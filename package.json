@@ -1,0 +1,95 @@
+{
+  "name": "jq",
+  "version": "1.0.0",
+  "description": "jq",
+  "main": "index.js",
+  "win": {
+    "icon": "./logo.ico"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "electron-forge start",
+    "package": "electron-forge package",
+    "make": "electron-forge make",
+    "make-mac": "electron-forge make --platform darwin",
+    "make-start": "electron-forge start --platform darwin",
+    "build": "electron-builder -w"
+  },
+  "config": {
+    "forge": {
+      "packagerConfig": {
+        "icon": "./logo",
+        "asar": true,
+        "ignore": [
+          "^/venv($|/)",
+          "^/python($|/)",
+          "^/__pycache__($|/)",
+          "\\.pyc$",
+          "^/build($|/)",
+          "^/data($|/)",
+          "^/db($|/)"
+        ]
+      },
+      "makers": [
+        {
+          "name": "@electron-forge/maker-zip",
+          "platforms": [
+            "win32"
+          ],
+          "config": {
+            "options": {
+              "icon": "./logo.icns"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "author": "jq",
+  "license": "ISC",
+  "devDependencies": {
+    "@electron-forge/cli": "^7.4.0",
+    "@electron-forge/maker-deb": "^7.4.0",
+    "@electron-forge/maker-rpm": "^7.4.0",
+    "@electron-forge/maker-squirrel": "^7.4.0",
+    "@electron-forge/maker-zip": "^7.4.0",
+    "@electron-forge/plugin-auto-unpack-natives": "^7.4.0",
+    "@electron-forge/plugin-fuses": "^7.4.0",
+    "@electron/fuses": "^1.8.0",
+    "electron": "^31.3.0",
+    "electron-builder": "^24.13.3",
+    "electron-icon-maker": "^0.0.5"
+  },
+  "build": {
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "./logo.ico",
+      "uninstallerIcon": "./logo.ico",
+      "installerHeaderIcon": "./logo.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "zeus"
+    },
+    "extraResources": {
+      "from": "./db/",
+      "to": "db"
+    },
+    "mac": {
+      "icon": "./logo.icns",
+      "category": "public.app-category.utilities"
+    }
+  },
+  "dependencies": {
+    "@serialport/parser-delimiter": "^13.0.0",
+    "crypto-js": "^4.2.0",
+    "csv-writer": "^1.6.0",
+    "electron-squirrel-startup": "^1.0.0",
+    "request": "^2.88.2",
+    "serialport": "^12.0.0",
+    "sqlite3": "^5.1.7",
+    "ws": "^8.14.2"
+  }
+}

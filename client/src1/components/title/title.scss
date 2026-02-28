@@ -1,0 +1,150 @@
+* {
+    margin: 0;
+    padding: 0;
+}
+
+.title {
+    box-sizing: border-box;
+    z-index: 10;
+
+    h2 {
+        color: #fff;
+    }
+
+    .ant-select-selection-search-input {
+        color: #55aaff !important;
+    }
+
+    display: flex;
+    background-color: #191932;
+    justify-content: space-between;
+    align-items: center;
+    color: #fff;
+    position: fixed;
+    top: 0;
+    width: 100%;
+    padding: 5px 3%;
+
+    .ant-input {
+        background-color: #000;
+        border: 0;
+        width: 150px;
+        margin-right: 20px;
+        color: #5A5A89;
+    }
+
+    .ant-input::placeholder {
+        color: #5A5A89;
+    }
+
+    .titleItems {
+        // display: inline-block;
+        // width: 50%;
+        display: flex;
+        align-items: center;
+    }
+
+    .titleButton {
+        background-color: #000;
+        color: #5A5A89;
+        border-color: #5A5A89;
+    }
+
+    .titleSelect {
+        margin-right: 30px;
+    }
+
+    .menu {
+        flex: 1;
+    }
+
+    .optionImg {
+        width: 30px;
+        height: 30px;
+    }
+
+    .ant-menu-horizontal:not(.ant-menu-dark)>.ant-menu-overflow-item {
+        color: #5A5A89;
+    }
+
+    .ant-menu-horizontal:not(.ant-menu-dark)>.ant-menu-item-selected {
+        color: #fff;
+    }
+
+    .ant-select-selector {
+        background-color: #000 !important;
+        border: 0px !important;
+    }
+
+
+    .ant-select-selection-placeholder {
+        color: #5A5A89;
+    }
+
+    .ant-select-selection-item {
+        color: #fff !important;
+    }
+
+    .ant-select-selection-item:after {
+        background-color: #fff !important;
+        color: #fff !important;
+    }
+
+    .ant-select-selector:after {
+        background-color: #fff !important;
+        color: #fff !important;
+    }
+
+    .ant-select-arrow {
+        color: #5A5A89;
+    }
+
+    .ant-menu {
+        background-color: unset;
+    }
+
+    .ant-menu-horizontal {
+        border: 0;
+    }
+
+    .el-input__inner {
+        background-color: #000;
+        border-color: #000;
+        color: #fff;
+    }
+
+    .el-select:hover {
+        border-color: #5A5A89;
+    }
+
+    .slideContent {}
+
+    .aniButton {
+        padding: 5px 10px;
+    }
+
+}
+
+.selectBox {
+    border: 1px solid #55aaff;
+    background-color: rgba(75, 160, 255, 0.3);
+    position: fixed;
+}
+
+.ant-drawer-header {
+    color: #fff !important;
+}
+
+.anticon {
+    color: #468493;
+}
+
+.ant-drawer-title {
+    color: #468493 !important;
+}
+
+.dataTitle {
+    color: #468493;
+    min-width: 120px;
+    text-align: left;
+}

@@ -1,0 +1,94 @@
+.chart {
+    display: flex;
+    height: 60px;
+    justify-content: center;
+}
+
+.chartItems {
+    display: flex;
+    flex-direction: column;
+    // height: 40px;
+    height: 100%;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    margin-right: 8px;
+}
+
+.chartItems:end {
+    margin: 0;
+}
+
+.chartItem {
+    width: 100%;
+    border-radius: 10px;
+
+}
+
+.chartLeft {
+    box-sizing: border-box;
+
+    position: absolute;
+    width: 100px;
+    height: 100px;
+    left: 0px;
+    top: 0px;
+
+    /* Purple */
+
+    border: 14px solid #991BFA;
+    filter: drop-shadow(0px 9px 80px rgba(204, 56, 171, 0.15)) drop-shadow(0px 3.75998px 33.4221px rgba(204, 56, 171, 0.107828)) drop-shadow(0px 2.01027px 17.869px rgba(204, 56, 171, 0.0894161)) drop-shadow(0px 1.12694px 10.0172px rgba(204, 56, 171, 0.075)) drop-shadow(0px 0.598509px 5.32008px rgba(204, 56, 171, 0.0605839)) drop-shadow(0px 0.249053px 2.21381px rgba(204, 56, 171, 0.0421718));
+}
+
+.chartRight {
+    box-sizing: border-box;
+
+    position: absolute;
+    width: 100px;
+    height: 100px;
+    left: 0px;
+    top: 0px;
+
+    border: 14px solid #01F1E3;
+    filter: drop-shadow(0px -17px 104px rgba(71, 255, 197, 0.14)) drop-shadow(0px -7.10219px 43.4487px rgba(71, 255, 197, 0.10064)) drop-shadow(0px -3.79717px 23.2298px rgba(71, 255, 197, 0.083455)) drop-shadow(0px -2.12866px 13.0224px rgba(71, 255, 197, 0.07)) drop-shadow(0px -1.13052px 6.91611px rgba(71, 255, 197, 0.056545)) drop-shadow(0px -0.470434px 2.87795px rgba(71, 255, 197, 0.0393604));
+}
+
+.customInfo{
+    display: flex;
+    justify-content: space-between;
+}
+
+.canvasContent{
+    width: 100%;
+    display: flex;
+    position: relative;
+    // justify-content: center;
+}
+
+.chartCircle{
+    width: 10px;
+    height: 10px;   
+    border-radius: 50%;
+    background-color: #01F1E3;
+    margin-right: 5px;
+    
+}
+
+.chartCircleright{
+    width: 10px;
+    height: 10px;   
+    border-radius: 50%;
+    background-color: #991BFA;
+    margin-right: 5px;
+}
+
+.chartCircleContent{
+    display: flex;
+    align-items: center;
+}
+
+.chartCircleContentCloumn{
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}

@@ -1,0 +1,19 @@
+const sensorArr = [
+  { label: '轮椅', value: 'yanfeng10' },
+  { label: '脚型检测', value: 'foot' },
+  { label: '臀部监测', value: 'sit' },
+  { label: '手部检测', value: 'hand' },
+  { label: '汽车', value: 'car' },
+  { label: '小床监测', value: 'jqbed' },
+  { label: '小床褥采集', value: 'matCol' },
+  { label: '小床睡姿采集', value: 'matColPos' },
+  { label: '车载传感器', value: 'carCol' },
+  { label: '正常测试', value: 'normal' },
+  { label: '手套监测', value: 'newHand' },
+  { label: '席悦1.0', value: 'smallBed' },
+  { label: '席悦2.0', value: 'xiyueReal1' },
+]
+
+
+all+天数  所有的传感器类型都可以使用
+生成密钥  输入格式  value+天数

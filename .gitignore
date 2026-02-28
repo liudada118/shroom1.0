@@ -1,0 +1,15 @@
+node_modules/
+client/node_modules/
+client/build/
+*.zip
+*.exe
+*.nupkg
+*.asar
+out/
+db/
+data/
+python/
+pdf/
+.DS_Store
+*.log
+config.txt

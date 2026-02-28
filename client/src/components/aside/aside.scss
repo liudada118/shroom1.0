@@ -1,0 +1,64 @@
+.aside {
+    position: absolute;
+    width: 15%;
+    top: 8%;
+    left: 3%;
+    color: #fff;
+}
+
+.firstAside{
+    margin-bottom: 20px;
+}
+
+.asideTitle{
+    color : #fff
+}
+
+.pressData{
+    color : #fff;
+    margin: 0;
+    font-size: 2em;
+    font-weight: bold;
+}
+
+.standardColor{
+    color: #5A5A89;
+}
+
+.dataItems{
+    margin-bottom: 100px;
+}
+
+.dataItem {
+    display: flex;
+    justify-content: space-between;
+    color: #fff;
+    margin-bottom: 3px;
+
+}
+
+.dataItemCircle{
+    display: flex;
+    align-items: center;
+    // flex: 1.5;
+}
+
+.dataIteminfo{
+    display: flex;
+    justify-content: space-between;
+    flex: 2;
+}
+
+.circleItem {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    margin-right: 10px;
+}
+
+.asideContent {
+    background-color: #191932   ;
+    padding: 15px 20px;
+    border-radius: 20px;
+
+}
