@@ -1,0 +1,80 @@
+graph TD
+    subgraph "User Interface (React Renderer Process)"
+        direction LR
+        subgraph Pages
+            HomePage["Home.js (Container)"]
+        end
+
+        subgraph Hooks
+            direction TB
+            useWebSocket["useWebSocket.js"]
+            usePressureData["usePressureData.js"]
+            useSerialControl["useSerialControl.js"]
+            usePlayback["usePlayback.js"]
+            useThreeScene["useThreeScene.js"]
+        end
+
+        subgraph Components
+            direction TB
+            Heatmap["Heatmap.js"]
+            ThreeCanvas["ThreeCanvas.js"]
+            ControlPanel["ControlPanel.js"]
+            PlaybackSlider["PlaybackSlider.js"]
+        end
+
+        HomePage -- uses --> Hooks
+        HomePage -- renders --> Components
+    end
+
+    subgraph "Backend (Electron Main Process)"
+        direction TB
+        subgraph Core
+            direction LR
+            Server["server.js (Scheduler)"]
+            IPC[IPC Main]
+        end
+        
+        subgraph Helpers
+            direction TB
+            ConfigManager["configManager.js"]
+            Logger["logger.js"]
+            LicenseHelper["licenseHelper.js"]
+            SerialHelper["serialHelper.js"]
+            DBHelper["dbHelper.js"]
+            WSHelper["wsHelper.js"]
+            DataProcessor["dataProcessor.js"]
+            CSVHelper["csvHelper.js"]
+        end
+
+        Server -- uses --> Helpers
+    end
+
+    subgraph External
+        direction TB
+        Hardware[Hardware Sensor]
+        FileSystem["File System (SQLite, CSV)"]
+    end
+
+    %% Connections
+    useSerialControl -- WebSocket --> Server
+    Server -- WebSocket --> useWebSocket
+    
+    SerialHelper -- reads from --> Hardware
+    DataProcessor -- processes --> SerialHelper
+    Server -- dispatches --> DataProcessor
+
+    DBHelper -- reads/writes --> FileSystem
+    CSVHelper -- writes --> FileSystem
+    Server -- uses --> DBHelper
+    Server -- uses --> CSVHelper
+
+    Hardware --> SerialHelper
+
+    classDef react fill:#61DAFB,stroke:#000,stroke-width:2px,color:#000
+    classDef electron fill:#47848F,stroke:#000,stroke-width:2px,color:#fff
+    classDef node fill:#8CC84B,stroke:#000,stroke-width:2px,color:#000
+    classDef external fill:#999,stroke:#000,stroke-width:1px,color:#fff
+
+    class HomePage,Components,Hooks,useWebSocket,usePressureData,useSerialControl,usePlayback,useThreeScene,Heatmap,ThreeCanvas,ControlPanel,PlaybackSlider react
+    class Server,IPC,Helpers,ConfigManager,Logger,LicenseHelper,SerialHelper,DBHelper,WSHelper,DataProcessor,CSVHelper electron
+    class Hardware,FileSystem external

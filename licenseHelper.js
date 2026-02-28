@@ -14,6 +14,7 @@ const logger = require('./logger');
 
 const CONFIG_FILE = path.join(__dirname, 'config.txt');
 const TIME_SERVER = 'http://sensor.bodyta.com';
+const TIMEOUT_MS = 5000;
 
 /**
  * 从 config.txt 读取并解密授权截止日期
@@ -26,11 +27,15 @@ function readEndDate() {
       return null;
     }
     const encrypted = fs.readFileSync(CONFIG_FILE, 'utf-8').trim();
+    if (!encrypted) {
+      logger.warn('config.txt 为空');
+      return null;
+    }
     const decrypted = module2.decrypt(encrypted);
     logger.info(`授权截止日期: ${decrypted}`);
     return decrypted;
   } catch (err) {
-    logger.error('读取授权文件失败', err.message);
+    logger.error('读取授权文件失败', err);
     return null;
   }
 }
@@ -42,7 +47,6 @@ function readEndDate() {
 function fetchNetworkTime() {
   return new Promise((resolve) => {
     const req = http.get(TIME_SERVER, (res) => {
-      // 使用响应头中的 Date 字段作为网络时间
       const serverDate = res.headers['date'];
       if (serverDate) {
         resolve(new Date(serverDate));
@@ -50,15 +54,15 @@ function fetchNetworkTime() {
         logger.warn('无法从响应头获取时间，使用本地时间');
         resolve(new Date());
       }
-      res.resume(); // 消耗响应体，防止内存泄漏
+      res.resume();
     });
 
     req.on('error', (err) => {
-      logger.warn(`获取网络时间失败，使用本地时间: ${err.message}`);
+      logger.warn(`获取网络时间失败: ${err.message}，使用本地时间`);
       resolve(new Date());
     });
 
-    req.setTimeout(5000, () => {
+    req.setTimeout(TIMEOUT_MS, () => {
       req.destroy();
       logger.warn('获取网络时间超时，使用本地时间');
       resolve(new Date());
@@ -73,26 +77,41 @@ function fetchNetworkTime() {
  * @returns {boolean}
  */
 function isLicenseValid(nowDate, endDate) {
-  if (!endDate) return true; // 无 config.txt 时不限制（开发模式）
+  if (!endDate) return true;
   return nowDate <= new Date(endDate);
 }
 
 /**
+ * 计算授权剩余天数
+ * @param {Date} nowDate - 当前时间
+ * @param {string|null} endDate - 授权截止日期字符串
+ * @returns {number} 剩余天数，-1 表示无限制
+ */
+function getRemainingDays(nowDate, endDate) {
+  if (!endDate) return -1;
+  const diff = new Date(endDate) - nowDate;
+  return Math.ceil(diff / (1000 * 60 * 60 * 24));
+}
+
+/**
  * 初始化授权：读取截止日期并获取网络时间
- * @returns {Promise<{ nowDate: Date, endDate: string|null, valid: boolean }>}
+ * @returns {Promise<{ nowDate: Date, endDate: string|null, valid: boolean, remainingDays: number }>}
  */
 async function initLicense() {
   const endDate = readEndDate();
   const nowDate = await fetchNetworkTime();
   const valid = isLicenseValid(nowDate, endDate);
+  const remainingDays = getRemainingDays(nowDate, endDate);
 
   if (!valid) {
-    logger.warn(`授权已过期！当前时间: ${nowDate.toISOString()}, 截止: ${endDate}`);
+    logger.error(`授权已过期！当前: ${nowDate.toISOString()}, 截止: ${endDate}`);
+  } else if (remainingDays >= 0 && remainingDays <= 30) {
+    logger.warn(`授权即将到期，剩余 ${remainingDays} 天`);
   } else {
     logger.info(`授权有效，截止: ${endDate || '无限制'}`);
   }
 
-  return { nowDate, endDate, valid };
+  return { nowDate, endDate, valid, remainingDays };
 }
 
-module.exports = { readEndDate, fetchNetworkTime, isLicenseValid, initLicense };
+module.exports = { readEndDate, fetchNetworkTime, isLicenseValid, getRemainingDays, initLicense };
