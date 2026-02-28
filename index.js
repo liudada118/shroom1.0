@@ -1,131 +1,230 @@
-const { app, BrowserWindow } = require('electron')
+/**
+ * index.js - Electron 主进程入口
+ *
+ * 职责:
+ * 1. 创建安全的 BrowserWindow（启用 contextIsolation + sandbox）
+ * 2. 启动后端服务（WebSocket + 串口）
+ * 3. 建立 IPC 通信桥梁（前端 ↔ 后端）
+ * 4. 管理应用生命周期
+ */
+
+const { app, BrowserWindow, ipcMain } = require("electron");
 const http = require("http");
 const fs = require("fs");
-var os = require('os');
+const os = require("os");
 const path = require("path");
-const { openServer } = require('./server');
-const hostname = "127.0.0.1";
-const port = 12321;
-const onlineHost = 'http://sensor.bodyta.com/xyTest/'
-const offlineHost = 'http://127.0.0.1:12321'
+const { openServer, getWsServer, handleCommand } = require("./server");
+
+// ============================================================
+// 配置常量
+// ============================================================
+const HOSTNAME = "127.0.0.1";
+const PORT = 12321;
+
+// ============================================================
+// 窗口管理
+// ============================================================
+let mainWindow = null;
+
 const createWindow = () => {
-    const win = new BrowserWindow({
-        show: false,
-        // width: 800,
-        // height: 600,
-        // fullscreen: true, // 设置全屏模式
-        icon: path.join(__dirname, 'logo.ico') // 设置ico
-    })
-    win.maximize()
-    // win.loadFile('./index.html')
+  mainWindow = new BrowserWindow({
+    show: false,
+    icon: path.join(__dirname, "logo.ico"),
+    webPreferences: {
+      contextIsolation: true,   // 启用上下文隔离，防止渲染进程访问 Node.js
+      sandbox: true,            // 启用沙箱，进一步限制渲染进程权限
+      nodeIntegration: false,   // 禁止渲染进程使用 Node.js API
+      preload: path.join(__dirname, "preload.js"), // 安全桥梁脚本
+      webSecurity: true,        // 启用 Web 安全策略
+    },
+  });
 
-    openServer()
+  mainWindow.maximize();
 
-    openWeb({ hostname, port, win });
+  // 启动后端服务
+  openServer();
 
-    // openWebOnline({ hostname: onlineHost , win })
+  // 启动静态文件服务并加载前端
+  startStaticServer({ hostname: HOSTNAME, port: PORT, win: mainWindow });
+};
 
-}
+// ============================================================
+// IPC 通信桥梁
+// ============================================================
 
-function openWeb({ hostname, port, win }) {
-    const server = http.createServer((req, res) => {
-
-        let pathName = __dirname
-
-        if (app.isPackaged) {
-          if (os.platform() == 'darwin') {
-           
-          } else {
-            pathName = 'resources' 
-        
-          }
-        
-        }
-
-    
-
-        if (req.url === "/") {
-            // 读取打包后的 index.html 文件
-            const filePath = path.join(pathName, "build", "index.html");
-            fs.readFile(filePath, (err, data) => {
-                if (err) {
-                    res.statusCode = 500;
-                    res.setHeader("Content-Type", "text/plain");
-                    res.end("Internal Server Error");
-                } else {
-                    // 设置响应头和内容，发送网页文件
-                    res.statusCode = 200;
-                    res.setHeader("Content-Type", "text/html");
-                    res.end(data);
-                }
-            });
-        } else {
-            // 处理其他请求（如样式表、脚本、图片等）
-            const filePath = path.join(pathName, "build", req.url);
-            fs.readFile(filePath, (err, data) => {
-                if (err) {
-                    res.statusCode = 404;
-                    res.setHeader("Content-Type", "text/plain");
-                    res.end("Not Found");
-                } else {
-                    res.statusCode = 200;
-                    res.setHeader("Content-Type", getContentType(filePath));
-                    res.end(data);
-                }
-            });
-        }
-    });
-
-    server.listen(port, hostname, () => {
-        const url = `http://${hostname}:${port}`;
-        console.log(`Server running at http://${hostname}:${port}/`);
-        // exec(`start chrome "${url}"`, (err, stdout, stderr) => {
-        //     if (err) {
-        //         console.error(`exec error: ${err}`);
-        //         return;
-        //     }
-        //     console.log(`stdout: ${stdout}`);
-        //     console.error(`stderr: ${stderr}`);
-        // });
-        win.loadURL(`http://${hostname}:${port}`)
-    });
-
-    function getContentType(filePath) {
-        const extname = path.extname(filePath);
-        switch (extname) {
-            case ".html":
-                return "text/html";
-            case ".css":
-                return "text/css";
-            case ".js":
-                return "text/javascript";
-            case ".png":
-                return "image/png";
-            case ".jpg":
-                return "image/jpg";
-            default:
-                return "text/plain";
-        }
+// 处理前端发来的 WebSocket 消息
+ipcMain.on("ws-send", (event, data) => {
+  try {
+    if (typeof handleCommand === "function") {
+      handleCommand(data);
     }
+  } catch (err) {
+    console.error("[IPC] ws-send error:", err.message);
+    event.sender.send("error", { message: err.message });
+  }
+});
+
+// 处理串口控制指令
+ipcMain.on("serial-command", (event, data) => {
+  try {
+    if (typeof handleCommand === "function") {
+      handleCommand({ type: "serial", ...data });
+    }
+  } catch (err) {
+    console.error("[IPC] serial-command error:", err.message);
+    event.sender.send("error", { message: err.message });
+  }
+});
+
+// 处理应用级指令（双向通信）
+ipcMain.handle("app-command", async (event, data) => {
+  switch (data?.action) {
+    case "getVersion":
+      return app.getVersion();
+    case "getPlatform":
+      return process.platform;
+    case "getAppPath":
+      return app.getAppPath();
+    default:
+      return null;
+  }
+});
+
+// 处理授权验证请求
+ipcMain.on("license-check", (event) => {
+  try {
+    if (typeof handleCommand === "function") {
+      handleCommand({ type: "license-check" });
+    }
+  } catch (err) {
+    event.sender.send("error", { message: err.message });
+  }
+});
+
+// 处理文件对话框请求
+ipcMain.handle("file-dialog", async (event, options) => {
+  const { dialog } = require("electron");
+  const result = await dialog.showOpenDialog(mainWindow, options);
+  return result;
+});
+
+// 处理 CSV 导出请求
+ipcMain.on("export-csv", (event, data) => {
+  try {
+    if (typeof handleCommand === "function") {
+      handleCommand({ type: "export-csv", ...data });
+    }
+  } catch (err) {
+    event.sender.send("error", { message: err.message });
+  }
+});
+
+// 处理数据库查询请求
+ipcMain.handle("db-query", async (event, data) => {
+  try {
+    if (typeof handleCommand === "function") {
+      return handleCommand({ type: "db-query", ...data });
+    }
+  } catch (err) {
+    event.sender.send("error", { message: err.message });
+    return null;
+  }
+});
+
+/**
+ * 向渲染进程发送消息的工具函数
+ * 供 server.js 等模块调用，将后端数据推送到前端
+ */
+function sendToRenderer(channel, data) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, data);
+  }
 }
 
-function openWebOnline({ hostname, port, win }) {
-    // win.loadURL(`http://sensor.bodyta.com/jqHzCol/`)
-    // win.loadURL('http://sensor.bodyta.com/256press')
-    //http://localhost:3000/
-    // win.loadURL('http://localhost:3000/')
-    win.loadURL(hostname)
+// 导出供 server.js 使用
+module.exports = { sendToRenderer };
+
+// ============================================================
+// 静态文件服务器
+// ============================================================
+function startStaticServer({ hostname, port, win }) {
+  const MIME_TYPES = {
+    ".html": "text/html",
+    ".css": "text/css",
+    ".js": "text/javascript",
+    ".json": "application/json",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".svg": "image/svg+xml",
+    ".ico": "image/x-icon",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
+    ".map": "application/json",
+  };
+
+  const server = http.createServer((req, res) => {
+    let basePath = __dirname;
+    if (app.isPackaged) {
+      if (os.platform() !== "darwin") {
+        basePath = "resources";
+      }
+    }
+
+    const urlPath = req.url === "/" ? "/index.html" : req.url.split("?")[0];
+    const filePath = path.join(basePath, "build", urlPath);
+
+    fs.readFile(filePath, (err, data) => {
+      if (err) {
+        // SPA fallback: 对于非静态资源请求，返回 index.html
+        if (urlPath.indexOf(".") === -1) {
+          const indexPath = path.join(basePath, "build", "index.html");
+          fs.readFile(indexPath, (err2, indexData) => {
+            if (err2) {
+              res.writeHead(500, { "Content-Type": "text/plain" });
+              res.end("Internal Server Error");
+            } else {
+              res.writeHead(200, { "Content-Type": "text/html" });
+              res.end(indexData);
+            }
+          });
+        } else {
+          res.writeHead(404, { "Content-Type": "text/plain" });
+          res.end("Not Found");
+        }
+      } else {
+        const ext = path.extname(filePath).toLowerCase();
+        const contentType = MIME_TYPES[ext] || "application/octet-stream";
+        res.writeHead(200, { "Content-Type": contentType });
+        res.end(data);
+      }
+    });
+  });
+
+  server.listen(port, hostname, () => {
+    console.log(`[Main] Static server running at http://${hostname}:${port}/`);
+    win.loadURL(`http://${hostname}:${port}`);
+  });
 }
 
-
+// ============================================================
+// 应用生命周期
+// ============================================================
 app.whenReady().then(() => {
-    createWindow()
+  createWindow();
 
-    app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) createWindow()
-    })
-})
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
 
-app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') app.quit()
-})
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") app.quit();
+});
+
+// 优雅退出：清理资源
+app.on("before-quit", () => {
+  console.log("[Main] Application is quitting, cleaning up...");
+});

@@ -1,0 +1,29 @@
+sequenceDiagram
+    participant User
+    participant ReactUI as React UI (Vite)
+    participant Zustand as Zustand Store
+    participant Preload as preload.js
+    participant Main as Main Process
+    participant Serial as SerialPort
+    participant Hardware as Sensor Hardware
+
+    User->>ReactUI: 点击“开始采集”
+    ReactUI->>Zustand: 调用 setRecording(true)
+    Zustand->>Preload: invoke('serial:open', { port: 'COM3' })
+    Preload->>Main: IPC 'serial:open'
+    Main->>Serial: openPort('COM3')
+
+    loop 数据采集
+        Hardware-->>Serial: 发送原始二进制数据
+        Serial-->>Main: 触发 'data' 事件
+        Main->>Main: dataProcessor.handle(data)
+        Main->>Zustand: (via IPC) updateMatrix(processedData)
+        Zustand->>ReactUI: 触发状态更新
+        ReactUI->>ReactUI: 重新渲染 Heatmap 和 3D View
+    end
+
+    User->>ReactUI: 点击“停止采集”
+    ReactUI->>Zustand: 调用 setRecording(false)
+    Zustand->>Preload: invoke('serial:close')
+    Preload->>Main: IPC 'serial:close'
+    Main->>Serial: closePort()

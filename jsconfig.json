@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "checkJs": false,
+    "allowJs": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"]
+    }
+  },
+  "include": [
+    "*.js",
+    "util/**/*.js",
+    "types.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "client",
+    "build"
+  ]
+}

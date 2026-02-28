@@ -1,7 +1,7 @@
 {
-  "name": "jq",
-  "version": "1.0.0",
-  "description": "jq",
+  "name": "shroom",
+  "version": "1.1.0",
+  "description": "Shroom - Pressure Sensor Data Acquisition & Visualization System",
   "main": "index.js",
   "win": {
     "icon": "./logo.ico"
@@ -13,7 +13,9 @@
     "make": "electron-forge make",
     "make-mac": "electron-forge make --platform darwin",
     "make-start": "electron-forge start --platform darwin",
-    "build": "electron-builder -w"
+    "build": "electron-builder -w",
+    "build-mac": "electron-builder -m",
+    "build-all": "electron-builder -mwl"
   },
   "config": {
     "forge": {
@@ -27,7 +29,9 @@
           "\\.pyc$",
           "^/build($|/)",
           "^/data($|/)",
-          "^/db($|/)"
+          "^/db($|/)",
+          "^/client($|/)",
+          "^/docs($|/)"
         ]
       },
       "makers": [
@@ -61,6 +65,8 @@
     "electron-icon-maker": "^0.0.5"
   },
   "build": {
+    "appId": "com.shroom.pressure-sensor",
+    "productName": "Shroom",
     "nsis": {
       "oneClick": false,
       "perMachine": true,
@@ -71,7 +77,7 @@
       "installerHeaderIcon": "./logo.ico",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "zeus"
+      "shortcutName": "Shroom"
     },
     "extraResources": {
       "from": "./db/",
@@ -80,16 +86,25 @@
     "mac": {
       "icon": "./logo.icns",
       "category": "public.app-category.utilities"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "liudada118",
+        "repo": "shroom1.0",
+        "releaseType": "release"
+      }
+    ]
   },
   "dependencies": {
     "@serialport/parser-delimiter": "^13.0.0",
+    "better-sqlite3": "^11.0.0",
     "crypto-js": "^4.2.0",
     "csv-writer": "^1.6.0",
     "electron-squirrel-startup": "^1.0.0",
+    "electron-updater": "^6.3.0",
     "request": "^2.88.2",
     "serialport": "^12.0.0",
-    "sqlite3": "^5.1.7",
     "ws": "^8.14.2"
   }
 }
