@@ -170,21 +170,40 @@ if (app.isPackaged) {
 
 }
 
-
+if (!fs.existsSync(filePath)) {
+  fs.mkdirSync(filePath, { recursive: true });
+}
+const initDbFile = `${filePath}/init.db`;
+if (!fs.existsSync(initDbFile)) {
+  const bootstrapDb = new sqlite3.Database(initDbFile);
+  bootstrapDb.close();
+}
 
 const defauleFile = 'hand0205'
-let date, sysStartTime, file = defauleFile, selectFlag
+let date, sysStartTime, file = defauleFile, selectFlag = defauleFile
 try {
-  const dateRes = fs.readFileSync(nameTxt, 'utf8');
+  const dateRes = fs.readFileSync(nameTxt, 'utf8').trim();
+  if (dateRes) {
+    const decrypted = module2.decryptStr(dateRes);
+    if (decrypted) {
+      const parsed = JSON.parse(decrypted);
+      if (parsed && typeof parsed === 'object') {
+        if (parsed.date != null && parsed.date !== '') {
+          const parsedDate = parseFloat(parsed.date);
+          if (!Number.isNaN(parsedDate)) {
+            endDate = parsedDate;
+          }
+        }
 
-  // date = JSON.parse(module2.decryptStr(dateRes)).dateRes
-  // file = JSON.parse(module2.decryptStr(dateRes)).file
-  endDate = parseFloat(JSON.parse(module2.decryptStr(dateRes)).date)
-  file = (JSON.parse(module2.decryptStr(dateRes)).file)
-  if (file == 'all') file = defauleFile
-  selectFlag = (JSON.parse(module2.decryptStr(dateRes)).file)
+        if (parsed.file) {
+          selectFlag = parsed.file;
+          file = parsed.file === 'all' ? defauleFile : parsed.file;
+        }
+      }
+    }
+  }
 } catch (err) {
-  console.error(err);
+  console.warn(`Invalid ${nameTxt}, using defaults.`);
 }
 
 // let db = new sqlite3.Database(`${filePath}/foot.db`);

@@ -8,6 +8,18 @@ const hostname = "127.0.0.1";
 const port = 12321;
 const onlineHost = 'http://sensor.bodyta.com/xyTest/'
 const offlineHost = 'http://127.0.0.1:12321'
+const defaultDevServerUrl = 'http://127.0.0.1:3000'
+const devServerUrl = process.env.ELECTRON_START_URL || process.env.FRONTEND_DEV_URL
+
+function hasLocalBuild() {
+    const buildIndexPath = path.join(__dirname, "build", "index.html");
+    return fs.existsSync(buildIndexPath);
+}
+
+function shouldUseDevServer() {
+    if (app.isPackaged) return false;
+    return Boolean(devServerUrl);
+}
 const createWindow = () => {
     const win = new BrowserWindow({
         show: false,
@@ -21,7 +33,11 @@ const createWindow = () => {
 
     openServer()
 
-    openWeb({ hostname, port, win });
+    if (shouldUseDevServer()) {
+        openWebOnline({ hostname: devServerUrl || defaultDevServerUrl, win })
+    } else {
+        openWeb({ hostname, port, win });
+    }
 
     // openWebOnline({ hostname: onlineHost , win })
 
@@ -51,7 +67,7 @@ function openWeb({ hostname, port, win }) {
                 if (err) {
                     res.statusCode = 500;
                     res.setHeader("Content-Type", "text/plain");
-                    res.end("Internal Server Error");
+                    res.end(`Frontend build not found: ${filePath}. Run "npm run dev" for hot reload or build the frontend first.`);
                 } else {
                     // 设置响应头和内容，发送网页文件
                     res.statusCode = 200;
