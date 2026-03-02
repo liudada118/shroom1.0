@@ -106,7 +106,11 @@ shroom1.0/
 │       ├── page/            # 页面级组件
 │       │   ├── home/        # 主页（Home.js 3610 行 + HomeFun.js）
 │       │   ├── col/         # 数据采集页
-│       │   └── date/        # 历史数据页
+│       │   ├── date/        # 历史数据页
+│       │   └── license/     # 密钥配置可视化页面
+│       │       ├── License.js    # 密钥生成/解析/管理页面
+│       │       ├── License.css   # 页面样式
+│       │       └── aesUtil.js    # 前端 AES-ECB 加解密工具
 │       └── assets/          # 静态资源
 │           ├── images/      # 图片资源
 │           ├── json/        # JSON 配置
@@ -211,6 +215,11 @@ graph TD
 
 4. **授权验证流程**
     - 应用启动 → `licenseHelper.js` 读取 `config.txt` → 使用 AES-ECB 解密 → 通过 HTTPS 获取网络时间 → 比对授权有效期 → 若过期则限制功能。
+    - 密钥 `file` 字段支持三种格式：`"all"`（全部授权）、`"hand0205"`（单类型锁定）、`["hand0205","robot1","footVideo"]`（多类型组合授权）。
+    - 前端 `Title.js` 根据 `allowedTypes` 数组动态过滤传感器类型下拉框，实现灵活的授权控制。
+
+6. **密钥配置管理流程**
+    - 管理员访问 `/license` 页面 → 勾选授权的传感器类型（支持分组全选和快捷预设） → 设置有效天数 → 点击生成密钥 → 密钥通过 AES-ECB 加密后可复制分发 → 也可在「密钥解析」标签页粘贴密钥查看授权详情。
 
 5. **自动更新流程**
     - 应用启动 30 秒后 → `autoUpdater.js` 检查 GitHub Releases → 发现新版本后静默下载 → 下载完成弹出对话框 → 用户确认后安装并重启。
@@ -235,7 +244,7 @@ graph TD
 | `getMessage.resetZero` | 归零校准 |
 | `getMessage.gauss` | 设置高斯平滑参数 |
 | `getMessage.play` | 开始/停止历史回放 |
-| `getMessage.date` | 查询历史数据列表 |
+| `getMessage.date` | 提交密钥 / 查询历史数据列表 |
 | `getMessage.delete` | 删除历史记录 |
 | `getMessage.download` | 导出 CSV 数据 |
 | `getMessage.exchange` | 矩阵行列交换 |
@@ -301,12 +310,15 @@ graph TD
 | 2026-03-02 | TypeScript 渐进式引入 | 添加 tsconfig.json、types.d.ts、types/index.ts 类型定义 |
 | 2026-03-02 | Zustand 状态管理 | 引入 Zustand，创建 useAppStore 和 usePressureStore |
 | 2026-03-02 | 自动更新集成 | 集成 electron-updater，支持 GitHub Releases 自动更新 |
+| 2026-03-02 | 密钥多类型授权 | 密钥 file 字段从 all/单个 升级为支持数组格式的多类型组合授权 |
+| 2026-03-02 | 密钥配置可视化页面 | 新增 /license 页面，支持传感器多选、时间设置、一键生成密钥、密钥解析 |
 
 ## 9. 更新日志
 
 | 日期 | 变更类型 | 描述 |
 | :--- | :--- | :--- |
 | 2026-03-02 | 初始化 | 创建项目架构文档（ARCHITECTURE.md） |
+| 2026-03-02 | 新增功能 | 密钥控制系统升级：支持多类型组合授权 + 密钥配置可视化页面（/license） |
 
 *变更类型：`新增功能` / `优化重构` / `修复缺陷` / `配置变更` / `文档更新` / `依赖升级` / `初始化`*
 

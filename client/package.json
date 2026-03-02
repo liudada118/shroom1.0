@@ -23,6 +23,7 @@
     "react-i18next": "^15.5.1",
     "react-router-dom": "^7.1.0",
     "three": "^0.170.0",
+    "crypto-js": "^4.2.0",
     "zustand": "^5.0.0"
   },
   "devDependencies": {

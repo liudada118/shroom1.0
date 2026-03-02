@@ -176,13 +176,20 @@ const defauleFile = 'hand0205'
 let date, sysStartTime, file = defauleFile, selectFlag
 try {
   const dateRes = fs.readFileSync(nameTxt, 'utf8');
+  const parsedData = JSON.parse(module2.decryptStr(dateRes));
+  endDate = parseFloat(parsedData.date);
+  const rawFile = parsedData.file;
+  selectFlag = rawFile; // 保留原始值发送给前端（可能是 'all'、字符串、或数组）
 
-  // date = JSON.parse(module2.decryptStr(dateRes)).dateRes
-  // file = JSON.parse(module2.decryptStr(dateRes)).file
-  endDate = parseFloat(JSON.parse(module2.decryptStr(dateRes)).date)
-  file = (JSON.parse(module2.decryptStr(dateRes)).file)
-  if (file == 'all') file = defauleFile
-  selectFlag = (JSON.parse(module2.decryptStr(dateRes)).file)
+  // 解析 file 字段：支持 'all'、单个字符串、数组三种格式
+  if (rawFile === 'all') {
+    file = defauleFile;
+  } else if (Array.isArray(rawFile)) {
+    // 多类型模式：使用数组中的第一个作为默认启动类型
+    file = rawFile[0] || defauleFile;
+  } else {
+    file = rawFile || defauleFile;
+  }
 } catch (err) {
   console.error(err);
 }
@@ -457,10 +464,19 @@ module.exports = {
           // console.log(JSON.parse(content).dateRes)
 
           // endDate = parseFloat(module2.decryptStr(date))
-          file = JSON.parse(dateRes).file
-          if (file == 'all') file = defauleFile
-          selectFlag = JSON.parse(dateRes).file
-          endDate = parseFloat(JSON.parse(dateRes).date)
+          const parsedLicense = JSON.parse(dateRes);
+          const rawFile = parsedLicense.file;
+          selectFlag = rawFile; // 保留原始值（'all'、字符串、或数组）发送给前端
+
+          // 解析 file 字段：支持 'all'、单个字符串、数组三种格式
+          if (rawFile === 'all') {
+            file = defauleFile;
+          } else if (Array.isArray(rawFile)) {
+            file = rawFile[0] || defauleFile;
+          } else {
+            file = rawFile || defauleFile;
+          }
+          endDate = parseFloat(parsedLicense.date);
 
 
           server.clients.forEach(function each(client) {

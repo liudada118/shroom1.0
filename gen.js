@@ -1,38 +1,85 @@
 const module2 = require('./aes_ecb')
-let str = module2.encStr(`45`);
-
-let str1 = module2.decryptStr(str)
-let str2 = module2.decryptStr('ae9746b667f334b8790b9fc4e04fd90b38f15d34372456727812be5dd2eb64155d84c8709d86c7117954b391271ca72f')
 const readline = require('readline');
 
-let str3 = module2.decryptStr('c37cc172b86fd1c5cdaf5d320e74afd05073f8bd8440c030a266d2b41bc2bba49c01949d70f28177a329587c0eac6157')
-// console.log(str, str1,(str2), str3)
-console.log(str2)
 const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
+  input: process.stdin,
+  output: process.stdout
 });
 
-// ask user for the anme input
-rl.question(`请输入一个密钥结束的时间天数`, (day) => {
+// 所有支持的传感器类型列表（供参考）
+const ALL_SENSOR_TYPES = [
+  'hand0205', 'robot1', 'robotSY', 'robotLCF', 'footVideo',
+  'fast256', 'fast1024', 'sofa', 'eye', 'daliegu',
+  'yanfeng10', 'foot', 'carQX', 'volvo', 'car', 'car10',
+  'jqbed', 'matCol', 'matColPos', 'carCol', 'newHand',
+  'smallBed', 'xiyueReal1', 'gloves', 'gloves1', 'gloves2',
+  'hand0205Point', 'hand0205Point147', 'ware', 'robot',
+  'handVideo', 'handVideo1', 'bed1616', 'footVideo256',
+  'bed4096', 'bed4096num', 'fast1024sit', 'car100',
+  'hand0507', 'bigBed', 'sitCol', 'sit10', 'smallBed1',
+  'smallM', 'rect', 'short', 'CarTq', 'normal', 'chairQX',
+  'Num3D', 'robot0428', 'handBlue', 'localCar'
+];
 
-    // ask for nationality
-    const file = day.split('+')[0]
-    const dates = day.split('+')[1]
+console.log('=== 密钥生成工具 ===');
+console.log('');
+console.log('支持三种授权模式:');
+console.log('  1. all+天数          → 授权所有传感器类型');
+console.log('  2. 单类型+天数       → 只授权一个类型，如: hand0205+365');
+console.log('  3. 多类型+天数       → 授权多个类型，用逗号分隔，如: hand0205,footVideo,fast256+365');
+console.log('');
+console.log('可用的传感器类型:');
+console.log(ALL_SENSOR_TYPES.join(', '));
+console.log('');
 
-    const date = new Date().getTime() + parseInt(dates) * 24 * 60 * 60 * 1000
-    // log user details
-    let obj = { date, file }
-    console.log(obj)
-    console.log(`${day}天的密钥是${module2.encStr(JSON.stringify(obj))}`);
+rl.question('请输入授权类型+天数: ', (input) => {
+  const plusIndex = input.lastIndexOf('+');
+  if (plusIndex === -1) {
+    console.error('格式错误！请使用 "类型+天数" 格式');
+    rl.close();
+    return;
+  }
 
+  const fileStr = input.substring(0, plusIndex).trim();
+  const days = parseInt(input.substring(plusIndex + 1).trim());
 
+  if (isNaN(days) || days <= 0) {
+    console.error('天数必须为正整数');
+    rl.close();
+    return;
+  }
 
+  // 解析 file 字段
+  let file;
+  if (fileStr === 'all') {
+    file = 'all';
+  } else if (fileStr.includes(',')) {
+    // 多类型模式：用逗号分隔，存为数组
+    const types = fileStr.split(',').map(t => t.trim()).filter(Boolean);
+    // 验证类型是否合法
+    const invalid = types.filter(t => !ALL_SENSOR_TYPES.includes(t));
+    if (invalid.length > 0) {
+      console.warn(`警告: 以下类型不在已知列表中: ${invalid.join(', ')}`);
+    }
+    file = types;
+  } else {
+    // 单类型模式
+    if (!ALL_SENSOR_TYPES.includes(fileStr)) {
+      console.warn(`警告: 类型 "${fileStr}" 不在已知列表中`);
+    }
+    file = fileStr;
+  }
+
+  const date = new Date().getTime() + days * 24 * 60 * 60 * 1000;
+  const obj = { date, file };
+
+  console.log('');
+  console.log('密钥信息:');
+  console.log(`  授权类型: ${Array.isArray(file) ? file.join(', ') + ` (共${file.length}个)` : file}`);
+  console.log(`  有效天数: ${days} 天`);
+  console.log(`  到期时间: ${new Date(date).toLocaleString()}`);
+  console.log('');
+  console.log(`密钥: ${module2.encStr(JSON.stringify(obj))}`);
+
+  rl.close();
 });
-// let str = module2.encStr(`45`);
-
-// let str1 = module2.decryptStr(str)
-// let str2 = module2.decryptStr('83ade528084c5547836f55dbcfa68742')
-
-// let str3 = module2.decryptStr('325699aacaf28e5743c313673d3e2c066f28abf9846a45a456735f8ecab8e5439405205fc2199e4e1374ceeb904b059659ce62fd6f047a5460f665a7d07f32270a32a94dc7c8ddc3790ef5fea6b95fd5')
-// console.log(str , str1 , str2 , str3)

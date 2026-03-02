@@ -345,6 +345,7 @@ class Home extends React.Component {
       portnameBack: "",
       portnameHead: '',
       matrixTitle: localStorage.getItem('matrixTitle') ? true : false,
+      allowedTypes: localStorage.getItem('allowedTypes') ? JSON.parse(localStorage.getItem('allowedTypes')) : null,
       length: 0,
       local: false,
       dataArr: [],
@@ -892,31 +893,34 @@ class Home extends React.Component {
     }
 
     if (jsonObject.file != null) {
-      if (jsonObject.file == 'all') {
+      if (jsonObject.file === 'all') {
         this.setState({ matrixTitle: true })
-
-        // this.setState({
-        //   matrixName: 'hand'
-        // })
-        // localStorage.setItem('file', 'hand')
+      } else if (Array.isArray(jsonObject.file)) {
+        // 多类型模式：使用数组第一个作为默认类型
+        this.setState({ matrixName: jsonObject.file[0] })
+        localStorage.setItem('file', jsonObject.file[0])
       } else {
-
-        this.setState({
-          matrixName: jsonObject.file
-        })
+        this.setState({ matrixName: jsonObject.file })
         localStorage.setItem('file', jsonObject.file)
       }
-
-
     }
 
     if (jsonObject.selectFlag != null) {
-      if (jsonObject.selectFlag == 'all') {
+      if (jsonObject.selectFlag === 'all') {
+        // 全部授权：显示所有类型下拉框
         localStorage.setItem('matrixTitle', true)
-        // if(!localStorage.getItem('matrixTitle')) 
-        this.setState({ matrixTitle: true })
+        localStorage.removeItem('allowedTypes')
+        this.setState({ matrixTitle: true, allowedTypes: null })
+      } else if (Array.isArray(jsonObject.selectFlag)) {
+        // 多类型授权：显示下拉框，但只展示授权的类型
+        localStorage.setItem('matrixTitle', true)
+        localStorage.setItem('allowedTypes', JSON.stringify(jsonObject.selectFlag))
+        this.setState({ matrixTitle: true, allowedTypes: jsonObject.selectFlag })
       } else {
+        // 单类型授权：隐藏下拉框，锁定为该类型
         localStorage.removeItem('matrixTitle')
+        localStorage.removeItem('allowedTypes')
+        this.setState({ matrixTitle: false, allowedTypes: null })
       }
     }
 
@@ -2745,6 +2749,7 @@ class Home extends React.Component {
             locale={this.state.locale}
             ref={this.title}
             matrixTitle={this.state.matrixTitle}
+            allowedTypes={this.state.allowedTypes}
             com={this.com}
             track={this.track}
             port={this.state.port}

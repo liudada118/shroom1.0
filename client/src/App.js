@@ -34,6 +34,7 @@ import LineAdjust1 from "./components/demo/LineAdjust copy";
 
 import Can from "./components/demo/can";
 import Num3D from "./components/num/NumWs";
+import License from "./page/license/License";
 i18next.init({
   resources: {
     en: {
@@ -264,6 +265,7 @@ function App() {
         <Route exact path="/log" element={<Log />} />
         <Route exact path="/diff" element={<MatrixDiff />} />
         <Route exact path="/3Dnum" element={<Num3D />} />
+        <Route exact path="/license" element={<License />} />
         {/* <Route exact path="/local" element={<Local />} /> */}
         {/* <Route exact path="/back" element={<Back />} /> */}
       </Routes>
