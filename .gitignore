@@ -1,15 +1,55 @@
+# Dependencies
 node_modules/
 client/node_modules/
+
+# Build output
 client/build/
+out/
+dist/
+
+# Database
+db/
+*.db
+*.db-wal
+*.db-shm
+
+# Data & exports
+data/
+pdf/
+*.csv
+
+# Packages
 *.zip
 *.exe
 *.nupkg
 *.asar
-out/
-db/
-data/
-python/
-pdf/
-.DS_Store
-*.log
+*.dmg
+
+# Config (encrypted)
 config.txt
+
+# Python
+python/
+venv/
+__pycache__/
+*.pyc
+
+# System
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test artifacts
+test/screenshots/
+
+# Temporary fix scripts
+scripts/fix_*.py
