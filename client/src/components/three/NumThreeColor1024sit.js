@@ -4,6 +4,7 @@ import * as THREE from "three";
 import './canvas.scss'
 import { findMax } from '../../assets/util/util';
 import { press, press256 } from '../../assets/util/line';
+import { cleanupThree } from "./disposeThree";
 
 var valuej1 = localStorage.getItem('carValuej') ? JSON.parse(localStorage.getItem('carValuej')) : 200,
   valueg1 = localStorage.getItem('carValueg') ? JSON.parse(localStorage.getItem('carValueg')) : 2,
@@ -469,6 +470,7 @@ export default React.forwardRef((props, refs) => {
      return () => {
       if (animationRequestId) cancelAnimationFrame(animationRequestId);
     }
+    cleanupThree({ renderer, scene, controls });
 
   }, [])
 

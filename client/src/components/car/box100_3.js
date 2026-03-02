@@ -19,6 +19,7 @@ import {
   rotate90,
 } from "../../assets/util/util";
 import { lineInterp } from "../../assets/util/line";
+import { cleanupThree } from "../three/disposeThree";
 
 let timer
 
@@ -882,6 +883,7 @@ const Canvas = React.forwardRef((props, refs) => {
     return () => {
       if (animationRequestId) cancelAnimationFrame(animationRequestId);
       selectHelper?.dispose()
+      cleanupThree({ renderer, scene, controls });
     };
   }, []);
   return (

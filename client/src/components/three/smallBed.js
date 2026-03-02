@@ -24,6 +24,7 @@ import {
 
 import './index.scss'
 import { calculatePressure, press, pressSmallBed } from "../../assets/util/line";
+import { cleanupThree } from "./disposeThree";
 
 
 
@@ -879,6 +880,7 @@ let isShiftPressed = false;
       document.removeEventListener('pointermove', pointMove)
       document.removeEventListener('pointup', pointUp)
       selectHelper.dispose()
+      cleanupThree({ renderer, scene, controls });
     };
   }, []);
   return (

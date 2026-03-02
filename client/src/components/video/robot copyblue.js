@@ -23,6 +23,7 @@ import {
 
 import { HeatmapCanvas } from "../../assets/util/heatmap";
 import { pressData } from "../../assets/util/matrixToPress";
+import { cleanupThree } from "../three/disposeThree";
 
 let timer
 
@@ -817,6 +818,7 @@ const Canvas = React.forwardRef((props, refs) => {
     return () => {
       if (animationRequestId) cancelAnimationFrame(animationRequestId);
       selectHelper?.dispose()
+      cleanupThree({ renderer, scene, controls });
     };
   }, []);
   const img = useRef()

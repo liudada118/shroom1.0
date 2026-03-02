@@ -22,6 +22,7 @@ import {
 // import { withData } from "./WithData";
 
 import { obj } from "../../assets/util/config";
+import { cleanupThree } from "./disposeThree";
 const group = new THREE.Group();
 const sitInit = 0;
 const backInit = 0;
@@ -958,6 +959,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
     return () => {
       cancelAnimationFrame(animationRequestId);
+      cleanupThree({ renderer, scene, controls });
     };
   }, []);
   return (

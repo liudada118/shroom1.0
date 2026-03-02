@@ -2,6 +2,7 @@ import React, { useContext, useEffect, useImperativeHandle, useRef } from 'react
 import Stats from "three/examples/jsm/libs/stats.module.js";
 import * as THREE from "three";
 import './canvas.scss'
+import { cleanupThree } from "./disposeThree";
 
 function jet(min, max, x) {
   let red, g, blue;

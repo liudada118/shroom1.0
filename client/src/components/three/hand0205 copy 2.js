@@ -18,6 +18,7 @@ import { SelectionHelper } from "./SelectionHelper";
 import { checkRectIndex, checkRectangleIntersection, getPointCoordinate, getPointCoordinateWowback, getPointCoordinateWowhead, getPointCoordinateback } from "./threeUtil1";
 import uv from '../../assets/images/handuv.png'
 import { HeatmapCanvas } from "../../assets/util/heatmap";
+import { cleanupThree } from "./disposeThree";
 let timer
 
 
@@ -1093,6 +1094,7 @@ const Canvas = React.forwardRef((props, refs) => {
     return () => {
       if (animationRequestId) cancelAnimationFrame(animationRequestId);
       selectHelper?.dispose()
+      cleanupThree({ renderer, scene, controls });
     };
   }, []);
   const img = useRef()

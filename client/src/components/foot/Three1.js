@@ -29,6 +29,7 @@ import { Slider, Button } from "antd";
 // import { withData } from "./WithData";
 
 import { obj } from "../../assets/util/config";
+import { cleanupThree } from "../three/disposeThree";
 const group = new THREE.Group();
 const sitInit = 0;
 const backInit = 0;

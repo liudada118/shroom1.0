@@ -24,6 +24,7 @@ import {
 
 import { obj } from "../../assets/util/config";
 import { pressData } from "../../assets/util/matrixToPress";
+import { cleanupThree } from "../three/disposeThree";
 const group = new THREE.Group();
 const sitInit = 0;
 const backInit = 0;
@@ -906,6 +907,7 @@ const Canvas = React.forwardRef((props, refs) => {
     window.addEventListener('keyup', onKeyUp);
 
     return () => {
+      cleanupThree({ renderer, scene, controls });
       cancelAnimationFrame(animationRequestId);
     };
   }, []);

@@ -23,6 +23,7 @@ import { checkRectIndex, checkRectangleIntersection, getPointCoordinate, getPoin
 import { bodydata } from "../../assets/json/body";
 import { handL } from "../../assets/json/handL";
 import { handR } from "../../assets/json/handR";
+import { cleanupThree } from "./disposeThree";
 
 let timer
 var canvas
@@ -1695,6 +1696,7 @@ const Canvas = React.forwardRef((props, refs) => {
     return () => {
       if (animationRequestId) cancelAnimationFrame(animationRequestId);
       selectHelper?.dispose()
+      cleanupThree({ renderer, scene, controls });
     };
   }, []);
   return (

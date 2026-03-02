@@ -3,6 +3,8 @@ const { app } = require('electron')
 const path = require('path');
 var os = require('os');
 const fs = require('fs');
+const { isPortAvailable, findAvailablePort } = require('./util/portFinder');
+const { installGuard } = require('./util/processGuard');
 const { SerialPort } = require("serialport");
 const { DelimiterParser } = require("@serialport/parser-delimiter");
 const sqlite3 = require("sqlite3").verbose();
@@ -271,12 +273,40 @@ var pointArr2zeroData = []
 var pointArr3zeroData = []
 var pointArr4zeroData = [], newArr147 = [], newArr147_2 = [],
 
-  server = new WebSocket.Server({ port: 19999 });
-server1 = new WebSocket.Server({ port: 19998 });
-server2 = new WebSocket.Server({ port: 19997 });
+  // 端口将在 openServer() 中动态分配
+  server = null;
+  server1 = null;
+  server2 = null;
 
 module.exports = {
-  openServer() {
+  async openServer() {
+
+    // 安装进程守护
+    installGuard({
+      onShutdown: () => {
+        console.log('[Server] 正在关闭 WebSocket 服务器...');
+        if (server) server.close();
+        if (server1) server1.close();
+        if (server2) server2.close();
+      }
+    });
+
+    // 动态分配 WebSocket 端口
+    try {
+      const wsPort1 = await findAvailablePort(19999);
+      const wsPort2 = await findAvailablePort(19998);
+      const wsPort3 = await findAvailablePort(19997);
+      server = new WebSocket.Server({ port: wsPort1 });
+      server1 = new WebSocket.Server({ port: wsPort2 });
+      server2 = new WebSocket.Server({ port: wsPort3 });
+      console.log(`[Server] WebSocket 端口分配: server=${wsPort1}, server1=${wsPort2}, server2=${wsPort3}`);
+    } catch (err) {
+      console.error('[Server] WebSocket 端口分配失败:', err.message);
+      // 回退到默认端口
+      server = new WebSocket.Server({ port: 19999 });
+      server1 = new WebSocket.Server({ port: 19998 });
+      server2 = new WebSocket.Server({ port: 19997 });
+    }
 
     server1.on("open", function open() {
       console.log("connected");

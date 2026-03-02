@@ -4,6 +4,7 @@ const fs = require("fs");
 var os = require('os');
 const path = require("path");
 const { openServer } = require('./server');
+const { listenWithRetry } = require('./util/portFinder');
 const hostname = "127.0.0.1";
 const port = 12321;
 const onlineHost = 'http://sensor.bodyta.com/xyTest/'
@@ -92,18 +93,12 @@ function openWeb({ hostname, port, win }) {
         }
     });
 
-    server.listen(port, hostname, () => {
-        const url = `http://${hostname}:${port}`;
-        console.log(`Server running at http://${hostname}:${port}/`);
-        // exec(`start chrome "${url}"`, (err, stdout, stderr) => {
-        //     if (err) {
-        //         console.error(`exec error: ${err}`);
-        //         return;
-        //     }
-        //     console.log(`stdout: ${stdout}`);
-        //     console.error(`stderr: ${stderr}`);
-        // });
-        win.loadURL(`http://${hostname}:${port}`)
+    listenWithRetry(server, port, { host: hostname }).then((actualPort) => {
+        const url = `http://${hostname}:${actualPort}`;
+        console.log(`[Frontend] Server running at ${url}`);
+        win.loadURL(url);
+    }).catch((err) => {
+        console.error('[Frontend] 无法启动前端服务器:', err.message);
     });
 
     function getContentType(filePath) {

@@ -18,6 +18,7 @@ import {
   jetgGrey,
 } from "../../assets/util/util";
 import './index.scss'
+import { cleanupThree } from "./disposeThree";
 
 const group = new THREE.Group();
 const sitInit = 0;
@@ -873,6 +874,7 @@ const Canvas = React.forwardRef((props, refs) => {
       document.removeEventListener('pointermove', pointMove)
       document.removeEventListener('pointup', pointUp)
       selectHelper.dispose()
+      cleanupThree({ renderer, scene, controls });
     };
   }, []);
   return (

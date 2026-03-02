@@ -13,6 +13,7 @@ import {
 } from "../../assets/util/util";
 import { SelectionHelper } from "./SelectionHelper";
 import { checkRectIndex, checkRectangleIntersection, getPointCoordinate, getPointCoordinateWowback, getPointCoordinateWowhead, getPointCoordinateback } from "./threeUtil1";
+import { cleanupThree } from "./disposeThree";
 
 let timer
 
@@ -1537,6 +1538,7 @@ const Canvas = React.forwardRef((props, refs) => {
       document.removeEventListener('pointermove', pointMove)
       document.removeEventListener('pointerup', pointUp)
       selectHelper?.dispose()
+      cleanupThree({ renderer, scene, controls });
     };
   }, []);
   return (

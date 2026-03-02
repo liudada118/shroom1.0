@@ -18,6 +18,7 @@ import { SelectionBox } from "./SelectionBox";
 import { SelectionHelper } from "./SelectionHelper";
 import { checkRectIndex, checkRectangleIntersection, getPointCoordinate, getPointCoordinateback } from "./threeUtil1";
 import { getPointCoordinate1 } from "./threeUtil2";
+import { cleanupThree } from "./disposeThree";
 var newDiv, newDiv1, selectStartArr = [], selectEndArr = [], sitArr, backArr, sitMatrix = [], backMatrix = [], selectMatrix = []
 let sitindexArr, backIndexArr
 const group = new THREE.Group();
@@ -817,6 +818,7 @@ const Canvas = React.forwardRef((props, refs) => {
     return () => {
       cancelAnimationFrame(animationRequestId);
       document.removeEventListener('pointerdown', function () { })
+      cleanupThree({ renderer, scene, controls });
     };
   }, []);
   return (

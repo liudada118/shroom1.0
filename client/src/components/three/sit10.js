@@ -19,6 +19,7 @@ import { checkRectIndex, checkRectangleIntersection, getPointCoordinate, getPoin
 
 import { obj } from "../../assets/util/config";
 import { SelectionHelper } from "./SelectionHelper";
+import { cleanupThree } from "./disposeThree";
 const group = new THREE.Group();
 
 
@@ -779,6 +780,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
     return () => { 
       cancelAnimationFrame(animationRequestId);
+      cleanupThree({ renderer, scene, controls });
     };
   }, []);
   return (
