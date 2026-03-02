@@ -1,4 +1,4 @@
-import { color } from 'echarts';
+import { color } from '../../assets/util/echarts';
 import React, { useEffect, useRef, useState, useImperativeHandle } from 'react';
 
 let firstData, lastData;

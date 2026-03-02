@@ -23,7 +23,7 @@ import {
   Stoke,
 } from "../../assets/util/util";
 import "./index.scss";
-import * as echarts from "echarts";
+import * as echarts from "../../assets/util/echarts";
 // import "antd/dist/antd.css";
 import { Slider, Button } from "antd";
 // import { withData } from "./WithData";

@@ -1,7 +1,7 @@
 import React, { useEffect, useImperativeHandle, useState } from 'react'
 import './aside.scss'
 // import Chart, { CanvasDemo, Chart2 } from '../chart/Chart'
-import * as echarts from "echarts";
+import * as echarts from "../../assets/util/echarts";
 // const dataArr = [{
 //     color: '#3CFF2B',
 //     data: '左脚内外翻'

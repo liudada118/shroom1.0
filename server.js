@@ -326,11 +326,11 @@ module.exports = {
          * 将实时靠背数据通道打开
          */
         if (nowDate < endDate) {
-          if (JSON.parse(message).backPort != null) {
-            com1 = JSON.parse(message).backPort;
+          if (getMessage.backPort != null) {
+            com1 = getMessage.backPort;
             try {
               port2 = new SerialPort(
-                JSON.parse(message).backPort,
+                getMessage.backPort,
                 {
                   baudRate: baudRate,
                   autoOpen: true,
@@ -346,7 +346,7 @@ module.exports = {
             }
           }
 
-          if (JSON.parse(message).local === true) {
+          if (getMessage.local === true) {
             // localFlag = true;
             // localData = []
             // localDataBack = []
@@ -359,7 +359,7 @@ module.exports = {
               }
             });
           }
-          if (JSON.parse(message).local === false) {
+          if (getMessage.local === false) {
             localFlag = false;
             const jsonData = JSON.stringify({
               backData: new Array(backTotal).fill(0),
@@ -393,7 +393,7 @@ module.exports = {
           /**
            * 将靠背数据通道关闭
            */
-          if (JSON.parse(message).backClose === true) {
+          if (getMessage.backClose === true) {
             backClose = true
             if (port2?.isOpen) {
 
@@ -401,8 +401,8 @@ module.exports = {
             }
           }
 
-          // if (JSON.parse(message).getTime != null) {
-          //   getTime = JSON.parse(message).getTime;
+          // if (getMessage.getTime != null) {
+          //   getTime = getMessage.getTime;
           //   localFlag = true;
           //   const selectQuery = "select * from matrix WHERE date=?";
           //   const params = [getTime];
@@ -622,7 +622,7 @@ module.exports = {
             pointArr147zero_2 = []
           }
 
-          if (JSON.parse(message).file != null) {
+          if (getMessage.file != null) {
             backClose = true
             sitClose = true
             if (port1?.isOpen) {
@@ -666,7 +666,7 @@ module.exports = {
                 }
               });
             }
-            const receiveFile = JSON.parse(message).file
+            const receiveFile = getMessage.file
             // db = new sqlite3.Database(`${filePath}/${receiveFile}.db`);
             file = receiveFile;
 
@@ -685,14 +685,14 @@ module.exports = {
 
           }
 
-          if (JSON.parse(message).baudRate != null) {
-            baudRate = Number(JSON.parse(message).baudRate)
+          if (getMessage.baudRate != null) {
+            baudRate = Number(getMessage.baudRate)
           }
           /**
            * 将本地保存数据通道打开
            */
-          if (JSON.parse(message).getTime != null) {
-            getTime = JSON.parse(message).getTime;
+          if (getMessage.getTime != null) {
+            getTime = getMessage.getTime;
             localFlag = true;
             const selectQuery = "select * from matrix WHERE date=?";
 
@@ -1141,29 +1141,29 @@ module.exports = {
             }
           }
 
-          if (JSON.parse(message).time != null) {
-            saveTime = JSON.parse(message).time;
+          if (getMessage.time != null) {
+            saveTime = getMessage.time;
           }
-          if (JSON.parse(message).colName != null) {
-            saveTime = JSON.parse(message).colName;
+          if (getMessage.colName != null) {
+            saveTime = getMessage.colName;
           }
 
-          if (JSON.parse(message).flag === true) {
+          if (getMessage.flag === true) {
             flag = true;
-          } else if (JSON.parse(message).flag === false) {
+          } else if (getMessage.flag === false) {
             flag = false;
           }
 
-          if (JSON.parse(message).colHZ != null) {
-            colHZ = JSON.parse(message).colHZ;
+          if (getMessage.colHZ != null) {
+            colHZ = getMessage.colHZ;
           }
 
           /**
            * 将实时座椅数据通道打开
            */
-          if (JSON.parse(message).sitPort != null) {
+          if (getMessage.sitPort != null) {
             sitClose = false
-            com = JSON.parse(message).sitPort;
+            com = getMessage.sitPort;
             if (port1?.isOpen) {
               port1.close((e) => {
                 console.log(e)
@@ -1182,7 +1182,7 @@ module.exports = {
               try {
                 port1 = new SerialPort(
                   {
-                    path: JSON.parse(message).sitPort,
+                    path: getMessage.sitPort,
 
                     baudRate: baudRate,
                     autoOpen: true,
@@ -1202,7 +1202,7 @@ module.exports = {
               try {
                 port1 = new SerialPort(
                   {
-                    path: JSON.parse(message).sitPort,
+                    path: getMessage.sitPort,
 
                     baudRate: baudRate,
                     autoOpen: true,
@@ -1220,9 +1220,9 @@ module.exports = {
           }
 
 
-          if (JSON.parse(message).headPort != null) {
+          if (getMessage.headPort != null) {
             headClose = false
-            comhead = JSON.parse(message).headPort;
+            comhead = getMessage.headPort;
             if (portHead?.isOpen) {
               portHead.close((e) => {
                 console.log(e)
@@ -1240,13 +1240,13 @@ module.exports = {
               try {
                 portHead = new SerialPort(
                   {
-                    path: JSON.parse(message).headPort,
+                    path: getMessage.headPort,
 
                     baudRate: baudRate,
                     autoOpen: true,
                   },
                   function (err) {
-                    console.log(err, baudRate, JSON.parse(message).headPort, "headerr");
+                    console.log(err, baudRate, getMessage.headPort, "headerr");
                   }
                 );
                 //管道添加解析器
@@ -1260,7 +1260,7 @@ module.exports = {
               try {
                 portHead = new SerialPort(
                   {
-                    path: JSON.parse(message).headPort,
+                    path: getMessage.headPort,
 
                     baudRate: baudRate,
                     autoOpen: true,
@@ -1280,9 +1280,9 @@ module.exports = {
           /**
            * 将实时靠背数据通道打开
            */
-          if (JSON.parse(message).backPort != null) {
+          if (getMessage.backPort != null) {
             backClose = false
-            com1 = JSON.parse(message).backPort;
+            com1 = getMessage.backPort;
             if (port2?.isOpen) {
               port2.close((e) => {
                 console.log(e, 'closeport2')
@@ -1299,7 +1299,7 @@ module.exports = {
             try {
               port2 = new SerialPort(
                 {
-                  path: JSON.parse(message).backPort,
+                  path: getMessage.backPort,
 
                   baudRate: baudRate,
                   autoOpen: true,
@@ -1319,7 +1319,7 @@ module.exports = {
           /**
            * 将座椅数据通道关闭
            */
-          if (JSON.parse(message).sitClose === true) {
+          if (getMessage.sitClose === true) {
             sitClose = true
             if (port1?.isOpen) {
               port1.close();
@@ -1329,14 +1329,14 @@ module.exports = {
           /**
            * 将靠背数据通道关闭
            */
-          if (JSON.parse(message).backClose === true) {
+          if (getMessage.backClose === true) {
             backClose = true
             if (port2?.isOpen) {
               port2.close();
             }
           }
 
-          if (JSON.parse(message).headClose === true) {
+          if (getMessage.headClose === true) {
             headClose = true
             if (portHead?.isOpen) {
 
@@ -1346,7 +1346,7 @@ module.exports = {
           /**
            * 将读取本地数据通道打开
            */
-          if (JSON.parse(message).local === true) {
+          if (getMessage.local === true) {
             localFlag = true;
 
             // 传递时间戳给前端
@@ -1502,7 +1502,7 @@ module.exports = {
 
 
           }
-          if (JSON.parse(message).local === false) {
+          if (getMessage.local === false) {
             localFlag = false;
             let jsonData;
             if (file === "bigBed") {
@@ -1586,8 +1586,8 @@ module.exports = {
             // }
           }
           if (localFlag) {
-            if (JSON.parse(message).value != null) {
-              const value = JSON.parse(message).value;
+            if (getMessage.value != null) {
+              const value = getMessage.value;
               console.log(
                 "received: %s from %s",
                 JSON.stringify(message),
@@ -1669,8 +1669,8 @@ module.exports = {
               }
             }
           }
-          if (JSON.parse(message).speed != null) {
-            const speed = JSON.parse(message).speed;
+          if (getMessage.speed != null) {
+            const speed = getMessage.speed;
             interval = parseInt(timeNum / speed);
 
             if (playFlag) {
@@ -4450,15 +4450,20 @@ function initDb(fileStr) {
  * @returns 返回db文件
  */
 function genDb(file) {
+  let database;
   try {
-    const fileExist = fs.accessSync(file)
-    return db = new sqlite3.Database(file);
+    fs.accessSync(file);
+    database = new sqlite3.Database(file);
   } catch (err) {
-    console.log(err)
+    console.log(err);
     let data = fs.readFileSync(`${filePath}/init.db`);
     fs.writeFileSync(file, data);
-    return db = new sqlite3.Database(file);
+    database = new sqlite3.Database(file);
   }
+  // 启用 WAL 模式提升写入性能 5-10 倍
+  database.run('PRAGMA journal_mode=WAL;');
+  database.run('PRAGMA synchronous=NORMAL;');
+  return database;
 }
 
 function press6(arr, width, height, type = "row", value = (1245),) {

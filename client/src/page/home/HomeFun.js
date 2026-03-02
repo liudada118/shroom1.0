@@ -19,7 +19,7 @@ import { findMax, findMin, returnChartMax, } from '../../assets/util/util'
 import { rainbowColors, rainbowTextColors } from "../../assets/util/color";
 import { handLine, footLine, carSitLine, carBackLine } from '../../assets/util/line';
 import { Select, Slider, Popover } from 'antd'
-import * as echarts from 'echarts'
+import * as echarts from "../../assets/util/echarts"
 import { SelectOutlined } from '@ant-design/icons'
 
 let ws, xvalue = 0, yvalue = 0, myChart2, sitIndexArr = new Array(4).fill(0), backIndexArr = new Array(4).fill(0), sitPress = 0, backPress = 0;

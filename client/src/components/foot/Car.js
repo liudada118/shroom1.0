@@ -3,7 +3,7 @@ import Three from "./Three1";
 // import Three from "./Three1 copy";
 import { useNavigate } from "react-router-dom";
 import { Slider, Button, Input } from "antd";
-import * as echarts from "echarts";
+import * as echarts from "../../assets/util/echarts";
 // import { rotate90 } from "../../assets/util/util";
 import plane from "../../assets/images/plane.png";
 import { Select } from "element-react";
