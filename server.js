@@ -311,7 +311,7 @@ module.exports = {
             const jsonData = JSON.stringify({
               backData: new Array(backTotal).fill(0),
             });
-            server1.clients.forEach(function each(client) {
+            server.clients.forEach(function each(client) {
               if (client.readyState === WebSocket.OPEN) {
                 client.send(jsonData);
               }
@@ -323,7 +323,7 @@ module.exports = {
               backData: new Array(backTotal).fill(0),
 
             });
-            server1.clients.forEach(function each(client) {
+            server.clients.forEach(function each(client) {
               if (client.readyState === WebSocket.OPEN) {
                 client.send(jsonData);
               }
@@ -546,7 +546,7 @@ module.exports = {
                 const jsonData = JSON.stringify({
                   backData: newArr,
                 });
-                server1.clients.forEach(function each(client) {
+                server.clients.forEach(function each(client) {
                   if (client.readyState === WebSocket.OPEN) {
                     client.send(jsonData);
                   }
@@ -614,7 +614,7 @@ module.exports = {
                 backData: new Array(backTotal).fill(0),
               });
 
-              server1.clients.forEach(function each(client) {
+              server.clients.forEach(function each(client) {
                 if (client.readyState === WebSocket.OPEN) {
                   client.send(jsonData);
                 }
@@ -627,7 +627,7 @@ module.exports = {
                 headData: new Array(100).fill(0),
               });
 
-              server2.clients.forEach(function each(client) {
+              server.clients.forEach(function each(client) {
                 if (client.readyState === WebSocket.OPEN) {
                   client.send(jsonData);
                 }
@@ -814,7 +814,7 @@ module.exports = {
 
 
 
-                  //   // server1.clients.forEach(function each(client) {
+                  //   // server.clients.forEach(function each(client) {
                   //   //   /**
                   //   //    * 首次读取串口，将数据长度和串口端口数
                   //   //    *  */
@@ -866,7 +866,7 @@ module.exports = {
                               area = [];
 
 
-                            server2.clients.forEach(function each(client) {
+                            server.clients.forEach(function each(client) {
                               /**
                                * 首次读取串口，将数据长度和串口端口数
                                *  */
@@ -1339,7 +1339,7 @@ module.exports = {
                       timeArr: timeArr,
                       backData: new Array(backTotal).fill(0),
                     });
-                    server1.clients.forEach(function each(client) {
+                    server.clients.forEach(function each(client) {
                       if (client.readyState === WebSocket.OPEN) {
                         client.send(jsonData1);
                       }
@@ -1350,7 +1350,7 @@ module.exports = {
                       timeArr: rows,
                       backData: new Array(100).fill(0),
                     });
-                    server1.clients.forEach(function each(client) {
+                    server.clients.forEach(function each(client) {
                       if (client.readyState === WebSocket.OPEN) {
                         client.send(jsonData1);
                       }
@@ -1396,7 +1396,7 @@ module.exports = {
                       const jsonData1 = JSON.stringify({
                         backData: new Array(backTotal).fill(0),
                       });
-                      server1.clients.forEach(function each(client) {
+                      server.clients.forEach(function each(client) {
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData1);
                         }
@@ -1407,7 +1407,7 @@ module.exports = {
                         const jsonData1 = JSON.stringify({
                           headData: new Array(100).fill(0),
                         });
-                        server2.clients.forEach(function each(client) {
+                        server.clients.forEach(function each(client) {
                           if (client.readyState === WebSocket.OPEN) {
                             client.send(jsonData1);
                           }
@@ -1457,7 +1457,7 @@ module.exports = {
                     const jsonData1 = JSON.stringify({
                       backData: new Array(backTotal).fill(0),
                     });
-                    server1.clients.forEach(function each(client) {
+                    server.clients.forEach(function each(client) {
                       if (client.readyState === WebSocket.OPEN) {
                         client.send(jsonData1);
                       }
@@ -1489,7 +1489,7 @@ module.exports = {
                 backData: new Array(sitTotal).fill(0),
                 // backData: new Array(1024).fill(0)
               });
-              server1.clients.forEach(function each(client) {
+              server.clients.forEach(function each(client) {
                 if (client.readyState === WebSocket.OPEN) {
                   client.send(jsonData1);
                 }
@@ -1500,7 +1500,7 @@ module.exports = {
                   headData: new Array(sitTotal).fill(0),
                   // backData: new Array(1024).fill(0)
                 });
-                server2.clients.forEach(function each(client) {
+                server.clients.forEach(function each(client) {
                   if (client.readyState === WebSocket.OPEN) {
                     client.send(jsonData2);
                   }
@@ -1599,7 +1599,7 @@ module.exports = {
                     sitFlag: localData.length > 0,
                   });
 
-                  server2.clients.forEach(function each(client) {
+                  server.clients.forEach(function each(client) {
                     if (client.readyState === WebSocket.OPEN) {
                       client.send(jsonData2);
                     }
@@ -1628,7 +1628,7 @@ module.exports = {
                 }
               });
               if (isCar(file)) {
-                server1.clients.forEach(function each(client) {
+                server.clients.forEach(function each(client) {
                   if (client.readyState === WebSocket.OPEN) {
                     client.send(jsonData1);
                   }
@@ -1672,7 +1672,7 @@ module.exports = {
                   backData: localDataBack[nowIndex]?.data,
                   index: nowIndex,
                 });
-                server1.clients.forEach(function each(client) {
+                server.clients.forEach(function each(client) {
                   if (client.readyState === WebSocket.OPEN) {
                     client.send(jsonData1);
                   }
@@ -1686,7 +1686,7 @@ module.exports = {
                     sitFlag: localData.length > 0,
                   });
 
-                  server2.clients.forEach(function each(client) {
+                  server.clients.forEach(function each(client) {
                     if (client.readyState === WebSocket.OPEN) {
                       client.send(jsonData2);
                     }
@@ -1760,7 +1760,7 @@ module.exports = {
 
                   const jsonData1 = JSON.stringify(backObj);
 
-                  server1.clients.forEach(function each(client) {
+                  server.clients.forEach(function each(client) {
                     if (client.readyState === WebSocket.OPEN) {
                       client.send(jsonData1);
                     }
@@ -1774,7 +1774,7 @@ module.exports = {
                       sitFlag: localData.length > 0,
                     });
 
-                    server2.clients.forEach(function each(client) {
+                    server.clients.forEach(function each(client) {
                       if (client.readyState === WebSocket.OPEN) {
                         client.send(jsonData2);
                       }
@@ -1894,7 +1894,7 @@ module.exports = {
               }
 
 
-              server1.clients.forEach(function each(client) {
+              server.clients.forEach(function each(client) {
                 /**
                  * 首次读取串口，将数据长度和串口端口数
                  *  */
@@ -3726,7 +3726,7 @@ parser2.on("data", function (data) {
           jsonData = JSON.stringify({ backData: pointArr2 });
         }
 
-        server1.clients.forEach(function each(client) {
+        server.clients.forEach(function each(client) {
           if (client.readyState === WebSocket.OPEN) {
             client.send(jsonData);
           }
@@ -3766,7 +3766,7 @@ parser2.on("data", function (data) {
           sitFlag: port1?.isOpen,
           backFlag: port2?.isOpen,
         });
-        // server1.clients.forEach(function each(client) {
+        // server.clients.forEach(function each(client) {
         //   if (client.readyState === WebSocket.OPEN) {
         //     client.send(jsonData);
         //   }
@@ -3877,7 +3877,7 @@ parser2.on("data", function (data) {
       //     backFlag: port2?.isOpen,
       //   });
       // }
-      // server1.clients.forEach(function each(client) {
+      // server.clients.forEach(function each(client) {
       //   if (client.readyState === WebSocket.OPEN) {
       //     client.send(jsonData);
       //   }
@@ -3940,7 +3940,7 @@ function colOrSendData1(jsonData) {
 
   if (!localFlag) {
 
-    server1.clients.forEach(function each(client) {
+    server.clients.forEach(function each(client) {
       if (client.readyState === WebSocket.OPEN) {
         client.send(jsonData);
       }
@@ -4090,7 +4090,7 @@ parser4.on("data", function (data) {
           jsonData = JSON.stringify({ headData: pointArr4 });
         }
 
-        server2.clients.forEach(function each(client) {
+        server.clients.forEach(function each(client) {
           if (client.readyState === WebSocket.OPEN) {
             client.send(jsonData);
           }
@@ -4131,7 +4131,7 @@ parser4.on("data", function (data) {
           sitFlag: port1?.isOpen,
           backFlag: port2?.isOpen,
         });
-        // server1.clients.forEach(function each(client) {
+        // server.clients.forEach(function each(client) {
         //   if (client.readyState === WebSocket.OPEN) {
         //     client.send(jsonData);
         //   }
@@ -4250,7 +4250,7 @@ function colOrSendData2(jsonData) {
 
   if (!localFlag) {
 
-    server2.clients.forEach(function each(client) {
+    server.clients.forEach(function each(client) {
       if (client.readyState === WebSocket.OPEN) {
         client.send(jsonData);
       }

@@ -3,12 +3,12 @@
   "branch": "test",
   "type": "串口模拟端到端测试",
   "protocol": "AA 55 03 99",
-  "timestamp": "2026-03-03T09:05:19.753Z",
+  "timestamp": "2026-03-03T09:22:06.474Z",
   "summary": {
     "total": 29,
-    "passed": 28,
+    "passed": 29,
     "failed": 0,
-    "skipped": 1
+    "skipped": 0
   },
   "categories": {
     "串口环境": {
@@ -48,9 +48,9 @@
       "total": 5
     },
     "多串口": {
-      "passed": 2,
+      "passed": 3,
       "failed": 0,
-      "skipped": 1,
+      "skipped": 0,
       "total": 3
     },
     "断开重连": {
@@ -72,15 +72,15 @@
       "name": "socat 进程",
       "status": "PASSED",
       "detail": "3 个 socat 进程运行中",
-      "duration_ms": 14,
+      "duration_ms": 13,
       "screenshot": null
     },
     {
       "category": "串口环境",
       "name": "虚拟串口 sit",
       "status": "PASSED",
-      "detail": "/tmp/vserial_sit_sim → /dev/pts/6",
-      "duration_ms": 14,
+      "detail": "/tmp/vserial_sit_sim → /dev/pts/7",
+      "duration_ms": 13,
       "screenshot": null
     },
     {
@@ -119,7 +119,7 @@
       "category": "协议帧",
       "name": "矩阵帧(1024B)",
       "status": "PASSED",
-      "detail": "长度: 1024, 范围: [14, 255]",
+      "detail": "长度: 1024, 范围: [19, 255]",
       "duration_ms": 16,
       "screenshot": null
     },
@@ -144,7 +144,7 @@
       "name": "完整数据包",
       "status": "PASSED",
       "detail": "总长: 1028, 分隔符位置: 1024",
-      "duration_ms": 17,
+      "duration_ms": 16,
       "screenshot": null
     },
     {
@@ -152,7 +152,7 @@
       "name": "License 激活",
       "status": "PASSED",
       "detail": "已发送加密 license (file=hand0205)",
-      "duration_ms": 4610,
+      "duration_ms": 5081,
       "screenshot": null
     },
     {
@@ -160,7 +160,7 @@
       "name": "传感器类型切换",
       "status": "PASSED",
       "detail": "file=hand0205",
-      "duration_ms": 5115,
+      "duration_ms": 5585,
       "screenshot": null
     },
     {
@@ -168,7 +168,7 @@
       "name": "坐垫串口连接",
       "status": "PASSED",
       "detail": "sitPort=/tmp/vserial_sit_app",
-      "duration_ms": 7117,
+      "duration_ms": 7587,
       "screenshot": null
     },
     {
@@ -176,7 +176,7 @@
       "name": "矩阵帧 → WS 广播",
       "status": "PASSED",
       "detail": "发送 20 帧, 接收 20 条 WS 消息",
-      "duration_ms": 12227,
+      "duration_ms": 12693,
       "screenshot": null
     },
     {
@@ -184,15 +184,15 @@
       "name": "WS 数据格式",
       "status": "PASSED",
       "detail": "sitData: true, 长度: 1024, hz: 12",
-      "duration_ms": 12227,
+      "duration_ms": 12694,
       "screenshot": null
     },
     {
       "category": "数据流",
       "name": "数据值范围",
       "status": "PASSED",
-      "detail": "范围: [14, 255]",
-      "duration_ms": 12227,
+      "detail": "范围: [12, 255]",
+      "duration_ms": 12694,
       "screenshot": null
     },
     {
@@ -200,7 +200,7 @@
       "name": "双帧数据接收",
       "status": "PASSED",
       "detail": "发送 10 帧对, 接收 10 条 WS 消息",
-      "duration_ms": 17434,
+      "duration_ms": 17899,
       "screenshot": null
     },
     {
@@ -208,7 +208,7 @@
       "name": "数据字段完整性",
       "status": "PASSED",
       "detail": "sitData: true, rotate: true, newArr147: true",
-      "duration_ms": 17434,
+      "duration_ms": 17899,
       "screenshot": null
     },
     {
@@ -216,7 +216,7 @@
       "name": "System 页面（数据前）",
       "status": "PASSED",
       "detail": "已导航到 System 页面",
-      "duration_ms": 19962,
+      "duration_ms": 20432,
       "screenshot": "/home/ubuntu/shroom1.0/test/screenshots_serial/06_system_before_data.png"
     },
     {
@@ -224,7 +224,7 @@
       "name": "System 数据驱动渲染",
       "status": "PASSED",
       "detail": "发送 30 帧, Canvas 数量: 7",
-      "duration_ms": 25463,
+      "duration_ms": 25980,
       "screenshot": "/home/ubuntu/shroom1.0/test/screenshots_serial/06_system_after_data.png"
     },
     {
@@ -232,7 +232,7 @@
       "name": "数字矩阵页面",
       "status": "PASSED",
       "detail": "内容长度: 4912",
-      "duration_ms": 29575,
+      "duration_ms": 30103,
       "screenshot": "/home/ubuntu/shroom1.0/test/screenshots_serial/06_num_car10_data.png"
     },
     {
@@ -240,7 +240,7 @@
       "name": "手部实时页面",
       "status": "PASSED",
       "detail": "手部数据已发送",
-      "duration_ms": 34635,
+      "duration_ms": 35172,
       "screenshot": "/home/ubuntu/shroom1.0/test/screenshots_serial/06_hand_real_data.png"
     },
     {
@@ -248,7 +248,7 @@
       "name": "矩阵差异页面",
       "status": "PASSED",
       "detail": "页面已加载",
-      "duration_ms": 36211,
+      "duration_ms": 36740,
       "screenshot": "/home/ubuntu/shroom1.0/test/screenshots_serial/06_diff_page.png"
     },
     {
@@ -256,7 +256,7 @@
       "name": "切换到 car10 模式",
       "status": "PASSED",
       "detail": "已发送 license + backPort",
-      "duration_ms": 38215,
+      "duration_ms": 38744,
       "screenshot": null
     },
     {
@@ -264,15 +264,15 @@
       "name": "坐垫数据接收",
       "status": "PASSED",
       "detail": "接收 15 条 sitData",
-      "duration_ms": 42820,
+      "duration_ms": 43352,
       "screenshot": null
     },
     {
       "category": "多串口",
       "name": "靠背数据接收",
-      "status": "SKIPPED",
-      "detail": "接收 0 条 backData",
-      "duration_ms": 42820,
+      "status": "PASSED",
+      "detail": "接收 15 条 backData",
+      "duration_ms": 43352,
       "screenshot": null
     },
     {
@@ -280,7 +280,7 @@
       "name": "首次连接发送",
       "status": "PASSED",
       "detail": "发送 5 帧成功",
-      "duration_ms": 43072,
+      "duration_ms": 43606,
       "screenshot": null
     },
     {
@@ -288,7 +288,7 @@
       "name": "重连后发送",
       "status": "PASSED",
       "detail": "重连后发送 5 帧成功",
-      "duration_ms": 44324,
+      "duration_ms": 44858,
       "screenshot": null
     },
     {
@@ -296,7 +296,7 @@
       "name": "应用关闭",
       "status": "PASSED",
       "detail": "进程正常退出",
-      "duration_ms": 44367,
+      "duration_ms": 44900,
       "screenshot": null
     }
   ]

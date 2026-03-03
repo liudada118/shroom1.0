@@ -353,7 +353,8 @@ export default function Demo() {
 
 
     // setData(newData)
-    ws = new WebSocket(" ws://localhost:19998");
+    // [优化] 统一使用主 WS 端口
+    ws = new WebSocket(" ws://localhost:19999");
     ws.onopen = () => {
       // connection opened
       console.info("connect success");

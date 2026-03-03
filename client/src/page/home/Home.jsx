@@ -435,13 +435,7 @@ class Home extends React.Component {
     //   ws2 = new WebSocket(" ws://127.0.0.1:19997");
     // }
     ws = new WebSocket(" ws://127.0.0.1:19999");
-    ws1 = new WebSocket(" ws://127.0.0.1:19998");
-    ws2 = new WebSocket(" ws://127.0.0.1:19997");
-
-    // ws = new WebSocket(" ws://192.168.31.114:19999");
-    // ws = new WebSocket(`ws://${ip}:1880/ws/data`)
-
-    // ws = new WebSocket("ws://192.168.31.124:1880/ws/data")
+    // [优化] 统一使用单 WS 连接，不再需要 ws1(19998) 和 ws2(19997)
     ws.onopen = () => {
       // connection opened
       console.info("connect success");
@@ -453,56 +447,18 @@ class Home extends React.Component {
     };
     ws.onmessage = (e) => {
       this.wsData(e);
+      // 统一在主 WS 中处理靠背和头枕数据（原 ws1/ws2）
+      if (isCar(this.state.matrixName)) {
+        this.ws1Data(e);
+      }
+      if (this.state.matrixName == "volvo" || this.state.matrixName == "carQX") {
+        this.ws2Data(e);
+      }
     };
     ws.onerror = (e) => {
       // an error occurred
     };
     ws.onclose = (e) => {
-      // connection closed
-    };
-
-    // ws1 = new WebSocket("ws://192.168.31.124:1880/ws/data1")
-    ws1.onopen = () => {
-      // connection opened
-      console.info("connect success");
-      this.wsSendObj({
-        // file: this.state.matrixName,
-        sitClose: true,
-        backClose: true
-      })
-    };
-    ws1.onmessage = (e) => {
-      if (isCar(this.state.matrixName)) {
-        this.ws1Data(e);
-      }
-
-    };
-    ws1.onerror = (e) => {
-      // an error occurred
-    };
-    ws1.onclose = (e) => {
-      // connection closed
-    };
-
-    ws2.onopen = () => {
-      // connection opened
-      console.info("connect success");
-      this.wsSendObj({
-        // file: this.state.matrixName,
-        sitClose: true,
-        backClose: true
-      })
-    };
-    ws2.onmessage = (e) => {
-      if (this.state.matrixName == "volvo" || this.state.matrixName == "carQX") {
-        this.ws2Data(e);
-      }
-
-    };
-    ws2.onerror = (e) => {
-      // an error occurred
-    };
-    ws2.onclose = (e) => {
       // connection closed
     };
 
@@ -678,12 +634,13 @@ class Home extends React.Component {
     if (ws) {
       ws.close()
     }
-    if (ws1) {
-      ws1.close()
-    }
-    if (ws2) {
-      ws2.close()
-    }
+    // [优化] ws1/ws2 已不再使用
+    // if (ws1) {
+    //   ws1.close()
+    // }
+    // if (ws2) {
+    //   ws2.close()
+    // }
   }
 
   colPushData() {
@@ -712,9 +669,7 @@ class Home extends React.Component {
     if (ws) {
       ws.close();
     }
-    if (ws1) {
-      ws1.close();
-    }
+    // [优化] ws1 已不再需要
     this.initCar();
     const that = this;
 
@@ -726,28 +681,15 @@ class Home extends React.Component {
     };
     ws.onmessage = (e) => {
       that.wsData(e);
+      // 统一在主 WS 中处理靠背数据
+      if (isCar(that.state.matrixName)) {
+        that.ws1Data(e);
+      }
     };
     ws.onerror = (e) => {
       // an error occurred
     };
     ws.onclose = (e) => {
-      // connection closed
-    };
-    // ws1 = new WebSocket(`ws://${ip}:1880/ws/data1`)
-    ws1 = new WebSocket(`ws://${ip}:23001/ws/data1`);
-    // ws1 = new WebSocket(" ws://127.0.0.1:19998");
-    // ws1 = new WebSocket("ws://192.168.31.124:1880/ws/data1")
-    ws1.onopen = () => {
-      // connection opened
-      console.info("connect success");
-    };
-    ws1.onmessage = (e) => {
-      that.ws1Data(e);
-    };
-    ws1.onerror = (e) => {
-      // an error occurred
-    };
-    ws1.onclose = (e) => {
       // connection closed
     };
 
