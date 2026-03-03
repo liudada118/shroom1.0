@@ -14,6 +14,9 @@ import react from "@vitejs/plugin-react";
 import path from "path";
 
 export default defineConfig({
+  // 处理大写扩展名的资源文件
+  assetsInclude: ['**/*.PNG', '**/*.JPG', '**/*.JPEG', '**/*.GIF', '**/*.SVG'],
+
   plugins: [
     react({
       // 启用 Fast Refresh（替代原有的 react-hot-loader）
@@ -77,6 +80,12 @@ export default defineConfig({
     },
   },
 
+  // 允许 .js 和 .jsx 文件包含 JSX 语法
+  esbuild: {
+    include: /\.[jt]sx?$/,
+    loader: 'jsx',
+  },
+
   // 优化依赖预构建
   optimizeDeps: {
     include: [
@@ -88,5 +97,11 @@ export default defineConfig({
       "echarts",
       "@tweenjs/tween.js",
     ],
+    esbuildOptions: {
+      loader: {
+        '.js': 'jsx',
+        '.jsx': 'jsx',
+      },
+    },
   },
 });
