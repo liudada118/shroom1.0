@@ -349,7 +349,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
     renderer.setSize(window.innerWidth, window.innerHeight);
 
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.outputEncoding = THREE.sRGBEncoding;
     if (container.childNodes.length == 0) {
       container.appendChild(renderer.domElement);
     }
