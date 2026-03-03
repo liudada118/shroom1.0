@@ -173,25 +173,33 @@ if (app.isPackaged) {
 
 
 const defauleFile = 'hand0205'
-let date, sysStartTime, file = defauleFile, selectFlag
+let date, sysStartTime, file = defauleFile, selectFlag = defauleFile
 try {
-  const dateRes = fs.readFileSync(nameTxt, 'utf8');
-  const parsedData = JSON.parse(module2.decryptStr(dateRes));
-  endDate = parseFloat(parsedData.date);
-  const rawFile = parsedData.file;
-  selectFlag = rawFile; // 保留原始值发送给前端（可能是 'all'、字符串、或数组）
+  const dateRes = fs.readFileSync(nameTxt, 'utf8').trim();
+  if (dateRes) {
+    const decrypted = module2.decryptStr(dateRes);
+    if (decrypted) {
+      const parsedData = JSON.parse(decrypted);
+      const parsedDate = parseFloat(parsedData?.date);
+      if (!Number.isNaN(parsedDate)) {
+        endDate = parsedDate;
+      }
 
-  // 解析 file 字段：支持 'all'、单个字符串、数组三种格式
-  if (rawFile === 'all') {
-    file = defauleFile;
-  } else if (Array.isArray(rawFile)) {
-    // 多类型模式：使用数组中的第一个作为默认启动类型
-    file = rawFile[0] || defauleFile;
-  } else {
-    file = rawFile || defauleFile;
+      const rawFile = parsedData?.file;
+      selectFlag = rawFile || defauleFile;
+
+      // 闁荤喐鐟辩徊楣冩倵?file 闁诲孩绋掗〃鍡涱敊瀹€鍕櫖婵﹩鍘介弳婊堟煙?'all'闂侀潧妫旂粈浣哥暦閻斿摜鈻旀い蹇撳閹界喓绱掑Δ瀣窗閻熸洖妫濇俊瀛樻媴鐟欏嫭顔嶇紓鍌欑鐎氼亞绮担铏圭煋鐎广儱妫涙竟鎰偓?
+      if (rawFile === 'all') {
+        file = defauleFile;
+      } else if (Array.isArray(rawFile)) {
+        file = rawFile[0] || defauleFile;
+      } else {
+        file = rawFile || defauleFile;
+      }
+    }
   }
 } catch (err) {
-  console.error(err);
+  console.warn(`Invalid ${nameTxt}, using defaults.`);
 }
 
 // let db = new sqlite3.Database(`${filePath}/foot.db`);
@@ -281,7 +289,7 @@ module.exports = {
         const getMessage = JSON.parse(message);
 
         /**
-         * 将实时靠背数据通道打开
+         * 闁诲繐绻愬Λ妤呮偪閸曨垰绫嶉柛顐ｆ礃濞村棝鏌ら崘鍙夋拱闁哄棛鍠栭獮鎴︻敋閳ь剟鍩€椤掍礁鍝哄ù婊堢畺楠炲秹骞樺畷鍥╋紱
          */
         if (nowDate < endDate) {
           if (JSON.parse(message).backPort != null) {
@@ -297,7 +305,7 @@ module.exports = {
                   console.log(err, "err");
                 }
               );
-              //管道添加解析器
+              //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
               port2.pipe(parser2);
             } catch (e) {
               console.log(e, "e");
@@ -340,7 +348,7 @@ module.exports = {
                     console.log(err, "err");
                   }
                 );
-                //管道添加解析器
+                //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
                 // port2.pipe(parser2);
               } catch (e) {
                 console.log(e, "e");
@@ -349,7 +357,7 @@ module.exports = {
           }
 
           /**
-           * 将靠背数据通道关闭
+           * 闁诲繐绻愬Λ婵嗩焽椤掑嫭鍤勯悘鐐靛亾濞堝爼鏌熺拠鈥虫珝闁逞屽墯瀹€鍛婄妤ｅ啫绀傞柟鎯板Г閿?
            */
           if (JSON.parse(message).backClose === true) {
             backClose = true
@@ -394,7 +402,7 @@ module.exports = {
 
       server.clients.forEach(function each(client) {
         /**
-         * 首次读取串口，将数据长度和串口端口数
+         * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
          *  */
         const jsonData = JSON.stringify({
           port: serialport,
@@ -412,7 +420,7 @@ module.exports = {
       if (endDate) {
         server.clients.forEach(function each(client) {
           /**
-           * 首次读取串口，将数据长度和串口端口数
+           * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
            *  */
           const jsonData = JSON.stringify({
             date: endDate,
@@ -466,9 +474,9 @@ module.exports = {
           // endDate = parseFloat(module2.decryptStr(date))
           const parsedLicense = JSON.parse(dateRes);
           const rawFile = parsedLicense.file;
-          selectFlag = rawFile; // 保留原始值（'all'、字符串、或数组）发送给前端
+          selectFlag = rawFile; // 婵烇絽娲︾换鍕汲閳ь剟鏌涘Ο鐓庢瀻妞ゎ偅鍔欏畷鎰兜妞嬪海顦?all'闂侀潧妫旂粈渚€鎮鸿缁參鏁傞懗顖ｆ船闂侀潧妫旈悞锕傚垂閵娾晛鏋侀柟娈垮枤閻鏌ㄥ☉姗嗘Ц鐟滄澘鍊块弻鍛媴閾忕鍩楅梺鍛婃尭缁夊爼顢?
 
-          // 解析 file 字段：支持 'all'、单个字符串、数组三种格式
+          // 闁荤喐鐟辩徊楣冩倵?file 闁诲孩绋掗〃鍡涱敊瀹€鍕櫖婵﹩鍘介弳婊堟煙?'all'闂侀潧妫旂粈浣哥暦閻斿摜鈻旀い蹇撳閹界喓绱掑Δ瀣窗閻熸洖妫濇俊瀛樻媴鐟欏嫭顔嶇紓鍌欑鐎氼亞绮担铏圭煋鐎广儱妫涙竟鎰偓?
           if (rawFile === 'all') {
             file = defauleFile;
           } else if (Array.isArray(rawFile)) {
@@ -481,7 +489,7 @@ module.exports = {
 
           server.clients.forEach(function each(client) {
             /**
-             * 首次读取串口，将数据长度和串口端口数
+             * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
              *  */
             const jsonData = JSON.stringify({
               date: date,
@@ -502,7 +510,7 @@ module.exports = {
         // if(new Date().getTime() >= parseInt(sysStartTime) + parseInt(module2.decryptStr(date)) * 24 * 60 * 60 * 1000){
         //   server.clients.forEach(function each(client) {
         //     /**
-        //      * 首次读取串口，将数据长度和串口端口数
+        //      * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
         //      *  */
         //     const jsonData = JSON.stringify({
         //       timeExpires: true,
@@ -569,7 +577,7 @@ module.exports = {
             }
           }
 
-          // 置零
+          // 缂傚倸鍠氶崳锝吤?
           if (getMessage.resetZero === true) {
             if (pointArr) pointArr1zero = [...pointArr1zeroData]
             if (pointArr2) pointArr2zero = [...pointArr2zeroData]
@@ -656,7 +664,7 @@ module.exports = {
             baudRate = Number(JSON.parse(message).baudRate)
           }
           /**
-           * 将本地保存数据通道打开
+           * 闁诲繐绻愬Λ娆忥耿娴兼潙鎹跺Λ棰佽兌缁犱粙鎮楀☉娅虫垿寮抽悢鐓庣妞ゆ洍鍋撻柍褜鍓氬畝鍛婄妤ｅ啫绠ラ柟鎯х－绾?
            */
           if (JSON.parse(message).getTime != null) {
             getTime = JSON.parse(message).getTime;
@@ -708,7 +716,7 @@ module.exports = {
 
                       server.clients.forEach(function each(client) {
                         /**
-                         * 首次读取串口，将数据长度和串口端口数
+                         * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
                          *  */
                         const jsonData = JSON.stringify({
                           length: length,
@@ -739,7 +747,7 @@ module.exports = {
 
                       //     server.clients.forEach(function each(client) {
                       //       /**
-                      //        * 首次读取串口，将数据长度和串口端口数
+                      //        * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
                       //        *  */
 
                       //       const jsonData = JSON.stringify({
@@ -760,7 +768,7 @@ module.exports = {
                       // } else {
                       //   server.clients.forEach(function each(client) {
                       //     /**
-                      //      * 首次读取串口，将数据长度和串口端口数
+                      //      * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
                       //      *  */
 
                       //     const jsonData = JSON.stringify({
@@ -816,7 +824,7 @@ module.exports = {
 
                   //   // server1.clients.forEach(function each(client) {
                   //   //   /**
-                  //   //    * 首次读取串口，将数据长度和串口端口数
+                  //   //    * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
                   //   //    *  */
 
                   //   //   const jsonData = JSON.stringify({
@@ -868,7 +876,7 @@ module.exports = {
 
                             server2.clients.forEach(function each(client) {
                               /**
-                               * 首次读取串口，将数据长度和串口端口数
+                               * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
                                *  */
                               const jsonData = JSON.stringify({
                                 // length: length,
@@ -926,7 +934,7 @@ module.exports = {
 
                       server.clients.forEach(function each(client) {
                         /**
-                         * 首次读取串口，将数据长度和串口端口数
+                         * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
                          *  */
                         const jsonData = JSON.stringify({
                           length: length,
@@ -957,7 +965,7 @@ module.exports = {
 
                       //     server.clients.forEach(function each(client) {
                       //       /**
-                      //        * 首次读取串口，将数据长度和串口端口数
+                      //        * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
                       //        *  */
 
                       //       const jsonData = JSON.stringify({
@@ -978,7 +986,7 @@ module.exports = {
                       // } else {
                       //   server.clients.forEach(function each(client) {
                       //     /**
-                      //      * 首次读取串口，将数据长度和串口端口数
+                      //      * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
                       //      *  */
 
                       //     const jsonData = JSON.stringify({
@@ -1037,7 +1045,7 @@ module.exports = {
 
                   server.clients.forEach(function each(client) {
                     /**
-                     * 首次读取串口，将数据长度和串口端口数
+                     * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
                      *  */
                     const jsonData = JSON.stringify({
                       length: length,
@@ -1068,7 +1076,7 @@ module.exports = {
 
                   //     server.clients.forEach(function each(client) {
                   //       /**
-                  //        * 首次读取串口，将数据长度和串口端口数
+                  //        * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
                   //        *  */
 
                   //       const jsonData = JSON.stringify({
@@ -1089,7 +1097,7 @@ module.exports = {
                   // } else {
                   //   server.clients.forEach(function each(client) {
                   //     /**
-                  //      * 首次读取串口，将数据长度和串口端口数
+                  //      * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
                   //      *  */
 
                   //     const jsonData = JSON.stringify({
@@ -1126,7 +1134,7 @@ module.exports = {
           }
 
           /**
-           * 将实时座椅数据通道打开
+           * 闁诲繐绻愬Λ妤呮偪閸曨垰绫嶉悹鐑樻そ閻涙挻淇婇悙鍙夊櫤闁哄棛鍠栭獮鎴︻敋閳ь剟鍩€椤掍礁鍝哄ù婊堢畺楠炲秹骞樺畷鍥╋紱
            */
           if (JSON.parse(message).sitPort != null) {
             sitClose = false
@@ -1158,7 +1166,7 @@ module.exports = {
                     console.log(err, "err");
                   }
                 );
-                //管道添加解析器
+                //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
                 // let splitBuffer = Buffer.from([0xaa, 0x55, 0x03, 0x99]);
                 // parser = new Delimiter({ delimiter: splitBuffer });
                 port1.pipe(parser);
@@ -1178,7 +1186,7 @@ module.exports = {
                     console.log(err, "err");
                   }
                 );
-                //管道添加解析器
+                //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
                 port1.pipe(parser3);
               } catch (e) {
                 console.log(e, "e");
@@ -1216,7 +1224,7 @@ module.exports = {
                     console.log(err, baudRate, JSON.parse(message).headPort, "headerr");
                   }
                 );
-                //管道添加解析器
+                //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
                 // let splitBuffer = Buffer.from([0xaa, 0x55, 0x03, 0x99]);
                 // parser = new Delimiter({ delimiter: splitBuffer });
                 portHead.pipe(parser4);
@@ -1236,7 +1244,7 @@ module.exports = {
                     console.log(err, "headerr");
                   }
                 );
-                //管道添加解析器
+                //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
                 portHead.pipe(parser4);
               } catch (e) {
                 console.log(e, "e");
@@ -1245,7 +1253,7 @@ module.exports = {
           }
 
           /**
-           * 将实时靠背数据通道打开
+           * 闁诲繐绻愬Λ妤呮偪閸曨垰绫嶉柛顐ｆ礃濞村棝鏌ら崘鍙夋拱闁哄棛鍠栭獮鎴︻敋閳ь剟鍩€椤掍礁鍝哄ù婊堢畺楠炲秹骞樺畷鍥╋紱
            */
           if (JSON.parse(message).backPort != null) {
             backClose = false
@@ -1275,7 +1283,7 @@ module.exports = {
                   console.log(err, "err");
                 }
               );
-              //管道添加解析器
+              //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
 
               port2.pipe(parser2);
             } catch (e) {
@@ -1284,7 +1292,7 @@ module.exports = {
           }
 
           /**
-           * 将座椅数据通道关闭
+           * 闁诲繐绻愬Λ妤侇殽閸パ屾富闁告侗鍠楀▓鍫曟煙鐠団€虫珝闁逞屽墯瀹€鍛婄妤ｅ啫绀傞柟鎯板Г閿?
            */
           if (JSON.parse(message).sitClose === true) {
             sitClose = true
@@ -1294,7 +1302,7 @@ module.exports = {
           }
 
           /**
-           * 将靠背数据通道关闭
+           * 闁诲繐绻愬Λ婵嗩焽椤掑嫭鍤勯悘鐐靛亾濞堝爼鏌熺拠鈥虫珝闁逞屽墯瀹€鍛婄妤ｅ啫绀傞柟鎯板Г閿?
            */
           if (JSON.parse(message).backClose === true) {
             backClose = true
@@ -1311,12 +1319,12 @@ module.exports = {
             }
           }
           /**
-           * 将读取本地数据通道打开
+           * 闁诲繐绻愬Λ婊堫敋娴兼潙鐭楅柡宥冨妽閹烽亶鏌涢敂鎯ь暭闁哄棛鍠栭獮鎴︻敋閳ь剟鍩€椤掍礁鍝哄ù婊堢畺楠炲秹骞樺畷鍥╋紱
            */
           if (JSON.parse(message).local === true) {
             localFlag = true;
 
-            // 传递时间戳给前端
+            // 婵炵鍋愭繛鈧柍褜鍓氱敮妤€顪冮崒鐐粹拻閻庢稒锚閻撳牏绱撴担鍦噧濠⒀呭Х缁?
             const selectQuery =
               "select DISTINCT date from matrix ORDER BY timestamp DESC LIMIT ?,?";
             const params = [0, 500];
@@ -1526,7 +1534,7 @@ module.exports = {
             //         console.log(err, "err");
             //       }
             //     );
-            //     //管道添加解析器
+            //     //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
             //     // port1.pipe(parser);
             //   } catch (e) {
             //     console.log(e, "e");
@@ -1545,7 +1553,7 @@ module.exports = {
             //         console.log(err, "err");
             //       }
             //     );
-            //     //管道添加解析器
+            //     //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
             //     // port2.pipe(parser2);
             //   } catch (e) {
             //     console.log(e, "e");
@@ -1800,7 +1808,7 @@ module.exports = {
             nowIndex = getMessage.index;
           }
 
-          // 交换串口
+          // 婵炲瓨鍤庨崐鏍х暦閸欏鈻旈柟缁樺笒缂?
           if (getMessage.exchange != null) {
             [com, com1] = [com1, com];
             // port1.close();
@@ -1826,7 +1834,7 @@ module.exports = {
                       console.log(err, "err");
                     }
                   );
-                  //管道添加解析器
+                  //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
                   port1.pipe(parser);
                 } catch (e) {
                   console.log(e, "e");
@@ -1846,7 +1854,7 @@ module.exports = {
                       console.log(err, "err");
                     }
                   );
-                  //管道添加解析器
+                  //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
                   port2.pipe(parser2);
                 } catch (e) {
                   console.log(e, "e");
@@ -1896,7 +1904,7 @@ module.exports = {
 
               server1.clients.forEach(function each(client) {
                 /**
-                 * 首次读取串口，将数据长度和串口端口数
+                 * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
                  *  */
 
                 const jsonData = JSON.stringify({
@@ -1952,7 +1960,7 @@ module.exports = {
 
             server.clients.forEach(function each(client) {
               /**
-               * 首次读取串口，将数据长度和串口端口数
+               * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
                *  */
               const jsonData = JSON.stringify({
                 length: length,
@@ -1969,12 +1977,12 @@ module.exports = {
             });
           }
 
-          // 下载csv
+          // 婵炴垶鎸搁鍫澝归崲绲獀
           if (getMessage.download) {
             smoothValue = 0;
             const csvWriteData = [];
             const csvWriteBackData = [];
-            //查询语句
+            //闂佸搫琚崕鎾敋濡ゅ啯瀚氭い鎾跺仜缂?
             // const selectQuery = 'select * from matrix WHERE timestamp>? and timestamp<? and date=?';
             const selectQuery = "select * from matrix WHERE date=?";
             // const params = [1287154796066,1887154796066,'2023-06-19-14:05'];
@@ -1986,7 +1994,7 @@ module.exports = {
                 if (err) {
                   console.error(err);
                 } else {
-                  //把时间 压力面积 平均压力数据push进csvWriter进行汇总
+                  //闂佺娉涢敃銉ヮ渻閸岀偞鈷?闂佸憡锚椤戝懏鎱ㄨ箛娑欘棃闁靛繆鎳?濡ょ姷鍋涢崯鍨焽鎼淬劌鍌ㄩ悗锝庝簻椤棃鏌℃担鍝勵暭鐎规挷鍨sh闁哄鏅滈惌鐎瀡Writer闁哄鏅滅粙鏍€侀幋婢囧炊閵娿垹浜?
                   for (var i = historyArr[0]; i < historyArr[1]; i++) {
                     // const press = JSON.parse(rows[i][`data`]).reduce(
                     //   (a, b) => a + b,
@@ -2039,7 +2047,7 @@ module.exports = {
                     ).length;
                     const newData = {
                       time: timeStampToDate(rows[i][`timestamp`]),
-                      pressureArea: area, //原始矩阵
+                      pressureArea: area, //闂佸憡顭囬崰搴綖閹扮増鍎楅柍鍝勬噺閳?
                       pressure: total / length,
                       realData: realArr,
                       pressValue: wsPointData.reduce((a, b) => a + b, 0),
@@ -2048,11 +2056,11 @@ module.exports = {
                     };
                     csvWriteData.push(newData);
                   }
-                  // 将汇总的压力数据写入 CSV 文件
+                  // 闁诲繐绻愬Λ娆撴儑瑜版帒绠戦柤濮愬€栭悾閬嶆煕濡警鍎忓┑顔肩箻瀵偊鎮ч崼婵堛偊闂佸憡鍔栭悷銉╁矗?CSV 闂佸搫鍊稿ú锝呪枎?
                   // const timeStamp = Date.now()
                   const str = nowGetTime.replace(/[/:]/g, "-");
                   const csvWriter = createCsvWriter({
-                    path: `${csvPath}/${file}${str}.csv`, // 指定输出文件的路径和名称
+                    path: `${csvPath}/${file}${str}.csv`, // 闂佸湱顭堝ú銈夋偩閻愵剚缍囬柟鎯у暱濮ｅ鏌￠崒姘煑婵炲棎鍨介幆鍐礋椤斿墽鍞撮悗鍨緲鐎氼剟骞忔导鏉戣Е鐎广儱娉?
                     header: [
                       { id: "time", title: "time" },
                       { id: "pressureArea", title: "area" },
@@ -2067,11 +2075,11 @@ module.exports = {
                   csvWriter
                     .writeRecords(csvWriteData)
                     .then(() => {
-                      console.log("导出csv成功！");
+                      console.log("csv export success");
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
-                          download: "导出csv成功！",
+                          download: "csv export success",
                         });
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData);
@@ -2079,11 +2087,11 @@ module.exports = {
                       });
                     })
                     .catch((err) => {
-                      console.error("导出csv失败：", err);
+                      console.error("csv export failed", err);
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
-                          download: "导出csv失败!",
+                          download: "闁诲海鏁搁崢褔宕甸悹鐜竩婵犮垺鍎肩划鍓ф喆?",
                         });
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData);
@@ -2097,7 +2105,7 @@ module.exports = {
                 if (err) {
                   console.error(err);
                 } else {
-                  //把时间 压力面积 平均压力数据push进csvWriter进行汇总
+                  //闂佺娉涢敃銉ヮ渻閸岀偞鈷?闂佸憡锚椤戝懏鎱ㄨ箛娑欘棃闁靛繆鎳?濡ょ姷鍋涢崯鍨焽鎼淬劌鍌ㄩ悗锝庝簻椤棃鏌℃担鍝勵暭鐎规挷鍨sh闁哄鏅滈惌鐎瀡Writer闁哄鏅滅粙鏍€侀幋婢囧炊閵娿垹浜?
 
                   if (!rows.length) return;
                   for (var i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
@@ -2125,7 +2133,7 @@ module.exports = {
                       time: timeStampToDate(rows[i][`timestamp`]),
                       pressureArea: sitAreaSelect.length
                         ? sitAreaSelect[i]
-                        : area * 2.1, //原始矩阵
+                        : area * 2.1, //闂佸憡顭囬崰搴綖閹扮増鍎楅柍鍝勬噺閳?
                       pressure: sitPressSelect.length
                         ? sitPressSelect[i]
                         : totalToN(press),
@@ -2137,7 +2145,7 @@ module.exports = {
                     };
                     csvWriteData.push(newData);
                   }
-                  // 将汇总的压力数据写入 CSV 文件
+                  // 闁诲繐绻愬Λ娆撴儑瑜版帒绠戦柤濮愬€栭悾閬嶆煕濡警鍎忓┑顔肩箻瀵偊鎮ч崼婵堛偊闂佸憡鍔栭悷銉╁矗?CSV 闂佸搫鍊稿ú锝呪枎?
                   // const timeStamp = Date.now()
 
                   // const str = nowGetTime.replace(/[/:]/g, "-");
@@ -2149,14 +2157,14 @@ module.exports = {
                   }
 
                   const csvWriter = createCsvWriter({
-                    path: `${csvPath}/${file}${str}.csv`, // 指定输出文件的路径和名称
+                    path: `${csvPath}/${file}${str}.csv`, // 闂佸湱顭堝ú銈夋偩閻愵剚缍囬柟鎯у暱濮ｅ鏌￠崒姘煑婵炲棎鍨介幆鍐礋椤斿墽鍞撮悗鍨緲鐎氼剟骞忔导鏉戣Е鐎广儱娉?
                     header: [
                       { id: "index", title: "" },
                       { id: "time", title: "time" },
                       { id: "pressureArea", title: "area" },
                       { id: "pressure", title: "press" },
                       { id: "realInitData", title: "realInitData" },
-                      { id: "pressuremmgH", title: "压强大小(mmgH)" },
+                      { id: "pressuremmgH", title: "闂佸憡锚椤戝懎顔忔潏銊ョ窞鐟滃秹鎯?mmgH)" },
                       { id: "realData", title: "data" },
                       { id: "dataToInterpGauss", title: "algorData" },
                     ],
@@ -2165,11 +2173,11 @@ module.exports = {
                   csvWriter
                     .writeRecords(csvWriteData)
                     .then(() => {
-                      console.log("导出csv成功！");
+                      console.log("csv export success");
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
-                          download: "导出csv成功！",
+                          download: "csv export success",
                         });
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData);
@@ -2177,11 +2185,11 @@ module.exports = {
                       });
                     })
                     .catch((err) => {
-                      console.error("导出csv失败：", err);
+                      console.error("csv export failed", err);
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
-                          download: "导出csv失败!",
+                          download: "闁诲海鏁搁崢褔宕甸悹鐜竩婵犮垺鍎肩划鍓ф喆?",
                         });
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData);
@@ -2195,7 +2203,7 @@ module.exports = {
                 if (err) {
                   console.error(err);
                 } else {
-                  //把时间 压力面积 平均压力数据push进csvWriter进行汇总
+                  //闂佺娉涢敃銉ヮ渻閸岀偞鈷?闂佸憡锚椤戝懏鎱ㄨ箛娑欘棃闁靛繆鎳?濡ょ姷鍋涢崯鍨焽鎼淬劌鍌ㄩ悗锝庝簻椤棃鏌℃担鍝勵暭鐎规挷鍨sh闁哄鏅滈惌鐎瀡Writer闁哄鏅滅粙鏍€侀幋婢囧炊閵娿垹浜?
                   const label = getMessage.download.split('_')[1]
                   if (!rows.length) return;
                   for (var i = 0, j = 0; i < rows.length; i++, j++) {
@@ -2205,7 +2213,7 @@ module.exports = {
                     };
                     csvWriteData.push(newData);
                   }
-                  // 将汇总的压力数据写入 CSV 文件
+                  // 闁诲繐绻愬Λ娆撴儑瑜版帒绠戦柤濮愬€栭悾閬嶆煕濡警鍎忓┑顔肩箻瀵偊鎮ч崼婵堛偊闂佸憡鍔栭悷銉╁矗?CSV 闂佸搫鍊稿ú锝呪枎?
                   // const timeStamp = Date.now()
 
                   // const str = nowGetTime.replace(/[/:]/g, "-");
@@ -2218,7 +2226,7 @@ module.exports = {
                   }
 
                   const csvWriter = createCsvWriter({
-                    path: `${csvPath}/${file}${str}.csv`, // 指定输出文件的路径和名称
+                    path: `${csvPath}/${file}${str}.csv`, // 闂佸湱顭堝ú銈夋偩閻愵剚缍囬柟鎯у暱濮ｅ鏌￠崒姘煑婵炲棎鍨介幆鍐礋椤斿墽鍞撮悗鍨緲鐎氼剟骞忔导鏉戣Е鐎广儱娉?
                     header: [
                       { id: "realData", title: "data" },
                       { id: "label", title: "label" },
@@ -2228,11 +2236,11 @@ module.exports = {
                   csvWriter
                     .writeRecords(csvWriteData)
                     .then(() => {
-                      console.log("导出csv成功！");
+                      console.log("csv export success");
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
-                          download: "导出csv成功！",
+                          download: "csv export success",
                         });
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData);
@@ -2240,11 +2248,11 @@ module.exports = {
                       });
                     })
                     .catch((err) => {
-                      console.error("导出csv失败：", err);
+                      console.error("csv export failed", err);
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
-                          download: "导出csv失败!",
+                          download: "闁诲海鏁搁崢褔宕甸悹鐜竩婵犮垺鍎肩划鍓ф喆?",
                         });
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData);
@@ -2258,7 +2266,7 @@ module.exports = {
                 if (err) {
                   console.error(err);
                 } else {
-                  //把时间 压力面积 平均压力数据push进csvWriter进行汇总
+                  //闂佺娉涢敃銉ヮ渻閸岀偞鈷?闂佸憡锚椤戝懏鎱ㄨ箛娑欘棃闁靛繆鎳?濡ょ姷鍋涢崯鍨焽鎼淬劌鍌ㄩ悗锝庝簻椤棃鏌℃担鍝勵暭鐎规挷鍨sh闁哄鏅滈惌鐎瀡Writer闁哄鏅滅粙鏍€侀幋婢囧炊閵娿垹浜?
                   const label = getMessage.download.split('_')[1]
                   if (!rows.length) return;
                   for (var i = 0, j = 0; i < rows.length; i++, j++) {
@@ -2268,7 +2276,7 @@ module.exports = {
                     };
                     csvWriteData.push(newData);
                   }
-                  // 将汇总的压力数据写入 CSV 文件
+                  // 闁诲繐绻愬Λ娆撴儑瑜版帒绠戦柤濮愬€栭悾閬嶆煕濡警鍎忓┑顔肩箻瀵偊鎮ч崼婵堛偊闂佸憡鍔栭悷銉╁矗?CSV 闂佸搫鍊稿ú锝呪枎?
                   // const timeStamp = Date.now()
 
                   // const str = nowGetTime.replace(/[/:]/g, "-");
@@ -2281,7 +2289,7 @@ module.exports = {
                   }
 
                   const csvWriter = createCsvWriter({
-                    path: `${csvPath}/${file}${str}.csv`, // 指定输出文件的路径和名称
+                    path: `${csvPath}/${file}${str}.csv`, // 闂佸湱顭堝ú銈夋偩閻愵剚缍囬柟鎯у暱濮ｅ鏌￠崒姘煑婵炲棎鍨介幆鍐礋椤斿墽鍞撮悗鍨緲鐎氼剟骞忔导鏉戣Е鐎广儱娉?
                     header: [
                       { id: "realData", title: "data" },
                       { id: "label", title: "label" },
@@ -2291,11 +2299,11 @@ module.exports = {
                   csvWriter
                     .writeRecords(csvWriteData)
                     .then(() => {
-                      console.log("导出csv成功！");
+                      console.log("csv export success");
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
-                          download: "导出csv成功！",
+                          download: "csv export success",
                         });
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData);
@@ -2303,11 +2311,11 @@ module.exports = {
                       });
                     })
                     .catch((err) => {
-                      console.error("导出csv失败：", err);
+                      console.error("csv export failed", err);
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
-                          download: "导出csv失败!",
+                          download: "闁诲海鏁搁崢褔宕甸悹鐜竩婵犮垺鍎肩划鍓ф喆?",
                         });
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData);
@@ -2321,7 +2329,7 @@ module.exports = {
                 if (err) {
                   console.error(err);
                 } else {
-                  //把时间 压力面积 平均压力数据push进csvWriter进行汇总
+                  //闂佺娉涢敃銉ヮ渻閸岀偞鈷?闂佸憡锚椤戝懏鎱ㄨ箛娑欘棃闁靛繆鎳?濡ょ姷鍋涢崯鍨焽鎼淬劌鍌ㄩ悗锝庝簻椤棃鏌℃担鍝勵暭鐎规挷鍨sh闁哄鏅滈惌鐎瀡Writer闁哄鏅滅粙鏍€侀幋婢囧炊閵娿垹浜?
 
                   if (!rows.length) return;
                   console.log(historyArr)
@@ -2345,7 +2353,7 @@ module.exports = {
                       time: timeStampToDate(rows[i][`timestamp`]),
                       pressureArea: sitAreaSelect.length
                         ? sitAreaSelect[i]
-                        : area, //原始矩阵
+                        : area, //闂佸憡顭囬崰搴綖閹扮増鍎楅柍鍝勬噺閳?
                       pressure: sitPressSelect.length
                         ? sitPressSelect[i]
                         : totalToN(press),
@@ -2356,7 +2364,7 @@ module.exports = {
                     };
                     csvWriteData.push(newData);
                   }
-                  // 将汇总的压力数据写入 CSV 文件
+                  // 闁诲繐绻愬Λ娆撴儑瑜版帒绠戦柤濮愬€栭悾閬嶆煕濡警鍎忓┑顔肩箻瀵偊鎮ч崼婵堛偊闂佸憡鍔栭悷銉╁矗?CSV 闂佸搫鍊稿ú锝呪枎?
                   // const timeStamp = Date.now()
 
                   // const str = nowGetTime.replace(/[/:]/g, "-");
@@ -2368,14 +2376,14 @@ module.exports = {
                   }
 
                   const csvWriter = createCsvWriter({
-                    path: `${csvPath}/sit${str}.csv`, // 指定输出文件的路径和名称
+                    path: `${csvPath}/sit${str}.csv`, // 闂佸湱顭堝ú銈夋偩閻愵剚缍囬柟鎯у暱濮ｅ鏌￠崒姘煑婵炲棎鍨介幆鍐礋椤斿墽鍞撮悗鍨緲鐎氼剟骞忔导鏉戣Е鐎广儱娉?
                     header: [
                       { id: "index", title: "" },
                       { id: "max", title: "max" },
                       { id: "time", title: "time" },
                       { id: "pressureArea", title: "area" },
                       { id: "pressure", title: "press" },
-                      // { id: "pressuremmgH", title: "压强大小(mmgH)" },
+                      // { id: "pressuremmgH", title: "闂佸憡锚椤戝懎顔忔潏銊ョ窞鐟滃秹鎯?mmgH)" },
                       { id: "realData", title: "data" },
 
                     ],
@@ -2384,11 +2392,11 @@ module.exports = {
                   csvWriter
                     .writeRecords(csvWriteData)
                     .then(() => {
-                      console.log("导出csv成功！");
+                      console.log("csv export success");
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
-                          download: "导出csv成功！",
+                          download: "csv export success",
                         });
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData);
@@ -2396,11 +2404,11 @@ module.exports = {
                       });
                     })
                     .catch((err) => {
-                      console.error("导出csv失败：", err);
+                      console.error("csv export failed", err);
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
-                          download: "导出csv失败!",
+                          download: "闁诲海鏁搁崢褔宕甸悹鐜竩婵犮垺鍎肩划鍓ф喆?",
                         });
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData);
@@ -2417,7 +2425,7 @@ module.exports = {
                   console.error(err);
                 } else {
                   // console.log(rows)
-                  //把时间 压力面积 平均压力数据push进csvWriter进行汇总
+                  //闂佺娉涢敃銉ヮ渻閸岀偞鈷?闂佸憡锚椤戝懏鎱ㄨ箛娑欘棃闁靛繆鎳?濡ょ姷鍋涢崯鍨焽鎼淬劌鍌ㄩ悗锝庝簻椤棃鏌℃担鍝勵暭鐎规挷鍨sh闁哄鏅滈惌鐎瀡Writer闁哄鏅滅粙鏍€侀幋婢囧炊閵娿垹浜?
                   if (!rows.length) return;
 
                   // if()
@@ -2435,7 +2443,7 @@ module.exports = {
                     //   time: timeStampToDate(rows[i][`timestamp`]),
                     //   pressureArea: backAreaSelect.length
                     //     ? backAreaSelect[i]
-                    //     : area * 2.1, //原始矩阵
+                    //     : area * 2.1, //闂佸憡顭囬崰搴綖閹扮増鍎楅柍鍝勬噺閳?
                     //   pressure: backPressSelect.length
                     //     ? backPressSelect[i]
                     //     : pressToN(area, press),
@@ -2446,7 +2454,7 @@ module.exports = {
                       time: timeStampToDate(rows[i][`timestamp`]),
                       pressureArea: backAreaSelect.length
                         ? backAreaSelect[i]
-                        : area, //原始矩阵
+                        : area, //闂佸憡顭囬崰搴綖閹扮増鍎楅柍鍝勬噺閳?
                       pressure: backPressSelect.length
                         ? backPressSelect[i]
                         : totalToN(press, 1.3),
@@ -2462,7 +2470,7 @@ module.exports = {
                     };
                     csvWriteBackData.push(newData);
                   }
-                  // 将汇总的压力数据写入 CSV 文件
+                  // 闁诲繐绻愬Λ娆撴儑瑜版帒绠戦柤濮愬€栭悾閬嶆煕濡警鍎忓┑顔肩箻瀵偊鎮ч崼婵堛偊闂佸憡鍔栭悷銉╁矗?CSV 闂佸搫鍊稿ú锝呪枎?
 
                   // let str = nowGetTime.replace(/[/:]/g, "-");
                   let str = nowGetTime;
@@ -2474,7 +2482,7 @@ module.exports = {
 
                   const csvWriter1 = createCsvWriter({
                     path: `${csvPath}/back${str}.csv`,
-                    // path: `./data/back${str}.csv`, // 指定输出文件的路径和名称
+                    // path: `./data/back${str}.csv`, // 闂佸湱顭堝ú銈夋偩閻愵剚缍囬柟鎯у暱濮ｅ鏌￠崒姘煑婵炲棎鍨介幆鍐礋椤斿墽鍞撮悗鍨緲鐎氼剟骞忔导鏉戣Е鐎广儱娉?
                     header: [
                       { id: "index", title: "" },
                       { id: "time", title: "time" },
@@ -2488,10 +2496,10 @@ module.exports = {
                   csvWriter1
                     .writeRecords(csvWriteBackData)
                     .then(() => {
-                      console.log("导出csv成功！");
+                      console.log("csv export success");
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
-                          download: "导出csv成功！",
+                          download: "csv export success",
                         });
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData);
@@ -2499,10 +2507,10 @@ module.exports = {
                       });
                     })
                     .catch((err) => {
-                      console.error("导出csv失败：", err);
+                      console.error("csv export failed", err);
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
-                          download: "导出csv失败！",
+                          download: "csv export success",
                         });
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData);
@@ -2518,7 +2526,7 @@ module.exports = {
                     console.error(err);
                   } else {
                     // console.log(rows)
-                    //把时间 压力面积 平均压力数据push进csvWriter进行汇总
+                    //闂佺娉涢敃銉ヮ渻閸岀偞鈷?闂佸憡锚椤戝懏鎱ㄨ箛娑欘棃闁靛繆鎳?濡ょ姷鍋涢崯鍨焽鎼淬劌鍌ㄩ悗锝庝簻椤棃鏌℃担鍝勵暭鐎规挷鍨sh闁哄鏅滈惌鐎瀡Writer闁哄鏅滅粙鏍€侀幋婢囧炊閵娿垹浜?
                     if (!rows.length) return;
 
                     // if()
@@ -2536,7 +2544,7 @@ module.exports = {
                       //   time: timeStampToDate(rows[i][`timestamp`]),
                       //   pressureArea: backAreaSelect.length
                       //     ? backAreaSelect[i]
-                      //     : area * 2.1, //原始矩阵
+                      //     : area * 2.1, //闂佸憡顭囬崰搴綖閹扮増鍎楅柍鍝勬噺閳?
                       //   pressure: backPressSelect.length
                       //     ? backPressSelect[i]
                       //     : pressToN(area, press),
@@ -2547,7 +2555,7 @@ module.exports = {
                         time: timeStampToDate(rows[i][`timestamp`]),
                         pressureArea: backAreaSelect.length
                           ? backAreaSelect[i]
-                          : area, //原始矩阵
+                          : area, //闂佸憡顭囬崰搴綖閹扮増鍎楅柍鍝勬噺閳?
                         pressure: backPressSelect.length
                           ? backPressSelect[i]
                           : totalToN(press, 1.3),
@@ -2563,7 +2571,7 @@ module.exports = {
                       };
                       csvWriteBackData.push(newData);
                     }
-                    // 将汇总的压力数据写入 CSV 文件
+                    // 闁诲繐绻愬Λ娆撴儑瑜版帒绠戦柤濮愬€栭悾閬嶆煕濡警鍎忓┑顔肩箻瀵偊鎮ч崼婵堛偊闂佸憡鍔栭悷銉╁矗?CSV 闂佸搫鍊稿ú锝呪枎?
 
                     // let str = nowGetTime.replace(/[/:]/g, "-");
                     let str = nowGetTime;
@@ -2575,7 +2583,7 @@ module.exports = {
 
                     const csvWriter1 = createCsvWriter({
                       path: `${csvPath}/head${str}.csv`,
-                      // path: `./data/back${str}.csv`, // 指定输出文件的路径和名称
+                      // path: `./data/back${str}.csv`, // 闂佸湱顭堝ú銈夋偩閻愵剚缍囬柟鎯у暱濮ｅ鏌￠崒姘煑婵炲棎鍨介幆鍐礋椤斿墽鍞撮悗鍨緲鐎氼剟骞忔导鏉戣Е鐎广儱娉?
                       header: [
                         { id: "index", title: "" },
                         { id: "time", title: "time" },
@@ -2590,10 +2598,10 @@ module.exports = {
                     csvWriter1
                       .writeRecords(csvWriteBackData)
                       .then(() => {
-                        console.log("导出csv成功！");
+                        console.log("csv export success");
                         server.clients.forEach(function each(client) {
                           const jsonData = JSON.stringify({
-                            download: "导出csv成功！",
+                            download: "csv export success",
                           });
                           if (client.readyState === WebSocket.OPEN) {
                             client.send(jsonData);
@@ -2601,10 +2609,10 @@ module.exports = {
                         });
                       })
                       .catch((err) => {
-                        console.error("导出csv失败：", err);
+                        console.error("csv export failed", err);
                         server.clients.forEach(function each(client) {
                           const jsonData = JSON.stringify({
-                            download: "导出csv失败！",
+                            download: "csv export success",
                           });
                           if (client.readyState === WebSocket.OPEN) {
                             client.send(jsonData);
@@ -2627,7 +2635,7 @@ module.exports = {
               } else {
                 server.clients.forEach(function each(client) {
                   const jsonData = JSON.stringify({
-                    download: "删除成功",
+                    download: "operation success",
                   });
                   if (client.readyState === WebSocket.OPEN) {
                     client.send(jsonData);
@@ -2644,7 +2652,7 @@ module.exports = {
                 } else {
                   server.clients.forEach(function each(client) {
                     const jsonData = JSON.stringify({
-                      download: "删除成功",
+                      download: "operation success",
                     });
                     if (client.readyState === WebSocket.OPEN) {
                       client.send(jsonData);
@@ -2655,19 +2663,19 @@ module.exports = {
             }
           }
 
-          // 调整高斯
+          // 闁荤姴顑呴崯顖炲汲閿濆棭娈楁俊顖滅帛閻?
           if (getMessage.gauss != null) {
             gauss = getMessage.gauss;
           }
 
-          // 重新请求串口
+          // 闂備焦褰冪粔鐢稿蓟婵犲嫭瀚氶梺鍨儑濠€鏉戔槈閹炬潙绲荤憸?
           if (getMessage.serialReset != null) {
             SerialPort.list().then((ports) => {
               serialport = getPort(ports)//ports; //.filter((a,index) => a.manufacturer === 'wch.cn');
 
               server.clients.forEach(function each(client) {
                 /**
-                 * 首次读取串口，将数据长度和串口端口数
+                 * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
                  *  */
                 const jsonData = JSON.stringify({
                   port: serialport,
@@ -2681,7 +2689,7 @@ module.exports = {
             });
           }
 
-          // 历史
+          // 闂佸憡锚濡銇?
           if (getMessage.indexArr != null) {
 
             let press = [],
@@ -2706,7 +2714,7 @@ module.exports = {
 
             server.clients.forEach(function each(client) {
               /**
-               * 首次读取串口，将数据长度和串口端口数
+               * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
                *  */
               const jsonData = JSON.stringify({
                 pressArr: press,
@@ -2747,7 +2755,7 @@ SerialPort.list().then((ports) => {
     //       console.log(err, "err");
     //     }
     //   );
-    //   //管道添加解析器
+    //   //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
     //   port1.pipe(parser);
     // } catch (e) {
 
@@ -2927,7 +2935,7 @@ parser.on("data", function (data) {
 
       //   // 2.0
       //   // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
-      //   const timestamp = Date.now(); // 获取当前时间的时间戳
+      //   const timestamp = Date.now(); // 闂佸吋鍎抽崲鑼躲亹閸ヮ亗浜归柟鎯у暱椤ゅ懘鏌￠崘銊у煟婵☆偄娼￠幆鍐礋椤掍緡妲梻鍌氬€搁悺銊╁春?
       //   const date = saveTime;
       //   const insertQuery =
       //     "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
@@ -3613,13 +3621,13 @@ function colOrSendData(jsonData) {
 
     // 2.0
     // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
-    const timestamp = Date.now(); // 获取当前时间的时间戳
+    const timestamp = Date.now(); // 闂佸吋鍎抽崲鑼躲亹閸ヮ亗浜归柟鎯у暱椤ゅ懘鏌￠崘銊у煟婵☆偄娼￠幆鍐礋椤掍緡妲梻鍌氬€搁悺銊╁春?
     const date = saveTime;
     const insertQuery =
       "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
 
 
-    // 1.0 机器人之前
+    // 1.0 闂佸搫鐗嗛幖顐⑩枍閹烘挾顩查弶鐐村椤撴椽鏌?
     // db.run(
     //   insertQuery,
     //   [file.includes('hand0205') ? JSON.stringify([...pointArr, ...rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify(pointArr), timestamp, date],
@@ -3655,7 +3663,7 @@ function colOrSendData(jsonData) {
   }
 }
 
-// 处理串口数据
+// 婵犮垼娉涚€氼噣骞冩繝鍐枖闁圭粯甯掔紞鎾绘煛娴ｅ搫顣肩€?
 
 var pointArr2;
 parser2.on("data", function (data) {
@@ -3696,7 +3704,7 @@ parser2.on("data", function (data) {
         };
         // csvWriterback.writeRecords([resDataArr]);
 
-        const timestamp = Date.now(); // 获取当前时间的时间戳
+        const timestamp = Date.now(); // 闂佸吋鍎抽崲鑼躲亹閸ヮ亗浜归柟鎯у暱椤ゅ懘鏌￠崘銊у煟婵☆偄娼￠幆鍐礋椤掍緡妲梻鍌氬€搁悺銊╁春?
         const date = saveTime;
         const insertQuery =
           "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
@@ -3919,7 +3927,7 @@ function colOrSendData1(jsonData) {
 
     // 2.0
     // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
-    const timestamp = Date.now(); // 获取当前时间的时间戳
+    const timestamp = Date.now(); // 闂佸吋鍎抽崲鑼躲亹閸ヮ亗浜归柟鎯у暱椤ゅ懘鏌￠崘銊у煟婵☆偄娼￠幆鍐礋椤掍緡妲梻鍌氬€搁悺銊╁春?
     const date = saveTime;
     const insertQuery =
       "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
@@ -3964,13 +3972,13 @@ parser3.on("data", function (data) {
         if (pointArr3[pointArr3.length - 1] == 0) {
           firstData = [...pointArr3];
           firstData.pop();
-          // 右边线序
+          // 闂佸憡鐟ラ悿鍥╃博閻旇櫣妫柛顭戝枤绾?
 
         }
         if (pointArr3[pointArr3.length - 1] == 1) {
           lastData = [...pointArr3];
           lastData.pop();
-          // 添加
+          // 濠电儑缍€椤曆勬叏?
           let a = [];
           for (let i = 0; i < 32; i++) {
             for (let j = 0; j < 32; j++) {
@@ -4001,7 +4009,7 @@ parser3.on("data", function (data) {
             // 2.0
             // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
             if (dataFalg % 10 == 0) {
-              const timestamp = Date.now(); // 获取当前时间的时间戳
+              const timestamp = Date.now(); // 闂佸吋鍎抽崲鑼躲亹閸ヮ亗浜归柟鎯у暱椤ゅ懘鏌￠崘銊у煟婵☆偄娼￠幆鍐礋椤掍緡妲梻鍌氬€搁悺銊╁春?
               const date = saveTime;
               const insertQuery =
                 "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
@@ -4060,7 +4068,7 @@ parser4.on("data", function (data) {
         };
         // csvWriterback.writeRecords([resDataArr]);
 
-        const timestamp = Date.now(); // 获取当前时间的时间戳
+        const timestamp = Date.now(); // 闂佸吋鍎抽崲鑼躲亹閸ヮ亗浜归柟鎯у暱椤ゅ懘鏌￠崘銊у煟婵☆偄娼￠幆鍐礋椤掍緡妲梻鍌氬€搁悺銊╁春?
         const date = saveTime;
         const insertQuery =
           "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
@@ -4229,7 +4237,7 @@ function colOrSendData2(jsonData) {
 
     // 2.0
     // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
-    const timestamp = Date.now(); // 获取当前时间的时间戳
+    const timestamp = Date.now(); // 闂佸吋鍎抽崲鑼躲亹閸ヮ亗浜归柟鎯у暱椤ゅ懘鏌￠崘銊у煟婵☆偄娼￠幆鍐礋椤掍緡妲梻鍌氬€搁悺銊╁春?
     const date = saveTime;
     const insertQuery =
       "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
@@ -4258,7 +4266,7 @@ function colOrSendData2(jsonData) {
   }
 }
 
-// 重连
+// 闂備焦褰冪粔椋庢崲?
 setInterval(() => {
   if (com && !port1.isOpen && sitClose == false) {
     // if()
@@ -4275,7 +4283,7 @@ setInterval(() => {
             console.log(err, "err");
           }
         );
-        //管道添加解析器
+        //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
         port1.pipe(parser);
       } catch (e) {
         console.log(e, "e");
@@ -4293,7 +4301,7 @@ setInterval(() => {
             console.log(err, "err");
           }
         );
-        //管道添加解析器
+        //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
         port1.pipe(parser3);
       } catch (e) {
         console.log(e, "e");
@@ -4315,7 +4323,7 @@ setInterval(() => {
           console.log(err, "err");
         }
       );
-      //管道添加解析器
+      //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
       port2.pipe(parser2);
     } catch (e) {
       console.log(e, "e");
@@ -4385,11 +4393,11 @@ function numLessZeroToZero(num) {
   return num < 0 ? 0 : num
 }
 
-// 初始化db
+// 闂佸憡甯楃换鍌烇綖閹版澘绀岄柡澶夋敾
 /**
  * 
- * @param {string} fileStr 传感器类型 
- * @returns db数据库
+ * @param {string} fileStr 婵炵鍋愭慨鐢稿礉閸涙潙闂柕濞у棭娼堕梺?
+ * @returns db闂佽桨鑳舵晶妤€鐣垫担瑙勫劅?
  */
 function initDb(fileStr) {
   file = fileStr;
@@ -4409,12 +4417,12 @@ function initDb(fileStr) {
   return { db, db1, db2 }
 }
 
-// 当没有db文件的时候拷贝一个以init.db为原型的db文件
+// 閻熸粎澧楅幐濠氭儉閸涙潙瀚夊┑澶屽闂佸搫鍊稿ú锝呪枎閵忋倖鍎嶉柛鏇ㄥ墯椤ρ囨煕婵犲啰鎳勯悗姘贡閹风懓鈹戦崨顖ｄ紘婵炴垶鎼╂禍娆愮閹舵笜it.db婵炴垶鎸搁幖顐ゆ暜椤愶箑鍨傞悗锝庡墯閻ｇ渻b闂佸搫鍊稿ú锝呪枎?
 
 /**
  * 
- * @param {string} file 文件名 
- * @returns 返回db文件
+ * @param {string} file 闂佸搫鍊稿ú锝呪枎閵忋倕瑙?
+ * @returns 闁哄鏅滈弻銊ッ洪弶涔ラ梺鍝勫€稿ú锝呪枎?
  */
 function genDb(file) {
   try {
@@ -4479,7 +4487,7 @@ function press6(arr, width, height, type = "row", value = (1245),) {
   return wsPointData;
 }
 
-// 分压公式
+// 闂佸憡甯掑Λ妤冩暜閸ヮ剙绀傛い鎺嗗亾缂?
 function pressNew1220({ arr, width, height, type = "row", value }) {
   let wsPointData = [...arr];
 
@@ -4593,20 +4601,20 @@ function press6sit(arr, width, height, type = "row", value = (480),) {
 
 
 function bytes4ToInt10(buffers) {
-  // 示例：四个字节的数组 
+  // 缂備讲鍋撻弶鐐村娴兼劙鏌ㄥ☉娆掑婵炲弶鎸荤粙澶愵敂閸曨厽鎲婚梺鐓庢惈閸婅鈻撻幋锕€鏋侀柟娈垮枤閻?
   // const fourBytes = [0x40, 0x48, 0xF5, 0xC3];
   const res = []
   for (let i = 0; i < buffers.length / 4; i++) {
     const buffer = new ArrayBuffer(4);
     const view = new DataView(buffer);
     for (let j = 0; j < 4; j++) {
-      // 创建一个 ArrayBuffer 并将四个字节写入其中 
+      // 闂佸憡甯楃粙鎴犵磽閹惧鈻旈柍褜鍓氱粙?ArrayBuffer 濡ょ姷鍋犲▔娑㈡儍閵忋倕鐐婃繛鎴烆殜閸ゅ鎮楀☉娆樻畽濠碘槅鍙冨畷妯衡枎韫囨挸姹查梺绋跨箲濠€褰掓嚈?
 
-      // 将四个字节写入 DataView 
+      // 闁诲繐绻愬Λ妤€煤閹惧鈻旀い蹇撳閹界喖鏌ら崫鍕偓鎼佸疮閹捐绀?DataView 
       // for (let k = 0; k < 4; k++) {
       view.setUint8(j, buffers[i * 4 + j]);
       // }
-      // 从 DataView 中读取浮点数 
+      // 婵?DataView 婵炴垶鎼╅崣鈧い鏇氬嵆瀹曪綁寮介妸銊ф闂佺粯鍔橀～澶愬汲?
 
     }
     const floatValue = view.getFloat32(0, true);

@@ -8,7 +8,11 @@
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "electron-forge start",
+    "dev": "node scripts/dev.js",
+    "start": "node scripts/dev.js",
+    "start:electron": "node scripts/dev.js",
+    "start:client": "npm --prefix client run dev",
+    "start:electron:only": "electron-forge start",
     "package": "electron-forge package",
     "make": "electron-forge make",
     "make-mac": "electron-forge make --platform darwin",
