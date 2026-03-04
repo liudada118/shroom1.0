@@ -393,7 +393,12 @@ class Home extends React.Component {
       butt: 0,
       locale: 'en',
       calibration: false,
-      showType: 'hand'
+      showType: 'hand',
+      // 授权状态
+      licenseExpired: false,
+      licenseWarning: false,
+      licenseRemainDays: null,
+      licenseMessage: ''
     };
     this.com = React.createRef();
     this.data = React.createRef();
@@ -762,6 +767,34 @@ class Home extends React.Component {
   wsData = (e) => {
     sitPress = 0;
     let jsonObject = JSON.parse(e.data);
+
+    // 授权状态处理 - 放在最前面
+    if (jsonObject.licenseExpired === true) {
+      console.log('[License] 授权已过期');
+      this.setState({
+        licenseExpired: true,
+        licenseWarning: false,
+        licenseRemainDays: 0,
+        licenseMessage: jsonObject.message || '授权已过期，请联系管理员续期'
+      });
+      // 过期后不处理其他数据消息（但仍然处理 file/selectFlag 等配置消息）
+    } else if (jsonObject.licenseWarning === true) {
+      console.log('[License] 授权即将到期，剩余', jsonObject.remainDays, '天');
+      this.setState({
+        licenseExpired: false,
+        licenseWarning: true,
+        licenseRemainDays: jsonObject.remainDays,
+        licenseMessage: jsonObject.message || `授权将在 ${jsonObject.remainDays} 天后到期`
+      });
+    } else if (jsonObject.licenseExpired === false) {
+      // 授权正常，清除警告
+      this.setState({
+        licenseExpired: false,
+        licenseWarning: false,
+        licenseRemainDays: jsonObject.remainDays || null,
+        licenseMessage: ''
+      });
+    }
 
     // download 弹窗判断 - 放在最前面确保不被其他逻辑阻断
     if (jsonObject.download != null) {
@@ -2344,6 +2377,84 @@ class Home extends React.Component {
     return (
       <ConfigProvider locale={this.state.locale}>
         <div className="home">
+          {/* 授权过期全屏遮罩 */}
+          {this.state.licenseExpired && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.85)',
+              zIndex: 99999,
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'center',
+              alignItems: 'center',
+              color: '#fff',
+            }}>
+              <div style={{
+                fontSize: 72,
+                marginBottom: 24,
+              }}>⚠️</div>
+              <div style={{
+                fontSize: 28,
+                fontWeight: 'bold',
+                marginBottom: 16,
+                color: '#ff4d4f',
+              }}>授权已过期</div>
+              <div style={{
+                fontSize: 16,
+                color: 'rgba(255,255,255,0.7)',
+                marginBottom: 32,
+                textAlign: 'center',
+                lineHeight: 1.8,
+              }}>
+                {this.state.licenseMessage || '您的软件授权已过期，请联系管理员续期后继续使用'}
+                <br />
+                请在密钥配置页面输入新的授权密钥
+              </div>
+              <div style={{
+                padding: '12px 32px',
+                background: 'rgba(255,255,255,0.1)',
+                borderRadius: 8,
+                fontSize: 14,
+                color: 'rgba(255,255,255,0.5)',
+              }}>
+                如需帮助，请联系技术支持
+              </div>
+            </div>
+          )}
+
+          {/* 授权即将到期警告条 */}
+          {this.state.licenseWarning && !this.state.licenseExpired && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              zIndex: 9999,
+              background: 'linear-gradient(90deg, #fa8c16, #faad14)',
+              color: '#fff',
+              padding: '8px 16px',
+              textAlign: 'center',
+              fontSize: 14,
+              fontWeight: 500,
+              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              gap: 8,
+            }}>
+              <span>⚠️</span>
+              <span>
+                {this.state.licenseMessage || `授权将在 ${this.state.licenseRemainDays} 天后到期，请及时续期`}
+              </span>
+              <span style={{ marginLeft: 16, opacity: 0.8 }}>
+                剩余 {this.state.licenseRemainDays} 天
+              </span>
+            </div>
+          )}
           {this.state.matrixName != "robot0428" ? <div className="setIcons">
             <div className="setIconItem setIconItem1">
               <Popover placement="top" title={text} content={content}>

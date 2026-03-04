@@ -129,22 +129,108 @@ const sitTotal = sitnum1 * sitnum2;
 let length, history, nowGetTime;
 var serialport;
 
-let nowDate = 0
+let nowDate = Date.now()  // 默认使用本地时间，避免为0导致授权绕过
 let endDate = 0
+let serverTimeAvailable = false  // 标记是否成功获取过服务器时间
 
-const https = require('https')
-const request = require('request');
-request('http://sensor.bodyta.com:8080/rcv/login/getSystemTime', {
-  json: true, method: 'get', headers: {
-    'content-type': 'application/json; charset=utf-8;',
-  }
-}, (err, res, body) => {
-  if (err) {
-    return console.log(err);
-  }
-  console.log(body.time, 'body');
-  nowDate = parseInt(body.time)
+const http = require('http')
+
+/**
+ * 从远程服务器获取当前时间
+ * 如果服务器不可达，回退到本地时间 Date.now()
+ * @returns {Promise<number>} 时间戳
+ */
+function fetchServerTime() {
+  return new Promise((resolve) => {
+    const req = http.get('http://sensor.bodyta.com:8080/rcv/login/getSystemTime', {
+      headers: { 'content-type': 'application/json; charset=utf-8;' },
+      timeout: 5000,
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const body = JSON.parse(data);
+          const serverTime = parseInt(body.time);
+          if (serverTime && serverTime > 0) {
+            console.log('[License] 服务器时间获取成功:', serverTime);
+            serverTimeAvailable = true;
+            resolve(serverTime);
+          } else {
+            console.warn('[License] 服务器返回无效时间，使用本地时间');
+            resolve(Date.now());
+          }
+        } catch (e) {
+          console.warn('[License] 解析服务器时间失败，使用本地时间:', e.message);
+          resolve(Date.now());
+        }
+      });
+    });
+    req.on('error', (err) => {
+      console.warn('[License] 服务器不可达，使用本地时间:', err.message);
+      resolve(Date.now());
+    });
+    req.on('timeout', () => {
+      req.destroy();
+      console.warn('[License] 服务器超时，使用本地时间');
+      resolve(Date.now());
+    });
+  });
+}
+
+// 启动时获取服务器时间
+fetchServerTime().then((time) => {
+  nowDate = time;
+  // 启动后立即检查一次授权状态并通知前端
+  broadcastLicenseStatus();
 });
+
+// 每30分钟刷新一次服务器时间，防止长时间运行绕过到期
+setInterval(async () => {
+  const newTime = await fetchServerTime();
+  nowDate = newTime;
+  console.log('[License] 定时刷新时间:', nowDate, '到期时间:', endDate);
+  // 刷新后重新检查授权状态
+  broadcastLicenseStatus();
+}, 30 * 60 * 1000);
+
+/**
+ * 检查授权状态并广播给所有前端客户端
+ */
+function broadcastLicenseStatus() {
+  if (!endDate || !server) return;
+  const isExpired = nowDate >= endDate;
+  const remainMs = endDate - nowDate;
+  const remainDays = Math.ceil(remainMs / (24 * 60 * 60 * 1000));
+
+  server.clients.forEach(function each(client) {
+    if (client.readyState === WebSocket.OPEN) {
+      if (isExpired) {
+        // 授权已过期
+        client.send(JSON.stringify({
+          licenseExpired: true,
+          message: '授权已过期，请联系管理员续期',
+          expireDate: endDate,
+          serverTime: nowDate
+        }));
+      } else if (remainDays <= 30) {
+        // 即将到期警告（30天内）
+        client.send(JSON.stringify({
+          licenseWarning: true,
+          remainDays: remainDays,
+          expireDate: endDate,
+          message: `授权将在 ${remainDays} 天后到期，请及时续期`
+        }));
+      }
+    }
+  });
+
+  if (isExpired) {
+    console.log('[License] 授权已过期! nowDate:', nowDate, 'endDate:', endDate);
+  } else if (remainDays <= 30) {
+    console.log(`[License] 授权即将到期，剩余 ${remainDays} 天`);
+  }
+}
 
 const runtimeResourceRoot = app.isPackaged ? process.resourcesPath : __dirname;
 let filePath = path.join(runtimeResourceRoot, "db");
@@ -413,16 +499,20 @@ module.exports = {
       });
 
       if (endDate) {
+        const isExpired = nowDate >= endDate;
+        const remainMs = endDate - nowDate;
+        const remainDays = Math.ceil(remainMs / (24 * 60 * 60 * 1000));
+
         server.clients.forEach(function each(client) {
-          /**
-           * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
-           *  */
           const jsonData = JSON.stringify({
             date: endDate,
             file: file,
-            selectFlag: selectFlag
-            // length: csvSitData.length,
-            // sitData: csvSitData[0], backData: csvBackData[0]
+            selectFlag: selectFlag,
+            // 授权状态信息
+            licenseExpired: isExpired,
+            licenseWarning: !isExpired && remainDays <= 30,
+            remainDays: isExpired ? 0 : remainDays,
+            serverTime: nowDate
           });
 
           if (client.readyState === WebSocket.OPEN) {
@@ -490,16 +580,20 @@ module.exports = {
             baudRate = 1000000
           }
 
+          // 密钥更新后立即检查授权状态
+          const isExpiredNew = nowDate >= endDate;
+          const remainMsNew = endDate - nowDate;
+          const remainDaysNew = Math.ceil(remainMsNew / (24 * 60 * 60 * 1000));
+
           server.clients.forEach(function each(client) {
-            /**
-             * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
-             *  */
             const jsonData = JSON.stringify({
               date: date,
               file,
-              selectFlag: selectFlag
-              // length: csvSitData.length,
-              // sitData: csvSitData[0], backData: csvBackData[0]
+              selectFlag: selectFlag,
+              licenseExpired: isExpiredNew,
+              licenseWarning: !isExpiredNew && remainDaysNew <= 30,
+              remainDays: isExpiredNew ? 0 : remainDaysNew,
+              serverTime: nowDate
             });
             if (client.readyState === WebSocket.OPEN) {
               client.send(jsonData);
