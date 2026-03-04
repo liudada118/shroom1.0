@@ -67,7 +67,7 @@ import {
   objChange,
   arr10to5,
 } from "../../assets/util/line";
-import { ConfigProvider, Input, Popover, message } from "antd";
+import { ConfigProvider, Input, Popover, message, Modal } from "antd";
 
 import { SelectOutlined } from "@ant-design/icons";
 import { Num } from "../../components/num/Num";
@@ -1341,7 +1341,11 @@ class Home extends React.Component {
     }
 
     if (jsonObject.download != null) {
-      message.info(jsonObject.download);
+      Modal.success({
+        title: '提示',
+        content: jsonObject.download,
+        okText: '确定',
+      });
     }
   };
 
