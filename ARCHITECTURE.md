@@ -213,8 +213,11 @@ graph TD
 3. **历史数据回放流程**
     - 用户在历史数据页选择记录 → 前端发送 `play` 指令 → `server.js` 从 SQLite 读取历史帧数据 → 按时间间隔逐帧通过 WebSocket 推送 → 前端 `usePlayback` Hook 管理播放状态（播放/暂停/变速/跳帧）。
 
-4. **授权验证流程**
-    - 应用启动 → `licenseHelper.js` 读取 `config.txt` → 使用 AES-ECB 解密 → 通过 HTTPS 获取网络时间 → 比对授权有效期 → 若过期则限制功能。
+4. **授权验证流程（已强化）**
+    - 应用启动 → `fetchServerTime()` 通过 HTTP 获取远程服务器时间（失败时回退到本地 `Date.now()`，不再保持为 0）→ 读取 `config.txt` → AES-ECB 解密得到 `endDate` → 比对 `nowDate < endDate` → 若过期则停止数据处理并通知前端。
+    - **定时刷新**：每 30 分钟通过 `fetchServerTime()` 重新获取服务器时间，防止长时间运行绕过到期检查。
+    - **状态广播**：`broadcastLicenseStatus()` 在启动、定时刷新、客户端连接、密钥更新时向所有前端发送 `licenseExpired`（已过期）或 `licenseWarning`（30天内即将到期）消息。
+    - **前端拦截**：Home.jsx 接收授权状态消息，过期时显示全屏黑色遮罩（禁止操作），即将到期时显示橙色警告条（显示剩余天数）。
     - 密钥 `file` 字段支持三种格式：`"all"`（全部授权）、`"hand0205"`（单类型锁定）、`["hand0205","robot1","footVideo"]`（多类型组合授权）。
     - 前端 `Title.js` 根据 `allowedTypes` 数组动态过滤传感器类型下拉框，实现灵活的授权控制。
 
@@ -269,7 +272,7 @@ graph TD
 | `echarts` | 数据图表可视化 | Canvas 渲染 |
 | `antd` | 控制面板 UI 组件 | React 组件库 |
 | `i18next` | 多语言国际化支持 | React 插件 |
-| `request` | HTTP 请求（在线时间获取） | 库调用（建议迁移到 `fetch`） |
+| `http` (原生) | HTTP 请求（在线时间获取） | Node.js 内置模块（已从废弃的 `request` 库迁移） |
 
 ## 7. 环境变量
 
@@ -318,6 +321,7 @@ graph TD
 | 2026-03-04 | 配置路径修复 | `config.txt` 运行时路径固定为 `resources/config.txt`，不再回退到 `app.asar/config.txt` |
 | 2026-03-04 | 打包资源归位（init.db） | 新增打包前同步脚本，仅将 `init.db` 打入 `resources/db/init.db`，不再落到 `resources/init.db` |
 | 2026-03-04 | 配置文件加载策略调整 | 启动时仅在 `resources/config.txt` 存在时读取，不再自动复制或创建 `config.txt` |
+| 2026-03-04 | 授权到期机制强化 | 修复 nowDate=0 漏洞、添加定时刷新、添加前端过期遮罩和即将到期警告条 |
 
 ## 9. 更新日志
 
@@ -331,6 +335,11 @@ graph TD
 | 2026-03-04 | 修复缺陷 | 修复 `config.txt` 路径回退逻辑，确保打包后优先使用 `resources/config.txt` |
 | 2026-03-04 | 配置变更 | 增加 `prepare-pack-resources` 脚本，固定将 `init.db` 打包到 `resources/db` 目录 |
 | 2026-03-04 | 修复缺陷 | 去除启动时自动复制 `config.txt` 的逻辑，避免打包后首次启动自动生成配置文件 |
+| 2026-03-04 | 修复缺陷 | 修复密钥到期机制致命漏洞：nowDate 初始值为 0 导致断网可绕过授权，现回退到本地时间 |
+| 2026-03-04 | 优化重构 | 替换废弃的 `request` 库为原生 `http` 模块，添加超时和错误处理 |
+| 2026-03-04 | 新增功能 | 添加每 30 分钟定时刷新服务器时间机制，防止长时间运行绕过到期 |
+| 2026-03-04 | 新增功能 | 添加授权状态广播机制 broadcastLicenseStatus()，实时通知前端授权状态 |
+| 2026-03-04 | 新增功能 | 前端添加授权过期全屏遮罩和即将到期警告条 UI |
 
 *变更类型：`新增功能` / `优化重构` / `修复缺陷` / `配置变更` / `文档更新` / `依赖升级` / `初始化`*
 
