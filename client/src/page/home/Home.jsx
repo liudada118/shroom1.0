@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useRef, useEffect } from "react";
 import Title from "../../components/title/Title";
 import "./index.scss";
 import CanvasCar from "../../components/three/carnewTest copy";
@@ -766,7 +766,11 @@ class Home extends React.Component {
     // download 弹窗判断 - 放在最前面确保不被其他逻辑阻断
     if (jsonObject.download != null) {
       console.log('[download弹窗] 收到download消息:', jsonObject.download);
-      message.info(jsonObject.download);
+      if (this.props.messageApi) {
+        this.props.messageApi.info(jsonObject.download);
+      } else {
+        message.info(jsonObject.download);
+      }
       return;
     }
 
@@ -3568,8 +3572,21 @@ class Home extends React.Component {
   }
 }
 
-// export default Home;
-export default withTranslation()((Home));
+// HOC 包装：通过 message.useMessage() 获取 contextHolder 和 messageApi
+function withMessageApi(WrappedComponent) {
+  return React.forwardRef((props, ref) => {
+    const [messageApi, contextHolder] = message.useMessage();
+    return (
+      <>
+        {contextHolder}
+        <WrappedComponent {...props} ref={ref} messageApi={messageApi} />
+      </>
+    );
+  });
+}
+
+const HomeWithMessage = withMessageApi(Home);
+export default withTranslation()((HomeWithMessage));
 
 // export const WithNavigation = (Component) => {
 //   const navigate = useNavigate()
