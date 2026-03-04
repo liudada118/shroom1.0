@@ -463,7 +463,7 @@ class Title extends React.Component {
 
         {console.log(this.props.matrixName, 'this.props.matrixName')}
         <Menu className='menu' onClick={this.onClick} selectedKeys={[this.state.current]} mode="horizontal" items={navItems} />
-        {this.props.matrixName != 'localCar' ? this.props.history === 'now' ? this.props.matrixName != 'car' && this.props.matrixName != 'car10' && this.props.matrixName != 'sofa' && this.props.matrixName != 'yanfeng10' && this.props.matrixName != 'volvo' && this.props.matrixName != 'carQX' && this.props.matrixName != 'hand0507' && this.props.matrixName != 'hand0205' && this.props.matrixName != 'smallSample' && this.props.matrixName != 'footVideo' && this.props.matrixName != 'eye' ? <><Select
+        {this.props.matrixName != 'localCar' ? this.props.history === 'now' ? this.props.matrixName != 'car' && this.props.matrixName != 'car10' && this.props.matrixName != 'sofa' && this.props.matrixName != 'yanfeng10' && this.props.matrixName != 'volvo' && this.props.matrixName != 'carQX' && this.props.matrixName != 'hand0507' && this.props.matrixName != 'hand0205' && this.props.matrixName != 'footVideo' && this.props.matrixName != 'eye' ? <><Select
 
           style={{ marginRight: 20, width: 160 }}
           placeholder={t('chooseSensor')}
