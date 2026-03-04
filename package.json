@@ -100,7 +100,7 @@
   },
   "dependencies": {
     "@serialport/parser-delimiter": "^13.0.0",
-    "better-sqlite3": "^11.0.0",
+    "better-sqlite3": "^11.10.0",
     "crypto-js": "^4.2.0",
     "csv-writer": "^1.6.0",
     "electron-squirrel-startup": "^1.0.0",
