@@ -1,5 +1,6 @@
 import "./App.css";
 import { HashRouter, Routes, Route } from "react-router-dom";
+import { App as AntdApp } from "antd";
 
 // import Local from "./components/local/Car";
 // import Back from "./components/playBack/Car";
@@ -199,6 +200,7 @@ i18next.init({
 });
 function App() {
   return (
+    <AntdApp>
     <HashRouter>
       <Routes>
         <Route exact path="/handPoint" element={
@@ -270,6 +272,7 @@ function App() {
         {/* <Route exact path="/back" element={<Back />} /> */}
       </Routes>
     </HashRouter>
+    </AntdApp>
   );
 }
 
