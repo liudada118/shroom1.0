@@ -11,7 +11,6 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
 const http = require("http");
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
 const { openServer, getWsServer, handleCommand } = require("./server");
 
@@ -165,22 +164,18 @@ function startStaticServer({ hostname, port, win }) {
     ".map": "application/json",
   };
 
-  const server = http.createServer((req, res) => {
-    let basePath = __dirname;
-    if (app.isPackaged) {
-      if (os.platform() !== "darwin") {
-        basePath = "resources";
-      }
-    }
+  const staticRoot = app.isPackaged ? process.resourcesPath : __dirname;
+  const buildRoot = path.join(staticRoot, "build");
 
-    const urlPath = req.url === "/" ? "/index.html" : req.url.split("?")[0];
-    const filePath = path.join(basePath, "build", urlPath);
+  const server = http.createServer((req, res) => {
+    const urlPath = req.url === "/" ? "index.html" : req.url.split("?")[0].replace(/^\/+/, "");
+    const filePath = path.join(buildRoot, urlPath);
 
     fs.readFile(filePath, (err, data) => {
       if (err) {
         // SPA fallback: 对于非静态资源请求，返回 index.html
         if (urlPath.indexOf(".") === -1) {
-          const indexPath = path.join(basePath, "build", "index.html");
+          const indexPath = path.join(buildRoot, "index.html");
           fs.readFile(indexPath, (err2, indexData) => {
             if (err2) {
               res.writeHead(500, { "Content-Type": "text/plain" });

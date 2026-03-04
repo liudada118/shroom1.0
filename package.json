@@ -22,6 +22,11 @@
       "packagerConfig": {
         "icon": "./logo",
         "asar": true,
+        "extraResource": [
+          "./build",
+          "./db/init.db",
+          "./config.txt"
+        ],
         "ignore": [
           "^/venv($|/)",
           "^/python($|/)",
@@ -81,10 +86,12 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Shroom"
     },
-    "extraResources": {
-      "from": "./db/",
-      "to": "db"
-    },
+    "extraResources": [
+      {
+        "from": "./db/init.db",
+        "to": "init.db"
+      }
+    ],
     "mac": {
       "icon": "./logo.icns",
       "category": "public.app-category.utilities"
