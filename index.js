@@ -6,6 +6,7 @@
  * 2. 启动后端服务（WebSocket + 串口）
  * 3. 建立 IPC 通信桥梁（前端 ↔ 后端）
  * 4. 管理应用生命周期
+ * 5. 集成自动更新（electron-updater）
  */
 
 const { app, BrowserWindow, ipcMain } = require("electron");
@@ -13,6 +14,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { openServer, getWsServer, handleCommand } = require("./server");
+const { AppUpdater } = require("./autoUpdater");
 
 // ============================================================
 // 配置常量
@@ -24,6 +26,7 @@ const PORT = 12321;
 // 窗口管理
 // ============================================================
 let mainWindow = null;
+let appUpdater = null;
 
 const createWindow = () => {
   mainWindow = new BrowserWindow({
@@ -45,6 +48,18 @@ const createWindow = () => {
 
   // 启动静态文件服务并加载前端
   startStaticServer({ hostname: HOSTNAME, port: PORT, win: mainWindow });
+
+  // ============================================================
+  // 初始化自动更新（仅在打包后生效）
+  // ============================================================
+  if (app.isPackaged) {
+    appUpdater = new AppUpdater(mainWindow, {
+      autoDownload: false,           // 不自动下载，让用户确认后再下载
+      autoInstallOnAppQuit: true,    // 退出时自动安装已下载的更新
+      checkInterval: 4 * 60 * 60 * 1000, // 每 4 小时自动检查一次
+    });
+    appUpdater.startAutoCheck();
+  }
 };
 
 // ============================================================
@@ -222,4 +237,7 @@ app.on("window-all-closed", () => {
 // 优雅退出：清理资源
 app.on("before-quit", () => {
   console.log("[Main] Application is quitting, cleaning up...");
+  if (appUpdater) {
+    appUpdater.dispose();
+  }
 });

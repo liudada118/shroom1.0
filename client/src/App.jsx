@@ -1,6 +1,7 @@
 import "./App.css";
 import { HashRouter, Routes, Route } from "react-router-dom";
 import { App as AntdApp, message } from "antd";
+import UpdateNotifier from "./components/updater/UpdateNotifier";
 
 // import Local from "./components/local/Car";
 // import Back from "./components/playBack/Car";
@@ -209,6 +210,7 @@ message.config({
 function App() {
   return (
     <AntdApp>
+    <UpdateNotifier />
     <HashRouter>
       <Routes>
         <Route exact path="/handPoint" element={
