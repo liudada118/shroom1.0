@@ -146,29 +146,28 @@ request('http://sensor.bodyta.com:8080/rcv/login/getSystemTime', {
   nowDate = parseInt(body.time)
 });
 
-let filePath = __dirname + "/db";
-let csvPath = __dirname + "/data";
-let nameTxt = __dirname + "/config.txt";
+const runtimeResourceRoot = app.isPackaged ? process.resourcesPath : __dirname;
+let filePath = path.join(runtimeResourceRoot, "db");
+let csvPath = path.join(runtimeResourceRoot, "data");
+let nameTxt = path.join(runtimeResourceRoot, "config.txt");
 
-console.log(__dirname, app.getAppPath(), path.join(__dirname, '../db'), '__dirname')
-
-if (app.isPackaged) {
-  if (os.platform() == 'darwin') {
-    // filePath = '../..' + '/db'
-    // filePath = path.join(app.getAppPath(), 'Resources/db',);
-    filePath = path.join(__dirname, '../db')
-    csvPath = path.join(__dirname, '../data')
-    nameTxt = path.join(__dirname, '../config.txt')
-    // nameTxt = 
-    // csvPath = '../..' + '/data'
-    // nameTxt = '../..' + "/config.txt";
-  } else {
-    filePath = 'resources' + '/db'
-    csvPath = 'resources' + '/data'
-    nameTxt = 'resources' + "/config.txt";
-  }
-
+if (!fs.existsSync(filePath)) {
+  fs.mkdirSync(filePath, { recursive: true });
 }
+
+if (!fs.existsSync(csvPath)) {
+  fs.mkdirSync(csvPath, { recursive: true });
+}
+
+if (!fs.existsSync(nameTxt)) {
+  const fallbackNameTxt = path.join(__dirname, "config.txt");
+  if (fs.existsSync(fallbackNameTxt)) {
+    nameTxt = fallbackNameTxt;
+  }
+}
+
+console.log("[Path] resourceRoot=", runtimeResourceRoot);
+console.log("[Path] db=", filePath, "data=", csvPath, "config=", nameTxt);
 
 
 
@@ -4445,7 +4444,17 @@ function genDb(file) {
     return db = new sqlite3.Database(file);
   } catch (err) {
     console.log(err)
-    let data = fs.readFileSync(`${filePath}/init.db`);
+    const initCandidates = [
+      path.join(filePath, "init.db"),
+      path.join(runtimeResourceRoot, "init.db"),
+      path.join(__dirname, "db", "init.db"),
+      path.join(app.getAppPath(), "db", "init.db"),
+    ];
+    const initDbPath = initCandidates.find((candidate) => fs.existsSync(candidate));
+    if (!initDbPath) {
+      throw new Error(`init.db not found. checked: ${initCandidates.join(", ")}`);
+    }
+    let data = fs.readFileSync(initDbPath);
     fs.writeFileSync(file, data);
     return db = new sqlite3.Database(file);
   }
