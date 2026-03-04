@@ -5,19 +5,20 @@
  * 功能：
  * 1. 可视化选择传感器类型（多选/全选）
  * 2. 设置授权有效期（天数或日期选择）
- * 3. 一键生成密钥
- * 4. 密钥解析（粘贴密钥查看内容）
- * 5. 通过 WebSocket 直接写入到应用
+ * 3. 输入目标机器码，实现一机一用绑定
+ * 4. 一键生成密钥
+ * 5. 密钥解析（粘贴密钥查看内容）
+ * 6. 通过 WebSocket 直接写入到应用
  */
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   Card, Checkbox, Button, InputNumber, DatePicker, Input, message,
-  Tag, Divider, Row, Col, Typography, Space, Tooltip, Badge, Tabs, Switch
+  Tag, Divider, Row, Col, Typography, Space, Tooltip, Badge, Tabs, Switch, Alert
 } from 'antd';
 import {
   KeyOutlined, CopyOutlined, SendOutlined, UnlockOutlined,
   CheckCircleOutlined, ClockCircleOutlined, AppstoreOutlined,
-  SafetyCertificateOutlined, ReloadOutlined
+  SafetyCertificateOutlined, ReloadOutlined, LaptopOutlined
 } from '@ant-design/icons';
 import { encStr, decryptStr } from './aesUtil';
 import './License.css';
@@ -137,6 +138,8 @@ const License = () => {
   const [isAll, setIsAll] = useState(false);
   const [days, setDays] = useState(365);
   const [generatedKey, setGeneratedKey] = useState('');
+  const [machineIdInput, setMachineIdInput] = useState('');  // 目标机器码输入
+  const [bindMachine, setBindMachine] = useState(true);       // 是否绑定机器
 
   // ---- 解析密钥 ----
   const [parseInput, setParseInput] = useState('');
@@ -145,6 +148,7 @@ const License = () => {
   // ---- WebSocket ----
   const wsRef = useRef(null);
   const [wsConnected, setWsConnected] = useState(false);
+  const [currentMachineId, setCurrentMachineId] = useState(''); // 当前连接应用的机器码
 
   // 连接 WebSocket
   useEffect(() => {
@@ -153,6 +157,17 @@ const License = () => {
       ws.onopen = () => setWsConnected(true);
       ws.onclose = () => setWsConnected(false);
       ws.onerror = () => setWsConnected(false);
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          // 接收后端发送的机器码
+          if (data.machineId) {
+            setCurrentMachineId(data.machineId);
+          }
+        } catch (e) {
+          // 忽略非 JSON 消息
+        }
+      };
       wsRef.current = ws;
     } catch (e) {
       console.warn('WebSocket 连接失败', e);
@@ -205,6 +220,10 @@ const License = () => {
       message.warning('请设置有效天数');
       return;
     }
+    if (bindMachine && !machineIdInput.trim()) {
+      message.warning('请输入目标机器码，或关闭"绑定机器"开关');
+      return;
+    }
 
     const date = new Date().getTime() + days * 24 * 60 * 60 * 1000;
     let file;
@@ -217,10 +236,27 @@ const License = () => {
     }
 
     const obj = { date, file };
+
+    // 如果开启了机器绑定，将机器码写入密钥
+    if (bindMachine && machineIdInput.trim()) {
+      // 去除横杠和空格，统一为纯大写16位
+      obj.machineId = machineIdInput.trim().replace(/[-\s]/g, '').toUpperCase();
+    }
+
     const key = encStr(JSON.stringify(obj));
     setGeneratedKey(key);
-    message.success('密钥生成成功');
-  }, [isAll, selectedTypes, days]);
+    message.success(bindMachine ? '已生成绑定机器的密钥' : '密钥生成成功（未绑定机器）');
+  }, [isAll, selectedTypes, days, bindMachine, machineIdInput]);
+
+  // 使用当前连接应用的机器码
+  const handleUseCurrentMachineId = useCallback(() => {
+    if (currentMachineId) {
+      setMachineIdInput(currentMachineId);
+      message.success('已填入当前应用的机器码');
+    } else {
+      message.warning('未获取到当前应用的机器码，请确保应用已连接');
+    }
+  }, [currentMachineId]);
 
   // 复制密钥
   const handleCopy = useCallback(() => {
@@ -238,6 +274,22 @@ const License = () => {
       message.success('已复制到剪贴板');
     });
   }, [generatedKey]);
+
+  // 复制机器码
+  const handleCopyMachineId = useCallback(() => {
+    if (!currentMachineId) return;
+    navigator.clipboard.writeText(currentMachineId).then(() => {
+      message.success('机器码已复制到剪贴板');
+    }).catch(() => {
+      const textarea = document.createElement('textarea');
+      textarea.value = currentMachineId;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      message.success('机器码已复制到剪贴板');
+    });
+  }, [currentMachineId]);
 
   // 发送到应用
   const handleSendToApp = useCallback(() => {
@@ -279,12 +331,18 @@ const License = () => {
         fileDisplay = { type: 'single', label: obj.file, list: [obj.file] };
       }
 
+      // 机器码信息
+      const machineInfo = obj.machineId
+        ? { bound: true, id: obj.machineId.match(/.{1,4}/g).join('-') }
+        : { bound: false, id: '未绑定' };
+
       setParseResult({
         raw: obj,
         expireDate: expireDate.toLocaleString(),
         remainDays,
         expired: remainDays < 0,
         fileDisplay,
+        machineInfo,
       });
     } catch (e) {
       message.error('密钥解析失败，请检查密钥是否正确');
@@ -316,6 +374,17 @@ const License = () => {
           <Text style={{ color: 'rgba(255,255,255,0.8)' }}>
             {wsConnected ? '应用已连接' : '应用未连接'}
           </Text>
+          {currentMachineId && (
+            <Tooltip title="点击复制机器码">
+              <Tag
+                color="cyan"
+                style={{ marginLeft: 8, cursor: 'pointer' }}
+                onClick={handleCopyMachineId}
+              >
+                <LaptopOutlined /> {currentMachineId}
+              </Tag>
+            </Tooltip>
+          )}
         </div>
       </div>
 
@@ -425,7 +494,7 @@ const License = () => {
                     </Card>
                   </Col>
 
-                  {/* 右侧：时间设置 + 生成 */}
+                  {/* 右侧：时间设置 + 机器绑定 + 生成 */}
                   <Col xs={24} lg={8}>
                     <Card
                       title={<Space><ClockCircleOutlined /> 授权有效期</Space>}
@@ -463,6 +532,60 @@ const License = () => {
 
                       <Divider />
 
+                      {/* 机器绑定 */}
+                      <div className="machine-bind-section">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                          <Space>
+                            <LaptopOutlined />
+                            <Text strong>机器绑定（一机一用）</Text>
+                          </Space>
+                          <Switch
+                            checkedChildren="绑定"
+                            unCheckedChildren="不绑定"
+                            checked={bindMachine}
+                            onChange={setBindMachine}
+                          />
+                        </div>
+                        {bindMachine && (
+                          <>
+                            <Input
+                              placeholder="请输入目标机器码，如 A1B2-C3D4-E5F6-7890"
+                              value={machineIdInput}
+                              onChange={(e) => setMachineIdInput(e.target.value)}
+                              style={{ marginBottom: 8 }}
+                              addonBefore={<LaptopOutlined />}
+                              allowClear
+                            />
+                            {currentMachineId && (
+                              <Button
+                                size="small"
+                                type="link"
+                                onClick={handleUseCurrentMachineId}
+                                style={{ padding: 0, marginBottom: 8 }}
+                              >
+                                使用当前连接应用的机器码: {currentMachineId}
+                              </Button>
+                            )}
+                            <Alert
+                              message="开启后，密钥只能在指定机器上使用。客户需在应用中查看机器码并提供给您。"
+                              type="info"
+                              showIcon
+                              style={{ fontSize: 12 }}
+                            />
+                          </>
+                        )}
+                        {!bindMachine && (
+                          <Alert
+                            message="未绑定机器的密钥可在任意机器上使用，安全性较低。"
+                            type="warning"
+                            showIcon
+                            style={{ fontSize: 12 }}
+                          />
+                        )}
+                      </div>
+
+                      <Divider />
+
                       {/* 授权摘要 */}
                       <div className="summary-section">
                         <Title level={5}>授权摘要</Title>
@@ -487,6 +610,14 @@ const License = () => {
                         <div className="summary-item">
                           <Text type="secondary">有效天数：</Text>
                           <Text strong>{days} 天</Text>
+                        </div>
+                        <div className="summary-item">
+                          <Text type="secondary">机器绑定：</Text>
+                          <Text strong type={bindMachine ? 'success' : 'warning'}>
+                            {bindMachine
+                              ? (machineIdInput.trim() ? `已绑定 (${machineIdInput.trim()})` : '待输入机器码')
+                              : '未绑定'}
+                          </Text>
                         </div>
                       </div>
 
@@ -603,6 +734,27 @@ const License = () => {
                                   </Tag>
                                 );
                               })}
+                            </div>
+                          )}
+                          <Divider />
+                          <div className="parse-item">
+                            <Text type="secondary">机器绑定：</Text>
+                            {parseResult.machineInfo.bound ? (
+                              <Tag color="cyan">
+                                <LaptopOutlined /> {parseResult.machineInfo.id}
+                              </Tag>
+                            ) : (
+                              <Tag color="orange">未绑定机器</Tag>
+                            )}
+                          </div>
+                          {parseResult.machineInfo.bound && currentMachineId && (
+                            <div className="parse-item" style={{ marginTop: 8 }}>
+                              <Text type="secondary">与当前机器：</Text>
+                              {parseResult.machineInfo.id.replace(/-/g, '') === currentMachineId.replace(/-/g, '') ? (
+                                <Tag color="green">匹配</Tag>
+                              ) : (
+                                <Tag color="red">不匹配</Tag>
+                              )}
                             </div>
                           )}
                         </div>

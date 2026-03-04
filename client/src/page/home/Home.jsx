@@ -398,7 +398,10 @@ class Home extends React.Component {
       licenseExpired: false,
       licenseWarning: false,
       licenseRemainDays: null,
-      licenseMessage: ''
+      licenseMessage: '',
+      // 机器码
+      machineId: '',
+      machineIdMismatch: false
     };
     this.com = React.createRef();
     this.data = React.createRef();
@@ -768,8 +771,25 @@ class Home extends React.Component {
     sitPress = 0;
     let jsonObject = JSON.parse(e.data);
 
+    // 机器码处理
+    if (jsonObject.machineId) {
+      this.setState({ machineId: jsonObject.machineId });
+    }
+    if (jsonObject.machineIdMismatch === true) {
+      console.error('[License] 机器码不匹配!');
+      this.setState({
+        machineIdMismatch: true,
+        licenseExpired: true,
+        licenseWarning: false,
+        licenseRemainDays: 0,
+        licenseMessage: jsonObject.message || `密钥与当前机器不匹配，机器码: ${jsonObject.machineId || this.state.machineId}`
+      });
+    } else if (jsonObject.machineIdMismatch === false) {
+      this.setState({ machineIdMismatch: false });
+    }
+
     // 授权状态处理 - 放在最前面
-    if (jsonObject.licenseExpired === true) {
+    if (jsonObject.licenseExpired === true && jsonObject.machineIdMismatch !== true) {
       console.log('[License] 授权已过期');
       this.setState({
         licenseExpired: true,
@@ -777,7 +797,6 @@ class Home extends React.Component {
         licenseRemainDays: 0,
         licenseMessage: jsonObject.message || '授权已过期，请联系管理员续期'
       });
-      // 过期后不处理其他数据消息（但仍然处理 file/selectFlag 等配置消息）
     } else if (jsonObject.licenseWarning === true) {
       console.log('[License] 授权即将到期，剩余', jsonObject.remainDays, '天');
       this.setState({
@@ -786,7 +805,7 @@ class Home extends React.Component {
         licenseRemainDays: jsonObject.remainDays,
         licenseMessage: jsonObject.message || `授权将在 ${jsonObject.remainDays} 天后到期`
       });
-    } else if (jsonObject.licenseExpired === false) {
+    } else if (jsonObject.licenseExpired === false && jsonObject.machineIdMismatch !== true) {
       // 授权正常，清除警告
       this.setState({
         licenseExpired: false,
@@ -2402,7 +2421,7 @@ class Home extends React.Component {
                 fontWeight: 'bold',
                 marginBottom: 16,
                 color: '#ff4d4f',
-              }}>授权已过期</div>
+              }}>{this.state.machineIdMismatch ? '密钥与机器不匹配' : '授权已过期'}</div>
               <div style={{
                 fontSize: 16,
                 color: 'rgba(255,255,255,0.7)',
@@ -2412,8 +2431,26 @@ class Home extends React.Component {
               }}>
                 {this.state.licenseMessage || '您的软件授权已过期，请联系管理员续期后继续使用'}
                 <br />
-                请在密钥配置页面输入新的授权密钥
+                {this.state.machineIdMismatch
+                  ? '请将下方机器码发送给管理员，重新生成绑定本机的密钥'
+                  : '请在密钥配置页面输入新的授权密钥'}
               </div>
+              {this.state.machineId && (
+                <div style={{
+                  padding: '16px 32px',
+                  background: 'rgba(255,255,255,0.1)',
+                  borderRadius: 8,
+                  fontSize: 18,
+                  color: '#40a9ff',
+                  fontFamily: 'monospace',
+                  letterSpacing: 2,
+                  marginBottom: 16,
+                  userSelect: 'all',
+                  cursor: 'text',
+                }}>
+                  本机机器码: {this.state.machineId}
+                </div>
+              )}
               <div style={{
                 padding: '12px 32px',
                 background: 'rgba(255,255,255,0.1)',

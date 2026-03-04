@@ -70,6 +70,7 @@ const {
   endiSit1024,
 } = require("./openWeb");
 const module2 = require('./aes_ecb')
+const { getMachineId, getMachineIdFormatted, verifyMachineId } = require('./machineId')
 const { isCar, dedupli, totalToN, } = require("./util");
 const { pressSmallBed } = require("./utilMatrix");
 
@@ -252,18 +253,38 @@ console.log("[Path] db=", filePath, "data=", csvPath, "config=", nameTxt);
 
 const defauleFile = 'hand0205'
 let date, sysStartTime, file = defauleFile, selectFlag
+// 启动时输出当前机器码
+const currentMachineId = getMachineId();
+const currentMachineIdFormatted = getMachineIdFormatted();
+console.log('[MachineId] 当前机器码:', currentMachineIdFormatted);
+
+let machineIdMismatch = false  // 标记机器码是否不匹配
+
 if (fs.existsSync(nameTxt)) {
   try {
     const dateRes = fs.readFileSync(nameTxt, 'utf8');
     const parsedData = JSON.parse(module2.decryptStr(dateRes));
     endDate = parseFloat(parsedData.date);
     const rawFile = parsedData.file;
-    selectFlag = rawFile; // ????????????????????? 'all'??????????????
-    // ??? file ????????'all'????????????????????
+    selectFlag = rawFile;
+
+    // 机器码验证：如果密钥中包含 machineId，必须与当前机器匹配
+    if (parsedData.machineId) {
+      if (!verifyMachineId(parsedData.machineId)) {
+        console.error('[License] 机器码不匹配! 密钥机器码:', parsedData.machineId, '当前机器码:', currentMachineId);
+        machineIdMismatch = true;
+        // 机器码不匹配时，将 endDate 设为 0，等同已过期
+        endDate = 0;
+      } else {
+        console.log('[License] 机器码验证通过');
+      }
+    } else {
+      console.log('[License] 旧版密钥，无机器码绑定，跳过机器验证');
+    }
+
     if (rawFile === 'all') {
       file = defauleFile;
     } else if (Array.isArray(rawFile)) {
-      // ???????????????????????????????????
       file = rawFile[0] || defauleFile;
     } else {
       file = rawFile || defauleFile;
@@ -482,15 +503,12 @@ module.exports = {
       console.log("%s is connected", clientName);
 
       server.clients.forEach(function each(client) {
-        /**
-         * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
-         *  */
         const jsonData = JSON.stringify({
           port: serialport,
           file,
-          selectFlag: selectFlag
-          // length: csvSitData.length,
-          // sitData: csvSitData[0], backData: csvBackData[0]
+          selectFlag: selectFlag,
+          machineId: currentMachineIdFormatted,  // 发送当前机器码给前端
+          machineIdMismatch: machineIdMismatch    // 机器码是否不匹配
         });
 
         if (client.readyState === WebSocket.OPEN) {
@@ -559,9 +577,36 @@ module.exports = {
           // endDate = parseFloat(module2.decryptStr(date))
           const parsedLicense = JSON.parse(dateRes);
           const rawFile = parsedLicense.file;
-          selectFlag = rawFile; // 淇濈暀鍘熷鍊硷紙'all'銆佸瓧绗︿覆銆佹垨鏁扮粍锛夊彂閫佺粰鍓嶇
+          selectFlag = rawFile;
 
-          // 瑙ｆ瀽 file 瀛楁锛氭敮鎸?'all'銆佸崟涓瓧绗︿覆銆佹暟缁勪笁绉嶆牸寮?
+          // 机器码验证：密钥写入时也要检查
+          if (parsedLicense.machineId) {
+            if (!verifyMachineId(parsedLicense.machineId)) {
+              console.error('[License] 密钥写入失败: 机器码不匹配! 密钥机器码:', parsedLicense.machineId, '当前机器码:', currentMachineId);
+              machineIdMismatch = true;
+              endDate = 0;  // 机器码不匹配，视为无效
+              // 通知前端机器码不匹配
+              server.clients.forEach(function each(client) {
+                const jsonData = JSON.stringify({
+                  machineIdMismatch: true,
+                  machineId: currentMachineIdFormatted,
+                  licenseExpired: true,
+                  message: `密钥与当前机器不匹配，请使用本机机器码 ${currentMachineIdFormatted} 重新生成密钥`
+                });
+                if (client.readyState === WebSocket.OPEN) {
+                  client.send(jsonData);
+                }
+              });
+              return;  // 不继续处理
+            } else {
+              console.log('[License] 密钥机器码验证通过');
+              machineIdMismatch = false;
+            }
+          } else {
+            console.log('[License] 旧版密钥，无机器码绑定');
+            machineIdMismatch = false;
+          }
+
           if (rawFile === 'all') {
             file = defauleFile;
           } else if (Array.isArray(rawFile)) {
@@ -593,7 +638,9 @@ module.exports = {
               licenseExpired: isExpiredNew,
               licenseWarning: !isExpiredNew && remainDaysNew <= 30,
               remainDays: isExpiredNew ? 0 : remainDaysNew,
-              serverTime: nowDate
+              serverTime: nowDate,
+              machineId: currentMachineIdFormatted,
+              machineIdMismatch: false
             });
             if (client.readyState === WebSocket.OPEN) {
               client.send(jsonData);
