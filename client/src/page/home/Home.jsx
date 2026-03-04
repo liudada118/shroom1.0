@@ -762,6 +762,14 @@ class Home extends React.Component {
   wsData = (e) => {
     sitPress = 0;
     let jsonObject = JSON.parse(e.data);
+
+    // download 弹窗判断 - 放在最前面确保不被其他逻辑阻断
+    if (jsonObject.download != null) {
+      console.log('[download弹窗] 收到download消息:', jsonObject.download);
+      message.info(jsonObject.download);
+      return;
+    }
+
     //处理空数组
     sitDataFlag = false;
 
@@ -1340,13 +1348,6 @@ class Home extends React.Component {
       }
     }
 
-    if (jsonObject.download != null) {
-      Modal.success({
-        title: '提示',
-        content: jsonObject.download,
-        okText: '确定',
-      });
-    }
   };
 
 

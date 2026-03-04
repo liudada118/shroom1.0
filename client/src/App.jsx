@@ -1,6 +1,6 @@
 import "./App.css";
 import { HashRouter, Routes, Route } from "react-router-dom";
-import { App as AntdApp } from "antd";
+import { App as AntdApp, message } from "antd";
 
 // import Local from "./components/local/Car";
 // import Back from "./components/playBack/Car";
@@ -198,6 +198,15 @@ i18next.init({
   },
   lng: localStorage.getItem('language') ? localStorage.getItem('language') : 'zh',
 });
+
+// 配置 message 全局设置，确保在 Electron 中正确显示
+message.config({
+  top: 50,
+  duration: 3,
+  maxCount: 3,
+  getContainer: () => document.body,
+});
+
 function App() {
   return (
     <AntdApp>
