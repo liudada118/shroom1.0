@@ -637,7 +637,7 @@ module.exports = {
             // db = new sqlite3.Database(`${filePath}/${receiveFile}.db`);
             file = receiveFile;
 
-            if (['hand0205', 'footVideo', 'eye', 'daliegu'].includes(receiveFile) || receiveFile.includes('robot')) {
+            if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(receiveFile) || receiveFile.includes('robot')) {
               baudRate = 921600
             } else if (['bed4096', 'bed4096num',].includes(receiveFile)) {
               baudRate = 3000000
@@ -3153,6 +3153,29 @@ parser.on("data", function (data) {
         // if (pointArr1zero.length) {
         //   pointArr = pointArr.map((a, index) => numLessZeroToZero(a - pointArr1zero[index]))
         // }
+      } else if (file == 'smallSample') {
+        // 小型样品 - 按点位标注图重排为100个点的10×10矩阵
+        // 点位映射: 每行10个点，从右到左排列
+        const smallSampleMap = [
+          [39, 38, 37, 36, 35, 34, 33, 32, 31, 30],
+          [49, 48, 47, 46, 45, 44, 43, 42, 41, 40],
+          [99, 98, 97, 96, 95, 94, 93, 92, 91, 90],
+          [89, 88, 87, 86, 85, 84, 83, 82, 81, 80],
+          [79, 78, 77, 76, 75, 74, 73, 72, 71, 70],
+          [69, 68, 67, 66, 65, 64, 63, 62, 61, 60],
+          [59, 58, 57, 56, 55, 54, 53, 52, 51, 50],
+          [9, 8, 7, 6, 5, 4, 3, 2, 1, 0],
+          [19, 18, 17, 16, 15, 14, 13, 12, 11, 10],
+          [29, 28, 27, 26, 25, 24, 23, 22, 21, 20],
+        ]
+        const mappedArr = []
+        for (let i = 0; i < 10; i++) {
+          for (let j = 0; j < 10; j++) {
+            mappedArr.push(pointArr[smallSampleMap[i][j]] || 0)
+          }
+        }
+        pointArr = mappedArr
+        newArr = [...mappedArr]
       } else if (file == 'hand0507' || file == 'hand0205' || file == 'Num3D') {
         // left
         // newArr = handVideoRealPoint_0506_3([...pointArr])

@@ -6,6 +6,7 @@ import CanvasCarWow from "../../components/three/carnewWow";
 import CanvasCarQX from "../../components/three/carQX"
 import CanvasCarSofa from "../../components/three/carSofa"
 import CanvasDaliegu from "../../components/num/daliegu"
+import SmallSample from "../../components/num/smallSample"
 import Eye from '../../components/three/eye'
 import Car10 from "../../components/three/car10";
 import Canvas from "../../components/three/Three";
@@ -3272,6 +3273,19 @@ class Home extends React.Component {
                           changeSelect={this.changeSelect}
                           changeStateData={this.changeStateData}
                         />
+                      </CanvasCom>
+                    ) : this.state.matrixName == "smallSample" ? (
+                      <CanvasCom matrixName={this.state.matrixName}
+                        local={this.state.local}
+                      >
+                        <SmallSample
+                          ref={this.com}
+                          data={this.data}
+                          local={this.state.local}
+                          handleChartsBody={this.handleChartsBody.bind(this)}
+                          handleChartsBody1={this.handleChartsBody1.bind(this)}
+                          changeStateData={this.changeStateData}
+                          changeSelect={this.changeSelect} />
                       </CanvasCom>
                     ) : this.state.matrixName == "daliegu" ? (
                       <CanvasCom matrixName={this.state.matrixName}>
