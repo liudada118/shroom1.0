@@ -4,8 +4,9 @@
  * 基于 electron-updater 实现应用的自动检查、下载和安装更新。
  *
  * 支持的发布渠道:
- * - GitHub Releases（默认）
- * - 自定义服务器（通过 generic provider）
+ * - 自建服务器（generic provider，默认）
+ * - GitHub Releases
+ * - Amazon S3 / 阿里云 OSS 等
  *
  * 工作流程:
  * 1. 应用启动后自动检查更新
@@ -22,9 +23,8 @@
  * {
  *   "build": {
  *     "publish": [{
- *       "provider": "github",
- *       "owner": "liudada118",
- *       "repo": "shroom1.0"
+ *       "provider": "generic",
+ *       "url": "http://sensor.bodyta.com/shroom1"
  *     }]
  *   }
  * }

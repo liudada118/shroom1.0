@@ -100,10 +100,8 @@
     },
     "publish": [
       {
-        "provider": "github",
-        "owner": "liudada118",
-        "repo": "shroom1.0",
-        "releaseType": "release"
+        "provider": "generic",
+        "url": "http://sensor.bodyta.com/shroom1"
       }
     ]
   },
