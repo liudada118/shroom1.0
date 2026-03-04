@@ -72,6 +72,7 @@ const SENSOR_GROUPS = [
       { label: '32×32高速', value: 'fast1024' },
       { label: '1024高速座椅', value: 'fast1024sit' },
       { label: '14×20高速', value: 'daliegu' },
+      { label: '小型样品', value: 'smallSample' },
     ],
   },
   {
