@@ -182,6 +182,14 @@ if (fs.existsSync(nameTxt)) {
     } else {
       file = rawFile || defauleFile;
     }
+    // 根据 file 类型设置波特率
+    if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(file) || file.includes('robot')) {
+      baudRate = 921600
+    } else if (['bed4096', 'bed4096num'].includes(file)) {
+      baudRate = 3000000
+    } else {
+      baudRate = 1000000
+    }
   } catch (err) {
     console.error(err);
   }
@@ -473,6 +481,14 @@ module.exports = {
           }
           endDate = parseFloat(parsedLicense.date);
 
+          // 根据 file 类型设置波特率
+          if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(file) || file.includes('robot')) {
+            baudRate = 921600
+          } else if (['bed4096', 'bed4096num'].includes(file)) {
+            baudRate = 3000000
+          } else {
+            baudRate = 1000000
+          }
 
           server.clients.forEach(function each(client) {
             /**
