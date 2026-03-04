@@ -1,4 +1,4 @@
-const WebSocket = require("ws");
+﻿const WebSocket = require("ws");
 const { app } = require('electron')
 const path = require('path');
 var os = require('os');
@@ -146,60 +146,55 @@ request('http://sensor.bodyta.com:8080/rcv/login/getSystemTime', {
   nowDate = parseInt(body.time)
 });
 
-let filePath = __dirname + "/db";
-let csvPath = __dirname + "/data";
-let nameTxt = __dirname + "/config.txt";
+const runtimeResourceRoot = app.isPackaged ? process.resourcesPath : __dirname;
+let filePath = path.join(runtimeResourceRoot, "db");
+let csvPath = path.join(runtimeResourceRoot, "data");
+let nameTxt = path.join(runtimeResourceRoot, "config.txt");
 
-console.log(__dirname, app.getAppPath(), path.join(__dirname, '../db'), '__dirname')
-
-if (app.isPackaged) {
-  if (os.platform() == 'darwin') {
-    // filePath = '../..' + '/db'
-    // filePath = path.join(app.getAppPath(), 'Resources/db',);
-    filePath = path.join(__dirname, '../db')
-    csvPath = path.join(__dirname, '../data')
-    nameTxt = path.join(__dirname, '../config.txt')
-    // nameTxt = 
-    // csvPath = '../..' + '/data'
-    // nameTxt = '../..' + "/config.txt";
-  } else {
-    filePath = 'resources' + '/db'
-    csvPath = 'resources' + '/data'
-    nameTxt = 'resources' + "/config.txt";
-  }
-
+if (!fs.existsSync(filePath)) {
+  fs.mkdirSync(filePath, { recursive: true });
 }
+
+if (!fs.existsSync(csvPath)) {
+  fs.mkdirSync(csvPath, { recursive: true });
+}
+
+console.log("[Path] resourceRoot=", runtimeResourceRoot);
+console.log("[Path] db=", filePath, "data=", csvPath, "config=", nameTxt);
 
 
 
 const defauleFile = 'hand0205'
-let date, sysStartTime, file = defauleFile, selectFlag = defauleFile
-try {
-  const dateRes = fs.readFileSync(nameTxt, 'utf8').trim();
-  if (dateRes) {
-    const decrypted = module2.decryptStr(dateRes);
-    if (decrypted) {
-      const parsedData = JSON.parse(decrypted);
-      const parsedDate = parseFloat(parsedData?.date);
-      if (!Number.isNaN(parsedDate)) {
-        endDate = parsedDate;
-      }
-
-      const rawFile = parsedData?.file;
-      selectFlag = rawFile || defauleFile;
-
-      // 闁荤喐鐟辩徊楣冩倵?file 闁诲孩绋掗〃鍡涱敊瀹€鍕櫖婵﹩鍘介弳婊堟煙?'all'闂侀潧妫旂粈浣哥暦閻斿摜鈻旀い蹇撳閹界喓绱掑Δ瀣窗閻熸洖妫濇俊瀛樻媴鐟欏嫭顔嶇紓鍌欑鐎氼亞绮担铏圭煋鐎广儱妫涙竟鎰偓?
-      if (rawFile === 'all') {
-        file = defauleFile;
-      } else if (Array.isArray(rawFile)) {
-        file = rawFile[0] || defauleFile;
-      } else {
-        file = rawFile || defauleFile;
-      }
+let date, sysStartTime, file = defauleFile, selectFlag
+if (fs.existsSync(nameTxt)) {
+  try {
+    const dateRes = fs.readFileSync(nameTxt, 'utf8');
+    const parsedData = JSON.parse(module2.decryptStr(dateRes));
+    endDate = parseFloat(parsedData.date);
+    const rawFile = parsedData.file;
+    selectFlag = rawFile; // ????????????????????? 'all'??????????????
+    // ??? file ????????'all'????????????????????
+    if (rawFile === 'all') {
+      file = defauleFile;
+    } else if (Array.isArray(rawFile)) {
+      // ???????????????????????????????????
+      file = rawFile[0] || defauleFile;
+    } else {
+      file = rawFile || defauleFile;
     }
+    // 根据 file 类型设置波特率
+    if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(file) || file.includes('robot')) {
+      baudRate = 921600
+    } else if (['bed4096', 'bed4096num'].includes(file)) {
+      baudRate = 3000000
+    } else {
+      baudRate = 1000000
+    }
+  } catch (err) {
+    console.error(err);
   }
-} catch (err) {
-  console.warn(`Invalid ${nameTxt}, using defaults.`);
+} else {
+  console.log("[Config] config.txt not found, skip loading license at startup.");
 }
 
 // let db = new sqlite3.Database(`${filePath}/foot.db`);
@@ -289,7 +284,7 @@ module.exports = {
         const getMessage = JSON.parse(message);
 
         /**
-         * 闁诲繐绻愬Λ妤呮偪閸曨垰绫嶉柛顐ｆ礃濞村棝鏌ら崘鍙夋拱闁哄棛鍠栭獮鎴︻敋閳ь剟鍩€椤掍礁鍝哄ù婊堢畺楠炲秹骞樺畷鍥╋紱
+         * 灏嗗疄鏃堕潬鑳屾暟鎹€氶亾鎵撳紑
          */
         if (nowDate < endDate) {
           if (JSON.parse(message).backPort != null) {
@@ -305,7 +300,7 @@ module.exports = {
                   console.log(err, "err");
                 }
               );
-              //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
+              //绠￠亾娣诲姞瑙ｆ瀽鍣?
               port2.pipe(parser2);
             } catch (e) {
               console.log(e, "e");
@@ -319,7 +314,7 @@ module.exports = {
             const jsonData = JSON.stringify({
               backData: new Array(backTotal).fill(0),
             });
-            server1.clients.forEach(function each(client) {
+            server.clients.forEach(function each(client) {
               if (client.readyState === WebSocket.OPEN) {
                 client.send(jsonData);
               }
@@ -331,7 +326,7 @@ module.exports = {
               backData: new Array(backTotal).fill(0),
 
             });
-            server1.clients.forEach(function each(client) {
+            server.clients.forEach(function each(client) {
               if (client.readyState === WebSocket.OPEN) {
                 client.send(jsonData);
               }
@@ -348,7 +343,7 @@ module.exports = {
                     console.log(err, "err");
                   }
                 );
-                //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
+                //绠￠亾娣诲姞瑙ｆ瀽鍣?
                 // port2.pipe(parser2);
               } catch (e) {
                 console.log(e, "e");
@@ -357,7 +352,7 @@ module.exports = {
           }
 
           /**
-           * 闁诲繐绻愬Λ婵嗩焽椤掑嫭鍤勯悘鐐靛亾濞堝爼鏌熺拠鈥虫珝闁逞屽墯瀹€鍛婄妤ｅ啫绀傞柟鎯板Г閿?
+           * 灏嗛潬鑳屾暟鎹€氶亾鍏抽棴
            */
           if (JSON.parse(message).backClose === true) {
             backClose = true
@@ -402,7 +397,7 @@ module.exports = {
 
       server.clients.forEach(function each(client) {
         /**
-         * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
+         * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
          *  */
         const jsonData = JSON.stringify({
           port: serialport,
@@ -420,7 +415,7 @@ module.exports = {
       if (endDate) {
         server.clients.forEach(function each(client) {
           /**
-           * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
+           * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
            *  */
           const jsonData = JSON.stringify({
             date: endDate,
@@ -474,9 +469,9 @@ module.exports = {
           // endDate = parseFloat(module2.decryptStr(date))
           const parsedLicense = JSON.parse(dateRes);
           const rawFile = parsedLicense.file;
-          selectFlag = rawFile; // 婵烇絽娲︾换鍕汲閳ь剟鏌涘Ο鐓庢瀻妞ゎ偅鍔欏畷鎰兜妞嬪海顦?all'闂侀潧妫旂粈渚€鎮鸿缁參鏁傞懗顖ｆ船闂侀潧妫旈悞锕傚垂閵娾晛鏋侀柟娈垮枤閻鏌ㄥ☉姗嗘Ц鐟滄澘鍊块弻鍛媴閾忕鍩楅梺鍛婃尭缁夊爼顢?
+          selectFlag = rawFile; // 淇濈暀鍘熷鍊硷紙'all'銆佸瓧绗︿覆銆佹垨鏁扮粍锛夊彂閫佺粰鍓嶇
 
-          // 闁荤喐鐟辩徊楣冩倵?file 闁诲孩绋掗〃鍡涱敊瀹€鍕櫖婵﹩鍘介弳婊堟煙?'all'闂侀潧妫旂粈浣哥暦閻斿摜鈻旀い蹇撳閹界喓绱掑Δ瀣窗閻熸洖妫濇俊瀛樻媴鐟欏嫭顔嶇紓鍌欑鐎氼亞绮担铏圭煋鐎广儱妫涙竟鎰偓?
+          // 瑙ｆ瀽 file 瀛楁锛氭敮鎸?'all'銆佸崟涓瓧绗︿覆銆佹暟缁勪笁绉嶆牸寮?
           if (rawFile === 'all') {
             file = defauleFile;
           } else if (Array.isArray(rawFile)) {
@@ -486,10 +481,18 @@ module.exports = {
           }
           endDate = parseFloat(parsedLicense.date);
 
+          // 根据 file 类型设置波特率
+          if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(file) || file.includes('robot')) {
+            baudRate = 921600
+          } else if (['bed4096', 'bed4096num'].includes(file)) {
+            baudRate = 3000000
+          } else {
+            baudRate = 1000000
+          }
 
           server.clients.forEach(function each(client) {
             /**
-             * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
+             * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
              *  */
             const jsonData = JSON.stringify({
               date: date,
@@ -510,7 +513,7 @@ module.exports = {
         // if(new Date().getTime() >= parseInt(sysStartTime) + parseInt(module2.decryptStr(date)) * 24 * 60 * 60 * 1000){
         //   server.clients.forEach(function each(client) {
         //     /**
-        //      * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
+        //      * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
         //      *  */
         //     const jsonData = JSON.stringify({
         //       timeExpires: true,
@@ -554,7 +557,7 @@ module.exports = {
                 const jsonData = JSON.stringify({
                   backData: newArr,
                 });
-                server1.clients.forEach(function each(client) {
+                server.clients.forEach(function each(client) {
                   if (client.readyState === WebSocket.OPEN) {
                     client.send(jsonData);
                   }
@@ -577,7 +580,7 @@ module.exports = {
             }
           }
 
-          // 缂傚倸鍠氶崳锝吤?
+          // 缃浂
           if (getMessage.resetZero === true) {
             if (pointArr) pointArr1zero = [...pointArr1zeroData]
             if (pointArr2) pointArr2zero = [...pointArr2zeroData]
@@ -622,7 +625,7 @@ module.exports = {
                 backData: new Array(backTotal).fill(0),
               });
 
-              server1.clients.forEach(function each(client) {
+              server.clients.forEach(function each(client) {
                 if (client.readyState === WebSocket.OPEN) {
                   client.send(jsonData);
                 }
@@ -635,7 +638,7 @@ module.exports = {
                 headData: new Array(100).fill(0),
               });
 
-              server2.clients.forEach(function each(client) {
+              server.clients.forEach(function each(client) {
                 if (client.readyState === WebSocket.OPEN) {
                   client.send(jsonData);
                 }
@@ -645,7 +648,7 @@ module.exports = {
             // db = new sqlite3.Database(`${filePath}/${receiveFile}.db`);
             file = receiveFile;
 
-            if (['hand0205', 'footVideo', 'eye', 'daliegu'].includes(receiveFile) || receiveFile.includes('robot')) {
+            if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(receiveFile) || receiveFile.includes('robot')) {
               baudRate = 921600
             } else if (['bed4096', 'bed4096num',].includes(receiveFile)) {
               baudRate = 3000000
@@ -664,7 +667,7 @@ module.exports = {
             baudRate = Number(JSON.parse(message).baudRate)
           }
           /**
-           * 闁诲繐绻愬Λ娆忥耿娴兼潙鎹跺Λ棰佽兌缁犱粙鎮楀☉娅虫垿寮抽悢鐓庣妞ゆ洍鍋撻柍褜鍓氬畝鍛婄妤ｅ啫绠ラ柟鎯х－绾?
+           * 灏嗘湰鍦颁繚瀛樻暟鎹€氶亾鎵撳紑
            */
           if (JSON.parse(message).getTime != null) {
             getTime = JSON.parse(message).getTime;
@@ -716,7 +719,7 @@ module.exports = {
 
                       server.clients.forEach(function each(client) {
                         /**
-                         * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
+                         * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
                          *  */
                         const jsonData = JSON.stringify({
                           length: length,
@@ -747,7 +750,7 @@ module.exports = {
 
                       //     server.clients.forEach(function each(client) {
                       //       /**
-                      //        * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
+                      //        * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
                       //        *  */
 
                       //       const jsonData = JSON.stringify({
@@ -768,7 +771,7 @@ module.exports = {
                       // } else {
                       //   server.clients.forEach(function each(client) {
                       //     /**
-                      //      * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
+                      //      * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
                       //      *  */
 
                       //     const jsonData = JSON.stringify({
@@ -822,9 +825,9 @@ module.exports = {
 
 
 
-                  //   // server1.clients.forEach(function each(client) {
+                  //   // server.clients.forEach(function each(client) {
                   //   //   /**
-                  //   //    * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
+                  //   //    * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
                   //   //    *  */
 
                   //   //   const jsonData = JSON.stringify({
@@ -874,9 +877,9 @@ module.exports = {
                               area = [];
 
 
-                            server2.clients.forEach(function each(client) {
+                            server.clients.forEach(function each(client) {
                               /**
-                               * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
+                               * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
                                *  */
                               const jsonData = JSON.stringify({
                                 // length: length,
@@ -934,7 +937,7 @@ module.exports = {
 
                       server.clients.forEach(function each(client) {
                         /**
-                         * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
+                         * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
                          *  */
                         const jsonData = JSON.stringify({
                           length: length,
@@ -965,7 +968,7 @@ module.exports = {
 
                       //     server.clients.forEach(function each(client) {
                       //       /**
-                      //        * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
+                      //        * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
                       //        *  */
 
                       //       const jsonData = JSON.stringify({
@@ -986,7 +989,7 @@ module.exports = {
                       // } else {
                       //   server.clients.forEach(function each(client) {
                       //     /**
-                      //      * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
+                      //      * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
                       //      *  */
 
                       //     const jsonData = JSON.stringify({
@@ -1045,7 +1048,7 @@ module.exports = {
 
                   server.clients.forEach(function each(client) {
                     /**
-                     * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
+                     * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
                      *  */
                     const jsonData = JSON.stringify({
                       length: length,
@@ -1076,7 +1079,7 @@ module.exports = {
 
                   //     server.clients.forEach(function each(client) {
                   //       /**
-                  //        * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
+                  //        * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
                   //        *  */
 
                   //       const jsonData = JSON.stringify({
@@ -1097,7 +1100,7 @@ module.exports = {
                   // } else {
                   //   server.clients.forEach(function each(client) {
                   //     /**
-                  //      * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
+                  //      * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
                   //      *  */
 
                   //     const jsonData = JSON.stringify({
@@ -1134,7 +1137,7 @@ module.exports = {
           }
 
           /**
-           * 闁诲繐绻愬Λ妤呮偪閸曨垰绫嶉悹鐑樻そ閻涙挻淇婇悙鍙夊櫤闁哄棛鍠栭獮鎴︻敋閳ь剟鍩€椤掍礁鍝哄ù婊堢畺楠炲秹骞樺畷鍥╋紱
+           * 灏嗗疄鏃跺骇妞呮暟鎹€氶亾鎵撳紑
            */
           if (JSON.parse(message).sitPort != null) {
             sitClose = false
@@ -1166,7 +1169,7 @@ module.exports = {
                     console.log(err, "err");
                   }
                 );
-                //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
+                //绠￠亾娣诲姞瑙ｆ瀽鍣?
                 // let splitBuffer = Buffer.from([0xaa, 0x55, 0x03, 0x99]);
                 // parser = new Delimiter({ delimiter: splitBuffer });
                 port1.pipe(parser);
@@ -1186,7 +1189,7 @@ module.exports = {
                     console.log(err, "err");
                   }
                 );
-                //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
+                //绠￠亾娣诲姞瑙ｆ瀽鍣?
                 port1.pipe(parser3);
               } catch (e) {
                 console.log(e, "e");
@@ -1224,7 +1227,7 @@ module.exports = {
                     console.log(err, baudRate, JSON.parse(message).headPort, "headerr");
                   }
                 );
-                //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
+                //绠￠亾娣诲姞瑙ｆ瀽鍣?
                 // let splitBuffer = Buffer.from([0xaa, 0x55, 0x03, 0x99]);
                 // parser = new Delimiter({ delimiter: splitBuffer });
                 portHead.pipe(parser4);
@@ -1244,7 +1247,7 @@ module.exports = {
                     console.log(err, "headerr");
                   }
                 );
-                //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
+                //绠￠亾娣诲姞瑙ｆ瀽鍣?
                 portHead.pipe(parser4);
               } catch (e) {
                 console.log(e, "e");
@@ -1253,7 +1256,7 @@ module.exports = {
           }
 
           /**
-           * 闁诲繐绻愬Λ妤呮偪閸曨垰绫嶉柛顐ｆ礃濞村棝鏌ら崘鍙夋拱闁哄棛鍠栭獮鎴︻敋閳ь剟鍩€椤掍礁鍝哄ù婊堢畺楠炲秹骞樺畷鍥╋紱
+           * 灏嗗疄鏃堕潬鑳屾暟鎹€氶亾鎵撳紑
            */
           if (JSON.parse(message).backPort != null) {
             backClose = false
@@ -1283,7 +1286,7 @@ module.exports = {
                   console.log(err, "err");
                 }
               );
-              //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
+              //绠￠亾娣诲姞瑙ｆ瀽鍣?
 
               port2.pipe(parser2);
             } catch (e) {
@@ -1292,7 +1295,7 @@ module.exports = {
           }
 
           /**
-           * 闁诲繐绻愬Λ妤侇殽閸パ屾富闁告侗鍠楀▓鍫曟煙鐠団€虫珝闁逞屽墯瀹€鍛婄妤ｅ啫绀傞柟鎯板Г閿?
+           * 灏嗗骇妞呮暟鎹€氶亾鍏抽棴
            */
           if (JSON.parse(message).sitClose === true) {
             sitClose = true
@@ -1302,7 +1305,7 @@ module.exports = {
           }
 
           /**
-           * 闁诲繐绻愬Λ婵嗩焽椤掑嫭鍤勯悘鐐靛亾濞堝爼鏌熺拠鈥虫珝闁逞屽墯瀹€鍛婄妤ｅ啫绀傞柟鎯板Г閿?
+           * 灏嗛潬鑳屾暟鎹€氶亾鍏抽棴
            */
           if (JSON.parse(message).backClose === true) {
             backClose = true
@@ -1319,12 +1322,12 @@ module.exports = {
             }
           }
           /**
-           * 闁诲繐绻愬Λ婊堫敋娴兼潙鐭楅柡宥冨妽閹烽亶鏌涢敂鎯ь暭闁哄棛鍠栭獮鎴︻敋閳ь剟鍩€椤掍礁鍝哄ù婊堢畺楠炲秹骞樺畷鍥╋紱
+           * 灏嗚鍙栨湰鍦版暟鎹€氶亾鎵撳紑
            */
           if (JSON.parse(message).local === true) {
             localFlag = true;
 
-            // 婵炵鍋愭繛鈧柍褜鍓氱敮妤€顪冮崒鐐粹拻閻庢稒锚閻撳牏绱撴担鍦噧濠⒀呭Х缁?
+            // 浼犻€掓椂闂存埑缁欏墠绔?
             const selectQuery =
               "select DISTINCT date from matrix ORDER BY timestamp DESC LIMIT ?,?";
             const params = [0, 500];
@@ -1347,7 +1350,7 @@ module.exports = {
                       timeArr: timeArr,
                       backData: new Array(backTotal).fill(0),
                     });
-                    server1.clients.forEach(function each(client) {
+                    server.clients.forEach(function each(client) {
                       if (client.readyState === WebSocket.OPEN) {
                         client.send(jsonData1);
                       }
@@ -1358,7 +1361,7 @@ module.exports = {
                       timeArr: rows,
                       backData: new Array(100).fill(0),
                     });
-                    server1.clients.forEach(function each(client) {
+                    server.clients.forEach(function each(client) {
                       if (client.readyState === WebSocket.OPEN) {
                         client.send(jsonData1);
                       }
@@ -1404,7 +1407,7 @@ module.exports = {
                       const jsonData1 = JSON.stringify({
                         backData: new Array(backTotal).fill(0),
                       });
-                      server1.clients.forEach(function each(client) {
+                      server.clients.forEach(function each(client) {
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData1);
                         }
@@ -1415,7 +1418,7 @@ module.exports = {
                         const jsonData1 = JSON.stringify({
                           headData: new Array(100).fill(0),
                         });
-                        server2.clients.forEach(function each(client) {
+                        server.clients.forEach(function each(client) {
                           if (client.readyState === WebSocket.OPEN) {
                             client.send(jsonData1);
                           }
@@ -1465,7 +1468,7 @@ module.exports = {
                     const jsonData1 = JSON.stringify({
                       backData: new Array(backTotal).fill(0),
                     });
-                    server1.clients.forEach(function each(client) {
+                    server.clients.forEach(function each(client) {
                       if (client.readyState === WebSocket.OPEN) {
                         client.send(jsonData1);
                       }
@@ -1497,7 +1500,7 @@ module.exports = {
                 backData: new Array(sitTotal).fill(0),
                 // backData: new Array(1024).fill(0)
               });
-              server1.clients.forEach(function each(client) {
+              server.clients.forEach(function each(client) {
                 if (client.readyState === WebSocket.OPEN) {
                   client.send(jsonData1);
                 }
@@ -1508,7 +1511,7 @@ module.exports = {
                   headData: new Array(sitTotal).fill(0),
                   // backData: new Array(1024).fill(0)
                 });
-                server2.clients.forEach(function each(client) {
+                server.clients.forEach(function each(client) {
                   if (client.readyState === WebSocket.OPEN) {
                     client.send(jsonData2);
                   }
@@ -1534,7 +1537,7 @@ module.exports = {
             //         console.log(err, "err");
             //       }
             //     );
-            //     //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
+            //     //绠￠亾娣诲姞瑙ｆ瀽鍣?
             //     // port1.pipe(parser);
             //   } catch (e) {
             //     console.log(e, "e");
@@ -1553,7 +1556,7 @@ module.exports = {
             //         console.log(err, "err");
             //       }
             //     );
-            //     //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
+            //     //绠￠亾娣诲姞瑙ｆ瀽鍣?
             //     // port2.pipe(parser2);
             //   } catch (e) {
             //     console.log(e, "e");
@@ -1607,7 +1610,7 @@ module.exports = {
                     sitFlag: localData.length > 0,
                   });
 
-                  server2.clients.forEach(function each(client) {
+                  server.clients.forEach(function each(client) {
                     if (client.readyState === WebSocket.OPEN) {
                       client.send(jsonData2);
                     }
@@ -1636,7 +1639,7 @@ module.exports = {
                 }
               });
               if (isCar(file)) {
-                server1.clients.forEach(function each(client) {
+                server.clients.forEach(function each(client) {
                   if (client.readyState === WebSocket.OPEN) {
                     client.send(jsonData1);
                   }
@@ -1680,7 +1683,7 @@ module.exports = {
                   backData: localDataBack[nowIndex]?.data,
                   index: nowIndex,
                 });
-                server1.clients.forEach(function each(client) {
+                server.clients.forEach(function each(client) {
                   if (client.readyState === WebSocket.OPEN) {
                     client.send(jsonData1);
                   }
@@ -1694,7 +1697,7 @@ module.exports = {
                     sitFlag: localData.length > 0,
                   });
 
-                  server2.clients.forEach(function each(client) {
+                  server.clients.forEach(function each(client) {
                     if (client.readyState === WebSocket.OPEN) {
                       client.send(jsonData2);
                     }
@@ -1768,7 +1771,7 @@ module.exports = {
 
                   const jsonData1 = JSON.stringify(backObj);
 
-                  server1.clients.forEach(function each(client) {
+                  server.clients.forEach(function each(client) {
                     if (client.readyState === WebSocket.OPEN) {
                       client.send(jsonData1);
                     }
@@ -1782,7 +1785,7 @@ module.exports = {
                       sitFlag: localData.length > 0,
                     });
 
-                    server2.clients.forEach(function each(client) {
+                    server.clients.forEach(function each(client) {
                       if (client.readyState === WebSocket.OPEN) {
                         client.send(jsonData2);
                       }
@@ -1808,7 +1811,7 @@ module.exports = {
             nowIndex = getMessage.index;
           }
 
-          // 婵炲瓨鍤庨崐鏍х暦閸欏鈻旈柟缁樺笒缂?
+          // 浜ゆ崲涓插彛
           if (getMessage.exchange != null) {
             [com, com1] = [com1, com];
             // port1.close();
@@ -1834,7 +1837,7 @@ module.exports = {
                       console.log(err, "err");
                     }
                   );
-                  //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
+                  //绠￠亾娣诲姞瑙ｆ瀽鍣?
                   port1.pipe(parser);
                 } catch (e) {
                   console.log(e, "e");
@@ -1854,7 +1857,7 @@ module.exports = {
                       console.log(err, "err");
                     }
                   );
-                  //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
+                  //绠￠亾娣诲姞瑙ｆ瀽鍣?
                   port2.pipe(parser2);
                 } catch (e) {
                   console.log(e, "e");
@@ -1902,9 +1905,9 @@ module.exports = {
               }
 
 
-              server1.clients.forEach(function each(client) {
+              server.clients.forEach(function each(client) {
                 /**
-                 * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
+                 * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
                  *  */
 
                 const jsonData = JSON.stringify({
@@ -1960,7 +1963,7 @@ module.exports = {
 
             server.clients.forEach(function each(client) {
               /**
-               * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
+               * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
                *  */
               const jsonData = JSON.stringify({
                 length: length,
@@ -1977,12 +1980,12 @@ module.exports = {
             });
           }
 
-          // 婵炴垶鎸搁鍫澝归崲绲獀
+          // 涓嬭浇csv
           if (getMessage.download) {
             smoothValue = 0;
             const csvWriteData = [];
             const csvWriteBackData = [];
-            //闂佸搫琚崕鎾敋濡ゅ啯瀚氭い鎾跺仜缂?
+            //鏌ヨ璇彞
             // const selectQuery = 'select * from matrix WHERE timestamp>? and timestamp<? and date=?';
             const selectQuery = "select * from matrix WHERE date=?";
             // const params = [1287154796066,1887154796066,'2023-06-19-14:05'];
@@ -1994,7 +1997,7 @@ module.exports = {
                 if (err) {
                   console.error(err);
                 } else {
-                  //闂佺娉涢敃銉ヮ渻閸岀偞鈷?闂佸憡锚椤戝懏鎱ㄨ箛娑欘棃闁靛繆鎳?濡ょ姷鍋涢崯鍨焽鎼淬劌鍌ㄩ悗锝庝簻椤棃鏌℃担鍝勵暭鐎规挷鍨sh闁哄鏅滈惌鐎瀡Writer闁哄鏅滅粙鏍€侀幋婢囧炊閵娿垹浜?
+                  //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
                   for (var i = historyArr[0]; i < historyArr[1]; i++) {
                     // const press = JSON.parse(rows[i][`data`]).reduce(
                     //   (a, b) => a + b,
@@ -2047,7 +2050,7 @@ module.exports = {
                     ).length;
                     const newData = {
                       time: timeStampToDate(rows[i][`timestamp`]),
-                      pressureArea: area, //闂佸憡顭囬崰搴綖閹扮増鍎楅柍鍝勬噺閳?
+                      pressureArea: area, //鍘熷鐭╅樀
                       pressure: total / length,
                       realData: realArr,
                       pressValue: wsPointData.reduce((a, b) => a + b, 0),
@@ -2056,11 +2059,11 @@ module.exports = {
                     };
                     csvWriteData.push(newData);
                   }
-                  // 闁诲繐绻愬Λ娆撴儑瑜版帒绠戦柤濮愬€栭悾閬嶆煕濡警鍎忓┑顔肩箻瀵偊鎮ч崼婵堛偊闂佸憡鍔栭悷銉╁矗?CSV 闂佸搫鍊稿ú锝呪枎?
+                  // 灏嗘眹鎬荤殑鍘嬪姏鏁版嵁鍐欏叆 CSV 鏂囦欢
                   // const timeStamp = Date.now()
                   const str = nowGetTime.replace(/[/:]/g, "-");
                   const csvWriter = createCsvWriter({
-                    path: `${csvPath}/${file}${str}.csv`, // 闂佸湱顭堝ú銈夋偩閻愵剚缍囬柟鎯у暱濮ｅ鏌￠崒姘煑婵炲棎鍨介幆鍐礋椤斿墽鍞撮悗鍨緲鐎氼剟骞忔导鏉戣Е鐎广儱娉?
+                    path: `${csvPath}/${file}${str}.csv`, // 鎸囧畾杈撳嚭鏂囦欢鐨勮矾寰勫拰鍚嶇О
                     header: [
                       { id: "time", title: "time" },
                       { id: "pressureArea", title: "area" },
@@ -2075,11 +2078,11 @@ module.exports = {
                   csvWriter
                     .writeRecords(csvWriteData)
                     .then(() => {
-                      console.log("csv export success");
+                      console.log("export csv success");
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
-                          download: "csv export success",
+                          download: "export csv success",
                         });
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData);
@@ -2087,11 +2090,11 @@ module.exports = {
                       });
                     })
                     .catch((err) => {
-                      console.error("csv export failed", err);
+                      console.error("export csv failed", err);
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
-                          download: "闁诲海鏁搁崢褔宕甸悹鐜竩婵犮垺鍎肩划鍓ф喆?",
+                          download: "export csv failed",
                         });
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData);
@@ -2105,7 +2108,7 @@ module.exports = {
                 if (err) {
                   console.error(err);
                 } else {
-                  //闂佺娉涢敃銉ヮ渻閸岀偞鈷?闂佸憡锚椤戝懏鎱ㄨ箛娑欘棃闁靛繆鎳?濡ょ姷鍋涢崯鍨焽鎼淬劌鍌ㄩ悗锝庝簻椤棃鏌℃担鍝勵暭鐎规挷鍨sh闁哄鏅滈惌鐎瀡Writer闁哄鏅滅粙鏍€侀幋婢囧炊閵娿垹浜?
+                  //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
 
                   if (!rows.length) return;
                   for (var i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
@@ -2133,7 +2136,7 @@ module.exports = {
                       time: timeStampToDate(rows[i][`timestamp`]),
                       pressureArea: sitAreaSelect.length
                         ? sitAreaSelect[i]
-                        : area * 2.1, //闂佸憡顭囬崰搴綖閹扮増鍎楅柍鍝勬噺閳?
+                        : area * 2.1, //鍘熷鐭╅樀
                       pressure: sitPressSelect.length
                         ? sitPressSelect[i]
                         : totalToN(press),
@@ -2145,7 +2148,7 @@ module.exports = {
                     };
                     csvWriteData.push(newData);
                   }
-                  // 闁诲繐绻愬Λ娆撴儑瑜版帒绠戦柤濮愬€栭悾閬嶆煕濡警鍎忓┑顔肩箻瀵偊鎮ч崼婵堛偊闂佸憡鍔栭悷銉╁矗?CSV 闂佸搫鍊稿ú锝呪枎?
+                  // 灏嗘眹鎬荤殑鍘嬪姏鏁版嵁鍐欏叆 CSV 鏂囦欢
                   // const timeStamp = Date.now()
 
                   // const str = nowGetTime.replace(/[/:]/g, "-");
@@ -2157,14 +2160,14 @@ module.exports = {
                   }
 
                   const csvWriter = createCsvWriter({
-                    path: `${csvPath}/${file}${str}.csv`, // 闂佸湱顭堝ú銈夋偩閻愵剚缍囬柟鎯у暱濮ｅ鏌￠崒姘煑婵炲棎鍨介幆鍐礋椤斿墽鍞撮悗鍨緲鐎氼剟骞忔导鏉戣Е鐎广儱娉?
+                    path: `${csvPath}/${file}${str}.csv`, // 鎸囧畾杈撳嚭鏂囦欢鐨勮矾寰勫拰鍚嶇О
                     header: [
                       { id: "index", title: "" },
                       { id: "time", title: "time" },
                       { id: "pressureArea", title: "area" },
                       { id: "pressure", title: "press" },
                       { id: "realInitData", title: "realInitData" },
-                      { id: "pressuremmgH", title: "闂佸憡锚椤戝懎顔忔潏銊ョ窞鐟滃秹鎯?mmgH)" },
+                      { id: "pressuremmgH", title: "鍘嬪己澶у皬(mmgH)" },
                       { id: "realData", title: "data" },
                       { id: "dataToInterpGauss", title: "algorData" },
                     ],
@@ -2173,11 +2176,11 @@ module.exports = {
                   csvWriter
                     .writeRecords(csvWriteData)
                     .then(() => {
-                      console.log("csv export success");
+                      console.log("export csv success");
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
-                          download: "csv export success",
+                          download: "export csv success",
                         });
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData);
@@ -2185,11 +2188,11 @@ module.exports = {
                       });
                     })
                     .catch((err) => {
-                      console.error("csv export failed", err);
+                      console.error("export csv failed", err);
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
-                          download: "闁诲海鏁搁崢褔宕甸悹鐜竩婵犮垺鍎肩划鍓ф喆?",
+                          download: "export csv failed",
                         });
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData);
@@ -2203,7 +2206,7 @@ module.exports = {
                 if (err) {
                   console.error(err);
                 } else {
-                  //闂佺娉涢敃銉ヮ渻閸岀偞鈷?闂佸憡锚椤戝懏鎱ㄨ箛娑欘棃闁靛繆鎳?濡ょ姷鍋涢崯鍨焽鎼淬劌鍌ㄩ悗锝庝簻椤棃鏌℃担鍝勵暭鐎规挷鍨sh闁哄鏅滈惌鐎瀡Writer闁哄鏅滅粙鏍€侀幋婢囧炊閵娿垹浜?
+                  //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
                   const label = getMessage.download.split('_')[1]
                   if (!rows.length) return;
                   for (var i = 0, j = 0; i < rows.length; i++, j++) {
@@ -2213,7 +2216,7 @@ module.exports = {
                     };
                     csvWriteData.push(newData);
                   }
-                  // 闁诲繐绻愬Λ娆撴儑瑜版帒绠戦柤濮愬€栭悾閬嶆煕濡警鍎忓┑顔肩箻瀵偊鎮ч崼婵堛偊闂佸憡鍔栭悷銉╁矗?CSV 闂佸搫鍊稿ú锝呪枎?
+                  // 灏嗘眹鎬荤殑鍘嬪姏鏁版嵁鍐欏叆 CSV 鏂囦欢
                   // const timeStamp = Date.now()
 
                   // const str = nowGetTime.replace(/[/:]/g, "-");
@@ -2226,7 +2229,7 @@ module.exports = {
                   }
 
                   const csvWriter = createCsvWriter({
-                    path: `${csvPath}/${file}${str}.csv`, // 闂佸湱顭堝ú銈夋偩閻愵剚缍囬柟鎯у暱濮ｅ鏌￠崒姘煑婵炲棎鍨介幆鍐礋椤斿墽鍞撮悗鍨緲鐎氼剟骞忔导鏉戣Е鐎广儱娉?
+                    path: `${csvPath}/${file}${str}.csv`, // 鎸囧畾杈撳嚭鏂囦欢鐨勮矾寰勫拰鍚嶇О
                     header: [
                       { id: "realData", title: "data" },
                       { id: "label", title: "label" },
@@ -2236,11 +2239,11 @@ module.exports = {
                   csvWriter
                     .writeRecords(csvWriteData)
                     .then(() => {
-                      console.log("csv export success");
+                      console.log("export csv success");
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
-                          download: "csv export success",
+                          download: "export csv success",
                         });
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData);
@@ -2248,11 +2251,11 @@ module.exports = {
                       });
                     })
                     .catch((err) => {
-                      console.error("csv export failed", err);
+                      console.error("export csv failed", err);
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
-                          download: "闁诲海鏁搁崢褔宕甸悹鐜竩婵犮垺鍎肩划鍓ф喆?",
+                          download: "export csv failed",
                         });
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData);
@@ -2266,7 +2269,7 @@ module.exports = {
                 if (err) {
                   console.error(err);
                 } else {
-                  //闂佺娉涢敃銉ヮ渻閸岀偞鈷?闂佸憡锚椤戝懏鎱ㄨ箛娑欘棃闁靛繆鎳?濡ょ姷鍋涢崯鍨焽鎼淬劌鍌ㄩ悗锝庝簻椤棃鏌℃担鍝勵暭鐎规挷鍨sh闁哄鏅滈惌鐎瀡Writer闁哄鏅滅粙鏍€侀幋婢囧炊閵娿垹浜?
+                  //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
                   const label = getMessage.download.split('_')[1]
                   if (!rows.length) return;
                   for (var i = 0, j = 0; i < rows.length; i++, j++) {
@@ -2276,7 +2279,7 @@ module.exports = {
                     };
                     csvWriteData.push(newData);
                   }
-                  // 闁诲繐绻愬Λ娆撴儑瑜版帒绠戦柤濮愬€栭悾閬嶆煕濡警鍎忓┑顔肩箻瀵偊鎮ч崼婵堛偊闂佸憡鍔栭悷銉╁矗?CSV 闂佸搫鍊稿ú锝呪枎?
+                  // 灏嗘眹鎬荤殑鍘嬪姏鏁版嵁鍐欏叆 CSV 鏂囦欢
                   // const timeStamp = Date.now()
 
                   // const str = nowGetTime.replace(/[/:]/g, "-");
@@ -2289,7 +2292,7 @@ module.exports = {
                   }
 
                   const csvWriter = createCsvWriter({
-                    path: `${csvPath}/${file}${str}.csv`, // 闂佸湱顭堝ú銈夋偩閻愵剚缍囬柟鎯у暱濮ｅ鏌￠崒姘煑婵炲棎鍨介幆鍐礋椤斿墽鍞撮悗鍨緲鐎氼剟骞忔导鏉戣Е鐎广儱娉?
+                    path: `${csvPath}/${file}${str}.csv`, // 鎸囧畾杈撳嚭鏂囦欢鐨勮矾寰勫拰鍚嶇О
                     header: [
                       { id: "realData", title: "data" },
                       { id: "label", title: "label" },
@@ -2299,11 +2302,11 @@ module.exports = {
                   csvWriter
                     .writeRecords(csvWriteData)
                     .then(() => {
-                      console.log("csv export success");
+                      console.log("export csv success");
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
-                          download: "csv export success",
+                          download: "export csv success",
                         });
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData);
@@ -2311,11 +2314,11 @@ module.exports = {
                       });
                     })
                     .catch((err) => {
-                      console.error("csv export failed", err);
+                      console.error("export csv failed", err);
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
-                          download: "闁诲海鏁搁崢褔宕甸悹鐜竩婵犮垺鍎肩划鍓ф喆?",
+                          download: "export csv failed",
                         });
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData);
@@ -2329,7 +2332,7 @@ module.exports = {
                 if (err) {
                   console.error(err);
                 } else {
-                  //闂佺娉涢敃銉ヮ渻閸岀偞鈷?闂佸憡锚椤戝懏鎱ㄨ箛娑欘棃闁靛繆鎳?濡ょ姷鍋涢崯鍨焽鎼淬劌鍌ㄩ悗锝庝簻椤棃鏌℃担鍝勵暭鐎规挷鍨sh闁哄鏅滈惌鐎瀡Writer闁哄鏅滅粙鏍€侀幋婢囧炊閵娿垹浜?
+                  //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
 
                   if (!rows.length) return;
                   console.log(historyArr)
@@ -2353,7 +2356,7 @@ module.exports = {
                       time: timeStampToDate(rows[i][`timestamp`]),
                       pressureArea: sitAreaSelect.length
                         ? sitAreaSelect[i]
-                        : area, //闂佸憡顭囬崰搴綖閹扮増鍎楅柍鍝勬噺閳?
+                        : area, //鍘熷鐭╅樀
                       pressure: sitPressSelect.length
                         ? sitPressSelect[i]
                         : totalToN(press),
@@ -2364,7 +2367,7 @@ module.exports = {
                     };
                     csvWriteData.push(newData);
                   }
-                  // 闁诲繐绻愬Λ娆撴儑瑜版帒绠戦柤濮愬€栭悾閬嶆煕濡警鍎忓┑顔肩箻瀵偊鎮ч崼婵堛偊闂佸憡鍔栭悷銉╁矗?CSV 闂佸搫鍊稿ú锝呪枎?
+                  // 灏嗘眹鎬荤殑鍘嬪姏鏁版嵁鍐欏叆 CSV 鏂囦欢
                   // const timeStamp = Date.now()
 
                   // const str = nowGetTime.replace(/[/:]/g, "-");
@@ -2376,14 +2379,14 @@ module.exports = {
                   }
 
                   const csvWriter = createCsvWriter({
-                    path: `${csvPath}/sit${str}.csv`, // 闂佸湱顭堝ú銈夋偩閻愵剚缍囬柟鎯у暱濮ｅ鏌￠崒姘煑婵炲棎鍨介幆鍐礋椤斿墽鍞撮悗鍨緲鐎氼剟骞忔导鏉戣Е鐎广儱娉?
+                    path: `${csvPath}/sit${str}.csv`, // 鎸囧畾杈撳嚭鏂囦欢鐨勮矾寰勫拰鍚嶇О
                     header: [
                       { id: "index", title: "" },
                       { id: "max", title: "max" },
                       { id: "time", title: "time" },
                       { id: "pressureArea", title: "area" },
                       { id: "pressure", title: "press" },
-                      // { id: "pressuremmgH", title: "闂佸憡锚椤戝懎顔忔潏銊ョ窞鐟滃秹鎯?mmgH)" },
+                      // { id: "pressuremmgH", title: "鍘嬪己澶у皬(mmgH)" },
                       { id: "realData", title: "data" },
 
                     ],
@@ -2392,11 +2395,11 @@ module.exports = {
                   csvWriter
                     .writeRecords(csvWriteData)
                     .then(() => {
-                      console.log("csv export success");
+                      console.log("export csv success");
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
-                          download: "csv export success",
+                          download: "export csv success",
                         });
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData);
@@ -2404,11 +2407,11 @@ module.exports = {
                       });
                     })
                     .catch((err) => {
-                      console.error("csv export failed", err);
+                      console.error("export csv failed", err);
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
-                          download: "闁诲海鏁搁崢褔宕甸悹鐜竩婵犮垺鍎肩划鍓ф喆?",
+                          download: "export csv failed",
                         });
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData);
@@ -2425,7 +2428,7 @@ module.exports = {
                   console.error(err);
                 } else {
                   // console.log(rows)
-                  //闂佺娉涢敃銉ヮ渻閸岀偞鈷?闂佸憡锚椤戝懏鎱ㄨ箛娑欘棃闁靛繆鎳?濡ょ姷鍋涢崯鍨焽鎼淬劌鍌ㄩ悗锝庝簻椤棃鏌℃担鍝勵暭鐎规挷鍨sh闁哄鏅滈惌鐎瀡Writer闁哄鏅滅粙鏍€侀幋婢囧炊閵娿垹浜?
+                  //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
                   if (!rows.length) return;
 
                   // if()
@@ -2443,7 +2446,7 @@ module.exports = {
                     //   time: timeStampToDate(rows[i][`timestamp`]),
                     //   pressureArea: backAreaSelect.length
                     //     ? backAreaSelect[i]
-                    //     : area * 2.1, //闂佸憡顭囬崰搴綖閹扮増鍎楅柍鍝勬噺閳?
+                    //     : area * 2.1, //鍘熷鐭╅樀
                     //   pressure: backPressSelect.length
                     //     ? backPressSelect[i]
                     //     : pressToN(area, press),
@@ -2454,7 +2457,7 @@ module.exports = {
                       time: timeStampToDate(rows[i][`timestamp`]),
                       pressureArea: backAreaSelect.length
                         ? backAreaSelect[i]
-                        : area, //闂佸憡顭囬崰搴綖閹扮増鍎楅柍鍝勬噺閳?
+                        : area, //鍘熷鐭╅樀
                       pressure: backPressSelect.length
                         ? backPressSelect[i]
                         : totalToN(press, 1.3),
@@ -2470,7 +2473,7 @@ module.exports = {
                     };
                     csvWriteBackData.push(newData);
                   }
-                  // 闁诲繐绻愬Λ娆撴儑瑜版帒绠戦柤濮愬€栭悾閬嶆煕濡警鍎忓┑顔肩箻瀵偊鎮ч崼婵堛偊闂佸憡鍔栭悷銉╁矗?CSV 闂佸搫鍊稿ú锝呪枎?
+                  // 灏嗘眹鎬荤殑鍘嬪姏鏁版嵁鍐欏叆 CSV 鏂囦欢
 
                   // let str = nowGetTime.replace(/[/:]/g, "-");
                   let str = nowGetTime;
@@ -2482,7 +2485,7 @@ module.exports = {
 
                   const csvWriter1 = createCsvWriter({
                     path: `${csvPath}/back${str}.csv`,
-                    // path: `./data/back${str}.csv`, // 闂佸湱顭堝ú銈夋偩閻愵剚缍囬柟鎯у暱濮ｅ鏌￠崒姘煑婵炲棎鍨介幆鍐礋椤斿墽鍞撮悗鍨緲鐎氼剟骞忔导鏉戣Е鐎广儱娉?
+                    // path: `./data/back${str}.csv`, // 鎸囧畾杈撳嚭鏂囦欢鐨勮矾寰勫拰鍚嶇О
                     header: [
                       { id: "index", title: "" },
                       { id: "time", title: "time" },
@@ -2496,10 +2499,10 @@ module.exports = {
                   csvWriter1
                     .writeRecords(csvWriteBackData)
                     .then(() => {
-                      console.log("csv export success");
+                      console.log("export csv success");
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
-                          download: "csv export success",
+                          download: "export csv success",
                         });
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData);
@@ -2507,10 +2510,10 @@ module.exports = {
                       });
                     })
                     .catch((err) => {
-                      console.error("csv export failed", err);
+                      console.error("export csv failed", err);
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
-                          download: "csv export success",
+                          download: "export csv failed",
                         });
                         if (client.readyState === WebSocket.OPEN) {
                           client.send(jsonData);
@@ -2526,7 +2529,7 @@ module.exports = {
                     console.error(err);
                   } else {
                     // console.log(rows)
-                    //闂佺娉涢敃銉ヮ渻閸岀偞鈷?闂佸憡锚椤戝懏鎱ㄨ箛娑欘棃闁靛繆鎳?濡ょ姷鍋涢崯鍨焽鎼淬劌鍌ㄩ悗锝庝簻椤棃鏌℃担鍝勵暭鐎规挷鍨sh闁哄鏅滈惌鐎瀡Writer闁哄鏅滅粙鏍€侀幋婢囧炊閵娿垹浜?
+                    //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
                     if (!rows.length) return;
 
                     // if()
@@ -2544,7 +2547,7 @@ module.exports = {
                       //   time: timeStampToDate(rows[i][`timestamp`]),
                       //   pressureArea: backAreaSelect.length
                       //     ? backAreaSelect[i]
-                      //     : area * 2.1, //闂佸憡顭囬崰搴綖閹扮増鍎楅柍鍝勬噺閳?
+                      //     : area * 2.1, //鍘熷鐭╅樀
                       //   pressure: backPressSelect.length
                       //     ? backPressSelect[i]
                       //     : pressToN(area, press),
@@ -2555,7 +2558,7 @@ module.exports = {
                         time: timeStampToDate(rows[i][`timestamp`]),
                         pressureArea: backAreaSelect.length
                           ? backAreaSelect[i]
-                          : area, //闂佸憡顭囬崰搴綖閹扮増鍎楅柍鍝勬噺閳?
+                          : area, //鍘熷鐭╅樀
                         pressure: backPressSelect.length
                           ? backPressSelect[i]
                           : totalToN(press, 1.3),
@@ -2571,7 +2574,7 @@ module.exports = {
                       };
                       csvWriteBackData.push(newData);
                     }
-                    // 闁诲繐绻愬Λ娆撴儑瑜版帒绠戦柤濮愬€栭悾閬嶆煕濡警鍎忓┑顔肩箻瀵偊鎮ч崼婵堛偊闂佸憡鍔栭悷銉╁矗?CSV 闂佸搫鍊稿ú锝呪枎?
+                    // 灏嗘眹鎬荤殑鍘嬪姏鏁版嵁鍐欏叆 CSV 鏂囦欢
 
                     // let str = nowGetTime.replace(/[/:]/g, "-");
                     let str = nowGetTime;
@@ -2583,7 +2586,7 @@ module.exports = {
 
                     const csvWriter1 = createCsvWriter({
                       path: `${csvPath}/head${str}.csv`,
-                      // path: `./data/back${str}.csv`, // 闂佸湱顭堝ú銈夋偩閻愵剚缍囬柟鎯у暱濮ｅ鏌￠崒姘煑婵炲棎鍨介幆鍐礋椤斿墽鍞撮悗鍨緲鐎氼剟骞忔导鏉戣Е鐎广儱娉?
+                      // path: `./data/back${str}.csv`, // 鎸囧畾杈撳嚭鏂囦欢鐨勮矾寰勫拰鍚嶇О
                       header: [
                         { id: "index", title: "" },
                         { id: "time", title: "time" },
@@ -2598,10 +2601,10 @@ module.exports = {
                     csvWriter1
                       .writeRecords(csvWriteBackData)
                       .then(() => {
-                        console.log("csv export success");
+                        console.log("export csv success");
                         server.clients.forEach(function each(client) {
                           const jsonData = JSON.stringify({
-                            download: "csv export success",
+                            download: "export csv success",
                           });
                           if (client.readyState === WebSocket.OPEN) {
                             client.send(jsonData);
@@ -2609,10 +2612,10 @@ module.exports = {
                         });
                       })
                       .catch((err) => {
-                        console.error("csv export failed", err);
+                        console.error("export csv failed", err);
                         server.clients.forEach(function each(client) {
                           const jsonData = JSON.stringify({
-                            download: "csv export success",
+                            download: "export csv failed",
                           });
                           if (client.readyState === WebSocket.OPEN) {
                             client.send(jsonData);
@@ -2635,7 +2638,7 @@ module.exports = {
               } else {
                 server.clients.forEach(function each(client) {
                   const jsonData = JSON.stringify({
-                    download: "operation success",
+                    download: "鍒犻櫎鎴愬姛",
                   });
                   if (client.readyState === WebSocket.OPEN) {
                     client.send(jsonData);
@@ -2652,7 +2655,7 @@ module.exports = {
                 } else {
                   server.clients.forEach(function each(client) {
                     const jsonData = JSON.stringify({
-                      download: "operation success",
+                      download: "鍒犻櫎鎴愬姛",
                     });
                     if (client.readyState === WebSocket.OPEN) {
                       client.send(jsonData);
@@ -2663,19 +2666,19 @@ module.exports = {
             }
           }
 
-          // 闁荤姴顑呴崯顖炲汲閿濆棭娈楁俊顖滅帛閻?
+          // 璋冩暣楂樻柉
           if (getMessage.gauss != null) {
             gauss = getMessage.gauss;
           }
 
-          // 闂備焦褰冪粔鐢稿蓟婵犲嫭瀚氶梺鍨儑濠€鏉戔槈閹炬潙绲荤憸?
+          // 閲嶆柊璇锋眰涓插彛
           if (getMessage.serialReset != null) {
             SerialPort.list().then((ports) => {
               serialport = getPort(ports)//ports; //.filter((a,index) => a.manufacturer === 'wch.cn');
 
               server.clients.forEach(function each(client) {
                 /**
-                 * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
+                 * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
                  *  */
                 const jsonData = JSON.stringify({
                   port: serialport,
@@ -2689,7 +2692,7 @@ module.exports = {
             });
           }
 
-          // 闂佸憡锚濡銇?
+          // 鍘嗗彶
           if (getMessage.indexArr != null) {
 
             let press = [],
@@ -2714,7 +2717,7 @@ module.exports = {
 
             server.clients.forEach(function each(client) {
               /**
-               * 婵☆偓绲鹃悧妤咁敃閼测晜瀚氶悹鍥ㄥ絻缁插灝鈽夐幘鏉戠祷鐟滅増鐩弫宥囦沪閻ｅ本顔戦梺杞拌兌婢ф鐣垫笟鈧褰掑垂椤旂⒈鍞洪梺鍛婄矊婵傛梻鎲伴崱娑樼煑闁挎繂娴傛导鍌炴煕濞嗘瑧绋婚柡?
+               * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
                *  */
               const jsonData = JSON.stringify({
                 pressArr: press,
@@ -2755,7 +2758,7 @@ SerialPort.list().then((ports) => {
     //       console.log(err, "err");
     //     }
     //   );
-    //   //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
+    //   //绠￠亾娣诲姞瑙ｆ瀽鍣?
     //   port1.pipe(parser);
     // } catch (e) {
 
@@ -2935,7 +2938,7 @@ parser.on("data", function (data) {
 
       //   // 2.0
       //   // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
-      //   const timestamp = Date.now(); // 闂佸吋鍎抽崲鑼躲亹閸ヮ亗浜归柟鎯у暱椤ゅ懘鏌￠崘銊у煟婵☆偄娼￠幆鍐礋椤掍緡妲梻鍌氬€搁悺銊╁春?
+      //   const timestamp = Date.now(); // 鑾峰彇褰撳墠鏃堕棿鐨勬椂闂存埑
       //   const date = saveTime;
       //   const insertQuery =
       //     "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
@@ -3161,6 +3164,29 @@ parser.on("data", function (data) {
         // if (pointArr1zero.length) {
         //   pointArr = pointArr.map((a, index) => numLessZeroToZero(a - pointArr1zero[index]))
         // }
+      } else if (file == 'smallSample') {
+        // 灏忓瀷鏍峰搧 - 鎸変紶鎰熷櫒缂栧彿1-100椤哄簭杈撳嚭10脳10鐭╅樀
+        // Excel鏄?6脳16缃戞牸锛屽搴?56瀛楄妭鏁版嵁鐨勯『搴?
+        // 浼犳劅鍣ㄧ紪鍙種鍦‥xcel涓殑浣嶇疆(row,col) -> 256瀛楄妭绱㈠紩 = row*16+col
+        // 浼犳劅鍣?-100瀵瑰簲鐨?56瀛楄妭绱㈠紩:
+        const sensorToByteIndex = [
+          223, 222, 221, 220, 219, 218, 217, 216, 215, 214,  // 浼犳劅鍣?-10   (琛?3, 鍒?5鈫?6)
+          239, 238, 237, 236, 235, 234, 233, 232, 231, 230,  // 浼犳劅鍣?1-20  (琛?4, 鍒?5鈫?6)
+          255, 254, 253, 252, 251, 250, 249, 248, 247, 246,  // 浼犳劅鍣?1-30  (琛?5, 鍒?5鈫?6)
+          15, 14, 13, 12, 11, 10, 9, 8, 7, 6,                // 浼犳劅鍣?1-40  (琛?,  鍒?5鈫?6)
+          31, 30, 29, 28, 27, 26, 25, 24, 23, 22,            // 浼犳劅鍣?1-50  (琛?,  鍒?5鈫?6)
+          207, 206, 205, 204, 203, 202, 201, 200, 199, 198,  // 浼犳劅鍣?1-60  (琛?2, 鍒?5鈫?6)
+          191, 190, 189, 188, 187, 186, 185, 184, 183, 182,  // 浼犳劅鍣?1-70  (琛?1, 鍒?5鈫?6)
+          175, 174, 173, 172, 171, 170, 169, 168, 167, 166,  // 浼犳劅鍣?1-80  (琛?0, 鍒?5鈫?6)
+          159, 158, 157, 156, 155, 154, 153, 152, 151, 150,  // 浼犳劅鍣?1-90  (琛?,  鍒?5鈫?6)
+          143, 142, 141, 140, 139, 138, 137, 136, 135, 134,  // 浼犳劅鍣?1-100 (琛?,  鍒?5鈫?6)
+        ]
+        const mappedArr = []
+        for (let i = 0; i < 100; i++) {
+          mappedArr.push(pointArr[sensorToByteIndex[i]] || 0)
+        }
+        pointArr = mappedArr
+        newArr = [...mappedArr]
       } else if (file == 'hand0507' || file == 'hand0205' || file == 'Num3D') {
         // left
         // newArr = handVideoRealPoint_0506_3([...pointArr])
@@ -3621,13 +3647,13 @@ function colOrSendData(jsonData) {
 
     // 2.0
     // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
-    const timestamp = Date.now(); // 闂佸吋鍎抽崲鑼躲亹閸ヮ亗浜归柟鎯у暱椤ゅ懘鏌￠崘銊у煟婵☆偄娼￠幆鍐礋椤掍緡妲梻鍌氬€搁悺銊╁春?
+    const timestamp = Date.now(); // 鑾峰彇褰撳墠鏃堕棿鐨勬椂闂存埑
     const date = saveTime;
     const insertQuery =
       "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
 
 
-    // 1.0 闂佸搫鐗嗛幖顐⑩枍閹烘挾顩查弶鐐村椤撴椽鏌?
+    // 1.0 鏈哄櫒浜轰箣鍓?
     // db.run(
     //   insertQuery,
     //   [file.includes('hand0205') ? JSON.stringify([...pointArr, ...rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify(pointArr), timestamp, date],
@@ -3663,7 +3689,7 @@ function colOrSendData(jsonData) {
   }
 }
 
-// 婵犮垼娉涚€氼噣骞冩繝鍐枖闁圭粯甯掔紞鎾绘煛娴ｅ搫顣肩€?
+// 澶勭悊涓插彛鏁版嵁
 
 var pointArr2;
 parser2.on("data", function (data) {
@@ -3704,7 +3730,7 @@ parser2.on("data", function (data) {
         };
         // csvWriterback.writeRecords([resDataArr]);
 
-        const timestamp = Date.now(); // 闂佸吋鍎抽崲鑼躲亹閸ヮ亗浜归柟鎯у暱椤ゅ懘鏌￠崘銊у煟婵☆偄娼￠幆鍐礋椤掍緡妲梻鍌氬€搁悺銊╁春?
+        const timestamp = Date.now(); // 鑾峰彇褰撳墠鏃堕棿鐨勬椂闂存埑
         const date = saveTime;
         const insertQuery =
           "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
@@ -3734,7 +3760,7 @@ parser2.on("data", function (data) {
           jsonData = JSON.stringify({ backData: pointArr2 });
         }
 
-        server1.clients.forEach(function each(client) {
+        server.clients.forEach(function each(client) {
           if (client.readyState === WebSocket.OPEN) {
             client.send(jsonData);
           }
@@ -3774,7 +3800,7 @@ parser2.on("data", function (data) {
           sitFlag: port1?.isOpen,
           backFlag: port2?.isOpen,
         });
-        // server1.clients.forEach(function each(client) {
+        // server.clients.forEach(function each(client) {
         //   if (client.readyState === WebSocket.OPEN) {
         //     client.send(jsonData);
         //   }
@@ -3885,7 +3911,7 @@ parser2.on("data", function (data) {
       //     backFlag: port2?.isOpen,
       //   });
       // }
-      // server1.clients.forEach(function each(client) {
+      // server.clients.forEach(function each(client) {
       //   if (client.readyState === WebSocket.OPEN) {
       //     client.send(jsonData);
       //   }
@@ -3927,7 +3953,7 @@ function colOrSendData1(jsonData) {
 
     // 2.0
     // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
-    const timestamp = Date.now(); // 闂佸吋鍎抽崲鑼躲亹閸ヮ亗浜归柟鎯у暱椤ゅ懘鏌￠崘銊у煟婵☆偄娼￠幆鍐礋椤掍緡妲梻鍌氬€搁悺銊╁春?
+    const timestamp = Date.now(); // 鑾峰彇褰撳墠鏃堕棿鐨勬椂闂存埑
     const date = saveTime;
     const insertQuery =
       "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
@@ -3948,7 +3974,7 @@ function colOrSendData1(jsonData) {
 
   if (!localFlag) {
 
-    server1.clients.forEach(function each(client) {
+    server.clients.forEach(function each(client) {
       if (client.readyState === WebSocket.OPEN) {
         client.send(jsonData);
       }
@@ -3972,13 +3998,13 @@ parser3.on("data", function (data) {
         if (pointArr3[pointArr3.length - 1] == 0) {
           firstData = [...pointArr3];
           firstData.pop();
-          // 闂佸憡鐟ラ悿鍥╃博閻旇櫣妫柛顭戝枤绾?
+          // 鍙宠竟绾垮簭
 
         }
         if (pointArr3[pointArr3.length - 1] == 1) {
           lastData = [...pointArr3];
           lastData.pop();
-          // 濠电儑缍€椤曆勬叏?
+          // 娣诲姞
           let a = [];
           for (let i = 0; i < 32; i++) {
             for (let j = 0; j < 32; j++) {
@@ -4009,7 +4035,7 @@ parser3.on("data", function (data) {
             // 2.0
             // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
             if (dataFalg % 10 == 0) {
-              const timestamp = Date.now(); // 闂佸吋鍎抽崲鑼躲亹閸ヮ亗浜归柟鎯у暱椤ゅ懘鏌￠崘銊у煟婵☆偄娼￠幆鍐礋椤掍緡妲梻鍌氬€搁悺銊╁春?
+              const timestamp = Date.now(); // 鑾峰彇褰撳墠鏃堕棿鐨勬椂闂存埑
               const date = saveTime;
               const insertQuery =
                 "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
@@ -4068,7 +4094,7 @@ parser4.on("data", function (data) {
         };
         // csvWriterback.writeRecords([resDataArr]);
 
-        const timestamp = Date.now(); // 闂佸吋鍎抽崲鑼躲亹閸ヮ亗浜归柟鎯у暱椤ゅ懘鏌￠崘銊у煟婵☆偄娼￠幆鍐礋椤掍緡妲梻鍌氬€搁悺銊╁春?
+        const timestamp = Date.now(); // 鑾峰彇褰撳墠鏃堕棿鐨勬椂闂存埑
         const date = saveTime;
         const insertQuery =
           "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
@@ -4098,7 +4124,7 @@ parser4.on("data", function (data) {
           jsonData = JSON.stringify({ headData: pointArr4 });
         }
 
-        server2.clients.forEach(function each(client) {
+        server.clients.forEach(function each(client) {
           if (client.readyState === WebSocket.OPEN) {
             client.send(jsonData);
           }
@@ -4139,7 +4165,7 @@ parser4.on("data", function (data) {
           sitFlag: port1?.isOpen,
           backFlag: port2?.isOpen,
         });
-        // server1.clients.forEach(function each(client) {
+        // server.clients.forEach(function each(client) {
         //   if (client.readyState === WebSocket.OPEN) {
         //     client.send(jsonData);
         //   }
@@ -4237,7 +4263,7 @@ function colOrSendData2(jsonData) {
 
     // 2.0
     // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
-    const timestamp = Date.now(); // 闂佸吋鍎抽崲鑼躲亹閸ヮ亗浜归柟鎯у暱椤ゅ懘鏌￠崘銊у煟婵☆偄娼￠幆鍐礋椤掍緡妲梻鍌氬€搁悺銊╁春?
+    const timestamp = Date.now(); // 鑾峰彇褰撳墠鏃堕棿鐨勬椂闂存埑
     const date = saveTime;
     const insertQuery =
       "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
@@ -4258,7 +4284,7 @@ function colOrSendData2(jsonData) {
 
   if (!localFlag) {
 
-    server2.clients.forEach(function each(client) {
+    server.clients.forEach(function each(client) {
       if (client.readyState === WebSocket.OPEN) {
         client.send(jsonData);
       }
@@ -4266,7 +4292,7 @@ function colOrSendData2(jsonData) {
   }
 }
 
-// 闂備焦褰冪粔椋庢崲?
+// 閲嶈繛
 setInterval(() => {
   if (com && !port1.isOpen && sitClose == false) {
     // if()
@@ -4283,7 +4309,7 @@ setInterval(() => {
             console.log(err, "err");
           }
         );
-        //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
+        //绠￠亾娣诲姞瑙ｆ瀽鍣?
         port1.pipe(parser);
       } catch (e) {
         console.log(e, "e");
@@ -4301,7 +4327,7 @@ setInterval(() => {
             console.log(err, "err");
           }
         );
-        //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
+        //绠￠亾娣诲姞瑙ｆ瀽鍣?
         port1.pipe(parser3);
       } catch (e) {
         console.log(e, "e");
@@ -4323,7 +4349,7 @@ setInterval(() => {
           console.log(err, "err");
         }
       );
-      //缂備胶濯寸换婵囩閹灔搴ｆ嫚閹绘帩娼遍柣鐔哥懕缁查箖鎮楁禒瀣棷?
+      //绠￠亾娣诲姞瑙ｆ瀽鍣?
       port2.pipe(parser2);
     } catch (e) {
       console.log(e, "e");
@@ -4393,11 +4419,11 @@ function numLessZeroToZero(num) {
   return num < 0 ? 0 : num
 }
 
-// 闂佸憡甯楃换鍌烇綖閹版澘绀岄柡澶夋敾
+// 鍒濆鍖杁b
 /**
  * 
- * @param {string} fileStr 婵炵鍋愭慨鐢稿礉閸涙潙闂柕濞у棭娼堕梺?
- * @returns db闂佽桨鑳舵晶妤€鐣垫担瑙勫劅?
+ * @param {string} fileStr 浼犳劅鍣ㄧ被鍨?
+ * @returns db鏁版嵁搴?
  */
 function initDb(fileStr) {
   file = fileStr;
@@ -4417,12 +4443,12 @@ function initDb(fileStr) {
   return { db, db1, db2 }
 }
 
-// 閻熸粎澧楅幐濠氭儉閸涙潙瀚夊┑澶屽闂佸搫鍊稿ú锝呪枎閵忋倖鍎嶉柛鏇ㄥ墯椤ρ囨煕婵犲啰鎳勯悗姘贡閹风懓鈹戦崨顖ｄ紘婵炴垶鎼╂禍娆愮閹舵笜it.db婵炴垶鎸搁幖顐ゆ暜椤愶箑鍨傞悗锝庡墯閻ｇ渻b闂佸搫鍊稿ú锝呪枎?
+// 褰撴病鏈塪b鏂囦欢鐨勬椂鍊欐嫹璐濅竴涓互init.db涓哄師鍨嬬殑db鏂囦欢
 
 /**
  * 
- * @param {string} file 闂佸搫鍊稿ú锝呪枎閵忋倕瑙?
- * @returns 闁哄鏅滈弻銊ッ洪弶涔ラ梺鍝勫€稿ú锝呪枎?
+ * @param {string} file 鏂囦欢鍚?
+ * @returns 杩斿洖db鏂囦欢
  */
 function genDb(file) {
   try {
@@ -4430,7 +4456,17 @@ function genDb(file) {
     return db = new sqlite3.Database(file);
   } catch (err) {
     console.log(err)
-    let data = fs.readFileSync(`${filePath}/init.db`);
+    const initCandidates = [
+      path.join(filePath, "init.db"),
+      path.join(runtimeResourceRoot, "init.db"),
+      path.join(__dirname, "db", "init.db"),
+      path.join(app.getAppPath(), "db", "init.db"),
+    ];
+    const initDbPath = initCandidates.find((candidate) => fs.existsSync(candidate));
+    if (!initDbPath) {
+      throw new Error(`init.db not found. checked: ${initCandidates.join(", ")}`);
+    }
+    let data = fs.readFileSync(initDbPath);
     fs.writeFileSync(file, data);
     return db = new sqlite3.Database(file);
   }
@@ -4487,7 +4523,7 @@ function press6(arr, width, height, type = "row", value = (1245),) {
   return wsPointData;
 }
 
-// 闂佸憡甯掑Λ妤冩暜閸ヮ剙绀傛い鎺嗗亾缂?
+// 鍒嗗帇鍏紡
 function pressNew1220({ arr, width, height, type = "row", value }) {
   let wsPointData = [...arr];
 
@@ -4601,20 +4637,20 @@ function press6sit(arr, width, height, type = "row", value = (480),) {
 
 
 function bytes4ToInt10(buffers) {
-  // 缂備讲鍋撻弶鐐村娴兼劙鏌ㄥ☉娆掑婵炲弶鎸荤粙澶愵敂閸曨厽鎲婚梺鐓庢惈閸婅鈻撻幋锕€鏋侀柟娈垮枤閻?
+  // 绀轰緥锛氬洓涓瓧鑺傜殑鏁扮粍 
   // const fourBytes = [0x40, 0x48, 0xF5, 0xC3];
   const res = []
   for (let i = 0; i < buffers.length / 4; i++) {
     const buffer = new ArrayBuffer(4);
     const view = new DataView(buffer);
     for (let j = 0; j < 4; j++) {
-      // 闂佸憡甯楃粙鎴犵磽閹惧鈻旈柍褜鍓氱粙?ArrayBuffer 濡ょ姷鍋犲▔娑㈡儍閵忋倕鐐婃繛鎴烆殜閸ゅ鎮楀☉娆樻畽濠碘槅鍙冨畷妯衡枎韫囨挸姹查梺绋跨箲濠€褰掓嚈?
+      // 鍒涘缓涓€涓?ArrayBuffer 骞跺皢鍥涗釜瀛楄妭鍐欏叆鍏朵腑 
 
-      // 闁诲繐绻愬Λ妤€煤閹惧鈻旀い蹇撳閹界喖鏌ら崫鍕偓鎼佸疮閹捐绀?DataView 
+      // 灏嗗洓涓瓧鑺傚啓鍏?DataView 
       // for (let k = 0; k < 4; k++) {
       view.setUint8(j, buffers[i * 4 + j]);
       // }
-      // 婵?DataView 婵炴垶鎼╅崣鈧い鏇氬嵆瀹曪綁寮介妸銊ф闂佺粯鍔橀～澶愬汲?
+      // 浠?DataView 涓鍙栨诞鐐规暟 
 
     }
     const floatValue = view.getFloat32(0, true);
@@ -4671,3 +4707,6 @@ function arrToRealLine(arr, arrX, arrY, matrixLength) {
 
   return newArr
 }
+
+
+

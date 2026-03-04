@@ -1,0 +1,979 @@
+{
+  "summary": {
+    "total": 73,
+    "passed": 72,
+    "failed": 1,
+    "passRate": "98.6%"
+  },
+  "sensorResults": {
+    "normal": {
+      "label": "正常测试",
+      "total": 6,
+      "passed": 6,
+      "failed": 0,
+      "details": [
+        {
+          "name": "[normal] 正常测试 - Switch sensor",
+          "pass": true,
+          "detail": "file=normal",
+          "time": "2026-03-04T03:13:36.766Z"
+        },
+        {
+          "name": "[normal] 正常测试 - Connect serial",
+          "pass": true,
+          "detail": "port=/tmp/vserial_sit_app",
+          "time": "2026-03-04T03:13:39.270Z"
+        },
+        {
+          "name": "[normal] 正常测试 - Data received",
+          "pass": true,
+          "detail": "len=1024, max=199, nonZero=1018",
+          "time": "2026-03-04T03:13:40.039Z"
+        },
+        {
+          "name": "[normal] 正常测试 - Data length valid",
+          "pass": true,
+          "detail": "length=1024",
+          "time": "2026-03-04T03:13:40.040Z"
+        },
+        {
+          "name": "[normal] 正常测试 - Data non-zero",
+          "pass": true,
+          "detail": "1018/1024 non-zero values",
+          "time": "2026-03-04T03:13:40.040Z"
+        },
+        {
+          "name": "[normal] 正常测试 - Disconnect",
+          "pass": true,
+          "detail": "",
+          "time": "2026-03-04T03:13:41.041Z"
+        }
+      ]
+    },
+    "hand0205": {
+      "label": "触觉手套",
+      "total": 6,
+      "passed": 6,
+      "failed": 0,
+      "details": [
+        {
+          "name": "[hand0205] 触觉手套 - Switch sensor",
+          "pass": true,
+          "detail": "file=hand0205",
+          "time": "2026-03-04T03:13:45.547Z"
+        },
+        {
+          "name": "[hand0205] 触觉手套 - Connect serial",
+          "pass": true,
+          "detail": "port=/tmp/vserial_sit_app",
+          "time": "2026-03-04T03:13:48.050Z"
+        },
+        {
+          "name": "[hand0205] 触觉手套 - Data received",
+          "pass": true,
+          "detail": "len=1024, max=206, nonZero=1024",
+          "time": "2026-03-04T03:13:48.817Z"
+        },
+        {
+          "name": "[hand0205] 触觉手套 - Data length valid",
+          "pass": true,
+          "detail": "length=1024",
+          "time": "2026-03-04T03:13:48.817Z"
+        },
+        {
+          "name": "[hand0205] 触觉手套 - Data non-zero",
+          "pass": true,
+          "detail": "1024/1024 non-zero values",
+          "time": "2026-03-04T03:13:48.817Z"
+        },
+        {
+          "name": "[hand0205] 触觉手套 - Disconnect",
+          "pass": true,
+          "detail": "",
+          "time": "2026-03-04T03:13:49.818Z"
+        }
+      ]
+    },
+    "robot1": {
+      "label": "宇树G1触觉上衣",
+      "total": 6,
+      "passed": 6,
+      "failed": 0,
+      "details": [
+        {
+          "name": "[robot1] 宇树G1触觉上衣 - Switch sensor",
+          "pass": true,
+          "detail": "file=robot1",
+          "time": "2026-03-04T03:13:54.322Z"
+        },
+        {
+          "name": "[robot1] 宇树G1触觉上衣 - Connect serial",
+          "pass": true,
+          "detail": "port=/tmp/vserial_sit_app",
+          "time": "2026-03-04T03:13:56.825Z"
+        },
+        {
+          "name": "[robot1] 宇树G1触觉上衣 - Data received",
+          "pass": true,
+          "detail": "len=256, max=149, nonZero=256",
+          "time": "2026-03-04T03:13:57.587Z"
+        },
+        {
+          "name": "[robot1] 宇树G1触觉上衣 - Data length valid",
+          "pass": true,
+          "detail": "length=256",
+          "time": "2026-03-04T03:13:57.587Z"
+        },
+        {
+          "name": "[robot1] 宇树G1触觉上衣 - Data non-zero",
+          "pass": true,
+          "detail": "256/256 non-zero values",
+          "time": "2026-03-04T03:13:57.587Z"
+        },
+        {
+          "name": "[robot1] 宇树G1触觉上衣 - Disconnect",
+          "pass": true,
+          "detail": "",
+          "time": "2026-03-04T03:13:58.589Z"
+        }
+      ]
+    },
+    "robotSY": {
+      "label": "松延N2触觉上衣",
+      "total": 6,
+      "passed": 6,
+      "failed": 0,
+      "details": [
+        {
+          "name": "[robotSY] 松延N2触觉上衣 - Switch sensor",
+          "pass": true,
+          "detail": "file=robotSY",
+          "time": "2026-03-04T03:14:03.095Z"
+        },
+        {
+          "name": "[robotSY] 松延N2触觉上衣 - Connect serial",
+          "pass": true,
+          "detail": "port=/tmp/vserial_sit_app",
+          "time": "2026-03-04T03:14:05.598Z"
+        },
+        {
+          "name": "[robotSY] 松延N2触觉上衣 - Data received",
+          "pass": true,
+          "detail": "len=256, max=149, nonZero=256",
+          "time": "2026-03-04T03:14:06.354Z"
+        },
+        {
+          "name": "[robotSY] 松延N2触觉上衣 - Data length valid",
+          "pass": true,
+          "detail": "length=256",
+          "time": "2026-03-04T03:14:06.354Z"
+        },
+        {
+          "name": "[robotSY] 松延N2触觉上衣 - Data non-zero",
+          "pass": true,
+          "detail": "256/256 non-zero values",
+          "time": "2026-03-04T03:14:06.354Z"
+        },
+        {
+          "name": "[robotSY] 松延N2触觉上衣 - Disconnect",
+          "pass": true,
+          "detail": "",
+          "time": "2026-03-04T03:14:07.355Z"
+        }
+      ]
+    },
+    "robotLCF": {
+      "label": "零次方H1触觉上衣",
+      "total": 6,
+      "passed": 6,
+      "failed": 0,
+      "details": [
+        {
+          "name": "[robotLCF] 零次方H1触觉上衣 - Switch sensor",
+          "pass": true,
+          "detail": "file=robotLCF",
+          "time": "2026-03-04T03:14:11.859Z"
+        },
+        {
+          "name": "[robotLCF] 零次方H1触觉上衣 - Connect serial",
+          "pass": true,
+          "detail": "port=/tmp/vserial_sit_app",
+          "time": "2026-03-04T03:14:14.362Z"
+        },
+        {
+          "name": "[robotLCF] 零次方H1触觉上衣 - Data received",
+          "pass": true,
+          "detail": "len=256, max=149, nonZero=256",
+          "time": "2026-03-04T03:14:15.120Z"
+        },
+        {
+          "name": "[robotLCF] 零次方H1触觉上衣 - Data length valid",
+          "pass": true,
+          "detail": "length=256",
+          "time": "2026-03-04T03:14:15.120Z"
+        },
+        {
+          "name": "[robotLCF] 零次方H1触觉上衣 - Data non-zero",
+          "pass": true,
+          "detail": "256/256 non-zero values",
+          "time": "2026-03-04T03:14:15.120Z"
+        },
+        {
+          "name": "[robotLCF] 零次方H1触觉上衣 - Disconnect",
+          "pass": true,
+          "detail": "",
+          "time": "2026-03-04T03:14:16.121Z"
+        }
+      ]
+    },
+    "footVideo": {
+      "label": "触觉足底",
+      "total": 6,
+      "passed": 6,
+      "failed": 0,
+      "details": [
+        {
+          "name": "[footVideo] 触觉足底 - Switch sensor",
+          "pass": true,
+          "detail": "file=footVideo",
+          "time": "2026-03-04T03:14:20.626Z"
+        },
+        {
+          "name": "[footVideo] 触觉足底 - Connect serial",
+          "pass": true,
+          "detail": "port=/tmp/vserial_sit_app",
+          "time": "2026-03-04T03:14:23.129Z"
+        },
+        {
+          "name": "[footVideo] 触觉足底 - Data received",
+          "pass": true,
+          "detail": "len=2048, max=149, nonZero=696",
+          "time": "2026-03-04T03:14:23.892Z"
+        },
+        {
+          "name": "[footVideo] 触觉足底 - Data length valid",
+          "pass": true,
+          "detail": "length=2048",
+          "time": "2026-03-04T03:14:23.892Z"
+        },
+        {
+          "name": "[footVideo] 触觉足底 - Data non-zero",
+          "pass": true,
+          "detail": "696/2048 non-zero values",
+          "time": "2026-03-04T03:14:23.892Z"
+        },
+        {
+          "name": "[footVideo] 触觉足底 - Disconnect",
+          "pass": true,
+          "detail": "",
+          "time": "2026-03-04T03:14:24.894Z"
+        }
+      ]
+    },
+    "bed4096num": {
+      "label": "4096数字",
+      "total": 6,
+      "passed": 6,
+      "failed": 0,
+      "details": [
+        {
+          "name": "[bed4096num] 4096数字 - Switch sensor",
+          "pass": true,
+          "detail": "file=bed4096num",
+          "time": "2026-03-04T03:14:29.399Z"
+        },
+        {
+          "name": "[bed4096num] 4096数字 - Connect serial",
+          "pass": true,
+          "detail": "port=/tmp/vserial_sit_app",
+          "time": "2026-03-04T03:14:31.902Z"
+        },
+        {
+          "name": "[bed4096num] 4096数字 - Data received",
+          "pass": true,
+          "detail": "len=256, max=149, nonZero=256",
+          "time": "2026-03-04T03:14:32.668Z"
+        },
+        {
+          "name": "[bed4096num] 4096数字 - Data length valid",
+          "pass": true,
+          "detail": "length=256",
+          "time": "2026-03-04T03:14:32.668Z"
+        },
+        {
+          "name": "[bed4096num] 4096数字 - Data non-zero",
+          "pass": true,
+          "detail": "256/256 non-zero values",
+          "time": "2026-03-04T03:14:32.668Z"
+        },
+        {
+          "name": "[bed4096num] 4096数字 - Disconnect",
+          "pass": true,
+          "detail": "",
+          "time": "2026-03-04T03:14:33.670Z"
+        }
+      ]
+    },
+    "jqbed": {
+      "label": "小床监测",
+      "total": 6,
+      "passed": 6,
+      "failed": 0,
+      "details": [
+        {
+          "name": "[jqbed] 小床监测 - Switch sensor",
+          "pass": true,
+          "detail": "file=jqbed",
+          "time": "2026-03-04T03:14:38.175Z"
+        },
+        {
+          "name": "[jqbed] 小床监测 - Connect serial",
+          "pass": true,
+          "detail": "port=/tmp/vserial_sit_app",
+          "time": "2026-03-04T03:14:40.678Z"
+        },
+        {
+          "name": "[jqbed] 小床监测 - Data received",
+          "pass": true,
+          "detail": "len=1024, max=215, nonZero=1024",
+          "time": "2026-03-04T03:14:41.438Z"
+        },
+        {
+          "name": "[jqbed] 小床监测 - Data length valid",
+          "pass": true,
+          "detail": "length=1024",
+          "time": "2026-03-04T03:14:41.438Z"
+        },
+        {
+          "name": "[jqbed] 小床监测 - Data non-zero",
+          "pass": true,
+          "detail": "1024/1024 non-zero values",
+          "time": "2026-03-04T03:14:41.438Z"
+        },
+        {
+          "name": "[jqbed] 小床监测 - Disconnect",
+          "pass": true,
+          "detail": "",
+          "time": "2026-03-04T03:14:42.440Z"
+        }
+      ]
+    },
+    "bed4096": {
+      "label": "4096",
+      "total": 6,
+      "passed": 6,
+      "failed": 0,
+      "details": [
+        {
+          "name": "[bed4096] 4096 - Switch sensor",
+          "pass": true,
+          "detail": "file=bed4096",
+          "time": "2026-03-04T03:14:46.946Z"
+        },
+        {
+          "name": "[bed4096] 4096 - Connect serial",
+          "pass": true,
+          "detail": "port=/tmp/vserial_sit_app",
+          "time": "2026-03-04T03:14:49.449Z"
+        },
+        {
+          "name": "[bed4096] 4096 - Data received",
+          "pass": true,
+          "detail": "len=1024, max=215, nonZero=1024",
+          "time": "2026-03-04T03:14:50.211Z"
+        },
+        {
+          "name": "[bed4096] 4096 - Data length valid",
+          "pass": true,
+          "detail": "length=1024",
+          "time": "2026-03-04T03:14:50.211Z"
+        },
+        {
+          "name": "[bed4096] 4096 - Data non-zero",
+          "pass": true,
+          "detail": "1024/1024 non-zero values",
+          "time": "2026-03-04T03:14:50.211Z"
+        },
+        {
+          "name": "[bed4096] 4096 - Disconnect",
+          "pass": true,
+          "detail": "",
+          "time": "2026-03-04T03:14:51.212Z"
+        }
+      ]
+    },
+    "fast256": {
+      "label": "16×16高速",
+      "total": 6,
+      "passed": 6,
+      "failed": 0,
+      "details": [
+        {
+          "name": "[fast256] 16×16高速 - Switch sensor",
+          "pass": true,
+          "detail": "file=fast256",
+          "time": "2026-03-04T03:14:55.718Z"
+        },
+        {
+          "name": "[fast256] 16×16高速 - Connect serial",
+          "pass": true,
+          "detail": "port=/tmp/vserial_sit_app",
+          "time": "2026-03-04T03:14:58.221Z"
+        },
+        {
+          "name": "[fast256] 16×16高速 - Data received",
+          "pass": true,
+          "detail": "len=256, max=190, nonZero=256",
+          "time": "2026-03-04T03:14:58.981Z"
+        },
+        {
+          "name": "[fast256] 16×16高速 - Data length valid",
+          "pass": true,
+          "detail": "length=256",
+          "time": "2026-03-04T03:14:58.981Z"
+        },
+        {
+          "name": "[fast256] 16×16高速 - Data non-zero",
+          "pass": true,
+          "detail": "256/256 non-zero values",
+          "time": "2026-03-04T03:14:58.981Z"
+        },
+        {
+          "name": "[fast256] 16×16高速 - Disconnect",
+          "pass": true,
+          "detail": "",
+          "time": "2026-03-04T03:14:59.983Z"
+        }
+      ]
+    },
+    "fast1024": {
+      "label": "32×32高速",
+      "total": 6,
+      "passed": 6,
+      "failed": 0,
+      "details": [
+        {
+          "name": "[fast1024] 32×32高速 - Switch sensor",
+          "pass": true,
+          "detail": "file=fast1024",
+          "time": "2026-03-04T03:15:04.489Z"
+        },
+        {
+          "name": "[fast1024] 32×32高速 - Connect serial",
+          "pass": true,
+          "detail": "port=/tmp/vserial_sit_app",
+          "time": "2026-03-04T03:15:06.992Z"
+        },
+        {
+          "name": "[fast1024] 32×32高速 - Data received",
+          "pass": true,
+          "detail": "len=256, max=186, nonZero=256",
+          "time": "2026-03-04T03:15:07.750Z"
+        },
+        {
+          "name": "[fast1024] 32×32高速 - Data length valid",
+          "pass": true,
+          "detail": "length=256",
+          "time": "2026-03-04T03:15:07.750Z"
+        },
+        {
+          "name": "[fast1024] 32×32高速 - Data non-zero",
+          "pass": true,
+          "detail": "256/256 non-zero values",
+          "time": "2026-03-04T03:15:07.750Z"
+        },
+        {
+          "name": "[fast1024] 32×32高速 - Disconnect",
+          "pass": true,
+          "detail": "",
+          "time": "2026-03-04T03:15:08.752Z"
+        }
+      ]
+    },
+    "daliegu": {
+      "label": "14×20高速",
+      "total": 6,
+      "passed": 6,
+      "failed": 0,
+      "details": [
+        {
+          "name": "[daliegu] 14×20高速 - Switch sensor",
+          "pass": true,
+          "detail": "file=daliegu",
+          "time": "2026-03-04T03:15:13.258Z"
+        },
+        {
+          "name": "[daliegu] 14×20高速 - Connect serial",
+          "pass": true,
+          "detail": "port=/tmp/vserial_sit_app",
+          "time": "2026-03-04T03:15:15.761Z"
+        },
+        {
+          "name": "[daliegu] 14×20高速 - Data received",
+          "pass": true,
+          "detail": "len=1024, max=218, nonZero=1024",
+          "time": "2026-03-04T03:15:16.527Z"
+        },
+        {
+          "name": "[daliegu] 14×20高速 - Data length valid",
+          "pass": true,
+          "detail": "length=1024",
+          "time": "2026-03-04T03:15:16.527Z"
+        },
+        {
+          "name": "[daliegu] 14×20高速 - Data non-zero",
+          "pass": true,
+          "detail": "1024/1024 non-zero values",
+          "time": "2026-03-04T03:15:16.527Z"
+        },
+        {
+          "name": "[daliegu] 14×20高速 - Disconnect",
+          "pass": true,
+          "detail": "",
+          "time": "2026-03-04T03:15:17.529Z"
+        }
+      ]
+    }
+  },
+  "results": [
+    {
+      "name": "License activation",
+      "pass": false,
+      "detail": "module2.encrypt is not a function",
+      "time": "2026-03-04T03:13:34.261Z"
+    },
+    {
+      "name": "[normal] 正常测试 - Switch sensor",
+      "pass": true,
+      "detail": "file=normal",
+      "time": "2026-03-04T03:13:36.766Z"
+    },
+    {
+      "name": "[normal] 正常测试 - Connect serial",
+      "pass": true,
+      "detail": "port=/tmp/vserial_sit_app",
+      "time": "2026-03-04T03:13:39.270Z"
+    },
+    {
+      "name": "[normal] 正常测试 - Data received",
+      "pass": true,
+      "detail": "len=1024, max=199, nonZero=1018",
+      "time": "2026-03-04T03:13:40.039Z"
+    },
+    {
+      "name": "[normal] 正常测试 - Data length valid",
+      "pass": true,
+      "detail": "length=1024",
+      "time": "2026-03-04T03:13:40.040Z"
+    },
+    {
+      "name": "[normal] 正常测试 - Data non-zero",
+      "pass": true,
+      "detail": "1018/1024 non-zero values",
+      "time": "2026-03-04T03:13:40.040Z"
+    },
+    {
+      "name": "[normal] 正常测试 - Disconnect",
+      "pass": true,
+      "detail": "",
+      "time": "2026-03-04T03:13:41.041Z"
+    },
+    {
+      "name": "[hand0205] 触觉手套 - Switch sensor",
+      "pass": true,
+      "detail": "file=hand0205",
+      "time": "2026-03-04T03:13:45.547Z"
+    },
+    {
+      "name": "[hand0205] 触觉手套 - Connect serial",
+      "pass": true,
+      "detail": "port=/tmp/vserial_sit_app",
+      "time": "2026-03-04T03:13:48.050Z"
+    },
+    {
+      "name": "[hand0205] 触觉手套 - Data received",
+      "pass": true,
+      "detail": "len=1024, max=206, nonZero=1024",
+      "time": "2026-03-04T03:13:48.817Z"
+    },
+    {
+      "name": "[hand0205] 触觉手套 - Data length valid",
+      "pass": true,
+      "detail": "length=1024",
+      "time": "2026-03-04T03:13:48.817Z"
+    },
+    {
+      "name": "[hand0205] 触觉手套 - Data non-zero",
+      "pass": true,
+      "detail": "1024/1024 non-zero values",
+      "time": "2026-03-04T03:13:48.817Z"
+    },
+    {
+      "name": "[hand0205] 触觉手套 - Disconnect",
+      "pass": true,
+      "detail": "",
+      "time": "2026-03-04T03:13:49.818Z"
+    },
+    {
+      "name": "[robot1] 宇树G1触觉上衣 - Switch sensor",
+      "pass": true,
+      "detail": "file=robot1",
+      "time": "2026-03-04T03:13:54.322Z"
+    },
+    {
+      "name": "[robot1] 宇树G1触觉上衣 - Connect serial",
+      "pass": true,
+      "detail": "port=/tmp/vserial_sit_app",
+      "time": "2026-03-04T03:13:56.825Z"
+    },
+    {
+      "name": "[robot1] 宇树G1触觉上衣 - Data received",
+      "pass": true,
+      "detail": "len=256, max=149, nonZero=256",
+      "time": "2026-03-04T03:13:57.587Z"
+    },
+    {
+      "name": "[robot1] 宇树G1触觉上衣 - Data length valid",
+      "pass": true,
+      "detail": "length=256",
+      "time": "2026-03-04T03:13:57.587Z"
+    },
+    {
+      "name": "[robot1] 宇树G1触觉上衣 - Data non-zero",
+      "pass": true,
+      "detail": "256/256 non-zero values",
+      "time": "2026-03-04T03:13:57.587Z"
+    },
+    {
+      "name": "[robot1] 宇树G1触觉上衣 - Disconnect",
+      "pass": true,
+      "detail": "",
+      "time": "2026-03-04T03:13:58.589Z"
+    },
+    {
+      "name": "[robotSY] 松延N2触觉上衣 - Switch sensor",
+      "pass": true,
+      "detail": "file=robotSY",
+      "time": "2026-03-04T03:14:03.095Z"
+    },
+    {
+      "name": "[robotSY] 松延N2触觉上衣 - Connect serial",
+      "pass": true,
+      "detail": "port=/tmp/vserial_sit_app",
+      "time": "2026-03-04T03:14:05.598Z"
+    },
+    {
+      "name": "[robotSY] 松延N2触觉上衣 - Data received",
+      "pass": true,
+      "detail": "len=256, max=149, nonZero=256",
+      "time": "2026-03-04T03:14:06.354Z"
+    },
+    {
+      "name": "[robotSY] 松延N2触觉上衣 - Data length valid",
+      "pass": true,
+      "detail": "length=256",
+      "time": "2026-03-04T03:14:06.354Z"
+    },
+    {
+      "name": "[robotSY] 松延N2触觉上衣 - Data non-zero",
+      "pass": true,
+      "detail": "256/256 non-zero values",
+      "time": "2026-03-04T03:14:06.354Z"
+    },
+    {
+      "name": "[robotSY] 松延N2触觉上衣 - Disconnect",
+      "pass": true,
+      "detail": "",
+      "time": "2026-03-04T03:14:07.355Z"
+    },
+    {
+      "name": "[robotLCF] 零次方H1触觉上衣 - Switch sensor",
+      "pass": true,
+      "detail": "file=robotLCF",
+      "time": "2026-03-04T03:14:11.859Z"
+    },
+    {
+      "name": "[robotLCF] 零次方H1触觉上衣 - Connect serial",
+      "pass": true,
+      "detail": "port=/tmp/vserial_sit_app",
+      "time": "2026-03-04T03:14:14.362Z"
+    },
+    {
+      "name": "[robotLCF] 零次方H1触觉上衣 - Data received",
+      "pass": true,
+      "detail": "len=256, max=149, nonZero=256",
+      "time": "2026-03-04T03:14:15.120Z"
+    },
+    {
+      "name": "[robotLCF] 零次方H1触觉上衣 - Data length valid",
+      "pass": true,
+      "detail": "length=256",
+      "time": "2026-03-04T03:14:15.120Z"
+    },
+    {
+      "name": "[robotLCF] 零次方H1触觉上衣 - Data non-zero",
+      "pass": true,
+      "detail": "256/256 non-zero values",
+      "time": "2026-03-04T03:14:15.120Z"
+    },
+    {
+      "name": "[robotLCF] 零次方H1触觉上衣 - Disconnect",
+      "pass": true,
+      "detail": "",
+      "time": "2026-03-04T03:14:16.121Z"
+    },
+    {
+      "name": "[footVideo] 触觉足底 - Switch sensor",
+      "pass": true,
+      "detail": "file=footVideo",
+      "time": "2026-03-04T03:14:20.626Z"
+    },
+    {
+      "name": "[footVideo] 触觉足底 - Connect serial",
+      "pass": true,
+      "detail": "port=/tmp/vserial_sit_app",
+      "time": "2026-03-04T03:14:23.129Z"
+    },
+    {
+      "name": "[footVideo] 触觉足底 - Data received",
+      "pass": true,
+      "detail": "len=2048, max=149, nonZero=696",
+      "time": "2026-03-04T03:14:23.892Z"
+    },
+    {
+      "name": "[footVideo] 触觉足底 - Data length valid",
+      "pass": true,
+      "detail": "length=2048",
+      "time": "2026-03-04T03:14:23.892Z"
+    },
+    {
+      "name": "[footVideo] 触觉足底 - Data non-zero",
+      "pass": true,
+      "detail": "696/2048 non-zero values",
+      "time": "2026-03-04T03:14:23.892Z"
+    },
+    {
+      "name": "[footVideo] 触觉足底 - Disconnect",
+      "pass": true,
+      "detail": "",
+      "time": "2026-03-04T03:14:24.894Z"
+    },
+    {
+      "name": "[bed4096num] 4096数字 - Switch sensor",
+      "pass": true,
+      "detail": "file=bed4096num",
+      "time": "2026-03-04T03:14:29.399Z"
+    },
+    {
+      "name": "[bed4096num] 4096数字 - Connect serial",
+      "pass": true,
+      "detail": "port=/tmp/vserial_sit_app",
+      "time": "2026-03-04T03:14:31.902Z"
+    },
+    {
+      "name": "[bed4096num] 4096数字 - Data received",
+      "pass": true,
+      "detail": "len=256, max=149, nonZero=256",
+      "time": "2026-03-04T03:14:32.668Z"
+    },
+    {
+      "name": "[bed4096num] 4096数字 - Data length valid",
+      "pass": true,
+      "detail": "length=256",
+      "time": "2026-03-04T03:14:32.668Z"
+    },
+    {
+      "name": "[bed4096num] 4096数字 - Data non-zero",
+      "pass": true,
+      "detail": "256/256 non-zero values",
+      "time": "2026-03-04T03:14:32.668Z"
+    },
+    {
+      "name": "[bed4096num] 4096数字 - Disconnect",
+      "pass": true,
+      "detail": "",
+      "time": "2026-03-04T03:14:33.670Z"
+    },
+    {
+      "name": "[jqbed] 小床监测 - Switch sensor",
+      "pass": true,
+      "detail": "file=jqbed",
+      "time": "2026-03-04T03:14:38.175Z"
+    },
+    {
+      "name": "[jqbed] 小床监测 - Connect serial",
+      "pass": true,
+      "detail": "port=/tmp/vserial_sit_app",
+      "time": "2026-03-04T03:14:40.678Z"
+    },
+    {
+      "name": "[jqbed] 小床监测 - Data received",
+      "pass": true,
+      "detail": "len=1024, max=215, nonZero=1024",
+      "time": "2026-03-04T03:14:41.438Z"
+    },
+    {
+      "name": "[jqbed] 小床监测 - Data length valid",
+      "pass": true,
+      "detail": "length=1024",
+      "time": "2026-03-04T03:14:41.438Z"
+    },
+    {
+      "name": "[jqbed] 小床监测 - Data non-zero",
+      "pass": true,
+      "detail": "1024/1024 non-zero values",
+      "time": "2026-03-04T03:14:41.438Z"
+    },
+    {
+      "name": "[jqbed] 小床监测 - Disconnect",
+      "pass": true,
+      "detail": "",
+      "time": "2026-03-04T03:14:42.440Z"
+    },
+    {
+      "name": "[bed4096] 4096 - Switch sensor",
+      "pass": true,
+      "detail": "file=bed4096",
+      "time": "2026-03-04T03:14:46.946Z"
+    },
+    {
+      "name": "[bed4096] 4096 - Connect serial",
+      "pass": true,
+      "detail": "port=/tmp/vserial_sit_app",
+      "time": "2026-03-04T03:14:49.449Z"
+    },
+    {
+      "name": "[bed4096] 4096 - Data received",
+      "pass": true,
+      "detail": "len=1024, max=215, nonZero=1024",
+      "time": "2026-03-04T03:14:50.211Z"
+    },
+    {
+      "name": "[bed4096] 4096 - Data length valid",
+      "pass": true,
+      "detail": "length=1024",
+      "time": "2026-03-04T03:14:50.211Z"
+    },
+    {
+      "name": "[bed4096] 4096 - Data non-zero",
+      "pass": true,
+      "detail": "1024/1024 non-zero values",
+      "time": "2026-03-04T03:14:50.211Z"
+    },
+    {
+      "name": "[bed4096] 4096 - Disconnect",
+      "pass": true,
+      "detail": "",
+      "time": "2026-03-04T03:14:51.212Z"
+    },
+    {
+      "name": "[fast256] 16×16高速 - Switch sensor",
+      "pass": true,
+      "detail": "file=fast256",
+      "time": "2026-03-04T03:14:55.718Z"
+    },
+    {
+      "name": "[fast256] 16×16高速 - Connect serial",
+      "pass": true,
+      "detail": "port=/tmp/vserial_sit_app",
+      "time": "2026-03-04T03:14:58.221Z"
+    },
+    {
+      "name": "[fast256] 16×16高速 - Data received",
+      "pass": true,
+      "detail": "len=256, max=190, nonZero=256",
+      "time": "2026-03-04T03:14:58.981Z"
+    },
+    {
+      "name": "[fast256] 16×16高速 - Data length valid",
+      "pass": true,
+      "detail": "length=256",
+      "time": "2026-03-04T03:14:58.981Z"
+    },
+    {
+      "name": "[fast256] 16×16高速 - Data non-zero",
+      "pass": true,
+      "detail": "256/256 non-zero values",
+      "time": "2026-03-04T03:14:58.981Z"
+    },
+    {
+      "name": "[fast256] 16×16高速 - Disconnect",
+      "pass": true,
+      "detail": "",
+      "time": "2026-03-04T03:14:59.983Z"
+    },
+    {
+      "name": "[fast1024] 32×32高速 - Switch sensor",
+      "pass": true,
+      "detail": "file=fast1024",
+      "time": "2026-03-04T03:15:04.489Z"
+    },
+    {
+      "name": "[fast1024] 32×32高速 - Connect serial",
+      "pass": true,
+      "detail": "port=/tmp/vserial_sit_app",
+      "time": "2026-03-04T03:15:06.992Z"
+    },
+    {
+      "name": "[fast1024] 32×32高速 - Data received",
+      "pass": true,
+      "detail": "len=256, max=186, nonZero=256",
+      "time": "2026-03-04T03:15:07.750Z"
+    },
+    {
+      "name": "[fast1024] 32×32高速 - Data length valid",
+      "pass": true,
+      "detail": "length=256",
+      "time": "2026-03-04T03:15:07.750Z"
+    },
+    {
+      "name": "[fast1024] 32×32高速 - Data non-zero",
+      "pass": true,
+      "detail": "256/256 non-zero values",
+      "time": "2026-03-04T03:15:07.750Z"
+    },
+    {
+      "name": "[fast1024] 32×32高速 - Disconnect",
+      "pass": true,
+      "detail": "",
+      "time": "2026-03-04T03:15:08.752Z"
+    },
+    {
+      "name": "[daliegu] 14×20高速 - Switch sensor",
+      "pass": true,
+      "detail": "file=daliegu",
+      "time": "2026-03-04T03:15:13.258Z"
+    },
+    {
+      "name": "[daliegu] 14×20高速 - Connect serial",
+      "pass": true,
+      "detail": "port=/tmp/vserial_sit_app",
+      "time": "2026-03-04T03:15:15.761Z"
+    },
+    {
+      "name": "[daliegu] 14×20高速 - Data received",
+      "pass": true,
+      "detail": "len=1024, max=218, nonZero=1024",
+      "time": "2026-03-04T03:15:16.527Z"
+    },
+    {
+      "name": "[daliegu] 14×20高速 - Data length valid",
+      "pass": true,
+      "detail": "length=1024",
+      "time": "2026-03-04T03:15:16.527Z"
+    },
+    {
+      "name": "[daliegu] 14×20高速 - Data non-zero",
+      "pass": true,
+      "detail": "1024/1024 non-zero values",
+      "time": "2026-03-04T03:15:16.527Z"
+    },
+    {
+      "name": "[daliegu] 14×20高速 - Disconnect",
+      "pass": true,
+      "detail": "",
+      "time": "2026-03-04T03:15:17.529Z"
+    }
+  ],
+  "timestamp": "2026-03-04T03:15:19.532Z"
+}

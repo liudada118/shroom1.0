@@ -6,7 +6,8 @@ client/build/
 *.nupkg
 *.asar
 out/
-db/
+db/*
+!db/init.db
 data/
 python/
 pdf/

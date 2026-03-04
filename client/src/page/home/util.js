@@ -945,6 +945,16 @@ export const sitTypeEvent = {
     } else if (that.state.numMatrixFlag == "heatmap") {
       that.com.current?.bthClickHandle(wsPointData);
     }
+  }, smallSample: ({ that, wsPointData, local }) => {
+    // 小型样品 - 10×10数字矩阵，数据已在 server.js 中按点位图重排
+    if (that.state.numMatrixFlag == "normal") {
+      that.com.current?.sitData({
+        wsPointData: wsPointData,
+        local: that.state.local
+      });
+    } else if (that.state.numMatrixFlag == "heatmap") {
+      that.com.current?.bthClickHandle(wsPointData);
+    }
   }, newHand: ({ that, wsPointData, local }) => {
     if (that.state.numMatrixFlag == "normal") {
       // wsPointData = handLine(wsPointData);

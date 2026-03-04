@@ -9,15 +9,15 @@
 // ─── WebSocket 端口配置 ───────────────────────────────────────────────────────
 export const WS_HOST = '127.0.0.1';
 export const WS_PORTS = {
-  MAIN:  19999,  // 主数据通道（坐垫 / 单传感器）
-  BACK:  19998,  // 靠背数据通道
-  HEAD:  19997,  // 头枕数据通道
+  MAIN:  19999,  // 统一数据通道（坐垫 + 靠背 + 头枕，通过 sitData/backData/headData 字段区分）
+  BACK:  19998,  // [已废弃] 靠背数据已合并到 MAIN
+  HEAD:  19997,  // [已废弃] 头枕数据已合并到 MAIN
 };
 
 export const WS_URLS = {
   MAIN: `ws://${WS_HOST}:${WS_PORTS.MAIN}`,
-  BACK: `ws://${WS_HOST}:${WS_PORTS.BACK}`,
-  HEAD: `ws://${WS_HOST}:${WS_PORTS.HEAD}`,
+  BACK: `ws://${WS_HOST}:${WS_PORTS.MAIN}`,  // 已合并到 MAIN
+  HEAD: `ws://${WS_HOST}:${WS_PORTS.MAIN}`,  // 已合并到 MAIN
 };
 
 // ─── 传感器类型标识符 ─────────────────────────────────────────────────────────
