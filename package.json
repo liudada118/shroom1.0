@@ -9,13 +9,14 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "electron-forge start",
-    "package": "electron-forge package",
-    "make": "electron-forge make",
-    "make-mac": "electron-forge make --platform darwin",
+    "prepare-pack-resources": "node scripts/sync-pack-resources.js",
+    "package": "npm run prepare-pack-resources && electron-forge package",
+    "make": "npm run prepare-pack-resources && electron-forge make",
+    "make-mac": "npm run prepare-pack-resources && electron-forge make --platform darwin",
     "make-start": "electron-forge start --platform darwin",
-    "build": "electron-builder -w",
-    "build-mac": "electron-builder -m",
-    "build-all": "electron-builder -mwl"
+    "build": "npm run prepare-pack-resources && electron-builder -w",
+    "build-mac": "npm run prepare-pack-resources && electron-builder -m",
+    "build-all": "npm run prepare-pack-resources && electron-builder -mwl"
   },
   "config": {
     "forge": {
@@ -24,7 +25,7 @@
         "asar": true,
         "extraResource": [
           "./build",
-          "./db/init.db",
+          "./pack-resources/db",
           "./config.txt"
         ],
         "ignore": [
@@ -35,6 +36,7 @@
           "^/build($|/)",
           "^/data($|/)",
           "^/db($|/)",
+          "^/pack-resources($|/)",
           "^/client($|/)",
           "^/docs($|/)"
         ]
@@ -88,8 +90,8 @@
     },
     "extraResources": [
       {
-        "from": "./db/init.db",
-        "to": "init.db"
+        "from": "./pack-resources/db",
+        "to": "db"
       }
     ],
     "mac": {
