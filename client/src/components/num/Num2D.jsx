@@ -139,7 +139,7 @@ function initWebGL(canvas, texWidth, texHeight, cellSize) {
     canvas.width = cw;
     canvas.height = ch;
 
-    const gl = canvas.getContext('webgl', { antialias: false, preserveDrawingBuffer: false });
+    const gl = canvas.getContext('webgl', { antialias: false, preserveDrawingBuffer: true });
     if (!gl) return null;
 
     const vs = createShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER_SRC);
@@ -465,9 +465,9 @@ export const Num2D = React.forwardRef((props, refs) => {
                     scheduleRender();
                 }
 
-                if (right) {
+                if (right && Array.isArray(right) && right.some(v => v > 0)) {
                     rightArr = [...right]
-                    // 标记有右脚数据
+                    // 标记有右脚数据（有非零值才算有效数据）
                     if (!hasRightFoot) setHasRightFoot(true);
                     const wsData = [...right]
                     const renderArr = [[2, 2], [2, 4], [2, 6], [2, 8], [2, 10], [2, 12], [5, 1], [5, 4], [5, 6], [5, 8], [5, 11], [5, 13], [8, 1], [8, 4], [8, 6], [8, 8], [8, 11], [8, 14], [11, 2], [11, 5], [11, 8], [11, 10], [11, 12], [11, 14], [14, 2], [14, 5], [14, 8], [14, 10], [14, 12], [14, 14], [17, 2], [17, 4], [17, 6], [17, 8], [17, 10], [17, 12], [20, 2], [20, 4], [20, 6], [20, 8], [20, 10], [20, 12], [23, 2], [23, 4], [23, 6], [23, 8], [23, 10], [23, 12], [26, 2], [26, 4], [26, 6], [26, 8], [26, 10], [26, 11], [29, 3], [29, 5], [29, 6], [29, 8], [29, 9], [29, 11]]
@@ -683,14 +683,10 @@ export const Num2D = React.forwardRef((props, refs) => {
                 <div style={{ position: 'relative' }}>
                     <canvas
                         ref={glCanvasRef}
-                        width={canvasW}
-                        height={canvasH}
                         style={{ display: 'block' }}
                     />
                     <canvas
                         ref={overlayCanvasRef}
-                        width={canvasW}
-                        height={canvasH}
                         style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
                     />
                     {isFoot && (
@@ -703,14 +699,10 @@ export const Num2D = React.forwardRef((props, refs) => {
                     <div style={{ position: 'relative' }}>
                         <canvas
                             ref={glCanvasRef2}
-                            width={16 * cs}
-                            height={32 * cs}
                             style={{ display: 'block' }}
                         />
                         <canvas
                             ref={overlayCanvasRef2}
-                            width={16 * cs}
-                            height={32 * cs}
                             style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
                         />
                         <div style={{ textAlign: 'center', marginTop: '4px' }}>右脚</div>

@@ -161,7 +161,7 @@ function initWebGL(canvas, texWidth, texHeight, cellSize) {
     canvas.width = cw;
     canvas.height = ch;
 
-    const gl = canvas.getContext('webgl', { antialias: false, preserveDrawingBuffer: false });
+    const gl = canvas.getContext('webgl', { antialias: false, preserveDrawingBuffer: true });
     if (!gl) return null;
 
     const vs = createShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER_SRC);
@@ -433,8 +433,8 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     // 初始化 WebGL
     useEffect(() => {
         if (!isRobot && glCanvasRef.current) {
-            const tw = (props.matrixName === 'hand0205') ? 15 : width;
-            const th = (props.matrixName === 'hand0205') ? 11 : height;
+            const tw = (props.matrixName === 'hand0205') ? 15 : (isFoot ? 6 : width);
+            const th = (props.matrixName === 'hand0205') ? 10 : (isFoot ? 10 : height);
             texSizeRef.current = { w: tw, h: th };
             glCtxRef.current = initWebGL(glCanvasRef.current, tw, th, cellSizeRef.current);
             if (overlayCanvasRef.current) {
@@ -708,9 +708,9 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                 scheduleRender();
             }
 
-            if (right) {
+            if (right && Array.isArray(right) && right.some(v => v > 0)) {
                 rightArr = [...right]
-                // 标记有右脚数据，触发右脚 canvas 渲染
+                // 标记有右脚数据（有非零值才算有效数据），触发右脚 canvas 渲染
                 if (!hasRightFoot) setHasRightFoot(true);
                 const tw = 6, th = 10;
                 // 确保第二个 canvas 已初始化
@@ -816,7 +816,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
 
     // 计算主 canvas 尺寸
     let mainTw = width, mainTh = height;
-    if (props.matrixName === 'hand0205') { mainTw = 15; mainTh = 11; }
+    if (props.matrixName === 'hand0205') { mainTw = 15; mainTh = 10; }
     else if (isFoot) { mainTw = 6; mainTh = 10; }
 
     const cs = cellSize;
@@ -851,14 +851,10 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                     <div style={{ position: 'relative' }}>
                         <canvas
                             ref={glCanvasRef}
-                            width={mainTw * cs}
-                            height={mainTh * cs}
                             style={{ display: 'block' }}
                         />
                         <canvas
                             ref={overlayCanvasRef}
-                            width={mainTw * cs + 30}
-                            height={mainTh * cs + 30}
                             style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
                         />
                         {isFoot && <div style={{ textAlign: 'center', marginTop: '4px' }}>左脚</div>}
@@ -870,14 +866,10 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                     <div style={{ position: 'relative' }}>
                         <canvas
                             ref={glCanvasRef2}
-                            width={6 * cs}
-                            height={10 * cs}
                             style={{ display: 'block' }}
                         />
                         <canvas
                             ref={overlayCanvasRef2}
-                            width={6 * cs + 30}
-                            height={10 * cs + 30}
                             style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
                         />
                         <div style={{ textAlign: 'center', marginTop: '4px' }}>右脚</div>
@@ -890,14 +882,10 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                         <div style={{ position: 'relative' }}>
                             <canvas
                                 ref={el => { robotGlRefs.current[idx] = el; }}
-                                width={part.w * cs}
-                                height={part.h * cs}
                                 style={{ display: 'block' }}
                             />
                             <canvas
                                 ref={el => { robotOverlayRefs.current[idx] = el; }}
-                                width={part.w * cs + 30}
-                                height={part.h * cs + 30}
                                 style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
                             />
                         </div>
