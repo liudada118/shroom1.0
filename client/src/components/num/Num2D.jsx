@@ -74,8 +74,6 @@ const FRAGMENT_SHADER_SRC = `
   uniform float u_min;
   uniform float u_max;
 
-  // 经典 jet 色谱（参考 32x32 高速 Num 组件）:
-  // 蓝(0,0,255) → 青(0,255,255) → 绿(0,255,0) → 黄(255,255,0) → 红(255,0,0)
   vec3 jet1(float minVal, float maxVal, float x) {
     if (x < minVal) x = minVal;
     if (x > maxVal) x = maxVal;
@@ -149,7 +147,6 @@ function initWebGL(canvas, texWidth, texHeight, cellSize) {
     const program = createProgram(gl, vs, fs);
     gl.useProgram(program);
 
-    // 全屏四边形
     const positions = new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]);
     const texCoords = new Float32Array([0,1, 1,1, 0,0, 0,0, 1,1, 1,0]);
 
@@ -167,7 +164,6 @@ function initWebGL(canvas, texWidth, texHeight, cellSize) {
     gl.enableVertexAttribArray(aTex);
     gl.vertexAttribPointer(aTex, 2, gl.FLOAT, false, 0, 0);
 
-    // 数据纹理
     const texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -263,6 +259,27 @@ function cleanupWebGL(glCtx) {
     gl.deleteBuffer(texBuffer);
 }
 
+// ========== 预热 WebGL ==========
+let _shaderPrewarmed2D = false;
+function prewarmWebGL() {
+    if (_shaderPrewarmed2D) return;
+    _shaderPrewarmed2D = true;
+    try {
+        const c = document.createElement('canvas');
+        c.width = 1; c.height = 1;
+        const gl = c.getContext('webgl', { antialias: false });
+        if (!gl) return;
+        const vs = createShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER_SRC);
+        const fs = createShader(gl, gl.FRAGMENT_SHADER, FRAGMENT_SHADER_SRC);
+        const prog = createProgram(gl, vs, fs);
+        gl.deleteProgram(prog);
+        if (vs) gl.deleteShader(vs);
+        if (fs) gl.deleteShader(fs);
+        const ext = gl.getExtension('WEBGL_lose_context');
+        if (ext) ext.loseContext();
+    } catch (e) { /* ignore */ }
+}
+
 
 export const Num2D = React.forwardRef((props, refs) => {
 
@@ -272,15 +289,15 @@ export const Num2D = React.forwardRef((props, refs) => {
         height = 9
     }
 
+    const isFoot = props.matrixName === 'footVideo';
+
     // 动态计算 cellSize：根据窗口大小自适应
     const [cellSize, setCellSize] = useState(() => {
-        // Num2D 的纹理尺寸：hand0205 是 36x36，footVideo 是 16x32，默认 32x32
         let tw = width, th = height;
         if (props.matrixName === 'hand0205') { tw = 36; th = 36; }
-        else if (props.matrixName === 'footVideo') { tw = 32; th = 32; } // 两个 16x32 并排
+        else if (isFoot) { tw = 34; th = 32; } // 两个 16x32 并排 + 间距
         const ww = typeof window !== 'undefined' ? window.innerWidth : 1920;
         const wh = typeof window !== 'undefined' ? window.innerHeight : 1080;
-        // 留出左侧面板(300px)和上下边距(120px)
         return calcCellSize(tw, th, ww - 300, wh - 120, 40);
     });
     const cellSizeRef = useRef(cellSize);
@@ -298,14 +315,22 @@ export const Num2D = React.forwardRef((props, refs) => {
     const glCtxRef2 = useRef(null);
     const overlayCtxRef2 = useRef(null);
 
+    // 足底：是否有右脚数据
+    const [hasRightFoot, setHasRightFoot] = useState(false);
+
     // RAF 节流
     const pendingFlatRef = useRef(null);
     const pendingFlatRef2 = useRef(null);
     const rafIdRef = useRef(null);
     const initedRef = useRef(false);
 
-    // 当前渲染的纹理尺寸（hand0205 是 36x36，footVideo 是 16x32，默认 32x32）
+    // 当前渲染的纹理尺寸
     const texSizeRef = useRef({ w: width, h: height });
+
+    // 预热 WebGL
+    useEffect(() => {
+        prewarmWebGL();
+    }, []);
 
     // 初始化 WebGL
     useEffect(() => {
@@ -330,10 +355,10 @@ export const Num2D = React.forwardRef((props, refs) => {
         };
     }, []);
 
-    // 初始化第二个 canvas（footVideo）
+    // 初始化第二个 canvas（footVideo 右脚）- 只在有右脚数据时
     useEffect(() => {
-        const cs = cellSizeRef.current;
-        if (props.matrixName === 'footVideo' && glCanvasRef2.current && !glCtxRef2.current) {
+        if (isFoot && hasRightFoot && glCanvasRef2.current && !glCtxRef2.current) {
+            const cs = cellSizeRef.current;
             glCtxRef2.current = initWebGL(glCanvasRef2.current, 16, 32, cs);
             if (overlayCanvasRef2.current) {
                 overlayCanvasRef2.current.width = 16 * cs;
@@ -341,7 +366,7 @@ export const Num2D = React.forwardRef((props, refs) => {
                 overlayCtxRef2.current = overlayCanvasRef2.current.getContext('2d');
             }
         }
-    }, [props.matrixName]);
+    }, [hasRightFoot]);
 
     // 重新初始化 WebGL（当纹理尺寸变化时）
     const reinitGL = useCallback((tw, th) => {
@@ -385,7 +410,7 @@ export const Num2D = React.forwardRef((props, refs) => {
         });
     }, []);
 
-    // ========== 数据处理函数（保持原有逻辑不变） ==========
+    // ========== 数据处理函数 ==========
 
     const changeWsData = (wsPointData) => {
         let newData = [...wsPointData]
@@ -400,7 +425,6 @@ export const Num2D = React.forwardRef((props, refs) => {
 
         wsPointData = dataG
 
-        // 直接用一维数组渲染到 WebGL
         reinitGL(width, height);
         pendingFlatRef.current = { data: wsPointData, tw: width, th: height };
         scheduleRender();
@@ -422,7 +446,7 @@ export const Num2D = React.forwardRef((props, refs) => {
         if (props.matrixName == 'hand0205') {
             // hand0205 暂不处理
         } else {
-            if (props.matrixName == 'footVideo') {
+            if (isFoot) {
                 const { left, right } = wsPointData
 
                 if (left) {
@@ -443,6 +467,8 @@ export const Num2D = React.forwardRef((props, refs) => {
 
                 if (right) {
                     rightArr = [...right]
+                    // 标记有右脚数据
+                    if (!hasRightFoot) setHasRightFoot(true);
                     const wsData = [...right]
                     const renderArr = [[2, 2], [2, 4], [2, 6], [2, 8], [2, 10], [2, 12], [5, 1], [5, 4], [5, 6], [5, 8], [5, 11], [5, 13], [8, 1], [8, 4], [8, 6], [8, 8], [8, 11], [8, 14], [11, 2], [11, 5], [11, 8], [11, 10], [11, 12], [11, 14], [14, 2], [14, 5], [14, 8], [14, 10], [14, 12], [14, 14], [17, 2], [17, 4], [17, 6], [17, 8], [17, 10], [17, 12], [20, 2], [20, 4], [20, 6], [20, 8], [20, 10], [20, 12], [23, 2], [23, 4], [23, 6], [23, 8], [23, 10], [23, 12], [26, 2], [26, 4], [26, 6], [26, 8], [26, 10], [26, 11], [29, 3], [29, 5], [29, 6], [29, 8], [29, 9], [29, 11]]
                     let newArr = new Array(16 * 32).fill(0)
@@ -452,6 +478,16 @@ export const Num2D = React.forwardRef((props, refs) => {
                     })
                     newArr = footInterp(newArr, renderArr)
 
+                    // 确保第二个 canvas 已初始化
+                    if (!glCtxRef2.current && glCanvasRef2.current) {
+                        const cs = cellSizeRef.current;
+                        glCtxRef2.current = initWebGL(glCanvasRef2.current, 16, 32, cs);
+                        if (overlayCanvasRef2.current) {
+                            overlayCanvasRef2.current.width = 16 * cs;
+                            overlayCanvasRef2.current.height = 32 * cs;
+                            overlayCtxRef2.current = overlayCanvasRef2.current.getContext('2d');
+                        }
+                    }
                     pendingFlatRef2.current = { data: newArr, tw: 16, th: 32 };
                     scheduleRender();
                 }
@@ -520,7 +556,7 @@ export const Num2D = React.forwardRef((props, refs) => {
             pendingFlatRef.current = { data: newArr, tw, th };
             scheduleRender();
         } else {
-            if (props.matrixName == 'footVideo') {
+            if (isFoot) {
                 const renderArr = [[2, 2], [2, 4], [2, 6], [2, 8], [2, 10], [2, 12], [5, 1], [5, 4], [5, 6], [5, 8], [5, 11], [5, 13], [8, 1], [8, 4], [8, 6], [8, 8], [8, 11], [8, 14], [11, 2], [11, 5], [11, 8], [11, 10], [11, 12], [11, 14], [14, 2], [14, 5], [14, 8], [14, 10], [14, 12], [14, 14], [17, 2], [17, 4], [17, 6], [17, 8], [17, 10], [17, 12], [20, 2], [20, 4], [20, 6], [20, 8], [20, 10], [20, 12], [23, 2], [23, 4], [23, 6], [23, 8], [23, 10], [23, 12], [26, 2], [26, 4], [26, 6], [26, 8], [26, 10], [26, 11], [29, 3], [29, 5], [29, 6], [29, 8], [29, 9], [29, 11]]
                 let newArr = new Array(16 * 32).fill(0)
                 renderArr.forEach((a, index) => {
@@ -544,7 +580,7 @@ export const Num2D = React.forwardRef((props, refs) => {
         sitValue
     }));
 
-    // ========== 高斯模糊（保持原有实现） ==========
+    // ========== 高斯模糊 ==========
     function boxesForGauss(sigma, n) {
         var wIdeal = Math.sqrt((12 * sigma * sigma / n) + 1);
         var wl = Math.floor(wIdeal);
@@ -637,7 +673,10 @@ export const Num2D = React.forwardRef((props, refs) => {
                     position: 'relative',
                     marginTop: '40px',
                     display: 'flex',
-                    gap: '10px'
+                    gap: '10px',
+                    justifyContent: 'center',
+                    alignItems: 'flex-start',
+                    maxWidth: 'calc(100vw - 300px)',
                 }}
             >
                 {/* 主 canvas（左脚 / 默认） */}
@@ -654,13 +693,13 @@ export const Num2D = React.forwardRef((props, refs) => {
                         height={canvasH}
                         style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
                     />
-                    {props.matrixName == 'footVideo' && (
+                    {isFoot && (
                         <div style={{ textAlign: 'center', marginTop: '4px' }}>左脚</div>
                     )}
                 </div>
 
-                {/* 第二个 canvas（footVideo 右脚） */}
-                {props.matrixName == 'footVideo' && (
+                {/* 第二个 canvas（footVideo 右脚）- 只在有右脚数据时显示 */}
+                {isFoot && hasRightFoot && (
                     <div style={{ position: 'relative' }}>
                         <canvas
                             ref={glCanvasRef2}

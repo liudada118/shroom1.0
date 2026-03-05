@@ -53,7 +53,28 @@ function calcCellSize(texW, texH, maxW, maxH, padding) {
     const availH = maxH - padding * 2;
     const cellW = Math.floor(availW / texW);
     const cellH = Math.floor(availH / texH);
-    return Math.max(8, Math.min(cellW, cellH)); // 最小 8px，取宽高中较小的
+    return Math.max(8, Math.min(cellW, cellH));
+}
+
+// 为 robot 分区计算合适的 cellSize
+// 分区横向排列，需要计算总宽度
+function calcRobotCellSize(parts, maxW, maxH) {
+    // 计算所有分区横向排列时的总宽度（以单元格数计）和最大高度
+    let totalW = 0;
+    let maxPartH = 0;
+    parts.forEach((p, idx) => {
+        totalW += p.w;
+        if (p.h > maxPartH) maxPartH = p.h;
+    });
+    // 加上间距（每个分区之间约2个单元格的间距，加上索引文字空间）
+    totalW += (parts.length - 1) * 2 + parts.length; // 间距 + 索引文字
+    maxPartH += 2; // 底部索引文字
+
+    const availW = maxW - 40;
+    const availH = maxH - 80;
+    const cellW = Math.floor(availW / totalW);
+    const cellH = Math.floor(availH / maxPartH);
+    return Math.max(12, Math.min(cellW, cellH, 60)); // 限制在 12-60 之间
 }
 
 // ========== WebGL Shaders ==========
@@ -207,7 +228,7 @@ function renderWebGL(glCtx, flatData, texWidth, texHeight) {
 function drawOverlay(ctx, flatData, texWidth, texHeight, cellSize, showNumbers, showBorder) {
     const cw = texWidth * cellSize;
     const ch = texHeight * cellSize;
-    ctx.clearRect(0, 0, cw, ch);
+    ctx.clearRect(0, 0, cw + 30, ch + 30);
 
     if (showBorder) {
         ctx.strokeStyle = 'rgba(0, 0, 40, 0.6)';
@@ -316,6 +337,28 @@ function cleanupWebGL(glCtx) {
     gl.deleteBuffer(texBuffer);
 }
 
+// ========== 预热 WebGL（创建一个临时 canvas 编译 shader，减少首次切换卡顿） ==========
+let _shaderPrewarmed = false;
+function prewarmWebGL() {
+    if (_shaderPrewarmed) return;
+    _shaderPrewarmed = true;
+    try {
+        const c = document.createElement('canvas');
+        c.width = 1; c.height = 1;
+        const gl = c.getContext('webgl', { antialias: false });
+        if (!gl) return;
+        const vs = createShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER_SRC);
+        const fs = createShader(gl, gl.FRAGMENT_SHADER, FRAGMENT_SHADER_SRC);
+        const prog = createProgram(gl, vs, fs);
+        // 清理
+        gl.deleteProgram(prog);
+        if (vs) gl.deleteShader(vs);
+        if (fs) gl.deleteShader(fs);
+        const ext = gl.getExtension('WEBGL_lose_context');
+        if (ext) ext.loseContext();
+    } catch (e) { /* ignore */ }
+}
+
 
 export const Num2DOriginal = React.forwardRef((props, refs) => {
     let width = 32, height = 32
@@ -324,16 +367,25 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
         height = 9
     }
 
+    const isRobot = props.matrixName === 'robotSY' || props.matrixName === 'robotLCF' || props.matrixName === 'robot1';
+    const isFoot = props.matrixName === 'footVideo';
+
     // 动态计算 cellSize：根据窗口大小自适应
     const [cellSize, setCellSize] = useState(() => {
-        const isRobot = props.matrixName === 'robotSY' || props.matrixName === 'robotLCF' || props.matrixName === 'robot1';
-        if (isRobot) return 40; // robot 分区较小，给大一些的 cellSize
-        let tw = width, th = height;
-        if (props.matrixName === 'hand0205') { tw = 15; th = 10; }
-        else if (props.matrixName === 'footVideo') { tw = 6; th = 10; }
         const ww = typeof window !== 'undefined' ? window.innerWidth : 1920;
         const wh = typeof window !== 'undefined' ? window.innerHeight : 1080;
-        // 留出左侧面板(300px)和上下边距(120px)
+
+        if (isRobot) {
+            // robot 分区：根据最大分区布局计算
+            // robot1 最大：后背(8x5) + 左臂(4x2) + 左肩(4x1) + 右肩(4x1) + 右臂(4x2) + 前胸(8x6) = 总宽32
+            return calcRobotCellSize(
+                [{ w: 8, h: 6 }, { w: 4, h: 2 }, { w: 4, h: 1 }, { w: 4, h: 1 }, { w: 4, h: 2 }, { w: 8, h: 6 }],
+                ww - 300, wh - 120
+            );
+        }
+        let tw = width, th = height;
+        if (props.matrixName === 'hand0205') { tw = 15; th = 10; }
+        else if (isFoot) { tw = 14; th = 10; } // 两个 6x10 并排 + 间距
         return calcCellSize(tw, th, ww - 300, wh - 120, 40);
     });
     const cellSizeRef = useRef(cellSize);
@@ -350,6 +402,9 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     const overlayCanvasRef2 = useRef(null);
     const glCtxRef2 = useRef(null);
     const overlayCtxRef2 = useRef(null);
+
+    // 足底：是否有右脚数据
+    const [hasRightFoot, setHasRightFoot] = useState(false);
 
     // robot 分区 canvas refs（最多6个分区）
     const robotGlRefs = useRef([]);
@@ -370,9 +425,13 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     const [robotParts, setRobotParts] = useState(null);
     const robotPartsRef = useRef(null);
 
+    // 预热 WebGL shader
+    useEffect(() => {
+        prewarmWebGL();
+    }, []);
+
     // 初始化 WebGL
     useEffect(() => {
-        const isRobot = props.matrixName === 'robotSY' || props.matrixName === 'robotLCF' || props.matrixName === 'robot1';
         if (!isRobot && glCanvasRef.current) {
             const tw = (props.matrixName === 'hand0205') ? 15 : width;
             const th = (props.matrixName === 'hand0205') ? 11 : height;
@@ -395,9 +454,9 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
         };
     }, []);
 
-    // 初始化第二个 canvas（footVideo）
+    // 初始化第二个 canvas（footVideo）- 只在有右脚数据时
     useEffect(() => {
-        if (props.matrixName === 'footVideo' && glCanvasRef2.current && !glCtxRef2.current) {
+        if (isFoot && hasRightFoot && glCanvasRef2.current && !glCtxRef2.current) {
             glCtxRef2.current = initWebGL(glCanvasRef2.current, 6, 10, cellSizeRef.current);
             if (overlayCanvasRef2.current) {
                 overlayCanvasRef2.current.width = 6 * cellSizeRef.current + 30;
@@ -405,7 +464,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                 overlayCtxRef2.current = overlayCanvasRef2.current.getContext('2d');
             }
         }
-    }, [props.matrixName]);
+    }, [hasRightFoot]);
 
     // 初始化 robot 分区 canvas
     useEffect(() => {
@@ -533,6 +592,14 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             robotGlCtxs.current.forEach(ctx => cleanupWebGL(ctx));
             robotGlCtxs.current = [];
             robotOverlayCtxs.current = [];
+
+            // 动态计算 robot 的 cellSize
+            const ww = typeof window !== 'undefined' ? window.innerWidth : 1920;
+            const wh = typeof window !== 'undefined' ? window.innerHeight : 1080;
+            const newCs = calcRobotCellSize(partsMeta, ww - 300, wh - 120);
+            cellSizeRef.current = newCs;
+            setCellSize(newCs);
+
             setRobotParts(partsMeta);
         }
 
@@ -643,6 +710,8 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
 
             if (right) {
                 rightArr = [...right]
+                // 标记有右脚数据，触发右脚 canvas 渲染
+                if (!hasRightFoot) setHasRightFoot(true);
                 const tw = 6, th = 10;
                 // 确保第二个 canvas 已初始化
                 if (!glCtxRef2.current && glCanvasRef2.current) {
@@ -745,9 +814,6 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
         };
     }, []);
 
-    const isRobot = props.matrixName === 'robotSY' || props.matrixName === 'robotLCF' || props.matrixName === 'robot1';
-    const isFoot = props.matrixName === 'footVideo';
-
     // 计算主 canvas 尺寸
     let mainTw = width, mainTh = height;
     if (props.matrixName === 'hand0205') { mainTw = 15; mainTh = 11; }
@@ -775,7 +841,9 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                     display: 'flex',
                     flexWrap: 'wrap',
                     gap: '10px',
-                    alignItems: 'flex-start'
+                    alignItems: 'flex-start',
+                    justifyContent: 'center',
+                    maxWidth: 'calc(100vw - 300px)',
                 }}
             >
                 {/* 非 robot 类型：主 canvas */}
@@ -797,8 +865,8 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                     </div>
                 )}
 
-                {/* footVideo 右脚 */}
-                {isFoot && (
+                {/* footVideo 右脚 - 只在有右脚数据时显示 */}
+                {isFoot && hasRightFoot && (
                     <div style={{ position: 'relative' }}>
                         <canvas
                             ref={glCanvasRef2}
@@ -818,7 +886,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
 
                 {/* robot 分区 canvas */}
                 {isRobot && robotParts && robotParts.map((part, idx) => (
-                    <div key={part.key} style={{ marginRight: '20px' }}>
+                    <div key={part.key} style={{ margin: '0 5px' }}>
                         <div style={{ position: 'relative' }}>
                             <canvas
                                 ref={el => { robotGlRefs.current[idx] = el; }}
