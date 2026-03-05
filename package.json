@@ -141,6 +141,10 @@
         "to": "db"
       }
     ],
+    "icon": "./logo.ico",
+    "win": {
+      "icon": "./logo.ico"
+    },
     "nsis": {
       "oneClick": false,
       "perMachine": true,
