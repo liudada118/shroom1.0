@@ -789,21 +789,6 @@ class Title extends React.Component {
           }}
         >固定</Button> : ''}
 
-        <Button className='titleButton'
-          style={this.state.resetZero ? { backgroundColor: '#52c41a', color: '#fff' } : {}}
-          onClick={() => {
-            if (!this.state.resetZero) {
-              this.setState({ resetZero: true })
-              this.props.changeAside({ resetZero: true })
-              this.props.wsSendObj({ resetZero: true })
-            } else {
-              this.setState({ resetZero: false })
-              this.props.changeAside({ resetZero: false })
-              this.props.wsSendObj({ resetZero: false })
-            }
-          }}
-        >{this.state.resetZero ? t('cancelZero') : t('resetZero')}</Button>
-
         <Button onClick={() => {
           this.props.wsSendObj({
             sitClose: true,
