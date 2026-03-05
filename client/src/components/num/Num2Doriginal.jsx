@@ -199,8 +199,8 @@ function drawOverlay(ctx, flatData, texWidth, texHeight, cellSize, showNumbers, 
     ctx.clearRect(0, 0, cw, ch);
 
     if (showBorder) {
-        ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
-        ctx.lineWidth = 0.5;
+        ctx.strokeStyle = 'rgba(0, 0, 40, 0.6)';
+        ctx.lineWidth = 1;
         for (let i = 0; i <= texHeight; i++) {
             ctx.beginPath();
             ctx.moveTo(0, i * cellSize);
@@ -218,19 +218,18 @@ function drawOverlay(ctx, flatData, texWidth, texHeight, cellSize, showNumbers, 
     if (showNumbers) {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.font = `${Math.max(8, cellSize * 0.5)}px monospace`;
+        ctx.font = `bold ${Math.max(10, cellSize * 0.45)}px monospace`;
 
         for (let i = 0; i < texHeight; i++) {
             for (let j = 0; j < texWidth; j++) {
                 const val = flatData[i * texWidth + j];
-                if (val > 0) {
-                    ctx.fillStyle = '#fff';
-                    ctx.fillText(
-                        Math.round(val).toString(),
-                        j * cellSize + cellSize / 2,
-                        i * cellSize + cellSize / 2
-                    );
-                }
+                const rounded = Math.round(val);
+                ctx.fillStyle = '#fff';
+                ctx.fillText(
+                    rounded.toString(),
+                    j * cellSize + cellSize / 2,
+                    i * cellSize + cellSize / 2
+                );
             }
         }
     }
@@ -242,8 +241,8 @@ function drawOverlayWithIndex(ctx, flatData, texWidth, texHeight, cellSize) {
     const ch = texHeight * cellSize;
     ctx.clearRect(0, 0, cw, ch);
 
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
-    ctx.lineWidth = 0.5;
+    ctx.strokeStyle = 'rgba(0, 0, 40, 0.6)';
+    ctx.lineWidth = 1;
     for (let i = 0; i <= texHeight; i++) {
         ctx.beginPath();
         ctx.moveTo(0, i * cellSize);
@@ -259,7 +258,7 @@ function drawOverlayWithIndex(ctx, flatData, texWidth, texHeight, cellSize) {
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = `${Math.max(8, cellSize * 0.45)}px monospace`;
+    ctx.font = `bold ${Math.max(10, cellSize * 0.45)}px monospace`;
 
     for (let i = 0; i < texHeight; i++) {
         for (let j = 0; j < texWidth; j++) {
