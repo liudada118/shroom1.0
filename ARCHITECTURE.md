@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-03-04
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-03-05
 
 ## 1. 项目概述
 
@@ -318,6 +318,9 @@ graph TD
 | 2026-03-04 | 配置路径修复 | `config.txt` 运行时路径固定为 `resources/config.txt`，不再回退到 `app.asar/config.txt` |
 | 2026-03-04 | 打包资源归位（init.db） | 新增打包前同步脚本，仅将 `init.db` 打入 `resources/db/init.db`，不再落到 `resources/init.db` |
 | 2026-03-04 | 配置文件加载策略调整 | 启动时仅在 `resources/config.txt` 存在时读取，不再自动复制或创建 `config.txt` |
+| 2026-03-05 | 小型样品传感器支持 | 新增 smallSample 传感器类型，10×10 数值矩阵显示，单串口选择，Excel 点位映射 |
+| 2026-03-05 | 下载通知弹窗修复 | 使用 message.useMessage() + HOC 包装解决 antd v5 在 Electron 中 CSS-in-JS 渲染问题 |
+| 2026-03-05 | 全传感器类型清零功能 | 在标题栏添加统一清零/取消清零按钮，移除 Drawer 中的传感器类型限制 |
 
 ## 9. 更新日志
 
@@ -331,6 +334,9 @@ graph TD
 | 2026-03-04 | 修复缺陷 | 修复 `config.txt` 路径回退逻辑，确保打包后优先使用 `resources/config.txt` |
 | 2026-03-04 | 配置变更 | 增加 `prepare-pack-resources` 脚本，固定将 `init.db` 打包到 `resources/db` 目录 |
 | 2026-03-04 | 修复缺陷 | 去除启动时自动复制 `config.txt` 的逻辑，避免打包后首次启动自动生成配置文件 |
+| 2026-03-05 | 新增功能 | 添加小型样品（smallSample）传感器类型：server.js 协议处理 + Excel 点位映射 + smallSample.jsx 10×10 矩阵组件 + Title.jsx 单串口选择 |
+| 2026-03-05 | 修复缺陷 | 修复 antd v5 message.info() 在 Electron 中不渲染的问题，使用 message.useMessage() + HOC 方案 |
+| 2026-03-05 | 新增功能 | 为所有传感器类型添加清零功能：标题栏统一清零按钮（带状态高亮）+ Drawer 面板移除类型限制 |
 
 *变更类型：`新增功能` / `优化重构` / `修复缺陷` / `配置变更` / `文档更新` / `依赖升级` / `初始化`*
 
