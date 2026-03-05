@@ -1,0 +1,37 @@
+sequenceDiagram
+    participant User
+    participant Frontend (React)
+    participant Backend (Node.js)
+    participant SerialPort
+    participant Database (SQLite)
+
+    User->>Frontend: 1. Click "Open Port COM3"
+    Frontend->>Backend: 2. WebSocket: { "port": "COM3" }
+    Backend->>SerialPort: 3. serialHelper.open("COM3")
+    activate SerialPort
+
+    loop Data Acquisition
+        SerialPort-->>Backend: 4. Raw Buffer Frame
+        Backend->>Backend: 5. dataProcessor.process(buffer)
+        Note right of Backend: - Line Mapping<br/>- Zero Calibration<br/>- Smoothing
+        Backend->>Frontend: 6. WebSocket: { type: "pressure_data", payload: { matrix, stats } }
+        Frontend->>Frontend: 7. usePressureData.updateFromMatrix()
+        Note left of Frontend: Re-render Heatmap & 3D Model
+
+        alt Recording Active
+            Backend->>Database: 8. dbHelper.insertFrame()
+            activate Database
+            Database-->>Backend: 9. Success
+            deactivate Database
+        end
+    end
+    deactivate SerialPort
+
+    User->>Frontend: 10. Click "Download CSV"
+    Frontend->>Backend: 11. WebSocket: { "download": "2026-03-01" }
+    Backend->>Database: 12. dbHelper.queryFramesByDate()
+    activate Database
+    Database-->>Backend: 13. Return Frames
+    deactivate Database
+    Backend->>Backend: 14. csvHelper.exportFramesToCsv()
+    Backend->>Frontend: 15. WebSocket: { type: "download_ready", payload: { path } }

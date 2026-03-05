@@ -1,0 +1,644 @@
+.localCar.content1.foot {
+    background-color: rgba(146,243,247, 0.2);
+
+    .showCard {
+        width: 100% !important;
+    }
+
+    .pronation {
+        width: 100% !important;
+    }
+
+    z-index : 100;
+    position : fixed;
+    color : red;
+    left: 0;
+    top : 60%;
+    // height: 40%;
+    // width: 100%;
+
+    .footCard1 {
+        height: 100%;
+    }
+
+    #chart1 {
+        height: 100%;
+    }
+
+    .testStart {
+        width: 200px;
+        height: 200px;
+        position: absolute;
+        z-index: 100;
+        color: white;
+        border-radius: 0 0 200px 0;
+        background-color: olivedrab;
+        font: 14px/1.5 "Helvetica Neue", Helvetica, Arial, "Microsoft Yahei", "Hiragino Sans GB", "Heiti SC", "WenQuanYi Micro Hei", sans-serif;
+        font-size: 36px;
+    }
+
+    .testStartText {
+        padding: 50px;
+    }
+
+    .contentItem {
+        height: 50%;
+        flex: 0 0 50%;
+        display: flex;
+        flex-direction: 'column'
+    }
+
+    .light {
+        position: absolute;
+        z-index: 101;
+        font-size: 40px;
+        /* left : 20%; */
+        color: white;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-flow: column;
+        background-color: rgba(0, 0, 0, 0.5);
+        /* opacity: 0.9; */
+        display: none
+    }
+
+    .lightIcon {
+        font-size: 60px;
+    }
+
+    .footModel {
+        height: calc(30% - 8px);
+    }
+
+    .footModel>div {
+        padding: 8px !important
+    }
+
+    /* .isOK{
+       z-index : 100;
+       position : absolute;
+       width: 60%;
+       display: flex;
+       align-items : center;
+       justify-content : center
+        
+   }
+   .isOK img{
+   width: 80%;
+   height: 80%; 
+   } */
+    @keyframes ok {
+        0% {
+            transform: scale(0)
+        }
+
+        100% {
+            transform: scale(1)
+        }
+    }
+
+    .progerssSlide {
+        // width: 80%;
+        padding: 10px;
+        font-size: 16px;
+    }
+
+    .ant-slider{
+        height: unset!important;
+    }
+    .chairSwitch {
+        width: 100%;
+        height: 50%;
+        display: flex;
+    }
+
+    .switchs {
+        // width: 30%;
+        height: 100%;
+        flex: 3;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .switch {
+        flex: 1;
+    }
+
+    .light img {
+        width: 15%;
+        animation: ok 1s;
+        /* transition : all 1s; */
+        /* height: 80%; */
+    }
+
+    .twoProgressImg {
+        position: relative;
+    }
+
+    .twoProgressText {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: white;
+        font-size: 80px;
+        font-weight: bold
+    }
+
+    .threeProgressImg {
+        position: absolute;
+        /* z-index: 1233232; */
+        display: flex;
+        /* padding : 20px */
+        color: #fff;
+        width: 100%;
+        height: 100%;
+        align-items: center;
+        justify-content: center;
+        background-color: #070822;
+    }
+
+    .threeLeftInfo {
+        border-right: 1px solid #999;
+        display: flex;
+        flex-flow: column;
+        height: 100%;
+        /* padding-right: 10%; */
+    }
+
+    .threeRightInfo {
+        display: flex;
+        flex-flow: column;
+        height: 100%;
+        /* padding-left: 10%; */
+    }
+
+    .threeLeftText {
+        text-align: center;
+        font-size: 24px;
+        font-weight: 600;
+    }
+
+    .threeRightText {
+        text-align: center;
+        font-size: 24px;
+        font-weight: 600;
+    }
+
+    .threeProgress {
+        background-color: #070b21;
+        border: 0px;
+        width: 100%;
+        height: 100%;
+        position: absolute;
+    }
+
+    .threeLeftInfo {
+        padding-right: 10%;
+    }
+
+    .threeRightInfo {
+        padding-left: 10%;
+    }
+
+    .leftIcon {
+        display: inline;
+        color: green;
+        /* background-color : 'white' ; */
+        display: inline
+    }
+
+    .rightIcon {
+        display: inline;
+        color: green;
+        /* background-color : 'white' ; */
+        display: inline
+    }
+
+    .threeProgress>div {
+        height: 100%;
+    }
+
+    .threeRightImg {
+        height: 80%;
+    }
+
+    .threeRightImg img {
+        height: 100%;
+    }
+
+    .threeLeftImg {
+        height: 80%;
+    }
+
+    .threeLeftImg img {
+        height: 100%;
+    }
+
+    .contents {
+        z-index: 100;
+        position: absolute;
+        color: '#468493';
+        right: 0;
+        top: 0;
+        height: 100%;
+        width: 35%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+
+    .contentsList {
+        color: #fff;
+        font-size: 48px;
+        list-style: none;
+    }
+
+    .TextColor {
+        background: linear-gradient(to right, #266689, #67a7bb);
+        -webkit-background-clip: text;
+        color: transparent;
+    }
+
+    .trainTypeInfo img {
+        width: 100%;
+    }
+
+
+    .infoCard1 {
+        display: flex;
+        height: 30%;
+    }
+
+    .footbgc {
+        // background-color: #10152b;
+        // border: 2px solid black
+    }
+
+    .footTypeInfo {
+        font-size: 38px;
+        font-weight: bold
+    }
+
+    .trainTypeInfo {
+        font-size: 38px;
+        font-weight: bold
+    }
+
+    .trainCard {
+        background-color: #10152b;
+    }
+
+    .textGradeColor {
+        background: linear-gradient(to right, #266689, #67a7bb);
+        -webkit-background-clip: text;
+        color: transparent;
+        font-size: 24px;
+        margin-top: 36px;
+    }
+
+    .whiteColor {
+        color: #83889d;
+        font-size: 16px;
+    }
+
+    .move {
+        height: 20%;
+    }
+
+    .detailInfoCard {
+        display: flex;
+        height: 100% !important;
+        // width: 70%!important;
+        flex: 7;
+        position: relative;
+    }
+
+    .switch {
+        width: 30%;
+    }
+
+    .trainInfo {
+        display: flex;
+        flex-wrap: nowrap;
+        height: 40%;
+    }
+
+    .pronationInfo {
+        font-size: 60px;
+        font-weight: bold;
+        /* width: 60%; */
+    }
+
+    .trainProportion {
+        font-size: 60px;
+        font-weight: bold
+    }
+
+    .cordCard {
+        /* display : flex; */
+        /* align-items : center;
+       justify-content : center; */
+        position: relative;
+        width: 20%;
+        text-align: center;
+    }
+
+    .cordProgress {
+        margin-top: 20px;
+        width: 16px;
+        height: 75%;
+        background: linear-gradient(to bottom, #266689, #67a7bb);
+        border-radius: 8px;
+        position: absolute;
+        left: 50%;
+        transform: translate(-50%)
+    }
+
+    .footInfo {
+        position: relative;
+        height: 60%;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .footProgress {
+        margin-top: 22px;
+        height: 16px;
+        width: 100%;
+        background: linear-gradient(to right, #266689, #67a7bb);
+        border-radius: 8px;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .cordProgressAddress {
+        height: 8%;
+        width: 16px;
+        background-color: #2dd5d1;
+        border-radius: 8px;
+        position: absolute;
+        bottom: 0;
+    }
+
+    .footProgressAddress {
+        height: 16px;
+        width: 100%;
+        transform: translateX(-100%);
+        background-color: #2dd5d1;
+        border-radius: 8px;
+        position: absolute;
+        //    transition: transform 2s linear
+    }
+
+    .train {
+        width: 30%;
+    }
+
+    .footCard {
+        height: 100%;
+    }
+
+    .showCard {
+        width: 55%;
+    }
+
+    .trainCard {
+        width: 45%;
+    }
+
+    .moreInfoCard {
+        width: 80%;
+    }
+
+    .pronation {
+        width: 70%;
+    }
+
+    .flexcenter {
+        display: flex;
+        position: relative;
+        align-items: center;
+        justify-content: end!important;
+        padding-bottom: 1.3rem;
+    }
+
+    .flexTitle {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+    }
+
+    .inputCard {
+        display: flex;
+        padding: 40px 40px;
+        background-color: rgb(16, 21, 43);
+        border-radius: 20px;
+        z-index: 20;
+    }
+
+    .breathes {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+    }
+
+    .breathe1 {
+        left: 45%;
+        top: 63%;
+    }
+
+    .breathe2 {
+        left: 65%;
+        top: 63%;
+    }
+    .breathe3 {
+        left: 66%;
+        top: 48%;
+    }
+
+    .breathe4 {
+        left: 68%;
+        top: 33%;
+    }
+    .breathe5 {
+        left: 65%;
+        top: 63%;
+    }
+
+    .breathe {
+        width: 30px;
+        height: 30px;
+        border: 1px solid #bb050e;
+        position: absolute;
+        border-radius: 50%;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+        overflow: hidden;
+        -webkit-animation-timing-function: ease-in-out;
+        -webkit-animation-name: breathe;
+        -webkit-animation-duration: 1500ms;
+        -webkit-animation-iteration-count: infinite;
+        -webkit-animation-direction: alternate;
+        // box-shadow: 0 1px 30px #0093df, 0 1px 20px #0093df inset;
+    }
+
+    // .breathe-div {
+    //     width: 30px;
+    //     height: 30px;
+    //     border: 1px solid #2b92d4;
+    //     border-radius: 50%;
+    //     text-align: center;
+    //     cursor: pointer;
+    //     // margin:150px auto;
+    //     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    //     overflow: hidden;
+    //     -webkit-animation-timing-function: ease-in-out;
+    //     -webkit-animation-name: breathe;
+    //     -webkit-animation-duration: 1500ms;
+    //     -webkit-animation-iteration-count: infinite;
+    //     -webkit-animation-direction: alternate;
+    //     box-shadow: 0 1px 30px #0093df, 0 1px 20px #0093df inset;
+    // }
+    .switchLevels {
+        display: flex;
+    }
+
+    .switchlevel {
+        width: 4px;
+        height: 20px;
+        margin-right: 2px;
+    }
+
+   
+
+    .ant-slider-track {
+        // background: linear-gradient(to right, "#468493", '#65d4df')!important;
+        background-color: #65d4df!important;
+    }
+
+    .ant-slider-rail {
+        background-color: #468493!important
+    }
+
+
+}
+
+@keyframes breathe {
+    0% {
+        opacity: .7;
+        box-shadow: 0 1px 30px #bb050e, 0 1px 20px #bb050e inset;
+    }
+
+    100% {
+        opacity: 1;
+        border: 1px solid rgba(187, 5, 14, 0.7);
+        box-shadow: 0 1px 40px 20px #bb050e, 0 1px 30px 20px #bb050e inset;
+    }
+}
+
+.content1.localCar.foot {
+    @media screen and (min-width: 768px) {
+        right: 0;
+        top: 0;
+        // width: 35%;
+        // height: 100%;
+        left: unset;
+    }
+
+    .inputCard {
+        @media screen and (min-width: 768px) {
+            display: flex;
+            padding: 80px 160px;
+            background-color: rgb(16, 21, 43);
+            border-radius: 20px;
+            z-index: 20;
+        }
+    }
+
+    .textGradeColor {
+        @media screen and (min-width: 768px) {
+            font-size: 36px;
+        }
+    }
+
+    .whiteColor {
+        @media screen and (min-width: 768px) {
+            font-size: 20px;
+        }
+
+        @media screen and (min-width: 1380px) {
+            font-size: 1.2rem!important;
+        }
+    }
+
+    .cordProgress {
+        @media screen and (min-width: 768px) {
+            width: 1.2rem!important;
+            border-radius: 12px;
+        }
+    }
+
+    .cordProgressAddress {
+        @media screen and (min-width: 768px) {
+            width: 24px;
+        }
+    }
+
+    .footProgressAddress {
+        @media screen and (min-width: 768px) {
+            height: 24px;
+        }
+    }
+
+    .footProgress {
+        @media screen and (min-width: 768px) {
+            height: 24px;
+            border-radius: 12px;
+        }
+    }
+
+    .cordProgressAddress {
+        @media screen and (min-width: 768px) {
+            border-radius: 12px;
+        }
+    }
+
+    .footProgressAddress {
+        @media screen and (min-width: 768px) {
+            border-radius: 12px;
+        }
+    }
+
+    .pronationInfo {
+        @media screen and (min-width: 768px) {
+            font-size: 30px !important;
+        }
+    }
+
+    .leg.textGradeColor {
+        @media screen and (min-width: 768px) {
+            font-size: 28px;
+        }
+    }
+
+    .item1 {
+        @media screen and (min-width: 768px) {
+            flex: 0 0 32.5%;
+        }
+    }
+
+    .item2 {
+        @media screen and (min-width: 768px) {
+            flex: 0 0 32.5%;
+        }
+    }
+
+    .item3 {
+        @media screen and (min-width: 768px) {
+            flex: 0 0 32.5%;
+        }
+    }
+}

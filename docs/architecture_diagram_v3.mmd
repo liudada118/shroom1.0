@@ -1,0 +1,46 @@
+graph TD
+    subgraph "用户界面 (UI)"
+        A["React 19 + Vite"]
+        B["Zustand Store"]
+        C["3D 视图 (InstancedMesh)"]
+        D["2D 热力图"]
+        E["控制面板"]
+    end
+
+    subgraph "渲染进程 (Renderer Process)"
+        direction LR
+        F["Preload.js"] -- IPC --> G
+        A -- "读/写" --> B
+        C -- "订阅" --> B
+        D -- "订阅" --> B
+        E -- "发送指令" --> B
+        B -- "通过 IPC 调用" --> F
+    end
+
+    subgraph "主进程 (Main Process)"
+        direction TB
+        G["index.js + IPC Bridge"]
+        H["WebSocket 服务器"]
+        I["better-sqlite3 数据库"]
+        J["串口通信模块"]
+        K["自动更新 (electron-updater)"]
+        L["数据处理管线"]
+        M["配置/日志/授权模块"]
+
+        G -- "启动/协调" --> H
+        G -- "启动/协调" --> J
+        G -- "启动/协调" --> K
+        J -- "原始数据" --> L
+        L -- "处理后数据" --> H
+        L -- "写入" --> I
+        H -- "广播数据" --> F
+        M -- "提供服务" --> G
+    end
+
+    subgraph "外部"
+        N["硬件传感器"]
+        O["GitHub Releases"]
+    end
+
+    N -- USB --> J
+    K -- HTTPS --> O

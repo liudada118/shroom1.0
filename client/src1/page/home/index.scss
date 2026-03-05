@@ -1,0 +1,45 @@
+.home{
+    background-color: #14142B;
+    height: 100%;
+    // width: 100vw;
+ 
+}
+
+.setIcons{
+    position: absolute;
+    top: 10%;
+    right: 3%;
+}
+
+.setIconItem{
+    background-color: #191932;
+    padding: 10px 10px;
+    border-radius: 4px;
+    margin-bottom: 10px;
+}
+
+.setIconItem1{
+    display: f;
+}
+
+.setIconItem:end{
+    margin-bottom: 0;
+}
+
+.setIcon{
+    width: 18px;
+   
+}
+
+.no-click-slider .ant-slider-rail,
+.no-click-slider .ant-slider-track,
+.no-click-slider .ant-slider-handle {
+  pointer-events: none; /* 禁用点击事件 */
+}
+.setIcon img{
+    width: 100%;
+}
+
+.marginB10{
+    margin-bottom: 10px;
+}

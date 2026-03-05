@@ -1,0 +1,369 @@
+.license-page {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  padding: 0;
+}
+
+.license-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 24px 32px;
+  background: rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.license-header-icon {
+  font-size: 36px;
+  color: #5b8def;
+}
+
+.license-header-status {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.license-tabs {
+  padding: 0 24px;
+}
+
+.license-tabs .ant-tabs-nav {
+  margin-bottom: 0;
+}
+
+.license-tabs .ant-tabs-tab {
+  color: rgba(255, 255, 255, 0.6) !important;
+  font-size: 15px;
+  padding: 12px 20px;
+}
+
+.license-tabs .ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: #5b8def !important;
+}
+
+.license-tabs .ant-tabs-ink-bar {
+  background: #5b8def;
+}
+
+.license-content {
+  padding: 24px 8px;
+}
+
+/* 传感器选择卡片 */
+.sensor-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+}
+
+.sensor-card .ant-card-head {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.sensor-card .ant-card-head-title {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.sensor-card .ant-card-body {
+  max-height: 65vh;
+  overflow-y: auto;
+}
+
+/* 快捷预设 */
+.preset-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.preset-tag {
+  cursor: pointer;
+  border: 1px dashed rgba(91, 141, 239, 0.4);
+  background: rgba(91, 141, 239, 0.08);
+  color: #5b8def;
+  transition: all 0.2s;
+  border-radius: 6px;
+  padding: 2px 12px;
+}
+
+.preset-tag:hover {
+  background: rgba(91, 141, 239, 0.2);
+  border-color: #5b8def;
+}
+
+/* 传感器分组 */
+.sensor-group {
+  margin-bottom: 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 8px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.sensor-group-header {
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.sensor-group-header .ant-checkbox-wrapper {
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 500;
+}
+
+.group-icon {
+  margin-right: 6px;
+  font-size: 16px;
+}
+
+.group-name {
+  margin-right: 8px;
+}
+
+.sensor-group-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 0;
+  padding-left: 24px;
+}
+
+.sensor-checkbox {
+  width: 180px;
+  margin: 4px 0 !important;
+}
+
+.sensor-checkbox .ant-checkbox-wrapper {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.sensor-checkbox span {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* 时间设置卡片 */
+.time-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  position: sticky;
+  top: 24px;
+}
+
+.time-card .ant-card-head {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.time-card .ant-card-head-title {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.time-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.time-section > .ant-typography {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.time-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.time-preset-tag {
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.7);
+  transition: all 0.2s;
+  border-radius: 6px;
+  padding: 2px 12px;
+}
+
+.time-preset-tag:hover {
+  background: rgba(91, 141, 239, 0.15);
+  border-color: #5b8def;
+  color: #5b8def;
+}
+
+.time-preset-tag.active {
+  background: rgba(91, 141, 239, 0.2);
+  border-color: #5b8def;
+  color: #5b8def;
+}
+
+.expire-preview {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+}
+
+/* 授权摘要 */
+.summary-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.summary-section .ant-typography h5 {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.summary-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.summary-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0 8px;
+}
+
+/* 生成按钮 */
+.generate-btn {
+  height: 48px;
+  font-size: 16px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #5b8def, #6c5ce7);
+  border: none;
+  box-shadow: 0 4px 15px rgba(91, 141, 239, 0.3);
+}
+
+.generate-btn:hover {
+  background: linear-gradient(135deg, #6c9bf0, #7d6de8) !important;
+  box-shadow: 0 6px 20px rgba(91, 141, 239, 0.4);
+}
+
+/* 密钥输出 */
+.key-output {
+  margin-top: 16px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  border: 1px solid rgba(91, 141, 239, 0.2);
+}
+
+.key-textarea {
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  background: rgba(0, 0, 0, 0.3) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: #5b8def !important;
+  border-radius: 6px;
+  margin-top: 4px;
+}
+
+/* 解析结果 */
+.parse-result {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.parse-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+}
+
+.parse-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 0;
+}
+
+.parse-empty {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 200px;
+}
+
+/* 暗色主题适配 */
+.license-page .ant-card {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.license-page .ant-card-head-title,
+.license-page .ant-typography {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.license-page .ant-input,
+.license-page .ant-input-number,
+.license-page .ant-input-number-input {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
+.license-page .ant-input-number-handler-wrap {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.license-page .ant-divider {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.license-page .ant-checkbox-wrapper {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.license-page .ant-switch {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.license-page .ant-switch-checked {
+  background: #5b8def;
+}
+
+/* 滚动条 */
+.sensor-card .ant-card-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sensor-card .ant-card-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sensor-card .ant-card-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+
+.sensor-card .ant-card-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* 响应式 */
+@media (max-width: 992px) {
+  .license-header {
+    flex-wrap: wrap;
+    padding: 16px;
+  }
+
+  .license-content {
+    padding: 16px 4px;
+  }
+
+  .time-card {
+    position: static;
+  }
+}
