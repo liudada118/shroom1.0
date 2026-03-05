@@ -161,6 +161,26 @@ module.exports = { sendToRenderer };
 // ============================================================
 // 静态文件服务器
 // ============================================================
+function resolveBuildRoot() {
+  const candidates = app.isPackaged
+    ? [
+        // electron-forge 产物通常会把 build 放在 resources/build
+        path.join(process.resourcesPath, "build"),
+        // electron-builder 默认会把 build 放在 app.asar/build
+        path.join(app.getAppPath(), "build"),
+      ]
+    : [path.join(__dirname, "build"), path.join(process.cwd(), "build")];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(path.join(candidate, "index.html"))) {
+      return candidate;
+    }
+  }
+
+  // 保底返回第一个候选路径，便于输出可排查的错误日志
+  return candidates[0];
+}
+
 function startStaticServer({ hostname, port, win }) {
   const MIME_TYPES = {
     ".html": "text/html",
@@ -179,8 +199,8 @@ function startStaticServer({ hostname, port, win }) {
     ".map": "application/json",
   };
 
-  const staticRoot = app.isPackaged ? process.resourcesPath : __dirname;
-  const buildRoot = path.join(staticRoot, "build");
+  const buildRoot = resolveBuildRoot();
+  console.log(`[Main] Static build root: ${buildRoot}`);
 
   const server = http.createServer((req, res) => {
     const urlPath = req.url === "/" ? "index.html" : req.url.split("?")[0].replace(/^\/+/, "");
