@@ -47,6 +47,15 @@ function footInterp(arr, footPointArr) {
 }
 let leftArr = [], rightArr = []
 
+// ========== 动态计算 cellSize ==========
+function calcCellSize(texW, texH, maxW, maxH, padding) {
+    const availW = maxW - padding * 2;
+    const availH = maxH - padding * 2;
+    const cellW = Math.floor(availW / texW);
+    const cellH = Math.floor(availH / texH);
+    return Math.max(8, Math.min(cellW, cellH));
+}
+
 // ========== WebGL Shaders ==========
 const VERTEX_SHADER_SRC = `
   attribute vec2 a_position;
@@ -107,7 +116,6 @@ function createShader(gl, type, source) {
     gl.shaderSource(shader, source);
     gl.compileShader(shader);
     if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-        console.error('Shader compile error:', gl.getShaderInfoLog(shader));
         gl.deleteShader(shader);
         return null;
     }
@@ -120,7 +128,6 @@ function createProgram(gl, vs, fs) {
     gl.attachShader(program, fs);
     gl.linkProgram(program);
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-        console.error('Program link error:', gl.getProgramInfoLog(program));
         gl.deleteProgram(program);
         return null;
     }
@@ -264,7 +271,20 @@ export const Num2D = React.forwardRef((props, refs) => {
         width = 10
         height = 9
     }
-    const cellSize = 20;
+
+    // 动态计算 cellSize：根据窗口大小自适应
+    const [cellSize, setCellSize] = useState(() => {
+        // Num2D 的纹理尺寸：hand0205 是 36x36，footVideo 是 16x32，默认 32x32
+        let tw = width, th = height;
+        if (props.matrixName === 'hand0205') { tw = 36; th = 36; }
+        else if (props.matrixName === 'footVideo') { tw = 32; th = 32; } // 两个 16x32 并排
+        const ww = typeof window !== 'undefined' ? window.innerWidth : 1920;
+        const wh = typeof window !== 'undefined' ? window.innerHeight : 1080;
+        // 留出左侧面板(300px)和上下边距(120px)
+        return calcCellSize(tw, th, ww - 300, wh - 120, 40);
+    });
+    const cellSizeRef = useRef(cellSize);
+    cellSizeRef.current = cellSize;
 
     // WebGL refs
     const glCanvasRef = useRef(null);
@@ -289,13 +309,14 @@ export const Num2D = React.forwardRef((props, refs) => {
 
     // 初始化 WebGL
     useEffect(() => {
+        const cs = cellSizeRef.current;
         if (glCanvasRef.current) {
             const tw = width, th = height;
             texSizeRef.current = { w: tw, h: th };
-            glCtxRef.current = initWebGL(glCanvasRef.current, tw, th, cellSize);
+            glCtxRef.current = initWebGL(glCanvasRef.current, tw, th, cs);
             if (overlayCanvasRef.current) {
-                overlayCanvasRef.current.width = tw * cellSize;
-                overlayCanvasRef.current.height = th * cellSize;
+                overlayCanvasRef.current.width = tw * cs;
+                overlayCanvasRef.current.height = th * cs;
                 overlayCtxRef.current = overlayCanvasRef.current.getContext('2d');
             }
         }
@@ -311,11 +332,12 @@ export const Num2D = React.forwardRef((props, refs) => {
 
     // 初始化第二个 canvas（footVideo）
     useEffect(() => {
+        const cs = cellSizeRef.current;
         if (props.matrixName === 'footVideo' && glCanvasRef2.current && !glCtxRef2.current) {
-            glCtxRef2.current = initWebGL(glCanvasRef2.current, 16, 32, cellSize);
+            glCtxRef2.current = initWebGL(glCanvasRef2.current, 16, 32, cs);
             if (overlayCanvasRef2.current) {
-                overlayCanvasRef2.current.width = 16 * cellSize;
-                overlayCanvasRef2.current.height = 32 * cellSize;
+                overlayCanvasRef2.current.width = 16 * cs;
+                overlayCanvasRef2.current.height = 32 * cs;
                 overlayCtxRef2.current = overlayCanvasRef2.current.getContext('2d');
             }
         }
@@ -326,13 +348,14 @@ export const Num2D = React.forwardRef((props, refs) => {
         if (texSizeRef.current.w === tw && texSizeRef.current.h === th && glCtxRef.current) return;
         texSizeRef.current = { w: tw, h: th };
         cleanupWebGL(glCtxRef.current);
-        glCtxRef.current = initWebGL(glCanvasRef.current, tw, th, cellSize);
+        const cs = cellSizeRef.current;
+        glCtxRef.current = initWebGL(glCanvasRef.current, tw, th, cs);
         if (overlayCanvasRef.current) {
-            overlayCanvasRef.current.width = tw * cellSize;
-            overlayCanvasRef.current.height = th * cellSize;
+            overlayCanvasRef.current.width = tw * cs;
+            overlayCanvasRef.current.height = th * cs;
             overlayCtxRef.current = overlayCanvasRef.current.getContext('2d');
         }
-    }, [cellSize]);
+    }, []);
 
     // RAF 调度渲染
     const scheduleRender = useCallback(() => {
@@ -340,12 +363,13 @@ export const Num2D = React.forwardRef((props, refs) => {
         rafIdRef.current = requestAnimationFrame(() => {
             rafIdRef.current = null;
             if (!initedRef.current) return;
+            const cs = cellSizeRef.current;
 
             if (pendingFlatRef.current !== null) {
                 const { data, tw, th } = pendingFlatRef.current;
                 renderWebGL(glCtxRef.current, data, tw, th);
                 if (overlayCtxRef.current) {
-                    drawOverlay(overlayCtxRef.current, data, tw, th, cellSize, true, true);
+                    drawOverlay(overlayCtxRef.current, data, tw, th, cs, true, true);
                 }
                 pendingFlatRef.current = null;
             }
@@ -354,12 +378,12 @@ export const Num2D = React.forwardRef((props, refs) => {
                 const { data, tw, th } = pendingFlatRef2.current;
                 renderWebGL(glCtxRef2.current, data, tw, th);
                 if (overlayCtxRef2.current) {
-                    drawOverlay(overlayCtxRef2.current, data, tw, th, cellSize, true, true);
+                    drawOverlay(overlayCtxRef2.current, data, tw, th, cs, true, true);
                 }
                 pendingFlatRef2.current = null;
             }
         });
-    }, [cellSize]);
+    }, []);
 
     // ========== 数据处理函数（保持原有逻辑不变） ==========
 
@@ -591,10 +615,9 @@ export const Num2D = React.forwardRef((props, refs) => {
     }
 
     // 计算 canvas 显示尺寸
-    const tw = texSizeRef.current.w;
-    const th = texSizeRef.current.h;
-    const canvasW = width * cellSize;
-    const canvasH = height * cellSize;
+    const cs = cellSize;
+    const canvasW = width * cs;
+    const canvasH = height * cs;
 
     return (
         <div
@@ -641,14 +664,14 @@ export const Num2D = React.forwardRef((props, refs) => {
                     <div style={{ position: 'relative' }}>
                         <canvas
                             ref={glCanvasRef2}
-                            width={16 * cellSize}
-                            height={32 * cellSize}
+                            width={16 * cs}
+                            height={32 * cs}
                             style={{ display: 'block' }}
                         />
                         <canvas
                             ref={overlayCanvasRef2}
-                            width={16 * cellSize}
-                            height={32 * cellSize}
+                            width={16 * cs}
+                            height={32 * cs}
                             style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
                         />
                         <div style={{ textAlign: 'center', marginTop: '4px' }}>右脚</div>

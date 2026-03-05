@@ -47,6 +47,15 @@ function genNewArrMatrix(arr, width, height) {
 
 let leftArr = [], rightArr = []
 
+// ========== 动态计算 cellSize ==========
+function calcCellSize(texW, texH, maxW, maxH, padding) {
+    const availW = maxW - padding * 2;
+    const availH = maxH - padding * 2;
+    const cellW = Math.floor(availW / texW);
+    const cellH = Math.floor(availH / texH);
+    return Math.max(8, Math.min(cellW, cellH)); // 最小 8px，取宽高中较小的
+}
+
 // ========== WebGL Shaders ==========
 const VERTEX_SHADER_SRC = `
   attribute vec2 a_position;
@@ -241,7 +250,7 @@ function drawOverlay(ctx, flatData, texWidth, texHeight, cellSize, showNumbers, 
 function drawOverlayWithIndex(ctx, flatData, texWidth, texHeight, cellSize) {
     const cw = texWidth * cellSize;
     const ch = texHeight * cellSize;
-    ctx.clearRect(0, 0, cw, ch);
+    ctx.clearRect(0, 0, cw + 30, ch + 30);
 
     ctx.strokeStyle = 'rgba(0, 0, 40, 0.6)';
     ctx.lineWidth = 1;
@@ -276,7 +285,7 @@ function drawOverlayWithIndex(ctx, flatData, texWidth, texHeight, cellSize) {
 
     // 行索引（右侧）
     ctx.fillStyle = '#333';
-    ctx.font = `${Math.max(8, cellSize * 0.4)}px monospace`;
+    ctx.font = `${Math.max(8, cellSize * 0.35)}px monospace`;
     ctx.textAlign = 'left';
     for (let i = 0; i < texHeight; i++) {
         ctx.fillText(
@@ -291,7 +300,7 @@ function drawOverlayWithIndex(ctx, flatData, texWidth, texHeight, cellSize) {
         ctx.fillText(
             j.toString(),
             j * cellSize + cellSize / 2,
-            ch + cellSize * 0.6
+            ch + cellSize * 0.5
         );
     }
 }
@@ -314,7 +323,21 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
         width = 10
         height = 9
     }
-    const cellSize = 20;
+
+    // 动态计算 cellSize：根据窗口大小自适应
+    const [cellSize, setCellSize] = useState(() => {
+        const isRobot = props.matrixName === 'robotSY' || props.matrixName === 'robotLCF' || props.matrixName === 'robot1';
+        if (isRobot) return 40; // robot 分区较小，给大一些的 cellSize
+        let tw = width, th = height;
+        if (props.matrixName === 'hand0205') { tw = 15; th = 10; }
+        else if (props.matrixName === 'footVideo') { tw = 6; th = 10; }
+        const ww = typeof window !== 'undefined' ? window.innerWidth : 1920;
+        const wh = typeof window !== 'undefined' ? window.innerHeight : 1080;
+        // 留出左侧面板(300px)和上下边距(120px)
+        return calcCellSize(tw, th, ww - 300, wh - 120, 40);
+    });
+    const cellSizeRef = useRef(cellSize);
+    cellSizeRef.current = cellSize;
 
     // WebGL refs - 主 canvas
     const glCanvasRef = useRef(null);
@@ -354,10 +377,10 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             const tw = (props.matrixName === 'hand0205') ? 15 : width;
             const th = (props.matrixName === 'hand0205') ? 11 : height;
             texSizeRef.current = { w: tw, h: th };
-            glCtxRef.current = initWebGL(glCanvasRef.current, tw, th, cellSize);
+            glCtxRef.current = initWebGL(glCanvasRef.current, tw, th, cellSizeRef.current);
             if (overlayCanvasRef.current) {
-                overlayCanvasRef.current.width = tw * cellSize + 20;
-                overlayCanvasRef.current.height = th * cellSize + 20;
+                overlayCanvasRef.current.width = tw * cellSizeRef.current + 30;
+                overlayCanvasRef.current.height = th * cellSizeRef.current + 30;
                 overlayCtxRef.current = overlayCanvasRef.current.getContext('2d');
             }
         }
@@ -375,10 +398,10 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     // 初始化第二个 canvas（footVideo）
     useEffect(() => {
         if (props.matrixName === 'footVideo' && glCanvasRef2.current && !glCtxRef2.current) {
-            glCtxRef2.current = initWebGL(glCanvasRef2.current, 6, 10, cellSize);
+            glCtxRef2.current = initWebGL(glCanvasRef2.current, 6, 10, cellSizeRef.current);
             if (overlayCanvasRef2.current) {
-                overlayCanvasRef2.current.width = 6 * cellSize + 20;
-                overlayCanvasRef2.current.height = 10 * cellSize + 20;
+                overlayCanvasRef2.current.width = 6 * cellSizeRef.current + 30;
+                overlayCanvasRef2.current.height = 10 * cellSizeRef.current + 30;
                 overlayCtxRef2.current = overlayCanvasRef2.current.getContext('2d');
             }
         }
@@ -391,10 +414,10 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             requestAnimationFrame(() => {
                 robotParts.forEach((part, idx) => {
                     if (robotGlRefs.current[idx] && !robotGlCtxs.current[idx]) {
-                        robotGlCtxs.current[idx] = initWebGL(robotGlRefs.current[idx], part.w, part.h, cellSize);
+                        robotGlCtxs.current[idx] = initWebGL(robotGlRefs.current[idx], part.w, part.h, cellSizeRef.current);
                         if (robotOverlayRefs.current[idx]) {
-                            robotOverlayRefs.current[idx].width = part.w * cellSize + 20;
-                            robotOverlayRefs.current[idx].height = part.h * cellSize + 20;
+                            robotOverlayRefs.current[idx].width = part.w * cellSizeRef.current + 30;
+                            robotOverlayRefs.current[idx].height = part.h * cellSizeRef.current + 30;
                             robotOverlayCtxs.current[idx] = robotOverlayRefs.current[idx].getContext('2d');
                         }
                     }
@@ -408,14 +431,14 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
         texSizeRef.current = { w: tw, h: th };
         cleanupWebGL(glCtxRef.current);
         if (glCanvasRef.current) {
-            glCtxRef.current = initWebGL(glCanvasRef.current, tw, th, cellSize);
+            glCtxRef.current = initWebGL(glCanvasRef.current, tw, th, cellSizeRef.current);
             if (overlayCanvasRef.current) {
-                overlayCanvasRef.current.width = tw * cellSize + 20;
-                overlayCanvasRef.current.height = th * cellSize + 20;
+                overlayCanvasRef.current.width = tw * cellSizeRef.current + 30;
+                overlayCanvasRef.current.height = th * cellSizeRef.current + 30;
                 overlayCtxRef.current = overlayCanvasRef.current.getContext('2d');
             }
         }
-    }, [cellSize]);
+    }, []);
 
     // RAF 调度渲染
     const scheduleRender = useCallback(() => {
@@ -423,12 +446,13 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
         rafIdRef.current = requestAnimationFrame(() => {
             rafIdRef.current = null;
             if (!initedRef.current) return;
+            const cs = cellSizeRef.current;
 
             if (pendingFlatRef.current !== null) {
                 const { data, tw, th } = pendingFlatRef.current;
                 renderWebGL(glCtxRef.current, data, tw, th);
                 if (overlayCtxRef.current) {
-                    drawOverlayWithIndex(overlayCtxRef.current, data, tw, th, cellSize);
+                    drawOverlayWithIndex(overlayCtxRef.current, data, tw, th, cs);
                 }
                 pendingFlatRef.current = null;
             }
@@ -437,7 +461,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                 const { data, tw, th } = pendingFlatRef2.current;
                 renderWebGL(glCtxRef2.current, data, tw, th);
                 if (overlayCtxRef2.current) {
-                    drawOverlayWithIndex(overlayCtxRef2.current, data, tw, th, cellSize);
+                    drawOverlayWithIndex(overlayCtxRef2.current, data, tw, th, cs);
                 }
                 pendingFlatRef2.current = null;
             }
@@ -448,14 +472,14 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                     if (robotGlCtxs.current[idx]) {
                         renderWebGL(robotGlCtxs.current[idx], part.data, part.w, part.h);
                         if (robotOverlayCtxs.current[idx]) {
-                            drawOverlayWithIndex(robotOverlayCtxs.current[idx], part.data, part.w, part.h, cellSize);
+                            drawOverlayWithIndex(robotOverlayCtxs.current[idx], part.data, part.w, part.h, cs);
                         }
                     }
                 });
                 pendingRobotRef.current = null;
             }
         });
-    }, [cellSize]);
+    }, []);
 
     // ========== 数据处理函数 ==========
 
@@ -622,10 +646,10 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                 const tw = 6, th = 10;
                 // 确保第二个 canvas 已初始化
                 if (!glCtxRef2.current && glCanvasRef2.current) {
-                    glCtxRef2.current = initWebGL(glCanvasRef2.current, tw, th, cellSize);
+                    glCtxRef2.current = initWebGL(glCanvasRef2.current, tw, th, cellSizeRef.current);
                     if (overlayCanvasRef2.current) {
-                        overlayCanvasRef2.current.width = tw * cellSize + 20;
-                        overlayCanvasRef2.current.height = th * cellSize + 20;
+                        overlayCanvasRef2.current.width = tw * cellSizeRef.current + 30;
+                        overlayCanvasRef2.current.height = th * cellSizeRef.current + 30;
                         overlayCtxRef2.current = overlayCanvasRef2.current.getContext('2d');
                     }
                 }
@@ -729,6 +753,8 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     if (props.matrixName === 'hand0205') { mainTw = 15; mainTh = 11; }
     else if (isFoot) { mainTw = 6; mainTh = 10; }
 
+    const cs = cellSize;
+
     return (
         <div
             style={{
@@ -757,14 +783,14 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                     <div style={{ position: 'relative' }}>
                         <canvas
                             ref={glCanvasRef}
-                            width={mainTw * cellSize}
-                            height={mainTh * cellSize}
+                            width={mainTw * cs}
+                            height={mainTh * cs}
                             style={{ display: 'block' }}
                         />
                         <canvas
                             ref={overlayCanvasRef}
-                            width={mainTw * cellSize + 20}
-                            height={mainTh * cellSize + 20}
+                            width={mainTw * cs + 30}
+                            height={mainTh * cs + 30}
                             style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
                         />
                         {isFoot && <div style={{ textAlign: 'center', marginTop: '4px' }}>左脚</div>}
@@ -776,14 +802,14 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                     <div style={{ position: 'relative' }}>
                         <canvas
                             ref={glCanvasRef2}
-                            width={6 * cellSize}
-                            height={10 * cellSize}
+                            width={6 * cs}
+                            height={10 * cs}
                             style={{ display: 'block' }}
                         />
                         <canvas
                             ref={overlayCanvasRef2}
-                            width={6 * cellSize + 20}
-                            height={10 * cellSize + 20}
+                            width={6 * cs + 30}
+                            height={10 * cs + 30}
                             style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
                         />
                         <div style={{ textAlign: 'center', marginTop: '4px' }}>右脚</div>
@@ -796,14 +822,14 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                         <div style={{ position: 'relative' }}>
                             <canvas
                                 ref={el => { robotGlRefs.current[idx] = el; }}
-                                width={part.w * cellSize}
-                                height={part.h * cellSize}
+                                width={part.w * cs}
+                                height={part.h * cs}
                                 style={{ display: 'block' }}
                             />
                             <canvas
                                 ref={el => { robotOverlayRefs.current[idx] = el; }}
-                                width={part.w * cellSize + 20}
-                                height={part.h * cellSize + 20}
+                                width={part.w * cs + 30}
+                                height={part.h * cs + 30}
                                 style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
                             />
                         </div>
