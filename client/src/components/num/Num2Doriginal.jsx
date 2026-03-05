@@ -64,14 +64,14 @@ function calcRobotCellSize(parts, maxW, maxH) {
         totalW += p.w;
         if (p.h > maxPartH) maxPartH = p.h;
     });
-    totalW += (parts.length - 1) * 2 + parts.length;
-    maxPartH += 2;
+    totalW += (parts.length - 1) * 3 + parts.length * 2; // 更多间距
+    maxPartH += 3;
 
-    const availW = maxW - 40;
-    const availH = maxH - 80;
+    const availW = maxW - 60;
+    const availH = maxH - 100;
     const cellW = Math.floor(availW / totalW);
     const cellH = Math.floor(availH / maxPartH);
-    return Math.max(12, Math.min(cellW, cellH, 60));
+    return Math.max(12, Math.min(cellW, cellH, 35)); // 上限从60降到35
 }
 
 // ========== Jet 色谱（Canvas 2D 版本） ==========
