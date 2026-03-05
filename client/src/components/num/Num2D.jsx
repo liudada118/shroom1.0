@@ -184,11 +184,18 @@ function initWebGL(canvas, texWidth, texHeight, cellSize) {
 // ========== WebGL 渲染函数 ==========
 function renderWebGL(glCtx, flatData, texWidth, texHeight) {
     if (!glCtx) return;
-    const { gl, texture, texData } = glCtx;
+    const { gl, texture, texData, uMin, uMax } = glCtx;
     const len = Math.min(flatData.length, texWidth * texHeight);
+    let maxVal = 0;
     for (let i = 0; i < len; i++) {
-        texData[i] = Math.min(255, Math.max(0, Math.round(flatData[i])));
+        const v = Math.min(255, Math.max(0, Math.round(flatData[i])));
+        texData[i] = v;
+        if (v > maxVal) maxVal = v;
     }
+    // 动态更新 u_max，确保颜色映射覆盖实际数据范围
+    const dynamicMax = Math.max(maxVal, 1);
+    gl.uniform1f(uMin, 0);
+    gl.uniform1f(uMax, dynamicMax);
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, texWidth, texHeight, gl.LUMINANCE, gl.UNSIGNED_BYTE, texData);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
