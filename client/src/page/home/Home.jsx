@@ -1407,16 +1407,10 @@ class Home extends React.Component {
       }
       let rotate = jsonObject.rotate;
 
-      // if (['robot1', 'footVideo'].includes(this.state.matrixName)) {
-      //   if (this.state.numMatrixFlag.includes('num')) {
-      //     let newArr = [...wsPointData]
-      //     this.com.current?.changeWsData147([...newArr])
-
-      //   }
-      //   return
-      // }
-
-      if (!this.state.hand && this.state.matrixName.includes('hand')) {
+      // [fix] footVideo 和 robot 已在块1（978行）处理，块2 不再重复处理
+      if (this.state.matrixName == 'footVideo' || this.state.matrixName.includes('robot')) {
+        // 跳过，避免重复调用 changeWsData147R 导致右脚误显示
+      } else if (!this.state.hand && this.state.matrixName.includes('hand')) {
 
 
         if (this.state.matrixName == 'Num3D') {
