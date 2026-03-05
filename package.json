@@ -98,6 +98,7 @@
       "serialHelper.js",
       "serialport.js",
       "util.js",
+      "util/**/*",
       "utilMatrix.js",
       "wsHelper.js",
       "config.txt",
