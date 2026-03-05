@@ -76,6 +76,80 @@
   "build": {
     "appId": "com.shroom.pressure-sensor",
     "productName": "Shroom",
+    "asar": true,
+    "files": [
+      "index.js",
+      "preload.js",
+      "server.js",
+      "openWeb.js",
+      "autoUpdater.js",
+      "logger.js",
+      "aes_ecb.js",
+      "configManager.js",
+      "csvHelper.js",
+      "dataProcessor.js",
+      "dbHelper.js",
+      "gen.js",
+      "genType.js",
+      "licenseHelper.js",
+      "localWs.js",
+      "parse.js",
+      "press.js",
+      "serialHelper.js",
+      "serialport.js",
+      "util.js",
+      "utilMatrix.js",
+      "wsHelper.js",
+      "config.txt",
+      "name.txt",
+      "date.txt",
+      "logo.ico",
+      "logo.icns",
+      "package.json",
+      "node_modules/**/*",
+      "!node_modules/electron/**",
+      "!node_modules/electron-builder/**",
+      "!node_modules/app-builder-bin/**",
+      "!node_modules/phantomjs-prebuilt/**",
+      "!node_modules/electron-winstaller/**",
+      "!node_modules/typescript/**",
+      "!node_modules/@electron-forge/**",
+      "!node_modules/@playwright/**",
+      "!node_modules/playwright/**",
+      "!node_modules/playwright-core/**",
+      "!node_modules/electron-icon-maker/**",
+      "!node_modules/@electron/fuses/**",
+      "!**/test/**",
+      "!**/tests/**",
+      "!**/*.md",
+      "!**/*.map",
+      "!**/LICENSE",
+      "!**/CHANGELOG*"
+    ],
+    "extraResources": [
+      {
+        "from": "./build",
+        "to": "build",
+        "filter": [
+          "**/*",
+          "!model/hand-g.fbx",
+          "!model/hand-g.glb",
+          "!model/hand-g1.glb",
+          "!model/hand-g2.glb",
+          "!model/hand-g3.glb",
+          "!model/hand-g4.glb",
+          "!model/hand0412.glb",
+          "!model/hand0418.glb",
+          "!model/hand2.glb",
+          "!model/newhand.glb",
+          "!model/newhand1.glb"
+        ]
+      },
+      {
+        "from": "./pack-resources/db",
+        "to": "db"
+      }
+    ],
     "nsis": {
       "oneClick": false,
       "perMachine": true,
@@ -88,12 +162,6 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Shroom"
     },
-    "extraResources": [
-      {
-        "from": "./pack-resources/db",
-        "to": "db"
-      }
-    ],
     "mac": {
       "icon": "./logo.icns",
       "category": "public.app-category.utilities"
