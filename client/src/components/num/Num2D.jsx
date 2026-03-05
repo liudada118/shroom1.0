@@ -66,29 +66,29 @@ const FRAGMENT_SHADER_SRC = `
   uniform float u_max;
 
   vec3 jet1(float minVal, float maxVal, float x) {
-    float r = 1.0, g = 1.0, b = 1.0;
+    float r = 0.0, g = 0.0, b = 0.5;
     if (x < minVal) x = minVal;
     if (x > maxVal) x = maxVal;
     float dv = maxVal - minVal;
-    if (dv == 0.0) return vec3(1.0, 1.0, 1.0);
+    if (dv == 0.0) return vec3(0.0, 0.0, 0.5);
 
-    if (x < minVal + 0.2 * dv) {
-      r = 1.0; g = 1.0; b = 1.0;
-    } else if (x < minVal + 0.4 * dv) {
+    if (x < minVal + 0.125 * dv) {
+      r = 0.0; g = 0.0; b = 0.5 + 0.5 * (x - minVal) / (0.125 * dv);
+    } else if (x < minVal + 0.375 * dv) {
       r = 0.0;
-      g = (5.0 * (x - minVal - 0.2 * dv)) / dv;
+      g = (x - minVal - 0.125 * dv) / (0.25 * dv);
       b = 1.0;
-    } else if (x < minVal + 0.6 * dv) {
-      r = 0.0;
+    } else if (x < minVal + 0.625 * dv) {
+      r = (x - minVal - 0.375 * dv) / (0.25 * dv);
       g = 1.0;
-      b = 1.0 + (4.0 * (minVal + 0.4 * dv - x)) / dv;
-    } else if (x < minVal + 0.8 * dv) {
-      r = (4.0 * (x - minVal - 0.6 * dv)) / dv;
-      g = 1.0;
+      b = 1.0 - (x - minVal - 0.375 * dv) / (0.25 * dv);
+    } else if (x < minVal + 0.875 * dv) {
+      r = 1.0;
+      g = 1.0 - (x - minVal - 0.625 * dv) / (0.25 * dv);
       b = 0.0;
     } else {
-      r = 1.0;
-      g = 1.0 + (4.0 * (minVal + 0.8 * dv - x)) / dv;
+      r = 1.0 - 0.5 * (x - minVal - 0.875 * dv) / (0.125 * dv);
+      g = 0.0;
       b = 0.0;
     }
     return vec3(r, g, b);
@@ -225,7 +225,7 @@ function drawOverlay(ctx, flatData, texWidth, texHeight, cellSize, showNumbers, 
             for (let j = 0; j < texWidth; j++) {
                 const val = flatData[i * texWidth + j];
                 if (val > 0) {
-                    ctx.fillStyle = val > 24 ? '#fff' : '#000';
+                    ctx.fillStyle = (val > 24 || val < 5) ? '#fff' : '#000';
                     ctx.fillText(
                         Math.round(val).toString(),
                         j * cellSize + cellSize / 2,
