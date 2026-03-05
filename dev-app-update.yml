@@ -1,0 +1,7 @@
+# dev-app-update.yml
+# 开发环境下 electron-updater 的更新配置
+# 在打包后的应用中，electron-builder 会自动生成 app-update.yml
+# 此文件仅用于开发环境调试
+
+provider: generic
+url: http://sensor.bodyta.com/shroom1

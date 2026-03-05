@@ -11,7 +11,6 @@ import {
   gaussBlur_return,
   interp,
   interpSmall,
-  interpSmall100,
   interpSquare,
   jet,
   jetWhite3,
