@@ -195,7 +195,6 @@ function renderWebGL(glCtx, flatData, texWidth, texHeight) {
         texData[i] = v;
         if (v > maxVal) maxVal = v;
     }
-    // 动态更新 u_max，确保颜色映射覆盖实际数据范围
     const dynamicMax = Math.max(maxVal, 1);
     gl.uniform1f(uMin, 0);
     gl.uniform1f(uMax, dynamicMax);
@@ -291,15 +290,25 @@ export const Num2D = React.forwardRef((props, refs) => {
 
     const isFoot = props.matrixName === 'footVideo';
 
-    // 动态计算 cellSize：根据窗口大小自适应
-    const [cellSize, setCellSize] = useState(() => {
-        let tw = width, th = height;
-        if (props.matrixName === 'hand0205') { tw = 36; th = 36; }
-        else if (isFoot) { tw = 34; th = 32; } // 两个 16x32 并排 + 间距
+    // 计算 cellSize 的辅助函数
+    const computeCellSize = useCallback((hasRight = false) => {
         const ww = typeof window !== 'undefined' ? window.innerWidth : 1920;
         const wh = typeof window !== 'undefined' ? window.innerHeight : 1080;
-        return calcCellSize(tw, th, ww - 300, wh - 120, 40);
-    });
+
+        if (props.matrixName === 'hand0205') {
+            return calcCellSize(36, 36, ww - 300, wh - 120, 40);
+        }
+        if (isFoot) {
+            // 只有左脚时按单脚计算，有右脚时按两脚并排计算
+            const tw = hasRight ? 34 : 16;
+            const th = 32;
+            return calcCellSize(tw, th, ww - 300, wh - 120, 40);
+        }
+        return calcCellSize(width, height, ww - 300, wh - 120, 40);
+    }, [isFoot, props.matrixName, width, height]);
+
+    // 动态计算 cellSize
+    const [cellSize, setCellSize] = useState(() => computeCellSize(false));
     const cellSizeRef = useRef(cellSize);
     cellSizeRef.current = cellSize;
 
@@ -317,6 +326,7 @@ export const Num2D = React.forwardRef((props, refs) => {
 
     // 足底：是否有右脚数据
     const [hasRightFoot, setHasRightFoot] = useState(false);
+    const hasRightFootRef = useRef(false);
 
     // RAF 节流
     const pendingFlatRef = useRef(null);
@@ -332,11 +342,14 @@ export const Num2D = React.forwardRef((props, refs) => {
         prewarmWebGL();
     }, []);
 
-    // 初始化 WebGL
+    // 初始化 WebGL - 根据产品类型使用正确的初始纹理尺寸
     useEffect(() => {
         const cs = cellSizeRef.current;
         if (glCanvasRef.current) {
-            const tw = width, th = height;
+            let tw = width, th = height;
+            // 根据产品类型设置正确的初始纹理尺寸，避免后续 reinit
+            if (props.matrixName === 'hand0205') { tw = 36; th = 36; }
+            else if (isFoot) { tw = 16; th = 32; }
             texSizeRef.current = { w: tw, h: th };
             glCtxRef.current = initWebGL(glCanvasRef.current, tw, th, cs);
             if (overlayCanvasRef.current) {
@@ -366,7 +379,62 @@ export const Num2D = React.forwardRef((props, refs) => {
                 overlayCtxRef2.current = overlayCanvasRef2.current.getContext('2d');
             }
         }
+        // 右脚出现时重新计算 cellSize
+        if (isFoot && hasRightFoot) {
+            const newCs = computeCellSize(true);
+            cellSizeRef.current = newCs;
+            setCellSize(newCs);
+            // 重新初始化左脚 canvas 以适应新 cellSize
+            if (glCanvasRef.current) {
+                cleanupWebGL(glCtxRef.current);
+                glCtxRef.current = initWebGL(glCanvasRef.current, 16, 32, newCs);
+                texSizeRef.current = { w: 16, h: 32 };
+                if (overlayCanvasRef.current) {
+                    overlayCanvasRef.current.width = 16 * newCs;
+                    overlayCanvasRef.current.height = 32 * newCs;
+                    overlayCtxRef.current = overlayCanvasRef.current.getContext('2d');
+                }
+            }
+        }
     }, [hasRightFoot]);
+
+    // 窗口 resize 监听
+    useEffect(() => {
+        let resizeTimer = null;
+        const handleResize = () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                const newCs = computeCellSize(hasRightFootRef.current);
+                cellSizeRef.current = newCs;
+                setCellSize(newCs);
+                // 重新初始化 WebGL canvas 以适应新 cellSize
+                if (glCanvasRef.current && glCtxRef.current) {
+                    const { w, h } = texSizeRef.current;
+                    cleanupWebGL(glCtxRef.current);
+                    glCtxRef.current = initWebGL(glCanvasRef.current, w, h, newCs);
+                    if (overlayCanvasRef.current) {
+                        overlayCanvasRef.current.width = w * newCs;
+                        overlayCanvasRef.current.height = h * newCs;
+                        overlayCtxRef.current = overlayCanvasRef.current.getContext('2d');
+                    }
+                }
+                if (isFoot && hasRightFootRef.current && glCanvasRef2.current && glCtxRef2.current) {
+                    cleanupWebGL(glCtxRef2.current);
+                    glCtxRef2.current = initWebGL(glCanvasRef2.current, 16, 32, newCs);
+                    if (overlayCanvasRef2.current) {
+                        overlayCanvasRef2.current.width = 16 * newCs;
+                        overlayCanvasRef2.current.height = 32 * newCs;
+                        overlayCtxRef2.current = overlayCanvasRef2.current.getContext('2d');
+                    }
+                }
+            }, 200);
+        };
+        window.addEventListener('resize', handleResize);
+        return () => {
+            window.removeEventListener('resize', handleResize);
+            clearTimeout(resizeTimer);
+        };
+    }, [computeCellSize]);
 
     // 重新初始化 WebGL（当纹理尺寸变化时）
     const reinitGL = useCallback((tw, th) => {
@@ -467,8 +535,10 @@ export const Num2D = React.forwardRef((props, refs) => {
 
                 if (right && Array.isArray(right) && right.some(v => v > 0)) {
                     rightArr = [...right]
-                    // 标记有右脚数据（有非零值才算有效数据）
-                    if (!hasRightFoot) setHasRightFoot(true);
+                    if (!hasRightFootRef.current) {
+                        hasRightFootRef.current = true;
+                        setHasRightFoot(true);
+                    }
                     const wsData = [...right]
                     const renderArr = [[2, 2], [2, 4], [2, 6], [2, 8], [2, 10], [2, 12], [5, 1], [5, 4], [5, 6], [5, 8], [5, 11], [5, 13], [8, 1], [8, 4], [8, 6], [8, 8], [8, 11], [8, 14], [11, 2], [11, 5], [11, 8], [11, 10], [11, 12], [11, 14], [14, 2], [14, 5], [14, 8], [14, 10], [14, 12], [14, 14], [17, 2], [17, 4], [17, 6], [17, 8], [17, 10], [17, 12], [20, 2], [20, 4], [20, 6], [20, 8], [20, 10], [20, 12], [23, 2], [23, 4], [23, 6], [23, 8], [23, 10], [23, 12], [26, 2], [26, 4], [26, 6], [26, 8], [26, 10], [26, 11], [29, 3], [29, 5], [29, 6], [29, 8], [29, 9], [29, 11]]
                     let newArr = new Array(16 * 32).fill(0)
@@ -650,10 +720,7 @@ export const Num2D = React.forwardRef((props, refs) => {
             props.data.current?.handleChartsArea(totalPointArr, max1 + 20);
     }
 
-    // 计算 canvas 显示尺寸
     const cs = cellSize;
-    const canvasW = width * cs;
-    const canvasH = height * cs;
 
     return (
         <div

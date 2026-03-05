@@ -64,14 +64,14 @@ function calcRobotCellSize(parts, maxW, maxH) {
         totalW += p.w;
         if (p.h > maxPartH) maxPartH = p.h;
     });
-    totalW += (parts.length - 1) * 3 + parts.length * 2; // 更多间距
+    totalW += (parts.length - 1) * 3 + parts.length * 2;
     maxPartH += 3;
 
     const availW = maxW - 60;
     const availH = maxH - 100;
     const cellW = Math.floor(availW / totalW);
     const cellH = Math.floor(availH / maxPartH);
-    return Math.max(12, Math.min(cellW, cellH, 35)); // 上限从60降到35
+    return Math.max(12, Math.min(cellW, cellH, 35));
 }
 
 // ========== Jet 色谱（Canvas 2D 版本） ==========
@@ -198,8 +198,8 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     const isRobot = props.matrixName === 'robotSY' || props.matrixName === 'robotLCF' || props.matrixName === 'robot1';
     const isFoot = props.matrixName === 'footVideo';
 
-    // 动态计算 cellSize
-    const [cellSize, setCellSize] = useState(() => {
+    // 计算初始 cellSize 的辅助函数
+    const computeCellSize = useCallback((hasRight = false) => {
         const ww = typeof window !== 'undefined' ? window.innerWidth : 1920;
         const wh = typeof window !== 'undefined' ? window.innerHeight : 1080;
 
@@ -209,11 +209,20 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                 ww - 300, wh - 120
             );
         }
-        let tw = width, th = height;
-        if (props.matrixName === 'hand0205') { tw = 15; th = 10; }
-        else if (isFoot) { tw = 14; th = 10; }
-        return calcCellSize(tw, th, ww - 300, wh - 120, 40);
-    });
+        if (props.matrixName === 'hand0205') {
+            return calcCellSize(15, 10, ww - 300, wh - 120, 40);
+        }
+        if (isFoot) {
+            // 只有左脚时按单脚计算，有右脚时按两脚并排计算
+            const tw = hasRight ? 14 : 6;
+            const th = 10;
+            return calcCellSize(tw, th, ww - 300, wh - 120, 40);
+        }
+        return calcCellSize(width, height, ww - 300, wh - 120, 40);
+    }, [isRobot, isFoot, props.matrixName, width, height]);
+
+    // 动态计算 cellSize
+    const [cellSize, setCellSize] = useState(() => computeCellSize(false));
     const cellSizeRef = useRef(cellSize);
     cellSizeRef.current = cellSize;
 
@@ -227,6 +236,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
 
     // 足底：是否有右脚数据
     const [hasRightFoot, setHasRightFoot] = useState(false);
+    const hasRightFootRef = useRef(false);
 
     // robot 分区 canvas refs
     const robotCanvasRefs = useRef([]);
@@ -261,6 +271,12 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
         if (isFoot && hasRightFoot && canvasRef2.current && !ctxRef2.current) {
             ctxRef2.current = canvasRef2.current.getContext('2d');
         }
+        // 右脚出现时重新计算 cellSize
+        if (isFoot && hasRightFoot) {
+            const newCs = computeCellSize(true);
+            cellSizeRef.current = newCs;
+            setCellSize(newCs);
+        }
     }, [hasRightFoot]);
 
     // 初始化 robot 分区 canvas
@@ -275,6 +291,24 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             });
         }
     }, [robotParts]);
+
+    // 窗口 resize 监听
+    useEffect(() => {
+        let resizeTimer = null;
+        const handleResize = () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                const newCs = computeCellSize(hasRightFootRef.current);
+                cellSizeRef.current = newCs;
+                setCellSize(newCs);
+            }, 200);
+        };
+        window.addEventListener('resize', handleResize);
+        return () => {
+            window.removeEventListener('resize', handleResize);
+            clearTimeout(resizeTimer);
+        };
+    }, [computeCellSize]);
 
     // RAF 调度渲染
     const scheduleRender = useCallback(() => {
@@ -312,8 +346,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
         });
     }, []);
 
-    // ========== 数据处理函数 ==========
-
+   
     const changeWsData = (wsPointData) => {
         let newData = [...wsPointData]
         let dataG = []
@@ -456,7 +489,10 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
 
             if (right && Array.isArray(right) && right.some(v => v > 0)) {
                 rightArr = [...right]
-                if (!hasRightFoot) setHasRightFoot(true);
+                if (!hasRightFootRef.current) {
+                    hasRightFootRef.current = true;
+                    setHasRightFoot(true);
+                }
                 const tw = 6, th = 10;
                 // 确保右脚 canvas context 已初始化
                 if (!ctxRef2.current && canvasRef2.current) {
