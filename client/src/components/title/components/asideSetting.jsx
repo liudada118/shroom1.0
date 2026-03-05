@@ -620,11 +620,7 @@ export default function asideSetting() {
               )}
               options={this.state.items1.map((item) => ({ label: item, value: item }))}
             />
-            {this.props.matrixName == 'Num3D' || this.props.matrixName == 'volvo' || this.props.matrixName == 'gloves1' || this.props.matrixName == 'gloves2' || this.props.matrixName == 'hand0205Point' || this.props.matrixName == 'handVideo' || this.props.matrixName == 'robot1' || this.props.matrixName.includes('hand') ? <> <Button onClick={() => {
-              // this.props.dataZero()
-              // this.setState({
-              //   resetZero: true
-              // })
+            <> <Button onClick={() => {
               this.props.changeAside({
                 resetZero: true
               })
@@ -632,15 +628,11 @@ export default function asideSetting() {
 
             }}>{t('resetZero')}</Button>
               <Button onClick={() => {
-                //  this.setState({
-                //   resetZero: false
-                // })
                 this.props.changeAside({
                   resetZero: false
                 })
-                // this.props.dataZero0()
                 this.props.wsSendObj({ resetZero: false })
-              }}>{t('cancelZero')}</Button></> : ''}
+              }}>{t('cancelZero')}</Button></>
 
             <NavLink to={`/num/${routerStr}`}> <Button onClick={() => {
               this.props.dataZero0()
