@@ -153,39 +153,34 @@ Licensed under MIT. https://github.com/101arrowz/fflate/blob/master/LICENSE
   uniform float u_min;
   uniform float u_max;
 
-  // 颜色渐变参考 32x32 高速热力图:
-  // 0.00: rgba(21,18,42)  深紫蓝
-  // 0.40: rgba(62,0,248)  蓝紫
-  // 0.55: rgba(149,253,237) 青
-  // 0.70: rgba(154,255,62) 绿
-  // 0.85: rgba(246,254,71) 黄
-  // 1.00: rgba(216,36,36)  红
+  // 经典 jet 色谱（参考 32x32 高速 Num 组件）:
+  // 蓝(0,0,255) → 青(0,255,255) → 绿(0,255,0) → 黄(255,255,0) → 红(255,0,0)
   vec3 jet1(float minVal, float maxVal, float x) {
     if (x < minVal) x = minVal;
     if (x > maxVal) x = maxVal;
     float dv = maxVal - minVal;
-    if (dv == 0.0) return vec3(21.0/255.0, 18.0/255.0, 42.0/255.0);
+    if (dv == 0.0) return vec3(0.0, 0.0, 1.0);
     float t = (x - minVal) / dv;
 
-    // 5段线性插值
-    vec3 c0 = vec3(21.0/255.0, 18.0/255.0, 42.0/255.0);   // 0.00
-    vec3 c1 = vec3(62.0/255.0, 0.0/255.0, 248.0/255.0);   // 0.40
-    vec3 c2 = vec3(149.0/255.0, 253.0/255.0, 237.0/255.0); // 0.55
-    vec3 c3 = vec3(154.0/255.0, 255.0/255.0, 62.0/255.0);  // 0.70
-    vec3 c4 = vec3(246.0/255.0, 254.0/255.0, 71.0/255.0);  // 0.85
-    vec3 c5 = vec3(216.0/255.0, 36.0/255.0, 36.0/255.0);   // 1.00
-
-    if (t < 0.40) {
-      return mix(c0, c1, t / 0.40);
-    } else if (t < 0.55) {
-      return mix(c1, c2, (t - 0.40) / 0.15);
-    } else if (t < 0.70) {
-      return mix(c2, c3, (t - 0.55) / 0.15);
-    } else if (t < 0.85) {
-      return mix(c3, c4, (t - 0.70) / 0.15);
+    float r = 1.0, g = 1.0, b = 1.0;
+    if (t < 0.25) {
+      r = 0.0;
+      g = 4.0 * t;
+      b = 1.0;
+    } else if (t < 0.5) {
+      r = 0.0;
+      g = 1.0;
+      b = 1.0 - 4.0 * (t - 0.25);
+    } else if (t < 0.75) {
+      r = 4.0 * (t - 0.5);
+      g = 1.0;
+      b = 0.0;
     } else {
-      return mix(c4, c5, (t - 0.85) / 0.15);
+      r = 1.0;
+      g = 1.0 - 4.0 * (t - 0.75);
+      b = 0.0;
     }
+    return vec3(r, g, b);
   }
 
   void main() {
@@ -208,39 +203,34 @@ Licensed under MIT. https://github.com/101arrowz/fflate/blob/master/LICENSE
   uniform float u_min;
   uniform float u_max;
 
-  // 颜色渐变参考 32x32 高速热力图:
-  // 0.00: rgba(21,18,42)  深紫蓝
-  // 0.40: rgba(62,0,248)  蓝紫
-  // 0.55: rgba(149,253,237) 青
-  // 0.70: rgba(154,255,62) 绿
-  // 0.85: rgba(246,254,71) 黄
-  // 1.00: rgba(216,36,36)  红
+  // 经典 jet 色谱（参考 32x32 高速 Num 组件）:
+  // 蓝(0,0,255) → 青(0,255,255) → 绿(0,255,0) → 黄(255,255,0) → 红(255,0,0)
   vec3 jet1(float minVal, float maxVal, float x) {
     if (x < minVal) x = minVal;
     if (x > maxVal) x = maxVal;
     float dv = maxVal - minVal;
-    if (dv == 0.0) return vec3(21.0/255.0, 18.0/255.0, 42.0/255.0);
+    if (dv == 0.0) return vec3(0.0, 0.0, 1.0);
     float t = (x - minVal) / dv;
 
-    // 5段线性插值
-    vec3 c0 = vec3(21.0/255.0, 18.0/255.0, 42.0/255.0);   // 0.00
-    vec3 c1 = vec3(62.0/255.0, 0.0/255.0, 248.0/255.0);   // 0.40
-    vec3 c2 = vec3(149.0/255.0, 253.0/255.0, 237.0/255.0); // 0.55
-    vec3 c3 = vec3(154.0/255.0, 255.0/255.0, 62.0/255.0);  // 0.70
-    vec3 c4 = vec3(246.0/255.0, 254.0/255.0, 71.0/255.0);  // 0.85
-    vec3 c5 = vec3(216.0/255.0, 36.0/255.0, 36.0/255.0);   // 1.00
-
-    if (t < 0.40) {
-      return mix(c0, c1, t / 0.40);
-    } else if (t < 0.55) {
-      return mix(c1, c2, (t - 0.40) / 0.15);
-    } else if (t < 0.70) {
-      return mix(c2, c3, (t - 0.55) / 0.15);
-    } else if (t < 0.85) {
-      return mix(c3, c4, (t - 0.70) / 0.15);
+    float r = 1.0, g = 1.0, b = 1.0;
+    if (t < 0.25) {
+      r = 0.0;
+      g = 4.0 * t;
+      b = 1.0;
+    } else if (t < 0.5) {
+      r = 0.0;
+      g = 1.0;
+      b = 1.0 - 4.0 * (t - 0.25);
+    } else if (t < 0.75) {
+      r = 4.0 * (t - 0.5);
+      g = 1.0;
+      b = 0.0;
     } else {
-      return mix(c4, c5, (t - 0.85) / 0.15);
+      r = 1.0;
+      g = 1.0 - 4.0 * (t - 0.75);
+      b = 0.0;
     }
+    return vec3(r, g, b);
   }
 
   void main() {
