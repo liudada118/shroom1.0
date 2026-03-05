@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-03-05
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-03-05 21:23
 
 ## 1. 项目概述
 
@@ -288,55 +288,56 @@ graph TD
 
 > 记录项目从开始到现在已经完成的所有工作，每次新增追加到末尾。
 
-| 完成日期 | 完成的功能/工作 | 说明 |
-| :--- | :--- | :--- |
-| 2025-02-03 | 核心数据采集系统 | 串口通信、数据解析、WebSocket 分发、SQLite 存储 |
-| 2025-02-03 | 多传感器类型支持 | 汽车坐垫/靠背/头枕、床垫、手部、足底等 10+ 种传感器 |
-| 2025-02-03 | 2D 热力图可视化 | Canvas 热力图渲染，支持高斯平滑和颜色映射 |
-| 2025-02-03 | 3D 模型可视化 | Three.js 3D 压力分布渲染，47 个传感器类型组件 |
-| 2025-02-03 | 历史数据回放 | SQLite 历史数据查询、逐帧回放、速度控制 |
-| 2025-02-03 | CSV 数据导出 | 采集数据导出为 CSV 格式 |
-| 2025-02-03 | 授权验证系统 | AES-ECB 加密授权文件 + 在线时间校验 |
-| 2025-02-03 | 多语言支持 | i18next 国际化框架集成 |
-| 2025-02-03 | Electron 桌面打包 | Electron Forge + electron-builder 打包分发 |
-| 2026-03-01 | 后端模块拆分 | 从 server.js 拆分出 wsHelper、dbHelper、logger、serialHelper、licenseHelper |
-| 2026-03-01 | 前端 Hook 化 | 创建 useWebSocket、usePressureData、useSerialControl 等自定义 Hook |
-| 2026-03-01 | 配置中心化 | 创建 configManager.js 和 constants.js，消除硬编码 |
-| 2026-03-02 | Electron 安全强化 | 启用 contextIsolation + sandbox，创建 preload.js 安全 IPC 通道 |
-| 2026-03-02 | Webpack → Vite 迁移 | 前端构建工具从 Webpack 4 迁移到 Vite 6，开发启动提速 10-100 倍 |
-| 2026-03-02 | React 17 → 19 升级 | 升级到 React 19，引入 useDeferredValue 并发特性 |
-| 2026-03-02 | sqlite3 → better-sqlite3 | 数据库迁移到同步 API + WAL 模式，性能提升 5-10 倍 |
-| 2026-03-02 | 3D InstancedMesh 优化 | 引入 InstancedMesh 渲染模式，Draw Call 从 O(n) 降至 O(1) |
-| 2026-03-02 | TypeScript 渐进式引入 | 添加 tsconfig.json、types.d.ts、types/index.ts 类型定义 |
-| 2026-03-02 | Zustand 状态管理 | 引入 Zustand，创建 useAppStore 和 usePressureStore |
-| 2026-03-02 | 自动更新集成 | 集成 electron-updater，支持 GitHub Releases 自动更新 |
-| 2026-03-02 | 密钥多类型授权 | 密钥 file 字段从 all/单个 升级为支持数组格式的多类型组合授权 |
-| 2026-03-02 | 密钥配置可视化页面 | 新增 /license 页面，支持传感器多选、时间设置、一键生成密钥、密钥解析 |
-| 2026-03-04 | Windows 打包修复 | 修复缺失的 better-sqlite3 依赖并完成 `npm run make`，生成 Windows x64 分发包 |
-| 2026-03-04 | 打包资源路径修复 | 统一打包态资源路径到 `process.resourcesPath`，并通过 `extraResource` 打入 `build/db/data/config.txt` |
-| 2026-03-04 | 打包精简（DB/Data） | 打包仅携带 `db/init.db` 模板，`data` 目录改为应用启动时自动创建空目录 |
-| 2026-03-04 | 配置路径修复 | `config.txt` 运行时路径固定为 `resources/config.txt`，不再回退到 `app.asar/config.txt` |
-| 2026-03-04 | 打包资源归位（init.db） | 新增打包前同步脚本，仅将 `init.db` 打入 `resources/db/init.db`，不再落到 `resources/init.db` |
-| 2026-03-04 | 配置文件加载策略调整 | 启动时仅在 `resources/config.txt` 存在时读取，不再自动复制或创建 `config.txt` |
-| 2026-03-05 | 小型样品传感器支持 | 新增 smallSample 传感器类型，10×10 数值矩阵显示，单串口选择，Excel 点位映射 |
-| 2026-03-05 | 下载通知弹窗修复 | 使用 message.useMessage() + HOC 包装解决 antd v5 在 Electron 中 CSS-in-JS 渲染问题 |
-| 2026-03-05 | 全传感器类型清零功能 | 在标题栏添加统一清零/取消清零按钮，移除 Drawer 中的传感器类型限制 |
+| 完成时间 | 分支 | 完成的功能/工作 | 说明 |
+| :--- | :--- | :--- | :--- |
+| 2025-02-03 | main | 核心数据采集系统 | 串口通信、数据解析、WebSocket 分发、SQLite 存储 |
+| 2025-02-03 | main | 多传感器类型支持 | 汽车坐垫/靠背/头枕、床垫、手部、足底等 10+ 种传感器 |
+| 2025-02-03 | main | 2D 热力图可视化 | Canvas 热力图渲染，支持高斯平滑和颜色映射 |
+| 2025-02-03 | main | 3D 模型可视化 | Three.js 3D 压力分布渲染，47 个传感器类型组件 |
+| 2025-02-03 | main | 历史数据回放 | SQLite 历史数据查询、逐帧回放、速度控制 |
+| 2025-02-03 | main | CSV 数据导出 | 采集数据导出为 CSV 格式 |
+| 2025-02-03 | main | 授权验证系统 | AES-ECB 加密授权文件 + 在线时间校验 |
+| 2025-02-03 | main | 多语言支持 | i18next 国际化框架集成 |
+| 2025-02-03 | main | Electron 桌面打包 | Electron Forge + electron-builder 打包分发 |
+| 2026-03-01 | Max | 后端模块拆分 | 从 server.js 拆分出 wsHelper、dbHelper、logger、serialHelper、licenseHelper |
+| 2026-03-01 | Max | 前端 Hook 化 | 创建 useWebSocket、usePressureData、useSerialControl 等自定义 Hook |
+| 2026-03-01 | Max | 配置中心化 | 创建 configManager.js 和 constants.js，消除硬编码 |
+| 2026-03-02 | Max | Electron 安全强化 | 启用 contextIsolation + sandbox，创建 preload.js 安全 IPC 通道 |
+| 2026-03-02 | Max | Webpack → Vite 迁移 | 前端构建工具从 Webpack 4 迁移到 Vite 6，开发启动提速 10-100 倍 |
+| 2026-03-02 | Max | React 17 → 19 升级 | 升级到 React 19，引入 useDeferredValue 并发特性 |
+| 2026-03-02 | Max | sqlite3 → better-sqlite3 | 数据库迁移到同步 API + WAL 模式，性能提升 5-10 倍 |
+| 2026-03-02 | Max | 3D InstancedMesh 优化 | 引入 InstancedMesh 渲染模式，Draw Call 从 O(n) 降至 O(1) |
+| 2026-03-02 | Max | TypeScript 渐进式引入 | 添加 tsconfig.json、types.d.ts、types/index.ts 类型定义 |
+| 2026-03-02 | Max | Zustand 状态管理 | 引入 Zustand，创建 useAppStore 和 usePressureStore |
+| 2026-03-02 | Max | 自动更新集成 | 集成 electron-updater，支持 GitHub Releases 自动更新 |
+| 2026-03-02 | Max | 密钥多类型授权 | 密钥 file 字段从 all/单个 升级为支持数组格式的多类型组合授权 |
+| 2026-03-02 | Max | 密钥配置可视化页面 | 新增 /license 页面，支持传感器多选、时间设置、一键生成密钥、密钥解析 |
+| 2026-03-04 | test | Windows 打包修复 | 修复缺失的 better-sqlite3 依赖并完成 `npm run make`，生成 Windows x64 分发包 |
+| 2026-03-04 | test | 打包资源路径修复 | 统一打包态资源路径到 `process.resourcesPath`，并通过 `extraResource` 打入 `build/db/data/config.txt` |
+| 2026-03-04 | test | 打包精简（DB/Data） | 打包仅携带 `db/init.db` 模板，`data` 目录改为应用启动时自动创建空目录 |
+| 2026-03-04 | test | 配置路径修复 | `config.txt` 运行时路径固定为 `resources/config.txt`，不再回退到 `app.asar/config.txt` |
+| 2026-03-04 | test | 打包资源归位（init.db） | 新增打包前同步脚本，仅将 `init.db` 打入 `resources/db/init.db`，不再落到 `resources/init.db` |
+| 2026-03-04 | test | 配置文件加载策略调整 | 启动时仅在 `resources/config.txt` 存在时读取，不再自动复制或创建 `config.txt` |
+| 2026-03-05 21:23 | test | 小型样品传感器支持 | 新增 smallSample 传感器类型，10×10 数值矩阵显示，单串口选择，Excel 点位映射 |
+| 2026-03-05 21:23 | test | 下载通知弹窗修复 | 使用 message.useMessage() + HOC 包装解决 antd v5 在 Electron 中 CSS-in-JS 渲染问题 |
+| 2026-03-05 21:23 | test | 全传感器类型清零功能 | 在标题栏添加统一清零/取消清零按钮，移除 Drawer 中的传感器类型限制 |
 
 ## 9. 更新日志
 
-| 日期 | 变更类型 | 描述 |
-| :--- | :--- | :--- |
-| 2026-03-02 | 初始化 | 创建项目架构文档（ARCHITECTURE.md） |
-| 2026-03-02 | 新增功能 | 密钥控制系统升级：支持多类型组合授权 + 密钥配置可视化页面（/license） |
-| 2026-03-04 | 依赖升级 | 补装 better-sqlite3 依赖并重新执行 Electron Forge 打包，产物输出到 `out/make` |
-| 2026-03-04 | 配置变更 | 调整 Electron Forge `packagerConfig`：新增 `extraResource`，修复打包后静态资源与数据库资源缺失问题 |
-| 2026-03-04 | 配置变更 | 调整打包策略：仅打入 `init.db`，不再打入 `data` 内容，运行时自动创建空 `data` 目录 |
-| 2026-03-04 | 修复缺陷 | 修复 `config.txt` 路径回退逻辑，确保打包后优先使用 `resources/config.txt` |
-| 2026-03-04 | 配置变更 | 增加 `prepare-pack-resources` 脚本，固定将 `init.db` 打包到 `resources/db` 目录 |
-| 2026-03-04 | 修复缺陷 | 去除启动时自动复制 `config.txt` 的逻辑，避免打包后首次启动自动生成配置文件 |
-| 2026-03-05 | 新增功能 | 添加小型样品（smallSample）传感器类型：server.js 协议处理 + Excel 点位映射 + smallSample.jsx 10×10 矩阵组件 + Title.jsx 单串口选择 |
-| 2026-03-05 | 修复缺陷 | 修复 antd v5 message.info() 在 Electron 中不渲染的问题，使用 message.useMessage() + HOC 方案 |
-| 2026-03-05 | 新增功能 | 为所有传感器类型添加清零功能：标题栏统一清零按钮（带状态高亮）+ Drawer 面板移除类型限制 |
+| 时间 | 分支 | 变更类型 | 描述 |
+| :--- | :--- | :--- | :--- |
+| 2026-03-02 | Max | 初始化 | 创建项目架构文档（ARCHITECTURE.md） |
+| 2026-03-02 | Max | 新增功能 | 密钥控制系统升级：支持多类型组合授权 + 密钥配置可视化页面（/license） |
+| 2026-03-04 | test | 依赖升级 | 补装 better-sqlite3 依赖并重新执行 Electron Forge 打包，产物输出到 `out/make` |
+| 2026-03-04 | test | 配置变更 | 调整 Electron Forge `packagerConfig`：新增 `extraResource`，修复打包后静态资源与数据库资源缺失问题 |
+| 2026-03-04 | test | 配置变更 | 调整打包策略：仅打入 `init.db`，不再打入 `data` 内容，运行时自动创建空 `data` 目录 |
+| 2026-03-04 | test | 修复缺陷 | 修复 `config.txt` 路径回退逻辑，确保打包后优先使用 `resources/config.txt` |
+| 2026-03-04 | test | 配置变更 | 增加 `prepare-pack-resources` 脚本，固定将 `init.db` 打包到 `resources/db` 目录 |
+| 2026-03-04 | test | 修复缺陷 | 去除启动时自动复制 `config.txt` 的逻辑，避免打包后首次启动自动生成配置文件 |
+| 2026-03-05 21:23 | test | 新增功能 | 添加小型样品（smallSample）传感器类型：server.js 协议处理 + Excel 点位映射 + smallSample.jsx 10×10 矩阵组件 + Title.jsx 单串口选择 |
+| 2026-03-05 21:23 | test | 修复缺陷 | 修复 antd v5 message.info() 在 Electron 中不渲染的问题，使用 message.useMessage() + HOC 方案 |
+| 2026-03-05 21:23 | test | 新增功能 | 为所有传感器类型添加清零功能：标题栏统一清零按钮（带状态高亮）+ Drawer 面板移除类型限制 |
+| 2026-03-05 21:23 | test | 文档更新 | 按新规范升级 ARCHITECTURE.md 格式：时间精确到分钟 + 添加 Git 分支列 |
 
 *变更类型：`新增功能` / `优化重构` / `修复缺陷` / `配置变更` / `文档更新` / `依赖升级` / `初始化`*
 
