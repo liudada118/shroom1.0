@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useImperativeHandle } from 'react'
+import React, { useEffect, useState, useImperativeHandle, useRef, useCallback } from 'react'
 import './num.css'
 import { addSide, findMax } from '../../assets/util/util';
 import { pressData } from '../../assets/util/matrixToPress';
@@ -66,11 +66,36 @@ export const Num2D = React.forwardRef((props, refs) => {
     const [data1, setData1] = useState(new Array(height).fill(new Array(width).fill(0)));
     const [scale, setScale] = useState(1)
 
+    // === RAF 节流：200Hz数据只缓冲，60fps渲染 ===
+    const pendingDataRef = useRef(null);
+    const pendingData1Ref = useRef(null);
+    const rafIdRef = useRef(null);
+
+    const scheduleRender = useCallback(() => {
+        if (rafIdRef.current) return; // 已有待执行的RAF
+        rafIdRef.current = requestAnimationFrame(() => {
+            rafIdRef.current = null;
+            if (pendingDataRef.current !== null) {
+                setData(pendingDataRef.current);
+                pendingDataRef.current = null;
+            }
+            if (pendingData1Ref.current !== null) {
+                setData1(pendingData1Ref.current);
+                pendingData1Ref.current = null;
+            }
+        });
+    }, []);
+
+    // 组件卸载时清理RAF
+    useEffect(() => {
+        return () => {
+            if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
+        };
+    }, []);
+
 
 
     const changeWsData = (wsPointData) => {
-
-        console.log(wsPointData.length, valuef1)
         let newData = [...wsPointData]
         let dataG = []
         let ndata = [...newData].map((a, index) => (a - valuef1 < 0 ? 0 : a));
@@ -93,11 +118,11 @@ export const Num2D = React.forwardRef((props, refs) => {
         }
 
         // wsPointData = a;
-        setData(a);
+        pendingDataRef.current = a;
+        scheduleRender();
     }
 
     const sitValue = (prop) => {
-        console.log(prop)
         const { valuej, valueg, value, valuel, valuef, valuelInit } = prop;
         if (valuej) valuej1 = valuej;
         if (valueg) valueg1 = valueg;
@@ -111,7 +136,6 @@ export const Num2D = React.forwardRef((props, refs) => {
     const drawContent = () => { }
 
     const changeWsData147R = (wsPointData) => {
-        console.log(wsPointData.length)
 
         if (props.matrixName == 'hand0205') {
 
@@ -165,7 +189,8 @@ export const Num2D = React.forwardRef((props, refs) => {
                         arr[height][i] = i
                     }
 
-                    setData(arr);
+                    pendingDataRef.current = arr;
+                    scheduleRender();
                 }
 
                 if (right) {
@@ -207,7 +232,8 @@ export const Num2D = React.forwardRef((props, refs) => {
                         arr[height][i] = i
                     }
 
-                    setData1(arr);
+                    pendingData1Ref.current = arr;
+                    scheduleRender();
                 }
 
                 const newArr = [...leftArr, ...rightArr]
@@ -341,8 +367,6 @@ export const Num2D = React.forwardRef((props, refs) => {
     }
 
     const changeWsData147 = (wsPointData) => {
-
-        console.log()
         layoutData([...wsPointData])
         if (props.matrixName == 'hand0205') {
 
@@ -453,10 +477,10 @@ export const Num2D = React.forwardRef((props, refs) => {
             }
 
             // wsPointData = a;
-            setData(a);
+            pendingDataRef.current = a;
+            scheduleRender();
         } else {
             if (props.matrixName == 'footVideo') {
-                // console.log(wsPointData)
 
                 // newArr = footL(pointArr)
                 // layoutData([...wsPointData])
@@ -496,7 +520,8 @@ export const Num2D = React.forwardRef((props, refs) => {
                     arr[height][i] = i
                 }
 
-                setData(arr);
+                pendingDataRef.current = arr;
+                scheduleRender();
 
             }
         }

@@ -2896,8 +2896,7 @@ parser.on("data", function (data) {
         pointArr = endiSit1024(pointArr)
       } else if (file == 'fast1024') {
         pointArr = jqbed(pointArr)
-        console.log('fast1024')
-        // console.log(Math.max(...pointArr))
+
         pointArr = pressNew1220({ arr: pointArr, height: 32, width: 32, type: 'col', value: 1024 })
         // pointArr = gaussBlur_return(pointArr , 32,32, 0.5)
       } else if (file == 'sofa') {
@@ -3128,7 +3127,7 @@ parser.on("data", function (data) {
         pointArr[i] = buffer.readUInt8(i);
       }
       let length = pointArr.length
-      console.log(pointArr[1])
+
       pointArr = pointArr.splice(2, length)
       length = pointArr.length
       const arr = pointArr.splice(length - 16, length)
@@ -3144,7 +3143,7 @@ parser.on("data", function (data) {
       // newArr = handVideo1470506([...pointArr])
       // newArr = handVideoRealPoint_0416_3([...newArr])
       // newArr = [...pointArr]
-      console.log(file)
+
       if (file == 'handVideo1') {
         newArr = handVideoRealPoint_0506_3([...pointArr])
         pointArr = handVideo1_0416_0506(pointArr)
@@ -3537,9 +3536,7 @@ parser.on("data", function (data) {
     }
 
     if (file.includes('bed4096') && buffer.length == 4096) {
-      if (buffer.length != 4096) {
-        console.log('bufferLength : ', baudRate, buffer.length)
-      }
+
 
       // console.log(file , baudRate)
       pointArr = new Array();
@@ -3612,7 +3609,6 @@ parser.on("data", function (data) {
     }
 
     if (buffer.length == 1) {
-      console.log(buffer.readUInt8(i))
       if (buffer.readUInt8(i) == 3) {
         server.clients.forEach(function each(client) {
           const jsonData = JSON.stringify({
@@ -3696,7 +3692,6 @@ parser2.on("data", function (data) {
   pointArr2 = new Array();
   let buffer = Buffer.from(data);
   if (nowDate < endDate) {
-    console.log(buffer.length)
     if (buffer.length === 1024) {
       for (var i = 0; i < buffer.length; i++) {
         pointArr2[i] = buffer.readUInt8(i);
@@ -3921,7 +3916,6 @@ parser2.on("data", function (data) {
     }
 
     if (buffer.length == 1) {
-      console.log(buffer.readUInt8(i))
       if (buffer.readUInt8(i) == 3) {
         server.clients.forEach(function each(client) {
           const jsonData = JSON.stringify({

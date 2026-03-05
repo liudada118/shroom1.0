@@ -169,7 +169,6 @@ class CanvasCom extends React.Component {
   }
   shouldComponentUpdate(nextProps, nextState) {
     if (this.props.local !== null || this.props.local !== undefined) {
-      console.log('hand')
       return this.props.matrixName != nextProps.matrixName || this.props.local != nextProps.local
     }
     return this.props.matrixName != nextProps.matrixName;
@@ -412,7 +411,6 @@ class Home extends React.Component {
 
   componentDidMount() {
     // window.alert(window.innerWidth)
-    console.log(this.state.matrixName)
     document.documentElement.style.fontSize = `${window.innerWidth / 120}px`;
 
     var c2 = document.getElementById("myChartBig");
@@ -1251,14 +1249,13 @@ class Home extends React.Component {
         if (this.state.matrixName == 'footVideo') {
           if (this.state.numMatrixFlag.includes('num')) {
             let newArr = [...wsPointData]
-            console.log(wsPointData, 'wsPointData')
+
             // this.com.current?.changeWsData147([...newArr])
             this.com.current?.changeWsData147R({ left: [...newArr] })
           }
         } else if (this.state.matrixName.includes('robot')) {
           if (this.state.numMatrixFlag.includes('num')) {
             let newArr = [...wsPointData]
-            console.log(wsPointData)
             this.com.current?.changeWsData147([...newArr])
           }
         }
@@ -1390,7 +1387,6 @@ class Home extends React.Component {
         this.state.matrixName !== "bigBed" &&
         this.state.matrixName !== "foot"
       ) {
-        console.log(this.state.matrixName)
         backTypeEvent[this.state.matrixName]({
           that: this,
           jsonObject,
@@ -1404,7 +1400,6 @@ class Home extends React.Component {
 
     if ((jsonObject.newArr != null || jsonObject.newArr147 != null) && (['robot1', 'footVideo'].includes(this.state.matrixName) || this.state.matrixName.includes('hand') || this.state.matrixName == 'Num3D')) {
 
-      console.log(this.state.numMatrixFlag)
       const that = this
       let wsPointData = jsonObject.newArr || jsonObject.newArr147;
       if (!Array.isArray(wsPointData)) {
@@ -1507,7 +1502,6 @@ class Home extends React.Component {
                 that.com.current?.bthClickHandle(wsPointData);
               }
 
-              console.log(wsPointDataSit)
 
               if (!that.state.calibration) {
                 //  z 
@@ -1615,7 +1609,6 @@ class Home extends React.Component {
                 that.com.current?.bthClickHandle(wsPointData);
               }
 
-              console.log(wsPointDataSit)
 
               if (!that.state.calibration) {
                 //  z 
@@ -1672,7 +1665,7 @@ class Home extends React.Component {
           if (this.state.numMatrixFlag.includes('num')) {
             let newArr = [...wsPointData]
 
-            console.log(wsPointData, 'wsPointData1')
+
 
             this.com.current?.changeWsData147R({ right: [...newArr] })
           }
@@ -1817,7 +1810,7 @@ class Home extends React.Component {
   changeMatrix = (e) => {
     // setMatrixName(e)
     const configObj = getConfig({ sensorType: e })
-    console.log(configObj)
+
     this.setState({ matrixName: e, ...configObj });
     // 网络版
     // if (e === 'yanfeng10') {
@@ -2176,7 +2169,7 @@ class Home extends React.Component {
         .reduce((a, b) => a + b, 0);
       backMax = (backMax / (backTotalvalue ? backTotalvalue : 1)) * backTotal;
       backMean = backTotal / (backPoint ? backPoint : 1);
-      console.log(backTotal)
+
       this.data.current?.changeData({
         meanPres: backMean.toFixed(2),
         maxPres: backMax.toFixed(2),
@@ -2255,7 +2248,7 @@ class Home extends React.Component {
         .reduce((a, b) => a + b, 0);
       headMax = (headMax / (headTotalvalue ? headTotalvalue : 1)) * headTotal;
       headMean = headTotal / (headPoint ? headPoint : 1);
-      console.log(headTotal)
+
       this.data.current?.changeData({
         meanPres: headMean.toFixed(2),
         maxPres: headMax.toFixed(2),
@@ -2312,7 +2305,7 @@ class Home extends React.Component {
     // rotateY: "绕y轴旋转30°",
     // selectBox: "框选一个矩形区域"
     const { t, i18n } = this.props;
-    console.log(this.props)
+
     const text = t('rotate');
     const text2 = t('boxSelection');
     const textReset = t('reset')
@@ -2578,7 +2571,7 @@ class Home extends React.Component {
                     });
                     this.com.current?.changeSelectFlag(flag, this.state.local);
 
-                    console.log(flag)
+
 
                     if (flag) {
                       this.setState({ width: 0, height: 0 });

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useImperativeHandle } from 'react'
+import React, { useEffect, useState, useImperativeHandle, useRef, useCallback } from 'react'
 import './num.css'
 import { addSide, findMax } from '../../assets/util/util';
 import { pressData } from '../../assets/util/matrixToPress';
@@ -55,6 +55,30 @@ export const
         height = 9
     }
     const [data, setData] = useState([[]]);
+    // === RAF 节流：200Hz数据只缓冲，60fps渲染 ===
+    const pendingDataRef = useRef(null);
+    const pendingData1Ref = useRef(null);
+    const pendingObjRef = useRef(null);
+    const rafIdRef = useRef(null);
+
+    const scheduleRender = useCallback(() => {
+        if (rafIdRef.current) return;
+        rafIdRef.current = requestAnimationFrame(() => {
+            rafIdRef.current = null;
+            if (pendingDataRef.current !== null) {
+                setData(pendingDataRef.current);
+                pendingDataRef.current = null;
+            }
+            if (pendingData1Ref.current !== null) {
+                setData1(pendingData1Ref.current);
+                pendingData1Ref.current = null;
+            }
+            if (pendingObjRef.current !== null) {
+                setObj(pendingObjRef.current);
+                pendingObjRef.current = null;
+            }
+        });
+    }, []);
     const [data1, setData1] = useState([[]]);
     const [obj, setObj] = useState()
     const [scale, setScale] = useState(1)
@@ -62,8 +86,6 @@ export const
 
 
     const changeWsData = (wsPointData) => {
-
-        console.log(wsPointData.length, valuef1)
         let newData = [...wsPointData]
         let dataG = []
         let ndata = [...newData].map((a, index) => (a - valuef1 < 0 ? 0 : a));
@@ -85,12 +107,13 @@ export const
             }
         }
 
-        // wsPointData = a;
-        setData(a);
+        pendingDataRef.current = a;
+        scheduleRender();
     }
 
+
+
     const sitValue = (prop) => {
-        console.log(prop)
         const { valuej, valueg, value, valuel, valuef, valuelInit } = prop;
         if (valuej) valuej1 = valuej;
         if (valueg) valueg1 = valueg;
@@ -250,7 +273,8 @@ export const
                     arr[height][i] = i
                 }
 
-                setData(arr);
+                pendingDataRef.current = arr;
+                scheduleRender();
             }
         } else {
 
@@ -291,7 +315,8 @@ export const
                     arr[height][i] = i
                 }
 
-                setData(arr);
+                pendingDataRef.current = arr;
+                scheduleRender();
             } else if (props.matrixName == 'robotSY') {
                 // const back = [62,46,30,14,254,238,222,206,61,45,29,13,253,237,221,205,60,44,28,12,252,236,220,204,59,43,27,11,251,235,219,203,58,42,26,10,250,234,218,202]
                 const back = [
@@ -346,7 +371,8 @@ export const
                     },
                 }
 
-                setObj(obj)
+                pendingObjRef.current = obj;
+                scheduleRender();
 
                 const newArr = new Array(1024).fill(0)
 
@@ -458,8 +484,8 @@ export const
                     
                 }
 
-                setObj(obj)
-                console.log(obj , wsPointData)
+                pendingObjRef.current = obj;
+                scheduleRender();
                 const newArr = new Array(1024).fill(0)
 
                 insertWb(newArr, genNewArr(wsPointData, back), 32, 32, 11, 0, 8, 5)
@@ -555,7 +581,8 @@ export const
                     },
                 }
 
-                setObj(obj)
+                pendingObjRef.current = obj;
+                scheduleRender();
 
                 const newArr = new Array(1024).fill(0)
 
@@ -646,7 +673,8 @@ export const
                         arr[height][i] = i
                     }
 
-                    setData(arr);
+                    pendingDataRef.current = arr;
+                    scheduleRender();
                 }
 
                 if (right) {
@@ -672,7 +700,8 @@ export const
                         arr[height][i] = i
                     }
 
-                    setData1(arr);
+                    pendingData1Ref.current = arr;
+                    scheduleRender();
                 }
                 const newArr = [...leftArr, ...rightArr]
                 const dataArr = [...newArr]
@@ -737,6 +766,9 @@ export const
         var WW = document.documentElement.clientWidth
         var scaleNum = WW / 1920
         setScale(scaleNum)
+        return () => {
+            if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
+        };
     }, []);
 
     return (

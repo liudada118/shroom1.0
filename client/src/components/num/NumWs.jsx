@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useImperativeHandle, useRef } from 'react'
+import React, { useEffect, useState, useImperativeHandle, useRef, useCallback } from 'react'
 import './num.css'
 import hand from '../../assets/images/hand(1).png'
 import { addSide, findMax, interp, rotate90, rotate90CW } from '../../assets/util/util'
@@ -104,6 +104,21 @@ const Num3D = React.forwardRef((props, refs) => {
         height = 9
     }
     const [data, setData] = useState(new Array(height).fill(new Array(width).fill(0)));
+
+    // === RAF 节流：200Hz数据只缓冲，60fps渲染 ===
+    const pendingDataRef = useRef(null);
+    const rafIdRef = useRef(null);
+
+    const scheduleRender = useCallback(() => {
+        if (rafIdRef.current) return;
+        rafIdRef.current = requestAnimationFrame(() => {
+            rafIdRef.current = null;
+            if (pendingDataRef.current !== null) {
+                setData(pendingDataRef.current);
+                pendingDataRef.current = null;
+            }
+        });
+    }, []);
     const [scale, setScale] = useState(1)
 
     const typeRef = useRef('hand')
@@ -139,7 +154,8 @@ const Num3D = React.forwardRef((props, refs) => {
 
 
         // wsPointData = a;
-        setData(a);
+        pendingDataRef.current = a;
+        scheduleRender();
     }
 
     const changeWsData147 = (wsPointData) => {
@@ -236,14 +252,13 @@ const Num3D = React.forwardRef((props, refs) => {
         }
 
         // wsPointData = a;
-        setData(a);
+        pendingDataRef.current = a;
+        scheduleRender();
     }
 
 
 
     const sitValue = (prop) => {
-        console.log(props)
-        console.log(prop)
 
         const { valuej, valueg, value, valuel, valuef, valuelInit } = prop;
         if (valuej) valuej1 = valuej;
@@ -287,13 +302,11 @@ const Num3D = React.forwardRef((props, refs) => {
         for (let i = 13; i < 17; i++) {
 
             for (let j = 17; j < 20; j++) {
-                console.log(data[k])
                 newArr[j * 32 + i] = data[k] * 8
                 k++
             }
         }
 
-        console.log(data, [...newArr])
         // const res = [...newArr]
         newArr = gaussBlur_2(newArr, 32, 32, 1.6)
         let a = [], newH = 32, newW = 32;
@@ -305,7 +318,8 @@ const Num3D = React.forwardRef((props, refs) => {
         }
 
         // wsPointData = a;
-        setData(a);
+        pendingDataRef.current = a;
+        scheduleRender();
     }
 
     const changeWsDatapalm = (wsPointData) => {
@@ -348,7 +362,8 @@ const Num3D = React.forwardRef((props, refs) => {
             }
         }
         // wsPointData = a;
-        setData(a);
+        pendingDataRef.current = a;
+        scheduleRender();
     }
 
     const layoutData = (dataArr) => {
@@ -538,6 +553,9 @@ const Num3D = React.forwardRef((props, refs) => {
         var WW = document.documentElement.clientWidth
         var scaleNum = WW / 1920
         setScale(scaleNum)
+        return () => {
+            if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
+        };
     }, []);
 
     return (
