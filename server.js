@@ -266,9 +266,9 @@ let pointArr4zero = []
 let pointArr1zeroData = []
 let pointArr2zeroData = []
 let pointArr3zeroData = []
-let pointArr4zeroData = [], newArr147 = [], newArr147_2 = [],
+let pointArr4zeroData = [], newArr147 = [], newArr147_2 = [];
 
-  server = new WebSocket.Server({ port: 19999 });
+server = new WebSocket.Server({ port: 19999 });
 server1 = new WebSocket.Server({ port: 19998 });
 server2 = new WebSocket.Server({ port: 19997 });
 
@@ -2743,7 +2743,7 @@ SerialPort.list().then((ports) => {
   logger.info(
     "=========================================================================================\r\n"
   );
-}
+});
 
 let pointArr, newData, firstBlueData = [], lastBlueData = [], firstBlueData1 = [], lastBlueData1 = [];
 let index = 0
@@ -4097,11 +4097,6 @@ setInterval(() => {
       logger.warn(e, "e");
     }
   }
-}
-}
-}
-}
-}
-}
+}, 3000);
 
 
