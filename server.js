@@ -2,7 +2,7 @@ const logger = require('./logger');
 ﻿const WebSocket = require("ws");
 const { app } = require('electron')
 const path = require('path');
-var os = require('os');
+const os = require('os');
 const fs = require('fs');
 const { SerialPort } = require("serialport");
 const { DelimiterParser } = require("@serialport/parser-delimiter");
@@ -91,9 +91,9 @@ const getPort = (ports) => {
 
 let baudRate = 1000000
 
-var serialport = { a: 1, b: 2 }
+let serialport = { a: 1, b: 2 }
 const timeNum = 1000 / 12;
-var port2,
+let port2,
   port1,
   portHead,
   localFlag = false,
@@ -127,7 +127,6 @@ let lastData = new Array(1024).fill(0),
 const backTotal = backnum1 * backnum2;
 const sitTotal = sitnum1 * sitnum2;
 let length, history, nowGetTime;
-var serialport;
 
 let nowDate = 0
 let endDate = 0
@@ -206,7 +205,7 @@ let dataFalg = 0;
 
 // const createCsvWriter = require("csv-writer").createObjectCsvWriter;
 
-var saveTime,
+let saveTime,
   getTime,
 
   com,
@@ -233,31 +232,31 @@ db = dbObj.db
 db1 = dbObj.db1
 db2 = dbObj.db2
 
-var flag = false;
-var colHZ = 12, oldTimeStamp = new Date().getTime();
+let flag = false;
+let colHZ = 12, oldTimeStamp = new Date().getTime();
 let splitBuffer = Buffer.from([0xaa, 0x55, 0x03, 0x99]);
 // let splitBuffer1 = Buffer.from([0xaa, 0x55, 0x03, 0x09]);
 let parser2 = new DelimiterParser({ delimiter: splitBuffer });
 let parser = new DelimiterParser({ delimiter: splitBuffer });
 let parser3 = new DelimiterParser({ delimiter: splitBuffer });
 let parser4 = new DelimiterParser({ delimiter: splitBuffer });
-var server, server1, server2;
-var localData = [],
+let server, server1, server2;
+let localData = [],
   localDataBack = [],
   localDataHead = [],
   indexArr = [0, 0];
 let up = 1245, down = 2
-var pointArr1zero = []
-var pointArr147zero = []
-var pointArr147zero_2 = []
-var pointArr2zero = []
-var pointArr3zero = []
-var pointArr4zero = []
+let pointArr1zero = []
+let pointArr147zero = []
+let pointArr147zero_2 = []
+let pointArr2zero = []
+let pointArr3zero = []
+let pointArr4zero = []
 
-var pointArr1zeroData = []
-var pointArr2zeroData = []
-var pointArr3zeroData = []
-var pointArr4zeroData = [], newArr147 = [], newArr147_2 = [],
+let pointArr1zeroData = []
+let pointArr2zeroData = []
+let pointArr3zeroData = []
+let pointArr4zeroData = [], newArr147 = [], newArr147_2 = [],
 
   server = new WebSocket.Server({ port: 19999 });
 server1 = new WebSocket.Server({ port: 19998 });
@@ -1981,7 +1980,7 @@ module.exports = {
                   logger.error(err);
                 } else {
                   //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
-                  for (var i = historyArr[0]; i < historyArr[1]; i++) {
+                  for (let i = historyArr[0]; i < historyArr[1]; i++) {
                     // const press = JSON.parse(rows[i][`data`]).reduce(
                     //   (a, b) => a + b,
                     //   0
@@ -2094,7 +2093,7 @@ module.exports = {
                   //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
 
                   if (!rows.length) return;
-                  for (var i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
+                  for (let i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
                     let sitData = JSON.parse(rows[i][`data`]);
                     let realData = JSON.parse(rows[i][`data`]);
                     // sitData = zeroLine(sitData,32,32)
@@ -2192,7 +2191,7 @@ module.exports = {
                   //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
                   const label = getMessage.download.split('_')[1]
                   if (!rows.length) return;
-                  for (var i = 0, j = 0; i < rows.length; i++, j++) {
+                  for (let i = 0, j = 0; i < rows.length; i++, j++) {
                     const newData = {
                       realData: rows[i][`data`],
                       label: label
@@ -2255,7 +2254,7 @@ module.exports = {
                   //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
                   const label = getMessage.download.split('_')[1]
                   if (!rows.length) return;
-                  for (var i = 0, j = 0; i < rows.length; i++, j++) {
+                  for (let i = 0, j = 0; i < rows.length; i++, j++) {
                     const newData = {
                       realData: rows[i][`data`],
                       label: label
@@ -2319,7 +2318,7 @@ module.exports = {
 
                   if (!rows.length) return;
                   logger.debug(historyArr)
-                  for (var i = historyArr[0], j = 0; i < historyArr[1] - 1; i++, j++) {
+                  for (let i = historyArr[0], j = 0; i < historyArr[1] - 1; i++, j++) {
                     const sitData = JSON.parse(rows[i][`data`]);
                     logger.debug(sitData.length)
                     const press = sitPressSelect.length
@@ -2415,7 +2414,7 @@ module.exports = {
 
                   // if()
 
-                  for (var i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
+                  for (let i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
                     const backData = JSON.parse(rows[i][`data`]);
                     // const press = calPressArr(backData , backIndex , 32)
                     const press = backPressSelect.length
@@ -2515,7 +2514,7 @@ module.exports = {
 
                     // if()
 
-                    for (var i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
+                    for (let i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
                       const backData = JSON.parse(rows[i][`data`]);
                       // const press = calPressArr(backData , backIndex , 32)
                       const press = backPressSelect.length
@@ -2750,17 +2749,17 @@ SerialPort.list().then((ports) => {
 
 function gaussBlur_return(scl, w, h, r) {
   const res = new Array(scl.length).fill(1)
-  var rs = Math.ceil(r * 2.57); // significant radius
-  for (var i = 0; i < h; i++) {
-    for (var j = 0; j < w; j++) {
-      var val = 0,
+  let rs = Math.ceil(r * 2.57); // significant radius
+  for (let i = 0; i < h; i++) {
+    for (let j = 0; j < w; j++) {
+      let val = 0,
         wsum = 0;
-      for (var iy = i - rs; iy < i + rs + 1; iy++)
-        for (var ix = j - rs; ix < j + rs + 1; ix++) {
-          var x = Math.min(w - 1, Math.max(0, ix));
-          var y = Math.min(h - 1, Math.max(0, iy));
-          var dsq = (ix - j) * (ix - j) + (iy - i) * (iy - i);
-          var wght = Math.exp(-dsq / (2 * r * r)) / (Math.PI * 2 * r * r);
+      for (let iy = i - rs; iy < i + rs + 1; iy++)
+        for (let ix = j - rs; ix < j + rs + 1; ix++) {
+          let x = Math.min(w - 1, Math.max(0, ix));
+          let y = Math.min(h - 1, Math.max(0, iy));
+          let dsq = (ix - j) * (ix - j) + (iy - i) * (iy - i);
+          let wght = Math.exp(-dsq / (2 * r * r)) / (Math.PI * 2 * r * r);
           val += scl[y * w + x] * wght;
           wsum += wght;
         }
@@ -2770,7 +2769,7 @@ function gaussBlur_return(scl, w, h, r) {
   return res
 }
 
-var pointArr, newData, firstBlueData = [], lastBlueData = [], firstBlueData1 = [], lastBlueData1 = [];
+let pointArr, newData, firstBlueData = [], lastBlueData = [], firstBlueData1 = [], lastBlueData1 = [];
 let index = 0
 parser.on("data", function (data) {
   pointArr = new Array();
@@ -2778,7 +2777,7 @@ parser.on("data", function (data) {
   newData = new Array();
   if (nowDate < endDate) {
     if (buffer.length === 1024) {
-      for (var i = 0; i < buffer.length; i++) {
+      for (let i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
       }
 
@@ -2959,7 +2958,7 @@ parser.on("data", function (data) {
     }
 
     if (buffer.length == 72 || buffer.length == 144) {
-      for (var i = 0; i < buffer.length; i++) {
+      for (let i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
       }
 
@@ -2990,7 +2989,7 @@ parser.on("data", function (data) {
     }
 
     if (buffer.length == 262) {
-      for (var i = 0; i < buffer.length; i++) {
+      for (let i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
       }
       const length = pointArr.length
@@ -3014,7 +3013,7 @@ parser.on("data", function (data) {
       let firstArr = new Array();
       const length = buffer.length
 
-      for (var i = 0; i < buffer.length; i++) {
+      for (let i = 0; i < buffer.length; i++) {
         firstArr[i] = buffer.readUInt8(i);
       }
 
@@ -3094,7 +3093,7 @@ parser.on("data", function (data) {
     if (buffer.length == 146) {
 
       pointArr = new Array();
-      for (var i = 0; i < buffer.length; i++) {
+      for (let i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
       }
       let length = pointArr.length
@@ -3277,7 +3276,7 @@ parser.on("data", function (data) {
       let firstArr = new Array();
       const length = buffer.length
 
-      for (var i = 0; i < buffer.length; i++) {
+      for (let i = 0; i < buffer.length; i++) {
         firstArr[i] = buffer.readUInt8(i);
       }
 
@@ -3295,7 +3294,7 @@ parser.on("data", function (data) {
     if (buffer.length == 158) {
 
       pointArr = new Array();
-      for (var i = 0; i < buffer.length; i++) {
+      for (let i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
       }
       let length = pointArr.length
@@ -3465,7 +3464,7 @@ parser.on("data", function (data) {
 
 
       pointArr = new Array();
-      for (var i = 0; i < buffer.length; i++) {
+      for (let i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
       }
 
@@ -3503,7 +3502,7 @@ parser.on("data", function (data) {
 
 
       pointArr = new Array();
-      for (var i = 0; i < buffer.length; i++) {
+      for (let i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
       }
 
@@ -3646,13 +3645,13 @@ function colOrSendData(jsonData) {
 
 // 澶勭悊涓插彛鏁版嵁
 
-var pointArr2;
+let pointArr2;
 parser2.on("data", function (data) {
   pointArr2 = new Array();
   let buffer = Buffer.from(data);
   if (nowDate < endDate) {
     if (buffer.length === 1024) {
-      for (var i = 0; i < buffer.length; i++) {
+      for (let i = 0; i < buffer.length; i++) {
         pointArr2[i] = buffer.readUInt8(i);
       }
 
@@ -3728,7 +3727,7 @@ parser2.on("data", function (data) {
       let firstArr = new Array();
       const length = buffer.length
 
-      for (var i = 0; i < buffer.length; i++) {
+      for (let i = 0; i < buffer.length; i++) {
         firstArr[i] = buffer.readUInt8(i);
       }
 
@@ -3769,7 +3768,7 @@ parser2.on("data", function (data) {
 
     if (buffer.length == 146) {
       let pointArr = new Array();
-      for (var i = 0; i < buffer.length; i++) {
+      for (let i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
       }
       let length = pointArr.length
@@ -3934,7 +3933,7 @@ function colOrSendData1(jsonData) {
   }
 }
 
-var pointArr3;
+let pointArr3;
 parser3.on("data", function (data) {
   if (file == "bigBed") {
     pointArr3 = new Array();
@@ -3943,7 +3942,7 @@ parser3.on("data", function (data) {
     let res = [];
     if (nowDate < endDate) {
       if (buffer.length === 1025) {
-        for (var i = 0; i < buffer.length; i++) {
+        for (let i = 0; i < buffer.length; i++) {
           pointArr3[i] = buffer.readUInt8(i);
         }
 
@@ -4017,7 +4016,7 @@ parser3.on("data", function (data) {
   }
 });
 
-var pointArr4;
+let pointArr4;
 
 parser4.on("data", function (data) {
   pointArr4 = new Array();
@@ -4025,7 +4024,7 @@ parser4.on("data", function (data) {
   if (nowDate < endDate) {
     if (buffer.length === 1024) {
 
-      for (var i = 0; i < buffer.length; i++) {
+      for (let i = 0; i < buffer.length; i++) {
         pointArr4[i] = buffer.readUInt8(i);
       }
       if (file == 'volvo') {
@@ -4091,7 +4090,7 @@ parser4.on("data", function (data) {
       let firstArr = new Array();
       const length = buffer.length
 
-      for (var i = 0; i < buffer.length; i++) {
+      for (let i = 0; i < buffer.length; i++) {
         firstArr[i] = buffer.readUInt8(i);
       }
 
@@ -4132,7 +4131,7 @@ parser4.on("data", function (data) {
 
     if (buffer.length == 146) {
       let pointArr = new Array();
-      for (var i = 0; i < buffer.length; i++) {
+      for (let i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
       }
       let length = pointArr.length
@@ -4311,17 +4310,17 @@ setInterval(() => {
 
 function gaussBlur_2(scl, w, h, r) {
   const tcl = new Array(scl.length).fill(1)
-  var rs = Math.ceil(r * 2.57); // significant radius
-  for (var i = 0; i < h; i++)
-    for (var j = 0; j < w; j++) {
-      var val = 0,
+  let rs = Math.ceil(r * 2.57); // significant radius
+  for (let i = 0; i < h; i++)
+    for (let j = 0; j < w; j++) {
+      let val = 0,
         wsum = 0;
-      for (var iy = i - rs; iy < i + rs + 1; iy++)
-        for (var ix = j - rs; ix < j + rs + 1; ix++) {
-          var x = Math.min(w - 1, Math.max(0, ix));
-          var y = Math.min(h - 1, Math.max(0, iy));
-          var dsq = (ix - j) * (ix - j) + (iy - i) * (iy - i);
-          var wght = Math.exp(-dsq / (2 * r * r)) / (Math.PI * 2 * r * r);
+      for (let iy = i - rs; iy < i + rs + 1; iy++)
+        for (let ix = j - rs; ix < j + rs + 1; ix++) {
+          let x = Math.min(w - 1, Math.max(0, ix));
+          let y = Math.min(h - 1, Math.max(0, iy));
+          let dsq = (ix - j) * (ix - j) + (iy - i) * (iy - i);
+          let wght = Math.exp(-dsq / (2 * r * r)) / (Math.PI * 2 * r * r);
           val += scl[y * w + x] * wght;
           wsum += wght;
         }

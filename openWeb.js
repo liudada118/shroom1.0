@@ -117,17 +117,17 @@ module.exports = {
     ];
   },
   gaussBlur_1(scl, tcl, w, h, r) {
-    var rs = Math.ceil(r * 2.57); // significant radius
-    for (var i = 0; i < h; i++)
-      for (var j = 0; j < w; j++) {
-        var val = 0,
+    let rs = Math.ceil(r * 2.57); // significant radius
+    for (let i = 0; i < h; i++)
+      for (let j = 0; j < w; j++) {
+        let val = 0,
           wsum = 0;
-        for (var iy = i - rs; iy < i + rs + 1; iy++)
-          for (var ix = j - rs; ix < j + rs + 1; ix++) {
-            var x = Math.min(w - 1, Math.max(0, ix));
-            var y = Math.min(h - 1, Math.max(0, iy));
-            var dsq = (ix - j) * (ix - j) + (iy - i) * (iy - i);
-            var wght = Math.exp(-dsq / (2 * r * r)) / (Math.PI * 2 * r * r);
+        for (let iy = i - rs; iy < i + rs + 1; iy++)
+          for (let ix = j - rs; ix < j + rs + 1; ix++) {
+            let x = Math.min(w - 1, Math.max(0, ix));
+            let y = Math.min(h - 1, Math.max(0, iy));
+            let dsq = (ix - j) * (ix - j) + (iy - i) * (iy - i);
+            let wght = Math.exp(-dsq / (2 * r * r)) / (Math.PI * 2 * r * r);
             val += scl[y * w + x] * wght;
             wsum += wght;
           }
@@ -702,17 +702,17 @@ module.exports = {
     }
   },
   gaussBlur_1(scl, tcl, w, h, r) {
-    var rs = Math.ceil(r * 2.57); // significant radius
-    for (var i = 0; i < h; i++)
-      for (var j = 0; j < w; j++) {
-        var val = 0,
+    let rs = Math.ceil(r * 2.57); // significant radius
+    for (let i = 0; i < h; i++)
+      for (let j = 0; j < w; j++) {
+        let val = 0,
           wsum = 0;
-        for (var iy = i - rs; iy < i + rs + 1; iy++)
-          for (var ix = j - rs; ix < j + rs + 1; ix++) {
-            var x = Math.min(w - 1, Math.max(0, ix));
-            var y = Math.min(h - 1, Math.max(0, iy));
-            var dsq = (ix - j) * (ix - j) + (iy - i) * (iy - i);
-            var wght = Math.exp(-dsq / (2 * r * r)) / (Math.PI * 2 * r * r);
+        for (let iy = i - rs; iy < i + rs + 1; iy++)
+          for (let ix = j - rs; ix < j + rs + 1; ix++) {
+            let x = Math.min(w - 1, Math.max(0, ix));
+            let y = Math.min(h - 1, Math.max(0, iy));
+            let dsq = (ix - j) * (ix - j) + (iy - i) * (iy - i);
+            let wght = Math.exp(-dsq / (2 * r * r)) / (Math.PI * 2 * r * r);
             val += scl[y * w + x] * wght;
             wsum += wght;
           }
@@ -752,7 +752,7 @@ module.exports = {
     ];
   },
   timeStampToDate(data) {
-    var date = new Date(data);  // 参数需要毫秒数，所以这里将秒数乘于 1000
+    let date = new Date(data);  // 参数需要毫秒数，所以这里将秒数乘于 1000
     Y = date.getFullYear() + '/';
     // M = (date.getMonth() + 1 < 10 ? '0' + (date.getMonth() + 1) : date.getMonth() + 1) + '/';
     M = (date.getMonth() + 1) + '/';
@@ -765,7 +765,7 @@ module.exports = {
     return Y + M + D + h + m + s + us
   },
   timeStampTo_Date(data) {
-    var date = new Date(data);  // 参数需要毫秒数，所以这里将秒数乘于 1000
+    let date = new Date(data);  // 参数需要毫秒数，所以这里将秒数乘于 1000
     Y = date.getFullYear() + '-';
     // M = (date.getMonth() + 1 < 10 ? '0' + (date.getMonth() + 1) : date.getMonth() + 1) + '/';
     M = (date.getMonth() + 1) + '-';
@@ -778,7 +778,7 @@ module.exports = {
     return Y + M + D + h + m + s
   },
   timeStampToDateNum(data) {
-    var date = new Date(data);  // 参数需要毫秒数，所以这里将秒数乘于 1000
+    let date = new Date(data);  // 参数需要毫秒数，所以这里将秒数乘于 1000
     Y = date.getFullYear();
     // M = (date.getMonth() + 1 < 10 ? '0' + (date.getMonth() + 1) : date.getMonth() + 1) + '/';
     M = (date.getMonth() + 1) < 10 ? '0' + (date.getMonth() + 1) : (date.getMonth() + 1);
@@ -2179,11 +2179,11 @@ function rotate90(arr, height, width) {
     }
   }
 
-  var temp = [];
-  var len = matrix.length;
-  for (var i = 0; i < len; i++) {
-    for (var j = 0; j < len; j++) {
-      var k = len - 1 - j;
+  let temp = [];
+  let len = matrix.length;
+  for (let i = 0; i < len; i++) {
+    for (let j = 0; j < len; j++) {
+      let k = len - 1 - j;
       if (!temp[k]) {
         temp[k] = [];
       }
