@@ -1,3 +1,4 @@
+const logger = require('./logger');
 /**
  * preload.js - Electron 安全桥梁脚本
  *
@@ -45,7 +46,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     if (VALID_SEND_CHANNELS.includes(channel)) {
       ipcRenderer.send(channel, data);
     } else {
-      console.warn(`[preload] Blocked send to invalid channel: ${channel}`);
+      logger.warn(`[preload] Blocked send to invalid channel: ${channel}`);
     }
   },
 
@@ -64,7 +65,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         ipcRenderer.removeListener(channel, subscription);
       };
     } else {
-      console.warn(`[preload] Blocked listen on invalid channel: ${channel}`);
+      logger.warn(`[preload] Blocked listen on invalid channel: ${channel}`);
       return () => {};
     }
   },

@@ -1,7 +1,7 @@
+const logger = require('./logger');
 const WebSocket = require("ws");
 
 function colOrSendData(jsonData) {
-    // console.log(JSON.stringify(JSON.parse(jsonData).sitData) , 'jsonData')
 
 
 
@@ -35,7 +35,7 @@ function zeroLineMatrix(arr, matrixLength, max, min) {
 
     for (let i = 1; i < matrixLength - 1; i++) {
         if (rowArr[i + 1] > 100 && rowArr[i] < 40 && rowArr[i - 1] > 100) {
-            console.log(i , 'rowArr')
+            logger.debug(i , 'rowArr')
             for (let j = 0; j < matrixLength; j++) {
                 wsPointData[i * matrixLength + j] =
                     (wsPointData[(i - 1) * matrixLength + j] + wsPointData[(i + 1) * matrixLength + j]) / 2;
@@ -45,7 +45,7 @@ function zeroLineMatrix(arr, matrixLength, max, min) {
 
     for (let i = 1; i < matrixLength - 1; i++) {
         if (colArr[i + 1] > 100 && colArr[i] < 40 && colArr[i - 1] > 100) {
-            console.log(i , 'colArr')
+            logger.debug(i , 'colArr')
             for (let j = 0; j < matrixLength; j++) {
                 wsPointData[j * matrixLength + i] = (wsPointData[(j) * matrixLength + i - 1] + wsPointData[(j) * matrixLength + i + 1]) / 2;
             }
@@ -67,7 +67,7 @@ setInterval(() => {
         }
     }
     pointArr = zeroLineMatrix(pointArr , 64)
-    console.log(pointArr)
+    logger.debug(pointArr)
     let jsonData = JSON.stringify({ sitData: pointArr, })
     colOrSendData(jsonData)
 }, 100);

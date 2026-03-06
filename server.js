@@ -1,3 +1,4 @@
+const logger = require('./logger');
 ﻿const WebSocket = require("ws");
 const { app } = require('electron')
 const path = require('path');
@@ -74,7 +75,6 @@ const { isCar, dedupli, totalToN, } = require("./util");
 const { pressSmallBed } = require("./utilMatrix");
 
 const getPort = (ports) => {
-  // console.log(ports)
   // if (os.platform == 'win32') {
   //   return ports.filter((port) => {
   //     return port.manufacturer == 'wch.cn'
@@ -140,9 +140,9 @@ request('http://sensor.bodyta.com:8080/rcv/login/getSystemTime', {
   }
 }, (err, res, body) => {
   if (err) {
-    return console.log(err);
+    return logger.warn(err);
   }
-  console.log(body.time, 'body');
+  logger.debug(body.time, 'body');
   nowDate = parseInt(body.time)
 });
 
@@ -159,8 +159,8 @@ if (!fs.existsSync(csvPath)) {
   fs.mkdirSync(csvPath, { recursive: true });
 }
 
-console.log("[Path] resourceRoot=", runtimeResourceRoot);
-console.log("[Path] db=", filePath, "data=", csvPath, "config=", nameTxt);
+logger.info("[Path] resourceRoot=", runtimeResourceRoot);
+logger.info("[Path] db=", filePath, "data=", csvPath, "config=", nameTxt);
 
 
 
@@ -191,10 +191,10 @@ if (fs.existsSync(nameTxt)) {
       baudRate = 1000000
     }
   } catch (err) {
-    console.error(err);
+    logger.error(err);
   }
 } else {
-  console.log("[Config] config.txt not found, skip loading license at startup.");
+  logger.info("[Config] config.txt not found, skip loading license at startup.");
 }
 
 // let db = new sqlite3.Database(`${filePath}/foot.db`);
@@ -217,15 +217,12 @@ var saveTime,
 // try {
 //   const dateRes = fs.readFileSync(nameTxt, 'utf8');
 
-//   console.log(dateRes)
 //   file = dateRes
 //   // date = JSON.parse(module2.decryptStr(dateRes)).dateRes
 //   // // endDate = JSON.parse(module2.decryptStr(dateRes)).dateRes
 //   // sysStartTime = (`${JSON.parse(module2.decryptStr(dateRes)).startTimeRes}`)
-//   // console.log(JSON.parse(module2.decryptStr(dateRes)).startTimeRes);
 //   // endDate = parseFloat(module2.decryptStr(date))
 // } catch (err) {
-//   console.error(err);
 // }
 
 
@@ -270,16 +267,16 @@ module.exports = {
   openServer() {
 
     server1.on("open", function open() {
-      console.log("connected");
+      logger.info("connected");
     });
 
     server1.on("close", function close() {
-      console.log("disconnected");
+      logger.info("disconnected");
     });
 
     server1.on("connection", function connection(ws, req) {
       ws.on("message", function incoming(message) {
-        console.log("received: %s from %s", message, clientName, localFlag);
+        logger.debug("received: %s from %s", message, clientName, localFlag);
 
         const getMessage = JSON.parse(message);
 
@@ -297,13 +294,13 @@ module.exports = {
                   autoOpen: true,
                 },
                 function (err) {
-                  console.log(err, "err");
+                  logger.warn(err, "err");
                 }
               );
               //绠￠亾娣诲姞瑙ｆ瀽鍣?
               port2.pipe(parser2);
             } catch (e) {
-              console.log(e, "e");
+              logger.warn(e, "e");
             }
           }
 
@@ -340,13 +337,13 @@ module.exports = {
                     autoOpen: true,
                   },
                   function (err) {
-                    console.log(err, "err");
+                    logger.warn(err, "err");
                   }
                 );
                 //绠￠亾娣诲姞瑙ｆ瀽鍣?
                 // port2.pipe(parser2);
               } catch (e) {
-                console.log(e, "e");
+                logger.warn(e, "e");
               }
             }
           }
@@ -370,7 +367,6 @@ module.exports = {
 
           //   db1.all(selectQuery, params, (err, rows) => {
           //     if (err) {
-          //       console.error(err);
           //     } else {
           //       localDataBack = rows;
           //     }
@@ -381,11 +377,11 @@ module.exports = {
     });
 
     server.on("open", function open() {
-      console.log("connected");
+      logger.info("connected");
     });
 
     server.on("close", function close() {
-      console.log("disconnected");
+      logger.info("disconnected");
     });
 
     server.on("connection", function connection(ws, req) {
@@ -393,7 +389,7 @@ module.exports = {
       const ip = req.connection.remoteAddress;
       const port = req.connection.remotePort;
       const clientName = ip + port;
-      console.log("%s is connected", clientName);
+      logger.info("%s is connected", clientName);
 
       server.clients.forEach(function each(client) {
         /**
@@ -454,7 +450,7 @@ module.exports = {
 
           fs.writeFile(nameTxt, date, err => {
             if (err) {
-              console.error(err);
+              logger.error(err);
             }
             // date = module2.decryptStr(content) 
             // file written successfully
@@ -464,7 +460,6 @@ module.exports = {
 
           // sysStartTime = getMessage.date.startTime
 
-          // console.log(JSON.parse(content).dateRes)
 
           // endDate = parseFloat(module2.decryptStr(date))
           const parsedLicense = JSON.parse(dateRes);
@@ -683,7 +678,7 @@ module.exports = {
                 if (err) {
                   db.all(selectQuery, params, (err, rows) => {
                     if (err) {
-                      console.error(err);
+                      logger.error(err);
                     } else {
                       localData = rows;
                       length = rows.length
@@ -788,7 +783,6 @@ module.exports = {
                     }
                   });
                 } else {
-                  // console.log(rows);
                   localDataBack = rows;
                   length = rows.length
                     ? Math.min(
@@ -849,13 +843,13 @@ module.exports = {
 
                   db.all(selectQuery, params, (err, rows) => {
                     if (err) {
-                      console.error(err);
+                      logger.error(err);
                     } else {
 
                       if (file == 'volvo') {
                         db2.all(selectQuery, params, (err, rows) => {
                           if (err) {
-                            console.error(err);
+                            logger.error(err);
                           } else {
 
 
@@ -1012,7 +1006,7 @@ module.exports = {
             if (!isCar(file)) {
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
                   localData = rows;
                   length = rows.length
@@ -1144,19 +1138,19 @@ module.exports = {
             com = JSON.parse(message).sitPort;
             if (port1?.isOpen) {
               port1.close((e) => {
-                console.log(e)
+                logger.debug(e)
               });
             }
             if (com == com1) {
               if (port2?.isOpen) {
                 port2.close((e) => {
-                  console.log(e)
+                  logger.debug(e)
                 });
               }
             }
-            console.log(baudRate)
+            logger.debug(baudRate)
             if (file != "bigBed") {
-              console.log(com);
+              logger.debug(com);
               try {
                 port1 = new SerialPort(
                   {
@@ -1166,7 +1160,7 @@ module.exports = {
                     autoOpen: true,
                   },
                   function (err) {
-                    console.log(err, "err");
+                    logger.warn(err, "err");
                   }
                 );
                 //绠￠亾娣诲姞瑙ｆ瀽鍣?
@@ -1174,7 +1168,7 @@ module.exports = {
                 // parser = new Delimiter({ delimiter: splitBuffer });
                 port1.pipe(parser);
               } catch (e) {
-                console.log(e, "e");
+                logger.warn(e, "e");
               }
             } else {
               try {
@@ -1186,13 +1180,13 @@ module.exports = {
                     autoOpen: true,
                   },
                   function (err) {
-                    console.log(err, "err");
+                    logger.warn(err, "err");
                   }
                 );
                 //绠￠亾娣诲姞瑙ｆ瀽鍣?
                 port1.pipe(parser3);
               } catch (e) {
-                console.log(e, "e");
+                logger.warn(e, "e");
               }
             }
           }
@@ -1203,18 +1197,16 @@ module.exports = {
             comhead = JSON.parse(message).headPort;
             if (portHead?.isOpen) {
               portHead.close((e) => {
-                console.log(e)
+                logger.debug(e)
               });
             }
             // if (com == com1) {
             //   if (port2?.isOpen) {
             //     port2.close((e) => {
-            //       console.log(e)
             //     });
             //   }
             // }
             if (file != "bigBed") {
-              // console.log(com);
               try {
                 portHead = new SerialPort(
                   {
@@ -1224,7 +1216,7 @@ module.exports = {
                     autoOpen: true,
                   },
                   function (err) {
-                    console.log(err, baudRate, JSON.parse(message).headPort, "headerr");
+                    logger.warn(err, baudRate, JSON.parse(message).headPort, "headerr");
                   }
                 );
                 //绠￠亾娣诲姞瑙ｆ瀽鍣?
@@ -1232,7 +1224,7 @@ module.exports = {
                 // parser = new Delimiter({ delimiter: splitBuffer });
                 portHead.pipe(parser4);
               } catch (e) {
-                console.log(e, "e");
+                logger.warn(e, "e");
               }
             } else {
               try {
@@ -1244,13 +1236,13 @@ module.exports = {
                     autoOpen: true,
                   },
                   function (err) {
-                    console.log(err, "headerr");
+                    logger.warn(err, "headerr");
                   }
                 );
                 //绠￠亾娣诲姞瑙ｆ瀽鍣?
                 portHead.pipe(parser4);
               } catch (e) {
-                console.log(e, "e");
+                logger.warn(e, "e");
               }
             }
           }
@@ -1263,14 +1255,14 @@ module.exports = {
             com1 = JSON.parse(message).backPort;
             if (port2?.isOpen) {
               port2.close((e) => {
-                console.log(e, 'closeport2')
+                logger.debug(e, 'closeport2')
               });
             }
             if (com == com1) {
               if (port1?.isOpen) {
                 port1.close((e) => {
 
-                  console.log(e, 'closeport1')
+                  logger.debug(e, 'closeport1')
                 });
               }
             }
@@ -1283,14 +1275,14 @@ module.exports = {
                   autoOpen: true,
                 },
                 function (err) {
-                  console.log(err, "err");
+                  logger.warn(err, "err");
                 }
               );
               //绠￠亾娣诲姞瑙ｆ瀽鍣?
 
               port2.pipe(parser2);
             } catch (e) {
-              console.log(e, "e");
+              logger.warn(e, "e");
             }
           }
 
@@ -1335,15 +1327,13 @@ module.exports = {
             if (isCar(file)) {
               db1.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
-                  // console.log(rows);
                   let jsonData;
 
                   backTimeArr = rows;
 
                   // const timeArr = Array.from(new Set([...sitTimeArr, ...backTimeArr]))
-                  // console.log(timeArr, 'timeArr')
                   const timeArr = dedupli(sitTimeArr, backTimeArr);
                   if (file == "car") {
                     const jsonData1 = JSON.stringify({
@@ -1370,9 +1360,9 @@ module.exports = {
 
                   db.all(selectQuery, params, (err, rows) => {
                     if (err) {
-                      console.error(err);
+                      logger.error(err);
                     } else {
-                      console.log(rows);
+                      logger.debug(rows);
                       let jsonData;
                       sitTimeArr = rows;
                       // const timeArr = Array.from(new Set([...sitTimeArr, ...backTimeArr]))
@@ -1431,9 +1421,9 @@ module.exports = {
             } else {
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
-                  console.log(rows);
+                  logger.debug(rows);
                   let jsonData;
                   sitTimeArr = rows;
                   // const timeArr = Array.from(new Set([...sitTimeArr, ...backTimeArr]))
@@ -1534,13 +1524,11 @@ module.exports = {
             //         autoOpen: true,
             //       },
             //       function (err) {
-            //         console.log(err, "err");
             //       }
             //     );
             //     //绠￠亾娣诲姞瑙ｆ瀽鍣?
             //     // port1.pipe(parser);
             //   } catch (e) {
-            //     console.log(e, "e");
             //   }
             // }
 
@@ -1553,20 +1541,18 @@ module.exports = {
             //         autoOpen: true,
             //       },
             //       function (err) {
-            //         console.log(err, "err");
             //       }
             //     );
             //     //绠￠亾娣诲姞瑙ｆ瀽鍣?
             //     // port2.pipe(parser2);
             //   } catch (e) {
-            //     console.log(e, "e");
             //   }
             // }
           }
           if (localFlag) {
             if (JSON.parse(message).value != null) {
               const value = JSON.parse(message).value;
-              console.log(
+              logger.debug(
                 "received: %s from %s",
                 JSON.stringify(message),
                 clientName
@@ -1619,7 +1605,6 @@ module.exports = {
 
               } else {
                 if (file === 'smallBed') {
-                  // console.log(JSON.stringify(pressSmallBed({ arr: JSON.parse(localData[value]?.data) })))
                   jsonData = JSON.stringify({
                     // sitData: pressSmallBed({ arr: JSON.parse(localData[value]?.data) }),
                     sitData: localData[value]?.data,
@@ -1657,8 +1642,6 @@ module.exports = {
               }
               timer = setInterval(() => {
                 nowIndex++;
-                // console.log(interval)
-                // console.log(localData,nowIndex)
                 let jsonData
                 if (file === 'smallBed') {
                   jsonData = JSON.stringify({
@@ -1711,7 +1694,7 @@ module.exports = {
                 });
               }, interval);
             } else {
-              console.log("clear");
+              logger.debug("clear");
               clearInterval(timer);
             }
           }
@@ -1834,13 +1817,13 @@ module.exports = {
                       autoOpen: true,
                     },
                     function (err) {
-                      console.log(err, "err");
+                      logger.warn(err, "err");
                     }
                   );
                   //绠￠亾娣诲姞瑙ｆ瀽鍣?
                   port1.pipe(parser);
                 } catch (e) {
-                  console.log(e, "e");
+                  logger.warn(e, "e");
                 }
               }
 
@@ -1854,13 +1837,13 @@ module.exports = {
                       autoOpen: true,
                     },
                     function (err) {
-                      console.log(err, "err");
+                      logger.warn(err, "err");
                     }
                   );
                   //绠￠亾娣诲姞瑙ｆ瀽鍣?
                   port2.pipe(parser2);
                 } catch (e) {
-                  console.log(e, "e");
+                  logger.warn(e, "e");
                 }
               }
             }, 1000);
@@ -1995,7 +1978,7 @@ module.exports = {
               let startPressure = 0;
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
                   //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
                   for (var i = historyArr[0]; i < historyArr[1]; i++) {
@@ -2078,7 +2061,7 @@ module.exports = {
                   csvWriter
                     .writeRecords(csvWriteData)
                     .then(() => {
-                      console.log("export csv success");
+                      logger.info("export csv success");
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
@@ -2090,7 +2073,7 @@ module.exports = {
                       });
                     })
                     .catch((err) => {
-                      console.error("export csv failed", err);
+                      logger.error("export csv failed", err);
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
@@ -2106,7 +2089,7 @@ module.exports = {
             } else if (file === 'smallBed' || file === 'smallBed1') {
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
                   //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
 
@@ -2176,7 +2159,7 @@ module.exports = {
                   csvWriter
                     .writeRecords(csvWriteData)
                     .then(() => {
-                      console.log("export csv success");
+                      logger.info("export csv success");
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
@@ -2188,7 +2171,7 @@ module.exports = {
                       });
                     })
                     .catch((err) => {
-                      console.error("export csv failed", err);
+                      logger.error("export csv failed", err);
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
@@ -2204,7 +2187,7 @@ module.exports = {
             } else if (file === 'sitCol') {
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
                   //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
                   const label = getMessage.download.split('_')[1]
@@ -2239,7 +2222,7 @@ module.exports = {
                   csvWriter
                     .writeRecords(csvWriteData)
                     .then(() => {
-                      console.log("export csv success");
+                      logger.info("export csv success");
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
@@ -2251,7 +2234,7 @@ module.exports = {
                       });
                     })
                     .catch((err) => {
-                      console.error("export csv failed", err);
+                      logger.error("export csv failed", err);
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
@@ -2267,7 +2250,7 @@ module.exports = {
             } else if (file === 'matCol') {
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
                   //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
                   const label = getMessage.download.split('_')[1]
@@ -2302,7 +2285,7 @@ module.exports = {
                   csvWriter
                     .writeRecords(csvWriteData)
                     .then(() => {
-                      console.log("export csv success");
+                      logger.info("export csv success");
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
@@ -2314,7 +2297,7 @@ module.exports = {
                       });
                     })
                     .catch((err) => {
-                      console.error("export csv failed", err);
+                      logger.error("export csv failed", err);
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
@@ -2330,15 +2313,15 @@ module.exports = {
             } else if (file !== "car10") {
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
                   //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
 
                   if (!rows.length) return;
-                  console.log(historyArr)
+                  logger.debug(historyArr)
                   for (var i = historyArr[0], j = 0; i < historyArr[1] - 1; i++, j++) {
                     const sitData = JSON.parse(rows[i][`data`]);
-                    console.log(sitData.length)
+                    logger.debug(sitData.length)
                     const press = sitPressSelect.length
                       ? sitPressSelect[i]
                       : sitData.reduce((a, b) => a + b, 0);
@@ -2395,7 +2378,7 @@ module.exports = {
                   csvWriter
                     .writeRecords(csvWriteData)
                     .then(() => {
-                      console.log("export csv success");
+                      logger.info("export csv success");
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
@@ -2407,7 +2390,7 @@ module.exports = {
                       });
                     })
                     .catch((err) => {
-                      console.error("export csv failed", err);
+                      logger.error("export csv failed", err);
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
@@ -2425,9 +2408,8 @@ module.exports = {
             if (isCar(file)) {
               db1.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
-                  // console.log(rows)
                   //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
                   if (!rows.length) return;
 
@@ -2499,7 +2481,7 @@ module.exports = {
                   csvWriter1
                     .writeRecords(csvWriteBackData)
                     .then(() => {
-                      console.log("export csv success");
+                      logger.info("export csv success");
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
                           download: "export csv success",
@@ -2510,7 +2492,7 @@ module.exports = {
                       });
                     })
                     .catch((err) => {
-                      console.error("export csv failed", err);
+                      logger.error("export csv failed", err);
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
                           download: "export csv failed",
@@ -2526,9 +2508,8 @@ module.exports = {
               if (file == 'volvo') {
                 db2.all(selectQuery, params, (err, rows) => {
                   if (err) {
-                    console.error(err);
+                    logger.error(err);
                   } else {
-                    // console.log(rows)
                     //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
                     if (!rows.length) return;
 
@@ -2601,7 +2582,7 @@ module.exports = {
                     csvWriter1
                       .writeRecords(csvWriteBackData)
                       .then(() => {
-                        console.log("export csv success");
+                        logger.info("export csv success");
                         server.clients.forEach(function each(client) {
                           const jsonData = JSON.stringify({
                             download: "export csv success",
@@ -2612,7 +2593,7 @@ module.exports = {
                         });
                       })
                       .catch((err) => {
-                        console.error("export csv failed", err);
+                        logger.error("export csv failed", err);
                         server.clients.forEach(function each(client) {
                           const jsonData = JSON.stringify({
                             download: "export csv failed",
@@ -2633,7 +2614,7 @@ module.exports = {
 
             db.run(createTableQuery, function (err) {
               if (err) {
-                console.error(err);
+                logger.error(err);
                 return;
               } else {
                 server.clients.forEach(function each(client) {
@@ -2650,7 +2631,7 @@ module.exports = {
             if (file === "car") {
               db1.run(createTableQuery, function (err) {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                   return;
                 } else {
                   server.clients.forEach(function each(client) {
@@ -2741,21 +2722,19 @@ module.exports = {
 }
 
 SerialPort.list().then((ports) => {
-  console.info(
+  logger.info(
     "=========================================================================================\r\n"
   );
-  console.info(
+  logger.info(
     "hello ,there are serialport lists that we selected from your device\r\n"
   );
-  // console.log(ports)
   serialport = getPort(ports)//ports; //.filter((a,index) => a.manufacturer === 'wch.cn');
   ports.forEach(function (port) {
-    console.info("port:%s\r\n", port.path);
+    logger.info("port:%s\r\n", port.path);
     // try {
     //   const port1 = new SerialPort(
     //     { path: "COM5", baudRate: baudRate, autoOpen: true },
     //     function (err) {
-    //       console.log(err, "err");
     //     }
     //   );
     //   //绠￠亾娣诲姞瑙ｆ瀽鍣?
@@ -2764,7 +2743,7 @@ SerialPort.list().then((ports) => {
 
     // }
   });
-  console.info(
+  logger.info(
     "=========================================================================================\r\n"
   );
 });
@@ -2797,7 +2776,6 @@ parser.on("data", function (data) {
   pointArr = new Array();
   let buffer = Buffer.from(data);
   newData = new Array();
-  // console.log(buffer.length)
   if (nowDate < endDate) {
     if (buffer.length === 1024) {
       for (var i = 0; i < buffer.length; i++) {
@@ -2924,7 +2902,6 @@ parser.on("data", function (data) {
       }
 
 
-      // console.log(JSON.stringify(pointArr))
       // if (flag) {
       //   const resDataArr = {
       //     data: JSON.stringify(pointArr),
@@ -2942,7 +2919,6 @@ parser.on("data", function (data) {
       //   const insertQuery =
       //     "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
 
-      //   console.log(db,)
 
       //   db.run(
       //     insertQuery,
@@ -2950,10 +2926,8 @@ parser.on("data", function (data) {
       //     [JSON.stringify(pointArr), timestamp, date],
       //     function (err) {
       //       if (err) {
-      //         console.error(err);
       //         return;
       //       }
-      //       console.log(`Event inserted with ID ${this.lastID}`);
       //     }
       //   );
       // }
@@ -3021,7 +2995,6 @@ parser.on("data", function (data) {
       }
       const length = pointArr.length
       const rotate = pointArr.splice(length - 6, length)
-      // console.log(pointArr.length , rotate)
       pointArr = gloves0123Res(pointArr)
       pointArr = gloves0123(pointArr)
       const jsonData = JSON.stringify({
@@ -3060,7 +3033,6 @@ parser.on("data", function (data) {
       //   const realArr = [...pointArr]
       //   // pointArr = footVideo(pointArr)
       //   newArr = handVideoRealPoint_0506_3([...pointArr])
-      //   console.log('handVideo147(pointArr)')
       //   // newArr = handVideoRealPoint([...pointArr])
       //   // newArr = handVideo1470506([...pointArr])
       //   // newArr = handVideoRealPoint_0416_3([...newArr])
@@ -3121,7 +3093,6 @@ parser.on("data", function (data) {
 
     if (buffer.length == 146) {
 
-      // console.log(file)
       pointArr = new Array();
       for (var i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
@@ -3256,7 +3227,6 @@ parser.on("data", function (data) {
         backFlag: port2?.isOpen,
       }
 
-      // console.log(JSON.stringify([pointArr[1] , pointArr[2] , pointArr[3]]))
 
       if (!rotate.every((a) => a == 0)) {
         jsonDataObj.rotate = rotate
@@ -3300,7 +3270,6 @@ parser.on("data", function (data) {
       //     client.send(jsonData);
       //   }
       // });
-      // console.log(jsonDataObj.sitData , jsonData)
       colOrSendData(jsonData, [])
     }
 
@@ -3325,7 +3294,6 @@ parser.on("data", function (data) {
 
     if (buffer.length == 158) {
 
-      // console.log(file)
       pointArr = new Array();
       for (var i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
@@ -3441,7 +3409,6 @@ parser.on("data", function (data) {
         backFlag: port2?.isOpen,
       }
 
-      // console.log(JSON.stringify([pointArr[1] , pointArr[2] , pointArr[3]]))
 
       if (!rotate.every((a) => a == 0)) {
         jsonDataObj.rotate = rotate
@@ -3485,7 +3452,6 @@ parser.on("data", function (data) {
       //     client.send(jsonData);
       //   }
       // });
-      // console.log(jsonDataObj.sitData , jsonData)
       colOrSendData(jsonData, [])
     }
 
@@ -3495,11 +3461,9 @@ parser.on("data", function (data) {
 
 
 
-    // console.log(buffer.length)
     if (buffer.length == 256) {
 
 
-      // console.log(file , baudRate)
       pointArr = new Array();
       for (var i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
@@ -3538,7 +3502,6 @@ parser.on("data", function (data) {
     if (file.includes('bed4096') && buffer.length == 4096) {
 
 
-      // console.log(file , baudRate)
       pointArr = new Array();
       for (var i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
@@ -3602,7 +3565,6 @@ parser.on("data", function (data) {
         jsonData = JSON.stringify({ sitData: file == 'smallBed' || file == 'smallBed1' ? newArr : pointArr, hz: colHZ });
       }
 
-      // console.log(jsonData)
 
       colOrSendData(jsonData)
 
@@ -3626,7 +3588,6 @@ parser.on("data", function (data) {
 });
 
 function colOrSendData(jsonData) {
-  // console.log(JSON.stringify(JSON.parse(jsonData).sitData) , 'jsonData')
   const nowDate = new Date().getTime()
   if (flag
     // && nowDate - oldTimeStamp > 1000 / colHZ
@@ -3655,10 +3616,8 @@ function colOrSendData(jsonData) {
     //   [file.includes('hand0205') ? JSON.stringify([...pointArr, ...rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify(pointArr), timestamp, date],
     //   function (err) {
     //     if (err) {
-    //       console.error(err);
     //       return;
     //     }
-    //     console.log(`Event inserted with ID ${this.lastID}`);
     //   }
     // );
 
@@ -3667,10 +3626,10 @@ function colOrSendData(jsonData) {
       [file.includes('hand0205') ? JSON.stringify([...JSON.parse(jsonData).newArr147, ...JSON.parse(jsonData).rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).sitData]), timestamp, date],
       function (err) {
         if (err) {
-          console.error(err);
+          logger.error(err);
           return;
         }
-        console.log(`Event inserted with ID ${this.lastID}`);
+        logger.debug(`Event inserted with ID ${this.lastID}`);
       }
     );
   }
@@ -3735,10 +3694,10 @@ parser2.on("data", function (data) {
           [JSON.stringify(pointArr2), timestamp, date],
           function (err) {
             if (err) {
-              console.error(err);
+              logger.error(err);
               return;
             }
-            console.log(`Event inserted with ID ${this.lastID}`);
+            logger.debug(`Event inserted with ID ${this.lastID}`);
           }
         );
       }
@@ -3858,7 +3817,6 @@ parser2.on("data", function (data) {
 
       newArr147_2 = [...newArr]
       pointArr2zeroData = [...pointArr2]
-      // console.log(pointArr2zero)
       if (pointArr2zero.length) {
         pointArr2 = pointArr2.map((a, index) => numLessZeroToZero(a - pointArr2zero[index]))
       }
@@ -3958,10 +3916,10 @@ function colOrSendData1(jsonData) {
       [file.includes('hand0205') ? JSON.stringify([...JSON.parse(jsonData).newArr147, ...JSON.parse(jsonData).rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
       function (err) {
         if (err) {
-          console.error(err);
+          logger.error(err);
           return;
         }
-        console.log(`Event inserted with ID ${this.lastID}`);
+        logger.debug(`Event inserted with ID ${this.lastID}`);
       }
     );
   }
@@ -4038,10 +3996,10 @@ parser3.on("data", function (data) {
                 [JSON.stringify(res), timestamp, date],
                 function (err) {
                   if (err) {
-                    console.error(err);
+                    logger.error(err);
                     return;
                   }
-                  console.log(`Event inserted with ID ${this.lastID}`);
+                  logger.debug(`Event inserted with ID ${this.lastID}`);
                 }
               );
             }
@@ -4098,10 +4056,10 @@ parser4.on("data", function (data) {
           [JSON.stringify(pointArr4), timestamp, date],
           function (err) {
             if (err) {
-              console.error(err);
+              logger.error(err);
               return;
             }
-            console.log(`Event inserted with ID ${this.lastID}`);
+            logger.debug(`Event inserted with ID ${this.lastID}`);
           }
         );
       }
@@ -4268,10 +4226,10 @@ function colOrSendData2(jsonData) {
       [file.includes('hand0205') ? JSON.stringify([...JSON.parse(jsonData).newArr147, ...JSON.parse(jsonData).rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
       function (err) {
         if (err) {
-          console.error(err);
+          logger.error(err);
           return;
         }
-        console.log(`Event inserted with ID ${this.lastID}`);
+        logger.debug(`Event inserted with ID ${this.lastID}`);
       }
     );
   }
@@ -4290,7 +4248,7 @@ function colOrSendData2(jsonData) {
 setInterval(() => {
   if (com && !port1.isOpen && sitClose == false) {
     // if()
-    console.log(com)
+    logger.debug(com)
     if (file != "bigBed") {
       try {
         port1 = new SerialPort(
@@ -4300,13 +4258,13 @@ setInterval(() => {
             autoOpen: true,
           },
           function (err) {
-            console.log(err, "err");
+            logger.warn(err, "err");
           }
         );
         //绠￠亾娣诲姞瑙ｆ瀽鍣?
         port1.pipe(parser);
       } catch (e) {
-        console.log(e, "e");
+        logger.warn(e, "e");
       }
     } else {
       try {
@@ -4318,13 +4276,13 @@ setInterval(() => {
             autoOpen: true,
           },
           function (err) {
-            console.log(err, "err");
+            logger.warn(err, "err");
           }
         );
         //绠￠亾娣诲姞瑙ｆ瀽鍣?
         port1.pipe(parser3);
       } catch (e) {
-        console.log(e, "e");
+        logger.warn(e, "e");
       }
     }
 
@@ -4340,13 +4298,13 @@ setInterval(() => {
           autoOpen: true,
         },
         function (err) {
-          console.log(err, "err");
+          logger.warn(err, "err");
         }
       );
       //绠￠亾娣诲姞瑙ｆ瀽鍣?
       port2.pipe(parser2);
     } catch (e) {
-      console.log(e, "e");
+      logger.warn(e, "e");
     }
   }
 }, 3000);
@@ -4396,7 +4354,6 @@ function interpSmall(smallMat, width, height, interp1, interp2) {
       ] = smallMat[i * width + j] * 10
     }
   }
-  // console.log(bigMat.length)
   return bigMat
 }
 
@@ -4422,7 +4379,7 @@ function numLessZeroToZero(num) {
 function initDb(fileStr) {
   file = fileStr;
   let db, db1, db2
-  console.log(isCar(file))
+  logger.debug(isCar(file))
   if (isCar(file)) {
     db = genDb(`${filePath}/${file}sit.db`)
     db1 = genDb(`${filePath}/${file}back.db`)
@@ -4449,7 +4406,7 @@ function genDb(file) {
     const fileExist = fs.accessSync(file)
     return db = new sqlite3.Database(file);
   } catch (err) {
-    console.log(err)
+    logger.warn(err)
     const initCandidates = [
       path.join(filePath, "init.db"),
       path.join(runtimeResourceRoot, "init.db"),
@@ -4579,7 +4536,6 @@ function press6sit(arr, width, height, type = "row", value = (480),) {
 
   const props = 4
 
-  // console.log(up, down)
 
   if (type == "row") {
     let colArr = [];
@@ -4610,7 +4566,6 @@ function press6sit(arr, width, height, type = "row", value = (480),) {
       }
       colArr.push(total);
     }
-    // console.log(colArr)
     // //////okok
     for (let i = 0; i < height; i++) {
       for (let j = 0; j < width; j++) {
@@ -4648,7 +4603,6 @@ function bytes4ToInt10(buffers) {
 
     }
     const floatValue = view.getFloat32(0, true);
-    // console.log(floatValue);
     res.push(floatValue)
   }
   return res

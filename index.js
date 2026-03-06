@@ -15,6 +15,7 @@ const fs = require("fs");
 const path = require("path");
 const { openServer, getWsServer, handleCommand } = require("./server");
 const { AppUpdater } = require("./autoUpdater");
+const logger = require('./logger');
 
 // ============================================================
 // 配置常量
@@ -73,7 +74,7 @@ ipcMain.on("ws-send", (event, data) => {
       handleCommand(data);
     }
   } catch (err) {
-    console.error("[IPC] ws-send error:", err.message);
+    logger.error("[IPC] ws-send error:", err.message);
     event.sender.send("error", { message: err.message });
   }
 });
@@ -85,7 +86,7 @@ ipcMain.on("serial-command", (event, data) => {
       handleCommand({ type: "serial", ...data });
     }
   } catch (err) {
-    console.error("[IPC] serial-command error:", err.message);
+    logger.error("[IPC] serial-command error:", err.message);
     event.sender.send("error", { message: err.message });
   }
 });
@@ -200,7 +201,7 @@ function startStaticServer({ hostname, port, win }) {
   };
 
   const buildRoot = resolveBuildRoot();
-  console.log(`[Main] Static build root: ${buildRoot}`);
+  logger.info(`[Main] Static build root: ${buildRoot}`);
 
   const server = http.createServer((req, res) => {
     const urlPath = req.url === "/" ? "index.html" : req.url.split("?")[0].replace(/^\/+/, "");
@@ -234,7 +235,7 @@ function startStaticServer({ hostname, port, win }) {
   });
 
   server.listen(port, hostname, () => {
-    console.log(`[Main] Static server running at http://${hostname}:${port}/`);
+    logger.info(`[Main] Static server running at http://${hostname}:${port}/`);
     win.loadURL(`http://${hostname}:${port}`);
   });
 }
@@ -256,7 +257,7 @@ app.on("window-all-closed", () => {
 
 // 优雅退出：清理资源
 app.on("before-quit", () => {
-  console.log("[Main] Application is quitting, cleaning up...");
+  logger.info("[Main] Application is quitting, cleaning up...");
   if (appUpdater) {
     appUpdater.dispose();
   }

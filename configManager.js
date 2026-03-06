@@ -1,3 +1,4 @@
+const logger = require('./logger');
 /**
  * configManager.js
  * 统一配置管理模块
@@ -7,8 +8,8 @@
  *
  * 使用方式：
  *   const config = require('./configManager');
- *   console.log(config.ws.MAIN_PORT); // 19999
- *   console.log(config.getSensorConfig('car10')); // { type: 'car', ... }
+ *   logger.debug(config.ws.MAIN_PORT); // 19999
+ *   logger.debug(config.getSensorConfig('car10')); // { type: 'car', ... }
  */
 
 const path = require('path');
