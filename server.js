@@ -75,6 +75,8 @@ const { isCar, dedupli, totalToN, } = require("./util");
 const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine } = require('./server/mathUtils');
 const { initDb: _initDbFromModule } = require('./server/dbManager');
 const { pressSmallBed } = require("./utilMatrix");
+const pluginDispatcher = require('./plugins/pluginDispatcher');
+pluginDispatcher.init();
 
 const getPort = (ports) => {
   // if (os.platform == 'win32') {
@@ -195,14 +197,8 @@ if (fs.existsSync(nameTxt)) {
     } else {
       file = rawFile || defauleFile;
     }
-    // 根据 file 类型设置波特率
-    if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(file) || file.includes('robot')) {
-      baudRate = 921600
-    } else if (['bed4096', 'bed4096num'].includes(file)) {
-      baudRate = 3000000
-    } else {
-      baudRate = 1000000
-    }
+    // 根据插件配置设置波特率
+    baudRate = pluginDispatcher.getBaudRate(file);
   } catch (err) {
     logger.error(err);
   }
@@ -490,13 +486,7 @@ module.exports = {
           endDate = parseFloat(parsedLicense.date);
 
           // 根据 file 类型设置波特率
-          if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(file) || file.includes('robot')) {
-            baudRate = 921600
-          } else if (['bed4096', 'bed4096num'].includes(file)) {
-            baudRate = 3000000
-          } else {
-            baudRate = 1000000
-          }
+          baudRate = pluginDispatcher.getBaudRate(file);
 
           server.clients.forEach(function each(client) {
             /**
@@ -656,13 +646,7 @@ module.exports = {
             // db = new sqlite3.Database(`${filePath}/${receiveFile}.db`);
             file = receiveFile;
 
-            if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(receiveFile) || receiveFile.includes('robot')) {
-              baudRate = 921600
-            } else if (['bed4096', 'bed4096num',].includes(receiveFile)) {
-              baudRate = 3000000
-            } else {
-              baudRate = 1000000
-            }
+            baudRate = pluginDispatcher.getBaudRate(receiveFile);
 
             const dbObj = initDb(file)
             db = dbObj.db
@@ -686,7 +670,7 @@ module.exports = {
 
             nowGetTime = getTime;
 
-            if (isCar(file)) {
+            if (pluginDispatcher.isMultiPort(file)) {
               db1.all(selectQuery, params, (err, rows) => {
                 if (err) {
                   db.all(selectQuery, params, (err, rows) => {
@@ -711,12 +695,12 @@ module.exports = {
                       for (let i = 0; i < rows.length; i++) {
                         let a =
                           totalToN(JSON.parse(localData[i].data).reduce((a, b) => a + b, 0)) +
-                          (isCar(file) && localDataBack[i]
+                          (pluginDispatcher.isMultiPort(file) && localDataBack[i]
                             ? totalToN(JSON.parse(localDataBack[i].data).reduce((a, b) => a + b, 0), 1.3)
                             : 0);
                         let b =
                           JSON.parse(localData[i].data).filter((a) => a > 10).length +
-                          (isCar(file) && localDataBack[i]
+                          (pluginDispatcher.isMultiPort(file) && localDataBack[i]
                             ? JSON.parse(localDataBack[i].data).filter((a) => a > 10)
                               .length
                             : 0);
@@ -928,12 +912,12 @@ module.exports = {
                       for (let i = 0; i < rows.length; i++) {
                         let a =
                           totalToN(JSON.parse(localData[i].data).reduce((a, b) => a + b, 0)) +
-                          (isCar(file) && localDataBack[i]
+                          (pluginDispatcher.isMultiPort(file) && localDataBack[i]
                             ? totalToN(JSON.parse(localDataBack[i].data).reduce((a, b) => a + b, 0), 1.3)
                             : 0);
                         let b =
                           JSON.parse(localData[i].data).filter((a) => a > 10).length +
-                          (isCar(file) && localDataBack[i]
+                          (pluginDispatcher.isMultiPort(file) && localDataBack[i]
                             ? JSON.parse(localDataBack[i].data).filter((a) => a > 10)
                               .length
                             : 0);
@@ -1016,7 +1000,7 @@ module.exports = {
               });
             }
 
-            if (!isCar(file)) {
+            if (!pluginDispatcher.isMultiPort(file)) {
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
                   logger.error(err);
@@ -1039,12 +1023,12 @@ module.exports = {
                   for (let i = 0; i < rows.length; i++) {
                     let a =
                       totalToN(JSON.parse(localData[i].data).reduce((a, b) => a + b, 0)) +
-                      (isCar(file) && localDataBack[i]
+                      (pluginDispatcher.isMultiPort(file) && localDataBack[i]
                         ? totalToN(JSON.parse(localDataBack[i].data).reduce((a, b) => a + b, 0), 1.3)
                         : 0);
                     let b =
                       JSON.parse(localData[i].data).filter((a) => a > 10).length +
-                      (isCar(file) && localDataBack[i]
+                      (pluginDispatcher.isMultiPort(file) && localDataBack[i]
                         ? JSON.parse(localDataBack[i].data).filter((a) => a > 10)
                           .length
                         : 0);
@@ -1337,7 +1321,7 @@ module.exports = {
               "select DISTINCT date from matrix ORDER BY timestamp DESC LIMIT ?,?";
             const params = [0, 500];
 
-            if (isCar(file)) {
+            if (pluginDispatcher.isMultiPort(file)) {
               db1.all(selectQuery, params, (err, rows) => {
                 if (err) {
                   logger.error(err);
@@ -1498,7 +1482,7 @@ module.exports = {
               });
             }
 
-            if (isCar(file)) {
+            if (pluginDispatcher.isMultiPort(file)) {
               let jsonData1 = JSON.stringify({
                 backData: new Array(sitTotal).fill(0),
                 // backData: new Array(1024).fill(0)
@@ -1572,7 +1556,7 @@ module.exports = {
               );
               nowIndex = Number(value);
               let jsonData, jsonData1;
-              if (isCar(file)) {
+              if (pluginDispatcher.isMultiPort(file)) {
 
 
                 const sitObj = {
@@ -1636,7 +1620,7 @@ module.exports = {
                   client.send(jsonData);
                 }
               });
-              if (isCar(file)) {
+              if (pluginDispatcher.isMultiPort(file)) {
                 server.clients.forEach(function each(client) {
                   if (client.readyState === WebSocket.OPEN) {
                     client.send(jsonData1);
@@ -2418,7 +2402,7 @@ module.exports = {
               });
             }
 
-            if (isCar(file)) {
+            if (pluginDispatcher.isMultiPort(file)) {
               db1.all(selectQuery, params, (err, rows) => {
                 if (err) {
                   logger.error(err);
@@ -2775,102 +2759,8 @@ parser.on("data", function (data) {
 
       let newArr, realArr
 
-      if (file === "car10") {
-        pointArr = car10Sit(pointArr);
-      }
-      else if (file === "car" || file === "foot") {
-        pointArr = carSitLine(pointArr);
-      }
-      else if (file === "sit10") {
-        pointArr = sit10Line(pointArr);
-      }
-      else if (file === "smallBed") {
-        // newArr = smallBed([...pointArr]);
-        // realArr = smallBed([...pointArr]);
-        pointArr = jqbed(pointArr)
-        // newArr = [...pointArr]
-        // realArr = [...pointArr]
-      } else if (file === "smallBed1") {
-        // newArr = smallBed1([...pointArr]);
-        // realArr = smallBed1([...pointArr]);
-        // newArr = [...pointArr]
-        // realArr = [...pointArr]
-        pointArr = smallBed1(pointArr)
-      }
-      else if (file === 'smallM') {
-        pointArr = smallM1(pointArr)
-      } else if (file === 'rect') {
-        pointArr = rect(pointArr)
-      } else if (file === 'short') {
-        pointArr = short(pointArr)
-      } else if (file === 'hand') {
-        // pointArr = handLine(pointArr)
-        // 625
-        pointArr = jqbed(pointArr)
-        for (let i = 0; i < 32; i++) {
-          for (let j = 0; j < 16; j++) {
-            [pointArr[i * 32 + j], pointArr[i * 32 + 31 - j]] = [pointArr[i * 32 + 31 - j], pointArr[i * 32 + j],]
-          }
-        }
-        newData = [...pointArr]
-        // pointArr = press6sit(pointArr, 32, 32, 'col')
-        // pointArr = zeroLine(pointArr)
-      } else if (file === 'sit') {
-        // pointArr = handLine(pointArr)
-        // 625
-        pointArr = jqbed(pointArr)
-        for (let i = 0; i < 32; i++) {
-          for (let j = 0; j < 16; j++) {
-            [pointArr[i * 32 + j], pointArr[i * 32 + 31 - j]] = [pointArr[i * 32 + 31 - j], pointArr[i * 32 + j],]
-          }
-        }
-        newData = [...pointArr]
-        pointArr = press6sit(pointArr, 32, 32, 'col')
-        // pointArr = zeroLine(pointArr)
-      } else if (file === 'matCol') {
-        pointArr = matColLine(pointArr)
-      } else if (file === 'sitCol') {
-        // pointArr = handLine(pointArr)
-        pointArr = handBlue(pointArr)
-      } else if (file === 'yanfeng10') {
-        pointArr = yanfeng10sit(pointArr)
-      } else if (file === 'handBlue') {
-        pointArr = handBlue(pointArr)
-      } else if (file === 'volvo') {
-        pointArr = wowSitLine(pointArr)
-      } else if (file === 'xiyueReal1') {
-        pointArr = xiyueReal1(pointArr)
-      } else if (file === 'jqbed') {
-        pointArr = jqbed(pointArr)
-      } else if (file === 'carCol') {
-        pointArr = carCol(pointArr)
-      } else if (file === 'newHand') {
-        pointArr = jqbed(pointArr)
-        for (let i = 0; i < 32; i++) {
-          for (let j = 0; j < 16; j++) {
-            [pointArr[i * 32 + j], pointArr[i * 32 + 31 - j]] = [pointArr[i * 32 + 31 - j], pointArr[i * 32 + j]]
-          }
-        }
-        pointArr = newHand(pointArr)
-      } else if (file == 'gloves') {
-        pointArr = gloves(pointArr)
-      } else if (file == 'gloves1') {
-        pointArr = gloves1(pointArr)
-      } else if (file == 'gloves2') {
-        pointArr = gloves2(pointArr)
-      } else if (file == 'sit100') {
-        pointArr = pressNew1220({ arr: pointArr, width: 32, height: 32, type: 'col', value: 4096 / 6 })
-        pointArr = sit100Line(pointArr)
-      } else if (file == 'fast1024sit') {
-        pointArr = endiSit1024(pointArr)
-      } else if (file == 'fast1024') {
-        pointArr = jqbed(pointArr)
-
-        pointArr = pressNew1220({ arr: pointArr, height: 32, width: 32, type: 'col', value: 1024 })
-        // pointArr = gaussBlur_return(pointArr , 32,32, 0.5)
-      } else if (file == 'sofa') {
-        pointArr = arrToRealLine(pointArr, [[7, 0], [8, 15]], [[0, 15]], 32)
-      }
+      // 插件调度: 用插件的 mapLineOrder 替代原来的 if/else 链
+      pointArr = pluginDispatcher.mapSitData(file, pointArr);
 
       pointArr1zeroData = [...pointArr]
 
@@ -2881,7 +2771,8 @@ parser.on("data", function (data) {
 
       let jsonData;
 
-      if (isCar(file)) {
+      // 插件调度: 构建 payload
+      if (pluginDispatcher.isMultiPort(file)) {
         jsonData = JSON.stringify({
           sitData: pointArr,
           sitFlag: port1?.isOpen,
@@ -2889,7 +2780,7 @@ parser.on("data", function (data) {
           hz: colHZ
         });
       } else {
-        jsonData = JSON.stringify({ sitData: file == 'smallBed' || file == 'smallBed1' ? pointArr : pointArr, hz: colHZ });
+        jsonData = JSON.stringify({ sitData: pointArr, hz: colHZ });
       }
 
 
@@ -2926,7 +2817,7 @@ parser.on("data", function (data) {
       // if (!localFlag) {
       //   let jsonData;
 
-      //   if (isCar(file)) {
+      //   if (pluginDispatcher.isMultiPort(file)) {
       //     jsonData = JSON.stringify({
       //       sitData: pointArr,
       //       newData: (newData),
@@ -2963,7 +2854,7 @@ parser.on("data", function (data) {
 
       let jsonData;
 
-      if (isCar(file)) {
+      if (pluginDispatcher.isMultiPort(file)) {
         jsonData = JSON.stringify({
           sitData: pointArr,
           sitFlag: port1?.isOpen,
@@ -3106,86 +2997,21 @@ parser.on("data", function (data) {
       // newArr = handVideoRealPoint_0416_3([...newArr])
       // newArr = [...pointArr]
 
-      if (file == 'handVideo1') {
-        newArr = handVideoRealPoint_0506_3([...pointArr])
-        pointArr = handVideo1_0416_0506(pointArr)
-      } else if (file == 'footVideo') {
-        // pointArr = new Array(256).fill(50)
-        newArr = footL(pointArr)
-        pointArr = footVideo(pointArr)
-
-      } else if (file.includes('robot')) {
-
-        // pointArr = press6(pointArr, 16, 16, 'col', 116, 1)
-        newArr = [...pointArr]
-        // pointArr = robot0401(pointArr)
-
-
-
-        // if (pointArr1zero.length) {
-        //   pointArr = pointArr.map((a, index) => numLessZeroToZero(a - pointArr1zero[index]))
-        // }
-      } else if (file == 'smallSample') {
-        // 灏忓瀷鏍峰搧 - 鎸変紶鎰熷櫒缂栧彿1-100椤哄簭杈撳嚭10脳10鐭╅樀
-        // Excel鏄?6脳16缃戞牸锛屽搴?56瀛楄妭鏁版嵁鐨勯『搴?
-        // 浼犳劅鍣ㄧ紪鍙種鍦‥xcel涓殑浣嶇疆(row,col) -> 256瀛楄妭绱㈠紩 = row*16+col
-        // 浼犳劅鍣?-100瀵瑰簲鐨?56瀛楄妭绱㈠紩:
-        const sensorToByteIndex = [
-          223, 222, 221, 220, 219, 218, 217, 216, 215, 214,  // 浼犳劅鍣?-10   (琛?3, 鍒?5鈫?6)
-          239, 238, 237, 236, 235, 234, 233, 232, 231, 230,  // 浼犳劅鍣?1-20  (琛?4, 鍒?5鈫?6)
-          255, 254, 253, 252, 251, 250, 249, 248, 247, 246,  // 浼犳劅鍣?1-30  (琛?5, 鍒?5鈫?6)
-          15, 14, 13, 12, 11, 10, 9, 8, 7, 6,                // 浼犳劅鍣?1-40  (琛?,  鍒?5鈫?6)
-          31, 30, 29, 28, 27, 26, 25, 24, 23, 22,            // 浼犳劅鍣?1-50  (琛?,  鍒?5鈫?6)
-          207, 206, 205, 204, 203, 202, 201, 200, 199, 198,  // 浼犳劅鍣?1-60  (琛?2, 鍒?5鈫?6)
-          191, 190, 189, 188, 187, 186, 185, 184, 183, 182,  // 浼犳劅鍣?1-70  (琛?1, 鍒?5鈫?6)
-          175, 174, 173, 172, 171, 170, 169, 168, 167, 166,  // 浼犳劅鍣?1-80  (琛?0, 鍒?5鈫?6)
-          159, 158, 157, 156, 155, 154, 153, 152, 151, 150,  // 浼犳劅鍣?1-90  (琛?,  鍒?5鈫?6)
-          143, 142, 141, 140, 139, 138, 137, 136, 135, 134,  // 浼犳劅鍣?1-100 (琛?,  鍒?5鈫?6)
-        ]
-        const mappedArr = []
-        for (let i = 0; i < 100; i++) {
-          mappedArr.push(pointArr[sensorToByteIndex[i]] || 0)
+      // 插件调度: 主串口 146 帧线序映射
+      const sitPlugin = pluginDispatcher.getPlugin(file);
+      if (sitPlugin) {
+        newArr = sitPlugin.mapLineOrder([...pointArr]);
+        // 对于某些类型（如 eye），mapLineOrder 同时处理了 pointArr
+        if (file === 'eye') {
+          pointArr = [...newArr];
+        } else if (file.includes('robot')) {
+          // robot 类型直接透传
+          newArr = [...pointArr];
+        } else if (typeof sitPlugin.mapLeftDetail === 'function') {
+          // handVideo1, footVideo 等有单独的 detail 映射
+          newArr = sitPlugin.mapLeftDetail([...firstBlueData, ...lastBlueData]);
+          pointArr = sitPlugin.mapLineOrder([...firstBlueData, ...lastBlueData]);
         }
-        pointArr = mappedArr
-        newArr = [...mappedArr]
-      } else if (file == 'hand0507' || file == 'hand0205' || file == 'Num3D') {
-        // left
-        // newArr = handVideoRealPoint_0506_3([...pointArr])
-        newArr = handL([...pointArr])
-
-        // pointArr = handVideo1470506(pointArr)
-
-        // 
-      } else if (file == 'eye') {
-        function leftEye(wsPointData) {
-
-          for (let i = 0; i < 4; i++) {
-            for (let j = 0; j < 16; j++) {
-              [wsPointData[(7 - i) * 16 + j], wsPointData[(i) * 16 + j]] = [wsPointData[(i) * 16 + j], wsPointData[(7 - i) * 16 + j],]
-            }
-          }
-
-          for (let i = 0; i < 4; i++) {
-            for (let j = 0; j < 16; j++) {
-              [wsPointData[(8 + 7 - i) * 16 + j], wsPointData[(8 + i) * 16 + j]] = [wsPointData[(8 + i) * 16 + j], wsPointData[(8 + 7 - i) * 16 + j],]
-            }
-          }
-
-          const arr = [8, 7, 6, 5, 4, 3, 2, 1, 9, 10, 11, 12, 13, 14, 15, 0]
-          const newArr = []
-          for (let j = 0; j < 16; j++) {
-            for (let i = 0; i < arr.length; i++) {
-
-              newArr.push(wsPointData[j * 16 + arr[i]])
-            }
-          }
-          return newArr
-
-
-
-        }
-        newArr = leftEye([...pointArr])
-        pointArr = [...newArr]
       }
       newArr147 = [...newArr]
       pointArr1zeroData = [...pointArr]
@@ -3476,7 +3302,7 @@ parser.on("data", function (data) {
       let jsonData;
       // pointArr = arr
 
-      if (isCar(file)) {
+      if (pluginDispatcher.isMultiPort(file)) {
         jsonData = JSON.stringify({
           sitData: pointArr,
           sitFlag: port1?.isOpen,
@@ -3545,7 +3371,7 @@ parser.on("data", function (data) {
 
       pointArr = zeroLineMatrix(pointArr, 64)
 
-      if (isCar(file)) {
+      if (pluginDispatcher.isMultiPort(file)) {
         jsonData = JSON.stringify({
           sitData: pointArr,
           sitFlag: port1?.isOpen,
@@ -3647,19 +3473,8 @@ parser2.on("data", function (data) {
         pointArr2[i] = buffer.readUInt8(i);
       }
 
-      if (file === "car10") {
-        pointArr2 = car10Back(pointArr2);
-      } else if (file === 'yanfeng10') {
-        pointArr2 = yanfeng10back(pointArr2);
-      } else if (file === 'volvo') {
-        pointArr2 = wowBackLine(pointArr2)
-      } else if (file == 'carQX') {
-
-      } else if (file == 'sofa') {
-        pointArr2 = arrToRealLine(pointArr2, [[7, 0], [8, 15]], [[0, 15]], 32)
-      } else {
-        pointArr2 = carBackLine(pointArr2);
-      }
+      // 插件调度: 用插件的 mapBackLineOrder 替代原来的 if/else 链
+      pointArr2 = pluginDispatcher.mapBackData(file, pointArr2);
 
       pointArr2zeroData = [...pointArr2]
 
@@ -3694,8 +3509,9 @@ parser2.on("data", function (data) {
       }
 
       if (!localFlag) {
-        let jsonData = JSON.stringify({ backData: pointArr2 });
-        if (isCar(file)) {
+        // 插件调度: 构建靠背 payload
+        let jsonData;
+        if (pluginDispatcher.isMultiPort(file)) {
           jsonData = JSON.stringify({
             backData: pointArr2,
             sitFlag: port1?.isOpen,
@@ -3776,34 +3592,17 @@ parser2.on("data", function (data) {
 
       const realArr = [...pointArr2]
 
-      if (file == 'footVideo') {
-        // pointArr2 = new Array(256).fill(50)
-        newArr = footR(pointArr2)
-        pointArr2 = footVideo1(pointArr2)
-
-      } else if (file == 'hand0507' || file == 'hand0205') {
-        newArr = handR(pointArr2)
-
-        pointArr2 = handRVideo1470506(pointArr2)
-
-      } else if (file == 'eye') {
-        function rightEye(wsPointData) {
-          const newArr = []
-          let lastArr = wsPointData.splice(128, 128)
-          wsPointData = lastArr.concat(wsPointData)
-          const arr = [7, 8, 9, 10, 11, 12, 13, 14, 6, 5, 4, 3, 2, 1, 0, 15].reverse()
-
-          for (let j = 0; j < 16; j++) {
-            for (let i = 0; i < arr.length; i++) {
-
-              newArr.push(wsPointData[j * 16 + arr[i]])
-            }
-          }
-          return newArr
+      // 插件调度: 副串口 146 帧线序映射
+      const backPlugin = pluginDispatcher.getPlugin(file);
+      if (backPlugin && typeof backPlugin.mapBackLineOrder === 'function') {
+        newArr = backPlugin.mapBackLineOrder([...pointArr2]);
+        if (file === 'eye') {
+          pointArr2 = [...newArr];
+        } else if (typeof backPlugin.mapBackLineOrder147 === 'function') {
+          pointArr2 = backPlugin.mapBackLineOrder147([...firstBlueData1, ...lastBlueData1]);
+        } else {
+          pointArr2 = [...newArr];
         }
-        newArr = rightEye([...pointArr2])
-        pointArr2 = [...newArr]
-
       }
 
       newArr147_2 = [...newArr]
@@ -4019,9 +3818,8 @@ parser4.on("data", function (data) {
       for (let i = 0; i < buffer.length; i++) {
         pointArr4[i] = buffer.readUInt8(i);
       }
-      if (file == 'volvo') {
-        pointArr4 = wowhead(pointArr4);
-      }
+      // 插件调度: 头枕线序映射
+      pointArr4 = pluginDispatcher.mapHeadData(file, pointArr4);
 
 
       pointArr4zeroData = [...pointArr4]
@@ -4056,8 +3854,9 @@ parser4.on("data", function (data) {
       }
 
       if (!localFlag) {
-        let jsonData = JSON.stringify({ headData: pointArr4 });
-        if (isCar(file)) {
+        // 插件调度: 构建头枕 payload
+        let jsonData;
+        if (pluginDispatcher.isMultiPort(file)) {
           jsonData = JSON.stringify({
             headData: pointArr4,
             sitFlag: port1?.isOpen,
@@ -4139,15 +3938,15 @@ parser4.on("data", function (data) {
 
       const realArr = [...pointArr4]
 
-      if (file == 'footVideo') {
-        newArr = footR(pointArr4)
-        pointArr4 = footVideo1(pointArr4)
-
-      } else if (file == 'hand0507' || file == 'hand0205') {
-        newArr = handR(pointArr4)
-
-        pointArr4 = handRVideo1470506(pointArr4)
-
+         // 插件调度: parser4 146 帧线序映射
+      const headPlugin = pluginDispatcher.getPlugin(file);
+      if (headPlugin && typeof headPlugin.mapBackLineOrder === 'function') {
+        newArr = headPlugin.mapBackLineOrder([...pointArr4]);
+        if (typeof headPlugin.mapBackLineOrder147 === 'function') {
+          pointArr4 = headPlugin.mapBackLineOrder147([...firstBlueData2, ...lastBlueData2]);
+        } else {
+          pointArr4 = [...newArr];
+        }
       }
 
       newArr147_2 = [...newArr]
