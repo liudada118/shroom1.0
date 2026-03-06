@@ -132,17 +132,24 @@ let nowDate = 0
 let endDate = 0
 
 const https = require('https')
-const request = require('request');
-request('http://sensor.bodyta.com:8080/rcv/login/getSystemTime', {
-  json: true, method: 'get', headers: {
-    'content-type': 'application/json; charset=utf-8;',
-  }
-}, (err, res, body) => {
-  if (err) {
-    return logger.warn(err);
-  }
-  logger.debug(body.time, 'body');
-  nowDate = parseInt(body.time)
+// 使用内置 http 模块替代已废弃的 request 包
+const http = require('http');
+http.get('http://sensor.bodyta.com:8080/rcv/login/getSystemTime', {
+  headers: { 'content-type': 'application/json; charset=utf-8;' }
+}, (res) => {
+  let data = '';
+  res.on('data', (chunk) => { data += chunk; });
+  res.on('end', () => {
+    try {
+      const body = JSON.parse(data);
+      logger.debug(body.time, 'body');
+      nowDate = parseInt(body.time);
+    } catch (e) {
+      logger.warn('Failed to parse system time response', e);
+    }
+  });
+}).on('error', (err) => {
+  logger.warn('Failed to get system time', err);
 });
 
 const runtimeResourceRoot = app.isPackaged ? process.resourcesPath : __dirname;
