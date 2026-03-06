@@ -2,8 +2,8 @@ const { spawn } = require('child_process');
 const http = require('http');
 
 const DEV_SERVER_URL = process.env.FRONTEND_DEV_URL || 'http://127.0.0.1:3000';
-const START_TIMEOUT_MS = 180000;
-const CHECK_INTERVAL_MS = 1000;
+const START_TIMEOUT_MS = 30000;   // Vite 很快，30 秒足够
+const CHECK_INTERVAL_MS = 300;    // 检查间隔缩短
 
 let clientProcess = null;
 let electronProcess = null;
@@ -25,14 +25,6 @@ function runNpm(args, options = {}) {
     return runCommand(comspec, ['/d', '/s', '/c', cmdline], options);
   }
   return runCommand('npm', args, options);
-}
-
-function withLegacyOpenSSL(env) {
-  const flag = '--openssl-legacy-provider';
-  const current = env.NODE_OPTIONS || '';
-  if (current.includes(flag)) return env;
-  const next = current ? `${current} ${flag}` : flag;
-  return { ...env, NODE_OPTIONS: next };
 }
 
 function pingUrl(url) {
@@ -74,30 +66,34 @@ function shutdown(code) {
 }
 
 async function start() {
+  console.log('[dev] Starting Vite dev server + Electron...');
+
   const frontendReady = await pingUrl(DEV_SERVER_URL);
   if (!frontendReady) {
-    clientProcess = runNpm(['--prefix', 'client', 'run', 'start'], {
-      env: withLegacyOpenSSL({ ...process.env, BROWSER: 'none' }),
+    // 启动 Vite dev server
+    clientProcess = runNpm(['--prefix', 'client', 'run', 'dev'], {
+      env: { ...process.env, BROWSER: 'none' },
     });
 
     clientProcess.on('exit', (code) => {
       if (!shuttingDown) {
-        // During startup, let waitForDevServer decide success/failure.
         if (!electronProcess) return;
-        console.error(`frontend exited unexpectedly (code: ${code ?? 'null'})`);
+        console.error(`[dev] Vite dev server exited unexpectedly (code: ${code ?? 'null'})`);
         shutdown(code || 1);
       }
     });
 
     try {
+      console.log('[dev] Waiting for Vite dev server...');
       await waitForDevServer(DEV_SERVER_URL, START_TIMEOUT_MS);
+      console.log('[dev] Vite dev server is ready!');
     } catch (error) {
       console.error(error.message);
       shutdown(1);
       return;
     }
   } else {
-    console.log(`Frontend already running at ${DEV_SERVER_URL}`);
+    console.log(`[dev] Frontend already running at ${DEV_SERVER_URL}`);
   }
 
   electronProcess = runNpm(['run', 'start:electron'], {
