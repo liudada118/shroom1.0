@@ -633,13 +633,15 @@ class Home extends React.Component {
     if (ws) {
       ws.close()
     }
-    // [优化] ws1/ws2 已不再使用
-    // if (ws1) {
-    //   ws1.close()
-    // }
-    // if (ws2) {
-    //   ws2.close()
-    // }
+    // 清理节流定时器，防止内存泄漏
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    if (timer1) {
+      clearTimeout(timer1);
+      timer1 = null;
+    }
   }
 
   colPushData() {
