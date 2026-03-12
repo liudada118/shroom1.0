@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useImperativeHandle } from 'react'
+import React, { useEffect, useRef, useState, useCallback, useImperativeHandle } from 'react'
 import './num.css'
 import { addSide, findMax } from '../../assets/util/util';
 import { pressData } from '../../assets/util/matrixToPress';
@@ -16,7 +16,6 @@ let totalArr = [],
     totalPointArr = [];
 
 function insertWb(arr, dataArr, arrW, arrH, startX, startY, width, height) {
-
     for (let i = 0; i < height; i++) {
         for (let j = 0; j < width; j++) {
             const newX = startY + i
@@ -27,7 +26,7 @@ function insertWb(arr, dataArr, arrW, arrH, startX, startY, width, height) {
     }
 }
 
-function genNewArr(arr, positionArr,) {
+function genNewArr(arr, positionArr) {
     const res = []
     for (let i = 0; i < positionArr.length; i++) {
         res[i] = arr[positionArr[i] - 1]
@@ -47,23 +46,308 @@ function genNewArrMatrix(arr, width, height) {
 }
 
 let leftArr = [], rightArr = []
-export const 
- Num2DOriginal = React.forwardRef((props, refs) => {
+
+// ========== 动态计算 cellSize ==========
+function calcCellSize(texW, texH, maxW, maxH, padding) {
+    const availW = maxW - padding * 2;
+    const availH = maxH - padding * 2;
+    const cellW = Math.floor(availW / texW);
+    const cellH = Math.floor(availH / texH);
+    return Math.max(8, Math.min(cellW, cellH));
+}
+
+// 为 robot 分区计算合适的 cellSize
+function calcRobotCellSize(parts, maxW, maxH) {
+    let totalW = 0;
+    let maxPartH = 0;
+    parts.forEach((p, idx) => {
+        totalW += p.w;
+        if (p.h > maxPartH) maxPartH = p.h;
+    });
+    totalW += (parts.length - 1) * 3 + parts.length * 2;
+    maxPartH += 3;
+
+    const availW = maxW - 60;
+    const availH = maxH - 100;
+    const cellW = Math.floor(availW / totalW);
+    const cellH = Math.floor(availH / maxPartH);
+    return Math.max(12, Math.min(cellW, cellH, 35));
+}
+
+// ========== Jet 色谱（Canvas 2D 版本） ==========
+function jet1(minVal, maxVal, x) {
+    if (x < minVal) x = minVal;
+    if (x > maxVal) x = maxVal;
+    const dv = maxVal - minVal;
+    if (dv === 0) return [0, 0, 255];
+    const t = (x - minVal) / dv;
+
+    let r = 255, g = 255, b = 255;
+    if (t < 0.25) {
+        r = 0;
+        g = Math.round(4.0 * t * 255);
+        b = 255;
+    } else if (t < 0.5) {
+        r = 0;
+        g = 255;
+        b = Math.round((1.0 - 4.0 * (t - 0.25)) * 255);
+    } else if (t < 0.75) {
+        r = Math.round(4.0 * (t - 0.5) * 255);
+        g = 255;
+        b = 0;
+    } else {
+        r = 255;
+        g = Math.round((1.0 - 4.0 * (t - 0.75)) * 255);
+        b = 0;
+    }
+    return [r, g, b];
+}
+
+// ========== Canvas 2D 渲染函数（颜色 + 数字 + 网格线 + 行列索引） ==========
+function renderCanvas2D(ctx, flatData, texWidth, texHeight, cellSize) {
+    const cw = texWidth * cellSize;
+    const ch = texHeight * cellSize;
+    ctx.canvas.width = cw + 30;
+    ctx.canvas.height = ch + 30;
+    ctx.clearRect(0, 0, cw + 30, ch + 30);
+
+    // 计算动态最大值
+    let maxVal = 0;
+    const len = Math.min(flatData.length, texWidth * texHeight);
+    for (let i = 0; i < len; i++) {
+        const v = Math.round(flatData[i]);
+        if (v > maxVal) maxVal = v;
+    }
+    const dynamicMax = Math.max(maxVal, 1);
+
+    // 绘制颜色格子
+    for (let i = 0; i < texHeight; i++) {
+        for (let j = 0; j < texWidth; j++) {
+            const idx = i * texWidth + j;
+            const val = idx < len ? Math.round(flatData[idx]) : 0;
+            const [r, g, b] = jet1(0, dynamicMax, val);
+            ctx.fillStyle = `rgb(${r},${g},${b})`;
+            ctx.fillRect(j * cellSize, i * cellSize, cellSize, cellSize);
+        }
+    }
+
+    // 绘制网格线
+    ctx.strokeStyle = 'rgba(0, 0, 40, 0.6)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= texHeight; i++) {
+        ctx.beginPath();
+        ctx.moveTo(0, i * cellSize);
+        ctx.lineTo(cw, i * cellSize);
+        ctx.stroke();
+    }
+    for (let j = 0; j <= texWidth; j++) {
+        ctx.beginPath();
+        ctx.moveTo(j * cellSize, 0);
+        ctx.lineTo(j * cellSize, ch);
+        ctx.stroke();
+    }
+
+    // 绘制数字
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `bold ${Math.max(10, cellSize * 0.45)}px monospace`;
+
+    for (let i = 0; i < texHeight; i++) {
+        for (let j = 0; j < texWidth; j++) {
+            const idx = i * texWidth + j;
+            const val = idx < len ? Math.round(flatData[idx]) : 0;
+            ctx.fillStyle = '#fff';
+            ctx.fillText(
+                val.toString(),
+                j * cellSize + cellSize / 2,
+                i * cellSize + cellSize / 2
+            );
+        }
+    }
+
+    // 行索引（右侧）
+    ctx.fillStyle = '#333';
+    ctx.font = `${Math.max(8, cellSize * 0.35)}px monospace`;
+    ctx.textAlign = 'left';
+    for (let i = 0; i < texHeight; i++) {
+        ctx.fillText(
+            i.toString(),
+            cw + 2,
+            i * cellSize + cellSize / 2
+        );
+    }
+    // 列索引（底部）
+    ctx.textAlign = 'center';
+    for (let j = 0; j < texWidth; j++) {
+        ctx.fillText(
+            j.toString(),
+            j * cellSize + cellSize / 2,
+            ch + cellSize * 0.5
+        );
+    }
+}
+
+
+export const Num2DOriginal = React.forwardRef((props, refs) => {
     let width = 32, height = 32
     if (props.matrixName == 'carCol') {
         width = 10
         height = 9
     }
-    const [data, setData] = useState([[]]);
-    const [data1, setData1] = useState([[]]);
-    const [obj, setObj] = useState()
-    const [scale, setScale] = useState(1)
 
+    const isRobot = props.matrixName === 'robotSY' || props.matrixName === 'robotLCF' || props.matrixName === 'robot1';
+    const isFoot = props.matrixName === 'footVideo';
 
+    // 计算初始 cellSize 的辅助函数
+    const computeCellSize = useCallback((hasRight = false) => {
+        const ww = typeof window !== 'undefined' ? window.innerWidth : 1920;
+        const wh = typeof window !== 'undefined' ? window.innerHeight : 1080;
 
+        if (isRobot) {
+            return calcRobotCellSize(
+                [{ w: 8, h: 6 }, { w: 4, h: 2 }, { w: 4, h: 1 }, { w: 4, h: 1 }, { w: 4, h: 2 }, { w: 8, h: 6 }],
+                ww - 300, wh - 120
+            );
+        }
+        if (props.matrixName === 'hand0205') {
+            return calcCellSize(15, 10, ww - 300, wh - 120, 40);
+        }
+        if (isFoot) {
+            // 只有左脚时按单脚计算，有右脚时按两脚并排计算
+            const tw = hasRight ? 14 : 6;
+            const th = 10;
+            return calcCellSize(tw, th, ww - 300, wh - 120, 40);
+        }
+        return calcCellSize(width, height, ww - 300, wh - 120, 40);
+    }, [isRobot, isFoot, props.matrixName, width, height]);
+
+    // 动态计算 cellSize
+    const [cellSize, setCellSize] = useState(() => computeCellSize(false));
+    const cellSizeRef = useRef(cellSize);
+    cellSizeRef.current = cellSize;
+
+    // Canvas refs - 主 canvas（单个 canvas 同时绘制颜色和数字）
+    const canvasRef = useRef(null);
+    const ctxRef = useRef(null);
+
+    // 第二个 canvas（footVideo 右脚）
+    const canvasRef2 = useRef(null);
+    const ctxRef2 = useRef(null);
+
+    // 足底：是否有右脚数据
+    const [hasRightFoot, setHasRightFoot] = useState(false);
+    const hasRightFootRef = useRef(false);
+
+    // robot 分区 canvas refs
+    const robotCanvasRefs = useRef([]);
+    const robotCtxRefs = useRef([]);
+
+    // RAF 节流
+    const pendingFlatRef = useRef(null);
+    const pendingFlatRef2 = useRef(null);
+    const pendingRobotRef = useRef(null);
+    const rafIdRef = useRef(null);
+    const initedRef = useRef(false);
+
+    // robot 分区状态
+    const [robotParts, setRobotParts] = useState(null);
+    const robotPartsRef = useRef(null);
+
+    // 初始化 Canvas 2D
+    useEffect(() => {
+        if (!isRobot && canvasRef.current) {
+            ctxRef.current = canvasRef.current.getContext('2d');
+        }
+        initedRef.current = true;
+
+        return () => {
+            initedRef.current = false;
+            if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
+        };
+    }, []);
+
+    // 初始化右脚 canvas
+    useEffect(() => {
+        if (isFoot && hasRightFoot && canvasRef2.current && !ctxRef2.current) {
+            ctxRef2.current = canvasRef2.current.getContext('2d');
+        }
+        // 右脚出现时重新计算 cellSize
+        if (isFoot && hasRightFoot) {
+            const newCs = computeCellSize(true);
+            cellSizeRef.current = newCs;
+            setCellSize(newCs);
+        }
+    }, [hasRightFoot]);
+
+    // 初始化 robot 分区 canvas
+    useEffect(() => {
+        if (robotParts && robotParts.length > 0) {
+            requestAnimationFrame(() => {
+                robotParts.forEach((part, idx) => {
+                    if (robotCanvasRefs.current[idx] && !robotCtxRefs.current[idx]) {
+                        robotCtxRefs.current[idx] = robotCanvasRefs.current[idx].getContext('2d');
+                    }
+                });
+            });
+        }
+    }, [robotParts]);
+
+    // 窗口 resize 监听
+    useEffect(() => {
+        let resizeTimer = null;
+        const handleResize = () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                const newCs = computeCellSize(hasRightFootRef.current);
+                cellSizeRef.current = newCs;
+                setCellSize(newCs);
+            }, 200);
+        };
+        window.addEventListener('resize', handleResize);
+        return () => {
+            window.removeEventListener('resize', handleResize);
+            clearTimeout(resizeTimer);
+        };
+    }, [computeCellSize]);
+
+    // RAF 调度渲染
+    const scheduleRender = useCallback(() => {
+        if (rafIdRef.current) return;
+        rafIdRef.current = requestAnimationFrame(() => {
+            rafIdRef.current = null;
+            if (!initedRef.current) return;
+            const cs = cellSizeRef.current;
+
+            if (pendingFlatRef.current !== null) {
+                const { data, tw, th } = pendingFlatRef.current;
+                if (ctxRef.current) {
+                    renderCanvas2D(ctxRef.current, data, tw, th, cs);
+                }
+                pendingFlatRef.current = null;
+            }
+
+            if (pendingFlatRef2.current !== null) {
+                const { data, tw, th } = pendingFlatRef2.current;
+                if (ctxRef2.current) {
+                    renderCanvas2D(ctxRef2.current, data, tw, th, cs);
+                }
+                pendingFlatRef2.current = null;
+            }
+
+            if (pendingRobotRef.current !== null) {
+                const parts = pendingRobotRef.current;
+                parts.forEach((part, idx) => {
+                    if (robotCtxRefs.current[idx]) {
+                        renderCanvas2D(robotCtxRefs.current[idx], part.data, part.w, part.h, cs);
+                    }
+                });
+                pendingRobotRef.current = null;
+            }
+        });
+    }, []);
+
+   
     const changeWsData = (wsPointData) => {
-
-        console.log(wsPointData.length, valuef1)
         let newData = [...wsPointData]
         let dataG = []
         let ndata = [...newData].map((a, index) => (a - valuef1 < 0 ? 0 : a));
@@ -73,24 +357,13 @@ export const
         }
 
         gaussBlur_2(ndata, dataG, width, height, 1)
-
-
         wsPointData = dataG
 
-        let a = [];
-        for (let i = 0; i < height; i++) {
-            a[i] = [];
-            for (let j = 0; j < width; j++) {
-                a[i].push(wsPointData[i * width + j]);
-            }
-        }
-
-        // wsPointData = a;
-        setData(a);
+        pendingFlatRef.current = { data: wsPointData, tw: width, th: height };
+        scheduleRender();
     }
 
     const sitValue = (prop) => {
-        console.log(prop)
         const { valuej, valueg, value, valuel, valuef, valuelInit } = prop;
         if (valuej) valuej1 = valuej;
         if (valueg) valueg1 = valueg;
@@ -98,10 +371,141 @@ export const
         if (valuel) valuel1 = valuel;
         if (valuef) valuef1 = valuef;
         if (valuelInit) valuelInit1 = valuelInit;
-
     }
 
     const drawContent = () => { }
+
+    // 处理 robot 类型的分区数据
+    const processRobotParts = (wsPointData, objDef) => {
+        const parts = Object.entries(objDef).map(([key, val]) => {
+            const flatData = genNewArr(wsPointData, val.posArr);
+            return {
+                key,
+                text: val.text,
+                w: val.w,
+                h: val.h,
+                data: flatData
+            };
+        });
+
+        // 检查分区是否变化，需要更新 JSX
+        if (!robotPartsRef.current || robotPartsRef.current.length !== parts.length) {
+            const partsMeta = parts.map(p => ({ key: p.key, text: p.text, w: p.w, h: p.h }));
+            robotPartsRef.current = partsMeta;
+            robotCtxRefs.current = [];
+
+            // 动态计算 robot 的 cellSize
+            const ww = typeof window !== 'undefined' ? window.innerWidth : 1920;
+            const wh = typeof window !== 'undefined' ? window.innerHeight : 1080;
+            const newCs = calcRobotCellSize(partsMeta, ww - 300, wh - 120);
+            cellSizeRef.current = newCs;
+            setCellSize(newCs);
+
+            setRobotParts(partsMeta);
+        }
+
+        pendingRobotRef.current = parts;
+        scheduleRender();
+    }
+
+    const changeWsData147 = (wsPointData) => {
+        layoutData([...wsPointData])
+
+        if (props.matrixName == 'hand0205') {
+            let newArr1 = [...wsPointData]
+            newArr1.splice(5 * 15, 0, 0);
+            newArr1.splice(5 * 15, 0, 0);
+            newArr1.splice(5 * 15, 0, 0);
+
+            const tw = 15, th = 10;
+            pendingFlatRef.current = { data: newArr1, tw, th };
+            scheduleRender();
+        } else if (props.matrixName == 'footVideo') {
+            let newArr = [...wsPointData]
+            const tw = 6, th = 10;
+            pendingFlatRef.current = { data: newArr, tw, th };
+            scheduleRender();
+        } else if (props.matrixName == 'robotSY') {
+            const back = [62, 61, 60, 59, 58, 46, 45, 44, 43, 42, 254, 253, 252, 251, 250, 14, 13, 12, 11, 10, 30, 29, 28, 27, 26]
+            const chest = [51, 35, 19, 3, 243, 227, 211, 195, 52, 36, 20, 4, 244, 228, 212, 196, 53, 37, 21, 5, 245, 229, 213, 197, 54, 38, 22, 6, 246, 230, 214, 198, 55, 39, 23, 7, 247, 231, 215, 199, 56, 40, 24, 8, 248, 232, 216, 200]
+            const shoulderL = [9, 25, 41, 57]
+            const shoulderR = [249, 233, 217, 201]
+            const handL = [79, 95, 111, 127, 80, 96, 112, 128]
+            const handR = [177, 162, 146, 130, 178, 161, 145, 129]
+
+            processRobotParts(wsPointData, {
+                back: { posArr: back, text: '脑袋', w: 5, h: 5 },
+                handL: { posArr: handL, text: '左臂', w: 4, h: 2 },
+                shoulderL: { posArr: shoulderL, text: '左肩', w: 4, h: 1 },
+                shoulderR: { posArr: shoulderR, text: '右肩', w: 4, h: 1 },
+                handR: { posArr: handR, text: '右臂', w: 4, h: 2 },
+                chest: { posArr: chest, text: '前胸', w: 8, h: 6 },
+            });
+        } else if (props.matrixName == 'robotLCF') {
+            const chest = [51, 35, 19, 3, 243, 227, 211, 195, 52, 36, 20, 4, 244, 228, 212, 196, 53, 37, 21, 5, 245, 229, 213, 197, 54, 38, 22, 6, 246, 230, 214, 198, 55, 39, 23, 7, 247, 231, 215, 199, 56, 40, 24, 8, 248, 232, 216, 200, 57, 41, 25, 9, 249, 233, 217, 201, 58, 42, 26, 10, 250, 234, 218, 202, 59, 43, 27, 11, 251, 235, 219, 203, 60, 44, 28, 12, 252, 236, 220, 204, 61, 45, 29, 13, 253, 237, 221, 205, 62, 46, 30, 14, 254, 238, 222, 206]
+            const shoulderL = [15, 31, 47, 63]
+            const shoulderR = [255, 239, 223, 207]
+            const handL = [79, 95, 111, 127, 80, 96, 112, 128]
+            const handR = [177, 162, 146, 130, 178, 161, 145, 129]
+
+            processRobotParts(wsPointData, {
+                handL: { posArr: handL, text: '左臂', w: 4, h: 2 },
+                shoulderL: { posArr: shoulderL, text: '左肩', w: 4, h: 1 },
+                shoulderR: { posArr: shoulderR, text: '右肩', w: 4, h: 1 },
+                handR: { posArr: handR, text: '右臂', w: 4, h: 2 },
+                chest: { posArr: chest, text: '前胸', w: 8, h: 12 },
+            });
+        } else if (props.matrixName == 'robot1') {
+            const back = [62, 61, 60, 59, 58, 46, 45, 44, 43, 42, 254, 253, 252, 251, 250, 14, 13, 12, 11, 10, 30, 29, 28, 27, 26, 78, 77, 76, 75, 74, 94, 93, 92, 91, 90, 110, 109, 108, 107, 106]
+            const chest = [51, 35, 19, 3, 243, 227, 211, 195, 52, 36, 20, 4, 244, 228, 212, 196, 53, 37, 21, 5, 245, 229, 213, 197, 54, 38, 22, 6, 246, 230, 214, 198, 55, 39, 23, 7, 247, 231, 215, 199, 56, 40, 24, 8, 248, 232, 216, 200]
+            const shoulderL = [9, 25, 41, 57]
+            const shoulderR = [249, 233, 217, 201]
+            const handL = [126, 125, 124, 123, 142, 141, 140, 139]
+            const handR = [177, 162, 146, 130, 178, 161, 145, 129]
+
+            processRobotParts(wsPointData, {
+                back: { posArr: back, text: '后背', w: 8, h: 5 },
+                handL: { posArr: handL, text: '左臂', w: 4, h: 2 },
+                shoulderL: { posArr: shoulderL, text: '左肩', w: 4, h: 1 },
+                shoulderR: { posArr: shoulderR, text: '右肩', w: 4, h: 1 },
+                handR: { posArr: handR, text: '右臂', w: 4, h: 2 },
+                chest: { posArr: chest, text: '前胸', w: 8, h: 6 },
+            });
+        }
+    }
+
+    const changeWsData147R = (wsPointData) => {
+        if (props.matrixName == 'hand0205') {
+            // hand0205 暂不处理
+        } else if (props.matrixName == 'footVideo') {
+            const { left, right } = wsPointData
+
+            if (left) {
+                leftArr = [...left]
+                const tw = 6, th = 10;
+                pendingFlatRef.current = { data: left, tw, th };
+                scheduleRender();
+            }
+
+            if (right && Array.isArray(right) && right.some(v => v > 0)) {
+                rightArr = [...right]
+                if (!hasRightFootRef.current) {
+                    hasRightFootRef.current = true;
+                    setHasRightFoot(true);
+                }
+                const tw = 6, th = 10;
+                // 确保右脚 canvas context 已初始化
+                if (!ctxRef2.current && canvasRef2.current) {
+                    ctxRef2.current = canvasRef2.current.getContext('2d');
+                }
+                pendingFlatRef2.current = { data: right, tw, th };
+                scheduleRender();
+            }
+
+            const newArr = [...leftArr, ...rightArr]
+            layoutData([...newArr])
+        }
+    }
 
     useImperativeHandle(refs, () => ({
         changeWsData147,
@@ -111,83 +515,9 @@ export const
         sitValue
     }));
 
-    function jet1(min, max, x) {
-        let red, g, blue;
-        let dv;
-        red = 1.0;
-        g = 1.0;
-        blue = 1.0;
-        if (x < min) {
-            x = min;
-        }
-        if (x > max) {
-            x = max;
-        }
-        dv = max - min;
-        if (x < min + 0.2 * dv) {
-            red = 1;
-            g = 1;
-            blue = 1;
-
-            // red = 0;
-            // g = (4 * (x - min)) / dv;
-        } else if (x < min + 0.4 * dv) {
-            // red = 0;
-            // g = 0;
-            // blue = 0;
-
-            red = 0;
-            g = (5 * (x - min - 0.2 * dv)) / dv;
-        } else if (x < min + 0.6 * dv) {
-            red = 0;
-            blue = 1 + (4 * (min + 0.4 * dv - x)) / dv;
-        } else if (x < min + 0.8 * dv) {
-            red = (4 * (x - min - 0.6 * dv)) / dv;
-            blue = 0;
-        } else {
-            g = 1 + (4 * (min + 0.8 * dv - x)) / dv;
-            blue = 0;
-        }
-        var rgb = new Array();
-        rgb[0] = parseInt(255 * red + '');
-        rgb[1] = parseInt(255 * g + '');
-        rgb[2] = parseInt(255 * blue + '');
-        return rgb;
-    }
-
-
-    function jet(min, max, x) {
-        let r, g, b;
-        let dv;
-        r = 1;
-        g = 1;
-        b = 1;
-        if (x < min) x = min;
-        if (x > max) x = max;
-        dv = max - min;
-        if (x < min + 0.25 * dv) {
-            r = 0;
-            g = (4 * (x - min)) / dv;
-        } else if (x < min + 0.5 * dv) {
-            r = 0;
-            b = 1 + (4 * (min + 0.25 * dv - x)) / dv;
-        } else if (x < min + 0.75 * dv) {
-            r = (4 * (x - min - 0.5 * dv)) / dv;
-            b = 0;
-        } else {
-            g = 1 + (4 * (min + 0.75 * dv - x)) / dv;
-            b = 0;
-        }
-        var rgb = new Array();
-        rgb[0] = parseInt(255 * r);
-        rgb[1] = parseInt(255 * g);
-        rgb[2] = parseInt(255 * b);
-        return rgb;
-    }
-
-    function boxesForGauss(sigma, n)  // standard deviation, number of boxes
-    {
-        var wIdeal = Math.sqrt((12 * sigma * sigma / n) + 1);  // Ideal averaging filter width
+    // ========== 高斯模糊 ==========
+    function boxesForGauss(sigma, n) {
+        var wIdeal = Math.sqrt((12 * sigma * sigma / n) + 1);
         var wl = Math.floor(wIdeal);
         if (wl % 2 == 0) wl--;
         var wu = wl + 2;
@@ -219,491 +549,16 @@ export const
             }
     }
 
-    const changeWsData147 = (wsPointData) => {
-
-        layoutData([...wsPointData])
-        if (props.matrixName == 'hand0205') {
-
-            let newArr1 = [...wsPointData]
-            newArr1.splice(5 * 15, 0, 0);
-            newArr1.splice(5 * 15, 0, 0);
-            newArr1.splice(5 * 15, 0, 0);
-            {
-                let width = 15
-                let height = 10
-                let newArr = [...newArr1]
-                let arr = [];
-
-                // newArr = newArr.map((a) => changeValue(a))
-
-                for (let i = 0; i < height; i++) {
-                    arr[i] = [];
-                    for (let j = 0; j < width; j++) {
-                        arr[i][j] = Math.floor(newArr[i * width + j]);
-                    }
-                    arr[i][width] = i
-
-                }
-
-                arr[height] = []
-                for (let i = 0; i < width; i++) {
-                    arr[height][i] = i
-                }
-
-                setData(arr);
-            }
-        } else {
-
-            if (props.matrixName == 'footVideo') {
-                // const renderArr = [[2, 2], [2, 4], [2, 6], [2, 8], [2, 10], [2, 12], [5, 1], [5, 4], [5, 6], [5, 8], [5, 11], [5, 13], [8, 1], [8, 4], [8, 6], [8, 8], [8, 11], [8, 14], [11, 2], [11, 5], [11, 8], [11, 10], [11, 12], [11, 14], [14, 2], [14, 5], [14, 8], [14, 10], [14, 12], [14, 14], [17, 2], [17, 4], [17, 6], [17, 8], [17, 10], [17, 12], [20, 2], [20, 4], [20, 6], [20, 8], [20, 10], [20, 12], [23, 2], [23, 4], [23, 6], [23, 8], [23, 10], [23, 12], [26, 2], [26, 4], [26, 6], [26, 8], [26, 10], [26, 11], [29, 3], [29, 5], [29, 6], [29, 8], [29, 9], [29, 11]]
-                // let newArr = new Array(16 * 32).fill(0)
-                // renderArr.forEach((a, index) => {
-                //     let realIndex = renderArr[index][0] * 16 + renderArr[index][1]
-                //     newArr[realIndex] = wsPointData[index]
-                // })
-
-
-                // let width = 16
-                // let height = 32
-
-                let newArr = [...wsPointData]
-
-
-                let width = 6
-                let height = 10
-
-                // let newArr = [...newArr1]
-                let arr = [];
-
-                // newArr = newArr.map((a) => changeValue(a))
-
-                for (let i = 0; i < height; i++) {
-                    arr[i] = [];
-                    for (let j = 0; j < width; j++) {
-                        arr[i][j] = Math.floor(newArr[i * width + j]);
-                    }
-                    arr[i][width] = i
-
-                }
-
-                arr[height] = []
-                for (let i = 0; i < width; i++) {
-                    arr[height][i] = i
-                }
-
-                setData(arr);
-            } else if (props.matrixName == 'robotSY') {
-                // const back = [62,46,30,14,254,238,222,206,61,45,29,13,253,237,221,205,60,44,28,12,252,236,220,204,59,43,27,11,251,235,219,203,58,42,26,10,250,234,218,202]
-                const back = [
-                    62, 61, 60, 59, 58,
-                    46, 45, 44, 43, 42,
-                    254, 253, 252, 251, 250,
-                    14, 13, 12, 11, 10,
-                    30, 29, 28, 27, 26
-                ]
-
-                // const chest = [195, 211, 227, 243, 3, 19, 35, 51, 196, 212, 228, 244, 4, 20, 36, 52, 197, 213, 229, 245, 5, 21, 37, 53, 198, 214, 230, 246, 6, 22, 38, 54, 199, 215, 231, 247, 7, 23, 39, 55, 200, 216, 232, 248, 8, 24, 40, 56]
-                const chest = [
-                    51, 35, 19, 3, 243, 227, 211, 195,
-                    52, 36, 20, 4, 244, 228, 212, 196,
-                    53, 37, 21, 5, 245, 229, 213, 197,
-                    54, 38, 22, 6, 246, 230, 214, 198,
-                    55, 39, 23, 7, 247, 231, 215, 199,
-                    56, 40, 24, 8, 248, 232, 216, 200
-                ]
-
-                const shoulderL = [9, 25, 41, 57]
-                const shoulderR = [249, 233, 217, 201]
-
-                const handL = [79, 95, 111, 127, 80, 96, 112, 128]
-
-                const handR = [177, 162, 146, 130, 178, 161, 145, 129]
-
-                const obj = {
-                    back: {
-                        data: genNewArrMatrix(genNewArr(wsPointData, back), 5, 5),
-                        text: '脑袋',
-                    },
-                    handL: {
-                        data: genNewArrMatrix(genNewArr(wsPointData, handL), 4, 2),
-                        text: '左臂',
-                    },
-                    shoulderL: {
-                        data: genNewArrMatrix(genNewArr(wsPointData, shoulderL), 4, 1),
-                        text: '左肩',
-                    },
-                    shoulderR: {
-                        data: genNewArrMatrix(genNewArr(wsPointData, shoulderR), 4, 1),
-                        text: '右肩',
-                    },
-                    handR: {
-                        data: genNewArrMatrix(genNewArr(wsPointData, handR), 4, 2),
-                        text: '右臂',
-                    },
-                    chest: {
-                        data: genNewArrMatrix(genNewArr(wsPointData, chest), 8, 6),
-                        text: '前胸',
-                    },
-                }
-
-                setObj(obj)
-
-                const newArr = new Array(1024).fill(0)
-
-                insertWb(newArr, genNewArr(wsPointData, back), 32, 32, 11, 0, 8, 5)
-
-                insertWb(newArr, genNewArr(wsPointData, handL), 32, 32, 0, 8, 4, 2)
-
-                insertWb(newArr, genNewArr(wsPointData, shoulderL), 32, 32, 4, 8, 4, 1)
-                insertWb(newArr, genNewArr(wsPointData, shoulderR), 32, 32, 8, 8, 4, 1)
-                insertWb(newArr, genNewArr(wsPointData, handR), 32, 32, 12, 8, 4, 2)
-
-                insertWb(newArr, genNewArr(wsPointData, chest), 32, 32, 11, 12, 8, 6)
-
-
-                {
-                    let width = 32
-                    let height = 32
-                    // let newArr = [...newArr1]
-                    let arr = [];
-
-                    // newArr = newArr.map((a) => changeValue(a))
-
-                    for (let i = 0; i < height; i++) {
-                        arr[i] = [];
-                        for (let j = 0; j < width; j++) {
-                            arr[i][j] = Math.floor(newArr[i * width + j]);
-                        }
-                        arr[i][width] = i
-
-                    }
-
-                    arr[height] = []
-                    for (let i = 0; i < width; i++) {
-                        arr[height][i] = i
-                    }
-
-                    // setData(arr);
-                }
-            } else if (props.matrixName == 'robotLCF') {
-                // const back = [62,46,30,14,254,238,222,206,61,45,29,13,253,237,221,205,60,44,28,12,252,236,220,204,59,43,27,11,251,235,219,203,58,42,26,10,250,234,218,202]
-                const back = [
-                    62, 61, 60, 59, 58,
-                    46, 45, 44, 43, 42,
-                    254, 253, 252, 251, 250,
-                    14, 13, 12, 11, 10,
-                    30, 29, 28, 27, 26
-                ]
-
-                // const chest = [195, 211, 227, 243, 3, 19, 35, 51, 196, 212, 228, 244, 4, 20, 36, 52, 197, 213, 229, 245, 5, 21, 37, 53, 198, 214, 230, 246, 6, 22, 38, 54, 199, 215, 231, 247, 7, 23, 39, 55, 200, 216, 232, 248, 8, 24, 40, 56]
-                const chest = [
-                    205, 221, 237, 253, 13, 29, 45, 61,
-                    204, 220, 236, 252, 12, 28, 44, 60,
-                    203, 219, 235, 251, 11, 27, 43, 59,
-                    202, 218, 234, 250, 10, 26, 42, 58,
-                    201, 217, 233, 249, 9, 25, 41, 57,
-                    195, 211, 227, 243, 3, 19, 35, 51,
-                    196, 212, 228, 244, 4, 20, 36, 52,
-                    197, 213, 229, 245, 5, 21, 37, 53,
-                    198, 214, 230, 246, 6, 22, 38, 54,
-                    199, 215, 231, 247, 7, 23, 39, 55,
-                    200, 216, 232, 248, 8, 24, 40, 56
-                ]
-
-                for (let i = 0; i < 11; i++) {
-                    for (let j = 0; j < 4; j++) {
-                        [chest[i * 8 + j], chest[i * 8 + 7 - j]] = [chest[i * 8 + 7 - j], chest[i * 8 + j]]
-                    }
-                }
-
-                const shoulderL = [14, 30, 46, 62,
-                ]
-                const shoulderR = [254, 238, 222, 206
-                ]
-
-                const handL = [
-                    79, 95, 111, 127,
-                    80, 96, 112, 128
-
-                ]
-
-                const handR = [
-                    177, 162, 146, 130,
-                    178, 161, 145, 129
-
-                ]
-
-                const obj = {
-                    
-                    handL: {
-                        data: genNewArrMatrix(genNewArr(wsPointData, handL), 4, 2),
-                        text: '左臂',
-                    },
-                    shoulderL: {
-                        data: genNewArrMatrix(genNewArr(wsPointData, shoulderL), 4, 1),
-                        text: '左肩',
-                    },
-                    chest: {
-                        data: genNewArrMatrix(genNewArr(wsPointData, chest), 8, 11),
-                        text: '前胸',
-                    },
-                    shoulderR: {
-                        data: genNewArrMatrix(genNewArr(wsPointData, shoulderR), 4, 1),
-                        text: '右肩',
-                    },
-                    handR: {
-                        data: genNewArrMatrix(genNewArr(wsPointData, handR), 4, 2),
-                        text: '右臂',
-                    },
-                    
-                }
-
-                setObj(obj)
-                console.log(obj , wsPointData)
-                const newArr = new Array(1024).fill(0)
-
-                insertWb(newArr, genNewArr(wsPointData, back), 32, 32, 11, 0, 8, 5)
-
-                insertWb(newArr, genNewArr(wsPointData, handL), 32, 32, 0, 8, 4, 2)
-
-                insertWb(newArr, genNewArr(wsPointData, shoulderL), 32, 32, 4, 8, 4, 1)
-                insertWb(newArr, genNewArr(wsPointData, shoulderR), 32, 32, 8, 8, 4, 1)
-                insertWb(newArr, genNewArr(wsPointData, handR), 32, 32, 12, 8, 4, 2)
-
-                insertWb(newArr, genNewArr(wsPointData, chest), 32, 32, 11, 12, 8, 6)
-
-
-                {
-                    let width = 32
-                    let height = 32
-                    // let newArr = [...newArr1]
-                    let arr = [];
-
-                    // newArr = newArr.map((a) => changeValue(a))
-
-                    for (let i = 0; i < height; i++) {
-                        arr[i] = [];
-                        for (let j = 0; j < width; j++) {
-                            arr[i][j] = Math.floor(newArr[i * width + j]);
-                        }
-                        arr[i][width] = i
-
-                    }
-
-                    arr[height] = []
-                    for (let i = 0; i < width; i++) {
-                        arr[height][i] = i
-                    }
-
-                    // setData(arr);
-                }
-            } else {
-                const back = [
-                    58, 42, 26, 10, 250, 234, 218, 202, 59,
-                    43, 27, 11, 251, 235, 219, 203, 60, 44,
-                    28, 12, 252, 236, 220, 204, 61, 45, 29,
-                    13, 253, 237, 221, 205, 62, 46, 30, 14,
-                    254, 238, 222, 206
-                ]
-
-                const chest = [
-                    195, 211, 227, 243, 3, 19, 35, 51, 196, 212,
-                    228, 244, 4, 20, 36, 52, 197, 213, 229, 245,
-                    5, 21, 37, 53, 198, 214, 230, 246, 6, 22,
-                    38, 54, 199, 215, 231, 247, 7, 23, 39, 55,
-                    200, 216, 232, 248, 8, 24, 40, 56
-                ]
-
-                const shoulderL = [9, 25, 41, 57].reverse()
-                const shoulderR = [249, 233, 217, 201]
-
-                const handL = [
-                    79, 95, 111, 127,
-                    80, 96, 112, 128
-                ].reverse()
-
-                const handR = [
-                    177, 162, 146,
-                    130, 178, 161,
-                    145, 129
-                ]
-
-                const obj = {
-                    back: {
-                        data: genNewArrMatrix(genNewArr(wsPointData, back), 8, 5),
-                        text: '后背',
-                    },
-                    handL: {
-                        data: genNewArrMatrix(genNewArr(wsPointData, handL), 4, 2),
-                        text: '左臂',
-                    },
-                    shoulderL: {
-                        data: genNewArrMatrix(genNewArr(wsPointData, shoulderL), 4, 1),
-                        text: '左肩',
-                    },
-                    shoulderR: {
-                        data: genNewArrMatrix(genNewArr(wsPointData, shoulderR), 4, 1),
-                        text: '右肩',
-                    },
-                    handR: {
-                        data: genNewArrMatrix(genNewArr(wsPointData, handR), 4, 2),
-                        text: '右臂',
-                    },
-                    chest: {
-                        data: genNewArrMatrix(genNewArr(wsPointData, chest), 8, 6),
-                        text: '前胸',
-                    },
-                }
-
-                setObj(obj)
-
-                const newArr = new Array(1024).fill(0)
-
-                insertWb(newArr, genNewArr(wsPointData, back), 32, 32, 11, 0, 8, 5)
-
-                insertWb(newArr, genNewArr(wsPointData, handL), 32, 32, 0, 8, 4, 2)
-
-                insertWb(newArr, genNewArr(wsPointData, shoulderL), 32, 32, 4, 8, 4, 1)
-                insertWb(newArr, genNewArr(wsPointData, shoulderR), 32, 32, 8, 8, 4, 1)
-                insertWb(newArr, genNewArr(wsPointData, handR), 32, 32, 12, 8, 4, 2)
-
-                insertWb(newArr, genNewArr(wsPointData, chest), 32, 32, 11, 12, 8, 6)
-
-
-                {
-                    let width = 32
-                    let height = 32
-                    // let newArr = [...newArr1]
-                    let arr = [];
-
-                    // newArr = newArr.map((a) => changeValue(a))
-
-                    for (let i = 0; i < height; i++) {
-                        arr[i] = [];
-                        for (let j = 0; j < width; j++) {
-                            arr[i][j] = Math.floor(newArr[i * width + j]);
-                        }
-                        arr[i][width] = i
-
-                    }
-
-                    arr[height] = []
-                    for (let i = 0; i < width; i++) {
-                        arr[height][i] = i
-                    }
-
-                    // setData(arr);
-                }
-            }
-
-
-
-        }
-        // setData(a);
-    }
-
-    const changeWsData147R = (wsPointData) => {
-
-
-        if (props.matrixName == 'hand0205') {
-
-        } else {
-
-            if (props.matrixName == 'footVideo') {
-                // const renderArr = [[2, 2], [2, 4], [2, 6], [2, 8], [2, 10], [2, 12], [5, 1], [5, 4], [5, 6], [5, 8], [5, 11], [5, 13], [8, 1], [8, 4], [8, 6], [8, 8], [8, 11], [8, 14], [11, 2], [11, 5], [11, 8], [11, 10], [11, 12], [11, 14], [14, 2], [14, 5], [14, 8], [14, 10], [14, 12], [14, 14], [17, 2], [17, 4], [17, 6], [17, 8], [17, 10], [17, 12], [20, 2], [20, 4], [20, 6], [20, 8], [20, 10], [20, 12], [23, 2], [23, 4], [23, 6], [23, 8], [23, 10], [23, 12], [26, 2], [26, 4], [26, 6], [26, 8], [26, 10], [26, 11], [29, 3], [29, 5], [29, 6], [29, 8], [29, 9], [29, 11]]
-                // let newArr = new Array(16 * 32).fill(0)
-                // renderArr.forEach((a, index) => {
-                //     let realIndex = renderArr[index][0] * 16 + renderArr[index][1]
-                //     newArr[realIndex] = wsPointData[index]
-                // })
-                // let newArr = [...wsPointData]
-                const { left, right } = wsPointData
-
-                if (left) {
-                    leftArr = [...left]
-                    let newArr = [...left]
-
-
-                    let width = 6
-                    let height = 10
-
-                    // let newArr = [...newArr1]
-                    let arr = [];
-
-                    // newArr = newArr.map((a) => changeValue(a))
-
-                    for (let i = 0; i < height; i++) {
-                        arr[i] = [];
-                        for (let j = 0; j < width; j++) {
-                            arr[i][j] = Math.floor(newArr[i * width + j]);
-                        }
-                        arr[i][width] = i
-
-                    }
-
-                    arr[height] = []
-                    for (let i = 0; i < width; i++) {
-                        arr[height][i] = i
-                    }
-
-                    setData(arr);
-                }
-
-                if (right) {
-                    rightArr = [...right]
-                    let width = 6
-                    let height = 10
-                    // let newArr = [...newArr1]
-                    let arr = [];
-
-                    // newArr = newArr.map((a) => changeValue(a))
-
-                    for (let i = 0; i < height; i++) {
-                        arr[i] = [];
-                        for (let j = 0; j < width; j++) {
-                            arr[i][j] = Math.floor(right[i * width + j]);
-                        }
-                        arr[i][width] = i
-
-                    }
-
-                    arr[height] = []
-                    for (let i = 0; i < width; i++) {
-                        arr[height][i] = i
-                    }
-
-                    setData1(arr);
-                }
-                const newArr = [...leftArr, ...rightArr]
-                const dataArr = [...newArr]
-                layoutData([...dataArr])
-
-            }
-
-
-
-        }
-        // setData(a);
-    }
-
     const layoutData = (dataArr) => {
-
-
-        // dataArr = dataArr.filter((a) => a > valuej1 * 0.025)
         const max = findMax(dataArr)
         const point = dataArr.filter((a) => a > 0).length
         let press = dataArr.reduce((a, b) => a + b, 0)
-        // press = Math.floor(press) * 3
-        // console.log(press)
-        // press = press > 724 ? parseInt((pressData[724] * (press / 724)).toFixed(2)) : pressData[press]
         const mean = press / (point == 0 ? 1 : point)
         props.data.current?.changeData({
             meanPres: mean.toFixed(2),
             maxPres: max,
             point: point,
-            // area: areaSmooth.toFixed(0),
             totalPres: `${press}`,
-            // pressure: pressureSmooth.toFixed(2),
         });
 
         if (totalArr.length < 60) {
@@ -714,7 +569,6 @@ export const
         }
 
         const maxTotal = findMax(totalArr);
-
         if (!props.local)
             props.data.current?.handleCharts(totalArr.map(a => { return a - 1 > 0 ? a - 1 : 0 }), maxTotal + 20);
 
@@ -728,16 +582,15 @@ export const
         const max1 = findMax(totalPointArr);
         if (!props.local)
             props.data.current?.handleChartsArea(totalPointArr, max1 + 20);
-        // timeS = 0;
-
-
     }
 
     useEffect(() => {
-        var WW = document.documentElement.clientWidth
-        var scaleNum = WW / 1920
-        setScale(scaleNum)
+        return () => {
+            if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
+        };
     }, []);
+
+    const cs = cellSize;
 
     return (
         <div
@@ -748,80 +601,54 @@ export const
                 justifyContent: 'center',
                 alignItems: 'center',
                 backgroundColor: '#fff',
-                // alignItems: 'center'
                 fontSize: '12px'
             }}
         >
-
             <div
                 className="threeBoxF"
                 style={{
-                    // color: 'blue', transformStyle: 'preserve-3d',
-                    // perspective: '500px',
                     position: 'relative',
                     marginTop: '20px',
-                    display: 'flex'
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: '10px',
+                    alignItems: 'flex-start',
+                    justifyContent: 'center',
+                    maxWidth: 'calc(100vw - 300px)',
                 }}
             >
-                {/* <img style={{ position: 'absolute',width : '100%' , height : '100%' ,zIndex : 1}} src={hand} alt="" /> */}
-                <div className="threeBox"
-                //  style={{   transform: 'rotateX(35deg)'}}
-                >
-                    {data.map((items, indexs) => {
-                        return (
-                            <div key={indexs} style={{ display: 'flex' }}>
-                                {items && items.length
-                                    ? items.map((item, index) => {
-                                        return <div style={{ width: "20px", height: '20px', lineHeight: '20px', backgroundColor: `rgb(${jet1(0, 40, item)})`, border: '1px solid', textAlign: 'center' }}>{item}</div>;
-                                    })
-                                    : null}
-                            </div>
-                        );
-                    })}
-                    {props.matrixName == 'footVideo' ? '左脚' : ''}
-                </div>
+                {/* 非 robot 类型：主 canvas */}
+                {!isRobot && (
+                    <div>
+                        <canvas
+                            ref={canvasRef}
+                            style={{ display: 'block' }}
+                        />
+                        {isFoot && <div style={{ textAlign: 'center', marginTop: '4px' }}>左脚</div>}
+                    </div>
+                )}
 
-                <div className="threeBox"
-                //  style={{   transform: 'rotateX(35deg)'}}
-                >
-                    {props.matrixName == 'footVideo' ? data1.map((items, indexs) => {
-                        return (
-                            <div key={indexs} style={{ display: 'flex' }}>
-                                {items && items.length
-                                    ? items.map((item, index) => {
-                                        return <div style={{ width: "20px", height: '20px', lineHeight: '20px', backgroundColor: `rgb(${jet1(0, 40, item)})`, border: '1px solid', textAlign: 'center' }}>{item}</div>;
-                                    })
-                                    : null}
-                            </div>
-                        );
-                    }) : ''}
-                    {props.matrixName == 'footVideo' ? '右脚' : ''}
+                {/* footVideo 右脚 - 只在有右脚数据时显示 */}
+                {isFoot && hasRightFoot && (
+                    <div>
+                        <canvas
+                            ref={canvasRef2}
+                            style={{ display: 'block' }}
+                        />
+                        <div style={{ textAlign: 'center', marginTop: '4px' }}>右脚</div>
+                    </div>
+                )}
 
-                </div>
-
-                {
-                    obj ? Object.values(obj).map((objItem, index) => {
-                        return (
-                            <div className="threeBox"
-                                //  style={{   transform: 'rotateX(35deg)'}}
-                                style={{ marginRight: '20px' }}
-                            >
-                                {objItem.data.map((items, indexs) => {
-                                    return (
-                                        <div key={indexs} style={{ display: 'flex' }}>
-                                            {items && items.length
-                                                ? items.map((item, index) => {
-                                                    return <div style={{ width: "20px", height: '20px', lineHeight: '20px', backgroundColor: `rgb(${jet1(0, 40, item)})`, border: '1px solid', textAlign: 'center' }}>{item}</div>;
-                                                })
-                                                : null}
-                                        </div>
-                                    );
-                                })}
-                                {objItem.text}
-                            </div>
-                        )
-                    }) : ''
-                }
+                {/* robot 分区 canvas */}
+                {isRobot && robotParts && robotParts.map((part, idx) => (
+                    <div key={part.key} style={{ margin: '0 5px' }}>
+                        <canvas
+                            ref={el => { robotCanvasRefs.current[idx] = el; }}
+                            style={{ display: 'block' }}
+                        />
+                        <div style={{ textAlign: 'center', marginTop: '4px' }}>{part.text}</div>
+                    </div>
+                ))}
             </div>
         </div>
     );

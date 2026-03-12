@@ -81,9 +81,11 @@ export default defineConfig({
   },
 
   // 允许 .js 和 .jsx 文件包含 JSX 语法
+  // 生产环境自动移除 console.log 和 debugger
   esbuild: {
     include: /\.[jt]sx?$/,
     loader: 'jsx',
+    drop: process.env.NODE_ENV === 'production' ? ['console', 'debugger'] : [],
   },
 
   // 优化依赖预构建

@@ -901,7 +901,7 @@ const Canvas = React.forwardRef((props, refs) => {
     if (!controlsFlag) {
       const sitInterArr = checkRectangleIntersection(selectMatrix, sitMatrix)
       const backInterArr = checkRectangleIntersection(selectMatrix, backMatrix)
-      console.log(selectMatrix, backMatrix)
+
       if (sitInterArr) {
         sitIndexArr = checkRectIndex(sitMatrix, sitInterArr, AMOUNTX, AMOUNTY)
       }

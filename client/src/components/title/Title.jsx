@@ -441,6 +441,7 @@ class Title extends React.Component {
             })
 
             this.props.wsSendObj({ resetZero: false })
+            this.setState({ resetZero: false })
 
             this.props.changeStateData({
               portname: '',
@@ -609,8 +610,10 @@ class Title extends React.Component {
 
                 if (value == 'normal') {
                   this.props.wsSendObj({ resetZero: false })
+                  this.setState({ resetZero: false })
                 } else {
                   this.props.wsSendObj({ resetZero: true })
+                  this.setState({ resetZero: true })
                 }
               }
 

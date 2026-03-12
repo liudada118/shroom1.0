@@ -1,24 +1,17 @@
 import "./App.css";
 import { HashRouter, Routes, Route } from "react-router-dom";
 import { App as AntdApp, message } from "antd";
+import UpdateNotifier from "./components/updater/UpdateNotifier";
 
-// import Local from "./components/local/Car";
-// import Back from "./components/playBack/Car";
-// import Foot from './components/foot/Car'
-// import Local from './components/foot/Num32DetectLocal'
 import Home from './page/home/Home'
 import Demo from "./components/demo/Demo";
 import HandDemo from "./components/demo/handDemo";
-import HandLineDemo from "./components/demo/handDemo copy";
 import HandLinePressDemo from "./components/demo/handDemoPress";
 import Demo1016 from "./components/demo/Demo1016";
 import Demo1010 from "./components/demo/Demo1010";
 import Demo24 from "./components/demo/Demo2419";
 import Block from "./components/demo/Block";
-import DemoC from "./components/demo/Demo copy";
-import DemoBed from "./components/demo/DemoBed";
 import { Heatmap } from "./components/heatmap/canvas";
-// import { I18nProvider, FormattedString } from "i18nLib";
 import i18next from "i18next";
 import Log from "./components/log/log";
 import MatrixDiff from "./components/demo/matrixDiff";
@@ -31,8 +24,6 @@ import CsvData from "./components/demo/robot";
 import HandLine from "./components/demo/handLine0116";
 import HandLine0123 from "./components/demo/handLine0123";
 import LineAdjust from "./components/demo/LineAdjust";
-import LineAdjust1 from "./components/demo/LineAdjust copy";
-
 import Can from "./components/demo/can";
 import Num3D from "./components/num/NumWs";
 import License from "./page/license/License";
@@ -209,6 +200,7 @@ message.config({
 function App() {
   return (
     <AntdApp>
+    <UpdateNotifier />
     <HashRouter>
       <Routes>
         <Route exact path="/handPoint" element={
@@ -259,10 +251,8 @@ function App() {
         <Route exact path="/heatmap" element={<Heatmap />} />
         <Route exact path="/num/:type" element={<Demo />} />
         <Route exact path="/handReal" element={<HandDemo />} />
-        <Route exact path="/handLineData" element={<HandLineDemo />} />
         <Route exact path="/handLinePressData" element={<HandLinePressDemo />} />
         <Route exact path="/line" element={<LineAdjust />} />
-        <Route exact path="/line1" element={<LineAdjust1 />} />
         <Route exact path="/can" element={<Can />} />
         <Route exact path="/num1010" element={<Demo1010 />} />
         <Route exact path="/num1016" element={<Demo1016 />} />
@@ -270,8 +260,6 @@ function App() {
         <Route exact path="/block" element={<Block />} />
         <Route exact path="/handLine" element={<HandLine />} />
         <Route exact path="/handLine0123" element={<HandLine0123 />} />
-        {/* <Route exact path="/num32" element={<DemoC />} />
-        <Route exact path="/numBed" element={<DemoBed />} /> */}
         <Route exact path="/log" element={<Log />} />
         <Route exact path="/diff" element={<MatrixDiff />} />
         <Route exact path="/3Dnum" element={<Num3D />} />
