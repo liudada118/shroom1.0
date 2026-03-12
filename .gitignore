@@ -14,3 +14,5 @@ pdf/
 .DS_Store
 *.log
 config.txt
+.npm-cache/
+dist/

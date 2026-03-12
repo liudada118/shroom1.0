@@ -5,7 +5,7 @@ var os = require('os');
 const fs = require('fs');
 const { SerialPort } = require("serialport");
 const { DelimiterParser } = require("@serialport/parser-delimiter");
-const sqlite3 = require("sqlite3").verbose();
+const sqlite3 = require("./sqlite3-compat").verbose();
 const createCsvWriter = require("csv-writer").createObjectCsvWriter;
 const {
   openWeb,
@@ -4707,6 +4707,5 @@ function arrToRealLine(arr, arrX, arrY, matrixLength) {
 
   return newArr
 }
-
 
 
