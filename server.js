@@ -72,11 +72,12 @@ const {
 } = require("./openWeb");
 const module2 = require('./aes_ecb')
 const { isCar, dedupli, totalToN, } = require("./util");
+const { pressSmallBed } = require("./utilMatrix");
 const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine } = require('./server/mathUtils');
 const { initDb: _initDbFromModule } = require('./server/dbManager');
-const { pressSmallBed } = require("./utilMatrix");
 
 const getPort = (ports) => {
+  // console.log(ports)
   // if (os.platform == 'win32') {
   //   return ports.filter((port) => {
   //     return port.manufacturer == 'wch.cn'
@@ -230,12 +231,15 @@ let saveTime,
 // try {
 //   const dateRes = fs.readFileSync(nameTxt, 'utf8');
 
+//   console.log(dateRes)
 //   file = dateRes
 //   // date = JSON.parse(module2.decryptStr(dateRes)).dateRes
 //   // // endDate = JSON.parse(module2.decryptStr(dateRes)).dateRes
 //   // sysStartTime = (`${JSON.parse(module2.decryptStr(dateRes)).startTimeRes}`)
+//   // console.log(JSON.parse(module2.decryptStr(dateRes)).startTimeRes);
 //   // endDate = parseFloat(module2.decryptStr(date))
 // } catch (err) {
+//   logger.error(err);
 // }
 
 
@@ -270,9 +274,9 @@ let pointArr4zero = []
 let pointArr1zeroData = []
 let pointArr2zeroData = []
 let pointArr3zeroData = []
-let pointArr4zeroData = [], newArr147 = [], newArr147_2 = [],
+let pointArr4zeroData = [], newArr147 = [], newArr147_2 = [];
 
-  server = new WebSocket.Server({ port: 19999 });
+server = new WebSocket.Server({ port: 19999 });
 server1 = new WebSocket.Server({ port: 19998 });
 server2 = new WebSocket.Server({ port: 19997 });
 
@@ -380,6 +384,7 @@ module.exports = {
 
           //   db1.all(selectQuery, params, (err, rows) => {
           //     if (err) {
+          //       logger.error(err);
           //     } else {
           //       localDataBack = rows;
           //     }
@@ -473,6 +478,7 @@ module.exports = {
 
           // sysStartTime = getMessage.date.startTime
 
+          // console.log(JSON.parse(content).dateRes)
 
           // endDate = parseFloat(module2.decryptStr(date))
           const parsedLicense = JSON.parse(dateRes);
@@ -796,6 +802,7 @@ module.exports = {
                     }
                   });
                 } else {
+                  // console.log(rows);
                   localDataBack = rows;
                   length = rows.length
                     ? Math.min(
@@ -1163,7 +1170,7 @@ module.exports = {
             }
             logger.debug(baudRate)
             if (file != "bigBed") {
-              logger.debug(com);
+              console.log(com);
               try {
                 port1 = new SerialPort(
                   {
@@ -1216,10 +1223,12 @@ module.exports = {
             // if (com == com1) {
             //   if (port2?.isOpen) {
             //     port2.close((e) => {
+            //       logger.debug(e)
             //     });
             //   }
             // }
             if (file != "bigBed") {
+              // console.log(com);
               try {
                 portHead = new SerialPort(
                   {
@@ -1229,7 +1238,7 @@ module.exports = {
                     autoOpen: true,
                   },
                   function (err) {
-                    logger.warn(err, baudRate, JSON.parse(message).headPort, "headerr");
+                    console.log(err, baudRate, JSON.parse(message).headPort, "headerr");
                   }
                 );
                 //绠￠亾娣诲姞瑙ｆ瀽鍣?
@@ -1249,7 +1258,7 @@ module.exports = {
                     autoOpen: true,
                   },
                   function (err) {
-                    logger.warn(err, "headerr");
+                    console.log(err, "headerr");
                   }
                 );
                 //绠￠亾娣诲姞瑙ｆ瀽鍣?
@@ -1268,14 +1277,14 @@ module.exports = {
             com1 = JSON.parse(message).backPort;
             if (port2?.isOpen) {
               port2.close((e) => {
-                logger.debug(e, 'closeport2')
+                console.log(e, 'closeport2')
               });
             }
             if (com == com1) {
               if (port1?.isOpen) {
                 port1.close((e) => {
 
-                  logger.debug(e, 'closeport1')
+                  console.log(e, 'closeport1')
                 });
               }
             }
@@ -1342,11 +1351,13 @@ module.exports = {
                 if (err) {
                   logger.error(err);
                 } else {
+                  // console.log(rows);
                   let jsonData;
 
                   backTimeArr = rows;
 
                   // const timeArr = Array.from(new Set([...sitTimeArr, ...backTimeArr]))
+                  // console.log(timeArr, 'timeArr')
                   const timeArr = dedupli(sitTimeArr, backTimeArr);
                   if (file == "car") {
                     const jsonData1 = JSON.stringify({
@@ -1375,7 +1386,7 @@ module.exports = {
                     if (err) {
                       logger.error(err);
                     } else {
-                      logger.debug(rows);
+                      console.log(rows);
                       let jsonData;
                       sitTimeArr = rows;
                       // const timeArr = Array.from(new Set([...sitTimeArr, ...backTimeArr]))
@@ -1436,7 +1447,7 @@ module.exports = {
                 if (err) {
                   logger.error(err);
                 } else {
-                  logger.debug(rows);
+                  console.log(rows);
                   let jsonData;
                   sitTimeArr = rows;
                   // const timeArr = Array.from(new Set([...sitTimeArr, ...backTimeArr]))
@@ -1537,11 +1548,13 @@ module.exports = {
             //         autoOpen: true,
             //       },
             //       function (err) {
+            //         logger.warn(err, "err");
             //       }
             //     );
             //     //绠￠亾娣诲姞瑙ｆ瀽鍣?
             //     // port1.pipe(parser);
             //   } catch (e) {
+            //     logger.warn(e, "e");
             //   }
             // }
 
@@ -1554,18 +1567,20 @@ module.exports = {
             //         autoOpen: true,
             //       },
             //       function (err) {
+            //         logger.warn(err, "err");
             //       }
             //     );
             //     //绠￠亾娣诲姞瑙ｆ瀽鍣?
             //     // port2.pipe(parser2);
             //   } catch (e) {
+            //     logger.warn(e, "e");
             //   }
             // }
           }
           if (localFlag) {
             if (JSON.parse(message).value != null) {
               const value = JSON.parse(message).value;
-              logger.debug(
+              console.log(
                 "received: %s from %s",
                 JSON.stringify(message),
                 clientName
@@ -1618,6 +1633,7 @@ module.exports = {
 
               } else {
                 if (file === 'smallBed') {
+                  // console.log(JSON.stringify(pressSmallBed({ arr: JSON.parse(localData[value]?.data) })))
                   jsonData = JSON.stringify({
                     // sitData: pressSmallBed({ arr: JSON.parse(localData[value]?.data) }),
                     sitData: localData[value]?.data,
@@ -1655,6 +1671,8 @@ module.exports = {
               }
               timer = setInterval(() => {
                 nowIndex++;
+                // console.log(interval)
+                // console.log(localData,nowIndex)
                 let jsonData
                 if (file === 'smallBed') {
                   jsonData = JSON.stringify({
@@ -1707,7 +1725,7 @@ module.exports = {
                 });
               }, interval);
             } else {
-              logger.debug("clear");
+              console.log("clear");
               clearInterval(timer);
             }
           }
@@ -1994,7 +2012,7 @@ module.exports = {
                   logger.error(err);
                 } else {
                   //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
-                  for (let i = historyArr[0]; i < historyArr[1]; i++) {
+                  for (var i = historyArr[0]; i < historyArr[1]; i++) {
                     // const press = JSON.parse(rows[i][`data`]).reduce(
                     //   (a, b) => a + b,
                     //   0
@@ -2074,7 +2092,7 @@ module.exports = {
                   csvWriter
                     .writeRecords(csvWriteData)
                     .then(() => {
-                      logger.info("export csv success");
+                      console.log("export csv success");
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
@@ -2086,7 +2104,7 @@ module.exports = {
                       });
                     })
                     .catch((err) => {
-                      logger.error("export csv failed", err);
+                      console.error("export csv failed", err);
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
@@ -2107,7 +2125,7 @@ module.exports = {
                   //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
 
                   if (!rows.length) return;
-                  for (let i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
+                  for (var i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
                     let sitData = JSON.parse(rows[i][`data`]);
                     let realData = JSON.parse(rows[i][`data`]);
                     // sitData = zeroLine(sitData,32,32)
@@ -2172,7 +2190,7 @@ module.exports = {
                   csvWriter
                     .writeRecords(csvWriteData)
                     .then(() => {
-                      logger.info("export csv success");
+                      console.log("export csv success");
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
@@ -2184,7 +2202,7 @@ module.exports = {
                       });
                     })
                     .catch((err) => {
-                      logger.error("export csv failed", err);
+                      console.error("export csv failed", err);
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
@@ -2205,7 +2223,7 @@ module.exports = {
                   //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
                   const label = getMessage.download.split('_')[1]
                   if (!rows.length) return;
-                  for (let i = 0, j = 0; i < rows.length; i++, j++) {
+                  for (var i = 0, j = 0; i < rows.length; i++, j++) {
                     const newData = {
                       realData: rows[i][`data`],
                       label: label
@@ -2235,7 +2253,7 @@ module.exports = {
                   csvWriter
                     .writeRecords(csvWriteData)
                     .then(() => {
-                      logger.info("export csv success");
+                      console.log("export csv success");
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
@@ -2247,7 +2265,7 @@ module.exports = {
                       });
                     })
                     .catch((err) => {
-                      logger.error("export csv failed", err);
+                      console.error("export csv failed", err);
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
@@ -2268,7 +2286,7 @@ module.exports = {
                   //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
                   const label = getMessage.download.split('_')[1]
                   if (!rows.length) return;
-                  for (let i = 0, j = 0; i < rows.length; i++, j++) {
+                  for (var i = 0, j = 0; i < rows.length; i++, j++) {
                     const newData = {
                       realData: rows[i][`data`],
                       label: label
@@ -2298,7 +2316,7 @@ module.exports = {
                   csvWriter
                     .writeRecords(csvWriteData)
                     .then(() => {
-                      logger.info("export csv success");
+                      console.log("export csv success");
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
@@ -2310,7 +2328,7 @@ module.exports = {
                       });
                     })
                     .catch((err) => {
-                      logger.error("export csv failed", err);
+                      console.error("export csv failed", err);
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
@@ -2331,10 +2349,10 @@ module.exports = {
                   //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
 
                   if (!rows.length) return;
-                  logger.debug(historyArr)
-                  for (let i = historyArr[0], j = 0; i < historyArr[1] - 1; i++, j++) {
+                  console.log(historyArr)
+                  for (var i = historyArr[0], j = 0; i < historyArr[1] - 1; i++, j++) {
                     const sitData = JSON.parse(rows[i][`data`]);
-                    logger.debug(sitData.length)
+                    console.log(sitData.length)
                     const press = sitPressSelect.length
                       ? sitPressSelect[i]
                       : sitData.reduce((a, b) => a + b, 0);
@@ -2391,7 +2409,7 @@ module.exports = {
                   csvWriter
                     .writeRecords(csvWriteData)
                     .then(() => {
-                      logger.info("export csv success");
+                      console.log("export csv success");
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
@@ -2403,7 +2421,7 @@ module.exports = {
                       });
                     })
                     .catch((err) => {
-                      logger.error("export csv failed", err);
+                      console.error("export csv failed", err);
 
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
@@ -2423,12 +2441,13 @@ module.exports = {
                 if (err) {
                   logger.error(err);
                 } else {
+                  // console.log(rows)
                   //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
                   if (!rows.length) return;
 
                   // if()
 
-                  for (let i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
+                  for (var i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
                     const backData = JSON.parse(rows[i][`data`]);
                     // const press = calPressArr(backData , backIndex , 32)
                     const press = backPressSelect.length
@@ -2494,7 +2513,7 @@ module.exports = {
                   csvWriter1
                     .writeRecords(csvWriteBackData)
                     .then(() => {
-                      logger.info("export csv success");
+                      console.log("export csv success");
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
                           download: "export csv success",
@@ -2505,7 +2524,7 @@ module.exports = {
                       });
                     })
                     .catch((err) => {
-                      logger.error("export csv failed", err);
+                      console.error("export csv failed", err);
                       server.clients.forEach(function each(client) {
                         const jsonData = JSON.stringify({
                           download: "export csv failed",
@@ -2523,12 +2542,13 @@ module.exports = {
                   if (err) {
                     logger.error(err);
                   } else {
+                    // console.log(rows)
                     //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
                     if (!rows.length) return;
 
                     // if()
 
-                    for (let i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
+                    for (var i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
                       const backData = JSON.parse(rows[i][`data`]);
                       // const press = calPressArr(backData , backIndex , 32)
                       const press = backPressSelect.length
@@ -2595,7 +2615,7 @@ module.exports = {
                     csvWriter1
                       .writeRecords(csvWriteBackData)
                       .then(() => {
-                        logger.info("export csv success");
+                        console.log("export csv success");
                         server.clients.forEach(function each(client) {
                           const jsonData = JSON.stringify({
                             download: "export csv success",
@@ -2606,7 +2626,7 @@ module.exports = {
                         });
                       })
                       .catch((err) => {
-                        logger.error("export csv failed", err);
+                        console.error("export csv failed", err);
                         server.clients.forEach(function each(client) {
                           const jsonData = JSON.stringify({
                             download: "export csv failed",
@@ -2741,6 +2761,7 @@ SerialPort.list().then((ports) => {
   logger.info(
     "hello ,there are serialport lists that we selected from your device\r\n"
   );
+  // console.log(ports)
   serialport = getPort(ports)//ports; //.filter((a,index) => a.manufacturer === 'wch.cn');
   ports.forEach(function (port) {
     logger.info("port:%s\r\n", port.path);
@@ -2748,6 +2769,7 @@ SerialPort.list().then((ports) => {
     //   const port1 = new SerialPort(
     //     { path: "COM5", baudRate: baudRate, autoOpen: true },
     //     function (err) {
+    //       logger.warn(err, "err");
     //     }
     //   );
     //   //绠￠亾娣诲姞瑙ｆ瀽鍣?
@@ -2759,7 +2781,8 @@ SerialPort.list().then((ports) => {
   logger.info(
     "=========================================================================================\r\n"
   );
-}
+});
+
 
 let pointArr, newData, firstBlueData = [], lastBlueData = [], firstBlueData1 = [], lastBlueData1 = [];
 let index = 0
@@ -2767,9 +2790,10 @@ parser.on("data", function (data) {
   pointArr = new Array();
   let buffer = Buffer.from(data);
   newData = new Array();
+  // console.log(buffer.length)
   if (nowDate < endDate) {
     if (buffer.length === 1024) {
-      for (let i = 0; i < buffer.length; i++) {
+      for (var i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
       }
 
@@ -2865,7 +2889,8 @@ parser.on("data", function (data) {
         pointArr = endiSit1024(pointArr)
       } else if (file == 'fast1024') {
         pointArr = jqbed(pointArr)
-
+        console.log('fast1024')
+        // console.log(Math.max(...pointArr))
         pointArr = pressNew1220({ arr: pointArr, height: 32, width: 32, type: 'col', value: 1024 })
         // pointArr = gaussBlur_return(pointArr , 32,32, 0.5)
       } else if (file == 'sofa') {
@@ -2893,6 +2918,7 @@ parser.on("data", function (data) {
       }
 
 
+      // console.log(JSON.stringify(pointArr))
       // if (flag) {
       //   const resDataArr = {
       //     data: JSON.stringify(pointArr),
@@ -2910,6 +2936,7 @@ parser.on("data", function (data) {
       //   const insertQuery =
       //     "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
 
+      //   console.log(db,)
 
       //   db.run(
       //     insertQuery,
@@ -2917,8 +2944,10 @@ parser.on("data", function (data) {
       //     [JSON.stringify(pointArr), timestamp, date],
       //     function (err) {
       //       if (err) {
+      //         logger.error(err);
       //         return;
       //       }
+      //       console.log(`Event inserted with ID ${this.lastID}`);
       //     }
       //   );
       // }
@@ -2950,7 +2979,7 @@ parser.on("data", function (data) {
     }
 
     if (buffer.length == 72 || buffer.length == 144) {
-      for (let i = 0; i < buffer.length; i++) {
+      for (var i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
       }
 
@@ -2981,11 +3010,12 @@ parser.on("data", function (data) {
     }
 
     if (buffer.length == 262) {
-      for (let i = 0; i < buffer.length; i++) {
+      for (var i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
       }
       const length = pointArr.length
       const rotate = pointArr.splice(length - 6, length)
+      // console.log(pointArr.length , rotate)
       pointArr = gloves0123Res(pointArr)
       pointArr = gloves0123(pointArr)
       const jsonData = JSON.stringify({
@@ -3005,7 +3035,7 @@ parser.on("data", function (data) {
       let firstArr = new Array();
       const length = buffer.length
 
-      for (let i = 0; i < buffer.length; i++) {
+      for (var i = 0; i < buffer.length; i++) {
         firstArr[i] = buffer.readUInt8(i);
       }
 
@@ -3024,6 +3054,7 @@ parser.on("data", function (data) {
       //   const realArr = [...pointArr]
       //   // pointArr = footVideo(pointArr)
       //   newArr = handVideoRealPoint_0506_3([...pointArr])
+      //   console.log('handVideo147(pointArr)')
       //   // newArr = handVideoRealPoint([...pointArr])
       //   // newArr = handVideo1470506([...pointArr])
       //   // newArr = handVideoRealPoint_0416_3([...newArr])
@@ -3084,12 +3115,13 @@ parser.on("data", function (data) {
 
     if (buffer.length == 146) {
 
+      // console.log(file)
       pointArr = new Array();
-      for (let i = 0; i < buffer.length; i++) {
+      for (var i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
       }
       let length = pointArr.length
-
+      console.log(pointArr[1])
       pointArr = pointArr.splice(2, length)
       length = pointArr.length
       const arr = pointArr.splice(length - 16, length)
@@ -3105,7 +3137,7 @@ parser.on("data", function (data) {
       // newArr = handVideo1470506([...pointArr])
       // newArr = handVideoRealPoint_0416_3([...newArr])
       // newArr = [...pointArr]
-
+      console.log(file)
       if (file == 'handVideo1') {
         newArr = handVideoRealPoint_0506_3([...pointArr])
         pointArr = handVideo1_0416_0506(pointArr)
@@ -3218,6 +3250,7 @@ parser.on("data", function (data) {
         backFlag: port2?.isOpen,
       }
 
+      // console.log(JSON.stringify([pointArr[1] , pointArr[2] , pointArr[3]]))
 
       if (!rotate.every((a) => a == 0)) {
         jsonDataObj.rotate = rotate
@@ -3261,6 +3294,7 @@ parser.on("data", function (data) {
       //     client.send(jsonData);
       //   }
       // });
+      // console.log(jsonDataObj.sitData , jsonData)
       colOrSendData(jsonData, [])
     }
 
@@ -3268,7 +3302,7 @@ parser.on("data", function (data) {
       let firstArr = new Array();
       const length = buffer.length
 
-      for (let i = 0; i < buffer.length; i++) {
+      for (var i = 0; i < buffer.length; i++) {
         firstArr[i] = buffer.readUInt8(i);
       }
 
@@ -3285,8 +3319,9 @@ parser.on("data", function (data) {
 
     if (buffer.length == 158) {
 
+      // console.log(file)
       pointArr = new Array();
-      for (let i = 0; i < buffer.length; i++) {
+      for (var i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
       }
       let length = pointArr.length
@@ -3400,6 +3435,7 @@ parser.on("data", function (data) {
         backFlag: port2?.isOpen,
       }
 
+      // console.log(JSON.stringify([pointArr[1] , pointArr[2] , pointArr[3]]))
 
       if (!rotate.every((a) => a == 0)) {
         jsonDataObj.rotate = rotate
@@ -3443,6 +3479,7 @@ parser.on("data", function (data) {
       //     client.send(jsonData);
       //   }
       // });
+      // console.log(jsonDataObj.sitData , jsonData)
       colOrSendData(jsonData, [])
     }
 
@@ -3452,11 +3489,13 @@ parser.on("data", function (data) {
 
 
 
+    // console.log(buffer.length)
     if (buffer.length == 256) {
 
 
+      // console.log(file , baudRate)
       pointArr = new Array();
-      for (let i = 0; i < buffer.length; i++) {
+      for (var i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
       }
 
@@ -3491,10 +3530,13 @@ parser.on("data", function (data) {
     }
 
     if (file.includes('bed4096') && buffer.length == 4096) {
+      if (buffer.length != 4096) {
+        console.log('bufferLength : ', baudRate, buffer.length)
+      }
 
-
+      // console.log(file , baudRate)
       pointArr = new Array();
-      for (let i = 0; i < buffer.length; i++) {
+      for (var i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
       }
 
@@ -3556,12 +3598,14 @@ parser.on("data", function (data) {
         jsonData = JSON.stringify({ sitData: file == 'smallBed' || file == 'smallBed1' ? newArr : pointArr, hz: colHZ });
       }
 
+      // console.log(jsonData)
 
       colOrSendData(jsonData)
 
     }
 
     if (buffer.length == 1) {
+      console.log(buffer.readUInt8(i))
       if (buffer.readUInt8(i) == 3) {
         server.clients.forEach(function each(client) {
           const jsonData = JSON.stringify({
@@ -3579,6 +3623,7 @@ parser.on("data", function (data) {
 });
 
 function colOrSendData(jsonData) {
+  // console.log(JSON.stringify(JSON.parse(jsonData).sitData) , 'jsonData')
   const nowDate = new Date().getTime()
   if (flag
     // && nowDate - oldTimeStamp > 1000 / colHZ
@@ -3607,8 +3652,10 @@ function colOrSendData(jsonData) {
     //   [file.includes('hand0205') ? JSON.stringify([...pointArr, ...rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify(pointArr), timestamp, date],
     //   function (err) {
     //     if (err) {
+    //       logger.error(err);
     //       return;
     //     }
+    //     console.log(`Event inserted with ID ${this.lastID}`);
     //   }
     // );
 
@@ -3620,7 +3667,7 @@ function colOrSendData(jsonData) {
           logger.error(err);
           return;
         }
-        logger.debug(`Event inserted with ID ${this.lastID}`);
+        console.log(`Event inserted with ID ${this.lastID}`);
       }
     );
   }
@@ -3637,13 +3684,14 @@ function colOrSendData(jsonData) {
 
 // 澶勭悊涓插彛鏁版嵁
 
-let pointArr2;
+var pointArr2;
 parser2.on("data", function (data) {
   pointArr2 = new Array();
   let buffer = Buffer.from(data);
   if (nowDate < endDate) {
+    console.log(buffer.length)
     if (buffer.length === 1024) {
-      for (let i = 0; i < buffer.length; i++) {
+      for (var i = 0; i < buffer.length; i++) {
         pointArr2[i] = buffer.readUInt8(i);
       }
 
@@ -3688,7 +3736,7 @@ parser2.on("data", function (data) {
               logger.error(err);
               return;
             }
-            logger.debug(`Event inserted with ID ${this.lastID}`);
+            console.log(`Event inserted with ID ${this.lastID}`);
           }
         );
       }
@@ -3719,7 +3767,7 @@ parser2.on("data", function (data) {
       let firstArr = new Array();
       const length = buffer.length
 
-      for (let i = 0; i < buffer.length; i++) {
+      for (var i = 0; i < buffer.length; i++) {
         firstArr[i] = buffer.readUInt8(i);
       }
 
@@ -3760,7 +3808,7 @@ parser2.on("data", function (data) {
 
     if (buffer.length == 146) {
       let pointArr = new Array();
-      for (let i = 0; i < buffer.length; i++) {
+      for (var i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
       }
       let length = pointArr.length
@@ -3808,6 +3856,7 @@ parser2.on("data", function (data) {
 
       newArr147_2 = [...newArr]
       pointArr2zeroData = [...pointArr2]
+      // console.log(pointArr2zero)
       if (pointArr2zero.length) {
         pointArr2 = pointArr2.map((a, index) => numLessZeroToZero(a - pointArr2zero[index]))
       }
@@ -3865,6 +3914,7 @@ parser2.on("data", function (data) {
     }
 
     if (buffer.length == 1) {
+      console.log(buffer.readUInt8(i))
       if (buffer.readUInt8(i) == 3) {
         server.clients.forEach(function each(client) {
           const jsonData = JSON.stringify({
@@ -3910,7 +3960,7 @@ function colOrSendData1(jsonData) {
           logger.error(err);
           return;
         }
-        logger.debug(`Event inserted with ID ${this.lastID}`);
+        console.log(`Event inserted with ID ${this.lastID}`);
       }
     );
   }
@@ -3925,7 +3975,7 @@ function colOrSendData1(jsonData) {
   }
 }
 
-let pointArr3;
+var pointArr3;
 parser3.on("data", function (data) {
   if (file == "bigBed") {
     pointArr3 = new Array();
@@ -3934,7 +3984,7 @@ parser3.on("data", function (data) {
     let res = [];
     if (nowDate < endDate) {
       if (buffer.length === 1025) {
-        for (let i = 0; i < buffer.length; i++) {
+        for (var i = 0; i < buffer.length; i++) {
           pointArr3[i] = buffer.readUInt8(i);
         }
 
@@ -3990,7 +4040,7 @@ parser3.on("data", function (data) {
                     logger.error(err);
                     return;
                   }
-                  logger.debug(`Event inserted with ID ${this.lastID}`);
+                  console.log(`Event inserted with ID ${this.lastID}`);
                 }
               );
             }
@@ -4008,7 +4058,7 @@ parser3.on("data", function (data) {
   }
 });
 
-let pointArr4;
+var pointArr4;
 
 parser4.on("data", function (data) {
   pointArr4 = new Array();
@@ -4016,7 +4066,7 @@ parser4.on("data", function (data) {
   if (nowDate < endDate) {
     if (buffer.length === 1024) {
 
-      for (let i = 0; i < buffer.length; i++) {
+      for (var i = 0; i < buffer.length; i++) {
         pointArr4[i] = buffer.readUInt8(i);
       }
       if (file == 'volvo') {
@@ -4050,7 +4100,7 @@ parser4.on("data", function (data) {
               logger.error(err);
               return;
             }
-            logger.debug(`Event inserted with ID ${this.lastID}`);
+            console.log(`Event inserted with ID ${this.lastID}`);
           }
         );
       }
@@ -4082,7 +4132,7 @@ parser4.on("data", function (data) {
       let firstArr = new Array();
       const length = buffer.length
 
-      for (let i = 0; i < buffer.length; i++) {
+      for (var i = 0; i < buffer.length; i++) {
         firstArr[i] = buffer.readUInt8(i);
       }
 
@@ -4123,7 +4173,7 @@ parser4.on("data", function (data) {
 
     if (buffer.length == 146) {
       let pointArr = new Array();
-      for (let i = 0; i < buffer.length; i++) {
+      for (var i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
       }
       let length = pointArr.length
@@ -4220,7 +4270,7 @@ function colOrSendData2(jsonData) {
           logger.error(err);
           return;
         }
-        logger.debug(`Event inserted with ID ${this.lastID}`);
+        console.log(`Event inserted with ID ${this.lastID}`);
       }
     );
   }
@@ -4239,7 +4289,7 @@ function colOrSendData2(jsonData) {
 setInterval(() => {
   if (com && !port1.isOpen && sitClose == false) {
     // if()
-    logger.debug(com)
+    console.log(com)
     if (file != "bigBed") {
       try {
         port1 = new SerialPort(
@@ -4298,12 +4348,5 @@ setInterval(() => {
       logger.warn(e, "e");
     }
   }
-}
-}
-}
-}
-}
-}
-
-
+}, 3000);
 
