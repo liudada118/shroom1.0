@@ -7,12 +7,14 @@
  * 3. 建立 IPC 通信桥梁（前端 ↔ 后端）
  * 4. 管理应用生命周期
  * 5. 集成自动更新（electron-updater）
+ * 6. 开发模式自动启动 Vite 开发服务器，实现前端热更新
  */
 
 const { app, BrowserWindow, ipcMain } = require("electron");
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const { spawn } = require("child_process");
 const { openServer, getWsServer, handleCommand } = require("./server");
 const { AppUpdater } = require("./autoUpdater");
 const logger = require('./logger');
@@ -24,14 +26,12 @@ const HOSTNAME = "127.0.0.1";
 const PORT = 12321;
 const VITE_DEV_PORT = 3000;
 
-// 判断是否为开发模式（通过环境变量 ELECTRON_DEV 或 Vite 开发服务器是否运行）
-const isDev = !app.isPackaged && (process.env.ELECTRON_DEV === 'true' || process.env.NODE_ENV === 'development');
-
 // ============================================================
 // 窗口管理
 // ============================================================
 let mainWindow = null;
 let appUpdater = null;
+let viteProcess = null;  // Vite 子进程引用，用于退出时清理
 
 const createWindow = () => {
   mainWindow = new BrowserWindow({
@@ -52,12 +52,12 @@ const createWindow = () => {
   openServer();
 
   // 加载前端页面
-  if (isDev) {
-    // 开发模式：连接 Vite 开发服务器，支持热更新（HMR）
-    loadViteDevServer(mainWindow);
-  } else {
-    // 生产模式：启动静态文件服务
+  if (app.isPackaged) {
+    // 生产模式（打包后）：启动静态文件服务
     startStaticServer({ hostname: HOSTNAME, port: PORT, win: mainWindow });
+  } else {
+    // 开发模式（未打包）：自动启动 Vite 开发服务器，支持热更新
+    startViteAndLoad(mainWindow);
   }
 
   // ============================================================
@@ -170,28 +170,61 @@ function sendToRenderer(channel, data) {
 module.exports = { sendToRenderer };
 
 // ============================================================
-// 开发模式：连接 Vite 开发服务器
+// 开发模式：自动启动 Vite 开发服务器并连接
 // ============================================================
-function loadViteDevServer(win) {
+function startViteAndLoad(win) {
   const viteUrl = `http://localhost:${VITE_DEV_PORT}`;
-  logger.info(`[Main] Dev mode: connecting to Vite dev server at ${viteUrl}`);
+  const clientDir = path.join(__dirname, "client");
+
+  logger.info(`[Main] Dev mode: starting Vite dev server in ${clientDir}`);
+
+  // 根据平台选择正确的 npx 命令
+  const isWin = process.platform === "win32";
+  const npxCmd = isWin ? "npx.cmd" : "npx";
+
+  // 在 client 目录下启动 Vite 开发服务器
+  viteProcess = spawn(npxCmd, ["vite", "--host", "--port", String(VITE_DEV_PORT)], {
+    cwd: clientDir,
+    stdio: ["ignore", "pipe", "pipe"],
+    shell: isWin,  // Windows 下需要 shell
+    env: { ...process.env, BROWSER: "none" },  // 阻止 Vite 自动打开浏览器
+  });
+
+  viteProcess.stdout.on("data", (data) => {
+    const msg = data.toString().trim();
+    if (msg) logger.info(`[Vite] ${msg}`);
+  });
+
+  viteProcess.stderr.on("data", (data) => {
+    const msg = data.toString().trim();
+    if (msg) logger.warn(`[Vite] ${msg}`);
+  });
+
+  viteProcess.on("error", (err) => {
+    logger.error(`[Main] Failed to start Vite: ${err.message}`);
+    logger.info("[Main] Falling back to static server...");
+    startStaticServer({ hostname: HOSTNAME, port: PORT, win });
+  });
+
+  viteProcess.on("exit", (code) => {
+    logger.info(`[Vite] Process exited with code ${code}`);
+    viteProcess = null;
+  });
 
   // 等待 Vite 开发服务器就绪后加载
-  const maxRetries = 30;
+  const maxRetries = 60;
   let retries = 0;
 
   function tryLoad() {
     http.get(viteUrl, (res) => {
       if (res.statusCode === 200) {
-        logger.info(`[Main] Vite dev server is ready, loading...`);
+        logger.info(`[Main] Vite dev server is ready, loading ${viteUrl}`);
         win.loadURL(viteUrl);
-        // 自动打开 DevTools 方便调试
-        win.webContents.openDevTools({ mode: 'detach' });
       } else {
         retry();
       }
       res.resume();
-    }).on('error', () => {
+    }).on("error", () => {
       retry();
     });
   }
@@ -199,15 +232,34 @@ function loadViteDevServer(win) {
   function retry() {
     retries++;
     if (retries < maxRetries) {
-      logger.info(`[Main] Waiting for Vite dev server... (${retries}/${maxRetries})`);
+      if (retries % 5 === 0) {
+        logger.info(`[Main] Waiting for Vite dev server... (${retries}s)`);
+      }
       setTimeout(tryLoad, 1000);
     } else {
       logger.error(`[Main] Vite dev server not available after ${maxRetries}s, falling back to static server`);
+      killVite();
       startStaticServer({ hostname: HOSTNAME, port: PORT, win });
     }
   }
 
   tryLoad();
+}
+
+/**
+ * 终止 Vite 子进程
+ */
+function killVite() {
+  if (viteProcess && !viteProcess.killed) {
+    logger.info("[Main] Killing Vite dev server...");
+    // Windows 下需要 taskkill 来杀掉进程树
+    if (process.platform === "win32") {
+      spawn("taskkill", ["/pid", String(viteProcess.pid), "/f", "/t"], { shell: true });
+    } else {
+      viteProcess.kill("SIGTERM");
+    }
+    viteProcess = null;
+  }
 }
 
 // ============================================================
@@ -309,6 +361,7 @@ app.on("window-all-closed", () => {
 // 优雅退出：清理资源
 app.on("before-quit", () => {
   logger.info("[Main] Application is quitting, cleaning up...");
+  killVite();
   if (appUpdater) {
     appUpdater.dispose();
   }
