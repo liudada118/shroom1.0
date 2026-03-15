@@ -192,11 +192,20 @@ function startViteAndLoad(win) {
     return;
   }
 
-  logger.info(`[Main] Dev mode: starting Vite dev server in ${clientDir}`);
-
-  // 根据平台选择正确的 npx 命令
   const isWin = process.platform === "win32";
-  const npxCmd = isWin ? "npx.cmd" : "npx";
+
+  // 直接使用 client/node_modules/.bin/vite 绝对路径，避免 npx 在 electron-forge 环境下找不到命令
+  const viteBin = path.join(clientDir, "node_modules", ".bin", isWin ? "vite.cmd" : "vite");
+
+  if (!fs.existsSync(viteBin)) {
+    logger.error(`[Main] Vite binary not found at: ${viteBin}`);
+    logger.error("[Main] Please run 'cd client && npm install' to install dependencies.");
+    logger.info("[Main] Falling back to static server...");
+    startStaticServer({ hostname: HOSTNAME, port: PORT, win });
+    return;
+  }
+
+  logger.info(`[Main] Dev mode: starting Vite from ${viteBin}`);
 
   // 标记 Vite 是否已失败，避免重复回退
   let viteFailed = false;
@@ -210,8 +219,8 @@ function startViteAndLoad(win) {
     startStaticServer({ hostname: HOSTNAME, port: PORT, win });
   }
 
-  // 在 client 目录下启动 Vite 开发服务器
-  viteProcess = spawn(npxCmd, ["vite", "--host", "--port", String(VITE_DEV_PORT)], {
+  // 使用绝对路径启动 Vite 开发服务器
+  viteProcess = spawn(viteBin, ["--host", "--port", String(VITE_DEV_PORT)], {
     cwd: clientDir,
     stdio: ["ignore", "pipe", "pipe"],
     shell: isWin,  // Windows 下需要 shell
