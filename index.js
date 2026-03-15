@@ -52,12 +52,19 @@ const createWindow = () => {
   openServer();
 
   // 加载前端页面
-  if (app.isPackaged) {
+  // 判断开发模式：检查 client 目录和 Vite 是否存在
+  const clientDir = path.join(__dirname, "client");
+  const hasVite = fs.existsSync(path.join(clientDir, "node_modules", ".bin"));
+  const canDevMode = !app.isPackaged && fs.existsSync(clientDir) && hasVite;
+
+  logger.info(`[Main] app.isPackaged=${app.isPackaged}, clientDir exists=${fs.existsSync(clientDir)}, hasVite=${hasVite}, canDevMode=${canDevMode}`);
+
+  if (canDevMode) {
+    // 开发模式：自动启动 Vite 开发服务器，支持前端热更新
+    startViteAndLoad(mainWindow);
+  } else {
     // 生产模式（打包后）：启动静态文件服务
     startStaticServer({ hostname: HOSTNAME, port: PORT, win: mainWindow });
-  } else {
-    // 开发模式（未打包）：自动启动 Vite 开发服务器，支持热更新
-    startViteAndLoad(mainWindow);
   }
 
   // ============================================================
