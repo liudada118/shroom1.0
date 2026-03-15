@@ -22,6 +22,10 @@ const logger = require('./logger');
 // ============================================================
 const HOSTNAME = "127.0.0.1";
 const PORT = 12321;
+const VITE_DEV_PORT = 3000;
+
+// 判断是否为开发模式（通过环境变量 ELECTRON_DEV 或 Vite 开发服务器是否运行）
+const isDev = !app.isPackaged && (process.env.ELECTRON_DEV === 'true' || process.env.NODE_ENV === 'development');
 
 // ============================================================
 // 窗口管理
@@ -47,8 +51,14 @@ const createWindow = () => {
   // 启动后端服务
   openServer();
 
-  // 启动静态文件服务并加载前端
-  startStaticServer({ hostname: HOSTNAME, port: PORT, win: mainWindow });
+  // 加载前端页面
+  if (isDev) {
+    // 开发模式：连接 Vite 开发服务器，支持热更新（HMR）
+    loadViteDevServer(mainWindow);
+  } else {
+    // 生产模式：启动静态文件服务
+    startStaticServer({ hostname: HOSTNAME, port: PORT, win: mainWindow });
+  }
 
   // ============================================================
   // 初始化自动更新（仅在打包后生效）
@@ -158,6 +168,47 @@ function sendToRenderer(channel, data) {
 
 // 导出供 server.js 使用
 module.exports = { sendToRenderer };
+
+// ============================================================
+// 开发模式：连接 Vite 开发服务器
+// ============================================================
+function loadViteDevServer(win) {
+  const viteUrl = `http://localhost:${VITE_DEV_PORT}`;
+  logger.info(`[Main] Dev mode: connecting to Vite dev server at ${viteUrl}`);
+
+  // 等待 Vite 开发服务器就绪后加载
+  const maxRetries = 30;
+  let retries = 0;
+
+  function tryLoad() {
+    http.get(viteUrl, (res) => {
+      if (res.statusCode === 200) {
+        logger.info(`[Main] Vite dev server is ready, loading...`);
+        win.loadURL(viteUrl);
+        // 自动打开 DevTools 方便调试
+        win.webContents.openDevTools({ mode: 'detach' });
+      } else {
+        retry();
+      }
+      res.resume();
+    }).on('error', () => {
+      retry();
+    });
+  }
+
+  function retry() {
+    retries++;
+    if (retries < maxRetries) {
+      logger.info(`[Main] Waiting for Vite dev server... (${retries}/${maxRetries})`);
+      setTimeout(tryLoad, 1000);
+    } else {
+      logger.error(`[Main] Vite dev server not available after ${maxRetries}s, falling back to static server`);
+      startStaticServer({ hostname: HOSTNAME, port: PORT, win });
+    }
+  }
+
+  tryLoad();
+}
 
 // ============================================================
 // 静态文件服务器
