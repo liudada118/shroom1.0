@@ -1510,10 +1510,8 @@ export const sitTypeEvent = {
     } else {
 
       // that.com.current?.calibration([0,0,0])
-      // that.com.current?.handZero()
-      // that.com.current?.calibration([0,0,0])
+      // that.com.current?.handZero(      // that.com.current?.calibration([0,0,0])
     }
-
   }, hand0205: ({ that, wsPointData, local, rotate, fingerArr }) => {
     // console.log('wsPointData')
     // console.log(wsPointData.length)
@@ -1688,6 +1686,7 @@ export const sitTypeEvent = {
 
 
   },
+  handGlove115200: function(args) { return sitTypeEvent.hand0205(args); },
   hand0205Point: ({ that, wsPointData, local, rotate, fingerArr }) => {
 
 
@@ -4450,7 +4449,7 @@ export const backTypeEvent = {
 
 
   },
-
+  handGlove115200: function(args) { return backTypeEvent.hand0205(args); },
 };
 
 export const headTypeEvent = {

@@ -92,7 +92,7 @@ import { chestLine, flLine, frLine, genWebglData, handSkinChange, heatMapMax, hl
 import { WebGLCanvas } from "../../components/webgl/WebGL.HeatMap copy 2";
 
 const isCar = (str) => {
-  const arr = ['yanfeng10', 'car', 'car10', 'volvo', 'footVideo', 'hand0507', 'hand0205', 'carQX', 'eye' , 'sofa']
+  const arr = ['yanfeng10', 'car', 'car10', 'volvo', 'footVideo', 'hand0507', 'hand0205', 'handGlove115200', 'carQX', 'eye' , 'sofa']
   return arr.includes(str)
 }
 
@@ -936,7 +936,7 @@ class Home extends React.Component {
 
 
 
-    if (this.state.hand && this.state.numMatrixFlag == 'normal' && jsonObject.rotate != null && this.state.matrixName == 'hand0205') {
+    if (this.state.hand && this.state.numMatrixFlag == 'normal' && jsonObject.rotate != null && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
       let wsPointData = jsonObject.sitData;
       let rotate = jsonObject.rotate;
       // sitTypeEvent[this.state.matrixName]({
@@ -2749,7 +2749,7 @@ class Home extends React.Component {
             <Heatmap ref={this.com} matrixName={this.state.matrixName} />
           ) :
 
-            this.state.numMatrixFlag == "num3D" && ["hand0205", 'robot1', 'footVideo'].includes(this.state.matrixName) ?
+            this.state.numMatrixFlag == "num3D" && ["hand0205", 'handGlove115200', 'robot1', 'footVideo'].includes(this.state.matrixName) ?
               <Num3D
                 ref={this.com}
                 matrixName={this.state.matrixName}
@@ -2759,7 +2759,7 @@ class Home extends React.Component {
                 handleChartsBody1={this.handleChartsBody1.bind(this)}
                 changeStateData={this.changeStateData}
                 changeSelect={this.changeSelect} />
-              : this.state.numMatrixFlag == "num" && ["hand0205", 'robot1', 'footVideo'].includes(this.state.matrixName) ?
+              : this.state.numMatrixFlag == "num" && ["hand0205", 'handGlove115200', 'robot1', 'footVideo'].includes(this.state.matrixName) ?
                 <Num2D ref={this.com}
                   matrixName={this.state.matrixName}
                   data={this.data}
@@ -2770,7 +2770,7 @@ class Home extends React.Component {
                   changeSelect={this.changeSelect} />
                 :
 
-                this.state.numMatrixFlag == "numoriginal" && ["hand0205", 'robot1', 'footVideo', 'robotSY', 'robotLCF'].includes(this.state.matrixName) ?
+                this.state.numMatrixFlag == "numoriginal" && ["hand0205", 'handGlove115200', 'robot1', 'footVideo', 'robotSY', 'robotLCF'].includes(this.state.matrixName) ?
                   <Num2DOriginal ref={this.com}
                     matrixName={this.state.matrixName}
                     data={this.data}
@@ -2780,7 +2780,7 @@ class Home extends React.Component {
                     changeStateData={this.changeStateData}
                     changeSelect={this.changeSelect} />
                   :
-                  this.state.numMatrixFlag == "skin" && ["hand0205", 'robot1', 'footVideo'].includes(this.state.matrixName) ?
+                  this.state.numMatrixFlag == "skin" && ["hand0205", 'handGlove115200', 'robot1', 'footVideo'].includes(this.state.matrixName) ?
                     <HandVideo1
                       ref={this.com}
                       data={this.data}
@@ -2940,7 +2940,7 @@ class Home extends React.Component {
                           changeStateData={this.changeStateData}
                           changeSelect={this.changeSelect} />
                       </CanvasCom>
-                    ) : this.state.matrixName == "hand0205" ? (
+                    ) : (this.state.matrixName == "hand0205" || this.state.matrixName == "handGlove115200") ? (
                       <CanvasCom matrixName={this.state.matrixName}
                         local={this.state.local}
                       >

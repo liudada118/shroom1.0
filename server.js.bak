@@ -1,8 +1,7 @@
-const logger = require('./logger');
 ﻿const WebSocket = require("ws");
 const { app } = require('electron')
 const path = require('path');
-const os = require('os');
+var os = require('os');
 const fs = require('fs');
 const { SerialPort } = require("serialport");
 const { DelimiterParser } = require("@serialport/parser-delimiter");
@@ -73,8 +72,6 @@ const {
 const module2 = require('./aes_ecb')
 const { isCar, dedupli, totalToN, } = require("./util");
 const { pressSmallBed } = require("./utilMatrix");
-const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine } = require('./server/mathUtils');
-const { initDb: _initDbFromModule } = require('./server/dbManager');
 
 const getPort = (ports) => {
   // console.log(ports)
@@ -94,9 +91,9 @@ const getPort = (ports) => {
 
 let baudRate = 1000000
 
-let serialport = { a: 1, b: 2 }
+var serialport = { a: 1, b: 2 }
 const timeNum = 1000 / 12;
-let port2,
+var port2,
   port1,
   portHead,
   localFlag = false,
@@ -130,29 +127,23 @@ let lastData = new Array(1024).fill(0),
 const backTotal = backnum1 * backnum2;
 const sitTotal = sitnum1 * sitnum2;
 let length, history, nowGetTime;
+var serialport;
 
 let nowDate = 0
 let endDate = 0
 
 const https = require('https')
-// 使用内置 http 模块替代已废弃的 request 包
-const http = require('http');
-http.get('http://sensor.bodyta.com:8080/rcv/login/getSystemTime', {
-  headers: { 'content-type': 'application/json; charset=utf-8;' }
-}, (res) => {
-  let data = '';
-  res.on('data', (chunk) => { data += chunk; });
-  res.on('end', () => {
-    try {
-      const body = JSON.parse(data);
-      logger.debug(body.time, 'body');
-      nowDate = parseInt(body.time);
-    } catch (e) {
-      logger.warn('Failed to parse system time response', e);
-    }
-  });
-}).on('error', (err) => {
-  logger.warn('Failed to get system time', err);
+const request = require('request');
+request('http://sensor.bodyta.com:8080/rcv/login/getSystemTime', {
+  json: true, method: 'get', headers: {
+    'content-type': 'application/json; charset=utf-8;',
+  }
+}, (err, res, body) => {
+  if (err) {
+    return console.log(err);
+  }
+  console.log(body.time, 'body');
+  nowDate = parseInt(body.time)
 });
 
 const runtimeResourceRoot = app.isPackaged ? process.resourcesPath : __dirname;
@@ -168,13 +159,8 @@ if (!fs.existsSync(csvPath)) {
   fs.mkdirSync(csvPath, { recursive: true });
 }
 
-logger.info("[Path] resourceRoot=", runtimeResourceRoot);
-logger.info("[Path] db=", filePath, "data=", csvPath, "config=", nameTxt);
-
-// initDb 包装函数，自动传入 filePath 和 runtimeResourceRoot
-function initDb(fileStr) {
-  return _initDbFromModule(fileStr, filePath, runtimeResourceRoot);
-}
+console.log("[Path] resourceRoot=", runtimeResourceRoot);
+console.log("[Path] db=", filePath, "data=", csvPath, "config=", nameTxt);
 
 
 
@@ -197,9 +183,7 @@ if (fs.existsSync(nameTxt)) {
       file = rawFile || defauleFile;
     }
     // 根据 file 类型设置波特率
-    if (file == 'handGlove115200') {
-      baudRate = 115200
-    } else if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(file) || file.includes('robot')) {
+    if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(file) || file.includes('robot')) {
       baudRate = 921600
     } else if (['bed4096', 'bed4096num'].includes(file)) {
       baudRate = 3000000
@@ -207,10 +191,10 @@ if (fs.existsSync(nameTxt)) {
       baudRate = 1000000
     }
   } catch (err) {
-    logger.error(err);
+    console.error(err);
   }
 } else {
-  logger.info("[Config] config.txt not found, skip loading license at startup.");
+  console.log("[Config] config.txt not found, skip loading license at startup.");
 }
 
 // let db = new sqlite3.Database(`${filePath}/foot.db`);
@@ -222,7 +206,7 @@ let dataFalg = 0;
 
 // const createCsvWriter = require("csv-writer").createObjectCsvWriter;
 
-let saveTime,
+var saveTime,
   getTime,
 
   com,
@@ -241,7 +225,7 @@ let saveTime,
 //   // console.log(JSON.parse(module2.decryptStr(dateRes)).startTimeRes);
 //   // endDate = parseFloat(module2.decryptStr(date))
 // } catch (err) {
-//   logger.error(err);
+//   console.error(err);
 // }
 
 
@@ -252,33 +236,33 @@ db = dbObj.db
 db1 = dbObj.db1
 db2 = dbObj.db2
 
-let flag = false;
-let colHZ = 12, oldTimeStamp = new Date().getTime();
+var flag = false;
+var colHZ = 12, oldTimeStamp = new Date().getTime();
 let splitBuffer = Buffer.from([0xaa, 0x55, 0x03, 0x99]);
 // let splitBuffer1 = Buffer.from([0xaa, 0x55, 0x03, 0x09]);
 let parser2 = new DelimiterParser({ delimiter: splitBuffer });
 let parser = new DelimiterParser({ delimiter: splitBuffer });
 let parser3 = new DelimiterParser({ delimiter: splitBuffer });
 let parser4 = new DelimiterParser({ delimiter: splitBuffer });
-let server, server1, server2;
-let localData = [],
+var server, server1, server2;
+var localData = [],
   localDataBack = [],
   localDataHead = [],
   indexArr = [0, 0];
 let up = 1245, down = 2
-let pointArr1zero = []
-let pointArr147zero = []
-let pointArr147zero_2 = []
-let pointArr2zero = []
-let pointArr3zero = []
-let pointArr4zero = []
+var pointArr1zero = []
+var pointArr147zero = []
+var pointArr147zero_2 = []
+var pointArr2zero = []
+var pointArr3zero = []
+var pointArr4zero = []
 
-let pointArr1zeroData = []
-let pointArr2zeroData = []
-let pointArr3zeroData = []
-let pointArr4zeroData = [], newArr147 = [], newArr147_2 = [];
+var pointArr1zeroData = []
+var pointArr2zeroData = []
+var pointArr3zeroData = []
+var pointArr4zeroData = [], newArr147 = [], newArr147_2 = [],
 
-server = new WebSocket.Server({ port: 19999 });
+  server = new WebSocket.Server({ port: 19999 });
 server1 = new WebSocket.Server({ port: 19998 });
 server2 = new WebSocket.Server({ port: 19997 });
 
@@ -286,16 +270,16 @@ module.exports = {
   openServer() {
 
     server1.on("open", function open() {
-      logger.info("connected");
+      console.log("connected");
     });
 
     server1.on("close", function close() {
-      logger.info("disconnected");
+      console.log("disconnected");
     });
 
     server1.on("connection", function connection(ws, req) {
       ws.on("message", function incoming(message) {
-        logger.debug("received: %s from %s", message, clientName, localFlag);
+        console.log("received: %s from %s", message, clientName, localFlag);
 
         const getMessage = JSON.parse(message);
 
@@ -313,13 +297,13 @@ module.exports = {
                   autoOpen: true,
                 },
                 function (err) {
-                  logger.warn(err, "err");
+                  console.log(err, "err");
                 }
               );
               //绠￠亾娣诲姞瑙ｆ瀽鍣?
               port2.pipe(parser2);
             } catch (e) {
-              logger.warn(e, "e");
+              console.log(e, "e");
             }
           }
 
@@ -356,13 +340,13 @@ module.exports = {
                     autoOpen: true,
                   },
                   function (err) {
-                    logger.warn(err, "err");
+                    console.log(err, "err");
                   }
                 );
                 //绠￠亾娣诲姞瑙ｆ瀽鍣?
                 // port2.pipe(parser2);
               } catch (e) {
-                logger.warn(e, "e");
+                console.log(e, "e");
               }
             }
           }
@@ -386,7 +370,7 @@ module.exports = {
 
           //   db1.all(selectQuery, params, (err, rows) => {
           //     if (err) {
-          //       logger.error(err);
+          //       console.error(err);
           //     } else {
           //       localDataBack = rows;
           //     }
@@ -397,11 +381,11 @@ module.exports = {
     });
 
     server.on("open", function open() {
-      logger.info("connected");
+      console.log("connected");
     });
 
     server.on("close", function close() {
-      logger.info("disconnected");
+      console.log("disconnected");
     });
 
     server.on("connection", function connection(ws, req) {
@@ -409,7 +393,7 @@ module.exports = {
       const ip = req.connection.remoteAddress;
       const port = req.connection.remotePort;
       const clientName = ip + port;
-      logger.info("%s is connected", clientName);
+      console.log("%s is connected", clientName);
 
       server.clients.forEach(function each(client) {
         /**
@@ -470,7 +454,7 @@ module.exports = {
 
           fs.writeFile(nameTxt, date, err => {
             if (err) {
-              logger.error(err);
+              console.error(err);
             }
             // date = module2.decryptStr(content) 
             // file written successfully
@@ -498,9 +482,7 @@ module.exports = {
           endDate = parseFloat(parsedLicense.date);
 
           // 根据 file 类型设置波特率
-          if (file == 'handGlove115200') {
-            baudRate = 115200
-          } else if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(file) || file.includes('robot')) {
+          if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(file) || file.includes('robot')) {
             baudRate = 921600
           } else if (['bed4096', 'bed4096num'].includes(file)) {
             baudRate = 3000000
@@ -666,9 +648,7 @@ module.exports = {
             // db = new sqlite3.Database(`${filePath}/${receiveFile}.db`);
             file = receiveFile;
 
-            if (receiveFile == 'handGlove115200') {
-              baudRate = 115200
-            } else if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(receiveFile) || receiveFile.includes('robot')) {
+            if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(receiveFile) || receiveFile.includes('robot')) {
               baudRate = 921600
             } else if (['bed4096', 'bed4096num',].includes(receiveFile)) {
               baudRate = 3000000
@@ -703,7 +683,7 @@ module.exports = {
                 if (err) {
                   db.all(selectQuery, params, (err, rows) => {
                     if (err) {
-                      logger.error(err);
+                      console.error(err);
                     } else {
                       localData = rows;
                       length = rows.length
@@ -869,13 +849,13 @@ module.exports = {
 
                   db.all(selectQuery, params, (err, rows) => {
                     if (err) {
-                      logger.error(err);
+                      console.error(err);
                     } else {
 
                       if (file == 'volvo') {
                         db2.all(selectQuery, params, (err, rows) => {
                           if (err) {
-                            logger.error(err);
+                            console.error(err);
                           } else {
 
 
@@ -1032,7 +1012,7 @@ module.exports = {
             if (!isCar(file)) {
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  logger.error(err);
+                  console.error(err);
                 } else {
                   localData = rows;
                   length = rows.length
@@ -1164,17 +1144,17 @@ module.exports = {
             com = JSON.parse(message).sitPort;
             if (port1?.isOpen) {
               port1.close((e) => {
-                logger.debug(e)
+                console.log(e)
               });
             }
             if (com == com1) {
               if (port2?.isOpen) {
                 port2.close((e) => {
-                  logger.debug(e)
+                  console.log(e)
                 });
               }
             }
-            logger.debug(baudRate)
+            console.log(baudRate)
             if (file != "bigBed") {
               console.log(com);
               try {
@@ -1186,7 +1166,7 @@ module.exports = {
                     autoOpen: true,
                   },
                   function (err) {
-                    logger.warn(err, "err");
+                    console.log(err, "err");
                   }
                 );
                 //绠￠亾娣诲姞瑙ｆ瀽鍣?
@@ -1194,7 +1174,7 @@ module.exports = {
                 // parser = new Delimiter({ delimiter: splitBuffer });
                 port1.pipe(parser);
               } catch (e) {
-                logger.warn(e, "e");
+                console.log(e, "e");
               }
             } else {
               try {
@@ -1206,13 +1186,13 @@ module.exports = {
                     autoOpen: true,
                   },
                   function (err) {
-                    logger.warn(err, "err");
+                    console.log(err, "err");
                   }
                 );
                 //绠￠亾娣诲姞瑙ｆ瀽鍣?
                 port1.pipe(parser3);
               } catch (e) {
-                logger.warn(e, "e");
+                console.log(e, "e");
               }
             }
           }
@@ -1223,13 +1203,13 @@ module.exports = {
             comhead = JSON.parse(message).headPort;
             if (portHead?.isOpen) {
               portHead.close((e) => {
-                logger.debug(e)
+                console.log(e)
               });
             }
             // if (com == com1) {
             //   if (port2?.isOpen) {
             //     port2.close((e) => {
-            //       logger.debug(e)
+            //       console.log(e)
             //     });
             //   }
             // }
@@ -1252,7 +1232,7 @@ module.exports = {
                 // parser = new Delimiter({ delimiter: splitBuffer });
                 portHead.pipe(parser4);
               } catch (e) {
-                logger.warn(e, "e");
+                console.log(e, "e");
               }
             } else {
               try {
@@ -1270,7 +1250,7 @@ module.exports = {
                 //绠￠亾娣诲姞瑙ｆ瀽鍣?
                 portHead.pipe(parser4);
               } catch (e) {
-                logger.warn(e, "e");
+                console.log(e, "e");
               }
             }
           }
@@ -1303,14 +1283,14 @@ module.exports = {
                   autoOpen: true,
                 },
                 function (err) {
-                  logger.warn(err, "err");
+                  console.log(err, "err");
                 }
               );
               //绠￠亾娣诲姞瑙ｆ瀽鍣?
 
               port2.pipe(parser2);
             } catch (e) {
-              logger.warn(e, "e");
+              console.log(e, "e");
             }
           }
 
@@ -1355,7 +1335,7 @@ module.exports = {
             if (isCar(file)) {
               db1.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  logger.error(err);
+                  console.error(err);
                 } else {
                   // console.log(rows);
                   let jsonData;
@@ -1390,7 +1370,7 @@ module.exports = {
 
                   db.all(selectQuery, params, (err, rows) => {
                     if (err) {
-                      logger.error(err);
+                      console.error(err);
                     } else {
                       console.log(rows);
                       let jsonData;
@@ -1451,7 +1431,7 @@ module.exports = {
             } else {
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  logger.error(err);
+                  console.error(err);
                 } else {
                   console.log(rows);
                   let jsonData;
@@ -1554,13 +1534,13 @@ module.exports = {
             //         autoOpen: true,
             //       },
             //       function (err) {
-            //         logger.warn(err, "err");
+            //         console.log(err, "err");
             //       }
             //     );
             //     //绠￠亾娣诲姞瑙ｆ瀽鍣?
             //     // port1.pipe(parser);
             //   } catch (e) {
-            //     logger.warn(e, "e");
+            //     console.log(e, "e");
             //   }
             // }
 
@@ -1573,13 +1553,13 @@ module.exports = {
             //         autoOpen: true,
             //       },
             //       function (err) {
-            //         logger.warn(err, "err");
+            //         console.log(err, "err");
             //       }
             //     );
             //     //绠￠亾娣诲姞瑙ｆ瀽鍣?
             //     // port2.pipe(parser2);
             //   } catch (e) {
-            //     logger.warn(e, "e");
+            //     console.log(e, "e");
             //   }
             // }
           }
@@ -1609,7 +1589,7 @@ module.exports = {
                   sitFlag: localData.length > 0,
                 }
 
-                if (['hand0205', 'handGlove115200', 'robot1'].includes(file)) {
+                if (['hand0205', 'robot1'].includes(file)) {
                   sitObj.newArr147 = localData[value]?.data
                   backObj.newArr147 = localData[value]?.data
                 }
@@ -1762,7 +1742,7 @@ module.exports = {
                     sitFlag: localData.length > 0,
                   }
 
-                  if (['hand0205', 'handGlove115200', 'robot1'].includes(file)) {
+                  if (['hand0205', 'robot1'].includes(file)) {
                     sitObj.newArr147 = localData[nowIndex]?.data
                     backObj.newArr147 = localDataBack[nowIndex]?.data
                   }
@@ -1854,13 +1834,13 @@ module.exports = {
                       autoOpen: true,
                     },
                     function (err) {
-                      logger.warn(err, "err");
+                      console.log(err, "err");
                     }
                   );
                   //绠￠亾娣诲姞瑙ｆ瀽鍣?
                   port1.pipe(parser);
                 } catch (e) {
-                  logger.warn(e, "e");
+                  console.log(e, "e");
                 }
               }
 
@@ -1874,13 +1854,13 @@ module.exports = {
                       autoOpen: true,
                     },
                     function (err) {
-                      logger.warn(err, "err");
+                      console.log(err, "err");
                     }
                   );
                   //绠￠亾娣诲姞瑙ｆ瀽鍣?
                   port2.pipe(parser2);
                 } catch (e) {
-                  logger.warn(e, "e");
+                  console.log(e, "e");
                 }
               }
             }, 1000);
@@ -2015,7 +1995,7 @@ module.exports = {
               let startPressure = 0;
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  logger.error(err);
+                  console.error(err);
                 } else {
                   //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
                   for (var i = historyArr[0]; i < historyArr[1]; i++) {
@@ -2126,7 +2106,7 @@ module.exports = {
             } else if (file === 'smallBed' || file === 'smallBed1') {
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  logger.error(err);
+                  console.error(err);
                 } else {
                   //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
 
@@ -2224,7 +2204,7 @@ module.exports = {
             } else if (file === 'sitCol') {
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  logger.error(err);
+                  console.error(err);
                 } else {
                   //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
                   const label = getMessage.download.split('_')[1]
@@ -2287,7 +2267,7 @@ module.exports = {
             } else if (file === 'matCol') {
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  logger.error(err);
+                  console.error(err);
                 } else {
                   //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
                   const label = getMessage.download.split('_')[1]
@@ -2350,7 +2330,7 @@ module.exports = {
             } else if (file !== "car10") {
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  logger.error(err);
+                  console.error(err);
                 } else {
                   //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
 
@@ -2445,7 +2425,7 @@ module.exports = {
             if (isCar(file)) {
               db1.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  logger.error(err);
+                  console.error(err);
                 } else {
                   // console.log(rows)
                   //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
@@ -2546,7 +2526,7 @@ module.exports = {
               if (file == 'volvo') {
                 db2.all(selectQuery, params, (err, rows) => {
                   if (err) {
-                    logger.error(err);
+                    console.error(err);
                   } else {
                     // console.log(rows)
                     //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
@@ -2653,7 +2633,7 @@ module.exports = {
 
             db.run(createTableQuery, function (err) {
               if (err) {
-                logger.error(err);
+                console.error(err);
                 return;
               } else {
                 server.clients.forEach(function each(client) {
@@ -2670,7 +2650,7 @@ module.exports = {
             if (file === "car") {
               db1.run(createTableQuery, function (err) {
                 if (err) {
-                  logger.error(err);
+                  console.error(err);
                   return;
                 } else {
                   server.clients.forEach(function each(client) {
@@ -2761,21 +2741,21 @@ module.exports = {
 }
 
 SerialPort.list().then((ports) => {
-  logger.info(
+  console.info(
     "=========================================================================================\r\n"
   );
-  logger.info(
+  console.info(
     "hello ,there are serialport lists that we selected from your device\r\n"
   );
   // console.log(ports)
   serialport = getPort(ports)//ports; //.filter((a,index) => a.manufacturer === 'wch.cn');
   ports.forEach(function (port) {
-    logger.info("port:%s\r\n", port.path);
+    console.info("port:%s\r\n", port.path);
     // try {
     //   const port1 = new SerialPort(
     //     { path: "COM5", baudRate: baudRate, autoOpen: true },
     //     function (err) {
-    //       logger.warn(err, "err");
+    //       console.log(err, "err");
     //     }
     //   );
     //   //绠￠亾娣诲姞瑙ｆ瀽鍣?
@@ -2784,13 +2764,34 @@ SerialPort.list().then((ports) => {
 
     // }
   });
-  logger.info(
+  console.info(
     "=========================================================================================\r\n"
   );
 });
 
+function gaussBlur_return(scl, w, h, r) {
+  const res = new Array(scl.length).fill(1)
+  var rs = Math.ceil(r * 2.57); // significant radius
+  for (var i = 0; i < h; i++) {
+    for (var j = 0; j < w; j++) {
+      var val = 0,
+        wsum = 0;
+      for (var iy = i - rs; iy < i + rs + 1; iy++)
+        for (var ix = j - rs; ix < j + rs + 1; ix++) {
+          var x = Math.min(w - 1, Math.max(0, ix));
+          var y = Math.min(h - 1, Math.max(0, iy));
+          var dsq = (ix - j) * (ix - j) + (iy - i) * (iy - i);
+          var wght = Math.exp(-dsq / (2 * r * r)) / (Math.PI * 2 * r * r);
+          val += scl[y * w + x] * wght;
+          wsum += wght;
+        }
+      res[i * w + j] = Math.round(val / wsum);
+    }
+  }
+  return res
+}
 
-let pointArr, newData, firstBlueData = [], lastBlueData = [], firstBlueData1 = [], lastBlueData1 = [];
+var pointArr, newData, firstBlueData = [], lastBlueData = [], firstBlueData1 = [], lastBlueData1 = [];
 let index = 0
 parser.on("data", function (data) {
   pointArr = new Array();
@@ -2950,7 +2951,7 @@ parser.on("data", function (data) {
       //     [JSON.stringify(pointArr), timestamp, date],
       //     function (err) {
       //       if (err) {
-      //         logger.error(err);
+      //         console.error(err);
       //         return;
       //       }
       //       console.log(`Event inserted with ID ${this.lastID}`);
@@ -3186,7 +3187,7 @@ parser.on("data", function (data) {
         }
         pointArr = mappedArr
         newArr = [...mappedArr]
-      } else if (file == 'hand0507' || file == 'hand0205' || file == 'handGlove115200' || file == 'Num3D') {
+      } else if (file == 'hand0507' || file == 'hand0205' || file == 'Num3D') {
         // left
         // newArr = handVideoRealPoint_0506_3([...pointArr])
         newArr = handL([...pointArr])
@@ -3371,7 +3372,7 @@ parser.on("data", function (data) {
       //   // if (pointArr1zero.length) {
       //   //   pointArr = pointArr.map((a, index) => numLessZeroToZero(a - pointArr1zero[index]))
       //   // }
-      // } else if (file == 'hand0507' || file == 'hand0205' || file == 'handGlove115200' || file == 'Num3D') {
+      // } else if (file == 'hand0507' || file == 'hand0205' || file == 'Num3D') {
       //   // left
       //   // newArr = handVideoRealPoint_0506_3([...pointArr])
       //   newArr = handL([...pointArr])
@@ -3655,10 +3656,10 @@ function colOrSendData(jsonData) {
     // 1.0 鏈哄櫒浜轰箣鍓?
     // db.run(
     //   insertQuery,
-    //   [(file.includes('hand0205') || file == 'handGlove115200') ? JSON.stringify([...pointArr, ...rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify(pointArr), timestamp, date],
+    //   [file.includes('hand0205') ? JSON.stringify([...pointArr, ...rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify(pointArr), timestamp, date],
     //   function (err) {
     //     if (err) {
-    //       logger.error(err);
+    //       console.error(err);
     //       return;
     //     }
     //     console.log(`Event inserted with ID ${this.lastID}`);
@@ -3667,10 +3668,10 @@ function colOrSendData(jsonData) {
 
     db.run(
       insertQuery,
-      [(file.includes('hand0205') || file == 'handGlove115200') ? JSON.stringify([...JSON.parse(jsonData).newArr147, ...JSON.parse(jsonData).rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).sitData]), timestamp, date],
+      [file.includes('hand0205') ? JSON.stringify([...JSON.parse(jsonData).newArr147, ...JSON.parse(jsonData).rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).sitData]), timestamp, date],
       function (err) {
         if (err) {
-          logger.error(err);
+          console.error(err);
           return;
         }
         console.log(`Event inserted with ID ${this.lastID}`);
@@ -3739,7 +3740,7 @@ parser2.on("data", function (data) {
           [JSON.stringify(pointArr2), timestamp, date],
           function (err) {
             if (err) {
-              logger.error(err);
+              console.error(err);
               return;
             }
             console.log(`Event inserted with ID ${this.lastID}`);
@@ -3835,7 +3836,7 @@ parser2.on("data", function (data) {
         newArr = footR(pointArr2)
         pointArr2 = footVideo1(pointArr2)
 
-      } else if (file == 'hand0507' || file == 'hand0205' || file == 'handGlove115200') {
+      } else if (file == 'hand0507' || file == 'hand0205') {
         newArr = handR(pointArr2)
 
         pointArr2 = handRVideo1470506(pointArr2)
@@ -3960,10 +3961,10 @@ function colOrSendData1(jsonData) {
 
     db1.run(
       insertQuery,
-      [(file.includes('hand0205') || file == 'handGlove115200') ? JSON.stringify([...JSON.parse(jsonData).newArr147, ...JSON.parse(jsonData).rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
+      [file.includes('hand0205') ? JSON.stringify([...JSON.parse(jsonData).newArr147, ...JSON.parse(jsonData).rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
       function (err) {
         if (err) {
-          logger.error(err);
+          console.error(err);
           return;
         }
         console.log(`Event inserted with ID ${this.lastID}`);
@@ -4043,7 +4044,7 @@ parser3.on("data", function (data) {
                 [JSON.stringify(res), timestamp, date],
                 function (err) {
                   if (err) {
-                    logger.error(err);
+                    console.error(err);
                     return;
                   }
                   console.log(`Event inserted with ID ${this.lastID}`);
@@ -4103,7 +4104,7 @@ parser4.on("data", function (data) {
           [JSON.stringify(pointArr4), timestamp, date],
           function (err) {
             if (err) {
-              logger.error(err);
+              console.error(err);
               return;
             }
             console.log(`Event inserted with ID ${this.lastID}`);
@@ -4199,7 +4200,7 @@ parser4.on("data", function (data) {
         newArr = footR(pointArr4)
         pointArr4 = footVideo1(pointArr4)
 
-      } else if (file == 'hand0507' || file == 'hand0205' || file == 'handGlove115200') {
+      } else if (file == 'hand0507' || file == 'hand0205') {
         newArr = handR(pointArr4)
 
         pointArr4 = handRVideo1470506(pointArr4)
@@ -4270,10 +4271,10 @@ function colOrSendData2(jsonData) {
 
     db2.run(
       insertQuery,
-      [(file.includes('hand0205') || file == 'handGlove115200') ? JSON.stringify([...JSON.parse(jsonData).newArr147, ...JSON.parse(jsonData).rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
+      [file.includes('hand0205') ? JSON.stringify([...JSON.parse(jsonData).newArr147, ...JSON.parse(jsonData).rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
       function (err) {
         if (err) {
-          logger.error(err);
+          console.error(err);
           return;
         }
         console.log(`Event inserted with ID ${this.lastID}`);
@@ -4305,13 +4306,13 @@ setInterval(() => {
             autoOpen: true,
           },
           function (err) {
-            logger.warn(err, "err");
+            console.log(err, "err");
           }
         );
         //绠￠亾娣诲姞瑙ｆ瀽鍣?
         port1.pipe(parser);
       } catch (e) {
-        logger.warn(e, "e");
+        console.log(e, "e");
       }
     } else {
       try {
@@ -4323,13 +4324,13 @@ setInterval(() => {
             autoOpen: true,
           },
           function (err) {
-            logger.warn(err, "err");
+            console.log(err, "err");
           }
         );
         //绠￠亾娣诲姞瑙ｆ瀽鍣?
         port1.pipe(parser3);
       } catch (e) {
-        logger.warn(e, "e");
+        console.log(e, "e");
       }
     }
 
@@ -4345,14 +4346,366 @@ setInterval(() => {
           autoOpen: true,
         },
         function (err) {
-          logger.warn(err, "err");
+          console.log(err, "err");
         }
       );
       //绠￠亾娣诲姞瑙ｆ瀽鍣?
       port2.pipe(parser2);
     } catch (e) {
-      logger.warn(e, "e");
+      console.log(e, "e");
     }
   }
 }, 3000);
+
+function gaussBlur_2(scl, w, h, r) {
+  const tcl = new Array(scl.length).fill(1)
+  var rs = Math.ceil(r * 2.57); // significant radius
+  for (var i = 0; i < h; i++)
+    for (var j = 0; j < w; j++) {
+      var val = 0,
+        wsum = 0;
+      for (var iy = i - rs; iy < i + rs + 1; iy++)
+        for (var ix = j - rs; ix < j + rs + 1; ix++) {
+          var x = Math.min(w - 1, Math.max(0, ix));
+          var y = Math.min(h - 1, Math.max(0, iy));
+          var dsq = (ix - j) * (ix - j) + (iy - i) * (iy - i);
+          var wght = Math.exp(-dsq / (2 * r * r)) / (Math.PI * 2 * r * r);
+          val += scl[y * w + x] * wght;
+          wsum += wght;
+        }
+      tcl[i * w + j] = Math.round(val / wsum);
+    }
+  return tcl
+}
+
+
+function interpSmall(smallMat, width, height, interp1, interp2) {
+  // for (let x = 1; x <= Length; x++) {
+  //   for (let y = 1; y <= Length; y++) {
+  //     bigMat[
+  //       Length * num * (num * (y - 1)) +
+  //       (Length * num * num) / 2 +
+  //       num * (x - 1) +
+  //       num / 2
+  //     ] = smallMat[Length * (y - 1) + x - 1] * 10;
+  //   }
+  // }
+  // 32, 10, 4, 5
+  const bigMat = new Array((width * interp1) * (height * interp2)).fill(0)
+  for (let i = 0; i < height; i++) {
+    for (let j = 0; j < width; j++) {
+      bigMat[(width * interp1) * i * interp2 + (j * interp1)
+
+        // + (width * interp1) * Math.floor(interp2/2)
+
+        // + Math.floor(interp1/2)
+      ] = smallMat[i * width + j] * 10
+    }
+  }
+  // console.log(bigMat.length)
+  return bigMat
+}
+
+
+function findMax(arr) {
+  let max = 0;
+  arr.forEach((item) => {
+    max = max > item ? max : item;
+  });
+  return max;
+}
+
+function numLessZeroToZero(num) {
+  return num < 0 ? 0 : num
+}
+
+// 鍒濆鍖杁b
+/**
+ * 
+ * @param {string} fileStr 浼犳劅鍣ㄧ被鍨?
+ * @returns db鏁版嵁搴?
+ */
+function initDb(fileStr) {
+  file = fileStr;
+  let db, db1, db2
+  console.log(isCar(file))
+  if (isCar(file)) {
+    db = genDb(`${filePath}/${file}sit.db`)
+    db1 = genDb(`${filePath}/${file}back.db`)
+  } else if (file == 'volvo') {
+    db = genDb(`${filePath}/${file}sit.db`)
+    db1 = genDb(`${filePath}/${file}back.db`)
+    db2 = genDb(`${filePath}/${file}head.db`)
+  }
+  else {
+    db = genDb(`${filePath}/${file}.db`)
+  }
+  return { db, db1, db2 }
+}
+
+// 褰撴病鏈塪b鏂囦欢鐨勬椂鍊欐嫹璐濅竴涓互init.db涓哄師鍨嬬殑db鏂囦欢
+
+/**
+ * 
+ * @param {string} file 鏂囦欢鍚?
+ * @returns 杩斿洖db鏂囦欢
+ */
+function genDb(file) {
+  try {
+    const fileExist = fs.accessSync(file)
+    return db = new sqlite3.Database(file);
+  } catch (err) {
+    console.log(err)
+    const initCandidates = [
+      path.join(filePath, "init.db"),
+      path.join(runtimeResourceRoot, "init.db"),
+      path.join(__dirname, "db", "init.db"),
+      path.join(app.getAppPath(), "db", "init.db"),
+    ];
+    const initDbPath = initCandidates.find((candidate) => fs.existsSync(candidate));
+    if (!initDbPath) {
+      throw new Error(`init.db not found. checked: ${initCandidates.join(", ")}`);
+    }
+    let data = fs.readFileSync(initDbPath);
+    fs.writeFileSync(file, data);
+    return db = new sqlite3.Database(file);
+  }
+}
+
+function press6(arr, width, height, type = "row", value = (1245),) {
+  let wsPointData = [...arr];
+
+  if (type == "row") {
+    let colArr = [];
+    for (let i = 0; i < height; i++) {
+      let total = 0;
+      for (let j = 0; j < width; j++) {
+        total += wsPointData[i * width + j];
+      }
+      colArr.push(total);
+    }
+
+    // //////okok
+    for (let i = 0; i < height; i++) {
+      for (let j = 0; j < width; j++) {
+        wsPointData[i * width + j] = parseInt(
+          (wsPointData[i * width + j] * 3 / 4 /
+            (value - colArr[i] * 3 / 4 <= 0 ? 1 : value - colArr[i] * 3 / 4)) *
+          1
+        );
+      }
+    }
+  } else {
+    let colArr = [];
+    for (let i = 0; i < height; i++) {
+      let total = 0;
+      for (let j = 0; j < width; j++) {
+        total += wsPointData[j * height + i];
+      }
+      colArr.push(total);
+    }
+
+    // //////okok
+    for (let i = 0; i < height; i++) {
+      for (let j = 0; j < width; j++) {
+        wsPointData[j * height + i] = parseInt(
+          (wsPointData[j * height + i] * 3 / 4 /
+            (value - colArr[i] * 3 / 4 <= 0 ? 1 : value - colArr[i] * 3 / 4)) *
+          1
+        );
+      }
+    }
+  }
+
+  //////
+
+  // wsPointData = wsPointData.map((a,index) => {return calculateY(a)})
+  return wsPointData;
+}
+
+// 鍒嗗帇鍏紡
+function pressNew1220({ arr, width, height, type = "row", value }) {
+  let wsPointData = [...arr];
+
+  if (type == "row") {
+    let colArr = [];
+    for (let i = 0; i < height; i++) {
+      let total = 0;
+      for (let j = 0; j < width; j++) {
+        total += wsPointData[i * width + j];
+      }
+      colArr.push(total);
+    }
+    // //////okok
+    for (let i = 0; i < height; i++) {
+      for (let j = 0; j < width; j++) {
+
+        let den = wsPointData[i * width + j] + value - colArr[i]
+        if (den <= 0) {
+          den = 1
+        }
+
+        wsPointData[i * width + j] = parseInt(
+          wsPointData[i * width + j] * value / den
+        );
+      }
+    }
+  } else {
+    let colArr = [];
+    for (let i = 0; i < height; i++) {
+      let total = 0;
+      for (let j = 0; j < width; j++) {
+        total += wsPointData[j * height + i];
+      }
+      colArr.push(total);
+    }
+    // //////okok
+    for (let i = 0; i < height; i++) {
+      for (let j = 0; j < width; j++) {
+        let den = wsPointData[j * height + i] + value - colArr[i]
+        if (den <= 0) {
+          den = 1
+        }
+
+        wsPointData[j * height + i] = parseInt(
+          (wsPointData[j * height + i] * value / den) / 2
+        );
+      }
+    }
+  }
+
+  //////
+
+  // wsPointData = wsPointData.map((a,index) => {return calculateY(a)})
+  return wsPointData;
+}
+
+function press6sit(arr, width, height, type = "row", value = (480),) {
+  let wsPointData = [...arr];
+
+  const props = 4
+
+  // console.log(up, down)
+
+  if (type == "row") {
+    let colArr = [];
+    for (let i = 0; i < height; i++) {
+      let total = 0;
+      for (let j = 0; j < width; j++) {
+        total += wsPointData[i * width + j];
+      }
+      colArr.push(total);
+    }
+
+    // //////okok
+    for (let i = 0; i < height; i++) {
+      for (let j = 0; j < width; j++) {
+        wsPointData[i * width + j] = parseInt(
+          (wsPointData[i * width + j] * props / 4 /
+            (value - colArr[i] * props / 4 <= 0 ? 1 : value - colArr[i] * props / 4)) *
+          1000
+        );
+      }
+    }
+  } else {
+    let colArr = [];
+    for (let i = 0; i < height; i++) {
+      let total = 0;
+      for (let j = 0; j < width; j++) {
+        total += wsPointData[j * height + i];
+      }
+      colArr.push(total);
+    }
+    // console.log(colArr)
+    // //////okok
+    for (let i = 0; i < height; i++) {
+      for (let j = 0; j < width; j++) {
+        wsPointData[j * height + i] = parseInt(
+          (wsPointData[j * height + i] * props / 4 /
+            (value - colArr[i] * props / 4 <= 0 ? 1 : value - colArr[i] * props / 4)) *
+          600
+        );
+      }
+    }
+  }
+
+  //////
+
+  // wsPointData = wsPointData.map((a,index) => {return calculateY(a)})
+  return wsPointData;
+}
+
+
+function bytes4ToInt10(buffers) {
+  // 绀轰緥锛氬洓涓瓧鑺傜殑鏁扮粍 
+  // const fourBytes = [0x40, 0x48, 0xF5, 0xC3];
+  const res = []
+  for (let i = 0; i < buffers.length / 4; i++) {
+    const buffer = new ArrayBuffer(4);
+    const view = new DataView(buffer);
+    for (let j = 0; j < 4; j++) {
+      // 鍒涘缓涓€涓?ArrayBuffer 骞跺皢鍥涗釜瀛楄妭鍐欏叆鍏朵腑 
+
+      // 灏嗗洓涓瓧鑺傚啓鍏?DataView 
+      // for (let k = 0; k < 4; k++) {
+      view.setUint8(j, buffers[i * 4 + j]);
+      // }
+      // 浠?DataView 涓鍙栨诞鐐规暟 
+
+    }
+    const floatValue = view.getFloat32(0, true);
+    // console.log(floatValue);
+    res.push(floatValue)
+  }
+  return res
+}
+
+function arrToRealLine(arr, arrX, arrY, matrixLength) {
+  const realX = [], realY = []
+  arrX.forEach((a) => {
+    if (Array.isArray(a)) {
+      // for(let i = )
+      if (a[0] > a[1]) {
+        for (let i = a[0]; i >= a[1]; i--) {
+          realX.push(i)
+        }
+      } else {
+        for (let i = a[0]; i <= a[1]; i++) {
+          realX.push(i)
+        }
+      }
+    } else {
+      realX.push(a)
+    }
+  })
+
+  arrY.forEach((a) => {
+    if (Array.isArray(a)) {
+      // for(let i = )
+      if (a[0] > a[1]) {
+        for (let i = a[0]; i >= a[1]; i--) {
+          realY.push(i)
+        }
+      } else {
+        for (let i = a[0]; i <= a[1]; i++) {
+          realY.push(i)
+        }
+      }
+    } else {
+      realY.push(a)
+    }
+  })
+
+  let newArr = []
+  for (let i = 0; i < realY.length; i++) {
+    for (let j = 0; j < realX.length; j++) {
+      const realXCoo = realY[i]
+      const realYCoo = realX[j]
+      newArr.push(arr[realXCoo * matrixLength + realYCoo])
+    }
+  }
+
+  return newArr
+}
+
 

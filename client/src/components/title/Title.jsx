@@ -338,6 +338,7 @@ class Title extends React.Component {
     // 全量传感器类型列表
     const allSensorArr = [
       { label: '触觉手套', value: 'hand0205' },
+      { label: '触觉手套(115200)', value: 'handGlove115200' },
       { label: '小型样品', value: 'smallSample' },
       { label: '宇树G1触觉上衣', value: 'robot1' },
       { label: '松延N2触觉上衣', value: 'robotSY' },
@@ -464,7 +465,7 @@ class Title extends React.Component {
 
         {console.log(this.props.matrixName, 'this.props.matrixName')}
         <Menu className='menu' onClick={this.onClick} selectedKeys={[this.state.current]} mode="horizontal" items={navItems} />
-        {this.props.matrixName != 'localCar' ? this.props.history === 'now' ? this.props.matrixName != 'car' && this.props.matrixName != 'car10' && this.props.matrixName != 'sofa' && this.props.matrixName != 'yanfeng10' && this.props.matrixName != 'volvo' && this.props.matrixName != 'carQX' && this.props.matrixName != 'hand0507' && this.props.matrixName != 'hand0205' && this.props.matrixName != 'footVideo' && this.props.matrixName != 'eye' ? <><Select
+        {this.props.matrixName != 'localCar' ? this.props.history === 'now' ? this.props.matrixName != 'car' && this.props.matrixName != 'car10' && this.props.matrixName != 'sofa' && this.props.matrixName != 'yanfeng10' && this.props.matrixName != 'volvo' && this.props.matrixName != 'carQX' && this.props.matrixName != 'hand0507' && this.props.matrixName != 'hand0205' && this.props.matrixName != 'handGlove115200' && this.props.matrixName != 'footVideo' && this.props.matrixName != 'eye' ? <><Select
 
           style={{ marginRight: 20, width: 160 }}
           placeholder={t('chooseSensor')}
@@ -483,8 +484,8 @@ class Title extends React.Component {
         </Select> <div></div></> : <><Select
 
           style={{ marginRight: 20, width: 160 }}
-          placeholder={['hand0205'].includes(this.props.matrixName) ? t('chooseLeftSensor') : this.props.matrixName == 'footVideo' ? t('chooseLeftFootSensor') : t('chooseSitSensor')}
-          value={this.props.portname ? `${this.props.portname}${['hand0205', 'footVideo', 'eye'].includes(this.props.matrixName) ? t('left') : (t('sit'))}` : null}
+          placeholder={['hand0205', 'handGlove115200'].includes(this.props.matrixName) ? t('chooseLeftSensor') : this.props.matrixName == 'footVideo' ? t('chooseLeftFootSensor') : t('chooseSitSensor')}
+          value={this.props.portname ? `${this.props.portname}${['hand0205', 'handGlove115200', 'footVideo', 'eye'].includes(this.props.matrixName) ? t('left') : (t('sit'))}` : null}
           onDropdownVisibleChange={() => {
             this.props.wsSendObj({ serialReset: true })
           }}
@@ -506,9 +507,9 @@ class Title extends React.Component {
 
           <Select
             // value={this.props.portnameBack}
-            placeholder={['hand0205'].includes(this.props.matrixName) ? t('chooseRightSensor') : this.props.matrixName == 'footVideo' ? t('chooseRightFootSensor') : t('chooseBackSensor')}
+            placeholder={['hand0205', 'handGlove115200'].includes(this.props.matrixName) ? t('chooseRightSensor') : this.props.matrixName == 'footVideo' ? t('chooseRightFootSensor') : t('chooseBackSensor')}
             style={{ marginRight: 20, width: 160 }}
-            value={this.props.portnameBack ? `${this.props.portnameBack}${['hand0205', 'footVideo'].includes(this.props.matrixName) ? t('right') : (t('back'))}` : null}
+            value={this.props.portnameBack ? `${this.props.portnameBack}${['hand0205', 'handGlove115200', 'footVideo'].includes(this.props.matrixName) ? t('right') : (t('back'))}` : null}
             onDropdownVisibleChange={(e) => {
               console.log(e)
               this.props.wsSendObj({ serialReset: true })
@@ -593,7 +594,7 @@ class Title extends React.Component {
 
 
 
-        {this.props.matrixName != 'car10' && ['hand0205', 'footVideo', 'robot1', 'robotSY', 'robotLCF'].includes(this.props.matrixName) ?
+        {this.props.matrixName != 'car10' && ['hand0205', 'handGlove115200', 'footVideo', 'robot1', 'robotSY', 'robotLCF'].includes(this.props.matrixName) ?
           <Select
             defaultValue={this.props.numMatrixFlag}
             style={{ width: 90 }}
@@ -603,7 +604,7 @@ class Title extends React.Component {
               this.props.changeStateData({ numMatrixFlag: value })
               //  this.props.i18n.changeLanguage(value)
 
-              if (this.props.matrixName == 'hand0205') {
+              if (this.props.matrixName == 'hand0205' || this.props.matrixName == 'handGlove115200') {
                 if (['normal', 'skin'].includes(this.props.numMatrixFlag)) {
                   this.props.com.current?.changeModal(this.props.hand)
                 }
@@ -620,7 +621,7 @@ class Title extends React.Component {
 
 
             }}
-            options={this.props.matrixName == 'hand0205' ? [
+            options={(this.props.matrixName == 'hand0205' || this.props.matrixName == 'handGlove115200') ? [
               { value: 'num', label: t('data2D') },
               { value: 'normal', label: t('tel3D') },
               { value: 'num3D', label: t('data3D') },
@@ -638,7 +639,7 @@ class Title extends React.Component {
         }
 
         {
-          this.props.matrixName == 'hand0205' ?
+          (this.props.matrixName == 'hand0205' || this.props.matrixName == 'handGlove115200') ?
             <Modal
               mask={false}
               width={450}
@@ -763,7 +764,7 @@ class Title extends React.Component {
           : ''} */}
 
 
-        {this.props.matrixName == 'hand0205' && this.props.numMatrixFlag == 'normal' ? <Button className='titleButton'
+        {(this.props.matrixName == 'hand0205' || this.props.matrixName == 'handGlove115200') && this.props.numMatrixFlag == 'normal' ? <Button className='titleButton'
           onClick={() => {
             // this.props.com.current?.calibration()
             // this.setState({
@@ -778,7 +779,7 @@ class Title extends React.Component {
             // 手固定
             this.props.com.current?.handZero()
           }}
-        >{t('calib')}</Button> : this.props.matrixName == 'hand0205' && this.props.numMatrixFlag == 'skin' ? <Button className='titleButton'
+        >{t('calib')}</Button> : (this.props.matrixName == 'hand0205' || this.props.matrixName == 'handGlove115200') && this.props.numMatrixFlag == 'skin' ? <Button className='titleButton'
           onClick={() => {
             // this.props.com.current?.calibration()
             // this.setState({

@@ -34,6 +34,7 @@ export const SENSOR_TYPES = {
   HAND_L:      'handL',
   HAND_R:      'handR',
   HAND_0205:   'hand0205',
+  HAND_GLOVE_115200: 'handGlove115200',
   HAND_0507:   'hand0507',
   GLOVES:      'gloves',
   GLOVES1:     'gloves1',
@@ -63,7 +64,7 @@ export const SENSOR_TYPES = {
  */
 export const CAR_TYPES = [
   'yanfeng10', 'car', 'car10', 'volvo', 'footVideo',
-  'hand0507', 'hand0205', 'carQX', 'eye', 'sofa',
+  'hand0507', 'hand0205', 'handGlove115200', 'carQX', 'eye', 'sofa',
 ];
 
 /**

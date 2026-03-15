@@ -288,7 +288,7 @@ class Aside extends React.Component {
                 {this.props.matrixName != 'bed40' ?<div className="asideContent firstAside">
                     <h2 className="asideTitle">Pressure Data</h2>
                     {/* <div style={{}}> */}
-                    <span className='pressData'>{this.props.matrixName != 'hand0205' ? (Number(this.state.totalPres).toFixed(0)) : this.state.totalPres}</span> <span style={{ color: '#999' }}></span>
+                    <span className='pressData'>{(this.props.matrixName != 'hand0205' && this.props.matrixName != 'handGlove115200') ? (Number(this.state.totalPres).toFixed(0)) : this.state.totalPres}</span> <span style={{ color: '#999' }}></span>
                     {/* </div> */}
 
                     {this.props.matrixName != 'foot' ? <>
@@ -304,7 +304,7 @@ class Aside extends React.Component {
                                         </div>
                                         <div className='dataIteminfo'>
                                             <div className='standardColor'>{a.eng}</div>
-                                            <div>{this.props.matrixName != 'hand0205' ? (index == 0 ? Number(this.state[arr[index]]).toFixed(2) : Number(this.state[arr[index]]).toFixed(0)) : this.state[arr[index]]} <span style={{ color: '#999' }}></span></div>
+                                            <div>{(this.props.matrixName != 'hand0205' && this.props.matrixName != 'handGlove115200') ? (index == 0 ? Number(this.state[arr[index]]).toFixed(2) : Number(this.state[arr[index]]).toFixed(0)) : this.state[arr[index]]} <span style={{ color: '#999' }}></span></div>
                                         </div>
                                     </div>
                                 )

@@ -35,6 +35,7 @@ const SENSOR_GROUPS = [
     icon: '🧤',
     items: [
       { label: '触觉手套', value: 'hand0205' },
+      { label: '触觉手套(115200)', value: 'handGlove115200' },
       { label: '手套模型', value: 'hand0507' },
       { label: '手套96', value: 'gloves' },
       { label: '左手手套', value: 'gloves1' },
@@ -297,7 +298,7 @@ const License = () => {
 
   // 快捷预设
   const presets = [
-    { label: '触觉全套', types: ['hand0205', 'robot1', 'robotSY', 'robotLCF', 'footVideo'] },
+    { label: '触觉全套', types: ['hand0205', 'handGlove115200', 'robot1', 'robotSY', 'robotLCF', 'footVideo'] },
     { label: '汽车全套', types: ['car', 'car10', 'volvo', 'carQX', 'yanfeng10', 'sofa'] },
     { label: '高速矩阵', types: ['fast256', 'fast1024', 'fast1024sit', 'daliegu'] },
     { label: '床垫全套', types: ['bigBed', 'jqbed', 'smallBed', 'xiyueReal1'] },

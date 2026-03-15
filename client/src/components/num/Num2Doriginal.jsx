@@ -209,7 +209,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                 ww - 300, wh - 120
             );
         }
-        if (props.matrixName === 'hand0205') {
+        if (props.matrixName === 'hand0205' || props.matrixName === 'handGlove115200') {
             return calcCellSize(15, 10, ww - 300, wh - 120, 40);
         }
         if (isFoot) {
@@ -411,7 +411,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     const changeWsData147 = (wsPointData) => {
         layoutData([...wsPointData])
 
-        if (props.matrixName == 'hand0205') {
+        if (props.matrixName == 'hand0205' || props.matrixName == 'handGlove115200') {
             let newArr1 = [...wsPointData]
             newArr1.splice(5 * 15, 0, 0);
             newArr1.splice(5 * 15, 0, 0);
@@ -475,7 +475,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     }
 
     const changeWsData147R = (wsPointData) => {
-        if (props.matrixName == 'hand0205') {
+        if (props.matrixName == 'hand0205' || props.matrixName == 'handGlove115200') {
             // hand0205 暂不处理
         } else if (props.matrixName == 'footVideo') {
             const { left, right } = wsPointData
