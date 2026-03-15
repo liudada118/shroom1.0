@@ -176,11 +176,32 @@ function startViteAndLoad(win) {
   const viteUrl = `http://localhost:${VITE_DEV_PORT}`;
   const clientDir = path.join(__dirname, "client");
 
+  // 检查 client/node_modules 是否存在
+  const nodeModulesPath = path.join(clientDir, "node_modules");
+  if (!fs.existsSync(nodeModulesPath)) {
+    logger.error("[Main] client/node_modules not found! Please run 'cd client && npm install' first.");
+    logger.info("[Main] Falling back to static server...");
+    startStaticServer({ hostname: HOSTNAME, port: PORT, win });
+    return;
+  }
+
   logger.info(`[Main] Dev mode: starting Vite dev server in ${clientDir}`);
 
   // 根据平台选择正确的 npx 命令
   const isWin = process.platform === "win32";
   const npxCmd = isWin ? "npx.cmd" : "npx";
+
+  // 标记 Vite 是否已失败，避免重复回退
+  let viteFailed = false;
+  let viteLoaded = false;
+
+  function fallbackToStatic() {
+    if (viteFailed) return;  // 防止重复触发
+    viteFailed = true;
+    logger.info("[Main] Falling back to static server...");
+    killVite();
+    startStaticServer({ hostname: HOSTNAME, port: PORT, win });
+  }
 
   // 在 client 目录下启动 Vite 开发服务器
   viteProcess = spawn(npxCmd, ["vite", "--host", "--port", String(VITE_DEV_PORT)], {
@@ -202,13 +223,17 @@ function startViteAndLoad(win) {
 
   viteProcess.on("error", (err) => {
     logger.error(`[Main] Failed to start Vite: ${err.message}`);
-    logger.info("[Main] Falling back to static server...");
-    startStaticServer({ hostname: HOSTNAME, port: PORT, win });
+    fallbackToStatic();
   });
 
+  // Vite 进程异常退出时立即回退，不再傻等
   viteProcess.on("exit", (code) => {
     logger.info(`[Vite] Process exited with code ${code}`);
     viteProcess = null;
+    if (!viteLoaded && code !== 0) {
+      logger.error(`[Main] Vite exited unexpectedly (code ${code}). Check if 'cd client && npm install' has been run.`);
+      fallbackToStatic();
+    }
   });
 
   // 等待 Vite 开发服务器就绪后加载
@@ -216,8 +241,11 @@ function startViteAndLoad(win) {
   let retries = 0;
 
   function tryLoad() {
+    if (viteFailed) return;  // Vite 已失败，停止轮询
+
     http.get(viteUrl, (res) => {
       if (res.statusCode === 200) {
+        viteLoaded = true;
         logger.info(`[Main] Vite dev server is ready, loading ${viteUrl}`);
         win.loadURL(viteUrl);
       } else {
@@ -230,6 +258,7 @@ function startViteAndLoad(win) {
   }
 
   function retry() {
+    if (viteFailed) return;  // Vite 已失败，停止轮询
     retries++;
     if (retries < maxRetries) {
       if (retries % 5 === 0) {
@@ -237,9 +266,8 @@ function startViteAndLoad(win) {
       }
       setTimeout(tryLoad, 1000);
     } else {
-      logger.error(`[Main] Vite dev server not available after ${maxRetries}s, falling back to static server`);
-      killVite();
-      startStaticServer({ hostname: HOSTNAME, port: PORT, win });
+      logger.error(`[Main] Vite dev server not available after ${maxRetries}s`);
+      fallbackToStatic();
     }
   }
 
