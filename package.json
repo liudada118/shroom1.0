@@ -16,6 +16,7 @@
     "make-start": "electron-forge start --platform darwin",
     "build": "npm run prepare-pack-resources && electron-builder -w",
     "build-mac": "npm run prepare-pack-resources && electron-builder -m",
+    "build-mac-share": "node scripts/build-mac-share.js",
     "build-all": "npm run prepare-pack-resources && electron-builder -mwl"
   },
   "config": {
