@@ -126,7 +126,8 @@ const sitnum2 = 64;
 const backnum1 = 64;
 const backnum2 = 64;
 let smoothValue = 0;
-let lastPyCallTime = 0; // jqbed Python 算法调用节流时间戳
+let onbedArr = []; // jqbed 在床状态数组
+let onBedTime = 0; // jqbed 在床/离床计时（秒）
 let lastData = new Array(1024).fill(0),
   firstData = new Array(1024).fill(0);
 const backTotal = backnum1 * backnum2;
@@ -2872,27 +2873,6 @@ parser.on("data", function (data) {
         pointArr = xiyueReal1(pointArr)
       } else if (file === 'jqbed') {
         pointArr = jqbed(pointArr)
-        // 调用 Python 健康监测算法（125ms 节流）
-        const nowPyTime = Date.now();
-        if (nowPyTime - lastPyCallTime >= 125) {
-          lastPyCallTime = nowPyTime;
-          try {
-            callPy('getData', { data: [...pointArr] }).then((pyResult) => {
-              if (pyResult) {
-                const rateData = JSON.stringify({ rate: pyResult });
-                server.clients.forEach(function each(client) {
-                  if (client.readyState === WebSocket.OPEN) {
-                    client.send(rateData);
-                  }
-                });
-              }
-            }).catch((err) => {
-              console.error('[jqbed] callPy error:', err.message);
-            });
-          } catch (e) {
-            console.error('[jqbed] callPy exception:', e.message);
-          }
-        }
       } else if (file === 'carCol') {
         pointArr = carCol(pointArr)
       } else if (file === 'newHand') {
@@ -4376,3 +4356,59 @@ setInterval(() => {
     }
   }
 }, 3000);
+
+// jqbed 数据翻转变换（供 callPy 使用）
+function jqbedOppo(arr) {
+  let wsPointData = [...arr];
+  let b = wsPointData.splice(0, 17 * 32);
+  wsPointData = wsPointData.concat(b);
+  for (let i = 0; i < 8; i++) {
+    for (let j = 0; j < 32; j++) {
+      [wsPointData[i * 32 + j], wsPointData[(14 - i) * 32 + j]] = [
+        wsPointData[(14 - i) * 32 + j],
+        wsPointData[i * 32 + j],
+      ];
+    }
+  }
+  return wsPointData;
+}
+
+// jqbed 健康监测算法定时调用（125ms）
+setInterval(async () => {
+  if (pointArr && file == 'jqbed' && port1 && port1.isOpen) {
+    const newArr = jqbedOppo(pointArr);
+    try {
+      const data = await callPy('getData', { data: newArr });
+      if (data && data.rate != -1) {
+        console.log('[jqbed] pyResult:', data);
+
+        if (onbedArr.length < 2) {
+          onbedArr.push(data.stateInBbed);
+        } else {
+          onbedArr.shift();
+          onbedArr.push(data.stateInBbed);
+        }
+
+        if (onbedArr.every((a) => a == 1)) {
+          onBedTime += 2;
+          data.onBedTime = onBedTime;
+        } else if (onbedArr.every((a) => a == 0)) {
+          onBedTime += 2;
+          data.onBedTime = onBedTime;
+        } else {
+          onBedTime = 0;
+          data.onBedTime = 0;
+        }
+
+        const jsonData = JSON.stringify({ rate: data });
+        server.clients.forEach(function each(client) {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(jsonData);
+          }
+        });
+      }
+    } catch (e) {
+      console.error('[jqbed] callPy error:', e.message);
+    }
+  }
+}, 125);
