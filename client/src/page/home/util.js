@@ -1678,10 +1678,6 @@ export const sitTypeEvent = {
       // that.com.current?.handZero()
       // that.com.current?.calibration([0,0,0])
     }
-  },}
-
-
-
   },
   handGlove115200: function(args) { return sitTypeEvent.hand0205(args); },
   hand0205Point: ({ that, wsPointData, local, rotate, fingerArr }) => {

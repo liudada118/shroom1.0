@@ -2790,11 +2790,6 @@ SerialPort.list().then((ports) => {
     "=========================================================================================\r\n"
   );
 });
-<<<<<<< Updated upstream
-
-=======
->>>>>>> Stashed changes
-
 let pointArr, newData, firstBlueData = [], lastBlueData = [], firstBlueData1 = [], lastBlueData1 = [];
 let index = 0
 parser.on("data", function (data) {
@@ -4381,7 +4376,3 @@ setInterval(() => {
     }
   }
 }, 3000);
-<<<<<<< Updated upstream
-
-=======
->>>>>>> Stashed changes

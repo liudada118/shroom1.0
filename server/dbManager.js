@@ -8,7 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
-const sqlite3 = require("sqlite3").verbose();
+const sqlite3 = require("../sqlite3-compat").verbose();
 const logger = require('../logger');
 const { isCar } = require('../util');
 
