@@ -421,9 +421,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
     renderer.outputEncoding = THREE.sRGBEncoding;
     // renderer.outputEncoding = THREE.sRGBEncoding;  
-    if (container.childNodes.length == 0) {
-      container.appendChild(renderer.domElement);
-    }
+    container.replaceChildren(renderer.domElement);
     renderer.gammaOutput = true;
     renderer.gammaFactor = 2.2;
 

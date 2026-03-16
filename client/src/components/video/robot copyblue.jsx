@@ -162,35 +162,6 @@ const Canvas = React.forwardRef((props, refs) => {
   const bodyCanvas = useRef()
   const handHeatmap1Ref = useRef()
   const handHeatmapRef = useRef()
-  const modelPath = "/model/jiqirenGggg.fbx"
-
-  function fitCameraToObject(object) {
-    if (!camera || !object) {
-      return;
-    }
-
-    const box = new THREE.Box3().setFromObject(object);
-    if (box.isEmpty()) {
-      return;
-    }
-
-    const size = box.getSize(new THREE.Vector3());
-    const center = box.getCenter(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z) || 1;
-    const fov = camera.fov * (Math.PI / 180);
-    const distance = (maxDim / (2 * Math.tan(fov / 2))) * 1.6;
-
-    camera.position.set(center.x, center.y + maxDim * 0.15, center.z + distance);
-    camera.near = Math.max(0.1, distance / 100);
-    camera.far = Math.max(1000, distance * 20);
-    camera.updateProjectionMatrix();
-    camera.lookAt(center);
-
-    if (controls) {
-      controls.target.copy(center);
-      controls.update();
-    }
-  }
 
   function init() {
     container = document.getElementById(`canvas${props.index}`);
@@ -292,13 +263,13 @@ const Canvas = React.forwardRef((props, refs) => {
 
 
 
-    loader.load(modelPath, function (fbx) {
+    loader.load("./model/jiqirenGggg.fbx", function (fbx) {
       // chair = gltf.scene;
 
       chair = fbx
       group.add(fbx);
       fbx.position.z = 40
-      fbx.rotation.x = 0
+      fbx.rotation.x = -Math.PI / 2
       // chair.rotation.z = 0//Math.PI
       // // chair.rotation.y = Math.PI
       fbx.scale.x = 0.003
@@ -310,13 +281,6 @@ const Canvas = React.forwardRef((props, refs) => {
 
       // // // // console.log(bodyCanvasRef.current.canvas)
       addCanvas(fbx, bodyCanvasRef.current.canvas)
-      fbx.traverse((child) => {
-        if (child.isMesh) {
-          child.frustumCulled = false;
-        }
-      });
-      fitCameraToObject(fbx)
-      renderer?.render(scene, camera);
 
       // const ctx = bodyCanvasRef.current.canvas.getContext('2d');
 
@@ -345,8 +309,6 @@ const Canvas = React.forwardRef((props, refs) => {
       //     addCanvas(child , bodyCanvasRef.current.canvas)
       //   }
       // });
-    }, undefined, function (error) {
-      console.error(`[robot1] Failed to load model: ${modelPath}`, error);
     });
 
     // const loader = new OBJLoader();
@@ -460,7 +422,6 @@ const Canvas = React.forwardRef((props, refs) => {
       MIDDLE: THREE.MOUSE.ZOOM,
       RIGHT: THREE.MOUSE.ROTATE,
     };
-    renderer.render(scene, camera);
     // initSet();
 
 
@@ -475,14 +436,21 @@ const Canvas = React.forwardRef((props, refs) => {
     const ctx = canvas.getContext('2d');
 
     // 示例：填充红色背景，可以替换成你需要的绘制内容
-    ctx.fillStyle = '#fff';
+    ctx.fillStyle = 'red';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // 3. 创建 CanvasTexture
     bodyCanvas.current = new THREE.CanvasTexture(canvas);
     bodyCanvas.current.needsUpdate = true;
     bodyCanvas.current.repeat.set(1, 1);
-    bodyCanvas.current.encoding = THREE.sRGBEncoding;
+    bodyCanvas.current.premultiplyAlpha = false;
+
+    // bodyCanvas.current.colorSpace = THREE.SRGBColorSpace;
+    // bodyCanvas.current.wrapS = THREE.ClampToEdgeWrapping;
+    // bodyCanvas.current.wrapT = THREE.ClampToEdgeWrapping;
+
+    bodyCanvas.current.wrapS = THREE.RepeatWrapping;
+    bodyCanvas.current.wrapT = THREE.RepeatWrapping;
     // 4. 遍历模型，给每个 Mesh 的材质添加 Canvas 纹理
     model.traverse((child) => {
       if (child.isMesh) {
@@ -499,27 +467,6 @@ const Canvas = React.forwardRef((props, refs) => {
       }
     });
 
-    model.traverse((child) => {
-      if (!child.isMesh) {
-        return;
-      }
-
-      const createMaterial = () => {
-        const material = new THREE.MeshBasicMaterial({
-          color: 0xffffff,
-          map: bodyCanvas.current,
-          side: THREE.DoubleSide,
-        });
-        material.skinning = !!child.isSkinnedMesh;
-        return material;
-      };
-
-      if (Array.isArray(child.material)) {
-        child.material = child.material.map(() => createMaterial());
-      } else {
-        child.material = createMaterial();
-      }
-    });
   }
 
   const width = 32, height = 32;
@@ -555,8 +502,6 @@ const Canvas = React.forwardRef((props, refs) => {
       // ctx.fillStyle = 'rgb(255, 0, 0)'; // 纯红色
       // // ctx2.clearRect(0, 0, canvas2.width, canvas2.height);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(handHeatmap1Ref.current.canvas, 0, 0, size, size, 0, 0, size, size);
 
       // ctx.fillRect(0, 0,bodyCanvasRef.current.canvas.width,bodyCanvasRef.current.canvas.height);
