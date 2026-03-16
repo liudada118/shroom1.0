@@ -160,35 +160,6 @@ const Canvas = React.forwardRef((props, refs) => {
   const bodyCanvas = useRef()
   const handHeatmap1Ref = useRef()
   const handHeatmapRef = useRef()
-  const modelPath = "/model/jiqirenGggg.fbx"
-
-  function fitCameraToObject(object) {
-    if (!camera || !object) {
-      return;
-    }
-
-    const box = new THREE.Box3().setFromObject(object);
-    if (box.isEmpty()) {
-      return;
-    }
-
-    const size = box.getSize(new THREE.Vector3());
-    const center = box.getCenter(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z) || 1;
-    const fov = camera.fov * (Math.PI / 180);
-    const distance = (maxDim / (2 * Math.tan(fov / 2))) * 1.6;
-
-    camera.position.set(center.x, center.y + maxDim * 0.15, center.z + distance);
-    camera.near = Math.max(0.1, distance / 100);
-    camera.far = Math.max(1000, distance * 20);
-    camera.updateProjectionMatrix();
-    camera.lookAt(center);
-
-    if (controls) {
-      controls.target.copy(center);
-      controls.update();
-    }
-  }
 
   function init() {
     container = document.getElementById(`canvas${props.index}`);
@@ -290,7 +261,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
 
 
-    loader.load(modelPath, function (fbx) {
+    loader.load("./model/jiqirenGggg.fbx", function (fbx) {
       // chair = gltf.scene;
 
       chair = fbx
@@ -308,7 +279,6 @@ const Canvas = React.forwardRef((props, refs) => {
 
       // // // // console.log(bodyCanvasRef.current.canvas)
       addCanvas(fbx, bodyCanvasRef.current.canvas)
-      fitCameraToObject(fbx)
 
       // const ctx = bodyCanvasRef.current.canvas.getContext('2d');
 
@@ -337,8 +307,6 @@ const Canvas = React.forwardRef((props, refs) => {
       //     addCanvas(child , bodyCanvasRef.current.canvas)
       //   }
       // });
-    }, undefined, function (error) {
-      console.error(`[robot0428] Failed to load model: ${modelPath}`, error);
     });
 
     // const loader = new OBJLoader();
@@ -439,7 +407,9 @@ const Canvas = React.forwardRef((props, refs) => {
 
     renderer.outputEncoding = THREE.sRGBEncoding;
     // renderer.outputEncoding = THREE.sRGBEncoding;  
-    container.replaceChildren(renderer.domElement);
+    if (container.childNodes.length == 0) {
+      container.appendChild(renderer.domElement);
+    }
 
     renderer.setClearColor(0xaaaaaa);
 
