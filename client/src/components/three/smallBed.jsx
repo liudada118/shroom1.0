@@ -81,7 +81,7 @@ let isShiftPressed = false;
     ).fill(0),
       bigArrg1New = new Array(
         (sitnum1 * sitInterp + 2 * sitOrder) *
-        (sitnum2 * sitInterp + 2 * sitOrder) * 2
+        (sitnum2 * sitInterp + 2 * sitOrder)
       ).fill(1),
       bigArrgnew = new Array(
         (sitnum1 * sitInterp + sitOrder * 2) *
@@ -89,7 +89,7 @@ let isShiftPressed = false;
       ).fill(0),
       smoothBig = new Array(
         (sitnum1 * sitInterp + sitOrder * 2) *
-        (sitnum2 * sitInterp + sitOrder * 2) * 2
+        (sitnum2 * sitInterp + sitOrder * 2)
       ).fill(0);
 
 
@@ -111,7 +111,7 @@ let isShiftPressed = false;
   const ALT_KEY = 18;
   const CTRL_KEY = 17;
   const CMD_KEY = 91;
-  const AMOUNTX = (sitnum1 * sitInterp + sitOrder * 2) * 2;
+  const AMOUNTX = (sitnum1 * sitInterp + sitOrder * 2);
   const AMOUNTY = (sitnum2 * sitInterp + sitOrder * 2);
 
   const SEPARATION = 100;
@@ -497,12 +497,12 @@ let isShiftPressed = false;
 
 
     const realArr = []
-    for (let i = 0; i < 64; i++) {
+    for (let i = 0; i < sitnum1; i++) {
       let num = 0
-      for (let j = 0; j < 32; j++) {
-        num += ndata1[j * 64 + i]
+      for (let j = 0; j < sitnum2; j++) {
+        num += ndata1[j * sitnum1 + i]
       }
-      smoothValue = smoothValue + (num / 32 - smoothValue) / 3
+      smoothValue = smoothValue + (num / sitnum2 - smoothValue) / 3
       realArr.push(smoothValue)
     }
 
@@ -534,12 +534,8 @@ let isShiftPressed = false;
 
     bodyArr = []
 
-    for (let i = 0; i < 72; i++) {
-      for (let j = 0; j < 72; j++) {
-        bigArrg1New[(i * 2) * 72 + j] = bigArrg[i * 72 + j]
-        bigArrg1New[(i * 2 + 1) * 72 + (j)] = bigArrg[i * 72 + j]
-        // bigArrg1New[(i * 2 + 1) * 72 + j] = bigArrg1[i * 72 + j]
-      }
+    for (let i = 0; i < bigArrg.length; i++) {
+      bigArrg1New[i] = bigArrg[i]
     }
 
     for (let ix = 0; ix < AMOUNTX; ix++) {
