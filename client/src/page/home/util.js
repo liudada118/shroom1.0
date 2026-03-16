@@ -1479,27 +1479,28 @@ export const sitTypeEvent = {
 
     if (!that.state.calibration) {
       //  z 
-      if (rotate) {
+      if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
         let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
         that.com.current?.changeHandAngle(arr)
       }
 
       if (fingerArr) {
-        if (!fingerArr[0]) {
+        if (!fingerArr[0] || !Array.isArray(fingerArr[0])) {
           fingerArr[0] = new Array(5).fill(0)
         }
-        if (!fingerArr[1]) {
+        if (!fingerArr[1] || !Array.isArray(fingerArr[1])) {
           fingerArr[1] = new Array(5).fill(255)
         }
         const baseArr = []
         for (let i = 0; i < 5; i++) {
-          baseArr.push(fingerArr[1][i] - fingerArr[0][i])
+          baseArr.push((fingerArr[1][i] || 0) - (fingerArr[0][i] || 0))
         }
 
 
         for (let i = 0; i < 5; i++) {
-
-          const numberValue = Math.round((wsPointData[i] - fingerArr[0][i]) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
+          const rawValue = wsPointData[i]
+          if (rawValue == null || isNaN(rawValue)) continue; // 跳过无效值，保持上一次的弯曲角度
+          const numberValue = Math.round((rawValue - (fingerArr[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
           const value = (numberValue) < 0 ? 0 : (numberValue) >= 1 ? 1 : (numberValue)
 
           newArr[i] = newArr[i] + (value - newArr[i]) / 3
@@ -1644,44 +1645,40 @@ export const sitTypeEvent = {
       that.com.current?.bthClickHandle(wsPointData);
     }
 
-    if (!that.state.calibration) {
+     if (!that.state.calibration) {
       //  z 
-      if (rotate && rotate.length == 4 && rotate.every((a) => a != undefined)) {
+      if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
         // console.log(arr)
         let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-
         that.com.current?.handL.changeHandAngle(arr)
       }
       // console.log(rotate.length ,fingerArr )
       if (fingerArr && fingerArr.length) {
-        if (!fingerArr[0] || !fingerArr[0].length) {
+        if (!fingerArr[0] || !Array.isArray(fingerArr[0])) {
           fingerArr[0] = new Array(5).fill(0)
         }
-        if (!fingerArr[1] || !fingerArr[0].length) {
+        if (!fingerArr[1] || !Array.isArray(fingerArr[1])) {
           fingerArr[1] = new Array(5).fill(255)
         }
         const baseArr = []
         for (let i = 0; i < 5; i++) {
-          baseArr.push(fingerArr[1][i] - fingerArr[0][i])
+          baseArr.push((fingerArr[1][i] || 0) - (fingerArr[0][i] || 0))
         }
-
-
         for (let i = 0; i < 5; i++) {
-
-          const numberValue = Math.round((wsPointData[i] - fingerArr[0][i]) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
+          const rawValue = wsPointData[i]
+          if (rawValue == null || isNaN(rawValue)) continue;
+          const numberValue = Math.round((rawValue - (fingerArr[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
           const value = (numberValue) < 0 ? 0 : (numberValue) >= 1 ? 1 : (numberValue)
-
           newArr[i] = newArr[i] + (value - newArr[i]) / 3
         }
-
         that.com.current?.handL.calibration(newArr)
       }
     } else {
-
       // that.com.current?.calibration([0,0,0])
       // that.com.current?.handZero()
       // that.com.current?.calibration([0,0,0])
     }
+  },}
 
 
 
@@ -1703,7 +1700,7 @@ export const sitTypeEvent = {
       }
       if (!that.state.calibration) {
         //  z 
-        if (rotate) {
+        if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
           let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
           that.com.current?.changeHandAngle(arr)
         }
@@ -1724,7 +1721,7 @@ export const sitTypeEvent = {
         that.com.current?.bthClickHandle(wsPointData);
       }
 
-      if (rotate) {
+      if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
         let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
         that.com.current?.changeHandAngle(arr)
       }
@@ -1751,7 +1748,7 @@ export const sitTypeEvent = {
       if (!that.state.calibration) {
         //  z 
         console.log(rotate)
-        if (rotate) {
+        if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
           let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
           that.com.current?.changeHandAngle(arr)
         }
@@ -1767,12 +1764,10 @@ export const sitTypeEvent = {
           wsPointData: wsPointData ? wsPointData : [],
           local: that.state.local
         });
-
       } else if (that.state.numMatrixFlag == "heatmap") {
         that.com.current?.bthClickHandle(wsPointData);
       }
-
-      if (rotate) {
+      if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
         let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
         that.com.current?.changeHandAngle(arr)
       }
@@ -4409,45 +4404,37 @@ export const backTypeEvent = {
 
     if (!that.state.calibration) {
       //  z 
-      if (rotate && rotate.length == 4 && rotate.every((a) => a != undefined)) {
+      if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
         // console.log(arr)
         let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-
         that.com.current?.handR.changeHandAngle(arr)
       }
       // console.log(rotate.length ,fingerArr )
       if (fingerArr && fingerArr.length) {
-        if (!fingerArr[0] || !fingerArr[0].length) {
+        if (!fingerArr[0] || !Array.isArray(fingerArr[0])) {
           fingerArr[0] = new Array(5).fill(0)
         }
-        if (!fingerArr[1] || !fingerArr[0].length) {
+        if (!fingerArr[1] || !Array.isArray(fingerArr[1])) {
           fingerArr[1] = new Array(5).fill(255)
         }
         const baseArr = []
         for (let i = 0; i < 5; i++) {
-          baseArr.push(fingerArr[1][i] - fingerArr[0][i])
+          baseArr.push((fingerArr[1][i] || 0) - (fingerArr[0][i] || 0))
         }
-
-
         for (let i = 0; i < 5; i++) {
-
-          const numberValue = Math.round((wsPointData[i] - fingerArr[0][i]) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
+          const rawValue = wsPointData[i]
+          if (rawValue == null || isNaN(rawValue)) continue;
+          const numberValue = Math.round((rawValue - (fingerArr[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
           const value = (numberValue) < 0 ? 0 : (numberValue) >= 1 ? 1 : (numberValue)
-
           newArr[i] = newArr[i] + (value - newArr[i]) / 3
         }
-
         that.com.current?.handR.calibration(newArr)
       }
     } else {
-
       // that.com.current?.calibration([0,0,0])
       // that.com.current?.handZero()
       // that.com.current?.calibration([0,0,0])
     }
-
-
-
   },
   handGlove115200: function(args) { return backTypeEvent.hand0205(args); },
 };

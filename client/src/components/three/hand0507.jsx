@@ -57,6 +57,11 @@ let baseQuaternionInv1 = null;
  */
 
 function transformQuaternion(a) {
+  // null/undefined 保护：检查数组和元素有效性
+  if (!a || !Array.isArray(a) || a.length < 4 || a.some(v => v == null || isNaN(v))) {
+    console.warn("Received invalid quaternion data:", a);
+    return new THREE.Quaternion(0, 0, 0, 1);
+  }
   [a[0], a[1]] = [a[1], a[0]]
 
   let q = new THREE.Quaternion(...a)
@@ -86,6 +91,11 @@ function transformQuaternion(a) {
   return qTransformed;
 }
 function transformQuaternion1(a) {
+  // null/undefined 保护：检查数组和元素有效性
+  if (!a || !Array.isArray(a) || a.length < 4 || a.some(v => v == null || isNaN(v))) {
+    console.warn("Received invalid quaternion data:", a);
+    return new THREE.Quaternion(0, 0, 0, 1);
+  }
   [a[0], a[1]] = [a[1], a[0]]
 
   let q = new THREE.Quaternion(...a)
@@ -125,9 +135,12 @@ let cube, chair, chair1, mixer, clips;
 
 
 function rotateFinger(fingerArr, value) {
+  // null/NaN 保护：无效值时保持手指不动
+  if (value == null || isNaN(value)) return;
+  const safeValue = Math.max(0, Math.min(1, value));
   fingerArr.forEach((a) => {
     if (a) {
-      a.rotation.z = (-Math.PI / 2) * value
+      a.rotation.z = (-Math.PI / 2) * safeValue
     }
   })
 }
@@ -176,7 +189,7 @@ function HandQuaterStatus() {
   // 更新四元数
   this.changeHandAngle = function (arr) {
     console.log(arr)
-    if (arr && !arr.includes(undefined)) {
+    if (arr && Array.isArray(arr) && arr.length >= 4 && !arr.some(v => v == null || isNaN(v))) {
       this.quaternion = this.transformQuaternion(arr)
     }
 
@@ -184,6 +197,7 @@ function HandQuaterStatus() {
 
   // 旋转手指
   this.rotateFingers = function (arr) {
+    if (!arr || !Array.isArray(arr) || arr.length < 5) return;
     if (this.hand) {
       this.hand.traverse((obj) => {
         if (obj.isSkinnedMesh) {
@@ -657,6 +671,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
 
   function rotateFingers(arr) {
+    if (!arr || !Array.isArray(arr) || arr.length < 5) return;
     if (chair) {
       chair.traverse((obj) => {
         if (obj.isSkinnedMesh) {

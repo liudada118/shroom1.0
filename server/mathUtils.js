@@ -247,14 +247,17 @@ function press6sit(arr, width, height, type = "row", value = 480) {
  */
 function bytes4ToInt10(buffers) {
   const res = [];
+  if (!buffers || !buffers.length) return res;
   for (let i = 0; i < buffers.length / 4; i++) {
     const buffer = new ArrayBuffer(4);
     const view = new DataView(buffer);
     for (let j = 0; j < 4; j++) {
-      view.setUint8(j, buffers[i * 4 + j]);
+      const byte = buffers[i * 4 + j];
+      view.setUint8(j, (byte != null && !isNaN(byte)) ? byte : 0);
     }
     const floatValue = view.getFloat32(0, true);
-    res.push(floatValue);
+    // NaN/Infinity 保护：无效值替换为 0
+    res.push(isFinite(floatValue) ? floatValue : 0);
   }
   return res;
 }

@@ -1088,27 +1088,28 @@ class Home extends React.Component {
 
               if (!that.state.calibration) {
                 //  z 
-                if (rotate && !rotate.includes(undefined)) {
+                if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
                   let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
                   com?.changeHandAngle(arr)
                 }
 
                 if (fingerArr) {
-                  if (!fingerArr[0]) {
+                  if (!fingerArr[0] || !Array.isArray(fingerArr[0])) {
                     fingerArr[0] = new Array(5).fill(0)
                   }
-                  if (!fingerArr[1]) {
+                  if (!fingerArr[1] || !Array.isArray(fingerArr[1])) {
                     fingerArr[1] = new Array(5).fill(255)
                   }
                   const baseArr = []
                   for (let i = 0; i < 5; i++) {
-                    baseArr.push(fingerArr[1][i] - fingerArr[0][i])
+                    baseArr.push((fingerArr[1][i] || 0) - (fingerArr[0][i] || 0))
                   }
 
 
                   for (let i = 0; i < 5; i++) {
-
-                    const numberValue = Math.round((wsPointData[i] - fingerArr[0][i]) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
+                    const rawValue = wsPointData[i]
+                    if (rawValue == null || isNaN(rawValue)) continue;
+                    const numberValue = Math.round((rawValue - (fingerArr[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
                     const value = (numberValue) < 0 ? 0 : (numberValue) >= 1 ? 1 : (numberValue)
 
                     newArr[i] = newArr[i] + (value - newArr[i]) / 3
@@ -1196,27 +1197,28 @@ class Home extends React.Component {
 
               if (!that.state.calibration) {
                 //  z 
-                if (rotate && !rotate.includes(undefined)) {
+                if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
                   let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
                   com?.changeHandAngle(arr)
                 }
 
                 if (fingerArr) {
-                  if (!fingerArr[0]) {
+                  if (!fingerArr[0] || !Array.isArray(fingerArr[0])) {
                     fingerArr[0] = new Array(5).fill(0)
                   }
-                  if (!fingerArr[1]) {
+                  if (!fingerArr[1] || !Array.isArray(fingerArr[1])) {
                     fingerArr[1] = new Array(5).fill(255)
                   }
                   const baseArr = []
                   for (let i = 0; i < 5; i++) {
-                    baseArr.push(fingerArr[1][i] - fingerArr[0][i])
+                    baseArr.push((fingerArr[1][i] || 0) - (fingerArr[0][i] || 0))
                   }
 
 
                   for (let i = 0; i < 5; i++) {
-
-                    const numberValue = Math.round((wsPointData[i] - fingerArr[0][i]) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
+                    const rawValue = wsPointData[i]
+                    if (rawValue == null || isNaN(rawValue)) continue;
+                    const numberValue = Math.round((rawValue - (fingerArr[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
                     const value = (numberValue) < 0 ? 0 : (numberValue) >= 1 ? 1 : (numberValue)
 
                     newArr[i] = newArr[i] + (value - newArr[i]) / 3
@@ -1499,27 +1501,28 @@ class Home extends React.Component {
 
               if (!that.state.calibration) {
                 //  z 
-                if (rotate && !rotate.includes(undefined)) {
+                if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
                   let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
                   com?.changeHandAngle(arr)
                 }
 
                 if (fingerArr) {
-                  if (!fingerArr[0]) {
+                  if (!fingerArr[0] || !Array.isArray(fingerArr[0])) {
                     fingerArr[0] = new Array(5).fill(0)
                   }
-                  if (!fingerArr[1]) {
+                  if (!fingerArr[1] || !Array.isArray(fingerArr[1])) {
                     fingerArr[1] = new Array(5).fill(255)
                   }
                   const baseArr = []
                   for (let i = 0; i < 5; i++) {
-                    baseArr.push(fingerArr[1][i] - fingerArr[0][i])
+                    baseArr.push((fingerArr[1][i] || 0) - (fingerArr[0][i] || 0))
                   }
 
 
                   for (let i = 0; i < 5; i++) {
-
-                    const numberValue = Math.round((wsPointData[i] - fingerArr[0][i]) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
+                    const rawValue = wsPointData[i]
+                    if (rawValue == null || isNaN(rawValue)) continue;
+                    const numberValue = Math.round((rawValue - (fingerArr[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
                     const value = (numberValue) < 0 ? 0 : (numberValue) >= 1 ? 1 : (numberValue)
 
                     newArr[i] = newArr[i] + (value - newArr[i]) / 3
@@ -1606,27 +1609,28 @@ class Home extends React.Component {
 
               if (!that.state.calibration) {
                 //  z 
-                if (rotate && !rotate.includes(undefined)) {
+                if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
                   let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
                   com?.changeHandAngle(arr)
                 }
 
                 if (fingerArr) {
-                  if (!fingerArr[0]) {
+                  if (!fingerArr[0] || !Array.isArray(fingerArr[0])) {
                     fingerArr[0] = new Array(5).fill(0)
                   }
-                  if (!fingerArr[1]) {
+                  if (!fingerArr[1] || !Array.isArray(fingerArr[1])) {
                     fingerArr[1] = new Array(5).fill(255)
                   }
                   const baseArr = []
                   for (let i = 0; i < 5; i++) {
-                    baseArr.push(fingerArr[1][i] - fingerArr[0][i])
+                    baseArr.push((fingerArr[1][i] || 0) - (fingerArr[0][i] || 0))
                   }
 
 
                   for (let i = 0; i < 5; i++) {
-
-                    const numberValue = Math.round((wsPointData[i] - fingerArr[0][i]) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
+                    const rawValue = wsPointData[i]
+                    if (rawValue == null || isNaN(rawValue)) continue;
+                    const numberValue = Math.round((rawValue - (fingerArr[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
                     const value = (numberValue) < 0 ? 0 : (numberValue) >= 1 ? 1 : (numberValue)
 
                     newArr[i] = newArr[i] + (value - newArr[i]) / 3
