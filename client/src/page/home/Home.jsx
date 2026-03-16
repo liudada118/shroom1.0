@@ -331,22 +331,22 @@ const speechDict = {
   "已离床": {
     zh: "已离床",
     en: "Left the bed",
-    ja: "\u30D9\u30C3\u30C9\u304B\u3089\u96E2\u308C\u307E\u3057\u305F"
+    ja: "ベッドから離れました"
   },
   "坠床风险": {
     zh: "坠床风险",
     en: "Risk of falling from bed",
-    ja: "\u30D9\u30C3\u30C9\u304B\u3089\u8EE2\u843D\u306E\u5371\u967A\u304C\u3042\u308A\u307E\u3059"
+    ja: "ベッドから転落の危険があります"
   },
   "已坐起": {
     zh: "已坐起",
     en: "Sat up",
-    ja: "\u8D77\u304D\u4E0A\u304C\u308A\u307E\u3057\u305F"
+    ja: "起き上がりました"
   },
-  "SOS\u7d27\u6025\u6c42\u52a9": {
-    zh: "SOS\u7d27\u6025\u6c42\u52a9",
+  "SOS紧急求助": {
+    zh: "SOS紧急求助",
     en: "SOS Emergency Help",
-    ja: "SOS \u7DCA\u6025\u30D8\u30EB\u30D7"
+    ja: "SOS 緊急ヘルプ"
   }
 };
 
