@@ -1,4 +1,3 @@
-const logger = require('./logger');
 /**
  * preload.js - Electron 安全桥梁脚本
  *
@@ -12,6 +11,14 @@ const logger = require('./logger');
  */
 
 const { contextBridge, ipcRenderer } = require("electron");
+
+function warn(message) {
+  try {
+    console.warn(message);
+  } catch {
+    // Ignore preload logging failures.
+  }
+}
 
 // 允许的 IPC 通道白名单
 const VALID_SEND_CHANNELS = [
@@ -46,7 +53,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     if (VALID_SEND_CHANNELS.includes(channel)) {
       ipcRenderer.send(channel, data);
     } else {
-      logger.warn(`[preload] Blocked send to invalid channel: ${channel}`);
+      warn(`[preload] Blocked send to invalid channel: ${channel}`);
     }
   },
 
@@ -65,7 +72,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         ipcRenderer.removeListener(channel, subscription);
       };
     } else {
-      logger.warn(`[preload] Blocked listen on invalid channel: ${channel}`);
+      warn(`[preload] Blocked listen on invalid channel: ${channel}`);
       return () => {};
     }
   },

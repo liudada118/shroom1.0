@@ -463,14 +463,13 @@ class Title extends React.Component {
           }} /> : ''
         }
 
-        {console.log(this.props.matrixName, 'this.props.matrixName')}
         <Menu className='menu' onClick={this.onClick} selectedKeys={[this.state.current]} mode="horizontal" items={navItems} />
         {this.props.matrixName != 'localCar' ? this.props.history === 'now' ? this.props.matrixName != 'car' && this.props.matrixName != 'car10' && this.props.matrixName != 'sofa' && this.props.matrixName != 'yanfeng10' && this.props.matrixName != 'volvo' && this.props.matrixName != 'carQX' && this.props.matrixName != 'hand0507' && this.props.matrixName != 'hand0205' && this.props.matrixName != 'handGlove115200' && this.props.matrixName != 'footVideo' && this.props.matrixName != 'eye' ? <><Select
 
           style={{ marginRight: 20, width: 160 }}
           placeholder={t('chooseSensor')}
           value={this.props.portname ? this.props.portname : null}
-          onDropdownVisibleChange={() => {
+          onOpenChange={() => {
             this.props.wsSendObj({ serialReset: true })
           }}
 
@@ -486,7 +485,7 @@ class Title extends React.Component {
           style={{ marginRight: 20, width: 160 }}
           placeholder={['hand0205', 'handGlove115200'].includes(this.props.matrixName) ? t('chooseLeftSensor') : this.props.matrixName == 'footVideo' ? t('chooseLeftFootSensor') : t('chooseSitSensor')}
           value={this.props.portname ? `${this.props.portname}${['hand0205', 'handGlove115200', 'footVideo', 'eye'].includes(this.props.matrixName) ? t('left') : (t('sit'))}` : null}
-          onDropdownVisibleChange={() => {
+          onOpenChange={() => {
             this.props.wsSendObj({ serialReset: true })
           }}
           onSelect={(e) => {
@@ -510,8 +509,7 @@ class Title extends React.Component {
             placeholder={['hand0205', 'handGlove115200'].includes(this.props.matrixName) ? t('chooseRightSensor') : this.props.matrixName == 'footVideo' ? t('chooseRightFootSensor') : t('chooseBackSensor')}
             style={{ marginRight: 20, width: 160 }}
             value={this.props.portnameBack ? `${this.props.portnameBack}${['hand0205', 'handGlove115200', 'footVideo'].includes(this.props.matrixName) ? t('right') : (t('back'))}` : null}
-            onDropdownVisibleChange={(e) => {
-              console.log(e)
+            onOpenChange={() => {
               this.props.wsSendObj({ serialReset: true })
             }}
             onSelect={(e) => {
@@ -537,8 +535,7 @@ class Title extends React.Component {
             placeholder={t('chooseHeadSensor')}
             style={{ width: 160 }}
             value={this.props.portnameHead ? `${this.props.portnameHead}(${t('head')})` : null}
-            onDropdownVisibleChange={(e) => {
-              console.log(e)
+            onOpenChange={() => {
               this.props.wsSendObj({ serialReset: true })
             }}
             onSelect={(e) => {
@@ -948,9 +945,7 @@ class Title extends React.Component {
           placeholder={t('chooseBackSensor')}
           style={{ marginRight: 20, width: 60 }}
 
-          onDropdownVisibleChange={(e) => {
-
-          }}
+          onOpenChange={() => {}}
           onSelect={(e) => {
 
             // if (e == 1) {

@@ -46,7 +46,6 @@ class Com extends React.Component {
         return false
     }
     render() {
-        console.log(this.props)
         return (
             <>{this.props.children}</>
         )
@@ -264,7 +263,7 @@ class Aside extends React.Component {
                             {
                                 dataArr.map((a, index) => {
                                     return (
-                                        <div className='dataItem' key={a.eng}>
+                                        <div className='dataItem' key={`${a.data}-${index}`}>
                                             <div className='dataItemCircle'>
                                                 <div className='circleItem' style={{ backgroundColor: a.color }}></div>
                                                 <div>{a.data}</div>
@@ -297,7 +296,7 @@ class Aside extends React.Component {
                         {
                             dataArrCar.map((a, index) => {
                                 return (
-                                    <div className='dataItem' key={a.eng}>
+                                    <div className='dataItem' key={`${a.data}-${index}`}>
                                         <div className='dataItemCircle'>
                                             <div className='circleItem' style={{ backgroundColor: a.color }}></div>
                                             <div>{a.data}</div>
@@ -357,7 +356,7 @@ class Aside extends React.Component {
                             {
                                 dataArr1.map((a, index) => {
                                     return (
-                                        <div className='dataItem' key={a.eng}>
+                                        <div className='dataItem' key={`${a.data}-${index}`}>
                                             <div className='dataItemCircle'>
                                                 <div className='circleItem' style={{ backgroundColor: a.color }}></div>
                                                 <div>{a.data}</div>
