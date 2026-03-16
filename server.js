@@ -1,4 +1,5 @@
 const logger = require('./logger');
+const { startWorker, callPy, stopWorker } = require('./pyWorker');
 ﻿const WebSocket = require("ws");
 const { app } = require('electron')
 const path = require('path');
@@ -125,6 +126,7 @@ const sitnum2 = 64;
 const backnum1 = 64;
 const backnum2 = 64;
 let smoothValue = 0;
+let lastPyCallTime = 0; // jqbed Python 算法调用节流时间戳
 let lastData = new Array(1024).fill(0),
   firstData = new Array(1024).fill(0);
 const backTotal = backnum1 * backnum2;
@@ -2872,6 +2874,27 @@ parser.on("data", function (data) {
         pointArr = xiyueReal1(pointArr)
       } else if (file === 'jqbed') {
         pointArr = jqbed(pointArr)
+        // 调用 Python 健康监测算法（125ms 节流）
+        const nowPyTime = Date.now();
+        if (nowPyTime - lastPyCallTime >= 125) {
+          lastPyCallTime = nowPyTime;
+          try {
+            callPy('getData', { data: [...pointArr] }).then((pyResult) => {
+              if (pyResult) {
+                const rateData = JSON.stringify({ rate: pyResult });
+                server.clients.forEach(function each(client) {
+                  if (client.readyState === WebSocket.OPEN) {
+                    client.send(rateData);
+                  }
+                });
+              }
+            }).catch((err) => {
+              console.error('[jqbed] callPy error:', err.message);
+            });
+          } catch (e) {
+            console.error('[jqbed] callPy exception:', e.message);
+          }
+        }
       } else if (file === 'carCol') {
         pointArr = carCol(pointArr)
       } else if (file === 'newHand') {

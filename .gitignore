@@ -9,7 +9,11 @@ out/
 db/*
 !db/init.db
 data/
-python/
+python/dist/
+python/build/
+python/*.spec
+python/app/*.pyd
+python/app/*.so
 pdf/
 .DS_Store
 *.log
