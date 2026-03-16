@@ -185,9 +185,7 @@ let isShiftPressed = false;
     renderer.setSize(window.innerWidth, window.innerHeight);
 
     renderer.outputEncoding = THREE.sRGBEncoding;
-    if (container.childNodes.length == 0) {
-      container.appendChild(renderer.domElement);
-    }
+    container.replaceChildren(renderer.domElement);
 
     renderer.setClearColor(0x000000);
 
@@ -875,10 +873,15 @@ let isShiftPressed = false;
 
     return () => {
       cancelAnimationFrame(animationRequestId);
-      document.removeEventListener('pointerdown', pointDown)
-      document.removeEventListener('pointermove', pointMove)
-      document.removeEventListener('pointup', pointUp)
-      selectHelper.dispose()
+      window.removeEventListener("resize", onWindowResize);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      document.removeEventListener('pointerdown', pointDown);
+      document.removeEventListener('pointermove', pointMove);
+      document.removeEventListener('pointerup', pointUp);
+      controls?.dispose();
+      renderer?.dispose();
+      selectHelper?.dispose();
     };
   }, []);
   return (
