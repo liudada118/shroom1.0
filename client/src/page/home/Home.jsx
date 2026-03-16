@@ -351,18 +351,32 @@ const speechDict = {
 };
 
 function speakMessage(key, lang = "zh") {
+
+
   if (!speechDict[key] || !speechDict[key][lang]) {
-    console.warn("\u672A\u627E\u5230\u5BF9\u5E94\u7FFB\u8BD1:", key, lang);
+    console.warn("未找到对应翻译:", key, lang);
     return;
   }
   const text = speechDict[key][lang];
   const utter = new SpeechSynthesisUtterance(text);
-  if (lang === "zh") utter.lang = "zh-CN";
-  if (lang === "en") utter.lang = "en-US";
-  if (lang === "ja") utter.lang = "ja-JP";
+
+
+
+
+  // 设置语言
+  if (lang === "zh") utter.lang = "zh-CN";   // 中文
+  if (lang === "en") utter.lang = "en-US";   // 英文
+  if (lang === "ja") utter.lang = "ja-JP";   // 日文
+
+
+  // 自动选择合适的 voice（如果系统支持）
   const voices = speechSynthesis.getVoices();
   const voice = voices.find(v => v.lang.startsWith(utter.lang));
+
+
   if (voice) utter.voice = voice;
+
+
   speechSynthesis.speak(utter);
 }
 
@@ -927,9 +941,9 @@ class Home extends React.Component {
       hz = jsonObject.hz
     }
 
-    // jqbed 健康监测算法结果处理
     if (jsonObject.rate != null) {
       this.data.current?.changeData(jsonObject.rate);
+
 
       if (onBedState.length < 2) {
         onBedState.push(jsonObject.rate.stateInBbed)
@@ -938,24 +952,48 @@ class Home extends React.Component {
         onBedState.push(jsonObject.rate.stateInBbed)
       }
 
-      // 离床语音播报
+
       if (onBedState[0] != onBedState[1] && onBedState[1] == 0) {
+
+
+        // if (this.props.i18n.language == 'zh') {
+        //   const msg = new SpeechSynthesisUtterance("已离床");
+        //   msg.lang = "zh-CN"; // 设定语言
+        //   speechSynthesis.speak(msg);
+        // }else if(this.props.i18n.language == 'en'){
+        //   const msg = new SpeechSynthesisUtterance("已离床");
+        //   msg.lang = "en-US"; // 设定语言
+        //   speechSynthesis.speak(msg);
+        // }
         speakMessage("已离床", this.props.i18n.language)
+
+
       }
 
-      // 坠床风险语音播报
+
       if (onBedState[0] != onBedState[1] && onBedState[1] == 3) {
+        // const msg = new SpeechSynthesisUtterance("坠床风险");
+        // msg.lang = "zh-CN"; // 设定语言
+        // speechSynthesis.speak(msg);
         speakMessage("坠床风险", this.props.i18n.language)
       }
 
-      // 坐起语音播报
+
       if (onBedState[0] != onBedState[1] && onBedState[1] == 4) {
+        // const msg = new SpeechSynthesisUtterance("已坐起");
+        // msg.lang = "zh-CN"; // 设定语言
+        // speechSynthesis.speak(msg);
         speakMessage("已坐起", this.props.i18n.language)
       }
 
-      // SOS 紧急求助
+
+
+
       if (jsonObject.rate.sosflag) {
-        speakMessage("SOS\u7d27\u6025\u6c42\u52a9", this.props.i18n.language)
+        // const msg = new SpeechSynthesisUtterance("SOS紧急求助");
+        // msg.lang = "zh-CN"; // 设定语言
+        // speechSynthesis.speak(msg);
+        speakMessage("SOS紧急求助", this.props.i18n.language)
       }
     }
 
