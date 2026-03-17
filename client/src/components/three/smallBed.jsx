@@ -185,9 +185,7 @@ let isShiftPressed = false;
     renderer.setSize(window.innerWidth, window.innerHeight);
 
     renderer.outputEncoding = THREE.sRGBEncoding;
-    if (container.childNodes.length == 0) {
-      container.appendChild(renderer.domElement);
-    }
+    container.replaceChildren(renderer.domElement);
 
     renderer.setClearColor(0x000000);
 
@@ -877,8 +875,15 @@ let isShiftPressed = false;
       cancelAnimationFrame(animationRequestId);
       document.removeEventListener('pointerdown', pointDown)
       document.removeEventListener('pointermove', pointMove)
-      document.removeEventListener('pointup', pointUp)
+      document.removeEventListener('pointerup', pointUp)
       selectHelper.dispose()
+      if (renderer) {
+        renderer.dispose();
+        renderer.forceContextLoss();
+      }
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('resize', onWindowResize);
     };
   }, []);
   return (
