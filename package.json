@@ -26,6 +26,7 @@
         "asar": true,
         "extraResource": [
           "./build",
+          "./python",
           "./pack-resources/db",
           "./config.txt"
         ],
@@ -81,6 +82,7 @@
       "**/*",
       "!client/**",
       "!build/**",
+      "!python/**",
       "!dist/**",
       "!out/**",
       "!docs/**",
@@ -141,6 +143,16 @@
           "!model/hand2.glb",
           "!model/newhand.glb",
           "!model/newhand1.glb"
+        ]
+      },
+      {
+        "from": "./python",
+        "to": "python",
+        "filter": [
+          "**/*",
+          "!build/**",
+          "!**/__pycache__/**",
+          "!**/*.pyc"
         ]
       },
       {

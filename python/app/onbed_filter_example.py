@@ -493,6 +493,7 @@ def create_default_inputs():
     inputs = {
         # 标量参数
         'threshold_factor': 0.0,
+        'breath_th': 0.0,
         'continuous_on_bed_duration_minutes': 0.0,
         'unlock_sitting_alarm_duration_minutes': 0.0,
         'sos_peak_threshold': 0.0,
@@ -538,9 +539,6 @@ def getData(data):
         if hasattr(val, 'tolist'):
             return val.tolist()
         return list(val)
-
-    print(outputs)
-
 
     result = {
         # 核心生理指标
