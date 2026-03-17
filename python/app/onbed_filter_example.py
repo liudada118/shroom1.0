@@ -565,11 +565,11 @@ def getData(data):
     #     'data' : data
     # }
     return {
-        "rate" : outputs["rate"] , 
-        "heart_rate" : outputs["heart_rate"],
-        "stateInBbed" : outputs["stateInBbed"],
-        "sosflag" : outputs["sosflag"],
-        
+        "rate" : float(outputs["rate"]) , 
+        "heart_rate" : float(outputs["heart_rate"]),
+        "stateInBbed" : float(outputs["stateInBbed"]),
+        "sosflag" : float(outputs["sosflag"]),
+        "matrix_origin" : outputs["matrix_origin"].tolist() if hasattr(outputs["matrix_origin"], 'tolist') else list(outputs["matrix_origin"]),
     }
 
 
