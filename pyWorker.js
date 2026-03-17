@@ -6,8 +6,65 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
-let isPackaged = process.env.isPackaged;
-isPackaged = isPackaged === 'true';
+let electronApp = null;
+try {
+  ({ app: electronApp } = require('electron'));
+} catch {}
+
+function isPackagedApp() {
+  if (electronApp && typeof electronApp.isPackaged === 'boolean') {
+    return electronApp.isPackaged;
+  }
+  return process.env.isPackaged === 'true';
+}
+
+function existingFile(filePath) {
+  try {
+    return fs.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function unique(items) {
+  return [...new Set(items.filter(Boolean))];
+}
+
+function packagedPythonRoots() {
+  if (!isPackagedApp()) return [];
+  return unique([
+    process.resourcesPath ? path.join(process.resourcesPath, 'python') : null,
+    process.resourcesPath ? path.join(process.resourcesPath, 'app.asar.unpacked', 'python') : null,
+  ]);
+}
+
+function devPythonRoot() {
+  return path.join(__dirname, 'python');
+}
+
+function executableName() {
+  return process.platform === 'win32' ? 'onbed_server.exe' : 'onbed_server';
+}
+
+function resolvePackagedExe() {
+  const exeName = executableName();
+  const candidates = [];
+
+  for (const root of packagedPythonRoots()) {
+    candidates.push(path.join(root, exeName));
+    candidates.push(path.join(root, 'onbed_server', exeName));
+  }
+
+  return candidates.find(existingFile) || null;
+}
+
+function resolveServerPy() {
+  const candidates = isPackagedApp()
+    ? packagedPythonRoots().map((root) => path.join(root, 'app', 'onbed_filter_example.py'))
+    : [path.join(devPythonRoot(), 'app', 'onbed_filter_example.py')];
+
+  return candidates.find(existingFile) || null;
+}
 
 /**
  * 获取 Python 可执行文件路径
@@ -15,49 +72,62 @@ isPackaged = isPackaged === 'true';
  * 打包模式：使用 PyInstaller 生成的可执行文件
  */
 function pythonBin() {
-  const isDev = !isPackaged;
-
-  if (isDev) {
+  if (!isPackagedApp()) {
     // 开发模式：优先使用项目内 Python，否则使用系统 Python
     if (process.platform === 'win32') {
-      const localPy = path.join(__dirname, 'python', 'Python311', 'python.exe');
+      const localPy = path.join(devPythonRoot(), 'Python311', 'python.exe');
       if (fs.existsSync(localPy)) return localPy;
       return 'python'; // 回退到系统 Python
     }
-    const localPy = path.join(__dirname, 'python', 'venv', 'bin', 'python');
-    if (fs.existsSync(localPy)) return localPy;
+    const localPyCandidates = [
+      path.join(devPythonRoot(), 'venv', 'bin', 'python3.11'),
+      path.join(devPythonRoot(), 'venv', 'bin', 'python3'),
+      path.join(devPythonRoot(), 'venv', 'bin', 'python'),
+    ];
+    const localPy = localPyCandidates.find(existingFile);
+    if (localPy) return localPy;
     return 'python3'; // 回退到系统 Python
   }
 
   // 打包模式：使用 PyInstaller 生成的可执行文件
-  if (process.platform === 'win32') {
-    const pyExe = path.join(process.resourcesPath, 'python', 'onbed_server.exe');
-    if (fs.existsSync(pyExe)) return pyExe;
-    // 回退到 Python 解释器
-    return path.join(process.resourcesPath, 'python', 'Python311', 'python.exe');
+  const packagedExe = resolvePackagedExe();
+  if (packagedExe) return packagedExe;
+
+  for (const root of packagedPythonRoots()) {
+    if (process.platform === 'win32') {
+      const pyExeCandidates = [
+        path.join(root, 'Python311', 'python.exe'),
+        path.join(root, 'venv', 'Scripts', 'python.exe'),
+      ];
+      const pyExe = pyExeCandidates.find(existingFile);
+      if (pyExe) return pyExe;
+      continue;
+    }
+
+    const pyExeCandidates = [
+      path.join(root, 'venv', 'bin', 'python3.11'),
+      path.join(root, 'venv', 'bin', 'python3'),
+      path.join(root, 'venv', 'bin', 'python'),
+    ];
+    const pyExe = pyExeCandidates.find(existingFile);
+    if (pyExe) return pyExe;
   }
-  const pyExe = path.join(process.resourcesPath, 'python', 'onbed_server');
-  if (fs.existsSync(pyExe)) return pyExe;
-  return path.join(process.resourcesPath, 'python', 'venv', 'bin', 'python');
+
+  return process.platform === 'win32' ? 'python' : 'python3';
 }
 
 /**
  * 获取 Python 脚本路径（仅开发模式或回退时使用）
  */
 function serverPy() {
-  const isDev = !isPackaged;
-  return isDev
-    ? path.join(__dirname, 'python', 'app', 'onbed_filter_example.py')
-    : path.join(process.resourcesPath, 'python', 'app', 'onbed_filter_example.py');
+  return resolveServerPy();
 }
 
 /**
  * 判断是否使用 PyInstaller 打包的可执行文件（无需传脚本参数）
  */
 function isPyInstallerExe() {
-  if (!isPackaged) return false;
-  const exeName = process.platform === 'win32' ? 'onbed_server.exe' : 'onbed_server';
-  return fs.existsSync(path.join(process.resourcesPath, 'python', exeName));
+  return Boolean(resolvePackagedExe());
 }
 
 let child = null;
@@ -76,16 +146,24 @@ function startWorker() {
 
   const py = pythonBin();
   const useExe = isPyInstallerExe();
-  const args = useExe ? [] : ['-u', serverPy()];
+  const serverScript = serverPy();
+  if (!useExe && !serverScript) {
+    starting = false;
+    console.error('[PY] start aborted: no python runtime script found');
+    return;
+  }
+  const args = useExe ? [] : ['-u', serverScript];
+  const cwd = useExe ? path.dirname(py) : (serverScript ? path.dirname(serverScript) : process.cwd());
 
-  console.log('[PY] start:', py, args.join(' '));
-  if (!fs.existsSync(py)) console.error('[PY] pythonBin NOT FOUND:', py);
-  if (!useExe && !fs.existsSync(serverPy())) console.error('[PY] serverPy NOT FOUND:', serverPy());
+  console.log('[PY] start:', py, args.join(' '), 'cwd=', cwd, 'packaged=', isPackagedApp(), 'useExe=', useExe);
+  if (py.includes(path.sep) && !fs.existsSync(py)) console.error('[PY] pythonBin NOT FOUND:', py);
+  if (!useExe && (!serverScript || !fs.existsSync(serverScript))) console.error('[PY] serverPy NOT FOUND:', serverScript);
 
   child = spawn(py, args, {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, PYTHONUNBUFFERED: '1', PYTHONNOUSERSITE: '1' },
-    windowsHide: true
+    windowsHide: true,
+    cwd,
   });
   starting = false;
   buf = '';
@@ -116,6 +194,11 @@ function startWorker() {
     console.error('[PY:stderr]', s.trim());
   });
 
+  child.on('error', (err) => {
+    pushErr(String(err.stack || err));
+    console.error(`[PY] worker ERROR: ${err.message}`);
+  });
+
   child.on('exit', (code, sig) => {
     console.error(`[PY] worker EXIT code=${code} sig=${sig}\n[PY] stderr tail:\n${stderrTail}`);
     for (const [id, rec] of pending) {
@@ -128,7 +211,7 @@ function startWorker() {
   });
 
   // 握手：确认常驻 OK
-  callPy('ping', {}, { timeoutMs: 10000 })
+  callPy('ping', {}, { timeoutMs: 30000 })
     .then(() => console.log('[PY] ready'))
     .catch(e => console.error('[PY] handshake failed:', e.message));
 }

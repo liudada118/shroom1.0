@@ -27,6 +27,7 @@
         "extraResource": [
           "./build",
           "./pack-resources/db",
+          "./pack-resources/python",
           "./config.txt"
         ],
         "ignore": [
@@ -90,6 +91,7 @@
       "!pack-resources/**",
       "!data/**",
       "!db/**",
+      "!python/**",
       "!.git/**",
       "!.git_broken*/**",
       "!.npm-cache/**",
@@ -146,6 +148,10 @@
       {
         "from": "./pack-resources/db",
         "to": "db"
+      },
+      {
+        "from": "./pack-resources/python",
+        "to": "python"
       },
       {
         "from": "./config.txt",
