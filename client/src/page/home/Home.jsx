@@ -369,13 +369,28 @@ function speakMessage(key, lang = "zh") {
   if (lang === "ja") utter.lang = "ja-JP";   // 日文
 
 
-  // 自动选择合适的 voice（如果系统支持）
+  // 优先选择女声 voice
   const voices = speechSynthesis.getVoices();
-  const voice = voices.find(v => v.lang.startsWith(utter.lang));
+  const langVoices = voices.filter(v => v.lang.startsWith(utter.lang));
 
+  // 女声关键词匹配（覆盖 Windows / macOS / Linux 常见女声名称）
+  const femaleKeywords = [
+    'xiaoxiao', 'huihui', 'yaoyao', 'female', 'woman',
+    'tingting', 'meijia', 'sinji',
+    'zira', 'hazel', 'susan', 'linda',
+    'nanami', 'haruka',
+    'google', // Google 默认中文声音通常是女声
+  ];
+
+  // 优先匹配女声
+  let voice = langVoices.find(v =>
+    femaleKeywords.some(kw => v.name.toLowerCase().includes(kw))
+  );
+
+  // 如果没找到女声关键词，选该语言第一个可用声音
+  if (!voice && langVoices.length > 0) voice = langVoices[0];
 
   if (voice) utter.voice = voice;
-
 
   speechSynthesis.speak(utter);
 }
