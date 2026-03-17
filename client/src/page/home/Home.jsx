@@ -344,9 +344,9 @@ const speechDict = {
     ja: "起き上がりました"
   },
   "SOS紧急求助": {
-    zh: "SOS紧急求助",
-    en: "SOS Emergency Help",
-    ja: "SOS 緊急ヘルプ"
+    zh: "S O S 紧急求助",
+    en: "S O S Emergency Help",
+    ja: "S O S 緊急ヘルプ"
   }
 };
 
