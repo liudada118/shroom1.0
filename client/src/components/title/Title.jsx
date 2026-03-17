@@ -337,6 +337,7 @@ class Title extends React.Component {
 
     // 全量传感器类型列表
     const allSensorArr = [
+      { label: '手部检测', value: 'hand' },
       { label: '触觉手套', value: 'hand0205' },
       { label: '触觉手套(115200)', value: 'handGlove115200' },
       { label: '小型样品', value: 'smallSample' },
