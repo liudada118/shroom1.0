@@ -526,7 +526,7 @@ def getInputData(data) :
     return 
 
 def getData(data):
-
+    print(data)
  
     inputs = create_sample_inputs()
     inputs["frameData"] = np_arr = np.array(data, dtype=np.float32)
@@ -570,6 +570,7 @@ def getData(data):
         "stateInBbed" : float(outputs["stateInBbed"]),
         "sosflag" : float(outputs["sosflag"]),
         "matrix_origin" : outputs["matrix_origin"].tolist() if hasattr(outputs["matrix_origin"], 'tolist') else list(outputs["matrix_origin"]),
+        "runtime" : float(outputs["runtime"]),
     }
 
 

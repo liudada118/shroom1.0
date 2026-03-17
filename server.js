@@ -4380,12 +4380,13 @@ function jqbedOppo(arr) {
 
 // jqbed 健康监测算法定时调用（125ms）
 setInterval(async () => {
-  if (pointArr && file == 'jqbed' && port1 && port1.isOpen) {
+  if (pointArr&&pointArr.length  && pointArr.every((a) => typeof a == 'number') && file == 'jqbed' && port1 && port1.isOpen) {
     const newArr = jqbedOppo(pointArr);
+    console.log(newArr.reduce((a,b) => a+b , 0),pointArr.length,'nweArr')
     try {
       const data = await callPy('getData', { data: newArr });
       if (data && data.rate != -1) {
-        console.log('[jqbed] pyResult:', data);
+        console.log('[jqbed] pyResult:', data,data.matrix_origin.reduce((a,b) => a+b , 0));
 
         // 缓存算法返回的 matrix_origin（供 useMatrixOrigin flag 使用）
         if (data.matrix_origin && Array.isArray(data.matrix_origin)) {
