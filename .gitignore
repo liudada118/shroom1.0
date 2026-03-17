@@ -14,6 +14,7 @@ python/build/
 python/*.spec
 python/app/*.pyd
 python/app/*.so
+python/venv
 pdf/
 .DS_Store
 *.log
