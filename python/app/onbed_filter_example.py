@@ -482,96 +482,79 @@ import sys, json, traceback
 def ping():
     return {"pong": True}
 
-def create_sample_inputs():
+def create_default_inputs():
     """
-    创建示例输入数据
-    展示正确的数据格式
+    创建默认输入参数（新版 API）
+    匹配 onbed_filter 2.0 的参数命名和结构
     
     返回:
-        dict: 示例输入数据
+        dict: 默认输入参数（不含 frame_data）
     """
-    # 创建模拟的32x32传感器矩阵数据
-    sensor_matrix = np.random.randint(100, 200, (32, 32)).astype(np.float32)
-   
-    # 在中心区域添加"人体"信号
-    center_x, center_y = 16, 16
-    for i in range(-4, 5):
-        for j in range(-8, 9):
-            x, y = center_x + i, center_y + j
-            if 0 <= x < 32 and 0 <= y < 32:
-                sensor_matrix[x, y] += 30  # 增加压力值
-    
-    # 展平为1024长度的一维数组
-    frame_data = sensor_matrix.flatten()
-    # print( frame_data)
-
-    # print(np.zeros(1024))
     inputs = {
-        'frameData': frame_data,
-        'tim': time.time() % 1000,
-        'threshold_factor': 25,
-        'continuous_on_bed_duration_minutes': 1.0,
-        'unlock_sitting_alarm_duration_minutes': 1.0,
-        'unlock_falling_alarm_duration_minutes': 1.0,
-        'sosPeakThreshold': 25.0,
-        'points_threshold_in': 3.0
+        # 标量参数
+        'threshold_factor': 0.0,
+        'continuous_on_bed_duration_minutes': 0.0,
+        'unlock_sitting_alarm_duration_minutes': 0.0,
+        'sos_peak_threshold': 0.0,
+        'points_threshold_in': 0.0,
+        'min_sos_sequence': 0.0,
+        'breath_detect_mode': 0.0,
+        'strel_switch': 1.0,
+        'filter_switch': 1.0,
+        'body_movement_threshold': 30.0,
+        'step_leavebed_trigger': 50.0,
+        'edge_align_ratio': 0.0,
+        # 数组参数
+        'sos_disable_area': np.array([6.0, 10.0], dtype=np.float32),
+        'sitting_area': np.array([0.0, 0.0], dtype=np.float32),
+        'leave_bed_disable_area': np.array([0.0, 0.0], dtype=np.float32),
+        'small_object_size': np.array([0.0, 0.0], dtype=np.float32),
+        'head_foot_area': np.array([0.0, 0.0], dtype=np.float32),
     }
-    
     return inputs
 
 
-def getInputData(data) : 
-    inputs = create_sample_inputs()
-    inputs["frameData"] = np_arr = np.array(data, dtype=np.float32)
-    return 
-
 def getData(data):
-    print(data)
- 
-    inputs = create_sample_inputs()
-    inputs["frameData"] = np_arr = np.array(data, dtype=np.float32)
-    # print(data)
+    """
+    处理传感器数据，返回健康监测结果（新版 API）
+    """
+    inputs = create_default_inputs()
+    inputs['frame_data'] = np.array(data, dtype=np.float32)
     outputs = ncz.step(inputs)
 
-    # _validate_inputs({
-    #    'frameData' : data,
-    #    'tim': time.time() % 1000,
-    #    'threshold_factor': 25,
-    #    'continuous_on_bed_duration_minutes': 1.0,
-    #    'unlock_sitting_alarm_duration_minutes': 1.0,
-    #    'unlock_falling_alarm_duration_minutes': 1.0,
-    #    'sosPeakThreshold': 25.0,
-    #    'points_threshold_in': 3.0
-    # })
+    # 安全转换 numpy 值为 Python 原生类型
+    def safe_float(val, default=0.0):
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return default
 
-    # outputs = ncz.step({
-    #    'frameData' : data,
-    #    'tim': time.time() % 1000,
-    #    'threshold_factor': 25,
-    #    'continuous_on_bed_duration_minutes': 1.0,
-    #    'unlock_sitting_alarm_duration_minutes': 1.0,
-    #    'unlock_falling_alarm_duration_minutes': 1.0,
-    #    'sosPeakThreshold': 25.0,
-    #    'points_threshold_in': 3.0
-    # })
+    def safe_list(val):
+        if val is None:
+            return []
+        if hasattr(val, 'tolist'):
+            return val.tolist()
+        return list(val)
 
-    # print({
-    #     "rate" : outputs["rate"] , 
-    #     "heart_rate" : outputs["heart_rate"],
-    #     "stateInBbed" : outputs["stateInBbed"],
-    #     "sosflag" : outputs["sosflag"]
-    # })
-    # return {
-    #     'data' : data
-    # }
-    return {
-        "rate" : float(outputs["rate"]) , 
-        "heart_rate" : float(outputs["heart_rate"]),
-        "stateInBbed" : float(outputs["stateInBbed"]),
-        "sosflag" : float(outputs["sosflag"]),
-        "matrix_origin" : outputs["matrix_origin"].tolist() if hasattr(outputs["matrix_origin"], 'tolist') else list(outputs["matrix_origin"]),
-        "runtime" : float(outputs["runtime"]),
+    result = {
+        # 核心生理指标
+        "rate": safe_float(outputs.get("rate", -1)),
+        "heart_rate": safe_float(outputs.get("heart_rate", 0)),
+        "stateInBbed": safe_float(outputs.get("stateInBbed", outputs.get("state_in_bed", 0))),
+        "sosflag": safe_float(outputs.get("sosflag", outputs.get("sos_flag", 0))),
+        "merged_alarm": safe_float(outputs.get("merged_alarm", 0)),
+        "runtime": safe_float(outputs.get("runtime", 0)),
+        "inBedtime": safe_float(outputs.get("inBedtime", 0)),
+        "rateMin": safe_float(outputs.get("rateMin", outputs.get("rate_minute", -1))),
+        "strokerisk": safe_float(outputs.get("strokerisk", 0)),
+        "strokeriskMin": safe_float(outputs.get("strokeriskMin", 0)),
+        "body_movement_data": safe_float(outputs.get("body_movement_data", outputs.get("bodyMovementData", 0))),
+        # 矩阵数据
+        "matrix_origin": safe_list(outputs.get("matrix_origin")),
+        "matrix_filter": safe_list(outputs.get("matrix_filter")),
     }
+
+    return result
 
 
 
