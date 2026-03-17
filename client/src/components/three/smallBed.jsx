@@ -875,6 +875,40 @@ let isShiftPressed = false;
       document.removeEventListener('pointerdown', pointDown);
       document.removeEventListener('pointermove', pointMove);
       document.removeEventListener('pointerup', pointUp);
+
+      // 清除 group 中的所有子对象
+      while (group.children.length > 0) {
+        const child = group.children[0];
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) {
+          if (child.material.map) child.material.map.dispose();
+          child.material.dispose();
+        }
+        group.remove(child);
+      }
+
+      // 从 scene 中移除所有对象
+      if (scene) {
+        while (scene.children.length > 0) {
+          const child = scene.children[0];
+          if (child.geometry) child.geometry.dispose();
+          if (child.material) {
+            if (Array.isArray(child.material)) {
+              child.material.forEach(m => m.dispose());
+            } else {
+              if (child.material.map) child.material.map.dispose();
+              child.material.dispose();
+            }
+          }
+          scene.remove(child);
+        }
+      }
+
+      // 移除 renderer 的 DOM 元素
+      if (renderer?.domElement && container) {
+        try { container.removeChild(renderer.domElement); } catch (e) {}
+      }
+
       controls?.dispose();
       renderer?.dispose();
       selectHelper?.dispose();
