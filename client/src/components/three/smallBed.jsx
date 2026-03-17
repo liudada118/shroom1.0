@@ -124,6 +124,12 @@ let isShiftPressed = false;
 
   function init() {
     container = document.getElementById(`canvas`);
+
+    // 清空 group 中的旧粒子，防止重复 add 导致双层
+    while (group.children.length > 0) {
+      group.remove(group.children[0]);
+    }
+
     // camera
 
     camera = new THREE.PerspectiveCamera(
