@@ -128,6 +128,8 @@ const backnum2 = 64;
 let smoothValue = 0;
 let onbedArr = []; // jqbed 在床状态数组
 let onBedTime = 0; // jqbed 在床/离床计时（秒）
+let useMatrixOrigin = false; // jqbed 调试 flag：true 时用算法返回的 matrix_origin 作为 sitData
+let jqbedMatrixOrigin = null; // 缓存算法返回的 matrix_origin 数据
 let lastData = new Array(1024).fill(0),
   firstData = new Array(1024).fill(0);
 const backTotal = backnum1 * backnum2;
@@ -2911,17 +2913,20 @@ parser.on("data", function (data) {
         pointArr = pointArr.map((a, index) => numLessZeroToZero(a - pointArr1zero[index]))
       }
 
+      // jqbed 调试模式：useMatrixOrigin=true 时用算法返回的 matrix_origin 作为 sitData
+      const sitDataToSend = (useMatrixOrigin && file === 'jqbed' && jqbedMatrixOrigin) ? jqbedMatrixOrigin : pointArr;
+
       let jsonData;
 
       if (isCar(file)) {
         jsonData = JSON.stringify({
-          sitData: pointArr,
+          sitData: sitDataToSend,
           sitFlag: port1?.isOpen,
           backFlag: port2?.isOpen,
           hz: colHZ
         });
       } else {
-        jsonData = JSON.stringify({ sitData: file == 'smallBed' || file == 'smallBed1' ? pointArr : pointArr, hz: colHZ });
+        jsonData = JSON.stringify({ sitData: file == 'smallBed' || file == 'smallBed1' ? pointArr : sitDataToSend, hz: colHZ });
       }
 
 
@@ -4381,6 +4386,11 @@ setInterval(async () => {
       const data = await callPy('getData', { data: newArr });
       if (data && data.rate != -1) {
         console.log('[jqbed] pyResult:', data);
+
+        // 缓存算法返回的 matrix_origin（供 useMatrixOrigin flag 使用）
+        if (data.matrix_origin && Array.isArray(data.matrix_origin)) {
+          jqbedMatrixOrigin = data.matrix_origin;
+        }
 
         if (onbedArr.length < 2) {
           onbedArr.push(data.stateInBbed);
