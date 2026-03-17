@@ -18,7 +18,6 @@ import {
   jetgGrey,
   findMax,
   interp,
-  interpSmall,
   initValue,
   jetWhite4,
 } from "../../assets/util/util";
@@ -40,10 +39,6 @@ const sitnum1 = 32;
 const sitnum2 = 32;
 const sitInterp = 2;
 const sitOrder = 4;
-const sitInterpX = sitInterp * 2;
-const sitInterpY = sitInterp;
-const sitOrderX = sitOrder * 2;
-const sitOrderY = sitOrder;
 let totalArr = [],
   totalPointArr = [];
 let compen1 = localStorage.getItem('compen') ? JSON.parse(localStorage.getItem('compen')) : 0
@@ -79,18 +74,22 @@ let isShiftPressed = false;
     ndata1Num
 
 
-    let bigArr = new Array(sitnum1 * sitInterpX * sitnum2 * sitInterpY).fill(1);
+    let bigArr = new Array(sitnum1 * sitInterp * sitnum2 * sitInterp).fill(1);
     let bigArrg = new Array(
-      (sitnum1 * sitInterpX + sitOrderX * 2) *
-      (sitnum2 * sitInterpY + sitOrderY * 2)
+      (sitnum1 * sitInterp + sitOrder * 2) *
+      (sitnum2 * sitInterp + sitOrder * 2)
     ).fill(0),
       bigArrg1New = new Array(
-        (sitnum1 * sitInterpX + sitOrderX * 2) *
-        (sitnum2 * sitInterpY + sitOrderY * 2)
+        (sitnum1 * sitInterp + 2 * sitOrder) *
+        (sitnum2 * sitInterp + 2 * sitOrder) * 2
       ).fill(1),
+      bigArrgnew = new Array(
+        (sitnum1 * sitInterp + sitOrder * 2) *
+        (sitnum2 * sitInterp + sitOrder * 2)
+      ).fill(0),
       smoothBig = new Array(
-        (sitnum1 * sitInterpX + sitOrderX * 2) *
-        (sitnum2 * sitInterpY + sitOrderY * 2)
+        (sitnum1 * sitInterp + sitOrder * 2) *
+        (sitnum2 * sitInterp + sitOrder * 2) * 2
       ).fill(0);
 
 
@@ -112,8 +111,8 @@ let isShiftPressed = false;
   const ALT_KEY = 18;
   const CTRL_KEY = 17;
   const CMD_KEY = 91;
-  const AMOUNTX = (sitnum1 * sitInterpX + sitOrderX * 2);
-  const AMOUNTY = (sitnum2 * sitInterpY + sitOrderY * 2);
+  const AMOUNTX = (sitnum1 * sitInterp + sitOrder * 2) * 2;
+  const AMOUNTY = (sitnum2 * sitInterp + sitOrder * 2);
 
   const SEPARATION = 100;
   // let group = new THREE.Group();
@@ -186,7 +185,9 @@ let isShiftPressed = false;
     renderer.setSize(window.innerWidth, window.innerHeight);
 
     renderer.outputEncoding = THREE.sRGBEncoding;
-    container.replaceChildren(renderer.domElement);
+    if (container.childNodes.length == 0) {
+      container.appendChild(renderer.domElement);
+    }
 
     renderer.setClearColor(0x000000);
 
@@ -498,12 +499,12 @@ let isShiftPressed = false;
 
 
     const realArr = []
-    for (let i = 0; i < sitnum1; i++) {
+    for (let i = 0; i < 64; i++) {
       let num = 0
-      for (let j = 0; j < sitnum2; j++) {
-        num += ndata1[j * sitnum1 + i]
+      for (let j = 0; j < 32; j++) {
+        num += ndata1[j * 64 + i]
       }
-      smoothValue = smoothValue + (num / sitnum2 - smoothValue) / 3
+      smoothValue = smoothValue + (num / 32 - smoothValue) / 3
       realArr.push(smoothValue)
     }
 
@@ -516,33 +517,37 @@ let isShiftPressed = false;
 
     // ndata1 = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,5,48,25,8,0,1,0,0,0,0,0,0,0,0,2,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,6,7,28,37,6,0,0,0,0,0,0,0,0,0,1,1,6,2,4,0,0,0,0,0,0,0,1,0,1,0,0,1,3,11,22,52,35,2,2,4,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,31,50,14,1,1,0,0,0,0,0,0,0,1,7,19,9,2,0,1,0,0,0,0,0,0,0,0,0,0,1,9,30,48,30,5,3,5,9,7,3,0,0,0,0,1,30,63,35,6,1,0,0,0,0,0,0,0,0,0,0,0,0,5,46,49,10,2,1,1,5,12,8,0,0,0,0,4,72,25,35,7,1,0,0,0,0,0,0,0,0,0,0,0,0,16,24,26,5,1,0,0,2,14,54,0,0,0,0,7,59,52,40,27,4,1,1,0,0,0,0,0,0,0,0,0,1,23,33,12,1,0,0,0,3,27,60,0,0,0,0,20,46,46,35,32,9,1,0,0,0,0,0,0,0,0,0,1,2,22,21,14,2,1,0,2,6,39,83,0,0,0,0,21,41,38,44,52,26,2,0,0,0,0,0,0,0,0,0,0,2,24,19,11,2,0,0,0,9,65,77,0,0,0,0,38,63,44,41,55,38,6,1,0,0,0,0,0,0,0,0,0,0,14,14,17,2,1,0,0,19,36,47,0,0,0,0,20,73,37,39,55,54,26,3,1,0,0,0,0,0,0,0,0,1,40,17,13,10,1,0,0,1,8,23,0,0,0,2,46,66,29,31,54,55,30,14,4,0,0,0,0,0,0,0,0,1,10,48,14,6,4,1,0,1,6,8,0,0,0,1,36,60,40,17,42,54,58,15,4,0,0,0,0,0,0,0,1,4,20,26,29,14,5,11,2,1,3,2,0,0,2,1,83,42,18,17,34,59,48,21,7,1,0,0,1,0,1,2,1,1,13,21,17,17,11,18,4,1,1,0,0,0,0,0,46,45,14,5,22,42,44,36,12,2,1,1,1,0,0,1,0,3,6,32,41,40,18,17,8,1,1,0,0,0,0,0,31,35,6,2,15,52,42,20,14,6,2,3,3,3,3,4,1,3,7,12,34,52,43,41,12,2,1,0,0,0,0,0,52,30,4,1,12,28,27,32,13,6,3,5,7,16,9,33,9,19,6,7,40,28,16,30,33,4,1,0,0,0,0,0,35,29,5,0,14,26,43,18,21,9,4,7,14,13,7,16,13,19,15,6,23,46,23,28,33,3,1,0,0,0,0,0,25,18,2,0,2,17,21,29,20,22,9,10,14,11,20,31,27,22,20,10,18,57,36,40,40,1,0,1,0,0,0,0,23,22,1,0,2,16,22,25,29,48,20,15,26,16,13,16,15,15,9,10,12,37,54,44,14,0,0,1,0,0,0,0,47,12,1,0,2,12,29,40,35,40,25,17,27,14,13,10,16,13,13,17,10,29,32,48,4,0,0,0,0,0,0,0,53,5,0,0,6,6,33,45,37,67,43,31,28,15,7,9,12,10,10,8,4,15,18,7,1,0,0,0,0,0,0,1,29,1,0,0,2,4,19,56,40,45,78,36,42,15,6,6,7,8,2,3,1,2,4,1,0,0,0,0,0,0,1,1,13,1,0,0,0,2,16,52,61,39,52,39,44,13,9,1,1,2,1,2,0,1,1,1,0,0,0,0,0,0,1,0,12,0,0,0,1,4,14,22,51,33,27,29,44,12,3,1,0,1,1,3,1,1,1,0,0,0,0,0,0,1,1,2,4,0,1,0,1,3,12,29,85,56,38,31,11,1,1,0,0,0,0,1,0,0,1,0,0,0,0,0,0,1,1,2,3,0,0,0,1,4,12,29,85,56,37,30,11,1,2,0,1,0,0,1,0,0,0,0,0,0,0,0,0,2,3,21,16,3,7,2,7,3,8,15,30,20,7,4,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,4,35,44,7,3,1,3,2,7,10,8,3,3,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,4,19,51,2,1,1,1,0,2,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,9,18,57,32,3,4,8,5,1,3,1,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
 
-    bigArr = interpSmall(ndata1, sitnum1, sitnum2, sitInterpX, sitInterpY);
+    interp(ndata1, bigArr, sitnum1, sitInterp);
     let bigArrs = addSide(
       bigArr,
-      sitnum1 * sitInterpX,
-      sitnum2 * sitInterpY,
-      sitOrderX,
-      sitOrderY
+      sitnum2 * sitInterp,
+      sitnum1 * sitInterp,
+      sitOrder,
+      sitOrder
     );
 
     gaussBlur_1(
       bigArrs,
       bigArrg,
-      AMOUNTX,
-      AMOUNTY,
+      sitnum2 * sitInterp + sitOrder * 2,
+      sitnum1 * sitInterp + sitOrder * 2,
       valueg1
     );
 
     bodyArr = []
 
-    for (let i = 0; i < bigArrg.length; i++) {
-      bigArrg1New[i] = bigArrg[i]
+    for (let i = 0; i < 72; i++) {
+      for (let j = 0; j < 72; j++) {
+        bigArrg1New[(i * 2) * 72 + j] = bigArrg[i * 72 + j]
+        bigArrg1New[(i * 2 + 1) * 72 + (j)] = bigArrg[i * 72 + j]
+        // bigArrg1New[(i * 2 + 1) * 72 + j] = bigArrg1[i * 72 + j]
+      }
     }
 
     for (let ix = 0; ix < AMOUNTX; ix++) {
       let num = 0
       for (let iy = 0; iy < AMOUNTY; iy++) {
-        num += bigArrg1New[iy * AMOUNTX + ix]
+        num += bigArrg[ix * AMOUNTY + iy]
       }
       bodyArr.push(parseInt(num / AMOUNTY))
     }
@@ -554,20 +559,20 @@ let isShiftPressed = false;
     dataArrRef.current = []
 
 
-    let k = 0;
+    let k = 0,
+      l = 0;
 
   
 
     for (let ix = 0; ix < AMOUNTX; ix++) {
       for (let iy = 0; iy < AMOUNTY; iy++) {
-        const dataIndex = iy * AMOUNTX + ix;
-        const value = bigArrg1New[dataIndex] * 10;
+        const value = bigArrg1New[l] * 10;
 
         //柔化处理smooth
-        smoothBig[dataIndex] = smoothBig[dataIndex] + (value - smoothBig[dataIndex]) / valuel1;
+        smoothBig[l] = smoothBig[l] + (value - smoothBig[l]) / valuel1;
 
         positions[k] = ix * SEPARATION - (AMOUNTX * SEPARATION) / 2; // x
-        positions[k + 1] = smoothBig[dataIndex] * value1; // y
+        positions[k + 1] = smoothBig[l] * value1; // y
         positions[k + 2] = iy * SEPARATION - (AMOUNTY * SEPARATION) / 2; // z
         let rgb
 
@@ -575,16 +580,16 @@ let isShiftPressed = false;
 
           if (ix >= sitIndexArr[0] && ix < sitIndexArr[1] && iy >= sitIndexArr[2] && iy < sitIndexArr[3]) {
           
-            rgb = jetWhite4(0, valuej1, smoothBig[dataIndex]);
+            rgb = jetWhite4(0, valuej1, smoothBig[l]);
            
-            dataArrRef.current.push(bigArrg1New[dataIndex])
+            dataArrRef.current.push(bigArrg1New[l])
           } else 
           {
-            rgb = jetWhite4(0, valuej1, smoothBig[dataIndex]);
+            rgb = jetWhite4(0, valuej1, smoothBig[l]);
             // scales1[l] = 1;
           }
         } else {
-          rgb = jetWhite4(0, valuej1, smoothBig[dataIndex]);
+          rgb = jetWhite4(0, valuej1, smoothBig[l]);
           // scales1[l] = 1;
         }
 
@@ -593,6 +598,7 @@ let isShiftPressed = false;
         colors[k + 2] = rgb[2] / 255;
 
         k += 3;
+        l++;
       }
     }
     if (!sitIndexArr.length || sitIndexArr.every((a) => a == 0)) {
@@ -781,7 +787,7 @@ let isShiftPressed = false;
   }
 
   function chartReset() {
-    console.log(dataArrRef.current)
+
     const point = dataArrRef.current.filter((a) => a > 0).length
     const press = Math.round(dataArrRef.current.reduce((a, b) => a + b, 0) / 10)
     if ( totalArrRef.current.length < 20) {
@@ -869,49 +875,10 @@ let isShiftPressed = false;
 
     return () => {
       cancelAnimationFrame(animationRequestId);
-      window.removeEventListener("resize", onWindowResize);
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
-      document.removeEventListener('pointerdown', pointDown);
-      document.removeEventListener('pointermove', pointMove);
-      document.removeEventListener('pointerup', pointUp);
-
-      // 清除 group 中的所有子对象
-      while (group.children.length > 0) {
-        const child = group.children[0];
-        if (child.geometry) child.geometry.dispose();
-        if (child.material) {
-          if (child.material.map) child.material.map.dispose();
-          child.material.dispose();
-        }
-        group.remove(child);
-      }
-
-      // 从 scene 中移除所有对象
-      if (scene) {
-        while (scene.children.length > 0) {
-          const child = scene.children[0];
-          if (child.geometry) child.geometry.dispose();
-          if (child.material) {
-            if (Array.isArray(child.material)) {
-              child.material.forEach(m => m.dispose());
-            } else {
-              if (child.material.map) child.material.map.dispose();
-              child.material.dispose();
-            }
-          }
-          scene.remove(child);
-        }
-      }
-
-      // 移除 renderer 的 DOM 元素
-      if (renderer?.domElement && container) {
-        try { container.removeChild(renderer.domElement); } catch (e) {}
-      }
-
-      controls?.dispose();
-      renderer?.dispose();
-      selectHelper?.dispose();
+      document.removeEventListener('pointerdown', pointDown)
+      document.removeEventListener('pointermove', pointMove)
+      document.removeEventListener('pointup', pointUp)
+      selectHelper.dispose()
     };
   }, []);
   return (
