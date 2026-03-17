@@ -158,6 +158,10 @@ const Canvas = React.forwardRef((props, refs) => {
   const handHeatmapRef = useRef()
 
   function init() {
+    // 清空 group 中的旧粒子，防止重复 add 导致双层
+    while (group.children.length > 0) {
+      group.remove(group.children[0]);
+    }
     container = document.getElementById(`canvas${props.index}`);
     // camera
 
