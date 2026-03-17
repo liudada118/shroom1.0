@@ -519,6 +519,9 @@ def getData(data):
     处理传感器数据，返回健康监测结果（新版 API）
     """
     inputs = create_default_inputs()
+
+    
+
     inputs['frame_data'] = np.array(data, dtype=np.float32)
     outputs = ncz.step(inputs)
 
@@ -535,6 +538,9 @@ def getData(data):
         if hasattr(val, 'tolist'):
             return val.tolist()
         return list(val)
+
+    print(outputs)
+
 
     result = {
         # 核心生理指标
