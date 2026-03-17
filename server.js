@@ -1615,8 +1615,31 @@ module.exports = {
                 }
 
                 if (['hand0205', 'handGlove115200', 'robot1'].includes(file)) {
-                  sitObj.newArr147 = localData[value]?.data
-                  backObj.newArr147 = localData[value]?.data
+                  // 兼容新旧数据格式：新版260(256+4)，旧版151(147+4)
+                  const sitRaw = JSON.parse(localData[value]?.data || '[]')
+                  const backRaw = JSON.parse(localDataBack[value]?.data || '[]')
+                  if (sitRaw.length >= 260) {
+                    // 新版：前256是原始数据，后4是四元数
+                    const sitPressure = sitRaw.slice(0, 256)
+                    const sitRotate = sitRaw.slice(256, 260)
+                    sitObj.sitData = sitPressure
+                    sitObj.newArr147 = handL([...sitPressure])
+                    sitObj.rotate = sitRotate
+                  } else {
+                    // 旧版：前147是newArr147，后4是四元数
+                    sitObj.newArr147 = sitRaw.slice(0, sitRaw.length - 4)
+                    sitObj.rotate = sitRaw.slice(sitRaw.length - 4)
+                  }
+                  if (backRaw.length >= 260) {
+                    const backPressure = backRaw.slice(0, 256)
+                    const backRotate = backRaw.slice(256, 260)
+                    backObj.backData = backPressure
+                    backObj.newArr147 = handR([...backPressure])
+                    backObj.rotate = backRotate
+                  } else {
+                    backObj.newArr147 = backRaw.slice(0, backRaw.length - 4)
+                    backObj.rotate = backRaw.slice(backRaw.length - 4)
+                  }
                 }
 
                 if (file == 'footVideo') {
@@ -1768,8 +1791,29 @@ module.exports = {
                   }
 
                   if (['hand0205', 'handGlove115200', 'robot1'].includes(file)) {
-                    sitObj.newArr147 = localData[nowIndex]?.data
-                    backObj.newArr147 = localDataBack[nowIndex]?.data
+                    // 兼容新旧数据格式：新版260(256+4)，旧版151(147+4)
+                    const sitRaw = JSON.parse(localData[nowIndex]?.data || '[]')
+                    const backRaw = JSON.parse(localDataBack[nowIndex]?.data || '[]')
+                    if (sitRaw.length >= 260) {
+                      const sitPressure = sitRaw.slice(0, 256)
+                      const sitRotate = sitRaw.slice(256, 260)
+                      sitObj.sitData = sitPressure
+                      sitObj.newArr147 = handL([...sitPressure])
+                      sitObj.rotate = sitRotate
+                    } else {
+                      sitObj.newArr147 = sitRaw.slice(0, sitRaw.length - 4)
+                      sitObj.rotate = sitRaw.slice(sitRaw.length - 4)
+                    }
+                    if (backRaw.length >= 260) {
+                      const backPressure = backRaw.slice(0, 256)
+                      const backRotate = backRaw.slice(256, 260)
+                      backObj.backData = backPressure
+                      backObj.newArr147 = handR([...backPressure])
+                      backObj.rotate = backRotate
+                    } else {
+                      backObj.newArr147 = backRaw.slice(0, backRaw.length - 4)
+                      backObj.rotate = backRaw.slice(backRaw.length - 4)
+                    }
                   }
 
                   if (file == 'footVideo') {
@@ -2353,68 +2397,80 @@ module.exports = {
                 }
               });
             } else if (file !== "car10") {
+              // 判断是否是触觉手套类型，需要分离原始256数据和四元数
+              const isHandType = ['hand0205', 'handGlove115200'].includes(file);
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
                   logger.error(err);
                 } else {
-                  //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
-
                   if (!rows.length) return;
                   console.log(historyArr)
                   for (var i = historyArr[0], j = 0; i < historyArr[1] - 1; i++, j++) {
-                    const sitData = JSON.parse(rows[i][`data`]);
-                    console.log(sitData.length)
+                    const rawData = JSON.parse(rows[i][`data`]);
+                    let pressureData, rotateData;
+                    if (isHandType) {
+                      // 兼容新旧数据格式
+                      if (rawData.length >= 260) {
+                        // 新版：前256是原始压力数据，后4是四元数
+                        pressureData = rawData.slice(0, 256);
+                        rotateData = rawData.slice(256, 260);
+                      } else {
+                        // 旧版：前147是newArr147，后4是四元数
+                        pressureData = rawData.slice(0, rawData.length - 4);
+                        rotateData = rawData.slice(rawData.length - 4);
+                      }
+                    } else {
+                      pressureData = rawData;
+                      rotateData = [];
+                    }
+                    console.log(pressureData.length)
                     const press = sitPressSelect.length
                       ? sitPressSelect[i]
-                      : sitData.reduce((a, b) => a + b, 0);
-                    // wsPointData = JSON.parse(rows[i][`data`]).map((a) => a < 10 ? 0 : a)
-                    // const realArr = press(wsPointData,1500)
-                    // const pressure = realArr.reduce((a,b) => a+b , 0) / realArr.filter((a) => a> 0).length
-                    // const pressuremmgH = calculatePressure(pressure)
+                      : pressureData.reduce((a, b) => a + b, 0);
 
                     const area = sitAreaSelect.length
                       ? sitAreaSelect[i]
-                      : sitData.filter((a) => a > 0).length;
+                      : pressureData.filter((a) => a > 0).length;
 
-                    const max = findMax(sitData)
+                    const max = findMax(pressureData)
                     const newData = {
                       time: timeStampToDate(rows[i][`timestamp`]),
                       pressureArea: sitAreaSelect.length
                         ? sitAreaSelect[i]
-                        : area, //鍘熷鐭╅樀
+                        : area,
                       pressure: sitPressSelect.length
                         ? sitPressSelect[i]
                         : totalToN(press),
-                      realData: rows[i][`data`],
+                      realData: JSON.stringify(pressureData),
                       index: (j / 12).toFixed(2),
-                      max
-                      // pressuremmgH :pressuremmgH
+                      max,
+                      rotate: rotateData.length ? JSON.stringify(rotateData) : '',
                     };
                     csvWriteData.push(newData);
                   }
-                  // 灏嗘眹鎬荤殑鍘嬪姏鏁版嵁鍐欏叆 CSV 鏂囦欢
-                  // const timeStamp = Date.now()
 
-                  // const str = nowGetTime.replace(/[/:]/g, "-");
-                  let str = nowGetTime; //.replace(/[/:]/g, "-");
+                  let str = nowGetTime;
                   if (str.includes(" ")) {
                     str = str.split(" ")[0];
                   } else {
                     str = timeStampTo_Date(Number(str));
                   }
 
-                  const csvWriter = createCsvWriter({
-                    path: `${csvPath}/sit${str}.csv`, // 鎸囧畾杈撳嚭鏂囦欢鐨勮矾寰勫拰鍚嶇О
-                    header: [
-                      { id: "index", title: "" },
-                      { id: "max", title: "max" },
-                      { id: "time", title: "time" },
-                      { id: "pressureArea", title: "area" },
-                      { id: "pressure", title: "press" },
-                      // { id: "pressuremmgH", title: "鍘嬪己澶у皬(mmgH)" },
-                      { id: "realData", title: "data" },
+                  const csvHeaders = [
+                    { id: "index", title: "" },
+                    { id: "max", title: "max" },
+                    { id: "time", title: "time" },
+                    { id: "pressureArea", title: "area" },
+                    { id: "pressure", title: "press" },
+                    { id: "realData", title: "data" },
+                  ];
+                  if (isHandType) {
+                    csvHeaders.push({ id: "rotate", title: "quaternion" });
+                  }
 
-                    ],
+                  const csvWriter = createCsvWriter({
+                    path: `${csvPath}/sit${str}.csv`,
+                    header: csvHeaders,
                   });
 
                   csvWriter
@@ -3673,7 +3729,7 @@ function colOrSendData(jsonData) {
 
     db.run(
       insertQuery,
-      [(file.includes('hand0205') || file == 'handGlove115200') ? JSON.stringify([...JSON.parse(jsonData).newArr147, ...JSON.parse(jsonData).rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).sitData]), timestamp, date],
+      [(file.includes('hand0205') || file == 'handGlove115200') ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).sitData]), timestamp, date],
       function (err) {
         if (err) {
           logger.error(err);
@@ -3966,7 +4022,7 @@ function colOrSendData1(jsonData) {
 
     db1.run(
       insertQuery,
-      [(file.includes('hand0205') || file == 'handGlove115200') ? JSON.stringify([...JSON.parse(jsonData).newArr147, ...JSON.parse(jsonData).rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
+      [(file.includes('hand0205') || file == 'handGlove115200') ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
       function (err) {
         if (err) {
           logger.error(err);
@@ -4276,7 +4332,7 @@ function colOrSendData2(jsonData) {
 
     db2.run(
       insertQuery,
-      [(file.includes('hand0205') || file == 'handGlove115200') ? JSON.stringify([...JSON.parse(jsonData).newArr147, ...JSON.parse(jsonData).rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
+      [(file.includes('hand0205') || file == 'handGlove115200') ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
       function (err) {
         if (err) {
           logger.error(err);
