@@ -21,3 +21,4 @@ pdf/
 config.txt
 .npm-cache/
 dist/
+pack-resources/python
