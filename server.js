@@ -128,6 +128,7 @@ const backnum2 = 64;
 let smoothValue = 0;
 let onbedArr = []; // jqbed 在床状态数组
 let onBedTime = 0; // jqbed 在床/离床计时（秒）
+let onBedTimeStart = null; // jqbed 计时起始时间戳
 let lastData = new Array(1024).fill(0),
   firstData = new Array(1024).fill(0);
 const backTotal = backnum1 * backnum2;
@@ -4389,14 +4390,17 @@ setInterval(async () => {
           onbedArr.push(data.stateInBbed);
         }
 
-        if (onbedArr.every((a) => a == 1)) {
-          onBedTime += 2;
-          data.onBedTime = onBedTime;
-        } else if (onbedArr.every((a) => a == 0)) {
-          onBedTime += 2;
+        if (onbedArr.every((a) => a == 1) || onbedArr.every((a) => a == 0)) {
+          // 状态稳定（全部在床或全部离床），用真实时间差计算
+          if (onBedTimeStart === null) {
+            onBedTimeStart = Date.now();
+          }
+          onBedTime = Math.floor((Date.now() - onBedTimeStart) / 1000);
           data.onBedTime = onBedTime;
         } else {
+          // 状态变化过渡期，重置计时
           onBedTime = 0;
+          onBedTimeStart = null;
           data.onBedTime = 0;
         }
 

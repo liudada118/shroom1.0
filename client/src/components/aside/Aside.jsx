@@ -80,7 +80,7 @@ class Aside extends React.Component {
             onBedTime: 0,
         }
         this.canvas = React.createRef()
-        this._onBedTimer = null
+
     }
 
     changePressMult(value) {
@@ -104,12 +104,7 @@ class Aside extends React.Component {
         var c2 = document.getElementById("myChart3");
         if (c2) ctx3 = c2.getContext("2d");
 
-        // jqbed 在床/离床计时器
-        this._onBedTimer = setInterval(() => {
-            if (this.state.stateInBbed === 0 || this.state.stateInBbed === 1) {
-                this.setState(prev => ({ onBedTime: prev.onBedTime + 1 }))
-            }
-        }, 1000)
+        // jqbed 在床/离床计时 - 由后端 server.js 计算并通过 WebSocket 发送
     }
 
     componentDidUpdate() {
@@ -124,10 +119,6 @@ class Aside extends React.Component {
     }
 
     componentWillUnmount() {
-        if (this._onBedTimer) {
-            clearInterval(this._onBedTimer)
-            this._onBedTimer = null
-        }
     }
 
     drawChart({ ctx, arr, max, canvas, index }) {
@@ -230,10 +221,7 @@ class Aside extends React.Component {
         if (obj.stateInBbed !== undefined) {
             const prevState = this.state.stateInBbed
             const newState = obj.stateInBbed
-            // 状态变化时重置计时
-            if (prevState !== newState) {
-                obj.onBedTime = 0
-            }
+            // 状态变化时重置计时（由后端处理，前端只展示）
         }
         this.setState(obj)
     }
