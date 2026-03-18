@@ -29,7 +29,8 @@ function insertWb(arr, dataArr, arrW, arrH, startX, startY, width, height) {
 function genNewArr(arr, positionArr) {
     const res = []
     for (let i = 0; i < positionArr.length; i++) {
-        res[i] = arr[positionArr[i] - 1]
+        const value = Number(arr[positionArr[i] - 1])
+        res[i] = Number.isFinite(value) ? value : 0
     }
     return res
 }
@@ -189,16 +190,17 @@ function renderCanvas2D(ctx, flatData, texWidth, texHeight, cellSize) {
 
 
 const MATRIX_WIDTH_RATIO = 0.4;
+const ROBOT_MATRIX_WIDTH_RATIO = 0.6;
 const MATRIX_SIDE_PANEL_WIDTH = 360;
 const MATRIX_HORIZONTAL_PADDING = 48;
 const MATRIX_VERTICAL_PADDING = 120;
 const MATRIX_MIN_WIDTH = 240;
 const MATRIX_MIN_HEIGHT = 280;
 
-function getMatrixViewportBounds() {
+function getMatrixViewportBounds(widthRatio = MATRIX_WIDTH_RATIO) {
     const ww = typeof window !== 'undefined' ? window.innerWidth : 1920;
     const wh = typeof window !== 'undefined' ? window.innerHeight : 1080;
-    const ratioWidth = Math.floor(ww * MATRIX_WIDTH_RATIO);
+    const ratioWidth = Math.floor(ww * widthRatio);
     const availableWidth = Math.max(ww - MATRIX_SIDE_PANEL_WIDTH - MATRIX_HORIZONTAL_PADDING, 160);
     const safeViewportWidth = Math.max(ww - 32, 160);
     const maxW = Math.min(
@@ -224,7 +226,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
 
     // 计算初始 cellSize 的辅助函数
     const computeCellSize = useCallback((hasRight = false) => {
-        const { maxW, maxH } = getMatrixViewportBounds();
+        const { maxW, maxH } = getMatrixViewportBounds(isRobot ? ROBOT_MATRIX_WIDTH_RATIO : MATRIX_WIDTH_RATIO);
 
         if (isRobot) {
             return calcRobotCellSize(
@@ -438,7 +440,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             robotCtxRefs.current = [];
 
             // 动态计算 robot 的 cellSize
-            const { maxW, maxH } = getMatrixViewportBounds();
+            const { maxW, maxH } = getMatrixViewportBounds(ROBOT_MATRIX_WIDTH_RATIO);
             const newCs = calcRobotCellSize(partsMeta, maxW, maxH);
             cellSizeRef.current = newCs;
             setCellSize(newCs);
@@ -635,7 +637,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     }, []);
 
     const cs = cellSize;
-    const { maxW: containerWidth } = getMatrixViewportBounds();
+    const { maxW: containerWidth } = getMatrixViewportBounds(isRobot ? ROBOT_MATRIX_WIDTH_RATIO : MATRIX_WIDTH_RATIO);
     const showDualFoot = footLayout === 'dual';
     const primaryFootLabel = footLayout === 'single-right' ? '\u53f3\u811a' : '\u5de6\u811a';
 
