@@ -1636,10 +1636,26 @@ module.exports = {
 
                 if (file == 'footVideo') {
                   if (localData[nowIndex]?.data) {
-                    sitObj.newArr147 = footArrToNormal(localData[nowIndex].data)
+                    const sitRaw256 = JSON.parse(localData[nowIndex].data || '[]')
+                    if (sitRaw256.length === 256) {
+                      // 新版：存储的是原始256点数据，需要插值和映射
+                      sitObj.sitData = footVideo([...sitRaw256])
+                      sitObj.newArr147 = footL([...sitRaw256])
+                    } else {
+                      // 旧版：存储的是512点插值数据，用旧逻辑
+                      sitObj.newArr147 = footArrToNormal(localData[nowIndex].data)
+                    }
                   }
                   if (localDataBack[nowIndex]?.data) {
-                    backObj.newArr147 = footArrToNormal(localDataBack[nowIndex].data)
+                    const backRaw256 = JSON.parse(localDataBack[nowIndex].data || '[]')
+                    if (backRaw256.length === 256) {
+                      // 新版：存储的是原始256点数据，需要插值和映射
+                      backObj.backData = footVideo1([...backRaw256])
+                      backObj.newArr147 = footR([...backRaw256])
+                    } else {
+                      // 旧版：存储的是512点插值数据，用旧逻辑
+                      backObj.newArr147 = footArrToNormal(localDataBack[nowIndex].data)
+                    }
                   }
                 }
 
@@ -1814,12 +1830,27 @@ module.exports = {
 
                   if (file == 'footVideo') {
                     if (localData[nowIndex]?.data) {
-                      sitObj.newArr147 = footArrToNormal(localData[nowIndex].data)
+                      const sitRaw256 = JSON.parse(localData[nowIndex].data || '[]')
+                      if (sitRaw256.length === 256) {
+                        // 新版：存储的是原始256点数据，需要插值和映射
+                        sitObj.sitData = footVideo([...sitRaw256])
+                        sitObj.newArr147 = footL([...sitRaw256])
+                      } else {
+                        // 旧版：存储的是512点插值数据，用旧逻辑
+                        sitObj.newArr147 = footArrToNormal(localData[nowIndex].data)
+                      }
                     }
                     if (localDataBack[nowIndex]?.data) {
-                      backObj.newArr147 = footArrToNormal(localDataBack[nowIndex].data)
+                      const backRaw256 = JSON.parse(localDataBack[nowIndex].data || '[]')
+                      if (backRaw256.length === 256) {
+                        // 新版：存储的是原始256点数据，需要插值和映射
+                        backObj.backData = footVideo1([...backRaw256])
+                        backObj.newArr147 = footR([...backRaw256])
+                      } else {
+                        // 旧版：存储的是512点插值数据，用旧逻辑
+                        backObj.newArr147 = footArrToNormal(localDataBack[nowIndex].data)
+                      }
                     }
-
                   }
 
                   if (file === 'smallBed') {
