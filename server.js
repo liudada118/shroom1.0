@@ -181,7 +181,7 @@ function initDb(fileStr) {
   return _initDbFromModule(fileStr, filePath, runtimeResourceRoot);
 }
 
-function getHistorySeries({ sitRows = [], backRows = [], start = 0, end = null }) {
+function getHistorySeries({ sitRows = [], backRows = [], start = 0, end = null, file = '' }) {
   const safeSitRows = Array.isArray(sitRows) ? sitRows : [];
   const safeBackRows = Array.isArray(backRows) ? backRows : [];
   const hasSit = safeSitRows.length > 0;
@@ -195,10 +195,17 @@ function getHistorySeries({ sitRows = [], backRows = [], start = 0, end = null }
   const press = [];
   const area = [];
   const time = [];
+  // hand/robot 类型存储格式为 [256压力数据, 4四元数]，需要截取前256个
+  const needSlice = ['hand0205', 'handGlove115200'].includes(file) || file.includes('robot');
 
   for (let i = rangeStart; i < rangeEnd; i++) {
-    const sitData = hasSit && safeSitRows[i] ? JSON.parse(safeSitRows[i].data) : null;
-    const backData = hasBack && safeBackRows[i] ? JSON.parse(safeBackRows[i].data) : null;
+    let sitData = hasSit && safeSitRows[i] ? JSON.parse(safeSitRows[i].data) : null;
+    let backData = hasBack && safeBackRows[i] ? JSON.parse(safeBackRows[i].data) : null;
+    // 对 hand/robot 类型截取前256个压力数据，去掉四元数
+    if (needSlice) {
+      if (sitData && sitData.length > 256) sitData = sitData.slice(0, 256);
+      if (backData && backData.length > 256) backData = backData.slice(0, 256);
+    }
     const sitTotalValue = sitData ? sitData.reduce((a, b) => a + b, 0) : 0;
     const backTotalValue = backData ? backData.reduce((a, b) => a + b, 0) : 0;
     const sitAreaValue = sitData ? sitData.filter((a) => a > 10).length : 0;
@@ -781,6 +788,7 @@ module.exports = {
                       const historySeries = getHistorySeries({
                         sitRows: localData,
                         backRows: localDataBack,
+                        file,
                       });
                       length = historySeries.length;
                       indexArr = [0, Math.max(length - 2, 0)];
@@ -979,6 +987,7 @@ module.exports = {
                       const historySeries = getHistorySeries({
                         sitRows: localData,
                         backRows: localDataBack,
+                        file,
                       });
                       length = historySeries.length;
                       indexArr = [0, Math.max(length - 2, 0)];
@@ -1070,6 +1079,7 @@ module.exports = {
                   const historySeries = getHistorySeries({
                     sitRows: localData,
                     backRows: localDataBack,
+                    file,
                   });
                   length = historySeries.length;
                   indexArr = [0, Math.max(length - 2, 0)];
@@ -1626,14 +1636,34 @@ module.exports = {
                   const sitRawText = localData[value]?.data
                   const backRawText = localDataBack[value]?.data
                   if (sitRawText) {
-                    const sitPressure = normalizeFiniteFrame(JSON.parse(sitRawText), 256)
-                    sitObj.sitData = sitPressure
-                    sitObj.newArr147 = sitPressure
+                    const sitRaw = JSON.parse(sitRawText)
+                    if (sitRaw.length >= 260) {
+                      // 新版：前256是原始数据，后4是四元数
+                      const sitPressure = sitRaw.slice(0, 256)
+                      sitObj.sitData = sitPressure
+                      sitObj.newArr147 = sitPressure
+                      sitObj.rotate = sitRaw.slice(256, 260)
+                    } else {
+                      // 旧版：直接是压力数据
+                      const sitPressure = normalizeFiniteFrame(sitRaw, 256)
+                      sitObj.sitData = sitPressure
+                      sitObj.newArr147 = sitPressure
+                    }
                   }
                   if (backRawText) {
-                    const backPressure = normalizeFiniteFrame(JSON.parse(backRawText), 256)
-                    backObj.backData = backPressure
-                    backObj.newArr147 = backPressure
+                    const backRaw = JSON.parse(backRawText)
+                    if (backRaw.length >= 260) {
+                      // 新版：前256是原始数据，后4是四元数
+                      const backPressure = backRaw.slice(0, 256)
+                      backObj.backData = backPressure
+                      backObj.newArr147 = backPressure
+                      backObj.rotate = backRaw.slice(256, 260)
+                    } else {
+                      // 旧版：直接是压力数据
+                      const backPressure = normalizeFiniteFrame(backRaw, 256)
+                      backObj.backData = backPressure
+                      backObj.newArr147 = backPressure
+                    }
                   }
                 } else if (['hand0205', 'handGlove115200'].includes(file)) {
                   // 鍏煎鏂版棫鏁版嵁鏍煎紡锛氭柊鐗?60(256+4)锛屾棫鐗?51(147+4)
@@ -1835,14 +1865,34 @@ module.exports = {
                     const sitRawText = localData[nowIndex]?.data
                     const backRawText = localDataBack[nowIndex]?.data
                     if (sitRawText) {
-                      const sitPressure = normalizeFiniteFrame(JSON.parse(sitRawText), 256)
-                      sitObj.sitData = sitPressure
-                      sitObj.newArr147 = sitPressure
+                      const sitRaw = JSON.parse(sitRawText)
+                      if (sitRaw.length >= 260) {
+                        // 新版：前256是原始数据，后4是四元数
+                        const sitPressure = sitRaw.slice(0, 256)
+                        sitObj.sitData = sitPressure
+                        sitObj.newArr147 = sitPressure
+                        sitObj.rotate = sitRaw.slice(256, 260)
+                      } else {
+                        // 旧版：直接是压力数据
+                        const sitPressure = normalizeFiniteFrame(sitRaw, 256)
+                        sitObj.sitData = sitPressure
+                        sitObj.newArr147 = sitPressure
+                      }
                     }
                     if (backRawText) {
-                      const backPressure = normalizeFiniteFrame(JSON.parse(backRawText), 256)
-                      backObj.backData = backPressure
-                      backObj.newArr147 = backPressure
+                      const backRaw = JSON.parse(backRawText)
+                      if (backRaw.length >= 260) {
+                        // 新版：前256是原始数据，后4是四元数
+                        const backPressure = backRaw.slice(0, 256)
+                        backObj.backData = backPressure
+                        backObj.newArr147 = backPressure
+                        backObj.rotate = backRaw.slice(256, 260)
+                      } else {
+                        // 旧版：直接是压力数据
+                        const backPressure = normalizeFiniteFrame(backRaw, 256)
+                        backObj.backData = backPressure
+                        backObj.newArr147 = backPressure
+                      }
                     }
                   } else if (['hand0205', 'handGlove115200'].includes(file)) {
                     // 鍏煎鏂版棫鏁版嵁鏍煎紡锛氭柊鐗?60(256+4)锛屾棫鐗?51(147+4)
@@ -2470,7 +2520,7 @@ module.exports = {
               });
             } else if (file !== "car10") {
               // 鍒ゆ柇鏄惁鏄Е瑙夋墜濂楃被鍨嬶紝闇€瑕佸垎绂诲師濮?56鏁版嵁鍜屽洓鍏冩暟
-              const isHandType = ['hand0205', 'handGlove115200'].includes(file);
+              const isHandType = ['hand0205', 'handGlove115200'].includes(file) || file.includes('robot');
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
                   logger.error(err);
@@ -2586,8 +2636,22 @@ module.exports = {
 
                   // if()
 
+                  const isBackHandType = ['hand0205', 'handGlove115200'].includes(file) || file.includes('robot');
                   for (var i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
-                    const backData = JSON.parse(rows[i][`data`]);
+                    const rawBackData = JSON.parse(rows[i][`data`]);
+                    let backData, backRotateData;
+                    if (isBackHandType && rawBackData.length >= 260) {
+                      // 新版：前256是原始压力数据，后4是四元数
+                      backData = rawBackData.slice(0, 256);
+                      backRotateData = rawBackData.slice(256, 260);
+                    } else if (isBackHandType && rawBackData.length > 4) {
+                      // 旧版：前N-4是数据，后4是四元数
+                      backData = rawBackData.slice(0, rawBackData.length - 4);
+                      backRotateData = rawBackData.slice(rawBackData.length - 4);
+                    } else {
+                      backData = rawBackData;
+                      backRotateData = [];
+                    }
                     // const press = calPressArr(backData , backIndex , 32)
                     const press = backPressSelect.length
                       ? backPressSelect[i]
@@ -2595,26 +2659,16 @@ module.exports = {
                     const area = backAreaSelect.length
                       ? backAreaSelect[i]
                       : backData.filter((a) => a > 10).length;
-                    // const newData = {
-                    //   time: timeStampToDate(rows[i][`timestamp`]),
-                    //   pressureArea: backAreaSelect.length
-                    //     ? backAreaSelect[i]
-                    //     : area * 2.1, //閸樼喎顫愰惌鈺呮█
-                    //   pressure: backPressSelect.length
-                    //     ? backPressSelect[i]
-                    //     : pressToN(area, press),
-                    //   realData: rows[i][`data`],
-                    // };
                     const max = findMax(backData);
                     const newData = {
                       time: timeStampToDate(rows[i][`timestamp`]),
                       pressureArea: backAreaSelect.length
                         ? backAreaSelect[i]
-                        : area, //閸樼喎顫愰惌鈺呮█
+                        : area,
                       pressure: backPressSelect.length
                         ? backPressSelect[i]
                         : totalToN(press, 1.3),
-                      realData: rows[i][`data`],
+                      realData: JSON.stringify(backData),
                       index: (j / 12).toFixed(2),
                       area1: [...backData].filter(a => a > 1).length,
                       area10: [...backData].filter(a => a > 10).length,
@@ -2622,7 +2676,8 @@ module.exports = {
                       total10: [...backData].filter(a => a > 10).reduce((a, b) => a + b, 0),
                       total10area10: [...backData].filter(a => a > 10).reduce((a, b) => a + b, 0) / [...backData].filter(a => a > 10).length,
                       total1area1: backData.reduce((a, b) => a + b, 0) / [...backData].filter(a => a > 1).length,
-                      max
+                      max,
+                      rotate: backRotateData.length ? JSON.stringify(backRotateData) : '',
                     };
                     csvWriteBackData.push(newData);
                   }
@@ -2636,17 +2691,20 @@ module.exports = {
                     str = timeStampTo_Date(Number(str));
                   }
 
+                  const backCsvHeaders = [
+                    { id: "index", title: "" },
+                    { id: "time", title: "time" },
+                    { id: "max", title: "max" },
+                    { id: "pressureArea", title: "area" },
+                    { id: "pressure", title: "press" },
+                    { id: "realData", title: "data" },
+                  ];
+                  if (isBackHandType) {
+                    backCsvHeaders.push({ id: "rotate", title: "quaternion" });
+                  }
                   const csvWriter1 = createCsvWriter({
                     path: `${csvPath}/back${str}.csv`,
-                    // path: `./data/back${str}.csv`, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
-                    header: [
-                      { id: "index", title: "" },
-                      { id: "time", title: "time" },
-                      { id: "max", title: "max" },
-                      { id: "pressureArea", title: "area" },
-                      { id: "pressure", title: "press" },
-                      { id: "realData", title: "data" },
-                    ],
+                    header: backCsvHeaders,
                   });
 
                   csvWriter1
@@ -2854,6 +2912,7 @@ module.exports = {
               backRows: localDataBack,
               start: getMessage.indexArr[0],
               end: getMessage.indexArr[1],
+              file,
             });
             const press = historySeries.press;
             const area = historySeries.area;
@@ -3791,7 +3850,7 @@ function colOrSendData(jsonData) {
 
     db.run(
       insertQuery,
-      [(file.includes('hand0205') || file == 'handGlove115200') ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : file == 'footVideo' ? JSON.stringify([...JSON.parse(jsonData).realArr]) : JSON.stringify([...JSON.parse(jsonData).sitData]), timestamp, date],
+      [(file.includes('hand0205') || file == 'handGlove115200' || file.includes('robot')) ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : file == 'footVideo' ? JSON.stringify([...JSON.parse(jsonData).realArr]) : JSON.stringify([...JSON.parse(jsonData).sitData]), timestamp, date],
       function (err) {
         if (err) {
           logger.error(err);
@@ -4084,7 +4143,7 @@ function colOrSendData1(jsonData) {
 
     db1.run(
       insertQuery,
-      [(file.includes('hand0205') || file == 'handGlove115200') ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : file == 'footVideo' ? JSON.stringify([...JSON.parse(jsonData).realArr]) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
+      [(file.includes('hand0205') || file == 'handGlove115200' || file.includes('robot')) ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : file == 'footVideo' ? JSON.stringify([...JSON.parse(jsonData).realArr]) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
       function (err) {
         if (err) {
           logger.error(err);
@@ -4394,7 +4453,7 @@ function colOrSendData2(jsonData) {
 
     db2.run(
       insertQuery,
-      [(file.includes('hand0205') || file == 'handGlove115200') ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : file == 'footVideo' ? JSON.stringify([...JSON.parse(jsonData).realArr]) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
+      [(file.includes('hand0205') || file == 'handGlove115200' || file.includes('robot')) ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : file == 'footVideo' ? JSON.stringify([...JSON.parse(jsonData).realArr]) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
       function (err) {
         if (err) {
           logger.error(err);
