@@ -935,6 +935,49 @@ class Home extends React.Component {
       // })
     }
 
+    // ====== 密钥过期检查 ======
+    if (jsonObject.date != null) {
+      const endDate = parseFloat(jsonObject.date);
+      const serverNow = jsonObject.nowDate ? parseFloat(jsonObject.nowDate) : Date.now();
+      const remainMs = endDate - serverNow;
+      const remainDays = Math.ceil(remainMs / 86400000);
+      const expireDateStr = new Date(endDate).toLocaleString();
+
+      if (remainMs <= 0) {
+        // 密钥已过期
+        Modal.error({
+          title: '密钥已过期',
+          content: (
+            <div style={{ lineHeight: '2' }}>
+              <p style={{ margin: 0 }}>您的授权密钥已于 <strong>{expireDateStr}</strong> 过期。</p>
+              <p style={{ margin: 0 }}>串口连接、数据采集等功能已被禁用。</p>
+              <p style={{ margin: '8px 0 0', color: '#999' }}>请联系管理员获取新的授权密钥，并在密钥配置页面重新写入。</p>
+            </div>
+          ),
+          okText: '我知道了',
+          centered: true,
+          width: 480,
+          className: 'license-expired-modal',
+        });
+      } else if (remainDays <= 7) {
+        // 密钥即将过期（7天内）
+        Modal.warning({
+          title: '密钥即将过期',
+          content: (
+            <div style={{ lineHeight: '2' }}>
+              <p style={{ margin: 0 }}>您的授权密钥将于 <strong>{expireDateStr}</strong> 过期。</p>
+              <p style={{ margin: 0 }}>剩余有效期：<strong style={{ color: '#faad14' }}>{remainDays} 天</strong></p>
+              <p style={{ margin: '8px 0 0', color: '#999' }}>请尽快联系管理员续期，以免影响正常使用。</p>
+            </div>
+          ),
+          okText: '我知道了',
+          centered: true,
+          width: 480,
+          className: 'license-warning-modal',
+        });
+      }
+    }
+
     if (jsonObject.file != null) {
       if (jsonObject.file === 'all') {
         this.setState({ matrixTitle: true })

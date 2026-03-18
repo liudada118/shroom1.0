@@ -513,10 +513,9 @@ module.exports = {
            *  */
           const jsonData = JSON.stringify({
             date: endDate,
+            nowDate: nowDate,
             file: file,
             selectFlag: selectFlag
-            // length: csvSitData.length,
-            // sitData: csvSitData[0], backData: csvBackData[0]
           });
 
           if (client.readyState === WebSocket.OPEN) {
@@ -591,11 +590,10 @@ module.exports = {
              * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
              *  */
             const jsonData = JSON.stringify({
-              date: date,
+              date: endDate,
+              nowDate: nowDate,
               file,
               selectFlag: selectFlag
-              // length: csvSitData.length,
-              // sitData: csvSitData[0], backData: csvBackData[0]
             });
             if (client.readyState === WebSocket.OPEN) {
               client.send(jsonData);

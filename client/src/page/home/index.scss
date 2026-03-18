@@ -43,3 +43,101 @@
 .marginB10{
     margin-bottom: 10px;
 }
+/* ====== 密钥过期弹窗样式 ====== */
+.license-expired-modal,
+.license-warning-modal {
+  .ant-modal-content {
+    background: #1a1a2e !important;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  }
+
+  .ant-modal-header {
+    background: transparent !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 20px 24px 16px;
+  }
+
+  .ant-modal-title {
+    color: #fff !important;
+    font-size: 18px;
+    font-weight: 600;
+  }
+
+  .ant-modal-body {
+    padding: 16px 24px 24px;
+    color: rgba(255, 255, 255, 0.85);
+
+    p {
+      color: rgba(255, 255, 255, 0.75);
+      font-size: 14px;
+    }
+
+    strong {
+      color: #fff;
+    }
+  }
+
+  .ant-modal-footer {
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 12px 24px 20px;
+  }
+
+  .ant-btn-primary {
+    border-radius: 8px;
+    height: 36px;
+    font-weight: 500;
+  }
+}
+
+.license-expired-modal {
+  .ant-modal-content {
+    border: 1px solid rgba(255, 77, 79, 0.3);
+  }
+
+  .ant-modal-confirm-title {
+    color: #ff4d4f !important;
+    font-size: 18px;
+    font-weight: 600;
+  }
+
+  .ant-modal-confirm-content {
+    color: rgba(255, 255, 255, 0.75);
+  }
+
+  .ant-btn-primary {
+    background: linear-gradient(135deg, #ff7875, #ff4d4f) !important;
+    border: none;
+  }
+
+  .ant-btn-primary:hover {
+    background: linear-gradient(135deg, #ff9c9c, #ff7875) !important;
+  }
+}
+
+.license-warning-modal {
+  .ant-modal-content {
+    border: 1px solid rgba(250, 173, 20, 0.3);
+  }
+
+  .ant-modal-confirm-title {
+    color: #faad14 !important;
+    font-size: 18px;
+    font-weight: 600;
+  }
+
+  .ant-modal-confirm-content {
+    color: rgba(255, 255, 255, 0.75);
+  }
+
+  .ant-btn-primary {
+    background: linear-gradient(135deg, #ffc53d, #faad14) !important;
+    border: none;
+    color: #000 !important;
+  }
+
+  .ant-btn-primary:hover {
+    background: linear-gradient(135deg, #ffd666, #ffc53d) !important;
+  }
+}
