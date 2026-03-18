@@ -347,8 +347,10 @@ export const Num2D = React.forwardRef((props, refs) => {
     const overlayCtxRef2 = useRef(null);
 
     // 足底：是否有右脚数据
-    const [hasRightFoot, setHasRightFoot] = useState(false);
-    const hasRightFootRef = useRef(false);
+    const [footLayout, setFootLayout] = useState('single-left');
+    const footLayoutRef = useRef('single-left');
+    const lastLeftFootFrameRef = useRef(0);
+    const lastRightFootFrameRef = useRef(0);
 
     // RAF 节流
     const pendingFlatRef = useRef(null);
@@ -390,43 +392,72 @@ export const Num2D = React.forwardRef((props, refs) => {
         };
     }, []);
 
-    // 初始化第二个 canvas（footVideo 右脚）- 只在有右脚数据时
+    const syncFootLayout = useCallback((side) => {
+        if (!isFoot) return footLayoutRef.current;
+        const now = Date.now();
+        const ttl = 1200;
+        if (side === 'left') {
+            lastLeftFootFrameRef.current = now;
+        }
+        if (side === 'right') {
+            lastRightFootFrameRef.current = now;
+        }
+
+        const leftActive = now - lastLeftFootFrameRef.current < ttl;
+        const rightActive = now - lastRightFootFrameRef.current < ttl;
+        const nextLayout = leftActive && rightActive ? 'dual' : rightActive ? 'single-right' : 'single-left';
+
+        if (footLayoutRef.current !== nextLayout) {
+            footLayoutRef.current = nextLayout;
+            setFootLayout(nextLayout);
+        }
+
+        return nextLayout;
+    }, [isFoot]);
+
     useEffect(() => {
-        if (isFoot && hasRightFoot && glCanvasRef2.current && !glCtxRef2.current) {
-            const cs = cellSizeRef.current;
-            glCtxRef2.current = initWebGL(glCanvasRef2.current, 16, 32, cs);
+        if (!isFoot) return;
+        const showDualFoot = footLayout === 'dual';
+        const newCs = computeCellSize(showDualFoot);
+        const cellSizeChanged = cellSizeRef.current !== newCs;
+
+        if (cellSizeChanged) {
+            cellSizeRef.current = newCs;
+            setCellSize(newCs);
+        }
+
+        if (glCanvasRef.current && (cellSizeChanged || !glCtxRef.current)) {
+            cleanupWebGL(glCtxRef.current);
+            glCtxRef.current = initWebGL(glCanvasRef.current, 16, 32, newCs);
+            texSizeRef.current = { w: 16, h: 32 };
+            if (overlayCanvasRef.current) {
+                overlayCanvasRef.current.width = 16 * newCs;
+                overlayCanvasRef.current.height = 32 * newCs;
+                overlayCtxRef.current = overlayCanvasRef.current.getContext('2d');
+            }
+        }
+
+        if (showDualFoot && glCanvasRef2.current && (cellSizeChanged || !glCtxRef2.current)) {
+            cleanupWebGL(glCtxRef2.current);
+            glCtxRef2.current = initWebGL(glCanvasRef2.current, 16, 32, newCs);
             if (overlayCanvasRef2.current) {
-                overlayCanvasRef2.current.width = 16 * cs;
-                overlayCanvasRef2.current.height = 32 * cs;
+                overlayCanvasRef2.current.width = 16 * newCs;
+                overlayCanvasRef2.current.height = 32 * newCs;
                 overlayCtxRef2.current = overlayCanvasRef2.current.getContext('2d');
             }
         }
-        // 右脚出现时重新计算 cellSize
-        if (isFoot && hasRightFoot) {
-            const newCs = computeCellSize(true);
-            cellSizeRef.current = newCs;
-            setCellSize(newCs);
-            // 重新初始化左脚 canvas 以适应新 cellSize
-            if (glCanvasRef.current) {
-                cleanupWebGL(glCtxRef.current);
-                glCtxRef.current = initWebGL(glCanvasRef.current, 16, 32, newCs);
-                texSizeRef.current = { w: 16, h: 32 };
-                if (overlayCanvasRef.current) {
-                    overlayCanvasRef.current.width = 16 * newCs;
-                    overlayCanvasRef.current.height = 32 * newCs;
-                    overlayCtxRef.current = overlayCanvasRef.current.getContext('2d');
-                }
-            }
-        }
-    }, [hasRightFoot]);
 
-    // 窗口 resize 监听
+        if (showDualFoot && pendingFlatRef2.current) {
+            scheduleRender();
+        }
+    }, [computeCellSize, footLayout, isFoot]);
     useEffect(() => {
         let resizeTimer = null;
         const handleResize = () => {
             clearTimeout(resizeTimer);
             resizeTimer = setTimeout(() => {
-                const newCs = computeCellSize(hasRightFootRef.current);
+                const showDualFoot = footLayoutRef.current === 'dual';
+                const newCs = computeCellSize(showDualFoot);
                 cellSizeRef.current = newCs;
                 setCellSize(newCs);
                 // 重新初始化 WebGL canvas 以适应新 cellSize
@@ -440,7 +471,7 @@ export const Num2D = React.forwardRef((props, refs) => {
                         overlayCtxRef.current = overlayCanvasRef.current.getContext('2d');
                     }
                 }
-                if (isFoot && hasRightFootRef.current && glCanvasRef2.current && glCtxRef2.current) {
+                if (isFoot && showDualFoot && glCanvasRef2.current && glCtxRef2.current) {
                     cleanupWebGL(glCtxRef2.current);
                     glCtxRef2.current = initWebGL(glCanvasRef2.current, 16, 32, newCs);
                     if (overlayCanvasRef2.current) {
@@ -489,7 +520,7 @@ export const Num2D = React.forwardRef((props, refs) => {
                 pendingFlatRef.current = null;
             }
 
-            if (pendingFlatRef2.current !== null) {
+            if (pendingFlatRef2.current !== null && glCtxRef2.current) {
                 const { data, tw, th } = pendingFlatRef2.current;
                 renderWebGL(glCtxRef2.current, data, tw, th);
                 if (overlayCtxRef2.current) {
@@ -538,10 +569,10 @@ export const Num2D = React.forwardRef((props, refs) => {
         } else {
             if (isFoot) {
                 const { left, right } = wsPointData
+                const hasLeftFrame = Array.isArray(left)
+                const hasRightFrame = Array.isArray(right)
 
-                if (left) {
-                    leftArr = [...left]
-                    const wsData = [...left]
+                const queueFootFrame = (wsData, target) => {
                     const renderArr = [[2, 2], [2, 4], [2, 6], [2, 8], [2, 10], [2, 12], [5, 1], [5, 4], [5, 6], [5, 8], [5, 11], [5, 13], [8, 1], [8, 4], [8, 6], [8, 8], [8, 11], [8, 14], [11, 2], [11, 5], [11, 8], [11, 10], [11, 12], [11, 14], [14, 2], [14, 5], [14, 8], [14, 10], [14, 12], [14, 14], [17, 2], [17, 4], [17, 6], [17, 8], [17, 10], [17, 12], [20, 2], [20, 4], [20, 6], [20, 8], [20, 10], [20, 12], [23, 2], [23, 4], [23, 6], [23, 8], [23, 10], [23, 12], [26, 2], [26, 4], [26, 6], [26, 8], [26, 10], [26, 11], [29, 3], [29, 5], [29, 6], [29, 8], [29, 9], [29, 11]]
                     let newArr = new Array(16 * 32).fill(0)
                     renderArr.forEach((a, index) => {
@@ -550,43 +581,41 @@ export const Num2D = React.forwardRef((props, refs) => {
                     })
                     newArr = footInterp(newArr, renderArr)
 
-                    reinitGL(16, 32);
-                    pendingFlatRef.current = { data: newArr, tw: 16, th: 32 };
+                    if (target === 'secondary') {
+                        if (!glCtxRef2.current && glCanvasRef2.current) {
+                            const cs = cellSizeRef.current;
+                            glCtxRef2.current = initWebGL(glCanvasRef2.current, 16, 32, cs);
+                            if (overlayCanvasRef2.current) {
+                                overlayCanvasRef2.current.width = 16 * cs;
+                                overlayCanvasRef2.current.height = 32 * cs;
+                                overlayCtxRef2.current = overlayCanvasRef2.current.getContext('2d');
+                            }
+                        }
+                        pendingFlatRef2.current = { data: newArr, tw: 16, th: 32 };
+                    } else {
+                        reinitGL(16, 32);
+                        pendingFlatRef.current = { data: newArr, tw: 16, th: 32 };
+                    }
+
                     scheduleRender();
-                    // 只在收到左脚数据时更新图表，避免左右脚交替刷新导致图表混乱
+                }
+
+                if (hasLeftFrame) {
+                    syncFootLayout('left')
+                    leftArr = [...left]
+                    queueFootFrame(left, 'primary')
                     layoutData([...leftArr])
                 }
 
-                if (right && Array.isArray(right) && right.some(v => v > 0)) {
+                if (hasRightFrame) {
+                    syncFootLayout('right')
                     rightArr = [...right]
-                    if (!hasRightFootRef.current) {
-                        hasRightFootRef.current = true;
-                        setHasRightFoot(true);
+                    const target = footLayoutRef.current === 'dual' ? 'secondary' : 'primary'
+                    queueFootFrame(right, target)
+                    if (target === 'primary') {
+                        layoutData([...rightArr])
                     }
-                    const wsData = [...right]
-                    const renderArr = [[2, 2], [2, 4], [2, 6], [2, 8], [2, 10], [2, 12], [5, 1], [5, 4], [5, 6], [5, 8], [5, 11], [5, 13], [8, 1], [8, 4], [8, 6], [8, 8], [8, 11], [8, 14], [11, 2], [11, 5], [11, 8], [11, 10], [11, 12], [11, 14], [14, 2], [14, 5], [14, 8], [14, 10], [14, 12], [14, 14], [17, 2], [17, 4], [17, 6], [17, 8], [17, 10], [17, 12], [20, 2], [20, 4], [20, 6], [20, 8], [20, 10], [20, 12], [23, 2], [23, 4], [23, 6], [23, 8], [23, 10], [23, 12], [26, 2], [26, 4], [26, 6], [26, 8], [26, 10], [26, 11], [29, 3], [29, 5], [29, 6], [29, 8], [29, 9], [29, 11]]
-                    let newArr = new Array(16 * 32).fill(0)
-                    renderArr.forEach((a, index) => {
-                        let realIndex = renderArr[index][0] * 16 + renderArr[index][1]
-                        newArr[realIndex] = wsData[index]
-                    })
-                    newArr = footInterp(newArr, renderArr)
-
-                    // 确保第二个 canvas 已初始化
-                    if (!glCtxRef2.current && glCanvasRef2.current) {
-                        const cs = cellSizeRef.current;
-                        glCtxRef2.current = initWebGL(glCanvasRef2.current, 16, 32, cs);
-                        if (overlayCanvasRef2.current) {
-                            overlayCanvasRef2.current.width = 16 * cs;
-                            overlayCanvasRef2.current.height = 32 * cs;
-                            overlayCtxRef2.current = overlayCanvasRef2.current.getContext('2d');
-                        }
-                    }
-                    pendingFlatRef2.current = { data: newArr, tw: 16, th: 32 };
-                    scheduleRender();
                 }
-
-                // layoutData 已在左脚分支中调用，右脚不再触发
             }
         }
     }
@@ -745,6 +774,8 @@ export const Num2D = React.forwardRef((props, refs) => {
 
     const cs = cellSize;
     const { maxW: containerWidth } = getMatrixViewportBounds();
+    const showDualFoot = footLayout === 'dual';
+    const primaryFootLabel = footLayout === 'single-right' ? '\u53f3\u811a' : '\u5de6\u811a';
 
     return (
         <div
@@ -782,12 +813,12 @@ export const Num2D = React.forwardRef((props, refs) => {
                         style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
                     />
                     {isFoot && (
-                        <div style={{ textAlign: 'center', marginTop: '4px' }}>左脚</div>
+                        <div style={{ textAlign: 'center', marginTop: '4px' }}>{primaryFootLabel}</div>
                     )}
                 </div>
 
                 {/* 第二个 canvas（footVideo 右脚）- 只在有右脚数据时显示 */}
-                {isFoot && hasRightFoot && (
+                {isFoot && showDualFoot && (
                     <div style={{ position: 'relative' }}>
                         <canvas
                             ref={glCanvasRef2}

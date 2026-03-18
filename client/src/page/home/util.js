@@ -4257,8 +4257,11 @@ export const backTypeEvent = {
     } else if (that.state.numMatrixFlag == "heatmap") {
       that.com.current?.bthClickHandle(wsPointData);
     } else if (that.state.numMatrixFlag.includes('num')) {
-      // 2D数字/原始数据 模式：传递右脚数据
-      that.com.current?.changeWsData147R({ right: [...wsPointData] });
+      let rightNumData = jsonObject.newArr147 ?? wsPointData;
+      if (!Array.isArray(rightNumData)) {
+        rightNumData = JSON.parse(rightNumData);
+      }
+      that.com.current?.changeWsData147R({ right: [...rightNumData] });
     }
   }, hand0205: ({ that, jsonObject, local, rotate, fingerArr }) => {
     // console.log('wsPointData')

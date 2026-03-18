@@ -255,8 +255,10 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     const ctxRef2 = useRef(null);
 
     // 足底：是否有右脚数据
-    const [hasRightFoot, setHasRightFoot] = useState(false);
-    const hasRightFootRef = useRef(false);
+    const [footLayout, setFootLayout] = useState('single-left');
+    const footLayoutRef = useRef('single-left');
+    const lastLeftFootFrameRef = useRef(0);
+    const lastRightFootFrameRef = useRef(0);
 
     // robot 分区 canvas refs
     const robotCanvasRefs = useRef([]);
@@ -286,20 +288,43 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
         };
     }, []);
 
-    // 初始化右脚 canvas
+    const syncFootLayout = useCallback((side) => {
+        if (!isFoot) return footLayoutRef.current;
+        const now = Date.now();
+        const ttl = 1200;
+        if (side === 'left') {
+            lastLeftFootFrameRef.current = now;
+        }
+        if (side === 'right') {
+            lastRightFootFrameRef.current = now;
+        }
+
+        const leftActive = now - lastLeftFootFrameRef.current < ttl;
+        const rightActive = now - lastRightFootFrameRef.current < ttl;
+        const nextLayout = leftActive && rightActive ? 'dual' : rightActive ? 'single-right' : 'single-left';
+
+        if (footLayoutRef.current !== nextLayout) {
+            footLayoutRef.current = nextLayout;
+            setFootLayout(nextLayout);
+        }
+
+        return nextLayout;
+    }, [isFoot]);
+
     useEffect(() => {
-        if (isFoot && hasRightFoot && canvasRef2.current && !ctxRef2.current) {
+        const showDualFoot = footLayout === 'dual';
+        if (isFoot && showDualFoot && canvasRef2.current && !ctxRef2.current) {
             ctxRef2.current = canvasRef2.current.getContext('2d');
         }
-        // 右脚出现时重新计算 cellSize
-        if (isFoot && hasRightFoot) {
-            const newCs = computeCellSize(true);
+        if (isFoot) {
+            const newCs = computeCellSize(showDualFoot);
             cellSizeRef.current = newCs;
             setCellSize(newCs);
         }
-    }, [hasRightFoot]);
-
-    // 初始化 robot 分区 canvas
+        if (showDualFoot && pendingFlatRef2.current) {
+            scheduleRender();
+        }
+    }, [computeCellSize, footLayout, isFoot]);
     useEffect(() => {
         if (robotParts && robotParts.length > 0) {
             requestAnimationFrame(() => {
@@ -312,13 +337,13 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
         }
     }, [robotParts]);
 
-    // 窗口 resize 监听
     useEffect(() => {
         let resizeTimer = null;
         const handleResize = () => {
             clearTimeout(resizeTimer);
             resizeTimer = setTimeout(() => {
-                const newCs = computeCellSize(hasRightFootRef.current);
+                const showDualFoot = footLayoutRef.current === 'dual';
+                const newCs = computeCellSize(showDualFoot);
                 cellSizeRef.current = newCs;
                 setCellSize(newCs);
             }, 200);
@@ -346,11 +371,9 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                 pendingFlatRef.current = null;
             }
 
-            if (pendingFlatRef2.current !== null) {
+            if (pendingFlatRef2.current !== null && ctxRef2.current) {
                 const { data, tw, th } = pendingFlatRef2.current;
-                if (ctxRef2.current) {
-                    renderCanvas2D(ctxRef2.current, data, tw, th, cs);
-                }
+                renderCanvas2D(ctxRef2.current, data, tw, th, cs);
                 pendingFlatRef2.current = null;
             }
 
@@ -498,32 +521,33 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             changeWsData147(wsPointData)
         } else if (props.matrixName == 'footVideo') {
             const { left, right } = wsPointData
+            const hasLeftFrame = Array.isArray(left)
+            const hasRightFrame = Array.isArray(right)
 
-            if (left) {
+            if (hasLeftFrame) {
+                syncFootLayout('left')
                 leftArr = [...left]
                 const tw = 6, th = 10;
                 pendingFlatRef.current = { data: left, tw, th };
                 scheduleRender();
-                // 只在收到左脚数据时更新图表，避免左右脚交替刷新导致图表混乱
                 layoutData([...leftArr])
             }
 
-            if (right && Array.isArray(right) && right.some(v => v > 0)) {
+            if (hasRightFrame) {
+                syncFootLayout('right')
                 rightArr = [...right]
-                if (!hasRightFootRef.current) {
-                    hasRightFootRef.current = true;
-                    setHasRightFoot(true);
-                }
                 const tw = 6, th = 10;
-                // 确保右脚 canvas context 已初始化
-                if (!ctxRef2.current && canvasRef2.current) {
-                    ctxRef2.current = canvasRef2.current.getContext('2d');
+                if (footLayoutRef.current === 'dual') {
+                    if (!ctxRef2.current && canvasRef2.current) {
+                        ctxRef2.current = canvasRef2.current.getContext('2d');
+                    }
+                    pendingFlatRef2.current = { data: right, tw, th };
+                } else {
+                    pendingFlatRef.current = { data: right, tw, th };
+                    layoutData([...rightArr]);
                 }
-                pendingFlatRef2.current = { data: right, tw, th };
                 scheduleRender();
             }
-
-            // layoutData 已在左脚分支中调用，右脚不再触发
         }
     }
 
@@ -612,6 +636,8 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
 
     const cs = cellSize;
     const { maxW: containerWidth } = getMatrixViewportBounds();
+    const showDualFoot = footLayout === 'dual';
+    const primaryFootLabel = footLayout === 'single-right' ? '\u53f3\u811a' : '\u5de6\u811a';
 
     return (
         <div
@@ -646,12 +672,12 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                             ref={canvasRef}
                             style={{ display: 'block' }}
                         />
-                        {isFoot && <div style={{ textAlign: 'center', marginTop: '4px' }}>左脚</div>}
+                        {isFoot && <div style={{ textAlign: 'center', marginTop: '4px' }}>{primaryFootLabel}</div>}
                     </div>
                 )}
 
                 {/* footVideo 右脚 - 只在有右脚数据时显示 */}
-                {isFoot && hasRightFoot && (
+                {isFoot && showDualFoot && (
                     <div>
                         <canvas
                             ref={canvasRef2}
