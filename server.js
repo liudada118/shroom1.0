@@ -3718,7 +3718,7 @@ function colOrSendData(jsonData) {
 
     db.run(
       insertQuery,
-      [(file.includes('hand0205') || file == 'handGlove115200') ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).sitData]), timestamp, date],
+      [(file.includes('hand0205') || file == 'handGlove115200') ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : file == 'footVideo' ? JSON.stringify([...JSON.parse(jsonData).realArr]) : JSON.stringify([...JSON.parse(jsonData).sitData]), timestamp, date],
       function (err) {
         if (err) {
           logger.error(err);
@@ -4011,7 +4011,7 @@ function colOrSendData1(jsonData) {
 
     db1.run(
       insertQuery,
-      [(file.includes('hand0205') || file == 'handGlove115200') ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
+      [(file.includes('hand0205') || file == 'handGlove115200') ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : file == 'footVideo' ? JSON.stringify([...JSON.parse(jsonData).realArr]) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
       function (err) {
         if (err) {
           logger.error(err);
@@ -4321,7 +4321,7 @@ function colOrSendData2(jsonData) {
 
     db2.run(
       insertQuery,
-      [(file.includes('hand0205') || file == 'handGlove115200') ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
+      [(file.includes('hand0205') || file == 'handGlove115200') ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : file == 'footVideo' ? JSON.stringify([...JSON.parse(jsonData).realArr]) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
       function (err) {
         if (err) {
           logger.error(err);
