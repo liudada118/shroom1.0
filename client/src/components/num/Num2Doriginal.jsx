@@ -504,6 +504,8 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                 const tw = 6, th = 10;
                 pendingFlatRef.current = { data: left, tw, th };
                 scheduleRender();
+                // 只在收到左脚数据时更新图表，避免左右脚交替刷新导致图表混乱
+                layoutData([...leftArr])
             }
 
             if (right && Array.isArray(right) && right.some(v => v > 0)) {
@@ -521,8 +523,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                 scheduleRender();
             }
 
-            const newArr = [...leftArr, ...rightArr]
-            layoutData([...newArr])
+            // layoutData 已在左脚分支中调用，右脚不再触发
         }
     }
 

@@ -1570,11 +1570,7 @@ class Home extends React.Component {
       if (this.state.matrixName.includes('robot')) {
         // 跳过 robot
       } else if (this.state.matrixName == 'footVideo') {
-        // footVideo 右脚数据处理
-        if (this.state.numMatrixFlag.includes('num')) {
-          let newArr = [...wsPointData]
-          this.com.current?.changeWsData147R({ right: [...newArr] })
-        }
+        // footVideo 已在块1 backTypeEvent 中处理，跳过
       } else if (!this.state.hand && this.state.matrixName.includes('hand')) {
 
 
