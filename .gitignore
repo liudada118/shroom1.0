@@ -21,8 +21,4 @@ pdf/
 config.txt
 .npm-cache/
 dist/
-<<<<<<< Updated upstream
-pack-resources/python
-=======
 pack-resources/python/
->>>>>>> Stashed changes

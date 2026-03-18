@@ -51,7 +51,7 @@ function main() {
     throw new Error("build-mac-share only supports macOS");
   }
 
-  run("npm", ["run", "prepare-pack-resources"]);
+  run("npm", ["run", "prepare-build-assets"]);
   run("npx", ["electron-builder", "--mac", "zip", "--publish", "never"]);
 
   const appPath = findMacAppPath();

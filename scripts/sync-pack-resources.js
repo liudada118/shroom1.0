@@ -56,23 +56,24 @@ function syncPython() {
 
   resetDir(targetRoot);
 
-  if (fs.existsSync(sourcePyDistExe)) {
-    const targetDistDir = path.join(targetRoot, "onbed_server");
-    copyDir(sourcePyDistDir, targetDistDir);
-    console.log(`[pack] synced python runtime -> ${targetDistDir}`);
-    return;
-  }
+  if (!fs.existsSync(sourcePyDistExe)) {
+    if (process.platform !== "win32" && fs.existsSync(sourcePyAppDir)) {
+      const targetAppDir = path.join(targetRoot, "app");
+      copyDir(sourcePyAppDir, targetAppDir);
+      console.warn(
+        `[pack] python dist not found on ${process.platform}, keep source app fallback -> ${targetAppDir}`
+      );
+      return;
+    }
 
-  if (fs.existsSync(sourcePyAppDir)) {
-    const targetAppDir = path.join(targetRoot, "app");
-    copyDir(sourcePyAppDir, targetAppDir);
-    console.warn(
-      `[pack] python dist not found, fallback to source app -> ${targetAppDir}. Packaged app will require a system Python runtime.`
+    throw new Error(
+      `python runtime not found: ${sourcePyDistExe}. Run npm run build-python-runtime before packaging.`
     );
-    return;
   }
 
-  console.warn("[pack] python runtime not found, skipped");
+  const targetDistDir = path.join(targetRoot, "onbed_server");
+  copyDir(sourcePyDistDir, targetDistDir);
+  console.log(`[pack] synced python runtime -> ${targetDistDir}`);
 }
 
 syncDb();

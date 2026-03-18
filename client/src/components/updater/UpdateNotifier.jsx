@@ -34,12 +34,40 @@ const UPDATE_STATE = {
   ERROR: "error",
 };
 
+function normalizeReleaseNotes(releaseNotes) {
+  if (!releaseNotes) return "";
+
+  if (typeof releaseNotes === "string") {
+    return releaseNotes.trim();
+  }
+
+  if (Array.isArray(releaseNotes)) {
+    return releaseNotes
+      .map((item) => normalizeReleaseNotes(item))
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  if (typeof releaseNotes === "object") {
+    if (typeof releaseNotes.note === "string") return releaseNotes.note.trim();
+    if (typeof releaseNotes.body === "string") return releaseNotes.body.trim();
+    if (typeof releaseNotes.releaseNotes === "string") {
+      return releaseNotes.releaseNotes.trim();
+    }
+
+    return JSON.stringify(releaseNotes, null, 2);
+  }
+
+  return String(releaseNotes).trim();
+}
+
 export default function UpdateNotifier() {
   const [updateState, setUpdateState] = useState(UPDATE_STATE.IDLE);
   const [updateInfo, setUpdateInfo] = useState({});
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloadDetail, setDownloadDetail] = useState({});
   const [showModal, setShowModal] = useState(false);
+  const releaseNotesText = normalizeReleaseNotes(updateInfo.releaseNotes);
 
   // 检查 electronAPI 是否可用
   const isElectron = typeof window !== "undefined" && window.electronAPI;
@@ -257,7 +285,7 @@ export default function UpdateNotifier() {
         )}
 
         {/* 更新说明 */}
-        {updateInfo.releaseNotes && (
+        {releaseNotesText && (
           <div
             style={{
               background: "#f5f5f5",
@@ -269,14 +297,9 @@ export default function UpdateNotifier() {
             }}
           >
             <p style={{ fontWeight: "bold", margin: "0 0 8px" }}>更新说明:</p>
-            <div
-              dangerouslySetInnerHTML={{
-                __html:
-                  typeof updateInfo.releaseNotes === "string"
-                    ? updateInfo.releaseNotes
-                    : "",
-              }}
-            />
+            <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.6 }}>
+              {releaseNotesText}
+            </div>
           </div>
         )}
 

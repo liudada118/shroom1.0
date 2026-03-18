@@ -111,7 +111,7 @@ function pythonBin() {
     if (pyExe) return pyExe;
   }
 
-  return process.platform === 'win32' ? 'python' : 'python3';
+  return null;
 }
 
 function serverPy() {
@@ -142,37 +142,54 @@ function rejectAllPending(error) {
   pending.clear();
 }
 
+function missingPackagedRuntimeError() {
+  const roots = packagedPythonRoots();
+  const searched = roots.length > 0 ? roots.join(", ") : (process.resourcesPath || "<unknown>");
+
+  return new Error(
+    `[PY] packaged runtime missing: expected bundled onbed_server or embedded Python under ${searched}`
+  );
+}
+
 function startWorker() {
   if (child || starting) return;
   starting = true;
   manualStop = false;
 
-  const py = pythonBin();
-  const useExe = isPyInstallerExe();
-  const serverScript = serverPy();
+  try {
+    const py = pythonBin();
+    const useExe = isPyInstallerExe();
+    const serverScript = serverPy();
 
-  if (!useExe && !serverScript) {
+    if (isPackagedApp() && !py) {
+      throw missingPackagedRuntimeError();
+    }
+
+    if (!useExe && !serverScript) {
+      throw new Error('[PY] start aborted: no python runtime script found');
+    }
+
+    const args = useExe ? [] : ['-u', serverScript];
+    const cwd = useExe ? path.dirname(py) : (serverScript ? path.dirname(serverScript) : process.cwd());
+
+    console.log('[PY] start:', py, args.join(' '), 'cwd=', cwd, 'packaged=', isPackagedApp(), 'useExe=', useExe);
+    if (py && py.includes(path.sep) && !fs.existsSync(py)) console.error('[PY] pythonBin NOT FOUND:', py);
+    if (!useExe && (!serverScript || !fs.existsSync(serverScript))) console.error('[PY] serverPy NOT FOUND:', serverScript);
+
+    child = spawn(py, args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, PYTHONUNBUFFERED: '1', PYTHONNOUSERSITE: '1' },
+      windowsHide: true,
+      cwd,
+    });
+    buf = '';
+    stderrTail = '';
+  } catch (error) {
+    console.error(error.message);
+    throw error;
+  } finally {
     starting = false;
-    console.error('[PY] start aborted: no python runtime script found');
-    return;
   }
-
-  const args = useExe ? [] : ['-u', serverScript];
-  const cwd = useExe ? path.dirname(py) : (serverScript ? path.dirname(serverScript) : process.cwd());
-
-  console.log('[PY] start:', py, args.join(' '), 'cwd=', cwd, 'packaged=', isPackagedApp(), 'useExe=', useExe);
-  if (py.includes(path.sep) && !fs.existsSync(py)) console.error('[PY] pythonBin NOT FOUND:', py);
-  if (!useExe && (!serverScript || !fs.existsSync(serverScript))) console.error('[PY] serverPy NOT FOUND:', serverScript);
-
-  child = spawn(py, args, {
-    stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env, PYTHONUNBUFFERED: '1', PYTHONNOUSERSITE: '1' },
-    windowsHide: true,
-    cwd,
-  });
-  starting = false;
-  buf = '';
-  stderrTail = '';
 
   child.stdout.on('data', (d) => {
     buf += d.toString();
@@ -245,7 +262,18 @@ function writeLine(line) {
 }
 
 function callPy(fn, args, { timeoutMs = 10000 } = {}) {
-  if (!child) startWorker();
+  if (!child) {
+    try {
+      startWorker();
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
+  if (!child) {
+    return Promise.reject(new Error('python worker not running'));
+  }
+
   const id = nextId++;
 
   return new Promise(async (resolve, reject) => {
