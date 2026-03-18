@@ -236,9 +236,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             return calcCellSize(15, 10, maxW, maxH, 40);
         }
         if (isFoot) {
-            const tw = hasRight ? 14 : 6;
-            const th = 10;
-            return calcCellSize(tw, th, maxW, maxH, 40);
+            return 30; // 触觉足底固定 30×30px 单元格
         }
         return calcCellSize(width, height, maxW, maxH, 40);
     }, [isRobot, isFoot, props.matrixName, width, height]);
