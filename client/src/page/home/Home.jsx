@@ -3764,54 +3764,30 @@ class Home extends React.Component {
             open={this.state.licenseModalVisible}
             onOk={() => this.setState({ licenseModalVisible: false })}
             onCancel={() => this.setState({ licenseModalVisible: false })}
-            footer={[
-              <button
-                key="ok"
-                onClick={() => this.setState({ licenseModalVisible: false })}
-                style={{
-                  padding: '8px 24px',
-                  border: 'none',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                  fontWeight: 'bold',
-                  color: '#fff',
-                  background: this.state.licenseModalType === 'expired'
-                    ? 'linear-gradient(135deg, #ff4d4f, #cf1322)'
-                    : 'linear-gradient(135deg, #faad14, #d48806)',
-                }}
-              >
-                我知道了
-              </button>
-            ]}
+            okText="我知道了"
+            cancelButtonProps={{ style: { display: 'none' } }}
             centered
             width={480}
             closable={false}
             maskClosable={false}
-            styles={{
-              header: { background: '#1a1a2e', borderBottom: '1px solid #2a2a4a', padding: '16px 24px' },
-              body: { background: '#1a1a2e', padding: '20px 24px' },
-              footer: { background: '#1a1a2e', borderTop: '1px solid #2a2a4a', padding: '12px 24px', textAlign: 'center' },
-              mask: { background: 'rgba(0,0,0,0.7)' },
-              content: { borderRadius: '12px', overflow: 'hidden', border: this.state.licenseModalType === 'expired' ? '1px solid #ff4d4f' : '1px solid #faad14' },
-            }}
+            className={this.state.licenseModalType === 'expired' ? 'license-expired-modal' : 'license-warning-modal'}
             title={
-              <span style={{ color: this.state.licenseModalType === 'expired' ? '#ff4d4f' : '#faad14', fontSize: '18px', fontWeight: 'bold' }}>
+              <span>
                 {this.state.licenseModalType === 'expired' ? '⚠ 密钥已过期' : '⚠ 密钥即将过期'}
               </span>
             }
           >
             {this.state.licenseModalType === 'expired' ? (
-              <div style={{ lineHeight: '2', color: '#e0e0e0' }}>
-                <p style={{ margin: 0 }}>您的授权密钥已于 <strong style={{ color: '#ff4d4f' }}>{this.state.licenseModalExpireDate}</strong> 过期。</p>
-                <p style={{ margin: 0 }}>串口连接、数据采集等功能已被禁用。</p>
-                <p style={{ margin: '8px 0 0', color: '#999' }}>请联系管理员获取新的授权密钥，并在密钥配置页面重新写入。</p>
+              <div>
+                <p>您的授权密钥已于 <strong className="expire-date">{this.state.licenseModalExpireDate}</strong> 过期。</p>
+                <p>串口连接、数据采集等功能已被禁用。</p>
+                <p className="hint">请联系管理员获取新的授权密钥，并在密钥配置页面重新写入。</p>
               </div>
             ) : (
-              <div style={{ lineHeight: '2', color: '#e0e0e0' }}>
-                <p style={{ margin: 0 }}>您的授权密钥将于 <strong style={{ color: '#faad14' }}>{this.state.licenseModalExpireDate}</strong> 过期。</p>
-                <p style={{ margin: 0 }}>剩余有效期：<strong style={{ color: '#faad14' }}>{this.state.licenseModalRemainDays} 天</strong></p>
-                <p style={{ margin: '8px 0 0', color: '#999' }}>请尽快联系管理员续期，以免影响正常使用。</p>
+              <div>
+                <p>您的授权密钥将于 <strong className="expire-date">{this.state.licenseModalExpireDate}</strong> 过期。</p>
+                <p>剩余有效期：<strong className="remain-days">{this.state.licenseModalRemainDays} 天</strong></p>
+                <p className="hint">请尽快联系管理员续期，以免影响正常使用。</p>
               </div>
             )}
           </Modal>
