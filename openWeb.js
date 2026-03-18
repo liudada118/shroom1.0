@@ -1938,8 +1938,14 @@ module.exports = {
 
     return newArr
   }, footArrToNormal(arr) {
-    if (!Array.isArray(arr)) {
-      arr = JSON.parse(arr)
+    if (arr == null || arr === "" || arr === "undefined") {
+      arr = []
+    } else if (!Array.isArray(arr)) {
+      try {
+        arr = JSON.parse(arr)
+      } catch (error) {
+        arr = []
+      }
     }
     const footPointArr = [
       [8, 10], [8, 13], [8, 16], [8, 19], [8, 21], [8, 24],

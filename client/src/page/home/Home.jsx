@@ -168,13 +168,32 @@ class CanvasCom extends React.Component {
     super(props);
   }
   shouldComponentUpdate(nextProps, nextState) {
-    if (this.props.local !== null || this.props.local !== undefined) {
+    if (this.props.local !== null && this.props.local !== undefined) {
       return this.props.matrixName != nextProps.matrixName || this.props.local != nextProps.local
     }
     return this.props.matrixName != nextProps.matrixName;
   }
   render() {
-    return <>{this.props.children}</>;
+    const localKey =
+      this.props.local === null || this.props.local === undefined
+        ? "default"
+        : this.props.local
+          ? "playback"
+          : "realtime";
+    const childBaseKey = `${this.props.matrixName}:${localKey}`;
+
+    return (
+      <>
+        {React.Children.map(this.props.children, (child, index) => {
+          if (!React.isValidElement(child)) {
+            return child;
+          }
+          return React.cloneElement(child, {
+            key: `${childBaseKey}:${index}`,
+          });
+        })}
+      </>
+    );
   }
 }
 
@@ -1102,7 +1121,8 @@ class Home extends React.Component {
     // }
 
 
-    if ((jsonObject.newArr != null || jsonObject.newArr147 != null) &&
+    if (jsonObject.sitData != null &&
+      (jsonObject.newArr != null || jsonObject.newArr147 != null) &&
       (['robot1', 'footVideo'].includes(this.state.matrixName) || this.state.matrixName.includes('robot') ||
         this.state.matrixName.includes('hand') || this.state.matrixName == 'Num3D')) {
       const that = this
@@ -1252,7 +1272,11 @@ class Home extends React.Component {
               }
             } else if (this.state.numMatrixFlag.includes('num')) {
               let newArr = [...wsPointData]
-              this.com.current?.changeWsData147([...newArr])
+              if (this.com.current?.changeWsData147R) {
+                this.com.current.changeWsData147R([...newArr])
+              } else {
+                this.com.current?.changeWsData147([...newArr])
+              }
             } else if (this.state.numMatrixFlag == 'skin') {
               let newArr = [...wsPointData]
               wsPointData = handSkinChange(wsPointData)
@@ -1361,7 +1385,11 @@ class Home extends React.Component {
               }
             } else if (this.state.numMatrixFlag.includes('num')) {
               let newArr = [...wsPointData]
-              this.com.current?.changeWsData147([...newArr])
+              if (this.com.current?.changeWsData147R) {
+                this.com.current.changeWsData147R([...newArr])
+              } else {
+                this.com.current?.changeWsData147([...newArr])
+              }
             } else if (this.state.numMatrixFlag == 'skin') {
               wsPointData = handSkinChange(wsPointData)
               that.com.current?.sitData({
@@ -1527,7 +1555,9 @@ class Home extends React.Component {
       }
     }
 
-    if ((jsonObject.newArr != null || jsonObject.newArr147 != null) && (['robot1', 'footVideo'].includes(this.state.matrixName) || this.state.matrixName.includes('hand') || this.state.matrixName == 'Num3D')) {
+    if (jsonObject.backData != null &&
+      (jsonObject.newArr != null || jsonObject.newArr147 != null) &&
+      (['robot1', 'footVideo'].includes(this.state.matrixName) || this.state.matrixName.includes('hand') || this.state.matrixName == 'Num3D')) {
 
       const that = this
       let wsPointData = jsonObject.newArr || jsonObject.newArr147;
@@ -2098,7 +2128,7 @@ class Home extends React.Component {
       if (value) {
         ws.send(JSON.stringify({ local: true }));
       } else {
-        ws.send(JSON.stringify({ local: false }));
+        ws.send(JSON.stringify({ play: false, local: false, history: false }));
       }
     }
   };
@@ -2434,6 +2464,7 @@ class Home extends React.Component {
     const text = t('rotate');
     const text2 = t('boxSelection');
     const textReset = t('reset')
+    const modeCanvasMatrixName = `${this.state.matrixName}:${this.state.numMatrixFlag}`;
     const contentReset = (
       <div>
         <p>{t('resetContent')}</p>
@@ -2879,17 +2910,9 @@ class Home extends React.Component {
           ) :
 
             this.state.numMatrixFlag == "num3D" && ["hand0205", 'handGlove115200', 'robot1', 'footVideo'].includes(this.state.matrixName) ?
-              <Num3D
-                ref={this.com}
-                matrixName={this.state.matrixName}
-                data={this.data}
-                local={this.state.local}
-                handleChartsBody={this.handleChartsBody.bind(this)}
-                handleChartsBody1={this.handleChartsBody1.bind(this)}
-                changeStateData={this.changeStateData}
-                changeSelect={this.changeSelect} />
-              : this.state.numMatrixFlag == "num" && ["hand0205", 'handGlove115200', 'robot1', 'footVideo'].includes(this.state.matrixName) ?
-                <Num2D ref={this.com}
+              <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
+                <Num3D
+                  ref={this.com}
                   matrixName={this.state.matrixName}
                   data={this.data}
                   local={this.state.local}
@@ -2897,10 +2920,10 @@ class Home extends React.Component {
                   handleChartsBody1={this.handleChartsBody1.bind(this)}
                   changeStateData={this.changeStateData}
                   changeSelect={this.changeSelect} />
-                :
-
-                this.state.numMatrixFlag == "numoriginal" && ["hand0205", 'handGlove115200', 'robot1', 'footVideo', 'robotSY', 'robotLCF'].includes(this.state.matrixName) ?
-                  <Num2DOriginal ref={this.com}
+              </CanvasCom>
+              : this.state.numMatrixFlag == "num" && ["hand0205", 'handGlove115200', 'robot1', 'footVideo'].includes(this.state.matrixName) ?
+                <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
+                  <Num2D ref={this.com}
                     matrixName={this.state.matrixName}
                     data={this.data}
                     local={this.state.local}
@@ -2908,17 +2931,33 @@ class Home extends React.Component {
                     handleChartsBody1={this.handleChartsBody1.bind(this)}
                     changeStateData={this.changeStateData}
                     changeSelect={this.changeSelect} />
-                  :
-                  this.state.numMatrixFlag == "skin" && ["hand0205", 'handGlove115200', 'robot1', 'footVideo'].includes(this.state.matrixName) ?
-                    <HandVideo1
-                      ref={this.com}
+                </CanvasCom>
+                :
+
+                this.state.numMatrixFlag == "numoriginal" && ["hand0205", 'handGlove115200', 'robot1', 'footVideo', 'robotSY', 'robotLCF'].includes(this.state.matrixName) ?
+                  <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
+                    <Num2DOriginal ref={this.com}
+                      matrixName={this.state.matrixName}
                       data={this.data}
                       local={this.state.local}
-                      hand={this.state.hand}
                       handleChartsBody={this.handleChartsBody.bind(this)}
                       handleChartsBody1={this.handleChartsBody1.bind(this)}
                       changeStateData={this.changeStateData}
                       changeSelect={this.changeSelect} />
+                  </CanvasCom>
+                  :
+                  this.state.numMatrixFlag == "skin" && ["hand0205", 'handGlove115200', 'robot1', 'footVideo'].includes(this.state.matrixName) ?
+                    <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
+                      <HandVideo1
+                        ref={this.com}
+                        data={this.data}
+                        local={this.state.local}
+                        hand={this.state.hand}
+                        handleChartsBody={this.handleChartsBody.bind(this)}
+                        handleChartsBody1={this.handleChartsBody1.bind(this)}
+                        changeStateData={this.changeStateData}
+                        changeSelect={this.changeSelect} />
+                    </CanvasCom>
                     :
 
                     this.state.matrixName == "foot" ? (

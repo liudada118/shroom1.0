@@ -181,6 +181,56 @@ function initDb(fileStr) {
   return _initDbFromModule(fileStr, filePath, runtimeResourceRoot);
 }
 
+function getHistorySeries({ sitRows = [], backRows = [], start = 0, end = null }) {
+  const safeSitRows = Array.isArray(sitRows) ? sitRows : [];
+  const safeBackRows = Array.isArray(backRows) ? backRows : [];
+  const hasSit = safeSitRows.length > 0;
+  const hasBack = safeBackRows.length > 0;
+  const totalLength = hasSit && hasBack
+    ? Math.min(safeSitRows.length, safeBackRows.length)
+    : (hasSit ? safeSitRows.length : safeBackRows.length);
+  const rangeStart = Math.max(0, start);
+  const rangeEnd = Math.min(end == null ? totalLength : end, totalLength);
+  const baseRows = hasSit ? safeSitRows : safeBackRows;
+  const press = [];
+  const area = [];
+  const time = [];
+
+  for (let i = rangeStart; i < rangeEnd; i++) {
+    const sitData = hasSit && safeSitRows[i] ? JSON.parse(safeSitRows[i].data) : null;
+    const backData = hasBack && safeBackRows[i] ? JSON.parse(safeBackRows[i].data) : null;
+    const sitTotalValue = sitData ? sitData.reduce((a, b) => a + b, 0) : 0;
+    const backTotalValue = backData ? backData.reduce((a, b) => a + b, 0) : 0;
+    const sitAreaValue = sitData ? sitData.filter((a) => a > 10).length : 0;
+    const backAreaValue = backData ? backData.filter((a) => a > 10).length : 0;
+
+    press.push(
+      (sitData ? totalToN(sitTotalValue) : 0) +
+      (backData ? totalToN(backTotalValue, 1.3) : 0)
+    );
+    area.push(sitAreaValue + backAreaValue);
+
+    if (baseRows[i] && baseRows[i].timestamp != null) {
+      time.push(baseRows[i].timestamp);
+    }
+  }
+
+  return {
+    length: totalLength,
+    press,
+    area,
+    time,
+  };
+}
+
+function stopPlaybackTimer() {
+  playFlag = false;
+  if (timer) {
+    clearInterval(timer);
+    timer = null;
+  }
+}
+
 
 
 const defauleFile = 'hand0205'
@@ -343,6 +393,7 @@ module.exports = {
           }
           if (JSON.parse(message).local === false) {
             localFlag = false;
+            stopPlaybackTimer();
             const jsonData = JSON.stringify({
               backData: new Array(backTotal).fill(0),
 
@@ -568,6 +619,7 @@ module.exports = {
 
           if (getMessage.history === false) {
             history = false;
+            stopPlaybackTimer();
           }
 
           if (getMessage.variety != null) {
@@ -711,36 +763,16 @@ module.exports = {
                       logger.error(err);
                     } else {
                       localData = rows;
-                      length = rows.length
-                        ? Math.min(
-                          rows.length,
-                          localDataBack.length ? localDataBack.length : rows.length
-                        )
-                        : localDataBack.length;
-                      indexArr = [0, length - 2];
-                      timeStamp = [];
-                      for (let i = 0; i < rows.length; i++) {
-                        timeStamp.push(rows[i].timestamp);
-                      }
+                      const historySeries = getHistorySeries({
+                        sitRows: localData,
+                        backRows: localDataBack,
+                      });
+                      length = historySeries.length;
+                      indexArr = [0, Math.max(length - 2, 0)];
+                      timeStamp = historySeries.time;
                       historyArr = [0, length];
-                      let press = [],
-                        area = [];
-                      for (let i = 0; i < rows.length; i++) {
-                        let a =
-                          totalToN(JSON.parse(localData[i].data).reduce((a, b) => a + b, 0)) +
-                          (isCar(file) && localDataBack[i]
-                            ? totalToN(JSON.parse(localDataBack[i].data).reduce((a, b) => a + b, 0), 1.3)
-                            : 0);
-                        let b =
-                          JSON.parse(localData[i].data).filter((a) => a > 10).length +
-                          (isCar(file) && localDataBack[i]
-                            ? JSON.parse(localDataBack[i].data).filter((a) => a > 10)
-                              .length
-                            : 0);
-                        // press.push(a);
-                        press.push(a);
-                        area.push(b);
-                      }
+                      const press = historySeries.press;
+                      const area = historySeries.area;
 
                       server.clients.forEach(function each(client) {
                         /**
@@ -929,36 +961,16 @@ module.exports = {
                       }
 
                       localData = rows;
-                      length = rows.length
-                        ? Math.min(
-                          rows.length,
-                          localDataBack.length ? localDataBack.length : rows.length
-                        )
-                        : localDataBack.length;
-                      indexArr = [0, length - 2];
-                      timeStamp = [];
-                      for (let i = 0; i < rows.length; i++) {
-                        timeStamp.push(rows[i].timestamp);
-                      }
+                      const historySeries = getHistorySeries({
+                        sitRows: localData,
+                        backRows: localDataBack,
+                      });
+                      length = historySeries.length;
+                      indexArr = [0, Math.max(length - 2, 0)];
+                      timeStamp = historySeries.time;
                       historyArr = [0, length];
-                      let press = [],
-                        area = [];
-                      for (let i = 0; i < rows.length; i++) {
-                        let a =
-                          totalToN(JSON.parse(localData[i].data).reduce((a, b) => a + b, 0)) +
-                          (isCar(file) && localDataBack[i]
-                            ? totalToN(JSON.parse(localDataBack[i].data).reduce((a, b) => a + b, 0), 1.3)
-                            : 0);
-                        let b =
-                          JSON.parse(localData[i].data).filter((a) => a > 10).length +
-                          (isCar(file) && localDataBack[i]
-                            ? JSON.parse(localDataBack[i].data).filter((a) => a > 10)
-                              .length
-                            : 0);
-                        // press.push(a);
-                        press.push(a);
-                        area.push(b);
-                      }
+                      const press = historySeries.press;
+                      const area = historySeries.area;
 
                       server.clients.forEach(function each(client) {
                         /**
@@ -1040,36 +1052,16 @@ module.exports = {
                   logger.error(err);
                 } else {
                   localData = rows;
-                  length = rows.length
-                    ? Math.min(
-                      rows.length,
-                      localDataBack.length ? localDataBack.length : rows.length
-                    )
-                    : localDataBack.length;
-                  indexArr = [0, length - 2];
-                  timeStamp = [];
-                  for (let i = 0; i < rows.length; i++) {
-                    timeStamp.push(rows[i].timestamp);
-                  }
+                  const historySeries = getHistorySeries({
+                    sitRows: localData,
+                    backRows: localDataBack,
+                  });
+                  length = historySeries.length;
+                  indexArr = [0, Math.max(length - 2, 0)];
+                  timeStamp = historySeries.time;
                   historyArr = [0, length];
-                  let press = [],
-                    area = [];
-                  for (let i = 0; i < rows.length; i++) {
-                    let a =
-                      totalToN(JSON.parse(localData[i].data).reduce((a, b) => a + b, 0)) +
-                      (isCar(file) && localDataBack[i]
-                        ? totalToN(JSON.parse(localDataBack[i].data).reduce((a, b) => a + b, 0), 1.3)
-                        : 0);
-                    let b =
-                      JSON.parse(localData[i].data).filter((a) => a > 10).length +
-                      (isCar(file) && localDataBack[i]
-                        ? JSON.parse(localDataBack[i].data).filter((a) => a > 10)
-                          .length
-                        : 0);
-                    // press.push(a);
-                    press.push(a);
-                    area.push(b);
-                  }
+                  const press = historySeries.press;
+                  const area = historySeries.area;
 
                   server.clients.forEach(function each(client) {
                     /**
@@ -1643,8 +1635,8 @@ module.exports = {
                 }
 
                 if (file == 'footVideo') {
-                  sitObj.newArr147 = footArrToNormal(localData[nowIndex]?.data)
-                  backObj.newArr147 = footArrToNormal(localDataBack[nowIndex]?.data)
+                  sitObj.newArr147 = footArrToNormal(localData[nowIndex]?.data || [])
+                  backObj.newArr147 = footArrToNormal(localDataBack[nowIndex]?.data || [])
                 }
 
                 jsonData = JSON.stringify(sitObj);
@@ -1760,7 +1752,7 @@ module.exports = {
               }, interval);
             } else {
               console.log("clear");
-              clearInterval(timer);
+              stopPlaybackTimer();
             }
           }
           if (getMessage.play != null) {
@@ -1817,8 +1809,8 @@ module.exports = {
                   }
 
                   if (file == 'footVideo') {
-                    sitObj.newArr147 = footArrToNormal(localData[nowIndex]?.data)
-                    backObj.newArr147 = footArrToNormal(localDataBack[nowIndex]?.data)
+                    sitObj.newArr147 = footArrToNormal(localData[nowIndex]?.data || [])
+                    backObj.newArr147 = footArrToNormal(localDataBack[nowIndex]?.data || [])
 
                   }
 
@@ -1867,12 +1859,11 @@ module.exports = {
                     }
                   });
                 } else {
-                  playFlag = false;
-                  clearInterval(timer);
+                  stopPlaybackTimer();
                 }
               }, interval);
             } else {
-              clearInterval(timer);
+              stopPlaybackTimer();
             }
           }
 
@@ -2776,25 +2767,15 @@ module.exports = {
           // 鍘嗗彶
           if (getMessage.indexArr != null) {
 
-            let press = [],
-              area = [];
             historyArr = getMessage.indexArr;
-            for (let i = getMessage.indexArr[0]; i < getMessage.indexArr[1]; i++) {
-              let a = localData.length
-                ? JSON.parse(localData[i].data).reduce((a, b) => a + b, 0)
-                : 0 +
-                (file === "car"
-                  ? JSON.parse(localDataBack[i].data).reduce((a, b) => a + b, 0)
-                  : 0);
-              let b = localData.length
-                ? JSON.parse(localData[i].data).filter((a) => a > 10).length
-                : 0 +
-                (file === "car"
-                  ? JSON.parse(localDataBack[i].data).filter((a) => a > 10).length
-                  : 0);
-              press.push(a);
-              area.push(b);
-            }
+            const historySeries = getHistorySeries({
+              sitRows: localData,
+              backRows: localDataBack,
+              start: getMessage.indexArr[0],
+              end: getMessage.indexArr[1],
+            });
+            const press = historySeries.press;
+            const area = historySeries.area;
 
             server.clients.forEach(function each(client) {
               /**

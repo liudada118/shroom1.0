@@ -159,6 +159,7 @@ class Title extends React.Component {
     if (e.key === 'now') {
       // this.props.changeLocal(false)
       this.props.wsSendObj({
+        play: false,
         local: false,
         history: false
       })

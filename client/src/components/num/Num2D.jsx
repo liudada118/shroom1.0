@@ -56,6 +56,30 @@ function calcCellSize(texW, texH, maxW, maxH, padding) {
     return Math.max(8, Math.min(cellW, cellH));
 }
 
+const MATRIX_WIDTH_RATIO = 0.4;
+const MATRIX_SIDE_PANEL_WIDTH = 360;
+const MATRIX_HORIZONTAL_PADDING = 48;
+const MATRIX_VERTICAL_PADDING = 120;
+const MATRIX_MIN_WIDTH = 240;
+const MATRIX_MIN_HEIGHT = 280;
+
+function getMatrixViewportBounds() {
+    const ww = typeof window !== 'undefined' ? window.innerWidth : 1920;
+    const wh = typeof window !== 'undefined' ? window.innerHeight : 1080;
+    const ratioWidth = Math.floor(ww * MATRIX_WIDTH_RATIO);
+    const availableWidth = Math.max(ww - MATRIX_SIDE_PANEL_WIDTH - MATRIX_HORIZONTAL_PADDING, 160);
+    const safeViewportWidth = Math.max(ww - 32, 160);
+    const maxW = Math.min(
+        safeViewportWidth,
+        Math.max(MATRIX_MIN_WIDTH, Math.min(ratioWidth, availableWidth))
+    );
+
+    return {
+        maxW,
+        maxH: Math.max(MATRIX_MIN_HEIGHT, wh - MATRIX_VERTICAL_PADDING),
+    };
+}
+
 // ========== WebGL Shaders ==========
 const VERTEX_SHADER_SRC = `
   attribute vec2 a_position;
@@ -292,19 +316,17 @@ export const Num2D = React.forwardRef((props, refs) => {
 
     // 计算 cellSize 的辅助函数
     const computeCellSize = useCallback((hasRight = false) => {
-        const ww = typeof window !== 'undefined' ? window.innerWidth : 1920;
-        const wh = typeof window !== 'undefined' ? window.innerHeight : 1080;
+        const { maxW, maxH } = getMatrixViewportBounds();
 
         if (props.matrixName === 'hand0205' || props.matrixName === 'handGlove115200') {
-            return calcCellSize(36, 36, ww - 300, wh - 120, 40);
+            return calcCellSize(36, 36, maxW, maxH, 40);
         }
         if (isFoot) {
-            // 只有左脚时按单脚计算，有右脚时按两脚并排计算
             const tw = hasRight ? 34 : 16;
             const th = 32;
-            return calcCellSize(tw, th, ww - 300, wh - 120, 40);
+            return calcCellSize(tw, th, maxW, maxH, 40);
         }
-        return calcCellSize(width, height, ww - 300, wh - 120, 40);
+        return calcCellSize(width, height, maxW, maxH, 40);
     }, [isFoot, props.matrixName, width, height]);
 
     // 动态计算 cellSize
@@ -512,7 +534,7 @@ export const Num2D = React.forwardRef((props, refs) => {
 
     const changeWsData147R = (wsPointData) => {
         if (props.matrixName == 'hand0205' || props.matrixName == 'handGlove115200') {
-            // hand0205 暂不处理
+            changeWsData147(wsPointData)
         } else {
             if (isFoot) {
                 const { left, right } = wsPointData
@@ -721,6 +743,7 @@ export const Num2D = React.forwardRef((props, refs) => {
     }
 
     const cs = cellSize;
+    const { maxW: containerWidth } = getMatrixViewportBounds();
 
     return (
         <div
@@ -743,7 +766,8 @@ export const Num2D = React.forwardRef((props, refs) => {
                     gap: '10px',
                     justifyContent: 'center',
                     alignItems: 'flex-start',
-                    maxWidth: 'calc(100vw - 300px)',
+                    width: `${containerWidth}px`,
+                    maxWidth: '100%',
                 }}
             >
                 {/* 主 canvas（左脚 / 默认） */}
