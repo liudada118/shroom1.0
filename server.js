@@ -1635,8 +1635,12 @@ module.exports = {
                 }
 
                 if (file == 'footVideo') {
-                  sitObj.newArr147 = footArrToNormal(localData[nowIndex]?.data || [])
-                  backObj.newArr147 = footArrToNormal(localDataBack[nowIndex]?.data || [])
+                  if (localData[nowIndex]?.data) {
+                    sitObj.newArr147 = footArrToNormal(localData[nowIndex].data)
+                  }
+                  if (localDataBack[nowIndex]?.data) {
+                    backObj.newArr147 = footArrToNormal(localDataBack[nowIndex].data)
+                  }
                 }
 
                 jsonData = JSON.stringify(sitObj);
@@ -1809,8 +1813,12 @@ module.exports = {
                   }
 
                   if (file == 'footVideo') {
-                    sitObj.newArr147 = footArrToNormal(localData[nowIndex]?.data || [])
-                    backObj.newArr147 = footArrToNormal(localDataBack[nowIndex]?.data || [])
+                    if (localData[nowIndex]?.data) {
+                      sitObj.newArr147 = footArrToNormal(localData[nowIndex].data)
+                    }
+                    if (localDataBack[nowIndex]?.data) {
+                      backObj.newArr147 = footArrToNormal(localDataBack[nowIndex].data)
+                    }
 
                   }
 
