@@ -31,8 +31,7 @@
           "./build",
           "./python",
           "./pack-resources/db",
-          "./pack-resources/python",
-          "./config.txt"
+          "./pack-resources/python"
         ],
         "ignore": [
           "^/venv($|/)",
@@ -44,7 +43,8 @@
           "^/db($|/)",
           "^/pack-resources($|/)",
           "^/client($|/)",
-          "^/docs($|/)"
+          "^/docs($|/)",
+          "^/config\\.txt$"
         ]
       },
       "makers": [
@@ -125,6 +125,7 @@
       "!**/dev-app-update.yml",
       "!**/latest-dev.log",
       "!**/$*.db",
+      "!config.txt",
       "!forge.config.js",
       "!gen.js",
       "!genType.js",
@@ -167,10 +168,6 @@
       {
         "from": "./pack-resources/python",
         "to": "python"
-      },
-      {
-        "from": "./config.txt",
-        "to": "config.txt"
       }
     ],
     "icon": "./logo.ico",

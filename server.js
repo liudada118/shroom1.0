@@ -72,6 +72,7 @@ const {
   endiSit1024,
 } = require("./openWeb");
 const module2 = require('./aes_ecb')
+const { resolveConfigFile, getConfigFileCandidates } = require('./licenseHelper');
 const { isCar, dedupli, totalToN, } = require("./util");
 const { pressSmallBed } = require("./utilMatrix");
 const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine } = require('./server/mathUtils');
@@ -163,7 +164,7 @@ http.get('http://sensor.bodyta.com:8080/rcv/login/getSystemTime', {
 const runtimeResourceRoot = app.isPackaged ? process.resourcesPath : __dirname;
 let filePath = path.join(runtimeResourceRoot, "db");
 let csvPath = path.join(runtimeResourceRoot, "data");
-let nameTxt = path.join(runtimeResourceRoot, "config.txt");
+let nameTxt = resolveConfigFile();
 
 if (!fs.existsSync(filePath)) {
   fs.mkdirSync(filePath, { recursive: true });
@@ -175,6 +176,7 @@ if (!fs.existsSync(csvPath)) {
 
 logger.info("[Path] resourceRoot=", runtimeResourceRoot);
 logger.info("[Path] db=", filePath, "data=", csvPath, "config=", nameTxt);
+logger.info("[Path] configCandidates=", getConfigFileCandidates().join(", "));
 
 // initDb 鍖呰鍑芥暟锛岃嚜鍔ㄤ紶鍏?filePath 鍜?runtimeResourceRoot
 function initDb(fileStr) {

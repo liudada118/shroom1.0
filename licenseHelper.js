@@ -12,9 +12,26 @@ const http = require('http');
 const module2 = require('./aes_ecb');
 const logger = require('./logger');
 
-const CONFIG_FILE = path.join(__dirname, 'config.txt');
 const TIME_SERVER = 'http://sensor.bodyta.com';
 const TIMEOUT_MS = 5000;
+
+function getConfigFileCandidates() {
+  const candidates = [];
+
+  if (process.resourcesPath) {
+    candidates.push(path.join(path.dirname(process.execPath), 'config.txt'));
+    candidates.push(path.join(process.resourcesPath, 'config.txt'));
+  }
+
+  candidates.push(path.join(__dirname, 'config.txt'));
+
+  return [...new Set(candidates)];
+}
+
+function resolveConfigFile() {
+  const candidates = getConfigFileCandidates();
+  return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
+}
 
 /**
  * 从 config.txt 读取并解密授权截止日期
@@ -22,11 +39,16 @@ const TIMEOUT_MS = 5000;
  */
 function readEndDate() {
   try {
-    if (!fs.existsSync(CONFIG_FILE)) {
-      logger.warn('config.txt 不存在，授权验证跳过');
+    const configFile = resolveConfigFile();
+
+    if (!fs.existsSync(configFile)) {
+      logger.warn(`[License] config.txt not found, searched: ${getConfigFileCandidates().join(', ')}`);
       return null;
     }
-    const encrypted = fs.readFileSync(CONFIG_FILE, 'utf-8').trim();
+
+    logger.info(`[License] Using config file: ${configFile}`);
+
+    const encrypted = fs.readFileSync(configFile, 'utf-8').trim();
     if (!encrypted) {
       logger.warn('config.txt 为空');
       return null;
@@ -114,4 +136,12 @@ async function initLicense() {
   return { nowDate, endDate, valid, remainingDays };
 }
 
-module.exports = { readEndDate, fetchNetworkTime, isLicenseValid, getRemainingDays, initLicense };
+module.exports = {
+  getConfigFileCandidates,
+  resolveConfigFile,
+  readEndDate,
+  fetchNetworkTime,
+  isLicenseValid,
+  getRemainingDays,
+  initLicense,
+};
