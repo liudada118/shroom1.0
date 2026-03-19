@@ -22,3 +22,8 @@ config.txt
 .npm-cache/
 dist/
 pack-resources/python/
+
+# License V2 - 私钥不提交
+keys/private.pem
+license.dat
+timeguard.dat

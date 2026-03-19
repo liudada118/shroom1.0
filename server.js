@@ -72,6 +72,8 @@ const {
   endiSit1024,
 } = require("./openWeb");
 const module2 = require('./aes_ecb')
+const licenseV2 = require('./licenseV2')
+const licenseOnline = require('./licenseOnline')
 const { isCar, dedupli, totalToN, } = require("./util");
 const { pressSmallBed } = require("./utilMatrix");
 const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine } = require('./server/mathUtils');
@@ -257,7 +259,42 @@ function stopPlaybackTimer() {
 
 const defauleFile = 'hand0205'
 let date, sysStartTime, file = defauleFile, selectFlag
-if (fs.existsSync(nameTxt)) {
+
+// ====== LicenseV2 初始化 ======
+try {
+  const v2Result = licenseV2.initLicense();
+  logger.info('[LicenseV2] 启动初始化结果:', JSON.stringify({ valid: v2Result.valid, mode: v2Result.mode, machineId: v2Result.machineId, remainingDays: v2Result.remainingDays }));
+  if (v2Result.valid) {
+    endDate = v2Result.expireDate;
+    const v2Types = v2Result.sensorTypes;
+    selectFlag = v2Types;
+    if (v2Types === 'all') {
+      file = defauleFile;
+    } else if (Array.isArray(v2Types)) {
+      file = v2Types[0] || defauleFile;
+    } else {
+      file = v2Types || defauleFile;
+    }
+    // 根据 file 类型设置波特率
+    if (file == 'handGlove115200') {
+      baudRate = 115200
+    } else if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(file) || file.includes('robot')) {
+      baudRate = 921600
+    } else if (['bed4096', 'bed4096num'].includes(file)) {
+      baudRate = 3000000
+    } else {
+      baudRate = 1000000
+    }
+    logger.info('[LicenseV2] V2授权加载成功, file:', file, 'endDate:', endDate);
+  } else {
+    logger.info('[LicenseV2] V2授权未生效，尝试旧版 config.txt');
+  }
+} catch (e) {
+  logger.warn('[LicenseV2] V2初始化异常:', e.message);
+}
+
+// ====== 旧版 config.txt 兼容 ======
+if (!endDate && fs.existsSync(nameTxt)) {
   try {
     const dateRes = fs.readFileSync(nameTxt, 'utf8');
     const parsedData = JSON.parse(module2.decryptStr(dateRes));
@@ -286,7 +323,7 @@ if (fs.existsSync(nameTxt)) {
   } catch (err) {
     logger.error(err);
   }
-} else {
+} else if (!endDate) {
   logger.info("[Config] config.txt not found, skip loading license at startup.");
 }
 
@@ -533,6 +570,136 @@ module.exports = {
         //   compen = getMessage.compen
         // }
 
+        // ====== LicenseV2: 获取机器码 ======
+        if (getMessage.getMachineId) {
+          try {
+            const machineId = licenseV2.getMachineId();
+            logger.info('[LicenseV2] 客户端请求机器码:', machineId);
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ machineId }));
+            }
+          } catch (e) {
+            logger.error('[LicenseV2] 获取机器码失败:', e.message);
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ machineId: 'ERROR' }));
+            }
+          }
+        }
+
+        // ====== LicenseV2: 离线激活 ======
+        if (getMessage.licenseV2Activate) {
+          try {
+            const activationCode = getMessage.licenseV2Activate;
+            logger.info('[LicenseV2] 收到离线激活请求');
+            const result = licenseV2.verifyOffline(activationCode);
+            logger.info('[LicenseV2] 离线验证结果:', JSON.stringify({ valid: result.valid, error: result.error }));
+
+            if (result.valid) {
+              // 保存激活码
+              licenseV2.saveLicense(activationCode);
+              // 更新运行时状态
+              endDate = result.expireDate;
+              const v2Types = result.sensorTypes;
+              selectFlag = v2Types;
+              if (v2Types === 'all') {
+                file = defauleFile;
+              } else if (Array.isArray(v2Types)) {
+                file = v2Types[0] || defauleFile;
+              } else {
+                file = v2Types || defauleFile;
+              }
+              // 设置波特率
+              if (file == 'handGlove115200') {
+                baudRate = 115200;
+              } else if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(file) || file.includes('robot')) {
+                baudRate = 921600;
+              } else if (['bed4096', 'bed4096num'].includes(file)) {
+                baudRate = 3000000;
+              } else {
+                baudRate = 1000000;
+              }
+              // 广播授权信息给所有客户端
+              server.clients.forEach(function each(client) {
+                if (client.readyState === WebSocket.OPEN) {
+                  client.send(JSON.stringify({
+                    date: endDate,
+                    nowDate: nowDate || Date.now(),
+                    file,
+                    selectFlag: selectFlag
+                  }));
+                }
+              });
+            }
+
+            // 返回验证结果给请求方
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ licenseV2Result: result }));
+            }
+          } catch (e) {
+            logger.error('[LicenseV2] 离线激活异常:', e.message);
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ licenseV2Result: { valid: false, error: '激活处理异常: ' + e.message } }));
+            }
+          }
+        }
+
+        // ====== LicenseV2: 在线验证 ======
+        if (getMessage.licenseV2Online) {
+          (async () => {
+            try {
+              logger.info('[LicenseV2] 收到在线验证请求');
+              const result = await licenseOnline.verifyOnline();
+              logger.info('[LicenseV2] 在线验证结果:', JSON.stringify({ valid: result.valid, error: result.error }));
+
+              if (result.valid) {
+                // 更新运行时状态
+                endDate = result.expireDate;
+                const v2Types = result.sensorTypes;
+                selectFlag = v2Types;
+                if (v2Types === 'all') {
+                  file = defauleFile;
+                } else if (Array.isArray(v2Types)) {
+                  file = v2Types[0] || defauleFile;
+                } else {
+                  file = v2Types || defauleFile;
+                }
+                // 设置波特率
+                if (file == 'handGlove115200') {
+                  baudRate = 115200;
+                } else if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(file) || file.includes('robot')) {
+                  baudRate = 921600;
+                } else if (['bed4096', 'bed4096num'].includes(file)) {
+                  baudRate = 3000000;
+                } else {
+                  baudRate = 1000000;
+                }
+                // 广播授权信息
+                server.clients.forEach(function each(client) {
+                  if (client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({
+                      date: endDate,
+                      nowDate: nowDate || Date.now(),
+                      file,
+                      selectFlag: selectFlag
+                    }));
+                  }
+                });
+              }
+
+              // 返回结果
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ onlineVerifyResult: result }));
+              }
+            } catch (e) {
+              logger.error('[LicenseV2] 在线验证异常:', e.message);
+              if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ onlineVerifyResult: { valid: false, error: '在线验证异常: ' + e.message } }));
+              }
+            }
+          })();
+        }
+
+        // ====== 旧版密钥处理（兼容） ======
         if (getMessage.date != null) {
           const content = (getMessage.date.date)
           const date = content

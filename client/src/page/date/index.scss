@@ -1,17 +1,306 @@
+/* ========================================
+   设备激活页面样式
+   ======================================== */
+
+.activate-page {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #0a0a1a 0%, #1a1a2e 40%, #16213e 70%, #0f3460 100%);
+  overflow: auto;
+}
+
+.activate-container {
+  width: 480px;
+  max-width: 90vw;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 32px;
+  backdrop-filter: blur(20px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+/* 标题区域 */
+.activate-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 28px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.activate-header-icon {
+  font-size: 40px;
+  color: #5b8def;
+}
+
+.activate-header-text h2 {
+  margin: 0;
+  color: #fff;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+.activate-header-text p {
+  margin: 4px 0 0;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 13px;
+}
+
+/* 机器码区域 */
+.machine-id-section {
+  margin-bottom: 20px;
+}
+
+.section-label {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 13px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.machine-id-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.machine-id-display {
+  flex: 1;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+  overflow: hidden;
+}
+
+.machine-id-text {
+  color: #5b8def;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 2px;
+}
+
+.machine-id-placeholder {
+  color: rgba(255, 255, 255, 0.25);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.machine-id-btn {
+  height: 40px;
+  border-radius: 8px;
+  font-size: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.75);
+  background: rgba(255, 255, 255, 0.06);
+  transition: all 0.2s;
+
+  &:hover {
+    border-color: #5b8def !important;
+    color: #5b8def !important;
+    background: rgba(91, 141, 239, 0.1) !important;
+  }
+}
+
+.get-btn {
+  min-width: 80px;
+}
+
+.copy-btn {
+  min-width: 80px;
+}
+
+/* 模式切换 */
+.mode-switch {
+  margin-bottom: 20px;
+
+  .ant-segmented {
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    padding: 3px;
+
+    .ant-segmented-item {
+      color: rgba(255, 255, 255, 0.5);
+      border-radius: 8px;
+      transition: all 0.3s;
+
+      &:hover {
+        color: rgba(255, 255, 255, 0.8);
+      }
+    }
+
+    .ant-segmented-item-selected {
+      background: rgba(91, 141, 239, 0.2);
+      color: #5b8def;
+      box-shadow: 0 2px 8px rgba(91, 141, 239, 0.15);
+    }
+
+    .ant-segmented-thumb {
+      background: rgba(91, 141, 239, 0.15);
+      border-radius: 8px;
+    }
+  }
+}
+
+/* 激活区域 */
+.activate-section {
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.activate-input {
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  background: rgba(0, 0, 0, 0.3) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: rgba(255, 255, 255, 0.85) !important;
+  border-radius: 8px;
+  resize: none;
+
+  &::placeholder {
+    color: rgba(255, 255, 255, 0.25);
+  }
+
+  &:focus {
+    border-color: rgba(91, 141, 239, 0.5) !important;
+    box-shadow: 0 0 0 2px rgba(91, 141, 239, 0.1) !important;
+  }
+}
+
+.legacy-input {
+  height: 44px;
+  background: rgba(0, 0, 0, 0.3) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: rgba(255, 255, 255, 0.85) !important;
+  border-radius: 8px;
+
+  &::placeholder {
+    color: rgba(255, 255, 255, 0.25);
+  }
+
+  &:focus {
+    border-color: rgba(91, 141, 239, 0.5) !important;
+    box-shadow: 0 0 0 2px rgba(91, 141, 239, 0.1) !important;
+  }
+}
+
+/* 操作按钮 */
+.activate-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.action-btn {
+  flex: 1;
+  height: 44px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 500;
+  transition: all 0.3s;
+}
+
+.activate-btn {
+  background: linear-gradient(135deg, #5b8def, #6c5ce7) !important;
+  border: none !important;
+  color: #fff !important;
+  box-shadow: 0 4px 15px rgba(91, 141, 239, 0.3);
+
+  &:hover {
+    background: linear-gradient(135deg, #6c9bf0, #7d6de8) !important;
+    box-shadow: 0 6px 20px rgba(91, 141, 239, 0.4);
+    transform: translateY(-1px);
+  }
+}
+
+.online-btn {
+  background: linear-gradient(135deg, #00b894, #00cec9) !important;
+  border: none !important;
+  color: #fff !important;
+  box-shadow: 0 4px 15px rgba(0, 184, 148, 0.3);
+
+  &:hover {
+    background: linear-gradient(135deg, #00d2a0, #00e0db) !important;
+    box-shadow: 0 6px 20px rgba(0, 184, 148, 0.4);
+    transform: translateY(-1px);
+  }
+}
+
+.back-btn {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  color: rgba(255, 255, 255, 0.65) !important;
+
+  &:hover {
+    border-color: rgba(255, 255, 255, 0.3) !important;
+    color: rgba(255, 255, 255, 0.85) !important;
+    background: rgba(255, 255, 255, 0.1) !important;
+  }
+}
+
+/* 提示信息 */
+.activate-hint {
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: rgba(91, 141, 239, 0.06);
+  border: 1px solid rgba(91, 141, 239, 0.12);
+  border-radius: 8px;
+
+  p {
+    margin: 0;
+    padding: 2px 0;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 12px;
+    line-height: 1.8;
+  }
+}
+
+/* 在线验证描述 */
+.online-desc {
+  padding: 20px;
+  background: rgba(0, 184, 148, 0.06);
+  border: 1px solid rgba(0, 184, 148, 0.12);
+  border-radius: 8px;
+  text-align: center;
+
+  p {
+    margin: 0;
+    padding: 2px 0;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 13px;
+    line-height: 1.8;
+  }
+}
+
+/* 旧版兼容样式 */
 .dateInput::placeholder {
-    color: #5A5A89;
+  color: #5A5A89;
 }
 
-.dateInput{
-    color: #5A5A89;
-    margin-bottom: 20px;
-    border-color: #5A5A89;
+.dateInput {
+  color: #5A5A89;
+  margin-bottom: 20px;
+  border-color: #5A5A89;
 }
-
-
 
 .dateButton {
-    background-color: #000;
-    color: #5A5A89;
-    border-color: #5A5A89;
+  background-color: #000;
+  color: #5A5A89;
+  border-color: #5A5A89;
 }
