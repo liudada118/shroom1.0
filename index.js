@@ -25,8 +25,7 @@ const logger = require('./logger');
 // ============================================================
 const HOSTNAME = "127.0.0.1";
 const PORT = 12321;
-const VITE_DEV_PORT_START = 3000;  // Vite 起始端口
-const VITE_DEV_PORT_END = 3010;    // 最大扫描到 3010
+const VITE_DEV_PORT = 3000;  // Vite 期望端口（如被占用 Vite 会自动换端口）
 
 // ============================================================
 // 窗口管理
@@ -222,7 +221,7 @@ function startViteAndLoad(win) {
   }
 
   // 使用绝对路径启动 Vite 开发服务器
-  viteProcess = spawn(viteBin, ["--host", "--port", String(VITE_DEV_PORT_START)], {
+  viteProcess = spawn(viteBin, ["--host", "--port", String(VITE_DEV_PORT)], {
     cwd: clientDir,
     stdio: ["ignore", "pipe", "pipe"],
     shell: isWin,  // Windows 下需要 shell
@@ -270,14 +269,15 @@ function startViteAndLoad(win) {
   });
 
   // 等待 Vite 开发服务器就绪后加载
-  // 策略：先等 stdout 解析到端口，如果超时则扫描端口范围
+  // 策略：只从自己启动的 Vite 进程 stdout 中解析实际端口，不扫描端口范围
+  // 这样即使其他程序占了 3000 端口，也不会误连
   const maxRetries = 60;
   let retries = 0;
 
   function tryLoad() {
-    if (viteFailed) return;  // Vite 已失败，停止轮询
+    if (viteFailed) return;
 
-    // 如果已从 stdout 解析到端口，直接尝试该端口
+    // 只有从 stdout 解析到端口后才尝试连接
     if (actualVitePort) {
       const url = `http://localhost:${actualVitePort}`;
       http.get(url, (res) => {
@@ -292,65 +292,22 @@ function startViteAndLoad(win) {
       }).on("error", () => {
         retry();
       });
-      return;
+    } else {
+      // 还没解析到端口，继续等待 stdout 输出
+      retry();
     }
-
-    // 还没解析到端口，扫描端口范围 3000-3010
-    scanVitePorts().then((port) => {
-      if (port) {
-        actualVitePort = port;
-        viteLoaded = true;
-        const url = `http://localhost:${port}`;
-        logger.info(`[Main] Vite dev server found at port ${port} (by scanning), loading ${url}`);
-        win.loadURL(url);
-      } else {
-        retry();
-      }
-    });
-  }
-
-  /**
-   * 扫描端口范围，找到 Vite 服务
-   * @returns {Promise<number|null>}
-   */
-  function scanVitePorts() {
-    return new Promise((resolve) => {
-      let found = false;
-      let pending = 0;
-
-      for (let port = VITE_DEV_PORT_START; port <= VITE_DEV_PORT_END; port++) {
-        pending++;
-        const url = `http://localhost:${port}`;
-        const req = http.get(url, (res) => {
-          if (!found && res.statusCode === 200) {
-            found = true;
-            resolve(port);
-          }
-          res.resume();
-          pending--;
-          if (pending === 0 && !found) resolve(null);
-        });
-        req.on("error", () => {
-          pending--;
-          if (pending === 0 && !found) resolve(null);
-        });
-        req.setTimeout(1000, () => {
-          req.destroy();
-        });
-      }
-    });
   }
 
   function retry() {
-    if (viteFailed) return;  // Vite 已失败，停止轮询
+    if (viteFailed) return;
     retries++;
     if (retries < maxRetries) {
       if (retries % 5 === 0) {
-        logger.info(`[Main] Waiting for Vite dev server... (${retries}s, scanned ports ${VITE_DEV_PORT_START}-${VITE_DEV_PORT_END})`);
+        logger.info(`[Main] Waiting for Vite stdout to report actual port... (${retries}s)`);
       }
       setTimeout(tryLoad, 1000);
     } else {
-      logger.error(`[Main] Vite dev server not available after ${maxRetries}s (scanned ports ${VITE_DEV_PORT_START}-${VITE_DEV_PORT_END})`);
+      logger.error(`[Main] Vite dev server port not detected from stdout after ${maxRetries}s`);
       fallbackToStatic();
     }
   }
