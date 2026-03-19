@@ -397,6 +397,53 @@ server1 = new WebSocket.Server({ port: 19998 });
 server2 = new WebSocket.Server({ port: 19997 });
 
 module.exports = {
+  closeServer() {
+    logger.info('[Server] Closing all WebSocket servers and serial ports...');
+    try {
+      // 关闭所有 WebSocket 连接
+      [server, server1, server2].forEach((wss, idx) => {
+        if (wss) {
+          wss.clients.forEach(client => {
+            try { client.terminate(); } catch (e) {}
+          });
+          try {
+            wss.close(() => logger.info(`[Server] WebSocket server ${idx} closed`));
+          } catch (e) {
+            logger.warn(`[Server] WebSocket server ${idx} close error:`, e.message);
+          }
+        }
+      });
+
+      // 关闭串口
+      [port1, port2, portHead].forEach((p, idx) => {
+        if (p && p.isOpen) {
+          try {
+            p.close((err) => {
+              if (err) logger.warn(`[Server] Serial port ${idx} close error:`, err.message);
+              else logger.info(`[Server] Serial port ${idx} closed`);
+            });
+          } catch (e) {
+            logger.warn(`[Server] Serial port ${idx} close error:`, e.message);
+          }
+        }
+      });
+
+      // 清理定时器
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+        logger.info('[Server] Timer cleared');
+      }
+      if (time) {
+        clearInterval(time);
+        time = null;
+        logger.info('[Server] Time interval cleared');
+      }
+    } catch (e) {
+      logger.error('[Server] Cleanup error:', e.message);
+    }
+    logger.info('[Server] All resources cleanup completed.');
+  },
   openServer() {
 
     server1.on("open", function open() {
@@ -3106,6 +3153,9 @@ module.exports = {
     })
   }
 }
+
+module.exports.getWsServer = () => server;
+module.exports.handleCommand = () => {};
 
 SerialPort.list().then((ports) => {
   logger.info(
