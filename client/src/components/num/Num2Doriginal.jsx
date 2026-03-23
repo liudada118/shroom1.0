@@ -796,17 +796,17 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             // 修正后的 robot1 索引映射（基于 robot0401 的原始 256 点 16x16 数据）
             const back = [58, 42, 26, 10, 250, 234, 218, 202, 59, 43, 27, 11, 251, 235, 219, 203, 60, 44, 28, 12, 252, 236, 220, 204, 61, 45, 29, 13, 253, 237, 221, 205, 62, 46, 30, 14, 254, 238, 222, 206]
             const chest = [195, 211, 227, 243, 3, 19, 35, 51, 196, 212, 228, 244, 4, 20, 36, 52, 197, 213, 229, 245, 5, 21, 37, 53, 198, 214, 230, 246, 6, 22, 38, 54, 199, 215, 231, 247, 7, 23, 39, 55, 200, 216, 232, 248, 8, 24, 40, 56]
-            const shoulderL = [249, 233, 217, 201]
-            const shoulderR = [57, 41, 25, 9]
-            const handL = [80, 79, 96, 95, 112, 111, 128, 127]
-            const handR = [178, 177, 162, 161, 146, 145, 130, 129]
+            const shoulderL = [57, 41, 25, 9]
+            const shoulderR = [249, 233, 217, 201]
+            const handL = [80, 96, 112, 128, 79, 95, 111, 127]
+            const handR = [178, 162, 146, 130, 177, 161, 145, 129]
 
             processRobotParts(wsPointData, {
                 back: { posArr: back, text: '后背', w: 8, h: 5 },
-                handL: { posArr: handL, text: '左臂', w: 2, h: 4 },
-                shoulderL: { posArr: shoulderL, text: '左肩', w: 1, h: 4 },
-                shoulderR: { posArr: shoulderR, text: '右肩', w: 1, h: 4 },
-                handR: { posArr: handR, text: '右臂', w: 2, h: 4 },
+                handL: { posArr: handL, text: '左臂', w: 4, h: 2 },
+                shoulderL: { posArr: shoulderL, text: '左肩', w: 4, h: 1 },
+                shoulderR: { posArr: shoulderR, text: '右肩', w: 4, h: 1 },
+                handR: { posArr: handR, text: '右臂', w: 4, h: 2 },
                 chest: { posArr: chest, text: '前胸', w: 8, h: 6 },
             });
         }
