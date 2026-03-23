@@ -349,7 +349,7 @@ class Title extends React.Component {
       // { label: '沙发', value: 'sofa' },
       { label: '14*20高速', value: 'daliegu' },
       // { label: '眼罩', value: 'eye' },
-      // { label: '4096数字', value: 'bed4096num' },
+      { label: '64*64高速', value: 'bed4096num' },
       // { label: '轮椅', value: 'yanfeng10' },
       // { label: '脚型检测', value: 'foot' },
       // { label: '清闲椅子', value: 'carQX' },
