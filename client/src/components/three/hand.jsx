@@ -654,38 +654,39 @@ const Canvas = React.forwardRef((props, refs) => {
       dataArr = bigArrg
     }
 
-    // === 使用原始数据 ndata1 计算 Aside 统计值 ===
-    let rawDataArr;
-    if (sitIndexArr && sitIndexArr.length && !sitIndexArr.every((a) => a == 0)) {
-      // 框选模式：从原始数据中提取框选区域
-      rawDataArr = [];
-      for (let i = sitIndexArr[0]; i < sitIndexArr[1]; i++) {
-        for (let j = sitIndexArr[2]; j < sitIndexArr[3]; j++) {
-          // 将插值后的索引映射回原始数据索引
-          const origI = Math.floor(i / sitInterp);
-          const origJ = Math.floor(j / sitInterp);
-          if (origI < sitnum1 && origJ < sitnum2) {
-            rawDataArr.push(ndata1[origI * sitnum2 + origJ]);
-          }
-        }
-      }
-      // 去重（因为插值后多个索引可能映射到同一个原始点）
-      rawDataArr = [...new Set(rawDataArr.map((v, i) => {
-        const origI = Math.floor((sitIndexArr[0] + Math.floor(i / (sitIndexArr[3] - sitIndexArr[2]))) / sitInterp);
-        const origJ = Math.floor((sitIndexArr[2] + (i % (sitIndexArr[3] - sitIndexArr[2]))) / sitInterp);
-        return `${origI},${origJ},${ndata1[origI * sitnum2 + origJ]}`;
-      }))].map(s => parseFloat(s.split(',')[2]));
-    } else {
-      rawDataArr = [...ndata1];
-    }
-
     var T = clock.getDelta();
     timeS = timeS + T;
     if (timeS > renderT) {
-      const rawFiltered = rawDataArr.filter((a) => a > 0);
-      const max = findMax(rawDataArr);
-      const point = rawFiltered.length;
-      const press = rawDataArr.reduce((a, b) => a + b, 0);
+      // === 使用原始数据 ndata1 计算 Aside 统计值（零分配优化） ===
+      let max = 0, point = 0, press = 0;
+      if (sitIndexArr && sitIndexArr.length && !sitIndexArr.every((a) => a == 0)) {
+        // 框选模式：直接遍历原始数据的框选区域，用 Set 去重原始索引
+        const visited = new Set();
+        for (let i = sitIndexArr[0]; i < sitIndexArr[1]; i++) {
+          for (let j = sitIndexArr[2]; j < sitIndexArr[3]; j++) {
+            const origI = Math.floor(i / sitInterp);
+            const origJ = Math.floor(j / sitInterp);
+            if (origI < sitnum1 && origJ < sitnum2) {
+              const key = origI * sitnum2 + origJ;
+              if (!visited.has(key)) {
+                visited.add(key);
+                const val = ndata1[key];
+                press += val;
+                if (val > 0) point++;
+                if (val > max) max = val;
+              }
+            }
+          }
+        }
+      } else {
+        // 非框选模式：直接遍历 ndata1
+        for (let i = 0; i < ndata1.length; i++) {
+          const val = ndata1[i];
+          press += val;
+          if (val > 0) point++;
+          if (val > max) max = val;
+        }
+      }
       const mean = press / (point == 0 ? 1 : point);
       props.data.current?.changeData({
         meanPres: mean.toFixed(2),

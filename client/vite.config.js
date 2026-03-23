@@ -68,36 +68,41 @@ export default defineConfig({
       },
       plugins: [
         // 代码混淆插件 - 仅在生产构建时生效
+        // 性能策略：关闭影响运行时性能的选项（controlFlowFlattening/deadCodeInjection/numbersToExpressions）
+        // 保留不影响性能的静态保护（变量名混淆/字符串数组/字符串拆分）
         obfuscatorPlugin({
           options: {
-            // 混淆强度配置
             compact: true,
-            controlFlowFlattening: true,
-            controlFlowFlatteningThreshold: 0.5,
-            deadCodeInjection: true,
-            deadCodeInjectionThreshold: 0.3,
+            // ✘ 关闭 - 将 if/for/while 转为 switch-case，破坏 V8 JIT 优化，导致 requestAnimationFrame 和 message handler 耗时激增
+            controlFlowFlattening: false,
+            // ✘ 关闭 - 注入无用代码块，增大代码体积，影响解析和执行速度
+            deadCodeInjection: false,
             debugProtection: false,
             disableConsoleOutput: false,
+            // ✔ 保留 - 变量名替换为 _0x 前缀，不影响运行时性能
             identifierNamesGenerator: 'hexadecimal',
             log: false,
-            numbersToExpressions: true,
+            // ✘ 关闭 - 将数字常量转为表达式，在热循环中增加计算开销
+            numbersToExpressions: false,
             renameGlobals: false,
             selfDefending: false,
             simplify: true,
+            // ✔ 保留 - 字符串拆分，仅影响初始化，不影响热循环
             splitStrings: true,
             splitStringsChunkLength: 10,
+            // ✔ 保留 - 字符串数组化，不使用 base64 编码避免运行时解码开销
             stringArray: true,
-            stringArrayCallsTransform: true,
-            stringArrayCallsTransformThreshold: 0.5,
-            stringArrayEncoding: ['base64'],
+            stringArrayCallsTransform: false,
+            stringArrayEncoding: [],
             stringArrayIndexShift: true,
             stringArrayRotate: true,
             stringArrayShuffle: true,
             stringArrayWrappersCount: 1,
-            stringArrayWrappersChainedCalls: true,
+            stringArrayWrappersChainedCalls: false,
             stringArrayWrappersParametersMaxCount: 2,
             stringArrayWrappersType: 'variable',
             stringArrayThreshold: 0.75,
+            // ✔ 保留 - 对象键名混淆
             transformObjectKeys: true,
             unicodeEscapeSequence: false,
           },
