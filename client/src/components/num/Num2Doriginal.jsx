@@ -502,6 +502,10 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     const isRobot = props.matrixName === 'robotSY' || props.matrixName === 'robotLCF' || props.matrixName === 'robot1';
     const isFoot = props.matrixName === 'footVideo';
 
+    // ===== Robot 布局信息（必须在 computeCellSize 之前声明） =====
+    const robotLayoutInfoRef = useRef(null); // { layoutW, layoutH }
+    const robotInitedRef = useRef(false);
+
     // 计算初始 cellSize 的辅助函数
     const computeCellSize = useCallback((hasRight = false) => {
         const { maxW, maxH } = getMatrixViewportBounds(isRobot ? ROBOT_MATRIX_WIDTH_RATIO : MATRIX_WIDTH_RATIO);
@@ -546,10 +550,6 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     const footLayoutRef = useRef('single-left');
     const lastLeftFootFrameRef = useRef(0);
     const lastRightFootFrameRef = useRef(0);
-
-    // ===== Robot 布局信息 =====
-    const robotLayoutInfoRef = useRef(null); // { layoutW, layoutH }
-    const robotInitedRef = useRef(false);
 
     // RAF 节流
     const pendingFlatRef = useRef(null);
