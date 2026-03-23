@@ -74,6 +74,7 @@ export default defineConfig({
   css: {
     preprocessorOptions: {
       scss: {
+        api: "modern-compiler",
         // SCSS 全局变量（如果有）
         // additionalData: `@import "@/styles/variables.scss";`
       },

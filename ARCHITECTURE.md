@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-03-18 16:33
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-03-23
 
 ## 1. 项目概述
 
@@ -357,6 +357,8 @@ graph TD
 | 2026-03-18 12:03 | Max | Packaged frontend rebuild before installers | Add shared `build-client` and `prepare-build-assets` packaging steps so Electron Forge, electron-builder, and the macOS share build all rebuild `client` into the root `build/` directory before packaging, preventing stale renderer assets from being shipped |
 | 2026-03-18 12:39 | Max | Release version bump to 1.1.2 | Update `package.json` and `package-lock.json` to `1.1.2`, and add `release-notes/windows/1.1.2.md` as the next Windows build's release-notes source file so packaging can proceed without a missing-notes error |
 | 2026-03-18 12:52 | Max | Windows installer default path on D drive | Add `scripts/installer.nsh` and point `build.nsis.include` at it so the NSIS assisted installer defaults the installation directory to `D:\Shroom` instead of the system drive while still allowing users to change it |
+| 2026-03-20 | Max | Frontend dev startup stabilization | Stop relying on parsing Vite stdout for the dev URL, probe the configured frontend URL directly before `loadURL`, show the Electron window once content is ready, and switch Sass onto the modern compiler API to remove the legacy warning during development |
+| 2026-03-23 | Max | Frontend dev root-path normalization | Normalize Electron dev-server URLs to the site root before probing/loading and remove the stale `client/public/index.html` shadow page so Vite dev startup no longer gets misidentified by `/index.html` responses |
 | 2026-03-06 11:03 | optimization-cleanup | 代码全面优化清理 | 删除 20 个 copy 文件、8 个未使用组件、13 个未使用 3D 模型；后端 console.log 替换为 logger；var 全部替换为 let/const；移除废弃依赖 request；修复定时器内存泄漏；server.js 模块化拆分（提取 mathUtils + dbManager） |
 | 2026-03-15 18:32 | fix-client-runtime | 前端运行时兼容修复 | 恢复 Home 页面缺失的 copy 组件兼容入口、补充 WebGL 热力图兼容模块、修复重复 state 键，恢复 client 的 Vite 构建与开发运行 |
 | 2026-03-15 18:37 | fix-electron-preload | Electron 启动链路修复 | preload 改为自包含告警实现，移除对 `./logger` 的本地依赖；同时修复 Title 的 Select 废弃回调与 Aside 列表 key 警告 |
@@ -419,6 +421,8 @@ graph TD
 | 2026-03-18 12:03 | Max | Configuration change | Add `build-client` and `prepare-build-assets` scripts, route all installer packaging commands through them, and update `scripts/build-mac-share.js` to rebuild the Vite frontend before syncing Electron resources so packaged apps always ship the latest renderer bundle |
 | 2026-03-18 12:39 | Max | Configuration change | Bump the source version to `1.1.2` and add a placeholder `release-notes/windows/1.1.2.md` so the next Windows build can inject release notes without additional setup |
 | 2026-03-18 12:52 | Max | Configuration change | Configure electron-builder NSIS to include `scripts/installer.nsh`, and use a `preInit` macro that writes `InstallLocation` to `D:\Shroom` so the Windows installer opens with D drive as the default target path |
+| 2026-03-20 | Max | Bug fix | Fix the Electron development startup path by probing the frontend URL directly instead of waiting for a Vite stdout banner, showing the hidden window once the renderer finishes loading, and switching Vite Sass preprocessing to the modern compiler API so development no longer stalls behind the legacy Sass warning stream |
+| 2026-03-23 | Max | Bug fix | Normalize Electron dev-server URLs to `http://127.0.0.1:3000/` before readiness checks and `loadURL`, and delete the stale CRA `client/public/index.html` that shadowed `/index.html` with the wrong HTML during Vite development |
 | 2026-03-06 11:03 | optimization-cleanup | 优化重构 | 删除 20 个 copy 文件、8 个未使用组件、13 个未使用 3D 模型、src1 目录、旧图标 |
 | 2026-03-06 11:03 | optimization-cleanup | 优化重构 | 后端 118+ 处 console.log/error/warn 替换为 logger 模块，前端 Vite 配置生产环境自动移除 console |
 | 2026-03-06 11:03 | optimization-cleanup | 优化重构 | 所有 var 声明替换为 let/const（server.js 66 处 + openWeb.js 28 处），修复 serialport 重复声明 |
