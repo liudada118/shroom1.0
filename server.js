@@ -163,8 +163,8 @@ http.get('http://sensor.bodyta.com:8080/rcv/login/getSystemTime', {
 
 const runtimeResourceRoot = app.isPackaged ? process.resourcesPath : __dirname;
 const runtimeWritableRoot = app.isPackaged ? app.getPath('userData') : __dirname;
-const exportRoot = app.isPackaged && process.platform === 'darwin'
-  ? app.getPath('desktop')
+const exportRoot = app.isPackaged
+  ? (process.platform === 'darwin' ? app.getPath('desktop') : process.resourcesPath)
   : runtimeWritableRoot;
 let filePath = path.join(runtimeWritableRoot, "db");
 let csvPath = path.join(exportRoot, "data");
@@ -3083,7 +3083,7 @@ parser.on("data", function (data) {
         pointArr = jqbed(pointArr)
         console.log('fast1024')
         // console.log(Math.max(...pointArr))
-        pointArr = pressNew1220({ arr: pointArr, height: 32, width: 32, type: 'col', value: 1024 })
+        // pointArr = pressNew1220({ arr: pointArr, height: 32, width: 32, type: 'col', value: 1024 })
         // pointArr = gaussBlur_return(pointArr , 32,32, 0.5)
       } else if (file == 'sofa') {
         pointArr = arrToRealLine(pointArr, [[7, 0], [8, 15]], [[0, 15]], 32)
