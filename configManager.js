@@ -20,11 +20,16 @@ const { app } = require('electron');
 /** 应用数据目录（打包后使用 userData，开发时使用项目目录） */
 const APP_DATA_DIR = app ? app.getPath('userData') : __dirname;
 
+/** CSV 导出根目录（mac 打包版导出到桌面，其他平台沿用应用数据目录） */
+const EXPORT_ROOT = app && app.isPackaged && process.platform === 'darwin'
+  ? app.getPath('desktop')
+  : APP_DATA_DIR;
+
 /** 数据库文件目录 */
-const DB_DIR = path.join(__dirname, 'db');
+const DB_DIR = path.join(APP_DATA_DIR, 'db');
 
 /** CSV 数据导出目录 */
-const DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = path.join(EXPORT_ROOT, 'data');
 
 // ─── WebSocket 配置 ──────────────────────────────────────────────────────────
 
@@ -120,6 +125,7 @@ const pressure = {
 
 module.exports = {
   APP_DATA_DIR,
+  EXPORT_ROOT,
   DB_DIR,
   DATA_DIR,
   ws,

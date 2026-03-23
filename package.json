@@ -1,6 +1,6 @@
 {
   "name": "shroom",
-  "version": "1.1.3",
+  "version": "1.1.4",
   "description": "Shroom - Pressure Sensor Data Acquisition & Visualization System",
   "main": "index.js",
   "win": {
@@ -19,6 +19,7 @@
     "make-start": "electron-forge start --platform darwin",
     "build": "npm run prepare-build-assets && electron-builder -w && node scripts/inject-release-notes.js",
     "build-mac": "npm run prepare-build-assets && electron-builder -m",
+    "build-mac-release": "node scripts/build-mac-release.js",
     "build-mac-share": "node scripts/build-mac-share.js",
     "build-all": "npm run prepare-build-assets && electron-builder -mwl"
   },
@@ -29,7 +30,6 @@
         "asar": true,
         "extraResource": [
           "./build",
-          "./python",
           "./pack-resources/db",
           "./pack-resources/python"
         ],
@@ -152,16 +152,6 @@
         ]
       },
       {
-        "from": "./python",
-        "to": "python",
-        "filter": [
-          "**/*",
-          "!build/**",
-          "!**/__pycache__/**",
-          "!**/*.pyc"
-        ]
-      },
-      {
         "from": "./pack-resources/db",
         "to": "db"
       },
@@ -189,7 +179,11 @@
     },
     "mac": {
       "icon": "./logo.icns",
-      "category": "public.app-category.utilities"
+      "category": "public.app-category.utilities",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "scripts/entitlements.mac.plist",
+      "entitlementsInherit": "scripts/entitlements.mac.plist"
     },
     "publish": [
       {

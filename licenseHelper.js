@@ -11,12 +11,21 @@ const path = require('path');
 const http = require('http');
 const module2 = require('./aes_ecb');
 const logger = require('./logger');
+let electronApp = null;
+try {
+  ({ app: electronApp } = require('electron'));
+} catch {}
 
 const TIME_SERVER = 'http://sensor.bodyta.com';
 const TIMEOUT_MS = 5000;
 
 function getConfigFileCandidates() {
   const candidates = [];
+  const writableConfig = getWritableConfigFile();
+
+  if (writableConfig) {
+    candidates.push(writableConfig);
+  }
 
   if (process.resourcesPath) {
     candidates.push(path.join(path.dirname(process.execPath), 'config.txt'));
@@ -28,9 +37,37 @@ function getConfigFileCandidates() {
   return [...new Set(candidates)];
 }
 
+function getWritableConfigFile() {
+  if (electronApp && typeof electronApp.getPath === 'function') {
+    return path.join(electronApp.getPath('userData'), 'config.txt');
+  }
+
+  return path.join(__dirname, 'config.txt');
+}
+
 function resolveConfigFile() {
-  const candidates = getConfigFileCandidates();
-  return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
+  const writableConfig = getWritableConfigFile();
+  if (fs.existsSync(writableConfig)) {
+    return writableConfig;
+  }
+
+  const existingReadonlyConfig = getConfigFileCandidates()
+    .filter((candidate) => candidate !== writableConfig)
+    .find((candidate) => fs.existsSync(candidate));
+
+  if (existingReadonlyConfig) {
+    try {
+      fs.mkdirSync(path.dirname(writableConfig), { recursive: true });
+      fs.copyFileSync(existingReadonlyConfig, writableConfig);
+      logger.info(`[License] copied config.txt to writable path: ${writableConfig}`);
+      return writableConfig;
+    } catch (err) {
+      logger.warn(`[License] failed to copy config.txt to writable path, fallback to readonly file: ${err.message}`);
+      return existingReadonlyConfig;
+    }
+  }
+
+  return writableConfig;
 }
 
 /**
@@ -138,6 +175,7 @@ async function initLicense() {
 
 module.exports = {
   getConfigFileCandidates,
+  getWritableConfigFile,
   resolveConfigFile,
   readEndDate,
   fetchNetworkTime,

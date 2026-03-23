@@ -162,8 +162,12 @@ http.get('http://sensor.bodyta.com:8080/rcv/login/getSystemTime', {
 });
 
 const runtimeResourceRoot = app.isPackaged ? process.resourcesPath : __dirname;
-let filePath = path.join(runtimeResourceRoot, "db");
-let csvPath = path.join(runtimeResourceRoot, "data");
+const runtimeWritableRoot = app.isPackaged ? app.getPath('userData') : __dirname;
+const exportRoot = app.isPackaged && process.platform === 'darwin'
+  ? app.getPath('desktop')
+  : runtimeWritableRoot;
+let filePath = path.join(runtimeWritableRoot, "db");
+let csvPath = path.join(exportRoot, "data");
 let nameTxt = resolveConfigFile();
 
 if (!fs.existsSync(filePath)) {
@@ -175,6 +179,7 @@ if (!fs.existsSync(csvPath)) {
 }
 
 logger.info("[Path] resourceRoot=", runtimeResourceRoot);
+logger.info("[Path] writableRoot=", runtimeWritableRoot);
 logger.info("[Path] db=", filePath, "data=", csvPath, "config=", nameTxt);
 logger.info("[Path] configCandidates=", getConfigFileCandidates().join(", "));
 
@@ -547,6 +552,7 @@ module.exports = {
           // const content = (JSON.stringify({ dateRes }))
           // const content1 = module2.encStr(content)
 
+          fs.mkdirSync(path.dirname(nameTxt), { recursive: true });
           fs.writeFile(nameTxt, date, err => {
             if (err) {
               logger.error(err);

@@ -53,6 +53,7 @@ function genDb(file, filePath, runtimeResourceRoot) {
     logger.warn('Database file not found, creating from template:', file);
     const initCandidates = [
       path.join(filePath, "init.db"),
+      path.join(runtimeResourceRoot, "db", "init.db"),
       path.join(runtimeResourceRoot, "init.db"),
       path.join(__dirname, "..", "db", "init.db"),
       path.join(app.getAppPath(), "db", "init.db"),

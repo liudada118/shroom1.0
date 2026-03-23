@@ -14,7 +14,10 @@ function copyPath(sourcePath, targetPath) {
   const stat = fs.lstatSync(sourcePath);
 
   if (stat.isSymbolicLink()) {
-    return copyPath(fs.realpathSync(sourcePath), targetPath);
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.rmSync(targetPath, { force: true, recursive: true });
+    fs.symlinkSync(fs.readlinkSync(sourcePath), targetPath);
+    return;
   }
 
   if (stat.isDirectory()) {

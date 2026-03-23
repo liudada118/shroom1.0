@@ -190,18 +190,25 @@ class AppUpdater {
     return autoUpdater.checkForUpdatesAndNotify();
   }
 
+  _safeCheckForUpdates() {
+    return this.checkForUpdates().catch((err) => {
+      logger.error("[Updater] checkForUpdates rejected:", err.message);
+      return null;
+    });
+  }
+
   /**
    * 启动定时检查
    */
   startAutoCheck() {
     // 启动后延迟 30 秒检查第一次（避免影响启动速度）
     setTimeout(() => {
-      this.checkForUpdates();
+      this._safeCheckForUpdates();
     }, 30 * 1000);
 
     // 之后按间隔定时检查
     this._timer = setInterval(() => {
-      this.checkForUpdates();
+      this._safeCheckForUpdates();
     }, this.checkInterval);
 
     logger.info(
