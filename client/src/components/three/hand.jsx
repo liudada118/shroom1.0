@@ -654,22 +654,44 @@ const Canvas = React.forwardRef((props, refs) => {
       dataArr = bigArrg
     }
 
+    // === 使用原始数据 ndata1 计算 Aside 统计值 ===
+    let rawDataArr;
+    if (sitIndexArr && sitIndexArr.length && !sitIndexArr.every((a) => a == 0)) {
+      // 框选模式：从原始数据中提取框选区域
+      rawDataArr = [];
+      for (let i = sitIndexArr[0]; i < sitIndexArr[1]; i++) {
+        for (let j = sitIndexArr[2]; j < sitIndexArr[3]; j++) {
+          // 将插值后的索引映射回原始数据索引
+          const origI = Math.floor(i / sitInterp);
+          const origJ = Math.floor(j / sitInterp);
+          if (origI < sitnum1 && origJ < sitnum2) {
+            rawDataArr.push(ndata1[origI * sitnum2 + origJ]);
+          }
+        }
+      }
+      // 去重（因为插值后多个索引可能映射到同一个原始点）
+      rawDataArr = [...new Set(rawDataArr.map((v, i) => {
+        const origI = Math.floor((sitIndexArr[0] + Math.floor(i / (sitIndexArr[3] - sitIndexArr[2]))) / sitInterp);
+        const origJ = Math.floor((sitIndexArr[2] + (i % (sitIndexArr[3] - sitIndexArr[2]))) / sitInterp);
+        return `${origI},${origJ},${ndata1[origI * sitnum2 + origJ]}`;
+      }))].map(s => parseFloat(s.split(',')[2]));
+    } else {
+      rawDataArr = [...ndata1];
+    }
 
     var T = clock.getDelta();
     timeS = timeS + T;
     if (timeS > renderT) {
-      dataArr = dataArr.filter((a) => a > valuej1 * 0.025)
-      const max = findMax(dataArr)
-      const point = dataArr.filter((a) => a > 0).length
-      const press = dataArr.reduce((a, b) => a + b, 0)
-      const mean = press / (point == 0 ? 1 : point)
+      const rawFiltered = rawDataArr.filter((a) => a > 0);
+      const max = findMax(rawDataArr);
+      const point = rawFiltered.length;
+      const press = rawDataArr.reduce((a, b) => a + b, 0);
+      const mean = press / (point == 0 ? 1 : point);
       props.data.current?.changeData({
         meanPres: mean.toFixed(2),
         maxPres: max,
         point: point,
-        // area: areaSmooth.toFixed(0),
         totalPres: press,
-        // pressure: pressureSmooth.toFixed(2),
       });
 
       if (totalArr.length < 20) {
@@ -680,7 +702,6 @@ const Canvas = React.forwardRef((props, refs) => {
       }
 
       const maxTotal = findMax(totalArr);
-      console.log(local)
       if (!local)
         props.data.current?.handleCharts(totalArr, maxTotal + 1000);
 

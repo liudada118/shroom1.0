@@ -12,6 +12,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
+import obfuscatorPlugin from "rollup-plugin-obfuscator";
 
 export default defineConfig({
   // 处理大写扩展名的资源文件
@@ -65,6 +66,43 @@ export default defineConfig({
           "vendor-echarts": ["echarts"],
         },
       },
+      plugins: [
+        // 代码混淆插件 - 仅在生产构建时生效
+        obfuscatorPlugin({
+          options: {
+            // 混淆强度配置
+            compact: true,
+            controlFlowFlattening: true,
+            controlFlowFlatteningThreshold: 0.5,
+            deadCodeInjection: true,
+            deadCodeInjectionThreshold: 0.3,
+            debugProtection: false,
+            disableConsoleOutput: false,
+            identifierNamesGenerator: 'hexadecimal',
+            log: false,
+            numbersToExpressions: true,
+            renameGlobals: false,
+            selfDefending: false,
+            simplify: true,
+            splitStrings: true,
+            splitStringsChunkLength: 10,
+            stringArray: true,
+            stringArrayCallsTransform: true,
+            stringArrayCallsTransformThreshold: 0.5,
+            stringArrayEncoding: ['base64'],
+            stringArrayIndexShift: true,
+            stringArrayRotate: true,
+            stringArrayShuffle: true,
+            stringArrayWrappersCount: 1,
+            stringArrayWrappersChainedCalls: true,
+            stringArrayWrappersParametersMaxCount: 2,
+            stringArrayWrappersType: 'variable',
+            stringArrayThreshold: 0.75,
+            transformObjectKeys: true,
+            unicodeEscapeSequence: false,
+          },
+        }),
+      ],
     },
     // 设置 chunk 大小警告阈值
     chunkSizeWarningLimit: 1000,
