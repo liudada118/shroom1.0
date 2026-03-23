@@ -75,62 +75,158 @@ function calcRobotCellSize(parts, maxW, maxH) {
     return Math.max(12, Math.min(cellW, cellH, 35));
 }
 
-// ========== Jet 色谱（Canvas 2D 版本） ==========
-function jet1(minVal, maxVal, x) {
+// ========== WebGL Shaders ==========
+const VERTEX_SHADER_SRC = `
+  attribute vec2 a_position;
+  attribute vec2 a_texCoord;
+  varying vec2 v_texCoord;
+  void main() {
+    gl_Position = vec4(a_position, 0.0, 1.0);
+    v_texCoord = a_texCoord;
+  }
+`;
+
+const FRAGMENT_SHADER_SRC = `
+  precision mediump float;
+  varying vec2 v_texCoord;
+  uniform sampler2D u_data;
+  uniform float u_min;
+  uniform float u_max;
+
+  vec3 jet1(float minVal, float maxVal, float x) {
     if (x < minVal) x = minVal;
     if (x > maxVal) x = maxVal;
-    const dv = maxVal - minVal;
-    if (dv === 0) return [0, 0, 255];
-    const t = (x - minVal) / dv;
+    float dv = maxVal - minVal;
+    if (dv == 0.0) return vec3(0.0, 0.0, 1.0);
+    float t = (x - minVal) / dv;
 
-    let r = 255, g = 255, b = 255;
+    float r = 1.0, g = 1.0, b = 1.0;
     if (t < 0.25) {
-        r = 0;
-        g = Math.round(4.0 * t * 255);
-        b = 255;
+      r = 0.0;
+      g = 4.0 * t;
+      b = 1.0;
     } else if (t < 0.5) {
-        r = 0;
-        g = 255;
-        b = Math.round((1.0 - 4.0 * (t - 0.25)) * 255);
+      r = 0.0;
+      g = 1.0;
+      b = 1.0 - 4.0 * (t - 0.25);
     } else if (t < 0.75) {
-        r = Math.round(4.0 * (t - 0.5) * 255);
-        g = 255;
-        b = 0;
+      r = 4.0 * (t - 0.5);
+      g = 1.0;
+      b = 0.0;
     } else {
-        r = 255;
-        g = Math.round((1.0 - 4.0 * (t - 0.75)) * 255);
-        b = 0;
+      r = 1.0;
+      g = 1.0 - 4.0 * (t - 0.75);
+      b = 0.0;
     }
-    return [r, g, b];
+    return vec3(r, g, b);
+  }
+
+  void main() {
+    float value = texture2D(u_data, v_texCoord).r * 255.0;
+    vec3 color = jet1(u_min, u_max, value);
+    gl_FragColor = vec4(color, 1.0);
+  }
+`;
+
+function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        gl.deleteShader(shader);
+        return null;
+    }
+    return shader;
 }
 
-// ========== Canvas 2D 渲染函数（颜色 + 数字 + 网格线 + 行列索引） ==========
-function renderCanvas2D(ctx, flatData, texWidth, texHeight, cellSize) {
+function createProgram(gl, vs, fs) {
+    const program = gl.createProgram();
+    gl.attachShader(program, vs);
+    gl.attachShader(program, fs);
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        gl.deleteProgram(program);
+        return null;
+    }
+    return program;
+}
+
+// ========== WebGL 初始化函数 ==========
+function initWebGL(canvas, texWidth, texHeight, cellSize) {
     const cw = texWidth * cellSize;
     const ch = texHeight * cellSize;
-    ctx.canvas.width = cw + 30;
-    ctx.canvas.height = ch + 30;
-    ctx.clearRect(0, 0, cw + 30, ch + 30);
+    canvas.width = cw;
+    canvas.height = ch;
 
-    // 计算动态最大值
-    let maxVal = 0;
+    const gl = canvas.getContext('webgl', { antialias: false, preserveDrawingBuffer: true });
+    if (!gl) return null;
+
+    const vs = createShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER_SRC);
+    const fs = createShader(gl, gl.FRAGMENT_SHADER, FRAGMENT_SHADER_SRC);
+    const program = createProgram(gl, vs, fs);
+    gl.useProgram(program);
+
+    const positions = new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]);
+    const texCoords = new Float32Array([0,1, 1,1, 0,0, 0,0, 1,1, 1,0]);
+
+    const posBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+    const aPos = gl.getAttribLocation(program, 'a_position');
+    gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+    const texBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, texBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, texCoords, gl.STATIC_DRAW);
+    const aTex = gl.getAttribLocation(program, 'a_texCoord');
+    gl.enableVertexAttribArray(aTex);
+    gl.vertexAttribPointer(aTex, 2, gl.FLOAT, false, 0, 0);
+
+    const texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    const texData = new Uint8Array(texWidth * texHeight);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, texWidth, texHeight, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, texData);
+
+    const uMin = gl.getUniformLocation(program, 'u_min');
+    const uMax = gl.getUniformLocation(program, 'u_max');
+    gl.uniform1f(uMin, 0);
+    gl.uniform1f(uMax, 40);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_data'), 0);
+    gl.viewport(0, 0, cw, ch);
+
+    return { gl, program, texture, texData, uMin, uMax, vs, fs, posBuffer, texBuffer };
+}
+
+// ========== WebGL 渲染函数 ==========
+function renderWebGL(glCtx, flatData, texWidth, texHeight) {
+    if (!glCtx) return;
+    const { gl, texture, texData, uMin, uMax } = glCtx;
     const len = Math.min(flatData.length, texWidth * texHeight);
+    let maxVal = 0;
     for (let i = 0; i < len; i++) {
-        const v = Math.round(flatData[i]);
+        const v = Math.min(255, Math.max(0, Math.round(flatData[i])));
+        texData[i] = v;
         if (v > maxVal) maxVal = v;
     }
     const dynamicMax = Math.max(maxVal, 1);
+    gl.uniform1f(uMin, 0);
+    gl.uniform1f(uMax, dynamicMax);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, texWidth, texHeight, gl.LUMINANCE, gl.UNSIGNED_BYTE, texData);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
 
-    // 绘制颜色格子
-    for (let i = 0; i < texHeight; i++) {
-        for (let j = 0; j < texWidth; j++) {
-            const idx = i * texWidth + j;
-            const val = idx < len ? Math.round(flatData[idx]) : 0;
-            const [r, g, b] = jet1(0, dynamicMax, val);
-            ctx.fillStyle = `rgb(${r},${g},${b})`;
-            ctx.fillRect(j * cellSize, i * cellSize, cellSize, cellSize);
-        }
-    }
+// ========== Canvas 2D overlay 绘制函数（数字 + 网格线 + 行列索引） ==========
+function drawOverlay(ctx, flatData, texWidth, texHeight, cellSize) {
+    const cw = texWidth * cellSize;
+    const ch = texHeight * cellSize;
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 
     // 绘制网格线
     ctx.strokeStyle = 'rgba(0, 0, 40, 0.6)';
@@ -153,6 +249,7 @@ function renderCanvas2D(ctx, flatData, texWidth, texHeight, cellSize) {
     ctx.textBaseline = 'middle';
     ctx.font = `bold ${Math.max(10, cellSize * 0.45)}px monospace`;
 
+    const len = Math.min(flatData.length, texWidth * texHeight);
     for (let i = 0; i < texHeight; i++) {
         for (let j = 0; j < texWidth; j++) {
             const idx = i * texWidth + j;
@@ -186,6 +283,39 @@ function renderCanvas2D(ctx, flatData, texWidth, texHeight, cellSize) {
             ch + cellSize * 0.5
         );
     }
+}
+
+// ========== 清理 WebGL 资源 ==========
+function cleanupWebGL(glCtx) {
+    if (!glCtx) return;
+    const { gl, program, texture, vs, fs, posBuffer, texBuffer } = glCtx;
+    gl.deleteTexture(texture);
+    gl.deleteProgram(program);
+    if (vs) gl.deleteShader(vs);
+    if (fs) gl.deleteShader(fs);
+    gl.deleteBuffer(posBuffer);
+    gl.deleteBuffer(texBuffer);
+}
+
+// ========== 预热 WebGL ==========
+let _shaderPrewarmedOriginal = false;
+function prewarmWebGL() {
+    if (_shaderPrewarmedOriginal) return;
+    _shaderPrewarmedOriginal = true;
+    try {
+        const c = document.createElement('canvas');
+        c.width = 1; c.height = 1;
+        const gl = c.getContext('webgl', { antialias: false });
+        if (!gl) return;
+        const vs = createShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER_SRC);
+        const fs = createShader(gl, gl.FRAGMENT_SHADER, FRAGMENT_SHADER_SRC);
+        const prog = createProgram(gl, vs, fs);
+        gl.deleteProgram(prog);
+        if (vs) gl.deleteShader(vs);
+        if (fs) gl.deleteShader(fs);
+        const ext = gl.getExtension('WEBGL_lose_context');
+        if (ext) ext.loseContext();
+    } catch (e) { /* ignore */ }
 }
 
 
@@ -238,7 +368,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             return calcCellSize(15, 10, maxW, maxH, 40);
         }
         if (isFoot) {
-            return 30; // 触觉足底固定 30×30px 单元格
+            return 30;
         }
         return calcCellSize(width, height, maxW, maxH, 40);
     }, [isRobot, isFoot, props.matrixName, width, height]);
@@ -248,13 +378,17 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     const cellSizeRef = useRef(cellSize);
     cellSizeRef.current = cellSize;
 
-    // Canvas refs - 主 canvas（单个 canvas 同时绘制颜色和数字）
-    const canvasRef = useRef(null);
-    const ctxRef = useRef(null);
+    // WebGL refs - 主 canvas
+    const glCanvasRef = useRef(null);
+    const overlayCanvasRef = useRef(null);
+    const glCtxRef = useRef(null);
+    const overlayCtxRef = useRef(null);
 
     // 第二个 canvas（footVideo 右脚）
-    const canvasRef2 = useRef(null);
-    const ctxRef2 = useRef(null);
+    const glCanvasRef2 = useRef(null);
+    const overlayCanvasRef2 = useRef(null);
+    const glCtxRef2 = useRef(null);
+    const overlayCtxRef2 = useRef(null);
 
     // 足底：是否有右脚数据
     const [footLayout, setFootLayout] = useState('single-left');
@@ -262,9 +396,11 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     const lastLeftFootFrameRef = useRef(0);
     const lastRightFootFrameRef = useRef(0);
 
-    // robot 分区 canvas refs
-    const robotCanvasRefs = useRef([]);
-    const robotCtxRefs = useRef([]);
+    // robot 分区 WebGL + overlay refs
+    const robotGlCanvasRefs = useRef([]);
+    const robotOverlayCanvasRefs = useRef([]);
+    const robotGlCtxRefs = useRef([]);
+    const robotOverlayCtxRefs = useRef([]);
 
     // RAF 节流
     const pendingFlatRef = useRef(null);
@@ -277,16 +413,38 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     const [robotParts, setRobotParts] = useState(null);
     const robotPartsRef = useRef(null);
 
-    // 初始化 Canvas 2D
+    // 当前渲染的纹理尺寸
+    const texSizeRef = useRef({ w: width, h: height });
+
+    // 预热 WebGL
     useEffect(() => {
-        if (!isRobot && canvasRef.current) {
-            ctxRef.current = canvasRef.current.getContext('2d');
+        prewarmWebGL();
+    }, []);
+
+    // 初始化 WebGL
+    useEffect(() => {
+        if (!isRobot && glCanvasRef.current) {
+            let tw = width, th = height;
+            if (props.matrixName === 'hand0205' || props.matrixName === 'handGlove115200') { tw = 15; th = 10; }
+            else if (isFoot) { tw = 6; th = 10; }
+            texSizeRef.current = { w: tw, h: th };
+            const cs = cellSizeRef.current;
+            glCtxRef.current = initWebGL(glCanvasRef.current, tw, th, cs);
+            if (overlayCanvasRef.current) {
+                overlayCanvasRef.current.width = tw * cs + 30;
+                overlayCanvasRef.current.height = th * cs + 30;
+                overlayCtxRef.current = overlayCanvasRef.current.getContext('2d');
+            }
         }
         initedRef.current = true;
 
         return () => {
             initedRef.current = false;
             if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
+            cleanupWebGL(glCtxRef.current);
+            cleanupWebGL(glCtxRef2.current);
+            // 清理 robot 分区 WebGL
+            robotGlCtxRefs.current.forEach(ctx => cleanupWebGL(ctx));
         };
     }, []);
 
@@ -315,8 +473,14 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
 
     useEffect(() => {
         const showDualFoot = footLayout === 'dual';
-        if (isFoot && showDualFoot && canvasRef2.current && !ctxRef2.current) {
-            ctxRef2.current = canvasRef2.current.getContext('2d');
+        if (isFoot && showDualFoot && glCanvasRef2.current && !glCtxRef2.current) {
+            const cs = cellSizeRef.current;
+            glCtxRef2.current = initWebGL(glCanvasRef2.current, 6, 10, cs);
+            if (overlayCanvasRef2.current) {
+                overlayCanvasRef2.current.width = 6 * cs + 30;
+                overlayCanvasRef2.current.height = 10 * cs + 30;
+                overlayCtxRef2.current = overlayCanvasRef2.current.getContext('2d');
+            }
         }
         if (isFoot) {
             const newCs = computeCellSize(showDualFoot);
@@ -327,12 +491,21 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             scheduleRender();
         }
     }, [computeCellSize, footLayout, isFoot]);
+
+    // 初始化 robot 分区的 WebGL
     useEffect(() => {
         if (robotParts && robotParts.length > 0) {
             requestAnimationFrame(() => {
+                const cs = cellSizeRef.current;
                 robotParts.forEach((part, idx) => {
-                    if (robotCanvasRefs.current[idx] && !robotCtxRefs.current[idx]) {
-                        robotCtxRefs.current[idx] = robotCanvasRefs.current[idx].getContext('2d');
+                    if (robotGlCanvasRefs.current[idx] && !robotGlCtxRefs.current[idx]) {
+                        robotGlCtxRefs.current[idx] = initWebGL(robotGlCanvasRefs.current[idx], part.w, part.h, cs);
+                    }
+                    if (robotOverlayCanvasRefs.current[idx] && !robotOverlayCtxRefs.current[idx]) {
+                        const overlayCanvas = robotOverlayCanvasRefs.current[idx];
+                        overlayCanvas.width = part.w * cs + 30;
+                        overlayCanvas.height = part.h * cs + 30;
+                        robotOverlayCtxRefs.current[idx] = overlayCanvas.getContext('2d');
                     }
                 });
             });
@@ -348,6 +521,33 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                 const newCs = computeCellSize(showDualFoot);
                 cellSizeRef.current = newCs;
                 setCellSize(newCs);
+
+                // 重新初始化主 WebGL
+                if (!isRobot && glCanvasRef.current && glCtxRef.current) {
+                    const { w, h } = texSizeRef.current;
+                    cleanupWebGL(glCtxRef.current);
+                    glCtxRef.current = initWebGL(glCanvasRef.current, w, h, newCs);
+                    if (overlayCanvasRef.current) {
+                        overlayCanvasRef.current.width = w * newCs + 30;
+                        overlayCanvasRef.current.height = h * newCs + 30;
+                        overlayCtxRef.current = overlayCanvasRef.current.getContext('2d');
+                    }
+                }
+
+                // 重新初始化 robot 分区 WebGL
+                if (isRobot && robotPartsRef.current) {
+                    robotPartsRef.current.forEach((part, idx) => {
+                        cleanupWebGL(robotGlCtxRefs.current[idx]);
+                        if (robotGlCanvasRefs.current[idx]) {
+                            robotGlCtxRefs.current[idx] = initWebGL(robotGlCanvasRefs.current[idx], part.w, part.h, newCs);
+                        }
+                        if (robotOverlayCanvasRefs.current[idx]) {
+                            robotOverlayCanvasRefs.current[idx].width = part.w * newCs + 30;
+                            robotOverlayCanvasRefs.current[idx].height = part.h * newCs + 30;
+                            robotOverlayCtxRefs.current[idx] = robotOverlayCanvasRefs.current[idx].getContext('2d');
+                        }
+                    });
+                }
             }, 200);
         };
         window.addEventListener('resize', handleResize);
@@ -367,23 +567,28 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
 
             if (pendingFlatRef.current !== null) {
                 const { data, tw, th } = pendingFlatRef.current;
-                if (ctxRef.current) {
-                    renderCanvas2D(ctxRef.current, data, tw, th, cs);
+                renderWebGL(glCtxRef.current, data, tw, th);
+                if (overlayCtxRef.current) {
+                    drawOverlay(overlayCtxRef.current, data, tw, th, cs);
                 }
                 pendingFlatRef.current = null;
             }
 
-            if (pendingFlatRef2.current !== null && ctxRef2.current) {
+            if (pendingFlatRef2.current !== null && glCtxRef2.current) {
                 const { data, tw, th } = pendingFlatRef2.current;
-                renderCanvas2D(ctxRef2.current, data, tw, th, cs);
+                renderWebGL(glCtxRef2.current, data, tw, th);
+                if (overlayCtxRef2.current) {
+                    drawOverlay(overlayCtxRef2.current, data, tw, th, cs);
+                }
                 pendingFlatRef2.current = null;
             }
 
             if (pendingRobotRef.current !== null) {
                 const parts = pendingRobotRef.current;
                 parts.forEach((part, idx) => {
-                    if (robotCtxRefs.current[idx]) {
-                        renderCanvas2D(robotCtxRefs.current[idx], part.data, part.w, part.h, cs);
+                    renderWebGL(robotGlCtxRefs.current[idx], part.data, part.w, part.h);
+                    if (robotOverlayCtxRefs.current[idx]) {
+                        drawOverlay(robotOverlayCtxRefs.current[idx], part.data, part.w, part.h, cs);
                     }
                 });
                 pendingRobotRef.current = null;
@@ -437,7 +642,9 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
         if (!robotPartsRef.current || robotPartsRef.current.length !== parts.length) {
             const partsMeta = parts.map(p => ({ key: p.key, text: p.text, w: p.w, h: p.h }));
             robotPartsRef.current = partsMeta;
-            robotCtxRefs.current = [];
+            robotGlCtxRefs.current.forEach(ctx => cleanupWebGL(ctx));
+            robotGlCtxRefs.current = [];
+            robotOverlayCtxRefs.current = [];
 
             // 动态计算 robot 的 cellSize
             const { maxW, maxH } = getMatrixViewportBounds(ROBOT_MATRIX_WIDTH_RATIO);
@@ -500,19 +707,20 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                 chest: { posArr: chest, text: '前胸', w: 8, h: 12 },
             });
         } else if (props.matrixName == 'robot1') {
-            const back = [62, 61, 60, 59, 58, 46, 45, 44, 43, 42, 254, 253, 252, 251, 250, 14, 13, 12, 11, 10, 30, 29, 28, 27, 26, 78, 77, 76, 75, 74, 94, 93, 92, 91, 90, 110, 109, 108, 107, 106]
-            const chest = [51, 35, 19, 3, 243, 227, 211, 195, 52, 36, 20, 4, 244, 228, 212, 196, 53, 37, 21, 5, 245, 229, 213, 197, 54, 38, 22, 6, 246, 230, 214, 198, 55, 39, 23, 7, 247, 231, 215, 199, 56, 40, 24, 8, 248, 232, 216, 200]
-            const shoulderL = [9, 25, 41, 57]
-            const shoulderR = [249, 233, 217, 201]
-            const handL = [126, 125, 124, 123, 142, 141, 140, 139]
-            const handR = [177, 162, 146, 130, 178, 161, 145, 129]
+            // 修正后的 robot1 索引映射（基于 robot0401 的原始 256 点 16x16 数据）
+            const back = [58, 42, 26, 10, 250, 234, 218, 202, 59, 43, 27, 11, 251, 235, 219, 203, 60, 44, 28, 12, 252, 236, 220, 204, 61, 45, 29, 13, 253, 237, 221, 205, 62, 46, 30, 14, 254, 238, 222, 206]
+            const chest = [195, 211, 227, 243, 3, 19, 35, 51, 196, 212, 228, 244, 4, 20, 36, 52, 197, 213, 229, 245, 5, 21, 37, 53, 198, 214, 230, 246, 6, 22, 38, 54, 199, 215, 231, 247, 7, 23, 39, 55, 200, 216, 232, 248, 8, 24, 40, 56]
+            const shoulderL = [249, 233, 217, 201]
+            const shoulderR = [57, 41, 25, 9]
+            const handL = [80, 79, 96, 95, 112, 111, 128, 127]
+            const handR = [178, 177, 162, 161, 146, 145, 130, 129]
 
             processRobotParts(wsPointData, {
                 back: { posArr: back, text: '后背', w: 8, h: 5 },
-                handL: { posArr: handL, text: '左臂', w: 4, h: 2 },
-                shoulderL: { posArr: shoulderL, text: '左肩', w: 4, h: 1 },
-                shoulderR: { posArr: shoulderR, text: '右肩', w: 4, h: 1 },
-                handR: { posArr: handR, text: '右臂', w: 4, h: 2 },
+                handL: { posArr: handL, text: '左臂', w: 2, h: 4 },
+                shoulderL: { posArr: shoulderL, text: '左肩', w: 1, h: 4 },
+                shoulderR: { posArr: shoulderR, text: '右肩', w: 1, h: 4 },
+                handR: { posArr: handR, text: '右臂', w: 2, h: 4 },
                 chest: { posArr: chest, text: '前胸', w: 8, h: 6 },
             });
         }
@@ -540,8 +748,14 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                 rightArr = [...right]
                 const tw = 6, th = 10;
                 if (footLayoutRef.current === 'dual') {
-                    if (!ctxRef2.current && canvasRef2.current) {
-                        ctxRef2.current = canvasRef2.current.getContext('2d');
+                    if (!glCtxRef2.current && glCanvasRef2.current) {
+                        const cs = cellSizeRef.current;
+                        glCtxRef2.current = initWebGL(glCanvasRef2.current, 6, 10, cs);
+                        if (overlayCanvasRef2.current) {
+                            overlayCanvasRef2.current.width = 6 * cs + 30;
+                            overlayCanvasRef2.current.height = 10 * cs + 30;
+                            overlayCtxRef2.current = overlayCanvasRef2.current.getContext('2d');
+                        }
                     }
                     pendingFlatRef2.current = { data: right, tw, th };
                 } else {
@@ -667,12 +881,16 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                     maxWidth: '100%',
                 }}
             >
-                {/* 非 robot 类型：主 canvas */}
+                {/* 非 robot 类型：主 canvas（WebGL + overlay） */}
                 {!isRobot && (
-                    <div>
+                    <div style={{ position: 'relative' }}>
                         <canvas
-                            ref={canvasRef}
+                            ref={glCanvasRef}
                             style={{ display: 'block' }}
+                        />
+                        <canvas
+                            ref={overlayCanvasRef}
+                            style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
                         />
                         {isFoot && <div style={{ textAlign: 'center', marginTop: '4px' }}>{primaryFootLabel}</div>}
                     </div>
@@ -680,21 +898,29 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
 
                 {/* footVideo 右脚 - 只在有右脚数据时显示 */}
                 {isFoot && showDualFoot && (
-                    <div>
+                    <div style={{ position: 'relative' }}>
                         <canvas
-                            ref={canvasRef2}
+                            ref={glCanvasRef2}
                             style={{ display: 'block' }}
+                        />
+                        <canvas
+                            ref={overlayCanvasRef2}
+                            style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
                         />
                         <div style={{ textAlign: 'center', marginTop: '4px' }}>右脚</div>
                     </div>
                 )}
 
-                {/* robot 分区 canvas */}
+                {/* robot 分区 canvas（WebGL + overlay） */}
                 {isRobot && robotParts && robotParts.map((part, idx) => (
-                    <div key={part.key} style={{ margin: '0 5px' }}>
+                    <div key={part.key} style={{ margin: '0 5px', position: 'relative' }}>
                         <canvas
-                            ref={el => { robotCanvasRefs.current[idx] = el; }}
+                            ref={el => { robotGlCanvasRefs.current[idx] = el; }}
                             style={{ display: 'block' }}
+                        />
+                        <canvas
+                            ref={el => { robotOverlayCanvasRefs.current[idx] = el; }}
+                            style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
                         />
                         <div style={{ textAlign: 'center', marginTop: '4px' }}>{part.text}</div>
                     </div>
