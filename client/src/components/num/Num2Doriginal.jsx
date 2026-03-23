@@ -48,6 +48,13 @@ function genNewArrMatrix(arr, width, height) {
 
 let leftArr = [], rightArr = []
 
+// ========== 计算下一个 2 的幂次方（解决 WebGL NPOT 纹理兼容性问题） ==========
+function nextPOT(n) {
+    let v = 1;
+    while (v < n) v <<= 1;
+    return v;
+}
+
 // ========== 动态计算 cellSize ==========
 function calcCellSize(texW, texH, maxW, maxH, padding) {
     const availW = maxW - padding * 2;
@@ -85,6 +92,7 @@ const FRAGMENT_SHADER_SRC = `
   uniform float u_min;
   uniform float u_max;
   uniform float u_useMask;
+  uniform vec2 u_texScale;
 
   vec3 jet1(float minVal, float maxVal, float x) {
     if (x < minVal) x = minVal;
@@ -115,9 +123,10 @@ const FRAGMENT_SHADER_SRC = `
   }
 
   void main() {
-    float value = texture2D(u_data, v_texCoord).r * 255.0;
+    vec2 scaledCoord = v_texCoord * u_texScale;
+    float value = texture2D(u_data, scaledCoord).r * 255.0;
     if (u_useMask > 0.5) {
-      float maskVal = texture2D(u_mask, v_texCoord).r;
+      float maskVal = texture2D(u_mask, scaledCoord).r;
       if (maskVal < 0.5) {
         gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);
         return;
@@ -151,12 +160,19 @@ function createProgram(gl, vs, fs) {
     return program;
 }
 
-// ========== WebGL 初始化函数（支持 mask 纹理） ==========
+// ========== WebGL 初始化函数（支持 mask 纹理 + POT 纹理尺寸） ==========
+// texWidth/texHeight: 逻辑数据尺寸（用于 canvas 显示大小）
+// useMask: 是否使用 mask 纹理（robot 模式）
+// 纹理实际使用 POT 尺寸以兼容 WebGL 1.0 NPOT 限制
 function initWebGL(canvas, texWidth, texHeight, cellSize, useMask) {
     const cw = texWidth * cellSize;
     const ch = texHeight * cellSize;
     canvas.width = cw;
     canvas.height = ch;
+
+    // 计算 POT 纹理尺寸
+    const potW = nextPOT(texWidth);
+    const potH = nextPOT(texHeight);
 
     const gl = canvas.getContext('webgl', { antialias: false, preserveDrawingBuffer: true });
     if (!gl) return null;
@@ -183,7 +199,7 @@ function initWebGL(canvas, texWidth, texHeight, cellSize, useMask) {
     gl.enableVertexAttribArray(aTex);
     gl.vertexAttribPointer(aTex, 2, gl.FLOAT, false, 0, 0);
 
-    // 数据纹理 (texture unit 0)
+    // 数据纹理 (texture unit 0) - 使用 POT 尺寸
     const texture = gl.createTexture();
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -192,8 +208,8 @@ function initWebGL(canvas, texWidth, texHeight, cellSize, useMask) {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
-    const texData = new Uint8Array(texWidth * texHeight);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, texWidth, texHeight, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, texData);
+    const texData = new Uint8Array(potW * potH);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, potW, potH, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, texData);
 
     // mask 纹理 (texture unit 1) - 用于 robot 模式标记哪些格子有数据
     let maskTexture = null;
@@ -206,68 +222,90 @@ function initWebGL(canvas, texWidth, texHeight, cellSize, useMask) {
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        maskData = new Uint8Array(texWidth * texHeight);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, texWidth, texHeight, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, maskData);
+        maskData = new Uint8Array(potW * potH);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, potW, potH, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, maskData);
     }
 
     const uMin = gl.getUniformLocation(program, 'u_min');
     const uMax = gl.getUniformLocation(program, 'u_max');
     const uUseMask = gl.getUniformLocation(program, 'u_useMask');
+    const uTexScale = gl.getUniformLocation(program, 'u_texScale');
     gl.uniform1f(uMin, 0);
     gl.uniform1f(uMax, 40);
     gl.uniform1i(gl.getUniformLocation(program, 'u_data'), 0);
     gl.uniform1i(gl.getUniformLocation(program, 'u_mask'), 1);
     gl.uniform1f(uUseMask, useMask ? 1.0 : 0.0);
+    // 纹理坐标缩放：将 [0,1] 映射到实际数据区域 [0, texWidth/potW]
+    gl.uniform2f(uTexScale, texWidth / potW, texHeight / potH);
     gl.viewport(0, 0, cw, ch);
 
-    return { gl, program, texture, texData, maskTexture, maskData, uMin, uMax, uUseMask, vs, fs, posBuffer, texBuffer };
+    return { gl, program, texture, texData, maskTexture, maskData, uMin, uMax, uUseMask, uTexScale, vs, fs, posBuffer, texBuffer, potW, potH, texWidth, texHeight };
 }
 
-// ========== WebGL 渲染函数 ==========
+// ========== WebGL 渲染函数（非 robot 模式） ==========
 function renderWebGL(glCtx, flatData, texWidth, texHeight) {
     if (!glCtx) return;
-    const { gl, texture, texData, uMin, uMax } = glCtx;
-    const len = Math.min(flatData.length, texWidth * texHeight);
+    const { gl, texture, texData, uMin, uMax, potW, potH } = glCtx;
+    // 将数据填入 POT 尺寸的 texData（按 potW 步长）
+    texData.fill(0);
     let maxVal = 0;
-    for (let i = 0; i < len; i++) {
-        const v = Math.min(255, Math.max(0, Math.round(flatData[i])));
-        texData[i] = v;
-        if (v > maxVal) maxVal = v;
+    for (let y = 0; y < texHeight; y++) {
+        for (let x = 0; x < texWidth; x++) {
+            const srcIdx = y * texWidth + x;
+            const dstIdx = y * potW + x;
+            const v = srcIdx < flatData.length ? Math.min(255, Math.max(0, Math.round(flatData[srcIdx]))) : 0;
+            texData[dstIdx] = v;
+            if (v > maxVal) maxVal = v;
+        }
     }
     const dynamicMax = Math.max(maxVal, 1);
     gl.uniform1f(uMin, 0);
     gl.uniform1f(uMax, dynamicMax);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, texWidth, texHeight, gl.LUMINANCE, gl.UNSIGNED_BYTE, texData);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, potW, potH, gl.LUMINANCE, gl.UNSIGNED_BYTE, texData);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 }
 
 // ========== Robot WebGL 渲染（带 mask） ==========
 function renderRobotWebGL(glCtx, layoutData, maskData, texWidth, texHeight) {
     if (!glCtx) return;
-    const { gl, texture, texData, maskTexture, uMin, uMax } = glCtx;
-    const len = Math.min(layoutData.length, texWidth * texHeight);
+    const { gl, texture, texData, maskTexture, uMin, uMax, potW, potH } = glCtx;
+    // 将布局数据填入 POT 尺寸的 texData（按 potW 步长）
+    texData.fill(0);
     let maxVal = 0;
-    for (let i = 0; i < len; i++) {
-        const v = Math.min(255, Math.max(0, Math.round(layoutData[i])));
-        texData[i] = v;
-        if (v > maxVal) maxVal = v;
+    for (let y = 0; y < texHeight; y++) {
+        for (let x = 0; x < texWidth; x++) {
+            const srcIdx = y * texWidth + x;
+            const dstIdx = y * potW + x;
+            const v = srcIdx < layoutData.length ? Math.min(255, Math.max(0, Math.round(layoutData[srcIdx]))) : 0;
+            texData[dstIdx] = v;
+            if (v > maxVal) maxVal = v;
+        }
     }
     const dynamicMax = Math.max(maxVal, 1);
     gl.uniform1f(uMin, 0);
     gl.uniform1f(uMax, dynamicMax);
 
-    // 上传数据纹理
+    // 上传数据纹理（POT 尺寸）
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, texWidth, texHeight, gl.LUMINANCE, gl.UNSIGNED_BYTE, texData);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, potW, potH, gl.LUMINANCE, gl.UNSIGNED_BYTE, texData);
 
-    // 上传 mask 纹理
+    // 上传 mask 纹理（POT 尺寸）
     if (maskTexture && maskData) {
+        // 将 mask 数据填入 POT 尺寸的 maskData
+        glCtx.maskData.fill(0);
+        for (let y = 0; y < texHeight; y++) {
+            for (let x = 0; x < texWidth; x++) {
+                const srcIdx = y * texWidth + x;
+                const dstIdx = y * potW + x;
+                glCtx.maskData[dstIdx] = srcIdx < maskData.length ? maskData[srcIdx] : 0;
+            }
+        }
         gl.activeTexture(gl.TEXTURE1);
         gl.bindTexture(gl.TEXTURE_2D, maskTexture);
-        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, texWidth, texHeight, gl.LUMINANCE, gl.UNSIGNED_BYTE, glCtx.maskData);
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, potW, potH, gl.LUMINANCE, gl.UNSIGNED_BYTE, glCtx.maskData);
     }
 
     gl.drawArrays(gl.TRIANGLES, 0, 6);
@@ -710,11 +748,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             // Robot: 一整块 WebGL 渲染 + 一整块 Canvas 2D overlay
             if (isRobot && pendingRobotRef.current !== null && glCtxRef.current) {
                 const { layoutData, maskData, layoutW, layoutH, partDefsWithOffset } = pendingRobotRef.current;
-                // 更新 mask 数据
-                if (glCtxRef.current.maskData) {
-                    glCtxRef.current.maskData.set(maskData);
-                }
-                // 一次 draw call 渲染整个布局
+                // 一次 draw call 渲染整个布局（mask 数据在 renderRobotWebGL 内部转换为 POT 尺寸）
                 renderRobotWebGL(glCtxRef.current, layoutData, maskData, layoutW, layoutH);
                 // 一次 overlay 绘制所有分区
                 if (overlayCtxRef.current) {
@@ -786,14 +820,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             if (glCanvasRef.current) {
                 cleanupWebGL(glCtxRef.current);
                 glCtxRef.current = initWebGL(glCanvasRef.current, layoutW, layoutH, newCs, true);
-                // 初始化 mask
-                if (glCtxRef.current && glCtxRef.current.maskData) {
-                    glCtxRef.current.maskData.set(maskData);
-                    const { gl, maskTexture } = glCtxRef.current;
-                    gl.activeTexture(gl.TEXTURE1);
-                    gl.bindTexture(gl.TEXTURE_2D, maskTexture);
-                    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, layoutW, layoutH, gl.LUMINANCE, gl.UNSIGNED_BYTE, glCtxRef.current.maskData);
-                }
+                // mask 初始化在 renderRobotWebGL 中完成（会自动转换为 POT 尺寸）
             }
             if (overlayCanvasRef.current) {
                 overlayCanvasRef.current.width = layoutW * newCs + 30;
