@@ -81,6 +81,20 @@ class Aside extends React.Component {
         }
         this.canvas = React.createRef()
 
+        // ========== 10Hz 节流控制 ==========
+        this._ASIDE_INTERVAL = 100; // 100ms = 10Hz
+        this._lastDataTime = 0;
+        this._pendingData = null;
+        this._dataTimer = null;
+        this._lastChartTime = 0;
+        this._pendingChart = null;
+        this._chartTimer = null;
+        this._lastAreaTime = 0;
+        this._pendingArea = null;
+        this._areaTimer = null;
+        this._lastBodyTime = 0;
+        this._pendingBody = null;
+        this._bodyTimer = null;
     }
 
     changePressMult(value) {
@@ -119,6 +133,10 @@ class Aside extends React.Component {
     }
 
     componentWillUnmount() {
+        if (this._dataTimer) clearTimeout(this._dataTimer);
+        if (this._chartTimer) clearTimeout(this._chartTimer);
+        if (this._areaTimer) clearTimeout(this._areaTimer);
+        if (this._bodyTimer) clearTimeout(this._bodyTimer);
     }
 
     drawChart({ ctx, arr, max, canvas, index }) {
@@ -179,25 +197,66 @@ class Aside extends React.Component {
     }
 
     handleCharts(arr, max, index) {
-        const canvas = document.getElementById('myChart1')
-
-        if (canvas) this.drawChart({ ctx: ctx1, arr, max, canvas, index })
+        const now = performance.now();
+        this._pendingChart = { arr, max, index };
+        if (now - this._lastChartTime >= this._ASIDE_INTERVAL) {
+            this._lastChartTime = now;
+            const canvas = document.getElementById('myChart1');
+            if (canvas) this.drawChart({ ctx: ctx1, arr, max, canvas, index });
+            if (this._chartTimer) { clearTimeout(this._chartTimer); this._chartTimer = null; }
+        } else if (!this._chartTimer) {
+            this._chartTimer = setTimeout(() => {
+                this._lastChartTime = performance.now();
+                if (this._pendingChart) {
+                    const { arr: a, max: m, index: i } = this._pendingChart;
+                    const canvas = document.getElementById('myChart1');
+                    if (canvas) this.drawChart({ ctx: ctx1, arr: a, max: m, canvas, index: i });
+                }
+                this._chartTimer = null;
+            }, this._ASIDE_INTERVAL - (now - this._lastChartTime));
+        }
     }
 
     handleChartsArea(arr, max, index) {
-
-        const canvas = document.getElementById('myChart2')
-        if (canvas) this.drawChart({ ctx: ctx2, arr, max, canvas, index })
-
+        const now = performance.now();
+        this._pendingArea = { arr, max, index };
+        if (now - this._lastAreaTime >= this._ASIDE_INTERVAL) {
+            this._lastAreaTime = now;
+            const canvas = document.getElementById('myChart2');
+            if (canvas) this.drawChart({ ctx: ctx2, arr, max, canvas, index });
+            if (this._areaTimer) { clearTimeout(this._areaTimer); this._areaTimer = null; }
+        } else if (!this._areaTimer) {
+            this._areaTimer = setTimeout(() => {
+                this._lastAreaTime = performance.now();
+                if (this._pendingArea) {
+                    const { arr: a, max: m, index: i } = this._pendingArea;
+                    const canvas = document.getElementById('myChart2');
+                    if (canvas) this.drawChart({ ctx: ctx2, arr: a, max: m, canvas, index: i });
+                }
+                this._areaTimer = null;
+            }, this._ASIDE_INTERVAL - (now - this._lastAreaTime));
+        }
     }
 
     handleChartsBody(arr, max, index) {
-
-        const canvas = document.getElementById('myChart3')
-        if (canvas) {
-            this.drawChart({ ctx: ctx3, arr, max, canvas, index })
+        const now = performance.now();
+        this._pendingBody = { arr, max, index };
+        if (now - this._lastBodyTime >= this._ASIDE_INTERVAL) {
+            this._lastBodyTime = now;
+            const canvas = document.getElementById('myChart3');
+            if (canvas) this.drawChart({ ctx: ctx3, arr, max, canvas, index });
+            if (this._bodyTimer) { clearTimeout(this._bodyTimer); this._bodyTimer = null; }
+        } else if (!this._bodyTimer) {
+            this._bodyTimer = setTimeout(() => {
+                this._lastBodyTime = performance.now();
+                if (this._pendingBody) {
+                    const { arr: a, max: m, index: i } = this._pendingBody;
+                    const canvas = document.getElementById('myChart3');
+                    if (canvas) this.drawChart({ ctx: ctx3, arr: a, max: m, canvas, index: i });
+                }
+                this._bodyTimer = null;
+            }, this._ASIDE_INTERVAL - (now - this._lastBodyTime));
         }
-
     }
 
     initCharts() {
@@ -223,7 +282,19 @@ class Aside extends React.Component {
             const newState = obj.stateInBbed
             // 状态变化时重置计时（由后端处理，前端只展示）
         }
-        this.setState(obj)
+        const now = performance.now();
+        this._pendingData = obj;
+        if (now - this._lastDataTime >= this._ASIDE_INTERVAL) {
+            this._lastDataTime = now;
+            this.setState(obj);
+            if (this._dataTimer) { clearTimeout(this._dataTimer); this._dataTimer = null; }
+        } else if (!this._dataTimer) {
+            this._dataTimer = setTimeout(() => {
+                this._lastDataTime = performance.now();
+                if (this._pendingData) this.setState(this._pendingData);
+                this._dataTimer = null;
+            }, this._ASIDE_INTERVAL - (now - this._lastDataTime));
+        }
     }
 
     render() {
