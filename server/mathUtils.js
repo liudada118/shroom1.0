@@ -195,6 +195,47 @@ function pressNew1220({ arr, width, height, type = "row", value }) {
   return wsPointData;
 }
 
+function pressNew12203131({ arr, width, height, type = "row", value }) {
+  let wsPointData = [...arr];
+
+  if (type == "row") {
+    let colArr = [];
+    for (let i = 0; i < height; i++) {
+      let total = 0;
+      for (let j = 0; j < width; j++) {
+        total += wsPointData[i * width + j];
+      }
+      colArr.push(total);
+    }
+    for (let i = 0; i < height; i++) {
+      for (let j = 0; j < width; j++) {
+        let den = wsPointData[i * width + j] + value - colArr[i];
+        if (den <= 0) den = 1;
+        wsPointData[i * width + j] = parseInt(wsPointData[i * width + j] * value / den);
+      }
+    }
+  } else {
+    let colArr = [];
+    for (let i = 0; i < height; i++) {
+      let total = 0;
+      for (let j = 0; j < width; j++) {
+        total += wsPointData[j * height + i];
+      }
+      colArr.push(total);
+    }
+    for (let i = 0; i < height; i++) {
+      for (let j = 0; j < width; j++) {
+        if(i == 31) continue;
+        if(j == 16) continue;
+        let den = wsPointData[j * height + i] + value - colArr[i];
+        if (den <= 0) den = 1;
+        wsPointData[j * height + i] = parseInt((wsPointData[j * height + i] * value / den) / 2);
+      }
+    }
+  }
+  return wsPointData;
+}
+
 /**
  * 分压公式（座椅版）
  */
@@ -318,4 +359,5 @@ module.exports = {
   press6sit,
   bytes4ToInt10,
   arrToRealLine,
+  pressNew12203131,
 };
