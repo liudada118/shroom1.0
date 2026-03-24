@@ -1233,6 +1233,119 @@ export const sitTypeEvent = {
         that.data.current?.handleChartsArea(totalPointArr, max1 + 100);
     }
   },
+  carY({ that, wsPointData, backFlag, local, state, wsPointDataSitZero }) {
+    let arr = [...wsPointData]
+
+    if (wsPointDataSitZero && wsPointDataSitZero.length) {
+      arr = arr.map((a, index) => a - wsPointDataSitZero[index] > 0 ? a - wsPointDataSitZero[index] : 0)
+    }
+
+    if (that.state.carState == "sit" && that.state.numMatrixFlag == "num") {
+      that.com.current?.changeWsData(arr);
+    } else if (
+      that.state.carState == "sit" &&
+      that.state.numMatrixFlag == "heatmap"
+    ) {
+      that.com.current?.bthClickHandle(arr);
+    } else {
+      if (that.state.numMatrixFlag == "normal") {
+        that.com.current?.sitData({
+          wsPointData: arr,
+        });
+      }
+    }
+
+    const selectArr = [];
+
+    for (let i = that.sitIndexArr[0]; i <= that.sitIndexArr[1]; i++) {
+      for (let j = that.sitIndexArr[2]; j <= that.sitIndexArr[3]; j++) {
+        selectArr.push(arr[i * 32 + j]);
+      }
+    }
+
+    let DataArr;
+
+    if (that.sitIndexArr.every((a) => a == 0)) {
+      DataArr = [...arr];
+    } else {
+      DataArr = [...selectArr];
+    }
+
+    const total = DataArr.reduce((a, b) => a + b, 0);
+    const length = DataArr.filter((a, index) => a > 0).length;
+
+    sitPoint = DataArr.filter((a) => a > 10).length;
+    const sitTotalvalue = DataArr.reduce((a, b) => a + b, 0);
+    sitMax = findMax(DataArr);
+    sitArea = sitPoint;
+    sitTotal = DataArr.reduce((a, b) => a + b, 0);
+    sitPressure = carFitting(sitTotal / (sitPoint ? sitPoint : 1));
+    sitTotal = [...DataArr].map((a) => pointToN(a)).reduce((a, b) => a + b, 0)
+    sitMax = (sitMax / (sitTotalvalue ? sitTotalvalue : 1)) * sitTotal;
+    sitMean = sitTotal / (sitPoint ? sitPoint : 1);
+    if (
+      sitPoint < 10 &&
+      that.sitIndexArr.every((a) => a == 0) &&
+      that.backIndexArr.every((a) => a == 0)
+    ) {
+      sitMean = 0;
+      sitMax = 0;
+      sitTotal = 0;
+      sitPoint = 0;
+      sitArea = 0;
+      sitPressure = 0;
+    }
+
+    if (!backFlag || state == 'sit') {
+      sitSmooth.getSmooth(
+        [sitMean, Math.max(sitMax), sitTotal, sitPoint, sitArea, sitPressure],
+        10
+      );
+
+      if (local) {
+        that.data.current?.changeData({
+          meanPres: sitMean.toFixed(2),
+          maxPres: sitMax.toFixed(2),
+          totalPres: sitTotal.toFixed(2),
+          point: sitPoint,
+          area: sitArea,
+          pressure: sitPressure,
+        });
+      } else {
+        that.data.current?.changeData({
+          meanPres: sitSmooth.smoothValue[0].toFixed(2),
+          maxPres: sitSmooth.smoothValue[1].toFixed(2),
+          totalPres: sitSmooth.smoothValue[2].toFixed(2),
+          point: parseInt(sitSmooth.smoothValue[3]),
+          area: parseInt(sitSmooth.smoothValue[4]),
+          pressure: parseInt(sitSmooth.smoothValue[5]),
+        });
+      }
+
+      if (totalArr.length < 20) {
+        totalArr.push(sitSmooth.smoothValue[2]);
+      } else {
+        totalArr.shift();
+        totalArr.push(sitSmooth.smoothValue[2]);
+      }
+
+      const max = findMax(totalArr);
+
+      if (!that.state.local)
+        that.data.current?.handleCharts(totalArr, max + 1000);
+
+      if (totalPointArr.length < 20) {
+        totalPointArr.push(sitSmooth.smoothValue[3]);
+      } else {
+        totalPointArr.shift();
+        totalPointArr.push(sitSmooth.smoothValue[3]);
+      }
+
+      const max1 = findMax(totalPointArr);
+      if (!that.state.local)
+        that.data.current?.handleChartsArea(totalPointArr, max1 + 100);
+    }
+  },
   footVideo256: ({ that, wsPointData, local }) => {
     function footVideo(arr) {
       const footArr = []
@@ -4028,6 +4141,166 @@ export const backTypeEvent = {
       }
 
       // console.log('back')
+
+      if (totalArr.length < 20) {
+        totalArr.push(backSmooth.smoothValue[2]);
+      } else {
+        totalArr.shift();
+        totalArr.push(backSmooth.smoothValue[2]);
+      }
+
+      const max = findMax(totalArr);
+      if (!that.state.local) {
+        that.data.current?.handleCharts(totalArr, max + 1000);
+      }
+
+      if (totalPointArr.length < 20) {
+        totalPointArr.push(backSmooth.smoothValue[3]);
+      } else {
+        totalPointArr.shift();
+        totalPointArr.push(backSmooth.smoothValue[3]);
+      }
+
+      const max1 = findMax(totalPointArr);
+      if (!that.state.local) {
+        that.data.current?.handleChartsArea(totalPointArr, max1 + 100);
+      }
+    }
+  },
+  carY: ({ that, jsonObject, sitFlag, local, state, wsPointDataBackZero }) => {
+    if (!sitFlag) {
+      if (colValueFlag) {
+        num++;
+
+        that.title.current?.changeNum(num);
+      } else {
+        num = 0;
+      }
+    }
+
+    backPress = 0;
+    let wsPointData = jsonObject.backData;
+
+    if (wsPointDataBackZero && wsPointDataBackZero.length) {
+      wsPointData = wsPointData.map((a, index) => a - wsPointDataBackZero[index] > 0 ? a - wsPointDataBackZero[index] : 0)
+    }
+
+    if (!Array.isArray(wsPointData)) {
+      wsPointData = JSON.parse(wsPointData);
+    }
+
+    if (that.state.carState == "back" && that.state.numMatrixFlag == "num") {
+      wsPointData = rotate90(wsPointData, 32, 32);
+      that.com.current?.changeWsData(wsPointData);
+    } else if (
+      that.state.carState == "back" &&
+      that.state.numMatrixFlag == "heatmap"
+    ) {
+      wsPointData = rotate180(wsPointData, 32, 32);
+      that.com.current?.bthClickHandle(wsPointData);
+    }
+    else {
+      if (that.state.numMatrixFlag == "normal")
+        that.com.current?.backData({
+          wsPointData: wsPointData,
+        });
+    }
+
+    const selectArr = [];
+    for (let i = that.backIndexArr[0]; i <= that.backIndexArr[1]; i++) {
+      for (
+        let j = 31 - that.backIndexArr[3];
+        j <= 31 - that.backIndexArr[2];
+        j++
+      ) {
+        selectArr.push(wsPointData[i * 32 + j]);
+      }
+    }
+
+    let DataArr;
+    if (
+      that.sitIndexArr.every((a) => a == 0) &&
+      that.backIndexArr.every((a) => a == 0)
+    ) {
+      DataArr = [...wsPointData];
+    } else {
+      DataArr = [...selectArr];
+    }
+
+    const backTotalvalue = DataArr.reduce((a, b) => a + b, 0);
+    backTotal = DataArr.reduce((a, b) => a + b, 0);
+    backPoint = DataArr.filter((a) => a > 10).length;
+    backMax = findMax(DataArr);
+    backArea = backPoint;
+    backPressure = carFitting(backTotal / (backPoint ? backPoint : 1));
+    backTotal = [...DataArr].map((a) => pointToN(a)).reduce((a, b) => a + b, 0)
+    backMax = (backMax / (backTotalvalue ? backTotalvalue : 1)) * backTotal;
+    backMean = backTotal / (backPoint ? backPoint : 1);
+
+    if (
+      backPoint < 10 &&
+      that.sitIndexArr.every((a) => a == 0) &&
+      that.backIndexArr.every((a) => a == 0) &&
+      !local
+    ) {
+      backMean = 0;
+      backMax = 0;
+      backTotal = 0;
+      backPoint = 0;
+      backArea = 0;
+      backPressure = 0;
+    }
+
+    if (!sitFlag || state == 'back') {
+      backSmooth.getSmooth(
+        [backMean, backMax, backTotal, backPoint, backArea, backPressure],
+        10
+      );
+    } else {
+      const totalPress = backTotal + sitTotal + headTotal;
+      const totalMax = Math.max(backMax, sitMax, headMax);
+      const totalPoint = backPoint + sitPoint + headPoint;
+      const totalArea = backArea + sitArea + headArea;
+
+      backMean = totalPress / totalPoint;
+      backMax = Math.max(backMax, sitMax);
+      backTotal = backTotal + sitTotal + headTotal;
+      backPoint = backPoint + sitPoint + headPoint;
+      backArea = backArea + sitArea + headArea;
+
+      backSmooth.getSmooth(
+        [
+          totalPress / (totalPoint ? totalPoint : 1),
+          totalMax,
+          totalPress,
+          totalPoint,
+          totalArea,
+          backPressure,
+        ],
+        10
+      );
+    }
+
+    if (state != 'sit' && state != 'head') {
+      if (local) {
+        that.data.current?.changeData({
+          meanPres: backMean.toFixed(2),
+          maxPres: backMax.toFixed(2),
+          totalPres: backTotal.toFixed(2),
+          point: backPoint,
+          area: backArea,
+          pressure: backPressure,
+        });
+      } else {
+        that.data.current?.changeData({
+          meanPres: backSmooth.smoothValue[0].toFixed(2),
+          maxPres: backSmooth.smoothValue[1].toFixed(2),
+          totalPres: backSmooth.smoothValue[2].toFixed(2),
+          point: parseInt(backSmooth.smoothValue[3]),
+          area: parseInt(backSmooth.smoothValue[4]),
+          pressure: backSmooth.smoothValue[5],
+        });
+      }
 
       if (totalArr.length < 20) {
         totalArr.push(backSmooth.smoothValue[2]);

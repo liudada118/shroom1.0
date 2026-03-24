@@ -360,6 +360,7 @@ class Title extends React.Component {
       { label: '手套监测', value: 'newHand' },
       { label: '席悦1.0', value: 'smallBed' },
       { label: '席悦2.0', value: 'xiyueReal1' },
+      { label: '汽车座椅Y', value: 'carY' },
       { label: '手套96', value: 'gloves' },
       { label: '左手手套', value: 'gloves1' },
       { label: '右手手套', value: 'gloves2' },

@@ -68,6 +68,7 @@ const {
   zeroLineMatrix,
   sit100Line,
   endiSit1024,
+  carYLine,
 } = require("./openWeb");
 const module2 = require('./aes_ecb')
 const { isCar, dedupli, totalToN, } = require("./util");
@@ -2886,6 +2887,8 @@ parser.on("data", function (data) {
         // pointArr = gaussBlur_return(pointArr , 32,32, 0.5)
       } else if (file == 'sofa') {
         pointArr = arrToRealLine(pointArr, [[7, 0], [8, 15]], [[0, 15]], 32)
+      } else if (file == 'carY') {
+        pointArr = carYLine(pointArr)
       }
 
       pointArr1zeroData = [...pointArr]
@@ -3696,6 +3699,8 @@ parser2.on("data", function (data) {
 
       } else if (file == 'sofa') {
         pointArr2 = arrToRealLine(pointArr2, [[7, 0], [8, 15]], [[0, 15]], 32)
+      } else if (file == 'carY') {
+        pointArr2 = carYLine(pointArr2)
       } else {
         pointArr2 = carBackLine(pointArr2);
       }

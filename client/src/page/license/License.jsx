@@ -86,6 +86,7 @@ const SENSOR_GROUPS = [
       { label: '沙发', value: 'sofa' },
       { label: 'car100', value: 'car100' },
       { label: '车载传感器', value: 'carCol' },
+      { label: '汽车座椅Y', value: 'carY' },
     ],
   },
   {
@@ -297,7 +298,7 @@ const License = () => {
   // 快捷预设
   const presets = [
     { label: '触觉全套', types: ['hand0205', 'robot1', 'robotSY', 'robotLCF', 'footVideo'] },
-    { label: '汽车全套', types: ['car', 'car10', 'volvo', 'carQX', 'yanfeng10', 'sofa'] },
+    { label: '汽车全套', types: ['car', 'car10', 'volvo', 'carQX', 'yanfeng10', 'sofa', 'carY'] },
     { label: '高速矩阵', types: ['fast256', 'fast1024', 'fast1024sit', 'daliegu'] },
     { label: '床垫全套', types: ['bigBed', 'jqbed', 'smallBed', 'xiyueReal1'] },
   ];

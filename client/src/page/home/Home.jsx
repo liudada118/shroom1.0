@@ -39,6 +39,7 @@ import RobotBlueSY from '../../components/video/robotSY'
 import RobotBlueLCF from "../../components/video/robotLCF";
 import RobotBlue0428 from "../../components/video/robot0428";
 import MatCol from "../../components/three/matCol";
+import CarY from "../../components/three/carY";
 import CarTq from "../../components/three/carTq";
 import Bed from "../../components/three/Bed";
 import SmallBed from "../../components/three/smallBed";
@@ -92,7 +93,7 @@ import { chestLine, flLine, frLine, genWebglData, handSkinChange, heatMapMax, hl
 import { WebGLCanvas } from "../../components/webgl/WebGL.HeatMap copy 2";
 
 const isCar = (str) => {
-  const arr = ['yanfeng10', 'car', 'car10', 'volvo', 'footVideo', 'hand0507', 'hand0205', 'carQX', 'eye' , 'sofa']
+  const arr = ['yanfeng10', 'car', 'car10', 'volvo', 'footVideo', 'hand0507', 'hand0205', 'carQX', 'eye' , 'sofa', 'carY']
   return arr.includes(str)
 }
 
@@ -3269,6 +3270,14 @@ class Home extends React.Component {
                     ) : this.state.matrixName == "sofa" ? (
                       <CanvasCom matrixName={this.state.matrixName}>
                         <CanvasCarSofa
+                          ref={this.com}
+                          changeSelect={this.changeSelect}
+                          changeStateData={this.changeStateData}
+                        />
+                      </CanvasCom>
+                    ) : this.state.matrixName == "carY" ? (
+                      <CanvasCom matrixName={this.state.matrixName}>
+                        <CarY
                           ref={this.com}
                           changeSelect={this.changeSelect}
                           changeStateData={this.changeStateData}
