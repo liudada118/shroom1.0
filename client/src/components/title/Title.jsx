@@ -753,6 +753,12 @@ class Title extends React.Component {
             backClose: true,
             headClose: true
           })
+          // 清空前端串口选择状态
+          this.props.changeStateData({
+            portname: '',
+            portnameBack: '',
+            portnameHead: ''
+          })
         }} className='titleButton'>
           {t('closeSensor')}
         </Button>

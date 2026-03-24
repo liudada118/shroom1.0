@@ -455,11 +455,13 @@ module.exports = {
           /**
            * 鐏忓棝娼懗灞炬殶閹诡噣鈧岸浜鹃崗鎶芥４
            */
-          if (JSON.parse(message).backClose === true) {
+           if (JSON.parse(message).backClose === true) {
             backClose = true
+            com1 = undefined; // 清除 com1 防止自动重连
             if (port2?.isOpen) {
-
-              port2.close();
+              port2.close((err) => {
+                if (err) logger.warn('port2 close error (server1):', err);
+              });
             }
           }
 
@@ -706,8 +708,15 @@ module.exports = {
           if (JSON.parse(message).file != null) {
             backClose = true
             sitClose = true
+            headClose = true
+            // 清除 com 变量，防止自动重连定时器用旧值重新打开串口
+            com = undefined;
+            com1 = undefined;
+            comhead = undefined;
             if (port1?.isOpen) {
-              port1.close();
+              port1.close((err) => {
+                if (err) logger.warn('port1 close error on file switch:', err);
+              });
 
               const jsonData = JSON.stringify({
                 sitData:
@@ -723,7 +732,9 @@ module.exports = {
               });
             }
             if (port2?.isOpen) {
-              port2.close();
+              port2.close((err) => {
+                if (err) logger.warn('port2 close error on file switch:', err);
+              });
               const jsonData = JSON.stringify({
                 backData: new Array(backTotal).fill(0),
               });
@@ -736,7 +747,9 @@ module.exports = {
             }
 
             if (portHead?.isOpen) {
-              portHead.close();
+              portHead.close((err) => {
+                if (err) logger.warn('portHead close error on file switch:', err);
+              });
               const jsonData = JSON.stringify({
                 headData: new Array(100).fill(0),
               });
@@ -1355,26 +1368,34 @@ module.exports = {
            */
           if (JSON.parse(message).sitClose === true) {
             sitClose = true
+            com = undefined; // 清除 com 防止自动重连
             if (port1?.isOpen) {
-              port1.close();
+              port1.close((err) => {
+                if (err) logger.warn('port1 close error:', err);
+              });
             }
           }
 
           /**
-           * 鐏忓棝娼懗灞炬殶閹诡噣鈧岸浜鹃崗鎶芥４
+           * 鐏忓棝娼懗灞炬殶閹诡噣鈧岸浜鹃崗鎶芥４
            */
           if (JSON.parse(message).backClose === true) {
             backClose = true
+            com1 = undefined; // 清除 com1 防止自动重连
             if (port2?.isOpen) {
-              port2.close();
+              port2.close((err) => {
+                if (err) logger.warn('port2 close error:', err);
+              });
             }
           }
 
           if (JSON.parse(message).headClose === true) {
             headClose = true
+            comhead = undefined; // 清除 comhead 防止自动重连
             if (portHead?.isOpen) {
-
-              portHead.close();
+              portHead.close((err) => {
+                if (err) logger.warn('portHead close error:', err);
+              });
             }
           }
           /**

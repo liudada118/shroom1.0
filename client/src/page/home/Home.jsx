@@ -2003,10 +2003,12 @@ class Home extends React.Component {
 
     // 1. 先停止回放，确保后端不再发送旧数据
     this.wsSendObj({ play: false });
-    // 2. 再发送 file 切换，后端切换数据库并重置回放状态
+    // 2. 关闭所有串口，确保切换前旧串口完全停止
+    this.wsSendObj({ sitClose: true, backClose: true, headClose: true });
+    // 3. 再发送 file 切换，后端切换数据库并重置回放状态
     this.wsSendObj({ file: e });
 
-    // 3. 清空前端数据
+    // 4. 清空前端数据
     this.data.current?.changeData({ meanPres: 0, maxPres: 0, point: 0, area: 0, totalPres: 0, pressure: 0 });
     this.data.current?.initCharts();
     this.areaArr = null;
@@ -2014,7 +2016,7 @@ class Home extends React.Component {
     this.max = 0;
     this.pressMax = 0;
 
-    // 4. 重置回放控件（播放状态 + 滑块位置）
+    // 5. 重置回放控件（播放状态 + 滑块位置）
     this.progress.current?.resetPlay();
 
     this.setState({
@@ -2025,9 +2027,12 @@ class Home extends React.Component {
       areaArr: null,
       pressArr: null,
       playflag: false,
+      portname: '',
+      portnameBack: '',
+      portnameHead: '',
     });
 
-    // 5. 如果当前在回放模式，重新请求新 db 的时间列表
+    // 6. 如果当前在回放模式，重新请求新 db 的时间列表
     if (wasLocal) {
       // 延迟发送，确保后端先处理 file 切换
       setTimeout(() => {
