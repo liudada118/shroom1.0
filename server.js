@@ -3088,8 +3088,8 @@ parser.on("data", function (data) {
       } else if (file == 'fast1024sit') {
         pointArr = endiSit1024(pointArr)
       } else if (file == 'fast1024') {
-        pointArr = jqbed(pointArr)
-        console.log('fast1024')
+        // pointArr = jqbed(pointArr)
+        // console.log('fast1024')
         // console.log(Math.max(...pointArr))
         // pointArr = pressNew1220({ arr: pointArr, height: 32, width: 32, type: 'col', value: 1024 })
         // pointArr = gaussBlur_return(pointArr , 32,32, 0.5)

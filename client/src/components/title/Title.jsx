@@ -352,6 +352,7 @@ class Title extends React.Component {
       { label: t('sensorFast256'), value: 'fast256' },
       { label: t('sensorFast1024'), value: 'fast1024' },
       { label: t('sensorNormal'), value: 'normal' },
+      { label: t('smallBed'), value: 'smallBed' },
     ]
 
     // 根据 allowedTypes 过滤传感器列表
