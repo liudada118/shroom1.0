@@ -766,6 +766,14 @@ module.exports = {
             db1 = dbObj.db1
             db2 = dbObj.db2
 
+            // 切换 file 时重置回放状态
+            stopPlaybackTimer();
+            nowIndex = 0;
+            localData = [];
+            localDataBack = [];
+            localDataHead = [];
+            indexArr = [0, 0];
+
           }
 
           if (JSON.parse(message).baudRate != null) {

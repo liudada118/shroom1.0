@@ -2000,7 +2000,31 @@ class Home extends React.Component {
     // setMatrixName(e)
     const configObj = getConfig({ sensorType: e })
 
-    this.setState({ matrixName: e, ...configObj });
+    // 切换 matrixName 时：停止回放、清空数据、重置回放控件
+    this.wsSendObj({ play: false });
+    this.data.current?.changeData({ meanPres: 0, maxPres: 0, point: 0, area: 0, totalPres: 0, pressure: 0 });
+    this.data.current?.initCharts();
+    this.areaArr = null;
+    this.pressArr = null;
+    this.max = 0;
+    this.pressMax = 0;
+
+    this.setState({
+      matrixName: e,
+      ...configObj,
+      dataArr: [],
+      dataTime: '',
+      areaArr: null,
+      pressArr: null,
+    });
+
+    // 如果当前在回放模式，重新请求新 db 的时间列表
+    if (this.state.local) {
+      // 延迟发送，确保后端先处理 file 切换
+      setTimeout(() => {
+        this.wsSendObj({ local: true });
+      }, 100);
+    }
     // 网络版
     // if (e === 'yanfeng10') {
     //   ws.close()

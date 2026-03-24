@@ -402,7 +402,7 @@ class Title extends React.Component {
             })
 
             this.props.wsSendObj({ resetZero: false })
-            this.setState({ resetZero: false })
+            this.setState({ resetZero: false, dataTime: '' })
 
             this.props.changeStateData({
               portname: '',
