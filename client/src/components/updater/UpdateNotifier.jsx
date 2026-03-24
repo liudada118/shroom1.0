@@ -22,6 +22,7 @@ import {
   ExclamationCircleOutlined,
   RocketOutlined,
 } from "@ant-design/icons";
+import VersionHistory from "./VersionHistory";
 
 // 更新状态枚举
 const UPDATE_STATE = {
@@ -386,6 +387,7 @@ export default function UpdateNotifier() {
         }}
       >
         {renderStatusTag()}
+        <VersionHistory />
         <Button
           type="primary"
           shape="circle"
