@@ -59,6 +59,7 @@ const SENSOR_GROUPS = [
       { label: '14x20高速', value: 'daliegu' },
       { label: '16x16高速', value: 'fast256' },
       { label: '32x32高速', value: 'fast1024' },
+      { label: '32x32高速测试', value: 'normalFast' },
     ],
   },
 ];
@@ -81,7 +82,7 @@ const DAY_PRESETS = [30, 90, 180, 365, 730, 1095];
 /** 传感器快捷预设 */
 const SENSOR_PRESETS = [
   { label: '触觉全套', types: ['hand0205', 'handGlove115200', 'robot1', 'robotSY', 'robotLCF', 'footVideo'] },
-  { label: '高速矩阵', types: ['fast256', 'fast1024', 'daliegu'] },
+  { label: '高速矩阵', types: ['fast256', 'fast1024', 'normalFast', 'daliegu'] },
 ];
 
 const License = () => {

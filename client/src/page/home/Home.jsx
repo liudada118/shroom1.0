@@ -3114,6 +3114,19 @@ class Home extends React.Component {
                           changeStateData={this.changeStateData}
                           changeSelect={this.changeSelect} />
                       </CanvasCom>
+                    ) : this.state.matrixName == "normalFast" ? (
+                      <CanvasCom matrixName={this.state.matrixName}
+                        local={this.state.local}
+                      >
+                        <Fast1024
+                          ref={this.com}
+                          data={this.data}
+                          local={this.state.local}
+                          handleChartsBody={this.handleChartsBody.bind(this)}
+                          handleChartsBody1={this.handleChartsBody1.bind(this)}
+                          changeStateData={this.changeStateData}
+                          changeSelect={this.changeSelect} />
+                      </CanvasCom>
                     ) : this.state.matrixName == "fast1024" ? (
                       <CanvasCom matrixName={this.state.matrixName}
                         local={this.state.local}

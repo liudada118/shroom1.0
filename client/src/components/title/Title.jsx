@@ -351,6 +351,7 @@ class Title extends React.Component {
       { label: t('sensorJqbed'), value: 'jqbed' },
       { label: t('sensorFast256'), value: 'fast256' },
       { label: t('sensorFast1024'), value: 'fast1024' },
+      { label: t('sensorNormalFast'), value: 'normalFast' },
       { label: t('sensorNormal'), value: 'normal' },
       { label: t('smallBed'), value: 'smallBed' },
     ]
@@ -416,7 +417,7 @@ class Title extends React.Component {
 
 
         {
-          this.props.matrixName.includes('fast') || this.props.matrixName == 'bed4096' || this.props.matrixName == 'bed4096num' || this.props.matrixName == 'bed1616' || this.props.matrixName == 'fast256' || this.props.matrixName == 'footVideo256' || this.props.matrixName == 'daliegu' ? <Input placeholder={t('enterBaudRate')} onChange={(e) => {
+          this.props.matrixName.includes('fast') || this.props.matrixName == 'normalFast' || this.props.matrixName == 'bed4096' || this.props.matrixName == 'bed4096num' || this.props.matrixName == 'bed1616' || this.props.matrixName == 'fast256' || this.props.matrixName == 'footVideo256' || this.props.matrixName == 'daliegu' ? <Input placeholder={t('enterBaudRate')} onChange={(e) => {
             const value = e.target.value
             this.props.wsSendObj({
               baudRate: value
