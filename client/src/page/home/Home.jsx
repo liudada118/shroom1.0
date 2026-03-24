@@ -1999,15 +1999,23 @@ class Home extends React.Component {
   changeMatrix = (e) => {
     // setMatrixName(e)
     const configObj = getConfig({ sensorType: e })
+    const wasLocal = this.state.local;
 
-    // 切换 matrixName 时：停止回放、清空数据、重置回放控件
+    // 1. 先停止回放，确保后端不再发送旧数据
     this.wsSendObj({ play: false });
+    // 2. 再发送 file 切换，后端切换数据库并重置回放状态
+    this.wsSendObj({ file: e });
+
+    // 3. 清空前端数据
     this.data.current?.changeData({ meanPres: 0, maxPres: 0, point: 0, area: 0, totalPres: 0, pressure: 0 });
     this.data.current?.initCharts();
     this.areaArr = null;
     this.pressArr = null;
     this.max = 0;
     this.pressMax = 0;
+
+    // 4. 重置回放控件（播放状态 + 滑块位置）
+    this.progress.current?.resetPlay();
 
     this.setState({
       matrixName: e,
@@ -2016,10 +2024,11 @@ class Home extends React.Component {
       dataTime: '',
       areaArr: null,
       pressArr: null,
+      playflag: false,
     });
 
-    // 如果当前在回放模式，重新请求新 db 的时间列表
-    if (this.state.local) {
+    // 5. 如果当前在回放模式，重新请求新 db 的时间列表
+    if (wasLocal) {
       // 延迟发送，确保后端先处理 file 切换
       setTimeout(() => {
         this.wsSendObj({ local: true });

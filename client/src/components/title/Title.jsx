@@ -260,7 +260,7 @@ class Title extends React.Component {
   changeMatrixType(e) {
     // this.props.handleChangeCom(e);
     console.log(e);
-    this.props.wsSendObj({ file: e })
+    // file 切换移到 changeMatrix 中统一管理，确保 play:false 先于 file 到达后端
     this.props.changeMatrix(e)
     if (e === 'bigBed') {
       this.props.initBigCtx()
