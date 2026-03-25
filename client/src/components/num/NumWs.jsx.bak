@@ -115,9 +115,6 @@ function render3DCanvas(ctx, flatData, texW, texH, cellW, cellH, textHeightMul, 
     }
 }
 
-// Rotation angle presets for changePointRotation (same as other components)
-const ROTATION_PRESETS = [0, Math.PI / 6, Math.PI / 3];
-
 const Num3D = React.forwardRef((props, refs) => {
 
     const textHeightRef = useRef(3)
@@ -139,10 +136,6 @@ const Num3D = React.forwardRef((props, refs) => {
     const texSizeRef = useRef({ w: width, h: height });
 
     const scaleRef = useRef(1);
-
-    // Rotation state for right-top angle buttons
-    const [rotateX, setRotateX] = useState(20);   // degrees, initial tilt
-    const [rotateZ, setRotateZ] = useState(0);     // degrees
 
     const cellW = 32; // 每个单元格宽度（像素）
     const cellH = 24; // 每个单元格高度（像素）
@@ -307,14 +300,17 @@ const Num3D = React.forwardRef((props, refs) => {
                 data.push(wsPointData[i * 15 + j])
             }
         }
+        layoutData(data)
         let newArr = new Array(1024).fill(0)
         let k = 0
+
         for (let i = 13; i < 17; i++) {
-            for (let j = 14; j < 14 + 3; j++) {
-                newArr[i * 32 + j] = data[k]
+            for (let j = 17; j < 20; j++) {
+                newArr[j * 32 + i] = data[k] * 8
                 k++
             }
         }
+
         newArr = gaussBlur_2(newArr, 32, 32, 1.6)
 
         reinitCanvas(32, 32);
@@ -323,15 +319,16 @@ const Num3D = React.forwardRef((props, refs) => {
     }
 
     const changeWsDatapalm = (wsPointData) => {
-        const w = 15, h = 5
-        let data = []
-        for (let i = 0; i < 5; i++) {
-            for (let j = 0; j < 15; j++) {
+        const data = []
+        for (let i = 5; i < 10; i++) {
+            for (let j = 14; j >= 0; j--) {
                 data.push(wsPointData[i * 15 + j])
             }
         }
+        layoutData(data)
         let newArr = new Array(1024).fill(0)
         let k = 0
+
         for (let i = 13; i < 18; i++) {
             for (let j = 7; j < 7 + 15; j++) {
                 newArr[i * 32 + j] = data[k]
@@ -386,32 +383,6 @@ const Num3D = React.forwardRef((props, refs) => {
         typeRef.current = str
     }
 
-    // ========== 视角调节接口 (compatible with Home.jsx right-top buttons) ==========
-    const changePointRotation = ({ direction, value }) => {
-        const angleDeg = (ROTATION_PRESETS[value] || 0) * (180 / Math.PI);
-        if (direction === 'x') {
-            setRotateX(20 + angleDeg); // 20deg base + rotation
-        } else if (direction === 'z') {
-            setRotateZ(angleDeg);
-        }
-    }
-
-    const changeGroupRotate = ({ x, z }) => {
-        if (x !== undefined) {
-            const angleDeg = (ROTATION_PRESETS[x] || 0) * (180 / Math.PI);
-            setRotateX(20 + angleDeg);
-        }
-        if (z !== undefined) {
-            const angleDeg = (ROTATION_PRESETS[z] || 0) * (180 / Math.PI);
-            setRotateZ(angleDeg);
-        }
-    }
-
-    const reset = () => {
-        setRotateX(20);
-        setRotateZ(0);
-    }
-
     useImperativeHandle(refs, () => ({
         changeWsData: changeWsData,
         drawContent: drawContent,
@@ -419,11 +390,7 @@ const Num3D = React.forwardRef((props, refs) => {
         changeType,
         changeWsDatafinger,
         changeWsDatapalm,
-        changeWsData147,
-        // 视角调节接口
-        changePointRotation,
-        changeGroupRotate,
-        reset,
+        changeWsData147
     }));
 
     function boxesForGauss(sigma, n) {
@@ -465,11 +432,6 @@ const Num3D = React.forwardRef((props, refs) => {
     const tw = texSizeRef.current.w;
     const th = texSizeRef.current.h;
 
-    // Calculate scale to fit within viewport
-    // Canvas native size
-    const canvasNativeW = tw * cellW;
-    const canvasNativeH = th * cellH + extraTop;
-
     return (
         <div
             style={{
@@ -479,7 +441,6 @@ const Num3D = React.forwardRef((props, refs) => {
                 justifyContent: 'center',
                 alignItems: 'center',
                 backgroundColor: '#000',
-                overflow: 'hidden',
             }}
         >
             <div
@@ -490,22 +451,13 @@ const Num3D = React.forwardRef((props, refs) => {
                 }}
             >
                 <div
-                    style={{
-                        transform: `rotateX(${rotateX}deg) rotateZ(${rotateZ}deg)`,
-                        maxWidth: '85vw',
-                        maxHeight: '85vh',
-                    }}
+                    style={{ transform: 'rotateX(20deg)' }}
                 >
                     <canvas
                         ref={canvasRef}
-                        width={canvasNativeW}
-                        height={canvasNativeH}
-                        style={{
-                            display: 'block',
-                            maxWidth: '85vw',
-                            maxHeight: '85vh',
-                            objectFit: 'contain',
-                        }}
+                        width={tw * cellW}
+                        height={th * cellH + extraTop}
+                        style={{ display: 'block' }}
                     />
                 </div>
             </div>
