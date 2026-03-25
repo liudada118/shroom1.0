@@ -71,6 +71,8 @@ shroom1.0/
 
 详细架构文档请参阅 [docs/architecture.md](./docs/architecture.md)
 
+Mac 正式打包与自动更新发布流程请参阅 [docs/mac_release_flow.md](./docs/mac_release_flow.md)
+
 ## License
 
 Private
