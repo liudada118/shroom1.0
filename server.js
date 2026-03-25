@@ -75,7 +75,7 @@ const module2 = require('./aes_ecb')
 const { resolveConfigFile, getConfigFileCandidates } = require('./licenseHelper');
 const { isCar, dedupli, totalToN, } = require("./util");
 const { pressSmallBed } = require("./utilMatrix");
-const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine } = require('./server/mathUtils');
+const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine, pressNew12203131 } = require('./server/mathUtils');
 const { initDb: _initDbFromModule } = require('./server/dbManager');
 
 const getPort = (ports) => {
@@ -163,8 +163,8 @@ http.get('http://sensor.bodyta.com:8080/rcv/login/getSystemTime', {
 
 const runtimeResourceRoot = app.isPackaged ? process.resourcesPath : __dirname;
 const runtimeWritableRoot = app.isPackaged ? app.getPath('userData') : __dirname;
-const exportRoot = app.isPackaged && process.platform === 'darwin'
-  ? app.getPath('desktop')
+const exportRoot = app.isPackaged
+  ? (process.platform === 'darwin' ? app.getPath('desktop') : process.resourcesPath)
   : runtimeWritableRoot;
 let filePath = path.join(runtimeWritableRoot, "db");
 let csvPath = path.join(exportRoot, "data");
@@ -455,11 +455,13 @@ module.exports = {
           /**
            * 鐏忓棝娼懗灞炬殶閹诡噣鈧岸浜鹃崗鎶芥４
            */
-          if (JSON.parse(message).backClose === true) {
+           if (JSON.parse(message).backClose === true) {
             backClose = true
+            com1 = undefined; // 清除 com1 防止自动重连
             if (port2?.isOpen) {
-
-              port2.close();
+              port2.close((err) => {
+                if (err) logger.warn('port2 close error (server1):', err);
+              });
             }
           }
 
@@ -706,8 +708,15 @@ module.exports = {
           if (JSON.parse(message).file != null) {
             backClose = true
             sitClose = true
+            headClose = true
+            // 清除 com 变量，防止自动重连定时器用旧值重新打开串口
+            com = undefined;
+            com1 = undefined;
+            comhead = undefined;
             if (port1?.isOpen) {
-              port1.close();
+              port1.close((err) => {
+                if (err) logger.warn('port1 close error on file switch:', err);
+              });
 
               const jsonData = JSON.stringify({
                 sitData:
@@ -723,7 +732,9 @@ module.exports = {
               });
             }
             if (port2?.isOpen) {
-              port2.close();
+              port2.close((err) => {
+                if (err) logger.warn('port2 close error on file switch:', err);
+              });
               const jsonData = JSON.stringify({
                 backData: new Array(backTotal).fill(0),
               });
@@ -736,7 +747,9 @@ module.exports = {
             }
 
             if (portHead?.isOpen) {
-              portHead.close();
+              portHead.close((err) => {
+                if (err) logger.warn('portHead close error on file switch:', err);
+              });
               const jsonData = JSON.stringify({
                 headData: new Array(100).fill(0),
               });
@@ -765,6 +778,14 @@ module.exports = {
             db = dbObj.db
             db1 = dbObj.db1
             db2 = dbObj.db2
+
+            // 切换 file 时重置回放状态
+            stopPlaybackTimer();
+            nowIndex = 0;
+            localData = [];
+            localDataBack = [];
+            localDataHead = [];
+            indexArr = [0, 0];
 
           }
 
@@ -1347,26 +1368,34 @@ module.exports = {
            */
           if (JSON.parse(message).sitClose === true) {
             sitClose = true
+            com = undefined; // 清除 com 防止自动重连
             if (port1?.isOpen) {
-              port1.close();
+              port1.close((err) => {
+                if (err) logger.warn('port1 close error:', err);
+              });
             }
           }
 
           /**
-           * 鐏忓棝娼懗灞炬殶閹诡噣鈧岸浜鹃崗鎶芥４
+           * 鐏忓棝娼懗灞炬殶閹诡噣鈧岸浜鹃崗鎶芥４
            */
           if (JSON.parse(message).backClose === true) {
             backClose = true
+            com1 = undefined; // 清除 com1 防止自动重连
             if (port2?.isOpen) {
-              port2.close();
+              port2.close((err) => {
+                if (err) logger.warn('port2 close error:', err);
+              });
             }
           }
 
           if (JSON.parse(message).headClose === true) {
             headClose = true
+            comhead = undefined; // 清除 comhead 防止自动重连
             if (portHead?.isOpen) {
-
-              portHead.close();
+              portHead.close((err) => {
+                if (err) logger.warn('portHead close error:', err);
+              });
             }
           }
           /**
@@ -3080,11 +3109,15 @@ parser.on("data", function (data) {
       } else if (file == 'fast1024sit') {
         pointArr = endiSit1024(pointArr)
       } else if (file == 'fast1024') {
-        pointArr = jqbed(pointArr)
-        console.log('fast1024')
+        // pointArr = jqbed(pointArr)
+        // console.log('fast1024')
         // console.log(Math.max(...pointArr))
-        pointArr = pressNew1220({ arr: pointArr, height: 32, width: 32, type: 'col', value: 1024 })
+        // pointArr = pressNew1220({ arr: pointArr, height: 32, width: 32, type: 'col', value: 1024 })
         // pointArr = gaussBlur_return(pointArr , 32,32, 0.5)
+      } else if (file == 'normalFast') {
+        pointArr = pressNew12203131({ arr: pointArr, height: 32, width: 32, type: 'col', value: 1024 })
+        // console.log('pressNew12203131')
+        // 32*32高速测试，与 fast1024 逻辑一致，不做任何线序变换
       } else if (file == 'sofa') {
         pointArr = arrToRealLine(pointArr, [[7, 0], [8, 15]], [[0, 15]], 32)
       }

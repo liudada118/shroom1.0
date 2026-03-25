@@ -837,6 +837,15 @@ export const sitTypeEvent = {
     } else if (that.state.numMatrixFlag == "heatmap") {
       that.com.current?.bthClickHandle(wsPointData);
     }
+  }, normalFast: ({ that, wsPointData, local }) => {
+    if (that.state.numMatrixFlag == "normal") {
+      that.com.current?.sitData({
+        wsPointData: wsPointData,
+        local: that.state.local
+      });
+    } else if (that.state.numMatrixFlag == "heatmap") {
+      that.com.current?.bthClickHandle(wsPointData);
+    }
   }, fast1024: ({ that, wsPointData, local }) => {
     if (that.state.numMatrixFlag == "normal") {
       // wsPointData = handLine(wsPointData);

@@ -260,7 +260,7 @@ class Title extends React.Component {
   changeMatrixType(e) {
     // this.props.handleChangeCom(e);
     console.log(e);
-    this.props.wsSendObj({ file: e })
+    // file 切换移到 changeMatrix 中统一管理，确保 play:false 先于 file 到达后端
     this.props.changeMatrix(e)
     if (e === 'bigBed') {
       this.props.initBigCtx()
@@ -351,7 +351,9 @@ class Title extends React.Component {
       { label: t('sensorJqbed'), value: 'jqbed' },
       { label: t('sensorFast256'), value: 'fast256' },
       { label: t('sensorFast1024'), value: 'fast1024' },
+      { label: t('sensorNormalFast'), value: 'normalFast' },
       { label: t('sensorNormal'), value: 'normal' },
+      { label: t('smallBed'), value: 'smallBed' },
     ]
 
     // 根据 allowedTypes 过滤传感器列表
@@ -402,7 +404,7 @@ class Title extends React.Component {
             })
 
             this.props.wsSendObj({ resetZero: false })
-            this.setState({ resetZero: false })
+            this.setState({ resetZero: false, dataTime: '' })
 
             this.props.changeStateData({
               portname: '',
@@ -415,7 +417,7 @@ class Title extends React.Component {
 
 
         {
-          this.props.matrixName.includes('fast') || this.props.matrixName == 'bed4096' || this.props.matrixName == 'bed4096num' || this.props.matrixName == 'bed1616' || this.props.matrixName == 'fast256' || this.props.matrixName == 'footVideo256' || this.props.matrixName == 'daliegu' ? <Input placeholder={t('enterBaudRate')} onChange={(e) => {
+          this.props.matrixName.includes('fast') || this.props.matrixName == 'normalFast' || this.props.matrixName == 'bed4096' || this.props.matrixName == 'bed4096num' || this.props.matrixName == 'bed1616' || this.props.matrixName == 'fast256' || this.props.matrixName == 'footVideo256' || this.props.matrixName == 'daliegu' ? <Input placeholder={t('enterBaudRate')} onChange={(e) => {
             const value = e.target.value
             this.props.wsSendObj({
               baudRate: value
@@ -752,6 +754,12 @@ class Title extends React.Component {
             sitClose: true,
             backClose: true,
             headClose: true
+          })
+          // 清空前端串口选择状态
+          this.props.changeStateData({
+            portname: '',
+            portnameBack: '',
+            portnameHead: ''
           })
         }} className='titleButton'>
           {t('closeSensor')}

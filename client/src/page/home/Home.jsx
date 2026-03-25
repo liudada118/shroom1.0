@@ -1999,8 +1999,46 @@ class Home extends React.Component {
   changeMatrix = (e) => {
     // setMatrixName(e)
     const configObj = getConfig({ sensorType: e })
+    const wasLocal = this.state.local;
 
-    this.setState({ matrixName: e, ...configObj });
+    // 1. 先停止回放，确保后端不再发送旧数据
+    this.wsSendObj({ play: false });
+    // 2. 关闭所有串口，确保切换前旧串口完全停止
+    this.wsSendObj({ sitClose: true, backClose: true, headClose: true });
+    // 3. 再发送 file 切换，后端切换数据库并重置回放状态
+    this.wsSendObj({ file: e });
+
+    // 4. 清空前端数据
+    this.data.current?.changeData({ meanPres: 0, maxPres: 0, point: 0, area: 0, totalPres: 0, pressure: 0 });
+    this.data.current?.initCharts();
+    this.areaArr = null;
+    this.pressArr = null;
+    this.max = 0;
+    this.pressMax = 0;
+
+    // 5. 重置回放控件（播放状态 + 滑块位置）
+    this.progress.current?.resetPlay();
+
+    this.setState({
+      matrixName: e,
+      ...configObj,
+      dataArr: [],
+      dataTime: '',
+      areaArr: null,
+      pressArr: null,
+      playflag: false,
+      portname: '',
+      portnameBack: '',
+      portnameHead: '',
+    });
+
+    // 6. 如果当前在回放模式，重新请求新 db 的时间列表
+    if (wasLocal) {
+      // 延迟发送，确保后端先处理 file 切换
+      setTimeout(() => {
+        this.wsSendObj({ local: true });
+      }, 100);
+    }
     // 网络版
     // if (e === 'yanfeng10') {
     //   ws.close()
@@ -3068,6 +3106,19 @@ class Home extends React.Component {
                         local={this.state.local}
                       >
                         <Fast256
+                          ref={this.com}
+                          data={this.data}
+                          local={this.state.local}
+                          handleChartsBody={this.handleChartsBody.bind(this)}
+                          handleChartsBody1={this.handleChartsBody1.bind(this)}
+                          changeStateData={this.changeStateData}
+                          changeSelect={this.changeSelect} />
+                      </CanvasCom>
+                    ) : this.state.matrixName == "normalFast" ? (
+                      <CanvasCom matrixName={this.state.matrixName}
+                        local={this.state.local}
+                      >
+                        <Fast1024
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
