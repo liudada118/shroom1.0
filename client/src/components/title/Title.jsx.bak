@@ -22,51 +22,27 @@ const maxValue = 1000
 
 let loadData = ''
 
-// Default config values (same as Home.jsx initConfig)
-const titleInitConfig = {
-  bed: { valueg1: 2, valuej1: 1205, valuel1: 5, valuef1: 6, value1: 0.72 },
-  sit: { valueg1: 4.3, valuej1: 1705, valuel1: 11, valuef1: 14, value1: 3.54 },
-}
-const bedArr_title = ['bigBed', 'smallBed', 'bed4096', 'bed4096num', 'matCol', 'matColPos', 'jqbed']
-const matrixNameToType_title = (type) => bedArr_title.includes(type) ? 'bed' : type
-
 /**
- * Get merged config from localStorage cache, supporting sensorType + mode two-dimensional cache.
+ * 
+ * @param {*} param0  sensorType 传感器类型 , valueType 需要修改的值的类型 , value 需要修改的值
+ * 修改localStroage 里面的配置
+ * 
  */
-const getConfig = ({ sensorType, mode }) => {
-  if (!sensorType) return titleInitConfig['bed']
-  const realType = matrixNameToType_title(sensorType)
-  const init = titleInitConfig[realType] ? titleInitConfig[realType] : titleInitConfig['bed']
+const changeLocalStroage = ({ sensorType, valueType, value }) => {
+  // localStorage.setItem("carValue", value);
+  console.log(valueType)
   let config = JSON.parse(localStorage.getItem('valueConfig'))
-  if (!config) return { ...init }
-  let result = {}
-  if (config[realType] && Object.keys(config[realType]).length) {
-    result = { ...config[realType] }
-  }
-  if (mode) {
-    const modeKey = `${realType}__${mode}`
-    if (config[modeKey] && Object.keys(config[modeKey]).length) {
-      result = { ...result, ...config[modeKey] }
-    }
-  }
-  return { ...init, ...result }
-}
-
-/**
- * @param {*} param0  sensorType 传感器类型, valueType 需要修改的值的类型, value 需要修改的值, mode 展示模式
- * Save setting value to localStorage cache, keyed by sensorType + mode
- */
-const changeLocalStroage = ({ sensorType, valueType, value, mode }) => {
-  let config = JSON.parse(localStorage.getItem('valueConfig'))
+  console.log(config)
   if (!config) {
     config = {}
   }
-  // Build cache key: sensorType or sensorType__mode
-  const cacheKey = mode ? `${sensorType}__${mode}` : sensorType
-  if (!config[cacheKey]) {
-    config[cacheKey] = {}
+
+  if (!config[sensorType]) {
+    config[sensorType] = {}
   }
-  config[cacheKey][valueType] = value
+
+  config[sensorType][valueType] = value
+  console.log(config)
   localStorage.setItem('valueConfig', JSON.stringify(config))
 }
 
@@ -355,247 +331,6 @@ class Title extends React.Component {
     }, 0);
   };
 
-  /**
-   * Determine which setting parameters to show based on matrixName + numMatrixFlag (display mode)
-   * Returns JSX for the Drawer slider content
-   */
-  renderSettingSliders(t) {
-    const matrixName = this.props.matrixName;
-    const mode = this.props.numMatrixFlag; // 'normal' | 'num' | 'num3D' | 'numoriginal' | 'skin'
-    const cacheMode = mode; // mode dimension for cache
-
-    // Sensor type groups
-    const group1 = ['hand', 'normal', 'footVideo', 'smallBed', 'jqbed']; // 3D point scene
-    const group2 = ['robot1', 'robotSY', 'robotLCF']; // Robots
-    const group3 = ['hand0205', 'handGlove115200']; // Tactile gloves
-    const group4 = ['fast256', 'fast1024', 'normalFast']; // High-speed
-
-    // Determine which parameters to show
-    let showGuass = false;    // Smoothness
-    let showSize = false;     // Size
-    let showSpeed = false;    // Rotation speed
-    let showColor = false;    // Color
-    let showFilter = false;   // Filter value
-    let showHeight = false;   // Height
-    let showConsis = false;   // Data consistency
-    let showInit = false;     // Initial value
-
-    if (group1.includes(matrixName)) {
-      // Group 1: 3D point scene - smoothness, color, filter, height, consistency, init
-      showGuass = true;
-      showColor = true;
-      showFilter = true;
-      showHeight = true;
-      showConsis = true;
-      showInit = true;
-    } else if (group2.includes(matrixName)) {
-      if (mode === 'numoriginal') {
-        // Robot raw data mode: only color
-        showColor = true;
-      } else {
-        // Robot normal mode: size, color, filter, init, speed
-        showSize = true;
-        showColor = true;
-        showFilter = true;
-        showInit = true;
-        showSpeed = true;
-      }
-    } else if (group3.includes(matrixName)) {
-      if (mode === 'skin') {
-        // Glove 3D skin mode: size, color, filter, init
-        showSize = true;
-        showColor = true;
-        showFilter = true;
-        showInit = true;
-      } else if (['num3D', 'num', 'numoriginal'].includes(mode)) {
-        // Glove 3D digit / 2D digit / raw data: only color
-        showColor = true;
-      } else {
-        // Glove normal 3D mode: show all relevant
-        showGuass = true;
-        showColor = true;
-        showFilter = true;
-        showHeight = true;
-        showConsis = true;
-        showInit = true;
-      }
-    } else if (group4.includes(matrixName)) {
-      // High-speed: color, filter, init
-      showColor = true;
-      showFilter = true;
-      showInit = true;
-    } else {
-      // Other sensor types: show nothing for now
-      return null;
-    }
-
-    // Helper to push value to component via ref methods
-    const pushSitBack = (obj) => {
-      if (this.props.com.current) {
-        if (this.props.com.current.sitValue) {
-          this.props.com.current.sitValue(obj);
-        }
-        if (this.props.com.current.backValue) {
-          this.props.com.current.backValue(obj);
-        }
-      }
-    };
-
-    const pushChangeColor = (obj) => {
-      if (this.props.com.current && this.props.com.current.changeColor) {
-        this.props.com.current.changeColor(obj);
-      }
-    };
-
-    return (
-      <div className='slideContent' style={{ width: '300px' }}>
-        <div className="flexcenter" style={{ flex: 1, flexDirection: "column" }}>
-
-          {/* Smoothness / Gaussian */}
-          {showGuass && (
-            <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
-              <div className='dataTitle'>{t('guass')}</div>
-              <Slider
-                min={0.1} max={8} step={0.1}
-                value={this.props.valueg1}
-                onChange={(value) => {
-                  localStorage.setItem("carValueg", value);
-                  this.props.changeStateData({ valueg1: value });
-                  changeLocalStroage({ sensorType: matrixName, valueType: 'valueg1', value, mode: cacheMode });
-                  pushSitBack({ valueg: value });
-                }}
-                style={{ width: '200px' }}
-              />
-            </div>
-          )}
-
-          {/* Size */}
-          {showSize && (
-            <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
-              <div className='dataTitle'>{t('size')}</div>
-              <Slider
-                min={1} max={50} step={0.1}
-                onChange={(value) => {
-                  changeLocalStroage({ sensorType: matrixName, valueType: 'sizeValue', value, mode: cacheMode });
-                  pushChangeColor({ size: value });
-                }}
-                style={{ width: '200px' }}
-              />
-            </div>
-          )}
-
-          {/* Rotation Speed */}
-          {showSpeed && (
-            <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
-              <div className='dataTitle'>{t('speed')}</div>
-              <Slider
-                min={1} max={20} step={1}
-                onChange={(value) => {
-                  changeLocalStroage({ sensorType: matrixName, valueType: 'speedValue', value, mode: cacheMode });
-                  pushChangeColor({ speedValue: value });
-                }}
-                style={{ width: '200px' }}
-              />
-            </div>
-          )}
-
-          {/* Color */}
-          {showColor && (
-            <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
-              <div className='dataTitle'>{t('color')}</div>
-              <Slider
-                min={5} max={1000} step={10}
-                value={this.props.valuej1}
-                onChange={(value) => {
-                  localStorage.setItem("carValuej", value);
-                  this.props.changeStateData({ valuej1: value });
-                  changeLocalStroage({ sensorType: matrixName, valueType: 'valuej1', value, mode: cacheMode });
-                  pushSitBack({ valuej: value });
-                  pushChangeColor({ max: value });
-                }}
-                style={{ width: '200px' }}
-              />
-            </div>
-          )}
-
-          {/* Filter */}
-          {showFilter && (
-            <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
-              <div className='dataTitle'>{t('filter')}</div>
-              <Slider
-                min={0} max={100} step={2}
-                value={this.props.valuef1}
-                onChange={(value) => {
-                  localStorage.setItem("carValuef", value);
-                  this.props.changeStateData({ valuef1: value });
-                  changeLocalStroage({ sensorType: matrixName, valueType: 'valuef1', value, mode: cacheMode });
-                  pushSitBack({ valuef: value });
-                  pushChangeColor({ filter: value });
-                }}
-                style={{ width: '200px' }}
-              />
-            </div>
-          )}
-
-          {/* Height */}
-          {showHeight && (
-            <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
-              <div className='dataTitle'>{t('height')}</div>
-              <Slider
-                min={0.1} max={15} step={0.02}
-                value={this.props.value1}
-                onChange={(value) => {
-                  localStorage.setItem("carValue", value);
-                  this.props.changeStateData({ value1: value });
-                  changeLocalStroage({ sensorType: matrixName, valueType: 'value1', value, mode: cacheMode });
-                  pushSitBack({ value: value });
-                }}
-                style={{ width: '200px' }}
-              />
-            </div>
-          )}
-
-          {/* Data Consistency */}
-          {showConsis && (
-            <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
-              <div className='dataTitle'>{t('consis')}</div>
-              <Slider
-                min={1} max={20} step={1}
-                value={this.props.valuel1}
-                onChange={(value) => {
-                  localStorage.setItem("carValuel", value);
-                  this.props.changeStateData({ valuel1: value });
-                  changeLocalStroage({ sensorType: matrixName, valueType: 'valuel1', value, mode: cacheMode });
-                  pushSitBack({ valuel: value });
-                }}
-                style={{ width: '200px' }}
-              />
-            </div>
-          )}
-
-          {/* Initial Value */}
-          {showInit && (
-            <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
-              <div className='dataTitle'>{t('init')}</div>
-              <Slider
-                min={1} max={5000} step={500}
-                value={this.props.valuelInit1}
-                onChange={(value) => {
-                  localStorage.setItem("carValueInit", value);
-                  this.props.changeStateData({ valuelInit1: value });
-                  changeLocalStroage({ sensorType: matrixName, valueType: 'valuelInit1', value, mode: cacheMode });
-                  pushSitBack({ valuelInit: value });
-                }}
-                style={{ width: '200px' }}
-              />
-            </div>
-          )}
-
-        </div>
-      </div>
-    );
-  }
-
   render() {
     const routerStr = this.props.matrixName == 'yanfeng10' ? '10a10' : this.props.matrixName == 'smallSample' ? '10a10' : this.props.matrixName == 'matCol' || this.props.matrixName == 'matColPos' ? '16a10' : this.props.matrixName == 'bed4096' ? '64a64' : this.props.matrixName == 'carCol' ? '10a9' : '32a32'
     const { t, i18n } = this.props;
@@ -825,9 +560,9 @@ class Title extends React.Component {
             style={{ width: 90 }}
             value={this.props.numMatrixFlag}
             onChange={(value) => {
-              // Load cached config for the new mode
-              const modeConfig = getConfig({ sensorType: this.props.matrixName, mode: value })
-              this.props.changeStateData({ numMatrixFlag: value, ...modeConfig })
+              // localStorage.setItem('language', value)
+              this.props.changeStateData({ numMatrixFlag: value })
+              //  this.props.i18n.changeLanguage(value)
 
               if (this.props.matrixName == 'hand0205' || this.props.matrixName == 'handGlove115200') {
                 if (['normal', 'skin'].includes(this.props.numMatrixFlag)) {
@@ -842,6 +577,9 @@ class Title extends React.Component {
                   this.setState({ resetZero: true })
                 }
               }
+
+
+
             }}
             options={(this.props.matrixName == 'hand0205' || this.props.matrixName == 'handGlove115200') ? [
               { value: 'num', label: t('data2D') },
@@ -1205,7 +943,650 @@ class Title extends React.Component {
           })
         }} className='optionImg' src={option} alt="" />
         <Drawer style={{ backgroundColor: 'rgba(21,18,42,0.8)' }} title={t('setData')} onClose={() => { this.setState({ open: false }) }} open={this.state.open}>
-          {this.renderSettingSliders(t)}
+          <div className='slideContent' style={{ width: '300px', }}>
+            <div
+              className="flexcenter"
+              style={{
+                flex: 1,
+                flexDirection: "column",
+              }}
+            >
+              <div
+                className="progerssSlide"
+                style={{
+                  display: "flex",
+
+                  alignItems: "center",
+                }}
+              >
+                <div
+                  className='dataTitle'
+                >
+                  {t('guass')}
+                </div>
+                <Slider
+                  min={0.1}
+                  max={8}
+                  onChange={(value) => {
+                    localStorage.setItem("carValueg", value);
+
+                    this.props.changeStateData({ valueg1: value })
+
+                    changeLocalStroage({ sensorType: this.props.matrixName, valueType: 'valueg1', value })
+
+                    if (this.props.com.current) {
+                      if (this.props.com.current.sitValue) {
+                        this.props.com.current.sitValue({
+                          valueg: value,
+                        });
+                      }
+                      if (this.props.com.current.backValue) {
+                        this.props.com.current.backValue({
+                          valueg: value,
+                        });
+                      }
+                      // if(this.props.com.current.changeColor){
+                      //   this.props.com.current.changeColor({size : value})
+                      // }
+                    }
+
+                  }}
+                  value={this.props.valueg1}
+                  step={0.1}
+
+                  style={{ width: '200px' }}
+                />
+              </div>
+
+
+              <div
+                className="progerssSlide"
+                style={{
+                  display: "flex",
+
+                  alignItems: "center",
+                }}
+              >
+                <div
+                  className='dataTitle'
+                >
+                  {t('size')}
+                </div>
+                <Slider
+                  min={1}
+                  max={50}
+                  onChange={(value) => {
+                    // localStorage.setItem("carValueg", value);
+
+                    // this.props.changeStateData({ valueg1: value })
+
+                    // changeLocalStroage({ sensorType: this.props.matrixName, valueType: 'valueg1', value })
+
+                    if (this.props.com.current) {
+                      // if (this.props.com.current.sitValue) {
+                      //   this.props.com.current.sitValue({
+                      //     valueg: value,
+                      //   });
+                      // }
+                      // if (this.props.com.current.backValue) {
+                      //   this.props.com.current.backValue({
+                      //     valueg: value,
+                      //   });
+                      // }
+                      if (this.props.com.current.changeColor) {
+                        this.props.com.current.changeColor({ size: value })
+                      }
+                    }
+
+                  }}
+                  // value={this.props.valueg1}
+                  step={0.1}
+
+                  style={{ width: '200px' }}
+                />
+              </div>
+
+
+              <div
+                className="progerssSlide"
+                style={{
+                  display: "flex",
+
+                  alignItems: "center",
+                }}
+              >
+                <div
+                  className='dataTitle'
+                >
+                  {t('speed')}
+                </div>
+                <Slider
+                  min={1}
+                  max={20}
+                  onChange={(value) => {
+
+                    if (this.props.com.current) {
+                      if (this.props.com.current.changeColor) {
+                        this.props.com.current.changeColor({
+                          speedValue: value,
+                        });
+                      }
+                    }
+                  }}
+                  // value={this.props.valuelInit1}
+                  step={1}
+                  style={{ width: '200px' }}
+                />
+              </div>
+
+
+              <div
+                className="progerssSlide"
+                style={{
+                  display: "flex",
+
+                  alignItems: "center",
+                }}
+              >
+                <div
+                  className='dataTitle'
+                >
+                  {t('分压')}
+                </div>
+                <Slider
+                  min={0}
+                  max={this.props.matrixName == 'fast256' ? 20 : 3000}
+                  onChange={(value) => {
+
+
+                    // this.props.changeStateData({ press: value })
+
+                    if (this.props.com.current) {
+                      if (this.props.com.current.sitValue) {
+                        this.props.com.current.sitValue({
+                          press: value,
+                        });
+                      }
+                      if (this.props.com.current.backValue) {
+                        this.props.com.current.backValue({
+                          press: value,
+                        });
+                      }
+                      // if(this.props.com.current.changeColor){
+                      //   this.props.com.current.changeColor({size : value})
+                      // }
+                    }
+
+                  }}
+                  // value={this.props.press}
+                  step={this.props.matrixName == 'fast256' ? 0.1 : 1}
+
+                  style={{ width: '200px' }}
+                />
+              </div>
+
+              <div
+                className="progerssSlide"
+                style={{
+                  display: "flex",
+
+                  alignItems: "center",
+                }}
+              >
+                <div
+                  className='dataTitle'
+                >
+                  {t('乘值')}
+                </div>
+                <Slider
+                  min={0}
+                  max={10}
+                  onChange={(value) => {
+
+
+                    this.props.changeStateData({ prop: value })
+
+                    if (this.props.com.current) {
+                      if (this.props.com.current.sitValue) {
+                        this.props.com.current.sitValue({
+                          prop: value,
+                        });
+                      }
+                      if (this.props.com.current.backValue) {
+                        this.props.com.current.backValue({
+                          prop: value,
+                        });
+                      }
+                      // if(this.props.com.current.changeColor){
+                      //   this.props.com.current.changeColor({size : value})
+                      // }
+                    }
+
+                  }}
+                  // value={this.props.press}
+                  step={0.02}
+
+                  style={{ width: '200px' }}
+                />
+              </div>
+
+
+              <div
+                className="progerssSlide"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  //   padding : '5px',
+                  //   borderRadius : 10,
+                  //   backgroundColor : '#72aec9'
+                }}
+              >
+                <div
+                  className='dataTitle'
+                >
+                  {t('color')}
+                </div>
+                <Slider
+                  min={5}
+                  max={1000}
+                  onChange={(value) => {
+                    localStorage.setItem("carValuej", value);
+                    // this.props.setValuej1(value);
+                    this.props.changeStateData({ valuej1: value })
+
+                    changeLocalStroage({ sensorType: this.props.matrixName, valueType: 'valuej1', value })
+
+                    if (this.props.com.current) {
+                      if (this.props.com.current.sitValue) {
+                        this.props.com.current.sitValue({
+                          valuej: value,
+                        });
+                      }
+                      if (this.props.com.current.backValue) {
+                        this.props.com.current.backValue({
+                          valuej: value,
+                        });
+                      }
+                      if (this.props.com.current.changeColor) {
+                        this.props.com.current.changeColor({ max: value })
+                      }
+
+                    }
+
+
+                  }}
+                  value={this.props.valuej1}
+                  step={10}
+                  // value={this.props.}
+                  style={{ width: '200px' }}
+                />
+              </div>
+              <div
+                className="progerssSlide"
+                style={{
+                  display: "flex",
+
+                  alignItems: "center",
+                }}
+              >
+                <div
+                  className='dataTitle'
+                >
+                  {t('filter')}
+                </div>
+                <Slider
+                  min={0}
+                  max={100}
+                  onChange={(value) => {
+                    localStorage.setItem("carValuef", value);
+                    // this.props.setValuef1(value);
+                    this.props.changeStateData({ valuef1: value })
+                    changeLocalStroage({ sensorType: this.props.matrixName, valueType: 'valuef1', value })
+
+                    if (this.props.com.current) {
+                      if (this.props.com.current.sitValue) {
+                        this.props.com.current.sitValue({
+                          valuef: value,
+                        });
+                      }
+                      if (this.props.com.current.backValue) {
+                        this.props.com.current.backValue({
+                          valuef: value,
+                        });
+                      }
+
+                      if (this.props.com.current.backValue) {
+                        this.props.com.current.changeColor({
+                          filter: value,
+                        });
+                      }
+                    }
+
+
+                  }}
+                  value={this.props.valuef1}
+                  step={2}
+                  // value={this.props.}
+                  style={{ width: '200px' }}
+                />
+              </div>
+
+              <div
+                className="progerssSlide"
+                style={{
+                  display: "flex",
+
+                  alignItems: "center",
+                }}
+              >
+                <div
+
+                  className='dataTitle'
+                >
+                  {t('height')}
+                </div>
+                <Slider
+                  min={0.1}
+                  max={15}
+                  onChange={(value) => {
+                    localStorage.setItem("carValue", value);
+                    // this.props.setValue1(value);
+                    this.props.changeStateData({ value1: value })
+                    changeLocalStroage({ sensorType: this.props.matrixName, valueType: 'value1', value })
+
+
+                    if (this.props.com.current) {
+                      if (this.props.com.current.sitValue) {
+                        this.props.com.current.sitValue({
+                          value: value,
+                        });
+                      }
+                      if (this.props.com.current.backValue) {
+                        this.props.com.current.backValue({
+                          value: value,
+                        });
+                      }
+                    }
+
+
+                  }}
+                  value={this.props.value1}
+                  step={0.02}
+                  // value={this.props.}
+                  style={{ width: '200px' }}
+                />
+              </div>
+              <div
+                className="progerssSlide"
+                style={{
+                  display: "flex",
+
+                  alignItems: "center",
+                }}
+              >
+                <div
+
+                  className='dataTitle'
+                >
+                  {t('consis')}
+                </div>
+                <Slider
+                  min={1}
+                  max={20}
+                  onChange={(value) => {
+                    localStorage.setItem("carValuel", value);
+                    // this.props.setValuel1(value);
+                    this.props.changeStateData({ valuel1: value })
+                    changeLocalStroage({ sensorType: this.props.matrixName, valueType: 'valuel1', value })
+
+                    if (this.props.com.current) {
+                      if (this.props.com.current.sitValue) {
+                        this.props.com.current.sitValue({
+                          valuel: value,
+                        });
+                      }
+                      if (this.props.com.current.backValue) {
+                        this.props.com.current.backValue({
+                          valuel: value,
+                        });
+                      }
+                    }
+
+
+
+                  }}
+                  value={this.props.valuel1}
+                  step={1}
+                  // value={this.props.}
+                  style={{ width: '200px' }}
+                />
+              </div>
+
+              <div
+                className="progerssSlide"
+                style={{
+                  display: "flex",
+
+                  alignItems: "center",
+                }}
+              >
+                <div
+                  className='dataTitle'
+                >
+                  {t('init')}
+                </div>
+                <Slider
+                  min={1}
+                  max={5000}
+                  onChange={(value) => {
+                    localStorage.setItem("carValueInit", value);
+                    // this.props.setValuelInit1(value);
+                    this.props.changeStateData({ valuelInit1: value })
+
+                    changeLocalStroage({ sensorType: this.props.matrixName, valueType: 'valuelInit1', value })
+
+                    if (this.props.com.current) {
+                      if (this.props.com.current.sitValsue) {
+                        this.props.com.current.sitValue({
+                          valuelInit: value,
+                        });
+                      }
+                      if (this.props.com.current.backValue) {
+                        this.props.com.current.backValue({
+                          valuelInit: value,
+                        });
+                      }
+                    }
+                  }}
+                  value={this.props.valuelInit1}
+                  step={500}
+                  style={{ width: '200px' }}
+                />
+              </div>
+
+              <div
+                className="progerssSlide"
+                style={{
+                  display: "flex",
+
+                  alignItems: "center",
+                }}
+              >
+                <div
+                  className='dataTitle'
+                >
+                  {t('light')}
+                </div>
+                <Slider
+                  min={0}
+                  max={1}
+                  onChange={(value) => {
+
+                    if (this.props.com.current) {
+                      if (this.props.com.current.changeColor) {
+                        this.props.com.current.changeColor({
+                          light: value,
+                        });
+                      }
+                    }
+                  }}
+                  // value={this.props.valuelInit1}
+                  step={0.001}
+                  style={{ width: '200px' }}
+                />
+              </div>
+
+
+
+              <div
+                className="progerssSlide"
+                style={{
+                  display: "flex",
+
+                  alignItems: "center",
+                }}
+              >
+                <div
+                  className='dataTitle'
+                >
+                  {t('x')}
+                </div>
+                <Slider
+                  min={- maxValue}
+                  max={maxValue}
+                  onChange={(value) => {
+
+                    if (this.props.com.current) {
+                      if (this.props.com.current.changaCamera) {
+                        this.props.com.current.changaCamera({
+                          x: value,
+                        });
+                      }
+                    }
+                  }}
+                  // value={this.props.valuelInit1}
+                  step={1}
+                  style={{ width: '200px' }}
+                />
+              </div>
+
+              <div
+                className="progerssSlide"
+                style={{
+                  display: "flex",
+
+                  alignItems: "center",
+                }}
+              >
+                <div
+                  className='dataTitle'
+                >
+                  {t('y')}
+                </div>
+                <Slider
+                  min={- maxValue}
+                  max={maxValue}
+                  onChange={(value) => {
+
+                    if (this.props.com.current) {
+                      if (this.props.com.current.changaCamera) {
+                        this.props.com.current.changaCamera({
+                          y: value,
+                        });
+                      }
+                    }
+                  }}
+                  // value={this.props.valuelInit1}
+                  step={1}
+                  style={{ width: '200px' }}
+                />
+              </div>
+
+              <div
+                className="progerssSlide"
+                style={{
+                  display: "flex",
+
+                  alignItems: "center",
+                }}
+              >
+                <div
+                  className='dataTitle'
+                >
+                  {t('z')}
+                </div>
+                <Slider
+                  min={-maxValue}
+                  max={maxValue}
+                  onChange={(value) => {
+
+                    if (this.props.com.current) {
+                      if (this.props.com.current.changaCamera) {
+                        this.props.com.current.changaCamera({
+                          z: value,
+                        });
+                      }
+                    }
+                  }}
+                  // value={this.props.valuelInit1}
+                  step={1}
+                  style={{ width: '200px' }}
+                />
+              </div>
+
+              {/* 分压 */}
+              {/* <div
+                className="progerssSlide"
+                style={{
+                  display: "flex",
+
+                  alignItems: "center",
+                }}
+              >
+                <div
+                  className='dataTitle'
+                >
+                  {t('init')}
+                </div>
+                <Slider
+                  min={1}
+                  max={6000}
+                  onChange={(value) => {
+                    this.props.wsSendObj({ up: value })
+                  }}
+                  // value={this.props.valuelInit1}
+                  step={1}
+                  style={{ width: '200px' }}
+                />
+              </div>
+
+              <div
+                className="progerssSlide"
+                style={{
+                  display: "flex",
+
+                  alignItems: "center",
+                }}
+              >
+                <div
+                  className='dataTitle'
+                >
+                  {t('init')}
+                </div>
+                <Slider
+                  min={0.1}
+                  max={20}
+                  onChange={(value) => {
+                    this.props.wsSendObj({ down: value })
+                  }}
+                  // value={this.props.valuelInit1}
+                  step={0.1}
+                  style={{ width: '200px' }}
+                />
+              </div> */}
+
+            </div>
+          </div>
           <>
             <Select
               style={{ width: 300 }}

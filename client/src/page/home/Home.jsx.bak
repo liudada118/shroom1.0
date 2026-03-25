@@ -316,45 +316,30 @@ const matrixNameToType = (type) => {
   }
 }
 
-/**
- * Get cached config from localStorage.
- * Supports two-dimensional cache: sensorType + mode.
- * First tries sensorType__mode key, then falls back to sensorType key.
- */
-const getLocalStorageConfig = ({ sensorType, mode }) => {
+// const localStorage
+const getLocalStorageConfig = ({ sensorType }) => {
   let config = JSON.parse(localStorage.getItem('valueConfig'))
+  // if(!){
+  //   return undefined
+  // }
   if (!config || !Object.keys(config).length) {
     return undefined
   }
 
-  let result = {}
-  // First merge base sensorType config (backward compatible)
-  if (config[sensorType] && Object.keys(config[sensorType]).length) {
-    result = { ...config[sensorType] }
-  }
-  // Then merge mode-specific config (higher priority)
-  if (mode) {
-    const modeKey = `${sensorType}__${mode}`
-    if (config[modeKey] && Object.keys(config[modeKey]).length) {
-      result = { ...result, ...config[modeKey] }
-    }
+  if (!config[sensorType] || !Object.keys(config[sensorType]).length) {
+    return undefined
   }
 
-  return Object.keys(result).length ? result : undefined
+  return config[sensorType]
 }
 
-/**
- * Get merged config: defaults + localStorage cache.
- * @param {string} sensorType - sensor type name
- * @param {string} mode - display mode (numMatrixFlag), optional
- */
-const getConfig = ({ sensorType, mode }) => {
+const getConfig = ({ sensorType }) => {
   if (!sensorType) {
     return initConfig['bed']
   }
   const realType = matrixNameToType(sensorType)
   const init = initConfig[realType] ? initConfig[realType] : initConfig['bed']
-  const local = getLocalStorageConfig({ sensorType: realType, mode })
+  const local = getLocalStorageConfig({ sensorType: realType })
   return { ...init, ...local }
 }
 
@@ -2013,7 +1998,7 @@ class Home extends React.Component {
 
   changeMatrix = (e) => {
     // setMatrixName(e)
-    const configObj = getConfig({ sensorType: e, mode: this.state.numMatrixFlag })
+    const configObj = getConfig({ sensorType: e })
     const wasLocal = this.state.local;
 
     // 1. 先停止回放，确保后端不再发送旧数据
