@@ -51,6 +51,7 @@ import ProgressCom from "../../components/progress/Progress";
 import plus from "../../assets/images/Plus.png";
 import minus from "../../assets/images/Minus.png";
 import reset from "../../assets/images/reset.png";
+import frontView from "../../assets/images/frontView.svg";
 import load from "../../assets/images/load.png";
 import enUS from 'antd/locale/en_US';
 import zhCN from 'antd/locale/zh_CN';
@@ -2759,6 +2760,36 @@ class Home extends React.Component {
                   }}
                 >
                   <img src={reset} alt="" />
+                </div>
+              </Popover>
+
+              <Popover
+                placement="top"
+                title={t('frontView') || '正面视角'}
+                content={<div><p>{t('frontViewContent') || '切换到正面视角'}</p></div>}
+              >
+                <div
+                  className="setIcon marginB10"
+                  style={{ marginTop: '10px' }}
+                  onClick={() => {
+                    xvalue = 0;
+                    zvalue = 0;
+                    localStorage.setItem('bedx', 0);
+                    localStorage.setItem('bedz', 0);
+                    if (this.com.current && this.com.current.changeGroupRotate) {
+                      this.com.current?.changeGroupRotate({ x: 0, z: 0 });
+                    }
+                    if (this.com.current && this.com.current.changePointRotation) {
+                      this.com.current?.changePointRotation({ direction: 'x', value: 0, type: this.state.carState });
+                      this.com.current?.changePointRotation({ direction: 'z', value: 0, type: this.state.carState });
+                    }
+                    // Set front view (rotateX=0, rotateZ=0) for Num3D component
+                    if (this.com.current && this.com.current.setFrontView) {
+                      this.com.current?.setFrontView();
+                    }
+                  }}
+                >
+                  <img src={frontView} alt="" />
                 </div>
               </Popover>
 

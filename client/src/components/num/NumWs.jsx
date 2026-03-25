@@ -412,6 +412,12 @@ const Num3D = React.forwardRef((props, refs) => {
         setRotateZ(0);
     }
 
+    // 正面视角：rotateX=0, rotateZ=0（完全正对屏幕）
+    const setFrontView = () => {
+        setRotateX(0);
+        setRotateZ(0);
+    }
+
     useImperativeHandle(refs, () => ({
         changeWsData: changeWsData,
         drawContent: drawContent,
@@ -424,6 +430,7 @@ const Num3D = React.forwardRef((props, refs) => {
         changePointRotation,
         changeGroupRotate,
         reset,
+        setFrontView,
     }));
 
     function boxesForGauss(sigma, n) {

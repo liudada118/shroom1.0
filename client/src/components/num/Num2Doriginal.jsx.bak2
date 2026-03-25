@@ -132,11 +132,6 @@ const FRAGMENT_SHADER_SRC = `
         return;
       }
     }
-    // 0值显示白色背景
-    if (value < 0.5) {
-      gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0);
-      return;
-    }
     vec3 color = jet1(u_min, u_max, value);
     gl_FragColor = vec4(color, 1.0);
   }
@@ -322,8 +317,8 @@ function drawOverlay(ctx, flatData, texWidth, texHeight, cellSize) {
     const ch = texHeight * cellSize;
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 
-    // 绘制网格线（白色边框）
-    ctx.strokeStyle = 'rgba(200, 200, 220, 0.8)';
+    // 绘制网格线
+    ctx.strokeStyle = 'rgba(0, 0, 40, 0.6)';
     ctx.lineWidth = 1;
     for (let i = 0; i <= texHeight; i++) {
         ctx.beginPath();
@@ -338,7 +333,7 @@ function drawOverlay(ctx, flatData, texWidth, texHeight, cellSize) {
         ctx.stroke();
     }
 
-    // 绘制数字（根据数值调整颜色：0值用深色，其他用白色）
+    // 绘制数字
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = `bold ${Math.max(10, cellSize * 0.45)}px monospace`;
@@ -348,8 +343,7 @@ function drawOverlay(ctx, flatData, texWidth, texHeight, cellSize) {
         for (let j = 0; j < texWidth; j++) {
             const idx = i * texWidth + j;
             const val = idx < len ? Math.round(flatData[idx]) : 0;
-            // 0值格子是白色背景，用深色字体；其他用白色字体
-            ctx.fillStyle = val === 0 ? '#999' : '#fff';
+            ctx.fillStyle = '#fff';
             ctx.fillText(
                 val.toString(),
                 j * cellSize + cellSize / 2,
@@ -358,20 +352,24 @@ function drawOverlay(ctx, flatData, texWidth, texHeight, cellSize) {
         }
     }
 
-    // 列索引（底部，蓝色背景）
-    const idxRowY = ch;
-    const idxRowH = Math.max(cellSize * 0.7, 18);
-    ctx.fillStyle = 'rgba(30, 60, 200, 0.85)';
-    ctx.fillRect(0, idxRowY, cw, idxRowH);
-    ctx.fillStyle = '#fff';
-    ctx.font = `bold ${Math.max(8, cellSize * 0.35)}px monospace`;
+    // 行索引（右侧）
+    ctx.fillStyle = '#333';
+    ctx.font = `${Math.max(8, cellSize * 0.35)}px monospace`;
+    ctx.textAlign = 'left';
+    for (let i = 0; i < texHeight; i++) {
+        ctx.fillText(
+            i.toString(),
+            cw + 2,
+            i * cellSize + cellSize / 2
+        );
+    }
+    // 列索引（底部）
     ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
     for (let j = 0; j < texWidth; j++) {
         ctx.fillText(
             j.toString(),
             j * cellSize + cellSize / 2,
-            idxRowY + idxRowH / 2
+            ch + cellSize * 0.5
         );
     }
 }
@@ -393,8 +391,8 @@ function drawRobotOverlay(ctx, partDefs, layoutInfo, cellSize) {
         const pw = w * cellSize;
         const ph = h * cellSize;
 
-        // 绘制网格线（白色边框）
-        ctx.strokeStyle = 'rgba(200, 200, 220, 0.8)';
+        // 绘制网格线
+        ctx.strokeStyle = 'rgba(0, 0, 40, 0.6)';
         ctx.lineWidth = 1;
         for (let i = 0; i <= h; i++) {
             ctx.beginPath();
@@ -409,15 +407,15 @@ function drawRobotOverlay(ctx, partDefs, layoutInfo, cellSize) {
             ctx.stroke();
         }
 
-        // 绘制数字（根据数值调整颜色）
+        // 绘制数字
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.font = `bold ${fontSize}px monospace`;
+        ctx.fillStyle = '#fff';
         for (let i = 0; i < h; i++) {
             for (let j = 0; j < w; j++) {
                 const idx = i * w + j;
                 const val = idx < data.length ? Math.round(data[idx]) : 0;
-                ctx.fillStyle = val === 0 ? '#999' : '#fff';
                 ctx.fillText(
                     val.toString(),
                     px + j * cellSize + cellSize / 2,
@@ -427,7 +425,7 @@ function drawRobotOverlay(ctx, partDefs, layoutInfo, cellSize) {
         }
 
         // 绘制分区标题（在分区下方）
-        ctx.fillStyle = '#ccc';
+        ctx.fillStyle = '#333';
         ctx.font = `bold ${titleFontSize}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
@@ -1040,7 +1038,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                 display: 'flex',
                 justifyContent: 'center',
                 alignItems: 'center',
-                backgroundColor: 'transparent',
+                backgroundColor: '#fff',
                 fontSize: '12px'
             }}
         >
