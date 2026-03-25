@@ -3,6 +3,7 @@
 const { spawnSync } = require("child_process");
 const crypto = require("crypto");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 
 const projectRoot = path.resolve(__dirname, "..");
@@ -16,6 +17,7 @@ const appOutDir = path.join(distDir, `mac-${arch}`);
 const appPath = path.join(appOutDir, `${productName}.app`);
 const updateZipPath = path.join(distDir, `${productName}-${version}-${arch}-mac.zip`);
 const notarizeZipPath = path.join(distDir, `${productName}-${version}-${arch}-mac-notary.zip`);
+const dmgPath = path.join(distDir, `${productName}-${version}-${arch}.dmg`);
 const latestMacYmlPath = path.join(distDir, "latest-mac.yml");
 const macReleaseNotesPath = path.join(projectRoot, "release-notes", "mac", `${version}.md`);
 const macEntitlementsPath = path.join(projectRoot, "scripts", "entitlements.mac.plist");
@@ -117,6 +119,12 @@ function writeAppUpdateYml() {
   ].join("\n");
 
   fs.writeFileSync(appUpdateYmlPath, content, "utf8");
+}
+
+function removeIfExists(targetPath) {
+  if (fs.existsSync(targetPath)) {
+    fs.rmSync(targetPath, { force: true, recursive: true });
+  }
 }
 
 function fileOutput(targetPath) {
@@ -496,11 +504,11 @@ function sleep(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-function submitForNotarization(notaryArgs) {
-  const result = runBuffered("xcrun", ["notarytool", "submit", notarizeZipPath, ...notaryArgs]);
+function submitForNotarization(targetPath, notaryArgs) {
+  const result = runBuffered("xcrun", ["notarytool", "submit", targetPath, ...notaryArgs]);
   if (result.status !== 0) {
     throw new Error(
-      `xcrun notarytool submit ${notarizeZipPath} ${notaryArgs.join(" ")} failed with exit code ${result.status ?? "unknown"}`
+      `xcrun notarytool submit ${targetPath} ${notaryArgs.join(" ")} failed with exit code ${result.status ?? "unknown"}`
     );
   }
 
@@ -542,6 +550,31 @@ function waitForNotarization(submissionId, notaryArgs) {
   throw new Error(`notarization wait exceeded ${maxAttempts} attempts for submission ${submissionId}`);
 }
 
+function createDmg() {
+  const stageRoot = fs.mkdtempSync(path.join(os.tmpdir(), "shroom-dmg-"));
+  const stagedAppPath = path.join(stageRoot, `${productName}.app`);
+  const applicationsLinkPath = path.join(stageRoot, "Applications");
+
+  try {
+    run("ditto", [appPath, stagedAppPath]);
+    fs.symlinkSync("/Applications", applicationsLinkPath);
+    removeIfExists(dmgPath);
+    run("hdiutil", [
+      "create",
+      "-volname",
+      productName,
+      "-srcfolder",
+      stageRoot,
+      "-ov",
+      "-format",
+      "UDZO",
+      dmgPath,
+    ]);
+  } finally {
+    removeIfExists(stageRoot);
+  }
+}
+
 function main() {
   if (process.platform !== "darwin") {
     throw new Error("build-mac-release only supports macOS");
@@ -577,12 +610,9 @@ function main() {
 
   writeAppUpdateYml();
 
-  if (fs.existsSync(notarizeZipPath)) {
-    fs.rmSync(notarizeZipPath, { force: true });
-  }
-  if (fs.existsSync(updateZipPath)) {
-    fs.rmSync(updateZipPath, { force: true });
-  }
+  removeIfExists(notarizeZipPath);
+  removeIfExists(updateZipPath);
+  removeIfExists(dmgPath);
 
   signNestedCode(identity);
   signPath(appPath, identity, { runtime: true, entitlements: macEntitlementsPath });
@@ -595,16 +625,22 @@ function main() {
 
   run("ditto", ["-c", "-k", "--sequesterRsrc", "--keepParent", appPath, notarizeZipPath]);
 
-  const submissionId = process.env.NOTARY_SUBMISSION_ID || submitForNotarization(notaryArgs);
+  const submissionId = process.env.NOTARY_SUBMISSION_ID || submitForNotarization(notarizeZipPath, notaryArgs);
   console.log(`[release] notarization submission -> ${submissionId}`);
   waitForNotarization(submissionId, notaryArgs);
   run("xcrun", ["stapler", "staple", appPath]);
   run("spctl", ["-a", "-t", "exec", "-vv", appPath]);
 
   run("ditto", ["-c", "-k", "--sequesterRsrc", "--keepParent", appPath, updateZipPath]);
+  createDmg();
+  const dmgSubmissionId = process.env.DMG_NOTARY_SUBMISSION_ID || submitForNotarization(dmgPath, notaryArgs);
+  console.log(`[release] dmg notarization submission -> ${dmgSubmissionId}`);
+  waitForNotarization(dmgSubmissionId, notaryArgs);
+  run("xcrun", ["stapler", "staple", dmgPath]);
   writeLatestMacYml();
 
   console.log(`[release] update zip -> ${updateZipPath}`);
+  console.log(`[release] dmg -> ${dmgPath}`);
   console.log(`[release] latest-mac -> ${latestMacYmlPath}`);
 }
 

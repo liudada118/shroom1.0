@@ -75,7 +75,7 @@ const module2 = require('./aes_ecb')
 const { resolveConfigFile, getConfigFileCandidates } = require('./licenseHelper');
 const { isCar, dedupli, totalToN, } = require("./util");
 const { pressSmallBed } = require("./utilMatrix");
-const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine } = require('./server/mathUtils');
+const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine, pressNew12203131 } = require('./server/mathUtils');
 const { initDb: _initDbFromModule } = require('./server/dbManager');
 
 const getPort = (ports) => {
@@ -3115,6 +3115,8 @@ parser.on("data", function (data) {
         // pointArr = pressNew1220({ arr: pointArr, height: 32, width: 32, type: 'col', value: 1024 })
         // pointArr = gaussBlur_return(pointArr , 32,32, 0.5)
       } else if (file == 'normalFast') {
+        pointArr = pressNew12203131({ arr: pointArr, height: 32, width: 32, type: 'col', value: 1024 })
+        // console.log('pressNew12203131')
         // 32*32高速测试，与 fast1024 逻辑一致，不做任何线序变换
       } else if (file == 'sofa') {
         pointArr = arrToRealLine(pointArr, [[7, 0], [8, 15]], [[0, 15]], 32)

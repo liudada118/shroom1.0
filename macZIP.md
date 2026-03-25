@@ -12,6 +12,7 @@
 最终正式产物:
 
 - `dist/Shroom-1.1.3-arm64-mac.zip`
+- `dist/Shroom-1.1.3-arm64.dmg`
 - `dist/latest-mac.yml`
 
 ## 本次遇到的问题
@@ -150,6 +151,7 @@ Fatal process out of memory: Failed to reserve virtual memory for CodeRange
   - notarization
   - stapling
   - 输出更新 zip
+  - 输出可拖入 `Applications` 的 dmg
   - 生成 `latest-mac.yml`
   - 支持 `NOTARY_SUBMISSION_ID` 续跑
 

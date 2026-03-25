@@ -1,6 +1,10 @@
 {
   "name": "shroom",
-  "version": "1.1.8",
+<<<<<<< HEAD
+  "version": "1.1.5",
+=======
+  "version": "1.1.9",
+>>>>>>> 9f746781bf9321ab7c3bb9c965ffcd5fd347f0a7
   "description": "Shroom - Pressure Sensor Data Acquisition & Visualization System",
   "main": "index.js",
   "win": {
