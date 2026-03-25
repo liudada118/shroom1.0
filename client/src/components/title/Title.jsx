@@ -397,6 +397,7 @@ class Title extends React.Component {
         {this.props.matrixTitle ? <Select
           style={{ width: '140px' }}
           placeholder={t('chooseSensor')}
+          value={this.props.matrixName}
           onChange={(e) => {
             this.changeMatrixType(e)
             this.props.changeStateData({
@@ -430,7 +431,7 @@ class Title extends React.Component {
 
           style={{ marginRight: 20, width: 160 }}
           placeholder={t('chooseSensor')}
-          value={this.props.portname ? this.props.portname : null}
+          value={this.props.portname || undefined}
           onOpenChange={() => {
             this.props.wsSendObj({ serialReset: true })
           }}
@@ -446,7 +447,7 @@ class Title extends React.Component {
 
           style={{ marginRight: 20, width: 160 }}
           placeholder={['hand0205', 'handGlove115200'].includes(this.props.matrixName) ? t('chooseLeftSensor') : this.props.matrixName == 'footVideo' ? t('chooseLeftFootSensor') : t('chooseSitSensor')}
-          value={this.props.portname ? `${this.props.portname}${['hand0205', 'handGlove115200', 'footVideo', 'eye'].includes(this.props.matrixName) ? t('left') : (t('sit'))}` : null}
+          value={this.props.portname ? `${this.props.portname}${['hand0205', 'handGlove115200', 'footVideo', 'eye'].includes(this.props.matrixName) ? t('left') : (t('sit'))}` : undefined}
           onOpenChange={() => {
             this.props.wsSendObj({ serialReset: true })
           }}
@@ -470,7 +471,7 @@ class Title extends React.Component {
             // value={this.props.portnameBack}
             placeholder={['hand0205', 'handGlove115200'].includes(this.props.matrixName) ? t('chooseRightSensor') : this.props.matrixName == 'footVideo' ? t('chooseRightFootSensor') : t('chooseBackSensor')}
             style={{ marginRight: 20, width: 160 }}
-            value={this.props.portnameBack ? `${this.props.portnameBack}${['hand0205', 'handGlove115200', 'footVideo'].includes(this.props.matrixName) ? t('right') : (t('back'))}` : null}
+            value={this.props.portnameBack ? `${this.props.portnameBack}${['hand0205', 'handGlove115200', 'footVideo'].includes(this.props.matrixName) ? t('right') : (t('back'))}` : undefined}
             onOpenChange={() => {
               this.props.wsSendObj({ serialReset: true })
             }}
@@ -496,7 +497,7 @@ class Title extends React.Component {
             // value={this.props.portnameBack}
             placeholder={t('chooseHeadSensor')}
             style={{ width: 160 }}
-            value={this.props.portnameHead ? `${this.props.portnameHead}(${t('head')})` : null}
+            value={this.props.portnameHead ? `${this.props.portnameHead}(${t('head')})` : undefined}
             onOpenChange={() => {
               this.props.wsSendObj({ serialReset: true })
             }}
@@ -535,7 +536,7 @@ class Title extends React.Component {
             // if (ws && ws.readyState === 1)
             //   ws.send(JSON.stringify({ sitPort: e }));
           }}
-          value={this.state.dataTime ? this.state.dataTime : null}
+          value={this.state.dataTime || undefined}
           options={this.props.dataArr}
         >
 
