@@ -21,6 +21,11 @@ import {
 // 版本历史数据（从 release-notes 中提取，按版本倒序排列）
 const VERSION_HISTORY = [
   {
+    version: "1.1.9",
+    date: "2026-03-25",
+    changes: ["增加32*32高速测试功能"],
+  },
+  {
     version: "1.1.8",
     date: "2026-03-24",
     changes: ["取消32*32线序和算法"],
