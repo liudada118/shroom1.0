@@ -1040,7 +1040,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                 display: 'flex',
                 justifyContent: 'center',
                 alignItems: 'center',
-                backgroundColor: 'transparent',
+                backgroundColor: '#fff',
                 fontSize: '12px'
             }}
         >

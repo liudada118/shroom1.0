@@ -808,7 +808,7 @@ const Canvas = React.forwardRef((props, refs) => {
       group.rotation.x = -((obj.x) * 6) / 12
     }
     if (typeof obj.z === 'number') {
-      particles.rotation.z = (obj.z) * 6 / 12
+      group.rotation.z = (obj.z) * 6 / 12
     }
   }
 
@@ -838,10 +838,24 @@ const Canvas = React.forwardRef((props, refs) => {
     // renderer.render(scene, camera);
 
     // group.rotation.x = -(Math.PI * 2) / 12
+    group.rotation.x = 0
     group.rotation.y = 0
+    group.rotation.z = 0
     // group.position.x = -15
     // group.position.y = 150
     // group.position.z = 230
+  }
+
+  function setFrontView() {
+    group.rotation.x = 0
+    group.rotation.y = 0
+    group.rotation.z = 0
+    camera.position.z = 70;
+    camera.position.y = 1;
+    camera.position.x = 0;
+    camera.rotation._x = 0;
+    camera.rotation._y = 0;
+    camera.rotation._z = 0;
   }
 
   useImperativeHandle(refs, () => ({
@@ -854,7 +868,8 @@ const Canvas = React.forwardRef((props, refs) => {
     // backRenew,
     sitRenew,
     changeGroupRotate,
-    reset
+    reset,
+    setFrontView
     // actionAll: actionAll,
     // actionSit: actionSit,
     // actionBack: actionBack,
