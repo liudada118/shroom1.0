@@ -657,10 +657,10 @@ class Title extends React.Component {
     // console.log('title')
     return <div className="title">
       {/* <h2>bodyta</h2> */}
-      <div style={{ display: 'flex', alignItems: 'center', color: '#5A5A89' }}> <img src={logo} style={{ height: '60px' }} alt="" />JQTOOLS-robot</div>
+      <div style={{ display: 'flex', alignItems: 'center', color: '#5A5A89', flexShrink: 0, whiteSpace: 'nowrap' }}> <img src={logo} style={{ height: '50px' }} alt="" /><span style={{ fontSize: '12px' }}>JQTOOLS-robot</span></div>
       <div className="titleItems">
         {this.props.matrixTitle ? <Select
-          style={{ width: '140px' }}
+          style={{ width: '130px' }}
           placeholder={t('chooseSensor')}
           value={this.props.matrixName}
           onChange={(e) => {
@@ -694,7 +694,7 @@ class Title extends React.Component {
         <Menu className='menu' onClick={this.onClick} selectedKeys={[this.state.current]} mode="horizontal" items={navItems} />
         {this.props.matrixName != 'localCar' ? this.props.history === 'now' ? this.props.matrixName != 'car' && this.props.matrixName != 'car10' && this.props.matrixName != 'sofa' && this.props.matrixName != 'yanfeng10' && this.props.matrixName != 'volvo' && this.props.matrixName != 'carQX' && this.props.matrixName != 'hand0507' && this.props.matrixName != 'hand0205' && this.props.matrixName != 'handGlove115200' && this.props.matrixName != 'footVideo' && this.props.matrixName != 'eye' ? <><Select
 
-          style={{ marginRight: 20, width: 160 }}
+          style={{ marginRight: 6, width: 140 }}
           placeholder={t('chooseSensor')}
           value={this.props.portname || undefined}
           onOpenChange={() => {
@@ -710,7 +710,7 @@ class Title extends React.Component {
         >
         </Select> <div></div></> : <><Select
 
-          style={{ marginRight: 20, width: 160 }}
+          style={{ marginRight: 6, width: 140 }}
           placeholder={['hand0205', 'handGlove115200'].includes(this.props.matrixName) ? t('chooseLeftSensor') : this.props.matrixName == 'footVideo' ? t('chooseLeftFootSensor') : t('chooseSitSensor')}
           value={this.props.portname ? `${this.props.portname}${['hand0205', 'handGlove115200', 'footVideo', 'eye'].includes(this.props.matrixName) ? t('left') : (t('sit'))}` : undefined}
           onOpenChange={() => {
@@ -735,7 +735,7 @@ class Title extends React.Component {
           <Select
             // value={this.props.portnameBack}
             placeholder={['hand0205', 'handGlove115200'].includes(this.props.matrixName) ? t('chooseRightSensor') : this.props.matrixName == 'footVideo' ? t('chooseRightFootSensor') : t('chooseBackSensor')}
-            style={{ marginRight: 20, width: 160 }}
+            style={{ marginRight: 6, width: 140 }}
             value={this.props.portnameBack ? `${this.props.portnameBack}${['hand0205', 'handGlove115200', 'footVideo'].includes(this.props.matrixName) ? t('right') : (t('back'))}` : undefined}
             onOpenChange={() => {
               this.props.wsSendObj({ serialReset: true })
@@ -761,7 +761,7 @@ class Title extends React.Component {
           {this.props.matrixName == 'volvo' || this.props.matrixName == 'carQX' ? <Select
             // value={this.props.portnameBack}
             placeholder={t('chooseHeadSensor')}
-            style={{ width: 160 }}
+            style={{ width: 140 }}
             value={this.props.portnameHead ? `${this.props.portnameHead}(${t('head')})` : undefined}
             onOpenChange={() => {
               this.props.wsSendObj({ serialReset: true })
@@ -1197,7 +1197,7 @@ class Title extends React.Component {
         ></Select> : ''
       }
 
-      <div style={{ position: 'relative' }}>
+      <div style={{ position: 'relative', flexShrink: 0 }}>
         <img onClick={() => {
           const show = this.state.show
           this.setState({

@@ -27,7 +27,10 @@
     position: fixed;
     top: 0;
     width: 100%;
-    padding: 5px 3%;
+    padding: 5px 1% 5px 1%;
+    flex-wrap: nowrap;
+    overflow: hidden;
+    gap: 4px;
 
     .ant-input {
         background-color: #000;
@@ -46,20 +49,28 @@
         // width: 50%;
         display: flex;
         align-items: center;
+        flex-wrap: wrap;
+        flex: 1;
+        min-width: 0;
+        gap: 4px;
+        justify-content: center;
     }
 
     .titleButton {
         background-color: #000;
         color: #5A5A89;
         border-color: #5A5A89;
+        white-space: nowrap;
+        padding: 4px 8px;
+        font-size: 13px;
     }
 
     .titleSelect {
-        margin-right: 30px;
+        margin-right: 8px;
     }
 
     .menu {
-        flex: 1;
+        flex: 0 0 auto;
     }
 
     .optionImg {
