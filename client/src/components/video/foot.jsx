@@ -806,9 +806,11 @@ const Canvas = React.forwardRef((props, refs) => {
 
     if (typeof obj.x === 'number') {
       group.rotation.x = -((obj.x) * 6) / 12
+      pointGroup.rotation.x = -((obj.x) * 6) / 12
     }
     if (typeof obj.z === 'number') {
       group.rotation.z = (obj.z) * 6 / 12
+      pointGroup.rotation.z = (obj.z) * 6 / 12
     }
   }
 
@@ -841,6 +843,9 @@ const Canvas = React.forwardRef((props, refs) => {
     group.rotation.x = 0
     group.rotation.y = 0
     group.rotation.z = 0
+    pointGroup.rotation.x = 0
+    pointGroup.rotation.y = 0
+    pointGroup.rotation.z = 0
     // group.position.x = -15
     // group.position.y = 150
     // group.position.z = 230
@@ -850,6 +855,9 @@ const Canvas = React.forwardRef((props, refs) => {
     group.rotation.x = 0
     group.rotation.y = 0
     group.rotation.z = 0
+    pointGroup.rotation.x = 0
+    pointGroup.rotation.y = 0
+    pointGroup.rotation.z = 0
     camera.position.z = 70;
     camera.position.y = 1;
     camera.position.x = 0;
