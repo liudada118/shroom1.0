@@ -19,7 +19,8 @@ const updateZipPath = path.join(distDir, `${productName}-${version}-${arch}-mac.
 const notarizeZipPath = path.join(distDir, `${productName}-${version}-${arch}-mac-notary.zip`);
 const dmgPath = path.join(distDir, `${productName}-${version}-${arch}.dmg`);
 const latestMacYmlPath = path.join(distDir, "latest-mac.yml");
-const macReleaseNotesPath = path.join(projectRoot, "release-notes", "mac", `${version}.md`);
+const windowsReleaseNotesPath = path.join(projectRoot, "release-notes", "windows", `${version}.md`);
+const legacyMacReleaseNotesPath = path.join(projectRoot, "release-notes", "mac", `${version}.md`);
 const macEntitlementsPath = path.join(projectRoot, "scripts", "entitlements.mac.plist");
 const pythonRoot = path.join(projectRoot, "python");
 const pythonBuildScript = path.join(pythonRoot, "build_exe.py");
@@ -457,14 +458,25 @@ function notarizationArgs() {
   );
 }
 
-function releaseNotesBlock() {
-  if (!fs.existsSync(macReleaseNotesPath)) {
-    return "";
+function resolveReleaseNotesPath() {
+  for (const candidate of [windowsReleaseNotesPath, legacyMacReleaseNotesPath]) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
   }
 
-  const normalized = fs.readFileSync(macReleaseNotesPath, "utf8").replace(/\r\n/g, "\n").trim();
+  return null;
+}
+
+function releaseNotesBlock() {
+  const releaseNotesPath = resolveReleaseNotesPath();
+  if (!releaseNotesPath) {
+    return { block: "", sourcePath: null };
+  }
+
+  const normalized = fs.readFileSync(releaseNotesPath, "utf8").replace(/\r\n/g, "\n").trim();
   if (!normalized) {
-    return "";
+    return { block: "", sourcePath: releaseNotesPath };
   }
 
   const body = normalized
@@ -472,7 +484,10 @@ function releaseNotesBlock() {
     .map((line) => `  ${line}`)
     .join("\n");
 
-  return `releaseNotes: |-\n${body}\n`;
+  return {
+    block: `releaseNotes: |-\n${body}\n`,
+    sourcePath: releaseNotesPath,
+  };
 }
 
 function writeLatestMacYml() {
@@ -480,7 +495,7 @@ function writeLatestMacYml() {
   const sha512 = crypto.createHash("sha512").update(zipBuffer).digest("base64");
   const size = fs.statSync(updateZipPath).size;
   const releaseDate = new Date().toISOString().replace(/\.\d{3}Z$/, ".000Z");
-  const releaseNotes = releaseNotesBlock();
+  const { block: releaseNotes, sourcePath: releaseNotesPath } = releaseNotesBlock();
 
   const content = [
     `version: ${version}`,
@@ -498,6 +513,9 @@ function writeLatestMacYml() {
 
   fs.writeFileSync(latestMacYmlPath, content, "utf8");
   console.log(`[release] wrote ${latestMacYmlPath}`);
+  if (releaseNotesPath) {
+    console.log(`[release] release notes source -> ${releaseNotesPath}`);
+  }
 }
 
 function sleep(ms) {

@@ -22,9 +22,9 @@
 1. 更新应用版本号  
    在根目录 `package.json` 中修改 `version`。
 
-2. 补充本次 mac 发布说明  
-   新建或更新 `release-notes/mac/<version>.md`。  
-   这个文件会被打进最终生成的 `latest-mac.yml`，然后在客户端更新弹窗里显示。
+2. 补充本次发布说明  
+   默认新建或更新 `release-notes/windows/<version>.md`。  
+   mac 正式打包会优先复用这份 Windows 发布说明写入 `latest-mac.yml`，只有历史版本缺少 Windows 说明时才回退到 `release-notes/mac/<version>.md`。
 
 3. 确认更新源地址  
    `package.json > build.publish` 当前配置的是 generic provider:
@@ -231,7 +231,7 @@ dist/Shroom-<version>-arm64.dmg
 dist/latest-mac.yml
 ```
 
-其中 `releaseNotes` 来自 `release-notes/mac/<version>.md`。
+其中 `releaseNotes` 默认来自 `release-notes/windows/<version>.md`，旧版本缺失时才回退到 `release-notes/mac/<version>.md`。
 
 这个文件是更新服务器对客户端暴露的入口元数据。
 
@@ -314,8 +314,8 @@ http://sensor.bodyta.com/shroom1
 - `client/src/components/updater/UpdateNotifier.jsx`
   前端更新提示、下载进度、安装按钮
 
-- `release-notes/mac/<version>.md`
-  本次版本在客户端展示的 mac 更新说明
+- `release-notes/windows/<version>.md`
+  当前版本的统一更新说明，Windows 和 mac 打包都会优先使用这份内容
 
 ## 8. 内部分发测试流程
 
@@ -341,10 +341,9 @@ npm run build-mac-share
 ## 9. 一次正式发版的最小操作清单
 
 1. 修改 `package.json` 版本号
-2. 新建 `release-notes/mac/<version>.md`
+2. 新建 `release-notes/windows/<version>.md`
 3. 确认更新源地址无需调整
 4. 执行 `npm run build-mac-release`
 5. 验证 `dist/` 下 zip、dmg、`latest-mac.yml` 已生成
 6. 上传 `*-mac.zip` 和 `latest-mac.yml` 到更新服务器
 7. 如需手动下载安装，再上传 DMG
-
