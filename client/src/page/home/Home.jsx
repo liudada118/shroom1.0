@@ -500,7 +500,8 @@ class Home extends React.Component {
       licenseModalVisible: false,
       licenseModalType: '',
       licenseModalExpireDate: '',
-      licenseModalRemainDays: 0
+      licenseModalRemainDays: 0,
+      hz: 12
     };
     this.com = React.createRef();
     this.data = React.createRef();
@@ -1021,6 +1022,9 @@ class Home extends React.Component {
 
     if (jsonObject.hz != null) {
       hz = jsonObject.hz
+      if (this.state.hz !== hz) {
+        this.setState({ hz: hz })
+      }
     }
 
     if (jsonObject.rate != null) {
@@ -3855,6 +3859,26 @@ class Home extends React.Component {
             : null}
         </div> */}
         </div>
+
+          {/* ====== 右下角采样频率显示 ====== */}
+          <div style={{
+            position: 'fixed',
+            bottom: '20px',
+            right: '20px',
+            backgroundColor: 'rgba(25, 25, 50, 0.85)',
+            color: '#01F1E3',
+            padding: '6px 14px',
+            borderRadius: '8px',
+            fontSize: '14px',
+            fontWeight: 'bold',
+            zIndex: 999,
+            backdropFilter: 'blur(6px)',
+            border: '1px solid rgba(1, 241, 227, 0.3)',
+            userSelect: 'none',
+          }}>
+            <span style={{ color: '#aaa', fontWeight: 'normal', marginRight: '4px' }}>Hz</span>
+            {this.state.hz}
+          </div>
 
           {/* ====== 密钥过期提示弹窗 ====== */}
           <Modal
