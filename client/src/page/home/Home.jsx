@@ -359,7 +359,7 @@ const getConfig = ({ sensorType, mode }) => {
   return { ...init, ...local }
 }
 
-var backFlag, hz = 12, sitFlag, fingerArr = localStorage.getItem('fingerArr') && JSON.parse(localStorage.getItem('fingerArr')).every((a) => a.length > 0) ? JSON.parse(localStorage.getItem('fingerArr')) : [new Array(5).fill(0), new Array(5).fill(255)];
+var backFlag, hz = 12, sitFlag, realHzFrameCount = 0, realHzLastTime = Date.now(), fingerArr = localStorage.getItem('fingerArr') && JSON.parse(localStorage.getItem('fingerArr')).every((a) => a.length > 0) ? JSON.parse(localStorage.getItem('fingerArr')) : [new Array(5).fill(0), new Array(5).fill(255)];
 
 // jqbed 健康监测语音播报
 const speechDict = {
@@ -501,7 +501,8 @@ class Home extends React.Component {
       licenseModalType: '',
       licenseModalExpireDate: '',
       licenseModalRemainDays: 0,
-      hz: 12
+      hz: 12,
+      realHz: 0
     };
     this.com = React.createRef();
     this.data = React.createRef();
@@ -1084,6 +1085,18 @@ class Home extends React.Component {
     }
 
     if (jsonObject.sitData != null) {
+      // 统计真实采样频率
+      realHzFrameCount++;
+      const now = Date.now();
+      if (now - realHzLastTime >= 1000) {
+        const realHz = Math.round(realHzFrameCount * 1000 / (now - realHzLastTime));
+        if (this.state.realHz !== realHz) {
+          this.setState({ realHz: realHz });
+        }
+        realHzFrameCount = 0;
+        realHzLastTime = now;
+      }
+
       if (this.state.matrixName != "car10") {
         if (colValueFlag) {
           num++;
@@ -3877,7 +3890,7 @@ class Home extends React.Component {
             userSelect: 'none',
           }}>
             <span style={{ color: '#aaa', fontWeight: 'normal', marginRight: '4px' }}>Hz</span>
-            {this.state.hz}
+            {this.state.realHz}
           </div>
 
           {/* ====== 密钥过期提示弹窗 ====== */}
