@@ -359,7 +359,10 @@ const getConfig = ({ sensorType, mode }) => {
   return { ...init, ...local }
 }
 
-var backFlag, hz = 12, sitFlag, realHzFrameCount = 0, realHzLastTime = Date.now(), fingerArr = localStorage.getItem('fingerArr') && JSON.parse(localStorage.getItem('fingerArr')).every((a) => a.length > 0) ? JSON.parse(localStorage.getItem('fingerArr')) : [new Array(5).fill(0), new Array(5).fill(255)];
+var backFlag, hz = 12, sitFlag, realHzFrameCount = 0, realHzLastTime = Date.now(),
+  fingerArrL = localStorage.getItem('fingerArrL') && JSON.parse(localStorage.getItem('fingerArrL')).every((a) => a.length > 0) ? JSON.parse(localStorage.getItem('fingerArrL')) : [new Array(5).fill(0), new Array(5).fill(255)],
+  fingerArrR = localStorage.getItem('fingerArrR') && JSON.parse(localStorage.getItem('fingerArrR')).every((a) => a.length > 0) ? JSON.parse(localStorage.getItem('fingerArrR')) : [new Array(5).fill(0), new Array(5).fill(255)],
+  fingerArr = fingerArrL; // 默认指向左手，兼容旧逻辑
 
 // jqbed 健康监测语音播报
 const speechDict = {
@@ -1019,6 +1022,8 @@ class Home extends React.Component {
 
     if (jsonObject.backFlag != null) {
       backFlag = jsonObject.backFlag;
+      // 根据左右手切换 fingerArr 指向
+      fingerArr = backFlag ? fingerArrR : fingerArrL;
     }
 
     if (jsonObject.hz != null) {
@@ -1302,7 +1307,10 @@ class Home extends React.Component {
                 //  z 
                 if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
                   let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-                  com?.changeHandAngle(arr)
+                  // 过滤四元数绝对值超过1的异常数据
+                  if (!arr.some(v => Math.abs(v) > 1)) {
+                    com?.changeHandAngle(arr)
+                  }
                 }
 
                 if (fingerArr) {
@@ -1415,7 +1423,10 @@ class Home extends React.Component {
                 //  z 
                 if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
                   let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-                  com?.changeHandAngle(arr)
+                  // 过滤四元数绝对值超过1的异常数据
+                  if (!arr.some(v => Math.abs(v) > 1)) {
+                    com?.changeHandAngle(arr)
+                  }
                 }
 
                 if (fingerArr) {
@@ -1727,7 +1738,10 @@ class Home extends React.Component {
                 //  z 
                 if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
                   let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-                  com?.changeHandAngle(arr)
+                  // 过滤四元数绝对值超过1的异常数据
+                  if (!arr.some(v => Math.abs(v) > 1)) {
+                    com?.changeHandAngle(arr)
+                  }
                 }
 
                 if (fingerArr) {
@@ -1835,7 +1849,10 @@ class Home extends React.Component {
                 //  z 
                 if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
                   let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-                  com?.changeHandAngle(arr)
+                  // 过滤四元数绝对值超过1的异常数据
+                  if (!arr.some(v => Math.abs(v) > 1)) {
+                    com?.changeHandAngle(arr)
+                  }
                 }
 
                 if (fingerArr) {
@@ -2551,11 +2568,18 @@ class Home extends React.Component {
     })
   }
 
-  colFingerData(index) {
-    const arr = localStorage.getItem('fingerArr') ? JSON.parse(localStorage.getItem('fingerArr')) : []
+  colFingerData(index, hand = 'left') {
+    const key = hand === 'right' ? 'fingerArrR' : 'fingerArrL'
+    const arr = localStorage.getItem(key) ? JSON.parse(localStorage.getItem(key)) : []
     arr[index] = wsPointDataSit
-    fingerArr = arr
-    localStorage.setItem('fingerArr', JSON.stringify(arr))
+    if (hand === 'right') {
+      fingerArrR = arr
+    } else {
+      fingerArrL = arr
+    }
+    // 同步当前 fingerArr 指向
+    fingerArr = backFlag ? fingerArrR : fingerArrL
+    localStorage.setItem(key, JSON.stringify(arr))
   }
 
   render() {

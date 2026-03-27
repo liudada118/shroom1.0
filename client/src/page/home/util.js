@@ -1490,7 +1490,10 @@ export const sitTypeEvent = {
       //  z 
       if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
         let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-        that.com.current?.changeHandAngle(arr)
+        // 过滤四元数绝对值超过1的异常数据
+        if (!arr.some(v => Math.abs(v) > 1)) {
+          that.com.current?.changeHandAngle(arr)
+        }
       }
 
       if (fingerArr) {
@@ -1659,7 +1662,10 @@ export const sitTypeEvent = {
       if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
         // console.log(arr)
         let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-        that.com.current?.handL.changeHandAngle(arr)
+        // 过滤四元数绝对值超过1的异常数据
+        if (!arr.some(v => Math.abs(v) > 1)) {
+          that.com.current?.handL.changeHandAngle(arr)
+        }
       }
       // console.log(rotate.length ,fingerArr )
       if (fingerArr && fingerArr.length) {
@@ -1707,7 +1713,10 @@ export const sitTypeEvent = {
         //  z 
         if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
           let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-          that.com.current?.changeHandAngle(arr)
+          // 过滤四元数绝对值超过1的异常数据
+          if (!arr.some(v => Math.abs(v) > 1)) {
+            that.com.current?.changeHandAngle(arr)
+          }
         }
       } else {
         that.com.current?.handZero()
@@ -1728,7 +1737,10 @@ export const sitTypeEvent = {
 
       if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
         let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-        that.com.current?.changeHandAngle(arr)
+        // 过滤四元数绝对值超过1的异常数据
+        if (!arr.some(v => Math.abs(v) > 1)) {
+          that.com.current?.changeHandAngle(arr)
+        }
       }
     }
 
@@ -1755,7 +1767,10 @@ export const sitTypeEvent = {
         console.log(rotate)
         if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
           let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-          that.com.current?.changeHandAngle(arr)
+          // 过滤四元数绝对值超过1的异常数据
+          if (!arr.some(v => Math.abs(v) > 1)) {
+            that.com.current?.changeHandAngle(arr)
+          }
         }
       } else {
         that.com.current?.handZero()
@@ -1774,7 +1789,10 @@ export const sitTypeEvent = {
       }
       if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
         let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-        that.com.current?.changeHandAngle(arr)
+        // 过滤四元数绝对值超过1的异常数据
+        if (!arr.some(v => Math.abs(v) > 1)) {
+          that.com.current?.changeHandAngle(arr)
+        }
       }
     }
 
@@ -4418,7 +4436,10 @@ export const backTypeEvent = {
       if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
         // console.log(arr)
         let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-        that.com.current?.handR.changeHandAngle(arr)
+        // 过滤四元数绝对值超过1的异常数据
+        if (!arr.some(v => Math.abs(v) > 1)) {
+          that.com.current?.handR.changeHandAngle(arr)
+        }
       }
       // console.log(rotate.length ,fingerArr )
       if (fingerArr && fingerArr.length) {

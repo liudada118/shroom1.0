@@ -368,7 +368,7 @@ class Title extends React.Component {
     const group1 = ['hand', 'normal', 'footVideo', 'smallBed', 'jqbed']; // 3D point scene
     const group2 = ['robot1', 'robotSY', 'robotLCF']; // Robots
     const group3 = ['hand0205', 'handGlove115200']; // Tactile gloves
-    const group4 = ['fast256', 'fast1024', 'normalFast']; // High-speed
+    const group4 = ['fast256', 'fast1024']; // High-speed
 
     // Determine which parameters to show
     let showGuass = false;    // Smoothness
@@ -616,7 +616,6 @@ class Title extends React.Component {
       { label: t('sensorJqbed'), value: 'jqbed' },
       { label: t('sensorFast256'), value: 'fast256' },
       { label: t('sensorFast1024'), value: 'fast1024' },
-      { label: t('sensorNormalFast'), value: 'normalFast' },
       { label: t('sensorNormal'), value: 'normal' },
       { label: t('smallBed'), value: 'smallBed' },
     ]
@@ -683,7 +682,7 @@ class Title extends React.Component {
 
 
         {
-          this.props.matrixName.includes('fast') || this.props.matrixName == 'normalFast' || this.props.matrixName == 'bed4096' || this.props.matrixName == 'bed4096num' || this.props.matrixName == 'bed1616' || this.props.matrixName == 'fast256' || this.props.matrixName == 'footVideo256' || this.props.matrixName == 'daliegu' ? <Input placeholder={t('enterBaudRate')} onChange={(e) => {
+          this.props.matrixName.includes('fast') || this.props.matrixName == 'normalFast' || this.props.matrixName == 'bed4096' || this.props.matrixName == 'bed4096num' || this.props.matrixName == 'bed1616' || this.props.matrixName == 'fast256' || this.props.matrixName == 'footVideo256' || this.props.matrixName == 'daliegu' || this.props.matrixName == 'smallSample' ? <Input placeholder={t('enterBaudRate')} onChange={(e) => {
             const value = e.target.value
             this.props.wsSendObj({
               baudRate: value
@@ -880,35 +879,47 @@ class Title extends React.Component {
                 })
               }}
             >
-              <Select
-                defaultValue={this.state.fingerIndex}
-                style={{ width: 120 }}
-                onChange={(e) => {
-                  this.setState({
-                    fingerIndex: e
-                  })
-                  if (e == 1) {
-                    this.props.com.current?.calibration(new Array(5).fill(1))
-                  } else {
-                    this.props.com.current?.calibration(new Array(5).fill(0))
-                  }
-                }}
-                options={[
-                  { value: 0, label: t('FingersSpread') },
-                  { value: 1, label: t('fist') },
-                ]}
-              />
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px' }}>
+                <Select
+                  defaultValue={this.state.calibHand || 'left'}
+                  style={{ width: 100 }}
+                  onChange={(e) => {
+                    this.setState({ calibHand: e })
+                  }}
+                  options={[
+                    { value: 'left', label: t('leftHand') },
+                    { value: 'right', label: t('rightHand') },
+                  ]}
+                />
+                <Select
+                  defaultValue={this.state.fingerIndex}
+                  style={{ width: 120 }}
+                  onChange={(e) => {
+                    this.setState({
+                      fingerIndex: e
+                    })
+                    if (e == 1) {
+                      this.props.com.current?.calibration(new Array(5).fill(1))
+                    } else {
+                      this.props.com.current?.calibration(new Array(5).fill(0))
+                    }
+                  }}
+                  options={[
+                    { value: 0, label: t('FingersSpread') },
+                    { value: 1, label: t('fist') },
+                  ]}
+                />
+              </div>
 
               <Button
                 onClick={() => {
-                  // const arr = localStorage.getItem('fingerArr') ? JSON.parse(localStorage.getItem('fingerArr')) : []
-                  // arr[this.state.fingerIndex] = []
-                  this.props.colFingerData(this.state.fingerIndex)
+                  this.props.colFingerData(this.state.fingerIndex, this.state.calibHand || 'left')
                 }}
               >{t('colData')}</Button>
               <Button
                 onClick={() => {
-                  localStorage.removeItem('fingerArr')
+                  localStorage.removeItem('fingerArrL')
+                  localStorage.removeItem('fingerArrR')
                 }}
               >{t('clearData')}</Button>
 
@@ -918,7 +929,7 @@ class Title extends React.Component {
 
 
 
-        {/* {this.props.matrixName == 'hand0205' ?
+        {/* {this.props.matrixName == 'hand0205' || this.props.matrixName == 'handGlove115200' ?
           <div className="asideContent firstAside" style={{
             position: 'absolute', right: '20%', top: '80px',
             opacity: this.props.calibration ? 1 : 0, transition: 'opacity 0.5s ease', border: '1px solid #2a5bc5',
@@ -947,17 +958,15 @@ class Title extends React.Component {
 
             <Button
               onClick={() => {
-                // const arr = localStorage.getItem('fingerArr') ? JSON.parse(localStorage.getItem('fingerArr')) : []
-                // arr[this.state.fingerIndex] = []
-                this.props.colFingerData(this.state.fingerIndex)
+                this.props.colFingerData(this.state.fingerIndex, this.state.calibHand || 'left')
               }}
             >采集数据</Button>
             <Button
               onClick={() => {
-                localStorage.removeItem('fingerArr')
+                localStorage.removeItem('fingerArrL')
+                localStorage.removeItem('fingerArrR')
               }}
             >清除历史数据</Button>
-
             <div>
               <Button>完成</Button>
             </div>

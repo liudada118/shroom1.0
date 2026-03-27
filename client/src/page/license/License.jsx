@@ -51,7 +51,7 @@ const SENSOR_GROUPS = [
     items: [
       { label: '触觉手套', value: 'hand0205' },
       { label: '触觉手套(115200)', value: 'handGlove115200' },
-      { label: '小型样品', value: 'smallSample' },
+      { label: '10*10小样', value: 'smallSample' },
       { label: '宇树G1触觉上衣', value: 'robot1' },
       { label: '松延N2触觉上衣', value: 'robotSY' },
       { label: '零次方H1触觉上衣', value: 'robotLCF' },
@@ -59,7 +59,6 @@ const SENSOR_GROUPS = [
       { label: '14x20高速', value: 'daliegu' },
       { label: '16x16高速', value: 'fast256' },
       { label: '32x32高速', value: 'fast1024' },
-      { label: '32x32高速测试', value: 'normalFast' },
     ],
   },
 ];
@@ -82,7 +81,7 @@ const DAY_PRESETS = [30, 90, 180, 365, 730, 1095];
 /** 传感器快捷预设 */
 const SENSOR_PRESETS = [
   { label: '触觉全套', types: ['hand0205', 'handGlove115200', 'robot1', 'robotSY', 'robotLCF', 'footVideo'] },
-  { label: '高速矩阵', types: ['fast256', 'fast1024', 'normalFast', 'daliegu'] },
+  { label: '高速矩阵', types: ['fast256', 'fast1024', 'daliegu'] },
 ];
 
 const License = () => {
