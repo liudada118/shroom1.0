@@ -4,6 +4,7 @@ import { PlusOutlined } from '@ant-design/icons';
 import exchange from '../../assets/images/exchange.png'
 import option from '../../assets/images/Option.png'
 import logo from '../../assets/images/logo.png'
+import shroomWordmark from '../../assets/images/shroom-wordmark.svg'
 import './title.scss'
 import Input from 'antd/es/input/Input';
 import { CSVLink, CSVDownload } from 'react-csv';
@@ -656,7 +657,10 @@ class Title extends React.Component {
     // console.log('title')
     return <div className="title">
       {/* <h2>bodyta</h2> */}
-      <div style={{ display: 'flex', alignItems: 'center', color: '#5A5A89', flexShrink: 0, whiteSpace: 'nowrap' }}> <img src={logo} style={{ height: '50px' }} alt="" /><span style={{ fontSize: '12px' }}>JQTOOLS-robot</span></div>
+      <div className="titleBrand">
+        <img className="titleBrandLogo" src={logo} alt="JQ Industries" />
+        <img className="titleBrandWordmark" src={shroomWordmark} alt="Shroom" />
+      </div>
       <div className="titleItems">
         {this.props.matrixTitle ? <Select
           style={{ width: '130px' }}

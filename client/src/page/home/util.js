@@ -2166,7 +2166,7 @@ export const sitTypeEvent = {
     }
     // const press = Math.round(wsPointData.reduce((a, b) => a + b, 0)/10)
 
-  } jqbed({ that, wsPointData, compen, local }) {
+  }, jqbed({ that, wsPointData, compen, local }) {
     // console.log(compen)
     // timeflag ++ 
 

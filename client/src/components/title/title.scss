@@ -32,6 +32,27 @@
     overflow: hidden;
     gap: 4px;
 
+    .titleBrand {
+        display: flex;
+        align-items: center;
+        flex-shrink: 0;
+        min-width: 0;
+        white-space: nowrap;
+        gap: 8px;
+    }
+
+    .titleBrandLogo {
+        height: 50px;
+        width: auto;
+        display: block;
+    }
+
+    .titleBrandWordmark {
+        height: 18px;
+        width: auto;
+        display: block;
+    }
+
     .ant-input {
         background-color: #000;
         border: 0;
