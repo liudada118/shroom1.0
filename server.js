@@ -121,6 +121,7 @@ let timeStamp,
   sitAreaSelect = [],
   sitClose = false,
   backClose = false,
+  headClose = false,
   sitPressSelect = [];
 const sitnum1 = 64;
 const sitnum2 = 64;
@@ -260,6 +261,123 @@ function stopPlaybackTimer() {
   }
 }
 
+let reconnectTimer = null;
+let jqbedTimer = null;
+let serverOpened = false;
+let serverShutdownRequested = false;
+
+function clearManagedInterval(name, timerRef) {
+  if (!timerRef) return null;
+  clearInterval(timerRef);
+  logger.info(`[Server] Cleared ${name}`);
+  return null;
+}
+
+function closeSerialPort(portRef, name) {
+  if (!portRef) return null;
+
+  try {
+    portRef.removeAllListeners?.();
+  } catch (err) {
+    logger.warn(`[Server] ${name} removeAllListeners failed:`, err.message);
+  }
+
+  if (portRef.isOpen && typeof portRef.close === 'function') {
+    portRef.close((err) => {
+      if (err) {
+        logger.warn(`[Server] ${name} close failed:`, err.message || err);
+      } else {
+        logger.info(`[Server] ${name} closed`);
+      }
+    });
+  }
+
+  return null;
+}
+
+function closeWsServer(wsServer, name) {
+  if (!wsServer) return;
+
+  try {
+    wsServer.clients?.forEach((client) => {
+      try {
+        client.terminate?.();
+      } catch (err) {
+        logger.warn(`[Server] ${name} client terminate failed:`, err.message);
+      }
+    });
+  } catch (err) {
+    logger.warn(`[Server] ${name} enumerate clients failed:`, err.message);
+  }
+
+  try {
+    wsServer.close((err) => {
+      if (err) {
+        logger.warn(`[Server] ${name} close failed:`, err.message || err);
+      } else {
+        logger.info(`[Server] ${name} closed`);
+      }
+    });
+  } catch (err) {
+    logger.warn(`[Server] ${name} close threw:`, err.message);
+  }
+}
+
+function closeDatabase(dbRef, name) {
+  if (!dbRef || typeof dbRef.close !== 'function') return;
+
+  try {
+    dbRef.close((err) => {
+      if (err) {
+        logger.warn(`[Server] ${name} close failed:`, err.message || err);
+      } else {
+        logger.info(`[Server] ${name} closed`);
+      }
+    });
+  } catch (err) {
+    logger.warn(`[Server] ${name} close threw:`, err.message);
+  }
+}
+
+function shutdownServer() {
+  if (serverShutdownRequested) return;
+  serverShutdownRequested = true;
+
+  logger.info("[Server] Shutdown requested, closing sockets/timers/workers...");
+
+  stopPlaybackTimer();
+  reconnectTimer = clearManagedInterval("serial reconnect timer", reconnectTimer);
+  jqbedTimer = clearManagedInterval("jqbed timer", jqbedTimer);
+
+  localFlag = false;
+  sitClose = true;
+  backClose = true;
+  headClose = true;
+  com = undefined;
+  com1 = undefined;
+  comhead = undefined;
+
+  try {
+    stopWorker();
+  } catch (err) {
+    logger.warn("[Server] stopWorker failed:", err.message);
+  }
+
+  port1 = closeSerialPort(port1, "port1");
+  port2 = closeSerialPort(port2, "port2");
+  portHead = closeSerialPort(portHead, "portHead");
+
+  closeWsServer(server, "server");
+  closeWsServer(server1, "server1");
+  closeWsServer(server2, "server2");
+
+  closeDatabase(db, "db");
+  closeDatabase(db1, "db1");
+  closeDatabase(db2, "db2");
+
+  serverOpened = false;
+}
+
 
 
 const defauleFile = 'hand0205'
@@ -368,6 +486,13 @@ server2 = new WebSocket.Server({ port: 19997 });
 
 module.exports = {
   openServer() {
+    if (serverOpened) {
+      logger.info("[Server] openServer skipped: listeners already attached");
+      return;
+    }
+
+    serverOpened = true;
+    serverShutdownRequested = false;
 
     server1.on("open", function open() {
       logger.info("connected");
@@ -4514,7 +4639,7 @@ function colOrSendData2(jsonData) {
 }
 
 // 闁插秷绻?
-setInterval(() => {
+reconnectTimer = setInterval(() => {
   if (com && !port1.isOpen && sitClose == false) {
     // if()
     console.log(com)
@@ -4595,7 +4720,7 @@ function jqbedOppo(arr) {
 }
 
 // jqbed 鍋ュ悍鐩戞祴绠楁硶瀹氭椂璋冪敤锛?25ms锛?
-setInterval(async () => {
+jqbedTimer = setInterval(async () => {
   if (pointArr&&pointArr.length  && pointArr.every((a) => typeof a == 'number') && file == 'jqbed' && port1 && port1.isOpen) {
     const newArr = jqbedOppo(pointArr);
     console.log(newArr.reduce((a,b) => a+b , 0),pointArr.length,'nweArr')
@@ -4639,3 +4764,5 @@ setInterval(async () => {
     }
   }
 }, 125);
+
+module.exports.shutdownServer = shutdownServer;

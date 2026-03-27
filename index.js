@@ -15,7 +15,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
-const { openServer, getWsServer, handleCommand } = require("./server");
+const { openServer, shutdownServer, getWsServer, handleCommand } = require("./server");
 const { AppUpdater } = require("./autoUpdater");
 const logger = require('./logger');
 
@@ -32,6 +32,7 @@ const VITE_DEV_PORT = 3000;
 let mainWindow = null;
 let appUpdater = null;
 let viteProcess = null;  // Vite 子进程引用，用于退出时清理
+let staticServer = null; // 生产环境静态资源 HTTP 服务
 
 const createWindow = () => {
   mainWindow = new BrowserWindow({
@@ -306,6 +307,21 @@ function killVite() {
   }
 }
 
+function closeStaticServer() {
+  if (!staticServer) return;
+
+  logger.info("[Main] Closing static server...");
+  staticServer.close((err) => {
+    if (err) {
+      logger.warn("[Main] Static server close failed:", err.message);
+      return;
+    }
+
+    logger.info("[Main] Static server closed");
+  });
+  staticServer = null;
+}
+
 // ============================================================
 // 静态文件服务器
 // ============================================================
@@ -350,7 +366,9 @@ function startStaticServer({ hostname, port, win }) {
   const buildRoot = resolveBuildRoot();
   logger.info(`[Main] Static build root: ${buildRoot}`);
 
-  const server = http.createServer((req, res) => {
+  closeStaticServer();
+
+  staticServer = http.createServer((req, res) => {
     const urlPath = req.url === "/" ? "index.html" : req.url.split("?")[0].replace(/^\/+/, "");
     const filePath = path.join(buildRoot, urlPath);
 
@@ -381,7 +399,7 @@ function startStaticServer({ hostname, port, win }) {
     });
   });
 
-  server.listen(port, hostname, () => {
+  staticServer.listen(port, hostname, () => {
     logger.info(`[Main] Static server running at http://${hostname}:${port}/`);
     win.loadURL(`http://${hostname}:${port}`);
   });
@@ -406,7 +424,15 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   logger.info("[Main] Application is quitting, cleaning up...");
   killVite();
+  closeStaticServer();
+  if (typeof shutdownServer === "function") {
+    shutdownServer();
+  }
   if (appUpdater) {
-    appUpdater.dispose();
+    if (typeof appUpdater.isInstallingUpdate === "function" && appUpdater.isInstallingUpdate()) {
+      logger.info("[Main] Skip updater dispose because update installation is in progress");
+    } else {
+      appUpdater.dispose();
+    }
   }
 });

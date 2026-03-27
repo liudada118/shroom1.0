@@ -34,6 +34,20 @@ const { autoUpdater } = require("electron-updater");
 const { ipcMain, dialog } = require("electron");
 const logger = require("./logger");
 
+function normalizeUpdaterErrorMessage(error) {
+  const raw = error && error.message ? error.message : String(error || "未知更新错误");
+
+  if (raw.includes("ERR_CHECKSUM_MISMATCH") || raw.includes("sha512 checksum mismatch")) {
+    return "更新包校验失败：服务器上的 latest-mac.yml 和实际 zip 文件不一致，请重新上传更新包后再试。";
+  }
+
+  if (raw.includes("Code signature at URL") && raw.includes("did not pass validation")) {
+    return "更新安装失败：当前电脑里的 Shroom 不是同一条正式签名链，不能直接自动升级。请先手动安装一次最新正式 DMG 到 /Applications，后续版本再走自动更新。";
+  }
+
+  return raw;
+}
+
 class AppUpdater {
   /**
    * @param {Electron.BrowserWindow} mainWindow - 主窗口实例
@@ -47,6 +61,7 @@ class AppUpdater {
     this.mainWindow = mainWindow;
     this.checkInterval = options.checkInterval || 4 * 60 * 60 * 1000;
     this._timer = null;
+    this._installRequested = false;
 
     // 配置 autoUpdater
     autoUpdater.autoDownload = options.autoDownload || false;
@@ -71,10 +86,11 @@ class AppUpdater {
   _bindEvents() {
     // 检查更新出错
     autoUpdater.on("error", (err) => {
-      logger.error("[Updater] 更新检查失败:", err.message);
+      const message = normalizeUpdaterErrorMessage(err);
+      logger.error("[Updater] 更新检查失败:", message);
       this._sendStatus({
         type: "update-error",
-        message: err.message,
+        message,
       });
     });
 
@@ -143,7 +159,7 @@ class AppUpdater {
         })
         .then(({ response }) => {
           if (response === 0) {
-            autoUpdater.quitAndInstall(false, true);
+            this.installDownloadedUpdate();
           }
         });
     });
@@ -156,19 +172,25 @@ class AppUpdater {
   _bindIPC() {
     // 前端请求检查更新
     ipcMain.handle("update-command", async (event, data) => {
-      switch (data?.action) {
-        case "checkForUpdate":
-          logger.info("[Updater] 收到前端检查更新请求");
-          return this.checkForUpdates();
-        case "downloadUpdate":
-          logger.info("[Updater] 收到前端下载更新请求");
-          return autoUpdater.downloadUpdate();
-        case "installUpdate":
-          logger.info("[Updater] 收到前端安装更新请求");
-          autoUpdater.quitAndInstall(false, true);
-          return true;
-        default:
-          return null;
+      try {
+        switch (data?.action) {
+          case "checkForUpdate":
+            logger.info("[Updater] 收到前端检查更新请求");
+            return this.checkForUpdates();
+          case "downloadUpdate":
+            logger.info("[Updater] 收到前端下载更新请求");
+            return autoUpdater.downloadUpdate();
+          case "installUpdate":
+            logger.info("[Updater] 收到前端安装更新请求");
+            this.installDownloadedUpdate();
+            return true;
+          default:
+            return null;
+        }
+      } catch (err) {
+        const message = normalizeUpdaterErrorMessage(err);
+        logger.error("[Updater] update-command failed:", message);
+        throw new Error(message);
       }
     });
   }
@@ -190,9 +212,19 @@ class AppUpdater {
     return autoUpdater.checkForUpdatesAndNotify();
   }
 
+  installDownloadedUpdate() {
+    this._installRequested = true;
+    logger.info("[Updater] 调用 quitAndInstall，准备交给 Squirrel.Mac/安装器处理");
+    autoUpdater.quitAndInstall(false, true);
+  }
+
+  isInstallingUpdate() {
+    return this._installRequested;
+  }
+
   _safeCheckForUpdates() {
     return this.checkForUpdates().catch((err) => {
-      logger.error("[Updater] checkForUpdates rejected:", err.message);
+      logger.error("[Updater] checkForUpdates rejected:", normalizeUpdaterErrorMessage(err));
       return null;
     });
   }
