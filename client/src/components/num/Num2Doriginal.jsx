@@ -537,6 +537,12 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     if (props.matrixName == 'carCol') {
         width = 10
         height = 9
+    } else if (props.matrixName == 'daliegu') {
+        width = 14
+        height = 20
+    } else if (props.matrixName == 'smallSample') {
+        width = 10
+        height = 10
     }
 
     const isRobot = props.matrixName === 'robotSY' || props.matrixName === 'robotLCF' || props.matrixName === 'robot1';

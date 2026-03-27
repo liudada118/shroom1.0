@@ -659,7 +659,9 @@ export const sitTypeEvent = {
   },
   hand: ({ that, wsPointData, local }) => {
     wsPointData = rotate90(wsPointData, 32, 32)
-    if (that.state.numMatrixFlag == "normal") {
+    if (that.state.numMatrixFlag == "numoriginal") {
+      that.com.current?.changeWsData([...wsPointData]);
+    } else if (that.state.numMatrixFlag == "normal") {
       // wsPointData = handLine(wsPointData);
       that.com.current?.sitData({
         wsPointData: wsPointData,
@@ -673,7 +675,9 @@ export const sitTypeEvent = {
   },
   daliegu: ({ that, wsPointData, local }) => {
     // wsPointData = rotate90(wsPointData, 32, 32)
-    if (that.state.numMatrixFlag == "normal") {
+    if (that.state.numMatrixFlag == "numoriginal") {
+      that.com.current?.changeWsData([...wsPointData]);
+    } else if (that.state.numMatrixFlag == "normal") {
       // wsPointData = handLine(wsPointData);
       that.com.current?.sitData({
         wsPointData: wsPointData,
@@ -956,7 +960,9 @@ export const sitTypeEvent = {
     }
   }, smallSample: ({ that, wsPointData, local }) => {
     // 小型样品 - 10×10数字矩阵，数据已在 server.js 中按点位图重排
-    if (that.state.numMatrixFlag == "normal") {
+    if (that.state.numMatrixFlag == "numoriginal") {
+      that.com.current?.changeWsData([...wsPointData]);
+    } else if (that.state.numMatrixFlag == "normal") {
       that.com.current?.sitData({
         wsPointData: wsPointData,
         local: that.state.local
@@ -2093,6 +2099,10 @@ export const sitTypeEvent = {
   },
   smallBed({ that, wsPointData, compen }) {
     // console.log(compen)
+    if (that.state.numMatrixFlag == "numoriginal") {
+      that.com.current?.changeWsData([...wsPointData]);
+      return;
+    }
     const arr = [...wsPointData]
     // for (let i = 0; i < 32; i++) {
     //   for (let j = 0; j < 32; j++) {
@@ -2156,11 +2166,13 @@ export const sitTypeEvent = {
     }
     // const press = Math.round(wsPointData.reduce((a, b) => a + b, 0)/10)
 
-  }, jqbed({ that, wsPointData, compen, local }) {
+  } jqbed({ that, wsPointData, compen, local }) {
     // console.log(compen)
     // timeflag ++ 
 
-    if (that.state.numMatrixFlag == "num") {
+    if (that.state.numMatrixFlag == "numoriginal") {
+      that.com.current?.changeWsData([...wsPointData]);
+    } else if (that.state.numMatrixFlag == "num") {
       that.com.current?.changeWsData(wsPointData);
     } else if (
 
@@ -2249,7 +2261,9 @@ export const sitTypeEvent = {
     });
   },
   normal({ that, wsPointData, press }) {
-    if (that.state.numMatrixFlag == "normal") {
+    if (that.state.numMatrixFlag == "numoriginal") {
+      that.com.current?.changeWsData([...wsPointData]);
+    } else if (that.state.numMatrixFlag == "normal") {
       // wsPointData = handLine(wsPointData);
       that.com.current?.sitData({
         wsPointData: wsPointData,
