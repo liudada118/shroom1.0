@@ -1,5 +1,5 @@
 import { Button, Input, Modal, message } from 'antd'
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState, useRef, useMemo } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import './index.scss'
 
@@ -12,7 +12,19 @@ export default function Date1() {
   const [messageApi, contextHolder] = message.useMessage()
 
   // 是否是从系统页手动跳转过来更新密钥
-  const isFromSystem = param.search.includes('from=system')
+  // 兼容多种跳转方式：
+  // 1. NavLink to="/?from=system"（Title.jsx 输入密钥按钮）
+  // 2. window.location.hash = '#/?from=system'（Home.jsx 密钥过期跳转）
+  // 3. 旧版 /?a=b 参数（兼容）
+  const isFromSystem = useMemo(() => {
+    const search = param.search || ''
+    const hash = window.location.hash || ''
+    const href = window.location.href || ''
+    return search.includes('from=system') || search.includes('a=b') ||
+           hash.includes('from=system') || hash.includes('a=b') ||
+           href.includes('from=system') || href.includes('a=b')
+  }, [param.search])
+
   // 标记用户是否正在提交密钥（区分后端主动推送 vs 用户提交后的响应）
   const isSubmitting = useRef(false)
 
@@ -29,7 +41,6 @@ export default function Date1() {
         // 处理密钥验证错误
         if (data.licenseError != null) {
           setLoading(false)
-          const wasSubmitting = isSubmitting.current
           isSubmitting.current = false
           Modal.error({
             title: '密钥错误',
@@ -70,7 +81,7 @@ export default function Date1() {
                 content: '该密钥已过期，请输入有效的密钥',
               })
             }
-            // 首次启动且密钥过期，或手动跳转时后端推送过期密钥 → 停留在密钥输入页
+            // 停留在密钥输入页
             return
           }
 
