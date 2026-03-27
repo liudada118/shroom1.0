@@ -963,10 +963,21 @@ class Home extends React.Component {
     // ====== 密钥过期检查 ======
     // 处理密钥错误提示
     if (jsonObject.licenseError != null) {
-      Modal.error({
-        title: '密钥错误',
-        content: jsonObject.licenseError,
-      });
+      // 无有效密钥时跳转到密钥输入页
+      if (jsonObject.noLicense) {
+        Modal.error({
+          title: '密钥错误',
+          content: jsonObject.licenseError,
+          onOk: () => {
+            window.location.hash = '#/?from=system';
+          }
+        });
+      } else {
+        Modal.error({
+          title: '密钥错误',
+          content: jsonObject.licenseError,
+        });
+      }
     }
 
     if (jsonObject.date != null) {
@@ -4000,10 +4011,16 @@ class Home extends React.Component {
           {/* ====== 密钥过期提示弹窗 ====== */}
           <Modal
             open={this.state.licenseModalVisible}
-            onOk={() => this.setState({ licenseModalVisible: false })}
+            onOk={() => {
+              this.setState({ licenseModalVisible: false })
+              // 密钥已过期时，点击确定跳转到密钥输入页
+              if (this.state.licenseModalType === 'expired') {
+                window.location.hash = '#/?from=system';
+              }
+            }}
             onCancel={() => this.setState({ licenseModalVisible: false })}
-            okText="我知道了"
-            cancelButtonProps={{ style: { display: 'none' } }}
+            okText={this.state.licenseModalType === 'expired' ? '去输入密钥' : '我知道了'}
+            cancelButtonProps={{ style: { display: this.state.licenseModalType === 'expired' ? 'none' : 'none' } }}
             centered
             width={480}
             closable={false}
@@ -4019,7 +4036,7 @@ class Home extends React.Component {
               <div>
                 <p>您的授权密钥已于 <strong className="expire-date">{this.state.licenseModalExpireDate}</strong> 过期。</p>
                 <p>串口连接、数据采集等功能已被禁用。</p>
-                <p className="hint">请联系管理员获取新的授权密钥，并在密钥配置页面重新写入。</p>
+                <p className="hint">请联系管理员获取新的授权密钥，点击下方按钮跳转到密钥输入页面。</p>
               </div>
             ) : (
               <div>

@@ -515,20 +515,23 @@ module.exports = {
         }
       });
 
-      if (endDate) {
+      if (endDate && endDate > 0) {
         server.clients.forEach(function each(client) {
-          /**
-           * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
-           *  */
           const jsonData = JSON.stringify({
             date: endDate,
             nowDate: nowDate,
             file: file,
             selectFlag: selectFlag
           });
-
           if (client.readyState === WebSocket.OPEN) {
             client.send(jsonData);
+          }
+        });
+      } else {
+        // 没有有效密钥时，发送错误信息给前端
+        server.clients.forEach(function each(client) {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({ licenseError: '未检测到有效密钥，请输入密钥后使用', noLicense: true }));
           }
         });
       }
