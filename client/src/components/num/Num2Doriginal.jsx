@@ -560,8 +560,8 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             return calcRobotCellSizeFromLayout(40, 10, maxW, maxH);
         }
         if (props.matrixName === 'hand0205' || props.matrixName === 'handGlove115200') {
-            // numoriginal 模式下显示16x16矩阵，其他模式显示15x10
-            return calcCellSize(16, 16, maxW, maxH, 40);
+            // numoriginal 模式下显示15x10矩阵（147映射数据）
+            return calcCellSize(15, 10, maxW, maxH, 40);
         }
         if (isFoot) {
             return 30;
@@ -614,7 +614,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             // 这里不初始化 WebGL，在 processRobotParts 中初始化
         } else if (glCanvasRef.current) {
             let tw = width, th = height;
-            if (props.matrixName === 'hand0205' || props.matrixName === 'handGlove115200') { tw = 16; th = 16; }
+            if (props.matrixName === 'hand0205' || props.matrixName === 'handGlove115200') { tw = 15; th = 10; }
             else if (isFoot) { tw = 6; th = 10; }
             texSizeRef.current = { w: tw, h: th };
             const cs = cellSizeRef.current;
