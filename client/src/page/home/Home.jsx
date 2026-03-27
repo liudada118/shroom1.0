@@ -961,6 +961,14 @@ class Home extends React.Component {
     }
 
     // ====== 密钥过期检查 ======
+    // 处理密钥错误提示
+    if (jsonObject.licenseError != null) {
+      Modal.error({
+        title: '密钥错误',
+        content: jsonObject.licenseError,
+      });
+    }
+
     if (jsonObject.date != null) {
       const endDate = parseFloat(jsonObject.date);
       const serverNow = jsonObject.nowDate ? parseFloat(jsonObject.nowDate) : Date.now();

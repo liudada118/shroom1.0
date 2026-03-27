@@ -543,73 +543,83 @@ module.exports = {
         // }
 
         if (getMessage.date != null) {
-          const content = (getMessage.date.date)
-          const date = content
+          try {
+            const content = (getMessage.date.date)
+            const date = content
 
-
-          const dateRes = module2.decryptStr(date)
-
-          // const file = module2.encStr(date).file
-          // const startTimeRes = module2.encStr(`${getMessage.date.startTime}`)
-          // const content = (JSON.stringify({ dateRes }))
-          // const content1 = module2.encStr(content)
-
-          fs.mkdirSync(path.dirname(nameTxt), { recursive: true });
-          fs.writeFile(nameTxt, date, err => {
-            if (err) {
-              logger.error(err);
+            if (!date || date.trim() === '') {
+              // 空密钥处理：发送错误提示给前端
+              logger.warn('[License] Empty license key received');
+              server.clients.forEach(function each(client) {
+                if (client.readyState === WebSocket.OPEN) {
+                  client.send(JSON.stringify({ licenseError: '密钥不能为空，请输入有效密钥' }));
+                }
+              });
+              return;
             }
-            // date = module2.decryptStr(content) 
-            // file written successfully
-          });
-          // date = JSON.parse(content).dateRes
 
+            const dateRes = module2.decryptStr(date)
 
-          // sysStartTime = getMessage.date.startTime
+            if (!dateRes) {
+              logger.warn('[License] Failed to decrypt license key');
+              server.clients.forEach(function each(client) {
+                if (client.readyState === WebSocket.OPEN) {
+                  client.send(JSON.stringify({ licenseError: '密钥无效，解密失败' }));
+                }
+              });
+              return;
+            }
 
-          // console.log(JSON.parse(content).dateRes)
-
-          // endDate = parseFloat(module2.decryptStr(date))
-          const parsedLicense = JSON.parse(dateRes);
-          const rawFile = parsedLicense.file;
-          selectFlag = rawFile; // 娣囨繄鏆€閸樼喎顫愰崐纭风礄'all'閵嗕礁鐡х粭锔胯閵嗕焦鍨ㄩ弫鎵矋閿涘褰傞柅浣虹舶閸撳秶顏?
-
-          // 鐟欙絾鐎?file 鐎涙顔岄敍姘暜閹?'all'閵嗕礁宕熸稉顏勭摟缁楋缚瑕嗛妴浣规殶缂佸嫪绗佺粔宥嗙壐瀵?
-          if (rawFile === 'all') {
-            file = defauleFile;
-          } else if (Array.isArray(rawFile)) {
-            file = rawFile[0] || defauleFile;
-          } else {
-            file = rawFile || defauleFile;
-          }
-          endDate = parseFloat(parsedLicense.date);
-
-          // 鏍规嵁 file 绫诲瀷璁剧疆娉㈢壒鐜?
-          if (file == 'handGlove115200') {
-            baudRate = 115200
-          } else if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(file) || file.includes('robot')) {
-            baudRate = 921600
-          } else if (['bed4096', 'bed4096num'].includes(file)) {
-            baudRate = 3000000
-          } else {
-            baudRate = 1000000
-          }
-
-          server.clients.forEach(function each(client) {
-            /**
-             * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
-             *  */
-            const jsonData = JSON.stringify({
-              date: endDate,
-              nowDate: nowDate,
-              file,
-              selectFlag: selectFlag
+            fs.mkdirSync(path.dirname(nameTxt), { recursive: true });
+            fs.writeFile(nameTxt, date, err => {
+              if (err) {
+                logger.error(err);
+              }
             });
-            if (client.readyState === WebSocket.OPEN) {
-              client.send(jsonData);
-            }
-          });
 
+            const parsedLicense = JSON.parse(dateRes);
+            const rawFile = parsedLicense.file;
+            selectFlag = rawFile;
+
+            if (rawFile === 'all') {
+              file = defauleFile;
+            } else if (Array.isArray(rawFile)) {
+              file = rawFile[0] || defauleFile;
+            } else {
+              file = rawFile || defauleFile;
+            }
+            endDate = parseFloat(parsedLicense.date);
+
+            if (file == 'handGlove115200') {
+              baudRate = 115200
+            } else if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(file) || file.includes('robot')) {
+              baudRate = 921600
+            } else if (['bed4096', 'bed4096num'].includes(file)) {
+              baudRate = 3000000
+            } else {
+              baudRate = 1000000
+            }
+
+            server.clients.forEach(function each(client) {
+              const jsonData = JSON.stringify({
+                date: endDate,
+                nowDate: nowDate,
+                file,
+                selectFlag: selectFlag
+              });
+              if (client.readyState === WebSocket.OPEN) {
+                client.send(jsonData);
+              }
+            });
+
+          } catch (err) {
+            logger.error('[License] Invalid license key:', err.message);
+            server.clients.forEach(function each(client) {
+              if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ licenseError: '密钥无效，请检查后重新输入' }));
+              }
+            });
+          }
         }
 
 

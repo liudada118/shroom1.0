@@ -834,6 +834,16 @@ class Title extends React.Component {
                 }
 
                 if (value == 'normal') {
+                  // 检查手指校准数据是否存在
+                  const fingerL = localStorage.getItem('fingerArrL')
+                  const fingerR = localStorage.getItem('fingerArrR')
+                  if (!fingerL && !fingerR) {
+                    message.warning(this.props.t ? this.props.t('noCalibData') : '未检测到手指校准数据，请先进行手指校准')
+                  } else if (!fingerL) {
+                    message.warning(this.props.t ? this.props.t('noCalibDataL') : '未检测到左手校准数据，请先校准左手')
+                  } else if (!fingerR) {
+                    message.warning(this.props.t ? this.props.t('noCalibDataR') : '未检测到右手校准数据，请先校准右手')
+                  }
                   this.props.wsSendObj({ resetZero: false })
                   this.setState({ resetZero: false })
                 } else {
