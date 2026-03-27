@@ -1370,7 +1370,7 @@ class Home extends React.Component {
               } else {
                 this.com.current?.changeWsData147([...newArr])
               }
-            } else if (this.state.numMatrixFlag.includes('num') && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+            } else if (this.state.numMatrixFlag == 'num' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
               // 手套2D数字模式：使用 sitData 的原始256数据点，以16x16矩阵显示
               let rawData = jsonObject.sitData;
               if (rawData && !Array.isArray(rawData)) {
@@ -1381,6 +1381,14 @@ class Home extends React.Component {
               } else {
                 // 旧版数据回退到147显示
                 this.com.current?.changeWsData147([...wsPointData])
+              }
+            } else if (this.state.numMatrixFlag == 'num3D' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+              // 手套3D数字模式：使用147映射数据，跟之前一样
+              let newArr = [...wsPointData]
+              if (this.com.current?.changeWsData147R) {
+                this.com.current.changeWsData147R([...newArr])
+              } else {
+                this.com.current?.changeWsData147([...newArr])
               }
             } else if (this.state.numMatrixFlag.includes('num')) {
               let newArr = [...wsPointData]
@@ -1506,7 +1514,7 @@ class Home extends React.Component {
               } else {
                 this.com.current?.changeWsData147([...newArr])
               }
-            } else if (this.state.numMatrixFlag.includes('num') && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+            } else if (this.state.numMatrixFlag == 'num' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
               // 手套2D数字模式：使用 sitData 的原始256数据点，以16x16矩阵显示
               let rawData = jsonObject.sitData;
               if (rawData && !Array.isArray(rawData)) {
@@ -1517,6 +1525,14 @@ class Home extends React.Component {
               } else {
                 // 旧版数据回退到147显示
                 this.com.current?.changeWsData147([...wsPointData])
+              }
+            } else if (this.state.numMatrixFlag == 'num3D' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+              // 手套3D数字模式：使用147映射数据，跟之前一样
+              let newArr = [...wsPointData]
+              if (this.com.current?.changeWsData147R) {
+                this.com.current.changeWsData147R([...newArr])
+              } else {
+                this.com.current?.changeWsData147([...newArr])
               }
             } else if (this.state.numMatrixFlag.includes('num')) {
               let newArr = [...wsPointData]
@@ -1837,7 +1853,7 @@ class Home extends React.Component {
               // 手套原始数据模式：保留147映射数据显示
               let newArr = [...wsPointData]
               this.com.current?.changeWsData147([...newArr])
-            } else if (this.state.numMatrixFlag.includes('num') && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+            } else if (this.state.numMatrixFlag == 'num' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
               // 手套2D数字模式：使用 backData 的原始256数据点，以16x16矩阵显示
               let rawData = jsonObject.backData;
               if (rawData && !Array.isArray(rawData)) {
@@ -1849,6 +1865,10 @@ class Home extends React.Component {
                 // 旧版数据回退到147显示
                 this.com.current?.changeWsData147([...wsPointData])
               }
+            } else if (this.state.numMatrixFlag == 'num3D' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+              // 手套3D数字模式：使用147映射数据，跟之前一样
+              let newArr = [...wsPointData]
+              this.com.current?.changeWsData147([...newArr])
             } else if (this.state.numMatrixFlag.includes('num')) {
               let newArr = [...wsPointData]
               this.com.current?.changeWsData147([...newArr])
@@ -1964,7 +1984,7 @@ class Home extends React.Component {
               // 手套原始数据模式：保留147映射数据显示
               let newArr = [...wsPointData]
               this.com.current?.changeWsData147([...newArr])
-            } else if (this.state.numMatrixFlag.includes('num') && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+            } else if (this.state.numMatrixFlag == 'num' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
               // 手套2D数字模式：使用 backData 的原始256数据点，以16x16矩阵显示
               let rawData = jsonObject.backData;
               if (rawData && !Array.isArray(rawData)) {
@@ -1976,6 +1996,10 @@ class Home extends React.Component {
                 // 旧版数据回退到147显示
                 this.com.current?.changeWsData147([...wsPointData])
               }
+            } else if (this.state.numMatrixFlag == 'num3D' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+              // 手套3D数字模式：使用147映射数据，跟之前一样
+              let newArr = [...wsPointData]
+              this.com.current?.changeWsData147([...newArr])
             } else if (this.state.numMatrixFlag.includes('num')) {
               let newArr = [...wsPointData]
               this.com.current?.changeWsData147([...newArr])
