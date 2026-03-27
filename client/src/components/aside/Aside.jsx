@@ -283,15 +283,40 @@ class Aside extends React.Component {
             // 状态变化时重置计时（由后端处理，前端只展示）
         }
         const now = performance.now();
-        this._pendingData = obj;
+        this._pendingData = {
+            ...(this._pendingData || {}),
+            ...obj,
+        };
+
+        const hasRealtimeDetectionData =
+            obj.rate !== undefined ||
+            obj.heart_rate !== undefined ||
+            obj.stateInBbed !== undefined ||
+            obj.sosflag !== undefined ||
+            obj.onBedTime !== undefined;
+
+        if (hasRealtimeDetectionData) {
+            this._lastDataTime = now;
+            const nextData = this._pendingData;
+            this.setState(nextData);
+            this._pendingData = null;
+            if (this._dataTimer) { clearTimeout(this._dataTimer); this._dataTimer = null; }
+            return;
+        }
+
         if (now - this._lastDataTime >= this._ASIDE_INTERVAL) {
             this._lastDataTime = now;
-            this.setState(obj);
+            const nextData = this._pendingData;
+            this.setState(nextData);
+            this._pendingData = null;
             if (this._dataTimer) { clearTimeout(this._dataTimer); this._dataTimer = null; }
         } else if (!this._dataTimer) {
             this._dataTimer = setTimeout(() => {
                 this._lastDataTime = performance.now();
-                if (this._pendingData) this.setState(this._pendingData);
+                if (this._pendingData) {
+                    this.setState(this._pendingData);
+                    this._pendingData = null;
+                }
                 this._dataTimer = null;
             }, this._ASIDE_INTERVAL - (now - this._lastDataTime));
         }
