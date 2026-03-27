@@ -537,6 +537,12 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     if (props.matrixName == 'carCol') {
         width = 10
         height = 9
+    } else if (props.matrixName == 'daliegu') {
+        width = 14
+        height = 20
+    } else if (props.matrixName == 'smallSample') {
+        width = 10
+        height = 10
     }
 
     const isRobot = props.matrixName === 'robotSY' || props.matrixName === 'robotLCF' || props.matrixName === 'robot1';
@@ -560,6 +566,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             return calcRobotCellSizeFromLayout(40, 10, maxW, maxH);
         }
         if (props.matrixName === 'hand0205' || props.matrixName === 'handGlove115200') {
+            // numoriginal 模式下显示15x10矩阵（147映射数据）
             return calcCellSize(15, 10, maxW, maxH, 40);
         }
         if (isFoot) {
@@ -837,6 +844,39 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
         scheduleRender();
     }
 
+    // ========== 手套原始数据 16x16 矩阵显示（256个原始数据点） ==========
+    const changeWsData256 = (wsPointData) => {
+        let rawData = [...wsPointData]
+        // 确保数据长度为256
+        if (rawData.length > 256) rawData = rawData.slice(0, 256)
+        while (rawData.length < 256) rawData.push(0)
+
+        layoutData([...rawData])
+
+        // 检查是否需要重新初始化 WebGL（首次或尺寸变化）
+        const tw = 16, th = 16;
+        if (texSizeRef.current.w !== tw || texSizeRef.current.h !== th) {
+            texSizeRef.current = { w: tw, h: th };
+            const { maxW, maxH } = getMatrixViewportBounds(MATRIX_WIDTH_RATIO);
+            const newCs = calcCellSize(tw, th, maxW, maxH, 40);
+            cellSizeRef.current = newCs;
+            setCellSize(newCs);
+
+            if (glCanvasRef.current) {
+                cleanupWebGL(glCtxRef.current);
+                glCtxRef.current = initWebGL(glCanvasRef.current, tw, th, newCs, false);
+                if (overlayCanvasRef.current) {
+                    overlayCanvasRef.current.width = tw * newCs + 30;
+                    overlayCanvasRef.current.height = th * newCs + 30;
+                    overlayCtxRef.current = overlayCanvasRef.current.getContext('2d');
+                }
+            }
+        }
+
+        pendingFlatRef.current = { data: rawData, tw, th };
+        scheduleRender();
+    }
+
     const changeWsData147 = (wsPointData) => {
         layoutData([...wsPointData])
 
@@ -945,6 +985,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     }
 
     useImperativeHandle(refs, () => ({
+        changeWsData256,
         changeWsData147,
         changeWsData147R,
         changeWsData: changeWsData,

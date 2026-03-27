@@ -283,6 +283,26 @@ const Num3D = React.forwardRef((props, refs) => {
         scheduleRender();
     }
 
+    // 手套原始256数据 → 16x16矩阵直接渲染（3D数字模式）
+    const changeWsData256 = (wsPointData) => {
+        const rows = 16, cols = 16;
+        let flat = new Array(rows * cols).fill(0);
+        for (let i = 0; i < Math.min(wsPointData.length, 256); i++) {
+            flat[i] = wsPointData[i];
+        }
+        layoutData(flat);
+
+        let ndata = flat.map((a) => (a - valuef1 < 0 ? 0 : a));
+        const ndataNum = ndata.reduce((a, b) => a + b, 0);
+        if (ndataNum < valuelInit1) {
+            ndata = new Array(rows * cols).fill(0);
+        }
+
+        reinitCanvas(cols, rows);
+        pendingDataRef.current = { data: ndata, tw: cols, th: rows };
+        scheduleRender();
+    }
+
     const sitValue = (prop) => {
         const { valuej, valueg, value, valuel, valuef, valuelInit } = prop;
         if (valuej) valuej1 = valuej;
@@ -426,6 +446,7 @@ const Num3D = React.forwardRef((props, refs) => {
         changeWsDatafinger,
         changeWsDatapalm,
         changeWsData147,
+        changeWsData256,
         // 视角调节接口
         changePointRotation,
         changeGroupRotate,

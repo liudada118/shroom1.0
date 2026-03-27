@@ -659,7 +659,9 @@ export const sitTypeEvent = {
   },
   hand: ({ that, wsPointData, local }) => {
     wsPointData = rotate90(wsPointData, 32, 32)
-    if (that.state.numMatrixFlag == "normal") {
+    if (that.state.numMatrixFlag == "numoriginal") {
+      that.com.current?.changeWsData([...wsPointData]);
+    } else if (that.state.numMatrixFlag == "normal") {
       // wsPointData = handLine(wsPointData);
       that.com.current?.sitData({
         wsPointData: wsPointData,
@@ -673,7 +675,9 @@ export const sitTypeEvent = {
   },
   daliegu: ({ that, wsPointData, local }) => {
     // wsPointData = rotate90(wsPointData, 32, 32)
-    if (that.state.numMatrixFlag == "normal") {
+    if (that.state.numMatrixFlag == "numoriginal") {
+      that.com.current?.changeWsData([...wsPointData]);
+    } else if (that.state.numMatrixFlag == "normal") {
       // wsPointData = handLine(wsPointData);
       that.com.current?.sitData({
         wsPointData: wsPointData,
@@ -956,7 +960,9 @@ export const sitTypeEvent = {
     }
   }, smallSample: ({ that, wsPointData, local }) => {
     // 小型样品 - 10×10数字矩阵，数据已在 server.js 中按点位图重排
-    if (that.state.numMatrixFlag == "normal") {
+    if (that.state.numMatrixFlag == "numoriginal") {
+      that.com.current?.changeWsData([...wsPointData]);
+    } else if (that.state.numMatrixFlag == "normal") {
       that.com.current?.sitData({
         wsPointData: wsPointData,
         local: that.state.local
@@ -1490,7 +1496,10 @@ export const sitTypeEvent = {
       //  z 
       if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
         let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-        that.com.current?.changeHandAngle(arr)
+        // 过滤四元数绝对值超过1的异常数据
+        if (!arr.some(v => Math.abs(v) > 1)) {
+          that.com.current?.changeHandAngle(arr)
+        }
       }
 
       if (fingerArr) {
@@ -1659,7 +1668,10 @@ export const sitTypeEvent = {
       if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
         // console.log(arr)
         let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-        that.com.current?.handL.changeHandAngle(arr)
+        // 过滤四元数绝对值超过1的异常数据
+        if (!arr.some(v => Math.abs(v) > 1)) {
+          that.com.current?.handL.changeHandAngle(arr)
+        }
       }
       // console.log(rotate.length ,fingerArr )
       if (fingerArr && fingerArr.length) {
@@ -1707,7 +1719,10 @@ export const sitTypeEvent = {
         //  z 
         if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
           let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-          that.com.current?.changeHandAngle(arr)
+          // 过滤四元数绝对值超过1的异常数据
+          if (!arr.some(v => Math.abs(v) > 1)) {
+            that.com.current?.changeHandAngle(arr)
+          }
         }
       } else {
         that.com.current?.handZero()
@@ -1728,7 +1743,10 @@ export const sitTypeEvent = {
 
       if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
         let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-        that.com.current?.changeHandAngle(arr)
+        // 过滤四元数绝对值超过1的异常数据
+        if (!arr.some(v => Math.abs(v) > 1)) {
+          that.com.current?.changeHandAngle(arr)
+        }
       }
     }
 
@@ -1755,7 +1773,10 @@ export const sitTypeEvent = {
         console.log(rotate)
         if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
           let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-          that.com.current?.changeHandAngle(arr)
+          // 过滤四元数绝对值超过1的异常数据
+          if (!arr.some(v => Math.abs(v) > 1)) {
+            that.com.current?.changeHandAngle(arr)
+          }
         }
       } else {
         that.com.current?.handZero()
@@ -1774,7 +1795,10 @@ export const sitTypeEvent = {
       }
       if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
         let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-        that.com.current?.changeHandAngle(arr)
+        // 过滤四元数绝对值超过1的异常数据
+        if (!arr.some(v => Math.abs(v) > 1)) {
+          that.com.current?.changeHandAngle(arr)
+        }
       }
     }
 
@@ -2075,6 +2099,10 @@ export const sitTypeEvent = {
   },
   smallBed({ that, wsPointData, compen }) {
     // console.log(compen)
+    if (that.state.numMatrixFlag == "numoriginal") {
+      that.com.current?.changeWsData([...wsPointData]);
+      return;
+    }
     const arr = [...wsPointData]
     // for (let i = 0; i < 32; i++) {
     //   for (let j = 0; j < 32; j++) {
@@ -2142,7 +2170,9 @@ export const sitTypeEvent = {
     // console.log(compen)
     // timeflag ++ 
 
-    if (that.state.numMatrixFlag == "num") {
+    if (that.state.numMatrixFlag == "numoriginal") {
+      that.com.current?.changeWsData([...wsPointData]);
+    } else if (that.state.numMatrixFlag == "num") {
       that.com.current?.changeWsData(wsPointData);
     } else if (
 
@@ -2231,7 +2261,9 @@ export const sitTypeEvent = {
     });
   },
   normal({ that, wsPointData, press }) {
-    if (that.state.numMatrixFlag == "normal") {
+    if (that.state.numMatrixFlag == "numoriginal") {
+      that.com.current?.changeWsData([...wsPointData]);
+    } else if (that.state.numMatrixFlag == "normal") {
       // wsPointData = handLine(wsPointData);
       that.com.current?.sitData({
         wsPointData: wsPointData,
@@ -4418,7 +4450,10 @@ export const backTypeEvent = {
       if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
         // console.log(arr)
         let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-        that.com.current?.handR.changeHandAngle(arr)
+        // 过滤四元数绝对值超过1的异常数据
+        if (!arr.some(v => Math.abs(v) > 1)) {
+          that.com.current?.handR.changeHandAngle(arr)
+        }
       }
       // console.log(rotate.length ,fingerArr )
       if (fingerArr && fingerArr.length) {

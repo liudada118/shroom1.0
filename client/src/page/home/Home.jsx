@@ -359,7 +359,10 @@ const getConfig = ({ sensorType, mode }) => {
   return { ...init, ...local }
 }
 
-var backFlag, hz = 12, sitFlag, realHzFrameCount = 0, realHzLastTime = Date.now(), fingerArr = localStorage.getItem('fingerArr') && JSON.parse(localStorage.getItem('fingerArr')).every((a) => a.length > 0) ? JSON.parse(localStorage.getItem('fingerArr')) : [new Array(5).fill(0), new Array(5).fill(255)];
+var backFlag, hz = 12, sitFlag, realHzFrameCount = 0, realHzLastTime = Date.now(),
+  fingerArrL = localStorage.getItem('fingerArrL') && JSON.parse(localStorage.getItem('fingerArrL')).every((a) => a.length > 0) ? JSON.parse(localStorage.getItem('fingerArrL')) : [new Array(5).fill(0), new Array(5).fill(255)],
+  fingerArrR = localStorage.getItem('fingerArrR') && JSON.parse(localStorage.getItem('fingerArrR')).every((a) => a.length > 0) ? JSON.parse(localStorage.getItem('fingerArrR')) : [new Array(5).fill(0), new Array(5).fill(255)],
+  fingerArr = fingerArrL; // 默认指向左手，兼容旧逻辑
 
 // jqbed 健康监测语音播报
 const speechDict = {
@@ -958,6 +961,25 @@ class Home extends React.Component {
     }
 
     // ====== 密钥过期检查 ======
+    // 处理密钥错误提示
+    if (jsonObject.licenseError != null) {
+      // 无有效密钥时跳转到密钥输入页
+      if (jsonObject.noLicense) {
+        Modal.error({
+          title: '密钥错误',
+          content: jsonObject.licenseError,
+          onOk: () => {
+            window.location.hash = '#/?from=system';
+          }
+        });
+      } else {
+        Modal.error({
+          title: '密钥错误',
+          content: jsonObject.licenseError,
+        });
+      }
+    }
+
     if (jsonObject.date != null) {
       const endDate = parseFloat(jsonObject.date);
       const serverNow = jsonObject.nowDate ? parseFloat(jsonObject.nowDate) : Date.now();
@@ -1019,6 +1041,8 @@ class Home extends React.Component {
 
     if (jsonObject.backFlag != null) {
       backFlag = jsonObject.backFlag;
+      // 根据左右手切换 fingerArr 指向
+      fingerArr = backFlag ? fingerArrR : fingerArrL;
     }
 
     if (jsonObject.hz != null) {
@@ -1302,7 +1326,10 @@ class Home extends React.Component {
                 //  z 
                 if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
                   let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-                  com?.changeHandAngle(arr)
+                  // 过滤四元数绝对值超过1的异常数据
+                  if (!arr.some(v => Math.abs(v) > 1)) {
+                    com?.changeHandAngle(arr)
+                  }
                 }
 
                 if (fingerArr) {
@@ -1334,6 +1361,26 @@ class Home extends React.Component {
                 // that.com.current?.calibration([0,0,0])
                 // that.com.current?.handZero()
                 // that.com.current?.calibration([0,0,0])
+              }
+            } else if (this.state.numMatrixFlag == 'numoriginal' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+              // 手套原始数据模式：保留147映射数据显示
+              let newArr = [...wsPointData]
+              if (this.com.current?.changeWsData147R) {
+                this.com.current.changeWsData147R([...newArr])
+              } else {
+                this.com.current?.changeWsData147([...newArr])
+              }
+            } else if (this.state.numMatrixFlag.includes('num') && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+              // 手套2D数字模式：使用 sitData 的原始256数据点，以16x16矩阵显示
+              let rawData = jsonObject.sitData;
+              if (rawData && !Array.isArray(rawData)) {
+                rawData = JSON.parse(rawData);
+              }
+              if (rawData && rawData.length >= 256) {
+                this.com.current?.changeWsData256([...rawData.slice(0, 256)])
+              } else {
+                // 旧版数据回退到147显示
+                this.com.current?.changeWsData147([...wsPointData])
               }
             } else if (this.state.numMatrixFlag.includes('num')) {
               let newArr = [...wsPointData]
@@ -1415,7 +1462,10 @@ class Home extends React.Component {
                 //  z 
                 if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
                   let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-                  com?.changeHandAngle(arr)
+                  // 过滤四元数绝对值超过1的异常数据
+                  if (!arr.some(v => Math.abs(v) > 1)) {
+                    com?.changeHandAngle(arr)
+                  }
                 }
 
                 if (fingerArr) {
@@ -1447,6 +1497,26 @@ class Home extends React.Component {
                 // that.com.current?.calibration([0,0,0])
                 // that.com.current?.handZero()
                 // that.com.current?.calibration([0,0,0])
+              }
+            } else if (this.state.numMatrixFlag == 'numoriginal' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+              // 手套原始数据模式：保留147映射数据显示
+              let newArr = [...wsPointData]
+              if (this.com.current?.changeWsData147R) {
+                this.com.current.changeWsData147R([...newArr])
+              } else {
+                this.com.current?.changeWsData147([...newArr])
+              }
+            } else if (this.state.numMatrixFlag.includes('num') && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+              // 手套2D数字模式：使用 sitData 的原始256数据点，以16x16矩阵显示
+              let rawData = jsonObject.sitData;
+              if (rawData && !Array.isArray(rawData)) {
+                rawData = JSON.parse(rawData);
+              }
+              if (rawData && rawData.length >= 256) {
+                this.com.current?.changeWsData256([...rawData.slice(0, 256)])
+              } else {
+                // 旧版数据回退到147显示
+                this.com.current?.changeWsData147([...wsPointData])
               }
             } else if (this.state.numMatrixFlag.includes('num')) {
               let newArr = [...wsPointData]
@@ -1727,7 +1797,10 @@ class Home extends React.Component {
                 //  z 
                 if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
                   let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-                  com?.changeHandAngle(arr)
+                  // 过滤四元数绝对值超过1的异常数据
+                  if (!arr.some(v => Math.abs(v) > 1)) {
+                    com?.changeHandAngle(arr)
+                  }
                 }
 
                 if (fingerArr) {
@@ -1759,6 +1832,22 @@ class Home extends React.Component {
                 // that.com.current?.calibration([0,0,0])
                 // that.com.current?.handZero()
                 // that.com.current?.calibration([0,0,0])
+              }
+            } else if (this.state.numMatrixFlag == 'numoriginal' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+              // 手套原始数据模式：保留147映射数据显示
+              let newArr = [...wsPointData]
+              this.com.current?.changeWsData147([...newArr])
+            } else if (this.state.numMatrixFlag.includes('num') && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+              // 手套2D数字模式：使用 backData 的原始256数据点，以16x16矩阵显示
+              let rawData = jsonObject.backData;
+              if (rawData && !Array.isArray(rawData)) {
+                rawData = JSON.parse(rawData);
+              }
+              if (rawData && rawData.length >= 256) {
+                this.com.current?.changeWsData256([...rawData.slice(0, 256)])
+              } else {
+                // 旧版数据回退到147显示
+                this.com.current?.changeWsData147([...wsPointData])
               }
             } else if (this.state.numMatrixFlag.includes('num')) {
               let newArr = [...wsPointData]
@@ -1835,7 +1924,10 @@ class Home extends React.Component {
                 //  z 
                 if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
                   let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-                  com?.changeHandAngle(arr)
+                  // 过滤四元数绝对值超过1的异常数据
+                  if (!arr.some(v => Math.abs(v) > 1)) {
+                    com?.changeHandAngle(arr)
+                  }
                 }
 
                 if (fingerArr) {
@@ -1867,6 +1959,22 @@ class Home extends React.Component {
                 // that.com.current?.calibration([0,0,0])
                 // that.com.current?.handZero()
                 // that.com.current?.calibration([0,0,0])
+              }
+            } else if (this.state.numMatrixFlag == 'numoriginal' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+              // 手套原始数据模式：保留147映射数据显示
+              let newArr = [...wsPointData]
+              this.com.current?.changeWsData147([...newArr])
+            } else if (this.state.numMatrixFlag.includes('num') && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+              // 手套2D数字模式：使用 backData 的原始256数据点，以16x16矩阵显示
+              let rawData = jsonObject.backData;
+              if (rawData && !Array.isArray(rawData)) {
+                rawData = JSON.parse(rawData);
+              }
+              if (rawData && rawData.length >= 256) {
+                this.com.current?.changeWsData256([...rawData.slice(0, 256)])
+              } else {
+                // 旧版数据回退到147显示
+                this.com.current?.changeWsData147([...wsPointData])
               }
             } else if (this.state.numMatrixFlag.includes('num')) {
               let newArr = [...wsPointData]
@@ -2551,11 +2659,18 @@ class Home extends React.Component {
     })
   }
 
-  colFingerData(index) {
-    const arr = localStorage.getItem('fingerArr') ? JSON.parse(localStorage.getItem('fingerArr')) : []
+  colFingerData(index, hand = 'left') {
+    const key = hand === 'right' ? 'fingerArrR' : 'fingerArrL'
+    const arr = localStorage.getItem(key) ? JSON.parse(localStorage.getItem(key)) : []
     arr[index] = wsPointDataSit
-    fingerArr = arr
-    localStorage.setItem('fingerArr', JSON.stringify(arr))
+    if (hand === 'right') {
+      fingerArrR = arr
+    } else {
+      fingerArrL = arr
+    }
+    // 同步当前 fingerArr 指向
+    fingerArr = backFlag ? fingerArrR : fingerArrL
+    localStorage.setItem(key, JSON.stringify(arr))
   }
 
   render() {
@@ -3069,7 +3184,7 @@ class Home extends React.Component {
                 </CanvasCom>
                 :
 
-                this.state.numMatrixFlag == "numoriginal" && ["hand0205", 'handGlove115200', 'robot1', 'footVideo', 'robotSY', 'robotLCF'].includes(this.state.matrixName) ?
+                this.state.numMatrixFlag == "numoriginal" && ["hand0205", 'handGlove115200', 'robot1', 'footVideo', 'robotSY', 'robotLCF', 'hand', 'normal', 'smallBed', 'jqbed', 'daliegu', 'smallSample'].includes(this.state.matrixName) ?
                   <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
                     <Num2DOriginal ref={this.com}
                       matrixName={this.state.matrixName}
@@ -3896,10 +4011,16 @@ class Home extends React.Component {
           {/* ====== 密钥过期提示弹窗 ====== */}
           <Modal
             open={this.state.licenseModalVisible}
-            onOk={() => this.setState({ licenseModalVisible: false })}
+            onOk={() => {
+              this.setState({ licenseModalVisible: false })
+              // 密钥已过期时，点击确定跳转到密钥输入页
+              if (this.state.licenseModalType === 'expired') {
+                window.location.hash = '#/?from=system';
+              }
+            }}
             onCancel={() => this.setState({ licenseModalVisible: false })}
-            okText="我知道了"
-            cancelButtonProps={{ style: { display: 'none' } }}
+            okText={this.state.licenseModalType === 'expired' ? '去输入密钥' : '我知道了'}
+            cancelButtonProps={{ style: { display: this.state.licenseModalType === 'expired' ? 'none' : 'none' } }}
             centered
             width={480}
             closable={false}
@@ -3915,7 +4036,7 @@ class Home extends React.Component {
               <div>
                 <p>您的授权密钥已于 <strong className="expire-date">{this.state.licenseModalExpireDate}</strong> 过期。</p>
                 <p>串口连接、数据采集等功能已被禁用。</p>
-                <p className="hint">请联系管理员获取新的授权密钥，并在密钥配置页面重新写入。</p>
+                <p className="hint">请联系管理员获取新的授权密钥，点击下方按钮跳转到密钥输入页面。</p>
               </div>
             ) : (
               <div>

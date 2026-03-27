@@ -319,7 +319,7 @@ export const Num2D = React.forwardRef((props, refs) => {
         const { maxW, maxH } = getMatrixViewportBounds();
 
         if (props.matrixName === 'hand0205' || props.matrixName === 'handGlove115200') {
-            return calcCellSize(36, 36, maxW, maxH, 40);
+            return calcCellSize(16, 16, maxW, maxH, 40);
         }
         if (isFoot) {
             const tw = hasRight ? 34 : 16;
@@ -372,7 +372,7 @@ export const Num2D = React.forwardRef((props, refs) => {
         if (glCanvasRef.current) {
             let tw = width, th = height;
             // 根据产品类型设置正确的初始纹理尺寸，避免后续 reinit
-            if (props.matrixName === 'hand0205' || props.matrixName === 'handGlove115200') { tw = 36; th = 36; }
+            if (props.matrixName === 'hand0205' || props.matrixName === 'handGlove115200') { tw = 16; th = 16; }
             else if (isFoot) { tw = 16; th = 32; }
             texSizeRef.current = { w: tw, h: th };
             glCtxRef.current = initWebGL(glCanvasRef.current, tw, th, cs);
@@ -620,6 +620,21 @@ export const Num2D = React.forwardRef((props, refs) => {
         }
     }
 
+    const changeWsData256 = (wsPointData) => {
+        let rawData = [...wsPointData]
+        // 确保数据长度为256
+        if (rawData.length > 256) rawData = rawData.slice(0, 256)
+        while (rawData.length < 256) rawData.push(0)
+
+        layoutData([...rawData])
+
+        // 16x16 矩阵直接渲染
+        const tw = 16, th = 16;
+        reinitGL(tw, th);
+        pendingFlatRef.current = { data: rawData, tw, th };
+        scheduleRender();
+    }
+
     const changeWsData147 = (wsPointData) => {
         layoutData([...wsPointData])
         if (props.matrixName == 'hand0205' || props.matrixName == 'handGlove115200') {
@@ -695,6 +710,7 @@ export const Num2D = React.forwardRef((props, refs) => {
     }
 
     useImperativeHandle(refs, () => ({
+        changeWsData256,
         changeWsData147,
         changeWsData147R,
         changeWsData: changeWsData,
