@@ -785,6 +785,16 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
         scheduleRender();
     }
 
+    // ========== 原始数据直接渲染（不做高斯模糊、不做阈值处理） ==========
+    const changeWsDataRaw = (wsPointData) => {
+        let rawData = [...wsPointData]
+
+        layoutData([...rawData])
+
+        pendingFlatRef.current = { data: rawData, tw: width, th: height };
+        scheduleRender();
+    }
+
     const sitValue = (prop) => {
         const { valuej, valueg, value, valuel, valuef, valuelInit } = prop;
         if (valuej) valuej1 = valuej;
@@ -989,6 +999,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
         changeWsData147,
         changeWsData147R,
         changeWsData: changeWsData,
+        changeWsDataRaw: changeWsDataRaw,
         drawContent: drawContent,
         sitValue
     }));

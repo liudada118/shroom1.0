@@ -1317,7 +1317,7 @@ class Title extends React.Component {
               this.props.dataZero0()
             }}>{t('rawData')}</Button></NavLink>
 
-            <NavLink to={`/?a=b`}> <Button onClick={() => {
+            <NavLink to={`/?from=system`}> <Button onClick={() => {
 
             }}>{t('key')}</Button></NavLink>
           </>

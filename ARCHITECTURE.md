@@ -492,6 +492,8 @@ graph TD
 | 2026-03-27 | Max | 新增功能 | 手部检测/正常测试/小床检测添加原始数据下拉框：Title.jsx 扩展模式选择下拉框到 hand/normal/smallBed/jqbed/daliegu/smallSample，支持“3D模型”和“原始数据”模式切换；Home.jsx numoriginal 渲染条件扩展到新增传感器类型；util.js 为 hand/daliegu/normal/smallBed/jqbed/smallSample 的 sitTypeEvent 添加 numoriginal 分支；Num2Doriginal.jsx 添加 daliegu(14x20) 和 smallSample(10x10) 矩阵尺寸配置 |
 | 2026-03-27 | Max | 修复缺陷 | 修复密钥页面逻辑：Date.jsx 用 isFromSystem(检查 URL 参数 from=system) 和 isSubmitting ref 区分首次启动和手动更新密钥场景；首次启动时有效密钥自动跳转系统页，手动跳转时不自动跳转允许更新密钥，用户提交新密钥成功后才跳转；空密钥前端拦截，错误/过期密钥弹窗提示 |
 
+| 2026-03-27 | Max | 修复缺陷 | 修复从系统页跳转到密钥页时自动跳回的问题：根因是 Title.jsx “输入密钥”按钮跳转到 /?a=b 但 Date.jsx 只检查 from=system；Title.jsx 改为 NavLink to='/?from=system'，Date.jsx 同时兼容 ?from=system 和旧版 ?a=b 参数，多重检测(param.search + window.location.hash + href)确保兼容 |
+| 2026-03-27 | Max | 修复缺陷 | 修复手套3D数字(num3D)模式数据源变少问题：将 Home.jsx 中 `includes('num')` 拆分为精确匹配，num(2D数字)使用256原始数据+changeWsData256，num3D(3D数字)恢复使用147映射数据+changeWsData147（手形热力图），4个手套数据分支均已修改 |
 | 2026-03-27 14:35 | Max | 修复缺陷 | 修复 Electron 开发模式误连其他 `localhost:3000` 页面：主进程改为从 Vite 输出中识别真实本地地址并校验预期标题/入口后再加载，同时将 Title 标题栏中的 `JQTOOLS-robot` 替换为 `shroom-wordmark.svg` 字标 |
 | 2026-03-27 14:43 | Max | 修复缺陷 | 修复 `client/src/page/home/util.js` 中对象方法定义缺少分隔逗号的问题，将 `} jqbed(...)` 更正为 `}, jqbed(...)`，消除浏览器里的 `Unexpected identifier 'jqbed'` 语法错误 |
 

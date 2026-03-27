@@ -660,7 +660,7 @@ export const sitTypeEvent = {
   hand: ({ that, wsPointData, local }) => {
     wsPointData = rotate90(wsPointData, 32, 32)
     if (that.state.numMatrixFlag == "numoriginal") {
-      that.com.current?.changeWsData([...wsPointData]);
+      that.com.current?.changeWsDataRaw([...wsPointData]);
     } else if (that.state.numMatrixFlag == "normal") {
       // wsPointData = handLine(wsPointData);
       that.com.current?.sitData({
@@ -676,7 +676,7 @@ export const sitTypeEvent = {
   daliegu: ({ that, wsPointData, local }) => {
     // wsPointData = rotate90(wsPointData, 32, 32)
     if (that.state.numMatrixFlag == "numoriginal") {
-      that.com.current?.changeWsData([...wsPointData]);
+      that.com.current?.changeWsDataRaw([...wsPointData]);
     } else if (that.state.numMatrixFlag == "normal") {
       // wsPointData = handLine(wsPointData);
       that.com.current?.sitData({
@@ -961,7 +961,7 @@ export const sitTypeEvent = {
   }, smallSample: ({ that, wsPointData, local }) => {
     // 小型样品 - 10×10数字矩阵，数据已在 server.js 中按点位图重排
     if (that.state.numMatrixFlag == "numoriginal") {
-      that.com.current?.changeWsData([...wsPointData]);
+      that.com.current?.changeWsDataRaw([...wsPointData]);
     } else if (that.state.numMatrixFlag == "normal") {
       that.com.current?.sitData({
         wsPointData: wsPointData,
@@ -2100,7 +2100,7 @@ export const sitTypeEvent = {
   smallBed({ that, wsPointData, compen }) {
     // console.log(compen)
     if (that.state.numMatrixFlag == "numoriginal") {
-      that.com.current?.changeWsData([...wsPointData]);
+      that.com.current?.changeWsDataRaw([...wsPointData]);
       return;
     }
     const arr = [...wsPointData]
@@ -2171,7 +2171,7 @@ export const sitTypeEvent = {
     // timeflag ++ 
 
     if (that.state.numMatrixFlag == "numoriginal") {
-      that.com.current?.changeWsData([...wsPointData]);
+      that.com.current?.changeWsDataRaw([...wsPointData]);
     } else if (that.state.numMatrixFlag == "num") {
       that.com.current?.changeWsData(wsPointData);
     } else if (
@@ -2262,7 +2262,7 @@ export const sitTypeEvent = {
   },
   normal({ that, wsPointData, press }) {
     if (that.state.numMatrixFlag == "numoriginal") {
-      that.com.current?.changeWsData([...wsPointData]);
+      that.com.current?.changeWsDataRaw([...wsPointData]);
     } else if (that.state.numMatrixFlag == "normal") {
       // wsPointData = handLine(wsPointData);
       that.com.current?.sitData({
