@@ -4,7 +4,7 @@ import { PlusOutlined } from '@ant-design/icons';
 import exchange from '../../assets/images/exchange.png'
 import option from '../../assets/images/Option.png'
 import logo from '../../assets/images/logo.png'
-import shroomWordmark from '../../assets/images/shroom-wordmark.svg'
+import shroomWordmark from '../../assets/images/shroom.png'
 import './title.scss'
 import Input from 'antd/es/input/Input';
 import { CSVLink, CSVDownload } from 'react-csv';
