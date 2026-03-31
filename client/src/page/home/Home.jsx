@@ -3208,7 +3208,19 @@ class Home extends React.Component {
                 </CanvasCom>
                 :
 
-                this.state.numMatrixFlag == "numoriginal" && ["hand0205", 'handGlove115200', 'robot1', 'footVideo', 'robotSY', 'robotLCF', 'hand', 'normal', 'smallBed', 'jqbed', 'daliegu', 'smallSample'].includes(this.state.matrixName) ?
+                this.state.numMatrixFlag == "numoriginal" && this.state.matrixName == 'hand' ?
+                  <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
+                    <Fast1024
+                      ref={this.com}
+                      data={this.data}
+                      local={this.state.local}
+                      handleChartsBody={this.handleChartsBody.bind(this)}
+                      handleChartsBody1={this.handleChartsBody1.bind(this)}
+                      changeStateData={this.changeStateData}
+                      changeSelect={this.changeSelect} />
+                  </CanvasCom>
+                  :
+                  this.state.numMatrixFlag == "numoriginal" && ["hand0205", 'handGlove115200', 'robot1', 'footVideo', 'robotSY', 'robotLCF', 'normal', 'smallBed', 'jqbed', 'daliegu', 'smallSample'].includes(this.state.matrixName) ?
                   <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
                     <Num2DOriginal ref={this.com}
                       matrixName={this.state.matrixName}
