@@ -624,6 +624,22 @@ module.exports = {
       const clientName = ip + port;
       logger.info("%s is connected", clientName);
 
+      // ====== 心跳机制：防止息屏后连接被系统关闭 ======
+      ws.isAlive = true;
+      ws.on('pong', () => { ws.isAlive = true; });
+      ws.on('close', () => { ws.isAlive = false; });
+      const heartbeatInterval = setInterval(() => {
+        if (ws.isAlive === false) {
+          logger.warn('[WS] 客户端心跳超时，关闭连接: ' + clientName);
+          clearInterval(heartbeatInterval);
+          return ws.terminate();
+        }
+        ws.isAlive = false;
+        if (ws.readyState === WebSocket.OPEN) ws.ping();
+      }, 30000);
+      ws.on('close', () => clearInterval(heartbeatInterval));
+      // ======================================================
+
       server.clients.forEach(function each(client) {
         /**
          * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?

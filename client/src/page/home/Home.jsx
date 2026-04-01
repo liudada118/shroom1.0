@@ -123,6 +123,7 @@ let ws,
   ws1,
   ws2,
   wsControl,
+  wsReconnectTimer = null, // 息屏后自动重连定时器
   xvalue = localStorage.getItem('bedx') ? Number(localStorage.getItem('bedx')) : 0,
   zvalue = localStorage.getItem('bedz') ? Number(localStorage.getItem('bedz')) : 0,
   sitIndexArr = new Array(4).fill(0),
@@ -569,9 +570,18 @@ class Home extends React.Component {
     };
     ws.onerror = (e) => {
       // an error occurred
+      console.warn('[WS] 连接错误，将在 3s 后重连');
     };
     ws.onclose = (e) => {
-      // connection closed
+      // 息屏或网络中断后自动重连
+      console.warn('[WS] 连接断开，3s 后自动重连...');
+      if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+      wsReconnectTimer = setTimeout(() => {
+        if (!ws || ws.readyState === WebSocket.CLOSED) {
+          console.info('[WS] 尝试重新连接...');
+          this.componentDidMount();
+        }
+      }, 3000);
     };
 
     if (this.state.matrixName === "localCar") {
@@ -743,8 +753,14 @@ class Home extends React.Component {
   }
 
   componentWillUnmount() {
+    // 清理自动重连定时器
+    if (wsReconnectTimer) {
+      clearTimeout(wsReconnectTimer);
+      wsReconnectTimer = null;
+    }
     if (ws) {
-      ws.close()
+      ws.onclose = null; // 移除 onclose 防止卸载时触发重连
+      ws.close();
     }
     // 清理节流定时器，防止内存泄漏
     if (timer) {
@@ -802,9 +818,18 @@ class Home extends React.Component {
     };
     ws.onerror = (e) => {
       // an error occurred
+      console.warn('[WS] 连接错误，将在 3s 后重连');
     };
     ws.onclose = (e) => {
-      // connection closed
+      // 息屏或网络中断后自动重连
+      console.warn('[WS] 连接断开，3s 后自动重连...');
+      if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+      wsReconnectTimer = setTimeout(() => {
+        if (!ws || ws.readyState === WebSocket.CLOSED) {
+          console.info('[WS] 尝试重新连接...');
+          this.componentDidMount();
+        }
+      }, 3000);
     };
 
     wsControl = new WebSocket(`ws://${ip}:23001/ws/msg`);
