@@ -46,6 +46,13 @@ const SENSOR_GROUPS = [
     ],
   },
   {
+    group: 'lab',
+    icon: '🧪',
+    items: [
+      { label: 'OneStep', value: 'bed4096' },
+    ],
+  },
+  {
     group: '精密',
     icon: '🔬',
     items: [
