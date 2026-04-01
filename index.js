@@ -523,28 +523,38 @@ app.whenReady().then(() => {
       mainWindow.webContents.executeJavaScript(`
         (function() {
           try {
-            var wsUrl = 'ws://127.0.0.1:19999';
             // 检查全局 ws 变量状态
             if (typeof ws !== 'undefined' && ws && ws.readyState === 1) {
               console.info('[Power-JS] WebSocket 状态正常 (readyState=1)，无需重连');
               return;
             }
-            console.warn('[Power-JS] WebSocket 已断开，强制重新连接...');
-            // 关闭旧连接
+            console.warn('[Power-JS] WebSocket 已断开，触发 onclose 自动重连（保留 React 回调绑定）...');
+            // 不自己 new WebSocket，而是触发旧 ws 的 close
+            // 让 React 组件的 ws.onclose 回调（componentDidMount 重连）来处理
+            // 这样 onmessage、wsData 等回调都能正确绑定
             if (typeof ws !== 'undefined' && ws) {
-              try { ws.onclose = null; ws.close(); } catch(e) {}
+              try {
+                // 如果 onclose 存在，直接 close 触发它
+                if (ws.onclose) {
+                  ws.close();
+                } else {
+                  // onclose 不存在时，手动触发 componentDidMount 重连
+                  ws.close();
+                  var wsUrl = 'ws://127.0.0.1:19999';
+                  ws = new WebSocket(wsUrl);
+                  // 注意：此时 onmessage 未绑定，页面不会渲染
+                  // 但 React 的 componentDidMount 会在下次 onclose 时重连
+                  console.warn('[Power-JS] onclose 未绑定，已新建裸连接，等待下次重连');
+                }
+              } catch(e) {
+                console.error('[Power-JS] 触发 close 异常:', e);
+              }
+            } else {
+              // ws 不存在，直接创建（首次连接失败场景）
+              console.warn('[Power-JS] ws 不存在，尝试直接重连...');
+              var wsUrl = 'ws://127.0.0.1:19999';
+              ws = new WebSocket(wsUrl);
             }
-            // 新建连接
-            ws = new WebSocket(wsUrl);
-            ws.onopen = function() {
-              console.info('[Power-JS] WebSocket 重连成功');
-            };
-            ws.onerror = function(e) {
-              console.warn('[Power-JS] WebSocket 重连失败', e);
-            };
-            ws.onclose = function() {
-              console.warn('[Power-JS] WebSocket 已关闭');
-            };
           } catch(e) {
             console.error('[Power-JS] 重连异常:', e);
           }
