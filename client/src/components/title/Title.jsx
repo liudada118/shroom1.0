@@ -366,7 +366,7 @@ class Title extends React.Component {
     const cacheMode = mode; // mode dimension for cache
 
     // Sensor type groups
-    const group1 = ['hand', 'normal', 'footVideo', 'smallBed', 'jqbed']; // 3D point scene
+    const group1 = ['hand', 'normal', 'footVideo', 'smallBed', 'jqbed', 'bed4096']; // 3D point scene
     const group2 = ['robot1', 'robotSY', 'robotLCF']; // Robots
     const group3 = ['hand0205', 'handGlove115200']; // Tactile gloves
     const group4 = ['fast256', 'fast1024']; // High-speed
@@ -382,13 +382,19 @@ class Title extends React.Component {
     let showInit = false;     // Initial value
 
     if (group1.includes(matrixName)) {
-      // Group 1: 3D point scene - smoothness, color, filter, height, consistency, init
-      showGuass = true;
-      showColor = true;
-      showFilter = true;
-      showHeight = true;
-      showConsis = true;
-      showInit = true;
+      if (mode === 'numoriginal' && ['hand', 'bed4096'].includes(matrixName)) {
+        // hand / bed4096 raw data mode: only color and filter
+        showColor = true;
+        showFilter = true;
+      } else {
+        // Group 1: 3D point scene - smoothness, color, filter, height, consistency, init
+        showGuass = true;
+        showColor = true;
+        showFilter = true;
+        showHeight = true;
+        showConsis = true;
+        showInit = true;
+      }
     } else if (group2.includes(matrixName)) {
       if (mode === 'numoriginal') {
         // Robot raw data mode: only color

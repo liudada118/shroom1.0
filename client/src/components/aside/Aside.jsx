@@ -397,6 +397,20 @@ class Aside extends React.Component {
                                     )
                                 })
                             }
+                            {this.props.matrixName === 'hand' && (
+                                <div className='dataItem'>
+                                    <div className='dataItemCircle'>
+                                        <div className='circleItem' style={{ backgroundColor: '#FFA63F' }}></div>
+                                        <div>{this.props.i18n.t('area')}</div>
+                                    </div>
+                                    <div className='dataIteminfo'>
+                                        <div className='standardColor'>Area</div>
+                                        <div>
+                                            <div>{this.state.point * 4} <span style={{ color: '#999' }}>mm²</span></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                         </> </> : <Com> <CanvasDemo ref={this.canvas} /></Com>}
                 </div> : ''}
 
