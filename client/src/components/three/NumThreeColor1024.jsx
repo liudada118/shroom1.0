@@ -495,10 +495,20 @@ export default React.forwardRef((props, refs) => {
         uvOffsets[i * 2] = (d % 16) / 16;
         uvOffsets[i * 2 + 1] = Math.floor(d / 16) / 16;
 
-        const rgb = jet(0, valuej1, d);
-        colorArray[i * 3 + 0] = rgb[0] / 255;
-        colorArray[i * 3 + 1] = rgb[1] / 255;
-        colorArray[i * 3 + 2] = rgb[2] / 255;
+        // const d = Math.floor(Math.random() * 256);
+        const r = d / 255;
+        const g = 0.2;
+        const b = 1.0 - r;
+
+        colorArray[i * 3 + 0] = r;
+        colorArray[i * 3 + 1] = g;
+        colorArray[i * 3 + 2] = b;
+
+        // const rgb = jet(0 , 30 , d)
+
+        // colorArray[i * 3 + 0] = rgb[0];
+        // colorArray[i * 3 + 1] = rgb[1];
+        // colorArray[i * 3 + 2] = rgb[2];
 
         geometry.setAttribute("instanceColor", new THREE.InstancedBufferAttribute(colorArray, 3));
         geometry.attributes.instanceColor.needsUpdate = true;
