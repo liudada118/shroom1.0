@@ -612,8 +612,7 @@ const Canvas = React.forwardRef((props, refs) => {
     let dataArr = []
     for (let ix = 0; ix < AMOUNTX; ix++) {
       for (let iy = 0; iy < AMOUNTY; iy++) {
-        const value = bigArrg[l] * 10;
-
+         const value = bigArrg[l] * 2;
         //柔化处理smooth
         smoothBig[l] = smoothBig[l] + (value - smoothBig[l] + 0.5) / valuel1;
 
