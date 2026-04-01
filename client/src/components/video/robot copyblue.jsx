@@ -409,9 +409,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
     renderer.outputEncoding = THREE.sRGBEncoding;
     // renderer.outputEncoding = THREE.sRGBEncoding;  
-    if (container.childNodes.length == 0) {
-      container.appendChild(renderer.domElement);
-    }
+    container.replaceChildren(renderer.domElement);
 
     renderer.setClearColor(0xaaaaaa);
 
@@ -468,6 +466,7 @@ const Canvas = React.forwardRef((props, refs) => {
         }
       }
     });
+
   }
 
   const width = 32, height = 32;
@@ -503,7 +502,6 @@ const Canvas = React.forwardRef((props, refs) => {
       // ctx.fillStyle = 'rgb(255, 0, 0)'; // 纯红色
       // // ctx2.clearRect(0, 0, canvas2.width, canvas2.height);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-
       ctx.drawImage(handHeatmap1Ref.current.canvas, 0, 0, size, size, 0, 0, size, size);
 
       // ctx.fillRect(0, 0,bodyCanvasRef.current.canvas.width,bodyCanvasRef.current.canvas.height);
@@ -578,7 +576,8 @@ const Canvas = React.forwardRef((props, refs) => {
     // }
 
 
-    var T = clock.getDelta();
+    try {
+      var T = clock.getDelta();
     timeS = timeS + T;
     if (timeS > renderT) {
       bodyPoint.forEach((a) => {
@@ -626,7 +625,10 @@ const Canvas = React.forwardRef((props, refs) => {
       const max1 = findMax(totalPointArr);
       if (!local)
         props.data.current?.handleChartsArea(totalPointArr, max1 + 100);
-      timeS = 0;
+        timeS = 0;
+      }
+    } catch (error) {
+      console.error("[robot1] render update failed", error);
     }
 
     TWEEN.update();
@@ -663,7 +665,7 @@ const Canvas = React.forwardRef((props, refs) => {
     if (valuelInit) valuelInit1 = valuelInit;
     // if(normalArr) 
 
-    ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a - valuef1));
+    ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a));
 
     ndata1Num = ndata1.reduce((a, b) => a + b, 0);
     if (ndata1Num < valuelInit1) {
@@ -707,7 +709,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
     // valuelInit1 = valuelInit;
     // 修改线序 坐垫
-    ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a - valuef1));
+    ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a));
 
     ndata1Num = ndata1.reduce((a, b) => a + b, 0);
 

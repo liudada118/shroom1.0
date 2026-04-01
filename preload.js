@@ -12,6 +12,14 @@
 
 const { contextBridge, ipcRenderer } = require("electron");
 
+function warn(message) {
+  try {
+    console.warn(message);
+  } catch {
+    // Ignore preload logging failures.
+  }
+}
+
 // 允许的 IPC 通道白名单
 const VALID_SEND_CHANNELS = [
   "ws-send",           // 发送 WebSocket 消息到后端
@@ -21,16 +29,18 @@ const VALID_SEND_CHANNELS = [
   "file-dialog",       // 请求文件对话框
   "export-csv",        // 请求导出 CSV
   "db-query",          // 数据库查询请求
+  "update-command",    // 更新控制指令（检查更新、下载、安装）
 ];
 
 const VALID_RECEIVE_CHANNELS = [
   "ws-message",        // 接收 WebSocket 消息
   "serial-status",     // 接收串口状态变更
   "license-status",    // 接收授权状态
-  "app-status",        // 接收应用状态（如更新可用）
+  "app-status",        // 接收应用状态
   "export-progress",   // 接收导出进度
   "db-result",         // 接收数据库查询结果
   "error",             // 接收错误信息
+  "update-status",     // 接收更新状态（检查中、有更新、下载进度、下载完成等）
 ];
 
 contextBridge.exposeInMainWorld("electronAPI", {
@@ -43,7 +53,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     if (VALID_SEND_CHANNELS.includes(channel)) {
       ipcRenderer.send(channel, data);
     } else {
-      console.warn(`[preload] Blocked send to invalid channel: ${channel}`);
+      warn(`[preload] Blocked send to invalid channel: ${channel}`);
     }
   },
 
@@ -62,7 +72,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         ipcRenderer.removeListener(channel, subscription);
       };
     } else {
-      console.warn(`[preload] Blocked listen on invalid channel: ${channel}`);
+      warn(`[preload] Blocked listen on invalid channel: ${channel}`);
       return () => {};
     }
   },

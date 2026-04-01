@@ -1,11 +1,13 @@
-﻿const WebSocket = require("ws");
+﻿const logger = require('./logger');
+const { startWorker, callPy, stopWorker } = require('./pyWorker');
+const WebSocket = require("ws");
 const { app } = require('electron')
 const path = require('path');
-var os = require('os');
+const os = require('os');
 const fs = require('fs');
 const { SerialPort } = require("serialport");
 const { DelimiterParser } = require("@serialport/parser-delimiter");
-const sqlite3 = require("sqlite3").verbose();
+const sqlite3 = require("./sqlite3-compat").verbose();
 const createCsvWriter = require("csv-writer").createObjectCsvWriter;
 const {
   openWeb,
@@ -71,8 +73,11 @@ const {
   carYLine,
 } = require("./openWeb");
 const module2 = require('./aes_ecb')
+const { resolveConfigFile, getConfigFileCandidates } = require('./licenseHelper');
 const { isCar, dedupli, totalToN, } = require("./util");
 const { pressSmallBed } = require("./utilMatrix");
+const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine, pressNew12203131 } = require('./server/mathUtils');
+const { initDb: _initDbFromModule } = require('./server/dbManager');
 
 const getPort = (ports) => {
   // console.log(ports)
@@ -92,9 +97,9 @@ const getPort = (ports) => {
 
 let baudRate = 1000000
 
-var serialport = { a: 1, b: 2 }
+let serialport = { a: 1, b: 2 }
 const timeNum = 1000 / 12;
-var port2,
+let port2,
   port1,
   portHead,
   localFlag = false,
@@ -117,40 +122,55 @@ let timeStamp,
   sitAreaSelect = [],
   sitClose = false,
   backClose = false,
+  headClose = false,
   sitPressSelect = [];
 const sitnum1 = 64;
 const sitnum2 = 64;
 const backnum1 = 64;
 const backnum2 = 64;
 let smoothValue = 0;
+let onbedArr = []; // jqbed 鍦ㄥ簥鐘舵€佹暟缁?
+let onBedTime = 0; // jqbed 鍦ㄥ簥/绂诲簥璁℃椂锛堢锛?
+let useMatrixOrigin = false; // jqbed 璋冭瘯 flag锛歵rue 鏃剁敤绠楁硶杩斿洖鐨?matrix_origin 浣滀负 sitData
+let jqbedMatrixOrigin = null; // 缂撳瓨绠楁硶杩斿洖鐨?matrix_origin 鏁版嵁
 let lastData = new Array(1024).fill(0),
   firstData = new Array(1024).fill(0);
 const backTotal = backnum1 * backnum2;
 const sitTotal = sitnum1 * sitnum2;
 let length, history, nowGetTime;
-var serialport;
 
 let nowDate = 0
 let endDate = 0
 
 const https = require('https')
-const request = require('request');
-request('http://sensor.bodyta.com:8080/rcv/login/getSystemTime', {
-  json: true, method: 'get', headers: {
-    'content-type': 'application/json; charset=utf-8;',
-  }
-}, (err, res, body) => {
-  if (err) {
-    return console.log(err);
-  }
-  console.log(body.time, 'body');
-  nowDate = parseInt(body.time)
+// 浣跨敤鍐呯疆 http 妯″潡鏇夸唬宸插簾寮冪殑 request 鍖?
+const http = require('http');
+http.get('http://sensor.bodyta.com:8080/rcv/login/getSystemTime', {
+  headers: { 'content-type': 'application/json; charset=utf-8;' }
+}, (res) => {
+  let data = '';
+  res.on('data', (chunk) => { data += chunk; });
+  res.on('end', () => {
+    try {
+      const body = JSON.parse(data);
+      logger.debug(body.time, 'body');
+      nowDate = parseInt(body.time);
+    } catch (e) {
+      logger.warn('Failed to parse system time response', e);
+    }
+  });
+}).on('error', (err) => {
+  logger.warn('Failed to get system time', err);
 });
 
 const runtimeResourceRoot = app.isPackaged ? process.resourcesPath : __dirname;
-let filePath = path.join(runtimeResourceRoot, "db");
-let csvPath = path.join(runtimeResourceRoot, "data");
-let nameTxt = path.join(runtimeResourceRoot, "config.txt");
+const runtimeWritableRoot = app.isPackaged ? app.getPath('userData') : __dirname;
+const exportRoot = app.isPackaged
+  ? (process.platform === 'darwin' ? app.getPath('desktop') : process.resourcesPath)
+  : runtimeWritableRoot;
+let filePath = path.join(runtimeWritableRoot, "db");
+let csvPath = path.join(exportRoot, "data");
+let nameTxt = resolveConfigFile();
 
 if (!fs.existsSync(filePath)) {
   fs.mkdirSync(filePath, { recursive: true });
@@ -160,8 +180,204 @@ if (!fs.existsSync(csvPath)) {
   fs.mkdirSync(csvPath, { recursive: true });
 }
 
-console.log("[Path] resourceRoot=", runtimeResourceRoot);
-console.log("[Path] db=", filePath, "data=", csvPath, "config=", nameTxt);
+logger.info("[Path] resourceRoot=", runtimeResourceRoot);
+logger.info("[Path] writableRoot=", runtimeWritableRoot);
+logger.info("[Path] db=", filePath, "data=", csvPath, "config=", nameTxt);
+logger.info("[Path] configCandidates=", getConfigFileCandidates().join(", "));
+
+// initDb 鍖呰鍑芥暟锛岃嚜鍔ㄤ紶鍏?filePath 鍜?runtimeResourceRoot
+function initDb(fileStr) {
+  return _initDbFromModule(fileStr, filePath, runtimeResourceRoot);
+}
+
+function getHistorySeries({ sitRows = [], backRows = [], start = 0, end = null, file = '' }) {
+  const safeSitRows = Array.isArray(sitRows) ? sitRows : [];
+  const safeBackRows = Array.isArray(backRows) ? backRows : [];
+  const hasSit = safeSitRows.length > 0;
+  const hasBack = safeBackRows.length > 0;
+  const totalLength = hasSit && hasBack
+    ? Math.min(safeSitRows.length, safeBackRows.length)
+    : (hasSit ? safeSitRows.length : safeBackRows.length);
+  const rangeStart = Math.max(0, start);
+  const rangeEnd = Math.min(end == null ? totalLength : end, totalLength);
+  const baseRows = hasSit ? safeSitRows : safeBackRows;
+  const press = [];
+  const area = [];
+  const time = [];
+  // hand/robot 类型存储格式为 [256压力数据, 4四元数]，需要截取前256个
+  const needSlice = ['hand0205', 'handGlove115200'].includes(file) || file.includes('robot');
+
+  for (let i = rangeStart; i < rangeEnd; i++) {
+    let sitData = hasSit && safeSitRows[i] ? JSON.parse(safeSitRows[i].data) : null;
+    let backData = hasBack && safeBackRows[i] ? JSON.parse(safeBackRows[i].data) : null;
+    // 对 hand/robot 类型截取前256个压力数据，去掉四元数
+    if (needSlice) {
+      if (sitData && sitData.length > 256) sitData = sitData.slice(0, 256);
+      if (backData && backData.length > 256) backData = backData.slice(0, 256);
+    }
+    const sitTotalValue = sitData ? sitData.reduce((a, b) => a + b, 0) : 0;
+    const backTotalValue = backData ? backData.reduce((a, b) => a + b, 0) : 0;
+    const sitAreaValue = sitData ? sitData.filter((a) => a > 10).length : 0;
+    const backAreaValue = backData ? backData.filter((a) => a > 10).length : 0;
+
+    press.push(
+      (sitData ? totalToN(sitTotalValue) : 0) +
+      (backData ? totalToN(backTotalValue, 1.3) : 0)
+    );
+    area.push(sitAreaValue + backAreaValue);
+
+    if (baseRows[i] && baseRows[i].timestamp != null) {
+      time.push(baseRows[i].timestamp);
+    }
+  }
+
+  return {
+    length: totalLength,
+    press,
+    area,
+    time,
+  };
+}
+
+function normalizeFiniteFrame(raw, expectedLength = null) {
+  const source = Array.isArray(raw) ? raw : [];
+  if (expectedLength == null) {
+    return source.map((value) => {
+      const numberValue = Number(value);
+      return Number.isFinite(numberValue) ? numberValue : 0;
+    });
+  }
+
+  return Array.from({ length: expectedLength }, (_, index) => {
+    const numberValue = Number(source[index]);
+    return Number.isFinite(numberValue) ? numberValue : 0;
+  });
+}
+
+function stopPlaybackTimer() {
+  playFlag = false;
+  if (timer) {
+    clearInterval(timer);
+    timer = null;
+  }
+}
+
+let reconnectTimer = null;
+let jqbedTimer = null;
+let serverOpened = false;
+let serverShutdownRequested = false;
+
+function clearManagedInterval(name, timerRef) {
+  if (!timerRef) return null;
+  clearInterval(timerRef);
+  logger.info(`[Server] Cleared ${name}`);
+  return null;
+}
+
+function closeSerialPort(portRef, name) {
+  if (!portRef) return null;
+
+  try {
+    portRef.removeAllListeners?.();
+  } catch (err) {
+    logger.warn(`[Server] ${name} removeAllListeners failed:`, err.message);
+  }
+
+  if (portRef.isOpen && typeof portRef.close === 'function') {
+    portRef.close((err) => {
+      if (err) {
+        logger.warn(`[Server] ${name} close failed:`, err.message || err);
+      } else {
+        logger.info(`[Server] ${name} closed`);
+      }
+    });
+  }
+
+  return null;
+}
+
+function closeWsServer(wsServer, name) {
+  if (!wsServer) return;
+
+  try {
+    wsServer.clients?.forEach((client) => {
+      try {
+        client.terminate?.();
+      } catch (err) {
+        logger.warn(`[Server] ${name} client terminate failed:`, err.message);
+      }
+    });
+  } catch (err) {
+    logger.warn(`[Server] ${name} enumerate clients failed:`, err.message);
+  }
+
+  try {
+    wsServer.close((err) => {
+      if (err) {
+        logger.warn(`[Server] ${name} close failed:`, err.message || err);
+      } else {
+        logger.info(`[Server] ${name} closed`);
+      }
+    });
+  } catch (err) {
+    logger.warn(`[Server] ${name} close threw:`, err.message);
+  }
+}
+
+function closeDatabase(dbRef, name) {
+  if (!dbRef || typeof dbRef.close !== 'function') return;
+
+  try {
+    dbRef.close((err) => {
+      if (err) {
+        logger.warn(`[Server] ${name} close failed:`, err.message || err);
+      } else {
+        logger.info(`[Server] ${name} closed`);
+      }
+    });
+  } catch (err) {
+    logger.warn(`[Server] ${name} close threw:`, err.message);
+  }
+}
+
+function shutdownServer() {
+  if (serverShutdownRequested) return;
+  serverShutdownRequested = true;
+
+  logger.info("[Server] Shutdown requested, closing sockets/timers/workers...");
+
+  stopPlaybackTimer();
+  reconnectTimer = clearManagedInterval("serial reconnect timer", reconnectTimer);
+  jqbedTimer = clearManagedInterval("jqbed timer", jqbedTimer);
+
+  localFlag = false;
+  sitClose = true;
+  backClose = true;
+  headClose = true;
+  com = undefined;
+  com1 = undefined;
+  comhead = undefined;
+
+  try {
+    stopWorker();
+  } catch (err) {
+    logger.warn("[Server] stopWorker failed:", err.message);
+  }
+
+  port1 = closeSerialPort(port1, "port1");
+  port2 = closeSerialPort(port2, "port2");
+  portHead = closeSerialPort(portHead, "portHead");
+
+  closeWsServer(server, "server");
+  closeWsServer(server1, "server1");
+  closeWsServer(server2, "server2");
+
+  closeDatabase(db, "db");
+  closeDatabase(db1, "db1");
+  closeDatabase(db2, "db2");
+
+  serverOpened = false;
+}
 
 
 
@@ -183,11 +399,21 @@ if (fs.existsSync(nameTxt)) {
     } else {
       file = rawFile || defauleFile;
     }
+    // 鏍规嵁 file 绫诲瀷璁剧疆娉㈢壒鐜?
+    if (file == 'handGlove115200') {
+      baudRate = 115200
+    } else if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(file) || file.includes('robot')) {
+      baudRate = 921600
+    } else if (['bed4096', 'bed4096num'].includes(file)) {
+      baudRate = 3000000
+    } else {
+      baudRate = 1000000
+    }
   } catch (err) {
-    console.error(err);
+    logger.error(err);
   }
 } else {
-  console.log("[Config] config.txt not found, skip loading license at startup.");
+  logger.info("[Config] config.txt not found, skip loading license at startup.");
 }
 
 // let db = new sqlite3.Database(`${filePath}/foot.db`);
@@ -199,7 +425,7 @@ let dataFalg = 0;
 
 // const createCsvWriter = require("csv-writer").createObjectCsvWriter;
 
-var saveTime,
+let saveTime,
   getTime,
 
   com,
@@ -218,7 +444,7 @@ var saveTime,
 //   // console.log(JSON.parse(module2.decryptStr(dateRes)).startTimeRes);
 //   // endDate = parseFloat(module2.decryptStr(date))
 // } catch (err) {
-//   console.error(err);
+//   logger.error(err);
 // }
 
 
@@ -229,55 +455,62 @@ db = dbObj.db
 db1 = dbObj.db1
 db2 = dbObj.db2
 
-var flag = false;
-var colHZ = 12, oldTimeStamp = new Date().getTime();
+let flag = false;
+let colHZ = 12, oldTimeStamp = new Date().getTime();
 let splitBuffer = Buffer.from([0xaa, 0x55, 0x03, 0x99]);
 // let splitBuffer1 = Buffer.from([0xaa, 0x55, 0x03, 0x09]);
 let parser2 = new DelimiterParser({ delimiter: splitBuffer });
 let parser = new DelimiterParser({ delimiter: splitBuffer });
 let parser3 = new DelimiterParser({ delimiter: splitBuffer });
 let parser4 = new DelimiterParser({ delimiter: splitBuffer });
-var server, server1, server2;
-var localData = [],
+let server, server1, server2;
+let localData = [],
   localDataBack = [],
   localDataHead = [],
   indexArr = [0, 0];
 let up = 1245, down = 2
-var pointArr1zero = []
-var pointArr147zero = []
-var pointArr147zero_2 = []
-var pointArr2zero = []
-var pointArr3zero = []
-var pointArr4zero = []
+let pointArr1zero = []
+let pointArr147zero = []
+let pointArr147zero_2 = []
+let pointArr2zero = []
+let pointArr3zero = []
+let pointArr4zero = []
 
-var pointArr1zeroData = []
-var pointArr2zeroData = []
-var pointArr3zeroData = []
-var pointArr4zeroData = [], newArr147 = [], newArr147_2 = [],
+let pointArr1zeroData = []
+let pointArr2zeroData = []
+let pointArr3zeroData = []
+let pointArr4zeroData = [], newArr147 = [], newArr147_2 = [];
 
-  server = new WebSocket.Server({ port: 19999 });
+server = new WebSocket.Server({ port: 19999 });
 server1 = new WebSocket.Server({ port: 19998 });
 server2 = new WebSocket.Server({ port: 19997 });
 
 module.exports = {
   openServer() {
+    if (serverOpened) {
+      logger.info("[Server] openServer skipped: listeners already attached");
+      return;
+    }
+
+    serverOpened = true;
+    serverShutdownRequested = false;
 
     server1.on("open", function open() {
-      console.log("connected");
+      logger.info("connected");
     });
 
     server1.on("close", function close() {
-      console.log("disconnected");
+      logger.info("disconnected");
     });
 
     server1.on("connection", function connection(ws, req) {
       ws.on("message", function incoming(message) {
-        console.log("received: %s from %s", message, clientName, localFlag);
+        logger.debug("received: %s from %s", message, clientName, localFlag);
 
         const getMessage = JSON.parse(message);
 
         /**
-         * 灏嗗疄鏃堕潬鑳屾暟鎹€氶亾鎵撳紑
+         * 鐏忓棗鐤勯弮鍫曟浆閼冲本鏆熼幑顕€鈧岸浜鹃幍鎾崇磻
          */
         if (nowDate < endDate) {
           if (JSON.parse(message).backPort != null) {
@@ -290,13 +523,13 @@ module.exports = {
                   autoOpen: true,
                 },
                 function (err) {
-                  console.log(err, "err");
+                  logger.warn(err, "err");
                 }
               );
-              //绠￠亾娣诲姞瑙ｆ瀽鍣?
+              //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
               port2.pipe(parser2);
             } catch (e) {
-              console.log(e, "e");
+              logger.warn(e, "e");
             }
           }
 
@@ -315,6 +548,7 @@ module.exports = {
           }
           if (JSON.parse(message).local === false) {
             localFlag = false;
+            stopPlaybackTimer();
             const jsonData = JSON.stringify({
               backData: new Array(backTotal).fill(0),
 
@@ -333,25 +567,27 @@ module.exports = {
                     autoOpen: true,
                   },
                   function (err) {
-                    console.log(err, "err");
+                    logger.warn(err, "err");
                   }
                 );
-                //绠￠亾娣诲姞瑙ｆ瀽鍣?
+                //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
                 // port2.pipe(parser2);
               } catch (e) {
-                console.log(e, "e");
+                logger.warn(e, "e");
               }
             }
           }
 
           /**
-           * 灏嗛潬鑳屾暟鎹€氶亾鍏抽棴
+           * 鐏忓棝娼懗灞炬殶閹诡噣鈧岸浜鹃崗鎶芥４
            */
-          if (JSON.parse(message).backClose === true) {
+           if (JSON.parse(message).backClose === true) {
             backClose = true
+            com1 = undefined; // 清除 com1 防止自动重连
             if (port2?.isOpen) {
-
-              port2.close();
+              port2.close((err) => {
+                if (err) logger.warn('port2 close error (server1):', err);
+              });
             }
           }
 
@@ -363,7 +599,7 @@ module.exports = {
 
           //   db1.all(selectQuery, params, (err, rows) => {
           //     if (err) {
-          //       console.error(err);
+          //       logger.error(err);
           //     } else {
           //       localDataBack = rows;
           //     }
@@ -374,11 +610,11 @@ module.exports = {
     });
 
     server.on("open", function open() {
-      console.log("connected");
+      logger.info("connected");
     });
 
     server.on("close", function close() {
-      console.log("disconnected");
+      logger.info("disconnected");
     });
 
     server.on("connection", function connection(ws, req) {
@@ -386,11 +622,11 @@ module.exports = {
       const ip = req.connection.remoteAddress;
       const port = req.connection.remotePort;
       const clientName = ip + port;
-      console.log("%s is connected", clientName);
+      logger.info("%s is connected", clientName);
 
       server.clients.forEach(function each(client) {
         /**
-         * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+         * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
          *  */
         const jsonData = JSON.stringify({
           port: serialport,
@@ -405,21 +641,23 @@ module.exports = {
         }
       });
 
-      if (endDate) {
+      if (endDate && endDate > 0) {
         server.clients.forEach(function each(client) {
-          /**
-           * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
-           *  */
           const jsonData = JSON.stringify({
             date: endDate,
+            nowDate: nowDate,
             file: file,
             selectFlag: selectFlag
-            // length: csvSitData.length,
-            // sitData: csvSitData[0], backData: csvBackData[0]
           });
-
           if (client.readyState === WebSocket.OPEN) {
             client.send(jsonData);
+          }
+        });
+      } else {
+        // 没有有效密钥时，发送错误信息给前端
+        server.clients.forEach(function each(client) {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({ licenseError: '未检测到有效密钥，请输入密钥后使用', noLicense: true }));
           }
         });
       }
@@ -434,63 +672,83 @@ module.exports = {
         // }
 
         if (getMessage.date != null) {
-          const content = (getMessage.date.date)
-          const date = content
+          try {
+            const content = (getMessage.date.date)
+            const date = content
 
-
-          const dateRes = module2.decryptStr(date)
-
-          // const file = module2.encStr(date).file
-          // const startTimeRes = module2.encStr(`${getMessage.date.startTime}`)
-          // const content = (JSON.stringify({ dateRes }))
-          // const content1 = module2.encStr(content)
-
-          fs.writeFile(nameTxt, date, err => {
-            if (err) {
-              console.error(err);
+            if (!date || date.trim() === '') {
+              // 空密钥处理：发送错误提示给前端
+              logger.warn('[License] Empty license key received');
+              server.clients.forEach(function each(client) {
+                if (client.readyState === WebSocket.OPEN) {
+                  client.send(JSON.stringify({ licenseError: '密钥不能为空，请输入有效密钥' }));
+                }
+              });
+              return;
             }
-            // date = module2.decryptStr(content) 
-            // file written successfully
-          });
-          // date = JSON.parse(content).dateRes
 
+            const dateRes = module2.decryptStr(date)
 
-          // sysStartTime = getMessage.date.startTime
+            if (!dateRes) {
+              logger.warn('[License] Failed to decrypt license key');
+              server.clients.forEach(function each(client) {
+                if (client.readyState === WebSocket.OPEN) {
+                  client.send(JSON.stringify({ licenseError: '密钥无效，解密失败' }));
+                }
+              });
+              return;
+            }
 
-          // console.log(JSON.parse(content).dateRes)
-
-          // endDate = parseFloat(module2.decryptStr(date))
-          const parsedLicense = JSON.parse(dateRes);
-          const rawFile = parsedLicense.file;
-          selectFlag = rawFile; // 淇濈暀鍘熷鍊硷紙'all'銆佸瓧绗︿覆銆佹垨鏁扮粍锛夊彂閫佺粰鍓嶇
-
-          // 瑙ｆ瀽 file 瀛楁锛氭敮鎸?'all'銆佸崟涓瓧绗︿覆銆佹暟缁勪笁绉嶆牸寮?
-          if (rawFile === 'all') {
-            file = defauleFile;
-          } else if (Array.isArray(rawFile)) {
-            file = rawFile[0] || defauleFile;
-          } else {
-            file = rawFile || defauleFile;
-          }
-          endDate = parseFloat(parsedLicense.date);
-
-
-          server.clients.forEach(function each(client) {
-            /**
-             * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
-             *  */
-            const jsonData = JSON.stringify({
-              date: date,
-              file,
-              selectFlag: selectFlag
-              // length: csvSitData.length,
-              // sitData: csvSitData[0], backData: csvBackData[0]
+            fs.mkdirSync(path.dirname(nameTxt), { recursive: true });
+            fs.writeFile(nameTxt, date, err => {
+              if (err) {
+                logger.error(err);
+              }
             });
-            if (client.readyState === WebSocket.OPEN) {
-              client.send(jsonData);
-            }
-          });
 
+            const parsedLicense = JSON.parse(dateRes);
+            const rawFile = parsedLicense.file;
+            selectFlag = rawFile;
+
+            if (rawFile === 'all') {
+              file = defauleFile;
+            } else if (Array.isArray(rawFile)) {
+              file = rawFile[0] || defauleFile;
+            } else {
+              file = rawFile || defauleFile;
+            }
+            endDate = parseFloat(parsedLicense.date);
+
+            if (file == 'handGlove115200') {
+              baudRate = 115200
+            } else if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(file) || file.includes('robot')) {
+              baudRate = 921600
+            } else if (['bed4096', 'bed4096num'].includes(file)) {
+              baudRate = 3000000
+            } else {
+              baudRate = 1000000
+            }
+
+            server.clients.forEach(function each(client) {
+              const jsonData = JSON.stringify({
+                date: endDate,
+                nowDate: nowDate,
+                file,
+                selectFlag: selectFlag
+              });
+              if (client.readyState === WebSocket.OPEN) {
+                client.send(jsonData);
+              }
+            });
+
+          } catch (err) {
+            logger.error('[License] Invalid license key:', err.message);
+            server.clients.forEach(function each(client) {
+              if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ licenseError: '密钥无效，请检查后重新输入' }));
+              }
+            });
+          }
         }
 
 
@@ -498,7 +756,7 @@ module.exports = {
         // if(new Date().getTime() >= parseInt(sysStartTime) + parseInt(module2.decryptStr(date)) * 24 * 60 * 60 * 1000){
         //   server.clients.forEach(function each(client) {
         //     /**
-        //      * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+        //      * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
         //      *  */
         //     const jsonData = JSON.stringify({
         //       timeExpires: true,
@@ -530,6 +788,7 @@ module.exports = {
 
           if (getMessage.history === false) {
             history = false;
+            stopPlaybackTimer();
           }
 
           if (getMessage.variety != null) {
@@ -565,7 +824,7 @@ module.exports = {
             }
           }
 
-          // 缃浂
+          // 缂冾噣娴?
           if (getMessage.resetZero === true) {
             if (pointArr) pointArr1zero = [...pointArr1zeroData]
             if (pointArr2) pointArr2zero = [...pointArr2zeroData]
@@ -588,8 +847,15 @@ module.exports = {
           if (JSON.parse(message).file != null) {
             backClose = true
             sitClose = true
+            headClose = true
+            // 清除 com 变量，防止自动重连定时器用旧值重新打开串口
+            com = undefined;
+            com1 = undefined;
+            comhead = undefined;
             if (port1?.isOpen) {
-              port1.close();
+              port1.close((err) => {
+                if (err) logger.warn('port1 close error on file switch:', err);
+              });
 
               const jsonData = JSON.stringify({
                 sitData:
@@ -605,7 +871,9 @@ module.exports = {
               });
             }
             if (port2?.isOpen) {
-              port2.close();
+              port2.close((err) => {
+                if (err) logger.warn('port2 close error on file switch:', err);
+              });
               const jsonData = JSON.stringify({
                 backData: new Array(backTotal).fill(0),
               });
@@ -618,7 +886,9 @@ module.exports = {
             }
 
             if (portHead?.isOpen) {
-              portHead.close();
+              portHead.close((err) => {
+                if (err) logger.warn('portHead close error on file switch:', err);
+              });
               const jsonData = JSON.stringify({
                 headData: new Array(100).fill(0),
               });
@@ -633,7 +903,9 @@ module.exports = {
             // db = new sqlite3.Database(`${filePath}/${receiveFile}.db`);
             file = receiveFile;
 
-            if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(receiveFile) || receiveFile.includes('robot')) {
+            if (receiveFile == 'handGlove115200') {
+              baudRate = 115200
+            } else if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(receiveFile) || receiveFile.includes('robot')) {
               baudRate = 921600
             } else if (['bed4096', 'bed4096num',].includes(receiveFile)) {
               baudRate = 3000000
@@ -646,13 +918,21 @@ module.exports = {
             db1 = dbObj.db1
             db2 = dbObj.db2
 
+            // 切换 file 时重置回放状态
+            stopPlaybackTimer();
+            nowIndex = 0;
+            localData = [];
+            localDataBack = [];
+            localDataHead = [];
+            indexArr = [0, 0];
+
           }
 
           if (JSON.parse(message).baudRate != null) {
             baudRate = Number(JSON.parse(message).baudRate)
           }
           /**
-           * 灏嗘湰鍦颁繚瀛樻暟鎹€氶亾鎵撳紑
+           * 鐏忓棙婀伴崷棰佺箽鐎涙ɑ鏆熼幑顕€鈧岸浜鹃幍鎾崇磻
            */
           if (JSON.parse(message).getTime != null) {
             getTime = JSON.parse(message).getTime;
@@ -668,43 +948,24 @@ module.exports = {
                 if (err) {
                   db.all(selectQuery, params, (err, rows) => {
                     if (err) {
-                      console.error(err);
+                      logger.error(err);
                     } else {
                       localData = rows;
-                      length = rows.length
-                        ? Math.min(
-                          rows.length,
-                          localDataBack.length ? localDataBack.length : rows.length
-                        )
-                        : localDataBack.length;
-                      indexArr = [0, length - 2];
-                      timeStamp = [];
-                      for (let i = 0; i < rows.length; i++) {
-                        timeStamp.push(rows[i].timestamp);
-                      }
+                      const historySeries = getHistorySeries({
+                        sitRows: localData,
+                        backRows: localDataBack,
+                        file,
+                      });
+                      length = historySeries.length;
+                      indexArr = [0, Math.max(length - 2, 0)];
+                      timeStamp = historySeries.time;
                       historyArr = [0, length];
-                      let press = [],
-                        area = [];
-                      for (let i = 0; i < rows.length; i++) {
-                        let a =
-                          totalToN(JSON.parse(localData[i].data).reduce((a, b) => a + b, 0)) +
-                          (isCar(file) && localDataBack[i]
-                            ? totalToN(JSON.parse(localDataBack[i].data).reduce((a, b) => a + b, 0), 1.3)
-                            : 0);
-                        let b =
-                          JSON.parse(localData[i].data).filter((a) => a > 10).length +
-                          (isCar(file) && localDataBack[i]
-                            ? JSON.parse(localDataBack[i].data).filter((a) => a > 10)
-                              .length
-                            : 0);
-                        // press.push(a);
-                        press.push(a);
-                        area.push(b);
-                      }
+                      const press = historySeries.press;
+                      const area = historySeries.area;
 
                       server.clients.forEach(function each(client) {
                         /**
-                         * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                         * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                          *  */
                         const jsonData = JSON.stringify({
                           length: length,
@@ -735,7 +996,7 @@ module.exports = {
 
                       //     server.clients.forEach(function each(client) {
                       //       /**
-                      //        * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                      //        * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                       //        *  */
 
                       //       const jsonData = JSON.stringify({
@@ -756,7 +1017,7 @@ module.exports = {
                       // } else {
                       //   server.clients.forEach(function each(client) {
                       //     /**
-                      //      * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                      //      * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                       //      *  */
 
                       //     const jsonData = JSON.stringify({
@@ -812,7 +1073,7 @@ module.exports = {
 
                   //   // server.clients.forEach(function each(client) {
                   //   //   /**
-                  //   //    * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                  //   //    * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                   //   //    *  */
 
                   //   //   const jsonData = JSON.stringify({
@@ -834,13 +1095,13 @@ module.exports = {
 
                   db.all(selectQuery, params, (err, rows) => {
                     if (err) {
-                      console.error(err);
+                      logger.error(err);
                     } else {
 
                       if (file == 'volvo') {
                         db2.all(selectQuery, params, (err, rows) => {
                           if (err) {
-                            console.error(err);
+                            logger.error(err);
                           } else {
 
 
@@ -864,7 +1125,7 @@ module.exports = {
 
                             server.clients.forEach(function each(client) {
                               /**
-                               * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                               * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                                *  */
                               const jsonData = JSON.stringify({
                                 // length: length,
@@ -889,40 +1150,21 @@ module.exports = {
                       }
 
                       localData = rows;
-                      length = rows.length
-                        ? Math.min(
-                          rows.length,
-                          localDataBack.length ? localDataBack.length : rows.length
-                        )
-                        : localDataBack.length;
-                      indexArr = [0, length - 2];
-                      timeStamp = [];
-                      for (let i = 0; i < rows.length; i++) {
-                        timeStamp.push(rows[i].timestamp);
-                      }
+                      const historySeries = getHistorySeries({
+                        sitRows: localData,
+                        backRows: localDataBack,
+                        file,
+                      });
+                      length = historySeries.length;
+                      indexArr = [0, Math.max(length - 2, 0)];
+                      timeStamp = historySeries.time;
                       historyArr = [0, length];
-                      let press = [],
-                        area = [];
-                      for (let i = 0; i < rows.length; i++) {
-                        let a =
-                          totalToN(JSON.parse(localData[i].data).reduce((a, b) => a + b, 0)) +
-                          (isCar(file) && localDataBack[i]
-                            ? totalToN(JSON.parse(localDataBack[i].data).reduce((a, b) => a + b, 0), 1.3)
-                            : 0);
-                        let b =
-                          JSON.parse(localData[i].data).filter((a) => a > 10).length +
-                          (isCar(file) && localDataBack[i]
-                            ? JSON.parse(localDataBack[i].data).filter((a) => a > 10)
-                              .length
-                            : 0);
-                        // press.push(a);
-                        press.push(a);
-                        area.push(b);
-                      }
+                      const press = historySeries.press;
+                      const area = historySeries.area;
 
                       server.clients.forEach(function each(client) {
                         /**
-                         * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                         * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                          *  */
                         const jsonData = JSON.stringify({
                           length: length,
@@ -953,7 +1195,7 @@ module.exports = {
 
                       //     server.clients.forEach(function each(client) {
                       //       /**
-                      //        * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                      //        * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                       //        *  */
 
                       //       const jsonData = JSON.stringify({
@@ -974,7 +1216,7 @@ module.exports = {
                       // } else {
                       //   server.clients.forEach(function each(client) {
                       //     /**
-                      //      * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                      //      * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                       //      *  */
 
                       //     const jsonData = JSON.stringify({
@@ -997,43 +1239,24 @@ module.exports = {
             if (!isCar(file)) {
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
                   localData = rows;
-                  length = rows.length
-                    ? Math.min(
-                      rows.length,
-                      localDataBack.length ? localDataBack.length : rows.length
-                    )
-                    : localDataBack.length;
-                  indexArr = [0, length - 2];
-                  timeStamp = [];
-                  for (let i = 0; i < rows.length; i++) {
-                    timeStamp.push(rows[i].timestamp);
-                  }
+                  const historySeries = getHistorySeries({
+                    sitRows: localData,
+                    backRows: localDataBack,
+                    file,
+                  });
+                  length = historySeries.length;
+                  indexArr = [0, Math.max(length - 2, 0)];
+                  timeStamp = historySeries.time;
                   historyArr = [0, length];
-                  let press = [],
-                    area = [];
-                  for (let i = 0; i < rows.length; i++) {
-                    let a =
-                      totalToN(JSON.parse(localData[i].data).reduce((a, b) => a + b, 0)) +
-                      (isCar(file) && localDataBack[i]
-                        ? totalToN(JSON.parse(localDataBack[i].data).reduce((a, b) => a + b, 0), 1.3)
-                        : 0);
-                    let b =
-                      JSON.parse(localData[i].data).filter((a) => a > 10).length +
-                      (isCar(file) && localDataBack[i]
-                        ? JSON.parse(localDataBack[i].data).filter((a) => a > 10)
-                          .length
-                        : 0);
-                    // press.push(a);
-                    press.push(a);
-                    area.push(b);
-                  }
+                  const press = historySeries.press;
+                  const area = historySeries.area;
 
                   server.clients.forEach(function each(client) {
                     /**
-                     * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                     * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                      *  */
                     const jsonData = JSON.stringify({
                       length: length,
@@ -1064,7 +1287,7 @@ module.exports = {
 
                   //     server.clients.forEach(function each(client) {
                   //       /**
-                  //        * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                  //        * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                   //        *  */
 
                   //       const jsonData = JSON.stringify({
@@ -1085,7 +1308,7 @@ module.exports = {
                   // } else {
                   //   server.clients.forEach(function each(client) {
                   //     /**
-                  //      * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                  //      * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                   //      *  */
 
                   //     const jsonData = JSON.stringify({
@@ -1122,24 +1345,24 @@ module.exports = {
           }
 
           /**
-           * 灏嗗疄鏃跺骇妞呮暟鎹€氶亾鎵撳紑
+           * 鐏忓棗鐤勯弮璺洪獓濡炲懏鏆熼幑顕€鈧岸浜鹃幍鎾崇磻
            */
           if (JSON.parse(message).sitPort != null) {
             sitClose = false
             com = JSON.parse(message).sitPort;
             if (port1?.isOpen) {
               port1.close((e) => {
-                console.log(e)
+                logger.debug(e)
               });
             }
             if (com == com1) {
               if (port2?.isOpen) {
                 port2.close((e) => {
-                  console.log(e)
+                  logger.debug(e)
                 });
               }
             }
-            console.log(baudRate)
+            logger.debug(baudRate)
             if (file != "bigBed") {
               console.log(com);
               try {
@@ -1151,15 +1374,15 @@ module.exports = {
                     autoOpen: true,
                   },
                   function (err) {
-                    console.log(err, "err");
+                    logger.warn(err, "err");
                   }
                 );
-                //绠￠亾娣诲姞瑙ｆ瀽鍣?
+                //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
                 // let splitBuffer = Buffer.from([0xaa, 0x55, 0x03, 0x99]);
                 // parser = new Delimiter({ delimiter: splitBuffer });
                 port1.pipe(parser);
               } catch (e) {
-                console.log(e, "e");
+                logger.warn(e, "e");
               }
             } else {
               try {
@@ -1171,13 +1394,13 @@ module.exports = {
                     autoOpen: true,
                   },
                   function (err) {
-                    console.log(err, "err");
+                    logger.warn(err, "err");
                   }
                 );
-                //绠￠亾娣诲姞瑙ｆ瀽鍣?
+                //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
                 port1.pipe(parser3);
               } catch (e) {
-                console.log(e, "e");
+                logger.warn(e, "e");
               }
             }
           }
@@ -1188,13 +1411,13 @@ module.exports = {
             comhead = JSON.parse(message).headPort;
             if (portHead?.isOpen) {
               portHead.close((e) => {
-                console.log(e)
+                logger.debug(e)
               });
             }
             // if (com == com1) {
             //   if (port2?.isOpen) {
             //     port2.close((e) => {
-            //       console.log(e)
+            //       logger.debug(e)
             //     });
             //   }
             // }
@@ -1212,12 +1435,12 @@ module.exports = {
                     console.log(err, baudRate, JSON.parse(message).headPort, "headerr");
                   }
                 );
-                //绠￠亾娣诲姞瑙ｆ瀽鍣?
+                //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
                 // let splitBuffer = Buffer.from([0xaa, 0x55, 0x03, 0x99]);
                 // parser = new Delimiter({ delimiter: splitBuffer });
                 portHead.pipe(parser4);
               } catch (e) {
-                console.log(e, "e");
+                logger.warn(e, "e");
               }
             } else {
               try {
@@ -1232,16 +1455,16 @@ module.exports = {
                     console.log(err, "headerr");
                   }
                 );
-                //绠￠亾娣诲姞瑙ｆ瀽鍣?
+                //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
                 portHead.pipe(parser4);
               } catch (e) {
-                console.log(e, "e");
+                logger.warn(e, "e");
               }
             }
           }
 
           /**
-           * 灏嗗疄鏃堕潬鑳屾暟鎹€氶亾鎵撳紑
+           * 鐏忓棗鐤勯弮鍫曟浆閼冲本鏆熼幑顕€鈧岸浜鹃幍鎾崇磻
            */
           if (JSON.parse(message).backPort != null) {
             backClose = false
@@ -1268,51 +1491,59 @@ module.exports = {
                   autoOpen: true,
                 },
                 function (err) {
-                  console.log(err, "err");
+                  logger.warn(err, "err");
                 }
               );
-              //绠￠亾娣诲姞瑙ｆ瀽鍣?
+              //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
 
               port2.pipe(parser2);
             } catch (e) {
-              console.log(e, "e");
+              logger.warn(e, "e");
             }
           }
 
           /**
-           * 灏嗗骇妞呮暟鎹€氶亾鍏抽棴
+           * 鐏忓棗楠囧鍛殶閹诡噣鈧岸浜鹃崗鎶芥４
            */
           if (JSON.parse(message).sitClose === true) {
             sitClose = true
+            com = undefined; // 清除 com 防止自动重连
             if (port1?.isOpen) {
-              port1.close();
+              port1.close((err) => {
+                if (err) logger.warn('port1 close error:', err);
+              });
             }
           }
 
           /**
-           * 灏嗛潬鑳屾暟鎹€氶亾鍏抽棴
+           * 鐏忓棝娼懗灞炬殶閹诡噣鈧岸浜鹃崗鎶芥４
            */
           if (JSON.parse(message).backClose === true) {
             backClose = true
+            com1 = undefined; // 清除 com1 防止自动重连
             if (port2?.isOpen) {
-              port2.close();
+              port2.close((err) => {
+                if (err) logger.warn('port2 close error:', err);
+              });
             }
           }
 
           if (JSON.parse(message).headClose === true) {
             headClose = true
+            comhead = undefined; // 清除 comhead 防止自动重连
             if (portHead?.isOpen) {
-
-              portHead.close();
+              portHead.close((err) => {
+                if (err) logger.warn('portHead close error:', err);
+              });
             }
           }
           /**
-           * 灏嗚鍙栨湰鍦版暟鎹€氶亾鎵撳紑
+           * 鐏忓棜顕伴崣鏍ㄦ拱閸︾増鏆熼幑顕€鈧岸浜鹃幍鎾崇磻
            */
           if (JSON.parse(message).local === true) {
             localFlag = true;
 
-            // 浼犻€掓椂闂存埑缁欏墠绔?
+            // 娴肩娀鈧帗妞傞梻瀛樺煈缂佹瑥澧犵粩?
             const selectQuery =
               "select DISTINCT date from matrix ORDER BY timestamp DESC LIMIT ?,?";
             const params = [0, 500];
@@ -1320,7 +1551,7 @@ module.exports = {
             if (isCar(file)) {
               db1.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
                   // console.log(rows);
                   let jsonData;
@@ -1355,7 +1586,7 @@ module.exports = {
 
                   db.all(selectQuery, params, (err, rows) => {
                     if (err) {
-                      console.error(err);
+                      logger.error(err);
                     } else {
                       console.log(rows);
                       let jsonData;
@@ -1416,7 +1647,7 @@ module.exports = {
             } else {
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
                   console.log(rows);
                   let jsonData;
@@ -1519,13 +1750,13 @@ module.exports = {
             //         autoOpen: true,
             //       },
             //       function (err) {
-            //         console.log(err, "err");
+            //         logger.warn(err, "err");
             //       }
             //     );
-            //     //绠￠亾娣诲姞瑙ｆ瀽鍣?
+            //     //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
             //     // port1.pipe(parser);
             //   } catch (e) {
-            //     console.log(e, "e");
+            //     logger.warn(e, "e");
             //   }
             // }
 
@@ -1538,13 +1769,13 @@ module.exports = {
             //         autoOpen: true,
             //       },
             //       function (err) {
-            //         console.log(err, "err");
+            //         logger.warn(err, "err");
             //       }
             //     );
-            //     //绠￠亾娣诲姞瑙ｆ瀽鍣?
+            //     //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
             //     // port2.pipe(parser2);
             //   } catch (e) {
-            //     console.log(e, "e");
+            //     logger.warn(e, "e");
             //   }
             // }
           }
@@ -1574,14 +1805,91 @@ module.exports = {
                   sitFlag: localData.length > 0,
                 }
 
-                if (['hand0205', 'robot1'].includes(file)) {
-                  sitObj.newArr147 = localData[value]?.data
-                  backObj.newArr147 = localData[value]?.data
+
+                if (file.includes('robot')) {
+                  const sitRawText = localData[value]?.data
+                  const backRawText = localDataBack[value]?.data
+                  if (sitRawText) {
+                    const sitRaw = JSON.parse(sitRawText)
+                    if (sitRaw.length >= 260) {
+                      // 新版：前256是原始数据，后4是四元数
+                      const sitPressure = sitRaw.slice(0, 256)
+                      sitObj.sitData = sitPressure
+                      sitObj.newArr147 = sitPressure
+                      sitObj.rotate = sitRaw.slice(256, 260)
+                    } else {
+                      // 旧版：直接是压力数据
+                      const sitPressure = normalizeFiniteFrame(sitRaw, 256)
+                      sitObj.sitData = sitPressure
+                      sitObj.newArr147 = sitPressure
+                    }
+                  }
+                  if (backRawText) {
+                    const backRaw = JSON.parse(backRawText)
+                    if (backRaw.length >= 260) {
+                      // 新版：前256是原始数据，后4是四元数
+                      const backPressure = backRaw.slice(0, 256)
+                      backObj.backData = backPressure
+                      backObj.newArr147 = backPressure
+                      backObj.rotate = backRaw.slice(256, 260)
+                    } else {
+                      // 旧版：直接是压力数据
+                      const backPressure = normalizeFiniteFrame(backRaw, 256)
+                      backObj.backData = backPressure
+                      backObj.newArr147 = backPressure
+                    }
+                  }
+                } else if (['hand0205', 'handGlove115200'].includes(file)) {
+                  // 鍏煎鏂版棫鏁版嵁鏍煎紡锛氭柊鐗?60(256+4)锛屾棫鐗?51(147+4)
+                  const sitRaw = JSON.parse(localData[value]?.data || '[]')
+                  const backRaw = JSON.parse(localDataBack[value]?.data || '[]')
+                  if (sitRaw.length >= 260) {
+                    // 鏂扮増锛氬墠256鏄師濮嬫暟鎹紝鍚?鏄洓鍏冩暟
+                    const sitPressure = sitRaw.slice(0, 256)
+                    const sitRotate = sitRaw.slice(256, 260)
+                    sitObj.sitData = sitPressure
+                    sitObj.newArr147 = handL([...sitPressure])
+                    sitObj.rotate = sitRotate
+                  } else {
+                    // 鏃х増锛氬墠147鏄痭ewArr147锛屽悗4鏄洓鍏冩暟
+                    sitObj.newArr147 = sitRaw.slice(0, sitRaw.length - 4)
+                    sitObj.rotate = sitRaw.slice(sitRaw.length - 4)
+                  }
+                  if (backRaw.length >= 260) {
+                    const backPressure = backRaw.slice(0, 256)
+                    const backRotate = backRaw.slice(256, 260)
+                    backObj.backData = backPressure
+                    backObj.newArr147 = handR([...backPressure])
+                    backObj.rotate = backRotate
+                  } else {
+                    backObj.newArr147 = backRaw.slice(0, backRaw.length - 4)
+                    backObj.rotate = backRaw.slice(backRaw.length - 4)
+                  }
                 }
 
                 if (file == 'footVideo') {
-                  sitObj.newArr147 = footArrToNormal(localData[nowIndex]?.data)
-                  backObj.newArr147 = footArrToNormal(localDataBack[nowIndex]?.data)
+                  if (localData[value]?.data) {
+                    const sitRaw256 = JSON.parse(localData[value].data || '[]')
+                    if (sitRaw256.length === 256) {
+                      // 新版：存储的是原始256点数据，需要插值和映射
+                      sitObj.sitData = footVideo([...sitRaw256])
+                      sitObj.newArr147 = footL([...sitRaw256])
+                    } else {
+                      // 旧版：存储的是512点插值数据，用旧逻辑
+                      sitObj.newArr147 = footArrToNormal(localData[value].data)
+                    }
+                  }
+                  if (localDataBack[value]?.data) {
+                    const backRaw256 = JSON.parse(localDataBack[value].data || '[]')
+                    if (backRaw256.length === 256) {
+                      // 新版：存储的是原始256点数据，需要插值和映射
+                      backObj.backData = footVideo1([...backRaw256])
+                      backObj.newArr147 = footR([...backRaw256])
+                    } else {
+                      // 旧版：存储的是512点插值数据，用旧逻辑
+                      backObj.newArr147 = footArrToNormal(localDataBack[value].data)
+                    }
+                  }
                 }
 
                 jsonData = JSON.stringify(sitObj);
@@ -1697,7 +2005,7 @@ module.exports = {
               }, interval);
             } else {
               console.log("clear");
-              clearInterval(timer);
+              stopPlaybackTimer();
             }
           }
           if (getMessage.play != null) {
@@ -1727,15 +2035,88 @@ module.exports = {
                     sitFlag: localData.length > 0,
                   }
 
-                  if (['hand0205', 'robot1'].includes(file)) {
-                    sitObj.newArr147 = localData[nowIndex]?.data
-                    backObj.newArr147 = localDataBack[nowIndex]?.data
+                  if (file.includes('robot')) {
+                    const sitRawText = localData[nowIndex]?.data
+                    const backRawText = localDataBack[nowIndex]?.data
+                    if (sitRawText) {
+                      const sitRaw = JSON.parse(sitRawText)
+                      if (sitRaw.length >= 260) {
+                        // 新版：前256是原始数据，后4是四元数
+                        const sitPressure = sitRaw.slice(0, 256)
+                        sitObj.sitData = sitPressure
+                        sitObj.newArr147 = sitPressure
+                        sitObj.rotate = sitRaw.slice(256, 260)
+                      } else {
+                        // 旧版：直接是压力数据
+                        const sitPressure = normalizeFiniteFrame(sitRaw, 256)
+                        sitObj.sitData = sitPressure
+                        sitObj.newArr147 = sitPressure
+                      }
+                    }
+                    if (backRawText) {
+                      const backRaw = JSON.parse(backRawText)
+                      if (backRaw.length >= 260) {
+                        // 新版：前256是原始数据，后4是四元数
+                        const backPressure = backRaw.slice(0, 256)
+                        backObj.backData = backPressure
+                        backObj.newArr147 = backPressure
+                        backObj.rotate = backRaw.slice(256, 260)
+                      } else {
+                        // 旧版：直接是压力数据
+                        const backPressure = normalizeFiniteFrame(backRaw, 256)
+                        backObj.backData = backPressure
+                        backObj.newArr147 = backPressure
+                      }
+                    }
+                  } else if (['hand0205', 'handGlove115200'].includes(file)) {
+                    // 鍏煎鏂版棫鏁版嵁鏍煎紡锛氭柊鐗?60(256+4)锛屾棫鐗?51(147+4)
+                    const sitRaw = JSON.parse(localData[nowIndex]?.data || '[]')
+                    const backRaw = JSON.parse(localDataBack[nowIndex]?.data || '[]')
+                    if (sitRaw.length >= 260) {
+                      const sitPressure = sitRaw.slice(0, 256)
+                      const sitRotate = sitRaw.slice(256, 260)
+                      sitObj.sitData = sitPressure
+                      sitObj.newArr147 = handL([...sitPressure])
+                      sitObj.rotate = sitRotate
+                    } else {
+                      sitObj.newArr147 = sitRaw.slice(0, sitRaw.length - 4)
+                      sitObj.rotate = sitRaw.slice(sitRaw.length - 4)
+                    }
+                    if (backRaw.length >= 260) {
+                      const backPressure = backRaw.slice(0, 256)
+                      const backRotate = backRaw.slice(256, 260)
+                      backObj.backData = backPressure
+                      backObj.newArr147 = handR([...backPressure])
+                      backObj.rotate = backRotate
+                    } else {
+                      backObj.newArr147 = backRaw.slice(0, backRaw.length - 4)
+                      backObj.rotate = backRaw.slice(backRaw.length - 4)
+                    }
                   }
 
                   if (file == 'footVideo') {
-                    sitObj.newArr147 = footArrToNormal(localData[nowIndex]?.data)
-                    backObj.newArr147 = footArrToNormal(localDataBack[nowIndex]?.data)
-
+                    if (localData[nowIndex]?.data) {
+                      const sitRaw256 = JSON.parse(localData[nowIndex].data || '[]')
+                      if (sitRaw256.length === 256) {
+                        // 新版：存储的是原始256点数据，需要插值和映射
+                        sitObj.sitData = footVideo([...sitRaw256])
+                        sitObj.newArr147 = footL([...sitRaw256])
+                      } else {
+                        // 旧版：存储的是512点插值数据，用旧逻辑
+                        sitObj.newArr147 = footArrToNormal(localData[nowIndex].data)
+                      }
+                    }
+                    if (localDataBack[nowIndex]?.data) {
+                      const backRaw256 = JSON.parse(localDataBack[nowIndex].data || '[]')
+                      if (backRaw256.length === 256) {
+                        // 新版：存储的是原始256点数据，需要插值和映射
+                        backObj.backData = footVideo1([...backRaw256])
+                        backObj.newArr147 = footR([...backRaw256])
+                      } else {
+                        // 旧版：存储的是512点插值数据，用旧逻辑
+                        backObj.newArr147 = footArrToNormal(localDataBack[nowIndex].data)
+                      }
+                    }
                   }
 
                   if (file === 'smallBed') {
@@ -1783,12 +2164,11 @@ module.exports = {
                     }
                   });
                 } else {
-                  playFlag = false;
-                  clearInterval(timer);
+                  stopPlaybackTimer();
                 }
               }, interval);
             } else {
-              clearInterval(timer);
+              stopPlaybackTimer();
             }
           }
 
@@ -1796,7 +2176,7 @@ module.exports = {
             nowIndex = getMessage.index;
           }
 
-          // 浜ゆ崲涓插彛
+          // 娴溿倖宕叉稉鎻掑經
           if (getMessage.exchange != null) {
             [com, com1] = [com1, com];
             // port1.close();
@@ -1819,13 +2199,13 @@ module.exports = {
                       autoOpen: true,
                     },
                     function (err) {
-                      console.log(err, "err");
+                      logger.warn(err, "err");
                     }
                   );
-                  //绠￠亾娣诲姞瑙ｆ瀽鍣?
+                  //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
                   port1.pipe(parser);
                 } catch (e) {
-                  console.log(e, "e");
+                  logger.warn(e, "e");
                 }
               }
 
@@ -1839,13 +2219,13 @@ module.exports = {
                       autoOpen: true,
                     },
                     function (err) {
-                      console.log(err, "err");
+                      logger.warn(err, "err");
                     }
                   );
-                  //绠￠亾娣诲姞瑙ｆ瀽鍣?
+                  //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
                   port2.pipe(parser2);
                 } catch (e) {
-                  console.log(e, "e");
+                  logger.warn(e, "e");
                 }
               }
             }, 1000);
@@ -1892,7 +2272,7 @@ module.exports = {
 
               server.clients.forEach(function each(client) {
                 /**
-                 * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                 * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                  *  */
 
                 const jsonData = JSON.stringify({
@@ -1948,7 +2328,7 @@ module.exports = {
 
             server.clients.forEach(function each(client) {
               /**
-               * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+               * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                *  */
               const jsonData = JSON.stringify({
                 length: length,
@@ -1965,12 +2345,12 @@ module.exports = {
             });
           }
 
-          // 涓嬭浇csv
+          // 娑撳娴嘽sv
           if (getMessage.download) {
             smoothValue = 0;
             const csvWriteData = [];
             const csvWriteBackData = [];
-            //鏌ヨ璇彞
+            //閺屻儴顕楃拠顓炲綖
             // const selectQuery = 'select * from matrix WHERE timestamp>? and timestamp<? and date=?';
             const selectQuery = "select * from matrix WHERE date=?";
             // const params = [1287154796066,1887154796066,'2023-06-19-14:05'];
@@ -1980,9 +2360,9 @@ module.exports = {
               let startPressure = 0;
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
-                  //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
+                  //閹跺﹥妞傞梻?閸樺濮忛棃銏⑿?楠炲啿娼庨崢瀣閺佺増宓乸ush鏉╂矞svWriter鏉╂稖顢戝Ч鍥ㄢ偓?
                   for (var i = historyArr[0]; i < historyArr[1]; i++) {
                     // const press = JSON.parse(rows[i][`data`]).reduce(
                     //   (a, b) => a + b,
@@ -2035,7 +2415,7 @@ module.exports = {
                     ).length;
                     const newData = {
                       time: timeStampToDate(rows[i][`timestamp`]),
-                      pressureArea: area, //鍘熷鐭╅樀
+                      pressureArea: area, //閸樼喎顫愰惌鈺呮█
                       pressure: total / length,
                       realData: realArr,
                       pressValue: wsPointData.reduce((a, b) => a + b, 0),
@@ -2044,11 +2424,11 @@ module.exports = {
                     };
                     csvWriteData.push(newData);
                   }
-                  // 灏嗘眹鎬荤殑鍘嬪姏鏁版嵁鍐欏叆 CSV 鏂囦欢
+                  // 鐏忓棙鐪归幀鑽ゆ畱閸樺濮忛弫鐗堝祦閸愭瑥鍙?CSV 閺傚洣娆?
                   // const timeStamp = Date.now()
                   const str = nowGetTime.replace(/[/:]/g, "-");
                   const csvWriter = createCsvWriter({
-                    path: `${csvPath}/${file}${str}.csv`, // 鎸囧畾杈撳嚭鏂囦欢鐨勮矾寰勫拰鍚嶇О
+                    path: `${csvPath}/${file}${str}.csv`, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                     header: [
                       { id: "time", title: "time" },
                       { id: "pressureArea", title: "area" },
@@ -2091,9 +2471,9 @@ module.exports = {
             } else if (file === 'smallBed' || file === 'smallBed1') {
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
-                  //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
+                  //閹跺﹥妞傞梻?閸樺濮忛棃銏⑿?楠炲啿娼庨崢瀣閺佺増宓乸ush鏉╂矞svWriter鏉╂稖顢戝Ч鍥ㄢ偓?
 
                   if (!rows.length) return;
                   for (var i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
@@ -2121,7 +2501,7 @@ module.exports = {
                       time: timeStampToDate(rows[i][`timestamp`]),
                       pressureArea: sitAreaSelect.length
                         ? sitAreaSelect[i]
-                        : area * 2.1, //鍘熷鐭╅樀
+                        : area * 2.1, //閸樼喎顫愰惌鈺呮█
                       pressure: sitPressSelect.length
                         ? sitPressSelect[i]
                         : totalToN(press),
@@ -2133,7 +2513,7 @@ module.exports = {
                     };
                     csvWriteData.push(newData);
                   }
-                  // 灏嗘眹鎬荤殑鍘嬪姏鏁版嵁鍐欏叆 CSV 鏂囦欢
+                  // 鐏忓棙鐪归幀鑽ゆ畱閸樺濮忛弫鐗堝祦閸愭瑥鍙?CSV 閺傚洣娆?
                   // const timeStamp = Date.now()
 
                   // const str = nowGetTime.replace(/[/:]/g, "-");
@@ -2145,14 +2525,14 @@ module.exports = {
                   }
 
                   const csvWriter = createCsvWriter({
-                    path: `${csvPath}/${file}${str}.csv`, // 鎸囧畾杈撳嚭鏂囦欢鐨勮矾寰勫拰鍚嶇О
+                    path: `${csvPath}/${file}${str}.csv`, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                     header: [
                       { id: "index", title: "" },
                       { id: "time", title: "time" },
                       { id: "pressureArea", title: "area" },
                       { id: "pressure", title: "press" },
                       { id: "realInitData", title: "realInitData" },
-                      { id: "pressuremmgH", title: "鍘嬪己澶у皬(mmgH)" },
+                      { id: "pressuremmgH", title: "閸樺宸辨径褍鐨?mmgH)" },
                       { id: "realData", title: "data" },
                       { id: "dataToInterpGauss", title: "algorData" },
                     ],
@@ -2189,9 +2569,9 @@ module.exports = {
             } else if (file === 'sitCol') {
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
-                  //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
+                  //閹跺﹥妞傞梻?閸樺濮忛棃銏⑿?楠炲啿娼庨崢瀣閺佺増宓乸ush鏉╂矞svWriter鏉╂稖顢戝Ч鍥ㄢ偓?
                   const label = getMessage.download.split('_')[1]
                   if (!rows.length) return;
                   for (var i = 0, j = 0; i < rows.length; i++, j++) {
@@ -2201,7 +2581,7 @@ module.exports = {
                     };
                     csvWriteData.push(newData);
                   }
-                  // 灏嗘眹鎬荤殑鍘嬪姏鏁版嵁鍐欏叆 CSV 鏂囦欢
+                  // 鐏忓棙鐪归幀鑽ゆ畱閸樺濮忛弫鐗堝祦閸愭瑥鍙?CSV 閺傚洣娆?
                   // const timeStamp = Date.now()
 
                   // const str = nowGetTime.replace(/[/:]/g, "-");
@@ -2214,7 +2594,7 @@ module.exports = {
                   }
 
                   const csvWriter = createCsvWriter({
-                    path: `${csvPath}/${file}${str}.csv`, // 鎸囧畾杈撳嚭鏂囦欢鐨勮矾寰勫拰鍚嶇О
+                    path: `${csvPath}/${file}${str}.csv`, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                     header: [
                       { id: "realData", title: "data" },
                       { id: "label", title: "label" },
@@ -2252,9 +2632,9 @@ module.exports = {
             } else if (file === 'matCol') {
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
-                  //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
+                  //閹跺﹥妞傞梻?閸樺濮忛棃銏⑿?楠炲啿娼庨崢瀣閺佺増宓乸ush鏉╂矞svWriter鏉╂稖顢戝Ч鍥ㄢ偓?
                   const label = getMessage.download.split('_')[1]
                   if (!rows.length) return;
                   for (var i = 0, j = 0; i < rows.length; i++, j++) {
@@ -2264,7 +2644,7 @@ module.exports = {
                     };
                     csvWriteData.push(newData);
                   }
-                  // 灏嗘眹鎬荤殑鍘嬪姏鏁版嵁鍐欏叆 CSV 鏂囦欢
+                  // 鐏忓棙鐪归幀鑽ゆ畱閸樺濮忛弫鐗堝祦閸愭瑥鍙?CSV 閺傚洣娆?
                   // const timeStamp = Date.now()
 
                   // const str = nowGetTime.replace(/[/:]/g, "-");
@@ -2277,7 +2657,7 @@ module.exports = {
                   }
 
                   const csvWriter = createCsvWriter({
-                    path: `${csvPath}/${file}${str}.csv`, // 鎸囧畾杈撳嚭鏂囦欢鐨勮矾寰勫拰鍚嶇О
+                    path: `${csvPath}/${file}${str}.csv`, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                     header: [
                       { id: "realData", title: "data" },
                       { id: "label", title: "label" },
@@ -2313,68 +2693,80 @@ module.exports = {
                 }
               });
             } else if (file !== "car10") {
+              // 鍒ゆ柇鏄惁鏄Е瑙夋墜濂楃被鍨嬶紝闇€瑕佸垎绂诲師濮?56鏁版嵁鍜屽洓鍏冩暟
+              const isHandType = ['hand0205', 'handGlove115200'].includes(file) || file.includes('robot');
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
-                  //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
-
                   if (!rows.length) return;
                   console.log(historyArr)
                   for (var i = historyArr[0], j = 0; i < historyArr[1] - 1; i++, j++) {
-                    const sitData = JSON.parse(rows[i][`data`]);
-                    console.log(sitData.length)
+                    const rawData = JSON.parse(rows[i][`data`]);
+                    let pressureData, rotateData;
+                    if (isHandType) {
+                      // 鍏煎鏂版棫鏁版嵁鏍煎紡
+                      if (rawData.length >= 260) {
+                        // 鏂扮増锛氬墠256鏄師濮嬪帇鍔涙暟鎹紝鍚?鏄洓鍏冩暟
+                        pressureData = rawData.slice(0, 256);
+                        rotateData = rawData.slice(256, 260);
+                      } else {
+                        // 鏃х増锛氬墠147鏄痭ewArr147锛屽悗4鏄洓鍏冩暟
+                        pressureData = rawData.slice(0, rawData.length - 4);
+                        rotateData = rawData.slice(rawData.length - 4);
+                      }
+                    } else {
+                      pressureData = rawData;
+                      rotateData = [];
+                    }
+                    console.log(pressureData.length)
                     const press = sitPressSelect.length
                       ? sitPressSelect[i]
-                      : sitData.reduce((a, b) => a + b, 0);
-                    // wsPointData = JSON.parse(rows[i][`data`]).map((a) => a < 10 ? 0 : a)
-                    // const realArr = press(wsPointData,1500)
-                    // const pressure = realArr.reduce((a,b) => a+b , 0) / realArr.filter((a) => a> 0).length
-                    // const pressuremmgH = calculatePressure(pressure)
+                      : pressureData.reduce((a, b) => a + b, 0);
 
                     const area = sitAreaSelect.length
                       ? sitAreaSelect[i]
-                      : sitData.filter((a) => a > 0).length;
+                      : pressureData.filter((a) => a > 0).length;
 
-                    const max = findMax(sitData)
+                    const max = findMax(pressureData)
                     const newData = {
                       time: timeStampToDate(rows[i][`timestamp`]),
                       pressureArea: sitAreaSelect.length
                         ? sitAreaSelect[i]
-                        : area, //鍘熷鐭╅樀
+                        : area,
                       pressure: sitPressSelect.length
                         ? sitPressSelect[i]
                         : totalToN(press),
-                      realData: rows[i][`data`],
+                      realData: JSON.stringify(pressureData),
                       index: (j / 12).toFixed(2),
-                      max
-                      // pressuremmgH :pressuremmgH
+                      max,
+                      rotate: rotateData.length ? JSON.stringify(rotateData) : '',
                     };
                     csvWriteData.push(newData);
                   }
-                  // 灏嗘眹鎬荤殑鍘嬪姏鏁版嵁鍐欏叆 CSV 鏂囦欢
-                  // const timeStamp = Date.now()
 
-                  // const str = nowGetTime.replace(/[/:]/g, "-");
-                  let str = nowGetTime; //.replace(/[/:]/g, "-");
+                  let str = nowGetTime;
                   if (str.includes(" ")) {
                     str = str.split(" ")[0];
                   } else {
                     str = timeStampTo_Date(Number(str));
                   }
 
-                  const csvWriter = createCsvWriter({
-                    path: `${csvPath}/sit${str}.csv`, // 鎸囧畾杈撳嚭鏂囦欢鐨勮矾寰勫拰鍚嶇О
-                    header: [
-                      { id: "index", title: "" },
-                      { id: "max", title: "max" },
-                      { id: "time", title: "time" },
-                      { id: "pressureArea", title: "area" },
-                      { id: "pressure", title: "press" },
-                      // { id: "pressuremmgH", title: "鍘嬪己澶у皬(mmgH)" },
-                      { id: "realData", title: "data" },
+                  const csvHeaders = [
+                    { id: "index", title: "" },
+                    { id: "max", title: "max" },
+                    { id: "time", title: "time" },
+                    { id: "pressureArea", title: "area" },
+                    { id: "pressure", title: "press" },
+                    { id: "realData", title: "data" },
+                  ];
+                  if (isHandType) {
+                    csvHeaders.push({ id: "rotate", title: "quaternion" });
+                  }
 
-                    ],
+                  const csvWriter = createCsvWriter({
+                    path: `${csvPath}/sit${str}.csv`,
+                    header: csvHeaders,
                   });
 
                   csvWriter
@@ -2410,16 +2802,30 @@ module.exports = {
             if (isCar(file)) {
               db1.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
                   // console.log(rows)
-                  //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
+                  //閹跺﹥妞傞梻?閸樺濮忛棃銏⑿?楠炲啿娼庨崢瀣閺佺増宓乸ush鏉╂矞svWriter鏉╂稖顢戝Ч鍥ㄢ偓?
                   if (!rows.length) return;
 
                   // if()
 
+                  const isBackHandType = ['hand0205', 'handGlove115200'].includes(file) || file.includes('robot');
                   for (var i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
-                    const backData = JSON.parse(rows[i][`data`]);
+                    const rawBackData = JSON.parse(rows[i][`data`]);
+                    let backData, backRotateData;
+                    if (isBackHandType && rawBackData.length >= 260) {
+                      // 新版：前256是原始压力数据，后4是四元数
+                      backData = rawBackData.slice(0, 256);
+                      backRotateData = rawBackData.slice(256, 260);
+                    } else if (isBackHandType && rawBackData.length > 4) {
+                      // 旧版：前N-4是数据，后4是四元数
+                      backData = rawBackData.slice(0, rawBackData.length - 4);
+                      backRotateData = rawBackData.slice(rawBackData.length - 4);
+                    } else {
+                      backData = rawBackData;
+                      backRotateData = [];
+                    }
                     // const press = calPressArr(backData , backIndex , 32)
                     const press = backPressSelect.length
                       ? backPressSelect[i]
@@ -2427,26 +2833,16 @@ module.exports = {
                     const area = backAreaSelect.length
                       ? backAreaSelect[i]
                       : backData.filter((a) => a > 10).length;
-                    // const newData = {
-                    //   time: timeStampToDate(rows[i][`timestamp`]),
-                    //   pressureArea: backAreaSelect.length
-                    //     ? backAreaSelect[i]
-                    //     : area * 2.1, //鍘熷鐭╅樀
-                    //   pressure: backPressSelect.length
-                    //     ? backPressSelect[i]
-                    //     : pressToN(area, press),
-                    //   realData: rows[i][`data`],
-                    // };
                     const max = findMax(backData);
                     const newData = {
                       time: timeStampToDate(rows[i][`timestamp`]),
                       pressureArea: backAreaSelect.length
                         ? backAreaSelect[i]
-                        : area, //鍘熷鐭╅樀
+                        : area,
                       pressure: backPressSelect.length
                         ? backPressSelect[i]
                         : totalToN(press, 1.3),
-                      realData: rows[i][`data`],
+                      realData: JSON.stringify(backData),
                       index: (j / 12).toFixed(2),
                       area1: [...backData].filter(a => a > 1).length,
                       area10: [...backData].filter(a => a > 10).length,
@@ -2454,11 +2850,12 @@ module.exports = {
                       total10: [...backData].filter(a => a > 10).reduce((a, b) => a + b, 0),
                       total10area10: [...backData].filter(a => a > 10).reduce((a, b) => a + b, 0) / [...backData].filter(a => a > 10).length,
                       total1area1: backData.reduce((a, b) => a + b, 0) / [...backData].filter(a => a > 1).length,
-                      max
+                      max,
+                      rotate: backRotateData.length ? JSON.stringify(backRotateData) : '',
                     };
                     csvWriteBackData.push(newData);
                   }
-                  // 灏嗘眹鎬荤殑鍘嬪姏鏁版嵁鍐欏叆 CSV 鏂囦欢
+                  // 鐏忓棙鐪归幀鑽ゆ畱閸樺濮忛弫鐗堝祦閸愭瑥鍙?CSV 閺傚洣娆?
 
                   // let str = nowGetTime.replace(/[/:]/g, "-");
                   let str = nowGetTime;
@@ -2468,17 +2865,20 @@ module.exports = {
                     str = timeStampTo_Date(Number(str));
                   }
 
+                  const backCsvHeaders = [
+                    { id: "index", title: "" },
+                    { id: "time", title: "time" },
+                    { id: "max", title: "max" },
+                    { id: "pressureArea", title: "area" },
+                    { id: "pressure", title: "press" },
+                    { id: "realData", title: "data" },
+                  ];
+                  if (isBackHandType) {
+                    backCsvHeaders.push({ id: "rotate", title: "quaternion" });
+                  }
                   const csvWriter1 = createCsvWriter({
                     path: `${csvPath}/back${str}.csv`,
-                    // path: `./data/back${str}.csv`, // 鎸囧畾杈撳嚭鏂囦欢鐨勮矾寰勫拰鍚嶇О
-                    header: [
-                      { id: "index", title: "" },
-                      { id: "time", title: "time" },
-                      { id: "max", title: "max" },
-                      { id: "pressureArea", title: "area" },
-                      { id: "pressure", title: "press" },
-                      { id: "realData", title: "data" },
-                    ],
+                    header: backCsvHeaders,
                   });
 
                   csvWriter1
@@ -2511,10 +2911,10 @@ module.exports = {
               if (file == 'volvo') {
                 db2.all(selectQuery, params, (err, rows) => {
                   if (err) {
-                    console.error(err);
+                    logger.error(err);
                   } else {
                     // console.log(rows)
-                    //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
+                    //閹跺﹥妞傞梻?閸樺濮忛棃銏⑿?楠炲啿娼庨崢瀣閺佺増宓乸ush鏉╂矞svWriter鏉╂稖顢戝Ч鍥ㄢ偓?
                     if (!rows.length) return;
 
                     // if()
@@ -2532,7 +2932,7 @@ module.exports = {
                       //   time: timeStampToDate(rows[i][`timestamp`]),
                       //   pressureArea: backAreaSelect.length
                       //     ? backAreaSelect[i]
-                      //     : area * 2.1, //鍘熷鐭╅樀
+                      //     : area * 2.1, //閸樼喎顫愰惌鈺呮█
                       //   pressure: backPressSelect.length
                       //     ? backPressSelect[i]
                       //     : pressToN(area, press),
@@ -2543,7 +2943,7 @@ module.exports = {
                         time: timeStampToDate(rows[i][`timestamp`]),
                         pressureArea: backAreaSelect.length
                           ? backAreaSelect[i]
-                          : area, //鍘熷鐭╅樀
+                          : area, //閸樼喎顫愰惌鈺呮█
                         pressure: backPressSelect.length
                           ? backPressSelect[i]
                           : totalToN(press, 1.3),
@@ -2559,7 +2959,7 @@ module.exports = {
                       };
                       csvWriteBackData.push(newData);
                     }
-                    // 灏嗘眹鎬荤殑鍘嬪姏鏁版嵁鍐欏叆 CSV 鏂囦欢
+                    // 鐏忓棙鐪归幀鑽ゆ畱閸樺濮忛弫鐗堝祦閸愭瑥鍙?CSV 閺傚洣娆?
 
                     // let str = nowGetTime.replace(/[/:]/g, "-");
                     let str = nowGetTime;
@@ -2571,7 +2971,7 @@ module.exports = {
 
                     const csvWriter1 = createCsvWriter({
                       path: `${csvPath}/head${str}.csv`,
-                      // path: `./data/back${str}.csv`, // 鎸囧畾杈撳嚭鏂囦欢鐨勮矾寰勫拰鍚嶇О
+                      // path: `./data/back${str}.csv`, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                       header: [
                         { id: "index", title: "" },
                         { id: "time", title: "time" },
@@ -2618,12 +3018,12 @@ module.exports = {
 
             db.run(createTableQuery, function (err) {
               if (err) {
-                console.error(err);
+                logger.error(err);
                 return;
               } else {
                 server.clients.forEach(function each(client) {
                   const jsonData = JSON.stringify({
-                    download: "鍒犻櫎鎴愬姛",
+                    download: "閸掔娀娅庨幋鎰",
                   });
                   if (client.readyState === WebSocket.OPEN) {
                     client.send(jsonData);
@@ -2635,12 +3035,12 @@ module.exports = {
             if (file === "car") {
               db1.run(createTableQuery, function (err) {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                   return;
                 } else {
                   server.clients.forEach(function each(client) {
                     const jsonData = JSON.stringify({
-                      download: "鍒犻櫎鎴愬姛",
+                      download: "閸掔娀娅庨幋鎰",
                     });
                     if (client.readyState === WebSocket.OPEN) {
                       client.send(jsonData);
@@ -2651,19 +3051,19 @@ module.exports = {
             }
           }
 
-          // 璋冩暣楂樻柉
+          // 鐠嬪啯鏆ｆ妯绘焿
           if (getMessage.gauss != null) {
             gauss = getMessage.gauss;
           }
 
-          // 閲嶆柊璇锋眰涓插彛
+          // 闁插秵鏌婄拠閿嬬湴娑撴彃褰?
           if (getMessage.serialReset != null) {
             SerialPort.list().then((ports) => {
               serialport = getPort(ports)//ports; //.filter((a,index) => a.manufacturer === 'wch.cn');
 
               server.clients.forEach(function each(client) {
                 /**
-                 * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                 * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                  *  */
                 const jsonData = JSON.stringify({
                   port: serialport,
@@ -2677,32 +3077,23 @@ module.exports = {
             });
           }
 
-          // 鍘嗗彶
+          // 閸樺棗褰?
           if (getMessage.indexArr != null) {
 
-            let press = [],
-              area = [];
             historyArr = getMessage.indexArr;
-            for (let i = getMessage.indexArr[0]; i < getMessage.indexArr[1]; i++) {
-              let a = localData.length
-                ? JSON.parse(localData[i].data).reduce((a, b) => a + b, 0)
-                : 0 +
-                (file === "car"
-                  ? JSON.parse(localDataBack[i].data).reduce((a, b) => a + b, 0)
-                  : 0);
-              let b = localData.length
-                ? JSON.parse(localData[i].data).filter((a) => a > 10).length
-                : 0 +
-                (file === "car"
-                  ? JSON.parse(localDataBack[i].data).filter((a) => a > 10).length
-                  : 0);
-              press.push(a);
-              area.push(b);
-            }
+            const historySeries = getHistorySeries({
+              sitRows: localData,
+              backRows: localDataBack,
+              start: getMessage.indexArr[0],
+              end: getMessage.indexArr[1],
+              file,
+            });
+            const press = historySeries.press;
+            const area = historySeries.area;
 
             server.clients.forEach(function each(client) {
               /**
-               * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+               * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                *  */
               const jsonData = JSON.stringify({
                 pressArr: press,
@@ -2726,57 +3117,34 @@ module.exports = {
 }
 
 SerialPort.list().then((ports) => {
-  console.info(
+  logger.info(
     "=========================================================================================\r\n"
   );
-  console.info(
+  logger.info(
     "hello ,there are serialport lists that we selected from your device\r\n"
   );
   // console.log(ports)
   serialport = getPort(ports)//ports; //.filter((a,index) => a.manufacturer === 'wch.cn');
   ports.forEach(function (port) {
-    console.info("port:%s\r\n", port.path);
+    logger.info("port:%s\r\n", port.path);
     // try {
     //   const port1 = new SerialPort(
     //     { path: "COM5", baudRate: baudRate, autoOpen: true },
     //     function (err) {
-    //       console.log(err, "err");
+    //       logger.warn(err, "err");
     //     }
     //   );
-    //   //绠￠亾娣诲姞瑙ｆ瀽鍣?
+    //   //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
     //   port1.pipe(parser);
     // } catch (e) {
 
     // }
   });
-  console.info(
+  logger.info(
     "=========================================================================================\r\n"
   );
 });
-
-function gaussBlur_return(scl, w, h, r) {
-  const res = new Array(scl.length).fill(1)
-  var rs = Math.ceil(r * 2.57); // significant radius
-  for (var i = 0; i < h; i++) {
-    for (var j = 0; j < w; j++) {
-      var val = 0,
-        wsum = 0;
-      for (var iy = i - rs; iy < i + rs + 1; iy++)
-        for (var ix = j - rs; ix < j + rs + 1; ix++) {
-          var x = Math.min(w - 1, Math.max(0, ix));
-          var y = Math.min(h - 1, Math.max(0, iy));
-          var dsq = (ix - j) * (ix - j) + (iy - i) * (iy - i);
-          var wght = Math.exp(-dsq / (2 * r * r)) / (Math.PI * 2 * r * r);
-          val += scl[y * w + x] * wght;
-          wsum += wght;
-        }
-      res[i * w + j] = Math.round(val / wsum);
-    }
-  }
-  return res
-}
-
-var pointArr, newData, firstBlueData = [], lastBlueData = [], firstBlueData1 = [], lastBlueData1 = [];
+let pointArr, newData, firstBlueData = [], lastBlueData = [], firstBlueData1 = [], lastBlueData1 = [];
 let index = 0
 parser.on("data", function (data) {
   pointArr = new Array();
@@ -2880,11 +3248,15 @@ parser.on("data", function (data) {
       } else if (file == 'fast1024sit') {
         pointArr = endiSit1024(pointArr)
       } else if (file == 'fast1024') {
-        pointArr = jqbed(pointArr)
-        console.log('fast1024')
+        // pointArr = jqbed(pointArr)
+        // console.log('fast1024')
         // console.log(Math.max(...pointArr))
-        pointArr = pressNew1220({ arr: pointArr, height: 32, width: 32, type: 'col', value: 1024 })
+        // pointArr = pressNew1220({ arr: pointArr, height: 32, width: 32, type: 'col', value: 1024 })
         // pointArr = gaussBlur_return(pointArr , 32,32, 0.5)
+      } else if (file == 'normalFast') {
+        pointArr = pressNew12203131({ arr: pointArr, height: 32, width: 32, type: 'col', value: 1024 })
+        // console.log('pressNew12203131')
+        // 32*32高速测试，与 fast1024 逻辑一致，不做任何线序变换
       } else if (file == 'sofa') {
         pointArr = arrToRealLine(pointArr, [[7, 0], [8, 15]], [[0, 15]], 32)
       } else if (file == 'carY') {
@@ -2898,17 +3270,20 @@ parser.on("data", function (data) {
         pointArr = pointArr.map((a, index) => numLessZeroToZero(a - pointArr1zero[index]))
       }
 
+      // jqbed 璋冭瘯妯″紡锛歶seMatrixOrigin=true 鏃剁敤绠楁硶杩斿洖鐨?matrix_origin 浣滀负 sitData
+      const sitDataToSend = (useMatrixOrigin && file === 'jqbed' && jqbedMatrixOrigin) ? jqbedMatrixOrigin : pointArr;
+
       let jsonData;
 
       if (isCar(file)) {
         jsonData = JSON.stringify({
-          sitData: pointArr,
+          sitData: sitDataToSend,
           sitFlag: port1?.isOpen,
           backFlag: port2?.isOpen,
           hz: colHZ
         });
       } else {
-        jsonData = JSON.stringify({ sitData: file == 'smallBed' || file == 'smallBed1' ? pointArr : pointArr, hz: colHZ });
+        jsonData = JSON.stringify({ sitData: file == 'smallBed' || file == 'smallBed1' ? pointArr : sitDataToSend, hz: colHZ });
       }
 
 
@@ -2925,7 +3300,7 @@ parser.on("data", function (data) {
 
       //   // 2.0
       //   // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
-      //   const timestamp = Date.now(); // 鑾峰彇褰撳墠鏃堕棿鐨勬椂闂存埑
+      //   const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
       //   const date = saveTime;
       //   const insertQuery =
       //     "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
@@ -2938,7 +3313,7 @@ parser.on("data", function (data) {
       //     [JSON.stringify(pointArr), timestamp, date],
       //     function (err) {
       //       if (err) {
-      //         console.error(err);
+      //         logger.error(err);
       //         return;
       //       }
       //       console.log(`Event inserted with ID ${this.lastID}`);
@@ -3152,21 +3527,21 @@ parser.on("data", function (data) {
         //   pointArr = pointArr.map((a, index) => numLessZeroToZero(a - pointArr1zero[index]))
         // }
       } else if (file == 'smallSample') {
-        // 灏忓瀷鏍峰搧 - 鎸変紶鎰熷櫒缂栧彿1-100椤哄簭杈撳嚭10脳10鐭╅樀
-        // Excel鏄?6脳16缃戞牸锛屽搴?56瀛楄妭鏁版嵁鐨勯『搴?
-        // 浼犳劅鍣ㄧ紪鍙種鍦‥xcel涓殑浣嶇疆(row,col) -> 256瀛楄妭绱㈠紩 = row*16+col
-        // 浼犳劅鍣?-100瀵瑰簲鐨?56瀛楄妭绱㈠紩:
+        // 鐏忓繐鐎烽弽宄版惂 - 閹稿绱堕幇鐔锋珤缂傛牕褰?-100妞ゅ搫绨潏鎾冲毉10鑴?0閻晠妯€
+        // Excel閺?6鑴?6缂冩垶鐗搁敍灞筋嚠鎼?56鐎涙濡弫鐗堝祦閻ㄥ嫰銆庢惔?
+        // 娴肩姵鍔呴崳銊х椽閸欑ó閸︹€cel娑擃厾娈戞担宥囩枂(row,col) -> 256鐎涙濡槐銏犵穿 = row*16+col
+        // 娴肩姵鍔呴崳?-100鐎电懓绨查惃?56鐎涙濡槐銏犵穿:
         const sensorToByteIndex = [
-          223, 222, 221, 220, 219, 218, 217, 216, 215, 214,  // 浼犳劅鍣?-10   (琛?3, 鍒?5鈫?6)
-          239, 238, 237, 236, 235, 234, 233, 232, 231, 230,  // 浼犳劅鍣?1-20  (琛?4, 鍒?5鈫?6)
-          255, 254, 253, 252, 251, 250, 249, 248, 247, 246,  // 浼犳劅鍣?1-30  (琛?5, 鍒?5鈫?6)
-          15, 14, 13, 12, 11, 10, 9, 8, 7, 6,                // 浼犳劅鍣?1-40  (琛?,  鍒?5鈫?6)
-          31, 30, 29, 28, 27, 26, 25, 24, 23, 22,            // 浼犳劅鍣?1-50  (琛?,  鍒?5鈫?6)
-          207, 206, 205, 204, 203, 202, 201, 200, 199, 198,  // 浼犳劅鍣?1-60  (琛?2, 鍒?5鈫?6)
-          191, 190, 189, 188, 187, 186, 185, 184, 183, 182,  // 浼犳劅鍣?1-70  (琛?1, 鍒?5鈫?6)
-          175, 174, 173, 172, 171, 170, 169, 168, 167, 166,  // 浼犳劅鍣?1-80  (琛?0, 鍒?5鈫?6)
-          159, 158, 157, 156, 155, 154, 153, 152, 151, 150,  // 浼犳劅鍣?1-90  (琛?,  鍒?5鈫?6)
-          143, 142, 141, 140, 139, 138, 137, 136, 135, 134,  // 浼犳劅鍣?1-100 (琛?,  鍒?5鈫?6)
+          223, 222, 221, 220, 219, 218, 217, 216, 215, 214,  // 娴肩姵鍔呴崳?-10   (鐞?3, 閸?5閳?6)
+          239, 238, 237, 236, 235, 234, 233, 232, 231, 230,  // 娴肩姵鍔呴崳?1-20  (鐞?4, 閸?5閳?6)
+          255, 254, 253, 252, 251, 250, 249, 248, 247, 246,  // 娴肩姵鍔呴崳?1-30  (鐞?5, 閸?5閳?6)
+          15, 14, 13, 12, 11, 10, 9, 8, 7, 6,                // 娴肩姵鍔呴崳?1-40  (鐞?,  閸?5閳?6)
+          31, 30, 29, 28, 27, 26, 25, 24, 23, 22,            // 娴肩姵鍔呴崳?1-50  (鐞?,  閸?5閳?6)
+          207, 206, 205, 204, 203, 202, 201, 200, 199, 198,  // 娴肩姵鍔呴崳?1-60  (鐞?2, 閸?5閳?6)
+          191, 190, 189, 188, 187, 186, 185, 184, 183, 182,  // 娴肩姵鍔呴崳?1-70  (鐞?1, 閸?5閳?6)
+          175, 174, 173, 172, 171, 170, 169, 168, 167, 166,  // 娴肩姵鍔呴崳?1-80  (鐞?0, 閸?5閳?6)
+          159, 158, 157, 156, 155, 154, 153, 152, 151, 150,  // 娴肩姵鍔呴崳?1-90  (鐞?,  閸?5閳?6)
+          143, 142, 141, 140, 139, 138, 137, 136, 135, 134,  // 娴肩姵鍔呴崳?1-100 (鐞?,  閸?5閳?6)
         ]
         const mappedArr = []
         for (let i = 0; i < 100; i++) {
@@ -3174,7 +3549,7 @@ parser.on("data", function (data) {
         }
         pointArr = mappedArr
         newArr = [...mappedArr]
-      } else if (file == 'hand0507' || file == 'hand0205' || file == 'Num3D') {
+      } else if (file == 'hand0507' || file == 'hand0205' || file == 'handGlove115200' || file == 'Num3D') {
         // left
         // newArr = handVideoRealPoint_0506_3([...pointArr])
         newArr = handL([...pointArr])
@@ -3359,7 +3734,7 @@ parser.on("data", function (data) {
       //   // if (pointArr1zero.length) {
       //   //   pointArr = pointArr.map((a, index) => numLessZeroToZero(a - pointArr1zero[index]))
       //   // }
-      // } else if (file == 'hand0507' || file == 'hand0205' || file == 'Num3D') {
+      // } else if (file == 'hand0507' || file == 'hand0205' || file == 'handGlove115200' || file == 'Num3D') {
       //   // left
       //   // newArr = handVideoRealPoint_0506_3([...pointArr])
       //   newArr = handL([...pointArr])
@@ -3634,19 +4009,19 @@ function colOrSendData(jsonData) {
 
     // 2.0
     // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
-    const timestamp = Date.now(); // 鑾峰彇褰撳墠鏃堕棿鐨勬椂闂存埑
+    const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
     const date = saveTime;
     const insertQuery =
       "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
 
 
-    // 1.0 鏈哄櫒浜轰箣鍓?
+    // 1.0 閺堝搫娅掓禍杞扮閸?
     // db.run(
     //   insertQuery,
-    //   [file.includes('hand0205') ? JSON.stringify([...pointArr, ...rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify(pointArr), timestamp, date],
+    //   [(file.includes('hand0205') || file == 'handGlove115200') ? JSON.stringify([...pointArr, ...rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify(pointArr), timestamp, date],
     //   function (err) {
     //     if (err) {
-    //       console.error(err);
+    //       logger.error(err);
     //       return;
     //     }
     //     console.log(`Event inserted with ID ${this.lastID}`);
@@ -3655,10 +4030,10 @@ function colOrSendData(jsonData) {
 
     db.run(
       insertQuery,
-      [file.includes('hand0205') ? JSON.stringify([...JSON.parse(jsonData).newArr147, ...JSON.parse(jsonData).rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).sitData]), timestamp, date],
+      [(file.includes('hand0205') || file == 'handGlove115200' || file.includes('robot')) ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : file == 'footVideo' ? JSON.stringify([...JSON.parse(jsonData).realArr]) : JSON.stringify([...JSON.parse(jsonData).sitData]), timestamp, date],
       function (err) {
         if (err) {
-          console.error(err);
+          logger.error(err);
           return;
         }
         console.log(`Event inserted with ID ${this.lastID}`);
@@ -3676,7 +4051,7 @@ function colOrSendData(jsonData) {
   }
 }
 
-// 澶勭悊涓插彛鏁版嵁
+// 婢跺嫮鎮婃稉鎻掑經閺佺増宓?
 
 var pointArr2;
 parser2.on("data", function (data) {
@@ -3719,7 +4094,7 @@ parser2.on("data", function (data) {
         };
         // csvWriterback.writeRecords([resDataArr]);
 
-        const timestamp = Date.now(); // 鑾峰彇褰撳墠鏃堕棿鐨勬椂闂存埑
+        const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
         const date = saveTime;
         const insertQuery =
           "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
@@ -3729,7 +4104,7 @@ parser2.on("data", function (data) {
           [JSON.stringify(pointArr2), timestamp, date],
           function (err) {
             if (err) {
-              console.error(err);
+              logger.error(err);
               return;
             }
             console.log(`Event inserted with ID ${this.lastID}`);
@@ -3825,7 +4200,7 @@ parser2.on("data", function (data) {
         newArr = footR(pointArr2)
         pointArr2 = footVideo1(pointArr2)
 
-      } else if (file == 'hand0507' || file == 'hand0205') {
+      } else if (file == 'hand0507' || file == 'hand0205' || file == 'handGlove115200') {
         newArr = handR(pointArr2)
 
         pointArr2 = handRVideo1470506(pointArr2)
@@ -3942,7 +4317,7 @@ function colOrSendData1(jsonData) {
 
     // 2.0
     // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
-    const timestamp = Date.now(); // 鑾峰彇褰撳墠鏃堕棿鐨勬椂闂存埑
+    const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
     const date = saveTime;
     const insertQuery =
       "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
@@ -3950,10 +4325,10 @@ function colOrSendData1(jsonData) {
 
     db1.run(
       insertQuery,
-      [file.includes('hand0205') ? JSON.stringify([...JSON.parse(jsonData).newArr147, ...JSON.parse(jsonData).rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
+      [(file.includes('hand0205') || file == 'handGlove115200' || file.includes('robot')) ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : file == 'footVideo' ? JSON.stringify([...JSON.parse(jsonData).realArr]) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
       function (err) {
         if (err) {
-          console.error(err);
+          logger.error(err);
           return;
         }
         console.log(`Event inserted with ID ${this.lastID}`);
@@ -3987,13 +4362,13 @@ parser3.on("data", function (data) {
         if (pointArr3[pointArr3.length - 1] == 0) {
           firstData = [...pointArr3];
           firstData.pop();
-          // 鍙宠竟绾垮簭
+          // 閸欏疇绔熺痪鍨碍
 
         }
         if (pointArr3[pointArr3.length - 1] == 1) {
           lastData = [...pointArr3];
           lastData.pop();
-          // 娣诲姞
+          // 濞ｈ濮?
           let a = [];
           for (let i = 0; i < 32; i++) {
             for (let j = 0; j < 32; j++) {
@@ -4024,7 +4399,7 @@ parser3.on("data", function (data) {
             // 2.0
             // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
             if (dataFalg % 10 == 0) {
-              const timestamp = Date.now(); // 鑾峰彇褰撳墠鏃堕棿鐨勬椂闂存埑
+              const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
               const date = saveTime;
               const insertQuery =
                 "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
@@ -4033,7 +4408,7 @@ parser3.on("data", function (data) {
                 [JSON.stringify(res), timestamp, date],
                 function (err) {
                   if (err) {
-                    console.error(err);
+                    logger.error(err);
                     return;
                   }
                   console.log(`Event inserted with ID ${this.lastID}`);
@@ -4083,7 +4458,7 @@ parser4.on("data", function (data) {
         };
         // csvWriterback.writeRecords([resDataArr]);
 
-        const timestamp = Date.now(); // 鑾峰彇褰撳墠鏃堕棿鐨勬椂闂存埑
+        const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
         const date = saveTime;
         const insertQuery =
           "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
@@ -4093,7 +4468,7 @@ parser4.on("data", function (data) {
           [JSON.stringify(pointArr4), timestamp, date],
           function (err) {
             if (err) {
-              console.error(err);
+              logger.error(err);
               return;
             }
             console.log(`Event inserted with ID ${this.lastID}`);
@@ -4189,7 +4564,7 @@ parser4.on("data", function (data) {
         newArr = footR(pointArr4)
         pointArr4 = footVideo1(pointArr4)
 
-      } else if (file == 'hand0507' || file == 'hand0205') {
+      } else if (file == 'hand0507' || file == 'hand0205' || file == 'handGlove115200') {
         newArr = handR(pointArr4)
 
         pointArr4 = handRVideo1470506(pointArr4)
@@ -4252,7 +4627,7 @@ function colOrSendData2(jsonData) {
 
     // 2.0
     // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
-    const timestamp = Date.now(); // 鑾峰彇褰撳墠鏃堕棿鐨勬椂闂存埑
+    const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
     const date = saveTime;
     const insertQuery =
       "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
@@ -4260,10 +4635,10 @@ function colOrSendData2(jsonData) {
 
     db2.run(
       insertQuery,
-      [file.includes('hand0205') ? JSON.stringify([...JSON.parse(jsonData).newArr147, ...JSON.parse(jsonData).rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
+      [(file.includes('hand0205') || file == 'handGlove115200' || file.includes('robot')) ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : file == 'footVideo' ? JSON.stringify([...JSON.parse(jsonData).realArr]) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
       function (err) {
         if (err) {
-          console.error(err);
+          logger.error(err);
           return;
         }
         console.log(`Event inserted with ID ${this.lastID}`);
@@ -4281,8 +4656,8 @@ function colOrSendData2(jsonData) {
   }
 }
 
-// 閲嶈繛
-setInterval(() => {
+// 闁插秷绻?
+reconnectTimer = setInterval(() => {
   if (com && !port1.isOpen && sitClose == false) {
     // if()
     console.log(com)
@@ -4295,13 +4670,13 @@ setInterval(() => {
             autoOpen: true,
           },
           function (err) {
-            console.log(err, "err");
+            logger.warn(err, "err");
           }
         );
-        //绠￠亾娣诲姞瑙ｆ瀽鍣?
+        //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
         port1.pipe(parser);
       } catch (e) {
-        console.log(e, "e");
+        logger.warn(e, "e");
       }
     } else {
       try {
@@ -4313,13 +4688,13 @@ setInterval(() => {
             autoOpen: true,
           },
           function (err) {
-            console.log(err, "err");
+            logger.warn(err, "err");
           }
         );
-        //绠￠亾娣诲姞瑙ｆ瀽鍣?
+        //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
         port1.pipe(parser3);
       } catch (e) {
-        console.log(e, "e");
+        logger.warn(e, "e");
       }
     }
 
@@ -4335,367 +4710,77 @@ setInterval(() => {
           autoOpen: true,
         },
         function (err) {
-          console.log(err, "err");
+          logger.warn(err, "err");
         }
       );
-      //绠￠亾娣诲姞瑙ｆ瀽鍣?
+      //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
       port2.pipe(parser2);
     } catch (e) {
-      console.log(e, "e");
+      logger.warn(e, "e");
     }
   }
 }, 3000);
 
-function gaussBlur_2(scl, w, h, r) {
-  const tcl = new Array(scl.length).fill(1)
-  var rs = Math.ceil(r * 2.57); // significant radius
-  for (var i = 0; i < h; i++)
-    for (var j = 0; j < w; j++) {
-      var val = 0,
-        wsum = 0;
-      for (var iy = i - rs; iy < i + rs + 1; iy++)
-        for (var ix = j - rs; ix < j + rs + 1; ix++) {
-          var x = Math.min(w - 1, Math.max(0, ix));
-          var y = Math.min(h - 1, Math.max(0, iy));
-          var dsq = (ix - j) * (ix - j) + (iy - i) * (iy - i);
-          var wght = Math.exp(-dsq / (2 * r * r)) / (Math.PI * 2 * r * r);
-          val += scl[y * w + x] * wght;
-          wsum += wght;
-        }
-      tcl[i * w + j] = Math.round(val / wsum);
-    }
-  return tcl
-}
-
-
-function interpSmall(smallMat, width, height, interp1, interp2) {
-  // for (let x = 1; x <= Length; x++) {
-  //   for (let y = 1; y <= Length; y++) {
-  //     bigMat[
-  //       Length * num * (num * (y - 1)) +
-  //       (Length * num * num) / 2 +
-  //       num * (x - 1) +
-  //       num / 2
-  //     ] = smallMat[Length * (y - 1) + x - 1] * 10;
-  //   }
-  // }
-  // 32, 10, 4, 5
-  const bigMat = new Array((width * interp1) * (height * interp2)).fill(0)
-  for (let i = 0; i < height; i++) {
-    for (let j = 0; j < width; j++) {
-      bigMat[(width * interp1) * i * interp2 + (j * interp1)
-
-        // + (width * interp1) * Math.floor(interp2/2)
-
-        // + Math.floor(interp1/2)
-      ] = smallMat[i * width + j] * 10
-    }
-  }
-  // console.log(bigMat.length)
-  return bigMat
-}
-
-
-function findMax(arr) {
-  let max = 0;
-  arr.forEach((item) => {
-    max = max > item ? max : item;
-  });
-  return max;
-}
-
-function numLessZeroToZero(num) {
-  return num < 0 ? 0 : num
-}
-
-// 鍒濆鍖杁b
-/**
- * 
- * @param {string} fileStr 浼犳劅鍣ㄧ被鍨?
- * @returns db鏁版嵁搴?
- */
-function initDb(fileStr) {
-  file = fileStr;
-  let db, db1, db2
-  console.log(isCar(file))
-  if (isCar(file)) {
-    db = genDb(`${filePath}/${file}sit.db`)
-    db1 = genDb(`${filePath}/${file}back.db`)
-  } else if (file == 'volvo') {
-    db = genDb(`${filePath}/${file}sit.db`)
-    db1 = genDb(`${filePath}/${file}back.db`)
-    db2 = genDb(`${filePath}/${file}head.db`)
-  }
-  else {
-    db = genDb(`${filePath}/${file}.db`)
-  }
-  return { db, db1, db2 }
-}
-
-// 褰撴病鏈塪b鏂囦欢鐨勬椂鍊欐嫹璐濅竴涓互init.db涓哄師鍨嬬殑db鏂囦欢
-
-/**
- * 
- * @param {string} file 鏂囦欢鍚?
- * @returns 杩斿洖db鏂囦欢
- */
-function genDb(file) {
-  try {
-    const fileExist = fs.accessSync(file)
-    return db = new sqlite3.Database(file);
-  } catch (err) {
-    console.log(err)
-    const initCandidates = [
-      path.join(filePath, "init.db"),
-      path.join(runtimeResourceRoot, "init.db"),
-      path.join(__dirname, "db", "init.db"),
-      path.join(app.getAppPath(), "db", "init.db"),
-    ];
-    const initDbPath = initCandidates.find((candidate) => fs.existsSync(candidate));
-    if (!initDbPath) {
-      throw new Error(`init.db not found. checked: ${initCandidates.join(", ")}`);
-    }
-    let data = fs.readFileSync(initDbPath);
-    fs.writeFileSync(file, data);
-    return db = new sqlite3.Database(file);
-  }
-}
-
-function press6(arr, width, height, type = "row", value = (1245),) {
+// jqbed 鏁版嵁缈昏浆鍙樻崲锛堜緵 callPy 浣跨敤锛?
+function jqbedOppo(arr) {
   let wsPointData = [...arr];
-
-  if (type == "row") {
-    let colArr = [];
-    for (let i = 0; i < height; i++) {
-      let total = 0;
-      for (let j = 0; j < width; j++) {
-        total += wsPointData[i * width + j];
-      }
-      colArr.push(total);
-    }
-
-    // //////okok
-    for (let i = 0; i < height; i++) {
-      for (let j = 0; j < width; j++) {
-        wsPointData[i * width + j] = parseInt(
-          (wsPointData[i * width + j] * 3 / 4 /
-            (value - colArr[i] * 3 / 4 <= 0 ? 1 : value - colArr[i] * 3 / 4)) *
-          1
-        );
-      }
-    }
-  } else {
-    let colArr = [];
-    for (let i = 0; i < height; i++) {
-      let total = 0;
-      for (let j = 0; j < width; j++) {
-        total += wsPointData[j * height + i];
-      }
-      colArr.push(total);
-    }
-
-    // //////okok
-    for (let i = 0; i < height; i++) {
-      for (let j = 0; j < width; j++) {
-        wsPointData[j * height + i] = parseInt(
-          (wsPointData[j * height + i] * 3 / 4 /
-            (value - colArr[i] * 3 / 4 <= 0 ? 1 : value - colArr[i] * 3 / 4)) *
-          1
-        );
-      }
+  let b = wsPointData.splice(0, 17 * 32);
+  wsPointData = wsPointData.concat(b);
+  for (let i = 0; i < 8; i++) {
+    for (let j = 0; j < 32; j++) {
+      [wsPointData[i * 32 + j], wsPointData[(14 - i) * 32 + j]] = [
+        wsPointData[(14 - i) * 32 + j],
+        wsPointData[i * 32 + j],
+      ];
     }
   }
-
-  //////
-
-  // wsPointData = wsPointData.map((a,index) => {return calculateY(a)})
   return wsPointData;
 }
 
-// 鍒嗗帇鍏紡
-function pressNew1220({ arr, width, height, type = "row", value }) {
-  let wsPointData = [...arr];
+// jqbed 鍋ュ悍鐩戞祴绠楁硶瀹氭椂璋冪敤锛?25ms锛?
+jqbedTimer = setInterval(async () => {
+  if (pointArr&&pointArr.length  && pointArr.every((a) => typeof a == 'number') && file == 'jqbed' && port1 && port1.isOpen) {
+    const newArr = jqbedOppo(pointArr);
+    // console.log(newArr.reduce((a,b) => a+b , 0),pointArr.length,'nweArr')
+    try {
+      const data = await callPy('getData', { data: newArr });
+      if (data && data.rate != -1) {
+        // console.log('[jqbed] pyResult:', data,data.matrix_origin.reduce((a,b) => a+b , 0));
 
-  if (type == "row") {
-    let colArr = [];
-    for (let i = 0; i < height; i++) {
-      let total = 0;
-      for (let j = 0; j < width; j++) {
-        total += wsPointData[i * width + j];
-      }
-      colArr.push(total);
-    }
-    // //////okok
-    for (let i = 0; i < height; i++) {
-      for (let j = 0; j < width; j++) {
-
-        let den = wsPointData[i * width + j] + value - colArr[i]
-        if (den <= 0) {
-          den = 1
+        // 缂撳瓨绠楁硶杩斿洖鐨?matrix_origin锛堜緵 useMatrixOrigin flag 浣跨敤锛?
+        if (data.matrix_origin && Array.isArray(data.matrix_origin)) {
+          jqbedMatrixOrigin = data.matrix_origin;
         }
 
-        wsPointData[i * width + j] = parseInt(
-          wsPointData[i * width + j] * value / den
-        );
-      }
-    }
-  } else {
-    let colArr = [];
-    for (let i = 0; i < height; i++) {
-      let total = 0;
-      for (let j = 0; j < width; j++) {
-        total += wsPointData[j * height + i];
-      }
-      colArr.push(total);
-    }
-    // //////okok
-    for (let i = 0; i < height; i++) {
-      for (let j = 0; j < width; j++) {
-        let den = wsPointData[j * height + i] + value - colArr[i]
-        if (den <= 0) {
-          den = 1
+        if (onbedArr.length < 2) {
+          onbedArr.push(data.stateInBbed);
+        } else {
+          onbedArr.shift();
+          onbedArr.push(data.stateInBbed);
         }
 
-        wsPointData[j * height + i] = parseInt(
-          (wsPointData[j * height + i] * value / den) / 2
-        );
+        if (onbedArr.every((a) => a == 1)) {
+          onBedTime += 2;
+          data.onBedTime = onBedTime;
+        } else if (onbedArr.every((a) => a == 0)) {
+          onBedTime += 2;
+          data.onBedTime = onBedTime;
+        } else {
+          onBedTime = 0;
+          data.onBedTime = 0;
+        }
+
+        const jsonData = JSON.stringify({ rate: data });
+        server.clients.forEach(function each(client) {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(jsonData);
+          }
+        });
       }
+    } catch (e) {
+      console.error('[jqbed] callPy error:', e.message);
     }
   }
+}, 125);
 
-  //////
-
-  // wsPointData = wsPointData.map((a,index) => {return calculateY(a)})
-  return wsPointData;
-}
-
-function press6sit(arr, width, height, type = "row", value = (480),) {
-  let wsPointData = [...arr];
-
-  const props = 4
-
-  // console.log(up, down)
-
-  if (type == "row") {
-    let colArr = [];
-    for (let i = 0; i < height; i++) {
-      let total = 0;
-      for (let j = 0; j < width; j++) {
-        total += wsPointData[i * width + j];
-      }
-      colArr.push(total);
-    }
-
-    // //////okok
-    for (let i = 0; i < height; i++) {
-      for (let j = 0; j < width; j++) {
-        wsPointData[i * width + j] = parseInt(
-          (wsPointData[i * width + j] * props / 4 /
-            (value - colArr[i] * props / 4 <= 0 ? 1 : value - colArr[i] * props / 4)) *
-          1000
-        );
-      }
-    }
-  } else {
-    let colArr = [];
-    for (let i = 0; i < height; i++) {
-      let total = 0;
-      for (let j = 0; j < width; j++) {
-        total += wsPointData[j * height + i];
-      }
-      colArr.push(total);
-    }
-    // console.log(colArr)
-    // //////okok
-    for (let i = 0; i < height; i++) {
-      for (let j = 0; j < width; j++) {
-        wsPointData[j * height + i] = parseInt(
-          (wsPointData[j * height + i] * props / 4 /
-            (value - colArr[i] * props / 4 <= 0 ? 1 : value - colArr[i] * props / 4)) *
-          600
-        );
-      }
-    }
-  }
-
-  //////
-
-  // wsPointData = wsPointData.map((a,index) => {return calculateY(a)})
-  return wsPointData;
-}
-
-
-function bytes4ToInt10(buffers) {
-  // 绀轰緥锛氬洓涓瓧鑺傜殑鏁扮粍 
-  // const fourBytes = [0x40, 0x48, 0xF5, 0xC3];
-  const res = []
-  for (let i = 0; i < buffers.length / 4; i++) {
-    const buffer = new ArrayBuffer(4);
-    const view = new DataView(buffer);
-    for (let j = 0; j < 4; j++) {
-      // 鍒涘缓涓€涓?ArrayBuffer 骞跺皢鍥涗釜瀛楄妭鍐欏叆鍏朵腑 
-
-      // 灏嗗洓涓瓧鑺傚啓鍏?DataView 
-      // for (let k = 0; k < 4; k++) {
-      view.setUint8(j, buffers[i * 4 + j]);
-      // }
-      // 浠?DataView 涓鍙栨诞鐐规暟 
-
-    }
-    const floatValue = view.getFloat32(0, true);
-    // console.log(floatValue);
-    res.push(floatValue)
-  }
-  return res
-}
-
-function arrToRealLine(arr, arrX, arrY, matrixLength) {
-  const realX = [], realY = []
-  arrX.forEach((a) => {
-    if (Array.isArray(a)) {
-      // for(let i = )
-      if (a[0] > a[1]) {
-        for (let i = a[0]; i >= a[1]; i--) {
-          realX.push(i)
-        }
-      } else {
-        for (let i = a[0]; i <= a[1]; i++) {
-          realX.push(i)
-        }
-      }
-    } else {
-      realX.push(a)
-    }
-  })
-
-  arrY.forEach((a) => {
-    if (Array.isArray(a)) {
-      // for(let i = )
-      if (a[0] > a[1]) {
-        for (let i = a[0]; i >= a[1]; i--) {
-          realY.push(i)
-        }
-      } else {
-        for (let i = a[0]; i <= a[1]; i++) {
-          realY.push(i)
-        }
-      }
-    } else {
-      realY.push(a)
-    }
-  })
-
-  let newArr = []
-  for (let i = 0; i < realY.length; i++) {
-    for (let j = 0; j < realX.length; j++) {
-      const realXCoo = realY[i]
-      const realYCoo = realX[j]
-      newArr.push(arr[realXCoo * matrixLength + realYCoo])
-    }
-  }
-
-  return newArr
-}
-
-
-
+module.exports.shutdownServer = shutdownServer;

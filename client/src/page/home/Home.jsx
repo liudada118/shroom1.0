@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useRef, useEffect } from "react";
 import Title from "../../components/title/Title";
 import "./index.scss";
 import CanvasCar from "../../components/three/carnewTest copy";
@@ -39,7 +39,6 @@ import RobotBlueSY from '../../components/video/robotSY'
 import RobotBlueLCF from "../../components/video/robotLCF";
 import RobotBlue0428 from "../../components/video/robot0428";
 import MatCol from "../../components/three/matCol";
-import CarY from "../../components/three/carY";
 import CarTq from "../../components/three/carTq";
 import Bed from "../../components/three/Bed";
 import SmallBed from "../../components/three/smallBed";
@@ -52,6 +51,7 @@ import ProgressCom from "../../components/progress/Progress";
 import plus from "../../assets/images/Plus.png";
 import minus from "../../assets/images/Minus.png";
 import reset from "../../assets/images/reset.png";
+import frontView from "../../assets/images/frontView.svg";
 import load from "../../assets/images/load.png";
 import enUS from 'antd/locale/en_US';
 import zhCN from 'antd/locale/zh_CN';
@@ -68,7 +68,7 @@ import {
   objChange,
   arr10to5,
 } from "../../assets/util/line";
-import { ConfigProvider, Input, Popover, message } from "antd";
+import { ConfigProvider, Input, Popover, message, Modal } from "antd";
 
 import { SelectOutlined } from "@ant-design/icons";
 import { Num } from "../../components/num/Num";
@@ -93,7 +93,7 @@ import { chestLine, flLine, frLine, genWebglData, handSkinChange, heatMapMax, hl
 import { WebGLCanvas } from "../../components/webgl/WebGL.HeatMap copy 2";
 
 const isCar = (str) => {
-  const arr = ['yanfeng10', 'car', 'car10', 'volvo', 'footVideo', 'hand0507', 'hand0205', 'carQX', 'eye' , 'sofa', 'carY']
+  const arr = ['yanfeng10', 'car', 'car10', 'volvo', 'footVideo', 'hand0507', 'hand0205', 'handGlove115200', 'carQX', 'eye' , 'sofa']
   return arr.includes(str)
 }
 
@@ -169,14 +169,32 @@ class CanvasCom extends React.Component {
     super(props);
   }
   shouldComponentUpdate(nextProps, nextState) {
-    if (this.props.local !== null || this.props.local !== undefined) {
-      console.log('hand')
+    if (this.props.local !== null && this.props.local !== undefined) {
       return this.props.matrixName != nextProps.matrixName || this.props.local != nextProps.local
     }
     return this.props.matrixName != nextProps.matrixName;
   }
   render() {
-    return <>{this.props.children}</>;
+    const localKey =
+      this.props.local === null || this.props.local === undefined
+        ? "default"
+        : this.props.local
+          ? "playback"
+          : "realtime";
+    const childBaseKey = `${this.props.matrixName}:${localKey}`;
+
+    return (
+      <>
+        {React.Children.map(this.props.children, (child, index) => {
+          if (!React.isValidElement(child)) {
+            return child;
+          }
+          return React.cloneElement(child, {
+            key: `${childBaseKey}:${index}`,
+          });
+        })}
+      </>
+    );
   }
 }
 
@@ -299,34 +317,123 @@ const matrixNameToType = (type) => {
   }
 }
 
-// const localStorage
-const getLocalStorageConfig = ({ sensorType }) => {
+/**
+ * Get cached config from localStorage.
+ * Supports two-dimensional cache: sensorType + mode.
+ * First tries sensorType__mode key, then falls back to sensorType key.
+ */
+const getLocalStorageConfig = ({ sensorType, mode }) => {
   let config = JSON.parse(localStorage.getItem('valueConfig'))
-  // if(!){
-  //   return undefined
-  // }
   if (!config || !Object.keys(config).length) {
     return undefined
   }
 
-  if (!config[sensorType] || !Object.keys(config[sensorType]).length) {
-    return undefined
+  let result = {}
+  // First merge base sensorType config (backward compatible)
+  if (config[sensorType] && Object.keys(config[sensorType]).length) {
+    result = { ...config[sensorType] }
+  }
+  // Then merge mode-specific config (higher priority)
+  if (mode) {
+    const modeKey = `${sensorType}__${mode}`
+    if (config[modeKey] && Object.keys(config[modeKey]).length) {
+      result = { ...result, ...config[modeKey] }
+    }
   }
 
-  return config[sensorType]
+  return Object.keys(result).length ? result : undefined
 }
 
-const getConfig = ({ sensorType }) => {
+/**
+ * Get merged config: defaults + localStorage cache.
+ * @param {string} sensorType - sensor type name
+ * @param {string} mode - display mode (numMatrixFlag), optional
+ */
+const getConfig = ({ sensorType, mode }) => {
   if (!sensorType) {
     return initConfig['bed']
   }
   const realType = matrixNameToType(sensorType)
   const init = initConfig[realType] ? initConfig[realType] : initConfig['bed']
-  const local = getLocalStorageConfig({ sensorType: realType })
+  const local = getLocalStorageConfig({ sensorType: realType, mode })
   return { ...init, ...local }
 }
 
-var backFlag, hz = 12, sitFlag, fingerArr = localStorage.getItem('fingerArr') && JSON.parse(localStorage.getItem('fingerArr')).every((a) => a.length > 0) ? JSON.parse(localStorage.getItem('fingerArr')) : [new Array(5).fill(0), new Array(5).fill(255)];
+var backFlag, hz = 12, sitFlag, realHzFrameCount = 0, realHzLastTime = Date.now(),
+  fingerArrL = localStorage.getItem('fingerArrL') && JSON.parse(localStorage.getItem('fingerArrL')).every((a) => a.length > 0) ? JSON.parse(localStorage.getItem('fingerArrL')) : [new Array(5).fill(0), new Array(5).fill(255)],
+  fingerArrR = localStorage.getItem('fingerArrR') && JSON.parse(localStorage.getItem('fingerArrR')).every((a) => a.length > 0) ? JSON.parse(localStorage.getItem('fingerArrR')) : [new Array(5).fill(0), new Array(5).fill(255)],
+  fingerArr = fingerArrL; // 默认指向左手，兼容旧逻辑
+
+// jqbed 健康监测语音播报
+const speechDict = {
+  "已离床": {
+    zh: "已离床",
+    en: "Left the bed",
+    ja: "ベッドから離れました"
+  },
+  "坠床风险": {
+    zh: "坠床风险",
+    en: "Risk of falling from bed",
+    ja: "ベッドから転落の危険があります"
+  },
+  "已坐起": {
+    zh: "已坐起",
+    en: "Sat up",
+    ja: "起き上がりました"
+  },
+  "SOS紧急求助": {
+    zh: "S O S 紧急求助",
+    en: "S O S Emergency Help",
+    ja: "S O S 緊急ヘルプ"
+  }
+};
+
+function speakMessage(key, lang = "zh") {
+
+
+  if (!speechDict[key] || !speechDict[key][lang]) {
+    console.warn("未找到对应翻译:", key, lang);
+    return;
+  }
+  const text = speechDict[key][lang];
+  const utter = new SpeechSynthesisUtterance(text);
+
+
+
+
+  // 设置语言
+  if (lang === "zh") utter.lang = "zh-CN";   // 中文
+  if (lang === "en") utter.lang = "en-US";   // 英文
+  if (lang === "ja") utter.lang = "ja-JP";   // 日文
+
+
+  // 优先选择女声 voice
+  const voices = speechSynthesis.getVoices();
+  const langVoices = voices.filter(v => v.lang.startsWith(utter.lang));
+
+  // 女声关键词匹配（覆盖 Windows / macOS / Linux 常见女声名称）
+  const femaleKeywords = [
+    'xiaoxiao', 'huihui', 'yaoyao', 'female', 'woman',
+    'tingting', 'meijia', 'sinji',
+    'zira', 'hazel', 'susan', 'linda',
+    'nanami', 'haruka',
+    'google', // Google 默认中文声音通常是女声
+  ];
+
+  // 优先匹配女声
+  let voice = langVoices.find(v =>
+    femaleKeywords.some(kw => v.name.toLowerCase().includes(kw))
+  );
+
+  // 如果没找到女声关键词，选该语言第一个可用声音
+  if (!voice && langVoices.length > 0) voice = langVoices[0];
+
+  if (voice) utter.voice = voice;
+
+  speechSynthesis.speak(utter);
+}
+
+let onBedState = []
 class Home extends React.Component {
   constructor() {
     super();
@@ -341,14 +448,12 @@ class Home extends React.Component {
       valuelInit1: initValue.valuelInit1,
       valueMult: initValue.valueMult,
       compen: initValue.compen,
-      press: initValue.press,
       port: [{ value: " ", label: "" }],
       portname: "",
       portnameBack: "",
       portnameHead: '',
       matrixTitle: localStorage.getItem('matrixTitle') ? true : false,
       allowedTypes: localStorage.getItem('allowedTypes') ? JSON.parse(localStorage.getItem('allowedTypes')) : null,
-      length: 0,
       local: false,
       dataArr: [],
       index: 0,
@@ -394,7 +499,13 @@ class Home extends React.Component {
       butt: 0,
       locale: 'en',
       calibration: false,
-      showType: 'hand'
+      showType: 'hand',
+      licenseModalVisible: false,
+      licenseModalType: '',
+      licenseModalExpireDate: '',
+      licenseModalRemainDays: 0,
+      hz: 12,
+      realHz: 0
     };
     this.com = React.createRef();
     this.data = React.createRef();
@@ -413,7 +524,6 @@ class Home extends React.Component {
 
   componentDidMount() {
     // window.alert(window.innerWidth)
-    console.log(this.state.matrixName)
     document.documentElement.style.fontSize = `${window.innerWidth / 120}px`;
 
     var c2 = document.getElementById("myChartBig");
@@ -636,13 +746,15 @@ class Home extends React.Component {
     if (ws) {
       ws.close()
     }
-    // [优化] ws1/ws2 已不再使用
-    // if (ws1) {
-    //   ws1.close()
-    // }
-    // if (ws2) {
-    //   ws2.close()
-    // }
+    // 清理节流定时器，防止内存泄漏
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    if (timer1) {
+      clearTimeout(timer1);
+      timer1 = null;
+    }
   }
 
   colPushData() {
@@ -763,6 +875,18 @@ class Home extends React.Component {
   wsData = (e) => {
     sitPress = 0;
     let jsonObject = JSON.parse(e.data);
+
+    // download 弹窗判断 - 放在最前面确保不被其他逻辑阻断
+    if (jsonObject.download != null) {
+      console.log('[download弹窗] 收到download消息:', jsonObject.download);
+      if (this.props.messageApi) {
+        this.props.messageApi.info(jsonObject.download);
+      } else {
+        message.info(jsonObject.download);
+      }
+      return;
+    }
+
     //处理空数组
     sitDataFlag = false;
 
@@ -836,6 +960,53 @@ class Home extends React.Component {
       // })
     }
 
+    // ====== 密钥过期检查 ======
+    // 处理密钥错误提示
+    if (jsonObject.licenseError != null) {
+      // 无有效密钥时跳转到密钥输入页
+      if (jsonObject.noLicense) {
+        Modal.error({
+          title: '密钥错误',
+          content: jsonObject.licenseError,
+          onOk: () => {
+            window.location.hash = '#/?from=system';
+          }
+        });
+      } else {
+        Modal.error({
+          title: '密钥错误',
+          content: jsonObject.licenseError,
+        });
+      }
+    }
+
+    if (jsonObject.date != null) {
+      const endDate = parseFloat(jsonObject.date);
+      const serverNow = jsonObject.nowDate ? parseFloat(jsonObject.nowDate) : Date.now();
+      const remainMs = endDate - serverNow;
+      const remainDays = Math.ceil(remainMs / 86400000);
+      const expireDateStr = new Date(endDate).toLocaleString();
+      console.log('[密钥检查] endDate:', endDate, 'serverNow:', serverNow, 'remainMs:', remainMs, 'remainDays:', remainDays);
+
+      if (remainMs <= 0) {
+        console.log('[密钥检查] 密钥已过期，弹出提示');
+        this.setState({
+          licenseModalVisible: true,
+          licenseModalType: 'expired',
+          licenseModalExpireDate: expireDateStr,
+          licenseModalRemainDays: 0
+        });
+      } else if (remainDays <= 7) {
+        console.log('[密钥检查] 密钥即将过期，剩余', remainDays, '天');
+        this.setState({
+          licenseModalVisible: true,
+          licenseModalType: 'warning',
+          licenseModalExpireDate: expireDateStr,
+          licenseModalRemainDays: remainDays
+        });
+      }
+    }
+
     if (jsonObject.file != null) {
       if (jsonObject.file === 'all') {
         this.setState({ matrixTitle: true })
@@ -870,13 +1041,86 @@ class Home extends React.Component {
 
     if (jsonObject.backFlag != null) {
       backFlag = jsonObject.backFlag;
+      // 根据左右手切换 fingerArr 指向
+      fingerArr = backFlag ? fingerArrR : fingerArrL;
     }
 
     if (jsonObject.hz != null) {
       hz = jsonObject.hz
+      if (this.state.hz !== hz) {
+        this.setState({ hz: hz })
+      }
+    }
+
+    if (jsonObject.rate != null) {
+      this.data.current?.changeData(jsonObject.rate);
+
+
+      if (onBedState.length < 2) {
+        onBedState.push(jsonObject.rate.stateInBbed)
+      } else {
+        onBedState.shift()
+        onBedState.push(jsonObject.rate.stateInBbed)
+      }
+
+
+      if (onBedState[0] != onBedState[1] && onBedState[1] == 0) {
+
+
+        // if (this.props.i18n.language == 'zh') {
+        //   const msg = new SpeechSynthesisUtterance("已离床");
+        //   msg.lang = "zh-CN"; // 设定语言
+        //   speechSynthesis.speak(msg);
+        // }else if(this.props.i18n.language == 'en'){
+        //   const msg = new SpeechSynthesisUtterance("已离床");
+        //   msg.lang = "en-US"; // 设定语言
+        //   speechSynthesis.speak(msg);
+        // }
+        speakMessage("已离床", this.props.i18n.language)
+
+
+      }
+
+
+      if (onBedState[0] != onBedState[1] && onBedState[1] == 3) {
+        // const msg = new SpeechSynthesisUtterance("坠床风险");
+        // msg.lang = "zh-CN"; // 设定语言
+        // speechSynthesis.speak(msg);
+        speakMessage("坠床风险", this.props.i18n.language)
+      }
+
+
+      if (onBedState[0] != onBedState[1] && onBedState[1] == 4) {
+        // const msg = new SpeechSynthesisUtterance("已坐起");
+        // msg.lang = "zh-CN"; // 设定语言
+        // speechSynthesis.speak(msg);
+        speakMessage("已坐起", this.props.i18n.language)
+      }
+
+
+
+
+      if (jsonObject.rate.sosflag) {
+        // const msg = new SpeechSynthesisUtterance("SOS紧急求助");
+        // msg.lang = "zh-CN"; // 设定语言
+        // speechSynthesis.speak(msg);
+        speakMessage("SOS紧急求助", this.props.i18n.language)
+      }
     }
 
     if (jsonObject.sitData != null) {
+      // 统计真实采样频率
+      realHzFrameCount++;
+      const now = Date.now();
+      if (now - realHzLastTime >= 1000) {
+        const realHz = Math.round(realHzFrameCount * 1000 / (now - realHzLastTime));
+        if (this.state.realHz !== realHz) {
+          this.setState({ realHz: realHz });
+        }
+        realHzFrameCount = 0;
+        realHzLastTime = now;
+      }
+
       if (this.state.matrixName != "car10") {
         if (colValueFlag) {
           num++;
@@ -925,7 +1169,7 @@ class Home extends React.Component {
 
 
 
-    if (this.state.hand && this.state.numMatrixFlag == 'normal' && jsonObject.rotate != null && this.state.matrixName == 'hand0205') {
+    if (this.state.hand && this.state.numMatrixFlag == 'normal' && jsonObject.rotate != null && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
       let wsPointData = jsonObject.sitData;
       let rotate = jsonObject.rotate;
       // sitTypeEvent[this.state.matrixName]({
@@ -966,7 +1210,8 @@ class Home extends React.Component {
     // }
 
 
-    if ((jsonObject.newArr != null || jsonObject.newArr147 != null) &&
+    if (jsonObject.sitData != null &&
+      (jsonObject.newArr != null || jsonObject.newArr147 != null) &&
       (['robot1', 'footVideo'].includes(this.state.matrixName) || this.state.matrixName.includes('robot') ||
         this.state.matrixName.includes('hand') || this.state.matrixName == 'Num3D')) {
       const that = this
@@ -1079,27 +1324,31 @@ class Home extends React.Component {
 
               if (!that.state.calibration) {
                 //  z 
-                if (rotate && !rotate.includes(undefined)) {
+                if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
                   let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-                  com?.changeHandAngle(arr)
+                  // 过滤四元数绝对值超过1的异常数据
+                  if (!arr.some(v => Math.abs(v) > 1)) {
+                    com?.changeHandAngle(arr)
+                  }
                 }
 
                 if (fingerArr) {
-                  if (!fingerArr[0]) {
+                  if (!fingerArr[0] || !Array.isArray(fingerArr[0])) {
                     fingerArr[0] = new Array(5).fill(0)
                   }
-                  if (!fingerArr[1]) {
+                  if (!fingerArr[1] || !Array.isArray(fingerArr[1])) {
                     fingerArr[1] = new Array(5).fill(255)
                   }
                   const baseArr = []
                   for (let i = 0; i < 5; i++) {
-                    baseArr.push(fingerArr[1][i] - fingerArr[0][i])
+                    baseArr.push((fingerArr[1][i] || 0) - (fingerArr[0][i] || 0))
                   }
 
 
                   for (let i = 0; i < 5; i++) {
-
-                    const numberValue = Math.round((wsPointData[i] - fingerArr[0][i]) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
+                    const rawValue = wsPointData[i]
+                    if (rawValue == null || isNaN(rawValue)) continue;
+                    const numberValue = Math.round((rawValue - (fingerArr[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
                     const value = (numberValue) < 0 ? 0 : (numberValue) >= 1 ? 1 : (numberValue)
 
                     newArr[i] = newArr[i] + (value - newArr[i]) / 3
@@ -1113,9 +1362,41 @@ class Home extends React.Component {
                 // that.com.current?.handZero()
                 // that.com.current?.calibration([0,0,0])
               }
+            } else if (this.state.numMatrixFlag == 'numoriginal' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+              // 手套原始数据模式：保留147映射数据显示
+              let newArr = [...wsPointData]
+              if (this.com.current?.changeWsData147R) {
+                this.com.current.changeWsData147R([...newArr])
+              } else {
+                this.com.current?.changeWsData147([...newArr])
+              }
+            } else if (this.state.numMatrixFlag == 'num' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+              // 手套2D数字模式：使用 sitData 的原始256数据点，以16x16矩阵显示
+              let rawData = jsonObject.sitData;
+              if (rawData && !Array.isArray(rawData)) {
+                rawData = JSON.parse(rawData);
+              }
+              if (rawData && rawData.length >= 256) {
+                this.com.current?.changeWsData256([...rawData.slice(0, 256)])
+              } else {
+                // 旧版数据回退到147显示
+                this.com.current?.changeWsData147([...wsPointData])
+              }
+            } else if (this.state.numMatrixFlag == 'num3D' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+              // 手套3D数字模式：使用147映射数据，跟之前一样
+              let newArr = [...wsPointData]
+              if (this.com.current?.changeWsData147R) {
+                this.com.current.changeWsData147R([...newArr])
+              } else {
+                this.com.current?.changeWsData147([...newArr])
+              }
             } else if (this.state.numMatrixFlag.includes('num')) {
               let newArr = [...wsPointData]
-              this.com.current?.changeWsData147([...newArr])
+              if (this.com.current?.changeWsData147R) {
+                this.com.current.changeWsData147R([...newArr])
+              } else {
+                this.com.current?.changeWsData147([...newArr])
+              }
             } else if (this.state.numMatrixFlag == 'skin') {
               let newArr = [...wsPointData]
               wsPointData = handSkinChange(wsPointData)
@@ -1187,27 +1468,31 @@ class Home extends React.Component {
 
               if (!that.state.calibration) {
                 //  z 
-                if (rotate && !rotate.includes(undefined)) {
+                if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
                   let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-                  com?.changeHandAngle(arr)
+                  // 过滤四元数绝对值超过1的异常数据
+                  if (!arr.some(v => Math.abs(v) > 1)) {
+                    com?.changeHandAngle(arr)
+                  }
                 }
 
                 if (fingerArr) {
-                  if (!fingerArr[0]) {
+                  if (!fingerArr[0] || !Array.isArray(fingerArr[0])) {
                     fingerArr[0] = new Array(5).fill(0)
                   }
-                  if (!fingerArr[1]) {
+                  if (!fingerArr[1] || !Array.isArray(fingerArr[1])) {
                     fingerArr[1] = new Array(5).fill(255)
                   }
                   const baseArr = []
                   for (let i = 0; i < 5; i++) {
-                    baseArr.push(fingerArr[1][i] - fingerArr[0][i])
+                    baseArr.push((fingerArr[1][i] || 0) - (fingerArr[0][i] || 0))
                   }
 
 
                   for (let i = 0; i < 5; i++) {
-
-                    const numberValue = Math.round((wsPointData[i] - fingerArr[0][i]) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
+                    const rawValue = wsPointData[i]
+                    if (rawValue == null || isNaN(rawValue)) continue;
+                    const numberValue = Math.round((rawValue - (fingerArr[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
                     const value = (numberValue) < 0 ? 0 : (numberValue) >= 1 ? 1 : (numberValue)
 
                     newArr[i] = newArr[i] + (value - newArr[i]) / 3
@@ -1221,9 +1506,41 @@ class Home extends React.Component {
                 // that.com.current?.handZero()
                 // that.com.current?.calibration([0,0,0])
               }
+            } else if (this.state.numMatrixFlag == 'numoriginal' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+              // 手套原始数据模式：保留147映射数据显示
+              let newArr = [...wsPointData]
+              if (this.com.current?.changeWsData147R) {
+                this.com.current.changeWsData147R([...newArr])
+              } else {
+                this.com.current?.changeWsData147([...newArr])
+              }
+            } else if (this.state.numMatrixFlag == 'num' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+              // 手套2D数字模式：使用 sitData 的原始256数据点，以16x16矩阵显示
+              let rawData = jsonObject.sitData;
+              if (rawData && !Array.isArray(rawData)) {
+                rawData = JSON.parse(rawData);
+              }
+              if (rawData && rawData.length >= 256) {
+                this.com.current?.changeWsData256([...rawData.slice(0, 256)])
+              } else {
+                // 旧版数据回退到147显示
+                this.com.current?.changeWsData147([...wsPointData])
+              }
+            } else if (this.state.numMatrixFlag == 'num3D' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+              // 手套3D数字模式：使用147映射数据，跟之前一样
+              let newArr = [...wsPointData]
+              if (this.com.current?.changeWsData147R) {
+                this.com.current.changeWsData147R([...newArr])
+              } else {
+                this.com.current?.changeWsData147([...newArr])
+              }
             } else if (this.state.numMatrixFlag.includes('num')) {
               let newArr = [...wsPointData]
-              this.com.current?.changeWsData147([...newArr])
+              if (this.com.current?.changeWsData147R) {
+                this.com.current.changeWsData147R([...newArr])
+              } else {
+                this.com.current?.changeWsData147([...newArr])
+              }
             } else if (this.state.numMatrixFlag == 'skin') {
               wsPointData = handSkinChange(wsPointData)
               that.com.current?.sitData({
@@ -1240,14 +1557,13 @@ class Home extends React.Component {
         if (this.state.matrixName == 'footVideo') {
           if (this.state.numMatrixFlag.includes('num')) {
             let newArr = [...wsPointData]
-            console.log(wsPointData, 'wsPointData')
+
             // this.com.current?.changeWsData147([...newArr])
             this.com.current?.changeWsData147R({ left: [...newArr] })
           }
         } else if (this.state.matrixName.includes('robot')) {
           if (this.state.numMatrixFlag.includes('num')) {
             let newArr = [...wsPointData]
-            console.log(wsPointData)
             this.com.current?.changeWsData147([...newArr])
           }
         }
@@ -1341,9 +1657,6 @@ class Home extends React.Component {
       }
     }
 
-    if (jsonObject.download != null) {
-      message.info(jsonObject.download);
-    }
   };
 
 
@@ -1382,7 +1695,6 @@ class Home extends React.Component {
         this.state.matrixName !== "bigBed" &&
         this.state.matrixName !== "foot"
       ) {
-        console.log(this.state.matrixName)
         backTypeEvent[this.state.matrixName]({
           that: this,
           jsonObject,
@@ -1394,9 +1706,10 @@ class Home extends React.Component {
       }
     }
 
-    if ((jsonObject.newArr != null || jsonObject.newArr147 != null) && (['robot1', 'footVideo'].includes(this.state.matrixName) || this.state.matrixName.includes('hand') || this.state.matrixName == 'Num3D')) {
+    if (jsonObject.backData != null &&
+      (jsonObject.newArr != null || jsonObject.newArr147 != null) &&
+      (['robot1', 'footVideo'].includes(this.state.matrixName) || this.state.matrixName.includes('hand') || this.state.matrixName == 'Num3D')) {
 
-      console.log(this.state.numMatrixFlag)
       const that = this
       let wsPointData = jsonObject.newArr || jsonObject.newArr147;
       if (!Array.isArray(wsPointData)) {
@@ -1404,16 +1717,12 @@ class Home extends React.Component {
       }
       let rotate = jsonObject.rotate;
 
-      // if (['robot1', 'footVideo'].includes(this.state.matrixName)) {
-      //   if (this.state.numMatrixFlag.includes('num')) {
-      //     let newArr = [...wsPointData]
-      //     this.com.current?.changeWsData147([...newArr])
-
-      //   }
-      //   return
-      // }
-
-      if (!this.state.hand && this.state.matrixName.includes('hand')) {
+      // [fix] robot 已在块1处理，块2 不再重复处理
+      if (this.state.matrixName.includes('robot')) {
+        // 跳过 robot
+      } else if (this.state.matrixName == 'footVideo') {
+        // footVideo 已在块1 backTypeEvent 中处理，跳过
+      } else if (!this.state.hand && this.state.matrixName.includes('hand')) {
 
 
         if (this.state.matrixName == 'Num3D') {
@@ -1499,31 +1808,34 @@ class Home extends React.Component {
                 that.com.current?.bthClickHandle(wsPointData);
               }
 
-              console.log(wsPointDataSit)
 
               if (!that.state.calibration) {
                 //  z 
-                if (rotate && !rotate.includes(undefined)) {
+                if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
                   let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-                  com?.changeHandAngle(arr)
+                  // 过滤四元数绝对值超过1的异常数据
+                  if (!arr.some(v => Math.abs(v) > 1)) {
+                    com?.changeHandAngle(arr)
+                  }
                 }
 
                 if (fingerArr) {
-                  if (!fingerArr[0]) {
+                  if (!fingerArr[0] || !Array.isArray(fingerArr[0])) {
                     fingerArr[0] = new Array(5).fill(0)
                   }
-                  if (!fingerArr[1]) {
+                  if (!fingerArr[1] || !Array.isArray(fingerArr[1])) {
                     fingerArr[1] = new Array(5).fill(255)
                   }
                   const baseArr = []
                   for (let i = 0; i < 5; i++) {
-                    baseArr.push(fingerArr[1][i] - fingerArr[0][i])
+                    baseArr.push((fingerArr[1][i] || 0) - (fingerArr[0][i] || 0))
                   }
 
 
                   for (let i = 0; i < 5; i++) {
-
-                    const numberValue = Math.round((wsPointData[i] - fingerArr[0][i]) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
+                    const rawValue = wsPointData[i]
+                    if (rawValue == null || isNaN(rawValue)) continue;
+                    const numberValue = Math.round((rawValue - (fingerArr[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
                     const value = (numberValue) < 0 ? 0 : (numberValue) >= 1 ? 1 : (numberValue)
 
                     newArr[i] = newArr[i] + (value - newArr[i]) / 3
@@ -1537,6 +1849,26 @@ class Home extends React.Component {
                 // that.com.current?.handZero()
                 // that.com.current?.calibration([0,0,0])
               }
+            } else if (this.state.numMatrixFlag == 'numoriginal' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+              // 手套原始数据模式：保留147映射数据显示
+              let newArr = [...wsPointData]
+              this.com.current?.changeWsData147([...newArr])
+            } else if (this.state.numMatrixFlag == 'num' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+              // 手套2D数字模式：使用 backData 的原始256数据点，以16x16矩阵显示
+              let rawData = jsonObject.backData;
+              if (rawData && !Array.isArray(rawData)) {
+                rawData = JSON.parse(rawData);
+              }
+              if (rawData && rawData.length >= 256) {
+                this.com.current?.changeWsData256([...rawData.slice(0, 256)])
+              } else {
+                // 旧版数据回退到147显示
+                this.com.current?.changeWsData147([...wsPointData])
+              }
+            } else if (this.state.numMatrixFlag == 'num3D' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+              // 手套3D数字模式：使用147映射数据，跟之前一样
+              let newArr = [...wsPointData]
+              this.com.current?.changeWsData147([...newArr])
             } else if (this.state.numMatrixFlag.includes('num')) {
               let newArr = [...wsPointData]
               this.com.current?.changeWsData147([...newArr])
@@ -1607,31 +1939,34 @@ class Home extends React.Component {
                 that.com.current?.bthClickHandle(wsPointData);
               }
 
-              console.log(wsPointDataSit)
 
               if (!that.state.calibration) {
                 //  z 
-                if (rotate && !rotate.includes(undefined)) {
+                if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
                   let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-                  com?.changeHandAngle(arr)
+                  // 过滤四元数绝对值超过1的异常数据
+                  if (!arr.some(v => Math.abs(v) > 1)) {
+                    com?.changeHandAngle(arr)
+                  }
                 }
 
                 if (fingerArr) {
-                  if (!fingerArr[0]) {
+                  if (!fingerArr[0] || !Array.isArray(fingerArr[0])) {
                     fingerArr[0] = new Array(5).fill(0)
                   }
-                  if (!fingerArr[1]) {
+                  if (!fingerArr[1] || !Array.isArray(fingerArr[1])) {
                     fingerArr[1] = new Array(5).fill(255)
                   }
                   const baseArr = []
                   for (let i = 0; i < 5; i++) {
-                    baseArr.push(fingerArr[1][i] - fingerArr[0][i])
+                    baseArr.push((fingerArr[1][i] || 0) - (fingerArr[0][i] || 0))
                   }
 
 
                   for (let i = 0; i < 5; i++) {
-
-                    const numberValue = Math.round((wsPointData[i] - fingerArr[0][i]) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
+                    const rawValue = wsPointData[i]
+                    if (rawValue == null || isNaN(rawValue)) continue;
+                    const numberValue = Math.round((rawValue - (fingerArr[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
                     const value = (numberValue) < 0 ? 0 : (numberValue) >= 1 ? 1 : (numberValue)
 
                     newArr[i] = newArr[i] + (value - newArr[i]) / 3
@@ -1645,6 +1980,26 @@ class Home extends React.Component {
                 // that.com.current?.handZero()
                 // that.com.current?.calibration([0,0,0])
               }
+            } else if (this.state.numMatrixFlag == 'numoriginal' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+              // 手套原始数据模式：保留147映射数据显示
+              let newArr = [...wsPointData]
+              this.com.current?.changeWsData147([...newArr])
+            } else if (this.state.numMatrixFlag == 'num' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+              // 手套2D数字模式：使用 backData 的原始256数据点，以16x16矩阵显示
+              let rawData = jsonObject.backData;
+              if (rawData && !Array.isArray(rawData)) {
+                rawData = JSON.parse(rawData);
+              }
+              if (rawData && rawData.length >= 256) {
+                this.com.current?.changeWsData256([...rawData.slice(0, 256)])
+              } else {
+                // 旧版数据回退到147显示
+                this.com.current?.changeWsData147([...wsPointData])
+              }
+            } else if (this.state.numMatrixFlag == 'num3D' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
+              // 手套3D数字模式：使用147映射数据，跟之前一样
+              let newArr = [...wsPointData]
+              this.com.current?.changeWsData147([...newArr])
             } else if (this.state.numMatrixFlag.includes('num')) {
               let newArr = [...wsPointData]
               this.com.current?.changeWsData147([...newArr])
@@ -1664,7 +2019,7 @@ class Home extends React.Component {
           if (this.state.numMatrixFlag.includes('num')) {
             let newArr = [...wsPointData]
 
-            console.log(wsPointData, 'wsPointData1')
+
 
             this.com.current?.changeWsData147R({ right: [...newArr] })
           }
@@ -1808,9 +2163,47 @@ class Home extends React.Component {
 
   changeMatrix = (e) => {
     // setMatrixName(e)
-    const configObj = getConfig({ sensorType: e })
-    console.log(configObj)
-    this.setState({ matrixName: e, ...configObj });
+    const configObj = getConfig({ sensorType: e, mode: this.state.numMatrixFlag })
+    const wasLocal = this.state.local;
+
+    // 1. 先停止回放，确保后端不再发送旧数据
+    this.wsSendObj({ play: false });
+    // 2. 关闭所有串口，确保切换前旧串口完全停止
+    this.wsSendObj({ sitClose: true, backClose: true, headClose: true });
+    // 3. 再发送 file 切换，后端切换数据库并重置回放状态
+    this.wsSendObj({ file: e });
+
+    // 4. 清空前端数据
+    this.data.current?.changeData({ meanPres: 0, maxPres: 0, point: 0, area: 0, totalPres: 0, pressure: 0 });
+    this.data.current?.initCharts();
+    this.areaArr = null;
+    this.pressArr = null;
+    this.max = 0;
+    this.pressMax = 0;
+
+    // 5. 重置回放控件（播放状态 + 滑块位置）
+    this.progress.current?.resetPlay();
+
+    this.setState({
+      matrixName: e,
+      ...configObj,
+      dataArr: [],
+      dataTime: '',
+      areaArr: null,
+      pressArr: null,
+      playflag: false,
+      portname: '',
+      portnameBack: '',
+      portnameHead: '',
+    });
+
+    // 6. 如果当前在回放模式，重新请求新 db 的时间列表
+    if (wasLocal) {
+      // 延迟发送，确保后端先处理 file 切换
+      setTimeout(() => {
+        this.wsSendObj({ local: true });
+      }, 100);
+    }
     // 网络版
     // if (e === 'yanfeng10') {
     //   ws.close()
@@ -1972,7 +2365,7 @@ class Home extends React.Component {
       if (value) {
         ws.send(JSON.stringify({ local: true }));
       } else {
-        ws.send(JSON.stringify({ local: false }));
+        ws.send(JSON.stringify({ play: false, local: false, history: false }));
       }
     }
   };
@@ -2168,7 +2561,7 @@ class Home extends React.Component {
         .reduce((a, b) => a + b, 0);
       backMax = (backMax / (backTotalvalue ? backTotalvalue : 1)) * backTotal;
       backMean = backTotal / (backPoint ? backPoint : 1);
-      console.log(backTotal)
+
       this.data.current?.changeData({
         meanPres: backMean.toFixed(2),
         maxPres: backMax.toFixed(2),
@@ -2247,7 +2640,7 @@ class Home extends React.Component {
         .reduce((a, b) => a + b, 0);
       headMax = (headMax / (headTotalvalue ? headTotalvalue : 1)) * headTotal;
       headMean = headTotal / (headPoint ? headPoint : 1);
-      console.log(headTotal)
+
       this.data.current?.changeData({
         meanPres: headMean.toFixed(2),
         maxPres: headMax.toFixed(2),
@@ -2290,11 +2683,18 @@ class Home extends React.Component {
     })
   }
 
-  colFingerData(index) {
-    const arr = localStorage.getItem('fingerArr') ? JSON.parse(localStorage.getItem('fingerArr')) : []
+  colFingerData(index, hand = 'left') {
+    const key = hand === 'right' ? 'fingerArrR' : 'fingerArrL'
+    const arr = localStorage.getItem(key) ? JSON.parse(localStorage.getItem(key)) : []
     arr[index] = wsPointDataSit
-    fingerArr = arr
-    localStorage.setItem('fingerArr', JSON.stringify(arr))
+    if (hand === 'right') {
+      fingerArrR = arr
+    } else {
+      fingerArrL = arr
+    }
+    // 同步当前 fingerArr 指向
+    fingerArr = backFlag ? fingerArrR : fingerArrL
+    localStorage.setItem(key, JSON.stringify(arr))
   }
 
   render() {
@@ -2304,10 +2704,11 @@ class Home extends React.Component {
     // rotateY: "绕y轴旋转30°",
     // selectBox: "框选一个矩形区域"
     const { t, i18n } = this.props;
-    console.log(this.props)
+
     const text = t('rotate');
     const text2 = t('boxSelection');
     const textReset = t('reset')
+    const modeCanvasMatrixName = `${this.state.matrixName}:${this.state.numMatrixFlag}`;
     const contentReset = (
       <div>
         <p>{t('resetContent')}</p>
@@ -2518,6 +2919,36 @@ class Home extends React.Component {
                 </div>
               </Popover>
 
+              <Popover
+                placement="top"
+                title={t('frontView') || '正面视角'}
+                content={<div><p>{t('frontViewContent') || '切换到正面视角'}</p></div>}
+              >
+                <div
+                  className="setIcon marginB10"
+                  style={{ marginTop: '10px' }}
+                  onClick={() => {
+                    xvalue = 0;
+                    zvalue = 0;
+                    localStorage.setItem('bedx', 0);
+                    localStorage.setItem('bedz', 0);
+                    if (this.com.current && this.com.current.changeGroupRotate) {
+                      this.com.current?.changeGroupRotate({ x: 0, z: 0 });
+                    }
+                    if (this.com.current && this.com.current.changePointRotation) {
+                      this.com.current?.changePointRotation({ direction: 'x', value: 0, type: this.state.carState });
+                      this.com.current?.changePointRotation({ direction: 'z', value: 0, type: this.state.carState });
+                    }
+                    // Set front view (rotateX=0, rotateZ=0) for Num3D component
+                    if (this.com.current && this.com.current.setFrontView) {
+                      this.com.current?.setFrontView();
+                    }
+                  }}
+                >
+                  <img src={frontView} alt="" />
+                </div>
+              </Popover>
+
             </div>
             {this.state.matrixName == "foot" ? (
               <Popover placement="top" title={"刷新"} content={content3}>
@@ -2570,7 +3001,7 @@ class Home extends React.Component {
                     });
                     this.com.current?.changeSelectFlag(flag, this.state.local);
 
-                    console.log(flag)
+
 
                     if (flag) {
                       this.setState({ width: 0, height: 0 });
@@ -2752,18 +3183,10 @@ class Home extends React.Component {
             <Heatmap ref={this.com} matrixName={this.state.matrixName} />
           ) :
 
-            this.state.numMatrixFlag == "num3D" && ["hand0205", 'robot1', 'footVideo'].includes(this.state.matrixName) ?
-              <Num3D
-                ref={this.com}
-                matrixName={this.state.matrixName}
-                data={this.data}
-                local={this.state.local}
-                handleChartsBody={this.handleChartsBody.bind(this)}
-                handleChartsBody1={this.handleChartsBody1.bind(this)}
-                changeStateData={this.changeStateData}
-                changeSelect={this.changeSelect} />
-              : this.state.numMatrixFlag == "num" && ["hand0205", 'robot1', 'footVideo'].includes(this.state.matrixName) ?
-                <Num2D ref={this.com}
+            this.state.numMatrixFlag == "num3D" && ["hand0205", 'handGlove115200', 'robot1', 'footVideo'].includes(this.state.matrixName) ?
+              <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
+                <Num3D
+                  ref={this.com}
                   matrixName={this.state.matrixName}
                   data={this.data}
                   local={this.state.local}
@@ -2771,10 +3194,10 @@ class Home extends React.Component {
                   handleChartsBody1={this.handleChartsBody1.bind(this)}
                   changeStateData={this.changeStateData}
                   changeSelect={this.changeSelect} />
-                :
-
-                this.state.numMatrixFlag == "numoriginal" && ["hand0205", 'robot1', 'footVideo', 'robotSY', 'robotLCF'].includes(this.state.matrixName) ?
-                  <Num2DOriginal ref={this.com}
+              </CanvasCom>
+              : this.state.numMatrixFlag == "num" && ["hand0205", 'handGlove115200', 'robot1', 'footVideo'].includes(this.state.matrixName) ?
+                <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
+                  <Num2D ref={this.com}
                     matrixName={this.state.matrixName}
                     data={this.data}
                     local={this.state.local}
@@ -2782,17 +3205,45 @@ class Home extends React.Component {
                     handleChartsBody1={this.handleChartsBody1.bind(this)}
                     changeStateData={this.changeStateData}
                     changeSelect={this.changeSelect} />
-                  :
-                  this.state.numMatrixFlag == "skin" && ["hand0205", 'robot1', 'footVideo'].includes(this.state.matrixName) ?
-                    <HandVideo1
+                </CanvasCom>
+                :
+
+                this.state.numMatrixFlag == "numoriginal" && this.state.matrixName == 'hand' ?
+                  <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
+                    <Fast1024
                       ref={this.com}
                       data={this.data}
                       local={this.state.local}
-                      hand={this.state.hand}
                       handleChartsBody={this.handleChartsBody.bind(this)}
                       handleChartsBody1={this.handleChartsBody1.bind(this)}
                       changeStateData={this.changeStateData}
                       changeSelect={this.changeSelect} />
+                  </CanvasCom>
+                  :
+                  this.state.numMatrixFlag == "numoriginal" && ["hand0205", 'handGlove115200', 'robot1', 'footVideo', 'robotSY', 'robotLCF', 'normal', 'smallBed', 'jqbed', 'daliegu', 'smallSample'].includes(this.state.matrixName) ?
+                  <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
+                    <Num2DOriginal ref={this.com}
+                      matrixName={this.state.matrixName}
+                      data={this.data}
+                      local={this.state.local}
+                      handleChartsBody={this.handleChartsBody.bind(this)}
+                      handleChartsBody1={this.handleChartsBody1.bind(this)}
+                      changeStateData={this.changeStateData}
+                      changeSelect={this.changeSelect} />
+                  </CanvasCom>
+                  :
+                  this.state.numMatrixFlag == "skin" && ["hand0205", 'handGlove115200', 'robot1', 'footVideo'].includes(this.state.matrixName) ?
+                    <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
+                      <HandVideo1
+                        ref={this.com}
+                        data={this.data}
+                        local={this.state.local}
+                        hand={this.state.hand}
+                        handleChartsBody={this.handleChartsBody.bind(this)}
+                        handleChartsBody1={this.handleChartsBody1.bind(this)}
+                        changeStateData={this.changeStateData}
+                        changeSelect={this.changeSelect} />
+                    </CanvasCom>
                     :
 
                     this.state.matrixName == "foot" ? (
@@ -2877,6 +3328,19 @@ class Home extends React.Component {
                           changeStateData={this.changeStateData}
                           changeSelect={this.changeSelect} />
                       </CanvasCom>
+                    ) : this.state.matrixName == "normalFast" ? (
+                      <CanvasCom matrixName={this.state.matrixName}
+                        local={this.state.local}
+                      >
+                        <Fast1024
+                          ref={this.com}
+                          data={this.data}
+                          local={this.state.local}
+                          handleChartsBody={this.handleChartsBody.bind(this)}
+                          handleChartsBody1={this.handleChartsBody1.bind(this)}
+                          changeStateData={this.changeStateData}
+                          changeSelect={this.changeSelect} />
+                      </CanvasCom>
                     ) : this.state.matrixName == "fast1024" ? (
                       <CanvasCom matrixName={this.state.matrixName}
                         local={this.state.local}
@@ -2943,7 +3407,7 @@ class Home extends React.Component {
                           changeStateData={this.changeStateData}
                           changeSelect={this.changeSelect} />
                       </CanvasCom>
-                    ) : this.state.matrixName == "hand0205" ? (
+                    ) : (this.state.matrixName == "hand0205" || this.state.matrixName == "handGlove115200") ? (
                       <CanvasCom matrixName={this.state.matrixName}
                         local={this.state.local}
                       >
@@ -3275,14 +3739,6 @@ class Home extends React.Component {
                           changeStateData={this.changeStateData}
                         />
                       </CanvasCom>
-                    ) : this.state.matrixName == "carY" ? (
-                      <CanvasCom matrixName={this.state.matrixName}>
-                        <CarY
-                          ref={this.com}
-                          changeSelect={this.changeSelect}
-                          changeStateData={this.changeStateData}
-                        />
-                      </CanvasCom>
                     ) : this.state.matrixName == "smallSample" ? (
                       <CanvasCom matrixName={this.state.matrixName}
                         local={this.state.local}
@@ -3567,13 +4023,86 @@ class Home extends React.Component {
             : null}
         </div> */}
         </div>
+
+          {/* ====== 右下角采样频率显示 ====== */}
+          <div style={{
+            position: 'fixed',
+            bottom: '20px',
+            right: '80px',
+            backgroundColor: 'rgba(25, 25, 50, 0.85)',
+            color: '#01F1E3',
+            padding: '6px 14px',
+            borderRadius: '8px',
+            fontSize: '14px',
+            fontWeight: 'bold',
+            zIndex: 999,
+            backdropFilter: 'blur(6px)',
+            border: '1px solid rgba(1, 241, 227, 0.3)',
+            userSelect: 'none',
+          }}>
+            <span style={{ color: '#aaa', fontWeight: 'normal', marginRight: '4px' }}>Hz</span>
+            {this.state.realHz}
+          </div>
+
+          {/* ====== 密钥过期提示弹窗 ====== */}
+          <Modal
+            open={this.state.licenseModalVisible}
+            onOk={() => {
+              this.setState({ licenseModalVisible: false })
+              // 密钥已过期时，点击确定跳转到密钥输入页
+              if (this.state.licenseModalType === 'expired') {
+                window.location.hash = '#/?from=system';
+              }
+            }}
+            onCancel={() => this.setState({ licenseModalVisible: false })}
+            okText={this.state.licenseModalType === 'expired' ? '去输入密钥' : '我知道了'}
+            cancelButtonProps={{ style: { display: this.state.licenseModalType === 'expired' ? 'none' : 'none' } }}
+            centered
+            width={480}
+            closable={false}
+            maskClosable={false}
+            className={this.state.licenseModalType === 'expired' ? 'license-expired-modal' : 'license-warning-modal'}
+            title={
+              <span>
+                {this.state.licenseModalType === 'expired' ? '⚠ 密钥已过期' : '⚠ 密钥即将过期'}
+              </span>
+            }
+          >
+            {this.state.licenseModalType === 'expired' ? (
+              <div>
+                <p>您的授权密钥已于 <strong className="expire-date">{this.state.licenseModalExpireDate}</strong> 过期。</p>
+                <p>串口连接、数据采集等功能已被禁用。</p>
+                <p className="hint">请联系管理员获取新的授权密钥，点击下方按钮跳转到密钥输入页面。</p>
+              </div>
+            ) : (
+              <div>
+                <p>您的授权密钥将于 <strong className="expire-date">{this.state.licenseModalExpireDate}</strong> 过期。</p>
+                <p>剩余有效期：<strong className="remain-days">{this.state.licenseModalRemainDays} 天</strong></p>
+                <p className="hint">请尽快联系管理员续期，以免影响正常使用。</p>
+              </div>
+            )}
+          </Modal>
+
       </ConfigProvider>
     );
   }
 }
 
-// export default Home;
-export default withTranslation()((Home));
+// HOC 包装：通过 message.useMessage() 获取 contextHolder 和 messageApi
+function withMessageApi(WrappedComponent) {
+  return React.forwardRef((props, ref) => {
+    const [messageApi, contextHolder] = message.useMessage();
+    return (
+      <>
+        {contextHolder}
+        <WrappedComponent {...props} ref={ref} messageApi={messageApi} />
+      </>
+    );
+  });
+}
+
+const HomeWithMessage = withMessageApi(Home);
+export default withTranslation()((HomeWithMessage));
 
 // export const WithNavigation = (Component) => {
 //   const navigate = useNavigate()

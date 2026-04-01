@@ -1,6 +1,6 @@
 {
   "name": "shroom",
-  "version": "1.1.0",
+  "version": "1.1.14",
   "description": "Shroom - Pressure Sensor Data Acquisition & Visualization System",
   "main": "index.js",
   "win": {
@@ -9,14 +9,19 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "electron-forge start",
-    "prepare-pack-resources": "node scripts/sync-pack-resources.js",
-    "package": "npm run prepare-pack-resources && electron-forge package",
-    "make": "npm run prepare-pack-resources && electron-forge make",
-    "make-mac": "npm run prepare-pack-resources && electron-forge make --platform darwin",
+    "build-client": "npm --prefix client run build",
+    "build-python-runtime": "node scripts/build-python-runtime.js",
+    "prepare-pack-resources": "npm run build-python-runtime && node scripts/sync-pack-resources.js",
+    "prepare-build-assets": "npm run build-client && npm run prepare-pack-resources",
+    "package": "npm run prepare-build-assets && electron-forge package",
+    "make": "npm run prepare-build-assets && electron-forge make",
+    "make-mac": "npm run prepare-build-assets && electron-forge make --platform darwin",
     "make-start": "electron-forge start --platform darwin",
-    "build": "npm run prepare-pack-resources && electron-builder -w",
-    "build-mac": "npm run prepare-pack-resources && electron-builder -m",
-    "build-all": "npm run prepare-pack-resources && electron-builder -mwl"
+    "build": "npm run prepare-build-assets && electron-builder -w && node scripts/inject-release-notes.js",
+    "build-mac": "npm run prepare-build-assets && electron-builder -m",
+    "build-mac-release": "node scripts/build-mac-release.js",
+    "build-mac-share": "node scripts/build-mac-share.js",
+    "build-all": "npm run prepare-build-assets && electron-builder -mwl"
   },
   "config": {
     "forge": {
@@ -26,7 +31,7 @@
         "extraResource": [
           "./build",
           "./pack-resources/db",
-          "./config.txt"
+          "./pack-resources/python"
         ],
         "ignore": [
           "^/venv($|/)",
@@ -38,7 +43,8 @@
           "^/db($|/)",
           "^/pack-resources($|/)",
           "^/client($|/)",
-          "^/docs($|/)"
+          "^/docs($|/)",
+          "^/config\\.txt$"
         ]
       },
       "makers": [
@@ -70,12 +76,94 @@
     "@playwright/test": "^1.58.2",
     "electron": "^31.3.0",
     "electron-builder": "^24.13.3",
-    "electron-icon-maker": "^0.0.5",
     "playwright": "^1.58.2"
   },
   "build": {
     "appId": "com.shroom.pressure-sensor",
     "productName": "Shroom",
+    "asar": true,
+    "files": [
+      "**/*",
+      "!client/**",
+      "!build/**",
+      "!python/**",
+      "!dist/**",
+      "!out/**",
+      "!docs/**",
+      "!test/**",
+      "!test-results/**",
+      "!scripts/**",
+      "!pack-resources/**",
+      "!data/**",
+      "!db/**",
+      "!python/**",
+      "!.git/**",
+      "!.git_broken*/**",
+      "!.npm-cache/**",
+      "!.npm-logs/**",
+      "!node_modules/electron/**",
+      "!node_modules/electron-builder/**",
+      "!node_modules/app-builder-bin/**",
+      "!node_modules/app-builder-lib/**",
+      "!node_modules/phantomjs-prebuilt/**",
+      "!node_modules/electron-winstaller/**",
+      "!node_modules/typescript/**",
+      "!node_modules/@electron-forge/**",
+      "!node_modules/@playwright/**",
+      "!node_modules/playwright/**",
+      "!node_modules/playwright-core/**",
+      "!node_modules/electron-icon-maker/**",
+      "!node_modules/@electron/fuses/**",
+      "!node_modules/7zip-bin/**",
+      "!node_modules/dmg-builder/**",
+      "!node_modules/electron-publish/**",
+      "!**/*.md",
+      "!**/*.map",
+      "!**/CHANGELOG*",
+      "!**/.npmrc",
+      "!**/ARCHITECTURE.md",
+      "!**/dev-app-update.yml",
+      "!**/latest-dev.log",
+      "!**/$*.db",
+      "!config.txt",
+      "!forge.config.js",
+      "!gen.js",
+      "!genType.js",
+      "!package-lock.json",
+      "!yarn.lock"
+    ],
+    "extraResources": [
+      {
+        "from": "./build",
+        "to": "build",
+        "filter": [
+          "**/*",
+          "!model/hand-g.fbx",
+          "!model/hand-g.glb",
+          "!model/hand-g1.glb",
+          "!model/hand-g2.glb",
+          "!model/hand-g3.glb",
+          "!model/hand-g4.glb",
+          "!model/hand0412.glb",
+          "!model/hand0418.glb",
+          "!model/hand2.glb",
+          "!model/newhand.glb",
+          "!model/newhand1.glb"
+        ]
+      },
+      {
+        "from": "./pack-resources/db",
+        "to": "db"
+      },
+      {
+        "from": "./pack-resources/python",
+        "to": "python"
+      }
+    ],
+    "icon": "./logo.ico",
+    "win": {
+      "icon": "./logo.ico"
+    },
     "nsis": {
       "oneClick": false,
       "perMachine": true,
@@ -86,24 +174,21 @@
       "installerHeaderIcon": "./logo.ico",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Shroom"
+      "shortcutName": "Shroom",
+      "include": "scripts/installer.nsh"
     },
-    "extraResources": [
-      {
-        "from": "./pack-resources/db",
-        "to": "db"
-      }
-    ],
     "mac": {
       "icon": "./logo.icns",
-      "category": "public.app-category.utilities"
+      "category": "public.app-category.utilities",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "scripts/entitlements.mac.plist",
+      "entitlementsInherit": "scripts/entitlements.mac.plist"
     },
     "publish": [
       {
-        "provider": "github",
-        "owner": "liudada118",
-        "repo": "shroom1.0",
-        "releaseType": "release"
+        "provider": "generic",
+        "url": "http://sensor.bodyta.com/shroom1"
       }
     ]
   },
@@ -112,11 +197,8 @@
     "better-sqlite3": "^11.10.0",
     "crypto-js": "^4.2.0",
     "csv-writer": "^1.6.0",
-    "electron-squirrel-startup": "^1.0.0",
     "electron-updater": "^6.3.0",
-    "request": "^2.88.2",
     "serialport": "^12.0.0",
-    "sqlite3": "^5.1.7",
     "ws": "^8.14.2"
   }
 }

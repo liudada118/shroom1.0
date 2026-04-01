@@ -144,6 +144,10 @@ const Canvas = React.forwardRef((props, refs) => {
   let colors, scales;
 
   function init() {
+    // 清空 group 中的旧粒子，防止重复 add 导致双层
+    while (group.children.length > 0) {
+      group.remove(group.children[0]);
+    }
     container = document.getElementById(`canvas`);
     // camera
 
@@ -202,9 +206,7 @@ const Canvas = React.forwardRef((props, refs) => {
     renderer.setSize(window.innerWidth, window.innerHeight);
 
     renderer.outputEncoding = THREE.sRGBEncoding;
-    if (container.childNodes.length == 0) {
-      container.appendChild(renderer.domElement);
-    }
+    container.replaceChildren(renderer.domElement);
 
     renderer.setClearColor(0x000000);
 
@@ -652,22 +654,45 @@ const Canvas = React.forwardRef((props, refs) => {
       dataArr = bigArrg
     }
 
-
     var T = clock.getDelta();
     timeS = timeS + T;
     if (timeS > renderT) {
-      dataArr = dataArr.filter((a) => a > valuej1 * 0.025)
-      const max = findMax(dataArr)
-      const point = dataArr.filter((a) => a > 0).length
-      const press = dataArr.reduce((a, b) => a + b, 0)
-      const mean = press / (point == 0 ? 1 : point)
+      // === 使用原始数据 ndata1 计算 Aside 统计值（零分配优化） ===
+      let max = 0, point = 0, press = 0;
+      if (sitIndexArr && sitIndexArr.length && !sitIndexArr.every((a) => a == 0)) {
+        // 框选模式：直接遍历原始数据的框选区域，用 Set 去重原始索引
+        const visited = new Set();
+        for (let i = sitIndexArr[0]; i < sitIndexArr[1]; i++) {
+          for (let j = sitIndexArr[2]; j < sitIndexArr[3]; j++) {
+            const origI = Math.floor(i / sitInterp);
+            const origJ = Math.floor(j / sitInterp);
+            if (origI < sitnum1 && origJ < sitnum2) {
+              const key = origI * sitnum2 + origJ;
+              if (!visited.has(key)) {
+                visited.add(key);
+                const val = ndata1[key];
+                press += val;
+                if (val > 0) point++;
+                if (val > max) max = val;
+              }
+            }
+          }
+        }
+      } else {
+        // 非框选模式：直接遍历 ndata1
+        for (let i = 0; i < ndata1.length; i++) {
+          const val = ndata1[i];
+          press += val;
+          if (val > 0) point++;
+          if (val > max) max = val;
+        }
+      }
+      const mean = press / (point == 0 ? 1 : point);
       props.data.current?.changeData({
         meanPres: mean.toFixed(2),
         maxPres: max,
         point: point,
-        // area: areaSmooth.toFixed(0),
         totalPres: press,
-        // pressure: pressureSmooth.toFixed(2),
       });
 
       if (totalArr.length < 20) {
@@ -678,7 +703,6 @@ const Canvas = React.forwardRef((props, refs) => {
       }
 
       const maxTotal = findMax(totalArr);
-      console.log(local)
       if (!local)
         props.data.current?.handleCharts(totalArr, maxTotal + 1000);
 
@@ -785,7 +809,7 @@ const Canvas = React.forwardRef((props, refs) => {
     if (valuel) valuel1 = valuel;
     if (valuef) valuef1 = valuef;
     if (valuelInit) valuelInit1 = valuelInit;
-    ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a - valuef1));
+    ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a));
 
     ndata1Num = ndata1.reduce((a, b) => a + b, 0);
     if (ndata1Num < valuelInit1) {
@@ -826,7 +850,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
     // valuelInit1 = valuelInit;
     // 修改线序 坐垫
-    ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a - valuef1));
+    ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a));
 
     ndata1Num = ndata1.reduce((a, b) => a + b, 0);
 
@@ -946,6 +970,17 @@ const Canvas = React.forwardRef((props, refs) => {
 
     return () => {
       cancelAnimationFrame(animationRequestId);
+      // 清理 renderer
+      if (renderer) {
+        renderer.dispose();
+        renderer.forceContextLoss();
+      }
+      // 清空 scene
+      if (scene) {
+        while (scene.children.length > 0) {
+          scene.remove(scene.children[0]);
+        }
+      }
       group = new THREE.Group();
     };
   }, []);

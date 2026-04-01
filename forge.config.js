@@ -5,11 +5,15 @@ module.exports = {
   packagerConfig: {
     icon: './logo',
     asar: true,
+    extraResource: [
+      './python'
+    ],
     ignore: [
       '^/venv($|/)',        // 排除 venv 文件夹
       '^/python($|/)',      // 如果你环境叫 python
       '^/__pycache__($|/)',
-      '\\.pyc$'
+      '\\.pyc$',
+      '^/config\\.txt$'
     ]
   },
   rebuildConfig: {},

@@ -425,9 +425,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
     renderer.outputEncoding = THREE.sRGBEncoding;
     // renderer.outputEncoding = THREE.sRGBEncoding;  
-    if (container.childNodes.length == 0) {
-      container.appendChild(renderer.domElement);
-    }
+    container.replaceChildren(renderer.domElement);
     renderer.gammaOutput = true;
     renderer.gammaFactor = 2.2;
 
@@ -782,7 +780,7 @@ const Canvas = React.forwardRef((props, refs) => {
     if (valuelInit) valuelInit1 = valuelInit;
     // if(normalArr) 
 
-    ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a - valuef1));
+    ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a));
 
     ndata1Num = ndata1.reduce((a, b) => a + b, 0);
     if (ndata1Num < valuelInit1) {
@@ -826,7 +824,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
     // valuelInit1 = valuelInit;
     // 修改线序 坐垫
-    ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a - valuef1));
+    ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a));
 
     ndata1Num = ndata1.reduce((a, b) => a + b, 0);
 

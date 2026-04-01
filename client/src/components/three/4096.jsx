@@ -144,6 +144,10 @@ const Canvas = React.forwardRef((props, refs) => {
   let colors, scales;
 
   function init() {
+    // 清空 group 中的旧粒子，防止重复 add 导致双层
+    while (group.children.length > 0) {
+      group.remove(group.children[0]);
+    }
     container = document.getElementById(`canvas`);
     // camera
 
@@ -202,9 +206,7 @@ const Canvas = React.forwardRef((props, refs) => {
     renderer.setSize(window.innerWidth, window.innerHeight);
 
     renderer.outputEncoding = THREE.sRGBEncoding;
-    if (container.childNodes.length == 0) {
-      container.appendChild(renderer.domElement);
-    }
+    container.replaceChildren(renderer.domElement);
 
     renderer.setClearColor(0x000000);
 
@@ -946,6 +948,17 @@ const Canvas = React.forwardRef((props, refs) => {
 
     return () => {
       cancelAnimationFrame(animationRequestId);
+      // 清理 renderer
+      if (renderer) {
+        renderer.dispose();
+        renderer.forceContextLoss();
+      }
+      // 清空 scene
+      if (scene) {
+        while (scene.children.length > 0) {
+          scene.remove(scene.children[0]);
+        }
+      }
       group = new THREE.Group();
     };
   }, []);

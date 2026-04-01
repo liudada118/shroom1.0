@@ -321,7 +321,7 @@ const Canvas = React.forwardRef((props, refs) => {
       chair = fbx.scene;
       // chair = fbx
       group.add(chair);
-      console.log(chair, 'chair');
+
       // if (props.body) {
       //   chair.rotation.y = -Math.PI / 2;
       //   chair.position.x = 135 - positionX;
@@ -635,7 +635,7 @@ const Canvas = React.forwardRef((props, refs) => {
   ctxWith.fillRect(0, 0, canvasWith.width, canvasWith.height);
 
   function canvasRenew(CanvasTexture, canvas) {
-    console.log('canvasRenew')
+
     // const canvas = CanvasTexture.canvas
     // console.log(CanvasTexture)
     // console.log(ndata1)
@@ -1140,7 +1140,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
       // valuelInit1 = valuelInit;
       // 修改线序 坐垫
-      ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a - valuef1));
+      ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a));
 
       ndata1Num = ndata1.reduce((a, b) => a + b, 0);
 
@@ -1303,8 +1303,7 @@ const Canvas = React.forwardRef((props, refs) => {
   }
 
   function changeColor({ max, size, filter, light, speedValue }) {
-    console.log(handHeatmapRef.current)
-    console.log(max, size)
+
     if (max) handHeatmapRef.current.options.max = max
     if (size) handHeatmapRef.current.options.size = size
     if (filter) handHeatmapRef.current.options.filter = filter

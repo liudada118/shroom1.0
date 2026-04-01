@@ -270,8 +270,20 @@ const ProgressCom = React.forwardRef((props, refs) => {
         }
     }
 
+    const resetPlay = () => {
+        setPlayFlag(false);
+        // 重置滑块和进度线的 DOM 位置
+        const left = document.querySelector('.leftProgress');
+        const right = document.querySelector('.rightProgress');
+        const line = document.querySelector('.progressLine');
+        if (left) left.style.left = '0px';
+        if (right) right.style.left = '580px';
+        if (line) line.style.left = '20px';
+    };
+
     useImperativeHandle(refs, () => ({
-        changeIndex
+        changeIndex,
+        resetPlay
     }));
 
     // console.log(props)

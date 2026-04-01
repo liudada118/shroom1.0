@@ -2,7 +2,10 @@ import React from 'react'
 import './aside.scss'
 import { CanvasDemo } from '../chart/Chart'
 import { withTranslation } from 'react-i18next'
-
+import dropBed from '../../assets/images/dropBed.png'
+import offBed from '../../assets/images/offBed.png'
+import onBed from '../../assets/images/onBed.png'
+import sitBed from '../../assets/images/sitBed.png'
 
 
 
@@ -30,11 +33,7 @@ const dataArr1 = [
 
 
 
-
-
 let myChart1, myChart2
-
-
 
 
 
@@ -46,7 +45,6 @@ class Com extends React.Component {
         return false
     }
     render() {
-        console.log(this.props)
         return (
             <>{this.props.children}</>
         )
@@ -58,7 +56,7 @@ const arrArea = ['point', 'area',]
 const footArr = ['meanPres', 'maxPres', 'point', 'area',]
 let ctx1, ctx2, ctx3
 class Aside extends React.Component {
-    
+
     constructor() {
         super()
         this.state = {
@@ -73,9 +71,30 @@ class Aside extends React.Component {
             pressMult: localStorage.getItem("valueMult")
                 ? JSON.parse(localStorage.getItem("valueMult"))
                 : 1,
-            fontSize: 1
+            fontSize: 1,
+            // jqbed 健康监测状态
+            rate: '--',
+            heart_rate: '--',
+            stateInBbed: null,
+            sosflag: 0,
+            onBedTime: 0,
         }
         this.canvas = React.createRef()
+
+        // ========== 10Hz 节流控制 ==========
+        this._ASIDE_INTERVAL = 100; // 100ms = 10Hz
+        this._lastDataTime = 0;
+        this._pendingData = null;
+        this._dataTimer = null;
+        this._lastChartTime = 0;
+        this._pendingChart = null;
+        this._chartTimer = null;
+        this._lastAreaTime = 0;
+        this._pendingArea = null;
+        this._areaTimer = null;
+        this._lastBodyTime = 0;
+        this._pendingBody = null;
+        this._bodyTimer = null;
     }
 
     changePressMult(value) {
@@ -98,6 +117,8 @@ class Aside extends React.Component {
 
         var c2 = document.getElementById("myChart3");
         if (c2) ctx3 = c2.getContext("2d");
+
+        // jqbed 在床/离床计时 - 由后端 server.js 计算并通过 WebSocket 发送
     }
 
     componentDidUpdate() {
@@ -111,6 +132,13 @@ class Aside extends React.Component {
         if (c2) ctx3 = c2.getContext("2d");
     }
 
+    componentWillUnmount() {
+        if (this._dataTimer) clearTimeout(this._dataTimer);
+        if (this._chartTimer) clearTimeout(this._chartTimer);
+        if (this._areaTimer) clearTimeout(this._areaTimer);
+        if (this._bodyTimer) clearTimeout(this._bodyTimer);
+    }
+
     drawChart({ ctx, arr, max, canvas, index }) {
         // 清空画布
         let min = Math.min(...arr)
@@ -122,8 +150,6 @@ class Aside extends React.Component {
         } else {
             data = arr.map((a) => a * 150 / max)
         }
-
-
 
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -154,7 +180,6 @@ class Aside extends React.Component {
         ctx.lineWidth = 2;
         ctx.stroke();
 
-
         // 测试文字
         if (index != null) {
             ctx.beginPath();
@@ -167,36 +192,71 @@ class Aside extends React.Component {
 
             ctx.font = "48px serif";
             ctx.fillStyle = '#01F1E3'
-            // ctx.fillText(arr[index - 1], gap * (index), canvas.height - 30)
         }
-
-    }
-
-    componentWillUnmount() {
 
     }
 
     handleCharts(arr, max, index) {
-        const canvas = document.getElementById('myChart1')
-
-        if(canvas) this.drawChart({ ctx: ctx1, arr, max, canvas, index })
+        const now = performance.now();
+        this._pendingChart = { arr, max, index };
+        if (now - this._lastChartTime >= this._ASIDE_INTERVAL) {
+            this._lastChartTime = now;
+            const canvas = document.getElementById('myChart1');
+            if (canvas) this.drawChart({ ctx: ctx1, arr, max, canvas, index });
+            if (this._chartTimer) { clearTimeout(this._chartTimer); this._chartTimer = null; }
+        } else if (!this._chartTimer) {
+            this._chartTimer = setTimeout(() => {
+                this._lastChartTime = performance.now();
+                if (this._pendingChart) {
+                    const { arr: a, max: m, index: i } = this._pendingChart;
+                    const canvas = document.getElementById('myChart1');
+                    if (canvas) this.drawChart({ ctx: ctx1, arr: a, max: m, canvas, index: i });
+                }
+                this._chartTimer = null;
+            }, this._ASIDE_INTERVAL - (now - this._lastChartTime));
+        }
     }
 
     handleChartsArea(arr, max, index) {
-
-        const canvas = document.getElementById('myChart2')
-        if(canvas) this.drawChart({ ctx: ctx2, arr, max, canvas, index })
-
+        const now = performance.now();
+        this._pendingArea = { arr, max, index };
+        if (now - this._lastAreaTime >= this._ASIDE_INTERVAL) {
+            this._lastAreaTime = now;
+            const canvas = document.getElementById('myChart2');
+            if (canvas) this.drawChart({ ctx: ctx2, arr, max, canvas, index });
+            if (this._areaTimer) { clearTimeout(this._areaTimer); this._areaTimer = null; }
+        } else if (!this._areaTimer) {
+            this._areaTimer = setTimeout(() => {
+                this._lastAreaTime = performance.now();
+                if (this._pendingArea) {
+                    const { arr: a, max: m, index: i } = this._pendingArea;
+                    const canvas = document.getElementById('myChart2');
+                    if (canvas) this.drawChart({ ctx: ctx2, arr: a, max: m, canvas, index: i });
+                }
+                this._areaTimer = null;
+            }, this._ASIDE_INTERVAL - (now - this._lastAreaTime));
+        }
     }
 
     handleChartsBody(arr, max, index) {
-
-        const canvas = document.getElementById('myChart3')
-        if (canvas) {
-            this.drawChart({ ctx: ctx3, arr, max, canvas, index })
+        const now = performance.now();
+        this._pendingBody = { arr, max, index };
+        if (now - this._lastBodyTime >= this._ASIDE_INTERVAL) {
+            this._lastBodyTime = now;
+            const canvas = document.getElementById('myChart3');
+            if (canvas) this.drawChart({ ctx: ctx3, arr, max, canvas, index });
+            if (this._bodyTimer) { clearTimeout(this._bodyTimer); this._bodyTimer = null; }
+        } else if (!this._bodyTimer) {
+            this._bodyTimer = setTimeout(() => {
+                this._lastBodyTime = performance.now();
+                if (this._pendingBody) {
+                    const { arr: a, max: m, index: i } = this._pendingBody;
+                    const canvas = document.getElementById('myChart3');
+                    if (canvas) this.drawChart({ ctx: ctx3, arr: a, max: m, canvas, index: i });
+                }
+                this._bodyTimer = null;
+            }, this._ASIDE_INTERVAL - (now - this._lastBodyTime));
         }
-
-
     }
 
     initCharts() {
@@ -216,45 +276,100 @@ class Aside extends React.Component {
     }
 
     changeData(obj) {
-        this.setState(obj)
+        // 处理 jqbed 健康监测数据
+        if (obj.stateInBbed !== undefined) {
+            const prevState = this.state.stateInBbed
+            const newState = obj.stateInBbed
+            // 状态变化时重置计时（由后端处理，前端只展示）
+        }
+        const now = performance.now();
+        this._pendingData = {
+            ...(this._pendingData || {}),
+            ...obj,
+        };
+
+        const hasRealtimeDetectionData =
+            obj.rate !== undefined ||
+            obj.heart_rate !== undefined ||
+            obj.stateInBbed !== undefined ||
+            obj.sosflag !== undefined ||
+            obj.onBedTime !== undefined;
+
+        if (hasRealtimeDetectionData) {
+            this._lastDataTime = now;
+            const nextData = this._pendingData;
+            this.setState(nextData);
+            this._pendingData = null;
+            if (this._dataTimer) { clearTimeout(this._dataTimer); this._dataTimer = null; }
+            return;
+        }
+
+        if (now - this._lastDataTime >= this._ASIDE_INTERVAL) {
+            this._lastDataTime = now;
+            const nextData = this._pendingData;
+            this.setState(nextData);
+            this._pendingData = null;
+            if (this._dataTimer) { clearTimeout(this._dataTimer); this._dataTimer = null; }
+        } else if (!this._dataTimer) {
+            this._dataTimer = setTimeout(() => {
+                this._lastDataTime = performance.now();
+                if (this._pendingData) {
+                    this.setState(this._pendingData);
+                    this._pendingData = null;
+                }
+                this._dataTimer = null;
+            }, this._ASIDE_INTERVAL - (now - this._lastDataTime));
+        }
     }
-    // meanPress : '平均压力',
-    // maxPress : '最大压力',
-    // pressTotal : '压力总和',
-    // points : "点数",
-    // area : "面积"
+
     render() {
         const { t, i18n } = this.props;
-        // console.log('aside')
-        // const { t, i18n } = this.props;
         const dataArrCar = [
             {
                 color: '#2A99FF',
                 data: this.props.i18n.t('meanPress'),
-                // eng: 'Mean Pres'
             }, {
                 color: '#FF2A2A',
                 data: this.props.i18n.t('maxPress'),
-                // eng: 'Max Pres'
             },
             {
                 color: '#FF2A2A',
                 data: this.props.i18n.t('pressTotal'),
-                // eng: 'Pressure'
             },
         ]
+
+        const onBedStatus = {
+            0: {
+                text: this.props.i18n.t('leaveBed'),
+                img: offBed
+            },
+            1: {
+                text: this.props.i18n.t('inBed'),
+                img: onBed
+            },
+            3: {
+                text: this.props.i18n.t('fallBed'),
+                img: dropBed
+            },
+            4: {
+                text: this.props.i18n.t('sitUp'),
+                img: sitBed
+            },
+        }
 
         const dataArr = [{
             color: '#FFA63F',
             data: this.props.i18n.t('points'),
-            // eng: 'Points'
         },
-        // {
-        //     color: '#2A99FF',
-        //     data: this.props.i18n.t('area'),
-        //     // eng: 'Area'
-        // },
-    ]
+        ]
+
+        function secondsToHMS(seconds) {
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = seconds % 60;
+            return [h, m, s].map(v => String(v).padStart(2, "0")).join(":");
+        }
+
         return (
             <div className='aside'>
                {this.props.matrixName != 'bed40' ? <div className="asideContent firstAside">
@@ -264,7 +379,7 @@ class Aside extends React.Component {
                             {
                                 dataArr.map((a, index) => {
                                     return (
-                                        <div className='dataItem' key={a.eng}>
+                                        <div className='dataItem' key={`${a.data}-${index}`}>
                                             <div className='dataItemCircle'>
                                                 <div className='circleItem' style={{ backgroundColor: a.color }}></div>
                                                 <div>{a.data}</div>
@@ -285,11 +400,47 @@ class Aside extends React.Component {
                         </> </> : <Com> <CanvasDemo ref={this.canvas} /></Com>}
                 </div> : ''}
 
-                {this.props.matrixName != 'bed40' ?<div className="asideContent firstAside">
+                {/* jqbed 健康监测面板 */}
+                {this.props.matrixName == 'jqbed' ?
+                    <>
+                        <div className="asideContent firstAside">
+                            <h2 className="asideTitle">{this.props.i18n.t('vitalSigns')}</h2>
+                            <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'space-around' }}>
+                                <div>
+                                    <div>
+                                        {this.props.i18n.t('respiration')}
+                                    </div>
+                                    <div>
+                                        {
+                                            this.state.rate
+                                        }
+                                    </div>
+                                </div>
+                                <div>
+                                    <div>
+                                        {this.props.i18n.t('heartRate')}
+                                    </div>
+                                    <div>
+                                        {
+                                            this.state.heart_rate != null && this.state.heart_rate !== '--' ? Math.round(this.state.heart_rate) : '--'
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                        <div className="asideContent firstAside" style={{ display: 'flex', flexDirection: 'column', justifyContent: "space-around", backgroundColor: [3, 4].includes(this.state.stateInBbed) ? "#ED4F4F" : "#191932" }}>
+                            {this.state.stateInBbed != null && onBedStatus[this.state.stateInBbed] && <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '30px', fontWeight: 'bold' }}>{onBedStatus[this.state.stateInBbed].text} <img src={onBedStatus[this.state.stateInBbed].img} alt="" /></div>}
+                            {(this.state.stateInBbed == 1 || this.state.stateInBbed == 0) ? <div style={{ marginTop: '20px', textAlign: 'center', background: '#25254F', borderRadius: '12px', padding: "10px 0" }}>{this.state.stateInBbed == 1 ? this.props.i18n.t('inBedDuration') : this.props.i18n.t('leaveBedDuration')} : {secondsToHMS(this.state.onBedTime)}</div> : ''}
+                        </div>
+                        {
+                            this.state.sosflag ? <div className="asideContent firstAside" style={{ fontSize: '30px', color: '#ED4F4F', fontWeight: 'bold' }}>{this.props.i18n.t('sos')}</div> : ''
+                        }
+                    </>
+                    : this.props.matrixName != 'bed40' ?
+                <div className="asideContent firstAside">
                     <h2 className="asideTitle">Pressure Data</h2>
-                    {/* <div style={{}}> */}
-                    <span className='pressData'>{this.props.matrixName != 'hand0205' ? (Number(this.state.totalPres).toFixed(0)) : this.state.totalPres}</span> <span style={{ color: '#999' }}></span>
-                    {/* </div> */}
+                    <span className='pressData'>{(this.props.matrixName != 'hand0205' && this.props.matrixName != 'handGlove115200') ? (Number(this.state.totalPres).toFixed(0)) : this.state.totalPres}</span> <span style={{ color: '#999' }}></span>
 
                     {this.props.matrixName != 'foot' ? <>
                         <div className='pressTitle standardColor'>{this.props.i18n.t('allPress')}</div>
@@ -297,14 +448,14 @@ class Aside extends React.Component {
                         {
                             dataArrCar.map((a, index) => {
                                 return (
-                                    <div className='dataItem' key={a.eng}>
+                                    <div className='dataItem' key={`${a.data}-${index}`}>
                                         <div className='dataItemCircle'>
                                             <div className='circleItem' style={{ backgroundColor: a.color }}></div>
                                             <div>{a.data}</div>
                                         </div>
                                         <div className='dataIteminfo'>
                                             <div className='standardColor'>{a.eng}</div>
-                                            <div>{this.props.matrixName != 'hand0205' ? (index == 0 ? Number(this.state[arr[index]]).toFixed(2) : Number(this.state[arr[index]]).toFixed(0)) : this.state[arr[index]]} <span style={{ color: '#999' }}></span></div>
+                                            <div>{(this.props.matrixName != 'hand0205' && this.props.matrixName != 'handGlove115200') ? (index == 0 ? Number(this.state[arr[index]]).toFixed(2) : Number(this.state[arr[index]]).toFixed(0)) : this.state[arr[index]]} <span style={{ color: '#999' }}></span></div>
                                         </div>
                                     </div>
                                 )
@@ -332,24 +483,8 @@ class Aside extends React.Component {
                                 </div>
 
                             </div>
-
-                            {/* <div className='dataItem'>
-                                <div className='dataItemCircle'>
-                                    <div className='circleItem' style={{ backgroundColor: 'red' }}></div>
-                                    <div>采集标签</div>
-                                </div>
-                                <div className='dataIteminfo'>
-                                    <div className='standardColor'></div>
-                                    <div>{this.state.sitCol}</div>
-                                </div>
-                            </div> */}
                         </> : null}
 
-                        {/* <>{this.props.matrixName == 'xiyueReal1' ?
-                            <div style={{ fontSize: '3rem' }}>
-                                <div>睡姿: {this.state.model}</div>
-                            </div>
-                            : ''} </> */}
                     </>
                         : <>
                             <div className='pressTitle standardColor'>总体面积 Total Area</div>
@@ -357,7 +492,7 @@ class Aside extends React.Component {
                             {
                                 dataArr1.map((a, index) => {
                                     return (
-                                        <div className='dataItem' key={a.eng}>
+                                        <div className='dataItem' key={`${a.data}-${index}`}>
                                             <div className='dataItemCircle'>
                                                 <div className='circleItem' style={{ backgroundColor: a.color }}></div>
                                                 <div>{a.data}</div>
@@ -372,18 +507,12 @@ class Aside extends React.Component {
                             }
 
                         </>}
-                        {/* <div style={{color : '#fff', fontSize : '2rem'}}>{this.state.resetZero ? t('resetZero') :t('cancelZero') }</div>  */}
                 </div> : ''}
-                {/* {this.props.matrixName === 'bigBed' ? <div className="asideContent" style={{padding : 0}}>
-                    <canvas id="myChart3" style={{ height: '150px', width: '100%' }}></canvas>
-                </div> : null} */}
-                
+
 
             </div>
         )
     }
 }
-
-// export default Aside
 
 export default withTranslation('translation', { withRef: true })(Aside);

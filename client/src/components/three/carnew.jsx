@@ -112,6 +112,10 @@ const Canvas = React.forwardRef((props, refs) => {
   }
 
   function init() {
+    // 清空 group 中的旧粒子，防止重复 add 导致双层
+    while (group.children.length > 0) {
+      group.remove(group.children[0]);
+    }
     container = document.getElementById(`canvas${props.index}`);
     // camera
 
@@ -185,9 +189,7 @@ const Canvas = React.forwardRef((props, refs) => {
     renderer.setSize(window.innerWidth, window.innerHeight);
 
     renderer.outputEncoding = THREE.sRGBEncoding;
-    if (container.childNodes.length == 0) {
-      container.appendChild(renderer.domElement);
-    }
+    container.replaceChildren(renderer.domElement);
 
     renderer.setClearColor(0x10152b);
 
@@ -772,7 +774,7 @@ const Canvas = React.forwardRef((props, refs) => {
     if (valuel) valuel1 = valuel;
     if (valuef) valuef1 = valuef;
     if (valuelInit) valuelInit1 = valuelInit;
-    ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a - valuef1));
+    ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a));
 
     ndata1Num = ndata1.reduce((a, b) => a + b, 0);
     if (ndata1Num < valuelInit1) {
@@ -804,7 +806,7 @@ const Canvas = React.forwardRef((props, refs) => {
     valuelInit1 = valuelInit;
     // 修改线序 坐垫
    
-    // ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a - valuef1));
+    // ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a));
 
     ndata1Num = ndata1.reduce((a, b) => a + b, 0);
     if (ndata1Num < valuelInit) {

@@ -35,6 +35,16 @@ npm start
 
 # 打包
 npm run make
+
+# mac 发给其他电脑（补签名+zip）
+npm run build-mac-share
+```
+
+`build-mac-share` 会生成 `dist/*-mac-adhoc.zip`，用于测试分发。  
+若目标电脑弹出安全提示，可在目标电脑执行：
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Shroom.app
 ```
 
 ## 项目结构
@@ -60,6 +70,8 @@ shroom1.0/
 ## 文档
 
 详细架构文档请参阅 [docs/architecture.md](./docs/architecture.md)
+
+Mac 正式打包与自动更新发布流程请参阅 [docs/mac_release_flow.md](./docs/mac_release_flow.md)
 
 ## License
 
