@@ -248,7 +248,7 @@ function initWebGL(canvas, texWidth, texHeight, cellSize, useMask) {
 }
 
 // ========== WebGL 渲染函数（非 robot 模式） ==========
-function renderWebGL(glCtx, flatData, texWidth, texHeight) {
+function renderWebGL(glCtx, flatData, texWidth, texHeight, maxOverride) {
     if (!glCtx) return;
     const { gl, texture, texData, uMin, uMax, potW, potH } = glCtx;
     // 将数据填入 POT 尺寸的 texData（按 potW 步长）
@@ -263,7 +263,7 @@ function renderWebGL(glCtx, flatData, texWidth, texHeight) {
             if (v > maxVal) maxVal = v;
         }
     }
-    const dynamicMax = Math.max(maxVal, 1);
+    const dynamicMax = (maxOverride && maxOverride > 0) ? maxOverride : Math.max(maxVal, 1);
     gl.uniform1f(uMin, 0);
     gl.uniform1f(uMax, dynamicMax);
     gl.activeTexture(gl.TEXTURE0);
@@ -604,6 +604,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     const pendingRobotRef = useRef(null); // { layoutData, maskData, layoutW, layoutH, partDefsWithOffset }
     const rafIdRef = useRef(null);
     const initedRef = useRef(false);
+    const lastDataRef = useRef(null); // 保存最后一帧原始数据，用于颜色参数变化时重渲染
 
     // 当前渲染的纹理尺寸
     const texSizeRef = useRef({ w: width, h: height });
@@ -738,7 +739,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             // 非 robot: WebGL + overlay
             if (!isRobot && pendingFlatRef.current !== null) {
                 const { data, tw, th } = pendingFlatRef.current;
-                renderWebGL(glCtxRef.current, data, tw, th);
+                renderWebGL(glCtxRef.current, data, tw, th, valuej1 > 0 ? valuej1 : undefined);
                 if (overlayCtxRef.current) {
                     drawOverlay(overlayCtxRef.current, data, tw, th, cs);
                 }
@@ -747,7 +748,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
 
             if (pendingFlatRef2.current !== null && glCtxRef2.current) {
                 const { data, tw, th } = pendingFlatRef2.current;
-                renderWebGL(glCtxRef2.current, data, tw, th);
+                renderWebGL(glCtxRef2.current, data, tw, th, valuej1 > 0 ? valuej1 : undefined);
                 if (overlayCtxRef2.current) {
                     drawOverlay(overlayCtxRef2.current, data, tw, th, cs);
                 }
@@ -788,13 +789,11 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     // ========== 原始数据直接渲染（不做高斯模糊、不做阈值处理） ==========
     const changeWsDataRaw = (wsPointData) => {
         let rawData = [...wsPointData]
-
+        lastDataRef.current = rawData; // 保存最后一帧数据
         layoutData([...rawData])
-
         pendingFlatRef.current = { data: rawData, tw: width, th: height };
         scheduleRender();
     }
-
     const sitValue = (prop) => {
         const { valuej, valueg, value, valuel, valuef, valuelInit } = prop;
         if (valuej) valuej1 = valuej;
@@ -803,6 +802,19 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
         if (valuel) valuel1 = valuel;
         if (valuef) valuef1 = valuef;
         if (valuelInit) valuelInit1 = valuelInit;
+        // 颜色或过滤参数变化时，立即重新渲染一帧
+        if (valuej || valuef) {
+            if (pendingFlatRef.current === null && glCtxRef.current) {
+                const glCtx = glCtxRef.current;
+                const tw = glCtx.texWidth;
+                const th = glCtx.texHeight;
+                const lastData = lastDataRef.current;
+                if (lastData) {
+                    pendingFlatRef.current = { data: lastData, tw, th };
+                    scheduleRender();
+                }
+            }
+        }
     }
 
     const drawContent = () => { }
