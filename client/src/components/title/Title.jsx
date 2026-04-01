@@ -614,6 +614,7 @@ class Title extends React.Component {
       { label: t('sensorFootVideo'), value: 'footVideo' },
       { label: t('sensorDaliegu'), value: 'daliegu' },
       { label: t('sensorBed4096num'), value: 'bed4096num' },
+      { label: t('sensorBed4096'), value: 'bed4096' },
       { label: t('sensorJqbed'), value: 'jqbed' },
       { label: t('sensorFast256'), value: 'fast256' },
       { label: t('sensorFast1024'), value: 'fast1024' },
