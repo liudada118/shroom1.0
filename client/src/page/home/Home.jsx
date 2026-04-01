@@ -526,6 +526,15 @@ class Home extends React.Component {
   componentDidMount() {
     // window.alert(window.innerWidth)
     document.documentElement.style.fontSize = `${window.innerWidth / 120}px`;
+    // 暴露全局重连函数，供主进程 executeJavaScript 直接调用
+    // 确保重连时 onmessage、wsData 等 React 回调完整绑定
+    window.__wsReconnect = () => {
+      console.info('[WS] 全局重连函数被调用，开始重连 WebSocket...');
+      if (ws) {
+        try { ws.onclose = null; ws.onerror = null; ws.close(); } catch(e) {}
+      }
+      this.componentDidMount();
+    };
 
     var c2 = document.getElementById("myChartBig");
 
