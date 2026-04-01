@@ -749,6 +749,25 @@ class Home extends React.Component {
       };
     }
 
+    // 监听主进程的息屏/唤醒事件，唤醒后重连 WebSocket
+    if (window.electronAPI) {
+      window.electronAPI.on('power-resume', () => {
+        console.info('[Power] 系统唤醒，检查 WebSocket 连接状态...');
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          console.warn('[Power] WebSocket 已断开，尝试重连...');
+          if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+          wsReconnectTimer = setTimeout(() => {
+            this.componentDidMount();
+          }, 1000);
+        } else {
+          console.info('[Power] WebSocket 状态正常 (readyState=1)，无需重连');
+        }
+      });
+      window.electronAPI.on('power-suspend', () => {
+        console.warn('[Power] 系统将息屏/锁屏，当前 WS readyState=', ws ? ws.readyState : 'no ws');
+      });
+    }
+
 
   }
 

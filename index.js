@@ -10,7 +10,7 @@
  * 6. 开发模式自动启动 Vite 开发服务器，实现前端热更新
  */
 
-const { app, BrowserWindow, ipcMain, powerSaveBlocker } = require("electron");
+const { app, BrowserWindow, ipcMain, powerSaveBlocker, powerMonitor } = require("electron");
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -506,6 +506,32 @@ app.whenReady().then(() => {
   // 防止息屏后系统暂停应用，保持 WebSocket 数据通道持续工作
   const psBlockerId = powerSaveBlocker.start('prevent-app-suspension');
   logger.info(`[Main] powerSaveBlocker started, id=${psBlockerId}, active=${powerSaveBlocker.isStarted(psBlockerId)}`);
+
+  // 监听系统息屏/唤醒事件，唤醒后通知渲染进程重连 WebSocket
+  powerMonitor.on('suspend', () => {
+    logger.warn('[Main] 系统将要息屏，通知渲染进程');
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('power-suspend');
+    }
+  });
+  powerMonitor.on('resume', () => {
+    logger.info('[Main] 系统已唤醒，通知渲染进程重连 WebSocket');
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('power-resume');
+    }
+  });
+  powerMonitor.on('lock-screen', () => {
+    logger.warn('[Main] 屏幕已锁定');
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('power-suspend');
+    }
+  });
+  powerMonitor.on('unlock-screen', () => {
+    logger.info('[Main] 屏幕已解锁，重连 WebSocket');
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('power-resume');
+    }
+  });
 
   createWindow();
 
