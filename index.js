@@ -10,7 +10,7 @@
  * 6. 开发模式自动启动 Vite 开发服务器，实现前端热更新
  */
 
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, powerSaveBlocker } = require("electron");
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -43,10 +43,11 @@ const createWindow = () => {
     icon: path.join(__dirname, "logo.ico"),
     webPreferences: {
       contextIsolation: true,   // 启用上下文隔离，防止渲染进程访问 Node.js
-      sandbox: true,            // 启用沙箱，进一步限制渲染进程权限
+      sandbox: true,            // 启用沙箋，进一步限制渲染进程权限
       nodeIntegration: false,   // 禁止渲染进程使用 Node.js API
       preload: path.join(__dirname, "preload.js"), // 安全桥梁脚本
       webSecurity: true,        // 启用 Web 安全策略
+      backgroundThrottling: false, // 禁止息屏后节流 JS，保持 WebSocket 消息发送能力
     },
   });
 
@@ -502,6 +503,10 @@ function startStaticServer({ hostname, port, win }) {
 // 应用生命周期
 // ============================================================
 app.whenReady().then(() => {
+  // 防止息屏后系统暂停应用，保持 WebSocket 数据通道持续工作
+  const psBlockerId = powerSaveBlocker.start('prevent-app-suspension');
+  logger.info(`[Main] powerSaveBlocker started, id=${psBlockerId}, active=${powerSaveBlocker.isStarted(psBlockerId)}`);
+
   createWindow();
 
   app.on("activate", () => {

@@ -2181,8 +2181,13 @@ class Home extends React.Component {
   }
 
   wsSendObj = (obj) => {
+    const state = ws ? ws.readyState : 'no ws';
+    // readyState: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
+    console.log(`[WS Send] readyState=${state}`, obj);
     if (ws && ws.readyState === 1) {
       ws.send(JSON.stringify(obj));
+    } else {
+      console.warn(`[WS Send] 无法发送， ws.readyState=${state}`, obj);
     }
   };
 
