@@ -681,6 +681,7 @@ class Title extends React.Component {
               portnameBack: '',
               portnameHead: ''
             })
+            this.props.wsSendObj({ serialReset: true })
           }}
           options={sensorArr}
         /> : ''}
