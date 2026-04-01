@@ -514,11 +514,47 @@ app.whenReady().then(() => {
       mainWindow.webContents.send('power-suspend');
     }
   });
+  // 唤醒后强制重连 WebSocket（渲染进程在息屏期间 JS 被暂停，无法接收 IPC 消息，用 executeJavaScript 绕过）
+  const forceWsReconnect = (reason) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    logger.info(`[Main] ${reason}，延迟 1.5s 后强制重连 WebSocket`);
+    setTimeout(() => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      mainWindow.webContents.executeJavaScript(`
+        (function() {
+          try {
+            var wsUrl = 'ws://127.0.0.1:19999';
+            // 检查全局 ws 变量状态
+            if (typeof ws !== 'undefined' && ws && ws.readyState === 1) {
+              console.info('[Power-JS] WebSocket 状态正常 (readyState=1)，无需重连');
+              return;
+            }
+            console.warn('[Power-JS] WebSocket 已断开，强制重新连接...');
+            // 关闭旧连接
+            if (typeof ws !== 'undefined' && ws) {
+              try { ws.onclose = null; ws.close(); } catch(e) {}
+            }
+            // 新建连接
+            ws = new WebSocket(wsUrl);
+            ws.onopen = function() {
+              console.info('[Power-JS] WebSocket 重连成功');
+            };
+            ws.onerror = function(e) {
+              console.warn('[Power-JS] WebSocket 重连失败', e);
+            };
+            ws.onclose = function() {
+              console.warn('[Power-JS] WebSocket 已关闭');
+            };
+          } catch(e) {
+            console.error('[Power-JS] 重连异常:', e);
+          }
+        })()
+      `).catch(err => logger.error('[Main] executeJavaScript 失败:', err.message));
+    }, 1500);
+  };
+
   powerMonitor.on('resume', () => {
-    logger.info('[Main] 系统已唤醒，通知渲染进程重连 WebSocket');
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('power-resume');
-    }
+    forceWsReconnect('系统已唤醒');
   });
   powerMonitor.on('lock-screen', () => {
     logger.warn('[Main] 屏幕已锁定');
@@ -527,10 +563,7 @@ app.whenReady().then(() => {
     }
   });
   powerMonitor.on('unlock-screen', () => {
-    logger.info('[Main] 屏幕已解锁，重连 WebSocket');
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('power-resume');
-    }
+    forceWsReconnect('屏幕已解锁');
   });
 
   createWindow();
