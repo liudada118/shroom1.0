@@ -4040,8 +4040,8 @@ class Home extends React.Component {
           {/* ====== 右下角采样频率显示 ====== */}
           <div style={{
             position: 'fixed',
-            bottom: '20px',
-            right: '80px',
+            bottom: '70px',
+            right: '20px',
             backgroundColor: 'rgba(25, 25, 50, 0.85)',
             color: '#01F1E3',
             padding: '6px 14px',
