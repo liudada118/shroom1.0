@@ -654,7 +654,7 @@ const Canvas = React.forwardRef((props, refs) => {
     }
 
     // 图表数据始终用原始 ndata1 计算（不经过插值/高斯模糊），保证点数和总和正确
-    const rawDataArr = ndata1.filter((a) => a > valuej1 * 0.025);
+    const rawDataArr = ndata1;
     var T = clock.getDelta();
     timeS = timeS + T;
     if (timeS > renderT) {
