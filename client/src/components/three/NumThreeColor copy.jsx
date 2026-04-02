@@ -136,15 +136,8 @@ export default React.forwardRef((props, refs) => {
     // }
     // console.log(ndata1)
 
-    let dataArr = ndata1
-    //  if (!sitIndexArr.length || sitIndexArr.every((a) => a == 0)) {
-    //   dataArr = ndata1
-    // }
-
-
-
-
-    // dataArr = dataArr.filter((a) => a > valuej1 * 0.025)
+    // 与 Bed4096 保持同源：用相同的阈值过滤，确保两种模式图表数据一致
+    let dataArr = ndata1.filter((a) => a > valuej1 * 0.025)
     const max = findMax(dataArr)
     const point = dataArr.filter((a) => a > 0).length
 
