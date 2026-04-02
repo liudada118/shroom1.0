@@ -16,6 +16,7 @@ import { withTranslation } from "react-i18next";
 import { useTranslation, initReactI18next } from "react-i18next";
 import { NavLink, useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { bthClickHandle as heatmapBthClickHandle } from '../../assets/util/heatmap';
 let collection = JSON.parse(localStorage.getItem('collection'))
   ? JSON.parse(localStorage.getItem('collection'))
   : [['hunch', 'front', '标签']];
@@ -1253,11 +1254,11 @@ class Title extends React.Component {
                   message.info('正在生成报告...');
                   const res = await axios({
                     method: 'post',
-                    url: 'http://localhost:19245/getDbHeatmap',
+                    url: 'http://127.0.0.1:19245/getDbHeatmap',
                     data: { time: date, collectName, age: collectAge, gender: collectGender, date }
                   });
                   if (res.status === 200) {
-                    const canvas = this.props.com.current?.bthClickHandle(res.data.data.peak_frame_data);
+                    const canvas = heatmapBthClickHandle(res.data.data.peak_frame_data);
                     if (!canvas) { message.info('Canvas not found.'); return; }
                     canvas.toBlob(async (blob) => {
                       if (!blob) { message.info('Canvas export failed.'); return; }
@@ -1270,7 +1271,7 @@ class Title extends React.Component {
                       formData.append('age', collectAge);
                       formData.append('gender', collectGender);
                       try {
-                        const uploadRes = await axios.post('http://localhost:19245/uploadCanvas', formData, {
+                        const uploadRes = await axios.post('http://127.0.0.1:19245/uploadCanvas', formData, {
                           headers: { 'Content-Type': 'multipart/form-data' }
                         });
                         message.info(`上传成功 (${uploadRes.status})`);
