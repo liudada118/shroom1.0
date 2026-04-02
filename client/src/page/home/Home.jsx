@@ -3442,8 +3442,7 @@ class Home extends React.Component {
                       <CanvasCom matrixName={this.state.matrixName}
                         local={this.state.local}
                       >
-                        <Fast256
-                          size={1}
+                        <Bed4096
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
