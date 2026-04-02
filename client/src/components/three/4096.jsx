@@ -21,6 +21,7 @@ import {
 // import { withData } from "./WithData";
 
 import { obj } from "../../assets/util/config";
+import { bed4096numParams } from "../../assets/util/bed4096numParams";
 let group = new THREE.Group();
 const sitInit = 0;
 const backInit = 0;
@@ -36,17 +37,14 @@ const backOrder = 4;
 let controlsFlag = true;
 var ndata = new Array(backnum1 * backnum2).fill(0), ndata1 = new Array(sitnum1 * sitnum2).fill(0);
 
-var valuej1 = localStorage.getItem('carValuej') ? JSON.parse(localStorage.getItem('carValuej')) : 200,
-  valueg1 = localStorage.getItem('carValueg') ? JSON.parse(localStorage.getItem('carValueg')) : 2,
-  value1 = localStorage.getItem('carValue') ? JSON.parse(localStorage.getItem('carValue')) : 2,
-  valuel1 = localStorage.getItem('carValuel') ? JSON.parse(localStorage.getItem('carValuel')) : 2,
-  valuef1 = localStorage.getItem('carValuef') ? JSON.parse(localStorage.getItem('carValuef')) : 2,
-  valuej2 = localStorage.getItem('carValuej') ? JSON.parse(localStorage.getItem('carValuej')) : 200,
+// 使用共享调参对象（与 Fast256 共享，切换模式时调参不重置）
+// 用 p 作为别名，所有 p.valuej1 等属性与 Fast256 实时共享
+const p = bed4096numParams;
+var valuej2 = localStorage.getItem('carValuej') ? JSON.parse(localStorage.getItem('carValuej')) : 200,
   valueg2 = localStorage.getItem('carValueg') ? JSON.parse(localStorage.getItem('carValueg')) : 2,
   value2 = localStorage.getItem('carValue') ? JSON.parse(localStorage.getItem('carValue')) : 2,
   valuel2 = localStorage.getItem('carValuel') ? JSON.parse(localStorage.getItem('carValuel')) : 2,
   valuef2 = localStorage.getItem('carValuef') ? JSON.parse(localStorage.getItem('carValuef')) : 2,
-  valuelInit1 = localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2,
   valuelInit2 = localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2;
 let enableControls = true;
 let isShiftPressed = false;
@@ -586,9 +584,9 @@ const Canvas = React.forwardRef((props, refs) => {
   //  更新座椅数据
   function sitRenew() {
     // console.log(props)
-    // valueg1 = 2
-    // valuej1 = 500 
-    // value1 =2
+    // p.valueg1 = 2
+    // p.valuej1 = 500 
+    // p.value1 =2
     interp(ndata1, bigArr, sitnum1, sitInterp);
     // console.log(first)
     let bigArrs = addSide(
@@ -604,7 +602,7 @@ const Canvas = React.forwardRef((props, refs) => {
       bigArrg,
       sitnum2 * sitInterp + sitOrder * 2,
       sitnum1 * sitInterp + sitOrder * 2,
-      valueg1
+      p.valueg1
     );
 
     let k = 0,
@@ -614,10 +612,10 @@ const Canvas = React.forwardRef((props, refs) => {
       for (let iy = 0; iy < AMOUNTY; iy++) {
         const value = bigArrg[l] * 10;
         //柔化处理smooth
-        smoothBig[l] = smoothBig[l] + (value - smoothBig[l] + 0.5) / valuel1;
+        smoothBig[l] = smoothBig[l] + (value - smoothBig[l] + 0.5) / p.valuel1;
 
         positions[k] = ix * SEPARATION - (AMOUNTX * SEPARATION) / 2; // x
-        positions[k + 1] = smoothBig[l] * value1; // y
+        positions[k + 1] = smoothBig[l] * p.value1; // y
         positions[k + 2] = iy * SEPARATION - (AMOUNTY * SEPARATION) / 2; // z
 
         let rgb
@@ -626,16 +624,16 @@ const Canvas = React.forwardRef((props, refs) => {
 
           if (ix >= sitIndexArr[0] && ix < sitIndexArr[1] && iy >= sitIndexArr[2] && iy < sitIndexArr[3]) {
             // rgb = [255, 0, 0];
-            rgb = jet(0, valuej1, smoothBig[l]);
+            rgb = jet(0, p.valuej1, smoothBig[l]);
             // scales1[l] = 2;
             // positions1[k + 1] = smoothBig[l] / value2 - 1000
             dataArr.push(bigArrg[l])
           } else {
-            rgb = jetgGrey(0, valuej1, smoothBig[l]);
+            rgb = jetgGrey(0, p.valuej1, smoothBig[l]);
             // scales1[l] = 1;
           }
         } else {
-          rgb = jet(0, valuej1, smoothBig[l]);
+          rgb = jet(0, p.valuej1, smoothBig[l]);
           // scales1[l] = 1;
         }
 
@@ -780,16 +778,16 @@ const Canvas = React.forwardRef((props, refs) => {
   function sitValue(prop) {
     // console.log(prop)
     const { valuej, valueg, value, valuel, valuef, valuelInit } = prop;
-    if (valuej) valuej1 = valuej;
-    if (valueg) valueg1 = valueg;
-    if (value) value1 = value;
-    if (valuel) valuel1 = valuel;
-    if (valuef) valuef1 = valuef;
-    if (valuelInit) valuelInit1 = valuelInit;
-    ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a));
+    if (valuej) p.valuej1 = valuej;
+    if (valueg) p.valueg1 = valueg;
+    if (value) p.value1 = value;
+    if (valuel) p.valuel1 = valuel;
+    if (valuef) p.valuef1 = valuef;
+    if (valuelInit) p.valuelInit1 = valuelInit;
+    ndata1 = ndata1.map((a, index) => (a - p.valuef1 < 0 ? 0 : a));
 
     ndata1Num = ndata1.reduce((a, b) => a + b, 0);
-    if (ndata1Num < valuelInit1) {
+    if (ndata1Num < p.valuelInit1) {
       ndata1 = new Array(sitnum1 * sitnum2).fill(0);
     }
     console.log(ndata1, 111)
@@ -817,17 +815,17 @@ const Canvas = React.forwardRef((props, refs) => {
     //   valuel,
     //   valuef,
     //   valuelInit,)
-    // valuej1 = valuej;
-    // valueg1 = valueg;
-    // value1 = value;
-    // valuel1 = valuel;
-    // valuef1 = valuef;
+    // p.valuej1 = valuej;
+    // p.valueg1 = valueg;
+    // p.value1 = value;
+    // p.valuel1 = valuel;
+    // p.valuef1 = valuef;
     // ndata1 = [];
     ndata1 = wsPointData;
 
-    // valuelInit1 = valuelInit;
+    // p.valuelInit1 = valuelInit;
     // 修改线序 坐垫
-    ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a ));
+    ndata1 = ndata1.map((a, index) => (a - p.valuef1 < 0 ? 0 : a ));
 
     ndata1Num = ndata1.reduce((a, b) => a + b, 0);
 
