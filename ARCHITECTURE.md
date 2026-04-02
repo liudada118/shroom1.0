@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-03-31 19:28
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-04-02 14:13
 
 ## 1. 项目概述
 
@@ -391,6 +391,7 @@ graph TD
 | 2026-03-27 14:35 | Max | Dev Vite 误连修复与标题字标替换 | `index.js` 从 Vite 输出中识别真实本地地址并校验 HTML 标题/入口，只加载当前应用前端，避免误连其他 `localhost:3000` 页面；`Title.jsx` 用 `shroom-wordmark.svg` 替换 `JQTOOLS-robot` 文案 |
 | 2026-03-27 14:43 | Max | util.js jqbed 语法修复 | 修复 `client/src/page/home/util.js` 中 `xiyueReal1` 与 `jqbed` 两个对象方法之间丢失的逗号，消除 `Unexpected identifier 'jqbed'` 运行时报错 |
 | 2026-03-31 19:28 | merge-conflict | 合并冲突按线上版本解决 | 将 `.gitignore`、`client/src/components/title/Title.jsx`、`client/src/constants.js`、`client/src/page/home/Home.jsx`、`client/src/page/license/License.jsx`、`openWeb.js` 统一切换到远端版本，并清理 `client/yarn.lock` 中线上遗留的冲突标记以恢复有效锁文件 |
+| 2026-04-02 14:13 | fix-heatmap-runtime | HeatmapCanvas 兼容导出恢复 | 在 `client/src/assets/util/heatmap.js` 保留 1.1.15 新增热力图导出逻辑的同时，补回旧版 `HeatmapCanvas` 兼容实现，恢复 hand/robot/video 等页面对共享热力图模块的历史调用，消除运行白屏并恢复 Vite 构建通过 |
 
 ## 9. 更新日志
 
@@ -498,6 +499,7 @@ graph TD
 | 2026-03-27 14:35 | Max | 修复缺陷 | 修复 Electron 开发模式误连其他 `localhost:3000` 页面：主进程改为从 Vite 输出中识别真实本地地址并校验预期标题/入口后再加载，同时将 Title 标题栏中的 `JQTOOLS-robot` 替换为 `shroom-wordmark.svg` 字标 |
 | 2026-03-27 14:43 | Max | 修复缺陷 | 修复 `client/src/page/home/util.js` 中对象方法定义缺少分隔逗号的问题，将 `} jqbed(...)` 更正为 `}, jqbed(...)`，消除浏览器里的 `Unexpected identifier 'jqbed'` 语法错误 |
 | 2026-03-31 19:28 | merge-conflict | 修复缺陷 | 解决合并冲突并以线上版本为准：同步 `.gitignore`、`client/src/components/title/Title.jsx`、`client/src/constants.js`、`client/src/page/home/Home.jsx`、`client/src/page/license/License.jsx`、`openWeb.js` 到远端内容，并清理 `client/yarn.lock` 中遗留的冲突标记 |
+| 2026-04-02 14:13 | fix-heatmap-runtime | 修复缺陷 | 修复 1.1.15 集成新的 `client/src/assets/util/heatmap.js` 后丢失 `HeatmapCanvas` 兼容导出的问题，在保留 `bthClickHandle` / `Intensity` 新逻辑的同时补回旧版渲染入口，恢复 hand、robot、video 等页面运行并消除白屏 |
 
 *变更类型：`新增功能` / `优化重构` / `修复缺陷` / `配置变更` / `文档更新` / `依赖升级` / `初始化`*
 

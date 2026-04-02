@@ -588,3 +588,251 @@ Intensity.prototype.getLegend = function (options) {
 
     return canvas;
 }
+
+function legacyHeatmapAddSide(arr, width, height, wnum, hnum, sideNum) {
+    const narr = new Array(height);
+    const res = [];
+    const fillValue = sideNum >= 0 ? sideNum : 1;
+
+    for (let i = 0; i < height; i++) {
+        narr[i] = [];
+        for (let j = 0; j < width; j++) {
+            if (j === 0) {
+                narr[i].push(...new Array(wnum).fill(fillValue), arr[i * width + j]);
+            } else if (j === width - 1) {
+                narr[i].push(arr[i * width + j], ...new Array(wnum).fill(fillValue));
+            } else {
+                narr[i].push(arr[i * width + j]);
+            }
+        }
+    }
+
+    for (let i = 0; i < height; i++) {
+        res.push(...narr[i]);
+    }
+
+    return [
+        ...new Array(hnum * (width + 2 * wnum)).fill(fillValue),
+        ...res,
+        ...new Array(hnum * (width + 2 * wnum)).fill(fillValue),
+    ];
+}
+
+function legacyHeatmapInterpSmall(smallMat, width, height, interp1, interp2) {
+    const bigMat = new Array((width * interp1) * (height * interp2)).fill(0);
+    for (let i = 0; i < height; i++) {
+        for (let j = 0; j < width; j++) {
+            const baseIndex = (width * interp1) * i * interp2 + (j * interp1);
+            bigMat[baseIndex] = smallMat[i * width + j] * 10;
+            bigMat[(width * interp1) * (i * interp2 + 1) + (j * interp1)] = smallMat[i * width + j] * 10;
+        }
+    }
+    return bigMat;
+}
+
+function legacyHeatmapGenerateData(arr, canvas, width, height, interp1, interp2, order) {
+    let resArr = arr;
+    resArr = legacyHeatmapAddSide(resArr, height, width, order, order, 0);
+    const interpArr = legacyHeatmapInterpSmall(resArr, height + order * 2, width + order * 2, interp1, interp2);
+    const data = [];
+    const dataWidth = (width + order * 2) * interp1;
+    const dataHeight = (height + order * 2) * interp2;
+
+    for (let i = 0; i < dataHeight; i++) {
+        for (let j = 0; j < dataWidth; j++) {
+            data.push({
+                y: i * canvas.width / dataWidth,
+                x: j * canvas.height / dataHeight,
+                value: interpArr[i * dataWidth + j],
+            });
+        }
+    }
+
+    return data;
+}
+
+function legacyHeatmapCanvas(width, height) {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    return canvas;
+}
+
+function legacyHeatmapCreateCircle(size) {
+    const shadowBlur = size / 2;
+    const radius = size + shadowBlur;
+    const offsetDistance = 10000;
+    const circle = legacyHeatmapCanvas(radius * 2, radius * 2);
+    const context = circle.getContext("2d");
+
+    if (isShadow) {
+        context.shadowBlur = shadowBlur;
+    }
+    context.shadowColor = "black";
+    context.shadowOffsetX = offsetDistance;
+    context.shadowOffsetY = offsetDistance;
+    context.beginPath();
+    context.arc(radius - offsetDistance, radius - offsetDistance, size, 0, Math.PI * 2, true);
+    context.closePath();
+    context.fill();
+    return circle;
+}
+
+function legacyHeatmapColorize(pixels, gradient, options) {
+    const max = options.max;
+    const min = options.min;
+    const diff = max - min;
+    const range = options.range || null;
+    let jMin = options.fliter ? options.fliter : 100;
+    let jMax = 1024;
+
+    if (range && range.length === 2) {
+        jMin = (range[0] - min) / diff * 1024;
+        jMax = (range[1] - min) / diff * 1024;
+    }
+
+    for (let i = 3, len = pixels.length, j; i < len; i += 4) {
+        j = pixels[i] * 4;
+
+        if (pixels[i] / 256 < 1) {
+            pixels[i] = 256;
+        }
+
+        if (j && j >= jMin && j <= jMax) {
+            pixels[i - 3] = gradient[j];
+            pixels[i - 2] = gradient[j + 1];
+            pixels[i - 1] = gradient[j + 2];
+        } else {
+            pixels[i] = 0;
+        }
+    }
+}
+
+function legacyHeatmapApplySharpen(context, width, height) {
+    const originalImageData = context.getImageData(0, 0, width, height);
+    const originalPixels = originalImageData.data;
+    const outputImageData = context.createImageData(width, height);
+    const outputPixels = outputImageData.data;
+    const kernel = [
+        0, -1, 0,
+        -1, 5, -1,
+        0, -1, 0,
+    ];
+    const kernelSize = Math.sqrt(kernel.length);
+    const halfKernelSize = Math.floor(kernelSize / 2);
+
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            let r = 0;
+            let g = 0;
+            let b = 0;
+
+            for (let ky = 0; ky < kernelSize; ky++) {
+                for (let kx = 0; kx < kernelSize; kx++) {
+                    const pixelY = y + ky - halfKernelSize;
+                    const pixelX = x + kx - halfKernelSize;
+
+                    if (pixelY < 0 || pixelY >= height || pixelX < 0 || pixelX >= width) {
+                        continue;
+                    }
+
+                    const offset = (pixelY * width + pixelX) * 4;
+                    const weight = kernel[ky * kernelSize + kx];
+                    r += originalPixels[offset] * weight;
+                    g += originalPixels[offset + 1] * weight;
+                    b += originalPixels[offset + 2] * weight;
+                }
+            }
+
+            const destOffset = (y * width + x) * 4;
+            outputPixels[destOffset] = r;
+            outputPixels[destOffset + 1] = g;
+            outputPixels[destOffset + 2] = b;
+            outputPixels[destOffset + 3] = originalPixels[destOffset + 3];
+        }
+    }
+
+    context.putImageData(outputImageData, 0, 0);
+}
+
+function legacyHeatmapDraw(context, data, canvas, options) {
+    const circle = legacyHeatmapCreateCircle(options.size);
+    const circleHalfWidth = circle.width / 2;
+    const circleHalfHeight = circle.height / 2;
+    const dataOrderByAlpha = {};
+
+    data.forEach((item) => {
+        const alpha = Math.min(1, item.value / options.max).toFixed(2);
+        if (!dataOrderByAlpha[alpha]) {
+            dataOrderByAlpha[alpha] = [];
+        }
+        dataOrderByAlpha[alpha].push(item);
+    });
+
+    for (const alpha in dataOrderByAlpha) {
+        if (Number.isNaN(Number(alpha))) {
+            continue;
+        }
+        context.beginPath();
+        context.globalAlpha = alpha;
+        dataOrderByAlpha[alpha].forEach((item) => {
+            context.drawImage(circle, item.x - circleHalfWidth, item.y - circleHalfHeight);
+        });
+    }
+
+    const intensity = new Intensity(options);
+    const colored = context.getImageData(0, 0, context.canvas.width, context.canvas.height);
+    legacyHeatmapColorize(colored.data, intensity.getImageData(), options);
+    context.clearRect(0, 0, context.canvas.width, context.canvas.height);
+    context.putImageData(colored, 0, 0);
+    legacyHeatmapApplySharpen(context, canvas.width, canvas.height);
+}
+
+function legacyHeatmapRender(arr, canvas, width, height, interp1, interp2, order, options) {
+    const data = legacyHeatmapGenerateData(arr, canvas, width, height, interp1, interp2, order);
+    const context = canvas.getContext("2d");
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    isShadow = true;
+    context.globalCompositeOperation = "lighter";
+    legacyHeatmapDraw(context, data, canvas, options);
+    isShadow = false;
+}
+
+export class HeatmapCanvas {
+    constructor(width, height, canvasWProp, canvasHProp, canvasName, options) {
+        this.width = 32;
+        this.height = 32;
+        this.canvas = document.createElement("canvas");
+
+        const contentWidth = 1024;
+        this.options = {
+            min: 0,
+            max: 2000,
+            size: contentWidth * canvasWProp / 4,
+        };
+
+        if (canvasName === "body") {
+            this.options.size = contentWidth * canvasWProp / 40;
+        }
+
+        this.canvas.width = contentWidth * canvasWProp;
+        this.canvas.height = contentWidth * canvasHProp;
+
+        if (options) {
+            this.options = options;
+        }
+    }
+
+    changeHeatmap(resArr, interp1, interp2, order) {
+        legacyHeatmapRender(
+            resArr,
+            this.canvas,
+            this.width,
+            this.height,
+            interp1,
+            interp2,
+            order,
+            this.options
+        );
+    }
+}
