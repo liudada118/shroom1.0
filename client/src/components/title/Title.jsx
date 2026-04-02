@@ -386,6 +386,11 @@ class Title extends React.Component {
         // hand / bed4096 raw data mode: only color and filter
         showColor = true;
         showFilter = true;
+      } else if (matrixName === 'bed4096') {
+        // bed4096 normal mode: WebGL heatmap - size, color, filter
+        showSize = true;
+        showColor = true;
+        showFilter = true;
       } else {
         // Group 1: 3D point scene - smoothness, color, filter, height, consistency, init
         showGuass = true;

@@ -15,6 +15,7 @@ import Box100 from "../../components/three/box100_3";
 import Car100 from "../../components/car/box100_3";
 
 import Bed4096 from "../../components/three/4096";
+import Canvas4096WebGL from "../../components/webgl/Canvas4096WebGL";
 import Bed1616 from "../../components/three/1616";
 import Fast256 from '../../components/three/NumThreeColor copy'
 import Fast1024 from '../../components/three/NumThreeColor1024'
@@ -3268,8 +3269,7 @@ class Home extends React.Component {
 
                 this.state.numMatrixFlag == "numoriginal" && this.state.matrixName == 'bed4096' ?
                   <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
-                    <Fast1024
-                      size={1}
+                    <Canvas4096WebGL
                       ref={this.com}
                       data={this.data}
                       local={this.state.local}
@@ -3364,7 +3364,7 @@ class Home extends React.Component {
                       <CanvasCom matrixName={this.state.matrixName}
                         local={this.state.local}
                       >
-                        <Bed4096
+                        <Canvas4096WebGL
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}

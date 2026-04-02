@@ -28,7 +28,7 @@ export class WebGLCanvas {
                 v_filterClick = u_filterClick;\
                 v_click = a_click; \
         }";
-        this.fragmentShader = "\
+                this.fragmentShader = "\
         precision mediump float;\
         varying vec2 v_center;\
         varying vec2 v_resolution;\
@@ -75,65 +75,63 @@ export class WebGLCanvas {
         void main(void){\
             gl_Position = a_Position;\
         }";
-        this.fragmentShader1 = `\
-        precision mediump float;\
-        uniform vec2 u_resolution;\
-        uniform sampler2D u_Sampler;\
-        vec3 getColorByPercent(float pct){\
-            vec3 v3=vec3(0.0,0.0,pct);\
-
-                  if(pct <= 0.00){\
-        return vec3(0, 0, 0);\
-    }else if(pct <= 0.08){\
-
-        float t = (pct - 0.00)/(0.08 - 0.00);\
-        return mix(vec3(0.255, 0.573, 0.996), vec3(0.286, 0.667, 1.000), t);\
-    }else if(pct <= 0.17){\
-
-        float t = (pct - 0.08)/(0.17 - 0.08);\
-        return mix(vec3(0.286, 0.667, 1.000), vec3(0.318, 0.776, 1.000), t);\
-    }else if(pct <= 0.25){\
-        float t = (pct - 0.17)/(0.25 - 0.17);\
-        return mix(vec3(0.318, 0.776, 1.000), vec3(0.302, 0.875, 0.961), t);\
-    }else if(pct <= 0.33){\
-        float t = (pct - 0.25)/(0.33 - 0.25);\
-        return mix(vec3(0.302, 0.875, 0.961), vec3(0.204, 0.965, 0.859), t);\
-    }else if(pct <= 0.42){\
-        float t = (pct - 0.33)/(0.42 - 0.33);\
-        return mix(vec3(0.204, 0.965, 0.859), vec3(0.424, 1.000, 0.725), t);\
-    }else if(pct <= 0.50){\
-        float t = (pct - 0.42)/(0.50 - 0.42);\
-        return mix(vec3(0.424, 1.000, 0.725), vec3(0.773, 1.000, 0.545), t);\
-    }else if(pct <= 0.58){\
-        float t = (pct - 0.50)/(0.58 - 0.50);\
-        return mix(vec3(0.773, 1.000, 0.545), vec3(0.992, 0.965, 0.333), t);\
-    }else if(pct <= 0.67){\
-        float t = (pct - 0.58)/(0.67 - 0.58);\
-        return mix(vec3(0.992, 0.965, 0.333), vec3(1.000, 0.855, 0.255), t);\
-    }else if(pct <= 0.75){\
-        float t = (pct - 0.67)/(0.75 - 0.67);\
-        return mix(vec3(1.000, 0.855, 0.255), vec3(1.000, 0.710, 0.290), t);\
-    }else if(pct <= 0.83){\
-        float t = (pct - 0.75)/(0.83 - 0.75);\
-        return mix(vec3(1.000, 0.710, 0.290), vec3(1.000, 0.584, 0.333), t);\
-    }else if(pct <= 0.92){\
-        float t = (pct - 0.83)/(0.92 - 0.83);\
-        return mix(vec3(1.000, 0.584, 0.333), vec3(1.000, 0.463, 0.396), t);\
-    }else if(pct <= 1.00){\
-        float t = (pct - 0.92)/(1.00 - 0.92);\
-        return mix(vec3(1.000, 0.463, 0.396), vec3(1.000, 0.369, 0.439), t);\
-    }else{\
-        return vec3(1.000, 0.369, 0.439);\
-    }\
-            return v3;\
-        }\
-        void main(void){\
-            vec4 c=texture2D(u_Sampler, vec2(gl_FragCoord.x/u_resolution[0],gl_FragCoord.y/u_resolution[1]));\
-            float p_alpha=c[3];\
-            if(p_alpha>0.08){\
-                 gl_FragColor = vec4(getColorByPercent(p_alpha),1) ;\
-            }\
-        }`
+        this.fragmentShader1 = "\
+precision mediump float; \
+uniform vec2 u_resolution; \
+uniform sampler2D u_Sampler; \
+\
+vec3 linearToSRGB(vec3 color){ \
+  return pow(color * 1.5, vec3(1.0/2.2)); \
+} \
+\
+vec3 getColorByPercent(float pct){ \
+  float p = clamp(pct, 0.0, 1.0); \
+  /* Color stops (sRGB, hex -> 0~1) */ \
+  const vec3 c0 = vec3(0.0,    0.0,    0.0   ); /* 0.00 -> #000000 */ \
+  const vec3 c1 = vec3(0.0,    0.0,    1.0   ); /* 0.14 -> #0000FF */ \
+  const vec3 c2 = vec3(0.0,    0.4,    1.0   ); /* 0.28 -> #0066FF */ \
+  const vec3 c3 = vec3(0.0,    1.0,    0.0   ); /* 0.42 -> #00FF00 */ \
+  const vec3 c4 = vec3(1.0,    1.0,    0.0   ); /* 0.56 -> #FFFF00 */ \
+  const vec3 c5 = vec3(1.0,    0.4,    0.0   ); /* 0.70 -> #FF6600 */ \
+  const vec3 c6 = vec3(1.0,    0.0,    0.0   ); /* 0.84 -> #FF0000 */ \
+  const vec3 c7 = vec3(1.0, 0.0, 0.0 ); /* 1.00 -> #FF1E42 */ \
+  \
+  if(p <= 0.14){ \
+    float t = (p - 0.00) / (0.14 - 0.00); \
+    return mix(c0, c1, t); \
+  }else if(p <= 0.28){ \
+    float t = (p - 0.14) / (0.28 - 0.14); \
+    return mix(c1, c2, t); \
+  }else if(p <= 0.42){ \
+    float t = (p - 0.28) / (0.42 - 0.28); \
+    return mix(c2, c3, t); \
+  }else if(p <= 0.56){ \
+    float t = (p - 0.42) / (0.56 - 0.42); \
+    return mix(c3, c4, t); \
+  }else if(p <= 0.70){ \
+    float t = (p - 0.56) / (0.70 - 0.56); \
+    return mix(c4, c5, t); \
+  }else if(p <= 0.84){ \
+    float t = (p - 0.70) / (0.84 - 0.70); \
+    return mix(c5, c6, t); \
+  }else{ \
+    float t = (p - 0.84) / (1.0 - 0.84); \
+    return mix(c6, c7, t); \
+  } \
+} \
+\
+void main(void){ \
+  vec2 uv = vec2(gl_FragCoord.x / u_resolution.x, gl_FragCoord.y / u_resolution.y); \
+  vec4 c = texture2D(u_Sampler, uv); \
+  float p_alpha = c.a; \
+  if(p_alpha > 0.03){ \
+    vec3 col = getColorByPercent(p_alpha); \
+    col = linearToSRGB(col); \
+    gl_FragColor = vec4(col, 1.0); \
+  }else{ \
+    discard; /* 或者输出透明：gl_FragColor = vec4(0.0); */ \
+  } \
+}";
     }
 
 
@@ -170,6 +168,7 @@ WebGLCanvas.prototype.bufferCuter = function (arr) {
 
 }
 var tplCanvas = document.createElement("canvas");
+tplCanvas.className = 'webgl'
 var map = {}
 // document.body.appendChild(tplCanvas)
 WebGLCanvas.prototype.createTplCanvas = function (cfg, data ,index) {
@@ -781,6 +780,51 @@ function interpSmall(smallMat, width, height, interp1, interp2) {
 }
 
 
+export function genWebglHeatmap(dataArr , heatMapMax = 12 , heatMapRadius = 24  , canvasWidth=256 , canvasHeight = 256) {
+    // const heatMapMax = 12
+    // const heatMapRadius = 24
+    const newArr = []
+
+    // 画布大小 必须为2的指数
+    const width = 16, height = 16//workbenchesStore.seniors.length
+
+    for (let i = 0; i < 1; i++) {
+        // newArr
+        // console.log(workbenchesStore.seniors[i].matrix)
+
+        // if (!dataArr[i]) continue
+        //  let resArr = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 2, 7, 5, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 4, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 1, 0, 2, 9, 6, 26, 4, 13, 12, 7, 4, 1, 1, 0, 2, 1, 1, 1, 0, 0, 0, 0, 2, 0, 0, 0, 0, 10, 9, 6, 12, 25, 36, 13, 16, 38, 32, 37, 14, 20, 29, 26, 17, 14, 23, 36, 27, 5, 3, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 32, 43, 21, 47, 37, 46, 74, 32, 38, 38, 44, 20, 33, 39, 63, 37, 30, 57, 36, 63, 35, 24, 18, 1, 0, 0, 0, 0, 0, 2, 1, 12, 21, 56, 10, 36, 34, 36, 69, 34, 48, 47, 71, 40, 56, 55, 56, 88, 93, 101, 86, 66, 11, 62, 37, 13, 3, 0, 0, 0, 0, 0, 1, 11, 22, 11, 6, 18, 25, 46, 56, 24, 72, 59, 34, 45, 78, 60, 38, 68, 92, 52, 81, 14, 2, 29, 59, 89, 54, 0, 0, 0, 0, 1, 9, 62, 28, 8, 2, 4, 41, 45, 27, 29, 77, 56, 61, 47, 55, 64, 50, 50, 59, 50, 7, 2, 0, 4, 35, 50, 47, 0, 0, 0, 0, 2, 51, 68, 44, 3, 1, 2, 7, 32, 40, 27, 54, 57, 38, 49, 59, 58, 50, 38, 36, 7, 1, 1, 0, 1, 6, 43, 58, 0, 0, 1, 1, 20, 84, 115, 10, 1, 1, 1, 3, 19, 55, 44, 44, 39, 45, 48, 31, 47, 61, 30, 15, 3, 1, 0, 0, 1, 1, 4, 32, 0, 0, 0, 4, 147, 71, 32, 3, 0, 1, 1, 3, 52, 38, 31, 38, 26, 27, 34, 45, 44, 58, 17, 3, 1, 0, 0, 0, 0, 0, 1, 18, 0, 1, 2, 48, 29, 2, 0, 0, 0, 1, 3, 1, 9, 22, 41, 39, 15, 27, 59, 34, 24, 25, 10, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 3, 22, 21, 4, 2, 1, 1, 0, 1, 0, 2, 9, 4, 15, 10, 13, 19, 28, 19, 17, 21, 5, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 26, 13, 2, 0, 0, 1, 1, 0, 2, 1, 0, 6, 3, 20, 10, 9, 24, 32, 20, 9, 10, 8, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 5, 3, 31, 19, 116, 33, 44, 48, 63, 62, 45, 38, 15, 3, 3, 1, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 3, 1, 2, 1, 7, 23, 17, 12, 19, 33, 55, 97, 98, 60, 54, 60, 53, 39, 17, 7, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 52, 64, 95, 94, 72, 48, 39, 52, 67, 47, 36, 48, 86, 54, 37, 41, 4, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 13, 74, 80, 65, 85, 66, 75, 41, 14, 19, 26, 36, 36, 37, 57, 64, 75, 24, 3, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 1, 3, 24, 43, 40, 23, 32, 13, 2, 5, 5, 4, 5, 4, 3, 15, 26, 31, 20, 49, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 18, 61, 7, 3, 3, 1, 0, 1, 2, 2, 0, 5, 15, 32, 56, 13, 35, 1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 6, 20, 57, 14, 2, 1, 1, 0, 0, 2, 0, 1, 4, 17, 48, 21, 6, 5, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16, 13, 11, 1, 0, 0, 0, 0, 0, 0, 2, 0, 0, 2, 12, 14, 16, 8, 4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 2, 5, 13, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 3, 5, 19, 6, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 2, 9, 8, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 38, 2, 1, 0, 1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 2, 30, 19, 21, 6, 0, 0, 0, 0, 1, 0, 0, 0, 0, 3, 38, 16, 8, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 6, 18, 31, 26, 10, 3, 0, 0, 1, 0, 0, 0, 0, 14, 54, 43, 14, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 3, 17, 69, 33, 59, 17, 0, 0, 1, 0, 0, 0, 0, 18, 34, 18, 16, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 8, 7, 69, 37, 96, 48, 25, 0, 0, 0, 0, 0, 0, 1, 51, 39, 58, 17, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 1, 3, 15, 25, 69, 63, 0, 1, 0, 0, 0, 2, 2, 49, 23, 28, 3, 0, 0, 0, 0, 0, 0, 0, 2, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 6, 12, 46, 0, 0, 1, 0, 0, 2, 15, 30, 26, 9, 3, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 4, 36, 0]
+
+        // 渲染数据源
+        let heatmapArr = dataArr
+        // heatmapArr = heatmapArr.map((a) => a > 10 ? a : 0)
+        // heatmapArr = gaussBlur_2(heatmapArr, 32 , 32, 1.4);
+        // heatmapArr = addSide(heatmapArr, 32, 32, 5, 5, 0)
+
+        const dataHeight = 64, dataWidth = 64
+        for (let j = 0; j < dataHeight; j++) {
+            for (let k = 0; k < dataWidth; k++) {
+                let obj = {}
+                const data = heatmapArr[j * dataWidth + k] ? heatmapArr[j * dataWidth + k] * 1.8 : 0
+                newArr.push([k * (canvasWidth / dataWidth), j * (canvasHeight / dataHeight), data],)
+            }
+
+        }
+    }
+   
+    // console.log(workbenchesStore.seniors, 'workbenchesStore.seniors.length')
+    const WebGLCanvas1 = new WebGLCanvas()
+    const z = WebGLCanvas1.render({
+        width: canvasWidth,
+        height: canvasHeight,
+        radius: heatMapRadius,
+        max: heatMapMax,
+        min: 0,
+        filter: 0,
+        class: 'body'
+    }, newArr, 'dynamic');
+    return z[0]
+}
 
 
 
