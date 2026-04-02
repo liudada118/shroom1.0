@@ -562,7 +562,63 @@ def getData(data):
 
 
 
-FUNCS = {"ping": ping, "getData": getData}
+# ============================================================
+# 足压分析函数（来自 real_time_and_replay_cop_speed_2 和
+# Comprehensive_Indicators_4096_modify_input3）
+# ============================================================
+try:
+    import real_time_and_replay_cop_speed_2 as _cop_speed
+    from Comprehensive_Indicators_4096_modify_input3 import (
+        extract_peak_frame as _extract_peak_frame,
+        generate_foot_pressure_report as _generate_foot_pressure_report,
+    )
+    _foot_analysis_available = True
+except Exception as _foot_import_err:
+    _foot_analysis_available = False
+    print(f'[WARN] foot analysis modules not available: {_foot_import_err}', file=sys.stderr)
+
+
+def realtime_server(sensor_data, data_prev=None):
+    """实时处理：计算左右脚压力/面积/COP速度"""
+    if not _foot_analysis_available:
+        raise RuntimeError('foot analysis modules not available')
+    return _cop_speed.process_frame_realtime(sensor_data, data_prev)
+
+
+def replay_server(sensor_data, fps=20.0):
+    """回放批量处理：传入 (N,4096) 数据矩阵"""
+    if not _foot_analysis_available:
+        raise RuntimeError('foot analysis modules not available')
+    return _cop_speed.process_playback_batch(sensor_data, fps=fps)
+
+
+def get_peak_frame(sensor_data):
+    """提取峰值帧"""
+    if not _foot_analysis_available:
+        raise RuntimeError('foot analysis modules not available')
+    return _extract_peak_frame(sensor_data)
+
+
+def generate_foot_pressure_report1(sensor_data, pdf_name, heatmap_png_path,
+                                    user_name, user_age, user_gender, user_id):
+    """生成足压分析 PDF 报告"""
+    if not _foot_analysis_available:
+        raise RuntimeError('foot analysis modules not available')
+    return _generate_foot_pressure_report(
+        sensor_data, pdf_name, heatmap_png_path,
+        user_name, user_age, user_gender, user_id
+    )
+
+
+FUNCS = {
+    "ping": ping,
+    "getData": getData,
+    # 足压分析
+    "realtime_server": realtime_server,
+    "replay_server": replay_server,
+    "get_peak_frame": get_peak_frame,
+    "generate_foot_pressure_report1": generate_foot_pressure_report1,
+}
 
 def handle(req):
     fn = req.get("fn")
