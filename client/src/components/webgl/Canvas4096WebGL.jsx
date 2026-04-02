@@ -100,10 +100,23 @@ const Canvas4096WebGL = React.forwardRef((props, refs) => {
     if (obj.size !== undefined) cfgRef.current.size = obj.size
   }
 
+  /**
+   * 接收峰值帧数据，渲染到 canvas 并返回 canvas 元素（用于导出 PDF）
+   * 与原 bthClickHandle 接口兼容
+   */
+  function bthClickHandle(wsPointData) {
+    if (wsPointData && wsPointData.length >= 4096) {
+      dataRef.current = wsPointData
+    }
+    renderFrame()
+    return canvasRef.current
+  }
+
   useImperativeHandle(refs, () => ({
     sitData,
     sitValue,
     changeColor,
+    bthClickHandle,
   }))
 
   return (

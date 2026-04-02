@@ -3279,6 +3279,18 @@ class Home extends React.Component {
                       changeSelect={this.changeSelect} />
                   </CanvasCom>
                   :
+                  this.state.numMatrixFlag == "numoriginal" && this.state.matrixName == 'bed4096num' ?
+                  <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
+                    <Bed4096
+                      ref={this.com}
+                      data={this.data}
+                      local={this.state.local}
+                      handleChartsBody={this.handleChartsBody.bind(this)}
+                      handleChartsBody1={this.handleChartsBody1.bind(this)}
+                      changeStateData={this.changeStateData}
+                      changeSelect={this.changeSelect} />
+                  </CanvasCom>
+                  :
                   this.state.numMatrixFlag == "numoriginal" && this.state.matrixName == 'hand' ?
                   <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
                     <Fast1024
