@@ -744,7 +744,7 @@ export const sitTypeEvent = {
     } else if (that.state.numMatrixFlag == "heatmap") {
       that.com.current?.bthClickHandle(wsPointData);
     }
-   }, bed4096num: ({ that, wsPointData, local }) => {
+  }, bed4096num: ({ that, wsPointData, local }) => {
     if (that.state.numMatrixFlag == "normal" || that.state.numMatrixFlag == "numoriginal") {
       // wsPointData = handLine(wsPointData);
       that.com.current?.sitData({
@@ -753,7 +753,7 @@ export const sitTypeEvent = {
       });
     } else if (that.state.numMatrixFlag == "heatmap") {
       that.com.current?.bthClickHandle(wsPointData);
-    }}
+    }
   }, bed1616: ({ that, wsPointData, local }) => {
     if (that.state.numMatrixFlag == "normal") {
       // wsPointData = handLine(wsPointData);
