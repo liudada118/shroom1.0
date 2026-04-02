@@ -1,5 +1,5 @@
 import React from 'react'
-import { Menu, Slider, Button, Select, message, Divider, Space, Radio, Drawer, Modal } from 'antd';
+import { Menu, Slider, Button, Select, message, notification, Divider, Space, Radio, Drawer, Modal } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import exchange from '../../assets/images/exchange.png'
 import option from '../../assets/images/Option.png'
@@ -143,7 +143,8 @@ class Title extends React.Component {
       collectGender: '男',
       open: false,
       fingerIndex: 0,
-      colHZ: 12
+      colHZ: 12,
+      pdfLoading: false,
     }
     this.inputRef = React.createRef(null)
     this.inputRef1 = React.createRef(null)
@@ -1243,15 +1244,17 @@ class Title extends React.Component {
             />
             <Button
               className='titleButton'
-              disabled={!this.state.dataTime}
+              disabled={!this.state.dataTime || this.state.pdfLoading}
+              loading={this.state.pdfLoading}
               onClick={async () => {
                 const date = this.state.dataTime;
                 const collectName = this.state.realname || '未知';
                 const collectAge = this.state.collectAge || '0';
                 const collectGender = this.state.collectGender || '男';
                 const colName = this.state.colName || date;
+                this.setState({ pdfLoading: true });
+                const hideLoading = message.loading('正在生成报告，请稍候...', 0);
                 try {
-                  message.info('正在生成报告...');
                   const res = await axios({
                     method: 'post',
                     url: 'http://127.0.0.1:19245/getDbHeatmap',
@@ -1259,9 +1262,9 @@ class Title extends React.Component {
                   });
                   if (res.status === 200) {
                     const canvas = heatmapBthClickHandle(res.data.data.peak_frame_data);
-                    if (!canvas) { message.info('Canvas not found.'); return; }
+                    if (!canvas) { hideLoading(); this.setState({ pdfLoading: false }); message.error('Canvas not found.'); return; }
                     canvas.toBlob(async (blob) => {
-                      if (!blob) { message.info('Canvas export failed.'); return; }
+                      if (!blob) { hideLoading(); this.setState({ pdfLoading: false }); message.error('Canvas export failed.'); return; }
                       const formData = new FormData();
                       formData.append('file', blob, 'canvas.png');
                       formData.append('selector', '#uploadCanvas');
@@ -1274,13 +1277,39 @@ class Title extends React.Component {
                         const uploadRes = await axios.post('http://127.0.0.1:19245/uploadCanvas', formData, {
                           headers: { 'Content-Type': 'multipart/form-data' }
                         });
-                        message.info(`上传成功 (${uploadRes.status})`);
+                        hideLoading();
+                        this.setState({ pdfLoading: false });
+                        const pdfFilePath = uploadRes.data?.data?.pdfFilePath || '';
+                        const pdfDir = uploadRes.data?.data?.pdfDir || '';
+                        notification.success({
+                          message: 'PDF 报告生成成功',
+                          description: pdfFilePath ? `已保存至：${pdfFilePath}` : '报告已生成',
+                          duration: 0,
+                          btn: pdfFilePath ? (
+                            <Button
+                              size='small'
+                              type='primary'
+                              onClick={() => {
+                                if (window.electronAPI?.invoke) {
+                                  window.electronAPI.invoke('open-folder', { filePath: pdfFilePath });
+                                }
+                              }}
+                            >打开文件夹</Button>
+                          ) : null,
+                        });
                       } catch (err) {
+                        hideLoading();
+                        this.setState({ pdfLoading: false });
                         message.error(err?.response?.data?.message || err?.message || '上传失败');
                       }
                     }, 'image/png');
+                  } else {
+                    hideLoading();
+                    this.setState({ pdfLoading: false });
                   }
                 } catch (err) {
+                  hideLoading();
+                  this.setState({ pdfLoading: false });
                   message.error(err?.response?.data?.message || err?.message || '请求失败');
                 }
               }}

@@ -1627,14 +1627,26 @@ def create_pdf_report(left_cop, right_cop, arch_results, additional_data, save_p
         # ==========================================
         if heatmap_png_path and Path(heatmap_png_path).exists():
             fig = new_fig('等高线热力图')
-            gs = make_gs(fig, 1, 1)
+            # 热力图缩小 10%：在默认布局基础上将宽高各缩小 10%，并居中展示
+            _orig_left, _orig_right = GS_LEFT, GS_RIGHT
+            _orig_bottom, _orig_top = GS_BOTTOM, GS_TOP
+            _orig_w = _orig_right - _orig_left  # 0.87
+            _orig_h = _orig_top - _orig_bottom  # 0.40
+            _new_w = _orig_w * 0.9
+            _new_h = _orig_h * 0.9
+            _new_left = (_orig_left + _orig_right - _new_w) / 2
+            _new_right = _new_left + _new_w
+            _new_bottom = (_orig_bottom + _orig_top - _new_h) / 2
+            _new_top = _new_bottom + _new_h
+            gs = make_gs(fig, 1, 1,
+                         top=_new_top, bottom=_new_bottom,
+                         left=_new_left, right=_new_right)
             ax = fig.add_subplot(gs[0, 0])
 
             img = mpimg.imread(heatmap_png_path)
             img_r = np.rot90(img, k=-1)
             ax.imshow(img_r, origin='upper', aspect='auto')
             ax.axis('off')
-            gs.tight_layout(fig, pad=0.5)
 
             pdf.savefig(fig)
             plt.close(fig)

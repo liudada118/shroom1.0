@@ -30,6 +30,7 @@ const VALID_SEND_CHANNELS = [
   "export-csv",        // 请求导出 CSV
   "db-query",          // 数据库查询请求
   "update-command",    // 更新控制指令（检查更新、下载、安装）
+  "open-folder",       // 打开文件夹
 ];
 
 const VALID_RECEIVE_CHANNELS = [

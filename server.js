@@ -4941,7 +4941,8 @@ httpApp.post('/uploadCanvas', upload.single('file'), async (req, res) => {
     }, {
       timeoutMs: PY_REPORT_TIMEOUT_MS,
     });
-    res.json(new HttpResult(0, { file: req.file, body: req.body, absolutePath }, 'success'));
+    const pdfFilePath = `${name}.pdf`;
+    res.json(new HttpResult(0, { file: req.file, body: req.body, absolutePath, pdfFilePath, pdfDir: pdfPath }, 'success'));
   } catch (e) {
     logger.error('[uploadCanvas] error:', e.message);
     res.json(new HttpResult(1, {}, 'upload failed'));

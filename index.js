@@ -10,7 +10,7 @@
  * 6. 开发模式自动启动 Vite 开发服务器，实现前端热更新
  */
 
-const { app, BrowserWindow, ipcMain, powerSaveBlocker, powerMonitor } = require("electron");
+const { app, BrowserWindow, ipcMain, powerSaveBlocker, powerMonitor, shell } = require("electron");
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -165,6 +165,20 @@ ipcMain.handle("db-query", async (event, data) => {
   } catch (err) {
     event.sender.send("error", { message: err.message });
     return null;
+  }
+});
+
+// 处理打开文件夹请求
+ipcMain.handle("open-folder", async (event, data) => {
+  try {
+    const { filePath } = data || {};
+    if (filePath) {
+      await shell.showItemInFolder(filePath);
+    }
+    return { success: true };
+  } catch (err) {
+    logger.error("[IPC] open-folder error:", err.message);
+    return { success: false, error: err.message };
   }
 });
 
