@@ -22,3 +22,6 @@ config.txt
 .npm-cache/
 dist/
 pack-resources/python/
+/OneStep
+/img
+/OneStep

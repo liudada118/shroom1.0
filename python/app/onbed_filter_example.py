@@ -568,7 +568,7 @@ def getData(data):
 # ============================================================
 try:
     import real_time_and_replay_cop_speed_2 as _cop_speed
-    from Comprehensive_Indicators_4096_modify_input3 import (
+    from oneStep.Comprehensive_Indicators_4096_modify_input3 import (
         extract_peak_frame as _extract_peak_frame,
         generate_foot_pressure_report as _generate_foot_pressure_report,
     )
