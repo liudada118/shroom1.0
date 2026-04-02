@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-03-31 19:28
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-04-02 17:26
 
 ## 1. 项目概述
 
@@ -391,6 +391,13 @@ graph TD
 | 2026-03-27 14:35 | Max | Dev Vite 误连修复与标题字标替换 | `index.js` 从 Vite 输出中识别真实本地地址并校验 HTML 标题/入口，只加载当前应用前端，避免误连其他 `localhost:3000` 页面；`Title.jsx` 用 `shroom-wordmark.svg` 替换 `JQTOOLS-robot` 文案 |
 | 2026-03-27 14:43 | Max | util.js jqbed 语法修复 | 修复 `client/src/page/home/util.js` 中 `xiyueReal1` 与 `jqbed` 两个对象方法之间丢失的逗号，消除 `Unexpected identifier 'jqbed'` 运行时报错 |
 | 2026-03-31 19:28 | merge-conflict | 合并冲突按线上版本解决 | 将 `.gitignore`、`client/src/components/title/Title.jsx`、`client/src/constants.js`、`client/src/page/home/Home.jsx`、`client/src/page/license/License.jsx`、`openWeb.js` 统一切换到远端版本，并清理 `client/yarn.lock` 中线上遗留的冲突标记以恢复有效锁文件 |
+| 2026-04-02 14:13 | fix-heatmap-runtime | HeatmapCanvas 兼容导出恢复 | 在 `client/src/assets/util/heatmap.js` 保留 1.1.15 新增热力图导出逻辑的同时，补回旧版 `HeatmapCanvas` 兼容实现，恢复 hand/robot/video 等页面对共享热力图模块的历史调用，消除运行白屏并恢复 Vite 构建通过 |
+| 2026-04-02 16:20 | fix-foot-report-import | 足压分析模板依赖降级 | 将 `python/app/Comprehensive_Indicators_4096_modify_input3.py` 中缺失的 `OneStep_template` 改为可降级的可选依赖，恢复 `get_peak_frame` 和足压分析链路的导入可用性，并让基础 PDF 生成在模板缺失时仍可继续执行 |
+| 2026-04-02 16:44 | fix-python-requirements | Python 依赖清单修正 | 修正 `python/requirements.txt` 中无效的 `asynciob` 包名，并将 `reportlab` 固定到当前 Windows + Python 3.11 可直接安装的 `4.4.9`，恢复 `pip install -r python/requirements.txt` 可执行 |
+| 2026-04-02 17:02 | fix-pdf-json-encoding | PDF 导出文本编码兜底 | 在 `python/app/Comprehensive_Indicators_4096_modify_input3.py` 为导出链路新增非法 surrogate 字符清洗，统一在用户字段和 JSON 序列化前替换异常码位，避免 `json.dump(..., encoding='utf-8')` 因脏输入直接崩溃 |
+| 2026-04-02 17:13 | resolve-python-merge-conflict | Python 报告模块冲突收敛 | 解决 `python/app/Comprehensive_Indicators_4096_modify_input3.py` 的合并冲突并以上方当前改动为准，保留 `OneStep_template` 可降级导入、文本编码清洗和现有入口逻辑，恢复文件为可执行状态 |
+| 2026-04-02 17:18 | move-foot-report-import | 足压报告模块路径切换 | 将 `python/app/onbed_filter_example.py` 中的足压报告导入从旧的 `Comprehensive_Indicators_4096_modify_input3` 切换到 `oneStep.Comprehensive_Indicators_4096_modify_input3`，对齐你迁移后的 `python/app/oneStep/` 目录结构并保留相对导入可用 |
+| 2026-04-02 17:26 | fix-onestep-json-encoding | OneStep 导出编码兜底同步 | 将非法 surrogate 字符清洗逻辑同步到 `python/app/oneStep/Comprehensive_Indicators_4096_modify_input3.py`，在新目录下的报告模块里同样对用户字段和 JSON 递归序列化做文本净化，避免迁移路径后再次触发 `UnicodeEncodeError` |
 
 ## 9. 更新日志
 
@@ -498,6 +505,13 @@ graph TD
 | 2026-03-27 14:35 | Max | 修复缺陷 | 修复 Electron 开发模式误连其他 `localhost:3000` 页面：主进程改为从 Vite 输出中识别真实本地地址并校验预期标题/入口后再加载，同时将 Title 标题栏中的 `JQTOOLS-robot` 替换为 `shroom-wordmark.svg` 字标 |
 | 2026-03-27 14:43 | Max | 修复缺陷 | 修复 `client/src/page/home/util.js` 中对象方法定义缺少分隔逗号的问题，将 `} jqbed(...)` 更正为 `}, jqbed(...)`，消除浏览器里的 `Unexpected identifier 'jqbed'` 语法错误 |
 | 2026-03-31 19:28 | merge-conflict | 修复缺陷 | 解决合并冲突并以线上版本为准：同步 `.gitignore`、`client/src/components/title/Title.jsx`、`client/src/constants.js`、`client/src/page/home/Home.jsx`、`client/src/page/license/License.jsx`、`openWeb.js` 到远端内容，并清理 `client/yarn.lock` 中遗留的冲突标记 |
+| 2026-04-02 14:13 | fix-heatmap-runtime | 修复缺陷 | 修复 1.1.15 集成新的 `client/src/assets/util/heatmap.js` 后丢失 `HeatmapCanvas` 兼容导出的问题，在保留 `bthClickHandle` / `Intensity` 新逻辑的同时补回旧版渲染入口，恢复 hand、robot、video 等页面运行并消除白屏 |
+| 2026-04-02 16:20 | fix-foot-report-import | 修复缺陷 | 修复 `python/app/Comprehensive_Indicators_4096_modify_input3.py` 顶层强制导入 `OneStep_template` 导致整个足压分析模块不可用的问题；改为缺失时使用降级占位实现，使 `get_peak_frame` 不再报 `foot analysis modules not available`，并让模板缺失时仅跳过最终 OneStep 报告包装 |
+| 2026-04-02 16:44 | fix-python-requirements | 依赖升级 | 修复 `python/requirements.txt` 中不存在的 `asynciob==3.11.10` 条目，保留标准库 `asyncio`；同时将 `reportlab` 版本从会在 Windows Python 3.11 下触发本地编译失败的 `3.5.59` 调整为已验证可安装的 `4.4.9`，恢复 Python 依赖一键安装 |
+| 2026-04-02 17:02 | fix-pdf-json-encoding | 修复缺陷 | 修复足压 PDF 导出时用户输入含非法 surrogate 字符导致的 `UnicodeEncodeError`：新增 `sanitize_text_value()`，在用户字段进入报告流程和 `convert_to_serializable()` 递归序列化时统一替换异常码位，恢复 JSON 落盘与导出流程稳定性 |
+| 2026-04-02 17:13 | resolve-python-merge-conflict | 修复缺陷 | 解决 `python/app/Comprehensive_Indicators_4096_modify_input3.py` 中的合并冲突并以上方当前改动为准，保留 `OneStep_template` 降级导入和编码清洗逻辑，去除冲突标记后恢复模块可运行状态 |
+| 2026-04-02 17:18 | move-foot-report-import | 修复缺陷 | 修复足压报告调用路径仍指向旧模块的问题：将 `python/app/onbed_filter_example.py` 的导入改为 `oneStep.Comprehensive_Indicators_4096_modify_input3`，使新目录下的 `from . import OneStep_template` 相对导入生效并恢复报告链路 |
+| 2026-04-02 17:26 | fix-onestep-json-encoding | 修复缺陷 | 修复迁移到 `python/app/oneStep/Comprehensive_Indicators_4096_modify_input3.py` 后仍沿用旧 JSON 序列化逻辑导致的 `UnicodeEncodeError`：为新模块新增 `sanitize_text_value()`，并在用户字段入口与 `convert_to_serializable()` 中统一清洗非法 surrogate 字符，恢复新路径下 PDF/JSON 导出稳定性 |
 
 *变更类型：`新增功能` / `优化重构` / `修复缺陷` / `配置变更` / `文档更新` / `依赖升级` / `初始化`*
 

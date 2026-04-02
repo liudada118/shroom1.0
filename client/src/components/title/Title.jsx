@@ -15,6 +15,8 @@ import { withTranslation } from "react-i18next";
 
 import { useTranslation, initReactI18next } from "react-i18next";
 import { NavLink, useNavigate } from 'react-router-dom';
+import axios from 'axios';
+import { bthClickHandle as heatmapBthClickHandle } from '../../assets/util/heatmap';
 let collection = JSON.parse(localStorage.getItem('collection'))
   ? JSON.parse(localStorage.getItem('collection'))
   : [['hunch', 'front', '标签']];
@@ -137,6 +139,8 @@ class Title extends React.Component {
       realname: '',
       realname1: '',
       loadName: '',
+      collectAge: '',
+      collectGender: '男',
       open: false,
       fingerIndex: 0,
       colHZ: 12
@@ -366,7 +370,7 @@ class Title extends React.Component {
     const cacheMode = mode; // mode dimension for cache
 
     // Sensor type groups
-    const group1 = ['hand', 'normal', 'footVideo', 'smallBed', 'jqbed', 'bed4096']; // 3D point scene
+    const group1 = ['hand', 'normal', 'footVideo', 'smallBed', 'jqbed', 'bed4096', 'bed4096num']; // 3D point scene / WebGL heatmap
     const group2 = ['robot1', 'robotSY', 'robotLCF']; // Robots
     const group3 = ['hand0205', 'handGlove115200']; // Tactile gloves
     const group4 = ['fast256', 'fast1024']; // High-speed
@@ -382,10 +386,23 @@ class Title extends React.Component {
     let showInit = false;     // Initial value
 
     if (group1.includes(matrixName)) {
-      if (mode === 'numoriginal' && ['hand', 'bed4096'].includes(matrixName)) {
-        // hand / bed4096 raw data mode: only color and filter
+      if (mode === 'numoriginal' && ['hand', 'bed4096', 'bed4096num'].includes(matrixName)) {
+        // hand / bed4096 / bed4096num raw data mode: only color and filter
         showColor = true;
         showFilter = true;
+      } else if (matrixName === 'bed4096') {
+        // bed4096 normal mode: WebGL heatmap - size, color, filter
+        showSize = true;
+        showColor = true;
+        showFilter = true;
+      } else if (matrixName === 'bed4096num') {
+        // bed4096num normal mode: 3D point scene - smoothness, color, filter, height, consistency, init
+        showGuass = true;
+        showColor = true;
+        showFilter = true;
+        showHeight = true;
+        showConsis = true;
+        showInit = true;
       } else {
         // Group 1: 3D point scene - smoothness, color, filter, height, consistency, init
         showGuass = true;
@@ -830,7 +847,7 @@ class Title extends React.Component {
 
 
 
-        {this.props.matrixName != 'car10' && ['hand0205', 'handGlove115200', 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'normal', 'smallBed', 'jqbed', 'daliegu', 'smallSample', 'bed4096'].includes(this.props.matrixName) ?
+        {this.props.matrixName != 'car10' && ['hand0205', 'handGlove115200', 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'normal', 'smallBed', 'jqbed', 'daliegu', 'smallSample', 'bed4096', 'bed4096num'].includes(this.props.matrixName) ?
           <Select
             defaultValue={this.props.numMatrixFlag}
             style={{ width: 90 }}
@@ -880,7 +897,7 @@ class Title extends React.Component {
             ] : ['hand', 'normal', 'smallBed', 'jqbed', 'daliegu', 'smallSample'].includes(this.props.matrixName) ? [
               { value: 'normal', label: t('modal3D') },
               { value: 'numoriginal', label: t('rawData') },
-            ] : this.props.matrixName == 'bed4096' ? [
+            ] : this.props.matrixName == 'bed4096' || this.props.matrixName == 'bed4096num' ? [
               { value: 'normal', label: t('modal3D') },
               { value: 'numoriginal', label: t('rawData') },
             ] : ''}
@@ -1204,6 +1221,72 @@ class Title extends React.Component {
               this.props.track.current?.canvasInit()
             }
           }}>{!this.props.centerFlag ? '重心' : '隐藏'}</Button> : null}
+        {this.props.matrixName === 'bed4096' && this.props.local ? (
+          <>
+            <Input
+              placeholder='姓名'
+              style={{ width: 80, marginRight: 4 }}
+              value={this.state.realname}
+              onChange={(e) => this.setState({ realname: e.target.value })}
+            />
+            <Input
+              placeholder='年龄'
+              style={{ width: 60, marginRight: 4 }}
+              value={this.state.collectAge}
+              onChange={(e) => this.setState({ collectAge: e.target.value })}
+            />
+            <Select
+              style={{ width: 70, marginRight: 4 }}
+              value={this.state.collectGender}
+              onChange={(e) => this.setState({ collectGender: e })}
+              options={[{ label: '男', value: '男' }, { label: '女', value: '女' }]}
+            />
+            <Button
+              className='titleButton'
+              disabled={!this.state.dataTime}
+              onClick={async () => {
+                const date = this.state.dataTime;
+                const collectName = this.state.realname || '未知';
+                const collectAge = this.state.collectAge || '0';
+                const collectGender = this.state.collectGender || '男';
+                const colName = this.state.colName || date;
+                try {
+                  message.info('正在生成报告...');
+                  const res = await axios({
+                    method: 'post',
+                    url: 'http://127.0.0.1:19245/getDbHeatmap',
+                    data: { time: date, collectName, age: collectAge, gender: collectGender, date }
+                  });
+                  if (res.status === 200) {
+                    const canvas = heatmapBthClickHandle(res.data.data.peak_frame_data);
+                    if (!canvas) { message.info('Canvas not found.'); return; }
+                    canvas.toBlob(async (blob) => {
+                      if (!blob) { message.info('Canvas export failed.'); return; }
+                      const formData = new FormData();
+                      formData.append('file', blob, 'canvas.png');
+                      formData.append('selector', '#uploadCanvas');
+                      formData.append('filename', encodeURIComponent(colName));
+                      formData.append('date', date);
+                      formData.append('collectName', encodeURIComponent(collectName));
+                      formData.append('age', collectAge);
+                      formData.append('gender', collectGender);
+                      try {
+                        const uploadRes = await axios.post('http://127.0.0.1:19245/uploadCanvas', formData, {
+                          headers: { 'Content-Type': 'multipart/form-data' }
+                        });
+                        message.info(`上传成功 (${uploadRes.status})`);
+                      } catch (err) {
+                        message.error(err?.response?.data?.message || err?.message || '上传失败');
+                      }
+                    }, 'image/png');
+                  }
+                } catch (err) {
+                  message.error(err?.response?.data?.message || err?.message || '请求失败');
+                }
+              }}
+            >导出PDF</Button>
+          </>
+        ) : null}
       </div>
 
 

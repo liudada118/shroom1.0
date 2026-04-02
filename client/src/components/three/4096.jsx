@@ -653,14 +653,14 @@ const Canvas = React.forwardRef((props, refs) => {
       dataArr = bigArrg
     }
 
-
+    // 图表数据始终用原始 ndata1 计算（不经过插值/高斯模糊），保证点数和总和正确
+    const rawDataArr = ndata1;
     var T = clock.getDelta();
     timeS = timeS + T;
     if (timeS > renderT) {
-      dataArr = dataArr.filter((a) => a > valuej1 * 0.025)
-      const max = findMax(dataArr)
-      const point = dataArr.filter((a) => a > 0).length
-      const press = dataArr.reduce((a, b) => a + b, 0)
+      const max = findMax(rawDataArr)
+      const point = rawDataArr.filter((a) => a > 0).length
+      const press = rawDataArr.reduce((a, b) => a + b, 0)
       const mean = press / (point == 0 ? 1 : point)
       props.data.current?.changeData({
         meanPres: mean.toFixed(2),

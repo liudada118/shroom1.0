@@ -15,6 +15,7 @@ import Box100 from "../../components/three/box100_3";
 import Car100 from "../../components/car/box100_3";
 
 import Bed4096 from "../../components/three/4096";
+import Canvas4096WebGL from "../../components/webgl/Canvas4096WebGL";
 import Bed1616 from "../../components/three/1616";
 import Fast256 from '../../components/three/NumThreeColor copy'
 import Fast1024 from '../../components/three/NumThreeColor1024'
@@ -526,6 +527,15 @@ class Home extends React.Component {
   componentDidMount() {
     // window.alert(window.innerWidth)
     document.documentElement.style.fontSize = `${window.innerWidth / 120}px`;
+    // 暴露全局重连函数，供主进程 executeJavaScript 直接调用
+    // 确保重连时 onmessage、wsData 等 React 回调完整绑定
+    window.__wsReconnect = () => {
+      console.info('[WS] 全局重连函数被调用，开始重连 WebSocket...');
+      if (ws) {
+        try { ws.onclose = null; ws.onerror = null; ws.close(); } catch(e) {}
+      }
+      this.componentDidMount();
+    };
 
     var c2 = document.getElementById("myChartBig");
 
@@ -747,6 +757,25 @@ class Home extends React.Component {
       wsControl.onclose = (e) => {
         // connection closed
       };
+    }
+
+    // 监听主进程的息屏/唤醒事件，唤醒后重连 WebSocket
+    if (window.electronAPI) {
+      window.electronAPI.on('power-resume', () => {
+        console.info('[Power] 系统唤醒，检查 WebSocket 连接状态...');
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          console.warn('[Power] WebSocket 已断开，尝试重连...');
+          if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+          wsReconnectTimer = setTimeout(() => {
+            this.componentDidMount();
+          }, 1000);
+        } else {
+          console.info('[Power] WebSocket 状态正常 (readyState=1)，无需重连');
+        }
+      });
+      window.electronAPI.on('power-suspend', () => {
+        console.warn('[Power] 系统将息屏/锁屏，当前 WS readyState=', ws ? ws.readyState : 'no ws');
+      });
     }
 
 
@@ -2181,8 +2210,13 @@ class Home extends React.Component {
   }
 
   wsSendObj = (obj) => {
+    const state = ws ? ws.readyState : 'no ws';
+    // readyState: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
+    console.log(`[WS Send] readyState=${state}`, obj);
     if (ws && ws.readyState === 1) {
       ws.send(JSON.stringify(obj));
+    } else {
+      console.warn(`[WS Send] 无法发送， ws.readyState=${state}`, obj);
     }
   };
 
@@ -3235,9 +3269,21 @@ class Home extends React.Component {
 
                 this.state.numMatrixFlag == "numoriginal" && this.state.matrixName == 'bed4096' ?
                   <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
-                    <Fast1024
-                      size={1}
+                    <Canvas4096WebGL
                       ref={this.com}
+                      data={this.data}
+                      local={this.state.local}
+                      handleChartsBody={this.handleChartsBody.bind(this)}
+                      handleChartsBody1={this.handleChartsBody1.bind(this)}
+                      changeStateData={this.changeStateData}
+                      changeSelect={this.changeSelect} />
+                  </CanvasCom>
+                  :
+                  this.state.numMatrixFlag == "numoriginal" && this.state.matrixName == 'bed4096num' ?
+                  <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
+                    <Fast256
+                      ref={this.com}
+                      size={1}
                       data={this.data}
                       local={this.state.local}
                       handleChartsBody={this.handleChartsBody.bind(this)}
@@ -3331,7 +3377,7 @@ class Home extends React.Component {
                       <CanvasCom matrixName={this.state.matrixName}
                         local={this.state.local}
                       >
-                        <Bed4096
+                        <Canvas4096WebGL
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
@@ -3409,8 +3455,7 @@ class Home extends React.Component {
                       <CanvasCom matrixName={this.state.matrixName}
                         local={this.state.local}
                       >
-                        <Fast256
-                          size={1}
+                        <Bed4096
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}

@@ -745,14 +745,12 @@ export const sitTypeEvent = {
       that.com.current?.bthClickHandle(wsPointData);
     }
   }, bed4096num: ({ that, wsPointData, local }) => {
-    if (that.state.numMatrixFlag == "normal") {
+    if (that.state.numMatrixFlag == "normal" || that.state.numMatrixFlag == "numoriginal") {
       // wsPointData = handLine(wsPointData);
       that.com.current?.sitData({
         wsPointData: wsPointData,
         local: that.state.local
       });
-
-
     } else if (that.state.numMatrixFlag == "heatmap") {
       that.com.current?.bthClickHandle(wsPointData);
     }

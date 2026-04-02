@@ -195,9 +195,12 @@
   "dependencies": {
     "@serialport/parser-delimiter": "^13.0.0",
     "better-sqlite3": "^11.10.0",
+    "cors": "^2.8.6",
     "crypto-js": "^4.2.0",
     "csv-writer": "^1.6.0",
     "electron-updater": "^6.3.0",
+    "express": "^5.2.1",
+    "multer": "^2.1.1",
     "serialport": "^12.0.0",
     "ws": "^8.14.2"
   }

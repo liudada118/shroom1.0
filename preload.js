@@ -41,6 +41,8 @@ const VALID_RECEIVE_CHANNELS = [
   "db-result",         // 接收数据库查询结果
   "error",             // 接收错误信息
   "update-status",     // 接收更新状态（检查中、有更新、下载进度、下载完成等）
+  "power-suspend",     // 系统息屏/锁屏通知
+  "power-resume",      // 系统唤醒/解锁通知
 ];
 
 contextBridge.exposeInMainWorld("electronAPI", {

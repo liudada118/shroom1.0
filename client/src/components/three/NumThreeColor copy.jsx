@@ -56,6 +56,7 @@ function jet(min, max, x) {
 }
 
 let ndata1 = new Array(256).fill(0),animationRequestId
+var materialRef = null // 用于 sitValue 更新纹理
 
 export default React.forwardRef((props, refs) => {
   const { size = 4 } = props
@@ -136,15 +137,8 @@ export default React.forwardRef((props, refs) => {
     // }
     // console.log(ndata1)
 
+    // 直接用原始 ndata1，与 Bed4096 保持同源
     let dataArr = ndata1
-    //  if (!sitIndexArr.length || sitIndexArr.every((a) => a == 0)) {
-    //   dataArr = ndata1
-    // }
-
-
-
-
-    // dataArr = dataArr.filter((a) => a > valuej1 * 0.025)
     const max = findMax(dataArr)
     const point = dataArr.filter((a) => a > 0).length
 
@@ -198,7 +192,15 @@ export default React.forwardRef((props, refs) => {
   function sitValue(props) {
     // console.log(prop)
     const { valuej, valueg, value, valuel, valuef, valuelInit, press, prop } = props;
-    if (valuej) valuej1 = valuej;
+    if (valuej) {
+      valuej1 = valuej;
+      // 颜色变化时重新生成精灵图纹理并更新材质（参考 Fast1024）
+      if (materialRef) {
+        const newTex = createDigitSpriteSheetWithJet(valuej1);
+        materialRef.uniforms.map.value = newTex;
+        materialRef.uniforms.map.value.needsUpdate = true;
+      }
+    }
     if (valueg) valueg1 = valueg;
     if (value) value1 = value;
     if (valuel) valuel1 = valuel;
@@ -219,7 +221,7 @@ export default React.forwardRef((props, refs) => {
   }));
 
 
-  function createDigitSpriteSheetWithJet() {
+  function createDigitSpriteSheetWithJet(maxVal) {
     const canvas = document.createElement("canvas");
     // document.body.appendChild(canvas)
     canvas.width = canvas.height = 512;
@@ -227,6 +229,7 @@ export default React.forwardRef((props, refs) => {
 
     const gridSize = 16;
     const cellSize = 32;
+    const colorMax = (maxVal && maxVal > 0) ? maxVal : 30;
 
     ctx.font = "bold 18px monospace";
     ctx.textAlign = "center";
@@ -238,8 +241,8 @@ export default React.forwardRef((props, refs) => {
       const cx = x * cellSize;
       const cy = y * cellSize;
 
-      // ✅ 计算背景颜色
-      const [r, g, b] = jet(0, 30, i);
+      // 计算背景颜色（使用 colorMax 作为映射最大值）
+      const [r, g, b] = jet(0, colorMax, i);
       ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
       ctx.fillRect(cx, cy, cellSize, cellSize);
 
@@ -349,10 +352,8 @@ export default React.forwardRef((props, refs) => {
     canvas.addEventListener('pointerleave', onPointerUp);
     canvas.addEventListener('pointercancel', onPointerUp);
 
-    const texture = createDigitSpriteSheetWithJet();
+    const texture = createDigitSpriteSheetWithJet(valuej1);
     // texture.flipY = false;
-
-
     const material = new THREE.ShaderMaterial({
       uniforms: {
         map: { value: texture },
@@ -398,6 +399,7 @@ export default React.forwardRef((props, refs) => {
     });
 
     material.toneMapped = false;
+    materialRef = material; // 暴露给 sitValue 使用
     // const size = 4
     const gridSize = 64 / size;
     const count = gridSize * gridSize;

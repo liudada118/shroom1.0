@@ -10,7 +10,7 @@
  * 6. 开发模式自动启动 Vite 开发服务器，实现前端热更新
  */
 
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, powerSaveBlocker, powerMonitor } = require("electron");
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -43,10 +43,11 @@ const createWindow = () => {
     icon: path.join(__dirname, "logo.ico"),
     webPreferences: {
       contextIsolation: true,   // 启用上下文隔离，防止渲染进程访问 Node.js
-      sandbox: true,            // 启用沙箱，进一步限制渲染进程权限
+      sandbox: true,            // 启用沙箋，进一步限制渲染进程权限
       nodeIntegration: false,   // 禁止渲染进程使用 Node.js API
       preload: path.join(__dirname, "preload.js"), // 安全桥梁脚本
       webSecurity: true,        // 启用 Web 安全策略
+      backgroundThrottling: false, // 禁止息屏后节流 JS，保持 WebSocket 消息发送能力
     },
   });
 
@@ -502,6 +503,63 @@ function startStaticServer({ hostname, port, win }) {
 // 应用生命周期
 // ============================================================
 app.whenReady().then(() => {
+  // 防止息屏后系统暂停应用，保持 WebSocket 数据通道持续工作
+  const psBlockerId = powerSaveBlocker.start('prevent-app-suspension');
+  logger.info(`[Main] powerSaveBlocker started, id=${psBlockerId}, active=${powerSaveBlocker.isStarted(psBlockerId)}`);
+
+  // 监听系统息屏/唤醒事件，唤醒后通知渲染进程重连 WebSocket
+  powerMonitor.on('suspend', () => {
+    logger.warn('[Main] 系统将要息屏，通知渲染进程');
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('power-suspend');
+    }
+  });
+  // 唤醒后强制重连 WebSocket（渲染进程在息屏期间 JS 被暂停，无法接收 IPC 消息，用 executeJavaScript 绕过）
+  const forceWsReconnect = (reason) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    logger.info(`[Main] ${reason}，延迟 1.5s 后强制重连 WebSocket`);
+    setTimeout(() => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      mainWindow.webContents.executeJavaScript(`
+        (function() {
+          try {
+            // 检查 WebSocket 状态
+            if (typeof ws !== 'undefined' && ws && ws.readyState === 1) {
+              console.info('[Power-JS] WebSocket 状态正常 (readyState=1)，无需重连');
+              return;
+            }
+            console.warn('[Power-JS] WebSocket 已断开，调用全局重连函数...');
+            // 直接调用 React 组件暴露的全局重连函数
+            // 确保 onmessage、wsData 等回调完整绑定，页面正常渲染
+            if (typeof window.__wsReconnect === 'function') {
+              window.__wsReconnect();
+            } else {
+              console.warn('[Power-JS] __wsReconnect 未就绪，尝试触发 ws.close...');
+              if (typeof ws !== 'undefined' && ws && ws.onclose) {
+                ws.close();
+              }
+            }
+          } catch(e) {
+            console.error('[Power-JS] 重连异常:', e);
+          }
+        })()
+      `).catch(err => logger.error('[Main] executeJavaScript 失败:', err.message));
+    }, 1500);
+  };
+
+  powerMonitor.on('resume', () => {
+    forceWsReconnect('系统已唤醒');
+  });
+  powerMonitor.on('lock-screen', () => {
+    logger.warn('[Main] 屏幕已锁定');
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('power-suspend');
+    }
+  });
+  powerMonitor.on('unlock-screen', () => {
+    forceWsReconnect('屏幕已解锁');
+  });
+
   createWindow();
 
   app.on("activate", () => {
