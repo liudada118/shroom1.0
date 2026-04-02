@@ -3281,8 +3281,9 @@ class Home extends React.Component {
                   :
                   this.state.numMatrixFlag == "numoriginal" && this.state.matrixName == 'bed4096num' ?
                   <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
-                    <Num2DOriginal ref={this.com}
-                      matrixName={this.state.matrixName}
+                    <Fast256
+                      ref={this.com}
+                      size={1}
                       data={this.data}
                       local={this.state.local}
                       handleChartsBody={this.handleChartsBody.bind(this)}
