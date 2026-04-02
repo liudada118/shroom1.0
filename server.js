@@ -1,5 +1,5 @@
 ﻿const logger = require('./logger');
-const { startWorker, callPy, stopWorker } = require('./pyWorker');
+const { startWorker, callPy, stopWorker, warmFootAnalysis } = require('./pyWorker');
 const WebSocket = require("ws");
 const express = require('express');
 const multer = require('multer');
@@ -4868,6 +4868,8 @@ const multerStorage = multer.diskStorage({
   },
 });
 const upload = multer({ storage: multerStorage });
+const PY_HEATMAP_TIMEOUT_MS = 60000;
+const PY_REPORT_TIMEOUT_MS = 120000;
 
 httpApp.post('/getDbHeatmap', async (req, res) => {
   try {
@@ -4885,7 +4887,10 @@ httpApp.post('/getDbHeatmap', async (req, res) => {
       const foot = rows.map(r => JSON.parse(r.data));
       pdfArrData = foot;
       try {
-        const peak_frame = await callPy('get_peak_frame', { sensor_data: foot });
+        await warmFootAnalysis();
+        const peak_frame = await callPy('get_peak_frame', { sensor_data: foot }, {
+          timeoutMs: PY_HEATMAP_TIMEOUT_MS,
+        });
         return res.json(new HttpResult(0, peak_frame, 'success'));
       } catch (e) {
         logger.error('[getDbHeatmap] callPy error:', e.message);
@@ -4924,6 +4929,7 @@ httpApp.post('/uploadCanvas', upload.single('file'), async (req, res) => {
     const absolutePath = path.resolve(req.file.path);
     const name = `${pdfPath}/${sanitizedRequested}`;
     logger.info('[uploadCanvas] calling generate_foot_pressure_report1', name);
+    await warmFootAnalysis();
     await callPy('generate_foot_pressure_report1', {
       sensor_data: pdfArrData,
       pdf_name: name,
@@ -4932,6 +4938,8 @@ httpApp.post('/uploadCanvas', upload.single('file'), async (req, res) => {
       user_age: req.body.age,
       user_gender: req.body.gender,
       user_id: req.body.userId || 9527,
+    }, {
+      timeoutMs: PY_REPORT_TIMEOUT_MS,
     });
     res.json(new HttpResult(0, { file: req.file, body: req.body, absolutePath }, 'success'));
   } catch (e) {

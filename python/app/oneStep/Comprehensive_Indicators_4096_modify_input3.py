@@ -2480,10 +2480,6 @@ def extract_peak_frame(processed_data, rotate_data=False):
     if not processed_data or len(processed_data) == 0:
         return None
 
-    # 预处理数据（如果需要的话）
-    df = preprocess_data_array(processed_data, rotate_90_ccw=rotate_data, mirrored_horizon=False,
-                               mirrored_vertical=False)
-
     # 计算左右脚压力曲线
     left_curve, right_curve = extract_pressure_curves(processed_data)
 

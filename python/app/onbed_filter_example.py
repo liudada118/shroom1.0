@@ -478,6 +478,7 @@ import time
 import numpy as np
 import onbed_filter as ncz
 import sys, json, traceback
+import importlib
 
 def ping():
     return {"pong": True}
@@ -566,44 +567,58 @@ def getData(data):
 # 足压分析函数（来自 real_time_and_replay_cop_speed_2 和
 # Comprehensive_Indicators_4096_modify_input3）
 # ============================================================
-try:
-    import real_time_and_replay_cop_speed_2 as _cop_speed
-    from oneStep.Comprehensive_Indicators_4096_modify_input3 import (
-        extract_peak_frame as _extract_peak_frame,
-        generate_foot_pressure_report as _generate_foot_pressure_report,
-    )
-    _foot_analysis_available = True
-except Exception as _foot_import_err:
-    _foot_analysis_available = False
-    print(f'[WARN] foot analysis modules not available: {_foot_import_err}', file=sys.stderr)
+_cop_speed = None
+_extract_peak_frame = None
+_generate_foot_pressure_report = None
+_foot_import_err = None
+
+
+def ensure_foot_analysis_loaded():
+    """按需加载足压分析模块，避免 worker 启动时被重型依赖拖慢。"""
+    global _cop_speed, _extract_peak_frame, _generate_foot_pressure_report, _foot_import_err
+
+    if _cop_speed and _extract_peak_frame and _generate_foot_pressure_report:
+      return
+
+    try:
+        _cop_speed = importlib.import_module('real_time_and_replay_cop_speed_2')
+        foot_module = importlib.import_module('oneStep.Comprehensive_Indicators_4096_modify_input3')
+        _extract_peak_frame = foot_module.extract_peak_frame
+        _generate_foot_pressure_report = foot_module.generate_foot_pressure_report
+        _foot_import_err = None
+    except Exception as err:
+        _foot_import_err = err
+        raise RuntimeError(f'foot analysis modules not available: {err}') from err
+
+
+def warm_foot_analysis():
+    """预热足压分析模块，减少第一次热力图/报告调用等待。"""
+    ensure_foot_analysis_loaded()
+    return {"warmed": True}
 
 
 def realtime_server(sensor_data, data_prev=None):
     """实时处理：计算左右脚压力/面积/COP速度"""
-    if not _foot_analysis_available:
-        raise RuntimeError('foot analysis modules not available')
+    ensure_foot_analysis_loaded()
     return _cop_speed.process_frame_realtime(sensor_data, data_prev)
 
 
 def replay_server(sensor_data, fps=20.0):
     """回放批量处理：传入 (N,4096) 数据矩阵"""
-    if not _foot_analysis_available:
-        raise RuntimeError('foot analysis modules not available')
+    ensure_foot_analysis_loaded()
     return _cop_speed.process_playback_batch(sensor_data, fps=fps)
 
 
 def get_peak_frame(sensor_data):
     """提取峰值帧"""
-    if not _foot_analysis_available:
-        raise RuntimeError('foot analysis modules not available')
+    ensure_foot_analysis_loaded()
     return _extract_peak_frame(sensor_data)
 
 
 def generate_foot_pressure_report1(sensor_data, pdf_name, heatmap_png_path,
                                     user_name, user_age, user_gender, user_id):
     """生成足压分析 PDF 报告"""
-    if not _foot_analysis_available:
-        raise RuntimeError('foot analysis modules not available')
+    ensure_foot_analysis_loaded()
     return _generate_foot_pressure_report(
         sensor_data, pdf_name, heatmap_png_path,
         user_name, user_age, user_gender, user_id
@@ -614,6 +629,7 @@ FUNCS = {
     "ping": ping,
     "getData": getData,
     # 足压分析
+    "warm_foot_analysis": warm_foot_analysis,
     "realtime_server": realtime_server,
     "replay_server": replay_server,
     "get_peak_frame": get_peak_frame,

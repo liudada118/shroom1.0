@@ -3,6 +3,7 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 
 let electronApp = null;
 try {
@@ -122,6 +123,20 @@ function isPyInstallerExe() {
   return Boolean(resolvePackagedExe());
 }
 
+function pythonRuntimeEnv() {
+  const mplConfigDir = path.join(os.tmpdir(), 'shroom-mplconfig');
+  try {
+    fs.mkdirSync(mplConfigDir, { recursive: true });
+  } catch {}
+
+  return {
+    ...process.env,
+    PYTHONUNBUFFERED: '1',
+    PYTHONNOUSERSITE: '1',
+    MPLCONFIGDIR: mplConfigDir,
+  };
+}
+
 let child = null;
 let buf = '';
 const pending = new Map();
@@ -129,6 +144,7 @@ let nextId = 1;
 let starting = false;
 let manualStop = false;
 let stderrTail = '';
+let footWarmupPromise = null;
 
 function pushErr(s) {
   stderrTail = (stderrTail + s).slice(-4000);
@@ -140,6 +156,21 @@ function rejectAllPending(error) {
     rec.reject(error);
   }
   pending.clear();
+}
+
+function warmFootAnalysis() {
+  if (footWarmupPromise) {
+    return footWarmupPromise;
+  }
+
+  footWarmupPromise = callPy('warm_foot_analysis', {}, { timeoutMs: 300000 })
+    .then(() => true)
+    .catch((error) => {
+      footWarmupPromise = null;
+      throw error;
+    });
+
+  return footWarmupPromise;
 }
 
 function missingPackagedRuntimeError() {
@@ -178,7 +209,7 @@ function startWorker() {
 
     child = spawn(py, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, PYTHONUNBUFFERED: '1', PYTHONNOUSERSITE: '1' },
+      env: pythonRuntimeEnv(),
       windowsHide: true,
       cwd,
     });
@@ -241,6 +272,7 @@ function startWorker() {
     console.error(`[PY] worker EXIT code=${code} sig=${sig}\n[PY] stderr tail:\n${stderrTail}`);
     rejectAllPending(new Error(`python worker exited (code=${code} sig=${sig})`));
     child = null;
+    footWarmupPromise = null;
 
     if (!manualStop) {
       setTimeout(startWorker, 500);
@@ -248,7 +280,12 @@ function startWorker() {
   });
 
   callPy('ping', {}, { timeoutMs: 30000 })
-    .then(() => console.log('[PY] ready'))
+    .then(() => {
+      console.log('[PY] ready');
+      return warmFootAnalysis()
+        .then(() => console.log('[PY] foot analysis warmed'))
+        .catch((e) => console.error('[PY] foot analysis warmup failed:', e.message));
+    })
     .catch((e) => console.error('[PY] handshake failed:', e.message));
 }
 
@@ -306,4 +343,4 @@ function stopWorker() {
   }
 }
 
-module.exports = { startWorker, callPy, stopWorker };
+module.exports = { startWorker, callPy, stopWorker, warmFootAnalysis };
