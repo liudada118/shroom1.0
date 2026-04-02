@@ -543,6 +543,9 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     } else if (props.matrixName == 'smallSample') {
         width = 10
         height = 10
+    } else if (props.matrixName == 'bed4096num') {
+        width = 64
+        height = 64
     }
 
     const isRobot = props.matrixName === 'robotSY' || props.matrixName === 'robotLCF' || props.matrixName === 'robot1';
