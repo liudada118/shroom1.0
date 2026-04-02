@@ -4,18 +4,14 @@ import * as THREE from "three";
 import './canvas.scss'
 import { findMax } from '../../assets/util/util';
 import { press, press256 } from '../../assets/util/line';
-
-var valuej1 = localStorage.getItem('carValuej') ? JSON.parse(localStorage.getItem('carValuej')) : 200,
-  valueg1 = localStorage.getItem('carValueg') ? JSON.parse(localStorage.getItem('carValueg')) : 2,
-  value1 = localStorage.getItem('carValue') ? JSON.parse(localStorage.getItem('carValue')) : 2,
-  valuel1 = localStorage.getItem('carValuel') ? JSON.parse(localStorage.getItem('carValuel')) : 2,
-  valuef1 = localStorage.getItem('carValuef') ? JSON.parse(localStorage.getItem('carValuef')) : 2,
-  valuej2 = localStorage.getItem('carValuej') ? JSON.parse(localStorage.getItem('carValuej')) : 200,
+import { bed4096numParams } from '../../assets/util/bed4096numParams';
+// 使用共享调参对象（与 Bed4096 共享，切换模式时调参不重置）
+const p = bed4096numParams;
+var valuej2 = localStorage.getItem('carValuej') ? JSON.parse(localStorage.getItem('carValuej')) : 200,
   valueg2 = localStorage.getItem('carValueg') ? JSON.parse(localStorage.getItem('carValueg')) : 2,
   value2 = localStorage.getItem('carValue') ? JSON.parse(localStorage.getItem('carValue')) : 2,
   valuel2 = localStorage.getItem('carValuel') ? JSON.parse(localStorage.getItem('carValuel')) : 2,
   valuef2 = localStorage.getItem('carValuef') ? JSON.parse(localStorage.getItem('carValuef')) : 2,
-  valuelInit1 = localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2,
   valuelInit2 = localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2;
 var valuep = 0, valueprop = 1
 function jet(min, max, x) {
@@ -116,18 +112,18 @@ export default React.forwardRef((props, refs) => {
     //   valuel,
     //   valuef,
     //   valuelInit,)
-    // valuej1 = valuej;
-    // valueg1 = valueg;
-    // value1 = value;
-    // valuel1 = valuel;
-    // valuef1 = valuef;
+    // p.valuej1 = valuej;
+    // p.valueg1 = valueg;
+    // p.value1 = value;
+    // p.valuel1 = valuel;
+    // p.valuef1 = valuef;
     // ndata1 = [];
     ndata1 = wsPointData;
 
-    // valuelInit1 = valuelInit;
+    // p.valuelInit1 = valuelInit;
     // 修改线序 坐垫
 
-    ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a));
+    ndata1 = ndata1.map((a, index) => (a - p.valuef1 < 0 ? 0 : a));
 
     // console.log(ndata1)
     // ndata1Num = ndata1.reduce((a, b) => a + b, 0);
@@ -193,21 +189,21 @@ export default React.forwardRef((props, refs) => {
     // console.log(prop)
     const { valuej, valueg, value, valuel, valuef, valuelInit, press, prop } = props;
     if (valuej) {
-      valuej1 = valuej;
+      p.valuej1 = valuej;
       // 颜色变化时重新生成精灵图纹理并更新材质（参考 Fast1024）
       if (materialRef) {
-        const newTex = createDigitSpriteSheetWithJet(valuej1);
+        const newTex = createDigitSpriteSheetWithJet(p.valuej1);
         materialRef.uniforms.map.value = newTex;
         materialRef.uniforms.map.value.needsUpdate = true;
       }
     }
-    if (valueg) valueg1 = valueg;
-    if (value) value1 = value;
-    if (valuel) valuel1 = valuel;
-    if (valuef) valuef1 = valuef;
+    if (valueg) p.valueg1 = valueg;
+    if (value) p.value1 = value;
+    if (valuel) p.valuel1 = valuel;
+    if (valuef) p.valuef1 = valuef;
     if (typeof press == 'number') valuep = press
     if (typeof prop == 'number') valueprop = prop
-    if (valuelInit) valuelInit1 = valuelInit;
+    if (valuelInit) p.valuelInit1 = valuelInit;
 
   }
 
@@ -352,7 +348,7 @@ export default React.forwardRef((props, refs) => {
     canvas.addEventListener('pointerleave', onPointerUp);
     canvas.addEventListener('pointercancel', onPointerUp);
 
-    const texture = createDigitSpriteSheetWithJet(valuej1);
+    const texture = createDigitSpriteSheetWithJet(p.valuej1);
     // texture.flipY = false;
     const material = new THREE.ShaderMaterial({
       uniforms: {
@@ -473,7 +469,7 @@ export default React.forwardRef((props, refs) => {
       // }
 
 
-      res = res.map((a, index) => (a - valuef1 < 0 ? 0 : parseInt(a)));
+      res = res.map((a, index) => (a - p.valuef1 < 0 ? 0 : parseInt(a)));
       let data = res
 
       const max = Math.max(...res)
