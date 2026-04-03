@@ -59,17 +59,20 @@ def build():
         '--distpath', os.path.join(script_dir, 'dist'),
         '--workpath', os.path.join(script_dir, 'build'),
         '--specpath', script_dir,
+        '--paths', app_dir,
         # 隐藏控制台窗口
         '--console',
         # 收集 numpy
         '--collect-all', 'numpy',
+        # 足压分析运行时依赖
+        '--hidden-import', 'real_time_and_replay_cop_speed_2',
+        '--hidden-import', 'oneStep',
+        '--hidden-import', 'oneStep.OneStep_template',
+        '--hidden-import', 'oneStep.Comprehensive_Indicators_4096_modify_input3',
+        '--add-data',
+        f"{os.path.join(app_dir, 'oneStep', 'icon')}{';' if platform.system() == 'Windows' else ':'}oneStep/icon",
         # 排除不需要的大模块以减小体积
         '--exclude-module', 'tkinter',
-        '--exclude-module', 'matplotlib',
-        '--exclude-module', 'scipy',
-        '--exclude-module', 'pandas',
-        '--exclude-module', 'PIL',
-        '--exclude-module', 'cv2',
         '--exclude-module', 'torch',
         '--exclude-module', 'tensorflow',
     ]

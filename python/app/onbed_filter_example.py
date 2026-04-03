@@ -479,6 +479,9 @@ import numpy as np
 import onbed_filter as ncz
 import sys, json, traceback
 import importlib
+import io
+import contextlib
+import warnings
 
 def ping():
     return {"pong": True}
@@ -573,6 +576,23 @@ _generate_foot_pressure_report = None
 _foot_import_err = None
 
 
+@contextlib.contextmanager
+def suppress_protocol_noise():
+    with contextlib.redirect_stdout(io.StringIO()):
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="This figure includes Axes that are not compatible with tight_layout.*",
+                category=UserWarning,
+            )
+            warnings.filterwarnings(
+                "ignore",
+                message=r"Glyph \d+ .* missing from font\(s\).*",
+                category=UserWarning,
+            )
+            yield
+
+
 def ensure_foot_analysis_loaded():
     """按需加载足压分析模块，避免 worker 启动时被重型依赖拖慢。"""
     global _cop_speed, _extract_peak_frame, _generate_foot_pressure_report, _foot_import_err
@@ -612,17 +632,19 @@ def replay_server(sensor_data, fps=20.0):
 def get_peak_frame(sensor_data):
     """提取峰值帧"""
     ensure_foot_analysis_loaded()
-    return _extract_peak_frame(sensor_data)
+    with suppress_protocol_noise():
+        return _extract_peak_frame(sensor_data)
 
 
 def generate_foot_pressure_report1(sensor_data, pdf_name, heatmap_png_path,
                                     user_name, user_age, user_gender, user_id):
     """生成足压分析 PDF 报告"""
     ensure_foot_analysis_loaded()
-    return _generate_foot_pressure_report(
-        sensor_data, pdf_name, heatmap_png_path,
-        user_name, user_age, user_gender, user_id
-    )
+    with suppress_protocol_noise():
+        return _generate_foot_pressure_report(
+            sensor_data, pdf_name, heatmap_png_path,
+            user_name, user_age, user_gender, user_id
+        )
 
 
 FUNCS = {

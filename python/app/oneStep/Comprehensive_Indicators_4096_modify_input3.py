@@ -16,7 +16,17 @@ import json
 import os
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'Arial Unicode MS', 'DejaVu Sans']
+plt.rcParams['font.family'] = 'sans-serif'
+plt.rcParams['font.sans-serif'] = [
+    'Arial Unicode MS',
+    'PingFang SC',
+    'Hiragino Sans GB',
+    'STHeiti',
+    'Songti SC',
+    'SimHei',
+    'Microsoft YaHei',
+    'DejaVu Sans',
+]
 plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
 from matplotlib.colors import ListedColormap
 from matplotlib.backends.backend_pdf import PdfPages

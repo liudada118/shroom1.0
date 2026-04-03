@@ -175,7 +175,9 @@ const exportRoot = app.isPackaged
 let filePath = path.join(runtimeWritableRoot, "db");
 let csvPath = path.join(exportRoot, "data");
 let imgPath = path.join(runtimeWritableRoot, "img");
-let pdfPath = path.join(runtimeWritableRoot, "OneStep");
+let pdfPath = app.isPackaged && process.platform === 'darwin'
+  ? path.join(exportRoot, "OneStep")
+  : path.join(runtimeWritableRoot, "OneStep");
 let nameTxt = resolveConfigFile();
 
 if (!fs.existsSync(filePath)) {

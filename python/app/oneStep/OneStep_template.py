@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import datetime
 import math
 from reportlab.pdfgen import canvas
@@ -7,33 +8,77 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfbase import ttfonts
 from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.lib.colors import HexColor, black, white
 from reportlab.lib.utils import ImageReader
 from PIL import Image
 
 # ========== 配置 ==========
-# 字体路径 (请确保此路径在你的机器上存在，否则会回退)
-YAHEI_TTC_PATH = r"C:\Windows\Fonts\msyh.ttc"
-YAHEI_BOLD_TTC_PATH = r"C:\Windows\Fonts\msyhbd.ttc" # 增加粗体路径
 FONT_NAME = "MSYH"
-FONT_NAME_BOLD = "MSYH_BD" # 为粗体取一个专属别名
+FONT_NAME_BOLD = "MSYH_BD"
 FOOTER_HEIGHT_MM=12
-# 注册常规体
-if os.path.exists(YAHEI_TTC_PATH):
-    pdfmetrics.registerFont(ttfonts.TTFont(FONT_NAME, YAHEI_TTC_PATH))
-else:
-    FONT_NAME = "Helvetica"
 
-# 注册粗体
-if os.path.exists(YAHEI_BOLD_TTC_PATH):
+
+def _register_font(alias, candidates):
+    for font_path in candidates:
+        if not font_path or not os.path.exists(font_path):
+            continue
+        try:
+            pdfmetrics.registerFont(ttfonts.TTFont(alias, font_path))
+            return alias
+        except Exception:
+            continue
+    return None
+
+
+def _configure_fonts():
+    if sys.platform == "darwin":
+        regular_name = _register_font(FONT_NAME, [
+            "/Library/Fonts/Arial Unicode.ttf",
+            "/System/Library/Fonts/Hiragino Sans GB.ttc",
+            "/System/Library/Fonts/STHeiti Light.ttc",
+        ])
+        bold_name = _register_font(FONT_NAME_BOLD, [
+            "/Library/Fonts/Arial Unicode.ttf",
+            "/System/Library/Fonts/STHeiti Medium.ttc",
+            "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        ])
+        if regular_name:
+            return regular_name, bold_name or regular_name
+        try:
+            fallback_name = "STSong-Light"
+            if fallback_name not in pdfmetrics.getRegisteredFontNames():
+                pdfmetrics.registerFont(UnicodeCIDFont(fallback_name))
+            return fallback_name, fallback_name
+        except Exception:
+            pass
+
+    regular_name = _register_font(FONT_NAME, [
+        r"C:\Windows\Fonts\msyh.ttc",
+        "/Library/Fonts/Arial Unicode.ttf",
+        "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        "/System/Library/Fonts/STHeiti Light.ttc",
+    ])
+    bold_name = _register_font(FONT_NAME_BOLD, [
+        r"C:\Windows\Fonts\msyhbd.ttc",
+        "/System/Library/Fonts/STHeiti Medium.ttc",
+        "/Library/Fonts/Arial Unicode.ttf",
+        "/System/Library/Fonts/Hiragino Sans GB.ttc",
+    ])
+
+    if regular_name:
+        return regular_name, bold_name or regular_name
+
     try:
-        pdfmetrics.registerFont(ttfonts.TTFont(FONT_NAME_BOLD, YAHEI_BOLD_TTC_PATH))
-    except Exception as e:
-        #print("粗体注册失败:", e)
-        FONT_NAME_BOLD = FONT_NAME # 注册失败则用常规体代替
-else:
-    #print("未找到粗体文件，将使用常规体代替")
-    FONT_NAME_BOLD = FONT_NAME
+        fallback_name = "STSong-Light"
+        if fallback_name not in pdfmetrics.getRegisteredFontNames():
+            pdfmetrics.registerFont(UnicodeCIDFont(fallback_name))
+        return fallback_name, fallback_name
+    except Exception:
+        return "Helvetica", "Helvetica-Bold"
+
+
+FONT_NAME, FONT_NAME_BOLD = _configure_fonts()
 
 
 
@@ -102,7 +147,8 @@ def draw_header_divider(c, margin, W, date_y):
     c.restoreState()
 
 
-def draw_image_in_rect(c, image_path, x, y, w, h, scale=1.0, rotate_mirror=False):
+def draw_image_in_rect(c, image_path, x, y, w, h, scale=1.0, rotate_mirror=False, h_align="center",
+                       v_align="center"):
     """
     在指定矩形区域内绘制图片，保持比例居中
     scale: 缩放系数，1.0 表示填满区域，0.8 表示缩小到80%
@@ -141,8 +187,19 @@ def draw_image_in_rect(c, image_path, x, y, w, h, scale=1.0, rotate_mirror=False
 
         draw_w *= scale
         draw_h *= scale
-        draw_x = x + (w - draw_w) / 2
-        draw_y = y + (h - draw_h) / 2
+        if h_align == "left":
+            draw_x = x
+        elif h_align == "right":
+            draw_x = x + w - draw_w
+        else:
+            draw_x = x + (w - draw_w) / 2
+
+        if v_align == "bottom":
+            draw_y = y
+        elif v_align == "top":
+            draw_y = y + h - draw_h
+        else:
+            draw_y = y + (h - draw_h) / 2
 
         c.drawImage(img_reader, draw_x, draw_y, width=draw_w, height=draw_h, mask='auto')
     except Exception as e:
@@ -241,8 +298,9 @@ def page1(c, W, H, margin, data_json):
 
     # 绘制热力图
     hm_path = imgs.get("heatmap_external") or imgs.get("heatmap_internal")
-    draw_image_in_rect(c, hm_path, heatmap_x + 6 * mm, heatmap_box_y + 2 * mm, heatmap_width - 4 * mm,
-                       heatmap_rect_h - 4 * mm, rotate_mirror=True, scale=1.275)#1.5
+    heatmap_left_shift = (heatmap_width - 4 * mm) * 0.10
+    draw_image_in_rect(c, hm_path, heatmap_x - heatmap_left_shift, heatmap_box_y + 2 * mm, heatmap_width - 4 * mm,
+                       heatmap_rect_h - 4 * mm, rotate_mirror=True, scale=1.15, h_align="left")#1.5
     partition_path = imgs.get("arch_regions")
     partition_height = 50 * mm
     partition_y = heatmap_box_y - partition_height - 4 * mm
@@ -694,7 +752,6 @@ def page4(c, W, H, margin):
 def generate_report_from_json(json_path):
     """读取JSON，根据其中路径生成最终PDF"""
     if not os.path.exists(json_path):
-        print(f"Error: JSON file not found at {json_path}")
         return None
 
     with open(json_path, 'r', encoding='utf-8') as f:
@@ -723,7 +780,6 @@ def generate_report_from_json(json_path):
     # ⚠️ 注意：不要在这里调用 c.showPage()
 
     c.save()
-    print(f"Report generated successfully!")
     return output_pdf
 
 if __name__ == "__main__":
