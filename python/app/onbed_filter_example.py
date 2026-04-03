@@ -483,6 +483,16 @@ import io
 import contextlib
 import warnings
 
+def configure_stdio_utf8():
+    for stream_name in ("stdin", "stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if not hasattr(stream, "reconfigure"):
+            continue
+        kwargs = {"encoding": "utf-8"}
+        if stream_name == "stderr":
+            kwargs["errors"] = "backslashreplace"
+        stream.reconfigure(**kwargs)
+
 def ping():
     return {"pong": True}
 
@@ -683,6 +693,7 @@ def main():
             }), flush=True)
 
 if __name__ == "__main__":
+    configure_stdio_utf8()
     ncz.initialize()
     main()
   

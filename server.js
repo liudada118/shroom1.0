@@ -4913,6 +4913,7 @@ httpApp.post('/uploadCanvas', upload.single('file'), async (req, res) => {
     if (typeof req.body.filename === 'string') req.body.filename = decodeField(req.body.filename);
     if (typeof req.body.collectName === 'string') req.body.collectName = decodeField(req.body.collectName);
     if (typeof req.body.date === 'string') req.body.date = decodeField(req.body.date);
+    if (typeof req.body.gender === 'string') req.body.gender = decodeField(req.body.gender);
     logger.info('[uploadCanvas]', { collectName: req.body.collectName, age: req.body.age, gender: req.body.gender });
     const requestedDate =
       (typeof req.body.date === 'string' && req.body.date.trim()) ||
