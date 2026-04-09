@@ -650,7 +650,7 @@ const Canvas = React.forwardRef((props, refs) => {
     }
 
 
-    if (!sitIndexArr.length || sitIndexArr.every((a) => a == 0)) {
+    if (!sitIndexArr || !sitIndexArr.length || sitIndexArr.every((a) => a == 0)) {
       dataArr = bigArrg
     }
 
@@ -846,14 +846,13 @@ const Canvas = React.forwardRef((props, refs) => {
     // valuel1 = valuel;
     // valuef1 = valuef;
     // ndata1 = [];
+     // wsPointData 为 null/undefined 时保留上一帧数据
+    if (!wsPointData) return;
     ndata1 = wsPointData;
-
     // valuelInit1 = valuelInit;
     // 修改线序 坐垫
     ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a));
-
     ndata1Num = ndata1.reduce((a, b) => a + b, 0);
-
     if (ndata1Num < valuelInit) {
       ndata1 = new Array(sitnum1 * sitnum2).fill(0);
     }
