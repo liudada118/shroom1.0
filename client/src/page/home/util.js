@@ -658,7 +658,7 @@ export const sitTypeEvent = {
     });
   },
   hand: ({ that, wsPointData, local }) => {
-    wsPointData = rotate90(wsPointData, 32, 32)
+    // rotate90 已移除，与 CSV 导出保持一致
     if (that.state.numMatrixFlag == "numoriginal") {
       that.com.current?.sitData({
         wsPointData: wsPointData,
