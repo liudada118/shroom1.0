@@ -3053,7 +3053,7 @@ module.exports = {
               } else {
                 server.clients.forEach(function each(client) {
                   const jsonData = JSON.stringify({
-                    download: "閸掔娀娅庨幋鎰",
+                    download: "deleteSuccess",
                   });
                   if (client.readyState === WebSocket.OPEN) {
                     client.send(jsonData);
@@ -3070,7 +3070,7 @@ module.exports = {
                 } else {
                   server.clients.forEach(function each(client) {
                     const jsonData = JSON.stringify({
-                      download: "閸掔娀娅庨幋鎰",
+                      download: "deleteSuccess",
                     });
                     if (client.readyState === WebSocket.OPEN) {
                       client.send(jsonData);
