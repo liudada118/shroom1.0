@@ -3221,11 +3221,6 @@ parser.on("data", function (data) {
         // pointArr = handLine(pointArr)
         // 625
         pointArr = jqbed(pointArr)
-        for (let i = 0; i < 32; i++) {
-          for (let j = 0; j < 16; j++) {
-            [pointArr[i * 32 + j], pointArr[i * 32 + 31 - j]] = [pointArr[i * 32 + 31 - j], pointArr[i * 32 + j],]
-          }
-        }
         newData = [...pointArr]
         // pointArr = press6sit(pointArr, 32, 32, 'col')
         // pointArr = zeroLine(pointArr)
