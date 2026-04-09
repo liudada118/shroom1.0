@@ -2467,6 +2467,7 @@ class Home extends React.Component {
   };
 
   changeSelect = (obj, type) => {
+    if (!obj || !obj.sit) return;
     let sit = [...obj.sit];
     // console.log(sit)
     if (!sit.every((a) => a == 0) && (this.state.carState == "sit" || this.state.carState == "all")) {
