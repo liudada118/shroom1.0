@@ -666,16 +666,9 @@ export const sitTypeEvent = {
       });
     } else if (that.state.numMatrixFlag == "normal") {
       // wsPointData = handLine(wsPointData);
-      // 沿左上→右下对角线对折（矩阵转置）：第 i 行第 j 列 ↔ 第 j 行第 i 列
-      const n = 32;
-      const transposed = new Array(n * n);
-      for (let i = 0; i < n; i++) {
-        for (let j = 0; j < n; j++) {
-          transposed[j * n + i] = wsPointData[i * n + j];
-        }
-      }
+      // 转置已移至 hand.jsx 渲染循环修复，此处直接传原始数据
       that.com.current?.sitData({
-        wsPointData: transposed,
+        wsPointData: wsPointData,
         local: that.state.local
       });
     } else if (that.state.numMatrixFlag == "heatmap") {
