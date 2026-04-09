@@ -110,6 +110,7 @@ let port2,
   playFlag = false,
   nowIndex = 0,
   interval = timeNum,
+  detectedInterval = timeNum,
   timer,
   parserOpen,
   parser2Open,
@@ -274,6 +275,24 @@ function stopPlaybackTimer() {
     clearInterval(timer);
     timer = null;
   }
+}
+
+/**
+ * 从时间戳数组推算实际采集帧间隔（ms）
+ * 取前 N 帧时间戳差值的中位数，过滤异常值，fallback 到 timeNum
+ */
+function calcDetectedInterval(timestamps) {
+  if (!Array.isArray(timestamps) || timestamps.length < 2) return timeNum;
+  const sampleSize = Math.min(20, timestamps.length - 1);
+  const diffs = [];
+  for (let i = 1; i <= sampleSize; i++) {
+    const d = timestamps[i] - timestamps[i - 1];
+    if (d > 0 && d < 5000) diffs.push(d); // 过滤异常值（>5s 视为无效）
+  }
+  if (diffs.length === 0) return timeNum;
+  diffs.sort((a, b) => a - b);
+  const median = diffs[Math.floor(diffs.length / 2)];
+  return Math.max(1, median); // 最小 1ms
 }
 
 let reconnectTimer = null;
@@ -989,13 +1008,15 @@ module.exports = {
                       length = historySeries.length;
                       indexArr = [0, Math.max(length - 2, 0)];
                       timeStamp = historySeries.time;
+                      detectedInterval = calcDetectedInterval(timeStamp);
+                      interval = detectedInterval;
                       historyArr = [0, length];
                       const press = historySeries.press;
                       const area = historySeries.area;
 
                       server.clients.forEach(function each(client) {
                         /**
-                         * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
+                         * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?鏆?
                          *  */
                         const jsonData = JSON.stringify({
                           length: length,
@@ -1077,6 +1098,8 @@ module.exports = {
                   for (let i = 0; i < rows.length; i++) {
                     timeStamp.push(rows[i].timestamp);
                   }
+                  detectedInterval = calcDetectedInterval(timeStamp);
+                  interval = detectedInterval;
                   historyArr = [0, length];
                   let press = [],
                     area = [];
@@ -1148,6 +1171,8 @@ module.exports = {
                             for (let i = 0; i < rows.length; i++) {
                               timeStamp.push(rows[i].timestamp);
                             }
+                            detectedInterval = calcDetectedInterval(timeStamp);
+                            interval = detectedInterval;
                             historyArr = [0, length];
                             let press = [],
                               area = [];
@@ -1187,14 +1212,16 @@ module.exports = {
                       });
                       length = historySeries.length;
                       indexArr = [0, Math.max(length - 2, 0)];
-                      timeStamp = historySeries.time;
+                       timeStamp = historySeries.time;
+                      detectedInterval = calcDetectedInterval(timeStamp);
+                      interval = detectedInterval;
                       historyArr = [0, length];
                       const press = historySeries.press;
                       const area = historySeries.area;
 
                       server.clients.forEach(function each(client) {
                         /**
-                         * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
+                         * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆??
                          *  */
                         const jsonData = JSON.stringify({
                           length: length,
@@ -1280,6 +1307,8 @@ module.exports = {
                   length = historySeries.length;
                   indexArr = [0, Math.max(length - 2, 0)];
                   timeStamp = historySeries.time;
+                  detectedInterval = calcDetectedInterval(timeStamp);
+                  interval = detectedInterval;
                   historyArr = [0, length];
                   const press = historySeries.press;
                   const area = historySeries.area;
@@ -1972,7 +2001,7 @@ module.exports = {
           }
           if (JSON.parse(message).speed != null) {
             const speed = JSON.parse(message).speed;
-            interval = parseInt(timeNum / speed);
+            interval = Math.max(1, parseInt(detectedInterval / speed));
 
             if (playFlag) {
               if (timer) {
