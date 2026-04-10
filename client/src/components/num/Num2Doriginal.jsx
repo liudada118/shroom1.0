@@ -983,6 +983,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                 layoutData([...left])
                 const tw = 6, th = 10
                 pendingFlatRef.current = { data: left, tw, th }
+                scheduleRender()
             }
 
             if (hasRightFrame) {
