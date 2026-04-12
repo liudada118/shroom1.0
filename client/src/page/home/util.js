@@ -658,7 +658,7 @@ export const sitTypeEvent = {
     });
   },
   hand: ({ that, wsPointData, local }) => {
-    wsPointData = rotate90(wsPointData, 32, 32)
+    // rotate90 已移除，与 CSV 导出保持一致
     if (that.state.numMatrixFlag == "numoriginal") {
       that.com.current?.sitData({
         wsPointData: wsPointData,
@@ -666,12 +666,11 @@ export const sitTypeEvent = {
       });
     } else if (that.state.numMatrixFlag == "normal") {
       // wsPointData = handLine(wsPointData);
+      // 转置已移至 hand.jsx 渲染循环修复，此处直接传原始数据
       that.com.current?.sitData({
         wsPointData: wsPointData,
         local: that.state.local
       });
-
-
     } else if (that.state.numMatrixFlag == "heatmap") {
       that.com.current?.bthClickHandle(wsPointData);
     }

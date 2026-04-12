@@ -123,6 +123,17 @@ function isPyInstallerExe() {
   return Boolean(resolvePackagedExe());
 }
 
+function pythonArgs(serverScript, useExe) {
+  if (useExe) return [];
+
+  const args = [];
+  if (process.platform === 'win32') {
+    args.push('-X', 'utf8');
+  }
+  args.push('-u', serverScript);
+  return args;
+}
+
 function pythonRuntimeEnv() {
   const mplConfigDir = path.join(os.tmpdir(), 'shroom-mplconfig');
   try {
@@ -133,6 +144,8 @@ function pythonRuntimeEnv() {
     ...process.env,
     PYTHONUNBUFFERED: '1',
     PYTHONNOUSERSITE: '1',
+    PYTHONUTF8: '1',
+    PYTHONIOENCODING: 'utf-8',
     MPLCONFIGDIR: mplConfigDir,
   };
 }
@@ -200,7 +213,7 @@ function startWorker() {
       throw new Error('[PY] start aborted: no python runtime script found');
     }
 
-    const args = useExe ? [] : ['-u', serverScript];
+    const args = pythonArgs(serverScript, useExe);
     const cwd = useExe ? path.dirname(py) : (serverScript ? path.dirname(serverScript) : process.cwd());
 
     console.log('[PY] start:', py, args.join(' '), 'cwd=', cwd, 'packaged=', isPackagedApp(), 'useExe=', useExe);

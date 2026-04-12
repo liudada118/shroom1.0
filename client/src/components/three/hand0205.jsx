@@ -715,7 +715,7 @@ const Canvas = React.forwardRef((props, refs) => {
     }
 
 
-    if (!sitIndexArr.length || sitIndexArr.every((a) => a == 0)) {
+    if (!sitIndexArr || !sitIndexArr.length || sitIndexArr.every((a) => a == 0)) {
       dataArr = bigArrg
     }
 

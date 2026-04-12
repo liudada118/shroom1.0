@@ -933,10 +933,15 @@ class Home extends React.Component {
     // download 弹窗判断 - 放在最前面确保不被其他逻辑阻断
     if (jsonObject.download != null) {
       console.log('[download弹窗] 收到download消息:', jsonObject.download);
+      const { t } = this.props;
+      const i18nKeys = ['deleteSuccess', 'export csv success', 'export csv failed'];
+      const displayMsg = i18nKeys.includes(jsonObject.download) && t
+        ? t(jsonObject.download)
+        : jsonObject.download;
       if (this.props.messageApi) {
-        this.props.messageApi.info(jsonObject.download);
+        this.props.messageApi.info(displayMsg);
       } else {
-        message.info(jsonObject.download);
+        message.info(displayMsg);
       }
       return;
     }
@@ -2467,6 +2472,7 @@ class Home extends React.Component {
   };
 
   changeSelect = (obj, type) => {
+    if (!obj || !obj.sit) return;
     let sit = [...obj.sit];
     // console.log(sit)
     if (!sit.every((a) => a == 0) && (this.state.carState == "sit" || this.state.carState == "all")) {
@@ -2980,8 +2986,8 @@ class Home extends React.Component {
 
               <Popover
                 placement="top"
-                title={t('frontView') || '正面视角'}
-                content={<div><p>{t('frontViewContent') || '切换到正面视角'}</p></div>}
+                title={t('frontView')}
+                content={<div><p>{t('frontViewContent')}</p></div>}
               >
                 <div
                   className="setIcon marginB10"
