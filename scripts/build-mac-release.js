@@ -84,6 +84,10 @@ function runBuffered(cmd, args, options = {}) {
   };
 }
 
+function sleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 function escapeYamlString(value) {
   return String(value).replace(/'/g, "''");
 }
@@ -208,7 +212,28 @@ function signPath(targetPath, identity, { runtime = false, entitlements = null }
     args.push("--entitlements", entitlements);
   }
   args.push(targetPath);
-  run("codesign", args);
+
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const result = runBuffered("codesign", args);
+    if (result.status === 0) {
+      return;
+    }
+
+    const output = result.combinedOutput || "";
+    const timestampUnavailable =
+      output.includes("The timestamp service is not available") ||
+      output.includes("timestamp service is not available");
+
+    if (!timestampUnavailable || attempt === maxAttempts) {
+      throw new Error(
+        `codesign ${args.join(" ")} failed with exit code ${result.status ?? "unknown"}`
+      );
+    }
+
+    console.warn(`[release] timestamp service unavailable, retrying codesign (${attempt}/${maxAttempts}) -> ${targetPath}`);
+    sleepMs(3000);
+  }
 }
 
 function signNestedCode(identity) {
