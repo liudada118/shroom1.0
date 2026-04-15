@@ -325,19 +325,7 @@ class Aside extends React.Component {
     render() {
         const { t, i18n } = this.props;
         const isGlove = this.props.matrixName === 'hand0205' || this.props.matrixName === 'handGlove115200';
-        const dataArrCar = isGlove ? [
-            {
-                color: '#2A99FF',
-                data: this.props.i18n.t('meanAngle'),
-            }, {
-                color: '#FF2A2A',
-                data: this.props.i18n.t('maxAngle'),
-            },
-            {
-                color: '#FF2A2A',
-                data: this.props.i18n.t('totalAngle'),
-            },
-        ] : [
+        const dataArrCar = [
             {
                 color: '#2A99FF',
                 data: this.props.i18n.t('meanPress'),
@@ -466,11 +454,11 @@ class Aside extends React.Component {
                     </>
                     : this.props.matrixName != 'bed40' ?
                 <div className="asideContent firstAside">
-                    <h2 className="asideTitle">{isGlove ? 'Angle Data' : 'Pressure Data'}</h2>
-                    <span className='pressData'>{isGlove ? (this.state.totalPres || 0) : Number(this.state.totalPres).toFixed(0)}</span> <span style={{ color: '#999' }}></span>
+                    <h2 className="asideTitle">{isGlove ? 'Index Finger Angle' : 'Pressure Data'}</h2>
+                    <span className='pressData'>{isGlove ? (this.state.indexAngle || 0) : Number(this.state.totalPres).toFixed(0)}</span> <span style={{ color: '#999' }}></span>
 
                     {this.props.matrixName != 'foot' ? <>
-                        <div className='pressTitle standardColor'>{isGlove ? this.props.i18n.t('allAngle') : this.props.i18n.t('allPress')}</div>
+                        <div className='pressTitle standardColor'>{this.props.i18n.t('allPress')}</div>
                         <canvas id="myChart1" style={{ height: `${150 * this.state.fontSize}px`, width: '100%' }}></canvas>
                         {
                             dataArrCar.map((a, index) => {
@@ -482,7 +470,7 @@ class Aside extends React.Component {
                                         </div>
                                         <div className='dataIteminfo'>
                                             <div className='standardColor'>{a.eng}</div>
-                                            <div>{isGlove ? (Number(this.state[arr[index]]) || 0).toFixed(2) : (index == 0 ? Number(this.state[arr[index]]).toFixed(2) : Number(this.state[arr[index]]).toFixed(0))} <span style={{ color: '#999' }}></span></div>
+                                            <div>{index == 0 ? Number(this.state[arr[index]]).toFixed(2) : Number(this.state[arr[index]]).toFixed(0)} <span style={{ color: '#999' }}></span></div>
                                         </div>
                                     </div>
                                 )

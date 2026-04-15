@@ -1683,20 +1683,13 @@ export const sitTypeEvent = {
     }
 
     if (that.state.numMatrixFlag == "normal") {
-      that.com.current?.sitData({
-        wsPointData: wsPointData ? wsPointData : [],
-        local: that.state.local
-      });
-      // 计算弯折角度统计数据并更新侧边栏
+      // 手套模式：不调用 sitData（wsPointData 只有5个弯折角度，会破坏 1024点渲染）
+      // 只通过 changeData 更新侧边栏：大数字显示食指弯曲角度，其他数据由 sitRenew 自然计算
       if (wsPointData && wsPointData.length > 0) {
-        const angleArr = wsPointData.map(a => (a == null || isNaN(a)) ? 0 : Number(a));
-        const angleTotal = angleArr.reduce((a, b) => a + b, 0);
-        const angleMax = Math.max(...angleArr);
-        const angleMean = angleTotal / (angleArr.length || 1);
+        // wsPointData[1] 为食指弯曲角度（索引从0开始，大拇=0、食指=1、中指=2、无名指=3、小指=4）
+        const indexFingerAngle = (wsPointData[1] == null || isNaN(wsPointData[1])) ? 0 : Number(wsPointData[1]);
         that.data.current?.changeData({
-          meanPres: angleMean.toFixed(2),
-          maxPres: angleMax.toFixed(2),
-          totalPres: angleTotal.toFixed(2),
+          indexAngle: indexFingerAngle.toFixed(2),
         });
       }
     } else if (that.state.numMatrixFlag == "heatmap") {
@@ -4618,20 +4611,12 @@ export const backTypeEvent = {
     }
 
     if (that.state.numMatrixFlag == "normal") {
-      that.com.current?.sitData({
-        wsPointData: wsPointData ? wsPointData : [],
-        local: that.state.local
-      });
-      // 计算弯折角度统计数据并更新侧边栏
+      // 手套回放模式：不调用 sitData（wsPointData 只有5个弯折角度，会破坏 1024点渲染）
+      // 只通过 changeData 更新侧边栏食指弯曲角度，其他数据由 sitRenew 自然计算
       if (wsPointData && wsPointData.length > 0) {
-        const angleArr = wsPointData.map(a => (a == null || isNaN(a)) ? 0 : Number(a));
-        const angleTotal = angleArr.reduce((a, b) => a + b, 0);
-        const angleMax = Math.max(...angleArr);
-        const angleMean = angleTotal / (angleArr.length || 1);
+        const indexFingerAngle = (wsPointData[1] == null || isNaN(wsPointData[1])) ? 0 : Number(wsPointData[1]);
         that.data.current?.changeData({
-          meanPres: angleMean.toFixed(2),
-          maxPres: angleMax.toFixed(2),
-          totalPres: angleTotal.toFixed(2),
+          indexAngle: indexFingerAngle.toFixed(2),
         });
       }
     } else if (that.state.numMatrixFlag == "heatmap") {
