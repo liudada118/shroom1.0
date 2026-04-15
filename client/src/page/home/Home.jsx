@@ -1866,13 +1866,24 @@ class Home extends React.Component {
               } else if (that.state.numMatrixFlag == "heatmap") {
                 that.com.current?.bthClickHandle(wsPointData);
               }
-
+              // 手套回放时更新角度统计数据
+              if ((this.state.matrixName === 'hand0205' || this.state.matrixName === 'handGlove115200') && wsPointData && wsPointData.length > 0) {
+                const angleArr = wsPointData.map(a => (a == null || isNaN(a)) ? 0 : Number(a));
+                const angleTotal = angleArr.reduce((a, b) => a + b, 0);
+                const angleMax = Math.max(...angleArr);
+                const angleMean = angleTotal / (angleArr.length || 1);
+                this.data.current?.changeData({
+                  meanPres: angleMean.toFixed(2),
+                  maxPres: angleMax.toFixed(2),
+                  totalPres: angleTotal.toFixed(2),
+                });
+              }
 
               if (!that.state.calibration) {
                 //  z 
                 if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
                   let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-                  // 过滤四元数绝对值超过1的异常数据
+                  // 过滤四元数绝对値超过1的异常数据
                   if (!arr.some(v => Math.abs(v) > 1)) {
                     com?.changeHandAngle(arr)
                   }
@@ -1997,13 +2008,24 @@ class Home extends React.Component {
               } else if (that.state.numMatrixFlag == "heatmap") {
                 that.com.current?.bthClickHandle(wsPointData);
               }
-
+              // 手套回放时更新角度统计数据
+              if ((this.state.matrixName === 'hand0205' || this.state.matrixName === 'handGlove115200') && wsPointData && wsPointData.length > 0) {
+                const angleArr = wsPointData.map(a => (a == null || isNaN(a)) ? 0 : Number(a));
+                const angleTotal = angleArr.reduce((a, b) => a + b, 0);
+                const angleMax = Math.max(...angleArr);
+                const angleMean = angleTotal / (angleArr.length || 1);
+                this.data.current?.changeData({
+                  meanPres: angleMean.toFixed(2),
+                  maxPres: angleMax.toFixed(2),
+                  totalPres: angleTotal.toFixed(2),
+                });
+              }
 
               if (!that.state.calibration) {
                 //  z 
                 if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
                   let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-                  // 过滤四元数绝对值超过1的异常数据
+                  // 过滤四元数绝对値超过1的异常数据
                   if (!arr.some(v => Math.abs(v) > 1)) {
                     com?.changeHandAngle(arr)
                   }
