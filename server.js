@@ -755,16 +755,14 @@ module.exports = {
               }
             });
 
-            const parsedLicense = JSON.parse(dateRes);
+             const parsedLicense = JSON.parse(dateRes);
             const rawFile = parsedLicense.file;
             selectFlag = rawFile;
-
-            // 支持 defaultModule 字段：用户在 license 页手动选择的默认展示模块
-            // 优先级：defaultModule > rawFile 第一项 > defauleFile
-            const rawDefault = parsedLicense.defaultModule;
-            if (rawDefault) {
-              file = rawDefault;
-            } else if (rawFile === 'all') {
+            // 支持 moduleConfig 字段：各传感器类型的默认功能模块配置
+            // { [sensorValue]: numMatrixFlag }
+            const rawModuleConfig = parsedLicense.moduleConfig || null;
+            // 确定初始展示的传感器类型（file）
+            if (rawFile === 'all') {
               file = defauleFile;
             } else if (Array.isArray(rawFile)) {
               file = rawFile[0] || defauleFile;
@@ -784,12 +782,17 @@ module.exports = {
             }
 
             server.clients.forEach(function each(client) {
-              const jsonData = JSON.stringify({
+              const payload = {
                 date: endDate,
                 nowDate: nowDate,
                 file,
-                selectFlag: selectFlag
-              });
+                selectFlag: selectFlag,
+              };
+              // 将功能模块配置一并下发给前端
+              if (rawModuleConfig) {
+                payload.moduleConfig = rawModuleConfig;
+              }
+              const jsonData = JSON.stringify(payload);
               if (client.readyState === WebSocket.OPEN) {
                 client.send(jsonData);
               }
