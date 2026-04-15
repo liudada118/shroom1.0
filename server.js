@@ -759,7 +759,12 @@ module.exports = {
             const rawFile = parsedLicense.file;
             selectFlag = rawFile;
 
-            if (rawFile === 'all') {
+            // 支持 defaultModule 字段：用户在 license 页手动选择的默认展示模块
+            // 优先级：defaultModule > rawFile 第一项 > defauleFile
+            const rawDefault = parsedLicense.defaultModule;
+            if (rawDefault) {
+              file = rawDefault;
+            } else if (rawFile === 'all') {
               file = defauleFile;
             } else if (Array.isArray(rawFile)) {
               file = rawFile[0] || defauleFile;

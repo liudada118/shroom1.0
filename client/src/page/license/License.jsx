@@ -13,12 +13,12 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   Card, Checkbox, Button, InputNumber, DatePicker, Input, message,
-  Tag, Divider, Row, Col, Typography, Space, Tooltip, Badge, Tabs, Switch, Radio, Alert
+  Tag, Divider, Row, Col, Typography, Space, Tooltip, Badge, Tabs, Switch, Radio, Alert, Select
 } from 'antd';
 import {
   KeyOutlined, CopyOutlined, SendOutlined, UnlockOutlined,
   CheckCircleOutlined, ClockCircleOutlined, AppstoreOutlined,
-  SafetyCertificateOutlined, ReloadOutlined, ExperimentOutlined
+  SafetyCertificateOutlined, ReloadOutlined, ExperimentOutlined, EyeOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { encStr, decryptStr } from './aesUtil';
@@ -97,6 +97,7 @@ const License = () => {
   const [isAll, setIsAll] = useState(false);
   const [days, setDays] = useState(365);
   const [generatedKey, setGeneratedKey] = useState('');
+  const [defaultModule, setDefaultModule] = useState(null); // 默认展示模块
 
   // ---- 时间模式 ----
   const [timeMode, setTimeMode] = useState('days'); // 'days' | 'picker'
@@ -140,9 +141,14 @@ const License = () => {
 
   // 单个选择
   const handleTypeChange = useCallback((value, checked) => {
-    setSelectedTypes((prev) => checked ? [...prev, value] : prev.filter((v) => v !== value));
+    setSelectedTypes((prev) => {
+      const next = checked ? [...prev, value] : prev.filter((v) => v !== value);
+      // 如果取消选中的是当前默认模块，自动清空默认模块
+      if (!checked && defaultModule === value) setDefaultModule(null);
+      return next;
+    });
     setIsAll(false);
-  }, []);
+  }, [defaultModule]);
 
   // 计算到期时间戳
   const computeExpireTimestamp = useCallback(() => {
@@ -178,6 +184,7 @@ const License = () => {
     }
 
     const date = computeExpireTimestamp();
+    // file 字段：全部授权时为 'all'，否则为授权类型数组（保持向下兼容）
     let file;
     if (isAll) {
       file = 'all';
@@ -187,13 +194,18 @@ const License = () => {
       file = selectedTypes;
     }
 
-    const obj = { date, file };
+    // defaultModule 字段：用户手动选择的默认展示模块
+    // 如果未设置，默认取第一个授权类型
+    const resolvedDefault = defaultModule
+      || (isAll ? null : (selectedTypes[0] || null));
+
+    const obj = { date, file, ...(resolvedDefault ? { defaultModule: resolvedDefault } : {}) };
     const key = encStr(JSON.stringify(obj));
     setGeneratedKey(key);
     message[isExpiredPreview ? 'warning' : 'success'](
       isExpiredPreview ? '已生成过期密钥（用于测试）' : '密钥生成成功'
     );
-  }, [isAll, selectedTypes, days, timeMode, pickerDate, computeExpireTimestamp, isExpiredPreview]);
+  }, [isAll, selectedTypes, defaultModule, days, timeMode, pickerDate, computeExpireTimestamp, isExpiredPreview]);
 
   // 复制密钥
   const handleCopy = useCallback(() => {
@@ -234,7 +246,7 @@ const License = () => {
         fileDisplay = { type: 'single', label: obj.file, list: [obj.file] };
       }
 
-      setParseResult({ raw: obj, expireDate: expireDate.toLocaleString(), remainDays, expired: remainDays < 0, fileDisplay });
+      setParseResult({ raw: obj, expireDate: expireDate.toLocaleString(), remainDays, expired: remainDays < 0, fileDisplay, defaultModule: obj.defaultModule || null });
     } catch (e) {
       message.error('密钥解析失败，请检查密钥是否正确');
       setParseResult(null);
@@ -428,7 +440,30 @@ const License = () => {
                       )}
 
                       <Divider />
-
+                      {/* 默认展示模块配置 */}
+                      <div className="summary-section" style={{ marginBottom: 0 }}>
+                        <Title level={5}><EyeOutlined style={{ marginRight: 6 }} />默认展示模块</Title>
+                        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+                          应用启动后默认加载的展示模块，未选则自动取第一个授权类型
+                        </Text>
+                        <Select
+                          style={{ width: '100%' }}
+                          placeholder={isAll ? '全部授权时不限制展示模块' : '选择默认展示模块（可选）'}
+                          value={defaultModule}
+                          onChange={setDefaultModule}
+                          allowClear
+                          disabled={isAll}
+                          options={(
+                            isAll ? ALL_SENSORS : ALL_SENSORS.filter(s => selectedTypes.includes(s.value))
+                          ).map(s => ({ label: `${s.label}  (${s.value})`, value: s.value }))}
+                        />
+                        {!isAll && !defaultModule && selectedTypes.length > 0 && (
+                          <Text type="secondary" style={{ fontSize: 11, marginTop: 4, display: 'block' }}>
+                            未选择时默认使用：{ALL_SENSORS.find(s => s.value === selectedTypes[0])?.label || selectedTypes[0]}
+                          </Text>
+                        )}
+                      </div>
+                      <Divider />
                       {/* 授权摘要 */}
                       <div className="summary-section">
                         <Title level={5}>授权摘要</Title>
@@ -550,6 +585,15 @@ const License = () => {
                                 const sensor = ALL_SENSORS.find((s) => s.value === t);
                                 return <Tag key={t} color="blue">{sensor ? sensor.label : t}</Tag>;
                               })}
+                            </div>
+                          )}
+                          {parseResult.defaultModule && (
+                            <div className="parse-item" style={{ marginTop: 8 }}>
+                              <Text type="secondary">默认展示模块：</Text>
+                              <Tag color="purple" icon={<EyeOutlined />}>
+                                {ALL_SENSORS.find(s => s.value === parseResult.defaultModule)?.label || parseResult.defaultModule}
+                                &nbsp;({parseResult.defaultModule})
+                              </Tag>
                             </div>
                           )}
                         </div>
