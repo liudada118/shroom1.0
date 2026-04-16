@@ -769,6 +769,7 @@ const Canvas = React.forwardRef((props, refs) => {
         meanPres: mean.toFixed(2),
         maxPres: max,
         point: point,
+        totalPres: press.toFixed(0),
       });
       const fingerR = fingerArr ? Math.floor(fingerArr[1] * 180) : 0
       props.data.current?.changeData({
