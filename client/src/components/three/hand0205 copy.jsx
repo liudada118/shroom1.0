@@ -765,14 +765,17 @@ const Canvas = React.forwardRef((props, refs) => {
       const press = dataArr.reduce((a, b) => a + b, 0)
       const mean = press / (point == 0 ? 1 : point)
 
-      props.data.current?.changeData({
-        meanPres: mean.toFixed(2),
-        maxPres: max,
-        point: point,
-      });
+      // props.data.current?.changeData({
+      //   meanPres: mean.toFixed(2),
+      //   maxPres: max,
+      //   point: point,
+      //   // area: areaSmooth.toFixed(0),
+      //   totalPres: press,
+      //   // pressure: pressureSmooth.toFixed(2),
+      // });
       const fingerR = fingerArr ? Math.floor(fingerArr[1] * 180) : 0
       props.data.current?.changeData({
-        indexAngle: fingerR
+        totalPres: `${fingerR}°`
       })
       // fingerArr
       if (totalArr.length < 20) {

@@ -1066,28 +1066,16 @@ class Home extends React.Component {
       }
     }
 
-    if (jsonObject.moduleConfig != null) {
-      // 保存各传感器类型的默认功能模块配置 { [sensorValue]: numMatrixFlag }
-      this.moduleConfig = jsonObject.moduleConfig;
-      localStorage.setItem('moduleConfig', JSON.stringify(jsonObject.moduleConfig));
-    }
     if (jsonObject.file != null) {
-      // 读取功能模块配置（优先用内存中的，其次用 localStorage 中的）
-      const moduleConfig = this.moduleConfig ||
-        (() => { try { return JSON.parse(localStorage.getItem('moduleConfig')) || {}; } catch { return {}; } })();
       if (jsonObject.file === 'all') {
         this.setState({ matrixTitle: true })
       } else if (Array.isArray(jsonObject.file)) {
         // 多类型模式：使用数组第一个作为默认类型
-        const firstType = jsonObject.file[0];
-        const defaultFlag = moduleConfig[firstType] || null;
-        this.setState({ matrixName: firstType, ...(defaultFlag ? { numMatrixFlag: defaultFlag } : {}) })
-        localStorage.setItem('file', firstType)
+        this.setState({ matrixName: jsonObject.file[0] })
+        localStorage.setItem('file', jsonObject.file[0])
       } else {
-        const singleType = jsonObject.file;
-        const defaultFlag = moduleConfig[singleType] || null;
-        this.setState({ matrixName: singleType, ...(defaultFlag ? { numMatrixFlag: defaultFlag } : {}) })
-        localStorage.setItem('file', singleType)
+        this.setState({ matrixName: jsonObject.file })
+        localStorage.setItem('file', jsonObject.file)
       }
     }
 
@@ -1878,11 +1866,13 @@ class Home extends React.Component {
               } else if (that.state.numMatrixFlag == "heatmap") {
                 that.com.current?.bthClickHandle(wsPointData);
               }
+
+
               if (!that.state.calibration) {
                 //  z 
                 if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
                   let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-                  // 过滤四元数绝对値超过1的异常数据
+                  // 过滤四元数绝对值超过1的异常数据
                   if (!arr.some(v => Math.abs(v) > 1)) {
                     com?.changeHandAngle(arr)
                   }
@@ -2007,11 +1997,13 @@ class Home extends React.Component {
               } else if (that.state.numMatrixFlag == "heatmap") {
                 that.com.current?.bthClickHandle(wsPointData);
               }
+
+
               if (!that.state.calibration) {
                 //  z 
                 if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
                   let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-                  // 过滤四元数绝对値超过1的异常数据
+                  // 过滤四元数绝对值超过1的异常数据
                   if (!arr.some(v => Math.abs(v) > 1)) {
                     com?.changeHandAngle(arr)
                   }
@@ -2233,20 +2225,18 @@ class Home extends React.Component {
     }
   };
 
-   changeMatrix = (e) => {
+  changeMatrix = (e) => {
     // setMatrixName(e)
-    // 读取该传感器类型对应的默认功能模块
-    const moduleConfig = this.moduleConfig ||
-      (() => { try { return JSON.parse(localStorage.getItem('moduleConfig')) || {}; } catch { return {}; } })();
-    const defaultFlag = moduleConfig[e] || this.state.numMatrixFlag;
-    const configObj = getConfig({ sensorType: e, mode: defaultFlag })
+    const configObj = getConfig({ sensorType: e, mode: this.state.numMatrixFlag })
     const wasLocal = this.state.local;
+
     // 1. 先停止回放，确保后端不再发送旧数据
     this.wsSendObj({ play: false });
     // 2. 关闭所有串口，确保切换前旧串口完全停止
     this.wsSendObj({ sitClose: true, backClose: true, headClose: true });
     // 3. 再发送 file 切换，后端切换数据库并重置回放状态
     this.wsSendObj({ file: e });
+
     // 4. 清空前端数据
     this.data.current?.changeData({ meanPres: 0, maxPres: 0, point: 0, area: 0, totalPres: 0, pressure: 0 });
     this.data.current?.initCharts();
@@ -2254,11 +2244,12 @@ class Home extends React.Component {
     this.pressArr = null;
     this.max = 0;
     this.pressMax = 0;
+
     // 5. 重置回放控件（播放状态 + 滑块位置）
     this.progress.current?.resetPlay();
+
     this.setState({
       matrixName: e,
-      numMatrixFlag: defaultFlag,
       ...configObj,
       dataArr: [],
       dataTime: '',
