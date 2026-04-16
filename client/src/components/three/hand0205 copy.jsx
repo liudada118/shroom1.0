@@ -842,22 +842,7 @@ const Canvas = React.forwardRef((props, refs) => {
     // valuel1 = valuel;
     // valuef1 = valuef;
     // ndata1 = [];
-    // 将 16×16（256字节）原始矩阵扩展为 32×32（1024元素）以匹配 interp 函数
-    if (wsPointData && wsPointData.length === 256) {
-      const expanded = new Array(1024);
-      for (let row = 0; row < 16; row++) {
-        for (let col = 0; col < 16; col++) {
-          const val = wsPointData[row * 16 + col];
-          expanded[(row * 2) * 32 + (col * 2)] = val;
-          expanded[(row * 2) * 32 + (col * 2 + 1)] = val;
-          expanded[(row * 2 + 1) * 32 + (col * 2)] = val;
-          expanded[(row * 2 + 1) * 32 + (col * 2 + 1)] = val;
-        }
-      }
-      ndata1 = expanded;
-    } else {
-      ndata1 = wsPointData;
-    }
+    ndata1 = wsPointData;
 
     // valuelInit1 = valuelInit;
     // 修改线序 坐垫

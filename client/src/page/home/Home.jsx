@@ -207,6 +207,7 @@ let startPressure = 0,
   time = 0;
 let num = 0,
   wsPointDataSit = [],
+  wsPointDataSitWidth = 32, // 坐垂矩阵列宽，默认 32，hand0205 为 16
   wsPointDataBack = [],
   wsPointDataHead = [],
   wsPointDataBackZero = [],
@@ -1325,70 +1326,63 @@ class Home extends React.Component {
           if (wsPointData.length == 147) {
 
             if (this.state.numMatrixFlag == 'normal') {
-              // 3D 遥操模式：直接使用 sitData（256字节原始矩阵），不进行 5 点压缩
+              // 3D 遥操模式：
+              // 1. 将 256 字节原始数据写入 wsPointDataSit，供 Aside 侧边栏显示压力数山
               let rawSitData = jsonObject.sitData;
               if (!Array.isArray(rawSitData)) rawSitData = JSON.parse(rawSitData);
               wsPointDataSit = [...rawSitData];
+              wsPointDataSitWidth = 16; // hand0205 是 16×16 矩阵
 
-              if (that.state.numMatrixFlag == "normal") {
-
-                if (this.state.matrixName != 'handVideo1') {
-                  that.com.current?.sitData({
-                    wsPointData: rawSitData,
-                    local: that.state.local
-                  });
-                } else {
-                  that.com.current?.sitData({
-                    local: that.state.local
-                  });
+              // 2. 将 147 字节数据压缩为 5 个点，用于遥操控制（手指弯折/旋转）
+              let fivePoints = []
+              if (jsonObject.newArr != null) {
+                for (let i = 0; i < 5; i++) {
+                  let num = 0
+                  for (let j = 0; j < 3; j++) {
+                    const index = j * 10 + i * 2
+                    num += wsPointData[index]
+                    num += wsPointData[index + 1]
+                  }
+                  fivePoints[i] = num
                 }
-
-
-              } else if (that.state.numMatrixFlag == "heatmap") {
-                that.com.current?.bthClickHandle(wsPointData);
+                fivePoints = [...fivePoints].reverse()
+              } else {
+                for (let i = 0; i < 5; i++) {
+                  let num = 0
+                  const j = 4
+                  const index = j * 15 + i * 3
+                  num += wsPointData[index]
+                  num += wsPointData[index + 1]
+                  num += wsPointData[index + 2]
+                  fivePoints[i] = num
+                }
               }
 
               const com = this.state.matrixName == 'hand0507' ? that.com.current?.handL : that.com.current
 
               if (!that.state.calibration) {
-                //  z 
                 if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
                   let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
-                  // 过滤四元数绝对值超过1的异常数据
                   if (!arr.some(v => Math.abs(v) > 1)) {
                     com?.changeHandAngle(arr)
                   }
                 }
-
                 if (fingerArr) {
-                  if (!fingerArr[0] || !Array.isArray(fingerArr[0])) {
-                    fingerArr[0] = new Array(5).fill(0)
-                  }
-                  if (!fingerArr[1] || !Array.isArray(fingerArr[1])) {
-                    fingerArr[1] = new Array(5).fill(255)
-                  }
+                  if (!fingerArr[0] || !Array.isArray(fingerArr[0])) fingerArr[0] = new Array(5).fill(0)
+                  if (!fingerArr[1] || !Array.isArray(fingerArr[1])) fingerArr[1] = new Array(5).fill(255)
                   const baseArr = []
                   for (let i = 0; i < 5; i++) {
                     baseArr.push((fingerArr[1][i] || 0) - (fingerArr[0][i] || 0))
                   }
-
-
                   for (let i = 0; i < 5; i++) {
-                    const rawValue = wsPointData[i]
+                    const rawValue = fivePoints[i]
                     if (rawValue == null || isNaN(rawValue)) continue;
                     const numberValue = Math.round((rawValue - (fingerArr[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
-                    const value = (numberValue) < 0 ? 0 : (numberValue) >= 1 ? 1 : (numberValue)
-
+                    const value = numberValue < 0 ? 0 : numberValue >= 1 ? 1 : numberValue
                     newArr[i] = newArr[i] + (value - newArr[i]) / 3
                   }
-
                   com?.calibration(newArr)
                 }
-              } else {
-
-                // that.com.current?.calibration([0,0,0])
-                // that.com.current?.handZero()
-                // that.com.current?.calibration([0,0,0])
               }
             } else if (this.state.numMatrixFlag == 'numoriginal' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
               // 手套原始数据模式：保留147映射数据显示
@@ -1473,6 +1467,7 @@ class Home extends React.Component {
 
               wsPointDataSit = wsPointData;
               wsPointDataSit = wsPointDataSit.map((a) => Math.round(a));
+              wsPointDataSitWidth = 32;
 
               if (that.state.numMatrixFlag == "normal") {
 
@@ -1817,6 +1812,7 @@ class Home extends React.Component {
 
               wsPointDataSit = wsPointData;
               wsPointDataSit = wsPointDataSit.map((a) => Math.round(a));
+              wsPointDataSitWidth = 32;
 
               if (that.state.numMatrixFlag == "normal") {
 
@@ -1944,13 +1940,11 @@ class Home extends React.Component {
 
 
 
-              const com = this.state.matrixName == 'hand0507' ? that.com.current?.handL : that.com.current
-
+               const com = this.state.matrixName == 'hand0507' ? that.com.current?.handL : that.com.current
               wsPointDataSit = wsPointData;
               wsPointDataSit = wsPointDataSit.map((a) => Math.round(a));
-
+              wsPointDataSitWidth = 32;
               if (that.state.numMatrixFlag == "normal") {
-
                 if (this.state.matrixName != 'handVideo1') {
                   that.com.current?.sitData({
                     wsPointData: wsPointData ? wsPointData : [],
@@ -2479,10 +2473,9 @@ class Home extends React.Component {
       }
 
       const selectArr = [];
-
       for (let i = this.sitIndexArr[0]; i <= this.sitIndexArr[1]; i++) {
         for (let j = this.sitIndexArr[2]; j <= this.sitIndexArr[3]; j++) {
-          selectArr.push(wsPointDataSit[i * 32 + j]);
+          selectArr.push(wsPointDataSit[i * wsPointDataSitWidth + j]);
         }
       }
 
