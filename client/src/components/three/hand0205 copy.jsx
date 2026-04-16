@@ -661,96 +661,38 @@ const Canvas = React.forwardRef((props, refs) => {
     if (fingerArr) rotateFingers(fingerArr)
 
 
-    // initndata1Data()
-
-    // interp(ndata1, bigArr, sitnum1, sitInterp);
-
-    // console.log(first)
-    // let bigArrs = addSide(
-    //   bigArr,
-    //   sitnum2 * sitInterp,
-    //   sitnum1 * sitInterp,
-    //   sitOrder,
-    //   sitOrder
-    // );
-
-
-    // interp(ndata2, bigArrhand, sitnum1, sitInterp);
-    // let bigArrshand1 = addSide(
-    //   bigArrhand,
-    //   sitnum2 * sitInterp,
-    //   sitnum1 * sitInterp,
-    //   sitOrder,
-    //   sitOrder
-    // );
-    // gaussBlur_1(
-    //   bigArrshand1,
-    //   bigArrshand,
-    //   sitnum2 * sitInterp + sitOrder * 2,
-    //   sitnum1 * sitInterp + sitOrder * 2,
-    //   1.2
-    // );
-    // gaussBlur_1(
-    //   bigArrs,
-    //   bigArrg,
-    //   sitnum2 * sitInterp + sitOrder * 2,
-    //   sitnum1 * sitInterp + sitOrder * 2,
-    //   valueg1
-    // );
-
-
-
-    // let k = 0,
-    //   l = 0;
-    // let dataArr = []
-    // for (let ix = 0; ix < AMOUNTX; ix++) {
-    //   for (let iy = 0; iy < AMOUNTY; iy++) {
-    //     const value = bigArrg[l] * 10;
-    //     const valuehand = bigArrshand[l] * 10
-    //     //柔化处理smooth
-    //     smoothBig[l] = smoothBig[l] + (value - smoothBig[l] + 0.5) / valuel1;
-
-    //     positions[k] = ix * SEPARATION - (AMOUNTX * SEPARATION) / 2; // x
-    //     positions[k + 1] = smoothBig[l] * value1; // y
-    //     positions[k + 2] = iy * SEPARATION - (AMOUNTY * SEPARATION) / 2; // z
-    //     // console.log(value)
-    //     if (valuehand < 50) {
-    //       positions[k + 1] = -100000
-    //       positions[k] = 0
-    //       positions[k + 2] = 0
-    //     }
-    //     let rgb
-
-    //     if (sitIndexArr && !sitIndexArr.every((a) => a == 0)) {
-
-    //       if (ix >= sitIndexArr[0] && ix < sitIndexArr[1] && iy >= sitIndexArr[2] && iy < sitIndexArr[3]) {
-    //         // rgb = [255, 0, 0];
-    //         rgb = jet(0, valuej1, smoothBig[l]);
-    //         // scales1[l] = 2;
-    //         // positions1[k + 1] = smoothBig[l] / value2 - 1000
-    //         dataArr.push(bigArrg[l])
-    //       } else {
-    //         rgb = jetgGrey(0, valuej1, smoothBig[l]);
-    //         // scales1[l] = 1;
-    //       }
-    //     } else {
-    //       rgb = jet(0, valuej1, smoothBig[l]);
-    //       // scales1[l] = 1;
-    //     }
-
-    //     colors[k] = rgb[0] / 255;
-    //     colors[k + 1] = rgb[1] / 255;
-    //     colors[k + 2] = rgb[2] / 255;
-
-    //     k += 3;
-    //     l++;
-    //   }
-    // }
-
-
-    // if (!sitIndexArr.length || sitIndexArr.every((a) => a == 0)) {
-    // dataArr = bigArrg
-    // }
+    interp(ndata1, bigArr, sitnum1, sitInterp);
+    let bigArrs = addSide(
+      bigArr,
+      sitnum2 * sitInterp,
+      sitnum1 * sitInterp,
+      sitOrder,
+      sitOrder
+    );
+    gaussBlur_1(
+      bigArrs,
+      bigArrg,
+      sitnum2 * sitInterp + sitOrder * 2,
+      sitnum1 * sitInterp + sitOrder * 2,
+      valueg1
+    );
+    let k = 0,
+      l = 0;
+    for (let iy = 0; iy < AMOUNTY; iy++) {
+      for (let ix = 0; ix < AMOUNTX; ix++) {
+        const value = bigArrg[l] * 10;
+        smoothBig[l] = smoothBig[l] + (value - smoothBig[l] + 0.5) / valuel1;
+        positions[k] = ix * SEPARATION - (AMOUNTX * SEPARATION) / 2; // x
+        positions[k + 1] = smoothBig[l] * value1; // y
+        positions[k + 2] = iy * SEPARATION - (AMOUNTY * SEPARATION) / 2; // z
+        const rgb = jet(0, valuej1, smoothBig[l]);
+        colors[k] = rgb[0] / 255;
+        colors[k + 1] = rgb[1] / 255;
+        colors[k + 2] = rgb[2] / 255;
+        k += 3;
+        l++;
+      }
+    }
 
 
     var T = clock.getDelta();
@@ -810,7 +752,7 @@ const Canvas = React.forwardRef((props, refs) => {
       "position",
       new THREE.BufferAttribute(positions, 3)
     );
-    // sitGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    sitGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   }
 
   function render() {
