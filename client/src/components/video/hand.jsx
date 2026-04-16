@@ -1368,7 +1368,7 @@ const Canvas = React.forwardRef((props, refs) => {
         style={{ width: "100%", height: "100%" }}
         id={`canvas${props.index}`}
       ></div>
-      <img ref={img} src={uv} style={{ transform: 'scaleY(-1)' }} alt="" />
+      {/* bg.png 已移除 */}
     </div>
   );
 });
