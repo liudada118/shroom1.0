@@ -455,7 +455,7 @@ class Aside extends React.Component {
                     : this.props.matrixName != 'bed40' ?
                 <div className="asideContent firstAside">
                     <h2 className="asideTitle">{isGlove ? 'Index Finger Angle' : 'Pressure Data'}</h2>
-                    <span className='pressData'>{isGlove ? (this.state.indexAngle || 0) : Number(this.state.totalPres).toFixed(0)}</span> <span style={{ color: '#999' }}></span>
+                    <span className='pressData'>{isGlove ? `${this.state.indexAngle || 0}°` : Number(this.state.totalPres).toFixed(0)}</span> <span style={{ color: '#999' }}>{isGlove ? '' : ''}</span>
 
                     {this.props.matrixName != 'foot' ? <>
                         <div className='pressTitle standardColor'>{isGlove ? 'Bending Angle' : this.props.i18n.t('allPress')}</div>
@@ -470,7 +470,7 @@ class Aside extends React.Component {
                                         </div>
                                         <div className='dataIteminfo'>
                                             <div className='standardColor'>{a.eng}</div>
-                                            <div>{index == 0 ? Number(this.state[arr[index]]).toFixed(2) : Number(this.state[arr[index]]).toFixed(0)} <span style={{ color: '#999' }}></span></div>
+                                            <div>{index == 0 ? Number(this.state[arr[index]]).toFixed(2) : Number(this.state[arr[index]]).toFixed(0)} <span style={{ color: '#999' }}>{isGlove ? '°' : ''}</span></div>
                                         </div>
                                     </div>
                                 )
