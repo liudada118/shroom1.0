@@ -610,9 +610,8 @@ const Canvas = React.forwardRef((props, refs) => {
     let k = 0,
       l = 0;
     let dataArr = []
-    // 外层改为 iy（行），内层改为 ix（列），与 NumThreeColor1024 排布一致
-    for (let iy = 0; iy < AMOUNTY; iy++) {
-      for (let ix = 0; ix < AMOUNTX; ix++) {
+    for (let ix = 0; ix < AMOUNTX; ix++) {
+      for (let iy = 0; iy < AMOUNTY; iy++) {
         const value = bigArrg[l] * 10;
         //柔化处理smooth
         smoothBig[l] = smoothBig[l] + (value - smoothBig[l] + 0.5) / valuel1;
