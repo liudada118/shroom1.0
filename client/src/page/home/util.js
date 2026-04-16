@@ -1683,15 +1683,10 @@ export const sitTypeEvent = {
     }
 
     if (that.state.numMatrixFlag == "normal") {
-      // 手套模式：不调用 sitData（wsPointData 只有5个弯折角度，会破坏 1024点渲染）
-      // 只通过 changeData 更新侧边栏：大数字显示食指弯曲角度，其他数据由 sitRenew 自然计算
-      if (wsPointData && wsPointData.length > 0) {
-        // wsPointData[1] 为食指弯曲角度（索引从0开始，大拇=0、食指=1、中指=2、无名指=3、小指=4）
-        const indexFingerAngle = (wsPointData[1] == null || isNaN(wsPointData[1])) ? 0 : Number(wsPointData[1]);
-        that.data.current?.changeData({
-          indexAngle: indexFingerAngle.toFixed(2),
-        });
-      }
+      that.com.current?.sitData({
+        wsPointData: wsPointData ? wsPointData : [],
+        local: that.state.local
+      });
     } else if (that.state.numMatrixFlag == "heatmap") {
       that.com.current?.bthClickHandle(wsPointData);
     }
@@ -1700,7 +1695,7 @@ export const sitTypeEvent = {
       if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
         let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
         if (!arr.some(v => Math.abs(v) > 1)) {
-          that.com.current?.handL.changeHandAngle(arr)
+          that.com.current?.changeHandAngle(arr)
         }
       }
       if (fingerArr && fingerArr.length) {
@@ -1721,7 +1716,7 @@ export const sitTypeEvent = {
           const value = (numberValue) < 0 ? 0 : (numberValue) >= 1 ? 1 : (numberValue)
           newArr[i] = newArr[i] + (value - newArr[i]) / 3
         }
-        that.com.current?.handL.calibration(newArr)
+        that.com.current?.calibration(newArr)
       }
     }
   }, hand0507: ({ that, wsPointData, local, rotate, fingerArr }) => {
@@ -4611,14 +4606,10 @@ export const backTypeEvent = {
     }
 
     if (that.state.numMatrixFlag == "normal") {
-      // 手套回放模式：不调用 sitData（wsPointData 只有5个弯折角度，会破坏 1024点渲染）
-      // 只通过 changeData 更新侧边栏食指弯曲角度，其他数据由 sitRenew 自然计算
-      if (wsPointData && wsPointData.length > 0) {
-        const indexFingerAngle = (wsPointData[1] == null || isNaN(wsPointData[1])) ? 0 : Number(wsPointData[1]);
-        that.data.current?.changeData({
-          indexAngle: indexFingerAngle.toFixed(2),
-        });
-      }
+      that.com.current?.sitData({
+        wsPointData: wsPointData ? wsPointData : [],
+        local: that.state.local
+      });
     } else if (that.state.numMatrixFlag == "heatmap") {
       that.com.current?.bthClickHandle(wsPointData);
     }
@@ -4627,7 +4618,7 @@ export const backTypeEvent = {
       if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
         let arr = [-rotate[0], rotate[1], rotate[2], rotate[3]]
         if (!arr.some(v => Math.abs(v) > 1)) {
-          that.com.current?.handL.changeHandAngle(arr)
+          that.com.current?.changeHandAngle(arr)
         }
       }
       if (fingerArr && fingerArr.length) {
@@ -4648,7 +4639,7 @@ export const backTypeEvent = {
           const value = (numberValue) < 0 ? 0 : (numberValue) >= 1 ? 1 : (numberValue)
           newArr[i] = newArr[i] + (value - newArr[i]) / 3
         }
-        that.com.current?.handL.calibration(newArr)
+        that.com.current?.calibration(newArr)
       }
     }
   }, hand0507: ({ that, jsonObject, local, rotate, fingerArr }) => {

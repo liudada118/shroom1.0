@@ -1878,13 +1878,6 @@ class Home extends React.Component {
               } else if (that.state.numMatrixFlag == "heatmap") {
                 that.com.current?.bthClickHandle(wsPointData);
               }
-               // 手套回放时只更新食指弯曲角度，其他数据由 sitRenew 自然计算
-              if ((this.state.matrixName === 'hand0205' || this.state.matrixName === 'handGlove115200') && wsPointData && wsPointData.length > 0) {
-                const indexFingerAngle = (wsPointData[1] == null || isNaN(wsPointData[1])) ? 0 : Number(wsPointData[1]);
-                this.data.current?.changeData({
-                  indexAngle: indexFingerAngle.toFixed(2),
-                });
-              }
               if (!that.state.calibration) {
                 //  z 
                 if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
@@ -2013,13 +2006,6 @@ class Home extends React.Component {
 
               } else if (that.state.numMatrixFlag == "heatmap") {
                 that.com.current?.bthClickHandle(wsPointData);
-              }
-               // 手套回放时只更新食指弯曲角度，其他数据由 sitRenew 自然计算
-              if ((this.state.matrixName === 'hand0205' || this.state.matrixName === 'handGlove115200') && wsPointData && wsPointData.length > 0) {
-                const indexFingerAngle = (wsPointData[1] == null || isNaN(wsPointData[1])) ? 0 : Number(wsPointData[1]);
-                this.data.current?.changeData({
-                  indexAngle: indexFingerAngle.toFixed(2),
-                });
               }
               if (!that.state.calibration) {
                 //  z 
