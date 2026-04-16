@@ -138,148 +138,41 @@ function createCircle(size, value) {
     return circle
 }
 
-function draw(context, data) {
-    // console.log(options)
-    let circle = createCircle(options.size)
+function draw(context, data, canvas, options) {
+    let circle = createCircle(options.size, data.value)
     let circleHalfWidth = circle.width / 2
     let circleHalfHeight = circle.height / 2
-
     // 按透明度分类
     let dataOrderByAlpha = {}
-    data.forEach((item) => {
+    data.forEach((item, index) => {
         let alpha = Math.min(1, item.value / options.max).toFixed(2)
         dataOrderByAlpha[alpha] = dataOrderByAlpha[alpha] || []
         dataOrderByAlpha[alpha].push(item)
     })
-
     // 绘制不同透明度的圆形
     for (let i in dataOrderByAlpha) {
-        if (isNaN(Number(i))) continue;
+        if (isNaN(i)) continue;
         let _data = dataOrderByAlpha[i]
         context.beginPath()
         context.globalAlpha = i
-        _data.forEach((item) => {
+        _data.forEach(item => {
             context.drawImage(circle, item.x - circleHalfWidth, item.y - circleHalfHeight)
         })
     }
     // 圆形着色
-    let intensity = new (Intensity)()
+    let intensity = new Intensity(options)
+    // 返回整张画布的像素信息 rgba组个成的点像素
     let colored = context.getImageData(0, 0, context.canvas.width, context.canvas.height)
-    const heatmap = colorize(colored.data, intensity.getImageData())
-
-    function addEdgeBorder(coloredData, intensityData, width, height, threshold = 1) {
-        const newData = new Uint8ClampedArray(coloredData.length);
-
-        console.log(intensityData)
-
-        for (let y = 1; y < height - 1; y++) {
-            for (let x = 1; x < width - 1; x++) {
-                const idx = (y * width + x) * 4;
-                const v = intensityData[idx]; // 灰度值（0-255）
-
-                // // 取邻域值
-                const left = intensityData[(y * width + (x - 1)) * 4];
-                const right = intensityData[(y * width + (x + 1)) * 4];
-                const up = intensityData[((y - 1) * width + x) * 4];
-                const down = intensityData[((y + 1) * width + x) * 4];
-
-                // const v = intensityData[idx + 1] + intensityData[idx + 2] + intensityData[idx + 3]
-
-                // const left = intensityData[(y * width + (x - 1)) * 4 + 1] + intensityData[(y * width + (x - 1)) * 4 + 2] + intensityData[(y * width + (x - 1)) * 4 + 3];
-                // const right = intensityData[(y * width + (x + 1)) * 4 + 1] + intensityData[(y * width + (x + 1)) * 4 + 2] + intensityData[(y * width + (x + 1)) * 4 + 3];
-                // const up = intensityData[((y - 1) * width + x) * 4 + 1] + intensityData[((y - 1) * width + x) * 4 + 2] + intensityData[((y - 1) * width + x) * 4 + 3];
-                // const down = intensityData[((y + 1) * width + x) * 4 + 1] + intensityData[((y + 1) * width + x) * 4 + 2] + intensityData[((y + 1) * width + x) * 4 + 3];
-
-                // 判断是否是边缘
-                const diff =
-                    Math.abs(v - left) +
-                    // Math.abs(v - right)
-                    +
-                    // Math.abs(v - up) +
-                    Math.abs(v - down);
-
-                // const diff = Math.abs(v - heatMap[y * width + x + 1]) + Math.abs(v - heatMap[(y + 1) * width + x]);
-
-
-                // 37,51,107
-
-                // console.log('diff:', diff);
-                if (diff > threshold) {
-                    // 边缘像素：黑边或指定颜色
-                    newData[idx] = 37;     // R
-                    newData[idx + 1] = 51; // G
-                    newData[idx + 2] = 107; // B
-                    newData[idx + 3] = 255;
-                    // console.log(v, left, right, up, down, diff)
-                } else {
-                    // 非边缘：保留原色
-                    newData[idx] = coloredData[idx];
-                    newData[idx + 1] = coloredData[idx + 1];
-                    newData[idx + 2] = coloredData[idx + 2];
-                    newData[idx + 3] = coloredData[idx + 3];
-                }
-            }
-        }
-
-        return newData;
-    }
-
-    function addEdgeBorderSobel(coloredData, heatMap, width, height, threshold = 1) {
-        const newData = new Uint8ClampedArray(coloredData.length);
-        const gx = [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]];  // Sobel X
-        const gy = [[-1, -2, -1], [0, 0, 0], [1, 2, 1]];  // Sobel Y
-
-        for (let y = 1; y < height - 1; y++) {
-            for (let x = 1; x < width - 1; x++) {
-                let sx = 0, sy = 0;
-
-                // 计算梯度
-                for (let j = -1; j <= 1; j++) {
-                    for (let i = -1; i <= 1; i++) {
-                        const v = heatMap[(y + j) * width + (x + i)];
-                        sx += gx[j + 1][i + 1] * v;
-                        sy += gy[j + 1][i + 1] * v;
-                    }
-                }
-
-                // 计算梯度幅值
-                const mag = Math.sqrt(sx * sx + sy * sy);
-                const idx = (y * width + x) * 4;
-
-                if (mag > threshold) {
-                    newData[idx] = 0;    // 黑色边框
-                    newData[idx + 1] = 0;
-                    newData[idx + 2] = 0;
-                    newData[idx + 3] = 255; // 不透明
-                } else {
-                    newData[idx] = coloredData[idx];
-                    newData[idx + 1] = coloredData[idx + 1];
-                    newData[idx + 2] = coloredData[idx + 2];
-                    newData[idx + 3] = coloredData[idx + 3];
-                }
-            }
-        }
-
-        return newData;
-    }
-
-    let intensityData = intensity.getImageData()
-    console.log(colored.data, intensityData)
-    const edged = addEdgeBorder(colored.data, heatmap, context.canvas.width, context.canvas.height, 0.0001);
+    // 形参 画布的像素数组   , 渐变的像素数组
+    colorize(colored.data, intensity.getImageData(), options)
 
     context.clearRect(0, 0, context.canvas.width, context.canvas.height)
-    // context.fillStyle = '#666'
-    // context.fillRect(0, 0, context.canvas.width, context.canvas.height)
-    // console.log(colored)
     context.fillStyle = '#666'
     context.fillRect(0, 0, context.canvas.width, context.canvas.height)
-
-
     context.clearRect(0, 0, context.canvas.width, context.canvas.height)
-    // context.putImageData(colored, 0, 0)
-    context.putImageData(new ImageData(edged, context.canvas.width, context.canvas.height), 0, 0);
-
-    // applySharpen(context, canvas.width, canvas.height);
+    // 将所有像素渲染
+    context.putImageData(colored, 0, 0)
+    applySharpen(context, canvas.width, canvas.height);
 }
 function applySharpen(context, width, height) {
     // 获取原始图像数据
@@ -334,88 +227,36 @@ function applySharpen(context, width, height) {
 }
 
 
-function colorize(pixels, gradient) {
-
-
-
-    var max = options.max;
-    var min = options.min;
-    var diff = max - min;
+function colorize(pixels, gradient, options) {
+    // console.log(gradient)
+    const max = options.max;
+    const min = options.min;
+    const diff = max - min;
     var range = options.range || null;
-
-    var jMin = 0;
+    var jMin = options.fliter ? options.fliter : 100;
     var jMax = 1024;
     if (range && range.length === 2) {
         jMin = (range[0] - min) / diff * 1024;
     }
-
     if (range && range.length === 2) {
         jMax = (range[1] - min) / diff * 1024;
     }
-
-    var maxOpacity = options.maxOpacity || 1;
+    const maxOpacity = options.maxOpacity || 1;
     var range = options.range;
-    console.log(gradient)
-    // 通过透明度 来选择渐变颜色
+    // console.log(pixels.length)
     for (var i = 3, len = pixels.length, j; i < len; i += 4) {
-        // console.log(pixels[i])
-        const mul = Math.floor(255 / 8)
-        const value = (pixels[i] % mul) / mul
-        // console.log(pixels[i])
-        // if (value < 0.15 || value > 0.25) {
-        // j = pixels[i] * 4
-        // } else {
-        j = Math.floor((pixels[i] / mul)) * mul * 4; // get gradient color from opacity value
-        // }
-
-        // if([-1, -2, -3, 35, 34, 33, 71, 70, 69, 107, 106, 105, 143, 142, 141, 179, 178, 177, 215, 214, 213, 251, 250, 249].includes(pixels[i])){
-        //     j = 0
-        // }
-        // console.log(pixels[i] , j)
-        // for (let i = 0; i < 7; i++) {
-        //     // if (pixels[i] > i * 36 - 5 &&  pixels[i] < i * 36 + 5) {
-        //     //   pixels[i] = 0  
-        //     console.log(pixels[i] ,i * mul - 30, i * mul)
-        //     if (pixels[i] > i * mul - 30 && pixels[i] < i * mul) {
-        //         console.log('tr')
-        //         // pixels[i - 3] = 255;
-        //         // pixels[i - 2] = 0;
-        //         // pixels[i - 1] = 0;
-        //         j = 0
-        //     }
-        // }
-
-        if (pixels[i] / 256 > maxOpacity) {
-            pixels[i] = 256 * maxOpacity;
+        j = pixels[i] * 4; // get gradient color from opacity value
+        if (pixels[i] / 256 < 1) {
+            pixels[i] = 256 * 1;
         }
-
         if (j && j >= jMin && j <= jMax) {
             pixels[i - 3] = gradient[j];
             pixels[i - 2] = gradient[j + 1];
             pixels[i - 1] = gradient[j + 2];
-
-            // pixels[i - 3] = 0;
-            // pixels[i - 2] = 0;
-            // pixels[i - 1] = 0;
-            pixels[i] = 255
         } else {
             pixels[i] = 0;
         }
-
-        // for (let i = 0; i < 7; i++) {
-        //     // if (pixels[i] > i * 36 - 5 &&  pixels[i] < i * 36 + 5) {
-        //     //   pixels[i] = 0  
-        //     if (pixels[i] > i * mul - 5 && pixels[i] <= i * mul) {
-        //         pixels[i - 3] = 255;
-        //         pixels[i - 2] = 0;
-        //         pixels[i - 1] = 0;
-        //     }
-        // }
-
-        // pixels[i] = 255
-
     }
-    return pixels
 }
 
 export function bthClickHandle(arr) {
