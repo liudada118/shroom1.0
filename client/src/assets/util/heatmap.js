@@ -1,102 +1,97 @@
 
 
-
-
-
-export let arr =  [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.0, 6.0, 2.0, 0.0, 6.0, 3.0, 4.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 5.0, 0.0, 0.0, 0.0, 3.0, 4.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 6.0, 4.0, 2.0, 0.0, 3.0, 12.0, 6.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 7.0, 7.0, 4.0, 0.0, 0.0, 8.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 11.0, 7.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.0, 7.0, 4.0, 1.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 6.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 22.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 6.0, 8.0, 2.0, 1.0, 1.0, 2.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 8.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 6.0, 0.0, 0.0, 0.0, 8.0, 8.0, 13.0, 8.0, 4.0, 1.0, 3.0, 2.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4.0, 6.0, 5.0, 3.0, 1.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 17.0, 0.0, 0.0, 10.0, 9.0, 9.0, 9.0, 9.0, 5.0, 2.0, 3.0, 3.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 9.0, 6.0, 4.0, 3.0, 7.0, 9.0, 3.0, 4.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 14.0, 0.0, 2.0, 11.0, 12.0, 14.0, 13.0, 10.0, 7.0, 4.0, 3.0, 3.0, 4.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.0, 7.0, 4.0, 4.0, 7.0, 7.0, 8.0, 7.0, 9.0, 8.0, 0.0, 0.0, 4.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 8.0, 16.0, 12.0, 11.0, 12.0, 12.0, 8.0, 4.0, 3.0, 3.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.0, 9.0, 6.0, 4.0, 5.0, 7.0, 8.0, 9.0, 9.0, 9.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 8.0, 14.0, 15.0, 17.0, 11.0, 15.0, 6.0, 4.0, 1.0, 3.0, 3.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4.0, 6.0, 4.0, 4.0, 6.0, 7.0, 14.0, 11.0, 10.0, 13.0, 14.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 8.0, 11.0, 20.0, 17.0, 12.0, 13.0, 10.0, 7.0, 5.0, 3.0, 3.0, 3.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 5.0, 4.0, 5.0, 4.0, 7.0, 8.0, 9.0, 11.0, 13.0, 15.0, 10.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 30.0, 26.0, 22.0, 12.0, 12.0, 10.0, 8.0, 5.0, 2.0, 4.0, 2.0, 2.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 3.0, 5.0, 5.0, 5.0, 8.0, 6.0, 10.0, 10.0, 10.0, 17.0, 13.0, 9.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 49.0, 39.0, 24.0, 12.0, 11.0, 10.0, 9.0, 5.0, 4.0, 2.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.0, 4.0, 4.0, 3.0, 5.0, 6.0, 9.0, 11.0, 11.0, 22.0, 27.0, 29.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 10.0, 37.0, 25.0, 10.0, 9.0, 7.0, 5.0, 5.0, 3.0, 4.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.0, 5.0, 3.0, 3.0, 6.0, 6.0, 6.0, 12.0, 11.0, 23.0, 46.0, 45.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 23.0, 16.0, 13.0, 9.0, 4.0, 5.0, 3.0, 2.0, 2.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 5.0, 7.0, 7.0, 9.0, 11.0, 22.0, 43.0, 27.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 6.0, 15.0, 13.0, 10.0, 4.0, 3.0, 4.0, 5.0, 4.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 5.0, 9.0, 9.0, 13.0, 19.0, 16.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 8.0, 10.0, 7.0, 8.0, 6.0, 6.0, 5.0, 5.0, 5.0, 4.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 5.0, 5.0, 7.0, 10.0, 14.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 8.0, 7.0, 7.0, 8.0, 7.0, 5.0, 6.0, 10.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 3.0, 8.0, 6.0, 7.0, 12.0, 11.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 10.0, 12.0, 11.0, 7.0, 12.0, 7.0, 8.0, 4.0, 6.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 6.0, 6.0, 9.0, 9.0, 14.0, 9.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4.0, 11.0, 10.0, 10.0, 8.0, 8.0, 7.0, 6.0, 3.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 2.0, 9.0, 10.0, 9.0, 14.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 6.0, 12.0, 9.0, 8.0, 6.0, 5.0, 8.0, 5.0, 5.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4.0, 10.0, 5.0, 7.0, 10.0, 6.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 6.0, 9.0, 9.0, 6.0, 6.0, 4.0, 4.0, 3.0, 3.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 9.0, 11.0, 8.0, 13.0, 8.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 8.0, 6.0, 9.0, 5.0, 5.0, 4.0, 6.0, 3.0, 4.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4.0, 9.0, 10.0, 7.0, 10.0, 9.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 6.0, 7.0, 8.0, 5.0, 2.0, 4.0, 5.0, 2.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4.0, 8.0, 11.0, 12.0, 9.0, 8.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.0, 7.0, 9.0, 9.0, 4.0, 5.0, 5.0, 4.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.0, 9.0, 7.0, 14.0, 11.0, 7.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 7.0, 10.0, 5.0, 6.0, 5.0, 8.0, 10.0, 7.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 4.0, 4.0, 6.0, 7.0, 9.0, 7.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.0, 11.0, 8.0, 9.0, 10.0, 11.0, 14.0, 11.0, 9.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 4.0, 14.0, 14.0, 5.0, 9.0, 8.0, 8.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 9.0, 11.0, 10.0, 13.0, 12.0, 12.0, 13.0, 14.0, 4.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 7.0, 24.0, 20.0, 13.0, 12.0, 10.0, 11.0, 9.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 8.0, 9.0, 11.0, 13.0, 13.0, 20.0, 24.0, 22.0, 13.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.0, 19.0, 21.0, 16.0, 11.0, 12.0, 14.0, 12.0, 7.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.0, 12.0, 13.0, 13.0, 12.0, 18.0, 22.0, 33.0, 23.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 9.0, 21.0, 23.0, 26.0, 9.0, 11.0, 9.0, 13.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 12.0, 15.0, 12.0, 16.0, 19.0, 20.0, 23.0, 41.0, 16.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 39.0, 16.0, 22.0, 15.0, 12.0, 10.0, 10.0, 13.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 8.0, 11.0, 14.0, 13.0, 18.0, 24.0, 28.0, 28.0, 21.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 44.0, 34.0, 17.0, 21.0, 13.0, 12.0, 11.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 10.0, 11.0, 14.0, 15.0, 20.0, 22.0, 38.0, 6.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 19.0, 44.0, 24.0, 15.0, 17.0, 15.0, 15.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 9.0, 14.0, 22.0, 20.0, 24.0, 32.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 7.0, 29.0, 30.0, 18.0, 15.0, 11.0, 4.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 10.0, 20.0, 19.0, 9.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.0, 17.0, 10.0, 6.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 3.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 1.0, 1.0, 0.0, 1.0, 3.0, 0.0]
-    
-let maxNum = 1, sizeNum = 80,length = 0
-
-
-var data = []
-var options = {
+const options = {
     min: 0,
-    max: 12000,
-    size: 12
+    max: 13000,
+    size: 10
 }
-
-const filterValue = 200
-
-
-var isShadow = true
-var canvas = document.createElement("canvas");
-// document.body.appendChild(canvas)
-// const width = 10, height = 16
-const width = 64, height = 64
-canvas.width = width * 64
-canvas.height = height * 64
+let isShadow = true
 
 
-options.size = canvas.width / 22
 
 
-function jet(min, max, x) {
-    let red, g, blue;
-    let dv;
-    red = 1.0;
-    g = 1.0;
-    blue = 1.0;
-    if (x < min) {
-        x = min;
-    }
-    if (x > max) {
-        x = max;
-    }
-    dv = max - min;
-    if (x < min + 0.25 * dv) {
-        // red = 0;
-        // g = 0;
-        // blue = 0;
-
-        red = 0;
-        g = (4 * (x - min)) / dv;
-    } else if (x < min + 0.5 * dv) {
-        red = 0;
-        blue = 1 + (4 * (min + 0.25 * dv - x)) / dv;
-    } else if (x < min + 0.75 * dv) {
-        red = (4 * (x - min - 0.5 * dv)) / dv;
-        blue = 0;
-    } else {
-        g = 1 + (4 * (min + 0.75 * dv - x)) / dv;
-        blue = 0;
-    }
-    var rgba = new Array();
-    rgba[0] = 255 * red;
-    rgba[1] = 255 * g;
-    rgba[2] = 255 * blue;
-    rgba[3] = 1;
-    return rgba;
-}
-
-// min <= x <= max
 function getRandomIntInclusive(min, max) {
     min = Math.ceil(min);
     max = Math.floor(max);
     return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+function addSide(arr, width, height, wnum, hnum, sideNum) {
+    const narr = new Array(height);
+    const res = [];
+    for (let i = 0; i < height; i++) {
+        narr[i] = [];
+
+        for (let j = 0; j < width; j++) {
+            if (j == 0) {
+                narr[i].push(
+                    ...new Array(wnum).fill(sideNum >= 0 ? sideNum : 1),
+                    arr[i * width + j]
+                );
+            } else if (j == width - 1) {
+                narr[i].push(
+                    arr[i * width + j],
+                    ...new Array(wnum).fill(sideNum >= 0 ? sideNum : 1)
+                );
+            } else {
+                narr[i].push(arr[i * width + j]);
+            }
+        }
+    }
+    for (let i = 0; i < height; i++) {
+        res.push(...narr[i]);
+    }
+
+    return [
+        ...new Array(hnum * (width + 2 * wnum)).fill(sideNum >= 0 ? sideNum : 1),
+        ...res,
+        ...new Array(hnum * (width + 2 * wnum)).fill(sideNum >= 0 ? sideNum : 1),
+    ];
+}
 
 
-// 生成随机数据
-function generateData(arr) {
- 
+function interpSmall(smallMat, width, height, interp1, interp2) {
 
-
-   let resData = arr
-
-
-    const data = []
-    const count = 32
-    console.log()
-    const max = Math.max(...resData)
-    options.max = max * maxNum
-    options.size = sizeNum
+    const bigMat = new Array((width * interp1) * (height * interp2)).fill(0)
     for (let i = 0; i < height; i++) {
         for (let j = 0; j < width; j++) {
+            bigMat[(width * interp1) * i * interp2 + (j * interp1)] = smallMat[i * width + j] * 10
+            bigMat[(width * interp1) * (i * interp2 + 1) + (j * interp1)] = smallMat[i * width + j] * 10
+        }
+    }
+
+    // console.log(bigMat.length)
+    return bigMat
+}
+
+
+
+
+function generateData(arr, canvas, width, height, interp1, interp2, order) {
+    // const resData = [0, 0, 1, 21, 9, 1, 0, 0, 0, 0, 0, 0, 0, 6, 5, 0, 0, 0, 0, 0, 0, 3, 28, 27, 37, 50, 56, 43, 34, 11, 1, 21, 45, 39, 37, 37, 9, 1, 0, 0, 3, 37, 6, 40, 48, 33, 3, 0, 0, 0, 2, 1, 1, 21, 33, 24, 2, 0, 0, 0, 0, 0, 1, 13, 26, 18, 4, 0, 0, 0, 0, 2, 16, 37, 34, 69, 51, 4, 1, 0, 1, 2, 15, 35, 52, 56, 39, 5, 0, 0, 0, 1, 14, 23, 4, 6, 30, 31, 1, 0, 0, 1, 1, 14, 1, 0, 5, 20, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 4, 0, 0, 0, 1, 34, 4, 0, 0, 2, 30, 3, 1, 0, 1, 19, 29, 0, 0, 1, 14, 0, 0, 0, 0, 3, 32, 1, 2, 3, 5, 1, 1, 1, 1, 2, 6]
+    let resData
+    let resArr = arr
+    resArr = addSide(
+        resArr,
+        height,
+        width,
+        order,
+        order,
+        0
+    );
+    const interpArr = interpSmall(resArr, height + order * 2, width + order * 2, interp1, interp2)
+
+    resData = interpArr
+    const count = 32
+    const data = []
+    // const width = 36, height = 36 * 2
+    const dataWidth = (width + order * 2) * interp1, dataHeight = (height + + order * 2) * interp2
+    for (let i = 0; i < dataHeight; i++) {
+        for (let j = 0; j < dataWidth; j++) {
             let obj = {}
-            obj.x = i * canvas.width / width
-            obj.y = j * canvas.height / height
-            obj.value = resData[i * width + j]
+            obj.y = i * canvas.width / dataWidth
+            obj.x = j * canvas.height / dataHeight
+            obj.value = resData[i * dataWidth + j]
             data.push(obj)
         }
 
@@ -106,26 +101,29 @@ function generateData(arr) {
 
 
 
-
-
 // 构造一个离屏canvas
 function Canvas(width, height) {
-    let canvas = document.createElement('canvas')
+    const canvas = document.createElement('canvas')
     canvas.width = width
     canvas.height = height
     return canvas
 }
 
 // 画圆
-function createCircle(size, value) {
-    let shadowBlur = size / 2
-    let r2 = size + shadowBlur
-    let offsetDistance = 10000
+function createCircle(size) {
+    const shadowBlur = size / 2
+    const r2 = size + shadowBlur
+    // let offsetDistance = 10000
+    const offsetDistance = 10000
+    // let newCanvas:UserConstructor = Canvas
 
-    let circle = new Canvas(r2 * 2, r2 * 2)
-    let context = circle.getContext('2d')
+    const circle = new (Canvas)(r2 * 2, r2 * 2)
+    const context = circle.getContext('2d')
 
-    // 模糊效果程度
+
+
+
+    // if (isShadow) context.shadowBlur = shadowBlur;
     if (isShadow) context.shadowBlur = shadowBlur;
     context.shadowColor = 'black'
     context.shadowOffsetX = context.shadowOffsetY = offsetDistance
@@ -133,7 +131,6 @@ function createCircle(size, value) {
     context.beginPath()
     context.arc(r2 - offsetDistance, r2 - offsetDistance, size, 0, Math.PI * 2, true)
     context.closePath()
-    context.fillStyle = `rgb(${jet(value)})`
     context.fill()
     return circle
 }
@@ -142,6 +139,7 @@ function draw(context, data, canvas, options) {
     let circle = createCircle(options.size, data.value)
     let circleHalfWidth = circle.width / 2
     let circleHalfHeight = circle.height / 2
+
     // 按透明度分类
     let dataOrderByAlpha = {}
     data.forEach((item, index) => {
@@ -149,6 +147,8 @@ function draw(context, data, canvas, options) {
         dataOrderByAlpha[alpha] = dataOrderByAlpha[alpha] || []
         dataOrderByAlpha[alpha].push(item)
     })
+
+
     // 绘制不同透明度的圆形
     for (let i in dataOrderByAlpha) {
         if (isNaN(i)) continue;
@@ -156,32 +156,41 @@ function draw(context, data, canvas, options) {
         context.beginPath()
         context.globalAlpha = i
         _data.forEach(item => {
+            // 把所有的圆都画再画布上
             context.drawImage(circle, item.x - circleHalfWidth, item.y - circleHalfHeight)
         })
     }
     // 圆形着色
     let intensity = new Intensity(options)
-    // 返回整张画布的像素信息 rgba组个成的点像素
+    // 返回整张画布的像素信息 rgba组个成的点像素 
     let colored = context.getImageData(0, 0, context.canvas.width, context.canvas.height)
-    // 形参 画布的像素数组   , 渐变的像素数组
+
+    // 形参 画布的像素数组   , 渐变的像素数组 
     colorize(colored.data, intensity.getImageData(), options)
+
 
     context.clearRect(0, 0, context.canvas.width, context.canvas.height)
     context.fillStyle = '#666'
     context.fillRect(0, 0, context.canvas.width, context.canvas.height)
+
+
     context.clearRect(0, 0, context.canvas.width, context.canvas.height)
+
     // 将所有像素渲染
     context.putImageData(colored, 0, 0)
+
     applySharpen(context, canvas.width, canvas.height);
 }
+
+
 function applySharpen(context, width, height) {
     // 获取原始图像数据
-    let originalImageData = context.getImageData(0, 0, width, height);
-    let originalPixels = originalImageData.data;
+    const originalImageData = context.getImageData(0, 0, width, height);
+    const originalPixels = originalImageData.data;
 
     // 创建一个用于存放处理后的图像数据的 ImageData 对象
-    let outputImageData = context.createImageData(width, height);
-    let outputPixels = outputImageData.data;
+    const outputImageData = context.createImageData(width, height);
+    const outputPixels = outputImageData.data;
 
     const kernel = [
         0, -1, 0,
@@ -194,19 +203,19 @@ function applySharpen(context, width, height) {
 
     for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
-            let r = 0, g = 0, b = 0;
+            let r = 0; let g = 0; let b = 0;
 
             for (let ky = 0; ky < kernelSize; ky++) {
                 for (let kx = 0; kx < kernelSize; kx++) {
                     // 考虑边缘像素
-                    let pixelY = y + ky - halfKernelSize;
-                    let pixelX = x + kx - halfKernelSize;
+                    const pixelY = y + ky - halfKernelSize;
+                    const pixelX = x + kx - halfKernelSize;
 
                     if (pixelY < 0 || pixelY >= height || pixelX < 0 || pixelX >= width) continue;
 
                     // 卷积计算
-                    let offset = (pixelY * width + pixelX) * 4;
-                    let weight = kernel[ky * kernelSize + kx];
+                    const offset = (pixelY * width + pixelX) * 4;
+                    const weight = kernel[ky * kernelSize + kx];
 
                     r += originalPixels[offset] * weight;
                     g += originalPixels[offset + 1] * weight;
@@ -214,7 +223,7 @@ function applySharpen(context, width, height) {
                 }
             }
 
-            let destOffset = (y * width + x) * 4;
+            const destOffset = (y * width + x) * 4;
             outputPixels[destOffset] = r;
             outputPixels[destOffset + 1] = g;
             outputPixels[destOffset + 2] = b;
@@ -228,27 +237,37 @@ function applySharpen(context, width, height) {
 
 
 function colorize(pixels, gradient, options) {
+
     // console.log(gradient)
+
     const max = options.max;
     const min = options.min;
     const diff = max - min;
     var range = options.range || null;
+
     var jMin = options.fliter ? options.fliter : 100;
     var jMax = 1024;
     if (range && range.length === 2) {
         jMin = (range[0] - min) / diff * 1024;
     }
+
     if (range && range.length === 2) {
         jMax = (range[1] - min) / diff * 1024;
     }
+
     const maxOpacity = options.maxOpacity || 1;
     var range = options.range;
     // console.log(pixels.length)
     for (var i = 3, len = pixels.length, j; i < len; i += 4) {
         j = pixels[i] * 4; // get gradient color from opacity value
+
+        // if (pixels[i] / 256 > maxOpacity) {
+        //     pixels[i] = 256 * maxOpacity;
+        // }
         if (pixels[i] / 256 < 1) {
             pixels[i] = 256 * 1;
         }
+        // const value = jet()
         if (j && j >= jMin && j <= jMax) {
             pixels[i - 3] = gradient[j];
             pixels[i - 2] = gradient[j + 1];
@@ -256,55 +275,61 @@ function colorize(pixels, gradient, options) {
         } else {
             pixels[i] = 0;
         }
+        // pixels[i] = 256 *0
     }
 }
 
-export function bthClickHandle(arr) {
-    const data = generateData(arr)
+
+function bthClickHandle(arr, canvas, width, height, interp1, interp2, order, options) {
+
+    const data = generateData(arr, canvas, width, height, interp1, interp2, order, options)
+
     let context = canvas.getContext('2d')
-
+    // let context2 = canvas2.getContext('2d')
     context.clearRect(0, 0, canvas.width, canvas.height)
-
+    // context2.clearRect(0, 0, canvas2.width, canvas2.height)
     isShadow = true
+    context.globalCompositeOperation = 'lighter';
+    // context2.drawImage(img, 0, 0, canvas2.width, canvas2.height);
+    draw(context, data, canvas, options)
+    isShadow = false
 
-    // canvas.width = width * 2;   // 分辨率加倍
-    // canvas.height = height * 2;
-
-    draw(context, data)
-    return canvas
-    // isShadow = false
     // draw(context2, data)
 }
 
+function Intensity(options) {
 
-export function Intensity(options) {
 
     options = options || {};
     this.gradient = options.gradient || {
-        // 0: "#000000",
-        // 0.14: "#0000FF",
-        // 0.28: " #0066FF",
-        // 0.42: "#00FF00",
-        // 0.56: "#FFFF00",
-        // 0.70: "#FF6600",
-        // 0.84: "#FF0000",
-        // 1: "#FF1E42",
-        1.00: '#B82172',
-        0.875: '#DF392A',
-        0.75: '#E25823',
-        0.625: '#EFA422',
-        0.5: '#9DB737',
-        0.375: '#4C806C',
-        0.25: '#25336B',
-        0.125: '#25336B',
-        0.00: '#000000'
+
+
+        // // 士凯
+        0.00: '#ffffff',
+        0.01: "#4192fe",
+        0.08: "#49aaff",
+        0.17: "#51c6ff",
+        0.25: "#4ddff5",
+        0.33: "#34f6db",
+        0.42: "#6cffb9",
+        0.50: "#c5ff8b",
+        0.58: "#fdf655",
+        0.67: "#ffda41",
+        0.75: "#ffb54a",
+        0.83: "#ff9555",
+        0.92: "#ff7665",
+        1.00: "#ff0000"
+
+        // 0.00: "#ffffff",
+       
+        // 1.00: "#ffffff"
+
+
     };
     this.maxSize = options.maxSize || 35;
     this.minSize = options.minSize || 0;
     this.max = options.max || 100;
     this.min = options.min || 0;
-
-    // 生成渐变
     this.initPalette();
 }
 
@@ -324,9 +349,28 @@ Intensity.prototype.setMinSize = function (minSize) {
     this.minSize = minSize || 0;
 }
 
+// Intensity.prototype.initPalette = function () {
+
+//     var gradient = this.gradient;
+
+//     var canvas = new (Canvas)(256, 1);
+
+//     var paletteCtx = this.paletteCtx = canvasRef.current.getContext('2d', { willReadFrequently: true });
+
+//     var lineGradient = paletteCtx.createLinearGradient(0, 0, 256, 1);
+
+//     for (var key in gradient) {
+//         lineGradient.addColorStop(parseFloat(key), gradient[key]);
+//     }
+
+//     paletteCtx.fillStyle = lineGradient;
+//     paletteCtx.fillRect(0, 0, 256, 1);
+
+// }
+
 Intensity.prototype.initPalette = function () {
 
-    var gradient = this.gradient;
+    const gradient = this.gradient;
 
     var canvas = new Canvas(256, 1);
 
@@ -346,25 +390,18 @@ Intensity.prototype.initPalette = function () {
 
 }
 
-Intensity.prototype.getColor = function (value) {
 
-    var imageData = this.getImageData(value);
-
-    return "rgba(" + imageData[0] + ", " + imageData[1] + ", " + imageData[2] + ", " + imageData[3] / 256 + ")";
-
-}
 
 Intensity.prototype.getImageData = function (value) {
 
-    // 获取渐变的像素数组
-    var imageData = this.paletteCtx.getImageData(0, 0, 256, 1).data;
+    const imageData = this.paletteCtx.getImageData(0, 0, 256, 1).data;
 
     if (value === undefined) {
         return imageData;
     }
 
-    var max = this.max;
-    var min = this.min;
+    const max = this.max;
+    const min = this.min;
 
     if (value > max) {
         value = max;
@@ -374,24 +411,24 @@ Intensity.prototype.getImageData = function (value) {
         value = min;
     }
 
-    var index = Math.floor((value - min) / (max - min) * (256 - 1));
+    const index = Math.floor((value - min) / (max - min) * (256 - 1));
 
     return [imageData[index], imageData[index + 1], imageData[index + 2], imageData[index + 3]];
 }
 
 /**
- * @param Number value 
+ * @param Number value
  * @param Number max of value
  * @param Number max of size
  * @param Object other options
  */
 Intensity.prototype.getSize = function (value) {
 
-    var size = 0;
-    var max = this.max;
-    var min = this.min;
-    var maxSize = this.maxSize;
-    var minSize = this.minSize;
+    let size = 0;
+    const max = this.max;
+    const min = this.min;
+    const maxSize = this.maxSize;
+    const minSize = this.minSize;
 
     if (value > max) {
         value = max;
@@ -407,20 +444,20 @@ Intensity.prototype.getSize = function (value) {
 
 }
 
-Intensity.prototype.getLegend = function (options) {
-    var gradient = this.gradient;
+Intensity.prototype.getLegend = function (options, canvas1) {
+    const gradient = this.gradient;
 
 
-    var width = options.width || 20;
-    var height = options.height || 180;
+    const width = options.width || 20;
+    const height = options.height || 180;
 
-    var canvas = new Canvas(width, height);
+    const canvas = new (Canvas)(width, height);
 
-    var paletteCtx = canvas.getContext('2d');
+    const paletteCtx = canvas1.current.getContext('2d');
 
-    var lineGradient = paletteCtx.createLinearGradient(0, height, 0, 0);
+    const lineGradient = paletteCtx.createLinearGradient(0, height, 0, 0);
 
-    for (var key in gradient) {
+    for (const key in gradient) {
         lineGradient.addColorStop(parseFloat(key), gradient[key]);
     }
 
@@ -430,250 +467,69 @@ Intensity.prototype.getLegend = function (options) {
     return canvas;
 }
 
-function legacyHeatmapAddSide(arr, width, height, wnum, hnum, sideNum) {
-    const narr = new Array(height);
-    const res = [];
-    const fillValue = sideNum >= 0 ? sideNum : 1;
-
-    for (let i = 0; i < height; i++) {
-        narr[i] = [];
-        for (let j = 0; j < width; j++) {
-            if (j === 0) {
-                narr[i].push(...new Array(wnum).fill(fillValue), arr[i * width + j]);
-            } else if (j === width - 1) {
-                narr[i].push(arr[i * width + j], ...new Array(wnum).fill(fillValue));
-            } else {
-                narr[i].push(arr[i * width + j]);
-            }
-        }
-    }
-
-    for (let i = 0; i < height; i++) {
-        res.push(...narr[i]);
-    }
-
-    return [
-        ...new Array(hnum * (width + 2 * wnum)).fill(fillValue),
-        ...res,
-        ...new Array(hnum * (width + 2 * wnum)).fill(fillValue),
-    ];
+const changeOptions = (value) => {
+    options.size = value
 }
 
-function legacyHeatmapInterpSmall(smallMat, width, height, interp1, interp2) {
-    const bigMat = new Array((width * interp1) * (height * interp2)).fill(0);
-    for (let i = 0; i < height; i++) {
-        for (let j = 0; j < width; j++) {
-            const baseIndex = (width * interp1) * i * interp2 + (j * interp1);
-            bigMat[baseIndex] = smallMat[i * width + j] * 10;
-            bigMat[(width * interp1) * (i * interp2 + 1) + (j * interp1)] = smallMat[i * width + j] * 10;
-        }
-    }
-    return bigMat;
-}
 
-function legacyHeatmapGenerateData(arr, canvas, width, height, interp1, interp2, order) {
-    let resArr = arr;
-    resArr = legacyHeatmapAddSide(resArr, height, width, order, order, 0);
-    const interpArr = legacyHeatmapInterpSmall(resArr, height + order * 2, width + order * 2, interp1, interp2);
-    const data = [];
-    const dataWidth = (width + order * 2) * interp1;
-    const dataHeight = (height + order * 2) * interp2;
 
-    for (let i = 0; i < dataHeight; i++) {
-        for (let j = 0; j < dataWidth; j++) {
-            data.push({
-                y: i * canvas.width / dataWidth,
-                x: j * canvas.height / dataHeight,
-                value: interpArr[i * dataWidth + j],
-            });
-        }
-    }
-
-    return data;
-}
-
-function legacyHeatmapCanvas(width, height) {
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    return canvas;
-}
-
-function legacyHeatmapCreateCircle(size) {
-    const shadowBlur = size / 2;
-    const radius = size + shadowBlur;
-    const offsetDistance = 10000;
-    const circle = legacyHeatmapCanvas(radius * 2, radius * 2);
-    const context = circle.getContext("2d");
-
-    if (isShadow) {
-        context.shadowBlur = shadowBlur;
-    }
-    context.shadowColor = "black";
-    context.shadowOffsetX = offsetDistance;
-    context.shadowOffsetY = offsetDistance;
-    context.beginPath();
-    context.arc(radius - offsetDistance, radius - offsetDistance, size, 0, Math.PI * 2, true);
-    context.closePath();
-    context.fill();
-    return circle;
-}
-
-function legacyHeatmapColorize(pixels, gradient, options) {
-    const max = options.max;
-    const min = options.min;
-    const diff = max - min;
-    const range = options.range || null;
-    let jMin = options.fliter ? options.fliter : 100;
-    let jMax = 1024;
-
-    if (range && range.length === 2) {
-        jMin = (range[0] - min) / diff * 1024;
-        jMax = (range[1] - min) / diff * 1024;
-    }
-
-    for (let i = 3, len = pixels.length, j; i < len; i += 4) {
-        j = pixels[i] * 4;
-
-        if (pixels[i] / 256 < 1) {
-            pixels[i] = 256;
-        }
-
-        if (j && j >= jMin && j <= jMax) {
-            pixels[i - 3] = gradient[j];
-            pixels[i - 2] = gradient[j + 1];
-            pixels[i - 1] = gradient[j + 2];
-        } else {
-            pixels[i] = 0;
-        }
-    }
-}
-
-function legacyHeatmapApplySharpen(context, width, height) {
-    const originalImageData = context.getImageData(0, 0, width, height);
-    const originalPixels = originalImageData.data;
-    const outputImageData = context.createImageData(width, height);
-    const outputPixels = outputImageData.data;
-    const kernel = [
-        0, -1, 0,
-        -1, 5, -1,
-        0, -1, 0,
-    ];
-    const kernelSize = Math.sqrt(kernel.length);
-    const halfKernelSize = Math.floor(kernelSize / 2);
-
-    for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-            let r = 0;
-            let g = 0;
-            let b = 0;
-
-            for (let ky = 0; ky < kernelSize; ky++) {
-                for (let kx = 0; kx < kernelSize; kx++) {
-                    const pixelY = y + ky - halfKernelSize;
-                    const pixelX = x + kx - halfKernelSize;
-
-                    if (pixelY < 0 || pixelY >= height || pixelX < 0 || pixelX >= width) {
-                        continue;
-                    }
-
-                    const offset = (pixelY * width + pixelX) * 4;
-                    const weight = kernel[ky * kernelSize + kx];
-                    r += originalPixels[offset] * weight;
-                    g += originalPixels[offset + 1] * weight;
-                    b += originalPixels[offset + 2] * weight;
-                }
-            }
-
-            const destOffset = (y * width + x) * 4;
-            outputPixels[destOffset] = r;
-            outputPixels[destOffset + 1] = g;
-            outputPixels[destOffset + 2] = b;
-            outputPixels[destOffset + 3] = originalPixels[destOffset + 3];
-        }
-    }
-
-    context.putImageData(outputImageData, 0, 0);
-}
-
-function legacyHeatmapDraw(context, data, canvas, options) {
-    const circle = legacyHeatmapCreateCircle(options.size);
-    const circleHalfWidth = circle.width / 2;
-    const circleHalfHeight = circle.height / 2;
-    const dataOrderByAlpha = {};
-
-    data.forEach((item) => {
-        const alpha = Math.min(1, item.value / options.max).toFixed(2);
-        if (!dataOrderByAlpha[alpha]) {
-            dataOrderByAlpha[alpha] = [];
-        }
-        dataOrderByAlpha[alpha].push(item);
-    });
-
-    for (const alpha in dataOrderByAlpha) {
-        if (Number.isNaN(Number(alpha))) {
-            continue;
-        }
-        context.beginPath();
-        context.globalAlpha = alpha;
-        dataOrderByAlpha[alpha].forEach((item) => {
-            context.drawImage(circle, item.x - circleHalfWidth, item.y - circleHalfHeight);
-        });
-    }
-
-    const intensity = new Intensity(options);
-    const colored = context.getImageData(0, 0, context.canvas.width, context.canvas.height);
-    legacyHeatmapColorize(colored.data, intensity.getImageData(), options);
-    context.clearRect(0, 0, context.canvas.width, context.canvas.height);
-    context.putImageData(colored, 0, 0);
-    legacyHeatmapApplySharpen(context, canvas.width, canvas.height);
-}
-
-function legacyHeatmapRender(arr, canvas, width, height, interp1, interp2, order, options) {
-    const data = legacyHeatmapGenerateData(arr, canvas, width, height, interp1, interp2, order);
-    const context = canvas.getContext("2d");
-    context.clearRect(0, 0, canvas.width, canvas.height);
-    isShadow = true;
-    context.globalCompositeOperation = "lighter";
-    legacyHeatmapDraw(context, data, canvas, options);
-    isShadow = false;
-}
-
+let i = 0
 export class HeatmapCanvas {
     constructor(width, height, canvasWProp, canvasHProp, canvasName, options) {
-        this.width = 32;
-        this.height = 32;
-        this.canvas = document.createElement("canvas");
+        this.width = 32
+        this.height = 32
 
-        const contentWidth = 1024;
+        this.canvas = document.createElement('canvas');
+
+
+        // document.body.appendChild(this.canvas)
+
+
+        const dpr = window.devicePixelRatio || 1;
+        // // console.log(contentWidth,dpr)
+        // this.canvas = canvas
+        const contentWidth = 1024
         this.options = {
             min: 0,
             max: 2000,
-            size: contentWidth * canvasWProp / 4,
-        };
+            size: contentWidth * canvasWProp / 4
 
-        if (canvasName === "body") {
-            this.options.size = contentWidth * canvasWProp / 40;
         }
 
-        this.canvas.width = contentWidth * canvasWProp;
-        this.canvas.height = contentWidth * canvasHProp;
 
-        if (options) {
-            this.options = options;
+        if (canvasName === 'body') {
+            this.options.size = contentWidth * canvasWProp / 40
+            this.canvas.width = contentWidth * canvasWProp
+            this.canvas.height = contentWidth * canvasHProp
+        } else if (canvasName === 'left') {
+            this.canvas.width = contentWidth * canvasWProp
+            this.canvas.height = contentWidth * canvasHProp
         }
+        else {
+            this.canvas.width = contentWidth * canvasWProp
+            this.canvas.height = contentWidth * canvasHProp
+        }
+        if (options) this.options = options
+
+
     }
 
     changeHeatmap(resArr, interp1, interp2, order) {
-        legacyHeatmapRender(
-            resArr,
-            this.canvas,
-            this.width,
-            this.height,
-            interp1,
-            interp2,
-            order,
-            this.options
-        );
+        bthClickHandle(resArr, this.canvas, this.width, this.height, interp1, interp2, order, this.options)
+        const ctx = this.canvas.getContext('2d');
+        // canvas.width = 1024;
+        // canvas.height = 1024;
+
+        // 填充 Canvas 颜色
+        // ctx.fillStyle = 'rgb(255, 0, 0)'; // 纯红色
+        // ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     }
 }
+
+function changeArrValue(arr, arrMax, backMax, name) {
+    const props = name ? 1 : 0.8
+    return arr.map((a) => Math.floor(a * backMax / arrMax * props))
+}
+
+
+
