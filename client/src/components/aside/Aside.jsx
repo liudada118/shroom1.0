@@ -333,10 +333,10 @@ class Aside extends React.Component {
                 color: '#FF2A2A',
                 data: this.props.i18n.t('maxPress'),
             },
-            {
+            ...(!isGlove ? [{
                 color: '#FF2A2A',
                 data: this.props.i18n.t('pressTotal'),
-            },
+            }] : []),
         ]
 
         const onBedStatus = {
@@ -458,7 +458,7 @@ class Aside extends React.Component {
                     <span className='pressData'>{isGlove ? (this.state.indexAngle || 0) : Number(this.state.totalPres).toFixed(0)}</span> <span style={{ color: '#999' }}></span>
 
                     {this.props.matrixName != 'foot' ? <>
-                        <div className='pressTitle standardColor'>{this.props.i18n.t('allPress')}</div>
+                        <div className='pressTitle standardColor'>{isGlove ? 'Bending Angle' : this.props.i18n.t('allPress')}</div>
                         <canvas id="myChart1" style={{ height: `${150 * this.state.fontSize}px`, width: '100%' }}></canvas>
                         {
                             dataArrCar.map((a, index) => {

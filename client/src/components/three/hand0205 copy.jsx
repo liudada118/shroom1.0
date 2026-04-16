@@ -776,10 +776,10 @@ const Canvas = React.forwardRef((props, refs) => {
       })
       // fingerArr
       if (totalArr.length < 20) {
-        totalArr.push(press);
+        totalArr.push(fingerR);
       } else {
         totalArr.shift();
-        totalArr.push(press);
+        totalArr.push(fingerR);
       }
 
       const maxTotal = findMax(totalArr);
@@ -787,7 +787,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
 
       if (!local)
-        props.data.current?.handleCharts(totalArr, maxTotal + 1000);
+        props.data.current?.handleCharts(totalArr, 180);
 
       if (totalPointArr.length < 20) {
         totalPointArr.push(point);
