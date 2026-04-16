@@ -1325,47 +1325,16 @@ class Home extends React.Component {
           if (wsPointData.length == 147) {
 
             if (this.state.numMatrixFlag == 'normal') {
-              let arr = []
-              if (jsonObject.newArr != null) {
-                for (let i = 0; i < 5; i++) {
-                  let num = 0
-                  for (let j = 0; j < 3; j++) {
-                    const index = j * 10 + i * 2
-                    num += wsPointData[index]
-                    num += wsPointData[index + 1]
-                  }
-                  arr[i] = num
-                }
-                wsPointData = [...arr].reverse()
-              } else {
-                for (let i = 0; i < 5; i++) {
-                  let num = 0
-                  // for (let j = 0; j < 3; j++) {
-                  const j = 4
-                  const index = j * 15 + i * 3
-                  num += wsPointData[index]
-                  num += wsPointData[index + 1]
-                  num += wsPointData[index + 2]
-                  // }
-                  arr[i] = num
-                }
-                wsPointData = [...arr]
-
-
-              }
-
-
-
-
-
-              wsPointDataSit = wsPointData;
-              wsPointDataSit = wsPointDataSit.map((a) => Math.round(a));
+              // 3D 遥操模式：直接使用 sitData（256字节原始矩阵），不进行 5 点压缩
+              let rawSitData = jsonObject.sitData;
+              if (!Array.isArray(rawSitData)) rawSitData = JSON.parse(rawSitData);
+              wsPointDataSit = [...rawSitData];
 
               if (that.state.numMatrixFlag == "normal") {
 
                 if (this.state.matrixName != 'handVideo1') {
                   that.com.current?.sitData({
-                    wsPointData: wsPointData ? wsPointData : [],
+                    wsPointData: rawSitData,
                     local: that.state.local
                   });
                 } else {
