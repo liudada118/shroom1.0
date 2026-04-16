@@ -280,7 +280,7 @@ function colorize(pixels, gradient, options) {
 }
 
 
-function bthClickHandle(arr, canvas, width, height, interp1, interp2, order, options) {
+export function bthClickHandle(arr, canvas, width, height, interp1, interp2, order, options) {
 
     const data = generateData(arr, canvas, width, height, interp1, interp2, order, options)
 
