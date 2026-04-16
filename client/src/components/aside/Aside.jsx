@@ -333,10 +333,10 @@ class Aside extends React.Component {
                 color: '#FF2A2A',
                 data: this.props.i18n.t('maxPress'),
             },
-            ...(!isGlove ? [{
+            {
                 color: '#FF2A2A',
                 data: this.props.i18n.t('pressTotal'),
-            }] : []),
+            },
         ]
 
         const onBedStatus = {

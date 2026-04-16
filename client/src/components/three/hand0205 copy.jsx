@@ -761,7 +761,7 @@ const Canvas = React.forwardRef((props, refs) => {
       // console.log(renderT)
       dataArr = dataArr.filter((a) => a > valuej1 * 0.025)
       const max = findMax(dataArr)
-      const point = dataArr.filter((a) => a > 0).length
+      const point = ndata1.filter((a) => a > 0).length
       const press = dataArr.reduce((a, b) => a + b, 0)
       const mean = press / (point == 0 ? 1 : point)
 
