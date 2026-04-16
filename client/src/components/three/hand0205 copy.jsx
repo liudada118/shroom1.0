@@ -14,7 +14,7 @@ import {
   jetgGrey,
   rotate90,
 } from "../../assets/util/util";
-import { SelectionHelper } from "./SelectionHelper";
+import brushManager from "./BrushManager";
 import { checkRectIndex, checkRectangleIntersection, getPointCoordinate, getPointCoordinateWowback, getPointCoordinateWowhead, getPointCoordinateback } from "./threeUtil1";
 
 let timer
@@ -100,7 +100,7 @@ const Canvas = React.forwardRef((props, refs) => {
   const backX = 1 - 15, backY = 100 + 5, backZ = 118, sitX = -3, sitY = 70, sitZ = 148, backRotationX = -Math.PI * 7 / 12
 
 
-  var newDiv, newDiv1, selectStartArr = [], selectEndArr = [], sitArr, backArr, headArr, sitMatrix = [], backMatrix = [], headMatrix = [], selectMatrix = [], selectHelper
+  var newDiv, newDiv1, selectStartArr = [], selectEndArr = [], sitArr, backArr, headArr, sitMatrix = [], backMatrix = [], headMatrix = [], selectMatrix = []
   let sitIndexArr = [], sitIndexEndArr = [], backIndexArr = [], headIndexArr = [], backIndexEndArr = [], headIndexEndArr = []
   var animationRequestId, colSelectFlag = false
   const sitnum1 = 32;
@@ -480,6 +480,30 @@ const Canvas = React.forwardRef((props, refs) => {
       // camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
     }
+
+    // BrushManager 订阅回调：框选变化时计算传感器索引并通知父组件
+    const _brushCallback = (rangeArr) => {
+      if (!rangeArr || !rangeArr.length) {
+        sitIndexArr = new Array(4).fill(0);
+        backIndexArr = new Array(4).fill(0);
+        props.changeSelect({ sit: sitIndexArr, back: backIndexArr });
+        return;
+      }
+      const { x1, y1, x2, y2 } = rangeArr[0];
+      const selMatrix = [x1, y1, x2, y2];
+      // 重新获取点云投影矩阵
+      const sitArr0 = getPointCoordinate({ particles, camera, position: { x: sitX, y: sitY, z: sitZ } });
+      if (sitArr0 && sitArr0.length >= 2) {
+        sitMatrix = [sitArr0[0].x, sitArr0[0].y, sitArr0[1].x, sitArr0[1].y];
+      }
+      const sitInterArr = checkRectangleIntersection(selMatrix, sitMatrix);
+      const backInterArr = checkRectangleIntersection(selMatrix, backMatrix);
+      if (sitInterArr) sitIndexArr = checkRectIndex(sitMatrix, sitInterArr, AMOUNTX, AMOUNTY);
+      if (backInterArr) backIndexArr = checkRectIndex(backMatrix, backInterArr, AMOUNTX1, AMOUNTY1);
+      props.changeSelect({ sit: sitIndexArr, back: backIndexArr });
+    };
+    brushManager.subscribe(_brushCallback);
+    container._brushCallback = _brushCallback;
   }
 
   //   初始化座椅
@@ -873,63 +897,28 @@ const Canvas = React.forwardRef((props, refs) => {
   }
 
   function changeBox({ width, height }) {
-    const left = selectHelper.pointTopLeft.x ? selectHelper.pointTopLeft.x : window.innerWidth / 2
-    const top = selectHelper.pointTopLeft.y ? selectHelper.pointTopLeft.y : window.innerHeight / 2
-    selectHelper.element.style.left = left + 'px';
-    selectHelper.element.style.top = top + 'px';
-    if (width) {
-      selectHelper.element.style.width = width + 'px';
-    }
-    if (height) {
-      selectHelper.element.style.height = height + 'px';
-    }
+    // 使用 BrushManager 获取当前框选区域
+    const rect = brushManager.getBoxRect();
+    const left = rect ? rect.left : window.innerWidth / 2;
+    const top = rect ? rect.top : window.innerHeight / 2;
+    const w = width || (rect ? rect.width : 0);
+    const h = height || (rect ? rect.height : 0);
 
-    selectEndArr = [left + Number(width), top + Number(height)]
-    selectStartArr = [left, top]
-
-
-    selectMatrix = [...selectStartArr, ...selectEndArr]
-
-    if (selectStartArr[0] > selectEndArr[0]) {
-      // selectMatrix = [...selectEndArr , ...selectStartArr]
-      selectMatrix[0] = selectEndArr[0]
-      selectMatrix[2] = selectStartArr[0]
-    } else {
-      selectMatrix[0] = selectStartArr[0]
-      selectMatrix[2] = selectEndArr[0]
-    }
-
-    if (selectStartArr[1] > selectEndArr[1]) {
-      selectMatrix[1] = selectEndArr[1]
-      selectMatrix[3] = selectStartArr[1]
-    } else {
-      selectMatrix[1] = selectStartArr[1]
-      selectMatrix[3] = selectEndArr[1]
-    }
-
+    selectEndArr = [left + Number(w), top + Number(h)];
+    selectStartArr = [left, top];
+    selectMatrix = [left, top, left + Number(w), top + Number(h)];
 
     if (!controlsFlag) {
-      const sitInterArr = checkRectangleIntersection(selectMatrix, sitMatrix)
-      const backInterArr = checkRectangleIntersection(selectMatrix, backMatrix)
-      console.log(selectMatrix, backMatrix)
-      if (sitInterArr) {
-        sitIndexArr = checkRectIndex(sitMatrix, sitInterArr, AMOUNTX, AMOUNTY)
-      }
-      if (backInterArr) {
-        backIndexArr = checkRectIndex(backMatrix, backInterArr, AMOUNTX1, AMOUNTY1)
-      }
-
-      props.changeSelect({ sit: sitIndexArr, back: backIndexArr })
-      // props.changeStateData({ width: width, height: height })
-
+      const sitInterArr = checkRectangleIntersection(selectMatrix, sitMatrix);
+      const backInterArr = checkRectangleIntersection(selectMatrix, backMatrix);
+      if (sitInterArr) sitIndexArr = checkRectIndex(sitMatrix, sitInterArr, AMOUNTX, AMOUNTY);
+      if (backInterArr) backIndexArr = checkRectIndex(backMatrix, backInterArr, AMOUNTX1, AMOUNTY1);
+      props.changeSelect({ sit: sitIndexArr, back: backIndexArr });
     }
-
-    // props.changeSelect({ sit: sitIndexArr, back: backIndexArr })
-
   }
 
   function cancelSelect() {
-    selectHelper.onSelectOver()
+    brushManager.deleteSelect();
   }
 
   function changeShow() {
@@ -1042,7 +1031,12 @@ const Canvas = React.forwardRef((props, refs) => {
     animate();
     return () => {
       if (animationRequestId) cancelAnimationFrame(animationRequestId);
-      selectHelper?.dispose()
+      // 清理 BrushManager
+      const container = document.getElementById(`canvas${props.index}`);
+      if (container && container._brushCallback) {
+        brushManager.unsubscribe(container._brushCallback);
+      }
+      brushManager.stopBrush();
     };
   }, []);
   return (

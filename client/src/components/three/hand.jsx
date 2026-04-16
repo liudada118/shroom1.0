@@ -5,7 +5,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { TrackballControls } from "three/examples/jsm/controls/TrackballControls";
 // import { SelectionBox } from 'three/addons/interactive/SelectionBox.js';
 // import { SelectionHelper } from 'three/addons/interactive/SelectionHelper.js';
-import { SelectionHelper } from "./SelectionHelper";
+import brushManager from "./BrushManager";
 import React, { useEffect, useImperativeHandle, useRef, useState } from "react";
 import { TextureLoader } from "three";
 import { checkRectIndex, checkRectangleIntersection, getPointCoordinate, getPointCoordinateback } from "./threeUtil1";
@@ -77,7 +77,7 @@ const Canvas = React.forwardRef((props, refs) => {
   console.log('render')
   local = props.local
   console.log(camera)
-  var newDiv, newDiv1, selectStartArr = [], selectEndArr = [], sitArr, backArr, sitMatrix = [], backMatrix = [], selectMatrix = [], selectHelper = {}//new SelectionHelper(renderer, controls, 'selectBox');
+  var newDiv, newDiv1, selectStartArr = [], selectEndArr = [], sitArr, backArr, sitMatrix = [], backMatrix = [], selectMatrix = [];
   let sitIndexArr = [], sitIndexEndArr = [], backIndexArr = [], backIndexEndArr = []
   var animationRequestId, colSelectFlag = false
   let dataFlag = false;
@@ -227,212 +227,32 @@ const Canvas = React.forwardRef((props, refs) => {
 
     window.addEventListener("resize", onWindowResize);
 
-    selectHelper = new SelectionHelper(renderer, controls, 'selectBox');
-
-    renderer.domElement.addEventListener('pointerdown', pointDown);
-
-    renderer.domElement.addEventListener('pointermove', pointMove);
-
-    renderer.domElement.addEventListener('pointerup', pointUp);
-
-    document.addEventListener('keydown', (e) => {
-
-      // if (e.key === 'Shift') {
-      // 	this.isKey = true
-      // 	if (this.element  ) {
-      // 		if(this.shiftFlag < 1){
-      // 			console.log('element')
-      // 		this.shiftFlag ++
-      // 		this.element.addEventListener('mousedown', this.elementDown)
-      // 		}else{
-      // 			this.shiftFlag = 2
-      // 		}
-
-      // 	}
-      // }
-
-      if (e.key === 'ArrowUp') {
-
-        selectHelper.element.style.top = parseInt(selectHelper.element.style.top) - 1 + 'px'
-
-        const elementLocal = selectHelper.element.getBoundingClientRect()
-        const selectMatrix = [elementLocal.left, elementLocal.top, elementLocal.right, elementLocal.bottom]
-        if (!controlsFlag) {
-          const sitInterArr = checkRectangleIntersection(selectMatrix, sitMatrix)
-          const backInterArr = checkRectangleIntersection(selectMatrix, backMatrix)
-
-          if (sitInterArr) {
-            sitIndexArr = checkRectIndex(sitMatrix, sitInterArr, AMOUNTX, AMOUNTY)
-          }
-          if (backInterArr) {
-            backIndexArr = checkRectIndex(backMatrix, backInterArr, AMOUNTX1, AMOUNTY1)
-
-          }
-          debounce(props.changeSelect.bind(this, { sit: sitIndexArr, back: backIndexArr }), 500)
-          // props.changeSelect({ sit: sitIndexArr, back: backIndexArr })
-
-        }
+    // BrushManager 订阅回调：框选变化时计算传感器索引并通知父组件
+    const _brushCallback = (rangeArr) => {
+      if (!rangeArr || !rangeArr.length) {
+        // 框选被删除
+        sitIndexArr = new Array(4).fill(0);
+        backIndexArr = new Array(4).fill(0);
+        props.changeSelect({ sit: sitIndexArr, back: backIndexArr });
+        return;
       }
-
-      if (e.key === 'ArrowDown') {
-        selectHelper.element.style.top = parseInt(selectHelper.element.style.top) + 1 + 'px'
-
-        const elementLocal = selectHelper.element.getBoundingClientRect()
-        const selectMatrix = [elementLocal.left, elementLocal.top, elementLocal.right, elementLocal.bottom]
-        if (!controlsFlag) {
-          const sitInterArr = checkRectangleIntersection(selectMatrix, sitMatrix)
-          const backInterArr = checkRectangleIntersection(selectMatrix, backMatrix)
-
-          if (sitInterArr) {
-            sitIndexArr = checkRectIndex(sitMatrix, sitInterArr, AMOUNTX, AMOUNTY)
-          }
-          if (backInterArr) {
-            backIndexArr = checkRectIndex(backMatrix, backInterArr, AMOUNTX1, AMOUNTY1)
-
-          }
-
-          debounce(props.changeSelect.bind(this, { sit: sitIndexArr, back: backIndexArr }), 500)
-          // props.changeSelect({ sit: sitIndexArr, back: backIndexArr })
-        }
-      }
-
-      if (e.key === 'ArrowLeft') {
-        selectHelper.element.style.left = parseInt(selectHelper.element.style.left) - 1 + 'px'
-
-        const elementLocal = selectHelper.element.getBoundingClientRect()
-        const selectMatrix = [elementLocal.left, elementLocal.top, elementLocal.right, elementLocal.bottom]
-        if (!controlsFlag) {
-          const sitInterArr = checkRectangleIntersection(selectMatrix, sitMatrix)
-          const backInterArr = checkRectangleIntersection(selectMatrix, backMatrix)
-
-          if (sitInterArr) {
-            sitIndexArr = checkRectIndex(sitMatrix, sitInterArr, AMOUNTX, AMOUNTY)
-          }
-          if (backInterArr) {
-            backIndexArr = checkRectIndex(backMatrix, backInterArr, AMOUNTX1, AMOUNTY1)
-
-          }
-
-          debounce(props.changeSelect.bind(this, { sit: sitIndexArr, back: backIndexArr }), 500)
-          // props.changeSelect({ sit: sitIndexArr, back: backIndexArr })
-        }
-      }
-
-      if (e.key === 'ArrowRight') {
-        selectHelper.element.style.left = parseInt(selectHelper.element.style.left) + 1 + 'px'
-
-        const elementLocal = selectHelper.element.getBoundingClientRect()
-        const selectMatrix = [elementLocal.left, elementLocal.top, elementLocal.right, elementLocal.bottom]
-        if (!controlsFlag) {
-          const sitInterArr = checkRectangleIntersection(selectMatrix, sitMatrix)
-          const backInterArr = checkRectangleIntersection(selectMatrix, backMatrix)
-
-          if (sitInterArr) {
-            sitIndexArr = checkRectIndex(sitMatrix, sitInterArr, AMOUNTX, AMOUNTY)
-          }
-          if (backInterArr) {
-            backIndexArr = checkRectIndex(backMatrix, backInterArr, AMOUNTX1, AMOUNTY1)
-
-          }
-
-          debounce(props.changeSelect.bind(this, { sit: sitIndexArr, back: backIndexArr }), 500)
-          // props.changeSelect({ sit: sitIndexArr, back: backIndexArr })
-        }
-      }
-
-    })
-
+      const { x1, y1, x2, y2 } = rangeArr[0];
+      const selMatrix = [x1, y1, x2, y2];
+      // 重新获取点云投影矩阵
+      sitArr = getPointCoordinate({ particles, camera, position: { x: groupX, y: groupY, z: groupZ } });
+      sitMatrix = [sitArr[0].x, sitArr[0].y, sitArr[1].x, sitArr[1].y];
+      const sitInterArr = checkRectangleIntersection(selMatrix, sitMatrix);
+      const backInterArr = checkRectangleIntersection(selMatrix, backMatrix);
+      if (sitInterArr) sitIndexArr = checkRectIndex(sitMatrix, sitInterArr, AMOUNTX, AMOUNTY);
+      if (backInterArr) backIndexArr = checkRectIndex(backMatrix, backInterArr, AMOUNTX1, AMOUNTY1);
+      props.changeSelect({ sit: sitIndexArr, back: backIndexArr });
+    };
+    brushManager.subscribe(_brushCallback);
+    // 保存引用以便 cleanup 时取消订阅
+    container._brushCallback = _brushCallback;
   }
 
-  function pointDown(event) {
-    if (selectHelper.isShiftPressed) {
-      sitIndexArr = []
-
-      selectStartArr = [(event.clientX), event.clientY]
-
-      sitArr = getPointCoordinate({ particles, camera, position: { x: groupX, y: groupY, z: groupZ } })
-
-
-      sitMatrix = [sitArr[0].x, sitArr[0].y, sitArr[1].x, sitArr[1].y]
-
-      colSelectFlag = true
-    }
-  }
-
-  function pointMove(event) {
-    if (selectHelper.isShiftPressed && colSelectFlag) {
-
-
-      selectEndArr = [(event.clientX), event.clientY,]
-
-
-
-      selectMatrix = [...selectStartArr, ...selectEndArr]
-
-
-      const width = Math.abs(Math.round(selectEndArr[0] - selectStartArr[0]))
-      const height = Math.abs(Math.round(selectEndArr[1] - selectStartArr[1]))
-      if (selectStartArr[0] > selectEndArr[0]) {
-        // selectMatrix = [...selectEndArr , ...selectStartArr]
-        selectMatrix[0] = selectEndArr[0]
-        selectMatrix[2] = selectStartArr[0]
-      } else {
-        selectMatrix[0] = selectStartArr[0]
-        selectMatrix[2] = selectEndArr[0]
-      }
-
-      if (selectStartArr[1] > selectEndArr[1]) {
-        selectMatrix[1] = selectEndArr[1]
-        selectMatrix[3] = selectStartArr[1]
-      } else {
-        selectMatrix[1] = selectStartArr[1]
-        selectMatrix[3] = selectEndArr[1]
-      }
-
-
-      if (!controlsFlag) {
-        const sitInterArr = checkRectangleIntersection(selectMatrix, sitMatrix)
-        const backInterArr = checkRectangleIntersection(selectMatrix, backMatrix)
-
-        if (sitInterArr) {
-          sitIndexArr = checkRectIndex(sitMatrix, sitInterArr, AMOUNTX, AMOUNTY)
-          // if((sitIndexArr[3] - sitIndexArr[1] < 2)&&(sitIndexArr[2] - sitIndexArr[0] < 2) ){
-          //   sitIndexArr = new Array(4).fill(0)
-          // }
-          sitIndexEndArr = [...sitIndexArr]
-
-        }
-        if (backInterArr) {
-          backIndexArr = checkRectIndex(backMatrix, backInterArr, AMOUNTX1, AMOUNTY1)
-          // if((backIndexArr[3] - backIndexArr[1] < 2)&&(backIndexArr[2] - backIndexArr[0] < 2) ){
-          //   backIndexArr = new Array(4).fill(0)
-          // }
-          backIndexEndArr = [...backIndexArr]
-
-        }
-        // console.log(backIndexArr)
-
-        props.changeStateData({ width: width, height: height })
-
-      }
-
-    }
-  }
-
-
-
-  function pointUp(event) {
-    // console.log(sitIndexEndArr , backIndexEndArr , backIndexArr)
-
-
-
-    if (selectHelper.isShiftPressed) {
-      props.changeSelect({ sit: sitIndexEndArr, back: backIndexEndArr })
-      selectStartArr = []
-      selectEndArr = []
-      colSelectFlag = false
-    }
-  }
+  // pointDown / pointMove / pointUp 已由 BrushManager 统一处理
 
 
   //   初始化座椅
@@ -514,12 +334,15 @@ const Canvas = React.forwardRef((props, refs) => {
 
 
   function changeSelectFlag(value, flag) {
-    controlsFlag = value
-    selectHelper.isShiftPressed = !value
+    controlsFlag = value;
     if (value) {
-      selectHelper.onSelectOver()
-      if (flag)
-        props.changeSelect({ sit: [0, 72, 0, 72] })
+      // 关闭框选模式
+      brushManager.stopBrush();
+      if (flag) props.changeSelect({ sit: [0, 72, 0, 72] });
+    } else {
+      // 开启框选模式，传入 Three.js 容器 DOM
+      const container = document.getElementById('canvas');
+      brushManager.startBrush(container || document.body);
     }
   }
 
@@ -968,6 +791,12 @@ const Canvas = React.forwardRef((props, refs) => {
 
     return () => {
       cancelAnimationFrame(animationRequestId);
+      // 取消 BrushManager 订阅
+      const container = document.getElementById('canvas');
+      if (container && container._brushCallback) {
+        brushManager.unsubscribe(container._brushCallback);
+      }
+      brushManager.stopBrush();
       // 清理 renderer
       if (renderer) {
         renderer.dispose();
