@@ -11,17 +11,18 @@
     "start": "electron-forge start",
     "build-client": "npm --prefix client run build",
     "build-python-runtime": "node scripts/build-python-runtime.js",
+    "clean-pack-output": "node scripts/clean-pack-output.js",
     "prepare-pack-resources": "npm run build-python-runtime && node scripts/sync-pack-resources.js",
     "prepare-build-assets": "npm run build-client && npm run prepare-pack-resources",
-    "package": "npm run prepare-build-assets && electron-forge package",
-    "make": "npm run prepare-build-assets && electron-forge make",
-    "make-mac": "npm run prepare-build-assets && electron-forge make --platform darwin",
+    "package": "npm run clean-pack-output && npm run prepare-build-assets && electron-forge package",
+    "make": "npm run clean-pack-output && npm run prepare-build-assets && electron-forge make",
+    "make-mac": "npm run clean-pack-output && npm run prepare-build-assets && electron-forge make --platform darwin",
     "make-start": "electron-forge start --platform darwin",
-    "build": "npm run prepare-build-assets && electron-builder -w && node scripts/inject-release-notes.js",
-    "build-mac": "npm run prepare-build-assets && electron-builder -m",
-    "build-mac-release": "node scripts/build-mac-release.js",
-    "build-mac-share": "node scripts/build-mac-share.js",
-    "build-all": "npm run prepare-build-assets && electron-builder -mwl"
+    "build": "npm run clean-pack-output && npm run prepare-build-assets && electron-builder -w && node scripts/inject-release-notes.js",
+    "build-mac": "npm run clean-pack-output && npm run prepare-build-assets && electron-builder -m",
+    "build-mac-release": "npm run clean-pack-output && node scripts/build-mac-release.js",
+    "build-mac-share": "npm run clean-pack-output && node scripts/build-mac-share.js",
+    "build-all": "npm run clean-pack-output && npm run prepare-build-assets && electron-builder -mwl"
   },
   "config": {
     "forge": {
@@ -44,7 +45,7 @@
           "^/pack-resources($|/)",
           "^/client($|/)",
           "^/docs($|/)",
-          "^/config\\.txt$"
+          "(^|[/\\\\])config\\.txt$"
         ]
       },
       "makers": [
@@ -82,6 +83,7 @@
     "appId": "com.shroom.pressure-sensor",
     "productName": "Shroom",
     "asar": true,
+    "afterPack": "scripts/electron-builder-after-pack.js",
     "files": [
       "**/*",
       "!client/**",
@@ -125,7 +127,7 @@
       "!**/dev-app-update.yml",
       "!**/latest-dev.log",
       "!**/$*.db",
-      "!config.txt",
+      "!**/config.txt",
       "!forge.config.js",
       "!gen.js",
       "!genType.js",
@@ -138,6 +140,7 @@
         "to": "build",
         "filter": [
           "**/*",
+          "!**/config.txt",
           "!model/hand-g.fbx",
           "!model/hand-g.glb",
           "!model/hand-g1.glb",
@@ -153,11 +156,19 @@
       },
       {
         "from": "./pack-resources/db",
-        "to": "db"
+        "to": "db",
+        "filter": [
+          "**/*",
+          "!**/config.txt"
+        ]
       },
       {
         "from": "./pack-resources/python",
-        "to": "python"
+        "to": "python",
+        "filter": [
+          "**/*",
+          "!**/config.txt"
+        ]
       }
     ],
     "icon": "./logo.ico",

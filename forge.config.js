@@ -1,5 +1,6 @@
 const { FusesPlugin } = require('@electron-forge/plugin-fuses');
 const { FuseV1Options, FuseVersion } = require('@electron/fuses');
+const packageHooks = require('./scripts/package-hooks');
 
 module.exports = {
   packagerConfig: {
@@ -13,7 +14,10 @@ module.exports = {
       '^/python($|/)',      // 如果你环境叫 python
       '^/__pycache__($|/)',
       '\\.pyc$',
-      '^/config\\.txt$'
+      '(^|[/\\\\])config\\.txt$'
+    ],
+    afterComplete: [
+      packageHooks.electronForgeAfterComplete
     ]
   },
   rebuildConfig: {},

@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-04-03 14:32
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-04-16 13:20
 
 ## 1. 项目概述
 
@@ -148,6 +148,7 @@ shroom1.0/
 | `/client/src/components/webgl/` | WebGL/Canvas 热力图渲染兼容模块，供机器人与复合体表映射组件复用 |
 | `/client/src/page/home/` | 主页面组件（Home.js），系统核心交互界面 |
 | `/docs/` | 架构文档、优化报告、技术优化建议等项目文档 |
+| `/scripts/` | 打包与发布脚本目录，包含 Python runtime 同步、更新说明注入，以及打包前清理和 `afterPack`/`afterComplete` 兜底移除 `config.txt` 的脚本 |
 | `/db/` | SQLite 数据库文件，存储采集数据和配置信息（运行时生成，Git 忽略） |
 | `/data/` | CSV 导出文件目录（运行时生成，Git 忽略） |
 
@@ -361,6 +362,8 @@ graph TD
 | 2026-03-23 | Max | Release version bump to 1.1.6 | Update `package.json` and the root `package-lock.json` to `1.1.6`, add the Chinese release notes file `release-notes/windows/1.1.6.md`, and rebuild the Windows installer artifacts so the updater can publish a fresh version without reusing the mismatched `1.1.5` payload |
 | 2026-03-23 | Max | Windows export path rollback | Keep packaged macOS CSV exports on the desktop, but route packaged Windows CSV exports back to `process.resourcesPath/data` so historical workflows that read files from `Shroom\\resources\\data` continue to work |
 | 2026-03-19 | Max | 配置文件外置化打包 | 打包配置显式排除 `config.txt`，运行时优先从 exe 同级外部文件读取，兼容旧的 `resources/config.txt` 路径 |
+| 2026-04-16 | Codex | npm run build 配置兜底清理 | 为 `electron-builder` 的 Windows 构建链路增加 `out/dist` 预清理、`afterPack` 钩子删除，以及 `files` / `extraResources` 的 `config.txt` 显式排除，避免历史产物或额外资源把授权文件带进安装包 |
+| 2026-04-16 | Codex | 打包态授权路径候选收紧 | `licenseHelper.js` 在打包态不再把 `app.asar/config.txt` 纳入候选列表，仅保留 `userData/config.txt`、exe 同级 `config.txt` 和兼容旧包的 `resources/config.txt` |
 | 2026-03-18 12:52 | Max | Windows installer default path on D drive | Add `scripts/installer.nsh` and point `build.nsis.include` at it so the NSIS assisted installer defaults the installation directory to `D:\Shroom` instead of the system drive while still allowing users to change it |
 | 2026-03-06 11:03 | optimization-cleanup | 代码全面优化清理 | 删除 20 个 copy 文件、8 个未使用组件、13 个未使用 3D 模型；后端 console.log 替换为 logger；var 全部替换为 let/const；移除废弃依赖 request；修复定时器内存泄漏；server.js 模块化拆分（提取 mathUtils + dbManager） |
 | 2026-03-15 18:32 | fix-client-runtime | 前端运行时兼容修复 | 恢复 Home 页面缺失的 copy 组件兼容入口、补充 WebGL 热力图兼容模块、修复重复 state 键，恢复 client 的 Vite 构建与开发运行 |
@@ -444,6 +447,8 @@ graph TD
 | 2026-03-23 | Max | Configuration change | Bump the release to `1.1.6`, sync the root package metadata, add the Chinese release-notes source file `release-notes/windows/1.1.6.md`, and rebuild `dist/latest.yml` plus the Windows installer artifacts to avoid the stale `1.1.5` updater payload |
 | 2026-03-23 | Max | Configuration change | Keep packaged macOS CSV exports on the desktop, but change the packaged Windows export root from `app.getPath('userData')` back to `process.resourcesPath`, restoring the historical `Shroom\\resources\\data` export location |
 | 2026-03-19 | Max | Configuration change | Exclude `config.txt` from Electron Forge and electron-builder outputs, and resolve the license config from external paths with exe-adjacent priority plus legacy `resources/config.txt` fallback |
+| 2026-04-16 | Codex | 配置变更 | `npm run build` 现在会先清理 `out/` 和 `dist/`，再执行 `electron-builder -w`；同时新增 `afterPack` 钩子并在 `files` / `extraResources` 中统一排除 `config.txt`，避免旧产物或额外资源把它打进 Windows 安装包 |
+| 2026-04-16 | Codex | 修复缺陷 | 收紧打包态 `config.txt` 搜索路径，移除对 `app.asar/config.txt` 的候选回退，避免运行日志继续显示包内授权文件路径并与外置化策略冲突 |
 | 2026-03-18 12:52 | Max | Configuration change | Configure electron-builder NSIS to include `scripts/installer.nsh`, and use a `preInit` macro that writes `InstallLocation` to `D:\Shroom` so the Windows installer opens with D drive as the default target path |
 | 2026-03-06 11:03 | optimization-cleanup | 优化重构 | 删除 20 个 copy 文件、8 个未使用组件、13 个未使用 3D 模型、src1 目录、旧图标 |
 | 2026-03-06 11:03 | optimization-cleanup | 优化重构 | 后端 118+ 处 console.log/error/warn 替换为 logger 模块，前端 Vite 配置生产环境自动移除 console |

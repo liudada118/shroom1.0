@@ -19,20 +19,34 @@ try {
 const TIME_SERVER = 'http://sensor.bodyta.com';
 const TIMEOUT_MS = 5000;
 
+function isPackagedRuntime() {
+  if (electronApp && typeof electronApp.isPackaged === 'boolean') {
+    return electronApp.isPackaged;
+  }
+
+  return false;
+}
+
 function getConfigFileCandidates() {
   const candidates = [];
   const writableConfig = getWritableConfigFile();
+  const packaged = isPackagedRuntime();
 
   if (writableConfig) {
     candidates.push(writableConfig);
   }
 
-  if (process.resourcesPath) {
+  if (packaged && process.execPath) {
     candidates.push(path.join(path.dirname(process.execPath), 'config.txt'));
+  }
+
+  if (packaged && process.resourcesPath) {
     candidates.push(path.join(process.resourcesPath, 'config.txt'));
   }
 
-  candidates.push(path.join(__dirname, 'config.txt'));
+  if (!packaged) {
+    candidates.push(path.join(__dirname, 'config.txt'));
+  }
 
   return [...new Set(candidates)];
 }
