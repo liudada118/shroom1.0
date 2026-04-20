@@ -804,7 +804,7 @@ const Canvas = React.forwardRef((props, refs) => {
       // });
       const fingerR = fingerArr ? Math.floor(fingerArr[1] * 180) : 0
       props.data.current?.changeData({
-        totalPres: `${fingerR}°`
+        totalPres: fingerR
       })
       // fingerArr
       if (totalArr.length < 20) {
