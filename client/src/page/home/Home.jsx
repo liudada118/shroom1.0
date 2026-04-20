@@ -1698,6 +1698,19 @@ class Home extends React.Component {
     }
 
     if (jsonObject.backData != null) {
+      // 右手（backData 路径）统计真实采样频率
+      if (this.state.matrixName.includes('hand') || this.state.matrixName == 'handGlove115200') {
+        realHzFrameCount++;
+        const nowHz = Date.now();
+        if (nowHz - realHzLastTime >= 1000) {
+          const realHz = Math.round(realHzFrameCount * 1000 / (nowHz - realHzLastTime));
+          if (this.state.realHz !== realHz) {
+            this.setState({ realHz: realHz });
+          }
+          realHzFrameCount = 0;
+          realHzLastTime = nowHz;
+        }
+      }
 
       if (isCar(this.state.matrixName) && !sitFlag) {
         if (colValueFlag) {

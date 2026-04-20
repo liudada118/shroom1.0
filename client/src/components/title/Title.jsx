@@ -1355,15 +1355,19 @@ class Title extends React.Component {
         }} className='optionImg' src={option} alt="" />
         <Drawer style={{ backgroundColor: 'rgba(21,18,42,0.8)' }} title={t('setData')} onClose={() => { this.setState({ open: false }) }} open={this.state.open}>
           {this.renderSettingSliders(t)}
-          <>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <Select
-              style={{ width: 300 }}
+              className='titleSelect'
+              style={{
+                width: 300,
+              }}
+              popupClassName='drawerSelectDropdown'
               placeholder={t('feaLabel')}
               onChange={this.onChange}
               dropdownRender={(menu) => (
                 <>
                   {menu}
-                  <Divider style={{ margin: '8px 0' }} />
+                  <Divider style={{ margin: '8px 0', borderColor: '#5A5A89' }} />
                   <Space style={{ padding: '0 8px 4px' }}>
                     <Input
                       placeholder="Please enter item"
@@ -1371,11 +1375,12 @@ class Title extends React.Component {
                       value={this.state.name}
                       onChange={this.onNameChange}
                       onKeyDown={(e) => e.stopPropagation()}
+                      style={{ backgroundColor: '#111', borderColor: '#5A5A89', color: '#fff' }}
                     />
-                    <Button type="text" icon={<PlusOutlined />} onClick={this.addItem}>
+                    <Button className='titleButton' icon={<PlusOutlined />} onClick={this.addItem}>
                       {t('add')}
                     </Button>
-                    <Button type="text" onClick={() => {
+                    <Button className='titleButton' onClick={() => {
                       this.setState({ items: [] })
                       localStorage.removeItem('sitType')
                     }}>
@@ -1387,13 +1392,17 @@ class Title extends React.Component {
               options={this.state.items.map((item) => ({ label: item, value: item }))}
             />
             <Select
-              style={{ width: 300 }}
+              className='titleSelect'
+              style={{
+                width: 300,
+              }}
+              popupClassName='drawerSelectDropdown'
               placeholder={t('feaLabel')}
               onChange={this.onChange1}
               dropdownRender={(menu) => (
                 <>
                   {menu}
-                  <Divider style={{ margin: '8px 0' }} />
+                  <Divider style={{ margin: '8px 0', borderColor: '#5A5A89' }} />
                   <Space style={{ padding: '0 8px 4px' }}>
                     <Input
                       placeholder="Please enter item"
@@ -1401,11 +1410,12 @@ class Title extends React.Component {
                       value={this.state.name1}
                       onChange={this.onNameChange1}
                       onKeyDown={(e) => e.stopPropagation()}
+                      style={{ backgroundColor: '#111', borderColor: '#5A5A89', color: '#fff' }}
                     />
-                    <Button type="text" icon={<PlusOutlined />} onClick={this.addItem1}>
+                    <Button className='titleButton' icon={<PlusOutlined />} onClick={this.addItem1}>
                       {t('add')}
                     </Button>
-                    <Button type="text" onClick={() => {
+                    <Button className='titleButton' onClick={() => {
                       this.setState({ items1: [] })
                       localStorage.removeItem('sitType1')
                     }}>
@@ -1416,34 +1426,25 @@ class Title extends React.Component {
               )}
               options={this.state.items1.map((item) => ({ label: item, value: item }))}
             />
-
-
-            <> <Button onClick={() => {
-
-              this.props.changeAside({
-                resetZero: true
-              })
-              this.props.wsSendObj({ resetZero: true })
-
-            }}>{t('resetZero')}</Button>
-              <Button onClick={() => {
-
-                this.props.changeAside({
-                  resetZero: false
-                })
-
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <Button className='titleButton' onClick={() => {
+                this.props.changeAside({ resetZero: true })
+                this.props.wsSendObj({ resetZero: true })
+              }}>{t('resetZero')}</Button>
+              <Button className='titleButton' onClick={() => {
+                this.props.changeAside({ resetZero: false })
                 this.props.wsSendObj({ resetZero: false })
-              }}>{t('cancelZero')}</Button></>
-
-
-            <NavLink to={`/num/${routerStr}`}> <Button onClick={() => {
-              this.props.dataZero0()
-            }}>{t('rawData')}</Button></NavLink>
-
-            <NavLink to={`/?from=system`}> <Button onClick={() => {
-
-            }}>{t('key')}</Button></NavLink>
-          </>
+              }}>{t('cancelZero')}</Button>
+              <NavLink to={`/num/${routerStr}`}>
+                <Button className='titleButton' onClick={() => {
+                  this.props.dataZero0()
+                }}>{t('rawData')}</Button>
+              </NavLink>
+              <NavLink to={`/?from=system`}>
+                <Button className='titleButton'>{t('key')}</Button>
+              </NavLink>
+            </div>
+          </div>
         </Drawer>
       </div>
 
