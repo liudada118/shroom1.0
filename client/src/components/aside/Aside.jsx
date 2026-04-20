@@ -341,6 +341,7 @@ class Aside extends React.Component {
     render() {
         const { t, i18n } = this.props;
         const isGlove = this.props.matrixName === 'hand0205' || this.props.matrixName === 'handGlove115200';
+        const isGloveRemoteControl = isGlove && this.props.numMatrixFlag === 'normal';
         const dataArrCar = [
             {
                 color: '#2A99FF',
@@ -544,11 +545,11 @@ class Aside extends React.Component {
                     </>
                     : this.props.matrixName != 'bed40' ?
                 <div className="asideContent firstAside">
-                    <h2 className="asideTitle">{isGlove ? 'Index Finger Angle' : 'Pressure Data'}</h2>
-                    <span className='pressData'>{isGlove ? `${this.state.indexAngle || 0}${this.props.numMatrixFlag === 'normal' ? '°' : ''}` : Number(this.state.totalPres).toFixed(0)}</span> <span style={{ color: '#999' }}>{isGlove ? '' : ''}</span>
+                    <h2 className="asideTitle">Pressure Data</h2>
+                    <span className='pressData'>{isGloveRemoteControl ? `${this.state.indexAngle || 0}°` : Number(this.state.totalPres).toFixed(0)}</span> <span style={{ color: '#999' }}></span>
 
                     {this.props.matrixName != 'foot' ? <>
-                        <div className='pressTitle standardColor'>{isGlove ? 'Bending Angle' : this.props.i18n.t('allPress')}</div>
+                        <div className='pressTitle standardColor'>{isGloveRemoteControl ? this.props.i18n.t('bendAngle') : this.props.i18n.t('allPress')}</div>
                         <canvas id="myChart1" style={{ height: `${150 * this.state.fontSize}px`, width: '100%' }}></canvas>
                         {
                             dataArrCar.map((a, index) => {

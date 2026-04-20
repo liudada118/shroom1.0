@@ -566,6 +566,55 @@ class Home extends React.Component {
     }
   }
 
+  parseGloveRawMatrix = (rawData) => {
+    if (rawData == null) {
+      return null;
+    }
+
+    let parsedData = rawData;
+    if (!Array.isArray(parsedData)) {
+      try {
+        parsedData = JSON.parse(parsedData);
+      } catch (error) {
+        return null;
+      }
+    }
+
+    if (!Array.isArray(parsedData) || parsedData.length < 256) {
+      return null;
+    }
+
+    return parsedData.slice(0, 256).map((value) => {
+      const numericValue = Number(value);
+      return Number.isFinite(numericValue) ? numericValue : 0;
+    });
+  }
+
+  syncGloveRawPressureStats = (rawData) => {
+    if (this.state.matrixName !== 'hand0205' && this.state.matrixName !== 'handGlove115200') {
+      return false;
+    }
+
+    const rawMatrix = this.parseGloveRawMatrix(rawData);
+    if (!rawMatrix) {
+      return false;
+    }
+
+    const positivePointCount = rawMatrix.filter((value) => value > 0).length;
+    const totalPres = rawMatrix.reduce((sum, value) => sum + value, 0);
+    const maxPres = findMax(rawMatrix);
+    const meanPres = totalPres / (positivePointCount || 1);
+
+    this.data.current?.changeData({
+      meanPres: meanPres.toFixed(2),
+      maxPres,
+      point: positivePointCount,
+      totalPres: totalPres.toFixed(0),
+    });
+
+    return true;
+  }
+
   componentDidMount() {
     // window.alert(window.innerWidth)
     document.documentElement.style.fontSize = `${window.innerWidth / 120}px`;
@@ -1378,6 +1427,7 @@ class Home extends React.Component {
               if (!Array.isArray(rawSitData)) rawSitData = JSON.parse(rawSitData);
               wsPointDataSit = [...rawSitData];
               wsPointDataSitWidth = 16; // hand0205 是 16×16 矩阵
+              this.syncGloveRawPressureStats(rawSitData);
 
               // 2. 将 147 字节数据压缩为 5 个点，用于遥操控制（手指弯折/旋转）
               let fivePoints = []
@@ -1514,12 +1564,14 @@ class Home extends React.Component {
               wsPointDataSit = wsPointData;
               wsPointDataSit = wsPointDataSit.map((a) => Math.round(a));
               wsPointDataSitWidth = 32;
+              this.syncGloveRawPressureStats(jsonObject.realArr || jsonObject.sitData || jsonObject.backData);
 
               if (that.state.numMatrixFlag == "normal") {
 
                 if (this.state.matrixName != 'handVideo1') {
                   that.com.current?.sitData({
                     wsPointData: wsPointData ? wsPointData : [],
+                    statsData: this.parseGloveRawMatrix(jsonObject.realArr || jsonObject.sitData || jsonObject.backData) || undefined,
                     local: that.state.local
                   });
                 } else {
@@ -1872,12 +1924,14 @@ class Home extends React.Component {
               wsPointDataSit = wsPointData;
               wsPointDataSit = wsPointDataSit.map((a) => Math.round(a));
               wsPointDataSitWidth = 32;
+              this.syncGloveRawPressureStats(jsonObject.realArr || jsonObject.sitData || jsonObject.backData);
 
               if (that.state.numMatrixFlag == "normal") {
 
                 if (this.state.matrixName != 'handVideo1') {
                   that.com.current?.sitData({
                     wsPointData: wsPointData ? wsPointData : [],
+                    statsData: this.parseGloveRawMatrix(jsonObject.realArr || jsonObject.sitData || jsonObject.backData) || undefined,
                     local: that.state.local
                   });
                 } else {
@@ -2002,10 +2056,12 @@ class Home extends React.Component {
               wsPointDataSit = wsPointData;
               wsPointDataSit = wsPointDataSit.map((a) => Math.round(a));
               wsPointDataSitWidth = 32;
+              this.syncGloveRawPressureStats(jsonObject.realArr || jsonObject.sitData || jsonObject.backData);
               if (that.state.numMatrixFlag == "normal") {
                 if (this.state.matrixName != 'handVideo1') {
                   that.com.current?.sitData({
                     wsPointData: wsPointData ? wsPointData : [],
+                    statsData: this.parseGloveRawMatrix(jsonObject.realArr || jsonObject.sitData || jsonObject.backData) || undefined,
                     local: that.state.local
                   });
                 } else {
@@ -3265,7 +3321,7 @@ class Home extends React.Component {
 
 
 
-          {this.state.matrixName != "robot0428" ? <CanvasCom matrixName={this.state.matrixName}>
+          {this.state.matrixName != "robot0428" ? <CanvasCom matrixName={modeCanvasMatrixName}>
             <Aside i18n={i18n} locale={this.state.locale} ref={this.data} matrixName={this.state.matrixName} numMatrixFlag={this.state.numMatrixFlag} />
           </CanvasCom> : ''}
 

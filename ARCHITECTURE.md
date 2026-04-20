@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-04-17 19:05
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-04-20 15:39
 
 ## 1. 项目概述
 
@@ -219,6 +219,7 @@ graph TD
 1. **传感器数据采集流程**
     - 硬件传感器通过 USB 串口发送原始二进制数据帧 → `serialHelper.js` 接收并触发 `parser.on('data')` 事件 → `server.js` 调用 `dataProcessor.js` 进行线序映射（`openWeb.js`）、归零校准、高斯平滑 → 处理后的矩阵数据通过 `wsHelper.js` 广播到 WebSocket 端口 19999 → 前端 `useWebSocket` Hook 接收数据 → 更新 `usePressureStore` → React 重新渲染热力图和 3D 模型。
     - 当系统类型为 `petCare` 时，`server.js` 先按 `jqbed` 线序将 32x32 数据重排，再以 50Hz（20ms）调用 `python/app/petCare/pet_care_wrapper`；算法输出通过 `python/app/onbed_filter_example.py` 的 JSON-line RPC 回传给 Electron，前端 Aside 面板展示呼吸率、姿态、体动、SNR、信号质量、离床告警和压力系数。
+    - 当系统类型为 `hand0205` / `handGlove115200` 且前端处于普通 3D 遥操模式时，`Home.jsx` 保持 147 点映射数据继续驱动手部姿态与手指弯曲，但 Aside 面板中的 `meanPres`、`maxPres`、`totalPres`、`point` 以及 Pressure Area / Pressure Data 图表改为直接基于原始 256 点矩阵（`sitData` / `realArr`）计算和渲染，避免统计值被映射后的控制数据覆盖。
 
 2. **数据存储与导出流程**
     - 用户点击"开始采集" → 前端通过 WebSocket 发送 `col` 指令 → `server.js` 开启采集模式 → 每帧数据同时写入 `dbHelper.js`（SQLite）和 `csvHelper.js`（CSV 文件） → 用户点击"停止采集"结束录制。
@@ -410,10 +411,23 @@ graph TD
 
 | 2026-04-17 18:06 | ld | petCare 算法结果日志打印 | 在 `server.js` 为 `petCare` Python 算法结果新增 1 秒节流日志，终端可直接查看实时输出，同时避免 50Hz 持续刷屏 |
 
+| 2026-04-20 | Codex | 手套 3D 遥操统计回切原始 256 数据 | `Home.jsx` 新增触觉手套原始矩阵解析与统计同步逻辑，使普通 3D 遥操模式下的平均压力、最大压力、压力总和直接来自原始 16x16 压力矩阵，同时保持手势控制与其它展示模式不变 |
+| 2026-04-20 | Codex | 手套 Pressure Area / Pressure Data 侧栏切换到原始 256 统计 | `Aside.jsx` 将手套侧栏首屏从 `Index Finger Angle` 切换为 `Pressure Data`，显示值改为 `totalPres`；`Pressure Area` 点数与面积沿用原始 256 点统计结果，配合 `hand0205 copy.jsx` 的图表采样一起统一为原始 16x16 压力矩阵 |
+| 2026-04-20 | Codex | 手套 Pressure Data 副标题修正 | 为手套侧栏新增 `bendAngle` 翻译项，`Pressure Data` 下方副标题改为“弯折角度 / Bending Angle”，仅修正文案，不改变 3D 遥操手指动画继续使用原有 5 点控制数组的逻辑 |
+| 2026-04-20 | Codex | 手套弯折角度显示回接食指角度 | `Aside.jsx` 将手套 `Pressure Data` 区块中的大号数值回接到原有 `indexAngle` 字段，继续显示食指弯折角度；下方压力图表和 Pressure Area 点数仍保持使用原始 256 点压力统计 |
+| 2026-04-20 | Codex | 手套弯折角度仅限 3D 遥操模式显示 | `Aside.jsx` 新增 `isGloveRemoteControl` 判定，仅在手套 `numMatrixFlag === 'normal'`（3D 遥操）时显示 `indexAngle` 与“弯折角度 / Bending Angle”；手套其它模式统一回退为压力总和文案与数值 |
+| 2026-04-20 | Codex | 修复 Aside 模式切换不刷新问题 | `Home.jsx` 中 Aside 外层 `CanvasCom` 改为使用 `matrixName:numMatrixFlag` 作为刷新键，避免手套从 3D 遥操切到其它模式后侧栏继续停留在弯折角度显示，保证 Pressure Data 的文案和数值随模式切换实时生效 |
+
 ## 9. 更新日志
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-04-20 15:39 | Codex | 修复缺陷 | 修复 `client/src/page/home/Home.jsx` 中 Aside 面板切换模式不重渲染的问题：将 Aside 外层 `CanvasCom` 的比较键从仅 `matrixName` 调整为 `matrixName:numMatrixFlag`，使手套在 `normal` 以外模式下能及时恢复显示 `totalPres` 和“压力总和”，不再沿用 3D 遥操模式的弯折角度视图 |
+| 2026-04-20 15:28 | Codex | 修复缺陷 | 调整 `client/src/components/aside/Aside.jsx` 的手套侧栏模式判断：新增 `isGloveRemoteControl` 条件，仅在 `hand0205` / `handGlove115200` 的 `numMatrixFlag === 'normal'`（3D 遥操）时显示食指 `indexAngle` 和“弯折角度”副标题；手套其它模式恢复显示 `totalPres` 和“压力总和” |
+| 2026-04-20 15:20 | Codex | 修复缺陷 | 调整 `client/src/components/aside/Aside.jsx` 的手套侧栏主数值：在保留 `Pressure Data` 标题、原始 256 点压力统计图表和 Pressure Area 点数逻辑不变的前提下，将大号显示值从 `totalPres` 改回原有 `indexAngle`，使“弯折角度”与之前食指角度读数保持一致 |
+| 2026-04-20 15:12 | Codex | 修复缺陷 | 调整 `client/src/components/aside/Aside.jsx` 与 `client/src/App.jsx` 的手套侧栏文案：为手套专门新增 `bendAngle` 国际化文案，并将 `Pressure Data` 下方副标题改为“弯折角度 / Bending Angle”；不改动 `Home.jsx` 中 3D 遥操手指弯曲动画继续使用原有 5 点 finger 控制数组的逻辑 |
+| 2026-04-20 15:01 | Codex | 修复缺陷 | 调整 `client/src/components/aside/Aside.jsx` 中手套普通 3D 遥操模式的侧栏展示：将首屏标题由 `Index Finger Angle` 切换为 `Pressure Data`，展示值固定为 `totalPres`，副标题统一为 `allPress`；配合此前 `Home.jsx` / `hand0205 copy.jsx` 的改动，Pressure Area 点数、面积和压力图表均改为使用原始 256 点压力数据 |
+| 2026-04-20 14:30 | Codex | 修复缺陷 | 调整 `client/src/page/home/Home.jsx` 中 `hand0205` / `handGlove115200` 的普通 3D 遥操模式统计逻辑：新增原始 256 点矩阵解析与同步方法，优先使用 `sitData` / `realArr` 更新 Aside 的 `meanPres`、`maxPres`、`totalPres`，不再让 147 点映射或 5 点手指控制数据覆盖这三项压力统计 |
 | 2026-04-17 19:05 | ld | 修复缺陷 | 修复 `petCare` 实时展示时报 `that.com.current.chartReset is not a function` 的前端异常：`CanvasHand` 已将内部空实现的 `chartReset()` 通过 `useImperativeHandle` 暴露给 `ref`，从而兼容 `util.js` 中 `petCare` 分支的统一调用 |
 | 2026-04-17 18:58 | ld | 配置变更 | 仅调整 `petCare` 的高度默认值：将前端独立默认参数中的 `value1` 从 `0.72` 调整为 `0.7`，其他系统默认值保持不变 |
 | 2026-04-17 18:54 | ld | 配置变更 | 仅调整 `petCare` 的颜色默认值：将前端独立默认参数中的 `valuej1` 从 `1205` 提升到 `2900`，使宠物看护默认色阶与当前软件预期一致，其他系统默认值保持不变 |

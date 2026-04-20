@@ -142,6 +142,7 @@ const Canvas = React.forwardRef((props, refs) => {
   var ndata1 = new Array(sitnum1 * sitnum2).fill(0), ndata = new Array(backnum1 * backnum2).fill(0),
     ndatahead = new Array(headnum1 * headnum2).fill(0), newData1 = new Array(sitnum1 * sitnum2).fill(0),
     newData = new Array(backnum1 * backnum2).fill(0), newDatahead = new Array(backnum1 * backnum2).fill(0);
+  let rawPressureStatsData = [];
   let dataFlag = false;
   const changeDataFlag = () => {
     dataFlag = true;
@@ -726,41 +727,43 @@ const Canvas = React.forwardRef((props, refs) => {
     if (timeS > renderT) {
       // console.log(renderT)
       dataArr = dataArr.filter((a) => a > valuej1 * 0.025)
-      const max = findMax(dataArr)
       const point = ndata1.filter((a) => a > 0).length
-      const press = dataArr.reduce((a, b) => a + b, 0)
-      const mean = press / (point == 0 ? 1 : point)
+      const statsData = rawPressureStatsData.length ? rawPressureStatsData : dataArr
+      const statsPoint = rawPressureStatsData.length
+        ? rawPressureStatsData.filter((a) => a > 0).length
+        : point
+      const max = findMax(statsData)
+      const press = statsData.reduce((a, b) => a + b, 0)
+      const mean = press / (statsPoint == 0 ? 1 : statsPoint)
 
       props.data.current?.changeData({
         meanPres: mean.toFixed(2),
         maxPres: max,
-        point: point,
+        point: statsPoint,
         totalPres: press.toFixed(0),
       });
       const fingerR = fingerArr ? Math.floor(fingerArr[1] * 180) : 0
       props.data.current?.changeData({
         indexAngle: fingerR
       })
-      // fingerArr
+
       if (totalArr.length < 20) {
-        totalArr.push(fingerR);
+        totalArr.push(press);
       } else {
         totalArr.shift();
-        totalArr.push(fingerR);
+        totalArr.push(press);
       }
 
       const maxTotal = findMax(totalArr);
 
-
-
       if (!local)
-        props.data.current?.handleCharts(totalArr, 180);
+        props.data.current?.handleCharts(totalArr, maxTotal + 100);
 
       if (totalPointArr.length < 20) {
-        totalPointArr.push(point);
+        totalPointArr.push(statsPoint);
       } else {
         totalPointArr.shift();
-        totalPointArr.push(point);
+        totalPointArr.push(statsPoint);
       }
 
       const max1 = findMax(totalPointArr);
@@ -823,6 +826,7 @@ const Canvas = React.forwardRef((props, refs) => {
     local = local
     const {
       wsPointData: wsPointData,
+      statsData,
       valuej,
       valueg,
       value,
@@ -843,6 +847,12 @@ const Canvas = React.forwardRef((props, refs) => {
     // valuef1 = valuef;
     // ndata1 = [];
     ndata1 = wsPointData;
+    rawPressureStatsData = Array.isArray(statsData) && statsData.length >= 256
+      ? statsData.map((item) => {
+        const numericValue = Number(item);
+        return Number.isFinite(numericValue) ? numericValue : 0;
+      })
+      : [];
 
     // valuelInit1 = valuelInit;
     // 修改线序 坐垫
