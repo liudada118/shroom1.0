@@ -226,3 +226,22 @@
         color: #fff !important;
     }
 }
+
+/* 抽屉内 Button 全局样式（与 titleButton 一致，但作用域在 Drawer 外层） */
+.ant-drawer-body .titleButton,
+.ant-drawer-body .ant-btn {
+    background-color: #0d0b1e !important;
+    color: #5A5A89 !important;
+    border-color: #5A5A89 !important;
+    white-space: nowrap;
+    padding: 4px 8px;
+    font-size: 13px;
+    box-shadow: none;
+}
+
+.ant-drawer-body .ant-btn:hover,
+.ant-drawer-body .titleButton:hover {
+    background-color: rgba(90, 90, 137, 0.2) !important;
+    color: #fff !important;
+    border-color: #7a7ab8 !important;
+}

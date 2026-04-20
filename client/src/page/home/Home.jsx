@@ -1937,15 +1937,14 @@ class Home extends React.Component {
               let newArr = [...wsPointData]
               this.com.current?.changeWsData147([...newArr])
             } else if (this.state.numMatrixFlag == 'num' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
-              // 手套2D数字模式：使用 backData 的原始256数据点，以16x16矩阵显示
-              let rawData = jsonObject.backData;
+              // 手套2D数字模式：使用 realArr（原始256字节）渲染16x16矩阵
+              let rawData = jsonObject.realArr || jsonObject.backData;
               if (rawData && !Array.isArray(rawData)) {
                 rawData = JSON.parse(rawData);
               }
               if (rawData && rawData.length >= 256) {
                 this.com.current?.changeWsData256([...rawData.slice(0, 256)])
               } else {
-                // 旧版数据回退到147显示
                 this.com.current?.changeWsData147([...wsPointData])
               }
             } else if (this.state.numMatrixFlag == 'num3D' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
@@ -2066,15 +2065,14 @@ class Home extends React.Component {
               let newArr = [...wsPointData]
               this.com.current?.changeWsData147([...newArr])
             } else if (this.state.numMatrixFlag == 'num' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
-              // 手套2D数字模式：使用 backData 的原始256数据点，以16x16矩阵显示
-              let rawData = jsonObject.backData;
+              // 手套2D数字模式：使用 realArr（原始256字节）渲染16x16矩阵
+              let rawData = jsonObject.realArr || jsonObject.backData;
               if (rawData && !Array.isArray(rawData)) {
                 rawData = JSON.parse(rawData);
               }
               if (rawData && rawData.length >= 256) {
                 this.com.current?.changeWsData256([...rawData.slice(0, 256)])
               } else {
-                // 旧版数据回退到147显示
                 this.com.current?.changeWsData147([...wsPointData])
               }
             } else if (this.state.numMatrixFlag == 'num3D' && (this.state.matrixName == 'hand0205' || this.state.matrixName == 'handGlove115200')) {
