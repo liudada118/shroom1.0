@@ -560,7 +560,7 @@ class Aside extends React.Component {
                                         </div>
                                         <div className='dataIteminfo'>
                                             <div className='standardColor'>{a.eng}</div>
-                                            <div>{index == 0 ? Number(this.state[arr[index]]).toFixed(2) : Number(this.state[arr[index]]).toFixed(0)} <span style={{ color: '#999' }}>{isGlove && this.props.numMatrixFlag === 'normal' ? '°' : ''}</span></div>
+                                            <div>{index == 0 ? Number(this.state[arr[index]]).toFixed(2) : Number(this.state[arr[index]]).toFixed(0)}</div>
                                         </div>
                                     </div>
                                 )
