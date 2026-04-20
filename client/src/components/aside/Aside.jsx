@@ -78,6 +78,14 @@ class Aside extends React.Component {
             stateInBbed: null,
             sosflag: 0,
             onBedTime: 0,
+            breath_rate: '--',
+            posture_state: null,
+            is_motion: 0,
+            snr_db: '--',
+            quality: '--',
+            bed_exit_flag: 0,
+            pressure_coefficient: '--',
+            petInBed: null,
         }
         this.canvas = React.createRef()
 
@@ -293,7 +301,15 @@ class Aside extends React.Component {
             obj.heart_rate !== undefined ||
             obj.stateInBbed !== undefined ||
             obj.sosflag !== undefined ||
-            obj.onBedTime !== undefined;
+            obj.onBedTime !== undefined ||
+            obj.breath_rate !== undefined ||
+            obj.posture_state !== undefined ||
+            obj.is_motion !== undefined ||
+            obj.snr_db !== undefined ||
+            obj.quality !== undefined ||
+            obj.bed_exit_flag !== undefined ||
+            obj.pressure_coefficient !== undefined ||
+            obj.petInBed !== undefined;
 
         if (hasRealtimeDetectionData) {
             this._lastDataTime = now;
@@ -358,6 +374,22 @@ class Aside extends React.Component {
             },
         }
 
+        const petPostureStatus = {
+            0: this.props.i18n.t('petEmpty'),
+            1: this.props.i18n.t('petPaws'),
+            2: this.props.i18n.t('petTorso'),
+            3: this.props.i18n.t('petMotion'),
+        }
+
+        const petBedStatus = {
+            0: {
+                text: this.props.i18n.t('petOffBed'),
+            },
+            1: {
+                text: this.props.i18n.t('petInBed'),
+            },
+        }
+
         const dataArr = [{
             color: '#FFA63F',
             data: this.props.i18n.t('points'),
@@ -370,6 +402,23 @@ class Aside extends React.Component {
             const s = seconds % 60;
             return [h, m, s].map(v => String(v).padStart(2, "0")).join(":");
         }
+
+        const petPostureState = Number(this.state.posture_state)
+        const petInBed = this.state.petInBed != null
+            ? this.state.petInBed
+            : (petPostureState >= 1 && petPostureState <= 3 ? 1 : 0)
+        const petBreathRate = petPostureState === 2 && this.state.breath_rate != null && this.state.breath_rate !== '--'
+            ? Number(this.state.breath_rate).toFixed(1)
+            : '--'
+        const petSnr = this.state.snr_db != null && this.state.snr_db !== '--'
+            ? Number(this.state.snr_db).toFixed(1)
+            : '--'
+        const petQuality = this.state.quality != null && this.state.quality !== '--'
+            ? Number(this.state.quality).toFixed(1)
+            : '--'
+        const petPressureCoefficient = this.state.pressure_coefficient != null && this.state.pressure_coefficient !== '--'
+            ? Number(this.state.pressure_coefficient).toFixed(2)
+            : '--'
 
         return (
             <div className='aside'>
@@ -416,7 +465,48 @@ class Aside extends React.Component {
                 </div> : ''}
 
                 {/* jqbed 健康监测面板 */}
-                {this.props.matrixName == 'jqbed' ?
+                {this.props.matrixName == 'petCare' ?
+                    <>
+                        <div className="asideContent firstAside">
+                            <h2 className="asideTitle">{this.props.i18n.t('petCareTitle')}</h2>
+                            <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'space-around' }}>
+                                <div>
+                                    <div>
+                                        {this.props.i18n.t('respiration')}
+                                    </div>
+                                    <div>
+                                        {petBreathRate}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div>
+                                        {this.props.i18n.t('petSignalQuality')}
+                                    </div>
+                                    <div>
+                                        {petQuality}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div>
+                                        SNR
+                                    </div>
+                                    <div>
+                                        {petSnr}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="asideContent firstAside" style={{ display: 'flex', flexDirection: 'column', justifyContent: "space-around", backgroundColor: petInBed === 0 ? "#ED4F4F" : "#191932" }}>
+                            {petBedStatus[petInBed] && <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '30px', fontWeight: 'bold' }}>{petBedStatus[petInBed].text}</div>}
+                            <div style={{ display: 'grid', gap: '10px', marginTop: '16px' }}>
+                                <div>{this.props.i18n.t('petPosture')} : {petPostureStatus[petPostureState] || '--'}</div>
+                                <div>{this.props.i18n.t('petMotionFlag')} : {this.state.is_motion ? this.props.i18n.t('petMotion') : this.props.i18n.t('petStill')}</div>
+                                <div>{this.props.i18n.t('petPressureCoeff')} : {petPressureCoefficient}</div>
+                            </div>
+                            <div style={{ marginTop: '20px', textAlign: 'center', background: '#25254F', borderRadius: '12px', padding: "10px 0" }}>{petInBed === 1 ? this.props.i18n.t('inBedDuration') : this.props.i18n.t('leaveBedDuration')} : {secondsToHMS(this.state.onBedTime)}</div>
+                        </div>
+                    </>
+                    : this.props.matrixName == 'jqbed' ?
                     <>
                         <div className="asideContent firstAside">
                             <h2 className="asideTitle">{this.props.i18n.t('vitalSigns')}</h2>

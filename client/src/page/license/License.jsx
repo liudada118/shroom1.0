@@ -44,6 +44,7 @@ const SENSOR_GROUPS = [
     icon: '❤️',
     items: [
       { label: '小床监测', value: 'jqbed' },
+      { label: '宠物看护', value: 'petCare' },
     ],
   },
   {
@@ -114,6 +115,10 @@ const SENSOR_MODULES = {
     { value: 'numoriginal', label: '原始数据' },
   ],
   jqbed: [
+    { value: 'normal', label: '3D模型' },
+    { value: 'numoriginal', label: '原始数据' },
+  ],
+  petCare: [
     { value: 'normal', label: '3D模型' },
     { value: 'numoriginal', label: '原始数据' },
   ],

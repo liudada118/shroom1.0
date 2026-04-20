@@ -732,6 +732,7 @@ const Canvas = React.forwardRef((props, refs) => {
     changeDataFlag: changeDataFlag,
     sitValue,
     backValue,
+    chartReset,
     changeSelectFlag,
     // backRenew,
     sitRenew,

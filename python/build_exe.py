@@ -50,6 +50,15 @@ def build():
         pyd_file = None
 
     # PyInstaller 参数
+    pet_care_dir = os.path.join(app_dir, 'petCare')
+    pet_care_binary = None
+    if platform.system() == 'Windows':
+        candidate = os.path.join(pet_care_dir, 'pet_care_wrapper.cp311-win_amd64.pyd')
+        if os.path.exists(candidate):
+            pet_care_binary = candidate
+        else:
+            print(f"璀﹀憡: 鎵句笉鍒?petCare 鍔ㄦ€佸簱 {candidate}")
+
     args = [
         sys.executable, '-m', 'PyInstaller',
         '--name', 'onbed_server',
@@ -60,6 +69,7 @@ def build():
         '--workpath', os.path.join(script_dir, 'build'),
         '--specpath', script_dir,
         '--paths', app_dir,
+        '--paths', pet_care_dir,
         # 隐藏控制台窗口
         '--console',
         # 收集 numpy
@@ -82,9 +92,13 @@ def build():
         # --add-binary "source;destination" (Windows用;, Unix用:)
         sep = ';' if platform.system() == 'Windows' else ':'
         args.extend(['--add-binary', f'{pyd_file}{sep}.'])
+        if pet_care_binary:
+            args.extend(['--add-binary', f'{pet_care_binary}{sep}petCare'])
 
     args.append(entry)
 
+    if pet_care_binary:
+        print(f"petCare 鍔ㄦ€佸簱: {pet_care_binary}")
     print("=" * 60)
     print("开始 PyInstaller 打包")
     print(f"平台: {platform.system()} {platform.machine()}")

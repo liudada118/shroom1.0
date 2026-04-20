@@ -23,6 +23,26 @@ onbed_filter 模块调用示例
     processor.terminate()
 """
 
+import os
+import sys
+
+
+def extend_runtime_module_paths():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    runtime_base = getattr(sys, "_MEIPASS", script_dir)
+    candidates = [
+        script_dir,
+        runtime_base,
+        os.path.join(script_dir, "petCare"),
+        os.path.join(runtime_base, "petCare"),
+    ]
+    for candidate in candidates:
+        if candidate and os.path.isdir(candidate) and candidate not in sys.path:
+            sys.path.insert(0, candidate)
+
+
+extend_runtime_module_paths()
+
 import numpy as np
 import time
 import onbed_filter as ncz
@@ -477,7 +497,7 @@ def demo_usage():
 import time
 import numpy as np
 import onbed_filter as ncz
-import sys, json, traceback
+import json, traceback
 import importlib
 import io
 import contextlib
@@ -584,6 +604,9 @@ _cop_speed = None
 _extract_peak_frame = None
 _generate_foot_pressure_report = None
 _foot_import_err = None
+_pet_care = None
+_pet_care_import_err = None
+_pet_care_initialized = False
 
 
 @contextlib.contextmanager
@@ -627,6 +650,91 @@ def warm_foot_analysis():
     return {"warmed": True}
 
 
+def ensure_pet_care_loaded():
+    """按需加载宠物看护算法模块。"""
+    global _pet_care, _pet_care_import_err
+
+    if _pet_care is not None:
+        return _pet_care
+
+    try:
+        _pet_care = importlib.import_module('pet_care_wrapper')
+        _pet_care_import_err = None
+        return _pet_care
+    except Exception as err:
+        _pet_care_import_err = err
+        raise RuntimeError(f'pet care module not available: {err}') from err
+
+
+def warm_pet_care():
+    """预热宠物看护算法模块并初始化状态。"""
+    module = ensure_pet_care_loaded()
+    info = module.get_info()
+    module.initialize()
+    global _pet_care_initialized
+    _pet_care_initialized = True
+    return {"warmed": True, "info": info}
+
+
+def reset_pet_care():
+    """重置宠物看护算法状态。"""
+    module = ensure_pet_care_loaded()
+    module.initialize()
+    global _pet_care_initialized
+    _pet_care_initialized = True
+    return {"reset": True}
+
+
+def pet_care_get_info():
+    """获取宠物看护算法信息。"""
+    module = ensure_pet_care_loaded()
+    return module.get_info()
+
+
+def pet_care_step(data, species=1.0, threshold_factor=1.0):
+    """执行单帧宠物看护算法。"""
+    module = ensure_pet_care_loaded()
+    global _pet_care_initialized
+
+    frame_data = np.array(data, dtype=np.float32)
+    if frame_data.shape != (1024,):
+        raise ValueError(f'pet care frame_data shape must be (1024,), got {frame_data.shape}')
+
+    if not _pet_care_initialized:
+        module.initialize()
+        _pet_care_initialized = True
+
+    outputs = module.step({
+        'frame_data': frame_data,
+        'threshold_factor': float(threshold_factor),
+        'species': float(species),
+    })
+
+    def safe_float(val, default=0.0):
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return default
+
+    def safe_list(val):
+        if val is None:
+            return []
+        if hasattr(val, 'tolist'):
+            return val.tolist()
+        return list(val)
+
+    return {
+        "breath_rate": safe_float(outputs.get("breath_rate", 0.0)),
+        "posture_state": safe_float(outputs.get("posture_state", 0.0)),
+        "is_motion": safe_float(outputs.get("is_motion", 0.0)),
+        "snr_db": safe_float(outputs.get("snr_db", -99.0)),
+        "quality": safe_float(outputs.get("quality", 0.0)),
+        "bed_exit_flag": safe_float(outputs.get("bed_exit_flag", 0.0)),
+        "pressure_coefficient": safe_float(outputs.get("pressure_coefficient", 0.0)),
+        "matrix_origin": safe_list(outputs.get("matrix_origin")),
+    }
+
+
 def realtime_server(sensor_data, data_prev=None):
     """实时处理：计算左右脚压力/面积/COP速度"""
     ensure_foot_analysis_loaded()
@@ -666,6 +774,10 @@ FUNCS = {
     "replay_server": replay_server,
     "get_peak_frame": get_peak_frame,
     "generate_foot_pressure_report1": generate_foot_pressure_report1,
+    "warm_pet_care": warm_pet_care,
+    "reset_pet_care": reset_pet_care,
+    "pet_care_get_info": pet_care_get_info,
+    "pet_care_step": pet_care_step,
 }
 
 def handle(req):

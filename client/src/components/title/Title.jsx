@@ -28,10 +28,11 @@ let loadData = ''
 // Default config values (same as Home.jsx initConfig)
 const titleInitConfig = {
   bed: { valueg1: 2, valuej1: 1205, valuel1: 5, valuef1: 6, value1: 0.72 },
+  petCare: { valueg1: 2, valuej1: 2900, valuel1: 5, valuef1: 6, value1: 0.7, valuelInit1: 500 },
   sit: { valueg1: 4.3, valuej1: 1705, valuel1: 11, valuef1: 14, value1: 3.54 },
 }
-const bedArr_title = ['bigBed', 'smallBed', 'bed4096', 'bed4096num', 'matCol', 'matColPos', 'jqbed']
-const matrixNameToType_title = (type) => bedArr_title.includes(type) ? 'bed' : type
+const bedArr_title = ['bigBed', 'smallBed', 'bed4096', 'bed4096num', 'matCol', 'matColPos', 'jqbed', 'petCare']
+const matrixNameToType_title = (type) => type === 'petCare' ? 'petCare' : bedArr_title.includes(type) ? 'bed' : type
 
 /**
  * Get merged config from localStorage cache, supporting sensorType + mode two-dimensional cache.
@@ -371,7 +372,7 @@ class Title extends React.Component {
     const cacheMode = mode; // mode dimension for cache
 
     // Sensor type groups
-    const group1 = ['hand', 'normal', 'footVideo', 'smallBed', 'jqbed', 'bed4096', 'bed4096num']; // 3D point scene / WebGL heatmap
+    const group1 = ['hand', 'normal', 'footVideo', 'smallBed', 'jqbed', 'petCare', 'bed4096', 'bed4096num']; // 3D point scene / WebGL heatmap
     const group2 = ['robot1', 'robotSY', 'robotLCF']; // Robots
     const group3 = ['hand0205', 'handGlove115200']; // Tactile gloves
     const group4 = ['fast256', 'fast1024']; // High-speed
@@ -529,7 +530,7 @@ class Title extends React.Component {
             <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
               <div className='dataTitle'>{t('color')}</div>
               <Slider
-                min={5} max={1000} step={10}
+                min={5} max={matrixName === 'petCare' ? 5000 : 1000} step={10}
                 value={this.props.valuej1}
                 onChange={(value) => {
                   localStorage.setItem("carValuej", value);
@@ -640,6 +641,7 @@ class Title extends React.Component {
       { label: t('sensorBed4096num'), value: 'bed4096num' },
       { label: t('sensorBed4096'), value: 'bed4096' },
       { label: t('sensorJqbed'), value: 'jqbed' },
+      { label: t('sensorPetCare'), value: 'petCare' },
       { label: t('sensorFast256'), value: 'fast256' },
       { label: t('sensorFast1024'), value: 'fast1024' },
       { label: t('sensorNormal'), value: 'normal' },
@@ -848,7 +850,7 @@ class Title extends React.Component {
 
 
 
-        {this.props.matrixName != 'car10' && ['hand0205', 'handGlove115200', 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'normal', 'smallBed', 'jqbed', 'daliegu', 'smallSample', 'bed4096', 'bed4096num'].includes(this.props.matrixName) ?
+        {this.props.matrixName != 'car10' && ['hand0205', 'handGlove115200', 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'normal', 'smallBed', 'jqbed', 'petCare', 'daliegu', 'smallSample', 'bed4096', 'bed4096num'].includes(this.props.matrixName) ?
           <Select
             defaultValue={this.props.numMatrixFlag}
             style={{ width: 90 }}
@@ -895,7 +897,7 @@ class Title extends React.Component {
             ] : this.props.matrixName.includes('robot') ? [
               { value: 'normal', label: t('modal3D') },
               { value: 'numoriginal', label: t('rawData') },
-            ] : ['hand', 'normal', 'smallBed', 'jqbed', 'daliegu', 'smallSample'].includes(this.props.matrixName) ? [
+            ] : ['hand', 'normal', 'smallBed', 'jqbed', 'petCare', 'daliegu', 'smallSample'].includes(this.props.matrixName) ? [
               { value: 'normal', label: t('modal3D') },
               { value: 'numoriginal', label: t('rawData') },
             ] : this.props.matrixName == 'bed4096' || this.props.matrixName == 'bed4096num' ? [

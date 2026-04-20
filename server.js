@@ -138,6 +138,12 @@ let onbedArr = []; // jqbed 鍦ㄥ簥鐘舵€佹暟缁?
 let onBedTime = 0; // jqbed 鍦ㄥ簥/绂诲簥璁℃椂锛堢锛?
 let useMatrixOrigin = false; // jqbed 璋冭瘯 flag锛歵rue 鏃剁敤绠楁硶杩斿洖鐨?matrix_origin 浣滀负 sitData
 let jqbedMatrixOrigin = null; // 缂撳瓨绠楁硶杩斿洖鐨?matrix_origin 鏁版嵁
+let petCareStateArr = [];
+let petCareStableState = null;
+let petCareStateStartedAt = 0;
+let petCareResetPending = true;
+let petCareProcessing = false;
+let petCareLastLoggedAt = 0;
 let lastData = new Array(1024).fill(0),
   firstData = new Array(1024).fill(0);
 const backTotal = backnum1 * backnum2;
@@ -297,6 +303,7 @@ function calcDetectedInterval(timestamps) {
 
 let reconnectTimer = null;
 let jqbedTimer = null;
+let petCareTimer = null;
 let serverOpened = false;
 let serverShutdownRequested = false;
 
@@ -382,6 +389,7 @@ function shutdownServer() {
   stopPlaybackTimer();
   reconnectTimer = clearManagedInterval("serial reconnect timer", reconnectTimer);
   jqbedTimer = clearManagedInterval("jqbed timer", jqbedTimer);
+  petCareTimer = clearManagedInterval("petCare timer", petCareTimer);
 
   localFlag = false;
   sitClose = true;
@@ -959,6 +967,12 @@ module.exports = {
             const receiveFile = JSON.parse(message).file
             // db = new sqlite3.Database(`${filePath}/${receiveFile}.db`);
             file = receiveFile;
+            petCareResetPending = true;
+            petCareProcessing = false;
+            petCareStateArr = [];
+            petCareStableState = null;
+            petCareStateStartedAt = 0;
+            petCareLastLoggedAt = 0;
 
             if (receiveFile == 'handGlove115200') {
               baudRate = 115200
@@ -3259,6 +3273,9 @@ parser.on("data", function (data) {
         // 625
         pointArr = jqbed(pointArr)
         newData = [...pointArr]
+      } else if (file === 'petCare') {
+        pointArr = jqbed(pointArr)
+        newData = [...pointArr]
         // pointArr = press6sit(pointArr, 32, 32, 'col')
         // pointArr = zeroLine(pointArr)
       } else if (file === 'sit') {
@@ -4799,6 +4816,66 @@ function jqbedOppo(arr) {
   return wsPointData;
 }
 
+function normalizePetCareResult(data) {
+  const postureState = Number(data?.posture_state);
+  const inBed = postureState >= 1 && postureState <= 3 ? 1 : 0;
+
+  if (petCareStateArr.length < 2) {
+    petCareStateArr.push(inBed);
+  } else {
+    petCareStateArr.shift();
+    petCareStateArr.push(inBed);
+  }
+
+  if (petCareStateArr.length === 2 && petCareStateArr.every((value) => value === inBed)) {
+    if (petCareStableState !== inBed) {
+      petCareStableState = inBed;
+      petCareStateStartedAt = Date.now();
+    }
+  } else if (petCareStableState == null) {
+    petCareStableState = inBed;
+    petCareStateStartedAt = Date.now();
+  }
+
+  const startedAt = petCareStateStartedAt || Date.now();
+
+  return {
+    ...data,
+    petInBed: petCareStableState ?? inBed,
+    onBedTime: Math.max(0, Math.floor((Date.now() - startedAt) / 1000)),
+  };
+}
+
+function logPetCareResult(result) {
+  const now = Date.now();
+  if (now - petCareLastLoggedAt < 1000) {
+    return;
+  }
+
+  petCareLastLoggedAt = now;
+  const postureState = Number(result?.posture_state);
+  const postureLabel =
+    postureState === 0 ? 'Empty'
+      : postureState === 1 ? 'Paws'
+        : postureState === 2 ? 'Torso'
+          : postureState === 3 ? 'Motion'
+            : 'Unknown';
+
+  logger.info('[petCare] algorithm result', {
+    breath_rate: result?.breath_rate,
+    effective_breath_rate: postureState === 2 ? result?.breath_rate : null,
+    posture_state: postureState,
+    posture_label: postureLabel,
+    is_motion: result?.is_motion,
+    snr_db: result?.snr_db,
+    quality: result?.quality,
+    bed_exit_flag: result?.bed_exit_flag,
+    pressure_coefficient: result?.pressure_coefficient,
+    petInBed: result?.petInBed,
+    onBedTime: result?.onBedTime,
+  });
+}
+
 // jqbed 鍋ュ悍鐩戞祴绠楁硶瀹氭椂璋冪敤锛?25ms锛?
 jqbedTimer = setInterval(async () => {
   if (pointArr&&pointArr.length  && pointArr.every((a) => typeof a == 'number') && file == 'jqbed' && port1 && port1.isOpen) {
@@ -4844,6 +4921,40 @@ jqbedTimer = setInterval(async () => {
     }
   }
 }, 125);
+
+petCareTimer = setInterval(async () => {
+  if (petCareProcessing) {
+    return;
+  }
+
+  if (!(pointArr && pointArr.length && pointArr.every((a) => typeof a == 'number') && file == 'petCare' && port1 && port1.isOpen)) {
+    return;
+  }
+
+  petCareProcessing = true;
+
+  try {
+    if (petCareResetPending) {
+      await callPy('reset_pet_care', {});
+      petCareResetPending = false;
+    }
+
+    const data = await callPy('pet_care_step', { data: [...pointArr] }, { timeoutMs: 30000 });
+    const result = normalizePetCareResult(data);
+    logPetCareResult(result);
+    const jsonData = JSON.stringify({ petCare: result });
+
+    server.clients.forEach(function each(client) {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(jsonData);
+      }
+    });
+  } catch (e) {
+    console.error('[petCare] callPy error:', e.message);
+  } finally {
+    petCareProcessing = false;
+  }
+}, 20);
 
 module.exports.shutdownServer = shutdownServer;
 

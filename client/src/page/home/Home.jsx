@@ -293,7 +293,7 @@ const thrott1 = (fun) => {
 //   // { label: '席悦2.0', value: 'xiyueReal1' },
 //   // { label: '小床监测', value: 'jqbed' },
 // ]
-const bedArr = ['jqbed', 'xiyueReal1', 'smallBed', 'smallBed1']
+const bedArr = ['jqbed', 'petCare', 'xiyueReal1', 'smallBed', 'smallBed1']
 
 const initConfig = {
   bed: {
@@ -302,6 +302,14 @@ const initConfig = {
     valuel1: 5,
     valuef1: 6,
     value1: 0.72,  //高度
+  },
+  petCare: {
+    valueg1: 2,
+    valuej1: 1205,
+    valuel1: 5,
+    valuef1: 6,
+    value1: 0.72,  //楂樺害
+    valuelInit1: 500,
   },
   sit: {
     valueg1: 4.3,
@@ -312,8 +320,19 @@ const initConfig = {
   }
 }
 
+initConfig.petCare = {
+  valueg1: 2,
+  valuej1: 2900,
+  valuel1: 5,
+  valuef1: 6,
+  value1: 0.7,
+  valuelInit1: 500,
+}
+
 const matrixNameToType = (type) => {
-  if (bedArr.includes(type)) {
+  if (type === 'petCare') {
+    return 'petCare'
+  } else if (bedArr.includes(type)) {
     return 'bed'
   } else {
     return type
@@ -448,7 +467,7 @@ class Home extends React.Component {
       valuel1: getConfig({ sensorType: localStorage.getItem('file') }).valuel1,
       valuef1: getConfig({ sensorType: localStorage.getItem('file') }).valuef1,
       value1: getConfig({ sensorType: localStorage.getItem('file') }).value1,
-      valuelInit1: initValue.valuelInit1,
+      valuelInit1: getConfig({ sensorType: localStorage.getItem('file') }).valuelInit1 ?? initValue.valuelInit1,
       valueMult: initValue.valueMult,
       compen: initValue.compen,
       port: [{ value: " ", label: "" }],
@@ -525,9 +544,32 @@ class Home extends React.Component {
     this.headIndexArr = new Array(4).fill(0);
   }
 
+  syncPetCareRendererConfig = () => {
+    if (this.state.matrixName !== 'petCare') {
+      return;
+    }
+
+    const rendererConfig = {
+      valueg: this.state.valueg1,
+      valuej: this.state.valuej1,
+      valuel: this.state.valuel1,
+      valuef: this.state.valuef1,
+      value: this.state.value1,
+      valuelInit: this.state.valuelInit1,
+    };
+
+    if (this.com.current?.sitValue) {
+      this.com.current.sitValue(rendererConfig);
+    }
+    if (this.com.current?.backValue) {
+      this.com.current.backValue(rendererConfig);
+    }
+  }
+
   componentDidMount() {
     // window.alert(window.innerWidth)
     document.documentElement.style.fontSize = `${window.innerWidth / 120}px`;
+    this.syncPetCareRendererConfig();
     // 暴露全局重连函数，供主进程 executeJavaScript 直接调用
     // 确保重连时 onmessage、wsData 等 React 回调完整绑定
     window.__wsReconnect = () => {
@@ -1166,6 +1208,10 @@ class Home extends React.Component {
         // speechSynthesis.speak(msg);
         speakMessage("SOS紧急求助", this.props.i18n.language)
       }
+    }
+
+    if (jsonObject.petCare != null) {
+      this.data.current?.changeData(jsonObject.petCare);
     }
 
     if (jsonObject.sitData != null) {
@@ -2105,6 +2151,22 @@ class Home extends React.Component {
       }
     }
   };
+
+  componentDidUpdate(prevProps, prevState) {
+    const rendererConfigChanged =
+      prevState.matrixName !== this.state.matrixName ||
+      prevState.numMatrixFlag !== this.state.numMatrixFlag ||
+      prevState.valueg1 !== this.state.valueg1 ||
+      prevState.valuej1 !== this.state.valuej1 ||
+      prevState.valuel1 !== this.state.valuel1 ||
+      prevState.valuef1 !== this.state.valuef1 ||
+      prevState.value1 !== this.state.value1 ||
+      prevState.valuelInit1 !== this.state.valuelInit1;
+
+    if (rendererConfigChanged) {
+      this.syncPetCareRendererConfig();
+    }
+  }
 
   ws2Data = (e) => {
     let jsonObject = JSON.parse(e.data);
@@ -3198,12 +3260,12 @@ class Home extends React.Component {
 
           {this.state.numMatrixFlag == "num" &&
             (this.state.matrixName == "foot" ||
-              this.state.matrixName == "hand" || this.state.matrixName == "carCol" || this.state.matrixName == "jqbed" ||
+              this.state.matrixName == "hand" || this.state.matrixName == "carCol" || this.state.matrixName == "jqbed" || this.state.matrixName == "petCare" ||
               this.state.carState == "back" ||
               this.state.carState == "sit") ? (
             <Num ref={this.com} matrixName={this.state.matrixName} />
           ) : this.state.numMatrixFlag == "heatmap" &&
-            (this.state.matrixName == "foot" || this.state.matrixName == "carCol" || this.state.matrixName == "jqbed" ||
+            (this.state.matrixName == "foot" || this.state.matrixName == "carCol" || this.state.matrixName == "jqbed" || this.state.matrixName == "petCare" ||
               this.state.matrixName == "hand" ||
               this.state.carState == "back" ||
               this.state.carState == "sit") ? (
@@ -3272,7 +3334,7 @@ class Home extends React.Component {
                       changeSelect={this.changeSelect} />
                   </CanvasCom>
                   :
-                  this.state.numMatrixFlag == "numoriginal" && ["hand0205", 'handGlove115200', 'robot1', 'footVideo', 'robotSY', 'robotLCF', 'normal', 'smallBed', 'jqbed', 'daliegu', 'smallSample'].includes(this.state.matrixName) ?
+                  this.state.numMatrixFlag == "numoriginal" && ["hand0205", 'handGlove115200', 'robot1', 'footVideo', 'robotSY', 'robotLCF', 'normal', 'smallBed', 'jqbed', 'petCare', 'daliegu', 'smallSample'].includes(this.state.matrixName) ?
                   <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
                     <Num2DOriginal ref={this.com}
                       matrixName={this.state.matrixName}
@@ -3863,6 +3925,18 @@ class Home extends React.Component {
                           local={this.state.local}
                           handleChartsBody={this.handleChartsBody.bind(this)}
                           handleChartsBody1={this.handleChartsBody1.bind(this)}
+                          changeSelect={this.changeSelect}
+                        />
+                      </CanvasCom>
+                    ) : this.state.matrixName == "petCare" ? (
+                      <CanvasCom matrixName={this.state.matrixName}>
+                        <CanvasHand
+                          ref={this.com}
+                          data={this.data}
+                          local={this.state.local}
+                          handleChartsBody={this.handleChartsBody.bind(this)}
+                          handleChartsBody1={this.handleChartsBody1.bind(this)}
+                          changeStateData={this.changeStateData}
                           changeSelect={this.changeSelect}
                         />
                       </CanvasCom>

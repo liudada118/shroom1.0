@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-04-16 13:20
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-04-17 19:05
 
 ## 1. 项目概述
 
@@ -149,6 +149,7 @@ shroom1.0/
 | `/client/src/page/home/` | 主页面组件（Home.js），系统核心交互界面 |
 | `/docs/` | 架构文档、优化报告、技术优化建议等项目文档 |
 | `/scripts/` | 打包与发布脚本目录，包含 Python runtime 同步、更新说明注入，以及打包前清理和 `afterPack`/`afterComplete` 兜底移除 `config.txt` 的脚本 |
+| `/python/app/` | Python 算法桥目录；`onbed_filter_example.py` 提供 JSON-line RPC，`oneStep/` 提供足压分析，`petCare/` 提供宠物看护算法二进制与调用文档 |
 | `/db/` | SQLite 数据库文件，存储采集数据和配置信息（运行时生成，Git 忽略） |
 | `/data/` | CSV 导出文件目录（运行时生成，Git 忽略） |
 
@@ -217,6 +218,7 @@ graph TD
 
 1. **传感器数据采集流程**
     - 硬件传感器通过 USB 串口发送原始二进制数据帧 → `serialHelper.js` 接收并触发 `parser.on('data')` 事件 → `server.js` 调用 `dataProcessor.js` 进行线序映射（`openWeb.js`）、归零校准、高斯平滑 → 处理后的矩阵数据通过 `wsHelper.js` 广播到 WebSocket 端口 19999 → 前端 `useWebSocket` Hook 接收数据 → 更新 `usePressureStore` → React 重新渲染热力图和 3D 模型。
+    - 当系统类型为 `petCare` 时，`server.js` 先按 `jqbed` 线序将 32x32 数据重排，再以 50Hz（20ms）调用 `python/app/petCare/pet_care_wrapper`；算法输出通过 `python/app/onbed_filter_example.py` 的 JSON-line RPC 回传给 Electron，前端 Aside 面板展示呼吸率、姿态、体动、SNR、信号质量、离床告警和压力系数。
 
 2. **数据存储与导出流程**
     - 用户点击"开始采集" → 前端通过 WebSocket 发送 `col` 指令 → `server.js` 开启采集模式 → 每帧数据同时写入 `dbHelper.js`（SQLite）和 `csvHelper.js`（CSV 文件） → 用户点击"停止采集"结束录制。
@@ -402,11 +404,24 @@ graph TD
 | 2026-04-02 17:18 | move-foot-report-import | 足压报告模块路径切换 | 将 `python/app/onbed_filter_example.py` 中的足压报告导入从旧的 `Comprehensive_Indicators_4096_modify_input3` 切换到 `oneStep.Comprehensive_Indicators_4096_modify_input3`，对齐你迁移后的 `python/app/oneStep/` 目录结构并保留相对导入可用 |
 | 2026-04-02 17:26 | fix-onestep-json-encoding | OneStep 导出编码兜底同步 | 将非法 surrogate 字符清洗逻辑同步到 `python/app/oneStep/Comprehensive_Indicators_4096_modify_input3.py`，在新目录下的报告模块里同样对用户字段和 JSON 递归序列化做文本净化，避免迁移路径后再次触发 `UnicodeEncodeError` |
 | 2026-04-03 14:32 | fix-windows-python-encoding | Windows Python UTF-8 report bridge | Force the Electron/Node to Python worker bridge onto UTF-8 on Windows with `PYTHONUTF8`, `PYTHONIOENCODING`, `-X utf8`, and Python-side stdio reconfiguration, and decode multipart `gender` fields before report generation so Chinese names and gender survive the upload-to-report chain |
+| 2026-04-17 16:45 | pet-care-integration | 宠物看护算法接入 | 新增 `petCare` 系统类型与 License 关怀分组选项；后端按 jqbed 线序处理 32x32 数据并以 50Hz 调用 `python/app/petCare` 算法，前端支持展示宠物呼吸/姿态/体动/离床等算法结果，PyInstaller 同步打入 `pet_care_wrapper` 二进制 |
+| 2026-04-17 17:18 | pet-care-line-order-fix | 宠物看护线序修正 | 将 `petCare` 的后端预处理线序从 `handLine` 改为 `jqbed`，对齐新的传感器数据实际排布，保证送入 Python 宠物看护算法的 32x32 矩阵方向正确 |
+| 2026-04-17 17:32 | pet-care-single-render-source | 宠物看护渲染去重 | 调整 `client/src/page/home/Home.jsx`：`petCare` 视图不再在通用 `sitData` 分支里更新 3D/2D 组件，而是只跟随算法回传的 `matrix_origin` 刷新，避免 raw 数据和算法结果双路推送造成同一组件连续重绘 |
+
+| 2026-04-17 18:06 | ld | petCare 算法结果日志打印 | 在 `server.js` 为 `petCare` Python 算法结果新增 1 秒节流日志，终端可直接查看实时输出，同时避免 50Hz 持续刷屏 |
 
 ## 9. 更新日志
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-04-17 19:05 | ld | 修复缺陷 | 修复 `petCare` 实时展示时报 `that.com.current.chartReset is not a function` 的前端异常：`CanvasHand` 已将内部空实现的 `chartReset()` 通过 `useImperativeHandle` 暴露给 `ref`，从而兼容 `util.js` 中 `petCare` 分支的统一调用 |
+| 2026-04-17 18:58 | ld | 配置变更 | 仅调整 `petCare` 的高度默认值：将前端独立默认参数中的 `value1` 从 `0.72` 调整为 `0.7`，其他系统默认值保持不变 |
+| 2026-04-17 18:54 | ld | 配置变更 | 仅调整 `petCare` 的颜色默认值：将前端独立默认参数中的 `valuej1` 从 `1205` 提升到 `2900`，使宠物看护默认色阶与当前软件预期一致，其他系统默认值保持不变 |
+| 2026-04-17 18:46 | ld | 配置变更 | 仅调整 `petCare` 的前端参数配置：颜色滑块上限提升到 `5000`，并为 `petCare` 增加独立默认参数（含 `valuelInit1=500`）；`Home.jsx` 在 `petCare` 激活时会将当前滑块参数同步到 3D/热力图/原始点图组件，保证渲染默认值与界面进度条一致 |
+| 2026-04-17 18:20 | ld | 修复缺陷 | 移除 `petCare` 前端面板在床状态栏右侧的 `onBed/offBed` 图标，仅保留文字状态展示，避免宠物看护界面继续显示 logo |
+| 2026-04-17 18:16 | ld | 修复缺陷 | 移除 `petCare` 前端面板中的“离床警告”单独展示项，仅保留姿态、体动、压力系数和在床状态展示，避免与 `posture_state` 派生状态重复 |
+| 2026-04-17 18:12 | ld | 修复缺陷 | 将 `petCare` 前端在床/离床与离床告警判断统一改为仅依据 `posture_state`：`0` 视为离床告警，`1/2/3` 视为在床，`bed_exit_flag` 不再参与界面判断 |
+| 2026-04-17 18:06 | ld | 配置变更 | 为 `petCare` 算法调用链增加 1 秒节流日志打印，并按文档约束将宠物呼吸值展示限制在 `posture_state === 2` 的躯干受力状态，便于调试实时算法数据并避免错误展示 |
 | 2026-03-02 | Max | 初始化 | 创建项目架构文档（ARCHITECTURE.md） |
 | 2026-03-02 | Max | 新增功能 | 密钥控制系统升级：支持多类型组合授权 + 密钥配置可视化页面（/license） |
 | 2026-03-04 | test | 依赖升级 | 补装 better-sqlite3 依赖并重新执行 Electron Forge 打包，产物输出到 `out/make` |
@@ -519,6 +534,13 @@ graph TD
 | 2026-04-02 17:18 | move-foot-report-import | 修复缺陷 | 修复足压报告调用路径仍指向旧模块的问题：将 `python/app/onbed_filter_example.py` 的导入改为 `oneStep.Comprehensive_Indicators_4096_modify_input3`，使新目录下的 `from . import OneStep_template` 相对导入生效并恢复报告链路 |
 | 2026-04-02 17:26 | fix-onestep-json-encoding | 修复缺陷 | 修复迁移到 `python/app/oneStep/Comprehensive_Indicators_4096_modify_input3.py` 后仍沿用旧 JSON 序列化逻辑导致的 `UnicodeEncodeError`：为新模块新增 `sanitize_text_value()`，并在用户字段入口与 `convert_to_serializable()` 中统一清洗非法 surrogate 字符，恢复新路径下 PDF/JSON 导出稳定性 |
 | 2026-04-03 14:32 | fix-windows-python-encoding | 修复缺陷 | 修复 Windows 下 Electron/Node 写入 Python worker stdin 默认按 GBK 解释导致中文姓名和性别乱码的问题：`pyWorker.js` 强制设置 `PYTHONUTF8` / `PYTHONIOENCODING` 并在 Windows 传入 `-X utf8`，`python/app/onbed_filter_example.py` 启动时将 stdin/stdout/stderr 统一重配为 UTF-8，同时 `server.js` 对 multipart `gender` 字段补充统一解码 |
+| 2026-04-17 16:45 | pet-care-integration | 新增功能 | 新增 `petCare` 宠物看护系统类型：前端在系统类型与 License 关怀目录加入入口，后端按 jqbed 线序重排 32x32 数据并以 50Hz 调用 `python/app/petCare/pet_care_wrapper`，Aside 展示呼吸率、姿态、体动、SNR、质量、离床告警和压力系数，PyInstaller 同步打包宠物算法二进制 |
+| 2026-04-17 17:18 | pet-care-line-order-fix | 修复缺陷 | 修正 `petCare` 送入算法前的线序处理：将 `server.js` 中 `file === 'petCare'` 分支从 `handLine(pointArr)` 改为 `jqbed(pointArr)`，使宠物看护系统与实际数据线序一致 |
+| 2026-04-17 17:32 | pet-care-single-render-source | 修复缺陷 | 修复 `petCare` 3D 组件被双路数据连续刷新的问题：`Home.jsx` 中保留 raw `sitData` 的频率统计与计数逻辑，但跳过对 `sitTypeEvent.petCare(...)` 的二次调用，改为仅由 `jsonObject.petCare.matrix_origin` 驱动可视化更新 |
+| 2026-04-17 18:46 | pet-care-slider-default-sync | 配置变更 | 仅针对 `petCare` 调整颜色滑块上限到 `5000`，并为 `petCare` 提供独立默认参数及渲染器参数同步逻辑，保证 3D/热力图/原始点图默认值与界面滑块一致 |
+| 2026-04-17 18:54 | pet-care-color-default-2900 | 配置变更 | 仅调整 `petCare` 的颜色默认值，将其独立 `valuej1` 默认参数改为 `2900`，其他系统默认值保持不变 |
+| 2026-04-17 18:58 | pet-care-height-default-07 | 配置变更 | 仅调整 `petCare` 的高度默认值，将其独立 `value1` 默认参数改为 `0.7`，其他系统默认值保持不变 |
+| 2026-04-17 19:05 | pet-care-chart-reset-fix | 修复缺陷 | 为 `client/src/components/three/hand.jsx` 暴露 `chartReset` ref 方法，修复 `util.js` 中 `petCare` 正常 3D 展示分支调用 `that.com.current.chartReset()` 时的运行时异常 |
 
 *变更类型：`新增功能` / `优化重构` / `修复缺陷` / `配置变更` / `文档更新` / `依赖升级` / `初始化`*
 

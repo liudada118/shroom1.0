@@ -2317,6 +2317,27 @@ export const sitTypeEvent = {
 
     // const press = Math.round(wsPointData.reduce((a, b) => a + b, 0)/10)
 
+  }, petCare({ that, wsPointData, compen, local }) {
+    if (that.state.numMatrixFlag == "numoriginal") {
+      that.com.current?.changeWsDataRaw([...wsPointData]);
+    } else if (that.state.numMatrixFlag == "num") {
+      that.com.current?.changeWsData(wsPointData);
+    } else if (
+
+      that.state.numMatrixFlag == "heatmap"
+    ) {
+      that.com.current?.bthClickHandle(wsPointData);
+    } else {
+      const arr = [...wsPointData]
+      that.com.current?.sitData({
+        wsPointData: arr,
+      });
+
+      if (!that.state.local) {
+        that.com.current.chartReset()
+      }
+    }
+
   },
   smallBed1({ that, wsPointData, compen }) {
     // console.log(compen)
