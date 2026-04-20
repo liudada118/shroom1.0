@@ -4228,21 +4228,31 @@ parser2.on("data", function (data) {
 
       if (order == 1) {
         firstBlueData1 = [...firstArr]
-      } else {
+       } else {
         lastBlueData1 = [...firstArr]
         pointArr = [...firstBlueData1, ...lastBlueData1]
-        pointArr = footVideo1(pointArr)
-
+        const realArr1 = [...pointArr]
+        let newArr1 = []
+        if (file == 'hand0507' || file == 'hand0205' || file == 'handGlove115200') {
+          newArr1 = handR(pointArr)
+          pointArr = handRVideo1470506(pointArr)
+        } else {
+          pointArr = footVideo1(pointArr)
+        }
         if (pointArr1zero.length) {
           pointArr = pointArr.map((a, index) => numLessZeroToZero(a - pointArr1zero[index]))
         }
         const arr = [...pointArr]
-        const jsonData = JSON.stringify({
-          rotate: rotate,
+        const jsonDataObj1 = {
           backData: arr,
+          realArr: realArr1,
           sitFlag: port1?.isOpen,
           backFlag: port2?.isOpen,
-        });
+        }
+        if (newArr1.length) {
+          jsonDataObj1.newArr147 = newArr1
+        }
+        const jsonData = JSON.stringify(jsonDataObj1);
         // server.clients.forEach(function each(client) {
         //   if (client.readyState === WebSocket.OPEN) {
         //     client.send(jsonData);
@@ -4251,11 +4261,7 @@ parser2.on("data", function (data) {
 
         colOrSendData1(jsonData, [])
       }
-
-
-
     }
-
     if (buffer.length == 146) {
       let pointArr = new Array();
       for (var i = 0; i < buffer.length; i++) {
@@ -4603,7 +4609,6 @@ parser4.on("data", function (data) {
         }
         const arr = [...pointArr]
         const jsonData = JSON.stringify({
-          rotate: rotate,
           backData: arr,
           sitFlag: port1?.isOpen,
           backFlag: port2?.isOpen,
