@@ -3266,7 +3266,7 @@ class Home extends React.Component {
 
 
           {this.state.matrixName != "robot0428" ? <CanvasCom matrixName={this.state.matrixName}>
-            <Aside i18n={i18n} locale={this.state.locale} ref={this.data} matrixName={this.state.matrixName} />
+            <Aside i18n={i18n} locale={this.state.locale} ref={this.data} matrixName={this.state.matrixName} numMatrixFlag={this.state.numMatrixFlag} />
           </CanvasCom> : ''}
 
           {this.state.numMatrixFlag == "num" &&
