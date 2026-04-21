@@ -99,6 +99,43 @@ const getPort = (ports) => {
   return ports
 }
 
+function summarizeSerialPort(port = {}) {
+  const summary = {
+    path: port.path ?? null,
+    manufacturer: port.manufacturer ?? null,
+    serialNumber: port.serialNumber ?? null,
+    pnpId: port.pnpId ?? null,
+    vendorId: port.vendorId ?? null,
+    productId: port.productId ?? null,
+    friendlyName: port.friendlyName ?? null,
+    locationId: port.locationId ?? null,
+  }
+
+  if (port.vendorIdentifier != null) {
+    summary.vendorIdentifier = port.vendorIdentifier
+  }
+
+  if (port.productIdentifier != null) {
+    summary.productIdentifier = port.productIdentifier
+  }
+
+  return summary
+}
+
+function logSerialPortList(reason, ports) {
+  const portList = Array.isArray(ports) ? ports : []
+  logger.info(`[SerialList] ${reason}: detected ${portList.length} port(s)`)
+
+  if (portList.length === 0) {
+    logger.warn(`[SerialList] ${reason}: no serial ports detected`)
+    return
+  }
+
+  portList.forEach((port, index) => {
+    logger.info(`[SerialList] ${reason} #${index + 1}`, summarizeSerialPort(port))
+  })
+}
+
 let baudRate = 1000000
 
 let serialport = { a: 1, b: 2 }
@@ -3141,6 +3178,7 @@ module.exports = {
           if (getMessage.serialReset != null) {
             SerialPort.list().then((ports) => {
               serialport = getPort(ports)//ports; //.filter((a,index) => a.manufacturer === 'wch.cn');
+              logSerialPortList('serialReset', serialport);
 
               server.clients.forEach(function each(client) {
                 /**
@@ -3155,6 +3193,8 @@ module.exports = {
                   client.send(jsonData);
                 }
               });
+            }).catch((err) => {
+              logger.error('[SerialList] serialReset failed', err);
             });
           }
 
@@ -3198,32 +3238,10 @@ module.exports = {
 }
 
 SerialPort.list().then((ports) => {
-  logger.info(
-    "=========================================================================================\r\n"
-  );
-  logger.info(
-    "hello ,there are serialport lists that we selected from your device\r\n"
-  );
-  // console.log(ports)
   serialport = getPort(ports)//ports; //.filter((a,index) => a.manufacturer === 'wch.cn');
-  ports.forEach(function (port) {
-    logger.info("port:%s\r\n", port.path);
-    // try {
-    //   const port1 = new SerialPort(
-    //     { path: "COM5", baudRate: baudRate, autoOpen: true },
-    //     function (err) {
-    //       logger.warn(err, "err");
-    //     }
-    //   );
-    //   //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
-    //   port1.pipe(parser);
-    // } catch (e) {
-
-    // }
-  });
-  logger.info(
-    "=========================================================================================\r\n"
-  );
+  logSerialPortList('startup', serialport);
+}).catch((err) => {
+  logger.error('[SerialList] startup failed', err);
 });
 let pointArr, newData, firstBlueData = [], lastBlueData = [], firstBlueData1 = [], lastBlueData1 = [];
 let index = 0
