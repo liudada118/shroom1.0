@@ -1,6 +1,6 @@
-# 架构文档
+﻿# 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-04-20 15:39
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-04-21
 
 ## 1. 项目概述
 
@@ -271,6 +271,24 @@ graph TD
 | `getMessage.serialReset` | 串口重置 |
 | `getMessage.indexArr` | 批量索引设置 |
 
+### Runtime HTTP / SDK API
+
+- Base URL: `http://127.0.0.1:19245/api/v1`
+- Auth: optional bearer token driven by `SHROOM_SDK_TOKEN`
+- REST endpoints: `GET /health`, `GET /status`, `GET /ports`, `POST /ports/refresh`, `GET /license`, `GET /collect/status`, `POST /collect/start`, `POST /collect/stop`, `POST /device/probe`, `POST /device/connect`, `POST /device/disconnect`
+- Event stream: `ws://127.0.0.1:19245/api/v1/events`
+- Positioning: stable localhost runtime API for SDK and commercial integration, separated from the internal UI WebSocket ports `19999/19998/19997`
+
+### SDK Event Types
+
+- `runtime.ready`: initial runtime snapshot on WebSocket connect
+- `device.status`: device lifecycle and sensor-type changes
+- `device.error`: serial/open/close errors
+- `ports.updated`: refreshed serial-port list
+- `collect.frame`: realtime normalized frame event with `channel`, `sensorType`, `frame`, `frameLength`, optional `rawFrame`, optional `derivedFrame`, and `rotate`
+- `collect.state`: collection session lifecycle with collecting flag, session name, timestamps, and streamed/saved counts
+- `collect.saved`: confirms that a frame batch has been written to SQLite for the active session
+
 ## 6. 外部依赖与集成
 
 | 服务/库 | 用途 | 集成方式 |
@@ -299,6 +317,14 @@ graph TD
 | 数据库路径 | `configManager.js` | SQLite 数据库文件位置 | `./db/info.db` |
 | CSV 导出路径 | `configManager.js` | 采集数据 CSV 导出目录 | `./data/` |
 | 在线时间服务器 | `server.js` 硬编码 | 用于授权时间校验的 HTTPS 端点 | `https://worldtimeapi.org/api/ip` |
+
+### SDK Runtime Env
+
+| Config item | Source | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `SHROOM_SDK_TOKEN` | process env | Optional bearer token for `/api/v1/*` and `/api/v1/events` | empty |
+
+
 
 ## 8. 项目进度
 
@@ -418,10 +444,18 @@ graph TD
 | 2026-04-20 | Codex | 手套弯折角度仅限 3D 遥操模式显示 | `Aside.jsx` 新增 `isGloveRemoteControl` 判定，仅在手套 `numMatrixFlag === 'normal'`（3D 遥操）时显示 `indexAngle` 与“弯折角度 / Bending Angle”；手套其它模式统一回退为压力总和文案与数值 |
 | 2026-04-20 | Codex | 修复 Aside 模式切换不刷新问题 | `Home.jsx` 中 Aside 外层 `CanvasCom` 改为使用 `matrixName:numMatrixFlag` 作为刷新键，避免手套从 3D 遥操切到其它模式后侧栏继续停留在弯折角度显示，保证 Pressure Data 的文案和数值随模式切换实时生效 |
 
+| 2026-04-21 | sdk | Runtime API v1 and JS SDK scaffold | Add localhost `/api/v1` health/status/ports/license/device endpoints, `/api/v1/events` stream, optional token auth, and `sdk/js` package scaffold for commercial integration |
+| 2026-04-21 | sdk | SDK realtime frame stream | Normalize realtime sit/back/head payloads into public `collect.frame` events on `/api/v1/events`, and add `client.events.onFrame()` helper for Node/browser SDK consumers |
+| 2026-04-21 | sdk | SDK collection session control | Add `collect/status`, `collect/start`, `collect/stop`, `device/probe`, plus `collect.state` and `collect.saved` so SDK users can manage full acquisition sessions instead of only consuming raw frame events |
+
+
 ## 9. 更新日志
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-04-21 | sdk | 新增功能 | Introduce Runtime API v1 on `127.0.0.1:19245/api/v1`, add `/api/v1/events` WebSocket stream plus `SHROOM_SDK_TOKEN` auth, and scaffold `sdk/js` for external integration |
+| 2026-04-21 | sdk | 新增功能 | Expose normalized realtime frame events as `collect.frame` over `/api/v1/events`, including channel, sensorType, frameLength, optional raw/derived frame data, and add `client.events.onFrame()` in the JS SDK |
+| 2026-04-21 | sdk | 新增功能 | Add collection-session APIs (`/collect/status`, `/collect/start`, `/collect/stop`) and `device/probe`, then emit `collect.state` and `collect.saved` so external SDK clients can control and audit acquisition from port discovery through SQLite persistence |
 | 2026-04-20 15:39 | Codex | 修复缺陷 | 修复 `client/src/page/home/Home.jsx` 中 Aside 面板切换模式不重渲染的问题：将 Aside 外层 `CanvasCom` 的比较键从仅 `matrixName` 调整为 `matrixName:numMatrixFlag`，使手套在 `normal` 以外模式下能及时恢复显示 `totalPres` 和“压力总和”，不再沿用 3D 遥操模式的弯折角度视图 |
 | 2026-04-20 15:28 | Codex | 修复缺陷 | 调整 `client/src/components/aside/Aside.jsx` 的手套侧栏模式判断：新增 `isGloveRemoteControl` 条件，仅在 `hand0205` / `handGlove115200` 的 `numMatrixFlag === 'normal'`（3D 遥操）时显示食指 `indexAngle` 和“弯折角度”副标题；手套其它模式恢复显示 `totalPres` 和“压力总和” |
 | 2026-04-20 15:20 | Codex | 修复缺陷 | 调整 `client/src/components/aside/Aside.jsx` 的手套侧栏主数值：在保留 `Pressure Data` 标题、原始 256 点压力统计图表和 Pressure Area 点数逻辑不变的前提下，将大号显示值从 `totalPres` 改回原有 `indexAngle`，使“弯折角度”与之前食指角度读数保持一致 |
@@ -561,3 +595,4 @@ graph TD
 ---
 
 *此文档旨在提供项目架构的快照，具体实现细节请参考源代码。*
+

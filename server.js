@@ -82,6 +82,9 @@ const { isCar, dedupli, totalToN, } = require("./util");
 const { pressSmallBed } = require("./utilMatrix");
 const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine, pressNew12203131 } = require('./server/mathUtils');
 const { initDb: _initDbFromModule } = require('./server/dbManager');
+const { createSdkRouter } = require('./server/sdk/router');
+const { attachSdkEventStream } = require('./server/sdk/ws');
+const { sdkEventBus, publishSdkEvent } = require('./server/sdk/events');
 
 const getPort = (ports) => {
   // console.log(ports)
@@ -440,16 +443,7 @@ if (fs.existsSync(nameTxt)) {
     } else {
       file = rawFile || defauleFile;
     }
-    // 鏍规嵁 file 绫诲瀷璁剧疆娉㈢壒鐜?
-    if (file == 'handGlove115200') {
-      baudRate = 115200
-    } else if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(file) || file.includes('robot')) {
-      baudRate = 921600
-    } else if (['bed4096', 'bed4096num'].includes(file)) {
-      baudRate = 3000000
-    } else {
-      baudRate = 1000000
-    }
+    baudRate = resolveBaudRate(file);
   } catch (err) {
     logger.error(err);
   }
@@ -525,6 +519,633 @@ let pointArr4zeroData = [], newArr147 = [], newArr147_2 = [];
 server = new WebSocket.Server({ port: 19999 });
 server1 = new WebSocket.Server({ port: 19998 });
 server2 = new WebSocket.Server({ port: 19997 });
+let sdkEventServer = null;
+let sdkFrameSequence = 0;
+let collectStartedAt = 0;
+let collectStoppedAt = 0;
+let collectSessionName = null;
+let collectLastFrameAt = 0;
+let collectFramesStreamed = { sit: 0, back: 0, head: 0 };
+let collectFramesSaved = { sit: 0, back: 0, head: 0 };
+
+function resolveBaudRate(sensorType) {
+  if (sensorType === 'handGlove115200') {
+    return 115200;
+  }
+
+  if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(sensorType) || sensorType?.includes('robot')) {
+    return 921600;
+  }
+
+  if (['bed4096', 'bed4096num'].includes(sensorType)) {
+    return 3000000;
+  }
+
+  return 1000000;
+}
+
+function resetPetCareRuntimeState() {
+  petCareResetPending = true;
+  petCareProcessing = false;
+  petCareStateArr = [];
+  petCareStableState = null;
+  petCareStateStartedAt = 0;
+  petCareLastLoggedAt = 0;
+}
+
+function resetPlaybackRuntimeState() {
+  stopPlaybackTimer();
+  nowIndex = 0;
+  localData = [];
+  localDataBack = [];
+  localDataHead = [];
+  indexArr = [0, 0];
+}
+
+function emitSdkStatus(reason, extra = {}) {
+  publishSdkEvent("device.status", {
+    reason,
+    ...extra,
+    status: getRuntimeStatus(),
+  });
+}
+
+function emitSdkError(role, error, portPath = null) {
+  publishSdkEvent("device.error", {
+    role,
+    path: portPath,
+    message: error?.message || String(error),
+  });
+}
+
+function parseFramePayload(jsonData) {
+  try {
+    return JSON.parse(jsonData);
+  } catch (error) {
+    logger.warn("[SDK] failed to parse frame payload:", error.message);
+    return null;
+  }
+}
+
+function createEmptyChannelCounts() {
+  return { sit: 0, back: 0, head: 0 };
+}
+
+function sumChannelCounts(counts = {}) {
+  return Object.values(counts).reduce((total, value) => total + Number(value || 0), 0);
+}
+
+function resetCollectMetrics() {
+  collectFramesStreamed = createEmptyChannelCounts();
+  collectFramesSaved = createEmptyChannelCounts();
+  collectLastFrameAt = 0;
+}
+
+function resolveCollectSessionName(options = {}) {
+  const candidates = [
+    options.sessionName,
+    options.collectionName,
+    options.time,
+    options.colName,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  return new Date().toISOString();
+}
+
+function getCollectStatus() {
+  return {
+    collecting: Boolean(flag),
+    sessionName: collectSessionName || saveTime || null,
+    startedAt: collectStartedAt || null,
+    stoppedAt: collectStoppedAt || null,
+    lastFrameAt: collectLastFrameAt || null,
+    streamCounts: { ...collectFramesStreamed },
+    savedCounts: { ...collectFramesSaved },
+    totalStreamed: sumChannelCounts(collectFramesStreamed),
+    totalSaved: sumChannelCounts(collectFramesSaved),
+    sensorType: file,
+    hz: colHZ,
+  };
+}
+
+function publishCollectState(reason, extra = {}) {
+  publishSdkEvent("collect.state", {
+    reason,
+    ...extra,
+    status: getCollectStatus(),
+  });
+}
+
+function setCollectingState(nextValue, options = {}) {
+  const nextCollecting = Boolean(nextValue);
+  const previousCollecting = Boolean(flag);
+  const shouldResetMetrics = Boolean(options.resetMetrics);
+
+  if (typeof options.hz !== "undefined" && options.hz !== null) {
+    const nextHz = Number(options.hz);
+    if (Number.isFinite(nextHz) && nextHz > 0) {
+      colHZ = nextHz;
+    }
+  }
+
+  if (typeof options.sessionName === "string" && options.sessionName.trim()) {
+    collectSessionName = options.sessionName.trim();
+    saveTime = collectSessionName;
+  }
+
+  if (nextCollecting) {
+    if (!previousCollecting || shouldResetMetrics) {
+      collectStartedAt = Date.now();
+      resetCollectMetrics();
+    }
+
+    collectStoppedAt = 0;
+
+    if (!collectSessionName && typeof saveTime === "string" && saveTime.trim()) {
+      collectSessionName = saveTime.trim();
+    }
+
+    if (!collectSessionName) {
+      collectSessionName = resolveCollectSessionName(options);
+      saveTime = collectSessionName;
+    }
+  } else if (previousCollecting) {
+    collectStoppedAt = Date.now();
+  }
+
+  flag = nextCollecting;
+  publishCollectState(nextCollecting ? "started" : "stopped", {
+    source: options.source || "runtime",
+  });
+
+  return getCollectStatus();
+}
+
+function buildCollectFrameEvent(channel, payload = {}, extra = {}) {
+  const key = channel === "sit" ? "sitData" : channel === "back" ? "backData" : "headData";
+  const frame = payload[key];
+
+  if (!Array.isArray(frame) || frame.length === 0) {
+    return null;
+  }
+
+  return {
+    sequence: ++sdkFrameSequence,
+    channel,
+    source: "realtime",
+    sensorType: file,
+    hz: Number(payload.hz) || colHZ,
+    frame,
+    frameLength: frame.length,
+    rawFrame: Array.isArray(payload.realArr) ? payload.realArr : undefined,
+    derivedFrame: Array.isArray(payload.newArr147) ? payload.newArr147 : undefined,
+    rotate: Array.isArray(payload.rotate) ? payload.rotate : undefined,
+    flags: {
+      sitOpen: Boolean(port1?.isOpen),
+      backOpen: Boolean(port2?.isOpen),
+      headOpen: Boolean(portHead?.isOpen),
+    },
+    ...extra,
+  };
+}
+
+function publishCollectFrame(channel, payload = {}, extra = {}) {
+  const eventPayload = buildCollectFrameEvent(channel, payload, extra);
+  if (!eventPayload) {
+    return;
+  }
+
+  eventPayload.collecting = Boolean(flag);
+  eventPayload.sessionName = collectSessionName || saveTime || null;
+  if (flag) {
+    collectFramesStreamed[channel] = (collectFramesStreamed[channel] || 0) + 1;
+    collectLastFrameAt = Date.now();
+  }
+  eventPayload.streamCount = collectFramesStreamed[channel] || 0;
+  eventPayload.totalStreamed = sumChannelCounts(collectFramesStreamed);
+  eventPayload.lastFrameAt = collectLastFrameAt || null;
+
+  publishSdkEvent("collect.frame", eventPayload);
+}
+
+function markCollectFrameSaved(channel, extra = {}) {
+  collectFramesSaved[channel] = (collectFramesSaved[channel] || 0) + 1;
+  publishSdkEvent("collect.saved", {
+    channel,
+    sessionName: collectSessionName || saveTime || null,
+    savedCount: collectFramesSaved[channel],
+    totalSaved: sumChannelCounts(collectFramesSaved),
+    ...extra,
+    status: getCollectStatus(),
+  });
+}
+
+function attachPortObservers(role, portRef, portPath) {
+  if (!portRef || typeof portRef.on !== "function") {
+    return;
+  }
+
+  portRef.on("open", () => {
+    emitSdkStatus(`${role}.open`, { role, path: portPath });
+  });
+
+  portRef.on("close", () => {
+    emitSdkStatus(`${role}.close`, { role, path: portPath });
+  });
+
+  portRef.on("error", (error) => {
+    logger.warn(`[SDK] ${role} port error:`, error);
+    emitSdkError(role, error, portPath);
+  });
+}
+
+function applySensorType(nextFile) {
+  if (!nextFile) {
+    return;
+  }
+
+  file = nextFile;
+  baudRate = resolveBaudRate(nextFile);
+
+  const nextDbObj = initDb(file);
+  db = nextDbObj.db;
+  db1 = nextDbObj.db1;
+  db2 = nextDbObj.db2;
+
+  resetPetCareRuntimeState();
+  resetPlaybackRuntimeState();
+
+  emitSdkStatus("sensor.changed", {
+    sensorType: file,
+    baudRate,
+  });
+}
+
+function closeSitPort() {
+  sitClose = true;
+  com = undefined;
+
+  if (port1?.isOpen) {
+    port1.close((err) => {
+      if (err) {
+        logger.warn('port1 close error:', err);
+        emitSdkError("sit", err, port1?.path || null);
+      }
+    });
+  }
+
+  emitSdkStatus("sit.close-requested");
+}
+
+function closeBackPort() {
+  backClose = true;
+  com1 = undefined;
+
+  if (port2?.isOpen) {
+    port2.close((err) => {
+      if (err) {
+        logger.warn('port2 close error:', err);
+        emitSdkError("back", err, port2?.path || null);
+      }
+    });
+  }
+
+  emitSdkStatus("back.close-requested");
+}
+
+function closeHeadPort() {
+  headClose = true;
+  comhead = undefined;
+
+  if (portHead?.isOpen) {
+    portHead.close((err) => {
+      if (err) {
+        logger.warn('portHead close error:', err);
+        emitSdkError("head", err, portHead?.path || null);
+      }
+    });
+  }
+
+  emitSdkStatus("head.close-requested");
+}
+
+function openSitPort(portPath) {
+  if (!portPath) {
+    throw new Error("sitPort is required");
+  }
+
+  sitClose = false;
+  com = portPath;
+
+  if (portPath === com1) {
+    closeBackPort();
+  }
+
+  if (port1?.isOpen) {
+    port1.close((e) => {
+      logger.debug(e);
+    });
+  }
+
+  logger.debug(baudRate);
+  try {
+    port1 = new SerialPort(
+      {
+        path: portPath,
+        baudRate,
+        autoOpen: true,
+      },
+      function (err) {
+        if (err) {
+          logger.warn(err, "err");
+          emitSdkError("sit", err, portPath);
+        }
+      }
+    );
+    attachPortObservers("sit", port1, portPath);
+    port1.pipe(file !== "bigBed" ? parser : parser3);
+  } catch (error) {
+    logger.warn(error, "e");
+    emitSdkError("sit", error, portPath);
+    throw error;
+  }
+}
+
+function openHeadPort(portPath) {
+  if (!portPath) {
+    throw new Error("headPort is required");
+  }
+
+  headClose = false;
+  comhead = portPath;
+
+  if (portHead?.isOpen) {
+    portHead.close((e) => {
+      logger.debug(e);
+    });
+  }
+
+  try {
+    portHead = new SerialPort(
+      {
+        path: portPath,
+        baudRate,
+        autoOpen: true,
+      },
+      function (err) {
+        if (err) {
+          logger.warn(err, "headerr");
+          emitSdkError("head", err, portPath);
+        }
+      }
+    );
+    attachPortObservers("head", portHead, portPath);
+    portHead.pipe(parser4);
+  } catch (error) {
+    logger.warn(error, "e");
+    emitSdkError("head", error, portPath);
+    throw error;
+  }
+}
+
+function openBackPort(portPath) {
+  if (!portPath) {
+    throw new Error("backPort is required");
+  }
+
+  backClose = false;
+  com1 = portPath;
+
+  if (portPath === com) {
+    closeSitPort();
+  }
+
+  if (port2?.isOpen) {
+    port2.close((e) => {
+      logger.debug(e);
+    });
+  }
+
+  try {
+    port2 = new SerialPort(
+      {
+        path: portPath,
+        baudRate,
+        autoOpen: true,
+      },
+      function (err) {
+        if (err) {
+          logger.warn(err, "err");
+          emitSdkError("back", err, portPath);
+        }
+      }
+    );
+    attachPortObservers("back", port2, portPath);
+    port2.pipe(parser2);
+  } catch (error) {
+    logger.warn(error, "e");
+    emitSdkError("back", error, portPath);
+    throw error;
+  }
+}
+
+function refreshSerialPorts() {
+  return SerialPort.list().then((ports) => {
+    serialport = getPort(ports);
+    publishSdkEvent("ports.updated", {
+      ports: serialport,
+    });
+    return serialport;
+  });
+}
+
+function getLicenseStatus() {
+  const serverTime = Number(nowDate) > 0 ? Number(nowDate) : Date.now();
+  const expiresAt = Number(endDate) || 0;
+  const valid = expiresAt > serverTime;
+
+  return {
+    valid,
+    expiresAt,
+    now: serverTime,
+    remainingMs: valid ? expiresAt - serverTime : 0,
+    sensorType: file,
+    selectFlag,
+    configPath: nameTxt,
+  };
+}
+
+function getRuntimeHealth() {
+  return {
+    ok: true,
+    serverOpened,
+    httpPort: 19245,
+    wsPorts: [19999, 19998, 19997],
+    sensorType: file,
+    licenseValid: getLicenseStatus().valid,
+  };
+}
+
+function getRuntimeStatus() {
+  return {
+    sensorType: file,
+    baudRate,
+    runtime: {
+      localFlag,
+      playFlag,
+      nowIndex,
+      interval,
+      detectedInterval,
+    },
+    ports: {
+      sit: {
+        path: com || port1?.path || null,
+        isOpen: Boolean(port1?.isOpen),
+        closeRequested: sitClose,
+      },
+      back: {
+        path: com1 || port2?.path || null,
+        isOpen: Boolean(port2?.isOpen),
+        closeRequested: backClose,
+      },
+      head: {
+        path: comhead || portHead?.path || null,
+        isOpen: Boolean(portHead?.isOpen),
+        closeRequested: headClose,
+      },
+    },
+    license: getLicenseStatus(),
+    collect: getCollectStatus(),
+    serialPorts: Array.isArray(serialport) ? serialport : [],
+  };
+}
+
+async function probeDevice(options = {}) {
+  const ports = await refreshSerialPorts();
+  const portPath = options.portPath || options.sitPort || options.backPort || options.headPort || null;
+  const requestedChannel = options.channel || (options.headPort ? "head" : options.backPort ? "back" : "sit");
+  const sensorType = options.sensorType || file;
+  const matchedPort = portPath ? ports.find((port) => port.path === portPath) || null : null;
+  const recommendedBaudRate = options.baudRate != null ? Number(options.baudRate) : resolveBaudRate(sensorType);
+
+  return {
+    requested: {
+      channel: requestedChannel,
+      portPath,
+      sensorType,
+      baudRate: recommendedBaudRate,
+    },
+    matched: Boolean(matchedPort),
+    matchedPort,
+    connectable: Boolean(matchedPort),
+    availablePorts: ports,
+  };
+}
+
+async function connectDevice(options = {}) {
+  const {
+    sensorType,
+    sitPort,
+    backPort,
+    headPort,
+    baudRate: nextBaudRate,
+  } = options;
+
+  if (sensorType) {
+    applySensorType(sensorType);
+  }
+
+  if (nextBaudRate != null) {
+    const parsedBaudRate = Number(nextBaudRate);
+    if (!Number.isFinite(parsedBaudRate) || parsedBaudRate <= 0) {
+      throw new Error("baudRate must be a positive number");
+    }
+    baudRate = parsedBaudRate;
+  }
+
+  if (!sitPort && !backPort && !headPort) {
+    throw new Error("At least one of sitPort, backPort, or headPort is required");
+  }
+
+  if (sitPort) {
+    openSitPort(sitPort);
+  }
+
+  if (backPort) {
+    openBackPort(backPort);
+  }
+
+  if (headPort) {
+    openHeadPort(headPort);
+  }
+
+  emitSdkStatus("device.connect-requested", {
+    requested: {
+      sensorType: sensorType || file,
+      sitPort: sitPort || null,
+      backPort: backPort || null,
+      headPort: headPort || null,
+      baudRate,
+    },
+  });
+
+  return getRuntimeStatus();
+}
+
+async function disconnectDevice(options = {}) {
+  const disconnectSit = options.sit !== false;
+  const disconnectBack = options.back !== false;
+  const disconnectHead = options.head !== false;
+
+  if (disconnectSit) {
+    closeSitPort();
+  }
+
+  if (disconnectBack) {
+    closeBackPort();
+  }
+
+  if (disconnectHead) {
+    closeHeadPort();
+  }
+
+  emitSdkStatus("device.disconnect-requested", {
+    requested: {
+      sit: disconnectSit,
+      back: disconnectBack,
+      head: disconnectHead,
+    },
+  });
+
+  return getRuntimeStatus();
+}
+
+async function startCollect(options = {}) {
+  if (!port1?.isOpen && !port2?.isOpen && !portHead?.isOpen) {
+    throw new Error("No device port is open");
+  }
+
+  const sessionName = resolveCollectSessionName(options);
+  return setCollectingState(true, {
+    source: "sdk",
+    sessionName,
+    hz: options.hz,
+    resetMetrics: true,
+  });
+}
+
+async function stopCollect(options = {}) {
+  return setCollectingState(false, {
+    source: "sdk",
+    reason: options.reason || null,
+  });
+}
 
 module.exports = {
   openServer() {
@@ -779,15 +1400,7 @@ module.exports = {
             }
             endDate = parseFloat(parsedLicense.date);
 
-            if (file == 'handGlove115200') {
-              baudRate = 115200
-            } else if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(file) || file.includes('robot')) {
-              baudRate = 921600
-            } else if (['bed4096', 'bed4096num'].includes(file)) {
-              baudRate = 3000000
-            } else {
-              baudRate = 1000000
-            }
+            baudRate = resolveBaudRate(file);
 
             server.clients.forEach(function each(client) {
               const payload = {
@@ -965,37 +1578,7 @@ module.exports = {
               });
             }
             const receiveFile = JSON.parse(message).file
-            // db = new sqlite3.Database(`${filePath}/${receiveFile}.db`);
-            file = receiveFile;
-            petCareResetPending = true;
-            petCareProcessing = false;
-            petCareStateArr = [];
-            petCareStableState = null;
-            petCareStateStartedAt = 0;
-            petCareLastLoggedAt = 0;
-
-            if (receiveFile == 'handGlove115200') {
-              baudRate = 115200
-            } else if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(receiveFile) || receiveFile.includes('robot')) {
-              baudRate = 921600
-            } else if (['bed4096', 'bed4096num',].includes(receiveFile)) {
-              baudRate = 3000000
-            } else {
-              baudRate = 1000000
-            }
-
-            const dbObj = initDb(file)
-            db = dbObj.db
-            db1 = dbObj.db1
-            db2 = dbObj.db2
-
-            // 切换 file 时重置回放状态
-            stopPlaybackTimer();
-            nowIndex = 0;
-            localData = [];
-            localDataBack = [];
-            localDataHead = [];
-            indexArr = [0, 0];
+            applySensorType(receiveFile);
 
           }
 
@@ -1410,15 +1993,23 @@ module.exports = {
 
           if (JSON.parse(message).time != null) {
             saveTime = JSON.parse(message).time;
+            collectSessionName = saveTime;
           }
           if (JSON.parse(message).colName != null) {
             saveTime = JSON.parse(message).colName;
+            collectSessionName = saveTime;
           }
 
           if (JSON.parse(message).flag === true) {
-            flag = true;
+            setCollectingState(true, {
+              source: "ui",
+              sessionName: collectSessionName || saveTime || undefined,
+              resetMetrics: true,
+            });
           } else if (JSON.parse(message).flag === false) {
-            flag = false;
+            setCollectingState(false, {
+              source: "ui",
+            });
           }
 
           if (JSON.parse(message).colHZ != null) {
@@ -1429,118 +2020,19 @@ module.exports = {
            * 鐏忓棗鐤勯弮璺洪獓濡炲懏鏆熼幑顕€鈧岸浜鹃幍鎾崇磻
            */
           if (JSON.parse(message).sitPort != null) {
-            sitClose = false
-            com = JSON.parse(message).sitPort;
-            if (port1?.isOpen) {
-              port1.close((e) => {
-                logger.debug(e)
-              });
-            }
-            if (com == com1) {
-              if (port2?.isOpen) {
-                port2.close((e) => {
-                  logger.debug(e)
-                });
-              }
-            }
-            logger.debug(baudRate)
-            if (file != "bigBed") {
-              console.log(com);
-              try {
-                port1 = new SerialPort(
-                  {
-                    path: JSON.parse(message).sitPort,
-
-                    baudRate: baudRate,
-                    autoOpen: true,
-                  },
-                  function (err) {
-                    logger.warn(err, "err");
-                  }
-                );
-                //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
-                // let splitBuffer = Buffer.from([0xaa, 0x55, 0x03, 0x99]);
-                // parser = new Delimiter({ delimiter: splitBuffer });
-                port1.pipe(parser);
-              } catch (e) {
-                logger.warn(e, "e");
-              }
-            } else {
-              try {
-                port1 = new SerialPort(
-                  {
-                    path: JSON.parse(message).sitPort,
-
-                    baudRate: baudRate,
-                    autoOpen: true,
-                  },
-                  function (err) {
-                    logger.warn(err, "err");
-                  }
-                );
-                //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
-                port1.pipe(parser3);
-              } catch (e) {
-                logger.warn(e, "e");
-              }
+            try {
+              openSitPort(JSON.parse(message).sitPort);
+            } catch (e) {
+              logger.warn(e, "e");
             }
           }
 
 
           if (JSON.parse(message).headPort != null) {
-            headClose = false
-            comhead = JSON.parse(message).headPort;
-            if (portHead?.isOpen) {
-              portHead.close((e) => {
-                logger.debug(e)
-              });
-            }
-            // if (com == com1) {
-            //   if (port2?.isOpen) {
-            //     port2.close((e) => {
-            //       logger.debug(e)
-            //     });
-            //   }
-            // }
-            if (file != "bigBed") {
-              // console.log(com);
-              try {
-                portHead = new SerialPort(
-                  {
-                    path: JSON.parse(message).headPort,
-
-                    baudRate: baudRate,
-                    autoOpen: true,
-                  },
-                  function (err) {
-                    console.log(err, baudRate, JSON.parse(message).headPort, "headerr");
-                  }
-                );
-                //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
-                // let splitBuffer = Buffer.from([0xaa, 0x55, 0x03, 0x99]);
-                // parser = new Delimiter({ delimiter: splitBuffer });
-                portHead.pipe(parser4);
-              } catch (e) {
-                logger.warn(e, "e");
-              }
-            } else {
-              try {
-                portHead = new SerialPort(
-                  {
-                    path: JSON.parse(message).headPort,
-
-                    baudRate: baudRate,
-                    autoOpen: true,
-                  },
-                  function (err) {
-                    console.log(err, "headerr");
-                  }
-                );
-                //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
-                portHead.pipe(parser4);
-              } catch (e) {
-                logger.warn(e, "e");
-              }
+            try {
+              openHeadPort(JSON.parse(message).headPort);
+            } catch (e) {
+              logger.warn(e, "e");
             }
           }
 
@@ -1548,36 +2040,8 @@ module.exports = {
            * 鐏忓棗鐤勯弮鍫曟浆閼冲本鏆熼幑顕€鈧岸浜鹃幍鎾崇磻
            */
           if (JSON.parse(message).backPort != null) {
-            backClose = false
-            com1 = JSON.parse(message).backPort;
-            if (port2?.isOpen) {
-              port2.close((e) => {
-                console.log(e, 'closeport2')
-              });
-            }
-            if (com == com1) {
-              if (port1?.isOpen) {
-                port1.close((e) => {
-
-                  console.log(e, 'closeport1')
-                });
-              }
-            }
             try {
-              port2 = new SerialPort(
-                {
-                  path: JSON.parse(message).backPort,
-
-                  baudRate: baudRate,
-                  autoOpen: true,
-                },
-                function (err) {
-                  logger.warn(err, "err");
-                }
-              );
-              //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
-
-              port2.pipe(parser2);
+              openBackPort(JSON.parse(message).backPort);
             } catch (e) {
               logger.warn(e, "e");
             }
@@ -1587,36 +2051,18 @@ module.exports = {
            * 鐏忓棗楠囧鍛殶閹诡噣鈧岸浜鹃崗鎶芥４
            */
           if (JSON.parse(message).sitClose === true) {
-            sitClose = true
-            com = undefined; // 清除 com 防止自动重连
-            if (port1?.isOpen) {
-              port1.close((err) => {
-                if (err) logger.warn('port1 close error:', err);
-              });
-            }
+            closeSitPort();
           }
 
           /**
            * 鐏忓棝娼懗灞炬殶閹诡噣鈧岸浜鹃崗鎶芥４
            */
           if (JSON.parse(message).backClose === true) {
-            backClose = true
-            com1 = undefined; // 清除 com1 防止自动重连
-            if (port2?.isOpen) {
-              port2.close((err) => {
-                if (err) logger.warn('port2 close error:', err);
-              });
-            }
+            closeBackPort();
           }
 
           if (JSON.parse(message).headClose === true) {
-            headClose = true
-            comhead = undefined; // 清除 comhead 防止自动重连
-            if (portHead?.isOpen) {
-              portHead.close((err) => {
-                if (err) logger.warn('portHead close error:', err);
-              });
-            }
+            closeHeadPort();
           }
           /**
            * 鐏忓棜顕伴崣鏍ㄦ拱閸︾増鏆熼幑顕€鈧岸浜鹃幍鎾崇磻
@@ -3139,15 +3585,13 @@ module.exports = {
 
           // 闁插秵鏌婄拠閿嬬湴娑撴彃褰?
           if (getMessage.serialReset != null) {
-            SerialPort.list().then((ports) => {
-              serialport = getPort(ports)//ports; //.filter((a,index) => a.manufacturer === 'wch.cn');
-
+            refreshSerialPorts().then((ports) => {
               server.clients.forEach(function each(client) {
                 /**
                  * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                  *  */
                 const jsonData = JSON.stringify({
-                  port: serialport,
+                  port: ports,
                   // length: csvSitData.length,
                   // sitData: csvSitData[0], backData: csvBackData[0]
                 });
@@ -3472,6 +3916,7 @@ parser.on("data", function (data) {
         sitFlag: port1?.isOpen,
         backFlag: port2?.isOpen,
       });
+      publishCollectFrame("sit", parseFramePayload(jsonData) || {});
       server.clients.forEach(function each(client) {
         if (client.readyState === WebSocket.OPEN) {
           client.send(jsonData);
@@ -4071,6 +4516,7 @@ parser.on("data", function (data) {
 });
 
 function colOrSendData(jsonData) {
+  const framePayload = parseFramePayload(jsonData);
   // console.log(JSON.stringify(JSON.parse(jsonData).sitData) , 'jsonData')
   const nowDate = new Date().getTime()
   if (flag
@@ -4115,12 +4561,20 @@ function colOrSendData(jsonData) {
           logger.error(err);
           return;
         }
+        markCollectFrameSaved("sit", {
+          dbRowId: this.lastID,
+          timestamp,
+          sessionName: date,
+        });
         console.log(`Event inserted with ID ${this.lastID}`);
       }
     );
   }
 
   if (!localFlag) {
+    if (framePayload) {
+      publishCollectFrame("sit", framePayload);
+    }
 
     server.clients.forEach(function each(client) {
       if (client.readyState === WebSocket.OPEN) {
@@ -4186,6 +4640,11 @@ parser2.on("data", function (data) {
               logger.error(err);
               return;
             }
+            markCollectFrameSaved("back", {
+              dbRowId: this.lastID,
+              timestamp,
+              sessionName: date,
+            });
             console.log(`Event inserted with ID ${this.lastID}`);
           }
         );
@@ -4203,6 +4662,7 @@ parser2.on("data", function (data) {
           jsonData = JSON.stringify({ backData: pointArr2 });
         }
 
+        publishCollectFrame("back", parseFramePayload(jsonData) || {});
         server.clients.forEach(function each(client) {
           if (client.readyState === WebSocket.OPEN) {
             client.send(jsonData);
@@ -4386,6 +4846,7 @@ parser2.on("data", function (data) {
 });
 
 function colOrSendData1(jsonData) {
+  const framePayload = parseFramePayload(jsonData);
 
   const nowDate = new Date().getTime()
   if (flag
@@ -4416,12 +4877,20 @@ function colOrSendData1(jsonData) {
           logger.error(err);
           return;
         }
+        markCollectFrameSaved("back", {
+          dbRowId: this.lastID,
+          timestamp,
+          sessionName: date,
+        });
         console.log(`Event inserted with ID ${this.lastID}`);
       }
     );
   }
 
   if (!localFlag) {
+    if (framePayload) {
+      publishCollectFrame("back", framePayload);
+    }
 
     server.clients.forEach(function each(client) {
       if (client.readyState === WebSocket.OPEN) {
@@ -4466,6 +4935,7 @@ parser3.on("data", function (data) {
           res = a;
           if (!localFlag) {
             let jsonData = JSON.stringify({ sitData: res });
+            publishCollectFrame("sit", parseFramePayload(jsonData) || {});
             server.clients.forEach(function each(client) {
               if (client.readyState === WebSocket.OPEN) {
                 client.send(jsonData);
@@ -4496,6 +4966,11 @@ parser3.on("data", function (data) {
                     logger.error(err);
                     return;
                   }
+                  markCollectFrameSaved("sit", {
+                    dbRowId: this.lastID,
+                    timestamp,
+                    sessionName: date,
+                  });
                   console.log(`Event inserted with ID ${this.lastID}`);
                 }
               );
@@ -4556,6 +5031,11 @@ parser4.on("data", function (data) {
               logger.error(err);
               return;
             }
+            markCollectFrameSaved("head", {
+              dbRowId: this.lastID,
+              timestamp,
+              sessionName: date,
+            });
             console.log(`Event inserted with ID ${this.lastID}`);
           }
         );
@@ -4573,6 +5053,7 @@ parser4.on("data", function (data) {
           jsonData = JSON.stringify({ headData: pointArr4 });
         }
 
+        publishCollectFrame("head", parseFramePayload(jsonData) || {});
         server.clients.forEach(function each(client) {
           if (client.readyState === WebSocket.OPEN) {
             client.send(jsonData);
@@ -4697,6 +5178,7 @@ parser4.on("data", function (data) {
 
 
 function colOrSendData2(jsonData) {
+  const framePayload = parseFramePayload(jsonData);
 
   const nowDate = new Date().getTime()
   if (flag && nowDate - oldTimeStamp > 1000 / colHZ) {
@@ -4725,12 +5207,20 @@ function colOrSendData2(jsonData) {
           logger.error(err);
           return;
         }
+        markCollectFrameSaved("head", {
+          dbRowId: this.lastID,
+          timestamp,
+          sessionName: date,
+        });
         console.log(`Event inserted with ID ${this.lastID}`);
       }
     );
   }
 
   if (!localFlag) {
+    if (framePayload) {
+      publishCollectFrame("head", framePayload);
+    }
 
     server.clients.forEach(function each(client) {
       if (client.readyState === WebSocket.OPEN) {
@@ -4742,63 +5232,25 @@ function colOrSendData2(jsonData) {
 
 // 闁插秷绻?
 reconnectTimer = setInterval(() => {
-  if (com && !port1.isOpen && sitClose == false) {
-    // if()
-    console.log(com)
-    if (file != "bigBed") {
-      try {
-        port1 = new SerialPort(
-          {
-            path: com,
-            baudRate: baudRate,
-            autoOpen: true,
-          },
-          function (err) {
-            logger.warn(err, "err");
-          }
-        );
-        //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
-        port1.pipe(parser);
-      } catch (e) {
-        logger.warn(e, "e");
-      }
-    } else {
-      try {
-        port1 = new SerialPort(
-          // com,
-          {
-            path: com,
-            baudRate: baudRate,
-            autoOpen: true,
-          },
-          function (err) {
-            logger.warn(err, "err");
-          }
-        );
-        //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
-        port1.pipe(parser3);
-      } catch (e) {
-        logger.warn(e, "e");
-      }
+  if (com && (!port1 || !port1.isOpen) && sitClose == false) {
+    try {
+      openSitPort(com);
+    } catch (e) {
+      logger.warn(e, "e");
     }
-
   }
 
-  if (com1 && !port2.isOpen && backClose == false) {
+  if (com1 && (!port2 || !port2.isOpen) && backClose == false) {
     try {
-      port2 = new SerialPort(
-        // com1,
-        {
-          path: com1,
-          baudRate: baudRate,
-          autoOpen: true,
-        },
-        function (err) {
-          logger.warn(err, "err");
-        }
-      );
-      //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
-      port2.pipe(parser2);
+      openBackPort(com1);
+    } catch (e) {
+      logger.warn(e, "e");
+    }
+  }
+
+  if (comhead && (!portHead || !portHead.isOpen) && headClose == false) {
+    try {
+      openHeadPort(comhead);
     } catch (e) {
       logger.warn(e, "e");
     }
@@ -4962,6 +5414,18 @@ petCareTimer = setInterval(async () => {
 }, 20);
 
 module.exports.shutdownServer = shutdownServer;
+module.exports.getWsServer = () => server;
+module.exports.getSdkEventServer = () => sdkEventServer;
+module.exports.getRuntimeStatus = getRuntimeStatus;
+module.exports.getRuntimeHealth = getRuntimeHealth;
+module.exports.getLicenseStatus = getLicenseStatus;
+module.exports.getCollectStatus = getCollectStatus;
+module.exports.connectDevice = connectDevice;
+module.exports.disconnectDevice = disconnectDevice;
+module.exports.probeDevice = probeDevice;
+module.exports.startCollect = startCollect;
+module.exports.stopCollect = stopCollect;
+module.exports.refreshSerialPorts = refreshSerialPorts;
 
 // ============================================================
 // Express HTTP 服务 (端口 19245) - OneStep 足压报告接口
@@ -5008,6 +5472,19 @@ const httpApp = express();
 httpApp.use(cors());
 httpApp.use(express.json({ limit: '50mb' }));
 httpApp.use(express.urlencoded({ limit: '50mb', extended: true }));
+httpApp.use('/api/v1', createSdkRouter({
+  getHealth: getRuntimeHealth,
+  getStatus: getRuntimeStatus,
+  listPorts: () => serialport,
+  refreshPorts: refreshSerialPorts,
+  getLicenseStatus,
+  getCollectStatus,
+  probeDevice,
+  connectDevice,
+  disconnectDevice,
+  startCollect,
+  stopCollect,
+}));
 
 const multerStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, imgPath),
@@ -5101,6 +5578,11 @@ httpApp.post('/uploadCanvas', upload.single('file'), async (req, res) => {
 });
 
 const HTTP_PORT = 19245;
-httpApp.listen(HTTP_PORT, '127.0.0.1', () => {
+const httpServer = httpApp.listen(HTTP_PORT, '127.0.0.1', () => {
   logger.info(`[HTTP] OneStep report server listening on http://127.0.0.1:${HTTP_PORT}`);
+});
+sdkEventServer = attachSdkEventStream(httpServer, {
+  eventBus: sdkEventBus,
+  getStatus: getRuntimeStatus,
+  getHealth: getRuntimeHealth,
 });

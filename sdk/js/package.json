@@ -1,0 +1,14 @@
+{
+  "name": "shroom-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "JavaScript SDK for the Shroom Runtime localhost API",
+  "main": "index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}
