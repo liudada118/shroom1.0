@@ -222,6 +222,8 @@ let num = 0,
   pressureSmooth = 0,
   sitDataFlag = false,
   arrSmooth = [16, 16],
+  latestFingerPointsL = new Array(5).fill(0),
+  latestFingerPointsR = new Array(5).fill(0),
   totalSmooth = 0,
   leftValueSmooth = 0,
   leftPropSmooth = 0,
@@ -381,9 +383,80 @@ const getConfig = ({ sensorType, mode }) => {
   return { ...init, ...local }
 }
 
+const createDefaultFingerPoints = (fallbackValue = 0) => new Array(5).fill(fallbackValue)
+
+const normalizeFingerPoints = (points, fallbackValue = 0) => {
+  const fallback = createDefaultFingerPoints(fallbackValue)
+  if (!Array.isArray(points) || points.length !== 5) {
+    return fallback
+  }
+
+  return points.map((value, index) => {
+    const numberValue = Number(value)
+    return Number.isFinite(numberValue) ? Math.round(numberValue) : fallback[index]
+  })
+}
+
+const createDefaultFingerCalibration = () => [
+  createDefaultFingerPoints(0),
+  createDefaultFingerPoints(255),
+]
+
+const cloneFingerCalibration = (calibration) => {
+  if (!Array.isArray(calibration) || calibration.length !== 2) {
+    return createDefaultFingerCalibration()
+  }
+
+  return [
+    normalizeFingerPoints(calibration[0], 0),
+    normalizeFingerPoints(calibration[1], 255),
+  ]
+}
+
+const readFingerCalibration = (key) => {
+  const raw = localStorage.getItem(key)
+  if (!raw) {
+    return createDefaultFingerCalibration()
+  }
+
+  try {
+    const parsed = JSON.parse(raw)
+    const isValid =
+      Array.isArray(parsed) &&
+      parsed.length === 2 &&
+      Array.isArray(parsed[0]) &&
+      parsed[0].length === 5 &&
+      Array.isArray(parsed[1]) &&
+      parsed[1].length === 5
+
+    if (!isValid) {
+      throw new Error('invalid finger calibration shape')
+    }
+
+    return cloneFingerCalibration(parsed)
+  } catch {
+    localStorage.removeItem(key)
+    return createDefaultFingerCalibration()
+  }
+}
+
+const updateLatestFingerPoints = (points, isRightHand = false) => {
+  const normalizedPoints = normalizeFingerPoints(points, 0)
+  if (isRightHand) {
+    latestFingerPointsR = normalizedPoints
+  } else {
+    latestFingerPointsL = normalizedPoints
+  }
+  return normalizedPoints
+}
+
+const getLatestFingerPoints = (hand = 'left') => (
+  hand === 'right' ? [...latestFingerPointsR] : [...latestFingerPointsL]
+)
+
 var backFlag, hz = 12, sitFlag, realHzFrameCount = 0, realHzLastTime = Date.now(),
-  fingerArrL = localStorage.getItem('fingerArrL') && JSON.parse(localStorage.getItem('fingerArrL')).every((a) => a.length > 0) ? JSON.parse(localStorage.getItem('fingerArrL')) : [new Array(5).fill(0), new Array(5).fill(255)],
-  fingerArrR = localStorage.getItem('fingerArrR') && JSON.parse(localStorage.getItem('fingerArrR')).every((a) => a.length > 0) ? JSON.parse(localStorage.getItem('fingerArrR')) : [new Array(5).fill(0), new Array(5).fill(255)],
+  fingerArrL = readFingerCalibration('fingerArrL'),
+  fingerArrR = readFingerCalibration('fingerArrR'),
   fingerArr = fingerArrL; // 默认指向左手，兼容旧逻辑
 
 // jqbed 健康监测语音播报
@@ -1453,6 +1526,7 @@ class Home extends React.Component {
                   fivePoints[i] = num
                 }
               }
+              const currentFingerPoints = updateLatestFingerPoints(fivePoints, !!backFlag)
 
               const com = this.state.matrixName == 'hand0507' ? that.com.current?.handL : that.com.current
 
@@ -1471,7 +1545,7 @@ class Home extends React.Component {
                     baseArr.push((fingerArr[1][i] || 0) - (fingerArr[0][i] || 0))
                   }
                   for (let i = 0; i < 5; i++) {
-                    const rawValue = fivePoints[i]
+                    const rawValue = currentFingerPoints[i]
                     if (rawValue == null || isNaN(rawValue)) continue;
                     const numberValue = Math.round((rawValue - (fingerArr[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
                     const value = numberValue < 0 ? 0 : numberValue >= 1 ? 1 : numberValue
@@ -1564,6 +1638,7 @@ class Home extends React.Component {
               wsPointDataSit = wsPointData;
               wsPointDataSit = wsPointDataSit.map((a) => Math.round(a));
               wsPointDataSitWidth = 32;
+              const currentFingerPoints = updateLatestFingerPoints(wsPointDataSit, !!backFlag)
               this.syncGloveRawPressureStats(jsonObject.realArr || jsonObject.sitData || jsonObject.backData);
 
               if (that.state.numMatrixFlag == "normal") {
@@ -1611,7 +1686,7 @@ class Home extends React.Component {
 
 
                   for (let i = 0; i < 5; i++) {
-                    const rawValue = wsPointData[i]
+                    const rawValue = currentFingerPoints[i]
                     if (rawValue == null || isNaN(rawValue)) continue;
                     const numberValue = Math.round((rawValue - (fingerArr[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
                     const value = (numberValue) < 0 ? 0 : (numberValue) >= 1 ? 1 : (numberValue)
@@ -1924,6 +1999,7 @@ class Home extends React.Component {
               wsPointDataSit = wsPointData;
               wsPointDataSit = wsPointDataSit.map((a) => Math.round(a));
               wsPointDataSitWidth = 32;
+              const currentFingerPoints = updateLatestFingerPoints(wsPointDataSit, !!backFlag)
               this.syncGloveRawPressureStats(jsonObject.realArr || jsonObject.sitData || jsonObject.backData);
 
               if (that.state.numMatrixFlag == "normal") {
@@ -1970,7 +2046,7 @@ class Home extends React.Component {
 
 
                   for (let i = 0; i < 5; i++) {
-                    const rawValue = wsPointData[i]
+                    const rawValue = currentFingerPoints[i]
                     if (rawValue == null || isNaN(rawValue)) continue;
                     const numberValue = Math.round((rawValue - (fingerArr[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
                     const value = (numberValue) < 0 ? 0 : (numberValue) >= 1 ? 1 : (numberValue)
@@ -2056,6 +2132,7 @@ class Home extends React.Component {
               wsPointDataSit = wsPointData;
               wsPointDataSit = wsPointDataSit.map((a) => Math.round(a));
               wsPointDataSitWidth = 32;
+              const currentFingerPoints = updateLatestFingerPoints(wsPointDataSit, !!backFlag)
               this.syncGloveRawPressureStats(jsonObject.realArr || jsonObject.sitData || jsonObject.backData);
               if (that.state.numMatrixFlag == "normal") {
                 if (this.state.matrixName != 'handVideo1') {
@@ -2100,7 +2177,7 @@ class Home extends React.Component {
 
 
                   for (let i = 0; i < 5; i++) {
-                    const rawValue = wsPointData[i]
+                    const rawValue = currentFingerPoints[i]
                     if (rawValue == null || isNaN(rawValue)) continue;
                     const numberValue = Math.round((rawValue - (fingerArr[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
                     const value = (numberValue) < 0 ? 0 : (numberValue) >= 1 ? 1 : (numberValue)
@@ -2841,8 +2918,8 @@ class Home extends React.Component {
 
   colFingerData(index, hand = 'left') {
     const key = hand === 'right' ? 'fingerArrR' : 'fingerArrL'
-    const arr = localStorage.getItem(key) ? JSON.parse(localStorage.getItem(key)) : []
-    arr[index] = wsPointDataSit
+    const arr = readFingerCalibration(key)
+    arr[index] = getLatestFingerPoints(hand)
     if (hand === 'right') {
       fingerArrR = arr
     } else {
