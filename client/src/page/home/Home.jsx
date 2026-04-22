@@ -39,6 +39,7 @@ import ChairQX from "../../components/video/chairQX";
 import RobotBlueSY from '../../components/video/robotSY'
 import RobotBlueLCF from "../../components/video/robotLCF";
 import RobotBlue0428 from "../../components/video/robot0428";
+import HumanBodyCanvas from '../../components/video/humanBody';
 import MatCol from "../../components/three/matCol";
 import CarTq from "../../components/three/carTq";
 import Bed from "../../components/three/Bed";
@@ -3503,6 +3504,18 @@ class Home extends React.Component {
                         changeSelect={this.changeSelect} />
                     </CanvasCom>
                     :
+                    this.state.numMatrixFlag == "skin" && this.state.matrixName == 'humanBody' ?
+                    <CanvasCom matrixName={this.state.matrixName} local={this.state.local}>
+                      <HumanBodyCanvas
+                        ref={this.com}
+                        data={this.data}
+                        local={this.state.local}
+                        handleChartsBody={this.handleChartsBody.bind(this)}
+                        handleChartsBody1={this.handleChartsBody1.bind(this)}
+                        changeStateData={this.changeStateData}
+                        changeSelect={this.changeSelect} />
+                    </CanvasCom>
+                    :
 
                     this.state.matrixName == "foot" ? (
                       <CanvasCom matrixName={this.state.matrixName}>
@@ -3852,6 +3865,19 @@ class Home extends React.Component {
                         local={this.state.local}
                       >
                         <RobotBlue0428
+                          ref={this.com}
+                          data={this.data}
+                          local={this.state.local}
+                          handleChartsBody={this.handleChartsBody.bind(this)}
+                          handleChartsBody1={this.handleChartsBody1.bind(this)}
+                          changeStateData={this.changeStateData}
+                          changeSelect={this.changeSelect} />
+                      </CanvasCom>
+                    ) : this.state.matrixName == "humanBody" ? (
+                      <CanvasCom matrixName={this.state.matrixName}
+                        local={this.state.local}
+                      >
+                        <HumanBodyCanvas
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}

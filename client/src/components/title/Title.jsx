@@ -646,6 +646,7 @@ class Title extends React.Component {
       { label: t('sensorFast1024'), value: 'fast1024' },
       { label: t('sensorNormal'), value: 'normal' },
       { label: t('smallBed'), value: 'smallBed' },
+      { label: t('sensorHumanBody'), value: 'humanBody' },
     ]
 
     // 根据 allowedTypes 过滤传感器列表
@@ -903,7 +904,9 @@ class Title extends React.Component {
             ] : this.props.matrixName == 'bed4096' || this.props.matrixName == 'bed4096num' ? [
               { value: 'normal', label: t('modal3D') },
               { value: 'numoriginal', label: t('rawData') },
-            ] : ''}
+            ] : this.props.matrixName == 'humanBody' ? [
+              { value: 'skin', label: t('skin3D') },
+            ] : '"}
           /> : ''
         }
 

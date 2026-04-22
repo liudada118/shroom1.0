@@ -2938,9 +2938,15 @@ export const sitTypeEvent = {
     // if (that.state.showType == 'hand') {
     //   that.com.current?.changeWsData(wsPointData);
     // }
-
-
-  }
+  },
+  humanBody: ({ that, wsPointData, local }) => {
+    if (that.state.numMatrixFlag === 'skin') {
+      that.com.current?.sitData({
+        wsPointData,
+        local: that.state.local,
+      });
+    }
+  },
 };
 
 export const backTypeEvent = {

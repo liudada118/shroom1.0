@@ -507,6 +507,8 @@ if (fs.existsSync(nameTxt)) {
       baudRate = 921600
     } else if (['bed4096', 'bed4096num'].includes(file)) {
       baudRate = 3000000
+    } else if (file === 'humanBody') {
+      baudRate = 1000000
     } else {
       baudRate = 1000000
     }
@@ -845,11 +847,12 @@ module.exports = {
               baudRate = 921600
             } else if (['bed4096', 'bed4096num'].includes(file)) {
               baudRate = 3000000
+            } else if (file === 'humanBody') {
+              baudRate = 1000000
             } else {
               baudRate = 1000000
             }
-
-            server.clients.forEach(function each(client) {
+            server.clients.forEachh(function each(client) {
               const payload = {
                 date: endDate,
                 nowDate: nowDate,
@@ -1040,6 +1043,8 @@ module.exports = {
               baudRate = 921600
             } else if (['bed4096', 'bed4096num',].includes(receiveFile)) {
               baudRate = 3000000
+            } else if (receiveFile === 'humanBody') {
+              baudRate = 1000000
             } else {
               baudRate = 1000000
             }
@@ -3379,10 +3384,11 @@ parser.on("data", function (data) {
         // 32*32高速测试，与 fast1024 逻辑一致，不做任何线序变换
       } else if (file == 'sofa') {
         pointArr = arrToRealLine(pointArr, [[7, 0], [8, 15]], [[0, 15]], 32)
-      } else if (file == 'carY') {
+       } else if (file == 'carY') {
         pointArr = carYLine(pointArr)
+      } else if (file == 'humanBody') {
+        // 人体全身：直接透传 1024 字节原始数据，不做线序变换
       }
-
       pointArr1zeroData = [...pointArr]
 
 
