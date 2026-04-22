@@ -852,7 +852,7 @@ module.exports = {
             } else {
               baudRate = 1000000
             }
-            server.clients.forEachh(function each(client) {
+            server.clients.forEach(function each(client) {
               const payload = {
                 date: endDate,
                 nowDate: nowDate,

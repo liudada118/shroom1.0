@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-04-22 14:29
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-04-22 19:14
 
 ## 1. 项目概述
 
@@ -423,11 +423,17 @@ graph TD
 | 2026-04-22 | Codex | Windows 串口白名单筛选 | `server.js` 在发送串口列表到前端前，对 Windows 平台按 `vendorId=1A86` 且 `productId` 属于 `7523/55D3` 的 WCH CH340 / CH343 设备做白名单过滤，避免无关串口进入前端下拉列表 |
 | 2026-04-22 | Codex | Windows 串口筛选放宽到 WCH 厂商级别 | `server.js` 将 Windows 串口筛选从固定 `PID_7523/55D3` 放宽为 WCH 厂商特征匹配：优先接受 `vendorId=1A86`，缺失时回退到 `pnpId`、`manufacturer`、`friendlyName` 的 WCH/CH34/USB-SERIAL 识别，减少兼容设备被误过滤 |
 | 2026-04-22 | Codex | 更新检查长度不匹配错误兜底 | `autoUpdater.js` 为 `ERR_CONTENT_LENGTH_MISMATCH` 新增归一化错误提示，并在检查更新阶段自动延迟 1.5 秒重试一次，减少更新源缓存或代理层瞬时异常直接导致前端更新检查失败 |
+| 2026-04-22 | Codex | 标题栏模式选择 JSX 语法修复 | `client/src/components/title/Title.jsx` 修复显示模式下拉 `options` 末尾 ternary 分支误写成坏掉字符串的问题，改为空数组兜底，恢复 `hand0205`/`handGlove115200` 校准弹窗附近整段 JSX 的正常解析与前端构建 |
+| 2026-04-22 | Codex | 授权下发广播拼写错误修复 | `server.js` 修复密钥写入成功分支里 `server.clients.forEachh` 的拼写错误，恢复 `all`/多类型/单类型密钥激活后向前端下发授权信息的正常广播，避免被误记为“密钥无效” |
+| 2026-04-22 | Codex | 人体全身模型切换为 human.glb | `client/src/components/video/humanBody.jsx` 将人体全身视图从 `OBJLoader + robot05-g.obj` 切换为 `GLTFLoader + human.glb`，避免 OBJ 文件末尾线段记录导致 Three.js 将整模解析成 `LineSegments`，并沿用现有 UV Canvas 热力贴图逻辑 |
 
 ## 9. 更新日志
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-04-22 19:14 | Codex | 修复缺陷 | 调整 `client/src/components/video/humanBody.jsx` 的人体全身模型加载方式：移除 `OBJLoader` 对 `robot05-g.obj` 的加载，改用 `GLTFLoader` 直接读取 `client/public/model/human.glb`，并去掉原先为 OBJ 额外添加的 `rotation.x = -Math.PI / 2`，恢复 `humanBody` 视图以实体网格而非线段方式渲染 |
+| 2026-04-22 19:02 | Codex | 修复缺陷 | 修复 `server.js` 中授权激活成功后的广播调用拼写错误：将 `server.clients.forEachh(...)` 改回 `server.clients.forEach(...)`，解决密钥页写入 `all` 授权后后端抛出 `server.clients.forEachh is not a function` 并误报 `Invalid license key` 的问题 |
+| 2026-04-22 18:55 | Codex | 修复缺陷 | 修复 `client/src/components/title/Title.jsx` 中显示模式下拉 `options` 的 JSX 语法错误：将坏掉的末尾兜底字符串改为空数组，消除 `Unterminated string literal` 构建失败，并恢复后续手部校准 `Select` 片段的正常编译 |
 | 2026-04-22 14:29 | Codex | 修复缺陷 | 调整 `autoUpdater.js` 的更新检查容错：将 `ERR_CONTENT_LENGTH_MISMATCH` 归一化为可读错误消息，并在 `checkForUpdates()` 阶段针对该错误自动延迟 1.5 秒后重试一次，便于缓解更新服务器/CDN/代理缓存导致的响应体长度不一致问题 |
 | 2026-04-22 12:09 | Codex | 配置变更 | 放宽 `server.js` 的 Windows 串口过滤规则：不再限制 `PID_7523/55D3`，改为优先匹配 `VID_1A86`，并在缺失 VID 时回退到 `pnpId`、`manufacturer`、`friendlyName` 的 WCH 特征判断，使更多同厂商 USB 转串口设备能继续出现在前端串口列表里 |
 | 2026-04-22 11:07 | Codex | 配置变更 | 调整 `server.js` 的 Windows 串口筛选逻辑：新增 `VID_1A86` + `PID_7523/55D3` 白名单判断，仅将 WCH CH340 / CH343 设备返回给前端串口列表；同时保留启动和 `serialReset` 刷新流程的统一日志，方便核对筛选结果 |

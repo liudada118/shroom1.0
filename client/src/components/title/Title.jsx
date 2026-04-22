@@ -906,7 +906,7 @@ class Title extends React.Component {
               { value: 'numoriginal', label: t('rawData') },
             ] : this.props.matrixName == 'humanBody' ? [
               { value: 'skin', label: t('skin3D') },
-            ] : '"}
+            ] : []}
           /> : ''
         }
 

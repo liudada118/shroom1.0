@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { TrackballControls } from "three/examples/jsm/controls/TrackballControls";
 import React, { useEffect, useImperativeHandle, useRef } from "react";
 import { HeatmapCanvas } from "../../assets/util/heatmap";
@@ -307,20 +307,19 @@ const HumanBodyCanvas = React.forwardRef((props, refs) => {
     ctx.fillStyle = '#1a1a2e';
     ctx.fillRect(0, 0, 1024, 1024);
 
-    // 加载 OBJ 模型
-    const loader = new OBJLoader();
+    // 加载 GLB 模型
+    const loader = new GLTFLoader();
     loader.load(
-      './model/robot05-g.obj',
-      (object) => {
-        model = object;
-        model.rotation.x = -Math.PI / 2;
+      './model/human.glb',
+      (gltf) => {
+        model = gltf.scene;
         model.scale.set(1, 1, 1);
         scene.add(model);
         addCanvas(model, uvCanvas);
         canvasRenew();
       },
       undefined,
-      (err) => { console.error('humanBody OBJ load error', err); }
+      (err) => { console.error('humanBody GLB load error', err); }
     );
 
     // Grid helper
