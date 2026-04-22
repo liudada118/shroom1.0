@@ -34,11 +34,27 @@ const { autoUpdater } = require("electron-updater");
 const { ipcMain, dialog } = require("electron");
 const logger = require("./logger");
 
+function getUpdaterErrorMessage(error) {
+  return error && error.message ? error.message : String(error || "鏈煡鏇存柊閿欒");
+}
+
+function isContentLengthMismatchError(error) {
+  return getUpdaterErrorMessage(error).includes("ERR_CONTENT_LENGTH_MISMATCH");
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function normalizeUpdaterErrorMessage(error) {
-  const raw = error && error.message ? error.message : String(error || "未知更新错误");
+  const raw = getUpdaterErrorMessage(error);
 
   if (raw.includes("ERR_CHECKSUM_MISMATCH") || raw.includes("sha512 checksum mismatch")) {
     return "更新包校验失败：服务器上的 latest-mac.yml 和实际 zip 文件不一致，请重新上传更新包后再试。";
+  }
+
+  if (raw.includes("ERR_CONTENT_LENGTH_MISMATCH")) {
+    return "更新服务器返回的文件长度与响应头不一致（ERR_CONTENT_LENGTH_MISMATCH）。这通常是服务器、CDN 或代理缓存异常，请重新上传更新文件、清理缓存后再试。";
   }
 
   if (raw.includes("Code signature at URL") && raw.includes("did not pass validation")) {
@@ -208,8 +224,18 @@ class AppUpdater {
    * 检查更新
    * @returns {Promise}
    */
-  checkForUpdates() {
-    return autoUpdater.checkForUpdatesAndNotify();
+  async checkForUpdates() {
+    try {
+      return await autoUpdater.checkForUpdatesAndNotify();
+    } catch (err) {
+      if (!isContentLengthMismatchError(err)) {
+        throw err;
+      }
+
+      logger.warn("[Updater] checkForUpdates hit ERR_CONTENT_LENGTH_MISMATCH, retrying once...");
+      await sleep(1500);
+      return autoUpdater.checkForUpdatesAndNotify();
+    }
   }
 
   installDownloadedUpdate() {

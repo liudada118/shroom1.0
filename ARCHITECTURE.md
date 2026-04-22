@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-04-22 10:46
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-04-22 14:29
 
 ## 1. 项目概述
 
@@ -237,6 +237,7 @@ graph TD
 
 5. **自动更新流程**
     - 应用启动 30 秒后 → `autoUpdater.js` 检查自建服务器 `http://sensor.bodyta.com/shroom1` → 发现新版本后通过 `update-status` IPC 通道通知前端 → 前端 `UpdateNotifier` 组件弹出通知 → 用户点击「下载更新」后通过 `update-command` IPC 通道触发下载 → 下载过程中实时推送进度到前端 → 下载完成后弹窗询问是否立即安装并重启。
+    - 若检查更新阶段遇到 `ERR_CONTENT_LENGTH_MISMATCH`，主进程会等待 1.5 秒后自动重试一次；若仍失败，则将归一化后的错误消息通过 `update-status` / `update-command` 返回给前端，提示优先排查更新服务器、CDN 或代理缓存的响应头与实际文件长度不一致问题。
     - IPC 通道：`update-command`（前端 → 主进程：checkForUpdate / downloadUpdate / installUpdate）、`update-status`（主进程 → 前端：checking / available / downloading / downloaded / error）。
     - 仅在打包后（`app.isPackaged`）启用自动更新，开发环境不触发。
 
@@ -419,11 +420,17 @@ graph TD
 | 2026-04-20 | Codex | 修复 Aside 模式切换不刷新问题 | `Home.jsx` 中 Aside 外层 `CanvasCom` 改为使用 `matrixName:numMatrixFlag` 作为刷新键，避免手套从 3D 遥操切到其它模式后侧栏继续停留在弯折角度显示，保证 Pressure Data 的文案和数值随模式切换实时生效 |
 | 2026-04-21 | Codex | 串口列表详情日志输出 | `server.js` 新增统一串口枚举日志，在应用启动和 `serialReset` 刷新时打印 `path`、`manufacturer`、`vendorId`、`productId`、`serialNumber`、`pnpId`、`friendlyName`、`locationId`，便于按设备特征筛选目标串口 |
 | 2026-04-22 | Codex | 手套左右手校准值改为固定保存 5 指采样 | `Home.jsx` 为左右手分别缓存实时 5 指原始采样值，采集校准数据时仅将这 5 个数写入 `fingerArrL` / `fingerArrR`；同时清理旧的异常缓存格式，避免把整帧矩阵误存成手指校准数据 |
+| 2026-04-22 | Codex | Windows 串口白名单筛选 | `server.js` 在发送串口列表到前端前，对 Windows 平台按 `vendorId=1A86` 且 `productId` 属于 `7523/55D3` 的 WCH CH340 / CH343 设备做白名单过滤，避免无关串口进入前端下拉列表 |
+| 2026-04-22 | Codex | Windows 串口筛选放宽到 WCH 厂商级别 | `server.js` 将 Windows 串口筛选从固定 `PID_7523/55D3` 放宽为 WCH 厂商特征匹配：优先接受 `vendorId=1A86`，缺失时回退到 `pnpId`、`manufacturer`、`friendlyName` 的 WCH/CH34/USB-SERIAL 识别，减少兼容设备被误过滤 |
+| 2026-04-22 | Codex | 更新检查长度不匹配错误兜底 | `autoUpdater.js` 为 `ERR_CONTENT_LENGTH_MISMATCH` 新增归一化错误提示，并在检查更新阶段自动延迟 1.5 秒重试一次，减少更新源缓存或代理层瞬时异常直接导致前端更新检查失败 |
 
 ## 9. 更新日志
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-04-22 14:29 | Codex | 修复缺陷 | 调整 `autoUpdater.js` 的更新检查容错：将 `ERR_CONTENT_LENGTH_MISMATCH` 归一化为可读错误消息，并在 `checkForUpdates()` 阶段针对该错误自动延迟 1.5 秒后重试一次，便于缓解更新服务器/CDN/代理缓存导致的响应体长度不一致问题 |
+| 2026-04-22 12:09 | Codex | 配置变更 | 放宽 `server.js` 的 Windows 串口过滤规则：不再限制 `PID_7523/55D3`，改为优先匹配 `VID_1A86`，并在缺失 VID 时回退到 `pnpId`、`manufacturer`、`friendlyName` 的 WCH 特征判断，使更多同厂商 USB 转串口设备能继续出现在前端串口列表里 |
+| 2026-04-22 11:07 | Codex | 配置变更 | 调整 `server.js` 的 Windows 串口筛选逻辑：新增 `VID_1A86` + `PID_7523/55D3` 白名单判断，仅将 WCH CH340 / CH343 设备返回给前端串口列表；同时保留启动和 `serialReset` 刷新流程的统一日志，方便核对筛选结果 |
 | 2026-04-22 10:46 | Codex | 修复缺陷 | 修复 `client/src/page/home/Home.jsx` 中手套左右手校准数据保存错误的问题：新增左右手最新 5 指原始采样缓存，`colFingerData()` 改为把当前手的 5 个采样值写入 `fingerArrL` / `fingerArrR`，不再误存 `wsPointDataSit` 的整帧矩阵；同时为本地缓存增加 5 位结构校验，发现旧的异常格式时自动清理并回退到默认校准值 |
 | 2026-04-21 15:11 | Codex | 优化重构 | 调整 `server.js` 的串口枚举日志：抽出统一摘要方法，在应用启动和 `serialReset` 触发的刷新流程里打印 `path`、`manufacturer`、`vendorId`、`productId`、`serialNumber`、`pnpId`、`friendlyName`、`locationId`，方便按设备信息筛选目标串口，同时保持前端下拉框继续仅使用 `path` 作为选择值 |
 | 2026-04-20 15:39 | Codex | 修复缺陷 | 修复 `client/src/page/home/Home.jsx` 中 Aside 面板切换模式不重渲染的问题：将 Aside 外层 `CanvasCom` 的比较键从仅 `matrixName` 调整为 `matrixName:numMatrixFlag`，使手套在 `normal` 以外模式下能及时恢复显示 `totalPres` 和“压力总和”，不再沿用 3D 遥操模式的弯折角度视图 |

@@ -83,20 +83,43 @@ const { pressSmallBed } = require("./utilMatrix");
 const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine, pressNew12203131 } = require('./server/mathUtils');
 const { initDb: _initDbFromModule } = require('./server/dbManager');
 
+const WINDOWS_ALLOWED_VENDOR_IDS = new Set(['1A86']);
+
+function normalizeSerialIdentifier(value) {
+  return String(value ?? '').trim().toUpperCase();
+}
+
+function isWindowsTargetSerialPort(port = {}) {
+  const vendorId = normalizeSerialIdentifier(port.vendorId ?? port.vendorIdentifier);
+  const pnpId = normalizeSerialIdentifier(port.pnpId);
+  const manufacturer = String(port.manufacturer ?? '').toLowerCase();
+  const friendlyName = String(port.friendlyName ?? '').toUpperCase();
+
+  if (vendorId) {
+    return WINDOWS_ALLOWED_VENDOR_IDS.has(vendorId);
+  }
+
+  if (pnpId.includes('VID_1A86')) {
+    return true;
+  }
+
+  if (manufacturer.includes('wch')) {
+    return true;
+  }
+
+  return friendlyName.includes('CH34') || friendlyName.includes('USB-SERIAL') || friendlyName.includes('USB-ENHANCED-SERIAL');
+}
+
 const getPort = (ports) => {
-  // console.log(ports)
-  // if (os.platform == 'win32') {
-  //   return ports.filter((port) => {
-  //     return port.manufacturer == 'wch.cn'
-  //   })
-  // } else if (os.platform == 'darwin') {
-  //   return ports.filter((port) => {
-  //     return port.path.includes('usb')
-  //   })
-  // } else {
-  //   return ports
-  // }
-  return ports
+  const portList = Array.isArray(ports) ? ports : [];
+
+  if (process.platform === 'win32') {
+    const filteredPorts = portList.filter(isWindowsTargetSerialPort);
+    logger.info(`[SerialList] filter win32 whitelist matched ${filteredPorts.length}/${portList.length} port(s)`);
+    return filteredPorts;
+  }
+
+  return portList
 }
 
 function summarizeSerialPort(port = {}) {
