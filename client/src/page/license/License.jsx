@@ -68,6 +68,7 @@ const SENSOR_GROUPS = [
       { label: '14x20高速', value: 'daliegu' },
       { label: '16x16高速', value: 'fast256' },
       { label: '32x32高速', value: 'fast1024' },
+      { label: '人体全身', value: 'humanBody' },
     ],
   },
 ];
@@ -149,6 +150,9 @@ const SENSOR_MODULES = {
   fast1024: [
     { value: 'normal', label: '3D模型' },
     { value: 'numoriginal', label: '原始数据' },
+  ],
+  humanBody: [
+    { value: 'skin', label: '3D皮肤' },
   ],
 };
 
