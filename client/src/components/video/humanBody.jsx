@@ -2,11 +2,17 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { TrackballControls } from "three/examples/jsm/controls/TrackballControls";
 import React, { useEffect, useImperativeHandle, useRef } from "react";
+import TWEEN from "@tweenjs/tween.js";
 import { HeatmapCanvas } from "../../assets/util/heatmap";
 
-// ─── 各部位传感器索引矩阵（1-based，取值时 -1 转为 0-based） ───────────────────
+/**
+ * 人体全身 skin 3D 渲染组件
+ * 完全参考 hand.jsx skin 模式
+ * 使用 human.glb + GLTFLoader + CanvasTexture
+ */
 
-// 后背（6行×10列）
+// ─── 各部位传感器索引矩阵（1-based，取值时 -1 转为 0-based）─────────────────────
+
 const BACK_IDX = [
   [5,4,3,2,1,15,14,13,12,11],
   [37,36,35,34,33,47,46,45,44,43],
@@ -16,7 +22,6 @@ const BACK_IDX = [
   [613,612,611,610,609,623,622,621,620,619],
 ];
 
-// 前胸（6行×10列）
 const CHEST_IDX = [
   [692,691,690,689,688,682,681,680,679,678],
   [660,659,658,657,656,650,649,648,647,646],
@@ -26,7 +31,6 @@ const CHEST_IDX = [
   [84,83,82,81,80,74,73,72,71,70],
 ];
 
-// 右手臂（6行×7列）
 const RIGHT_ARM_IDX = [
   [736,768,800,832,864,1024,992],
   [735,767,799,831,863,1023,991],
@@ -36,7 +40,6 @@ const RIGHT_ARM_IDX = [
   [731,763,795,827,859,1019,987],
 ];
 
-// 右肩膀（6行×3列）
 const RIGHT_SHOULDER_IDX = [
   [960,928,896],
   [959,927,895],
@@ -46,7 +49,6 @@ const RIGHT_SHOULDER_IDX = [
   [955,923,891],
 ];
 
-// 左手臂（6行×7列）
 const LEFT_ARM_IDX = [
   [832,864,1024,992,960,928,896],
   [831,863,1023,991,959,927,895],
@@ -56,7 +58,6 @@ const LEFT_ARM_IDX = [
   [827,859,1019,987,955,923,891],
 ];
 
-// 左肩膀（6行×3列）
 const LEFT_SHOULDER_IDX = [
   [885,917,949],
   [886,918,950],
@@ -66,7 +67,6 @@ const LEFT_SHOULDER_IDX = [
   [890,922,954],
 ];
 
-// 后裤子左（8行×5列）
 const BACK_PANTS_LEFT_IDX = [
   [197,196,195,194,193],
   [165,164,163,162,161],
@@ -78,7 +78,6 @@ const BACK_PANTS_LEFT_IDX = [
   [325,324,323,322,321],
 ];
 
-// 后裤子右（8行×5列）
 const BACK_PANTS_RIGHT_IDX = [
   [495,494,493,492,491],
   [527,526,525,524,523],
@@ -90,7 +89,6 @@ const BACK_PANTS_RIGHT_IDX = [
   [367,366,365,364,363],
 ];
 
-// 前裤左（8行×5列）
 const FRONT_PANTS_LEFT_IDX = [
   [468,467,466,465,464],
   [500,499,498,497,496],
@@ -102,7 +100,6 @@ const FRONT_PANTS_LEFT_IDX = [
   [372,371,370,369,368],
 ];
 
-// 前裤右（8行×5列）
 const FRONT_PANTS_RIGHT_IDX = [
   [202,201,200,199,198],
   [170,169,168,167,166],
@@ -114,9 +111,7 @@ const FRONT_PANTS_RIGHT_IDX = [
   [330,329,328,327,326],
 ];
 
-// ─── UV Canvas 各部位坐标（1024×1024，基于 64×64 网格，255px UV 图） ──────────
-// 格子大小 = 255/64，Canvas 缩放 = 1024/255
-// 格式：{ x, y, w, h }（Canvas 像素坐标）
+// ─── UV Canvas 各部位坐标（1024×1024，基于 64×64 网格，每格 16px）─────────────
 const UV_REGIONS = {
   back:            { x: 448, y: 368, w: 96,  h: 112 },
   chest:           { x: 448, y: 528, w: 96,  h: 160 },
@@ -130,14 +125,14 @@ const UV_REGIONS = {
   frontPantsRight: { x: 528, y: 736, w: 64,  h: 272 },
 };
 
-// ─── 从 wsPointData（1024个值）按索引矩阵提取一维数组 ────────────────────────
+// ─── 从 wsPointData 按索引矩阵提取一维数组 ────────────────────────────────────
 function extractByIndex(wsPointData, idxMatrix) {
   const rows = idxMatrix.length;
   const cols = idxMatrix[0].length;
   const result = new Array(rows * cols).fill(0);
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      const idx = idxMatrix[r][c] - 1; // 1-based → 0-based
+      const idx = idxMatrix[r][c] - 1;
       result[r * cols + c] = (wsPointData && idx >= 0 && idx < wsPointData.length)
         ? wsPointData[idx]
         : 0;
@@ -146,15 +141,15 @@ function extractByIndex(wsPointData, idxMatrix) {
   return result;
 }
 
-// ─── 主组件 ──────────────────────────────────────────────────────────────────
-var ndata = new Array(1024).fill(0);
+// ─── 全局传感器数据（参考 hand.jsx 的 ndata1）────────────────────────────────
+var ndata1 = new Array(1024).fill(0);
 
 const HumanBodyCanvas = React.forwardRef((props, refs) => {
-  const bodyCanvasRef = useRef();   // HeatmapCanvas（各部位共用，逐个渲染）
-  const bodyCanvas = useRef();      // THREE.CanvasTexture
-  const uvCanvasRef = useRef();     // 1024×1024 UV Canvas（贴到模型上）
+  // ─── Refs（完全参考 hand.jsx）────────────────────────────────────────────────
+  const bodyCanvasRef = useRef();    // UV Canvas（1024×1024，贴到模型）
+  const bodyCanvas = useRef();       // THREE.CanvasTexture
 
-  // 各部位独立的 HeatmapCanvas 实例
+  // 各部位 HeatmapCanvas（参考 hand.jsx 的 handHeatmapRef / handHeatmap1Ref）
   const hmBack           = useRef();
   const hmChest          = useRef();
   const hmRightArm       = useRef();
@@ -164,87 +159,114 @@ const HumanBodyCanvas = React.forwardRef((props, refs) => {
   const hmBackPantsLeft  = useRef();
   const hmBackPantsRight = useRef();
   const hmFrontPantsLeft = useRef();
-  const hmFrontPantsRight= useRef();
+  const hmFrontPantsRight = useRef();
+
+  // 背景灰色 Canvas（参考 hand.jsx 的 canvasWith）
+  const canvasWith = document.createElement('canvas');
+  const ctxWith = canvasWith.getContext('2d');
+  ctxWith.fillStyle = '#aaaaaa';
+  ctxWith.fillRect(0, 0, canvasWith.width, canvasWith.height);
 
   var FPS = 10;
   var timeS = 0;
   var renderT = 1 / FPS;
   const clock = new THREE.Clock();
+
   let camera, scene, renderer, controls, animationRequestId;
-  let model;
+  let chair;
   const lightGroup = new THREE.Group();
   let controlsFlag = true;
   var valuef1 = 0;
 
-  // ─── 初始化各部位 HeatmapCanvas ─────────────────────────────────────────
-  function initHeatmaps() {
-    const opts = { min: 0, max: 2000, size: 40 };
-    // 后背 6×10
-    hmBack.current = new HeatmapCanvas(10, 6, 1, 1, 'hand', { ...opts, size: 60 });
-    // 前胸 6×10
-    hmChest.current = new HeatmapCanvas(10, 6, 1, 1, 'hand', { ...opts, size: 60 });
-    // 右手臂 6×7
-    hmRightArm.current = new HeatmapCanvas(7, 6, 1, 1, 'hand', { ...opts, size: 50 });
-    // 右肩膀 6×3
-    hmRightShoulder.current = new HeatmapCanvas(3, 6, 1, 1, 'hand', { ...opts, size: 80 });
-    // 左手臂 6×7
-    hmLeftArm.current = new HeatmapCanvas(7, 6, 1, 1, 'hand', { ...opts, size: 50 });
-    // 左肩膀 6×3
-    hmLeftShoulder.current = new HeatmapCanvas(3, 6, 1, 1, 'hand', { ...opts, size: 80 });
-    // 后裤子左 8×5
-    hmBackPantsLeft.current = new HeatmapCanvas(5, 8, 1, 1, 'hand', { ...opts, size: 50 });
-    // 后裤子右 8×5
-    hmBackPantsRight.current = new HeatmapCanvas(5, 8, 1, 1, 'hand', { ...opts, size: 50 });
-    // 前裤左 8×5
-    hmFrontPantsLeft.current = new HeatmapCanvas(5, 8, 1, 1, 'hand', { ...opts, size: 50 });
-    // 前裤右 8×5
-    hmFrontPantsRight.current = new HeatmapCanvas(5, 8, 1, 1, 'hand', { ...opts, size: 50 });
-  }
+  const ALT_KEY = 18;
+  const CTRL_KEY = 17;
+  const CMD_KEY = 91;
 
-  // ─── 将 HeatmapCanvas 的热力图绘制到 UV Canvas 的指定区域 ─────────────────
-  function drawPartToUV(ctx, hm, rows, cols, region) {
-    const { x, y, w, h } = region;
-    const srcSize = cols * rows * 1024 / 32; // HeatmapCanvas 内部尺寸
-    ctx.drawImage(hm.canvas, 0, 0, hm.canvas.width, hm.canvas.height, x, y, w, h);
-  }
+  // ─── init（完全参考 hand.jsx）────────────────────────────────────────────────
+  function init() {
+    const container = document.getElementById('canvasHumanBody');
 
-  // ─── canvasRenew：每帧更新 UV Canvas ────────────────────────────────────
-  function canvasRenew() {
-    if (!uvCanvasRef.current || !bodyCanvas.current) return;
-    const canvas = uvCanvasRef.current;
-    const ctx = canvas.getContext('2d');
+    // Camera
+    camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 1, 150000);
+    camera.position.z = -10;
+    camera.position.y = 30;
+    camera.position.x = 0;
+    camera.lookAt(0, 0, 0);
 
-    // 清空 UV Canvas，填充深色背景
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#1a1a2e';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Scene
+    scene = new THREE.Scene();
+    scene.add(lightGroup);
 
-    // 各部位数据提取并渲染
-    const parts = [
-      { hm: hmBack.current,           idx: BACK_IDX,            rows: 6,  cols: 10, region: UV_REGIONS.back },
-      { hm: hmChest.current,          idx: CHEST_IDX,           rows: 6,  cols: 10, region: UV_REGIONS.chest },
-      { hm: hmRightArm.current,       idx: RIGHT_ARM_IDX,       rows: 6,  cols: 7,  region: UV_REGIONS.rightArm },
-      { hm: hmRightShoulder.current,  idx: RIGHT_SHOULDER_IDX,  rows: 6,  cols: 3,  region: UV_REGIONS.rightShoulder },
-      { hm: hmLeftArm.current,        idx: LEFT_ARM_IDX,        rows: 6,  cols: 7,  region: UV_REGIONS.leftArm },
-      { hm: hmLeftShoulder.current,   idx: LEFT_SHOULDER_IDX,   rows: 6,  cols: 3,  region: UV_REGIONS.leftShoulder },
-      { hm: hmBackPantsLeft.current,  idx: BACK_PANTS_LEFT_IDX, rows: 8,  cols: 5,  region: UV_REGIONS.backPantsLeft },
-      { hm: hmBackPantsRight.current, idx: BACK_PANTS_RIGHT_IDX,rows: 8,  cols: 5,  region: UV_REGIONS.backPantsRight },
-      { hm: hmFrontPantsLeft.current, idx: FRONT_PANTS_LEFT_IDX,rows: 8,  cols: 5,  region: UV_REGIONS.frontPantsLeft },
-      { hm: hmFrontPantsRight.current,idx: FRONT_PANTS_RIGHT_IDX,rows: 8, cols: 5,  region: UV_REGIONS.frontPantsRight },
-    ];
-
-    for (const part of parts) {
-      if (!part.hm) continue;
-      const data = extractByIndex(ndata, part.idx);
-      part.hm.changeHeatmap(data, 1, 1, 0);
-      drawPartToUV(ctx, part.hm, part.rows, part.cols, part.region);
+    // Lights（完全参考 hand.jsx）
+    const coordinates = [80, 0, -80];
+    for (let x of coordinates) {
+      for (let y of coordinates) {
+        for (let z of coordinates) {
+          const pointlight = new THREE.PointLight(0xffffff, 1, 600);
+          pointlight.position.set(x, y, z);
+          lightGroup.add(pointlight);
+        }
+      }
     }
 
-    bodyCanvas.current.needsUpdate = true;
+    // 初始化各部位 HeatmapCanvas（参考 hand.jsx 的 handHeatmapRef = new HeatmapCanvas(30,30,1,1,'body',{...})）
+    const hmOpts = { min: 0, max: 3000, size: 40 };
+    hmBack.current           = new HeatmapCanvas(30, 30, 1, 1, 'hand', { ...hmOpts });
+    hmChest.current          = new HeatmapCanvas(30, 30, 1, 1, 'hand', { ...hmOpts });
+    hmRightArm.current       = new HeatmapCanvas(30, 30, 1, 1, 'hand', { ...hmOpts });
+    hmRightShoulder.current  = new HeatmapCanvas(30, 30, 1, 1, 'hand', { ...hmOpts });
+    hmLeftArm.current        = new HeatmapCanvas(30, 30, 1, 1, 'hand', { ...hmOpts });
+    hmLeftShoulder.current   = new HeatmapCanvas(30, 30, 1, 1, 'hand', { ...hmOpts });
+    hmBackPantsLeft.current  = new HeatmapCanvas(30, 30, 1, 1, 'hand', { ...hmOpts });
+    hmBackPantsRight.current = new HeatmapCanvas(30, 30, 1, 1, 'hand', { ...hmOpts });
+    hmFrontPantsLeft.current = new HeatmapCanvas(30, 30, 1, 1, 'hand', { ...hmOpts });
+    hmFrontPantsRight.current = new HeatmapCanvas(30, 30, 1, 1, 'hand', { ...hmOpts });
+
+    // 加载 human.glb（参考 hand.jsx 的 GLTFLoader + addCanvas）
+    const loader = new GLTFLoader();
+    loader.load('./model/human.glb', function (gltf) {
+      chair = gltf.scene;
+      scene.add(chair);
+      chair.rotation.z = -Math.PI;
+
+      // 创建 UV Canvas（1024×1024）并绑定为模型贴图
+      bodyCanvasRef.current = new HeatmapCanvas(30, 30, 1, 1, 'hand', { min: 0, max: 3000, size: 40 });
+      bodyCanvasRef.current.canvas.width = 1024;
+      bodyCanvasRef.current.canvas.height = 1024;
+
+      addCanvas(chair, bodyCanvasRef.current.canvas);
+    });
+
+    // Grid helper
+    const helper = new THREE.GridHelper(2000, 100);
+    helper.position.y = -199;
+    helper.material.opacity = 0.25;
+    helper.material.transparent = true;
+    scene.add(helper);
+
+    // Renderer（完全参考 hand.jsx）
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    renderer.setClearColor(0x10152b);
+    if (container.childNodes.length === 0) {
+      container.appendChild(renderer.domElement);
+    }
+
+    // Controls（完全参考 hand.jsx）
+    controls = new TrackballControls(camera, renderer.domElement);
+    controls.dynamicDampingFactor = 1;
+    controls.domElement = container;
+    controls.mouseButtons = {
+      LEFT: THREE.MOUSE.PAN,
+      MIDDLE: THREE.MOUSE.ZOOM,
+      RIGHT: THREE.MOUSE.ROTATE,
+    };
   }
 
-  // ─── addCanvas：将 UV Canvas 绑定为模型材质 ──────────────────────────────
-  function addCanvas(obj, canvas) {
+  // ─── addCanvas（完全参考 hand.jsx）──────────────────────────────────────────
+  function addCanvas(model, canvas) {
     bodyCanvas.current = new THREE.CanvasTexture(canvas);
     bodyCanvas.current.needsUpdate = true;
     bodyCanvas.current.repeat.set(1, 1);
@@ -253,7 +275,7 @@ const HumanBodyCanvas = React.forwardRef((props, refs) => {
     bodyCanvas.current.wrapS = THREE.RepeatWrapping;
     bodyCanvas.current.wrapT = THREE.RepeatWrapping;
 
-    obj.traverse((child) => {
+    model.traverse((child) => {
       if (child.isMesh) {
         if (Array.isArray(child.material)) {
           child.material.forEach((mat) => {
@@ -268,89 +290,50 @@ const HumanBodyCanvas = React.forwardRef((props, refs) => {
     });
   }
 
-  // ─── init ────────────────────────────────────────────────────────────────
-  function init() {
-    const container = document.getElementById('canvasHumanBody');
+  // ─── canvasRenew（完全参考 hand.jsx，多部位版本）────────────────────────────
+  function canvasRenew(CanvasTexture, canvas) {
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      const size = 1024;
 
-    // Camera
-    camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 1, 150000);
-    camera.position.set(0, 100, 300);
-    camera.lookAt(0, 0, 0);
+      // 清除并填充背景（参考 hand.jsx 的 ctx.drawImage(canvasWith, ...)）
+      ctx.drawImage(canvasWith, 0, 0, size, size);
 
-    // Scene
-    scene = new THREE.Scene();
-    scene.add(lightGroup);
+      // 各部位：提取数据 → 更新热力图 → drawImage 到 UV Canvas 对应区域
+      const parts = [
+        { hm: hmBack.current,            idx: BACK_IDX,             region: UV_REGIONS.back },
+        { hm: hmChest.current,           idx: CHEST_IDX,            region: UV_REGIONS.chest },
+        { hm: hmRightArm.current,        idx: RIGHT_ARM_IDX,        region: UV_REGIONS.rightArm },
+        { hm: hmRightShoulder.current,   idx: RIGHT_SHOULDER_IDX,   region: UV_REGIONS.rightShoulder },
+        { hm: hmLeftArm.current,         idx: LEFT_ARM_IDX,         region: UV_REGIONS.leftArm },
+        { hm: hmLeftShoulder.current,    idx: LEFT_SHOULDER_IDX,    region: UV_REGIONS.leftShoulder },
+        { hm: hmBackPantsLeft.current,   idx: BACK_PANTS_LEFT_IDX,  region: UV_REGIONS.backPantsLeft },
+        { hm: hmBackPantsRight.current,  idx: BACK_PANTS_RIGHT_IDX, region: UV_REGIONS.backPantsRight },
+        { hm: hmFrontPantsLeft.current,  idx: FRONT_PANTS_LEFT_IDX, region: UV_REGIONS.frontPantsLeft },
+        { hm: hmFrontPantsRight.current, idx: FRONT_PANTS_RIGHT_IDX,region: UV_REGIONS.frontPantsRight },
+      ];
 
-    // Lights
-    const coordinates = [80, 0, -80];
-    for (let x of coordinates) {
-      for (let y of coordinates) {
-        for (let z of coordinates) {
-          const pl = new THREE.PointLight(0xffffff, 1, 600);
-          pl.position.set(x, y, z);
-          lightGroup.add(pl);
-        }
+      for (const part of parts) {
+        if (!part.hm) continue;
+        // 提取该部位数据
+        const data = extractByIndex(ndata1, part.idx);
+        // 更新热力图（参考 hand.jsx 的 handHeatmapRef.current.changeHeatmap(ndata1, 1, 1, 0)）
+        part.hm.changeHeatmap(data, 1, 1, 0);
+        // 绘制到 UV Canvas 对应区域（参考 hand.jsx 的 ctx.drawImage(handHeatmapRef.current.canvas, ...)）
+        ctx.drawImage(
+          part.hm.canvas,
+          0, 0, part.hm.canvas.width, part.hm.canvas.height,
+          part.region.x, part.region.y, part.region.w, part.region.h
+        );
       }
     }
 
-    // UV Canvas（1024×1024）
-    const uvCanvas = document.createElement('canvas');
-    uvCanvas.width = 1024;
-    uvCanvas.height = 1024;
-    uvCanvasRef.current = uvCanvas;
-
-    // 初始化各部位 HeatmapCanvas
-    initHeatmaps();
-
-    // 初始渲染一帧（填充背景色）
-    const ctx = uvCanvas.getContext('2d');
-    ctx.fillStyle = '#1a1a2e';
-    ctx.fillRect(0, 0, 1024, 1024);
-
-    // 加载 GLB 模型
-    const loader = new GLTFLoader();
-    loader.load(
-      './model/human.glb',
-      (gltf) => {
-        model = gltf.scene;
-        model.scale.set(1, 1, 1);
-        scene.add(model);
-        addCanvas(model, uvCanvas);
-        canvasRenew();
-      },
-      undefined,
-      (err) => { console.error('humanBody GLB load error', err); }
-    );
-
-    // Grid helper
-    const helper = new THREE.GridHelper(2000, 100);
-    helper.position.y = -199;
-    helper.material.opacity = 0.25;
-    helper.material.transparent = true;
-    scene.add(helper);
-
-    // Renderer
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.outputEncoding = THREE.sRGBEncoding;
-    renderer.setClearColor(0x10152b);
-    if (container.childNodes.length === 0) {
-      container.appendChild(renderer.domElement);
+    if (CanvasTexture) {
+      CanvasTexture.needsUpdate = true;
     }
-
-    // Controls
-    controls = new TrackballControls(camera, renderer.domElement);
-    controls.dynamicDampingFactor = 1;
-    controls.domElement = container;
-    controls.mouseButtons = {
-      LEFT: THREE.MOUSE.PAN,
-      MIDDLE: THREE.MOUSE.ZOOM,
-      RIGHT: THREE.MOUSE.ROTATE,
-    };
   }
 
-  // ─── animate / render ────────────────────────────────────────────────────
+  // ─── animate / render（完全参考 hand.jsx）────────────────────────────────────
   function animate() {
     animationRequestId = requestAnimationFrame(animate);
     render();
@@ -360,26 +343,34 @@ const HumanBodyCanvas = React.forwardRef((props, refs) => {
     const T = clock.getDelta();
     timeS += T;
     if (timeS > renderT) {
-      canvasRenew();
+      // 参考 hand.jsx: canvasRenew(bodyCanvas.current, bodyCanvasRef.current?.canvas)
+      canvasRenew(bodyCanvas.current, bodyCanvasRef.current?.canvas);
       timeS = 0;
     }
+    TWEEN.update();
     if (controlsFlag) {
       controls.mouseButtons = {
         LEFT: THREE.MOUSE.PAN,
         MIDDLE: THREE.MOUSE.ZOOM,
         RIGHT: THREE.MOUSE.ROTATE,
       };
+      controls.keys = [ALT_KEY, CTRL_KEY, CMD_KEY];
       controls.update();
+    } else {
+      controls.keys = [];
+      controls.mouseButtons = [];
     }
     renderer.render(scene, camera);
   }
 
-  // ─── sitData：接收传感器数据 ─────────────────────────────────────────────
+  // ─── sitData（完全参考 hand.jsx）────────────────────────────────────────────
   function sitData(prop) {
-    const { wsPointData, valuef } = prop;
+    const { wsPointData, valuef, valuelInit } = prop;
     if (valuef !== undefined) valuef1 = valuef;
     if (wsPointData) {
-      ndata = wsPointData.map((a) => (a - valuef1 < 0 ? 0 : a));
+      ndata1 = wsPointData;
+      // 去除底噪（参考 hand.jsx: ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a))）
+      ndata1 = ndata1.map((a) => (a - valuef1 < 0 ? 0 : a));
     }
   }
 
@@ -403,14 +394,17 @@ const HumanBodyCanvas = React.forwardRef((props, refs) => {
     controlsFlag = value;
   }
 
-  // ─── useImperativeHandle ─────────────────────────────────────────────────
+  // ─── useImperativeHandle（完全参考 hand.jsx）────────────────────────────────
   useImperativeHandle(refs, () => ({
     sitData,
     changeColor,
     changeFlag,
   }));
 
+  // ─── useEffect（完全参考 hand.jsx）──────────────────────────────────────────
   useEffect(() => {
+    window.removeEventListener('keydown', function () {});
+    window.removeEventListener('keyup', function () {});
     init();
     animate();
     return () => {
@@ -420,7 +414,10 @@ const HumanBodyCanvas = React.forwardRef((props, refs) => {
 
   return (
     <div>
-      <div style={{ width: '100%', height: '100%' }} id="canvasHumanBody" />
+      <div
+        style={{ width: '100%', height: '100%' }}
+        id="canvasHumanBody"
+      />
     </div>
   );
 });
