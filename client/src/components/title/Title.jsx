@@ -30,9 +30,21 @@ const titleInitConfig = {
   bed: { valueg1: 2, valuej1: 1205, valuel1: 5, valuef1: 6, value1: 0.72 },
   petCare: { valueg1: 2, valuej1: 2900, valuel1: 5, valuef1: 6, value1: 0.7, valuelInit1: 500 },
   sit: { valueg1: 4.3, valuej1: 1705, valuel1: 11, valuef1: 14, value1: 3.54 },
+  humanBody: { valueg1: 2, valuej1: 1205, valuel1: 5, valuef1: 6, value1: 0.72, sizeValue: 60 },
 }
+const createDefaultHumanTransform = () => ({
+  position: { x: 0, y: 26, z: -9.5 },
+  rotation: { x: -140, y: 0, z: -180 },
+})
 const bedArr_title = ['bigBed', 'smallBed', 'bed4096', 'bed4096num', 'matCol', 'matColPos', 'jqbed', 'petCare']
 const matrixNameToType_title = (type) => type === 'petCare' ? 'petCare' : bedArr_title.includes(type) ? 'bed' : type
+const normalizeHumanBodySizeValue = (sizeValue) => {
+  const nextValue = Number(sizeValue);
+  if (!Number.isFinite(nextValue)) {
+    return 60;
+  }
+  return Math.min(200, Math.max(50, nextValue));
+}
 
 /**
  * Get merged config from localStorage cache, supporting sensorType + mode two-dimensional cache.
@@ -53,7 +65,11 @@ const getConfig = ({ sensorType, mode }) => {
       result = { ...result, ...config[modeKey] }
     }
   }
-  return { ...init, ...result }
+  const mergedConfig = { ...init, ...result }
+  if (realType === 'humanBody') {
+    mergedConfig.sizeValue = normalizeHumanBodySizeValue(mergedConfig.sizeValue)
+  }
+  return mergedConfig
 }
 
 /**
@@ -146,6 +162,7 @@ class Title extends React.Component {
       fingerIndex: 0,
       colHZ: 12,
       pdfLoading: false,
+      humanTransform: createDefaultHumanTransform(),
     }
     this.inputRef = React.createRef(null)
     this.inputRef1 = React.createRef(null)
@@ -178,6 +195,14 @@ class Title extends React.Component {
           items1: ['平躺_0', '左侧躺_1', '右侧躺_2',]
         })
       }
+    }
+  }
+
+  componentDidUpdate(prevProps) {
+    if (prevProps.matrixName !== this.props.matrixName && this.props.matrixName === 'humanBody') {
+      this.setState({
+        humanTransform: createDefaultHumanTransform(),
+      })
     }
   }
 
@@ -386,8 +411,14 @@ class Title extends React.Component {
     let showHeight = false;   // Height
     let showConsis = false;   // Data consistency
     let showInit = false;     // Initial value
+    let showHumanTransform = false; // Human model transform
 
-    if (group1.includes(matrixName)) {
+    if (matrixName === 'humanBody') {
+      showSize = true;
+      showColor = true;
+      showFilter = true;
+      showHumanTransform = true;
+    } else if (group1.includes(matrixName)) {
       if (mode === 'numoriginal' && ['hand', 'bed4096', 'bed4096num'].includes(matrixName)) {
         // hand / bed4096 / bed4096num raw data mode: only color and filter
         showColor = true;
@@ -473,6 +504,34 @@ class Title extends React.Component {
       }
     };
 
+    const pushHumanTransform = (transformPatch) => {
+      const nextTransform = {
+        position: {
+          ...this.state.humanTransform.position,
+          ...(transformPatch.position ?? {}),
+        },
+        rotation: {
+          ...this.state.humanTransform.rotation,
+          ...(transformPatch.rotation ?? {}),
+        },
+      };
+
+      this.setState({ humanTransform: nextTransform });
+
+      if (this.props.com.current?.changeModelTransform) {
+        this.props.com.current.changeModelTransform(transformPatch);
+      }
+    };
+
+    const resetHumanTransform = () => {
+      const defaultTransform = createDefaultHumanTransform();
+      this.setState({ humanTransform: defaultTransform });
+
+      if (this.props.com.current?.changeModelTransform) {
+        this.props.com.current.changeModelTransform(defaultTransform);
+      }
+    };
+
     return (
       <div className='slideContent' style={{ width: '300px' }}>
         <div className="flexcenter" style={{ flex: 1, flexDirection: "column" }}>
@@ -500,8 +559,14 @@ class Title extends React.Component {
             <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
               <div className='dataTitle'>{t('size')}</div>
               <Slider
-                min={1} max={50} step={0.1}
+                min={matrixName === 'humanBody' ? 50 : 1}
+                max={matrixName === 'humanBody' ? 200 : 50}
+                step={matrixName === 'humanBody' ? 1 : 0.1}
+                value={matrixName === 'humanBody' ? (this.props.sizeValue ?? 60) : undefined}
                 onChange={(value) => {
+                  if (matrixName === 'humanBody') {
+                    this.props.changeStateData({ sizeValue: value });
+                  }
                   changeLocalStroage({ sensorType: matrixName, valueType: 'sizeValue', value, mode: cacheMode });
                   pushChangeColor({ size: value });
                 }}
@@ -615,6 +680,74 @@ class Title extends React.Component {
                 style={{ width: '200px' }}
               />
             </div>
+          )}
+
+          {showHumanTransform && (
+            <>
+              <Divider style={{ borderColor: 'rgba(255,255,255,0.18)', margin: '12px 0 8px' }}>Human Transform</Divider>
+
+              <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
+                <div className='dataTitle'>Pos X</div>
+                <Slider
+                  min={-200} max={200} step={0.5}
+                  value={this.state.humanTransform.position.x}
+                  onChange={(value) => pushHumanTransform({ position: { x: value } })}
+                  style={{ width: '200px' }}
+                />
+              </div>
+
+              <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
+                <div className='dataTitle'>Pos Y</div>
+                <Slider
+                  min={-200} max={200} step={0.5}
+                  value={this.state.humanTransform.position.y}
+                  onChange={(value) => pushHumanTransform({ position: { y: value } })}
+                  style={{ width: '200px' }}
+                />
+              </div>
+
+              <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
+                <div className='dataTitle'>Pos Z</div>
+                <Slider
+                  min={-200} max={200} step={0.5}
+                  value={this.state.humanTransform.position.z}
+                  onChange={(value) => pushHumanTransform({ position: { z: value } })}
+                  style={{ width: '200px' }}
+                />
+              </div>
+
+              <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
+                <div className='dataTitle'>Rot X</div>
+                <Slider
+                  min={-180} max={180} step={1}
+                  value={this.state.humanTransform.rotation.x}
+                  onChange={(value) => pushHumanTransform({ rotation: { x: value } })}
+                  style={{ width: '200px' }}
+                />
+              </div>
+
+              <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
+                <div className='dataTitle'>Rot Y</div>
+                <Slider
+                  min={-180} max={180} step={1}
+                  value={this.state.humanTransform.rotation.y}
+                  onChange={(value) => pushHumanTransform({ rotation: { y: value } })}
+                  style={{ width: '200px' }}
+                />
+              </div>
+
+              <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
+                <div className='dataTitle'>Rot Z</div>
+                <Slider
+                  min={-180} max={180} step={1}
+                  value={this.state.humanTransform.rotation.z}
+                  onChange={(value) => pushHumanTransform({ rotation: { z: value } })}
+                  style={{ width: '200px' }}
+                />
+              </div>
+
+              <Button style={{ marginTop: 8 }} onClick={resetHumanTransform}>Reset Human</Button>
+            </>
           )}
 
         </div>
@@ -851,7 +984,7 @@ class Title extends React.Component {
 
 
 
-        {this.props.matrixName != 'car10' && ['hand0205', 'handGlove115200', 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'normal', 'smallBed', 'jqbed', 'petCare', 'daliegu', 'smallSample', 'bed4096', 'bed4096num'].includes(this.props.matrixName) ?
+        {this.props.matrixName != 'car10' && ['hand0205', 'handGlove115200', 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'normal', 'smallBed', 'jqbed', 'petCare', 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody'].includes(this.props.matrixName) ?
           <Select
             defaultValue={this.props.numMatrixFlag}
             style={{ width: 90 }}

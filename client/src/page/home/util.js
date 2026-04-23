@@ -2940,12 +2940,13 @@ export const sitTypeEvent = {
     // }
   },
   humanBody: ({ that, wsPointData, local }) => {
-    if (that.state.numMatrixFlag === 'skin') {
-      that.com.current?.sitData({
-        wsPointData,
-        local: that.state.local,
-      });
-    }
+
+    that.com.current?.sitData({
+      wsPointData,
+      valuef: that.state.valuef1,
+      valuelInit: that.state.valuelInit1,
+      local: that.state.local,
+    });
   },
 };
 

@@ -67,7 +67,8 @@ export function chestLine(arr) {
 
 export const heatMapMax = 2000
 
-const canvasWidth = 128, canvasHeight = 128
+const DEFAULT_WEBGL_TILE_WIDTH = 128;
+const DEFAULT_WEBGL_TILE_HEIGHT = 128;
 
 function addSide(arr, width, height, wnum, hnum, sideNum) {
   const narr = new Array(height);
@@ -113,7 +114,13 @@ export function interpSmall(smallMat, width, height, interp1, interp2) {
   return bigMat
 }
 
-export function genWebglData(dataArr) {
+export function genWebglData(
+  dataArr,
+  {
+    canvasWidth = DEFAULT_WEBGL_TILE_WIDTH,
+    canvasHeight = DEFAULT_WEBGL_TILE_HEIGHT,
+  } = {}
+) {
   let heightIndex = 0, newArr = []
   for (let index = 0; index < dataArr.length; index++) {
     const data = dataArr[index]

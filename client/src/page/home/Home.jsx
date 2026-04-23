@@ -323,6 +323,15 @@ const initConfig = {
   }
 }
 
+initConfig.humanBody = {
+  valueg1: 2,
+  valuej1: 1205,
+  valuel1: 5,
+  valuef1: 6,
+  value1: 0.72,
+  sizeValue: 60,
+}
+
 initConfig.petCare = {
   valueg1: 2,
   valuej1: 2900,
@@ -340,6 +349,14 @@ const matrixNameToType = (type) => {
   } else {
     return type
   }
+}
+
+const normalizeHumanBodySizeValue = (sizeValue) => {
+  const nextValue = Number(sizeValue)
+  if (!Number.isFinite(nextValue)) {
+    return 60
+  }
+  return Math.min(200, Math.max(50, nextValue))
 }
 
 /**
@@ -381,7 +398,18 @@ const getConfig = ({ sensorType, mode }) => {
   const realType = matrixNameToType(sensorType)
   const init = initConfig[realType] ? initConfig[realType] : initConfig['bed']
   const local = getLocalStorageConfig({ sensorType: realType, mode })
-  return { ...init, ...local }
+  const mergedConfig = { ...init, ...local }
+  if (realType === 'humanBody') {
+    mergedConfig.sizeValue = normalizeHumanBodySizeValue(mergedConfig.sizeValue)
+  }
+  return mergedConfig
+}
+
+const getDefaultModeForMatrix = (matrixName, currentMode = "normal") => {
+  if (matrixName === "humanBody") {
+    return "skin";
+  }
+  return currentMode;
 }
 
 const createDefaultFingerPoints = (fallbackValue = 0) => new Array(5).fill(fallbackValue)
@@ -541,6 +569,7 @@ class Home extends React.Component {
       valuel1: getConfig({ sensorType: localStorage.getItem('file') }).valuel1,
       valuef1: getConfig({ sensorType: localStorage.getItem('file') }).valuef1,
       value1: getConfig({ sensorType: localStorage.getItem('file') }).value1,
+      sizeValue: getConfig({ sensorType: localStorage.getItem('file') }).sizeValue ?? 60,
       valuelInit1: getConfig({ sensorType: localStorage.getItem('file') }).valuelInit1 ?? initValue.valuelInit1,
       valueMult: initValue.valueMult,
       compen: initValue.compen,
@@ -1237,10 +1266,22 @@ class Home extends React.Component {
         this.setState({ matrixTitle: true })
       } else if (Array.isArray(jsonObject.file)) {
         // 多类型模式：使用数组第一个作为默认类型
-        this.setState({ matrixName: jsonObject.file[0] })
+        const nextMatrixName = jsonObject.file[0]
+        const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag)
+        this.setState({
+          matrixName: nextMatrixName,
+          numMatrixFlag: nextMode,
+          ...getConfig({ sensorType: nextMatrixName, mode: nextMode }),
+        })
         localStorage.setItem('file', jsonObject.file[0])
       } else {
-        this.setState({ matrixName: jsonObject.file })
+        const nextMatrixName = jsonObject.file
+        const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag)
+        this.setState({
+          matrixName: nextMatrixName,
+          numMatrixFlag: nextMode,
+          ...getConfig({ sensorType: nextMatrixName, mode: nextMode }),
+        })
         localStorage.setItem('file', jsonObject.file)
       }
     }
@@ -2397,7 +2438,8 @@ class Home extends React.Component {
 
   changeMatrix = (e) => {
     // setMatrixName(e)
-    const configObj = getConfig({ sensorType: e, mode: this.state.numMatrixFlag })
+    const nextMode = getDefaultModeForMatrix(e, this.state.numMatrixFlag);
+    const configObj = getConfig({ sensorType: e, mode: nextMode })
     const wasLocal = this.state.local;
 
     // 1. 先停止回放，确保后端不再发送旧数据
@@ -2420,6 +2462,7 @@ class Home extends React.Component {
 
     this.setState({
       matrixName: e,
+      numMatrixFlag: nextMode,
       ...configObj,
       dataArr: [],
       dataTime: '',
@@ -3352,6 +3395,7 @@ class Home extends React.Component {
             valuef1={this.state.valuef1}
             valuel1={this.state.valuel1}
             valuej1={this.state.valuej1}
+            sizeValue={this.state.sizeValue}
             valuelInit1={this.state.valuelInit1}
             compen={this.state.compen}
             ymax={this.state.ymax}
@@ -3510,6 +3554,11 @@ class Home extends React.Component {
                         ref={this.com}
                         data={this.data}
                         local={this.state.local}
+                        renderOptions={{
+                          max: this.state.valuej1,
+                          size: this.state.sizeValue ?? 60,
+                          filter: this.state.valuef1,
+                        }}
                         handleChartsBody={this.handleChartsBody.bind(this)}
                         handleChartsBody1={this.handleChartsBody1.bind(this)}
                         changeStateData={this.changeStateData}
@@ -3881,6 +3930,11 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
+                          renderOptions={{
+                            max: this.state.valuej1,
+                            size: this.state.sizeValue ?? 60,
+                            filter: this.state.valuef1,
+                          }}
                           handleChartsBody={this.handleChartsBody.bind(this)}
                           handleChartsBody1={this.handleChartsBody1.bind(this)}
                           changeStateData={this.changeStateData}

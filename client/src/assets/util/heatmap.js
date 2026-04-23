@@ -482,7 +482,7 @@ export class HeatmapCanvas {
         this.canvas = document.createElement('canvas');
 
 
-        // document.body.appendChild(this.canvas)
+        document.body.appendChild(this.canvas)
 
 
         const dpr = window.devicePixelRatio || 1;
