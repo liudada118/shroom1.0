@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-04-23 18:04
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-04-23 18:17
 
 ## 1. 项目概述
 
@@ -307,6 +307,7 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-04-23 | Codex | 人体全身 WebGL 热力图连续性优化 | `client/src/components/video/humanBody.jsx` 将人体各部位 WebGL 热力图输入的默认 padding 和插值密度提升到 `3`，并开启 `drawImage()` 的高质量平滑；`client/src/components/webgl/WebGL.HeatMap copy 2.js` 为圆形扩散新增可选 `blurFactor` 参数，人体全身默认使用更柔和的 `0.72`，减少多个圆相加时的“颗粒感”和断裂边缘 |
 | 2026-04-23 | Codex | 人体全身可视化 size 滑杆改为独立默认值并持久化 | `client/src/components/title/Title.jsx` 将 `humanBody` 的 size 滑杆独立改为 `50-200` 区间、默认 `60`，并在拖动时同步写入 `valueConfig` 与页面 state；`client/src/page/home/Home.jsx` 为人体全身新增 `sizeValue` 配置与 state 透传，同时对历史缓存的 `sizeValue` 做 `50-200` 区间归一化；`client/src/components/video/humanBody.jsx` 也把默认渲染半径改为 `60`，确保切换传感器、切换模式和刷新后都能恢复人体全身的 size 设置 |
 | 2026-04-23 | Codex | WebGL 热力图 tile 尺寸改为可传参且默认兼容旧调用 | `client/src/page/home/robotUtil.js` 将 `genWebglData()` 改为支持可选参数 `canvasWidth/canvasHeight`，默认仍保持旧版 `128x128` 分块尺寸；`client/src/components/video/humanBody.jsx` 则显式传入 `WEBGL_TILE_SIZE`，使人体全身可以单独提升到更高分辨率而不影响机器人和其他既有调用方 |
 | 2026-04-23 | Codex | 人体全身 human2.glb 手臂与肩膀 UV 区间微调 | `client/src/components/video/humanBody.jsx` 按最新 `64x64` UV 布局微调 `human2.glb` 的 4 个关键区域：右手臂改为 `22-30 / 28-33`、右肩膀改为 `31-36 / 29-35`、左手臂改为 `49-58 / 28-33`、左肩膀改为 `44-49 / 29-35`，其余后背、前胸和裤片区域保持上一版映射不变 |
@@ -451,6 +452,7 @@ graph TD
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-04-23 18:17 | Codex | 优化重构 | `client/src/components/video/humanBody.jsx` 提升人体全身 WebGL 热力图源的平滑度：默认把各部位 `order/interp1/interp2` 提升到 `3`，让 `genWebglData()` 生成更致密的中间点；同时在回贴 UV 时启用 `imageSmoothingQuality='high'`。`client/src/components/webgl/WebGL.HeatMap copy 2.js` 还将圆形扩散的硬编码 `blurFactory` 改为可配置的 `u_blurFactor`，人体页默认使用 `0.72`，降低多个圆叠加时边界发硬、层次断开的感觉 |
 | 2026-04-23 18:04 | Codex | 配置变更 | `client/src/components/title/Title.jsx` 将人体全身 `humanBody` 的可视化 size 滑杆改为独立的 `50-200` 区间，并使用 `sizeValue` 作为受控值；`client/src/page/home/Home.jsx` 新增 `humanBody.sizeValue=60` 的默认配置并把该值透传给 `HumanBodyCanvas`，同时对历史缓存的 size 值做 `50-200` 区间归一化；`client/src/components/video/humanBody.jsx` 同步将默认 `size` 调整为 `60`，从而让人体全身视图的 size 默认值、滑杆显示和 `valueConfig` 本地持久化保持一致 |
 | 2026-04-23 17:56 | Codex | 优化重构 | `client/src/page/home/robotUtil.js` 将 `genWebglData()` 重构为支持可选的 `canvasWidth/canvasHeight` 参数，默认仍回落到旧版 `128x128` tile 尺寸；`client/src/components/video/humanBody.jsx` 在人体全身视图中显式传入 `WEBGL_TILE_SIZE`，使提高 WebGL 源图分辨率时，热力图点位排布也同步按新 tile 尺寸放大，不再出现“画布变大但绘制仍停留在 128x128/128x2048 旧坐标系”的错位感 |
 | 2026-04-23 17:46 | Codex | 配置变更 | `client/src/components/video/humanBody.jsx` 按用户最新提供的 `64x64` UV 表进一步微调 `human2.glb` 的肩膀与手臂映射范围：右手臂从 `22-31` 改为 `22-30`，右肩从 `32-36` 改为 `31-36`，左手臂从 `48-58` 改为 `49-58`，左肩从 `44-48` 改为 `44-49`；其余后背、前胸和裤片 UV 区域保持不变 |

@@ -38,6 +38,7 @@ export class WebGLCanvas {
         varying float v_filterClick;\
         varying float v_click;\
         varying float v_groupIdx;\
+        uniform float u_blurFactor;\
         void main() {\
                 vec4 color0 = vec4(0.0, 0.0, 0.0, 0.0);\
                 float x = gl_FragCoord.x;\
@@ -47,7 +48,7 @@ export class WebGLCanvas {
                 float distance = sqrt(dx*dx + dy*dy);\
                 float diff = v_radius-distance;\
                 float currentPercent=0.95;\
-                float blurFactory=0.55;\
+                float blurFactory=u_blurFactor;\
                 float pxAlpha=0.0;\
                 if(v_maxClick>= v_click && v_click>= v_minClick){\
                     pxAlpha = (v_click-v_minClick)/(v_maxClick-v_minClick);\
@@ -240,6 +241,7 @@ WebGLCanvas.prototype.createTplCanvas = function (cfg, data ,index) {
     var u_maxClickLocation = tplCanvas.glObj.u_maxClickLocation = gl.getUniformLocation(programNode, "u_maxClick");
     var u_minClickLocation = tplCanvas.glObj.u_minClickLocation = gl.getUniformLocation(programNode, "u_minClick");
     var u_filterClickLocation = tplCanvas.glObj.u_filterClickLocation = gl.getUniformLocation(programNode, "u_filterClick");
+    var u_blurFactorLocation = tplCanvas.glObj.u_blurFactorLocation = gl.getUniformLocation(programNode, "u_blurFactor");
 
 
 
@@ -255,6 +257,7 @@ WebGLCanvas.prototype.createTplCanvas = function (cfg, data ,index) {
         gl.uniform1f(u_maxClickLocation, tplCanvas.glObj.cfg.max);
         gl.uniform1f(u_minClickLocation, tplCanvas.glObj.cfg.min);
         gl.uniform1f(u_filterClickLocation, tplCanvas.glObj.cfg.filter);
+        gl.uniform1f(u_blurFactorLocation, tplCanvas.glObj.cfg.blurFactor != null ? tplCanvas.glObj.cfg.blurFactor : 0.55);
 
 
         // 设置顶点属性值

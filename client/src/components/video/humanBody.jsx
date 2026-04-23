@@ -13,6 +13,8 @@ const UV_CANVAS_SIZE = 1024;
 const WEBGL_TILE_SIZE = 128*4;
 const WEBGL_SOURCE_WIDTH = 128*4;
 const WEBGL_SOURCE_HEIGHT = 2048*4;
+const HUMAN_BODY_WEBGL_PADDING = 3;
+const HUMAN_BODY_WEBGL_INTERP = 3;
 const DEFAULT_LIGHT_INTENSITY = 0.22;
 const HUMAN_MODEL_ASSET = "./model/human2.glb";
 const DEFAULT_RENDER_OPTIONS = {
@@ -20,6 +22,7 @@ const DEFAULT_RENDER_OPTIONS = {
   max: 100,
   size: 60,
   filter: 0,
+  blurFactor: 0.72,
 };
 const createDefaultModelTransform = () => ({
   position: { x: 0, y: 26, z: -9.5 },
@@ -155,9 +158,9 @@ const createPartConfig = (key, idxMatrix, uv, options = {}) => ({
   width: idxMatrix[0].length,
   height: idxMatrix.length,
   positions: idxMatrix.flat(),
-  order: options.order ?? 2,
-  interp1: options.interp1 ?? 1,
-  interp2: options.interp2 ?? 1,
+  order: options.order ?? HUMAN_BODY_WEBGL_PADDING,
+  interp1: options.interp1 ?? HUMAN_BODY_WEBGL_INTERP,
+  interp2: options.interp2 ?? HUMAN_BODY_WEBGL_INTERP,
 });
 
 const BODY_PARTS = [
@@ -230,6 +233,8 @@ const HumanBodyCanvas = React.forwardRef((props, refs) => {
     }
 
     const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
     BODY_PARTS.forEach((part, index) => {
       ctx.drawImage(
         sourceCanvas,
@@ -400,6 +405,7 @@ const HumanBodyCanvas = React.forwardRef((props, refs) => {
         max: heatmapOptionsRef.current.max,
         min: heatmapOptionsRef.current.min,
         filter: heatmapOptionsRef.current.filter,
+        blurFactor: heatmapOptionsRef.current.blurFactor,
         class: "body",
       },
       webglData,
@@ -473,7 +479,7 @@ const HumanBodyCanvas = React.forwardRef((props, refs) => {
     syncControlsTargetToModel();
   }
 
-  function changeColor({ max, size, filter, light }) {
+  function changeColor({ max, size, filter, light, blurFactor }) {
     if (max !== undefined) {
       heatmapOptionsRef.current.max = max;
     }
@@ -482,6 +488,9 @@ const HumanBodyCanvas = React.forwardRef((props, refs) => {
     }
     if (filter !== undefined) {
       heatmapOptionsRef.current.filter = filter;
+    }
+    if (blurFactor !== undefined) {
+      heatmapOptionsRef.current.blurFactor = blurFactor;
     }
     if (light !== undefined) {
       lightGroup.children.forEach((lightItem) => {
