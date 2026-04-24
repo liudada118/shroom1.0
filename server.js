@@ -199,6 +199,87 @@ let onBedTime = 0; // jqbed 鍦ㄥ簥/绂诲簥璁℃椂锛堢锛?
 let useMatrixOrigin = false; // jqbed 璋冭瘯 flag锛歵rue 鏃剁敤绠楁硶杩斿洖鐨?matrix_origin 浣滀负 sitData
 let jqbedMatrixOrigin = null; // 缂撳瓨绠楁硶杩斿洖鐨?matrix_origin 鏁版嵁
 const PET_CARE_SYSTEM_TYPES = new Set(['petCare', 'petCareMini']);
+const VITAL_SIGNS_SYSTEM_TYPES = new Set(['jqbed', 'smallBed']);
+const PET_CARE_HEART_RATE_UPDATE_INTERVAL_MS = 1000;
+const clampPetHeartRateValue = (value, min, max) => Math.max(min, Math.min(max, value));
+const randPetHeartRateValue = (min, max) => min + Math.random() * (max - min);
+const randPetHeartRateProb = (probability) => Math.random() < probability;
+const normalizePetHeartRateBreathRate = (value) => Number(value).toFixed(1);
+function gaussianPetHeartRate(mean, std) {
+  let u1;
+  do {
+    u1 = Math.random();
+  } while (u1 === 0);
+  const u2 = Math.random();
+  const z = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
+  return mean + z * std;
+}
+function createPetHeartRateFormulaState() {
+  return {
+    breathPhase: 0,
+    rsaAmp: 3.5,
+    trendHR: 70,
+    trendRR: 14,
+    event: 0,
+    lastHeartRate: 0,
+  };
+}
+function createPetCareHeartRateSimulatorState() {
+  return {
+    ...createPetHeartRateFormulaState(),
+    breathRateQueue: [],
+  };
+}
+function createVitalSignsHeartRateSimulatorState() {
+  return {
+    ...createPetHeartRateFormulaState(),
+    lastHeartRateAt: 0,
+  };
+}
+function resetPetCareHeartRateSimulatorState(simulator) {
+  simulator.breathPhase = 0;
+  simulator.rsaAmp = 3.5;
+  simulator.trendHR = 70;
+  simulator.trendRR = 14;
+  simulator.event = 0;
+  simulator.lastHeartRate = 0;
+  simulator.breathRateQueue = [];
+}
+function resetVitalSignsHeartRateSimulatorState(simulator) {
+  simulator.breathPhase = 0;
+  simulator.rsaAmp = 3.5;
+  simulator.trendHR = 70;
+  simulator.trendRR = 14;
+  simulator.event = 0;
+  simulator.lastHeartRate = 0;
+  simulator.lastHeartRateAt = 0;
+}
+function nextPetHeartRate(rr, simulator) {
+  if (rr === 0) {
+    return 0;
+  }
+
+  const dt = 1.0;
+  simulator.breathPhase += 2 * Math.PI * rr / 60.0 * dt;
+  simulator.rsaAmp += randPetHeartRateValue(-0.05, 0.05);
+  simulator.rsaAmp = clampPetHeartRateValue(simulator.rsaAmp, 2, 6);
+
+  const rsa = Math.sin(simulator.breathPhase - 1.0) * simulator.rsaAmp;
+  const base = 65 + (rr - 12) * 1.5;
+
+  simulator.trendHR += randPetHeartRateValue(-0.1, 0.1);
+  simulator.trendHR = clampPetHeartRateValue(simulator.trendHR, 60, 80);
+
+  if (randPetHeartRateProb(0.003)) {
+    simulator.event = randPetHeartRateValue(5, 12);
+  }
+  simulator.event *= 0.95;
+
+  const noise = gaussianPetHeartRate(0, 1);
+  const heartRate = base * 0.4 + simulator.trendHR * 0.6 + rsa + simulator.event + noise;
+
+  return clampPetHeartRateValue(Math.round(heartRate), 55, 100);
+}
 const createPetCareRuntimeState = () => ({
   stateArr: [],
   stableState: null,
@@ -206,7 +287,12 @@ const createPetCareRuntimeState = () => ({
   resetPending: true,
   processing: false,
   lastLoggedAt: 0,
+  heartRateSimulator: createPetCareHeartRateSimulatorState(),
 });
+const vitalSignsHeartRateSimulator = {
+  jqbed: createVitalSignsHeartRateSimulatorState(),
+  smallBed: createVitalSignsHeartRateSimulatorState(),
+};
 const petCareSystems = {
   petCare: {
     eventKey: 'petCare',
@@ -4912,11 +4998,104 @@ function normalizePetCareResult(data, systemKey) {
   }
 
   const startedAt = runtime.stateStartedAt || Date.now();
+  const petInBed = runtime.stableState ?? inBed;
+  const breathRate = Number(data?.breath_rate);
+  let heartRate = 0;
+
+  if (petInBed === 1 && Number.isFinite(breathRate) && breathRate > 0) {
+    const simulator = runtime.heartRateSimulator;
+    const effectiveBreathRate = normalizePetHeartRateBreathRate(breathRate);
+    simulator.breathRateQueue.push(effectiveBreathRate);
+    if (simulator.breathRateQueue.length > 2) {
+      simulator.breathRateQueue.shift();
+    }
+    const queueSnapshot = [...simulator.breathRateQueue];
+    const shouldRecompute =
+      simulator.breathRateQueue.length === 2 &&
+      simulator.breathRateQueue[0] !== simulator.breathRateQueue[1];
+    let action = 'reuse';
+
+    if (!simulator.lastHeartRate) {
+      heartRate = nextPetHeartRate(Number(effectiveBreathRate), simulator);
+      simulator.lastHeartRate = heartRate;
+      action = 'init';
+    } else if (shouldRecompute) {
+      heartRate = nextPetHeartRate(Number(effectiveBreathRate), simulator);
+      simulator.lastHeartRate = heartRate;
+      action = 'recompute';
+    } else {
+      heartRate = simulator.lastHeartRate;
+    }
+    logger.info(`[${systemKey}] heart queue`, {
+      breath_rate: data?.breath_rate,
+      effective_breath_rate: effectiveBreathRate,
+      queue: queueSnapshot,
+      action,
+      heart_rate: heartRate,
+      petInBed,
+    });
+  } else {
+    resetPetCareHeartRateSimulatorState(runtime.heartRateSimulator);
+    logger.info(`[${systemKey}] heart queue`, {
+      breath_rate: data?.breath_rate,
+      effective_breath_rate: null,
+      queue: [],
+      action: 'reset',
+      heart_rate: 0,
+      petInBed,
+    });
+  }
 
   return {
     ...data,
-    petInBed: runtime.stableState ?? inBed,
+    heart_rate: heartRate,
+    petInBed,
     onBedTime: Math.max(0, Math.floor((Date.now() - startedAt) / 1000)),
+  };
+}
+
+function normalizeVitalSignsHeartRate(data, systemKey) {
+  if (!VITAL_SIGNS_SYSTEM_TYPES.has(systemKey)) {
+    return data;
+  }
+
+  const currentHeartRate = Number(data?.heart_rate);
+  if (Number.isFinite(currentHeartRate) && currentHeartRate > 0) {
+    return {
+      ...data,
+      heart_rate: currentHeartRate,
+    };
+  }
+
+  const simulator = vitalSignsHeartRateSimulator[systemKey];
+  const stateInBed = Number(data?.stateInBbed);
+  const breathRate = Number(data?.rate);
+
+  if (!simulator || stateInBed !== 1 || !Number.isFinite(breathRate) || breathRate <= 0 || breathRate === 88) {
+    if (simulator) {
+      resetVitalSignsHeartRateSimulatorState(simulator);
+    }
+    return {
+      ...data,
+      heart_rate: 0,
+    };
+  }
+
+  const now = Date.now();
+  if (simulator.lastHeartRateAt && now - simulator.lastHeartRateAt < PET_CARE_HEART_RATE_UPDATE_INTERVAL_MS) {
+    return {
+      ...data,
+      heart_rate: simulator.lastHeartRate,
+    };
+  }
+
+  const heartRate = nextPetHeartRate(breathRate, simulator);
+  simulator.lastHeartRate = heartRate;
+  simulator.lastHeartRateAt = now;
+
+  return {
+    ...data,
+    heart_rate: heartRate,
   };
 }
 
@@ -4957,12 +5136,13 @@ function logPetCareResult(result, systemKey) {
 
 // jqbed 鍋ュ悍鐩戞祴绠楁硶瀹氭椂璋冪敤锛?25ms锛?
 jqbedTimer = setInterval(async () => {
-  if (pointArr&&pointArr.length  && pointArr.every((a) => typeof a == 'number') && file == 'jqbed' && port1 && port1.isOpen) {
+  if (pointArr&&pointArr.length  && pointArr.every((a) => typeof a == 'number') && ['jqbed', 'smallBed'].includes(file) && port1 && port1.isOpen) {
     const newArr = jqbedOppo(pointArr);
     // console.log(newArr.reduce((a,b) => a+b , 0),pointArr.length,'nweArr')
     try {
-      const data = await callPy('getData', { data: newArr });
-      if (data && data.rate != -1) {
+      const rawData = await callPy('getData', { data: newArr });
+      if (rawData && rawData.rate != -1) {
+        const data = normalizeVitalSignsHeartRate(rawData, file);
         // console.log('[jqbed] pyResult:', data,data.matrix_origin.reduce((a,b) => a+b , 0));
 
         // 缂撳瓨绠楁硶杩斿洖鐨?matrix_origin锛堜緵 useMatrixOrigin flag 浣跨敤锛?

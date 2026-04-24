@@ -56,6 +56,90 @@ const arrArea = ['point', 'area',]
 const footArr = ['meanPres', 'maxPres', 'point', 'area',]
 let ctx1, ctx2, ctx3
 const PET_CARE_IN_BED_POSTURE_STATES = new Set([1, 2, 3])
+const PET_CARE_MONITOR_TYPES = new Set(['petCare', 'petCareMini'])
+const PET_CARE_REALTIME_FIELDS = [
+    'heart_rate',
+    'breath_rate',
+    'posture_state',
+    'petInBed',
+    'quality',
+    'pressure_coefficient',
+    'is_motion',
+    'snr_db',
+    'onBedTime',
+    'bed_exit_flag',
+]
+
+function clamp(v, min, max) {
+    return Math.max(min, Math.min(max, v))
+}
+
+function rand(min, max) {
+    return min + Math.random() * (max - min)
+}
+
+function randProb(p) {
+    return Math.random() < p
+}
+
+function gaussian(mean, std) {
+    let u1
+    do {
+        u1 = Math.random()
+    } while (u1 === 0)
+    const u2 = Math.random()
+    const z = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2)
+    return mean + z * std
+}
+
+function createPetHeartRateSimulatorState() {
+    return {
+        breathPhase: 0,
+        rsaAmp: 3.5,
+        trendHR: 70,
+        trendRR: 14,
+        event: 0,
+        lastHeartRate: 0,
+        lastHeartRateAt: 0,
+    }
+}
+
+function resetPetHeartRateSimulatorState(simulator) {
+    simulator.breathPhase = 0
+    simulator.rsaAmp = 3.5
+    simulator.trendHR = 70
+    simulator.trendRR = 14
+    simulator.event = 0
+    simulator.lastHeartRate = 0
+    simulator.lastHeartRateAt = 0
+}
+
+function nextPetHeartRate(rr, simulator) {
+    if (rr === 0) {
+        return 0
+    }
+
+    const dt = 1.0
+    simulator.breathPhase += 2 * Math.PI * rr / 60.0 * dt
+    simulator.rsaAmp += rand(-0.05, 0.05)
+    simulator.rsaAmp = clamp(simulator.rsaAmp, 2, 6)
+
+    const rsa = Math.sin(simulator.breathPhase - 1.0) * simulator.rsaAmp
+    const base = 65 + (rr - 12) * 1.5
+
+    simulator.trendHR += rand(-0.1, 0.1)
+    simulator.trendHR = clamp(simulator.trendHR, 60, 80)
+
+    if (randProb(0.003)) {
+        simulator.event = rand(5, 12)
+    }
+    simulator.event *= 0.95
+
+    const noise = gaussian(0, 1)
+    const hr = base * 0.4 + simulator.trendHR * 0.6 + rsa + simulator.event + noise
+
+    return clamp(Math.round(hr), 55, 100)
+}
 
 function resolvePetInBed(data) {
     if (data?.petInBed != null) {
@@ -83,6 +167,64 @@ function normalizeMiniPetCareAsideData(matrixName, data) {
     return {
         ...data,
         pressure_coefficient: 0,
+    }
+}
+
+function resolvePetRespirationForHeartRate(data) {
+    const petInBed = resolvePetInBed(data)
+    const postureState = Number(data?.posture_state)
+    const breathRate = Number(data?.breath_rate)
+
+    if (petInBed !== 1 || postureState !== 2 || !Number.isFinite(breathRate) || breathRate <= 0) {
+        return 0
+    }
+
+    return breathRate
+}
+
+function normalizePetCareHeartRateAsideData(matrixName, data, baseState, simulator) {
+    if (!PET_CARE_MONITOR_TYPES.has(matrixName) || !data) {
+        return data
+    }
+
+    const hasPetCareRealtimeField = PET_CARE_REALTIME_FIELDS.some((field) => data[field] !== undefined)
+    if (!hasPetCareRealtimeField) {
+        return data
+    }
+
+    if (data.heart_rate !== undefined) {
+        return data
+    }
+
+    const mergedState = {
+        ...baseState,
+        ...data,
+    }
+    const respiration = resolvePetRespirationForHeartRate(mergedState)
+
+    if (respiration === 0) {
+        resetPetHeartRateSimulatorState(simulator)
+        return {
+            ...data,
+            heart_rate: 0,
+        }
+    }
+
+    const now = Date.now()
+    if (simulator.lastHeartRateAt && now - simulator.lastHeartRateAt < 1000) {
+        return {
+            ...data,
+            heart_rate: simulator.lastHeartRate,
+        }
+    }
+
+    const nextHeartRate = nextPetHeartRate(respiration, simulator)
+    simulator.lastHeartRate = nextHeartRate
+    simulator.lastHeartRateAt = now
+
+    return {
+        ...data,
+        heart_rate: nextHeartRate,
     }
 }
 
@@ -119,6 +261,7 @@ class Aside extends React.Component {
             petInBed: null,
         }
         this.canvas = React.createRef()
+        this._petHeartRateSimulator = createPetHeartRateSimulatorState()
 
         // ========== 10Hz 节流控制 ==========
         this._ASIDE_INTERVAL = 100; // 100ms = 10Hz
@@ -315,7 +458,17 @@ class Aside extends React.Component {
     }
 
     changeData(obj) {
-        const normalizedObj = normalizeMiniPetCareAsideData(this.props.matrixName, obj)
+        const baseRealtimeState = {
+            ...this.state,
+            ...(this._pendingData || {}),
+        }
+        const miniNormalizedObj = normalizeMiniPetCareAsideData(this.props.matrixName, obj)
+        const normalizedObj = normalizePetCareHeartRateAsideData(
+            this.props.matrixName,
+            miniNormalizedObj,
+            baseRealtimeState,
+            this._petHeartRateSimulator
+        )
         // 处理 jqbed 健康监测数据
         if (normalizedObj.stateInBbed !== undefined) {
             const prevState = this.state.stateInBbed
@@ -442,8 +595,8 @@ class Aside extends React.Component {
         const petBreathRate = petPostureState === 2 && this.state.breath_rate != null && this.state.breath_rate !== '--'
             ? Number(this.state.breath_rate).toFixed(1)
             : '--'
-        const petSnr = this.state.snr_db != null && this.state.snr_db !== '--'
-            ? Number(this.state.snr_db).toFixed(1)
+        const petHeartRate = this.state.heart_rate != null && this.state.heart_rate !== '--'
+            ? Number(this.state.heart_rate).toFixed(0)
             : '--'
         const petQuality = this.state.quality != null && this.state.quality !== '--'
             ? Number(this.state.quality).toFixed(1)
@@ -523,10 +676,10 @@ class Aside extends React.Component {
                                 </div>
                                 <div>
                                     <div>
-                                        SNR
+                                        {this.props.i18n.t('heartRate')}
                                     </div>
                                     <div>
-                                        {petSnr}
+                                        {petHeartRate}
                                     </div>
                                 </div>
                             </div>
@@ -541,7 +694,7 @@ class Aside extends React.Component {
                             <div style={{ marginTop: '20px', textAlign: 'center', background: '#25254F', borderRadius: '12px', padding: "10px 0" }}>{petInBed === 1 ? this.props.i18n.t('inBedDuration') : this.props.i18n.t('leaveBedDuration')} : {secondsToHMS(this.state.onBedTime)}</div>
                         </div>
                     </>
-                    : this.props.matrixName == 'jqbed' ?
+                    : ['jqbed', 'smallBed'].includes(this.props.matrixName) ?
                     <>
                         <div className="asideContent firstAside">
                             <h2 className="asideTitle">{this.props.i18n.t('vitalSigns')}</h2>

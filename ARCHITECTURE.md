@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-04-23 19:31
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-04-24 19:06
 
 ## 1. 项目概述
 
@@ -218,7 +218,7 @@ graph TD
 
 1. **传感器数据采集流程**
     - 硬件传感器通过 USB 串口发送原始二进制数据帧 → `serialHelper.js` 接收并触发 `parser.on('data')` 事件 → `server.js` 调用 `dataProcessor.js` 进行线序映射（`openWeb.js`）、归零校准、高斯平滑 → 处理后的矩阵数据通过 `wsHelper.js` 广播到 WebSocket 端口 19999 → 前端 `useWebSocket` Hook 接收数据 → 更新 `usePressureStore` → React 重新渲染热力图和 3D 模型。
-    - 当系统类型为 `petCare` / `petCareMini` 时，`server.js` 先按 `jqbed` 线序将 32x32 数据重排，再以 50Hz（20ms）分别调用 `python/app/petCare/pet_care_wrapper` / `pet_care_wrappermini`；算法输出通过 `python/app/onbed_filter_example.py` 的 JSON-line RPC 回传给 Electron，前端 Title/Home/Aside/License 复用宠物看护链路展示呼吸率、姿态、体动、SNR、信号质量和压力系数；其中 `Aside.jsx` 会在前端层对 `petCareMini` 的离床状态（`petInBed=0` 或 `posture_state=0`）做展示归一化，强制将面板上的 `pressure_coefficient` 显示为 `0.00`，不改写后端算法返回值；同时 `server.js` 关闭了 `petCareMini` 的 `[petCareMini] algorithm result` 周期性信息日志，避免运行期刷屏。
+    - 当系统类型为 `petCare` / `petCareMini` 时，`server.js` 先按 `jqbed` 线序将 32x32 数据重排，再以 50Hz（20ms）分别调用 `python/app/petCare/pet_care_wrapper` / `pet_care_wrappermini`；算法输出通过 `python/app/onbed_filter_example.py` 的 JSON-line RPC 回传给 Electron，前端 Title/Home/Aside/License 复用宠物看护链路展示呼吸率、姿态、体动、信号质量、模拟心率和压力系数；其中 `Aside.jsx` 会在前端层对 `petCareMini` 的离床状态（`petInBed=0` 或 `posture_state=0`）做展示归一化，强制将面板上的 `pressure_coefficient` 显示为 `0.00`，并依据呼吸频率在前端生成 `55-100` 区间的模拟心率替换原来的 SNR 展示；为避免心率跳变过快，模拟心率现在按 1 秒节拍更新一次，其余呼吸、姿态和质量数据仍保持实时刷新；同时 `server.js` 关闭了 `petCareMini` 的 `[petCareMini] algorithm result` 周期性信息日志，避免运行期刷屏。
     - 当系统类型为 `hand0205` / `handGlove115200` 且前端处于普通 3D 遥操模式时，`Home.jsx` 保持 147 点映射数据继续驱动手部姿态与手指弯曲，但 Aside 面板中的 `meanPres`、`maxPres`、`totalPres`、`point` 以及 Pressure Area / Pressure Data 图表改为直接基于原始 256 点矩阵（`sitData` / `realArr`）计算和渲染，避免统计值被映射后的控制数据覆盖。
 
 2. **数据存储与导出流程**
@@ -307,6 +307,19 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-04-24 | Codex | 宠物看护心率公式下沉到后端 | `server.js` 为 `petCare` / `petCareMini` 的 runtime 新增心率模拟状态机，在广播算法结果前按呼吸频率、RSA 振幅、趋势项、事件扰动和高斯噪声生成 `heart_rate`，并限制为每秒更新一次；`client/src/components/aside/Aside.jsx` 同步改为优先使用后端下发的 `heart_rate`，前端只保留缺省兜底 |
+| 2026-04-24 | Codex | 宠物看护心率改为随呼吸变化触发 | `server.js` 继续保留 `petCare` / `petCareMini` 的 1 秒心率更新上限，但新增 `lastBreathRate` 记忆：只有当归一化后的 `breath_rate` 相比上一拍发生有效变化时，后端才会重新计算并下发新的 `heart_rate`；若呼吸率未变，则持续复用上一拍心率，避免心率脱离呼吸单独跳动 |
+| 2026-04-24 | Codex | 宠物看护心率改为与呼吸同拍更新 | `server.js` 去掉 `petCare` / `petCareMini` 在呼吸变化后的额外 1 秒门限，改为只按归一化后的 `breath_rate` 是否变化来决定是否重算 `heart_rate`；这样呼吸显示值一变，心率就会立刻跟着更新，呼吸稳定时则保持上一拍心率 |
+| 2026-04-24 | Codex | 宠物看护心率与呼吸显示节奏强制对齐 | `server.js` 为 `petCare` / `petCareMini` 的心率模拟器新增 `lastBreathDirection` 和记数值对齐逻辑：当呼吸显示值已变化、但公式重算后的整数 `heart_rate` 仍与上一拍相同时，会按呼吸变化方向强制推一拍，避免“后端已重算但前端整数心率没变”造成的视觉不同步 |
+| 2026-04-24 | Codex | 宠物看护心率触发条件改为按 1 位小数显示值比较 | `server.js` 将 `petCare` / `petCareMini` 的呼吸变化判断从数值归一化改为直接使用 `Number(breath_rate).toFixed(1)` 的显示值：只有当呼吸在保留 1 位小数后的展示结果发生变化时，才重算并下发新的 `heart_rate`，确保后端触发条件与前端显示完全一致 |
+| 2026-04-24 | Codex | 宠物看护心率改为等待 1 位小数呼吸稳定后触发 | `server.js` 为 `petCare` / `petCareMini` 的后端心率模拟器新增 `pendingBreathRate / pendingBreathCount`：呼吸在保留 1 位小数后的新值需要连续稳定 5 个采样周期后，才会提交为新的 `lastBreathRate` 并触发 `heart_rate` 重算，从而滤掉相邻帧之间的 0.1 来回抖动 |
+| 2026-04-24 | Codex | 宠物看护心率回退为固定 1 秒更新 | `server.js` 将 `petCare` / `petCareMini` 的心率逻辑回退为最简单的固定节奏：满足在床且躯干姿态时，仅按 1 秒间隔重算一次 `heart_rate` 并缓存上一拍，其余时间直接复用；前面临时加入的按呼吸变化、显示值对齐和稳定帧触发逻辑均已撤回 |
+| 2026-04-24 | Codex | 宠物看护心率固定刷新去除姿态抖动重置 | `server.js` 进一步放宽 `petCare` / `petCareMini` 的 1 秒心率刷新条件：不再要求 `posture_state === 2` 才保留缓存，而是只要 `petInBed=1` 且 `breath_rate` 有效，就继续沿用 1 秒缓存；这样实时姿态在 `2/3` 等状态间抖动时，不会反复重置心率模拟器并导致看起来像实时更新 |
+| 2026-04-24 | Codex | 宠物看护心率改回按呼吸变化更新 | `server.js` 为 `petCare` / `petCareMini` 的后端心率模拟器恢复 `lastBreathRate` 记忆，改成只有当 `breath_rate`（当前仍按 `toFixed(1)` 归一）相对上一拍发生变化时，才重算并下发新的 `heart_rate`；呼吸值未变时持续复用上一拍心率，不再按固定 1 秒节奏刷新 |
+| 2026-04-24 | Codex | 小床检测接入生命体征心率面板 | `server.js` 将 `smallBed` 纳入现有 `jqbed` 的 `getData` 检测定时器条件，使小床数据也能回传 `rate / heart_rate / stateInBbed / onBedTime`；`client/src/components/aside/Aside.jsx` 同步把 `smallBed` 纳入生命体征面板分支，和 `jqbed` 一样显示呼吸与心率 |
+| 2026-04-24 | Codex | 小床检测心率增加后端公式兜底 | `server.js` 为 `jqbed` / `smallBed` 新增独立的后端心率模拟状态机；当 Python `getData()` 返回的 `heart_rate` 无效或为 `0` 时，改为按当前呼吸率在后端生成每秒一拍的兜底心率，仅在 `stateInBbed=1` 且呼吸有效时生效，离床或检测中会自动归零 |
+| 2026-04-24 | Codex | 宠物看护模拟心率改为 1 秒刷新 | `client/src/components/aside/Aside.jsx` 在宠物看护心率模拟器内部新增 `lastHeartRate / lastHeartRateAt` 状态，将呼吸驱动的模拟心率更新频率限制为每秒一次；其余实时呼吸、姿态、信号质量和压力系数展示仍沿用原有实时刷新节奏 |
+| 2026-04-24 | Codex | 宠物看护左侧卡片改为模拟心率展示 | `client/src/components/aside/Aside.jsx` 为 `petCare` / `petCareMini` 新增前端呼吸驱动的模拟心率生成器：按呼吸频率推进相位、RSA 振幅、趋势项、事件扰动和高斯噪声，输出 `55-100` 范围内的心率；左侧第一张卡片移除 SNR 显示，改为显示基于当前呼吸频率推导的心率，离床或无有效呼吸时重置状态并显示 `0` |
 | 2026-04-23 | Codex | 关闭 mini看护算法结果刷屏日志 | `server.js` 在 `logPetCareResult()` 入口对 `petCareMini` 提前返回，停止输出 `[petCareMini] algorithm result` 周期性信息日志；`petCare` 原有算法结果日志保留不变 |
 | 2026-04-23 | Codex | mini看护离床时前端压力系数归零 | `client/src/components/aside/Aside.jsx` 为 `petCareMini` 新增前端面板归一化：根据 `petInBed` 或 `posture_state` 识别离床状态，在 `changeData()` 进入 Aside state 前将 `pressure_coefficient` 覆写为 `0`，并在渲染层继续兜底显示 `0.00`；该改动只影响前端展示，不修改后端算法结果 |
 | 2026-04-23 | Codex | 修复 petCareMini 动态库导出名不匹配 | `python/app/onbed_filter_example.py` 为 `petCareMini` 新增按文件路径加载扩展模块的兼容层：由于 `pet_care_wrappermini.cp311-win_amd64.pyd` 内部仍导出 `PyInit_pet_care_wrapper`，现在改为按文件路径加载并临时占用原始初始化名，再在加载后恢复 `sys.modules`，从而允许 `petCare` 与 `petCareMini` 在同一进程中先后切换使用 |
@@ -453,10 +466,34 @@ graph TD
 | 2026-04-23 | Codex | 人体全身 WebGL 源图增加阈值裁剪与动态上限 | `client/src/components/video/humanBody.jsx` 在构造人体各部位 WebGL 输入时使用当前 `filter` 作为阈值裁剪，将低于阈值的点直接置零；同时基于激活点的 `98%` 分位数动态抬高 `renderMax`，并用 `WEBGL_RADIUS_DENSITY_FACTOR` 进一步压缩 WebGL 半径，降低胸背高密度部位在单张源图中整体发红的问题 |
 | 2026-04-23 | Codex | 人体全身 WebGL 源图恢复原始参数并改为指数幂尺寸 | 根据排查结论将 `client/src/components/video/humanBody.jsx` 的人体 WebGL 参数恢复为原始 `radius/max/filter` 配置，撤销临时加入的阈值裁剪、动态上限和额外半径压缩；同时把 WebGL 源画布尺寸调整为 `128x2048`（均为 2 的指数幂），仍保持按 `128` 高度切片复制到人体各个 UV 区域的分发方式 |
 
+| 2026-04-24 | Codex | 宠物看护前端只对实时包处理心率展示 | `client/src/components/aside/Aside.jsx` 为 `petCare` / `petCareMini` 新增 `PET_CARE_REALTIME_FIELDS` 白名单，只有收到包含 `heart_rate/breath_rate/posture_state/petInBed/quality/pressure_coefficient` 等实时字段的包时，才允许走心率归一化逻辑；纯 `meanPres/maxPres/point/totalPres` 这类前端统计更新不再覆写后端下发的 `heart_rate` |
+| 2026-04-24 | Codex | 宠物看护心率队列状态增加结构化日志打印 | `server.js` 在 `petCare` / `petCareMini` 的两帧 `breathRateQueue` 判断点新增 `[systemKey] heart queue` 日志，实时打印原始呼吸值、归一化呼吸值、队列快照、动作类型（`init/recompute/reuse/reset`）以及最终 `heart_rate`，便于直接排查队列是否正确触发重算 |
+| 2026-04-24 | Codex | 宠物看护心率状态拆分为纯队列触发与生命体征定时缓存 | `server.js` 将心率模拟状态拆成两类：`petCare` / `petCareMini` 使用仅包含 `breathRateQueue` 的纯队列状态，只保留“两帧呼吸不同才重算”的触发逻辑；`jqbed` / `smallBed` 继续使用独立的 `lastHeartRateAt` 定时缓存状态，避免两套策略共用同一结构造成误判 |
+| 2026-04-24 | Codex | 宠物看护心率只保留两帧呼吸队列触发 | `server.js` 进一步收敛 `petCare` / `petCareMini` 的心率更新分支：去掉 `lastHeartRateAt` 在宠物看护链路中的参与，仅保留前后两帧 `breathRateQueue` 比较；首帧初始化一次心率，后续只有两帧呼吸值不同才重算，否则始终复用上一拍心率 |
+| 2026-04-24 | Codex | 宠物看护心率改为比较前后两帧呼吸队列 | `server.js` 为 `petCare` / `petCareMini` 的心率运行时新增 `breathRateQueue`，每次只缓存前后两帧 `Number(breath_rate).toFixed(1)` 后的呼吸值；只有两帧不同才调用心率函数重算 `heart_rate`，两帧相同则继续复用上一拍心率，离床或呼吸无效时同步清空队列 |
+
 ## 9. 更新日志
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-04-24 19:06 | Codex | 修复缺陷 | `client/src/components/aside/Aside.jsx` 修复宠物看护前端“心率乱跳”展示问题：新增 `PET_CARE_REALTIME_FIELDS` 判断，仅当 `changeData()` 收到真正的宠物实时检测字段时才会进入心率归一化分支；本地压力统计包（如 `meanPres/maxPres/point/totalPres`）不再触发前端心率补算，从而避免覆盖后端已正确下发的 `heart_rate` |
+| 2026-04-24 19:02 | Codex | 配置变更 | `server.js` 为 `petCare` / `petCareMini` 的两帧 `breathRateQueue` 触发链路新增结构化调试日志：每帧都会打印 `[systemKey] heart queue`，包含 `breath_rate`、`effective_breath_rate`、当前两帧队列、动作类型（`init/recompute/reuse/reset`）和最终 `heart_rate`，用于直接观察队列状态与重算时机 |
+| 2026-04-24 18:59 | Codex | 配置变更 | `server.js` 将心率模拟状态正式拆分为两套：`createPetCareHeartRateSimulatorState()` / `resetPetCareHeartRateSimulatorState()` 仅服务 `petCare` 与 `petCareMini` 的两帧 `breathRateQueue` 触发链路，不再携带 `lastHeartRateAt`；`createVitalSignsHeartRateSimulatorState()` / `resetVitalSignsHeartRateSimulatorState()` 则继续供 `jqbed` / `smallBed` 使用 1 秒缓存逻辑 |
+| 2026-04-24 18:58 | Codex | 配置变更 | `server.js` 继续收敛 `petCare` / `petCareMini` 的心率更新条件，只保留两帧 `breathRateQueue` 触发：首帧初始化一次 `heart_rate`，后续仅当 `queue[0] !== queue[1]` 时才重算；相同则始终复用 `lastHeartRate`，不再让 `lastHeartRateAt` 参与宠物看护链路的判定 |
+| 2026-04-24 18:51 | Codex | 配置变更 | `server.js` 将 `petCare` / `petCareMini` 的心率触发改为两帧 `breath_rate` 缓存队列：`createPetHeartRateSimulatorState()` 新增 `breathRateQueue`，实时处理时仅保留前后两帧归一化呼吸值，只有 `queue[0] !== queue[1]` 时才调用心率公式重算 `heart_rate`，否则持续复用上一拍心率；离床或呼吸无效时会同步清空队列与缓存 |
+| 2026-04-24 02:14 | Codex | 配置变更 | `server.js` 将 `petCare` / `petCareMini` 的心率逻辑从固定 1 秒刷新改回按呼吸变化触发：新增 `lastBreathRate` 记忆，只有当前 `breath_rate`（按 `Number(...).toFixed(1)` 归一）和上一拍不同，才会重算并下发新的 `heart_rate`；呼吸值未变时继续复用上一拍心率 |
+| 2026-04-24 02:03 | Codex | 配置变更 | `server.js` 放宽 `petCare` / `petCareMini` 的固定 1 秒心率缓存条件：去掉 `posture_state === 2` 的限制，只要 `petInBed=1` 且 `breath_rate` 有效，就继续复用上一拍心率直至满 1 秒后再重算，从而避免实时姿态抖动触发的频繁重置 |
+| 2026-04-24 01:55 | Codex | 配置变更 | `server.js` 将 `petCare` / `petCareMini` 的心率更新逻辑回退为固定 1 秒一次：在 `petInBed=1` 且 `posture_state=2` 时，若距离上一拍未满 1 秒则直接复用缓存心率；满 1 秒后再按当前呼吸率重算一拍，前面临时加入的按呼吸显示值比较、稳定帧等待和强制对齐逻辑已移除 |
+| 2026-04-24 01:48 | Codex | 配置变更 | `server.js` 进一步收紧 `petCare` / `petCareMini` 的心率触发条件：呼吸在保留 1 位小数后的新显示值需要连续稳定 5 个采样周期，才会提交为新的 `lastBreathRate` 并触发 `heart_rate` 重算；如果只是相邻帧之间的 0.1 抖动，则继续沿用上一拍心率 |
+| 2026-04-24 01:38 | Codex | 配置变更 | `server.js` 将 `petCare` / `petCareMini` 的心率触发条件改为直接比较 `Number(breath_rate).toFixed(1)`：只有呼吸在保留 1 位小数后的显示值变化时，才会重算并下发新的 `heart_rate`，从而让后端更新判定和前端呼吸展示完全一致 |
+| 2026-04-24 01:31 | Codex | 配置变更 | `server.js` 进一步收紧 `petCare` / `petCareMini` 的心率显示同步：新增 `lastBreathDirection` 和记数值对齐逻辑，当 `breath_rate` 显示值已经变化、但公式重算后的整数 `heart_rate` 恰好与上一拍相同，会按呼吸变化方向强制推一拍，避免视觉上出现“呼吸变了但心率没动”的不同频现象 |
+| 2026-04-24 01:22 | Codex | 配置变更 | `server.js` 调整 `petCare` / `petCareMini` 的后端心率更新策略：移除“呼吸变化后仍需等待 1 秒”的额外门限，保留 `lastBreathRate` 比较；现在只要归一化后的 `breath_rate` 变化，`heart_rate` 就会立刻重算并下发，从而和呼吸显示节奏保持一致 |
+| 2026-04-24 01:16 | Codex | 配置变更 | `server.js` 调整 `petCare` / `petCareMini` 的后端心率更新策略：在保留 1 秒更新上限的同时，新增 `lastBreathRate` 呼吸记忆，只有 `breath_rate` 发生新的有效变化后才重新计算 `heart_rate`；若呼吸未变，则继续沿用上一拍心率，避免心率在呼吸稳定时单独跳动 |
+| 2026-04-24 01:02 | Codex | 修复缺陷 | `server.js` 为 `jqbed` / `smallBed` 新增后端心率兜底：当 Python `getData()` 返回的 `heart_rate` 为 `0` 或无效时，按当前 `rate` 在后端生成每秒一拍的模拟心率并透传给前端；仅在 `stateInBbed=1` 且呼吸有效时生效，离床、检测中或无效呼吸时自动重置为 `0` |
+| 2026-04-24 00:31 | Codex | 配置变更 | `server.js` 为 `petCare` / `petCareMini` 的 runtime 新增后端心率公式状态机，在广播前按呼吸频率、RSA 振幅、趋势项、事件扰动和高斯噪声生成 `heart_rate` 并限制为每秒更新一次；`client/src/components/aside/Aside.jsx` 改为优先使用后端下发的 `heart_rate`，不再覆盖已存在的心率字段 |
+| 2026-04-24 00:22 | Codex | 新增功能 | `server.js` 将 `smallBed` 纳入现有 `jqbed` 的 `getData` 检测定时器条件，复用现有生命体征检测链路回传 `rate / heart_rate / stateInBbed / onBedTime`；`client/src/components/aside/Aside.jsx` 同步把 `smallBed` 纳入生命体征面板分支，和 `jqbed` 一样显示呼吸与心率 |
+| 2026-04-24 00:13 | Codex | 配置变更 | `client/src/components/aside/Aside.jsx` 将 `petCare` / `petCareMini` 的模拟心率刷新频率限制为每 1 秒一次：新增 `lastHeartRate` 与 `lastHeartRateAt` 缓存，1 秒内重复收到呼吸数据时直接复用上一拍心率，避免在 50Hz 实时数据链路下心率数值跳变过快 |
+| 2026-04-24 00:08 | Codex | 配置变更 | `client/src/components/aside/Aside.jsx` 将 `petCare` / `petCareMini` 左侧第一张信息卡的第三列从 SNR 改为心率：新增前端模拟心率生成器，按呼吸频率驱动 RSA 相位、慢变趋势、事件扰动和高斯噪声生成 `55-100` 的心率值；当离床、无有效呼吸或姿态不为躯干时自动重置模拟状态并显示 `0` |
 | 2026-04-23 19:31 | Codex | 配置变更 | `server.js` 在 `logPetCareResult()` 中对 `petCareMini` 提前返回，停止打印 `[petCareMini] algorithm result` 周期性算法结果日志，避免 mini 看护运行时持续刷屏；`petCare` 原有日志不受影响 |
 | 2026-04-23 19:24 | Codex | 修复缺陷 | `client/src/components/aside/Aside.jsx` 在前端展示链为 `petCareMini` 新增离床压力系数归零：当 `petInBed=0` 或 `posture_state=0` 时，`changeData()` 会先把 `pressure_coefficient` 归一化为 `0` 再写入 Aside state，渲染层也会兜底显示 `0.00`，从而避免 mini 看护离床后继续显示上一次在床压力系数 |
 | 2026-04-23 19:18 | Codex | 修复缺陷 | Fix `petCareMini` Python import failure: `pet_care_wrappermini.cp311-win_amd64.pyd` does not export `PyInit_pet_care_wrappermini`, so `python/app/onbed_filter_example.py` now loads it by file path with the original init name `pet_care_wrapper`, restores `sys.modules` after load, and keeps `petCare` / `petCareMini` switchable in the same worker process |
