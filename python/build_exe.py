@@ -52,12 +52,19 @@ def build():
     # PyInstaller 参数
     pet_care_dir = os.path.join(app_dir, 'petCare')
     pet_care_binary = None
+    pet_care_mini_binary = None
     if platform.system() == 'Windows':
         candidate = os.path.join(pet_care_dir, 'pet_care_wrapper.cp311-win_amd64.pyd')
         if os.path.exists(candidate):
             pet_care_binary = candidate
         else:
             print(f"璀﹀憡: 鎵句笉鍒?petCare 鍔ㄦ€佸簱 {candidate}")
+
+        mini_candidate = os.path.join(pet_care_dir, 'pet_care_wrappermini.cp311-win_amd64.pyd')
+        if os.path.exists(mini_candidate):
+            pet_care_mini_binary = mini_candidate
+        else:
+            print(f"璀﹀憡: 鎵句笉鍒?petCare mini 鍔ㄦ€佸簱 {mini_candidate}")
 
     args = [
         sys.executable, '-m', 'PyInstaller',
@@ -94,11 +101,15 @@ def build():
         args.extend(['--add-binary', f'{pyd_file}{sep}.'])
         if pet_care_binary:
             args.extend(['--add-binary', f'{pet_care_binary}{sep}petCare'])
+        if pet_care_mini_binary:
+            args.extend(['--add-binary', f'{pet_care_mini_binary}{sep}petCare'])
 
     args.append(entry)
 
     if pet_care_binary:
         print(f"petCare 鍔ㄦ€佸簱: {pet_care_binary}")
+    if pet_care_mini_binary:
+        print(f"petCare mini 鍔ㄦ€佸簱: {pet_care_mini_binary}")
     print("=" * 60)
     print("开始 PyInstaller 打包")
     print(f"平台: {platform.system()} {platform.machine()}")

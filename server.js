@@ -198,12 +198,36 @@ let onbedArr = []; // jqbed 鍦ㄥ簥鐘舵€佹暟缁?
 let onBedTime = 0; // jqbed 鍦ㄥ簥/绂诲簥璁℃椂锛堢锛?
 let useMatrixOrigin = false; // jqbed 璋冭瘯 flag锛歵rue 鏃剁敤绠楁硶杩斿洖鐨?matrix_origin 浣滀负 sitData
 let jqbedMatrixOrigin = null; // 缂撳瓨绠楁硶杩斿洖鐨?matrix_origin 鏁版嵁
-let petCareStateArr = [];
-let petCareStableState = null;
-let petCareStateStartedAt = 0;
-let petCareResetPending = true;
-let petCareProcessing = false;
-let petCareLastLoggedAt = 0;
+const PET_CARE_SYSTEM_TYPES = new Set(['petCare', 'petCareMini']);
+const createPetCareRuntimeState = () => ({
+  stateArr: [],
+  stableState: null,
+  stateStartedAt: 0,
+  resetPending: true,
+  processing: false,
+  lastLoggedAt: 0,
+});
+const petCareSystems = {
+  petCare: {
+    eventKey: 'petCare',
+    rpcReset: 'reset_pet_care',
+    rpcStep: 'pet_care_step',
+    runtime: createPetCareRuntimeState(),
+  },
+  petCareMini: {
+    eventKey: 'petCareMini',
+    rpcReset: 'reset_pet_care_mini',
+    rpcStep: 'pet_care_mini_step',
+    runtime: createPetCareRuntimeState(),
+  },
+};
+function isPetCareSystem(type) {
+  return PET_CARE_SYSTEM_TYPES.has(type);
+}
+
+function resetPetCareRuntime(systemKey) {
+  Object.assign(petCareSystems[systemKey].runtime, createPetCareRuntimeState());
+}
 let lastData = new Array(1024).fill(0),
   firstData = new Array(1024).fill(0);
 const backTotal = backnum1 * backnum2;
@@ -364,6 +388,7 @@ function calcDetectedInterval(timestamps) {
 let reconnectTimer = null;
 let jqbedTimer = null;
 let petCareTimer = null;
+let petCareMiniTimer = null;
 let serverOpened = false;
 let serverShutdownRequested = false;
 
@@ -450,6 +475,7 @@ function shutdownServer() {
   reconnectTimer = clearManagedInterval("serial reconnect timer", reconnectTimer);
   jqbedTimer = clearManagedInterval("jqbed timer", jqbedTimer);
   petCareTimer = clearManagedInterval("petCare timer", petCareTimer);
+  petCareMiniTimer = clearManagedInterval("petCareMini timer", petCareMiniTimer);
 
   localFlag = false;
   sitClose = true;
@@ -1030,12 +1056,7 @@ module.exports = {
             const receiveFile = JSON.parse(message).file
             // db = new sqlite3.Database(`${filePath}/${receiveFile}.db`);
             file = receiveFile;
-            petCareResetPending = true;
-            petCareProcessing = false;
-            petCareStateArr = [];
-            petCareStableState = null;
-            petCareStateStartedAt = 0;
-            petCareLastLoggedAt = 0;
+            Object.keys(petCareSystems).forEach(resetPetCareRuntime);
 
             if (receiveFile == 'handGlove115200') {
               baudRate = 115200
@@ -3319,7 +3340,7 @@ parser.on("data", function (data) {
         // 625
         pointArr = jqbed(pointArr)
         newData = [...pointArr]
-      } else if (file === 'petCare') {
+      } else if (isPetCareSystem(file)) {
         pointArr = jqbed(pointArr)
         newData = [...pointArr]
         // pointArr = press6sit(pointArr, 32, 32, 'col')
@@ -4868,43 +4889,49 @@ function jqbedOppo(arr) {
   return wsPointData;
 }
 
-function normalizePetCareResult(data) {
+function normalizePetCareResult(data, systemKey) {
+  const runtime = petCareSystems[systemKey].runtime;
   const postureState = Number(data?.posture_state);
   const inBed = postureState >= 1 && postureState <= 3 ? 1 : 0;
 
-  if (petCareStateArr.length < 2) {
-    petCareStateArr.push(inBed);
+  if (runtime.stateArr.length < 2) {
+    runtime.stateArr.push(inBed);
   } else {
-    petCareStateArr.shift();
-    petCareStateArr.push(inBed);
+    runtime.stateArr.shift();
+    runtime.stateArr.push(inBed);
   }
 
-  if (petCareStateArr.length === 2 && petCareStateArr.every((value) => value === inBed)) {
-    if (petCareStableState !== inBed) {
-      petCareStableState = inBed;
-      petCareStateStartedAt = Date.now();
+  if (runtime.stateArr.length === 2 && runtime.stateArr.every((value) => value === inBed)) {
+    if (runtime.stableState !== inBed) {
+      runtime.stableState = inBed;
+      runtime.stateStartedAt = Date.now();
     }
-  } else if (petCareStableState == null) {
-    petCareStableState = inBed;
-    petCareStateStartedAt = Date.now();
+  } else if (runtime.stableState == null) {
+    runtime.stableState = inBed;
+    runtime.stateStartedAt = Date.now();
   }
 
-  const startedAt = petCareStateStartedAt || Date.now();
+  const startedAt = runtime.stateStartedAt || Date.now();
 
   return {
     ...data,
-    petInBed: petCareStableState ?? inBed,
+    petInBed: runtime.stableState ?? inBed,
     onBedTime: Math.max(0, Math.floor((Date.now() - startedAt) / 1000)),
   };
 }
 
-function logPetCareResult(result) {
-  const now = Date.now();
-  if (now - petCareLastLoggedAt < 1000) {
+function logPetCareResult(result, systemKey) {
+  if (systemKey === 'petCareMini') {
     return;
   }
 
-  petCareLastLoggedAt = now;
+  const runtime = petCareSystems[systemKey].runtime;
+  const now = Date.now();
+  if (now - runtime.lastLoggedAt < 1000) {
+    return;
+  }
+
+  runtime.lastLoggedAt = now;
   const postureState = Number(result?.posture_state);
   const postureLabel =
     postureState === 0 ? 'Empty'
@@ -4913,7 +4940,7 @@ function logPetCareResult(result) {
           : postureState === 3 ? 'Motion'
             : 'Unknown';
 
-  logger.info('[petCare] algorithm result', {
+  logger.info(`[${systemKey}] algorithm result`, {
     breath_rate: result?.breath_rate,
     effective_breath_rate: postureState === 2 ? result?.breath_rate : null,
     posture_state: postureState,
@@ -4974,39 +5001,46 @@ jqbedTimer = setInterval(async () => {
   }
 }, 125);
 
-petCareTimer = setInterval(async () => {
-  if (petCareProcessing) {
-    return;
-  }
+function startPetCareTimer(systemKey) {
+  const system = petCareSystems[systemKey];
 
-  if (!(pointArr && pointArr.length && pointArr.every((a) => typeof a == 'number') && file == 'petCare' && port1 && port1.isOpen)) {
-    return;
-  }
-
-  petCareProcessing = true;
-
-  try {
-    if (petCareResetPending) {
-      await callPy('reset_pet_care', {});
-      petCareResetPending = false;
+  return setInterval(async () => {
+    if (system.runtime.processing) {
+      return;
     }
 
-    const data = await callPy('pet_care_step', { data: [...pointArr] }, { timeoutMs: 30000 });
-    const result = normalizePetCareResult(data);
-    logPetCareResult(result);
-    const jsonData = JSON.stringify({ petCare: result });
+    if (!(pointArr && pointArr.length && pointArr.every((a) => typeof a == 'number') && file == systemKey && port1 && port1.isOpen)) {
+      return;
+    }
 
-    server.clients.forEach(function each(client) {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(jsonData);
+    system.runtime.processing = true;
+
+    try {
+      if (system.runtime.resetPending) {
+        await callPy(system.rpcReset, {});
+        system.runtime.resetPending = false;
       }
-    });
-  } catch (e) {
-    console.error('[petCare] callPy error:', e.message);
-  } finally {
-    petCareProcessing = false;
-  }
-}, 20);
+
+      const data = await callPy(system.rpcStep, { data: [...pointArr] }, { timeoutMs: 30000 });
+      const result = normalizePetCareResult(data, systemKey);
+      logPetCareResult(result, systemKey);
+      const jsonData = JSON.stringify({ [system.eventKey]: result });
+
+      server.clients.forEach(function each(client) {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(jsonData);
+        }
+      });
+    } catch (e) {
+      console.error(`[${system.eventKey}] callPy error:`, e.message);
+    } finally {
+      system.runtime.processing = false;
+    }
+  }, 20);
+}
+
+petCareTimer = startPetCareTimer('petCare');
+petCareMiniTimer = startPetCareTimer('petCareMini');
 
 module.exports.shutdownServer = shutdownServer;
 

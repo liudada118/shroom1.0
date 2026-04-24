@@ -91,6 +91,7 @@ const SENSOR_MATRIX_MAP = {
   smallBed:   { width: 32, height: 32, total: 1024 },
   smallBed1:  { width: 32, height: 32, total: 1024 },
   petCare:    { width: 32, height: 32, total: 1024 },
+  petCareMini:{ width: 32, height: 32, total: 1024 },
   smallM:     { width: 32, height: 32, total: 1024 },
   hand:       { width: 32, height: 32, total: 1024 },
   sit:        { width: 32, height: 32, total: 1024 },

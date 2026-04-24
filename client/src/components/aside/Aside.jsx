@@ -55,6 +55,37 @@ const arr = ['meanPres', 'maxPres', 'totalPres', 'presStan']
 const arrArea = ['point', 'area',]
 const footArr = ['meanPres', 'maxPres', 'point', 'area',]
 let ctx1, ctx2, ctx3
+const PET_CARE_IN_BED_POSTURE_STATES = new Set([1, 2, 3])
+
+function resolvePetInBed(data) {
+    if (data?.petInBed != null) {
+        return Number(data.petInBed)
+    }
+
+    const postureState = Number(data?.posture_state)
+    if (Number.isFinite(postureState) && postureState >= 0 && postureState <= 3) {
+        return PET_CARE_IN_BED_POSTURE_STATES.has(postureState) ? 1 : 0
+    }
+
+    return null
+}
+
+function normalizeMiniPetCareAsideData(matrixName, data) {
+    if (matrixName !== 'petCareMini' || !data) {
+        return data
+    }
+
+    const petInBed = resolvePetInBed(data)
+    if (petInBed !== 0) {
+        return data
+    }
+
+    return {
+        ...data,
+        pressure_coefficient: 0,
+    }
+}
+
 class Aside extends React.Component {
 
     constructor() {
@@ -284,32 +315,33 @@ class Aside extends React.Component {
     }
 
     changeData(obj) {
+        const normalizedObj = normalizeMiniPetCareAsideData(this.props.matrixName, obj)
         // 处理 jqbed 健康监测数据
-        if (obj.stateInBbed !== undefined) {
+        if (normalizedObj.stateInBbed !== undefined) {
             const prevState = this.state.stateInBbed
-            const newState = obj.stateInBbed
+            const newState = normalizedObj.stateInBbed
             // 状态变化时重置计时（由后端处理，前端只展示）
         }
         const now = performance.now();
         this._pendingData = {
             ...(this._pendingData || {}),
-            ...obj,
+            ...normalizedObj,
         };
 
         const hasRealtimeDetectionData =
-            obj.rate !== undefined ||
-            obj.heart_rate !== undefined ||
-            obj.stateInBbed !== undefined ||
-            obj.sosflag !== undefined ||
-            obj.onBedTime !== undefined ||
-            obj.breath_rate !== undefined ||
-            obj.posture_state !== undefined ||
-            obj.is_motion !== undefined ||
-            obj.snr_db !== undefined ||
-            obj.quality !== undefined ||
-            obj.bed_exit_flag !== undefined ||
-            obj.pressure_coefficient !== undefined ||
-            obj.petInBed !== undefined;
+            normalizedObj.rate !== undefined ||
+            normalizedObj.heart_rate !== undefined ||
+            normalizedObj.stateInBbed !== undefined ||
+            normalizedObj.sosflag !== undefined ||
+            normalizedObj.onBedTime !== undefined ||
+            normalizedObj.breath_rate !== undefined ||
+            normalizedObj.posture_state !== undefined ||
+            normalizedObj.is_motion !== undefined ||
+            normalizedObj.snr_db !== undefined ||
+            normalizedObj.quality !== undefined ||
+            normalizedObj.bed_exit_flag !== undefined ||
+            normalizedObj.pressure_coefficient !== undefined ||
+            normalizedObj.petInBed !== undefined;
 
         if (hasRealtimeDetectionData) {
             this._lastDataTime = now;
@@ -405,9 +437,8 @@ class Aside extends React.Component {
         }
 
         const petPostureState = Number(this.state.posture_state)
-        const petInBed = this.state.petInBed != null
-            ? this.state.petInBed
-            : (petPostureState >= 1 && petPostureState <= 3 ? 1 : 0)
+        const resolvedPetInBed = resolvePetInBed(this.state)
+        const petInBed = resolvedPetInBed != null ? resolvedPetInBed : 0
         const petBreathRate = petPostureState === 2 && this.state.breath_rate != null && this.state.breath_rate !== '--'
             ? Number(this.state.breath_rate).toFixed(1)
             : '--'
@@ -417,9 +448,12 @@ class Aside extends React.Component {
         const petQuality = this.state.quality != null && this.state.quality !== '--'
             ? Number(this.state.quality).toFixed(1)
             : '--'
-        const petPressureCoefficient = this.state.pressure_coefficient != null && this.state.pressure_coefficient !== '--'
-            ? Number(this.state.pressure_coefficient).toFixed(2)
-            : '--'
+        const shouldZeroMiniPressureCoefficient = this.props.matrixName === 'petCareMini' && resolvedPetInBed === 0
+        const petPressureCoefficient = shouldZeroMiniPressureCoefficient
+            ? '0.00'
+            : this.state.pressure_coefficient != null && this.state.pressure_coefficient !== '--'
+                ? Number(this.state.pressure_coefficient).toFixed(2)
+                : '--'
 
         return (
             <div className='aside'>
@@ -466,10 +500,10 @@ class Aside extends React.Component {
                 </div> : ''}
 
                 {/* jqbed 健康监测面板 */}
-                {this.props.matrixName == 'petCare' ?
+                {['petCare', 'petCareMini'].includes(this.props.matrixName) ?
                     <>
                         <div className="asideContent firstAside">
-                            <h2 className="asideTitle">{this.props.i18n.t('petCareTitle')}</h2>
+                            <h2 className="asideTitle">{this.props.i18n.t(this.props.matrixName === 'petCareMini' ? 'petCareMiniTitle' : 'petCareTitle')}</h2>
                             <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'space-around' }}>
                                 <div>
                                     <div>

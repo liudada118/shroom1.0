@@ -499,6 +499,7 @@ import numpy as np
 import onbed_filter as ncz
 import json, traceback
 import importlib
+import importlib.util
 import io
 import contextlib
 import warnings
@@ -515,6 +516,42 @@ def configure_stdio_utf8():
 
 def ping():
     return {"pong": True}
+
+
+def find_runtime_module_file(*relative_parts):
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    runtime_base = getattr(sys, "_MEIPASS", script_dir)
+    candidates = [
+        os.path.join(script_dir, *relative_parts),
+        os.path.join(runtime_base, *relative_parts),
+        os.path.join(script_dir, "petCare", *relative_parts),
+        os.path.join(runtime_base, "petCare", *relative_parts),
+    ]
+
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate):
+            return candidate
+
+    searched = ", ".join(candidates)
+    raise FileNotFoundError(f"module binary not found: {relative_parts[-1]} (searched: {searched})")
+
+
+def load_extension_module_from_file(binary_filename, init_module_name):
+    module_path = find_runtime_module_file(binary_filename)
+    previous_module = sys.modules.pop(init_module_name, None)
+
+    try:
+        spec = importlib.util.spec_from_file_location(init_module_name, module_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"unable to create extension spec for {module_path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return sys.modules.get(init_module_name, module)
+    finally:
+        if previous_module is not None:
+            sys.modules[init_module_name] = previous_module
+        else:
+            sys.modules.pop(init_module_name, None)
 
 def create_default_inputs():
     """
@@ -607,6 +644,9 @@ _foot_import_err = None
 _pet_care = None
 _pet_care_import_err = None
 _pet_care_initialized = False
+_pet_care_mini = None
+_pet_care_mini_import_err = None
+_pet_care_mini_initialized = False
 
 
 @contextlib.contextmanager
@@ -735,6 +775,94 @@ def pet_care_step(data, species=1.0, threshold_factor=1.0):
     }
 
 
+def ensure_pet_care_mini_loaded():
+    """按需加载 mini 看护算法模块。"""
+    global _pet_care_mini, _pet_care_mini_import_err
+
+    if _pet_care_mini is not None:
+        return _pet_care_mini
+
+    try:
+        _pet_care_mini = load_extension_module_from_file(
+            'pet_care_wrappermini.cp311-win_amd64.pyd',
+            'pet_care_wrapper',
+        )
+        _pet_care_mini_import_err = None
+        return _pet_care_mini
+    except Exception as err:
+        _pet_care_mini_import_err = err
+        raise RuntimeError(f'pet care mini module not available: {err}') from err
+
+
+def warm_pet_care_mini():
+    """预热 mini 看护算法模块并初始化状态。"""
+    module = ensure_pet_care_mini_loaded()
+    info = module.get_info()
+    module.initialize()
+    global _pet_care_mini_initialized
+    _pet_care_mini_initialized = True
+    return {"warmed": True, "info": info}
+
+
+def reset_pet_care_mini():
+    """重置 mini 看护算法状态。"""
+    module = ensure_pet_care_mini_loaded()
+    module.initialize()
+    global _pet_care_mini_initialized
+    _pet_care_mini_initialized = True
+    return {"reset": True}
+
+
+def pet_care_mini_get_info():
+    """获取 mini 看护算法信息。"""
+    module = ensure_pet_care_mini_loaded()
+    return module.get_info()
+
+
+def pet_care_mini_step(data, species=1.0, threshold_factor=1.0):
+    """执行单帧 mini 看护算法。"""
+    module = ensure_pet_care_mini_loaded()
+    global _pet_care_mini_initialized
+
+    frame_data = np.array(data, dtype=np.float32)
+    if frame_data.shape != (1024,):
+        raise ValueError(f'pet care mini frame_data shape must be (1024,), got {frame_data.shape}')
+
+    if not _pet_care_mini_initialized:
+        module.initialize()
+        _pet_care_mini_initialized = True
+
+    outputs = module.step({
+        'frame_data': frame_data,
+        'threshold_factor': float(threshold_factor),
+        'species': float(species),
+    })
+
+    def safe_float(val, default=0.0):
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return default
+
+    def safe_list(val):
+        if val is None:
+            return []
+        if hasattr(val, 'tolist'):
+            return val.tolist()
+        return list(val)
+
+    return {
+        "breath_rate": safe_float(outputs.get("breath_rate", 0.0)),
+        "posture_state": safe_float(outputs.get("posture_state", 0.0)),
+        "is_motion": safe_float(outputs.get("is_motion", 0.0)),
+        "snr_db": safe_float(outputs.get("snr_db", -99.0)),
+        "quality": safe_float(outputs.get("quality", 0.0)),
+        "bed_exit_flag": safe_float(outputs.get("bed_exit_flag", 0.0)),
+        "pressure_coefficient": safe_float(outputs.get("pressure_coefficient", 0.0)),
+        "matrix_origin": safe_list(outputs.get("matrix_origin")),
+    }
+
+
 def realtime_server(sensor_data, data_prev=None):
     """实时处理：计算左右脚压力/面积/COP速度"""
     ensure_foot_analysis_loaded()
@@ -778,6 +906,10 @@ FUNCS = {
     "reset_pet_care": reset_pet_care,
     "pet_care_get_info": pet_care_get_info,
     "pet_care_step": pet_care_step,
+    "warm_pet_care_mini": warm_pet_care_mini,
+    "reset_pet_care_mini": reset_pet_care_mini,
+    "pet_care_mini_get_info": pet_care_mini_get_info,
+    "pet_care_mini_step": pet_care_mini_step,
 }
 
 def handle(req):

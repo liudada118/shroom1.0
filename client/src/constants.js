@@ -47,6 +47,7 @@ export const SENSOR_TYPES = {
   SMALL_BED:   'smallBed',
   SMALL_BED1:  'smallBed1',
   PET_CARE:    'petCare',
+  PET_CARE_MINI: 'petCareMini',
   BIG_BED:     'bigBed',
   // 坐垫
   SIT:         'sit',
@@ -88,6 +89,7 @@ export const SENSOR_MATRIX_MAP = {
   smallBed:   { width: 32, height: 32, total: 1024 },
   smallBed1:  { width: 32, height: 32, total: 1024 },
   petCare:    { width: 32, height: 32, total: 1024 },
+  petCareMini:{ width: 32, height: 32, total: 1024 },
   smallM:     { width: 32, height: 32, total: 1024 },
   hand:       { width: 32, height: 32, total: 1024 },
   sit:        { width: 32, height: 32, total: 1024 },

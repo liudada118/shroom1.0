@@ -171,7 +171,7 @@ WebGLCanvas.prototype.bufferCuter = function (arr) {
 var tplCanvas = document.createElement("canvas");
 tplCanvas.className = 'webgl'
 var map = {}
-document.body.appendChild(tplCanvas)
+// document.body.appendChild(tplCanvas)
 WebGLCanvas.prototype.createTplCanvas = function (cfg, data ,index) {
 
     // var tplCanvas = document.createElement("canvas");

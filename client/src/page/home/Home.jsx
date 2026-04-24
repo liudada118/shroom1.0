@@ -296,7 +296,9 @@ const thrott1 = (fun) => {
 //   // { label: '席悦2.0', value: 'xiyueReal1' },
 //   // { label: '小床监测', value: 'jqbed' },
 // ]
-const bedArr = ['jqbed', 'petCare', 'xiyueReal1', 'smallBed', 'smallBed1']
+const petCareMatrixArr = ['petCare', 'petCareMini']
+const isPetCareMatrix = (type) => petCareMatrixArr.includes(type)
+const bedArr = ['jqbed', ...petCareMatrixArr, 'xiyueReal1', 'smallBed', 'smallBed1']
 
 const initConfig = {
   bed: {
@@ -312,6 +314,14 @@ const initConfig = {
     valuel1: 5,
     valuef1: 6,
     value1: 0.72,  //楂樺害
+    valuelInit1: 500,
+  },
+  petCareMini: {
+    valueg1: 2,
+    valuej1: 2900,
+    valuel1: 5,
+    valuef1: 6,
+    value1: 0.7,
     valuelInit1: 500,
   },
   sit: {
@@ -341,9 +351,18 @@ initConfig.petCare = {
   valuelInit1: 500,
 }
 
+initConfig.petCareMini = {
+  valueg1: 2,
+  valuej1: 2900,
+  valuel1: 5,
+  valuef1: 6,
+  value1: 0.7,
+  valuelInit1: 500,
+}
+
 const matrixNameToType = (type) => {
-  if (type === 'petCare') {
-    return 'petCare'
+  if (isPetCareMatrix(type)) {
+    return type
   } else if (bedArr.includes(type)) {
     return 'bed'
   } else {
@@ -648,7 +667,7 @@ class Home extends React.Component {
   }
 
   syncPetCareRendererConfig = () => {
-    if (this.state.matrixName !== 'petCare') {
+    if (!isPetCareMatrix(this.state.matrixName)) {
       return;
     }
 
@@ -1376,6 +1395,10 @@ class Home extends React.Component {
 
     if (jsonObject.petCare != null) {
       this.data.current?.changeData(jsonObject.petCare);
+    }
+
+    if (jsonObject.petCareMini != null) {
+      this.data.current?.changeData(jsonObject.petCareMini);
     }
 
     if (jsonObject.sitData != null) {
@@ -3449,12 +3472,12 @@ class Home extends React.Component {
 
           {this.state.numMatrixFlag == "num" &&
             (this.state.matrixName == "foot" ||
-              this.state.matrixName == "hand" || this.state.matrixName == "carCol" || this.state.matrixName == "jqbed" || this.state.matrixName == "petCare" ||
+              this.state.matrixName == "hand" || this.state.matrixName == "carCol" || this.state.matrixName == "jqbed" || ['petCare', 'petCareMini'].includes(this.state.matrixName) ||
               this.state.carState == "back" ||
               this.state.carState == "sit") ? (
             <Num ref={this.com} matrixName={this.state.matrixName} />
           ) : this.state.numMatrixFlag == "heatmap" &&
-            (this.state.matrixName == "foot" || this.state.matrixName == "carCol" || this.state.matrixName == "jqbed" || this.state.matrixName == "petCare" ||
+            (this.state.matrixName == "foot" || this.state.matrixName == "carCol" || this.state.matrixName == "jqbed" || ['petCare', 'petCareMini'].includes(this.state.matrixName) ||
               this.state.matrixName == "hand" ||
               this.state.carState == "back" ||
               this.state.carState == "sit") ? (
@@ -3523,7 +3546,7 @@ class Home extends React.Component {
                       changeSelect={this.changeSelect} />
                   </CanvasCom>
                   :
-                  this.state.numMatrixFlag == "numoriginal" && ["hand0205", 'handGlove115200', 'robot1', 'footVideo', 'robotSY', 'robotLCF', 'normal', 'smallBed', 'jqbed', 'petCare', 'daliegu', 'smallSample'].includes(this.state.matrixName) ?
+                  this.state.numMatrixFlag == "numoriginal" && ["hand0205", 'handGlove115200', 'robot1', 'footVideo', 'robotSY', 'robotLCF', 'normal', 'smallBed', 'jqbed', 'petCare', 'petCareMini', 'daliegu', 'smallSample'].includes(this.state.matrixName) ?
                   <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
                     <Num2DOriginal ref={this.com}
                       matrixName={this.state.matrixName}
@@ -4152,7 +4175,7 @@ class Home extends React.Component {
                           changeSelect={this.changeSelect}
                         />
                       </CanvasCom>
-                    ) : this.state.matrixName == "petCare" ? (
+                    ) : ['petCare', 'petCareMini'].includes(this.state.matrixName) ? (
                       <CanvasCom matrixName={this.state.matrixName}>
                         <CanvasHand
                           ref={this.com}

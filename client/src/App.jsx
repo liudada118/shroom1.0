@@ -1,4 +1,4 @@
-import "./App.css";
+﻿import "./App.css";
 import { HashRouter, Routes, Route } from "react-router-dom";
 import { App as AntdApp, message } from "antd";
 import UpdateNotifier from "./components/updater/UpdateNotifier";
@@ -128,6 +128,7 @@ i18next.init({
         leaveBedDuration: 'Off-bed Duration',
         sos: 'SOS Emergency',
         petCareTitle: 'Pet Care',
+        petCareMiniTitle: 'Mini Care',
         petPosture: 'Posture',
         petMotionFlag: 'Motion',
         petSignalQuality: 'Signal Quality',
@@ -153,6 +154,7 @@ i18next.init({
         sensorBed4096num: '64*64 High Speed',
         sensorJqbed: 'Small Bed Monitor',
         sensorPetCare: 'Pet Care',
+        sensorPetCareMini: 'Mini Care',
         sensorFast256: '16*16 High Speed',
         sensorFast1024: '32*32 High Speed',
         sensorNormalFast: '32*32 High Speed Test',
@@ -163,6 +165,8 @@ i18next.init({
     },
     zh: {
       translation: {
+        petCareMiniTitle: 'mini看护',
+        sensorPetCareMini: 'mini看护',
         welcome: '欢迎',
         chooseSensor: '请选择传感器',
         realTime: '实时',
@@ -383,3 +387,5 @@ function App() {
 }
 
 export default App;
+
+

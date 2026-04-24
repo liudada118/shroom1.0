@@ -1,4 +1,4 @@
-/**
+﻿/**
  * License.js
  * 密钥配置可视化页面
  *
@@ -72,6 +72,17 @@ const SENSOR_GROUPS = [
     ],
   },
 ];
+
+/*
+SENSOR_GROUPS
+  .find((group) => group.items.some((item) => item.value === 'petCare'))
+  ?.items.push({ label: 'mini鐪嬫姢', value: 'petCareMini' });
+
+*/
+
+SENSOR_GROUPS
+  .find((group) => group.items.some((item) => item.value === 'petCare'))
+  ?.items.push({ label: 'mini看护', value: 'petCareMini' });
 
 const ALL_SENSORS = SENSOR_GROUPS.flatMap((g) => g.items);
 
@@ -157,6 +168,8 @@ const SENSOR_MODULES = {
 };
 
 /** 获取某传感器类型的可用功能模块，若无定义则返回通用选项 */
+SENSOR_MODULES.petCareMini = [...(SENSOR_MODULES.petCare || [])];
+
 const getModulesForSensor = (sensorValue) => {
   return SENSOR_MODULES[sensorValue] || [
     { value: 'normal', label: '3D模型' },
@@ -801,3 +814,4 @@ const License = () => {
 };
 
 export default License;
+
