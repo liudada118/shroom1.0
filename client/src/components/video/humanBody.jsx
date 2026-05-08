@@ -17,6 +17,7 @@ const HUMAN_BODY_WEBGL_PADDING = 3;
 const HUMAN_BODY_WEBGL_INTERP = 3;
 const DEFAULT_LIGHT_INTENSITY = 0.22;
 const HUMAN_MODEL_ASSET = "./model/human3.glb";
+const KEYBOARD_ROTATE_STEP = 5;
 const DEFAULT_RENDER_OPTIONS = {
   min: 1,
   max: 100,
@@ -203,6 +204,8 @@ const HumanBodyCanvas = React.forwardRef((props, refs) => {
   const ALT_KEY = 18;
   const CTRL_KEY = 17;
   const CMD_KEY = 91;
+  const LEFT_KEY = "ArrowLeft";
+  const RIGHT_KEY = "ArrowRight";
 
   function paintBaseTexture(canvas) {
     const ctx = canvas.getContext("2d");
@@ -479,6 +482,45 @@ const HumanBodyCanvas = React.forwardRef((props, refs) => {
     syncControlsTargetToModel();
   }
 
+  function rotateModelByKeyboard(deltaY) {
+    modelTransformRef.current = {
+      ...modelTransformRef.current,
+      rotation: {
+        ...modelTransformRef.current.rotation,
+        y: modelTransformRef.current.rotation.y + deltaY,
+      },
+    };
+    applyModelTransform();
+  }
+
+  function isTextInputTarget(target) {
+    const tagName = target?.tagName?.toLowerCase();
+    return target?.isContentEditable || tagName === "input" || tagName === "textarea" || tagName === "select";
+  }
+
+  function handleKeyDown(event) {
+    if (isTextInputTarget(event.target)) {
+      return;
+    }
+
+    if (event.key === LEFT_KEY) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.nativeEvent?.stopImmediatePropagation?.();
+      event.stopImmediatePropagation?.();
+      rotateModelByKeyboard(-KEYBOARD_ROTATE_STEP);
+      return;
+    }
+
+    if (event.key === RIGHT_KEY) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.nativeEvent?.stopImmediatePropagation?.();
+      event.stopImmediatePropagation?.();
+      rotateModelByKeyboard(KEYBOARD_ROTATE_STEP);
+    }
+  }
+
   function changeColor({ max, size, filter, light, blurFactor }) {
     if (max !== undefined) {
       heatmapOptionsRef.current.max = max;
@@ -522,8 +564,10 @@ const HumanBodyCanvas = React.forwardRef((props, refs) => {
   useEffect(() => {
     init();
     animate();
+    window.addEventListener("keydown", handleKeyDown, true);
 
     return () => {
+      window.removeEventListener("keydown", handleKeyDown, true);
       if (animationRequestId) {
         cancelAnimationFrame(animationRequestId);
       }

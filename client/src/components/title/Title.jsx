@@ -39,6 +39,8 @@ const createDefaultHumanTransform = () => ({
 })
 const petCareMatrixTypes_title = ['petCare', 'petCareMini']
 const tactileGloveTypes_title = ['hand0205', 'handGlove115200', 'handGloveFullPacket']
+const fullPacketGloveType_title = 'handGloveFullPacket'
+const calibratableGloveTypes_title = tactileGloveTypes_title.filter((type) => type !== fullPacketGloveType_title)
 const isPetCareMatrixTitle = (type) => petCareMatrixTypes_title.includes(type)
 const bedArr_title = ['bigBed', 'smallBed', 'bed4096', 'bed4096num', 'matCol', 'matColPos', 'jqbed', ...petCareMatrixTypes_title]
 const matrixNameToType_title = (type) => isPetCareMatrixTitle(type) ? type : bedArr_title.includes(type) ? 'bed' : type
@@ -425,7 +427,7 @@ class Title extends React.Component {
     let showInit = false;     // Initial value
     let showHumanTransform = false; // Human model transform
 
-    if (matrixName === 'humanBody') {
+    if (matrixName === 'humanBody' && mode !== 'numoriginal') {
       showSize = true;
       showColor = true;
       showFilter = true;
@@ -1005,7 +1007,7 @@ class Title extends React.Component {
               const modeConfig = getConfig({ sensorType: this.props.matrixName, mode: value })
               this.props.changeStateData({ numMatrixFlag: value, ...modeConfig })
 
-              if (tactileGloveTypes_title.includes(this.props.matrixName)) {
+              if (calibratableGloveTypes_title.includes(this.props.matrixName)) {
                 if (['normal', 'skin'].includes(this.props.numMatrixFlag)) {
                   this.props.com.current?.changeModal(this.props.hand)
                 }
@@ -1029,7 +1031,10 @@ class Title extends React.Component {
                 }
               }
             }}
-            options={tactileGloveTypes_title.includes(this.props.matrixName) ? [
+            options={this.props.matrixName === fullPacketGloveType_title ? [
+              { value: 'num', label: t('data2D') },
+              { value: 'numoriginal', label: t('rawData') },
+            ] : tactileGloveTypes_title.includes(this.props.matrixName) ? [
               { value: 'num', label: t('data2D') },
               { value: 'normal', label: t('tel3D') },
               { value: 'num3D', label: t('data3D') },
@@ -1050,12 +1055,13 @@ class Title extends React.Component {
               { value: 'numoriginal', label: t('rawData') },
             ] : this.props.matrixName == 'humanBody' ? [
               { value: 'skin', label: t('skin3D') },
+              { value: 'numoriginal', label: t('rawData') },
             ] : []}
           /> : ''
         }
 
         {
-          tactileGloveTypes_title.includes(this.props.matrixName) ?
+          calibratableGloveTypes_title.includes(this.props.matrixName) ?
             <Modal
               mask={false}
               width={450}
@@ -1190,7 +1196,7 @@ class Title extends React.Component {
           : ''} */}
 
 
-        {tactileGloveTypes_title.includes(this.props.matrixName) && this.props.numMatrixFlag == 'normal' ? <Button className='titleButton'
+        {calibratableGloveTypes_title.includes(this.props.matrixName) && this.props.numMatrixFlag == 'normal' ? <Button className='titleButton'
           onClick={() => {
             // this.props.com.current?.calibration()
             // this.setState({
@@ -1205,7 +1211,7 @@ class Title extends React.Component {
             // 手固定
             this.props.com.current?.handZero()
           }}
-        >{t('calib')}</Button> : tactileGloveTypes_title.includes(this.props.matrixName) && this.props.numMatrixFlag == 'skin' ? <Button className='titleButton'
+        >{t('calib')}</Button> : calibratableGloveTypes_title.includes(this.props.matrixName) && this.props.numMatrixFlag == 'skin' ? <Button className='titleButton'
           onClick={() => {
             // this.props.com.current?.calibration()
             // this.setState({

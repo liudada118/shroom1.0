@@ -46,6 +46,7 @@ function footInterp(arr, footPointArr) {
     return newArr
 }
 let leftArr = [], rightArr = []
+const fullPacketGloveType = 'handGloveFullPacket'
 
 // ========== 动态计算 cellSize ==========
 function calcCellSize(texW, texH, maxW, maxH, padding) {
@@ -386,6 +387,12 @@ export const Num2D = React.forwardRef((props, refs) => {
             }
         }
         initedRef.current = true;
+        if (props.matrixName === fullPacketGloveType) {
+            const defaultData = new Array(16 * 16).fill(0);
+            layoutData(defaultData);
+            pendingFlatRef.current = { data: defaultData, tw: 16, th: 16 };
+            scheduleRender();
+        }
 
         return () => {
             initedRef.current = false;

@@ -76,6 +76,7 @@ import { SelectOutlined } from "@ant-design/icons";
 import { Num } from "../../components/num/Num";
 import { Num2D } from "../../components/num/Num2D";
 import { Num2DOriginal } from "../../components/num/Num2Doriginal";
+import HumanBodyRawData from "../../components/num/HumanBodyRawData";
 import Num3D from "../../components/num/NumWs";
 import { calFoot } from "../../assets/util/value";
 import { Heatmap } from "../../components/heatmap/canvas";
@@ -94,7 +95,9 @@ import { withTranslation } from "react-i18next";
 import { chestLine, flLine, frLine, genWebglData, handSkinChange, heatMapMax, hlLine, hrLine, robot0401 } from "./robotUtil";
 import { WebGLCanvas } from "../../components/webgl/WebGL.HeatMap copy 2";
 
-const tactileGloveTypes = ['hand0205', 'handGlove115200', 'handGloveFullPacket']
+const FULL_PACKET_GLOVE_MATRIX = 'handGloveFullPacket'
+const FULL_PACKET_GLOVE_MODES = ['num', 'numoriginal']
+const tactileGloveTypes = ['hand0205', 'handGlove115200', FULL_PACKET_GLOVE_MATRIX]
 const isTactileGloveMappedLength = (matrixName, length) => {
   return length === 147 || (matrixName === 'handGloveFullPacket' && length === 195)
 }
@@ -122,6 +125,51 @@ const parsePressurePayload = (payload) => {
 
 const getRawPressurePayload = (jsonObject, dataKey) => {
   return jsonObject.realArr ?? jsonObject.rawPressureData ?? jsonObject[dataKey]
+}
+
+const parseMaybeJsonPayload = (payload, fallback = null) => {
+  if (payload == null) {
+    return fallback
+  }
+  if (typeof payload !== 'string') {
+    return payload
+  }
+  try {
+    return JSON.parse(payload)
+  } catch {
+    return fallback
+  }
+}
+
+const getHumanBodyPartArray = (part) => {
+  const parsedPart = parseMaybeJsonPayload(part, null)
+  if (Array.isArray(parsedPart)) {
+    return parsedPart
+  }
+
+  const arrPayload = parsedPart?.arr ?? parsedPart?.data ?? parsedPart?.value
+  const parsedArr = parseMaybeJsonPayload(arrPayload, arrPayload)
+  if (Array.isArray(parsedArr)) {
+    return parsedArr
+  }
+
+  if (typeof parsedArr === 'string') {
+    const splitArr = parsedArr
+      .split(',')
+      .map((value) => Number(value.trim()))
+      .filter((value) => Number.isFinite(value))
+    return splitArr.length ? splitArr : null
+  }
+
+  return Array.isArray(parsedArr) ? parsedArr : null
+}
+
+const getHumanBodyFrameData = (payload) => {
+  const source = getHumanBodyPartArray(payload)
+  if (!source) {
+    return new Array(1024).fill(0)
+  }
+  return source.length >= 1024 ? source.slice(0, 1024) : robot0401(source)
 }
 
 const isCar = (str) => {
@@ -456,7 +504,10 @@ const getConfig = ({ sensorType, mode }) => {
 
 const getDefaultModeForMatrix = (matrixName, currentMode = "normal") => {
   if (matrixName === "humanBody") {
-    return "skin";
+    return currentMode === "numoriginal" ? "numoriginal" : "skin";
+  }
+  if (matrixName === FULL_PACKET_GLOVE_MATRIX) {
+    return FULL_PACKET_GLOVE_MODES.includes(currentMode) ? currentMode : "num";
   }
   return currentMode;
 }
@@ -1196,18 +1247,40 @@ class Home extends React.Component {
     if (jsonObject.data != null) {
       // const data = JSON.parse(jsonObject.data)
       // console.log(jsonObject.data)
-      const { HL, HR, FL, FR, ALLBODY, BODY } = jsonObject.data
+      const humanBodyPayload = parseMaybeJsonPayload(jsonObject.data, {})
+      const normalizedHumanBodyPayload = parseMaybeJsonPayload(humanBodyPayload?.data, humanBodyPayload) || {}
+      const {
+        HL,
+        HR,
+        FL,
+        FR,
+        ALLBODY,
+        BODY,
+        hl,
+        hr,
+        fl,
+        fr,
+        allbody: lowerAllbody,
+        body: lowerBody,
+      } = normalizedHumanBodyPayload
 
       let flArr = new Array(60).fill(0), frArr = new Array(60).fill(0),
-        hrArr = new Array(147).fill(0), hlArr = new Array(147).fill(0), allbody = new Array(256).fill(0), body = new Array(256).fill(0)
+        hrArr = new Array(147).fill(0), hlArr = new Array(147).fill(0), allbody = new Array(1024).fill(0), body = new Array(1024).fill(0)
 
-      if (FL && FL.arr) flArr = flLine(FL.arr)
-      if (FR && FR.arr) frArr = frLine(FR.arr)
-      if (HR && HR.arr) hrArr = hrLine(HR.arr)
-      if (HL && HL.arr) hlArr = hlLine(HL.arr)
+      const flSource = getHumanBodyPartArray(FL ?? fl)
+      const frSource = getHumanBodyPartArray(FR ?? fr)
+      const hrSource = getHumanBodyPartArray(HR ?? hr)
+      const hlSource = getHumanBodyPartArray(HL ?? hl)
+      const allbodySource = getHumanBodyPartArray(ALLBODY ?? lowerAllbody)
+      const bodySource = getHumanBodyPartArray(BODY ?? lowerBody)
+
+      if (flSource) flArr = flLine(flSource)
+      if (frSource) frArr = frLine(frSource)
+      if (hrSource) hrArr = hrLine(hrSource)
+      if (hlSource) hlArr = hlLine(hlSource)
       // if (BODY && BODY.arr) body = chestLine(BODY.arr)
-      if (ALLBODY && ALLBODY.arr) allbody = robot0401(ALLBODY.arr)
-      if (BODY && BODY.arr) body = robot0401(BODY.arr)
+      if (allbodySource) allbody = allbodySource.length >= 1024 ? allbodySource.slice(0, 1024) : robot0401(allbodySource)
+      if (bodySource) body = bodySource.length >= 1024 ? bodySource.slice(0, 1024) : robot0401(bodySource)
       // console.log(FL)
 
       // flArr = flLine(FL.arr)
@@ -1222,6 +1295,15 @@ class Home extends React.Component {
         { arr: allbody, width: 32, height: 32, order: 2, interp1: 1, interp2: 1 },
         { arr: body, width: 32, height: 32, order: 2, interp1: 1, interp2: 1 },
       ])
+      if (this.state.matrixName === 'humanBody') {
+        const humanBodySource = allbody.some((value) => value > 0) ? allbody : body
+
+        if (this.state.numMatrixFlag === 'numoriginal') {
+          this.com.current?.changeHumanBodyData?.(humanBodySource)
+        } else {
+          this.com.current?.sitData?.({ wsPointData: humanBodySource })
+        }
+      }
       // console.log(newArr)
       const WebGLCanvas1 = new WebGLCanvas()
       const z = WebGLCanvas1.render({
@@ -1461,7 +1543,24 @@ class Home extends React.Component {
       //   wsPointDataSit = yanfeng10sit(wsPointDataSit)
       // }
       // console.log(fingerArr)
-      if (this.state.matrixName !== 'handGloveFullPacket') {
+      if (this.state.matrixName === 'humanBody') {
+        const humanBodySource = getHumanBodyFrameData(wsPointData)
+        if (this.state.numMatrixFlag === 'numoriginal') {
+          this.com.current?.changeHumanBodyData?.(humanBodySource)
+        } else {
+          sitTypeEvent[this.state.matrixName]({
+            that: this,
+            wsPointData: humanBodySource,
+            backFlag,
+            state: this.state.carState,
+            local: this.state.local,
+            press: this.state.press,
+            rotate,
+            wsPointDataSitZero: wsPointDataSitZero,
+            fingerArr: fingerArr
+          });
+        }
+      } else if (this.state.matrixName !== 'handGloveFullPacket') {
         sitTypeEvent[this.state.matrixName]({
           that: this,
           wsPointData,
@@ -2420,6 +2519,18 @@ class Home extends React.Component {
   };
 
   componentDidUpdate(prevProps, prevState) {
+    if (
+      this.state.matrixName === FULL_PACKET_GLOVE_MATRIX &&
+      !FULL_PACKET_GLOVE_MODES.includes(this.state.numMatrixFlag)
+    ) {
+      const nextMode = getDefaultModeForMatrix(this.state.matrixName, this.state.numMatrixFlag);
+      this.setState({
+        numMatrixFlag: nextMode,
+        ...getConfig({ sensorType: this.state.matrixName, mode: nextMode }),
+      });
+      return;
+    }
+
     const rendererConfigChanged =
       prevState.matrixName !== this.state.matrixName ||
       prevState.numMatrixFlag !== this.state.numMatrixFlag ||
@@ -3627,6 +3738,15 @@ class Home extends React.Component {
                         handleChartsBody1={this.handleChartsBody1.bind(this)}
                         changeStateData={this.changeStateData}
                         changeSelect={this.changeSelect} />
+                    </CanvasCom>
+                    :
+                    this.state.numMatrixFlag == "numoriginal" && this.state.matrixName == 'humanBody' ?
+                    <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
+                      <HumanBodyRawData
+                        ref={this.com}
+                        data={this.data}
+                        local={this.state.local}
+                      />
                     </CanvasCom>
                     :
                     this.state.numMatrixFlag == "skin" && this.state.matrixName == 'humanBody' ?

@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-05-07
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-05-08
 
 ## 1. 项目概述
 
@@ -309,6 +309,12 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-05-08 | Codex | 触觉手套整包取消包内类型左右判断 | `handGloveFullPacket` 保留左手/右手两个串口选择；后端整包点位映射和数据发送均不再由包内 `packetType` 决定，而是按实际选择的左/右串口入口决定，使接到左手串口就按左手表、接到右手串口就按右手表展示 |
+| 2026-05-08 | Codex | 人体全身原始数据展示 | `humanBody` 增加 `numoriginal` 原始数据模式，新增 `HumanBodyRawData.jsx` 按 `BACK_IDX/CHEST_IDX/RIGHT_ARM_IDX` 等 10 个模型部位索引矩阵绘制 2D 数值网格，并兼容实时 `sitData` 1024 点载荷、`jsonObject.data` 字符串、嵌套 `data`、大小写字段和直接数组载荷；原始数据展示中左/右肩臂、胸部、后背横向翻转，后裤左右纵向翻转 |
+| 2026-05-08 | Codex | 修复整包手套默认 2D 展示空白 | `Home.jsx` 对 `handGloveFullPacket` 增加模式兜底，确保只进入 `num/numoriginal`；`Num2D.jsx` 在整包手套首屏主动渲染 16x16 全 0 数组，避免无串口数据时白屏 |
+| 2026-05-08 | Codex | 限制整包手套展示模式并固定背景网格 | `humanBody.jsx` 的方向键旋转不再调用 `TrackballControls` 同步逻辑，只直接修改 human 模型自身旋转；`Title.jsx` 将 `handGloveFullPacket` 模式限制为 `num` 和 `numoriginal` 两项，隐藏旧手套校准入口 |
+| 2026-05-08 | Codex | 修复人体全身键盘旋转联动背景 | `humanBody.jsx` 将左右方向键监听改为捕获阶段处理，并阻止事件继续传给 `TrackballControls`，避免键盘旋转 human 模型时相机/背景同步旋转 |
+| 2026-05-08 | Codex | 人体全身模型键盘旋转 | `client/src/components/video/humanBody.jsx` 为 `humanBody` 增加左右方向键旋转模型能力，按键会修改模型 `rotation.y`，并在输入框聚焦时跳过以避免影响表单输入 |
 | 2026-05-08 | Codex | 彻底取消系统类型筛选显示依赖 | `Title.jsx` 无条件渲染完整系统类型下拉框，不再受 `matrixTitle` 控制；`Home.jsx` 对空 `file` 下发做兜底，避免取消筛选后当前系统类型被置空 |
 | 2026-05-07 | Codex | 取消密钥类型对传感器系统的锁定 | `server.js` 不再用密钥 `file` 字段覆盖当前系统类型，统一下发 `selectFlag='all'`；`Home.jsx` 和 `Title.jsx` 不再按 `allowedTypes` 隐藏或过滤系统类型，下拉框始终可选所有传感器 |
 | 2026-05-07 | Codex | 对调整包手套左右手路由 | `server.js` 将 `handGloveFullPacket` 的包内类型解释改为 `type=01` 右手、`type=02` 左手，使点位映射和 `sitData/backData` 发送方向整体互换 |
@@ -493,6 +499,12 @@ graph TD
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-05-08 | Codex | 修复缺陷 | `触觉手套(整包)` 取消包内 `type` 的左右判断但保留左右串口选择：`Title.jsx` 继续显示左手/右手两个串口入口；`server.js` 的整包点位映射和发送通道都按实际串口入口决定，`packetType` 只作为调试字段保留 |
+| 2026-05-08 | Codex | 新增功能 | `humanBody` 人体全身系统新增 `原始数据` 展示：`Title.jsx` 增加模式入口，`Home.jsx` 将实时 `sitData` 或 `ALLBODY/BODY` 转换后的 1024 点数据分发给 `HumanBodyRawData`，组件按 10 个 human 模型部位 IDX 矩阵用 canvas 展示 2D 数值；同时修复 `jsonObject.data` 为字符串、嵌套 `data`、大小写字段或直接数组时不渲染真实数据、窄矩阵标题被裁剪，并按当前对位规则翻转肩臂/胸背/后裤展示方向 |
+| 2026-05-08 | Codex | 修复缺陷 | `触觉手套(整包)` 默认展示模式增加兜底：若状态仍停在旧的 `normal/skin/num3D` 会自动切回 `num`；`Num2D` 首屏渲染 16x16 全 0，`Num2DOriginal` 首屏渲染 15x13 全 0，避免无数据时白屏 |
+| 2026-05-08 | Codex | 修复缺陷 | `humanBody` 左右方向键旋转改为直接更新 human 模型自身 `rotation.y`，不再调用会同步控制器目标点的 `changeModelTransform()`；同时 `触觉手套(整包)` 系统只保留 `2D数字` 和 `原始数据` 两个展示模式，并移除旧手套校准/固定入口 |
+| 2026-05-08 | Codex | 修复缺陷 | 修复 `humanBody` 左右方向键旋转时背景/相机也跟着动的问题：方向键事件现在在捕获阶段拦截，并阻止继续传播给 `TrackballControls`，只修改 human 模型自身 `rotation.y` |
+| 2026-05-08 | Codex | 新增功能 | `humanBody` 人体全身视图新增键盘左右方向键旋转模型：左键逆时针、右键顺时针，每次 5 度；输入框、文本框、下拉框或可编辑元素聚焦时不拦截方向键 |
 | 2026-05-08 | Codex | 修复缺陷 | 取消类型筛选后系统类型为空：`Title.jsx` 改为无条件渲染完整 `sensorArr`，`Home.jsx` 对空数组/空字符串 `file` 做兜底，不再让授权下发把当前系统类型清空 |
 | 2026-05-07 | Codex | 配置变更 | 取消密钥 `file/selectFlag` 对系统类型下拉框和当前传感器类型的锁定：授权仍校验有效期，但不再因密钥类型与实际设备类型不同导致传感器不可选或不可用 |
 | 2026-05-07 | Codex | 配置变更 | 对调 `handGloveFullPacket` 左右手路由：`type=01` 现在按右手点位表并走 `backData`，`type=02` 现在按左手点位表并走 `sitData` |

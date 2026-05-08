@@ -47,6 +47,7 @@ function genNewArrMatrix(arr, width, height) {
 }
 
 let leftArr = [], rightArr = []
+const fullPacketGloveType = 'handGloveFullPacket'
 
 // ========== 计算下一个 2 的幂次方（解决 WebGL NPOT 纹理兼容性问题） ==========
 function nextPOT(n) {
@@ -639,6 +640,12 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             }
         }
         initedRef.current = true;
+        if (props.matrixName === fullPacketGloveType) {
+            const defaultData = new Array(15 * 13).fill(0);
+            layoutData(defaultData);
+            pendingFlatRef.current = { data: defaultData, tw: 15, th: 13 };
+            scheduleRender();
+        }
 
         return () => {
             initedRef.current = false;

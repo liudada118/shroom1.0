@@ -3524,7 +3524,7 @@ function parseHandGloveFullPacket(buffer, fallbackSide) {
   const pressureData = bytes.slice(2, 258);
   const imuBytes = bytes.slice(258, 274);
   const packetType = bytes[1];
-  const side = getHandGloveFullPacketSide(packetType, fallbackSide);
+  const side = fallbackSide === 'right' ? 'right' : 'left';
   const mappedData = mapHandGloveFullPacketPressure(pressureData, side);
 
   return {
@@ -3541,8 +3541,9 @@ function handleHandGloveFullPacket(buffer, fallbackSide) {
   const packet = parseHandGloveFullPacket(buffer, fallbackSide);
   const realArr = [...packet.pressureData];
   let newArr = [...packet.mappedData];
+  const outputSide = fallbackSide === 'right' ? 'right' : 'left';
 
-  if (packet.side === 'right') {
+  if (outputSide === 'right') {
     pointArr2 = [...packet.pressureData];
     pointArr2zeroData = [...pointArr2];
     newArr147_2 = [...newArr];
@@ -3566,6 +3567,7 @@ function handleHandGloveFullPacket(buffer, fallbackSide) {
       frameIndex: packet.frameIndex,
       packetType: packet.packetType,
       handSide: packet.side,
+      outputSide,
       sitFlag: port1?.isOpen,
       backFlag: port2?.isOpen,
     }));
@@ -3595,6 +3597,7 @@ function handleHandGloveFullPacket(buffer, fallbackSide) {
     frameIndex: packet.frameIndex,
     packetType: packet.packetType,
     handSide: packet.side,
+    outputSide,
     sitFlag: port1?.isOpen,
     backFlag: port2?.isOpen,
   }));
