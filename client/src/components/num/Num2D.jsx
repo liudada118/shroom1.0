@@ -318,7 +318,7 @@ export const Num2D = React.forwardRef((props, refs) => {
     const computeCellSize = useCallback((hasRight = false) => {
         const { maxW, maxH } = getMatrixViewportBounds();
 
-        if (props.matrixName === 'hand0205' || props.matrixName === 'handGlove115200') {
+        if (['hand0205', 'handGlove115200', 'handGloveFullPacket'].includes(props.matrixName)) {
             return calcCellSize(16, 16, maxW, maxH, 40);
         }
         if (isFoot) {
@@ -372,7 +372,10 @@ export const Num2D = React.forwardRef((props, refs) => {
         if (glCanvasRef.current) {
             let tw = width, th = height;
             // 根据产品类型设置正确的初始纹理尺寸，避免后续 reinit
-            if (props.matrixName === 'hand0205' || props.matrixName === 'handGlove115200') { tw = 16; th = 16; }
+            if (['hand0205', 'handGlove115200', 'handGloveFullPacket'].includes(props.matrixName)) {
+                tw = 16;
+                th = 16;
+            }
             else if (isFoot) { tw = 16; th = 32; }
             texSizeRef.current = { w: tw, h: th };
             glCtxRef.current = initWebGL(glCanvasRef.current, tw, th, cs);
@@ -564,7 +567,7 @@ export const Num2D = React.forwardRef((props, refs) => {
     const drawContent = () => { }
 
     const changeWsData147R = (wsPointData) => {
-        if (props.matrixName == 'hand0205' || props.matrixName == 'handGlove115200') {
+        if (['hand0205', 'handGlove115200', 'handGloveFullPacket'].includes(props.matrixName)) {
             changeWsData147(wsPointData)
         } else {
             if (isFoot) {
@@ -636,8 +639,8 @@ export const Num2D = React.forwardRef((props, refs) => {
     }
 
     const changeWsData147 = (wsPointData) => {
-        layoutData([...wsPointData])
-        if (props.matrixName == 'hand0205' || props.matrixName == 'handGlove115200') {
+        if (['hand0205', 'handGlove115200', 'handGloveFullPacket'].includes(props.matrixName)) {
+            layoutData([...wsPointData])
             let pointArr = [[16, 30], [16, 29], [16, 28], [2, 18], [2, 17], [2, 16], [1, 13], [1, 12], [1, 11], [2, 8], [2, 7], [2, 6], [5, 4], [5, 3], [5, 2], [17, 30], [17, 29], [17, 28], [3, 18], [3, 17], [3, 16], [2, 13], [2, 12], [2, 11], [3, 8], [3, 7], [3, 6], [6, 4], [6, 3], [6, 2], [18, 29], [18, 28], [18, 27], [4, 18], [4, 17], [4, 16], [3, 13], [3, 12], [3, 11], [4, 8], [4, 7], [4, 6], [7, 4], [7, 3], [7, 2], [19, 29], [19, 28], [19, 27], [5, 18], [5, 17], [5, 16], [4, 13], [4, 12], [4, 11], [5, 8], [5, 7], [5, 6], [8, 4], [8, 3], [8, 2], [22, 28], [22, 27], [22, 26], [8, 17], [8, 16], [8, 15], [7, 13], [7, 12], [7, 11], [8, 9], [8, 8], [8, 7], [11, 5], [11, 4], [11, 3], [19, 15], [19, 14], [19, 13], [19, 12], [19, 11], [19, 10], [19, 9], [19, 8], [19, 7], [19, 6], [19, 5], [19, 4], [21, 18], [21, 17], [21, 16], [21, 15], [21, 14], [21, 13], [21, 12], [21, 11], [21, 10], [21, 9], [21, 8], [21, 7], [21, 6], [21, 5], [21, 4], [23, 18], [23, 17], [23, 16], [23, 15], [23, 14], [23, 13], [23, 12], [23, 11], [23, 10], [23, 9], [23, 8], [23, 7], [23, 6], [23, 5], [23, 4], [25, 18], [25, 17], [25, 16], [25, 15], [25, 14], [25, 13], [25, 12], [25, 11], [25, 10], [25, 9], [25, 8], [25, 7], [25, 6], [25, 5], [25, 4], [27, 18], [27, 17], [27, 16], [27, 15], [27, 14], [27, 13], [27, 12], [27, 11], [27, 10], [27, 9], [27, 8], [27, 7], [27, 6], [27, 5], [27, 4]]
 
             let newArr = new Array(1024).fill(0)
@@ -693,6 +696,7 @@ export const Num2D = React.forwardRef((props, refs) => {
             pendingFlatRef.current = { data: newArr, tw, th };
             scheduleRender();
         } else {
+            layoutData([...wsPointData])
             if (isFoot) {
                 const renderArr = [[2, 2], [2, 4], [2, 6], [2, 8], [2, 10], [2, 12], [5, 1], [5, 4], [5, 6], [5, 8], [5, 11], [5, 13], [8, 1], [8, 4], [8, 6], [8, 8], [8, 11], [8, 14], [11, 2], [11, 5], [11, 8], [11, 10], [11, 12], [11, 14], [14, 2], [14, 5], [14, 8], [14, 10], [14, 12], [14, 14], [17, 2], [17, 4], [17, 6], [17, 8], [17, 10], [17, 12], [20, 2], [20, 4], [20, 6], [20, 8], [20, 10], [20, 12], [23, 2], [23, 4], [23, 6], [23, 8], [23, 10], [23, 12], [26, 2], [26, 4], [26, 6], [26, 8], [26, 10], [26, 11], [29, 3], [29, 5], [29, 6], [29, 8], [29, 9], [29, 11]]
                 let newArr = new Array(16 * 32).fill(0)

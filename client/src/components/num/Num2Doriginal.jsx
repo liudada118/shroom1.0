@@ -568,9 +568,9 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             // 默认估算
             return calcRobotCellSizeFromLayout(40, 10, maxW, maxH);
         }
-        if (props.matrixName === 'hand0205' || props.matrixName === 'handGlove115200') {
-            // numoriginal 模式下显示15x10矩阵（147映射数据）
-            return calcCellSize(15, 10, maxW, maxH, 40);
+        if (['hand0205', 'handGlove115200', 'handGloveFullPacket'].includes(props.matrixName)) {
+            const handRows = props.matrixName === 'handGloveFullPacket' ? 13 : 10;
+            return calcCellSize(15, handRows, maxW, maxH, 40);
         }
         if (isFoot) {
             return 30;
@@ -624,7 +624,10 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             // 这里不初始化 WebGL，在 processRobotParts 中初始化
         } else if (glCanvasRef.current) {
             let tw = width, th = height;
-            if (props.matrixName === 'hand0205' || props.matrixName === 'handGlove115200') { tw = 15; th = 10; }
+            if (['hand0205', 'handGlove115200', 'handGloveFullPacket'].includes(props.matrixName)) {
+                tw = 15;
+                th = props.matrixName === 'handGloveFullPacket' ? 13 : 10;
+            }
             else if (isFoot) { tw = 6; th = 10; }
             texSizeRef.current = { w: tw, h: th };
             const cs = cellSizeRef.current;
@@ -869,17 +872,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
         scheduleRender();
     }
 
-    // ========== 手套原始数据 16x16 矩阵显示（256个原始数据点） ==========
-    const changeWsData256 = (wsPointData) => {
-        let rawData = [...wsPointData]
-        // 确保数据长度为256
-        if (rawData.length > 256) rawData = rawData.slice(0, 256)
-        while (rawData.length < 256) rawData.push(0)
-
-        layoutData([...rawData])
-
-        // 检查是否需要重新初始化 WebGL（首次或尺寸变化）
-        const tw = 16, th = 16;
+    const ensureFlatMatrixSize = (tw, th) => {
         if (texSizeRef.current.w !== tw || texSizeRef.current.h !== th) {
             texSizeRef.current = { w: tw, h: th };
             const { maxW, maxH } = getMatrixViewportBounds(MATRIX_WIDTH_RATIO);
@@ -897,29 +890,50 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                 }
             }
         }
+    }
+
+    // ========== 手套原始数据 16x16 矩阵显示（256个原始数据点） ==========
+    const changeWsData256 = (wsPointData) => {
+        let rawData = [...wsPointData]
+        // 确保数据长度为256
+        if (rawData.length > 256) rawData = rawData.slice(0, 256)
+        while (rawData.length < 256) rawData.push(0)
+
+        layoutData([...rawData])
+
+        const tw = 16, th = 16;
+        ensureFlatMatrixSize(tw, th);
 
         pendingFlatRef.current = { data: rawData, tw, th };
         scheduleRender();
     }
 
     const changeWsData147 = (wsPointData) => {
-        layoutData([...wsPointData])
-
-        if (props.matrixName == 'hand0205' || props.matrixName == 'handGlove115200') {
+        if (['hand0205', 'handGlove115200', 'handGloveFullPacket'].includes(props.matrixName)) {
             let newArr1 = [...wsPointData]
-            newArr1.splice(5 * 15, 0, 0);
-            newArr1.splice(5 * 15, 0, 0);
-            newArr1.splice(5 * 15, 0, 0);
+            const isFullPacketGlove = props.matrixName === 'handGloveFullPacket' && newArr1.length >= 189;
+            if (isFullPacketGlove) {
+                while (newArr1.length < 195) newArr1.push(0);
+                if (newArr1.length > 195) newArr1 = newArr1.slice(0, 195);
+            } else {
+                newArr1.splice(5 * 15, 0, 0);
+                newArr1.splice(5 * 15, 0, 0);
+                newArr1.splice(5 * 15, 0, 0);
+            }
 
-            const tw = 15, th = 10;
+            const tw = 15, th = isFullPacketGlove ? 13 : 10;
+            ensureFlatMatrixSize(tw, th);
+            layoutData([...newArr1])
             pendingFlatRef.current = { data: newArr1, tw, th };
             scheduleRender();
         } else if (props.matrixName == 'footVideo') {
             let newArr = [...wsPointData]
             const tw = 6, th = 10;
+            layoutData([...newArr])
             pendingFlatRef.current = { data: newArr, tw, th };
             scheduleRender();
         } else if (props.matrixName == 'robotSY') {
+            layoutData([...wsPointData])
             const back = [62, 61, 60, 59, 58, 46, 45, 44, 43, 42, 254, 253, 252, 251, 250, 14, 13, 12, 11, 10, 30, 29, 28, 27, 26]
             const chest = [51, 35, 19, 3, 243, 227, 211, 195, 52, 36, 20, 4, 244, 228, 212, 196, 53, 37, 21, 5, 245, 229, 213, 197, 54, 38, 22, 6, 246, 230, 214, 198, 55, 39, 23, 7, 247, 231, 215, 199, 56, 40, 24, 8, 248, 232, 216, 200]
             const shoulderL = [9, 25, 41, 57]
@@ -936,6 +950,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                 chest: { posArr: chest, text: '前胸', w: 8, h: 6 },
             });
         } else if (props.matrixName == 'robotLCF') {
+            layoutData([...wsPointData])
             const chest = [51, 35, 19, 3, 243, 227, 211, 195, 52, 36, 20, 4, 244, 228, 212, 196, 53, 37, 21, 5, 245, 229, 213, 197, 54, 38, 22, 6, 246, 230, 214, 198, 55, 39, 23, 7, 247, 231, 215, 199, 56, 40, 24, 8, 248, 232, 216, 200, 57, 41, 25, 9, 249, 233, 217, 201, 58, 42, 26, 10, 250, 234, 218, 202, 59, 43, 27, 11, 251, 235, 219, 203, 60, 44, 28, 12, 252, 236, 220, 204, 61, 45, 29, 13, 253, 237, 221, 205, 62, 46, 30, 14, 254, 238, 222, 206]
             const shoulderL = [15, 31, 47, 63]
             const shoulderR = [255, 239, 223, 207]
@@ -950,6 +965,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                 chest: { posArr: chest, text: '前胸', w: 8, h: 12 },
             });
         } else if (props.matrixName == 'robot1') {
+            layoutData([...wsPointData])
             // 修正后的 robot1 索引映射（基于 robot0401 的原始 256 点 16x16 数据）
             const back = [58, 42, 26, 10, 250, 234, 218, 202, 59, 43, 27, 11, 251, 235, 219, 203, 60, 44, 28, 12, 252, 236, 220, 204, 61, 45, 29, 13, 253, 237, 221, 205, 62, 46, 30, 14, 254, 238, 222, 206]
             const chest = [195, 211, 227, 243, 3, 19, 35, 51, 196, 212, 228, 244, 4, 20, 36, 52, 197, 213, 229, 245, 5, 21, 37, 53, 198, 214, 230, 246, 6, 22, 38, 54, 199, 215, 231, 247, 7, 23, 39, 55, 200, 216, 232, 248, 8, 24, 40, 56]
@@ -970,7 +986,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     }
 
     const changeWsData147R = (wsPointData) => {
-        if (props.matrixName == 'hand0205' || props.matrixName == 'handGlove115200') {
+        if (['hand0205', 'handGlove115200', 'handGloveFullPacket'].includes(props.matrixName)) {
             changeWsData147(wsPointData)
         } else if (props.matrixName == 'footVideo') {
             const { left, right } = wsPointData

@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-04-24 19:06
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-05-07
 
 ## 1. 项目概述
 
@@ -219,7 +219,9 @@ graph TD
 1. **传感器数据采集流程**
     - 硬件传感器通过 USB 串口发送原始二进制数据帧 → `serialHelper.js` 接收并触发 `parser.on('data')` 事件 → `server.js` 调用 `dataProcessor.js` 进行线序映射（`openWeb.js`）、归零校准、高斯平滑 → 处理后的矩阵数据通过 `wsHelper.js` 广播到 WebSocket 端口 19999 → 前端 `useWebSocket` Hook 接收数据 → 更新 `usePressureStore` → React 重新渲染热力图和 3D 模型。
     - 当系统类型为 `petCare` / `petCareMini` 时，`server.js` 先按 `jqbed` 线序将 32x32 数据重排，再以 50Hz（20ms）分别调用 `python/app/petCare/pet_care_wrapper` / `pet_care_wrappermini`；算法输出通过 `python/app/onbed_filter_example.py` 的 JSON-line RPC 回传给 Electron，前端 Title/Home/Aside/License 复用宠物看护链路展示呼吸率、姿态、体动、信号质量、模拟心率和压力系数；其中 `Aside.jsx` 会在前端层对 `petCareMini` 的离床状态（`petInBed=0` 或 `posture_state=0`）做展示归一化，强制将面板上的 `pressure_coefficient` 显示为 `0.00`，并依据呼吸频率在前端生成 `55-100` 区间的模拟心率替换原来的 SNR 展示；为避免心率跳变过快，模拟心率现在按 1 秒节拍更新一次，其余呼吸、姿态和质量数据仍保持实时刷新；同时 `server.js` 关闭了 `petCareMini` 的 `[petCareMini] algorithm result` 周期性信息日志，避免运行期刷屏。
-    - 当系统类型为 `hand0205` / `handGlove115200` 且前端处于普通 3D 遥操模式时，`Home.jsx` 保持 147 点映射数据继续驱动手部姿态与手指弯曲，但 Aside 面板中的 `meanPres`、`maxPres`、`totalPres`、`point` 以及 Pressure Area / Pressure Data 图表改为直接基于原始 256 点矩阵（`sitData` / `realArr`）计算和渲染，避免统计值被映射后的控制数据覆盖。
+    - 当系统类型为 `hand0205` / `handGlove115200` / `handGloveFullPacket` 且前端处于普通 3D 遥操模式时，`Home.jsx` 使用模型渲染矩阵继续驱动手部姿态与手指弯曲，但 Aside 面板中的 `meanPres`、`maxPres`、`totalPres`、`point` 以及 Pressure Area / Pressure Data 图表改为直接基于原始 256 点矩阵（`realArr` / `rawPressureData`）计算和渲染，避免统计值被映射后的控制数据覆盖。
+    - 当系统类型为 `handGloveFullPacket` 时，`server.js` 在 `AA 55 03 99` 分隔符后按 274 字节整包解析：前 2 字节为帧号与类型（当前按 `01` 右手、`02` 左手路由），中间 256 字节为手套压力矩阵，末尾 16 字节陀螺仪数据暂不参与渲染；解析后按整包协议专用的左右手 1-based 点位表映射到固定 `15x13`（195 点）数组：前 4 行为手指，第 5 行为指腹（非指腹格补 0），后 8 行为手掌（掌面空白格补 0）。`mappedArr195` 专用于原始数据视图的规则排布，`realArr` / `rawPressureData` 保留原始 256 点并继续供 `num` 2D 数字模式以 `16x16` 高速矩阵显示，`sitData` / `backData` 专用于旧手套 3D 模型并承载转换后的 32x32（1024 点）矩阵；前端会跳过整包手套的旧 `hand0205` 原始数据二次映射路径，避免 256/195/1024 三种数据形态互相覆盖。
+    - 当系统类型为 `hand0205` / `handGlove115200` / `handGloveFullPacket` 且前端处于 3D `skin` 模式时，`client/src/components/video/hand.jsx` 继续沿用现有 `ndata1` 32×32 数据格式、`sitData/changeColor` ref 接口和 `CanvasTexture` 贴图链路，但热力图生成层由原来的 `HeatmapCanvas.changeHeatmap()` 切换为 `WebGLCanvas.render()`：为避免模型热力图全透明且保持原有 size 进度条语义不变，WebGL 输入改为复用旧 `HeatmapCanvas` 的强度缩放与补边预处理（包含固定 `*10` 强度放大和补零插值），并将滑杆 `size` 按旧 Canvas 圆形阴影扩散语义换算为 WebGL 半径后，再用单张离屏 WebGL canvas 生成 1024×1024 热力图并通过 `drawImage()` 回贴到原有手部纹理 canvas，以降低高频场景下的 CPU 逐帧绘制压力。
 
 2. **数据存储与导出流程**
     - 用户点击"开始采集" → 前端通过 WebSocket 发送 `col` 指令 → `server.js` 开启采集模式 → 每帧数据同时写入 `dbHelper.js`（SQLite）和 `csvHelper.js`（CSV 文件） → 用户点击"停止采集"结束录制。
@@ -229,8 +231,8 @@ graph TD
 
 4. **授权验证流程**
     - 应用启动 → `licenseHelper.js` 读取外部 `config.txt`（打包后优先读取 exe 同级文件，兼容 `resources/config.txt`，开发态读取项目根目录） → 使用 AES-ECB 解密 → 通过 HTTPS 获取网络时间 → 比对授权有效期 → 若过期则限制功能。
-    - 密钥 `file` 字段支持三种格式：`"all"`（全部授权）、`"hand0205"`（单类型锁定）、`["hand0205","robot1","footVideo"]`（多类型组合授权）。
-    - 前端 `Title.js` 根据 `allowedTypes` 数组动态过滤传感器类型下拉框，实现灵活的授权控制。
+    - 密钥 `file` 字段仍保留在密钥结构中用于兼容旧密钥和解析展示，但运行期不再用它锁定、切换或过滤当前传感器系统类型。
+    - 前端 `Title.jsx` 始终展示完整系统类型下拉框，渲染不再受 `matrixTitle` / `allowedTypes` 控制；`Home.jsx` 会清除旧的 `allowedTypes` 本地缓存，并忽略空的 `file` 值，避免密钥类型与实际传感器类型不一致时导致传感器不可选、不可用或当前类型被置空。
 
 6. **密钥配置管理流程**
     - 管理员访问 `/license` 页面 → 勾选授权的传感器类型（支持分组全选和快捷预设） → 设置有效天数 → 点击生成密钥 → 密钥通过 AES-ECB 加密后可复制分发 → 也可在「密钥解析」标签页粘贴密钥查看授权详情。
@@ -307,6 +309,19 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-05-08 | Codex | 彻底取消系统类型筛选显示依赖 | `Title.jsx` 无条件渲染完整系统类型下拉框，不再受 `matrixTitle` 控制；`Home.jsx` 对空 `file` 下发做兜底，避免取消筛选后当前系统类型被置空 |
+| 2026-05-07 | Codex | 取消密钥类型对传感器系统的锁定 | `server.js` 不再用密钥 `file` 字段覆盖当前系统类型，统一下发 `selectFlag='all'`；`Home.jsx` 和 `Title.jsx` 不再按 `allowedTypes` 隐藏或过滤系统类型，下拉框始终可选所有传感器 |
+| 2026-05-07 | Codex | 对调整包手套左右手路由 | `server.js` 将 `handGloveFullPacket` 的包内类型解释改为 `type=01` 右手、`type=02` 左手，使点位映射和 `sitData/backData` 发送方向整体互换 |
+| 2026-05-07 | Codex | 恢复整包手套 2D 数字 16x16 高速显示 | `Home.jsx` 在 `handGloveFullPacket` 的 `num` 模式下改回读取 `realArr` / `rawPressureData` 256 点并调用 `changeWsData256()`；`Num2D.jsx` 初始化尺寸恢复为 16x16，13x15 仅保留给 `numoriginal` 的规则排布视图 |
+| 2026-05-07 | Codex | 修正整包手套左右手原始视图点位顺序 | `server.js` 将 `handGloveFullPacket` 的 15x13 映射表按用户给定明细重排：左手按大拇指到小拇指拼成 `65 66 67 / 38 69 70 / ...`，右手按 `190 191 192 / 187 188 189 / ...` 到小拇指，指腹与手掌按明细补 0 |
+| 2026-05-07 | Codex | 修复整包手套数据形态混用 | `server.js` 将 `handGloveFullPacket` 的 15x13 映射数据转换为旧手套模型需要的 32x32 渲染矩阵，并把原始 256 点改由 `realArr` / `rawPressureData` 承载；`Home.jsx` 跳过整包手套旧 `hand0205` 二次映射，修正模型、统计和数字视图数据源错位 |
+| 2026-05-07 | Codex | 整包手套 195 点数据字段显式化 | `server.js` 为 `handGloveFullPacket` 实时包新增 `mappedArr195` 字段；`Home.jsx` 优先读取该字段并只把 195 点识别为整包手套映射数据；`Num2DOriginal` 按 15x13 处理 |
+| 2026-05-07 | Codex | 触觉手套整包映射扩展为 189 点 | `handGloveFullPacket` 不再裁剪掌面点位，完整保留 114 个掌面点；前端实时分支允许 189 点映射数据进入手套处理链路，回放分支也使用整包专用映射 |
+| 2026-05-07 | Codex | 触觉手套整包原始布局改为 15x13 | `handGloveFullPacket` 映射输出改为固定 195 点：4 行手指、1 行指腹、8 行手掌，指腹和掌面空白位置补 0；`Num2DOriginal` 按 15x13 显示 |
+| 2026-05-07 | Codex | 触觉手套整包原始视图对齐 15x13 | `Home.jsx` 在 `numoriginal` 模式下对 `handGloveFullPacket` 显示已按规则重排的 195 点；`Num2DOriginal.jsx` 对整包手套按 15x13 平铺渲染 |
+| 2026-05-07 | Codex | 对齐整包手套模型输入顺序 | 调整 `handGloveFullPacket` 左右手手指与掌面输出顺序：前 147 点按旧手套模型兼容排列，新增 42 个掌面点追加，避免手指、手掌与模型坐标错位 |
+| 2026-05-07 | Codex | 更新触觉手套整包点位映射 | `server.js` 为 `handGloveFullPacket` 新增左右手专用点位表，按包内 `type=01/02` 自动路由左/右手数据，并将 256 点压力数据映射为手套渲染数组 |
+| 2026-05-07 | Codex | 新增触觉手套整包系统类型 | 新增 `handGloveFullPacket` / “触觉手套(整包)” 系统类型；后端支持 274 字节整包协议并复用原手套映射、存储和回放链路，前端 Title/Home/Aside/License/数字视图复用现有手套渲染模式 |
 | 2026-04-24 | Codex | 宠物看护心率公式下沉到后端 | `server.js` 为 `petCare` / `petCareMini` 的 runtime 新增心率模拟状态机，在广播算法结果前按呼吸频率、RSA 振幅、趋势项、事件扰动和高斯噪声生成 `heart_rate`，并限制为每秒更新一次；`client/src/components/aside/Aside.jsx` 同步改为优先使用后端下发的 `heart_rate`，前端只保留缺省兜底 |
 | 2026-04-24 | Codex | 宠物看护心率改为随呼吸变化触发 | `server.js` 继续保留 `petCare` / `petCareMini` 的 1 秒心率更新上限，但新增 `lastBreathRate` 记忆：只有当归一化后的 `breath_rate` 相比上一拍发生有效变化时，后端才会重新计算并下发新的 `heart_rate`；若呼吸率未变，则持续复用上一拍心率，避免心率脱离呼吸单独跳动 |
 | 2026-04-24 | Codex | 宠物看护心率改为与呼吸同拍更新 | `server.js` 去掉 `petCare` / `petCareMini` 在呼吸变化后的额外 1 秒门限，改为只按归一化后的 `breath_rate` 是否变化来决定是否重算 `heart_rate`；这样呼吸显示值一变，心率就会立刻跟着更新，呼吸稳定时则保持上一拍心率 |
@@ -472,10 +487,28 @@ graph TD
 | 2026-04-24 | Codex | 宠物看护心率只保留两帧呼吸队列触发 | `server.js` 进一步收敛 `petCare` / `petCareMini` 的心率更新分支：去掉 `lastHeartRateAt` 在宠物看护链路中的参与，仅保留前后两帧 `breathRateQueue` 比较；首帧初始化一次心率，后续只有两帧呼吸值不同才重算，否则始终复用上一拍心率 |
 | 2026-04-24 | Codex | 宠物看护心率改为比较前后两帧呼吸队列 | `server.js` 为 `petCare` / `petCareMini` 的心率运行时新增 `breathRateQueue`，每次只缓存前后两帧 `Number(breath_rate).toFixed(1)` 后的呼吸值；只有两帧不同才调用心率函数重算 `heart_rate`，两帧相同则继续复用上一拍心率，离床或呼吸无效时同步清空队列 |
 
+| 2026-04-27 | Codex | 手套 3D skin 热力图切换为 WebGL 渲染层 | `client/src/components/video/hand.jsx` 将 `hand0205` / `handGlove115200` 的 3D `skin` 模式从 `HeatmapCanvas.changeHeatmap()` CPU 逐帧生成改为 `WebGLCanvas.render()` 生成离屏热力图，再回贴到原有 `CanvasTexture`；同时保留旧 `HeatmapCanvas` 的强度缩放与补边预处理，维持 `ndata1` 数据格式、`sitData/changeColor` 接口和现有贴图链路不变 |
+
 ## 9. 更新日志
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-05-08 | Codex | 修复缺陷 | 取消类型筛选后系统类型为空：`Title.jsx` 改为无条件渲染完整 `sensorArr`，`Home.jsx` 对空数组/空字符串 `file` 做兜底，不再让授权下发把当前系统类型清空 |
+| 2026-05-07 | Codex | 配置变更 | 取消密钥 `file/selectFlag` 对系统类型下拉框和当前传感器类型的锁定：授权仍校验有效期，但不再因密钥类型与实际设备类型不同导致传感器不可选或不可用 |
+| 2026-05-07 | Codex | 配置变更 | 对调 `handGloveFullPacket` 左右手路由：`type=01` 现在按右手点位表并走 `backData`，`type=02` 现在按左手点位表并走 `sitData` |
+| 2026-05-07 | Codex | 修复缺陷 | 恢复 `handGloveFullPacket` 的 `num` 2D 数字模式为原始 256 点 `16x16` 高速显示：前端改读 `realArr` / `rawPressureData` 并调用 `Num2D.changeWsData256()`，`mappedArr195` 只用于 `numoriginal` 的 13x15 规则排布 |
+| 2026-05-07 | Codex | 修复缺陷 | 修正 `handGloveFullPacket` 左右手原始视图排布：左手第 1 行输出 `65 66 67 38 69 70 71 72 73 74 75 76 77 78 79`，右手第 1 行输出 `190 191 192 187 188 189 184 185 186 181 182 183 178 179 180`，指腹行和手掌 8 行保持 15x13 补 0 规则 |
+| 2026-05-07 | Codex | 修复缺陷 | 深排 `handGloveFullPacket` 数据异常：后端不再把原始 256 点直接塞给旧手套 3D 模型，而是下发 1024 点模型矩阵；前端统计和 2D 数字模式改读 `realArr` / `rawPressureData`，原始数据视图继续读 `mappedArr195` |
+| 2026-05-07 | Codex | 修复缺陷 | 修正 `handGloveFullPacket` 实时渲染字段选择：后端额外下发 `mappedArr195`，前端优先使用该 195 点数组并收紧整包手套长度判断，避免旧 `newArr147` / 256 点原始矩阵路径造成空行、末列补 0 或尺寸误判 |
+| 2026-05-07 | Codex | 配置变更 | 将 `handGloveFullPacket` 的映射输出从 147 点扩展到 189 点，完整保留掌面多出的 42 个传感点；实时接收和历史回放均按左/右手整包点位表生成映射数据 |
+| 2026-05-07 | Codex | 配置变更 | 将 `handGloveFullPacket` 原始映射布局调整为固定 `15x13`：手指在顶部 4 行，指腹单独占 1 行，手掌占后 8 行，空白格补 0；前端 `numoriginal` 按 15x13 渲染 |
+| 2026-05-07 | Codex | 修复缺陷 | 修正 `handGloveFullPacket` 的 `numoriginal` 原始数据视图：复用后端 15x13 映射数组，确保原始数据排布与手指/指腹/手掌规则一致 |
+| 2026-05-07 | Codex | 修复缺陷 | 修正 `handGloveFullPacket` 的模型映射顺序：不再按图片表格行列直接输出，而是按旧触觉手套模型顺序排列前 147 点，并将新增掌面点追加在末尾，避免手指、手掌和 3D 模型位置不对应 |
+| 2026-05-07 | Codex | 配置变更 | 更新 `handGloveFullPacket` 整包手套点位映射：左手使用 `type=01`、右手使用 `type=02`，`server.js` 按用户提供的左右手手指与掌面 1-based 点位表生成 `newArr147`，并按包内类型自动发送 `sitData` 或 `backData` |
+| 2026-05-07 | Codex | 新增功能 | 新增 `handGloveFullPacket` 系统类型（触觉手套整包）：`server.js` 解析 `AA 55 03 99` 分隔后的 274 字节整包，取 2 字节帧信息、256 字节压力数据并暂忽略 16 字节陀螺仪；前端新增传感器选项、授权项、模式选择和手套渲染判断，继续复用 `hand0205` 的处理与显示链路 |
+| 2026-04-27 12:18 | Codex | 修复缺陷 | `client/src/components/video/hand.jsx` 进一步对齐手套 `skin` 模式的 WebGL 热力图参数语义：保留界面上原有的 size 进度条取值不变，但内部将 `options.size` 按旧 Canvas 阴影扩散半径换算后再传给 `WebGLCanvas.render()`；同时将传入 WebGL 的点值缩放固定为 `*10` 常量，保持与旧 `HeatmapCanvas.changeHeatmap()` 的数值强度一致 |
+| 2026-04-27 12:11 | Codex | 修复缺陷 | `client/src/components/video/hand.jsx` 修复手套 `hand0205` / `handGlove115200` 的 3D `skin` 模式切到 WebGL 后模型热力图不出图的问题：不再直接沿用机器人链路的通用 `genWebglData()`，而是把 WebGL 输入改回兼容旧 `HeatmapCanvas.changeHeatmap()` 的强度缩放与补边预处理（含 `*10` 强度放大和补零插值），再交给 `WebGLCanvas.render()` 离屏渲染后回贴到原有纹理 canvas，避免整层透明导致模型只剩底色 |
+| 2026-04-27 11:59 | Codex | 优化重构 | `client/src/components/video/hand.jsx` 将手套 `hand0205` / `handGlove115200` 的 3D `skin` 热力图生成层从 `HeatmapCanvas.changeHeatmap()` 切换为 `genWebglData()` + `WebGLCanvas.render()`：继续复用现有 32×32 `ndata1` 数据、`sitData/changeColor` 接口和 `CanvasTexture` 贴图链路，只把离屏热力图改为单张 WebGL canvas 渲染后再 `drawImage()` 回纹理 canvas，以降低高频场景下的 CPU 逐帧绘制压力 |
 | 2026-04-24 19:06 | Codex | 修复缺陷 | `client/src/components/aside/Aside.jsx` 修复宠物看护前端“心率乱跳”展示问题：新增 `PET_CARE_REALTIME_FIELDS` 判断，仅当 `changeData()` 收到真正的宠物实时检测字段时才会进入心率归一化分支；本地压力统计包（如 `meanPres/maxPres/point/totalPres`）不再触发前端心率补算，从而避免覆盖后端已正确下发的 `heart_rate` |
 | 2026-04-24 19:02 | Codex | 配置变更 | `server.js` 为 `petCare` / `petCareMini` 的两帧 `breathRateQueue` 触发链路新增结构化调试日志：每帧都会打印 `[systemKey] heart queue`，包含 `breath_rate`、`effective_breath_rate`、当前两帧队列、动作类型（`init/recompute/reuse/reset`）和最终 `heart_rate`，用于直接观察队列状态与重算时机 |
 | 2026-04-24 18:59 | Codex | 配置变更 | `server.js` 将心率模拟状态正式拆分为两套：`createPetCareHeartRateSimulatorState()` / `resetPetCareHeartRateSimulatorState()` 仅服务 `petCare` 与 `petCareMini` 的两帧 `breathRateQueue` 触发链路，不再携带 `lastHeartRateAt`；`createVitalSignsHeartRateSimulatorState()` / `resetVitalSignsHeartRateSimulatorState()` 则继续供 `jqbed` / `smallBed` 使用 1 秒缓存逻辑 |

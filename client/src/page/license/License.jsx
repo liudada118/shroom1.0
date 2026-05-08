@@ -60,6 +60,7 @@ const SENSOR_GROUPS = [
     items: [
       { label: '触觉手套', value: 'hand0205' },
       { label: '触觉手套(115200)', value: 'handGlove115200' },
+      { label: '触觉手套(整包)', value: 'handGloveFullPacket' },
       { label: '10*10小样', value: 'smallSample' },
       { label: '宇树G1触觉上衣', value: 'robot1' },
       { label: '松延N2触觉上衣', value: 'robotSY' },
@@ -99,6 +100,13 @@ const SENSOR_MODULES = {
     { value: 'skin', label: '3D皮肤' },
   ],
   handGlove115200: [
+    { value: 'num', label: '2D数字' },
+    { value: 'normal', label: '3D遥操' },
+    { value: 'num3D', label: '3D数字' },
+    { value: 'numoriginal', label: '原始数据' },
+    { value: 'skin', label: '3D皮肤' },
+  ],
+  handGloveFullPacket: [
     { value: 'num', label: '2D数字' },
     { value: 'normal', label: '3D遥操' },
     { value: 'num3D', label: '3D数字' },
@@ -192,7 +200,7 @@ const DAY_PRESETS = [30, 90, 180, 365, 730, 1095];
 
 /** 传感器快捷预设 */
 const SENSOR_PRESETS = [
-  { label: '触觉全套', types: ['hand0205', 'handGlove115200', 'robot1', 'robotSY', 'robotLCF', 'footVideo'] },
+  { label: '触觉全套', types: ['hand0205', 'handGlove115200', 'handGloveFullPacket', 'robot1', 'robotSY', 'robotLCF', 'footVideo'] },
   { label: '高速矩阵', types: ['fast256', 'fast1024', 'daliegu'] },
 ];
 

@@ -16,7 +16,7 @@ const WEBGL_SOURCE_HEIGHT = 2048*4;
 const HUMAN_BODY_WEBGL_PADDING = 3;
 const HUMAN_BODY_WEBGL_INTERP = 3;
 const DEFAULT_LIGHT_INTENSITY = 0.22;
-const HUMAN_MODEL_ASSET = "./model/human2.glb";
+const HUMAN_MODEL_ASSET = "./model/human3.glb";
 const DEFAULT_RENDER_OPTIONS = {
   min: 1,
   max: 100,
@@ -140,16 +140,16 @@ const createUvRegionFromGrid = (x1, x2, y1, y2) => {
 };
 
 const UV_REGIONS = {
-  back: createUvRegionFromGrid(6, 20, 6, 26),
-  chest: createUvRegionFromGrid(5, 21, 35, 60),
-  rightArm: createUvRegionFromGrid(22, 30, 28, 33),
-  rightShoulder: createUvRegionFromGrid(31, 36, 29, 35),
-  leftArm: createUvRegionFromGrid(49, 58, 28, 33),
-  leftShoulder: createUvRegionFromGrid(44, 49, 29, 35),
-  backPantsLeft: createUvRegionFromGrid(33, 39, 1, 24),
-  backPantsRight: createUvRegionFromGrid(46, 52, 1, 24),
-  frontPantsLeft: createUvRegionFromGrid(34, 40, 40, 63),
-  frontPantsRight: createUvRegionFromGrid(45, 50, 40, 63),
+  back: createUvRegionFromGrid(4, 21, 6, 26),
+  chest: createUvRegionFromGrid(4, 21, 35, 60),
+  rightArm: createUvRegionFromGrid(17, 36, 28, 33),
+  rightShoulder: createUvRegionFromGrid(32, 40, 28, 33),
+  leftArm: createUvRegionFromGrid(45, 63, 28, 33),
+  leftShoulder: createUvRegionFromGrid(40, 48, 28, 33),
+  backPantsLeft: createUvRegionFromGrid(31, 42, 1, 24),
+  backPantsRight: createUvRegionFromGrid(44, 54, 1, 24),
+  frontPantsLeft: createUvRegionFromGrid(31, 42, 40, 63),
+  frontPantsRight: createUvRegionFromGrid(44, 54, 40, 63),
 };
 
 const createPartConfig = (key, idxMatrix, uv, options = {}) => ({

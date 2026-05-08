@@ -38,6 +38,7 @@ const createDefaultHumanTransform = () => ({
   rotation: { x: -140, y: 0, z: -180 },
 })
 const petCareMatrixTypes_title = ['petCare', 'petCareMini']
+const tactileGloveTypes_title = ['hand0205', 'handGlove115200', 'handGloveFullPacket']
 const isPetCareMatrixTitle = (type) => petCareMatrixTypes_title.includes(type)
 const bedArr_title = ['bigBed', 'smallBed', 'bed4096', 'bed4096num', 'matCol', 'matColPos', 'jqbed', ...petCareMatrixTypes_title]
 const matrixNameToType_title = (type) => isPetCareMatrixTitle(type) ? type : bedArr_title.includes(type) ? 'bed' : type
@@ -410,7 +411,7 @@ class Title extends React.Component {
     // Sensor type groups
     const group1 = ['hand', 'normal', 'footVideo', 'smallBed', 'jqbed', 'petCare', 'petCareMini', 'bed4096', 'bed4096num']; // 3D point scene / WebGL heatmap
     const group2 = ['robot1', 'robotSY', 'robotLCF']; // Robots
-    const group3 = ['hand0205', 'handGlove115200']; // Tactile gloves
+    const group3 = tactileGloveTypes_title; // Tactile gloves
     const group4 = ['fast256', 'fast1024']; // High-speed
 
     // Determine which parameters to show
@@ -776,6 +777,7 @@ class Title extends React.Component {
       { label: t('sensorHand'), value: 'hand' },
       { label: t('sensorHand0205'), value: 'hand0205' },
       { label: t('sensorHandGlove115200'), value: 'handGlove115200' },
+      { label: t('sensorHandGloveFullPacket'), value: 'handGloveFullPacket' },
       { label: t('sensorSmallSample'), value: 'smallSample' },
       { label: t('sensorRobot1'), value: 'robot1' },
       { label: t('sensorRobotSY'), value: 'robotSY' },
@@ -794,10 +796,7 @@ class Title extends React.Component {
       { label: t('sensorHumanBody'), value: 'humanBody' },
     ]
 
-    // 根据 allowedTypes 过滤传感器列表
-    const sensorArr = this.props.allowedTypes
-      ? allSensorArr.filter(item => this.props.allowedTypes.includes(item.value))
-      : allSensorArr;
+    const sensorArr = allSensorArr;
 
     const navItems = [
       {
@@ -835,7 +834,7 @@ class Title extends React.Component {
         <img className="titleBrandWordmark" src={shroomWordmark} alt="Shroom" />
       </div>
       <div className="titleItems">
-        {this.props.matrixTitle ? <Select
+        <Select
           style={{ width: '130px' }}
           placeholder={t('chooseSensor')}
           value={this.props.matrixName}
@@ -856,7 +855,7 @@ class Title extends React.Component {
             this.props.wsSendObj({ serialReset: true })
           }}
           options={sensorArr}
-        /> : ''}
+        />
 
 
         {
@@ -869,7 +868,7 @@ class Title extends React.Component {
         }
 
         <Menu className='menu' onClick={this.onClick} selectedKeys={[this.state.current]} mode="horizontal" items={navItems} />
-        {this.props.matrixName != 'localCar' ? this.props.history === 'now' ? this.props.matrixName != 'car' && this.props.matrixName != 'car10' && this.props.matrixName != 'sofa' && this.props.matrixName != 'yanfeng10' && this.props.matrixName != 'volvo' && this.props.matrixName != 'carQX' && this.props.matrixName != 'hand0507' && this.props.matrixName != 'hand0205' && this.props.matrixName != 'handGlove115200' && this.props.matrixName != 'footVideo' && this.props.matrixName != 'eye' ? <><Select
+        {this.props.matrixName != 'localCar' ? this.props.history === 'now' ? this.props.matrixName != 'car' && this.props.matrixName != 'car10' && this.props.matrixName != 'sofa' && this.props.matrixName != 'yanfeng10' && this.props.matrixName != 'volvo' && this.props.matrixName != 'carQX' && this.props.matrixName != 'hand0507' && !tactileGloveTypes_title.includes(this.props.matrixName) && this.props.matrixName != 'footVideo' && this.props.matrixName != 'eye' ? <><Select
 
           style={{ marginRight: 6, width: 140 }}
           placeholder={t('chooseSensor')}
@@ -888,8 +887,8 @@ class Title extends React.Component {
         </Select> <div></div></> : <><Select
 
           style={{ marginRight: 6, width: 140 }}
-          placeholder={['hand0205', 'handGlove115200'].includes(this.props.matrixName) ? t('chooseLeftSensor') : this.props.matrixName == 'footVideo' ? t('chooseLeftFootSensor') : t('chooseSitSensor')}
-          value={this.props.portname ? `${this.props.portname}${['hand0205', 'handGlove115200', 'footVideo', 'eye'].includes(this.props.matrixName) ? t('left') : (t('sit'))}` : undefined}
+          placeholder={tactileGloveTypes_title.includes(this.props.matrixName) ? t('chooseLeftSensor') : this.props.matrixName == 'footVideo' ? t('chooseLeftFootSensor') : t('chooseSitSensor')}
+          value={this.props.portname ? `${this.props.portname}${[...tactileGloveTypes_title, 'footVideo', 'eye'].includes(this.props.matrixName) ? t('left') : (t('sit'))}` : undefined}
           onOpenChange={() => {
             this.props.wsSendObj({ serialReset: true })
           }}
@@ -911,9 +910,9 @@ class Title extends React.Component {
 
           <Select
             // value={this.props.portnameBack}
-            placeholder={['hand0205', 'handGlove115200'].includes(this.props.matrixName) ? t('chooseRightSensor') : this.props.matrixName == 'footVideo' ? t('chooseRightFootSensor') : t('chooseBackSensor')}
+            placeholder={tactileGloveTypes_title.includes(this.props.matrixName) ? t('chooseRightSensor') : this.props.matrixName == 'footVideo' ? t('chooseRightFootSensor') : t('chooseBackSensor')}
             style={{ marginRight: 6, width: 140 }}
-            value={this.props.portnameBack ? `${this.props.portnameBack}${['hand0205', 'handGlove115200', 'footVideo'].includes(this.props.matrixName) ? t('right') : (t('back'))}` : undefined}
+            value={this.props.portnameBack ? `${this.props.portnameBack}${[...tactileGloveTypes_title, 'footVideo'].includes(this.props.matrixName) ? t('right') : (t('back'))}` : undefined}
             onOpenChange={() => {
               this.props.wsSendObj({ serialReset: true })
             }}
@@ -996,7 +995,7 @@ class Title extends React.Component {
 
 
 
-        {this.props.matrixName != 'car10' && ['hand0205', 'handGlove115200', 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'normal', 'smallBed', 'jqbed', 'petCare', 'petCareMini', 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody'].includes(this.props.matrixName) ?
+        {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'normal', 'smallBed', 'jqbed', 'petCare', 'petCareMini', 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody'].includes(this.props.matrixName) ?
           <Select
             defaultValue={this.props.numMatrixFlag}
             style={{ width: 90 }}
@@ -1006,7 +1005,7 @@ class Title extends React.Component {
               const modeConfig = getConfig({ sensorType: this.props.matrixName, mode: value })
               this.props.changeStateData({ numMatrixFlag: value, ...modeConfig })
 
-              if (this.props.matrixName == 'hand0205' || this.props.matrixName == 'handGlove115200') {
+              if (tactileGloveTypes_title.includes(this.props.matrixName)) {
                 if (['normal', 'skin'].includes(this.props.numMatrixFlag)) {
                   this.props.com.current?.changeModal(this.props.hand)
                 }
@@ -1030,7 +1029,7 @@ class Title extends React.Component {
                 }
               }
             }}
-            options={(this.props.matrixName == 'hand0205' || this.props.matrixName == 'handGlove115200') ? [
+            options={tactileGloveTypes_title.includes(this.props.matrixName) ? [
               { value: 'num', label: t('data2D') },
               { value: 'normal', label: t('tel3D') },
               { value: 'num3D', label: t('data3D') },
@@ -1056,7 +1055,7 @@ class Title extends React.Component {
         }
 
         {
-          (this.props.matrixName == 'hand0205' || this.props.matrixName == 'handGlove115200') ?
+          tactileGloveTypes_title.includes(this.props.matrixName) ?
             <Modal
               mask={false}
               width={450}
@@ -1191,7 +1190,7 @@ class Title extends React.Component {
           : ''} */}
 
 
-        {(this.props.matrixName == 'hand0205' || this.props.matrixName == 'handGlove115200') && this.props.numMatrixFlag == 'normal' ? <Button className='titleButton'
+        {tactileGloveTypes_title.includes(this.props.matrixName) && this.props.numMatrixFlag == 'normal' ? <Button className='titleButton'
           onClick={() => {
             // this.props.com.current?.calibration()
             // this.setState({
@@ -1206,7 +1205,7 @@ class Title extends React.Component {
             // 手固定
             this.props.com.current?.handZero()
           }}
-        >{t('calib')}</Button> : (this.props.matrixName == 'hand0205' || this.props.matrixName == 'handGlove115200') && this.props.numMatrixFlag == 'skin' ? <Button className='titleButton'
+        >{t('calib')}</Button> : tactileGloveTypes_title.includes(this.props.matrixName) && this.props.numMatrixFlag == 'skin' ? <Button className='titleButton'
           onClick={() => {
             // this.props.com.current?.calibration()
             // this.setState({
