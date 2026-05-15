@@ -77,6 +77,7 @@ class AppUpdater {
     this.mainWindow = mainWindow;
     this.checkInterval = options.checkInterval || 4 * 60 * 60 * 1000;
     this._timer = null;
+    this._startupCheckTimer = null;
     this._installRequested = false;
 
     // 配置 autoUpdater
@@ -94,6 +95,10 @@ class AppUpdater {
 
     this._bindEvents();
     this._bindIPC();
+  }
+
+  setMainWindow(mainWindow) {
+    this.mainWindow = mainWindow;
   }
 
   /**
@@ -186,6 +191,8 @@ class AppUpdater {
    * 使用独立的 update-command 通道，避免与 app-command 冲突
    */
   _bindIPC() {
+    ipcMain.removeHandler("update-command");
+
     // 前端请求检查更新
     ipcMain.handle("update-command", async (event, data) => {
       try {
@@ -259,8 +266,13 @@ class AppUpdater {
    * 启动定时检查
    */
   startAutoCheck() {
+    if (this._timer || this._startupCheckTimer) {
+      return;
+    }
+
     // 启动后延迟 30 秒检查第一次（避免影响启动速度）
-    setTimeout(() => {
+    this._startupCheckTimer = setTimeout(() => {
+      this._startupCheckTimer = null;
       this._safeCheckForUpdates();
     }, 30 * 1000);
 
@@ -278,6 +290,11 @@ class AppUpdater {
    * 停止定时检查
    */
   stopAutoCheck() {
+    if (this._startupCheckTimer) {
+      clearTimeout(this._startupCheckTimer);
+      this._startupCheckTimer = null;
+    }
+
     if (this._timer) {
       clearInterval(this._timer);
       this._timer = null;
@@ -289,7 +306,9 @@ class AppUpdater {
    */
   dispose() {
     this.stopAutoCheck();
+    ipcMain.removeHandler("update-command");
     autoUpdater.removeAllListeners();
+    this.mainWindow = null;
   }
 }
 

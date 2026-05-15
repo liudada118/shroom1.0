@@ -2,6 +2,7 @@
 
 const { spawnSync } = require("child_process");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 
 const projectRoot = path.resolve(__dirname, "..");
@@ -12,6 +13,72 @@ const runtimeExe = path.join(
   runtimeDir,
   process.platform === "win32" ? "onbed_server.exe" : "onbed_server"
 );
+
+function unique(items) {
+  return [...new Set(items.filter(Boolean))];
+}
+
+function existingDir(dirPath) {
+  try {
+    return fs.statSync(dirPath).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function pathCommandCandidates(command) {
+  if (process.platform === "win32") return [];
+
+  const result = spawnSync("which", ["-a", command], {
+    encoding: "utf8",
+    stdio: "pipe",
+  });
+
+  if (result.error || result.status !== 0) {
+    return [];
+  }
+
+  return unique((result.stdout || "").split(/\r?\n/));
+}
+
+function condaPython311Candidates() {
+  if (process.platform === "win32") return [];
+
+  const home = os.homedir();
+  const candidates = [];
+  const baseRoots = unique([
+    process.env.CONDA_PREFIX || null,
+    "/opt/miniconda3",
+    path.join(home, "miniconda3"),
+    "/opt/anaconda3",
+    path.join(home, "anaconda3"),
+  ]);
+  const envRoots = unique([
+    process.env.CONDA_PREFIX ? path.join(process.env.CONDA_PREFIX, "..") : null,
+    "/opt/miniconda3/envs",
+    path.join(home, "miniconda3", "envs"),
+    "/opt/anaconda3/envs",
+    path.join(home, "anaconda3", "envs"),
+  ]);
+
+  for (const root of baseRoots) {
+    if (existingDir(root)) {
+      candidates.push(path.join(root, "bin", "python3.11"));
+    }
+  }
+
+  for (const envRoot of envRoots) {
+    if (!existingDir(envRoot)) continue;
+    try {
+      for (const entry of fs.readdirSync(envRoot, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        candidates.push(path.join(envRoot, entry.name, "bin", "python3.11"));
+      }
+    } catch {}
+  }
+
+  return unique(candidates.filter((candidate) => fs.existsSync(candidate)));
+}
 
 function latestMtime(targetPath) {
   if (!fs.existsSync(targetPath)) {
@@ -73,11 +140,15 @@ function interpreterCandidates() {
       candidates.push({ command: localPython, args: [], label: localPython });
     }
 
-    candidates.push(
-      { command: "python3.11", args: [], label: "python3.11" },
-      { command: "python3", args: [], label: "python3" },
-      { command: "python", args: [], label: "python" }
-    );
+    for (const candidate of unique([
+      ...pathCommandCandidates("python3.11"),
+      ...condaPython311Candidates(),
+      "python3.11",
+      "python3",
+      "python",
+    ])) {
+      candidates.push({ command: candidate, args: [], label: candidate });
+    }
   }
 
   return candidates;
@@ -89,7 +160,7 @@ function probeInterpreter(candidate) {
     [
       ...candidate.args,
       "-c",
-      "import sys, numpy, PyInstaller; print(sys.executable)",
+      "import sys, numpy, PyInstaller; assert sys.version_info[:2] == (3, 11), sys.version; print(sys.executable)",
     ],
     {
       cwd: pythonRoot,

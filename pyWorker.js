@@ -1,6 +1,6 @@
 // pyWorker.js
 // Python algorithm bridge for on-bed processing.
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -24,6 +24,14 @@ function isPackagedApp() {
 function existingFile(filePath) {
   try {
     return fs.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function existingDir(dirPath) {
+  try {
+    return fs.statSync(dirPath).isDirectory();
   } catch {
     return false;
   }
@@ -63,6 +71,41 @@ function resolvePackagedExe() {
   return candidates.find(existingFile) || null;
 }
 
+function latestMtime(targetPath) {
+  if (!fs.existsSync(targetPath)) {
+    return 0;
+  }
+
+  const stat = fs.statSync(targetPath);
+  if (stat.isFile()) {
+    return stat.mtimeMs;
+  }
+
+  let latest = stat.mtimeMs;
+  for (const entry of fs.readdirSync(targetPath, { withFileTypes: true })) {
+    latest = Math.max(latest, latestMtime(path.join(targetPath, entry.name)));
+  }
+  return latest;
+}
+
+function resolveFreshDevExe() {
+  if (isPackagedApp()) return null;
+
+  const runtimeDir = path.join(devPythonRoot(), 'dist', 'onbed_server');
+  const runtimeExe = path.join(runtimeDir, executableName());
+  if (!existingFile(runtimeExe)) {
+    return null;
+  }
+
+  const sourceStamp = Math.max(
+    latestMtime(path.join(devPythonRoot(), 'app')),
+    latestMtime(path.join(devPythonRoot(), 'build_exe.py')),
+    latestMtime(path.join(devPythonRoot(), 'requirements.txt'))
+  );
+
+  return latestMtime(runtimeDir) >= sourceStamp ? runtimeExe : null;
+}
+
 function resolveServerPy() {
   const candidates = isPackagedApp()
     ? packagedPythonRoots().map((root) => path.join(root, 'app', 'onbed_filter_example.py'))
@@ -71,35 +114,108 @@ function resolveServerPy() {
   return candidates.find(existingFile) || null;
 }
 
-function pythonBin() {
+function serverPy() {
+  return resolveServerPy();
+}
+
+function pathCommandCandidates(command) {
+  if (process.platform === 'win32') return [];
+
+  const result = spawnSync('which', ['-a', command], {
+    encoding: 'utf8',
+  });
+
+  if (result.error || result.status !== 0) {
+    return [];
+  }
+
+  return unique((result.stdout || '').split(/\r?\n/));
+}
+
+function condaPython311Candidates() {
+  if (process.platform === 'win32') return [];
+
+  const home = os.homedir();
+  const candidates = [];
+  const baseRoots = unique([
+    process.env.CONDA_PREFIX || null,
+    '/opt/miniconda3',
+    path.join(home, 'miniconda3'),
+    '/opt/anaconda3',
+    path.join(home, 'anaconda3'),
+  ]);
+  const envRoots = unique([
+    process.env.CONDA_PREFIX ? path.join(process.env.CONDA_PREFIX, '..') : null,
+    '/opt/miniconda3/envs',
+    path.join(home, 'miniconda3', 'envs'),
+    '/opt/anaconda3/envs',
+    path.join(home, 'anaconda3', 'envs'),
+  ]);
+
+  for (const root of baseRoots) {
+    if (existingDir(root)) {
+      candidates.push(path.join(root, 'bin', 'python3.11'));
+    }
+  }
+
+  for (const envRoot of envRoots) {
+    if (!existingDir(envRoot)) continue;
+    try {
+      for (const entry of fs.readdirSync(envRoot, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        candidates.push(path.join(envRoot, entry.name, 'bin', 'python3.11'));
+      }
+    } catch {}
+  }
+
+  return unique(candidates.filter(existingFile));
+}
+
+function pythonInterpreterCandidates() {
+  const candidates = [];
+
+  if (process.env.PYTHON_FOR_RUNTIME) {
+    candidates.push({
+      command: process.env.PYTHON_FOR_RUNTIME,
+      args: [],
+      label: process.env.PYTHON_FOR_RUNTIME,
+    });
+  }
+
   if (!isPackagedApp()) {
     if (process.platform === 'win32') {
       const localPy = path.join(devPythonRoot(), 'Python311', 'python.exe');
-      if (existingFile(localPy)) return localPy;
-      return 'python';
+      candidates.push(
+        { command: localPy, args: [], label: localPy },
+        { command: 'py', args: ['-3.11'], label: 'py -3.11' },
+        { command: 'python', args: [], label: 'python' }
+      );
+      return candidates;
     }
 
     const localPyCandidates = [
       path.join(devPythonRoot(), 'venv', 'bin', 'python3.11'),
       path.join(devPythonRoot(), 'venv', 'bin', 'python3'),
       path.join(devPythonRoot(), 'venv', 'bin', 'python'),
+      ...pathCommandCandidates('python3.11'),
+      ...condaPython311Candidates(),
+      'python3.11',
+      'python3',
+      'python',
     ];
-    const localPy = localPyCandidates.find(existingFile);
-    if (localPy) return localPy;
-    return 'python3';
-  }
 
-  const packagedExe = resolvePackagedExe();
-  if (packagedExe) return packagedExe;
+    for (const candidate of unique(localPyCandidates)) {
+      candidates.push({ command: candidate, args: [], label: candidate });
+    }
+    return candidates;
+  }
 
   for (const root of packagedPythonRoots()) {
     if (process.platform === 'win32') {
-      const pyExeCandidates = [
-        path.join(root, 'Python311', 'python.exe'),
-        path.join(root, 'venv', 'Scripts', 'python.exe'),
-      ];
-      const pyExe = pyExeCandidates.find(existingFile);
-      if (pyExe) return pyExe;
+      candidates.push(
+        { command: path.join(root, 'Python311', 'python.exe'), args: [], label: path.join(root, 'Python311', 'python.exe') },
+        { command: path.join(root, 'venv', 'Scripts', 'python.exe'), args: [], label: path.join(root, 'venv', 'Scripts', 'python.exe') }
+      );
       continue;
     }
 
@@ -108,19 +224,114 @@ function pythonBin() {
       path.join(root, 'venv', 'bin', 'python3'),
       path.join(root, 'venv', 'bin', 'python'),
     ];
-    const pyExe = pyExeCandidates.find(existingFile);
-    if (pyExe) return pyExe;
+
+    for (const candidate of pyExeCandidates) {
+      candidates.push({ command: candidate, args: [], label: candidate });
+    }
   }
 
-  return null;
+  return candidates;
 }
 
-function serverPy() {
-  return resolveServerPy();
+function probePythonInterpreter(candidate, serverScript) {
+  const probeCode = [
+    'import sys',
+    "assert sys.version_info[:2] == (3, 11), f'Expected Python 3.11, got {sys.version.split()[0]}'",
+    'import numpy',
+    serverScript ? `sys.path.insert(0, ${JSON.stringify(path.dirname(serverScript))})` : '',
+    serverScript ? 'import onbed_filter_example' : '',
+    'print(sys.executable)',
+  ].filter(Boolean).join('; ');
+
+  const result = spawnSync(
+    candidate.command,
+    [...candidate.args, '-c', probeCode],
+    {
+      cwd: serverScript ? path.dirname(serverScript) : process.cwd(),
+      env: pythonRuntimeEnv(),
+      encoding: 'utf8',
+    }
+  );
+
+  if (result.error) {
+    return { ok: false, reason: result.error.message };
+  }
+
+  if (result.status !== 0) {
+    return {
+      ok: false,
+      reason: (result.stderr || result.stdout || `exit ${result.status}`).trim(),
+    };
+  }
+
+  return {
+    ok: true,
+    executable: (result.stdout || '').trim().split(/\r?\n/).pop(),
+  };
 }
 
-function isPyInstallerExe() {
-  return Boolean(resolvePackagedExe());
+let resolvedLaunchTarget = null;
+
+function resolvePythonLaunchTarget() {
+  const serverScript = serverPy();
+
+  if (!isPackagedApp()) {
+    const devExe = resolveFreshDevExe();
+    if (devExe) {
+      return {
+        command: devExe,
+        args: [],
+        label: devExe,
+        serverScript: null,
+        useExe: true,
+      };
+    }
+  }
+
+  const packagedExe = resolvePackagedExe();
+  if (packagedExe) {
+    return {
+      command: packagedExe,
+      args: [],
+      label: packagedExe,
+      serverScript: null,
+      useExe: true,
+    };
+  }
+
+  if (!serverScript) {
+    return null;
+  }
+
+  const failures = [];
+  for (const candidate of pythonInterpreterCandidates()) {
+    const probe = probePythonInterpreter(candidate, serverScript);
+    if (probe.ok) {
+      return {
+        command: candidate.command,
+        args: candidate.args,
+        label: candidate.label,
+        resolvedExecutable: probe.executable,
+        serverScript,
+        useExe: false,
+      };
+    }
+    failures.push(`${candidate.label}: ${probe.reason}`);
+  }
+
+  throw new Error(
+    [
+      '[PY] no usable Python 3.11 runtime found',
+      ...failures.map((failure) => `- ${failure}`),
+    ].join('\n')
+  );
+}
+
+function pythonLaunchTarget() {
+  if (!resolvedLaunchTarget) {
+    resolvedLaunchTarget = resolvePythonLaunchTarget();
+  }
+  return resolvedLaunchTarget;
 }
 
 function pythonArgs(serverScript, useExe) {
@@ -201,9 +412,10 @@ function startWorker() {
   manualStop = false;
 
   try {
-    const py = pythonBin();
-    const useExe = isPyInstallerExe();
-    const serverScript = serverPy();
+    const target = pythonLaunchTarget();
+    const py = target?.command;
+    const useExe = Boolean(target?.useExe);
+    const serverScript = target?.serverScript;
 
     if (isPackagedApp() && !py) {
       throw missingPackagedRuntimeError();
@@ -213,10 +425,13 @@ function startWorker() {
       throw new Error('[PY] start aborted: no python runtime script found');
     }
 
-    const args = pythonArgs(serverScript, useExe);
+    const args = [...(target?.args || []), ...pythonArgs(serverScript, useExe)];
     const cwd = useExe ? path.dirname(py) : (serverScript ? path.dirname(serverScript) : process.cwd());
 
     console.log('[PY] start:', py, args.join(' '), 'cwd=', cwd, 'packaged=', isPackagedApp(), 'useExe=', useExe);
+    if (target?.resolvedExecutable && target.resolvedExecutable !== py) {
+      console.log('[PY] resolved executable:', target.resolvedExecutable);
+    }
     if (py && py.includes(path.sep) && !fs.existsSync(py)) console.error('[PY] pythonBin NOT FOUND:', py);
     if (!useExe && (!serverScript || !fs.existsSync(serverScript))) console.error('[PY] serverPy NOT FOUND:', serverScript);
 
@@ -295,9 +510,6 @@ function startWorker() {
   callPy('ping', {}, { timeoutMs: 30000 })
     .then(() => {
       console.log('[PY] ready');
-      return warmFootAnalysis()
-        .then(() => console.log('[PY] foot analysis warmed'))
-        .catch((e) => console.error('[PY] foot analysis warmup failed:', e.message));
     })
     .catch((e) => console.error('[PY] handshake failed:', e.message));
 }
