@@ -1817,6 +1817,7 @@ export const sitTypeEvent = {
     }
   },
   handGlove115200: function(args) { return sitTypeEvent.hand0205(args); },
+  handGloveFullPacket: function(args) { return sitTypeEvent.hand0205(args); },
   hand0205Point: ({ that, wsPointData, local, rotate, fingerArr }) => {
 
 
@@ -4808,6 +4809,7 @@ export const backTypeEvent = {
     }
   },
   handGlove115200: function(args) { return backTypeEvent.hand0205(args); },
+  handGloveFullPacket: function(args) { return backTypeEvent.hand0205(args); },
 };
 
 export const headTypeEvent = {

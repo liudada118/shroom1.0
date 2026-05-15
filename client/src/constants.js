@@ -35,6 +35,7 @@ export const SENSOR_TYPES = {
   HAND_R:      'handR',
   HAND_0205:   'hand0205',
   HAND_GLOVE_115200: 'handGlove115200',
+  HAND_GLOVE_FULL_PACKET: 'handGloveFullPacket',
   HAND_0507:   'hand0507',
   GLOVES:      'gloves',
   GLOVES1:     'gloves1',
@@ -66,7 +67,7 @@ export const SENSOR_TYPES = {
  */
 export const CAR_TYPES = [
   'yanfeng10', 'car', 'car10', 'volvo', 'footVideo',
-  'hand0507', 'hand0205', 'handGlove115200', 'carQX', 'eye', 'sofa',
+  'hand0507', 'hand0205', 'handGlove115200', 'handGloveFullPacket', 'carQX', 'eye', 'sofa',
 ];
 
 /**
@@ -99,6 +100,7 @@ export const SENSOR_MATRIX_MAP = {
   short:      { width: 32, height: 32, total: 1024 },
   handL:      { width: 16, height: 16, total: 256 },
   handR:      { width: 16, height: 16, total: 256 },
+  handGloveFullPacket: { width: 16, height: 16, total: 256 },
   gloves:     { width: 16, height: 16, total: 256 },
   bigBed:     { width: 64, height: 32, total: 2048 },
 };

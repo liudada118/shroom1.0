@@ -16,7 +16,8 @@ const WEBGL_SOURCE_HEIGHT = 2048*4;
 const HUMAN_BODY_WEBGL_PADDING = 3;
 const HUMAN_BODY_WEBGL_INTERP = 3;
 const DEFAULT_LIGHT_INTENSITY = 0.22;
-const HUMAN_MODEL_ASSET = "./model/human2.glb";
+const HUMAN_MODEL_ASSET = "./model/human3.glb";
+const KEYBOARD_ROTATE_STEP = 5;
 const DEFAULT_RENDER_OPTIONS = {
   min: 1,
   max: 100,
@@ -140,16 +141,16 @@ const createUvRegionFromGrid = (x1, x2, y1, y2) => {
 };
 
 const UV_REGIONS = {
-  back: createUvRegionFromGrid(6, 20, 6, 26),
-  chest: createUvRegionFromGrid(5, 21, 35, 60),
-  rightArm: createUvRegionFromGrid(22, 30, 28, 33),
-  rightShoulder: createUvRegionFromGrid(31, 36, 29, 35),
-  leftArm: createUvRegionFromGrid(49, 58, 28, 33),
-  leftShoulder: createUvRegionFromGrid(44, 49, 29, 35),
-  backPantsLeft: createUvRegionFromGrid(33, 39, 1, 24),
-  backPantsRight: createUvRegionFromGrid(46, 52, 1, 24),
-  frontPantsLeft: createUvRegionFromGrid(34, 40, 40, 63),
-  frontPantsRight: createUvRegionFromGrid(45, 50, 40, 63),
+  back: createUvRegionFromGrid(4, 21, 6, 26),
+  chest: createUvRegionFromGrid(4, 21, 35, 60),
+  rightArm: createUvRegionFromGrid(17, 36, 28, 33),
+  rightShoulder: createUvRegionFromGrid(32, 40, 28, 33),
+  leftArm: createUvRegionFromGrid(45, 63, 28, 33),
+  leftShoulder: createUvRegionFromGrid(40, 48, 28, 33),
+  backPantsLeft: createUvRegionFromGrid(31, 42, 1, 24),
+  backPantsRight: createUvRegionFromGrid(44, 54, 1, 24),
+  frontPantsLeft: createUvRegionFromGrid(31, 42, 40, 63),
+  frontPantsRight: createUvRegionFromGrid(44, 54, 40, 63),
 };
 
 const createPartConfig = (key, idxMatrix, uv, options = {}) => ({
@@ -203,6 +204,8 @@ const HumanBodyCanvas = React.forwardRef((props, refs) => {
   const ALT_KEY = 18;
   const CTRL_KEY = 17;
   const CMD_KEY = 91;
+  const LEFT_KEY = "ArrowLeft";
+  const RIGHT_KEY = "ArrowRight";
 
   function paintBaseTexture(canvas) {
     const ctx = canvas.getContext("2d");
@@ -479,6 +482,45 @@ const HumanBodyCanvas = React.forwardRef((props, refs) => {
     syncControlsTargetToModel();
   }
 
+  function rotateModelByKeyboard(deltaY) {
+    modelTransformRef.current = {
+      ...modelTransformRef.current,
+      rotation: {
+        ...modelTransformRef.current.rotation,
+        y: modelTransformRef.current.rotation.y + deltaY,
+      },
+    };
+    applyModelTransform();
+  }
+
+  function isTextInputTarget(target) {
+    const tagName = target?.tagName?.toLowerCase();
+    return target?.isContentEditable || tagName === "input" || tagName === "textarea" || tagName === "select";
+  }
+
+  function handleKeyDown(event) {
+    if (isTextInputTarget(event.target)) {
+      return;
+    }
+
+    if (event.key === LEFT_KEY) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.nativeEvent?.stopImmediatePropagation?.();
+      event.stopImmediatePropagation?.();
+      rotateModelByKeyboard(-KEYBOARD_ROTATE_STEP);
+      return;
+    }
+
+    if (event.key === RIGHT_KEY) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.nativeEvent?.stopImmediatePropagation?.();
+      event.stopImmediatePropagation?.();
+      rotateModelByKeyboard(KEYBOARD_ROTATE_STEP);
+    }
+  }
+
   function changeColor({ max, size, filter, light, blurFactor }) {
     if (max !== undefined) {
       heatmapOptionsRef.current.max = max;
@@ -522,8 +564,10 @@ const HumanBodyCanvas = React.forwardRef((props, refs) => {
   useEffect(() => {
     init();
     animate();
+    window.addEventListener("keydown", handleKeyDown, true);
 
     return () => {
+      window.removeEventListener("keydown", handleKeyDown, true);
       if (animationRequestId) {
         cancelAnimationFrame(animationRequestId);
       }

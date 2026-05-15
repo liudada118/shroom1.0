@@ -83,6 +83,27 @@ const { pressSmallBed } = require("./utilMatrix");
 const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine, pressNew12203131 } = require('./server/mathUtils');
 const { initDb: _initDbFromModule } = require('./server/dbManager');
 
+const HAND_GLOVE_FULL_PACKET = 'handGloveFullPacket';
+const HAND_GLOVE_TYPES = ['hand0205', 'handGlove115200', HAND_GLOVE_FULL_PACKET];
+const HAND_GLOVE_FULL_PACKET_LENGTH = 274;
+const isHandGloveType = (sensorType) => HAND_GLOVE_TYPES.includes(sensorType);
+const isHandStorageType = (sensorType = '') => isHandGloveType(sensorType) || String(sensorType).includes('robot');
+const getSensorBaudRate = (sensorType) => {
+  if (sensorType == 'handGlove115200') {
+    return 115200;
+  }
+  if (isHandGloveType(sensorType) || ['footVideo', 'eye', 'daliegu', 'smallSample'].includes(sensorType) || String(sensorType).includes('robot')) {
+    return 921600;
+  }
+  if (['bed4096', 'bed4096num'].includes(sensorType)) {
+    return 3000000;
+  }
+  if (sensorType === 'humanBody') {
+    return 1000000;
+  }
+  return 1000000;
+};
+
 const WCH_ALLOWED_VENDOR_IDS = new Set(['1A86']);
 const WCH_ALLOWED_PRODUCT_IDS = new Set(['7523', '55D3']);
 
@@ -421,7 +442,7 @@ function getHistorySeries({ sitRows = [], backRows = [], start = 0, end = null, 
   const area = [];
   const time = [];
   // hand/robot 类型存储格式为 [256压力数据, 4四元数]，需要截取前256个
-  const needSlice = ['hand0205', 'handGlove115200'].includes(file) || file.includes('robot');
+  const needSlice = isHandStorageType(file);
 
   for (let i = rangeStart; i < rangeEnd; i++) {
     let sitData = hasSit && safeSitRows[i] ? JSON.parse(safeSitRows[i].data) : null;
@@ -626,29 +647,10 @@ if (fs.existsSync(nameTxt)) {
     const dateRes = fs.readFileSync(nameTxt, 'utf8');
     const parsedData = JSON.parse(module2.decryptStr(dateRes));
     endDate = parseFloat(parsedData.date);
-    const rawFile = parsedData.file;
-    selectFlag = rawFile; // ????????????????????? 'all'??????????????
-    // ??? file ????????'all'????????????????????
-    if (rawFile === 'all') {
-      file = defauleFile;
-    } else if (Array.isArray(rawFile)) {
-      // ???????????????????????????????????
-      file = rawFile[0] || defauleFile;
-    } else {
-      file = rawFile || defauleFile;
-    }
+    selectFlag = 'all';
+    file = defauleFile;
     // 鏍规嵁 file 绫诲瀷璁剧疆娉㈢壒鐜?
-    if (file == 'handGlove115200') {
-      baudRate = 115200
-    } else if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(file) || file.includes('robot')) {
-      baudRate = 921600
-    } else if (['bed4096', 'bed4096num'].includes(file)) {
-      baudRate = 3000000
-    } else if (file === 'humanBody') {
-      baudRate = 1000000
-    } else {
-      baudRate = 1000000
-    }
+    baudRate = getSensorBaudRate(file);
   } catch (err) {
     logger.error(err);
   }
@@ -963,32 +965,14 @@ module.exports = {
             });
 
              const parsedLicense = JSON.parse(dateRes);
-            const rawFile = parsedLicense.file;
-            selectFlag = rawFile;
+            selectFlag = 'all';
             // 支持 moduleConfig 字段：各传感器类型的默认功能模块配置
             // { [sensorValue]: numMatrixFlag }
             const rawModuleConfig = parsedLicense.moduleConfig || null;
-            // 确定初始展示的传感器类型（file）
-            if (rawFile === 'all') {
-              file = defauleFile;
-            } else if (Array.isArray(rawFile)) {
-              file = rawFile[0] || defauleFile;
-            } else {
-              file = rawFile || defauleFile;
-            }
+            // License type is no longer used to lock or switch the active sensor.
             endDate = parseFloat(parsedLicense.date);
 
-            if (file == 'handGlove115200') {
-              baudRate = 115200
-            } else if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(file) || file.includes('robot')) {
-              baudRate = 921600
-            } else if (['bed4096', 'bed4096num'].includes(file)) {
-              baudRate = 3000000
-            } else if (file === 'humanBody') {
-              baudRate = 1000000
-            } else {
-              baudRate = 1000000
-            }
+            baudRate = getSensorBaudRate(file);
             server.clients.forEach(function each(client) {
               const payload = {
                 date: endDate,
@@ -1169,17 +1153,7 @@ module.exports = {
             file = receiveFile;
             Object.keys(petCareSystems).forEach(resetPetCareRuntime);
 
-            if (receiveFile == 'handGlove115200') {
-              baudRate = 115200
-            } else if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(receiveFile) || receiveFile.includes('robot')) {
-              baudRate = 921600
-            } else if (['bed4096', 'bed4096num',].includes(receiveFile)) {
-              baudRate = 3000000
-            } else if (receiveFile === 'humanBody') {
-              baudRate = 1000000
-            } else {
-              baudRate = 1000000
-            }
+            baudRate = getSensorBaudRate(receiveFile);
 
             const dbObj = initDb(file)
             db = dbObj.db
@@ -2117,27 +2091,45 @@ module.exports = {
                       backObj.newArr147 = backPressure
                     }
                   }
-                } else if (['hand0205', 'handGlove115200'].includes(file)) {
+                } else if (isHandGloveType(file)) {
                   // 鍏煎鏂版棫鏁版嵁鏍煎紡锛氭柊鐗?60(256+4)锛屾棫鐗?51(147+4)
                   const sitRaw = JSON.parse(localData[value]?.data || '[]')
                   const backRaw = JSON.parse(localDataBack[value]?.data || '[]')
-                  if (sitRaw.length >= 260) {
+                  if (file === HAND_GLOVE_FULL_PACKET && sitRaw.length >= 256) {
+                    const sitPressure = sitRaw.slice(0, 256)
+                    const sitMapped = mapHandGloveFullPacketPressure([...sitPressure], 'left')
+                    sitObj.sitData = mapHandGloveFullPacketModelMatrix(sitMapped)
+                    sitObj.realArr = sitPressure
+                    sitObj.rawPressureData = sitPressure
+                    sitObj.newArr147 = sitMapped
+                    sitObj.mappedArr195 = sitMapped
+                    sitObj.rotate = []
+                  } else if (sitRaw.length >= 260) {
                     // 鏂扮増锛氬墠256鏄師濮嬫暟鎹紝鍚?鏄洓鍏冩暟
                     const sitPressure = sitRaw.slice(0, 256)
                     const sitRotate = sitRaw.slice(256, 260)
                     sitObj.sitData = sitPressure
-                    sitObj.newArr147 = handL([...sitPressure])
+                    sitObj.newArr147 = file === HAND_GLOVE_FULL_PACKET ? mapHandGloveFullPacketPressure([...sitPressure], 'left') : handL([...sitPressure])
                     sitObj.rotate = sitRotate
                   } else {
                     // 鏃х増锛氬墠147鏄痭ewArr147锛屽悗4鏄洓鍏冩暟
                     sitObj.newArr147 = sitRaw.slice(0, sitRaw.length - 4)
                     sitObj.rotate = sitRaw.slice(sitRaw.length - 4)
                   }
-                  if (backRaw.length >= 260) {
+                  if (file === HAND_GLOVE_FULL_PACKET && backRaw.length >= 256) {
+                    const backPressure = backRaw.slice(0, 256)
+                    const backMapped = mapHandGloveFullPacketPressure([...backPressure], 'right')
+                    backObj.backData = mapHandGloveFullPacketModelMatrix(backMapped)
+                    backObj.realArr = backPressure
+                    backObj.rawPressureData = backPressure
+                    backObj.newArr147 = backMapped
+                    backObj.mappedArr195 = backMapped
+                    backObj.rotate = []
+                  } else if (backRaw.length >= 260) {
                     const backPressure = backRaw.slice(0, 256)
                     const backRotate = backRaw.slice(256, 260)
                     backObj.backData = backPressure
-                    backObj.newArr147 = handR([...backPressure])
+                    backObj.newArr147 = file === HAND_GLOVE_FULL_PACKET ? mapHandGloveFullPacketPressure([...backPressure], 'right') : handR([...backPressure])
                     backObj.rotate = backRotate
                   } else {
                     backObj.newArr147 = backRaw.slice(0, backRaw.length - 4)
@@ -2346,25 +2338,43 @@ module.exports = {
                         backObj.newArr147 = backPressure
                       }
                     }
-                  } else if (['hand0205', 'handGlove115200'].includes(file)) {
+                  } else if (isHandGloveType(file)) {
                     // 鍏煎鏂版棫鏁版嵁鏍煎紡锛氭柊鐗?60(256+4)锛屾棫鐗?51(147+4)
                     const sitRaw = JSON.parse(localData[nowIndex]?.data || '[]')
                     const backRaw = JSON.parse(localDataBack[nowIndex]?.data || '[]')
-                    if (sitRaw.length >= 260) {
+                    if (file === HAND_GLOVE_FULL_PACKET && sitRaw.length >= 256) {
+                      const sitPressure = sitRaw.slice(0, 256)
+                      const sitMapped = mapHandGloveFullPacketPressure([...sitPressure], 'left')
+                      sitObj.sitData = mapHandGloveFullPacketModelMatrix(sitMapped)
+                      sitObj.realArr = sitPressure
+                      sitObj.rawPressureData = sitPressure
+                      sitObj.newArr147 = sitMapped
+                      sitObj.mappedArr195 = sitMapped
+                      sitObj.rotate = []
+                    } else if (sitRaw.length >= 260) {
                       const sitPressure = sitRaw.slice(0, 256)
                       const sitRotate = sitRaw.slice(256, 260)
                       sitObj.sitData = sitPressure
-                      sitObj.newArr147 = handL([...sitPressure])
+                      sitObj.newArr147 = file === HAND_GLOVE_FULL_PACKET ? mapHandGloveFullPacketPressure([...sitPressure], 'left') : handL([...sitPressure])
                       sitObj.rotate = sitRotate
                     } else {
                       sitObj.newArr147 = sitRaw.slice(0, sitRaw.length - 4)
                       sitObj.rotate = sitRaw.slice(sitRaw.length - 4)
                     }
-                    if (backRaw.length >= 260) {
+                    if (file === HAND_GLOVE_FULL_PACKET && backRaw.length >= 256) {
+                      const backPressure = backRaw.slice(0, 256)
+                      const backMapped = mapHandGloveFullPacketPressure([...backPressure], 'right')
+                      backObj.backData = mapHandGloveFullPacketModelMatrix(backMapped)
+                      backObj.realArr = backPressure
+                      backObj.rawPressureData = backPressure
+                      backObj.newArr147 = backMapped
+                      backObj.mappedArr195 = backMapped
+                      backObj.rotate = []
+                    } else if (backRaw.length >= 260) {
                       const backPressure = backRaw.slice(0, 256)
                       const backRotate = backRaw.slice(256, 260)
                       backObj.backData = backPressure
-                      backObj.newArr147 = handR([...backPressure])
+                      backObj.newArr147 = file === HAND_GLOVE_FULL_PACKET ? mapHandGloveFullPacketPressure([...backPressure], 'right') : handR([...backPressure])
                       backObj.rotate = backRotate
                     } else {
                       backObj.newArr147 = backRaw.slice(0, backRaw.length - 4)
@@ -2972,7 +2982,7 @@ module.exports = {
               });
             } else if (file !== "car10") {
               // 鍒ゆ柇鏄惁鏄Е瑙夋墜濂楃被鍨嬶紝闇€瑕佸垎绂诲師濮?56鏁版嵁鍜屽洓鍏冩暟
-              const isHandType = ['hand0205', 'handGlove115200'].includes(file) || file.includes('robot');
+              const isHandType = isHandStorageType(file);
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
                   logger.error(err);
@@ -3088,7 +3098,7 @@ module.exports = {
 
                   // if()
 
-                  const isBackHandType = ['hand0205', 'handGlove115200'].includes(file) || file.includes('robot');
+                  const isBackHandType = isHandStorageType(file);
                   for (var i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
                     const rawBackData = JSON.parse(rows[i][`data`]);
                     let backData, backRotateData;
@@ -3405,12 +3415,230 @@ SerialPort.list().then((ports) => {
 });
 let pointArr, newData, firstBlueData = [], lastBlueData = [], firstBlueData1 = [], lastBlueData1 = [];
 let index = 0
+const HAND_GLOVE_FULL_PACKET_LAYOUT = {
+  left: {
+    fingerRows: [
+      [65, 66, 67, 38, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79],
+      [49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63],
+      [33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47],
+      [17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
+    ],
+    fingerTips: [2, 5, 8, 11, 14],
+    palm: [
+      129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143,
+      145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159,
+      161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175,
+      177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191,
+      193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207,
+      209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223,
+    ],
+    palmLeadingBlankCount: 3,
+    palmTopRows: [
+      [244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255],
+      [228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239],
+    ],
+  },
+  right: {
+    fingerRows: [
+      [190, 191, 192, 187, 188, 189, 184, 185, 186, 181, 182, 183, 178, 179, 180],
+      [206, 207, 208, 203, 204, 205, 200, 201, 202, 197, 198, 199, 194, 195, 196],
+      [222, 223, 224, 219, 220, 221, 216, 217, 218, 213, 214, 215, 210, 211, 212],
+      [238, 239, 240, 235, 236, 237, 232, 233, 234, 229, 230, 231, 226, 227, 228],
+    ],
+    fingerTips: [255, 252, 249, 246, 243],
+    palm: [
+      114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128,
+      98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112,
+      82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96,
+      66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80,
+      50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64,
+      34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48,
+    ],
+    palmTrailingBlankCount: 3,
+    palmTopRows: [
+      [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+      [18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29],
+    ],
+  },
+};
+
+function readHandGlovePoint(pressureData, oneBasedIndex) {
+  return pressureData[oneBasedIndex - 1] || 0;
+}
+
+function mapHandGloveFullPacketPressure(pressureData, side) {
+  const layout = HAND_GLOVE_FULL_PACKET_LAYOUT[side] || HAND_GLOVE_FULL_PACKET_LAYOUT.left;
+  const res = new Array(15 * 13).fill(0);
+
+  layout.fingerRows.forEach((row, rowIndex) => {
+    row.forEach((oneBasedIndex, colIndex) => {
+      res[rowIndex * 15 + colIndex] = readHandGlovePoint(pressureData, oneBasedIndex);
+    });
+  });
+
+  layout.fingerTips.forEach((oneBasedIndex, fingerIndex) => {
+    res[15 * 4 + 1 + fingerIndex * 3] = readHandGlovePoint(pressureData, oneBasedIndex);
+  });
+
+  layout.palmTopRows.forEach((row, rowIndex) => {
+    const startIndex = 75 + rowIndex * 15 + (layout.palmLeadingBlankCount || 0);
+    row.forEach((oneBasedIndex, colIndex) => {
+      res[startIndex + colIndex] = readHandGlovePoint(pressureData, oneBasedIndex);
+    });
+  });
+
+  layout.palm.forEach((oneBasedIndex, index) => {
+    res[75 + 2 * 15 + index] = readHandGlovePoint(pressureData, oneBasedIndex);
+  });
+
+  return res;
+}
+
+function mapHandGloveFullPacketModelMatrix(mappedData) {
+  const sourceData = [...mappedData];
+  while (sourceData.length < 195) {
+    sourceData.push(0);
+  }
+
+  for (let i = 4 * 15; i < 5 * 15; i++) {
+    sourceData[i] = sourceData[i] / 3;
+  }
+
+  const legacyData = [];
+  for (let i = 0; i < 5; i++) {
+    for (let j = 0; j < 15; j++) {
+      legacyData.push(sourceData[i * 15 + 14 - j]);
+    }
+  }
+
+  for (let i = 75 + 12 - 1; i >= 75; i--) {
+    legacyData.push(sourceData[i]);
+  }
+
+  for (let i = 0; i < 4; i++) {
+    for (let j = 0; j < 15; j++) {
+      legacyData.push(sourceData[75 + 12 + i * 15 + 14 - j]);
+    }
+  }
+
+  const handPointArr = [[6, 2], [6, 3], [6, 4], [3, 8], [3, 9], [3, 10], [3, 14], [3, 15], [3, 16], [3, 20], [3, 21], [3, 22], [10, 26], [10, 27], [10, 28], [7, 2], [7, 3], [7, 4], [4, 8], [4, 9], [4, 10], [4, 14], [4, 15], [4, 16], [4, 20], [4, 21], [4, 22], [11, 26], [11, 27], [11, 28], [8, 2], [8, 3], [8, 4], [5, 8], [5, 9], [5, 10], [5, 14], [5, 15], [5, 16], [5, 20], [5, 21], [5, 22], [12, 26], [12, 27], [12, 28], [9, 2], [9, 3], [9, 4], [6, 8], [6, 9], [6, 10], [6, 14], [6, 15], [6, 16], [6, 20], [6, 21], [6, 22], [13, 26], [13, 27], [13, 28], [13, 2], [13, 3], [13, 4], [13, 8], [13, 9], [13, 10], [13, 14], [13, 15], [13, 16], [13, 20], [13, 21], [13, 22], [17, 25], [17, 26], [17, 27], [17, 6], [17, 7], [17, 8], [17, 9], [17, 10], [17, 11], [17, 12], [17, 13], [17, 14], [17, 15], [17, 16], [17, 17], [19, 6], [19, 7], [19, 8], [19, 9], [19, 10], [19, 11], [19, 12], [19, 13], [19, 14], [19, 15], [19, 16], [19, 17], [19, 18], [19, 19], [19, 20], [21, 6], [21, 7], [21, 8], [21, 9], [21, 10], [21, 11], [21, 12], [21, 13], [21, 14], [21, 15], [21, 16], [21, 17], [21, 18], [21, 19], [21, 20], [23, 6], [23, 7], [23, 8], [23, 9], [23, 10], [23, 11], [23, 12], [23, 13], [23, 14], [23, 15], [23, 16], [23, 17], [23, 18], [23, 19], [23, 20], [25, 6], [25, 7], [25, 8], [25, 9], [25, 10], [25, 11], [25, 12], [25, 13], [25, 14], [25, 15], [25, 16], [25, 17], [25, 18], [25, 19], [25, 20]];
+  const modelData = new Array(32 * 32).fill(0);
+  handPointArr.forEach((point, index) => {
+    const [row, col] = point;
+    modelData[(31 - row) * 32 + col] = legacyData[index] || 0;
+    if (index >= 75) {
+      modelData[(31 - (row + 1)) * 32 + col] = legacyData[index] || 0;
+    }
+  });
+
+  return modelData;
+}
+
+function getHandGloveFullPacketSide(packetType, fallbackSide) {
+  if (packetType === 1) {
+    return 'right';
+  }
+  if (packetType === 2) {
+    return 'left';
+  }
+  return fallbackSide;
+}
+
+function parseHandGloveFullPacket(buffer, fallbackSide) {
+  const bytes = Array.from(buffer);
+  const pressureData = bytes.slice(2, 258);
+  const imuBytes = bytes.slice(258, 274);
+  const packetType = bytes[1];
+  const side = fallbackSide === 'right' ? 'right' : 'left';
+  const mappedData = mapHandGloveFullPacketPressure(pressureData, side);
+
+  return {
+    frameIndex: bytes[0],
+    packetType,
+    side,
+    pressureData,
+    imuBytes,
+    mappedData,
+  };
+}
+
+function handleHandGloveFullPacket(buffer, fallbackSide) {
+  const packet = parseHandGloveFullPacket(buffer, fallbackSide);
+  const realArr = [...packet.pressureData];
+  let newArr = [...packet.mappedData];
+  const outputSide = fallbackSide === 'right' ? 'right' : 'left';
+
+  if (outputSide === 'right') {
+    pointArr2 = [...packet.pressureData];
+    pointArr2zeroData = [...pointArr2];
+    newArr147_2 = [...newArr];
+
+    if (pointArr2zero.length) {
+      pointArr2 = pointArr2.map((a, index) => numLessZeroToZero(a - pointArr2zero[index]));
+    }
+
+    if (pointArr147zero_2.length) {
+      newArr = newArr.map((a, index) => numLessZeroToZero(a - pointArr147zero_2[index]));
+    }
+
+    const renderData = mapHandGloveFullPacketModelMatrix(newArr);
+
+    colOrSendData1(JSON.stringify({
+      backData: renderData,
+      realArr,
+      rawPressureData: pointArr2,
+      newArr147: newArr,
+      mappedArr195: newArr,
+      frameIndex: packet.frameIndex,
+      packetType: packet.packetType,
+      handSide: packet.side,
+      outputSide,
+      sitFlag: port1?.isOpen,
+      backFlag: port2?.isOpen,
+    }));
+    return;
+  }
+
+  pointArr = [...packet.pressureData];
+  pointArr1zeroData = [...pointArr];
+  newArr147 = [...newArr];
+
+  if (pointArr1zero.length) {
+    pointArr = pointArr.map((a, index) => numLessZeroToZero(a - pointArr1zero[index]));
+  }
+
+  if (pointArr147zero.length) {
+    newArr = newArr.map((a, index) => numLessZeroToZero(a - pointArr147zero[index]));
+  }
+
+  const renderData = mapHandGloveFullPacketModelMatrix(newArr);
+
+  colOrSendData(JSON.stringify({
+    sitData: renderData,
+    realArr,
+    rawPressureData: pointArr,
+    newArr147: newArr,
+    mappedArr195: newArr,
+    frameIndex: packet.frameIndex,
+    packetType: packet.packetType,
+    handSide: packet.side,
+    outputSide,
+    sitFlag: port1?.isOpen,
+    backFlag: port2?.isOpen,
+  }));
+}
+
 parser.on("data", function (data) {
   pointArr = new Array();
   let buffer = Buffer.from(data);
   newData = new Array();
   // console.log(buffer.length)
   if (nowDate < endDate) {
+    if (file === HAND_GLOVE_FULL_PACKET && buffer.length === HAND_GLOVE_FULL_PACKET_LENGTH) {
+      handleHandGloveFullPacket(buffer, 'left');
+      return;
+    }
+
     if (buffer.length === 1024) {
       for (var i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
@@ -3807,7 +4035,7 @@ parser.on("data", function (data) {
         }
         pointArr = mappedArr
         newArr = [...mappedArr]
-      } else if (file == 'hand0507' || file == 'hand0205' || file == 'handGlove115200' || file == 'Num3D') {
+      } else if (file == 'hand0507' || isHandGloveType(file) || file == 'Num3D') {
         // left
         // newArr = handVideoRealPoint_0506_3([...pointArr])
         newArr = handL([...pointArr])
@@ -4288,7 +4516,7 @@ function colOrSendData(jsonData) {
 
     db.run(
       insertQuery,
-      [(file.includes('hand0205') || file == 'handGlove115200' || file.includes('robot')) ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : file == 'footVideo' ? JSON.stringify([...JSON.parse(jsonData).realArr]) : JSON.stringify([...JSON.parse(jsonData).sitData]), timestamp, date],
+      [isHandStorageType(file) ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : file == 'footVideo' ? JSON.stringify([...JSON.parse(jsonData).realArr]) : JSON.stringify([...JSON.parse(jsonData).sitData]), timestamp, date],
       function (err) {
         if (err) {
           logger.error(err);
@@ -4317,6 +4545,11 @@ parser2.on("data", function (data) {
   let buffer = Buffer.from(data);
   if (nowDate < endDate) {
     console.log(buffer.length)
+    if (file === HAND_GLOVE_FULL_PACKET && buffer.length === HAND_GLOVE_FULL_PACKET_LENGTH) {
+      handleHandGloveFullPacket(buffer, 'right');
+      return;
+    }
+
     if (buffer.length === 1024) {
       for (var i = 0; i < buffer.length; i++) {
         pointArr2[i] = buffer.readUInt8(i);
@@ -4412,7 +4645,7 @@ parser2.on("data", function (data) {
         pointArr = [...firstBlueData1, ...lastBlueData1]
         const realArr1 = [...pointArr]
         let newArr1 = []
-        if (file == 'hand0507' || file == 'hand0205' || file == 'handGlove115200') {
+        if (file == 'hand0507' || isHandGloveType(file)) {
           newArr1 = handR(pointArr)
           pointArr = handRVideo1470506(pointArr)
         } else {
@@ -4464,7 +4697,7 @@ parser2.on("data", function (data) {
         newArr = footR(pointArr2)
         pointArr2 = footVideo1(pointArr2)
 
-      } else if (file == 'hand0507' || file == 'hand0205' || file == 'handGlove115200') {
+      } else if (file == 'hand0507' || isHandGloveType(file)) {
         newArr = handR(pointArr2)
 
         pointArr2 = handRVideo1470506(pointArr2)
@@ -4589,7 +4822,7 @@ function colOrSendData1(jsonData) {
 
     db1.run(
       insertQuery,
-      [(file.includes('hand0205') || file == 'handGlove115200' || file.includes('robot')) ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : file == 'footVideo' ? JSON.stringify([...JSON.parse(jsonData).realArr]) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
+      [isHandStorageType(file) ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : file == 'footVideo' ? JSON.stringify([...JSON.parse(jsonData).realArr]) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
       function (err) {
         if (err) {
           logger.error(err);
@@ -4827,7 +5060,7 @@ parser4.on("data", function (data) {
         newArr = footR(pointArr4)
         pointArr4 = footVideo1(pointArr4)
 
-      } else if (file == 'hand0507' || file == 'hand0205' || file == 'handGlove115200') {
+      } else if (file == 'hand0507' || isHandGloveType(file)) {
         newArr = handR(pointArr4)
 
         pointArr4 = handRVideo1470506(pointArr4)
@@ -4898,7 +5131,7 @@ function colOrSendData2(jsonData) {
 
     db2.run(
       insertQuery,
-      [(file.includes('hand0205') || file == 'handGlove115200' || file.includes('robot')) ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : file == 'footVideo' ? JSON.stringify([...JSON.parse(jsonData).realArr]) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
+      [isHandStorageType(file) ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : file == 'footVideo' ? JSON.stringify([...JSON.parse(jsonData).realArr]) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
       function (err) {
         if (err) {
           logger.error(err);

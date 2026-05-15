@@ -525,7 +525,7 @@ class Aside extends React.Component {
 
     render() {
         const { t, i18n } = this.props;
-        const isGlove = this.props.matrixName === 'hand0205' || this.props.matrixName === 'handGlove115200';
+        const isGlove = ['hand0205', 'handGlove115200', 'handGloveFullPacket'].includes(this.props.matrixName);
         const isGloveRemoteControl = isGlove && this.props.numMatrixFlag === 'normal';
         const dataArrCar = [
             {
