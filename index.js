@@ -37,7 +37,28 @@ let appUpdater = null;
 let viteProcess = null;  // Vite 子进程引用，用于退出时清理
 let staticServer = null; // 生产环境静态资源 HTTP 服务
 
+function focusMainWindow(win) {
+  if (!win || win.isDestroyed()) {
+    return false;
+  }
+
+  if (win.isMinimized()) {
+    win.restore();
+  }
+
+  if (!win.isVisible()) {
+    win.show();
+  }
+
+  win.focus();
+  return true;
+}
+
 const createWindow = () => {
+  if (focusMainWindow(mainWindow)) {
+    return mainWindow;
+  }
+
   mainWindow = new BrowserWindow({
     show: false,
     icon: path.join(__dirname, "logo.ico"),
@@ -49,6 +70,17 @@ const createWindow = () => {
       webSecurity: true,        // 启用 Web 安全策略
       backgroundThrottling: false, // 禁止息屏后节流 JS，保持 WebSocket 消息发送能力
     },
+  });
+
+  const currentWindow = mainWindow;
+  currentWindow.on("closed", () => {
+    if (appUpdater && typeof appUpdater.setMainWindow === "function") {
+      appUpdater.setMainWindow(null);
+    }
+
+    if (mainWindow === currentWindow) {
+      mainWindow = null;
+    }
   });
 
   mainWindow.maximize();
@@ -76,13 +108,19 @@ const createWindow = () => {
   // 初始化自动更新（仅在打包后生效）
   // ============================================================
   if (app.isPackaged) {
-    appUpdater = new AppUpdater(mainWindow, {
-      autoDownload: false,           // 不自动下载，让用户确认后再下载
-      autoInstallOnAppQuit: true,    // 退出时自动安装已下载的更新
-      checkInterval: 4 * 60 * 60 * 1000, // 每 4 小时自动检查一次
-    });
-    appUpdater.startAutoCheck();
+    if (!appUpdater) {
+      appUpdater = new AppUpdater(mainWindow, {
+        autoDownload: false,           // 不自动下载，让用户确认后再下载
+        autoInstallOnAppQuit: true,    // 退出时自动安装已下载的更新
+        checkInterval: 4 * 60 * 60 * 1000, // 每 4 小时自动检查一次
+      });
+      appUpdater.startAutoCheck();
+    } else {
+      appUpdater.setMainWindow(mainWindow);
+    }
   }
+
+  return mainWindow;
 };
 
 // ============================================================
@@ -577,7 +615,9 @@ app.whenReady().then(() => {
   createWindow();
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (!focusMainWindow(mainWindow)) {
+      createWindow();
+    }
   });
 });
 
@@ -601,4 +641,3 @@ app.on("before-quit", () => {
     }
   }
 });
-

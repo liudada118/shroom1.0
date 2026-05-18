@@ -104,31 +104,50 @@ const getSensorBaudRate = (sensorType) => {
   return 1000000;
 };
 
-const WINDOWS_ALLOWED_VENDOR_IDS = new Set(['1A86']);
+const WCH_ALLOWED_VENDOR_IDS = new Set(['1A86']);
+const WCH_ALLOWED_PRODUCT_IDS = new Set(['7523', '55D3']);
 
 function normalizeSerialIdentifier(value) {
   return String(value ?? '').trim().toUpperCase();
 }
 
-function isWindowsTargetSerialPort(port = {}) {
+function hasWchSerialSignature(port = {}) {
   const vendorId = normalizeSerialIdentifier(port.vendorId ?? port.vendorIdentifier);
+  const productId = normalizeSerialIdentifier(port.productId ?? port.productIdentifier);
   const pnpId = normalizeSerialIdentifier(port.pnpId);
-  const manufacturer = String(port.manufacturer ?? '').toLowerCase();
-  const friendlyName = String(port.friendlyName ?? '').toUpperCase();
+  const manufacturer = normalizeSerialIdentifier(port.manufacturer);
+  const friendlyName = normalizeSerialIdentifier(port.friendlyName);
+  const portPath = normalizeSerialIdentifier(port.path);
 
-  if (vendorId) {
-    return WINDOWS_ALLOWED_VENDOR_IDS.has(vendorId);
+  if (vendorId && WCH_ALLOWED_VENDOR_IDS.has(vendorId)) {
+    return true;
   }
 
   if (pnpId.includes('VID_1A86')) {
     return true;
   }
 
-  if (manufacturer.includes('wch')) {
+  if (WCH_ALLOWED_PRODUCT_IDS.has(productId) && portPath.includes('USBSERIAL')) {
+    return true;
+  }
+
+  if (portPath.includes('WCHUSBSERIAL')) {
+    return true;
+  }
+
+  if (manufacturer.includes('WCH')) {
     return true;
   }
 
   return friendlyName.includes('CH34') || friendlyName.includes('USB-SERIAL') || friendlyName.includes('USB-ENHANCED-SERIAL');
+}
+
+function isWindowsTargetSerialPort(port = {}) {
+  return hasWchSerialSignature(port);
+}
+
+function isMacTargetSerialPort(port = {}) {
+  return hasWchSerialSignature(port);
 }
 
 const getPort = (ports) => {
@@ -137,6 +156,12 @@ const getPort = (ports) => {
   if (process.platform === 'win32') {
     const filteredPorts = portList.filter(isWindowsTargetSerialPort);
     logger.info(`[SerialList] filter win32 whitelist matched ${filteredPorts.length}/${portList.length} port(s)`);
+    return filteredPorts;
+  }
+
+  if (process.platform === 'darwin') {
+    const filteredPorts = portList.filter(isMacTargetSerialPort);
+    logger.info(`[SerialList] filter darwin whitelist matched ${filteredPorts.length}/${portList.length} port(s)`);
     return filteredPorts;
   }
 
@@ -5242,41 +5267,21 @@ function normalizePetCareResult(data, systemKey) {
     if (simulator.breathRateQueue.length > 2) {
       simulator.breathRateQueue.shift();
     }
-    const queueSnapshot = [...simulator.breathRateQueue];
     const shouldRecompute =
       simulator.breathRateQueue.length === 2 &&
       simulator.breathRateQueue[0] !== simulator.breathRateQueue[1];
-    let action = 'reuse';
 
     if (!simulator.lastHeartRate) {
       heartRate = nextPetHeartRate(Number(effectiveBreathRate), simulator);
       simulator.lastHeartRate = heartRate;
-      action = 'init';
     } else if (shouldRecompute) {
       heartRate = nextPetHeartRate(Number(effectiveBreathRate), simulator);
       simulator.lastHeartRate = heartRate;
-      action = 'recompute';
     } else {
       heartRate = simulator.lastHeartRate;
     }
-    logger.info(`[${systemKey}] heart queue`, {
-      breath_rate: data?.breath_rate,
-      effective_breath_rate: effectiveBreathRate,
-      queue: queueSnapshot,
-      action,
-      heart_rate: heartRate,
-      petInBed,
-    });
   } else {
     resetPetCareHeartRateSimulatorState(runtime.heartRateSimulator);
-    logger.info(`[${systemKey}] heart queue`, {
-      breath_rate: data?.breath_rate,
-      effective_breath_rate: null,
-      queue: [],
-      action: 'reset',
-      heart_rate: 0,
-      petInBed,
-    });
   }
 
   return {

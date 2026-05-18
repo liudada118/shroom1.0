@@ -23,6 +23,14 @@ import os
 import platform
 import shutil
 
+
+def first_existing_path(candidates):
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
 def build():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     app_dir = os.path.join(script_dir, 'app')
@@ -54,17 +62,35 @@ def build():
     pet_care_binary = None
     pet_care_mini_binary = None
     if platform.system() == 'Windows':
-        candidate = os.path.join(pet_care_dir, 'pet_care_wrapper.cp311-win_amd64.pyd')
-        if os.path.exists(candidate):
-            pet_care_binary = candidate
-        else:
+        pet_care_binary = first_existing_path([
+            os.path.join(pet_care_dir, 'pet_care_wrapper.cp311-win_amd64.pyd'),
+        ])
+        if pet_care_binary is None:
+            candidate = os.path.join(pet_care_dir, 'pet_care_wrapper.cp311-win_amd64.pyd')
             print(f"璀﹀憡: 鎵句笉鍒?petCare 鍔ㄦ€佸簱 {candidate}")
-
-        mini_candidate = os.path.join(pet_care_dir, 'pet_care_wrappermini.cp311-win_amd64.pyd')
-        if os.path.exists(mini_candidate):
-            pet_care_mini_binary = mini_candidate
-        else:
+        pet_care_mini_binary = first_existing_path([
+            os.path.join(pet_care_dir, 'pet_care_wrappermini.cp311-win_amd64.pyd'),
+        ])
+        if pet_care_mini_binary is None:
+            mini_candidate = os.path.join(pet_care_dir, 'pet_care_wrappermini.cp311-win_amd64.pyd')
             print(f"璀﹀憡: 鎵句笉鍒?petCare mini 鍔ㄦ€佸簱 {mini_candidate}")
+    elif platform.system() == 'Darwin':
+        pet_care_binary = first_existing_path([
+            os.path.join(pet_care_dir, 'pet_care_wrapper.cpython-311-darwin.so'),
+        ])
+        if pet_care_binary is None:
+            candidate = os.path.join(pet_care_dir, 'pet_care_wrapper.cpython-311-darwin.so')
+            print(f"警告: 找不到 macOS petCare 动态库 {candidate}")
+        pet_care_mini_binary = first_existing_path([
+            os.path.join(pet_care_dir, 'people20_care_wrapper.cpython-311-darwin.so'),
+            os.path.join(pet_care_dir, 'pet_care_wrappermini.cpython-311-darwin.so'),
+        ])
+        if pet_care_mini_binary is None:
+            searched = [
+                os.path.join(pet_care_dir, 'people20_care_wrapper.cpython-311-darwin.so'),
+                os.path.join(pet_care_dir, 'pet_care_wrappermini.cpython-311-darwin.so'),
+            ]
+            print(f"警告: 找不到 macOS petCare mini 动态库 {searched}")
 
     args = [
         sys.executable, '-m', 'PyInstaller',

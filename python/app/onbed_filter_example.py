@@ -553,6 +553,34 @@ def load_extension_module_from_file(binary_filename, init_module_name):
         else:
             sys.modules.pop(init_module_name, None)
 
+
+def load_extension_module(binary_candidates, import_names=None, init_module_names=None):
+    """按候选模块名/文件名加载扩展模块，兼容不同平台和导出名。"""
+    import_names = import_names or []
+    init_module_names = init_module_names or []
+    errors = []
+
+    for import_name in import_names:
+        try:
+            return importlib.import_module(import_name)
+        except Exception as err:
+            errors.append(f"import {import_name}: {err}")
+
+    for binary_filename in binary_candidates:
+        try:
+            module_path = find_runtime_module_file(binary_filename)
+        except FileNotFoundError as err:
+            errors.append(str(err))
+            continue
+
+        for init_module_name in init_module_names:
+            try:
+                return load_extension_module_from_file(binary_filename, init_module_name)
+            except Exception as err:
+                errors.append(f"load {os.path.basename(module_path)} as {init_module_name}: {err}")
+
+    raise ImportError("; ".join(errors))
+
 def create_default_inputs():
     """
     创建默认输入参数（新版 API）
@@ -698,7 +726,18 @@ def ensure_pet_care_loaded():
         return _pet_care
 
     try:
-        _pet_care = importlib.import_module('pet_care_wrapper')
+        _pet_care = load_extension_module(
+            binary_candidates=[
+                'pet_care_wrapper.cp311-win_amd64.pyd',
+                'pet_care_wrapper.cpython-311-darwin.so',
+            ],
+            import_names=[
+                'pet_care_wrapper',
+            ],
+            init_module_names=[
+                'pet_care_wrapper',
+            ],
+        )
         _pet_care_import_err = None
         return _pet_care
     except Exception as err:
@@ -783,9 +822,21 @@ def ensure_pet_care_mini_loaded():
         return _pet_care_mini
 
     try:
-        _pet_care_mini = load_extension_module_from_file(
-            'pet_care_wrappermini.cp311-win_amd64.pyd',
-            'pet_care_wrapper',
+        _pet_care_mini = load_extension_module(
+            binary_candidates=[
+                'people20_care_wrapper.cpython-311-darwin.so',
+                'pet_care_wrappermini.cpython-311-darwin.so',
+                'pet_care_wrappermini.cp311-win_amd64.pyd',
+            ],
+            import_names=[
+                'people20_care_wrapper',
+                'pet_care_wrappermini',
+            ],
+            init_module_names=[
+                'people20_care_wrapper',
+                'pet_care_wrappermini',
+                'pet_care_wrapper',
+            ],
         )
         _pet_care_mini_import_err = None
         return _pet_care_mini
