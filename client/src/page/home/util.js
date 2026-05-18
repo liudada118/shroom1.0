@@ -2318,6 +2318,20 @@ export const sitTypeEvent = {
 
     // const press = Math.round(wsPointData.reduce((a, b) => a + b, 0)/10)
 
+  }, tempFullBed({ that, wsPointData, local }) {
+    if (that.state.numMatrixFlag == "numoriginal") {
+      that.com.current?.changeWsDataRaw([...wsPointData]);
+    } else if (that.state.numMatrixFlag == "num") {
+      that.com.current?.changeWsData(wsPointData);
+    } else {
+      that.com.current?.sitData({
+        wsPointData,
+      });
+
+      if (!that.state.local) {
+        that.com.current.chartReset()
+      }
+    }
   }, petCare({ that, wsPointData, compen, local }) {
     if (that.state.numMatrixFlag == "numoriginal") {
       that.com.current?.changeWsDataRaw([...wsPointData]);

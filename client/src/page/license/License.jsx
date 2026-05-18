@@ -55,6 +55,13 @@ const SENSOR_GROUPS = [
     ],
   },
   {
+    group: '定制',
+    icon: '⚙️',
+    items: [
+      { label: '温度全床系统', value: 'tempFullBed' },
+    ],
+  },
+  {
     group: '精密',
     icon: '🔬',
     items: [
@@ -143,6 +150,10 @@ const SENSOR_MODULES = {
     { value: 'numoriginal', label: '原始数据' },
   ],
   smallBed: [
+    { value: 'normal', label: '3D模型' },
+    { value: 'numoriginal', label: '原始数据' },
+  ],
+  tempFullBed: [
     { value: 'normal', label: '3D模型' },
     { value: 'numoriginal', label: '原始数据' },
   ],

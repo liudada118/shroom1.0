@@ -44,6 +44,7 @@ import MatCol from "../../components/three/matCol";
 import CarTq from "../../components/three/carTq";
 import Bed from "../../components/three/Bed";
 import SmallBed from "../../components/three/smallBed";
+import TempFullBed from "../../components/three/tempFullBed";
 import SmallM from "../../components/three/smallM";
 import SmallRect from "../../components/three/smallRect";
 import SmallShort from "../../components/three/Short";
@@ -376,7 +377,8 @@ const thrott1 = (fun) => {
 // ]
 const petCareMatrixArr = ['petCare', 'petCareMini']
 const isPetCareMatrix = (type) => petCareMatrixArr.includes(type)
-const bedArr = ['jqbed', ...petCareMatrixArr, 'xiyueReal1', 'smallBed', 'smallBed1']
+const tempFullBedMatrix = 'tempFullBed'
+const bedArr = ['jqbed', tempFullBedMatrix, ...petCareMatrixArr, 'xiyueReal1', 'smallBed', 'smallBed1']
 
 const initConfig = {
   bed: {
@@ -503,6 +505,9 @@ const getConfig = ({ sensorType, mode }) => {
 }
 
 const getDefaultModeForMatrix = (matrixName, currentMode = "normal") => {
+  if (matrixName === tempFullBedMatrix) {
+    return currentMode === "numoriginal" ? "numoriginal" : "normal";
+  }
   if (matrixName === "humanBody") {
     return currentMode === "numoriginal" ? "numoriginal" : "skin";
   }
@@ -678,7 +683,7 @@ class Home extends React.Component {
       portnameBack: "",
       portnameHead: '',
       matrixTitle: true,
-      allowedTypes: null,
+      allowedTypes: localStorage.getItem('allowedTypes') ? JSON.parse(localStorage.getItem('allowedTypes')) : null,
       local: false,
       dataArr: [],
       index: 0,
@@ -1392,7 +1397,7 @@ class Home extends React.Component {
       }
     }
 
-    if (jsonObject.file != null) {
+    if (jsonObject.file != null && jsonObject.selectFlag == null) {
       if (jsonObject.file === 'all') {
         this.setState({ matrixTitle: true })
       } else if (Array.isArray(jsonObject.file) && jsonObject.file.length) {
@@ -1422,8 +1427,28 @@ class Home extends React.Component {
     if (jsonObject.selectFlag != null) {
       // 全部授权：显示所有类型下拉框
       localStorage.setItem('matrixTitle', true)
-      localStorage.removeItem('allowedTypes')
-      this.setState({ matrixTitle: true, allowedTypes: null })
+      if (jsonObject.selectFlag === 'all') {
+        localStorage.removeItem('allowedTypes')
+        this.setState({ matrixTitle: true, allowedTypes: null })
+      } else {
+        const allowedTypes = Array.isArray(jsonObject.selectFlag)
+          ? jsonObject.selectFlag
+          : [jsonObject.selectFlag].filter(Boolean)
+        localStorage.setItem('allowedTypes', JSON.stringify(allowedTypes))
+        const nextState = { matrixTitle: true, allowedTypes }
+        if (allowedTypes.length && !allowedTypes.includes(this.state.matrixName)) {
+          const nextMatrixName = allowedTypes[0]
+          const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag)
+          Object.assign(nextState, {
+            matrixName: nextMatrixName,
+            numMatrixFlag: nextMode,
+            ...getConfig({ sensorType: nextMatrixName, mode: nextMode }),
+          })
+          localStorage.setItem('file', nextMatrixName)
+          this.wsSendObj({ file: nextMatrixName })
+        }
+        this.setState(nextState)
+      }
     }
 
     if (jsonObject.backFlag != null) {
@@ -1501,6 +1526,13 @@ class Home extends React.Component {
 
     if (jsonObject.petCareMini != null) {
       this.data.current?.changeData(jsonObject.petCareMini);
+    }
+
+    if (jsonObject.temperatureData != null) {
+      this.data.current?.changeData({
+        temperatureData: jsonObject.temperatureData,
+        temperatureAvg: jsonObject.temperatureAvg,
+      });
     }
 
     if (jsonObject.sitData != null) {
@@ -3641,7 +3673,7 @@ class Home extends React.Component {
 
           {this.state.numMatrixFlag == "num" &&
             (this.state.matrixName == "foot" ||
-              this.state.matrixName == "hand" || this.state.matrixName == "carCol" || this.state.matrixName == "jqbed" || ['petCare', 'petCareMini'].includes(this.state.matrixName) ||
+              this.state.matrixName == "hand" || this.state.matrixName == "carCol" || this.state.matrixName == "jqbed" || this.state.matrixName == tempFullBedMatrix || ['petCare', 'petCareMini'].includes(this.state.matrixName) ||
               this.state.carState == "back" ||
               this.state.carState == "sit") ? (
             <Num ref={this.com} matrixName={this.state.matrixName} />
@@ -3715,7 +3747,7 @@ class Home extends React.Component {
                       changeSelect={this.changeSelect} />
                   </CanvasCom>
                   :
-                  this.state.numMatrixFlag == "numoriginal" && [...tactileGloveTypes, 'robot1', 'footVideo', 'robotSY', 'robotLCF', 'normal', 'smallBed', 'jqbed', 'petCare', 'petCareMini', 'daliegu', 'smallSample'].includes(this.state.matrixName) ?
+                  this.state.numMatrixFlag == "numoriginal" && [...tactileGloveTypes, 'robot1', 'footVideo', 'robotSY', 'robotLCF', 'normal', 'smallBed', 'jqbed', tempFullBedMatrix, 'petCare', 'petCareMini', 'daliegu', 'smallSample'].includes(this.state.matrixName) ?
                   <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
                     <Num2DOriginal ref={this.com}
                       matrixName={this.state.matrixName}
@@ -4346,6 +4378,20 @@ class Home extends React.Component {
                       <CanvasCom matrixName={this.state.matrixName}>
                         <SmallBed
                           ref={this.com}
+                          data={this.data}
+                          local={this.state.local}
+                          handleChartsBody={this.handleChartsBody.bind(this)}
+                          handleChartsBody1={this.handleChartsBody1.bind(this)}
+                          changeSelect={this.changeSelect}
+                        />
+                      </CanvasCom>
+                    ) : this.state.matrixName == tempFullBedMatrix ? (
+                      <CanvasCom matrixName={this.state.matrixName}>
+                        <TempFullBed
+                          ref={this.com}
+                          matrixWidth={15}
+                          matrixHeight={12}
+                          xStretch={1}
                           data={this.data}
                           local={this.state.local}
                           handleChartsBody={this.handleChartsBody.bind(this)}

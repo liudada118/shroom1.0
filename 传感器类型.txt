@@ -5,6 +5,7 @@ const sensorArr = [
   { label: '手部检测', value: 'hand' },
   { label: '汽车', value: 'car' },
   { label: '小床监测', value: 'jqbed' },
+  { label: '温度全床系统', value: 'tempFullBed' },
   { label: '小床褥采集', value: 'matCol' },
   { label: '小床睡姿采集', value: 'matColPos' },
   { label: '车载传感器', value: 'carCol' },

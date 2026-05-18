@@ -259,6 +259,8 @@ class Aside extends React.Component {
             bed_exit_flag: 0,
             pressure_coefficient: '--',
             petInBed: null,
+            temperatureData: [],
+            temperatureAvg: '--',
         }
         this.canvas = React.createRef()
         this._petHeartRateSimulator = createPetHeartRateSimulatorState()
@@ -494,7 +496,9 @@ class Aside extends React.Component {
             normalizedObj.quality !== undefined ||
             normalizedObj.bed_exit_flag !== undefined ||
             normalizedObj.pressure_coefficient !== undefined ||
-            normalizedObj.petInBed !== undefined;
+            normalizedObj.petInBed !== undefined ||
+            normalizedObj.temperatureData !== undefined ||
+            normalizedObj.temperatureAvg !== undefined;
 
         if (hasRealtimeDetectionData) {
             this._lastDataTime = now;
@@ -607,6 +611,9 @@ class Aside extends React.Component {
             : this.state.pressure_coefficient != null && this.state.pressure_coefficient !== '--'
                 ? Number(this.state.pressure_coefficient).toFixed(2)
                 : '--'
+        const temperatureValues = Array.isArray(this.state.temperatureData) ? this.state.temperatureData : []
+        const temperatureAvg = Number(this.state.temperatureAvg)
+        const temperatureAvgText = Number.isFinite(temperatureAvg) ? temperatureAvg.toFixed(1) : '--'
 
         return (
             <div className='aside'>
@@ -653,6 +660,29 @@ class Aside extends React.Component {
                 </div> : ''}
 
                 {/* jqbed 健康监测面板 */}
+                {this.props.matrixName === 'tempFullBed' ? (
+                    <div className="asideContent firstAside">
+                        <h2 className="asideTitle">温度</h2>
+                        <span className='pressData'>{temperatureAvgText}</span> <span style={{ color: '#999' }}>℃</span>
+                        <div className='pressTitle standardColor'>Average Temperature</div>
+                        {temperatureValues.map((value, index) => {
+                            const numberValue = Number(value)
+                            return (
+                                <div className='dataItem' key={`temperature-${index}`}>
+                                    <div className='dataItemCircle'>
+                                        <div className='circleItem' style={{ backgroundColor: '#FFA63F' }}></div>
+                                        <div>{`温度${index + 1}`}</div>
+                                    </div>
+                                    <div className='dataIteminfo'>
+                                        <div className='standardColor'>{`Row ${14 + index}, Col 20`}</div>
+                                        <div>{Number.isFinite(numberValue) ? numberValue.toFixed(1) : '--'} <span style={{ color: '#999' }}>℃</span></div>
+                                    </div>
+                                </div>
+                            )
+                        })}
+                    </div>
+                ) : null}
+
                 {['petCare', 'petCareMini'].includes(this.props.matrixName) ?
                     <>
                         <div className="asideContent firstAside">

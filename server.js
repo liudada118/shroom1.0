@@ -54,6 +54,7 @@ const {
   wowhead,
   xiyueReal1,
   jqbed,
+  tempFullBed,
   carCol,
   newHand,
   gloves,
@@ -86,6 +87,8 @@ const { initDb: _initDbFromModule } = require('./server/dbManager');
 const HAND_GLOVE_FULL_PACKET = 'handGloveFullPacket';
 const HAND_GLOVE_TYPES = ['hand0205', 'handGlove115200', HAND_GLOVE_FULL_PACKET];
 const HAND_GLOVE_FULL_PACKET_LENGTH = 274;
+const TEMP_FULL_BED_TYPE = 'tempFullBed';
+const TEMP_FULL_BED_PRESSURE_THRESHOLD = 20;
 const isHandGloveType = (sensorType) => HAND_GLOVE_TYPES.includes(sensorType);
 const isHandStorageType = (sensorType = '') => isHandGloveType(sensorType) || String(sensorType).includes('robot');
 const getSensorBaudRate = (sensorType) => {
@@ -148,6 +151,79 @@ function isWindowsTargetSerialPort(port = {}) {
 
 function isMacTargetSerialPort(port = {}) {
   return hasWchSerialSignature(port);
+}
+
+function parseStoredFrameData(row) {
+  if (!row?.data) return null;
+  try {
+    return JSON.parse(row.data);
+  } catch (error) {
+    return null;
+  }
+}
+
+function getStoredSitData(row) {
+  const storedData = parseStoredFrameData(row);
+  if (Array.isArray(storedData)) return storedData;
+  if (Array.isArray(storedData?.sitData)) return storedData.sitData;
+  return [];
+}
+
+function getHistoryPressureData(row) {
+  const storedData = parseStoredFrameData(row);
+  if (Array.isArray(storedData)) return storedData;
+  if (Array.isArray(storedData?.sitData)) return storedData.sitData;
+  if (Array.isArray(storedData?.backData)) return storedData.backData;
+  return [];
+}
+
+function normalizeHistoryPressureData(row, file = '') {
+  const data = getHistoryPressureData(row);
+  const pressureData = isHandStorageType(file) && data.length > 256 ? data.slice(0, 256) : data;
+  const normalizedData = pressureData.map((value) => {
+    const numberValue = Number(value);
+    return Number.isFinite(numberValue) ? numberValue : 0;
+  });
+  if (file !== TEMP_FULL_BED_TYPE) return normalizedData;
+  return normalizedData.map((value) => value < TEMP_FULL_BED_PRESSURE_THRESHOLD ? 0 : value);
+}
+
+function normalizeTempFullBedPlaybackPressureArray(data, frame = {}) {
+  if (!Array.isArray(data)) return [];
+  const pressureData = frame.matrixOrientation === 'transposed' || (frame.matrixWidth === 12 && frame.matrixHeight === 15)
+    ? data.map((_, index) => {
+      const row = Math.floor(index / 15);
+      const col = index % 15;
+      return data[col * 12 + row];
+    })
+    : data;
+  return pressureData.map((value) => {
+    const numberValue = Number(value);
+    if (!Number.isFinite(numberValue) || numberValue < TEMP_FULL_BED_PRESSURE_THRESHOLD) return 0;
+    return numberValue;
+  });
+}
+
+function buildTempFullBedPlaybackPayload(row, extra = {}) {
+  const storedData = parseStoredFrameData(row);
+  const frame = Array.isArray(storedData) ? { sitData: storedData } : (storedData || {});
+  const sitData = normalizeTempFullBedPlaybackPressureArray(frame.sitData, frame);
+  const rawSitData = normalizeTempFullBedPlaybackPressureArray(frame.rawSitData, frame);
+  return {
+    sitData,
+    rawSitData: rawSitData.length ? rawSitData : undefined,
+    matrixWidth: 15,
+    matrixHeight: 12,
+    matrixOrientation: 'row-major',
+    realArr: Array.isArray(frame.realArr) ? frame.realArr : undefined,
+    pressureThreshold: frame.pressureThreshold || TEMP_FULL_BED_PRESSURE_THRESHOLD,
+    temperatureRawData: Array.isArray(frame.temperatureRawData) ? frame.temperatureRawData : [],
+    temperatureData: Array.isArray(frame.temperatureData) ? frame.temperatureData : [],
+    temperatureAvg: frame.temperatureAvg,
+    temperatureK: frame.temperatureK,
+    time: row?.timestamp,
+    ...extra,
+  };
 }
 
 const getPort = (ports) => {
@@ -441,17 +517,10 @@ function getHistorySeries({ sitRows = [], backRows = [], start = 0, end = null, 
   const press = [];
   const area = [];
   const time = [];
-  // hand/robot 类型存储格式为 [256压力数据, 4四元数]，需要截取前256个
-  const needSlice = isHandStorageType(file);
 
   for (let i = rangeStart; i < rangeEnd; i++) {
-    let sitData = hasSit && safeSitRows[i] ? JSON.parse(safeSitRows[i].data) : null;
-    let backData = hasBack && safeBackRows[i] ? JSON.parse(safeBackRows[i].data) : null;
-    // 对 hand/robot 类型截取前256个压力数据，去掉四元数
-    if (needSlice) {
-      if (sitData && sitData.length > 256) sitData = sitData.slice(0, 256);
-      if (backData && backData.length > 256) backData = backData.slice(0, 256);
-    }
+    const sitData = hasSit && safeSitRows[i] ? normalizeHistoryPressureData(safeSitRows[i], file) : null;
+    const backData = hasBack && safeBackRows[i] ? normalizeHistoryPressureData(safeBackRows[i], file) : null;
     const sitTotalValue = sitData ? sitData.reduce((a, b) => a + b, 0) : 0;
     const backTotalValue = backData ? backData.reduce((a, b) => a + b, 0) : 0;
     const sitAreaValue = sitData ? sitData.filter((a) => a > 10).length : 0;
@@ -642,13 +711,26 @@ function shutdownServer() {
 
 const defauleFile = 'hand0205'
 let date, sysStartTime, file = defauleFile, selectFlag
+function getLicenseSelectFlag(licenseFile) {
+  if (licenseFile === 'all') return 'all';
+  if (Array.isArray(licenseFile)) return licenseFile.filter(Boolean);
+  if (licenseFile) return [licenseFile];
+  return 'all';
+}
+
+function getDefaultFileForLicense(licenseFile, fallback = defauleFile) {
+  if (licenseFile === 'all') return fallback;
+  if (Array.isArray(licenseFile)) return licenseFile.find(Boolean) || fallback;
+  return licenseFile || fallback;
+}
+
 if (fs.existsSync(nameTxt)) {
   try {
     const dateRes = fs.readFileSync(nameTxt, 'utf8');
     const parsedData = JSON.parse(module2.decryptStr(dateRes));
     endDate = parseFloat(parsedData.date);
-    selectFlag = 'all';
-    file = defauleFile;
+    selectFlag = getLicenseSelectFlag(parsedData.file);
+    file = getDefaultFileForLicense(parsedData.file);
     // 鏍规嵁 file 绫诲瀷璁剧疆娉㈢壒鐜?
     baudRate = getSensorBaudRate(file);
   } catch (err) {
@@ -964,8 +1046,9 @@ module.exports = {
               }
             });
 
-             const parsedLicense = JSON.parse(dateRes);
-            selectFlag = 'all';
+            const parsedLicense = JSON.parse(dateRes);
+            selectFlag = getLicenseSelectFlag(parsedLicense.file);
+            file = getDefaultFileForLicense(parsedLicense.file, file);
             // 支持 moduleConfig 字段：各传感器类型的默认功能模块配置
             // { [sensorValue]: numMatrixFlag }
             const rawModuleConfig = parsedLicense.moduleConfig || null;
@@ -2181,7 +2264,9 @@ module.exports = {
                 }
 
               } else {
-                if (file === 'smallBed') {
+                if (file === TEMP_FULL_BED_TYPE) {
+                  jsonData = JSON.stringify(buildTempFullBedPlaybackPayload(localData[value]));
+                } else if (file === 'smallBed') {
                   // console.log(JSON.stringify(pressSmallBed({ arr: JSON.parse(localData[value]?.data) })))
                   jsonData = JSON.stringify({
                     // sitData: pressSmallBed({ arr: JSON.parse(localData[value]?.data) }),
@@ -2223,7 +2308,9 @@ module.exports = {
                 // console.log(interval)
                 // console.log(localData,nowIndex)
                 let jsonData
-                if (file === 'smallBed') {
+                if (file === TEMP_FULL_BED_TYPE) {
+                  jsonData = JSON.stringify(buildTempFullBedPlaybackPayload(localData[nowIndex], { index: nowIndex }));
+                } else if (file === 'smallBed') {
                   jsonData = JSON.stringify({
                     // sitData: pressSmallBed({ arr: JSON.parse(localData[nowIndex]?.data) }),
                     sitData: localData[nowIndex]?.data,
@@ -2407,7 +2494,12 @@ module.exports = {
                     }
                   }
 
-                  if (file === 'smallBed') {
+                  if (file === TEMP_FULL_BED_TYPE) {
+                    jsonData = JSON.stringify(buildTempFullBedPlaybackPayload(localData[nowIndex], {
+                      index: nowIndex,
+                      backFlag: localDataBack.length > 0,
+                    }));
+                  } else if (file === 'smallBed') {
                     jsonData = JSON.stringify({
                       // sitData: pressSmallBed({ arr: JSON.parse(localData[nowIndex]?.data) }),
                       sitData: localData[nowIndex]?.data,
@@ -2589,10 +2681,14 @@ module.exports = {
               //     newsit.push(JSON.parse(localData[i].data)[x * 32 + y])
               //   }
               // }
-              if (file === 'smallBed') {
+              if (file === 'smallBed' || file === TEMP_FULL_BED_TYPE) {
+                const storedSitData = file === TEMP_FULL_BED_TYPE
+                  ? buildTempFullBedPlaybackPayload(localData[i]).sitData
+                  : getStoredSitData(localData[i]);
+                const storedWidth = file === TEMP_FULL_BED_TYPE ? 15 : 32;
                 for (let x = sitArr[0]; x < sitArr[1]; x++) {
                   for (let y = sitArr[2]; y < sitArr[3]; y++) {
-                    newsit.push(JSON.parse(localData[i].data)[x * 32 + y]);
+                    newsit.push(storedSitData[x * storedWidth + y]);
                   }
                 }
               } else {
@@ -2765,8 +2861,8 @@ module.exports = {
 
                   if (!rows.length) return;
                   for (var i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
-                    let sitData = JSON.parse(rows[i][`data`]);
-                    let realData = JSON.parse(rows[i][`data`]);
+                    let sitData = normalizeHistoryPressureData(rows[i], file);
+                    let realData = sitData;
                     // sitData = zeroLine(sitData,32,32)
                     // sitData = pressSmallBed({ arr: sitData })
 
@@ -2992,7 +3088,12 @@ module.exports = {
                   for (var i = historyArr[0], j = 0; i < historyArr[1] - 1; i++, j++) {
                     const rawData = JSON.parse(rows[i][`data`]);
                     let pressureData, rotateData;
-                    if (isHandType) {
+                    let tempFullBedPayload = null;
+                    if (file === TEMP_FULL_BED_TYPE) {
+                      tempFullBedPayload = buildTempFullBedPlaybackPayload(rows[i]);
+                      pressureData = tempFullBedPayload.sitData;
+                      rotateData = [];
+                    } else if (isHandType) {
                       // 鍏煎鏂版棫鏁版嵁鏍煎紡
                       if (rawData.length >= 260) {
                         // 鏂扮増锛氬墠256鏄師濮嬪帇鍔涙暟鎹紝鍚?鏄洓鍏冩暟
@@ -3004,7 +3105,7 @@ module.exports = {
                         rotateData = rawData.slice(rawData.length - 4);
                       }
                     } else {
-                      pressureData = rawData;
+                      pressureData = Array.isArray(rawData) ? rawData : getHistoryPressureData(rows[i]);
                       rotateData = [];
                     }
                     console.log(pressureData.length)
@@ -3029,6 +3130,9 @@ module.exports = {
                       index: (j / 12).toFixed(2),
                       max,
                       rotate: rotateData.length ? JSON.stringify(rotateData) : '',
+                      temperatureData: tempFullBedPayload ? JSON.stringify(tempFullBedPayload.temperatureData.map((value) => Number(value).toFixed(1))) : '',
+                      temperatureAvg: tempFullBedPayload?.temperatureAvg != null ? Number(tempFullBedPayload.temperatureAvg).toFixed(1) : '',
+                      temperatureK: tempFullBedPayload?.temperatureK ?? '',
                     };
                     csvWriteData.push(newData);
                   }
@@ -3050,6 +3154,13 @@ module.exports = {
                   ];
                   if (isHandType) {
                     csvHeaders.push({ id: "rotate", title: "quaternion" });
+                  }
+                  if (file === TEMP_FULL_BED_TYPE) {
+                    csvHeaders.push(
+                      { id: "temperatureData", title: "temperatureCelsius" },
+                      { id: "temperatureAvg", title: "temperatureAvg" },
+                      { id: "temperatureK", title: "temperatureK" },
+                    );
                   }
 
                   const csvWriter = createCsvWriter({
@@ -3711,6 +3822,10 @@ parser.on("data", function (data) {
         pointArr = xiyueReal1(pointArr)
       } else if (file === 'jqbed') {
         pointArr = jqbed(pointArr)
+      } else if (file === 'tempFullBed') {
+        const tempFullBedFrame = tempFullBed(pointArr)
+        pointArr = tempFullBedFrame.sitData
+        newData = tempFullBedFrame
       } else if (file === 'carCol') {
         pointArr = carCol(pointArr)
       } else if (file === 'newHand') {
@@ -3761,7 +3876,22 @@ parser.on("data", function (data) {
 
       let jsonData;
 
-      if (isCar(file)) {
+      if (file === 'tempFullBed') {
+        jsonData = JSON.stringify({
+          sitData: pointArr,
+          rawSitData: newData.rawSitData,
+          matrixWidth: newData.matrixWidth,
+          matrixHeight: newData.matrixHeight,
+          matrixOrientation: newData.matrixOrientation,
+          realArr: newData.realArr,
+          pressureThreshold: newData.pressureThreshold,
+          temperatureRawData: newData.temperatureRawData,
+          temperatureData: newData.temperatureData,
+          temperatureAvg: newData.temperatureAvg,
+          temperatureK: newData.temperatureK,
+          hz: colHZ,
+        });
+      } else if (isCar(file)) {
         jsonData = JSON.stringify({
           sitData: sitDataToSend,
           sitFlag: port1?.isOpen,
@@ -4514,9 +4644,32 @@ function colOrSendData(jsonData) {
     //   }
     // );
 
+    const frameToStore = JSON.parse(jsonData);
+    const dataToStore = file === TEMP_FULL_BED_TYPE
+      ? JSON.stringify({
+        sitData: frameToStore.sitData,
+        rawSitData: frameToStore.rawSitData,
+        matrixWidth: frameToStore.matrixWidth,
+        matrixHeight: frameToStore.matrixHeight,
+        matrixOrientation: frameToStore.matrixOrientation,
+        realArr: frameToStore.realArr,
+        pressureThreshold: frameToStore.pressureThreshold,
+        temperatureRawData: frameToStore.temperatureRawData,
+        temperatureData: frameToStore.temperatureData,
+        temperatureAvg: frameToStore.temperatureAvg,
+        temperatureK: frameToStore.temperatureK,
+      })
+      : isHandStorageType(file)
+        ? JSON.stringify([...frameToStore.realArr, ...(frameToStore.rotate || [])])
+        : file == 'smallBed'
+          ? JSON.stringify(realArr)
+          : file == 'footVideo'
+            ? JSON.stringify([...frameToStore.realArr])
+            : JSON.stringify([...frameToStore.sitData]);
+
     db.run(
       insertQuery,
-      [isHandStorageType(file) ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : file == 'footVideo' ? JSON.stringify([...JSON.parse(jsonData).realArr]) : JSON.stringify([...JSON.parse(jsonData).sitData]), timestamp, date],
+      [dataToStore, timestamp, date],
       function (err) {
         if (err) {
           logger.error(err);

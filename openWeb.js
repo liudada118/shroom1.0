@@ -5,6 +5,22 @@ const path = require("path");
 const { exec } = require("child_process");
 const { pressSmallBed } = require("./utilMatrix");
 const { handLArr } = require("./util/constant");
+
+const TEMP_FULL_BED_TEMPERATURE_K = Number(process.env.TEMP_FULL_BED_TEMPERATURE_K || 1);
+const TEMP_FULL_BED_PRESSURE_THRESHOLD = 20;
+
+function convertTempFullBedTemperature(adcRaw, k = TEMP_FULL_BED_TEMPERATURE_K) {
+  const raw = Number(adcRaw) || 0;
+  const coefficient = Number.isFinite(Number(k)) ? Number(k) : 1;
+  return ((10 / 6) * raw + (2 / 3)) * coefficient;
+}
+
+function normalizeTempFullBedPressure(value) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue) || numberValue < TEMP_FULL_BED_PRESSURE_THRESHOLD) return 0;
+  return numberValue;
+}
+
 module.exports = {
   openWeb: function ({ hostname, port }) {
     const server = http.createServer((req, res) => {
@@ -849,6 +865,53 @@ module.exports = {
     wsPointData = wsPointData.concat(b);
     // wsPointData = press6(wsPointData, 32, 32, 'col')
     return wsPointData
+  },
+  tempFullBed(arr) {
+    const ordered = [...arr];
+    for (let i = 0; i < 8; i++) {
+      for (let j = 0; j < 32; j++) {
+        [ordered[i * 32 + j], ordered[(14 - i) * 32 + j]] = [
+          ordered[(14 - i) * 32 + j],
+          ordered[i * 32 + j],
+        ];
+      }
+    }
+    const shiftedRows = ordered.splice(0, 15 * 32);
+    ordered.push(...shiftedRows);
+
+    const pointRows = [20, 31];
+    const pointCols = [[13, 19], [21, 28]];
+    const pointColIndexes = pointCols.flatMap(([startCol, endCol]) => {
+      const indexes = [];
+      for (let col = startCol; col <= endCol; col++) indexes.push(col);
+      return indexes;
+    });
+    const temperatureRows = [14, 15, 16];
+    const temperatureCol = 20;
+    const basePointData = [];
+
+    for (let row = pointRows[0]; row <= pointRows[1]; row++) {
+      pointColIndexes.forEach((col) => {
+        basePointData.push(normalizeTempFullBedPressure(ordered[row * 32 + col]));
+      });
+    }
+
+    const temperatureRawData = temperatureRows.map((row) => ordered[row * 32 + temperatureCol] || 0);
+    const temperatureData = temperatureRawData.map((value) => convertTempFullBedTemperature(value));
+
+    return {
+      sitData: basePointData,
+      rawSitData: basePointData,
+      matrixWidth: 15,
+      matrixHeight: 12,
+      matrixOrientation: 'row-major',
+      realArr: ordered,
+      pressureThreshold: TEMP_FULL_BED_PRESSURE_THRESHOLD,
+      temperatureRawData,
+      temperatureData,
+      temperatureAvg: temperatureData.reduce((sum, value) => sum + value, 0) / temperatureData.length,
+      temperatureK: TEMP_FULL_BED_TEMPERATURE_K,
+    };
   },
   smallBedReal(wsPointData) {
 

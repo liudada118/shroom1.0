@@ -12,6 +12,7 @@ const ALL_SENSOR_TYPES = [
   'fast256', 'fast1024', 'sofa', 'eye', 'daliegu',
   'yanfeng10', 'foot', 'carQX', 'volvo', 'car', 'car10',
   'jqbed', 'petCare', 'petCareMini', 'matCol', 'matColPos', 'carCol', 'newHand',
+  'tempFullBed',
   'smallBed', 'xiyueReal1', 'gloves', 'gloves1', 'gloves2',
   'hand0205Point', 'hand0205Point147', 'ware', 'robot',
   'handVideo', 'handVideo1', 'bed1616', 'footVideo256',

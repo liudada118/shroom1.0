@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-05-08
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-05-18
 
 ## 1. 项目概述
 
@@ -309,6 +309,37 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-05-18 | Codex | 密钥默认系统修正 | `server.js` 在读取或更换非 all 密钥时将当前 `file` 设为密钥授权列表第一个系统；`Home.jsx` 对同时包含 `file/selectFlag` 的授权消息由 `selectFlag` 统一切换，避免默认展示到密钥外系统 |
+| 2026-05-18 | Codex | 温度全床 CSV 温度格式 | `server.js` 的温度全床 CSV 导出将 `temperatureData` 和 `temperatureAvg` 格式化为 1 位小数，实时展示和落库数据不变 |
+| 2026-05-18 | Codex | Windows 换密钥系统列表刷新 | `server.js` 恢复从密钥 `file` 字段生成 `selectFlag`，`Home.jsx` 根据 `selectFlag` 写入并恢复 `allowedTypes`，`Title.jsx` 按 `allowedTypes` 过滤系统下拉；新密钥不包含当前系统时自动切到第一个授权系统 |
+| 2026-05-18 | Codex | 温度全床 CSV 导出温度 | `server.js` 的温度全床 CSV 导出在压力矩阵外追加公式转换后的 `temperatureData`、`temperatureAvg` 和 `temperatureK`，不导出原始温度 ADC |
+| 2026-05-18 | Codex | 温度全床 3D 行优先铺点修正 | `tempFullBed.jsx` 内部改为按 `lineInterp()` 输出的行优先顺序铺点，坐标使用 `x=列/z=行`，并同步修正 `bigArrg1New` 扩展索引和列向曲线统计索引，避免 3D 点图行内数据不连续 |
+| 2026-05-18 | Codex | 温度全床 3D 取消额外处理 | `util.js` 的 `tempFullBed` 3D 分支取消转置处理，3D 点图直接使用后端 `12行x15列` 原始矩阵；`Home.jsx` 传入 `matrixWidth=15/matrixHeight=12`，`tempFullBed.jsx` 使用列向 x2、行向 x4 插值 |
+| 2026-05-18 | Codex | 温度全床 3D 数据转置 | `util.js` 中 `tempFullBed` 仅在 3D 点图分支把原始 `12行x15列` row-major 数据转置为点图入参需要的 `15行x12列`，原始 2D 数字展示继续使用未转置数据 |
+| 2026-05-18 | Codex | 温度全床 3D 插值系数对调 | `tempFullBed.jsx` 在 3D 点图入参调整为 `matrixWidth=12/matrixHeight=15` 后，同步将插值系数改为 `sitInterp=4/sitInterp1=2`，即 12 方向插值 4 倍、15 方向插值 2 倍 |
+| 2026-05-18 | Codex | 温度全床导出与点图方向调整 | `server.js` 下载 CSV 的通用导出分支对 `tempFullBed` 使用回放载荷中的 `sitData` 作为压力数组，避免对象执行 `reduce()`；`Home.jsx` 中温度全床 3D 点图入参调整为 `matrixWidth=12/matrixHeight=15` |
+| 2026-05-18 | Codex | 温度全床矩阵方向重置 | `openWeb.tempFullBed()` 重新固定为先走小床检测线序，再抽取行 `20-31`、列 `13-19/21-28`，直接输出 `12行x15列` row-major 压力矩阵；前端矩阵配置和 3D 组件同步为 `matrixWidth=15/matrixHeight=12`，3D 按 `12行x4`、`15列x2` 插值 |
+| 2026-05-18 | Codex | 温度全床压力矩阵阈值 | `openWeb.tempFullBed()` 对温度全床压力矩阵增加 `<20` 清零处理，温度 ADC 点仍从原始线序数据中读取；`server.js` 回放旧历史帧时也按同一阈值输出和统计 |
+| 2026-05-18 | Codex | 温度全床回放历史兼容 | `server.js` 的历史统计解析新增 `normalizeHistoryPressureData()`，兼容温度全床新对象存储格式 `{ sitData, temperatureData, ... }` 和旧数组格式，避免回放统计时对对象执行 `reduce()` |
+| 2026-05-18 | Codex | 温度全床原始矩阵展示 | `Num2DOriginal` 中 `tempFullBed` 的原始数字矩阵展示改为 `12行x15列`，即 `width=15/height=12`；3D 点图插值链路保持 `12*4/15*2` 不变 |
+| 2026-05-18 | Codex | 温度全床 3D 插值倍率 | `tempFullBed.jsx` 的 3D 点图插值倍率调整为 `12` 维 `x4`、`15` 维 `x2`，在 `12x15` 展示矩阵上生成 `48x30` 点图网格 |
+| 2026-05-18 | Codex | 温度全床链路重置 | `openWeb.tempFullBed()` 恢复先执行小床检测线序，再按行 `20-31`、列 `13-19/21-28` 抽取 `12x15` 压力矩阵，并在后端转置为前端展示用 `15行x12列`；温度继续取线序后的第 `14/15/16` 行第 `20` 列 |
+| 2026-05-18 | Codex | 温度全床 12x15 展示 | 前端 `rotateTempFullBedMatrix90()` 改为按后端原始 `15x12` 读取并旋转输出 `12x15` 展示矩阵；`Home`、`Num2DOriginal` 和 `SENSOR_MATRIX_MAP` 同步切换到 `12x15` |
+| 2026-05-18 | Codex | 温度全床前端矩阵旋转 | `tempFullBed` 后端继续保持原始抽取，前端 `sitTypeEvent.tempFullBed` 新增 `rotateTempFullBedMatrix90()`，按 `12x15` 源矩阵顺时针旋转为 `15x12` 展示矩阵，使原 12 列变成行后再下发给 2D 数字和 3D 点图 |
+| 2026-05-18 | Codex | 温度全床 3D 回退 carSofa 处理 | `tempFullBed.jsx` 取消 3D `group` 视觉旋转，恢复参考 `carSofa.jsx` 的矩阵创建方式：`lineInterp(ndata1, sitnum2, sitnum1, sitInterp1, sitInterp)`，补边/高斯按交换后的宽高处理，铺点坐标按 `x=iy/z=ix` |
+| 2026-05-18 | Codex | 温度全床后端原始线序 | `openWeb.tempFullBed()` 取消后端小床线序整理，不再交换/搬移 32x32 行数据；压力矩阵和温度 ADC 都直接从串口原始 32x32 帧按指定行列索引抽取，前端 3D 仍只做视觉旋转 |
+| 2026-05-18 | Codex | 温度全床 3D 视觉旋转 | 温度全床数据链路和矩阵尺寸保持原始 `15x12`，仅在 `tempFullBed.jsx` 中通过 `group.rotation.y = Math.PI / 2` 将 3D 点图整体旋转 90 度，避免修改点图输入数据 |
+| 2026-05-18 | Codex | 温度全床展示旋转回退 | 移除 `tempFullBed` 前端展示层的 `15x12 -> 12x15` 旋转，2D 数字矩阵和 3D 点图都直接使用后端原始 `15x12` 顺序；矩阵配置和 `Num2DOriginal` 尺寸同步恢复为 `15x12` |
+| 2026-05-18 | Codex | 温度全床 3D 方向修正 | 温度全床数字矩阵继续按展示层旋转为 `12x15`，但 3D 点图改回使用原始 `15x12` 输入，避免点图整体旋转；3D 插值同步调整为 `15` 维 `x2`、`12` 维 `x4` |
+| 2026-05-18 | Codex | 温度全床展示方向调整 | `tempFullBed` 后端和采集落库继续保留原始 `15x12` 矩阵方向；前端展示时再统一旋转 90 度为 `12x15`，2D 原始数字和 3D 点图使用同一展示方向；采集数据保留三路温度 raw ADC、转换温度、平均温度和温度系数 |
+| 2026-05-18 | Codex | 温度全床 3D 插值倍率调整 | `tempFullBed.jsx` 以旋转后的 `12x15` 为输入，3D 点图对 `12` 维做 `x4`、对 `15` 维做 `x2`，渲染矩阵为 `48x30` |
+| 2026-05-18 | Codex | 温度全床 12 维插值调整 | `tempFullBed.jsx` 将 3D 点图插值改为仅对 `12` 这一维做 `x2`，`15` 这一维保持原始采样，渲染矩阵由 `12x15` 变为 `24x15` |
+| 2026-05-18 | Codex | 温度全床独立 3D 组件 | 新增 `client/src/components/three/tempFullBed.jsx`，不再复用 `smallBed.jsx` 渲染温度全床 3D 点图；组件参考 `carSofa.jsx` 使用 `lineInterp -> addSide -> gaussBlur` 创建矩阵，并按 `x=列 / z=行` 映射坐标 |
+| 2026-05-18 | Codex | 温度全床 3D 转置排布测试 | `tempFullBed` 的 3D 点图在不插值基础上仅做 `15x12 -> 12x15` 转置后送入 `SmallBed`，用于修正同一行数据在 3D 中斜向展开的问题；2D 原始数字仍直接显示 `15x12` |
+| 2026-05-18 | Codex | 温度全床 3D 取消插值试验 | `tempFullBed` 的 3D 点图暂时直接使用后端 `15x12` 原始矩阵渲染，不再在前端行向两倍插值，用于排查 3D 点图线序问题；2D 原始数字展示保持不变 |
+| 2026-05-18 | Codex | 温度全床 3D 非方阵线序修正 | 修正 `SmallBed` 在 `tempFullBed` 这类非方阵点图下调用 `addSide/gaussBlur` 时宽高参数反置的问题，避免 3D 点图内部按错误行宽重排；原始 2D 数字展示继续保持 `15x12` |
+| 2026-05-18 | Codex | 温度全床原始数据展示调整 | `tempFullBed` 的 `numoriginal` 原始 2D 数字视图直接展示后端保存的 `15x12` 原始矩阵，不再插值；仅 `normal` 3D 点图渲染时行向两倍插值并转置为 `24x15` |
+| 2026-05-18 | Codex | 新增温度全床系统 | 新增 `tempFullBed` 系统类型：串口 1024 字节帧协议复用小床检测，后端先执行 `jqbed` 线序整理，再按行 `20-31`、列 `13-19/21-28` 抽取并保存原始 `15x12` 矩阵；前端仅渲染 3D 点图时再行向两倍插值并转置为 `24x15`；三路温度按 `((10/6)*adc_raw + 2/3) * k` 转换后下发，右侧 `Aside` 展示温度与平均温度，License 定制分组加入该类型 |
 | 2026-05-08 | Codex | 触觉手套整包取消包内类型左右判断 | `handGloveFullPacket` 保留左手/右手两个串口选择；后端整包点位映射和数据发送均不再由包内 `packetType` 决定，而是按实际选择的左/右串口入口决定，使接到左手串口就按左手表、接到右手串口就按右手表展示 |
 | 2026-05-08 | Codex | 人体全身原始数据展示 | `humanBody` 增加 `numoriginal` 原始数据模式，新增 `HumanBodyRawData.jsx` 按 `BACK_IDX/CHEST_IDX/RIGHT_ARM_IDX` 等 10 个模型部位索引矩阵绘制 2D 数值网格，并兼容实时 `sitData` 1024 点载荷、`jsonObject.data` 字符串、嵌套 `data`、大小写字段和直接数组载荷；原始数据展示中左/右肩臂、胸部、后背横向翻转，后裤左右纵向翻转 |
 | 2026-05-08 | Codex | 修复整包手套默认 2D 展示空白 | `Home.jsx` 对 `handGloveFullPacket` 增加模式兜底，确保只进入 `num/numoriginal`；`Num2D.jsx` 在整包手套首屏主动渲染 16x16 全 0 数组，避免无串口数据时白屏 |
@@ -499,6 +530,37 @@ graph TD
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-05-18 | Codex | 修复缺陷 | 修复换密钥后默认展示系统可能不是密钥内系统的问题，非 all 授权默认进入授权列表第一个系统 |
+| 2026-05-18 | Codex | 配置变更 | 温度全床下载 CSV 中公式转换后的温度值统一保留 1 位小数 |
+| 2026-05-18 | Codex | 修复缺陷 | 修复 Windows 换密钥后系统下拉不变化：后端不再把授权范围固定下发为 `all`，前端恢复按授权类型过滤并持久化 `allowedTypes` |
+| 2026-05-18 | Codex | 新增功能 | 温度全床下载 CSV 增加公式转换后的温度列：`temperatureCelsius`、`temperatureAvg`、`temperatureK`，不包含原始 ADC |
+| 2026-05-18 | Codex | 修复缺陷 | 修复温度全床 3D 点图内部按列优先读取行优先插值结果的问题，点位坐标和数组索引统一为 `x=列/z=行` |
+| 2026-05-18 | Codex | 配置变更 | 温度全床 3D 取消额外数据处理：不再在进入 3D 前转置，点图直接接收 `12行x15列` 原始矩阵，按 `lineInterp(raw, 15, 12, 2, 4)` 插值 |
+| 2026-05-18 | Codex | 修复缺陷 | 修复温度全床 3D 点图线序：原始矩阵仍按 `12行x15列` 展示，但进入 3D 前单独转置为 `15行x12列` 以匹配 `matrixWidth=12/matrixHeight=15` |
+| 2026-05-18 | Codex | 配置变更 | 温度全床 3D 点图插值系数跟随 12/15 入参对调，改为 `lineInterp(raw, 12, 15, 4, 2)` |
+| 2026-05-18 | Codex | 修复缺陷 | 修复温度全床下载 CSV 时 `pressureData.reduce is not a function`：导出前先从温度全床对象帧解析压力数组；同时将 3D 点图 12/15 入参对调 |
+| 2026-05-18 | Codex | 配置变更 | 温度全床方向重新统一为 `12行x15列`：后端不再转置抽取结果，前端 `SENSOR_MATRIX_MAP` 和 `TempFullBed` 入参改为 `width=15/height=12`，3D 使用 `lineInterp(raw, 15, 12, 2, 4)` 生成 `30列x48行` 插值点阵 |
+| 2026-05-18 | Codex | 配置变更 | 温度全床压力矩阵新增阈值过滤：除三路温度 ADC 点外，`sitData/rawSitData` 中小于 `20` 的压力值清零；回放历史数据同样在发给前端和统计前应用该规则 |
+| 2026-05-18 | Codex | 修复缺陷 | 修复温度全床回放时主进程 `sitData.reduce is not a function`：历史曲线和回放详情统计统一先从历史帧对象中提取压力数组，再计算总压和面积 |
+| 2026-05-18 | Codex | 配置变更 | 温度全床 `numoriginal` 原始矩阵展示改为 `12行x15列`，仅调整 `Num2DOriginal` 的 `width=15/height=12` |
+| 2026-05-18 | Codex | 配置变更 | 温度全床 3D 点图插值改为 `sitInterp=4/sitInterp1=2`，对应展示矩阵 `12x15` 的 `12*4` 与 `15*2` |
+| 2026-05-18 | Codex | 配置变更 | 温度全床重新按最终线序规则实现：后端恢复小床线序预处理并转置抽取结果为 `matrixWidth=12/matrixHeight=15`，前端取消额外旋转，2D 原始矩阵和 3D 点图直接使用后端下发的 `15行x12列` |
+| 2026-05-18 | Codex | 配置变更 | 温度全床矩阵展示改为 `12x15`：前端旋转函数以 `15x12` 为源矩阵，输出 `12x15`；2D 原始数字、矩阵配置和 3D 组件入参同步为 `width=12/height=15` |
+| 2026-05-18 | Codex | 配置变更 | 温度全床在前端渲染入口重新增加矩阵 90 度旋转：`rotateTempFullBedMatrix90()` 按 `12` 列、`15` 行重排 `wsPointData`，输出仍为 `15x12`，统一供原始数字、数字矩阵和 3D 点图使用 |
+| 2026-05-18 | Codex | 配置变更 | 温度全床 3D 回退到参考 `carSofa.jsx` 的数据处理：删除 `group.rotation.y = Math.PI / 2`，插值/补边/高斯使用交换后的宽高参数，点位坐标按 `carSofa` 的 `x=iy/z=ix` 方式生成 |
+| 2026-05-18 | Codex | 配置变更 | 温度全床后端取消小床线序预处理：`tempFullBed()` 直接使用串口原始 32x32 帧抽取行 `20-31`、列 `13-19/21-28` 和温度列，`realArr` 保存原始帧，不再在后端旋转或搬移数据 |
+| 2026-05-18 | Codex | 配置变更 | 温度全床 3D 点图改为场景层旋转：不改变 `wsPointData`、`lineInterp(raw, 15, 12, 2, 4)` 和矩阵配置，只给 Three.js `group` 增加 90 度 Y 轴旋转，重置视图时保留该旋转 |
+| 2026-05-18 | Codex | 修复缺陷 | 温度全床前端取消所有展示旋转：删除 `rotateTempFullBedDisplay90` 调用，`num/numoriginal/normal` 均接收原始 `15x12`，避免 2D 和 3D 同时被旋转 |
+| 2026-05-18 | Codex | 配置变更 | 温度全床矩阵方向分层：`openWeb.tempFullBed()` 和采集落库保持原始 `15x12`，前端 `sitTypeEvent.tempFullBed` 在展示前旋转为 `12x15`，`Num2DOriginal`、`SENSOR_MATRIX_MAP` 和 3D 组件采用展示方向 |
+| 2026-05-18 | Codex | 配置变更 | `tempFullBed.jsx` 的插值系数调整为 `lineInterp(raw, 12, 15, 4, 2)`，即 `12` 维插值四倍、`15` 维插值两倍 |
+| 2026-05-18 | Codex | 修复缺陷 | 温度全床 3D 点图取消展示层旋转：`sitTypeEvent.tempFullBed` 仅在数字矩阵模式旋转为 `12x15`，3D 继续接收原始 `15x12`，`tempFullBed.jsx` 改为 `lineInterp(raw, 15, 12, 2, 4)` |
+| 2026-05-18 | Codex | 配置变更 | `tempFullBed.jsx` 增加独立插值系数，`lineInterp(raw, 15, 12, 1, 2)` 只把 `12` 这一维插值为两倍，避免 `15` 维也被同步放大 |
+| 2026-05-18 | Codex | 新增功能 | 新增温度全床专用 3D 组件 `tempFullBed.jsx`：参考 `carSofa.jsx` 的矩阵创建方式，原始 `15x12` 数据不在 `util.js` 转置，组件内部按 `lineInterp(raw, 15, 12, ...)` 构造渲染矩阵 |
+| 2026-05-18 | Codex | 配置变更 | `tempFullBed` 的 3D 点图改为先转置原始矩阵再渲染：前端将 `15x12` 转为 `12x15`，`SmallBed` 同步按 `matrixWidth=12/matrixHeight=15` 接收，避免单行点位斜向排布 |
+| 2026-05-18 | Codex | 配置变更 | `tempFullBed` 的 3D 点图临时取消插值，`SmallBed` 改按 `15x12` 接收原始矩阵渲染，以便对照排查 3D 线序 |
+| 2026-05-18 | Codex | 修复缺陷 | 修复 `SmallBed` 非方阵 3D 点图线序：`addSide/gaussBlur` 改用 `sitnum1` 作为宽、`sitnum2` 作为高，避免 `tempFullBed` 的 `24x15` 渲染数据被按 `15x24` 行宽处理 |
+| 2026-05-18 | Codex | 配置变更 | 调整 `tempFullBed` 原始数据展示：`Num2DOriginal` 和矩阵配置回到 `15x12/180`，前端仅在 3D 点图路径对数据插值成 `24x15` |
+| 2026-05-18 | Codex | 新增功能 | 新增 `tempFullBed` 温度全床系统：协议沿用小床 1024 字节帧，先经过 `jqbed` 线序整理，再按指定行列索引生成 `15x12` 原始矩阵；仅前端渲染 3D 点图时转换为 `24x15`，实时和回放都保留温度 ADC 与摄氏度字段 |
 | 2026-05-08 | Codex | 修复缺陷 | `触觉手套(整包)` 取消包内 `type` 的左右判断但保留左右串口选择：`Title.jsx` 继续显示左手/右手两个串口入口；`server.js` 的整包点位映射和发送通道都按实际串口入口决定，`packetType` 只作为调试字段保留 |
 | 2026-05-08 | Codex | 新增功能 | `humanBody` 人体全身系统新增 `原始数据` 展示：`Title.jsx` 增加模式入口，`Home.jsx` 将实时 `sitData` 或 `ALLBODY/BODY` 转换后的 1024 点数据分发给 `HumanBodyRawData`，组件按 10 个 human 模型部位 IDX 矩阵用 canvas 展示 2D 数值；同时修复 `jsonObject.data` 为字符串、嵌套 `data`、大小写字段或直接数组时不渲染真实数据、窄矩阵标题被裁剪，并按当前对位规则翻转肩臂/胸背/后裤展示方向 |
 | 2026-05-08 | Codex | 修复缺陷 | `触觉手套(整包)` 默认展示模式增加兜底：若状态仍停在旧的 `normal/skin/num3D` 会自动切回 `num`；`Num2D` 首屏渲染 16x16 全 0，`Num2DOriginal` 首屏渲染 15x13 全 0，避免无数据时白屏 |

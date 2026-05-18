@@ -47,6 +47,7 @@ export const SENSOR_TYPES = {
   // 床垫
   SMALL_BED:   'smallBed',
   SMALL_BED1:  'smallBed1',
+  TEMP_FULL_BED: 'tempFullBed',
   PET_CARE:    'petCare',
   PET_CARE_MINI: 'petCareMini',
   BIG_BED:     'bigBed',
@@ -89,6 +90,7 @@ export const SENSOR_MATRIX_MAP = {
   car:        { width: 32, height: 32, total: 1024 },
   smallBed:   { width: 32, height: 32, total: 1024 },
   smallBed1:  { width: 32, height: 32, total: 1024 },
+  tempFullBed:{ width: 15, height: 12, total: 180 },
   petCare:    { width: 32, height: 32, total: 1024 },
   petCareMini:{ width: 32, height: 32, total: 1024 },
   smallM:     { width: 32, height: 32, total: 1024 },
