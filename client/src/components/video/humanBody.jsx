@@ -141,6 +141,19 @@ const createUvRegionFromGrid = (x1, x2, y1, y2) => {
 };
 
 const UV_REGIONS = {
+  back: createUvRegionFromGrid(0, 25, 0, 35),
+  chest: createUvRegionFromGrid(0, 25, 20, 64),
+  rightArm: createUvRegionFromGrid(17, 36, 28, 33),
+  rightShoulder: createUvRegionFromGrid(30, 42, 25, 35),
+  leftArm: createUvRegionFromGrid(45, 63, 28, 33),
+  leftShoulder: createUvRegionFromGrid(40, 48, 25, 35),
+  backPantsLeft: createUvRegionFromGrid(31, 42, 1, 24),
+  backPantsRight: createUvRegionFromGrid(44, 54, 1, 24),
+  frontPantsLeft: createUvRegionFromGrid(31, 42, 40, 63),
+  frontPantsRight: createUvRegionFromGrid(44, 54, 40, 63),
+};
+
+const UV_REGIONS1 = {
   back: createUvRegionFromGrid(4, 21, 6, 26),
   chest: createUvRegionFromGrid(4, 21, 35, 60),
   rightArm: createUvRegionFromGrid(17, 36, 28, 33),
@@ -391,10 +404,14 @@ const HumanBodyCanvas = React.forwardRef((props, refs) => {
   }
 
   function canvasRenew(texture, canvas) {
+    canvas.id = "human-body-dynamic";
+    if(!document.getElementById("human-body-dynamic")){
+      document.body.appendChild(canvas);
+    }
     if (!canvas || !webglHeatmapRef.current) {
       return;
     }
-    // ndata1 = new Array(1024).fill(244)
+    ndata1 = new Array(1024).fill(244)
     const sourceData = buildPartHeatmapInput(ndata1);
     const webglData = genWebglData(sourceData, {
       canvasWidth: WEBGL_TILE_SIZE,
