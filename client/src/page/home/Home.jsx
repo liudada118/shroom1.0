@@ -2943,7 +2943,7 @@ class Home extends React.Component {
             } else {
               return this.changeValue(a);
             }
-          } else if (this.state.matrixName === "smallBed") {
+          } else if (this.state.matrixName === "smallBed" || this.state.matrixName === "smallBed12B") {
             if (index == 0 || index == 1) {
               return this.changeSmallBedValue(a);
             } else {
@@ -3763,7 +3763,7 @@ class Home extends React.Component {
                       changeSelect={this.changeSelect} />
                   </CanvasCom>
                   :
-                  this.state.numMatrixFlag == "numoriginal" && [...tactileGloveTypes, 'robot1', 'footVideo', 'robotSY', 'robotLCF', 'normal', 'smallBed', 'jqbed', tempFullBedMatrix, 'petCare', 'petCareMini', 'daliegu', 'smallSample'].includes(this.state.matrixName) ?
+                  this.state.numMatrixFlag == "numoriginal" && [...tactileGloveTypes, 'robot1', 'footVideo', 'robotSY', 'robotLCF', 'normal', 'smallBed', 'smallBed12B', 'jqbed', tempFullBedMatrix, 'petCare', 'petCareMini', 'daliegu', 'smallSample'].includes(this.state.matrixName) ?
                   <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
                     <Num2DOriginal ref={this.com}
                       matrixName={this.state.matrixName}
@@ -4379,9 +4379,10 @@ class Home extends React.Component {
                           changeSelect={this.changeSelect}
                         />
                       </CanvasCom>
-                    ) : this.state.matrixName == "smallBed" ? (
+                    ) : this.state.matrixName == "smallBed" || this.state.matrixName == "smallBed12B" ? (
                       <CanvasCom matrixName={this.state.matrixName}>
                         <SmallBed
+                          matrixName={this.state.matrixName}
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}

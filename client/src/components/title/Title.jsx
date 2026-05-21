@@ -39,11 +39,12 @@ const createDefaultHumanTransform = () => ({
 })
 const petCareMatrixTypes_title = ['petCare', 'petCareMini']
 const tempFullBedType_title = 'tempFullBed'
+const smallBed12BType_title = 'smallBed12B'
 const tactileGloveTypes_title = ['hand0205', 'handGlove115200', 'handGloveFullPacket']
 const fullPacketGloveType_title = 'handGloveFullPacket'
 const calibratableGloveTypes_title = tactileGloveTypes_title.filter((type) => type !== fullPacketGloveType_title)
 const isPetCareMatrixTitle = (type) => petCareMatrixTypes_title.includes(type)
-const bedArr_title = ['bigBed', 'smallBed', 'bed4096', 'bed4096num', 'matCol', 'matColPos', 'jqbed', tempFullBedType_title, ...petCareMatrixTypes_title]
+const bedArr_title = ['bigBed', 'smallBed', smallBed12BType_title, 'bed4096', 'bed4096num', 'matCol', 'matColPos', 'jqbed', tempFullBedType_title, ...petCareMatrixTypes_title]
 const matrixNameToType_title = (type) => isPetCareMatrixTitle(type) ? type : bedArr_title.includes(type) ? 'bed' : type
 const normalizeHumanBodySizeValue = (sizeValue) => {
   const nextValue = Number(sizeValue);
@@ -412,7 +413,7 @@ class Title extends React.Component {
     const cacheMode = mode; // mode dimension for cache
 
     // Sensor type groups
-    const group1 = ['hand', 'normal', 'footVideo', 'smallBed', 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', 'bed4096', 'bed4096num']; // 3D point scene / WebGL heatmap
+    const group1 = ['hand', 'normal', 'footVideo', 'smallBed', smallBed12BType_title, 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', 'bed4096', 'bed4096num']; // 3D point scene / WebGL heatmap
     const group2 = ['robot1', 'robotSY', 'robotLCF']; // Robots
     const group3 = tactileGloveTypes_title; // Tactile gloves
     const group4 = ['fast256', 'fast1024']; // High-speed
@@ -790,6 +791,7 @@ class Title extends React.Component {
       { label: t('sensorBed4096num'), value: 'bed4096num' },
       { label: t('sensorBed4096'), value: 'bed4096' },
       { label: t('sensorJqbed'), value: 'jqbed' },
+      { label: t('sensorSmallBed12B'), value: smallBed12BType_title },
       { label: '温度全床系统', value: tempFullBedType_title },
       { label: t('sensorPetCare'), value: 'petCare' },
       { label: t('sensorPetCareMini'), value: 'petCareMini' },
@@ -1002,7 +1004,7 @@ class Title extends React.Component {
 
 
 
-        {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'normal', 'smallBed', 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody'].includes(this.props.matrixName) ?
+        {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'normal', 'smallBed', smallBed12BType_title, 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody'].includes(this.props.matrixName) ?
           <Select
             defaultValue={this.props.numMatrixFlag}
             style={{ width: 90 }}
@@ -1055,7 +1057,7 @@ class Title extends React.Component {
             ] : this.props.matrixName === tempFullBedType_title ? [
               { value: 'normal', label: t('modal3D') },
               { value: 'numoriginal', label: t('rawData') },
-            ] : ['hand', 'normal', 'smallBed', 'jqbed', 'petCare', 'petCareMini', 'daliegu', 'smallSample'].includes(this.props.matrixName) ? [
+            ] : ['hand', 'normal', 'smallBed', smallBed12BType_title, 'jqbed', 'petCare', 'petCareMini', 'daliegu', 'smallSample'].includes(this.props.matrixName) ? [
               { value: 'normal', label: t('modal3D') },
               { value: 'numoriginal', label: t('rawData') },
             ] : this.props.matrixName == 'bed4096' || this.props.matrixName == 'bed4096num' ? [

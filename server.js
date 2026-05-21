@@ -89,6 +89,9 @@ const HAND_GLOVE_TYPES = ['hand0205', 'handGlove115200', HAND_GLOVE_FULL_PACKET]
 const HAND_GLOVE_FULL_PACKET_LENGTH = 274;
 const TEMP_FULL_BED_TYPE = 'tempFullBed';
 const TEMP_FULL_BED_PRESSURE_THRESHOLD = 20;
+const SMALL_BED_12B_TYPE = 'smallBed12B';
+const SMALL_BED_12B_PAYLOAD_LENGTH = 1024 * 2;
+const SMALL_BED_12B_FRAME_TAIL = Buffer.from([0xaa, 0x00, 0x55, 0x00, 0x03, 0x00, 0x99, 0x00]);
 const isHandGloveType = (sensorType) => HAND_GLOVE_TYPES.includes(sensorType);
 const isHandStorageType = (sensorType = '') => isHandGloveType(sensorType) || String(sensorType).includes('robot');
 const getSensorBaudRate = (sensorType) => {
@@ -100,6 +103,9 @@ const getSensorBaudRate = (sensorType) => {
   }
   if (['bed4096', 'bed4096num'].includes(sensorType)) {
     return 3000000;
+  }
+  if (sensorType === SMALL_BED_12B_TYPE) {
+    return 1500000;
   }
   if (sensorType === 'humanBody') {
     return 1000000;
@@ -186,6 +192,22 @@ function normalizeHistoryPressureData(row, file = '') {
   });
   if (file !== TEMP_FULL_BED_TYPE) return normalizedData;
   return normalizedData.map((value) => value < TEMP_FULL_BED_PRESSURE_THRESHOLD ? 0 : value);
+}
+
+function getCsvElapsedSeconds(rows, rowIndex, baseIndex = 0, frameIndex = 0) {
+  const currentTimestamp = Number(rows?.[rowIndex]?.timestamp);
+  const baseTimestamp = Number(rows?.[baseIndex]?.timestamp);
+  if (Number.isFinite(currentTimestamp) && Number.isFinite(baseTimestamp)) {
+    return ((currentTimestamp - baseTimestamp) / 1000).toFixed(3);
+  }
+
+  const fallbackHz = Number(colHZ) > 0 ? Number(colHZ) : 12;
+  return (frameIndex / fallbackHz).toFixed(3);
+}
+
+function getCsvFilePrefix(sensorType, fallbackPrefix) {
+  if (sensorType === SMALL_BED_12B_TYPE) return '12B';
+  return fallbackPrefix;
 }
 
 function normalizeTempFullBedPlaybackPressureArray(data, frame = {}) {
@@ -801,8 +823,10 @@ let splitBuffer = Buffer.from([0xaa, 0x55, 0x03, 0x99]);
 // let splitBuffer1 = Buffer.from([0xaa, 0x55, 0x03, 0x09]);
 let parser2 = new DelimiterParser({ delimiter: splitBuffer });
 let parser = new DelimiterParser({ delimiter: splitBuffer });
+let parserSmallBed12B = new DelimiterParser({ delimiter: SMALL_BED_12B_FRAME_TAIL });
 let parser3 = new DelimiterParser({ delimiter: splitBuffer });
 let parser4 = new DelimiterParser({ delimiter: splitBuffer });
+const getSitParser = () => file === SMALL_BED_12B_TYPE ? parserSmallBed12B : parser;
 let server, server1, server2;
 let localData = [],
   localDataBack = [],
@@ -1736,7 +1760,7 @@ module.exports = {
                 //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
                 // let splitBuffer = Buffer.from([0xaa, 0x55, 0x03, 0x99]);
                 // parser = new Delimiter({ delimiter: splitBuffer });
-                port1.pipe(parser);
+                port1.pipe(getSitParser());
               } catch (e) {
                 logger.warn(e, "e");
               }
@@ -2604,7 +2628,7 @@ module.exports = {
                     }
                   );
                   //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
-                  port1.pipe(parser);
+                  port1.pipe(getSitParser());
                 } catch (e) {
                   logger.warn(e, "e");
                 }
@@ -2912,7 +2936,7 @@ module.exports = {
                         : totalToN(press),
                       realData: sitData,//rows[i][`data`],
                       realInitData: rows[i][`data`],
-                      index: (j / 12).toFixed(2),
+                      index: getCsvElapsedSeconds(rows, i, historyArr[0], j),
                       dataToInterpGauss,
                       pressuremmgH: pressuremmgH
                     };
@@ -2932,7 +2956,7 @@ module.exports = {
                   const csvWriter = createCsvWriter({
                     path: `${csvPath}/${file}${str}.csv`, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                     header: [
-                      { id: "index", title: "" },
+                      { id: "index", title: "seconds" },
                       { id: "time", title: "time" },
                       { id: "pressureArea", title: "area" },
                       { id: "pressure", title: "press" },
@@ -3148,7 +3172,7 @@ module.exports = {
                         ? sitPressSelect[i]
                         : totalToN(press),
                       realData: JSON.stringify(pressureData),
-                      index: (j / 12).toFixed(2),
+                      index: getCsvElapsedSeconds(rows, i, historyArr[0], j),
                       max,
                       rotate: rotateData.length ? JSON.stringify(rotateData) : '',
                       temperatureData: tempFullBedPayload ? JSON.stringify(tempFullBedPayload.temperatureData.map((value) => Number(value).toFixed(1))) : '',
@@ -3166,7 +3190,7 @@ module.exports = {
                   }
 
                   const csvHeaders = [
-                    { id: "index", title: "" },
+                    { id: "index", title: "seconds" },
                     { id: "max", title: "max" },
                     { id: "time", title: "time" },
                     { id: "pressureArea", title: "area" },
@@ -3185,7 +3209,7 @@ module.exports = {
                   }
 
                   const csvWriter = createCsvWriter({
-                    path: `${csvPath}/sit${str}.csv`,
+                    path: `${csvPath}/${getCsvFilePrefix(file, 'sit')}${str}.csv`,
                     header: csvHeaders,
                   });
 
@@ -3263,7 +3287,7 @@ module.exports = {
                         ? backPressSelect[i]
                         : totalToN(press, 1.3),
                       realData: JSON.stringify(backData),
-                      index: (j / 12).toFixed(2),
+                      index: getCsvElapsedSeconds(rows, i, historyArr[0], j),
                       area1: [...backData].filter(a => a > 1).length,
                       area10: [...backData].filter(a => a > 10).length,
                       total1: backData.reduce((a, b) => a + b, 0),
@@ -3286,7 +3310,7 @@ module.exports = {
                   }
 
                   const backCsvHeaders = [
-                    { id: "index", title: "" },
+                    { id: "index", title: "seconds" },
                     { id: "time", title: "time" },
                     { id: "max", title: "max" },
                     { id: "pressureArea", title: "area" },
@@ -3368,7 +3392,7 @@ module.exports = {
                           ? backPressSelect[i]
                           : totalToN(press, 1.3),
                         realData: rows[i][`data`],
-                        index: (j / 12).toFixed(2),
+                        index: getCsvElapsedSeconds(rows, i, historyArr[0], j),
                         area1: [...backData].filter(a => a > 1).length,
                         area10: [...backData].filter(a => a > 10).length,
                         total1: backData.reduce((a, b) => a + b, 0),
@@ -3393,7 +3417,7 @@ module.exports = {
                       path: `${csvPath}/head${str}.csv`,
                       // path: `./data/back${str}.csv`, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                       header: [
-                        { id: "index", title: "" },
+                        { id: "index", title: "seconds" },
                         { id: "time", title: "time" },
                         { id: "max", title: "max" },
                         { id: "pressureArea", title: "area" },
@@ -4628,6 +4652,29 @@ parser.on("data", function (data) {
   }
 });
 
+parserSmallBed12B.on("data", function (data) {
+  pointArr = new Array();
+  let buffer = Buffer.from(data);
+  newData = new Array();
+
+  if (nowDate < endDate && file === SMALL_BED_12B_TYPE && buffer.length === SMALL_BED_12B_PAYLOAD_LENGTH) {
+    for (var i = 0; i < SMALL_BED_12B_PAYLOAD_LENGTH / 2; i++) {
+      pointArr[i] = buffer.readUInt16LE(i * 2);
+    }
+
+    pointArr = jqbed(pointArr);
+    newData = [...pointArr];
+    pointArr1zeroData = [...pointArr];
+
+    if (pointArr1zero.length) {
+      pointArr = pointArr.map((a, index) => numLessZeroToZero(a - pointArr1zero[index]));
+    }
+
+    const jsonData = JSON.stringify({ sitData: pointArr, hz: colHZ });
+    colOrSendData(jsonData);
+  }
+});
+
 function colOrSendData(jsonData) {
   // console.log(JSON.stringify(JSON.parse(jsonData).sitData) , 'jsonData')
   const nowDate = new Date().getTime()
@@ -5344,7 +5391,7 @@ reconnectTimer = setInterval(() => {
           }
         );
         //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
-        port1.pipe(parser);
+        port1.pipe(getSitParser());
       } catch (e) {
         logger.warn(e, "e");
       }

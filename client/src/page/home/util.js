@@ -2235,6 +2235,19 @@ export const sitTypeEvent = {
       that.com.current.chartReset()
       // timeflag = 0
     }
+  }, smallBed12B({ that, wsPointData }) {
+    if (that.state.numMatrixFlag == "numoriginal") {
+      that.com.current?.changeWsDataRaw([...wsPointData]);
+      return;
+    }
+
+    that.com.current?.sitData({
+      wsPointData: [...wsPointData],
+    });
+
+    if (!that.state.local) {
+      that.com.current.chartReset()
+    }
   }, xiyueReal1({ that, wsPointData, compen, local }) {
     // console.log(compen)
     // timeflag ++ 

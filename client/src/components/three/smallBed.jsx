@@ -617,21 +617,25 @@ let isShiftPressed = false;
     var T = clock.getDelta();
     timeS = timeS + T;
     
-      dataArrRef.current = dataArrRef.current.filter((a) => a > valuej1 * 0.025)
+      const useRawAsideData = props.matrixName === 'smallBed12B'
+      if (useRawAsideData) {
+        dataArrRef.current = [...ndata1]
+      }
+      dataArrRef.current = dataArrRef.current.filter((a) => a > (useRawAsideData ? 10 : valuej1 * 0.025))
       const max = findMax(dataArrRef.current)
       const point = dataArrRef.current.filter((a) => a > 0).length
-      const press = Math.round(dataArrRef.current.reduce((a, b) => a + b, 0) / 10)
+      const press = Math.round(dataArrRef.current.reduce((a, b) => a + b, 0) / (useRawAsideData ? 1 : 10))
       const mean = press / (point == 0 ? 1 : point)
-      const realPoint = ndata1.filter((a) => a > 0).length
+      const realPoint = useRawAsideData ? point : ndata1.filter((a) => a > 0).length
 
       props.data.current?.changeData({
         meanPres: mean.toFixed(2),
         maxPres: max,
         point: point,
-        area: realPoint * 8,
+        area: useRawAsideData ? realPoint : realPoint * 8,
         totalPres: press,
         // pressure: pressureSmooth.toFixed(2),
-        pressure: press / realPoint//calculatePressure(press/realPoint)
+        pressure: press / (realPoint || 1)//calculatePressure(press/realPoint)
       });
 
       if (totalArrRef.current.length < 20) {
@@ -796,8 +800,9 @@ let isShiftPressed = false;
 
   function chartReset() {
 
-    const point = dataArrRef.current.filter((a) => a > 0).length
-    const press = Math.round(dataArrRef.current.reduce((a, b) => a + b, 0) / 10)
+    const useRawAsideData = props.matrixName === 'smallBed12B'
+    const point = dataArrRef.current.filter((a) => a > (useRawAsideData ? 10 : 0)).length
+    const press = Math.round(dataArrRef.current.reduce((a, b) => a + b, 0) / (useRawAsideData ? 1 : 10))
     if ( totalArrRef.current.length < 20) {
        totalArrRef.current.push(press);
     } else {
