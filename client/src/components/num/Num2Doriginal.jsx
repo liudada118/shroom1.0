@@ -46,6 +46,28 @@ function genNewArrMatrix(arr, width, height) {
     return res
 }
 
+const RAW_TRANSPOSE_MATRIX_TYPES = new Set(['jqbed', 'smallBed', 'smallBed12B'])
+
+function transposeSquareMatrixData(data, size) {
+    if (!Array.isArray(data) || data.length !== size * size) {
+        return Array.isArray(data) ? [...data] : []
+    }
+
+    return data.map((_, index) => {
+        const row = Math.floor(index / size)
+        const col = index % size
+        return data[col * size + row]
+    })
+}
+
+function normalizeRawDisplayData(data, matrixName, width, height) {
+    const rawData = Array.isArray(data) ? [...data] : []
+    if (RAW_TRANSPOSE_MATRIX_TYPES.has(matrixName) && width === height) {
+        return transposeSquareMatrixData(rawData, width)
+    }
+    return rawData
+}
+
 let leftArr = [], rightArr = []
 const fullPacketGloveType = 'handGloveFullPacket'
 
@@ -804,7 +826,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
 
     // ========== 原始数据直接渲染（不做高斯模糊、不做阈值处理） ==========
     const changeWsDataRaw = (wsPointData) => {
-        let rawData = [...wsPointData]
+        let rawData = normalizeRawDisplayData(wsPointData, props.matrixName, width, height)
         lastDataRef.current = rawData; // 保存最后一帧数据
         layoutData([...rawData])
         pendingFlatRef.current = { data: rawData, tw: width, th: height };

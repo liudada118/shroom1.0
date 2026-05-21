@@ -89,6 +89,8 @@ const HAND_GLOVE_TYPES = ['hand0205', 'handGlove115200', HAND_GLOVE_FULL_PACKET]
 const HAND_GLOVE_FULL_PACKET_LENGTH = 274;
 const TEMP_FULL_BED_TYPE = 'tempFullBed';
 const TEMP_FULL_BED_PRESSURE_THRESHOLD = 20;
+const JQ_BED_TYPE = 'jqbed';
+const SMALL_BED_TYPE = 'smallBed';
 const SMALL_BED_12B_TYPE = 'smallBed12B';
 const SMALL_BED_12B_PAYLOAD_LENGTH = 1024 * 2;
 const SMALL_BED_12B_FRAME_TAIL = Buffer.from([0xaa, 0x00, 0x55, 0x00, 0x03, 0x00, 0x99, 0x00]);
@@ -220,6 +222,10 @@ function transposeSquareMatrix(data, size = 32) {
     const col = index % size;
     return data[col * size + row];
   });
+}
+
+function shouldTransposeSmallBedRawMatrix(sensorType) {
+  return sensorType === JQ_BED_TYPE || sensorType === SMALL_BED_TYPE || sensorType === SMALL_BED_12B_TYPE;
 }
 
 function normalizeTempFullBedPlaybackPressureArray(data, frame = {}) {
@@ -2919,6 +2925,9 @@ module.exports = {
                   if (!rows.length) return;
                   for (var i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
                     let sitData = normalizeHistoryPressureData(rows[i], file);
+                    if (shouldTransposeSmallBedRawMatrix(file)) {
+                      sitData = transposeSquareMatrix(sitData);
+                    }
                     let realData = sitData;
                     // sitData = zeroLine(sitData,32,32)
                     // sitData = pressSmallBed({ arr: sitData })
@@ -3165,7 +3174,7 @@ module.exports = {
                       pressureData = Array.isArray(rawData) ? rawData : getHistoryPressureData(rows[i]);
                       rotateData = [];
                     }
-                    if (file === SMALL_BED_12B_TYPE) {
+                    if (shouldTransposeSmallBedRawMatrix(file)) {
                       pressureData = transposeSquareMatrix(pressureData);
                     }
                     console.log(pressureData.length)
