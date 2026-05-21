@@ -210,6 +210,18 @@ function getCsvFilePrefix(sensorType, fallbackPrefix) {
   return fallbackPrefix;
 }
 
+function transposeSquareMatrix(data, size = 32) {
+  if (!Array.isArray(data) || data.length !== size * size) {
+    return Array.isArray(data) ? [...data] : [];
+  }
+
+  return data.map((_, index) => {
+    const row = Math.floor(index / size);
+    const col = index % size;
+    return data[col * size + row];
+  });
+}
+
 function normalizeTempFullBedPlaybackPressureArray(data, frame = {}) {
   if (!Array.isArray(data)) return [];
   const pressureData = frame.matrixOrientation === 'transposed' || (frame.matrixWidth === 12 && frame.matrixHeight === 15)
@@ -3152,6 +3164,9 @@ module.exports = {
                     } else {
                       pressureData = Array.isArray(rawData) ? rawData : getHistoryPressureData(rows[i]);
                       rotateData = [];
+                    }
+                    if (file === SMALL_BED_12B_TYPE) {
+                      pressureData = transposeSquareMatrix(pressureData);
                     }
                     console.log(pressureData.length)
                     const press = sitPressSelect.length
