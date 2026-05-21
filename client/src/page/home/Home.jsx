@@ -388,6 +388,13 @@ const initConfig = {
     valuef1: 6,
     value1: 0.72,  //高度
   },
+  smallBed12B: {
+    valueg1: 2,
+    valuej1: 2205,
+    valuel1: 5,
+    valuef1: 6,
+    value1: 0.1,
+  },
   petCare: {
     valueg1: 2,
     valuej1: 1205,
@@ -442,6 +449,8 @@ initConfig.petCareMini = {
 
 const matrixNameToType = (type) => {
   if (isPetCareMatrix(type)) {
+    return type
+  } else if (type === 'smallBed12B') {
     return type
   } else if (bedArr.includes(type)) {
     return 'bed'

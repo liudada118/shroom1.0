@@ -28,6 +28,7 @@ let loadData = ''
 // Default config values (same as Home.jsx initConfig)
 const titleInitConfig = {
   bed: { valueg1: 2, valuej1: 1205, valuel1: 5, valuef1: 6, value1: 0.72 },
+  smallBed12B: { valueg1: 2, valuej1: 2205, valuel1: 5, valuef1: 6, value1: 0.1 },
   petCare: { valueg1: 2, valuej1: 2900, valuel1: 5, valuef1: 6, value1: 0.7, valuelInit1: 500 },
   petCareMini: { valueg1: 2, valuej1: 2900, valuel1: 5, valuef1: 6, value1: 0.7, valuelInit1: 500 },
   sit: { valueg1: 4.3, valuej1: 1705, valuel1: 11, valuef1: 14, value1: 3.54 },
@@ -45,7 +46,14 @@ const fullPacketGloveType_title = 'handGloveFullPacket'
 const calibratableGloveTypes_title = tactileGloveTypes_title.filter((type) => type !== fullPacketGloveType_title)
 const isPetCareMatrixTitle = (type) => petCareMatrixTypes_title.includes(type)
 const bedArr_title = ['bigBed', 'smallBed', smallBed12BType_title, 'bed4096', 'bed4096num', 'matCol', 'matColPos', 'jqbed', tempFullBedType_title, ...petCareMatrixTypes_title]
-const matrixNameToType_title = (type) => isPetCareMatrixTitle(type) ? type : bedArr_title.includes(type) ? 'bed' : type
+const matrixNameToType_title = (type) => type === smallBed12BType_title ? type : isPetCareMatrixTitle(type) ? type : bedArr_title.includes(type) ? 'bed' : type
+const getColorSliderMax = (matrixName) => {
+  if (matrixName === smallBed12BType_title) return 4000
+  if (isPetCareMatrixTitle(matrixName)) return 5000
+  if (matrixName === 'humanBody') return 3000
+  return 1000
+}
+const getColorSliderStep = () => 10
 const normalizeHumanBodySizeValue = (sizeValue) => {
   const nextValue = Number(sizeValue);
   if (!Number.isFinite(nextValue)) {
@@ -611,7 +619,7 @@ class Title extends React.Component {
             <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
               <div className='dataTitle'>{t('color')}</div>
               <Slider
-                min={5} max={isPetCareMatrixTitle(matrixName) ? 5000 : matrixName === 'humanBody' ? 3000 : 1000} step={10}
+                min={5} max={getColorSliderMax(matrixName)} step={getColorSliderStep(matrixName)}
                 value={this.props.valuej1}
                 onChange={(value) => {
                   localStorage.setItem("carValuej", value);
