@@ -219,7 +219,7 @@ graph TD
 1. **传感器数据采集流程**
     - 硬件传感器通过 USB 串口发送原始二进制数据帧 → `serialHelper.js` 接收并触发 `parser.on('data')` 事件 → `server.js` 调用 `dataProcessor.js` 进行线序映射（`openWeb.js`）、归零校准、高斯平滑 → 处理后的矩阵数据通过 `wsHelper.js` 广播到 WebSocket 端口 19999 → 前端 `useWebSocket` Hook 接收数据 → 更新 `usePressureStore` → React 重新渲染热力图和 3D 模型。
     - `smallBed12B`（小床检测 12B）使用 `1500000` 波特率和独立帧尾 `AA 00 55 00 03 00 99 00`，`@serialport/parser-delimiter` 按 8 字节帧尾切分后得到 2048 字节 payload；`server.js` 按 1024 个 `uint16LE` 解析为 32x32 压力矩阵，并复用 `jqbed(pointArr)` 小床检测线序后通过通用 `sitData` 下发。该类型不加入 `jqbed/smallBed` 生命体征集合，因此前端 `Aside.jsx` 仅展示 Pressure Area 与 Pressure Data，不触发 Python 算法数据面板；左侧 Pressure Data / Pressure Area 统计使用 3D 插值和高斯处理前的 32x32 原始矩阵值。
-    - `smallBed12B` 使用独立的前端显示配置，不再复用通用 `bed` 颜色默认值；默认高斯为 `2`，颜色上限默认值为 `2205`，设置面板颜色滑块范围为 `5-4000` 且步进为 `10`，高度默认值为 `0.1`。
+    - `smallBed12B` 使用独立的前端显示配置，不再复用通用 `bed` 颜色默认值；默认高斯为 `2`，颜色上限默认值为 `2205`，设置面板颜色滑块范围为 `5-4000` 且步进为 `10`，高度默认值为 `0.1`。`Home.jsx` 会通过通用 `syncDisplayRendererConfig()` 将进度条 state 同步到 3D/原始数据组件 ref，确保初始值、系统切换和滑块变更都会下发到渲染器内部变量。
     - 当系统类型为 `petCare` / `petCareMini` 时，`server.js` 先按 `jqbed` 线序将 32x32 数据重排，再以 50Hz（20ms）分别调用 `python/app/petCare/pet_care_wrapper` / `pet_care_wrappermini`；算法输出通过 `python/app/onbed_filter_example.py` 的 JSON-line RPC 回传给 Electron，前端 Title/Home/Aside/License 复用宠物看护链路展示呼吸率、姿态、体动、信号质量、模拟心率和压力系数；其中 `Aside.jsx` 会在前端层对 `petCareMini` 的离床状态（`petInBed=0` 或 `posture_state=0`）做展示归一化，强制将面板上的 `pressure_coefficient` 显示为 `0.00`，并依据呼吸频率在前端生成 `55-100` 区间的模拟心率替换原来的 SNR 展示；为避免心率跳变过快，模拟心率现在按 1 秒节拍更新一次，其余呼吸、姿态和质量数据仍保持实时刷新；同时 `server.js` 关闭了 `petCareMini` 的 `[petCareMini] algorithm result` 周期性信息日志，避免运行期刷屏。
     - 当系统类型为 `hand0205` / `handGlove115200` / `handGloveFullPacket` 且前端处于普通 3D 遥操模式时，`Home.jsx` 使用模型渲染矩阵继续驱动手部姿态与手指弯曲，但 Aside 面板中的 `meanPres`、`maxPres`、`totalPres`、`point` 以及 Pressure Area / Pressure Data 图表改为直接基于原始 256 点矩阵（`realArr` / `rawPressureData`）计算和渲染，避免统计值被映射后的控制数据覆盖。
     - 当系统类型为 `handGloveFullPacket` 时，`server.js` 在 `AA 55 03 99` 分隔符后按 274 字节整包解析：前 2 字节为帧号与类型（当前按 `01` 右手、`02` 左手路由），中间 256 字节为手套压力矩阵，末尾 16 字节陀螺仪数据暂不参与渲染；解析后按整包协议专用的左右手 1-based 点位表映射到固定 `15x13`（195 点）数组：前 4 行为手指，第 5 行为指腹（非指腹格补 0），后 8 行为手掌（掌面空白格补 0）。`mappedArr195` 专用于原始数据视图的规则排布，`realArr` / `rawPressureData` 保留原始 256 点并继续供 `num` 2D 数字模式以 `16x16` 高速矩阵显示，`sitData` / `backData` 专用于旧手套 3D 模型并承载转换后的 32x32（1024 点）矩阵；前端会跳过整包手套的旧 `hand0205` 原始数据二次映射路径，避免 256/195/1024 三种数据形态互相覆盖。
@@ -319,6 +319,7 @@ graph TD
 | 2026-05-21 | Codex | 小床检测原始展示转置入口收敛 | 将 `smallBed` / `smallBed12B` 原始数据展示的 32x32 转置集中到 `Num2Doriginal.jsx` 的 `changeWsDataRaw`，并补齐 `smallBed` 专用 CSV 导出分支的 `data` 列转置 |
 | 2026-05-21 | Codex | 小床监测原始矩阵方向补齐 | 将界面“小床监测”对应的 `jqbed` 纳入原始数据展示与 CSV `data` 列的 32x32 对角线转置规则 |
 | 2026-05-21 | Codex | 小床检测(12B)颜色范围扩展 | `smallBed12B` 从通用 `bed` 显示配置拆出独立默认值，当前默认高斯为 `2`、颜色上限为 `2205`、颜色滑块范围为 `5-4000` 且步进为 `10`、高度默认值为 `0.1` |
+| 2026-05-21 | Codex | 小床检测(12B)渲染参数同步 | 将 12B 纳入 `Home.jsx` 的渲染器参数同步逻辑，进度条默认值会在首次挂载、系统切换、模式切换和滑块变更时同步到 3D 组件 |
 | 2026-05-18 | Codex | 密钥默认系统修正 | `server.js` 在读取或更换非 all 密钥时将当前 `file` 设为密钥授权列表第一个系统；`Home.jsx` 对同时包含 `file/selectFlag` 的授权消息由 `selectFlag` 统一切换，避免默认展示到密钥外系统 |
 | 2026-05-18 | Codex | 温度全床 CSV 温度格式 | `server.js` 的温度全床 CSV 导出将 `temperatureData` 和 `temperatureAvg` 格式化为 1 位小数，实时展示和落库数据不变 |
 | 2026-05-18 | Codex | Windows 换密钥系统列表刷新 | `server.js` 恢复从密钥 `file` 字段生成 `selectFlag`，`Home.jsx` 根据 `selectFlag` 写入并恢复 `allowedTypes`，`Title.jsx` 按 `allowedTypes` 过滤系统下拉；新密钥不包含当前系统时自动切到第一个授权系统 |
@@ -548,6 +549,7 @@ graph TD
 | 2026-05-21 | Codex | 修复缺陷 | 修复小床检测原始数据展示未生效的问题：转置逻辑改到 `Num2Doriginal.jsx` 最终渲染入口，并补齐 `smallBed` 专用 CSV 导出路径 |
 | 2026-05-21 | Codex | 修复缺陷 | 补齐 `jqbed` 小床监测系统的原始数据展示和 CSV 导出方向转置，避免界面所选“小床监测”未命中 `smallBed` 规则 |
 | 2026-05-21 | Codex | 配置变更 | 调整 `smallBed12B` 可视化默认参数：高斯 `2`、颜色 `2205`、颜色滑块最大值 `4000`、步进 `10`、高度 `0.1` |
+| 2026-05-21 | Codex | 修复缺陷 | 修复 `smallBed12B` 打包后进度条显示默认值但 3D 图仍使用旧内部初始值的问题，统一由 `syncDisplayRendererConfig()` 下发当前 state |
 | 2026-05-18 | Codex | 修复缺陷 | 修复换密钥后默认展示系统可能不是密钥内系统的问题，非 all 授权默认进入授权列表第一个系统 |
 | 2026-05-18 | Codex | 配置变更 | 温度全床下载 CSV 中公式转换后的温度值统一保留 1 位小数 |
 | 2026-05-18 | Codex | 修复缺陷 | 修复 Windows 换密钥后系统下拉不变化：后端不再把授权范围固定下发为 `all`，前端恢复按授权类型过滤并持久化 `allowedTypes` |

@@ -379,6 +379,7 @@ const petCareMatrixArr = ['petCare', 'petCareMini']
 const isPetCareMatrix = (type) => petCareMatrixArr.includes(type)
 const tempFullBedMatrix = 'tempFullBed'
 const bedArr = ['jqbed', tempFullBedMatrix, ...petCareMatrixArr, 'xiyueReal1', 'smallBed', 'smallBed1']
+const displayRendererConfigMatrixArr = ['smallBed', 'smallBed12B', 'jqbed', ...petCareMatrixArr]
 
 const initConfig = {
   bed: {
@@ -769,8 +770,8 @@ class Home extends React.Component {
     this.headIndexArr = new Array(4).fill(0);
   }
 
-  syncPetCareRendererConfig = () => {
-    if (!isPetCareMatrix(this.state.matrixName)) {
+  syncDisplayRendererConfig = () => {
+    if (!displayRendererConfigMatrixArr.includes(this.state.matrixName)) {
       return;
     }
 
@@ -843,7 +844,7 @@ class Home extends React.Component {
   componentDidMount() {
     // window.alert(window.innerWidth)
     document.documentElement.style.fontSize = `${window.innerWidth / 120}px`;
-    this.syncPetCareRendererConfig();
+    this.syncDisplayRendererConfig();
     // 暴露全局重连函数，供主进程 executeJavaScript 直接调用
     // 确保重连时 onmessage、wsData 等 React 回调完整绑定
     window.__wsReconnect = () => {
@@ -2599,7 +2600,7 @@ class Home extends React.Component {
       prevState.valuelInit1 !== this.state.valuelInit1;
 
     if (rendererConfigChanged) {
-      this.syncPetCareRendererConfig();
+      this.syncDisplayRendererConfig();
     }
   }
 
