@@ -1,0 +1,17 @@
+{
+  "name": "@shroom/pressure-visualization",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Internal pressure sensor visualization SDK for Shroom applications.",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "peerDependencies": {
+    "react": ">=18 <20",
+    "react-dom": ">=18 <20",
+    "three": ">=0.127 <1",
+    "echarts": "^5.5.0"
+  }
+}

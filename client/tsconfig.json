@@ -27,7 +27,8 @@
       "@components/*": ["./src/components/*"],
       "@hooks/*": ["./src/hooks/*"],
       "@assets/*": ["./src/assets/*"],
-      "@utils/*": ["./src/assets/util/*"]
+      "@utils/*": ["./src/assets/util/*"],
+      "@shroom/pressure-visualization": ["../packages/pressure-visualization-sdk/src"]
     },
 
     /* 互操作性 */
@@ -41,6 +42,6 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.js", "src/**/*.jsx"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.js", "src/**/*.jsx", "../packages/pressure-visualization-sdk/src/**/*.js", "../packages/pressure-visualization-sdk/src/**/*.jsx"],
   "exclude": ["node_modules", "build", "dist"]
 }
