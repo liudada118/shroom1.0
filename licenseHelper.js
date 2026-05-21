@@ -36,16 +36,21 @@ function getConfigFileCandidates() {
     candidates.push(writableConfig);
   }
 
-  if (packaged && process.execPath) {
-    candidates.push(path.join(path.dirname(process.execPath), 'config.txt'));
-  }
-
-  if (packaged && process.resourcesPath) {
-    candidates.push(path.join(process.resourcesPath, 'config.txt'));
-  }
-
   if (!packaged) {
     candidates.push(path.join(__dirname, 'config.txt'));
+  } else {
+    if (process.execPath) {
+      if (process.platform === 'darwin') {
+        const appBundleDir = path.dirname(path.dirname(path.dirname(process.execPath)));
+        candidates.push(path.join(path.dirname(appBundleDir), 'config.txt'));
+      }
+
+      candidates.push(path.join(path.dirname(process.execPath), 'config.txt'));
+    }
+
+    if (process.resourcesPath) {
+      candidates.push(path.join(process.resourcesPath, 'config.txt'));
+    }
   }
 
   return [...new Set(candidates)];
@@ -61,24 +66,11 @@ function getWritableConfigFile() {
 
 function resolveConfigFile() {
   const writableConfig = getWritableConfigFile();
-  if (fs.existsSync(writableConfig)) {
-    return writableConfig;
-  }
-
-  const existingReadonlyConfig = getConfigFileCandidates()
-    .filter((candidate) => candidate !== writableConfig)
+  const existingConfig = getConfigFileCandidates()
     .find((candidate) => fs.existsSync(candidate));
 
-  if (existingReadonlyConfig) {
-    try {
-      fs.mkdirSync(path.dirname(writableConfig), { recursive: true });
-      fs.copyFileSync(existingReadonlyConfig, writableConfig);
-      logger.info(`[License] copied config.txt to writable path: ${writableConfig}`);
-      return writableConfig;
-    } catch (err) {
-      logger.warn(`[License] failed to copy config.txt to writable path, fallback to readonly file: ${err.message}`);
-      return existingReadonlyConfig;
-    }
+  if (existingConfig) {
+    return existingConfig;
   }
 
   return writableConfig;

@@ -666,6 +666,14 @@ let onBedState = []
 class Home extends React.Component {
   constructor() {
     super();
+    let storedAllowedTypes = null;
+    try {
+      const parsedAllowedTypes = JSON.parse(localStorage.getItem('allowedTypes') || 'null');
+      storedAllowedTypes = Array.isArray(parsedAllowedTypes) ? parsedAllowedTypes : null;
+    } catch (err) {
+      storedAllowedTypes = null;
+    }
+
     this.state = {
       hand: true,
       matrixName: 'hand0205',//localStorage.getItem('file'),
@@ -682,8 +690,8 @@ class Home extends React.Component {
       portname: "",
       portnameBack: "",
       portnameHead: '',
-      matrixTitle: true,
-      allowedTypes: localStorage.getItem('allowedTypes') ? JSON.parse(localStorage.getItem('allowedTypes')) : null,
+      matrixTitle: localStorage.getItem('matrixTitle') === 'false' ? false : true,
+      allowedTypes: storedAllowedTypes,
       local: false,
       dataArr: [],
       index: 0,
@@ -1404,7 +1412,11 @@ class Home extends React.Component {
         // 多类型模式：使用数组第一个作为默认类型
         const nextMatrixName = jsonObject.file[0]
         const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag)
+        localStorage.setItem('matrixTitle', false)
+        localStorage.setItem('allowedTypes', JSON.stringify(jsonObject.file))
         this.setState({
+          matrixTitle: false,
+          allowedTypes: jsonObject.file,
           matrixName: nextMatrixName,
           numMatrixFlag: nextMode,
           ...getConfig({ sensorType: nextMatrixName, mode: nextMode }),
@@ -1413,7 +1425,11 @@ class Home extends React.Component {
       } else if (jsonObject.file) {
         const nextMatrixName = jsonObject.file
         const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag)
+        localStorage.setItem('matrixTitle', false)
+        localStorage.setItem('allowedTypes', JSON.stringify([jsonObject.file]))
         this.setState({
+          matrixTitle: false,
+          allowedTypes: [jsonObject.file],
           matrixName: nextMatrixName,
           numMatrixFlag: nextMode,
           ...getConfig({ sensorType: nextMatrixName, mode: nextMode }),

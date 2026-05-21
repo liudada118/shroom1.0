@@ -78,7 +78,7 @@ const {
   carYLine,
 } = require("./openWeb");
 const module2 = require('./aes_ecb')
-const { resolveConfigFile, getConfigFileCandidates } = require('./licenseHelper');
+const { resolveConfigFile, getConfigFileCandidates, getWritableConfigFile } = require('./licenseHelper');
 const { isCar, dedupli, totalToN, } = require("./util");
 const { pressSmallBed } = require("./utilMatrix");
 const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine, pressNew12203131 } = require('./server/mathUtils');
@@ -478,6 +478,7 @@ let pdfPath = app.isPackaged && process.platform === 'darwin'
   ? path.join(exportRoot, "OneStep")
   : path.join(runtimeWritableRoot, "OneStep");
 let nameTxt = resolveConfigFile();
+let writableNameTxt = getWritableConfigFile();
 
 if (!fs.existsSync(filePath)) {
   fs.mkdirSync(filePath, { recursive: true });
@@ -711,17 +712,31 @@ function shutdownServer() {
 
 const defauleFile = 'hand0205'
 let date, sysStartTime, file = defauleFile, selectFlag
-function getLicenseSelectFlag(licenseFile) {
+let licenseFile = null
+
+function getSelectFlagFromLicense(licenseFile) {
   if (licenseFile === 'all') return 'all';
-  if (Array.isArray(licenseFile)) return licenseFile.filter(Boolean);
-  if (licenseFile) return [licenseFile];
-  return 'all';
+  if (Array.isArray(licenseFile)) {
+    return licenseFile.filter((item) => typeof item === 'string' && item.trim());
+  }
+
+  if (typeof licenseFile === 'string' && licenseFile.trim() && licenseFile !== 'all') {
+    return [licenseFile];
+  }
+
+  return undefined;
 }
 
-function getDefaultFileForLicense(licenseFile, fallback = defauleFile) {
-  if (licenseFile === 'all') return fallback;
-  if (Array.isArray(licenseFile)) return licenseFile.find(Boolean) || fallback;
-  return licenseFile || fallback;
+function getDefaultFileFromLicense(licenseFile, fallback = null) {
+  if (Array.isArray(licenseFile)) {
+    return licenseFile.find((item) => typeof item === 'string' && item.trim()) || fallback;
+  }
+
+  if (typeof licenseFile === 'string' && licenseFile.trim() && licenseFile !== 'all') {
+    return licenseFile;
+  }
+
+  return fallback;
 }
 
 if (fs.existsSync(nameTxt)) {
@@ -729,8 +744,9 @@ if (fs.existsSync(nameTxt)) {
     const dateRes = fs.readFileSync(nameTxt, 'utf8');
     const parsedData = JSON.parse(module2.decryptStr(dateRes));
     endDate = parseFloat(parsedData.date);
-    selectFlag = getLicenseSelectFlag(parsedData.file);
-    file = getDefaultFileForLicense(parsedData.file);
+    licenseFile = parsedData.file || null;
+    selectFlag = getSelectFlagFromLicense(parsedData.file);
+    file = getDefaultFileFromLicense(parsedData.file, defauleFile);
     // 鏍规嵁 file 绫诲瀷璁剧疆娉㈢壒鐜?
     baudRate = getSensorBaudRate(file);
   } catch (err) {
@@ -970,7 +986,7 @@ module.exports = {
          *  */
         const jsonData = JSON.stringify({
           port: serialport,
-          file,
+          file: licenseFile || file,
           selectFlag: selectFlag
           // length: csvSitData.length,
           // sitData: csvSitData[0], backData: csvBackData[0]
@@ -986,7 +1002,7 @@ module.exports = {
           const jsonData = JSON.stringify({
             date: endDate,
             nowDate: nowDate,
-            file: file,
+            file: licenseFile || file,
             selectFlag: selectFlag
           });
           if (client.readyState === WebSocket.OPEN) {
@@ -1039,20 +1055,25 @@ module.exports = {
               return;
             }
 
-            fs.mkdirSync(path.dirname(nameTxt), { recursive: true });
-            fs.writeFile(nameTxt, date, err => {
+            fs.mkdirSync(path.dirname(writableNameTxt), { recursive: true });
+            fs.writeFile(writableNameTxt, date, err => {
               if (err) {
                 logger.error(err);
               }
             });
+            nameTxt = writableNameTxt;
 
             const parsedLicense = JSON.parse(dateRes);
-            selectFlag = getLicenseSelectFlag(parsedLicense.file);
-            file = getDefaultFileForLicense(parsedLicense.file, file);
+            licenseFile = parsedLicense.file || null;
+            selectFlag = getSelectFlagFromLicense(parsedLicense.file);
             // 支持 moduleConfig 字段：各传感器类型的默认功能模块配置
             // { [sensorValue]: numMatrixFlag }
             const rawModuleConfig = parsedLicense.moduleConfig || null;
-            // License type is no longer used to lock or switch the active sensor.
+            const nextFile = getDefaultFileFromLicense(parsedLicense.file);
+            if (nextFile) {
+              file = nextFile;
+              Object.keys(petCareSystems).forEach(resetPetCareRuntime);
+            }
             endDate = parseFloat(parsedLicense.date);
 
             baudRate = getSensorBaudRate(file);
@@ -1060,7 +1081,7 @@ module.exports = {
               const payload = {
                 date: endDate,
                 nowDate: nowDate,
-                file,
+                file: licenseFile || file,
                 selectFlag: selectFlag,
               };
               // 将功能模块配置一并下发给前端

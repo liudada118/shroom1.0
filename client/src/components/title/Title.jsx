@@ -800,9 +800,9 @@ class Title extends React.Component {
       { label: t('sensorHumanBody'), value: 'humanBody' },
     ]
 
-    const allowedTypes = Array.isArray(this.props.allowedTypes) ? this.props.allowedTypes : null;
-    const sensorArr = allowedTypes && allowedTypes.length
-      ? allSensorArr.filter(item => allowedTypes.includes(item.value))
+    const allowedTypes = Array.isArray(this.props.allowedTypes) ? this.props.allowedTypes : [];
+    const sensorArr = allowedTypes.length
+      ? allSensorArr.filter((sensor) => allowedTypes.includes(sensor.value))
       : allSensorArr;
 
     const navItems = [

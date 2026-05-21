@@ -746,10 +746,12 @@ function main() {
 
   run("ditto", ["-c", "-k", "--sequesterRsrc", "--keepParent", appPath, updateZipPath]);
   createDmg();
+  signPath(dmgPath, identity);
   const dmgSubmissionId = process.env.DMG_NOTARY_SUBMISSION_ID || submitForNotarization(dmgPath, notaryArgs);
   console.log(`[release] dmg notarization submission -> ${dmgSubmissionId}`);
   waitForNotarization(dmgSubmissionId, notaryArgs);
   run("xcrun", ["stapler", "staple", dmgPath]);
+  run("spctl", ["-a", "-t", "open", "--context", "context:primary-signature", "-vv", dmgPath]);
   writeLatestMacYml();
 
   console.log(`[release] update zip -> ${updateZipPath}`);
