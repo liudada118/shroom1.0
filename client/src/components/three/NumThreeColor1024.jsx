@@ -18,6 +18,16 @@ var valuej1 = localStorage.getItem('carValuej') ? JSON.parse(localStorage.getIte
   valuelInit1 = localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2,
   valuelInit2 = localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2;
 var valuep = 0, valueprop = 1
+const getTextureRange = (textureValueMax) => {
+  const max = textureValueMax && textureValueMax > 255 ? Math.round(textureValueMax) : 255;
+  return max > 255
+    ? { max, cols: 32, rows: Math.ceil((max + 1) / 32) }
+    : { max: 255, cols: 16, rows: 16 };
+}
+const clampTextureValue = (value, textureValueMax) => {
+  const { max } = getTextureRange(textureValueMax);
+  return Math.max(0, Math.min(max, Math.round(Number(value) || 0)));
+}
 function jet(min, max, x) {
   let red, g, blue;
   let dv;
@@ -196,14 +206,17 @@ export default React.forwardRef((props, refs) => {
 
   }
 
-  function sitValue(props) {
-    const { valuej, valueg, value, valuel, valuef, valuelInit, press, prop } = props;
+  function sitValue(config) {
+    const { valuej, valueg, value, valuel, valuef, valuelInit, press, prop } = config;
     if (valuej) {
       valuej1 = valuej;
       // 颜色变化时重新生成精灵图纹理并更新材质
       if (materialRef) {
-        const newTex = createDigitSpriteSheetWithJet(valuej1);
+        const textureMax = props.textureValueMax || 255;
+        const newTex = createDigitSpriteSheetWithJet(props.textureValueMax ? textureMax : valuej1, textureMax);
         materialRef.uniforms.map.value = newTex;
+        const { cols, rows } = getTextureRange(textureMax);
+        materialRef.uniforms.tileSize.value.set(1.0 / cols, 1.0 / rows);
         materialRef.uniforms.map.value.needsUpdate = true;
       }
     }
@@ -219,6 +232,8 @@ export default React.forwardRef((props, refs) => {
   useImperativeHandle(refs, () => ({
 
     sitData: sitData,
+    changeWsDataRaw: (wsPointData) => sitData({ wsPointData }, props.local),
+    changeWsData: (wsPointData) => sitData({ wsPointData }, props.local),
     sitValue
     // actionAll: actionAll,
     // actionSit: actionSit,
@@ -226,22 +241,22 @@ export default React.forwardRef((props, refs) => {
   }));
 
 
-  function createDigitSpriteSheetWithJet(maxVal) {
+  function createDigitSpriteSheetWithJet(maxVal, textureValueMax = 255) {
+    const { max: textureMax, cols, rows } = getTextureRange(textureValueMax);
     const canvas = document.createElement("canvas");
-    canvas.width = canvas.height = 512;
-    const ctx = canvas.getContext("2d");
-
-    const gridSize = 16;
     const cellSize = 32;
+    canvas.width = cols * cellSize;
+    canvas.height = rows * cellSize;
+    const ctx = canvas.getContext("2d");
     const colorMax = (maxVal && maxVal > 0) ? maxVal : 30;
 
-    ctx.font = "bold 18px monospace";
+    ctx.font = `bold ${textureMax > 255 ? 16 : 18}px monospace`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
-    for (let i = 0; i < 256; i++) {
-      const x = i % gridSize;
-      const y = Math.floor(i / gridSize);
+    for (let i = 0; i <= textureMax; i++) {
+      const x = i % cols;
+      const y = Math.floor(i / cols);
       const cx = x * cellSize;
       const cy = y * cellSize;
 
@@ -262,6 +277,9 @@ export default React.forwardRef((props, refs) => {
 
     const tex = new THREE.CanvasTexture(canvas);
     tex.flipY = false;
+    tex.generateMipmaps = false;
+    tex.wrapS = THREE.ClampToEdgeWrapping;
+    tex.wrapT = THREE.ClampToEdgeWrapping;
     tex.minFilter = THREE.LinearFilter;
     tex.magFilter = THREE.NearestFilter;
     return tex;
@@ -356,19 +374,21 @@ export default React.forwardRef((props, refs) => {
     canvas.addEventListener('pointerleave', onPointerUp);
     canvas.addEventListener('pointercancel', onPointerUp);
 
-    const texture = createDigitSpriteSheetWithJet(valuej1);
+    const textureMax = props.textureValueMax || 255;
+    const { max: textureValueMax, cols: textureCols, rows: textureRows } = getTextureRange(textureMax);
+    const texture = createDigitSpriteSheetWithJet(props.textureValueMax ? textureValueMax : valuej1, textureValueMax);
 
     const material = new THREE.ShaderMaterial({
 
       uniforms: {
         map: { value: texture },
-        tileSize: { value: 1.0 / 16.0 }
+        tileSize: { value: new THREE.Vector2(1.0 / textureCols, 1.0 / textureRows) }
       },
       vertexShader: `
         attribute vec3 instanceColor;
         varying vec3 vColor;
         attribute vec2 uvOffset;
-        uniform float tileSize;
+        uniform vec2 tileSize;
         varying vec2 vUv;
         void main() {
           vUv = uv * tileSize + uvOffset;
@@ -427,8 +447,8 @@ export default React.forwardRef((props, refs) => {
       mesh.setMatrixAt(i, dummy.matrix);
 
       const d = 20//Math.floor(Math.random() * 256);
-      uvOffsets[i * 2] = (d % 16) / 16;
-      uvOffsets[i * 2 + 1] = Math.floor(d / 16) / 16;
+      uvOffsets[i * 2] = (d % textureCols) / textureCols;
+      uvOffsets[i * 2 + 1] = Math.floor(d / textureCols) / textureRows;
     }
     let oldTime = new Date().getTime()
 
@@ -498,12 +518,12 @@ export default React.forwardRef((props, refs) => {
         dummy.updateMatrix();
         mesh.setMatrixAt(i, dummy.matrix);
 
-        const d = data[i]//Math.floor(Math.random() * 256);
-        uvOffsets[i * 2] = (d % 16) / 16;
-        uvOffsets[i * 2 + 1] = Math.floor(d / 16) / 16;
+        const d = clampTextureValue(data[i], textureValueMax)//Math.floor(Math.random() * 256);
+        uvOffsets[i * 2] = (d % textureCols) / textureCols;
+        uvOffsets[i * 2 + 1] = Math.floor(d / textureCols) / textureRows;
 
         // const d = Math.floor(Math.random() * 256);
-        const r = d / 255;
+        const r = d / textureValueMax;
         const g = 0.2;
         const b = 1.0 - r;
 
