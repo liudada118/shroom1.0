@@ -186,7 +186,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Shroom",
-      "include": "scripts/installer.nsh"
+      "include": "scripts/installer.nsh",
+      "license": "docs/EULA.txt"
     },
     "mac": {
       "icon": "./logo.icns",
