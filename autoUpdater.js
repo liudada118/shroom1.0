@@ -79,6 +79,7 @@ class AppUpdater {
     this._timer = null;
     this._startupCheckTimer = null;
     this._installRequested = false;
+    this._beforeInstall = typeof options.beforeInstall === "function" ? options.beforeInstall : null;
 
     // 配置 autoUpdater
     autoUpdater.autoDownload = options.autoDownload || false;
@@ -180,7 +181,9 @@ class AppUpdater {
         })
         .then(({ response }) => {
           if (response === 0) {
-            this.installDownloadedUpdate();
+            this.installDownloadedUpdate().catch((err) => {
+              logger.error("[Updater] installDownloadedUpdate failed:", normalizeUpdaterErrorMessage(err));
+            });
           }
         });
     });
@@ -205,8 +208,7 @@ class AppUpdater {
             return autoUpdater.downloadUpdate();
           case "installUpdate":
             logger.info("[Updater] 收到前端安装更新请求");
-            this.installDownloadedUpdate();
-            return true;
+            return this.installDownloadedUpdate();
           default:
             return null;
         }
@@ -245,10 +247,35 @@ class AppUpdater {
     }
   }
 
-  installDownloadedUpdate() {
+  async installDownloadedUpdate() {
+    if (this._installRequested) {
+      logger.warn("[Updater] installDownloadedUpdate ignored because installation is already requested");
+      return false;
+    }
+
     this._installRequested = true;
+    this.stopAutoCheck();
+    this._sendStatus({ type: "installing-update" });
+
+    try {
+      if (this._beforeInstall) {
+        logger.info("[Updater] Preparing application shutdown before launching installer...");
+        await this._beforeInstall();
+      }
+    } catch (err) {
+      const message = normalizeUpdaterErrorMessage(err);
+      this._installRequested = false;
+      logger.error("[Updater] Failed to prepare application shutdown:", message);
+      this._sendStatus({
+        type: "update-error",
+        message,
+      });
+      throw err;
+    }
+
     logger.info("[Updater] 调用 quitAndInstall，准备交给 Squirrel.Mac/安装器处理");
     autoUpdater.quitAndInstall(false, true);
+    return true;
   }
 
   isInstallingUpdate() {

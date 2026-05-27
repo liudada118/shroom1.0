@@ -8,6 +8,8 @@ import { genWebglHeatmap } from './WebGL.HeatMap copy 2'
  */
 const Canvas4096WebGL = React.forwardRef((props, refs) => {
   const canvasRef = useRef(null)
+  const totalArrRef = useRef([])
+  const totalPointArrRef = useRef([])
 
   // 运行时参数（通过 sitValue / changeColor 更新）
   const cfgRef = useRef({
@@ -21,6 +23,46 @@ const Canvas4096WebGL = React.forwardRef((props, refs) => {
 
   // requestAnimationFrame id
   const rafRef = useRef(null)
+
+  function getMax(arr) {
+    return arr.reduce((max, item) => (max > item ? max : item), 0)
+  }
+
+  function updatePressureStats(rawData, isLocal) {
+    const dataArr = Array.isArray(rawData) ? rawData : []
+    const max = getMax(dataArr)
+    const point = dataArr.filter((item) => item > 0).length
+    const press = dataArr.reduce((sum, item) => sum + item, 0)
+    const mean = press / (point === 0 ? 1 : point)
+
+    props.data.current?.changeData({
+      meanPres: mean.toFixed(2),
+      maxPres: max,
+      point,
+      totalPres: press,
+    })
+
+    if (totalArrRef.current.length < 20) {
+      totalArrRef.current.push(press)
+    } else {
+      totalArrRef.current.shift()
+      totalArrRef.current.push(press)
+    }
+
+    if (totalPointArrRef.current.length < 20) {
+      totalPointArrRef.current.push(point)
+    } else {
+      totalPointArrRef.current.shift()
+      totalPointArrRef.current.push(point)
+    }
+
+    if (!isLocal) {
+      const maxTotal = getMax(totalArrRef.current)
+      const maxPoint = getMax(totalPointArrRef.current)
+      props.data.current?.handleCharts(totalArrRef.current, maxTotal + 1000)
+      props.data.current?.handleChartsArea(totalPointArrRef.current, maxPoint + 100)
+    }
+  }
 
   // 渲染一帧
   function renderFrame() {
@@ -81,9 +123,10 @@ const Canvas4096WebGL = React.forwardRef((props, refs) => {
 
   /** 接收新帧数据（与 Bed4096 sitData 接口兼容） */
   function sitData(prop) {
-    const { wsPointData } = prop || {}
+    const { wsPointData, local } = prop || {}
     if (wsPointData && wsPointData.length >= 4096) {
       dataRef.current = wsPointData
+      updatePressureStats(wsPointData, local ?? props.local)
     }
   }
 
@@ -107,6 +150,7 @@ const Canvas4096WebGL = React.forwardRef((props, refs) => {
   function bthClickHandle(wsPointData) {
     if (wsPointData && wsPointData.length >= 4096) {
       dataRef.current = wsPointData
+      updatePressureStats(wsPointData, props.local)
     }
     renderFrame()
     return canvasRef.current

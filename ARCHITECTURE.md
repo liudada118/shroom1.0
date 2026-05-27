@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-05-21
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-05-27
 
 ## 1. 项目概述
 
@@ -246,6 +246,7 @@ graph TD
 5. **自动更新流程**
     - 应用启动 30 秒后 → `autoUpdater.js` 检查自建服务器 `http://sensor.bodyta.com/shroom1` → 发现新版本后通过 `update-status` IPC 通道通知前端 → 前端 `UpdateNotifier` 组件弹出通知 → 用户点击「下载更新」后通过 `update-command` IPC 通道触发下载 → 下载过程中实时推送进度到前端 → 下载完成后弹窗询问是否立即安装并重启。
     - 若检查更新阶段遇到 `ERR_CONTENT_LENGTH_MISMATCH`，主进程会等待 1.5 秒后自动重试一次；若仍失败，则将归一化后的错误消息通过 `update-status` / `update-command` 返回给前端，提示优先排查更新服务器、CDN 或代理缓存的响应头与实际文件长度不一致问题。
+    - 用户确认立即安装后，`autoUpdater.js` 会先调用主进程传入的 `beforeInstall` 清理钩子，关闭静态资源服务、WebSocket 服务、串口、数据库、Python worker 和 OneStep 报告 HTTP 服务，再触发 `quitAndInstall()`，避免 Windows NSIS 安装器因旧版进程未完全退出而弹出“Shroom 无法关闭”重试对话框。
     - IPC 通道：`update-command`（前端 → 主进程：checkForUpdate / downloadUpdate / installUpdate）、`update-status`（主进程 → 前端：checking / available / downloading / downloaded / error）。
     - 仅在打包后（`app.isPackaged`）启用自动更新，开发环境不触发。
 
@@ -315,6 +316,21 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-05-27 | Codex | OneStep 左侧压力图表修复 | `Canvas4096WebGL` 在接收 4096 原始矩阵时同步计算平均压力、最大压力、有效点数和总压力，并向左侧 Pressure Data / Pressure Area 图表推送最近 20 帧数据。 |
+| 2026-05-26 | Codex | 整椅 2D 三路分发修正 | 修正 `wholeChair` 在 `2D数字` 模式下 sit/back 仍依赖隐藏的 `carState` 菜单才更新的问题，三路数据现在直接分发到 `WholeChairNum2D` 的 head/back/sit 独立面板。 |
+| 2026-05-26 | Codex | 整椅 head CSV 下载修正 | 修正三串口导出时 head CSV 复用 back 行缓存的问题，head 导出现在使用独立缓存并基于 head 自身数据计算面积、压力和最大值。 |
+| 2026-05-26 | Codex | 整椅后端方向修正 | 在 `server.js` 的 `wholeChair` 统一线序输出中追加 back 上下翻转和 head 上下翻转，实时、回放和 CSV 下载保持一致方向。 |
+| 2026-05-26 | Codex | 整椅 head 方向追加修正 | 在 `wholeChairHeadLine` 中取消 head 左右翻转，仅保留上下翻转，确保 head 10x10 数据方向符合实际安装方向。 |
+| 2026-05-26 | Codex | 整椅 head 后端数值缩放 | 在 `wholeChairHeadLine` 后端统一输出阶段将 head 10x10 数据除以 2，实时、回放和 CSV 下载共享同一缩放结果。 |
+| 2026-05-26 | Codex | 整椅后端小高斯 | 在 `wholeChair` 的 sit/back/head 原始 1024 帧后端线序转换出口追加半径 0.5 的高斯平滑，新采集、回放旧原始帧和 CSV 下载共用平滑后的数据。 |
+| 2026-05-26 | Codex | 整椅过滤值生效修正 | 修正 `wholeChair` 过滤滑块未作用于 3D 点图和 2D 数字的问题：3D 在插值/高斯前按 `valuef` 过滤，2D 数字保存原始矩阵并按当前过滤值派生显示。 |
+| 2026-05-26 | Codex | 整椅 2D 数字展示取消 | 移除 `wholeChair` 的 2D 数字模式入口和专用渲染分支，整椅展示固定回到 `normal` 3D 模型/点图模式。 |
+| 2026-05-27 | Codex | 整椅可视化默认值调整 | 调整 `wholeChair` 默认可视化参数：颜色 25、过滤 6、高度 15、数据连贯性 4、润滑/平滑程度 2。 |
+| 2026-05-26 | Codex | 整椅 3D 靠背点图上下翻转 | 在 `wholeChair.jsx` 的 3D 点图渲染入口仅对 back 矩阵做前端显示层上下翻转，neck/sit 保持原方向，不影响后端数据、2D 数字和 CSV 下载。 |
+| 2026-05-26 | Codex | 整椅展示 2D 数字视图 | 新增 `WholeChairNum2D` 专用组件，`wholeChair` 的 `2D数字` 模式同屏展示 head 10x10、back 16x16、sit 16x16 三路矩阵；Title 中移除整椅展示右侧整体/靠背/座椅/头枕切换入口。 |
+| 2026-05-26 | Codex | 整椅展示线序后端化 | 将 `wholeChair` 的 sit/back/head QXline 线序从前端迁移到 `server.js` 串口解析、回放读取和 CSV 下载链路，下载与回放统一使用线序后的 16x16/10x10 数据，并保留旧 1024 原始历史帧兼容。 |
+| 2026-05-26 | Codex | 整椅展示可视化调节 | 将 `wholeChair` 纳入可视化调节白名单和渲染参数同步链路，支持高斯、颜色、过滤、高度、一致性和初始值参数从 Title 抽屉实时下发到整椅 Three.js 组件。 |
+| 2026-05-26 | Codex | 整椅展示系统 | 新增 `wholeChair` 整椅展示类型，接入 sit/back/head 三串口、1000000 波特率 1024 帧协议、QXline 线序映射和独立 Three.js 渲染组件。 |
 | 2026-05-21 | Codex | 小床检测(12B)硬件协议与展示类型 | 新增 `smallBed12B` 传感器类型：后端使用 `1500000` 波特率并按 `AA 00 55 00 03 00 99 00` 帧尾解析 2048 字节 payload 为 1024 个 `uint16LE` 压力点，随后复用 `jqbed(pointArr)` 小床线序；前端加入定制授权分组、系统下拉、模式选择、3D 小床展示和原始数据展示；该类型只走 Pressure Area / Pressure Data，不接入 jqbed/smallBed Python 生命体征面板，左侧统计使用插值/高斯前的原始矩阵 |
 | 2026-05-21 | Codex | 小床检测原始矩阵方向统一 | `smallBed` 原始数据展示和 CSV 导出 `data` 列改为沿左上-右下对角线转置 32x32 矩阵，与 12B 小床检测保持一致 |
 | 2026-05-21 | Codex | 小床检测原始展示转置入口收敛 | `smallBed` 原始数据展示的 32x32 转置集中到 `Num2Doriginal.jsx`，`smallBed12B` 原始高速渲染则在 `util.js` 进入 `Fast1024` 前转置；同时补齐 `smallBed` 专用 CSV 导出分支的 `data` 列转置 |
@@ -538,11 +554,28 @@ graph TD
 | 2026-04-24 | Codex | 宠物看护心率改为比较前后两帧呼吸队列 | `server.js` 为 `petCare` / `petCareMini` 的心率运行时新增 `breathRateQueue`，每次只缓存前后两帧 `Number(breath_rate).toFixed(1)` 后的呼吸值；只有两帧不同才调用心率函数重算 `heart_rate`，两帧相同则继续复用上一拍心率，离床或呼吸无效时同步清空队列 |
 
 | 2026-04-27 | Codex | 手套 3D skin 热力图切换为 WebGL 渲染层 | `client/src/components/video/hand.jsx` 将 `hand0205` / `handGlove115200` 的 3D `skin` 模式从 `HeatmapCanvas.changeHeatmap()` CPU 逐帧生成改为 `WebGLCanvas.render()` 生成离屏热力图，再回贴到原有 `CanvasTexture`；同时保留旧 `HeatmapCanvas` 的强度缩放与补边预处理，维持 `ndata1` 数据格式、`sitData/changeColor` 接口和现有贴图链路不变 |
+| 2026-05-26 | Codex | Windows 自动更新安装前退出清理 | `autoUpdater.js` 在 `quitAndInstall()` 前调用主进程清理钩子，`index.js` 统一等待静态服务和后端服务关闭，`server.js` 将串口、WebSocket、数据库和 OneStep 报告 HTTP 服务关闭流程 Promise 化，避免 NSIS 安装器提示旧版 Shroom 无法关闭 |
 
 ## 9. 更新日志
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-05-27 | Codex | 修复缺陷 | 修复 OneStep (`bed4096`) WebGL 渲染组件只绘制热力图、不更新左侧压力统计的问题；`sitData` 现在收到帧数据后直接更新 Pressure Data 和 Pressure Area。 |
+| 2026-05-26 | Codex | 修复缺陷 | 修复 `wholeChair` 2D 数字视图只有 head 面板刷新的问题：sit/back 在 `num` 模式下不再走旧的 carState 单块矩阵入口，而是直接调用整椅专用组件的 `sitData/backData`。 |
+| 2026-05-26 | Codex | 修复缺陷 | 修复三串口系统导出 `head*.csv` 时混入 back 数据的问题：head 下载分支改用独立 `csvWriteHeadData`，避免 `seconds` 列随 back/head 拼接重复从 0 开始。 |
+| 2026-05-26 | Codex | 配置变更 | `wholeChair` 后端线序方向调整：back 在输出 16x16 数据后上下翻转，head 在输出 10x10 数据后上下翻转，保证前端展示、历史回放和下载数据方向一致。 |
+| 2026-05-26 | Codex | 配置变更 | `wholeChair` 的 head 后端输出取消左右翻转，仅保留上下翻转，实时、回放和下载 CSV 均使用调整后的 10x10 数据。 |
+| 2026-05-26 | Codex | 配置变更 | `wholeChair` 的 head 后端输出数据统一除以 2，前端展示、历史回放和下载 CSV 不再单独缩放。 |
+| 2026-05-26 | Codex | 配置变更 | `wholeChair` 的 sit/back/head 后端线序输出增加 `0.5` 小高斯；高斯只作用于原始 1024 帧转换阶段，避免已处理历史帧回放/下载时重复平滑。 |
+| 2026-05-26 | Codex | 修复缺陷 | `wholeChair` 的过滤值现在同时作用于 3D 点图和 `WholeChairNum2D`：滑块值可为 0，低于阈值的数据会显示为 0，实时切换过滤值会立即刷新当前画面。 |
+| 2026-05-26 | Codex | 配置变更 | 取消 `wholeChair` 的 `2D数字` 展示：标题栏不再提供该模式，历史状态若停留在 `num` 会自动恢复为 `normal`。 |
+| 2026-05-27 | Codex | 配置变更 | `wholeChair` 在 `Title.jsx` 和 `Home.jsx` 中的默认渲染参数同步改为 `valuej1=25`、`valuef1=6`、`value1=15`、`valuel1=4`、`valueg1=2`。 |
+| 2026-05-26 | Codex | 配置变更 | `wholeChair` 3D 点图显示层仅对靠背 back 增加上下翻转，neck/sit 不再翻转，避免改变后端落库、回放和下载数据。 |
+| 2026-05-26 | Codex | 新增功能 | `wholeChair` 新增 `2D数字` 展示模式，直接渲染 head/back/sit 三个传感器二维数字矩阵，并取消整椅展示在标题栏的 carState 分区切换菜单。 |
+| 2026-05-26 | Codex | 配置变更 | `wholeChair` 线序处理前移到后端：实时入库、回放和 CSV 下载都会按 QXline 输出整椅 sit/back/head 数据；前端仅在遇到旧 1024 原始历史帧时做兼容转换，避免新数据重复处理。 |
+| 2026-05-26 | Codex | 配置变更 | `wholeChair` 整椅展示新增可视化调节默认参数，并接入 `displayRendererConfigMatrixArr` 与 Title 滑块白名单，切换系统和调节滑块时会同步更新 sit/back/head 渲染参数。 |
+| 2026-05-26 | Codex | 新增功能 | 新增 `wholeChair` 整椅展示系统：前端下拉、授权配置、三串口选择、sit/back/head 数据分发、QXline 线序映射、Three.js 整椅渲染组件与后端三库 head 回放链路同步接入。 |
+| 2026-05-26 | Codex | 修复缺陷 | 修复 Windows 自动更新安装器弹出“Shroom 无法关闭”的问题：安装前先释放主进程资源，并关闭此前未纳入退出清理的 OneStep 报告 HTTP 服务 `127.0.0.1:19245`。 |
 | 2026-05-21 | Codex | 新增功能 | 新增 `smallBed12B` 小床检测(12B)：后端使用 `1500000` 波特率，增加 8 字节帧尾解析器并按 1024 个 `uint16LE` 解析后复用小床检测线序，输出通用压力矩阵；前端加入定制授权分组、传感器下拉、模式选择和小床 3D/原始数据展示，左侧仅保留压力与面积统计，不接入 Python 算法数据，且统计来源为原始 32x32 矩阵 |
 | 2026-05-21 | Codex | 修复缺陷 | CSV 导出最左侧秒数列改为基于 SQLite 帧 `timestamp` 的真实相对秒数，避免固定 `j / 12` 导致非 12Hz 采集时秒数不准确 |
 | 2026-05-21 | Codex | 配置变更 | `smallBed12B` CSV 导出文件名前缀改为系统简写 `12B`，不再使用通用 `sit` 前缀 |

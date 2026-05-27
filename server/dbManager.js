@@ -23,13 +23,13 @@ function initDb(fileStr, filePath, runtimeResourceRoot) {
   logger.debug('initDb: ' + fileStr);
   let db, db1, db2;
 
-  if (isCar(fileStr)) {
-    db = genDb(`${filePath}/${fileStr}sit.db`, filePath, runtimeResourceRoot);
-    db1 = genDb(`${filePath}/${fileStr}back.db`, filePath, runtimeResourceRoot);
-  } else if (fileStr === 'volvo') {
+  if (fileStr === 'volvo' || fileStr === 'wholeChair') {
     db = genDb(`${filePath}/${fileStr}sit.db`, filePath, runtimeResourceRoot);
     db1 = genDb(`${filePath}/${fileStr}back.db`, filePath, runtimeResourceRoot);
     db2 = genDb(`${filePath}/${fileStr}head.db`, filePath, runtimeResourceRoot);
+  } else if (isCar(fileStr)) {
+    db = genDb(`${filePath}/${fileStr}sit.db`, filePath, runtimeResourceRoot);
+    db1 = genDb(`${filePath}/${fileStr}back.db`, filePath, runtimeResourceRoot);
   } else {
     db = genDb(`${filePath}/${fileStr}.db`, filePath, runtimeResourceRoot);
   }

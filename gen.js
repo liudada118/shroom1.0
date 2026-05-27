@@ -10,7 +10,7 @@ const rl = readline.createInterface({
 const ALL_SENSOR_TYPES = [
   'hand0205', 'handGlove115200', 'handGloveFullPacket', 'robot1', 'robotSY', 'robotLCF', 'footVideo',
   'fast256', 'fast1024', 'sofa', 'eye', 'daliegu',
-  'yanfeng10', 'foot', 'carQX', 'volvo', 'car', 'car10',
+  'yanfeng10', 'foot', 'carQX', 'wholeChair', 'volvo', 'car', 'car10',
   'jqbed', 'petCare', 'petCareMini', 'matCol', 'matColPos', 'carCol', 'newHand',
   'tempFullBed',
   'smallBed', 'xiyueReal1', 'gloves', 'gloves1', 'gloves2',

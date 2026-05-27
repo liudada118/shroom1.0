@@ -36,6 +36,7 @@ let mainWindow = null;
 let appUpdater = null;
 let viteProcess = null;  // Vite 子进程引用，用于退出时清理
 let staticServer = null; // 生产环境静态资源 HTTP 服务
+let appCleanupPromise = null;
 
 function focusMainWindow(win) {
   if (!win || win.isDestroyed()) {
@@ -113,6 +114,7 @@ const createWindow = () => {
         autoDownload: false,           // 不自动下载，让用户确认后再下载
         autoInstallOnAppQuit: true,    // 退出时自动安装已下载的更新
         checkInterval: 4 * 60 * 60 * 1000, // 每 4 小时自动检查一次
+        beforeInstall: prepareForUpdateInstall,
       });
       appUpdater.startAutoCheck();
     } else {
@@ -454,18 +456,48 @@ function killVite() {
 }
 
 function closeStaticServer() {
-  if (!staticServer) return;
+  if (!staticServer) return Promise.resolve();
 
   logger.info("[Main] Closing static server...");
-  staticServer.close((err) => {
-    if (err) {
-      logger.warn("[Main] Static server close failed:", err.message);
-      return;
-    }
-
-    logger.info("[Main] Static server closed");
-  });
+  const serverToClose = staticServer;
   staticServer = null;
+
+  return new Promise((resolve) => {
+    serverToClose.close((err) => {
+      if (err) {
+        logger.warn("[Main] Static server close failed:", err.message);
+      } else {
+        logger.info("[Main] Static server closed");
+      }
+      resolve();
+    });
+  });
+}
+
+function cleanupApplicationResources() {
+  if (appCleanupPromise) {
+    return appCleanupPromise;
+  }
+
+  appCleanupPromise = (async () => {
+    killVite();
+    await closeStaticServer();
+    if (typeof shutdownServer === "function") {
+      await shutdownServer();
+    }
+  })();
+
+  return appCleanupPromise;
+}
+
+async function prepareForUpdateInstall() {
+  logger.info("[Main] Preparing resources for update installation...");
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.hide();
+  }
+
+  await cleanupApplicationResources();
+  await new Promise((resolve) => setTimeout(resolve, 300));
 }
 
 // ============================================================
@@ -628,11 +660,9 @@ app.on("window-all-closed", () => {
 // 优雅退出：清理资源
 app.on("before-quit", () => {
   logger.info("[Main] Application is quitting, cleaning up...");
-  killVite();
-  closeStaticServer();
-  if (typeof shutdownServer === "function") {
-    shutdownServer();
-  }
+  cleanupApplicationResources().catch((err) => {
+    logger.warn("[Main] Cleanup failed:", err.message);
+  });
   if (appUpdater) {
     if (typeof appUpdater.isInstallingUpdate === "function" && appUpdater.isInstallingUpdate()) {
       logger.info("[Main] Skip updater dispose because update installation is in progress");

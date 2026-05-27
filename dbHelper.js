@@ -147,6 +147,13 @@ function initDatabases(sensorType, dbDir, isCarFn) {
   const templatePath = path.join(dbDir, "init.db");
   let db, db1, db2;
 
+  if (sensorType === "wholeChair") {
+    db = genDb(path.join(dbDir, `${sensorType}sit.db`), templatePath);
+    db1 = genDb(path.join(dbDir, `${sensorType}back.db`), templatePath);
+    db2 = genDb(path.join(dbDir, `${sensorType}head.db`), templatePath);
+    return { db, db1, db2 };
+  }
+
   if (isCarFn(sensorType)) {
     db = genDb(path.join(dbDir, `${sensorType}sit.db`), templatePath);
     db1 = genDb(path.join(dbDir, `${sensorType}back.db`), templatePath);

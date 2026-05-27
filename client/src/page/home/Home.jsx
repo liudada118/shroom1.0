@@ -4,6 +4,7 @@ import "./index.scss";
 import CanvasCar from "../../components/three/carnewTest copy";
 import CanvasCarWow from "../../components/three/carnewWow";
 import CanvasCarQX from "../../components/three/carQX"
+import WholeChair from "../../components/three/wholeChair"
 import CanvasCarSofa from "../../components/three/carSofa"
 import CanvasDaliegu from "../../components/num/daliegu"
 import SmallSample from "../../components/num/smallSample"
@@ -98,6 +99,7 @@ import { WebGLCanvas } from "../../components/webgl/WebGL.HeatMap copy 2";
 
 const FULL_PACKET_GLOVE_MATRIX = 'handGloveFullPacket'
 const FULL_PACKET_GLOVE_MODES = ['num', 'numoriginal']
+const WHOLE_CHAIR_MATRIX = 'wholeChair'
 const tactileGloveTypes = ['hand0205', 'handGlove115200', FULL_PACKET_GLOVE_MATRIX]
 const isTactileGloveMappedLength = (matrixName, length) => {
   return length === 147 || (matrixName === 'handGloveFullPacket' && length === 195)
@@ -174,7 +176,7 @@ const getHumanBodyFrameData = (payload) => {
 }
 
 const isCar = (str) => {
-  const arr = ['yanfeng10', 'car', 'car10', 'volvo', 'footVideo', 'hand0507', ...tactileGloveTypes, 'carQX', 'eye' , 'sofa']
+  const arr = ['yanfeng10', 'car', 'car10', 'volvo', 'footVideo', 'hand0507', ...tactileGloveTypes, 'carQX', WHOLE_CHAIR_MATRIX, 'eye' , 'sofa']
   return arr.includes(str)
 }
 
@@ -379,7 +381,7 @@ const petCareMatrixArr = ['petCare', 'petCareMini']
 const isPetCareMatrix = (type) => petCareMatrixArr.includes(type)
 const tempFullBedMatrix = 'tempFullBed'
 const bedArr = ['jqbed', tempFullBedMatrix, ...petCareMatrixArr, 'xiyueReal1', 'smallBed', 'smallBed1']
-const displayRendererConfigMatrixArr = ['smallBed', 'smallBed12B', 'jqbed', ...petCareMatrixArr]
+const displayRendererConfigMatrixArr = ['smallBed', 'smallBed12B', WHOLE_CHAIR_MATRIX, 'jqbed', ...petCareMatrixArr]
 
 const initConfig = {
   bed: {
@@ -395,6 +397,14 @@ const initConfig = {
     valuel1: 5,
     valuef1: 6,
     value1: 0.1,
+  },
+  wholeChair: {
+    valueg1: 2,
+    valuej1: 25,
+    valuel1: 4,
+    valuef1: 6,
+    value1: 15,
+    valuelInit1: 500,
   },
   petCare: {
     valueg1: 2,
@@ -515,6 +525,9 @@ const getConfig = ({ sensorType, mode }) => {
 }
 
 const getDefaultModeForMatrix = (matrixName, currentMode = "normal") => {
+  if (matrixName === WHOLE_CHAIR_MATRIX) {
+    return "normal";
+  }
   if (matrixName === tempFullBedMatrix) {
     return currentMode === "numoriginal" ? "numoriginal" : "normal";
   }
@@ -892,7 +905,7 @@ class Home extends React.Component {
       if (isCar(this.state.matrixName)) {
         this.ws1Data(e);
       }
-      if (this.state.matrixName == "volvo" || this.state.matrixName == "carQX") {
+      if (this.state.matrixName == "volvo" || this.state.matrixName == "carQX" || this.state.matrixName == WHOLE_CHAIR_MATRIX) {
         this.ws2Data(e);
       }
     };
@@ -2578,6 +2591,18 @@ class Home extends React.Component {
 
   componentDidUpdate(prevProps, prevState) {
     if (
+      this.state.matrixName === WHOLE_CHAIR_MATRIX &&
+      this.state.numMatrixFlag !== "normal"
+    ) {
+      const nextMode = getDefaultModeForMatrix(this.state.matrixName, this.state.numMatrixFlag);
+      this.setState({
+        numMatrixFlag: nextMode,
+        ...getConfig({ sensorType: this.state.matrixName, mode: nextMode }),
+      });
+      return;
+    }
+
+    if (
       this.state.matrixName === FULL_PACKET_GLOVE_MATRIX &&
       !FULL_PACKET_GLOVE_MODES.includes(this.state.numMatrixFlag)
     ) {
@@ -3698,6 +3723,7 @@ class Home extends React.Component {
           </CanvasCom> : ''}
 
           {this.state.numMatrixFlag == "num" &&
+            this.state.matrixName != WHOLE_CHAIR_MATRIX &&
             (this.state.matrixName == "foot" ||
               this.state.matrixName == "hand" || this.state.matrixName == "carCol" || this.state.matrixName == "jqbed" || this.state.matrixName == tempFullBedMatrix || ['petCare', 'petCareMini'].includes(this.state.matrixName) ||
               this.state.carState == "back" ||
@@ -4335,6 +4361,14 @@ class Home extends React.Component {
                     ) : this.state.matrixName == "carQX" ? (
                       <CanvasCom matrixName={this.state.matrixName}>
                         <CanvasCarQX
+                          ref={this.com}
+                          changeSelect={this.changeSelect}
+                          changeStateData={this.changeStateData}
+                        />
+                      </CanvasCom>
+                    ) : this.state.matrixName == WHOLE_CHAIR_MATRIX ? (
+                      <CanvasCom matrixName={this.state.matrixName}>
+                        <WholeChair
                           ref={this.com}
                           changeSelect={this.changeSelect}
                           changeStateData={this.changeStateData}

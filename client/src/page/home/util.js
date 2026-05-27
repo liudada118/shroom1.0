@@ -32,6 +32,19 @@ import {
 } from "../../assets/util/util";
 import { calFoot } from "../../assets/util/value";
 import { robot0401 } from "./robotUtil";
+
+const normalizeWholeChairFrame = (data, mapper) => {
+  let frame = data;
+  if (!Array.isArray(frame)) {
+    try {
+      frame = JSON.parse(frame || "[]");
+    } catch (error) {
+      frame = [];
+    }
+  }
+  return frame.length === 1024 ? mapper(frame) : frame;
+};
+
 let totalArr = [],
   totalPointArr = [];
 let selectArr = [];
@@ -2740,8 +2753,7 @@ export const sitTypeEvent = {
     let arr = [...wsPointData]
     // console.log(first)
 
-    arr = carQXsit(arr)
-    // arr = carQXsitLocal(arr)
+    arr = that.state.matrixName === 'wholeChair' ? normalizeWholeChairFrame(arr, carQXsitLocal) : carQXsit(arr)
     // arr = rotateArray90Degrees(arr,16,16)
     // arr = press6(arr, 16, 16, 'col', 1170, 1000)
 
@@ -2751,7 +2763,11 @@ export const sitTypeEvent = {
 
     // arr = press(arr, 32, 32, 'row')
 
-    if (that.state.carState == "sit" && that.state.numMatrixFlag == "num") {
+    if (that.state.matrixName === 'wholeChair' && that.state.numMatrixFlag == "num") {
+      that.com.current?.sitData({
+        wsPointData: arr,
+      });
+    } else if (that.state.carState == "sit" && that.state.numMatrixFlag == "num") {
       that.com.current?.changeWsData(arr);
     } else if (
       that.state.carState == "sit" &&
@@ -3918,8 +3934,7 @@ export const backTypeEvent = {
     backPress = 0;
     let wsPointData = jsonObject.backData;
 
-    wsPointData = carQXsit(wsPointData, 'right')
-    // wsPointData = carQXbackLocal(wsPointData)
+    wsPointData = that.state.matrixName === 'wholeChair' ? normalizeWholeChairFrame(wsPointData, carQXbackLocal) : carQXsit(wsPointData, 'right')
 
     if (wsPointDataBackZero.length) {
       wsPointData = wsPointData.map((a, index) => a - wsPointDataBackZero[index] > 0 ? a - wsPointDataBackZero[index] : 0)
@@ -3941,7 +3956,11 @@ export const backTypeEvent = {
     // }
 
     // wsPointData[31] = 1000
-    if (that.state.carState == "back" && that.state.numMatrixFlag == "num") {
+    if (that.state.matrixName === 'wholeChair' && that.state.numMatrixFlag == "num") {
+      that.com.current?.backData({
+        wsPointData: wsPointData,
+      });
+    } else if (that.state.carState == "back" && that.state.numMatrixFlag == "num") {
       wsPointData = rotate90(wsPointData, 32, 32);
       that.com.current?.changeWsData(wsPointData);
     } else if (
@@ -4994,8 +5013,7 @@ export const headTypeEvent = {
   carQX: ({ that, wsPointData, sitFlag, local, backFlag, state, wsPointDataHeadZero }) => {
 
 
-    wsPointData = carQXhead(wsPointData)
-    // wsPointData = carQXheadLocal(wsPointData)
+    wsPointData = that.state.matrixName === 'wholeChair' ? normalizeWholeChairFrame(wsPointData, carQXheadLocal) : carQXhead(wsPointData)
     // console.log(wsPointData)
 
     if (local) {
@@ -5282,6 +5300,11 @@ export const headTypeEvent = {
     });
   }
 }
+
+sitTypeEvent.wholeChair = sitTypeEvent.carQX;
+backTypeEvent.wholeChair = backTypeEvent.carQX;
+headTypeEvent.wholeChair = headTypeEvent.carQX;
+
 // 0.0007   -0.0030   -0.0407
 export function carFitting(value) {
   const res =

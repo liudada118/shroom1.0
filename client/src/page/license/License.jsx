@@ -60,6 +60,7 @@ const SENSOR_GROUPS = [
     items: [
       { label: '小床检测(12B)', value: 'smallBed12B' },
       { label: '温度全床系统', value: 'tempFullBed' },
+      { label: '整椅展示', value: 'wholeChair' },
     ],
   },
   {
@@ -125,6 +126,9 @@ const SENSOR_MODULES = {
     { value: 'num', label: '2D数字' },
     { value: 'normal', label: '3D模型' },
     { value: 'numoriginal', label: '原始数据' },
+  ],
+  wholeChair: [
+    { value: 'normal', label: '3D模型' },
   ],
   robot1: [
     { value: 'normal', label: '3D模型' },

@@ -29,6 +29,7 @@ let loadData = ''
 const titleInitConfig = {
   bed: { valueg1: 2, valuej1: 1205, valuel1: 5, valuef1: 6, value1: 0.72 },
   smallBed12B: { valueg1: 2, valuej1: 2205, valuel1: 5, valuef1: 6, value1: 0.1 },
+  wholeChair: { valueg1: 2, valuej1: 25, valuel1: 4, valuef1: 6, value1: 15, valuelInit1: 500 },
   petCare: { valueg1: 2, valuej1: 2900, valuel1: 5, valuef1: 6, value1: 0.7, valuelInit1: 500 },
   petCareMini: { valueg1: 2, valuej1: 2900, valuel1: 5, valuef1: 6, value1: 0.7, valuelInit1: 500 },
   sit: { valueg1: 4.3, valuej1: 1705, valuel1: 11, valuef1: 14, value1: 3.54 },
@@ -41,6 +42,7 @@ const createDefaultHumanTransform = () => ({
 const petCareMatrixTypes_title = ['petCare', 'petCareMini']
 const tempFullBedType_title = 'tempFullBed'
 const smallBed12BType_title = 'smallBed12B'
+const wholeChairType_title = 'wholeChair'
 const tactileGloveTypes_title = ['hand0205', 'handGlove115200', 'handGloveFullPacket']
 const fullPacketGloveType_title = 'handGloveFullPacket'
 const calibratableGloveTypes_title = tactileGloveTypes_title.filter((type) => type !== fullPacketGloveType_title)
@@ -421,7 +423,7 @@ class Title extends React.Component {
     const cacheMode = mode; // mode dimension for cache
 
     // Sensor type groups
-    const group1 = ['hand', 'normal', 'footVideo', 'smallBed', smallBed12BType_title, 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', 'bed4096', 'bed4096num']; // 3D point scene / WebGL heatmap
+    const group1 = ['hand', 'normal', 'footVideo', 'smallBed', smallBed12BType_title, wholeChairType_title, 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', 'bed4096', 'bed4096num']; // 3D point scene / WebGL heatmap
     const group2 = ['robot1', 'robotSY', 'robotLCF']; // Robots
     const group3 = tactileGloveTypes_title; // Tactile gloves
     const group4 = ['fast256', 'fast1024']; // High-speed
@@ -803,6 +805,7 @@ class Title extends React.Component {
       { label: '温度全床系统', value: tempFullBedType_title },
       { label: t('sensorPetCare'), value: 'petCare' },
       { label: t('sensorPetCareMini'), value: 'petCareMini' },
+      { label: t('sensorWholeChair'), value: wholeChairType_title },
       { label: t('sensorFast256'), value: 'fast256' },
       { label: t('sensorFast1024'), value: 'fast1024' },
       { label: t('sensorNormal'), value: 'normal' },
@@ -885,7 +888,7 @@ class Title extends React.Component {
         }
 
         <Menu className='menu' onClick={this.onClick} selectedKeys={[this.state.current]} mode="horizontal" items={navItems} />
-        {this.props.matrixName != 'localCar' ? this.props.history === 'now' ? this.props.matrixName != 'car' && this.props.matrixName != 'car10' && this.props.matrixName != 'sofa' && this.props.matrixName != 'yanfeng10' && this.props.matrixName != 'volvo' && this.props.matrixName != 'carQX' && this.props.matrixName != 'hand0507' && !tactileGloveTypes_title.includes(this.props.matrixName) && this.props.matrixName != 'footVideo' && this.props.matrixName != 'eye' ? <><Select
+        {this.props.matrixName != 'localCar' ? this.props.history === 'now' ? this.props.matrixName != 'car' && this.props.matrixName != 'car10' && this.props.matrixName != 'sofa' && this.props.matrixName != 'yanfeng10' && this.props.matrixName != 'volvo' && this.props.matrixName != 'carQX' && this.props.matrixName != wholeChairType_title && this.props.matrixName != 'hand0507' && !tactileGloveTypes_title.includes(this.props.matrixName) && this.props.matrixName != 'footVideo' && this.props.matrixName != 'eye' ? <><Select
 
           style={{ marginRight: 6, width: 140 }}
           placeholder={t('chooseSensor')}
@@ -951,7 +954,7 @@ class Title extends React.Component {
           >
           </Select>
 
-          {this.props.matrixName == 'volvo' || this.props.matrixName == 'carQX' ? <Select
+          {this.props.matrixName == 'volvo' || this.props.matrixName == 'carQX' || this.props.matrixName == wholeChairType_title ? <Select
             // value={this.props.portnameBack}
             placeholder={t('chooseHeadSensor')}
             style={{ width: 140 }}

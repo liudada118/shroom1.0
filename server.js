@@ -92,10 +92,14 @@ const TEMP_FULL_BED_PRESSURE_THRESHOLD = 20;
 const JQ_BED_TYPE = 'jqbed';
 const SMALL_BED_TYPE = 'smallBed';
 const SMALL_BED_12B_TYPE = 'smallBed12B';
+const WHOLE_CHAIR_TYPE = 'wholeChair';
+const WHOLE_CHAIR_GAUSS_RADIUS = 0.5;
 const SMALL_BED_12B_PAYLOAD_LENGTH = 1024 * 2;
 const SMALL_BED_12B_FRAME_TAIL = Buffer.from([0xaa, 0x00, 0x55, 0x00, 0x03, 0x00, 0x99, 0x00]);
+const THREE_PORT_SENSOR_TYPES = new Set(['volvo', WHOLE_CHAIR_TYPE]);
 const isHandGloveType = (sensorType) => HAND_GLOVE_TYPES.includes(sensorType);
 const isHandStorageType = (sensorType = '') => isHandGloveType(sensorType) || String(sensorType).includes('robot');
+const isThreePortFile = (sensorType) => THREE_PORT_SENSOR_TYPES.has(sensorType);
 const getSensorBaudRate = (sensorType) => {
   if (sensorType == 'handGlove115200') {
     return 115200;
@@ -114,6 +118,189 @@ const getSensorBaudRate = (sensorType) => {
   }
   return 1000000;
 };
+
+function rotateSquare90CounterClockwise(arr, size) {
+  const matrix = [];
+  for (let i = 0; i < size; i++) {
+    matrix[i] = [];
+    for (let j = 0; j < size; j++) {
+      matrix[i].push(arr[i * size + j]);
+    }
+  }
+
+  const temp = [];
+  for (let i = 0; i < size; i++) {
+    for (let j = 0; j < size; j++) {
+      const k = size - 1 - j;
+      if (!temp[k]) {
+        temp[k] = [];
+      }
+      temp[k][i] = matrix[i][j];
+    }
+  }
+  return temp.flat();
+}
+
+function rotateMatrix90Clockwise(arr, height, width) {
+  const matrix = Array.from({ length: height }, (_, i) =>
+    arr.slice(i * width, i * width + width)
+  );
+
+  const newMatrix = [];
+  for (let col = 0; col < width; col++) {
+    newMatrix[col] = [];
+    for (let row = 0; row < height; row++) {
+      newMatrix[col][row] = matrix[height - 1 - row][col];
+    }
+  }
+  return newMatrix.flat();
+}
+
+function flipMatrixVertical(arr, height, width) {
+  const result = [];
+  for (let row = height - 1; row >= 0; row--) {
+    result.push(...arr.slice(row * width, row * width + width));
+  }
+  return result;
+}
+
+function flipMatrixHorizontal(arr, height, width) {
+  const result = [];
+  for (let row = 0; row < height; row++) {
+    result.push(...arr.slice(row * width, row * width + width).reverse());
+  }
+  return result;
+}
+
+function applyWholeChairGauss(arr, width, height) {
+  if (!Array.isArray(arr) || arr.length !== width * height) {
+    return arr;
+  }
+  return gaussBlur_return(arr, width, height, WHOLE_CHAIR_GAUSS_RADIUS);
+}
+
+function parseFrameArray(data) {
+  if (Array.isArray(data)) {
+    return [...data];
+  }
+  if (typeof data === 'string') {
+    try {
+      const parsed = JSON.parse(data);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      logger.warn('[wholeChair] failed to parse stored frame data', error);
+      return [];
+    }
+  }
+  return [];
+}
+
+function wholeChairSitLine(rawData) {
+  const wsPointData = parseFrameArray(rawData);
+  if (wsPointData.length !== 1024) {
+    return wsPointData;
+  }
+
+  let resArr = [];
+  for (let i = 0; i < 16; i++) {
+    for (let j = 0; j < 16; j++) {
+      resArr.push(wsPointData[i * 32 + j]);
+    }
+  }
+
+  for (let i = 0; i < 16; i++) {
+    for (let j = 0; j < 4; j++) {
+      [resArr[i * 16 + 8 + j], resArr[i * 16 + 8 + 7 - j]] =
+        [resArr[i * 16 + 8 + 7 - j], resArr[i * 16 + 8 + j]];
+    }
+  }
+  return applyWholeChairGauss(rotateSquare90CounterClockwise(resArr, 16), 16, 16);
+}
+
+function wholeChairBackLine(rawData) {
+  const wsPointData = parseFrameArray(rawData);
+  if (wsPointData.length !== 1024) {
+    return wsPointData;
+  }
+
+  let resArr = [];
+  for (let i = 0; i < 16; i++) {
+    for (let j = 0; j < 16; j++) {
+      resArr.push(wsPointData[i * 32 + j]);
+    }
+  }
+
+  for (let i = 0; i < 16; i++) {
+    for (let j = 0; j < 4; j++) {
+      [resArr[i * 16 + 8 + j], resArr[i * 16 + 8 + 7 - j]] =
+        [resArr[i * 16 + 8 + 7 - j], resArr[i * 16 + 8 + j]];
+    }
+  }
+
+  for (let i = 0; i < 8; i++) {
+    for (let j = 0; j < 16; j++) {
+      [resArr[i * 16 + j], resArr[(15 - i) * 16 + j]] =
+        [resArr[(15 - i) * 16 + j], resArr[i * 16 + j]];
+    }
+  }
+
+  return applyWholeChairGauss(
+    flipMatrixVertical(rotateSquare90CounterClockwise(resArr, 16), 16, 16),
+    16,
+    16
+  );
+}
+
+function wholeChairHeadLine(rawData) {
+  const wsPointData = parseFrameArray(rawData);
+  if (wsPointData.length !== 1024) {
+    return wsPointData;
+  }
+
+  let resArr = [];
+  for (let i = 6; i < 16; i++) {
+    for (let j = 0; j < 10; j++) {
+      resArr.push(wsPointData[i * 32 + j]);
+    }
+  }
+
+  for (let i = 0; i < 10; i++) {
+    for (let j = 0; j < 2; j++) {
+      [resArr[i * 10 + 5 + j], resArr[i * 10 + 5 + 4 - j]] =
+        [resArr[i * 10 + 5 + 4 - j], resArr[i * 10 + 5 + j]];
+    }
+  }
+
+  for (let i = 0; i < 10; i++) {
+    for (let j = 0; j < 5; j++) {
+      [resArr[i * 10 + j], resArr[i * 10 + 9 - j]] =
+        [resArr[i * 10 + 9 - j], resArr[i * 10 + j]];
+    }
+  }
+
+  return applyWholeChairGauss(
+    flipMatrixVertical(rotateMatrix90Clockwise(resArr, 10, 10), 10, 10),
+    10,
+    10
+  )
+    .map((value) => value / 2);
+}
+
+function normalizeWholeChairFrame(section, data) {
+  if (file !== WHOLE_CHAIR_TYPE) {
+    return data;
+  }
+  if (section === 'sit') {
+    return wholeChairSitLine(data);
+  }
+  if (section === 'back') {
+    return wholeChairBackLine(data);
+  }
+  if (section === 'head') {
+    return wholeChairHeadLine(data);
+  }
+  return parseFrameArray(data);
+}
 
 const WCH_ALLOWED_VENDOR_IDS = new Set(['1A86']);
 const WCH_ALLOWED_PRODUCT_IDS = new Set(['7523', '55D3']);
@@ -631,8 +818,30 @@ let reconnectTimer = null;
 let jqbedTimer = null;
 let petCareTimer = null;
 let petCareMiniTimer = null;
+let reportHttpServer = null;
 let serverOpened = false;
 let serverShutdownRequested = false;
+let serverShutdownPromise = null;
+
+function closeWithTimeout(name, promise, timeoutMs = 3000) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      logger.warn(`[Server] ${name} close timed out after ${timeoutMs}ms`);
+      resolve(false);
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        logger.warn(`[Server] ${name} close failed:`, err.message || err);
+        resolve(false);
+      });
+  });
+}
 
 function clearManagedInterval(name, timerRef) {
   if (!timerRef) return null;
@@ -642,7 +851,7 @@ function clearManagedInterval(name, timerRef) {
 }
 
 function closeSerialPort(portRef, name) {
-  if (!portRef) return null;
+  if (!portRef) return Promise.resolve(null);
 
   try {
     portRef.removeAllListeners?.();
@@ -650,21 +859,51 @@ function closeSerialPort(portRef, name) {
     logger.warn(`[Server] ${name} removeAllListeners failed:`, err.message);
   }
 
-  if (portRef.isOpen && typeof portRef.close === 'function') {
-    portRef.close((err) => {
-      if (err) {
-        logger.warn(`[Server] ${name} close failed:`, err.message || err);
-      } else {
-        logger.info(`[Server] ${name} closed`);
-      }
-    });
+  if (!portRef.isOpen || typeof portRef.close !== 'function') {
+    return Promise.resolve(null);
   }
 
-  return null;
+  return new Promise((resolve) => {
+    try {
+      portRef.close((err) => {
+        if (err) {
+          logger.warn(`[Server] ${name} close failed:`, err.message || err);
+        } else {
+          logger.info(`[Server] ${name} closed`);
+        }
+        resolve(null);
+      });
+    } catch (err) {
+      logger.warn(`[Server] ${name} close threw:`, err.message);
+      resolve(null);
+    }
+  });
+}
+
+function closeHttpServer(httpServer, name) {
+  if (!httpServer || typeof httpServer.close !== 'function') {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    try {
+      httpServer.close((err) => {
+        if (err) {
+          logger.warn(`[Server] ${name} close failed:`, err.message || err);
+        } else {
+          logger.info(`[Server] ${name} closed`);
+        }
+        resolve();
+      });
+    } catch (err) {
+      logger.warn(`[Server] ${name} close threw:`, err.message);
+      resolve();
+    }
+  });
 }
 
 function closeWsServer(wsServer, name) {
-  if (!wsServer) return;
+  if (!wsServer) return Promise.resolve();
 
   try {
     wsServer.clients?.forEach((client) => {
@@ -678,37 +917,47 @@ function closeWsServer(wsServer, name) {
     logger.warn(`[Server] ${name} enumerate clients failed:`, err.message);
   }
 
-  try {
-    wsServer.close((err) => {
-      if (err) {
-        logger.warn(`[Server] ${name} close failed:`, err.message || err);
-      } else {
-        logger.info(`[Server] ${name} closed`);
-      }
-    });
-  } catch (err) {
-    logger.warn(`[Server] ${name} close threw:`, err.message);
-  }
+  return new Promise((resolve) => {
+    try {
+      wsServer.close((err) => {
+        if (err) {
+          logger.warn(`[Server] ${name} close failed:`, err.message || err);
+        } else {
+          logger.info(`[Server] ${name} closed`);
+        }
+        resolve();
+      });
+    } catch (err) {
+      logger.warn(`[Server] ${name} close threw:`, err.message);
+      resolve();
+    }
+  });
 }
 
 function closeDatabase(dbRef, name) {
-  if (!dbRef || typeof dbRef.close !== 'function') return;
+  if (!dbRef || typeof dbRef.close !== 'function') return Promise.resolve();
 
-  try {
-    dbRef.close((err) => {
-      if (err) {
-        logger.warn(`[Server] ${name} close failed:`, err.message || err);
-      } else {
-        logger.info(`[Server] ${name} closed`);
-      }
-    });
-  } catch (err) {
-    logger.warn(`[Server] ${name} close threw:`, err.message);
-  }
+  return new Promise((resolve) => {
+    try {
+      dbRef.close((err) => {
+        if (err) {
+          logger.warn(`[Server] ${name} close failed:`, err.message || err);
+        } else {
+          logger.info(`[Server] ${name} closed`);
+        }
+        resolve();
+      });
+    } catch (err) {
+      logger.warn(`[Server] ${name} close threw:`, err.message);
+      resolve();
+    }
+  });
 }
 
 function shutdownServer() {
-  if (serverShutdownRequested) return;
+  if (serverShutdownRequested) {
+    return serverShutdownPromise || Promise.resolve();
+  }
   serverShutdownRequested = true;
 
   logger.info("[Server] Shutdown requested, closing sockets/timers/workers...");
@@ -733,19 +982,28 @@ function shutdownServer() {
     logger.warn("[Server] stopWorker failed:", err.message);
   }
 
-  port1 = closeSerialPort(port1, "port1");
-  port2 = closeSerialPort(port2, "port2");
-  portHead = closeSerialPort(portHead, "portHead");
+  const reportServer = reportHttpServer;
+  reportHttpServer = null;
 
-  closeWsServer(server, "server");
-  closeWsServer(server1, "server1");
-  closeWsServer(server2, "server2");
+  serverShutdownPromise = Promise.all([
+    closeWithTimeout("port1", closeSerialPort(port1, "port1")),
+    closeWithTimeout("port2", closeSerialPort(port2, "port2")),
+    closeWithTimeout("portHead", closeSerialPort(portHead, "portHead")),
+    closeWithTimeout("server", closeWsServer(server, "server")),
+    closeWithTimeout("server1", closeWsServer(server1, "server1")),
+    closeWithTimeout("server2", closeWsServer(server2, "server2")),
+    closeWithTimeout("report HTTP server", closeHttpServer(reportServer, "report HTTP server")),
+    closeWithTimeout("db", closeDatabase(db, "db")),
+    closeWithTimeout("db1", closeDatabase(db1, "db1")),
+    closeWithTimeout("db2", closeDatabase(db2, "db2")),
+  ]).then(() => {
+    port1 = null;
+    port2 = null;
+    portHead = null;
+    serverOpened = false;
+  });
 
-  closeDatabase(db, "db");
-  closeDatabase(db1, "db1");
-  closeDatabase(db2, "db2");
-
-  serverOpened = false;
+  return serverShutdownPromise;
 }
 
 
@@ -1490,7 +1748,7 @@ module.exports = {
                       logger.error(err);
                     } else {
 
-                      if (file == 'volvo') {
+                      if (isThreePortFile(file)) {
                         db2.all(selectQuery, params, (err, rows) => {
                           if (err) {
                             logger.error(err);
@@ -2028,7 +2286,7 @@ module.exports = {
                       });
                       // }
 
-                      if (file == "volvo") {
+                      if (isThreePortFile(file)) {
                         const jsonData1 = JSON.stringify({
                           headData: new Array(100).fill(0),
                         });
@@ -2120,7 +2378,7 @@ module.exports = {
                 }
               });
 
-              if (file == 'volvo') {
+              if (isThreePortFile(file)) {
                 let jsonData2 = JSON.stringify({
                   headData: new Array(sitTotal).fill(0),
                   // backData: new Array(1024).fill(0)
@@ -2308,13 +2566,20 @@ module.exports = {
                   }
                 }
 
+                if (file === WHOLE_CHAIR_TYPE) {
+                  sitObj.sitData = normalizeWholeChairFrame('sit', localData[value]?.data);
+                  backObj.backData = normalizeWholeChairFrame('back', localDataBack[value]?.data);
+                }
+
                 jsonData = JSON.stringify(sitObj);
                 jsonData1 = JSON.stringify(backObj);
 
-                if (file == 'volvo') {
+                if (isThreePortFile(file)) {
                   let jsonData2 = JSON.stringify({
                     // sitData: localData[value]?.data,
-                    headData: localDataHead[value]?.data,
+                    headData: file === WHOLE_CHAIR_TYPE
+                      ? normalizeWholeChairFrame('head', localDataHead[value]?.data)
+                      : localDataHead[value]?.data,
                     time: localDataHead[value]?.timestamp,
                     sitFlag: localData.length > 0,
                   });
@@ -2382,8 +2647,11 @@ module.exports = {
                     index: nowIndex,
                   });
                 } else {
+                  const sitPlaybackData = file === WHOLE_CHAIR_TYPE
+                    ? normalizeWholeChairFrame('sit', localData[nowIndex]?.data)
+                    : localData[nowIndex]?.data;
                   jsonData = JSON.stringify({
-                    sitData: localData[nowIndex]?.data,
+                    sitData: sitPlaybackData,
                     // backData: localDataBack[nowIndex]?.data,
                     time: localData[nowIndex]?.timestamp,
                     index: nowIndex,
@@ -2391,9 +2659,12 @@ module.exports = {
                 }
 
 
+                const backPlaybackData = file === WHOLE_CHAIR_TYPE
+                  ? normalizeWholeChairFrame('back', localDataBack[nowIndex]?.data)
+                  : localDataBack[nowIndex]?.data;
                 const jsonData1 = JSON.stringify({
                   // sitData: new Array(sitTotal).fill(0),
-                  backData: localDataBack[nowIndex]?.data,
+                  backData: backPlaybackData,
                   index: nowIndex,
                 });
                 server.clients.forEach(function each(client) {
@@ -2402,10 +2673,12 @@ module.exports = {
                   }
                 });
 
-                if (file == 'volvo') {
+                if (isThreePortFile(file)) {
                   let jsonData2 = JSON.stringify({
                     // sitData: localData[value]?.data,
-                    headData: localDataHead[nowIndex]?.data,
+                    headData: file === WHOLE_CHAIR_TYPE
+                      ? normalizeWholeChairFrame('head', localDataHead[nowIndex]?.data)
+                      : localDataHead[nowIndex]?.data,
                     time: localDataHead[nowIndex]?.timestamp,
                     sitFlag: localData.length > 0,
                   });
@@ -2557,6 +2830,11 @@ module.exports = {
                     }
                   }
 
+                  if (file === WHOLE_CHAIR_TYPE) {
+                    sitObj.sitData = normalizeWholeChairFrame('sit', localData[nowIndex]?.data);
+                    backObj.backData = normalizeWholeChairFrame('back', localDataBack[nowIndex]?.data);
+                  }
+
                   if (file === TEMP_FULL_BED_TYPE) {
                     jsonData = JSON.stringify(buildTempFullBedPlaybackPayload(localData[nowIndex], {
                       index: nowIndex,
@@ -2586,10 +2864,12 @@ module.exports = {
                     }
                   });
 
-                  if (file == 'volvo') {
+                  if (isThreePortFile(file)) {
                     let jsonData2 = JSON.stringify({
                       // sitData: localData[value]?.data,
-                      headData: localDataHead[nowIndex]?.data,
+                      headData: file === WHOLE_CHAIR_TYPE
+                        ? normalizeWholeChairFrame('head', localDataHead[nowIndex]?.data)
+                        : localDataHead[nowIndex]?.data,
                       index: nowIndex,
                       sitFlag: localData.length > 0,
                     });
@@ -2797,6 +3077,7 @@ module.exports = {
             smoothValue = 0;
             const csvWriteData = [];
             const csvWriteBackData = [];
+            const csvWriteHeadData = [];
             //閺屻儴顕楃拠顓炲綖
             // const selectQuery = 'select * from matrix WHERE timestamp>? and timestamp<? and date=?';
             const selectQuery = "select * from matrix WHERE date=?";
@@ -3174,6 +3455,9 @@ module.exports = {
                       pressureData = Array.isArray(rawData) ? rawData : getHistoryPressureData(rows[i]);
                       rotateData = [];
                     }
+                    if (file === WHOLE_CHAIR_TYPE) {
+                      pressureData = normalizeWholeChairFrame('sit', pressureData);
+                    }
                     if (shouldTransposeSmallBedRawMatrix(file)) {
                       pressureData = transposeSquareMatrix(pressureData);
                     }
@@ -3294,6 +3578,9 @@ module.exports = {
                       backData = rawBackData;
                       backRotateData = [];
                     }
+                    if (file === WHOLE_CHAIR_TYPE) {
+                      backData = normalizeWholeChairFrame('back', backData);
+                    }
                     // const press = calPressArr(backData , backIndex , 32)
                     const press = backPressSelect.length
                       ? backPressSelect[i]
@@ -3376,7 +3663,7 @@ module.exports = {
                 }
               });
 
-              if (file == 'volvo') {
+              if (isThreePortFile(file)) {
                 db2.all(selectQuery, params, (err, rows) => {
                   if (err) {
                     logger.error(err);
@@ -3387,15 +3674,14 @@ module.exports = {
 
                     // if()
 
-                    for (var i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
-                      const backData = JSON.parse(rows[i][`data`]);
+                    const headEndIndex = Math.min(historyArr[1], rows.length);
+                    for (var i = historyArr[0], j = 0; i < headEndIndex; i++, j++) {
+                      const headData = file === WHOLE_CHAIR_TYPE
+                        ? normalizeWholeChairFrame('head', rows[i][`data`])
+                        : JSON.parse(rows[i][`data`]);
                       // const press = calPressArr(backData , backIndex , 32)
-                      const press = backPressSelect.length
-                        ? backPressSelect[i]
-                        : backData.reduce((a, b) => a + b, 0);
-                      const area = backAreaSelect.length
-                        ? backAreaSelect[i]
-                        : backData.filter((a) => a > 10).length;
+                      const press = headData.reduce((a, b) => a + b, 0);
+                      const area = headData.filter((a) => a > 10).length;
                       // const newData = {
                       //   time: timeStampToDate(rows[i][`timestamp`]),
                       //   pressureArea: backAreaSelect.length
@@ -3406,26 +3692,22 @@ module.exports = {
                       //     : pressToN(area, press),
                       //   realData: rows[i][`data`],
                       // };
-                      const max = findMax(backData);
+                      const max = findMax(headData);
                       const newData = {
                         time: timeStampToDate(rows[i][`timestamp`]),
-                        pressureArea: backAreaSelect.length
-                          ? backAreaSelect[i]
-                          : area, //閸樼喎顫愰惌鈺呮█
-                        pressure: backPressSelect.length
-                          ? backPressSelect[i]
-                          : totalToN(press, 1.3),
-                        realData: rows[i][`data`],
+                        pressureArea: area, //閸樼喎顫愰惌鈺呮█
+                        pressure: totalToN(press, 1.3),
+                        realData: JSON.stringify(headData),
                         index: getCsvElapsedSeconds(rows, i, historyArr[0], j),
-                        area1: [...backData].filter(a => a > 1).length,
-                        area10: [...backData].filter(a => a > 10).length,
-                        total1: backData.reduce((a, b) => a + b, 0),
-                        total10: [...backData].filter(a => a > 10).reduce((a, b) => a + b, 0),
-                        total10area10: [...backData].filter(a => a > 10).reduce((a, b) => a + b, 0) / [...backData].filter(a => a > 10).length,
-                        total1area1: backData.reduce((a, b) => a + b, 0) / [...backData].filter(a => a > 1).length,
+                        area1: [...headData].filter(a => a > 1).length,
+                        area10: [...headData].filter(a => a > 10).length,
+                        total1: headData.reduce((a, b) => a + b, 0),
+                        total10: [...headData].filter(a => a > 10).reduce((a, b) => a + b, 0),
+                        total10area10: [...headData].filter(a => a > 10).reduce((a, b) => a + b, 0) / [...headData].filter(a => a > 10).length,
+                        total1area1: headData.reduce((a, b) => a + b, 0) / [...headData].filter(a => a > 1).length,
                         max
                       };
-                      csvWriteBackData.push(newData);
+                      csvWriteHeadData.push(newData);
                     }
                     // 鐏忓棙鐪归幀鑽ゆ畱閸樺濮忛弫鐗堝祦閸愭瑥鍙?CSV 閺傚洣娆?
 
@@ -3452,7 +3734,7 @@ module.exports = {
                     });
 
                     csvWriter1
-                      .writeRecords(csvWriteBackData)
+                      .writeRecords(csvWriteHeadData)
                       .then(() => {
                         console.log("export csv success");
                         server.clients.forEach(function each(client) {
@@ -3887,6 +4169,8 @@ parser.on("data", function (data) {
         pointArr = handBlue(pointArr)
       } else if (file === 'volvo') {
         pointArr = wowSitLine(pointArr)
+      } else if (file === WHOLE_CHAIR_TYPE) {
+        pointArr = normalizeWholeChairFrame('sit', pointArr)
       } else if (file === 'xiyueReal1') {
         pointArr = xiyueReal1(pointArr)
       } else if (file === 'jqbed') {
@@ -4807,7 +5091,8 @@ parser2.on("data", function (data) {
       } else if (file === 'volvo') {
         pointArr2 = wowBackLine(pointArr2)
       } else if (file == 'carQX') {
-
+      } else if (file === WHOLE_CHAIR_TYPE) {
+        pointArr2 = normalizeWholeChairFrame('back', pointArr2)
       } else if (file == 'sofa') {
         pointArr2 = arrToRealLine(pointArr2, [[7, 0], [8, 15]], [[0, 15]], 32)
       } else if (file == 'carY') {
@@ -5184,6 +5469,8 @@ parser4.on("data", function (data) {
       }
       if (file == 'volvo') {
         pointArr4 = wowhead(pointArr4);
+      } else if (file === WHOLE_CHAIR_TYPE) {
+        pointArr4 = normalizeWholeChairFrame('head', pointArr4);
       }
 
 
@@ -5845,6 +6132,6 @@ httpApp.post('/uploadCanvas', upload.single('file'), async (req, res) => {
 });
 
 const HTTP_PORT = 19245;
-httpApp.listen(HTTP_PORT, '127.0.0.1', () => {
+reportHttpServer = httpApp.listen(HTTP_PORT, '127.0.0.1', () => {
   logger.info(`[HTTP] OneStep report server listening on http://127.0.0.1:${HTTP_PORT}`);
 });

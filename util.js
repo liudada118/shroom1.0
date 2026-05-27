@@ -2,7 +2,7 @@ const { timeStampToDate } = require("./openWeb");
 
 module.exports = {
   isCar: (value) => {
-    const arr = ["car", "car10", 'yanfeng10', 'volvo', 'footVideo', 'hand0205', 'handGlove115200', 'handGloveFullPacket', 'carQX' , 'eye' , 'sofa', 'carY'];
+    const arr = ["car", "car10", 'yanfeng10', 'volvo', 'footVideo', 'hand0205', 'handGlove115200', 'handGloveFullPacket', 'carQX', 'wholeChair', 'eye' , 'sofa', 'carY'];
     return arr.includes(value);
   },
 
