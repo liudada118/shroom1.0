@@ -382,6 +382,10 @@ const isPetCareMatrix = (type) => petCareMatrixArr.includes(type)
 const tempFullBedMatrix = 'tempFullBed'
 const bedArr = ['jqbed', tempFullBedMatrix, ...petCareMatrixArr, 'xiyueReal1', 'smallBed', 'smallBed1']
 const displayRendererConfigMatrixArr = ['smallBed', 'smallBed12B', WHOLE_CHAIR_MATRIX, 'jqbed', ...petCareMatrixArr]
+const HUMAN_BODY_DEFAULT_COLOR = 1555
+const HUMAN_BODY_DEFAULT_SIZE = 31
+const HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES = [1205, 5000]
+const HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES = [20, 60]
 
 const initConfig = {
   bed: {
@@ -433,11 +437,11 @@ const initConfig = {
 
 initConfig.humanBody = {
   valueg1: 2,
-  valuej1: 1205,
+  valuej1: HUMAN_BODY_DEFAULT_COLOR,
   valuel1: 5,
   valuef1: 6,
   value1: 0.72,
-  sizeValue: 60,
+  sizeValue: HUMAN_BODY_DEFAULT_SIZE,
 }
 
 initConfig.petCare = {
@@ -473,9 +477,9 @@ const matrixNameToType = (type) => {
 const normalizeHumanBodySizeValue = (sizeValue) => {
   const nextValue = Number(sizeValue)
   if (!Number.isFinite(nextValue)) {
-    return 60
+    return HUMAN_BODY_DEFAULT_SIZE
   }
-  return Math.min(200, Math.max(50, nextValue))
+  return Math.min(200, Math.max(1, nextValue))
 }
 
 /**
@@ -519,6 +523,12 @@ const getConfig = ({ sensorType, mode }) => {
   const local = getLocalStorageConfig({ sensorType: realType, mode })
   const mergedConfig = { ...init, ...local }
   if (realType === 'humanBody') {
+    if (HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES.includes(Number(mergedConfig.valuej1))) {
+      mergedConfig.valuej1 = HUMAN_BODY_DEFAULT_COLOR
+    }
+    if (HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES.includes(Number(mergedConfig.sizeValue))) {
+      mergedConfig.sizeValue = HUMAN_BODY_DEFAULT_SIZE
+    }
     mergedConfig.sizeValue = normalizeHumanBodySizeValue(mergedConfig.sizeValue)
   }
   return mergedConfig
@@ -705,7 +715,7 @@ class Home extends React.Component {
       valuel1: getConfig({ sensorType: localStorage.getItem('file') }).valuel1,
       valuef1: getConfig({ sensorType: localStorage.getItem('file') }).valuef1,
       value1: getConfig({ sensorType: localStorage.getItem('file') }).value1,
-      sizeValue: getConfig({ sensorType: localStorage.getItem('file') }).sizeValue ?? 60,
+      sizeValue: getConfig({ sensorType: localStorage.getItem('file') }).sizeValue ?? HUMAN_BODY_DEFAULT_SIZE,
       valuelInit1: getConfig({ sensorType: localStorage.getItem('file') }).valuelInit1 ?? initValue.valuelInit1,
       valueMult: initValue.valueMult,
       compen: initValue.compen,
@@ -3854,7 +3864,7 @@ class Home extends React.Component {
                         local={this.state.local}
                         renderOptions={{
                           max: this.state.valuej1,
-                          size: this.state.sizeValue ?? 60,
+                          size: this.state.sizeValue ?? HUMAN_BODY_DEFAULT_SIZE,
                           filter: this.state.valuef1,
                         }}
                         handleChartsBody={this.handleChartsBody.bind(this)}
@@ -4230,7 +4240,7 @@ class Home extends React.Component {
                           local={this.state.local}
                           renderOptions={{
                             max: this.state.valuej1,
-                            size: this.state.sizeValue ?? 60,
+                            size: this.state.sizeValue ?? HUMAN_BODY_DEFAULT_SIZE,
                             filter: this.state.valuef1,
                           }}
                           handleChartsBody={this.handleChartsBody.bind(this)}

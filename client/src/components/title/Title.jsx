@@ -24,6 +24,11 @@ let collection = JSON.parse(localStorage.getItem('collection'))
 const maxValue = 1000
 
 let loadData = ''
+const HUMAN_BODY_COLOR_SLIDER_MAX = 5000
+const HUMAN_BODY_DEFAULT_COLOR = 1555
+const HUMAN_BODY_DEFAULT_SIZE = 31
+const HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES = [1205, 5000]
+const HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES = [20, 60]
 
 // Default config values (same as Home.jsx initConfig)
 const titleInitConfig = {
@@ -33,7 +38,7 @@ const titleInitConfig = {
   petCare: { valueg1: 2, valuej1: 2900, valuel1: 5, valuef1: 6, value1: 0.7, valuelInit1: 500 },
   petCareMini: { valueg1: 2, valuej1: 2900, valuel1: 5, valuef1: 6, value1: 0.7, valuelInit1: 500 },
   sit: { valueg1: 4.3, valuej1: 1705, valuel1: 11, valuef1: 14, value1: 3.54 },
-  humanBody: { valueg1: 2, valuej1: 1205, valuel1: 5, valuef1: 6, value1: 0.72, sizeValue: 60 },
+  humanBody: { valueg1: 2, valuej1: HUMAN_BODY_DEFAULT_COLOR, valuel1: 5, valuef1: 6, value1: 0.72, sizeValue: HUMAN_BODY_DEFAULT_SIZE },
 }
 const createDefaultHumanTransform = () => ({
   position: { x: 0, y: 26, z: -9.5 },
@@ -52,16 +57,16 @@ const matrixNameToType_title = (type) => type === smallBed12BType_title ? type :
 const getColorSliderMax = (matrixName) => {
   if (matrixName === smallBed12BType_title) return 4000
   if (isPetCareMatrixTitle(matrixName)) return 5000
-  if (matrixName === 'humanBody') return 3000
+  if (matrixName === 'humanBody') return HUMAN_BODY_COLOR_SLIDER_MAX
   return 1000
 }
 const getColorSliderStep = () => 10
 const normalizeHumanBodySizeValue = (sizeValue) => {
   const nextValue = Number(sizeValue);
   if (!Number.isFinite(nextValue)) {
-    return 60;
+    return HUMAN_BODY_DEFAULT_SIZE;
   }
-  return Math.min(200, Math.max(50, nextValue));
+  return Math.min(200, Math.max(1, nextValue));
 }
 
 /**
@@ -85,6 +90,12 @@ const getConfig = ({ sensorType, mode }) => {
   }
   const mergedConfig = { ...init, ...result }
   if (realType === 'humanBody') {
+    if (HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES.includes(Number(mergedConfig.valuej1))) {
+      mergedConfig.valuej1 = HUMAN_BODY_DEFAULT_COLOR
+    }
+    if (HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES.includes(Number(mergedConfig.sizeValue))) {
+      mergedConfig.sizeValue = HUMAN_BODY_DEFAULT_SIZE
+    }
     mergedConfig.sizeValue = normalizeHumanBodySizeValue(mergedConfig.sizeValue)
   }
   return mergedConfig
@@ -585,10 +596,10 @@ class Title extends React.Component {
             <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
               <div className='dataTitle'>{t('size')}</div>
               <Slider
-                min={matrixName === 'humanBody' ? 50 : 1}
+                min={1}
                 max={matrixName === 'humanBody' ? 200 : 50}
                 step={matrixName === 'humanBody' ? 1 : 0.1}
-                value={matrixName === 'humanBody' ? (this.props.sizeValue ?? 60) : undefined}
+                value={matrixName === 'humanBody' ? (this.props.sizeValue ?? HUMAN_BODY_DEFAULT_SIZE) : undefined}
                 onChange={(value) => {
                   if (matrixName === 'humanBody') {
                     this.props.changeStateData({ sizeValue: value });

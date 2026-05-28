@@ -9,7 +9,7 @@ import { genWebglData } from "../../page/home/robotUtil";
 const MATRIX_WIDTH = 32;
 const MATRIX_HEIGHT = 32;
 const UV_GRID_SIZE = 64;
-const UV_CANVAS_SIZE = 500;
+const UV_CANVAS_SIZE = 400;
 const WEBGL_TILE_SIZE = 128;
 const WEBGL_SOURCE_WIDTH = 128;
 const WEBGL_SOURCE_HEIGHT = 2048;
@@ -142,15 +142,15 @@ const createUvRegionFromGrid = (x1, x2, y1, y2) => {
 
 const UV_REGIONS = {
   back: createUvRegionFromGrid(2, 25, 2, 30),
-  chest: createUvRegionFromGrid(2, 25, 30, 64),
-  rightArm: createUvRegionFromGrid(18, 36, 28, 33),
+  chest: createUvRegionFromGrid(2, 25, 35, 64),
+  rightArm: createUvRegionFromGrid(19, 32, 28, 33),
   rightShoulder: createUvRegionFromGrid(30, 42, 25, 35),
-  leftArm: createUvRegionFromGrid(45, 63, 28, 33),
+  leftArm: createUvRegionFromGrid(48, 63, 28, 33),
   leftShoulder: createUvRegionFromGrid(39, 51, 25, 35),
-  backPantsLeft: createUvRegionFromGrid(31, 42, 0, 30),
-  backPantsRight: createUvRegionFromGrid(44, 54, 0, 30),
-  frontPantsLeft: createUvRegionFromGrid(31, 42, 30, 64),
-  frontPantsRight: createUvRegionFromGrid(44, 54, 30, 64),
+  backPantsLeft: createUvRegionFromGrid(31, 42, 0, 28),
+  backPantsRight: createUvRegionFromGrid(44, 54, 0, 28),
+  frontPantsLeft: createUvRegionFromGrid(31, 42, 35, 64),
+  frontPantsRight: createUvRegionFromGrid(44, 54, 35, 64),
 };
 
 const UV_REGIONS1 = {
@@ -405,13 +405,13 @@ const HumanBodyCanvas = React.forwardRef((props, refs) => {
 
   function canvasRenew(texture, canvas) {
     canvas.id = "human-body-dynamic";
-    if(!document.getElementById("human-body-dynamic")){
-      document.body.appendChild(canvas);
-    }
+    // if(!document.getElementById("human-body-dynamic")){
+    //   document.body.appendChild(canvas);
+    // }
     if (!canvas || !webglHeatmapRef.current) {
       return;
     }
-    ndata1 = new Array(1024).fill(244)
+    // ndata1 = new Array(1024).fill(244)
     const sourceData = buildPartHeatmapInput(ndata1);
     const webglData = genWebglData(sourceData, {
       canvasWidth: WEBGL_TILE_SIZE,
