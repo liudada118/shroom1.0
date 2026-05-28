@@ -9,14 +9,14 @@ import { genWebglData } from "../../page/home/robotUtil";
 const MATRIX_WIDTH = 32;
 const MATRIX_HEIGHT = 32;
 const UV_GRID_SIZE = 64;
-const UV_CANVAS_SIZE = 1024;
-const WEBGL_TILE_SIZE = 128*4;
-const WEBGL_SOURCE_WIDTH = 128*4;
-const WEBGL_SOURCE_HEIGHT = 2048*4;
+const UV_CANVAS_SIZE = 500;
+const WEBGL_TILE_SIZE = 128;
+const WEBGL_SOURCE_WIDTH = 128;
+const WEBGL_SOURCE_HEIGHT = 2048;
 const HUMAN_BODY_WEBGL_PADDING = 3;
-const HUMAN_BODY_WEBGL_INTERP = 3;
+const HUMAN_BODY_WEBGL_INTERP = 2;
 const DEFAULT_LIGHT_INTENSITY = 0.22;
-const HUMAN_MODEL_ASSET = "./model/human3.glb";
+const HUMAN_MODEL_ASSET = "./model/human4.glb";
 const KEYBOARD_ROTATE_STEP = 5;
 const DEFAULT_RENDER_OPTIONS = {
   min: 1,
@@ -108,7 +108,7 @@ const BACK_PANTS_LEFT_IDX = [
 ].reverse();
 
 const FRONT_PANTS_LEFT_IDX = [
-  
+
   [500, 499, 498, 497, 496],
   [532, 531, 530, 529, 528],
   [564, 563, 562, 561, 560],
@@ -141,6 +141,19 @@ const createUvRegionFromGrid = (x1, x2, y1, y2) => {
 };
 
 const UV_REGIONS = {
+  back: createUvRegionFromGrid(1.5, 28, 1.5, 30),
+  chest: createUvRegionFromGrid(0, 28, 25, 64),
+  rightArm: createUvRegionFromGrid(40, 54, 4, 26),
+  rightShoulder: createUvRegionFromGrid(52, 62, 16, 26),
+  leftArm: createUvRegionFromGrid(26, 40, 4, 26),
+  leftShoulder: createUvRegionFromGrid(52, 62, 4, 14),
+  backPantsLeft: createUvRegionFromGrid(26, 40, 30, 64),
+  backPantsRight: createUvRegionFromGrid(55, 64, 30, 64),
+  frontPantsLeft: createUvRegionFromGrid(37, 48, 36, 64),
+  frontPantsRight: createUvRegionFromGrid(45, 56, 36, 64),
+};
+
+const UV_REGIONS0528 = {
   back: createUvRegionFromGrid(0, 25, 0, 35),
   chest: createUvRegionFromGrid(0, 25, 20, 64),
   rightArm: createUvRegionFromGrid(17, 36, 28, 33),
@@ -194,6 +207,7 @@ const HumanBodyCanvas = React.forwardRef((props, refs) => {
   const textureCanvasRef = useRef();
   const textureRef = useRef();
   const webglHeatmapRef = useRef();
+  const webglWarningRef = useRef(false);
   const modelTransformRef = useRef(createDefaultModelTransform());
   const heatmapOptionsRef = useRef({
     ...DEFAULT_RENDER_OPTIONS,
@@ -404,35 +418,44 @@ const HumanBodyCanvas = React.forwardRef((props, refs) => {
   }
 
   function canvasRenew(texture, canvas) {
-    canvas.id = "human-body-dynamic";
-    if(!document.getElementById("human-body-dynamic")){
-      document.body.appendChild(canvas);
-    }
     if (!canvas || !webglHeatmapRef.current) {
       return;
     }
+    if (!document.getElementById("human-body-dynamic")) {
+      document.body.appendChild(canvas);
+    }
     ndata1 = new Array(1024).fill(244)
+    canvas.id = "human-body-dynamic";
     const sourceData = buildPartHeatmapInput(ndata1);
     const webglData = genWebglData(sourceData, {
       canvasWidth: WEBGL_TILE_SIZE,
       canvasHeight: WEBGL_TILE_SIZE,
     });
-    const sourceCanvas = webglHeatmapRef.current.render(
-      {
-        width: WEBGL_SOURCE_WIDTH,
-        height: WEBGL_SOURCE_HEIGHT,
-        radius: heatmapOptionsRef.current.size,
-        max: heatmapOptionsRef.current.max,
-        min: heatmapOptionsRef.current.min,
-        filter: heatmapOptionsRef.current.filter,
-        blurFactor: heatmapOptionsRef.current.blurFactor,
-        class: "body",
-      },
-      webglData,
-      "human-body-dynamic"
-    )[0];
 
-    drawHeatmapToUV(canvas, sourceCanvas);
+    try {
+      const sourceCanvas = webglHeatmapRef.current.render(
+        {
+          width: WEBGL_SOURCE_WIDTH,
+          height: WEBGL_SOURCE_HEIGHT,
+          radius: heatmapOptionsRef.current.size,
+          max: heatmapOptionsRef.current.max,
+          min: heatmapOptionsRef.current.min,
+          filter: heatmapOptionsRef.current.filter,
+          blurFactor: heatmapOptionsRef.current.blurFactor,
+          class: "body",
+        },
+        webglData,
+        "human-body-dynamic"
+      )[0];
+
+      drawHeatmapToUV(canvas, sourceCanvas);
+    } catch (error) {
+      if (!webglWarningRef.current) {
+        console.warn("humanBody WebGL heatmap render failed", error);
+        webglWarningRef.current = true;
+      }
+      paintBaseTexture(canvas);
+    }
 
     if (texture) {
       texture.needsUpdate = true;
@@ -474,9 +497,9 @@ const HumanBodyCanvas = React.forwardRef((props, refs) => {
     const { wsPointData } = prop;
 
     if (wsPointData) {
-      ndata1 = wsPointData.map((value) => Number(value)*10 || 0);
+      ndata1 = wsPointData.map((value) => Number(value) * 10 || 0);
     }
-    
+
   }
 
   function changeModelTransform(transformPatch) {
