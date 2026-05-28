@@ -9,11 +9,11 @@ import { genWebglData } from "../../page/home/robotUtil";
 const MATRIX_WIDTH = 32;
 const MATRIX_HEIGHT = 32;
 const UV_GRID_SIZE = 64;
-const UV_CANVAS_SIZE = 1024;
-const WEBGL_TILE_SIZE = 128*4;
-const WEBGL_SOURCE_WIDTH = 128*4;
-const WEBGL_SOURCE_HEIGHT = 2048*4;
-const HUMAN_BODY_WEBGL_PADDING = 3;
+const UV_CANVAS_SIZE = 500;
+const WEBGL_TILE_SIZE = 128;
+const WEBGL_SOURCE_WIDTH = 128;
+const WEBGL_SOURCE_HEIGHT = 2048;
+const HUMAN_BODY_WEBGL_PADDING = 2;
 const HUMAN_BODY_WEBGL_INTERP = 3;
 const DEFAULT_LIGHT_INTENSITY = 0.22;
 const HUMAN_MODEL_ASSET = "./model/human3.glb";
@@ -141,29 +141,29 @@ const createUvRegionFromGrid = (x1, x2, y1, y2) => {
 };
 
 const UV_REGIONS = {
-  back: createUvRegionFromGrid(0, 25, 0, 35),
-  chest: createUvRegionFromGrid(0, 25, 20, 64),
-  rightArm: createUvRegionFromGrid(17, 36, 28, 33),
+  back: createUvRegionFromGrid(2, 25, 2, 30),
+  chest: createUvRegionFromGrid(2, 25, 30, 64),
+  rightArm: createUvRegionFromGrid(18, 36, 28, 33),
   rightShoulder: createUvRegionFromGrid(30, 42, 25, 35),
   leftArm: createUvRegionFromGrid(45, 63, 28, 33),
-  leftShoulder: createUvRegionFromGrid(40, 48, 25, 35),
-  backPantsLeft: createUvRegionFromGrid(31, 42, 1, 24),
-  backPantsRight: createUvRegionFromGrid(44, 54, 1, 24),
-  frontPantsLeft: createUvRegionFromGrid(31, 42, 40, 63),
-  frontPantsRight: createUvRegionFromGrid(44, 54, 40, 63),
+  leftShoulder: createUvRegionFromGrid(39, 51, 25, 35),
+  backPantsLeft: createUvRegionFromGrid(31, 42, 0, 30),
+  backPantsRight: createUvRegionFromGrid(44, 54, 0, 30),
+  frontPantsLeft: createUvRegionFromGrid(31, 42, 30, 64),
+  frontPantsRight: createUvRegionFromGrid(44, 54, 30, 64),
 };
 
 const UV_REGIONS1 = {
-  back: createUvRegionFromGrid(4, 21, 6, 26),
-  chest: createUvRegionFromGrid(4, 21, 35, 60),
+  back: createUvRegionFromGrid(4, 21, 6, 24),
+  chest: createUvRegionFromGrid(4, 21, 40, 60),
   rightArm: createUvRegionFromGrid(17, 36, 28, 33),
   rightShoulder: createUvRegionFromGrid(32, 40, 28, 33),
   leftArm: createUvRegionFromGrid(45, 63, 28, 33),
   leftShoulder: createUvRegionFromGrid(40, 48, 28, 33),
   backPantsLeft: createUvRegionFromGrid(31, 42, 1, 24),
   backPantsRight: createUvRegionFromGrid(44, 54, 1, 24),
-  frontPantsLeft: createUvRegionFromGrid(31, 42, 40, 63),
-  frontPantsRight: createUvRegionFromGrid(44, 54, 40, 63),
+  frontPantsLeft: createUvRegionFromGrid(31, 42, 30, 64),
+  frontPantsRight: createUvRegionFromGrid(44, 54, 30, 64),
 };
 
 const createPartConfig = (key, idxMatrix, uv, options = {}) => ({
