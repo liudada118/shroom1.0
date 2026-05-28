@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-05-27
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-05-28
 
 ## 1. 项目概述
 
@@ -316,6 +316,7 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-05-28 | Codex | 人体全身 WebGL 热力图稳定性修复 | `humanBody.jsx` 将人体全身离屏 WebGL 热力图源图恢复为 `128x2048`，避免 `512x8192` 在部分显卡上导致 shader 创建失败；同时移除固定 244 测试数据覆盖并增加渲染异常保护。 |
 | 2026-05-27 | Codex | EULA 协议与安装器接入 | 新增 `docs/EULA.md` / `docs/EULA.txt` 中文最终用户许可协议初稿，并将 electron-builder NSIS `license` 指向 `docs/EULA.txt`，让 Windows 安装流程展示协议确认页。 |
 | 2026-05-27 | Codex | OneStep 左侧压力图表修复 | `Canvas4096WebGL` 在接收 4096 原始矩阵时同步计算平均压力、最大压力、有效点数和总压力，并向左侧 Pressure Data / Pressure Area 图表推送最近 20 帧数据。 |
 | 2026-05-26 | Codex | 整椅 2D 三路分发修正 | 修正 `wholeChair` 在 `2D数字` 模式下 sit/back 仍依赖隐藏的 `carState` 菜单才更新的问题，三路数据现在直接分发到 `WholeChairNum2D` 的 head/back/sit 独立面板。 |
@@ -561,6 +562,7 @@ graph TD
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-05-28 | Codex | 修复缺陷 | 修复人体全身 WebGL 热力图在部分环境下 `createShader()` 返回空对象导致 `shaderSource` 抛错的问题：降低离屏源图尺寸并为渲染失败增加兜底，避免打断 3D 渲染循环。 |
 | 2026-05-27 | Codex | 配置变更 | 新增 Shroom 中文 EULA 初稿，并配置 Windows NSIS 安装器使用 `docs/EULA.txt` 作为安装许可协议展示文件。 |
 | 2026-05-27 | Codex | 修复缺陷 | 修复 OneStep (`bed4096`) WebGL 渲染组件只绘制热力图、不更新左侧压力统计的问题；`sitData` 现在收到帧数据后直接更新 Pressure Data 和 Pressure Area。 |
 | 2026-05-26 | Codex | 修复缺陷 | 修复 `wholeChair` 2D 数字视图只有 head 面板刷新的问题：sit/back 在 `num` 模式下不再走旧的 carState 单块矩阵入口，而是直接调用整椅专用组件的 `sitData/backData`。 |
