@@ -16,7 +16,7 @@ import { withTranslation } from "react-i18next";
 import { useTranslation, initReactI18next } from "react-i18next";
 import { NavLink, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { bthClickHandle as heatmapBthClickHandle } from '../../assets/util/heatmap';
+import { bthClickHandle as heatmapBthClickHandle } from '../onestep/heatmap';
 let collection = JSON.parse(localStorage.getItem('collection'))
   ? JSON.parse(localStorage.getItem('collection'))
   : [['hunch', 'front', '标签']];
@@ -29,6 +29,21 @@ const HUMAN_BODY_DEFAULT_COLOR = 1555
 const HUMAN_BODY_DEFAULT_SIZE = 31
 const HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES = [1205, 5000]
 const HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES = [20, 60]
+
+const canvasToPngBlob = (canvas) => new Promise((resolve) => {
+  if (!canvas || typeof canvas.toBlob !== 'function') {
+    resolve(null)
+    return
+  }
+  canvas.toBlob((blob) => resolve(blob), 'image/png')
+})
+
+const createOneStepPdfHeatmapCanvas = (peakFrameData) => {
+  if (!Array.isArray(peakFrameData) || peakFrameData.length < 4096) {
+    return null
+  }
+  return heatmapBthClickHandle(peakFrameData)
+}
 
 // Default config values (same as Home.jsx initConfig)
 const titleInitConfig = {
@@ -1447,53 +1462,74 @@ class Title extends React.Component {
                     url: 'http://127.0.0.1:19245/getDbHeatmap',
                     data: { time: date, collectName, age: collectAge, gender: collectGender, date }
                   });
-                  if (res.status === 200) {
-                    const canvas = heatmapBthClickHandle(res.data.data.peak_frame_data);
-                    if (!canvas) { hideLoading(); this.setState({ pdfLoading: false }); message.error('Canvas not found.'); return; }
-                    canvas.toBlob(async (blob) => {
-                      if (!blob) { hideLoading(); this.setState({ pdfLoading: false }); message.error('Canvas export failed.'); return; }
-                      const formData = new FormData();
-                      formData.append('file', blob, 'canvas.png');
-                      formData.append('selector', '#uploadCanvas');
-                      formData.append('filename', encodeURIComponent(colName));
-                      formData.append('date', date);
-                      formData.append('collectName', encodeURIComponent(collectName));
-                      formData.append('age', collectAge);
-                      formData.append('gender', collectGender);
-                      try {
-                        const uploadRes = await axios.post('http://127.0.0.1:19245/uploadCanvas', formData, {
-                          headers: { 'Content-Type': 'multipart/form-data' }
-                        });
-                        hideLoading();
-                        this.setState({ pdfLoading: false });
-                        const pdfFilePath = uploadRes.data?.data?.pdfFilePath || '';
-                        const pdfDir = uploadRes.data?.data?.pdfDir || '';
-                        notification.success({
-                          message: 'PDF 报告生成成功',
-                          description: pdfFilePath ? `已保存至：${pdfFilePath}` : '报告已生成',
-                          duration: 0,
-                          btn: pdfFilePath ? (
-                            <Button
-                              size='small'
-                              type='primary'
-                              onClick={() => {
-                                if (window.electronAPI?.invoke) {
-                                  window.electronAPI.invoke('open-folder', { filePath: pdfFilePath });
-                                }
-                              }}
-                            >打开文件夹</Button>
-                          ) : null,
-                        });
-                      } catch (err) {
-                        hideLoading();
-                        this.setState({ pdfLoading: false });
-                        message.error(err?.response?.data?.message || err?.message || '上传失败');
-                      }
-                    }, 'image/png');
-                  } else {
+                  if (res.status !== 200 || res.data?.code !== 0) {
                     hideLoading();
                     this.setState({ pdfLoading: false });
+                    message.error(res.data?.message || '获取峰值帧失败');
+                    return;
                   }
+
+                  const peakFrameData = res.data?.data?.peak_frame_data;
+                  if (!Array.isArray(peakFrameData) || peakFrameData.length < 4096) {
+                    hideLoading();
+                    this.setState({ pdfLoading: false });
+                    message.error('峰值帧数据为空，无法生成 PDF');
+                    return;
+                  }
+
+                  const canvas = createOneStepPdfHeatmapCanvas(peakFrameData);
+                  if (!canvas) {
+                    hideLoading();
+                    this.setState({ pdfLoading: false });
+                    message.error('OneStep 热力图生成失败');
+                    return;
+                  }
+
+                  const blob = await canvasToPngBlob(canvas);
+                  if (!blob) {
+                    hideLoading();
+                    this.setState({ pdfLoading: false });
+                    message.error('热力图导出失败');
+                    return;
+                  }
+
+                  const formData = new FormData();
+                  formData.append('file', blob, 'canvas.png');
+                  formData.append('selector', '#uploadCanvas');
+                  formData.append('filename', encodeURIComponent(colName));
+                  formData.append('date', date);
+                  formData.append('collectName', encodeURIComponent(collectName));
+                  formData.append('age', collectAge);
+                  formData.append('gender', collectGender);
+
+                  const uploadRes = await axios.post('http://127.0.0.1:19245/uploadCanvas', formData, {
+                    headers: { 'Content-Type': 'multipart/form-data' }
+                  });
+                  hideLoading();
+                  this.setState({ pdfLoading: false });
+
+                  if (uploadRes.data?.code !== 0) {
+                    message.error(uploadRes.data?.message || 'PDF 生成失败');
+                    return;
+                  }
+
+                  const pdfFilePath = uploadRes.data?.data?.pdfFilePath || '';
+                  notification.success({
+                    message: 'PDF 报告生成成功',
+                    description: pdfFilePath ? `已保存至：${pdfFilePath}` : '报告已生成',
+                    duration: 0,
+                    btn: pdfFilePath ? (
+                      <Button
+                        size='small'
+                        type='primary'
+                        onClick={() => {
+                          if (window.electronAPI?.invoke) {
+                            window.electronAPI.invoke('open-folder', { filePath: pdfFilePath });
+                          }
+                        }}
+                      >打开文件夹</Button>
+                    ) : null,
+                  });
                 } catch (err) {
                   hideLoading();
                   this.setState({ pdfLoading: false });
