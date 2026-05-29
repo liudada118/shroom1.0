@@ -316,6 +316,15 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-05-29 | Codex | CSV 字段逻辑文档补充 | `csv-shroom.md` 新增字段计算逻辑章节，补充 `seconds/time/max/area/press/data/algorData/quaternion/temperature*` 等字段的来源、计算方式和各系统差异。 |
+| 2026-05-29 | Codex | CSV 下载实现文档整理 | 新增 `csv-shroom.md`，基于用户提供的 `csv.md` 通用说明，结合本项目 WebSocket 下载入口、后端 `csv-writer` 导出分支、真实秒数列、线序处理和提示机制整理当前实现文档。 |
+| 2026-05-29 | Codex | OneStep PDF 成功提示对齐 CSV 通道 | `client/src/page/home/Home.jsx` 将 `message.useMessage()` 创建的 `messageApi` 传给 `Title`，OneStep PDF 导出成功后改用与 CSV 下载一致的 `messageApi.success()` 提示。 |
+| 2026-05-29 | Codex | OneStep PDF message 全局配置恢复 | `client/src/components/title/Title.jsx` 在 OneStep PDF 导出前恢复 `message.config` 的默认 `ant-message` 前缀，并在导出成功后销毁 loading 再延迟弹出成功提示，避免被其他模块的 message 配置覆盖。 |
+| 2026-05-29 | Codex | OneStep PDF message 提示稳定性修正 | `client/src/components/title/Title.jsx` 将 OneStep PDF 导出流程的 loading/success/error 提示统一使用同一个 message key，成功或失败时直接替换加载提示，避免成功提示被关闭逻辑覆盖。 |
+| 2026-05-29 | Codex | OneStep PDF 成功提示补充 | `client/src/components/title/Title.jsx` 在 OneStep PDF 导出成功后新增 `message.success` 轻提示，同时保留原有包含保存路径的通知弹窗。 |
+| 2026-05-29 | Codex | Windows 打包态 OneStep 报告目录调整 | `server.js` 为 Windows 打包态单独指定 `process.resourcesPath/OneStep` 作为 OneStep PDF 输出目录，开发环境继续使用项目根目录 `oneStepPdf`。 |
+| 2026-05-29 | Codex | OneStep PDF 输出目录调整 | `server.js` 将 OneStep 报告输出目录从 `OneStep` 调整为项目根目录下的 `oneStepPdf`，导出的 PDF/JSON 报告产物集中保存到该目录。 |
+| 2026-05-29 | Codex | OneStep PDF 导出信息弹窗 | `client/src/components/title/Title.jsx` 将 OneStep 导出 PDF 的姓名、年龄、性别输入从标题栏内联控件改为导出前弹窗填写，确认后再执行热力图上传和报告生成流程。 |
 | 2026-05-29 | Codex | OneStep PDF 导出修复 | 修正 `Title.jsx` 中 OneStep 导出 PDF 使用通用 heatmap 工具但未传 canvas 参数的问题，改为直接复用 `client/src/components/onestep/heatmap.js` 的 `bthClickHandle()` 生成 PNG，并补齐后端业务错误提示。 |
 | 2026-05-28 | Codex | 人体全身可视化默认值二次调整 | 将 `humanBody` 可视化调节默认大小改为 `31`、颜色默认值改为 `1555`，颜色滑块最大值继续保持 `5000`，并兼容迁移旧默认缓存。 |
 | 2026-05-28 | Codex | 人体全身可视化默认参数调整 | 将 `humanBody` 可视化调节默认大小从 `60` 改为 `20`，颜色上限默认值和颜色滑块最大值改为 `5000`，并兼容迁移本地缓存中的旧默认值。 |
@@ -565,6 +574,15 @@ graph TD
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-05-29 | Codex | 文档更新 | 补充 `csv-shroom.md` 的字段逻辑说明，明确 CSV 每个字段在当前项目中的数据来源、计算规则、系统分支差异和未写入 header 的内部统计字段。 |
+| 2026-05-29 | Codex | 文档更新 | 新增 `csv-shroom.md`，将外部 CSV 下载通用文档改写为适配当前 Shroom 项目的 CSV 下载实现说明，并明确当前未实现的配置弹窗、字段选择、路径选择等能力。 |
+| 2026-05-29 | Codex | 修复缺陷 | OneStep PDF 导出成功提示改为复用 Home 注入给 CSV 下载提示的 `messageApi` 实例，避免全局 `message` 配置导致成功提示不可见。 |
+| 2026-05-29 | Codex | 修复缺陷 | 修复 OneStep PDF 导出成功后仍看不到 message 的问题：导出流程会先恢复 `ant-message` 全局前缀，成功后销毁 loading 并延迟弹出独立的 `PDF 导出成功` 提示。 |
+| 2026-05-29 | Codex | 修复缺陷 | 修复 OneStep PDF 导出成功后看不到顶部 message 的问题：使用固定 `oneStepPdfExport` key 让成功/失败提示替换 loading 提示，不再由 `hideLoading()` 立即关闭。 |
+| 2026-05-29 | Codex | 优化重构 | OneStep PDF 导出成功后新增 `PDF 导出成功` 的顶部 message 提示，避免用户只依赖通知弹窗判断导出状态。 |
+| 2026-05-29 | Codex | 配置变更 | Windows 打包后 OneStep 报告保存目录改为 `resources/OneStep`，对应运行时 `process.resourcesPath/OneStep`；开发环境仍保存到 `E:\shroom1\oneStepPdf`。 |
+| 2026-05-29 | Codex | 配置变更 | OneStep 报告保存目录改为 `oneStepPdf`：开发环境下对应 `E:\shroom1\oneStepPdf`，导出报告时后端以该目录作为 `pdfPath`。 |
+| 2026-05-29 | Codex | 优化重构 | OneStep 导出 PDF 交互改为点击「导出PDF」后弹出报告信息窗口，在弹窗内填写姓名、年龄、性别并确认后才调用 `getDbHeatmap/uploadCanvas` 生成报告。 |
 | 2026-05-29 | Codex | 修复缺陷 | 修复 OneStep 采集数据后点击「导出PDF」无反应的问题：前端改为直接使用 `client/src/components/onestep/heatmap.js` 生成报告热力图，并对 `getDbHeatmap/uploadCanvas` 的业务失败返回明确提示。 |
 | 2026-05-28 | Codex | 配置变更 | 人体全身 `humanBody` 可视化默认值更新为大小 `31`、颜色 `1555`；颜色滑块最大值仍为 `5000`，旧默认缓存 `20/60` 和 `1205/5000` 会迁移到新默认。 |
 | 2026-05-28 | Codex | 配置变更 | 调整人体全身 `humanBody` 可视化参数：大小进度条默认值为 `20`，颜色上限默认值与颜色滑块最大值为 `5000`，旧缓存中的 `60/1205` 会自动迁移到新默认值。 |

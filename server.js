@@ -701,9 +701,9 @@ const exportRoot = app.isPackaged
 let filePath = path.join(runtimeWritableRoot, "db");
 let csvPath = path.join(exportRoot, "data");
 let imgPath = path.join(runtimeWritableRoot, "img");
-let pdfPath = app.isPackaged && process.platform === 'darwin'
-  ? path.join(exportRoot, "OneStep")
-  : path.join(runtimeWritableRoot, "OneStep");
+let pdfPath = app.isPackaged
+  ? (process.platform === 'win32' ? path.join(process.resourcesPath, "OneStep") : path.join(exportRoot, "oneStepPdf"))
+  : path.join(runtimeWritableRoot, "oneStepPdf");
 let nameTxt = resolveConfigFile();
 let writableNameTxt = getWritableConfigFile();
 

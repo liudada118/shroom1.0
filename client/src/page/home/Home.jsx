@@ -3674,6 +3674,7 @@ class Home extends React.Component {
             hand={this.state.hand}
             changeAside={this.changeAside}
             i18n={i18n}
+            messageApi={this.props.messageApi}
             initBigCtx={this.initBigCtx}
             valueg1={this.state.valueg1}
             value1={this.state.value1}

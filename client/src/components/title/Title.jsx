@@ -45,6 +45,16 @@ const createOneStepPdfHeatmapCanvas = (peakFrameData) => {
   return heatmapBthClickHandle(peakFrameData)
 }
 
+const configureOneStepPdfMessage = () => {
+  message.config({
+    top: 80,
+    duration: 3,
+    maxCount: 3,
+    prefixCls: 'ant-message',
+    getContainer: () => document.body,
+  })
+}
+
 // Default config values (same as Home.jsx initConfig)
 const titleInitConfig = {
   bed: { valueg1: 2, valuej1: 1205, valuel1: 5, valuef1: 6, value1: 0.72 },
@@ -210,6 +220,7 @@ class Title extends React.Component {
       loadName: '',
       collectAge: '',
       collectGender: '男',
+      pdfModalOpen: false,
       open: false,
       fingerIndex: 0,
       colHZ: 12,
@@ -438,6 +449,105 @@ class Title extends React.Component {
       this.inputRef.current?.focus();
     }, 0);
   };
+
+  openOneStepPdfModal = () => {
+    if (!this.state.dataTime) {
+      message.warning('请先选择要导出的采集数据');
+      return;
+    }
+    this.setState({ pdfModalOpen: true });
+  }
+
+  generateOneStepPdfReport = async () => {
+    const date = this.state.dataTime;
+    const collectName = (this.state.realname || '').trim() || '未知';
+    const collectAge = (this.state.collectAge || '').trim() || '0';
+    const collectGender = this.state.collectGender || '男';
+    const colName = this.state.colName || date;
+    this.setState({ pdfLoading: true });
+    const pdfMessageKey = 'oneStepPdfExport';
+    configureOneStepPdfMessage();
+    message.loading({ content: '正在生成报告，请稍候...', key: pdfMessageKey, duration: 0 });
+    try {
+      const res = await axios({
+        method: 'post',
+        url: 'http://127.0.0.1:19245/getDbHeatmap',
+        data: { time: date, collectName, age: collectAge, gender: collectGender, date }
+      });
+      if (res.status !== 200 || res.data?.code !== 0) {
+        message.error({ content: res.data?.message || '获取峰值帧失败', key: pdfMessageKey, duration: 3 });
+        return;
+      }
+
+      const peakFrameData = res.data?.data?.peak_frame_data;
+      if (!Array.isArray(peakFrameData) || peakFrameData.length < 4096) {
+        message.error({ content: '峰值帧数据为空，无法生成 PDF', key: pdfMessageKey, duration: 3 });
+        return;
+      }
+
+      const canvas = createOneStepPdfHeatmapCanvas(peakFrameData);
+      if (!canvas) {
+        message.error({ content: 'OneStep 热力图生成失败', key: pdfMessageKey, duration: 3 });
+        return;
+      }
+
+      const blob = await canvasToPngBlob(canvas);
+      if (!blob) {
+        message.error({ content: '热力图导出失败', key: pdfMessageKey, duration: 3 });
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('file', blob, 'canvas.png');
+      formData.append('selector', '#uploadCanvas');
+      formData.append('filename', encodeURIComponent(colName));
+      formData.append('date', date);
+      formData.append('collectName', encodeURIComponent(collectName));
+      formData.append('age', collectAge);
+      formData.append('gender', collectGender);
+
+      const uploadRes = await axios.post('http://127.0.0.1:19245/uploadCanvas', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+
+      if (uploadRes.data?.code !== 0) {
+        message.error({ content: uploadRes.data?.message || 'PDF 生成失败', key: pdfMessageKey, duration: 3 });
+        return;
+      }
+
+      const pdfFilePath = uploadRes.data?.data?.pdfFilePath || '';
+      this.setState({ pdfModalOpen: false });
+      message.destroy(pdfMessageKey);
+      setTimeout(() => {
+        configureOneStepPdfMessage();
+        if (this.props.messageApi) {
+          this.props.messageApi.success('PDF 导出成功', 5);
+        } else {
+          message.success({ content: 'PDF 导出成功', duration: 5 });
+        }
+      }, 100);
+      notification.success({
+        message: 'PDF 报告生成成功',
+        description: pdfFilePath ? `已保存至：${pdfFilePath}` : '报告已生成',
+        duration: 0,
+        btn: pdfFilePath ? (
+          <Button
+            size='small'
+            type='primary'
+            onClick={() => {
+              if (window.electronAPI?.invoke) {
+                window.electronAPI.invoke('open-folder', { filePath: pdfFilePath });
+              }
+            }}
+          >打开文件夹</Button>
+        ) : null,
+      });
+    } catch (err) {
+      message.error({ content: err?.response?.data?.message || err?.message || '请求失败', key: pdfMessageKey, duration: 3 });
+    } finally {
+      this.setState({ pdfLoading: false });
+    }
+  }
 
   /**
    * Determine which setting parameters to show based on matrixName + numMatrixFlag (display mode)
@@ -1426,117 +1536,50 @@ class Title extends React.Component {
           }}>{!this.props.centerFlag ? '重心' : '隐藏'}</Button> : null}
         {this.props.matrixName === 'bed4096' && this.props.local ? (
           <>
-            <Input
-              placeholder='姓名'
-              style={{ width: 80, marginRight: 4 }}
-              value={this.state.realname}
-              onChange={(e) => this.setState({ realname: e.target.value })}
-            />
-            <Input
-              placeholder='年龄'
-              style={{ width: 60, marginRight: 4 }}
-              value={this.state.collectAge}
-              onChange={(e) => this.setState({ collectAge: e.target.value })}
-            />
-            <Select
-              style={{ width: 70, marginRight: 4 }}
-              value={this.state.collectGender}
-              onChange={(e) => this.setState({ collectGender: e })}
-              options={[{ label: '男', value: '男' }, { label: '女', value: '女' }]}
-            />
             <Button
               className='titleButton'
               disabled={!this.state.dataTime || this.state.pdfLoading}
               loading={this.state.pdfLoading}
-              onClick={async () => {
-                const date = this.state.dataTime;
-                const collectName = this.state.realname || '未知';
-                const collectAge = this.state.collectAge || '0';
-                const collectGender = this.state.collectGender || '男';
-                const colName = this.state.colName || date;
-                this.setState({ pdfLoading: true });
-                const hideLoading = message.loading('正在生成报告，请稍候...', 0);
-                try {
-                  const res = await axios({
-                    method: 'post',
-                    url: 'http://127.0.0.1:19245/getDbHeatmap',
-                    data: { time: date, collectName, age: collectAge, gender: collectGender, date }
-                  });
-                  if (res.status !== 200 || res.data?.code !== 0) {
-                    hideLoading();
-                    this.setState({ pdfLoading: false });
-                    message.error(res.data?.message || '获取峰值帧失败');
-                    return;
-                  }
-
-                  const peakFrameData = res.data?.data?.peak_frame_data;
-                  if (!Array.isArray(peakFrameData) || peakFrameData.length < 4096) {
-                    hideLoading();
-                    this.setState({ pdfLoading: false });
-                    message.error('峰值帧数据为空，无法生成 PDF');
-                    return;
-                  }
-
-                  const canvas = createOneStepPdfHeatmapCanvas(peakFrameData);
-                  if (!canvas) {
-                    hideLoading();
-                    this.setState({ pdfLoading: false });
-                    message.error('OneStep 热力图生成失败');
-                    return;
-                  }
-
-                  const blob = await canvasToPngBlob(canvas);
-                  if (!blob) {
-                    hideLoading();
-                    this.setState({ pdfLoading: false });
-                    message.error('热力图导出失败');
-                    return;
-                  }
-
-                  const formData = new FormData();
-                  formData.append('file', blob, 'canvas.png');
-                  formData.append('selector', '#uploadCanvas');
-                  formData.append('filename', encodeURIComponent(colName));
-                  formData.append('date', date);
-                  formData.append('collectName', encodeURIComponent(collectName));
-                  formData.append('age', collectAge);
-                  formData.append('gender', collectGender);
-
-                  const uploadRes = await axios.post('http://127.0.0.1:19245/uploadCanvas', formData, {
-                    headers: { 'Content-Type': 'multipart/form-data' }
-                  });
-                  hideLoading();
-                  this.setState({ pdfLoading: false });
-
-                  if (uploadRes.data?.code !== 0) {
-                    message.error(uploadRes.data?.message || 'PDF 生成失败');
-                    return;
-                  }
-
-                  const pdfFilePath = uploadRes.data?.data?.pdfFilePath || '';
-                  notification.success({
-                    message: 'PDF 报告生成成功',
-                    description: pdfFilePath ? `已保存至：${pdfFilePath}` : '报告已生成',
-                    duration: 0,
-                    btn: pdfFilePath ? (
-                      <Button
-                        size='small'
-                        type='primary'
-                        onClick={() => {
-                          if (window.electronAPI?.invoke) {
-                            window.electronAPI.invoke('open-folder', { filePath: pdfFilePath });
-                          }
-                        }}
-                      >打开文件夹</Button>
-                    ) : null,
-                  });
-                } catch (err) {
-                  hideLoading();
-                  this.setState({ pdfLoading: false });
-                  message.error(err?.response?.data?.message || err?.message || '请求失败');
-                }
-              }}
+              onClick={this.openOneStepPdfModal}
             >导出PDF</Button>
+            <Modal
+              title='填写报告信息'
+              open={this.state.pdfModalOpen}
+              confirmLoading={this.state.pdfLoading}
+              okText='生成报告'
+              cancelText='取消'
+              onOk={this.generateOneStepPdfReport}
+              onCancel={() => this.setState({ pdfModalOpen: false })}
+              destroyOnClose
+            >
+              <Space direction='vertical' style={{ width: '100%' }} size={12}>
+                <div>
+                  <div style={{ marginBottom: 4 }}>姓名</div>
+                  <Input
+                    placeholder='请输入姓名'
+                    value={this.state.realname}
+                    onChange={(e) => this.setState({ realname: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <div style={{ marginBottom: 4 }}>年龄</div>
+                  <Input
+                    placeholder='请输入年龄'
+                    value={this.state.collectAge}
+                    onChange={(e) => this.setState({ collectAge: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <div style={{ marginBottom: 4 }}>性别</div>
+                  <Select
+                    style={{ width: '100%' }}
+                    value={this.state.collectGender}
+                    onChange={(e) => this.setState({ collectGender: e })}
+                    options={[{ label: '男', value: '男' }, { label: '女', value: '女' }]}
+                  />
+                </div>
+              </Space>
+            </Modal>
           </>
         ) : null}
       </div>
