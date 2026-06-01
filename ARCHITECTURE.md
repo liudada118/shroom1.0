@@ -222,6 +222,7 @@ graph TD
     - `smallBed12B` 使用独立的前端显示配置，不再复用通用 `bed` 颜色默认值；默认高斯为 `2`，颜色上限默认值为 `2205`，设置面板颜色滑块范围为 `5-4000` 且步进为 `10`，高度默认值为 `0.1`。`Home.jsx` 会通过通用 `syncDisplayRendererConfig()` 将进度条 state 同步到 3D/原始数据组件 ref，确保初始值、系统切换和滑块变更都会下发到渲染器内部变量。
     - 当系统类型为 `petCare` / `petCareMini` 时，`server.js` 先按 `jqbed` 线序将 32x32 数据重排，再以 50Hz（20ms）分别调用 `python/app/petCare/pet_care_wrapper` / `pet_care_wrappermini`；算法输出通过 `python/app/onbed_filter_example.py` 的 JSON-line RPC 回传给 Electron，前端 Title/Home/Aside/License 复用宠物看护链路展示呼吸率、姿态、体动、信号质量、模拟心率和压力系数；其中 `Aside.jsx` 会在前端层对 `petCareMini` 的离床状态（`petInBed=0` 或 `posture_state=0`）做展示归一化，强制将面板上的 `pressure_coefficient` 显示为 `0.00`，并依据呼吸频率在前端生成 `55-100` 区间的模拟心率替换原来的 SNR 展示；为避免心率跳变过快，模拟心率现在按 1 秒节拍更新一次，其余呼吸、姿态和质量数据仍保持实时刷新；同时 `server.js` 关闭了 `petCareMini` 的 `[petCareMini] algorithm result` 周期性信息日志，避免运行期刷屏。
     - 当系统类型为 `hand0205` / `handGlove115200` / `handGloveFullPacket` 且前端处于普通 3D 遥操模式时，`Home.jsx` 使用模型渲染矩阵继续驱动手部姿态与手指弯曲，但 Aside 面板中的 `meanPres`、`maxPres`、`totalPres`、`point` 以及 Pressure Area / Pressure Data 图表改为直接基于原始 256 点矩阵（`realArr` / `rawPressureData`）计算和渲染，避免统计值被映射后的控制数据覆盖。
+    - 手套类系统在 200Hz 采集时仍按原始采样频率写入 SQLite 历史数据，但 `server.js` 会把实时 WebSocket 展示推送限制到约 60fps，并移除手套高频路径上的逐帧 `console.log` / 入库成功日志，降低 Electron 主进程和前端渲染压力，避免采集时 UI 卡顿。
     - 当系统类型为 `handGloveFullPacket` 时，`server.js` 在 `AA 55 03 99` 分隔符后按 274 字节整包解析：前 2 字节为帧号与类型（当前按 `01` 右手、`02` 左手路由），中间 256 字节为手套压力矩阵，末尾 16 字节陀螺仪数据暂不参与渲染；解析后按整包协议专用的左右手 1-based 点位表映射到固定 `15x13`（195 点）数组：前 4 行为手指，第 5 行为指腹（非指腹格补 0），后 8 行为手掌（掌面空白格补 0）。`mappedArr195` 专用于原始数据视图的规则排布，`realArr` / `rawPressureData` 保留原始 256 点并继续供 `num` 2D 数字模式以 `16x16` 高速矩阵显示，`sitData` / `backData` 专用于旧手套 3D 模型并承载转换后的 32x32（1024 点）矩阵；前端会跳过整包手套的旧 `hand0205` 原始数据二次映射路径，避免 256/195/1024 三种数据形态互相覆盖。
     - 当系统类型为 `hand0205` / `handGlove115200` / `handGloveFullPacket` 且前端处于 3D `skin` 模式时，`client/src/components/video/hand.jsx` 继续沿用现有 `ndata1` 32×32 数据格式、`sitData/changeColor` ref 接口和 `CanvasTexture` 贴图链路，但热力图生成层由原来的 `HeatmapCanvas.changeHeatmap()` 切换为 `WebGLCanvas.render()`：为避免模型热力图全透明且保持原有 size 进度条语义不变，WebGL 输入改为复用旧 `HeatmapCanvas` 的强度缩放与补边预处理（包含固定 `*10` 强度放大和补零插值），并将滑杆 `size` 按旧 Canvas 圆形阴影扩散语义换算为 WebGL 半径后，再用单张离屏 WebGL canvas 生成 1024×1024 热力图并通过 `drawImage()` 回贴到原有手部纹理 canvas，以降低高频场景下的 CPU 逐帧绘制压力。
 
@@ -229,6 +230,7 @@ graph TD
     - 用户点击"开始采集" → 前端通过 WebSocket 发送 `col` 指令 → `server.js` 开启采集模式 → 每帧数据同时写入 `dbHelper.js`（SQLite）和 `csvHelper.js`（CSV 文件） → 用户点击"停止采集"结束录制。
     - CSV 导出的最左侧 `seconds` 列使用数据库帧时间戳计算真实相对秒数（当前帧 `timestamp` - 导出首帧 `timestamp`），仅在缺失时间戳时回退到采集频率估算，不再固定按 12Hz 用 `j / 12` 生成。
     - `smallBed12B` 的 CSV 文件名前缀使用系统简写 `12B`，例如 `12B2026-05-21...csv`；其它系统保持既有 `file` 或通道名前缀。
+    - 手套类 CSV 导出在保留整体 `data` 矩阵和 `quaternion` 姿态列的基础上，额外按左右手原始 256 点位表拆出 `小拇指`、`无名指`、`中指`、`食指`、`大拇指`、`指根`、`手掌` 七个 JSON 数组列；点位表为 1-based，代码读取时减 1 访问数组，`指根` 按小拇指到大拇指顺序写入 5 个弯折点。`hand0205`、`handGlove115200` 和 `handGloveFullPacket` 的 sit/back 导出都会写入这些部位列，机器人类虽然复用手部存储格式但不会写入手套部位列。
     - `jqbed`、`smallBed` 与 `smallBed12B` 的原始数据展示和 CSV `data` 列会沿左上-右下对角线转置 32x32 矩阵，即 `(row, col)` 显示/导出为 `(col, row)`，用于匹配小床检测/监测系统原始矩阵方向；`jqbed/smallBed` 的前端原始 2D 数字矩阵入口仍在 `Num2Doriginal.jsx` 做兜底转置，`smallBed12B` 在 `util.js` 进入 `Fast1024` 前完成转置。
     - `smallBed12B` 的原始数据模式单独复用 `32*32高速` 的 `Fast1024` 渲染组件，进入组件前仍执行 32x32 对角线转置；该模式使用 `0-1024` 的数字材质/颜色范围，其它系统的原始数字矩阵颜色范围、配色逻辑和渲染组件保持原样。
 
@@ -316,6 +318,10 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-05-29 | Codex | 手套 200Hz 采集卡顿优化 | `server.js` 保持手套采集数据按原始频率入库，但将手套实时 WebSocket 展示推送限频到约 60fps，并移除手套解析和入库路径上的逐帧日志，降低高频采集时的主进程和前端渲染压力。 |
+| 2026-05-29 | Codex | 手套 CSV 左右手部位顺序修正 | `server.js` 的手套部位拆分改为直接使用用户给定的左右手 1-based 原始点位表读取 256 点数组，修正小拇指到大拇指方向反的问题，`指根` 按小拇指到大拇指写入 5 个弯折点。 |
+| 2026-05-29 | Codex | 手套 CSV 部位字段拆分 | `server.js` 在手套类历史 CSV 导出中新增 `小拇指`、`无名指`、`中指`、`食指`、`大拇指`、`指根`、`手掌` 七个部位列，沿用现有手套线序映射拆分压力数据，并同步更新 `csv-shroom.md` 字段说明。 |
+| 2026-05-29 | Codex | CSV 下载配置与文件定位增强 | `Title.jsx` 新增 CSV 下载配置/进度弹窗，支持自定义保存路径、导出格式选择、路径可写性预检查、导出完成文件列表、打开 CSV 文件和打开下载文件夹；`server.js` 支持 `downloadOptions.path/format` 并回传生成文件路径。 |
 | 2026-05-29 | Codex | CSV 字段逻辑文档补充 | `csv-shroom.md` 新增字段计算逻辑章节，补充 `seconds/time/max/area/press/data/algorData/quaternion/temperature*` 等字段的来源、计算方式和各系统差异。 |
 | 2026-05-29 | Codex | CSV 下载实现文档整理 | 新增 `csv-shroom.md`，基于用户提供的 `csv.md` 通用说明，结合本项目 WebSocket 下载入口、后端 `csv-writer` 导出分支、真实秒数列、线序处理和提示机制整理当前实现文档。 |
 | 2026-05-29 | Codex | OneStep PDF 成功提示对齐 CSV 通道 | `client/src/page/home/Home.jsx` 将 `message.useMessage()` 创建的 `messageApi` 传给 `Title`，OneStep PDF 导出成功后改用与 CSV 下载一致的 `messageApi.success()` 提示。 |
@@ -574,6 +580,10 @@ graph TD
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-05-29 | Codex | 优化重构 | 优化触觉手套 200Hz 采集性能：采集入库仍保留原始帧率，实时 WebSocket 展示推送降到约 60fps，并移除手套高频路径逐帧日志和重复 JSON.parse，降低卡顿。 |
+| 2026-05-29 | Codex | 修复缺陷 | 修正手套 CSV 部位列左右手手指顺序反的问题：不再从 15 列映射矩阵推断部位，改为按用户给定的左右手 1-based 原始点位表读取 256 点数据，`指根` 输出 5 个弯折点。 |
+| 2026-05-29 | Codex | 新增功能 | 手套类 CSV 下载新增部位拆分列：`小拇指`、`无名指`、`中指`、`食指`、`大拇指`、`指根`、`手掌`，sit/back 导出均按现有手套线序生成对应 JSON 数组，并保留原 `data` 与 `quaternion` 列。 |
+| 2026-05-29 | Codex | 新增功能 | 完善历史数据 CSV 下载：下载前打开配置弹窗，可自定义导出目录并预检查可写性，后端写入自定义路径并在 WebSocket 结果中回传 `downloadFiles/downloadDir`，前端进度窗口展示文件列表并支持打开 CSV 或下载文件夹。 |
 | 2026-05-29 | Codex | 文档更新 | 补充 `csv-shroom.md` 的字段逻辑说明，明确 CSV 每个字段在当前项目中的数据来源、计算规则、系统分支差异和未写入 header 的内部统计字段。 |
 | 2026-05-29 | Codex | 文档更新 | 新增 `csv-shroom.md`，将外部 CSV 下载通用文档改写为适配当前 Shroom 项目的 CSV 下载实现说明，并明确当前未实现的配置弹窗、字段选择、路径选择等能力。 |
 | 2026-05-29 | Codex | 修复缺陷 | OneStep PDF 导出成功提示改为复用 Home 注入给 CSV 下载提示的 `messageApi` 实例，避免全局 `message` 配置导致成功提示不可见。 |

@@ -1279,6 +1279,12 @@ class Home extends React.Component {
       const displayMsg = i18nKeys.includes(jsonObject.download) && t
         ? t(jsonObject.download)
         : jsonObject.download;
+      window.dispatchEvent(new CustomEvent('shroom-csv-download-status', {
+        detail: {
+          ...jsonObject,
+          displayMsg,
+        },
+      }));
       if (this.props.messageApi) {
         this.props.messageApi.info(displayMsg);
       } else {

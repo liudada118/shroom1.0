@@ -221,6 +221,13 @@ class Title extends React.Component {
       collectAge: '',
       collectGender: '男',
       pdfModalOpen: false,
+      csvDownloadModalOpen: false,
+      csvDownloadStage: 'config',
+      csvDownloadPath: localStorage.getItem('csvDownloadPath') || '',
+      csvDownloadFormat: 'csv',
+      csvDownloadFiles: [],
+      csvDownloadDir: '',
+      csvDownloadMessage: '',
       open: false,
       fingerIndex: 0,
       colHZ: 12,
@@ -229,10 +236,12 @@ class Title extends React.Component {
     }
     this.inputRef = React.createRef(null)
     this.inputRef1 = React.createRef(null)
+    this.handleCsvDownloadStatus = this.handleCsvDownloadStatus.bind(this)
   }
 
   componentDidMount() {
     console.log(this.props, 'props')
+    window.addEventListener('shroom-csv-download-status', this.handleCsvDownloadStatus)
 
     if (this.props.matrixName === 'sitCol' || this.props.matrixName === 'handBlue') {
       if (localStorage.getItem('sitType1')) {
@@ -259,6 +268,10 @@ class Title extends React.Component {
         })
       }
     }
+  }
+
+  componentWillUnmount() {
+    window.removeEventListener('shroom-csv-download-status', this.handleCsvDownloadStatus)
   }
 
   componentDidUpdate(prevProps) {
@@ -449,6 +462,189 @@ class Title extends React.Component {
       this.inputRef.current?.focus();
     }, 0);
   };
+
+  openCsvDownloadModal = () => {
+    if (!this.state.dataTime) {
+      message.warning('请先选择要下载的历史数据');
+      return;
+    }
+    this.setState({
+      csvDownloadModalOpen: true,
+      csvDownloadStage: 'config',
+      csvDownloadFiles: [],
+      csvDownloadDir: this.state.csvDownloadPath || '',
+      csvDownloadMessage: '',
+    });
+  }
+
+  chooseCsvDownloadPath = async () => {
+    if (!window.electronAPI?.invoke) {
+      message.warning('当前环境不支持选择文件夹');
+      return;
+    }
+    const result = await window.electronAPI.invoke('file-dialog', {
+      properties: ['openDirectory', 'createDirectory'],
+      title: '选择 CSV 保存文件夹',
+    });
+    const selectedPath = result?.filePaths?.[0];
+    if (selectedPath) {
+      this.setState({ csvDownloadPath: selectedPath, csvDownloadDir: selectedPath });
+      localStorage.setItem('csvDownloadPath', selectedPath);
+    }
+  }
+
+  openCsvPath = async (targetPath) => {
+    if (!targetPath) return;
+    if (!window.electronAPI?.invoke) {
+      message.warning('当前环境不支持打开路径');
+      return;
+    }
+    const result = await window.electronAPI.invoke('open-path', { filePath: targetPath });
+    if (!result?.success) {
+      message.error(result?.error || '打开失败');
+    }
+  }
+
+  startCsvDownload = async () => {
+    if (!this.state.dataTime) {
+      message.warning('请先选择要下载的历史数据');
+      return;
+    }
+    if (this.state.csvDownloadFormat !== 'csv') {
+      message.warning('当前仅支持 CSV 格式');
+      return;
+    }
+    const downloadPath = (this.state.csvDownloadPath || '').trim();
+    if (downloadPath && window.electronAPI?.invoke) {
+      const validateResult = await window.electronAPI.invoke('validate-path', { path: downloadPath });
+      if (!validateResult?.success) {
+        message.error(`保存路径不可用：${validateResult?.error || '未知错误'}`);
+        return;
+      }
+      localStorage.setItem('csvDownloadPath', downloadPath);
+    }
+    this.setState({
+      csvDownloadStage: 'exporting',
+      csvDownloadFiles: [],
+      csvDownloadDir: downloadPath,
+      csvDownloadMessage: '正在导出 CSV...',
+    });
+    this.props.wsSendObj({
+      download: this.state.dataTime,
+      downloadOptions: {
+        path: downloadPath,
+        format: this.state.csvDownloadFormat,
+      },
+    });
+  }
+
+  handleCsvDownloadStatus(event) {
+    const detail = event.detail || {};
+    if (!['export csv success', 'export csv failed'].includes(detail.download)) {
+      return;
+    }
+    const nextFiles = Array.isArray(detail.downloadFiles) ? detail.downloadFiles : [];
+    const mergedFiles = Array.from(new Set([...(this.state.csvDownloadFiles || []), ...nextFiles]));
+    if (detail.download === 'export csv success') {
+      this.setState({
+        csvDownloadModalOpen: true,
+        csvDownloadStage: 'done',
+        csvDownloadFiles: mergedFiles,
+        csvDownloadDir: detail.downloadDir || this.state.csvDownloadDir || this.state.csvDownloadPath,
+        csvDownloadMessage: detail.displayMsg || '导出 CSV 成功',
+      });
+      return;
+    }
+    this.setState({
+      csvDownloadModalOpen: true,
+      csvDownloadStage: 'error',
+      csvDownloadFiles: mergedFiles,
+      csvDownloadDir: detail.downloadDir || this.state.csvDownloadDir || this.state.csvDownloadPath,
+      csvDownloadMessage: detail.downloadError || detail.displayMsg || '导出 CSV 失败',
+    });
+  }
+
+  renderCsvDownloadModal() {
+    const stage = this.state.csvDownloadStage;
+    const isConfig = stage === 'config';
+    const isExporting = stage === 'exporting';
+    const isDone = stage === 'done';
+    const isError = stage === 'error';
+    const fileList = this.state.csvDownloadFiles || [];
+    const folderPath = this.state.csvDownloadDir || this.state.csvDownloadPath;
+
+    return (
+      <Modal
+        title={isConfig ? 'CSV 下载配置' : 'CSV 下载进度'}
+        open={this.state.csvDownloadModalOpen}
+        okText={isConfig ? '开始下载' : '关闭'}
+        cancelText='取消'
+        confirmLoading={isExporting}
+        closable={!isExporting}
+        maskClosable={!isExporting}
+        onOk={isConfig ? this.startCsvDownload : () => this.setState({ csvDownloadModalOpen: false })}
+        onCancel={() => {
+          if (!isExporting) {
+            this.setState({ csvDownloadModalOpen: false });
+          }
+        }}
+        cancelButtonProps={{ style: isConfig ? undefined : { display: 'none' } }}
+      >
+        {isConfig ? (
+          <Space direction='vertical' style={{ width: '100%' }} size={12}>
+            <div>
+              <div style={{ marginBottom: 4 }}>保存路径</div>
+              <Input
+                placeholder='不填写则使用默认 data 目录'
+                value={this.state.csvDownloadPath}
+                onChange={(e) => this.setState({ csvDownloadPath: e.target.value })}
+              />
+            </div>
+            <Space>
+              <Button onClick={this.chooseCsvDownloadPath}>选择文件夹</Button>
+              <Button disabled={!folderPath} onClick={() => this.openCsvPath(folderPath)}>打开文件夹</Button>
+            </Space>
+            <div>
+              <div style={{ marginBottom: 4 }}>导出格式</div>
+              <Select
+                style={{ width: '100%' }}
+                value={this.state.csvDownloadFormat}
+                onChange={(value) => this.setState({ csvDownloadFormat: value })}
+                options={[{ label: 'CSV', value: 'csv' }]}
+              />
+            </div>
+          </Space>
+        ) : null}
+
+        {isExporting ? (
+          <div>
+            <p>正在导出 CSV，请稍候...</p>
+            <p style={{ color: '#666' }}>文件生成完成后会显示在这里。</p>
+          </div>
+        ) : null}
+
+        {isDone ? (
+          <Space direction='vertical' style={{ width: '100%' }} size={12}>
+            <div>{this.state.csvDownloadMessage || '导出 CSV 成功'}</div>
+            {fileList.length ? fileList.map((filePath) => (
+              <div key={filePath} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{filePath}</span>
+                <Button size='small' onClick={() => this.openCsvPath(filePath)}>打开</Button>
+              </div>
+            )) : <div>已导出完成，但未收到文件路径。</div>}
+            <Button disabled={!folderPath} onClick={() => this.openCsvPath(folderPath)}>打开下载文件夹</Button>
+          </Space>
+        ) : null}
+
+        {isError ? (
+          <Space direction='vertical' style={{ width: '100%' }} size={12}>
+            <div style={{ color: '#ff4d4f' }}>{this.state.csvDownloadMessage || '导出 CSV 失败'}</div>
+            <Button disabled={!folderPath} onClick={() => this.openCsvPath(folderPath)}>打开下载文件夹</Button>
+          </Space>
+        ) : null}
+      </Modal>
+    );
+  }
 
   openOneStepPdfModal = () => {
     if (!this.state.dataTime) {
@@ -1487,9 +1683,7 @@ class Title extends React.Component {
           </>
           : <> <Button
             className='titleButton'
-            onClick={() => {
-              this.props.wsSendObj({ download: this.state.dataTime })
-            }}
+            onClick={this.openCsvDownloadModal}
           >{t('download')}</Button>
             <Button
               className='titleButton'
@@ -1611,6 +1805,8 @@ class Title extends React.Component {
           ]}
         ></Select> : ''
       }
+
+      {this.renderCsvDownloadModal()}
 
       <div style={{ position: 'relative', flexShrink: 0 }}>
         <img onClick={() => {

@@ -222,6 +222,42 @@ ipcMain.handle("open-folder", async (event, data) => {
   }
 });
 
+ipcMain.handle("open-path", async (event, data) => {
+  try {
+    const { filePath } = data || {};
+    if (!filePath) {
+      return { success: false, error: "missing filePath" };
+    }
+    const error = await shell.openPath(filePath);
+    return error ? { success: false, error } : { success: true };
+  } catch (err) {
+    logger.error("[IPC] open-path error:", err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle("validate-path", async (event, data) => {
+  const targetPath = String(data?.path || "").trim();
+  if (!targetPath) {
+    return { success: false, error: "路径不能为空" };
+  }
+  const testFile = path.join(targetPath, `.shroom-write-test-${Date.now()}.tmp`);
+  try {
+    fs.mkdirSync(targetPath, { recursive: true });
+    fs.writeFileSync(testFile, "ok");
+    fs.unlinkSync(testFile);
+    return { success: true, path: targetPath };
+  } catch (err) {
+    try {
+      if (fs.existsSync(testFile)) fs.unlinkSync(testFile);
+    } catch {
+      // Ignore cleanup failure.
+    }
+    logger.error("[IPC] validate-path error:", err.message);
+    return { success: false, error: err.message };
+  }
+});
+
 /**
  * 向渲染进程发送消息的工具函数
  * 供 server.js 等模块调用，将后端数据推送到前端

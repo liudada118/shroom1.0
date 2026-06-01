@@ -100,6 +100,11 @@ const THREE_PORT_SENSOR_TYPES = new Set(['volvo', WHOLE_CHAIR_TYPE]);
 const isHandGloveType = (sensorType) => HAND_GLOVE_TYPES.includes(sensorType);
 const isHandStorageType = (sensorType = '') => isHandGloveType(sensorType) || String(sensorType).includes('robot');
 const isThreePortFile = (sensorType) => THREE_PORT_SENSOR_TYPES.has(sensorType);
+const HAND_GLOVE_REALTIME_SEND_INTERVAL_MS = 1000 / 60;
+let lastHandGloveRealtimeSendAt = {
+  sit: 0,
+  back: 0,
+};
 const getSensorBaudRate = (sensorType) => {
   if (sensorType == 'handGlove115200') {
     return 115200;
@@ -397,6 +402,84 @@ function getCsvElapsedSeconds(rows, rowIndex, baseIndex = 0, frameIndex = 0) {
 function getCsvFilePrefix(sensorType, fallbackPrefix) {
   if (sensorType === SMALL_BED_12B_TYPE) return '12B';
   return fallbackPrefix;
+}
+
+function shouldSendRealtimeFrame(channel = 'sit') {
+  if (!isHandGloveType(file)) return true;
+
+  const now = Date.now();
+  const lastSendAt = lastHandGloveRealtimeSendAt[channel] || 0;
+  if (now - lastSendAt < HAND_GLOVE_REALTIME_SEND_INTERVAL_MS) {
+    return false;
+  }
+
+  lastHandGloveRealtimeSendAt[channel] = now;
+  return true;
+}
+
+const HAND_GLOVE_CSV_SEGMENT_HEADERS = [
+  { id: 'littleFinger', title: '小拇指' },
+  { id: 'ringFinger', title: '无名指' },
+  { id: 'middleFinger', title: '中指' },
+  { id: 'indexFinger', title: '食指' },
+  { id: 'thumb', title: '大拇指' },
+  { id: 'fingerRoot', title: '指根' },
+  { id: 'palm', title: '手掌' },
+];
+
+const HAND_GLOVE_CSV_SEGMENT_POINTS = {
+  left: {
+    littleFinger: [31, 30, 29, 15, 14, 13, 255, 254, 253, 239, 238, 237],
+    ringFinger: [28, 27, 26, 12, 11, 10, 252, 251, 250, 236, 235, 234],
+    middleFinger: [25, 24, 23, 9, 8, 7, 249, 248, 247, 233, 232, 231],
+    indexFinger: [22, 21, 20, 6, 5, 4, 246, 245, 244, 230, 229, 228],
+    thumb: [19, 18, 17, 3, 2, 1, 243, 242, 241, 227, 226, 225],
+    fingerRoot: [222, 219, 216, 213, 210],
+    palm: [
+      207, 206, 205, 204, 203, 202, 201, 200, 199, 198, 197, 196,
+      191, 190, 189, 188, 187, 186, 185, 184, 183, 182, 181, 180,
+      179, 178, 177, 175, 174, 173, 172, 171, 170, 169, 168, 167,
+      166, 165, 164, 163, 162, 161, 159, 158, 157, 156, 155, 154,
+      153, 152, 151, 150, 149, 148, 147, 146, 145, 143, 142, 141,
+      140, 139, 138, 137, 136, 135, 134, 133, 132, 131, 130, 129,
+    ],
+  },
+  right: {
+    littleFinger: [228, 227, 226, 244, 243, 242, 4, 3, 2, 20, 19, 18],
+    ringFinger: [231, 230, 229, 247, 246, 245, 7, 6, 5, 23, 22, 21],
+    middleFinger: [234, 233, 232, 250, 249, 248, 10, 9, 8, 26, 25, 24],
+    indexFinger: [237, 236, 235, 253, 252, 251, 13, 12, 11, 29, 28, 27],
+    thumb: [240, 239, 238, 256, 255, 254, 16, 15, 14, 32, 31, 30],
+    fingerRoot: [35, 38, 41, 44, 47],
+    palm: [
+      61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50,
+      80, 79, 78, 77, 76, 75, 74, 73, 72, 71, 70, 69,
+      68, 67, 66, 96, 95, 94, 93, 92, 91, 90, 89, 88,
+      87, 86, 85, 84, 83, 82, 112, 111, 110, 109, 108, 107,
+      106, 105, 104, 103, 102, 101, 100, 99, 98, 128, 127, 126,
+      125, 124, 123, 122, 121, 120, 119, 118, 117, 116, 115, 114,
+    ],
+  },
+};
+
+function appendHandGloveCsvHeaders(csvHeaders) {
+  csvHeaders.push(...HAND_GLOVE_CSV_SEGMENT_HEADERS);
+}
+
+function buildHandGloveCsvSegments(pressureData, side = 'left') {
+  const data = Array.isArray(pressureData) ? pressureData : [];
+  const points = HAND_GLOVE_CSV_SEGMENT_POINTS[side] || HAND_GLOVE_CSV_SEGMENT_POINTS.left;
+  const readPoints = (pointIndexes = []) => pointIndexes.map((pointIndex) => data[pointIndex - 1] ?? 0);
+
+  return {
+    littleFinger: JSON.stringify(readPoints(points.littleFinger)),
+    ringFinger: JSON.stringify(readPoints(points.ringFinger)),
+    middleFinger: JSON.stringify(readPoints(points.middleFinger)),
+    indexFinger: JSON.stringify(readPoints(points.indexFinger)),
+    thumb: JSON.stringify(readPoints(points.thumb)),
+    fingerRoot: JSON.stringify(readPoints(points.fingerRoot)),
+    palm: JSON.stringify(readPoints(points.palm)),
+  };
 }
 
 function transposeSquareMatrix(data, size = 32) {
@@ -725,6 +808,50 @@ logger.info("[Path] resourceRoot=", runtimeResourceRoot);
 logger.info("[Path] writableRoot=", runtimeWritableRoot);
 logger.info("[Path] db=", filePath, "data=", csvPath, "config=", nameTxt);
 logger.info("[Path] configCandidates=", getConfigFileCandidates().join(", "));
+
+function validateWritableDirectory(targetDir) {
+  const dir = String(targetDir || '').trim();
+  if (!dir) {
+    return { ok: false, error: 'download path is empty' };
+  }
+  const testFile = path.join(dir, `.shroom-write-test-${Date.now()}-${Math.floor(Math.random() * 1e6)}.tmp`);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(testFile, 'ok');
+    fs.unlinkSync(testFile);
+    return { ok: true, dir };
+  } catch (error) {
+    try {
+      if (fs.existsSync(testFile)) fs.unlinkSync(testFile);
+    } catch {
+      // Ignore cleanup failure.
+    }
+    return { ok: false, error: error.message };
+  }
+}
+
+function getCsvExportDirectory(downloadOptions = {}) {
+  const requestedDir =
+    (typeof downloadOptions.path === 'string' && downloadOptions.path.trim()) ||
+    (typeof downloadOptions.dir === 'string' && downloadOptions.dir.trim()) ||
+    csvPath;
+  return validateWritableDirectory(requestedDir);
+}
+
+function broadcastCsvDownloadResult(download, { files = [], dir = '', error = '' } = {}) {
+  server.clients.forEach(function each(client) {
+    const jsonData = JSON.stringify({
+      download,
+      downloadStatus: download === 'export csv success' ? 'success' : 'failed',
+      downloadFiles: files,
+      downloadDir: dir,
+      downloadError: error,
+    });
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(jsonData);
+    }
+  });
+}
 
 // initDb 鍖呰鍑芥暟锛岃嚜鍔ㄤ紶鍏?filePath 鍜?runtimeResourceRoot
 function initDb(fileStr) {
@@ -3078,6 +3205,27 @@ module.exports = {
             const csvWriteData = [];
             const csvWriteBackData = [];
             const csvWriteHeadData = [];
+            const csvFormat = String(getMessage.downloadOptions?.format || 'csv').toLowerCase();
+            if (csvFormat !== 'csv') {
+              broadcastCsvDownloadResult('export csv failed', { error: `unsupported export format: ${csvFormat}` });
+              return;
+            }
+            const csvExportDir = getCsvExportDirectory(getMessage.downloadOptions || {});
+            if (!csvExportDir.ok) {
+              logger.error('[CSV] invalid export directory:', csvExportDir.error);
+              broadcastCsvDownloadResult('export csv failed', { error: csvExportDir.error });
+              return;
+            }
+            const csvTargetPath = (filename) => path.join(csvExportDir.dir, filename);
+            const sendCsvSuccess = (files = []) => broadcastCsvDownloadResult('export csv success', {
+              files,
+              dir: csvExportDir.dir,
+            });
+            const sendCsvFailed = (error, files = []) => broadcastCsvDownloadResult('export csv failed', {
+              files,
+              dir: csvExportDir.dir,
+              error: error?.message || String(error || ''),
+            });
             //閺屻儴顕楃拠顓炲綖
             // const selectQuery = 'select * from matrix WHERE timestamp>? and timestamp<? and date=?';
             const selectQuery = "select * from matrix WHERE date=?";
@@ -3155,8 +3303,9 @@ module.exports = {
                   // 鐏忓棙鐪归幀鑽ゆ畱閸樺濮忛弫鐗堝祦閸愭瑥鍙?CSV 閺傚洣娆?
                   // const timeStamp = Date.now()
                   const str = nowGetTime.replace(/[/:]/g, "-");
+                  const csvFilePath = csvTargetPath(`${file}${str}.csv`);
                   const csvWriter = createCsvWriter({
-                    path: `${csvPath}/${file}${str}.csv`, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
+                    path: csvFilePath, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                     header: [
                       { id: "time", title: "time" },
                       { id: "pressureArea", title: "area" },
@@ -3172,27 +3321,11 @@ module.exports = {
                     .writeRecords(csvWriteData)
                     .then(() => {
                       console.log("export csv success");
-
-                      server.clients.forEach(function each(client) {
-                        const jsonData = JSON.stringify({
-                          download: "export csv success",
-                        });
-                        if (client.readyState === WebSocket.OPEN) {
-                          client.send(jsonData);
-                        }
-                      });
+                      sendCsvSuccess([csvFilePath]);
                     })
                     .catch((err) => {
                       console.error("export csv failed", err);
-
-                      server.clients.forEach(function each(client) {
-                        const jsonData = JSON.stringify({
-                          download: "export csv failed",
-                        });
-                        if (client.readyState === WebSocket.OPEN) {
-                          client.send(jsonData);
-                        }
-                      });
+                      sendCsvFailed(err);
                     });
                 }
               });
@@ -3255,8 +3388,9 @@ module.exports = {
                     str = timeStampTo_Date(Number(str));
                   }
 
+                  const csvFilePath = csvTargetPath(`${file}${str}.csv`);
                   const csvWriter = createCsvWriter({
-                    path: `${csvPath}/${file}${str}.csv`, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
+                    path: csvFilePath, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                     header: [
                       { id: "index", title: "seconds" },
                       { id: "time", title: "time" },
@@ -3273,27 +3407,11 @@ module.exports = {
                     .writeRecords(csvWriteData)
                     .then(() => {
                       console.log("export csv success");
-
-                      server.clients.forEach(function each(client) {
-                        const jsonData = JSON.stringify({
-                          download: "export csv success",
-                        });
-                        if (client.readyState === WebSocket.OPEN) {
-                          client.send(jsonData);
-                        }
-                      });
+                      sendCsvSuccess([csvFilePath]);
                     })
                     .catch((err) => {
                       console.error("export csv failed", err);
-
-                      server.clients.forEach(function each(client) {
-                        const jsonData = JSON.stringify({
-                          download: "export csv failed",
-                        });
-                        if (client.readyState === WebSocket.OPEN) {
-                          client.send(jsonData);
-                        }
-                      });
+                      sendCsvFailed(err);
                     });
                 }
               });
@@ -3324,8 +3442,9 @@ module.exports = {
                     str = timeStampTo_Date(Number(str));
                   }
 
+                  const csvFilePath = csvTargetPath(`${file}${str}.csv`);
                   const csvWriter = createCsvWriter({
-                    path: `${csvPath}/${file}${str}.csv`, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
+                    path: csvFilePath, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                     header: [
                       { id: "realData", title: "data" },
                       { id: "label", title: "label" },
@@ -3336,27 +3455,11 @@ module.exports = {
                     .writeRecords(csvWriteData)
                     .then(() => {
                       console.log("export csv success");
-
-                      server.clients.forEach(function each(client) {
-                        const jsonData = JSON.stringify({
-                          download: "export csv success",
-                        });
-                        if (client.readyState === WebSocket.OPEN) {
-                          client.send(jsonData);
-                        }
-                      });
+                      sendCsvSuccess([csvFilePath]);
                     })
                     .catch((err) => {
                       console.error("export csv failed", err);
-
-                      server.clients.forEach(function each(client) {
-                        const jsonData = JSON.stringify({
-                          download: "export csv failed",
-                        });
-                        if (client.readyState === WebSocket.OPEN) {
-                          client.send(jsonData);
-                        }
-                      });
+                      sendCsvFailed(err);
                     });
                 }
               });
@@ -3387,8 +3490,9 @@ module.exports = {
                     str = timeStampTo_Date(Number(str));
                   }
 
+                  const csvFilePath = csvTargetPath(`${file}${str}.csv`);
                   const csvWriter = createCsvWriter({
-                    path: `${csvPath}/${file}${str}.csv`, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
+                    path: csvFilePath, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                     header: [
                       { id: "realData", title: "data" },
                       { id: "label", title: "label" },
@@ -3399,33 +3503,18 @@ module.exports = {
                     .writeRecords(csvWriteData)
                     .then(() => {
                       console.log("export csv success");
-
-                      server.clients.forEach(function each(client) {
-                        const jsonData = JSON.stringify({
-                          download: "export csv success",
-                        });
-                        if (client.readyState === WebSocket.OPEN) {
-                          client.send(jsonData);
-                        }
-                      });
+                      sendCsvSuccess([csvFilePath]);
                     })
                     .catch((err) => {
                       console.error("export csv failed", err);
-
-                      server.clients.forEach(function each(client) {
-                        const jsonData = JSON.stringify({
-                          download: "export csv failed",
-                        });
-                        if (client.readyState === WebSocket.OPEN) {
-                          client.send(jsonData);
-                        }
-                      });
+                      sendCsvFailed(err);
                     });
                 }
               });
             } else if (file !== "car10") {
               // 鍒ゆ柇鏄惁鏄Е瑙夋墜濂楃被鍨嬶紝闇€瑕佸垎绂诲師濮?56鏁版嵁鍜屽洓鍏冩暟
               const isHandType = isHandStorageType(file);
+              const isHandGloveCsvType = isHandGloveType(file);
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
                   logger.error(err);
@@ -3487,6 +3576,9 @@ module.exports = {
                       temperatureAvg: tempFullBedPayload?.temperatureAvg != null ? Number(tempFullBedPayload.temperatureAvg).toFixed(1) : '',
                       temperatureK: tempFullBedPayload?.temperatureK ?? '',
                     };
+                    if (isHandGloveCsvType) {
+                      Object.assign(newData, buildHandGloveCsvSegments(pressureData, 'left'));
+                    }
                     csvWriteData.push(newData);
                   }
 
@@ -3505,6 +3597,9 @@ module.exports = {
                     { id: "pressure", title: "press" },
                     { id: "realData", title: "data" },
                   ];
+                  if (isHandGloveCsvType) {
+                    appendHandGloveCsvHeaders(csvHeaders);
+                  }
                   if (isHandType) {
                     csvHeaders.push({ id: "rotate", title: "quaternion" });
                   }
@@ -3516,8 +3611,9 @@ module.exports = {
                     );
                   }
 
+                  const csvFilePath = csvTargetPath(`${getCsvFilePrefix(file, 'sit')}${str}.csv`);
                   const csvWriter = createCsvWriter({
-                    path: `${csvPath}/${getCsvFilePrefix(file, 'sit')}${str}.csv`,
+                    path: csvFilePath,
                     header: csvHeaders,
                   });
 
@@ -3525,27 +3621,11 @@ module.exports = {
                     .writeRecords(csvWriteData)
                     .then(() => {
                       console.log("export csv success");
-
-                      server.clients.forEach(function each(client) {
-                        const jsonData = JSON.stringify({
-                          download: "export csv success",
-                        });
-                        if (client.readyState === WebSocket.OPEN) {
-                          client.send(jsonData);
-                        }
-                      });
+                      sendCsvSuccess([csvFilePath]);
                     })
                     .catch((err) => {
                       console.error("export csv failed", err);
-
-                      server.clients.forEach(function each(client) {
-                        const jsonData = JSON.stringify({
-                          download: "export csv failed",
-                        });
-                        if (client.readyState === WebSocket.OPEN) {
-                          client.send(jsonData);
-                        }
-                      });
+                      sendCsvFailed(err);
                     });
                 }
               });
@@ -3563,6 +3643,7 @@ module.exports = {
                   // if()
 
                   const isBackHandType = isHandStorageType(file);
+                  const isBackHandGloveType = isHandGloveType(file);
                   for (var i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
                     const rawBackData = JSON.parse(rows[i][`data`]);
                     let backData, backRotateData;
@@ -3608,6 +3689,9 @@ module.exports = {
                       max,
                       rotate: backRotateData.length ? JSON.stringify(backRotateData) : '',
                     };
+                    if (isBackHandGloveType) {
+                      Object.assign(newData, buildHandGloveCsvSegments(backData, 'right'));
+                    }
                     csvWriteBackData.push(newData);
                   }
                   // 鐏忓棙鐪归幀鑽ゆ畱閸樺濮忛弫鐗堝祦閸愭瑥鍙?CSV 閺傚洣娆?
@@ -3628,11 +3712,15 @@ module.exports = {
                     { id: "pressure", title: "press" },
                     { id: "realData", title: "data" },
                   ];
+                  if (isBackHandGloveType) {
+                    appendHandGloveCsvHeaders(backCsvHeaders);
+                  }
                   if (isBackHandType) {
                     backCsvHeaders.push({ id: "rotate", title: "quaternion" });
                   }
+                  const backCsvFilePath = csvTargetPath(`back${str}.csv`);
                   const csvWriter1 = createCsvWriter({
-                    path: `${csvPath}/back${str}.csv`,
+                    path: backCsvFilePath,
                     header: backCsvHeaders,
                   });
 
@@ -3640,25 +3728,11 @@ module.exports = {
                     .writeRecords(csvWriteBackData)
                     .then(() => {
                       console.log("export csv success");
-                      server.clients.forEach(function each(client) {
-                        const jsonData = JSON.stringify({
-                          download: "export csv success",
-                        });
-                        if (client.readyState === WebSocket.OPEN) {
-                          client.send(jsonData);
-                        }
-                      });
+                      sendCsvSuccess([backCsvFilePath]);
                     })
                     .catch((err) => {
                       console.error("export csv failed", err);
-                      server.clients.forEach(function each(client) {
-                        const jsonData = JSON.stringify({
-                          download: "export csv failed",
-                        });
-                        if (client.readyState === WebSocket.OPEN) {
-                          client.send(jsonData);
-                        }
-                      });
+                      sendCsvFailed(err);
                     });
                 }
               });
@@ -3719,8 +3793,9 @@ module.exports = {
                       str = timeStampTo_Date(Number(str));
                     }
 
+                    const headCsvFilePath = csvTargetPath(`head${str}.csv`);
                     const csvWriter1 = createCsvWriter({
-                      path: `${csvPath}/head${str}.csv`,
+                      path: headCsvFilePath,
                       // path: `./data/back${str}.csv`, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                       header: [
                         { id: "index", title: "seconds" },
@@ -3737,25 +3812,11 @@ module.exports = {
                       .writeRecords(csvWriteHeadData)
                       .then(() => {
                         console.log("export csv success");
-                        server.clients.forEach(function each(client) {
-                          const jsonData = JSON.stringify({
-                            download: "export csv success",
-                          });
-                          if (client.readyState === WebSocket.OPEN) {
-                            client.send(jsonData);
-                          }
-                        });
+                        sendCsvSuccess([headCsvFilePath]);
                       })
                       .catch((err) => {
                         console.error("export csv failed", err);
-                        server.clients.forEach(function each(client) {
-                          const jsonData = JSON.stringify({
-                            download: "export csv failed",
-                          });
-                          if (client.readyState === WebSocket.OPEN) {
-                            client.send(jsonData);
-                          }
-                        });
+                        sendCsvFailed(err);
                       });
                   }
                 });
@@ -4459,7 +4520,6 @@ parser.on("data", function (data) {
         pointArr[i] = buffer.readUInt8(i);
       }
       let length = pointArr.length
-      console.log(pointArr[1])
       pointArr = pointArr.splice(2, length)
       length = pointArr.length
       const arr = pointArr.splice(length - 16, length)
@@ -4475,7 +4535,6 @@ parser.on("data", function (data) {
       // newArr = handVideo1470506([...pointArr])
       // newArr = handVideoRealPoint_0416_3([...newArr])
       // newArr = [...pointArr]
-      console.log(file)
       if (file == 'handVideo1') {
         newArr = handVideoRealPoint_0506_3([...pointArr])
         pointArr = handVideo1_0416_0506(pointArr)
@@ -5051,12 +5110,11 @@ function colOrSendData(jsonData) {
           logger.error(err);
           return;
         }
-        console.log(`Event inserted with ID ${this.lastID}`);
       }
     );
   }
 
-  if (!localFlag) {
+  if (!localFlag && shouldSendRealtimeFrame('sit')) {
 
     server.clients.forEach(function each(client) {
       if (client.readyState === WebSocket.OPEN) {
@@ -5073,7 +5131,6 @@ parser2.on("data", function (data) {
   pointArr2 = new Array();
   let buffer = Buffer.from(data);
   if (nowDate < endDate) {
-    console.log(buffer.length)
     if (file === HAND_GLOVE_FULL_PACKET && buffer.length === HAND_GLOVE_FULL_PACKET_LENGTH) {
       handleHandGloveFullPacket(buffer, 'right');
       return;
@@ -5349,21 +5406,20 @@ function colOrSendData1(jsonData) {
     const insertQuery =
       "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
 
-
+    const frameToStore = JSON.parse(jsonData);
     db1.run(
       insertQuery,
-      [isHandStorageType(file) ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : file == 'footVideo' ? JSON.stringify([...JSON.parse(jsonData).realArr]) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
+      [isHandStorageType(file) ? JSON.stringify([...frameToStore.realArr, ...(frameToStore.rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : file == 'footVideo' ? JSON.stringify([...frameToStore.realArr]) : JSON.stringify([...frameToStore.backData]), timestamp, date],
       function (err) {
         if (err) {
           logger.error(err);
           return;
         }
-        console.log(`Event inserted with ID ${this.lastID}`);
       }
     );
   }
 
-  if (!localFlag) {
+  if (!localFlag && shouldSendRealtimeFrame('back')) {
 
     server.clients.forEach(function each(client) {
       if (client.readyState === WebSocket.OPEN) {

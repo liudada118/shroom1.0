@@ -31,6 +31,8 @@ const VALID_SEND_CHANNELS = [
   "db-query",          // 数据库查询请求
   "update-command",    // 更新控制指令（检查更新、下载、安装）
   "open-folder",       // 打开文件夹
+  "open-path",         // 打开文件或文件夹
+  "validate-path",     // 校验目录是否可写
 ];
 
 const VALID_RECEIVE_CHANNELS = [
