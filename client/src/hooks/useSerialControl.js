@@ -178,7 +178,12 @@ export function useSerialControl(sendMessage) {
    * @param {string} dateLabel - 采集标签
    */
   const downloadCsv = useCallback((dateLabel) => {
-    sendMessage({ download: dateLabel });
+    sendMessage({
+      download: dateLabel,
+      downloadOptions: {
+        language: localStorage.getItem('language') || 'zh',
+      },
+    });
   }, [sendMessage]);
 
   /**

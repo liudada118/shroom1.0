@@ -534,6 +534,7 @@ class Title extends React.Component {
       downloadOptions: {
         path: downloadPath,
         format: this.state.csvDownloadFormat,
+        language: this.props.i18n?.language || 'zh',
       },
     });
   }
@@ -1641,7 +1642,13 @@ class Title extends React.Component {
                   } else {
                     this.props.wsSendObj({ colHZ: this.state.colHZ, flag: flag })
                     if (this.props.matrixName == 'sitCol' || this.props.matrixName == 'matCol') {
-                      this.props.wsSendObj({ colHZ: this.state.colHZ, download: loadData })
+                      this.props.wsSendObj({
+                        colHZ: this.state.colHZ,
+                        download: loadData,
+                        downloadOptions: {
+                          language: this.props.i18n?.language || 'zh',
+                        },
+                      })
                     }
                   }
                   // console.log(flag)

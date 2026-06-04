@@ -85,7 +85,8 @@ const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, 
 const { initDb: _initDbFromModule } = require('./server/dbManager');
 
 const HAND_GLOVE_FULL_PACKET = 'handGloveFullPacket';
-const HAND_GLOVE_TYPES = ['hand0205', 'handGlove115200', HAND_GLOVE_FULL_PACKET];
+const HAND_GLOVE_DOUBLE = 'hand0205Double';
+const HAND_GLOVE_TYPES = ['hand0205', HAND_GLOVE_DOUBLE, 'handGlove115200', HAND_GLOVE_FULL_PACKET];
 const HAND_GLOVE_FULL_PACKET_LENGTH = 274;
 const TEMP_FULL_BED_TYPE = 'tempFullBed';
 const TEMP_FULL_BED_PRESSURE_THRESHOLD = 20;
@@ -99,6 +100,7 @@ const SMALL_BED_12B_FRAME_TAIL = Buffer.from([0xaa, 0x00, 0x55, 0x00, 0x03, 0x00
 const THREE_PORT_SENSOR_TYPES = new Set(['volvo', WHOLE_CHAIR_TYPE]);
 const isHandGloveType = (sensorType) => HAND_GLOVE_TYPES.includes(sensorType);
 const isHandStorageType = (sensorType = '') => isHandGloveType(sensorType) || String(sensorType).includes('robot');
+const isZeroFrameStorageType = (sensorType = '') => isHandGloveType(sensorType) || sensorType === 'footVideo' || String(sensorType).includes('robot');
 const isThreePortFile = (sensorType) => THREE_PORT_SENSOR_TYPES.has(sensorType);
 const HAND_GLOVE_REALTIME_SEND_INTERVAL_MS = 1000 / 60;
 let lastHandGloveRealtimeSendAt = {
@@ -372,6 +374,7 @@ function getStoredSitData(row) {
 function getHistoryPressureData(row) {
   const storedData = parseStoredFrameData(row);
   if (Array.isArray(storedData)) return storedData;
+  if (Array.isArray(storedData?.pressureData)) return storedData.pressureData;
   if (Array.isArray(storedData?.sitData)) return storedData.sitData;
   if (Array.isArray(storedData?.backData)) return storedData.backData;
   return [];
@@ -401,6 +404,8 @@ function getCsvElapsedSeconds(rows, rowIndex, baseIndex = 0, frameIndex = 0) {
 
 function getCsvFilePrefix(sensorType, fallbackPrefix) {
   if (sensorType === SMALL_BED_12B_TYPE) return '12B';
+  if (isHandGloveType(sensorType) && fallbackPrefix === 'sit') return 'left';
+  if (isHandGloveType(sensorType) && fallbackPrefix === 'back') return 'right';
   return fallbackPrefix;
 }
 
@@ -417,15 +422,164 @@ function shouldSendRealtimeFrame(channel = 'sit') {
   return true;
 }
 
-const HAND_GLOVE_CSV_SEGMENT_HEADERS = [
-  { id: 'littleFinger', title: '小拇指' },
-  { id: 'ringFinger', title: '无名指' },
-  { id: 'middleFinger', title: '中指' },
-  { id: 'indexFinger', title: '食指' },
-  { id: 'thumb', title: '大拇指' },
-  { id: 'fingerRoot', title: '指根' },
-  { id: 'palm', title: '手掌' },
+function parseStoredSensorFrame(storedData, sensorType = '') {
+  if (storedData && typeof storedData === 'object' && !Array.isArray(storedData)) {
+    return {
+      pressureData: normalizeFiniteFrame(
+        storedData.pressureData || storedData.rawPressureData || storedData.sitData || storedData.backData || storedData.headData || [],
+      ),
+      rotateData: normalizeFiniteFrame(storedData.rotate || storedData.quaternion || []),
+      zeroFrame: normalizeFiniteFrame(storedData.zeroFrame || []),
+    };
+  }
+
+  const data = Array.isArray(storedData) ? storedData : [];
+  if (isHandGloveType(sensorType)) {
+    if (data.length >= 260) {
+      return {
+        pressureData: normalizeFiniteFrame(data.slice(0, 256)),
+        rotateData: normalizeFiniteFrame(data.slice(256, 260)),
+        zeroFrame: [],
+      };
+    }
+    if (data.length > 4 && data.length !== 256) {
+      return {
+        pressureData: normalizeFiniteFrame(data.slice(0, data.length - 4)),
+        rotateData: normalizeFiniteFrame(data.slice(data.length - 4)),
+        zeroFrame: [],
+      };
+    }
+  }
+
+  if (String(sensorType).includes('robot') && data.length >= 260) {
+    return {
+      pressureData: normalizeFiniteFrame(data.slice(0, 256)),
+      rotateData: normalizeFiniteFrame(data.slice(256, 260)),
+      zeroFrame: [],
+    };
+  }
+
+  return {
+    pressureData: normalizeFiniteFrame(data),
+    rotateData: [],
+    zeroFrame: [],
+  };
+}
+
+function getZeroAwareStoragePressureData(frameToStore, dataKey) {
+  const candidates = [
+    frameToStore.rawPressureData,
+    frameToStore[dataKey],
+    frameToStore.realArr,
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate) && candidate.length >= 256) {
+      return candidate.slice(0, 256);
+    }
+  }
+
+  return [];
+}
+
+function getZeroFrameForStorage(channel = 'sit') {
+  const source = channel === 'back'
+    ? (pointArr2RawZero.length ? pointArr2RawZero : pointArr2zero)
+    : channel === 'head'
+      ? pointArr4zero
+      : (pointArr1RawZero.length ? pointArr1RawZero : pointArr1zero);
+  return Array.isArray(source) ? [...source] : [];
+}
+
+function buildZeroAwareStorageData(frameToStore, dataKey, channel = 'sit') {
+  const pressureData = getZeroAwareStoragePressureData(frameToStore, dataKey);
+  if (!isZeroFrameStorageType(file)) {
+    return JSON.stringify(pressureData);
+  }
+
+  return JSON.stringify({
+    pressureData,
+    rotate: Array.isArray(frameToStore.rotate) ? [...frameToStore.rotate] : [],
+    zeroFrame: getZeroFrameForStorage(channel),
+  });
+}
+
+const HAND_GLOVE_CSV_SEGMENT_HEADER_TITLES = {
+  zh: {
+    littleFinger: '小拇指',
+    ringFinger: '无名指',
+    middleFinger: '中指',
+    indexFinger: '食指',
+    thumb: '大拇指',
+    fingerRoot: '指根',
+    palm: '手掌',
+  },
+  en: {
+    littleFinger: 'littleFinger',
+    ringFinger: 'ringFinger',
+    middleFinger: 'middleFinger',
+    indexFinger: 'indexFinger',
+    thumb: 'thumb',
+    fingerRoot: 'fingerRoot',
+    palm: 'palm',
+  },
+};
+
+const HAND_GLOVE_CSV_SEGMENT_HEADER_IDS = [
+  'littleFinger',
+  'ringFinger',
+  'middleFinger',
+  'indexFinger',
+  'thumb',
+  'fingerRoot',
+  'palm',
 ];
+
+const CSV_TITLES = {
+  zh: {
+    index: '秒数',
+    max: '矩阵最大值',
+    time: '时间戳',
+    pressureArea: '矩阵大于 0 的点数',
+    pressure: '矩阵总和',
+    pressValue: '矩阵总和',
+    pressuremmgH: '压力',
+    realData: '矩阵数据',
+    realInitData: '原始矩阵数据',
+    dataToInterpGauss: '算法数据',
+    pressLine: '压力曲线',
+    rotate: '四元数',
+    temperatureData: '温度',
+    temperatureAvg: '平均温度',
+    temperatureK: '温度K值',
+    zeroFrame: '清零帧',
+    label: '标签',
+  },
+  en: {
+    index: 'seconds',
+    max: 'max',
+    time: 'time',
+    pressureArea: 'area',
+    pressure: 'press',
+    pressValue: 'pressTotal',
+    pressuremmgH: 'pressure',
+    realData: 'data',
+    realInitData: 'realInitData',
+    dataToInterpGauss: 'algorData',
+    pressLine: 'pressLine',
+    rotate: 'quaternion',
+    temperatureData: 'temperatureCelsius',
+    temperatureAvg: 'temperatureAvg',
+    temperatureK: 'temperatureK',
+    zeroFrame: 'zeroFrame',
+    label: 'label',
+  },
+};
+
+function getCsvTitleMap(downloadOptions = {}) {
+  const language = String(downloadOptions.language || downloadOptions.locale || 'zh').toLowerCase();
+  return language.startsWith('en') ? CSV_TITLES.en : CSV_TITLES.zh;
+}
 
 const HAND_GLOVE_CSV_SEGMENT_POINTS = {
   left: {
@@ -462,8 +616,16 @@ const HAND_GLOVE_CSV_SEGMENT_POINTS = {
   },
 };
 
-function appendHandGloveCsvHeaders(csvHeaders) {
-  csvHeaders.push(...HAND_GLOVE_CSV_SEGMENT_HEADERS);
+function appendHandGloveCsvHeaders(csvHeaders, languageTitles = CSV_TITLES.zh) {
+  const segmentTitles = languageTitles === CSV_TITLES.en
+    ? HAND_GLOVE_CSV_SEGMENT_HEADER_TITLES.en
+    : HAND_GLOVE_CSV_SEGMENT_HEADER_TITLES.zh;
+  csvHeaders.push(
+    ...HAND_GLOVE_CSV_SEGMENT_HEADER_IDS.map((id) => ({
+      id,
+      title: segmentTitles[id],
+    })),
+  );
 }
 
 function buildHandGloveCsvSegments(pressureData, side = 'left') {
@@ -1242,11 +1404,14 @@ let pointArr147zero_2 = []
 let pointArr2zero = []
 let pointArr3zero = []
 let pointArr4zero = []
+let pointArr2RawZero = []
 
 let pointArr1zeroData = []
 let pointArr2zeroData = []
 let pointArr3zeroData = []
-let pointArr4zeroData = [], newArr147 = [], newArr147_2 = [];
+let pointArr4zeroData = [], pointArr2RawZeroData = [], newArr147 = [], newArr147_2 = [];
+let pointArr1RawZero = []
+let pointArr1RawZeroData = []
 
 server = new WebSocket.Server({ port: 19999 });
 server1 = new WebSocket.Server({ port: 19998 });
@@ -1610,6 +1775,8 @@ module.exports = {
             if (pointArr2) pointArr2zero = [...pointArr2zeroData]
             if (pointArr3) pointArr3zero = [...pointArr3zeroData]
             if (pointArr4) pointArr4zero = [...pointArr4zeroData]
+            if (pointArr1RawZeroData.length) pointArr1RawZero = [...pointArr1RawZeroData]
+            if (pointArr2RawZeroData.length) pointArr2RawZero = [...pointArr2RawZeroData]
             if (newArr147) pointArr147zero = [...newArr147]
             if (newArr147_2) pointArr147zero_2 = [...newArr147_2]
 
@@ -1620,6 +1787,8 @@ module.exports = {
             pointArr2zero = []
             pointArr3zero = []
             pointArr4zero = []
+            pointArr1RawZero = []
+            pointArr2RawZero = []
             pointArr147zero = []
             pointArr147zero_2 = []
           }
@@ -2593,13 +2762,14 @@ module.exports = {
                   const sitRawText = localData[value]?.data
                   const backRawText = localDataBack[value]?.data
                   if (sitRawText) {
-                    const sitRaw = JSON.parse(sitRawText)
-                    if (sitRaw.length >= 260) {
+                    const sitFrame = parseStoredSensorFrame(JSON.parse(sitRawText), file)
+                    const sitRaw = sitFrame.pressureData
+                    if (sitFrame.rotateData.length) sitObj.rotate = sitFrame.rotateData
+                    if (sitRaw.length >= 256) {
                       // 新版：前256是原始数据，后4是四元数
                       const sitPressure = sitRaw.slice(0, 256)
                       sitObj.sitData = sitPressure
                       sitObj.newArr147 = sitPressure
-                      sitObj.rotate = sitRaw.slice(256, 260)
                     } else {
                       // 旧版：直接是压力数据
                       const sitPressure = normalizeFiniteFrame(sitRaw, 256)
@@ -2608,13 +2778,14 @@ module.exports = {
                     }
                   }
                   if (backRawText) {
-                    const backRaw = JSON.parse(backRawText)
-                    if (backRaw.length >= 260) {
+                    const backFrame = parseStoredSensorFrame(JSON.parse(backRawText), file)
+                    const backRaw = backFrame.pressureData
+                    if (backFrame.rotateData.length) backObj.rotate = backFrame.rotateData
+                    if (backRaw.length >= 256) {
                       // 新版：前256是原始数据，后4是四元数
                       const backPressure = backRaw.slice(0, 256)
                       backObj.backData = backPressure
                       backObj.newArr147 = backPressure
-                      backObj.rotate = backRaw.slice(256, 260)
                     } else {
                       // 旧版：直接是压力数据
                       const backPressure = normalizeFiniteFrame(backRaw, 256)
@@ -2624,8 +2795,10 @@ module.exports = {
                   }
                 } else if (isHandGloveType(file)) {
                   // 鍏煎鏂版棫鏁版嵁鏍煎紡锛氭柊鐗?60(256+4)锛屾棫鐗?51(147+4)
-                  const sitRaw = JSON.parse(localData[value]?.data || '[]')
-                  const backRaw = JSON.parse(localDataBack[value]?.data || '[]')
+                  const sitRawFrame = parseStoredSensorFrame(JSON.parse(localData[value]?.data || '[]'), file)
+                  const backRawFrame = parseStoredSensorFrame(JSON.parse(localDataBack[value]?.data || '[]'), file)
+                  const sitRaw = sitRawFrame.pressureData
+                  const backRaw = backRawFrame.pressureData
                   if (file === HAND_GLOVE_FULL_PACKET && sitRaw.length >= 256) {
                     const sitPressure = sitRaw.slice(0, 256)
                     const sitMapped = mapHandGloveFullPacketPressure([...sitPressure], 'left')
@@ -2638,14 +2811,20 @@ module.exports = {
                   } else if (sitRaw.length >= 260) {
                     // 鏂扮増锛氬墠256鏄師濮嬫暟鎹紝鍚?鏄洓鍏冩暟
                     const sitPressure = sitRaw.slice(0, 256)
-                    const sitRotate = sitRaw.slice(256, 260)
+                    const sitRotate = sitRawFrame.rotateData.length ? sitRawFrame.rotateData : sitRaw.slice(256, 260)
                     sitObj.sitData = sitPressure
                     sitObj.newArr147 = file === HAND_GLOVE_FULL_PACKET ? mapHandGloveFullPacketPressure([...sitPressure], 'left') : handL([...sitPressure])
                     sitObj.rotate = sitRotate
+                  } else if (sitRaw.length >= 256) {
+                    const sitPressure = sitRaw.slice(0, 256)
+                    sitObj.sitData = sitPressure
+                    sitObj.rawPressureData = sitPressure
+                    sitObj.newArr147 = handL([...sitPressure])
+                    sitObj.rotate = sitRawFrame.rotateData
                   } else {
                     // 鏃х増锛氬墠147鏄痭ewArr147锛屽悗4鏄洓鍏冩暟
-                    sitObj.newArr147 = sitRaw.slice(0, sitRaw.length - 4)
-                    sitObj.rotate = sitRaw.slice(sitRaw.length - 4)
+                    sitObj.newArr147 = sitRawFrame.rotateData.length ? sitRaw : sitRaw.slice(0, sitRaw.length - 4)
+                    sitObj.rotate = sitRawFrame.rotateData.length ? sitRawFrame.rotateData : sitRaw.slice(sitRaw.length - 4)
                   }
                   if (file === HAND_GLOVE_FULL_PACKET && backRaw.length >= 256) {
                     const backPressure = backRaw.slice(0, 256)
@@ -2658,19 +2837,25 @@ module.exports = {
                     backObj.rotate = []
                   } else if (backRaw.length >= 260) {
                     const backPressure = backRaw.slice(0, 256)
-                    const backRotate = backRaw.slice(256, 260)
+                    const backRotate = backRawFrame.rotateData.length ? backRawFrame.rotateData : backRaw.slice(256, 260)
                     backObj.backData = backPressure
                     backObj.newArr147 = file === HAND_GLOVE_FULL_PACKET ? mapHandGloveFullPacketPressure([...backPressure], 'right') : handR([...backPressure])
                     backObj.rotate = backRotate
+                  } else if (backRaw.length >= 256) {
+                    const backPressure = backRaw.slice(0, 256)
+                    backObj.backData = backPressure
+                    backObj.rawPressureData = backPressure
+                    backObj.newArr147 = handR([...backPressure])
+                    backObj.rotate = backRawFrame.rotateData
                   } else {
-                    backObj.newArr147 = backRaw.slice(0, backRaw.length - 4)
-                    backObj.rotate = backRaw.slice(backRaw.length - 4)
+                    backObj.newArr147 = backRawFrame.rotateData.length ? backRaw : backRaw.slice(0, backRaw.length - 4)
+                    backObj.rotate = backRawFrame.rotateData.length ? backRawFrame.rotateData : backRaw.slice(backRaw.length - 4)
                   }
                 }
 
                 if (file == 'footVideo') {
                   if (localData[value]?.data) {
-                    const sitRaw256 = JSON.parse(localData[value].data || '[]')
+                    const sitRaw256 = parseStoredSensorFrame(JSON.parse(localData[value].data || '[]'), file).pressureData
                     if (sitRaw256.length === 256) {
                       // 新版：存储的是原始256点数据，需要插值和映射
                       sitObj.sitData = footVideo([...sitRaw256])
@@ -2681,7 +2866,7 @@ module.exports = {
                     }
                   }
                   if (localDataBack[value]?.data) {
-                    const backRaw256 = JSON.parse(localDataBack[value].data || '[]')
+                    const backRaw256 = parseStoredSensorFrame(JSON.parse(localDataBack[value].data || '[]'), file).pressureData
                     if (backRaw256.length === 256) {
                       // 新版：存储的是原始256点数据，需要插值和映射
                       backObj.backData = footVideo1([...backRaw256])
@@ -2856,16 +3041,17 @@ module.exports = {
                   }
 
                   if (file.includes('robot')) {
-                    const sitRawText = localData[nowIndex]?.data
-                    const backRawText = localDataBack[nowIndex]?.data
-                    if (sitRawText) {
-                      const sitRaw = JSON.parse(sitRawText)
-                      if (sitRaw.length >= 260) {
+                  const sitRawText = localData[nowIndex]?.data
+                  const backRawText = localDataBack[nowIndex]?.data
+                  if (sitRawText) {
+                      const sitFrame = parseStoredSensorFrame(JSON.parse(sitRawText), file)
+                      const sitRaw = sitFrame.pressureData
+                      if (sitFrame.rotateData.length) sitObj.rotate = sitFrame.rotateData
+                      if (sitRaw.length >= 256) {
                         // 新版：前256是原始数据，后4是四元数
                         const sitPressure = sitRaw.slice(0, 256)
                         sitObj.sitData = sitPressure
                         sitObj.newArr147 = sitPressure
-                        sitObj.rotate = sitRaw.slice(256, 260)
                       } else {
                         // 旧版：直接是压力数据
                         const sitPressure = normalizeFiniteFrame(sitRaw, 256)
@@ -2874,13 +3060,14 @@ module.exports = {
                       }
                     }
                     if (backRawText) {
-                      const backRaw = JSON.parse(backRawText)
-                      if (backRaw.length >= 260) {
+                      const backFrame = parseStoredSensorFrame(JSON.parse(backRawText), file)
+                      const backRaw = backFrame.pressureData
+                      if (backFrame.rotateData.length) backObj.rotate = backFrame.rotateData
+                      if (backRaw.length >= 256) {
                         // 新版：前256是原始数据，后4是四元数
                         const backPressure = backRaw.slice(0, 256)
                         backObj.backData = backPressure
                         backObj.newArr147 = backPressure
-                        backObj.rotate = backRaw.slice(256, 260)
                       } else {
                         // 旧版：直接是压力数据
                         const backPressure = normalizeFiniteFrame(backRaw, 256)
@@ -2890,8 +3077,10 @@ module.exports = {
                     }
                   } else if (isHandGloveType(file)) {
                     // 鍏煎鏂版棫鏁版嵁鏍煎紡锛氭柊鐗?60(256+4)锛屾棫鐗?51(147+4)
-                    const sitRaw = JSON.parse(localData[nowIndex]?.data || '[]')
-                    const backRaw = JSON.parse(localDataBack[nowIndex]?.data || '[]')
+                    const sitRawFrame = parseStoredSensorFrame(JSON.parse(localData[nowIndex]?.data || '[]'), file)
+                    const backRawFrame = parseStoredSensorFrame(JSON.parse(localDataBack[nowIndex]?.data || '[]'), file)
+                    const sitRaw = sitRawFrame.pressureData
+                    const backRaw = backRawFrame.pressureData
                     if (file === HAND_GLOVE_FULL_PACKET && sitRaw.length >= 256) {
                       const sitPressure = sitRaw.slice(0, 256)
                       const sitMapped = mapHandGloveFullPacketPressure([...sitPressure], 'left')
@@ -2903,13 +3092,19 @@ module.exports = {
                       sitObj.rotate = []
                     } else if (sitRaw.length >= 260) {
                       const sitPressure = sitRaw.slice(0, 256)
-                      const sitRotate = sitRaw.slice(256, 260)
+                      const sitRotate = sitRawFrame.rotateData.length ? sitRawFrame.rotateData : sitRaw.slice(256, 260)
                       sitObj.sitData = sitPressure
                       sitObj.newArr147 = file === HAND_GLOVE_FULL_PACKET ? mapHandGloveFullPacketPressure([...sitPressure], 'left') : handL([...sitPressure])
                       sitObj.rotate = sitRotate
+                    } else if (sitRaw.length >= 256) {
+                      const sitPressure = sitRaw.slice(0, 256)
+                      sitObj.sitData = sitPressure
+                      sitObj.rawPressureData = sitPressure
+                      sitObj.newArr147 = handL([...sitPressure])
+                      sitObj.rotate = sitRawFrame.rotateData
                     } else {
-                      sitObj.newArr147 = sitRaw.slice(0, sitRaw.length - 4)
-                      sitObj.rotate = sitRaw.slice(sitRaw.length - 4)
+                      sitObj.newArr147 = sitRawFrame.rotateData.length ? sitRaw : sitRaw.slice(0, sitRaw.length - 4)
+                      sitObj.rotate = sitRawFrame.rotateData.length ? sitRawFrame.rotateData : sitRaw.slice(sitRaw.length - 4)
                     }
                     if (file === HAND_GLOVE_FULL_PACKET && backRaw.length >= 256) {
                       const backPressure = backRaw.slice(0, 256)
@@ -2922,20 +3117,26 @@ module.exports = {
                       backObj.rotate = []
                     } else if (backRaw.length >= 260) {
                       const backPressure = backRaw.slice(0, 256)
-                      const backRotate = backRaw.slice(256, 260)
+                      const backRotate = backRawFrame.rotateData.length ? backRawFrame.rotateData : backRaw.slice(256, 260)
                       backObj.backData = backPressure
                       backObj.newArr147 = file === HAND_GLOVE_FULL_PACKET ? mapHandGloveFullPacketPressure([...backPressure], 'right') : handR([...backPressure])
                       backObj.rotate = backRotate
+                    } else if (backRaw.length >= 256) {
+                      const backPressure = backRaw.slice(0, 256)
+                      backObj.backData = backPressure
+                      backObj.rawPressureData = backPressure
+                      backObj.newArr147 = handR([...backPressure])
+                      backObj.rotate = backRawFrame.rotateData
                     } else {
-                      backObj.newArr147 = backRaw.slice(0, backRaw.length - 4)
-                      backObj.rotate = backRaw.slice(backRaw.length - 4)
+                      backObj.newArr147 = backRawFrame.rotateData.length ? backRaw : backRaw.slice(0, backRaw.length - 4)
+                      backObj.rotate = backRawFrame.rotateData.length ? backRawFrame.rotateData : backRaw.slice(backRaw.length - 4)
                     }
                   }
 
                   if (file == 'footVideo') {
                     if (localData[nowIndex]?.data) {
-                      const sitRaw256 = JSON.parse(localData[nowIndex].data || '[]')
-                      if (sitRaw256.length === 256) {
+                        const sitRaw256 = parseStoredSensorFrame(JSON.parse(localData[nowIndex].data || '[]'), file).pressureData
+                        if (sitRaw256.length === 256) {
                         // 新版：存储的是原始256点数据，需要插值和映射
                         sitObj.sitData = footVideo([...sitRaw256])
                         sitObj.newArr147 = footL([...sitRaw256])
@@ -2945,8 +3146,8 @@ module.exports = {
                       }
                     }
                     if (localDataBack[nowIndex]?.data) {
-                      const backRaw256 = JSON.parse(localDataBack[nowIndex].data || '[]')
-                      if (backRaw256.length === 256) {
+                        const backRaw256 = parseStoredSensorFrame(JSON.parse(localDataBack[nowIndex].data || '[]'), file).pressureData
+                        if (backRaw256.length === 256) {
                         // 新版：存储的是原始256点数据，需要插值和映射
                         backObj.backData = footVideo1([...backRaw256])
                         backObj.newArr147 = footR([...backRaw256])
@@ -3206,6 +3407,7 @@ module.exports = {
             const csvWriteBackData = [];
             const csvWriteHeadData = [];
             const csvFormat = String(getMessage.downloadOptions?.format || 'csv').toLowerCase();
+            const csvTitle = getCsvTitleMap(getMessage.downloadOptions || {});
             if (csvFormat !== 'csv') {
               broadcastCsvDownloadResult('export csv failed', { error: `unsupported export format: ${csvFormat}` });
               return;
@@ -3307,13 +3509,13 @@ module.exports = {
                   const csvWriter = createCsvWriter({
                     path: csvFilePath, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                     header: [
-                      { id: "time", title: "time" },
-                      { id: "pressureArea", title: "area" },
-                      { id: "pressValue", title: "pressTotal" },
-                      { id: "pressure", title: "press" },
-                      { id: "pressuremmgH", title: "pressure" },
-                      { id: "realData", title: "data" },
-                      { id: "pressLine", title: "pressLine" },
+                      { id: "time", title: csvTitle.time },
+                      { id: "pressureArea", title: csvTitle.pressureArea },
+                      { id: "pressValue", title: csvTitle.pressValue },
+                      { id: "pressure", title: csvTitle.pressure },
+                      { id: "pressuremmgH", title: csvTitle.pressuremmgH },
+                      { id: "realData", title: csvTitle.realData },
+                      { id: "pressLine", title: csvTitle.pressLine },
                     ],
                   });
 
@@ -3392,14 +3594,14 @@ module.exports = {
                   const csvWriter = createCsvWriter({
                     path: csvFilePath, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                     header: [
-                      { id: "index", title: "seconds" },
-                      { id: "time", title: "time" },
-                      { id: "pressureArea", title: "area" },
-                      { id: "pressure", title: "press" },
-                      { id: "realInitData", title: "realInitData" },
-                      { id: "pressuremmgH", title: "閸樺宸辨径褍鐨?mmgH)" },
-                      { id: "realData", title: "data" },
-                      { id: "dataToInterpGauss", title: "algorData" },
+                      { id: "index", title: csvTitle.index },
+                      { id: "time", title: csvTitle.time },
+                      { id: "pressureArea", title: csvTitle.pressureArea },
+                      { id: "pressure", title: csvTitle.pressure },
+                      { id: "realInitData", title: csvTitle.realInitData },
+                      { id: "pressuremmgH", title: csvTitle.pressuremmgH },
+                      { id: "realData", title: csvTitle.realData },
+                      { id: "dataToInterpGauss", title: csvTitle.dataToInterpGauss },
                     ],
                   });
 
@@ -3446,8 +3648,8 @@ module.exports = {
                   const csvWriter = createCsvWriter({
                     path: csvFilePath, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                     header: [
-                      { id: "realData", title: "data" },
-                      { id: "label", title: "label" },
+                      { id: "realData", title: csvTitle.realData },
+                      { id: "label", title: csvTitle.label },
                     ],
                   });
 
@@ -3494,8 +3696,8 @@ module.exports = {
                   const csvWriter = createCsvWriter({
                     path: csvFilePath, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                     header: [
-                      { id: "realData", title: "data" },
-                      { id: "label", title: "label" },
+                      { id: "realData", title: csvTitle.realData },
+                      { id: "label", title: csvTitle.label },
                     ],
                   });
 
@@ -3515,6 +3717,7 @@ module.exports = {
               // 鍒ゆ柇鏄惁鏄Е瑙夋墜濂楃被鍨嬶紝闇€瑕佸垎绂诲師濮?56鏁版嵁鍜屽洓鍏冩暟
               const isHandType = isHandStorageType(file);
               const isHandGloveCsvType = isHandGloveType(file);
+              const shouldWriteZeroFrame = isZeroFrameStorageType(file);
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
                   logger.error(err);
@@ -3523,12 +3726,17 @@ module.exports = {
                   console.log(historyArr)
                   for (var i = historyArr[0], j = 0; i < historyArr[1] - 1; i++, j++) {
                     const rawData = JSON.parse(rows[i][`data`]);
-                    let pressureData, rotateData;
+                    let pressureData, rotateData, zeroFrameData = [];
                     let tempFullBedPayload = null;
                     if (file === TEMP_FULL_BED_TYPE) {
                       tempFullBedPayload = buildTempFullBedPlaybackPayload(rows[i]);
                       pressureData = tempFullBedPayload.sitData;
                       rotateData = [];
+                    } else if (shouldWriteZeroFrame) {
+                      const storedFrame = parseStoredSensorFrame(rawData, file);
+                      pressureData = storedFrame.pressureData;
+                      rotateData = storedFrame.rotateData;
+                      zeroFrameData = storedFrame.zeroFrame;
                     } else if (isHandType) {
                       // 鍏煎鏂版棫鏁版嵁鏍煎紡
                       if (rawData.length >= 260) {
@@ -3572,6 +3780,7 @@ module.exports = {
                       index: getCsvElapsedSeconds(rows, i, historyArr[0], j),
                       max,
                       rotate: rotateData.length ? JSON.stringify(rotateData) : '',
+                      zeroFrame: zeroFrameData.length ? JSON.stringify(zeroFrameData) : '',
                       temperatureData: tempFullBedPayload ? JSON.stringify(tempFullBedPayload.temperatureData.map((value) => Number(value).toFixed(1))) : '',
                       temperatureAvg: tempFullBedPayload?.temperatureAvg != null ? Number(tempFullBedPayload.temperatureAvg).toFixed(1) : '',
                       temperatureK: tempFullBedPayload?.temperatureK ?? '',
@@ -3590,24 +3799,27 @@ module.exports = {
                   }
 
                   const csvHeaders = [
-                    { id: "index", title: "seconds" },
-                    { id: "max", title: "max" },
-                    { id: "time", title: "time" },
-                    { id: "pressureArea", title: "area" },
-                    { id: "pressure", title: "press" },
-                    { id: "realData", title: "data" },
+                    { id: "index", title: csvTitle.index },
+                    { id: "max", title: csvTitle.max },
+                    { id: "time", title: csvTitle.time },
+                    { id: "pressureArea", title: csvTitle.pressureArea },
+                    { id: "pressure", title: csvTitle.pressure },
+                    { id: "realData", title: csvTitle.realData },
                   ];
                   if (isHandGloveCsvType) {
-                    appendHandGloveCsvHeaders(csvHeaders);
+                    appendHandGloveCsvHeaders(csvHeaders, csvTitle);
+                  }
+                  if (shouldWriteZeroFrame) {
+                    csvHeaders.push({ id: "zeroFrame", title: csvTitle.zeroFrame });
                   }
                   if (isHandType) {
-                    csvHeaders.push({ id: "rotate", title: "quaternion" });
+                    csvHeaders.push({ id: "rotate", title: csvTitle.rotate });
                   }
                   if (file === TEMP_FULL_BED_TYPE) {
                     csvHeaders.push(
-                      { id: "temperatureData", title: "temperatureCelsius" },
-                      { id: "temperatureAvg", title: "temperatureAvg" },
-                      { id: "temperatureK", title: "temperatureK" },
+                      { id: "temperatureData", title: csvTitle.temperatureData },
+                      { id: "temperatureAvg", title: csvTitle.temperatureAvg },
+                      { id: "temperatureK", title: csvTitle.temperatureK },
                     );
                   }
 
@@ -3644,10 +3856,16 @@ module.exports = {
 
                   const isBackHandType = isHandStorageType(file);
                   const isBackHandGloveType = isHandGloveType(file);
+                  const shouldWriteBackZeroFrame = isZeroFrameStorageType(file);
                   for (var i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
                     const rawBackData = JSON.parse(rows[i][`data`]);
-                    let backData, backRotateData;
-                    if (isBackHandType && rawBackData.length >= 260) {
+                    let backData, backRotateData, backZeroFrameData = [];
+                    if (shouldWriteBackZeroFrame) {
+                      const storedBackFrame = parseStoredSensorFrame(rawBackData, file);
+                      backData = storedBackFrame.pressureData;
+                      backRotateData = storedBackFrame.rotateData;
+                      backZeroFrameData = storedBackFrame.zeroFrame;
+                    } else if (isBackHandType && rawBackData.length >= 260) {
                       // 新版：前256是原始压力数据，后4是四元数
                       backData = rawBackData.slice(0, 256);
                       backRotateData = rawBackData.slice(256, 260);
@@ -3688,6 +3906,7 @@ module.exports = {
                       total1area1: backData.reduce((a, b) => a + b, 0) / [...backData].filter(a => a > 1).length,
                       max,
                       rotate: backRotateData.length ? JSON.stringify(backRotateData) : '',
+                      zeroFrame: backZeroFrameData.length ? JSON.stringify(backZeroFrameData) : '',
                     };
                     if (isBackHandGloveType) {
                       Object.assign(newData, buildHandGloveCsvSegments(backData, 'right'));
@@ -3705,20 +3924,23 @@ module.exports = {
                   }
 
                   const backCsvHeaders = [
-                    { id: "index", title: "seconds" },
-                    { id: "time", title: "time" },
-                    { id: "max", title: "max" },
-                    { id: "pressureArea", title: "area" },
-                    { id: "pressure", title: "press" },
-                    { id: "realData", title: "data" },
+                    { id: "index", title: csvTitle.index },
+                    { id: "time", title: csvTitle.time },
+                    { id: "max", title: csvTitle.max },
+                    { id: "pressureArea", title: csvTitle.pressureArea },
+                    { id: "pressure", title: csvTitle.pressure },
+                    { id: "realData", title: csvTitle.realData },
                   ];
                   if (isBackHandGloveType) {
-                    appendHandGloveCsvHeaders(backCsvHeaders);
+                    appendHandGloveCsvHeaders(backCsvHeaders, csvTitle);
+                  }
+                  if (shouldWriteBackZeroFrame) {
+                    backCsvHeaders.push({ id: "zeroFrame", title: csvTitle.zeroFrame });
                   }
                   if (isBackHandType) {
-                    backCsvHeaders.push({ id: "rotate", title: "quaternion" });
+                    backCsvHeaders.push({ id: "rotate", title: csvTitle.rotate });
                   }
-                  const backCsvFilePath = csvTargetPath(`back${str}.csv`);
+                  const backCsvFilePath = csvTargetPath(`${getCsvFilePrefix(file, 'back')}${str}.csv`);
                   const csvWriter1 = createCsvWriter({
                     path: backCsvFilePath,
                     header: backCsvHeaders,
@@ -4094,6 +4316,7 @@ function handleHandGloveFullPacket(buffer, fallbackSide) {
   if (outputSide === 'right') {
     pointArr2 = [...packet.pressureData];
     pointArr2zeroData = [...pointArr2];
+    pointArr2RawZeroData = [...pointArr2];
     newArr147_2 = [...newArr];
 
     if (pointArr2zero.length) {
@@ -4124,6 +4347,7 @@ function handleHandGloveFullPacket(buffer, fallbackSide) {
 
   pointArr = [...packet.pressureData];
   pointArr1zeroData = [...pointArr];
+  pointArr1RawZeroData = [...pointArr];
   newArr147 = [...newArr];
 
   if (pointArr1zero.length) {
@@ -4528,6 +4752,10 @@ parser.on("data", function (data) {
 
       pointArr = [...firstBlueData, ...lastBlueData]
       const realArr = [...pointArr]
+      pointArr1RawZeroData = [...realArr]
+      const rawPressureData = pointArr1RawZero.length
+        ? realArr.map((a, index) => numLessZeroToZero(a - (pointArr1RawZero[index] || 0)))
+        : [...realArr]
       let newArr = []
 
 
@@ -4642,6 +4870,7 @@ parser.on("data", function (data) {
       let jsonDataObj = {
         sitData: pointArr,
         realArr,
+        rawPressureData,
         newArr147: newArr,
         sitFlag: port1?.isOpen,
         backFlag: port2?.isOpen,
@@ -4827,6 +5056,7 @@ parser.on("data", function (data) {
       let jsonDataObj = {
         sitData: pointArr,
         realArr,
+        rawPressureData: pointArr,
         newArr147: newArr,
         sitFlag: port1?.isOpen,
         backFlag: port2?.isOpen,
@@ -5094,13 +5324,11 @@ function colOrSendData(jsonData) {
         temperatureAvg: frameToStore.temperatureAvg,
         temperatureK: frameToStore.temperatureK,
       })
-      : isHandStorageType(file)
-        ? JSON.stringify([...frameToStore.realArr, ...(frameToStore.rotate || [])])
+      : isZeroFrameStorageType(file)
+        ? buildZeroAwareStorageData(frameToStore, 'sitData', 'sit')
         : file == 'smallBed'
           ? JSON.stringify(realArr)
-          : file == 'footVideo'
-            ? JSON.stringify([...frameToStore.realArr])
-            : JSON.stringify([...frameToStore.sitData]);
+          : JSON.stringify([...frameToStore.sitData]);
 
     db.run(
       insertQuery,
@@ -5231,6 +5459,10 @@ parser2.on("data", function (data) {
         lastBlueData1 = [...firstArr]
         pointArr = [...firstBlueData1, ...lastBlueData1]
         const realArr1 = [...pointArr]
+        pointArr2RawZeroData = [...realArr1]
+        const rawPressureData1 = pointArr2RawZero.length
+          ? realArr1.map((a, index) => numLessZeroToZero(a - (pointArr2RawZero[index] || 0)))
+          : [...realArr1]
         let newArr1 = []
         if (file == 'hand0507' || isHandGloveType(file)) {
           newArr1 = handR(pointArr)
@@ -5245,6 +5477,7 @@ parser2.on("data", function (data) {
         const jsonDataObj1 = {
           backData: arr,
           realArr: realArr1,
+          rawPressureData: rawPressureData1,
           sitFlag: port1?.isOpen,
           backFlag: port2?.isOpen,
         }
@@ -5278,6 +5511,10 @@ parser2.on("data", function (data) {
       pointArr2 = [...firstBlueData1, ...lastBlueData1]
 
       const realArr = [...pointArr2]
+      pointArr2RawZeroData = [...realArr]
+      const rawPressureData = pointArr2RawZero.length
+        ? realArr.map((a, index) => numLessZeroToZero(a - (pointArr2RawZero[index] || 0)))
+        : [...realArr]
 
       if (file == 'footVideo') {
         // pointArr2 = new Array(256).fill(50)
@@ -5326,6 +5563,7 @@ parser2.on("data", function (data) {
       let jsonDataObj = {
         backData: pointArr2,
         realArr,
+        rawPressureData,
         newArr147: newArr,
         sitFlag: port1?.isOpen,
         backFlag: port2?.isOpen,
@@ -5409,7 +5647,7 @@ function colOrSendData1(jsonData) {
     const frameToStore = JSON.parse(jsonData);
     db1.run(
       insertQuery,
-      [isHandStorageType(file) ? JSON.stringify([...frameToStore.realArr, ...(frameToStore.rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : file == 'footVideo' ? JSON.stringify([...frameToStore.realArr]) : JSON.stringify([...frameToStore.backData]), timestamp, date],
+      [isZeroFrameStorageType(file) ? buildZeroAwareStorageData(frameToStore, 'backData', 'back') : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...frameToStore.backData]), timestamp, date],
       function (err) {
         if (err) {
           logger.error(err);
@@ -5673,6 +5911,7 @@ parser4.on("data", function (data) {
       let jsonDataObj = {
         headData: pointArr4,
         realArr,
+        rawPressureData: pointArr4,
         newArr147: newArr,
         sitFlag: port1?.isOpen,
         backFlag: port2?.isOpen,
@@ -5719,7 +5958,7 @@ function colOrSendData2(jsonData) {
 
     db2.run(
       insertQuery,
-      [isHandStorageType(file) ? JSON.stringify([...JSON.parse(jsonData).realArr, ...(JSON.parse(jsonData).rotate || [])]) : file == 'smallBed' ? JSON.stringify(realArr) : file == 'footVideo' ? JSON.stringify([...JSON.parse(jsonData).realArr]) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
+      [isZeroFrameStorageType(file) ? buildZeroAwareStorageData(JSON.parse(jsonData), 'headData', 'head') : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
       function (err) {
         if (err) {
           logger.error(err);
@@ -6191,3 +6430,4 @@ const HTTP_PORT = 19245;
 reportHttpServer = httpApp.listen(HTTP_PORT, '127.0.0.1', () => {
   logger.info(`[HTTP] OneStep report server listening on http://127.0.0.1:${HTTP_PORT}`);
 });
+

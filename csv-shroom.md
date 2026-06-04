@@ -127,11 +127,13 @@ function getCsvElapsedSeconds(rows, rowIndex, baseIndex = 0, frameIndex = 0) {
 | `smallBed12B` 通用分支 | `12B2026-05-29-12-00.csv` |
 | 多路座椅 sit | `sit2026-05-29-12-00.csv` |
 | 多路座椅 back | `back2026-05-29-12-00.csv` |
+| 触觉手套左手/右手 | `left2026-05-29-12-00.csv` / `right2026-05-29-12-00.csv` |
 | 三路系统 head | `head2026-05-29-12-00.csv` |
 | `sitCol` / `matCol` | `sitCol{采集记录}.csv` / `matCol{采集记录}.csv` |
 | `bigBed` | `bigBed{当前时间}.csv` |
 
 `smallBed12B` 在通用导出分支中通过 `getCsvFilePrefix()` 使用系统简写 `12B` 作为文件名前缀。
+触觉手套类系统仍沿用内部 sit/back 两路数据流，但下载 CSV 文件名前缀会改为 `left` / `right`，避免用户在文件夹中按左右手找数据时看到 `sit` / `back`。
 
 ## 7. 数据方向与线序
 
@@ -148,7 +150,23 @@ CSV 导出会尽量与前端展示方向保持一致。
 
 ## 8. 字段计算逻辑
 
-本项目 CSV 字段主要来自 `server.js` 中各导出分支构造的 `newData` 对象，再由 `csv-writer` 根据 header 写入文件。不同系统字段不完全一致，但核心字段逻辑如下。
+本项目 CSV 字段主要来自 `server.js` 中各导出分支构造的 `newData` 对象，再由 `csv-writer` 根据 header 写入文件。中文界面下载时使用中文表头，英文界面下载时保留旧版英文简写表头；字段 id 和计算逻辑不变。不同系统字段不完全一致，但核心字段逻辑如下。
+
+### 表头语言
+
+| 字段 id | 中文表头 | 英文表头 |
+| :--- | :--- | :--- |
+| `index` | `秒数` | `seconds` |
+| `max` | `矩阵最大值` | `max` |
+| `time` | `时间戳` | `time` |
+| `pressureArea` | `矩阵大于 0 的点数` | `area` |
+| `pressure` | `矩阵总和` | `press` |
+| `realData` | `矩阵数据` | `data` |
+| `rotate` | `四元数` | `quaternion` |
+| `temperatureData` | `温度` | `temperatureCelsius` |
+| `temperatureAvg` | `平均温度` | `temperatureAvg` |
+| `temperatureK` | `温度K值` | `temperatureK` |
+| `zeroFrame` | `清零帧` | `zeroFrame` |
 
 ### 通用时间字段
 
@@ -274,8 +292,11 @@ back/head 导出分支会计算一些内部统计字段：
 | `area` | `pressureArea` | 优先使用 `sitAreaSelect[i]`，否则统计大于 0 的点数。 |
 | `press` | `pressure` | 优先使用 `sitPressSelect[i]`，否则矩阵总和经过 `totalToN()`。 |
 | `data` | `realData` | 处理后的矩阵 JSON 字符串。 |
-| `小拇指` / `无名指` / `中指` / `食指` / `大拇指` / `指根` / `手掌` | `littleFinger` / `ringFinger` / `middleFinger` / `indexFinger` / `thumb` / `fingerRoot` / `palm` | 仅 `hand0205`、`handGlove115200`、`handGloveFullPacket` 写入。后端直接按左右手原始 256 点位对应关系拆成 5 指压力、5 个指根弯折点和手掌压力 JSON 数组，方便按部位查找数据。 |
+| `清零帧` | `zeroFrame` | 仅触觉手套、触觉足底、robot 类触觉上衣写入。记录用户点击清零时使用的基准帧 JSON 数组；未清零或旧历史数据为空。 |
+| `小拇指` / `无名指` / `中指` / `食指` / `大拇指` / `指根` / `手掌` | `littleFinger` / `ringFinger` / `middleFinger` / `indexFinger` / `thumb` / `fingerRoot` / `palm` | 仅 `hand0205`、`hand0205Double`、`handGlove115200`、`handGloveFullPacket` 写入。后端直接按左右手原始 256 点位对应关系拆成 5 指压力、5 个指根弯折点和手掌压力 JSON 数组，方便按部位查找数据。 |
 | `quaternion` | `rotate` | 手套类系统的 4 位四元数 JSON 字符串。 |
+
+触觉手套、触觉足底、robot 类触觉上衣点击清零后，后端实时包和采集入库都会使用清零后的压力矩阵；因此后续 CSV 导出的 `data` 会基于清零后的压力值生成，并额外写入 `清零帧`。手套类继续保留 `quaternion` 姿态列，手指/手掌拆分列也基于清零后的压力值生成。
 | `temperatureCelsius` | `temperatureData` | `tempFullBed` 温度矩阵 JSON 字符串。 |
 | `temperatureAvg` | `temperatureAvg` | `tempFullBed` 平均温度，1 位小数。 |
 | `temperatureK` | `temperatureK` | `tempFullBed` 温度 K 值。 |
@@ -296,7 +317,7 @@ back 文件字段通常包括：
 seconds, time, max, area, press, data
 ```
 
-如果当前系统是手套类，sit/back 文件会在 `data` 后额外写入 `小拇指`、`无名指`、`中指`、`食指`、`大拇指`、`指根`、`手掌`，并继续保留 `quaternion` 姿态列。
+如果当前系统是手套类，sit/back 文件会在 `data` 后额外写入 `清零帧`、`小拇指`、`无名指`、`中指`、`食指`、`大拇指`、`指根`、`手掌`，并继续保留 `quaternion` 姿态列。触觉足底和 robot 类触觉上衣会写入 `清零帧`，但不会写入手套部位列。
 
 head 文件字段通常包括：
 

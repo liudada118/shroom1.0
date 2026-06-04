@@ -594,7 +594,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             // 默认估算
             return calcRobotCellSizeFromLayout(40, 10, maxW, maxH);
         }
-        if (['hand0205', 'handGlove115200', 'handGloveFullPacket'].includes(props.matrixName)) {
+        if (['hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket'].includes(props.matrixName)) {
             const handRows = props.matrixName === 'handGloveFullPacket' ? 13 : 10;
             return calcCellSize(15, handRows, maxW, maxH, 40);
         }
@@ -650,7 +650,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             // 这里不初始化 WebGL，在 processRobotParts 中初始化
         } else if (glCanvasRef.current) {
             let tw = width, th = height;
-            if (['hand0205', 'handGlove115200', 'handGloveFullPacket'].includes(props.matrixName)) {
+            if (['hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket'].includes(props.matrixName)) {
                 tw = 15;
                 th = props.matrixName === 'handGloveFullPacket' ? 13 : 10;
             }
@@ -941,7 +941,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     }
 
     const changeWsData147 = (wsPointData) => {
-        if (['hand0205', 'handGlove115200', 'handGloveFullPacket'].includes(props.matrixName)) {
+        if (['hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket'].includes(props.matrixName)) {
             let newArr1 = [...wsPointData]
             const isFullPacketGlove = props.matrixName === 'handGloveFullPacket' && newArr1.length >= 189;
             if (isFullPacketGlove) {
@@ -1018,7 +1018,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     }
 
     const changeWsData147R = (wsPointData) => {
-        if (['hand0205', 'handGlove115200', 'handGloveFullPacket'].includes(props.matrixName)) {
+        if (['hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket'].includes(props.matrixName)) {
             changeWsData147(wsPointData)
         } else if (props.matrixName == 'footVideo') {
             const { left, right } = wsPointData

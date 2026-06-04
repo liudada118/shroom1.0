@@ -26,6 +26,7 @@ import Gloves from "../../components/three/gloves";
 import Gloves1 from "../../components/three/gloves1";
 import Carcol from "../../components/three/carCol";
 import Hand0205 from "../../components/three/hand0205 copy";
+import Hand0205Double from "../../components/three/hand0205Double";
 import Hand0507 from "../../components/three/hand0507";
 import Hand0205Point from "../../components/three/hand0205Point";
 import Hand0205Point147 from "../../components/three/hand0205Point147";
@@ -98,9 +99,10 @@ import { chestLine, flLine, frLine, genWebglData, handSkinChange, heatMapMax, hl
 import { WebGLCanvas } from "../../components/webgl/WebGL.HeatMap copy 2";
 
 const FULL_PACKET_GLOVE_MATRIX = 'handGloveFullPacket'
+const HAND_0205_DOUBLE_MATRIX = 'hand0205Double'
 const FULL_PACKET_GLOVE_MODES = ['num', 'numoriginal']
 const WHOLE_CHAIR_MATRIX = 'wholeChair'
-const tactileGloveTypes = ['hand0205', 'handGlove115200', FULL_PACKET_GLOVE_MATRIX]
+const tactileGloveTypes = ['hand0205', HAND_0205_DOUBLE_MATRIX, 'handGlove115200', FULL_PACKET_GLOVE_MATRIX]
 const isTactileGloveMappedLength = (matrixName, length) => {
   return length === 147 || (matrixName === 'handGloveFullPacket' && length === 195)
 }
@@ -127,7 +129,11 @@ const parsePressurePayload = (payload) => {
 }
 
 const getRawPressurePayload = (jsonObject, dataKey) => {
-  return jsonObject.realArr ?? jsonObject.rawPressureData ?? jsonObject[dataKey]
+  const rawPressureData = parseMaybeJsonPayload(jsonObject.rawPressureData, null)
+  if (Array.isArray(rawPressureData) && rawPressureData.length >= 256) {
+    return rawPressureData
+  }
+  return jsonObject.realArr ?? jsonObject[dataKey]
 }
 
 const parseMaybeJsonPayload = (payload, fallback = null) => {
@@ -181,6 +187,7 @@ const isCar = (str) => {
 }
 
 let newArr = new Array(5).fill(0)
+let rightHandNewArr = new Array(5).fill(0)
 let controlFlag = true;
 const controlArr = [
   { name: "座椅向前", info: "座椅向前" },
@@ -1670,7 +1677,7 @@ class Home extends React.Component {
 
 
 
-    if (this.state.hand && this.state.numMatrixFlag == 'normal' && jsonObject.rotate != null && tactileGloveTypes.includes(this.state.matrixName)) {
+    if ((this.state.hand || this.state.matrixName === HAND_0205_DOUBLE_MATRIX) && this.state.numMatrixFlag == 'normal' && jsonObject.rotate != null && tactileGloveTypes.includes(this.state.matrixName)) {
       let wsPointData = jsonObject.sitData;
       let rotate = jsonObject.rotate;
       // sitTypeEvent[this.state.matrixName]({
@@ -1730,7 +1737,7 @@ class Home extends React.Component {
       //   return
       // }
 
-      if (this.state.hand && this.state.matrixName.includes('hand')) {
+      if ((this.state.hand || this.state.matrixName === HAND_0205_DOUBLE_MATRIX) && this.state.matrixName.includes('hand')) {
 
 
 
@@ -1850,7 +1857,7 @@ class Home extends React.Component {
                 }
               } else {
                 // 手套2D数字模式：旧手套使用 sitData 的原始256数据点，以16x16矩阵显示
-                let rawData = jsonObject.sitData;
+                let rawData = getRawPressurePayload(jsonObject, 'sitData');
                 if (rawData && !Array.isArray(rawData)) {
                   rawData = JSON.parse(rawData);
                 }
@@ -1925,14 +1932,15 @@ class Home extends React.Component {
               wsPointDataSit = wsPointDataSit.map((a) => Math.round(a));
               wsPointDataSitWidth = 32;
               const currentFingerPoints = updateLatestFingerPoints(wsPointDataSit, !!backFlag)
-              this.syncGloveRawPressureStats(jsonObject.realArr || jsonObject.sitData || jsonObject.backData);
+              const rawSitData = getRawPressurePayload(jsonObject, 'sitData');
+              this.syncGloveRawPressureStats(rawSitData);
 
               if (that.state.numMatrixFlag == "normal") {
 
                 if (this.state.matrixName != 'handVideo1') {
                   that.com.current?.sitData({
                     wsPointData: wsPointData ? wsPointData : [],
-                    statsData: this.parseGloveRawMatrix(jsonObject.realArr || jsonObject.sitData || jsonObject.backData) || undefined,
+                    statsData: this.parseGloveRawMatrix(rawSitData) || undefined,
                     local: that.state.local
                   });
                 } else {
@@ -2004,7 +2012,7 @@ class Home extends React.Component {
                 }
               } else {
                 // 手套2D数字模式：旧手套使用 sitData 的原始256数据点，以16x16矩阵显示
-                let rawData = jsonObject.sitData;
+                let rawData = getRawPressurePayload(jsonObject, 'sitData');
                 if (rawData && !Array.isArray(rawData)) {
                   rawData = JSON.parse(rawData);
                 }
@@ -2195,7 +2203,8 @@ class Home extends React.Component {
       if (
         this.state.matrixName !== "bigBed" &&
         this.state.matrixName !== "foot" &&
-        this.state.matrixName !== "handGloveFullPacket"
+        this.state.matrixName !== "handGloveFullPacket" &&
+        this.state.matrixName !== HAND_0205_DOUBLE_MATRIX
       ) {
         backTypeEvent[this.state.matrixName]({
           that: this,
@@ -2222,7 +2231,7 @@ class Home extends React.Component {
         // 跳过 robot
       } else if (this.state.matrixName == 'footVideo') {
         // footVideo 已在块1 backTypeEvent 中处理，跳过
-      } else if (!this.state.hand && this.state.matrixName.includes('hand')) {
+      } else if ((!this.state.hand || this.state.matrixName === HAND_0205_DOUBLE_MATRIX) && this.state.matrixName.includes('hand')) {
 
 
         if (this.state.matrixName == 'Num3D') {
@@ -2285,7 +2294,14 @@ class Home extends React.Component {
 
 
 
-              const com = this.state.matrixName == 'hand0507' ? that.com.current?.handL : that.com.current
+              const isDoubleGlove = this.state.matrixName === HAND_0205_DOUBLE_MATRIX
+              const com = isDoubleGlove
+                ? {
+                  changeHandAngle: that.com.current?.changeRightHandAngle,
+                  calibration: that.com.current?.calibrationRight,
+                }
+                : this.state.matrixName == 'hand0507' ? that.com.current?.handL : that.com.current
+              const writeHandData = isDoubleGlove ? that.com.current?.rightData : that.com.current?.sitData
 
               wsPointDataSit = wsPointData;
               wsPointDataSit = wsPointDataSit.map((a) => Math.round(a));
@@ -2300,13 +2316,13 @@ class Home extends React.Component {
                   const renderData = this.state.matrixName === 'handGloveFullPacket'
                     ? parsePressurePayload(jsonObject.backData)
                     : wsPointData;
-                  that.com.current?.sitData({
+                  writeHandData?.({
                     wsPointData: renderData ? renderData : [],
                     statsData: this.parseGloveRawMatrix(rawBackData) || undefined,
                     local: that.state.local
                   });
                 } else {
-                  that.com.current?.sitData({
+                  writeHandData?.({
                     local: that.state.local
                   });
                 }
@@ -2346,10 +2362,11 @@ class Home extends React.Component {
                     const numberValue = Math.round((rawValue - (fingerArr[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
                     const value = (numberValue) < 0 ? 0 : (numberValue) >= 1 ? 1 : (numberValue)
 
-                    newArr[i] = newArr[i] + (value - newArr[i]) / 3
+                    const bendArr = isDoubleGlove ? rightHandNewArr : newArr
+                    bendArr[i] = bendArr[i] + (value - bendArr[i]) / 3
                   }
 
-                  com?.calibration(newArr)
+                  com?.calibration(isDoubleGlove ? rightHandNewArr : newArr)
                 }
               } else {
 
@@ -2369,7 +2386,7 @@ class Home extends React.Component {
                 }
               } else {
                 // 手套2D数字模式：旧手套使用 realArr（原始256字节）渲染16x16矩阵
-                let rawData = jsonObject.realArr || jsonObject.backData;
+                let rawData = getRawPressurePayload(jsonObject, 'backData');
                 if (rawData && !Array.isArray(rawData)) {
                   rawData = JSON.parse(rawData);
                 }
@@ -2430,21 +2447,29 @@ class Home extends React.Component {
 
 
 
-               const com = this.state.matrixName == 'hand0507' ? that.com.current?.handL : that.com.current
+              const isDoubleGlove = this.state.matrixName === HAND_0205_DOUBLE_MATRIX
+              const com = isDoubleGlove
+                ? {
+                  changeHandAngle: that.com.current?.changeRightHandAngle,
+                  calibration: that.com.current?.calibrationRight,
+                }
+                : this.state.matrixName == 'hand0507' ? that.com.current?.handL : that.com.current
+              const writeHandData = isDoubleGlove ? that.com.current?.rightData : that.com.current?.sitData
               wsPointDataSit = wsPointData;
               wsPointDataSit = wsPointDataSit.map((a) => Math.round(a));
               wsPointDataSitWidth = 32;
               const currentFingerPoints = updateLatestFingerPoints(wsPointDataSit, !!backFlag)
-              this.syncGloveRawPressureStats(jsonObject.realArr || jsonObject.sitData || jsonObject.backData);
+              const rawBackData = getRawPressurePayload(jsonObject, 'backData');
+              this.syncGloveRawPressureStats(rawBackData);
               if (that.state.numMatrixFlag == "normal") {
                 if (this.state.matrixName != 'handVideo1') {
-                  that.com.current?.sitData({
+                  writeHandData?.({
                     wsPointData: wsPointData ? wsPointData : [],
-                    statsData: this.parseGloveRawMatrix(jsonObject.realArr || jsonObject.sitData || jsonObject.backData) || undefined,
+                    statsData: this.parseGloveRawMatrix(rawBackData) || undefined,
                     local: that.state.local
                   });
                 } else {
-                  that.com.current?.sitData({
+                  writeHandData?.({
                     local: that.state.local
                   });
                 }
@@ -2484,10 +2509,11 @@ class Home extends React.Component {
                     const numberValue = Math.round((rawValue - (fingerArr[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
                     const value = (numberValue) < 0 ? 0 : (numberValue) >= 1 ? 1 : (numberValue)
 
-                    newArr[i] = newArr[i] + (value - newArr[i]) / 3
+                    const bendArr = isDoubleGlove ? rightHandNewArr : newArr
+                    bendArr[i] = bendArr[i] + (value - bendArr[i]) / 3
                   }
 
-                  com?.calibration(newArr)
+                  com?.calibration(isDoubleGlove ? rightHandNewArr : newArr)
                 }
               } else {
 
@@ -2507,7 +2533,7 @@ class Home extends React.Component {
                 }
               } else {
                 // 手套2D数字模式：旧手套使用 realArr（原始256字节）渲染16x16矩阵
-                let rawData = jsonObject.realArr || jsonObject.backData;
+                let rawData = getRawPressurePayload(jsonObject, 'backData');
                 if (rawData && !Array.isArray(rawData)) {
                   rawData = JSON.parse(rawData);
                 }
@@ -4045,15 +4071,26 @@ class Home extends React.Component {
                       <CanvasCom matrixName={this.state.matrixName}
                         local={this.state.local}
                       >
-                        <Hand0205
-                          hand={this.state.hand}
-                          ref={this.com}
-                          data={this.data}
-                          local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                        {this.state.matrixName === HAND_0205_DOUBLE_MATRIX ? (
+                          <Hand0205Double
+                            ref={this.com}
+                            data={this.data}
+                            local={this.state.local}
+                            handleChartsBody={this.handleChartsBody.bind(this)}
+                            handleChartsBody1={this.handleChartsBody1.bind(this)}
+                            changeStateData={this.changeStateData}
+                            changeSelect={this.changeSelect} />
+                        ) : (
+                          <Hand0205
+                            hand={this.state.hand}
+                            ref={this.com}
+                            data={this.data}
+                            local={this.state.local}
+                            handleChartsBody={this.handleChartsBody.bind(this)}
+                            handleChartsBody1={this.handleChartsBody1.bind(this)}
+                            changeStateData={this.changeStateData}
+                            changeSelect={this.changeSelect} />
+                        )}
                       </CanvasCom>
                     ) : this.state.matrixName == "hand0507" ? (
                       <CanvasCom matrixName={this.state.matrixName}

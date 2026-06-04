@@ -1840,6 +1840,7 @@ export const sitTypeEvent = {
       // that.com.current?.calibration([0,0,0])
     }
   },
+  hand0205Double: function(args) { return sitTypeEvent.hand0205(args); },
   handGlove115200: function(args) { return sitTypeEvent.hand0205(args); },
   handGloveFullPacket: function(args) { return sitTypeEvent.hand0205(args); },
   hand0205Point: ({ that, wsPointData, local, rotate, fingerArr }) => {
@@ -4865,6 +4866,7 @@ export const backTypeEvent = {
       // that.com.current?.calibration([0,0,0])
     }
   },
+  hand0205Double: function(args) { return backTypeEvent.hand0205(args); },
   handGlove115200: function(args) { return backTypeEvent.hand0205(args); },
   handGloveFullPacket: function(args) { return backTypeEvent.hand0205(args); },
 };

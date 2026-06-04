@@ -35,6 +35,7 @@ export const SENSOR_TYPES = {
   HAND_L:      'handL',
   HAND_R:      'handR',
   HAND_0205:   'hand0205',
+  HAND_0205_DOUBLE: 'hand0205Double',
   HAND_GLOVE_115200: 'handGlove115200',
   HAND_GLOVE_FULL_PACKET: 'handGloveFullPacket',
   HAND_0507:   'hand0507',
@@ -70,7 +71,7 @@ export const SENSOR_TYPES = {
  */
 export const CAR_TYPES = [
   'yanfeng10', 'car', 'car10', 'volvo', 'footVideo',
-  'hand0507', 'hand0205', 'handGlove115200', 'handGloveFullPacket', 'carQX', 'wholeChair', 'eye', 'sofa',
+  'hand0507', 'hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket', 'carQX', 'wholeChair', 'eye', 'sofa',
 ];
 
 /**
