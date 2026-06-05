@@ -49,6 +49,7 @@ const {
   yanfeng10sit,
   yanfeng10back,
   handBlue,
+  handSinglePoint,
   wowSitLine,
   wowBackLine,
   wowhead,
@@ -93,7 +94,9 @@ const TEMP_FULL_BED_PRESSURE_THRESHOLD = 20;
 const JQ_BED_TYPE = 'jqbed';
 const SMALL_BED_TYPE = 'smallBed';
 const SMALL_BED_12B_TYPE = 'smallBed12B';
+const HAND_SINGLE_POINT_TYPE = 'handSinglePoint';
 const WHOLE_CHAIR_TYPE = 'wholeChair';
+const MINZHEN_TYPE = 'minzhen';
 const WHOLE_CHAIR_GAUSS_RADIUS = 0.5;
 const SMALL_BED_12B_PAYLOAD_LENGTH = 1024 * 2;
 const SMALL_BED_12B_FRAME_TAIL = Buffer.from([0xaa, 0x00, 0x55, 0x00, 0x03, 0x00, 0x99, 0x00]);
@@ -125,6 +128,66 @@ const getSensorBaudRate = (sensorType) => {
   }
   return 1000000;
 };
+
+function parseMinzhenSensorFrame(buffer) {
+  const text = buffer.toString();
+  if (!text.includes('gyroscope') || !text.includes('thermistor')) {
+    return null;
+  }
+
+  const tempObj = {};
+  text.split(';').forEach((item) => {
+    if (!item || !item.includes(':')) return;
+    const [rawKey, ...rest] = item.split(':');
+    const key = rawKey.trim();
+    const value = rest.join(':').trim();
+    if (!key) return;
+
+    if (key === 'gyroscope') {
+      const newValue = value.split('\t').map((v) => v.trim()).filter(Boolean);
+      tempObj[key] = newValue;
+
+      const angleFbRaw = Number(newValue[2]);
+      const angleLrRaw = Number(newValue[0]);
+      if (Number.isFinite(angleFbRaw)) {
+        tempObj.angle_fb = (angleFbRaw / 15000).toFixed(2);
+      }
+      if (Number.isFinite(angleLrRaw)) {
+        tempObj.angle_lr = (angleLrRaw / 15000).toFixed(2);
+      }
+    } else {
+      tempObj[key] = value;
+    }
+  });
+
+  return Object.keys(tempObj).length ? { tempObj } : null;
+}
+
+let minzhenSensorTextBuffer = '';
+function handleMinzhenSensorPortData(data) {
+  if (file !== MINZHEN_TYPE || new Date().getTime() >= endDate) return;
+
+  minzhenSensorTextBuffer += Buffer.from(data).toString();
+  if (minzhenSensorTextBuffer.length > 4096) {
+    minzhenSensorTextBuffer = minzhenSensorTextBuffer.slice(-4096);
+  }
+
+  const frame = parseMinzhenSensorFrame(Buffer.from(minzhenSensorTextBuffer));
+  if (!frame) return;
+
+  minzhenSensorTextBuffer = '';
+  colOrSendData1(JSON.stringify(frame));
+}
+
+function bindBackPortParser() {
+  if (!port2) return;
+  if (file === MINZHEN_TYPE) {
+    minzhenSensorTextBuffer = '';
+    port2.on("data", handleMinzhenSensorPortData);
+  } else {
+    port2.pipe(parser2);
+  }
+}
 
 function rotateSquare90CounterClockwise(arr, size) {
   const matrix = [];
@@ -402,8 +465,14 @@ function getCsvElapsedSeconds(rows, rowIndex, baseIndex = 0, frameIndex = 0) {
   return (frameIndex / fallbackHz).toFixed(3);
 }
 
-function getCsvFilePrefix(sensorType, fallbackPrefix) {
+function isEnglishCsvDownload(downloadOptions = {}) {
+  const language = String(downloadOptions.language || downloadOptions.locale || 'zh').toLowerCase();
+  return language.startsWith('en');
+}
+
+function getCsvFilePrefix(sensorType, fallbackPrefix, downloadOptions = {}) {
   if (sensorType === SMALL_BED_12B_TYPE) return '12B';
+  if (sensorType === HAND_SINGLE_POINT_TYPE) return isEnglishCsvDownload(downloadOptions) ? 'detection' : '检测点';
   if (isHandGloveType(sensorType) && fallbackPrefix === 'sit') return 'left';
   if (isHandGloveType(sensorType) && fallbackPrefix === 'back') return 'right';
   return fallbackPrefix;
@@ -553,6 +622,7 @@ const CSV_TITLES = {
     temperatureAvg: '平均温度',
     temperatureK: '温度K值',
     zeroFrame: '清零帧',
+    detectionPoint: '检测点',
     label: '标签',
   },
   en: {
@@ -572,6 +642,7 @@ const CSV_TITLES = {
     temperatureAvg: 'temperatureAvg',
     temperatureK: 'temperatureK',
     zeroFrame: 'zeroFrame',
+    detectionPoint: 'detectionPoint',
     label: 'label',
   },
 };
@@ -642,6 +713,158 @@ function buildHandGloveCsvSegments(pressureData, side = 'left') {
     fingerRoot: JSON.stringify(readPoints(points.fingerRoot)),
     palm: JSON.stringify(readPoints(points.palm)),
   };
+}
+
+function appendPrefixedHandGloveCsvHeaders(csvHeaders, side, languageTitles = CSV_TITLES.zh) {
+  const segmentTitles = languageTitles === CSV_TITLES.en
+    ? HAND_GLOVE_CSV_SEGMENT_HEADER_TITLES.en
+    : HAND_GLOVE_CSV_SEGMENT_HEADER_TITLES.zh;
+  const sideTitle = languageTitles === CSV_TITLES.en
+    ? side
+    : side === 'left'
+      ? '左手'
+      : '右手';
+  HAND_GLOVE_CSV_SEGMENT_HEADER_IDS.forEach((id) => {
+    const suffix = id.charAt(0).toUpperCase() + id.slice(1);
+    csvHeaders.push({
+      id: `${side}${suffix}`,
+      title: languageTitles === CSV_TITLES.en ? `${side}${suffix}` : `${sideTitle}${segmentTitles[id]}`,
+    });
+  });
+}
+
+function buildPrefixedHandGloveCsvSegments(pressureData, side = 'left') {
+  const segments = buildHandGloveCsvSegments(pressureData, side);
+  return Object.fromEntries(
+    Object.entries(segments).map(([key, value]) => {
+      const suffix = key.charAt(0).toUpperCase() + key.slice(1);
+      return [`${side}${suffix}`, value];
+    }),
+  );
+}
+
+function buildStoredHandGloveCsvFrame(row, side) {
+  if (!row) {
+    return {
+      pressureData: [],
+      rotateData: [],
+      zeroFrame: [],
+      timestamp: null,
+    };
+  }
+  const rawData = JSON.parse(row.data || '[]');
+  const frame = parseStoredSensorFrame(rawData, HAND_GLOVE_DOUBLE);
+  return {
+    pressureData: frame.pressureData,
+    rotateData: frame.rotateData,
+    zeroFrame: frame.zeroFrame,
+    timestamp: row.timestamp,
+    side,
+  };
+}
+
+function exportHandGloveDoubleCsv({ selectQuery, params, csvTitle, csvTargetPath, sendCsvSuccess, sendCsvFailed, downloadOptions }) {
+  db.all(selectQuery, params, (sitErr, sitRows) => {
+    if (sitErr) {
+      logger.error(sitErr);
+      sendCsvFailed(sitErr);
+      return;
+    }
+
+    db1.all(selectQuery, params, (backErr, backRows) => {
+      if (backErr) {
+        logger.error(backErr);
+        sendCsvFailed(backErr);
+        return;
+      }
+
+      const leftRows = Array.isArray(sitRows) ? sitRows : [];
+      const rightRows = Array.isArray(backRows) ? backRows : [];
+      const totalLength = Math.max(leftRows.length, rightRows.length);
+      if (!totalLength) return;
+
+      const start = Math.max(0, historyArr[0] || 0);
+      const end = Math.min(historyArr[1] || totalLength, totalLength);
+      const csvWriteData = [];
+
+      for (let i = start, j = 0; i < end; i++, j++) {
+        const leftFrame = buildStoredHandGloveCsvFrame(leftRows[i], 'left');
+        const rightFrame = buildStoredHandGloveCsvFrame(rightRows[i], 'right');
+        const leftData = leftFrame.pressureData;
+        const rightData = rightFrame.pressureData;
+        const leftPress = leftData.reduce((sum, value) => sum + value, 0);
+        const rightPress = rightData.reduce((sum, value) => sum + value, 0);
+        const leftArea = leftData.filter((value) => value > 0).length;
+        const rightArea = rightData.filter((value) => value > 0).length;
+        const baseRows = leftRows.length ? leftRows : rightRows;
+
+        csvWriteData.push({
+          index: getCsvElapsedSeconds(baseRows, i, start, j),
+          time: timeStampToDate(leftFrame.timestamp || rightFrame.timestamp || Date.now()),
+          leftMax: leftData.length ? findMax(leftData) : 0,
+          leftPressureArea: leftArea,
+          leftPressure: totalToN(leftPress),
+          leftRealData: JSON.stringify(leftData),
+          leftZeroFrame: leftFrame.zeroFrame.length ? JSON.stringify(leftFrame.zeroFrame) : '',
+          leftRotate: leftFrame.rotateData.length ? JSON.stringify(leftFrame.rotateData) : '',
+          rightMax: rightData.length ? findMax(rightData) : 0,
+          rightPressureArea: rightArea,
+          rightPressure: totalToN(rightPress),
+          rightRealData: JSON.stringify(rightData),
+          rightZeroFrame: rightFrame.zeroFrame.length ? JSON.stringify(rightFrame.zeroFrame) : '',
+          rightRotate: rightFrame.rotateData.length ? JSON.stringify(rightFrame.rotateData) : '',
+          ...buildPrefixedHandGloveCsvSegments(leftData, 'left'),
+          ...buildPrefixedHandGloveCsvSegments(rightData, 'right'),
+        });
+      }
+
+      let str = params[0];
+      if (str.includes(" ")) {
+        str = str.split(" ")[0];
+      } else {
+        str = timeStampTo_Date(Number(str));
+      }
+
+      const sideLabel = csvTitle === CSV_TITLES.en
+        ? { left: 'left', right: 'right' }
+        : { left: '左手', right: '右手' };
+      const csvHeaders = [
+        { id: "index", title: csvTitle.index },
+        { id: "time", title: csvTitle.time },
+        { id: "leftMax", title: `${sideLabel.left}${csvTitle.max}` },
+        { id: "leftPressureArea", title: `${sideLabel.left}${csvTitle.pressureArea}` },
+        { id: "leftPressure", title: `${sideLabel.left}${csvTitle.pressure}` },
+        { id: "leftRealData", title: `${sideLabel.left}${csvTitle.realData}` },
+        { id: "leftZeroFrame", title: `${sideLabel.left}${csvTitle.zeroFrame}` },
+        { id: "leftRotate", title: `${sideLabel.left}${csvTitle.rotate}` },
+        { id: "rightMax", title: `${sideLabel.right}${csvTitle.max}` },
+        { id: "rightPressureArea", title: `${sideLabel.right}${csvTitle.pressureArea}` },
+        { id: "rightPressure", title: `${sideLabel.right}${csvTitle.pressure}` },
+        { id: "rightRealData", title: `${sideLabel.right}${csvTitle.realData}` },
+        { id: "rightZeroFrame", title: `${sideLabel.right}${csvTitle.zeroFrame}` },
+        { id: "rightRotate", title: `${sideLabel.right}${csvTitle.rotate}` },
+      ];
+      appendPrefixedHandGloveCsvHeaders(csvHeaders, 'left', csvTitle);
+      appendPrefixedHandGloveCsvHeaders(csvHeaders, 'right', csvTitle);
+
+      const csvFilePath = csvTargetPath(`${csvTitle === CSV_TITLES.en ? 'glove2' : '触觉手套2'}${str}.csv`);
+      const csvWriter = createCsvWriter({
+        path: csvFilePath,
+        header: csvHeaders,
+      });
+
+      csvWriter
+        .writeRecords(csvWriteData)
+        .then(() => {
+          console.log("export csv success");
+          sendCsvSuccess([csvFilePath]);
+        })
+        .catch((err) => {
+          console.error("export csv failed", err);
+          sendCsvFailed(err);
+        });
+    });
+  });
 }
 
 function transposeSquareMatrix(data, size = 32) {
@@ -1459,7 +1682,7 @@ module.exports = {
                 }
               );
               //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
-              port2.pipe(parser2);
+              bindBackPortParser();
             } catch (e) {
               logger.warn(e, "e");
             }
@@ -2448,7 +2671,7 @@ module.exports = {
               );
               //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
 
-              port2.pipe(parser2);
+              bindBackPortParser();
             } catch (e) {
               logger.warn(e, "e");
             }
@@ -3274,7 +3497,7 @@ module.exports = {
                     }
                   );
                   //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
-                  port2.pipe(parser2);
+                  bindBackPortParser();
                 } catch (e) {
                   logger.warn(e, "e");
                 }
@@ -3433,6 +3656,19 @@ module.exports = {
             const selectQuery = "select * from matrix WHERE date=?";
             // const params = [1287154796066,1887154796066,'2023-06-19-14:05'];
             const params = [getMessage.download];
+
+            if (file === HAND_GLOVE_DOUBLE) {
+              exportHandGloveDoubleCsv({
+                selectQuery,
+                params,
+                csvTitle,
+                csvTargetPath,
+                sendCsvSuccess,
+                sendCsvFailed,
+                downloadOptions: getMessage.downloadOptions || {},
+              });
+              return;
+            }
 
             if (file === "bigBed") {
               let startPressure = 0;
@@ -3718,6 +3954,7 @@ module.exports = {
               const isHandType = isHandStorageType(file);
               const isHandGloveCsvType = isHandGloveType(file);
               const shouldWriteZeroFrame = isZeroFrameStorageType(file);
+              const shouldWriteDetectionPoint = file === HAND_SINGLE_POINT_TYPE;
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
                   logger.error(err);
@@ -3785,6 +4022,9 @@ module.exports = {
                       temperatureAvg: tempFullBedPayload?.temperatureAvg != null ? Number(tempFullBedPayload.temperatureAvg).toFixed(1) : '',
                       temperatureK: tempFullBedPayload?.temperatureK ?? '',
                     };
+                    if (shouldWriteDetectionPoint) {
+                      newData.detectionPoint = pressureData[pressureData.length - 1] ?? '';
+                    }
                     if (isHandGloveCsvType) {
                       Object.assign(newData, buildHandGloveCsvSegments(pressureData, 'left'));
                     }
@@ -3809,6 +4049,9 @@ module.exports = {
                   if (isHandGloveCsvType) {
                     appendHandGloveCsvHeaders(csvHeaders, csvTitle);
                   }
+                  if (shouldWriteDetectionPoint) {
+                    csvHeaders.push({ id: "detectionPoint", title: csvTitle.detectionPoint });
+                  }
                   if (shouldWriteZeroFrame) {
                     csvHeaders.push({ id: "zeroFrame", title: csvTitle.zeroFrame });
                   }
@@ -3823,7 +4066,7 @@ module.exports = {
                     );
                   }
 
-                  const csvFilePath = csvTargetPath(`${getCsvFilePrefix(file, 'sit')}${str}.csv`);
+                  const csvFilePath = csvTargetPath(`${getCsvFilePrefix(file, 'sit', getMessage.downloadOptions || {})}${str}.csv`);
                   const csvWriter = createCsvWriter({
                     path: csvFilePath,
                     header: csvHeaders,
@@ -3940,7 +4183,7 @@ module.exports = {
                   if (isBackHandType) {
                     backCsvHeaders.push({ id: "rotate", title: csvTitle.rotate });
                   }
-                  const backCsvFilePath = csvTargetPath(`${getCsvFilePrefix(file, 'back')}${str}.csv`);
+                  const backCsvFilePath = csvTargetPath(`${getCsvFilePrefix(file, 'back', getMessage.downloadOptions || {})}${str}.csv`);
                   const csvWriter1 = createCsvWriter({
                     path: backCsvFilePath,
                     header: backCsvHeaders,
@@ -4110,6 +4353,116 @@ module.exports = {
               });
             }).catch((err) => {
               logger.error('[SerialList] serialReset failed', err);
+            });
+          }
+
+          if (getMessage.autoConnectHand0205Double === true) {
+            SerialPort.list().then((ports) => {
+              serialport = getPort(ports);
+              logSerialPortList('autoConnectHand0205Double', serialport);
+              const paths = serialport.map((port) => port.path).filter(Boolean);
+
+              if (paths.length < 2) {
+                const jsonData = JSON.stringify({
+                  port: serialport,
+                  autoConnectHand0205Double: {
+                    success: false,
+                    message: `触觉手套2 自动连接失败：只检测到 ${paths.length} 个可用手套串口`,
+                  },
+                });
+                server.clients.forEach(function each(client) {
+                  if (client.readyState === WebSocket.OPEN) {
+                    client.send(jsonData);
+                  }
+                });
+                return;
+              }
+
+              const [leftPath, rightPath] = paths;
+              sitClose = false;
+              backClose = false;
+              com = leftPath;
+              com1 = rightPath;
+              baudRate = getSensorBaudRate(HAND_GLOVE_DOUBLE);
+
+              if (port1?.isOpen) {
+                port1.close((err) => {
+                  if (err) logger.warn('[autoConnectHand0205Double] port1 close error:', err);
+                });
+              }
+              if (port2?.isOpen) {
+                port2.close((err) => {
+                  if (err) logger.warn('[autoConnectHand0205Double] port2 close error:', err);
+                });
+              }
+
+              try {
+                port1 = new SerialPort(
+                  {
+                    path: leftPath,
+                    baudRate,
+                    autoOpen: true,
+                  },
+                  function (err) {
+                    if (err) logger.warn(err, "err");
+                  }
+                );
+                port1.pipe(getSitParser());
+
+                port2 = new SerialPort(
+                  {
+                    path: rightPath,
+                    baudRate,
+                    autoOpen: true,
+                  },
+                  function (err) {
+                    if (err) logger.warn(err, "err");
+                  }
+                );
+                bindBackPortParser();
+
+                const jsonData = JSON.stringify({
+                  port: serialport,
+                  autoConnectHand0205Double: {
+                    success: true,
+                    portname: leftPath,
+                    portnameBack: rightPath,
+                    message: `触觉手套2 已连接：${leftPath} / ${rightPath}`,
+                  },
+                });
+                server.clients.forEach(function each(client) {
+                  if (client.readyState === WebSocket.OPEN) {
+                    client.send(jsonData);
+                  }
+                });
+              } catch (err) {
+                logger.warn('[autoConnectHand0205Double] open failed', err);
+                const jsonData = JSON.stringify({
+                  port: serialport,
+                  autoConnectHand0205Double: {
+                    success: false,
+                    message: err?.message || '触觉手套2 自动连接失败',
+                  },
+                });
+                server.clients.forEach(function each(client) {
+                  if (client.readyState === WebSocket.OPEN) {
+                    client.send(jsonData);
+                  }
+                });
+              }
+            }).catch((err) => {
+              logger.error('[SerialList] autoConnectHand0205Double failed', err);
+              const jsonData = JSON.stringify({
+                autoConnectHand0205Double: {
+                  success: false,
+                  message: err?.message || '触觉手套2 自动连接失败',
+                },
+              });
+              server.clients.forEach(function each(client) {
+                if (client.readyState === WebSocket.OPEN) {
+                  client.send(jsonData);
+                }
+              });
             });
           }
 
@@ -4375,6 +4728,119 @@ function handleHandGloveFullPacket(buffer, fallbackSide) {
   }));
 }
 
+const HAND_GLOVE_DOUBLE_PACKET_SIDE = {
+  1: 'left',
+  2: 'right',
+};
+const handGloveDoublePacketChunks = {
+  left: [],
+  right: [],
+};
+
+function getHandGloveDoublePacketSide(packetType, fallbackSide) {
+  if (file !== HAND_GLOVE_DOUBLE) return fallbackSide;
+  return HAND_GLOVE_DOUBLE_PACKET_SIDE[Number(packetType)] || fallbackSide;
+}
+
+function routeHandGloveDoubleFrame({ pressureData, imuBytes = [], outputSide = 'left', sourcePort = 'sit' }) {
+  const realPressureData = normalizeFiniteFrame(pressureData, 256);
+  const rotate = bytes4ToInt10(imuBytes);
+  const isRight = outputSide === 'right';
+
+  if (isRight) {
+    pointArr2 = [...realPressureData];
+    pointArr2RawZeroData = [...realPressureData];
+    const rawPressureData = pointArr2RawZero.length
+      ? realPressureData.map((value, index) => numLessZeroToZero(value - (pointArr2RawZero[index] || 0)))
+      : [...realPressureData];
+    let mappedData = handR([...realPressureData]);
+    pointArr2 = handRVideo1470506([...realPressureData]);
+    newArr147_2 = [...mappedData];
+    pointArr2zeroData = [...pointArr2];
+
+    if (pointArr2zero.length) {
+      pointArr2 = pointArr2.map((value, index) => numLessZeroToZero(value - (pointArr2zero[index] || 0)));
+    }
+    if (pointArr147zero_2.length) {
+      mappedData = mappedData.map((value, index) => numLessZeroToZero(value - (pointArr147zero_2[index] || 0)));
+    }
+
+    const payload = {
+      backData: pointArr2,
+      realArr: realPressureData,
+      rawPressureData,
+      newArr147: mappedData,
+      handSide: 'right',
+      packetSourcePort: sourcePort,
+      sitFlag: port1?.isOpen,
+      backFlag: port2?.isOpen,
+    };
+    if (rotate.length && !rotate.every((value) => value == 0)) {
+      payload.rotate = rotate;
+    }
+    colOrSendData1(JSON.stringify(payload));
+    return;
+  }
+
+  pointArr = [...realPressureData];
+  pointArr1RawZeroData = [...realPressureData];
+  const rawPressureData = pointArr1RawZero.length
+    ? realPressureData.map((value, index) => numLessZeroToZero(value - (pointArr1RawZero[index] || 0)))
+    : [...realPressureData];
+  let mappedData = handL([...realPressureData]);
+  newArr147 = [...mappedData];
+  pointArr1zeroData = [...pointArr];
+
+  if (pointArr1zero.length) {
+    pointArr = pointArr.map((value, index) => numLessZeroToZero(value - (pointArr1zero[index] || 0)));
+  }
+  if (pointArr147zero.length) {
+    mappedData = mappedData.map((value, index) => numLessZeroToZero(value - (pointArr147zero[index] || 0)));
+  }
+
+  const payload = {
+    sitData: pointArr,
+    realArr: realPressureData,
+    rawPressureData,
+    newArr147: mappedData,
+    handSide: 'left',
+    packetSourcePort: sourcePort,
+    sitFlag: port1?.isOpen,
+    backFlag: port2?.isOpen,
+  };
+  if (rotate.length && !rotate.every((value) => value == 0)) {
+    payload.rotate = rotate;
+  }
+  colOrSendData(JSON.stringify(payload));
+}
+
+function handleHandGloveDoubleFirstPacket(buffer, fallbackSide, sourcePort) {
+  if (file !== HAND_GLOVE_DOUBLE || buffer.length !== 130) return false;
+  const bytes = Array.from(buffer);
+  const side = getHandGloveDoublePacketSide(bytes[1], fallbackSide);
+  handGloveDoublePacketChunks[side] = bytes.slice(2);
+  return true;
+}
+
+function handleHandGloveDoubleSecondPacket(buffer, fallbackSide, sourcePort) {
+  if (file !== HAND_GLOVE_DOUBLE || buffer.length !== 146) return false;
+  const bytes = Array.from(buffer);
+  const side = getHandGloveDoublePacketSide(bytes[1], fallbackSide);
+  const firstChunk = handGloveDoublePacketChunks[side] || [];
+  const rest = bytes.slice(2);
+  const imuBytes = rest.slice(rest.length - 16);
+  const secondChunk = rest.slice(0, rest.length - 16);
+  const pressureData = [...firstChunk, ...secondChunk];
+  handGloveDoublePacketChunks[side] = [];
+  routeHandGloveDoubleFrame({
+    pressureData,
+    imuBytes,
+    outputSide: side,
+    sourcePort,
+  });
+  return true;
+}
+
 parser.on("data", function (data) {
   pointArr = new Array();
   let buffer = Buffer.from(data);
@@ -4424,6 +4890,12 @@ parser.on("data", function (data) {
       } else if (file === 'hand') {
         // pointArr = handLine(pointArr)
         // 625
+        pointArr = jqbed(pointArr)
+        newData = [...pointArr]
+      } else if (file === HAND_SINGLE_POINT_TYPE) {
+        pointArr = handSinglePoint(pointArr)
+        newData = [...pointArr]
+      } else if (file === MINZHEN_TYPE) {
         pointArr = jqbed(pointArr)
         newData = [...pointArr]
       } else if (isPetCareSystem(file)) {
@@ -4537,7 +5009,10 @@ parser.on("data", function (data) {
           hz: colHZ
         });
       } else {
-        jsonData = JSON.stringify({ sitData: file == 'smallBed' || file == 'smallBed1' ? pointArr : sitDataToSend, hz: colHZ });
+        jsonData = JSON.stringify({
+          sitData: file == 'smallBed' || file == 'smallBed1' ? pointArr : sitDataToSend,
+          hz: colHZ,
+        });
       }
 
 
@@ -4655,6 +5130,10 @@ parser.on("data", function (data) {
     }
 
     if (buffer.length == 130) {
+      if (handleHandGloveDoubleFirstPacket(buffer, 'left', 'sit')) {
+        return;
+      }
+
       let firstArr = new Array();
       const length = buffer.length
 
@@ -4737,6 +5216,9 @@ parser.on("data", function (data) {
     }
 
     if (buffer.length == 146) {
+      if (handleHandGloveDoubleSecondPacket(buffer, 'left', 'sit')) {
+        return;
+      }
 
       // console.log(file)
       pointArr = new Array();
@@ -5359,6 +5841,14 @@ parser2.on("data", function (data) {
   pointArr2 = new Array();
   let buffer = Buffer.from(data);
   if (nowDate < endDate) {
+    if (file === MINZHEN_TYPE) {
+      const minzhenSensorFrame = parseMinzhenSensorFrame(buffer);
+      if (minzhenSensorFrame) {
+        colOrSendData1(JSON.stringify(minzhenSensorFrame));
+        return;
+      }
+    }
+
     if (file === HAND_GLOVE_FULL_PACKET && buffer.length === HAND_GLOVE_FULL_PACKET_LENGTH) {
       handleHandGloveFullPacket(buffer, 'right');
       return;
@@ -5378,6 +5868,8 @@ parser2.on("data", function (data) {
       } else if (file == 'carQX') {
       } else if (file === WHOLE_CHAIR_TYPE) {
         pointArr2 = normalizeWholeChairFrame('back', pointArr2)
+      } else if (file === HAND_SINGLE_POINT_TYPE) {
+        pointArr2 = handSinglePoint(pointArr2)
       } else if (file == 'sofa') {
         pointArr2 = arrToRealLine(pointArr2, [[7, 0], [8, 15]], [[0, 15]], 32)
       } else if (file == 'carY') {
@@ -5441,6 +5933,10 @@ parser2.on("data", function (data) {
     }
 
     if (buffer.length == 130) {
+      if (handleHandGloveDoubleFirstPacket(buffer, 'right', 'back')) {
+        return;
+      }
+
       let firstArr = new Array();
       const length = buffer.length
 
@@ -5495,6 +5991,10 @@ parser2.on("data", function (data) {
       }
     }
     if (buffer.length == 146) {
+      if (handleHandGloveDoubleSecondPacket(buffer, 'right', 'back')) {
+        return;
+      }
+
       let pointArr = new Array();
       for (var i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
@@ -5645,9 +6145,17 @@ function colOrSendData1(jsonData) {
       "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
 
     const frameToStore = JSON.parse(jsonData);
+    const dataToStore = frameToStore.tempObj
+      ? JSON.stringify(frameToStore.tempObj)
+      : isZeroFrameStorageType(file)
+        ? buildZeroAwareStorageData(frameToStore, 'backData', 'back')
+        : file == 'smallBed'
+          ? JSON.stringify(realArr)
+          : JSON.stringify([...frameToStore.backData]);
+
     db1.run(
       insertQuery,
-      [isZeroFrameStorageType(file) ? buildZeroAwareStorageData(frameToStore, 'backData', 'back') : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...frameToStore.backData]), timestamp, date],
+      [dataToStore, timestamp, date],
       function (err) {
         if (err) {
           logger.error(err);
@@ -6037,7 +6545,7 @@ reconnectTimer = setInterval(() => {
         }
       );
       //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
-      port2.pipe(parser2);
+      bindBackPortParser();
     } catch (e) {
       logger.warn(e, "e");
     }

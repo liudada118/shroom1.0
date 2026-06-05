@@ -19,7 +19,7 @@ const ALL_SENSOR_TYPES = [
   'bed4096', 'bed4096num', 'fast1024sit', 'car100',
   'hand0507', 'bigBed', 'sitCol', 'sit10', 'smallBed1',
   'smallM', 'rect', 'short', 'CarTq', 'normal', 'chairQX',
-  'Num3D', 'robot0428', 'handBlue', 'localCar'
+  'Num3D', 'robot0428', 'handBlue', 'handSinglePoint', 'localCar'
 ];
 
 console.log('=== 密钥生成工具 ===');

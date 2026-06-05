@@ -95,6 +95,7 @@ const SENSOR_MATRIX_MAP = {
   petCareMini:{ width: 32, height: 32, total: 1024 },
   smallM:     { width: 32, height: 32, total: 1024 },
   hand:       { width: 32, height: 32, total: 1024 },
+  handSinglePoint: { width: 32, height: 32, total: 1024 },
   sit:        { width: 32, height: 32, total: 1024 },
   foot:       { width: 32, height: 32, total: 1024 },
   rect:       { width: 32, height: 32, total: 1024 },

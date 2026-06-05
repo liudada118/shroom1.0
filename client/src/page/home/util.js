@@ -114,6 +114,31 @@ const transposeSquareMatrix = (data, size = 32) => {
     return data[col * size + row];
   });
 }
+
+const normalizeMinzhenFrame = (data) => {
+  let source = data;
+  if (!Array.isArray(source)) {
+    try {
+      source = JSON.parse(source || "[]");
+    } catch (error) {
+      source = [];
+    }
+  }
+
+  const frame = source
+    .slice(0, 1024)
+    .map((value) => {
+      const numberValue = Number(value);
+      return Number.isFinite(numberValue) ? numberValue : 0;
+    });
+
+  while (frame.length < 1024) {
+    frame.push(0);
+  }
+
+  return frame;
+}
+
 export const sitTypeEvent = {
   foot: ({ that, wsPointData }) => {
     // let resData = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 3, 2, 10, 25, 28, 31, 5, 1, 0, 0, 0, 0, 0, 0, 63, 53, 21, 20, 5, 2, 2, 2, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 10, 22, 21, 5, 3, 1, 0, 0, 0, 0, 0, 0, 35, 61, 29, 14, 6, 2, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 5, 11, 18, 6, 1, 1, 0, 0, 0, 0, 0, 0, 0, 5, 30, 34, 16, 13, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 6, 18, 24, 11, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 10, 20, 17, 13, 3, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 15, 31, 27, 22, 12, 1, 1, 2, 0, 0, 0, 0, 0, 0, 0, 1, 5, 19, 20, 24, 11, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 6, 34, 48, 27, 27, 4, 2, 1, 2, 0, 0, 0, 0, 0, 0, 0, 1, 3, 25, 33, 29, 12, 7, 2, 1, 1, 0, 0, 0, 0, 0, 0, 36, 67, 51, 54, 35, 7, 4, 2, 3, 1, 0, 0, 0, 0, 0, 0, 1, 4, 34, 24, 51, 38, 18, 3, 2, 0, 0, 0, 0, 0, 0, 1, 84, 86, 62, 63, 44, 13, 5, 4, 6, 2, 0, 0, 0, 0, 0, 0, 3, 6, 43, 63, 65, 81, 57, 6, 4, 0, 0, 0, 0, 0, 0, 6, 76, 85, 53, 58, 82, 12, 5, 4, 7, 2, 0, 0, 0, 0, 0, 0, 3, 7, 44, 55, 80, 100, 67, 8, 4, 0, 0, 0, 0, 0, 0, 16, 63, 77, 53, 63, 86, 7, 5, 4, 6, 2, 0, 0, 0, 0, 0, 0, 3, 14, 60, 57, 55, 55, 75, 17, 4, 0, 0, 0, 0, 0, 0, 1, 24, 57, 65, 52, 16, 5, 4, 3, 6, 2, 0, 0, 0, 0, 0, 0, 3, 11, 64, 59, 57, 84, 69, 6, 4, 0, 0, 0, 0, 0, 0, 0, 1, 4, 6, 5, 3, 2, 2, 2, 3, 1, 0, 0, 0, 0, 0, 0, 2, 4, 23, 65, 74, 71, 14, 3, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 26, 15, 17, 20, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 6, 1, 1, 3, 1, 0, 0, 0, 0, 0, 0, 0, 2, 5, 40, 46, 45, 28, 57, 8, 5, 1, 0, 0, 0, 0, 0, 0, 2, 4, 4, 16, 37, 23, 34, 49, 5, 2, 0, 0, 0, 0, 0, 0, 1, 4, 51, 53, 36, 10, 19, 52, 7, 1, 0, 0, 0, 0, 0, 0, 2, 4, 6, 16, 15, 15, 36, 72, 30, 0, 0, 0, 0, 0, 0, 0, 0, 2, 16, 18, 28, 4, 21, 14, 5, 0, 0, 0, 0, 0, 0, 0, 1, 2, 20, 21, 3, 4, 17, 52, 11, 0, 0, 0, 0, 0, 0, 0, 0, 5, 18, 19, 21, 33, 23, 22, 21, 1, 0, 0, 0, 0, 0, 0, 1, 11, 17, 23, 4, 4, 24, 23, 15, 0, 0, 0, 0, 0, 0, 0, 3, 35, 58, 44, 46, 62, 64, 22, 15, 2, 0, 0, 0, 0, 0, 0, 2, 13, 12, 25, 44, 33, 32, 25, 19, 0, 0, 0, 0, 0, 0, 0, 5, 77, 56, 54, 65, 88, 62, 60, 39, 4, 0, 0, 0, 0, 0, 0, 5, 16, 44, 40, 53, 61, 45, 50, 86, 3, 1, 0, 0, 0, 0, 0, 5, 70, 41, 46, 60, 76, 60, 55, 54, 8, 0, 0, 0, 0, 0, 1, 13, 36, 45, 77, 54, 57, 63, 48, 89, 12, 0, 0, 0, 0, 0, 0, 0, 46, 55, 43, 54, 60, 53, 54, 62, 0, 0, 0, 0, 0, 0, 0, 26, 46, 53, 69, 59, 62, 63, 50, 72, 0, 0, 0, 0, 0, 0, 0, 3, 22, 70, 41, 48, 45, 46, 54, 70, 36, 0, 0, 0, 0, 0, 1, 40, 57, 61, 61, 65, 67, 64, 53, 56, 2, 0, 0, 0, 0, 0, 0, 1, 2, 4, 4, 12, 34, 44, 39, 69, 33, 0, 0, 0, 0, 0, 20, 65, 76, 51, 38, 18, 24, 21, 8, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 3, 3, 13, 34, 29, 48, 5, 0, 0, 0, 0, 0, 10, 53, 43, 24, 28, 11, 5, 4, 3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 10, 16, 27, 21, 2, 0, 0, 0, 0, 0, 2, 46, 45, 26, 16, 3, 2, 2, 2, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 3, 1, 4, 22, 34, 35, 12, 1, 0, 0, 0, 0, 0, 1, 41, 56, 26, 14, 3, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 3, 14, 32, 26, 5, 1, 0, 0, 0, 0, 0, 0, 41, 51, 28, 19, 6, 2, 2, 2, 1, 0, 0, 0]
@@ -697,6 +722,78 @@ export const sitTypeEvent = {
       });
     } else if (that.state.numMatrixFlag == "heatmap") {
       that.com.current?.bthClickHandle(wsPointData);
+    }
+  },
+  handSinglePoint: function(args) { return sitTypeEvent.hand(args); },
+  minzhen: ({ that, wsPointData, local }) => {
+    const sourceData = normalizeMinzhenFrame(wsPointData);
+    const selectArr = [];
+    for (let i = that.sitIndexArr[0]; i <= that.sitIndexArr[1]; i++) {
+      for (let j = that.sitIndexArr[2]; j <= that.sitIndexArr[3]; j++) {
+        selectArr.push(sourceData[i * 32 + j]);
+      }
+    }
+    let dataArr = that.sitIndexArr.every((a) => a == 0) ? [...sourceData] : selectArr;
+    dataArr = dataArr.map((value) => (Number(value) > 10 ? Number(value) : 0));
+    let totalPress = dataArr.reduce((sum, value) => sum + value, 0);
+    let totalPoint = dataArr.filter((value) => value > 0).length;
+    let totalMax = dataArr.length ? findMax(dataArr) : 0;
+    let totalMean = totalPress / (totalPoint || 1);
+    let totalArea = totalPoint;
+    let totalPressure = totalMean;
+
+    if (totalPoint < 10 && that.sitIndexArr.every((a) => a == 0)) {
+      totalPress = 0;
+      totalPoint = 0;
+      totalMax = 0;
+      totalMean = 0;
+      totalArea = 0;
+      totalPressure = 0;
+    }
+
+    sitSmooth.getSmooth(
+      [totalMean, totalMax, totalPress, totalPoint, totalArea, totalPressure],
+      10
+    );
+    const displayData = local
+      ? [totalMean, totalMax, totalPress, totalPoint, totalArea, totalPressure]
+      : sitSmooth.smoothValue;
+
+    that.data.current?.changeData({
+      meanPres: Number(displayData[0]).toFixed(2),
+      maxPres: Number(displayData[1]).toFixed(2),
+      totalPres: Number(displayData[2]).toFixed(2),
+      point: parseInt(displayData[3]),
+      area: parseInt(displayData[4]),
+      pressure: Number(displayData[5]).toFixed(2),
+    });
+
+    if (totalArr.length < 20) {
+      totalArr.push(displayData[2]);
+    } else {
+      totalArr.shift();
+      totalArr.push(displayData[2]);
+    }
+    if (totalPointArr.length < 20) {
+      totalPointArr.push(displayData[4]);
+    } else {
+      totalPointArr.shift();
+      totalPointArr.push(displayData[4]);
+    }
+    const maxPress = findMax(totalArr);
+    that.data.current?.handleCharts(totalArr, maxPress + 1000);
+    const maxArea = findMax(totalPointArr);
+    that.data.current?.handleChartsArea(totalPointArr, maxArea + 100);
+
+    if (that.state.numMatrixFlag == "numoriginal") {
+      that.com.current?.changeWsDataRaw(sourceData);
+    } else if (that.state.numMatrixFlag == "normal") {
+      that.com.current?.sitData({
+        wsPointData: sourceData,
+        local: that.state.local
+      });
+    } else if (that.state.numMatrixFlag == "heatmap") {
+      that.com.current?.bthClickHandle(sourceData);
     }
   },
   daliegu: ({ that, wsPointData, local }) => {

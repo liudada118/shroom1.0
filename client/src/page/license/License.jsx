@@ -61,13 +61,16 @@ const SENSOR_GROUPS = [
       { label: '小床检测(12B)', value: 'smallBed12B' },
       { label: '温度全床系统', value: 'tempFullBed' },
       { label: '整椅展示', value: 'wholeChair' },
+      { label: '轮椅', value: 'minzhen' },
     ],
   },
   {
     group: '精密',
     icon: '🔬',
     items: [
+      { label: '32*32(检测点)', value: 'handSinglePoint' },
       { label: '触觉手套', value: 'hand0205' },
+      { label: '触觉手套2', value: 'hand0205Double' },
       { label: '触觉手套(115200)', value: 'handGlove115200' },
       { label: '触觉手套(整包)', value: 'handGloveFullPacket' },
       { label: '10*10小样', value: 'smallSample' },
@@ -108,6 +111,13 @@ const SENSOR_MODULES = {
     { value: 'numoriginal', label: '原始数据' },
     { value: 'skin', label: '3D皮肤' },
   ],
+  hand0205Double: [
+    { value: 'num', label: '2D数字' },
+    { value: 'normal', label: '3D遥操' },
+    { value: 'num3D', label: '3D数字' },
+    { value: 'numoriginal', label: '原始数据' },
+    { value: 'skin', label: '3D皮肤' },
+  ],
   handGlove115200: [
     { value: 'num', label: '2D数字' },
     { value: 'normal', label: '3D遥操' },
@@ -130,6 +140,10 @@ const SENSOR_MODULES = {
   wholeChair: [
     { value: 'normal', label: '3D模型' },
   ],
+  minzhen: [
+    { value: 'normal', label: '3D模型' },
+    { value: 'numoriginal', label: '原始数据' },
+  ],
   robot1: [
     { value: 'normal', label: '3D模型' },
     { value: 'numoriginal', label: '原始数据' },
@@ -143,6 +157,10 @@ const SENSOR_MODULES = {
     { value: 'numoriginal', label: '原始数据' },
   ],
   hand: [
+    { value: 'normal', label: '3D模型' },
+    { value: 'numoriginal', label: '原始数据' },
+  ],
+  handSinglePoint: [
     { value: 'normal', label: '3D模型' },
     { value: 'numoriginal', label: '原始数据' },
   ],
@@ -368,11 +386,37 @@ const License = () => {
 
   // 复制密钥
   const handleCopy = useCallback(() => {
-    if (!generatedKey) return;
-    navigator.clipboard.writeText(generatedKey).then(
-      () => message.success('已复制到剪贴板'),
-      () => message.error('复制失败')
-    );
+    if (!generatedKey) {
+      message.warning('请先生成密钥');
+      return;
+    }
+
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(generatedKey).then(
+        () => message.success('已复制到剪贴板'),
+        () => message.error('复制失败，请手动复制')
+      );
+      return;
+    }
+
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = generatedKey;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      if (copied) {
+        message.success('已复制到剪贴板');
+      } else {
+        message.error('复制失败，请手动复制');
+      }
+    } catch (error) {
+      message.error('复制失败，请手动复制');
+    }
   }, [generatedKey]);
 
   // 发送到应用

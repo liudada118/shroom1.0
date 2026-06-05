@@ -30,8 +30,10 @@ export const SENSOR_TYPES = {
   CAR_QX:      'carQX',
   WHOLE_CHAIR: 'wholeChair',
   SOFA:        'sofa',
+  MINZHEN:     'minzhen',
   // 手部
   HAND:        'hand',
+  HAND_SINGLE_POINT: 'handSinglePoint',
   HAND_L:      'handL',
   HAND_R:      'handR',
   HAND_0205:   'hand0205',
@@ -71,7 +73,7 @@ export const SENSOR_TYPES = {
  */
 export const CAR_TYPES = [
   'yanfeng10', 'car', 'car10', 'volvo', 'footVideo',
-  'hand0507', 'hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket', 'carQX', 'wholeChair', 'eye', 'sofa',
+  'hand0507', 'hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket', 'carQX', 'wholeChair', 'minzhen', 'eye', 'sofa',
 ];
 
 /**
@@ -90,6 +92,7 @@ export const SENSOR_MATRIX_MAP = {
   volvo:      { width: 32, height: 32, total: 1024 },
   carQX:      { width: 32, height: 32, total: 1024 },
   wholeChair: { width: 32, height: 32, total: 1024 },
+  minzhen:    { width: 32, height: 32, total: 1024 },
   sofa:       { width: 32, height: 32, total: 1024 },
   car:        { width: 32, height: 32, total: 1024 },
   smallBed:   { width: 32, height: 32, total: 1024 },
@@ -100,6 +103,7 @@ export const SENSOR_MATRIX_MAP = {
   petCareMini:{ width: 32, height: 32, total: 1024 },
   smallM:     { width: 32, height: 32, total: 1024 },
   hand:       { width: 32, height: 32, total: 1024 },
+  handSinglePoint: { width: 32, height: 32, total: 1024 },
   sit:        { width: 32, height: 32, total: 1024 },
   sit10:      { width: 32, height: 32, total: 1024 },
   foot:       { width: 32, height: 32, total: 1024 },

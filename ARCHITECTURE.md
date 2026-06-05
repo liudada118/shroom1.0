@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-06-03
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-06-05
 
 ## 1. 项目概述
 
@@ -219,10 +219,11 @@ graph TD
 1. **传感器数据采集流程**
     - 硬件传感器通过 USB 串口发送原始二进制数据帧 → `serialHelper.js` 接收并触发 `parser.on('data')` 事件 → `server.js` 调用 `dataProcessor.js` 进行线序映射（`openWeb.js`）、归零校准、高斯平滑 → 处理后的矩阵数据通过 `wsHelper.js` 广播到 WebSocket 端口 19999 → 前端 `useWebSocket` Hook 接收数据 → 更新 `usePressureStore` → React 重新渲染热力图和 3D 模型。
     - `smallBed12B`（小床检测 12B）使用 `1500000` 波特率和独立帧尾 `AA 00 55 00 03 00 99 00`，`@serialport/parser-delimiter` 按 8 字节帧尾切分后得到 2048 字节 payload；`server.js` 按 1024 个 `uint16LE` 解析为 32x32 压力矩阵，并复用 `jqbed(pointArr)` 小床检测线序后通过通用 `sitData` 下发。该类型不加入 `jqbed/smallBed` 生命体征集合，因此前端 `Aside.jsx` 仅展示 Pressure Area 与 Pressure Data，不触发 Python 算法数据面板；左侧 Pressure Data / Pressure Area 统计使用 3D 插值和高斯处理前的 32x32 原始矩阵值。
+    - `handSinglePoint`（32*32(检测点)）沿用 `hand` 的单串口 32x32 / 1024 点协议和默认 `1000000` 波特率，实时串口数据只在后端 `openWeb.handSinglePoint()` 中按 1-based 点位表重排一次：先输出 481-992，每 32 点一行；再输出 449-1 的 15 行倒序块；最后输出 993-1024。WebSocket 展示、采集入库和 CSV 下载都使用这份后端处理后的 1024 点矩阵，前端不再参与线序转换；前端复用 `hand` 的 `CanvasHand` 渲染链路和 `normal` / `numoriginal` 模式，授权页和密钥脚本使用独立 key `handSinglePoint`，密钥配置页归入“精密”分组；CSV 下载按语言使用 `检测点` / `detection` 文件名前缀，并新增 `检测点` / `detectionPoint` 列写入 1024 点矩阵的最后一个点。
     - `smallBed12B` 使用独立的前端显示配置，不再复用通用 `bed` 颜色默认值；默认高斯为 `2`，颜色上限默认值为 `2205`，设置面板颜色滑块范围为 `5-4000` 且步进为 `10`，高度默认值为 `0.1`。`Home.jsx` 会通过通用 `syncDisplayRendererConfig()` 将进度条 state 同步到 3D/原始数据组件 ref，确保初始值、系统切换和滑块变更都会下发到渲染器内部变量。
     - 当系统类型为 `petCare` / `petCareMini` 时，`server.js` 先按 `jqbed` 线序将 32x32 数据重排，再以 50Hz（20ms）分别调用 `python/app/petCare/pet_care_wrapper` / `pet_care_wrappermini`；算法输出通过 `python/app/onbed_filter_example.py` 的 JSON-line RPC 回传给 Electron，前端 Title/Home/Aside/License 复用宠物看护链路展示呼吸率、姿态、体动、信号质量、模拟心率和压力系数；其中 `Aside.jsx` 会在前端层对 `petCareMini` 的离床状态（`petInBed=0` 或 `posture_state=0`）做展示归一化，强制将面板上的 `pressure_coefficient` 显示为 `0.00`，并依据呼吸频率在前端生成 `55-100` 区间的模拟心率替换原来的 SNR 展示；为避免心率跳变过快，模拟心率现在按 1 秒节拍更新一次，其余呼吸、姿态和质量数据仍保持实时刷新；同时 `server.js` 关闭了 `petCareMini` 的 `[petCareMini] algorithm result` 周期性信息日志，避免运行期刷屏。
     - 当系统类型为 `hand0205` / `hand0205Double` / `handGlove115200` / `handGloveFullPacket` 且前端处于普通 3D 遥操模式时，`Home.jsx` 使用模型渲染矩阵继续驱动手部姿态与手指弯曲，但 Aside 面板中的 `meanPres`、`maxPres`、`totalPres`、`point` 以及 Pressure Area / Pressure Data 图表改为直接基于原始 256 点矩阵（`realArr` / `rawPressureData`）计算和渲染，避免统计值被映射后的控制数据覆盖。
-    - `hand0205Double`（触觉手套2）是独立于旧 `hand0205 copy.jsx` 的双手 3D 展示系统，前端使用新增 `client/src/components/three/hand0205Double.jsx`：左手继续沿用 `sitData/changeHandAngle/calibration` 旧手套接口，右手由 `backData` 分支调用 `rightData/changeRightHandAngle/calibrationRight` 驱动；右手模型从同一个 `hand1.glb` 克隆并设置 `scale.x = -1`，因此旧触觉手套系统和单手左右切换行为不受影响。由于当前双手效果尚未达到使用要求，`Title.jsx` 与 `License.jsx` 暂时隐藏该系统入口，保留代码以便后续继续调整。
+    - `hand0205Double`（触觉手套2）是独立于旧 `hand0205 copy.jsx` 的双手 3D 展示系统，前端使用新增 `client/src/components/three/hand0205Double.jsx`：左手继续沿用 `sitData/changeHandAngle/calibration` 旧手套接口，右手由 `backData` 分支调用 `rightData/changeRightHandAngle/calibrationRight` 驱动；右手模型从同一个 `hand1.glb` 克隆并设置镜像缩放，因此旧触觉手套系统和单手左右切换行为不受影响。`Title.jsx` 主传感器下拉与 `License.jsx` 授权配置页已恢复该系统入口；标题栏新增“一键连接双手套”，后端自动打开两个可用手套串口，并按每包第二个字节 `01=左手`、`02=右手` 将任意串口收到的数据路由到对应左右手通道。前端在双手模式下优先使用当前包的 `handSide` 区分左右手校准和姿态接口，`hand0205Double.jsx` 会把 147/256 点控制数据补成手形 32x32 渲染源，并在收到四元数/弯折数据时立即作用到左右手模型。
     - 触觉手套、触觉足底和 robot 类触觉上衣清零后，后端实时包会额外下发或优先保存 `rawPressureData` 作为清零后的压力矩阵；`Home.jsx` 的侧栏统计、Pressure Data 图表和 2D 数字模式优先读取该字段，右手 `backData` 清零后也会立即反映到前端显示。采集入库时，`server.js` 对 `hand0205` / `hand0205Double` / `handGlove115200` / `handGloveFullPacket` / `footVideo` / `robot*` 改为保存 `{ pressureData, rotate, zeroFrame }` 对象格式，其中 `pressureData` 是清零后的压力矩阵，`zeroFrame` 是用户点击清零时的基准帧；历史回放和 CSV 导出继续兼容旧数组格式。
     - 右手旧手套实时路径会在映射到 3D 模型前保留原始 256 点矩阵，并用独立的 `pointArr2RawZero` 作为右手 2D 数字/统计的清零基准；`Home.jsx` 只有在 `rawPressureData` 长度达到 256 时才使用该字段，否则回退到 `realArr`，避免右手 2D 数字误读 3D 映射数组后只显示少量点。
     - 手套类系统在 200Hz 采集时仍按原始采样频率写入 SQLite 历史数据，但 `server.js` 会把实时 WebSocket 展示推送限制到约 60fps，并移除手套高频路径上的逐帧 `console.log` / 入库成功日志，降低 Electron 主进程和前端渲染压力，避免采集时 UI 卡顿。
@@ -232,9 +233,9 @@ graph TD
 2. **数据存储与导出流程**
     - 用户点击"开始采集" → 前端通过 WebSocket 发送 `col` 指令 → `server.js` 开启采集模式 → 每帧数据同时写入 `dbHelper.js`（SQLite）和 `csvHelper.js`（CSV 文件） → 用户点击"停止采集"结束录制。
     - CSV 导出的最左侧 `seconds` 列使用数据库帧时间戳计算真实相对秒数（当前帧 `timestamp` - 导出首帧 `timestamp`），仅在缺失时间戳时回退到采集频率估算，不再固定按 12Hz 用 `j / 12` 生成。
-    - CSV 表头根据前端当前语言自动选择：`Title.jsx` / `useSerialControl.js` 在 `downloadOptions.language` 中传入当前语言；`server.js` 中文模式输出 `秒数/矩阵最大值/时间戳/矩阵大于 0 的点数/矩阵总和/矩阵数据/四元数/温度/平均温度/温度K值` 等中文表头，英文模式继续输出旧版 `seconds/max/time/area/press/data/quaternion/temperatureCelsius/temperatureAvg/temperatureK` 简写表头。
+    - CSV 表头根据前端当前语言自动选择：`Title.jsx` / `useSerialControl.js` 在 `downloadOptions.language` 中传入当前语言；`server.js` 中文模式输出 `秒数/矩阵最大值/时间戳/矩阵大于 0 的点数/矩阵总和/矩阵数据/四元数/温度/平均温度/温度K值` 等中文表头，英文模式继续输出旧版 `seconds/max/time/area/press/data/quaternion/temperatureCelsius/temperatureAvg/temperatureK` 简写表头；`handSinglePoint` 额外输出 `检测点` / `detectionPoint` 列，取 CSV `data` 矩阵的最后一个点。
     - `smallBed12B` 的 CSV 文件名前缀使用系统简写 `12B`，例如 `12B2026-05-21...csv`；其它系统保持既有 `file` 或通道名前缀。
-    - 手套类 CSV 导出在保留整体 `data` 矩阵、`清零帧` 和 `quaternion` 姿态列的基础上，额外按左右手原始 256 点位表拆出 `小拇指`、`无名指`、`中指`、`食指`、`大拇指`、`指根`、`手掌` 七个 JSON 数组列；点位表为 1-based，代码读取时减 1 访问数组，`指根` 按小拇指到大拇指顺序写入 5 个弯折点。`hand0205`、`hand0205Double`、`handGlove115200` 和 `handGloveFullPacket` 的 sit/back 导出都会写入这些部位列，但文件名前缀对用户改为左手 `left`、右手 `right`；触觉足底和 robot 类触觉上衣也会写入 `清零帧`，但不会写入手套部位列。
+    - 手套类 CSV 导出在保留整体 `data` 矩阵、`清零帧` 和 `quaternion` 姿态列的基础上，额外按左右手原始 256 点位表拆出 `小拇指`、`无名指`、`中指`、`食指`、`大拇指`、`指根`、`手掌` 七个 JSON 数组列；点位表为 1-based，代码读取时减 1 访问数组，`指根` 按小拇指到大拇指顺序写入 5 个弯折点。`hand0205`、`handGlove115200` 和 `handGloveFullPacket` 的 sit/back 导出都会写入这些部位列，但文件名前缀对用户改为左手 `left`、右手 `right`；`hand0205Double` 专用导出改为单个 `触觉手套2...csv` / `glove2...csv`，同一行同时写入左手和右手矩阵、统计、清零帧、四元数与分指数据；触觉足底和 robot 类触觉上衣也会写入 `清零帧`，但不会写入手套部位列。
     - `jqbed`、`smallBed` 与 `smallBed12B` 的原始数据展示和 CSV `data` 列会沿左上-右下对角线转置 32x32 矩阵，即 `(row, col)` 显示/导出为 `(col, row)`，用于匹配小床检测/监测系统原始矩阵方向；`jqbed/smallBed` 的前端原始 2D 数字矩阵入口仍在 `Num2Doriginal.jsx` 做兜底转置，`smallBed12B` 在 `util.js` 进入 `Fast1024` 前完成转置。
     - `smallBed12B` 的原始数据模式单独复用 `32*32高速` 的 `Fast1024` 渲染组件，进入组件前仍执行 32x32 对角线转置；该模式使用 `0-1024` 的数字材质/颜色范围，其它系统的原始数字矩阵颜色范围、配色逻辑和渲染组件保持原样。
 
@@ -322,6 +323,20 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-06-05 | Codex | 触觉手套2实时遥操修复 | `Home.jsx` 双手模式改为按当前包 `handSide` 选择左右手校准和模型接口；`hand0205Double.jsx` 补齐 147/256 点到 32x32 手形点阵的渲染归一化，并让四元数和弯折数据到达后立即应用到左右手模型。 |
+| 2026-06-05 | Codex | 触觉手套2模型位置收窄 | `hand0205Double.jsx` 将左右手模型分组从 `x=±220` 调整为 `x=±80`，保持与普通触觉手套相同的相机、模型位置和缩放基准，使双手模型落在同一中心视野附近。 |
+| 2026-06-05 | Codex | 触觉手套2近景视角修正 | `hand0205Double.jsx` 的渲染相机改为与 `hand0205.jsx` 一致的近景位置 `0,-1000,-50` 和旋转 `2.5,0,0`，并避免 `TrackballControls.update()` 每帧覆盖该视角，使触觉手套2进入 3D 遥操后不再显示为远处小模型。 |
+| 2026-06-05 | Codex | 触觉手套2双手自动连接与单 CSV | `Title.jsx` 为 `hand0205Double` 增加“一键连接双手套”，`server.js` 自动打开两个手套串口并按包内第二个字节 `01/02` 分流左右手；`hand0205Double.jsx` 恢复单手套可见视角和 5 倍模型缩放；CSV 下载改为单个 `触觉手套2...csv` / `glove2...csv` 同时包含左右手数据。 |
+| 2026-06-05 | Codex | 恢复触觉手套2入口 | `Title.jsx` 主传感器下拉重新展示 `hand0205Double` / 触觉手套2，`License.jsx` 精密分组和模块配置同步恢复该授权项；双手 3D 渲染、后端协议和 CSV 链路继续复用已有实现。 |
+| 2026-06-05 | Codex | 隐藏触觉手套2展示入口 | `Title.jsx` 从主传感器下拉、手套展示类型集合和专属一键连接按钮移除 `hand0205Double`，`Home.jsx` 过滤授权/切换输入并将直接切换到该 key 的请求回退到 `hand0205`，保留后端协议和历史兼容逻辑。 |
+| 2026-06-05 | Codex | 轮椅原始数据模式隐藏动画切换栏 | `Title.jsx` 中轮椅 `minzhen` 的“整体/座椅”动画切换菜单仅在 `normal` 3D 模型模式显示，切到 `numoriginal` 原始数据模式时隐藏，避免原始数据页出现无效动画入口。 |
+| 2026-06-05 | Codex | 轮椅渲染颜色默认值按模式拆分 | `minzhen` 在 `normal` 3D 模型模式下颜色默认值为 `415`，在 `numoriginal` 原始数据模式下颜色默认值为 `25`；`Home.jsx` 与 `Title.jsx` 的模式配置同步更新，并兼容旧默认 `1205` 的本地缓存迁移。 |
+| 2026-06-05 | Codex | 轮椅模型打包资源修复 | 将 `client/public/model/minzhen/chair.gltf` 及原始素材中的中文 `.bin` 引用改为 ASCII 文件名 `chair.bin`，Vite 构建后 `build/model/minzhen` 会稳定带出模型二进制、贴图和 glTF 资源，避免打包后 GLTFLoader 无法加载中文 buffer URI。 |
+| 2026-06-05 | Codex | Minzhen 3D 点图方向调整 | `client/src/components/three/minzhen.jsx` 仅在 3D 模型模式的点云坐标投影中逆时针旋转 90 度并做左右镜像，原始数据、CSV、左侧统计、串口解析和模型变换保持不变。 |
+| 2026-06-05 | Codex | Minzhen 显示名称改为轮椅 | 前端 `sensorMinzhen` 中文显示名改为“轮椅”、英文显示名改为 `Wheelchair`，授权配置页标签同步为“轮椅”；内部系统 key 仍为 `minzhen`，协议、模型路径和数据链路不变。 |
+| 2026-06-05 | Codex | 32*32(检测点) 下拉顺序调整 | `Title.jsx` 主传感器下拉框中将 `handSinglePoint` / 32*32(检测点) 移到 `fast1024` / 32*32高速 后面，系统 key、授权分组和渲染逻辑保持不变。 |
+| 2026-06-05 | Codex | 32*32(检测点) CSV 命名与检测点列 | `server.js` 中 `handSinglePoint` CSV 下载按语言输出 `检测点...csv` / `detection...csv` 文件名前缀，并在该系统 CSV 中新增 `检测点` / `detectionPoint` 列，值来自 1024 点矩阵最后一个点。 |
+| 2026-06-05 | Codex | 新增 32*32(检测点) | 新增 `handSinglePoint` 系统类型，沿用 `hand` 的单串口 1024 点协议和默认波特率；线序只在后端按用户提供的 1-based 表重排一次，展示、入库和 CSV 下载都使用同一份后端处理后的矩阵；前端复用手部检测 3D 点阵/原始数据展示，并补齐授权页和密钥脚本入口。 |
 | 2026-06-03 | Codex | CSV 表头中英文自适配 | 前端下载请求携带当前 `i18n.language`，后端按语言输出中文表头或旧版英文简写表头；手套部位列和 `清零帧` 也同步跟随语言。 |
 | 2026-06-03 | Codex | 清零帧入库与 CSV 导出 | 触觉手套、触觉足底和 robot 类触觉上衣采集保存改为记录清零后的压力矩阵和 `zeroFrame` 基准帧；CSV 下载新增 `清零帧` 表头，历史回放和旧数组数据继续兼容。 |
 | 2026-06-03 | Codex | 手套 CSV 左右手文件命名 | `server.js` 的手套类 CSV 导出将内部 sit/back 通道文件名前缀映射为 `left` / `right`，便于按物理左右手查找下载文件；其它系统仍保留原前缀。 |
@@ -591,6 +606,20 @@ graph TD
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-06-05 | Codex | 修复缺陷 | 修复触觉手套2连接数据后 3D 遥操无明显反馈的问题：双手帧按 `handSide` 分流，右手数据入口不再为空，短控制数组会归一化成手形 32x32 点阵，姿态/弯折即时应用到模型。 |
+| 2026-06-05 | Codex | 配置变更 | `hand0205Double.jsx` 收窄双手模型分组间距，左右手从 `x=±220` 改为 `x=±80`，让触觉手套2模型位置接近普通触觉手套默认视角。 |
+| 2026-06-05 | Codex | 修复缺陷 | `hand0205Double.jsx` 同步普通触觉手套的近景相机位置和旋转，并取消每帧 Trackball 更新覆盖默认视角，修复触觉手套2打开后模型过小、距离过远的问题。 |
+| 2026-06-05 | Codex | 新增功能 | `hand0205Double` / 触觉手套2新增一键连接双手套，后端自动打开两个可用手套串口，并按包内第二个字节 `01=左手`、`02=右手` 分流；双手套 CSV 下载改为一个文件同时包含左右手数据。 |
+| 2026-06-05 | Codex | 修复缺陷 | 修复 `hand0205Double.jsx` 双手模型默认不可见或过小的问题：恢复单手套相机/Group 可见参数，并保持左右手模型 5 倍缩放与右手镜像。 |
+| 2026-06-05 | Codex | 配置变更 | 恢复 `hand0205Double` / 触觉手套2 在主传感器下拉和授权配置页中的入口，模块配置与普通触觉手套保持一致。 |
+| 2026-06-05 | Codex | 配置变更 | 轮椅 `minzhen` 的“整体/座椅”动画切换栏改为仅在 3D 模型 `normal` 模式显示，原始数据 `numoriginal` 模式隐藏。 |
+| 2026-06-05 | Codex | 配置变更 | 轮椅 `minzhen` 渲染颜色默认值按模式拆分：3D 模型 `normal` 为 `415`，原始数据 `numoriginal` 为 `25`，并对旧默认 `1205` 做本地缓存迁移。 |
+| 2026-06-05 | Codex | 修复缺陷 | 修复轮椅系统打包后模型无法加载的问题：`chair.gltf` 的 buffer URI 从中文文件名改为 `chair.bin`，并同步重命名 `client/public/model/minzhen` 与原始素材目录中的 `.bin` 文件。 |
+| 2026-06-05 | Codex | 配置变更 | `minzhen` 系统显示名称改为中文“轮椅”/英文 `Wheelchair`，授权页标签同步更新，内部 key、协议和数据链路保持不变。 |
+| 2026-06-05 | Codex | 配置变更 | `minzhen` 3D 模型模式中的压力点图展示坐标改为逆时针旋转 90 度并左右镜像，未改动原始数据展示、CSV、统计或模型本体。 |
+| 2026-06-05 | Codex | 配置变更 | 主传感器下拉框中 `handSinglePoint` / 32*32(检测点) 顺序调整到 `fast1024` / 32*32高速 后方。 |
+| 2026-06-05 | Codex | 配置变更 | `handSinglePoint` / 32*32(检测点) CSV 下载文件名前缀改为随语言输出中文 `检测点` 或英文 `detection`，并新增 `检测点` / `detectionPoint` 表头列记录矩阵最后一个点。 |
+| 2026-06-05 | Codex | 新增功能 | 新增 `handSinglePoint` / 32*32(检测点)：串口协议与 `hand` 保持一致，默认 `1000000` 波特率，线序只在后端重排一次，前端展示、采集入库和 CSV 下载复用同一份 1024 点矩阵；前端与授权配置复用手部检测普通 3D/原始数据模式。 |
 | 2026-06-03 | Codex | 配置变更 | CSV 下载表头改为跟随界面语言：中文系统使用中文表头，英文系统保留旧版英文简写表头。 |
 | 2026-06-03 | Codex | 修复缺陷 | 修复触觉足底和 robot 类触觉上衣清零后采集保存仍为清零前数据的问题，并为触觉手套、触觉足底、robot 类触觉上衣 CSV 新增 `清零帧` 列记录清零基准帧。 |
 | 2026-06-03 | Codex | 配置变更 | 触觉手套 CSV 下载文件名从内部通道前缀 `sit` / `back` 改为物理方向前缀 `left` / `right`，不影响其它系统的 CSV 命名。 |
@@ -886,3 +915,20 @@ graph TD
 ---
 
 *此文档旨在提供项目架构的快照，具体实现细节请参考源代码。*
+## 2026-06-04 Minzhen / Wheelchair Display System
+
+- Added `minzhen` as a custom 32x32 / 1024-point display system.
+- The user-facing display name is "轮椅" in Chinese and `Wheelchair` in English; the internal sensor key remains `minzhen`.
+- Frontend entry points: `client/src/components/three/minzhen.jsx`, `client/src/page/home/Home.jsx`, `client/src/page/home/util.js`, `client/src/components/title/Title.jsx`, `client/src/page/license/License.jsx`, `client/src/constants.js`, `client/src/types/index.ts`.
+- Runtime model asset: `build/model/minzhen/chair.gltf`.
+- `minzhen.jsx` auto-centers/scales the loaded chair model; if `chair.gltf` fails because external `.bin` or texture files are missing, it logs the missing dependency and falls back to `model/chair3.glb`.
+- `minzhen.jsx` keeps the Group/Point/Scale/Size transform defaults internally and persists them in `localStorage` under `minzhenPointTransformV4`, but the in-scene right-side transform panel is hidden in the runtime UI. The V4 key intentionally ignores older cached Minzhen point settings so the default loads as Group (3, 97, 92), Point (-1, -38, 12), Scale (0.0054, 0.0029, 0.0054), and Size 0.77.
+- The `minzhen` data path updates the left Aside pressure and area panels from raw 32x32 pressure frames, including total pressure, point count, area, and the pressure/area trend canvases.
+- `sitTypeEvent.minzhen` is the single source for left Aside pressure and area statistics in both 3D model mode and raw-data mode. The `minzhen.jsx` 3D renderer and the `Fast1024` raw-data renderer do not overwrite these Aside statistics, so both modes show the same chart values for the same hardware frame.
+- The shared `Aside` panel has an explicit z-index, and the `minzhen` WebGL canvas is mounted at z-index 0, so the left pressure/area visualization remains visible above the 3D model canvas.
+- In `minzhen` raw-data mode, `Home.jsx` routes the system through the same `Fast1024` renderer used by the existing hand detection raw-data mode. `sitTypeEvent.minzhen` normalizes incoming frames to 1024 numeric values and calls `changeWsDataRaw(...)`; in 3D model mode, the same normalized frame is passed to `minzhen.jsx` through `sitData(...)`.
+- In `minzhen` 3D model mode, `minzhen.jsx` rotates only the seat pressure point-cloud coordinate projection counterclockwise by 90 degrees and mirrors it left-right through `getSitPointPosition(...)`; raw-data mode, CSV data, Aside statistics, serial parsing, and the chair model transform are unchanged.
+- Main pressure serial port uses the same `jqbed` line order as the existing 1024 hand detection path.
+- The `minzhen` title bar now exposes only the main seat pressure serial selector. The back serial selector remains available for other two-port systems but is hidden for `minzhen`.
+- `minzhen.jsx` exposes `actionSit` / `actionAll` like the existing car-style 3D components. The title bar shows a simplified `all` / `sit` view menu for `minzhen`; `actionSit` animates the pressure point cloud from the previous/all-view Point transform into an isolated seat view at Point (2, 61, 147) and removes the chair model from the Three.js group, while `actionAll` stops any previous point tween, restores the saved all-view Point transform, and adds the chair model back to the group with all child nodes visible. The chair model is stored in `chairRef.current` instead of a render-local variable, so it remains available after `setPointTransform(...)` causes React to re-render. `actionSit` changes only Point position; Group, Scale, and Size remain at the default/current all-view values. The seat-view Point value is synchronized to the slider panel after animation completion but is not persisted to `localStorage`. The previous continuous pressure-center seat tilt animation is not used.
+- Extra sensor text parsing remains available in `server.js`; frames containing `gyroscope` and `thermistor` are parsed into `tempObj`, with `angle_fb` and `angle_lr` derived from gyroscope values divided by `15000`.

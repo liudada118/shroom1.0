@@ -248,8 +248,8 @@ const Canvas = React.forwardRef((props, refs) => {
     );
 
     // 初版
-    camera.position.z = -10;
-    camera.position.y = 30;
+    camera.position.z = 2000;
+    camera.position.y = -3003;
     camera.position.x = 0;
 
     // 更新版
@@ -280,8 +280,8 @@ const Canvas = React.forwardRef((props, refs) => {
     group.quaternion.set(0, 0, 0, 1)
     leftHandGroup = new THREE.Group();
     rightHandGroup = new THREE.Group();
-    leftHandGroup.position.x = -220;
-    rightHandGroup.position.x = 220;
+    leftHandGroup.position.x = -80;
+    rightHandGroup.position.x = 80;
     group.add(leftHandGroup);
     group.add(rightHandGroup);
     loader.load("./model/hand1.glb", function (gltf) {
@@ -293,8 +293,13 @@ const Canvas = React.forwardRef((props, refs) => {
 
       //   chair.position.z = 150;
       // }
-      chair.rotation.x = Math.PI / 6
-      chair.rotation.z = -Math.PI;
+      chair.rotation.x = -Math.PI / 3
+      chair.rotation.z = Math.PI;
+      chair.rotation.y = 0;
+      chair.position.z = 535;
+      chair.position.y = -810;
+      chair.position.x = 10;
+      chair.scale.set(5, 5, 5)
 
       // if(!props.hand){
       changeModal(true)
@@ -404,17 +409,18 @@ const Canvas = React.forwardRef((props, refs) => {
       leftHandGroup.add(chair);
 
       rightChair = SkeletonUtils.clone(chair);
-      rightChair.rotation.x = Math.PI / 6
-      rightChair.rotation.z = -Math.PI;
-      rightChair.scale.x = -1;
+      rightChair.rotation.x = -Math.PI / 3
+      rightChair.rotation.z = Math.PI;
+      rightChair.rotation.y = 0;
+      rightChair.scale.x = -5;
       rightHandGroup.add(rightChair);
 
 
 
 
-      // group.position.x = groupX;
-      // group.position.y = groupY;
-      // group.position.z = groupZ;
+      group.position.x = groupX;
+      group.position.y = groupY;
+      group.position.z = groupZ;
       // const arr = [0.8733426332473755, -0.34111812710762024, -0.2885167896747589, 0.19408577680587769]
 
       //  if(arr) angleFlag = true
@@ -705,22 +711,66 @@ const Canvas = React.forwardRef((props, refs) => {
     ndata2 = newZeroArr
   }
   var ndata2
+
+  function normalizeHandRenderData(source) {
+    const length = sitnum1 * sitnum2
+    const values = Array.isArray(source) ? source : []
+    if (values.length >= length) {
+      return values.slice(0, length).map((item) => {
+        const value = Number(item)
+        return Number.isFinite(value) ? value : 0
+      })
+    }
+
+    const normalized = new Array(length).fill(0)
+    if (!values.length) {
+      return normalized
+    }
+
+    let valueIndex = 0
+    for (let index = 0; index < length; index++) {
+      if (ndata2?.[index] > 0) {
+        const value = Number(values[valueIndex % values.length])
+        normalized[index] = Number.isFinite(value) ? value : 0
+        valueIndex++
+      }
+    }
+    return normalized
+  }
   //  更新座椅数据
   function sitRenew() {
 
-    if (leftHandGroup && baseQuaternion && quaternion) leftHandGroup.quaternion.copy(quaternion);
-    if (rightHandGroup && rightBaseQuaternion && rightQuaternion) rightHandGroup.quaternion.copy(rightQuaternion);
+    initndata1Data()
+
+    if (leftHandGroup && quaternion) leftHandGroup.quaternion.copy(quaternion);
+    if (rightHandGroup && rightQuaternion) rightHandGroup.quaternion.copy(rightQuaternion);
     if (fingerArr) rotateFingers(fingerArr, chair)
     if (rightFingerArr) rotateFingers(rightFingerArr, rightChair)
 
 
-    interp(ndata1, bigArr, sitnum1, sitInterp);
+    const renderSource = normalizeHandRenderData(ndata1)
+    interp(renderSource, bigArr, sitnum1, sitInterp);
     let bigArrs = addSide(
       bigArr,
       sitnum2 * sitInterp,
       sitnum1 * sitInterp,
       sitOrder,
       sitOrder
+    );
+    interp(ndata2, bigArrhand, sitnum1, sitInterp);
+    let bigArrshand1 = addSide(
+      bigArrhand,
+      sitnum2 * sitInterp,
+      sitnum1 * sitInterp,
+      sitOrder,
+      sitOrder
+    );
+    gaussBlur_1(
+      bigArrshand1,
+      bigArrshand,
+      sitnum2 * sitInterp + sitOrder * 2,
+      sitnum1 * sitInterp + sitOrder * 2,
+      1.2
     );
     gaussBlur_1(
       bigArrs,
@@ -731,14 +781,31 @@ const Canvas = React.forwardRef((props, refs) => {
     );
     let k = 0,
       l = 0;
-    for (let iy = 0; iy < AMOUNTY; iy++) {
-      for (let ix = 0; ix < AMOUNTX; ix++) {
+    let dataArr = []
+    for (let ix = 0; ix < AMOUNTX; ix++) {
+      for (let iy = 0; iy < AMOUNTY; iy++) {
         const value = bigArrg[l] * 10;
+        const valuehand = bigArrshand[l] * 10;
         smoothBig[l] = smoothBig[l] + (value - smoothBig[l] + 0.5) / valuel1;
         positions[k] = ix * SEPARATION - (AMOUNTX * SEPARATION) / 2; // x
         positions[k + 1] = smoothBig[l] * value1; // y
         positions[k + 2] = iy * SEPARATION - (AMOUNTY * SEPARATION) / 2; // z
-        const rgb = jet(0, valuej1, smoothBig[l]);
+        if (valuehand < 50) {
+          positions[k + 1] = -100000;
+          positions[k] = 0;
+          positions[k + 2] = 0;
+        }
+        let rgb
+        if (sitIndexArr && !sitIndexArr.every((a) => a == 0)) {
+          if (ix >= sitIndexArr[0] && ix < sitIndexArr[1] && iy >= sitIndexArr[2] && iy < sitIndexArr[3]) {
+            rgb = jet(0, valuej1, smoothBig[l]);
+            dataArr.push(bigArrg[l]);
+          } else {
+            rgb = jetgGrey(0, valuej1, smoothBig[l]);
+          }
+        } else {
+          rgb = jet(0, valuej1, smoothBig[l]);
+        }
         colors[k] = rgb[0] / 255;
         colors[k + 1] = rgb[1] / 255;
         colors[k + 2] = rgb[2] / 255;
@@ -747,15 +814,17 @@ const Canvas = React.forwardRef((props, refs) => {
       }
     }
 
+    if (!sitIndexArr || !sitIndexArr.length || sitIndexArr.every((a) => a == 0)) {
+      dataArr = bigArrg;
+    }
 
     var T = clock.getDelta();
     timeS = timeS + T;
 
-    let dataArr = ndata1
     if (timeS > renderT) {
       // console.log(renderT)
       dataArr = dataArr.filter((a) => a > valuej1 * 0.025)
-      const point = ndata1.filter((a) => a > 0).length
+      const point = renderSource.filter((a) => a > 0).length
       const statsData = rawPressureStatsData.length ? rawPressureStatsData : dataArr
       const statsPoint = rawPressureStatsData.length
         ? rawPressureStatsData.filter((a) => a > 0).length
@@ -814,8 +883,8 @@ const Canvas = React.forwardRef((props, refs) => {
     // backRenew();
     sitRenew();
     // headRenew()
-    // camera.position.set(0,-1000,-50)
-    // camera.rotation.set(2.5,0,0,)
+    camera.position.set(0, -1000, -50)
+    camera.rotation.set(2.5, 0, 0)
     // console.log(camera.position, 'position')
     // console.log(camera.rotation, 'rotation')
 
@@ -832,7 +901,7 @@ const Canvas = React.forwardRef((props, refs) => {
         CTRL_KEY, // zoom
         CMD_KEY, // pan
       ];
-      controls.update();
+      // controls.update();
 
     } else if (!controlsFlag) {
 
@@ -894,11 +963,16 @@ const Canvas = React.forwardRef((props, refs) => {
 
   }
 
-  function rightData() {
-    // 右手只复用姿态和弯折控制，压力点云仍由左手原有逻辑维护。
+  function rightData(prop = {}, nextLocal = local) {
+    local = nextLocal
+    const { statsData } = prop
+    rawPressureStatsData = Array.isArray(statsData) && statsData.length >= 256
+      ? statsData.map((item) => {
+        const numericValue = Number(item)
+        return Number.isFinite(numericValue) ? numericValue : 0
+      })
+      : rawPressureStatsData
   }
-
-
 
   function changePointRotation({ direction, value, type }) {
     if (type === 'back') {
@@ -956,6 +1030,9 @@ const Canvas = React.forwardRef((props, refs) => {
   function changeHandAngle(arr) {
     if (arr && !arr.includes(undefined)) {
       quaternion = transformQuaternion(arr)
+      if (leftHandGroup && quaternion) {
+        leftHandGroup.quaternion.copy(quaternion)
+      }
     }
 
   }
@@ -963,16 +1040,25 @@ const Canvas = React.forwardRef((props, refs) => {
   function changeRightHandAngle(arr) {
     if (arr && !arr.includes(undefined)) {
       rightQuaternion = transformQuaternion(arr, 'right')
+      if (rightHandGroup && rightQuaternion) {
+        rightHandGroup.quaternion.copy(rightQuaternion)
+      }
     }
   }
 
   function calibration(arr) {
     fingerArr = arr
+    if (arr && chair) {
+      rotateFingers(arr, chair)
+    }
 
   }
 
   function calibrationRight(arr) {
     rightFingerArr = arr
+    if (arr && rightChair) {
+      rotateFingers(arr, rightChair)
+    }
   }
 
   function handZero() {
@@ -1034,10 +1120,10 @@ const Canvas = React.forwardRef((props, refs) => {
 
   function changeModal(bool) {
     if (chair) {
-      chair.scale.x = 1
+      chair.scale.x = 5
     }
     if (rightChair) {
-      rightChair.scale.x = -1
+      rightChair.scale.x = -5
     }
   }
 

@@ -20,6 +20,7 @@ export type SensorType =
   | "carSeat"
   | "volvo"
   | "wholeChair"
+  | "minzhen"
   | "bed"
   | "shoe"
   | "insole"

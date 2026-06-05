@@ -1324,6 +1324,23 @@ module.exports = {
 
     wsPointData = zeroLine(wsPointData)
     return wsPointData
+  },
+  handSinglePoint(arr) {
+    const wsPointData = []
+    for (let start = 481; start <= 992; start += 32) {
+      for (let point = start; point < start + 32; point++) {
+        wsPointData.push(arr[point - 1] || 0)
+      }
+    }
+    for (let start = 449; start >= 1; start -= 32) {
+      for (let point = start; point < start + 32; point++) {
+        wsPointData.push(arr[point - 1] || 0)
+      }
+    }
+    for (let point = 993; point <= 1024; point++) {
+      wsPointData.push(arr[point - 1] || 0)
+    }
+    return wsPointData
   }, carCol(arr) {
     const wsPointData = [...arr]
     let newData = []

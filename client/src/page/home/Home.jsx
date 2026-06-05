@@ -27,6 +27,7 @@ import Gloves1 from "../../components/three/gloves1";
 import Carcol from "../../components/three/carCol";
 import Hand0205 from "../../components/three/hand0205 copy";
 import Hand0205Double from "../../components/three/hand0205Double";
+import Minzhen from "../../components/three/minzhen";
 import Hand0507 from "../../components/three/hand0507";
 import Hand0205Point from "../../components/three/hand0205Point";
 import Hand0205Point147 from "../../components/three/hand0205Point147";
@@ -100,9 +101,15 @@ import { WebGLCanvas } from "../../components/webgl/WebGL.HeatMap copy 2";
 
 const FULL_PACKET_GLOVE_MATRIX = 'handGloveFullPacket'
 const HAND_0205_DOUBLE_MATRIX = 'hand0205Double'
+const MINZHEN_MATRIX = 'minzhen'
 const FULL_PACKET_GLOVE_MODES = ['num', 'numoriginal']
 const WHOLE_CHAIR_MATRIX = 'wholeChair'
-const tactileGloveTypes = ['hand0205', HAND_0205_DOUBLE_MATRIX, 'handGlove115200', FULL_PACKET_GLOVE_MATRIX]
+const HIDDEN_DISPLAY_MATRIX_TYPES = [HAND_0205_DOUBLE_MATRIX]
+const normalizeDisplayMatrixName = (matrixName) =>
+  HIDDEN_DISPLAY_MATRIX_TYPES.includes(matrixName) ? 'hand0205' : matrixName
+const filterVisibleDisplayMatrixTypes = (types) =>
+  types.filter((type) => !HIDDEN_DISPLAY_MATRIX_TYPES.includes(type))
+const tactileGloveTypes = ['hand0205', 'handGlove115200', FULL_PACKET_GLOVE_MATRIX]
 const isTactileGloveMappedLength = (matrixName, length) => {
   return length === 147 || (matrixName === 'handGloveFullPacket' && length === 195)
 }
@@ -388,11 +395,14 @@ const petCareMatrixArr = ['petCare', 'petCareMini']
 const isPetCareMatrix = (type) => petCareMatrixArr.includes(type)
 const tempFullBedMatrix = 'tempFullBed'
 const bedArr = ['jqbed', tempFullBedMatrix, ...petCareMatrixArr, 'xiyueReal1', 'smallBed', 'smallBed1']
-const displayRendererConfigMatrixArr = ['smallBed', 'smallBed12B', WHOLE_CHAIR_MATRIX, 'jqbed', ...petCareMatrixArr]
+const displayRendererConfigMatrixArr = ['smallBed', 'smallBed12B', WHOLE_CHAIR_MATRIX, MINZHEN_MATRIX, 'jqbed', ...petCareMatrixArr]
 const HUMAN_BODY_DEFAULT_COLOR = 1555
 const HUMAN_BODY_DEFAULT_SIZE = 31
 const HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES = [1205, 5000]
 const HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES = [20, 60]
+const MINZHEN_NORMAL_DEFAULT_COLOR = 415
+const MINZHEN_RAW_DEFAULT_COLOR = 25
+const MINZHEN_OLD_DEFAULT_COLOR_VALUES = [1205]
 
 const initConfig = {
   bed: {
@@ -415,6 +425,14 @@ const initConfig = {
     valuel1: 4,
     valuef1: 6,
     value1: 15,
+    valuelInit1: 500,
+  },
+  minzhen: {
+    valueg1: 2,
+    valuej1: MINZHEN_NORMAL_DEFAULT_COLOR,
+    valuel1: 5,
+    valuef1: 6,
+    value1: 0.72,
     valuelInit1: 500,
   },
   petCare: {
@@ -489,6 +507,16 @@ const normalizeHumanBodySizeValue = (sizeValue) => {
   return Math.min(200, Math.max(1, nextValue))
 }
 
+initConfig.minzhen__normal = {
+  ...initConfig.minzhen,
+  valuej1: MINZHEN_NORMAL_DEFAULT_COLOR,
+}
+
+initConfig.minzhen__numoriginal = {
+  ...initConfig.minzhen,
+  valuej1: MINZHEN_RAW_DEFAULT_COLOR,
+}
+
 /**
  * Get cached config from localStorage.
  * Supports two-dimensional cache: sensorType + mode.
@@ -516,6 +544,15 @@ const getLocalStorageConfig = ({ sensorType, mode }) => {
   return Object.keys(result).length ? result : undefined
 }
 
+const hasModeColorConfig = ({ sensorType, mode }) => {
+  if (!mode) {
+    return false
+  }
+  const config = JSON.parse(localStorage.getItem('valueConfig'))
+  const modeConfig = config?.[`${sensorType}__${mode}`]
+  return modeConfig && Object.prototype.hasOwnProperty.call(modeConfig, 'valuej1')
+}
+
 /**
  * Get merged config: defaults + localStorage cache.
  * @param {string} sensorType - sensor type name
@@ -526,7 +563,12 @@ const getConfig = ({ sensorType, mode }) => {
     return initConfig['bed']
   }
   const realType = matrixNameToType(sensorType)
-  const init = initConfig[realType] ? initConfig[realType] : initConfig['bed']
+  const modeDefaultKey = mode ? `${realType}__${mode}` : ''
+  const init = modeDefaultKey && initConfig[modeDefaultKey]
+    ? initConfig[modeDefaultKey]
+    : initConfig[realType]
+      ? initConfig[realType]
+      : initConfig['bed']
   const local = getLocalStorageConfig({ sensorType: realType, mode })
   const mergedConfig = { ...init, ...local }
   if (realType === 'humanBody') {
@@ -538,6 +580,17 @@ const getConfig = ({ sensorType, mode }) => {
     }
     mergedConfig.sizeValue = normalizeHumanBodySizeValue(mergedConfig.sizeValue)
   }
+  if (realType === MINZHEN_MATRIX) {
+    const modeDefaultColor = mode === 'numoriginal' ? MINZHEN_RAW_DEFAULT_COLOR : MINZHEN_NORMAL_DEFAULT_COLOR
+    const hasExplicitModeColor = hasModeColorConfig({ sensorType: realType, mode })
+    const currentColor = Number(mergedConfig.valuej1)
+    if (
+      MINZHEN_OLD_DEFAULT_COLOR_VALUES.includes(currentColor) ||
+      (mode === 'numoriginal' && !hasExplicitModeColor && currentColor === MINZHEN_NORMAL_DEFAULT_COLOR)
+    ) {
+      mergedConfig.valuej1 = modeDefaultColor
+    }
+  }
   return mergedConfig
 }
 
@@ -546,6 +599,9 @@ const getDefaultModeForMatrix = (matrixName, currentMode = "normal") => {
     return "normal";
   }
   if (matrixName === tempFullBedMatrix) {
+    return currentMode === "numoriginal" ? "numoriginal" : "normal";
+  }
+  if (matrixName === MINZHEN_MATRIX) {
     return currentMode === "numoriginal" ? "numoriginal" : "normal";
   }
   if (matrixName === "humanBody") {
@@ -628,6 +684,11 @@ const getLatestFingerPoints = (hand = 'left') => (
   hand === 'right' ? [...latestFingerPointsR] : [...latestFingerPointsL]
 )
 
+const isRightHandPayload = (jsonObject, fallback = false) => {
+  const side = jsonObject?.handSide ?? jsonObject?.outputSide
+  return typeof side === 'string' ? side.toLowerCase() === 'right' : fallback
+}
+
 var backFlag, hz = 12, sitFlag, realHzFrameCount = 0, realHzLastTime = Date.now(),
   fingerArrL = readFingerCalibration('fingerArrL'),
   fingerArrR = readFingerCalibration('fingerArrR'),
@@ -709,7 +770,9 @@ class Home extends React.Component {
     let storedAllowedTypes = null;
     try {
       const parsedAllowedTypes = JSON.parse(localStorage.getItem('allowedTypes') || 'null');
-      storedAllowedTypes = Array.isArray(parsedAllowedTypes) ? parsedAllowedTypes : null;
+      storedAllowedTypes = Array.isArray(parsedAllowedTypes)
+        ? filterVisibleDisplayMatrixTypes(parsedAllowedTypes)
+        : null;
     } catch (err) {
       storedAllowedTypes = null;
     }
@@ -1301,6 +1364,31 @@ class Home extends React.Component {
     }
 
     //处理空数组
+    if (jsonObject.autoConnectHand0205Double != null) {
+      const result = jsonObject.autoConnectHand0205Double;
+      if (result.success) {
+        this.setState({
+          portname: result.portname || '',
+          portnameBack: result.portnameBack || '',
+          hand: true,
+        });
+        const text = result.message || '触觉手套2 已连接左右手套';
+        if (this.props.messageApi) {
+          this.props.messageApi.success(text);
+        } else {
+          message.success(text);
+        }
+      } else {
+        const text = result.message || '触觉手套2 自动连接失败';
+        if (this.props.messageApi) {
+          this.props.messageApi.error(text);
+        } else {
+          message.error(text);
+        }
+      }
+      return;
+    }
+
     sitDataFlag = false;
 
     if (jsonObject.data != null) {
@@ -1456,31 +1544,33 @@ class Home extends React.Component {
         this.setState({ matrixTitle: true })
       } else if (Array.isArray(jsonObject.file) && jsonObject.file.length) {
         // 多类型模式：使用数组第一个作为默认类型
-        const nextMatrixName = jsonObject.file[0]
+        const allowedTypes = filterVisibleDisplayMatrixTypes(jsonObject.file)
+        const nextMatrixName = normalizeDisplayMatrixName(allowedTypes[0] || jsonObject.file[0])
         const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag)
         localStorage.setItem('matrixTitle', false)
-        localStorage.setItem('allowedTypes', JSON.stringify(jsonObject.file))
+        localStorage.setItem('allowedTypes', JSON.stringify(allowedTypes))
         this.setState({
           matrixTitle: false,
-          allowedTypes: jsonObject.file,
+          allowedTypes,
           matrixName: nextMatrixName,
           numMatrixFlag: nextMode,
           ...getConfig({ sensorType: nextMatrixName, mode: nextMode }),
         })
-        localStorage.setItem('file', jsonObject.file[0])
+        localStorage.setItem('file', nextMatrixName)
       } else if (jsonObject.file) {
-        const nextMatrixName = jsonObject.file
+        const nextMatrixName = normalizeDisplayMatrixName(jsonObject.file)
+        const allowedTypes = HIDDEN_DISPLAY_MATRIX_TYPES.includes(jsonObject.file) ? [] : [jsonObject.file]
         const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag)
         localStorage.setItem('matrixTitle', false)
-        localStorage.setItem('allowedTypes', JSON.stringify([jsonObject.file]))
+        localStorage.setItem('allowedTypes', JSON.stringify(allowedTypes))
         this.setState({
           matrixTitle: false,
-          allowedTypes: [jsonObject.file],
+          allowedTypes,
           matrixName: nextMatrixName,
           numMatrixFlag: nextMode,
           ...getConfig({ sensorType: nextMatrixName, mode: nextMode }),
         })
-        localStorage.setItem('file', jsonObject.file)
+        localStorage.setItem('file', nextMatrixName)
       } else {
         this.setState({ matrixTitle: true })
       }
@@ -1493,13 +1583,15 @@ class Home extends React.Component {
         localStorage.removeItem('allowedTypes')
         this.setState({ matrixTitle: true, allowedTypes: null })
       } else {
-        const allowedTypes = Array.isArray(jsonObject.selectFlag)
+        const allowedTypesRaw = Array.isArray(jsonObject.selectFlag)
           ? jsonObject.selectFlag
           : [jsonObject.selectFlag].filter(Boolean)
+        const allowedTypes = filterVisibleDisplayMatrixTypes(allowedTypesRaw)
         localStorage.setItem('allowedTypes', JSON.stringify(allowedTypes))
         const nextState = { matrixTitle: true, allowedTypes }
-        if (allowedTypes.length && !allowedTypes.includes(this.state.matrixName)) {
-          const nextMatrixName = allowedTypes[0]
+        const currentMatrixName = normalizeDisplayMatrixName(this.state.matrixName)
+        if (currentMatrixName !== this.state.matrixName || (allowedTypes.length && !allowedTypes.includes(this.state.matrixName))) {
+          const nextMatrixName = allowedTypes[0] || currentMatrixName
           const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag)
           Object.assign(nextState, {
             matrixName: nextMatrixName,
@@ -1597,6 +1689,10 @@ class Home extends React.Component {
       });
     }
 
+    if (jsonObject.tempObj != null) {
+      this.com.current?.sensorData?.(jsonObject);
+    }
+
     if (jsonObject.sitData != null) {
       // 统计真实采样频率
       realHzFrameCount++;
@@ -1650,6 +1746,7 @@ class Home extends React.Component {
             local: this.state.local,
             press: this.state.press,
             rotate,
+            jsonObject,
             wsPointDataSitZero: wsPointDataSitZero,
             fingerArr: fingerArr
           });
@@ -1663,6 +1760,7 @@ class Home extends React.Component {
           local: this.state.local,
           press: this.state.press,
           rotate,
+          jsonObject,
           wsPointDataSitZero: wsPointDataSitZero,
           fingerArr: fingerArr
           // compen : this.state.compen
@@ -1813,9 +1911,26 @@ class Home extends React.Component {
                   fivePoints[i] = num
                 }
               }
-              const currentFingerPoints = updateLatestFingerPoints(fivePoints, !!backFlag)
+              const isDoubleGlove = this.state.matrixName === HAND_0205_DOUBLE_MATRIX
+              const isRightPayload = isDoubleGlove ? isRightHandPayload(jsonObject, false) : !!backFlag
+              const currentFingerPoints = updateLatestFingerPoints(fivePoints, isRightPayload)
 
-              const com = this.state.matrixName == 'hand0507' ? that.com.current?.handL : that.com.current
+              const com = isDoubleGlove && isRightPayload
+                ? {
+                  changeHandAngle: that.com.current?.changeRightHandAngle,
+                  calibration: that.com.current?.calibrationRight,
+                }
+                : this.state.matrixName == 'hand0507' ? that.com.current?.handL : that.com.current
+              const currentFingerCalibration = isDoubleGlove
+                ? (isRightPayload ? fingerArrR : fingerArrL)
+                : fingerArr
+              if (isDoubleGlove && !isRightPayload) {
+                that.com.current?.sitData({
+                  wsPointData: wsPointData ? [...wsPointData] : [],
+                  statsData: rawSitData,
+                  local: that.state.local
+                });
+              }
 
               if (!that.state.calibration) {
                 if (rotate && Array.isArray(rotate) && rotate.length >= 4 && !rotate.some(v => v == null || isNaN(v))) {
@@ -1824,21 +1939,22 @@ class Home extends React.Component {
                     com?.changeHandAngle(arr)
                   }
                 }
-                if (fingerArr) {
-                  if (!fingerArr[0] || !Array.isArray(fingerArr[0])) fingerArr[0] = new Array(5).fill(0)
-                  if (!fingerArr[1] || !Array.isArray(fingerArr[1])) fingerArr[1] = new Array(5).fill(255)
+                if (currentFingerCalibration) {
+                  if (!currentFingerCalibration[0] || !Array.isArray(currentFingerCalibration[0])) currentFingerCalibration[0] = new Array(5).fill(0)
+                  if (!currentFingerCalibration[1] || !Array.isArray(currentFingerCalibration[1])) currentFingerCalibration[1] = new Array(5).fill(255)
                   const baseArr = []
                   for (let i = 0; i < 5; i++) {
-                    baseArr.push((fingerArr[1][i] || 0) - (fingerArr[0][i] || 0))
+                    baseArr.push((currentFingerCalibration[1][i] || 0) - (currentFingerCalibration[0][i] || 0))
                   }
+                  const bendArr = isDoubleGlove && isRightPayload ? rightHandNewArr : newArr
                   for (let i = 0; i < 5; i++) {
                     const rawValue = currentFingerPoints[i]
                     if (rawValue == null || isNaN(rawValue)) continue;
-                    const numberValue = Math.round((rawValue - (fingerArr[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
+                    const numberValue = Math.round((rawValue - (currentFingerCalibration[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
                     const value = numberValue < 0 ? 0 : numberValue >= 1 ? 1 : numberValue
-                    newArr[i] = newArr[i] + (value - newArr[i]) / 3
+                    bendArr[i] = bendArr[i] + (value - bendArr[i]) / 3
                   }
-                  com?.calibration(newArr)
+                  com?.calibration(bendArr)
                 }
               }
             } else if (this.state.numMatrixFlag == 'numoriginal' && tactileGloveTypes.includes(this.state.matrixName)) {
@@ -1931,7 +2047,9 @@ class Home extends React.Component {
               wsPointDataSit = wsPointData;
               wsPointDataSit = wsPointDataSit.map((a) => Math.round(a));
               wsPointDataSitWidth = 32;
-              const currentFingerPoints = updateLatestFingerPoints(wsPointDataSit, !!backFlag)
+              const isDoubleGlove = this.state.matrixName === HAND_0205_DOUBLE_MATRIX
+              const isRightPayload = isDoubleGlove ? isRightHandPayload(jsonObject, false) : !!backFlag
+              const currentFingerPoints = updateLatestFingerPoints(wsPointDataSit, isRightPayload)
               const rawSitData = getRawPressurePayload(jsonObject, 'sitData');
               this.syncGloveRawPressureStats(rawSitData);
 
@@ -1954,7 +2072,15 @@ class Home extends React.Component {
                 that.com.current?.bthClickHandle(wsPointData);
               }
 
-              const com = this.state.matrixName == 'hand0507' ? that.com.current?.handL : that.com.current
+              const com = isDoubleGlove && isRightPayload
+                ? {
+                  changeHandAngle: that.com.current?.changeRightHandAngle,
+                  calibration: that.com.current?.calibrationRight,
+                }
+                : this.state.matrixName == 'hand0507' ? that.com.current?.handL : that.com.current
+              const currentFingerCalibration = isDoubleGlove
+                ? (isRightPayload ? fingerArrR : fingerArrL)
+                : fingerArr
 
               if (!that.state.calibration) {
                 //  z 
@@ -1966,29 +2092,29 @@ class Home extends React.Component {
                   }
                 }
 
-                if (fingerArr) {
-                  if (!fingerArr[0] || !Array.isArray(fingerArr[0])) {
-                    fingerArr[0] = new Array(5).fill(0)
+                if (currentFingerCalibration) {
+                  if (!currentFingerCalibration[0] || !Array.isArray(currentFingerCalibration[0])) {
+                    currentFingerCalibration[0] = new Array(5).fill(0)
                   }
-                  if (!fingerArr[1] || !Array.isArray(fingerArr[1])) {
-                    fingerArr[1] = new Array(5).fill(255)
+                  if (!currentFingerCalibration[1] || !Array.isArray(currentFingerCalibration[1])) {
+                    currentFingerCalibration[1] = new Array(5).fill(255)
                   }
                   const baseArr = []
                   for (let i = 0; i < 5; i++) {
-                    baseArr.push((fingerArr[1][i] || 0) - (fingerArr[0][i] || 0))
+                    baseArr.push((currentFingerCalibration[1][i] || 0) - (currentFingerCalibration[0][i] || 0))
                   }
 
-
+                  const bendArr = isDoubleGlove && isRightPayload ? rightHandNewArr : newArr
                   for (let i = 0; i < 5; i++) {
                     const rawValue = currentFingerPoints[i]
                     if (rawValue == null || isNaN(rawValue)) continue;
-                    const numberValue = Math.round((rawValue - (fingerArr[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
+                    const numberValue = Math.round((rawValue - (currentFingerCalibration[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
                     const value = (numberValue) < 0 ? 0 : (numberValue) >= 1 ? 1 : (numberValue)
 
-                    newArr[i] = newArr[i] + (value - newArr[i]) / 3
+                    bendArr[i] = bendArr[i] + (value - bendArr[i]) / 3
                   }
 
-                  com?.calibration(newArr)
+                  com?.calibration(bendArr)
                 }
               } else {
 
@@ -2295,6 +2421,7 @@ class Home extends React.Component {
 
 
               const isDoubleGlove = this.state.matrixName === HAND_0205_DOUBLE_MATRIX
+              const isRightPayload = isDoubleGlove ? isRightHandPayload(jsonObject, true) : !!backFlag
               const com = isDoubleGlove
                 ? {
                   changeHandAngle: that.com.current?.changeRightHandAngle,
@@ -2306,9 +2433,12 @@ class Home extends React.Component {
               wsPointDataSit = wsPointData;
               wsPointDataSit = wsPointDataSit.map((a) => Math.round(a));
               wsPointDataSitWidth = 32;
-              const currentFingerPoints = updateLatestFingerPoints(wsPointDataSit, !!backFlag)
+              const currentFingerPoints = updateLatestFingerPoints(wsPointDataSit, isRightPayload)
               const rawBackData = getRawPressurePayload(jsonObject, 'backData');
               this.syncGloveRawPressureStats(rawBackData);
+              const currentFingerCalibration = isDoubleGlove
+                ? (isRightPayload ? fingerArrR : fingerArrL)
+                : fingerArr
 
               if (that.state.numMatrixFlag == "normal") {
 
@@ -2343,23 +2473,23 @@ class Home extends React.Component {
                   }
                 }
 
-                if (fingerArr) {
-                  if (!fingerArr[0] || !Array.isArray(fingerArr[0])) {
-                    fingerArr[0] = new Array(5).fill(0)
+                if (currentFingerCalibration) {
+                  if (!currentFingerCalibration[0] || !Array.isArray(currentFingerCalibration[0])) {
+                    currentFingerCalibration[0] = new Array(5).fill(0)
                   }
-                  if (!fingerArr[1] || !Array.isArray(fingerArr[1])) {
-                    fingerArr[1] = new Array(5).fill(255)
+                  if (!currentFingerCalibration[1] || !Array.isArray(currentFingerCalibration[1])) {
+                    currentFingerCalibration[1] = new Array(5).fill(255)
                   }
                   const baseArr = []
                   for (let i = 0; i < 5; i++) {
-                    baseArr.push((fingerArr[1][i] || 0) - (fingerArr[0][i] || 0))
+                    baseArr.push((currentFingerCalibration[1][i] || 0) - (currentFingerCalibration[0][i] || 0))
                   }
 
 
                   for (let i = 0; i < 5; i++) {
                     const rawValue = currentFingerPoints[i]
                     if (rawValue == null || isNaN(rawValue)) continue;
-                    const numberValue = Math.round((rawValue - (fingerArr[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
+                    const numberValue = Math.round((rawValue - (currentFingerCalibration[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
                     const value = (numberValue) < 0 ? 0 : (numberValue) >= 1 ? 1 : (numberValue)
 
                     const bendArr = isDoubleGlove ? rightHandNewArr : newArr
@@ -2448,6 +2578,7 @@ class Home extends React.Component {
 
 
               const isDoubleGlove = this.state.matrixName === HAND_0205_DOUBLE_MATRIX
+              const isRightPayload = isDoubleGlove ? isRightHandPayload(jsonObject, true) : !!backFlag
               const com = isDoubleGlove
                 ? {
                   changeHandAngle: that.com.current?.changeRightHandAngle,
@@ -2458,9 +2589,12 @@ class Home extends React.Component {
               wsPointDataSit = wsPointData;
               wsPointDataSit = wsPointDataSit.map((a) => Math.round(a));
               wsPointDataSitWidth = 32;
-              const currentFingerPoints = updateLatestFingerPoints(wsPointDataSit, !!backFlag)
+              const currentFingerPoints = updateLatestFingerPoints(wsPointDataSit, isRightPayload)
               const rawBackData = getRawPressurePayload(jsonObject, 'backData');
               this.syncGloveRawPressureStats(rawBackData);
+              const currentFingerCalibration = isDoubleGlove
+                ? (isRightPayload ? fingerArrR : fingerArrL)
+                : fingerArr
               if (that.state.numMatrixFlag == "normal") {
                 if (this.state.matrixName != 'handVideo1') {
                   writeHandData?.({
@@ -2490,23 +2624,23 @@ class Home extends React.Component {
                   }
                 }
 
-                if (fingerArr) {
-                  if (!fingerArr[0] || !Array.isArray(fingerArr[0])) {
-                    fingerArr[0] = new Array(5).fill(0)
+                if (currentFingerCalibration) {
+                  if (!currentFingerCalibration[0] || !Array.isArray(currentFingerCalibration[0])) {
+                    currentFingerCalibration[0] = new Array(5).fill(0)
                   }
-                  if (!fingerArr[1] || !Array.isArray(fingerArr[1])) {
-                    fingerArr[1] = new Array(5).fill(255)
+                  if (!currentFingerCalibration[1] || !Array.isArray(currentFingerCalibration[1])) {
+                    currentFingerCalibration[1] = new Array(5).fill(255)
                   }
                   const baseArr = []
                   for (let i = 0; i < 5; i++) {
-                    baseArr.push((fingerArr[1][i] || 0) - (fingerArr[0][i] || 0))
+                    baseArr.push((currentFingerCalibration[1][i] || 0) - (currentFingerCalibration[0][i] || 0))
                   }
 
 
                   for (let i = 0; i < 5; i++) {
                     const rawValue = currentFingerPoints[i]
                     if (rawValue == null || isNaN(rawValue)) continue;
-                    const numberValue = Math.round((rawValue - (fingerArr[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
+                    const numberValue = Math.round((rawValue - (currentFingerCalibration[0][i] || 0)) / (baseArr[i] ? baseArr[i] : 1) * 100) / 100
                     const value = (numberValue) < 0 ? 0 : (numberValue) >= 1 ? 1 : (numberValue)
 
                     const bendArr = isDoubleGlove ? rightHandNewArr : newArr
@@ -2755,8 +2889,9 @@ class Home extends React.Component {
 
   changeMatrix = (e) => {
     // setMatrixName(e)
-    const nextMode = getDefaultModeForMatrix(e, this.state.numMatrixFlag);
-    const configObj = getConfig({ sensorType: e, mode: nextMode })
+    const nextMatrixName = normalizeDisplayMatrixName(e);
+    const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag);
+    const configObj = getConfig({ sensorType: nextMatrixName, mode: nextMode })
     const wasLocal = this.state.local;
 
     // 1. 先停止回放，确保后端不再发送旧数据
@@ -2764,7 +2899,7 @@ class Home extends React.Component {
     // 2. 关闭所有串口，确保切换前旧串口完全停止
     this.wsSendObj({ sitClose: true, backClose: true, headClose: true });
     // 3. 再发送 file 切换，后端切换数据库并重置回放状态
-    this.wsSendObj({ file: e });
+    this.wsSendObj({ file: nextMatrixName });
 
     // 4. 清空前端数据
     this.data.current?.changeData({ meanPres: 0, maxPres: 0, point: 0, area: 0, totalPres: 0, pressure: 0 });
@@ -2778,7 +2913,7 @@ class Home extends React.Component {
     this.progress.current?.resetPlay();
 
     this.setState({
-      matrixName: e,
+      matrixName: nextMatrixName,
       numMatrixFlag: nextMode,
       ...configObj,
       dataArr: [],
@@ -3830,10 +3965,11 @@ class Home extends React.Component {
                       changeSelect={this.changeSelect} />
                   </CanvasCom>
                   :
-                  this.state.numMatrixFlag == "numoriginal" && this.state.matrixName == 'hand' ?
+                  this.state.numMatrixFlag == "numoriginal" && ['hand', 'handSinglePoint', MINZHEN_MATRIX].includes(this.state.matrixName) ?
                   <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
                     <Fast1024
                       ref={this.com}
+                      matrixName={this.state.matrixName}
                       data={this.data}
                       local={this.state.local}
                       handleChartsBody={this.handleChartsBody.bind(this)}
@@ -3911,7 +4047,20 @@ class Home extends React.Component {
                       <CanvasCom matrixName={this.state.matrixName}>
                         <Canvas ref={this.com} changeSelect={this.changeSelect} />
                       </CanvasCom>
-                    ) : this.state.matrixName == "hand" || this.state.matrixName == "handBlue" || this.state.matrixName == "sit" ? (
+                    ) : this.state.matrixName == MINZHEN_MATRIX ? (
+                      <CanvasCom matrixName={this.state.matrixName}
+                        local={this.state.local}
+                      >
+                        <Minzhen
+                          ref={this.com}
+                          data={this.data}
+                          local={this.state.local}
+                          handleChartsBody={this.handleChartsBody.bind(this)}
+                          handleChartsBody1={this.handleChartsBody1.bind(this)}
+                          changeStateData={this.changeStateData}
+                          changeSelect={this.changeSelect} />
+                      </CanvasCom>
+                    ) : this.state.matrixName == "hand" || this.state.matrixName == "handSinglePoint" || this.state.matrixName == "handBlue" || this.state.matrixName == "sit" ? (
                       <CanvasCom matrixName={this.state.matrixName}
                         local={this.state.local}
                       >

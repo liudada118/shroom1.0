@@ -171,37 +171,39 @@ export default React.forwardRef((props, refs) => {
     let press = dataArr.reduce((a, b) => a + b, 0)
     // press = pressTommhg(press, point)
     const mean = press / (point == 0 ? 1 : point)
-    props.data.current?.changeData({
-      meanPres: mean.toFixed(2),
-      maxPres: max,
-      point: point,
-      // area: areaSmooth.toFixed(0),
-      totalPres: press,
-      // pressure: pressureSmooth.toFixed(2),
-    });
+    if (props.matrixName !== 'minzhen') {
+      props.data.current?.changeData({
+        meanPres: mean.toFixed(2),
+        maxPres: max,
+        point: point,
+        // area: areaSmooth.toFixed(0),
+        totalPres: press,
+        // pressure: pressureSmooth.toFixed(2),
+      });
 
-    if (totalArr.length < 20) {
-      totalArr.push(press);
-    } else {
-      totalArr.shift();
-      totalArr.push(press);
+      if (totalArr.length < 20) {
+        totalArr.push(press);
+      } else {
+        totalArr.shift();
+        totalArr.push(press);
+      }
+
+      const maxTotal = findMax(totalArr);
+
+      if (!local)
+        props.data.current?.handleCharts(totalArr, maxTotal + 1000);
+
+      if (totalPointArr.length < 20) {
+        totalPointArr.push(point);
+      } else {
+        totalPointArr.shift();
+        totalPointArr.push(point);
+      }
+
+      const max1 = findMax(totalPointArr);
+      if (!local)
+        props.data.current?.handleChartsArea(totalPointArr, max1 + 100);
     }
-
-    const maxTotal = findMax(totalArr);
-
-    if (!local)
-      props.data.current?.handleCharts(totalArr, maxTotal + 1000);
-
-    if (totalPointArr.length < 20) {
-      totalPointArr.push(point);
-    } else {
-      totalPointArr.shift();
-      totalPointArr.push(point);
-    }
-
-    const max1 = findMax(totalPointArr);
-    if (!local)
-      props.data.current?.handleChartsArea(totalPointArr, max1 + 100);
 
 
   }

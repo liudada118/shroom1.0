@@ -29,6 +29,9 @@ const HUMAN_BODY_DEFAULT_COLOR = 1555
 const HUMAN_BODY_DEFAULT_SIZE = 31
 const HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES = [1205, 5000]
 const HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES = [20, 60]
+const MINZHEN_NORMAL_DEFAULT_COLOR = 415
+const MINZHEN_RAW_DEFAULT_COLOR = 25
+const MINZHEN_OLD_DEFAULT_COLOR_VALUES = [1205]
 
 const canvasToPngBlob = (canvas) => new Promise((resolve) => {
   if (!canvas || typeof canvas.toBlob !== 'function') {
@@ -60,10 +63,19 @@ const titleInitConfig = {
   bed: { valueg1: 2, valuej1: 1205, valuel1: 5, valuef1: 6, value1: 0.72 },
   smallBed12B: { valueg1: 2, valuej1: 2205, valuel1: 5, valuef1: 6, value1: 0.1 },
   wholeChair: { valueg1: 2, valuej1: 25, valuel1: 4, valuef1: 6, value1: 15, valuelInit1: 500 },
+  minzhen: { valueg1: 2, valuej1: MINZHEN_NORMAL_DEFAULT_COLOR, valuel1: 5, valuef1: 6, value1: 0.72, valuelInit1: 500 },
   petCare: { valueg1: 2, valuej1: 2900, valuel1: 5, valuef1: 6, value1: 0.7, valuelInit1: 500 },
   petCareMini: { valueg1: 2, valuej1: 2900, valuel1: 5, valuef1: 6, value1: 0.7, valuelInit1: 500 },
   sit: { valueg1: 4.3, valuej1: 1705, valuel1: 11, valuef1: 14, value1: 3.54 },
   humanBody: { valueg1: 2, valuej1: HUMAN_BODY_DEFAULT_COLOR, valuel1: 5, valuef1: 6, value1: 0.72, sizeValue: HUMAN_BODY_DEFAULT_SIZE },
+}
+titleInitConfig.minzhen__normal = {
+  ...titleInitConfig.minzhen,
+  valuej1: MINZHEN_NORMAL_DEFAULT_COLOR,
+}
+titleInitConfig.minzhen__numoriginal = {
+  ...titleInitConfig.minzhen,
+  valuej1: MINZHEN_RAW_DEFAULT_COLOR,
 }
 const createDefaultHumanTransform = () => ({
   position: { x: 0, y: 26, z: -9.5 },
@@ -73,6 +85,7 @@ const petCareMatrixTypes_title = ['petCare', 'petCareMini']
 const tempFullBedType_title = 'tempFullBed'
 const smallBed12BType_title = 'smallBed12B'
 const wholeChairType_title = 'wholeChair'
+const minzhenType_title = 'minzhen'
 const tactileGloveTypes_title = ['hand0205', 'handGlove115200', 'handGloveFullPacket']
 const fullPacketGloveType_title = 'handGloveFullPacket'
 const calibratableGloveTypes_title = tactileGloveTypes_title.filter((type) => type !== fullPacketGloveType_title)
@@ -94,13 +107,27 @@ const normalizeHumanBodySizeValue = (sizeValue) => {
   return Math.min(200, Math.max(1, nextValue));
 }
 
+const hasModeColorConfig = ({ sensorType, mode }) => {
+  if (!mode) {
+    return false
+  }
+  const config = JSON.parse(localStorage.getItem('valueConfig'))
+  const modeConfig = config?.[`${sensorType}__${mode}`]
+  return modeConfig && Object.prototype.hasOwnProperty.call(modeConfig, 'valuej1')
+}
+
 /**
  * Get merged config from localStorage cache, supporting sensorType + mode two-dimensional cache.
  */
 const getConfig = ({ sensorType, mode }) => {
   if (!sensorType) return titleInitConfig['bed']
   const realType = matrixNameToType_title(sensorType)
-  const init = titleInitConfig[realType] ? titleInitConfig[realType] : titleInitConfig['bed']
+  const modeDefaultKey = mode ? `${realType}__${mode}` : ''
+  const init = modeDefaultKey && titleInitConfig[modeDefaultKey]
+    ? titleInitConfig[modeDefaultKey]
+    : titleInitConfig[realType]
+      ? titleInitConfig[realType]
+      : titleInitConfig['bed']
   let config = JSON.parse(localStorage.getItem('valueConfig'))
   if (!config) return { ...init }
   let result = {}
@@ -122,6 +149,17 @@ const getConfig = ({ sensorType, mode }) => {
       mergedConfig.sizeValue = HUMAN_BODY_DEFAULT_SIZE
     }
     mergedConfig.sizeValue = normalizeHumanBodySizeValue(mergedConfig.sizeValue)
+  }
+  if (realType === minzhenType_title) {
+    const modeDefaultColor = mode === 'numoriginal' ? MINZHEN_RAW_DEFAULT_COLOR : MINZHEN_NORMAL_DEFAULT_COLOR
+    const hasExplicitModeColor = hasModeColorConfig({ sensorType: realType, mode })
+    const currentColor = Number(mergedConfig.valuej1)
+    if (
+      MINZHEN_OLD_DEFAULT_COLOR_VALUES.includes(currentColor) ||
+      (mode === 'numoriginal' && !hasExplicitModeColor && currentColor === MINZHEN_NORMAL_DEFAULT_COLOR)
+    ) {
+      mergedConfig.valuej1 = modeDefaultColor
+    }
   }
   return mergedConfig
 }
@@ -756,7 +794,7 @@ class Title extends React.Component {
     const cacheMode = mode; // mode dimension for cache
 
     // Sensor type groups
-    const group1 = ['hand', 'normal', 'footVideo', 'smallBed', smallBed12BType_title, wholeChairType_title, 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', 'bed4096', 'bed4096num']; // 3D point scene / WebGL heatmap
+    const group1 = ['hand', 'handSinglePoint', 'normal', 'footVideo', 'smallBed', smallBed12BType_title, wholeChairType_title, minzhenType_title, 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', 'bed4096', 'bed4096num']; // 3D point scene / WebGL heatmap
     const group2 = ['robot1', 'robotSY', 'robotLCF']; // Robots
     const group3 = tactileGloveTypes_title; // Tactile gloves
     const group4 = ['fast256', 'fast1024']; // High-speed
@@ -778,7 +816,7 @@ class Title extends React.Component {
       showFilter = true;
       showHumanTransform = true;
     } else if (group1.includes(matrixName)) {
-      if (mode === 'numoriginal' && ['hand', 'bed4096', 'bed4096num'].includes(matrixName)) {
+      if (mode === 'numoriginal' && ['hand', 'handSinglePoint', 'bed4096', 'bed4096num'].includes(matrixName)) {
         // hand / bed4096 / bed4096num raw data mode: only color and filter
         showColor = true;
         showFilter = true;
@@ -1139,8 +1177,10 @@ class Title extends React.Component {
       { label: t('sensorPetCare'), value: 'petCare' },
       { label: t('sensorPetCareMini'), value: 'petCareMini' },
       { label: t('sensorWholeChair'), value: wholeChairType_title },
+      { label: t('sensorMinzhen'), value: minzhenType_title },
       { label: t('sensorFast256'), value: 'fast256' },
       { label: t('sensorFast1024'), value: 'fast1024' },
+      { label: t('sensorHandSinglePoint'), value: 'handSinglePoint' },
       { label: t('sensorNormal'), value: 'normal' },
       { label: t('smallBed'), value: 'smallBed' },
       { label: t('sensorHumanBody'), value: 'humanBody' },
@@ -1162,7 +1202,16 @@ class Title extends React.Component {
       },
     ];
 
-    const carItems = [
+    const carItems = this.props.matrixName === minzhenType_title ? [
+      {
+        label: t('all'),
+        key: 'all',
+      },
+      {
+        label: t('sit'),
+        key: 'sit',
+      },
+    ] : [
       {
         label: t('all'),
         key: 'all',
@@ -1179,6 +1228,7 @@ class Title extends React.Component {
         key: 'head',
       },
     ];
+    const isMinzhenAnimationMode = this.props.matrixName === minzhenType_title && this.props.numMatrixFlag === 'normal';
     // console.log('title')
     return <div className="title">
       {/* <h2>bodyta</h2> */}
@@ -1221,7 +1271,7 @@ class Title extends React.Component {
         }
 
         <Menu className='menu' onClick={this.onClick} selectedKeys={[this.state.current]} mode="horizontal" items={navItems} />
-        {this.props.matrixName != 'localCar' ? this.props.history === 'now' ? this.props.matrixName != 'car' && this.props.matrixName != 'car10' && this.props.matrixName != 'sofa' && this.props.matrixName != 'yanfeng10' && this.props.matrixName != 'volvo' && this.props.matrixName != 'carQX' && this.props.matrixName != wholeChairType_title && this.props.matrixName != 'hand0507' && !tactileGloveTypes_title.includes(this.props.matrixName) && this.props.matrixName != 'footVideo' && this.props.matrixName != 'eye' ? <><Select
+        {this.props.matrixName != 'localCar' ? this.props.history === 'now' ? this.props.matrixName != 'car' && this.props.matrixName != 'car10' && this.props.matrixName != 'sofa' && this.props.matrixName != 'yanfeng10' && this.props.matrixName != 'volvo' && this.props.matrixName != 'carQX' && this.props.matrixName != wholeChairType_title && this.props.matrixName != minzhenType_title && this.props.matrixName != 'hand0507' && !tactileGloveTypes_title.includes(this.props.matrixName) && this.props.matrixName != 'footVideo' && this.props.matrixName != 'eye' ? <><Select
 
           style={{ marginRight: 6, width: 140 }}
           placeholder={t('chooseSensor')}
@@ -1261,7 +1311,7 @@ class Title extends React.Component {
         </Select>
 
 
-          <Select
+          {this.props.matrixName !== minzhenType_title ? <Select
             // value={this.props.portnameBack}
             placeholder={tactileGloveTypes_title.includes(this.props.matrixName) ? t('chooseRightSensor') : this.props.matrixName == 'footVideo' ? t('chooseRightFootSensor') : t('chooseBackSensor')}
             style={{ marginRight: 6, width: 140 }}
@@ -1285,7 +1335,7 @@ class Title extends React.Component {
 
             options={this.props.port}
           >
-          </Select>
+          </Select> : null}
 
           {this.props.matrixName == 'volvo' || this.props.matrixName == 'carQX' || this.props.matrixName == wholeChairType_title ? <Select
             // value={this.props.portnameBack}
@@ -1348,7 +1398,7 @@ class Title extends React.Component {
 
 
 
-        {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'normal', 'smallBed', smallBed12BType_title, 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody'].includes(this.props.matrixName) ?
+        {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'handSinglePoint', 'normal', 'smallBed', smallBed12BType_title, 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody'].includes(this.props.matrixName) ?
           <Select
             defaultValue={this.props.numMatrixFlag}
             style={{ width: 90 }}
@@ -1401,7 +1451,7 @@ class Title extends React.Component {
             ] : this.props.matrixName === tempFullBedType_title ? [
               { value: 'normal', label: t('modal3D') },
               { value: 'numoriginal', label: t('rawData') },
-            ] : ['hand', 'normal', 'smallBed', smallBed12BType_title, 'jqbed', 'petCare', 'petCareMini', 'daliegu', 'smallSample'].includes(this.props.matrixName) ? [
+            ] : ['hand', 'handSinglePoint', 'normal', 'smallBed', smallBed12BType_title, 'jqbed', 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample'].includes(this.props.matrixName) ? [
               { value: 'normal', label: t('modal3D') },
               { value: 'numoriginal', label: t('rawData') },
             ] : this.props.matrixName == 'bed4096' || this.props.matrixName == 'bed4096num' ? [
@@ -1609,7 +1659,7 @@ class Title extends React.Component {
         />
 
 
-        {this.props.matrixName == 'car' || this.props.matrixName == 'car10' || this.props.matrixName == 'localCar' || this.props.matrixName == 'yanfeng10' || this.props.matrixName == 'volvo' ?
+        {this.props.matrixName == 'car' || this.props.matrixName == 'car10' || this.props.matrixName == 'localCar' || this.props.matrixName == 'yanfeng10' || this.props.matrixName == 'volvo' || isMinzhenAnimationMode ?
 
 
           <Menu className='menu' onClick={this.onCarClick} selectedKeys={[this.state.carCurrent]} mode="horizontal" items={carItems} />
