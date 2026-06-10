@@ -115,6 +115,8 @@ const transposeSquareMatrix = (data, size = 32) => {
   });
 }
 
+const MINZHEN_ZERO_POINT_INDEXES = [384, 416];
+
 const normalizeMinzhenFrame = (data) => {
   let source = data;
   if (!Array.isArray(source)) {
@@ -135,6 +137,10 @@ const normalizeMinzhenFrame = (data) => {
   while (frame.length < 1024) {
     frame.push(0);
   }
+
+  MINZHEN_ZERO_POINT_INDEXES.forEach((index) => {
+    frame[index] = 0;
+  });
 
   return frame;
 }
@@ -2357,6 +2363,8 @@ export const sitTypeEvent = {
       that.com.current.chartReset()
       // timeflag = 0
     }
+  }, smallBedNoAlg({ that, wsPointData, compen }) {
+    return this.smallBed({ that, wsPointData, compen });
   }, smallBed12B({ that, wsPointData }) {
     if (that.state.numMatrixFlag == "numoriginal") {
       that.com.current?.changeWsDataRaw(transposeSquareMatrix(wsPointData));

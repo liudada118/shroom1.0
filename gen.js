@@ -13,7 +13,7 @@ const ALL_SENSOR_TYPES = [
   'yanfeng10', 'foot', 'carQX', 'wholeChair', 'volvo', 'car', 'car10',
   'jqbed', 'petCare', 'petCareMini', 'matCol', 'matColPos', 'carCol', 'newHand',
   'tempFullBed',
-  'smallBed', 'xiyueReal1', 'gloves', 'gloves1', 'gloves2',
+  'smallBed', 'smallBedNoAlg', 'xiyueReal1', 'gloves', 'gloves1', 'gloves2',
   'hand0205Point', 'hand0205Point147', 'ware', 'robot',
   'handVideo', 'handVideo1', 'bed1616', 'footVideo256',
   'bed4096', 'bed4096num', 'fast1024sit', 'car100',

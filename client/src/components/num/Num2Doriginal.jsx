@@ -46,7 +46,7 @@ function genNewArrMatrix(arr, width, height) {
     return res
 }
 
-const RAW_TRANSPOSE_MATRIX_TYPES = new Set(['jqbed', 'smallBed', 'smallBed12B'])
+const RAW_TRANSPOSE_MATRIX_TYPES = new Set(['jqbed', 'smallBed', 'smallBedNoAlg', 'smallBed12B'])
 
 function transposeSquareMatrixData(data, size) {
     if (!Array.isArray(data) || data.length !== size * size) {

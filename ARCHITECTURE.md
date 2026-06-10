@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-06-05
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-06-10
 
 ## 1. 项目概述
 
@@ -329,9 +329,18 @@ graph TD
 | 2026-06-05 | Codex | 触觉手套2双手自动连接与单 CSV | `Title.jsx` 为 `hand0205Double` 增加“一键连接双手套”，`server.js` 自动打开两个手套串口并按包内第二个字节 `01/02` 分流左右手；`hand0205Double.jsx` 恢复单手套可见视角和 5 倍模型缩放；CSV 下载改为单个 `触觉手套2...csv` / `glove2...csv` 同时包含左右手数据。 |
 | 2026-06-05 | Codex | 恢复触觉手套2入口 | `Title.jsx` 主传感器下拉重新展示 `hand0205Double` / 触觉手套2，`License.jsx` 精密分组和模块配置同步恢复该授权项；双手 3D 渲染、后端协议和 CSV 链路继续复用已有实现。 |
 | 2026-06-05 | Codex | 隐藏触觉手套2展示入口 | `Title.jsx` 从主传感器下拉、手套展示类型集合和专属一键连接按钮移除 `hand0205Double`，`Home.jsx` 过滤授权/切换输入并将直接切换到该 key 的请求回退到 `hand0205`，保留后端协议和历史兼容逻辑。 |
+| 2026-06-05 | Codex | 新增后端 SDK 骨架 | 新增 `sdk/` 后端能力包，将授权、系统配置、串口识别/读取、协议解析、清零、采集入库、历史回放、CSV 导出和报告生成适配拆成独立模块；SDK 暂不改动现有 `server.js` 主运行链路，可供新孵化系统直接接入。 |
 | 2026-06-05 | Codex | 轮椅原始数据模式隐藏动画切换栏 | `Title.jsx` 中轮椅 `minzhen` 的“整体/座椅”动画切换菜单仅在 `normal` 3D 模型模式显示，切到 `numoriginal` 原始数据模式时隐藏，避免原始数据页出现无效动画入口。 |
 | 2026-06-05 | Codex | 轮椅渲染颜色默认值按模式拆分 | `minzhen` 在 `normal` 3D 模型模式下颜色默认值为 `415`，在 `numoriginal` 原始数据模式下颜色默认值为 `25`；`Home.jsx` 与 `Title.jsx` 的模式配置同步更新，并兼容旧默认 `1205` 的本地缓存迁移。 |
 | 2026-06-05 | Codex | 轮椅模型打包资源修复 | 将 `client/public/model/minzhen/chair.gltf` 及原始素材中的中文 `.bin` 引用改为 ASCII 文件名 `chair.bin`，Vite 构建后 `build/model/minzhen` 会稳定带出模型二进制、贴图和 glTF 资源，避免打包后 GLTFLoader 无法加载中文 buffer URI。 |
+| 2026-06-10 | Codex | Wheelchair temperature/gyroscope serial display | `server.js` adds a dedicated `sensorPort` entry for `minzhen`, fixed at `115200` baud, parsing text frames containing `gyroscope` and `thermistor` into `tempObj`; `Title.jsx` shows a wheelchair-only temperature/gyroscope serial selector, `Home.jsx` tracks `portnameSensor`, and `minzhen.jsx` renders the sensor panel on the right side of the screen. |
+| 2026-06-10 | Codex | Wheelchair gyroscope timestamp parsing fix | `server.js` now searches each semicolon-delimited sensor segment for the actual `yroscope` / `thermistor` key before splitting, so serial monitor prefixes such as `[12:17:11.663]...` no longer cause the gyroscope field to be dropped. |
+| 2026-06-10 | Codex | Wheelchair sensor partial-frame guard | `parseMinzhenSensorFrame` now scans the whole text frame for known sensor field markers and only emits `tempObj` after `gyroscope` has been parsed, preventing temperature-only partial frames from overwriting accelerometer/gyroscope display data. |
+| 2026-06-10 | Codex | Wheelchair matrix dead-point mask and gyro display | `server.js`, `client/src/page/home/util.js`, and `client/src/components/three/minzhen.jsx` now zero Minzhen matrix indexes `384` and `416` during frame normalization / realtime send; the right sensor panel formats accelerometer and gyroscope values as fixed three-value groups so missing or clipped values are visible. |
+| 2026-06-10 | Codex | Wheelchair sensor stream framing fix | `server.js` now treats `yroscope:` as the extra-sensor frame start and `humidity:<number>` as the frame completion point, preserving possible split frame headers in the buffer and avoiding mixed previous-tail / next-head parsing when serial chunks are split or concatenated. |
+| 2026-06-10 | Codex | Wheelchair thermistor raw passthrough | `server.js` keeps Minzhen `thermistor0` / `thermistor1` / `thermistor2` as the raw numeric values parsed from the serial frame; it no longer converts Kelvin-like values to Celsius and no longer applies the previous `1.5` degree outlier mask. |
+| 2026-06-10 | Codex | Wheelchair raw Other Data panel | `Home.jsx` caches the latest `tempObj` so the `numoriginal` Fast1024 raw-data mode also renders the right-side Other Data panel, and the panel icons are hidden from the wheelchair sensor display. |
+| 2026-06-10 | Codex | Wheelchair temperature and humidity display | The Minzhen right-side Other Data panel displays Temperature 0, Temperature 1, Temperature 2, and Humidity in both 3D model mode and raw-data mode using the raw parsed serial values. |
 | 2026-06-05 | Codex | Minzhen 3D 点图方向调整 | `client/src/components/three/minzhen.jsx` 仅在 3D 模型模式的点云坐标投影中逆时针旋转 90 度并做左右镜像，原始数据、CSV、左侧统计、串口解析和模型变换保持不变。 |
 | 2026-06-05 | Codex | Minzhen 显示名称改为轮椅 | 前端 `sensorMinzhen` 中文显示名改为“轮椅”、英文显示名改为 `Wheelchair`，授权配置页标签同步为“轮椅”；内部系统 key 仍为 `minzhen`，协议、模型路径和数据链路不变。 |
 | 2026-06-05 | Codex | 32*32(检测点) 下拉顺序调整 | `Title.jsx` 主传感器下拉框中将 `handSinglePoint` / 32*32(检测点) 移到 `fast1024` / 32*32高速 后面，系统 key、授权分组和渲染逻辑保持不变。 |
@@ -612,6 +621,16 @@ graph TD
 | 2026-06-05 | Codex | 新增功能 | `hand0205Double` / 触觉手套2新增一键连接双手套，后端自动打开两个可用手套串口，并按包内第二个字节 `01=左手`、`02=右手` 分流；双手套 CSV 下载改为一个文件同时包含左右手数据。 |
 | 2026-06-05 | Codex | 修复缺陷 | 修复 `hand0205Double.jsx` 双手模型默认不可见或过小的问题：恢复单手套相机/Group 可见参数，并保持左右手模型 5 倍缩放与右手镜像。 |
 | 2026-06-05 | Codex | 配置变更 | 恢复 `hand0205Double` / 触觉手套2 在主传感器下拉和授权配置页中的入口，模块配置与普通触觉手套保持一致。 |
+| 2026-06-05 | Codex | 新增功能 | 新增 `sdk/` 后端 SDK：覆盖授权、系统配置、串口、协议、清零、采集、回放、导出和报告适配等后端操作域，作为新孵化系统的后端能力底座。 |
+| 2026-06-10 | Codex | 新增功能 | 轮椅 `minzhen` 新增温度/陀螺仪专用串口：前端新增“温度陀螺仪串口”下拉并发送 `sensorPort`，后端以 `115200` 波特率打开 `portSensor`，解析 `gyroscope` / `thermistor` 文本帧为 `tempObj`，并在 `minzhen.jsx` 右侧展示。 |
+| 2026-06-10 | Codex | 修复缺陷 | 修复温度/陀螺仪串口文本前带时间戳时加速度和陀螺仪不显示的问题：后端不再按字段中的第一个冒号切 key，而是优先定位真实的 `yroscope:` / `thermistor:` 字段。 |
+| 2026-06-10 | Codex | 修复缺陷 | 修复温度/陀螺仪串口半帧覆盖问题：后端改为整帧扫描字段，并且只有解析到 `gyroscope` 后才下发 `tempObj`，避免 WS 出现只有温湿度而没有加速度/陀螺仪。 |
+| 2026-06-10 | Codex | 配置变更 | 轮椅 `minzhen` 矩阵在后端实时发送/入库和前端归一化时均固定将数组下标 `384` 和 `416` 置为 `0`，并优化右侧传感器面板的加速度/陀螺仪三轴数据显示宽度。 |
+| 2026-06-10 | Codex | 修复缺陷 | 修复温度/陀螺仪串口分包/粘包导致 `yroscope` 读取混乱的问题：后端按 `yroscope:` 帧头和 `humidity:<number>` 帧尾切出完整帧后再解析，并保留可能被拆开的下一帧头残片。 |
+| 2026-06-10 | Codex | 配置变更 | 轮椅温度解析改为原始数值透传：温度0/1/2 不再做开尔文转摄氏度，也不再执行温差离群清零过滤。 |
+| 2026-06-10 | Codex | 配置变更 | 轮椅温湿度串口下发的 `thermistor0`、`thermistor1`、`thermistor2` 和 `humidity` 均保留原始解析数值并展示到右侧 Other Data 面板。 |
+| 2026-06-10 | Codex | 配置变更 | 轮椅温度/陀螺仪数据保留串口原始温湿度数值；`Home.jsx` 缓存最新 `tempObj`，使原始数据 `numoriginal` 模式也显示右侧 Other Data 面板，并去掉该面板的图标。 |
+| 2026-06-10 | Codex | 配置变更 | 轮椅右侧 Other Data 面板在 3D 和原始数据模式下均展示温度0、温度1、温度2和湿度，数值直接来自温湿度串口解析结果。 |
 | 2026-06-05 | Codex | 配置变更 | 轮椅 `minzhen` 的“整体/座椅”动画切换栏改为仅在 3D 模型 `normal` 模式显示，原始数据 `numoriginal` 模式隐藏。 |
 | 2026-06-05 | Codex | 配置变更 | 轮椅 `minzhen` 渲染颜色默认值按模式拆分：3D 模型 `normal` 为 `415`，原始数据 `numoriginal` 为 `25`，并对旧默认 `1205` 做本地缓存迁移。 |
 | 2026-06-05 | Codex | 修复缺陷 | 修复轮椅系统打包后模型无法加载的问题：`chair.gltf` 的 buffer URI 从中文文件名改为 `chair.bin`，并同步重命名 `client/public/model/minzhen` 与原始素材目录中的 `.bin` 文件。 |
@@ -925,10 +944,23 @@ graph TD
 - `minzhen.jsx` keeps the Group/Point/Scale/Size transform defaults internally and persists them in `localStorage` under `minzhenPointTransformV4`, but the in-scene right-side transform panel is hidden in the runtime UI. The V4 key intentionally ignores older cached Minzhen point settings so the default loads as Group (3, 97, 92), Point (-1, -38, 12), Scale (0.0054, 0.0029, 0.0054), and Size 0.77.
 - The `minzhen` data path updates the left Aside pressure and area panels from raw 32x32 pressure frames, including total pressure, point count, area, and the pressure/area trend canvases.
 - `sitTypeEvent.minzhen` is the single source for left Aside pressure and area statistics in both 3D model mode and raw-data mode. The `minzhen.jsx` 3D renderer and the `Fast1024` raw-data renderer do not overwrite these Aside statistics, so both modes show the same chart values for the same hardware frame.
+- Minzhen frame normalization masks matrix indexes `384` and `416` to `0` in `server.js` before realtime send/storage and again in frontend normalization before statistics, raw-data display, and 3D point rendering.
 - The shared `Aside` panel has an explicit z-index, and the `minzhen` WebGL canvas is mounted at z-index 0, so the left pressure/area visualization remains visible above the 3D model canvas.
 - In `minzhen` raw-data mode, `Home.jsx` routes the system through the same `Fast1024` renderer used by the existing hand detection raw-data mode. `sitTypeEvent.minzhen` normalizes incoming frames to 1024 numeric values and calls `changeWsDataRaw(...)`; in 3D model mode, the same normalized frame is passed to `minzhen.jsx` through `sitData(...)`.
 - In `minzhen` 3D model mode, `minzhen.jsx` rotates only the seat pressure point-cloud coordinate projection counterclockwise by 90 degrees and mirrors it left-right through `getSitPointPosition(...)`; raw-data mode, CSV data, Aside statistics, serial parsing, and the chair model transform are unchanged.
 - Main pressure serial port uses the same `jqbed` line order as the existing 1024 hand detection path.
 - The `minzhen` title bar now exposes only the main seat pressure serial selector. The back serial selector remains available for other two-port systems but is hidden for `minzhen`.
 - `minzhen.jsx` exposes `actionSit` / `actionAll` like the existing car-style 3D components. The title bar shows a simplified `all` / `sit` view menu for `minzhen`; `actionSit` animates the pressure point cloud from the previous/all-view Point transform into an isolated seat view at Point (2, 61, 147) and removes the chair model from the Three.js group, while `actionAll` stops any previous point tween, restores the saved all-view Point transform, and adds the chair model back to the group with all child nodes visible. The chair model is stored in `chairRef.current` instead of a render-local variable, so it remains available after `setPointTransform(...)` causes React to re-render. `actionSit` changes only Point position; Group, Scale, and Size remain at the default/current all-view values. The seat-view Point value is synchronized to the slider panel after animation completion but is not persisted to `localStorage`. The previous continuous pressure-center seat tilt animation is not used.
-- Extra sensor text parsing remains available in `server.js`; frames containing `gyroscope` and `thermistor` are parsed into `tempObj`, with `angle_fb` and `angle_lr` derived from gyroscope values divided by `15000`.
+- Extra sensor text parsing now uses the wheelchair-only `sensorPort` path. `Title.jsx` sends the selected temperature/gyroscope port as `sensorPort`; `server.js` opens it as `portSensor` at `115200` baud, buffers incoming text, tolerates noisy prefixes around `gyroscope`, scans the whole text frame for known sensor field markers so timestamp prefixes such as `[12:17:11.663]` do not swallow the gyroscope field, and now frames the stream by `yroscope:` start plus `humidity:<number>` completion before parsing to avoid split/concatenated serial chunks mixing previous frame tails with the next frame. It parses `thermistor0` / `thermistor1` / `thermistor2` and `humidity` frames into `tempObj` as raw numeric serial values, and derives `angle_fb` / `angle_lr` from gyroscope values divided by `15000`. `tempObj` is emitted only after `gyroscope` has six numeric values and temperature/humidity fields are present, preventing partial frames from overwriting the accelerometer/gyroscope display. `minzhen.jsx` renders the right-side Other Data panel in 3D mode, and `Home.jsx` caches the latest `tempObj` so `numoriginal` raw-data mode renders the same panel beside `Fast1024`; the panel shows accelerometer, gyroscope, temperature 0/1/2, humidity, and front-back / left-right spine angles without the previous row icons. Accelerometer and gyroscope values are formatted as three-value groups, labels switch between Chinese and English through `react-i18next`, and values are blank until the first `tempObj` frame arrives.
+- Wheelchair extra-sensor display now passes through raw parsed thermistor and humidity numbers: `thermistor0`, `thermistor1`, `thermistor2`, and `humidity` are all shown in the right-side Other Data panel in both 3D model mode and raw-data mode. `server.js` no longer forces `thermistor2` to `0`, no longer converts Kelvin-like thermistor values to Celsius, and no longer applies the previous `1.5` degree outlier mask.
+
+## 2026-06-10 Small Bed Detection Types
+
+- Added `smallBedNoAlg` as the "小床检测(数据)" / `Small Bed Detection(Data)` system type.
+- The existing `smallBed` key remains only for legacy compatibility and is not exposed as a selectable system entry.
+- `smallBedNoAlg` reuses the existing `smallBed` serial protocol: one pressure serial port, default `1000000` baud, 1024 bytes per frame, 32x32 matrix, and the same `jqbed(pointArr)` line-order conversion.
+- `smallBedNoAlg` reuses the existing `SmallBed` 3D renderer, Pressure Area chart, Pressure Data chart, and `normal` / `numoriginal` modes.
+- `smallBedNoAlg` uses the same raw 32x32 pressure frame for left-side Pressure Data / Pressure Area statistics in both `normal` 3D mode and `numoriginal` raw-data mode. The 3D renderer no longer calculates these Aside values from interpolated or Gaussian-smoothed point data.
+- `smallBedNoAlg` is intentionally excluded from `VITAL_SIGNS_SYSTEM_TYPES` and the `['jqbed', 'smallBed']` Python algorithm timer condition, so it does not call the algorithm package and does not show the vital-signs panel.
+- Raw matrix display and CSV/raw-data handling treat `smallBedNoAlg` like `jqbed` / `smallBed`: 32x32 data is transposed on the raw display/export path to keep the small-bed matrix direction consistent.
+- License configuration exposes `smallBedNoAlg` (`小床检测(数据)`) with `normal` and `numoriginal` module options; the legacy `smallBed` key is not listed as an authorization sensor entry.

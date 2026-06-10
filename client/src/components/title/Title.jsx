@@ -83,6 +83,7 @@ const createDefaultHumanTransform = () => ({
 })
 const petCareMatrixTypes_title = ['petCare', 'petCareMini']
 const tempFullBedType_title = 'tempFullBed'
+const smallBedNoAlgType_title = 'smallBedNoAlg'
 const smallBed12BType_title = 'smallBed12B'
 const wholeChairType_title = 'wholeChair'
 const minzhenType_title = 'minzhen'
@@ -90,7 +91,7 @@ const tactileGloveTypes_title = ['hand0205', 'handGlove115200', 'handGloveFullPa
 const fullPacketGloveType_title = 'handGloveFullPacket'
 const calibratableGloveTypes_title = tactileGloveTypes_title.filter((type) => type !== fullPacketGloveType_title)
 const isPetCareMatrixTitle = (type) => petCareMatrixTypes_title.includes(type)
-const bedArr_title = ['bigBed', 'smallBed', smallBed12BType_title, 'bed4096', 'bed4096num', 'matCol', 'matColPos', 'jqbed', tempFullBedType_title, ...petCareMatrixTypes_title]
+const bedArr_title = ['bigBed', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'bed4096', 'bed4096num', 'matCol', 'matColPos', 'jqbed', tempFullBedType_title, ...petCareMatrixTypes_title]
 const matrixNameToType_title = (type) => type === smallBed12BType_title ? type : isPetCareMatrixTitle(type) ? type : bedArr_title.includes(type) ? 'bed' : type
 const getColorSliderMax = (matrixName) => {
   if (matrixName === smallBed12BType_title) return 4000
@@ -794,7 +795,7 @@ class Title extends React.Component {
     const cacheMode = mode; // mode dimension for cache
 
     // Sensor type groups
-    const group1 = ['hand', 'handSinglePoint', 'normal', 'footVideo', 'smallBed', smallBed12BType_title, wholeChairType_title, minzhenType_title, 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', 'bed4096', 'bed4096num']; // 3D point scene / WebGL heatmap
+    const group1 = ['hand', 'handSinglePoint', 'normal', 'footVideo', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, wholeChairType_title, minzhenType_title, 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', 'bed4096', 'bed4096num']; // 3D point scene / WebGL heatmap
     const group2 = ['robot1', 'robotSY', 'robotLCF']; // Robots
     const group3 = tactileGloveTypes_title; // Tactile gloves
     const group4 = ['fast256', 'fast1024']; // High-speed
@@ -1172,6 +1173,7 @@ class Title extends React.Component {
       { label: t('sensorBed4096num'), value: 'bed4096num' },
       { label: t('sensorBed4096'), value: 'bed4096' },
       { label: t('sensorJqbed'), value: 'jqbed' },
+      { label: t('sensorSmallBedNoAlg'), value: smallBedNoAlgType_title },
       { label: t('sensorSmallBed12B'), value: smallBed12BType_title },
       { label: '温度全床系统', value: tempFullBedType_title },
       { label: t('sensorPetCare'), value: 'petCare' },
@@ -1182,7 +1184,6 @@ class Title extends React.Component {
       { label: t('sensorFast1024'), value: 'fast1024' },
       { label: t('sensorHandSinglePoint'), value: 'handSinglePoint' },
       { label: t('sensorNormal'), value: 'normal' },
-      { label: t('smallBed'), value: 'smallBed' },
       { label: t('sensorHumanBody'), value: 'humanBody' },
     ]
 
@@ -1253,7 +1254,8 @@ class Title extends React.Component {
             this.props.changeStateData({
               portname: '',
               portnameBack: '',
-              portnameHead: ''
+              portnameHead: '',
+              portnameSensor: ''
             })
             this.props.wsSendObj({ serialReset: true })
           }}
@@ -1309,6 +1311,23 @@ class Title extends React.Component {
           options={this.props.port}
         >
         </Select>
+
+
+          {this.props.matrixName === minzhenType_title ? <Select
+            placeholder='温度陀螺仪串口'
+            style={{ marginRight: 6, width: 160 }}
+            value={this.props.portnameSensor ? `${this.props.portnameSensor}(温度陀螺仪)` : undefined}
+            onOpenChange={() => {
+              this.props.wsSendObj({ serialReset: true })
+            }}
+            onSelect={(e) => {
+              console.log(e);
+              this.props.wsSendObj({ sensorPort: e })
+              this.props.changeStateData({ portnameSensor: e })
+            }}
+            options={this.props.port}
+          >
+          </Select> : null}
 
 
           {this.props.matrixName !== minzhenType_title ? <Select
@@ -1398,7 +1417,7 @@ class Title extends React.Component {
 
 
 
-        {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'handSinglePoint', 'normal', 'smallBed', smallBed12BType_title, 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody'].includes(this.props.matrixName) ?
+        {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'handSinglePoint', 'normal', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody'].includes(this.props.matrixName) ?
           <Select
             defaultValue={this.props.numMatrixFlag}
             style={{ width: 90 }}
@@ -1451,7 +1470,7 @@ class Title extends React.Component {
             ] : this.props.matrixName === tempFullBedType_title ? [
               { value: 'normal', label: t('modal3D') },
               { value: 'numoriginal', label: t('rawData') },
-            ] : ['hand', 'handSinglePoint', 'normal', 'smallBed', smallBed12BType_title, 'jqbed', 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample'].includes(this.props.matrixName) ? [
+            ] : ['hand', 'handSinglePoint', 'normal', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'jqbed', 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample'].includes(this.props.matrixName) ? [
               { value: 'normal', label: t('modal3D') },
               { value: 'numoriginal', label: t('rawData') },
             ] : this.props.matrixName == 'bed4096' || this.props.matrixName == 'bed4096num' ? [
@@ -1630,13 +1649,15 @@ class Title extends React.Component {
           this.props.wsSendObj({
             sitClose: true,
             backClose: true,
-            headClose: true
+            headClose: true,
+            sensorClose: true
           })
           // 清空前端串口选择状态
           this.props.changeStateData({
             portname: '',
             portnameBack: '',
-            portnameHead: ''
+            portnameHead: '',
+            portnameSensor: ''
           })
         }} className='titleButton'>
           {t('closeSensor')}

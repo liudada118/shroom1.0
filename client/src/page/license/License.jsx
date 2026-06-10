@@ -58,6 +58,7 @@ const SENSOR_GROUPS = [
     group: '定制',
     icon: '⚙️',
     items: [
+      { label: '小床检测(数据)', value: 'smallBedNoAlg' },
       { label: '小床检测(12B)', value: 'smallBed12B' },
       { label: '温度全床系统', value: 'tempFullBed' },
       { label: '整椅展示', value: 'wholeChair' },
@@ -173,6 +174,10 @@ const SENSOR_MODULES = {
     { value: 'numoriginal', label: '原始数据' },
   ],
   smallBed: [
+    { value: 'normal', label: '3D模型' },
+    { value: 'numoriginal', label: '原始数据' },
+  ],
+  smallBedNoAlg: [
     { value: 'normal', label: '3D模型' },
     { value: 'numoriginal', label: '原始数据' },
   ],

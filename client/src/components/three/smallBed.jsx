@@ -26,6 +26,7 @@ import {
 import './index.scss'
 import { calculatePressure, press, pressSmallBed } from "../../assets/util/line";
 
+const RAW_ASIDE_MATRIX_TYPES = new Set(['smallBed12B', 'smallBedNoAlg']);
 
 
 const Canvas = React.forwardRef((props, refs) => {
@@ -113,6 +114,23 @@ let isShiftPressed = false;
   const CMD_KEY = 91;
   const AMOUNTX = baseAmountX * xStretch;
   const AMOUNTY = baseAmountY;
+  const isSmallBedNoAlg = () => props.matrixName === 'smallBedNoAlg';
+  const isRawAsideDataMatrix = () => RAW_ASIDE_MATRIX_TYPES.has(props.matrixName);
+  const getRawAsideData = () => (isSmallBedNoAlg() ? [...newData1] : [...ndata1]);
+  const getAsidePointThreshold = () => {
+    if (isSmallBedNoAlg()) return 0;
+    if (isRawAsideDataMatrix()) return 10;
+    return valuej1 * 0.025;
+  };
+  const getAsidePressDivisor = () => (isRawAsideDataMatrix() ? 1 : 10);
+  const getAsideChartLimit = () => (isSmallBedNoAlg() ? 60 : 20);
+  const getPressureChartData = () => (
+    isSmallBedNoAlg()
+      ? totalArrRef.current.map((a) => (a - 1 > 0 ? a - 1 : 0))
+      : totalArrRef.current
+  );
+  const getPressureChartPadding = () => (isSmallBedNoAlg() ? 20 : 1000);
+  const getAreaChartPadding = () => (isSmallBedNoAlg() ? 20 : 100);
 
   const SEPARATION = 100;
   // let group = new THREE.Group();
@@ -617,14 +635,14 @@ let isShiftPressed = false;
     var T = clock.getDelta();
     timeS = timeS + T;
     
-      const useRawAsideData = props.matrixName === 'smallBed12B'
+      const useRawAsideData = isRawAsideDataMatrix()
       if (useRawAsideData) {
-        dataArrRef.current = [...ndata1]
+        dataArrRef.current = getRawAsideData()
       }
-      dataArrRef.current = dataArrRef.current.filter((a) => a > (useRawAsideData ? 10 : valuej1 * 0.025))
+      dataArrRef.current = dataArrRef.current.filter((a) => a > getAsidePointThreshold())
       const max = findMax(dataArrRef.current)
       const point = dataArrRef.current.filter((a) => a > 0).length
-      const press = Math.round(dataArrRef.current.reduce((a, b) => a + b, 0) / (useRawAsideData ? 1 : 10))
+      const press = Math.round(dataArrRef.current.reduce((a, b) => a + b, 0) / getAsidePressDivisor())
       const mean = press / (point == 0 ? 1 : point)
       const realPoint = useRawAsideData ? point : ndata1.filter((a) => a > 0).length
 
@@ -638,7 +656,7 @@ let isShiftPressed = false;
         pressure: press / (realPoint || 1)//calculatePressure(press/realPoint)
       });
 
-      if (totalArrRef.current.length < 20) {
+      if (totalArrRef.current.length < getAsideChartLimit()) {
          totalArrRef.current.push(press);
       } else {
          totalArrRef.current.shift();
@@ -650,7 +668,7 @@ let isShiftPressed = false;
       // if (!props.local)
       //   props.data.current?.handleCharts(totalArr, maxTotal + 1000);
 
-      if (totalPointArr.length < 20) {
+      if (totalPointArr.length < getAsideChartLimit()) {
         totalPointArr.push(point);
       } else {
         totalPointArr.shift();
@@ -800,20 +818,23 @@ let isShiftPressed = false;
 
   function chartReset() {
 
-    const useRawAsideData = props.matrixName === 'smallBed12B'
-    const point = dataArrRef.current.filter((a) => a > (useRawAsideData ? 10 : 0)).length
-    const press = Math.round(dataArrRef.current.reduce((a, b) => a + b, 0) / (useRawAsideData ? 1 : 10))
-    if ( totalArrRef.current.length < 20) {
+    const useRawAsideData = isRawAsideDataMatrix()
+    const chartData = useRawAsideData
+      ? getRawAsideData().filter((a) => a > getAsidePointThreshold())
+      : (dataArrRef.current || []);
+    const point = chartData.filter((a) => a > 0).length
+    const press = Math.round(chartData.reduce((a, b) => a + b, 0) / getAsidePressDivisor())
+    if ( totalArrRef.current.length < getAsideChartLimit()) {
        totalArrRef.current.push(press);
     } else {
        totalArrRef.current.shift();
        totalArrRef.current.push(press);
     }
     const maxTotal = findMax( totalArrRef.current);
-    props.data.current?.handleCharts( totalArrRef.current, maxTotal + 1000);
+    props.data.current?.handleCharts(getPressureChartData(), maxTotal + getPressureChartPadding());
 
 
-    if (totalPointArr.length < 20) {
+    if (totalPointArr.length < getAsideChartLimit()) {
       totalPointArr.push(point);
     } else {
       totalPointArr.shift();
@@ -821,7 +842,7 @@ let isShiftPressed = false;
     }
 
     const max1 = findMax(totalPointArr);
-    props.data.current?.handleChartsArea(totalPointArr, max1 + 100);
+    props.data.current?.handleChartsArea(totalPointArr, max1 + getAreaChartPadding());
   }
 
   useImperativeHandle(refs, () => ({

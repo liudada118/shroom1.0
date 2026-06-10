@@ -50,6 +50,7 @@ export const SENSOR_TYPES = {
   FOOT_VIDEO:  'footVideo',
   // 床垫
   SMALL_BED:   'smallBed',
+  SMALL_BED_NO_ALG: 'smallBedNoAlg',
   SMALL_BED_12B: 'smallBed12B',
   SMALL_BED1:  'smallBed1',
   TEMP_FULL_BED: 'tempFullBed',
@@ -96,6 +97,7 @@ export const SENSOR_MATRIX_MAP = {
   sofa:       { width: 32, height: 32, total: 1024 },
   car:        { width: 32, height: 32, total: 1024 },
   smallBed:   { width: 32, height: 32, total: 1024 },
+  smallBedNoAlg: { width: 32, height: 32, total: 1024 },
   smallBed12B:{ width: 32, height: 32, total: 1024 },
   smallBed1:  { width: 32, height: 32, total: 1024 },
   tempFullBed:{ width: 15, height: 12, total: 180 },

@@ -28,6 +28,7 @@ import Carcol from "../../components/three/carCol";
 import Hand0205 from "../../components/three/hand0205 copy";
 import Hand0205Double from "../../components/three/hand0205Double";
 import Minzhen from "../../components/three/minzhen";
+import MinzhenSensorPanel from "../../components/minzhen/MinzhenSensorPanel";
 import Hand0507 from "../../components/three/hand0507";
 import Hand0205Point from "../../components/three/hand0205Point";
 import Hand0205Point147 from "../../components/three/hand0205Point147";
@@ -102,6 +103,7 @@ import { WebGLCanvas } from "../../components/webgl/WebGL.HeatMap copy 2";
 const FULL_PACKET_GLOVE_MATRIX = 'handGloveFullPacket'
 const HAND_0205_DOUBLE_MATRIX = 'hand0205Double'
 const MINZHEN_MATRIX = 'minzhen'
+const SMALL_BED_NO_ALG_MATRIX = 'smallBedNoAlg'
 const FULL_PACKET_GLOVE_MODES = ['num', 'numoriginal']
 const WHOLE_CHAIR_MATRIX = 'wholeChair'
 const HIDDEN_DISPLAY_MATRIX_TYPES = [HAND_0205_DOUBLE_MATRIX]
@@ -394,8 +396,8 @@ const thrott1 = (fun) => {
 const petCareMatrixArr = ['petCare', 'petCareMini']
 const isPetCareMatrix = (type) => petCareMatrixArr.includes(type)
 const tempFullBedMatrix = 'tempFullBed'
-const bedArr = ['jqbed', tempFullBedMatrix, ...petCareMatrixArr, 'xiyueReal1', 'smallBed', 'smallBed1']
-const displayRendererConfigMatrixArr = ['smallBed', 'smallBed12B', WHOLE_CHAIR_MATRIX, MINZHEN_MATRIX, 'jqbed', ...petCareMatrixArr]
+const bedArr = ['jqbed', tempFullBedMatrix, ...petCareMatrixArr, 'xiyueReal1', 'smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed1']
+const displayRendererConfigMatrixArr = ['smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed12B', WHOLE_CHAIR_MATRIX, MINZHEN_MATRIX, 'jqbed', ...petCareMatrixArr]
 const HUMAN_BODY_DEFAULT_COLOR = 1555
 const HUMAN_BODY_DEFAULT_SIZE = 31
 const HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES = [1205, 5000]
@@ -793,6 +795,7 @@ class Home extends React.Component {
       portname: "",
       portnameBack: "",
       portnameHead: '',
+      portnameSensor: '',
       matrixTitle: localStorage.getItem('matrixTitle') === 'false' ? false : true,
       allowedTypes: storedAllowedTypes,
       local: false,
@@ -845,6 +848,7 @@ class Home extends React.Component {
       licenseModalType: '',
       licenseModalExpireDate: '',
       licenseModalRemainDays: 0,
+      minzhenSensorInfo: {},
       hz: 12,
       realHz: 0
     };
@@ -976,7 +980,8 @@ class Home extends React.Component {
       this.wsSendObj({
         // file: this.state.matrixName,
         sitClose: true,
-        backClose: true
+        backClose: true,
+        sensorClose: true
       })
     };
     ws.onmessage = (e) => {
@@ -1554,6 +1559,7 @@ class Home extends React.Component {
           allowedTypes,
           matrixName: nextMatrixName,
           numMatrixFlag: nextMode,
+          minzhenSensorInfo: {},
           ...getConfig({ sensorType: nextMatrixName, mode: nextMode }),
         })
         localStorage.setItem('file', nextMatrixName)
@@ -1568,6 +1574,7 @@ class Home extends React.Component {
           allowedTypes,
           matrixName: nextMatrixName,
           numMatrixFlag: nextMode,
+          minzhenSensorInfo: {},
           ...getConfig({ sensorType: nextMatrixName, mode: nextMode }),
         })
         localStorage.setItem('file', nextMatrixName)
@@ -1596,6 +1603,7 @@ class Home extends React.Component {
           Object.assign(nextState, {
             matrixName: nextMatrixName,
             numMatrixFlag: nextMode,
+            minzhenSensorInfo: {},
             ...getConfig({ sensorType: nextMatrixName, mode: nextMode }),
           })
           localStorage.setItem('file', nextMatrixName)
@@ -1690,6 +1698,7 @@ class Home extends React.Component {
     }
 
     if (jsonObject.tempObj != null) {
+      this.setState({ minzhenSensorInfo: jsonObject.tempObj });
       this.com.current?.sensorData?.(jsonObject);
     }
 
@@ -2897,7 +2906,7 @@ class Home extends React.Component {
     // 1. 先停止回放，确保后端不再发送旧数据
     this.wsSendObj({ play: false });
     // 2. 关闭所有串口，确保切换前旧串口完全停止
-    this.wsSendObj({ sitClose: true, backClose: true, headClose: true });
+    this.wsSendObj({ sitClose: true, backClose: true, headClose: true, sensorClose: true });
     // 3. 再发送 file 切换，后端切换数据库并重置回放状态
     this.wsSendObj({ file: nextMatrixName });
 
@@ -2924,6 +2933,8 @@ class Home extends React.Component {
       portname: '',
       portnameBack: '',
       portnameHead: '',
+      portnameSensor: '',
+      minzhenSensorInfo: {},
     });
 
     // 6. 如果当前在回放模式，重新请求新 db 的时间列表
@@ -3155,7 +3166,7 @@ class Home extends React.Component {
             } else {
               return this.changeValue(a);
             }
-          } else if (this.state.matrixName === "smallBed" || this.state.matrixName === "smallBed12B") {
+          } else if (this.state.matrixName === "smallBed" || this.state.matrixName === SMALL_BED_NO_ALG_MATRIX || this.state.matrixName === "smallBed12B") {
             if (index == 0 || index == 1) {
               return this.changeSmallBedValue(a);
             } else {
@@ -3862,6 +3873,7 @@ class Home extends React.Component {
             portname={this.state.portname}
             portnameBack={this.state.portnameBack}
             portnameHead={this.state.portnameHead}
+            portnameSensor={this.state.portnameSensor}
             local={this.state.local}
             dataArr={this.state.dataArr}
             matrixName={this.state.matrixName}
@@ -3966,17 +3978,22 @@ class Home extends React.Component {
                   </CanvasCom>
                   :
                   this.state.numMatrixFlag == "numoriginal" && ['hand', 'handSinglePoint', MINZHEN_MATRIX].includes(this.state.matrixName) ?
-                  <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
-                    <Fast1024
-                      ref={this.com}
-                      matrixName={this.state.matrixName}
-                      data={this.data}
-                      local={this.state.local}
-                      handleChartsBody={this.handleChartsBody.bind(this)}
-                      handleChartsBody1={this.handleChartsBody1.bind(this)}
-                      changeStateData={this.changeStateData}
-                      changeSelect={this.changeSelect} />
-                  </CanvasCom>
+                  <>
+                    <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
+                      <Fast1024
+                        ref={this.com}
+                        matrixName={this.state.matrixName}
+                        data={this.data}
+                        local={this.state.local}
+                        handleChartsBody={this.handleChartsBody.bind(this)}
+                        handleChartsBody1={this.handleChartsBody1.bind(this)}
+                        changeStateData={this.changeStateData}
+                        changeSelect={this.changeSelect} />
+                    </CanvasCom>
+                    {this.state.matrixName === MINZHEN_MATRIX ? (
+                      <MinzhenSensorPanel sensorInfo={this.state.minzhenSensorInfo} />
+                    ) : null}
+                  </>
                   :
                   this.state.numMatrixFlag == "numoriginal" && this.state.matrixName == 'smallBed12B' ?
                   <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
@@ -3991,7 +4008,7 @@ class Home extends React.Component {
                       changeSelect={this.changeSelect} />
                   </CanvasCom>
                   :
-                  this.state.numMatrixFlag == "numoriginal" && [...tactileGloveTypes, 'robot1', 'footVideo', 'robotSY', 'robotLCF', 'normal', 'smallBed', 'smallBed12B', 'jqbed', tempFullBedMatrix, 'petCare', 'petCareMini', 'daliegu', 'smallSample'].includes(this.state.matrixName) ?
+                  this.state.numMatrixFlag == "numoriginal" && [...tactileGloveTypes, 'robot1', 'footVideo', 'robotSY', 'robotLCF', 'normal', 'smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed12B', 'jqbed', tempFullBedMatrix, 'petCare', 'petCareMini', 'daliegu', 'smallSample'].includes(this.state.matrixName) ?
                   <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
                     <Num2DOriginal ref={this.com}
                       matrixName={this.state.matrixName}
@@ -4639,7 +4656,7 @@ class Home extends React.Component {
                           changeSelect={this.changeSelect}
                         />
                       </CanvasCom>
-                    ) : this.state.matrixName == "smallBed" || this.state.matrixName == "smallBed12B" ? (
+                    ) : this.state.matrixName == "smallBed" || this.state.matrixName == SMALL_BED_NO_ALG_MATRIX || this.state.matrixName == "smallBed12B" ? (
                       <CanvasCom matrixName={this.state.matrixName}>
                         <SmallBed
                           matrixName={this.state.matrixName}

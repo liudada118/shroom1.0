@@ -93,10 +93,14 @@ const TEMP_FULL_BED_TYPE = 'tempFullBed';
 const TEMP_FULL_BED_PRESSURE_THRESHOLD = 20;
 const JQ_BED_TYPE = 'jqbed';
 const SMALL_BED_TYPE = 'smallBed';
+const SMALL_BED_NO_ALG_TYPE = 'smallBedNoAlg';
 const SMALL_BED_12B_TYPE = 'smallBed12B';
 const HAND_SINGLE_POINT_TYPE = 'handSinglePoint';
 const WHOLE_CHAIR_TYPE = 'wholeChair';
 const MINZHEN_TYPE = 'minzhen';
+const MINZHEN_SENSOR_BAUD_RATE = 115200;
+const MINZHEN_SENSOR_FRAME_START_PATTERN = /yroscope\s*:/i;
+const MINZHEN_ZERO_POINT_INDEXES = [384, 416];
 const WHOLE_CHAIR_GAUSS_RADIUS = 0.5;
 const SMALL_BED_12B_PAYLOAD_LENGTH = 1024 * 2;
 const SMALL_BED_12B_FRAME_TAIL = Buffer.from([0xaa, 0x00, 0x55, 0x00, 0x03, 0x00, 0x99, 0x00]);
@@ -104,6 +108,7 @@ const THREE_PORT_SENSOR_TYPES = new Set(['volvo', WHOLE_CHAIR_TYPE]);
 const isHandGloveType = (sensorType) => HAND_GLOVE_TYPES.includes(sensorType);
 const isHandStorageType = (sensorType = '') => isHandGloveType(sensorType) || String(sensorType).includes('robot');
 const isZeroFrameStorageType = (sensorType = '') => isHandGloveType(sensorType) || sensorType === 'footVideo' || String(sensorType).includes('robot');
+const isSmallBedMatrixType = (sensorType) => [SMALL_BED_TYPE, SMALL_BED_NO_ALG_TYPE].includes(sensorType);
 const isThreePortFile = (sensorType) => THREE_PORT_SENSOR_TYPES.has(sensorType);
 const HAND_GLOVE_REALTIME_SEND_INTERVAL_MS = 1000 / 60;
 let lastHandGloveRealtimeSendAt = {
@@ -129,22 +134,68 @@ const getSensorBaudRate = (sensorType) => {
   return 1000000;
 };
 
+function maskMinzhenMatrixValues(frame) {
+  if (!Array.isArray(frame)) return frame;
+  MINZHEN_ZERO_POINT_INDEXES.forEach((index) => {
+    if (index >= 0 && index < frame.length) {
+      frame[index] = 0;
+    }
+  });
+  return frame;
+}
+
+function normalizeMinzhenSensorKey(rawKey = '') {
+  const key = String(rawKey).trim();
+  if (/yroscope/i.test(key)) return 'gyroscope';
+  if (/thermistor0/i.test(key)) return 'thermistor0';
+  if (/thermistor1/i.test(key)) return 'thermistor1';
+  if (/thermistor2/i.test(key)) return 'thermistor2';
+  if (/thermistor/i.test(key)) return 'thermistor';
+  if (/humidity/i.test(key)) return 'humidity';
+  return key;
+}
+
+function cleanMinzhenSensorNumber(value) {
+  const match = String(value ?? '').match(/-?\d+(?:\.\d+)?/);
+  return match ? match[0] : '';
+}
+
+function parseMinzhenSensorFields(text = '') {
+  console.log(text)
+  const fields = [];
+  const fieldPattern = /(yroscope|thermistor0|thermistor1|thermistor2|thermistor|humidity)\s*:/ig;
+  const matches = [...String(text).matchAll(fieldPattern)];
+
+  matches.forEach((match, index) => {
+    const nextMatch = matches[index + 1];
+    fields.push({
+      key: normalizeMinzhenSensorKey(match[1]),
+      value: String(text)
+        .slice(match.index + match[0].length, nextMatch ? nextMatch.index : undefined)
+        .trim(),
+    });
+  });
+
+  return fields;
+}
+
 function parseMinzhenSensorFrame(buffer) {
   const text = buffer.toString();
-  if (!text.includes('gyroscope') || !text.includes('thermistor')) {
+  if (!/yroscope/i.test(text) || !/thermistor/i.test(text)) {
     return null;
   }
 
   const tempObj = {};
-  text.split(';').forEach((item) => {
-    if (!item || !item.includes(':')) return;
-    const [rawKey, ...rest] = item.split(':');
-    const key = rawKey.trim();
-    const value = rest.join(':').trim();
+  parseMinzhenSensorFields(text).forEach((field) => {
+    const { key, value } = field;
     if (!key) return;
 
     if (key === 'gyroscope') {
-      const newValue = value.split('\t').map((v) => v.trim()).filter(Boolean);
+      const newValue = value
+        .split(/[\t,\s]+/)
+        .map((v) => cleanMinzhenSensorNumber(v))
+        .filter(Boolean)
+        .slice(0, 6);
       tempObj[key] = newValue;
 
       const angleFbRaw = Number(newValue[2]);
@@ -155,12 +206,57 @@ function parseMinzhenSensorFrame(buffer) {
       if (Number.isFinite(angleLrRaw)) {
         tempObj.angle_lr = (angleLrRaw / 15000).toFixed(2);
       }
+    } else if (['thermistor0', 'thermistor1', 'thermistor2'].includes(key)) {
+      tempObj[key] = cleanMinzhenSensorNumber(value);
+    } else if (key === 'humidity') {
+      tempObj[key] = cleanMinzhenSensorNumber(value);
     } else {
-      tempObj[key] = value;
+      tempObj[key] = value.trim();
     }
   });
 
-  return Object.keys(tempObj).length ? { tempObj } : null;
+  if (!Array.isArray(tempObj.gyroscope) || tempObj.gyroscope.length < 6) {
+    return null;
+  }
+  if (!['thermistor0', 'thermistor1', 'thermistor2', 'humidity'].every((key) => tempObj[key] !== undefined)) {
+    return null;
+  }
+
+  return { tempObj };
+}
+
+function getMinzhenSensorFrameStartIndex(text) {
+  const match = String(text).match(MINZHEN_SENSOR_FRAME_START_PATTERN);
+  return match ? match.index : -1;
+}
+
+function takeNextMinzhenSensorFrame() {
+  const firstStart = getMinzhenSensorFrameStartIndex(minzhenSensorTextBuffer);
+  if (firstStart < 0) {
+    minzhenSensorTextBuffer = minzhenSensorTextBuffer.slice(-64);
+    return null;
+  }
+
+  if (firstStart > 0) {
+    minzhenSensorTextBuffer = minzhenSensorTextBuffer.slice(firstStart);
+  }
+
+  const nextStart = getMinzhenSensorFrameStartIndex(minzhenSensorTextBuffer.slice(1));
+  if (nextStart >= 0) {
+    const frameText = minzhenSensorTextBuffer.slice(0, nextStart + 1);
+    minzhenSensorTextBuffer = minzhenSensorTextBuffer.slice(nextStart + 1);
+    return frameText;
+  }
+
+  const humidityMatch = minzhenSensorTextBuffer.match(/humidity\s*:\s*-?\d+(?:\.\d+)?/i);
+  if (humidityMatch) {
+    const frameEnd = humidityMatch.index + humidityMatch[0].length;
+    const frameText = minzhenSensorTextBuffer.slice(0, frameEnd);
+    minzhenSensorTextBuffer = minzhenSensorTextBuffer.slice(frameEnd).slice(-64);
+    return frameText;
+  }
+
+  return null;
 }
 
 let minzhenSensorTextBuffer = '';
@@ -172,11 +268,15 @@ function handleMinzhenSensorPortData(data) {
     minzhenSensorTextBuffer = minzhenSensorTextBuffer.slice(-4096);
   }
 
-  const frame = parseMinzhenSensorFrame(Buffer.from(minzhenSensorTextBuffer));
-  if (!frame) return;
+  let frameText = takeNextMinzhenSensorFrame();
+  while (frameText) {
+    const frame = parseMinzhenSensorFrame(Buffer.from(frameText));
+    if (frame) {
+      colOrSendData1(JSON.stringify(frame));
+    }
 
-  minzhenSensorTextBuffer = '';
-  colOrSendData1(JSON.stringify(frame));
+    frameText = takeNextMinzhenSensorFrame();
+  }
 }
 
 function bindBackPortParser() {
@@ -186,6 +286,45 @@ function bindBackPortParser() {
     port2.on("data", handleMinzhenSensorPortData);
   } else {
     port2.pipe(parser2);
+  }
+}
+
+function closeMinzhenSensorPort(reason = 'close') {
+  minzhenSensorTextBuffer = '';
+  if (!portSensor) return;
+
+  portSensor.removeListener("data", handleMinzhenSensorPortData);
+  const closingPort = portSensor;
+  portSensor = null;
+  if (closingPort.isOpen) {
+    closingPort.close((err) => {
+      if (err) logger.warn(`minzhen sensor port close error (${reason}):`, err);
+    });
+  }
+}
+
+function openMinzhenSensorPort(portPath) {
+  if (!portPath) return;
+  if (file !== MINZHEN_TYPE) return;
+  sensorClose = false;
+  comSensor = portPath;
+  closeMinzhenSensorPort('reopen');
+
+  try {
+    portSensor = new SerialPort(
+      {
+        path: portPath,
+        baudRate: MINZHEN_SENSOR_BAUD_RATE,
+        autoOpen: true,
+      },
+      function (err) {
+        if (err) logger.warn(err, "minzhen sensor port err");
+      }
+    );
+    minzhenSensorTextBuffer = '';
+    portSensor.on("data", handleMinzhenSensorPortData);
+  } catch (e) {
+    logger.warn(e, "minzhen sensor port open error");
   }
 }
 
@@ -880,7 +1019,7 @@ function transposeSquareMatrix(data, size = 32) {
 }
 
 function shouldTransposeSmallBedRawMatrix(sensorType) {
-  return sensorType === JQ_BED_TYPE || sensorType === SMALL_BED_TYPE || sensorType === SMALL_BED_12B_TYPE;
+  return sensorType === JQ_BED_TYPE || sensorType === SMALL_BED_TYPE || sensorType === SMALL_BED_NO_ALG_TYPE || sensorType === SMALL_BED_12B_TYPE;
 }
 
 function normalizeTempFullBedPlaybackPressureArray(data, frame = {}) {
@@ -983,6 +1122,7 @@ const timeNum = 1000 / 12;
 let port2,
   port1,
   portHead,
+  portSensor,
   localFlag = false,
   playFlag = false,
   nowIndex = 0,
@@ -1005,6 +1145,7 @@ let timeStamp,
   sitClose = false,
   backClose = false,
   headClose = false,
+  sensorClose = false,
   sitPressSelect = [];
 const sitnum1 = 64;
 const sitnum2 = 64;
@@ -1484,9 +1625,11 @@ function shutdownServer() {
   sitClose = true;
   backClose = true;
   headClose = true;
+  sensorClose = true;
   com = undefined;
   com1 = undefined;
   comhead = undefined;
+  comSensor = undefined;
 
   try {
     stopWorker();
@@ -1501,6 +1644,7 @@ function shutdownServer() {
     closeWithTimeout("port1", closeSerialPort(port1, "port1")),
     closeWithTimeout("port2", closeSerialPort(port2, "port2")),
     closeWithTimeout("portHead", closeSerialPort(portHead, "portHead")),
+    closeWithTimeout("portSensor", closeSerialPort(portSensor, "portSensor")),
     closeWithTimeout("server", closeWsServer(server, "server")),
     closeWithTimeout("server1", closeWsServer(server1, "server1")),
     closeWithTimeout("server2", closeWsServer(server2, "server2")),
@@ -1512,6 +1656,7 @@ function shutdownServer() {
     port1 = null;
     port2 = null;
     portHead = null;
+    portSensor = null;
     serverOpened = false;
   });
 
@@ -1580,7 +1725,8 @@ let saveTime,
 
   com,
   com1,
-  comhead;
+  comhead,
+  comSensor;
 // db = new sqlite3.Database(`${filePath}/${file}.db`);
 
 // try {
@@ -2020,10 +2166,12 @@ module.exports = {
             backClose = true
             sitClose = true
             headClose = true
+            sensorClose = true
             // 清除 com 变量，防止自动重连定时器用旧值重新打开串口
             com = undefined;
             com1 = undefined;
             comhead = undefined;
+            comSensor = undefined;
             if (port1?.isOpen) {
               port1.close((err) => {
                 if (err) logger.warn('port1 close error on file switch:', err);
@@ -2071,6 +2219,7 @@ module.exports = {
                 }
               });
             }
+            closeMinzhenSensorPort('file switch');
             const receiveFile = JSON.parse(message).file
             // db = new sqlite3.Database(`${filePath}/${receiveFile}.db`);
             file = receiveFile;
@@ -2638,6 +2787,10 @@ module.exports = {
             }
           }
 
+          if (JSON.parse(message).sensorPort != null) {
+            openMinzhenSensorPort(JSON.parse(message).sensorPort);
+          }
+
           /**
            * 鐏忓棗鐤勯弮鍫曟浆閼冲本鏆熼幑顕€鈧岸浜鹃幍鎾崇磻
            */
@@ -2711,6 +2864,12 @@ module.exports = {
                 if (err) logger.warn('portHead close error:', err);
               });
             }
+          }
+
+          if (JSON.parse(message).sensorClose === true) {
+            sensorClose = true
+            comSensor = undefined;
+            closeMinzhenSensorPort('manual close');
           }
           /**
            * 鐏忓棜顕伴崣鏍ㄦ拱閸︾増鏆熼幑顕€鈧岸浜鹃幍鎾崇磻
@@ -3129,7 +3288,7 @@ module.exports = {
               } else {
                 if (file === TEMP_FULL_BED_TYPE) {
                   jsonData = JSON.stringify(buildTempFullBedPlaybackPayload(localData[value]));
-                } else if (file === 'smallBed') {
+                } else if (isSmallBedMatrixType(file)) {
                   // console.log(JSON.stringify(pressSmallBed({ arr: JSON.parse(localData[value]?.data) })))
                   jsonData = JSON.stringify({
                     // sitData: pressSmallBed({ arr: JSON.parse(localData[value]?.data) }),
@@ -3173,7 +3332,7 @@ module.exports = {
                 let jsonData
                 if (file === TEMP_FULL_BED_TYPE) {
                   jsonData = JSON.stringify(buildTempFullBedPlaybackPayload(localData[nowIndex], { index: nowIndex }));
-                } else if (file === 'smallBed') {
+                } else if (isSmallBedMatrixType(file)) {
                   jsonData = JSON.stringify({
                     // sitData: pressSmallBed({ arr: JSON.parse(localData[nowIndex]?.data) }),
                     sitData: localData[nowIndex]?.data,
@@ -3391,7 +3550,7 @@ module.exports = {
                       index: nowIndex,
                       backFlag: localDataBack.length > 0,
                     }));
-                  } else if (file === 'smallBed') {
+                  } else if (isSmallBedMatrixType(file)) {
                     jsonData = JSON.stringify({
                       // sitData: pressSmallBed({ arr: JSON.parse(localData[nowIndex]?.data) }),
                       sitData: localData[nowIndex]?.data,
@@ -3575,7 +3734,7 @@ module.exports = {
               //     newsit.push(JSON.parse(localData[i].data)[x * 32 + y])
               //   }
               // }
-              if (file === 'smallBed' || file === TEMP_FULL_BED_TYPE) {
+              if (isSmallBedMatrixType(file) || file === TEMP_FULL_BED_TYPE) {
                 const storedSitData = file === TEMP_FULL_BED_TYPE
                   ? buildTempFullBedPlaybackPayload(localData[i]).sitData
                   : getStoredSitData(localData[i]);
@@ -3767,7 +3926,7 @@ module.exports = {
                     });
                 }
               });
-            } else if (file === 'smallBed' || file === 'smallBed1') {
+            } else if (isSmallBedMatrixType(file) || file === 'smallBed1') {
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
                   logger.error(err);
@@ -4868,7 +5027,7 @@ parser.on("data", function (data) {
       else if (file === "sit10") {
         pointArr = sit10Line(pointArr);
       }
-      else if (file === "smallBed") {
+      else if (isSmallBedMatrixType(file)) {
         // newArr = smallBed([...pointArr]);
         // realArr = smallBed([...pointArr]);
         pointArr = jqbed(pointArr)
@@ -4897,6 +5056,7 @@ parser.on("data", function (data) {
         newData = [...pointArr]
       } else if (file === MINZHEN_TYPE) {
         pointArr = jqbed(pointArr)
+        maskMinzhenMatrixValues(pointArr)
         newData = [...pointArr]
       } else if (isPetCareSystem(file)) {
         pointArr = jqbed(pointArr)
@@ -5010,7 +5170,7 @@ parser.on("data", function (data) {
         });
       } else {
         jsonData = JSON.stringify({
-          sitData: file == 'smallBed' || file == 'smallBed1' ? pointArr : sitDataToSend,
+          sitData: isSmallBedMatrixType(file) || file == 'smallBed1' ? pointArr : sitDataToSend,
           hz: colHZ,
         });
       }
@@ -5098,7 +5258,7 @@ parser.on("data", function (data) {
           hz: colHZ
         });
       } else {
-        jsonData = JSON.stringify({ sitData: file == 'smallBed' || file == 'smallBed1' ? newArr : pointArr, hz: colHZ });
+        jsonData = JSON.stringify({ sitData: isSmallBedMatrixType(file) || file == 'smallBed1' ? newArr : pointArr, hz: colHZ });
       }
       colOrSendData(jsonData)
     }
@@ -5632,7 +5792,7 @@ parser.on("data", function (data) {
           hz: colHZ
         });
       } else {
-        jsonData = JSON.stringify({ sitData: file == 'smallBed' || file == 'smallBed1' ? newArr : pointArr, hz: colHZ });
+        jsonData = JSON.stringify({ sitData: isSmallBedMatrixType(file) || file == 'smallBed1' ? newArr : pointArr, hz: colHZ });
       }
 
       colOrSendData(jsonData)
@@ -5704,7 +5864,7 @@ parser.on("data", function (data) {
           hz: colHZ
         });
       } else {
-        jsonData = JSON.stringify({ sitData: file == 'smallBed' || file == 'smallBed1' ? newArr : pointArr, hz: colHZ });
+        jsonData = JSON.stringify({ sitData: isSmallBedMatrixType(file) || file == 'smallBed1' ? newArr : pointArr, hz: colHZ });
       }
 
       // console.log(jsonData)
@@ -5757,6 +5917,18 @@ parserSmallBed12B.on("data", function (data) {
 function colOrSendData(jsonData) {
   // console.log(JSON.stringify(JSON.parse(jsonData).sitData) , 'jsonData')
   const nowDate = new Date().getTime()
+  let frameToStore = null;
+  if (file === MINZHEN_TYPE) {
+    try {
+      frameToStore = JSON.parse(jsonData);
+      if (Array.isArray(frameToStore.sitData)) {
+        maskMinzhenMatrixValues(frameToStore.sitData);
+        jsonData = JSON.stringify(frameToStore);
+      }
+    } catch (error) {
+      frameToStore = null;
+    }
+  }
   if (flag
     // && nowDate - oldTimeStamp > 1000 / colHZ
 
@@ -5791,7 +5963,7 @@ function colOrSendData(jsonData) {
     //   }
     // );
 
-    const frameToStore = JSON.parse(jsonData);
+    frameToStore = frameToStore || JSON.parse(jsonData);
     const dataToStore = file === TEMP_FULL_BED_TYPE
       ? JSON.stringify({
         sitData: frameToStore.sitData,
@@ -5808,7 +5980,7 @@ function colOrSendData(jsonData) {
       })
       : isZeroFrameStorageType(file)
         ? buildZeroAwareStorageData(frameToStore, 'sitData', 'sit')
-        : file == 'smallBed'
+        : isSmallBedMatrixType(file)
           ? JSON.stringify(realArr)
           : JSON.stringify([...frameToStore.sitData]);
 
@@ -6149,7 +6321,7 @@ function colOrSendData1(jsonData) {
       ? JSON.stringify(frameToStore.tempObj)
       : isZeroFrameStorageType(file)
         ? buildZeroAwareStorageData(frameToStore, 'backData', 'back')
-        : file == 'smallBed'
+        : isSmallBedMatrixType(file)
           ? JSON.stringify(realArr)
           : JSON.stringify([...frameToStore.backData]);
 
@@ -6466,7 +6638,7 @@ function colOrSendData2(jsonData) {
 
     db2.run(
       insertQuery,
-      [isZeroFrameStorageType(file) ? buildZeroAwareStorageData(JSON.parse(jsonData), 'headData', 'head') : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
+      [isZeroFrameStorageType(file) ? buildZeroAwareStorageData(JSON.parse(jsonData), 'headData', 'head') : isSmallBedMatrixType(file) ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
       function (err) {
         if (err) {
           logger.error(err);
@@ -6549,6 +6721,10 @@ reconnectTimer = setInterval(() => {
     } catch (e) {
       logger.warn(e, "e");
     }
+  }
+
+  if (comSensor && (!portSensor || !portSensor.isOpen) && sensorClose == false) {
+    openMinzhenSensorPort(comSensor);
   }
 }, 3000);
 

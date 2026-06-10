@@ -7,6 +7,7 @@ import { TrackballControls } from "three/examples/jsm/controls/TrackballControls
 // import { SelectionHelper } from 'three/addons/interactive/SelectionHelper.js';
 import { SelectionHelper } from "./SelectionHelper";
 import React, { useEffect, useImperativeHandle, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { TextureLoader } from "three";
 import TWEEN from "@tweenjs/tween.js";
 import { checkRectIndex, checkRectangleIntersection, getPointCoordinate, getPointCoordinateback } from "./threeUtil1";
@@ -99,6 +100,7 @@ const MINZHEN_POINT_TRANSFORM_RANGES = {
   scaleZ: { min: 0.0001, max: 0.02, step: 0.0001 },
   pointSize: { min: 0.01, max: 2, step: 0.01 },
 };
+const MINZHEN_ZERO_POINT_INDEXES = [384, 416];
 
 const normalizeMinzhenPointTransform = (value) => {
   const next = { ...MINZHEN_POINT_TRANSFORM_DEFAULT };
@@ -139,11 +141,17 @@ const normalizeMinzhenFrame = (data) => {
     frame.push(0);
   }
 
+  MINZHEN_ZERO_POINT_INDEXES.forEach((index) => {
+    frame[index] = 0;
+  });
+
   return frame;
 };
 
 const Canvas = React.forwardRef((props, refs) => {
   local = props.local
+  const { i18n } = useTranslation();
+  const isEnglish = String(i18n.language || "").startsWith("en");
   const canvasId = useRef(`minzhen-canvas-${Math.random().toString(36).slice(2)}`);
   const [sensorInfo, setSensorInfo] = useState({});
   const [pointTransform, setPointTransform] = useState(readMinzhenPointTransform);
@@ -1290,6 +1298,71 @@ const Canvas = React.forwardRef((props, refs) => {
     );
   };
 
+  const splitSensorValues = (value) => {
+    if (Array.isArray(value)) {
+      return value.map((item) => String(item).trim()).filter(Boolean);
+    }
+    if (value == null) {
+      return [];
+    }
+    return String(value)
+      .split(/[\t,，\s]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  };
+
+  const getSensorValue = (...keys) => {
+    for (const key of keys) {
+      const value = sensorInfo[key];
+      if (value !== undefined && value !== null && value !== "") {
+        return Array.isArray(value) ? value.join(",") : String(value);
+      }
+    }
+    return "";
+  };
+
+  const formatSensorValues = (values, expectedCount) => {
+    const nextValues = values.filter((value) => value !== undefined && value !== null && value !== "");
+    if (!nextValues.length) {
+      return "";
+    }
+    if (expectedCount) {
+      while (nextValues.length < expectedCount) {
+        nextValues.push("--");
+      }
+    }
+    return nextValues.join(",");
+  };
+  const gyroscopeValues = splitSensorValues(sensorInfo.gyroscope);
+  const thermistorValues = splitSensorValues(sensorInfo.thermistor);
+  const renderSensorItem = ({ zh, en, value, unit }) => {
+    const label = isEnglish ? en : zh;
+    return (
+    <div className="dataItem" key={en} style={{ alignItems: "center", gap: 8 }}>
+      <div className="dataItemCircle" style={{ flex: "0 0 48%", minWidth: 0 }}>
+        <div className="circleItem" style={{ display: "none" }}></div>
+        <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</div>
+      </div>
+      <div className="dataIteminfo" style={{ flex: "1 1 52%", justifyContent: "flex-end", minWidth: 0 }}>
+        <div style={{ minWidth: 0, maxWidth: "100%", textAlign: "right" }}>
+          <div style={{ overflowWrap: "anywhere" }}>{value} {unit ? <span style={{ color: "#999" }}>{unit}</span> : null}</div>
+        </div>
+      </div>
+    </div>
+    );
+  };
+
+  const sensorPanelItems = [
+    { zh: "加速度计", en: "Acceleration", value: formatSensorValues(gyroscopeValues.slice(0, 3), 3) },
+    { zh: "陀螺仪", en: "Gyroscope", value: formatSensorValues(gyroscopeValues.slice(3, 6), 3) },
+    { zh: "温度0", en: "Temperature 0", value: getSensorValue("thermistor0", "temperature0", "temp0") || (thermistorValues[0] || "") },
+    { zh: "温度1", en: "Temperature 1", value: getSensorValue("thermistor1", "temperature1", "temp1") || (thermistorValues[1] || "") },
+    { zh: "温度2", en: "Temperature 2", value: getSensorValue("thermistor2", "temperature2", "temp2") || (thermistorValues[2] || "") },
+    { zh: "湿度", en: "Humidity", value: getSensorValue("humidity") },
+    { zh: "脊柱前后角度", en: "Front/Back Angle", value: getSensorValue("angle_fb") },
+    { zh: "脊柱左右角度", en: "Left/Right Angle", value: getSensorValue("angle_lr") },
+  ];
+
   return (
     <div style={{ position: "relative", width: "100%", height: "100%" }}>
       <div
@@ -1356,29 +1429,22 @@ const Canvas = React.forwardRef((props, refs) => {
         </div>
       </div>
       ) : null}
-      {Object.keys(sensorInfo).length ? (
-        <div style={{
-          position: "absolute",
-          top: 12,
-          left: 12,
-          zIndex: 2,
-          minWidth: 220,
-          padding: "10px 12px",
-          borderRadius: 6,
-          background: "rgba(15, 23, 42, 0.72)",
+      <div
+        style={{
+          position: "fixed",
+          width: "15%",
+          top: "8%",
+          right: "3%",
           color: "#fff",
-          fontSize: 12,
-          lineHeight: 1.7,
+          zIndex: 10,
           pointerEvents: "none",
-        }}>
-          {Object.entries(sensorInfo).slice(0, 8).map(([key, value]) => (
-            <div key={key}>
-              <span style={{ opacity: 0.72 }}>{key}: </span>
-              <span>{Array.isArray(value) ? value.join(", ") : String(value)}</span>
-            </div>
-          ))}
+        }}
+      >
+        <div className="asideContent firstAside">
+          <h2 className="asideTitle">{isEnglish ? "Other Data" : "其他数据"}</h2>
+          {sensorPanelItems.map((item) => renderSensorItem(item))}
         </div>
-      ) : null}
+      </div>
     </div>
   );
 });
