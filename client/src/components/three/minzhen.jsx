@@ -1333,6 +1333,23 @@ const Canvas = React.forwardRef((props, refs) => {
     }
     return nextValues.join(",");
   };
+  const parseSensorNumber = (value) => {
+    const text = Array.isArray(value) ? value[0] : value;
+    const match = String(text ?? "").match(/-?\d+(?:\.\d+)?/);
+    if (!match) {
+      return null;
+    }
+    const nextValue = Number(match[0]);
+    return Number.isFinite(nextValue) ? nextValue : null;
+  };
+  const formatAverageTemperature = () => {
+    const temp0 = parseSensorNumber(getSensorValue("thermistor0", "temperature0", "temp0") || thermistorValues[0]);
+    const temp1 = parseSensorNumber(getSensorValue("thermistor1", "temperature1", "temp1") || thermistorValues[1]);
+    if (temp0 === null || temp1 === null) {
+      return "";
+    }
+    return ((temp0 + temp1) / 2).toFixed(2);
+  };
   const gyroscopeValues = splitSensorValues(sensorInfo.gyroscope);
   const thermistorValues = splitSensorValues(sensorInfo.thermistor);
   const renderSensorItem = ({ zh, en, value, unit }) => {
@@ -1355,9 +1372,7 @@ const Canvas = React.forwardRef((props, refs) => {
   const sensorPanelItems = [
     { zh: "加速度计", en: "Acceleration", value: formatSensorValues(gyroscopeValues.slice(0, 3), 3) },
     { zh: "陀螺仪", en: "Gyroscope", value: formatSensorValues(gyroscopeValues.slice(3, 6), 3) },
-    { zh: "温度0", en: "Temperature 0", value: getSensorValue("thermistor0", "temperature0", "temp0") || (thermistorValues[0] || "") },
-    { zh: "温度1", en: "Temperature 1", value: getSensorValue("thermistor1", "temperature1", "temp1") || (thermistorValues[1] || "") },
-    { zh: "温度2", en: "Temperature 2", value: getSensorValue("thermistor2", "temperature2", "temp2") || (thermistorValues[2] || "") },
+    { zh: "温度", en: "Temperature", value: formatAverageTemperature() },
     { zh: "湿度", en: "Humidity", value: getSensorValue("humidity") },
     { zh: "脊柱前后角度", en: "Front/Back Angle", value: getSensorValue("angle_fb") },
     { zh: "脊柱左右角度", en: "Left/Right Angle", value: getSensorValue("angle_lr") },

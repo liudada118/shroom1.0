@@ -101,6 +101,7 @@ const MINZHEN_TYPE = 'minzhen';
 const MINZHEN_SENSOR_BAUD_RATE = 115200;
 const MINZHEN_SENSOR_FRAME_START_PATTERN = /yroscope\s*:/i;
 const MINZHEN_ZERO_POINT_INDEXES = [384, 416];
+const MINZHEN_BACKEND_GAUSS_RADIUS = 0.5;
 const WHOLE_CHAIR_GAUSS_RADIUS = 0.5;
 const SMALL_BED_12B_PAYLOAD_LENGTH = 1024 * 2;
 const SMALL_BED_12B_FRAME_TAIL = Buffer.from([0xaa, 0x00, 0x55, 0x00, 0x03, 0x00, 0x99, 0x00]);
@@ -142,6 +143,17 @@ function maskMinzhenMatrixValues(frame) {
     }
   });
   return frame;
+}
+
+function applyMinzhenBackendGauss(frame) {
+  if (!Array.isArray(frame) || frame.length < 1024) return maskMinzhenMatrixValues(frame);
+  const normalizedFrame = frame.slice(0, 1024).map((value) => {
+    const nextValue = Number(value);
+    return Number.isFinite(nextValue) ? nextValue : 0;
+  });
+  maskMinzhenMatrixValues(normalizedFrame);
+  const blurredFrame = gaussBlur_return(normalizedFrame, 32, 32, MINZHEN_BACKEND_GAUSS_RADIUS);
+  return maskMinzhenMatrixValues(blurredFrame);
 }
 
 function normalizeMinzhenSensorKey(rawKey = '') {
@@ -5922,7 +5934,7 @@ function colOrSendData(jsonData) {
     try {
       frameToStore = JSON.parse(jsonData);
       if (Array.isArray(frameToStore.sitData)) {
-        maskMinzhenMatrixValues(frameToStore.sitData);
+        frameToStore.sitData = applyMinzhenBackendGauss(frameToStore.sitData);
         jsonData = JSON.stringify(frameToStore);
       }
     } catch (error) {

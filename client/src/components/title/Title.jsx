@@ -817,8 +817,8 @@ class Title extends React.Component {
       showFilter = true;
       showHumanTransform = true;
     } else if (group1.includes(matrixName)) {
-      if (mode === 'numoriginal' && ['hand', 'handSinglePoint', 'bed4096', 'bed4096num'].includes(matrixName)) {
-        // hand / bed4096 / bed4096num raw data mode: only color and filter
+      if (mode === 'numoriginal' && ['hand', 'handSinglePoint', minzhenType_title, 'bed4096', 'bed4096num'].includes(matrixName)) {
+        // raw data mode: no Gaussian; Gaussian only controls 3D point scenes.
         showColor = true;
         showFilter = true;
       } else if (matrixName === 'bed4096') {
