@@ -62,10 +62,37 @@ function buildParsedFrame({ buffer, profile, channel, values, pressureData, rota
   };
 }
 
+function applyLineOrder(pressureData, profile, context = {}) {
+  const lineOrder = context.lineOrder || profile.lineOrder;
+  if (!lineOrder) {
+    return pressureData;
+  }
+
+  if (typeof lineOrder === 'function') {
+    return lineOrder([...pressureData], {
+      profile,
+      channel: context.channel || 'sit',
+      ...(profile.lineOrderOptions || {}),
+      ...(context.lineOrderOptions || {}),
+    });
+  }
+
+  if (!context.lineOrders?.has?.(lineOrder)) {
+    throw new Error(`line order "${lineOrder}" is not registered`);
+  }
+
+  return context.lineOrders.apply(lineOrder, pressureData, {
+    profile,
+    channel: context.channel || 'sit',
+    ...(profile.lineOrderOptions || {}),
+    ...(context.lineOrderOptions || {}),
+  });
+}
+
 function parseDefaultFrame(buffer, profile, context = {}) {
   const values = readValues(buffer, profile.valueType);
   const pressureLength = Number(profile.pressureLength) > 0 ? Number(profile.pressureLength) : values.length;
-  const pressureData = values.slice(0, pressureLength);
+  const pressureData = applyLineOrder(values.slice(0, pressureLength), profile, context);
   const rotateOffset = Number(profile.rotateOffset);
   const rotateLength = Number(profile.rotateLength);
   const rotate = Number.isFinite(rotateOffset) && rotateLength > 0
@@ -85,7 +112,7 @@ function parseDefaultFrame(buffer, profile, context = {}) {
 function parseHandGloveFullPacket(buffer, profile, context = {}) {
   const data = Buffer.from(buffer || []);
   const packetType = data[1];
-  const pressureData = [...data.slice(2, 258)].map((value) => Number(value));
+  const pressureData = applyLineOrder([...data.slice(2, 258)].map((value) => Number(value)), profile, context);
   const rotate = [...data.slice(258, 274)].map((value) => Number(value));
   const values = [...data].map((value) => Number(value));
 
@@ -120,4 +147,5 @@ module.exports = {
   parseFrame,
   parseDefaultFrame,
   parseHandGloveFullPacket,
+  applyLineOrder,
 };

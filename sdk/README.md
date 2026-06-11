@@ -12,6 +12,7 @@
 | 系统配置 | `file` 切换、波特率、协议类型 | `ProtocolRegistry` / `profiles` |
 | 串口 | 串口识别、打开、关闭、通道绑定 | `ShroomSensorSDK.listPorts()` / `open()` / `SensorSession` |
 | 实时解析 | parser `data` 事件、原始帧解析、实时 payload | `ProtocolRegistry.parse()` / `session.on('frame')` |
+| 线序 | `jqbed`、`handSinglePoint`、`carSitLine` 等线序转换 | `LineOrderRegistry` / `applyLineOrder()` |
 | 清零 | `resetZero`、基准帧、清零后矩阵 | `ZeroCalibrator` |
 | 采集 | `flag`、`colName`、`time`、`colHZ`、入库 | `CaptureStore` / `startCapture()` |
 | 回放 | `getTime`、`local`、`play`、`value`、`speed` | `ReplayService` |
@@ -25,6 +26,7 @@
 - 串口识别：`listPorts()`
 - 串口连接读取：`open({ sensorType, channels })`
 - 协议解析：通过 sensor profile 统一配置帧尾、波特率、数值类型和矩阵长度
+- 线序转换：复用项目现有 `openWeb.js` / `utilMatrix.js` 中的线序函数
 - 实时数据：`session.on('frame', handler)`
 - 清零处理：`zeroCalibrator.captureBaseline(frame)` / `clearBaseline()`
 - 采集入库：`startCapture(session, options)` / `stopCapture(session)`
@@ -118,7 +120,43 @@ sdk.registerProfile('mySensor', {
   pressureLength: 1024,
   matrixWidth: 32,
   matrixHeight: 32,
+  lineOrder: 'jqbed',
 });
 ```
 
 如果协议特殊，可以提供 `parseFrame(buffer, profile, context)`，返回和默认 frame 相同结构的数据。
+
+## 线序函数
+
+SDK 会把当前项目 `openWeb.js` 和 `utilMatrix.js` 里导出的线序/矩阵函数注册到 `LineOrderRegistry`。
+
+```js
+const { ShroomSensorSDK } = require('./sdk');
+
+const sdk = new ShroomSensorSDK();
+
+console.log(sdk.listLineOrders());
+
+const raw = new Array(1024).fill(1);
+const mapped = sdk.applyLineOrder('jqbed', raw);
+```
+
+常用线序名包括：
+
+- `jqbed`
+- `handSinglePoint`
+- `handL`
+- `handR`
+- `carSitLine`
+- `carBackLine`
+- `yanfeng10sit`
+- `yanfeng10back`
+- `smallBed`
+- `smallBed1`
+- `tempFullBed`
+
+如果新硬件有独立线序，可以注册：
+
+```js
+sdk.registerLineOrder('myLine', (data) => data.reverse());
+```

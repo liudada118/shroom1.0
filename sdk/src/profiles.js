@@ -82,6 +82,7 @@ const DEFAULT_SENSOR_PROFILES = {
     pressureLength: 1024,
     matrixWidth: 32,
     matrixHeight: 32,
+    lineOrder: 'jqbed',
   },
   handSinglePoint: {
     sensorType: 'handSinglePoint',
@@ -91,6 +92,7 @@ const DEFAULT_SENSOR_PROFILES = {
     pressureLength: 1024,
     matrixWidth: 32,
     matrixHeight: 32,
+    lineOrder: 'handSinglePoint',
   },
   fast1024: {
     sensorType: 'fast1024',
@@ -109,6 +111,7 @@ const DEFAULT_SENSOR_PROFILES = {
     pressureLength: 1024,
     matrixWidth: 32,
     matrixHeight: 32,
+    lineOrder: 'jqbed',
   },
   bed4096: {
     sensorType: 'bed4096',

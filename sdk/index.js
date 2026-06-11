@@ -9,6 +9,8 @@ const { BackendCommandRouter } = require('./src/backend/BackendCommandRouter');
 const { LicenseService } = require('./src/license/LicenseService');
 const { PathService } = require('./src/config/PathService');
 const { ReportService } = require('./src/report/ReportService');
+const { LineOrderRegistry } = require('./src/line/LineOrderRegistry');
+const { createProjectLineOrderRegistry, PROJECT_LINE_ORDER_NAMES } = require('./src/line/projectLineOrders');
 const { listBackendOperations, BACKEND_OPERATIONS } = require('./src/backend/backendOperations');
 const {
   DEFAULT_SENSOR_PROFILES,
@@ -29,6 +31,9 @@ module.exports = {
   LicenseService,
   PathService,
   ReportService,
+  LineOrderRegistry,
+  createProjectLineOrderRegistry,
+  PROJECT_LINE_ORDER_NAMES,
   BACKEND_OPERATIONS,
   listBackendOperations,
   DEFAULT_SENSOR_PROFILES,

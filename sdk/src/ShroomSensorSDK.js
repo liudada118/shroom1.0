@@ -5,6 +5,7 @@ const { CaptureStore } = require('./storage/CaptureStore');
 const { CsvExporter } = require('./export/CsvExporter');
 const { SensorSession } = require('./serial/SensorSession');
 const { DEFAULT_SENSOR_PROFILES } = require('./profiles');
+const { createProjectLineOrderRegistry } = require('./line/projectLineOrders');
 const { ZeroCalibrator } = require('./processing/ZeroCalibrator');
 const { ReplayService } = require('./replay/ReplayService');
 const { BackendCommandRouter } = require('./backend/BackendCommandRouter');
@@ -51,6 +52,8 @@ class ShroomSensorSDK {
     this.registry = new ProtocolRegistry({
       ...DEFAULT_SENSOR_PROFILES,
       ...(options.profiles || {}),
+    }, {
+      lineOrders: options.lineOrders || createProjectLineOrderRegistry(options.extraLineOrders || {}),
     });
     this.store = options.store || null;
     this.exporter = options.exporter || null;
@@ -94,6 +97,18 @@ class ShroomSensorSDK {
 
   registerProfile(sensorType, profile) {
     return this.registry.registerProfile(sensorType, profile);
+  }
+
+  registerLineOrder(name, handler) {
+    return this.registry.lineOrders.register(name, handler);
+  }
+
+  listLineOrders() {
+    return this.registry.lineOrders.list();
+  }
+
+  applyLineOrder(name, data, context = {}) {
+    return this.registry.lineOrders.apply(name, data, context);
   }
 
   async listPorts(options = {}) {
