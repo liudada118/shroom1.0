@@ -652,7 +652,9 @@ function normalizeCollectOptions(options = {}) {
   const matrixDownsample = options.matrixDownsample && typeof options.matrixDownsample === 'object'
     ? options.matrixDownsample
     : {};
+  const frequencyMode = options.frequencyMode === 'serial' ? 'serial' : 'custom';
   return {
+    frequencyMode,
     frequencyHz: normalizeCollectFrequency(options.frequencyHz ?? colHZ),
     matrixDownsample: {
       enabled: matrixDownsample.enabled === true,
@@ -673,6 +675,12 @@ function resetCollectionStorageClock() {
 }
 
 function shouldStoreCollectionFrame(channel = 'sit') {
+  if (collectOptions.frequencyMode === 'serial') {
+    const now = Date.now();
+    lastCollectionStorageAt[channel] = now;
+    oldTimeStamp = now;
+    return true;
+  }
   const hz = normalizeCollectFrequency(collectOptions.frequencyHz ?? colHZ);
   const intervalMs = 1000 / hz;
   const now = Date.now();
@@ -2765,7 +2773,7 @@ db2 = dbObj.db2
 
 let flag = false;
 let colHZ = 12, oldTimeStamp = new Date().getTime();
-let collectOptions = { frequencyHz: 12, matrixDownsample: { enabled: false } };
+let collectOptions = { frequencyMode: 'serial', frequencyHz: 12, matrixDownsample: { enabled: false } };
 let lastCollectionStorageAt = { sit: 0, back: 0, head: 0 };
 let splitBuffer = Buffer.from([0xaa, 0x55, 0x03, 0x99]);
 // let splitBuffer1 = Buffer.from([0xaa, 0x55, 0x03, 0x09]);

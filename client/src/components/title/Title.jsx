@@ -272,6 +272,7 @@ class Title extends React.Component {
       colHZ: 12,
       collectionModalOpen: false,
       collectLabel: '',
+      collectFrequencyMode: 'serial',
       collectMatrixMode: 'raw',
       collectSamplePoint: 'topLeft',
       pdfLoading: false,
@@ -728,8 +729,10 @@ class Title extends React.Component {
     const formattedDate = Date.now();
     const baseName = this.getCollectionBaseName();
     const collectHz = Math.max(1, Number(this.state.colHZ) || 12);
+    const frequencyMode = this.state.collectFrequencyMode === 'custom' ? 'custom' : 'serial';
     const collectOptions = {
-      frequencyHz: collectHz,
+      frequencyMode,
+      frequencyHz: frequencyMode === 'custom' ? collectHz : null,
       matrixDownsample: this.props.matrixName === smallBed12BType_title && this.state.collectMatrixMode === '16x16'
         ? {
           enabled: true,
@@ -748,7 +751,7 @@ class Title extends React.Component {
       : '';
 
     this.props.wsSendObj({
-      colHZ: collectHz,
+      colHZ: frequencyMode === 'custom' ? collectHz : null,
       flag: true,
       collectOptions,
       ...(nextLoadData ? { colName: nextLoadData } : { time: formattedDate }),
@@ -858,14 +861,35 @@ class Title extends React.Component {
           </div>
           <div>
             <div style={{ marginBottom: 4 }}>采集频率</div>
-            <Input
-              type='number'
-              min={1}
-              step={1}
-              value={this.state.colHZ}
-              onChange={(e) => this.setState({ colHZ: e.target.value })}
-              addonAfter='Hz'
+            <Radio.Group
+              value={this.state.collectFrequencyMode}
+              onChange={(e) => this.setState({ collectFrequencyMode: e.target.value })}
+              optionType='button'
+              buttonStyle='solid'
+              options={[
+                { label: '跟随串口频率', value: 'serial' },
+                { label: '自定义保存频率', value: 'custom' },
+              ]}
             />
+            {this.state.collectFrequencyMode === 'serial' ? (
+              <div className='collectionHelpText' style={{ marginTop: 8 }}>
+                按串口实际发送频率保存，每收到一帧就写入一帧。
+              </div>
+            ) : (
+              <div style={{ marginTop: 8 }}>
+                <Input
+                  type='number'
+                  min={1}
+                  step={1}
+                  value={this.state.colHZ}
+                  onChange={(e) => this.setState({ colHZ: e.target.value })}
+                  addonAfter='Hz'
+                />
+                <div className='collectionHelpText' style={{ marginTop: 6 }}>
+                  按目标 Hz 保存，建议设置为小于串口实际发送 Hz；高于串口频率时最多也只能按串口实际帧率保存。
+                </div>
+              </div>
+            )}
           </div>
           {isSmallBed12B ? (
             <>
