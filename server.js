@@ -12,7 +12,7 @@ const fs = require('fs');
 const { SerialPort } = require("serialport");
 const { DelimiterParser } = require("@serialport/parser-delimiter");
 const sqlite3 = require("./sqlite3-compat").verbose();
-const createCsvWriter = require("csv-writer").createObjectCsvWriter;
+const { createObjectCsvWriter: createCsvWriter, createObjectCsvStringifier: createCsvStringifier } = require("csv-writer");
 const {
   openWeb,
   interp,
@@ -640,6 +640,137 @@ function shouldSendRealtimeFrame(channel = 'sit') {
 
   lastHandGloveRealtimeSendAt[channel] = now;
   return true;
+}
+
+function normalizeCollectFrequency(value) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue) || numberValue <= 0) return 12;
+  return Math.min(200, Math.max(1, numberValue));
+}
+
+function normalizeCollectOptions(options = {}) {
+  const matrixDownsample = options.matrixDownsample && typeof options.matrixDownsample === 'object'
+    ? options.matrixDownsample
+    : {};
+  return {
+    frequencyHz: normalizeCollectFrequency(options.frequencyHz ?? colHZ),
+    matrixDownsample: {
+      enabled: matrixDownsample.enabled === true,
+      sourceWidth: Number(matrixDownsample.sourceWidth) || 32,
+      sourceHeight: Number(matrixDownsample.sourceHeight) || 32,
+      targetWidth: Number(matrixDownsample.targetWidth) || 16,
+      targetHeight: Number(matrixDownsample.targetHeight) || 16,
+      blockWidth: Number(matrixDownsample.blockWidth) || 2,
+      blockHeight: Number(matrixDownsample.blockHeight) || 2,
+      samplePoint: matrixDownsample.samplePoint || 'topLeft',
+    },
+  };
+}
+
+function resetCollectionStorageClock() {
+  oldTimeStamp = 0;
+  lastCollectionStorageAt = { sit: 0, back: 0, head: 0 };
+}
+
+function shouldStoreCollectionFrame(channel = 'sit') {
+  const hz = normalizeCollectFrequency(collectOptions.frequencyHz ?? colHZ);
+  const intervalMs = 1000 / hz;
+  const now = Date.now();
+  const lastAt = lastCollectionStorageAt[channel] || 0;
+  if (lastAt && now - lastAt < intervalMs) {
+    return false;
+  }
+  lastCollectionStorageAt[channel] = now;
+  oldTimeStamp = now;
+  return true;
+}
+
+function getDownsampleOffset(samplePoint = 'topLeft') {
+  switch (samplePoint) {
+    case 'topRight':
+      return { row: 0, col: 1 };
+    case 'bottomLeft':
+      return { row: 1, col: 0 };
+    case 'bottomRight':
+      return { row: 1, col: 1 };
+    case 'topLeft':
+    default:
+      return { row: 0, col: 0 };
+  }
+}
+
+function downsampleMatrixByPoint(data, options = {}) {
+  if (!Array.isArray(data)) return [];
+  const sourceWidth = Number(options.sourceWidth) || 32;
+  const sourceHeight = Number(options.sourceHeight) || 32;
+  const targetWidth = Number(options.targetWidth) || Math.floor(sourceWidth / 2);
+  const targetHeight = Number(options.targetHeight) || Math.floor(sourceHeight / 2);
+  const blockWidth = Number(options.blockWidth) || Math.floor(sourceWidth / targetWidth);
+  const blockHeight = Number(options.blockHeight) || Math.floor(sourceHeight / targetHeight);
+  const offset = getDownsampleOffset(options.samplePoint);
+  const result = [];
+
+  for (let row = 0; row < targetHeight; row++) {
+    for (let col = 0; col < targetWidth; col++) {
+      const sourceRow = Math.min(sourceHeight - 1, row * blockHeight + Math.min(offset.row, blockHeight - 1));
+      const sourceCol = Math.min(sourceWidth - 1, col * blockWidth + Math.min(offset.col, blockWidth - 1));
+      result.push(data[sourceRow * sourceWidth + sourceCol] ?? 0);
+    }
+  }
+
+  return result;
+}
+
+function shouldDownsampleSmallBed12BCollection() {
+  return file === SMALL_BED_12B_TYPE && collectOptions.matrixDownsample?.enabled === true;
+}
+
+function buildSmallBed12BCollectionStorageData(frameToStore) {
+  const sourceData = Array.isArray(frameToStore?.sitData) ? frameToStore.sitData : [];
+  if (!shouldDownsampleSmallBed12BCollection()) {
+    return JSON.stringify(sourceData);
+  }
+
+  const options = collectOptions.matrixDownsample || {};
+  const downsampled = downsampleMatrixByPoint(sourceData, options);
+  return JSON.stringify({
+    sitData: downsampled,
+    pressureData: downsampled,
+    matrixWidth: Number(options.targetWidth) || 16,
+    matrixHeight: Number(options.targetHeight) || 16,
+    sourceMatrixWidth: Number(options.sourceWidth) || 32,
+    sourceMatrixHeight: Number(options.sourceHeight) || 32,
+    matrixDownsample: {
+      enabled: true,
+      samplePoint: options.samplePoint || 'topLeft',
+      blockWidth: Number(options.blockWidth) || 2,
+      blockHeight: Number(options.blockHeight) || 2,
+    },
+  });
+}
+
+function buildSmallBedPlaybackPayload(row, extra = {}) {
+  const storedData = parseStoredFrameData(row);
+  if (storedData && typeof storedData === 'object' && !Array.isArray(storedData)) {
+    return {
+      sitData: Array.isArray(storedData.sitData)
+        ? storedData.sitData
+        : Array.isArray(storedData.pressureData)
+          ? storedData.pressureData
+          : [],
+      matrixWidth: storedData.matrixWidth,
+      matrixHeight: storedData.matrixHeight,
+      matrixDownsample: storedData.matrixDownsample,
+      time: row?.timestamp,
+      ...extra,
+    };
+  }
+
+  return {
+    sitData: Array.isArray(storedData) ? storedData : [],
+    time: row?.timestamp,
+    ...extra,
+  };
 }
 
 function parseStoredSensorFrame(storedData, sensorType = '') {
@@ -1396,6 +1527,132 @@ function initDb(fileStr) {
   return _initDbFromModule(fileStr, filePath, runtimeResourceRoot);
 }
 
+const HISTORY_EAGER_ROW_LIMIT = 50000;
+const HISTORY_CHART_SAMPLE_LIMIT = 2000;
+const historyStmtCache = new WeakMap();
+
+function getNativeDb(dbRef) {
+  return dbRef && (dbRef._db || dbRef.db || null);
+}
+
+function getHistoryStmt(dbRef, sql) {
+  const nativeDb = getNativeDb(dbRef);
+  if (!nativeDb || typeof nativeDb.prepare !== 'function') {
+    throw new Error('invalid history database handle');
+  }
+  let cache = historyStmtCache.get(nativeDb);
+  if (!cache) {
+    cache = new Map();
+    historyStmtCache.set(nativeDb, cache);
+  }
+  if (!cache.has(sql)) {
+    cache.set(sql, nativeDb.prepare(sql));
+  }
+  return cache.get(sql);
+}
+
+function dbGetHistory(dbRef, sql, params = []) {
+  return getHistoryStmt(dbRef, sql).get(...params);
+}
+
+function dbAllHistory(dbRef, sql, params = []) {
+  return getHistoryStmt(dbRef, sql).all(...params);
+}
+
+function ensureHistoryIndexes(dbRef) {
+  const nativeDb = getNativeDb(dbRef);
+  if (!nativeDb || typeof nativeDb.exec !== 'function') return;
+  try {
+    nativeDb.exec('CREATE INDEX IF NOT EXISTS idx_matrix_date_id ON matrix(date, id)');
+  } catch (error) {
+    logger.warn('[History] failed to ensure index:', error.message || error);
+  }
+}
+
+function getHistoryStats(dbRef, date) {
+  if (!dbRef || !date) return { count: 0, minId: 0, maxId: 0 };
+  ensureHistoryIndexes(dbRef);
+  const row = dbGetHistory(
+    dbRef,
+    'SELECT COUNT(*) AS count, MIN(id) AS minId, MAX(id) AS maxId FROM matrix WHERE date = ?',
+    [date],
+  ) || {};
+  return {
+    count: Number(row.count || 0),
+    minId: Number(row.minId || 0),
+    maxId: Number(row.maxId || 0),
+  };
+}
+
+function queryHistoryRows(dbRef, date, limit, offset = 0) {
+  if (!dbRef || !date || limit <= 0) return [];
+  ensureHistoryIndexes(dbRef);
+  return dbAllHistory(
+    dbRef,
+    'SELECT * FROM matrix WHERE date = ? ORDER BY id ASC LIMIT ? OFFSET ?',
+    [date, limit, Math.max(0, offset)],
+  );
+}
+
+function queryHistoryTimestampSample(dbRef, date, limit = 21) {
+  return queryHistoryRows(dbRef, date, limit, 0)
+    .map((row) => row.timestamp)
+    .filter((value) => value != null);
+}
+
+function queryHistoryRowsFromId(dbRef, date, minId, limit) {
+  if (!dbRef || !date || !minId || limit <= 0) return [];
+  ensureHistoryIndexes(dbRef);
+  return dbAllHistory(
+    dbRef,
+    'SELECT * FROM matrix WHERE date = ? AND id >= ? ORDER BY id ASC LIMIT ?',
+    [date, minId, limit],
+  );
+}
+
+function createLazyHistoryRows(dbRef, date, stats) {
+  const cache = new Map();
+  const maxCacheSize = 512;
+  const lengthValue = Number(stats?.count || 0);
+  const minId = Number(stats?.minId || 0);
+
+  const readByIndex = (index) => {
+    if (!Number.isInteger(index) || index < 0 || index >= lengthValue || !minId) return undefined;
+    if (cache.has(index)) return cache.get(index);
+    const row = dbGetHistory(
+      dbRef,
+      'SELECT * FROM matrix WHERE date = ? AND id >= ? ORDER BY id ASC LIMIT 1',
+      [date, minId + index],
+    );
+    if (cache.size >= maxCacheSize) {
+      const oldestKey = cache.keys().next().value;
+      cache.delete(oldestKey);
+    }
+    cache.set(index, row);
+    return row;
+  };
+
+  return new Proxy([], {
+    get(target, prop) {
+      if (prop === 'length') return lengthValue;
+      if (prop === '__lazyHistoryRows') return true;
+      if (prop === '__historyDate') return date;
+      if (prop === '__historyDb') return dbRef;
+      if (prop === Symbol.iterator) {
+        return function* lazyIterator() {
+          for (let i = 0; i < lengthValue; i++) {
+            yield readByIndex(i);
+          }
+        };
+      }
+      if (typeof prop === 'string' && /^\d+$/.test(prop)) {
+        return readByIndex(Number(prop));
+      }
+      return target[prop];
+    },
+  });
+}
+
 function getHistorySeries({ sitRows = [], backRows = [], start = 0, end = null, file = '' }) {
   const safeSitRows = Array.isArray(sitRows) ? sitRows : [];
   const safeBackRows = Array.isArray(backRows) ? backRows : [];
@@ -1410,8 +1667,12 @@ function getHistorySeries({ sitRows = [], backRows = [], start = 0, end = null, 
   const press = [];
   const area = [];
   const time = [];
+  const rangeLength = Math.max(0, rangeEnd - rangeStart);
+  const sampleStep = rangeLength > HISTORY_CHART_SAMPLE_LIMIT
+    ? Math.ceil(rangeLength / HISTORY_CHART_SAMPLE_LIMIT)
+    : 1;
 
-  for (let i = rangeStart; i < rangeEnd; i++) {
+  for (let i = rangeStart; i < rangeEnd; i += sampleStep) {
     const sitData = hasSit && safeSitRows[i] ? normalizeHistoryPressureData(safeSitRows[i], file) : null;
     const backData = hasBack && safeBackRows[i] ? normalizeHistoryPressureData(safeBackRows[i], file) : null;
     const sitTotalValue = sitData ? sitData.reduce((a, b) => a + b, 0) : 0;
@@ -1435,7 +1696,746 @@ function getHistorySeries({ sitRows = [], backRows = [], start = 0, end = null, 
     press,
     area,
     time,
+    sampleStep,
   };
+}
+
+function getHistoryLengthFromCounts(...counts) {
+  const positiveCounts = counts
+    .map((value) => Number(value || 0))
+    .filter((value) => value > 0);
+  if (!positiveCounts.length) return 0;
+  return Math.min(...positiveCounts);
+}
+
+function createHistoryRowsForPlayback(dbRef, date, stats, eager) {
+  if (!stats?.count) return [];
+  return eager
+    ? queryHistoryRows(dbRef, date, stats.count, 0)
+    : createLazyHistoryRows(dbRef, date, stats);
+}
+
+function buildZeroPlaybackFrame() {
+  return file === "bigBed"
+    ? new Array(2048).fill(0)
+    : new Array(1024).fill(0);
+}
+
+function broadcastHistorySelectionPayload(payload) {
+  server.clients.forEach(function each(client) {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify(payload));
+    }
+  });
+}
+
+function loadSelectedHistory(dateLabel) {
+  try {
+    stopPlaybackTimer();
+    nowIndex = 0;
+    localData = [];
+    localDataBack = [];
+    localDataHead = [];
+
+    const sitStats = getHistoryStats(db, dateLabel);
+    const backStats = isCar(file) && db1 ? getHistoryStats(db1, dateLabel) : { count: 0, minId: 0, maxId: 0 };
+    const headStats = isThreePortFile(file) && db2 ? getHistoryStats(db2, dateLabel) : { count: 0, minId: 0, maxId: 0 };
+    const totalLength = isThreePortFile(file)
+      ? getHistoryLengthFromCounts(sitStats.count, backStats.count, headStats.count)
+      : isCar(file)
+        ? getHistoryLengthFromCounts(sitStats.count, backStats.count)
+        : getHistoryLengthFromCounts(sitStats.count);
+    const maxRows = Math.max(sitStats.count, backStats.count, headStats.count);
+    const eager = maxRows <= HISTORY_EAGER_ROW_LIMIT;
+
+    localData = createHistoryRowsForPlayback(db, dateLabel, sitStats, eager);
+    if (isCar(file) && db1) {
+      localDataBack = createHistoryRowsForPlayback(db1, dateLabel, backStats, eager);
+    }
+    if (isThreePortFile(file) && db2) {
+      localDataHead = createHistoryRowsForPlayback(db2, dateLabel, headStats, eager);
+    }
+
+    length = totalLength;
+    indexArr = [0, Math.max(length - 2, 0)];
+    historyArr = [0, length];
+    const timestampDb = sitStats.count ? db : (backStats.count && db1 ? db1 : db);
+    timeStamp = queryHistoryTimestampSample(timestampDb, dateLabel, 21);
+    detectedInterval = calcDetectedInterval(timeStamp);
+    interval = detectedInterval;
+
+    const historySeries = getHistorySeries({
+      sitRows: localData,
+      backRows: localDataBack,
+      start: 0,
+      end: length,
+      file,
+    });
+
+    logger.info(`[History] selected ${dateLabel}: length=${length}, eager=${eager}, sampleStep=${historySeries.sampleStep || 1}`);
+
+    broadcastHistorySelectionPayload({
+      length,
+      time: timeStamp,
+      index: nowIndex,
+      pressArr: historySeries.press,
+      areaArr: historySeries.area,
+      historySampleStep: historySeries.sampleStep || 1,
+      historyLazy: !eager,
+      sitData: buildZeroPlaybackFrame(),
+    });
+
+    if (isThreePortFile(file)) {
+      broadcastHistorySelectionPayload({
+        headData: file === "bigBed" ? new Array(2048).fill(0) : new Array(100).fill(0),
+      });
+    }
+  } catch (error) {
+    logger.error('[History] failed to load selected history:', error);
+    broadcastHistorySelectionPayload({
+      historyError: error.message || 'load history failed',
+    });
+  }
+}
+
+function formatCsvDatePart(value) {
+  let str = String(value || '');
+  if (str.includes(" ")) {
+    str = str.split(" ")[0];
+  } else {
+    str = timeStampTo_Date(Number(str));
+  }
+  return str;
+}
+
+function getCsvElapsedSecondsFromBase(row, rowIndex, baseTimestamp, fallbackIndex = 0) {
+  if (row?.timestamp != null && baseTimestamp != null) {
+    const diffMs = Number(row.timestamp) - Number(baseTimestamp);
+    if (Number.isFinite(diffMs) && diffMs >= 0) {
+      return (diffMs / 1000).toFixed(3);
+    }
+  }
+  const fallbackHz = Number(colHZ) > 0 ? Number(colHZ) : 12;
+  return (fallbackIndex / fallbackHz).toFixed(3);
+}
+
+function writeStreamChunk(stream, chunk) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      stream.off('error', onError);
+      stream.off('drain', onDrain);
+    };
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+    const onDrain = () => {
+      cleanup();
+      resolve();
+    };
+    stream.once('error', onError);
+    if (!stream.write(chunk)) {
+      stream.once('drain', onDrain);
+    } else {
+      cleanup();
+      resolve();
+    }
+  });
+}
+
+function closeWriteStream(stream) {
+  return new Promise((resolve, reject) => {
+    const onError = (error) => {
+      stream.off('finish', onFinish);
+      reject(error);
+    };
+    const onFinish = () => {
+      stream.off('error', onError);
+      resolve();
+    };
+    stream.once('error', onError);
+    stream.once('finish', onFinish);
+    stream.end();
+  });
+}
+
+async function writeCsvFileInBatches({
+  csvFilePath,
+  header,
+  dbRef,
+  date,
+  start = 0,
+  end = null,
+  mapRow,
+  batchSize = 1000,
+}) {
+  const stats = getHistoryStats(dbRef, date);
+  if (!stats.count) return 0;
+  const rangeStart = Math.max(0, Number(start || 0));
+  const rangeEnd = Math.min(end == null ? stats.count : Number(end), stats.count);
+  if (rangeStart >= rangeEnd) return 0;
+  const firstRow = queryHistoryRowsFromId(dbRef, date, stats.minId + rangeStart, 1)[0];
+  const baseTimestamp = firstRow?.timestamp ?? null;
+  const stringifier = createCsvStringifier({ header });
+  const stream = fs.createWriteStream(csvFilePath, { encoding: 'utf8' });
+  let written = 0;
+  let nextId = stats.minId + rangeStart;
+
+  try {
+    await writeStreamChunk(stream, stringifier.getHeaderString());
+    while (written < rangeEnd - rangeStart) {
+      const rows = queryHistoryRowsFromId(
+        dbRef,
+        date,
+        nextId,
+        Math.min(batchSize, rangeEnd - rangeStart - written),
+      );
+      if (!rows.length) break;
+      const records = [];
+      for (let batchIndex = 0; batchIndex < rows.length; batchIndex++) {
+        const row = rows[batchIndex];
+        const absoluteIndex = rangeStart + written + batchIndex;
+        records.push(mapRow(row, {
+          absoluteIndex,
+          relativeIndex: written + batchIndex,
+          baseTimestamp,
+        }));
+      }
+      await writeStreamChunk(stream, stringifier.stringifyRecords(records));
+      written += rows.length;
+      nextId = Number(rows[rows.length - 1].id) + 1;
+    }
+    await closeWriteStream(stream);
+    return written;
+  } catch (error) {
+    stream.destroy();
+    throw error;
+  }
+}
+
+function buildGenericSitCsvRow(row, { absoluteIndex, relativeIndex, baseTimestamp }, csvTitle, options = {}) {
+  const {
+    isHandType = false,
+    isHandGloveCsvType = false,
+    shouldWriteZeroFrame = false,
+    shouldWriteDetectionPoint = false,
+  } = options;
+  const rawData = JSON.parse(row?.data || '[]');
+  let pressureData, rotateData, zeroFrameData = [];
+  let tempFullBedPayload = null;
+  if (file === TEMP_FULL_BED_TYPE) {
+    tempFullBedPayload = buildTempFullBedPlaybackPayload(row);
+    pressureData = tempFullBedPayload.sitData;
+    rotateData = [];
+  } else if (shouldWriteZeroFrame) {
+    const storedFrame = parseStoredSensorFrame(rawData, file);
+    pressureData = storedFrame.pressureData;
+    rotateData = storedFrame.rotateData;
+    zeroFrameData = storedFrame.zeroFrame;
+  } else if (isHandType) {
+    if (rawData.length >= 260) {
+      pressureData = rawData.slice(0, 256);
+      rotateData = rawData.slice(256, 260);
+    } else {
+      pressureData = rawData.slice(0, rawData.length - 4);
+      rotateData = rawData.slice(rawData.length - 4);
+    }
+  } else {
+    pressureData = Array.isArray(rawData) ? rawData : getHistoryPressureData(row);
+    rotateData = [];
+  }
+  if (file === WHOLE_CHAIR_TYPE) {
+    pressureData = normalizeWholeChairFrame('sit', pressureData);
+  }
+  if (shouldTransposeSmallBedRawMatrix(file)) {
+    pressureData = transposeSquareMatrix(pressureData);
+  }
+  const press = pressureData.reduce((a, b) => a + b, 0);
+  const area = pressureData.filter((a) => a > 0).length;
+  const newData = {
+    time: timeStampToDate(row?.timestamp),
+    pressureArea: area,
+    pressure: totalToN(press),
+    realData: JSON.stringify(pressureData),
+    index: getCsvElapsedSecondsFromBase(row, absoluteIndex, baseTimestamp, relativeIndex),
+    max: findMax(pressureData),
+    rotate: rotateData.length ? JSON.stringify(rotateData) : '',
+    zeroFrame: zeroFrameData.length ? JSON.stringify(zeroFrameData) : '',
+    temperatureData: tempFullBedPayload ? JSON.stringify(tempFullBedPayload.temperatureData.map((value) => Number(value).toFixed(1))) : '',
+    temperatureAvg: tempFullBedPayload?.temperatureAvg != null ? Number(tempFullBedPayload.temperatureAvg).toFixed(1) : '',
+    temperatureK: tempFullBedPayload?.temperatureK ?? '',
+  };
+  if (shouldWriteDetectionPoint) {
+    newData.detectionPoint = pressureData[pressureData.length - 1] ?? '';
+  }
+  if (isHandGloveCsvType) {
+    Object.assign(newData, buildHandGloveCsvSegments(pressureData, 'left'));
+  }
+  return newData;
+}
+
+function buildGenericBackCsvRow(row, { absoluteIndex, relativeIndex, baseTimestamp }, options = {}) {
+  const {
+    isBackHandType = false,
+    isBackHandGloveType = false,
+    shouldWriteBackZeroFrame = false,
+  } = options;
+  const rawBackData = JSON.parse(row?.data || '[]');
+  let backData, backRotateData, backZeroFrameData = [];
+  if (shouldWriteBackZeroFrame) {
+    const storedBackFrame = parseStoredSensorFrame(rawBackData, file);
+    backData = storedBackFrame.pressureData;
+    backRotateData = storedBackFrame.rotateData;
+    backZeroFrameData = storedBackFrame.zeroFrame;
+  } else if (isBackHandType && rawBackData.length >= 260) {
+    backData = rawBackData.slice(0, 256);
+    backRotateData = rawBackData.slice(256, 260);
+  } else if (isBackHandType && rawBackData.length > 4) {
+    backData = rawBackData.slice(0, rawBackData.length - 4);
+    backRotateData = rawBackData.slice(rawBackData.length - 4);
+  } else {
+    backData = rawBackData;
+    backRotateData = [];
+  }
+  if (file === WHOLE_CHAIR_TYPE) {
+    backData = normalizeWholeChairFrame('back', backData);
+  }
+  const press = backData.reduce((a, b) => a + b, 0);
+  const area = backData.filter((a) => a > 10).length;
+  const area1 = backData.filter((a) => a > 1).length;
+  const area10Data = backData.filter((a) => a > 10);
+  const total10 = area10Data.reduce((a, b) => a + b, 0);
+  const total1 = backData.reduce((a, b) => a + b, 0);
+  const newData = {
+    time: timeStampToDate(row?.timestamp),
+    pressureArea: area,
+    pressure: totalToN(press, 1.3),
+    realData: JSON.stringify(backData),
+    index: getCsvElapsedSecondsFromBase(row, absoluteIndex, baseTimestamp, relativeIndex),
+    area1,
+    area10: area10Data.length,
+    total1,
+    total10,
+    total10area10: total10 / (area10Data.length || 1),
+    total1area1: total1 / (area1 || 1),
+    max: findMax(backData),
+    rotate: backRotateData.length ? JSON.stringify(backRotateData) : '',
+    zeroFrame: backZeroFrameData.length ? JSON.stringify(backZeroFrameData) : '',
+  };
+  if (isBackHandGloveType) {
+    Object.assign(newData, buildHandGloveCsvSegments(backData, 'right'));
+  }
+  return newData;
+}
+
+function buildHeadCsvRow(row, { absoluteIndex, relativeIndex, baseTimestamp }) {
+  const headData = file === WHOLE_CHAIR_TYPE
+    ? normalizeWholeChairFrame('head', row?.data)
+    : JSON.parse(row?.data || '[]');
+  const press = headData.reduce((a, b) => a + b, 0);
+  const area = headData.filter((a) => a > 10).length;
+  const area1 = headData.filter((a) => a > 1).length;
+  const area10Data = headData.filter((a) => a > 10);
+  const total10 = area10Data.reduce((a, b) => a + b, 0);
+  const total1 = headData.reduce((a, b) => a + b, 0);
+  return {
+    time: timeStampToDate(row?.timestamp),
+    pressureArea: area,
+    pressure: totalToN(press, 1.3),
+    realData: JSON.stringify(headData),
+    index: getCsvElapsedSecondsFromBase(row, absoluteIndex, baseTimestamp, relativeIndex),
+    area1,
+    area10: area10Data.length,
+    total1,
+    total10,
+    total10area10: total10 / (area10Data.length || 1),
+    total1area1: total1 / (area1 || 1),
+    max: findMax(headData),
+  };
+}
+
+function getDefaultSitCsvHeaders(csvTitle, {
+  isHandGloveCsvType = false,
+  shouldWriteDetectionPoint = false,
+  shouldWriteZeroFrame = false,
+  isHandType = false,
+} = {}) {
+  const csvHeaders = [
+    { id: "index", title: csvTitle.index },
+    { id: "max", title: csvTitle.max },
+    { id: "time", title: csvTitle.time },
+    { id: "pressureArea", title: csvTitle.pressureArea },
+    { id: "pressure", title: csvTitle.pressure },
+    { id: "realData", title: csvTitle.realData },
+  ];
+  if (isHandGloveCsvType) {
+    appendHandGloveCsvHeaders(csvHeaders, csvTitle);
+  }
+  if (shouldWriteDetectionPoint) {
+    csvHeaders.push({ id: "detectionPoint", title: csvTitle.detectionPoint });
+  }
+  if (shouldWriteZeroFrame) {
+    csvHeaders.push({ id: "zeroFrame", title: csvTitle.zeroFrame });
+  }
+  if (isHandType) {
+    csvHeaders.push({ id: "rotate", title: csvTitle.rotate });
+  }
+  if (file === TEMP_FULL_BED_TYPE) {
+    csvHeaders.push(
+      { id: "temperatureData", title: csvTitle.temperatureData },
+      { id: "temperatureAvg", title: csvTitle.temperatureAvg },
+      { id: "temperatureK", title: csvTitle.temperatureK },
+    );
+  }
+  return csvHeaders;
+}
+
+function getDefaultBackCsvHeaders(csvTitle, {
+  isBackHandGloveType = false,
+  shouldWriteBackZeroFrame = false,
+  isBackHandType = false,
+} = {}) {
+  const backCsvHeaders = [
+    { id: "index", title: csvTitle.index },
+    { id: "time", title: csvTitle.time },
+    { id: "max", title: csvTitle.max },
+    { id: "pressureArea", title: csvTitle.pressureArea },
+    { id: "pressure", title: csvTitle.pressure },
+    { id: "realData", title: csvTitle.realData },
+  ];
+  if (isBackHandGloveType) {
+    appendHandGloveCsvHeaders(backCsvHeaders, csvTitle);
+  }
+  if (shouldWriteBackZeroFrame) {
+    backCsvHeaders.push({ id: "zeroFrame", title: csvTitle.zeroFrame });
+  }
+  if (isBackHandType) {
+    backCsvHeaders.push({ id: "rotate", title: csvTitle.rotate });
+  }
+  return backCsvHeaders;
+}
+
+function getHeadCsvHeaders(csvTitle) {
+  return [
+    { id: "index", title: csvTitle.index },
+    { id: "time", title: csvTitle.time },
+    { id: "max", title: csvTitle.max },
+    { id: "pressureArea", title: csvTitle.pressureArea },
+    { id: "pressure", title: csvTitle.pressure },
+    { id: "realData", title: csvTitle.realData },
+  ];
+}
+
+async function exportHandGloveDoubleCsvStreaming({ date, csvTitle, csvTargetPath, sendCsvSuccess, sendCsvFailed }) {
+  const leftStats = getHistoryStats(db, date);
+  const rightStats = getHistoryStats(db1, date);
+  const totalLength = Math.max(leftStats.count, rightStats.count);
+  if (!totalLength) {
+    sendCsvFailed(new Error('no rows to export'));
+    return;
+  }
+  const start = Math.max(0, historyArr[0] || 0);
+  const end = Math.min(historyArr[1] || totalLength, totalLength);
+  const sideLabel = csvTitle === CSV_TITLES.en
+    ? { left: 'left', right: 'right' }
+    : { left: '左手', right: '右手' };
+  const csvHeaders = [
+    { id: "index", title: csvTitle.index },
+    { id: "time", title: csvTitle.time },
+    { id: "leftMax", title: `${sideLabel.left}${csvTitle.max}` },
+    { id: "leftPressureArea", title: `${sideLabel.left}${csvTitle.pressureArea}` },
+    { id: "leftPressure", title: `${sideLabel.left}${csvTitle.pressure}` },
+    { id: "leftRealData", title: `${sideLabel.left}${csvTitle.realData}` },
+    { id: "leftZeroFrame", title: `${sideLabel.left}${csvTitle.zeroFrame}` },
+    { id: "leftRotate", title: `${sideLabel.left}${csvTitle.rotate}` },
+    { id: "rightMax", title: `${sideLabel.right}${csvTitle.max}` },
+    { id: "rightPressureArea", title: `${sideLabel.right}${csvTitle.pressureArea}` },
+    { id: "rightPressure", title: `${sideLabel.right}${csvTitle.pressure}` },
+    { id: "rightRealData", title: `${sideLabel.right}${csvTitle.realData}` },
+    { id: "rightZeroFrame", title: `${sideLabel.right}${csvTitle.zeroFrame}` },
+    { id: "rightRotate", title: `${sideLabel.right}${csvTitle.rotate}` },
+  ];
+  appendPrefixedHandGloveCsvHeaders(csvHeaders, 'left', csvTitle);
+  appendPrefixedHandGloveCsvHeaders(csvHeaders, 'right', csvTitle);
+
+  let str = formatCsvDatePart(nowGetTime || date);
+  const csvFilePath = csvTargetPath(`${csvTitle === CSV_TITLES.en ? 'glove2' : '触觉手套2'}${str}.csv`);
+  const stringifier = createCsvStringifier({ header: csvHeaders });
+  const stream = fs.createWriteStream(csvFilePath, { encoding: 'utf8' });
+  let written = 0;
+  let leftNextId = leftStats.minId + start;
+  let rightNextId = rightStats.minId + start;
+  const baseRow = (leftStats.count ? queryHistoryRowsFromId(db, date, leftNextId, 1) : queryHistoryRowsFromId(db1, date, rightNextId, 1))[0];
+  const baseTimestamp = baseRow?.timestamp ?? null;
+  const batchSize = 1000;
+
+  try {
+    await writeStreamChunk(stream, stringifier.getHeaderString());
+    while (written < end - start) {
+      const limit = Math.min(batchSize, end - start - written);
+      const leftRows = queryHistoryRowsFromId(db, date, leftNextId, limit);
+      const rightRows = queryHistoryRowsFromId(db1, date, rightNextId, limit);
+      const count = Math.max(leftRows.length, rightRows.length);
+      if (!count) break;
+      const records = [];
+      for (let index = 0; index < count; index++) {
+        const leftFrame = buildStoredHandGloveCsvFrame(leftRows[index], 'left');
+        const rightFrame = buildStoredHandGloveCsvFrame(rightRows[index], 'right');
+        const leftData = leftFrame.pressureData;
+        const rightData = rightFrame.pressureData;
+        const leftPress = leftData.reduce((sum, value) => sum + value, 0);
+        const rightPress = rightData.reduce((sum, value) => sum + value, 0);
+        const leftArea = leftData.filter((value) => value > 0).length;
+        const rightArea = rightData.filter((value) => value > 0).length;
+        const baseFrameRow = leftRows[index] || rightRows[index];
+        records.push({
+          index: getCsvElapsedSecondsFromBase(baseFrameRow, start + written + index, baseTimestamp, written + index),
+          time: timeStampToDate(leftFrame.timestamp || rightFrame.timestamp || Date.now()),
+          leftMax: leftData.length ? findMax(leftData) : 0,
+          leftPressureArea: leftArea,
+          leftPressure: totalToN(leftPress),
+          leftRealData: JSON.stringify(leftData),
+          leftZeroFrame: leftFrame.zeroFrame.length ? JSON.stringify(leftFrame.zeroFrame) : '',
+          leftRotate: leftFrame.rotateData.length ? JSON.stringify(leftFrame.rotateData) : '',
+          rightMax: rightData.length ? findMax(rightData) : 0,
+          rightPressureArea: rightArea,
+          rightPressure: totalToN(rightPress),
+          rightRealData: JSON.stringify(rightData),
+          rightZeroFrame: rightFrame.zeroFrame.length ? JSON.stringify(rightFrame.zeroFrame) : '',
+          rightRotate: rightFrame.rotateData.length ? JSON.stringify(rightFrame.rotateData) : '',
+          ...buildPrefixedHandGloveCsvSegments(leftData, 'left'),
+          ...buildPrefixedHandGloveCsvSegments(rightData, 'right'),
+        });
+      }
+      await writeStreamChunk(stream, stringifier.stringifyRecords(records));
+      written += count;
+      if (leftRows.length) leftNextId = Number(leftRows[leftRows.length - 1].id) + 1;
+      if (rightRows.length) rightNextId = Number(rightRows[rightRows.length - 1].id) + 1;
+    }
+    await closeWriteStream(stream);
+    sendCsvSuccess([csvFilePath]);
+  } catch (error) {
+    stream.destroy();
+    sendCsvFailed(error, [csvFilePath]);
+  }
+}
+
+async function exportHistoryCsvStreaming({ date, csvTitle, csvTargetPath, sendCsvSuccess, sendCsvFailed, downloadOptions }) {
+  try {
+    const files = [];
+    const start = Math.max(0, historyArr[0] || 0);
+    const end = historyArr[1] || null;
+    const str = formatCsvDatePart(nowGetTime || date);
+
+    if (file === HAND_GLOVE_DOUBLE) {
+      await exportHandGloveDoubleCsvStreaming({ date, csvTitle, csvTargetPath, sendCsvSuccess, sendCsvFailed, downloadOptions });
+      return;
+    }
+
+    if (file === "bigBed") {
+      let startPressure = 0;
+      let pressureTime = 0;
+      let streamSmoothValue = 0;
+      const csvFilePath = csvTargetPath(`${file}${String(nowGetTime || date).replace(/[/:]/g, "-")}.csv`);
+      await writeCsvFileInBatches({
+        csvFilePath,
+        header: [
+          { id: "time", title: csvTitle.time },
+          { id: "pressureArea", title: csvTitle.pressureArea },
+          { id: "pressValue", title: csvTitle.pressValue },
+          { id: "pressure", title: csvTitle.pressure },
+          { id: "pressuremmgH", title: csvTitle.pressuremmgH },
+          { id: "realData", title: csvTitle.realData },
+          { id: "pressLine", title: csvTitle.pressLine },
+        ],
+        dbRef: db,
+        date,
+        start,
+        end,
+        mapRow: (row) => {
+          const wsData = JSON.parse(row?.data || '[]').map((a) => a < 10 ? 0 : a);
+          const realArr = wsData;
+          const bodyArr = [];
+          for (let col = 0; col < 64; col++) {
+            let num = 0;
+            for (let r = 0; r < 32; r++) {
+              num += realArr[r * 64 + col];
+            }
+            streamSmoothValue = streamSmoothValue + (num / 32 - streamSmoothValue) / 3;
+            bodyArr.push(streamSmoothValue.toFixed(2));
+          }
+          const total = realArr.reduce((a, b) => a + b, 0);
+          let nonZeroLength = realArr.filter((a) => a > 0).length || 1;
+          let pressure = calculatePressure(total / nonZeroLength);
+          const newPressure = total / nonZeroLength;
+          const change = objChange(newPressure, startPressure, 4);
+          if (change) {
+            startPressure = newPressure;
+            pressureTime = 0;
+          } else {
+            pressureTime++;
+            pressure = calculatePressure(calPress(startPressure, newPressure, pressureTime));
+            if (pressureTime > 240 * 13) pressureTime = 240 * 13;
+          }
+          return {
+            time: timeStampToDate(row?.timestamp),
+            pressureArea: realArr.filter((a) => a > 0).length,
+            pressure: total / nonZeroLength,
+            realData: realArr,
+            pressValue: wsData.reduce((a, b) => a + b, 0),
+            pressuremmgH: pressure,
+            pressLine: bodyArr,
+          };
+        },
+      });
+      files.push(csvFilePath);
+      sendCsvSuccess(files);
+      return;
+    }
+
+    if (isSmallBedMatrixType(file) || file === SMALL_BED_12B_TYPE || file === 'smallBed1') {
+      const csvFilePath = csvTargetPath(`${file}${str}.csv`);
+      await writeCsvFileInBatches({
+        csvFilePath,
+        header: [
+          { id: "index", title: csvTitle.index },
+          { id: "time", title: csvTitle.time },
+          { id: "pressureArea", title: csvTitle.pressureArea },
+          { id: "pressure", title: csvTitle.pressure },
+          { id: "realInitData", title: csvTitle.realInitData },
+          { id: "pressuremmgH", title: csvTitle.pressuremmgH },
+          { id: "realData", title: csvTitle.realData },
+          { id: "dataToInterpGauss", title: csvTitle.dataToInterpGauss },
+        ],
+        dbRef: db,
+        date,
+        start,
+        end,
+        mapRow: (row, meta) => {
+          const storedFrame = parseStoredFrameData(row);
+          const matrixWidth = Number(storedFrame?.matrixWidth) || Math.sqrt(normalizeHistoryPressureData(row, file).length) || 32;
+          const matrixHeight = Number(storedFrame?.matrixHeight) || matrixWidth;
+          let sitData = normalizeHistoryPressureData(row, file);
+          if (shouldTransposeSmallBedRawMatrix(file) && matrixWidth === matrixHeight) {
+            sitData = transposeSquareMatrix(sitData, matrixWidth);
+          }
+          const interpArr = interpSmall(sitData, matrixWidth, matrixHeight, 1, 2);
+          const dataToInterpGauss = gaussBlur_2(interpArr, matrixWidth, matrixHeight * 2, 1);
+          const press = sitData.reduce((a, b) => a + b, 0);
+          const active = sitData.filter((a) => a > 0).length || 1;
+          const area = sitData.filter((a) => a > 10).length;
+          return {
+            time: timeStampToDate(row?.timestamp),
+            pressureArea: area * 2.1,
+            pressure: totalToN(press),
+            realData: sitData,
+            realInitData: row?.data,
+            index: getCsvElapsedSecondsFromBase(row, meta.absoluteIndex, meta.baseTimestamp, meta.relativeIndex),
+            dataToInterpGauss,
+            pressuremmgH: calculatePressure(press / active),
+          };
+        },
+      });
+      files.push(csvFilePath);
+      sendCsvSuccess(files);
+      return;
+    }
+
+    if (file === 'sitCol' || file === 'matCol') {
+      const label = String(date).split('_')[1];
+      const csvFilePath = csvTargetPath(`${file}${str}.csv`);
+      await writeCsvFileInBatches({
+        csvFilePath,
+        header: [
+          { id: "realData", title: csvTitle.realData },
+          { id: "label", title: csvTitle.label },
+        ],
+        dbRef: db,
+        date,
+        start: 0,
+        end: null,
+        mapRow: (row) => ({
+          realData: row?.data,
+          label,
+        }),
+      });
+      files.push(csvFilePath);
+      sendCsvSuccess(files);
+      return;
+    }
+
+    const isHandType = isHandStorageType(file);
+    const isHandGloveCsvType = isHandGloveType(file);
+    const shouldWriteZeroFrame = isZeroFrameStorageType(file);
+    const shouldWriteDetectionPoint = file === HAND_SINGLE_POINT_TYPE;
+    if (file !== "car10") {
+      const csvFilePath = csvTargetPath(`${getCsvFilePrefix(file, 'sit', downloadOptions || {})}${str}.csv`);
+      await writeCsvFileInBatches({
+        csvFilePath,
+        header: getDefaultSitCsvHeaders(csvTitle, {
+          isHandGloveCsvType,
+          shouldWriteDetectionPoint,
+          shouldWriteZeroFrame,
+          isHandType,
+        }),
+        dbRef: db,
+        date,
+        start,
+        end: end == null ? null : Math.max(start, end - 1),
+        mapRow: (row, meta) => buildGenericSitCsvRow(row, meta, csvTitle, {
+          isHandType,
+          isHandGloveCsvType,
+          shouldWriteZeroFrame,
+          shouldWriteDetectionPoint,
+        }),
+      });
+      files.push(csvFilePath);
+    }
+
+    if (isCar(file)) {
+      const isBackHandType = isHandStorageType(file);
+      const isBackHandGloveType = isHandGloveType(file);
+      const shouldWriteBackZeroFrame = isZeroFrameStorageType(file);
+      const backCsvFilePath = csvTargetPath(`${getCsvFilePrefix(file, 'back', downloadOptions || {})}${str}.csv`);
+      await writeCsvFileInBatches({
+        csvFilePath: backCsvFilePath,
+        header: getDefaultBackCsvHeaders(csvTitle, {
+          isBackHandGloveType,
+          shouldWriteBackZeroFrame,
+          isBackHandType,
+        }),
+        dbRef: db1,
+        date,
+        start,
+        end,
+        mapRow: (row, meta) => buildGenericBackCsvRow(row, meta, {
+          isBackHandType,
+          isBackHandGloveType,
+          shouldWriteBackZeroFrame,
+        }),
+      });
+      files.push(backCsvFilePath);
+
+      if (isThreePortFile(file)) {
+        const headCsvFilePath = csvTargetPath(`head${str}.csv`);
+        await writeCsvFileInBatches({
+          csvFilePath: headCsvFilePath,
+          header: getHeadCsvHeaders(csvTitle),
+          dbRef: db2,
+          date,
+          start,
+          end,
+          mapRow: buildHeadCsvRow,
+        });
+        files.push(headCsvFilePath);
+      }
+    }
+
+    sendCsvSuccess(files);
+  } catch (error) {
+    logger.error('[CSV] streaming export failed:', error);
+    sendCsvFailed(error);
+  }
 }
 
 function normalizeFiniteFrame(raw, expectedLength = null) {
@@ -1765,6 +2765,8 @@ db2 = dbObj.db2
 
 let flag = false;
 let colHZ = 12, oldTimeStamp = new Date().getTime();
+let collectOptions = { frequencyHz: 12, matrixDownsample: { enabled: false } };
+let lastCollectionStorageAt = { sit: 0, back: 0, head: 0 };
 let splitBuffer = Buffer.from([0xaa, 0x55, 0x03, 0x99]);
 // let splitBuffer1 = Buffer.from([0xaa, 0x55, 0x03, 0x09]);
 let parser2 = new DelimiterParser({ delimiter: splitBuffer });
@@ -2263,6 +3265,9 @@ module.exports = {
           if (JSON.parse(message).getTime != null) {
             getTime = JSON.parse(message).getTime;
             localFlag = true;
+            nowGetTime = getTime;
+            loadSelectedHistory(getTime);
+            return;
             const selectQuery = "select * from matrix WHERE date=?";
 
             const params = [getTime];
@@ -2672,12 +3677,22 @@ module.exports = {
 
           if (JSON.parse(message).flag === true) {
             flag = true;
+            resetCollectionStorageClock();
           } else if (JSON.parse(message).flag === false) {
             flag = false;
           }
 
           if (JSON.parse(message).colHZ != null) {
-            colHZ = JSON.parse(message).colHZ;
+            colHZ = normalizeCollectFrequency(JSON.parse(message).colHZ);
+            collectOptions = normalizeCollectOptions({
+              ...collectOptions,
+              frequencyHz: colHZ,
+            });
+          }
+
+          if (JSON.parse(message).collectOptions != null) {
+            collectOptions = normalizeCollectOptions(JSON.parse(message).collectOptions);
+            colHZ = collectOptions.frequencyHz;
           }
 
           /**
@@ -3300,13 +4315,8 @@ module.exports = {
               } else {
                 if (file === TEMP_FULL_BED_TYPE) {
                   jsonData = JSON.stringify(buildTempFullBedPlaybackPayload(localData[value]));
-                } else if (isSmallBedMatrixType(file)) {
-                  // console.log(JSON.stringify(pressSmallBed({ arr: JSON.parse(localData[value]?.data) })))
-                  jsonData = JSON.stringify({
-                    // sitData: pressSmallBed({ arr: JSON.parse(localData[value]?.data) }),
-                    sitData: localData[value]?.data,
-                    time: localData[value]?.timestamp,
-                  });
+                } else if (isSmallBedMatrixType(file) || file === SMALL_BED_12B_TYPE) {
+                  jsonData = JSON.stringify(buildSmallBedPlaybackPayload(localData[value]));
                 } else {
                   jsonData = JSON.stringify({
                     sitData: localData[value]?.data,
@@ -3344,14 +4354,8 @@ module.exports = {
                 let jsonData
                 if (file === TEMP_FULL_BED_TYPE) {
                   jsonData = JSON.stringify(buildTempFullBedPlaybackPayload(localData[nowIndex], { index: nowIndex }));
-                } else if (isSmallBedMatrixType(file)) {
-                  jsonData = JSON.stringify({
-                    // sitData: pressSmallBed({ arr: JSON.parse(localData[nowIndex]?.data) }),
-                    sitData: localData[nowIndex]?.data,
-                    // backData: localDataBack[nowIndex]?.data,
-                    time: localData[nowIndex]?.timestamp,
-                    index: nowIndex,
-                  });
+                } else if (isSmallBedMatrixType(file) || file === SMALL_BED_12B_TYPE) {
+                  jsonData = JSON.stringify(buildSmallBedPlaybackPayload(localData[nowIndex], { index: nowIndex }));
                 } else {
                   const sitPlaybackData = file === WHOLE_CHAIR_TYPE
                     ? normalizeWholeChairFrame('sit', localData[nowIndex]?.data)
@@ -3562,15 +4566,11 @@ module.exports = {
                       index: nowIndex,
                       backFlag: localDataBack.length > 0,
                     }));
-                  } else if (isSmallBedMatrixType(file)) {
-                    jsonData = JSON.stringify({
-                      // sitData: pressSmallBed({ arr: JSON.parse(localData[nowIndex]?.data) }),
-                      sitData: localData[nowIndex]?.data,
-                      // backData: localDataBack[nowIndex]?.data,
-                      time: localData[nowIndex]?.timestamp,
+                  } else if (isSmallBedMatrixType(file) || file === SMALL_BED_12B_TYPE) {
+                    jsonData = JSON.stringify(buildSmallBedPlaybackPayload(localData[nowIndex], {
                       index: nowIndex,
                       backFlag: localDataBack.length > 0,
-                    });
+                    }));
                   } else {
 
                     jsonData = JSON.stringify(sitObj);
@@ -3746,11 +4746,12 @@ module.exports = {
               //     newsit.push(JSON.parse(localData[i].data)[x * 32 + y])
               //   }
               // }
-              if (isSmallBedMatrixType(file) || file === TEMP_FULL_BED_TYPE) {
+              if (isSmallBedMatrixType(file) || file === SMALL_BED_12B_TYPE || file === TEMP_FULL_BED_TYPE) {
                 const storedSitData = file === TEMP_FULL_BED_TYPE
                   ? buildTempFullBedPlaybackPayload(localData[i]).sitData
                   : getStoredSitData(localData[i]);
-                const storedWidth = file === TEMP_FULL_BED_TYPE ? 15 : 32;
+                const storedFrame = parseStoredFrameData(localData[i]);
+                const storedWidth = file === TEMP_FULL_BED_TYPE ? 15 : Number(storedFrame?.matrixWidth) || 32;
                 for (let x = sitArr[0]; x < sitArr[1]; x++) {
                   for (let y = sitArr[2]; y < sitArr[3]; y++) {
                     newsit.push(storedSitData[x * storedWidth + y]);
@@ -3827,6 +4828,16 @@ module.exports = {
             const selectQuery = "select * from matrix WHERE date=?";
             // const params = [1287154796066,1887154796066,'2023-06-19-14:05'];
             const params = [getMessage.download];
+
+            exportHistoryCsvStreaming({
+              date: getMessage.download,
+              csvTitle,
+              csvTargetPath,
+              sendCsvSuccess,
+              sendCsvFailed,
+              downloadOptions: getMessage.downloadOptions || {},
+            });
+            return;
 
             if (file === HAND_GLOVE_DOUBLE) {
               exportHandGloveDoubleCsv({
@@ -5941,11 +6952,7 @@ function colOrSendData(jsonData) {
       frameToStore = null;
     }
   }
-  if (flag
-    // && nowDate - oldTimeStamp > 1000 / colHZ
-
-  ) {
-    oldTimeStamp = nowDate
+  if (flag && shouldStoreCollectionFrame('sit')) {
     const resDataArr = {
       data: JSON.stringify(pointArr),
       time: new Date().getTime(),
@@ -5992,7 +6999,9 @@ function colOrSendData(jsonData) {
       })
       : isZeroFrameStorageType(file)
         ? buildZeroAwareStorageData(frameToStore, 'sitData', 'sit')
-        : isSmallBedMatrixType(file)
+        : file === SMALL_BED_12B_TYPE
+          ? buildSmallBed12BCollectionStorageData(frameToStore)
+          : isSmallBedMatrixType(file)
           ? JSON.stringify(realArr)
           : JSON.stringify([...frameToStore.sitData]);
 
@@ -6069,7 +7078,7 @@ parser2.on("data", function (data) {
       }
 
       // pointArr2 = carBackLine(pointArr2);
-      if (flag) {
+      if (flag && shouldStoreCollectionFrame('back')) {
         const resDataArr = {
           data: JSON.stringify(pointArr2),
           time: new Date().getTime(),
@@ -6309,10 +7318,7 @@ parser2.on("data", function (data) {
 function colOrSendData1(jsonData) {
 
   const nowDate = new Date().getTime()
-  if (flag
-    // && nowDate - oldTimeStamp > 1000 / colHZ
-  ) {
-    oldTimeStamp = nowDate
+  if (flag && shouldStoreCollectionFrame('back')) {
     const resDataArr = {
       data: JSON.stringify(pointArr),
       time: new Date().getTime(),
@@ -6401,7 +7407,7 @@ parser3.on("data", function (data) {
             });
           }
 
-          if (flag) {
+          if (flag && shouldStoreCollectionFrame('sit')) {
             const resDataArr = {
               data: JSON.stringify(res),
               time: new Date().getTime(),
@@ -6466,7 +7472,7 @@ parser4.on("data", function (data) {
         pointArr4 = pointArr4.map((a, index) => numLessZeroToZero(a - pointArr4zero[index]))
       }
 
-      if (flag) {
+      if (flag && shouldStoreCollectionFrame('head')) {
         const resDataArr = {
           data: JSON.stringify(pointArr4),
           time: new Date().getTime(),
@@ -6630,8 +7636,7 @@ parser4.on("data", function (data) {
 function colOrSendData2(jsonData) {
 
   const nowDate = new Date().getTime()
-  if (flag && nowDate - oldTimeStamp > 1000 / colHZ) {
-    oldTimeStamp = nowDate
+  if (flag && shouldStoreCollectionFrame('head')) {
     const resDataArr = {
       data: JSON.stringify(pointArr),
       time: new Date().getTime(),

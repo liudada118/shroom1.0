@@ -270,6 +270,10 @@ class Title extends React.Component {
       open: false,
       fingerIndex: 0,
       colHZ: 12,
+      collectionModalOpen: false,
+      collectLabel: '',
+      collectMatrixMode: 'raw',
+      collectSamplePoint: 'topLeft',
       pdfLoading: false,
       humanTransform: createDefaultHumanTransform(),
     }
@@ -682,6 +686,222 @@ class Title extends React.Component {
             <Button disabled={!folderPath} onClick={() => this.openCsvPath(folderPath)}>打开下载文件夹</Button>
           </Space>
         ) : null}
+      </Modal>
+    );
+  }
+
+  getCollectionBaseName = () => {
+    const manualName = (this.state.collectLabel || '').trim();
+    const featureName = `${this.state.realname || ''}${this.state.realname1 || ''}`.trim();
+    return manualName || featureName;
+  }
+
+  openCollectionModal = () => {
+    this.setState({
+      collectionModalOpen: true,
+      collectLabel: this.state.collectLabel || '',
+      collectMatrixMode: this.props.matrixName === smallBed12BType_title ? this.state.collectMatrixMode : 'raw',
+    });
+  }
+
+  closeCollectionModal = () => {
+    this.setState({ collectionModalOpen: false });
+  }
+
+  stopCollection = () => {
+    const flag = this.props.colFlag;
+    this.props.wsSendObj({ colHZ: this.state.colHZ, flag });
+    if (this.props.matrixName == 'sitCol' || this.props.matrixName == 'matCol') {
+      this.props.wsSendObj({
+        colHZ: this.state.colHZ,
+        download: loadData,
+        downloadOptions: {
+          language: this.props.i18n?.language || 'zh',
+        },
+      })
+    }
+    this.props.changeStateData({ colFlag: !flag });
+    this.props.setColValueFlag(flag);
+  }
+
+  startCollectionWithOptions = () => {
+    const formattedDate = Date.now();
+    const baseName = this.getCollectionBaseName();
+    const collectHz = Math.max(1, Number(this.state.colHZ) || 12);
+    const collectOptions = {
+      frequencyHz: collectHz,
+      matrixDownsample: this.props.matrixName === smallBed12BType_title && this.state.collectMatrixMode === '16x16'
+        ? {
+          enabled: true,
+          sourceWidth: 32,
+          sourceHeight: 32,
+          targetWidth: 16,
+          targetHeight: 16,
+          blockWidth: 2,
+          blockHeight: 2,
+          samplePoint: this.state.collectSamplePoint,
+        }
+        : { enabled: false },
+    };
+    const nextLoadData = baseName
+      ? `${baseName}_${timeStampToDateNospace(formattedDate)} ${formattedDate}`
+      : '';
+
+    this.props.wsSendObj({
+      colHZ: collectHz,
+      flag: true,
+      collectOptions,
+      ...(nextLoadData ? { colName: nextLoadData } : { time: formattedDate }),
+    });
+
+    if (nextLoadData) {
+      loadData = nextLoadData;
+    }
+
+    this.props.changeStateData({ colFlag: false });
+    this.props.setColValueFlag(true);
+    this.setState({ collectionModalOpen: false, colHZ: collectHz });
+  }
+
+  renderCollectionModal(t) {
+    const isSmallBed12B = this.props.matrixName === smallBed12BType_title;
+
+    return (
+      <Modal
+        className='collectionModal'
+        title='采集配置'
+        open={this.state.collectionModalOpen}
+        okText='开始采集'
+        cancelText='取消'
+        onOk={this.startCollectionWithOptions}
+        onCancel={this.closeCollectionModal}
+        destroyOnClose
+      >
+        <Space direction='vertical' style={{ width: '100%' }} size={12}>
+          <div>
+            <div style={{ marginBottom: 4 }}>采集名称</div>
+            <Input
+              placeholder='可不填，默认使用特征标签'
+              value={this.state.collectLabel}
+              onChange={(e) => this.setState({ collectLabel: e.target.value })}
+            />
+          </div>
+          <div>
+            <div style={{ marginBottom: 4 }}>特征标签</div>
+            <div className='collectionHelpText'>
+              用来给本次采集记录命名分类，方便后续在历史回放和 CSV 导出时识别；不参与矩阵计算，可不选。
+            </div>
+            <div className='collectionFeatureRow'>
+              <div className='collectionFieldLabel'>特征标签1</div>
+              <div className='collectionHelpText'>主标签，建议填写采集对象、实验分组或大类，例如测试人、床垫区域、样本组。</div>
+              <Select
+                popupClassName='collectionSelectDropdown'
+                style={{ width: '100%' }}
+                placeholder='选择特征标签1'
+                value={this.state.realname || undefined}
+                onChange={this.onChange}
+                dropdownRender={(menu) => (
+                  <>
+                    {menu}
+                    <Divider style={{ margin: '8px 0' }} />
+                    <Space style={{ padding: '0 8px 4px' }}>
+                      <Input
+                        placeholder='新增标签'
+                        ref={this.inputRef}
+                        value={this.state.name}
+                        onChange={this.onNameChange}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      />
+                      <Button icon={<PlusOutlined />} onClick={this.addItem}>{t('add')}</Button>
+                      <Button onClick={() => {
+                        this.setState({ items: [] })
+                        localStorage.removeItem('sitType')
+                      }}>{t('delete')}</Button>
+                    </Space>
+                  </>
+                )}
+                options={this.state.items.map((item) => ({ label: item, value: item }))}
+              />
+            </div>
+            <div className='collectionFeatureRow'>
+              <div className='collectionFieldLabel'>特征标签2</div>
+              <div className='collectionHelpText'>副标签，建议填写姿态、动作、状态或场景，例如平躺、左侧躺、坐姿异常。</div>
+              <Select
+                popupClassName='collectionSelectDropdown'
+                style={{ width: '100%' }}
+                placeholder='选择特征标签2'
+                value={this.state.realname1 || undefined}
+                onChange={this.onChange1}
+                dropdownRender={(menu) => (
+                  <>
+                    {menu}
+                    <Divider style={{ margin: '8px 0' }} />
+                    <Space style={{ padding: '0 8px 4px' }}>
+                      <Input
+                        placeholder='新增标签'
+                        ref={this.inputRef1}
+                        value={this.state.name1}
+                        onChange={this.onNameChange1}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      />
+                      <Button icon={<PlusOutlined />} onClick={this.addItem1}>{t('add')}</Button>
+                      <Button onClick={() => {
+                        this.setState({ items1: [] })
+                        localStorage.removeItem('sitType1')
+                      }}>{t('delete')}</Button>
+                    </Space>
+                  </>
+                )}
+                options={this.state.items1.map((item) => ({ label: item, value: item }))}
+              />
+            </div>
+          </div>
+          <div>
+            <div style={{ marginBottom: 4 }}>采集频率</div>
+            <Input
+              type='number'
+              min={1}
+              step={1}
+              value={this.state.colHZ}
+              onChange={(e) => this.setState({ colHZ: e.target.value })}
+              addonAfter='Hz'
+            />
+          </div>
+          {isSmallBed12B ? (
+            <>
+              <div>
+                <div style={{ marginBottom: 4 }}>采集矩阵</div>
+                <Radio.Group
+                  value={this.state.collectMatrixMode}
+                  onChange={(e) => this.setState({ collectMatrixMode: e.target.value })}
+                  optionType='button'
+                  buttonStyle='solid'
+                  options={[
+                    { label: '32x32 原始', value: 'raw' },
+                    { label: '16x16 缩小', value: '16x16' },
+                  ]}
+                />
+              </div>
+              {this.state.collectMatrixMode === '16x16' ? (
+                <div>
+                  <div style={{ marginBottom: 4 }}>2x2 取点位置</div>
+                  <Radio.Group
+                    value={this.state.collectSamplePoint}
+                    onChange={(e) => this.setState({ collectSamplePoint: e.target.value })}
+                    optionType='button'
+                    buttonStyle='solid'
+                    options={[
+                      { label: '左上', value: 'topLeft' },
+                      { label: '右上', value: 'topRight' },
+                      { label: '左下', value: 'bottomLeft' },
+                      { label: '右下', value: 'bottomRight' },
+                    ]}
+                  />
+                </div>
+              ) : null}
+            </>
+          ) : null}
+        </Space>
       </Modal>
     );
   }
@@ -1699,33 +1919,11 @@ class Title extends React.Component {
 
                 if (this.props.matrixName !== 'localCar') {
                   const flag = this.props.colFlag
-                  const formattedDate = Date.now()
                   if (flag) {
-                    console.log(this.state.colName)
-                    if (this.state.colName) {
-                      this.props.wsSendObj({ colHZ: this.state.colHZ, flag: true, colName: this.state.colName + '_' + timeStampToDateNospace(formattedDate) + ' ' + formattedDate })
-                      loadData = this.state.colName + '_' + timeStampToDateNospace(formattedDate) + ' ' + formattedDate
-                    } else {
-                      this.props.wsSendObj({ colHZ: this.state.colHZ, flag: true, time: formattedDate })
-                    }
-                    // this.setState({loadName : this.state.colName + timeStampToDateNospace(formattedDate)+ ' ' + formattedDate})
-
+                    this.openCollectionModal()
                   } else {
-                    this.props.wsSendObj({ colHZ: this.state.colHZ, flag: flag })
-                    if (this.props.matrixName == 'sitCol' || this.props.matrixName == 'matCol') {
-                      this.props.wsSendObj({
-                        colHZ: this.state.colHZ,
-                        download: loadData,
-                        downloadOptions: {
-                          language: this.props.i18n?.language || 'zh',
-                        },
-                      })
-                    }
+                    this.stopCollection()
                   }
-                  // console.log(flag)
-                  // this.props.setColFlag(!flag)
-                  this.props.changeStateData({ colFlag: !flag })
-                  this.props.setColValueFlag(flag)
                 } else {
 
                   const flag = this.props.colWebFlag
@@ -1885,6 +2083,7 @@ class Title extends React.Component {
       }
 
       {this.renderCsvDownloadModal()}
+      {this.renderCollectionModal(t)}
 
       <div style={{ position: 'relative', flexShrink: 0 }}>
         <img onClick={() => {
@@ -1896,76 +2095,6 @@ class Title extends React.Component {
         <Drawer style={{ backgroundColor: 'rgba(21,18,42,0.8)' }} title={t('setData')} onClose={() => { this.setState({ open: false }) }} open={this.state.open}>
           {this.renderSettingSliders(t)}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <Select
-              className='titleSelect'
-              style={{
-                width: 300,
-              }}
-              popupClassName='drawerSelectDropdown'
-              placeholder={t('feaLabel')}
-              onChange={this.onChange}
-              dropdownRender={(menu) => (
-                <>
-                  {menu}
-                  <Divider style={{ margin: '8px 0', borderColor: '#5A5A89' }} />
-                  <Space style={{ padding: '0 8px 4px' }}>
-                    <Input
-                      placeholder="Please enter item"
-                      ref={this.inputRef}
-                      value={this.state.name}
-                      onChange={this.onNameChange}
-                      onKeyDown={(e) => e.stopPropagation()}
-                      style={{ backgroundColor: '#111', borderColor: '#5A5A89', color: '#fff' }}
-                    />
-                    <Button className='titleButton' icon={<PlusOutlined />} onClick={this.addItem}>
-                      {t('add')}
-                    </Button>
-                    <Button className='titleButton' onClick={() => {
-                      this.setState({ items: [] })
-                      localStorage.removeItem('sitType')
-                    }}>
-                      {t('delete')}
-                    </Button>
-                  </Space>
-                </>
-              )}
-              options={this.state.items.map((item) => ({ label: item, value: item }))}
-            />
-            <Select
-              className='titleSelect'
-              style={{
-                width: 300,
-              }}
-              popupClassName='drawerSelectDropdown'
-              placeholder={t('feaLabel')}
-              onChange={this.onChange1}
-              dropdownRender={(menu) => (
-                <>
-                  {menu}
-                  <Divider style={{ margin: '8px 0', borderColor: '#5A5A89' }} />
-                  <Space style={{ padding: '0 8px 4px' }}>
-                    <Input
-                      placeholder="Please enter item"
-                      ref={this.inputRef1}
-                      value={this.state.name1}
-                      onChange={this.onNameChange1}
-                      onKeyDown={(e) => e.stopPropagation()}
-                      style={{ backgroundColor: '#111', borderColor: '#5A5A89', color: '#fff' }}
-                    />
-                    <Button className='titleButton' icon={<PlusOutlined />} onClick={this.addItem1}>
-                      {t('add')}
-                    </Button>
-                    <Button className='titleButton' onClick={() => {
-                      this.setState({ items1: [] })
-                      localStorage.removeItem('sitType1')
-                    }}>
-                      {t('delete')}
-                    </Button>
-                  </Space>
-                </>
-              )}
-              options={this.state.items1.map((item) => ({ label: item, value: item }))}
-            />
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               <Button className='titleButton' onClick={() => {
                 this.props.changeAside({ resetZero: true })

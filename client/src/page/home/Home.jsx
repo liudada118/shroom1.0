@@ -104,6 +104,7 @@ const FULL_PACKET_GLOVE_MATRIX = 'handGloveFullPacket'
 const HAND_0205_DOUBLE_MATRIX = 'hand0205Double'
 const MINZHEN_MATRIX = 'minzhen'
 const SMALL_BED_NO_ALG_MATRIX = 'smallBedNoAlg'
+const SMALL_BED_12B_MATRIX = 'smallBed12B'
 const FULL_PACKET_GLOVE_MODES = ['num', 'numoriginal']
 const WHOLE_CHAIR_MATRIX = 'wholeChair'
 const HIDDEN_DISPLAY_MATRIX_TYPES = [HAND_0205_DOUBLE_MATRIX]
@@ -270,9 +271,11 @@ class CanvasCom extends React.Component {
   }
   shouldComponentUpdate(nextProps, nextState) {
     if (this.props.local !== null && this.props.local !== undefined) {
-      return this.props.matrixName != nextProps.matrixName || this.props.local != nextProps.local
+      return this.props.matrixName != nextProps.matrixName
+        || this.props.local != nextProps.local
+        || this.props.variantKey != nextProps.variantKey
     }
-    return this.props.matrixName != nextProps.matrixName;
+    return this.props.matrixName != nextProps.matrixName || this.props.variantKey != nextProps.variantKey;
   }
   render() {
     const localKey =
@@ -281,7 +284,7 @@ class CanvasCom extends React.Component {
         : this.props.local
           ? "playback"
           : "realtime";
-    const childBaseKey = `${this.props.matrixName}:${localKey}`;
+    const childBaseKey = `${this.props.matrixName}:${localKey}:${this.props.variantKey || 'default'}`;
 
     return (
       <>
@@ -850,7 +853,9 @@ class Home extends React.Component {
       licenseModalRemainDays: 0,
       minzhenSensorInfo: {},
       hz: 12,
-      realHz: 0
+      realHz: 0,
+      smallBedMatrixWidth: 32,
+      smallBedMatrixHeight: 32,
     };
     this.com = React.createRef();
     this.data = React.createRef();
@@ -1342,9 +1347,28 @@ class Home extends React.Component {
 
 
 
+  syncSmallBed12BMatrixSize(jsonObject = {}) {
+    if (this.state.matrixName !== SMALL_BED_12B_MATRIX) {
+      return;
+    }
+
+    const nextWidth = Number(jsonObject.matrixWidth) || 32;
+    const nextHeight = Number(jsonObject.matrixHeight) || 32;
+    if (
+      nextWidth !== this.state.smallBedMatrixWidth ||
+      nextHeight !== this.state.smallBedMatrixHeight
+    ) {
+      this.setState({
+        smallBedMatrixWidth: nextWidth,
+        smallBedMatrixHeight: nextHeight,
+      });
+    }
+  }
+
   wsData = (e) => {
     sitPress = 0;
     let jsonObject = JSON.parse(e.data);
+    this.syncSmallBed12BMatrixSize(jsonObject);
 
     // download 弹窗判断 - 放在最前面确保不被其他逻辑阻断
     if (jsonObject.download != null) {
@@ -2009,6 +2033,7 @@ class Home extends React.Component {
               }
             } else if (this.state.numMatrixFlag == 'skin') {
               let newArr = [...wsPointData]
+              console.log(wsPointData)
               wsPointData = handSkinChange(wsPointData)
               that.com.current?.sitData({
                 wsPointData: wsPointData,
@@ -2173,6 +2198,7 @@ class Home extends React.Component {
                 this.com.current?.changeWsData147([...newArr])
               }
             } else if (this.state.numMatrixFlag == 'skin') {
+              console.log(wsPointData)
               wsPointData = handSkinChange(wsPointData)
               that.com.current?.sitData({
                 wsPointData: wsPointData,
@@ -2935,6 +2961,8 @@ class Home extends React.Component {
       portnameHead: '',
       portnameSensor: '',
       minzhenSensorInfo: {},
+      smallBedMatrixWidth: 32,
+      smallBedMatrixHeight: 32,
     });
 
     // 6. 如果当前在回放模式，重新请求新 db 的时间列表
@@ -4656,10 +4684,15 @@ class Home extends React.Component {
                           changeSelect={this.changeSelect}
                         />
                       </CanvasCom>
-                    ) : this.state.matrixName == "smallBed" || this.state.matrixName == SMALL_BED_NO_ALG_MATRIX || this.state.matrixName == "smallBed12B" ? (
-                      <CanvasCom matrixName={this.state.matrixName}>
+                    ) : this.state.matrixName == "smallBed" || this.state.matrixName == SMALL_BED_NO_ALG_MATRIX || this.state.matrixName == SMALL_BED_12B_MATRIX ? (
+                      <CanvasCom
+                        matrixName={this.state.matrixName}
+                        variantKey={this.state.matrixName === SMALL_BED_12B_MATRIX ? `${this.state.smallBedMatrixWidth}x${this.state.smallBedMatrixHeight}` : undefined}
+                      >
                         <SmallBed
                           matrixName={this.state.matrixName}
+                          matrixWidth={this.state.matrixName === SMALL_BED_12B_MATRIX ? this.state.smallBedMatrixWidth : undefined}
+                          matrixHeight={this.state.matrixName === SMALL_BED_12B_MATRIX ? this.state.smallBedMatrixHeight : undefined}
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}

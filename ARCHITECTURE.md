@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-06-11
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-06-12
 
 ## 1. 项目概述
 
@@ -219,6 +219,7 @@ graph TD
 1. **传感器数据采集流程**
     - 硬件传感器通过 USB 串口发送原始二进制数据帧 → `serialHelper.js` 接收并触发 `parser.on('data')` 事件 → `server.js` 调用 `dataProcessor.js` 进行线序映射（`openWeb.js`）、归零校准、高斯平滑 → 处理后的矩阵数据通过 `wsHelper.js` 广播到 WebSocket 端口 19999 → 前端 `useWebSocket` Hook 接收数据 → 更新 `usePressureStore` → React 重新渲染热力图和 3D 模型。
     - `smallBed12B`（小床检测 12B）使用 `1500000` 波特率和独立帧尾 `AA 00 55 00 03 00 99 00`，`@serialport/parser-delimiter` 按 8 字节帧尾切分后得到 2048 字节 payload；`server.js` 按 1024 个 `uint16LE` 解析为 32x32 压力矩阵，并复用 `jqbed(pointArr)` 小床检测线序后通过通用 `sitData` 下发。该类型不加入 `jqbed/smallBed` 生命体征集合，因此前端 `Aside.jsx` 仅展示 Pressure Area 与 Pressure Data，不触发 Python 算法数据面板；左侧 Pressure Data / Pressure Area 统计使用 3D 插值和高斯处理前的 32x32 原始矩阵值。
+    - `smallBed12B` 的采集按钮现在先打开 `Title.jsx` 采集配置弹窗；用户可设置采集名称、特征标签、入库频率，以及是否把采集矩阵从 32x32 缩小为 16x16。16x16 模式由前端通过 `collectOptions.matrixDownsample` 传入 2x2 块取点位置，后端 `server.js` 仍实时下发 32x32 原始帧，但采集入库时把每个 2x2 块按左上/右上/左下/右下选点抽样为 256 点，并保存 `matrixWidth/matrixHeight/matrixDownsample` 元数据。
     - `handSinglePoint`（32*32(检测点)）沿用 `hand` 的单串口 32x32 / 1024 点协议和默认 `1000000` 波特率，实时串口数据只在后端 `openWeb.handSinglePoint()` 中按 1-based 点位表重排一次：先输出 481-992，每 32 点一行；再输出 449-1 的 15 行倒序块；最后输出 993-1024。WebSocket 展示、采集入库和 CSV 下载都使用这份后端处理后的 1024 点矩阵，前端不再参与线序转换；前端复用 `hand` 的 `CanvasHand` 渲染链路和 `normal` / `numoriginal` 模式，授权页和密钥脚本使用独立 key `handSinglePoint`，密钥配置页归入“精密”分组；CSV 下载按语言使用 `检测点` / `detection` 文件名前缀，并新增 `检测点` / `detectionPoint` 列写入 1024 点矩阵的最后一个点。
     - `smallBed12B` 使用独立的前端显示配置，不再复用通用 `bed` 颜色默认值；默认高斯为 `2`，颜色上限默认值为 `2205`，设置面板颜色滑块范围为 `5-4000` 且步进为 `10`，高度默认值为 `0.1`。`Home.jsx` 会通过通用 `syncDisplayRendererConfig()` 将进度条 state 同步到 3D/原始数据组件 ref，确保初始值、系统切换和滑块变更都会下发到渲染器内部变量。
     - 当系统类型为 `petCare` / `petCareMini` 时，`server.js` 先按 `jqbed` 线序将 32x32 数据重排，再以 50Hz（20ms）分别调用 `python/app/petCare/pet_care_wrapper` / `pet_care_wrappermini`；算法输出通过 `python/app/onbed_filter_example.py` 的 JSON-line RPC 回传给 Electron，前端 Title/Home/Aside/License 复用宠物看护链路展示呼吸率、姿态、体动、信号质量、模拟心率和压力系数；其中 `Aside.jsx` 会在前端层对 `petCareMini` 的离床状态（`petInBed=0` 或 `posture_state=0`）做展示归一化，强制将面板上的 `pressure_coefficient` 显示为 `0.00`，并依据呼吸频率在前端生成 `55-100` 区间的模拟心率替换原来的 SNR 展示；为避免心率跳变过快，模拟心率现在按 1 秒节拍更新一次，其余呼吸、姿态和质量数据仍保持实时刷新；同时 `server.js` 关闭了 `petCareMini` 的 `[petCareMini] algorithm result` 周期性信息日志，避免运行期刷屏。
@@ -232,15 +233,19 @@ graph TD
 
 2. **数据存储与导出流程**
     - 用户点击"开始采集" → 前端通过 WebSocket 发送 `col` 指令 → `server.js` 开启采集模式 → 每帧数据同时写入 `dbHelper.js`（SQLite）和 `csvHelper.js`（CSV 文件） → 用户点击"停止采集"结束录制。
+    - `Title.jsx` 的采集入口改为开始采集时弹出配置 Modal；原设置抽屉里的特征标签选择移动到该 Modal，采集频率通过 `colHZ/collectOptions.frequencyHz` 下发。`server.js` 使用每个通道独立的入库时间戳按频率跳帧，避免坐垫、靠背、头枕共用一个 `oldTimeStamp` 互相影响。
     - CSV 导出的最左侧 `seconds` 列使用数据库帧时间戳计算真实相对秒数（当前帧 `timestamp` - 导出首帧 `timestamp`），仅在缺失时间戳时回退到采集频率估算，不再固定按 12Hz 用 `j / 12` 生成。
     - CSV 表头根据前端当前语言自动选择：`Title.jsx` / `useSerialControl.js` 在 `downloadOptions.language` 中传入当前语言；`server.js` 中文模式输出 `秒数/矩阵最大值/时间戳/矩阵大于 0 的点数/矩阵总和/矩阵数据/四元数/温度/平均温度/温度K值` 等中文表头，英文模式继续输出旧版 `seconds/max/time/area/press/data/quaternion/temperatureCelsius/temperatureAvg/temperatureK` 简写表头；`handSinglePoint` 额外输出 `检测点` / `detectionPoint` 列，取 CSV `data` 矩阵的最后一个点。
     - `smallBed12B` 的 CSV 文件名前缀使用系统简写 `12B`，例如 `12B2026-05-21...csv`；其它系统保持既有 `file` 或通道名前缀。
     - 手套类 CSV 导出在保留整体 `data` 矩阵、`清零帧` 和 `quaternion` 姿态列的基础上，额外按左右手原始 256 点位表拆出 `小拇指`、`无名指`、`中指`、`食指`、`大拇指`、`指根`、`手掌` 七个 JSON 数组列；点位表为 1-based，代码读取时减 1 访问数组，`指根` 按小拇指到大拇指顺序写入 5 个弯折点。`hand0205`、`handGlove115200` 和 `handGloveFullPacket` 的 sit/back 导出都会写入这些部位列，但文件名前缀对用户改为左手 `left`、右手 `right`；`hand0205Double` 专用导出改为单个 `触觉手套2...csv` / `glove2...csv`，同一行同时写入左手和右手矩阵、统计、清零帧、四元数与分指数据；触觉足底和 robot 类触觉上衣也会写入 `清零帧`，但不会写入手套部位列。
     - `jqbed`、`smallBed` 与 `smallBed12B` 的原始数据展示和 CSV `data` 列会沿左上-右下对角线转置 32x32 矩阵，即 `(row, col)` 显示/导出为 `(col, row)`，用于匹配小床检测/监测系统原始矩阵方向；`jqbed/smallBed` 的前端原始 2D 数字矩阵入口仍在 `Num2Doriginal.jsx` 做兜底转置，`smallBed12B` 在 `util.js` 进入 `Fast1024` 前完成转置。
     - `smallBed12B` 的原始数据模式单独复用 `32*32高速` 的 `Fast1024` 渲染组件，进入组件前仍执行 32x32 对角线转置；该模式使用 `0-1024` 的数字材质/颜色范围，其它系统的原始数字矩阵颜色范围、配色逻辑和渲染组件保持原样。
+    - 大体量历史 CSV 下载不再先把所有帧和所有 CSV 行放入数组；`server.js` 使用 `matrix(date,id)` 索引按 `id` 游标分批读取历史帧，并用 `csv-writer` stringifier 写入文件流，覆盖通用 sit/back/head、整椅、大小床、选区标签和触觉手套2合并导出，降低 90 万帧下载时主进程内存压力。
 
 3. **历史数据回放流程**
     - 用户在历史数据页选择记录 → 前端发送 `play` 指令 → `server.js` 从 SQLite 读取历史帧数据 → 按时间间隔逐帧通过 WebSocket 推送 → 前端 `usePlayback` Hook 管理播放状态（播放/暂停/变速/跳帧）。
+    - `smallBed12B` 回放兼容 32x32 原始采集和 16x16 缩小采集两种历史格式；`server.js` 会把对象格式历史帧还原为 `sitData` 并携带 `matrixWidth/matrixHeight`，`Home.jsx` 根据尺寸变化重挂载 `SmallBed` 渲染组件，避免 16x16 历史帧继续按 32x32 显示。
+    - 大体量历史记录（如几十万帧以上）选中时，`server.js` 不再一次性 `SELECT *` 加载全部帧到内存；改为先查询 `COUNT/MIN(id)/MAX(id)` 元信息、建立 `matrix(date,id)` 索引、生成最多约 2000 点的抽样压力/面积曲线，并通过懒加载代理在回放或拖动进度时按当前帧索引读取单帧，避免 90 万帧记录选中和回放时阻塞 Electron 主进程。
 
 4. **授权验证流程**
     - 应用启动 → `licenseHelper.js` 读取外部 `config.txt`（打包后优先读取 exe 同级文件，兼容 `resources/config.txt`，开发态读取项目根目录） → 使用 AES-ECB 解密 → 通过 HTTPS 获取网络时间 → 比对授权有效期 → 若过期则限制功能。
@@ -323,6 +328,12 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-06-12 | Codex | 采集特征标签分行说明 | `Title.jsx` 的采集配置 Modal 将特征标签1和特征标签2改为上下两行展示，并分别说明主标签用于采集对象/分组、副标签用于姿态/状态/场景。 |
+| 2026-06-12 | Codex | 采集特征标签说明与弹窗配色收敛 | `Title.jsx` 在采集配置 Modal 的特征标签下方补充用途说明，`title.scss` 将 Modal 从多强调色改为深色背景、白字和灰紫边框的克制配色。 |
+| 2026-06-12 | Codex | 采集配置弹窗样式统一 | `Title.jsx` 的采集配置 Modal 增加独立样式类，`title.scss` 将其输入框、下拉、分段按钮和底部按钮调整为与标题栏/设置抽屉一致的深色主题。 |
+| 2026-06-12 | Codex | 采集配置弹窗与 12B 缩小采集 | `Title.jsx` 将采集参数移入 Modal，支持特征标签、采集频率和 `smallBed12B` 32x32→16x16 抽点入库；`server.js` 按通道独立频率入库并保存 16x16 帧元数据，`Home.jsx` 回放时按历史帧尺寸重挂载小床渲染。 |
+| 2026-06-11 | Codex | 大历史记录回放懒加载 | `server.js` 的历史记录选中流程改为元信息查询、抽样曲线和单帧懒加载，避免 90 万帧级记录在选中或回放时一次性读入内存导致软件无响应。 |
+| 2026-06-11 | Codex | 大历史记录 CSV 流式导出 | `server.js` 的历史 CSV 下载改为按 `id` 游标分批读取 SQLite，并用文件流逐批写入 CSV，避免 90 万帧导出时同时持有全部数据库行和 CSV 行。 |
 | 2026-06-05 | Codex | 触觉手套2实时遥操修复 | `Home.jsx` 双手模式改为按当前包 `handSide` 选择左右手校准和模型接口；`hand0205Double.jsx` 补齐 147/256 点到 32x32 手形点阵的渲染归一化，并让四元数和弯折数据到达后立即应用到左右手模型。 |
 | 2026-06-05 | Codex | 触觉手套2模型位置收窄 | `hand0205Double.jsx` 将左右手模型分组从 `x=±220` 调整为 `x=±80`，保持与普通触觉手套相同的相机、模型位置和缩放基准，使双手模型落在同一中心视野附近。 |
 | 2026-06-05 | Codex | 触觉手套2近景视角修正 | `hand0205Double.jsx` 的渲染相机改为与 `hand0205.jsx` 一致的近景位置 `0,-1000,-50` 和旋转 `2.5,0,0`，并避免 `TrackballControls.update()` 每帧覆盖该视角，使触觉手套2进入 3D 遥操后不再显示为远处小模型。 |
@@ -619,6 +630,12 @@ graph TD
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-06-12 | Codex | 配置变更 | 采集配置 Modal 中的特征标签改为两行展示：特征标签1作为主标签用于对象/分组，特征标签2作为副标签用于姿态/状态/场景，解决选项内容较长时横向拥挤的问题。 |
+| 2026-06-12 | Codex | 配置变更 | 采集配置 Modal 的“特征标签”增加用途简介，说明其用于标注采集记录、方便回放和 CSV 识别且不参与矩阵计算；同时减少弹窗强调色，只保留深色背景、白字和灰紫边框。 |
+| 2026-06-12 | Codex | 配置变更 | 采集配置 Modal 使用与当前软件一致的深色背景、紫灰边框、青色标题和深色下拉层，避免默认 Ant Design 白色弹窗与主界面风格割裂。 |
+| 2026-06-12 | Codex | 新增功能 | 采集按钮改为开始采集前弹出配置 Modal，特征标签从设置抽屉移入采集流程；新增采集频率下发和 `smallBed12B` 32x32→16x16 2x2 抽点入库，历史回放与 CSV 导出按帧元数据兼容 16x16 记录。 |
+| 2026-06-11 | Codex | 修复缺陷 | `server.js` 历史记录选中不再对同一 `date` 执行全量 `SELECT *` 并构造完整 `pressArr/areaArr`；大记录改用 `COUNT/MIN(id)/MAX(id)`、`matrix(date,id)` 索引、约 2000 点抽样曲线和当前帧懒加载，降低 90 万帧回放导致主进程无响应的风险。 |
+| 2026-06-11 | Codex | 修复缺陷 | `server.js` 历史 CSV 下载改为流式导出：通过 `matrix(date,id)` 索引分批读取历史帧并逐批写入 CSV 文件，避免下载大记录时 `db.all()` 和 `csvWriteData` 占用过多内存。 |
 | 2026-06-05 | Codex | 修复缺陷 | 修复触觉手套2连接数据后 3D 遥操无明显反馈的问题：双手帧按 `handSide` 分流，右手数据入口不再为空，短控制数组会归一化成手形 32x32 点阵，姿态/弯折即时应用到模型。 |
 | 2026-06-05 | Codex | 配置变更 | `hand0205Double.jsx` 收窄双手模型分组间距，左右手从 `x=±220` 改为 `x=±80`，让触觉手套2模型位置接近普通触觉手套默认视角。 |
 | 2026-06-05 | Codex | 修复缺陷 | `hand0205Double.jsx` 同步普通触觉手套的近景相机位置和旋转，并取消每帧 Trackball 更新覆盖默认视角，修复触觉手套2打开后模型过小、距离过远的问题。 |
