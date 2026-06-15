@@ -1,6 +1,6 @@
 {
   "name": "shroom",
-  "version": "1.1.30",
+  "version": "1.1.31",
   "description": "Shroom - Pressure Sensor Data Acquisition & Visualization System",
   "main": "index.js",
   "win": {
@@ -11,9 +11,10 @@
     "start": "electron-forge start",
     "build-client": "npm --prefix client run build",
     "build-python-runtime": "node scripts/build-python-runtime.js",
+    "prepare-nsis-license": "node scripts/prepare-nsis-license.js",
     "clean-pack-output": "node scripts/clean-pack-output.js",
     "prepare-pack-resources": "npm run build-python-runtime && node scripts/sync-pack-resources.js",
-    "prepare-build-assets": "npm run build-client && npm run prepare-pack-resources",
+    "prepare-build-assets": "npm run build-client && npm run prepare-pack-resources && npm run prepare-nsis-license",
     "package": "npm run clean-pack-output && npm run prepare-build-assets && electron-forge package",
     "make": "npm run clean-pack-output && npm run prepare-build-assets && electron-forge make",
     "make-mac": "npm run clean-pack-output && npm run prepare-build-assets && electron-forge make --platform darwin",
@@ -187,7 +188,7 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Shroom",
       "include": "scripts/installer.nsh",
-      "license": "docs/EULA.txt"
+      "license": "docs/EULA.nsis.txt"
     },
     "mac": {
       "icon": "./logo.icns",

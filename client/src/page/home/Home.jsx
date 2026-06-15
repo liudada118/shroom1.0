@@ -1370,6 +1370,24 @@ class Home extends React.Component {
     let jsonObject = JSON.parse(e.data);
     this.syncSmallBed12BMatrixSize(jsonObject);
 
+    if (jsonObject.collectionStorageError != null) {
+      const errorInfo = jsonObject.collectionStorageError || {};
+      const text = errorInfo.message || '数据库空间不足，已停止采集';
+      if (this.props.messageApi) {
+        this.props.messageApi.error(text, 6);
+      } else {
+        message.error(text, 6);
+      }
+      return;
+    }
+
+    if (jsonObject.csvDownloadProgress != null) {
+      window.dispatchEvent(new CustomEvent('shroom-csv-download-status', {
+        detail: jsonObject,
+      }));
+      return;
+    }
+
     // download 弹窗判断 - 放在最前面确保不被其他逻辑阻断
     if (jsonObject.download != null) {
       console.log('[download弹窗] 收到download消息:', jsonObject.download);
@@ -4005,7 +4023,7 @@ class Home extends React.Component {
                       changeSelect={this.changeSelect} />
                   </CanvasCom>
                   :
-                  this.state.numMatrixFlag == "numoriginal" && ['hand', 'handSinglePoint', MINZHEN_MATRIX].includes(this.state.matrixName) ?
+                  this.state.numMatrixFlag == "numoriginal" && ['hand', 'handSinglePoint', MINZHEN_MATRIX, 'smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed12B'].includes(this.state.matrixName) ?
                   <>
                     <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
                       <Fast1024
@@ -4023,20 +4041,7 @@ class Home extends React.Component {
                     ) : null}
                   </>
                   :
-                  this.state.numMatrixFlag == "numoriginal" && this.state.matrixName == 'smallBed12B' ?
-                  <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
-                    <Fast1024
-                      ref={this.com}
-                      textureValueMax={1024}
-                      data={this.data}
-                      local={this.state.local}
-                      handleChartsBody={this.handleChartsBody.bind(this)}
-                      handleChartsBody1={this.handleChartsBody1.bind(this)}
-                      changeStateData={this.changeStateData}
-                      changeSelect={this.changeSelect} />
-                  </CanvasCom>
-                  :
-                  this.state.numMatrixFlag == "numoriginal" && [...tactileGloveTypes, 'robot1', 'footVideo', 'robotSY', 'robotLCF', 'normal', 'smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed12B', 'jqbed', tempFullBedMatrix, 'petCare', 'petCareMini', 'daliegu', 'smallSample'].includes(this.state.matrixName) ?
+                  this.state.numMatrixFlag == "numoriginal" && [...tactileGloveTypes, 'robot1', 'footVideo', 'robotSY', 'robotLCF', 'normal', 'jqbed', tempFullBedMatrix, 'petCare', 'petCareMini', 'daliegu', 'smallSample'].includes(this.state.matrixName) ?
                   <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
                     <Num2DOriginal ref={this.com}
                       matrixName={this.state.matrixName}

@@ -1,5 +1,5 @@
 import React from 'react'
-import { Menu, Slider, Button, Select, message, notification, Divider, Space, Radio, Drawer, Modal } from 'antd';
+import { Menu, Slider, Button, Select, message, notification, Divider, Space, Radio, Drawer, Modal, Progress } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import exchange from '../../assets/images/exchange.png'
 import option from '../../assets/images/Option.png'
@@ -267,6 +267,8 @@ class Title extends React.Component {
       csvDownloadFiles: [],
       csvDownloadDir: '',
       csvDownloadMessage: '',
+      csvDownloadProgress: 0,
+      csvDownloadProgressDetail: null,
       open: false,
       fingerIndex: 0,
       colHZ: 12,
@@ -518,6 +520,8 @@ class Title extends React.Component {
       csvDownloadFiles: [],
       csvDownloadDir: this.state.csvDownloadPath || '',
       csvDownloadMessage: '',
+      csvDownloadProgress: 0,
+      csvDownloadProgressDetail: null,
     });
   }
 
@@ -571,6 +575,8 @@ class Title extends React.Component {
       csvDownloadStage: 'exporting',
       csvDownloadFiles: [],
       csvDownloadDir: downloadPath,
+      csvDownloadProgress: 0,
+      csvDownloadProgressDetail: null,
       csvDownloadMessage: '正在导出 CSV...',
     });
     this.props.wsSendObj({
@@ -585,6 +591,20 @@ class Title extends React.Component {
 
   handleCsvDownloadStatus(event) {
     const detail = event.detail || {};
+    if (detail.csvDownloadProgress != null) {
+      const progress = detail.csvDownloadProgress || {};
+      this.setState({
+        csvDownloadModalOpen: true,
+        csvDownloadStage: 'exporting',
+        csvDownloadDir: detail.downloadDir || progress.dir || this.state.csvDownloadDir || this.state.csvDownloadPath,
+        csvDownloadProgress: Math.max(0, Math.min(100, Number(progress.percent) || 0)),
+        csvDownloadProgressDetail: progress,
+        csvDownloadMessage: progress.currentFile
+          ? `Exporting ${progress.currentFile}`
+          : 'Exporting CSV...',
+      });
+      return;
+    }
     if (!['export csv success', 'export csv failed'].includes(detail.download)) {
       return;
     }
@@ -596,6 +616,7 @@ class Title extends React.Component {
         csvDownloadStage: 'done',
         csvDownloadFiles: mergedFiles,
         csvDownloadDir: detail.downloadDir || this.state.csvDownloadDir || this.state.csvDownloadPath,
+        csvDownloadProgress: 100,
         csvDownloadMessage: detail.displayMsg || '导出 CSV 成功',
       });
       return;
@@ -617,6 +638,10 @@ class Title extends React.Component {
     const isError = stage === 'error';
     const fileList = this.state.csvDownloadFiles || [];
     const folderPath = this.state.csvDownloadDir || this.state.csvDownloadPath;
+    const progressDetail = this.state.csvDownloadProgressDetail || {};
+    const progressPercent = Math.max(0, Math.min(100, Math.round(Number(this.state.csvDownloadProgress) || 0)));
+    const progressWritten = Number(progressDetail.written) || 0;
+    const progressTotal = Number(progressDetail.total) || 0;
 
     return (
       <Modal
@@ -663,6 +688,14 @@ class Title extends React.Component {
 
         {isExporting ? (
           <div>
+            <Progress percent={progressPercent} status='active' />
+            <div style={{ marginTop: 8, color: '#666', fontSize: 12 }}>
+              {progressDetail.currentFile ? `File: ${progressDetail.currentFile}` : 'Preparing file...'}
+            </div>
+            <div style={{ color: '#666', fontSize: 12 }}>
+              {progressTotal ? `${progressWritten.toLocaleString()} / ${progressTotal.toLocaleString()} rows` : 'Calculating rows...'}
+              {progressDetail.fileCount ? `, file ${progressDetail.fileIndex || 1}/${progressDetail.fileCount}` : ''}
+            </div>
             <p>正在导出 CSV，请稍候...</p>
             <p style={{ color: '#666' }}>文件生成完成后会显示在这里。</p>
           </div>

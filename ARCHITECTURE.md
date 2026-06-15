@@ -219,7 +219,7 @@ graph TD
 1. **传感器数据采集流程**
     - 硬件传感器通过 USB 串口发送原始二进制数据帧 → `serialHelper.js` 接收并触发 `parser.on('data')` 事件 → `server.js` 调用 `dataProcessor.js` 进行线序映射（`openWeb.js`）、归零校准、高斯平滑 → 处理后的矩阵数据通过 `wsHelper.js` 广播到 WebSocket 端口 19999 → 前端 `useWebSocket` Hook 接收数据 → 更新 `usePressureStore` → React 重新渲染热力图和 3D 模型。
     - `smallBed12B`（小床检测 12B）使用 `1500000` 波特率和独立帧尾 `AA 00 55 00 03 00 99 00`，`@serialport/parser-delimiter` 按 8 字节帧尾切分后得到 2048 字节 payload；`server.js` 按 1024 个 `uint16LE` 解析为 32x32 压力矩阵，并复用 `jqbed(pointArr)` 小床检测线序后通过通用 `sitData` 下发。该类型不加入 `jqbed/smallBed` 生命体征集合，因此前端 `Aside.jsx` 仅展示 Pressure Area 与 Pressure Data，不触发 Python 算法数据面板；左侧 Pressure Data / Pressure Area 统计使用 3D 插值和高斯处理前的 32x32 原始矩阵值。
-    - `smallBed12B` 的采集按钮现在先打开 `Title.jsx` 采集配置弹窗；用户可设置采集名称、特征标签、入库频率，以及是否把采集矩阵从 32x32 缩小为 16x16。16x16 模式由前端通过 `collectOptions.matrixDownsample` 传入 2x2 块取点位置，后端 `server.js` 仍实时下发 32x32 原始帧，但采集入库时把每个 2x2 块按左上/右上/左下/右下选点抽样为 256 点，并保存 `matrixWidth/matrixHeight/matrixDownsample` 元数据。
+    - `smallBed12B` 的采集按钮现在先打开 `Title.jsx` 采集配置弹窗；用户可设置采集名称、特征标签、入库频率，以及是否把采集矩阵从 32x32 缩小为 16x16。16x16 模式由前端通过 `collectOptions.matrixDownsample` 传入按当前原始数据展示方向选择的 2x2 块取点位置，后端 `server.js` 仍实时下发 32x32 原始帧，但采集入库时会先换算到未转置矩阵的实际取点位置：右上与左下互换，左上与右下保持不变，然后抽样为 256 点，并保存 `matrixWidth/matrixHeight/matrixDownsample` 元数据。
     - `handSinglePoint`（32*32(检测点)）沿用 `hand` 的单串口 32x32 / 1024 点协议和默认 `1000000` 波特率，实时串口数据只在后端 `openWeb.handSinglePoint()` 中按 1-based 点位表重排一次：先输出 481-992，每 32 点一行；再输出 449-1 的 15 行倒序块；最后输出 993-1024。WebSocket 展示、采集入库和 CSV 下载都使用这份后端处理后的 1024 点矩阵，前端不再参与线序转换；前端复用 `hand` 的 `CanvasHand` 渲染链路和 `normal` / `numoriginal` 模式，授权页和密钥脚本使用独立 key `handSinglePoint`，密钥配置页归入“精密”分组；CSV 下载按语言使用 `检测点` / `detection` 文件名前缀，并新增 `检测点` / `detectionPoint` 列写入 1024 点矩阵的最后一个点。
     - `smallBed12B` 使用独立的前端显示配置，不再复用通用 `bed` 颜色默认值；默认高斯为 `2`，颜色上限默认值为 `2205`，设置面板颜色滑块范围为 `5-4000` 且步进为 `10`，高度默认值为 `0.1`。`Home.jsx` 会通过通用 `syncDisplayRendererConfig()` 将进度条 state 同步到 3D/原始数据组件 ref，确保初始值、系统切换和滑块变更都会下发到渲染器内部变量。
     - 当系统类型为 `petCare` / `petCareMini` 时，`server.js` 先按 `jqbed` 线序将 32x32 数据重排，再以 50Hz（20ms）分别调用 `python/app/petCare/pet_care_wrapper` / `pet_care_wrappermini`；算法输出通过 `python/app/onbed_filter_example.py` 的 JSON-line RPC 回传给 Electron，前端 Title/Home/Aside/License 复用宠物看护链路展示呼吸率、姿态、体动、信号质量、模拟心率和压力系数；其中 `Aside.jsx` 会在前端层对 `petCareMini` 的离床状态（`petInBed=0` 或 `posture_state=0`）做展示归一化，强制将面板上的 `pressure_coefficient` 显示为 `0.00`，并依据呼吸频率在前端生成 `55-100` 区间的模拟心率替换原来的 SNR 展示；为避免心率跳变过快，模拟心率现在按 1 秒节拍更新一次，其余呼吸、姿态和质量数据仍保持实时刷新；同时 `server.js` 关闭了 `petCareMini` 的 `[petCareMini] algorithm result` 周期性信息日志，避免运行期刷屏。
@@ -238,9 +238,9 @@ graph TD
     - CSV 表头根据前端当前语言自动选择：`Title.jsx` / `useSerialControl.js` 在 `downloadOptions.language` 中传入当前语言；`server.js` 中文模式输出 `秒数/矩阵最大值/时间戳/矩阵大于 0 的点数/矩阵总和/矩阵数据/四元数/温度/平均温度/温度K值` 等中文表头，英文模式继续输出旧版 `seconds/max/time/area/press/data/quaternion/temperatureCelsius/temperatureAvg/temperatureK` 简写表头；`handSinglePoint` 额外输出 `检测点` / `detectionPoint` 列，取 CSV `data` 矩阵的最后一个点。
     - `smallBed12B` 的 CSV 文件名前缀使用系统简写 `12B`，例如 `12B2026-05-21...csv`；其它系统保持既有 `file` 或通道名前缀。
     - 手套类 CSV 导出在保留整体 `data` 矩阵、`清零帧` 和 `quaternion` 姿态列的基础上，额外按左右手原始 256 点位表拆出 `小拇指`、`无名指`、`中指`、`食指`、`大拇指`、`指根`、`手掌` 七个 JSON 数组列；点位表为 1-based，代码读取时减 1 访问数组，`指根` 按小拇指到大拇指顺序写入 5 个弯折点。`hand0205`、`handGlove115200` 和 `handGloveFullPacket` 的 sit/back 导出都会写入这些部位列，但文件名前缀对用户改为左手 `left`、右手 `right`；`hand0205Double` 专用导出改为单个 `触觉手套2...csv` / `glove2...csv`，同一行同时写入左手和右手矩阵、统计、清零帧、四元数与分指数据；触觉足底和 robot 类触觉上衣也会写入 `清零帧`，但不会写入手套部位列。
-    - `jqbed`、`smallBed` 与 `smallBed12B` 的原始数据展示和 CSV `data` 列会沿左上-右下对角线转置 32x32 矩阵，即 `(row, col)` 显示/导出为 `(col, row)`，用于匹配小床检测/监测系统原始矩阵方向；`jqbed/smallBed` 的前端原始 2D 数字矩阵入口仍在 `Num2Doriginal.jsx` 做兜底转置，`smallBed12B` 在 `util.js` 进入 `Fast1024` 前完成转置。
+    - `jqbed`、`smallBed`、`smallBedNoAlg` 与 `smallBed12B` 的原始数据展示和 CSV `data` 列会沿左上-右下对角线转置 32x32 矩阵，即 `(row, col)` 显示/导出为 `(col, row)`，用于匹配小床检测/监测系统原始矩阵方向；`jqbed/smallBed/smallBedNoAlg` 的前端原始 2D 数字矩阵入口仍在 `Num2Doriginal.jsx` 做兜底转置，`smallBed12B` 在 `util.js` 进入 `Fast1024` 前完成转置。
     - `smallBed12B` 的原始数据模式单独复用 `32*32高速` 的 `Fast1024` 渲染组件，进入组件前仍执行 32x32 对角线转置；该模式使用 `0-1024` 的数字材质/颜色范围，其它系统的原始数字矩阵颜色范围、配色逻辑和渲染组件保持原样。
-    - 大体量历史 CSV 下载不再先把所有帧和所有 CSV 行放入数组；`server.js` 使用 `matrix(date,id)` 索引按 `id` 游标分批读取历史帧，并用 `csv-writer` stringifier 写入文件流，覆盖通用 sit/back/head、整椅、大小床、选区标签和触觉手套2合并导出，降低 90 万帧下载时主进程内存压力。
+    - 大体量历史 CSV 下载不再先把所有帧和所有 CSV 行放入数组；`server.js` 使用 `matrix(date,id)` 索引按 `id` 游标分批读取历史帧，并用 `csv-writer` stringifier 写入文件流，覆盖通用 sit/back/head、整椅、大小床、选区标签和触觉手套2合并导出，降低 90 万帧下载时主进程内存压力。导出过程中后端会按批次通过 WebSocket 发送 `csvDownloadProgress`，前端 `Title.jsx` 的 CSV 下载弹窗展示百分比、当前文件、已写行数和多文件序号。
 
 3. **历史数据回放流程**
     - 用户在历史数据页选择记录 → 前端发送 `play` 指令 → `server.js` 从 SQLite 读取历史帧数据 → 按时间间隔逐帧通过 WebSocket 推送 → 前端 `usePlayback` Hook 管理播放状态（播放/暂停/变速/跳帧）。
@@ -328,6 +328,19 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-06-15 | Codex | 回放范围滑块时间提示 | `Progress.jsx` 为播放控件左右范围滑块增加 hover 时间提示，拖动范围时同步维护左右帧索引，并从历史 `time` 数组按索引显示对应时间。 |
+| 2026-06-15 | Codex | 回放滑块时间提示修复 | `Progress.jsx` 缓存历史时间轴数组，避免播放中单帧 `time` 覆盖左右范围滑块的时间来源，并兼容数字时间戳和已格式化时间字符串。 |
+| 2026-06-15 | Codex | 采集数据库满盘保护 | `server.js` 在采集入库前检查数据库所在磁盘剩余空间，低于阈值或遇到 `SQLITE_FULL/database or disk is full` 时自动停止采集并广播错误；`Home.jsx` 收到 `collectionStorageError` 后弹出提示。 |
+| 2026-06-15 | Codex | Windows 安装器协议编码修复 | `package.json` 将 NSIS 协议文件切换为 `docs/EULA.nsis.txt`，并新增 `scripts/prepare-nsis-license.js` 在打包前从 `docs/EULA.txt` 生成带 UTF-8 BOM 的安装器专用协议文本，避免中文许可证协议乱码。 |
+| 2026-06-12 | Codex | 小床检测 12B 原始方向恢复 | `server.js`、`util.js` 和 `Num2Doriginal.jsx` 恢复 `smallBed12B` 原始矩阵与 CSV `data` 的小床转置规则，取消上一轮按 `Fast1024` 行优先直接显示的方向调整。 |
+| 2026-06-12 | Codex | CSV 下载进度条 | `server.js` 在流式 CSV 导出批量写入后广播 `csvDownloadProgress`，`Home.jsx` 转发进度事件，`Title.jsx` 的下载弹窗新增进度条、当前文件、已写行数和多文件序号展示。 |
+| 2026-06-12 | Codex | 小床检测 12B 缩小采集取点方向定义 | `server.js` 将 `smallBed12B` 缩小采集弹窗中的取点位置按当前原始数据展示方向解释，入库前把显示方向的右上/左下换算为未转置矩阵的左下/右上，并在元数据中同时保存显示取点与实际取点。 |
+| 2026-06-12 | Codex | 小床检测 12B 256 点还原方位修正 | `server.js` 在 12B 256 点历史帧回放扩回 1024 点时，按采集时的 `matrixDownsample.samplePoint` 原样放回每个 2x2 块，避免选择右上却回放到左下；CSV 下载仍保留真实采集的 256 点数据。 |
+| 2026-06-12 | Codex | 小床检测 12B 256 点回放还原 | `server.js` 在 `smallBed12B` 回放中检测到 256 点历史帧时，按采集时 `matrixDownsample.samplePoint` 的 2x2 取点位置还原为 32x32/1024 点矩阵，其余位置补 0；缺少元数据的旧 256 帧默认按左上点还原，CSV 下载保持 256 点。 |
+| 2026-06-12 | Codex | 小床检测 12B 缩小采集 CSV 保持 256 点 | `server.js` 将 `smallBed12B` 缩小采集数据的 CSV 下载改为保留数据库中的 16x16/256 点矩阵，回放仍单独扩回 32x32/1024 点用于展示采样位置。 |
+| 2026-06-12 | Codex | 小床原始数据展示对齐手部检测 | `Home.jsx` 将 `smallBed` / `smallBedNoAlg` / `smallBed12B` 原始数据模式改为复用 `hand` 的 `Fast1024` 32x32 高速方阵展示；`smallBed12B` 进入高速方阵前仍按既有小床矩阵方向转置。 |
+| 2026-06-12 | Codex | 小床检测 CSV 表头对齐手部检测 | `server.js` 将 `smallBed` / `smallBedNoAlg` / `smallBed12B` / `smallBed1` 小床矩阵类 CSV 导出改为复用手部检测的通用表头 `seconds/max/time/area/press/data`，不再额外导出 `realInitData`、`pressuremmgH` 和 `algorData` 表头。 |
+| 2026-06-12 | Codex | 小床检测(数据)采集入库异常修复 | `server.js` 修复 `smallBedNoAlg` / 小床矩阵类采集入库分支引用未定义 `realArr` 的问题，采集保存改为从当前帧 `sitData/backData/headData` 安全取矩阵数组，避免长时间采集时后端因 `ReferenceError` 中断。 |
 | 2026-06-12 | Codex | 采集频率模式 | `Title.jsx` 的采集配置 Modal 将采集频率改为“跟随串口频率”和“自定义保存频率”两种模式；`server.js` 在跟随串口模式下每帧入库，在自定义模式下按目标 Hz 跳帧保存。 |
 | 2026-06-12 | Codex | 采集特征标签分行说明 | `Title.jsx` 的采集配置 Modal 将特征标签1和特征标签2改为上下两行展示，并分别说明主标签用于采集对象/分组、副标签用于姿态/状态/场景。 |
 | 2026-06-12 | Codex | 采集特征标签说明与弹窗配色收敛 | `Title.jsx` 在采集配置 Modal 的特征标签下方补充用途说明，`title.scss` 将 Modal 从多强调色改为深色背景、白字和灰紫边框的克制配色。 |
@@ -631,6 +644,14 @@ graph TD
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-06-12 | Codex | 配置变更 | `smallBed12B` 缩小采集 CSV 下载保持真实采集的 256 点 `data`，不再为下载扩回 1024；回放链路仍会扩回 1024 并把未采样位置填 0。 |
+| 2026-06-12 | Codex | 新增功能 | CSV 下载弹窗新增进度条；后端流式写入每批 CSV 记录后上报总进度，前端展示当前文件、已写行数/总行数和文件序号，适配百万级历史帧导出。 |
+| 2026-06-12 | Codex | 配置变更 | `smallBed12B` 16x16 缩小采集的“左上/右上/左下/右下”按当前原始数据展示方向定义；由于展示链路会做对角线转置，后端入库时会把右上与左下互换为实际矩阵取点。 |
+| 2026-06-12 | Codex | 配置变更 | 取消 `smallBed12B` 按 `Fast1024` 行优先直接显示的方向调整，恢复原始高速矩阵和 CSV 下载的既有小床转置顺序。 |
+| 2026-06-12 | Codex | 配置变更 | `smallBed12B` 历史回放遇到 256 点缩小采集帧时，按原 2x2 采样点位置扩回 1024 点，未采样位置填 0；CSV 下载保留 256 点，便于拿到真实采集数据。 |
+| 2026-06-12 | Codex | 配置变更 | 小床检测、小床检测（数据）和小床检测 12B 的原始数据视图改为与 `hand` 手部检测一致的 `Fast1024` 32x32 高速方阵展示；其中 12B 进入组件前仍按既有小床矩阵方向转置。 |
+| 2026-06-12 | Codex | 配置变更 | 小床检测、小床检测（数据）和小床检测 12B 的 CSV 下载表头对齐手部检测通用表头，保留 `data` 列作为矩阵数据输出，移除专用原始矩阵和算法数据表头。 |
+| 2026-06-12 | Codex | 修复缺陷 | 修复小床检测（数据）采集时 `colOrSendData` 报 `realArr is not defined` 的问题：小床矩阵类入库统一从当前帧 payload 读取对应通道矩阵，避免采集保存 Promise 未处理异常。 |
 | 2026-06-12 | Codex | 配置变更 | 采集频率配置新增两种模式：跟随串口频率时每收到一帧就入库；自定义保存频率时用户输入目标 Hz，后端按该频率跳帧保存，适用于只采集小于串口实际 Hz 的历史数据。 |
 | 2026-06-12 | Codex | 配置变更 | 采集配置 Modal 中的特征标签改为两行展示：特征标签1作为主标签用于对象/分组，特征标签2作为副标签用于姿态/状态/场景，解决选项内容较长时横向拥挤的问题。 |
 | 2026-06-12 | Codex | 配置变更 | 采集配置 Modal 的“特征标签”增加用途简介，说明其用于标注采集记录、方便回放和 CSV 识别且不参与矩阵计算；同时减少弹窗强调色，只保留深色背景、白字和灰紫边框。 |

@@ -2345,7 +2345,7 @@ export const sitTypeEvent = {
   smallBed({ that, wsPointData, compen }) {
     // console.log(compen)
     if (that.state.numMatrixFlag == "numoriginal") {
-      that.com.current?.changeWsDataRaw([...wsPointData]);
+      that.com.current?.changeWsDataRaw(transposeSquareMatrix(wsPointData));
       return;
     }
     const arr = [...wsPointData]
