@@ -1,0 +1,385 @@
+{
+  "project": "Shroom1.0",
+  "branch": "test (based on Max)",
+  "timestamp": "2026-03-03T08:04:47.227Z",
+  "summary": {
+    "total": 41,
+    "passed": 39,
+    "failed": 1,
+    "skipped": 1
+  },
+  "categories": {
+    "生命周期": {
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "total": 6
+    },
+    "WebSocket": {
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "total": 3
+    },
+    "数据库": {
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "total": 2
+    },
+    "UI导航": {
+      "passed": 14,
+      "failed": 1,
+      "skipped": 0,
+      "total": 15
+    },
+    "组件交互": {
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "total": 5
+    },
+    "Canvas/3D": {
+      "passed": 8,
+      "failed": 0,
+      "skipped": 1,
+      "total": 9
+    },
+    "内存检测": {
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "total": 1
+    }
+  },
+  "results": [
+    {
+      "category": "生命周期",
+      "name": "应用启动",
+      "status": "PASSED",
+      "detail": "Electron 主窗口已创建并可见",
+      "duration_ms": 3434,
+      "screenshot": null
+    },
+    {
+      "category": "生命周期",
+      "name": "页面加载",
+      "status": "PASSED",
+      "detail": "DOM 节点数: 25",
+      "duration_ms": 5503,
+      "screenshot": "/home/ubuntu/shroom1.0/test/screenshots/01_page_loaded.png"
+    },
+    {
+      "category": "生命周期",
+      "name": "窗口属性",
+      "status": "PASSED",
+      "detail": "标题: \"Shroom - Pressure Sensor System\", URL: http://127.0.0.1:12321/",
+      "duration_ms": 5505,
+      "screenshot": null
+    },
+    {
+      "category": "生命周期",
+      "name": "JS错误检测",
+      "status": "PASSED",
+      "detail": "无未捕获异常",
+      "duration_ms": 6507,
+      "screenshot": null
+    },
+    {
+      "category": "生命周期",
+      "name": "静态服务器",
+      "status": "PASSED",
+      "detail": "HTTP 200 OK",
+      "duration_ms": 6514,
+      "screenshot": null
+    },
+    {
+      "category": "WebSocket",
+      "name": "WS main (19999)",
+      "status": "PASSED",
+      "detail": "连接成功",
+      "duration_ms": 6519,
+      "screenshot": null
+    },
+    {
+      "category": "WebSocket",
+      "name": "WS back (19998)",
+      "status": "PASSED",
+      "detail": "连接成功",
+      "duration_ms": 6523,
+      "screenshot": null
+    },
+    {
+      "category": "WebSocket",
+      "name": "WS head (19997)",
+      "status": "PASSED",
+      "detail": "连接成功",
+      "duration_ms": 6527,
+      "screenshot": null
+    },
+    {
+      "category": "数据库",
+      "name": "SQLite CRUD 测试",
+      "status": "PASSED",
+      "detail": "建表、插入、查询均成功",
+      "duration_ms": 6534,
+      "screenshot": null
+    },
+    {
+      "category": "数据库",
+      "name": "项目数据库文件",
+      "status": "PASSED",
+      "detail": "db/ 目录文件: hand0205.db, hand0205back.db, hand0205sit.db, init.db",
+      "duration_ms": 6534,
+      "screenshot": null
+    },
+    {
+      "category": "UI导航",
+      "name": "路由 / (首页(Date))",
+      "status": "PASSED",
+      "detail": "页面内容长度: 3",
+      "duration_ms": 8083,
+      "screenshot": "/home/ubuntu/shroom1.0/test/screenshots/04_route__.png"
+    },
+    {
+      "category": "UI导航",
+      "name": "路由 /system (系统主页(Home))",
+      "status": "PASSED",
+      "detail": "页面内容长度: 120",
+      "duration_ms": 9836,
+      "screenshot": "/home/ubuntu/shroom1.0/test/screenshots/04_route__system.png"
+    },
+    {
+      "category": "UI导航",
+      "name": "路由 /heatmap (热力图)",
+      "status": "FAILED",
+      "detail": "页面内容长度: 0",
+      "duration_ms": 11399,
+      "screenshot": "/home/ubuntu/shroom1.0/test/screenshots/04_route__heatmap.png"
+    },
+    {
+      "category": "UI导航",
+      "name": "路由 /num/car10 (数字矩阵(car10))",
+      "status": "PASSED",
+      "detail": "页面内容长度: 4912",
+      "duration_ms": 12957,
+      "screenshot": "/home/ubuntu/shroom1.0/test/screenshots/04_route__num_car10.png"
+    },
+    {
+      "category": "UI导航",
+      "name": "路由 /handReal (手部实时演示)",
+      "status": "PASSED",
+      "detail": "页面内容长度: 1148",
+      "duration_ms": 14518,
+      "screenshot": "/home/ubuntu/shroom1.0/test/screenshots/04_route__handReal.png"
+    },
+    {
+      "category": "UI导航",
+      "name": "路由 /handPoint (手部传感点)",
+      "status": "PASSED",
+      "detail": "页面内容长度: 847",
+      "duration_ms": 16088,
+      "screenshot": "/home/ubuntu/shroom1.0/test/screenshots/04_route__handPoint.png"
+    },
+    {
+      "category": "UI导航",
+      "name": "路由 /handPoint32 (32点手部)",
+      "status": "PASSED",
+      "detail": "页面内容长度: 167",
+      "duration_ms": 17651,
+      "screenshot": "/home/ubuntu/shroom1.0/test/screenshots/04_route__handPoint32.png"
+    },
+    {
+      "category": "UI导航",
+      "name": "路由 /line (线调整)",
+      "status": "PASSED",
+      "detail": "页面内容长度: 3",
+      "duration_ms": 19183,
+      "screenshot": "/home/ubuntu/shroom1.0/test/screenshots/04_route__line.png"
+    },
+    {
+      "category": "UI导航",
+      "name": "路由 /num1010 (10x10矩阵)",
+      "status": "PASSED",
+      "detail": "页面内容长度: 2520",
+      "duration_ms": 20737,
+      "screenshot": "/home/ubuntu/shroom1.0/test/screenshots/04_route__num1010.png"
+    },
+    {
+      "category": "UI导航",
+      "name": "路由 /num1016 (10x16矩阵)",
+      "status": "PASSED",
+      "detail": "页面内容长度: 427",
+      "duration_ms": 22284,
+      "screenshot": "/home/ubuntu/shroom1.0/test/screenshots/04_route__num1016.png"
+    },
+    {
+      "category": "UI导航",
+      "name": "路由 /block (块显示)",
+      "status": "PASSED",
+      "detail": "页面内容长度: 20",
+      "duration_ms": 23835,
+      "screenshot": "/home/ubuntu/shroom1.0/test/screenshots/04_route__block.png"
+    },
+    {
+      "category": "UI导航",
+      "name": "路由 /log (日志)",
+      "status": "PASSED",
+      "detail": "页面内容长度: 813",
+      "duration_ms": 25370,
+      "screenshot": "/home/ubuntu/shroom1.0/test/screenshots/04_route__log.png"
+    },
+    {
+      "category": "UI导航",
+      "name": "路由 /diff (矩阵差异)",
+      "status": "PASSED",
+      "detail": "页面内容长度: 6415",
+      "duration_ms": 26936,
+      "screenshot": "/home/ubuntu/shroom1.0/test/screenshots/04_route__diff.png"
+    },
+    {
+      "category": "UI导航",
+      "name": "路由 /3Dnum (3D数字)",
+      "status": "PASSED",
+      "detail": "页面内容长度: 2047",
+      "duration_ms": 28494,
+      "screenshot": "/home/ubuntu/shroom1.0/test/screenshots/04_route__3Dnum.png"
+    },
+    {
+      "category": "UI导航",
+      "name": "路由 /license (授权管理)",
+      "status": "PASSED",
+      "detail": "页面内容长度: 555",
+      "duration_ms": 30113,
+      "screenshot": "/home/ubuntu/shroom1.0/test/screenshots/04_route__license.png"
+    },
+    {
+      "category": "组件交互",
+      "name": "Antd 按钮检测",
+      "status": "PASSED",
+      "detail": "发现 1 个按钮",
+      "duration_ms": 32165,
+      "screenshot": "/home/ubuntu/shroom1.0/test/screenshots/05_buttons.png"
+    },
+    {
+      "category": "组件交互",
+      "name": "Antd 输入框检测",
+      "status": "PASSED",
+      "detail": "发现 1 个输入框",
+      "duration_ms": 32167,
+      "screenshot": null
+    },
+    {
+      "category": "组件交互",
+      "name": "Antd Select 检测",
+      "status": "PASSED",
+      "detail": "发现 0 个 Select",
+      "duration_ms": 32168,
+      "screenshot": null
+    },
+    {
+      "category": "组件交互",
+      "name": "System 页面组件",
+      "status": "PASSED",
+      "detail": "Select: 4",
+      "duration_ms": 34392,
+      "screenshot": "/home/ubuntu/shroom1.0/test/screenshots/05_system_page.png"
+    },
+    {
+      "category": "组件交互",
+      "name": "License 页面组件",
+      "status": "PASSED",
+      "detail": "按钮: 2, 输入框: 0",
+      "duration_ms": 36042,
+      "screenshot": "/home/ubuntu/shroom1.0/test/screenshots/05_license_page.png"
+    },
+    {
+      "category": "Canvas/3D",
+      "name": "System Canvas",
+      "status": "PASSED",
+      "detail": "7 个 Canvas",
+      "duration_ms": 39287,
+      "screenshot": "/home/ubuntu/shroom1.0/test/screenshots/06_canvas_system.png"
+    },
+    {
+      "category": "Canvas/3D",
+      "name": "Canvas[0] 尺寸",
+      "status": "PASSED",
+      "detail": "300x150",
+      "duration_ms": 39287,
+      "screenshot": null
+    },
+    {
+      "category": "Canvas/3D",
+      "name": "Canvas[1] 尺寸",
+      "status": "PASSED",
+      "detail": "300x150",
+      "duration_ms": 39287,
+      "screenshot": null
+    },
+    {
+      "category": "Canvas/3D",
+      "name": "Canvas[2] 尺寸",
+      "status": "PASSED",
+      "detail": "300x150",
+      "duration_ms": 39287,
+      "screenshot": null
+    },
+    {
+      "category": "Canvas/3D",
+      "name": "Canvas[3] 尺寸",
+      "status": "PASSED",
+      "detail": "300x150",
+      "duration_ms": 39287,
+      "screenshot": null
+    },
+    {
+      "category": "Canvas/3D",
+      "name": "Canvas[4] 尺寸",
+      "status": "PASSED",
+      "detail": "300x150",
+      "duration_ms": 39287,
+      "screenshot": null
+    },
+    {
+      "category": "Canvas/3D",
+      "name": "Canvas[5] 尺寸",
+      "status": "PASSED",
+      "detail": "300x150",
+      "duration_ms": 39287,
+      "screenshot": null
+    },
+    {
+      "category": "Canvas/3D",
+      "name": "Canvas[6] 尺寸",
+      "status": "PASSED",
+      "detail": "800x576",
+      "duration_ms": 39287,
+      "screenshot": null
+    },
+    {
+      "category": "Canvas/3D",
+      "name": "3D数字 Canvas",
+      "status": "SKIPPED",
+      "detail": "Canvas: 0",
+      "duration_ms": 41374,
+      "screenshot": "/home/ubuntu/shroom1.0/test/screenshots/06_3dnum.png"
+    },
+    {
+      "category": "内存检测",
+      "name": "路由切换内存",
+      "status": "PASSED",
+      "detail": "变化: 13.08 MB (阈值: 50MB)",
+      "duration_ms": 46410,
+      "screenshot": null
+    },
+    {
+      "category": "生命周期",
+      "name": "应用关闭",
+      "status": "PASSED",
+      "detail": "进程正常退出",
+      "duration_ms": 46467,
+      "screenshot": null
+    }
+  ]
+}

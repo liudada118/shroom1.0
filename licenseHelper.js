@@ -11,10 +11,70 @@ const path = require('path');
 const http = require('http');
 const module2 = require('./aes_ecb');
 const logger = require('./logger');
+let electronApp = null;
+try {
+  ({ app: electronApp } = require('electron'));
+} catch {}
 
-const CONFIG_FILE = path.join(__dirname, 'config.txt');
 const TIME_SERVER = 'http://sensor.bodyta.com';
 const TIMEOUT_MS = 5000;
+
+function isPackagedRuntime() {
+  if (electronApp && typeof electronApp.isPackaged === 'boolean') {
+    return electronApp.isPackaged;
+  }
+
+  return false;
+}
+
+function getConfigFileCandidates() {
+  const candidates = [];
+  const writableConfig = getWritableConfigFile();
+  const packaged = isPackagedRuntime();
+
+  if (writableConfig) {
+    candidates.push(writableConfig);
+  }
+
+  if (!packaged) {
+    candidates.push(path.join(__dirname, 'config.txt'));
+  } else {
+    if (process.execPath) {
+      if (process.platform === 'darwin') {
+        const appBundleDir = path.dirname(path.dirname(path.dirname(process.execPath)));
+        candidates.push(path.join(path.dirname(appBundleDir), 'config.txt'));
+      }
+
+      candidates.push(path.join(path.dirname(process.execPath), 'config.txt'));
+    }
+
+    if (process.resourcesPath) {
+      candidates.push(path.join(process.resourcesPath, 'config.txt'));
+    }
+  }
+
+  return [...new Set(candidates)];
+}
+
+function getWritableConfigFile() {
+  if (electronApp && typeof electronApp.getPath === 'function') {
+    return path.join(electronApp.getPath('userData'), 'config.txt');
+  }
+
+  return path.join(__dirname, 'config.txt');
+}
+
+function resolveConfigFile() {
+  const writableConfig = getWritableConfigFile();
+  const existingConfig = getConfigFileCandidates()
+    .find((candidate) => fs.existsSync(candidate));
+
+  if (existingConfig) {
+    return existingConfig;
+  }
+
+  return writableConfig;
+}
 
 /**
  * 从 config.txt 读取并解密授权截止日期
@@ -22,11 +82,16 @@ const TIMEOUT_MS = 5000;
  */
 function readEndDate() {
   try {
-    if (!fs.existsSync(CONFIG_FILE)) {
-      logger.warn('config.txt 不存在，授权验证跳过');
+    const configFile = resolveConfigFile();
+
+    if (!fs.existsSync(configFile)) {
+      logger.warn(`[License] config.txt not found, searched: ${getConfigFileCandidates().join(', ')}`);
       return null;
     }
-    const encrypted = fs.readFileSync(CONFIG_FILE, 'utf-8').trim();
+
+    logger.info(`[License] Using config file: ${configFile}`);
+
+    const encrypted = fs.readFileSync(configFile, 'utf-8').trim();
     if (!encrypted) {
       logger.warn('config.txt 为空');
       return null;
@@ -114,4 +179,13 @@ async function initLicense() {
   return { nowDate, endDate, valid, remainingDays };
 }
 
-module.exports = { readEndDate, fetchNetworkTime, isLicenseValid, getRemainingDays, initLicense };
+module.exports = {
+  getConfigFileCandidates,
+  getWritableConfigFile,
+  resolveConfigFile,
+  readEndDate,
+  fetchNetworkTime,
+  isLicenseValid,
+  getRemainingDays,
+  initLicense,
+};

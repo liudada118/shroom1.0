@@ -352,6 +352,51 @@
   background: rgba(255, 255, 255, 0.25);
 }
 
+/* 过期测试样式 */
+.expire-preview-danger {
+  background: rgba(255, 77, 79, 0.08) !important;
+  border: 1px solid rgba(255, 77, 79, 0.2);
+  border-radius: 6px;
+}
+
+.expired-preset {
+  border-color: rgba(255, 77, 79, 0.4) !important;
+  color: #ff4d4f !important;
+  background: rgba(255, 77, 79, 0.08) !important;
+}
+
+.expired-preset:hover {
+  background: rgba(255, 77, 79, 0.15) !important;
+  border-color: #ff4d4f !important;
+}
+
+.expired-alert {
+  background: rgba(255, 165, 0, 0.08) !important;
+  border-color: rgba(255, 165, 0, 0.3) !important;
+}
+
+.expired-alert .ant-alert-message {
+  color: #faad14 !important;
+}
+
+.expired-alert .ant-alert-description {
+  color: rgba(255, 255, 255, 0.6) !important;
+}
+
+.generate-btn-expired {
+  background: linear-gradient(135deg, #ff7875, #ff4d4f) !important;
+  box-shadow: 0 4px 15px rgba(255, 77, 79, 0.3) !important;
+}
+
+.generate-btn-expired:hover {
+  background: linear-gradient(135deg, #ff9c9c, #ff7875) !important;
+  box-shadow: 0 6px 20px rgba(255, 77, 79, 0.4) !important;
+}
+
+.time-mode-switch {
+  margin-bottom: 4px;
+}
+
 /* 响应式 */
 @media (max-width: 992px) {
   .license-header {

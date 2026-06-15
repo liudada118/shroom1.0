@@ -4,33 +4,27 @@
     // width: 100vw;
  
 }
-
 .setIcons{
     position: absolute;
     top: 10%;
     right: 3%;
 }
-
 .setIconItem{
     background-color: #191932;
     padding: 10px 10px;
     border-radius: 4px;
     margin-bottom: 10px;
 }
-
 .setIconItem1{
     display: f;
 }
-
 .setIconItem:end{
     margin-bottom: 0;
 }
-
 .setIcon{
     width: 18px;
    
 }
-
 .no-click-slider .ant-slider-rail,
 .no-click-slider .ant-slider-track,
 .no-click-slider .ant-slider-handle {
@@ -39,7 +33,123 @@
 .setIcon img{
     width: 100%;
 }
-
 .marginB10{
     margin-bottom: 10px;
+}
+
+/* ====== 密钥过期弹窗 - 暗色主题基础样式 ====== */
+.license-expired-modal,
+.license-warning-modal {
+  // 整个 Modal 内容容器 - 覆盖 antd 默认白色背景
+  .ant-modal-content {
+    background: #1a1a2e !important;
+    border-radius: 12px !important;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6) !important;
+    padding: 0 !important;
+    overflow: hidden;
+  }
+
+  // 标题栏
+  .ant-modal-header {
+    background: #1a1a2e !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+    padding: 20px 24px 16px !important;
+    margin: 0 !important;
+  }
+
+  .ant-modal-title {
+    font-size: 18px !important;
+    font-weight: 600 !important;
+  }
+
+  // 内容区域
+  .ant-modal-body {
+    background: #1a1a2e !important;
+    padding: 20px 24px 24px !important;
+
+    p {
+      color: rgba(255, 255, 255, 0.8);
+      font-size: 14px;
+      line-height: 2;
+      margin: 0;
+    }
+
+    .expire-date {
+      font-weight: 600;
+    }
+
+    .remain-days {
+      font-weight: 600;
+    }
+
+    .hint {
+      margin-top: 8px !important;
+      color: rgba(255, 255, 255, 0.45) !important;
+    }
+  }
+
+  // 底部按钮区域
+  .ant-modal-footer {
+    background: #1a1a2e !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
+    padding: 12px 24px 20px !important;
+    margin: 0 !important;
+
+    .ant-btn {
+      border-radius: 8px;
+      height: 38px;
+      font-weight: 600;
+      font-size: 14px;
+      border: none !important;
+    }
+  }
+}
+
+/* ====== 已过期弹窗 - 红色主题 ====== */
+.license-expired-modal {
+  .ant-modal-content {
+    border: 1px solid rgba(255, 77, 79, 0.4) !important;
+  }
+
+  .ant-modal-title {
+    color: #ff4d4f !important;
+  }
+
+  .expire-date {
+    color: #ff4d4f !important;
+  }
+
+  .ant-modal-footer .ant-btn-primary {
+    background: linear-gradient(135deg, #ff7875, #ff4d4f) !important;
+    color: #fff !important;
+
+    &:hover {
+      background: linear-gradient(135deg, #ff9c9c, #ff7875) !important;
+    }
+  }
+}
+
+/* ====== 即将过期弹窗 - 黄色主题 ====== */
+.license-warning-modal {
+  .ant-modal-content {
+    border: 1px solid rgba(250, 173, 20, 0.4) !important;
+  }
+
+  .ant-modal-title {
+    color: #faad14 !important;
+  }
+
+  .expire-date,
+  .remain-days {
+    color: #faad14 !important;
+  }
+
+  .ant-modal-footer .ant-btn-primary {
+    background: linear-gradient(135deg, #ffc53d, #faad14) !important;
+    color: #000 !important;
+
+    &:hover {
+      background: linear-gradient(135deg, #ffd666, #ffc53d) !important;
+    }
+  }
 }

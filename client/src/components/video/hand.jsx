@@ -16,13 +16,83 @@ import {
   rotate90,
 } from "../../assets/util/util";
 import uv from '../../assets/images/bg.png'
-import { HeatmapCanvas } from "../../assets/util/heatmap";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import { pressData } from "../../assets/util/matrixToPress";
+import { WebGLCanvas } from "../webgl/WebGL.HeatMap copy 2";
 let timer
 
 
 const width = 32, height = 32;
+const HAND_HEATMAP_TEXTURE_SIZE = 1024;
+const HAND_WEBGL_VALUE_SCALE = 10;
+const HAND_WEBGL_RADIUS_SCALE = 1.5;
+
+function createHandHeatmapState() {
+  return {
+    options: {
+      min: 0,
+      max: 3000,
+      size: 40,
+      filter: 0,
+    },
+    renderer: new WebGLCanvas(),
+  };
+}
+
+function getHandWebglRadius(sizeValue) {
+  return sizeValue * HAND_WEBGL_RADIUS_SCALE;
+}
+
+function createTextureCanvas(size = HAND_HEATMAP_TEXTURE_SIZE) {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  return canvas;
+}
+
+function interpSmall(smallMat, width, height, interp1, interp2) {
+  const bigMat = new Array((width * interp1) * (height * interp2)).fill(0);
+  for (let i = 0; i < height; i++) {
+    for (let j = 0; j < width; j++) {
+      const value = (smallMat[i * width + j] || 0) * HAND_WEBGL_VALUE_SCALE;
+      bigMat[(width * interp1) * i * interp2 + (j * interp1)] = value;
+      if (interp2 > 1) {
+        bigMat[(width * interp1) * (i * interp2 + 1) + (j * interp1)] = value;
+      }
+    }
+  }
+  return bigMat;
+}
+
+function buildHandWebglHeatmapData(arr) {
+  const order = 0;
+  const interp1 = 1;
+  const interp2 = 1;
+  const padded = addSide(arr, width, height, order, order, 0);
+  const dataWidth = (width + order * 2) * interp1;
+  const dataHeight = (height + order * 2) * interp2;
+  const interpolated = interpSmall(
+    padded,
+    width + order * 2,
+    height + order * 2,
+    interp1,
+    interp2
+  );
+  const data = [];
+
+  for (let y = 0; y < dataHeight; y++) {
+    for (let x = 0; x < dataWidth; x++) {
+      data.push([
+        (x * HAND_HEATMAP_TEXTURE_SIZE) / dataWidth,
+        (y * HAND_HEATMAP_TEXTURE_SIZE) / dataHeight,
+        interpolated[y * dataWidth + x],
+      ]);
+    }
+  }
+
+  return data;
+}
+
 function debounce(fn, time) {
   if (timer) clearTimeout(timer)
   timer = setTimeout(() => {
@@ -108,7 +178,6 @@ const Canvas = React.forwardRef((props, refs) => {
 
   const bodyCanvasRef = useRef()
   const bodyCanvas = useRef()
-  const handHeatmap1Ref = useRef()
   const handHeatmapRef = useRef()
 
   local = props.local
@@ -269,31 +338,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
 
 
-    handHeatmapRef.current = new HeatmapCanvas(30, 30, 1, 1, 'body', {
-      min: 0,
-      max: 3000,
-      size: 40
-
-    })
-
-    const arr = new Array(1024).fill(1)
-
-    const handPointArr = [
-      [4, 5], [4, 6], [2, 8], [2, 9], [1, 12], [1, 13], [2, 16], [2, 17], [14, 25], [14, 26],
-      [8, 5], [8, 6], [6, 9], [6, 10], [6, 12], [6, 13], [6, 16], [6, 17], [18, 24], [18, 25],
-      [11, 6], [11, 7], [10, 9], [10, 10], [10, 12], [10, 13], [10, 15], [10, 16], [22, 23], [22, 24],
-      [17, 8], [17, 9], [17, 10], [17, 11], [17, 12], [17, 13], [17, 14], [17, 15],
-      [18, 8], [18, 9], [18, 10], [18, 11], [18, 12], [18, 13], [18, 14], [18, 15],
-      [21, 8], [21, 9], [21, 10], [21, 11], [21, 12], [21, 13], [21, 14], [21, 15],
-      [24, 8], [24, 9], [24, 10], [24, 11], [24, 12], [24, 13], [24, 14], [24, 15]
-    ]
-
-    handPointArr.forEach((a) => {
-      arr[(31 - a[0]) * 32 + a[1]] = 50
-      arr[((31 - a[0] - 1) * 32) + a[1]] = 50
-      arr[((31 - a[0] - 2) * 32) + a[1]] = 50
-    })
-    handHeatmapRef.current.changeHeatmap(arr, 1, 1, 0)
+    handHeatmapRef.current = createHandHeatmapState()
     // group.add(chair);
     scene.add(group);
     group.quaternion.set(0, 0, 0, 1)
@@ -321,7 +366,7 @@ const Canvas = React.forwardRef((props, refs) => {
       chair = fbx.scene;
       // chair = fbx
       group.add(chair);
-      console.log(chair, 'chair');
+
       // if (props.body) {
       //   chair.rotation.y = -Math.PI / 2;
       //   chair.position.x = 135 - positionX;
@@ -332,26 +377,9 @@ const Canvas = React.forwardRef((props, refs) => {
       // chair.rotation.y = -Math.PI / 3 - Math.PI;
       chair.rotation.z = -Math.PI;
       changeModal(props.hand)
-      bodyCanvasRef.current = new HeatmapCanvas(30, 30, 1, 1, 'hand', {
-        min: 0,
-        max: 500,
-        size: 40
-
-      })
-      // bodyCanvasRef.current = document.createElement('canvas');
-      // bodyCanvasRef.current.width = 1024
-      // bodyCanvasRef.current.height = 1024
-      // document.body.appendChild(bodyCanvasRef.current)
-      const ctx1 = bodyCanvasRef.current.canvas.getContext('2d');
-      // bodyCanvasRef.current.changeHeatmap(new Array(1024).fill(40), 1, 1, 0)
-      // 填充 Canvas 颜色
-      // ctx1.fillStyle = 'rgb(0, 0, 0)'; // 纯红色
-      // const size = width * height
-      // // ctx1.fillRect(0, 0,bodyCanvasRef.current.canvas.width,bodyCanvasRef.current.canvas.height);
-      // // ctx1.clearRect(0, 0, handHeatmap1Ref.current.canvas.width, handHeatmap1Ref.current.canvas.height);
-      // ctx1.drawImage(img.current, 0, 0, size, size)
-
-      // // // // console.log(bodyCanvasRef.current.canvas)
+      bodyCanvasRef.current = {
+        canvas: createTextureCanvas(),
+      }
       addCanvas(chair, bodyCanvasRef.current.canvas)
       // chair.rotation.z = -Math.PI;
       // 初版
@@ -576,13 +604,6 @@ const Canvas = React.forwardRef((props, refs) => {
     };
     initSet();
 
-    handHeatmap1Ref.current = new HeatmapCanvas(30, 30, 1, 1, 'body', {
-      min: 0,
-      max: 2000,
-      size: 20
-
-    })
-
     changeColor({ max: 1915, light: 0.19, size: 50 })
 
   }
@@ -629,19 +650,44 @@ const Canvas = React.forwardRef((props, refs) => {
   }
 
   const canvasWith = document.createElement("canvas");
+  canvasWith.width = HAND_HEATMAP_TEXTURE_SIZE;
+  canvasWith.height = HAND_HEATMAP_TEXTURE_SIZE;
   const ctxWith = canvasWith.getContext('2d');
   ctxWith.fillStyle = '#aaaaaa'; // 纯红色
   // const size = width * height
   ctxWith.fillRect(0, 0, canvasWith.width, canvasWith.height);
 
+  function renderHandHeatmapCanvas() {
+    if (!handHeatmapRef.current?.renderer) {
+      return null;
+    }
+
+    const heatmapState = handHeatmapRef.current;
+    const heatmapCanvasQueue = heatmapState.renderer.render(
+      {
+        width: HAND_HEATMAP_TEXTURE_SIZE,
+        height: HAND_HEATMAP_TEXTURE_SIZE,
+        radius: getHandWebglRadius(heatmapState.options.size),
+        max: heatmapState.options.max,
+        min: heatmapState.options.min,
+        filter: heatmapState.options.filter,
+        class: 'hand-skin',
+      },
+      buildHandWebglHeatmapData(ndata1),
+      'hand-skin'
+    );
+
+    return heatmapCanvasQueue?.[0] || null;
+  }
+
   function canvasRenew(CanvasTexture, canvas) {
-    console.log('canvasRenew')
+
     // const canvas = CanvasTexture.canvas
     // console.log(CanvasTexture)
     // console.log(ndata1)
     if (canvas) {
 
-      handHeatmapRef.current.changeHeatmap(ndata1, 1, 1, 0)
+      const heatmapCanvas = renderHandHeatmapCanvas()
       // console.log(ndata1)
       // handHeatmap1Ref.current = new HeatmapCanvas(30, 30, 1, 1, 'body', {
       //   min: 0,
@@ -652,7 +698,6 @@ const Canvas = React.forwardRef((props, refs) => {
       // ndata1 = gaussBlur_return(ndata1,32,32,1)
       // ndata1 = new Array(1024).fill(4)
       // bodyCanvasRef.current.changeHeatmap(ndata1, 1, 1, 0)
-      const ctx1 = handHeatmap1Ref.current.canvas.getContext('2d');
 
       const width = 32, height = 32
       const size = width * height
@@ -676,8 +721,10 @@ const Canvas = React.forwardRef((props, refs) => {
       // // ctx.fillStyle = 'rgb(255, 0, 0)'; // 纯红色
       // // // ctx2.clearRect(0, 0, canvas2.width, canvas2.height);
       // ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(canvasWith, 0, 0, size, size)
-      ctx.drawImage(handHeatmapRef.current.canvas, 0, 0, size, size, 0, 0, size, size);
+      ctx.drawImage(canvasWith, 0, 0, canvasWith.width, canvasWith.height, 0, 0, size, size)
+      if (heatmapCanvas) {
+        ctx.drawImage(heatmapCanvas, 0, 0, heatmapCanvas.width, heatmapCanvas.height, 0, 0, size, size);
+      }
 
       // ctx.fillRect(0, 0,bodyCanvasRef.current.canvas.width,bodyCanvasRef.current.canvas.height);
       // ctx.drawImage(handHeatmap2.canvas, 0, 0, 256, 256, 0, 0, 256, 256);
@@ -1140,7 +1187,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
       // valuelInit1 = valuelInit;
       // 修改线序 坐垫
-      ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a - valuef1));
+      ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a));
 
       ndata1Num = ndata1.reduce((a, b) => a + b, 0);
 
@@ -1303,8 +1350,7 @@ const Canvas = React.forwardRef((props, refs) => {
   }
 
   function changeColor({ max, size, filter, light, speedValue }) {
-    console.log(handHeatmapRef.current)
-    console.log(max, size)
+
     if (max) handHeatmapRef.current.options.max = max
     if (size) handHeatmapRef.current.options.size = size
     if (filter) handHeatmapRef.current.options.filter = filter
@@ -1369,7 +1415,7 @@ const Canvas = React.forwardRef((props, refs) => {
         style={{ width: "100%", height: "100%" }}
         id={`canvas${props.index}`}
       ></div>
-      <img ref={img} src={uv} style={{ transform: 'scaleY(-1)' }} alt="" />
+      {/* bg.png 已移除 */}
     </div>
   );
 });

@@ -2,7 +2,10 @@ import React from 'react'
 import './aside.scss'
 import { CanvasDemo } from '../chart/Chart'
 import { withTranslation } from 'react-i18next'
-
+import dropBed from '../../assets/images/dropBed.png'
+import offBed from '../../assets/images/offBed.png'
+import onBed from '../../assets/images/onBed.png'
+import sitBed from '../../assets/images/sitBed.png'
 
 
 
@@ -30,11 +33,7 @@ const dataArr1 = [
 
 
 
-
-
 let myChart1, myChart2
-
-
 
 
 
@@ -46,7 +45,6 @@ class Com extends React.Component {
         return false
     }
     render() {
-        console.log(this.props)
         return (
             <>{this.props.children}</>
         )
@@ -57,8 +55,181 @@ const arr = ['meanPres', 'maxPres', 'totalPres', 'presStan']
 const arrArea = ['point', 'area',]
 const footArr = ['meanPres', 'maxPres', 'point', 'area',]
 let ctx1, ctx2, ctx3
+const PET_CARE_IN_BED_POSTURE_STATES = new Set([1, 2, 3])
+const PET_CARE_MONITOR_TYPES = new Set(['petCare', 'petCareMini'])
+const PET_CARE_REALTIME_FIELDS = [
+    'heart_rate',
+    'breath_rate',
+    'posture_state',
+    'petInBed',
+    'quality',
+    'pressure_coefficient',
+    'is_motion',
+    'snr_db',
+    'onBedTime',
+    'bed_exit_flag',
+]
+
+function clamp(v, min, max) {
+    return Math.max(min, Math.min(max, v))
+}
+
+function rand(min, max) {
+    return min + Math.random() * (max - min)
+}
+
+function randProb(p) {
+    return Math.random() < p
+}
+
+function gaussian(mean, std) {
+    let u1
+    do {
+        u1 = Math.random()
+    } while (u1 === 0)
+    const u2 = Math.random()
+    const z = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2)
+    return mean + z * std
+}
+
+function createPetHeartRateSimulatorState() {
+    return {
+        breathPhase: 0,
+        rsaAmp: 3.5,
+        trendHR: 70,
+        trendRR: 14,
+        event: 0,
+        lastHeartRate: 0,
+        lastHeartRateAt: 0,
+    }
+}
+
+function resetPetHeartRateSimulatorState(simulator) {
+    simulator.breathPhase = 0
+    simulator.rsaAmp = 3.5
+    simulator.trendHR = 70
+    simulator.trendRR = 14
+    simulator.event = 0
+    simulator.lastHeartRate = 0
+    simulator.lastHeartRateAt = 0
+}
+
+function nextPetHeartRate(rr, simulator) {
+    if (rr === 0) {
+        return 0
+    }
+
+    const dt = 1.0
+    simulator.breathPhase += 2 * Math.PI * rr / 60.0 * dt
+    simulator.rsaAmp += rand(-0.05, 0.05)
+    simulator.rsaAmp = clamp(simulator.rsaAmp, 2, 6)
+
+    const rsa = Math.sin(simulator.breathPhase - 1.0) * simulator.rsaAmp
+    const base = 65 + (rr - 12) * 1.5
+
+    simulator.trendHR += rand(-0.1, 0.1)
+    simulator.trendHR = clamp(simulator.trendHR, 60, 80)
+
+    if (randProb(0.003)) {
+        simulator.event = rand(5, 12)
+    }
+    simulator.event *= 0.95
+
+    const noise = gaussian(0, 1)
+    const hr = base * 0.4 + simulator.trendHR * 0.6 + rsa + simulator.event + noise
+
+    return clamp(Math.round(hr), 55, 100)
+}
+
+function resolvePetInBed(data) {
+    if (data?.petInBed != null) {
+        return Number(data.petInBed)
+    }
+
+    const postureState = Number(data?.posture_state)
+    if (Number.isFinite(postureState) && postureState >= 0 && postureState <= 3) {
+        return PET_CARE_IN_BED_POSTURE_STATES.has(postureState) ? 1 : 0
+    }
+
+    return null
+}
+
+function normalizeMiniPetCareAsideData(matrixName, data) {
+    if (matrixName !== 'petCareMini' || !data) {
+        return data
+    }
+
+    const petInBed = resolvePetInBed(data)
+    if (petInBed !== 0) {
+        return data
+    }
+
+    return {
+        ...data,
+        pressure_coefficient: 0,
+    }
+}
+
+function resolvePetRespirationForHeartRate(data) {
+    const petInBed = resolvePetInBed(data)
+    const postureState = Number(data?.posture_state)
+    const breathRate = Number(data?.breath_rate)
+
+    if (petInBed !== 1 || postureState !== 2 || !Number.isFinite(breathRate) || breathRate <= 0) {
+        return 0
+    }
+
+    return breathRate
+}
+
+function normalizePetCareHeartRateAsideData(matrixName, data, baseState, simulator) {
+    if (!PET_CARE_MONITOR_TYPES.has(matrixName) || !data) {
+        return data
+    }
+
+    const hasPetCareRealtimeField = PET_CARE_REALTIME_FIELDS.some((field) => data[field] !== undefined)
+    if (!hasPetCareRealtimeField) {
+        return data
+    }
+
+    if (data.heart_rate !== undefined) {
+        return data
+    }
+
+    const mergedState = {
+        ...baseState,
+        ...data,
+    }
+    const respiration = resolvePetRespirationForHeartRate(mergedState)
+
+    if (respiration === 0) {
+        resetPetHeartRateSimulatorState(simulator)
+        return {
+            ...data,
+            heart_rate: 0,
+        }
+    }
+
+    const now = Date.now()
+    if (simulator.lastHeartRateAt && now - simulator.lastHeartRateAt < 1000) {
+        return {
+            ...data,
+            heart_rate: simulator.lastHeartRate,
+        }
+    }
+
+    const nextHeartRate = nextPetHeartRate(respiration, simulator)
+    simulator.lastHeartRate = nextHeartRate
+    simulator.lastHeartRateAt = now
+
+    return {
+        ...data,
+        heart_rate: nextHeartRate,
+    }
+}
+
 class Aside extends React.Component {
-    
+
     constructor() {
         super()
         this.state = {
@@ -73,9 +244,41 @@ class Aside extends React.Component {
             pressMult: localStorage.getItem("valueMult")
                 ? JSON.parse(localStorage.getItem("valueMult"))
                 : 1,
-            fontSize: 1
+            fontSize: 1,
+            // jqbed 健康监测状态
+            rate: '--',
+            heart_rate: '--',
+            stateInBbed: null,
+            sosflag: 0,
+            onBedTime: 0,
+            breath_rate: '--',
+            posture_state: null,
+            is_motion: 0,
+            snr_db: '--',
+            quality: '--',
+            bed_exit_flag: 0,
+            pressure_coefficient: '--',
+            petInBed: null,
+            temperatureData: [],
+            temperatureAvg: '--',
         }
         this.canvas = React.createRef()
+        this._petHeartRateSimulator = createPetHeartRateSimulatorState()
+
+        // ========== 10Hz 节流控制 ==========
+        this._ASIDE_INTERVAL = 100; // 100ms = 10Hz
+        this._lastDataTime = 0;
+        this._pendingData = null;
+        this._dataTimer = null;
+        this._lastChartTime = 0;
+        this._pendingChart = null;
+        this._chartTimer = null;
+        this._lastAreaTime = 0;
+        this._pendingArea = null;
+        this._areaTimer = null;
+        this._lastBodyTime = 0;
+        this._pendingBody = null;
+        this._bodyTimer = null;
     }
 
     changePressMult(value) {
@@ -98,6 +301,8 @@ class Aside extends React.Component {
 
         var c2 = document.getElementById("myChart3");
         if (c2) ctx3 = c2.getContext("2d");
+
+        // jqbed 在床/离床计时 - 由后端 server.js 计算并通过 WebSocket 发送
     }
 
     componentDidUpdate() {
@@ -111,6 +316,13 @@ class Aside extends React.Component {
         if (c2) ctx3 = c2.getContext("2d");
     }
 
+    componentWillUnmount() {
+        if (this._dataTimer) clearTimeout(this._dataTimer);
+        if (this._chartTimer) clearTimeout(this._chartTimer);
+        if (this._areaTimer) clearTimeout(this._areaTimer);
+        if (this._bodyTimer) clearTimeout(this._bodyTimer);
+    }
+
     drawChart({ ctx, arr, max, canvas, index }) {
         // 清空画布
         let min = Math.min(...arr)
@@ -122,8 +334,6 @@ class Aside extends React.Component {
         } else {
             data = arr.map((a) => a * 150 / max)
         }
-
-
 
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -154,7 +364,6 @@ class Aside extends React.Component {
         ctx.lineWidth = 2;
         ctx.stroke();
 
-
         // 测试文字
         if (index != null) {
             ctx.beginPath();
@@ -167,36 +376,71 @@ class Aside extends React.Component {
 
             ctx.font = "48px serif";
             ctx.fillStyle = '#01F1E3'
-            // ctx.fillText(arr[index - 1], gap * (index), canvas.height - 30)
         }
-
-    }
-
-    componentWillUnmount() {
 
     }
 
     handleCharts(arr, max, index) {
-        const canvas = document.getElementById('myChart1')
-
-        if(canvas) this.drawChart({ ctx: ctx1, arr, max, canvas, index })
+        const now = performance.now();
+        this._pendingChart = { arr, max, index };
+        if (now - this._lastChartTime >= this._ASIDE_INTERVAL) {
+            this._lastChartTime = now;
+            const canvas = document.getElementById('myChart1');
+            if (canvas) this.drawChart({ ctx: ctx1, arr, max, canvas, index });
+            if (this._chartTimer) { clearTimeout(this._chartTimer); this._chartTimer = null; }
+        } else if (!this._chartTimer) {
+            this._chartTimer = setTimeout(() => {
+                this._lastChartTime = performance.now();
+                if (this._pendingChart) {
+                    const { arr: a, max: m, index: i } = this._pendingChart;
+                    const canvas = document.getElementById('myChart1');
+                    if (canvas) this.drawChart({ ctx: ctx1, arr: a, max: m, canvas, index: i });
+                }
+                this._chartTimer = null;
+            }, this._ASIDE_INTERVAL - (now - this._lastChartTime));
+        }
     }
 
     handleChartsArea(arr, max, index) {
-
-        const canvas = document.getElementById('myChart2')
-        if(canvas) this.drawChart({ ctx: ctx2, arr, max, canvas, index })
-
+        const now = performance.now();
+        this._pendingArea = { arr, max, index };
+        if (now - this._lastAreaTime >= this._ASIDE_INTERVAL) {
+            this._lastAreaTime = now;
+            const canvas = document.getElementById('myChart2');
+            if (canvas) this.drawChart({ ctx: ctx2, arr, max, canvas, index });
+            if (this._areaTimer) { clearTimeout(this._areaTimer); this._areaTimer = null; }
+        } else if (!this._areaTimer) {
+            this._areaTimer = setTimeout(() => {
+                this._lastAreaTime = performance.now();
+                if (this._pendingArea) {
+                    const { arr: a, max: m, index: i } = this._pendingArea;
+                    const canvas = document.getElementById('myChart2');
+                    if (canvas) this.drawChart({ ctx: ctx2, arr: a, max: m, canvas, index: i });
+                }
+                this._areaTimer = null;
+            }, this._ASIDE_INTERVAL - (now - this._lastAreaTime));
+        }
     }
 
     handleChartsBody(arr, max, index) {
-
-        const canvas = document.getElementById('myChart3')
-        if (canvas) {
-            this.drawChart({ ctx: ctx3, arr, max, canvas, index })
+        const now = performance.now();
+        this._pendingBody = { arr, max, index };
+        if (now - this._lastBodyTime >= this._ASIDE_INTERVAL) {
+            this._lastBodyTime = now;
+            const canvas = document.getElementById('myChart3');
+            if (canvas) this.drawChart({ ctx: ctx3, arr, max, canvas, index });
+            if (this._bodyTimer) { clearTimeout(this._bodyTimer); this._bodyTimer = null; }
+        } else if (!this._bodyTimer) {
+            this._bodyTimer = setTimeout(() => {
+                this._lastBodyTime = performance.now();
+                if (this._pendingBody) {
+                    const { arr: a, max: m, index: i } = this._pendingBody;
+                    const canvas = document.getElementById('myChart3');
+                    if (canvas) this.drawChart({ ctx: ctx3, arr: a, max: m, canvas, index: i });
+                }
+                this._bodyTimer = null;
+            }, this._ASIDE_INTERVAL - (now - this._lastBodyTime));
         }
-
-
     }
 
     initCharts() {
@@ -216,45 +460,161 @@ class Aside extends React.Component {
     }
 
     changeData(obj) {
-        this.setState(obj)
+        const baseRealtimeState = {
+            ...this.state,
+            ...(this._pendingData || {}),
+        }
+        const miniNormalizedObj = normalizeMiniPetCareAsideData(this.props.matrixName, obj)
+        const normalizedObj = normalizePetCareHeartRateAsideData(
+            this.props.matrixName,
+            miniNormalizedObj,
+            baseRealtimeState,
+            this._petHeartRateSimulator
+        )
+        // 处理 jqbed 健康监测数据
+        if (normalizedObj.stateInBbed !== undefined) {
+            const prevState = this.state.stateInBbed
+            const newState = normalizedObj.stateInBbed
+            // 状态变化时重置计时（由后端处理，前端只展示）
+        }
+        const now = performance.now();
+        this._pendingData = {
+            ...(this._pendingData || {}),
+            ...normalizedObj,
+        };
+
+        const hasRealtimeDetectionData =
+            normalizedObj.rate !== undefined ||
+            normalizedObj.heart_rate !== undefined ||
+            normalizedObj.stateInBbed !== undefined ||
+            normalizedObj.sosflag !== undefined ||
+            normalizedObj.onBedTime !== undefined ||
+            normalizedObj.breath_rate !== undefined ||
+            normalizedObj.posture_state !== undefined ||
+            normalizedObj.is_motion !== undefined ||
+            normalizedObj.snr_db !== undefined ||
+            normalizedObj.quality !== undefined ||
+            normalizedObj.bed_exit_flag !== undefined ||
+            normalizedObj.pressure_coefficient !== undefined ||
+            normalizedObj.petInBed !== undefined ||
+            normalizedObj.temperatureData !== undefined ||
+            normalizedObj.temperatureAvg !== undefined;
+
+        if (hasRealtimeDetectionData) {
+            this._lastDataTime = now;
+            const nextData = this._pendingData;
+            this.setState(nextData);
+            this._pendingData = null;
+            if (this._dataTimer) { clearTimeout(this._dataTimer); this._dataTimer = null; }
+            return;
+        }
+
+        if (now - this._lastDataTime >= this._ASIDE_INTERVAL) {
+            this._lastDataTime = now;
+            const nextData = this._pendingData;
+            this.setState(nextData);
+            this._pendingData = null;
+            if (this._dataTimer) { clearTimeout(this._dataTimer); this._dataTimer = null; }
+        } else if (!this._dataTimer) {
+            this._dataTimer = setTimeout(() => {
+                this._lastDataTime = performance.now();
+                if (this._pendingData) {
+                    this.setState(this._pendingData);
+                    this._pendingData = null;
+                }
+                this._dataTimer = null;
+            }, this._ASIDE_INTERVAL - (now - this._lastDataTime));
+        }
     }
-    // meanPress : '平均压力',
-    // maxPress : '最大压力',
-    // pressTotal : '压力总和',
-    // points : "点数",
-    // area : "面积"
+
     render() {
         const { t, i18n } = this.props;
-        // console.log('aside')
-        // const { t, i18n } = this.props;
+        const isGlove = ['hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket'].includes(this.props.matrixName);
+        const isGloveRemoteControl = isGlove && this.props.numMatrixFlag === 'normal';
         const dataArrCar = [
             {
                 color: '#2A99FF',
                 data: this.props.i18n.t('meanPress'),
-                // eng: 'Mean Pres'
             }, {
                 color: '#FF2A2A',
                 data: this.props.i18n.t('maxPress'),
-                // eng: 'Max Pres'
             },
             {
                 color: '#FF2A2A',
                 data: this.props.i18n.t('pressTotal'),
-                // eng: 'Pressure'
             },
         ]
+
+        const onBedStatus = {
+            0: {
+                text: this.props.i18n.t('leaveBed'),
+                img: offBed
+            },
+            1: {
+                text: this.props.i18n.t('inBed'),
+                img: onBed
+            },
+            3: {
+                text: this.props.i18n.t('fallBed'),
+                img: dropBed
+            },
+            4: {
+                text: this.props.i18n.t('sitUp'),
+                img: sitBed
+            },
+        }
+
+        const petPostureStatus = {
+            0: this.props.i18n.t('petEmpty'),
+            1: this.props.i18n.t('petPaws'),
+            2: this.props.i18n.t('petTorso'),
+            3: this.props.i18n.t('petMotion'),
+        }
+
+        const petBedStatus = {
+            0: {
+                text: this.props.i18n.t('petOffBed'),
+            },
+            1: {
+                text: this.props.i18n.t('petInBed'),
+            },
+        }
 
         const dataArr = [{
             color: '#FFA63F',
             data: this.props.i18n.t('points'),
-            // eng: 'Points'
         },
-        // {
-        //     color: '#2A99FF',
-        //     data: this.props.i18n.t('area'),
-        //     // eng: 'Area'
-        // },
-    ]
+        ]
+
+        function secondsToHMS(seconds) {
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = seconds % 60;
+            return [h, m, s].map(v => String(v).padStart(2, "0")).join(":");
+        }
+
+        const petPostureState = Number(this.state.posture_state)
+        const resolvedPetInBed = resolvePetInBed(this.state)
+        const petInBed = resolvedPetInBed != null ? resolvedPetInBed : 0
+        const petBreathRate = petPostureState === 2 && this.state.breath_rate != null && this.state.breath_rate !== '--'
+            ? Number(this.state.breath_rate).toFixed(1)
+            : '--'
+        const petHeartRate = this.state.heart_rate != null && this.state.heart_rate !== '--'
+            ? Number(this.state.heart_rate).toFixed(0)
+            : '--'
+        const petQuality = this.state.quality != null && this.state.quality !== '--'
+            ? Number(this.state.quality).toFixed(1)
+            : '--'
+        const shouldZeroMiniPressureCoefficient = this.props.matrixName === 'petCareMini' && resolvedPetInBed === 0
+        const petPressureCoefficient = shouldZeroMiniPressureCoefficient
+            ? '0.00'
+            : this.state.pressure_coefficient != null && this.state.pressure_coefficient !== '--'
+                ? Number(this.state.pressure_coefficient).toFixed(2)
+                : '--'
+        const temperatureValues = Array.isArray(this.state.temperatureData) ? this.state.temperatureData : []
+        const temperatureAvg = Number(this.state.temperatureAvg)
+        const temperatureAvgText = Number.isFinite(temperatureAvg) ? temperatureAvg.toFixed(1) : '--'
+
         return (
             <div className='aside'>
                {this.props.matrixName != 'bed40' ? <div className="asideContent firstAside">
@@ -264,7 +624,7 @@ class Aside extends React.Component {
                             {
                                 dataArr.map((a, index) => {
                                     return (
-                                        <div className='dataItem' key={a.eng}>
+                                        <div className='dataItem' key={`${a.data}-${index}`}>
                                             <div className='dataItemCircle'>
                                                 <div className='circleItem' style={{ backgroundColor: a.color }}></div>
                                                 <div>{a.data}</div>
@@ -282,29 +642,143 @@ class Aside extends React.Component {
                                     )
                                 })
                             }
+                            {this.props.matrixName === 'hand' && (
+                                <div className='dataItem'>
+                                    <div className='dataItemCircle'>
+                                        <div className='circleItem' style={{ backgroundColor: '#FFA63F' }}></div>
+                                        <div>{this.props.i18n.t('area')}</div>
+                                    </div>
+                                    <div className='dataIteminfo'>
+                                        <div className='standardColor'>Area</div>
+                                        <div>
+                                            <div>{this.state.point * 4} <span style={{ color: '#999' }}>mm²</span></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                         </> </> : <Com> <CanvasDemo ref={this.canvas} /></Com>}
                 </div> : ''}
 
-                {this.props.matrixName != 'bed40' ?<div className="asideContent firstAside">
+                {/* jqbed 健康监测面板 */}
+                {this.props.matrixName === 'tempFullBed' ? (
+                    <div className="asideContent firstAside">
+                        <h2 className="asideTitle">温度</h2>
+                        <span className='pressData'>{temperatureAvgText}</span> <span style={{ color: '#999' }}>℃</span>
+                        <div className='pressTitle standardColor'>Average Temperature</div>
+                        {temperatureValues.map((value, index) => {
+                            const numberValue = Number(value)
+                            return (
+                                <div className='dataItem' key={`temperature-${index}`}>
+                                    <div className='dataItemCircle'>
+                                        <div className='circleItem' style={{ backgroundColor: '#FFA63F' }}></div>
+                                        <div>{`温度${index + 1}`}</div>
+                                    </div>
+                                    <div className='dataIteminfo'>
+                                        <div className='standardColor'>{`Row ${14 + index}, Col 20`}</div>
+                                        <div>{Number.isFinite(numberValue) ? numberValue.toFixed(1) : '--'} <span style={{ color: '#999' }}>℃</span></div>
+                                    </div>
+                                </div>
+                            )
+                        })}
+                    </div>
+                ) : null}
+
+                {['petCare', 'petCareMini'].includes(this.props.matrixName) ?
+                    <>
+                        <div className="asideContent firstAside">
+                            <h2 className="asideTitle">{this.props.i18n.t(this.props.matrixName === 'petCareMini' ? 'petCareMiniTitle' : 'petCareTitle')}</h2>
+                            <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'space-around' }}>
+                                <div>
+                                    <div>
+                                        {this.props.i18n.t('respiration')}
+                                    </div>
+                                    <div>
+                                        {petBreathRate}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div>
+                                        {this.props.i18n.t('petSignalQuality')}
+                                    </div>
+                                    <div>
+                                        {petQuality}
+                                    </div>
+                                </div>
+                                <div>
+                                    <div>
+                                        {this.props.i18n.t('heartRate')}
+                                    </div>
+                                    <div>
+                                        {petHeartRate}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="asideContent firstAside" style={{ display: 'flex', flexDirection: 'column', justifyContent: "space-around", backgroundColor: petInBed === 0 ? "#ED4F4F" : "#191932" }}>
+                            {petBedStatus[petInBed] && <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '30px', fontWeight: 'bold' }}>{petBedStatus[petInBed].text}</div>}
+                            <div style={{ display: 'grid', gap: '10px', marginTop: '16px' }}>
+                                <div>{this.props.i18n.t('petPosture')} : {petPostureStatus[petPostureState] || '--'}</div>
+                                <div>{this.props.i18n.t('petMotionFlag')} : {this.state.is_motion ? this.props.i18n.t('petMotion') : this.props.i18n.t('petStill')}</div>
+                                <div>{this.props.i18n.t('petPressureCoeff')} : {petPressureCoefficient}</div>
+                            </div>
+                            <div style={{ marginTop: '20px', textAlign: 'center', background: '#25254F', borderRadius: '12px', padding: "10px 0" }}>{petInBed === 1 ? this.props.i18n.t('inBedDuration') : this.props.i18n.t('leaveBedDuration')} : {secondsToHMS(this.state.onBedTime)}</div>
+                        </div>
+                    </>
+                    : ['jqbed', 'smallBed'].includes(this.props.matrixName) ?
+                    <>
+                        <div className="asideContent firstAside">
+                            <h2 className="asideTitle">{this.props.i18n.t('vitalSigns')}</h2>
+                            <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'space-around' }}>
+                                <div>
+                                    <div>
+                                        {this.props.i18n.t('respiration')}
+                                    </div>
+                                    <div>
+                                        {
+                                            this.state.rate
+                                        }
+                                    </div>
+                                </div>
+                                <div>
+                                    <div>
+                                        {this.props.i18n.t('heartRate')}
+                                    </div>
+                                    <div>
+                                        {
+                                            this.state.heart_rate != null && this.state.heart_rate !== '--' ? Math.round(this.state.heart_rate) : '--'
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                        <div className="asideContent firstAside" style={{ display: 'flex', flexDirection: 'column', justifyContent: "space-around", backgroundColor: [3, 4].includes(this.state.stateInBbed) ? "#ED4F4F" : "#191932" }}>
+                            {this.state.stateInBbed != null && onBedStatus[this.state.stateInBbed] && <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '30px', fontWeight: 'bold' }}>{onBedStatus[this.state.stateInBbed].text} <img src={onBedStatus[this.state.stateInBbed].img} alt="" /></div>}
+                            {(this.state.stateInBbed == 1 || this.state.stateInBbed == 0) ? <div style={{ marginTop: '20px', textAlign: 'center', background: '#25254F', borderRadius: '12px', padding: "10px 0" }}>{this.state.stateInBbed == 1 ? this.props.i18n.t('inBedDuration') : this.props.i18n.t('leaveBedDuration')} : {secondsToHMS(this.state.onBedTime)}</div> : ''}
+                        </div>
+                        {
+                            this.state.sosflag ? <div className="asideContent firstAside" style={{ fontSize: '30px', color: '#ED4F4F', fontWeight: 'bold' }}>{this.props.i18n.t('sos')}</div> : ''
+                        }
+                    </>
+                    : this.props.matrixName != 'bed40' ?
+                <div className="asideContent firstAside">
                     <h2 className="asideTitle">Pressure Data</h2>
-                    {/* <div style={{}}> */}
-                    <span className='pressData'>{this.props.matrixName != 'hand0205' ? (Number(this.state.totalPres).toFixed(0)) : this.state.totalPres}</span> <span style={{ color: '#999' }}></span>
-                    {/* </div> */}
+                    <span className='pressData'>{isGloveRemoteControl ? `${this.state.indexAngle || 0}°` : Number(this.state.totalPres).toFixed(0)}</span> <span style={{ color: '#999' }}></span>
 
                     {this.props.matrixName != 'foot' ? <>
-                        <div className='pressTitle standardColor'>{this.props.i18n.t('allPress')}</div>
+                        <div className='pressTitle standardColor'>{isGloveRemoteControl ? this.props.i18n.t('bendAngle') : this.props.i18n.t('allPress')}</div>
                         <canvas id="myChart1" style={{ height: `${150 * this.state.fontSize}px`, width: '100%' }}></canvas>
                         {
                             dataArrCar.map((a, index) => {
                                 return (
-                                    <div className='dataItem' key={a.eng}>
+                                    <div className='dataItem' key={`${a.data}-${index}`}>
                                         <div className='dataItemCircle'>
                                             <div className='circleItem' style={{ backgroundColor: a.color }}></div>
                                             <div>{a.data}</div>
                                         </div>
                                         <div className='dataIteminfo'>
                                             <div className='standardColor'>{a.eng}</div>
-                                            <div>{this.props.matrixName != 'hand0205' ? (index == 0 ? Number(this.state[arr[index]]).toFixed(2) : Number(this.state[arr[index]]).toFixed(0)) : this.state[arr[index]]} <span style={{ color: '#999' }}></span></div>
+                                            <div>{index == 0 ? Number(this.state[arr[index]]).toFixed(2) : Number(this.state[arr[index]]).toFixed(0)}</div>
                                         </div>
                                     </div>
                                 )
@@ -332,24 +806,8 @@ class Aside extends React.Component {
                                 </div>
 
                             </div>
-
-                            {/* <div className='dataItem'>
-                                <div className='dataItemCircle'>
-                                    <div className='circleItem' style={{ backgroundColor: 'red' }}></div>
-                                    <div>采集标签</div>
-                                </div>
-                                <div className='dataIteminfo'>
-                                    <div className='standardColor'></div>
-                                    <div>{this.state.sitCol}</div>
-                                </div>
-                            </div> */}
                         </> : null}
 
-                        {/* <>{this.props.matrixName == 'xiyueReal1' ?
-                            <div style={{ fontSize: '3rem' }}>
-                                <div>睡姿: {this.state.model}</div>
-                            </div>
-                            : ''} </> */}
                     </>
                         : <>
                             <div className='pressTitle standardColor'>总体面积 Total Area</div>
@@ -357,7 +815,7 @@ class Aside extends React.Component {
                             {
                                 dataArr1.map((a, index) => {
                                     return (
-                                        <div className='dataItem' key={a.eng}>
+                                        <div className='dataItem' key={`${a.data}-${index}`}>
                                             <div className='dataItemCircle'>
                                                 <div className='circleItem' style={{ backgroundColor: a.color }}></div>
                                                 <div>{a.data}</div>
@@ -372,18 +830,12 @@ class Aside extends React.Component {
                             }
 
                         </>}
-                        {/* <div style={{color : '#fff', fontSize : '2rem'}}>{this.state.resetZero ? t('resetZero') :t('cancelZero') }</div>  */}
                 </div> : ''}
-                {/* {this.props.matrixName === 'bigBed' ? <div className="asideContent" style={{padding : 0}}>
-                    <canvas id="myChart3" style={{ height: '150px', width: '100%' }}></canvas>
-                </div> : null} */}
-                
+
 
             </div>
         )
     }
 }
-
-// export default Aside
 
 export default withTranslation('translation', { withRef: true })(Aside);

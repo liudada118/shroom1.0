@@ -1,24 +1,17 @@
-import "./App.css";
+﻿import "./App.css";
 import { HashRouter, Routes, Route } from "react-router-dom";
 import { App as AntdApp, message } from "antd";
+import UpdateNotifier from "./components/updater/UpdateNotifier";
 
-// import Local from "./components/local/Car";
-// import Back from "./components/playBack/Car";
-// import Foot from './components/foot/Car'
-// import Local from './components/foot/Num32DetectLocal'
 import Home from './page/home/Home'
 import Demo from "./components/demo/Demo";
 import HandDemo from "./components/demo/handDemo";
-import HandLineDemo from "./components/demo/handDemo copy";
 import HandLinePressDemo from "./components/demo/handDemoPress";
 import Demo1016 from "./components/demo/Demo1016";
 import Demo1010 from "./components/demo/Demo1010";
 import Demo24 from "./components/demo/Demo2419";
 import Block from "./components/demo/Block";
-import DemoC from "./components/demo/Demo copy";
-import DemoBed from "./components/demo/DemoBed";
 import { Heatmap } from "./components/heatmap/canvas";
-// import { I18nProvider, FormattedString } from "i18nLib";
 import i18next from "i18next";
 import Log from "./components/log/log";
 import MatrixDiff from "./components/demo/matrixDiff";
@@ -31,8 +24,6 @@ import CsvData from "./components/demo/robot";
 import HandLine from "./components/demo/handLine0116";
 import HandLine0123 from "./components/demo/handLine0123";
 import LineAdjust from "./components/demo/LineAdjust";
-import LineAdjust1 from "./components/demo/LineAdjust copy";
-
 import Can from "./components/demo/can";
 import Num3D from "./components/num/NumWs";
 import License from "./page/license/License";
@@ -49,6 +40,7 @@ i18next.init({
         chooseRightSensor: 'Select right port.',
         chooseBackSensor: 'Select back port.',
         chooseHeadSensor: 'Select head port.',
+        autoConnectDoubleGlove: 'Auto connect gloves',
         closeSensor: 'Close serial port',
         all: "All",
         back: 'Back',
@@ -64,6 +56,11 @@ i18next.init({
         points: "Data points",
         area: "Area",
         allPress: "Overall pressure",
+        bendAngle: "Bending Angle",
+        meanAngle: 'Average Angle',
+        maxAngle: 'Maximum Angle',
+        totalAngle: 'Total Angle',
+        allAngle: 'Total Angle',
         download: "Download",
         delete: 'Delete',
         add: 'Add',
@@ -84,6 +81,11 @@ i18next.init({
         setData: "Data settings",
         reset: 'Reset',
         resetContent: 'Reset matrix position',
+        frontView: 'Front View',
+        frontViewContent: 'Switch to front view',
+        deleteSuccess: 'Delete successful',
+        'export csv success': 'Export CSV successful',
+        'export csv failed': 'Export CSV failed',
         resetZero: 'Reset to zero',
         cancelZero: 'Cancel Zero',
         head: 'Head',
@@ -99,6 +101,9 @@ i18next.init({
         FingersSpread: 'Fingers Spread',
         fist: 'Fist',
         calib: 'Calibrate',
+        noCalibData: 'No finger calibration data detected, please calibrate first',
+        noCalibDataL: 'No left hand calibration data detected, please calibrate left hand first',
+        noCalibDataR: 'No right hand calibration data detected, please calibrate right hand first',
         colData: 'Collect Data',
         clearData: 'Clear Historical Data',
         deviceCal: 'Device Calibration',
@@ -113,24 +118,79 @@ i18next.init({
         gloves: 'Tactile Gloves',
         robot: 'Tactile Shirt',
         foot: 'Tactile Insoles',
+        vitalSigns: 'Vital Signs',
+        respiration: 'Respiration',
+        heartRate: 'Heart Rate',
+        leaveBed: 'Left Bed',
+        inBed: 'In Bed',
+        fallBed: 'Fall Risk',
+        sitUp: 'Sat Up',
+        inBedDuration: 'In-bed Duration',
+        leaveBedDuration: 'Off-bed Duration',
+        sos: 'SOS Emergency',
+        petCareTitle: 'Pet Care',
+        petCareMiniTitle: 'Mini Care',
+        petPosture: 'Posture',
+        petMotionFlag: 'Motion',
+        petSignalQuality: 'Signal Quality',
+        petPressureCoeff: 'Pressure Coefficient',
+        petBedExit: 'Bed Exit Alert',
+        petEmpty: 'Empty',
+        petPaws: 'Paws / Limbs',
+        petTorso: 'Torso',
+        petMotion: 'Motion',
+        petStill: 'Still',
+        petInBed: 'In Bed',
+        petOffBed: 'Off Bed',
+        sensorHand: 'Hand Detection',
+        sensorHandSinglePoint: '32*32 Detection Points',
+        sensorHand0205: 'Tactile Gloves',
+        sensorHand0205Double: 'Tactile Gloves 2',
+        sensorHandGlove115200: 'Tactile Gloves(115200)',
+        sensorHandGloveFullPacket: 'Tactile Gloves(Full Packet)',
+        sensorSmallSample: '10*10 Small Sample',
+        sensorRobot1: 'Unitree G1 Tactile Shirt',
+        sensorRobotSY: 'Songyan N2 Tactile Shirt',
+        sensorRobotLCF: 'LCF H1 Tactile Shirt',
+        sensorFootVideo: 'Tactile Insoles',
+        sensorDaliegu: '14*20 High Speed',
+        sensorBed4096: 'OneStep',
+        sensorBed4096num: '64*64 High Speed',
+        sensorJqbed: 'Small Bed Monitor',
+        sensorSmallBedNoAlg: 'Small Bed Detection(Data)',
+        smallBed: 'Small Bed Detection',
+        sensorSmallBed12B: 'Small Bed Detection(12B)',
+        sensorPetCare: 'Pet Care',
+        sensorPetCareMini: 'Mini Care',
+        sensorFast256: '16*16 High Speed',
+        sensorFast1024: '32*32 High Speed',
+        sensorNormalFast: '32*32 High Speed Test',
+        sensorNormal: 'Normal Test',
+        sensorHumanBody: 'Human Body',
+        sensorWholeChair: 'Whole Chair',
+        sensorMinzhen: 'Wheelchair',
+        enterBaudRate: 'Enter baud rate',
       },
     },
     zh: {
       translation: {
-        welcome: "欢迎",
+        petCareMiniTitle: 'mini看护',
+        sensorPetCareMini: 'mini看护',
+        sensorMinzhen: '轮椅',
+        welcome: '欢迎',
         chooseSensor: '请选择传感器',
         realTime: '实时',
         playBack: '回放',
         chooseSitSensor: '请选择座椅串口',
         chooseBackSensor: '请选择靠背串口',
         chooseLeftSensor: '请选择左手串口',
-        chooseLeftFootSensor : '请选择左脚串口',
-        chooseRightFootSensor : '请选择右脚串口',
+        chooseLeftFootSensor: '请选择左脚串口',
+        chooseRightFootSensor: '请选择右脚串口',
         chooseRightSensor: '请选择右手串口',
         chooseHeadSensor: '请选择头枕串口',
-        // chooseSensor: '请选择串口',
+        autoConnectDoubleGlove: '一键连接双手套',
         closeSensor: '关闭串口',
-        all: "整体",
+        all: '整体',
         back: '靠背',
         sit: '座椅',
         left: '左',
@@ -141,29 +201,39 @@ i18next.init({
         meanPress: '平均压力',
         maxPress: '最大压力',
         pressTotal: '压力总和',
-        points: "点数",
-        area: "面积",
-        allPress: "压力总和",
-        download: "下载",
+        points: '点数',
+        area: '面积',
+        allPress: '压力总和',
+        bendAngle: '弯折角度',
+        meanAngle: '平均角度',
+        maxAngle: '最大角度',
+        totalAngle: '角度总和',
+        allAngle: '角度总和',
+        download: '下载',
         add: '添加',
         delete: '删除',
-        guass: "润滑程度",
+        guass: '润滑程度',
         color: '颜色',
-        filter: "过滤值",
-        height: "高度",
-        consis: "数据连贯性",
-        init: "初始值",
-        feaLabel: "特征标签",
-        matrix: "矩阵",
-        heatmap: "热力图",
-        rotate: "旋转",
+        filter: '过滤值',
+        height: '高度',
+        consis: '数据连贯性',
+        init: '初始值',
+        feaLabel: '特征标签',
+        matrix: '矩阵',
+        heatmap: '热力图',
+        rotate: '旋转',
         boxSelection: '框选',
-        rotateX: "绕x轴旋转30°",
-        rotateY: "绕y轴旋转30°",
-        selectBox: "框选一个矩形区域",
-        setData: "数据设置",
+        rotateX: '绕x轴旋转30°',
+        rotateY: '绕y轴旋转30°',
+        selectBox: '框选一个矩形区域',
+        setData: '数据设置',
         reset: '重置',
         resetContent: '重置矩阵位置',
+        frontView: '正面视角',
+        frontViewContent: '切换到正面视角',
+        deleteSuccess: '删除成功',
+        'export csv success': '导出 CSV 成功',
+        'export csv failed': '导出 CSV 失败',
         resetZero: '清零',
         cancelZero: '取消清零',
         head: '头枕',
@@ -179,6 +249,9 @@ i18next.init({
         FingersSpread: '手指平铺',
         fist: '手指握拳',
         calib: '校准',
+        noCalibData: '未检测到手指校准数据，请先进行手指校准',
+        noCalibDataL: '未检测到左手校准数据，请先校准左手',
+        noCalibDataR: '未检测到右手校准数据，请先校准右手',
         colData: '采集数据',
         clearData: '清除历史数据',
         deviceCal: '设备校准',
@@ -193,6 +266,55 @@ i18next.init({
         gloves: '手套模型',
         robot: '机器人全身',
         foot: '足底模型',
+        vitalSigns: '生命体征',
+        respiration: '呼吸',
+        heartRate: '心率',
+        leaveBed: '已离床',
+        inBed: '在床',
+        fallBed: '坠床风险',
+        sitUp: '已坐起',
+        inBedDuration: '在床时长',
+        leaveBedDuration: '离床时长',
+        sos: 'SOS紧急求助',
+        petCareTitle: '宠物看护',
+        petPosture: '姿态',
+        petMotionFlag: '体动',
+        petSignalQuality: '信号质量',
+        petPressureCoeff: '压力系数',
+        petBedExit: '离床告警',
+        petEmpty: '空床',
+        petPaws: '爪子/四肢受力',
+        petTorso: '躯干受力',
+        petMotion: '剧烈体动',
+        petStill: '静止',
+        petInBed: '在床',
+        petOffBed: '离床',
+        sensorHand: '手部检测',
+        sensorHandSinglePoint: '32*32(检测点)',
+        sensorHand0205: '触觉手套',
+        sensorHand0205Double: '触觉手套2',
+        sensorHandGlove115200: '触觉手套(115200)',
+        sensorHandGloveFullPacket: '触觉手套(整包)',
+        sensorSmallSample: '10*10小样',
+        sensorRobot1: '宇树G1触觉上衣',
+        sensorRobotSY: '松延N2触觉上衣',
+        sensorRobotLCF: '零次方H1触觉上衣',
+        sensorFootVideo: '触觉足底',
+        sensorDaliegu: '14*20高速',
+        sensorBed4096: 'OneStep',
+        sensorBed4096num: '64*64高速',
+        sensorJqbed: '小床监测',
+        sensorSmallBedNoAlg: '小床检测(数据)',
+        smallBed: '小床检测',
+        sensorSmallBed12B: '小床检测(12B)',
+        sensorPetCare: '宠物看护',
+        sensorFast256: '16*16高速',
+        sensorFast1024: '32*32高速',
+        sensorNormalFast: '32*32高速测试',
+        sensorNormal: '正常测试',
+        sensorHumanBody: '人体全身',
+        sensorWholeChair: '整椅展示',
+        enterBaudRate: '请输入波特率',
       },
     },
   },
@@ -210,6 +332,7 @@ message.config({
 function App() {
   return (
     <AntdApp>
+    <UpdateNotifier />
     <HashRouter>
       <Routes>
         <Route exact path="/handPoint" element={
@@ -260,10 +383,8 @@ function App() {
         <Route exact path="/heatmap" element={<Heatmap />} />
         <Route exact path="/num/:type" element={<Demo />} />
         <Route exact path="/handReal" element={<HandDemo />} />
-        <Route exact path="/handLineData" element={<HandLineDemo />} />
         <Route exact path="/handLinePressData" element={<HandLinePressDemo />} />
         <Route exact path="/line" element={<LineAdjust />} />
-        <Route exact path="/line1" element={<LineAdjust1 />} />
         <Route exact path="/can" element={<Can />} />
         <Route exact path="/num1010" element={<Demo1010 />} />
         <Route exact path="/num1016" element={<Demo1016 />} />
@@ -271,8 +392,6 @@ function App() {
         <Route exact path="/block" element={<Block />} />
         <Route exact path="/handLine" element={<HandLine />} />
         <Route exact path="/handLine0123" element={<HandLine0123 />} />
-        {/* <Route exact path="/num32" element={<DemoC />} />
-        <Route exact path="/numBed" element={<DemoBed />} /> */}
         <Route exact path="/log" element={<Log />} />
         <Route exact path="/diff" element={<MatrixDiff />} />
         <Route exact path="/3Dnum" element={<Num3D />} />
@@ -286,3 +405,5 @@ function App() {
 }
 
 export default App;
+
+

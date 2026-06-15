@@ -280,7 +280,7 @@ function colorize(pixels, gradient, options) {
 }
 
 
-function bthClickHandle(arr, canvas, width, height, interp1, interp2, order, options) {
+export function bthClickHandle(arr, canvas, width, height, interp1, interp2, order, options) {
 
     const data = generateData(arr, canvas, width, height, interp1, interp2, order, options)
 
@@ -482,7 +482,7 @@ export class HeatmapCanvas {
         this.canvas = document.createElement('canvas');
 
 
-        // document.body.appendChild(this.canvas)
+        document.body.appendChild(this.canvas)
 
 
         const dpr = window.devicePixelRatio || 1;

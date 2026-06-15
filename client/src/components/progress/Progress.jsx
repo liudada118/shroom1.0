@@ -36,6 +36,51 @@ const ProgressCom = React.forwardRef((props, refs) => {
     const [rightFlag, setRightFlag] = useState(false)
     const [lineFlag, setLineFlag] = useState(false)
     const [dataTime, setDataTime] = useState()
+    const [leftPosition, setLeftPosition] = useState(0)
+    const [rightPosition, setRightPosition] = useState(580)
+    const [leftIndex, setLeftIndex] = useState(0)
+    const [rightIndex, setRightIndex] = useState(0)
+    const [historyTime, setHistoryTime] = useState([])
+
+    const maxFrameIndex = () => Math.max(0, (props.length || 1) - 1)
+    const emptyTimeText = '\u6682\u65e0\u65f6\u95f4'
+
+    const formatTimeValue = (value) => {
+        if (value == null) return emptyTimeText
+
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            return timeStampToDate(value) || emptyTimeText
+        }
+
+        if (typeof value === 'string') {
+            const trimmed = value.trim()
+            if (!trimmed) return emptyTimeText
+
+            const numericValue = Number(trimmed)
+            if (Number.isFinite(numericValue)) {
+                return timeStampToDate(numericValue) || trimmed
+            }
+
+            return trimmed
+        }
+
+        return emptyTimeText
+    }
+
+    const formatIndexTime = (index) => {
+        const timeList = Array.isArray(historyTime) && historyTime.length
+            ? historyTime
+            : (Array.isArray(props.time) ? props.time : [])
+
+        if (!timeList.length) return formatTimeValue(props.time)
+
+        const frameIndex = Math.max(0, Math.min(maxFrameIndex(), Number(index) || 0))
+        const timeIndex = timeList.length > maxFrameIndex()
+            ? Math.min(timeList.length - 1, frameIndex)
+            : Math.round((frameIndex / (maxFrameIndex() || 1)) * (timeList.length - 1))
+
+        return formatTimeValue(timeList[timeIndex])
+    }
 
     const thrott = (fun) => {
         if (!timer) {
@@ -45,6 +90,17 @@ const ProgressCom = React.forwardRef((props, refs) => {
             }, 100);
         }
     }
+
+    useEffect(() => {
+        setLeftIndex(0)
+        setRightIndex(maxFrameIndex())
+    }, [props.length])
+
+    useEffect(() => {
+        if (Array.isArray(props.time) && props.time.length > 0) {
+            setHistoryTime(props.time)
+        }
+    }, [props.time])
 
     const changeLeftProgress = (e) => {
         // 当进度条左边被按住调节起始的时间时
@@ -59,7 +115,9 @@ const ProgressCom = React.forwardRef((props, refs) => {
             const leftpx = moveValue(e.clientX - leftX - 10);
 
             // 将开始滑块的位置设置为 相对位移
-            document.querySelector(".leftProgress").style.left = `${leftpx > right - 20 ? right - 20 : leftpx}px`;
+            const nextLeft = leftpx > right - 20 ? right - 20 : leftpx;
+            document.querySelector(".leftProgress").style.left = `${nextLeft}px`;
+            setLeftPosition(nextLeft);
 
             // 计算移动后开始滑块的最左边位置
             const left = parseInt(document.querySelector(".leftProgress").style.left);
@@ -84,6 +142,8 @@ const ProgressCom = React.forwardRef((props, refs) => {
 
             // 节流去给后端发送 开始结束滑块的位置
             let arr = [changePxToValue({ value: left, length: props.length }), changePxToValue({ value: right, length: props.length })];
+            setLeftIndex(arr[0]);
+            setRightIndex(arr[1]);
 
             thrott(() => {
                 props.wsSendObj({
@@ -101,7 +161,9 @@ const ProgressCom = React.forwardRef((props, refs) => {
             var moveX = e.clientX;
 
             const rightpx = moveValue(e.clientX - leftX - 10);
-            document.querySelector(".rightProgress").style.left = `${rightpx < left + 20 ? left + 20 : rightpx}px`;
+            const nextRight = rightpx < left + 20 ? left + 20 : rightpx;
+            document.querySelector(".rightProgress").style.left = `${nextRight}px`;
+            setRightPosition(nextRight);
 
             const right = parseInt(document.querySelector(".rightProgress").style.left);
             const lineleft = parseInt(document.querySelector(".progressLine").style.left);
@@ -117,6 +179,8 @@ const ProgressCom = React.forwardRef((props, refs) => {
             }
 
             let arr = [changePxToValue({ value: left, length: props.length }), changePxToValue({ value: right, length: props.length })];
+            setLeftIndex(arr[0]);
+            setRightIndex(arr[1]);
 
             thrott(() => {
                 props.wsSendObj({
@@ -270,8 +334,24 @@ const ProgressCom = React.forwardRef((props, refs) => {
         }
     }
 
+    const resetPlay = () => {
+        setPlayFlag(false);
+        // 重置滑块和进度线的 DOM 位置
+        const left = document.querySelector('.leftProgress');
+        const right = document.querySelector('.rightProgress');
+        const line = document.querySelector('.progressLine');
+        if (left) left.style.left = '0px';
+        if (right) right.style.left = '580px';
+        if (line) line.style.left = '20px';
+        setLeftPosition(0);
+        setRightPosition(580);
+        setLeftIndex(0);
+        setRightIndex(maxFrameIndex());
+    };
+
     useImperativeHandle(refs, () => ({
-        changeIndex
+        changeIndex,
+        resetPlay
     }));
 
     // console.log(props)
@@ -290,9 +370,10 @@ const ProgressCom = React.forwardRef((props, refs) => {
                 <div
                     style={{
                         border: leftFlag ? "1px solid #991BFA" : "0px",
-                        left: 0
+                        left: `${leftPosition}px`
                     }}
                     className="leftProgress"
+                    title={formatIndexTime(leftIndex)}
                     onMouseDown={(e) => {
                         // 当鼠标点击在控制开始时间的滑块时，将leftFlag置为true，防止事件冒泡
                         e.stopPropagation();
@@ -307,9 +388,10 @@ const ProgressCom = React.forwardRef((props, refs) => {
                 <div
                     style={{
                         border: rightFlag ? "1px solid #991BFA" : "0px",
-                        left: '580px'
+                        left: `${rightPosition}px`
                     }}
                     className="rightProgress"
+                    title={formatIndexTime(rightIndex)}
                     onMouseDown={(e) => {
                         // 当鼠标点击在控制结束时间的滑块时，将rightFlag置为true，防止事件冒泡
                         e.stopPropagation();

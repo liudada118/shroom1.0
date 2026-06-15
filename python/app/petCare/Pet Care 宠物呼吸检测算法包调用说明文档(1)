@@ -1,0 +1,327 @@
+# Pet Care 宠物呼吸检测算法包调用说明文档
+
+本文档详细说明了 `pet_care_wrapper` 算法包的接口定义、输入输出字段含义以及调用方法，供二次开发和系统集成人员参考。
+
+## 1. 模块简介
+
+`pet_care_wrapper` 是一个基于 Cython 封装的 Python 扩展模块，底层核心算法由 Simulink Coder 生成的 C 代码实现。该算法包主要用于处理 32x32 压力传感器阵列数据，实现以下核心功能：
+
+- 实时呼吸率计算（频域与时域融合分析）
+
+- 目标姿态判定（空床、仅爪子、躯干）
+
+- 体动检测与信号质量评估
+
+- 在离床状态判定
+
+**适用环境**：Python 3.11.13 (Windows x64)
+
+**编译文件**：`pet_care_wrapper.cp311-win_amd64.pyd`
+
+**依赖库**：`numpy`
+
+---
+
+## 2. 环境配置
+
+### 2.1 Python 版本要求
+
+本算法包的 `.pyd` 文件是基于 **Python 3.11.13** 编译的，调用方必须使用相同大版本（Python 3.11.x）的解释器。使用其他版本（如 3.6、3.10、3.12）将无法导入模块。
+
+可通过以下命令确认 Python 版本：
+
+```bash
+python --version
+# 期望输出: Python 3.11.13
+```
+
+### 2.2 依赖安装
+
+```bash
+pip install numpy
+```
+
+### 2.3 文件部署
+
+将以下文件放置在同一目录下即可使用：
+
+```
+your_project/
+    pet_care_wrapper.cp311-win_amd64.pyd   # 算法包编译文件
+    your_script.py                          # 调用脚本
+```
+
+---
+
+## 3. 核心 API 接口
+
+算法包对外提供四个函数，其中三个为核心生命周期函数，一个为信息查询函数。
+
+### 3.1 `get_info()`
+
+**作用**：获取模块的版本号、作者和描述信息。
+
+**参数**：无
+
+**返回值**：`dict`，包含 `version`、`author`、`description`、`generated_date`、`type`、`target` 等键。
+
+### 3.2 `initialize()`
+
+**作用**：初始化算法模型，清零所有内部状态变量（包括缓冲区、滤波器状态、EMA 累积值等）。
+
+**调用时机**：必须在首次调用 `step()` 之前调用一次。如果需要重置算法状态（例如切换了监测对象或重新开始一次监测），也可以再次调用。
+
+**参数**：无
+
+**返回值**：无
+
+### 3.3 `step(inputs)`
+
+**作用**：执行一次模型步进，处理一帧压力矩阵数据，返回呼吸率、姿态、体动等计算结果。
+
+**调用时机**：在数据采集循环中，每获取到一帧有效数据时调用。算法内部设计的输入采样率为 50Hz，建议以 50Hz 的频率调用（即每 20ms 调用一次）。
+
+**参数**：`inputs` (`dict`) — 包含当前帧数据和配置参数的字典，详见第 4 章。
+
+**返回值**：`outputs` (`dict`) — 包含算法计算结果的字典，详见第 5 章。
+
+**异常**：当输入字典缺少必要的键或数据格式不正确时，抛出 `ValueError`。
+
+### 3.4 `terminate()`
+
+**作用**：终止模型，释放内部资源。
+
+**调用时机**：在程序退出或不再需要使用算法包时调用。
+
+**参数**：无
+
+**返回值**：无
+
+---
+
+## 4. 输入字段说明 (`inputs` 字典)
+
+调用 `step(inputs)` 时，传入的 `inputs` 字典需要包含以下字段：
+
+| 字段名 | 数据类型 | 必填 | 默认值 | 含义与作用 |
+| --- | --- | --- | --- | --- |
+| `frame_data` | `numpy.ndarray`, dtype=`float32`, shape=`(1024,)` | 是 | 无 | 当前帧的 32x32 压力矩阵数据，按行展平为 1024 个元素。每个元素为传感器原始压力值（uint8 范围 0-255 转为 float32）。 |
+| `threshold_factor` | `float` | 否 | `1.0` | 压力阈值调节因子，用于在离床滤波模块中调节灵敏度。值越大，判定为"在床"所需的压力越大。取值范围通常为 0.0 ~ 5.0。 |
+| `species` | `float` | 否 | `1.0` | 监测物种预设编号，决定算法内部的呼吸频段范围和形态学参数。取值见下表。 |
+
+### 4.1 物种编号对照表
+
+| 编号 | 物种 | 呼吸频段范围 | 典型呼吸率范围 |
+| --- | --- | --- | --- |
+| `0.0` | 仓鼠 | 1.0 ~ 4.0 Hz | 60 ~ 240 BPM |
+| `1.0` | 猫 | 0.15 ~ 1.50 Hz | 9 ~ 90 BPM |
+| `2.0` | 狗 | 0.12 ~ 1.50 Hz | 7 ~ 90 BPM |
+| `3.0` | 人体 | 0.15 ~ 0.80 Hz | 9 ~ 48 BPM |
+
+---
+
+## 5. 输出字段说明 (`outputs` 字典)
+
+`step()` 函数返回的 `outputs` 字典包含以下 8 个字段：
+
+| 字段名 | 数据类型 | 取值范围 | 含义与作用 |
+| --- | --- | --- | --- |
+| `breath_rate` | `float` | 0 ~ 240 | 实时呼吸率（单位：BPM，次/分钟）。经过 EMA 平滑处理后的每分钟呼吸次数。当信号质量极差或空床时，输出 0.0 或保持上一有效值。 |
+| `posture_state` | `float` | 0.0 / 1.0 / 2.0 / 3.0 | 当前姿态状态。0.0 = 空床（Empty），1.0 = 仅爪子/四肢受力（Paws），2.0 = 躯干受力（Torso），3.0 = 剧烈体动中（Motion），其中1、2、3表示在床，2状态出呼吸，1、3状态的呼吸忽略。 |
+| `is_motion` | `float` | 0.0 / 1.0 | 体动标志。1.0 表示当前帧检测到明显体动，0.0 表示静止。 |
+| `snr_db` | `float` | -99 ~ +40 | 呼吸频段信噪比（单位：dB）。反映当前呼吸信号的清晰度，通常大于 3.0 dB 认为信号有效。-99 表示无法计算。 |
+| `quality` | `float` | 0 ~ 10 | 信号质量综合评分。分数越高表示当前呼吸率计算结果越可靠。 |
+| `bed_exit_flag` | `float` | 0.0 / 1.0 | 离床报警标志。1.0 表示触发离床报警，0.0 表示正常在床。 |
+| `pressure_coefficient` | `float` | >= 0 | 综合压力系数。反映当前床垫上的总受力情况，用于辅助判断在离床状态。 |
+| `matrix_origin` | `numpy.ndarray`, dtype=`float32`, shape=`(1024,)` | 0 ~ 255 | 原始矩阵透传。长度为 1024 的一维数组，可通过 `reshape(32, 32)` 还原为二维矩阵，用于 UI 热力图渲染。 |
+
+---
+
+## 6. 标准调用示例代码
+
+以下是一个完整的 Python 调用示例，展示了如何初始化、循环处理数据以及安全退出：
+
+```python
+import numpy as np
+import time
+import pet_care_wrapper as pcw
+
+def main():
+    # ========== 1. 查看模块信息 ==========
+    info = pcw.get_info()
+    print("算法包信息:", info)
+
+    # ========== 2. 初始化算法包 (必须在 step 之前调用) ==========
+    print("初始化算法包...")
+    pcw.initialize()
+
+    try:
+        # ========== 3. 数据采集与处理循环 ==========
+        for frame_idx in range(1000):
+            # --- 获取一帧 32x32 的传感器数据 ---
+            # 实际使用时从串口/传感器读取，这里用随机数据模拟
+            raw_matrix_2d = np.random.randint(0, 255, size=(32, 32), dtype=np.uint8)
+
+            # 展平为 1024 长度的一维 float32 数组
+            frame_data_flat = raw_matrix_2d.flatten().astype(np.float32)
+
+            # --- 构建输入字典 ---
+            inputs = {
+                'frame_data': frame_data_flat,       # 必填: 1024 长度 float32 数组
+                'threshold_factor': 1.0,             # 可选: 阈值因子, 默认 1.0
+                'species': 1.0                       # 可选: 物种编号, 1.0=猫
+            }
+
+            # --- 调用算法步进处理 ---
+            outputs = pcw.step(inputs)
+
+            # --- 解析输出结果 ---
+            breath_rate       = outputs['breath_rate']        # 呼吸率 (BPM)
+            posture_state     = outputs['posture_state']      # 姿态状态
+            is_motion         = outputs['is_motion']          # 体动标志
+            snr_db            = outputs['snr_db']             # 信噪比 (dB)
+            quality           = outputs['quality']            # 信号质量 (0-10)
+            bed_exit_flag     = outputs['bed_exit_flag']      # 离床标志
+            pressure_coeff    = outputs['pressure_coefficient']  # 压力系数
+            matrix_origin     = outputs['matrix_origin']      # 原始矩阵 (1024,)
+
+            # 还原为 32x32 二维矩阵 (用于热力图显示)
+            matrix_2d = matrix_origin.reshape(32, 32)
+
+            # 每 50 帧打印一次关键信息
+            if frame_idx % 50 == 0:
+                print(f"帧 {frame_idx:4d}: "
+                      f"呼吸率={breath_rate:5.1f} bpm, "
+                      f"姿态={posture_state:.0f}, "
+                      f"体动={is_motion:.0f}, "
+                      f"SNR={snr_db:5.1f} dB, "
+                      f"质量={quality:.1f}, "
+                      f"离床={bed_exit_flag:.0f}, "
+                      f"压力系数={pressure_coeff:.2f}")
+
+            # 模拟 50Hz 的采样间隔 (20ms)
+            time.sleep(0.02)
+
+    except KeyboardInterrupt:
+        print("\n监测被用户中断")
+    except Exception as e:
+        print(f"发生错误: {e}")
+    finally:
+        # ========== 4. 终止算法包，释放资源 (必须) ==========
+        print("释放算法资源...")
+        pcw.terminate()
+        print("完成。")
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+## 7. 串口数据采集集成示例
+
+在实际应用中，数据通常从串口采集。以下示例展示了如何从串口读取帧数据并送入算法包处理：
+
+```python
+import serial
+import numpy as np
+import pet_care_wrapper as pcw
+
+# 串口协议常量
+BAUD_RATE = 1000000
+FRAME_HEADER = bytes([0xAA, 0x55, 0x03, 0x99])  # 4 字节帧头
+FRAME_DATA_LEN = 1024                             # 32x32 = 1024 字节
+FRAME_TOTAL_LEN = len(FRAME_HEADER) + FRAME_DATA_LEN  # 1028 字节
+
+def run_serial_monitoring(port="COM5", species=1.0, threshold=1.0):
+    """从串口采集数据并实时处理"""
+
+    # 初始化算法包
+    pcw.initialize()
+
+    # 打开串口
+    ser = serial.Serial(port, BAUD_RATE, timeout=1)
+    buf = bytearray()
+    frame_count = 0
+    skip_counter = 0  # 用于 100Hz->50Hz 降采样
+
+    try:
+        while True:
+            # 读取串口数据
+            chunk = ser.read(4096)
+            if not chunk:
+                continue
+            buf.extend(chunk)
+
+            # 搜索帧头并提取完整帧
+            while len(buf) >= FRAME_TOTAL_LEN:
+                idx = buf.find(FRAME_HEADER)
+                if idx < 0:
+                    buf = buf[-3:]  # 保留末尾可能的部分帧头
+                    break
+                if idx > 0:
+                    del buf[:idx]   # 丢弃帧头前的无效数据
+                if len(buf) < FRAME_TOTAL_LEN:
+                    break
+
+                # 提取帧数据 (跳过 4 字节帧头)
+                frame_bytes = buf[len(FRAME_HEADER):FRAME_TOTAL_LEN]
+                del buf[:FRAME_TOTAL_LEN]
+
+                # 间隔一帧传一次 (100Hz -> 50Hz)
+                skip_counter += 1
+                if skip_counter < 2:
+                    continue
+                skip_counter = 0
+
+                # 转换为 float32 数组并送入算法
+                frame_data = np.frombuffer(frame_bytes, dtype=np.uint8).astype(np.float32)
+                inputs = {
+                    'frame_data': frame_data,
+                    'threshold_factor': threshold,
+                    'species': species
+                }
+                outputs = pcw.step(inputs)
+
+                frame_count += 1
+                if frame_count % 50 == 0:
+                    print(f"帧 {frame_count}: 呼吸率={outputs['breath_rate']:.1f} bpm")
+
+    except KeyboardInterrupt:
+        print("停止监测")
+    finally:
+        pcw.terminate()
+        ser.close()
+
+if __name__ == "__main__":
+    run_serial_monitoring(port="COM5", species=1.0)
+```
+
+---
+
+## 8. 注意事项与最佳实践
+
+### 8.1 Python 版本匹配
+
+`.pyd` 文件与 Python 版本严格绑定。本算法包编译于 **Python 3.11.13**，文件名中的 `cp311` 表示 CPython 3.11。使用其他 Python 版本导入时会报 `ImportError`。
+
+### 8.2 GIL 释放与多线程
+
+`pcw.step()` 内部的核心 C 算法在执行期间会自动释放 Python 的全局解释器锁（GIL）。因此，在多线程架构中，算法处理线程不会阻塞串口数据采集线程或 UI 渲染线程，可以实现真正的并行执行。
+
+### 8.3 数据类型要求
+
+传入的 `frame_data` 必须是 `numpy.float32` 类型且内存连续（C-contiguous）。如果传入 `uint8` 或 `float64` 等其他类型，封装器会自动进行类型转换，但这会增加微小的性能开销。建议在调用前统一转换好数据类型。
+
+### 8.4 异常处理
+
+如果传入的字典缺少 `frame_data` 字段，或数组长度不等于 1024，`step()` 会抛出 `ValueError`。建议在调用层做好异常捕获，避免因单帧异常导致整个监测流程中断。
+
+### 8.5 算法预热
+
+算法内部维护了一个 254 帧的滑动缓冲区。在缓冲区未填满之前（约前 5 秒，按 50Hz 计算），输出的呼吸率可能不稳定或为 0。这是正常现象，属于算法预热阶段。
+
+### 8.6 调用频率
+
+算法内部设计的输入采样率为 **50Hz**。如果传感器采集频率为 100Hz，需要在调用侧进行 2:1 降采样（即每 2 帧取 1 帧传入算法）。如果调用频率偏离设计值过大，可能影响呼吸率计算的准确性。
+

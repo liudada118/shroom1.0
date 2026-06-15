@@ -1,3 +1,4 @@
+const logger = require('./logger');
 /**
  * configManager.js
  * 统一配置管理模块
@@ -7,8 +8,8 @@
  *
  * 使用方式：
  *   const config = require('./configManager');
- *   console.log(config.ws.MAIN_PORT); // 19999
- *   console.log(config.getSensorConfig('car10')); // { type: 'car', ... }
+ *   logger.debug(config.ws.MAIN_PORT); // 19999
+ *   logger.debug(config.getSensorConfig('car10')); // { type: 'car', ... }
  */
 
 const path = require('path');
@@ -19,11 +20,16 @@ const { app } = require('electron');
 /** 应用数据目录（打包后使用 userData，开发时使用项目目录） */
 const APP_DATA_DIR = app ? app.getPath('userData') : __dirname;
 
+/** CSV 导出根目录（mac 打包版导出到桌面，其他平台沿用应用数据目录） */
+const EXPORT_ROOT = app && app.isPackaged && process.platform === 'darwin'
+  ? app.getPath('desktop')
+  : APP_DATA_DIR;
+
 /** 数据库文件目录 */
-const DB_DIR = path.join(__dirname, 'db');
+const DB_DIR = path.join(APP_DATA_DIR, 'db');
 
 /** CSV 数据导出目录 */
-const DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = path.join(EXPORT_ROOT, 'data');
 
 // ─── WebSocket 配置 ──────────────────────────────────────────────────────────
 
@@ -48,12 +54,12 @@ const serial = {
 /**
  * 汽车类型传感器列表（需要 sit + back 双串口）
  */
-const CAR_TYPES = ['yanfeng10', 'car', 'car10', 'volvo', 'footVideo', 'hand0507', 'hand0205', 'carQX', 'eye', 'sofa'];
+const CAR_TYPES = ['yanfeng10', 'car', 'car10', 'volvo', 'footVideo', 'hand0507', 'hand0205', 'handGlove115200', 'handGloveFullPacket', 'carQX', 'wholeChair', 'eye', 'sofa', 'carY'];
 
 /**
  * 三串口类型（sit + back + head）
  */
-const THREE_PORT_TYPES = ['volvo'];
+const THREE_PORT_TYPES = ['volvo', 'wholeChair'];
 
 /**
  * 判断传感器类型是否为汽车类型
@@ -81,11 +87,16 @@ const SENSOR_MATRIX_MAP = {
   yanfeng10:  { width: 32, height: 32, total: 1024 },
   volvo:      { width: 32, height: 32, total: 1024 },
   carQX:      { width: 32, height: 32, total: 1024 },
+  wholeChair: { width: 32, height: 32, total: 1024 },
   sofa:       { width: 32, height: 32, total: 1024 },
   smallBed:   { width: 32, height: 32, total: 1024 },
+  smallBedNoAlg: { width: 32, height: 32, total: 1024 },
   smallBed1:  { width: 32, height: 32, total: 1024 },
+  petCare:    { width: 32, height: 32, total: 1024 },
+  petCareMini:{ width: 32, height: 32, total: 1024 },
   smallM:     { width: 32, height: 32, total: 1024 },
   hand:       { width: 32, height: 32, total: 1024 },
+  handSinglePoint: { width: 32, height: 32, total: 1024 },
   sit:        { width: 32, height: 32, total: 1024 },
   foot:       { width: 32, height: 32, total: 1024 },
   rect:       { width: 32, height: 32, total: 1024 },
@@ -98,6 +109,7 @@ const SENSOR_MATRIX_MAP = {
   bigBed:     { width: 64, height: 32, total: 2048 },
   matCol:     { width: 32, height: 32, total: 1024 },
   endiSit:    { width: 32, height: 32, total: 1024 },
+  carY:       { width: 32, height: 32, total: 1024 },
 };
 
 /**
@@ -119,6 +131,7 @@ const pressure = {
 
 module.exports = {
   APP_DATA_DIR,
+  EXPORT_ROOT,
   DB_DIR,
   DATA_DIR,
   ws,

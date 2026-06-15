@@ -1,55 +1,28 @@
-# Dependencies
 node_modules/
 client/node_modules/
-
-# Build output
 client/build/
-out/
-dist/
-
-# Database
-db/
-*.db
-*.db-wal
-*.db-shm
-
-# Data & exports
-data/
-pdf/
-*.csv
-
-# Packages
 *.zip
 *.exe
 *.nupkg
 *.asar
-*.dmg
-
-# Config (encrypted)
-config.txt
-
-# Python
-python/
-venv/
-__pycache__/
-*.pyc
-
-# System
+out/
+db/*
+!db/init.db
+data/
+python/dist/
+python/build/
+python/*.spec
+python/app/*.pyd
+python/app/*.so
+python/venv
+pdf/
 .DS_Store
-Thumbs.db
-
-# Logs
 *.log
-npm-debug.log*
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Test artifacts
-test/screenshots/
-
-# Temporary fix scripts
-scripts/fix_*.py
+config.txt
+.npm-cache/
+dist/
+pack-resources/python/
+/OneStep
+/img
+/OneStep
+/OneStep

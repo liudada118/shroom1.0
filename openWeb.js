@@ -1,9 +1,26 @@
+const logger = require('./logger');
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { exec } = require("child_process");
 const { pressSmallBed } = require("./utilMatrix");
 const { handLArr } = require("./util/constant");
+
+const TEMP_FULL_BED_TEMPERATURE_K = Number(process.env.TEMP_FULL_BED_TEMPERATURE_K || 1);
+const TEMP_FULL_BED_PRESSURE_THRESHOLD = 20;
+
+function convertTempFullBedTemperature(adcRaw, k = TEMP_FULL_BED_TEMPERATURE_K) {
+  const raw = Number(adcRaw) || 0;
+  const coefficient = Number.isFinite(Number(k)) ? Number(k) : 1;
+  return ((10 / 6) * raw + (2 / 3)) * coefficient;
+}
+
+function normalizeTempFullBedPressure(value) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue) || numberValue < TEMP_FULL_BED_PRESSURE_THRESHOLD) return 0;
+  return numberValue;
+}
+
 module.exports = {
   openWeb: function ({ hostname, port }) {
     const server = http.createServer((req, res) => {
@@ -41,14 +58,14 @@ module.exports = {
 
     server.listen(port, hostname, () => {
       const url = `http://${hostname}:${port}`;
-      console.log(`Server running at http://${hostname}:${port}/`);
+      logger.debug(`Server running at http://${hostname}:${port}/`);
       exec(`start chrome "${url}"`, (err, stdout, stderr) => {
         if (err) {
-          console.error(`exec error: ${err}`);
+          logger.error(`exec error: ${err}`);
           return;
         }
-        console.log(`stdout: ${stdout}`);
-        console.error(`stderr: ${stderr}`);
+        logger.debug(`stdout: ${stdout}`);
+        logger.error(`stderr: ${stderr}`);
       });
     });
 
@@ -116,17 +133,17 @@ module.exports = {
     ];
   },
   gaussBlur_1(scl, tcl, w, h, r) {
-    var rs = Math.ceil(r * 2.57); // significant radius
-    for (var i = 0; i < h; i++)
-      for (var j = 0; j < w; j++) {
-        var val = 0,
+    let rs = Math.ceil(r * 2.57); // significant radius
+    for (let i = 0; i < h; i++)
+      for (let j = 0; j < w; j++) {
+        let val = 0,
           wsum = 0;
-        for (var iy = i - rs; iy < i + rs + 1; iy++)
-          for (var ix = j - rs; ix < j + rs + 1; ix++) {
-            var x = Math.min(w - 1, Math.max(0, ix));
-            var y = Math.min(h - 1, Math.max(0, iy));
-            var dsq = (ix - j) * (ix - j) + (iy - i) * (iy - i);
-            var wght = Math.exp(-dsq / (2 * r * r)) / (Math.PI * 2 * r * r);
+        for (let iy = i - rs; iy < i + rs + 1; iy++)
+          for (let ix = j - rs; ix < j + rs + 1; ix++) {
+            let x = Math.min(w - 1, Math.max(0, ix));
+            let y = Math.min(h - 1, Math.max(0, iy));
+            let dsq = (ix - j) * (ix - j) + (iy - i) * (iy - i);
+            let wght = Math.exp(-dsq / (2 * r * r)) / (Math.PI * 2 * r * r);
             val += scl[y * w + x] * wght;
             wsum += wght;
           }
@@ -172,7 +189,6 @@ module.exports = {
       }
     }
     newArr = rotate90(newArr, 10, 10)
-    // console.log(newArr , arr[6*32+7])
     return newArr;
   },
 
@@ -289,7 +305,6 @@ module.exports = {
     return wsPointData
   },
   newHand(wsPointData) {
-    // console.log(wsPointData)
     // let arr = [0, 17, 18, 19, 20, 21].reverse()
     // const newArr = []
     // for (let i = 0; i < arr.length; i++) {
@@ -329,7 +344,6 @@ module.exports = {
 
 
 
-    // console.log(newArr)
 
     const handPointArr = [
       [4, 5], [4, 6], [2, 8], [2, 9], [1, 12], [1, 13], [2, 16], [2, 17], [14, 25], [14, 26],
@@ -347,7 +361,6 @@ module.exports = {
       newZeroArr[(a[0] + 2) * 32 + a[1]] = newArr[index]
     })
     newZeroArr = rotate90(newZeroArr, 32, 32)
-    // console.log(newZeroArr)
     return newZeroArr
   },
   gloves(wsPointData) {
@@ -402,7 +415,6 @@ module.exports = {
     }
 
     newZeroArr = rotate90(newZeroArr, 32, 32)
-    // console.log(newZeroArr)
     return newZeroArr
   },
   gloves1(wsPointData) {
@@ -446,7 +458,6 @@ module.exports = {
     }
 
     newZeroArr = rotate90(newZeroArr, 32, 32)
-    // console.log(newZeroArr)
     return newZeroArr
   },
   gloves2(wsPointData) {
@@ -483,7 +494,6 @@ module.exports = {
     }
 
     newZeroArr = rotate90(newZeroArr, 32, 32)
-    // console.log(newZeroArr)
     return newZeroArr
   }, sit100Line(wsPointData) {
     let left = [], center = [], right = [];
@@ -522,7 +532,6 @@ module.exports = {
 
     // newArr = rotate90(newArr, 45, 45)
 
-    // console.log(newArr.length)
     return newArr
   },
   press(arr, value) {
@@ -709,17 +718,17 @@ module.exports = {
     }
   },
   gaussBlur_1(scl, tcl, w, h, r) {
-    var rs = Math.ceil(r * 2.57); // significant radius
-    for (var i = 0; i < h; i++)
-      for (var j = 0; j < w; j++) {
-        var val = 0,
+    let rs = Math.ceil(r * 2.57); // significant radius
+    for (let i = 0; i < h; i++)
+      for (let j = 0; j < w; j++) {
+        let val = 0,
           wsum = 0;
-        for (var iy = i - rs; iy < i + rs + 1; iy++)
-          for (var ix = j - rs; ix < j + rs + 1; ix++) {
-            var x = Math.min(w - 1, Math.max(0, ix));
-            var y = Math.min(h - 1, Math.max(0, iy));
-            var dsq = (ix - j) * (ix - j) + (iy - i) * (iy - i);
-            var wght = Math.exp(-dsq / (2 * r * r)) / (Math.PI * 2 * r * r);
+        for (let iy = i - rs; iy < i + rs + 1; iy++)
+          for (let ix = j - rs; ix < j + rs + 1; ix++) {
+            let x = Math.min(w - 1, Math.max(0, ix));
+            let y = Math.min(h - 1, Math.max(0, iy));
+            let dsq = (ix - j) * (ix - j) + (iy - i) * (iy - i);
+            let wght = Math.exp(-dsq / (2 * r * r)) / (Math.PI * 2 * r * r);
             val += scl[y * w + x] * wght;
             wsum += wght;
           }
@@ -759,7 +768,7 @@ module.exports = {
     ];
   },
   timeStampToDate(data) {
-    var date = new Date(data);  // 参数需要毫秒数，所以这里将秒数乘于 1000
+    let date = new Date(data);  // 参数需要毫秒数，所以这里将秒数乘于 1000
     Y = date.getFullYear() + '/';
     // M = (date.getMonth() + 1 < 10 ? '0' + (date.getMonth() + 1) : date.getMonth() + 1) + '/';
     M = (date.getMonth() + 1) + '/';
@@ -772,7 +781,7 @@ module.exports = {
     return Y + M + D + h + m + s + us
   },
   timeStampTo_Date(data) {
-    var date = new Date(data);  // 参数需要毫秒数，所以这里将秒数乘于 1000
+    let date = new Date(data);  // 参数需要毫秒数，所以这里将秒数乘于 1000
     Y = date.getFullYear() + '-';
     // M = (date.getMonth() + 1 < 10 ? '0' + (date.getMonth() + 1) : date.getMonth() + 1) + '/';
     M = (date.getMonth() + 1) + '-';
@@ -785,7 +794,7 @@ module.exports = {
     return Y + M + D + h + m + s
   },
   timeStampToDateNum(data) {
-    var date = new Date(data);  // 参数需要毫秒数，所以这里将秒数乘于 1000
+    let date = new Date(data);  // 参数需要毫秒数，所以这里将秒数乘于 1000
     Y = date.getFullYear();
     // M = (date.getMonth() + 1 < 10 ? '0' + (date.getMonth() + 1) : date.getMonth() + 1) + '/';
     M = (date.getMonth() + 1) < 10 ? '0' + (date.getMonth() + 1) : (date.getMonth() + 1);
@@ -794,7 +803,6 @@ module.exports = {
     m = (date.getMinutes() < 10 ? '0' + date.getMinutes() : date.getMinutes());
     s = date.getSeconds() < 10 ? '0' + date.getSeconds() : date.getSeconds();
 
-    // console.log(Y,M,D,h,m,s);
     return Y + M + D + h + m + s
   },
   calPressArr(data, indexArr, height) {
@@ -857,6 +865,53 @@ module.exports = {
     wsPointData = wsPointData.concat(b);
     // wsPointData = press6(wsPointData, 32, 32, 'col')
     return wsPointData
+  },
+  tempFullBed(arr) {
+    const ordered = [...arr];
+    for (let i = 0; i < 8; i++) {
+      for (let j = 0; j < 32; j++) {
+        [ordered[i * 32 + j], ordered[(14 - i) * 32 + j]] = [
+          ordered[(14 - i) * 32 + j],
+          ordered[i * 32 + j],
+        ];
+      }
+    }
+    const shiftedRows = ordered.splice(0, 15 * 32);
+    ordered.push(...shiftedRows);
+
+    const pointRows = [20, 31];
+    const pointCols = [[13, 19], [21, 28]];
+    const pointColIndexes = pointCols.flatMap(([startCol, endCol]) => {
+      const indexes = [];
+      for (let col = startCol; col <= endCol; col++) indexes.push(col);
+      return indexes;
+    });
+    const temperatureRows = [14, 15, 16];
+    const temperatureCol = 20;
+    const basePointData = [];
+
+    for (let row = pointRows[0]; row <= pointRows[1]; row++) {
+      pointColIndexes.forEach((col) => {
+        basePointData.push(normalizeTempFullBedPressure(ordered[row * 32 + col]));
+      });
+    }
+
+    const temperatureRawData = temperatureRows.map((row) => ordered[row * 32 + temperatureCol] || 0);
+    const temperatureData = temperatureRawData.map((value) => convertTempFullBedTemperature(value));
+
+    return {
+      sitData: basePointData,
+      rawSitData: basePointData,
+      matrixWidth: 15,
+      matrixHeight: 12,
+      matrixOrientation: 'row-major',
+      realArr: ordered,
+      pressureThreshold: TEMP_FULL_BED_PRESSURE_THRESHOLD,
+      temperatureRawData,
+      temperatureData,
+      temperatureAvg: temperatureData.reduce((sum, value) => sum + value, 0) / temperatureData.length,
+      temperatureK: TEMP_FULL_BED_TEMPERATURE_K,
+    };
   },
   smallBedReal(wsPointData) {
 
@@ -990,7 +1045,6 @@ module.exports = {
 
     for (let i = 1; i < 31; i++) {
       if (colArr[i + 1] > max && colArr[i] < min && colArr[i - 1] > max) {
-        // console.log(i)
         for (let j = 0; j < 32; j++) {
           wsPointData[j * 32 + i] = (wsPointData[(j) * 32 + i - 1] + wsPointData[(j) * 32 + i + 1]) / 2;
         }
@@ -1270,6 +1324,23 @@ module.exports = {
 
     wsPointData = zeroLine(wsPointData)
     return wsPointData
+  },
+  handSinglePoint(arr) {
+    const wsPointData = []
+    for (let start = 481; start <= 992; start += 32) {
+      for (let point = start; point < start + 32; point++) {
+        wsPointData.push(arr[point - 1] || 0)
+      }
+    }
+    for (let start = 449; start >= 1; start -= 32) {
+      for (let point = start; point < start + 32; point++) {
+        wsPointData.push(arr[point - 1] || 0)
+      }
+    }
+    for (let point = 993; point <= 1024; point++) {
+      wsPointData.push(arr[point - 1] || 0)
+    }
+    return wsPointData
   }, carCol(arr) {
     const wsPointData = [...arr]
     let newData = []
@@ -1345,7 +1416,6 @@ module.exports = {
     }
 
     newZeroArr = rotate90(newZeroArr, 32, 32)
-    // console.log(newZeroArr)
     return newZeroArr
   },
   gloves0123Res(wsPointData) {
@@ -1419,7 +1489,7 @@ module.exports = {
       res[15 * 4 + 1 + i * 3] = arr[fingerMiddleHand[i]]
     }
 
-    console.log(handArr.length, 'handArr')
+    logger.debug(handArr.length, 'handArr')
 
     for (let i = 0; i < handArr.length; i++) {
       res[15 * 5 + i] = arr[handArr[i]]
@@ -1537,7 +1607,6 @@ module.exports = {
     // }
 
     newZeroArr = rotate90(newZeroArr, 32, 32)
-    // console.log(newZeroArr)
     return newZeroArr
   }, footR(arr) {
     const footArr = []
@@ -1624,7 +1693,6 @@ module.exports = {
       const nextCol = footPointArr[(i + 1) * 6 + 0][0]
       const firstIndex = footPointArr[i * 6 + 0][1]
       const lastIndex = footPointArr[i * 6 + 5][1]
-      // console.log(newArr[(nextCol) * 32 + 1] , newArr[(col) * 32 + 1])
       for (let j = firstIndex; j <= lastIndex; j++) {
         newArr[(col + 1) * 32 + j] = newArr[(col) * 32 + j] + Math.floor((newArr[(nextCol) * 32 + j] - newArr[(col) * 32 + j]) * 10 * 1 / 5) / 10
         newArr[(col + 2) * 32 + j] = newArr[(col) * 32 + j] + Math.floor((newArr[(nextCol) * 32 + j] - newArr[(col) * 32 + j]) * 10 * 2 / 5) / 10
@@ -1865,7 +1933,6 @@ module.exports = {
     })
 
     // newZeroArr = rotate90(newZeroArr, 32, 32)
-    // console.log(newZeroArr)
     return newZeroArr
   }, footL(arr) {
     const footArr = []
@@ -1923,7 +1990,6 @@ module.exports = {
       const nextCol = footPointArr[(i + 1) * 6 + 0][0]
       const firstIndex = footPointArr[i * 6 + 0][1]
       const lastIndex = footPointArr[i * 6 + 5][1]
-      // console.log(newArr[(nextCol) * 32 + 1] , newArr[(col) * 32 + 1])
       for (let j = firstIndex; j <= lastIndex; j++) {
         newArr[(col + 1) * 32 + j] = newArr[(col) * 32 + j] + Math.floor((newArr[(nextCol) * 32 + j] - newArr[(col) * 32 + j]) * 10 * 1 / 5) / 10
         newArr[(col + 2) * 32 + j] = newArr[(col) * 32 + j] + Math.floor((newArr[(nextCol) * 32 + j] - newArr[(col) * 32 + j]) * 10 * 2 / 5) / 10
@@ -1952,8 +2018,14 @@ module.exports = {
 
     return newArr
   }, footArrToNormal(arr) {
-    if (!Array.isArray(arr)) {
-      arr = JSON.parse(arr)
+    if (arr == null || arr === "" || arr === "undefined") {
+      arr = []
+    } else if (!Array.isArray(arr)) {
+      try {
+        arr = JSON.parse(arr)
+      } catch (error) {
+        arr = []
+      }
     }
     const footPointArr = [
       [8, 10], [8, 13], [8, 16], [8, 19], [8, 21], [8, 24],
@@ -2020,7 +2092,6 @@ module.exports = {
 
     for (let i = 1; i < matrixLength - 1; i++) {
       if (colArr[i + 1] > 100 && colArr[i] < 40 && colArr[i - 1] > 100) {
-        // console.log(i)
         for (let j = 0; j < matrixLength; j++) {
           wsPointData[j * matrixLength + i] = (wsPointData[(j) * matrixLength + i - 1] + wsPointData[(j) * matrixLength + i + 1]) / 2;
         }
@@ -2194,11 +2265,11 @@ function rotate90(arr, height, width) {
     }
   }
 
-  var temp = [];
-  var len = matrix.length;
-  for (var i = 0; i < len; i++) {
-    for (var j = 0; j < len; j++) {
-      var k = len - 1 - j;
+  let temp = [];
+  let len = matrix.length;
+  for (let i = 0; i < len; i++) {
+    for (let j = 0; j < len; j++) {
+      let k = len - 1 - j;
       if (!temp[k]) {
         temp[k] = [];
       }
@@ -2216,7 +2287,7 @@ function rotateArrayCounter90Degrees(array, rows, cols) {
   const length = array.length;
 
   if (length !== rows * cols) {
-    console.error("输入数组长度与给定的行数和列数不匹配。");
+    logger.error("输入数组长度与给定的行数和列数不匹配。");
     return;
   }
 
@@ -2250,7 +2321,7 @@ function rotateArray90Degrees(array) {
   const cols = rows;
 
   if (rows % 1 !== 0) {
-    console.error("输入数组长度不适合生成正方形二维数组。");
+    logger.error("输入数组长度不适合生成正方形二维数组。");
     return;
   }
 
@@ -2279,7 +2350,6 @@ function rotateArray90Degrees(array) {
 function carFitting(value) {
 
   const res = 0.0582 * Math.pow(value, 2) + (-1.4553) * Math.pow(value, 1) + 11.6990
-  // console.log(value , res)
   return res
 }
 
@@ -2326,7 +2396,6 @@ function mmghToPress(mmgH, area) {
 //       }
 //       colArr.push(total);
 //     }
-//     // console.log(colArr)
 //     // //////okok
 //     for (let i = 0; i < height; i++) {
 //       for (let j = 0; j < width; j++) {
@@ -2381,7 +2450,6 @@ function pressSmallBedToValue({ arr, width, height, type = 'row', num = 100 }) {
       }
       colArr.push(total);
     }
-    // console.log(colArr)
     // //////okok
     for (let i = 0; i < height; i++) {
       for (let j = 0; j < width; j++) {
@@ -2426,7 +2494,6 @@ function zeroLine(arr, max, min) {
 
   for (let i = 1; i < 31; i++) {
     if (colArr[i + 1] > 100 && colArr[i] < 40 && colArr[i - 1] > 100) {
-      // console.log(i)
       for (let j = 0; j < 32; j++) {
         wsPointData[j * 32 + i] = (wsPointData[(j) * 32 + i - 1] + wsPointData[(j) * 32 + i + 1]) / 2;
       }
@@ -2461,7 +2528,6 @@ function zeroLineMatrix(arr, matrixLength, max, min) {
 
   for (let i = 1; i < matrixLength - 1; i++) {
     if (colArr[i + 1] > 100 && colArr[i] < 40 && colArr[i - 1] > 100) {
-      // console.log(i)
       for (let j = 0; j < matrixLength; j++) {
         wsPointData[j * matrixLength + i] = (wsPointData[(j) * matrixLength + i - 1] + wsPointData[(j) * matrixLength + i + 1]) / 2;
       }

@@ -28,12 +28,18 @@ export const SENSOR_TYPES = {
   YANFENG10:   'yanfeng10',
   VOLVO:       'volvo',
   CAR_QX:      'carQX',
+  WHOLE_CHAIR: 'wholeChair',
   SOFA:        'sofa',
+  MINZHEN:     'minzhen',
   // 手部
   HAND:        'hand',
+  HAND_SINGLE_POINT: 'handSinglePoint',
   HAND_L:      'handL',
   HAND_R:      'handR',
   HAND_0205:   'hand0205',
+  HAND_0205_DOUBLE: 'hand0205Double',
+  HAND_GLOVE_115200: 'handGlove115200',
+  HAND_GLOVE_FULL_PACKET: 'handGloveFullPacket',
   HAND_0507:   'hand0507',
   GLOVES:      'gloves',
   GLOVES1:     'gloves1',
@@ -44,7 +50,12 @@ export const SENSOR_TYPES = {
   FOOT_VIDEO:  'footVideo',
   // 床垫
   SMALL_BED:   'smallBed',
+  SMALL_BED_NO_ALG: 'smallBedNoAlg',
+  SMALL_BED_12B: 'smallBed12B',
   SMALL_BED1:  'smallBed1',
+  TEMP_FULL_BED: 'tempFullBed',
+  PET_CARE:    'petCare',
+  PET_CARE_MINI: 'petCareMini',
   BIG_BED:     'bigBed',
   // 坐垫
   SIT:         'sit',
@@ -63,7 +74,7 @@ export const SENSOR_TYPES = {
  */
 export const CAR_TYPES = [
   'yanfeng10', 'car', 'car10', 'volvo', 'footVideo',
-  'hand0507', 'hand0205', 'carQX', 'eye', 'sofa',
+  'hand0507', 'hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket', 'carQX', 'wholeChair', 'minzhen', 'eye', 'sofa',
 ];
 
 /**
@@ -81,12 +92,20 @@ export const SENSOR_MATRIX_MAP = {
   yanfeng10:  { width: 32, height: 32, total: 1024 },
   volvo:      { width: 32, height: 32, total: 1024 },
   carQX:      { width: 32, height: 32, total: 1024 },
+  wholeChair: { width: 32, height: 32, total: 1024 },
+  minzhen:    { width: 32, height: 32, total: 1024 },
   sofa:       { width: 32, height: 32, total: 1024 },
   car:        { width: 32, height: 32, total: 1024 },
   smallBed:   { width: 32, height: 32, total: 1024 },
+  smallBedNoAlg: { width: 32, height: 32, total: 1024 },
+  smallBed12B:{ width: 32, height: 32, total: 1024 },
   smallBed1:  { width: 32, height: 32, total: 1024 },
+  tempFullBed:{ width: 15, height: 12, total: 180 },
+  petCare:    { width: 32, height: 32, total: 1024 },
+  petCareMini:{ width: 32, height: 32, total: 1024 },
   smallM:     { width: 32, height: 32, total: 1024 },
   hand:       { width: 32, height: 32, total: 1024 },
+  handSinglePoint: { width: 32, height: 32, total: 1024 },
   sit:        { width: 32, height: 32, total: 1024 },
   sit10:      { width: 32, height: 32, total: 1024 },
   foot:       { width: 32, height: 32, total: 1024 },
@@ -94,6 +113,7 @@ export const SENSOR_MATRIX_MAP = {
   short:      { width: 32, height: 32, total: 1024 },
   handL:      { width: 16, height: 16, total: 256 },
   handR:      { width: 16, height: 16, total: 256 },
+  handGloveFullPacket: { width: 16, height: 16, total: 256 },
   gloves:     { width: 16, height: 16, total: 256 },
   bigBed:     { width: 64, height: 32, total: 2048 },
 };

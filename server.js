@@ -1,12 +1,18 @@
-﻿const WebSocket = require("ws");
+﻿const logger = require('./logger');
+const { startWorker, callPy, stopWorker, warmFootAnalysis } = require('./pyWorker');
+const WebSocket = require("ws");
+const express = require('express');
+const multer = require('multer');
+const cors = require('cors');
+const HttpResult = require('./HttpResult');
 const { app } = require('electron')
 const path = require('path');
-var os = require('os');
+const os = require('os');
 const fs = require('fs');
 const { SerialPort } = require("serialport");
 const { DelimiterParser } = require("@serialport/parser-delimiter");
-const sqlite3 = require("sqlite3").verbose();
-const createCsvWriter = require("csv-writer").createObjectCsvWriter;
+const sqlite3 = require("./sqlite3-compat").verbose();
+const { createObjectCsvWriter: createCsvWriter, createObjectCsvStringifier: createCsvStringifier } = require("csv-writer");
 const {
   openWeb,
   interp,
@@ -43,11 +49,13 @@ const {
   yanfeng10sit,
   yanfeng10back,
   handBlue,
+  handSinglePoint,
   wowSitLine,
   wowBackLine,
   wowhead,
   xiyueReal1,
   jqbed,
+  tempFullBed,
   carCol,
   newHand,
   gloves,
@@ -68,38 +76,1296 @@ const {
   zeroLineMatrix,
   sit100Line,
   endiSit1024,
+  carYLine,
 } = require("./openWeb");
 const module2 = require('./aes_ecb')
+const { resolveConfigFile, getConfigFileCandidates, getWritableConfigFile } = require('./licenseHelper');
 const { isCar, dedupli, totalToN, } = require("./util");
 const { pressSmallBed } = require("./utilMatrix");
+const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine, pressNew12203131 } = require('./server/mathUtils');
+const { initDb: _initDbFromModule } = require('./server/dbManager');
+
+const HAND_GLOVE_FULL_PACKET = 'handGloveFullPacket';
+const HAND_GLOVE_DOUBLE = 'hand0205Double';
+const HAND_GLOVE_TYPES = ['hand0205', HAND_GLOVE_DOUBLE, 'handGlove115200', HAND_GLOVE_FULL_PACKET];
+const HAND_GLOVE_FULL_PACKET_LENGTH = 274;
+const TEMP_FULL_BED_TYPE = 'tempFullBed';
+const TEMP_FULL_BED_PRESSURE_THRESHOLD = 20;
+const JQ_BED_TYPE = 'jqbed';
+const SMALL_BED_TYPE = 'smallBed';
+const SMALL_BED_NO_ALG_TYPE = 'smallBedNoAlg';
+const SMALL_BED_12B_TYPE = 'smallBed12B';
+const HAND_SINGLE_POINT_TYPE = 'handSinglePoint';
+const WHOLE_CHAIR_TYPE = 'wholeChair';
+const MINZHEN_TYPE = 'minzhen';
+const MINZHEN_SENSOR_BAUD_RATE = 115200;
+const MINZHEN_SENSOR_FRAME_START_PATTERN = /yroscope\s*:/i;
+const MINZHEN_ZERO_POINT_INDEXES = [384, 416];
+const MINZHEN_BACKEND_GAUSS_RADIUS = 0.5;
+const WHOLE_CHAIR_GAUSS_RADIUS = 0.5;
+const SMALL_BED_12B_PAYLOAD_LENGTH = 1024 * 2;
+const SMALL_BED_12B_FRAME_TAIL = Buffer.from([0xaa, 0x00, 0x55, 0x00, 0x03, 0x00, 0x99, 0x00]);
+const THREE_PORT_SENSOR_TYPES = new Set(['volvo', WHOLE_CHAIR_TYPE]);
+const isHandGloveType = (sensorType) => HAND_GLOVE_TYPES.includes(sensorType);
+const isHandStorageType = (sensorType = '') => isHandGloveType(sensorType) || String(sensorType).includes('robot');
+const isZeroFrameStorageType = (sensorType = '') => isHandGloveType(sensorType) || sensorType === 'footVideo' || String(sensorType).includes('robot');
+const isSmallBedMatrixType = (sensorType) => [SMALL_BED_TYPE, SMALL_BED_NO_ALG_TYPE].includes(sensorType);
+const isThreePortFile = (sensorType) => THREE_PORT_SENSOR_TYPES.has(sensorType);
+const getFrameMatrixData = (frame, key) => Array.isArray(frame?.[key]) ? frame[key] : [];
+const HAND_GLOVE_REALTIME_SEND_INTERVAL_MS = 1000 / 60;
+const COLLECTION_MIN_FREE_BYTES = Number(process.env.SHROOM_MIN_COLLECTION_FREE_BYTES) || 2 * 1024 * 1024 * 1024;
+let lastHandGloveRealtimeSendAt = {
+  sit: 0,
+  back: 0,
+};
+const getSensorBaudRate = (sensorType) => {
+  if (sensorType == 'handGlove115200') {
+    return 115200;
+  }
+  if (isHandGloveType(sensorType) || ['footVideo', 'eye', 'daliegu', 'smallSample'].includes(sensorType) || String(sensorType).includes('robot')) {
+    return 921600;
+  }
+  if (['bed4096', 'bed4096num'].includes(sensorType)) {
+    return 3000000;
+  }
+  if (sensorType === SMALL_BED_12B_TYPE) {
+    return 1500000;
+  }
+  if (sensorType === 'humanBody') {
+    return 1000000;
+  }
+  return 1000000;
+};
+
+function maskMinzhenMatrixValues(frame) {
+  if (!Array.isArray(frame)) return frame;
+  MINZHEN_ZERO_POINT_INDEXES.forEach((index) => {
+    if (index >= 0 && index < frame.length) {
+      frame[index] = 0;
+    }
+  });
+  return frame;
+}
+
+function applyMinzhenBackendGauss(frame) {
+  if (!Array.isArray(frame) || frame.length < 1024) return maskMinzhenMatrixValues(frame);
+  const normalizedFrame = frame.slice(0, 1024).map((value) => {
+    const nextValue = Number(value);
+    return Number.isFinite(nextValue) ? nextValue : 0;
+  });
+  maskMinzhenMatrixValues(normalizedFrame);
+  const blurredFrame = gaussBlur_return(normalizedFrame, 32, 32, MINZHEN_BACKEND_GAUSS_RADIUS);
+  return maskMinzhenMatrixValues(blurredFrame);
+}
+
+function normalizeMinzhenSensorKey(rawKey = '') {
+  const key = String(rawKey).trim();
+  if (/yroscope/i.test(key)) return 'gyroscope';
+  if (/thermistor0/i.test(key)) return 'thermistor0';
+  if (/thermistor1/i.test(key)) return 'thermistor1';
+  if (/thermistor2/i.test(key)) return 'thermistor2';
+  if (/thermistor/i.test(key)) return 'thermistor';
+  if (/humidity/i.test(key)) return 'humidity';
+  return key;
+}
+
+function cleanMinzhenSensorNumber(value) {
+  const match = String(value ?? '').match(/-?\d+(?:\.\d+)?/);
+  return match ? match[0] : '';
+}
+
+function parseMinzhenSensorFields(text = '') {
+  console.log(text)
+  const fields = [];
+  const fieldPattern = /(yroscope|thermistor0|thermistor1|thermistor2|thermistor|humidity)\s*:/ig;
+  const matches = [...String(text).matchAll(fieldPattern)];
+
+  matches.forEach((match, index) => {
+    const nextMatch = matches[index + 1];
+    fields.push({
+      key: normalizeMinzhenSensorKey(match[1]),
+      value: String(text)
+        .slice(match.index + match[0].length, nextMatch ? nextMatch.index : undefined)
+        .trim(),
+    });
+  });
+
+  return fields;
+}
+
+function parseMinzhenSensorFrame(buffer) {
+  const text = buffer.toString();
+  if (!/yroscope/i.test(text) || !/thermistor/i.test(text)) {
+    return null;
+  }
+
+  const tempObj = {};
+  parseMinzhenSensorFields(text).forEach((field) => {
+    const { key, value } = field;
+    if (!key) return;
+
+    if (key === 'gyroscope') {
+      const newValue = value
+        .split(/[\t,\s]+/)
+        .map((v) => cleanMinzhenSensorNumber(v))
+        .filter(Boolean)
+        .slice(0, 6);
+      tempObj[key] = newValue;
+
+      const angleFbRaw = Number(newValue[2]);
+      const angleLrRaw = Number(newValue[0]);
+      if (Number.isFinite(angleFbRaw)) {
+        tempObj.angle_fb = (angleFbRaw / 15000).toFixed(2);
+      }
+      if (Number.isFinite(angleLrRaw)) {
+        tempObj.angle_lr = (angleLrRaw / 15000).toFixed(2);
+      }
+    } else if (['thermistor0', 'thermistor1', 'thermistor2'].includes(key)) {
+      tempObj[key] = cleanMinzhenSensorNumber(value);
+    } else if (key === 'humidity') {
+      tempObj[key] = cleanMinzhenSensorNumber(value);
+    } else {
+      tempObj[key] = value.trim();
+    }
+  });
+
+  if (!Array.isArray(tempObj.gyroscope) || tempObj.gyroscope.length < 6) {
+    return null;
+  }
+  if (!['thermistor0', 'thermistor1', 'thermistor2', 'humidity'].every((key) => tempObj[key] !== undefined)) {
+    return null;
+  }
+
+  return { tempObj };
+}
+
+function getMinzhenSensorFrameStartIndex(text) {
+  const match = String(text).match(MINZHEN_SENSOR_FRAME_START_PATTERN);
+  return match ? match.index : -1;
+}
+
+function takeNextMinzhenSensorFrame() {
+  const firstStart = getMinzhenSensorFrameStartIndex(minzhenSensorTextBuffer);
+  if (firstStart < 0) {
+    minzhenSensorTextBuffer = minzhenSensorTextBuffer.slice(-64);
+    return null;
+  }
+
+  if (firstStart > 0) {
+    minzhenSensorTextBuffer = minzhenSensorTextBuffer.slice(firstStart);
+  }
+
+  const nextStart = getMinzhenSensorFrameStartIndex(minzhenSensorTextBuffer.slice(1));
+  if (nextStart >= 0) {
+    const frameText = minzhenSensorTextBuffer.slice(0, nextStart + 1);
+    minzhenSensorTextBuffer = minzhenSensorTextBuffer.slice(nextStart + 1);
+    return frameText;
+  }
+
+  const humidityMatch = minzhenSensorTextBuffer.match(/humidity\s*:\s*-?\d+(?:\.\d+)?/i);
+  if (humidityMatch) {
+    const frameEnd = humidityMatch.index + humidityMatch[0].length;
+    const frameText = minzhenSensorTextBuffer.slice(0, frameEnd);
+    minzhenSensorTextBuffer = minzhenSensorTextBuffer.slice(frameEnd).slice(-64);
+    return frameText;
+  }
+
+  return null;
+}
+
+let minzhenSensorTextBuffer = '';
+function handleMinzhenSensorPortData(data) {
+  if (file !== MINZHEN_TYPE || new Date().getTime() >= endDate) return;
+
+  minzhenSensorTextBuffer += Buffer.from(data).toString();
+  if (minzhenSensorTextBuffer.length > 4096) {
+    minzhenSensorTextBuffer = minzhenSensorTextBuffer.slice(-4096);
+  }
+
+  let frameText = takeNextMinzhenSensorFrame();
+  while (frameText) {
+    const frame = parseMinzhenSensorFrame(Buffer.from(frameText));
+    if (frame) {
+      colOrSendData1(JSON.stringify(frame));
+    }
+
+    frameText = takeNextMinzhenSensorFrame();
+  }
+}
+
+function bindBackPortParser() {
+  if (!port2) return;
+  if (file === MINZHEN_TYPE) {
+    minzhenSensorTextBuffer = '';
+    port2.on("data", handleMinzhenSensorPortData);
+  } else {
+    port2.pipe(parser2);
+  }
+}
+
+function closeMinzhenSensorPort(reason = 'close') {
+  minzhenSensorTextBuffer = '';
+  if (!portSensor) return;
+
+  portSensor.removeListener("data", handleMinzhenSensorPortData);
+  const closingPort = portSensor;
+  portSensor = null;
+  if (closingPort.isOpen) {
+    closingPort.close((err) => {
+      if (err) logger.warn(`minzhen sensor port close error (${reason}):`, err);
+    });
+  }
+}
+
+function openMinzhenSensorPort(portPath) {
+  if (!portPath) return;
+  if (file !== MINZHEN_TYPE) return;
+  sensorClose = false;
+  comSensor = portPath;
+  closeMinzhenSensorPort('reopen');
+
+  try {
+    portSensor = new SerialPort(
+      {
+        path: portPath,
+        baudRate: MINZHEN_SENSOR_BAUD_RATE,
+        autoOpen: true,
+      },
+      function (err) {
+        if (err) logger.warn(err, "minzhen sensor port err");
+      }
+    );
+    minzhenSensorTextBuffer = '';
+    portSensor.on("data", handleMinzhenSensorPortData);
+  } catch (e) {
+    logger.warn(e, "minzhen sensor port open error");
+  }
+}
+
+function rotateSquare90CounterClockwise(arr, size) {
+  const matrix = [];
+  for (let i = 0; i < size; i++) {
+    matrix[i] = [];
+    for (let j = 0; j < size; j++) {
+      matrix[i].push(arr[i * size + j]);
+    }
+  }
+
+  const temp = [];
+  for (let i = 0; i < size; i++) {
+    for (let j = 0; j < size; j++) {
+      const k = size - 1 - j;
+      if (!temp[k]) {
+        temp[k] = [];
+      }
+      temp[k][i] = matrix[i][j];
+    }
+  }
+  return temp.flat();
+}
+
+function rotateMatrix90Clockwise(arr, height, width) {
+  const matrix = Array.from({ length: height }, (_, i) =>
+    arr.slice(i * width, i * width + width)
+  );
+
+  const newMatrix = [];
+  for (let col = 0; col < width; col++) {
+    newMatrix[col] = [];
+    for (let row = 0; row < height; row++) {
+      newMatrix[col][row] = matrix[height - 1 - row][col];
+    }
+  }
+  return newMatrix.flat();
+}
+
+function flipMatrixVertical(arr, height, width) {
+  const result = [];
+  for (let row = height - 1; row >= 0; row--) {
+    result.push(...arr.slice(row * width, row * width + width));
+  }
+  return result;
+}
+
+function flipMatrixHorizontal(arr, height, width) {
+  const result = [];
+  for (let row = 0; row < height; row++) {
+    result.push(...arr.slice(row * width, row * width + width).reverse());
+  }
+  return result;
+}
+
+function applyWholeChairGauss(arr, width, height) {
+  if (!Array.isArray(arr) || arr.length !== width * height) {
+    return arr;
+  }
+  return gaussBlur_return(arr, width, height, WHOLE_CHAIR_GAUSS_RADIUS);
+}
+
+function parseFrameArray(data) {
+  if (Array.isArray(data)) {
+    return [...data];
+  }
+  if (typeof data === 'string') {
+    try {
+      const parsed = JSON.parse(data);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      logger.warn('[wholeChair] failed to parse stored frame data', error);
+      return [];
+    }
+  }
+  return [];
+}
+
+function wholeChairSitLine(rawData) {
+  const wsPointData = parseFrameArray(rawData);
+  if (wsPointData.length !== 1024) {
+    return wsPointData;
+  }
+
+  let resArr = [];
+  for (let i = 0; i < 16; i++) {
+    for (let j = 0; j < 16; j++) {
+      resArr.push(wsPointData[i * 32 + j]);
+    }
+  }
+
+  for (let i = 0; i < 16; i++) {
+    for (let j = 0; j < 4; j++) {
+      [resArr[i * 16 + 8 + j], resArr[i * 16 + 8 + 7 - j]] =
+        [resArr[i * 16 + 8 + 7 - j], resArr[i * 16 + 8 + j]];
+    }
+  }
+  return applyWholeChairGauss(rotateSquare90CounterClockwise(resArr, 16), 16, 16);
+}
+
+function wholeChairBackLine(rawData) {
+  const wsPointData = parseFrameArray(rawData);
+  if (wsPointData.length !== 1024) {
+    return wsPointData;
+  }
+
+  let resArr = [];
+  for (let i = 0; i < 16; i++) {
+    for (let j = 0; j < 16; j++) {
+      resArr.push(wsPointData[i * 32 + j]);
+    }
+  }
+
+  for (let i = 0; i < 16; i++) {
+    for (let j = 0; j < 4; j++) {
+      [resArr[i * 16 + 8 + j], resArr[i * 16 + 8 + 7 - j]] =
+        [resArr[i * 16 + 8 + 7 - j], resArr[i * 16 + 8 + j]];
+    }
+  }
+
+  for (let i = 0; i < 8; i++) {
+    for (let j = 0; j < 16; j++) {
+      [resArr[i * 16 + j], resArr[(15 - i) * 16 + j]] =
+        [resArr[(15 - i) * 16 + j], resArr[i * 16 + j]];
+    }
+  }
+
+  return applyWholeChairGauss(
+    flipMatrixVertical(rotateSquare90CounterClockwise(resArr, 16), 16, 16),
+    16,
+    16
+  );
+}
+
+function wholeChairHeadLine(rawData) {
+  const wsPointData = parseFrameArray(rawData);
+  if (wsPointData.length !== 1024) {
+    return wsPointData;
+  }
+
+  let resArr = [];
+  for (let i = 6; i < 16; i++) {
+    for (let j = 0; j < 10; j++) {
+      resArr.push(wsPointData[i * 32 + j]);
+    }
+  }
+
+  for (let i = 0; i < 10; i++) {
+    for (let j = 0; j < 2; j++) {
+      [resArr[i * 10 + 5 + j], resArr[i * 10 + 5 + 4 - j]] =
+        [resArr[i * 10 + 5 + 4 - j], resArr[i * 10 + 5 + j]];
+    }
+  }
+
+  for (let i = 0; i < 10; i++) {
+    for (let j = 0; j < 5; j++) {
+      [resArr[i * 10 + j], resArr[i * 10 + 9 - j]] =
+        [resArr[i * 10 + 9 - j], resArr[i * 10 + j]];
+    }
+  }
+
+  return applyWholeChairGauss(
+    flipMatrixVertical(rotateMatrix90Clockwise(resArr, 10, 10), 10, 10),
+    10,
+    10
+  )
+    .map((value) => value / 2);
+}
+
+function normalizeWholeChairFrame(section, data) {
+  if (file !== WHOLE_CHAIR_TYPE) {
+    return data;
+  }
+  if (section === 'sit') {
+    return wholeChairSitLine(data);
+  }
+  if (section === 'back') {
+    return wholeChairBackLine(data);
+  }
+  if (section === 'head') {
+    return wholeChairHeadLine(data);
+  }
+  return parseFrameArray(data);
+}
+
+const WCH_ALLOWED_VENDOR_IDS = new Set(['1A86']);
+const WCH_ALLOWED_PRODUCT_IDS = new Set(['7523', '55D3']);
+
+function normalizeSerialIdentifier(value) {
+  return String(value ?? '').trim().toUpperCase();
+}
+
+function hasWchSerialSignature(port = {}) {
+  const vendorId = normalizeSerialIdentifier(port.vendorId ?? port.vendorIdentifier);
+  const productId = normalizeSerialIdentifier(port.productId ?? port.productIdentifier);
+  const pnpId = normalizeSerialIdentifier(port.pnpId);
+  const manufacturer = normalizeSerialIdentifier(port.manufacturer);
+  const friendlyName = normalizeSerialIdentifier(port.friendlyName);
+  const portPath = normalizeSerialIdentifier(port.path);
+
+  if (vendorId && WCH_ALLOWED_VENDOR_IDS.has(vendorId)) {
+    return true;
+  }
+
+  if (pnpId.includes('VID_1A86')) {
+    return true;
+  }
+
+  if (WCH_ALLOWED_PRODUCT_IDS.has(productId) && portPath.includes('USBSERIAL')) {
+    return true;
+  }
+
+  if (portPath.includes('WCHUSBSERIAL')) {
+    return true;
+  }
+
+  if (manufacturer.includes('WCH')) {
+    return true;
+  }
+
+  return friendlyName.includes('CH34') || friendlyName.includes('USB-SERIAL') || friendlyName.includes('USB-ENHANCED-SERIAL');
+}
+
+function isWindowsTargetSerialPort(port = {}) {
+  return hasWchSerialSignature(port);
+}
+
+function isMacTargetSerialPort(port = {}) {
+  return hasWchSerialSignature(port);
+}
+
+function parseStoredFrameData(row) {
+  if (!row?.data) return null;
+  try {
+    return JSON.parse(row.data);
+  } catch (error) {
+    return null;
+  }
+}
+
+function getStoredSitData(row) {
+  const storedData = parseStoredFrameData(row);
+  if (Array.isArray(storedData)) return storedData;
+  if (Array.isArray(storedData?.sitData)) return storedData.sitData;
+  return [];
+}
+
+function getHistoryPressureData(row) {
+  const storedData = parseStoredFrameData(row);
+  if (Array.isArray(storedData)) return storedData;
+  if (Array.isArray(storedData?.pressureData)) return storedData.pressureData;
+  if (Array.isArray(storedData?.sitData)) return storedData.sitData;
+  if (Array.isArray(storedData?.backData)) return storedData.backData;
+  return [];
+}
+
+function normalizeHistoryPressureData(row, file = '') {
+  const data = getHistoryPressureData(row);
+  const pressureData = isHandStorageType(file) && data.length > 256 ? data.slice(0, 256) : data;
+  const normalizedData = pressureData.map((value) => {
+    const numberValue = Number(value);
+    return Number.isFinite(numberValue) ? numberValue : 0;
+  });
+  if (file !== TEMP_FULL_BED_TYPE) return normalizedData;
+  return normalizedData.map((value) => value < TEMP_FULL_BED_PRESSURE_THRESHOLD ? 0 : value);
+}
+
+function getCsvElapsedSeconds(rows, rowIndex, baseIndex = 0, frameIndex = 0) {
+  const currentTimestamp = Number(rows?.[rowIndex]?.timestamp);
+  const baseTimestamp = Number(rows?.[baseIndex]?.timestamp);
+  if (Number.isFinite(currentTimestamp) && Number.isFinite(baseTimestamp)) {
+    return ((currentTimestamp - baseTimestamp) / 1000).toFixed(3);
+  }
+
+  const fallbackHz = Number(colHZ) > 0 ? Number(colHZ) : 12;
+  return (frameIndex / fallbackHz).toFixed(3);
+}
+
+function isEnglishCsvDownload(downloadOptions = {}) {
+  const language = String(downloadOptions.language || downloadOptions.locale || 'zh').toLowerCase();
+  return language.startsWith('en');
+}
+
+function getCsvFilePrefix(sensorType, fallbackPrefix, downloadOptions = {}) {
+  if (sensorType === SMALL_BED_12B_TYPE) return '12B';
+  if (sensorType === HAND_SINGLE_POINT_TYPE) return isEnglishCsvDownload(downloadOptions) ? 'detection' : '检测点';
+  if (isHandGloveType(sensorType) && fallbackPrefix === 'sit') return 'left';
+  if (isHandGloveType(sensorType) && fallbackPrefix === 'back') return 'right';
+  return fallbackPrefix;
+}
+
+function shouldSendRealtimeFrame(channel = 'sit') {
+  if (!isHandGloveType(file)) return true;
+
+  const now = Date.now();
+  const lastSendAt = lastHandGloveRealtimeSendAt[channel] || 0;
+  if (now - lastSendAt < HAND_GLOVE_REALTIME_SEND_INTERVAL_MS) {
+    return false;
+  }
+
+  lastHandGloveRealtimeSendAt[channel] = now;
+  return true;
+}
+
+function normalizeCollectFrequency(value) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue) || numberValue <= 0) return 12;
+  return Math.min(200, Math.max(1, numberValue));
+}
+
+function normalizeCollectOptions(options = {}) {
+  const matrixDownsample = options.matrixDownsample && typeof options.matrixDownsample === 'object'
+    ? options.matrixDownsample
+    : {};
+  const frequencyMode = options.frequencyMode === 'serial' ? 'serial' : 'custom';
+  return {
+    frequencyMode,
+    frequencyHz: normalizeCollectFrequency(options.frequencyHz ?? colHZ),
+    matrixDownsample: {
+      enabled: matrixDownsample.enabled === true,
+      sourceWidth: Number(matrixDownsample.sourceWidth) || 32,
+      sourceHeight: Number(matrixDownsample.sourceHeight) || 32,
+      targetWidth: Number(matrixDownsample.targetWidth) || 16,
+      targetHeight: Number(matrixDownsample.targetHeight) || 16,
+      blockWidth: Number(matrixDownsample.blockWidth) || 2,
+      blockHeight: Number(matrixDownsample.blockHeight) || 2,
+      samplePoint: matrixDownsample.samplePoint || 'topLeft',
+    },
+  };
+}
+
+function resetCollectionStorageClock() {
+  oldTimeStamp = 0;
+  lastCollectionStorageAt = { sit: 0, back: 0, head: 0 };
+}
+
+function shouldStoreCollectionFrame(channel = 'sit') {
+  if (collectOptions.frequencyMode === 'serial') {
+    const now = Date.now();
+    lastCollectionStorageAt[channel] = now;
+    oldTimeStamp = now;
+    return true;
+  }
+  const hz = normalizeCollectFrequency(collectOptions.frequencyHz ?? colHZ);
+  const intervalMs = 1000 / hz;
+  const now = Date.now();
+  const lastAt = lastCollectionStorageAt[channel] || 0;
+  if (lastAt && now - lastAt < intervalMs) {
+    return false;
+  }
+  lastCollectionStorageAt[channel] = now;
+  oldTimeStamp = now;
+  return true;
+}
+
+function getDownsampleOffset(samplePoint = 'topLeft') {
+  switch (samplePoint) {
+    case 'topRight':
+      return { row: 0, col: 1 };
+    case 'bottomLeft':
+      return { row: 1, col: 0 };
+    case 'bottomRight':
+      return { row: 1, col: 1 };
+    case 'topLeft':
+    default:
+      return { row: 0, col: 0 };
+  }
+}
+
+function getSmallBed12BStorageSamplePoint(displaySamplePoint = 'topLeft') {
+  switch (displaySamplePoint) {
+    case 'topRight':
+      return 'bottomLeft';
+    case 'bottomLeft':
+      return 'topRight';
+    case 'bottomRight':
+    case 'topLeft':
+    default:
+      return displaySamplePoint || 'topLeft';
+  }
+}
+
+function downsampleMatrixByPoint(data, options = {}) {
+  if (!Array.isArray(data)) return [];
+  const sourceWidth = Number(options.sourceWidth) || 32;
+  const sourceHeight = Number(options.sourceHeight) || 32;
+  const targetWidth = Number(options.targetWidth) || Math.floor(sourceWidth / 2);
+  const targetHeight = Number(options.targetHeight) || Math.floor(sourceHeight / 2);
+  const blockWidth = Number(options.blockWidth) || Math.floor(sourceWidth / targetWidth);
+  const blockHeight = Number(options.blockHeight) || Math.floor(sourceHeight / targetHeight);
+  const offset = getDownsampleOffset(options.samplePoint);
+  const result = [];
+
+  for (let row = 0; row < targetHeight; row++) {
+    for (let col = 0; col < targetWidth; col++) {
+      const sourceRow = Math.min(sourceHeight - 1, row * blockHeight + Math.min(offset.row, blockHeight - 1));
+      const sourceCol = Math.min(sourceWidth - 1, col * blockWidth + Math.min(offset.col, blockWidth - 1));
+      result.push(data[sourceRow * sourceWidth + sourceCol] ?? 0);
+    }
+  }
+
+  return result;
+}
+
+function expandDownsampledMatrixByPoint(data, options = {}) {
+  if (!Array.isArray(data)) return [];
+  const targetWidth = Number(options.targetWidth) || 16;
+  const targetHeight = Number(options.targetHeight) || 16;
+  const blockWidth = Number(options.blockWidth) || 2;
+  const blockHeight = Number(options.blockHeight) || 2;
+  const sourceWidth = Number(options.sourceWidth) || targetWidth * blockWidth;
+  const sourceHeight = Number(options.sourceHeight) || targetHeight * blockHeight;
+  const offset = getDownsampleOffset(options.samplePoint);
+  const result = new Array(sourceWidth * sourceHeight).fill(0);
+
+  for (let row = 0; row < targetHeight; row++) {
+    for (let col = 0; col < targetWidth; col++) {
+      const sourceRow = Math.min(sourceHeight - 1, row * blockHeight + Math.min(offset.row, blockHeight - 1));
+      const sourceCol = Math.min(sourceWidth - 1, col * blockWidth + Math.min(offset.col, blockWidth - 1));
+      result[sourceRow * sourceWidth + sourceCol] = data[row * targetWidth + col] ?? 0;
+    }
+  }
+
+  return result;
+}
+
+function shouldDownsampleSmallBed12BCollection() {
+  return file === SMALL_BED_12B_TYPE && collectOptions.matrixDownsample?.enabled === true;
+}
+
+function buildSmallBed12BCollectionStorageData(frameToStore) {
+  const sourceData = Array.isArray(frameToStore?.sitData) ? frameToStore.sitData : [];
+  if (!shouldDownsampleSmallBed12BCollection()) {
+    return JSON.stringify(sourceData);
+  }
+
+  const options = collectOptions.matrixDownsample || {};
+  const displaySamplePoint = options.samplePoint || 'topLeft';
+  const storageSamplePoint = getSmallBed12BStorageSamplePoint(displaySamplePoint);
+  const downsampled = downsampleMatrixByPoint(sourceData, {
+    ...options,
+    samplePoint: storageSamplePoint,
+  });
+  return JSON.stringify({
+    sitData: downsampled,
+    pressureData: downsampled,
+    matrixWidth: Number(options.targetWidth) || 16,
+    matrixHeight: Number(options.targetHeight) || 16,
+    sourceMatrixWidth: Number(options.sourceWidth) || 32,
+    sourceMatrixHeight: Number(options.sourceHeight) || 32,
+    matrixDownsample: {
+      enabled: true,
+      samplePoint: storageSamplePoint,
+      displaySamplePoint,
+      blockWidth: Number(options.blockWidth) || 2,
+      blockHeight: Number(options.blockHeight) || 2,
+    },
+  });
+}
+
+function buildSmallBedPlaybackPayload(row, extra = {}) {
+  const storedData = parseStoredFrameData(row);
+  if (storedData && typeof storedData === 'object' && !Array.isArray(storedData)) {
+    const storedSitData = Array.isArray(storedData.sitData)
+      ? storedData.sitData
+      : Array.isArray(storedData.pressureData)
+        ? storedData.pressureData
+        : [];
+    if (file === SMALL_BED_12B_TYPE && storedSitData.length === 256) {
+      const matrixDownsample = storedData.matrixDownsample || {};
+      return {
+        sitData: expandDownsampledMatrixByPoint(storedSitData, {
+          targetWidth: Number(storedData.matrixWidth) || 16,
+          targetHeight: Number(storedData.matrixHeight) || 16,
+          sourceWidth: Number(storedData.sourceMatrixWidth) || 32,
+          sourceHeight: Number(storedData.sourceMatrixHeight) || 32,
+          blockWidth: Number(matrixDownsample.blockWidth) || 2,
+          blockHeight: Number(matrixDownsample.blockHeight) || 2,
+          samplePoint: matrixDownsample.samplePoint || 'topLeft',
+        }),
+        matrixWidth: Number(storedData.sourceMatrixWidth) || 32,
+        matrixHeight: Number(storedData.sourceMatrixHeight) || 32,
+        sourceMatrixWidth: Number(storedData.sourceMatrixWidth) || 32,
+        sourceMatrixHeight: Number(storedData.sourceMatrixHeight) || 32,
+        matrixDownsample,
+        playbackExpandedFromMatrixWidth: Number(storedData.matrixWidth) || 16,
+        playbackExpandedFromMatrixHeight: Number(storedData.matrixHeight) || 16,
+        time: row?.timestamp,
+        ...extra,
+      };
+    }
+    return {
+      sitData: storedSitData,
+      matrixWidth: storedData.matrixWidth,
+      matrixHeight: storedData.matrixHeight,
+      matrixDownsample: storedData.matrixDownsample,
+      time: row?.timestamp,
+      ...extra,
+    };
+  }
+
+  if (file === SMALL_BED_12B_TYPE && Array.isArray(storedData) && storedData.length === 256) {
+    return {
+      sitData: expandDownsampledMatrixByPoint(storedData, {
+        targetWidth: 16,
+        targetHeight: 16,
+        sourceWidth: 32,
+        sourceHeight: 32,
+        blockWidth: 2,
+        blockHeight: 2,
+        samplePoint: 'topLeft',
+      }),
+      matrixWidth: 32,
+      matrixHeight: 32,
+      playbackExpandedFromMatrixWidth: 16,
+      playbackExpandedFromMatrixHeight: 16,
+      time: row?.timestamp,
+      ...extra,
+    };
+  }
+
+  return {
+    sitData: Array.isArray(storedData) ? storedData : [],
+    time: row?.timestamp,
+    ...extra,
+  };
+}
+
+function parseStoredSensorFrame(storedData, sensorType = '') {
+  if (storedData && typeof storedData === 'object' && !Array.isArray(storedData)) {
+    return {
+      pressureData: normalizeFiniteFrame(
+        storedData.pressureData || storedData.rawPressureData || storedData.sitData || storedData.backData || storedData.headData || [],
+      ),
+      rotateData: normalizeFiniteFrame(storedData.rotate || storedData.quaternion || []),
+      zeroFrame: normalizeFiniteFrame(storedData.zeroFrame || []),
+    };
+  }
+
+  const data = Array.isArray(storedData) ? storedData : [];
+  if (isHandGloveType(sensorType)) {
+    if (data.length >= 260) {
+      return {
+        pressureData: normalizeFiniteFrame(data.slice(0, 256)),
+        rotateData: normalizeFiniteFrame(data.slice(256, 260)),
+        zeroFrame: [],
+      };
+    }
+    if (data.length > 4 && data.length !== 256) {
+      return {
+        pressureData: normalizeFiniteFrame(data.slice(0, data.length - 4)),
+        rotateData: normalizeFiniteFrame(data.slice(data.length - 4)),
+        zeroFrame: [],
+      };
+    }
+  }
+
+  if (String(sensorType).includes('robot') && data.length >= 260) {
+    return {
+      pressureData: normalizeFiniteFrame(data.slice(0, 256)),
+      rotateData: normalizeFiniteFrame(data.slice(256, 260)),
+      zeroFrame: [],
+    };
+  }
+
+  return {
+    pressureData: normalizeFiniteFrame(data),
+    rotateData: [],
+    zeroFrame: [],
+  };
+}
+
+function getZeroAwareStoragePressureData(frameToStore, dataKey) {
+  const candidates = [
+    frameToStore.rawPressureData,
+    frameToStore[dataKey],
+    frameToStore.realArr,
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate) && candidate.length >= 256) {
+      return candidate.slice(0, 256);
+    }
+  }
+
+  return [];
+}
+
+function getZeroFrameForStorage(channel = 'sit') {
+  const source = channel === 'back'
+    ? (pointArr2RawZero.length ? pointArr2RawZero : pointArr2zero)
+    : channel === 'head'
+      ? pointArr4zero
+      : (pointArr1RawZero.length ? pointArr1RawZero : pointArr1zero);
+  return Array.isArray(source) ? [...source] : [];
+}
+
+function buildZeroAwareStorageData(frameToStore, dataKey, channel = 'sit') {
+  const pressureData = getZeroAwareStoragePressureData(frameToStore, dataKey);
+  if (!isZeroFrameStorageType(file)) {
+    return JSON.stringify(pressureData);
+  }
+
+  return JSON.stringify({
+    pressureData,
+    rotate: Array.isArray(frameToStore.rotate) ? [...frameToStore.rotate] : [],
+    zeroFrame: getZeroFrameForStorage(channel),
+  });
+}
+
+const HAND_GLOVE_CSV_SEGMENT_HEADER_TITLES = {
+  zh: {
+    littleFinger: '小拇指',
+    ringFinger: '无名指',
+    middleFinger: '中指',
+    indexFinger: '食指',
+    thumb: '大拇指',
+    fingerRoot: '指根',
+    palm: '手掌',
+  },
+  en: {
+    littleFinger: 'littleFinger',
+    ringFinger: 'ringFinger',
+    middleFinger: 'middleFinger',
+    indexFinger: 'indexFinger',
+    thumb: 'thumb',
+    fingerRoot: 'fingerRoot',
+    palm: 'palm',
+  },
+};
+
+const HAND_GLOVE_CSV_SEGMENT_HEADER_IDS = [
+  'littleFinger',
+  'ringFinger',
+  'middleFinger',
+  'indexFinger',
+  'thumb',
+  'fingerRoot',
+  'palm',
+];
+
+const CSV_TITLES = {
+  zh: {
+    index: '秒数',
+    max: '矩阵最大值',
+    time: '时间戳',
+    pressureArea: '矩阵大于 0 的点数',
+    pressure: '矩阵总和',
+    pressValue: '矩阵总和',
+    pressuremmgH: '压力',
+    realData: '矩阵数据',
+    realInitData: '原始矩阵数据',
+    dataToInterpGauss: '算法数据',
+    pressLine: '压力曲线',
+    rotate: '四元数',
+    temperatureData: '温度',
+    temperatureAvg: '平均温度',
+    temperatureK: '温度K值',
+    zeroFrame: '清零帧',
+    detectionPoint: '检测点',
+    label: '标签',
+  },
+  en: {
+    index: 'seconds',
+    max: 'max',
+    time: 'time',
+    pressureArea: 'area',
+    pressure: 'press',
+    pressValue: 'pressTotal',
+    pressuremmgH: 'pressure',
+    realData: 'data',
+    realInitData: 'realInitData',
+    dataToInterpGauss: 'algorData',
+    pressLine: 'pressLine',
+    rotate: 'quaternion',
+    temperatureData: 'temperatureCelsius',
+    temperatureAvg: 'temperatureAvg',
+    temperatureK: 'temperatureK',
+    zeroFrame: 'zeroFrame',
+    detectionPoint: 'detectionPoint',
+    label: 'label',
+  },
+};
+
+function getCsvTitleMap(downloadOptions = {}) {
+  const language = String(downloadOptions.language || downloadOptions.locale || 'zh').toLowerCase();
+  return language.startsWith('en') ? CSV_TITLES.en : CSV_TITLES.zh;
+}
+
+const HAND_GLOVE_CSV_SEGMENT_POINTS = {
+  left: {
+    littleFinger: [31, 30, 29, 15, 14, 13, 255, 254, 253, 239, 238, 237],
+    ringFinger: [28, 27, 26, 12, 11, 10, 252, 251, 250, 236, 235, 234],
+    middleFinger: [25, 24, 23, 9, 8, 7, 249, 248, 247, 233, 232, 231],
+    indexFinger: [22, 21, 20, 6, 5, 4, 246, 245, 244, 230, 229, 228],
+    thumb: [19, 18, 17, 3, 2, 1, 243, 242, 241, 227, 226, 225],
+    fingerRoot: [222, 219, 216, 213, 210],
+    palm: [
+      207, 206, 205, 204, 203, 202, 201, 200, 199, 198, 197, 196,
+      191, 190, 189, 188, 187, 186, 185, 184, 183, 182, 181, 180,
+      179, 178, 177, 175, 174, 173, 172, 171, 170, 169, 168, 167,
+      166, 165, 164, 163, 162, 161, 159, 158, 157, 156, 155, 154,
+      153, 152, 151, 150, 149, 148, 147, 146, 145, 143, 142, 141,
+      140, 139, 138, 137, 136, 135, 134, 133, 132, 131, 130, 129,
+    ],
+  },
+  right: {
+    littleFinger: [228, 227, 226, 244, 243, 242, 4, 3, 2, 20, 19, 18],
+    ringFinger: [231, 230, 229, 247, 246, 245, 7, 6, 5, 23, 22, 21],
+    middleFinger: [234, 233, 232, 250, 249, 248, 10, 9, 8, 26, 25, 24],
+    indexFinger: [237, 236, 235, 253, 252, 251, 13, 12, 11, 29, 28, 27],
+    thumb: [240, 239, 238, 256, 255, 254, 16, 15, 14, 32, 31, 30],
+    fingerRoot: [35, 38, 41, 44, 47],
+    palm: [
+      61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50,
+      80, 79, 78, 77, 76, 75, 74, 73, 72, 71, 70, 69,
+      68, 67, 66, 96, 95, 94, 93, 92, 91, 90, 89, 88,
+      87, 86, 85, 84, 83, 82, 112, 111, 110, 109, 108, 107,
+      106, 105, 104, 103, 102, 101, 100, 99, 98, 128, 127, 126,
+      125, 124, 123, 122, 121, 120, 119, 118, 117, 116, 115, 114,
+    ],
+  },
+};
+
+function appendHandGloveCsvHeaders(csvHeaders, languageTitles = CSV_TITLES.zh) {
+  const segmentTitles = languageTitles === CSV_TITLES.en
+    ? HAND_GLOVE_CSV_SEGMENT_HEADER_TITLES.en
+    : HAND_GLOVE_CSV_SEGMENT_HEADER_TITLES.zh;
+  csvHeaders.push(
+    ...HAND_GLOVE_CSV_SEGMENT_HEADER_IDS.map((id) => ({
+      id,
+      title: segmentTitles[id],
+    })),
+  );
+}
+
+function buildHandGloveCsvSegments(pressureData, side = 'left') {
+  const data = Array.isArray(pressureData) ? pressureData : [];
+  const points = HAND_GLOVE_CSV_SEGMENT_POINTS[side] || HAND_GLOVE_CSV_SEGMENT_POINTS.left;
+  const readPoints = (pointIndexes = []) => pointIndexes.map((pointIndex) => data[pointIndex - 1] ?? 0);
+
+  return {
+    littleFinger: JSON.stringify(readPoints(points.littleFinger)),
+    ringFinger: JSON.stringify(readPoints(points.ringFinger)),
+    middleFinger: JSON.stringify(readPoints(points.middleFinger)),
+    indexFinger: JSON.stringify(readPoints(points.indexFinger)),
+    thumb: JSON.stringify(readPoints(points.thumb)),
+    fingerRoot: JSON.stringify(readPoints(points.fingerRoot)),
+    palm: JSON.stringify(readPoints(points.palm)),
+  };
+}
+
+function appendPrefixedHandGloveCsvHeaders(csvHeaders, side, languageTitles = CSV_TITLES.zh) {
+  const segmentTitles = languageTitles === CSV_TITLES.en
+    ? HAND_GLOVE_CSV_SEGMENT_HEADER_TITLES.en
+    : HAND_GLOVE_CSV_SEGMENT_HEADER_TITLES.zh;
+  const sideTitle = languageTitles === CSV_TITLES.en
+    ? side
+    : side === 'left'
+      ? '左手'
+      : '右手';
+  HAND_GLOVE_CSV_SEGMENT_HEADER_IDS.forEach((id) => {
+    const suffix = id.charAt(0).toUpperCase() + id.slice(1);
+    csvHeaders.push({
+      id: `${side}${suffix}`,
+      title: languageTitles === CSV_TITLES.en ? `${side}${suffix}` : `${sideTitle}${segmentTitles[id]}`,
+    });
+  });
+}
+
+function buildPrefixedHandGloveCsvSegments(pressureData, side = 'left') {
+  const segments = buildHandGloveCsvSegments(pressureData, side);
+  return Object.fromEntries(
+    Object.entries(segments).map(([key, value]) => {
+      const suffix = key.charAt(0).toUpperCase() + key.slice(1);
+      return [`${side}${suffix}`, value];
+    }),
+  );
+}
+
+function buildStoredHandGloveCsvFrame(row, side) {
+  if (!row) {
+    return {
+      pressureData: [],
+      rotateData: [],
+      zeroFrame: [],
+      timestamp: null,
+    };
+  }
+  const rawData = JSON.parse(row.data || '[]');
+  const frame = parseStoredSensorFrame(rawData, HAND_GLOVE_DOUBLE);
+  return {
+    pressureData: frame.pressureData,
+    rotateData: frame.rotateData,
+    zeroFrame: frame.zeroFrame,
+    timestamp: row.timestamp,
+    side,
+  };
+}
+
+function exportHandGloveDoubleCsv({ selectQuery, params, csvTitle, csvTargetPath, sendCsvSuccess, sendCsvFailed, downloadOptions }) {
+  db.all(selectQuery, params, (sitErr, sitRows) => {
+    if (sitErr) {
+      logger.error(sitErr);
+      sendCsvFailed(sitErr);
+      return;
+    }
+
+    db1.all(selectQuery, params, (backErr, backRows) => {
+      if (backErr) {
+        logger.error(backErr);
+        sendCsvFailed(backErr);
+        return;
+      }
+
+      const leftRows = Array.isArray(sitRows) ? sitRows : [];
+      const rightRows = Array.isArray(backRows) ? backRows : [];
+      const totalLength = Math.max(leftRows.length, rightRows.length);
+      if (!totalLength) return;
+
+      const start = Math.max(0, historyArr[0] || 0);
+      const end = Math.min(historyArr[1] || totalLength, totalLength);
+      const csvWriteData = [];
+
+      for (let i = start, j = 0; i < end; i++, j++) {
+        const leftFrame = buildStoredHandGloveCsvFrame(leftRows[i], 'left');
+        const rightFrame = buildStoredHandGloveCsvFrame(rightRows[i], 'right');
+        const leftData = leftFrame.pressureData;
+        const rightData = rightFrame.pressureData;
+        const leftPress = leftData.reduce((sum, value) => sum + value, 0);
+        const rightPress = rightData.reduce((sum, value) => sum + value, 0);
+        const leftArea = leftData.filter((value) => value > 0).length;
+        const rightArea = rightData.filter((value) => value > 0).length;
+        const baseRows = leftRows.length ? leftRows : rightRows;
+
+        csvWriteData.push({
+          index: getCsvElapsedSeconds(baseRows, i, start, j),
+          time: timeStampToDate(leftFrame.timestamp || rightFrame.timestamp || Date.now()),
+          leftMax: leftData.length ? findMax(leftData) : 0,
+          leftPressureArea: leftArea,
+          leftPressure: totalToN(leftPress),
+          leftRealData: JSON.stringify(leftData),
+          leftZeroFrame: leftFrame.zeroFrame.length ? JSON.stringify(leftFrame.zeroFrame) : '',
+          leftRotate: leftFrame.rotateData.length ? JSON.stringify(leftFrame.rotateData) : '',
+          rightMax: rightData.length ? findMax(rightData) : 0,
+          rightPressureArea: rightArea,
+          rightPressure: totalToN(rightPress),
+          rightRealData: JSON.stringify(rightData),
+          rightZeroFrame: rightFrame.zeroFrame.length ? JSON.stringify(rightFrame.zeroFrame) : '',
+          rightRotate: rightFrame.rotateData.length ? JSON.stringify(rightFrame.rotateData) : '',
+          ...buildPrefixedHandGloveCsvSegments(leftData, 'left'),
+          ...buildPrefixedHandGloveCsvSegments(rightData, 'right'),
+        });
+      }
+
+      let str = params[0];
+      if (str.includes(" ")) {
+        str = str.split(" ")[0];
+      } else {
+        str = timeStampTo_Date(Number(str));
+      }
+
+      const sideLabel = csvTitle === CSV_TITLES.en
+        ? { left: 'left', right: 'right' }
+        : { left: '左手', right: '右手' };
+      const csvHeaders = [
+        { id: "index", title: csvTitle.index },
+        { id: "time", title: csvTitle.time },
+        { id: "leftMax", title: `${sideLabel.left}${csvTitle.max}` },
+        { id: "leftPressureArea", title: `${sideLabel.left}${csvTitle.pressureArea}` },
+        { id: "leftPressure", title: `${sideLabel.left}${csvTitle.pressure}` },
+        { id: "leftRealData", title: `${sideLabel.left}${csvTitle.realData}` },
+        { id: "leftZeroFrame", title: `${sideLabel.left}${csvTitle.zeroFrame}` },
+        { id: "leftRotate", title: `${sideLabel.left}${csvTitle.rotate}` },
+        { id: "rightMax", title: `${sideLabel.right}${csvTitle.max}` },
+        { id: "rightPressureArea", title: `${sideLabel.right}${csvTitle.pressureArea}` },
+        { id: "rightPressure", title: `${sideLabel.right}${csvTitle.pressure}` },
+        { id: "rightRealData", title: `${sideLabel.right}${csvTitle.realData}` },
+        { id: "rightZeroFrame", title: `${sideLabel.right}${csvTitle.zeroFrame}` },
+        { id: "rightRotate", title: `${sideLabel.right}${csvTitle.rotate}` },
+      ];
+      appendPrefixedHandGloveCsvHeaders(csvHeaders, 'left', csvTitle);
+      appendPrefixedHandGloveCsvHeaders(csvHeaders, 'right', csvTitle);
+
+      const csvFilePath = csvTargetPath(`${csvTitle === CSV_TITLES.en ? 'glove2' : '触觉手套2'}${str}.csv`);
+      const csvWriter = createCsvWriter({
+        path: csvFilePath,
+        header: csvHeaders,
+      });
+
+      csvWriter
+        .writeRecords(csvWriteData)
+        .then(() => {
+          console.log("export csv success");
+          sendCsvSuccess([csvFilePath]);
+        })
+        .catch((err) => {
+          console.error("export csv failed", err);
+          sendCsvFailed(err);
+        });
+    });
+  });
+}
+
+function transposeSquareMatrix(data, size = 32) {
+  if (!Array.isArray(data) || data.length !== size * size) {
+    return Array.isArray(data) ? [...data] : [];
+  }
+
+  return data.map((_, index) => {
+    const row = Math.floor(index / size);
+    const col = index % size;
+    return data[col * size + row];
+  });
+}
+
+function shouldTransposeSmallBedRawMatrix(sensorType) {
+  return sensorType === JQ_BED_TYPE || sensorType === SMALL_BED_TYPE || sensorType === SMALL_BED_NO_ALG_TYPE || sensorType === SMALL_BED_12B_TYPE;
+}
+
+function normalizeTempFullBedPlaybackPressureArray(data, frame = {}) {
+  if (!Array.isArray(data)) return [];
+  const pressureData = frame.matrixOrientation === 'transposed' || (frame.matrixWidth === 12 && frame.matrixHeight === 15)
+    ? data.map((_, index) => {
+      const row = Math.floor(index / 15);
+      const col = index % 15;
+      return data[col * 12 + row];
+    })
+    : data;
+  return pressureData.map((value) => {
+    const numberValue = Number(value);
+    if (!Number.isFinite(numberValue) || numberValue < TEMP_FULL_BED_PRESSURE_THRESHOLD) return 0;
+    return numberValue;
+  });
+}
+
+function buildTempFullBedPlaybackPayload(row, extra = {}) {
+  const storedData = parseStoredFrameData(row);
+  const frame = Array.isArray(storedData) ? { sitData: storedData } : (storedData || {});
+  const sitData = normalizeTempFullBedPlaybackPressureArray(frame.sitData, frame);
+  const rawSitData = normalizeTempFullBedPlaybackPressureArray(frame.rawSitData, frame);
+  return {
+    sitData,
+    rawSitData: rawSitData.length ? rawSitData : undefined,
+    matrixWidth: 15,
+    matrixHeight: 12,
+    matrixOrientation: 'row-major',
+    realArr: Array.isArray(frame.realArr) ? frame.realArr : undefined,
+    pressureThreshold: frame.pressureThreshold || TEMP_FULL_BED_PRESSURE_THRESHOLD,
+    temperatureRawData: Array.isArray(frame.temperatureRawData) ? frame.temperatureRawData : [],
+    temperatureData: Array.isArray(frame.temperatureData) ? frame.temperatureData : [],
+    temperatureAvg: frame.temperatureAvg,
+    temperatureK: frame.temperatureK,
+    time: row?.timestamp,
+    ...extra,
+  };
+}
 
 const getPort = (ports) => {
-  // console.log(ports)
-  // if (os.platform == 'win32') {
-  //   return ports.filter((port) => {
-  //     return port.manufacturer == 'wch.cn'
-  //   })
-  // } else if (os.platform == 'darwin') {
-  //   return ports.filter((port) => {
-  //     return port.path.includes('usb')
-  //   })
-  // } else {
-  //   return ports
-  // }
-  return ports
+  const portList = Array.isArray(ports) ? ports : [];
+
+  if (process.platform === 'win32') {
+    const filteredPorts = portList.filter(isWindowsTargetSerialPort);
+    logger.info(`[SerialList] filter win32 whitelist matched ${filteredPorts.length}/${portList.length} port(s)`);
+    return filteredPorts;
+  }
+
+  if (process.platform === 'darwin') {
+    const filteredPorts = portList.filter(isMacTargetSerialPort);
+    logger.info(`[SerialList] filter darwin whitelist matched ${filteredPorts.length}/${portList.length} port(s)`);
+    return filteredPorts;
+  }
+
+  return portList
+}
+
+function summarizeSerialPort(port = {}) {
+  const summary = {
+    path: port.path ?? null,
+    manufacturer: port.manufacturer ?? null,
+    serialNumber: port.serialNumber ?? null,
+    pnpId: port.pnpId ?? null,
+    vendorId: port.vendorId ?? null,
+    productId: port.productId ?? null,
+    friendlyName: port.friendlyName ?? null,
+    locationId: port.locationId ?? null,
+  }
+
+  if (port.vendorIdentifier != null) {
+    summary.vendorIdentifier = port.vendorIdentifier
+  }
+
+  if (port.productIdentifier != null) {
+    summary.productIdentifier = port.productIdentifier
+  }
+
+  return summary
+}
+
+function logSerialPortList(reason, ports) {
+  const portList = Array.isArray(ports) ? ports : []
+  logger.info(`[SerialList] ${reason}: detected ${portList.length} port(s)`)
+
+  if (portList.length === 0) {
+    logger.warn(`[SerialList] ${reason}: no serial ports detected`)
+    return
+  }
+
+  portList.forEach((port, index) => {
+    logger.info(`[SerialList] ${reason} #${index + 1}`, summarizeSerialPort(port))
+  })
 }
 
 let baudRate = 1000000
 
-var serialport = { a: 1, b: 2 }
+let serialport = { a: 1, b: 2 }
 const timeNum = 1000 / 12;
-var port2,
+let port2,
   port1,
   portHead,
+  portSensor,
   localFlag = false,
   playFlag = false,
   nowIndex = 0,
   interval = timeNum,
+  detectedInterval = timeNum,
   timer,
   parserOpen,
   parser2Open,
@@ -116,40 +1382,177 @@ let timeStamp,
   sitAreaSelect = [],
   sitClose = false,
   backClose = false,
+  headClose = false,
+  sensorClose = false,
   sitPressSelect = [];
 const sitnum1 = 64;
 const sitnum2 = 64;
 const backnum1 = 64;
 const backnum2 = 64;
 let smoothValue = 0;
+let onbedArr = []; // jqbed 鍦ㄥ簥鐘舵€佹暟缁?
+let onBedTime = 0; // jqbed 鍦ㄥ簥/绂诲簥璁℃椂锛堢锛?
+let useMatrixOrigin = false; // jqbed 璋冭瘯 flag锛歵rue 鏃剁敤绠楁硶杩斿洖鐨?matrix_origin 浣滀负 sitData
+let jqbedMatrixOrigin = null; // 缂撳瓨绠楁硶杩斿洖鐨?matrix_origin 鏁版嵁
+const PET_CARE_SYSTEM_TYPES = new Set(['petCare', 'petCareMini']);
+const VITAL_SIGNS_SYSTEM_TYPES = new Set(['jqbed', 'smallBed']);
+const PET_CARE_HEART_RATE_UPDATE_INTERVAL_MS = 1000;
+const clampPetHeartRateValue = (value, min, max) => Math.max(min, Math.min(max, value));
+const randPetHeartRateValue = (min, max) => min + Math.random() * (max - min);
+const randPetHeartRateProb = (probability) => Math.random() < probability;
+const normalizePetHeartRateBreathRate = (value) => Number(value).toFixed(1);
+function gaussianPetHeartRate(mean, std) {
+  let u1;
+  do {
+    u1 = Math.random();
+  } while (u1 === 0);
+  const u2 = Math.random();
+  const z = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
+  return mean + z * std;
+}
+function createPetHeartRateFormulaState() {
+  return {
+    breathPhase: 0,
+    rsaAmp: 3.5,
+    trendHR: 70,
+    trendRR: 14,
+    event: 0,
+    lastHeartRate: 0,
+  };
+}
+function createPetCareHeartRateSimulatorState() {
+  return {
+    ...createPetHeartRateFormulaState(),
+    breathRateQueue: [],
+  };
+}
+function createVitalSignsHeartRateSimulatorState() {
+  return {
+    ...createPetHeartRateFormulaState(),
+    lastHeartRateAt: 0,
+  };
+}
+function resetPetCareHeartRateSimulatorState(simulator) {
+  simulator.breathPhase = 0;
+  simulator.rsaAmp = 3.5;
+  simulator.trendHR = 70;
+  simulator.trendRR = 14;
+  simulator.event = 0;
+  simulator.lastHeartRate = 0;
+  simulator.breathRateQueue = [];
+}
+function resetVitalSignsHeartRateSimulatorState(simulator) {
+  simulator.breathPhase = 0;
+  simulator.rsaAmp = 3.5;
+  simulator.trendHR = 70;
+  simulator.trendRR = 14;
+  simulator.event = 0;
+  simulator.lastHeartRate = 0;
+  simulator.lastHeartRateAt = 0;
+}
+function nextPetHeartRate(rr, simulator) {
+  if (rr === 0) {
+    return 0;
+  }
+
+  const dt = 1.0;
+  simulator.breathPhase += 2 * Math.PI * rr / 60.0 * dt;
+  simulator.rsaAmp += randPetHeartRateValue(-0.05, 0.05);
+  simulator.rsaAmp = clampPetHeartRateValue(simulator.rsaAmp, 2, 6);
+
+  const rsa = Math.sin(simulator.breathPhase - 1.0) * simulator.rsaAmp;
+  const base = 65 + (rr - 12) * 1.5;
+
+  simulator.trendHR += randPetHeartRateValue(-0.1, 0.1);
+  simulator.trendHR = clampPetHeartRateValue(simulator.trendHR, 60, 80);
+
+  if (randPetHeartRateProb(0.003)) {
+    simulator.event = randPetHeartRateValue(5, 12);
+  }
+  simulator.event *= 0.95;
+
+  const noise = gaussianPetHeartRate(0, 1);
+  const heartRate = base * 0.4 + simulator.trendHR * 0.6 + rsa + simulator.event + noise;
+
+  return clampPetHeartRateValue(Math.round(heartRate), 55, 100);
+}
+const createPetCareRuntimeState = () => ({
+  stateArr: [],
+  stableState: null,
+  stateStartedAt: 0,
+  resetPending: true,
+  processing: false,
+  lastLoggedAt: 0,
+  heartRateSimulator: createPetCareHeartRateSimulatorState(),
+});
+const vitalSignsHeartRateSimulator = {
+  jqbed: createVitalSignsHeartRateSimulatorState(),
+  smallBed: createVitalSignsHeartRateSimulatorState(),
+};
+const petCareSystems = {
+  petCare: {
+    eventKey: 'petCare',
+    rpcReset: 'reset_pet_care',
+    rpcStep: 'pet_care_step',
+    runtime: createPetCareRuntimeState(),
+  },
+  petCareMini: {
+    eventKey: 'petCareMini',
+    rpcReset: 'reset_pet_care_mini',
+    rpcStep: 'pet_care_mini_step',
+    runtime: createPetCareRuntimeState(),
+  },
+};
+function isPetCareSystem(type) {
+  return PET_CARE_SYSTEM_TYPES.has(type);
+}
+
+function resetPetCareRuntime(systemKey) {
+  Object.assign(petCareSystems[systemKey].runtime, createPetCareRuntimeState());
+}
 let lastData = new Array(1024).fill(0),
   firstData = new Array(1024).fill(0);
 const backTotal = backnum1 * backnum2;
 const sitTotal = sitnum1 * sitnum2;
 let length, history, nowGetTime;
-var serialport;
 
 let nowDate = 0
 let endDate = 0
 
 const https = require('https')
-const request = require('request');
-request('http://sensor.bodyta.com:8080/rcv/login/getSystemTime', {
-  json: true, method: 'get', headers: {
-    'content-type': 'application/json; charset=utf-8;',
-  }
-}, (err, res, body) => {
-  if (err) {
-    return console.log(err);
-  }
-  console.log(body.time, 'body');
-  nowDate = parseInt(body.time)
+// 浣跨敤鍐呯疆 http 妯″潡鏇夸唬宸插簾寮冪殑 request 鍖?
+const http = require('http');
+http.get('http://sensor.bodyta.com:8080/rcv/login/getSystemTime', {
+  headers: { 'content-type': 'application/json; charset=utf-8;' }
+}, (res) => {
+  let data = '';
+  res.on('data', (chunk) => { data += chunk; });
+  res.on('end', () => {
+    try {
+      const body = JSON.parse(data);
+      logger.debug(body.time, 'body');
+      nowDate = parseInt(body.time);
+    } catch (e) {
+      logger.warn('Failed to parse system time response', e);
+    }
+  });
+}).on('error', (err) => {
+  logger.warn('Failed to get system time', err);
 });
 
 const runtimeResourceRoot = app.isPackaged ? process.resourcesPath : __dirname;
-let filePath = path.join(runtimeResourceRoot, "db");
-let csvPath = path.join(runtimeResourceRoot, "data");
-let nameTxt = path.join(runtimeResourceRoot, "config.txt");
+const runtimeWritableRoot = app.isPackaged ? app.getPath('userData') : __dirname;
+const exportRoot = app.isPackaged
+  ? (process.platform === 'darwin' ? app.getPath('desktop') : process.resourcesPath)
+  : runtimeWritableRoot;
+let filePath = path.join(runtimeWritableRoot, "db");
+let csvPath = path.join(exportRoot, "data");
+let imgPath = path.join(runtimeWritableRoot, "img");
+let pdfPath = app.isPackaged
+  ? (process.platform === 'win32' ? path.join(process.resourcesPath, "OneStep") : path.join(exportRoot, "oneStepPdf"))
+  : path.join(runtimeWritableRoot, "oneStepPdf");
+let nameTxt = resolveConfigFile();
+let writableNameTxt = getWritableConfigFile();
 
 if (!fs.existsSync(filePath)) {
   fs.mkdirSync(filePath, { recursive: true });
@@ -158,43 +1561,1408 @@ if (!fs.existsSync(filePath)) {
 if (!fs.existsSync(csvPath)) {
   fs.mkdirSync(csvPath, { recursive: true });
 }
+if (!fs.existsSync(imgPath)) {
+  fs.mkdirSync(imgPath, { recursive: true });
+}
+if (!fs.existsSync(pdfPath)) {
+  fs.mkdirSync(pdfPath, { recursive: true });
+}
 
-console.log("[Path] resourceRoot=", runtimeResourceRoot);
-console.log("[Path] db=", filePath, "data=", csvPath, "config=", nameTxt);
+logger.info("[Path] resourceRoot=", runtimeResourceRoot);
+logger.info("[Path] writableRoot=", runtimeWritableRoot);
+logger.info("[Path] db=", filePath, "data=", csvPath, "config=", nameTxt);
+logger.info("[Path] configCandidates=", getConfigFileCandidates().join(", "));
+
+function validateWritableDirectory(targetDir) {
+  const dir = String(targetDir || '').trim();
+  if (!dir) {
+    return { ok: false, error: 'download path is empty' };
+  }
+  const testFile = path.join(dir, `.shroom-write-test-${Date.now()}-${Math.floor(Math.random() * 1e6)}.tmp`);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(testFile, 'ok');
+    fs.unlinkSync(testFile);
+    return { ok: true, dir };
+  } catch (error) {
+    try {
+      if (fs.existsSync(testFile)) fs.unlinkSync(testFile);
+    } catch {
+      // Ignore cleanup failure.
+    }
+    return { ok: false, error: error.message };
+  }
+}
+
+function getCsvExportDirectory(downloadOptions = {}) {
+  const requestedDir =
+    (typeof downloadOptions.path === 'string' && downloadOptions.path.trim()) ||
+    (typeof downloadOptions.dir === 'string' && downloadOptions.dir.trim()) ||
+    csvPath;
+  return validateWritableDirectory(requestedDir);
+}
+
+function broadcastCsvDownloadResult(download, { files = [], dir = '', error = '' } = {}) {
+  server.clients.forEach(function each(client) {
+    const jsonData = JSON.stringify({
+      download,
+      downloadStatus: download === 'export csv success' ? 'success' : 'failed',
+      downloadFiles: files,
+      downloadDir: dir,
+      downloadError: error,
+    });
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(jsonData);
+    }
+  });
+}
+
+function broadcastCsvDownloadProgress(progress = {}) {
+  server.clients.forEach(function each(client) {
+    const jsonData = JSON.stringify({
+      csvDownloadProgress: progress,
+      downloadStatus: 'progress',
+      downloadDir: progress.dir || '',
+    });
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(jsonData);
+    }
+  });
+}
+
+function broadcastCollectionStorageError(error = {}) {
+  if (!server || !server.clients) return;
+  const jsonData = JSON.stringify({
+    collectionStorageError: {
+      message: error.message || '数据库空间不足，已停止采集',
+      freeBytes: error.freeBytes,
+      minFreeBytes: error.minFreeBytes,
+      file,
+      saveTime,
+    },
+  });
+  server.clients.forEach(function each(client) {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(jsonData);
+    }
+  });
+}
+
+function getCollectionFreeBytes() {
+  try {
+    if (typeof fs.statfsSync !== 'function') return null;
+    const stat = fs.statfsSync(filePath);
+    return Number(stat.bavail ?? stat.bfree ?? 0) * Number(stat.bsize || 0);
+  } catch (error) {
+    logger.warn('[Collection] failed to check free disk space:', error.message || error);
+    return null;
+  }
+}
+
+function stopCollectionForStorageError(error, extra = {}) {
+  flag = false;
+  const message = error?.message || String(error || '数据库写入失败，已停止采集');
+  logger.error('[Collection] stop collection:', message);
+  broadcastCollectionStorageError({
+    message: message.includes('database or disk is full')
+      ? '磁盘空间不足，数据库写入失败，已自动停止采集'
+      : message,
+    ...extra,
+  });
+}
+
+let lastCollectionDiskCheckAt = 0;
+function hasEnoughCollectionDiskSpace() {
+  const now = Date.now();
+  if (now - lastCollectionDiskCheckAt < 1000) return true;
+  lastCollectionDiskCheckAt = now;
+
+  const freeBytes = getCollectionFreeBytes();
+  if (freeBytes == null || freeBytes >= COLLECTION_MIN_FREE_BYTES) return true;
+
+  stopCollectionForStorageError(
+    new Error('磁盘剩余空间不足，已自动停止采集'),
+    { freeBytes, minFreeBytes: COLLECTION_MIN_FREE_BYTES },
+  );
+  return false;
+}
+
+function handleCollectionDbError(err, channel) {
+  if (!err) return;
+  const message = err.message || String(err);
+  if (err.code === 'SQLITE_FULL' || message.includes('database or disk is full')) {
+    stopCollectionForStorageError(err, {
+      channel,
+      freeBytes: getCollectionFreeBytes(),
+      minFreeBytes: COLLECTION_MIN_FREE_BYTES,
+    });
+    return;
+  }
+  logger.error(err);
+}
+
+// initDb 鍖呰鍑芥暟锛岃嚜鍔ㄤ紶鍏?filePath 鍜?runtimeResourceRoot
+function initDb(fileStr) {
+  return _initDbFromModule(fileStr, filePath, runtimeResourceRoot);
+}
+
+const HISTORY_EAGER_ROW_LIMIT = 50000;
+const HISTORY_CHART_SAMPLE_LIMIT = 2000;
+const historyStmtCache = new WeakMap();
+
+function getNativeDb(dbRef) {
+  return dbRef && (dbRef._db || dbRef.db || null);
+}
+
+function getHistoryStmt(dbRef, sql) {
+  const nativeDb = getNativeDb(dbRef);
+  if (!nativeDb || typeof nativeDb.prepare !== 'function') {
+    throw new Error('invalid history database handle');
+  }
+  let cache = historyStmtCache.get(nativeDb);
+  if (!cache) {
+    cache = new Map();
+    historyStmtCache.set(nativeDb, cache);
+  }
+  if (!cache.has(sql)) {
+    cache.set(sql, nativeDb.prepare(sql));
+  }
+  return cache.get(sql);
+}
+
+function dbGetHistory(dbRef, sql, params = []) {
+  return getHistoryStmt(dbRef, sql).get(...params);
+}
+
+function dbAllHistory(dbRef, sql, params = []) {
+  return getHistoryStmt(dbRef, sql).all(...params);
+}
+
+function ensureHistoryIndexes(dbRef) {
+  const nativeDb = getNativeDb(dbRef);
+  if (!nativeDb || typeof nativeDb.exec !== 'function') return;
+  try {
+    nativeDb.exec('CREATE INDEX IF NOT EXISTS idx_matrix_date_id ON matrix(date, id)');
+  } catch (error) {
+    logger.warn('[History] failed to ensure index:', error.message || error);
+  }
+}
+
+function getHistoryStats(dbRef, date) {
+  if (!dbRef || !date) return { count: 0, minId: 0, maxId: 0 };
+  ensureHistoryIndexes(dbRef);
+  const row = dbGetHistory(
+    dbRef,
+    'SELECT COUNT(*) AS count, MIN(id) AS minId, MAX(id) AS maxId FROM matrix WHERE date = ?',
+    [date],
+  ) || {};
+  return {
+    count: Number(row.count || 0),
+    minId: Number(row.minId || 0),
+    maxId: Number(row.maxId || 0),
+  };
+}
+
+function queryHistoryRows(dbRef, date, limit, offset = 0) {
+  if (!dbRef || !date || limit <= 0) return [];
+  ensureHistoryIndexes(dbRef);
+  return dbAllHistory(
+    dbRef,
+    'SELECT * FROM matrix WHERE date = ? ORDER BY id ASC LIMIT ? OFFSET ?',
+    [date, limit, Math.max(0, offset)],
+  );
+}
+
+function queryHistoryTimestampSample(dbRef, date, limit = 21) {
+  return queryHistoryRows(dbRef, date, limit, 0)
+    .map((row) => row.timestamp)
+    .filter((value) => value != null);
+}
+
+function queryHistoryRowsFromId(dbRef, date, minId, limit) {
+  if (!dbRef || !date || !minId || limit <= 0) return [];
+  ensureHistoryIndexes(dbRef);
+  return dbAllHistory(
+    dbRef,
+    'SELECT * FROM matrix WHERE date = ? AND id >= ? ORDER BY id ASC LIMIT ?',
+    [date, minId, limit],
+  );
+}
+
+function createLazyHistoryRows(dbRef, date, stats) {
+  const cache = new Map();
+  const maxCacheSize = 512;
+  const lengthValue = Number(stats?.count || 0);
+  const minId = Number(stats?.minId || 0);
+
+  const readByIndex = (index) => {
+    if (!Number.isInteger(index) || index < 0 || index >= lengthValue || !minId) return undefined;
+    if (cache.has(index)) return cache.get(index);
+    const row = dbGetHistory(
+      dbRef,
+      'SELECT * FROM matrix WHERE date = ? AND id >= ? ORDER BY id ASC LIMIT 1',
+      [date, minId + index],
+    );
+    if (cache.size >= maxCacheSize) {
+      const oldestKey = cache.keys().next().value;
+      cache.delete(oldestKey);
+    }
+    cache.set(index, row);
+    return row;
+  };
+
+  return new Proxy([], {
+    get(target, prop) {
+      if (prop === 'length') return lengthValue;
+      if (prop === '__lazyHistoryRows') return true;
+      if (prop === '__historyDate') return date;
+      if (prop === '__historyDb') return dbRef;
+      if (prop === Symbol.iterator) {
+        return function* lazyIterator() {
+          for (let i = 0; i < lengthValue; i++) {
+            yield readByIndex(i);
+          }
+        };
+      }
+      if (typeof prop === 'string' && /^\d+$/.test(prop)) {
+        return readByIndex(Number(prop));
+      }
+      return target[prop];
+    },
+  });
+}
+
+function getHistorySeries({ sitRows = [], backRows = [], start = 0, end = null, file = '' }) {
+  const safeSitRows = Array.isArray(sitRows) ? sitRows : [];
+  const safeBackRows = Array.isArray(backRows) ? backRows : [];
+  const hasSit = safeSitRows.length > 0;
+  const hasBack = safeBackRows.length > 0;
+  const totalLength = hasSit && hasBack
+    ? Math.min(safeSitRows.length, safeBackRows.length)
+    : (hasSit ? safeSitRows.length : safeBackRows.length);
+  const rangeStart = Math.max(0, start);
+  const rangeEnd = Math.min(end == null ? totalLength : end, totalLength);
+  const baseRows = hasSit ? safeSitRows : safeBackRows;
+  const press = [];
+  const area = [];
+  const time = [];
+  const rangeLength = Math.max(0, rangeEnd - rangeStart);
+  const sampleStep = rangeLength > HISTORY_CHART_SAMPLE_LIMIT
+    ? Math.ceil(rangeLength / HISTORY_CHART_SAMPLE_LIMIT)
+    : 1;
+
+  for (let i = rangeStart; i < rangeEnd; i += sampleStep) {
+    const sitData = hasSit && safeSitRows[i] ? normalizeHistoryPressureData(safeSitRows[i], file) : null;
+    const backData = hasBack && safeBackRows[i] ? normalizeHistoryPressureData(safeBackRows[i], file) : null;
+    const sitTotalValue = sitData ? sitData.reduce((a, b) => a + b, 0) : 0;
+    const backTotalValue = backData ? backData.reduce((a, b) => a + b, 0) : 0;
+    const sitAreaValue = sitData ? sitData.filter((a) => a > 10).length : 0;
+    const backAreaValue = backData ? backData.filter((a) => a > 10).length : 0;
+
+    press.push(
+      (sitData ? totalToN(sitTotalValue) : 0) +
+      (backData ? totalToN(backTotalValue, 1.3) : 0)
+    );
+    area.push(sitAreaValue + backAreaValue);
+
+    if (baseRows[i] && baseRows[i].timestamp != null) {
+      time.push(baseRows[i].timestamp);
+    }
+  }
+
+  return {
+    length: totalLength,
+    press,
+    area,
+    time,
+    sampleStep,
+  };
+}
+
+function getHistoryLengthFromCounts(...counts) {
+  const positiveCounts = counts
+    .map((value) => Number(value || 0))
+    .filter((value) => value > 0);
+  if (!positiveCounts.length) return 0;
+  return Math.min(...positiveCounts);
+}
+
+function createHistoryRowsForPlayback(dbRef, date, stats, eager) {
+  if (!stats?.count) return [];
+  return eager
+    ? queryHistoryRows(dbRef, date, stats.count, 0)
+    : createLazyHistoryRows(dbRef, date, stats);
+}
+
+function buildZeroPlaybackFrame() {
+  return file === "bigBed"
+    ? new Array(2048).fill(0)
+    : new Array(1024).fill(0);
+}
+
+function broadcastHistorySelectionPayload(payload) {
+  server.clients.forEach(function each(client) {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify(payload));
+    }
+  });
+}
+
+function loadSelectedHistory(dateLabel) {
+  try {
+    stopPlaybackTimer();
+    nowIndex = 0;
+    localData = [];
+    localDataBack = [];
+    localDataHead = [];
+
+    const sitStats = getHistoryStats(db, dateLabel);
+    const backStats = isCar(file) && db1 ? getHistoryStats(db1, dateLabel) : { count: 0, minId: 0, maxId: 0 };
+    const headStats = isThreePortFile(file) && db2 ? getHistoryStats(db2, dateLabel) : { count: 0, minId: 0, maxId: 0 };
+    const totalLength = isThreePortFile(file)
+      ? getHistoryLengthFromCounts(sitStats.count, backStats.count, headStats.count)
+      : isCar(file)
+        ? getHistoryLengthFromCounts(sitStats.count, backStats.count)
+        : getHistoryLengthFromCounts(sitStats.count);
+    const maxRows = Math.max(sitStats.count, backStats.count, headStats.count);
+    const eager = maxRows <= HISTORY_EAGER_ROW_LIMIT;
+
+    localData = createHistoryRowsForPlayback(db, dateLabel, sitStats, eager);
+    if (isCar(file) && db1) {
+      localDataBack = createHistoryRowsForPlayback(db1, dateLabel, backStats, eager);
+    }
+    if (isThreePortFile(file) && db2) {
+      localDataHead = createHistoryRowsForPlayback(db2, dateLabel, headStats, eager);
+    }
+
+    length = totalLength;
+    indexArr = [0, Math.max(length - 2, 0)];
+    historyArr = [0, length];
+    const timestampDb = sitStats.count ? db : (backStats.count && db1 ? db1 : db);
+    timeStamp = queryHistoryTimestampSample(timestampDb, dateLabel, 21);
+    detectedInterval = calcDetectedInterval(timeStamp);
+    interval = detectedInterval;
+
+    const historySeries = getHistorySeries({
+      sitRows: localData,
+      backRows: localDataBack,
+      start: 0,
+      end: length,
+      file,
+    });
+
+    logger.info(`[History] selected ${dateLabel}: length=${length}, eager=${eager}, sampleStep=${historySeries.sampleStep || 1}`);
+
+    broadcastHistorySelectionPayload({
+      length,
+      time: timeStamp,
+      index: nowIndex,
+      pressArr: historySeries.press,
+      areaArr: historySeries.area,
+      historySampleStep: historySeries.sampleStep || 1,
+      historyLazy: !eager,
+      sitData: buildZeroPlaybackFrame(),
+    });
+
+    if (isThreePortFile(file)) {
+      broadcastHistorySelectionPayload({
+        headData: file === "bigBed" ? new Array(2048).fill(0) : new Array(100).fill(0),
+      });
+    }
+  } catch (error) {
+    logger.error('[History] failed to load selected history:', error);
+    broadcastHistorySelectionPayload({
+      historyError: error.message || 'load history failed',
+    });
+  }
+}
+
+function formatCsvDatePart(value) {
+  let str = String(value || '');
+  if (str.includes(" ")) {
+    str = str.split(" ")[0];
+  } else {
+    str = timeStampTo_Date(Number(str));
+  }
+  return str;
+}
+
+function getCsvElapsedSecondsFromBase(row, rowIndex, baseTimestamp, fallbackIndex = 0) {
+  if (row?.timestamp != null && baseTimestamp != null) {
+    const diffMs = Number(row.timestamp) - Number(baseTimestamp);
+    if (Number.isFinite(diffMs) && diffMs >= 0) {
+      return (diffMs / 1000).toFixed(3);
+    }
+  }
+  const fallbackHz = Number(colHZ) > 0 ? Number(colHZ) : 12;
+  return (fallbackIndex / fallbackHz).toFixed(3);
+}
+
+function writeStreamChunk(stream, chunk) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      stream.off('error', onError);
+      stream.off('drain', onDrain);
+    };
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+    const onDrain = () => {
+      cleanup();
+      resolve();
+    };
+    stream.once('error', onError);
+    if (!stream.write(chunk)) {
+      stream.once('drain', onDrain);
+    } else {
+      cleanup();
+      resolve();
+    }
+  });
+}
+
+function closeWriteStream(stream) {
+  return new Promise((resolve, reject) => {
+    const onError = (error) => {
+      stream.off('finish', onFinish);
+      reject(error);
+    };
+    const onFinish = () => {
+      stream.off('error', onError);
+      resolve();
+    };
+    stream.once('error', onError);
+    stream.once('finish', onFinish);
+    stream.end();
+  });
+}
+
+async function writeCsvFileInBatches({
+  csvFilePath,
+  header,
+  dbRef,
+  date,
+  start = 0,
+  end = null,
+  mapRow,
+  batchSize = 1000,
+  onProgress = null,
+}) {
+  const stats = getHistoryStats(dbRef, date);
+  if (!stats.count) return 0;
+  const rangeStart = Math.max(0, Number(start || 0));
+  const rangeEnd = Math.min(end == null ? stats.count : Number(end), stats.count);
+  if (rangeStart >= rangeEnd) return 0;
+  const firstRow = queryHistoryRowsFromId(dbRef, date, stats.minId + rangeStart, 1)[0];
+  const baseTimestamp = firstRow?.timestamp ?? null;
+  const stringifier = createCsvStringifier({ header });
+  const stream = fs.createWriteStream(csvFilePath, { encoding: 'utf8' });
+  let written = 0;
+  let nextId = stats.minId + rangeStart;
+  const total = rangeEnd - rangeStart;
+  let lastProgressAt = 0;
+  const emitProgress = (force = false) => {
+    if (typeof onProgress !== 'function') return;
+    const now = Date.now();
+    if (!force && now - lastProgressAt < 250 && written < total) return;
+    lastProgressAt = now;
+    onProgress({
+      csvFilePath,
+      written,
+      total,
+      percent: total ? Math.min(100, Math.round((written / total) * 100)) : 100,
+    });
+  };
+
+  try {
+    await writeStreamChunk(stream, stringifier.getHeaderString());
+    emitProgress(true);
+    while (written < rangeEnd - rangeStart) {
+      const rows = queryHistoryRowsFromId(
+        dbRef,
+        date,
+        nextId,
+        Math.min(batchSize, rangeEnd - rangeStart - written),
+      );
+      if (!rows.length) break;
+      const records = [];
+      for (let batchIndex = 0; batchIndex < rows.length; batchIndex++) {
+        const row = rows[batchIndex];
+        const absoluteIndex = rangeStart + written + batchIndex;
+        records.push(mapRow(row, {
+          absoluteIndex,
+          relativeIndex: written + batchIndex,
+          baseTimestamp,
+        }));
+      }
+      await writeStreamChunk(stream, stringifier.stringifyRecords(records));
+      written += rows.length;
+      nextId = Number(rows[rows.length - 1].id) + 1;
+      emitProgress();
+    }
+    await closeWriteStream(stream);
+    emitProgress(true);
+    return written;
+  } catch (error) {
+    stream.destroy();
+    throw error;
+  }
+}
+
+function buildGenericSitCsvRow(row, { absoluteIndex, relativeIndex, baseTimestamp }, csvTitle, options = {}) {
+  const {
+    isHandType = false,
+    isHandGloveCsvType = false,
+    shouldWriteZeroFrame = false,
+    shouldWriteDetectionPoint = false,
+  } = options;
+  const rawData = JSON.parse(row?.data || '[]');
+  let pressureData, rotateData, zeroFrameData = [];
+  let tempFullBedPayload = null;
+  if (file === TEMP_FULL_BED_TYPE) {
+    tempFullBedPayload = buildTempFullBedPlaybackPayload(row);
+    pressureData = tempFullBedPayload.sitData;
+    rotateData = [];
+  } else if (shouldWriteZeroFrame) {
+    const storedFrame = parseStoredSensorFrame(rawData, file);
+    pressureData = storedFrame.pressureData;
+    rotateData = storedFrame.rotateData;
+    zeroFrameData = storedFrame.zeroFrame;
+  } else if (isHandType) {
+    if (rawData.length >= 260) {
+      pressureData = rawData.slice(0, 256);
+      rotateData = rawData.slice(256, 260);
+    } else {
+      pressureData = rawData.slice(0, rawData.length - 4);
+      rotateData = rawData.slice(rawData.length - 4);
+    }
+  } else {
+    pressureData = Array.isArray(rawData) ? rawData : getHistoryPressureData(row);
+    rotateData = [];
+  }
+  if (file === WHOLE_CHAIR_TYPE) {
+    pressureData = normalizeWholeChairFrame('sit', pressureData);
+  }
+  if (shouldTransposeSmallBedRawMatrix(file)) {
+    pressureData = transposeSquareMatrix(pressureData);
+  }
+  const press = pressureData.reduce((a, b) => a + b, 0);
+  const area = pressureData.filter((a) => a > 0).length;
+  const newData = {
+    time: timeStampToDate(row?.timestamp),
+    pressureArea: area,
+    pressure: totalToN(press),
+    realData: JSON.stringify(pressureData),
+    index: getCsvElapsedSecondsFromBase(row, absoluteIndex, baseTimestamp, relativeIndex),
+    max: findMax(pressureData),
+    rotate: rotateData.length ? JSON.stringify(rotateData) : '',
+    zeroFrame: zeroFrameData.length ? JSON.stringify(zeroFrameData) : '',
+    temperatureData: tempFullBedPayload ? JSON.stringify(tempFullBedPayload.temperatureData.map((value) => Number(value).toFixed(1))) : '',
+    temperatureAvg: tempFullBedPayload?.temperatureAvg != null ? Number(tempFullBedPayload.temperatureAvg).toFixed(1) : '',
+    temperatureK: tempFullBedPayload?.temperatureK ?? '',
+  };
+  if (shouldWriteDetectionPoint) {
+    newData.detectionPoint = pressureData[pressureData.length - 1] ?? '';
+  }
+  if (isHandGloveCsvType) {
+    Object.assign(newData, buildHandGloveCsvSegments(pressureData, 'left'));
+  }
+  return newData;
+}
+
+function buildGenericBackCsvRow(row, { absoluteIndex, relativeIndex, baseTimestamp }, options = {}) {
+  const {
+    isBackHandType = false,
+    isBackHandGloveType = false,
+    shouldWriteBackZeroFrame = false,
+  } = options;
+  const rawBackData = JSON.parse(row?.data || '[]');
+  let backData, backRotateData, backZeroFrameData = [];
+  if (shouldWriteBackZeroFrame) {
+    const storedBackFrame = parseStoredSensorFrame(rawBackData, file);
+    backData = storedBackFrame.pressureData;
+    backRotateData = storedBackFrame.rotateData;
+    backZeroFrameData = storedBackFrame.zeroFrame;
+  } else if (isBackHandType && rawBackData.length >= 260) {
+    backData = rawBackData.slice(0, 256);
+    backRotateData = rawBackData.slice(256, 260);
+  } else if (isBackHandType && rawBackData.length > 4) {
+    backData = rawBackData.slice(0, rawBackData.length - 4);
+    backRotateData = rawBackData.slice(rawBackData.length - 4);
+  } else {
+    backData = rawBackData;
+    backRotateData = [];
+  }
+  if (file === WHOLE_CHAIR_TYPE) {
+    backData = normalizeWholeChairFrame('back', backData);
+  }
+  const press = backData.reduce((a, b) => a + b, 0);
+  const area = backData.filter((a) => a > 10).length;
+  const area1 = backData.filter((a) => a > 1).length;
+  const area10Data = backData.filter((a) => a > 10);
+  const total10 = area10Data.reduce((a, b) => a + b, 0);
+  const total1 = backData.reduce((a, b) => a + b, 0);
+  const newData = {
+    time: timeStampToDate(row?.timestamp),
+    pressureArea: area,
+    pressure: totalToN(press, 1.3),
+    realData: JSON.stringify(backData),
+    index: getCsvElapsedSecondsFromBase(row, absoluteIndex, baseTimestamp, relativeIndex),
+    area1,
+    area10: area10Data.length,
+    total1,
+    total10,
+    total10area10: total10 / (area10Data.length || 1),
+    total1area1: total1 / (area1 || 1),
+    max: findMax(backData),
+    rotate: backRotateData.length ? JSON.stringify(backRotateData) : '',
+    zeroFrame: backZeroFrameData.length ? JSON.stringify(backZeroFrameData) : '',
+  };
+  if (isBackHandGloveType) {
+    Object.assign(newData, buildHandGloveCsvSegments(backData, 'right'));
+  }
+  return newData;
+}
+
+function buildHeadCsvRow(row, { absoluteIndex, relativeIndex, baseTimestamp }) {
+  const headData = file === WHOLE_CHAIR_TYPE
+    ? normalizeWholeChairFrame('head', row?.data)
+    : JSON.parse(row?.data || '[]');
+  const press = headData.reduce((a, b) => a + b, 0);
+  const area = headData.filter((a) => a > 10).length;
+  const area1 = headData.filter((a) => a > 1).length;
+  const area10Data = headData.filter((a) => a > 10);
+  const total10 = area10Data.reduce((a, b) => a + b, 0);
+  const total1 = headData.reduce((a, b) => a + b, 0);
+  return {
+    time: timeStampToDate(row?.timestamp),
+    pressureArea: area,
+    pressure: totalToN(press, 1.3),
+    realData: JSON.stringify(headData),
+    index: getCsvElapsedSecondsFromBase(row, absoluteIndex, baseTimestamp, relativeIndex),
+    area1,
+    area10: area10Data.length,
+    total1,
+    total10,
+    total10area10: total10 / (area10Data.length || 1),
+    total1area1: total1 / (area1 || 1),
+    max: findMax(headData),
+  };
+}
+
+function getDefaultSitCsvHeaders(csvTitle, {
+  isHandGloveCsvType = false,
+  shouldWriteDetectionPoint = false,
+  shouldWriteZeroFrame = false,
+  isHandType = false,
+} = {}) {
+  const csvHeaders = [
+    { id: "index", title: csvTitle.index },
+    { id: "max", title: csvTitle.max },
+    { id: "time", title: csvTitle.time },
+    { id: "pressureArea", title: csvTitle.pressureArea },
+    { id: "pressure", title: csvTitle.pressure },
+    { id: "realData", title: csvTitle.realData },
+  ];
+  if (isHandGloveCsvType) {
+    appendHandGloveCsvHeaders(csvHeaders, csvTitle);
+  }
+  if (shouldWriteDetectionPoint) {
+    csvHeaders.push({ id: "detectionPoint", title: csvTitle.detectionPoint });
+  }
+  if (shouldWriteZeroFrame) {
+    csvHeaders.push({ id: "zeroFrame", title: csvTitle.zeroFrame });
+  }
+  if (isHandType) {
+    csvHeaders.push({ id: "rotate", title: csvTitle.rotate });
+  }
+  if (file === TEMP_FULL_BED_TYPE) {
+    csvHeaders.push(
+      { id: "temperatureData", title: csvTitle.temperatureData },
+      { id: "temperatureAvg", title: csvTitle.temperatureAvg },
+      { id: "temperatureK", title: csvTitle.temperatureK },
+    );
+  }
+  return csvHeaders;
+}
+
+function getDefaultBackCsvHeaders(csvTitle, {
+  isBackHandGloveType = false,
+  shouldWriteBackZeroFrame = false,
+  isBackHandType = false,
+} = {}) {
+  const backCsvHeaders = [
+    { id: "index", title: csvTitle.index },
+    { id: "time", title: csvTitle.time },
+    { id: "max", title: csvTitle.max },
+    { id: "pressureArea", title: csvTitle.pressureArea },
+    { id: "pressure", title: csvTitle.pressure },
+    { id: "realData", title: csvTitle.realData },
+  ];
+  if (isBackHandGloveType) {
+    appendHandGloveCsvHeaders(backCsvHeaders, csvTitle);
+  }
+  if (shouldWriteBackZeroFrame) {
+    backCsvHeaders.push({ id: "zeroFrame", title: csvTitle.zeroFrame });
+  }
+  if (isBackHandType) {
+    backCsvHeaders.push({ id: "rotate", title: csvTitle.rotate });
+  }
+  return backCsvHeaders;
+}
+
+function getHeadCsvHeaders(csvTitle) {
+  return [
+    { id: "index", title: csvTitle.index },
+    { id: "time", title: csvTitle.time },
+    { id: "max", title: csvTitle.max },
+    { id: "pressureArea", title: csvTitle.pressureArea },
+    { id: "pressure", title: csvTitle.pressure },
+    { id: "realData", title: csvTitle.realData },
+  ];
+}
+
+async function exportHandGloveDoubleCsvStreaming({ date, csvTitle, csvTargetPath, sendCsvSuccess, sendCsvFailed, sendCsvProgress }) {
+  const leftStats = getHistoryStats(db, date);
+  const rightStats = getHistoryStats(db1, date);
+  const totalLength = Math.max(leftStats.count, rightStats.count);
+  if (!totalLength) {
+    sendCsvFailed(new Error('no rows to export'));
+    return;
+  }
+  const start = Math.max(0, historyArr[0] || 0);
+  const end = Math.min(historyArr[1] || totalLength, totalLength);
+  const sideLabel = csvTitle === CSV_TITLES.en
+    ? { left: 'left', right: 'right' }
+    : { left: '左手', right: '右手' };
+  const csvHeaders = [
+    { id: "index", title: csvTitle.index },
+    { id: "time", title: csvTitle.time },
+    { id: "leftMax", title: `${sideLabel.left}${csvTitle.max}` },
+    { id: "leftPressureArea", title: `${sideLabel.left}${csvTitle.pressureArea}` },
+    { id: "leftPressure", title: `${sideLabel.left}${csvTitle.pressure}` },
+    { id: "leftRealData", title: `${sideLabel.left}${csvTitle.realData}` },
+    { id: "leftZeroFrame", title: `${sideLabel.left}${csvTitle.zeroFrame}` },
+    { id: "leftRotate", title: `${sideLabel.left}${csvTitle.rotate}` },
+    { id: "rightMax", title: `${sideLabel.right}${csvTitle.max}` },
+    { id: "rightPressureArea", title: `${sideLabel.right}${csvTitle.pressureArea}` },
+    { id: "rightPressure", title: `${sideLabel.right}${csvTitle.pressure}` },
+    { id: "rightRealData", title: `${sideLabel.right}${csvTitle.realData}` },
+    { id: "rightZeroFrame", title: `${sideLabel.right}${csvTitle.zeroFrame}` },
+    { id: "rightRotate", title: `${sideLabel.right}${csvTitle.rotate}` },
+  ];
+  appendPrefixedHandGloveCsvHeaders(csvHeaders, 'left', csvTitle);
+  appendPrefixedHandGloveCsvHeaders(csvHeaders, 'right', csvTitle);
+
+  let str = formatCsvDatePart(nowGetTime || date);
+  const csvFilePath = csvTargetPath(`${csvTitle === CSV_TITLES.en ? 'glove2' : '触觉手套2'}${str}.csv`);
+  const stringifier = createCsvStringifier({ header: csvHeaders });
+  const stream = fs.createWriteStream(csvFilePath, { encoding: 'utf8' });
+  let written = 0;
+  let leftNextId = leftStats.minId + start;
+  let rightNextId = rightStats.minId + start;
+  const baseRow = (leftStats.count ? queryHistoryRowsFromId(db, date, leftNextId, 1) : queryHistoryRowsFromId(db1, date, rightNextId, 1))[0];
+  const baseTimestamp = baseRow?.timestamp ?? null;
+  const batchSize = 1000;
+  const emitProgress = (force = false) => {
+    if (typeof sendCsvProgress !== 'function') return;
+    const total = end - start;
+    sendCsvProgress({
+      percent: total ? Math.min(99, Math.round((written / total) * 100)) : 100,
+      filePercent: total ? Math.min(100, Math.round((written / total) * 100)) : 100,
+      written,
+      total,
+      fileIndex: 1,
+      fileCount: 1,
+      currentFile: path.basename(csvFilePath),
+      currentFilePath: csvFilePath,
+      force,
+    });
+  };
+
+  try {
+    await writeStreamChunk(stream, stringifier.getHeaderString());
+    emitProgress(true);
+    while (written < end - start) {
+      const limit = Math.min(batchSize, end - start - written);
+      const leftRows = queryHistoryRowsFromId(db, date, leftNextId, limit);
+      const rightRows = queryHistoryRowsFromId(db1, date, rightNextId, limit);
+      const count = Math.max(leftRows.length, rightRows.length);
+      if (!count) break;
+      const records = [];
+      for (let index = 0; index < count; index++) {
+        const leftFrame = buildStoredHandGloveCsvFrame(leftRows[index], 'left');
+        const rightFrame = buildStoredHandGloveCsvFrame(rightRows[index], 'right');
+        const leftData = leftFrame.pressureData;
+        const rightData = rightFrame.pressureData;
+        const leftPress = leftData.reduce((sum, value) => sum + value, 0);
+        const rightPress = rightData.reduce((sum, value) => sum + value, 0);
+        const leftArea = leftData.filter((value) => value > 0).length;
+        const rightArea = rightData.filter((value) => value > 0).length;
+        const baseFrameRow = leftRows[index] || rightRows[index];
+        records.push({
+          index: getCsvElapsedSecondsFromBase(baseFrameRow, start + written + index, baseTimestamp, written + index),
+          time: timeStampToDate(leftFrame.timestamp || rightFrame.timestamp || Date.now()),
+          leftMax: leftData.length ? findMax(leftData) : 0,
+          leftPressureArea: leftArea,
+          leftPressure: totalToN(leftPress),
+          leftRealData: JSON.stringify(leftData),
+          leftZeroFrame: leftFrame.zeroFrame.length ? JSON.stringify(leftFrame.zeroFrame) : '',
+          leftRotate: leftFrame.rotateData.length ? JSON.stringify(leftFrame.rotateData) : '',
+          rightMax: rightData.length ? findMax(rightData) : 0,
+          rightPressureArea: rightArea,
+          rightPressure: totalToN(rightPress),
+          rightRealData: JSON.stringify(rightData),
+          rightZeroFrame: rightFrame.zeroFrame.length ? JSON.stringify(rightFrame.zeroFrame) : '',
+          rightRotate: rightFrame.rotateData.length ? JSON.stringify(rightFrame.rotateData) : '',
+          ...buildPrefixedHandGloveCsvSegments(leftData, 'left'),
+          ...buildPrefixedHandGloveCsvSegments(rightData, 'right'),
+        });
+      }
+      await writeStreamChunk(stream, stringifier.stringifyRecords(records));
+      written += count;
+      if (leftRows.length) leftNextId = Number(leftRows[leftRows.length - 1].id) + 1;
+      if (rightRows.length) rightNextId = Number(rightRows[rightRows.length - 1].id) + 1;
+      emitProgress();
+    }
+    await closeWriteStream(stream);
+    if (typeof sendCsvProgress === 'function') {
+      sendCsvProgress({
+        percent: 100,
+        filePercent: 100,
+        written: end - start,
+        total: end - start,
+        fileIndex: 1,
+        fileCount: 1,
+        currentFile: path.basename(csvFilePath),
+        currentFilePath: csvFilePath,
+        force: true,
+      });
+    }
+    sendCsvSuccess([csvFilePath]);
+  } catch (error) {
+    stream.destroy();
+    sendCsvFailed(error, [csvFilePath]);
+  }
+}
+
+async function exportHistoryCsvStreaming({ date, csvTitle, csvTargetPath, sendCsvSuccess, sendCsvFailed, sendCsvProgress, downloadOptions }) {
+  try {
+    const files = [];
+    const start = Math.max(0, historyArr[0] || 0);
+    const end = historyArr[1] || null;
+    const str = formatCsvDatePart(nowGetTime || date);
+    const createProgressReporter = (csvFilePath, fileIndex, fileCount) => (progress) => {
+      if (typeof sendCsvProgress !== 'function') return;
+      const filePercent = Number(progress.percent) || 0;
+      const overallPercent = Math.min(
+        99,
+        Math.round((((fileIndex - 1) + filePercent / 100) / Math.max(1, fileCount)) * 100),
+      );
+      sendCsvProgress({
+        percent: overallPercent,
+        filePercent,
+        written: progress.written,
+        total: progress.total,
+        fileIndex,
+        fileCount,
+        currentFile: path.basename(csvFilePath),
+        currentFilePath: csvFilePath,
+      });
+    };
+
+    if (file === HAND_GLOVE_DOUBLE) {
+      await exportHandGloveDoubleCsvStreaming({ date, csvTitle, csvTargetPath, sendCsvSuccess, sendCsvFailed, sendCsvProgress, downloadOptions });
+      return;
+    }
+
+    if (file === "bigBed") {
+      let startPressure = 0;
+      let pressureTime = 0;
+      let streamSmoothValue = 0;
+      const csvFilePath = csvTargetPath(`${file}${String(nowGetTime || date).replace(/[/:]/g, "-")}.csv`);
+      await writeCsvFileInBatches({
+        csvFilePath,
+        header: [
+          { id: "time", title: csvTitle.time },
+          { id: "pressureArea", title: csvTitle.pressureArea },
+          { id: "pressValue", title: csvTitle.pressValue },
+          { id: "pressure", title: csvTitle.pressure },
+          { id: "pressuremmgH", title: csvTitle.pressuremmgH },
+          { id: "realData", title: csvTitle.realData },
+          { id: "pressLine", title: csvTitle.pressLine },
+        ],
+        dbRef: db,
+        date,
+        start,
+        end,
+        onProgress: createProgressReporter(csvFilePath, 1, 1),
+        mapRow: (row) => {
+          const wsData = JSON.parse(row?.data || '[]').map((a) => a < 10 ? 0 : a);
+          const realArr = wsData;
+          const bodyArr = [];
+          for (let col = 0; col < 64; col++) {
+            let num = 0;
+            for (let r = 0; r < 32; r++) {
+              num += realArr[r * 64 + col];
+            }
+            streamSmoothValue = streamSmoothValue + (num / 32 - streamSmoothValue) / 3;
+            bodyArr.push(streamSmoothValue.toFixed(2));
+          }
+          const total = realArr.reduce((a, b) => a + b, 0);
+          let nonZeroLength = realArr.filter((a) => a > 0).length || 1;
+          let pressure = calculatePressure(total / nonZeroLength);
+          const newPressure = total / nonZeroLength;
+          const change = objChange(newPressure, startPressure, 4);
+          if (change) {
+            startPressure = newPressure;
+            pressureTime = 0;
+          } else {
+            pressureTime++;
+            pressure = calculatePressure(calPress(startPressure, newPressure, pressureTime));
+            if (pressureTime > 240 * 13) pressureTime = 240 * 13;
+          }
+          return {
+            time: timeStampToDate(row?.timestamp),
+            pressureArea: realArr.filter((a) => a > 0).length,
+            pressure: total / nonZeroLength,
+            realData: realArr,
+            pressValue: wsData.reduce((a, b) => a + b, 0),
+            pressuremmgH: pressure,
+            pressLine: bodyArr,
+          };
+        },
+      });
+      files.push(csvFilePath);
+      sendCsvSuccess(files);
+      return;
+    }
+
+    if (isSmallBedMatrixType(file) || file === SMALL_BED_12B_TYPE || file === 'smallBed1') {
+      const csvFilePath = csvTargetPath(`${file}${str}.csv`);
+      await writeCsvFileInBatches({
+        csvFilePath,
+        header: getDefaultSitCsvHeaders(csvTitle),
+        dbRef: db,
+        date,
+        start,
+        end,
+        onProgress: createProgressReporter(csvFilePath, 1, 1),
+        mapRow: (row, meta) => {
+          const storedFrame = parseStoredFrameData(row);
+          let matrixWidth = Number(storedFrame?.matrixWidth) || Math.sqrt(normalizeHistoryPressureData(row, file).length) || 32;
+          let matrixHeight = Number(storedFrame?.matrixHeight) || matrixWidth;
+          let sitData = normalizeHistoryPressureData(row, file);
+          if (shouldTransposeSmallBedRawMatrix(file) && matrixWidth === matrixHeight) {
+            sitData = transposeSquareMatrix(sitData, matrixWidth);
+          }
+          const press = sitData.reduce((a, b) => a + b, 0);
+          const area = sitData.filter((a) => a > 0).length;
+          return {
+            time: timeStampToDate(row?.timestamp),
+            pressureArea: area,
+            pressure: totalToN(press),
+            realData: JSON.stringify(sitData),
+            index: getCsvElapsedSecondsFromBase(row, meta.absoluteIndex, meta.baseTimestamp, meta.relativeIndex),
+            max: findMax(sitData),
+          };
+        },
+      });
+      files.push(csvFilePath);
+      sendCsvSuccess(files);
+      return;
+    }
+
+    if (file === 'sitCol' || file === 'matCol') {
+      const label = String(date).split('_')[1];
+      const csvFilePath = csvTargetPath(`${file}${str}.csv`);
+      await writeCsvFileInBatches({
+        csvFilePath,
+        header: [
+          { id: "realData", title: csvTitle.realData },
+          { id: "label", title: csvTitle.label },
+        ],
+        dbRef: db,
+        date,
+        start: 0,
+        end: null,
+        onProgress: createProgressReporter(csvFilePath, 1, 1),
+        mapRow: (row) => ({
+          realData: row?.data,
+          label,
+        }),
+      });
+      files.push(csvFilePath);
+      sendCsvSuccess(files);
+      return;
+    }
+
+    const isHandType = isHandStorageType(file);
+    const isHandGloveCsvType = isHandGloveType(file);
+    const shouldWriteZeroFrame = isZeroFrameStorageType(file);
+    const shouldWriteDetectionPoint = file === HAND_SINGLE_POINT_TYPE;
+    const genericFileCount = (file !== "car10" ? 1 : 0) + (isCar(file) ? 1 : 0) + (isCar(file) && isThreePortFile(file) ? 1 : 0);
+    let genericFileIndex = 0;
+    if (file !== "car10") {
+      const csvFilePath = csvTargetPath(`${getCsvFilePrefix(file, 'sit', downloadOptions || {})}${str}.csv`);
+      genericFileIndex += 1;
+      await writeCsvFileInBatches({
+        csvFilePath,
+        header: getDefaultSitCsvHeaders(csvTitle, {
+          isHandGloveCsvType,
+          shouldWriteDetectionPoint,
+          shouldWriteZeroFrame,
+          isHandType,
+        }),
+        dbRef: db,
+        date,
+        start,
+        end: end == null ? null : Math.max(start, end - 1),
+        onProgress: createProgressReporter(csvFilePath, genericFileIndex, genericFileCount || 1),
+        mapRow: (row, meta) => buildGenericSitCsvRow(row, meta, csvTitle, {
+          isHandType,
+          isHandGloveCsvType,
+          shouldWriteZeroFrame,
+          shouldWriteDetectionPoint,
+        }),
+      });
+      files.push(csvFilePath);
+    }
+
+    if (isCar(file)) {
+      const isBackHandType = isHandStorageType(file);
+      const isBackHandGloveType = isHandGloveType(file);
+      const shouldWriteBackZeroFrame = isZeroFrameStorageType(file);
+      const backCsvFilePath = csvTargetPath(`${getCsvFilePrefix(file, 'back', downloadOptions || {})}${str}.csv`);
+      genericFileIndex += 1;
+      await writeCsvFileInBatches({
+        csvFilePath: backCsvFilePath,
+        header: getDefaultBackCsvHeaders(csvTitle, {
+          isBackHandGloveType,
+          shouldWriteBackZeroFrame,
+          isBackHandType,
+        }),
+        dbRef: db1,
+        date,
+        start,
+        end,
+        onProgress: createProgressReporter(backCsvFilePath, genericFileIndex, genericFileCount || 1),
+        mapRow: (row, meta) => buildGenericBackCsvRow(row, meta, {
+          isBackHandType,
+          isBackHandGloveType,
+          shouldWriteBackZeroFrame,
+        }),
+      });
+      files.push(backCsvFilePath);
+
+      if (isThreePortFile(file)) {
+        const headCsvFilePath = csvTargetPath(`head${str}.csv`);
+        genericFileIndex += 1;
+        await writeCsvFileInBatches({
+          csvFilePath: headCsvFilePath,
+          header: getHeadCsvHeaders(csvTitle),
+          dbRef: db2,
+          date,
+          start,
+          end,
+          onProgress: createProgressReporter(headCsvFilePath, genericFileIndex, genericFileCount || 1),
+          mapRow: buildHeadCsvRow,
+        });
+        files.push(headCsvFilePath);
+      }
+    }
+
+    sendCsvSuccess(files);
+  } catch (error) {
+    logger.error('[CSV] streaming export failed:', error);
+    sendCsvFailed(error);
+  }
+}
+
+function normalizeFiniteFrame(raw, expectedLength = null) {
+  const source = Array.isArray(raw) ? raw : [];
+  if (expectedLength == null) {
+    return source.map((value) => {
+      const numberValue = Number(value);
+      return Number.isFinite(numberValue) ? numberValue : 0;
+    });
+  }
+
+  return Array.from({ length: expectedLength }, (_, index) => {
+    const numberValue = Number(source[index]);
+    return Number.isFinite(numberValue) ? numberValue : 0;
+  });
+}
+
+function stopPlaybackTimer() {
+  playFlag = false;
+  if (timer) {
+    clearInterval(timer);
+    timer = null;
+  }
+}
+
+/**
+ * 从时间戳数组推算实际采集帧间隔（ms）
+ * 取前 N 帧时间戳差值的中位数，过滤异常值，fallback 到 timeNum
+ */
+function calcDetectedInterval(timestamps) {
+  if (!Array.isArray(timestamps) || timestamps.length < 2) return timeNum;
+  const sampleSize = Math.min(20, timestamps.length - 1);
+  const diffs = [];
+  for (let i = 1; i <= sampleSize; i++) {
+    const d = timestamps[i] - timestamps[i - 1];
+    if (d > 0 && d < 5000) diffs.push(d); // 过滤异常值（>5s 视为无效）
+  }
+  if (diffs.length === 0) return timeNum;
+  diffs.sort((a, b) => a - b);
+  const median = diffs[Math.floor(diffs.length / 2)];
+  return Math.max(1, median); // 最小 1ms
+}
+
+let reconnectTimer = null;
+let jqbedTimer = null;
+let petCareTimer = null;
+let petCareMiniTimer = null;
+let reportHttpServer = null;
+let serverOpened = false;
+let serverShutdownRequested = false;
+let serverShutdownPromise = null;
+
+function closeWithTimeout(name, promise, timeoutMs = 3000) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      logger.warn(`[Server] ${name} close timed out after ${timeoutMs}ms`);
+      resolve(false);
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        logger.warn(`[Server] ${name} close failed:`, err.message || err);
+        resolve(false);
+      });
+  });
+}
+
+function clearManagedInterval(name, timerRef) {
+  if (!timerRef) return null;
+  clearInterval(timerRef);
+  logger.info(`[Server] Cleared ${name}`);
+  return null;
+}
+
+function closeSerialPort(portRef, name) {
+  if (!portRef) return Promise.resolve(null);
+
+  try {
+    portRef.removeAllListeners?.();
+  } catch (err) {
+    logger.warn(`[Server] ${name} removeAllListeners failed:`, err.message);
+  }
+
+  if (!portRef.isOpen || typeof portRef.close !== 'function') {
+    return Promise.resolve(null);
+  }
+
+  return new Promise((resolve) => {
+    try {
+      portRef.close((err) => {
+        if (err) {
+          logger.warn(`[Server] ${name} close failed:`, err.message || err);
+        } else {
+          logger.info(`[Server] ${name} closed`);
+        }
+        resolve(null);
+      });
+    } catch (err) {
+      logger.warn(`[Server] ${name} close threw:`, err.message);
+      resolve(null);
+    }
+  });
+}
+
+function closeHttpServer(httpServer, name) {
+  if (!httpServer || typeof httpServer.close !== 'function') {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    try {
+      httpServer.close((err) => {
+        if (err) {
+          logger.warn(`[Server] ${name} close failed:`, err.message || err);
+        } else {
+          logger.info(`[Server] ${name} closed`);
+        }
+        resolve();
+      });
+    } catch (err) {
+      logger.warn(`[Server] ${name} close threw:`, err.message);
+      resolve();
+    }
+  });
+}
+
+function closeWsServer(wsServer, name) {
+  if (!wsServer) return Promise.resolve();
+
+  try {
+    wsServer.clients?.forEach((client) => {
+      try {
+        client.terminate?.();
+      } catch (err) {
+        logger.warn(`[Server] ${name} client terminate failed:`, err.message);
+      }
+    });
+  } catch (err) {
+    logger.warn(`[Server] ${name} enumerate clients failed:`, err.message);
+  }
+
+  return new Promise((resolve) => {
+    try {
+      wsServer.close((err) => {
+        if (err) {
+          logger.warn(`[Server] ${name} close failed:`, err.message || err);
+        } else {
+          logger.info(`[Server] ${name} closed`);
+        }
+        resolve();
+      });
+    } catch (err) {
+      logger.warn(`[Server] ${name} close threw:`, err.message);
+      resolve();
+    }
+  });
+}
+
+function closeDatabase(dbRef, name) {
+  if (!dbRef || typeof dbRef.close !== 'function') return Promise.resolve();
+
+  return new Promise((resolve) => {
+    try {
+      dbRef.close((err) => {
+        if (err) {
+          logger.warn(`[Server] ${name} close failed:`, err.message || err);
+        } else {
+          logger.info(`[Server] ${name} closed`);
+        }
+        resolve();
+      });
+    } catch (err) {
+      logger.warn(`[Server] ${name} close threw:`, err.message);
+      resolve();
+    }
+  });
+}
+
+function shutdownServer() {
+  if (serverShutdownRequested) {
+    return serverShutdownPromise || Promise.resolve();
+  }
+  serverShutdownRequested = true;
+
+  logger.info("[Server] Shutdown requested, closing sockets/timers/workers...");
+
+  stopPlaybackTimer();
+  reconnectTimer = clearManagedInterval("serial reconnect timer", reconnectTimer);
+  jqbedTimer = clearManagedInterval("jqbed timer", jqbedTimer);
+  petCareTimer = clearManagedInterval("petCare timer", petCareTimer);
+  petCareMiniTimer = clearManagedInterval("petCareMini timer", petCareMiniTimer);
+
+  localFlag = false;
+  sitClose = true;
+  backClose = true;
+  headClose = true;
+  sensorClose = true;
+  com = undefined;
+  com1 = undefined;
+  comhead = undefined;
+  comSensor = undefined;
+
+  try {
+    stopWorker();
+  } catch (err) {
+    logger.warn("[Server] stopWorker failed:", err.message);
+  }
+
+  const reportServer = reportHttpServer;
+  reportHttpServer = null;
+
+  serverShutdownPromise = Promise.all([
+    closeWithTimeout("port1", closeSerialPort(port1, "port1")),
+    closeWithTimeout("port2", closeSerialPort(port2, "port2")),
+    closeWithTimeout("portHead", closeSerialPort(portHead, "portHead")),
+    closeWithTimeout("portSensor", closeSerialPort(portSensor, "portSensor")),
+    closeWithTimeout("server", closeWsServer(server, "server")),
+    closeWithTimeout("server1", closeWsServer(server1, "server1")),
+    closeWithTimeout("server2", closeWsServer(server2, "server2")),
+    closeWithTimeout("report HTTP server", closeHttpServer(reportServer, "report HTTP server")),
+    closeWithTimeout("db", closeDatabase(db, "db")),
+    closeWithTimeout("db1", closeDatabase(db1, "db1")),
+    closeWithTimeout("db2", closeDatabase(db2, "db2")),
+  ]).then(() => {
+    port1 = null;
+    port2 = null;
+    portHead = null;
+    portSensor = null;
+    serverOpened = false;
+  });
+
+  return serverShutdownPromise;
+}
 
 
 
 const defauleFile = 'hand0205'
 let date, sysStartTime, file = defauleFile, selectFlag
+let licenseFile = null
+
+function getSelectFlagFromLicense(licenseFile) {
+  if (licenseFile === 'all') return 'all';
+  if (Array.isArray(licenseFile)) {
+    return licenseFile.filter((item) => typeof item === 'string' && item.trim());
+  }
+
+  if (typeof licenseFile === 'string' && licenseFile.trim() && licenseFile !== 'all') {
+    return [licenseFile];
+  }
+
+  return undefined;
+}
+
+function getDefaultFileFromLicense(licenseFile, fallback = null) {
+  if (Array.isArray(licenseFile)) {
+    return licenseFile.find((item) => typeof item === 'string' && item.trim()) || fallback;
+  }
+
+  if (typeof licenseFile === 'string' && licenseFile.trim() && licenseFile !== 'all') {
+    return licenseFile;
+  }
+
+  return fallback;
+}
+
 if (fs.existsSync(nameTxt)) {
   try {
     const dateRes = fs.readFileSync(nameTxt, 'utf8');
     const parsedData = JSON.parse(module2.decryptStr(dateRes));
     endDate = parseFloat(parsedData.date);
-    const rawFile = parsedData.file;
-    selectFlag = rawFile; // ????????????????????? 'all'??????????????
-    // ??? file ????????'all'????????????????????
-    if (rawFile === 'all') {
-      file = defauleFile;
-    } else if (Array.isArray(rawFile)) {
-      // ???????????????????????????????????
-      file = rawFile[0] || defauleFile;
-    } else {
-      file = rawFile || defauleFile;
-    }
-    // 根据 file 类型设置波特率
-    if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(file) || file.includes('robot')) {
-      baudRate = 921600
-    } else if (['bed4096', 'bed4096num'].includes(file)) {
-      baudRate = 3000000
-    } else {
-      baudRate = 1000000
-    }
+    licenseFile = parsedData.file || null;
+    selectFlag = getSelectFlagFromLicense(parsedData.file);
+    file = getDefaultFileFromLicense(parsedData.file, defauleFile);
+    // 鏍规嵁 file 绫诲瀷璁剧疆娉㈢壒鐜?
+    baudRate = getSensorBaudRate(file);
   } catch (err) {
-    console.error(err);
+    logger.error(err);
   }
 } else {
-  console.log("[Config] config.txt not found, skip loading license at startup.");
+  logger.info("[Config] config.txt not found, skip loading license at startup.");
 }
 
 // let db = new sqlite3.Database(`${filePath}/foot.db`);
@@ -206,12 +2974,13 @@ let dataFalg = 0;
 
 // const createCsvWriter = require("csv-writer").createObjectCsvWriter;
 
-var saveTime,
+let saveTime,
   getTime,
 
   com,
   com1,
-  comhead;
+  comhead,
+  comSensor;
 // db = new sqlite3.Database(`${filePath}/${file}.db`);
 
 // try {
@@ -225,7 +2994,7 @@ var saveTime,
 //   // console.log(JSON.parse(module2.decryptStr(dateRes)).startTimeRes);
 //   // endDate = parseFloat(module2.decryptStr(date))
 // } catch (err) {
-//   console.error(err);
+//   logger.error(err);
 // }
 
 
@@ -236,55 +3005,69 @@ db = dbObj.db
 db1 = dbObj.db1
 db2 = dbObj.db2
 
-var flag = false;
-var colHZ = 12, oldTimeStamp = new Date().getTime();
+let flag = false;
+let colHZ = 12, oldTimeStamp = new Date().getTime();
+let collectOptions = { frequencyMode: 'serial', frequencyHz: 12, matrixDownsample: { enabled: false } };
+let lastCollectionStorageAt = { sit: 0, back: 0, head: 0 };
 let splitBuffer = Buffer.from([0xaa, 0x55, 0x03, 0x99]);
 // let splitBuffer1 = Buffer.from([0xaa, 0x55, 0x03, 0x09]);
 let parser2 = new DelimiterParser({ delimiter: splitBuffer });
 let parser = new DelimiterParser({ delimiter: splitBuffer });
+let parserSmallBed12B = new DelimiterParser({ delimiter: SMALL_BED_12B_FRAME_TAIL });
 let parser3 = new DelimiterParser({ delimiter: splitBuffer });
 let parser4 = new DelimiterParser({ delimiter: splitBuffer });
-var server, server1, server2;
-var localData = [],
+const getSitParser = () => file === SMALL_BED_12B_TYPE ? parserSmallBed12B : parser;
+let server, server1, server2;
+let localData = [],
   localDataBack = [],
   localDataHead = [],
   indexArr = [0, 0];
 let up = 1245, down = 2
-var pointArr1zero = []
-var pointArr147zero = []
-var pointArr147zero_2 = []
-var pointArr2zero = []
-var pointArr3zero = []
-var pointArr4zero = []
+let pointArr1zero = []
+let pointArr147zero = []
+let pointArr147zero_2 = []
+let pointArr2zero = []
+let pointArr3zero = []
+let pointArr4zero = []
+let pointArr2RawZero = []
 
-var pointArr1zeroData = []
-var pointArr2zeroData = []
-var pointArr3zeroData = []
-var pointArr4zeroData = [], newArr147 = [], newArr147_2 = [],
+let pointArr1zeroData = []
+let pointArr2zeroData = []
+let pointArr3zeroData = []
+let pointArr4zeroData = [], pointArr2RawZeroData = [], newArr147 = [], newArr147_2 = [];
+let pointArr1RawZero = []
+let pointArr1RawZeroData = []
 
-  server = new WebSocket.Server({ port: 19999 });
+server = new WebSocket.Server({ port: 19999 });
 server1 = new WebSocket.Server({ port: 19998 });
 server2 = new WebSocket.Server({ port: 19997 });
 
 module.exports = {
   openServer() {
+    if (serverOpened) {
+      logger.info("[Server] openServer skipped: listeners already attached");
+      return;
+    }
+
+    serverOpened = true;
+    serverShutdownRequested = false;
 
     server1.on("open", function open() {
-      console.log("connected");
+      logger.info("connected");
     });
 
     server1.on("close", function close() {
-      console.log("disconnected");
+      logger.info("disconnected");
     });
 
     server1.on("connection", function connection(ws, req) {
       ws.on("message", function incoming(message) {
-        console.log("received: %s from %s", message, clientName, localFlag);
+        logger.debug("received: %s from %s", message, clientName, localFlag);
 
         const getMessage = JSON.parse(message);
 
         /**
-         * 灏嗗疄鏃堕潬鑳屾暟鎹€氶亾鎵撳紑
+         * 鐏忓棗鐤勯弮鍫曟浆閼冲本鏆熼幑顕€鈧岸浜鹃幍鎾崇磻
          */
         if (nowDate < endDate) {
           if (JSON.parse(message).backPort != null) {
@@ -297,13 +3080,13 @@ module.exports = {
                   autoOpen: true,
                 },
                 function (err) {
-                  console.log(err, "err");
+                  logger.warn(err, "err");
                 }
               );
-              //绠￠亾娣诲姞瑙ｆ瀽鍣?
-              port2.pipe(parser2);
+              //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
+              bindBackPortParser();
             } catch (e) {
-              console.log(e, "e");
+              logger.warn(e, "e");
             }
           }
 
@@ -322,6 +3105,7 @@ module.exports = {
           }
           if (JSON.parse(message).local === false) {
             localFlag = false;
+            stopPlaybackTimer();
             const jsonData = JSON.stringify({
               backData: new Array(backTotal).fill(0),
 
@@ -340,25 +3124,27 @@ module.exports = {
                     autoOpen: true,
                   },
                   function (err) {
-                    console.log(err, "err");
+                    logger.warn(err, "err");
                   }
                 );
-                //绠￠亾娣诲姞瑙ｆ瀽鍣?
+                //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
                 // port2.pipe(parser2);
               } catch (e) {
-                console.log(e, "e");
+                logger.warn(e, "e");
               }
             }
           }
 
           /**
-           * 灏嗛潬鑳屾暟鎹€氶亾鍏抽棴
+           * 鐏忓棝娼懗灞炬殶閹诡噣鈧岸浜鹃崗鎶芥４
            */
-          if (JSON.parse(message).backClose === true) {
+           if (JSON.parse(message).backClose === true) {
             backClose = true
+            com1 = undefined; // 清除 com1 防止自动重连
             if (port2?.isOpen) {
-
-              port2.close();
+              port2.close((err) => {
+                if (err) logger.warn('port2 close error (server1):', err);
+              });
             }
           }
 
@@ -370,7 +3156,7 @@ module.exports = {
 
           //   db1.all(selectQuery, params, (err, rows) => {
           //     if (err) {
-          //       console.error(err);
+          //       logger.error(err);
           //     } else {
           //       localDataBack = rows;
           //     }
@@ -381,11 +3167,11 @@ module.exports = {
     });
 
     server.on("open", function open() {
-      console.log("connected");
+      logger.info("connected");
     });
 
     server.on("close", function close() {
-      console.log("disconnected");
+      logger.info("disconnected");
     });
 
     server.on("connection", function connection(ws, req) {
@@ -393,15 +3179,31 @@ module.exports = {
       const ip = req.connection.remoteAddress;
       const port = req.connection.remotePort;
       const clientName = ip + port;
-      console.log("%s is connected", clientName);
+      logger.info("%s is connected", clientName);
+
+      // ====== 心跳机制：防止息屏后连接被系统关闭 ======
+      ws.isAlive = true;
+      ws.on('pong', () => { ws.isAlive = true; });
+      ws.on('close', () => { ws.isAlive = false; });
+      const heartbeatInterval = setInterval(() => {
+        if (ws.isAlive === false) {
+          logger.warn('[WS] 客户端心跳超时，关闭连接: ' + clientName);
+          clearInterval(heartbeatInterval);
+          return ws.terminate();
+        }
+        ws.isAlive = false;
+        if (ws.readyState === WebSocket.OPEN) ws.ping();
+      }, 30000);
+      ws.on('close', () => clearInterval(heartbeatInterval));
+      // ======================================================
 
       server.clients.forEach(function each(client) {
         /**
-         * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+         * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
          *  */
         const jsonData = JSON.stringify({
           port: serialport,
-          file,
+          file: licenseFile || file,
           selectFlag: selectFlag
           // length: csvSitData.length,
           // sitData: csvSitData[0], backData: csvBackData[0]
@@ -412,21 +3214,23 @@ module.exports = {
         }
       });
 
-      if (endDate) {
+      if (endDate && endDate > 0) {
         server.clients.forEach(function each(client) {
-          /**
-           * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
-           *  */
           const jsonData = JSON.stringify({
             date: endDate,
-            file: file,
+            nowDate: nowDate,
+            file: licenseFile || file,
             selectFlag: selectFlag
-            // length: csvSitData.length,
-            // sitData: csvSitData[0], backData: csvBackData[0]
           });
-
           if (client.readyState === WebSocket.OPEN) {
             client.send(jsonData);
+          }
+        });
+      } else {
+        // 没有有效密钥时，发送错误信息给前端
+        server.clients.forEach(function each(client) {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({ licenseError: '未检测到有效密钥，请输入密钥后使用', noLicense: true }));
           }
         });
       }
@@ -441,71 +3245,80 @@ module.exports = {
         // }
 
         if (getMessage.date != null) {
-          const content = (getMessage.date.date)
-          const date = content
+          try {
+            const content = (getMessage.date.date)
+            const date = content
 
-
-          const dateRes = module2.decryptStr(date)
-
-          // const file = module2.encStr(date).file
-          // const startTimeRes = module2.encStr(`${getMessage.date.startTime}`)
-          // const content = (JSON.stringify({ dateRes }))
-          // const content1 = module2.encStr(content)
-
-          fs.writeFile(nameTxt, date, err => {
-            if (err) {
-              console.error(err);
+            if (!date || date.trim() === '') {
+              // 空密钥处理：发送错误提示给前端
+              logger.warn('[License] Empty license key received');
+              server.clients.forEach(function each(client) {
+                if (client.readyState === WebSocket.OPEN) {
+                  client.send(JSON.stringify({ licenseError: '密钥不能为空，请输入有效密钥' }));
+                }
+              });
+              return;
             }
-            // date = module2.decryptStr(content) 
-            // file written successfully
-          });
-          // date = JSON.parse(content).dateRes
 
+            const dateRes = module2.decryptStr(date)
 
-          // sysStartTime = getMessage.date.startTime
+            if (!dateRes) {
+              logger.warn('[License] Failed to decrypt license key');
+              server.clients.forEach(function each(client) {
+                if (client.readyState === WebSocket.OPEN) {
+                  client.send(JSON.stringify({ licenseError: '密钥无效，解密失败' }));
+                }
+              });
+              return;
+            }
 
-          // console.log(JSON.parse(content).dateRes)
-
-          // endDate = parseFloat(module2.decryptStr(date))
-          const parsedLicense = JSON.parse(dateRes);
-          const rawFile = parsedLicense.file;
-          selectFlag = rawFile; // 淇濈暀鍘熷鍊硷紙'all'銆佸瓧绗︿覆銆佹垨鏁扮粍锛夊彂閫佺粰鍓嶇
-
-          // 瑙ｆ瀽 file 瀛楁锛氭敮鎸?'all'銆佸崟涓瓧绗︿覆銆佹暟缁勪笁绉嶆牸寮?
-          if (rawFile === 'all') {
-            file = defauleFile;
-          } else if (Array.isArray(rawFile)) {
-            file = rawFile[0] || defauleFile;
-          } else {
-            file = rawFile || defauleFile;
-          }
-          endDate = parseFloat(parsedLicense.date);
-
-          // 根据 file 类型设置波特率
-          if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(file) || file.includes('robot')) {
-            baudRate = 921600
-          } else if (['bed4096', 'bed4096num'].includes(file)) {
-            baudRate = 3000000
-          } else {
-            baudRate = 1000000
-          }
-
-          server.clients.forEach(function each(client) {
-            /**
-             * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
-             *  */
-            const jsonData = JSON.stringify({
-              date: date,
-              file,
-              selectFlag: selectFlag
-              // length: csvSitData.length,
-              // sitData: csvSitData[0], backData: csvBackData[0]
+            fs.mkdirSync(path.dirname(writableNameTxt), { recursive: true });
+            fs.writeFile(writableNameTxt, date, err => {
+              if (err) {
+                logger.error(err);
+              }
             });
-            if (client.readyState === WebSocket.OPEN) {
-              client.send(jsonData);
-            }
-          });
+            nameTxt = writableNameTxt;
 
+            const parsedLicense = JSON.parse(dateRes);
+            licenseFile = parsedLicense.file || null;
+            selectFlag = getSelectFlagFromLicense(parsedLicense.file);
+            // 支持 moduleConfig 字段：各传感器类型的默认功能模块配置
+            // { [sensorValue]: numMatrixFlag }
+            const rawModuleConfig = parsedLicense.moduleConfig || null;
+            const nextFile = getDefaultFileFromLicense(parsedLicense.file);
+            if (nextFile) {
+              file = nextFile;
+              Object.keys(petCareSystems).forEach(resetPetCareRuntime);
+            }
+            endDate = parseFloat(parsedLicense.date);
+
+            baudRate = getSensorBaudRate(file);
+            server.clients.forEach(function each(client) {
+              const payload = {
+                date: endDate,
+                nowDate: nowDate,
+                file: licenseFile || file,
+                selectFlag: selectFlag,
+              };
+              // 将功能模块配置一并下发给前端
+              if (rawModuleConfig) {
+                payload.moduleConfig = rawModuleConfig;
+              }
+              const jsonData = JSON.stringify(payload);
+              if (client.readyState === WebSocket.OPEN) {
+                client.send(jsonData);
+              }
+            });
+
+          } catch (err) {
+            logger.error('[License] Invalid license key:', err.message);
+            server.clients.forEach(function each(client) {
+              if (client.readyState === WebSocket.OPEN) {
+                client.send(JSON.stringify({ licenseError: '密钥无效，请检查后重新输入' }));
+              }
+            });
+          }
         }
 
 
@@ -513,7 +3326,7 @@ module.exports = {
         // if(new Date().getTime() >= parseInt(sysStartTime) + parseInt(module2.decryptStr(date)) * 24 * 60 * 60 * 1000){
         //   server.clients.forEach(function each(client) {
         //     /**
-        //      * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+        //      * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
         //      *  */
         //     const jsonData = JSON.stringify({
         //       timeExpires: true,
@@ -545,6 +3358,7 @@ module.exports = {
 
           if (getMessage.history === false) {
             history = false;
+            stopPlaybackTimer();
           }
 
           if (getMessage.variety != null) {
@@ -580,12 +3394,14 @@ module.exports = {
             }
           }
 
-          // 缃浂
+          // 缂冾噣娴?
           if (getMessage.resetZero === true) {
             if (pointArr) pointArr1zero = [...pointArr1zeroData]
             if (pointArr2) pointArr2zero = [...pointArr2zeroData]
             if (pointArr3) pointArr3zero = [...pointArr3zeroData]
             if (pointArr4) pointArr4zero = [...pointArr4zeroData]
+            if (pointArr1RawZeroData.length) pointArr1RawZero = [...pointArr1RawZeroData]
+            if (pointArr2RawZeroData.length) pointArr2RawZero = [...pointArr2RawZeroData]
             if (newArr147) pointArr147zero = [...newArr147]
             if (newArr147_2) pointArr147zero_2 = [...newArr147_2]
 
@@ -596,6 +3412,8 @@ module.exports = {
             pointArr2zero = []
             pointArr3zero = []
             pointArr4zero = []
+            pointArr1RawZero = []
+            pointArr2RawZero = []
             pointArr147zero = []
             pointArr147zero_2 = []
           }
@@ -603,8 +3421,17 @@ module.exports = {
           if (JSON.parse(message).file != null) {
             backClose = true
             sitClose = true
+            headClose = true
+            sensorClose = true
+            // 清除 com 变量，防止自动重连定时器用旧值重新打开串口
+            com = undefined;
+            com1 = undefined;
+            comhead = undefined;
+            comSensor = undefined;
             if (port1?.isOpen) {
-              port1.close();
+              port1.close((err) => {
+                if (err) logger.warn('port1 close error on file switch:', err);
+              });
 
               const jsonData = JSON.stringify({
                 sitData:
@@ -620,7 +3447,9 @@ module.exports = {
               });
             }
             if (port2?.isOpen) {
-              port2.close();
+              port2.close((err) => {
+                if (err) logger.warn('port2 close error on file switch:', err);
+              });
               const jsonData = JSON.stringify({
                 backData: new Array(backTotal).fill(0),
               });
@@ -633,7 +3462,9 @@ module.exports = {
             }
 
             if (portHead?.isOpen) {
-              portHead.close();
+              portHead.close((err) => {
+                if (err) logger.warn('portHead close error on file switch:', err);
+              });
               const jsonData = JSON.stringify({
                 headData: new Array(100).fill(0),
               });
@@ -644,22 +3475,26 @@ module.exports = {
                 }
               });
             }
+            closeMinzhenSensorPort('file switch');
             const receiveFile = JSON.parse(message).file
             // db = new sqlite3.Database(`${filePath}/${receiveFile}.db`);
             file = receiveFile;
+            Object.keys(petCareSystems).forEach(resetPetCareRuntime);
 
-            if (['hand0205', 'footVideo', 'eye', 'daliegu', 'smallSample'].includes(receiveFile) || receiveFile.includes('robot')) {
-              baudRate = 921600
-            } else if (['bed4096', 'bed4096num',].includes(receiveFile)) {
-              baudRate = 3000000
-            } else {
-              baudRate = 1000000
-            }
+            baudRate = getSensorBaudRate(receiveFile);
 
             const dbObj = initDb(file)
             db = dbObj.db
             db1 = dbObj.db1
             db2 = dbObj.db2
+
+            // 切换 file 时重置回放状态
+            stopPlaybackTimer();
+            nowIndex = 0;
+            localData = [];
+            localDataBack = [];
+            localDataHead = [];
+            indexArr = [0, 0];
 
           }
 
@@ -667,11 +3502,14 @@ module.exports = {
             baudRate = Number(JSON.parse(message).baudRate)
           }
           /**
-           * 灏嗘湰鍦颁繚瀛樻暟鎹€氶亾鎵撳紑
+           * 鐏忓棙婀伴崷棰佺箽鐎涙ɑ鏆熼幑顕€鈧岸浜鹃幍鎾崇磻
            */
           if (JSON.parse(message).getTime != null) {
             getTime = JSON.parse(message).getTime;
             localFlag = true;
+            nowGetTime = getTime;
+            loadSelectedHistory(getTime);
+            return;
             const selectQuery = "select * from matrix WHERE date=?";
 
             const params = [getTime];
@@ -683,43 +3521,26 @@ module.exports = {
                 if (err) {
                   db.all(selectQuery, params, (err, rows) => {
                     if (err) {
-                      console.error(err);
+                      logger.error(err);
                     } else {
                       localData = rows;
-                      length = rows.length
-                        ? Math.min(
-                          rows.length,
-                          localDataBack.length ? localDataBack.length : rows.length
-                        )
-                        : localDataBack.length;
-                      indexArr = [0, length - 2];
-                      timeStamp = [];
-                      for (let i = 0; i < rows.length; i++) {
-                        timeStamp.push(rows[i].timestamp);
-                      }
+                      const historySeries = getHistorySeries({
+                        sitRows: localData,
+                        backRows: localDataBack,
+                        file,
+                      });
+                      length = historySeries.length;
+                      indexArr = [0, Math.max(length - 2, 0)];
+                      timeStamp = historySeries.time;
+                      detectedInterval = calcDetectedInterval(timeStamp);
+                      interval = detectedInterval;
                       historyArr = [0, length];
-                      let press = [],
-                        area = [];
-                      for (let i = 0; i < rows.length; i++) {
-                        let a =
-                          totalToN(JSON.parse(localData[i].data).reduce((a, b) => a + b, 0)) +
-                          (isCar(file) && localDataBack[i]
-                            ? totalToN(JSON.parse(localDataBack[i].data).reduce((a, b) => a + b, 0), 1.3)
-                            : 0);
-                        let b =
-                          JSON.parse(localData[i].data).filter((a) => a > 10).length +
-                          (isCar(file) && localDataBack[i]
-                            ? JSON.parse(localDataBack[i].data).filter((a) => a > 10)
-                              .length
-                            : 0);
-                        // press.push(a);
-                        press.push(a);
-                        area.push(b);
-                      }
+                      const press = historySeries.press;
+                      const area = historySeries.area;
 
                       server.clients.forEach(function each(client) {
                         /**
-                         * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                         * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?鏆?
                          *  */
                         const jsonData = JSON.stringify({
                           length: length,
@@ -750,7 +3571,7 @@ module.exports = {
 
                       //     server.clients.forEach(function each(client) {
                       //       /**
-                      //        * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                      //        * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                       //        *  */
 
                       //       const jsonData = JSON.stringify({
@@ -771,7 +3592,7 @@ module.exports = {
                       // } else {
                       //   server.clients.forEach(function each(client) {
                       //     /**
-                      //      * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                      //      * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                       //      *  */
 
                       //     const jsonData = JSON.stringify({
@@ -801,6 +3622,8 @@ module.exports = {
                   for (let i = 0; i < rows.length; i++) {
                     timeStamp.push(rows[i].timestamp);
                   }
+                  detectedInterval = calcDetectedInterval(timeStamp);
+                  interval = detectedInterval;
                   historyArr = [0, length];
                   let press = [],
                     area = [];
@@ -827,7 +3650,7 @@ module.exports = {
 
                   //   // server.clients.forEach(function each(client) {
                   //   //   /**
-                  //   //    * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                  //   //    * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                   //   //    *  */
 
                   //   //   const jsonData = JSON.stringify({
@@ -849,13 +3672,13 @@ module.exports = {
 
                   db.all(selectQuery, params, (err, rows) => {
                     if (err) {
-                      console.error(err);
+                      logger.error(err);
                     } else {
 
-                      if (file == 'volvo') {
+                      if (isThreePortFile(file)) {
                         db2.all(selectQuery, params, (err, rows) => {
                           if (err) {
-                            console.error(err);
+                            logger.error(err);
                           } else {
 
 
@@ -872,6 +3695,8 @@ module.exports = {
                             for (let i = 0; i < rows.length; i++) {
                               timeStamp.push(rows[i].timestamp);
                             }
+                            detectedInterval = calcDetectedInterval(timeStamp);
+                            interval = detectedInterval;
                             historyArr = [0, length];
                             let press = [],
                               area = [];
@@ -879,7 +3704,7 @@ module.exports = {
 
                             server.clients.forEach(function each(client) {
                               /**
-                               * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                               * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                                *  */
                               const jsonData = JSON.stringify({
                                 // length: length,
@@ -904,40 +3729,23 @@ module.exports = {
                       }
 
                       localData = rows;
-                      length = rows.length
-                        ? Math.min(
-                          rows.length,
-                          localDataBack.length ? localDataBack.length : rows.length
-                        )
-                        : localDataBack.length;
-                      indexArr = [0, length - 2];
-                      timeStamp = [];
-                      for (let i = 0; i < rows.length; i++) {
-                        timeStamp.push(rows[i].timestamp);
-                      }
+                      const historySeries = getHistorySeries({
+                        sitRows: localData,
+                        backRows: localDataBack,
+                        file,
+                      });
+                      length = historySeries.length;
+                      indexArr = [0, Math.max(length - 2, 0)];
+                       timeStamp = historySeries.time;
+                      detectedInterval = calcDetectedInterval(timeStamp);
+                      interval = detectedInterval;
                       historyArr = [0, length];
-                      let press = [],
-                        area = [];
-                      for (let i = 0; i < rows.length; i++) {
-                        let a =
-                          totalToN(JSON.parse(localData[i].data).reduce((a, b) => a + b, 0)) +
-                          (isCar(file) && localDataBack[i]
-                            ? totalToN(JSON.parse(localDataBack[i].data).reduce((a, b) => a + b, 0), 1.3)
-                            : 0);
-                        let b =
-                          JSON.parse(localData[i].data).filter((a) => a > 10).length +
-                          (isCar(file) && localDataBack[i]
-                            ? JSON.parse(localDataBack[i].data).filter((a) => a > 10)
-                              .length
-                            : 0);
-                        // press.push(a);
-                        press.push(a);
-                        area.push(b);
-                      }
+                      const press = historySeries.press;
+                      const area = historySeries.area;
 
                       server.clients.forEach(function each(client) {
                         /**
-                         * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                         * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆??
                          *  */
                         const jsonData = JSON.stringify({
                           length: length,
@@ -968,7 +3776,7 @@ module.exports = {
 
                       //     server.clients.forEach(function each(client) {
                       //       /**
-                      //        * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                      //        * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                       //        *  */
 
                       //       const jsonData = JSON.stringify({
@@ -989,7 +3797,7 @@ module.exports = {
                       // } else {
                       //   server.clients.forEach(function each(client) {
                       //     /**
-                      //      * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                      //      * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                       //      *  */
 
                       //     const jsonData = JSON.stringify({
@@ -1012,43 +3820,26 @@ module.exports = {
             if (!isCar(file)) {
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
                   localData = rows;
-                  length = rows.length
-                    ? Math.min(
-                      rows.length,
-                      localDataBack.length ? localDataBack.length : rows.length
-                    )
-                    : localDataBack.length;
-                  indexArr = [0, length - 2];
-                  timeStamp = [];
-                  for (let i = 0; i < rows.length; i++) {
-                    timeStamp.push(rows[i].timestamp);
-                  }
+                  const historySeries = getHistorySeries({
+                    sitRows: localData,
+                    backRows: localDataBack,
+                    file,
+                  });
+                  length = historySeries.length;
+                  indexArr = [0, Math.max(length - 2, 0)];
+                  timeStamp = historySeries.time;
+                  detectedInterval = calcDetectedInterval(timeStamp);
+                  interval = detectedInterval;
                   historyArr = [0, length];
-                  let press = [],
-                    area = [];
-                  for (let i = 0; i < rows.length; i++) {
-                    let a =
-                      totalToN(JSON.parse(localData[i].data).reduce((a, b) => a + b, 0)) +
-                      (isCar(file) && localDataBack[i]
-                        ? totalToN(JSON.parse(localDataBack[i].data).reduce((a, b) => a + b, 0), 1.3)
-                        : 0);
-                    let b =
-                      JSON.parse(localData[i].data).filter((a) => a > 10).length +
-                      (isCar(file) && localDataBack[i]
-                        ? JSON.parse(localDataBack[i].data).filter((a) => a > 10)
-                          .length
-                        : 0);
-                    // press.push(a);
-                    press.push(a);
-                    area.push(b);
-                  }
+                  const press = historySeries.press;
+                  const area = historySeries.area;
 
                   server.clients.forEach(function each(client) {
                     /**
-                     * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                     * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                      *  */
                     const jsonData = JSON.stringify({
                       length: length,
@@ -1079,7 +3870,7 @@ module.exports = {
 
                   //     server.clients.forEach(function each(client) {
                   //       /**
-                  //        * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                  //        * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                   //        *  */
 
                   //       const jsonData = JSON.stringify({
@@ -1100,7 +3891,7 @@ module.exports = {
                   // } else {
                   //   server.clients.forEach(function each(client) {
                   //     /**
-                  //      * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                  //      * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                   //      *  */
 
                   //     const jsonData = JSON.stringify({
@@ -1128,33 +3919,43 @@ module.exports = {
 
           if (JSON.parse(message).flag === true) {
             flag = true;
+            resetCollectionStorageClock();
           } else if (JSON.parse(message).flag === false) {
             flag = false;
           }
 
           if (JSON.parse(message).colHZ != null) {
-            colHZ = JSON.parse(message).colHZ;
+            colHZ = normalizeCollectFrequency(JSON.parse(message).colHZ);
+            collectOptions = normalizeCollectOptions({
+              ...collectOptions,
+              frequencyHz: colHZ,
+            });
+          }
+
+          if (JSON.parse(message).collectOptions != null) {
+            collectOptions = normalizeCollectOptions(JSON.parse(message).collectOptions);
+            colHZ = collectOptions.frequencyHz;
           }
 
           /**
-           * 灏嗗疄鏃跺骇妞呮暟鎹€氶亾鎵撳紑
+           * 鐏忓棗鐤勯弮璺洪獓濡炲懏鏆熼幑顕€鈧岸浜鹃幍鎾崇磻
            */
           if (JSON.parse(message).sitPort != null) {
             sitClose = false
             com = JSON.parse(message).sitPort;
             if (port1?.isOpen) {
               port1.close((e) => {
-                console.log(e)
+                logger.debug(e)
               });
             }
             if (com == com1) {
               if (port2?.isOpen) {
                 port2.close((e) => {
-                  console.log(e)
+                  logger.debug(e)
                 });
               }
             }
-            console.log(baudRate)
+            logger.debug(baudRate)
             if (file != "bigBed") {
               console.log(com);
               try {
@@ -1166,15 +3967,15 @@ module.exports = {
                     autoOpen: true,
                   },
                   function (err) {
-                    console.log(err, "err");
+                    logger.warn(err, "err");
                   }
                 );
-                //绠￠亾娣诲姞瑙ｆ瀽鍣?
+                //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
                 // let splitBuffer = Buffer.from([0xaa, 0x55, 0x03, 0x99]);
                 // parser = new Delimiter({ delimiter: splitBuffer });
-                port1.pipe(parser);
+                port1.pipe(getSitParser());
               } catch (e) {
-                console.log(e, "e");
+                logger.warn(e, "e");
               }
             } else {
               try {
@@ -1186,13 +3987,13 @@ module.exports = {
                     autoOpen: true,
                   },
                   function (err) {
-                    console.log(err, "err");
+                    logger.warn(err, "err");
                   }
                 );
-                //绠￠亾娣诲姞瑙ｆ瀽鍣?
+                //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
                 port1.pipe(parser3);
               } catch (e) {
-                console.log(e, "e");
+                logger.warn(e, "e");
               }
             }
           }
@@ -1203,13 +4004,13 @@ module.exports = {
             comhead = JSON.parse(message).headPort;
             if (portHead?.isOpen) {
               portHead.close((e) => {
-                console.log(e)
+                logger.debug(e)
               });
             }
             // if (com == com1) {
             //   if (port2?.isOpen) {
             //     port2.close((e) => {
-            //       console.log(e)
+            //       logger.debug(e)
             //     });
             //   }
             // }
@@ -1227,12 +4028,12 @@ module.exports = {
                     console.log(err, baudRate, JSON.parse(message).headPort, "headerr");
                   }
                 );
-                //绠￠亾娣诲姞瑙ｆ瀽鍣?
+                //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
                 // let splitBuffer = Buffer.from([0xaa, 0x55, 0x03, 0x99]);
                 // parser = new Delimiter({ delimiter: splitBuffer });
                 portHead.pipe(parser4);
               } catch (e) {
-                console.log(e, "e");
+                logger.warn(e, "e");
               }
             } else {
               try {
@@ -1247,16 +4048,20 @@ module.exports = {
                     console.log(err, "headerr");
                   }
                 );
-                //绠￠亾娣诲姞瑙ｆ瀽鍣?
+                //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
                 portHead.pipe(parser4);
               } catch (e) {
-                console.log(e, "e");
+                logger.warn(e, "e");
               }
             }
           }
 
+          if (JSON.parse(message).sensorPort != null) {
+            openMinzhenSensorPort(JSON.parse(message).sensorPort);
+          }
+
           /**
-           * 灏嗗疄鏃堕潬鑳屾暟鎹€氶亾鎵撳紑
+           * 鐏忓棗鐤勯弮鍫曟浆閼冲本鏆熼幑顕€鈧岸浜鹃幍鎾崇磻
            */
           if (JSON.parse(message).backPort != null) {
             backClose = false
@@ -1283,51 +4088,65 @@ module.exports = {
                   autoOpen: true,
                 },
                 function (err) {
-                  console.log(err, "err");
+                  logger.warn(err, "err");
                 }
               );
-              //绠￠亾娣诲姞瑙ｆ瀽鍣?
+              //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
 
-              port2.pipe(parser2);
+              bindBackPortParser();
             } catch (e) {
-              console.log(e, "e");
+              logger.warn(e, "e");
             }
           }
 
           /**
-           * 灏嗗骇妞呮暟鎹€氶亾鍏抽棴
+           * 鐏忓棗楠囧鍛殶閹诡噣鈧岸浜鹃崗鎶芥４
            */
           if (JSON.parse(message).sitClose === true) {
             sitClose = true
+            com = undefined; // 清除 com 防止自动重连
             if (port1?.isOpen) {
-              port1.close();
+              port1.close((err) => {
+                if (err) logger.warn('port1 close error:', err);
+              });
             }
           }
 
           /**
-           * 灏嗛潬鑳屾暟鎹€氶亾鍏抽棴
+           * 鐏忓棝娼懗灞炬殶閹诡噣鈧岸浜鹃崗鎶芥４
            */
           if (JSON.parse(message).backClose === true) {
             backClose = true
+            com1 = undefined; // 清除 com1 防止自动重连
             if (port2?.isOpen) {
-              port2.close();
+              port2.close((err) => {
+                if (err) logger.warn('port2 close error:', err);
+              });
             }
           }
 
           if (JSON.parse(message).headClose === true) {
             headClose = true
+            comhead = undefined; // 清除 comhead 防止自动重连
             if (portHead?.isOpen) {
-
-              portHead.close();
+              portHead.close((err) => {
+                if (err) logger.warn('portHead close error:', err);
+              });
             }
           }
+
+          if (JSON.parse(message).sensorClose === true) {
+            sensorClose = true
+            comSensor = undefined;
+            closeMinzhenSensorPort('manual close');
+          }
           /**
-           * 灏嗚鍙栨湰鍦版暟鎹€氶亾鎵撳紑
+           * 鐏忓棜顕伴崣鏍ㄦ拱閸︾増鏆熼幑顕€鈧岸浜鹃幍鎾崇磻
            */
           if (JSON.parse(message).local === true) {
             localFlag = true;
 
-            // 浼犻€掓椂闂存埑缁欏墠绔?
+            // 娴肩娀鈧帗妞傞梻瀛樺煈缂佹瑥澧犵粩?
             const selectQuery =
               "select DISTINCT date from matrix ORDER BY timestamp DESC LIMIT ?,?";
             const params = [0, 500];
@@ -1335,7 +4154,7 @@ module.exports = {
             if (isCar(file)) {
               db1.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
                   // console.log(rows);
                   let jsonData;
@@ -1370,7 +4189,7 @@ module.exports = {
 
                   db.all(selectQuery, params, (err, rows) => {
                     if (err) {
-                      console.error(err);
+                      logger.error(err);
                     } else {
                       console.log(rows);
                       let jsonData;
@@ -1414,7 +4233,7 @@ module.exports = {
                       });
                       // }
 
-                      if (file == "volvo") {
+                      if (isThreePortFile(file)) {
                         const jsonData1 = JSON.stringify({
                           headData: new Array(100).fill(0),
                         });
@@ -1431,7 +4250,7 @@ module.exports = {
             } else {
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
                   console.log(rows);
                   let jsonData;
@@ -1506,7 +4325,7 @@ module.exports = {
                 }
               });
 
-              if (file == 'volvo') {
+              if (isThreePortFile(file)) {
                 let jsonData2 = JSON.stringify({
                   headData: new Array(sitTotal).fill(0),
                   // backData: new Array(1024).fill(0)
@@ -1534,13 +4353,13 @@ module.exports = {
             //         autoOpen: true,
             //       },
             //       function (err) {
-            //         console.log(err, "err");
+            //         logger.warn(err, "err");
             //       }
             //     );
-            //     //绠￠亾娣诲姞瑙ｆ瀽鍣?
+            //     //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
             //     // port1.pipe(parser);
             //   } catch (e) {
-            //     console.log(e, "e");
+            //     logger.warn(e, "e");
             //   }
             // }
 
@@ -1553,13 +4372,13 @@ module.exports = {
             //         autoOpen: true,
             //       },
             //       function (err) {
-            //         console.log(err, "err");
+            //         logger.warn(err, "err");
             //       }
             //     );
-            //     //绠￠亾娣诲姞瑙ｆ瀽鍣?
+            //     //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
             //     // port2.pipe(parser2);
             //   } catch (e) {
-            //     console.log(e, "e");
+            //     logger.warn(e, "e");
             //   }
             // }
           }
@@ -1589,23 +4408,141 @@ module.exports = {
                   sitFlag: localData.length > 0,
                 }
 
-                if (['hand0205', 'robot1'].includes(file)) {
-                  sitObj.newArr147 = localData[value]?.data
-                  backObj.newArr147 = localData[value]?.data
+
+                if (file.includes('robot')) {
+                  const sitRawText = localData[value]?.data
+                  const backRawText = localDataBack[value]?.data
+                  if (sitRawText) {
+                    const sitFrame = parseStoredSensorFrame(JSON.parse(sitRawText), file)
+                    const sitRaw = sitFrame.pressureData
+                    if (sitFrame.rotateData.length) sitObj.rotate = sitFrame.rotateData
+                    if (sitRaw.length >= 256) {
+                      // 新版：前256是原始数据，后4是四元数
+                      const sitPressure = sitRaw.slice(0, 256)
+                      sitObj.sitData = sitPressure
+                      sitObj.newArr147 = sitPressure
+                    } else {
+                      // 旧版：直接是压力数据
+                      const sitPressure = normalizeFiniteFrame(sitRaw, 256)
+                      sitObj.sitData = sitPressure
+                      sitObj.newArr147 = sitPressure
+                    }
+                  }
+                  if (backRawText) {
+                    const backFrame = parseStoredSensorFrame(JSON.parse(backRawText), file)
+                    const backRaw = backFrame.pressureData
+                    if (backFrame.rotateData.length) backObj.rotate = backFrame.rotateData
+                    if (backRaw.length >= 256) {
+                      // 新版：前256是原始数据，后4是四元数
+                      const backPressure = backRaw.slice(0, 256)
+                      backObj.backData = backPressure
+                      backObj.newArr147 = backPressure
+                    } else {
+                      // 旧版：直接是压力数据
+                      const backPressure = normalizeFiniteFrame(backRaw, 256)
+                      backObj.backData = backPressure
+                      backObj.newArr147 = backPressure
+                    }
+                  }
+                } else if (isHandGloveType(file)) {
+                  // 鍏煎鏂版棫鏁版嵁鏍煎紡锛氭柊鐗?60(256+4)锛屾棫鐗?51(147+4)
+                  const sitRawFrame = parseStoredSensorFrame(JSON.parse(localData[value]?.data || '[]'), file)
+                  const backRawFrame = parseStoredSensorFrame(JSON.parse(localDataBack[value]?.data || '[]'), file)
+                  const sitRaw = sitRawFrame.pressureData
+                  const backRaw = backRawFrame.pressureData
+                  if (file === HAND_GLOVE_FULL_PACKET && sitRaw.length >= 256) {
+                    const sitPressure = sitRaw.slice(0, 256)
+                    const sitMapped = mapHandGloveFullPacketPressure([...sitPressure], 'left')
+                    sitObj.sitData = mapHandGloveFullPacketModelMatrix(sitMapped)
+                    sitObj.realArr = sitPressure
+                    sitObj.rawPressureData = sitPressure
+                    sitObj.newArr147 = sitMapped
+                    sitObj.mappedArr195 = sitMapped
+                    sitObj.rotate = []
+                  } else if (sitRaw.length >= 260) {
+                    // 鏂扮増锛氬墠256鏄師濮嬫暟鎹紝鍚?鏄洓鍏冩暟
+                    const sitPressure = sitRaw.slice(0, 256)
+                    const sitRotate = sitRawFrame.rotateData.length ? sitRawFrame.rotateData : sitRaw.slice(256, 260)
+                    sitObj.sitData = sitPressure
+                    sitObj.newArr147 = file === HAND_GLOVE_FULL_PACKET ? mapHandGloveFullPacketPressure([...sitPressure], 'left') : handL([...sitPressure])
+                    sitObj.rotate = sitRotate
+                  } else if (sitRaw.length >= 256) {
+                    const sitPressure = sitRaw.slice(0, 256)
+                    sitObj.sitData = sitPressure
+                    sitObj.rawPressureData = sitPressure
+                    sitObj.newArr147 = handL([...sitPressure])
+                    sitObj.rotate = sitRawFrame.rotateData
+                  } else {
+                    // 鏃х増锛氬墠147鏄痭ewArr147锛屽悗4鏄洓鍏冩暟
+                    sitObj.newArr147 = sitRawFrame.rotateData.length ? sitRaw : sitRaw.slice(0, sitRaw.length - 4)
+                    sitObj.rotate = sitRawFrame.rotateData.length ? sitRawFrame.rotateData : sitRaw.slice(sitRaw.length - 4)
+                  }
+                  if (file === HAND_GLOVE_FULL_PACKET && backRaw.length >= 256) {
+                    const backPressure = backRaw.slice(0, 256)
+                    const backMapped = mapHandGloveFullPacketPressure([...backPressure], 'right')
+                    backObj.backData = mapHandGloveFullPacketModelMatrix(backMapped)
+                    backObj.realArr = backPressure
+                    backObj.rawPressureData = backPressure
+                    backObj.newArr147 = backMapped
+                    backObj.mappedArr195 = backMapped
+                    backObj.rotate = []
+                  } else if (backRaw.length >= 260) {
+                    const backPressure = backRaw.slice(0, 256)
+                    const backRotate = backRawFrame.rotateData.length ? backRawFrame.rotateData : backRaw.slice(256, 260)
+                    backObj.backData = backPressure
+                    backObj.newArr147 = file === HAND_GLOVE_FULL_PACKET ? mapHandGloveFullPacketPressure([...backPressure], 'right') : handR([...backPressure])
+                    backObj.rotate = backRotate
+                  } else if (backRaw.length >= 256) {
+                    const backPressure = backRaw.slice(0, 256)
+                    backObj.backData = backPressure
+                    backObj.rawPressureData = backPressure
+                    backObj.newArr147 = handR([...backPressure])
+                    backObj.rotate = backRawFrame.rotateData
+                  } else {
+                    backObj.newArr147 = backRawFrame.rotateData.length ? backRaw : backRaw.slice(0, backRaw.length - 4)
+                    backObj.rotate = backRawFrame.rotateData.length ? backRawFrame.rotateData : backRaw.slice(backRaw.length - 4)
+                  }
                 }
 
                 if (file == 'footVideo') {
-                  sitObj.newArr147 = footArrToNormal(localData[nowIndex]?.data)
-                  backObj.newArr147 = footArrToNormal(localDataBack[nowIndex]?.data)
+                  if (localData[value]?.data) {
+                    const sitRaw256 = parseStoredSensorFrame(JSON.parse(localData[value].data || '[]'), file).pressureData
+                    if (sitRaw256.length === 256) {
+                      // 新版：存储的是原始256点数据，需要插值和映射
+                      sitObj.sitData = footVideo([...sitRaw256])
+                      sitObj.newArr147 = footL([...sitRaw256])
+                    } else {
+                      // 旧版：存储的是512点插值数据，用旧逻辑
+                      sitObj.newArr147 = footArrToNormal(localData[value].data)
+                    }
+                  }
+                  if (localDataBack[value]?.data) {
+                    const backRaw256 = parseStoredSensorFrame(JSON.parse(localDataBack[value].data || '[]'), file).pressureData
+                    if (backRaw256.length === 256) {
+                      // 新版：存储的是原始256点数据，需要插值和映射
+                      backObj.backData = footVideo1([...backRaw256])
+                      backObj.newArr147 = footR([...backRaw256])
+                    } else {
+                      // 旧版：存储的是512点插值数据，用旧逻辑
+                      backObj.newArr147 = footArrToNormal(localDataBack[value].data)
+                    }
+                  }
+                }
+
+                if (file === WHOLE_CHAIR_TYPE) {
+                  sitObj.sitData = normalizeWholeChairFrame('sit', localData[value]?.data);
+                  backObj.backData = normalizeWholeChairFrame('back', localDataBack[value]?.data);
                 }
 
                 jsonData = JSON.stringify(sitObj);
                 jsonData1 = JSON.stringify(backObj);
 
-                if (file == 'volvo') {
+                if (isThreePortFile(file)) {
                   let jsonData2 = JSON.stringify({
                     // sitData: localData[value]?.data,
-                    headData: localDataHead[value]?.data,
+                    headData: file === WHOLE_CHAIR_TYPE
+                      ? normalizeWholeChairFrame('head', localDataHead[value]?.data)
+                      : localDataHead[value]?.data,
                     time: localDataHead[value]?.timestamp,
                     sitFlag: localData.length > 0,
                   });
@@ -1618,13 +4555,10 @@ module.exports = {
                 }
 
               } else {
-                if (file === 'smallBed') {
-                  // console.log(JSON.stringify(pressSmallBed({ arr: JSON.parse(localData[value]?.data) })))
-                  jsonData = JSON.stringify({
-                    // sitData: pressSmallBed({ arr: JSON.parse(localData[value]?.data) }),
-                    sitData: localData[value]?.data,
-                    time: localData[value]?.timestamp,
-                  });
+                if (file === TEMP_FULL_BED_TYPE) {
+                  jsonData = JSON.stringify(buildTempFullBedPlaybackPayload(localData[value]));
+                } else if (isSmallBedMatrixType(file) || file === SMALL_BED_12B_TYPE) {
+                  jsonData = JSON.stringify(buildSmallBedPlaybackPayload(localData[value]));
                 } else {
                   jsonData = JSON.stringify({
                     sitData: localData[value]?.data,
@@ -1649,7 +4583,7 @@ module.exports = {
           }
           if (JSON.parse(message).speed != null) {
             const speed = JSON.parse(message).speed;
-            interval = parseInt(timeNum / speed);
+            interval = Math.max(1, parseInt(detectedInterval / speed));
 
             if (playFlag) {
               if (timer) {
@@ -1660,17 +4594,16 @@ module.exports = {
                 // console.log(interval)
                 // console.log(localData,nowIndex)
                 let jsonData
-                if (file === 'smallBed') {
-                  jsonData = JSON.stringify({
-                    // sitData: pressSmallBed({ arr: JSON.parse(localData[nowIndex]?.data) }),
-                    sitData: localData[nowIndex]?.data,
-                    // backData: localDataBack[nowIndex]?.data,
-                    time: localData[nowIndex]?.timestamp,
-                    index: nowIndex,
-                  });
+                if (file === TEMP_FULL_BED_TYPE) {
+                  jsonData = JSON.stringify(buildTempFullBedPlaybackPayload(localData[nowIndex], { index: nowIndex }));
+                } else if (isSmallBedMatrixType(file) || file === SMALL_BED_12B_TYPE) {
+                  jsonData = JSON.stringify(buildSmallBedPlaybackPayload(localData[nowIndex], { index: nowIndex }));
                 } else {
+                  const sitPlaybackData = file === WHOLE_CHAIR_TYPE
+                    ? normalizeWholeChairFrame('sit', localData[nowIndex]?.data)
+                    : localData[nowIndex]?.data;
                   jsonData = JSON.stringify({
-                    sitData: localData[nowIndex]?.data,
+                    sitData: sitPlaybackData,
                     // backData: localDataBack[nowIndex]?.data,
                     time: localData[nowIndex]?.timestamp,
                     index: nowIndex,
@@ -1678,9 +4611,12 @@ module.exports = {
                 }
 
 
+                const backPlaybackData = file === WHOLE_CHAIR_TYPE
+                  ? normalizeWholeChairFrame('back', localDataBack[nowIndex]?.data)
+                  : localDataBack[nowIndex]?.data;
                 const jsonData1 = JSON.stringify({
                   // sitData: new Array(sitTotal).fill(0),
-                  backData: localDataBack[nowIndex]?.data,
+                  backData: backPlaybackData,
                   index: nowIndex,
                 });
                 server.clients.forEach(function each(client) {
@@ -1689,10 +4625,12 @@ module.exports = {
                   }
                 });
 
-                if (file == 'volvo') {
+                if (isThreePortFile(file)) {
                   let jsonData2 = JSON.stringify({
                     // sitData: localData[value]?.data,
-                    headData: localDataHead[nowIndex]?.data,
+                    headData: file === WHOLE_CHAIR_TYPE
+                      ? normalizeWholeChairFrame('head', localDataHead[nowIndex]?.data)
+                      : localDataHead[nowIndex]?.data,
                     time: localDataHead[nowIndex]?.timestamp,
                     sitFlag: localData.length > 0,
                   });
@@ -1712,7 +4650,7 @@ module.exports = {
               }, interval);
             } else {
               console.log("clear");
-              clearInterval(timer);
+              stopPlaybackTimer();
             }
           }
           if (getMessage.play != null) {
@@ -1742,26 +4680,139 @@ module.exports = {
                     sitFlag: localData.length > 0,
                   }
 
-                  if (['hand0205', 'robot1'].includes(file)) {
-                    sitObj.newArr147 = localData[nowIndex]?.data
-                    backObj.newArr147 = localDataBack[nowIndex]?.data
+                  if (file.includes('robot')) {
+                  const sitRawText = localData[nowIndex]?.data
+                  const backRawText = localDataBack[nowIndex]?.data
+                  if (sitRawText) {
+                      const sitFrame = parseStoredSensorFrame(JSON.parse(sitRawText), file)
+                      const sitRaw = sitFrame.pressureData
+                      if (sitFrame.rotateData.length) sitObj.rotate = sitFrame.rotateData
+                      if (sitRaw.length >= 256) {
+                        // 新版：前256是原始数据，后4是四元数
+                        const sitPressure = sitRaw.slice(0, 256)
+                        sitObj.sitData = sitPressure
+                        sitObj.newArr147 = sitPressure
+                      } else {
+                        // 旧版：直接是压力数据
+                        const sitPressure = normalizeFiniteFrame(sitRaw, 256)
+                        sitObj.sitData = sitPressure
+                        sitObj.newArr147 = sitPressure
+                      }
+                    }
+                    if (backRawText) {
+                      const backFrame = parseStoredSensorFrame(JSON.parse(backRawText), file)
+                      const backRaw = backFrame.pressureData
+                      if (backFrame.rotateData.length) backObj.rotate = backFrame.rotateData
+                      if (backRaw.length >= 256) {
+                        // 新版：前256是原始数据，后4是四元数
+                        const backPressure = backRaw.slice(0, 256)
+                        backObj.backData = backPressure
+                        backObj.newArr147 = backPressure
+                      } else {
+                        // 旧版：直接是压力数据
+                        const backPressure = normalizeFiniteFrame(backRaw, 256)
+                        backObj.backData = backPressure
+                        backObj.newArr147 = backPressure
+                      }
+                    }
+                  } else if (isHandGloveType(file)) {
+                    // 鍏煎鏂版棫鏁版嵁鏍煎紡锛氭柊鐗?60(256+4)锛屾棫鐗?51(147+4)
+                    const sitRawFrame = parseStoredSensorFrame(JSON.parse(localData[nowIndex]?.data || '[]'), file)
+                    const backRawFrame = parseStoredSensorFrame(JSON.parse(localDataBack[nowIndex]?.data || '[]'), file)
+                    const sitRaw = sitRawFrame.pressureData
+                    const backRaw = backRawFrame.pressureData
+                    if (file === HAND_GLOVE_FULL_PACKET && sitRaw.length >= 256) {
+                      const sitPressure = sitRaw.slice(0, 256)
+                      const sitMapped = mapHandGloveFullPacketPressure([...sitPressure], 'left')
+                      sitObj.sitData = mapHandGloveFullPacketModelMatrix(sitMapped)
+                      sitObj.realArr = sitPressure
+                      sitObj.rawPressureData = sitPressure
+                      sitObj.newArr147 = sitMapped
+                      sitObj.mappedArr195 = sitMapped
+                      sitObj.rotate = []
+                    } else if (sitRaw.length >= 260) {
+                      const sitPressure = sitRaw.slice(0, 256)
+                      const sitRotate = sitRawFrame.rotateData.length ? sitRawFrame.rotateData : sitRaw.slice(256, 260)
+                      sitObj.sitData = sitPressure
+                      sitObj.newArr147 = file === HAND_GLOVE_FULL_PACKET ? mapHandGloveFullPacketPressure([...sitPressure], 'left') : handL([...sitPressure])
+                      sitObj.rotate = sitRotate
+                    } else if (sitRaw.length >= 256) {
+                      const sitPressure = sitRaw.slice(0, 256)
+                      sitObj.sitData = sitPressure
+                      sitObj.rawPressureData = sitPressure
+                      sitObj.newArr147 = handL([...sitPressure])
+                      sitObj.rotate = sitRawFrame.rotateData
+                    } else {
+                      sitObj.newArr147 = sitRawFrame.rotateData.length ? sitRaw : sitRaw.slice(0, sitRaw.length - 4)
+                      sitObj.rotate = sitRawFrame.rotateData.length ? sitRawFrame.rotateData : sitRaw.slice(sitRaw.length - 4)
+                    }
+                    if (file === HAND_GLOVE_FULL_PACKET && backRaw.length >= 256) {
+                      const backPressure = backRaw.slice(0, 256)
+                      const backMapped = mapHandGloveFullPacketPressure([...backPressure], 'right')
+                      backObj.backData = mapHandGloveFullPacketModelMatrix(backMapped)
+                      backObj.realArr = backPressure
+                      backObj.rawPressureData = backPressure
+                      backObj.newArr147 = backMapped
+                      backObj.mappedArr195 = backMapped
+                      backObj.rotate = []
+                    } else if (backRaw.length >= 260) {
+                      const backPressure = backRaw.slice(0, 256)
+                      const backRotate = backRawFrame.rotateData.length ? backRawFrame.rotateData : backRaw.slice(256, 260)
+                      backObj.backData = backPressure
+                      backObj.newArr147 = file === HAND_GLOVE_FULL_PACKET ? mapHandGloveFullPacketPressure([...backPressure], 'right') : handR([...backPressure])
+                      backObj.rotate = backRotate
+                    } else if (backRaw.length >= 256) {
+                      const backPressure = backRaw.slice(0, 256)
+                      backObj.backData = backPressure
+                      backObj.rawPressureData = backPressure
+                      backObj.newArr147 = handR([...backPressure])
+                      backObj.rotate = backRawFrame.rotateData
+                    } else {
+                      backObj.newArr147 = backRawFrame.rotateData.length ? backRaw : backRaw.slice(0, backRaw.length - 4)
+                      backObj.rotate = backRawFrame.rotateData.length ? backRawFrame.rotateData : backRaw.slice(backRaw.length - 4)
+                    }
                   }
 
                   if (file == 'footVideo') {
-                    sitObj.newArr147 = footArrToNormal(localData[nowIndex]?.data)
-                    backObj.newArr147 = footArrToNormal(localDataBack[nowIndex]?.data)
-
+                    if (localData[nowIndex]?.data) {
+                        const sitRaw256 = parseStoredSensorFrame(JSON.parse(localData[nowIndex].data || '[]'), file).pressureData
+                        if (sitRaw256.length === 256) {
+                        // 新版：存储的是原始256点数据，需要插值和映射
+                        sitObj.sitData = footVideo([...sitRaw256])
+                        sitObj.newArr147 = footL([...sitRaw256])
+                      } else {
+                        // 旧版：存储的是512点插值数据，用旧逻辑
+                        sitObj.newArr147 = footArrToNormal(localData[nowIndex].data)
+                      }
+                    }
+                    if (localDataBack[nowIndex]?.data) {
+                        const backRaw256 = parseStoredSensorFrame(JSON.parse(localDataBack[nowIndex].data || '[]'), file).pressureData
+                        if (backRaw256.length === 256) {
+                        // 新版：存储的是原始256点数据，需要插值和映射
+                        backObj.backData = footVideo1([...backRaw256])
+                        backObj.newArr147 = footR([...backRaw256])
+                      } else {
+                        // 旧版：存储的是512点插值数据，用旧逻辑
+                        backObj.newArr147 = footArrToNormal(localDataBack[nowIndex].data)
+                      }
+                    }
                   }
 
-                  if (file === 'smallBed') {
-                    jsonData = JSON.stringify({
-                      // sitData: pressSmallBed({ arr: JSON.parse(localData[nowIndex]?.data) }),
-                      sitData: localData[nowIndex]?.data,
-                      // backData: localDataBack[nowIndex]?.data,
-                      time: localData[nowIndex]?.timestamp,
+                  if (file === WHOLE_CHAIR_TYPE) {
+                    sitObj.sitData = normalizeWholeChairFrame('sit', localData[nowIndex]?.data);
+                    backObj.backData = normalizeWholeChairFrame('back', localDataBack[nowIndex]?.data);
+                  }
+
+                  if (file === TEMP_FULL_BED_TYPE) {
+                    jsonData = JSON.stringify(buildTempFullBedPlaybackPayload(localData[nowIndex], {
                       index: nowIndex,
                       backFlag: localDataBack.length > 0,
-                    });
+                    }));
+                  } else if (isSmallBedMatrixType(file) || file === SMALL_BED_12B_TYPE) {
+                    jsonData = JSON.stringify(buildSmallBedPlaybackPayload(localData[nowIndex], {
+                      index: nowIndex,
+                      backFlag: localDataBack.length > 0,
+                    }));
                   } else {
 
                     jsonData = JSON.stringify(sitObj);
@@ -1777,10 +4828,12 @@ module.exports = {
                     }
                   });
 
-                  if (file == 'volvo') {
+                  if (isThreePortFile(file)) {
                     let jsonData2 = JSON.stringify({
                       // sitData: localData[value]?.data,
-                      headData: localDataHead[nowIndex]?.data,
+                      headData: file === WHOLE_CHAIR_TYPE
+                        ? normalizeWholeChairFrame('head', localDataHead[nowIndex]?.data)
+                        : localDataHead[nowIndex]?.data,
                       index: nowIndex,
                       sitFlag: localData.length > 0,
                     });
@@ -1798,12 +4851,11 @@ module.exports = {
                     }
                   });
                 } else {
-                  playFlag = false;
-                  clearInterval(timer);
+                  stopPlaybackTimer();
                 }
               }, interval);
             } else {
-              clearInterval(timer);
+              stopPlaybackTimer();
             }
           }
 
@@ -1811,7 +4863,7 @@ module.exports = {
             nowIndex = getMessage.index;
           }
 
-          // 浜ゆ崲涓插彛
+          // 娴溿倖宕叉稉鎻掑經
           if (getMessage.exchange != null) {
             [com, com1] = [com1, com];
             // port1.close();
@@ -1834,13 +4886,13 @@ module.exports = {
                       autoOpen: true,
                     },
                     function (err) {
-                      console.log(err, "err");
+                      logger.warn(err, "err");
                     }
                   );
-                  //绠￠亾娣诲姞瑙ｆ瀽鍣?
-                  port1.pipe(parser);
+                  //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
+                  port1.pipe(getSitParser());
                 } catch (e) {
-                  console.log(e, "e");
+                  logger.warn(e, "e");
                 }
               }
 
@@ -1854,13 +4906,13 @@ module.exports = {
                       autoOpen: true,
                     },
                     function (err) {
-                      console.log(err, "err");
+                      logger.warn(err, "err");
                     }
                   );
-                  //绠￠亾娣诲姞瑙ｆ瀽鍣?
-                  port2.pipe(parser2);
+                  //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
+                  bindBackPortParser();
                 } catch (e) {
-                  console.log(e, "e");
+                  logger.warn(e, "e");
                 }
               }
             }, 1000);
@@ -1907,7 +4959,7 @@ module.exports = {
 
               server.clients.forEach(function each(client) {
                 /**
-                 * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                 * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                  *  */
 
                 const jsonData = JSON.stringify({
@@ -1936,10 +4988,15 @@ module.exports = {
               //     newsit.push(JSON.parse(localData[i].data)[x * 32 + y])
               //   }
               // }
-              if (file === 'smallBed') {
+              if (isSmallBedMatrixType(file) || file === SMALL_BED_12B_TYPE || file === TEMP_FULL_BED_TYPE) {
+                const storedSitData = file === TEMP_FULL_BED_TYPE
+                  ? buildTempFullBedPlaybackPayload(localData[i]).sitData
+                  : getStoredSitData(localData[i]);
+                const storedFrame = parseStoredFrameData(localData[i]);
+                const storedWidth = file === TEMP_FULL_BED_TYPE ? 15 : Number(storedFrame?.matrixWidth) || 32;
                 for (let x = sitArr[0]; x < sitArr[1]; x++) {
                   for (let y = sitArr[2]; y < sitArr[3]; y++) {
-                    newsit.push(JSON.parse(localData[i].data)[x * 32 + y]);
+                    newsit.push(storedSitData[x * storedWidth + y]);
                   }
                 }
               } else {
@@ -1963,7 +5020,7 @@ module.exports = {
 
             server.clients.forEach(function each(client) {
               /**
-               * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+               * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                *  */
               const jsonData = JSON.stringify({
                 length: length,
@@ -1980,24 +5037,75 @@ module.exports = {
             });
           }
 
-          // 涓嬭浇csv
+          // 娑撳娴嘽sv
           if (getMessage.download) {
             smoothValue = 0;
             const csvWriteData = [];
             const csvWriteBackData = [];
-            //鏌ヨ璇彞
+            const csvWriteHeadData = [];
+            const csvFormat = String(getMessage.downloadOptions?.format || 'csv').toLowerCase();
+            const csvTitle = getCsvTitleMap(getMessage.downloadOptions || {});
+            if (csvFormat !== 'csv') {
+              broadcastCsvDownloadResult('export csv failed', { error: `unsupported export format: ${csvFormat}` });
+              return;
+            }
+            const csvExportDir = getCsvExportDirectory(getMessage.downloadOptions || {});
+            if (!csvExportDir.ok) {
+              logger.error('[CSV] invalid export directory:', csvExportDir.error);
+              broadcastCsvDownloadResult('export csv failed', { error: csvExportDir.error });
+              return;
+            }
+            const csvTargetPath = (filename) => path.join(csvExportDir.dir, filename);
+            const sendCsvSuccess = (files = []) => broadcastCsvDownloadResult('export csv success', {
+              files,
+              dir: csvExportDir.dir,
+            });
+            const sendCsvFailed = (error, files = []) => broadcastCsvDownloadResult('export csv failed', {
+              files,
+              dir: csvExportDir.dir,
+              error: error?.message || String(error || ''),
+            });
+            const sendCsvProgress = (progress = {}) => broadcastCsvDownloadProgress({
+              ...progress,
+              dir: csvExportDir.dir,
+            });
+            //閺屻儴顕楃拠顓炲綖
             // const selectQuery = 'select * from matrix WHERE timestamp>? and timestamp<? and date=?';
             const selectQuery = "select * from matrix WHERE date=?";
             // const params = [1287154796066,1887154796066,'2023-06-19-14:05'];
             const params = [getMessage.download];
 
+            exportHistoryCsvStreaming({
+              date: getMessage.download,
+              csvTitle,
+              csvTargetPath,
+              sendCsvSuccess,
+              sendCsvFailed,
+              sendCsvProgress,
+              downloadOptions: getMessage.downloadOptions || {},
+            });
+            return;
+
+            if (file === HAND_GLOVE_DOUBLE) {
+              exportHandGloveDoubleCsv({
+                selectQuery,
+                params,
+                csvTitle,
+                csvTargetPath,
+                sendCsvSuccess,
+                sendCsvFailed,
+                downloadOptions: getMessage.downloadOptions || {},
+              });
+              return;
+            }
+
             if (file === "bigBed") {
               let startPressure = 0;
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
-                  //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
+                  //閹跺﹥妞傞梻?閸樺濮忛棃銏⑿?楠炲啿娼庨崢瀣閺佺増宓乸ush鏉╂矞svWriter鏉╂稖顢戝Ч鍥ㄢ偓?
                   for (var i = historyArr[0]; i < historyArr[1]; i++) {
                     // const press = JSON.parse(rows[i][`data`]).reduce(
                     //   (a, b) => a + b,
@@ -2050,7 +5158,7 @@ module.exports = {
                     ).length;
                     const newData = {
                       time: timeStampToDate(rows[i][`timestamp`]),
-                      pressureArea: area, //鍘熷鐭╅樀
+                      pressureArea: area, //閸樼喎顫愰惌鈺呮█
                       pressure: total / length,
                       realData: realArr,
                       pressValue: wsPointData.reduce((a, b) => a + b, 0),
@@ -2059,19 +5167,20 @@ module.exports = {
                     };
                     csvWriteData.push(newData);
                   }
-                  // 灏嗘眹鎬荤殑鍘嬪姏鏁版嵁鍐欏叆 CSV 鏂囦欢
+                  // 鐏忓棙鐪归幀鑽ゆ畱閸樺濮忛弫鐗堝祦閸愭瑥鍙?CSV 閺傚洣娆?
                   // const timeStamp = Date.now()
                   const str = nowGetTime.replace(/[/:]/g, "-");
+                  const csvFilePath = csvTargetPath(`${file}${str}.csv`);
                   const csvWriter = createCsvWriter({
-                    path: `${csvPath}/${file}${str}.csv`, // 鎸囧畾杈撳嚭鏂囦欢鐨勮矾寰勫拰鍚嶇О
+                    path: csvFilePath, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                     header: [
-                      { id: "time", title: "time" },
-                      { id: "pressureArea", title: "area" },
-                      { id: "pressValue", title: "pressTotal" },
-                      { id: "pressure", title: "press" },
-                      { id: "pressuremmgH", title: "pressure" },
-                      { id: "realData", title: "data" },
-                      { id: "pressLine", title: "pressLine" },
+                      { id: "time", title: csvTitle.time },
+                      { id: "pressureArea", title: csvTitle.pressureArea },
+                      { id: "pressValue", title: csvTitle.pressValue },
+                      { id: "pressure", title: csvTitle.pressure },
+                      { id: "pressuremmgH", title: csvTitle.pressuremmgH },
+                      { id: "realData", title: csvTitle.realData },
+                      { id: "pressLine", title: csvTitle.pressLine },
                     ],
                   });
 
@@ -2079,76 +5188,56 @@ module.exports = {
                     .writeRecords(csvWriteData)
                     .then(() => {
                       console.log("export csv success");
-
-                      server.clients.forEach(function each(client) {
-                        const jsonData = JSON.stringify({
-                          download: "export csv success",
-                        });
-                        if (client.readyState === WebSocket.OPEN) {
-                          client.send(jsonData);
-                        }
-                      });
+                      sendCsvSuccess([csvFilePath]);
                     })
                     .catch((err) => {
                       console.error("export csv failed", err);
-
-                      server.clients.forEach(function each(client) {
-                        const jsonData = JSON.stringify({
-                          download: "export csv failed",
-                        });
-                        if (client.readyState === WebSocket.OPEN) {
-                          client.send(jsonData);
-                        }
-                      });
+                      sendCsvFailed(err);
                     });
                 }
               });
-            } else if (file === 'smallBed' || file === 'smallBed1') {
+            } else if (isSmallBedMatrixType(file) || file === 'smallBed1') {
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
-                  //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
+                  //閹跺﹥妞傞梻?閸樺濮忛棃銏⑿?楠炲啿娼庨崢瀣閺佺増宓乸ush鏉╂矞svWriter鏉╂稖顢戝Ч鍥ㄢ偓?
 
                   if (!rows.length) return;
                   for (var i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
-                    let sitData = JSON.parse(rows[i][`data`]);
-                    let realData = JSON.parse(rows[i][`data`]);
+                    const storedFrame = parseStoredFrameData(rows[i]);
+                    let sitData = normalizeHistoryPressureData(rows[i], file);
+                    let matrixWidth = Number(storedFrame?.matrixWidth) || Math.sqrt(sitData.length) || 32;
+                    let matrixHeight = Number(storedFrame?.matrixHeight) || matrixWidth;
+                    if (shouldTransposeSmallBedRawMatrix(file) && matrixWidth === matrixHeight) {
+                      sitData = transposeSquareMatrix(sitData, matrixWidth);
+                    }
                     // sitData = zeroLine(sitData,32,32)
                     // sitData = pressSmallBed({ arr: sitData })
-
-                    const interpArr = interpSmall(sitData, 32, 32, 1, 2)
-                    const dataToInterpGauss = gaussBlur_2(interpArr, 32, 64, 1)
 
                     const press = sitPressSelect.length
                       ? sitPressSelect[i]
                       : sitData.reduce((a, b) => a + b, 0);
-                    // wsPointData = JSON.parse(rows[i][`data`]).map((a) => a < 10 ? 0 : a)
-                    // const realArr = press(wsPointData,1500)
-                    // const pressure = realArr.reduce((a,b) => a+b , 0) / realArr.filter((a) => a> 0).length
-                    const pressuremmgH = calculatePressure(press / realData.filter((a) => a > 0).length)
 
                     const area = sitAreaSelect.length
                       ? sitAreaSelect[i]
-                      : sitData.filter((a) => a > 10).length;
+                      : sitData.filter((a) => a > 0).length;
 
                     const newData = {
                       time: timeStampToDate(rows[i][`timestamp`]),
                       pressureArea: sitAreaSelect.length
                         ? sitAreaSelect[i]
-                        : area * 2.1, //鍘熷鐭╅樀
+                        : area, //閸樼喎顫愰惌鈺呮█
                       pressure: sitPressSelect.length
                         ? sitPressSelect[i]
                         : totalToN(press),
-                      realData: sitData,//rows[i][`data`],
-                      realInitData: rows[i][`data`],
-                      index: (j / 12).toFixed(2),
-                      dataToInterpGauss,
-                      pressuremmgH: pressuremmgH
+                      realData: JSON.stringify(sitData),
+                      index: getCsvElapsedSeconds(rows, i, historyArr[0], j),
+                      max: findMax(sitData),
                     };
                     csvWriteData.push(newData);
                   }
-                  // 灏嗘眹鎬荤殑鍘嬪姏鏁版嵁鍐欏叆 CSV 鏂囦欢
+                  // 鐏忓棙鐪归幀鑽ゆ畱閸樺濮忛弫鐗堝祦閸愭瑥鍙?CSV 閺傚洣娆?
                   // const timeStamp = Date.now()
 
                   // const str = nowGetTime.replace(/[/:]/g, "-");
@@ -2159,54 +5248,30 @@ module.exports = {
                     str = timeStampTo_Date(Number(str));
                   }
 
+                  const csvFilePath = csvTargetPath(`${file}${str}.csv`);
                   const csvWriter = createCsvWriter({
-                    path: `${csvPath}/${file}${str}.csv`, // 鎸囧畾杈撳嚭鏂囦欢鐨勮矾寰勫拰鍚嶇О
-                    header: [
-                      { id: "index", title: "" },
-                      { id: "time", title: "time" },
-                      { id: "pressureArea", title: "area" },
-                      { id: "pressure", title: "press" },
-                      { id: "realInitData", title: "realInitData" },
-                      { id: "pressuremmgH", title: "鍘嬪己澶у皬(mmgH)" },
-                      { id: "realData", title: "data" },
-                      { id: "dataToInterpGauss", title: "algorData" },
-                    ],
+                    path: csvFilePath, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
+                    header: getDefaultSitCsvHeaders(csvTitle),
                   });
 
                   csvWriter
                     .writeRecords(csvWriteData)
                     .then(() => {
                       console.log("export csv success");
-
-                      server.clients.forEach(function each(client) {
-                        const jsonData = JSON.stringify({
-                          download: "export csv success",
-                        });
-                        if (client.readyState === WebSocket.OPEN) {
-                          client.send(jsonData);
-                        }
-                      });
+                      sendCsvSuccess([csvFilePath]);
                     })
                     .catch((err) => {
                       console.error("export csv failed", err);
-
-                      server.clients.forEach(function each(client) {
-                        const jsonData = JSON.stringify({
-                          download: "export csv failed",
-                        });
-                        if (client.readyState === WebSocket.OPEN) {
-                          client.send(jsonData);
-                        }
-                      });
+                      sendCsvFailed(err);
                     });
                 }
               });
             } else if (file === 'sitCol') {
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
-                  //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
+                  //閹跺﹥妞傞梻?閸樺濮忛棃銏⑿?楠炲啿娼庨崢瀣閺佺増宓乸ush鏉╂矞svWriter鏉╂稖顢戝Ч鍥ㄢ偓?
                   const label = getMessage.download.split('_')[1]
                   if (!rows.length) return;
                   for (var i = 0, j = 0; i < rows.length; i++, j++) {
@@ -2216,7 +5281,7 @@ module.exports = {
                     };
                     csvWriteData.push(newData);
                   }
-                  // 灏嗘眹鎬荤殑鍘嬪姏鏁版嵁鍐欏叆 CSV 鏂囦欢
+                  // 鐏忓棙鐪归幀鑽ゆ畱閸樺濮忛弫鐗堝祦閸愭瑥鍙?CSV 閺傚洣娆?
                   // const timeStamp = Date.now()
 
                   // const str = nowGetTime.replace(/[/:]/g, "-");
@@ -2228,11 +5293,12 @@ module.exports = {
                     str = timeStampTo_Date(Number(str));
                   }
 
+                  const csvFilePath = csvTargetPath(`${file}${str}.csv`);
                   const csvWriter = createCsvWriter({
-                    path: `${csvPath}/${file}${str}.csv`, // 鎸囧畾杈撳嚭鏂囦欢鐨勮矾寰勫拰鍚嶇О
+                    path: csvFilePath, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                     header: [
-                      { id: "realData", title: "data" },
-                      { id: "label", title: "label" },
+                      { id: "realData", title: csvTitle.realData },
+                      { id: "label", title: csvTitle.label },
                     ],
                   });
 
@@ -2240,36 +5306,20 @@ module.exports = {
                     .writeRecords(csvWriteData)
                     .then(() => {
                       console.log("export csv success");
-
-                      server.clients.forEach(function each(client) {
-                        const jsonData = JSON.stringify({
-                          download: "export csv success",
-                        });
-                        if (client.readyState === WebSocket.OPEN) {
-                          client.send(jsonData);
-                        }
-                      });
+                      sendCsvSuccess([csvFilePath]);
                     })
                     .catch((err) => {
                       console.error("export csv failed", err);
-
-                      server.clients.forEach(function each(client) {
-                        const jsonData = JSON.stringify({
-                          download: "export csv failed",
-                        });
-                        if (client.readyState === WebSocket.OPEN) {
-                          client.send(jsonData);
-                        }
-                      });
+                      sendCsvFailed(err);
                     });
                 }
               });
             } else if (file === 'matCol') {
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
-                  //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
+                  //閹跺﹥妞傞梻?閸樺濮忛棃銏⑿?楠炲啿娼庨崢瀣閺佺増宓乸ush鏉╂矞svWriter鏉╂稖顢戝Ч鍥ㄢ偓?
                   const label = getMessage.download.split('_')[1]
                   if (!rows.length) return;
                   for (var i = 0, j = 0; i < rows.length; i++, j++) {
@@ -2279,7 +5329,7 @@ module.exports = {
                     };
                     csvWriteData.push(newData);
                   }
-                  // 灏嗘眹鎬荤殑鍘嬪姏鏁版嵁鍐欏叆 CSV 鏂囦欢
+                  // 鐏忓棙鐪归幀鑽ゆ畱閸樺濮忛弫鐗堝祦閸愭瑥鍙?CSV 閺傚洣娆?
                   // const timeStamp = Date.now()
 
                   // const str = nowGetTime.replace(/[/:]/g, "-");
@@ -2291,11 +5341,12 @@ module.exports = {
                     str = timeStampTo_Date(Number(str));
                   }
 
+                  const csvFilePath = csvTargetPath(`${file}${str}.csv`);
                   const csvWriter = createCsvWriter({
-                    path: `${csvPath}/${file}${str}.csv`, // 鎸囧畾杈撳嚭鏂囦欢鐨勮矾寰勫拰鍚嶇О
+                    path: csvFilePath, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                     header: [
-                      { id: "realData", title: "data" },
-                      { id: "label", title: "label" },
+                      { id: "realData", title: csvTitle.realData },
+                      { id: "label", title: csvTitle.label },
                     ],
                   });
 
@@ -2303,120 +5354,146 @@ module.exports = {
                     .writeRecords(csvWriteData)
                     .then(() => {
                       console.log("export csv success");
-
-                      server.clients.forEach(function each(client) {
-                        const jsonData = JSON.stringify({
-                          download: "export csv success",
-                        });
-                        if (client.readyState === WebSocket.OPEN) {
-                          client.send(jsonData);
-                        }
-                      });
+                      sendCsvSuccess([csvFilePath]);
                     })
                     .catch((err) => {
                       console.error("export csv failed", err);
-
-                      server.clients.forEach(function each(client) {
-                        const jsonData = JSON.stringify({
-                          download: "export csv failed",
-                        });
-                        if (client.readyState === WebSocket.OPEN) {
-                          client.send(jsonData);
-                        }
-                      });
+                      sendCsvFailed(err);
                     });
                 }
               });
             } else if (file !== "car10") {
+              // 鍒ゆ柇鏄惁鏄Е瑙夋墜濂楃被鍨嬶紝闇€瑕佸垎绂诲師濮?56鏁版嵁鍜屽洓鍏冩暟
+              const isHandType = isHandStorageType(file);
+              const isHandGloveCsvType = isHandGloveType(file);
+              const shouldWriteZeroFrame = isZeroFrameStorageType(file);
+              const shouldWriteDetectionPoint = file === HAND_SINGLE_POINT_TYPE;
               db.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
-                  //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
-
                   if (!rows.length) return;
                   console.log(historyArr)
                   for (var i = historyArr[0], j = 0; i < historyArr[1] - 1; i++, j++) {
-                    const sitData = JSON.parse(rows[i][`data`]);
-                    console.log(sitData.length)
+                    const rawData = JSON.parse(rows[i][`data`]);
+                    let pressureData, rotateData, zeroFrameData = [];
+                    let tempFullBedPayload = null;
+                    if (file === TEMP_FULL_BED_TYPE) {
+                      tempFullBedPayload = buildTempFullBedPlaybackPayload(rows[i]);
+                      pressureData = tempFullBedPayload.sitData;
+                      rotateData = [];
+                    } else if (shouldWriteZeroFrame) {
+                      const storedFrame = parseStoredSensorFrame(rawData, file);
+                      pressureData = storedFrame.pressureData;
+                      rotateData = storedFrame.rotateData;
+                      zeroFrameData = storedFrame.zeroFrame;
+                    } else if (isHandType) {
+                      // 鍏煎鏂版棫鏁版嵁鏍煎紡
+                      if (rawData.length >= 260) {
+                        // 鏂扮増锛氬墠256鏄師濮嬪帇鍔涙暟鎹紝鍚?鏄洓鍏冩暟
+                        pressureData = rawData.slice(0, 256);
+                        rotateData = rawData.slice(256, 260);
+                      } else {
+                        // 鏃х増锛氬墠147鏄痭ewArr147锛屽悗4鏄洓鍏冩暟
+                        pressureData = rawData.slice(0, rawData.length - 4);
+                        rotateData = rawData.slice(rawData.length - 4);
+                      }
+                    } else {
+                      pressureData = Array.isArray(rawData) ? rawData : getHistoryPressureData(rows[i]);
+                      rotateData = [];
+                    }
+                    if (file === WHOLE_CHAIR_TYPE) {
+                      pressureData = normalizeWholeChairFrame('sit', pressureData);
+                    }
+                    if (shouldTransposeSmallBedRawMatrix(file)) {
+                      pressureData = transposeSquareMatrix(pressureData);
+                    }
+                    console.log(pressureData.length)
                     const press = sitPressSelect.length
                       ? sitPressSelect[i]
-                      : sitData.reduce((a, b) => a + b, 0);
-                    // wsPointData = JSON.parse(rows[i][`data`]).map((a) => a < 10 ? 0 : a)
-                    // const realArr = press(wsPointData,1500)
-                    // const pressure = realArr.reduce((a,b) => a+b , 0) / realArr.filter((a) => a> 0).length
-                    // const pressuremmgH = calculatePressure(pressure)
+                      : pressureData.reduce((a, b) => a + b, 0);
 
                     const area = sitAreaSelect.length
                       ? sitAreaSelect[i]
-                      : sitData.filter((a) => a > 0).length;
+                      : pressureData.filter((a) => a > 0).length;
 
-                    const max = findMax(sitData)
+                    const max = findMax(pressureData)
                     const newData = {
                       time: timeStampToDate(rows[i][`timestamp`]),
                       pressureArea: sitAreaSelect.length
                         ? sitAreaSelect[i]
-                        : area, //鍘熷鐭╅樀
+                        : area,
                       pressure: sitPressSelect.length
                         ? sitPressSelect[i]
                         : totalToN(press),
-                      realData: rows[i][`data`],
-                      index: (j / 12).toFixed(2),
-                      max
-                      // pressuremmgH :pressuremmgH
+                      realData: JSON.stringify(pressureData),
+                      index: getCsvElapsedSeconds(rows, i, historyArr[0], j),
+                      max,
+                      rotate: rotateData.length ? JSON.stringify(rotateData) : '',
+                      zeroFrame: zeroFrameData.length ? JSON.stringify(zeroFrameData) : '',
+                      temperatureData: tempFullBedPayload ? JSON.stringify(tempFullBedPayload.temperatureData.map((value) => Number(value).toFixed(1))) : '',
+                      temperatureAvg: tempFullBedPayload?.temperatureAvg != null ? Number(tempFullBedPayload.temperatureAvg).toFixed(1) : '',
+                      temperatureK: tempFullBedPayload?.temperatureK ?? '',
                     };
+                    if (shouldWriteDetectionPoint) {
+                      newData.detectionPoint = pressureData[pressureData.length - 1] ?? '';
+                    }
+                    if (isHandGloveCsvType) {
+                      Object.assign(newData, buildHandGloveCsvSegments(pressureData, 'left'));
+                    }
                     csvWriteData.push(newData);
                   }
-                  // 灏嗘眹鎬荤殑鍘嬪姏鏁版嵁鍐欏叆 CSV 鏂囦欢
-                  // const timeStamp = Date.now()
 
-                  // const str = nowGetTime.replace(/[/:]/g, "-");
-                  let str = nowGetTime; //.replace(/[/:]/g, "-");
+                  let str = nowGetTime;
                   if (str.includes(" ")) {
                     str = str.split(" ")[0];
                   } else {
                     str = timeStampTo_Date(Number(str));
                   }
 
-                  const csvWriter = createCsvWriter({
-                    path: `${csvPath}/sit${str}.csv`, // 鎸囧畾杈撳嚭鏂囦欢鐨勮矾寰勫拰鍚嶇О
-                    header: [
-                      { id: "index", title: "" },
-                      { id: "max", title: "max" },
-                      { id: "time", title: "time" },
-                      { id: "pressureArea", title: "area" },
-                      { id: "pressure", title: "press" },
-                      // { id: "pressuremmgH", title: "鍘嬪己澶у皬(mmgH)" },
-                      { id: "realData", title: "data" },
+                  const csvHeaders = [
+                    { id: "index", title: csvTitle.index },
+                    { id: "max", title: csvTitle.max },
+                    { id: "time", title: csvTitle.time },
+                    { id: "pressureArea", title: csvTitle.pressureArea },
+                    { id: "pressure", title: csvTitle.pressure },
+                    { id: "realData", title: csvTitle.realData },
+                  ];
+                  if (isHandGloveCsvType) {
+                    appendHandGloveCsvHeaders(csvHeaders, csvTitle);
+                  }
+                  if (shouldWriteDetectionPoint) {
+                    csvHeaders.push({ id: "detectionPoint", title: csvTitle.detectionPoint });
+                  }
+                  if (shouldWriteZeroFrame) {
+                    csvHeaders.push({ id: "zeroFrame", title: csvTitle.zeroFrame });
+                  }
+                  if (isHandType) {
+                    csvHeaders.push({ id: "rotate", title: csvTitle.rotate });
+                  }
+                  if (file === TEMP_FULL_BED_TYPE) {
+                    csvHeaders.push(
+                      { id: "temperatureData", title: csvTitle.temperatureData },
+                      { id: "temperatureAvg", title: csvTitle.temperatureAvg },
+                      { id: "temperatureK", title: csvTitle.temperatureK },
+                    );
+                  }
 
-                    ],
+                  const csvFilePath = csvTargetPath(`${getCsvFilePrefix(file, 'sit', getMessage.downloadOptions || {})}${str}.csv`);
+                  const csvWriter = createCsvWriter({
+                    path: csvFilePath,
+                    header: csvHeaders,
                   });
 
                   csvWriter
                     .writeRecords(csvWriteData)
                     .then(() => {
                       console.log("export csv success");
-
-                      server.clients.forEach(function each(client) {
-                        const jsonData = JSON.stringify({
-                          download: "export csv success",
-                        });
-                        if (client.readyState === WebSocket.OPEN) {
-                          client.send(jsonData);
-                        }
-                      });
+                      sendCsvSuccess([csvFilePath]);
                     })
                     .catch((err) => {
                       console.error("export csv failed", err);
-
-                      server.clients.forEach(function each(client) {
-                        const jsonData = JSON.stringify({
-                          download: "export csv failed",
-                        });
-                        if (client.readyState === WebSocket.OPEN) {
-                          client.send(jsonData);
-                        }
-                      });
+                      sendCsvFailed(err);
                     });
                 }
               });
@@ -2425,16 +5502,40 @@ module.exports = {
             if (isCar(file)) {
               db1.all(selectQuery, params, (err, rows) => {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                 } else {
                   // console.log(rows)
-                  //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
+                  //閹跺﹥妞傞梻?閸樺濮忛棃銏⑿?楠炲啿娼庨崢瀣閺佺増宓乸ush鏉╂矞svWriter鏉╂稖顢戝Ч鍥ㄢ偓?
                   if (!rows.length) return;
 
                   // if()
 
+                  const isBackHandType = isHandStorageType(file);
+                  const isBackHandGloveType = isHandGloveType(file);
+                  const shouldWriteBackZeroFrame = isZeroFrameStorageType(file);
                   for (var i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
-                    const backData = JSON.parse(rows[i][`data`]);
+                    const rawBackData = JSON.parse(rows[i][`data`]);
+                    let backData, backRotateData, backZeroFrameData = [];
+                    if (shouldWriteBackZeroFrame) {
+                      const storedBackFrame = parseStoredSensorFrame(rawBackData, file);
+                      backData = storedBackFrame.pressureData;
+                      backRotateData = storedBackFrame.rotateData;
+                      backZeroFrameData = storedBackFrame.zeroFrame;
+                    } else if (isBackHandType && rawBackData.length >= 260) {
+                      // 新版：前256是原始压力数据，后4是四元数
+                      backData = rawBackData.slice(0, 256);
+                      backRotateData = rawBackData.slice(256, 260);
+                    } else if (isBackHandType && rawBackData.length > 4) {
+                      // 旧版：前N-4是数据，后4是四元数
+                      backData = rawBackData.slice(0, rawBackData.length - 4);
+                      backRotateData = rawBackData.slice(rawBackData.length - 4);
+                    } else {
+                      backData = rawBackData;
+                      backRotateData = [];
+                    }
+                    if (file === WHOLE_CHAIR_TYPE) {
+                      backData = normalizeWholeChairFrame('back', backData);
+                    }
                     // const press = calPressArr(backData , backIndex , 32)
                     const press = backPressSelect.length
                       ? backPressSelect[i]
@@ -2442,38 +5543,33 @@ module.exports = {
                     const area = backAreaSelect.length
                       ? backAreaSelect[i]
                       : backData.filter((a) => a > 10).length;
-                    // const newData = {
-                    //   time: timeStampToDate(rows[i][`timestamp`]),
-                    //   pressureArea: backAreaSelect.length
-                    //     ? backAreaSelect[i]
-                    //     : area * 2.1, //鍘熷鐭╅樀
-                    //   pressure: backPressSelect.length
-                    //     ? backPressSelect[i]
-                    //     : pressToN(area, press),
-                    //   realData: rows[i][`data`],
-                    // };
                     const max = findMax(backData);
                     const newData = {
                       time: timeStampToDate(rows[i][`timestamp`]),
                       pressureArea: backAreaSelect.length
                         ? backAreaSelect[i]
-                        : area, //鍘熷鐭╅樀
+                        : area,
                       pressure: backPressSelect.length
                         ? backPressSelect[i]
                         : totalToN(press, 1.3),
-                      realData: rows[i][`data`],
-                      index: (j / 12).toFixed(2),
+                      realData: JSON.stringify(backData),
+                      index: getCsvElapsedSeconds(rows, i, historyArr[0], j),
                       area1: [...backData].filter(a => a > 1).length,
                       area10: [...backData].filter(a => a > 10).length,
                       total1: backData.reduce((a, b) => a + b, 0),
                       total10: [...backData].filter(a => a > 10).reduce((a, b) => a + b, 0),
                       total10area10: [...backData].filter(a => a > 10).reduce((a, b) => a + b, 0) / [...backData].filter(a => a > 10).length,
                       total1area1: backData.reduce((a, b) => a + b, 0) / [...backData].filter(a => a > 1).length,
-                      max
+                      max,
+                      rotate: backRotateData.length ? JSON.stringify(backRotateData) : '',
+                      zeroFrame: backZeroFrameData.length ? JSON.stringify(backZeroFrameData) : '',
                     };
+                    if (isBackHandGloveType) {
+                      Object.assign(newData, buildHandGloveCsvSegments(backData, 'right'));
+                    }
                     csvWriteBackData.push(newData);
                   }
-                  // 灏嗘眹鎬荤殑鍘嬪姏鏁版嵁鍐欏叆 CSV 鏂囦欢
+                  // 鐏忓棙鐪归幀鑽ゆ畱閸樺濮忛弫鐗堝祦閸愭瑥鍙?CSV 閺傚洣娆?
 
                   // let str = nowGetTime.replace(/[/:]/g, "-");
                   let str = nowGetTime;
@@ -2483,98 +5579,89 @@ module.exports = {
                     str = timeStampTo_Date(Number(str));
                   }
 
+                  const backCsvHeaders = [
+                    { id: "index", title: csvTitle.index },
+                    { id: "time", title: csvTitle.time },
+                    { id: "max", title: csvTitle.max },
+                    { id: "pressureArea", title: csvTitle.pressureArea },
+                    { id: "pressure", title: csvTitle.pressure },
+                    { id: "realData", title: csvTitle.realData },
+                  ];
+                  if (isBackHandGloveType) {
+                    appendHandGloveCsvHeaders(backCsvHeaders, csvTitle);
+                  }
+                  if (shouldWriteBackZeroFrame) {
+                    backCsvHeaders.push({ id: "zeroFrame", title: csvTitle.zeroFrame });
+                  }
+                  if (isBackHandType) {
+                    backCsvHeaders.push({ id: "rotate", title: csvTitle.rotate });
+                  }
+                  const backCsvFilePath = csvTargetPath(`${getCsvFilePrefix(file, 'back', getMessage.downloadOptions || {})}${str}.csv`);
                   const csvWriter1 = createCsvWriter({
-                    path: `${csvPath}/back${str}.csv`,
-                    // path: `./data/back${str}.csv`, // 鎸囧畾杈撳嚭鏂囦欢鐨勮矾寰勫拰鍚嶇О
-                    header: [
-                      { id: "index", title: "" },
-                      { id: "time", title: "time" },
-                      { id: "max", title: "max" },
-                      { id: "pressureArea", title: "area" },
-                      { id: "pressure", title: "press" },
-                      { id: "realData", title: "data" },
-                    ],
+                    path: backCsvFilePath,
+                    header: backCsvHeaders,
                   });
 
                   csvWriter1
                     .writeRecords(csvWriteBackData)
                     .then(() => {
                       console.log("export csv success");
-                      server.clients.forEach(function each(client) {
-                        const jsonData = JSON.stringify({
-                          download: "export csv success",
-                        });
-                        if (client.readyState === WebSocket.OPEN) {
-                          client.send(jsonData);
-                        }
-                      });
+                      sendCsvSuccess([backCsvFilePath]);
                     })
                     .catch((err) => {
                       console.error("export csv failed", err);
-                      server.clients.forEach(function each(client) {
-                        const jsonData = JSON.stringify({
-                          download: "export csv failed",
-                        });
-                        if (client.readyState === WebSocket.OPEN) {
-                          client.send(jsonData);
-                        }
-                      });
+                      sendCsvFailed(err);
                     });
                 }
               });
 
-              if (file == 'volvo') {
+              if (isThreePortFile(file)) {
                 db2.all(selectQuery, params, (err, rows) => {
                   if (err) {
-                    console.error(err);
+                    logger.error(err);
                   } else {
                     // console.log(rows)
-                    //鎶婃椂闂?鍘嬪姏闈㈢Н 骞冲潎鍘嬪姏鏁版嵁push杩沜svWriter杩涜姹囨€?
+                    //閹跺﹥妞傞梻?閸樺濮忛棃銏⑿?楠炲啿娼庨崢瀣閺佺増宓乸ush鏉╂矞svWriter鏉╂稖顢戝Ч鍥ㄢ偓?
                     if (!rows.length) return;
 
                     // if()
 
-                    for (var i = historyArr[0], j = 0; i < historyArr[1]; i++, j++) {
-                      const backData = JSON.parse(rows[i][`data`]);
+                    const headEndIndex = Math.min(historyArr[1], rows.length);
+                    for (var i = historyArr[0], j = 0; i < headEndIndex; i++, j++) {
+                      const headData = file === WHOLE_CHAIR_TYPE
+                        ? normalizeWholeChairFrame('head', rows[i][`data`])
+                        : JSON.parse(rows[i][`data`]);
                       // const press = calPressArr(backData , backIndex , 32)
-                      const press = backPressSelect.length
-                        ? backPressSelect[i]
-                        : backData.reduce((a, b) => a + b, 0);
-                      const area = backAreaSelect.length
-                        ? backAreaSelect[i]
-                        : backData.filter((a) => a > 10).length;
+                      const press = headData.reduce((a, b) => a + b, 0);
+                      const area = headData.filter((a) => a > 10).length;
                       // const newData = {
                       //   time: timeStampToDate(rows[i][`timestamp`]),
                       //   pressureArea: backAreaSelect.length
                       //     ? backAreaSelect[i]
-                      //     : area * 2.1, //鍘熷鐭╅樀
+                      //     : area * 2.1, //閸樼喎顫愰惌鈺呮█
                       //   pressure: backPressSelect.length
                       //     ? backPressSelect[i]
                       //     : pressToN(area, press),
                       //   realData: rows[i][`data`],
                       // };
-                      const max = findMax(backData);
+                      const max = findMax(headData);
                       const newData = {
                         time: timeStampToDate(rows[i][`timestamp`]),
-                        pressureArea: backAreaSelect.length
-                          ? backAreaSelect[i]
-                          : area, //鍘熷鐭╅樀
-                        pressure: backPressSelect.length
-                          ? backPressSelect[i]
-                          : totalToN(press, 1.3),
-                        realData: rows[i][`data`],
-                        index: (j / 12).toFixed(2),
-                        area1: [...backData].filter(a => a > 1).length,
-                        area10: [...backData].filter(a => a > 10).length,
-                        total1: backData.reduce((a, b) => a + b, 0),
-                        total10: [...backData].filter(a => a > 10).reduce((a, b) => a + b, 0),
-                        total10area10: [...backData].filter(a => a > 10).reduce((a, b) => a + b, 0) / [...backData].filter(a => a > 10).length,
-                        total1area1: backData.reduce((a, b) => a + b, 0) / [...backData].filter(a => a > 1).length,
+                        pressureArea: area, //閸樼喎顫愰惌鈺呮█
+                        pressure: totalToN(press, 1.3),
+                        realData: JSON.stringify(headData),
+                        index: getCsvElapsedSeconds(rows, i, historyArr[0], j),
+                        area1: [...headData].filter(a => a > 1).length,
+                        area10: [...headData].filter(a => a > 10).length,
+                        total1: headData.reduce((a, b) => a + b, 0),
+                        total10: [...headData].filter(a => a > 10).reduce((a, b) => a + b, 0),
+                        total10area10: [...headData].filter(a => a > 10).reduce((a, b) => a + b, 0) / [...headData].filter(a => a > 10).length,
+                        total1area1: headData.reduce((a, b) => a + b, 0) / [...headData].filter(a => a > 1).length,
                         max
                       };
-                      csvWriteBackData.push(newData);
+                      csvWriteHeadData.push(newData);
                     }
-                    // 灏嗘眹鎬荤殑鍘嬪姏鏁版嵁鍐欏叆 CSV 鏂囦欢
+                    // 鐏忓棙鐪归幀鑽ゆ畱閸樺濮忛弫鐗堝祦閸愭瑥鍙?CSV 閺傚洣娆?
 
                     // let str = nowGetTime.replace(/[/:]/g, "-");
                     let str = nowGetTime;
@@ -2584,11 +5671,12 @@ module.exports = {
                       str = timeStampTo_Date(Number(str));
                     }
 
+                    const headCsvFilePath = csvTargetPath(`head${str}.csv`);
                     const csvWriter1 = createCsvWriter({
-                      path: `${csvPath}/head${str}.csv`,
-                      // path: `./data/back${str}.csv`, // 鎸囧畾杈撳嚭鏂囦欢鐨勮矾寰勫拰鍚嶇О
+                      path: headCsvFilePath,
+                      // path: `./data/back${str}.csv`, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                       header: [
-                        { id: "index", title: "" },
+                        { id: "index", title: "seconds" },
                         { id: "time", title: "time" },
                         { id: "max", title: "max" },
                         { id: "pressureArea", title: "area" },
@@ -2599,28 +5687,14 @@ module.exports = {
                     });
 
                     csvWriter1
-                      .writeRecords(csvWriteBackData)
+                      .writeRecords(csvWriteHeadData)
                       .then(() => {
                         console.log("export csv success");
-                        server.clients.forEach(function each(client) {
-                          const jsonData = JSON.stringify({
-                            download: "export csv success",
-                          });
-                          if (client.readyState === WebSocket.OPEN) {
-                            client.send(jsonData);
-                          }
-                        });
+                        sendCsvSuccess([headCsvFilePath]);
                       })
                       .catch((err) => {
                         console.error("export csv failed", err);
-                        server.clients.forEach(function each(client) {
-                          const jsonData = JSON.stringify({
-                            download: "export csv failed",
-                          });
-                          if (client.readyState === WebSocket.OPEN) {
-                            client.send(jsonData);
-                          }
-                        });
+                        sendCsvFailed(err);
                       });
                   }
                 });
@@ -2633,12 +5707,12 @@ module.exports = {
 
             db.run(createTableQuery, function (err) {
               if (err) {
-                console.error(err);
+                logger.error(err);
                 return;
               } else {
                 server.clients.forEach(function each(client) {
                   const jsonData = JSON.stringify({
-                    download: "鍒犻櫎鎴愬姛",
+                    download: "deleteSuccess",
                   });
                   if (client.readyState === WebSocket.OPEN) {
                     client.send(jsonData);
@@ -2650,12 +5724,12 @@ module.exports = {
             if (file === "car") {
               db1.run(createTableQuery, function (err) {
                 if (err) {
-                  console.error(err);
+                  logger.error(err);
                   return;
                 } else {
                   server.clients.forEach(function each(client) {
                     const jsonData = JSON.stringify({
-                      download: "鍒犻櫎鎴愬姛",
+                      download: "deleteSuccess",
                     });
                     if (client.readyState === WebSocket.OPEN) {
                       client.send(jsonData);
@@ -2666,19 +5740,20 @@ module.exports = {
             }
           }
 
-          // 璋冩暣楂樻柉
+          // 鐠嬪啯鏆ｆ妯绘焿
           if (getMessage.gauss != null) {
             gauss = getMessage.gauss;
           }
 
-          // 閲嶆柊璇锋眰涓插彛
+          // 闁插秵鏌婄拠閿嬬湴娑撴彃褰?
           if (getMessage.serialReset != null) {
             SerialPort.list().then((ports) => {
               serialport = getPort(ports)//ports; //.filter((a,index) => a.manufacturer === 'wch.cn');
+              logSerialPortList('serialReset', serialport);
 
               server.clients.forEach(function each(client) {
                 /**
-                 * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+                 * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                  *  */
                 const jsonData = JSON.stringify({
                   port: serialport,
@@ -2689,35 +5764,138 @@ module.exports = {
                   client.send(jsonData);
                 }
               });
+            }).catch((err) => {
+              logger.error('[SerialList] serialReset failed', err);
             });
           }
 
-          // 鍘嗗彶
+          if (getMessage.autoConnectHand0205Double === true) {
+            SerialPort.list().then((ports) => {
+              serialport = getPort(ports);
+              logSerialPortList('autoConnectHand0205Double', serialport);
+              const paths = serialport.map((port) => port.path).filter(Boolean);
+
+              if (paths.length < 2) {
+                const jsonData = JSON.stringify({
+                  port: serialport,
+                  autoConnectHand0205Double: {
+                    success: false,
+                    message: `触觉手套2 自动连接失败：只检测到 ${paths.length} 个可用手套串口`,
+                  },
+                });
+                server.clients.forEach(function each(client) {
+                  if (client.readyState === WebSocket.OPEN) {
+                    client.send(jsonData);
+                  }
+                });
+                return;
+              }
+
+              const [leftPath, rightPath] = paths;
+              sitClose = false;
+              backClose = false;
+              com = leftPath;
+              com1 = rightPath;
+              baudRate = getSensorBaudRate(HAND_GLOVE_DOUBLE);
+
+              if (port1?.isOpen) {
+                port1.close((err) => {
+                  if (err) logger.warn('[autoConnectHand0205Double] port1 close error:', err);
+                });
+              }
+              if (port2?.isOpen) {
+                port2.close((err) => {
+                  if (err) logger.warn('[autoConnectHand0205Double] port2 close error:', err);
+                });
+              }
+
+              try {
+                port1 = new SerialPort(
+                  {
+                    path: leftPath,
+                    baudRate,
+                    autoOpen: true,
+                  },
+                  function (err) {
+                    if (err) logger.warn(err, "err");
+                  }
+                );
+                port1.pipe(getSitParser());
+
+                port2 = new SerialPort(
+                  {
+                    path: rightPath,
+                    baudRate,
+                    autoOpen: true,
+                  },
+                  function (err) {
+                    if (err) logger.warn(err, "err");
+                  }
+                );
+                bindBackPortParser();
+
+                const jsonData = JSON.stringify({
+                  port: serialport,
+                  autoConnectHand0205Double: {
+                    success: true,
+                    portname: leftPath,
+                    portnameBack: rightPath,
+                    message: `触觉手套2 已连接：${leftPath} / ${rightPath}`,
+                  },
+                });
+                server.clients.forEach(function each(client) {
+                  if (client.readyState === WebSocket.OPEN) {
+                    client.send(jsonData);
+                  }
+                });
+              } catch (err) {
+                logger.warn('[autoConnectHand0205Double] open failed', err);
+                const jsonData = JSON.stringify({
+                  port: serialport,
+                  autoConnectHand0205Double: {
+                    success: false,
+                    message: err?.message || '触觉手套2 自动连接失败',
+                  },
+                });
+                server.clients.forEach(function each(client) {
+                  if (client.readyState === WebSocket.OPEN) {
+                    client.send(jsonData);
+                  }
+                });
+              }
+            }).catch((err) => {
+              logger.error('[SerialList] autoConnectHand0205Double failed', err);
+              const jsonData = JSON.stringify({
+                autoConnectHand0205Double: {
+                  success: false,
+                  message: err?.message || '触觉手套2 自动连接失败',
+                },
+              });
+              server.clients.forEach(function each(client) {
+                if (client.readyState === WebSocket.OPEN) {
+                  client.send(jsonData);
+                }
+              });
+            });
+          }
+
+          // 閸樺棗褰?
           if (getMessage.indexArr != null) {
 
-            let press = [],
-              area = [];
             historyArr = getMessage.indexArr;
-            for (let i = getMessage.indexArr[0]; i < getMessage.indexArr[1]; i++) {
-              let a = localData.length
-                ? JSON.parse(localData[i].data).reduce((a, b) => a + b, 0)
-                : 0 +
-                (file === "car"
-                  ? JSON.parse(localDataBack[i].data).reduce((a, b) => a + b, 0)
-                  : 0);
-              let b = localData.length
-                ? JSON.parse(localData[i].data).filter((a) => a > 10).length
-                : 0 +
-                (file === "car"
-                  ? JSON.parse(localDataBack[i].data).filter((a) => a > 10).length
-                  : 0);
-              press.push(a);
-              area.push(b);
-            }
+            const historySeries = getHistorySeries({
+              sitRows: localData,
+              backRows: localDataBack,
+              start: getMessage.indexArr[0],
+              end: getMessage.indexArr[1],
+              file,
+            });
+            const press = historySeries.press;
+            const area = historySeries.area;
 
             server.clients.forEach(function each(client) {
               /**
-               * 棣栨璇诲彇涓插彛锛屽皢鏁版嵁闀垮害鍜屼覆鍙ｇ鍙ｆ暟
+               * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
                *  */
               const jsonData = JSON.stringify({
                 pressArr: press,
@@ -2741,64 +5919,352 @@ module.exports = {
 }
 
 SerialPort.list().then((ports) => {
-  console.info(
-    "=========================================================================================\r\n"
-  );
-  console.info(
-    "hello ,there are serialport lists that we selected from your device\r\n"
-  );
-  // console.log(ports)
   serialport = getPort(ports)//ports; //.filter((a,index) => a.manufacturer === 'wch.cn');
-  ports.forEach(function (port) {
-    console.info("port:%s\r\n", port.path);
-    // try {
-    //   const port1 = new SerialPort(
-    //     { path: "COM5", baudRate: baudRate, autoOpen: true },
-    //     function (err) {
-    //       console.log(err, "err");
-    //     }
-    //   );
-    //   //绠￠亾娣诲姞瑙ｆ瀽鍣?
-    //   port1.pipe(parser);
-    // } catch (e) {
-
-    // }
-  });
-  console.info(
-    "=========================================================================================\r\n"
-  );
+  logSerialPortList('startup', serialport);
+}).catch((err) => {
+  logger.error('[SerialList] startup failed', err);
 });
+let pointArr, newData, firstBlueData = [], lastBlueData = [], firstBlueData1 = [], lastBlueData1 = [];
+let index = 0
+const HAND_GLOVE_FULL_PACKET_LAYOUT = {
+  left: {
+    fingerRows: [
+      [65, 66, 67, 38, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79],
+      [49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63],
+      [33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47],
+      [17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
+    ],
+    fingerTips: [2, 5, 8, 11, 14],
+    palm: [
+      129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143,
+      145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159,
+      161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175,
+      177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191,
+      193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207,
+      209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223,
+    ],
+    palmLeadingBlankCount: 3,
+    palmTopRows: [
+      [244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255],
+      [228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239],
+    ],
+  },
+  right: {
+    fingerRows: [
+      [190, 191, 192, 187, 188, 189, 184, 185, 186, 181, 182, 183, 178, 179, 180],
+      [206, 207, 208, 203, 204, 205, 200, 201, 202, 197, 198, 199, 194, 195, 196],
+      [222, 223, 224, 219, 220, 221, 216, 217, 218, 213, 214, 215, 210, 211, 212],
+      [238, 239, 240, 235, 236, 237, 232, 233, 234, 229, 230, 231, 226, 227, 228],
+    ],
+    fingerTips: [255, 252, 249, 246, 243],
+    palm: [
+      114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128,
+      98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112,
+      82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96,
+      66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80,
+      50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64,
+      34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48,
+    ],
+    palmTrailingBlankCount: 3,
+    palmTopRows: [
+      [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+      [18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29],
+    ],
+  },
+};
 
-function gaussBlur_return(scl, w, h, r) {
-  const res = new Array(scl.length).fill(1)
-  var rs = Math.ceil(r * 2.57); // significant radius
-  for (var i = 0; i < h; i++) {
-    for (var j = 0; j < w; j++) {
-      var val = 0,
-        wsum = 0;
-      for (var iy = i - rs; iy < i + rs + 1; iy++)
-        for (var ix = j - rs; ix < j + rs + 1; ix++) {
-          var x = Math.min(w - 1, Math.max(0, ix));
-          var y = Math.min(h - 1, Math.max(0, iy));
-          var dsq = (ix - j) * (ix - j) + (iy - i) * (iy - i);
-          var wght = Math.exp(-dsq / (2 * r * r)) / (Math.PI * 2 * r * r);
-          val += scl[y * w + x] * wght;
-          wsum += wght;
-        }
-      res[i * w + j] = Math.round(val / wsum);
-    }
-  }
-  return res
+function readHandGlovePoint(pressureData, oneBasedIndex) {
+  return pressureData[oneBasedIndex - 1] || 0;
 }
 
-var pointArr, newData, firstBlueData = [], lastBlueData = [], firstBlueData1 = [], lastBlueData1 = [];
-let index = 0
+function mapHandGloveFullPacketPressure(pressureData, side) {
+  const layout = HAND_GLOVE_FULL_PACKET_LAYOUT[side] || HAND_GLOVE_FULL_PACKET_LAYOUT.left;
+  const res = new Array(15 * 13).fill(0);
+
+  layout.fingerRows.forEach((row, rowIndex) => {
+    row.forEach((oneBasedIndex, colIndex) => {
+      res[rowIndex * 15 + colIndex] = readHandGlovePoint(pressureData, oneBasedIndex);
+    });
+  });
+
+  layout.fingerTips.forEach((oneBasedIndex, fingerIndex) => {
+    res[15 * 4 + 1 + fingerIndex * 3] = readHandGlovePoint(pressureData, oneBasedIndex);
+  });
+
+  layout.palmTopRows.forEach((row, rowIndex) => {
+    const startIndex = 75 + rowIndex * 15 + (layout.palmLeadingBlankCount || 0);
+    row.forEach((oneBasedIndex, colIndex) => {
+      res[startIndex + colIndex] = readHandGlovePoint(pressureData, oneBasedIndex);
+    });
+  });
+
+  layout.palm.forEach((oneBasedIndex, index) => {
+    res[75 + 2 * 15 + index] = readHandGlovePoint(pressureData, oneBasedIndex);
+  });
+
+  return res;
+}
+
+function mapHandGloveFullPacketModelMatrix(mappedData) {
+  const sourceData = [...mappedData];
+  while (sourceData.length < 195) {
+    sourceData.push(0);
+  }
+
+  for (let i = 4 * 15; i < 5 * 15; i++) {
+    sourceData[i] = sourceData[i] / 3;
+  }
+
+  const legacyData = [];
+  for (let i = 0; i < 5; i++) {
+    for (let j = 0; j < 15; j++) {
+      legacyData.push(sourceData[i * 15 + 14 - j]);
+    }
+  }
+
+  for (let i = 75 + 12 - 1; i >= 75; i--) {
+    legacyData.push(sourceData[i]);
+  }
+
+  for (let i = 0; i < 4; i++) {
+    for (let j = 0; j < 15; j++) {
+      legacyData.push(sourceData[75 + 12 + i * 15 + 14 - j]);
+    }
+  }
+
+  const handPointArr = [[6, 2], [6, 3], [6, 4], [3, 8], [3, 9], [3, 10], [3, 14], [3, 15], [3, 16], [3, 20], [3, 21], [3, 22], [10, 26], [10, 27], [10, 28], [7, 2], [7, 3], [7, 4], [4, 8], [4, 9], [4, 10], [4, 14], [4, 15], [4, 16], [4, 20], [4, 21], [4, 22], [11, 26], [11, 27], [11, 28], [8, 2], [8, 3], [8, 4], [5, 8], [5, 9], [5, 10], [5, 14], [5, 15], [5, 16], [5, 20], [5, 21], [5, 22], [12, 26], [12, 27], [12, 28], [9, 2], [9, 3], [9, 4], [6, 8], [6, 9], [6, 10], [6, 14], [6, 15], [6, 16], [6, 20], [6, 21], [6, 22], [13, 26], [13, 27], [13, 28], [13, 2], [13, 3], [13, 4], [13, 8], [13, 9], [13, 10], [13, 14], [13, 15], [13, 16], [13, 20], [13, 21], [13, 22], [17, 25], [17, 26], [17, 27], [17, 6], [17, 7], [17, 8], [17, 9], [17, 10], [17, 11], [17, 12], [17, 13], [17, 14], [17, 15], [17, 16], [17, 17], [19, 6], [19, 7], [19, 8], [19, 9], [19, 10], [19, 11], [19, 12], [19, 13], [19, 14], [19, 15], [19, 16], [19, 17], [19, 18], [19, 19], [19, 20], [21, 6], [21, 7], [21, 8], [21, 9], [21, 10], [21, 11], [21, 12], [21, 13], [21, 14], [21, 15], [21, 16], [21, 17], [21, 18], [21, 19], [21, 20], [23, 6], [23, 7], [23, 8], [23, 9], [23, 10], [23, 11], [23, 12], [23, 13], [23, 14], [23, 15], [23, 16], [23, 17], [23, 18], [23, 19], [23, 20], [25, 6], [25, 7], [25, 8], [25, 9], [25, 10], [25, 11], [25, 12], [25, 13], [25, 14], [25, 15], [25, 16], [25, 17], [25, 18], [25, 19], [25, 20]];
+  const modelData = new Array(32 * 32).fill(0);
+  handPointArr.forEach((point, index) => {
+    const [row, col] = point;
+    modelData[(31 - row) * 32 + col] = legacyData[index] || 0;
+    if (index >= 75) {
+      modelData[(31 - (row + 1)) * 32 + col] = legacyData[index] || 0;
+    }
+  });
+
+  return modelData;
+}
+
+function getHandGloveFullPacketSide(packetType, fallbackSide) {
+  if (packetType === 1) {
+    return 'right';
+  }
+  if (packetType === 2) {
+    return 'left';
+  }
+  return fallbackSide;
+}
+
+function parseHandGloveFullPacket(buffer, fallbackSide) {
+  const bytes = Array.from(buffer);
+  const pressureData = bytes.slice(2, 258);
+  const imuBytes = bytes.slice(258, 274);
+  const packetType = bytes[1];
+  const side = fallbackSide === 'right' ? 'right' : 'left';
+  const mappedData = mapHandGloveFullPacketPressure(pressureData, side);
+
+  return {
+    frameIndex: bytes[0],
+    packetType,
+    side,
+    pressureData,
+    imuBytes,
+    mappedData,
+  };
+}
+
+function handleHandGloveFullPacket(buffer, fallbackSide) {
+  const packet = parseHandGloveFullPacket(buffer, fallbackSide);
+  const realArr = [...packet.pressureData];
+  let newArr = [...packet.mappedData];
+  const outputSide = fallbackSide === 'right' ? 'right' : 'left';
+
+  if (outputSide === 'right') {
+    pointArr2 = [...packet.pressureData];
+    pointArr2zeroData = [...pointArr2];
+    pointArr2RawZeroData = [...pointArr2];
+    newArr147_2 = [...newArr];
+
+    if (pointArr2zero.length) {
+      pointArr2 = pointArr2.map((a, index) => numLessZeroToZero(a - pointArr2zero[index]));
+    }
+
+    if (pointArr147zero_2.length) {
+      newArr = newArr.map((a, index) => numLessZeroToZero(a - pointArr147zero_2[index]));
+    }
+
+    const renderData = mapHandGloveFullPacketModelMatrix(newArr);
+
+    colOrSendData1(JSON.stringify({
+      backData: renderData,
+      realArr,
+      rawPressureData: pointArr2,
+      newArr147: newArr,
+      mappedArr195: newArr,
+      frameIndex: packet.frameIndex,
+      packetType: packet.packetType,
+      handSide: packet.side,
+      outputSide,
+      sitFlag: port1?.isOpen,
+      backFlag: port2?.isOpen,
+    }));
+    return;
+  }
+
+  pointArr = [...packet.pressureData];
+  pointArr1zeroData = [...pointArr];
+  pointArr1RawZeroData = [...pointArr];
+  newArr147 = [...newArr];
+
+  if (pointArr1zero.length) {
+    pointArr = pointArr.map((a, index) => numLessZeroToZero(a - pointArr1zero[index]));
+  }
+
+  if (pointArr147zero.length) {
+    newArr = newArr.map((a, index) => numLessZeroToZero(a - pointArr147zero[index]));
+  }
+
+  const renderData = mapHandGloveFullPacketModelMatrix(newArr);
+
+  colOrSendData(JSON.stringify({
+    sitData: renderData,
+    realArr,
+    rawPressureData: pointArr,
+    newArr147: newArr,
+    mappedArr195: newArr,
+    frameIndex: packet.frameIndex,
+    packetType: packet.packetType,
+    handSide: packet.side,
+    outputSide,
+    sitFlag: port1?.isOpen,
+    backFlag: port2?.isOpen,
+  }));
+}
+
+const HAND_GLOVE_DOUBLE_PACKET_SIDE = {
+  1: 'left',
+  2: 'right',
+};
+const handGloveDoublePacketChunks = {
+  left: [],
+  right: [],
+};
+
+function getHandGloveDoublePacketSide(packetType, fallbackSide) {
+  if (file !== HAND_GLOVE_DOUBLE) return fallbackSide;
+  return HAND_GLOVE_DOUBLE_PACKET_SIDE[Number(packetType)] || fallbackSide;
+}
+
+function routeHandGloveDoubleFrame({ pressureData, imuBytes = [], outputSide = 'left', sourcePort = 'sit' }) {
+  const realPressureData = normalizeFiniteFrame(pressureData, 256);
+  const rotate = bytes4ToInt10(imuBytes);
+  const isRight = outputSide === 'right';
+
+  if (isRight) {
+    pointArr2 = [...realPressureData];
+    pointArr2RawZeroData = [...realPressureData];
+    const rawPressureData = pointArr2RawZero.length
+      ? realPressureData.map((value, index) => numLessZeroToZero(value - (pointArr2RawZero[index] || 0)))
+      : [...realPressureData];
+    let mappedData = handR([...realPressureData]);
+    pointArr2 = handRVideo1470506([...realPressureData]);
+    newArr147_2 = [...mappedData];
+    pointArr2zeroData = [...pointArr2];
+
+    if (pointArr2zero.length) {
+      pointArr2 = pointArr2.map((value, index) => numLessZeroToZero(value - (pointArr2zero[index] || 0)));
+    }
+    if (pointArr147zero_2.length) {
+      mappedData = mappedData.map((value, index) => numLessZeroToZero(value - (pointArr147zero_2[index] || 0)));
+    }
+
+    const payload = {
+      backData: pointArr2,
+      realArr: realPressureData,
+      rawPressureData,
+      newArr147: mappedData,
+      handSide: 'right',
+      packetSourcePort: sourcePort,
+      sitFlag: port1?.isOpen,
+      backFlag: port2?.isOpen,
+    };
+    if (rotate.length && !rotate.every((value) => value == 0)) {
+      payload.rotate = rotate;
+    }
+    colOrSendData1(JSON.stringify(payload));
+    return;
+  }
+
+  pointArr = [...realPressureData];
+  pointArr1RawZeroData = [...realPressureData];
+  const rawPressureData = pointArr1RawZero.length
+    ? realPressureData.map((value, index) => numLessZeroToZero(value - (pointArr1RawZero[index] || 0)))
+    : [...realPressureData];
+  let mappedData = handL([...realPressureData]);
+  newArr147 = [...mappedData];
+  pointArr1zeroData = [...pointArr];
+
+  if (pointArr1zero.length) {
+    pointArr = pointArr.map((value, index) => numLessZeroToZero(value - (pointArr1zero[index] || 0)));
+  }
+  if (pointArr147zero.length) {
+    mappedData = mappedData.map((value, index) => numLessZeroToZero(value - (pointArr147zero[index] || 0)));
+  }
+
+  const payload = {
+    sitData: pointArr,
+    realArr: realPressureData,
+    rawPressureData,
+    newArr147: mappedData,
+    handSide: 'left',
+    packetSourcePort: sourcePort,
+    sitFlag: port1?.isOpen,
+    backFlag: port2?.isOpen,
+  };
+  if (rotate.length && !rotate.every((value) => value == 0)) {
+    payload.rotate = rotate;
+  }
+  colOrSendData(JSON.stringify(payload));
+}
+
+function handleHandGloveDoubleFirstPacket(buffer, fallbackSide, sourcePort) {
+  if (file !== HAND_GLOVE_DOUBLE || buffer.length !== 130) return false;
+  const bytes = Array.from(buffer);
+  const side = getHandGloveDoublePacketSide(bytes[1], fallbackSide);
+  handGloveDoublePacketChunks[side] = bytes.slice(2);
+  return true;
+}
+
+function handleHandGloveDoubleSecondPacket(buffer, fallbackSide, sourcePort) {
+  if (file !== HAND_GLOVE_DOUBLE || buffer.length !== 146) return false;
+  const bytes = Array.from(buffer);
+  const side = getHandGloveDoublePacketSide(bytes[1], fallbackSide);
+  const firstChunk = handGloveDoublePacketChunks[side] || [];
+  const rest = bytes.slice(2);
+  const imuBytes = rest.slice(rest.length - 16);
+  const secondChunk = rest.slice(0, rest.length - 16);
+  const pressureData = [...firstChunk, ...secondChunk];
+  handGloveDoublePacketChunks[side] = [];
+  routeHandGloveDoubleFrame({
+    pressureData,
+    imuBytes,
+    outputSide: side,
+    sourcePort,
+  });
+  return true;
+}
+
 parser.on("data", function (data) {
   pointArr = new Array();
   let buffer = Buffer.from(data);
   newData = new Array();
   // console.log(buffer.length)
   if (nowDate < endDate) {
+    if (file === HAND_GLOVE_FULL_PACKET && buffer.length === HAND_GLOVE_FULL_PACKET_LENGTH) {
+      handleHandGloveFullPacket(buffer, 'left');
+      return;
+    }
+
     if (buffer.length === 1024) {
       for (var i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
@@ -2815,7 +6281,7 @@ parser.on("data", function (data) {
       else if (file === "sit10") {
         pointArr = sit10Line(pointArr);
       }
-      else if (file === "smallBed") {
+      else if (isSmallBedMatrixType(file)) {
         // newArr = smallBed([...pointArr]);
         // realArr = smallBed([...pointArr]);
         pointArr = jqbed(pointArr)
@@ -2838,11 +6304,16 @@ parser.on("data", function (data) {
         // pointArr = handLine(pointArr)
         // 625
         pointArr = jqbed(pointArr)
-        for (let i = 0; i < 32; i++) {
-          for (let j = 0; j < 16; j++) {
-            [pointArr[i * 32 + j], pointArr[i * 32 + 31 - j]] = [pointArr[i * 32 + 31 - j], pointArr[i * 32 + j],]
-          }
-        }
+        newData = [...pointArr]
+      } else if (file === HAND_SINGLE_POINT_TYPE) {
+        pointArr = handSinglePoint(pointArr)
+        newData = [...pointArr]
+      } else if (file === MINZHEN_TYPE) {
+        pointArr = jqbed(pointArr)
+        maskMinzhenMatrixValues(pointArr)
+        newData = [...pointArr]
+      } else if (isPetCareSystem(file)) {
+        pointArr = jqbed(pointArr)
         newData = [...pointArr]
         // pointArr = press6sit(pointArr, 32, 32, 'col')
         // pointArr = zeroLine(pointArr)
@@ -2869,10 +6340,16 @@ parser.on("data", function (data) {
         pointArr = handBlue(pointArr)
       } else if (file === 'volvo') {
         pointArr = wowSitLine(pointArr)
+      } else if (file === WHOLE_CHAIR_TYPE) {
+        pointArr = normalizeWholeChairFrame('sit', pointArr)
       } else if (file === 'xiyueReal1') {
         pointArr = xiyueReal1(pointArr)
       } else if (file === 'jqbed') {
         pointArr = jqbed(pointArr)
+      } else if (file === 'tempFullBed') {
+        const tempFullBedFrame = tempFullBed(pointArr)
+        pointArr = tempFullBedFrame.sitData
+        newData = tempFullBedFrame
       } else if (file === 'carCol') {
         pointArr = carCol(pointArr)
       } else if (file === 'newHand') {
@@ -2895,15 +6372,22 @@ parser.on("data", function (data) {
       } else if (file == 'fast1024sit') {
         pointArr = endiSit1024(pointArr)
       } else if (file == 'fast1024') {
-        pointArr = jqbed(pointArr)
-        console.log('fast1024')
+        // pointArr = jqbed(pointArr)
+        // console.log('fast1024')
         // console.log(Math.max(...pointArr))
-        pointArr = pressNew1220({ arr: pointArr, height: 32, width: 32, type: 'col', value: 1024 })
+        // pointArr = pressNew1220({ arr: pointArr, height: 32, width: 32, type: 'col', value: 1024 })
         // pointArr = gaussBlur_return(pointArr , 32,32, 0.5)
+      } else if (file == 'normalFast') {
+        pointArr = pressNew12203131({ arr: pointArr, height: 32, width: 32, type: 'col', value: 1024 })
+        // console.log('pressNew12203131')
+        // 32*32高速测试，与 fast1024 逻辑一致，不做任何线序变换
       } else if (file == 'sofa') {
         pointArr = arrToRealLine(pointArr, [[7, 0], [8, 15]], [[0, 15]], 32)
+       } else if (file == 'carY') {
+        pointArr = carYLine(pointArr)
+      } else if (file == 'humanBody') {
+        // 人体全身：直接透传 1024 字节原始数据，不做线序变换
       }
-
       pointArr1zeroData = [...pointArr]
 
 
@@ -2911,17 +6395,38 @@ parser.on("data", function (data) {
         pointArr = pointArr.map((a, index) => numLessZeroToZero(a - pointArr1zero[index]))
       }
 
+      // jqbed 璋冭瘯妯″紡锛歶seMatrixOrigin=true 鏃剁敤绠楁硶杩斿洖鐨?matrix_origin 浣滀负 sitData
+      const sitDataToSend = (useMatrixOrigin && file === 'jqbed' && jqbedMatrixOrigin) ? jqbedMatrixOrigin : pointArr;
+
       let jsonData;
 
-      if (isCar(file)) {
+      if (file === 'tempFullBed') {
         jsonData = JSON.stringify({
           sitData: pointArr,
+          rawSitData: newData.rawSitData,
+          matrixWidth: newData.matrixWidth,
+          matrixHeight: newData.matrixHeight,
+          matrixOrientation: newData.matrixOrientation,
+          realArr: newData.realArr,
+          pressureThreshold: newData.pressureThreshold,
+          temperatureRawData: newData.temperatureRawData,
+          temperatureData: newData.temperatureData,
+          temperatureAvg: newData.temperatureAvg,
+          temperatureK: newData.temperatureK,
+          hz: colHZ,
+        });
+      } else if (isCar(file)) {
+        jsonData = JSON.stringify({
+          sitData: sitDataToSend,
           sitFlag: port1?.isOpen,
           backFlag: port2?.isOpen,
           hz: colHZ
         });
       } else {
-        jsonData = JSON.stringify({ sitData: file == 'smallBed' || file == 'smallBed1' ? pointArr : pointArr, hz: colHZ });
+        jsonData = JSON.stringify({
+          sitData: isSmallBedMatrixType(file) || file == 'smallBed1' ? pointArr : sitDataToSend,
+          hz: colHZ,
+        });
       }
 
 
@@ -2938,7 +6443,7 @@ parser.on("data", function (data) {
 
       //   // 2.0
       //   // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
-      //   const timestamp = Date.now(); // 鑾峰彇褰撳墠鏃堕棿鐨勬椂闂存埑
+      //   const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
       //   const date = saveTime;
       //   const insertQuery =
       //     "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
@@ -2951,7 +6456,7 @@ parser.on("data", function (data) {
       //     [JSON.stringify(pointArr), timestamp, date],
       //     function (err) {
       //       if (err) {
-      //         console.error(err);
+      //         logger.error(err);
       //         return;
       //       }
       //       console.log(`Event inserted with ID ${this.lastID}`);
@@ -3007,7 +6512,7 @@ parser.on("data", function (data) {
           hz: colHZ
         });
       } else {
-        jsonData = JSON.stringify({ sitData: file == 'smallBed' || file == 'smallBed1' ? newArr : pointArr, hz: colHZ });
+        jsonData = JSON.stringify({ sitData: isSmallBedMatrixType(file) || file == 'smallBed1' ? newArr : pointArr, hz: colHZ });
       }
       colOrSendData(jsonData)
     }
@@ -3039,6 +6544,10 @@ parser.on("data", function (data) {
     }
 
     if (buffer.length == 130) {
+      if (handleHandGloveDoubleFirstPacket(buffer, 'left', 'sit')) {
+        return;
+      }
+
       let firstArr = new Array();
       const length = buffer.length
 
@@ -3121,6 +6630,9 @@ parser.on("data", function (data) {
     }
 
     if (buffer.length == 146) {
+      if (handleHandGloveDoubleSecondPacket(buffer, 'left', 'sit')) {
+        return;
+      }
 
       // console.log(file)
       pointArr = new Array();
@@ -3128,7 +6640,6 @@ parser.on("data", function (data) {
         pointArr[i] = buffer.readUInt8(i);
       }
       let length = pointArr.length
-      console.log(pointArr[1])
       pointArr = pointArr.splice(2, length)
       length = pointArr.length
       const arr = pointArr.splice(length - 16, length)
@@ -3137,6 +6648,10 @@ parser.on("data", function (data) {
 
       pointArr = [...firstBlueData, ...lastBlueData]
       const realArr = [...pointArr]
+      pointArr1RawZeroData = [...realArr]
+      const rawPressureData = pointArr1RawZero.length
+        ? realArr.map((a, index) => numLessZeroToZero(a - (pointArr1RawZero[index] || 0)))
+        : [...realArr]
       let newArr = []
 
 
@@ -3144,7 +6659,6 @@ parser.on("data", function (data) {
       // newArr = handVideo1470506([...pointArr])
       // newArr = handVideoRealPoint_0416_3([...newArr])
       // newArr = [...pointArr]
-      console.log(file)
       if (file == 'handVideo1') {
         newArr = handVideoRealPoint_0506_3([...pointArr])
         pointArr = handVideo1_0416_0506(pointArr)
@@ -3165,21 +6679,21 @@ parser.on("data", function (data) {
         //   pointArr = pointArr.map((a, index) => numLessZeroToZero(a - pointArr1zero[index]))
         // }
       } else if (file == 'smallSample') {
-        // 灏忓瀷鏍峰搧 - 鎸変紶鎰熷櫒缂栧彿1-100椤哄簭杈撳嚭10脳10鐭╅樀
-        // Excel鏄?6脳16缃戞牸锛屽搴?56瀛楄妭鏁版嵁鐨勯『搴?
-        // 浼犳劅鍣ㄧ紪鍙種鍦‥xcel涓殑浣嶇疆(row,col) -> 256瀛楄妭绱㈠紩 = row*16+col
-        // 浼犳劅鍣?-100瀵瑰簲鐨?56瀛楄妭绱㈠紩:
+        // 鐏忓繐鐎烽弽宄版惂 - 閹稿绱堕幇鐔锋珤缂傛牕褰?-100妞ゅ搫绨潏鎾冲毉10鑴?0閻晠妯€
+        // Excel閺?6鑴?6缂冩垶鐗搁敍灞筋嚠鎼?56鐎涙濡弫鐗堝祦閻ㄥ嫰銆庢惔?
+        // 娴肩姵鍔呴崳銊х椽閸欑ó閸︹€cel娑擃厾娈戞担宥囩枂(row,col) -> 256鐎涙濡槐銏犵穿 = row*16+col
+        // 娴肩姵鍔呴崳?-100鐎电懓绨查惃?56鐎涙濡槐銏犵穿:
         const sensorToByteIndex = [
-          223, 222, 221, 220, 219, 218, 217, 216, 215, 214,  // 浼犳劅鍣?-10   (琛?3, 鍒?5鈫?6)
-          239, 238, 237, 236, 235, 234, 233, 232, 231, 230,  // 浼犳劅鍣?1-20  (琛?4, 鍒?5鈫?6)
-          255, 254, 253, 252, 251, 250, 249, 248, 247, 246,  // 浼犳劅鍣?1-30  (琛?5, 鍒?5鈫?6)
-          15, 14, 13, 12, 11, 10, 9, 8, 7, 6,                // 浼犳劅鍣?1-40  (琛?,  鍒?5鈫?6)
-          31, 30, 29, 28, 27, 26, 25, 24, 23, 22,            // 浼犳劅鍣?1-50  (琛?,  鍒?5鈫?6)
-          207, 206, 205, 204, 203, 202, 201, 200, 199, 198,  // 浼犳劅鍣?1-60  (琛?2, 鍒?5鈫?6)
-          191, 190, 189, 188, 187, 186, 185, 184, 183, 182,  // 浼犳劅鍣?1-70  (琛?1, 鍒?5鈫?6)
-          175, 174, 173, 172, 171, 170, 169, 168, 167, 166,  // 浼犳劅鍣?1-80  (琛?0, 鍒?5鈫?6)
-          159, 158, 157, 156, 155, 154, 153, 152, 151, 150,  // 浼犳劅鍣?1-90  (琛?,  鍒?5鈫?6)
-          143, 142, 141, 140, 139, 138, 137, 136, 135, 134,  // 浼犳劅鍣?1-100 (琛?,  鍒?5鈫?6)
+          223, 222, 221, 220, 219, 218, 217, 216, 215, 214,  // 娴肩姵鍔呴崳?-10   (鐞?3, 閸?5閳?6)
+          239, 238, 237, 236, 235, 234, 233, 232, 231, 230,  // 娴肩姵鍔呴崳?1-20  (鐞?4, 閸?5閳?6)
+          255, 254, 253, 252, 251, 250, 249, 248, 247, 246,  // 娴肩姵鍔呴崳?1-30  (鐞?5, 閸?5閳?6)
+          15, 14, 13, 12, 11, 10, 9, 8, 7, 6,                // 娴肩姵鍔呴崳?1-40  (鐞?,  閸?5閳?6)
+          31, 30, 29, 28, 27, 26, 25, 24, 23, 22,            // 娴肩姵鍔呴崳?1-50  (鐞?,  閸?5閳?6)
+          207, 206, 205, 204, 203, 202, 201, 200, 199, 198,  // 娴肩姵鍔呴崳?1-60  (鐞?2, 閸?5閳?6)
+          191, 190, 189, 188, 187, 186, 185, 184, 183, 182,  // 娴肩姵鍔呴崳?1-70  (鐞?1, 閸?5閳?6)
+          175, 174, 173, 172, 171, 170, 169, 168, 167, 166,  // 娴肩姵鍔呴崳?1-80  (鐞?0, 閸?5閳?6)
+          159, 158, 157, 156, 155, 154, 153, 152, 151, 150,  // 娴肩姵鍔呴崳?1-90  (鐞?,  閸?5閳?6)
+          143, 142, 141, 140, 139, 138, 137, 136, 135, 134,  // 娴肩姵鍔呴崳?1-100 (鐞?,  閸?5閳?6)
         ]
         const mappedArr = []
         for (let i = 0; i < 100; i++) {
@@ -3187,7 +6701,7 @@ parser.on("data", function (data) {
         }
         pointArr = mappedArr
         newArr = [...mappedArr]
-      } else if (file == 'hand0507' || file == 'hand0205' || file == 'Num3D') {
+      } else if (file == 'hand0507' || isHandGloveType(file) || file == 'Num3D') {
         // left
         // newArr = handVideoRealPoint_0506_3([...pointArr])
         newArr = handL([...pointArr])
@@ -3252,6 +6766,7 @@ parser.on("data", function (data) {
       let jsonDataObj = {
         sitData: pointArr,
         realArr,
+        rawPressureData,
         newArr147: newArr,
         sitFlag: port1?.isOpen,
         backFlag: port2?.isOpen,
@@ -3372,7 +6887,7 @@ parser.on("data", function (data) {
       //   // if (pointArr1zero.length) {
       //   //   pointArr = pointArr.map((a, index) => numLessZeroToZero(a - pointArr1zero[index]))
       //   // }
-      // } else if (file == 'hand0507' || file == 'hand0205' || file == 'Num3D') {
+      // } else if (file == 'hand0507' || file == 'hand0205' || file == 'handGlove115200' || file == 'Num3D') {
       //   // left
       //   // newArr = handVideoRealPoint_0506_3([...pointArr])
       //   newArr = handL([...pointArr])
@@ -3437,6 +6952,7 @@ parser.on("data", function (data) {
       let jsonDataObj = {
         sitData: pointArr,
         realArr,
+        rawPressureData: pointArr,
         newArr147: newArr,
         sitFlag: port1?.isOpen,
         backFlag: port2?.isOpen,
@@ -3530,7 +7046,7 @@ parser.on("data", function (data) {
           hz: colHZ
         });
       } else {
-        jsonData = JSON.stringify({ sitData: file == 'smallBed' || file == 'smallBed1' ? newArr : pointArr, hz: colHZ });
+        jsonData = JSON.stringify({ sitData: isSmallBedMatrixType(file) || file == 'smallBed1' ? newArr : pointArr, hz: colHZ });
       }
 
       colOrSendData(jsonData)
@@ -3602,7 +7118,7 @@ parser.on("data", function (data) {
           hz: colHZ
         });
       } else {
-        jsonData = JSON.stringify({ sitData: file == 'smallBed' || file == 'smallBed1' ? newArr : pointArr, hz: colHZ });
+        jsonData = JSON.stringify({ sitData: isSmallBedMatrixType(file) || file == 'smallBed1' ? newArr : pointArr, hz: colHZ });
       }
 
       // console.log(jsonData)
@@ -3629,14 +7145,45 @@ parser.on("data", function (data) {
   }
 });
 
+parserSmallBed12B.on("data", function (data) {
+  pointArr = new Array();
+  let buffer = Buffer.from(data);
+  newData = new Array();
+
+  if (nowDate < endDate && file === SMALL_BED_12B_TYPE && buffer.length === SMALL_BED_12B_PAYLOAD_LENGTH) {
+    for (var i = 0; i < SMALL_BED_12B_PAYLOAD_LENGTH / 2; i++) {
+      pointArr[i] = buffer.readUInt16LE(i * 2);
+    }
+
+    pointArr = jqbed(pointArr);
+    newData = [...pointArr];
+    pointArr1zeroData = [...pointArr];
+
+    if (pointArr1zero.length) {
+      pointArr = pointArr.map((a, index) => numLessZeroToZero(a - pointArr1zero[index]));
+    }
+
+    const jsonData = JSON.stringify({ sitData: pointArr, hz: colHZ });
+    colOrSendData(jsonData);
+  }
+});
+
 function colOrSendData(jsonData) {
   // console.log(JSON.stringify(JSON.parse(jsonData).sitData) , 'jsonData')
   const nowDate = new Date().getTime()
-  if (flag
-    // && nowDate - oldTimeStamp > 1000 / colHZ
-
-  ) {
-    oldTimeStamp = nowDate
+  let frameToStore = null;
+  if (file === MINZHEN_TYPE) {
+    try {
+      frameToStore = JSON.parse(jsonData);
+      if (Array.isArray(frameToStore.sitData)) {
+        frameToStore.sitData = applyMinzhenBackendGauss(frameToStore.sitData);
+        jsonData = JSON.stringify(frameToStore);
+      }
+    } catch (error) {
+      frameToStore = null;
+    }
+  }
+  if (flag && shouldStoreCollectionFrame('sit') && hasEnoughCollectionDiskSpace()) {
     const resDataArr = {
       data: JSON.stringify(pointArr),
       time: new Date().getTime(),
@@ -3647,39 +7194,58 @@ function colOrSendData(jsonData) {
 
     // 2.0
     // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
-    const timestamp = Date.now(); // 鑾峰彇褰撳墠鏃堕棿鐨勬椂闂存埑
+    const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
     const date = saveTime;
     const insertQuery =
       "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
 
 
-    // 1.0 鏈哄櫒浜轰箣鍓?
+    // 1.0 閺堝搫娅掓禍杞扮閸?
     // db.run(
     //   insertQuery,
-    //   [file.includes('hand0205') ? JSON.stringify([...pointArr, ...rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify(pointArr), timestamp, date],
+    //   [(file.includes('hand0205') || file == 'handGlove115200') ? JSON.stringify([...pointArr, ...rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify(pointArr), timestamp, date],
     //   function (err) {
     //     if (err) {
-    //       console.error(err);
+    //       logger.error(err);
     //       return;
     //     }
     //     console.log(`Event inserted with ID ${this.lastID}`);
     //   }
     // );
 
+    frameToStore = frameToStore || JSON.parse(jsonData);
+    const dataToStore = file === TEMP_FULL_BED_TYPE
+      ? JSON.stringify({
+        sitData: frameToStore.sitData,
+        rawSitData: frameToStore.rawSitData,
+        matrixWidth: frameToStore.matrixWidth,
+        matrixHeight: frameToStore.matrixHeight,
+        matrixOrientation: frameToStore.matrixOrientation,
+        realArr: frameToStore.realArr,
+        pressureThreshold: frameToStore.pressureThreshold,
+        temperatureRawData: frameToStore.temperatureRawData,
+        temperatureData: frameToStore.temperatureData,
+        temperatureAvg: frameToStore.temperatureAvg,
+        temperatureK: frameToStore.temperatureK,
+      })
+      : isZeroFrameStorageType(file)
+        ? buildZeroAwareStorageData(frameToStore, 'sitData', 'sit')
+        : file === SMALL_BED_12B_TYPE
+          ? buildSmallBed12BCollectionStorageData(frameToStore)
+          : isSmallBedMatrixType(file)
+          ? JSON.stringify(getFrameMatrixData(frameToStore, 'sitData'))
+          : JSON.stringify([...frameToStore.sitData]);
+
     db.run(
       insertQuery,
-      [file.includes('hand0205') ? JSON.stringify([...JSON.parse(jsonData).newArr147, ...JSON.parse(jsonData).rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).sitData]), timestamp, date],
+      [dataToStore, timestamp, date],
       function (err) {
-        if (err) {
-          console.error(err);
-          return;
-        }
-        console.log(`Event inserted with ID ${this.lastID}`);
+        handleCollectionDbError(err, 'sit');
       }
     );
   }
 
-  if (!localFlag) {
+  if (!localFlag && shouldSendRealtimeFrame('sit')) {
 
     server.clients.forEach(function each(client) {
       if (client.readyState === WebSocket.OPEN) {
@@ -3689,14 +7255,26 @@ function colOrSendData(jsonData) {
   }
 }
 
-// 澶勭悊涓插彛鏁版嵁
+// 婢跺嫮鎮婃稉鎻掑經閺佺増宓?
 
 var pointArr2;
 parser2.on("data", function (data) {
   pointArr2 = new Array();
   let buffer = Buffer.from(data);
   if (nowDate < endDate) {
-    console.log(buffer.length)
+    if (file === MINZHEN_TYPE) {
+      const minzhenSensorFrame = parseMinzhenSensorFrame(buffer);
+      if (minzhenSensorFrame) {
+        colOrSendData1(JSON.stringify(minzhenSensorFrame));
+        return;
+      }
+    }
+
+    if (file === HAND_GLOVE_FULL_PACKET && buffer.length === HAND_GLOVE_FULL_PACKET_LENGTH) {
+      handleHandGloveFullPacket(buffer, 'right');
+      return;
+    }
+
     if (buffer.length === 1024) {
       for (var i = 0; i < buffer.length; i++) {
         pointArr2[i] = buffer.readUInt8(i);
@@ -3709,9 +7287,14 @@ parser2.on("data", function (data) {
       } else if (file === 'volvo') {
         pointArr2 = wowBackLine(pointArr2)
       } else if (file == 'carQX') {
-
+      } else if (file === WHOLE_CHAIR_TYPE) {
+        pointArr2 = normalizeWholeChairFrame('back', pointArr2)
+      } else if (file === HAND_SINGLE_POINT_TYPE) {
+        pointArr2 = handSinglePoint(pointArr2)
       } else if (file == 'sofa') {
         pointArr2 = arrToRealLine(pointArr2, [[7, 0], [8, 15]], [[0, 15]], 32)
+      } else if (file == 'carY') {
+        pointArr2 = carYLine(pointArr2)
       } else {
         pointArr2 = carBackLine(pointArr2);
       }
@@ -3723,14 +7306,14 @@ parser2.on("data", function (data) {
       }
 
       // pointArr2 = carBackLine(pointArr2);
-      if (flag) {
+      if (flag && shouldStoreCollectionFrame('back')) {
         const resDataArr = {
           data: JSON.stringify(pointArr2),
           time: new Date().getTime(),
         };
         // csvWriterback.writeRecords([resDataArr]);
 
-        const timestamp = Date.now(); // 鑾峰彇褰撳墠鏃堕棿鐨勬椂闂存埑
+        const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
         const date = saveTime;
         const insertQuery =
           "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
@@ -3740,7 +7323,7 @@ parser2.on("data", function (data) {
           [JSON.stringify(pointArr2), timestamp, date],
           function (err) {
             if (err) {
-              console.error(err);
+              logger.error(err);
               return;
             }
             console.log(`Event inserted with ID ${this.lastID}`);
@@ -3771,6 +7354,10 @@ parser2.on("data", function (data) {
     }
 
     if (buffer.length == 130) {
+      if (handleHandGloveDoubleFirstPacket(buffer, 'right', 'back')) {
+        return;
+      }
+
       let firstArr = new Array();
       const length = buffer.length
 
@@ -3785,21 +7372,36 @@ parser2.on("data", function (data) {
 
       if (order == 1) {
         firstBlueData1 = [...firstArr]
-      } else {
+       } else {
         lastBlueData1 = [...firstArr]
         pointArr = [...firstBlueData1, ...lastBlueData1]
-        pointArr = footVideo1(pointArr)
-
+        const realArr1 = [...pointArr]
+        pointArr2RawZeroData = [...realArr1]
+        const rawPressureData1 = pointArr2RawZero.length
+          ? realArr1.map((a, index) => numLessZeroToZero(a - (pointArr2RawZero[index] || 0)))
+          : [...realArr1]
+        let newArr1 = []
+        if (file == 'hand0507' || isHandGloveType(file)) {
+          newArr1 = handR(pointArr)
+          pointArr = handRVideo1470506(pointArr)
+        } else {
+          pointArr = footVideo1(pointArr)
+        }
         if (pointArr1zero.length) {
           pointArr = pointArr.map((a, index) => numLessZeroToZero(a - pointArr1zero[index]))
         }
         const arr = [...pointArr]
-        const jsonData = JSON.stringify({
-          rotate: rotate,
+        const jsonDataObj1 = {
           backData: arr,
+          realArr: realArr1,
+          rawPressureData: rawPressureData1,
           sitFlag: port1?.isOpen,
           backFlag: port2?.isOpen,
-        });
+        }
+        if (newArr1.length) {
+          jsonDataObj1.newArr147 = newArr1
+        }
+        const jsonData = JSON.stringify(jsonDataObj1);
         // server.clients.forEach(function each(client) {
         //   if (client.readyState === WebSocket.OPEN) {
         //     client.send(jsonData);
@@ -3808,12 +7410,12 @@ parser2.on("data", function (data) {
 
         colOrSendData1(jsonData, [])
       }
-
-
-
     }
-
     if (buffer.length == 146) {
+      if (handleHandGloveDoubleSecondPacket(buffer, 'right', 'back')) {
+        return;
+      }
+
       let pointArr = new Array();
       for (var i = 0; i < buffer.length; i++) {
         pointArr[i] = buffer.readUInt8(i);
@@ -3830,13 +7432,17 @@ parser2.on("data", function (data) {
       pointArr2 = [...firstBlueData1, ...lastBlueData1]
 
       const realArr = [...pointArr2]
+      pointArr2RawZeroData = [...realArr]
+      const rawPressureData = pointArr2RawZero.length
+        ? realArr.map((a, index) => numLessZeroToZero(a - (pointArr2RawZero[index] || 0)))
+        : [...realArr]
 
       if (file == 'footVideo') {
         // pointArr2 = new Array(256).fill(50)
         newArr = footR(pointArr2)
         pointArr2 = footVideo1(pointArr2)
 
-      } else if (file == 'hand0507' || file == 'hand0205') {
+      } else if (file == 'hand0507' || isHandGloveType(file)) {
         newArr = handR(pointArr2)
 
         pointArr2 = handRVideo1470506(pointArr2)
@@ -3878,6 +7484,7 @@ parser2.on("data", function (data) {
       let jsonDataObj = {
         backData: pointArr2,
         realArr,
+        rawPressureData,
         newArr147: newArr,
         sitFlag: port1?.isOpen,
         backFlag: port2?.isOpen,
@@ -3939,10 +7546,7 @@ parser2.on("data", function (data) {
 function colOrSendData1(jsonData) {
 
   const nowDate = new Date().getTime()
-  if (flag
-    // && nowDate - oldTimeStamp > 1000 / colHZ
-  ) {
-    oldTimeStamp = nowDate
+  if (flag && shouldStoreCollectionFrame('back') && hasEnoughCollectionDiskSpace()) {
     const resDataArr = {
       data: JSON.stringify(pointArr),
       time: new Date().getTime(),
@@ -3953,26 +7557,30 @@ function colOrSendData1(jsonData) {
 
     // 2.0
     // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
-    const timestamp = Date.now(); // 鑾峰彇褰撳墠鏃堕棿鐨勬椂闂存埑
+    const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
     const date = saveTime;
     const insertQuery =
       "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
 
+    const frameToStore = JSON.parse(jsonData);
+    const dataToStore = frameToStore.tempObj
+      ? JSON.stringify(frameToStore.tempObj)
+      : isZeroFrameStorageType(file)
+        ? buildZeroAwareStorageData(frameToStore, 'backData', 'back')
+        : isSmallBedMatrixType(file)
+          ? JSON.stringify(getFrameMatrixData(frameToStore, 'backData'))
+          : JSON.stringify([...frameToStore.backData]);
 
     db1.run(
       insertQuery,
-      [file.includes('hand0205') ? JSON.stringify([...JSON.parse(jsonData).newArr147, ...JSON.parse(jsonData).rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
+      [dataToStore, timestamp, date],
       function (err) {
-        if (err) {
-          console.error(err);
-          return;
-        }
-        console.log(`Event inserted with ID ${this.lastID}`);
+        handleCollectionDbError(err, 'back');
       }
     );
   }
 
-  if (!localFlag) {
+  if (!localFlag && shouldSendRealtimeFrame('back')) {
 
     server.clients.forEach(function each(client) {
       if (client.readyState === WebSocket.OPEN) {
@@ -3998,13 +7606,13 @@ parser3.on("data", function (data) {
         if (pointArr3[pointArr3.length - 1] == 0) {
           firstData = [...pointArr3];
           firstData.pop();
-          // 鍙宠竟绾垮簭
+          // 閸欏疇绔熺痪鍨碍
 
         }
         if (pointArr3[pointArr3.length - 1] == 1) {
           lastData = [...pointArr3];
           lastData.pop();
-          // 娣诲姞
+          // 濞ｈ濮?
           let a = [];
           for (let i = 0; i < 32; i++) {
             for (let j = 0; j < 32; j++) {
@@ -4024,7 +7632,7 @@ parser3.on("data", function (data) {
             });
           }
 
-          if (flag) {
+          if (flag && shouldStoreCollectionFrame('sit') && hasEnoughCollectionDiskSpace()) {
             const resDataArr = {
               data: JSON.stringify(res),
               time: new Date().getTime(),
@@ -4035,7 +7643,7 @@ parser3.on("data", function (data) {
             // 2.0
             // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
             if (dataFalg % 10 == 0) {
-              const timestamp = Date.now(); // 鑾峰彇褰撳墠鏃堕棿鐨勬椂闂存埑
+              const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
               const date = saveTime;
               const insertQuery =
                 "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
@@ -4043,11 +7651,7 @@ parser3.on("data", function (data) {
                 insertQuery,
                 [JSON.stringify(res), timestamp, date],
                 function (err) {
-                  if (err) {
-                    console.error(err);
-                    return;
-                  }
-                  console.log(`Event inserted with ID ${this.lastID}`);
+                  handleCollectionDbError(err, 'sit');
                 }
               );
             }
@@ -4078,6 +7682,8 @@ parser4.on("data", function (data) {
       }
       if (file == 'volvo') {
         pointArr4 = wowhead(pointArr4);
+      } else if (file === WHOLE_CHAIR_TYPE) {
+        pointArr4 = normalizeWholeChairFrame('head', pointArr4);
       }
 
 
@@ -4087,14 +7693,14 @@ parser4.on("data", function (data) {
         pointArr4 = pointArr4.map((a, index) => numLessZeroToZero(a - pointArr4zero[index]))
       }
 
-      if (flag) {
+      if (flag && shouldStoreCollectionFrame('head') && hasEnoughCollectionDiskSpace()) {
         const resDataArr = {
           data: JSON.stringify(pointArr4),
           time: new Date().getTime(),
         };
         // csvWriterback.writeRecords([resDataArr]);
 
-        const timestamp = Date.now(); // 鑾峰彇褰撳墠鏃堕棿鐨勬椂闂存埑
+        const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
         const date = saveTime;
         const insertQuery =
           "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
@@ -4103,11 +7709,7 @@ parser4.on("data", function (data) {
           insertQuery,
           [JSON.stringify(pointArr4), timestamp, date],
           function (err) {
-            if (err) {
-              console.error(err);
-              return;
-            }
-            console.log(`Event inserted with ID ${this.lastID}`);
+            handleCollectionDbError(err, 'head');
           }
         );
       }
@@ -4160,7 +7762,6 @@ parser4.on("data", function (data) {
         }
         const arr = [...pointArr]
         const jsonData = JSON.stringify({
-          rotate: rotate,
           backData: arr,
           sitFlag: port1?.isOpen,
           backFlag: port2?.isOpen,
@@ -4200,7 +7801,7 @@ parser4.on("data", function (data) {
         newArr = footR(pointArr4)
         pointArr4 = footVideo1(pointArr4)
 
-      } else if (file == 'hand0507' || file == 'hand0205') {
+      } else if (file == 'hand0507' || isHandGloveType(file)) {
         newArr = handR(pointArr4)
 
         pointArr4 = handRVideo1470506(pointArr4)
@@ -4225,6 +7826,7 @@ parser4.on("data", function (data) {
       let jsonDataObj = {
         headData: pointArr4,
         realArr,
+        rawPressureData: pointArr4,
         newArr147: newArr,
         sitFlag: port1?.isOpen,
         backFlag: port2?.isOpen,
@@ -4251,8 +7853,7 @@ parser4.on("data", function (data) {
 function colOrSendData2(jsonData) {
 
   const nowDate = new Date().getTime()
-  if (flag && nowDate - oldTimeStamp > 1000 / colHZ) {
-    oldTimeStamp = nowDate
+  if (flag && shouldStoreCollectionFrame('head') && hasEnoughCollectionDiskSpace()) {
     const resDataArr = {
       data: JSON.stringify(pointArr),
       time: new Date().getTime(),
@@ -4263,21 +7864,18 @@ function colOrSendData2(jsonData) {
 
     // 2.0
     // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
-    const timestamp = Date.now(); // 鑾峰彇褰撳墠鏃堕棿鐨勬椂闂存埑
+    const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
     const date = saveTime;
     const insertQuery =
       "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
 
 
+    const frameToStore = JSON.parse(jsonData);
     db2.run(
       insertQuery,
-      [file.includes('hand0205') ? JSON.stringify([...JSON.parse(jsonData).newArr147, ...JSON.parse(jsonData).rotate]) : file == 'smallBed' ? JSON.stringify(realArr) : JSON.stringify([...JSON.parse(jsonData).backData]), timestamp, date],
+      [isZeroFrameStorageType(file) ? buildZeroAwareStorageData(frameToStore, 'headData', 'head') : isSmallBedMatrixType(file) ? JSON.stringify(getFrameMatrixData(frameToStore, 'headData')) : JSON.stringify([...frameToStore.backData]), timestamp, date],
       function (err) {
-        if (err) {
-          console.error(err);
-          return;
-        }
-        console.log(`Event inserted with ID ${this.lastID}`);
+        handleCollectionDbError(err, 'head');
       }
     );
   }
@@ -4292,8 +7890,8 @@ function colOrSendData2(jsonData) {
   }
 }
 
-// 閲嶈繛
-setInterval(() => {
+// 闁插秷绻?
+reconnectTimer = setInterval(() => {
   if (com && !port1.isOpen && sitClose == false) {
     // if()
     console.log(com)
@@ -4306,13 +7904,13 @@ setInterval(() => {
             autoOpen: true,
           },
           function (err) {
-            console.log(err, "err");
+            logger.warn(err, "err");
           }
         );
-        //绠￠亾娣诲姞瑙ｆ瀽鍣?
-        port1.pipe(parser);
+        //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
+        port1.pipe(getSitParser());
       } catch (e) {
-        console.log(e, "e");
+        logger.warn(e, "e");
       }
     } else {
       try {
@@ -4324,13 +7922,13 @@ setInterval(() => {
             autoOpen: true,
           },
           function (err) {
-            console.log(err, "err");
+            logger.warn(err, "err");
           }
         );
-        //绠￠亾娣诲姞瑙ｆ瀽鍣?
+        //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
         port1.pipe(parser3);
       } catch (e) {
-        console.log(e, "e");
+        logger.warn(e, "e");
       }
     }
 
@@ -4346,367 +7944,405 @@ setInterval(() => {
           autoOpen: true,
         },
         function (err) {
-          console.log(err, "err");
+          logger.warn(err, "err");
         }
       );
-      //绠￠亾娣诲姞瑙ｆ瀽鍣?
-      port2.pipe(parser2);
+      //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
+      bindBackPortParser();
     } catch (e) {
-      console.log(e, "e");
+      logger.warn(e, "e");
     }
+  }
+
+  if (comSensor && (!portSensor || !portSensor.isOpen) && sensorClose == false) {
+    openMinzhenSensorPort(comSensor);
   }
 }, 3000);
 
-function gaussBlur_2(scl, w, h, r) {
-  const tcl = new Array(scl.length).fill(1)
-  var rs = Math.ceil(r * 2.57); // significant radius
-  for (var i = 0; i < h; i++)
-    for (var j = 0; j < w; j++) {
-      var val = 0,
-        wsum = 0;
-      for (var iy = i - rs; iy < i + rs + 1; iy++)
-        for (var ix = j - rs; ix < j + rs + 1; ix++) {
-          var x = Math.min(w - 1, Math.max(0, ix));
-          var y = Math.min(h - 1, Math.max(0, iy));
-          var dsq = (ix - j) * (ix - j) + (iy - i) * (iy - i);
-          var wght = Math.exp(-dsq / (2 * r * r)) / (Math.PI * 2 * r * r);
-          val += scl[y * w + x] * wght;
-          wsum += wght;
-        }
-      tcl[i * w + j] = Math.round(val / wsum);
-    }
-  return tcl
-}
-
-
-function interpSmall(smallMat, width, height, interp1, interp2) {
-  // for (let x = 1; x <= Length; x++) {
-  //   for (let y = 1; y <= Length; y++) {
-  //     bigMat[
-  //       Length * num * (num * (y - 1)) +
-  //       (Length * num * num) / 2 +
-  //       num * (x - 1) +
-  //       num / 2
-  //     ] = smallMat[Length * (y - 1) + x - 1] * 10;
-  //   }
-  // }
-  // 32, 10, 4, 5
-  const bigMat = new Array((width * interp1) * (height * interp2)).fill(0)
-  for (let i = 0; i < height; i++) {
-    for (let j = 0; j < width; j++) {
-      bigMat[(width * interp1) * i * interp2 + (j * interp1)
-
-        // + (width * interp1) * Math.floor(interp2/2)
-
-        // + Math.floor(interp1/2)
-      ] = smallMat[i * width + j] * 10
+// jqbed 鏁版嵁缈昏浆鍙樻崲锛堜緵 callPy 浣跨敤锛?
+function jqbedOppo(arr) {
+  let wsPointData = [...arr];
+  let b = wsPointData.splice(0, 17 * 32);
+  wsPointData = wsPointData.concat(b);
+  for (let i = 0; i < 8; i++) {
+    for (let j = 0; j < 32; j++) {
+      [wsPointData[i * 32 + j], wsPointData[(14 - i) * 32 + j]] = [
+        wsPointData[(14 - i) * 32 + j],
+        wsPointData[i * 32 + j],
+      ];
     }
   }
-  // console.log(bigMat.length)
-  return bigMat
+  return wsPointData;
 }
 
+function normalizePetCareResult(data, systemKey) {
+  const runtime = petCareSystems[systemKey].runtime;
+  const postureState = Number(data?.posture_state);
+  const inBed = postureState >= 1 && postureState <= 3 ? 1 : 0;
 
-function findMax(arr) {
-  let max = 0;
-  arr.forEach((item) => {
-    max = max > item ? max : item;
+  if (runtime.stateArr.length < 2) {
+    runtime.stateArr.push(inBed);
+  } else {
+    runtime.stateArr.shift();
+    runtime.stateArr.push(inBed);
+  }
+
+  if (runtime.stateArr.length === 2 && runtime.stateArr.every((value) => value === inBed)) {
+    if (runtime.stableState !== inBed) {
+      runtime.stableState = inBed;
+      runtime.stateStartedAt = Date.now();
+    }
+  } else if (runtime.stableState == null) {
+    runtime.stableState = inBed;
+    runtime.stateStartedAt = Date.now();
+  }
+
+  const startedAt = runtime.stateStartedAt || Date.now();
+  const petInBed = runtime.stableState ?? inBed;
+  const breathRate = Number(data?.breath_rate);
+  let heartRate = 0;
+
+  if (petInBed === 1 && Number.isFinite(breathRate) && breathRate > 0) {
+    const simulator = runtime.heartRateSimulator;
+    const effectiveBreathRate = normalizePetHeartRateBreathRate(breathRate);
+    simulator.breathRateQueue.push(effectiveBreathRate);
+    if (simulator.breathRateQueue.length > 2) {
+      simulator.breathRateQueue.shift();
+    }
+    const shouldRecompute =
+      simulator.breathRateQueue.length === 2 &&
+      simulator.breathRateQueue[0] !== simulator.breathRateQueue[1];
+
+    if (!simulator.lastHeartRate) {
+      heartRate = nextPetHeartRate(Number(effectiveBreathRate), simulator);
+      simulator.lastHeartRate = heartRate;
+    } else if (shouldRecompute) {
+      heartRate = nextPetHeartRate(Number(effectiveBreathRate), simulator);
+      simulator.lastHeartRate = heartRate;
+    } else {
+      heartRate = simulator.lastHeartRate;
+    }
+  } else {
+    resetPetCareHeartRateSimulatorState(runtime.heartRateSimulator);
+  }
+
+  return {
+    ...data,
+    heart_rate: heartRate,
+    petInBed,
+    onBedTime: Math.max(0, Math.floor((Date.now() - startedAt) / 1000)),
+  };
+}
+
+function normalizeVitalSignsHeartRate(data, systemKey) {
+  if (!VITAL_SIGNS_SYSTEM_TYPES.has(systemKey)) {
+    return data;
+  }
+
+  const currentHeartRate = Number(data?.heart_rate);
+  if (Number.isFinite(currentHeartRate) && currentHeartRate > 0) {
+    return {
+      ...data,
+      heart_rate: currentHeartRate,
+    };
+  }
+
+  const simulator = vitalSignsHeartRateSimulator[systemKey];
+  const stateInBed = Number(data?.stateInBbed);
+  const breathRate = Number(data?.rate);
+
+  if (!simulator || stateInBed !== 1 || !Number.isFinite(breathRate) || breathRate <= 0 || breathRate === 88) {
+    if (simulator) {
+      resetVitalSignsHeartRateSimulatorState(simulator);
+    }
+    return {
+      ...data,
+      heart_rate: 0,
+    };
+  }
+
+  const now = Date.now();
+  if (simulator.lastHeartRateAt && now - simulator.lastHeartRateAt < PET_CARE_HEART_RATE_UPDATE_INTERVAL_MS) {
+    return {
+      ...data,
+      heart_rate: simulator.lastHeartRate,
+    };
+  }
+
+  const heartRate = nextPetHeartRate(breathRate, simulator);
+  simulator.lastHeartRate = heartRate;
+  simulator.lastHeartRateAt = now;
+
+  return {
+    ...data,
+    heart_rate: heartRate,
+  };
+}
+
+function logPetCareResult(result, systemKey) {
+  if (systemKey === 'petCareMini') {
+    return;
+  }
+
+  const runtime = petCareSystems[systemKey].runtime;
+  const now = Date.now();
+  if (now - runtime.lastLoggedAt < 1000) {
+    return;
+  }
+
+  runtime.lastLoggedAt = now;
+  const postureState = Number(result?.posture_state);
+  const postureLabel =
+    postureState === 0 ? 'Empty'
+      : postureState === 1 ? 'Paws'
+        : postureState === 2 ? 'Torso'
+          : postureState === 3 ? 'Motion'
+            : 'Unknown';
+
+  logger.info(`[${systemKey}] algorithm result`, {
+    breath_rate: result?.breath_rate,
+    effective_breath_rate: postureState === 2 ? result?.breath_rate : null,
+    posture_state: postureState,
+    posture_label: postureLabel,
+    is_motion: result?.is_motion,
+    snr_db: result?.snr_db,
+    quality: result?.quality,
+    bed_exit_flag: result?.bed_exit_flag,
+    pressure_coefficient: result?.pressure_coefficient,
+    petInBed: result?.petInBed,
+    onBedTime: result?.onBedTime,
   });
-  return max;
 }
 
-function numLessZeroToZero(num) {
-  return num < 0 ? 0 : num
-}
+// jqbed 鍋ュ悍鐩戞祴绠楁硶瀹氭椂璋冪敤锛?25ms锛?
+jqbedTimer = setInterval(async () => {
+  if (pointArr&&pointArr.length  && pointArr.every((a) => typeof a == 'number') && ['jqbed', 'smallBed'].includes(file) && port1 && port1.isOpen) {
+    const newArr = jqbedOppo(pointArr);
+    // console.log(newArr.reduce((a,b) => a+b , 0),pointArr.length,'nweArr')
+    try {
+      const rawData = await callPy('getData', { data: newArr });
+      if (rawData && rawData.rate != -1) {
+        const data = normalizeVitalSignsHeartRate(rawData, file);
+        // console.log('[jqbed] pyResult:', data,data.matrix_origin.reduce((a,b) => a+b , 0));
 
-// 鍒濆鍖杁b
-/**
- * 
- * @param {string} fileStr 浼犳劅鍣ㄧ被鍨?
- * @returns db鏁版嵁搴?
- */
-function initDb(fileStr) {
-  file = fileStr;
-  let db, db1, db2
-  console.log(isCar(file))
-  if (isCar(file)) {
-    db = genDb(`${filePath}/${file}sit.db`)
-    db1 = genDb(`${filePath}/${file}back.db`)
-  } else if (file == 'volvo') {
-    db = genDb(`${filePath}/${file}sit.db`)
-    db1 = genDb(`${filePath}/${file}back.db`)
-    db2 = genDb(`${filePath}/${file}head.db`)
+        // 缂撳瓨绠楁硶杩斿洖鐨?matrix_origin锛堜緵 useMatrixOrigin flag 浣跨敤锛?
+        if (data.matrix_origin && Array.isArray(data.matrix_origin)) {
+          jqbedMatrixOrigin = data.matrix_origin;
+        }
+
+        if (onbedArr.length < 2) {
+          onbedArr.push(data.stateInBbed);
+        } else {
+          onbedArr.shift();
+          onbedArr.push(data.stateInBbed);
+        }
+
+        if (onbedArr.every((a) => a == 1)) {
+          onBedTime += 2;
+          data.onBedTime = onBedTime;
+        } else if (onbedArr.every((a) => a == 0)) {
+          onBedTime += 2;
+          data.onBedTime = onBedTime;
+        } else {
+          onBedTime = 0;
+          data.onBedTime = 0;
+        }
+
+        const jsonData = JSON.stringify({ rate: data });
+        server.clients.forEach(function each(client) {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(jsonData);
+          }
+        });
+      }
+    } catch (e) {
+      console.error('[jqbed] callPy error:', e.message);
+    }
   }
-  else {
-    db = genDb(`${filePath}/${file}.db`)
-  }
-  return { db, db1, db2 }
+}, 125);
+
+function startPetCareTimer(systemKey) {
+  const system = petCareSystems[systemKey];
+
+  return setInterval(async () => {
+    if (system.runtime.processing) {
+      return;
+    }
+
+    if (!(pointArr && pointArr.length && pointArr.every((a) => typeof a == 'number') && file == systemKey && port1 && port1.isOpen)) {
+      return;
+    }
+
+    system.runtime.processing = true;
+
+    try {
+      if (system.runtime.resetPending) {
+        await callPy(system.rpcReset, {});
+        system.runtime.resetPending = false;
+      }
+
+      const data = await callPy(system.rpcStep, { data: [...pointArr] }, { timeoutMs: 30000 });
+      const result = normalizePetCareResult(data, systemKey);
+      logPetCareResult(result, systemKey);
+      const jsonData = JSON.stringify({ [system.eventKey]: result });
+
+      server.clients.forEach(function each(client) {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(jsonData);
+        }
+      });
+    } catch (e) {
+      console.error(`[${system.eventKey}] callPy error:`, e.message);
+    } finally {
+      system.runtime.processing = false;
+    }
+  }, 20);
 }
 
-// 褰撴病鏈塪b鏂囦欢鐨勬椂鍊欐嫹璐濅竴涓互init.db涓哄師鍨嬬殑db鏂囦欢
+petCareTimer = startPetCareTimer('petCare');
+petCareMiniTimer = startPetCareTimer('petCareMini');
 
-/**
- * 
- * @param {string} file 鏂囦欢鍚?
- * @returns 杩斿洖db鏂囦欢
- */
-function genDb(file) {
+module.exports.shutdownServer = shutdownServer;
+
+// ============================================================
+// Express HTTP 服务 (端口 19245) - OneStep 足压报告接口
+// ============================================================
+let pdfArrData = [];
+
+function sanitizeFilename(name) {
+  if (typeof name !== 'string') return '';
+  let safe = name.trim();
+  safe = safe.replace(/[\\/]/g, '');
+  safe = safe.replace(/[\x00-\x1F<>:"|?*]/g, '');
+  safe = safe.replace(/[.\s]+$/g, '');
+  return safe;
+}
+
+function fixMojibake(value) {
+  if (typeof value !== 'string') return value;
   try {
-    const fileExist = fs.accessSync(file)
-    return db = new sqlite3.Database(file);
-  } catch (err) {
-    console.log(err)
-    const initCandidates = [
-      path.join(filePath, "init.db"),
-      path.join(runtimeResourceRoot, "init.db"),
-      path.join(__dirname, "db", "init.db"),
-      path.join(app.getAppPath(), "db", "init.db"),
-    ];
-    const initDbPath = initCandidates.find((candidate) => fs.existsSync(candidate));
-    if (!initDbPath) {
-      throw new Error(`init.db not found. checked: ${initCandidates.join(", ")}`);
-    }
-    let data = fs.readFileSync(initDbPath);
-    fs.writeFileSync(file, data);
-    return db = new sqlite3.Database(file);
-  }
+    const buf = Buffer.from(value, 'latin1');
+    const utf = buf.toString('utf8');
+    if (Buffer.from(utf, 'utf8').equals(buf)) return utf;
+  } catch {}
+  return value;
 }
 
-function press6(arr, width, height, type = "row", value = (1245),) {
-  let wsPointData = [...arr];
-
-  if (type == "row") {
-    let colArr = [];
-    for (let i = 0; i < height; i++) {
-      let total = 0;
-      for (let j = 0; j < width; j++) {
-        total += wsPointData[i * width + j];
-      }
-      colArr.push(total);
-    }
-
-    // //////okok
-    for (let i = 0; i < height; i++) {
-      for (let j = 0; j < width; j++) {
-        wsPointData[i * width + j] = parseInt(
-          (wsPointData[i * width + j] * 3 / 4 /
-            (value - colArr[i] * 3 / 4 <= 0 ? 1 : value - colArr[i] * 3 / 4)) *
-          1
-        );
-      }
-    }
-  } else {
-    let colArr = [];
-    for (let i = 0; i < height; i++) {
-      let total = 0;
-      for (let j = 0; j < width; j++) {
-        total += wsPointData[j * height + i];
-      }
-      colArr.push(total);
-    }
-
-    // //////okok
-    for (let i = 0; i < height; i++) {
-      for (let j = 0; j < width; j++) {
-        wsPointData[j * height + i] = parseInt(
-          (wsPointData[j * height + i] * 3 / 4 /
-            (value - colArr[i] * 3 / 4 <= 0 ? 1 : value - colArr[i] * 3 / 4)) *
-          1
-        );
-      }
-    }
+function decodeMaybeUri(value) {
+  if (typeof value !== 'string') return value;
+  let result = value;
+  for (let i = 0; i < 2; i++) {
+    try {
+      const decoded = decodeURIComponent(result);
+      if (decoded === result) break;
+      result = decoded;
+    } catch { break; }
   }
-
-  //////
-
-  // wsPointData = wsPointData.map((a,index) => {return calculateY(a)})
-  return wsPointData;
+  return result;
 }
 
-// 鍒嗗帇鍏紡
-function pressNew1220({ arr, width, height, type = "row", value }) {
-  let wsPointData = [...arr];
-
-  if (type == "row") {
-    let colArr = [];
-    for (let i = 0; i < height; i++) {
-      let total = 0;
-      for (let j = 0; j < width; j++) {
-        total += wsPointData[i * width + j];
-      }
-      colArr.push(total);
-    }
-    // //////okok
-    for (let i = 0; i < height; i++) {
-      for (let j = 0; j < width; j++) {
-
-        let den = wsPointData[i * width + j] + value - colArr[i]
-        if (den <= 0) {
-          den = 1
-        }
-
-        wsPointData[i * width + j] = parseInt(
-          wsPointData[i * width + j] * value / den
-        );
-      }
-    }
-  } else {
-    let colArr = [];
-    for (let i = 0; i < height; i++) {
-      let total = 0;
-      for (let j = 0; j < width; j++) {
-        total += wsPointData[j * height + i];
-      }
-      colArr.push(total);
-    }
-    // //////okok
-    for (let i = 0; i < height; i++) {
-      for (let j = 0; j < width; j++) {
-        let den = wsPointData[j * height + i] + value - colArr[i]
-        if (den <= 0) {
-          den = 1
-        }
-
-        wsPointData[j * height + i] = parseInt(
-          (wsPointData[j * height + i] * value / den) / 2
-        );
-      }
-    }
-  }
-
-  //////
-
-  // wsPointData = wsPointData.map((a,index) => {return calculateY(a)})
-  return wsPointData;
+function decodeField(value) {
+  return decodeMaybeUri(fixMojibake(value));
 }
 
-function press6sit(arr, width, height, type = "row", value = (480),) {
-  let wsPointData = [...arr];
+const httpApp = express();
+httpApp.use(cors());
+httpApp.use(express.json({ limit: '50mb' }));
+httpApp.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-  const props = 4
+const multerStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, imgPath),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname || '');
+    const tempName = `${Date.now()}-${Math.floor(Math.random() * 1e9)}${ext}`;
+    cb(null, tempName);
+  },
+});
+const upload = multer({ storage: multerStorage });
+const PY_HEATMAP_TIMEOUT_MS = 60000;
+const PY_REPORT_TIMEOUT_MS = 120000;
 
-  // console.log(up, down)
-
-  if (type == "row") {
-    let colArr = [];
-    for (let i = 0; i < height; i++) {
-      let total = 0;
-      for (let j = 0; j < width; j++) {
-        total += wsPointData[i * width + j];
+httpApp.post('/getDbHeatmap', async (req, res) => {
+  try {
+    const { time } = req.body;
+    const selectQuery = 'select * from matrix WHERE date=?';
+    const params = [time];
+    db.all(selectQuery, params, async (err, rows) => {
+      if (err) {
+        logger.error('[getDbHeatmap] db error:', err);
+        return res.json(new HttpResult(1, {}, 'db error'));
       }
-      colArr.push(total);
-    }
-
-    // //////okok
-    for (let i = 0; i < height; i++) {
-      for (let j = 0; j < width; j++) {
-        wsPointData[i * width + j] = parseInt(
-          (wsPointData[i * width + j] * props / 4 /
-            (value - colArr[i] * props / 4 <= 0 ? 1 : value - colArr[i] * props / 4)) *
-          1000
-        );
+      if (!rows || rows.length === 0) {
+        return res.json(new HttpResult(1, {}, 'no data'));
       }
-    }
-  } else {
-    let colArr = [];
-    for (let i = 0; i < height; i++) {
-      let total = 0;
-      for (let j = 0; j < width; j++) {
-        total += wsPointData[j * height + i];
+      const foot = rows.map(r => JSON.parse(r.data));
+      pdfArrData = foot;
+      try {
+        await warmFootAnalysis();
+        const peak_frame = await callPy('get_peak_frame', { sensor_data: foot }, {
+          timeoutMs: PY_HEATMAP_TIMEOUT_MS,
+        });
+        return res.json(new HttpResult(0, peak_frame, 'success'));
+      } catch (e) {
+        logger.error('[getDbHeatmap] callPy error:', e.message);
+        return res.json(new HttpResult(1, {}, 'callPy error'));
       }
-      colArr.push(total);
-    }
-    // console.log(colArr)
-    // //////okok
-    for (let i = 0; i < height; i++) {
-      for (let j = 0; j < width; j++) {
-        wsPointData[j * height + i] = parseInt(
-          (wsPointData[j * height + i] * props / 4 /
-            (value - colArr[i] * props / 4 <= 0 ? 1 : value - colArr[i] * props / 4)) *
-          600
-        );
-      }
-    }
+    });
+  } catch (e) {
+    logger.error('[getDbHeatmap] error:', e.message);
+    res.json(new HttpResult(1, {}, 'error'));
   }
+});
 
-  //////
-
-  // wsPointData = wsPointData.map((a,index) => {return calculateY(a)})
-  return wsPointData;
-}
-
-
-function bytes4ToInt10(buffers) {
-  // 绀轰緥锛氬洓涓瓧鑺傜殑鏁扮粍 
-  // const fourBytes = [0x40, 0x48, 0xF5, 0xC3];
-  const res = []
-  for (let i = 0; i < buffers.length / 4; i++) {
-    const buffer = new ArrayBuffer(4);
-    const view = new DataView(buffer);
-    for (let j = 0; j < 4; j++) {
-      // 鍒涘缓涓€涓?ArrayBuffer 骞跺皢鍥涗釜瀛楄妭鍐欏叆鍏朵腑 
-
-      // 灏嗗洓涓瓧鑺傚啓鍏?DataView 
-      // for (let k = 0; k < 4; k++) {
-      view.setUint8(j, buffers[i * 4 + j]);
-      // }
-      // 浠?DataView 涓鍙栨诞鐐规暟 
-
+httpApp.post('/uploadCanvas', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.json(new HttpResult(1, {}, 'missing file'));
     }
-    const floatValue = view.getFloat32(0, true);
-    // console.log(floatValue);
-    res.push(floatValue)
+    if (typeof req.body.filename === 'string') req.body.filename = decodeField(req.body.filename);
+    if (typeof req.body.collectName === 'string') req.body.collectName = decodeField(req.body.collectName);
+    if (typeof req.body.date === 'string') req.body.date = decodeField(req.body.date);
+    if (typeof req.body.gender === 'string') req.body.gender = decodeField(req.body.gender);
+    logger.info('[uploadCanvas]', { collectName: req.body.collectName, age: req.body.age, gender: req.body.gender });
+    const requestedDate =
+      (typeof req.body.date === 'string' && req.body.date.trim()) ||
+      (typeof req.query.date === 'string' && req.query.date.trim()) ||
+      '';
+    const sanitizedRequested = sanitizeFilename(requestedDate);
+    if (!sanitizedRequested) {
+      fs.unlinkSync(req.file.path);
+      return res.json(new HttpResult(1, {}, 'missing date'));
+    }
+    const finalName = `${sanitizedRequested}.png`;
+    const newPath = path.join(imgPath, finalName);
+    fs.renameSync(req.file.path, newPath);
+    req.file.filename = finalName;
+    req.file.path = newPath;
+    const absolutePath = path.resolve(req.file.path);
+    const name = `${pdfPath}/${sanitizedRequested}`;
+    logger.info('[uploadCanvas] calling generate_foot_pressure_report1', name);
+    await warmFootAnalysis();
+    await callPy('generate_foot_pressure_report1', {
+      sensor_data: pdfArrData,
+      pdf_name: name,
+      heatmap_png_path: `${imgPath}/${sanitizedRequested}.png`,
+      user_name: req.body.collectName,
+      user_age: req.body.age,
+      user_gender: req.body.gender,
+      user_id: req.body.userId || 9527,
+    }, {
+      timeoutMs: PY_REPORT_TIMEOUT_MS,
+    });
+    const pdfFilePath = `${name}.pdf`;
+    res.json(new HttpResult(0, { file: req.file, body: req.body, absolutePath, pdfFilePath, pdfDir: pdfPath }, 'success'));
+  } catch (e) {
+    logger.error('[uploadCanvas] error:', e.message);
+    res.json(new HttpResult(1, {}, 'upload failed'));
   }
-  return res
-}
+});
 
-function arrToRealLine(arr, arrX, arrY, matrixLength) {
-  const realX = [], realY = []
-  arrX.forEach((a) => {
-    if (Array.isArray(a)) {
-      // for(let i = )
-      if (a[0] > a[1]) {
-        for (let i = a[0]; i >= a[1]; i--) {
-          realX.push(i)
-        }
-      } else {
-        for (let i = a[0]; i <= a[1]; i++) {
-          realX.push(i)
-        }
-      }
-    } else {
-      realX.push(a)
-    }
-  })
-
-  arrY.forEach((a) => {
-    if (Array.isArray(a)) {
-      // for(let i = )
-      if (a[0] > a[1]) {
-        for (let i = a[0]; i >= a[1]; i--) {
-          realY.push(i)
-        }
-      } else {
-        for (let i = a[0]; i <= a[1]; i++) {
-          realY.push(i)
-        }
-      }
-    } else {
-      realY.push(a)
-    }
-  })
-
-  let newArr = []
-  for (let i = 0; i < realY.length; i++) {
-    for (let j = 0; j < realX.length; j++) {
-      const realXCoo = realY[i]
-      const realYCoo = realX[j]
-      newArr.push(arr[realXCoo * matrixLength + realYCoo])
-    }
-  }
-
-  return newArr
-}
-
-
+const HTTP_PORT = 19245;
+reportHttpServer = httpApp.listen(HTTP_PORT, '127.0.0.1', () => {
+  logger.info(`[HTTP] OneStep report server listening on http://127.0.0.1:${HTTP_PORT}`);
+});
 

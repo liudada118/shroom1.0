@@ -1065,7 +1065,7 @@ export function carQXsit(wsPointData, type) {
 }
 
 export function carQXsitLocal(wsPointData) {
-  const resArr = []
+  let resArr = []
   for (let i = 0; i < 16; i++) {
     for (let j = 0; j < 16; j++) {
       resArr.push(wsPointData[i * 32 + j])
@@ -1077,11 +1077,12 @@ export function carQXsitLocal(wsPointData) {
       [resArr[i * 16 + 8 + j], resArr[i * 16 + 8 + 7 - j]] = [resArr[i * 16 + 8 + 7 - j], resArr[i * 16 + 8 + j],]
     }
   }
+  resArr = rotate90(resArr, 16, 16)
   return resArr
 }
 
 export function carQXbackLocal(wsPointData) {
-  const resArr = []
+  let resArr = []
   for (let i = 0; i < 16; i++) {
     for (let j = 0; j < 16; j++) {
       resArr.push(wsPointData[i * 32 + j])
@@ -1093,11 +1094,19 @@ export function carQXbackLocal(wsPointData) {
       [resArr[i * 16 + 8 + j], resArr[i * 16 + 8 + 7 - j]] = [resArr[i * 16 + 8 + 7 - j], resArr[i * 16 + 8 + j],]
     }
   }
+
+  for (let i = 0; i < 8; i++) {
+    for (let j = 0; j < 16; j++) {
+      [resArr[i * 16 + j], resArr[(15 - i) * 16 + j]] = [resArr[(15 - i) * 16 + j], resArr[i * 16 + j]]
+    }
+  }
+
+  resArr = rotate90(resArr, 16, 16)
   return resArr
 }
 
 export function carQXheadLocal(wsPointData) {
-  const resArr = []
+  let resArr = []
   for (let i = 6; i < 16; i++) {
     for (let j = 0; j < 10; j++) {
       resArr.push(wsPointData[i * 32 + j])
@@ -1109,6 +1118,13 @@ export function carQXheadLocal(wsPointData) {
       [resArr[i * 10 + 5 + j], resArr[i * 10 + 5 + 4 - j]] = [resArr[i * 10 + 5 + 4 - j], resArr[i * 10 + 5 + j],]
     }
   }
+  for (let i = 0; i < 10; i++) {
+    for (let j = 0; j < 5; j++) {
+      [resArr[i * 10 + j], resArr[i * 10 + 9 - j]] = [resArr[i * 10 + 9 - j], resArr[i * 10 + j]]
+    }
+  }
+
+  resArr = rotate90CW(resArr, 10, 10)
   return resArr
 }
 
@@ -1171,4 +1187,70 @@ export function sit256(wsPointData) {
     }
   }
   return resArr
+}
+
+export function objAddOrder(obj, row, col, order = 1) {
+  const source = Array.isArray(obj) ? obj : []
+  const result = []
+  const readPoint = (r, c) => {
+    const rr = Math.min(row - 1, Math.max(0, r))
+    const cc = Math.min(col - 1, Math.max(0, c))
+    return source[rr * col + cc] || { X: 0, Y: 0, Z: 0 }
+  }
+
+  for (let r = -order; r < row + order; r++) {
+    for (let c = -order; c < col + order; c++) {
+      const point = readPoint(r, c)
+      result.push({ ...point })
+    }
+  }
+
+  return result
+}
+
+export function rowInterp(obj, width, height, interp = 2) {
+  const source = Array.isArray(obj) ? obj : []
+  const nextWidth = width * interp
+  const nextHeight = height * interp
+  const result = new Array(nextWidth * nextHeight)
+
+  const readPoint = (r, c) => {
+    const rr = Math.min(height - 1, Math.max(0, r))
+    const cc = Math.min(width - 1, Math.max(0, c))
+    return source[rr * width + cc] || { X: 0, Y: 0, Z: 0 }
+  }
+
+  for (let r = 0; r < nextHeight; r++) {
+    for (let c = 0; c < nextWidth; c++) {
+      const sourceR = r / interp
+      const sourceC = c / interp
+      const r0 = Math.floor(sourceR)
+      const c0 = Math.floor(sourceC)
+      const r1 = Math.min(height - 1, r0 + 1)
+      const c1 = Math.min(width - 1, c0 + 1)
+      const tr = sourceR - r0
+      const tc = sourceC - c0
+      const p00 = readPoint(r0, c0)
+      const p10 = readPoint(r1, c0)
+      const p01 = readPoint(r0, c1)
+      const p11 = readPoint(r1, c1)
+      const mix = (key) =>
+        Number(p00[key] || 0) * (1 - tr) * (1 - tc) +
+        Number(p10[key] || 0) * tr * (1 - tc) +
+        Number(p01[key] || 0) * (1 - tr) * tc +
+        Number(p11[key] || 0) * tr * tc
+
+      result[r * nextWidth + c] = {
+        X: mix('X'),
+        Y: mix('Y'),
+        Z: mix('Z'),
+      }
+    }
+  }
+
+  return result
+}
+
+export function rowPointInterp(smallMat, width, height, interp1, interp2) {
+  return lineInterp(smallMat, width, height, interp1, interp2)
 }

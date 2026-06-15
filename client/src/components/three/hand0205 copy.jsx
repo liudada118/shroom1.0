@@ -14,7 +14,7 @@ import {
   jetgGrey,
   rotate90,
 } from "../../assets/util/util";
-import { SelectionHelper } from "./SelectionHelper";
+import brushManager from "./BrushManager";
 import { checkRectIndex, checkRectangleIntersection, getPointCoordinate, getPointCoordinateWowback, getPointCoordinateWowhead, getPointCoordinateback } from "./threeUtil1";
 
 let timer
@@ -100,7 +100,7 @@ const Canvas = React.forwardRef((props, refs) => {
   const backX = 1 - 15, backY = 100 + 5, backZ = 118, sitX = -3, sitY = 70, sitZ = 148, backRotationX = -Math.PI * 7 / 12
 
 
-  var newDiv, newDiv1, selectStartArr = [], selectEndArr = [], sitArr, backArr, headArr, sitMatrix = [], backMatrix = [], headMatrix = [], selectMatrix = [], selectHelper
+  var newDiv, newDiv1, selectStartArr = [], selectEndArr = [], sitArr, backArr, headArr, sitMatrix = [], backMatrix = [], headMatrix = [], selectMatrix = []
   let sitIndexArr = [], sitIndexEndArr = [], backIndexArr = [], headIndexArr = [], backIndexEndArr = [], headIndexEndArr = []
   var animationRequestId, colSelectFlag = false
   const sitnum1 = 32;
@@ -142,6 +142,7 @@ const Canvas = React.forwardRef((props, refs) => {
   var ndata1 = new Array(sitnum1 * sitnum2).fill(0), ndata = new Array(backnum1 * backnum2).fill(0),
     ndatahead = new Array(headnum1 * headnum2).fill(0), newData1 = new Array(sitnum1 * sitnum2).fill(0),
     newData = new Array(backnum1 * backnum2).fill(0), newDatahead = new Array(backnum1 * backnum2).fill(0);
+  let rawPressureStatsData = [];
   let dataFlag = false;
   const changeDataFlag = () => {
     dataFlag = true;
@@ -218,6 +219,10 @@ const Canvas = React.forwardRef((props, refs) => {
   }
 
   function init() {
+    // 清空 group 中的旧粒子，防止重复 add 导致双层
+    while (group.children.length > 0) {
+      group.remove(group.children[0]);
+    }
     container = document.getElementById(`canvas${props.index}`);
     // camera
 
@@ -451,9 +456,7 @@ const Canvas = React.forwardRef((props, refs) => {
     renderer.setSize(window.innerWidth, window.innerHeight);
 
     renderer.outputEncoding = THREE.sRGBEncoding;
-    if (container.childNodes.length == 0) {
-      container.appendChild(renderer.domElement);
-    }
+    container.replaceChildren(renderer.domElement);
 
     renderer.setClearColor(0x778592);
 
@@ -478,6 +481,30 @@ const Canvas = React.forwardRef((props, refs) => {
       // camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
     }
+
+    // BrushManager 订阅回调：框选变化时计算传感器索引并通知父组件
+    const _brushCallback = (rangeArr) => {
+      if (!rangeArr || !rangeArr.length) {
+        sitIndexArr = new Array(4).fill(0);
+        backIndexArr = new Array(4).fill(0);
+        props.changeSelect({ sit: sitIndexArr, back: backIndexArr });
+        return;
+      }
+      const { x1, y1, x2, y2 } = rangeArr[0];
+      const selMatrix = [x1, y1, x2, y2];
+      // 重新获取点云投影矩阵
+      const sitArr0 = getPointCoordinate({ particles, camera, position: { x: sitX, y: sitY, z: sitZ } });
+      if (sitArr0 && sitArr0.length >= 2) {
+        sitMatrix = [sitArr0[0].x, sitArr0[0].y, sitArr0[1].x, sitArr0[1].y];
+      }
+      const sitInterArr = checkRectangleIntersection(selMatrix, sitMatrix);
+      const backInterArr = checkRectangleIntersection(selMatrix, backMatrix);
+      if (sitInterArr) sitIndexArr = checkRectIndex(sitMatrix, sitInterArr, AMOUNTX, AMOUNTY);
+      if (backInterArr) backIndexArr = checkRectIndex(backMatrix, backInterArr, AMOUNTX1, AMOUNTY1);
+      props.changeSelect({ sit: sitIndexArr, back: backIndexArr });
+    };
+    brushManager.subscribe(_brushCallback);
+    container._brushCallback = _brushCallback;
   }
 
   //   初始化座椅
@@ -659,96 +686,38 @@ const Canvas = React.forwardRef((props, refs) => {
     if (fingerArr) rotateFingers(fingerArr)
 
 
-    // initndata1Data()
-
-    // interp(ndata1, bigArr, sitnum1, sitInterp);
-
-    // console.log(first)
-    // let bigArrs = addSide(
-    //   bigArr,
-    //   sitnum2 * sitInterp,
-    //   sitnum1 * sitInterp,
-    //   sitOrder,
-    //   sitOrder
-    // );
-
-
-    // interp(ndata2, bigArrhand, sitnum1, sitInterp);
-    // let bigArrshand1 = addSide(
-    //   bigArrhand,
-    //   sitnum2 * sitInterp,
-    //   sitnum1 * sitInterp,
-    //   sitOrder,
-    //   sitOrder
-    // );
-    // gaussBlur_1(
-    //   bigArrshand1,
-    //   bigArrshand,
-    //   sitnum2 * sitInterp + sitOrder * 2,
-    //   sitnum1 * sitInterp + sitOrder * 2,
-    //   1.2
-    // );
-    // gaussBlur_1(
-    //   bigArrs,
-    //   bigArrg,
-    //   sitnum2 * sitInterp + sitOrder * 2,
-    //   sitnum1 * sitInterp + sitOrder * 2,
-    //   valueg1
-    // );
-
-
-
-    // let k = 0,
-    //   l = 0;
-    // let dataArr = []
-    // for (let ix = 0; ix < AMOUNTX; ix++) {
-    //   for (let iy = 0; iy < AMOUNTY; iy++) {
-    //     const value = bigArrg[l] * 10;
-    //     const valuehand = bigArrshand[l] * 10
-    //     //柔化处理smooth
-    //     smoothBig[l] = smoothBig[l] + (value - smoothBig[l] + 0.5) / valuel1;
-
-    //     positions[k] = ix * SEPARATION - (AMOUNTX * SEPARATION) / 2; // x
-    //     positions[k + 1] = smoothBig[l] * value1; // y
-    //     positions[k + 2] = iy * SEPARATION - (AMOUNTY * SEPARATION) / 2; // z
-    //     // console.log(value)
-    //     if (valuehand < 50) {
-    //       positions[k + 1] = -100000
-    //       positions[k] = 0
-    //       positions[k + 2] = 0
-    //     }
-    //     let rgb
-
-    //     if (sitIndexArr && !sitIndexArr.every((a) => a == 0)) {
-
-    //       if (ix >= sitIndexArr[0] && ix < sitIndexArr[1] && iy >= sitIndexArr[2] && iy < sitIndexArr[3]) {
-    //         // rgb = [255, 0, 0];
-    //         rgb = jet(0, valuej1, smoothBig[l]);
-    //         // scales1[l] = 2;
-    //         // positions1[k + 1] = smoothBig[l] / value2 - 1000
-    //         dataArr.push(bigArrg[l])
-    //       } else {
-    //         rgb = jetgGrey(0, valuej1, smoothBig[l]);
-    //         // scales1[l] = 1;
-    //       }
-    //     } else {
-    //       rgb = jet(0, valuej1, smoothBig[l]);
-    //       // scales1[l] = 1;
-    //     }
-
-    //     colors[k] = rgb[0] / 255;
-    //     colors[k + 1] = rgb[1] / 255;
-    //     colors[k + 2] = rgb[2] / 255;
-
-    //     k += 3;
-    //     l++;
-    //   }
-    // }
-
-
-    // if (!sitIndexArr.length || sitIndexArr.every((a) => a == 0)) {
-    // dataArr = bigArrg
-    // }
+    interp(ndata1, bigArr, sitnum1, sitInterp);
+    let bigArrs = addSide(
+      bigArr,
+      sitnum2 * sitInterp,
+      sitnum1 * sitInterp,
+      sitOrder,
+      sitOrder
+    );
+    gaussBlur_1(
+      bigArrs,
+      bigArrg,
+      sitnum2 * sitInterp + sitOrder * 2,
+      sitnum1 * sitInterp + sitOrder * 2,
+      valueg1
+    );
+    let k = 0,
+      l = 0;
+    for (let iy = 0; iy < AMOUNTY; iy++) {
+      for (let ix = 0; ix < AMOUNTX; ix++) {
+        const value = bigArrg[l] * 10;
+        smoothBig[l] = smoothBig[l] + (value - smoothBig[l] + 0.5) / valuel1;
+        positions[k] = ix * SEPARATION - (AMOUNTX * SEPARATION) / 2; // x
+        positions[k + 1] = smoothBig[l] * value1; // y
+        positions[k + 2] = iy * SEPARATION - (AMOUNTY * SEPARATION) / 2; // z
+        const rgb = jet(0, valuej1, smoothBig[l]);
+        colors[k] = rgb[0] / 255;
+        colors[k + 1] = rgb[1] / 255;
+        colors[k + 2] = rgb[2] / 255;
+        k += 3;
+        l++;
+      }
+    }
 
 
     var T = clock.getDelta();
@@ -758,24 +727,26 @@ const Canvas = React.forwardRef((props, refs) => {
     if (timeS > renderT) {
       // console.log(renderT)
       dataArr = dataArr.filter((a) => a > valuej1 * 0.025)
-      const max = findMax(dataArr)
-      const point = dataArr.filter((a) => a > 0).length
-      const press = dataArr.reduce((a, b) => a + b, 0)
-      const mean = press / (point == 0 ? 1 : point)
+      const point = ndata1.filter((a) => a > 0).length
+      const statsData = rawPressureStatsData.length ? rawPressureStatsData : dataArr
+      const statsPoint = rawPressureStatsData.length
+        ? rawPressureStatsData.filter((a) => a > 0).length
+        : point
+      const max = findMax(statsData)
+      const press = statsData.reduce((a, b) => a + b, 0)
+      const mean = press / (statsPoint == 0 ? 1 : statsPoint)
 
-      // props.data.current?.changeData({
-      //   meanPres: mean.toFixed(2),
-      //   maxPres: max,
-      //   point: point,
-      //   // area: areaSmooth.toFixed(0),
-      //   totalPres: press,
-      //   // pressure: pressureSmooth.toFixed(2),
-      // });
+      props.data.current?.changeData({
+        meanPres: mean.toFixed(2),
+        maxPres: max,
+        point: statsPoint,
+        totalPres: press.toFixed(0),
+      });
       const fingerR = fingerArr ? Math.floor(fingerArr[1] * 180) : 0
       props.data.current?.changeData({
-        totalPres: `${fingerR}°`
+        indexAngle: fingerR
       })
-      // fingerArr
+
       if (totalArr.length < 20) {
         totalArr.push(press);
       } else {
@@ -785,16 +756,14 @@ const Canvas = React.forwardRef((props, refs) => {
 
       const maxTotal = findMax(totalArr);
 
-
-
       if (!local)
-        props.data.current?.handleCharts(totalArr, maxTotal + 1000);
+        props.data.current?.handleCharts(totalArr, maxTotal + 100);
 
       if (totalPointArr.length < 20) {
-        totalPointArr.push(point);
+        totalPointArr.push(statsPoint);
       } else {
         totalPointArr.shift();
-        totalPointArr.push(point);
+        totalPointArr.push(statsPoint);
       }
 
       const max1 = findMax(totalPointArr);
@@ -810,7 +779,7 @@ const Canvas = React.forwardRef((props, refs) => {
       "position",
       new THREE.BufferAttribute(positions, 3)
     );
-    // sitGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    sitGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   }
 
   function render() {
@@ -857,6 +826,7 @@ const Canvas = React.forwardRef((props, refs) => {
     local = local
     const {
       wsPointData: wsPointData,
+      statsData,
       valuej,
       valueg,
       value,
@@ -877,10 +847,16 @@ const Canvas = React.forwardRef((props, refs) => {
     // valuef1 = valuef;
     // ndata1 = [];
     ndata1 = wsPointData;
+    rawPressureStatsData = Array.isArray(statsData) && statsData.length >= 256
+      ? statsData.map((item) => {
+        const numericValue = Number(item);
+        return Number.isFinite(numericValue) ? numericValue : 0;
+      })
+      : [];
 
     // valuelInit1 = valuelInit;
     // 修改线序 坐垫
-    ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a - valuef1));
+    ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a));
 
     ndata1Num = ndata1.reduce((a, b) => a + b, 0);
 
@@ -916,63 +892,28 @@ const Canvas = React.forwardRef((props, refs) => {
   }
 
   function changeBox({ width, height }) {
-    const left = selectHelper.pointTopLeft.x ? selectHelper.pointTopLeft.x : window.innerWidth / 2
-    const top = selectHelper.pointTopLeft.y ? selectHelper.pointTopLeft.y : window.innerHeight / 2
-    selectHelper.element.style.left = left + 'px';
-    selectHelper.element.style.top = top + 'px';
-    if (width) {
-      selectHelper.element.style.width = width + 'px';
-    }
-    if (height) {
-      selectHelper.element.style.height = height + 'px';
-    }
+    // 使用 BrushManager 获取当前框选区域
+    const rect = brushManager.getBoxRect();
+    const left = rect ? rect.left : window.innerWidth / 2;
+    const top = rect ? rect.top : window.innerHeight / 2;
+    const w = width || (rect ? rect.width : 0);
+    const h = height || (rect ? rect.height : 0);
 
-    selectEndArr = [left + Number(width), top + Number(height)]
-    selectStartArr = [left, top]
-
-
-    selectMatrix = [...selectStartArr, ...selectEndArr]
-
-    if (selectStartArr[0] > selectEndArr[0]) {
-      // selectMatrix = [...selectEndArr , ...selectStartArr]
-      selectMatrix[0] = selectEndArr[0]
-      selectMatrix[2] = selectStartArr[0]
-    } else {
-      selectMatrix[0] = selectStartArr[0]
-      selectMatrix[2] = selectEndArr[0]
-    }
-
-    if (selectStartArr[1] > selectEndArr[1]) {
-      selectMatrix[1] = selectEndArr[1]
-      selectMatrix[3] = selectStartArr[1]
-    } else {
-      selectMatrix[1] = selectStartArr[1]
-      selectMatrix[3] = selectEndArr[1]
-    }
-
+    selectEndArr = [left + Number(w), top + Number(h)];
+    selectStartArr = [left, top];
+    selectMatrix = [left, top, left + Number(w), top + Number(h)];
 
     if (!controlsFlag) {
-      const sitInterArr = checkRectangleIntersection(selectMatrix, sitMatrix)
-      const backInterArr = checkRectangleIntersection(selectMatrix, backMatrix)
-      console.log(selectMatrix, backMatrix)
-      if (sitInterArr) {
-        sitIndexArr = checkRectIndex(sitMatrix, sitInterArr, AMOUNTX, AMOUNTY)
-      }
-      if (backInterArr) {
-        backIndexArr = checkRectIndex(backMatrix, backInterArr, AMOUNTX1, AMOUNTY1)
-      }
-
-      props.changeSelect({ sit: sitIndexArr, back: backIndexArr })
-      // props.changeStateData({ width: width, height: height })
-
+      const sitInterArr = checkRectangleIntersection(selectMatrix, sitMatrix);
+      const backInterArr = checkRectangleIntersection(selectMatrix, backMatrix);
+      if (sitInterArr) sitIndexArr = checkRectIndex(sitMatrix, sitInterArr, AMOUNTX, AMOUNTY);
+      if (backInterArr) backIndexArr = checkRectIndex(backMatrix, backInterArr, AMOUNTX1, AMOUNTY1);
+      props.changeSelect({ sit: sitIndexArr, back: backIndexArr });
     }
-
-    // props.changeSelect({ sit: sitIndexArr, back: backIndexArr })
-
   }
 
   function cancelSelect() {
-    selectHelper.onSelectOver()
+    brushManager.deleteSelect();
   }
 
   function changeShow() {
@@ -1085,7 +1026,12 @@ const Canvas = React.forwardRef((props, refs) => {
     animate();
     return () => {
       if (animationRequestId) cancelAnimationFrame(animationRequestId);
-      selectHelper?.dispose()
+      // 清理 BrushManager
+      const container = document.getElementById(`canvas${props.index}`);
+      if (container && container._brushCallback) {
+        brushManager.unsubscribe(container._brushCallback);
+      }
+      brushManager.stopBrush();
     };
   }, []);
   return (
