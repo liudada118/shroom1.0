@@ -81,6 +81,7 @@ const {
 const module2 = require('./aes_ecb')
 const { resolveConfigFile, getConfigFileCandidates, getWritableConfigFile } = require('./licenseHelper');
 const { isCar, dedupli, totalToN, } = require("./util");
+const { estimatePointPressure, FILTER_THRESHOLD: PRESSURE_CALIBRATION_FILTER_THRESHOLD } = require("./util/pressureCalibration_V2.7.54");
 const { pressSmallBed } = require("./utilMatrix");
 const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine, pressNew12203131 } = require('./server/mathUtils');
 const { initDb: _initDbFromModule } = require('./server/dbManager');
@@ -607,6 +608,28 @@ function normalizeHistoryPressureData(row, file = '') {
   return normalizedData.map((value) => value < TEMP_FULL_BED_PRESSURE_THRESHOLD ? 0 : value);
 }
 
+function applySmallBed12BPressureCalibration(data) {
+  if (!Array.isArray(data) || data.length === 0) return [];
+
+  let sum = 0;
+  let count = 0;
+  const adcData = data.map((value) => {
+    const numberValue = Number(value);
+    return Number.isFinite(numberValue) ? numberValue : 0;
+  });
+
+  for (const value of adcData) {
+    if (value > PRESSURE_CALIBRATION_FILTER_THRESHOLD) {
+      sum += value;
+      count += 1;
+    }
+  }
+
+  if (!count) return adcData.map(() => 0);
+  const adcAvg = sum / count;
+  return adcData.map((value) => Number(estimatePointPressure(adcAvg, value).toFixed(4)));
+}
+
 function getCsvElapsedSeconds(rows, rowIndex, baseIndex = 0, frameIndex = 0) {
   const currentTimestamp = Number(rows?.[rowIndex]?.timestamp);
   const baseTimestamp = Number(rows?.[baseIndex]?.timestamp);
@@ -771,7 +794,9 @@ function shouldDownsampleSmallBed12BCollection() {
 }
 
 function buildSmallBed12BCollectionStorageData(frameToStore) {
-  const sourceData = Array.isArray(frameToStore?.sitData) ? frameToStore.sitData : [];
+  const sourceData = Array.isArray(frameToStore?.rawSitData)
+    ? frameToStore.rawSitData
+    : (Array.isArray(frameToStore?.sitData) ? frameToStore.sitData : []);
   if (!shouldDownsampleSmallBed12BCollection()) {
     return JSON.stringify(sourceData);
   }
@@ -810,16 +835,17 @@ function buildSmallBedPlaybackPayload(row, extra = {}) {
         : [];
     if (file === SMALL_BED_12B_TYPE && storedSitData.length === 256) {
       const matrixDownsample = storedData.matrixDownsample || {};
+      const expandedSitData = expandDownsampledMatrixByPoint(storedSitData, {
+        targetWidth: Number(storedData.matrixWidth) || 16,
+        targetHeight: Number(storedData.matrixHeight) || 16,
+        sourceWidth: Number(storedData.sourceMatrixWidth) || 32,
+        sourceHeight: Number(storedData.sourceMatrixHeight) || 32,
+        blockWidth: Number(matrixDownsample.blockWidth) || 2,
+        blockHeight: Number(matrixDownsample.blockHeight) || 2,
+        samplePoint: matrixDownsample.samplePoint || 'topLeft',
+      });
       return {
-        sitData: expandDownsampledMatrixByPoint(storedSitData, {
-          targetWidth: Number(storedData.matrixWidth) || 16,
-          targetHeight: Number(storedData.matrixHeight) || 16,
-          sourceWidth: Number(storedData.sourceMatrixWidth) || 32,
-          sourceHeight: Number(storedData.sourceMatrixHeight) || 32,
-          blockWidth: Number(matrixDownsample.blockWidth) || 2,
-          blockHeight: Number(matrixDownsample.blockHeight) || 2,
-          samplePoint: matrixDownsample.samplePoint || 'topLeft',
-        }),
+        sitData: applySmallBed12BPressureCalibration(expandedSitData),
         matrixWidth: Number(storedData.sourceMatrixWidth) || 32,
         matrixHeight: Number(storedData.sourceMatrixHeight) || 32,
         sourceMatrixWidth: Number(storedData.sourceMatrixWidth) || 32,
@@ -832,7 +858,7 @@ function buildSmallBedPlaybackPayload(row, extra = {}) {
       };
     }
     return {
-      sitData: storedSitData,
+      sitData: file === SMALL_BED_12B_TYPE ? applySmallBed12BPressureCalibration(storedSitData) : storedSitData,
       matrixWidth: storedData.matrixWidth,
       matrixHeight: storedData.matrixHeight,
       matrixDownsample: storedData.matrixDownsample,
@@ -842,16 +868,17 @@ function buildSmallBedPlaybackPayload(row, extra = {}) {
   }
 
   if (file === SMALL_BED_12B_TYPE && Array.isArray(storedData) && storedData.length === 256) {
+    const expandedSitData = expandDownsampledMatrixByPoint(storedData, {
+      targetWidth: 16,
+      targetHeight: 16,
+      sourceWidth: 32,
+      sourceHeight: 32,
+      blockWidth: 2,
+      blockHeight: 2,
+      samplePoint: 'topLeft',
+    });
     return {
-      sitData: expandDownsampledMatrixByPoint(storedData, {
-        targetWidth: 16,
-        targetHeight: 16,
-        sourceWidth: 32,
-        sourceHeight: 32,
-        blockWidth: 2,
-        blockHeight: 2,
-        samplePoint: 'topLeft',
-      }),
+      sitData: applySmallBed12BPressureCalibration(expandedSitData),
       matrixWidth: 32,
       matrixHeight: 32,
       playbackExpandedFromMatrixWidth: 16,
@@ -862,7 +889,9 @@ function buildSmallBedPlaybackPayload(row, extra = {}) {
   }
 
   return {
-    sitData: Array.isArray(storedData) ? storedData : [],
+    sitData: file === SMALL_BED_12B_TYPE
+      ? applySmallBed12BPressureCalibration(Array.isArray(storedData) ? storedData : [])
+      : (Array.isArray(storedData) ? storedData : []),
     time: row?.timestamp,
     ...extra,
   };
@@ -1852,8 +1881,10 @@ function getHistorySeries({ sitRows = [], backRows = [], start = 0, end = null, 
     : 1;
 
   for (let i = rangeStart; i < rangeEnd; i += sampleStep) {
-    const sitData = hasSit && safeSitRows[i] ? normalizeHistoryPressureData(safeSitRows[i], file) : null;
-    const backData = hasBack && safeBackRows[i] ? normalizeHistoryPressureData(safeBackRows[i], file) : null;
+    const rawSitData = hasSit && safeSitRows[i] ? normalizeHistoryPressureData(safeSitRows[i], file) : null;
+    const rawBackData = hasBack && safeBackRows[i] ? normalizeHistoryPressureData(safeBackRows[i], file) : null;
+    const sitData = file === SMALL_BED_12B_TYPE && rawSitData ? applySmallBed12BPressureCalibration(rawSitData) : rawSitData;
+    const backData = file === SMALL_BED_12B_TYPE && rawBackData ? applySmallBed12BPressureCalibration(rawBackData) : rawBackData;
     const sitTotalValue = sitData ? sitData.reduce((a, b) => a + b, 0) : 0;
     const backTotalValue = backData ? backData.reduce((a, b) => a + b, 0) : 0;
     const sitAreaValue = sitData ? sitData.filter((a) => a > 10).length : 0;
@@ -7163,7 +7194,8 @@ parserSmallBed12B.on("data", function (data) {
       pointArr = pointArr.map((a, index) => numLessZeroToZero(a - pointArr1zero[index]));
     }
 
-    const jsonData = JSON.stringify({ sitData: pointArr, hz: colHZ });
+    const calibratedSitData = applySmallBed12BPressureCalibration(pointArr);
+    const jsonData = JSON.stringify({ sitData: calibratedSitData, rawSitData: pointArr, hz: colHZ });
     colOrSendData(jsonData);
   }
 });
