@@ -32,6 +32,8 @@ const HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES = [20, 60]
 const MINZHEN_NORMAL_DEFAULT_COLOR = 415
 const MINZHEN_RAW_DEFAULT_COLOR = 25
 const MINZHEN_OLD_DEFAULT_COLOR_VALUES = [1205]
+const SMALL_BED_12B_PRESSURE_DEFAULT_COLOR = 80
+const SMALL_BED_12B_PRESSURE_COLOR_MAX = 300
 
 const canvasToPngBlob = (canvas) => new Promise((resolve) => {
   if (!canvas || typeof canvas.toBlob !== 'function') {
@@ -61,7 +63,7 @@ const configureOneStepPdfMessage = () => {
 // Default config values (same as Home.jsx initConfig)
 const titleInitConfig = {
   bed: { valueg1: 2, valuej1: 1205, valuel1: 5, valuef1: 6, value1: 0.72 },
-  smallBed12B: { valueg1: 2, valuej1: 2205, valuel1: 5, valuef1: 6, value1: 0.1 },
+  smallBed12B: { valueg1: 2, valuej1: SMALL_BED_12B_PRESSURE_DEFAULT_COLOR, valuel1: 5, valuef1: 6, value1: 0.1 },
   wholeChair: { valueg1: 2, valuej1: 25, valuel1: 4, valuef1: 6, value1: 15, valuelInit1: 500 },
   minzhen: { valueg1: 2, valuej1: MINZHEN_NORMAL_DEFAULT_COLOR, valuel1: 5, valuef1: 6, value1: 0.72, valuelInit1: 500 },
   petCare: { valueg1: 2, valuej1: 2900, valuel1: 5, valuef1: 6, value1: 0.7, valuelInit1: 500 },
@@ -94,7 +96,7 @@ const isPetCareMatrixTitle = (type) => petCareMatrixTypes_title.includes(type)
 const bedArr_title = ['bigBed', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'bed4096', 'bed4096num', 'matCol', 'matColPos', 'jqbed', tempFullBedType_title, ...petCareMatrixTypes_title]
 const matrixNameToType_title = (type) => type === smallBed12BType_title ? type : isPetCareMatrixTitle(type) ? type : bedArr_title.includes(type) ? 'bed' : type
 const getColorSliderMax = (matrixName) => {
-  if (matrixName === smallBed12BType_title) return 4000
+  if (matrixName === smallBed12BType_title) return SMALL_BED_12B_PRESSURE_COLOR_MAX
   if (isPetCareMatrixTitle(matrixName)) return 5000
   if (matrixName === 'humanBody') return HUMAN_BODY_COLOR_SLIDER_MAX
   return 1000
@@ -161,6 +163,9 @@ const getConfig = ({ sensorType, mode }) => {
     ) {
       mergedConfig.valuej1 = modeDefaultColor
     }
+  }
+  if (realType === smallBed12BType_title && Number(mergedConfig.valuej1) > SMALL_BED_12B_PRESSURE_COLOR_MAX) {
+    mergedConfig.valuej1 = SMALL_BED_12B_PRESSURE_DEFAULT_COLOR
   }
   return mergedConfig
 }

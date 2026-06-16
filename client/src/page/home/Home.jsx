@@ -408,6 +408,8 @@ const HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES = [20, 60]
 const MINZHEN_NORMAL_DEFAULT_COLOR = 415
 const MINZHEN_RAW_DEFAULT_COLOR = 25
 const MINZHEN_OLD_DEFAULT_COLOR_VALUES = [1205]
+const SMALL_BED_12B_PRESSURE_DEFAULT_COLOR = 80
+const SMALL_BED_12B_PRESSURE_COLOR_MAX = 300
 
 const initConfig = {
   bed: {
@@ -419,7 +421,7 @@ const initConfig = {
   },
   smallBed12B: {
     valueg1: 2,
-    valuej1: 2205,
+    valuej1: SMALL_BED_12B_PRESSURE_DEFAULT_COLOR,
     valuel1: 5,
     valuef1: 6,
     value1: 0.1,
@@ -595,6 +597,9 @@ const getConfig = ({ sensorType, mode }) => {
     ) {
       mergedConfig.valuej1 = modeDefaultColor
     }
+  }
+  if (realType === SMALL_BED_12B_MATRIX && Number(mergedConfig.valuej1) > SMALL_BED_12B_PRESSURE_COLOR_MAX) {
+    mergedConfig.valuej1 = SMALL_BED_12B_PRESSURE_DEFAULT_COLOR
   }
   return mergedConfig
 }
