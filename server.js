@@ -115,6 +115,9 @@ const isThreePortFile = (sensorType) => THREE_PORT_SENSOR_TYPES.has(sensorType);
 const getFrameMatrixData = (frame, key) => Array.isArray(frame?.[key]) ? frame[key] : [];
 const HAND_GLOVE_REALTIME_SEND_INTERVAL_MS = 1000 / 60;
 const COLLECTION_MIN_FREE_BYTES = Number(process.env.SHROOM_MIN_COLLECTION_FREE_BYTES) || 2 * 1024 * 1024 * 1024;
+const COLLECTION_INSERT_SQL = "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
+const COLLECTION_INSERT_BATCH_SIZE = Number(process.env.SHROOM_COLLECTION_INSERT_BATCH_SIZE) || 200;
+const COLLECTION_INSERT_FLUSH_INTERVAL_MS = Number(process.env.SHROOM_COLLECTION_INSERT_FLUSH_INTERVAL_MS) || 250;
 let lastHandGloveRealtimeSendAt = {
   sit: 0,
   back: 0,
@@ -1689,6 +1692,7 @@ function getCollectionFreeBytes() {
 }
 
 function stopCollectionForStorageError(error, extra = {}) {
+  flushCollectionInsertQueues();
   flag = false;
   const message = error?.message || String(error || '数据库写入失败，已停止采集');
   logger.error('[Collection] stop collection:', message);
@@ -1728,6 +1732,84 @@ function handleCollectionDbError(err, channel) {
     return;
   }
   logger.error(err);
+}
+
+const collectionInsertQueues = new Set();
+const collectionInsertQueueByDb = new WeakMap();
+let collectionInsertFlushTimer = null;
+
+function getCollectionInsertQueue(dbRef, channel = 'sit') {
+  if (!dbRef) return null;
+  let queue = collectionInsertQueueByDb.get(dbRef);
+  if (!queue) {
+    queue = {
+      dbRef,
+      channel,
+      rows: [],
+      flushing: false,
+      stmt: null,
+      tx: null,
+    };
+    collectionInsertQueueByDb.set(dbRef, queue);
+    collectionInsertQueues.add(queue);
+  }
+  queue.channel = channel || queue.channel;
+  return queue;
+}
+
+function ensureCollectionInsertFlushTimer() {
+  if (collectionInsertFlushTimer) return;
+  collectionInsertFlushTimer = setInterval(flushCollectionInsertQueues, COLLECTION_INSERT_FLUSH_INTERVAL_MS);
+  if (typeof collectionInsertFlushTimer.unref === 'function') {
+    collectionInsertFlushTimer.unref();
+  }
+}
+
+function flushCollectionInsertQueue(queue) {
+  if (!queue || queue.flushing || queue.rows.length === 0) return;
+  const rows = queue.rows.splice(0, queue.rows.length);
+  queue.flushing = true;
+  try {
+    const nativeDb = getNativeDb(queue.dbRef);
+    if (nativeDb && typeof nativeDb.transaction === 'function' && typeof nativeDb.prepare === 'function') {
+      if (!queue.stmt) {
+        queue.stmt = nativeDb.prepare(COLLECTION_INSERT_SQL);
+      }
+      if (!queue.tx) {
+        queue.tx = nativeDb.transaction((batchRows) => {
+          for (const params of batchRows) {
+            queue.stmt.run(...params);
+          }
+        });
+      }
+      queue.tx(rows);
+    } else {
+      for (const params of rows) {
+        queue.dbRef.run(COLLECTION_INSERT_SQL, params, function (err) {
+          handleCollectionDbError(err, queue.channel);
+        });
+      }
+    }
+  } catch (err) {
+    handleCollectionDbError(err, queue.channel);
+  } finally {
+    queue.flushing = false;
+  }
+}
+
+function flushCollectionInsertQueues() {
+  collectionInsertQueues.forEach(flushCollectionInsertQueue);
+}
+
+function enqueueCollectionInsert(dbRef, params, channel = 'sit') {
+  const queue = getCollectionInsertQueue(dbRef, channel);
+  if (!queue) return;
+  queue.rows.push(params);
+  if (queue.rows.length >= COLLECTION_INSERT_BATCH_SIZE) {
+    flushCollectionInsertQueue(queue);
+  } else {
+    ensureCollectionInsertFlushTimer();
+  }
 }
 
 // initDb 鍖呰鍑芥暟锛岃嚜鍔ㄤ紶鍏?filePath 鍜?runtimeResourceRoot
@@ -3952,6 +4034,7 @@ module.exports = {
             flag = true;
             resetCollectionStorageClock();
           } else if (JSON.parse(message).flag === false) {
+            flushCollectionInsertQueues();
             flag = false;
           }
 
@@ -7228,10 +7311,6 @@ function colOrSendData(jsonData) {
     // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
     const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
     const date = saveTime;
-    const insertQuery =
-      "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
-
-
     // 1.0 閺堝搫娅掓禍杞扮閸?
     // db.run(
     //   insertQuery,
@@ -7268,13 +7347,7 @@ function colOrSendData(jsonData) {
           ? JSON.stringify(getFrameMatrixData(frameToStore, 'sitData'))
           : JSON.stringify([...frameToStore.sitData]);
 
-    db.run(
-      insertQuery,
-      [dataToStore, timestamp, date],
-      function (err) {
-        handleCollectionDbError(err, 'sit');
-      }
-    );
+    enqueueCollectionInsert(db, [dataToStore, timestamp, date], 'sit');
   }
 
   if (!localFlag && shouldSendRealtimeFrame('sit')) {
@@ -7347,20 +7420,7 @@ parser2.on("data", function (data) {
 
         const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
         const date = saveTime;
-        const insertQuery =
-          "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
-
-        db1.run(
-          insertQuery,
-          [JSON.stringify(pointArr2), timestamp, date],
-          function (err) {
-            if (err) {
-              logger.error(err);
-              return;
-            }
-            console.log(`Event inserted with ID ${this.lastID}`);
-          }
-        );
+        enqueueCollectionInsert(db1, [JSON.stringify(pointArr2), timestamp, date], 'back');
       }
 
       if (!localFlag) {
@@ -7591,9 +7651,6 @@ function colOrSendData1(jsonData) {
     // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
     const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
     const date = saveTime;
-    const insertQuery =
-      "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
-
     const frameToStore = JSON.parse(jsonData);
     const dataToStore = frameToStore.tempObj
       ? JSON.stringify(frameToStore.tempObj)
@@ -7603,13 +7660,7 @@ function colOrSendData1(jsonData) {
           ? JSON.stringify(getFrameMatrixData(frameToStore, 'backData'))
           : JSON.stringify([...frameToStore.backData]);
 
-    db1.run(
-      insertQuery,
-      [dataToStore, timestamp, date],
-      function (err) {
-        handleCollectionDbError(err, 'back');
-      }
-    );
+    enqueueCollectionInsert(db1, [dataToStore, timestamp, date], 'back');
   }
 
   if (!localFlag && shouldSendRealtimeFrame('back')) {
@@ -7677,15 +7728,7 @@ parser3.on("data", function (data) {
             if (dataFalg % 10 == 0) {
               const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
               const date = saveTime;
-              const insertQuery =
-                "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
-              db.run(
-                insertQuery,
-                [JSON.stringify(res), timestamp, date],
-                function (err) {
-                  handleCollectionDbError(err, 'sit');
-                }
-              );
+              enqueueCollectionInsert(db, [JSON.stringify(res), timestamp, date], 'sit');
             }
             if (dataFalg >= 10) {
               dataFalg = 0;
@@ -7734,16 +7777,7 @@ parser4.on("data", function (data) {
 
         const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
         const date = saveTime;
-        const insertQuery =
-          "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
-
-        db2.run(
-          insertQuery,
-          [JSON.stringify(pointArr4), timestamp, date],
-          function (err) {
-            handleCollectionDbError(err, 'head');
-          }
-        );
+        enqueueCollectionInsert(db2, [JSON.stringify(pointArr4), timestamp, date], 'head');
       }
 
       if (!localFlag) {
@@ -7898,17 +7932,11 @@ function colOrSendData2(jsonData) {
     // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
     const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
     const date = saveTime;
-    const insertQuery =
-      "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
-
-
     const frameToStore = JSON.parse(jsonData);
-    db2.run(
-      insertQuery,
+    enqueueCollectionInsert(
+      db2,
       [isZeroFrameStorageType(file) ? buildZeroAwareStorageData(frameToStore, 'headData', 'head') : isSmallBedMatrixType(file) ? JSON.stringify(getFrameMatrixData(frameToStore, 'headData')) : JSON.stringify([...frameToStore.backData]), timestamp, date],
-      function (err) {
-        handleCollectionDbError(err, 'head');
-      }
+      'head',
     );
   }
 

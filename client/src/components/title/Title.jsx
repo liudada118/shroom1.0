@@ -280,7 +280,7 @@ class Title extends React.Component {
       collectionModalOpen: false,
       collectLabel: '',
       collectFrequencyMode: 'serial',
-      collectMatrixMode: 'raw',
+      collectMatrixMode: '16x16',
       collectSamplePoint: 'topLeft',
       pdfLoading: false,
       humanTransform: createDefaultHumanTransform(),
