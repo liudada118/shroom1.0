@@ -41,11 +41,20 @@ const ProgressCom = React.forwardRef((props, refs) => {
     const [leftIndex, setLeftIndex] = useState(0)
     const [rightIndex, setRightIndex] = useState(0)
     const [historyTime, setHistoryTime] = useState([])
+    const [hoverHandle, setHoverHandle] = useState(null)
 
-    const maxFrameIndex = () => Math.max(0, (props.length || 1) - 1)
+    const maxFrameIndex = () => Math.max(0, Number(props.length) || 0)
     const emptyTimeText = '\u6682\u65e0\u65f6\u95f4'
 
+    const getTimeValue = (value) => {
+        if (value && typeof value === 'object') {
+            return value.info ?? value.date ?? value.time ?? value.name ?? value.value ?? value.label
+        }
+        return value
+    }
+
     const formatTimeValue = (value) => {
+        value = getTimeValue(value)
         if (value == null) return emptyTimeText
 
         if (typeof value === 'number' && Number.isFinite(value)) {
@@ -70,17 +79,30 @@ const ProgressCom = React.forwardRef((props, refs) => {
     const formatIndexTime = (index) => {
         const timeList = Array.isArray(historyTime) && historyTime.length
             ? historyTime
-            : (Array.isArray(props.time) ? props.time : [])
+            : (Array.isArray(props.historyTimeArr) && props.historyTimeArr.length ? props.historyTimeArr : [])
 
-        if (!timeList.length) return formatTimeValue(props.time)
+        const fallbackTimeList = timeList.length
+            ? timeList
+            : (Array.isArray(props.timeArr) ? props.timeArr : [])
+
+        if (!fallbackTimeList.length) return formatTimeValue(props.time)
 
         const frameIndex = Math.max(0, Math.min(maxFrameIndex(), Number(index) || 0))
-        const timeIndex = timeList.length > maxFrameIndex()
-            ? Math.min(timeList.length - 1, frameIndex)
-            : Math.round((frameIndex / (maxFrameIndex() || 1)) * (timeList.length - 1))
+        const timeIndex = fallbackTimeList.length > maxFrameIndex()
+            ? Math.min(fallbackTimeList.length - 1, frameIndex)
+            : Math.round((frameIndex / (maxFrameIndex() || 1)) * (fallbackTimeList.length - 1))
 
-        return formatTimeValue(timeList[timeIndex])
+        return formatTimeValue(fallbackTimeList[timeIndex])
     }
+
+    const getHandleIndex = (position) => changePxToValue({
+        value: position,
+        length: maxFrameIndex(),
+    })
+
+    const getHandleTime = (type) => formatIndexTime(
+        type === 'right' ? getHandleIndex(rightPosition) : getHandleIndex(leftPosition)
+    )
 
     const thrott = (fun) => {
         if (!timer) {
@@ -97,10 +119,20 @@ const ProgressCom = React.forwardRef((props, refs) => {
     }, [props.length])
 
     useEffect(() => {
+        if (Array.isArray(props.historyTimeArr) && props.historyTimeArr.length > 0) {
+            setHistoryTime(props.historyTimeArr)
+            return
+        }
+
+        if (Array.isArray(props.timeArr) && props.timeArr.length > 0) {
+            setHistoryTime(props.timeArr)
+            return
+        }
+
         if (Array.isArray(props.time) && props.time.length > 0) {
             setHistoryTime(props.time)
         }
-    }, [props.time])
+    }, [props.historyTimeArr, props.timeArr, props.time])
 
     const changeLeftProgress = (e) => {
         // 当进度条左边被按住调节起始的时间时
@@ -373,7 +405,9 @@ const ProgressCom = React.forwardRef((props, refs) => {
                         left: `${leftPosition}px`
                     }}
                     className="leftProgress"
-                    title={formatIndexTime(leftIndex)}
+                    title={getHandleTime('left')}
+                    onMouseEnter={() => setHoverHandle('left')}
+                    onMouseLeave={() => setHoverHandle(null)}
                     onMouseDown={(e) => {
                         // 当鼠标点击在控制开始时间的滑块时，将leftFlag置为true，防止事件冒泡
                         e.stopPropagation();
@@ -383,6 +417,7 @@ const ProgressCom = React.forwardRef((props, refs) => {
                         e.stopPropagation();
                     }}
                 >
+                    {hoverHandle === 'left' ? <div className="progressTimeTip">{getHandleTime('left')}</div> : null}
                 </div>
                 {/* 控制结束时间的滑块 */}
                 <div
@@ -391,7 +426,9 @@ const ProgressCom = React.forwardRef((props, refs) => {
                         left: `${rightPosition}px`
                     }}
                     className="rightProgress"
-                    title={formatIndexTime(rightIndex)}
+                    title={getHandleTime('right')}
+                    onMouseEnter={() => setHoverHandle('right')}
+                    onMouseLeave={() => setHoverHandle(null)}
                     onMouseDown={(e) => {
                         // 当鼠标点击在控制结束时间的滑块时，将rightFlag置为true，防止事件冒泡
                         e.stopPropagation();
@@ -400,7 +437,9 @@ const ProgressCom = React.forwardRef((props, refs) => {
                     onClick={(e) => {
                         e.stopPropagation();
                     }}
-                ></div>
+                >
+                    {hoverHandle === 'right' ? <div className="progressTimeTip">{getHandleTime('right')}</div> : null}
+                </div>
                 {/* 控制实时数据帧位置的滑块 */}
                 <div
                     // ref={this.line}

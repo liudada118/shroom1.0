@@ -32,8 +32,15 @@ const HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES = [20, 60]
 const MINZHEN_NORMAL_DEFAULT_COLOR = 415
 const MINZHEN_RAW_DEFAULT_COLOR = 25
 const MINZHEN_OLD_DEFAULT_COLOR_VALUES = [1205]
-const SMALL_BED_12B_PRESSURE_DEFAULT_COLOR = 80
-const SMALL_BED_12B_PRESSURE_COLOR_MAX = 300
+const SMALL_BED_12B_PRESSURE_DEFAULT_COLOR = 25
+const SMALL_BED_12B_PRESSURE_COLOR_MAX = 30
+const SMALL_BED_12B_PRESSURE_DEFAULT_SMOOTH = 2
+const SMALL_BED_12B_OLD_DEFAULT_COLOR_VALUES = [30, 80, 2205, 4000]
+const SMALL_BED_12B_OLD_DEFAULT_SMOOTH_VALUES = [5]
+const SMALL_BED_12B_PRESSURE_DEFAULT_FILTER = 0
+const SMALL_BED_12B_OLD_DEFAULT_FILTER_VALUES = [6]
+const SMALL_BED_12B_PRESSURE_DEFAULT_INIT_FILTER = 0
+const SMALL_BED_12B_OLD_DEFAULT_INIT_FILTER_VALUES = [500]
 
 const canvasToPngBlob = (canvas) => new Promise((resolve) => {
   if (!canvas || typeof canvas.toBlob !== 'function') {
@@ -63,7 +70,7 @@ const configureOneStepPdfMessage = () => {
 // Default config values (same as Home.jsx initConfig)
 const titleInitConfig = {
   bed: { valueg1: 2, valuej1: 1205, valuel1: 5, valuef1: 6, value1: 0.72 },
-  smallBed12B: { valueg1: 2, valuej1: SMALL_BED_12B_PRESSURE_DEFAULT_COLOR, valuel1: 5, valuef1: 6, value1: 0.1 },
+  smallBed12B: { valueg1: 2, valuej1: SMALL_BED_12B_PRESSURE_DEFAULT_COLOR, valuel1: SMALL_BED_12B_PRESSURE_DEFAULT_SMOOTH, valuef1: SMALL_BED_12B_PRESSURE_DEFAULT_FILTER, value1: 0.1, valuelInit1: SMALL_BED_12B_PRESSURE_DEFAULT_INIT_FILTER },
   wholeChair: { valueg1: 2, valuej1: 25, valuel1: 4, valuef1: 6, value1: 15, valuelInit1: 500 },
   minzhen: { valueg1: 2, valuej1: MINZHEN_NORMAL_DEFAULT_COLOR, valuel1: 5, valuef1: 6, value1: 0.72, valuelInit1: 500 },
   petCare: { valueg1: 2, valuej1: 2900, valuel1: 5, valuef1: 6, value1: 0.7, valuelInit1: 500 },
@@ -164,8 +171,32 @@ const getConfig = ({ sensorType, mode }) => {
       mergedConfig.valuej1 = modeDefaultColor
     }
   }
-  if (realType === smallBed12BType_title && Number(mergedConfig.valuej1) > SMALL_BED_12B_PRESSURE_COLOR_MAX) {
+  if (
+    realType === smallBed12BType_title &&
+    (
+      Number(mergedConfig.valuej1) > SMALL_BED_12B_PRESSURE_COLOR_MAX ||
+      SMALL_BED_12B_OLD_DEFAULT_COLOR_VALUES.includes(Number(mergedConfig.valuej1))
+    )
+  ) {
     mergedConfig.valuej1 = SMALL_BED_12B_PRESSURE_DEFAULT_COLOR
+  }
+  if (
+    realType === smallBed12BType_title &&
+    SMALL_BED_12B_OLD_DEFAULT_SMOOTH_VALUES.includes(Number(mergedConfig.valuel1))
+  ) {
+    mergedConfig.valuel1 = SMALL_BED_12B_PRESSURE_DEFAULT_SMOOTH
+  }
+  if (
+    realType === smallBed12BType_title &&
+    SMALL_BED_12B_OLD_DEFAULT_FILTER_VALUES.includes(Number(mergedConfig.valuef1))
+  ) {
+    mergedConfig.valuef1 = SMALL_BED_12B_PRESSURE_DEFAULT_FILTER
+  }
+  if (
+    realType === smallBed12BType_title &&
+    SMALL_BED_12B_OLD_DEFAULT_INIT_FILTER_VALUES.includes(Number(mergedConfig.valuelInit1))
+  ) {
+    mergedConfig.valuelInit1 = SMALL_BED_12B_PRESSURE_DEFAULT_INIT_FILTER
   }
   return mergedConfig
 }
@@ -282,6 +313,9 @@ class Title extends React.Component {
       collectFrequencyMode: 'serial',
       collectMatrixMode: '16x16',
       collectSamplePoint: 'topLeft',
+      smallBed12BDisplaySettingsOpen: false,
+      smallBed12BRealtimeMatrixMode: localStorage.getItem('smallBed12BRealtimeMatrixMode') === '16x16' ? '16x16' : '32x32',
+      smallBed12BRealtimeSamplePoint: localStorage.getItem('smallBed12BRealtimeSamplePoint') || 'topLeft',
       pdfLoading: false,
       humanTransform: createDefaultHumanTransform(),
     }
@@ -333,6 +367,39 @@ class Title extends React.Component {
     }
   }
 
+  getSmallBed12BDisplayState = () => {
+    if (this.props.matrixName !== smallBed12BType_title) return {};
+    const matrixMode = this.props.smallBed12BRealtimeMatrixMode === '16x16' ? '16x16' : '32x32';
+    const matrixSize = matrixMode === '16x16' ? 16 : 32;
+    return {
+      smallBed12BDisplayOptions: {
+        matrixMode,
+        samplePoint: this.props.smallBed12BRealtimeSamplePoint || 'topLeft',
+      },
+      smallBedMatrixWidth: matrixSize,
+      smallBedMatrixHeight: matrixSize,
+    };
+  }
+
+  withSmallBed12BDisplayOptions = (payload = {}) => {
+    const displayState = this.getSmallBed12BDisplayState();
+    if (!displayState.smallBed12BDisplayOptions) return payload;
+    return {
+      ...payload,
+      smallBed12BDisplayOptions: displayState.smallBed12BDisplayOptions,
+    };
+  }
+
+  withSmallBed12BDisplayState = (state = {}) => {
+    const displayState = this.getSmallBed12BDisplayState();
+    if (!displayState.smallBed12BDisplayOptions) return state;
+    const { smallBed12BDisplayOptions, ...matrixState } = displayState;
+    return {
+      ...state,
+      ...matrixState,
+    };
+  }
+
 
   onClick = (e) => {
     console.log('click ', e.key);
@@ -349,29 +416,29 @@ class Title extends React.Component {
       this.props.changeStateData({ history: 'now', local: false })
     } else if (e.key === 'playback') {
       // this.props.changeLocal(true)
-      this.props.wsSendObj({
+      this.props.wsSendObj(this.withSmallBed12BDisplayOptions({
         local: true,
         history: false
-      })
-      this.props.changeStateData({ history: 'playback', index: 0, local: true })
+      }))
+      this.props.changeStateData(this.withSmallBed12BDisplayState({ history: 'playback', index: 0, local: true }))
 
 
 
     } else {
-      this.props.changeStateData({ history: 'history', index: 0, local: true })
+      this.props.changeStateData(this.withSmallBed12BDisplayState({ history: 'history', index: 0, local: true }))
       // this.props.changeLocal(true)
 
 
       if (this.state.dataTime != '') {
-        this.props.wsSendObj({
+        this.props.wsSendObj(this.withSmallBed12BDisplayOptions({
           local: true,
           history: true
-        })
+        }))
       } else {
-        this.props.wsSendObj({
+        this.props.wsSendObj(this.withSmallBed12BDisplayOptions({
           local: true,
           // history : true
-        })
+        }))
       }
     }
     this.setState({
@@ -739,7 +806,6 @@ class Title extends React.Component {
     this.setState({
       collectionModalOpen: true,
       collectLabel: this.state.collectLabel || '',
-      collectMatrixMode: this.props.matrixName === smallBed12BType_title ? this.state.collectMatrixMode : 'raw',
     });
   }
 
@@ -771,18 +837,7 @@ class Title extends React.Component {
     const collectOptions = {
       frequencyMode,
       frequencyHz: frequencyMode === 'custom' ? collectHz : null,
-      matrixDownsample: this.props.matrixName === smallBed12BType_title && this.state.collectMatrixMode === '16x16'
-        ? {
-          enabled: true,
-          sourceWidth: 32,
-          sourceHeight: 32,
-          targetWidth: 16,
-          targetHeight: 16,
-          blockWidth: 2,
-          blockHeight: 2,
-          samplePoint: this.state.collectSamplePoint,
-        }
-        : { enabled: false },
+      matrixDownsample: { enabled: false },
     };
     const nextLoadData = baseName
       ? `${baseName}_${timeStampToDateNospace(formattedDate)} ${formattedDate}`
@@ -805,8 +860,6 @@ class Title extends React.Component {
   }
 
   renderCollectionModal(t) {
-    const isSmallBed12B = this.props.matrixName === smallBed12BType_title;
-
     return (
       <Modal
         className='collectionModal'
@@ -929,39 +982,82 @@ class Title extends React.Component {
               </div>
             )}
           </div>
-          {isSmallBed12B ? (
-            <>
-              <div>
-                <div style={{ marginBottom: 4 }}>采集矩阵</div>
-                <Radio.Group
-                  value={this.state.collectMatrixMode}
-                  onChange={(e) => this.setState({ collectMatrixMode: e.target.value })}
-                  optionType='button'
-                  buttonStyle='solid'
-                  options={[
-                    { label: '32x32 原始', value: 'raw' },
-                    { label: '16x16 缩小', value: '16x16' },
-                  ]}
-                />
-              </div>
-              {this.state.collectMatrixMode === '16x16' ? (
-                <div>
-                  <div style={{ marginBottom: 4 }}>2x2 取点位置</div>
-                  <Radio.Group
-                    value={this.state.collectSamplePoint}
-                    onChange={(e) => this.setState({ collectSamplePoint: e.target.value })}
-                    optionType='button'
-                    buttonStyle='solid'
-                    options={[
-                      { label: '左上', value: 'topLeft' },
-                      { label: '右上', value: 'topRight' },
-                      { label: '左下', value: 'bottomLeft' },
-                      { label: '右下', value: 'bottomRight' },
-                    ]}
-                  />
-                </div>
-              ) : null}
-            </>
+        </Space>
+      </Modal>
+    );
+  }
+
+  applySmallBed12BDisplaySettings = (next = {}) => {
+    const matrixMode = next.matrixMode || this.state.smallBed12BRealtimeMatrixMode;
+    const samplePoint = next.samplePoint || this.state.smallBed12BRealtimeSamplePoint;
+    const normalizedMode = matrixMode === '16x16' ? '16x16' : '32x32';
+    const normalizedSamplePoint = samplePoint || 'topLeft';
+    localStorage.setItem('smallBed12BRealtimeMatrixMode', normalizedMode);
+    localStorage.setItem('smallBed12BRealtimeSamplePoint', normalizedSamplePoint);
+    this.setState({
+      smallBed12BRealtimeMatrixMode: normalizedMode,
+      smallBed12BRealtimeSamplePoint: normalizedSamplePoint,
+    });
+    this.props.changeStateData({
+      numMatrixFlag: 'numoriginal',
+      smallBed12BRealtimeMatrixMode: normalizedMode,
+      smallBed12BRealtimeSamplePoint: normalizedSamplePoint,
+      smallBedMatrixWidth: normalizedMode === '16x16' ? 16 : 32,
+      smallBedMatrixHeight: normalizedMode === '16x16' ? 16 : 32,
+    });
+    this.props.wsSendObj({
+      smallBed12BDisplayOptions: {
+        matrixMode: normalizedMode,
+        samplePoint: normalizedSamplePoint,
+      },
+    });
+  }
+
+  renderSmallBed12BDisplaySettings() {
+    return (
+      <Modal
+        className='collectionModal'
+        title='展示设置'
+        open={this.state.smallBed12BDisplaySettingsOpen}
+        okText='确定'
+        cancelText='取消'
+        onOk={() => this.setState({ smallBed12BDisplaySettingsOpen: false })}
+        onCancel={() => this.setState({ smallBed12BDisplaySettingsOpen: false })}
+        destroyOnClose
+      >
+        <Space direction='vertical' style={{ width: '100%' }} size={12}>
+          <div>
+            <div style={{ marginBottom: 4 }}>实时矩阵</div>
+            <Radio.Group
+              value={this.state.smallBed12BRealtimeMatrixMode}
+              onChange={(e) => this.applySmallBed12BDisplaySettings({ matrixMode: e.target.value })}
+              optionType='button'
+              buttonStyle='solid'
+              options={[
+                { label: '32x32', value: '32x32' },
+                { label: '16x16', value: '16x16' },
+              ]}
+            />
+            <div className='collectionHelpText' style={{ marginTop: 8 }}>
+              这里会同时影响实时原始数据展示、采集入库和 CSV 下载矩阵尺寸。
+            </div>
+          </div>
+          {this.state.smallBed12BRealtimeMatrixMode === '16x16' ? (
+            <div>
+              <div style={{ marginBottom: 4 }}>2x2 取点位置</div>
+              <Radio.Group
+                value={this.state.smallBed12BRealtimeSamplePoint}
+                onChange={(e) => this.applySmallBed12BDisplaySettings({ samplePoint: e.target.value })}
+                optionType='button'
+                buttonStyle='solid'
+                options={[
+                  { label: '左上', value: 'topLeft' },
+                  { label: '右上', value: 'topRight' },
+                  { label: '左下', value: 'bottomLeft' },
+                  { label: '右下', value: 'bottomRight' },
+                ]}
+              />
+            </div>
           ) : null}
         </Space>
       </Modal>
@@ -1671,11 +1767,11 @@ class Title extends React.Component {
             console.log(e);
             this.props.changeStateData({ dataTime: e })
             this.setState({ dataTime: e })
-            this.props.wsSendObj({ getTime: e, index: 0 })
+            this.props.wsSendObj(this.withSmallBed12BDisplayOptions({ getTime: e, index: 0 }))
             if (this.props.history === 'history') {
-              this.props.wsSendObj({ getTime: e, index: 0, history: true })
+              this.props.wsSendObj(this.withSmallBed12BDisplayOptions({ getTime: e, index: 0, history: true }))
             } else {
-              this.props.wsSendObj({ getTime: e, index: 0 })
+              this.props.wsSendObj(this.withSmallBed12BDisplayOptions({ getTime: e, index: 0 }))
             }
             // this.props.wsSendObj({port : e})
             // if (ws && ws.readyState === 1)
@@ -1733,7 +1829,9 @@ class Title extends React.Component {
                 }
               }
             }}
-            options={this.props.matrixName === fullPacketGloveType_title ? [
+            options={this.props.matrixName === smallBed12BType_title ? [
+              { value: 'numoriginal', label: t('rawData') },
+            ] : this.props.matrixName === fullPacketGloveType_title ? [
               { value: 'num', label: t('data2D') },
               { value: 'numoriginal', label: t('rawData') },
             ] : tactileGloveTypes_title.includes(this.props.matrixName) ? [
@@ -1764,6 +1862,15 @@ class Title extends React.Component {
             ] : []}
           /> : ''
         }
+
+        {this.props.matrixName === smallBed12BType_title ? (
+          <Button
+            className='titleButton'
+            onClick={() => this.setState({ smallBed12BDisplaySettingsOpen: true })}
+          >
+            展示设置
+          </Button>
+        ) : null}
 
         {
           calibratableGloveTypes_title.includes(this.props.matrixName) ?
@@ -2146,6 +2253,7 @@ class Title extends React.Component {
 
       {this.renderCsvDownloadModal()}
       {this.renderCollectionModal(t)}
+      {this.renderSmallBed12BDisplaySettings()}
 
       <div style={{ position: 'relative', flexShrink: 0 }}>
         <img onClick={() => {

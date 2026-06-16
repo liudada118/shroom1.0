@@ -115,10 +115,12 @@ let isShiftPressed = false;
   const AMOUNTX = baseAmountX * xStretch;
   const AMOUNTY = baseAmountY;
   const isSmallBedNoAlg = () => props.matrixName === 'smallBedNoAlg';
+  const isSmallBed12B = () => props.matrixName === 'smallBed12B';
   const isRawAsideDataMatrix = () => RAW_ASIDE_MATRIX_TYPES.has(props.matrixName);
   const getRawAsideData = () => (isSmallBedNoAlg() ? [...newData1] : [...ndata1]);
   const getAsidePointThreshold = () => {
     if (isSmallBedNoAlg()) return 0;
+    if (isSmallBed12B()) return 0;
     if (isRawAsideDataMatrix()) return 10;
     return valuej1 * 0.025;
   };
@@ -129,8 +131,15 @@ let isShiftPressed = false;
       ? totalArrRef.current.map((a) => (a - 1 > 0 ? a - 1 : 0))
       : totalArrRef.current
   );
-  const getPressureChartPadding = () => (isSmallBedNoAlg() ? 20 : 1000);
+  const getPressureChartPadding = () => {
+    if (isSmallBedNoAlg()) return 20;
+    if (isSmallBed12B()) return 5;
+    return 1000;
+  };
   const getAreaChartPadding = () => (isSmallBedNoAlg() ? 20 : 100);
+  const getSmallBed12BChartMax = (arr, fallbackMax) => (
+    isSmallBed12B() ? Math.max(findMax(arr) + 5, 5) : fallbackMax
+  );
 
   const SEPARATION = 100;
   // let group = new THREE.Group();
@@ -530,7 +539,7 @@ let isShiftPressed = false;
       realArr.push(smoothValue)
     }
 
-    props.handleChartsBody1(realArr, ymax1 / 2)
+    props.handleChartsBody1(realArr, getSmallBed12BChartMax(realArr, ymax1 / 2))
 
     ndata1Num = ndata1.reduce((a, b) => a + b, 0);
     if (ndata1Num < valuelInit1) {
@@ -575,10 +584,11 @@ let isShiftPressed = false;
       for (let iy = 0; iy < AMOUNTY; iy++) {
         num += bigArrg[ix * AMOUNTY + iy]
       }
-      bodyArr.push(parseInt(num / AMOUNTY))
+      const columnMean = num / AMOUNTY
+      bodyArr.push(isSmallBed12B() ? Number(columnMean.toFixed(1)) : parseInt(columnMean))
     }
 
-    props.handleChartsBody(bodyArr, ymax1)
+    props.handleChartsBody(bodyArr, getSmallBed12BChartMax(bodyArr, ymax1))
 
 
 
@@ -642,25 +652,27 @@ let isShiftPressed = false;
       dataArrRef.current = dataArrRef.current.filter((a) => a > getAsidePointThreshold())
       const max = findMax(dataArrRef.current)
       const point = dataArrRef.current.filter((a) => a > 0).length
-      const press = Math.round(dataArrRef.current.reduce((a, b) => a + b, 0) / getAsidePressDivisor())
+      const pressTotal = dataArrRef.current.reduce((a, b) => a + b, 0)
+      const press = isSmallBed12B() ? pressTotal : Math.round(pressTotal / getAsidePressDivisor())
       const mean = press / (point == 0 ? 1 : point)
       const realPoint = useRawAsideData ? point : ndata1.filter((a) => a > 0).length
+      const displayPress = isSmallBed12B() ? max : press
 
       props.data.current?.changeData({
         meanPres: mean.toFixed(2),
         maxPres: max,
         point: point,
         area: useRawAsideData ? realPoint : realPoint * 8,
-        totalPres: press,
+        totalPres: displayPress,
         // pressure: pressureSmooth.toFixed(2),
         pressure: press / (realPoint || 1)//calculatePressure(press/realPoint)
       });
 
       if (totalArrRef.current.length < getAsideChartLimit()) {
-         totalArrRef.current.push(press);
+         totalArrRef.current.push(displayPress);
       } else {
          totalArrRef.current.shift();
-         totalArrRef.current.push(press);
+         totalArrRef.current.push(displayPress);
       }
 
       const maxTotal = findMax( totalArrRef.current);
@@ -734,15 +746,15 @@ let isShiftPressed = false;
   function sitValue(prop) {
 
     const { valuej, valueg, value, valuel, valuef, valuelInit, ymax, compen, press } = prop;
-    if (valuej) valuej1 = valuej;
-    if (valueg) valueg1 = valueg;
-    if (value) value1 = value;
-    if (valuel) valuel1 = valuel;
-    if (valuef) valuef1 = valuef;
-    if (valuelInit) valuelInit1 = valuelInit;
-    if (ymax) ymax1 = ymax;
-    if (compen) compen1 = compen
-    if (press) pressValue = press
+    if (valuej !== undefined) valuej1 = valuej;
+    if (valueg !== undefined) valueg1 = valueg;
+    if (value !== undefined) value1 = value;
+    if (valuel !== undefined) valuel1 = valuel;
+    if (valuef !== undefined) valuef1 = valuef;
+    if (valuelInit !== undefined) valuelInit1 = valuelInit;
+    if (ymax !== undefined) ymax1 = ymax;
+    if (compen !== undefined) compen1 = compen
+    if (press !== undefined) pressValue = press
 
   }
   function sitData(prop) {
@@ -823,7 +835,9 @@ let isShiftPressed = false;
       ? getRawAsideData().filter((a) => a > getAsidePointThreshold())
       : (dataArrRef.current || []);
     const point = chartData.filter((a) => a > 0).length
-    const press = Math.round(chartData.reduce((a, b) => a + b, 0) / getAsidePressDivisor())
+    const press = isSmallBed12B()
+      ? findMax(chartData)
+      : Math.round(chartData.reduce((a, b) => a + b, 0) / getAsidePressDivisor())
     if ( totalArrRef.current.length < getAsideChartLimit()) {
        totalArrRef.current.push(press);
     } else {

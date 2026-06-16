@@ -531,17 +531,39 @@ class Aside extends React.Component {
         const { t, i18n } = this.props;
         const isGlove = ['hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket'].includes(this.props.matrixName);
         const isGloveRemoteControl = isGlove && this.props.numMatrixFlag === 'normal';
-        const dataArrCar = [
+        const isSmallBed12B = this.props.matrixName === 'smallBed12B'
+        const pressureDataFields = isSmallBed12B
+            ? [
+                {
+                    color: '#2A99FF',
+                    data: this.props.i18n.t('meanPressureIntensity'),
+                    key: 'meanPres',
+                    decimals: 1,
+                },
+                {
+                    color: '#FF2A2A',
+                    data: this.props.i18n.t('maxPressureIntensity'),
+                    key: 'maxPres',
+                    decimals: 1,
+                },
+            ]
+            : [
             {
                 color: '#2A99FF',
                 data: this.props.i18n.t('meanPress'),
+                key: 'meanPres',
+                decimals: 2,
             }, {
                 color: '#FF2A2A',
                 data: this.props.i18n.t('maxPress'),
+                key: 'maxPres',
+                decimals: 0,
             },
             {
                 color: '#FF2A2A',
                 data: this.props.i18n.t('pressTotal'),
+                key: 'totalPres',
+                decimals: 0,
             },
         ]
 
@@ -762,14 +784,14 @@ class Aside extends React.Component {
                     </>
                     : this.props.matrixName != 'bed40' ?
                 <div className="asideContent firstAside">
-                    <h2 className="asideTitle">Pressure Data</h2>
-                    <span className='pressData'>{isGloveRemoteControl ? `${this.state.indexAngle || 0}°` : Number(this.state.totalPres).toFixed(0)}</span> <span style={{ color: '#999' }}></span>
+                    <h2 className="asideTitle">{isSmallBed12B ? this.props.i18n.t('pressureIntensityData') : 'Pressure Data'}</h2>
+                    <span className='pressData'>{isGloveRemoteControl ? `${this.state.indexAngle || 0}°` : isSmallBed12B ? Number(this.state.totalPres).toFixed(1) : Number(this.state.totalPres).toFixed(0)}</span> <span style={{ color: '#999' }}>{isSmallBed12B ? 'kPa' : ''}</span>
 
                     {this.props.matrixName != 'foot' ? <>
-                        <div className='pressTitle standardColor'>{isGloveRemoteControl ? this.props.i18n.t('bendAngle') : this.props.i18n.t('allPress')}</div>
+                        <div className='pressTitle standardColor'>{isGloveRemoteControl ? this.props.i18n.t('bendAngle') : isSmallBed12B ? this.props.i18n.t('maxPressureIntensity') : this.props.i18n.t('allPress')}</div>
                         <canvas id="myChart1" style={{ height: `${150 * this.state.fontSize}px`, width: '100%' }}></canvas>
                         {
-                            dataArrCar.map((a, index) => {
+                            pressureDataFields.map((a, index) => {
                                 return (
                                     <div className='dataItem' key={`${a.data}-${index}`}>
                                         <div className='dataItemCircle'>
@@ -778,7 +800,7 @@ class Aside extends React.Component {
                                         </div>
                                         <div className='dataIteminfo'>
                                             <div className='standardColor'>{a.eng}</div>
-                                            <div>{index == 0 ? Number(this.state[arr[index]]).toFixed(2) : Number(this.state[arr[index]]).toFixed(0)}</div>
+                                            <div>{Number(this.state[a.key]).toFixed(a.decimals)}{isSmallBed12B ? <span style={{ color: '#999' }}> kPa</span> : null}</div>
                                         </div>
                                     </div>
                                 )

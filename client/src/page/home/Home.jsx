@@ -408,8 +408,15 @@ const HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES = [20, 60]
 const MINZHEN_NORMAL_DEFAULT_COLOR = 415
 const MINZHEN_RAW_DEFAULT_COLOR = 25
 const MINZHEN_OLD_DEFAULT_COLOR_VALUES = [1205]
-const SMALL_BED_12B_PRESSURE_DEFAULT_COLOR = 80
-const SMALL_BED_12B_PRESSURE_COLOR_MAX = 300
+const SMALL_BED_12B_PRESSURE_DEFAULT_COLOR = 25
+const SMALL_BED_12B_PRESSURE_COLOR_MAX = 30
+const SMALL_BED_12B_PRESSURE_DEFAULT_SMOOTH = 2
+const SMALL_BED_12B_OLD_DEFAULT_COLOR_VALUES = [30, 80, 2205, 4000]
+const SMALL_BED_12B_OLD_DEFAULT_SMOOTH_VALUES = [5]
+const SMALL_BED_12B_PRESSURE_DEFAULT_FILTER = 0
+const SMALL_BED_12B_OLD_DEFAULT_FILTER_VALUES = [6]
+const SMALL_BED_12B_PRESSURE_DEFAULT_INIT_FILTER = 0
+const SMALL_BED_12B_OLD_DEFAULT_INIT_FILTER_VALUES = [500]
 
 const initConfig = {
   bed: {
@@ -422,9 +429,10 @@ const initConfig = {
   smallBed12B: {
     valueg1: 2,
     valuej1: SMALL_BED_12B_PRESSURE_DEFAULT_COLOR,
-    valuel1: 5,
-    valuef1: 6,
+    valuel1: SMALL_BED_12B_PRESSURE_DEFAULT_SMOOTH,
+    valuef1: SMALL_BED_12B_PRESSURE_DEFAULT_FILTER,
     value1: 0.1,
+    valuelInit1: SMALL_BED_12B_PRESSURE_DEFAULT_INIT_FILTER,
   },
   wholeChair: {
     valueg1: 2,
@@ -598,13 +606,40 @@ const getConfig = ({ sensorType, mode }) => {
       mergedConfig.valuej1 = modeDefaultColor
     }
   }
-  if (realType === SMALL_BED_12B_MATRIX && Number(mergedConfig.valuej1) > SMALL_BED_12B_PRESSURE_COLOR_MAX) {
+  if (
+    realType === SMALL_BED_12B_MATRIX &&
+    (
+      Number(mergedConfig.valuej1) > SMALL_BED_12B_PRESSURE_COLOR_MAX ||
+      SMALL_BED_12B_OLD_DEFAULT_COLOR_VALUES.includes(Number(mergedConfig.valuej1))
+    )
+  ) {
     mergedConfig.valuej1 = SMALL_BED_12B_PRESSURE_DEFAULT_COLOR
+  }
+  if (
+    realType === SMALL_BED_12B_MATRIX &&
+    SMALL_BED_12B_OLD_DEFAULT_SMOOTH_VALUES.includes(Number(mergedConfig.valuel1))
+  ) {
+    mergedConfig.valuel1 = SMALL_BED_12B_PRESSURE_DEFAULT_SMOOTH
+  }
+  if (
+    realType === SMALL_BED_12B_MATRIX &&
+    SMALL_BED_12B_OLD_DEFAULT_FILTER_VALUES.includes(Number(mergedConfig.valuef1))
+  ) {
+    mergedConfig.valuef1 = SMALL_BED_12B_PRESSURE_DEFAULT_FILTER
+  }
+  if (
+    realType === SMALL_BED_12B_MATRIX &&
+    SMALL_BED_12B_OLD_DEFAULT_INIT_FILTER_VALUES.includes(Number(mergedConfig.valuelInit1))
+  ) {
+    mergedConfig.valuelInit1 = SMALL_BED_12B_PRESSURE_DEFAULT_INIT_FILTER
   }
   return mergedConfig
 }
 
 const getDefaultModeForMatrix = (matrixName, currentMode = "normal") => {
+  if (matrixName === SMALL_BED_12B_MATRIX) {
+    return "numoriginal";
+  }
   if (matrixName === WHOLE_CHAIR_MATRIX) {
     return "normal";
   }
@@ -622,6 +657,22 @@ const getDefaultModeForMatrix = (matrixName, currentMode = "normal") => {
   }
   return currentMode;
 }
+
+const normalizeSmallBed12BRealtimeMatrixMode = (value) => value === '16x16' ? '16x16' : '32x32';
+const normalizeSmallBed12BRealtimeSamplePoint = (value) => value || 'topLeft';
+
+const getSmallBed12BMatrixSizeByMode = (matrixMode) => {
+  const size = normalizeSmallBed12BRealtimeMatrixMode(matrixMode) === '16x16' ? 16 : 32;
+  return {
+    smallBedMatrixWidth: size,
+    smallBedMatrixHeight: size,
+  };
+}
+
+const getSmallBed12BDisplayOptions = (matrixMode, samplePoint) => ({
+  matrixMode: normalizeSmallBed12BRealtimeMatrixMode(matrixMode),
+  samplePoint: normalizeSmallBed12BRealtimeSamplePoint(samplePoint),
+})
 
 const createDefaultFingerPoints = (fallbackValue = 0) => new Array(5).fill(fallbackValue)
 
@@ -787,6 +838,10 @@ class Home extends React.Component {
       storedAllowedTypes = null;
     }
 
+    const smallBed12BRealtimeMatrixMode = normalizeSmallBed12BRealtimeMatrixMode(localStorage.getItem('smallBed12BRealtimeMatrixMode'));
+    const smallBed12BRealtimeSamplePoint = normalizeSmallBed12BRealtimeSamplePoint(localStorage.getItem('smallBed12BRealtimeSamplePoint'));
+    const smallBed12BMatrixSize = getSmallBed12BMatrixSizeByMode(smallBed12BRealtimeMatrixMode);
+
     this.state = {
       hand: true,
       matrixName: 'hand0205',//localStorage.getItem('file'),
@@ -823,6 +878,8 @@ class Home extends React.Component {
       pressNum: false,
       press: false,
       dataTime: "",
+      timeArr: [],
+      historyTimeArr: [],
       pointFlag: false,
       pressChart: false,
       newArr: [],
@@ -859,8 +916,10 @@ class Home extends React.Component {
       minzhenSensorInfo: {},
       hz: 12,
       realHz: 0,
-      smallBedMatrixWidth: 32,
-      smallBedMatrixHeight: 32,
+      smallBed12BRealtimeMatrixMode,
+      smallBed12BRealtimeSamplePoint,
+      smallBedMatrixWidth: smallBed12BMatrixSize.smallBedMatrixWidth,
+      smallBedMatrixHeight: smallBed12BMatrixSize.smallBedMatrixHeight,
     };
     this.com = React.createRef();
     this.data = React.createRef();
@@ -1357,8 +1416,37 @@ class Home extends React.Component {
       return;
     }
 
-    const nextWidth = Number(jsonObject.matrixWidth) || 32;
-    const nextHeight = Number(jsonObject.matrixHeight) || 32;
+    let nextWidth = Number(jsonObject.matrixWidth);
+    let nextHeight = Number(jsonObject.matrixHeight);
+    if (!Number.isFinite(nextWidth) || !Number.isFinite(nextHeight)) {
+      if (jsonObject.sitData == null) {
+        return;
+      }
+      if (!this.state.local && jsonObject.time == null && jsonObject.index == null) {
+        return;
+      }
+
+      let frameData = jsonObject.sitData;
+      if (!Array.isArray(frameData)) {
+        try {
+          frameData = JSON.parse(frameData);
+        } catch (error) {
+          return;
+        }
+      }
+
+      const matrixSize = Math.sqrt(frameData.length);
+      if (!Number.isInteger(matrixSize)) {
+        return;
+      }
+      nextWidth = matrixSize;
+      nextHeight = matrixSize;
+    }
+
+    if (nextWidth <= 0 || nextHeight <= 0) {
+      return;
+    }
+
     if (
       nextWidth !== this.state.smallBedMatrixWidth ||
       nextHeight !== this.state.smallBedMatrixHeight
@@ -1599,6 +1687,7 @@ class Home extends React.Component {
         const allowedTypes = filterVisibleDisplayMatrixTypes(jsonObject.file)
         const nextMatrixName = normalizeDisplayMatrixName(allowedTypes[0] || jsonObject.file[0])
         const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag)
+        const smallBed12BMatrixSize = getSmallBed12BMatrixSizeByMode(this.state.smallBed12BRealtimeMatrixMode)
         localStorage.setItem('matrixTitle', false)
         localStorage.setItem('allowedTypes', JSON.stringify(allowedTypes))
         this.setState({
@@ -1607,6 +1696,8 @@ class Home extends React.Component {
           matrixName: nextMatrixName,
           numMatrixFlag: nextMode,
           minzhenSensorInfo: {},
+          smallBedMatrixWidth: nextMatrixName === SMALL_BED_12B_MATRIX ? smallBed12BMatrixSize.smallBedMatrixWidth : 32,
+          smallBedMatrixHeight: nextMatrixName === SMALL_BED_12B_MATRIX ? smallBed12BMatrixSize.smallBedMatrixHeight : 32,
           ...getConfig({ sensorType: nextMatrixName, mode: nextMode }),
         })
         localStorage.setItem('file', nextMatrixName)
@@ -1614,6 +1705,7 @@ class Home extends React.Component {
         const nextMatrixName = normalizeDisplayMatrixName(jsonObject.file)
         const allowedTypes = HIDDEN_DISPLAY_MATRIX_TYPES.includes(jsonObject.file) ? [] : [jsonObject.file]
         const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag)
+        const smallBed12BMatrixSize = getSmallBed12BMatrixSizeByMode(this.state.smallBed12BRealtimeMatrixMode)
         localStorage.setItem('matrixTitle', false)
         localStorage.setItem('allowedTypes', JSON.stringify(allowedTypes))
         this.setState({
@@ -1622,6 +1714,8 @@ class Home extends React.Component {
           matrixName: nextMatrixName,
           numMatrixFlag: nextMode,
           minzhenSensorInfo: {},
+          smallBedMatrixWidth: nextMatrixName === SMALL_BED_12B_MATRIX ? smallBed12BMatrixSize.smallBedMatrixWidth : 32,
+          smallBedMatrixHeight: nextMatrixName === SMALL_BED_12B_MATRIX ? smallBed12BMatrixSize.smallBedMatrixHeight : 32,
           ...getConfig({ sensorType: nextMatrixName, mode: nextMode }),
         })
         localStorage.setItem('file', nextMatrixName)
@@ -2282,6 +2376,11 @@ class Home extends React.Component {
         time: jsonObject.time,
       });
     }
+    if (jsonObject.historyTimeArr != null) {
+      this.setState({
+        historyTimeArr: Array.isArray(jsonObject.historyTimeArr) ? jsonObject.historyTimeArr : [],
+      });
+    }
     if (jsonObject.timeArr != null) {
       // const arr = []
       const arr = jsonObject.timeArr; //.map((a, index) => a.date);
@@ -2296,7 +2395,7 @@ class Home extends React.Component {
         });
       });
 
-      this.setState({ dataArr: obj });
+      this.setState({ dataArr: obj, timeArr: arr });
       // } else {
       //   let obj = [];
       //   arr.forEach((a, index) => {
@@ -2779,7 +2878,7 @@ class Home extends React.Component {
           label: a.name,
         });
       });
-      this.setState({ dataArr: obj });
+      this.setState({ dataArr: obj, timeArr: arr });
     }
 
     if (jsonObject.length != null) {
@@ -2790,6 +2889,11 @@ class Home extends React.Component {
     if (jsonObject.time != null) {
       this.setState({
         time: jsonObject.time,
+      });
+    }
+    if (jsonObject.historyTimeArr != null) {
+      this.setState({
+        historyTimeArr: Array.isArray(jsonObject.historyTimeArr) ? jsonObject.historyTimeArr : [],
       });
     }
 
@@ -2824,6 +2928,34 @@ class Home extends React.Component {
   };
 
   componentDidUpdate(prevProps, prevState) {
+    if (
+      this.state.matrixName === SMALL_BED_12B_MATRIX &&
+      this.state.numMatrixFlag !== "numoriginal"
+    ) {
+      const nextMode = getDefaultModeForMatrix(this.state.matrixName, this.state.numMatrixFlag);
+      this.setState({
+        numMatrixFlag: nextMode,
+        ...getConfig({ sensorType: this.state.matrixName, mode: nextMode }),
+      });
+      return;
+    }
+
+    if (
+      this.state.matrixName === SMALL_BED_12B_MATRIX &&
+      (
+        prevState.matrixName !== this.state.matrixName ||
+        prevState.smallBed12BRealtimeMatrixMode !== this.state.smallBed12BRealtimeMatrixMode ||
+        prevState.smallBed12BRealtimeSamplePoint !== this.state.smallBed12BRealtimeSamplePoint
+      )
+    ) {
+      this.wsSendObj({
+        smallBed12BDisplayOptions: {
+          matrixMode: this.state.smallBed12BRealtimeMatrixMode,
+          samplePoint: this.state.smallBed12BRealtimeSamplePoint,
+        },
+      });
+    }
+
     if (
       this.state.matrixName === WHOLE_CHAIR_MATRIX &&
       this.state.numMatrixFlag !== "normal"
@@ -2951,13 +3083,20 @@ class Home extends React.Component {
     const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag);
     const configObj = getConfig({ sensorType: nextMatrixName, mode: nextMode })
     const wasLocal = this.state.local;
+    const smallBed12BDisplayOptions = getSmallBed12BDisplayOptions(
+      this.state.smallBed12BRealtimeMatrixMode,
+      this.state.smallBed12BRealtimeSamplePoint,
+    );
+    const smallBed12BMatrixSize = getSmallBed12BMatrixSizeByMode(smallBed12BDisplayOptions.matrixMode);
 
     // 1. 先停止回放，确保后端不再发送旧数据
     this.wsSendObj({ play: false });
     // 2. 关闭所有串口，确保切换前旧串口完全停止
     this.wsSendObj({ sitClose: true, backClose: true, headClose: true, sensorClose: true });
     // 3. 再发送 file 切换，后端切换数据库并重置回放状态
-    this.wsSendObj({ file: nextMatrixName });
+    this.wsSendObj(nextMatrixName === SMALL_BED_12B_MATRIX
+      ? { file: nextMatrixName, smallBed12BDisplayOptions }
+      : { file: nextMatrixName });
 
     // 4. 清空前端数据
     this.data.current?.changeData({ meanPres: 0, maxPres: 0, point: 0, area: 0, totalPres: 0, pressure: 0 });
@@ -2984,8 +3123,8 @@ class Home extends React.Component {
       portnameHead: '',
       portnameSensor: '',
       minzhenSensorInfo: {},
-      smallBedMatrixWidth: 32,
-      smallBedMatrixHeight: 32,
+      smallBedMatrixWidth: nextMatrixName === SMALL_BED_12B_MATRIX ? smallBed12BMatrixSize.smallBedMatrixWidth : 32,
+      smallBedMatrixHeight: nextMatrixName === SMALL_BED_12B_MATRIX ? smallBed12BMatrixSize.smallBedMatrixHeight : 32,
     });
 
     // 6. 如果当前在回放模式，重新请求新 db 的时间列表
@@ -3149,12 +3288,25 @@ class Home extends React.Component {
   }
 
   changeLocal = (value) => {
-    this.setState({ local: value });
+    const nextState = { local: value };
+    if (this.state.matrixName === SMALL_BED_12B_MATRIX && value) {
+      Object.assign(nextState, getSmallBed12BMatrixSizeByMode(this.state.smallBed12BRealtimeMatrixMode));
+    }
+    this.setState(nextState);
     // changeDateArr(matrixName)
 
     if (ws && ws.readyState === 1) {
       if (value) {
-        ws.send(JSON.stringify({ local: true }));
+        const localPayload = this.state.matrixName === SMALL_BED_12B_MATRIX
+          ? {
+            local: true,
+            smallBed12BDisplayOptions: getSmallBed12BDisplayOptions(
+              this.state.smallBed12BRealtimeMatrixMode,
+              this.state.smallBed12BRealtimeSamplePoint,
+            ),
+          }
+          : { local: true };
+        ws.send(JSON.stringify(localPayload));
       } else {
         ws.send(JSON.stringify({ play: false, local: false, history: false }));
       }
@@ -3499,7 +3651,9 @@ class Home extends React.Component {
     const text = t('rotate');
     const text2 = t('boxSelection');
     const textReset = t('reset')
-    const modeCanvasMatrixName = `${this.state.matrixName}:${this.state.numMatrixFlag}`;
+    const modeCanvasMatrixName = this.state.matrixName === SMALL_BED_12B_MATRIX
+      ? `${this.state.matrixName}:${this.state.numMatrixFlag}:${this.state.smallBedMatrixWidth}x${this.state.smallBedMatrixHeight}`
+      : `${this.state.matrixName}:${this.state.numMatrixFlag}`;
     const contentReset = (
       <div>
         <p>{t('resetContent')}</p>
@@ -3955,6 +4109,8 @@ class Home extends React.Component {
             calibration={this.state.calibration}
             changeCalibration={this.changeCalibration.bind(this)}
             colFingerData={this.colFingerData.bind(this)}
+            smallBed12BRealtimeMatrixMode={this.state.smallBed12BRealtimeMatrixMode}
+            smallBed12BRealtimeSamplePoint={this.state.smallBed12BRealtimeSamplePoint}
           />
 
 
@@ -4030,10 +4186,11 @@ class Home extends React.Component {
                   :
                   this.state.numMatrixFlag == "numoriginal" && ['hand', 'handSinglePoint', MINZHEN_MATRIX, 'smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed12B'].includes(this.state.matrixName) ?
                   <>
-                    <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
+                    <CanvasCom key={modeCanvasMatrixName} matrixName={modeCanvasMatrixName} local={this.state.local}>
                       <Fast1024
                         ref={this.com}
                         matrixName={this.state.matrixName}
+                        size={this.state.matrixName === SMALL_BED_12B_MATRIX && this.state.smallBedMatrixWidth === 16 ? 4 : 2}
                         data={this.data}
                         local={this.state.local}
                         handleChartsBody={this.handleChartsBody.bind(this)}
@@ -4855,6 +5012,8 @@ class Home extends React.Component {
               length={this.state.length - 1}
               max={this.max}
               time={this.state.time}
+              timeArr={this.state.timeArr}
+              historyTimeArr={this.state.historyTimeArr}
               pressMax={this.pressMax}
               wsSendObj={this.wsSendObj}
             />

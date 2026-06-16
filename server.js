@@ -12,7 +12,7 @@ const fs = require('fs');
 const { SerialPort } = require("serialport");
 const { DelimiterParser } = require("@serialport/parser-delimiter");
 const sqlite3 = require("./sqlite3-compat").verbose();
-const { createObjectCsvWriter: createCsvWriter, createObjectCsvStringifier: createCsvStringifier } = require("csv-writer");
+const { createObjectCsvStringifier: createCsvStringifier } = require("csv-writer");
 const {
   openWeb,
   interp,
@@ -601,14 +601,55 @@ function getHistoryPressureData(row) {
 }
 
 function normalizeHistoryPressureData(row, file = '') {
+  const storedData = parseStoredFrameData(row);
   const data = getHistoryPressureData(row);
   const pressureData = isHandStorageType(file) && data.length > 256 ? data.slice(0, 256) : data;
   const normalizedData = pressureData.map((value) => {
     const numberValue = Number(value);
     return Number.isFinite(numberValue) ? numberValue : 0;
   });
+  if (file === SMALL_BED_12B_TYPE) {
+    return normalizeSmallBed12BPressureData(normalizedData, storedData);
+  }
   if (file !== TEMP_FULL_BED_TYPE) return normalizedData;
   return normalizedData.map((value) => value < TEMP_FULL_BED_PRESSURE_THRESHOLD ? 0 : value);
+}
+
+function isSmallBed12BPressureStoredData(storedData) {
+  return storedData && typeof storedData === 'object' && !Array.isArray(storedData) && (
+    storedData.pressureUnit === 'kPa' ||
+    storedData.dataUnit === 'kPa' ||
+    storedData.unit === 'kPa'
+  );
+}
+
+function normalizeSmallBed12BPressureData(data, storedData = null) {
+  const normalizedData = Array.isArray(data)
+    ? data.map((value) => {
+      const numberValue = Number(value);
+      return Number.isFinite(numberValue) ? numberValue : 0;
+    })
+    : [];
+
+  if (isSmallBed12BPressureStoredData(storedData)) {
+    return normalizedData.map(roundSmallBed12BPressureValue);
+  }
+
+  return applySmallBed12BPressureCalibration(normalizedData);
+}
+
+function roundSmallBed12BPressureValue(value) {
+  const numberValue = Number(value);
+  return Number((Number.isFinite(numberValue) ? numberValue : 0).toFixed(1));
+}
+
+function formatMatrixTotalForFile(value, targetFile = file) {
+  const numberValue = Number(value);
+  const safeValue = Number.isFinite(numberValue) ? numberValue : 0;
+  if (targetFile === SMALL_BED_12B_TYPE) {
+    return Number(safeValue.toFixed(1));
+  }
+  return totalToN(safeValue);
 }
 
 function applySmallBed12BPressureCalibration(data) {
@@ -630,7 +671,7 @@ function applySmallBed12BPressureCalibration(data) {
 
   if (!count) return adcData.map(() => 0);
   const adcAvg = sum / count;
-  return adcData.map((value) => Number(estimatePointPressure(adcAvg, value).toFixed(4)));
+  return adcData.map((value) => roundSmallBed12BPressureValue(estimatePointPressure(adcAvg, value)));
 }
 
 function getCsvElapsedSeconds(rows, rowIndex, baseIndex = 0, frameIndex = 0) {
@@ -694,6 +735,61 @@ function normalizeCollectOptions(options = {}) {
       blockHeight: Number(matrixDownsample.blockHeight) || 2,
       samplePoint: matrixDownsample.samplePoint || 'topLeft',
     },
+  };
+}
+
+function normalizeSmallBed12BDisplayOptions(options = {}) {
+  const matrixMode = options.matrixMode === '16x16' ? '16x16' : '32x32';
+  return {
+    matrixMode,
+    samplePoint: options.samplePoint || 'topLeft',
+  };
+}
+
+function buildSmallBed12BRealtimeFrame(pressureData) {
+  const normalizedPressureData = Array.isArray(pressureData) ? pressureData : [];
+  const options = normalizeSmallBed12BDisplayOptions(smallBed12BDisplayOptions);
+  if (options.matrixMode !== '16x16') {
+    return {
+      sitData: normalizedPressureData,
+      rawSitData: normalizedPressureData,
+      pressureData: normalizedPressureData,
+      matrixWidth: 32,
+      matrixHeight: 32,
+      pressureUnit: 'kPa',
+      hz: colHZ,
+    };
+  }
+
+  const displayPressureData = transposeSquareMatrix(normalizedPressureData, 32);
+  const downsampled = downsampleMatrixByPoint(displayPressureData, {
+    sourceWidth: 32,
+    sourceHeight: 32,
+    targetWidth: 16,
+    targetHeight: 16,
+    blockWidth: 2,
+    blockHeight: 2,
+    samplePoint: options.samplePoint,
+  });
+
+  return {
+    sitData: downsampled,
+    rawSitData: downsampled,
+    pressureData: downsampled,
+    matrixWidth: 16,
+    matrixHeight: 16,
+    sourceMatrixWidth: 32,
+    sourceMatrixHeight: 32,
+    matrixOrientation: 'transposed',
+    pressureUnit: 'kPa',
+    matrixDownsample: {
+      enabled: true,
+      samplePoint: options.samplePoint,
+      displaySamplePoint: options.samplePoint,
+      blockWidth: 2,
+      blockHeight: 2,
+    },
+    hz: colHZ,
   };
 }
 
@@ -770,46 +866,48 @@ function downsampleMatrixByPoint(data, options = {}) {
   return result;
 }
 
-function expandDownsampledMatrixByPoint(data, options = {}) {
-  if (!Array.isArray(data)) return [];
-  const targetWidth = Number(options.targetWidth) || 16;
-  const targetHeight = Number(options.targetHeight) || 16;
-  const blockWidth = Number(options.blockWidth) || 2;
-  const blockHeight = Number(options.blockHeight) || 2;
-  const sourceWidth = Number(options.sourceWidth) || targetWidth * blockWidth;
-  const sourceHeight = Number(options.sourceHeight) || targetHeight * blockHeight;
-  const offset = getDownsampleOffset(options.samplePoint);
-  const result = new Array(sourceWidth * sourceHeight).fill(0);
-
-  for (let row = 0; row < targetHeight; row++) {
-    for (let col = 0; col < targetWidth; col++) {
-      const sourceRow = Math.min(sourceHeight - 1, row * blockHeight + Math.min(offset.row, blockHeight - 1));
-      const sourceCol = Math.min(sourceWidth - 1, col * blockWidth + Math.min(offset.col, blockWidth - 1));
-      result[sourceRow * sourceWidth + sourceCol] = data[row * targetWidth + col] ?? 0;
-    }
-  }
-
-  return result;
-}
-
 function shouldDownsampleSmallBed12BCollection() {
   return file === SMALL_BED_12B_TYPE && collectOptions.matrixDownsample?.enabled === true;
 }
 
 function buildSmallBed12BCollectionStorageData(frameToStore) {
-  const sourceData = Array.isArray(frameToStore?.rawSitData)
-    ? frameToStore.rawSitData
-    : (Array.isArray(frameToStore?.sitData) ? frameToStore.sitData : []);
+  const sourceData = Array.isArray(frameToStore?.sitData)
+    ? frameToStore.sitData
+    : (Array.isArray(frameToStore?.rawSitData) ? frameToStore.rawSitData : []);
   if (!shouldDownsampleSmallBed12BCollection()) {
-    return JSON.stringify(sourceData);
+    return JSON.stringify({
+      sitData: sourceData,
+      pressureData: sourceData,
+      matrixWidth: Number(frameToStore?.matrixWidth) || 32,
+      matrixHeight: Number(frameToStore?.matrixHeight) || 32,
+      matrixOrientation: frameToStore?.matrixOrientation,
+      sourceMatrixWidth: frameToStore?.sourceMatrixWidth,
+      sourceMatrixHeight: frameToStore?.sourceMatrixHeight,
+      pressureUnit: 'kPa',
+      matrixDownsample: frameToStore?.matrixDownsample,
+    });
+  }
+
+  if (Number(frameToStore?.matrixWidth) === 16 || sourceData.length === 256) {
+    return JSON.stringify({
+      sitData: sourceData,
+      pressureData: sourceData,
+      matrixWidth: Number(frameToStore?.matrixWidth) || 16,
+      matrixHeight: Number(frameToStore?.matrixHeight) || 16,
+      sourceMatrixWidth: Number(frameToStore?.sourceMatrixWidth) || 32,
+      sourceMatrixHeight: Number(frameToStore?.sourceMatrixHeight) || 32,
+      matrixOrientation: frameToStore?.matrixOrientation,
+      pressureUnit: 'kPa',
+      matrixDownsample: frameToStore?.matrixDownsample,
+    });
   }
 
   const options = collectOptions.matrixDownsample || {};
   const displaySamplePoint = options.samplePoint || 'topLeft';
-  const storageSamplePoint = getSmallBed12BStorageSamplePoint(displaySamplePoint);
-  const downsampled = downsampleMatrixByPoint(sourceData, {
+  const displaySourceData = transposeSquareMatrix(sourceData, Number(options.sourceWidth) || 32);
+  const downsampled = downsampleMatrixByPoint(displaySourceData, {
     ...options,
-    samplePoint: storageSamplePoint,
+    samplePoint: displaySamplePoint,
   });
   return JSON.stringify({
     sitData: downsampled,
@@ -818,9 +916,11 @@ function buildSmallBed12BCollectionStorageData(frameToStore) {
     matrixHeight: Number(options.targetHeight) || 16,
     sourceMatrixWidth: Number(options.sourceWidth) || 32,
     sourceMatrixHeight: Number(options.sourceHeight) || 32,
+    matrixOrientation: 'transposed',
+    pressureUnit: 'kPa',
     matrixDownsample: {
       enabled: true,
-      samplePoint: storageSamplePoint,
+      samplePoint: displaySamplePoint,
       displaySamplePoint,
       blockWidth: Number(options.blockWidth) || 2,
       blockHeight: Number(options.blockHeight) || 2,
@@ -838,32 +938,23 @@ function buildSmallBedPlaybackPayload(row, extra = {}) {
         : [];
     if (file === SMALL_BED_12B_TYPE && storedSitData.length === 256) {
       const matrixDownsample = storedData.matrixDownsample || {};
-      const expandedSitData = expandDownsampledMatrixByPoint(storedSitData, {
-        targetWidth: Number(storedData.matrixWidth) || 16,
-        targetHeight: Number(storedData.matrixHeight) || 16,
-        sourceWidth: Number(storedData.sourceMatrixWidth) || 32,
-        sourceHeight: Number(storedData.sourceMatrixHeight) || 32,
-        blockWidth: Number(matrixDownsample.blockWidth) || 2,
-        blockHeight: Number(matrixDownsample.blockHeight) || 2,
-        samplePoint: matrixDownsample.samplePoint || 'topLeft',
-      });
       return {
-        sitData: applySmallBed12BPressureCalibration(expandedSitData),
-        matrixWidth: Number(storedData.sourceMatrixWidth) || 32,
-        matrixHeight: Number(storedData.sourceMatrixHeight) || 32,
+        sitData: normalizeSmallBed12BPressureData(storedSitData, storedData),
+        matrixWidth: Number(storedData.matrixWidth) || 16,
+        matrixHeight: Number(storedData.matrixHeight) || 16,
         sourceMatrixWidth: Number(storedData.sourceMatrixWidth) || 32,
         sourceMatrixHeight: Number(storedData.sourceMatrixHeight) || 32,
+        matrixOrientation: storedData.matrixOrientation,
         matrixDownsample,
-        playbackExpandedFromMatrixWidth: Number(storedData.matrixWidth) || 16,
-        playbackExpandedFromMatrixHeight: Number(storedData.matrixHeight) || 16,
         time: row?.timestamp,
         ...extra,
       };
     }
     return {
-      sitData: file === SMALL_BED_12B_TYPE ? applySmallBed12BPressureCalibration(storedSitData) : storedSitData,
+      sitData: file === SMALL_BED_12B_TYPE ? normalizeSmallBed12BPressureData(storedSitData, storedData) : storedSitData,
       matrixWidth: storedData.matrixWidth,
       matrixHeight: storedData.matrixHeight,
+      matrixOrientation: storedData.matrixOrientation,
       matrixDownsample: storedData.matrixDownsample,
       time: row?.timestamp,
       ...extra,
@@ -871,21 +962,10 @@ function buildSmallBedPlaybackPayload(row, extra = {}) {
   }
 
   if (file === SMALL_BED_12B_TYPE && Array.isArray(storedData) && storedData.length === 256) {
-    const expandedSitData = expandDownsampledMatrixByPoint(storedData, {
-      targetWidth: 16,
-      targetHeight: 16,
-      sourceWidth: 32,
-      sourceHeight: 32,
-      blockWidth: 2,
-      blockHeight: 2,
-      samplePoint: 'topLeft',
-    });
     return {
-      sitData: applySmallBed12BPressureCalibration(expandedSitData),
-      matrixWidth: 32,
-      matrixHeight: 32,
-      playbackExpandedFromMatrixWidth: 16,
-      playbackExpandedFromMatrixHeight: 16,
+      sitData: normalizeSmallBed12BPressureData(storedData),
+      matrixWidth: 16,
+      matrixHeight: 16,
       time: row?.timestamp,
       ...extra,
     };
@@ -893,7 +973,7 @@ function buildSmallBedPlaybackPayload(row, extra = {}) {
 
   return {
     sitData: file === SMALL_BED_12B_TYPE
-      ? applySmallBed12BPressureCalibration(Array.isArray(storedData) ? storedData : [])
+      ? normalizeSmallBed12BPressureData(Array.isArray(storedData) ? storedData : [], storedData)
       : (Array.isArray(storedData) ? storedData : []),
     time: row?.timestamp,
     ...extra,
@@ -1012,6 +1092,8 @@ const HAND_GLOVE_CSV_SEGMENT_HEADER_IDS = [
   'fingerRoot',
   'palm',
 ];
+
+const CSV_UTF8_BOM = '\ufeff';
 
 const CSV_TITLES = {
   zh: {
@@ -1257,7 +1339,7 @@ function exportHandGloveDoubleCsv({ selectQuery, params, csvTitle, csvTargetPath
       appendPrefixedHandGloveCsvHeaders(csvHeaders, 'right', csvTitle);
 
       const csvFilePath = csvTargetPath(`${csvTitle === CSV_TITLES.en ? 'glove2' : '触觉手套2'}${str}.csv`);
-      const csvWriter = createCsvWriter({
+      const csvWriter = createUtf8BomCsvWriter({
         path: csvFilePath,
         header: csvHeaders,
       });
@@ -1290,6 +1372,10 @@ function transposeSquareMatrix(data, size = 32) {
 
 function shouldTransposeSmallBedRawMatrix(sensorType) {
   return sensorType === JQ_BED_TYPE || sensorType === SMALL_BED_TYPE || sensorType === SMALL_BED_NO_ALG_TYPE || sensorType === SMALL_BED_12B_TYPE;
+}
+
+function shouldTransposeSmallBedRawMatrixFrame(sensorType, frame = null) {
+  return shouldTransposeSmallBedRawMatrix(sensorType) && frame?.matrixOrientation !== 'transposed';
 }
 
 function normalizeTempFullBedPlaybackPressureArray(data, frame = {}) {
@@ -1963,17 +2049,15 @@ function getHistorySeries({ sitRows = [], backRows = [], start = 0, end = null, 
     : 1;
 
   for (let i = rangeStart; i < rangeEnd; i += sampleStep) {
-    const rawSitData = hasSit && safeSitRows[i] ? normalizeHistoryPressureData(safeSitRows[i], file) : null;
-    const rawBackData = hasBack && safeBackRows[i] ? normalizeHistoryPressureData(safeBackRows[i], file) : null;
-    const sitData = file === SMALL_BED_12B_TYPE && rawSitData ? applySmallBed12BPressureCalibration(rawSitData) : rawSitData;
-    const backData = file === SMALL_BED_12B_TYPE && rawBackData ? applySmallBed12BPressureCalibration(rawBackData) : rawBackData;
+    const sitData = hasSit && safeSitRows[i] ? normalizeHistoryPressureData(safeSitRows[i], file) : null;
+    const backData = hasBack && safeBackRows[i] ? normalizeHistoryPressureData(safeBackRows[i], file) : null;
     const sitTotalValue = sitData ? sitData.reduce((a, b) => a + b, 0) : 0;
     const backTotalValue = backData ? backData.reduce((a, b) => a + b, 0) : 0;
     const sitAreaValue = sitData ? sitData.filter((a) => a > 10).length : 0;
     const backAreaValue = backData ? backData.filter((a) => a > 10).length : 0;
 
     press.push(
-      (sitData ? totalToN(sitTotalValue) : 0) +
+      (sitData ? formatMatrixTotalForFile(sitTotalValue, file) : 0) +
       (backData ? totalToN(backTotalValue, 1.3) : 0)
     );
     area.push(sitAreaValue + backAreaValue);
@@ -2008,9 +2092,29 @@ function createHistoryRowsForPlayback(dbRef, date, stats, eager) {
 }
 
 function buildZeroPlaybackFrame() {
+  if (file === SMALL_BED_12B_TYPE) {
+    return smallBed12BDisplayOptions.matrixMode === '16x16'
+      ? new Array(256).fill(0)
+      : new Array(1024).fill(0);
+  }
   return file === "bigBed"
     ? new Array(2048).fill(0)
     : new Array(1024).fill(0);
+}
+
+function buildZeroPlaybackPayload() {
+  const sitData = buildZeroPlaybackFrame();
+  if (file === SMALL_BED_12B_TYPE) {
+    const matrixSize = smallBed12BDisplayOptions.matrixMode === '16x16' ? 16 : 32;
+    return {
+      sitData,
+      matrixWidth: matrixSize,
+      matrixHeight: matrixSize,
+      pressureUnit: 'kPa',
+      matrixOrientation: matrixSize === 16 ? 'transposed' : undefined,
+    };
+  }
+  return { sitData };
 }
 
 function broadcastHistorySelectionPayload(payload) {
@@ -2072,9 +2176,10 @@ function loadSelectedHistory(dateLabel) {
       index: nowIndex,
       pressArr: historySeries.press,
       areaArr: historySeries.area,
+      historyTimeArr: historySeries.time,
       historySampleStep: historySeries.sampleStep || 1,
       historyLazy: !eager,
-      sitData: buildZeroPlaybackFrame(),
+      ...buildZeroPlaybackPayload(),
     });
 
     if (isThreePortFile(file)) {
@@ -2151,6 +2256,27 @@ function closeWriteStream(stream) {
   });
 }
 
+async function writeCsvRecordsWithBom(csvFilePath, header, records = []) {
+  const stringifier = createCsvStringifier({ header });
+  const stream = fs.createWriteStream(csvFilePath, { encoding: 'utf8' });
+  try {
+    await writeStreamChunk(stream, CSV_UTF8_BOM + stringifier.getHeaderString());
+    if (records.length) {
+      await writeStreamChunk(stream, stringifier.stringifyRecords(records));
+    }
+    await closeWriteStream(stream);
+  } catch (error) {
+    stream.destroy();
+    throw error;
+  }
+}
+
+function createUtf8BomCsvWriter({ path: csvFilePath, header }) {
+  return {
+    writeRecords: (records) => writeCsvRecordsWithBom(csvFilePath, header, records),
+  };
+}
+
 async function writeCsvFileInBatches({
   csvFilePath,
   header,
@@ -2189,7 +2315,7 @@ async function writeCsvFileInBatches({
   };
 
   try {
-    await writeStreamChunk(stream, stringifier.getHeaderString());
+    await writeStreamChunk(stream, CSV_UTF8_BOM + stringifier.getHeaderString());
     emitProgress(true);
     while (written < rangeEnd - rangeStart) {
       const rows = queryHistoryRowsFromId(
@@ -2231,6 +2357,7 @@ function buildGenericSitCsvRow(row, { absoluteIndex, relativeIndex, baseTimestam
     shouldWriteDetectionPoint = false,
   } = options;
   const rawData = JSON.parse(row?.data || '[]');
+  const storedMatrixFrame = parseStoredFrameData(row);
   let pressureData, rotateData, zeroFrameData = [];
   let tempFullBedPayload = null;
   if (file === TEMP_FULL_BED_TYPE) {
@@ -2257,15 +2384,17 @@ function buildGenericSitCsvRow(row, { absoluteIndex, relativeIndex, baseTimestam
   if (file === WHOLE_CHAIR_TYPE) {
     pressureData = normalizeWholeChairFrame('sit', pressureData);
   }
-  if (shouldTransposeSmallBedRawMatrix(file)) {
-    pressureData = transposeSquareMatrix(pressureData);
+  const matrixWidth = Number(storedMatrixFrame?.matrixWidth) || Math.sqrt(pressureData.length) || 32;
+  const matrixHeight = Number(storedMatrixFrame?.matrixHeight) || matrixWidth;
+  if (shouldTransposeSmallBedRawMatrixFrame(file, storedMatrixFrame) && matrixWidth === matrixHeight) {
+    pressureData = transposeSquareMatrix(pressureData, matrixWidth);
   }
   const press = pressureData.reduce((a, b) => a + b, 0);
   const area = pressureData.filter((a) => a > 0).length;
   const newData = {
     time: timeStampToDate(row?.timestamp),
     pressureArea: area,
-    pressure: totalToN(press),
+    pressure: formatMatrixTotalForFile(press, file),
     realData: JSON.stringify(pressureData),
     index: getCsvElapsedSecondsFromBase(row, absoluteIndex, baseTimestamp, relativeIndex),
     max: findMax(pressureData),
@@ -2495,7 +2624,7 @@ async function exportHandGloveDoubleCsvStreaming({ date, csvTitle, csvTargetPath
   };
 
   try {
-    await writeStreamChunk(stream, stringifier.getHeaderString());
+    await writeStreamChunk(stream, CSV_UTF8_BOM + stringifier.getHeaderString());
     emitProgress(true);
     while (written < end - start) {
       const limit = Math.min(batchSize, end - start - written);
@@ -2667,7 +2796,7 @@ async function exportHistoryCsvStreaming({ date, csvTitle, csvTargetPath, sendCs
           let matrixWidth = Number(storedFrame?.matrixWidth) || Math.sqrt(normalizeHistoryPressureData(row, file).length) || 32;
           let matrixHeight = Number(storedFrame?.matrixHeight) || matrixWidth;
           let sitData = normalizeHistoryPressureData(row, file);
-          if (shouldTransposeSmallBedRawMatrix(file) && matrixWidth === matrixHeight) {
+          if (shouldTransposeSmallBedRawMatrixFrame(file, storedFrame) && matrixWidth === matrixHeight) {
             sitData = transposeSquareMatrix(sitData, matrixWidth);
           }
           const press = sitData.reduce((a, b) => a + b, 0);
@@ -2675,7 +2804,7 @@ async function exportHistoryCsvStreaming({ date, csvTitle, csvTargetPath, sendCs
           return {
             time: timeStampToDate(row?.timestamp),
             pressureArea: area,
-            pressure: totalToN(press),
+            pressure: formatMatrixTotalForFile(press, file),
             realData: JSON.stringify(sitData),
             index: getCsvElapsedSecondsFromBase(row, meta.absoluteIndex, meta.baseTimestamp, meta.relativeIndex),
             max: findMax(sitData),
@@ -3121,6 +3250,7 @@ db2 = dbObj.db2
 let flag = false;
 let colHZ = 12, oldTimeStamp = new Date().getTime();
 let collectOptions = { frequencyMode: 'serial', frequencyHz: 12, matrixDownsample: { enabled: false } };
+let smallBed12BDisplayOptions = { matrixMode: '32x32', samplePoint: 'topLeft' };
 let lastCollectionStorageAt = { sit: 0, back: 0, head: 0 };
 let splitBuffer = Buffer.from([0xaa, 0x55, 0x03, 0x99]);
 // let splitBuffer1 = Buffer.from([0xaa, 0x55, 0x03, 0x09]);
@@ -3178,6 +3308,9 @@ module.exports = {
         logger.debug("received: %s from %s", message, clientName, localFlag);
 
         const getMessage = JSON.parse(message);
+        if (getMessage.smallBed12BDisplayOptions != null) {
+          smallBed12BDisplayOptions = normalizeSmallBed12BDisplayOptions(getMessage.smallBed12BDisplayOptions);
+        }
 
         /**
          * 鐏忓棗鐤勯弮鍫曟浆閼冲本鏆熼幑顕€鈧岸浜鹃幍鎾崇磻
@@ -3352,6 +3485,9 @@ module.exports = {
 
 
         const getMessage = JSON.parse(message);
+        if (getMessage.smallBed12BDisplayOptions != null) {
+          smallBed12BDisplayOptions = normalizeSmallBed12BDisplayOptions(getMessage.smallBed12BDisplayOptions);
+        }
 
         // if(getMessage.compen != null){
         //   compen = getMessage.compen
@@ -4049,6 +4185,10 @@ module.exports = {
           if (JSON.parse(message).collectOptions != null) {
             collectOptions = normalizeCollectOptions(JSON.parse(message).collectOptions);
             colHZ = collectOptions.frequencyHz;
+          }
+
+          if (JSON.parse(message).smallBed12BDisplayOptions != null) {
+            smallBed12BDisplayOptions = normalizeSmallBed12BDisplayOptions(JSON.parse(message).smallBed12BDisplayOptions);
           }
 
           /**
@@ -5105,7 +5245,9 @@ module.exports = {
               if (isSmallBedMatrixType(file) || file === SMALL_BED_12B_TYPE || file === TEMP_FULL_BED_TYPE) {
                 const storedSitData = file === TEMP_FULL_BED_TYPE
                   ? buildTempFullBedPlaybackPayload(localData[i]).sitData
-                  : getStoredSitData(localData[i]);
+                  : file === SMALL_BED_12B_TYPE
+                    ? normalizeHistoryPressureData(localData[i], file)
+                    : getStoredSitData(localData[i]);
                 const storedFrame = parseStoredFrameData(localData[i]);
                 const storedWidth = file === TEMP_FULL_BED_TYPE ? 15 : Number(storedFrame?.matrixWidth) || 32;
                 for (let x = sitArr[0]; x < sitArr[1]; x++) {
@@ -5128,7 +5270,7 @@ module.exports = {
               let b = newsit.filter((a) => a > 10).length;
               // sitPressSelect.push(pressToN(b, a));
               // sitAreaSelect.push(b * 2.1);
-              sitPressSelect.push(totalToN(a));
+              sitPressSelect.push(formatMatrixTotalForFile(a, file));
               sitAreaSelect.push(b);
             }
 
@@ -5285,7 +5427,7 @@ module.exports = {
                   // const timeStamp = Date.now()
                   const str = nowGetTime.replace(/[/:]/g, "-");
                   const csvFilePath = csvTargetPath(`${file}${str}.csv`);
-                  const csvWriter = createCsvWriter({
+                  const csvWriter = createUtf8BomCsvWriter({
                     path: csvFilePath, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                     header: [
                       { id: "time", title: csvTitle.time },
@@ -5323,7 +5465,7 @@ module.exports = {
                     let sitData = normalizeHistoryPressureData(rows[i], file);
                     let matrixWidth = Number(storedFrame?.matrixWidth) || Math.sqrt(sitData.length) || 32;
                     let matrixHeight = Number(storedFrame?.matrixHeight) || matrixWidth;
-                    if (shouldTransposeSmallBedRawMatrix(file) && matrixWidth === matrixHeight) {
+                    if (shouldTransposeSmallBedRawMatrixFrame(file, storedFrame) && matrixWidth === matrixHeight) {
                       sitData = transposeSquareMatrix(sitData, matrixWidth);
                     }
                     // sitData = zeroLine(sitData,32,32)
@@ -5344,7 +5486,7 @@ module.exports = {
                         : area, //閸樼喎顫愰惌鈺呮█
                       pressure: sitPressSelect.length
                         ? sitPressSelect[i]
-                        : totalToN(press),
+                        : formatMatrixTotalForFile(press, file),
                       realData: JSON.stringify(sitData),
                       index: getCsvElapsedSeconds(rows, i, historyArr[0], j),
                       max: findMax(sitData),
@@ -5363,7 +5505,7 @@ module.exports = {
                   }
 
                   const csvFilePath = csvTargetPath(`${file}${str}.csv`);
-                  const csvWriter = createCsvWriter({
+                  const csvWriter = createUtf8BomCsvWriter({
                     path: csvFilePath, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                     header: getDefaultSitCsvHeaders(csvTitle),
                   });
@@ -5408,7 +5550,7 @@ module.exports = {
                   }
 
                   const csvFilePath = csvTargetPath(`${file}${str}.csv`);
-                  const csvWriter = createCsvWriter({
+                  const csvWriter = createUtf8BomCsvWriter({
                     path: csvFilePath, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                     header: [
                       { id: "realData", title: csvTitle.realData },
@@ -5456,7 +5598,7 @@ module.exports = {
                   }
 
                   const csvFilePath = csvTargetPath(`${file}${str}.csv`);
-                  const csvWriter = createCsvWriter({
+                  const csvWriter = createUtf8BomCsvWriter({
                     path: csvFilePath, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                     header: [
                       { id: "realData", title: csvTitle.realData },
@@ -5490,6 +5632,7 @@ module.exports = {
                   console.log(historyArr)
                   for (var i = historyArr[0], j = 0; i < historyArr[1] - 1; i++, j++) {
                     const rawData = JSON.parse(rows[i][`data`]);
+                    const storedMatrixFrame = parseStoredFrameData(rows[i]);
                     let pressureData, rotateData, zeroFrameData = [];
                     let tempFullBedPayload = null;
                     if (file === TEMP_FULL_BED_TYPE) {
@@ -5519,8 +5662,10 @@ module.exports = {
                     if (file === WHOLE_CHAIR_TYPE) {
                       pressureData = normalizeWholeChairFrame('sit', pressureData);
                     }
-                    if (shouldTransposeSmallBedRawMatrix(file)) {
-                      pressureData = transposeSquareMatrix(pressureData);
+                    const matrixWidth = Number(storedMatrixFrame?.matrixWidth) || Math.sqrt(pressureData.length) || 32;
+                    const matrixHeight = Number(storedMatrixFrame?.matrixHeight) || matrixWidth;
+                    if (shouldTransposeSmallBedRawMatrixFrame(file, storedMatrixFrame) && matrixWidth === matrixHeight) {
+                      pressureData = transposeSquareMatrix(pressureData, matrixWidth);
                     }
                     console.log(pressureData.length)
                     const press = sitPressSelect.length
@@ -5539,7 +5684,7 @@ module.exports = {
                         : area,
                       pressure: sitPressSelect.length
                         ? sitPressSelect[i]
-                        : totalToN(press),
+                        : formatMatrixTotalForFile(press, file),
                       realData: JSON.stringify(pressureData),
                       index: getCsvElapsedSeconds(rows, i, historyArr[0], j),
                       max,
@@ -5594,7 +5739,7 @@ module.exports = {
                   }
 
                   const csvFilePath = csvTargetPath(`${getCsvFilePrefix(file, 'sit', getMessage.downloadOptions || {})}${str}.csv`);
-                  const csvWriter = createCsvWriter({
+                  const csvWriter = createUtf8BomCsvWriter({
                     path: csvFilePath,
                     header: csvHeaders,
                   });
@@ -5711,7 +5856,7 @@ module.exports = {
                     backCsvHeaders.push({ id: "rotate", title: csvTitle.rotate });
                   }
                   const backCsvFilePath = csvTargetPath(`${getCsvFilePrefix(file, 'back', getMessage.downloadOptions || {})}${str}.csv`);
-                  const csvWriter1 = createCsvWriter({
+                  const csvWriter1 = createUtf8BomCsvWriter({
                     path: backCsvFilePath,
                     header: backCsvHeaders,
                   });
@@ -5786,7 +5931,7 @@ module.exports = {
                     }
 
                     const headCsvFilePath = csvTargetPath(`head${str}.csv`);
-                    const csvWriter1 = createCsvWriter({
+                    const csvWriter1 = createUtf8BomCsvWriter({
                       path: headCsvFilePath,
                       // path: `./data/back${str}.csv`, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                       header: [
@@ -7277,8 +7422,10 @@ parserSmallBed12B.on("data", function (data) {
       pointArr = pointArr.map((a, index) => numLessZeroToZero(a - pointArr1zero[index]));
     }
 
-    const calibratedSitData = applySmallBed12BPressureCalibration(pointArr);
-    const jsonData = JSON.stringify({ sitData: calibratedSitData, rawSitData: pointArr, hz: colHZ });
+    const pressureData = applySmallBed12BPressureCalibration(pointArr);
+    pointArr = pressureData;
+    newData = [...pressureData];
+    const jsonData = JSON.stringify(buildSmallBed12BRealtimeFrame(pressureData));
     colOrSendData(jsonData);
   }
 });
