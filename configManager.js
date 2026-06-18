@@ -121,6 +121,19 @@ function getSensorMatrix(sensorType) {
   return SENSOR_MATRIX_MAP[sensorType] || { width: 32, height: 32, total: 1024 };
 }
 
+// ─── 密钥管理系统（验证方）配置 ─────────────────────────────────────────────────
+// 在线版校时/校状态用。变更服务器地址只改这里，替代旧的 sensor.bodyta.com 调用。
+
+const keyServer = {
+  // 本地联调：密钥管理系统 npm run dev 跑在 localhost:3000
+  // 上线切回：'https://3000-i1umh8p7fltv67u785ozq-b0525e2d.sg1.manus.computer'
+  BASE_URL: 'http://localhost:3000',
+  LICENSE_CHECK_PATH: '/licenseCheck', // POST { key } → { time, valid, status, reason, expireTimestamp, remainingDays, sensorTypes, isAllTypes }
+  SERVER_TIME_PATH: '/serverTime',     // GET → { time: <毫秒> }（备用）
+  POLL_INTERVAL_MS: 2 * 60 * 60 * 1000, // 在线版复检间隔 2h
+  TIMEOUT_MS: 5000,                     // 请求超时，超时即视为取不到 → fail-closed
+};
+
 // ─── 压力阈值配置 ─────────────────────────────────────────────────────────────
 
 const pressure = {
@@ -136,6 +149,7 @@ module.exports = {
   DATA_DIR,
   ws,
   serial,
+  keyServer,
   CAR_TYPES,
   THREE_PORT_TYPES,
   isCar,

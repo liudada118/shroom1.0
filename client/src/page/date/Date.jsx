@@ -40,12 +40,17 @@ export default function Date1() {
 
         // 处理密钥验证错误
         if (data.licenseError != null) {
+          const wasSubmitting = isSubmitting.current
           setLoading(false)
           isSubmitting.current = false
-          Modal.error({
-            title: '密钥错误',
-            content: data.licenseError,
-          })
+          // 仅在用户主动提交密钥后才弹错误框；
+          // 后端在连接/复检时主动推送的 licenseError（如未授权、已过期）不弹，避免一打开页面就弹窗
+          if (wasSubmitting) {
+            Modal.error({
+              title: '密钥错误',
+              content: data.licenseError,
+            })
+          }
           return
         }
 
@@ -63,8 +68,9 @@ export default function Date1() {
           }
         }
 
-        // 密钥验证成功：收到有效的 date
-        if (data.date != null && data.date > 0) {
+        // 密钥验证成功：收到有效的 date 且后端判定有效（valid !== false）
+        // 防止「能本地解密但被服务器判无效/吊销」的密钥仅凭 date>0 就被放进系统页
+        if (data.date != null && data.date > 0 && data.valid !== false) {
           setLoading(false)
           const wasSubmitting = isSubmitting.current
           isSubmitting.current = false

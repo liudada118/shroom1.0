@@ -78,8 +78,8 @@ const {
   endiSit1024,
   carYLine,
 } = require("./openWeb");
-const module2 = require('./aes_ecb')
 const { resolveConfigFile, getConfigFileCandidates, getWritableConfigFile } = require('./licenseHelper');
+const licenseManager = require('./licenseManager');
 const { isCar, dedupli, totalToN, } = require("./util");
 const { pressSmallBed } = require("./utilMatrix");
 const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine, pressNew12203131 } = require('./server/mathUtils');
@@ -275,7 +275,7 @@ function takeNextMinzhenSensorFrame() {
 
 let minzhenSensorTextBuffer = '';
 function handleMinzhenSensorPortData(data) {
-  if (file !== MINZHEN_TYPE || new Date().getTime() >= endDate) return;
+  if (file !== MINZHEN_TYPE || !licenseManager.isLicenseValid()) return;
 
   minzhenSensorTextBuffer += Buffer.from(data).toString();
   if (minzhenSensorTextBuffer.length > 4096) {
@@ -1516,29 +1516,8 @@ const backTotal = backnum1 * backnum2;
 const sitTotal = sitnum1 * sitnum2;
 let length, history, nowGetTime;
 
-let nowDate = 0
-let endDate = 0
-
-const https = require('https')
-// 浣跨敤鍐呯疆 http 妯″潡鏇夸唬宸插簾寮冪殑 request 鍖?
-const http = require('http');
-http.get('http://sensor.bodyta.com:8080/rcv/login/getSystemTime', {
-  headers: { 'content-type': 'application/json; charset=utf-8;' }
-}, (res) => {
-  let data = '';
-  res.on('data', (chunk) => { data += chunk; });
-  res.on('end', () => {
-    try {
-      const body = JSON.parse(data);
-      logger.debug(body.time, 'body');
-      nowDate = parseInt(body.time);
-    } catch (e) {
-      logger.warn('Failed to parse system time response', e);
-    }
-  });
-}).on('error', (err) => {
-  logger.warn('Failed to get system time', err);
-});
+// 授权校验已统一到 licenseManager（在线版服务器时间 / 离线版防回拨可信时间）；
+// 全局 nowDate、endDate 与旧的 sensor.bodyta.com getSystemTime 均已删除，过期/到期由 licenseManager 维护。
 
 const runtimeResourceRoot = app.isPackaged ? process.resourcesPath : __dirname;
 const runtimeWritableRoot = app.isPackaged ? app.getPath('userData') : __dirname;
@@ -2948,16 +2927,90 @@ function getDefaultFileFromLicense(licenseFile, fallback = null) {
   return fallback;
 }
 
+/**
+ * 给单个客户端推送当前授权状态（在线/离线、到期时间、剩余天数、原因）。
+ * 无 payload → 提示输入密钥（校验中只发 checking）；有 payload 但未放行 → 附带 licenseError（踢停会话）。
+ */
+function sendLicenseStatusTo(client) {
+  if (!client || client.readyState !== WebSocket.OPEN) return;
+  const st = licenseManager.getState();
+  if (!st.payload) {
+    // 校验中（首检未回）时只发 checking，避免启动瞬间闪红"未授权"
+    client.send(JSON.stringify(st.checking
+      ? { licenseChecking: true }
+      : { licenseError: '未检测到有效密钥，请输入密钥后使用', noLicense: true }));
+    return;
+  }
+  const payload = {
+    date: st.expireTimestamp,
+    nowDate: st.lastCheckedAt || Date.now(), // 服务器/可信时间，供前端算剩余天数
+    file: licenseFile || file,
+    selectFlag: selectFlag,
+    checking: !!st.checking,
+    valid: !!st.valid,
+    licenseType: st.type,          // 'online' | 'offline'，供前端区分展示
+    remainingDays: st.remainingDays,
+  };
+  if (st.payload.moduleConfig) payload.moduleConfig = st.payload.moduleConfig;
+  client.send(JSON.stringify(payload));
+  // 仅在校验已完成且未放行时才报错，避免"校验中"被误判为未授权
+  if (!st.checking && !st.valid) {
+    client.send(JSON.stringify({ licenseError: st.reason || '授权校验未通过', noLicense: false }));
+  }
+}
+
+/** 向所有前端连接广播当前授权状态。 */
+function broadcastLicenseStatus() {
+  if (!server) return;
+  server.clients.forEach(sendLicenseStatusTo);
+}
+
+/** 向所有前端广播一条 licenseError（写入校验失败等即时反馈用）。 */
+function sendLicenseErrorToAll(msg) {
+  if (!server) return;
+  server.clients.forEach(function each(client) {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify({ licenseError: msg }));
+    }
+  });
+}
+
+/** 在线版 2h 复检回调：valid 由 true→false（远程吊销/断网）时通知前端停用。 */
+function onLicensePollChange(st, prevValid) {
+  if (prevValid && !st.valid) {
+    logger.warn('[License] 在线复检失效，通知前端停止使用：' + (st.reason || ''));
+  }
+  broadcastLicenseStatus();
+}
+
 if (fs.existsSync(nameTxt)) {
   try {
-    const dateRes = fs.readFileSync(nameTxt, 'utf8');
-    const parsedData = JSON.parse(module2.decryptStr(dateRes));
-    endDate = parseFloat(parsedData.date);
-    licenseFile = parsedData.file || null;
-    selectFlag = getSelectFlagFromLicense(parsedData.file);
-    file = getDefaultFileFromLicense(parsedData.file, defauleFile);
-    // 鏍规嵁 file 绫诲瀷璁剧疆娉㈢壒鐜?
-    baudRate = getSensorBaudRate(file);
+    const startupRawKey = fs.readFileSync(nameTxt, 'utf8').trim();
+
+    // 1) 同步预取 payload：仅用于配置 db/串口（不联网、不判有效性）。
+    //    在线/离线统一归一化为 { date, file, moduleConfig }；旧 ECB config.txt 走在线分支，零兼容差异。
+    const peeked = licenseManager.peekPayload(startupRawKey);
+    if (peeked) {
+      licenseFile = peeked.payload.file || null;
+      selectFlag = getSelectFlagFromLicense(peeked.payload.file);
+      file = getDefaultFileFromLicense(peeked.payload.file, defauleFile);
+      // 鏍规嵁 file 绫诲瀷璁剧疆娉㈢壒鐜?
+      baudRate = getSensorBaudRate(file);
+    } else {
+      logger.warn('[License] 启动预取密钥失败（格式无法识别或解密失败），按未授权处理。');
+    }
+
+    // 2) 异步校验有效性（在线版联网 /licenseCheck、离线版 RSA+防回拨可信时间）。
+    //    isLicenseValid() 基线为 false，首检返回前数据通道保持关闭（fail-closed），不会在首检完成前放数据。
+    licenseManager.loadFromKey(startupRawKey)
+      .then((ok) => {
+        logger.info(`[License] 启动校验完成：valid=${ok} type=${licenseManager.getState().type}`);
+        if (licenseManager.getState().type === 'online') {
+          licenseManager.startOnlinePolling(onLicensePollChange);
+        }
+        broadcastLicenseStatus();
+      })
+      .catch((err) => logger.error('[License] 启动校验异常', err));
   } catch (err) {
     logger.error(err);
   }
@@ -2982,20 +3035,6 @@ let saveTime,
   comhead,
   comSensor;
 // db = new sqlite3.Database(`${filePath}/${file}.db`);
-
-// try {
-//   const dateRes = fs.readFileSync(nameTxt, 'utf8');
-
-//   console.log(dateRes)
-//   file = dateRes
-//   // date = JSON.parse(module2.decryptStr(dateRes)).dateRes
-//   // // endDate = JSON.parse(module2.decryptStr(dateRes)).dateRes
-//   // sysStartTime = (`${JSON.parse(module2.decryptStr(dateRes)).startTimeRes}`)
-//   // console.log(JSON.parse(module2.decryptStr(dateRes)).startTimeRes);
-//   // endDate = parseFloat(module2.decryptStr(date))
-// } catch (err) {
-//   logger.error(err);
-// }
 
 
 
@@ -3069,7 +3108,7 @@ module.exports = {
         /**
          * 鐏忓棗鐤勯弮鍫曟浆閼冲本鏆熼幑顕€鈧岸浜鹃幍鎾崇磻
          */
-        if (nowDate < endDate) {
+        if (licenseManager.isLicenseValid()) {
           if (JSON.parse(message).backPort != null) {
             com1 = JSON.parse(message).backPort;
             try {
@@ -3214,26 +3253,8 @@ module.exports = {
         }
       });
 
-      if (endDate && endDate > 0) {
-        server.clients.forEach(function each(client) {
-          const jsonData = JSON.stringify({
-            date: endDate,
-            nowDate: nowDate,
-            file: licenseFile || file,
-            selectFlag: selectFlag
-          });
-          if (client.readyState === WebSocket.OPEN) {
-            client.send(jsonData);
-          }
-        });
-      } else {
-        // 没有有效密钥时，发送错误信息给前端
-        server.clients.forEach(function each(client) {
-          if (client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify({ licenseError: '未检测到有效密钥，请输入密钥后使用', noLicense: true }));
-          }
-        });
-      }
+      // 向新连接的客户端推送当前授权状态（在线/离线、剩余天数、checking、未授权原因）
+      sendLicenseStatusTo(ws);
 
       ws.on("message", function incoming(message) {
 
@@ -3246,100 +3267,58 @@ module.exports = {
 
         if (getMessage.date != null) {
           try {
-            const content = (getMessage.date.date)
-            const date = content
+            const newKey = (getMessage.date && getMessage.date.date ? String(getMessage.date.date) : '').trim();
 
-            if (!date || date.trim() === '') {
-              // 空密钥处理：发送错误提示给前端
+            if (!newKey) {
               logger.warn('[License] Empty license key received');
-              server.clients.forEach(function each(client) {
-                if (client.readyState === WebSocket.OPEN) {
-                  client.send(JSON.stringify({ licenseError: '密钥不能为空，请输入有效密钥' }));
-                }
-              });
+              sendLicenseErrorToAll('密钥不能为空，请输入有效密钥');
               return;
             }
 
-            const dateRes = module2.decryptStr(date)
-
-            if (!dateRes) {
-              logger.warn('[License] Failed to decrypt license key');
-              server.clients.forEach(function each(client) {
-                if (client.readyState === WebSocket.OPEN) {
-                  client.send(JSON.stringify({ licenseError: '密钥无效，解密失败' }));
-                }
-              });
+            // 识别 + 预取（同时校验格式：在线 ECB 解密、离线 RSA 验签）；失败即拒绝、不写入
+            const peeked = licenseManager.peekPayload(newKey);
+            if (!peeked) {
+              logger.warn('[License] Failed to parse/verify license key');
+              sendLicenseErrorToAll('密钥无效，解密或验签失败');
               return;
             }
 
+            // 写入 config.txt（原始密钥串：在线为 hex、离线为 base64 JSON）
             fs.mkdirSync(path.dirname(writableNameTxt), { recursive: true });
-            fs.writeFile(writableNameTxt, date, err => {
-              if (err) {
-                logger.error(err);
-              }
+            fs.writeFile(writableNameTxt, newKey, err => {
+              if (err) { logger.error(err); }
             });
             nameTxt = writableNameTxt;
 
-            const parsedLicense = JSON.parse(dateRes);
-            licenseFile = parsedLicense.file || null;
-            selectFlag = getSelectFlagFromLicense(parsedLicense.file);
-            // 支持 moduleConfig 字段：各传感器类型的默认功能模块配置
-            // { [sensorValue]: numMatrixFlag }
-            const rawModuleConfig = parsedLicense.moduleConfig || null;
-            const nextFile = getDefaultFileFromLicense(parsedLicense.file);
+            // 更新运行期变量（file/baudRate 等），在线/离线统一用归一化 payload
+            licenseFile = peeked.payload.file || null;
+            selectFlag = getSelectFlagFromLicense(peeked.payload.file);
+            const nextFile = getDefaultFileFromLicense(peeked.payload.file);
             if (nextFile) {
               file = nextFile;
               Object.keys(petCareSystems).forEach(resetPetCareRuntime);
             }
-            endDate = parseFloat(parsedLicense.date);
-
             baudRate = getSensorBaudRate(file);
-            server.clients.forEach(function each(client) {
-              const payload = {
-                date: endDate,
-                nowDate: nowDate,
-                file: licenseFile || file,
-                selectFlag: selectFlag,
-              };
-              // 将功能模块配置一并下发给前端
-              if (rawModuleConfig) {
-                payload.moduleConfig = rawModuleConfig;
+
+            // 异步校验有效性（在线联网 /licenseCheck、离线 RSA+可信时间），据类型启停轮询；先推"校验中"
+            const p = licenseManager.loadFromKey(newKey);
+            broadcastLicenseStatus();
+            p.then(() => {
+              if (licenseManager.getState().type === 'online') {
+                licenseManager.startOnlinePolling(onLicensePollChange);
+              } else {
+                licenseManager.stopOnlinePolling();
               }
-              const jsonData = JSON.stringify(payload);
-              if (client.readyState === WebSocket.OPEN) {
-                client.send(jsonData);
-              }
-            });
+              broadcastLicenseStatus();
+            }).catch((err) => logger.error('[License] 写入后校验异常', err));
 
           } catch (err) {
-            logger.error('[License] Invalid license key:', err.message);
-            server.clients.forEach(function each(client) {
-              if (client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify({ licenseError: '密钥无效，请检查后重新输入' }));
-              }
-            });
+            logger.error('[License] Invalid license key:', err && err.message);
+            sendLicenseErrorToAll('密钥无效，请检查后重新输入');
           }
         }
 
-
-
-        // if(new Date().getTime() >= parseInt(sysStartTime) + parseInt(module2.decryptStr(date)) * 24 * 60 * 60 * 1000){
-        //   server.clients.forEach(function each(client) {
-        //     /**
-        //      * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
-        //      *  */
-        //     const jsonData = JSON.stringify({
-        //       timeExpires: true,
-        //       // length: csvSitData.length,
-        //       // sitData: csvSitData[0], backData: csvBackData[0]
-        //     });
-        //     if (client.readyState === WebSocket.OPEN) {
-        //       client.send(jsonData);
-        //     }
-        //   });
-        // }
-
-        if (nowDate < endDate) {
+        if (licenseManager.isLicenseValid()) {
 
 
 
@@ -6259,7 +6238,7 @@ parser.on("data", function (data) {
   let buffer = Buffer.from(data);
   newData = new Array();
   // console.log(buffer.length)
-  if (nowDate < endDate) {
+  if (licenseManager.isLicenseValid()) {
     if (file === HAND_GLOVE_FULL_PACKET && buffer.length === HAND_GLOVE_FULL_PACKET_LENGTH) {
       handleHandGloveFullPacket(buffer, 'left');
       return;
@@ -7150,7 +7129,7 @@ parserSmallBed12B.on("data", function (data) {
   let buffer = Buffer.from(data);
   newData = new Array();
 
-  if (nowDate < endDate && file === SMALL_BED_12B_TYPE && buffer.length === SMALL_BED_12B_PAYLOAD_LENGTH) {
+  if (licenseManager.isLicenseValid() && file === SMALL_BED_12B_TYPE && buffer.length === SMALL_BED_12B_PAYLOAD_LENGTH) {
     for (var i = 0; i < SMALL_BED_12B_PAYLOAD_LENGTH / 2; i++) {
       pointArr[i] = buffer.readUInt16LE(i * 2);
     }
@@ -7169,9 +7148,7 @@ parserSmallBed12B.on("data", function (data) {
 });
 
 function colOrSendData(jsonData) {
-  // console.log(JSON.stringify(JSON.parse(jsonData).sitData) , 'jsonData')
-  const nowDate = new Date().getTime()
-  let frameToStore = null;
+  // console.log(JSON.stringify(JSON.parse(jsonData).sitData) , 'jsonData')  let frameToStore = null;
   if (file === MINZHEN_TYPE) {
     try {
       frameToStore = JSON.parse(jsonData);
@@ -7261,7 +7238,7 @@ var pointArr2;
 parser2.on("data", function (data) {
   pointArr2 = new Array();
   let buffer = Buffer.from(data);
-  if (nowDate < endDate) {
+  if (licenseManager.isLicenseValid()) {
     if (file === MINZHEN_TYPE) {
       const minzhenSensorFrame = parseMinzhenSensorFrame(buffer);
       if (minzhenSensorFrame) {
@@ -7544,8 +7521,6 @@ parser2.on("data", function (data) {
 });
 
 function colOrSendData1(jsonData) {
-
-  const nowDate = new Date().getTime()
   if (flag && shouldStoreCollectionFrame('back') && hasEnoughCollectionDiskSpace()) {
     const resDataArr = {
       data: JSON.stringify(pointArr),
@@ -7597,7 +7572,7 @@ parser3.on("data", function (data) {
     let buffer = Buffer.from(data);
 
     let res = [];
-    if (nowDate < endDate) {
+    if (licenseManager.isLicenseValid()) {
       if (buffer.length === 1025) {
         for (var i = 0; i < buffer.length; i++) {
           pointArr3[i] = buffer.readUInt8(i);
@@ -7674,7 +7649,7 @@ var pointArr4;
 parser4.on("data", function (data) {
   pointArr4 = new Array();
   let buffer = Buffer.from(data);
-  if (nowDate < endDate) {
+  if (licenseManager.isLicenseValid()) {
     if (buffer.length === 1024) {
 
       for (var i = 0; i < buffer.length; i++) {
@@ -7851,8 +7826,6 @@ parser4.on("data", function (data) {
 
 
 function colOrSendData2(jsonData) {
-
-  const nowDate = new Date().getTime()
   if (flag && shouldStoreCollectionFrame('head') && hasEnoughCollectionDiskSpace()) {
     const resDataArr = {
       data: JSON.stringify(pointArr),

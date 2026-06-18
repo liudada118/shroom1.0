@@ -15,6 +15,18 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
+
+// Windows 控制台默认代码页(936/GBK)会把 UTF-8 中文日志显示成乱码。
+// 在引入 ./server（触发授权等中文日志）之前，把控制台切到 UTF-8(65001)，
+// 让 PowerShell / cmd 正确渲染中文。切换失败不影响启动。
+if (process.platform === "win32") {
+  try {
+    require("child_process").execSync("chcp 65001", { stdio: "ignore" });
+  } catch {
+    // 忽略：仅日志可能继续显示乱码，不影响功能
+  }
+}
+
 const { openServer, shutdownServer, getWsServer, handleCommand } = require("./server");
 const { AppUpdater } = require("./autoUpdater");
 const logger = require('./logger');
