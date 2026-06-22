@@ -2,9 +2,9 @@
   "name": "shroom",
   "version": "1.1.31",
   "description": "Shroom - Pressure Sensor Data Acquisition & Visualization System",
-  "main": "index.js",
+  "main": "app/electron/index.js",
   "win": {
-    "icon": "./logo.ico"
+    "icon": "./assets/icons/logo.ico"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
@@ -28,7 +28,7 @@
   "config": {
     "forge": {
       "packagerConfig": {
-        "icon": "./logo",
+        "icon": "./assets/icons/logo",
         "asar": true,
         "extraResource": [
           "./build",
@@ -57,7 +57,7 @@
           ],
           "config": {
             "options": {
-              "icon": "./logo.icns"
+              "icon": "./assets/icons/logo.icns"
             }
           }
         }
@@ -172,18 +172,18 @@
         ]
       }
     ],
-    "icon": "./logo.ico",
+    "icon": "./assets/icons/logo.ico",
     "win": {
-      "icon": "./logo.ico"
+      "icon": "./assets/icons/logo.ico"
     },
     "nsis": {
       "oneClick": false,
       "perMachine": true,
       "allowElevation": true,
       "allowToChangeInstallationDirectory": true,
-      "installerIcon": "./logo.ico",
-      "uninstallerIcon": "./logo.ico",
-      "installerHeaderIcon": "./logo.ico",
+      "installerIcon": "./assets/icons/logo.ico",
+      "uninstallerIcon": "./assets/icons/logo.ico",
+      "installerHeaderIcon": "./assets/icons/logo.ico",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Shroom",
@@ -191,7 +191,7 @@
       "license": "docs/EULA.nsis.txt"
     },
     "mac": {
-      "icon": "./logo.icns",
+      "icon": "./assets/icons/logo.icns",
       "category": "public.app-category.utilities",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,

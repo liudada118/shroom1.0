@@ -2,6 +2,22 @@
 
 > 压力传感矩阵数据采集、处理与可视化桌面应用
 
+## 当前代码分类（2026-06-17）
+
+- `app/electron/`：Electron 主进程入口和 preload 安全桥。
+- `app/update/`：自动更新模块。
+- `backend/server/`：后端核心入口，串口、WebSocket、采集、回放和导出主流程。
+- `backend/runtime/`：后端运行时门面，承接 Electron 调用、命令路由和 WebSocket 广播工具。
+- `backend/services/`：后端横向业务服务层；当前已收口 WebSocket 广播/三通道、服务关闭生命周期、采集配置、采集磁盘保护、批量入库队列和历史查询能力，供 runtime 与 server 复用。
+- `backend/sensors/`：全类型传感器注册表和插件化模块；统一维护波特率、矩阵尺寸、通道、能力分类和存储策略，`smallBed12B.js`、`minzhen.js`、`wholeChair.js`、`handGloveFullPacket.js` 已承接各自复杂解析/映射逻辑。
+- `client/src/displays/`：前端全类型展示注册表，集中描述展示系统的矩阵尺寸、默认模式、通道和能力。
+- `backend/processing/`：线序、矩阵、压力和传感器数据处理。
+- `backend/common/`、`backend/db/`、`backend/ws/`、`backend/serial/`、`backend/export/`、`backend/license/`、`backend/config/`、`backend/python/`：后端公共能力按功能拆分。
+- `assets/`：图标和授权资源。
+- `tools/generators/`：生成和解析脚本。
+- `runtime/`：日志、临时文件和历史遗留入口文件。
+- `docs/markdown/`：从根目录归档的 Markdown 说明文档。
+
 ## 简介
 
 Shroom1.0 是一个基于 **Electron + React + Node.js** 构建的跨平台桌面应用，专用于连接多种物理压力传感器硬件（座椅、床垫、手套、足底等），实时采集并可视化压力分布数据。

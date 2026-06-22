@@ -4,7 +4,7 @@ const packageHooks = require('./scripts/package-hooks');
 
 module.exports = {
   packagerConfig: {
-    icon: './logo',
+    icon: './assets/icons/logo',
     asar: true,
     extraResource: [
       './python'
@@ -28,7 +28,7 @@ module.exports = {
         // An URL to an ICO file to use as the application icon (displayed in Control Panel > Programs and Features).
         iconUrl: 'https://url/to/icon.ico',
         // The ICO file to use as the icon for the generated Setup.exe
-        setupIcon: './logo.ico'
+        setupIcon: './assets/icons/logo.ico'
       }
     },
     {
@@ -36,7 +36,7 @@ module.exports = {
       platforms: ['darwin'],
       config: {
         options: {
-          icon: './logo.icns'
+          icon: './assets/icons/logo.icns'
         }
       }
     },
@@ -44,14 +44,14 @@ module.exports = {
       name: '@electron-forge/maker-deb',
       config: {
         options: {
-          icon: './logo.ico'
+          icon: './assets/icons/logo.ico'
         }
       }
     },
     {
       name: '@electron-forge/maker-rpm',
       config: {
-        icon: './logo.ico'
+      icon: './assets/icons/logo.ico'
       },
     },
 

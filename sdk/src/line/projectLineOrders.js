@@ -11,13 +11,13 @@ function loadProjectLineOrderSources() {
   const sources = [];
 
   try {
-    sources.push(require('../../../openWeb'));
+    sources.push(require('../../../backend/processing/openWeb'));
   } catch (error) {
     sources.push({});
   }
 
   try {
-    sources.push(require('../../../utilMatrix'));
+    sources.push(require('../../../backend/processing/utilMatrix'));
   } catch (error) {
     sources.push({});
   }

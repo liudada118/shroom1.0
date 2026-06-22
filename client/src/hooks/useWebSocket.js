@@ -51,6 +51,7 @@ export default function useWebSocket(url, options = {}) {
     onOpen,
     onClose,
     onError,
+    channels = [],
   } = options;
 
   const wsRef = useRef(null);
@@ -89,6 +90,12 @@ export default function useWebSocket(url, options = {}) {
         if (unmountedRef.current) return;
         setReadyState(ReadyState.OPEN);
         reconnectCountRef.current = 0;
+        if (channels.length) {
+          ws.send(JSON.stringify({
+            type: 'subscribe',
+            channels,
+          }));
+        }
         callbacksRef.current.onOpen?.(event);
       };
 
@@ -128,7 +135,7 @@ export default function useWebSocket(url, options = {}) {
     } catch (err) {
       console.error('[useWebSocket] 连接创建失败:', err);
     }
-  }, [url, enabled, autoReconnect, reconnectInterval, maxReconnectAttempts]);
+  }, [url, enabled, autoReconnect, reconnectInterval, maxReconnectAttempts, channels]);
 
   // 连接管理
   useEffect(() => {
@@ -170,6 +177,20 @@ export default function useWebSocket(url, options = {}) {
     }
   }, []);
 
+  const subscribe = useCallback((nextChannels) => {
+    sendMessage({
+      type: 'subscribe',
+      channels: Array.isArray(nextChannels) ? nextChannels : [nextChannels],
+    });
+  }, [sendMessage]);
+
+  const unsubscribe = useCallback((nextChannels) => {
+    sendMessage({
+      type: 'unsubscribe',
+      channels: Array.isArray(nextChannels) ? nextChannels : [nextChannels],
+    });
+  }, [sendMessage]);
+
   /**
    * 手动触发重连
    */
@@ -196,6 +217,8 @@ export default function useWebSocket(url, options = {}) {
     readyState,
     reconnect,
     disconnect,
+    subscribe,
+    unsubscribe,
     wsRef,
   };
 }

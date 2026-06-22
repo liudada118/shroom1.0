@@ -3,10 +3,11 @@ import { toLegacyCommand } from './legacyCommands.js';
 import { normalizeIncomingMessage } from '../store/normalizeFrame.js';
 
 export class SensorClient {
-  constructor({ url = 'ws://127.0.0.1:19999', WebSocketImpl = globalThis.WebSocket, legacyProtocol = false } = {}) {
+  constructor({ url = 'ws://127.0.0.1:19999', WebSocketImpl = globalThis.WebSocket, legacyProtocol = false, channels = [] } = {}) {
     this.url = url;
     this.WebSocketImpl = WebSocketImpl;
     this.legacyProtocol = legacyProtocol;
+    this.channels = channels;
     this.ws = null;
     this.listeners = new Map();
     this.isConnected = false;
@@ -23,6 +24,9 @@ export class SensorClient {
     this.ws = new this.WebSocketImpl(this.url);
     this.ws.onopen = (event) => {
       this.isConnected = true;
+      if (this.channels.length) {
+        this.subscribe(this.channels);
+      }
       this.emit('open', event);
     };
     this.ws.onclose = (event) => {
@@ -63,6 +67,20 @@ export class SensorClient {
       throw new Error(`unknown command "${name}"`);
     }
     this.send(commandFactory(payload));
+  }
+
+  subscribe(channels) {
+    this.send({
+      type: 'subscribe',
+      channels: Array.isArray(channels) ? channels : [channels],
+    });
+  }
+
+  unsubscribe(channels) {
+    this.send({
+      type: 'unsubscribe',
+      channels: Array.isArray(channels) ? channels : [channels],
+    });
   }
 
   handleMessage(rawMessage) {

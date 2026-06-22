@@ -1,6 +1,6 @@
 const { EventEmitter } = require('events');
-const { SerialPort } = require('serialport');
 const { DelimiterParser } = require('@serialport/parser-delimiter');
+const { createSerialPort } = require('../../../backend/serial/serialHelper');
 
 class SensorSession extends EventEmitter {
   constructor({ sensorType, profile, registry, channels = {}, frameProcessor = null }) {
@@ -33,7 +33,7 @@ class SensorSession extends EventEmitter {
 
   openChannel(channel, portPath) {
     return new Promise((resolve, reject) => {
-      const port = new SerialPort({
+      const port = createSerialPort({
         path: portPath,
         baudRate: this.profile.baudRate,
         autoOpen: false,

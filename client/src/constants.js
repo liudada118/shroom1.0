@@ -1,3 +1,5 @@
+import { getDisplayMatrix } from './displays/registry';
+
 /**
  * constants.js
  * 全局常量配置
@@ -124,7 +126,7 @@ export const SENSOR_MATRIX_MAP = {
  * @returns {{ width: number, height: number, total: number }}
  */
 export function getSensorMatrix(sensorType) {
-  return SENSOR_MATRIX_MAP[sensorType] || { width: 32, height: 32, total: 1024 };
+  return getDisplayMatrix(sensorType, SENSOR_MATRIX_MAP[sensorType] || { width: 32, height: 32, total: 1024 });
 }
 
 // ─── 数据刷新频率 ─────────────────────────────────────────────────────────────

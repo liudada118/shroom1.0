@@ -52,7 +52,7 @@ function withTimeout(fn, timeoutMs = 30000) {
 
 // ─── 加密工具 ─────────────────────────────────────────────────
 function generateLicenseKey(file, daysValid = 365) {
-  const module2 = require(path.join(PROJECT_DIR, 'aes_ecb'));
+  const module2 = require(path.join(PROJECT_DIR, 'backend', 'license', 'aes_ecb'));
   const futureDate = Date.now() + daysValid * 24 * 60 * 60 * 1000;
   const licenseData = JSON.stringify({ date: futureDate.toString(), file });
   return module2.encStr(licenseData);

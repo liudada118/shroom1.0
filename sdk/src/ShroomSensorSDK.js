@@ -1,5 +1,5 @@
-const { SerialPort } = require('serialport');
 const path = require('path');
+const { listPorts: listSerialPorts } = require('../../backend/serial/serialHelper');
 const { ProtocolRegistry } = require('./protocol/ProtocolRegistry');
 const { CaptureStore } = require('./storage/CaptureStore');
 const { CsvExporter } = require('./export/CsvExporter');
@@ -112,7 +112,7 @@ class ShroomSensorSDK {
   }
 
   async listPorts(options = {}) {
-    const ports = await SerialPort.list();
+    const ports = await listSerialPorts();
     const summarized = ports.map(summarizePort);
     if (options.onlyLikelySensorPorts) {
       return summarized.filter((port) => port.isLikelySensorPort);

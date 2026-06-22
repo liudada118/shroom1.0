@@ -313,7 +313,7 @@ async function main() {
   // 激活 License
   log('Activating license...');
   try {
-    const module2 = require(path.join(__dirname, '..', 'aes_ecb'));
+    const module2 = require(path.join(__dirname, '..', 'backend', 'license', 'aes_ecb'));
     const futureDate = new Date(Date.now() + 365 * 24 * 3600 * 1000);
     const dateStr = futureDate.toISOString().split('T')[0];
     const encrypted = module2.encrypt(dateStr);

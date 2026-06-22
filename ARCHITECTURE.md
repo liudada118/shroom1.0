@@ -1,6 +1,82 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-06-12
+> 最新维护：2026-06-18。本次维护升级 `serialManager` 为目标文档推荐的注册式串口生命周期管理，新增 `registerPort/start/stop/getStatus` 接口并在状态接口暴露串口运行状态。
+
+## 当前维护记录
+
+| 日期 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| 2026-06-18 | 优化重构 | 新增 `backend/ws/webSocketCommandRouter.js` 和 `backend/ws/registerRuntimeCommandHandlers.js`，将播放、采集、下载、历史删除、显示配置等低风险 WebSocket 命令从 `server.js` 拆入 command handler。|
+| 2026-06-18 | 优化重构 | 新增 `backend/services/petCareRuntimeService.js`，将 petCare/petCareMini 和 jqbed/smallBed 生命体征算法运行时、心率模拟、定时器逻辑从 `server.js` 拆出，主服务文件减少约 340 行。|
+| 2026-06-18 | 优化重构 | 新增 `backend/services/realtimeTelemetryGateway.js`，集中处理 legacy 实时通道发布、telemetry normalizer 调用、标准 channel 发布和 WebSocket 精确订阅推送，`server.js` 只保留兼容入口。|
+| 2026-06-18 | 优化重构 | 新增 `backend/normalizers/telemetryNormalizer.js`，将旧实时 payload 到标准 telemetry 帧的转换从 channel 定义服务中拆出，数据链路进一步接近 `Parser -> Normalizer -> ChannelBus`。|
+| 2026-06-18 | 优化重构 | 串口重连职责下沉到 `backend/serial/serialManager.js`，新增 `reconnectAll/reconnectPort/startReconnectLoop/stopReconnectLoop/setReconnect`，`server.js` 不再手写 sit/back/sensor 的重连定时器。|
+| 2026-06-18 | 优化重构 | `backend/serial/serialManager.js` 升级为注册式串口生命周期管理器，维护注册配置和运行 worker 两张表，提供 `registerPort/start/stop/getStatus`，并继续兼容旧 `open/close`。 |
+| 2026-06-18 | 新增接口 | `/api/ws/status` 增加 `serial` 字段，返回当前串口角色的注册配置、运行状态、打开时间和最近错误，便于前端或调试工具追踪串口生命周期。 |
+| 2026-06-18 | 优化重构 | 新增 `backend/channel/telemetryChannelService.js`，将旧实时 payload 转换为目标文档推荐的标准 telemetry 数据模型，并生成 `deviceId.metric` 风格的标准 channel 定义。 |
+| 2026-06-18 | 优化重构 | `publishRealtimeFrame` 在保留旧 `sit/back/head` 通道的同时，额外向 ChannelBus 发布标准 telemetry 通道，并通过 `publishExact` 只推送给显式订阅标准通道的客户端，避免影响旧 `*` 页面。 |
+| 2026-06-18 | 优化重构 | `backend/sensors/smallBed12B.js` 新增 `buildRealtimeFrameFromBuffer`，集中处理 12B 实时串口帧的 ADC 解析、线序变换、清零、压力标定和 16x16/32x32 payload 构造，`server.js` 只同步运行时状态并发送。 |
+| 2026-06-18 | 优化重构 | 新增 `backend/services/websocketMessageService.js`，统一解析 WebSocket JSON 消息，非法 JSON 和非对象消息会被记录并丢弃，`server.js` 不再对同一条消息重复 `JSON.parse(message)`。 |
+| 2026-06-18 | 优化重构 | `historyQueryService` 新增 `queryHistoryDates`，主 WebSocket 的 `local:true` 历史时间列表入口改为调用 `publishHistoryDateList()`，移除嵌套 `db.all/db1.all` 回调树。 |
+| 2026-06-18 | 优化重构 | 新增 `backend/sensors/handGloveDouble.js`，集中解析触觉手套2的 130/146 字节分包协议，负责左右手半包缓存、256 点压力帧合成和 16 字节 IMU 提取；`server.js` 只保留清零、入库和通道发送。 |
+| 2026-06-18 | 优化重构 | 新增 `backend/serial/serialManager.js`，集中管理 `sit/back/head/sensor` 串口角色的打开、关闭、重复端口互斥、parser/data handler 绑定和关停清理，`server.js` 不再直接调用 `createSerialPort` 或 `port.close()`。 |
+| 2026-06-18 | 优化重构 | 新增 `backend/serial/serialParserManager.js`，集中创建和管理 `sit/back/head/bigBedSit/smallBed12B` 命名串口 parser，替换 `server.js` 中的 `parser/parser2/parser3/parser4` 编号式定义。 |
+| 2026-06-18 | 优化重构 | 新增 `backend/services/csvDownloadService.js`，集中处理 CSV 导出目录校验、UTF-8 BOM 写入、导出进度、成功/失败消息和基础历史数据导出。 |
+| 2026-06-18 | 优化重构 | 删除 `server.js` 中 `exportHistoryCsvStreaming(...); return;` 后不可达的旧 CSV 导出分支，主文件减少约 700 行历史包袱。 |
+| 2026-06-18 | 优化重构 | 新增 `backend/services/historyMaintenanceService.js`，历史删除改为服务层参数化 SQL，避免 `date` 字符串拼接。 |
+| 2026-06-18 | 优化重构 | 新增 `backend/services/playbackFrameService.js`，将 robot、手套、足底、小床、整椅和温度床的历史回放帧 payload 构造从 `server.js` 拆出。 |
+| 2026-06-18 | 优化重构 | 新增 `backend/services/playbackTimerService.js`，播放/停止/调速统一通过定时器服务管理，`server.js` 不再持有回放 timer 句柄。 |
+| 2026-06-18 | 优化重构 | 新增 `backend/services/websocketConnectionService.js`，主 WebSocket 连接心跳从业务入口中拆出，连接层职责独立维护。 |
+| 2026-06-18 | 优化重构 | `sdk/src/ShroomSensorSDK.js` 与 `sdk/src/serial/SensorSession.js` 不再直接依赖 `serialport`，统一复用 `backend/serial/serialHelper.js` 的 `listPorts/createSerialPort`。 |
+| 2026-06-18 | 优化重构 | 新增 `backend/services/historyPlaybackService.js`，将历史曲线抽样、同步回放长度计算和空白回放 payload 构造从 `server.js` 拆出，并删除 `getTime` 后不可达的旧 SQL 回调分支。 |
+| 2026-06-18 | 优化重构 | 新增 `backend/services/collectionFrameStorageService.js`，将 sit/back/head 三路采集帧的存储载荷构建和入队逻辑从 `server.js` 迁出。 |
+| 2026-06-18 | 优化重构 | 将未被生产路径引用的旧 WebSocket/串口调试脚本迁入 `runtime/legacy`，避免 backend 主路径继续暴露旧广播和直连串口示例。 |
+| 2026-06-18 | 优化重构 | 拆分 `server.js` 中 `colOrSendData*` 的职责：`storeSit/Back/HeadCollectionFrame` 专注采集入库载荷，`publishRealtimeChannel` 专注实时 channel 发布。 |
+| 2026-06-18 | 优化重构 | 继续收口主 WebSocket 客户端遍历，活跃 `forEachMainWsClient` 循环已清零，系统事件统一通过 `publishSystemEvent` 发送。 |
+| 2026-06-18 | 修复缺陷 | 恢复授权错误提示中文文案，避免旧编码导致的密钥错误信息乱码。 |
+| 2026-06-18 | 优化重构 | 新增 `backend/channel/channelBus.js`，实时帧先发布到后端内部 ChannelBus，再由 WebSocket 订阅服务按 channel 推送。 |
+| 2026-06-18 | 优化重构 | `server.js` 中直接 `server.clients.forEach`、`broadcast(server, ...)`、`new SerialPort`、`SerialPort.list()` 已继续收口为 `publishSystemEvent`、`publishRealtimeFrame`、`serialManager` 和 `listPorts`；串口实例创建只保留在 `backend/serial` 边界内。 |
+| 2026-06-18 | 优化重构 | `client/src/hooks/useWebSocket.js` 和 `sdk/frontend/src/client/SensorClient.js` 增加 `channels`、`subscribe`、`unsubscribe`，前端统一入口开始支持按需订阅。 |
+| 2026-06-18 | 优化重构 | 新增 `backend/services/websocketSubscriptionService.js`，集中管理 WebSocket 客户端订阅关系，支持 `subscribe/unsubscribe/getSubscriptions` 控制消息。 |
+| 2026-06-18 | 优化重构 | `server.js` 的 sit/back/head 实时帧开始通过订阅服务发布；主端口默认使用 `*` 通配订阅兼容旧页面，独立端口默认订阅各自通道。 |
+| 2026-06-18 | 新增接口 | OneStep 本地 HTTP 服务新增 `/api/channels` 和 `/api/ws/status`，用于查看实时通道元数据和当前订阅统计。 |
+| 2026-06-18 | 修复缺陷 | 清理 `server.js` 中的 U+FFFD 替换符和残留 mojibake 注释，恢复授权提示、jqbed 变量说明、触觉手套兼容逻辑、CSV 保存和时间戳等中文说明。 |
+| 2026-06-18 | 文档更新 | 记录本次编码治理结果，明确后端入口文件已按 UTF-8 保存并通过 Node 语法检查。 |
+
+## 当前项目进度
+
+| 日期 | 完成项 | 说明 |
+| :--- | :--- | :--- |
+| 2026-06-18 | SerialManager 重连闭环 | 串口注册配置增加 `reconnect` 状态，管理器内部提供重连循环；手动关闭会关闭该端口重连，异常断开会按注册配置恢复。 |
+| 2026-06-18 | Telemetry Normalizer 独立层 | 标准 telemetry 帧由 `backend/normalizers/telemetryNormalizer.js` 生成，`channel` 模块只保留通道元数据定义，降低后续新增传感器指标时对 WebSocket 和通道服务的耦合。 |
+| 2026-06-18 | petCare 运行时服务化 | 宠物护理和 jqbed/smallBed 生命体征算法定时器迁入 `backend/services/petCareRuntimeService.js`，`server.js` 通过 getter/setter 注入运行时状态。 |
+| 2026-06-18 | WebSocket Command Router | WebSocket 回调开始改为调用 command router，播放、采集、导出、删除和运行参数类命令已迁入 `backend/ws/registerRuntimeCommandHandlers.js`。 |
+| 2026-06-18 | SerialManager 注册式接口 | 串口层从单纯 `open/close` 升级为 `registerPort/start/stop/getStatus`，为后续 PortWorker、重连策略和状态上报继续下沉打基础。 |
+| 2026-06-18 | 标准 Telemetry 模型入口 | 实时矩阵帧开始同步生成 `{ channelId, deviceId, portId, metric, value, unit, timestamp, quality }` 标准数据，`/api/channels` 同时返回旧通道和标准通道。 |
+| 2026-06-18 | smallBed12B 实时帧处理模块化 | 12B 的实时 buffer 解析和展示 payload 构造迁入传感器模块，主服务不再直接调用 `readAdcFrame` 或手写 ADC 到 kPa 的实时链路。 |
+| 2026-06-18 | WebSocket 消息解析收口 | WebSocket 回调通过 `parseJsonMessage` 解析一次消息并复用 `getMessage`，避免重复解析和非法 JSON 直接打断连接处理。 |
+| 2026-06-18 | 历史时间列表查询服务化 | 历史日期列表查询迁入 `historyQueryService.queryHistoryDates`，`server.js` 的本地回放入口只负责发布兼容旧前端的空帧和时间列表。 |
+| 2026-06-18 | 触觉手套2 parser 模块化 | `hand0205Double` 的分包识别、左右手路由和半包合并迁入 `backend/sensors/handGloveDouble.js`，registry 将该类型挂载为传感器插件。 |
+| 2026-06-18 | 串口 SerialManager | 串口生命周期统一走 `serialManager`，`server.js` 只表达打开/关闭坐垫、靠背、头枕和额外传感器角色，不再直接创建 `SerialPort`、关闭端口或手动 pipe parser。 |
+| 2026-06-18 | 串口 Parser Manager | 串口 parser 创建和 pipe 入口统一走 `serialParserManager`，`server.js` 只按业务通道注册 `onData` 处理器。 |
+| 2026-06-18 | CSV 下载服务化 | `server.js` 的下载分支只负责调用 `csvDownloadService.exportHistoryCsv`，导出目录、CSV 写入和状态消息由服务层处理。 |
+| 2026-06-18 | 历史删除服务化 | 历史删除入口改为调用 `historyMaintenanceService.deleteHistory`，数据库删除语句使用 `WHERE date = ?` 参数化执行。 |
+| 2026-06-18 | 历史回放帧服务化 | `server.js` 的手动跳帧、播放和调速逻辑改为调用 `publishPlaybackFrame`，具体传感器回放 payload 由 `playbackFrameService` 生成。 |
+| 2026-06-18 | 回放定时器服务化 | 播放定时器生命周期迁移到 `playbackTimerService`，主文件只保留 `startPlaybackTimer/stopPlaybackTimer` 语义入口。 |
+| 2026-06-18 | WebSocket 心跳服务化 | 主 WebSocket 连接使用 `attachHeartbeat` 挂载心跳检测，连接保活逻辑不再内联在业务消息处理前。 |
+| 2026-06-18 | SDK 串口边界统一 | SDK 的端口扫描和会话打开逻辑改为调用统一串口 helper，业务层不再直接 `SerialPort.list()` 或 `new SerialPort()`。 |
+| 2026-06-18 | 历史回放计算服务化 | `server.js` 通过 `historyPlaybackService` 生成历史趋势曲线和切换历史时的空白矩阵帧，历史选择入口不再保留不可达的旧 `db.all` 回调树。 |
+| 2026-06-18 | 采集帧存储服务迁出 | `server.js` 通过 `collectionFrameStorage.storeSit/storeBack/storeHead` 调用采集入库服务，采集帧序列化策略集中到独立 service。 |
+| 2026-06-18 | 旧调试入口隔离 | `localWs`、旧 `wsHelper` 和串口调试脚本迁入 `runtime/legacy`，生产后端目录只保留当前架构使用的 WS 订阅服务和串口 helper。 |
+| 2026-06-18 | 采集入库与实时发布职责拆分 | `colOrSendData*` 不再直接混写入库和 WS 发送细节，改为调用独立的 collection frame builder/store 函数和统一实时发布函数。 |
+| 2026-06-18 | 主 WebSocket 客户端遍历清零 | 活跃业务代码不再直接遍历主 WS 客户端，授权、下载、历史统计、手套复位和串口重扫等系统消息统一走 `publishSystemEvent`。 |
+| 2026-06-18 | WebSocket 与串口主链路收口 | 后端主服务不再直接遍历 WebSocket 客户端、不再直接创建串口实例；实时数据进入 ChannelBus 后按订阅通道推送，为后续拆分存储、告警和前端页面订阅打基础。 |
+| 2026-06-18 | WebSocket 订阅网关基础优化 | 将实时帧推送入口从直接广播升级为 `publishRealtimeFrame(channel, data)`，为前端按页面订阅 channel 和逐步下线全量推送打基础。 |
+| 2026-06-18 | `server.js` 编码与注释清理 | 修复混合 GBK/UTF-8 导致的显示乱码，保留业务逻辑不变，并通过 `node --check backend/server/server.js`。 |
+
+---
+
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-06-18
 
 ## 1. 项目概述
 
@@ -36,18 +112,25 @@ Shroom1.0 是一个基于 **Electron** 的跨平台桌面应用程序，专用�
 
 ## 3. 目录结构
 
+> 2026-06-17 更新：根目录业务文件已按模块迁移到 `app/`、`backend/`、`assets/`、`tools/`、`runtime/` 和 `docs/markdown/`。根目录仅保留项目级配置、入口说明和锁文件；Electron 主入口现在是 `app/electron/index.js`，后端核心入口是 `backend/server/server.js`，线序/矩阵处理入口是 `backend/processing/openWeb.js`。
+
 ```
 shroom1.0/
 ├── index.js                 # Electron 主进程入口（窗口管理 + IPC 桥梁）
 ├── preload.js               # Electron 预加载脚本（安全 IPC 通道）
-├── server.js                # 后端核心（串口数据处理 + WebSocket 分发，4308 行）
+├── server.js                # 后端核心（串口数据处理 + WebSocket 分发，约 4562 行）
 ├── package.json             # 后端依赖与构建配置
 │
 ├── # ── 后端拆分模块 ──
 ├── wsHelper.js              # WebSocket 广播与消息路由工具
 ├── dbHelper.js              # better-sqlite3 数据库操作封装
 ├── logger.js                # 结构化日志模块（带文件输出和性能计时）
-├── serialHelper.js          # 串口生命周期管理
+├── serialHelper.js          # 底层串口适配与端口扫描
+├── serialManager.js         # 按 sit/back/head/sensor 角色管理串口生命周期
+├── serialParserManager.js   # 按业务通道管理串口帧 parser
+├── channel/telemetryChannelService.js # 标准 telemetry 数据模型与通道定义
+├── sensors/handGloveDouble.js # 触觉手套2双包协议 parser
+├── services/websocketMessageService.js # WebSocket 消息解析与非法消息保护
 ├── licenseHelper.js         # 授权验证（AES 解密 + 在线时间校验）
 ├── configManager.js         # 统一配置中心
 ├── dataProcessor.js         # 传感器数据处理管线
@@ -217,7 +300,7 @@ graph TD
 ### 4.2. 主要数据流
 
 1. **传感器数据采集流程**
-    - 硬件传感器通过 USB 串口发送原始二进制数据帧 → `serialHelper.js` 接收并触发 `parser.on('data')` 事件 → `server.js` 调用 `dataProcessor.js` 进行线序映射（`openWeb.js`）、归零校准、高斯平滑 → 处理后的矩阵数据通过 `wsHelper.js` 广播到 WebSocket 端口 19999 → 前端 `useWebSocket` Hook 接收数据 → 更新 `usePressureStore` → React 重新渲染热力图和 3D 模型。
+    - 硬件传感器通过 USB 串口发送原始二进制数据帧 → `serialManager` 按 `sit/back/head/sensor` 角色打开和关闭物理端口 → `serialParserManager` 按业务通道切帧 → `server.js` 保留现有协议处理、线序映射（`openWeb.js`）、归零校准和高斯平滑 → 处理后的矩阵数据进入 ChannelBus/WebSocket 订阅网关 → 前端 `useWebSocket` Hook 接收数据 → 更新 `usePressureStore` → React 重新渲染热力图和 3D 模型。
     - `smallBed12B`（小床检测 12B）使用 `1500000` 波特率和独立帧尾 `AA 00 55 00 03 00 99 00`，`@serialport/parser-delimiter` 按 8 字节帧尾切分后得到 2048 字节 payload；`server.js` 按 1024 个 `uint16LE` 解析为 32x32 ADC 矩阵，复用 `jqbed(pointArr)` 小床检测线序并清零后，立即调用 `estimatePointPressure` 将整帧转换为 kPa 压强矩阵并统一保留 1 位小数，后续 `sitData/rawSitData/pressureData`、左侧统计、回放、采集入库和 CSV 下载都使用这份 kPa 数据。该类型不加入 `jqbed/smallBed` 生命体征集合，因此前端 `Aside.jsx` 仅展示 Pressure Area 与 Pressure Data，不触发 Python 算法数据面板；左侧 Pressure Data / Pressure Area 统计使用 3D 插值和高斯处理前的 32x32 压强矩阵值。
     - `smallBed12B` 的标题栏新增 `展示设置`，实时矩阵可在 32x32 与 16x16 间切换；16x16 模式会按当前原始数据展示方向选择 2x2 块取点位置，前端通过 `smallBed12BDisplayOptions` 下发给后端，`server.js` 在串口入口转换为 kPa 后先把 32x32 转为原始数据显示方向，再从这份 32x32 展示矩阵按 2x2 抽点为 16x16，并用 `matrixOrientation: 'transposed'` 标记该帧已是展示方向；采集入库和 CSV 下载直接沿用实时展示尺寸与方向。12B 仅保留原始数据展示模式，前端切换到该系统时会强制使用 `numoriginal`，不再提供 3D 展示模式。`client/src/page/home/util.js` 的原始矩阵转置入口会按方阵长度自动识别 32x32 或 16x16；遇到已标记为展示方向的 12B 16x16 帧时不再二次转置。
     - `smallBed12B` 的采集按钮现在先打开 `Title.jsx` 采集配置弹窗；用户可设置采集名称、特征标签和入库频率。矩阵尺寸不再在采集弹窗里单独设置，而是跟随实时 `展示设置`，避免实时展示、采集入库和 CSV 下载尺寸不一致。
@@ -329,6 +412,21 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-06-17 | Codex | 根目录模块化重组 | 将根目录业务文件按功能迁移到 `app/electron`、`app/update`、`backend/*`、`assets/*`、`tools/generators`、`runtime/*` 和 `docs/markdown`，并同步更新 Electron 入口、打包图标路径、后端 require 路径、SDK 线序加载路径和测试授权工具路径。 |
+| 2026-06-17 | Codex | 核心函数中文注释补充 | 为 Electron 主入口、Python worker 桥接、后端关键传感器解析、历史数据归一化、采集配置和服务关闭链路补充中文 JSDoc 注释，说明职责、参数和返回值。 |
+| 2026-06-17 | Codex | 传感器注册表抽取 | 新增 `backend/sensors/registry.js`，集中维护传感器类型常量、分类判断、矩阵取值工具和默认串口波特率；`backend/server/server.js` 改为从 registry 读取这些能力，为后续传感器插件化拆分打基础。 |
+| 2026-06-17 | Codex | smallBed12B 传感器模块化 | 新增 `backend/sensors/smallBed12B.js`，将 12B 的帧尾/帧长、uint16LE 帧解析、ADC→kPa 标定、16x16/32x32 实时载荷、缩小采集入库载荷和下采样工具从 `server.js` 抽出；`server.js` 仅保留串口事件、清零状态和采集时机编排。 |
+| 2026-06-17 | Codex | 后端模块非 Electron 加载保护 | `server.js` 与 `backend/server/modules/dbManager.js` 增加 Electron app 安全回退，普通 Node 环境下使用项目根目录作为资源/写入根目录，并跳过 `app.getAppPath()` 专属候选路径。 |
+| 2026-06-17 | Codex | 后端 runtime 门面与命令路由 | 新增 `backend/runtime/`，提供 `openServer/shutdownServer/getWsServer/handleCommand` 运行时门面、`CommandRouter` 命令路由和 WebSocket 广播工具；Electron 主进程改为依赖 runtime，不再直接依赖 `backend/server/server.js`。 |
+| 2026-06-17 | Codex | 前端展示注册表骨架 | 新增 `client/src/displays/registry.js`，集中登记 `smallBed12B`、`minzhen`、`wholeChair`、`hand0205` 的矩阵尺寸、默认模式和能力；`constants.js` 的 `getSensorMatrix()` 开始优先读取展示注册表。 |
+| 2026-06-17 | Codex | minzhen 传感器模块化 | 新增 `backend/sensors/minzhen.js`，将敏枕/轮椅的附加传感器文本帧解析、串口文本缓冲切帧、矩阵点位屏蔽和后端高斯处理从 `server.js` 抽出；`server.js` 保留串口打开/关闭和 WebSocket 发送编排。 |
+| 2026-06-17 | Codex | 全类型传感器元数据收口 | 扩展 `backend/sensors/registry.js` 为全类型注册表，统一维护主要传感器的矩阵尺寸、通道、波特率、能力分类、存储策略判断和插件引用；扩展 `client/src/displays/registry.js` 覆盖前端主要展示系统的矩阵、默认模式、通道和能力。 |
+| 2026-06-17 | Codex | WebSocket 广播服务抽取 | 新增 `backend/services/websocketBroadcastService.js`，统一提供载荷序列化、在线客户端判断、连接数统计和广播能力；`backend/runtime/websocketHub.js` 与 `server.js` 的 CSV 下载、采集错误、历史选择广播开始复用该服务。 |
+| 2026-06-17 | Codex | WebSocket 通道与生命周期服务抽取 | 新增 `backend/services/websocketChannelService.js` 管理 `sit/back/head` 三路通道、实时广播和客户端统计；新增 `backend/services/serverLifecycleService.js` 管理超时关闭、串口关闭、HTTP 关闭和 WebSocket 关闭，`runtime` 与 `server.js` 改为调用服务层。 |
+| 2026-06-17 | Codex | 采集与历史查询服务抽取 | 新增 `backend/services/collectionService.js`、`collectionInsertQueueService.js` 和 `historyQueryService.js`，将采集频率/配置归一化、按通道采集限频、磁盘空间保护、批量入库队列、历史查询 prepared statement 缓存、索引保障和懒加载历史行代理从 `server.js` 抽出。 |
+| 2026-06-18 | Codex | 回放定时器停止函数恢复 | 恢复 `server.js` 中被历史查询拆分误删的 `stopPlaybackTimer()`，确保历史加载、回放切换、服务关闭和播放速度切换时能正确停止并清空回放定时器。 |
+| 2026-06-18 | Codex | 整椅与整包手套传感器模块化 | 新增 `backend/sensors/wholeChair.js` 和 `backend/sensors/handGloveFullPacket.js`，将整椅 sit/back/head 线序、方向、高斯处理，以及整包手套 15x13 点位映射、1024 点模型矩阵和 274 字节整包解析从 `server.js` 抽出。 |
+| 2026-06-18 | Codex | server.js 变量中文注释补充 | 为 `backend/server/server.js` 的关键全局变量组补充中文说明，覆盖传感器常量、串口/回放状态、历史统计、运行路径、生命周期定时器、授权与数据库句柄、采集配置、WebSocket 三通道、实时协议缓存、双手套分包缓存和 OneStep 报告服务状态。 |
 | 2026-06-16 | Codex | 小床检测 12B 主回放连接设置顺序修复 | `server.js` 主 WebSocket 入口现在会在处理 `getTime/loadSelectedHistory` 前优先应用 `smallBed12BDisplayOptions`，避免应用重启后实时 16x16 切到回放时历史空帧仍按服务端默认 32x32 输出。 |
 | 2026-06-16 | Codex | 小床检测 12B 实时切回放尺寸保持 | `Title.jsx` 的回放/历史按钮和历史时间选择消息会携带 `smallBed12BDisplayOptions` 并同步前端 12B 视图尺寸；`server.js` 在 WebSocket 消息入口优先应用该设置，再加载历史数据，避免实时 16x16 切换到回放时历史空帧按旧默认 32x32 下发。 |
 | 2026-06-16 | Codex | 小床检测 12B 回放入口默认尺寸跟随展示设置 | `Home.jsx` 在点击回放进入本地模式时立即按 `smallBed12BRealtimeMatrixMode` 设置 12B 视图尺寸并同步 `smallBed12BDisplayOptions`；`server.js` 的历史选择空帧不再固定发 1024 点，而是按展示设置发送 16x16/32x32 和尺寸元数据。 |
@@ -666,6 +764,21 @@ graph TD
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-06-17 | Codex | 优化重构 | 按模块重组根目录文件：Electron 主进程进入 `app/`，后端公共、串口、WebSocket、数据库、导出、授权、配置、Python 桥接和矩阵处理进入 `backend/`，图标/授权资源进入 `assets/`，生成脚本进入 `tools/`，日志和临时文件进入 `runtime/`。 |
+| 2026-06-17 | Codex | 文档更新 | 补充核心模块函数级中文注释，覆盖 `app/electron/index.js`、`backend/python/pyWorker.js` 和 `backend/server/server.js` 的关键入口与复杂处理链路。 |
+| 2026-06-17 | Codex | 优化重构 | 抽取后端传感器注册表：`server.js` 不再本地维护波特率和传感器分类判断，统一从 `backend/sensors/registry.js` 获取，为后续按传感器插件拆分解析、入库、实时载荷和 CSV 导出逻辑预留边界。 |
+| 2026-06-17 | Codex | 优化重构 | 将 `smallBed12B` 做成第一个后端传感器模块：`backend/sensors/smallBed12B.js` 负责协议帧解析、压强标定、实时显示载荷和采集存储载荷，`server.js` 通过 registry 调用该模块，减少主服务内的传感器专属分支。 |
+| 2026-06-17 | Codex | 修复缺陷 | 修复后端模块在普通 Node 环境加载时直接访问 Electron `app` 导致的崩溃；数据库模板候选路径在无 Electron app 时自动跳过 `app.getAppPath()`。 |
+| 2026-06-17 | Codex | 优化重构 | 新增后端 runtime 层和 `CommandRouter`，Electron 入口改为调用 `backend/runtime`；旧 `server.js` 作为兼容适配层继续承接现有 WebSocket/串口逻辑。 |
+| 2026-06-17 | Codex | 优化重构 | 新增前端展示注册表 `client/src/displays/registry.js`，开始把展示系统能力、矩阵尺寸和默认模式从散落判断收拢到集中注册表。 |
+| 2026-06-17 | Codex | 优化重构 | 将 `minzhen` 做成第二个后端传感器模块：`backend/sensors/minzhen.js` 负责文本帧解析、缓冲切帧、矩阵屏蔽和高斯后处理，进一步减少 `server.js` 内的传感器专属逻辑。 |
+| 2026-06-17 | Codex | 优化重构 | 后端 sensor registry 和前端 display registry 扩展到全类型元数据：`car/hand/foot/bed/robot/wholeChair/minzhen/tempFullBed/humanBody` 等主要类型的波特率、矩阵、通道和能力统一登记，减少新增传感器时继续散落硬编码。 |
+| 2026-06-17 | Codex | 优化重构 | 新增 `backend/services/websocketBroadcastService.js` 横向服务层，`runtime/websocketHub.js` 改为兼容转发；CSV 导出进度、采集存储错误和历史选择结果广播开始统一调用该服务，减少 `server.js` 内重复遍历客户端发送逻辑。 |
+| 2026-06-17 | Codex | 优化重构 | 继续扩展 `backend/services/`：新增 WebSocket 通道服务统一 `sit/back/head` 通道归一化、实时广播和客户端统计；新增 server 生命周期服务承接关闭超时、串口关闭、HTTP 关闭和 WebSocket 关闭，`server.js` 保留资源编排职责。 |
+| 2026-06-17 | Codex | 优化重构 | 拆出采集与历史查询服务：`collectionService` 负责采集频率、配置、限频和磁盘 guard；`collectionInsertQueueService` 负责批量入库队列与事务写入；`historyQueryService` 负责历史查询、索引、statement 缓存和懒加载回放数据，进一步压缩 `server.js` 的基础设施职责。 |
+| 2026-06-18 | Codex | 修复缺陷 | 修复服务层拆分后 `stopPlaybackTimer is not defined` 的运行错误，按旧实现恢复 `stopPlaybackTimer()`，统一清理 `timer` 并将 `playFlag` 置为 false。 |
+| 2026-06-18 | Codex | 优化重构 | 继续压缩 `server.js` 传感器协议体积：`wholeChair` 的三路矩阵归一化迁入独立传感器模块，`handGloveFullPacket` 的左右手点位表、195 点映射、1024 点模型矩阵和整包解析迁入独立传感器模块。 |
+| 2026-06-18 | Codex | 文档更新 | 为 `server.js` 中仍需保留的关键全局状态变量补充中文分组注释，降低继续拆分串口协议、采集、回放和报告服务时的理解成本。 |
 | 2026-06-12 | Codex | 配置变更 | `smallBed12B` 缩小采集 CSV 下载保持真实采集的 256 点 `data`，不再为下载扩回 1024；回放链路仍会扩回 1024 并把未采样位置填 0。 |
 | 2026-06-12 | Codex | 新增功能 | CSV 下载弹窗新增进度条；后端流式写入每批 CSV 记录后上报总进度，前端展示当前文件、已写行数/总行数和文件序号，适配百万级历史帧导出。 |
 | 2026-06-12 | Codex | 配置变更 | `smallBed12B` 16x16 缩小采集的“左上/右上/左下/右下”按当前原始数据展示方向定义；由于展示链路会做对角线转置，后端入库时会把右上与左下互换为实际矩阵取点。 |
