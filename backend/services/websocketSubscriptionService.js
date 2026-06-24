@@ -4,6 +4,13 @@ const { toPayload } = require('./websocketBroadcastService');
 const WILDCARD_CHANNEL = '*';
 
 /**
+ * WebSocket 实时订阅服务。
+ *
+ * 维护客户端与业务 channel/scope 的订阅关系，并按订阅结果发送实时数据。
+ * 该服务不解析传感器协议，也不直接处理采集、入库或算法逻辑。
+ */
+
+/**
  * 将前端传入的单个通道或通道数组统一成干净的字符串数组。
  * @param {string | string[]} channels 通道名或通道名数组。
  * @returns {string[]} 可订阅的通道列表。
@@ -42,6 +49,11 @@ function createWebSocketSubscriptionManager({ logger } = {}) {
   const clientIds = new WeakMap();
   const clientScopes = new WeakMap();
 
+  /**
+   * 获取客户端稳定 ID；未显式传入时生成一个运行期 ID。
+   * @param {import('ws')} client WebSocket 客户端。
+   * @returns {string} 客户端 ID。
+   */
   function getClientId(client) {
     if (!clientIds.has(client)) {
       clientIds.set(client, `ws_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
@@ -49,6 +61,11 @@ function createWebSocketSubscriptionManager({ logger } = {}) {
     return clientIds.get(client);
   }
 
+  /**
+   * 获取客户端当前订阅集合；不存在时自动创建。
+   * @param {import('ws')} client WebSocket 客户端。
+   * @returns {Set<string>} 当前客户端订阅的 channel 集合。
+   */
   function ensureClientChannels(client) {
     let channels = clientChannels.get(client);
     if (!channels) {
@@ -58,6 +75,11 @@ function createWebSocketSubscriptionManager({ logger } = {}) {
     return channels;
   }
 
+  /**
+   * 把客户端加入指定 channel 的订阅集合。
+   * @param {string} channel 业务通道名。
+   * @param {import('ws')} client WebSocket 客户端。
+   */
   function addChannelClient(channel, client) {
     if (!channelClients.has(channel)) {
       channelClients.set(channel, new Set());
@@ -65,6 +87,11 @@ function createWebSocketSubscriptionManager({ logger } = {}) {
     channelClients.get(channel).add(client);
   }
 
+  /**
+   * 从指定 channel 中移除客户端，并清理空集合。
+   * @param {string} channel 业务通道名。
+   * @param {import('ws')} client WebSocket 客户端。
+   */
   function removeChannelClient(channel, client) {
     const clients = channelClients.get(channel);
     if (!clients) return;
@@ -74,6 +101,11 @@ function createWebSocketSubscriptionManager({ logger } = {}) {
     }
   }
 
+  /**
+   * 把客户端加入指定 scope，用于按连接组发送消息。
+   * @param {string} scope 连接分组名。
+   * @param {import('ws')} client WebSocket 客户端。
+   */
   function addScopeClient(scope, client) {
     const normalizedScope = String(scope || 'default');
     if (!scopeClients.has(normalizedScope)) {
@@ -83,6 +115,10 @@ function createWebSocketSubscriptionManager({ logger } = {}) {
     clientScopes.set(client, normalizedScope);
   }
 
+  /**
+   * 从客户端所属 scope 中移除客户端。
+   * @param {import('ws')} client WebSocket 客户端。
+   */
   function removeScopeClient(client) {
     const scope = clientScopes.get(client);
     if (!scope) return;
@@ -93,6 +129,13 @@ function createWebSocketSubscriptionManager({ logger } = {}) {
     }
   }
 
+  /**
+   * 为客户端订阅一个或多个 channel。
+   * @param {import('ws')} client WebSocket 客户端。
+   * @param {string | string[]} channels 要订阅的 channel。
+   * @param {{replace?: boolean}} options 是否替换已有订阅。
+   * @returns {string[]} 更新后的订阅列表。
+   */
   function subscribe(client, channels, { replace = false } = {}) {
     const normalizedChannels = normalizeChannels(channels);
     const subscriptions = ensureClientChannels(client);
@@ -115,6 +158,12 @@ function createWebSocketSubscriptionManager({ logger } = {}) {
     return [...subscriptions];
   }
 
+  /**
+   * 取消客户端对一个或多个 channel 的订阅。
+   * @param {import('ws')} client WebSocket 客户端。
+   * @param {string | string[]} channels 要取消订阅的 channel。
+   * @returns {string[]} 更新后的订阅列表。
+   */
   function unsubscribe(client, channels) {
     const normalizedChannels = normalizeChannels(channels);
     const subscriptions = ensureClientChannels(client);
@@ -127,6 +176,10 @@ function createWebSocketSubscriptionManager({ logger } = {}) {
     return [...subscriptions];
   }
 
+  /**
+   * 注销客户端，清理它的 channel 和 scope 订阅关系。
+   * @param {import('ws')} client WebSocket 客户端。
+   */
   function unregisterClient(client) {
     const subscriptions = clientChannels.get(client);
     if (!subscriptions) return;
@@ -138,6 +191,12 @@ function createWebSocketSubscriptionManager({ logger } = {}) {
     removeScopeClient(client);
   }
 
+  /**
+   * 向单个在线客户端发送已序列化 payload。
+   * @param {import('ws')} client WebSocket 客户端。
+   * @param {string} payload 已序列化消息。
+   * @returns {boolean} 是否发送成功。
+   */
   function send(client, payload) {
     if (client?.readyState !== WebSocket.OPEN) return false;
     client.send(payload);
@@ -166,6 +225,12 @@ function createWebSocketSubscriptionManager({ logger } = {}) {
     return sent;
   }
 
+  /**
+   * 只向精确订阅指定 channel 的客户端发送，不包含通配符订阅者。
+   * @param {string} channel 业务通道。
+   * @param {string | object} data 要发送的数据。
+   * @returns {number} 实际发送成功的客户端数量。
+   */
   function publishExact(channel, data) {
     const payload = toPayload(data);
     let sent = 0;
@@ -177,6 +242,12 @@ function createWebSocketSubscriptionManager({ logger } = {}) {
     return sent;
   }
 
+  /**
+   * 向指定 scope 下的所有客户端发送消息。
+   * @param {string} scope 连接分组名。
+   * @param {string | object} data 要发送的数据。
+   * @returns {number} 实际发送成功的客户端数量。
+   */
   function publishScope(scope, data) {
     const payload = toPayload(data);
     let sent = 0;
@@ -188,10 +259,20 @@ function createWebSocketSubscriptionManager({ logger } = {}) {
     return sent;
   }
 
+  /**
+   * 查询客户端当前订阅的 channel 列表。
+   * @param {import('ws')} client WebSocket 客户端。
+   * @returns {string[]} 当前订阅列表。
+   */
   function getSubscriptions(client) {
     return [...(clientChannels.get(client) || [])];
   }
 
+  /**
+   * 向客户端发送订阅控制确认消息。
+   * @param {import('ws')} client WebSocket 客户端。
+   * @param {object} payload 确认消息对象。
+   */
   function sendAck(client, payload) {
     send(client, JSON.stringify(payload));
   }
@@ -271,6 +352,10 @@ function createWebSocketSubscriptionManager({ logger } = {}) {
     return getSubscriptions(client);
   }
 
+  /**
+   * 获取当前订阅管理器的运行状态统计。
+   * @returns {{channels: Record<string, number>, scopes: Record<string, number>}} channel/scope 客户端数量。
+   */
   function getStatus() {
     const channels = {};
     for (const [channel, clients] of channelClients.entries()) {

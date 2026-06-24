@@ -1,7 +1,19 @@
+/**
+ * CSV 下载服务。
+ *
+ * 负责校验导出目录、分页读取历史数据、构造 CSV 记录、写入 UTF-8 BOM 文件，
+ * 并通过系统事件向前端上报导出进度、成功文件列表或失败原因。
+ */
 const { createObjectCsvStringifier } = require('csv-writer');
 
 const CSV_UTF8_BOM = '\ufeff';
 
+/**
+ * 校验目标目录是否可写。
+ *
+ * @param {object} options 文件系统、path 模块和目标目录。
+ * @returns {{ ok: boolean, dir?: string, error?: string }} 校验结果。
+ */
 function validateWritableDirectory({ fs, path, targetDir }) {
   const dir = String(targetDir || '').trim();
   if (!dir) {
@@ -24,12 +36,25 @@ function validateWritableDirectory({ fs, path, targetDir }) {
   }
 }
 
+/**
+ * 将历史日期或时间戳格式化为文件名可用的日期标签。
+ *
+ * @param {string | number} date 历史日期或时间戳。
+ * @param {Function} timeStampToDateLabel 时间戳转日期函数。
+ * @returns {string} 日期标签。
+ */
 function formatDateLabel(date, timeStampToDateLabel) {
   const value = String(date || '');
   if (value.includes(' ')) return value.split(' ')[0];
   return timeStampToDateLabel(Number(value));
 }
 
+/**
+ * 写入单个 CSV 文件。
+ *
+ * @param {object} options 写入参数。
+ * @returns {Promise<string>} 写入完成后的文件路径。
+ */
 async function writeCsvFile({ fs, filePath, headers, records }) {
   const stringifier = createObjectCsvStringifier({ header: headers });
   const content = CSV_UTF8_BOM +
@@ -39,6 +64,12 @@ async function writeCsvFile({ fs, filePath, headers, records }) {
   return filePath;
 }
 
+/**
+ * 创建 CSV 下载服务。
+ *
+ * @param {object} deps 运行时依赖。
+ * @returns {object} CSV 导出 API。
+ */
 function createCsvDownloadService({
   fs,
   path,
@@ -61,6 +92,12 @@ function createCsvDownloadService({
   isCar,
   isThreePortFile,
 }) {
+  /**
+   * 获取并校验 CSV 导出目录。
+   *
+   * @param {object} downloadOptions 下载配置。
+   * @returns {{ ok: boolean, dir?: string, error?: string }} 目录校验结果。
+   */
   function getCsvExportDirectory(downloadOptions = {}) {
     const requestedDir =
       (typeof downloadOptions.path === 'string' && downloadOptions.path.trim()) ||
@@ -69,6 +106,13 @@ function createCsvDownloadService({
     return validateWritableDirectory({ fs, path, targetDir: requestedDir });
   }
 
+  /**
+   * 向前端发布 CSV 导出最终结果。
+   *
+   * @param {string} download 旧前端兼容状态字段。
+   * @param {object} result 导出结果。
+   * @returns {number} 推送到的客户端数量。
+   */
   function publishResult(download, { files = [], dir = '', error = '' } = {}) {
     return publishSystemEvent({
       download,
@@ -79,6 +123,12 @@ function createCsvDownloadService({
     });
   }
 
+  /**
+   * 向前端发布 CSV 导出进度。
+   *
+   * @param {object} progress 进度信息。
+   * @returns {number} 推送到的客户端数量。
+   */
   function publishProgress(progress = {}) {
     return publishSystemEvent({
       csvDownloadProgress: progress,
@@ -87,6 +137,12 @@ function createCsvDownloadService({
     });
   }
 
+  /**
+   * 根据语言表头映射构建 csv-writer header 配置。
+   *
+   * @param {Record<string, string>} csvTitle 表头映射。
+   * @returns {Array<{ id: string, title: string }>} CSV header 配置。
+   */
   function buildHeaders(csvTitle) {
     return [
       { id: 'index', title: csvTitle.index },
@@ -98,6 +154,12 @@ function createCsvDownloadService({
     ];
   }
 
+  /**
+   * 将某个通道的历史行转换为 CSV 记录。
+   *
+   * @param {object} options 通道历史行、传感器类型和导出范围。
+   * @returns {{ records: object[], start: number, end: number }} CSV 记录和范围。
+   */
   function buildChannelRecords({ rows, sensorType, channel, range, csvTitle }) {
     const start = Math.max(0, Number(range?.[0] || 0));
     const end = Math.min(Number(range?.[1] || rows.length), rows.length);
@@ -126,6 +188,12 @@ function createCsvDownloadService({
     return { records, start, end };
   }
 
+  /**
+   * 导出单个通道的历史 CSV 文件。
+   *
+   * @param {object} options 通道导出参数。
+   * @returns {Promise<string | null>} 导出的文件路径；无数据时返回 null。
+   */
   async function exportChannel({
     dbRef,
     date,
@@ -162,6 +230,12 @@ function createCsvDownloadService({
     return filePath;
   }
 
+  /**
+   * 导出当前历史日期的 CSV 文件；汽车/三通道类型会导出多路文件。
+   *
+   * @param {{ date: string, downloadOptions?: object }} options 导出参数。
+   * @returns {Promise<void>} 导出完成 Promise。
+   */
   async function exportHistoryCsv({ date, downloadOptions = {} }) {
     const csvFormat = String(downloadOptions?.format || 'csv').toLowerCase();
     if (csvFormat !== 'csv') {

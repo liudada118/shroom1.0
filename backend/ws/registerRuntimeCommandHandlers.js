@@ -1,28 +1,29 @@
-function registerRuntimeCommandHandlers(router, deps) {
-  const {
-    csvDownloadService,
-    getRuntime,
-    historyMaintenanceService,
-    normalizeCollectFrequency,
-    normalizeCollectOptions,
-    normalizeSmallBed12BDisplayOptions,
-    resetCollectionStorageClock,
-    flushCollectionInsertQueues,
-    startPlaybackTimer,
-    stopPlaybackTimer,
-    setRuntime,
-  } = deps;
+/**
+ * 注册运行时控制命令。
+ *
+ * 这一组 handler 处理不直接碰串口的控制命令：
+ * - 显示参数
+ * - 历史回放播放状态
+ * - 采集开关和采集频率
+ * - CSV 导出和历史删除
+ *
+ * 它同时服务旧 WebSocket 命令和新 HTTP 控制 API。
+ */
+const { createRuntimeControlService } = require('../application/runtimeControlService');
 
+function registerRuntimeCommandHandlers(router, deps) {
+  const runtimeControlService = deps.runtimeControlService || createRuntimeControlService(deps);
+
+  // 显示配置只更新运行时状态，不触发数据链路副作用。
   router.register({
     name: 'display-options',
     when: (message) => message.smallBed12BDisplayOptions != null,
     handle: (message) => {
-      setRuntime({
-        smallBed12BDisplayOptions: normalizeSmallBed12BDisplayOptions(message.smallBed12BDisplayOptions),
-      });
+      runtimeControlService.updateDisplayOptions(message.smallBed12BDisplayOptions);
     },
   });
 
+  // 历史回放的播放、暂停、速度和索引控制。
   router.register({
     name: 'history-playback-state',
     when: (message) => (
@@ -35,31 +36,11 @@ function registerRuntimeCommandHandlers(router, deps) {
       message.index != null
     ),
     handle: (message) => {
-      const runtime = getRuntime();
-      const next = {};
-      if (message.history != null) next.history = message.history;
-      if (message.up != null) next.up = Number(message.up);
-      if (message.down != null) next.down = Number(message.down);
-      if (message.history === false) {
-        next.history = false;
-        stopPlaybackTimer();
-      }
-      if (message.speed != null) {
-        const speed = Number(message.speed);
-        next.interval = Math.max(1, parseInt(runtime.detectedInterval / speed));
-        if (runtime.playFlag) startPlaybackTimer();
-        else stopPlaybackTimer();
-      }
-      if (message.play != null) {
-        next.playFlag = message.play;
-        if (message.play) startPlaybackTimer();
-        else stopPlaybackTimer();
-      }
-      if (message.index != null) next.nowIndex = message.index;
-      setRuntime(next);
+      runtimeControlService.updateHistoryPlayback(message);
     },
   });
 
+  // 采集控制：开始采集时重置存储节流时钟，停止时先 flush 入库队列。
   router.register({
     name: 'collection-control',
     when: (message) => (
@@ -71,60 +52,34 @@ function registerRuntimeCommandHandlers(router, deps) {
       message.colName != null
     ),
     handle: (message) => {
-      const runtime = getRuntime();
-      const next = {};
-      if (message.time != null) next.saveTime = message.time;
-      if (message.colName != null) next.saveTime = message.colName;
-      if (message.flag === true) {
-        next.flag = true;
-        resetCollectionStorageClock();
-      } else if (message.flag === false) {
-        flushCollectionInsertQueues();
-        next.flag = false;
-      }
-      if (message.colHZ != null) {
-        next.colHZ = normalizeCollectFrequency(message.colHZ, runtime.colHZ);
-        next.collectOptions = normalizeCollectOptions({
-          ...runtime.collectOptions,
-          frequencyHz: next.colHZ,
-        }, next.colHZ);
-      }
-      if (message.collectOptions != null) {
-        next.collectOptions = normalizeCollectOptions(message.collectOptions, next.colHZ ?? runtime.colHZ);
-        next.colHZ = next.collectOptions.frequencyHz;
-      }
-      setRuntime(next);
+      runtimeControlService.updateCollectionControl(message);
     },
   });
 
+  // 运行时参数：串口波特率和算法/平滑开关。
   router.register({
     name: 'runtime-options',
     when: (message) => message.baudRate != null || message.gauss != null,
     handle: (message) => {
-      const next = {};
-      if (message.baudRate != null) next.baudRate = Number(message.baudRate);
-      if (message.gauss != null) next.gauss = message.gauss;
-      setRuntime(next);
+      runtimeControlService.updateRuntimeOptions(message);
     },
   });
 
+  // 历史数据删除走独立 service，避免在 WS/HTTP 层拼 SQL。
   router.register({
     name: 'history-maintenance',
     when: (message) => message.delete != null,
     handle: (message) => {
-      historyMaintenanceService.deleteHistory(message.delete);
+      runtimeControlService.deleteHistory(message.delete);
     },
   });
 
+  // CSV 导出可能耗时，handler 返回 stop 防止旧 WS 分支继续处理同一条命令。
   router.register({
     name: 'csv-download',
     when: (message) => message.download != null,
     handle: (message) => {
-      setRuntime({ smoothValue: 0 });
-      csvDownloadService.exportHistoryCsv({
-        date: message.download,
-        downloadOptions: message.downloadOptions || {},
-      });
+      runtimeControlService.exportHistoryCsv(message);
       return { stop: true };
     },
   });

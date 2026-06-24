@@ -1,3 +1,9 @@
+/**
+ * 服务生命周期辅助函数。
+ *
+ * 统一关闭串口、HTTP server 和 WebSocket server，并给关闭流程加超时保护，
+ * 避免应用退出或自动更新安装前卡在某个资源释放步骤。
+ */
 const logger = require('../common/logger');
 
 /**

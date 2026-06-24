@@ -1,3 +1,9 @@
+/**
+ * 传感器注册表。
+ *
+ * 统一维护传感器类型、矩阵尺寸、通道、波特率、能力标签和协议插件。
+ * 后端串口、采集、回放、CSV 和 SDK 元数据都应从这里读取传感器能力。
+ */
 const smallBed12B = require('./smallBed12B');
 const minzhen = require('./minzhen');
 const wholeChair = require('./wholeChair');
@@ -109,6 +115,11 @@ const SENSOR_DEFINITIONS = {
   bed4096num: { matrix: { width: 64, height: 64, total: 4096 }, channels: ['sit'], baudRate: 3000000, capabilities: DEFAULT_CAPABILITIES },
 };
 
+/**
+ * 获取传感器定义；未知类型按默认 32x32 单坐垫处理。
+ * @param {string} sensorType 传感器类型。
+ * @returns {object} 传感器定义。
+ */
 function getSensorDefinition(sensorType = '') {
   const type = String(sensorType || '');
   if (SENSOR_DEFINITIONS[type]) return SENSOR_DEFINITIONS[type];
@@ -123,42 +134,94 @@ function getSensorDefinition(sensorType = '') {
   return { matrix: MATRIX_32, channels: ['sit'], capabilities: DEFAULT_CAPABILITIES };
 }
 
+/**
+ * 判断传感器是否具备某项能力。
+ * @param {string} sensorType 传感器类型。
+ * @param {string} capability 能力名。
+ * @returns {boolean} 是否具备能力。
+ */
 function hasCapability(sensorType, capability) {
   return getSensorDefinition(sensorType).capabilities.includes(capability);
 }
 
+/**
+ * 判断是否属于触觉手套协议类型。
+ * @param {string} sensorType 传感器类型。
+ * @returns {boolean} 是否为手套类型。
+ */
 function isHandGloveType(sensorType) {
   return HAND_GLOVE_TYPES.includes(sensorType);
 }
 
+/**
+ * 判断是否需要按手部存储格式入库。
+ * @param {string} sensorType 传感器类型。
+ * @returns {boolean} 是否为手部存储类型。
+ */
 function isHandStorageType(sensorType = '') {
   return hasCapability(sensorType, SENSOR_CAPABILITIES.HAND_STORAGE) || String(sensorType).includes('robot');
 }
 
+/**
+ * 判断是否支持零点帧存储。
+ * @param {string} sensorType 传感器类型。
+ * @returns {boolean} 是否支持零点帧。
+ */
 function isZeroFrameStorageType(sensorType = '') {
   return hasCapability(sensorType, SENSOR_CAPABILITIES.ZERO_FRAME) || String(sensorType).includes('robot');
 }
 
+/**
+ * 判断是否属于小床矩阵类传感器。
+ * @param {string} sensorType 传感器类型。
+ * @returns {boolean} 是否为小床矩阵类型。
+ */
 function isSmallBedMatrixType(sensorType) {
   return hasCapability(sensorType, SENSOR_CAPABILITIES.SMALL_BED_MATRIX);
 }
 
+/**
+ * 判断是否需要 sit/back/head 三端口。
+ * @param {string} sensorType 传感器类型。
+ * @returns {boolean} 是否为三端口类型。
+ */
 function isThreePortFile(sensorType) {
   return hasCapability(sensorType, SENSOR_CAPABILITIES.THREE_PORT);
 }
 
+/**
+ * 从实时帧中读取指定矩阵字段。
+ * @param {object} frame 实时帧对象。
+ * @param {string} key 字段名。
+ * @returns {number[]} 矩阵数据。
+ */
 function getFrameMatrixData(frame, key) {
   return Array.isArray(frame?.[key]) ? frame[key] : [];
 }
 
+/**
+ * 获取传感器推荐波特率。
+ * @param {string} sensorType 传感器类型。
+ * @returns {number} 波特率。
+ */
 function getSensorBaudRate(sensorType) {
   return getSensorDefinition(sensorType).baudRate || 1000000;
 }
 
+/**
+ * 获取传感器矩阵尺寸定义。
+ * @param {string} sensorType 传感器类型。
+ * @returns {{width:number,height:number,total:number}} 矩阵定义。
+ */
 function getSensorMatrix(sensorType) {
   return getSensorDefinition(sensorType).matrix;
 }
 
+/**
+ * 获取传感器使用的业务通道。
+ * @param {string} sensorType 传感器类型。
+ * @returns {string[]} 通道列表。
+ */
 function getSensorChannels(sensorType) {
   return getSensorDefinition(sensorType).channels;
 }

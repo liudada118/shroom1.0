@@ -1,6 +1,12 @@
 const WebSocket = require('ws');
 
 /**
+ * WebSocket 连接保活服务。
+ *
+ * 这里只处理连接级心跳，不承载业务消息解析、订阅关系或传感器数据处理。
+ */
+
+/**
  * 给 WebSocket 客户端挂载心跳检测。
  *
  * @param {object} ws WebSocket 客户端。

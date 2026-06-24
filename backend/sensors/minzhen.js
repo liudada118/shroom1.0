@@ -1,3 +1,9 @@
+/**
+ * 敏枕文本协议解析模块。
+ *
+ * 敏枕串口会输出包含 gyroscope、thermistor 和 humidity 的文本帧。
+ * 本模块负责文本缓冲、帧切分、字段解析、矩阵置零和后端高斯平滑。
+ */
 const TYPE = 'minzhen';
 const SENSOR_BAUD_RATE = 115200;
 const FRAME_START_PATTERN = /yroscope\s*:/i;
@@ -6,11 +12,22 @@ const BACKEND_GAUSS_RADIUS = 0.5;
 const TEXT_BUFFER_MAX_LENGTH = 4096;
 const TEXT_BUFFER_TAIL_LENGTH = 64;
 
+/**
+ * 将任意值转成有限数字，非法值统一按 0 处理。
+ * @param {unknown} value 原始值。
+ * @returns {number} 有限数字。
+ */
 function toFiniteNumber(value) {
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue : 0;
 }
 
+/**
+ * 将敏枕矩阵中已知不稳定点强制置零。
+ * @param {number[]} frame 压力矩阵。
+ * @param {number[]} zeroPointIndexes 要置零的点位索引。
+ * @returns {number[]} 处理后的矩阵。
+ */
 function maskMatrixValues(frame, zeroPointIndexes = ZERO_POINT_INDEXES) {
   if (!Array.isArray(frame)) return frame;
   zeroPointIndexes.forEach((index) => {
@@ -21,6 +38,12 @@ function maskMatrixValues(frame, zeroPointIndexes = ZERO_POINT_INDEXES) {
   return frame;
 }
 
+/**
+ * 对敏枕 32x32 压力矩阵做后端高斯平滑，并再次屏蔽不稳定点。
+ * @param {number[]} frame 原始压力矩阵。
+ * @param {{gaussBlur?: Function, radius?: number}} options 高斯平滑配置。
+ * @returns {number[]} 平滑后的压力矩阵。
+ */
 function applyBackendGauss(frame, { gaussBlur, radius = BACKEND_GAUSS_RADIUS } = {}) {
   if (!Array.isArray(frame) || frame.length < 1024) return maskMatrixValues(frame);
 
@@ -35,6 +58,11 @@ function applyBackendGauss(frame, { gaussBlur, radius = BACKEND_GAUSS_RADIUS } =
   return maskMatrixValues(blurredFrame);
 }
 
+/**
+ * 归一化敏枕文本字段名。
+ * @param {string} rawKey 原始字段名。
+ * @returns {string} 标准字段名。
+ */
 function normalizeSensorKey(rawKey = '') {
   const key = String(rawKey).trim();
   if (/yroscope/i.test(key)) return 'gyroscope';
@@ -46,11 +74,21 @@ function normalizeSensorKey(rawKey = '') {
   return key;
 }
 
+/**
+ * 从文本字段中提取数字字符串。
+ * @param {unknown} value 原始字段值。
+ * @returns {string} 数字字符串。
+ */
 function cleanSensorNumber(value) {
   const match = String(value ?? '').match(/-?\d+(?:\.\d+)?/);
   return match ? match[0] : '';
 }
 
+/**
+ * 解析一段敏枕文本中的字段列表。
+ * @param {string} text 敏枕文本帧。
+ * @returns {{key:string, value:string}[]} 字段列表。
+ */
 function parseSensorFields(text = '') {
   const fields = [];
   const fieldPattern = /(yroscope|thermistor0|thermistor1|thermistor2|thermistor|humidity)\s*:/ig;
@@ -69,6 +107,11 @@ function parseSensorFields(text = '') {
   return fields;
 }
 
+/**
+ * 解析一帧敏枕文本数据。
+ * @param {Buffer | Uint8Array | string} buffer 原始文本帧。
+ * @returns {null | {tempObj: object}} 解析后的传感器对象。
+ */
 function parseSensorFrame(buffer) {
   const text = Buffer.from(buffer || []).toString();
   if (!/yroscope/i.test(text) || !/thermistor/i.test(text)) {
@@ -113,11 +156,21 @@ function parseSensorFrame(buffer) {
   return { tempObj };
 }
 
+/**
+ * 查找下一帧敏枕文本的起始位置。
+ * @param {string} text 缓冲文本。
+ * @returns {number} 起始索引，未找到返回 -1。
+ */
 function getFrameStartIndex(text) {
   const match = String(text).match(FRAME_START_PATTERN);
   return match ? match.index : -1;
 }
 
+/**
+ * 从文本缓冲中取出下一帧完整敏枕文本。
+ * @param {{buffer:string}} state 文本缓冲状态。
+ * @returns {null | string} 完整文本帧。
+ */
 function takeNextTextFrame(state) {
   const firstStart = getFrameStartIndex(state.buffer);
   if (firstStart < 0) {
@@ -147,6 +200,10 @@ function takeNextTextFrame(state) {
   return null;
 }
 
+/**
+ * 创建敏枕文本帧提取器。
+ * @returns {{reset: Function, push: Function, getBuffer: Function}} 文本帧提取器。
+ */
 function createTextFrameExtractor() {
   const state = { buffer: '' };
   return {

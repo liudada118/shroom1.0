@@ -1,9 +1,21 @@
+/**
+ * 整椅传感器矩阵归一化模块。
+ *
+ * 整椅使用 sit/back/head 三个区域的 32x32 原始矩阵，
+ * 本模块负责裁剪、翻转、旋转和高斯平滑，输出前端展示矩阵。
+ */
 const logger = require('../common/logger');
 const { gaussBlur_return } = require('../server/modules/mathUtils');
 
 const TYPE = 'wholeChair';
 const GAUSS_RADIUS = 0.5;
 
+/**
+ * 将正方形矩阵逆时针旋转 90 度。
+ * @param {unknown[]} arr 原始矩阵。
+ * @param {number} size 矩阵边长。
+ * @returns {unknown[]} 旋转后的矩阵。
+ */
 function rotateSquare90CounterClockwise(arr, size) {
   const matrix = [];
   for (let i = 0; i < size; i++) {
@@ -26,6 +38,13 @@ function rotateSquare90CounterClockwise(arr, size) {
   return temp.flat();
 }
 
+/**
+ * 将矩形矩阵顺时针旋转 90 度。
+ * @param {unknown[]} arr 原始矩阵。
+ * @param {number} height 原始高度。
+ * @param {number} width 原始宽度。
+ * @returns {unknown[]} 旋转后的矩阵。
+ */
 function rotateMatrix90Clockwise(arr, height, width) {
   const matrix = Array.from({ length: height }, (_, i) =>
     arr.slice(i * width, i * width + width)
@@ -41,6 +60,13 @@ function rotateMatrix90Clockwise(arr, height, width) {
   return newMatrix.flat();
 }
 
+/**
+ * 将矩阵按垂直方向翻转。
+ * @param {unknown[]} arr 原始矩阵。
+ * @param {number} height 高度。
+ * @param {number} width 宽度。
+ * @returns {unknown[]} 翻转后的矩阵。
+ */
 function flipMatrixVertical(arr, height, width) {
   const result = [];
   for (let row = height - 1; row >= 0; row--) {
@@ -49,6 +75,13 @@ function flipMatrixVertical(arr, height, width) {
   return result;
 }
 
+/**
+ * 对指定尺寸矩阵应用高斯平滑。
+ * @param {number[]} arr 原始矩阵。
+ * @param {number} width 宽度。
+ * @param {number} height 高度。
+ * @returns {number[]} 平滑后的矩阵。
+ */
 function applyGauss(arr, width, height) {
   if (!Array.isArray(arr) || arr.length !== width * height) {
     return arr;
@@ -56,6 +89,11 @@ function applyGauss(arr, width, height) {
   return gaussBlur_return(arr, width, height, GAUSS_RADIUS);
 }
 
+/**
+ * 将数组或 JSON 字符串解析为矩阵数组。
+ * @param {unknown[] | string} data 原始帧或数据库 JSON 字符串。
+ * @returns {unknown[]} 矩阵数组。
+ */
 function parseFrameArray(data) {
   if (Array.isArray(data)) {
     return [...data];

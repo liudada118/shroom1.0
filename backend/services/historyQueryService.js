@@ -1,9 +1,28 @@
+/**
+ * 历史查询服务。
+ *
+ * 统一封装 matrix 表的索引保障、prepared statement 缓存、日期列表查询、
+ * 历史行分页查询和大数据懒加载代理，避免 server.js 直接拼 SQL。
+ */
 const historyStmtCache = new WeakMap();
 
+/**
+ * 获取 sqlite 兼容包装对象中的原生数据库连接。
+ *
+ * @param {object} dbRef 数据库句柄或兼容包装对象。
+ * @returns {object | null} 原生数据库连接。
+ */
 function getNativeDb(dbRef) {
   return dbRef && (dbRef._db || dbRef.db || null);
 }
 
+/**
+ * 获取并缓存历史查询 prepared statement。
+ *
+ * @param {object} dbRef 数据库句柄。
+ * @param {string} sql SQL 语句。
+ * @returns {object} prepared statement。
+ */
 function getHistoryStmt(dbRef, sql) {
   const nativeDb = getNativeDb(dbRef);
   if (!nativeDb || typeof nativeDb.prepare !== 'function') {
@@ -88,6 +107,16 @@ function getHistoryStats(dbRef, date, logger) {
   };
 }
 
+/**
+ * 查询指定日期的历史行。
+ *
+ * @param {object} dbRef 数据库句柄。
+ * @param {string} date 历史日期标签。
+ * @param {number} limit 最大返回条数。
+ * @param {number} offset 偏移量。
+ * @param {object} logger 日志对象。
+ * @returns {Array<object>} 历史行列表。
+ */
 function queryHistoryRows(dbRef, date, limit, offset = 0, logger) {
   if (!dbRef || !date || limit <= 0) return [];
   ensureHistoryIndexes(dbRef, logger);
@@ -98,12 +127,30 @@ function queryHistoryRows(dbRef, date, limit, offset = 0, logger) {
   );
 }
 
+/**
+ * 查询指定日期前几帧时间戳，用于估算历史回放帧间隔。
+ *
+ * @param {object} dbRef 数据库句柄。
+ * @param {string} date 历史日期标签。
+ * @param {number} limit 采样条数。
+ * @param {object} logger 日志对象。
+ * @returns {Array<number>} 时间戳数组。
+ */
 function queryHistoryTimestampSample(dbRef, date, limit = 21, logger) {
   return queryHistoryRows(dbRef, date, limit, 0, logger)
     .map((row) => row.timestamp)
     .filter((value) => value != null);
 }
 
+/**
+ * 查询历史采集日期列表。
+ *
+ * @param {object} dbRef 数据库句柄。
+ * @param {number} limit 最大返回条数。
+ * @param {number} offset 偏移量。
+ * @param {object} logger 日志对象。
+ * @returns {Array<object>} 日期行列表。
+ */
 function queryHistoryDates(dbRef, limit = 500, offset = 0, logger) {
   if (!dbRef) return [];
   try {
@@ -118,6 +165,16 @@ function queryHistoryDates(dbRef, limit = 500, offset = 0, logger) {
   }
 }
 
+/**
+ * 从指定 ID 开始读取历史行，用于分页或懒加载补充。
+ *
+ * @param {object} dbRef 数据库句柄。
+ * @param {string} date 历史日期标签。
+ * @param {number} minId 起始 ID。
+ * @param {number} limit 最大返回条数。
+ * @param {object} logger 日志对象。
+ * @returns {Array<object>} 历史行列表。
+ */
 function queryHistoryRowsFromId(dbRef, date, minId, limit, logger) {
   if (!dbRef || !date || !minId || limit <= 0) return [];
   ensureHistoryIndexes(dbRef, logger);
@@ -182,6 +239,16 @@ function createLazyHistoryRows(dbRef, date, stats) {
   });
 }
 
+/**
+ * 根据数据规模选择立即加载或懒加载历史行。
+ *
+ * @param {object} dbRef 数据库句柄。
+ * @param {string} date 历史日期标签。
+ * @param {{ count: number, minId: number }} stats 历史统计信息。
+ * @param {boolean} eager 是否立即加载全部行。
+ * @param {object} logger 日志对象。
+ * @returns {Array<object>} 历史行数组或懒加载代理。
+ */
 function createHistoryRowsForPlayback(dbRef, date, stats, eager, logger) {
   if (!stats?.count) return [];
   return eager

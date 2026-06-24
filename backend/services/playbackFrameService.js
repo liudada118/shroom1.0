@@ -29,10 +29,22 @@ function createPlaybackFrameService(deps) {
     wholeChairType,
   } = deps;
 
+  /**
+   * 解析历史行中的传感器帧，并标准化为压力/旋转/清零字段。
+   *
+   * @param {{ data?: string }} row 历史数据库行。
+   * @param {string} sensorType 传感器类型。
+   * @returns {{ pressureData: number[], rotateData: number[], zeroFrame: number[] }} 标准帧。
+   */
   function parseStoredPressure(row, sensorType) {
     return parseStoredSensorFrame(JSON.parse(row?.data || '[]'), sensorType);
   }
 
+  /**
+   * 处理 robot 类传感器历史回放 payload。
+   *
+   * @param {object} options 当前回放行和待写入 payload。
+   */
   function applyRobotPlayback({ sensorType, sitRow, backRow, sitPayload, backPayload }) {
     const sitRawText = sitRow?.data;
     const backRawText = backRow?.data;
@@ -60,6 +72,11 @@ function createPlaybackFrameService(deps) {
     }
   }
 
+  /**
+   * 处理手套类传感器历史回放 payload，兼容整包和双串口历史格式。
+   *
+   * @param {object} options 当前回放行和待写入 payload。
+   */
   function applyHandGlovePlayback({ sensorType, sitRow, backRow, sitPayload, backPayload }) {
     const sitFrame = parseStoredPressure(sitRow, sensorType);
     const backFrame = parseStoredPressure(backRow, sensorType);
@@ -123,6 +140,11 @@ function createPlaybackFrameService(deps) {
     }
   }
 
+  /**
+   * 处理足底视频类传感器历史回放 payload。
+   *
+   * @param {object} options 当前回放行和待写入 payload。
+   */
   function applyFootVideoPlayback({ sensorType, sitRow, backRow, sitPayload, backPayload }) {
     if (sitRow?.data) {
       const sitRaw256 = parseStoredPressure(sitRow, sensorType).pressureData;

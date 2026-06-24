@@ -1,3 +1,9 @@
+/**
+ * WebSocket 通道服务。
+ *
+ * 统一 sit/back/head 三个旧 WebSocket server 的通道命名、server 获取、
+ * 广播和连接数统计，避免业务层继续散落 server/server1/server2 判断。
+ */
 const {
   broadcast,
   getClientCount,

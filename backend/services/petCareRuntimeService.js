@@ -1,3 +1,9 @@
+/**
+ * 宠物看护和生命体征运行时服务。
+ *
+ * 负责定时调用 Python 算法、维护宠物在床状态稳定窗口、模拟/补齐心率，
+ * 并把 jqbed/smallBed/petCare/petCareMini 的算法结果发布给前端。
+ */
 const PET_CARE_SYSTEM_TYPES = new Set(['petCare', 'petCareMini']);
 const VITAL_SIGNS_SYSTEM_TYPES = new Set(['jqbed', 'smallBed']);
 const HEART_RATE_UPDATE_INTERVAL_MS = 1000;
@@ -7,6 +13,13 @@ const randValue = (min, max) => min + Math.random() * (max - min);
 const randProb = (probability) => Math.random() < probability;
 const normalizeBreathRate = (value) => Number(value).toFixed(1);
 
+/**
+ * 生成正态分布随机数，用于心率模拟中的小幅噪声。
+ *
+ * @param {number} mean 均值。
+ * @param {number} std 标准差。
+ * @returns {number} 随机值。
+ */
 function gaussian(mean, std) {
   let u1;
   do {
@@ -17,6 +30,11 @@ function gaussian(mean, std) {
   return mean + z * std;
 }
 
+/**
+ * 创建心率模拟公式的基础状态。
+ *
+ * @returns {object} 公式状态。
+ */
 function createFormulaState() {
   return {
     breathPhase: 0,
@@ -28,6 +46,11 @@ function createFormulaState() {
   };
 }
 
+/**
+ * 创建宠物看护心率模拟器状态。
+ *
+ * @returns {object} 宠物看护心率状态。
+ */
 function createPetCareHeartRateSimulatorState() {
   return {
     ...createFormulaState(),
@@ -35,6 +58,11 @@ function createPetCareHeartRateSimulatorState() {
   };
 }
 
+/**
+ * 创建 jqbed/smallBed 生命体征心率模拟器状态。
+ *
+ * @returns {object} 生命体征心率状态。
+ */
 function createVitalSignsHeartRateSimulatorState() {
   return {
     ...createFormulaState(),
@@ -42,6 +70,11 @@ function createVitalSignsHeartRateSimulatorState() {
   };
 }
 
+/**
+ * 重置宠物看护心率模拟器。
+ *
+ * @param {object} simulator 心率模拟器状态。
+ */
 function resetPetCareHeartRateSimulatorState(simulator) {
   simulator.breathPhase = 0;
   simulator.rsaAmp = 3.5;
@@ -52,6 +85,11 @@ function resetPetCareHeartRateSimulatorState(simulator) {
   simulator.breathRateQueue = [];
 }
 
+/**
+ * 重置生命体征心率模拟器。
+ *
+ * @param {object} simulator 心率模拟器状态。
+ */
 function resetVitalSignsHeartRateSimulatorState(simulator) {
   simulator.breathPhase = 0;
   simulator.rsaAmp = 3.5;
@@ -62,6 +100,13 @@ function resetVitalSignsHeartRateSimulatorState(simulator) {
   simulator.lastHeartRateAt = 0;
 }
 
+/**
+ * 根据呼吸率推算下一拍心率。
+ *
+ * @param {number} rr 呼吸率。
+ * @param {object} simulator 心率模拟器状态。
+ * @returns {number} 模拟心率。
+ */
 function nextHeartRate(rr, simulator) {
   if (rr === 0) return 0;
 
@@ -85,6 +130,11 @@ function nextHeartRate(rr, simulator) {
   return clampValue(Math.round(heartRate), 55, 100);
 }
 
+/**
+ * 创建单个宠物看护系统的运行时状态。
+ *
+ * @returns {object} 运行时状态。
+ */
 function createPetCareRuntimeState() {
   return {
     stateArr: [],
@@ -97,6 +147,12 @@ function createPetCareRuntimeState() {
   };
 }
 
+/**
+ * 调整 jqbed 矩阵方向，使算法输入与 Python 侧预期一致。
+ *
+ * @param {number[]} arr 原始压力矩阵。
+ * @returns {number[]} 翻转后的矩阵。
+ */
 function jqbedOppo(arr) {
   let wsPointData = [...arr];
   const b = wsPointData.splice(0, 17 * 32);
@@ -112,6 +168,12 @@ function jqbedOppo(arr) {
   return wsPointData;
 }
 
+/**
+ * 创建宠物看护运行时服务。
+ *
+ * @param {object} deps Python 调用、实时数据读取和发布依赖。
+ * @returns {object} 宠物看护运行时 API。
+ */
 function createPetCareRuntimeService({
   logger,
   callPy,
@@ -142,16 +204,30 @@ function createPetCareRuntimeService({
     },
   };
 
+  /**
+   * 判断当前传感器类型是否属于宠物看护系统。
+   *
+   * @param {string} type 传感器类型。
+   * @returns {boolean} 是否是宠物看护系统。
+   */
   function isPetCareSystem(type) {
     return PET_CARE_SYSTEM_TYPES.has(type);
   }
 
+  /**
+   * 重置指定宠物看护系统运行时。
+   *
+   * @param {'petCare' | 'petCareMini'} systemKey 系统 key。
+   */
   function resetRuntime(systemKey) {
     const system = petCareSystems[systemKey];
     if (!system) return;
     Object.assign(system.runtime, createPetCareRuntimeState());
   }
 
+  /**
+   * 重置全部宠物看护和生命体征运行时状态。
+   */
   function resetAll() {
     Object.keys(petCareSystems).forEach(resetRuntime);
     Object.values(vitalSignsHeartRateSimulator).forEach(resetVitalSignsHeartRateSimulatorState);
@@ -159,6 +235,13 @@ function createPetCareRuntimeService({
     onBedTime = 0;
   }
 
+  /**
+   * 标准化宠物看护算法结果，补齐稳定在床状态、在床时长和心率。
+   *
+   * @param {object} data Python 算法返回值。
+   * @param {'petCare' | 'petCareMini'} systemKey 系统 key。
+   * @returns {object} 前端可用结果。
+   */
   function normalizePetCareResult(data, systemKey) {
     const runtime = petCareSystems[systemKey].runtime;
     const postureState = Number(data?.posture_state);
@@ -215,6 +298,13 @@ function createPetCareRuntimeService({
     };
   }
 
+  /**
+   * 标准化 jqbed/smallBed 生命体征心率，没有有效心率时根据呼吸率模拟。
+   *
+   * @param {object} data Python 算法返回值。
+   * @param {'jqbed' | 'smallBed'} systemKey 系统 key。
+   * @returns {object} 前端可用结果。
+   */
   function normalizeVitalSignsHeartRate(data, systemKey) {
     if (!VITAL_SIGNS_SYSTEM_TYPES.has(systemKey)) return data;
 
@@ -256,6 +346,12 @@ function createPetCareRuntimeService({
     };
   }
 
+  /**
+   * 限频记录宠物看护算法结果，避免日志刷屏。
+   *
+   * @param {object} result 标准化后的算法结果。
+   * @param {'petCare' | 'petCareMini'} systemKey 系统 key。
+   */
   function logPetCareResult(result, systemKey) {
     if (systemKey === 'petCareMini') return;
 
@@ -287,6 +383,11 @@ function createPetCareRuntimeService({
     });
   }
 
+  /**
+   * 启动 jqbed/smallBed 生命体征算法定时器。
+   *
+   * @returns {NodeJS.Timeout} 定时器句柄。
+   */
   function startVitalSignsTimer() {
     return setInterval(async () => {
       const pointArr = getPointArr?.();
@@ -332,6 +433,12 @@ function createPetCareRuntimeService({
     }, 125);
   }
 
+  /**
+   * 启动宠物看护算法定时器。
+   *
+   * @param {'petCare' | 'petCareMini'} systemKey 系统 key。
+   * @returns {NodeJS.Timeout} 定时器句柄。
+   */
   function startPetCareTimer(systemKey) {
     const system = petCareSystems[systemKey];
     return setInterval(async () => {

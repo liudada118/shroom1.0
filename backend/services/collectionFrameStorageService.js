@@ -1,3 +1,17 @@
+/**
+ * 采集帧存储服务。
+ *
+ * 根据当前传感器类型和通道，把实时 payload 转成 matrix.data 的存储格式，
+ * 再交给入库队列。这里集中处理 sit/back/head 三路差异，避免实时输出管线
+ * 直接拼接存储结构。
+ */
+
+/**
+ * 创建采集帧存储服务。
+ *
+ * @param {object} options 运行时依赖和传感器类型判断函数。
+ * @returns {object} 三路采集存储 API。
+ */
 function createCollectionFrameStorageService(options = {}) {
   const {
     getSensorType,
@@ -14,10 +28,21 @@ function createCollectionFrameStorageService(options = {}) {
     smallBed12BType,
   } = options;
 
+  /**
+   * 读取当前传感器类型。
+   *
+   * @returns {string} 当前传感器类型。
+   */
   function sensorType() {
     return typeof getSensorType === 'function' ? getSensorType() : '';
   }
 
+  /**
+   * 判断当前通道本帧是否允许入库。
+   *
+   * @param {'sit' | 'back' | 'head'} channel 采集通道。
+   * @returns {boolean} 是否可以入库。
+   */
   function canStore(channel) {
     return Boolean(
       shouldStoreCollectionFrame?.(channel) &&
@@ -25,6 +50,12 @@ function createCollectionFrameStorageService(options = {}) {
     );
   }
 
+  /**
+   * 构建坐面通道的 matrix.data 存储字符串。
+   *
+   * @param {object} frameToStore 实时帧对象。
+   * @returns {string} 序列化后的存储数据。
+   */
   function buildSitCollectionData(frameToStore) {
     const type = sensorType();
     return type === tempFullBedType
@@ -50,6 +81,12 @@ function createCollectionFrameStorageService(options = {}) {
           : JSON.stringify([...frameToStore.sitData]);
   }
 
+  /**
+   * 构建靠背通道的 matrix.data 存储字符串。
+   *
+   * @param {object} frameToStore 实时帧对象。
+   * @returns {string} 序列化后的存储数据。
+   */
   function buildBackCollectionData(frameToStore) {
     const type = sensorType();
     return frameToStore.tempObj
@@ -61,6 +98,12 @@ function createCollectionFrameStorageService(options = {}) {
           : JSON.stringify([...frameToStore.backData]);
   }
 
+  /**
+   * 构建头枕通道的 matrix.data 存储字符串。
+   *
+   * @param {object} frameToStore 实时帧对象。
+   * @returns {string} 序列化后的存储数据。
+   */
   function buildHeadCollectionData(frameToStore) {
     const type = sensorType();
     return isZeroFrameStorageType(type)
@@ -70,6 +113,13 @@ function createCollectionFrameStorageService(options = {}) {
         : JSON.stringify([...frameToStore.backData]);
   }
 
+  /**
+   * 按通道选择构造器并把采集帧加入入库队列。
+   *
+   * @param {'sit' | 'back' | 'head'} channel 采集通道。
+   * @param {object} frameToStore 实时帧对象。
+   * @returns {boolean} 是否已入队。
+   */
   function store(channel, frameToStore) {
     if (!canStore(channel)) return false;
 

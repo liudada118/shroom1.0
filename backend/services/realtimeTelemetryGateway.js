@@ -1,5 +1,17 @@
+/**
+ * 实时 telemetry 网关。
+ *
+ * 负责把旧 sit/back/head 实时 payload 同时发布到旧 WebSocket 通道和新的
+ * 标准 telemetry channel。它是旧前端兼容通道与新 ChannelBus 模型之间的桥。
+ */
 const { normalizeLegacyRealtimeFrame } = require('../normalizers/telemetryNormalizer');
 
+/**
+ * 创建实时 telemetry 网关。
+ *
+ * @param {object} deps ChannelBus、订阅管理器和传感器类型读取器。
+ * @returns {{ publishRealtimeFrame: Function }} 实时发布 API。
+ */
 function createRealtimeTelemetryGateway({
   channelBus,
   wsSubscriptions,

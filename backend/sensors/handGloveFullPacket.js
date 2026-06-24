@@ -1,3 +1,9 @@
+/**
+ * 触觉手套整包协议映射模块。
+ *
+ * 整包协议一次性携带 256 点压力和 16 字节 IMU。
+ * 本模块负责左右手压力点映射、195 点手模矩阵生成和 32x32 模型矩阵构造。
+ */
 const HAND_GLOVE_FULL_PACKET_LAYOUT = {
   left: {
     fingerRows: [
@@ -45,10 +51,22 @@ const HAND_GLOVE_FULL_PACKET_LAYOUT = {
   },
 };
 
+/**
+ * 按协议中的 1 基点位读取压力值。
+ * @param {number[]} pressureData 256 点压力数组。
+ * @param {number} oneBasedIndex 协议中的 1 基索引。
+ * @returns {number} 压力值。
+ */
 function readHandGlovePoint(pressureData, oneBasedIndex) {
   return pressureData[oneBasedIndex - 1] || 0;
 }
 
+/**
+ * 将整包 256 点压力映射成 195 点手部展开矩阵。
+ * @param {number[]} pressureData 256 点压力数组。
+ * @param {'left'|'right'} side 手侧。
+ * @returns {number[]} 195 点手部展开矩阵。
+ */
 function mapHandGloveFullPacketPressure(pressureData, side) {
   const layout = HAND_GLOVE_FULL_PACKET_LAYOUT[side] || HAND_GLOVE_FULL_PACKET_LAYOUT.left;
   const res = new Array(15 * 13).fill(0);
@@ -77,6 +95,11 @@ function mapHandGloveFullPacketPressure(pressureData, side) {
   return res;
 }
 
+/**
+ * 将 195 点手部展开矩阵映射到旧前端使用的 32x32 模型矩阵。
+ * @param {number[]} mappedData 195 点手部展开矩阵。
+ * @returns {number[]} 32x32 模型矩阵。
+ */
 function mapHandGloveFullPacketModelMatrix(mappedData) {
   const sourceData = [...mappedData];
   while (sourceData.length < 195) {
@@ -117,6 +140,12 @@ function mapHandGloveFullPacketModelMatrix(mappedData) {
   return modelData;
 }
 
+/**
+ * 根据协议包类型推断左右手。
+ * @param {number} packetType 协议包类型。
+ * @param {'left'|'right'} fallbackSide 无法识别时使用的手侧。
+ * @returns {'left'|'right'} 手侧。
+ */
 function getHandGloveFullPacketSide(packetType, fallbackSide) {
   if (packetType === 1) {
     return 'right';
@@ -127,6 +156,12 @@ function getHandGloveFullPacketSide(packetType, fallbackSide) {
   return fallbackSide;
 }
 
+/**
+ * 解析触觉手套整包。
+ * @param {Buffer | Uint8Array | number[]} buffer 原始整包数据。
+ * @param {'left'|'right'} fallbackSide 默认手侧。
+ * @returns {{frameIndex:number, packetType:number, side:string, pressureData:number[], imuBytes:number[], mappedData:number[]}} 解析结果。
+ */
 function parseHandGloveFullPacket(buffer, fallbackSide) {
   const bytes = Array.from(buffer);
   const pressureData = bytes.slice(2, 258);

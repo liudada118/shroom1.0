@@ -1,3 +1,9 @@
+/**
+ * 采集配置与磁盘保护服务。
+ *
+ * 负责清洗采集频率/降采样配置、按通道限频判断是否入库，
+ * 以及在采集前检查磁盘剩余空间，避免数据库写满磁盘。
+ */
 const DEFAULT_COLLECTION_FREQUENCY_HZ = 12;
 const MIN_COLLECTION_FREQUENCY_HZ = 1;
 const MAX_COLLECTION_FREQUENCY_HZ = 200;
