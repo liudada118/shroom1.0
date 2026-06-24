@@ -11,12 +11,12 @@
  */
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
-  Card, Button, Input, message,
+  Card, Button, Input, message, Modal,
   Tag, Divider, Row, Col, Typography, Space, Tooltip, Badge, Tabs, Alert
 } from 'antd';
 import {
   SendOutlined, UnlockOutlined, CheckCircleOutlined,
-  SafetyCertificateOutlined, EyeOutlined, SettingOutlined
+  SafetyCertificateOutlined, EyeOutlined, SettingOutlined, LockOutlined
 } from '@ant-design/icons';
 import { decryptStr } from './aesUtil';
 import './License.css';
@@ -263,19 +263,47 @@ const License = () => {
   // ---- WebSocket ----
   const wsRef = useRef(null);
   const [wsConnected, setWsConnected] = useState(false);
-  // 当前授权状态（来自后端广播：在线/离线、剩余天数、校验中、未授权原因）
+  // 当前授权状态（来自后端广播：在线/离线、剩余天数、校验中、未授权原因、锁定）
   const [licenseStatus, setLicenseStatus] = useState(null);
+  // 后台传感器类型 value→中文名映射（首屏从 localStorage 兜底，WS 连上后刷新）
+  const [sensorTypeMap, setSensorTypeMap] = useState(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem('sensorTypeList') || 'null');
+      if (parsed && parsed.map && typeof parsed.map === 'object') return parsed.map;
+    } catch (e) { /* ignore */ }
+    return null;
+  });
+
+  // value→中文名：优先后台动态映射，回退到本地写死 ALL_SENSORS，再回退原样
+  const sensorLabelOf = useCallback((value) => {
+    if (sensorTypeMap && sensorTypeMap[value]) return sensorTypeMap[value];
+    const sensor = ALL_SENSORS.find((s) => s.value === value);
+    return sensor ? sensor.label : value;
+  }, [sensorTypeMap]);
 
   useEffect(() => {
     try {
       const ws = new WebSocket('ws://localhost:19999');
-      ws.onopen = () => setWsConnected(true);
+      ws.onopen = () => {
+        setWsConnected(true);
+        // 主动请求传感器类型清单（请求-应答；主进程连接时也会主动 push 一次）
+        try { ws.send(JSON.stringify({ getSensorTypes: true })); } catch (e) { /* ignore */ }
+      };
       ws.onclose = () => setWsConnected(false);
       ws.onerror = () => setWsConnected(false);
       ws.onmessage = (evt) => {
         let msg;
         try { msg = JSON.parse(evt.data); } catch (e) { return; }
-        if (msg.licenseChecking) {
+        if (msg.sensorTypeList && msg.sensorTypeList.map && typeof msg.sensorTypeList.map === 'object') {
+          // 传感器类型清单：存映射并落地 localStorage 兜底
+          setSensorTypeMap(msg.sensorTypeList.map);
+          try { localStorage.setItem('sensorTypeList', JSON.stringify(msg.sensorTypeList)); } catch (e) { /* ignore */ }
+          return;
+        }
+        if (msg.licenseLocked) {
+          // 锁定（时间回拨/篡改）→ 弹"请联系厂商重新获取密钥"
+          setLicenseStatus({ locked: true, valid: false, error: msg.reason || '检测到异常行为' });
+        } else if (msg.licenseChecking) {
           // 校验中：只显示"校验中…"，不闪红
           setLicenseStatus({ checking: true });
         } else if (msg.licenseType !== undefined && msg.date != null) {
@@ -283,9 +311,11 @@ const License = () => {
           setLicenseStatus({
             checking: !!msg.checking,
             valid: !!msg.valid,
+            locked: false,
             type: msg.licenseType,
             date: msg.date,
             remainingDays: msg.remainingDays,
+            offline: !!msg.offline,
           });
         } else if (msg.licenseError != null) {
           // 未授权 / 校验失败原因（覆盖在状态之上）
@@ -293,6 +323,7 @@ const License = () => {
             ...(prev || {}),
             checking: false,
             valid: false,
+            locked: false,
             error: msg.licenseError,
             noLicense: !!msg.noLicense,
           }));
@@ -376,24 +407,27 @@ const License = () => {
         </div>
       </div>
 
-      {/* 当前授权状态：校验中 / 在线·离线 + 剩余天数 / 未授权原因 */}
+      {/* 当前授权状态：校验中 / 锁定 / 在线·离线(+断网缓存) + 剩余天数 / 未授权原因 */}
       {licenseStatus && (
         <Alert
           style={{ marginBottom: 16 }}
           showIcon
           type={licenseStatus.checking ? 'info' : licenseStatus.valid ? 'success' : 'error'}
+          icon={licenseStatus.locked ? <LockOutlined /> : undefined}
           message={
             licenseStatus.checking
               ? '正在校验授权…'
-              : licenseStatus.valid
-                ? `${licenseStatus.type === 'offline' ? '离线授权' : '在线授权'} · 剩余 ${licenseStatus.remainingDays ?? '—'} 天 · 到期 ${licenseStatus.date ? new Date(licenseStatus.date).toLocaleString() : '—'}`
-                : (licenseStatus.error || '未检测到有效授权')
+              : licenseStatus.locked
+                ? `${licenseStatus.error || '检测到异常行为'}，请联系厂商重新获取密钥`
+                : licenseStatus.valid
+                  ? `${licenseStatus.type === 'offline' ? '离线授权' : '在线授权'}${licenseStatus.offline ? '（断网缓存兜底）' : ''} · 剩余 ${licenseStatus.remainingDays ?? '—'} 天 · 到期 ${licenseStatus.date ? new Date(licenseStatus.date).toLocaleString() : '—'}`
+                  : (licenseStatus.error || '未检测到有效授权')
           }
         />
       )}
 
       <Tabs
-        defaultActiveKey="generate"
+        defaultActiveKey="parse"
         className="license-tabs"
         items={[
           {
@@ -467,10 +501,9 @@ const License = () => {
                           </div>
                           {parseResult.fileDisplay.type !== 'all' && (
                             <div className="parse-types">
-                              {parseResult.fileDisplay.list.map((t) => {
-                                const sensor = ALL_SENSORS.find((s) => s.value === t);
-                                return <Tag key={t} color="blue">{sensor ? sensor.label : t}</Tag>;
-                              })}
+                              {parseResult.fileDisplay.list.map((val) => (
+                                <Tag key={val} color="blue">{sensorLabelOf(val)}</Tag>
+                              ))}
                             </div>
                           )}
                           {parseResult.moduleConfig && Object.keys(parseResult.moduleConfig).length > 0 && (
@@ -480,12 +513,11 @@ const License = () => {
                                 <SettingOutlined style={{ marginRight: 4 }} />功能模块配置：
                               </Text>
                               {Object.entries(parseResult.moduleConfig).map(([sensorVal, moduleVal]) => {
-                                const sensor = ALL_SENSORS.find(s => s.value === sensorVal);
                                 const modules = getModulesForSensor(sensorVal);
                                 const mod = modules.find(m => m.value === moduleVal);
                                 return (
                                   <div key={sensorVal} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                                    <Text style={{ fontSize: 12 }}>{sensor?.label || sensorVal}</Text>
+                                    <Text style={{ fontSize: 12 }}>{sensorLabelOf(sensorVal)}</Text>
                                     <Tag color="purple" icon={<EyeOutlined />} style={{ margin: 0, fontSize: 11 }}>
                                       {mod?.label || moduleVal}
                                     </Tag>
@@ -508,6 +540,28 @@ const License = () => {
           },
         ]}
       />
+
+      {/* 锁定模态框：检测到时间回拨/篡改时弹出，提示联系厂商重新获取密钥 */}
+      <Modal
+        open={!!(licenseStatus && licenseStatus.locked)}
+        title={<span><LockOutlined style={{ color: '#cf1322', marginRight: 8 }} />授权异常</span>}
+        closable={false}
+        maskClosable={false}
+        keyboard={false}
+        okText="确定"
+        cancelButtonProps={{ style: { display: 'none' } }}
+        onOk={() => {
+          setLicenseStatus((prev) => ({ ...(prev || {}), locked: false }));
+          window.location.hash = '#/?from=system';
+        }}
+      >
+        <p style={{ marginBottom: 8 }}>
+          {(licenseStatus && licenseStatus.error) || '检测到异常行为'}。
+        </p>
+        <p style={{ color: '#888' }}>
+          串口连接、数据采集等功能已被禁用。请联系厂商重新获取密钥，点击「确定」前往密钥输入页写入新密钥。
+        </p>
+      </Modal>
     </div>
   );
 };

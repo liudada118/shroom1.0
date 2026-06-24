@@ -125,13 +125,13 @@ function getSensorMatrix(sensorType) {
 // 在线版校时/校状态用。变更服务器地址只改这里，替代旧的 sensor.bodyta.com 调用。
 
 const keyServer = {
-  // 本地联调：密钥管理系统 npm run dev 跑在 localhost:3000
-  // 上线切回：'https://3000-i1umh8p7fltv67u785ozq-b0525e2d.sg1.manus.computer'
-  BASE_URL: 'http://localhost:3000',
-  LICENSE_CHECK_PATH: '/licenseCheck', // POST { key } → { time, valid, status, reason, expireTimestamp, remainingDays, sensorTypes, isAllTypes }
-  SERVER_TIME_PATH: '/serverTime',     // GET → { time: <毫秒> }（备用）
-  POLL_INTERVAL_MS: 2 * 60 * 60 * 1000, // 在线版复检间隔 2h
-  TIMEOUT_MS: 5000,                     // 请求超时，超时即视为取不到 → fail-closed
+  // 线上自部署地址。本地联调改回 http://localhost:3000。
+  BASE_URL: 'http://39.105.83.246:3000',
+  LICENSE_CHECK_PATH: '/licenseCheck',     // POST { key } → { time, valid, status, reason, expireTimestamp, remainingDays, sensorTypes, isAllTypes }
+  SERVER_TIME_PATH: '/serverTime',         // GET → { time: <毫秒> }（备用）
+  CACHE_REFRESH_MS: 2 * 60 * 60 * 1000,    // 在线缓存刷新间隔 2h：超过才真正联网拉 /licenseCheck，否则用缓存
+  RECHECK_INTERVAL_MS: 30 * 1000,          // 运行中复检间隔 30s：尽快检测时间回拨弹锁定（本地校验无网络开销）；到点(2h)才联网刷新
+  TIMEOUT_MS: 5000,                        // /licenseCheck 请求超时
 };
 
 // ─── 压力阈值配置 ─────────────────────────────────────────────────────────────

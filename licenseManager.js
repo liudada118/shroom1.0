@@ -1,70 +1,73 @@
 /**
  * licenseManager.js
- * 授权验证统一模块（验证方）
- *
- * 取代 licenseHelper.js 中失效的授权逻辑（readEndDate/initLicense 等，
- * 它们依赖不存在的 module2.decrypt）。licenseHelper.js 里仍在用的路径函数
- * resolveConfigFile / getConfigFileCandidates / getWritableConfigFile 不在本模块职责内。
+ * 授权验证统一模块（验证方，v2：防回拨 + 在线缓存兜底 + 永久锁定/解锁）
  *
  * 两个授权版本，按密钥格式自动识别：
- *   能 base64→JSON 且含 signature → 离线版（RSA-SHA256 验签 + 防回拨本机时间，全程不联网）
- *   否则按 hex                     → 在线版（ECB 解密拿 file/moduleConfig + 联网 /licenseCheck 校时校状态）
+ *   能 base64→JSON 且含 signature → 离线版（RSA 验签 + 回拨闸 + 本机时间判过期）
+ *   否则按 hex                     → 在线版（ECB 解出 file + /licenseCheck 缓存 + 回拨闸）
  *
- * 在线版：启动 + 每 2h POST {BASE_URL}/licenseCheck { key }，
- *   用返回 time 判过期、valid/status 决定放行；取不到响应即 fail-closed（停用），
- *   绝不回退本机时间——修掉旧的 nowDate=0 "离线永不过期" bug。
- * 离线版：getTrustedNow(主/备锚点) + verifyOfflineLicense（公钥已内置、无机器码）。
- *   rolledBack 不硬停：getTrustedNow 已返回 max(本机,锚点) 的防回拨时间，用它判过期即可防白嫖。
+ * v2 时间闸（crypto-lib.cjs）：
+ *   - 回拨即锁定：本机/服务器时间低于"已见最高可信时间(高水位)"超过容差 → 锁定（不再像 v1 钳制后继续）。
+ *     已取消解锁码机制：锁定后提示"联系厂商重新获取密钥"，写入新密钥时 clearLockState 清除锁定重新校验。
+ *   - 在线缓存兜底：在线密钥缓存服务器时间+状态，每 2h 联网刷新；断网时只要没回拨、
+ *     缓存未过期/未吊销就继续用 —— 网络抖动不会因一次请求失败就锁。
+ *   - 运行中每 5min 复检一次，持续顶高水位（防开着软件不关再回拨时钟）。
+ *
+ * 状态/缓存文件放 userData 下隐藏文件，HMAC 签名，被改字段即判锁定/失效。
  */
 
+const fs = require('fs');
 const path = require('path');
 const logger = require('./logger');
 const config = require('./configManager');
 
-// 在线密钥解密沿用现有 ECB（零改动），用于本地解出 file/moduleConfig。
+// 在线密钥解密沿用现有 ECB，用于本地解出 file/moduleConfig（runtime 配置 + 展示）。
 const ecb = require('./aes_ecb');
 
-// 离线版加密库：容错加载，文件缺失时仅离线版不可用，不影响应用启动。
+// v2 加密库：容错加载，缺失时授权不可用但不崩。
 let cryptoLib = null;
 try {
   cryptoLib = require('./crypto-lib.cjs');
 } catch (err) {
-  logger.warn('[License] crypto-lib.cjs 尚未就绪，离线版暂不可用：' + err.message);
+  logger.warn('[License] crypto-lib.cjs 未就绪：' + err.message);
 }
 
-// ─── 锚点文件路径（防回拨可信时间，离线版用）────────────────────────────────────
-// 主：userData 下隐蔽文件；备：db 目录（启动已创建）。读取大值、写入两份。
-const GUARD_MAIN = path.join(config.APP_DATA_DIR, '.tg.dat');
-const GUARD_BAK = path.join(config.DB_DIR, '.tg.bak');
+// ─── 状态/缓存文件（userData 下隐藏文件）────────────────────────────────────────
+const LIC_STATE = path.join(config.APP_DATA_DIR, '.lic_state'); // 回拨高水位 + 锁定态（HMAC）
+const LIC_CACHE = path.join(config.APP_DATA_DIR, '.lic_cache'); // 在线缓存：服务器时间 + 密钥状态（HMAC）
 
 // ─── 模块内授权状态缓存 ─────────────────────────────────────────────────────────
-// server.js 的各处过期判断统一读 isLicenseValid()，不再各自比较 nowDate < endDate。
 const state = {
   type: null,              // 'online' | 'offline' | null
-  rawKey: null,            // config.txt 原始密钥串（在线轮询复检要用）
-  checking: false,         // 是否正在首检/复检中（前端据此区分"校验中"与"未授权"，避免启动瞬间闪红）
-  valid: false,            // 当前是否放行（默认 false = fail-closed）
-  reason: null,            // 不放行时给前端展示的原因
-  warning: null,           // 轻提示（如检测到时间回拨），不影响放行
-  payload: null,           // 归一化的 { date, file, moduleConfig }，在线/离线通用
-  expireTimestamp: null,   // 到期时间戳（ms）
-  remainingDays: null,     // 剩余天数
-  lastCheckedAt: null,     // 上次成功校验时间（ms：在线=服务器时间，离线=可信时间）
-  sensorTypes: null,       // 授权传感器列表
+  rawKey: null,            // config.txt 原始密钥串
+  checking: false,         // 正在首检/复检中（前端区分"校验中"与"未授权"）
+  valid: false,            // 是否放行（默认 false = fail-closed）
+  locked: false,           // 是否永久锁定（回拨/篡改），需解锁码
+  rolledBack: false,       // 本次是否检测到回拨
+  offline: false,          // 本次是否走断网缓存兜底
+  reason: null,            // 未放行/锁定的展示原因
+  payload: null,           // 归一化 { date, file, moduleConfig }
+  expireTimestamp: null,
+  remainingDays: null,
+  lastCheckedAt: null,
+  sensorTypes: null,
   isAllTypes: false,
 };
 
-let pollTimer = null;
+let recheckTimer = null;
 
 // ─── 内部辅助 ───────────────────────────────────────────────────────────────────
 
-/** 把 state 置为未授权（fail-closed）。extra 可携带已解出的 payload/expireTimestamp 供 UI 展示。 */
+/** 置为未授权（非锁定，如解密失败/格式错误）。 */
 function setInvalid(type, rawKey, reason, extra) {
   state.type = type;
   state.rawKey = rawKey;
+  state.checking = false;
   state.valid = false;
+  state.locked = false;
+  state.rolledBack = false;
+  state.offline = false;
   state.reason = reason;
-  state.warning = null;
   state.payload = (extra && extra.payload) || null;
   state.expireTimestamp = (extra && extra.expireTimestamp) || null;
   state.remainingDays = null;
@@ -72,16 +75,12 @@ function setInvalid(type, rawKey, reason, extra) {
   state.isAllTypes = false;
 }
 
-/** 在线版原始 payload → 归一化 { date, file, moduleConfig }。 */
+/** 在线原始 payload → 归一化 { date, file, moduleConfig }。 */
 function normalizeOnline(p) {
-  return {
-    date: parseFloat(p.date),
-    file: p.file,
-    moduleConfig: p.moduleConfig || null,
-  };
+  return { date: parseFloat(p.date), file: p.file, moduleConfig: p.moduleConfig || null };
 }
 
-/** 离线版校验结果 → 归一化 { date, file, moduleConfig }。把 sensorTypes 还原成 file 形态。 */
+/** 离线校验结果 → 归一化 { date, file, moduleConfig }（sensorTypes 还原成 file 形态）。 */
 function normalizeOffline(r) {
   let file;
   if (r.isAllTypes) {
@@ -94,16 +93,35 @@ function normalizeOffline(r) {
   return { date: r.expireTimestamp, file, moduleConfig: null };
 }
 
-/** /licenseCheck 的 status → 兜底提示文案（服务器未给 reason 时用）。 */
-function statusReason(status) {
-  switch (status) {
-    case 'SUSPENDED': return '密钥已被暂停，请联系供应商';
-    case 'REVOKED': return '密钥已被吊销，请联系供应商';
-    case 'EXPIRED': return '密钥已过期';
-    case 'INVALID': return '密钥无效';
-    case 'UNKNOWN': return '未知密钥';
-    case 'DB_ERROR': return '授权服务异常，请稍后重试';
-    default: return '授权校验未通过';
+/** 把 evaluate* 的结果写入 state。payloadForFile：在线传本地解出的归一化 payload，离线传 normalizeOffline(r) 或 null。 */
+function applyEval(type, rawKey, r, payloadForFile) {
+  state.type = type;
+  state.rawKey = rawKey;
+  state.locked = !!r.locked;
+  state.rolledBack = !!r.rolledBack;
+  state.offline = !!r.offline;
+  state.valid = (r.valid === true) && !r.locked;
+  state.reason = state.valid
+    ? null
+    : (r.reason || (r.locked ? '检测到异常行为，请联系厂商解锁' : '授权未通过'));
+  state.payload = payloadForFile || state.payload;
+  state.expireTimestamp = (r.expireTimestamp != null)
+    ? r.expireTimestamp
+    : (payloadForFile ? payloadForFile.date : null);
+  state.remainingDays = (r.remainingDays != null) ? r.remainingDays : null;
+  state.sensorTypes = r.sensorTypes || null;
+  state.isAllTypes = !!r.isAllTypes;
+  state.lastCheckedAt = Date.now();
+}
+
+/** 统一出日志。 */
+function logOutcome(label) {
+  if (state.locked) {
+    logger.warn(`[License] ${label}授权已锁定：${state.reason}`);
+  } else if (state.valid) {
+    logger.info(`[License] ${label}授权有效，剩余 ${state.remainingDays} 天${state.offline ? '（断网缓存兜底）' : ''}`);
+  } else {
+    logger.warn(`[License] ${label}授权未通过：${state.reason}`);
   }
 }
 
@@ -111,219 +129,24 @@ function statusReason(status) {
 
 /**
  * 识别密钥格式。
- * @param {string} rawKey
  * @returns {'online'|'offline'|'invalid'}
  */
 function identifyKeyType(rawKey) {
   if (!rawKey || typeof rawKey !== 'string' || !rawKey.trim()) return 'invalid';
   const key = rawKey.trim();
-  // 离线：base64 解出 JSON 且含 payload+signature
   try {
     const obj = JSON.parse(Buffer.from(key, 'base64').toString('utf-8'));
     if (obj && obj.payload && obj.signature) return 'offline';
   } catch (e) {
-    /* 非离线格式，继续判 hex */
+    /* 非离线格式 */
   }
-  // 在线：纯 hex 字符串
   if (/^[0-9a-fA-F]+$/.test(key)) return 'online';
   return 'invalid';
 }
 
 /**
- * 在线版：POST {BASE_URL}{LICENSE_CHECK_PATH} { key } 做校时+校状态。
- * @param {string} hexKey
- * @returns {Promise<object|null>} 解析后的响应；网络/超时/解析失败/无 time → null（fail-closed）。
- */
-function fetchLicenseCheck(hexKey) {
-  return new Promise((resolve) => {
-    try {
-      const ks = config.keyServer;
-      const url = new URL(ks.BASE_URL + ks.LICENSE_CHECK_PATH);
-      const lib = url.protocol === 'https:' ? require('https') : require('http');
-      const body = JSON.stringify({ key: hexKey });
-
-      const req = lib.request(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(body),
-        },
-        timeout: ks.TIMEOUT_MS,
-      }, (res) => {
-        let data = '';
-        res.on('data', (chunk) => { data += chunk; });
-        res.on('end', () => {
-          try {
-            const json = JSON.parse(data);
-            // 无 time 字段视为无效响应 → fail-closed
-            if (!json || typeof json.time !== 'number') { resolve(null); return; }
-            resolve(json);
-          } catch (e) {
-            resolve(null);
-          }
-        });
-      });
-
-      req.on('error', (err) => {
-        logger.warn('[License] /licenseCheck 请求失败：' + err.message);
-        resolve(null);
-      });
-      req.on('timeout', () => {
-        req.destroy();
-        logger.warn('[License] /licenseCheck 超时');
-        resolve(null);
-      });
-      req.write(body);
-      req.end();
-    } catch (e) {
-      logger.warn('[License] /licenseCheck 异常：' + e.message);
-      resolve(null);
-    }
-  });
-}
-
-/**
- * 在线版加载：本地 ECB 解出 file/moduleConfig + 调 /licenseCheck 判定，写入 state。
- * @param {string} hexKey
- * @returns {Promise<boolean>} 是否放行
- */
-async function loadOnline(hexKey) {
-  // 1. 本地解密拿 file/moduleConfig（licenseCheck 不返回 moduleConfig）
-  let rawPayload = null;
-  try {
-    const plain = ecb.decryptStr(hexKey);
-    if (plain) rawPayload = JSON.parse(plain);
-  } catch (e) {
-    rawPayload = null;
-  }
-  if (!rawPayload || !rawPayload.date || !rawPayload.file) {
-    setInvalid('online', hexKey, '密钥无效，解密失败');
-    return false;
-  }
-
-  // 2. 联网校验；取不到响应 → fail-closed（仍保留本地解出的 payload 供 UI 展示）
-  const resp = await fetchLicenseCheck(hexKey);
-  if (!resp) {
-    setInvalid('online', hexKey, '无法连接授权服务器，已暂停使用', {
-      payload: normalizeOnline(rawPayload),
-      expireTimestamp: parseFloat(rawPayload.date),
-    });
-    return false;
-  }
-
-  // 3. valid 决定放行；SUSPENDED/REVOKED 立即停用（远程吊销）
-  const blocked = resp.status === 'SUSPENDED' || resp.status === 'REVOKED';
-  const allow = resp.valid === true && !blocked;
-
-  state.type = 'online';
-  state.rawKey = hexKey;
-  state.valid = allow;
-  state.reason = allow ? null : (resp.reason || statusReason(resp.status));
-  state.warning = null;
-  state.payload = normalizeOnline(rawPayload);
-  state.expireTimestamp = (resp.expireTimestamp != null) ? resp.expireTimestamp : parseFloat(rawPayload.date);
-  state.remainingDays = (resp.remainingDays != null) ? resp.remainingDays : null;
-  state.sensorTypes = resp.sensorTypes || null;
-  state.isAllTypes = !!resp.isAllTypes;
-  state.lastCheckedAt = resp.time; // 上次成功校验（服务器时间）
-
-  if (allow) {
-    logger.info(`[License] 在线授权有效，剩余 ${state.remainingDays} 天`);
-  } else {
-    logger.warn(`[License] 在线授权未通过：status=${resp.status} reason=${state.reason}`);
-  }
-  return allow;
-}
-
-/**
- * 防回拨可信时间（主/备锚点）：读两份取较大值对齐主文件，调 getTrustedNow，再补写备份。
- * @returns {{ now:number, rolledBack:boolean }}
- */
-function trustedNowWithBackup() {
-  if (!cryptoLib) return { now: 0, rolledBack: true };
-
-  const a = cryptoLib.readTimeAnchor(GUARD_MAIN);
-  const b = cryptoLib.readTimeAnchor(GUARD_BAK);
-  const maxAnchor = Math.max(a || 0, b || 0);
-  // 用较大锚点对齐主文件，避免某一份落后导致 getTrustedNow 取到更小的时间
-  if (maxAnchor > (a || 0)) {
-    cryptoLib.writeTimeAnchor(GUARD_MAIN, maxAnchor);
-  }
-
-  const { now, rolledBack } = cryptoLib.getTrustedNow(GUARD_MAIN);
-  // getTrustedNow 已写主文件，这里把可信时间补写到备份，保持两份一致
-  cryptoLib.writeTimeAnchor(GUARD_BAK, now);
-  return { now, rolledBack };
-}
-
-/**
- * 离线版加载：可信时间 + RSA 验签判定，写入 state。公钥已内置，无机器码。
- * @param {string} code - base64 的 { payload, signature }
- * @returns {boolean} 是否放行
- */
-function loadOffline(code) {
-  if (!cryptoLib) {
-    setInvalid('offline', code, '离线校验库(crypto-lib.cjs)未就绪');
-    return false;
-  }
-
-  const { now, rolledBack } = trustedNowWithBackup();
-  if (rolledBack) {
-    // 不硬停：now 已是防回拨时间，用它判过期足够防白嫖；回拨可能是改时区/NTP 校时等正常操作
-    logger.warn('[License] 检测到本机时间被回拨，已用防回拨时间判过期');
-  }
-
-  const r = cryptoLib.verifyOfflineLicense(code, { nowMs: now });
-
-  state.type = 'offline';
-  state.rawKey = code;
-  state.valid = r.valid === true;
-  state.reason = state.valid ? null : (r.error || '离线授权无效');
-  state.warning = rolledBack ? '检测到系统时间曾被回拨，已按可信时间校验' : null;
-  state.payload = state.valid ? normalizeOffline(r) : null;
-  state.expireTimestamp = r.expireTimestamp || null;
-  state.remainingDays = (r.remainingDays != null) ? r.remainingDays : null;
-  state.sensorTypes = r.sensorTypes || null;
-  state.isAllTypes = !!r.isAllTypes;
-  state.lastCheckedAt = now;
-
-  if (state.valid) {
-    logger.info(`[License] 离线授权有效，剩余 ${state.remainingDays} 天`);
-  } else {
-    logger.warn('[License] 离线授权未通过：' + state.reason);
-  }
-  return state.valid;
-}
-
-/**
- * 启动/写入时按格式分流加载。旧 config.txt（老 ECB 在线密钥）走在线版，零兼容分支。
- * 注意：在线版的 2h 轮询由调用方（server.js）在加载后据 getState().type 启动。
- * @param {string} rawKey
- * @returns {Promise<boolean>} 是否放行
- */
-async function loadFromKey(rawKey) {
-  state.checking = true;
-  try {
-    const type = identifyKeyType(rawKey);
-    if (type === 'offline') {
-      stopOnlinePolling();
-      return loadOffline(rawKey.trim());
-    }
-    if (type === 'online') {
-      return await loadOnline(rawKey.trim());
-    }
-    setInvalid(null, rawKey, '密钥格式无法识别');
-    return false;
-  } finally {
-    state.checking = false;
-  }
-}
-
-/**
- * 同步预取 payload（仅供启动时配置 db/串口用）：不联网、不判有效性。
- * 在线版本地 ECB 解密；离线版 RSA 验签通过才取 payload（签名无效返回 null，不信任伪造内容）。
- * @param {string} rawKey
- * @returns {{ type:'online'|'offline', payload:{date:number,file:any,moduleConfig:any} }|null}
+ * 同步预取 payload（仅供启动时配置 db/串口）：不联网、不判有效性、不动时间闸。
+ * @returns {{ type, payload:{date,file,moduleConfig} }|null}
  */
 function peekPayload(rawKey) {
   const type = identifyKeyType(rawKey);
@@ -340,69 +163,198 @@ function peekPayload(rawKey) {
   }
   if (type === 'offline') {
     if (!cryptoLib) return null;
-    // nowMs 此处不影响 payload 提取；只要签名有效就能拿到 sensorTypes
     const r = cryptoLib.verifyOfflineLicense(rawKey.trim(), { nowMs: 0 });
-    if (!r || !r.sensorTypes) return null; // 签名无效
+    if (!r || !r.sensorTypes) return null;
     return { type, payload: normalizeOffline(r) };
   }
   return null;
 }
 
 /**
- * 启动在线版 2h 轮询复检。每次复检后通过 onChange(state, prevValid) 回调给 server.js 广播。
- * @param {(state:object, prevValid:boolean)=>void} [onChange]
+ * 在线版：POST /licenseCheck { key } 取服务器时间 + 密钥状态。
+ * @returns {Promise<object|null>} 失败/超时/解析失败/无 time → null（走缓存兜底）。
  */
-function startOnlinePolling(onChange) {
-  stopOnlinePolling();
-  pollTimer = setInterval(async () => {
-    if (state.type !== 'online' || !state.rawKey) return;
-    const prevValid = state.valid;
-    await loadOnline(state.rawKey);
-    if (typeof onChange === 'function') {
-      try { onChange(getState(), prevValid); } catch (e) { logger.error('[License] 轮询回调异常', e); }
+function fetchLicenseCheck(hexKey, opts) {
+  opts = opts || {};
+  return new Promise((resolve) => {
+    try {
+      const ks = config.keyServer;
+      const url = new URL(ks.BASE_URL + ks.LICENSE_CHECK_PATH);
+      const lib = url.protocol === 'https:' ? require('https') : require('http');
+      // clientTime 供服务端维护"可信时间高水位"做服务端权威防回拨；tamper=本地已检测到回拨
+      const body = JSON.stringify({ key: hexKey, clientTime: Date.now(), tamper: !!opts.tamper });
+      const req = lib.request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+        timeout: ks.TIMEOUT_MS,
+      }, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          try {
+            const json = JSON.parse(data);
+            if (!json || typeof json.time !== 'number') { resolve(null); return; }
+            resolve(json);
+          } catch (e) { resolve(null); }
+        });
+      });
+      req.on('error', (err) => { logger.warn('[License] /licenseCheck 请求失败：' + err.message); resolve(null); });
+      req.on('timeout', () => { req.destroy(); logger.warn('[License] /licenseCheck 超时'); resolve(null); });
+      req.write(body);
+      req.end();
+    } catch (e) {
+      logger.warn('[License] /licenseCheck 异常：' + e.message);
+      resolve(null);
     }
-  }, config.keyServer.POLL_INTERVAL_MS);
-  if (pollTimer && pollTimer.unref) pollTimer.unref(); // 不阻止进程退出
+  });
 }
 
-/** 停止在线轮询（如重新写入密钥、切到离线版时）。 */
-function stopOnlinePolling() {
-  if (pollTimer) {
-    clearInterval(pollTimer);
-    pollTimer = null;
+/**
+ * 在线版加载：本地 ECB 解出 file/moduleConfig + 缓存感知联网 + evaluateOnlineLicense。
+ * @returns {Promise<boolean>} 是否放行
+ */
+async function loadOnline(hexKey) {
+  if (!cryptoLib) { setInvalid('online', hexKey, '加密库未就绪'); return false; }
+
+  // 1. 本地解密拿 file/moduleConfig
+  let rawPayload = null;
+  try {
+    const plain = ecb.decryptStr(hexKey);
+    if (plain) rawPayload = JSON.parse(plain);
+  } catch (e) { rawPayload = null; }
+  if (!rawPayload || !rawPayload.date || !rawPayload.file) {
+    setInvalid('online', hexKey, '密钥无效，解密失败');
+    return false;
+  }
+
+  // 2. 缓存到期(2h)才真正联网；否则用缓存兜底（省流量、扛网络抖动）。
+  //    本地已锁定时强制联网上报，拿服务端权威状态（即便缓存未到刷新点）。
+  const localLocked = cryptoLib.isLocked(LIC_STATE).locked;
+  const cache = cryptoLib.readOnlineCache(LIC_CACHE);
+  const needFetch = localLocked || cryptoLib.shouldRefreshOnlineCache(cache, Date.now(), config.keyServer.CACHE_REFRESH_MS);
+  const serverResult = needFetch ? await fetchLicenseCheck(hexKey, { tamper: localLocked }) : null;
+
+  // 3. 统一评估（含回拨闸 + 缓存兜底）
+  const r = cryptoLib.evaluateOnlineLicense({ statePath: LIC_STATE, cachePath: LIC_CACHE, serverResult });
+
+  // 4. 服务端权威异常：status=TAMPERED → 视为锁定（弹"请联系厂商重新获取密钥"）。
+  //    覆盖在线分支与缓存兜底分支两种来源。
+  if (r.status === 'TAMPERED') {
+    r.locked = true;
+    r.valid = false;
+    r.reason = r.reason || '检测到系统时间异常，请联系厂商重新获取密钥';
+  }
+
+  applyEval('online', hexKey, r, normalizeOnline(rawPayload));
+  logOutcome('在线');
+  return state.valid;
+}
+
+/**
+ * 离线版加载：回拨闸 + RSA 验签 + 本机时间判过期。
+ * @returns {boolean} 是否放行
+ */
+function loadOffline(code) {
+  if (!cryptoLib) { setInvalid('offline', code, '离线校验库未就绪'); return false; }
+  const r = cryptoLib.evaluateOfflineLicense({ activationCode: code, statePath: LIC_STATE });
+  applyEval('offline', code, r, r.valid ? normalizeOffline(r) : null);
+  logOutcome('离线');
+  return state.valid;
+}
+
+/**
+ * 启动/写入时按格式分流加载。运行期复检由调用方启动 startRuntimeRecheck。
+ * @returns {Promise<boolean>} 是否放行
+ */
+async function loadFromKey(rawKey) {
+  state.checking = true;
+  try {
+    const type = identifyKeyType(rawKey);
+    if (type === 'offline') {
+      return loadOffline(rawKey.trim());
+    }
+    if (type === 'online') {
+      return await loadOnline(rawKey.trim());
+    }
+    setInvalid(null, rawKey, '密钥格式无法识别');
+    return false;
+  } finally {
+    state.checking = false;
   }
 }
 
 /**
- * 统一授权有效性出口。server.js 各处过期判断改调它，替代散落的 nowDate < endDate。
- * @returns {boolean}
+ * 清除锁定/缓存状态：用户写入厂商重新签发的新密钥时调用，让新密钥重新校验。
+ * （已取消解锁码机制，锁定后凭新密钥恢复。）删除 .lic_state（含高水位+锁定）与 .lic_cache。
  */
+function clearLockState() {
+  try { if (fs.existsSync(LIC_STATE)) fs.unlinkSync(LIC_STATE); } catch (e) { logger.warn('[License] 清除锁定状态失败：' + e.message); }
+  try { if (fs.existsSync(LIC_CACHE)) fs.unlinkSync(LIC_CACHE); } catch (e) { /* ignore */ }
+}
+
+/**
+ * 仅清除在线缓存（换在线密钥时调用）。
+ * 缓存不与密钥绑定，换密钥若不清旧缓存，新密钥断网时会沿用旧密钥缓存被判有效 → 必须清掉，
+ * 强制新密钥先联网激活一次。
+ */
+function clearOnlineCache() {
+  try { if (fs.existsSync(LIC_CACHE)) fs.unlinkSync(LIC_CACHE); } catch (e) { /* ignore */ }
+}
+
+/** 当前是否处于锁定态（启动时可用于快速决定弹解锁窗）。 */
+function isLockedNow() {
+  if (!cryptoLib) return { locked: false, reason: '' };
+  return cryptoLib.isLocked(LIC_STATE);
+}
+
+/**
+ * 运行期复检（5min）：持续顶高水位、catch 开机回拨；在线到点(2h)才联网刷新。
+ * 在线/离线都跑。每次复检后回调 onChange(state, prevValid)。
+ */
+function startRuntimeRecheck(onChange) {
+  stopRuntimeRecheck();
+  recheckTimer = setInterval(async () => {
+    if (!state.rawKey) return;
+    const prevValid = state.valid;
+    await loadFromKey(state.rawKey);
+    if (typeof onChange === 'function') {
+      try { onChange(getState(), prevValid); } catch (e) { logger.error('[License] 复检回调异常', e); }
+    }
+  }, config.keyServer.RECHECK_INTERVAL_MS);
+  if (recheckTimer && recheckTimer.unref) recheckTimer.unref();
+}
+
+function stopRuntimeRecheck() {
+  if (recheckTimer) {
+    clearInterval(recheckTimer);
+    recheckTimer = null;
+  }
+}
+
+/** 统一授权有效性出口（锁定时返回 false）。 */
 function isLicenseValid() {
   return state.valid === true;
 }
 
-/** 当前授权状态快照（供 server.js 广播给前端：在线/离线、剩余天数、原因等）。 */
+/** 当前授权状态快照。 */
 function getState() {
   return { ...state };
 }
 
 module.exports = {
-  // 路径常量
-  GUARD_MAIN,
-  GUARD_BAK,
-  // 识别 / 加载
+  LIC_STATE,
+  LIC_CACHE,
   identifyKeyType,
   peekPayload,
   loadFromKey,
   loadOnline,
   loadOffline,
   fetchLicenseCheck,
-  // 时间锚点
-  trustedNowWithBackup,
-  // 轮询
-  startOnlinePolling,
-  stopOnlinePolling,
-  // 状态出口
+  clearLockState,
+  clearOnlineCache,
+  isLockedNow,
+  startRuntimeRecheck,
+  stopRuntimeRecheck,
   isLicenseValid,
   getState,
 };

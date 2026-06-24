@@ -80,6 +80,8 @@ const {
 } = require("./openWeb");
 const { resolveConfigFile, getConfigFileCandidates, getWritableConfigFile } = require('./licenseHelper');
 const licenseManager = require('./licenseManager');
+const sensorTypeStore = require('./sensorTypeStore');
+const appConfig = require('./configManager');
 const { isCar, dedupli, totalToN, } = require("./util");
 const { pressSmallBed } = require("./utilMatrix");
 const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine, pressNew12203131 } = require('./server/mathUtils');
@@ -2934,6 +2936,11 @@ function getDefaultFileFromLicense(licenseFile, fallback = null) {
 function sendLicenseStatusTo(client) {
   if (!client || client.readyState !== WebSocket.OPEN) return;
   const st = licenseManager.getState();
+  // 永久锁定（回拨/篡改）→ 弹解锁窗，需厂商解锁码
+  if (st.locked) {
+    client.send(JSON.stringify({ licenseLocked: true, reason: st.reason || '检测到异常行为，请联系厂商解锁' }));
+    return;
+  }
   if (!st.payload) {
     // 校验中（首检未回）时只发 checking，避免启动瞬间闪红"未授权"
     client.send(JSON.stringify(st.checking
@@ -2950,6 +2957,7 @@ function sendLicenseStatusTo(client) {
     valid: !!st.valid,
     licenseType: st.type,          // 'online' | 'offline'，供前端区分展示
     remainingDays: st.remainingDays,
+    offline: !!st.offline,         // 在线密钥是否走了断网缓存兜底
   };
   if (st.payload.moduleConfig) payload.moduleConfig = st.payload.moduleConfig;
   client.send(JSON.stringify(payload));
@@ -2965,6 +2973,18 @@ function broadcastLicenseStatus() {
   server.clients.forEach(sendLicenseStatusTo);
 }
 
+/** 给单个客户端下发当前传感器类型清单（请求-应答 / 连接时主动 push 都走这）。 */
+function sendSensorTypesTo(client) {
+  if (!client || client.readyState !== WebSocket.OPEN) return;
+  client.send(JSON.stringify({ sensorTypeList: sensorTypeStore.getSnapshot() }));
+}
+
+/** 向所有前端广播传感器类型清单（远程拉取更新后调用）。 */
+function broadcastSensorTypes() {
+  if (!server) return;
+  server.clients.forEach(sendSensorTypesTo);
+}
+
 /** 向所有前端广播一条 licenseError（写入校验失败等即时反馈用）。 */
 function sendLicenseErrorToAll(msg) {
   if (!server) return;
@@ -2975,10 +2995,10 @@ function sendLicenseErrorToAll(msg) {
   });
 }
 
-/** 在线版 2h 复检回调：valid 由 true→false（远程吊销/断网）时通知前端停用。 */
+/** 5min 复检回调：valid 由 true→false（吊销/过期/回拨锁定/断网无缓存）时通知前端停用。 */
 function onLicensePollChange(st, prevValid) {
   if (prevValid && !st.valid) {
-    logger.warn('[License] 在线复检失效，通知前端停止使用：' + (st.reason || ''));
+    logger.warn('[License] 复检失效，通知前端停止使用：' + (st.reason || '') + (st.locked ? '（已锁定）' : ''));
   }
   broadcastLicenseStatus();
 }
@@ -3005,9 +3025,8 @@ if (fs.existsSync(nameTxt)) {
     licenseManager.loadFromKey(startupRawKey)
       .then((ok) => {
         logger.info(`[License] 启动校验完成：valid=${ok} type=${licenseManager.getState().type}`);
-        if (licenseManager.getState().type === 'online') {
-          licenseManager.startOnlinePolling(onLicensePollChange);
-        }
+        // 在线/离线都启动 5min 复检：持续顶高水位、catch 开机后回拨时钟
+        licenseManager.startRuntimeRecheck(onLicensePollChange);
         broadcastLicenseStatus();
       })
       .catch((err) => logger.error('[License] 启动校验异常', err));
@@ -3017,6 +3036,12 @@ if (fs.existsSync(nameTxt)) {
 } else {
   logger.info("[Config] config.txt not found, skip loading license at startup.");
 }
+
+// 后台拉取传感器类型清单：不阻塞启动（getSnapshot 已有缓存/内置兜底可立即下发），
+// 断网时不会白等超时；远程拉到后再广播一次，让已连接前端刷新到最新清单。
+sensorTypeStore.initSensorTypes(appConfig.keyServer.BASE_URL)
+  .then((updated) => { if (updated) broadcastSensorTypes(); })
+  .catch((err) => logger.warn('[SensorTypes] 初始化异常：' + (err && err.message)));
 
 // let db = new sqlite3.Database(`${filePath}/foot.db`);
 // let db1 = new sqlite3.Database(`${filePath}/back.db`);
@@ -3255,6 +3280,8 @@ module.exports = {
 
       // 向新连接的客户端推送当前授权状态（在线/离线、剩余天数、checking、未授权原因）
       sendLicenseStatusTo(ws);
+      // 连接时主动 push 一次传感器类型清单（配合渲染端的请求-应答，避免首屏空列表）
+      sendSensorTypesTo(ws);
 
       ws.on("message", function incoming(message) {
 
@@ -3283,6 +3310,24 @@ module.exports = {
               return;
             }
 
+            // 锁定 / 换密钥处理：
+            //  - 锁定态下重输【同一把】被锁密钥 → 拒绝（必须联系厂商重签新密钥）；
+            //  - 锁定态下写入【不同】新密钥 → clearLockState（清锁 + 清缓存）后重校验；
+            //  - 未锁定但写入【不同】新密钥 → 清旧缓存，强制新密钥先联网激活一次
+            //    （缓存不与密钥绑定，不清的话新密钥断网会沿用旧密钥缓存被误判有效）。
+            const currentKey = licenseManager.getState().rawKey;
+            const sameKey = currentKey && newKey === currentKey;
+            if (licenseManager.isLockedNow().locked) {
+              if (sameKey) {
+                logger.warn('[License] 锁定态下重复输入同一密钥，已拒绝');
+                sendLicenseErrorToAll('该密钥已因系统时间异常被锁定，请联系厂商重新获取新密钥');
+                return;
+              }
+              licenseManager.clearLockState();
+            } else if (!sameKey) {
+              licenseManager.clearOnlineCache();
+            }
+
             // 写入 config.txt（原始密钥串：在线为 hex、离线为 base64 JSON）
             fs.mkdirSync(path.dirname(writableNameTxt), { recursive: true });
             fs.writeFile(writableNameTxt, newKey, err => {
@@ -3304,11 +3349,8 @@ module.exports = {
             const p = licenseManager.loadFromKey(newKey);
             broadcastLicenseStatus();
             p.then(() => {
-              if (licenseManager.getState().type === 'online') {
-                licenseManager.startOnlinePolling(onLicensePollChange);
-              } else {
-                licenseManager.stopOnlinePolling();
-              }
+              // 在线/离线都重启 5min 复检
+              licenseManager.startRuntimeRecheck(onLicensePollChange);
               broadcastLicenseStatus();
             }).catch((err) => logger.error('[License] 写入后校验异常', err));
 
@@ -3316,6 +3358,11 @@ module.exports = {
             logger.error('[License] Invalid license key:', err && err.message);
             sendLicenseErrorToAll('密钥无效，请检查后重新输入');
           }
+        }
+
+        // 传感器类型清单请求-应答（不受授权守卫限制：下拉/密钥页未授权时也要能拿到清单）
+        if (getMessage.getSensorTypes) {
+          sendSensorTypesTo(ws);
         }
 
         if (licenseManager.isLicenseValid()) {

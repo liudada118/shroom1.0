@@ -782,6 +782,15 @@ class Home extends React.Component {
       storedAllowedTypes = null;
     }
 
+    // 上次收到的传感器类型清单（{time,flat,map}）：首屏先用它兜底，避免空列表；WS 连上后会刷新
+    let storedSensorTypeList = null;
+    try {
+      const parsed = JSON.parse(localStorage.getItem('sensorTypeList') || 'null');
+      if (parsed && Array.isArray(parsed.flat)) storedSensorTypeList = parsed;
+    } catch (err) {
+      storedSensorTypeList = null;
+    }
+
     this.state = {
       hand: true,
       matrixName: 'hand0205',//localStorage.getItem('file'),
@@ -801,6 +810,7 @@ class Home extends React.Component {
       portnameSensor: '',
       matrixTitle: localStorage.getItem('matrixTitle') === 'false' ? false : true,
       allowedTypes: storedAllowedTypes,
+      sensorTypeList: storedSensorTypeList,
       local: false,
       dataArr: [],
       index: 0,
@@ -851,6 +861,8 @@ class Home extends React.Component {
       licenseModalType: '',
       licenseModalExpireDate: '',
       licenseModalRemainDays: 0,
+      licenseLockedVisible: false,
+      licenseLockReason: '',
       minzhenSensorInfo: {},
       hz: 12,
       realHz: 0,
@@ -988,6 +1000,8 @@ class Home extends React.Component {
         backClose: true,
         sensorClose: true
       })
+      // 主动请求传感器类型清单（请求-应答；主进程连接时也会主动 push 一次）
+      this.wsSendObj({ getSensorTypes: true })
     };
     ws.onmessage = (e) => {
       this.wsData(e);
@@ -1370,6 +1384,13 @@ class Home extends React.Component {
     let jsonObject = JSON.parse(e.data);
     this.syncSmallBed12BMatrixSize(jsonObject);
 
+    // 传感器类型清单（{time,flat,map}）：存到 state 并落地 localStorage 兜底
+    if (jsonObject.sensorTypeList && Array.isArray(jsonObject.sensorTypeList.flat)) {
+      this.setState({ sensorTypeList: jsonObject.sensorTypeList });
+      try { localStorage.setItem('sensorTypeList', JSON.stringify(jsonObject.sensorTypeList)); } catch (err) { /* ignore */ }
+      return;
+    }
+
     if (jsonObject.collectionStorageError != null) {
       const errorInfo = jsonObject.collectionStorageError || {};
       const text = errorInfo.message || '数据库空间不足，已停止采集';
@@ -1537,6 +1558,14 @@ class Home extends React.Component {
       // itemRefs.current?.forEach((item, index) => {
       //   item.drawHeatmap(z[0], index)
       // })
+    }
+
+    // ====== 授权锁定（时间回拨/篡改）→ 弹"请联系厂商重新获取密钥" ======
+    if (jsonObject.licenseLocked) {
+      this.setState({
+        licenseLockedVisible: true,
+        licenseLockReason: jsonObject.reason || '检测到异常行为',
+      });
     }
 
     // ====== 密钥过期检查 ======
@@ -3913,6 +3942,7 @@ class Home extends React.Component {
             ref={this.title}
             matrixTitle={this.state.matrixTitle}
             allowedTypes={this.state.allowedTypes}
+            sensorTypeList={this.state.sensorTypeList ? this.state.sensorTypeList.flat : null}
             com={this.com}
             track={this.track}
             port={this.state.port}
@@ -5009,6 +5039,29 @@ class Home extends React.Component {
                 <p className="hint">请尽快联系管理员续期，以免影响正常使用。</p>
               </div>
             )}
+          </Modal>
+
+          {/* ====== 授权锁定弹窗（时间回拨/篡改，需厂商解锁码） ====== */}
+          <Modal
+            open={this.state.licenseLockedVisible}
+            centered
+            width={480}
+            closable={false}
+            maskClosable={false}
+            keyboard={false}
+            okText="确定"
+            cancelButtonProps={{ style: { display: 'none' } }}
+            className="license-expired-modal"
+            title={<span>🔒 授权异常</span>}
+            onOk={() => {
+              this.setState({ licenseLockedVisible: false });
+              window.location.hash = '#/?from=system';
+            }}
+          >
+            <div>
+              <p>{this.state.licenseLockReason || '检测到异常行为'}。</p>
+              <p className="hint">串口连接、数据采集等功能已被禁用。请联系厂商重新获取密钥，点击「确定」前往密钥输入页写入新密钥。</p>
+            </div>
           </Modal>
 
       </ConfigProvider>
