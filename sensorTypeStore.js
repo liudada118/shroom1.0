@@ -22,8 +22,8 @@ const config = require('./configManager');
 const CACHE_FILE = path.join(config.APP_DATA_DIR, 'sensorTypes.cache.json');
 const FETCH_TIMEOUT_MS = 5000;
 
-// ─── 内置兜底清单（= 授权页 License.jsx SENSOR_GROUPS 的 24 项，原样搬过来，逐字一致）──────
-// 断网首次安装、无缓存时用它；与原授权清单完全一致，保证"原来有的全都在"。
+// ─── 内置兜底清单（= 后台权威清单 26 项，value 逐字一致；与选择器 Title.jsx allSensorArr 对齐）──────
+// 断网首次安装、无缓存时用它；与授权清单完全一致，保证"原来有的全都在"。
 // 后台「传感器类型管理」新增的类型靠远程/缓存覆盖；本清单是权威基线，不删不改原有项。
 const BUILTIN_GROUPS = [
   {
@@ -31,6 +31,7 @@ const BUILTIN_GROUPS = [
     icon: '⭐',
     items: [
       { label: '手部检测', value: 'hand' },
+      { label: '正常测试', value: 'normal' },
     ],
   },
   {
@@ -77,6 +78,7 @@ const BUILTIN_GROUPS = [
       { label: '14x20高速', value: 'daliegu' },
       { label: '16x16高速', value: 'fast256' },
       { label: '32x32高速', value: 'fast1024' },
+      { label: '64*64高速', value: 'bed4096num' },
       { label: '人体全身', value: 'humanBody' },
     ],
   },
