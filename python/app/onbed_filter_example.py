@@ -45,7 +45,11 @@ extend_runtime_module_paths()
 
 import numpy as np
 import time
-import onbed_filter as ncz
+try:
+    import onbed_filter as ncz
+except Exception as _e:  # onbed_filter 原生库缺失时降级：床垫检测不可用，其余功能正常
+    ncz = None
+    print(f"[onbed] onbed_filter unavailable, bed detection disabled: {_e}", file=sys.stderr)
 
 
 class OnbedFilterProcessor:
@@ -496,7 +500,10 @@ def demo_usage():
 #     demo_usage()
 import time
 import numpy as np
-import onbed_filter as ncz
+try:
+    import onbed_filter as ncz
+except Exception:  # onbed_filter 原生库缺失时降级：床垫检测不可用
+    ncz = None
 import json, traceback
 import importlib
 import importlib.util
@@ -989,7 +996,8 @@ def main():
 
 if __name__ == "__main__":
     configure_stdio_utf8()
-    ncz.initialize()
+    if ncz is not None:
+        ncz.initialize()
     main()
   
     
