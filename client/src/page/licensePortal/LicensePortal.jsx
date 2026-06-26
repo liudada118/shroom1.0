@@ -1,11 +1,10 @@
-import { Modal, message } from 'antd';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { message } from 'antd';
 import {
   CodeOutlined,
   LockOutlined,
   SafetyCertificateOutlined,
 } from '@ant-design/icons';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
 import { decryptStr } from '../license/aesUtil';
 import {
   BRAND_LOGO_SRC,
@@ -13,52 +12,77 @@ import {
   getUnlockedSolutions,
   normalizeLicenseFiles,
   SOLUTIONS,
-} from '../licensePortal/solutionConfig';
-import '../licensePortal/LicensePortal.css';
-import './index.scss';
+} from './solutionConfig';
+import './LicensePortal.css';
 
-export default function Date1() {
-  const nav = useNavigate();
-  const param = useLocation();
-  const wsRef = useRef(null);
-  const isSubmitting = useRef(false);
-  const submittedFilesRef = useRef([]);
-  const [date, setDate] = useState(() => localStorage.getItem('shroomAccessKey') || '');
-  const [loading, setLoading] = useState(false);
+const LicensePortal = () => {
+  const [accessKey, setAccessKey] = useState(() => localStorage.getItem('shroomAccessKey') || '');
   const [wsConnected, setWsConnected] = useState(false);
-  const [licenseReady, setLicenseReady] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [activeSolution, setActiveSolution] = useState('care');
   const [activeModuleBySolution, setActiveModuleBySolution] = useState({});
   const [carouselIndexBySolution, setCarouselIndexBySolution] = useState({});
-  const [messageApi, contextHolder] = message.useMessage();
+  const wsRef = useRef(null);
+  const pendingKeyRef = useRef('');
 
-  const isFromSystem = useMemo(() => {
-    const search = param.search || '';
-    const hash = window.location.hash || '';
-    const href = window.location.href || '';
-    return search.includes('from=system') || search.includes('a=b') ||
-      hash.includes('from=system') || hash.includes('a=b') ||
-      href.includes('from=system') || href.includes('a=b');
-  }, [param.search]);
+  useEffect(() => {
+    try {
+      const ws = new WebSocket('ws://localhost:19999');
+      ws.onopen = () => setWsConnected(true);
+      ws.onclose = () => {
+        setWsConnected(false);
+        setSaving(false);
+        pendingKeyRef.current = '';
+      };
+      ws.onerror = () => {
+        setWsConnected(false);
+        setSaving(false);
+      };
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+
+          if (typeof data.licenseKey === 'string' && data.licenseKey.trim() && !pendingKeyRef.current) {
+            setAccessKey(data.licenseKey);
+            localStorage.setItem('shroomAccessKey', data.licenseKey);
+          }
+
+          if (data.licenseError != null) {
+            if (data.noLicense && !pendingKeyRef.current) {
+              return;
+            }
+            setSaving(false);
+            pendingKeyRef.current = '';
+            message.error(data.licenseError);
+            return;
+          }
+
+          if (pendingKeyRef.current && data.date != null && data.date > 0) {
+            if (typeof data.licenseKey === 'string' && data.licenseKey.trim()) {
+              localStorage.setItem('shroomAccessKey', data.licenseKey);
+            }
+            pendingKeyRef.current = '';
+            setSaving(false);
+            message.success('密钥已保存，并已写入应用配置');
+          }
+        } catch (error) {
+          console.error('解析密钥保存回包失败:', error);
+        }
+      };
+      wsRef.current = ws;
+    } catch (error) {
+      setWsConnected(false);
+    }
+
+    return () => {
+      wsRef.current?.close();
+    };
+  }, []);
 
   const activeSolutionInfo = useMemo(
     () => SOLUTIONS.find((solution) => solution.key === activeSolution) || SOLUTIONS[0],
     [activeSolution]
   );
-  const savedAccessKey = localStorage.getItem('shroomAccessKey') || '';
-  const canEnterSystem = licenseReady && date.trim() && date.trim() === savedAccessKey.trim();
-  const accessActionLabel = loading
-    ? '验证中'
-    : canEnterSystem
-      ? (isFromSystem ? '回到系统' : '进入系统')
-      : '保存';
-
-  const updateUnlockedSolutions = useCallback((files) => {
-    const nextUnlockedSolutions = getUnlockedSolutions(files);
-    if (nextUnlockedSolutions[0]) {
-      setActiveSolution(nextUnlockedSolutions[0]);
-    }
-  }, []);
 
   const handleModuleActivate = useCallback((solutionKey, moduleKey) => {
     setActiveSolution(solutionKey);
@@ -82,149 +106,39 @@ export default function Date1() {
     });
   }, []);
 
-  useEffect(() => {
-    const ws = new WebSocket('ws://127.0.0.1:19999');
-    wsRef.current = ws;
-
-    ws.onopen = () => setWsConnected(true);
-
-    ws.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-
-        if (typeof data.licenseKey === 'string' && data.licenseKey.trim() && !isSubmitting.current) {
-          setDate(data.licenseKey);
-          localStorage.setItem('shroomAccessKey', data.licenseKey);
-        }
-
-        if (data.licenseError != null) {
-          setLoading(false);
-          isSubmitting.current = false;
-          setLicenseReady(false);
-
-          if (!data.noLicense) {
-            Modal.error({
-              title: '密钥错误',
-              content: data.licenseError,
-            });
-          }
-          return;
-        }
-
-        if (data.selectFlag != null) {
-          if (data.selectFlag === 'all') {
-            localStorage.setItem('matrixTitle', true);
-            localStorage.removeItem('allowedTypes');
-          } else if (Array.isArray(data.selectFlag)) {
-            localStorage.setItem('matrixTitle', true);
-            localStorage.setItem('allowedTypes', JSON.stringify(data.selectFlag));
-          } else {
-            localStorage.removeItem('matrixTitle');
-            localStorage.removeItem('allowedTypes');
-          }
-        }
-
-        if (data.date != null && data.date > 0) {
-          setLoading(false);
-          const wasSubmitting = isSubmitting.current;
-          isSubmitting.current = false;
-
-          const serverNow = data.nowDate ? parseFloat(data.nowDate) : window.Date.now();
-          const endDate = parseFloat(data.date);
-          if (endDate <= serverNow) {
-            setLicenseReady(false);
-            if (wasSubmitting) {
-              Modal.error({
-                title: '密钥已过期',
-                content: '该密钥已过期，请输入有效的密钥',
-              });
-            }
-            return;
-          }
-
-          setLicenseReady(true);
-          const validFiles = data.file != null
-            ? normalizeLicenseFiles(data.file)
-            : submittedFilesRef.current;
-          if (validFiles.length || wasSubmitting) {
-            updateUnlockedSolutions(validFiles);
-          }
-
-          if (wasSubmitting) {
-            if (typeof data.licenseKey === 'string' && data.licenseKey.trim()) {
-              localStorage.setItem('shroomAccessKey', data.licenseKey);
-            }
-            messageApi.success('密钥验证成功，可手动进入系统');
-          }
-        }
-      } catch (err) {
-        console.error('解析消息失败:', err);
-      }
-    };
-
-    ws.onerror = () => setWsConnected(false);
-    ws.onclose = () => setWsConnected(false);
-
-    return () => {
-      wsRef.current?.close();
-    };
-  }, [messageApi, updateUnlockedSolutions]);
-
-  const handleSubmit = useCallback(() => {
-    const trimmed = date.trim();
-    if (!trimmed) {
-      Modal.error({
-        title: '密钥错误',
-        content: '密钥不能为空，请输入有效密钥',
-      });
+  const handleSave = useCallback(() => {
+    const key = accessKey.trim();
+    if (!key) {
+      message.warning('请输入访问密钥');
       return;
     }
 
-    let parsedLicense;
+    let decrypted;
     try {
-      parsedLicense = JSON.parse(decryptStr(trimmed));
+      decrypted = JSON.parse(decryptStr(key));
     } catch (error) {
-      Modal.error({
-        title: '密钥错误',
-        content: '密钥验证失败，请检查后重试',
-      });
+      message.error('密钥验证失败，请检查后重试');
       return;
     }
 
-    submittedFilesRef.current = normalizeLicenseFiles(parsedLicense.file);
-    localStorage.setItem('shroomAccessKey', trimmed);
-    setLoading(true);
-    isSubmitting.current = true;
+    const files = normalizeLicenseFiles(decrypted.file);
+    const nextUnlockedSolutions = getUnlockedSolutions(files);
+    if (nextUnlockedSolutions[0]) {
+      setActiveSolution(nextUnlockedSolutions[0]);
+    }
 
-    const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        date: {
-          date: trimmed,
-          startTime: window.Date.now(),
-        },
-      }));
+    localStorage.setItem('shroomAccessKey', key);
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      pendingKeyRef.current = key;
+      setSaving(true);
+      wsRef.current.send(JSON.stringify({ date: { date: key } }));
     } else {
-      setLoading(false);
-      isSubmitting.current = false;
-      Modal.error({
-        title: '连接错误',
-        content: '密钥已保存到本地，但与服务器的连接已断开，暂未写入应用配置',
-      });
+      message.warning('密钥已保存到本地，应用未连接，暂未写入应用配置');
     }
-  }, [date]);
-
-  const handleAccessAction = useCallback(() => {
-    if (canEnterSystem) {
-      nav('/system');
-      return;
-    }
-    handleSubmit();
-  }, [canEnterSystem, handleSubmit, nav]);
+  }, [accessKey]);
 
   return (
     <main className="solution-license-page">
-      {contextHolder}
       <header className="solution-topbar">
         <div className="solution-brand">
           <img alt="" className="solution-logo-img" draggable={false} src={BRAND_LOGO_SRC} />
@@ -345,23 +259,25 @@ export default function Date1() {
         <div className="solution-access-form">
           <input
             aria-label="访问密钥"
-            onChange={(event) => setDate(event.target.value.trim())}
+            onChange={(event) => setAccessKey(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter') handleAccessAction();
+              if (event.key === 'Enter') handleSave();
             }}
             placeholder="请输入访问密钥"
             type="text"
-            value={date}
+            value={accessKey}
           />
-          <button type="button" onClick={handleAccessAction} disabled={loading}>
-            {accessActionLabel}
+          <button type="button" onClick={handleSave} disabled={saving}>
+            {saving ? '保存中' : '保存'}
           </button>
         </div>
         <div className="solution-access-note">
           <LockOutlined />
-          密钥验证通过后，将解锁对应方案内容，请手动进入系统
+          密钥验证通过后，将自动加载并解锁对应方案内容
         </div>
       </section>
     </main>
   );
-}
+};
+
+export default LicensePortal;

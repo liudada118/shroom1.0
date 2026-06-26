@@ -105,6 +105,7 @@ const HAND_0205_DOUBLE_MATRIX = 'hand0205Double'
 const MINZHEN_MATRIX = 'minzhen'
 const SMALL_BED_NO_ALG_MATRIX = 'smallBedNoAlg'
 const SMALL_BED_12B_MATRIX = 'smallBed12B'
+const MAT_COL_MATRIX = 'matCol'
 const FULL_PACKET_GLOVE_MODES = ['num', 'numoriginal']
 const WHOLE_CHAIR_MATRIX = 'wholeChair'
 const HIDDEN_DISPLAY_MATRIX_TYPES = [HAND_0205_DOUBLE_MATRIX]
@@ -400,7 +401,7 @@ const petCareMatrixArr = ['petCare', 'petCareMini']
 const isPetCareMatrix = (type) => petCareMatrixArr.includes(type)
 const tempFullBedMatrix = 'tempFullBed'
 const bedArr = ['jqbed', tempFullBedMatrix, ...petCareMatrixArr, 'xiyueReal1', 'smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed1']
-const displayRendererConfigMatrixArr = ['smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed12B', WHOLE_CHAIR_MATRIX, MINZHEN_MATRIX, 'jqbed', ...petCareMatrixArr]
+const displayRendererConfigMatrixArr = ['smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed12B', WHOLE_CHAIR_MATRIX, MINZHEN_MATRIX, MAT_COL_MATRIX, 'jqbed', ...petCareMatrixArr]
 const HUMAN_BODY_DEFAULT_COLOR = 1555
 const HUMAN_BODY_DEFAULT_SIZE = 31
 const HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES = [1205, 5000]
@@ -647,6 +648,9 @@ const getDefaultModeForMatrix = (matrixName, currentMode = "normal") => {
     return currentMode === "numoriginal" ? "numoriginal" : "normal";
   }
   if (matrixName === MINZHEN_MATRIX) {
+    return currentMode === "numoriginal" ? "numoriginal" : "normal";
+  }
+  if (matrixName === MAT_COL_MATRIX) {
     return currentMode === "numoriginal" ? "numoriginal" : "normal";
   }
   if (matrixName === "humanBody") {
@@ -4184,13 +4188,15 @@ class Home extends React.Component {
                       changeSelect={this.changeSelect} />
                   </CanvasCom>
                   :
-                  this.state.numMatrixFlag == "numoriginal" && ['hand', 'handSinglePoint', MINZHEN_MATRIX, 'smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed12B'].includes(this.state.matrixName) ?
+                  this.state.numMatrixFlag == "numoriginal" && ['hand', 'handSinglePoint', MINZHEN_MATRIX, 'smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed12B', MAT_COL_MATRIX].includes(this.state.matrixName) ?
                   <>
                     <CanvasCom key={modeCanvasMatrixName} matrixName={modeCanvasMatrixName} local={this.state.local}>
                       <Fast1024
                         ref={this.com}
                         matrixName={this.state.matrixName}
                         size={this.state.matrixName === SMALL_BED_12B_MATRIX && this.state.smallBedMatrixWidth === 16 ? 4 : 2}
+                        matrixWidth={this.state.matrixName === MAT_COL_MATRIX ? 16 : undefined}
+                        matrixHeight={this.state.matrixName === MAT_COL_MATRIX ? 10 : undefined}
                         data={this.data}
                         local={this.state.local}
                         handleChartsBody={this.handleChartsBody.bind(this)}

@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-06-12
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-06-26
 
 ## 1. 项目概述
 
@@ -114,12 +114,17 @@ shroom1.0/
 │       ├── page/            # 页面级组件
 │       │   ├── home/        # 主页（Home.js 3610 行 + HomeFun.js）
 │       │   ├── col/         # 数据采集页
-│       │   ├── date/        # 历史数据页
-│       │   └── license/     # 密钥配置可视化页面
-│       │       ├── License.js    # 密钥生成/解析/管理页面
-│       │       ├── License.css   # 页面样式
-│       │       └── aesUtil.js    # 前端 AES-ECB 加解密工具
+│       │   ├── date/        # 启动密钥输入页（/）
+│       │   ├── license/     # 管理员密钥配置页面
+│       │   │   ├── License.js    # 密钥生成/解析/管理页面（/license-admin）
+│       │   │   ├── License.css   # 页面样式
+│       │   │   └── aesUtil.js    # 前端 AES-ECB 加解密工具
+│       │   └── licensePortal/ # 行业解决方案访问密钥页（/license）
+│       │       ├── LicensePortal.jsx # 密钥输入与行业方案展示页面
+│       │       ├── LicensePortal.css # 独立深色页面样式
+│       │       └── solutionConfig.jsx # 行业方案卡片与授权 key 映射
 │       └── assets/          # 静态资源
+│           ├── 开屏IMG/     # 行业方案体验中心图标图片资源
 │           ├── images/      # 图片资源
 │           ├── json/        # JSON 配置
 │           └── util/        # 前端工具函数
@@ -237,16 +242,20 @@ graph TD
     - `Title.jsx` 的采集入口改为开始采集时弹出配置 Modal；原设置抽屉里的特征标签选择移动到该 Modal，采集频率通过 `colHZ/collectOptions.frequencyHz` 下发。`server.js` 使用每个通道独立的入库时间戳按频率跳帧，避免坐垫、靠背、头枕共用一个 `oldTimeStamp` 互相影响。
     - CSV 导出的最左侧 `seconds` 列使用数据库帧时间戳计算真实相对秒数（当前帧 `timestamp` - 导出首帧 `timestamp`），仅在缺失时间戳时回退到采集频率估算，不再固定按 12Hz 用 `j / 12` 生成。
     - CSV 表头根据前端当前语言自动选择：`Title.jsx` / `useSerialControl.js` 在 `downloadOptions.language` 中传入当前语言；`server.js` 中文模式输出 `秒数/矩阵最大值/时间戳/矩阵大于 0 的点数/矩阵总和/矩阵数据/四元数/温度/平均温度/温度K值` 等中文表头，英文模式继续输出旧版 `seconds/max/time/area/press/data/quaternion/temperatureCelsius/temperatureAvg/temperatureK` 简写表头；所有 CSV 文件开头统一写入 UTF-8 BOM，便于 Windows Excel/WPS 直接双击打开时识别中文；`handSinglePoint` 额外输出 `检测点` / `detectionPoint` 列，取 CSV `data` 矩阵的最后一个点。
+    - `matCol` 停止采集不再自动触发 CSV 下载；采集记录名由“采集名称 + 特征标签1 + 特征标签2 + 时间片”组成，其中特征标签1只追加到文件名后面，`sitCol/matCol` 的 CSV `label` 列由 `server.js` 先去掉末尾时间片，再解析特征标签2 末尾的 `_数字`，并新增 `labelText` / `标签文本` 列记录特征标签2 的完整文本。
     - `smallBed12B` 的 CSV 文件名前缀使用系统简写 `12B`，例如 `12B2026-05-21...csv`；CSV `矩阵总和/press` 与选区矩阵总和按 kPa 压强数据求和并统一保留 1 位小数；其它系统保持既有 `file` 或通道名前缀。
     - 手套类 CSV 导出在保留整体 `data` 矩阵、`清零帧` 和 `quaternion` 姿态列的基础上，额外按左右手原始 256 点位表拆出 `小拇指`、`无名指`、`中指`、`食指`、`大拇指`、`指根`、`手掌` 七个 JSON 数组列；点位表为 1-based，代码读取时减 1 访问数组，`指根` 按小拇指到大拇指顺序写入 5 个弯折点。`hand0205`、`handGlove115200` 和 `handGloveFullPacket` 的 sit/back 导出都会写入这些部位列，但文件名前缀对用户改为左手 `left`、右手 `right`；`hand0205Double` 专用导出改为单个 `触觉手套2...csv` / `glove2...csv`，同一行同时写入左手和右手矩阵、统计、清零帧、四元数与分指数据；触觉足底和 robot 类触觉上衣也会写入 `清零帧`，但不会写入手套部位列。
     - `jqbed`、`smallBed`、`smallBedNoAlg` 与 `smallBed12B` 的原始数据展示和 CSV `data` 列会沿左上-右下对角线转置 32x32 矩阵，即 `(row, col)` 显示/导出为 `(col, row)`，用于匹配小床检测/监测系统原始矩阵方向；`jqbed/smallBed/smallBedNoAlg` 的前端原始 2D 数字矩阵入口仍在 `Num2Doriginal.jsx` 做兜底转置，`smallBed12B` 在 `util.js` 进入 `Fast1024` 前完成转置。
     - `smallBed12B` 的原始数据模式单独复用 `32*32高速` 的 `Fast1024` 渲染组件，进入组件前仍执行 32x32 对角线转置；该模式按压强值保留 1 位小数显示，颜色/数值上限按 `30` 处理，其它系统的原始数字矩阵颜色范围、配色逻辑和渲染组件保持原样。
+    - `matCol` / 小床褥采集新增 `numoriginal` 原始数据模式，复用 `32*32高速` 的 `Fast1024` 彩色数字矩阵渲染；`Home.jsx` 固定传入 `matrixWidth=16`、`matrixHeight=10`，`NumThreeColor1024.jsx` 支持矩形矩阵尺寸后按 16x10 共 160 点居中渲染，旧 32x32/16x16 方阵模式保持默认行为不变。为保持与传感器和 3D 点图方向一致，2D 原始数据展示前会把 `matColLine()` 输出的 16 行 x 10 列矩阵转置为 10 行 x 16 列；`server.js` 的 `matCol` CSV `realData` 导出也执行同一转换。
+    - `matCol` 现在纳入标题栏 `展示设置` 可视化调节范围，支持颜色上限、过滤值和初始过滤值；`Title.jsx` 按 `matCol + 当前展示模式` 独立读写 `valueConfig` 缓存，`Home.jsx` 通过 `syncDisplayRendererConfig()` 在系统切换和模式切换后把当前参数同步给 3D `MatCol` 与原始数据 `Fast1024` 渲染组件。
     - 大体量历史 CSV 下载不再先把所有帧和所有 CSV 行放入数组；`server.js` 使用 `matrix(date,id)` 索引按 `id` 游标分批读取历史帧，并用 `csv-writer` stringifier 写入文件流，覆盖通用 sit/back/head、整椅、大小床、选区标签和触觉手套2合并导出，降低 90 万帧下载时主进程内存压力。导出过程中后端会按批次通过 WebSocket 发送 `csvDownloadProgress`，前端 `Title.jsx` 的 CSV 下载弹窗展示百分比、当前文件、已写行数和多文件序号。
 
 3. **历史数据回放流程**
     - 用户在历史数据页选择记录 → 前端发送 `play` 指令 → `server.js` 从 SQLite 读取历史帧数据 → 按时间间隔逐帧通过 WebSocket 推送 → 前端 `usePlayback` Hook 管理播放状态（播放/暂停/变速/跳帧）。
     - `smallBed12B` 回放兼容 32x32 原始采集和 16x16 缩小采集两种历史格式；`server.js` 会把对象格式历史帧还原为 `sitData` 并携带 `matrixWidth/matrixHeight`，32x32 采集按 32x32 回放，16x16 采集按 16x16 回放，不再把 256 点历史帧扩回 1024 点；`Home.jsx` 默认按标题栏 `展示设置` 初始化 12B 视图尺寸，`Title.jsx` 的回放/历史入口和历史时间选择都会同步 `smallBed12BDisplayOptions` 给后端，`server.js` 的主 WebSocket 与辅助 WebSocket 消息入口都会先应用该设置再处理 `getTime/loadSelectedHistory`，因此历史选择空帧也会按展示设置输出 16x16 或 32x32；前端只根据真实矩阵帧的 `matrixWidth/matrixHeight` 或历史回放帧的 `sitData` 方阵长度同步尺寸，控制/进度/切换清空类 WebSocket 消息不会再把尺寸回退到 32x32，避免默认展示和回放时反复重挂载闪烁。
     - 大体量历史记录（如几十万帧以上）选中时，`server.js` 不再一次性 `SELECT *` 加载全部帧到内存；改为先查询 `COUNT/MIN(id)/MAX(id)` 元信息、建立 `matrix(date,id)` 索引、生成最多约 2000 点的抽样压力/面积曲线，并通过懒加载代理在回放或拖动进度时按当前帧索引读取单帧，避免 90 万帧记录选中和回放时阻塞 Electron 主进程。
+    - 历史记录列表合并时，`util.js` 的 `dedupli()` 会先过滤 `null`、空字符串和非数组输入，并把有效 `date` 统一转成字符串后再判断 `includes()`，避免数据库异常记录触发 Electron 主进程弹错。
 
 4. **授权验证流程**
     - 应用启动 → `licenseHelper.js` 读取外部 `config.txt`（打包后优先读取 exe 同级文件，兼容 `resources/config.txt`，开发态读取项目根目录） → 使用 AES-ECB 解密 → 通过 HTTPS 获取网络时间 → 比对授权有效期 → 若过期则限制功能。
@@ -254,7 +263,10 @@ graph TD
     - 前端 `Title.jsx` 始终展示完整系统类型下拉框，渲染不再受 `matrixTitle` / `allowedTypes` 控制；`Home.jsx` 会清除旧的 `allowedTypes` 本地缓存，并忽略空的 `file` 值，避免密钥类型与实际传感器类型不一致时导致传感器不可选、不可用或当前类型被置空。
 
 6. **密钥配置管理流程**
-    - 管理员访问 `/license` 页面 → 勾选授权的传感器类型（支持分组全选和快捷预设） → 设置有效天数 → 点击生成密钥 → 密钥通过 AES-ECB 加密后可复制分发 → 也可在「密钥解析」标签页粘贴密钥查看授权详情。
+    - 用户启动应用进入 `/` 密钥输入页，或访问 `/license` 页面进入 `LicensePortal` 行业解决方案体验中心；两处都使用同一套行业方案卡片与访问密钥输入样式，输入框先用 `localStorage.shroomAccessKey` 占位，WebSocket 连上后由 `server.js` 读取实际 `config.txt` 并通过 `licenseKey` 回传，前端再以 `config.txt` 内容覆盖输入框默认值。访问密钥输入框使用明文 `text` 输入，模块图标仅在 click/focus 时切换选中状态，鼠标 hover 不再触发高亮切换。用户提交可解密密钥后，前端会立即把密钥保存到本地缓存，再按 `file` 授权范围点亮康养、座椅定制、具身智能方案，并通过 WebSocket `ws://localhost:19999` 发送 `{ date: { date: key } }` 写入应用；`server.js` 会先解析密钥，再把密钥同步写入可写 `config.txt`，通过临时文件 rename 和回读校验确认落盘成功后才广播 `licenseSaved`。根路由 `/` 校验成功后默认停留在密钥页，底部主按钮由“保存”切换为“进入系统”或从系统页返回时的“回到系统”。
+    - `licensePortal/solutionConfig.jsx` 集中导入 `assets/开屏IMG` 中的图标图片，渲染康养、座椅定制、具身智能、定制LAB 四张行业方案卡片和智能床垫、宠物检测、汽车座椅、人体工学椅、触觉手套、智能鞋垫、机器人、足垫、步道模块按钮；根路由 `/` 与 `/license` 复用同一份配置，避免两处页面图标不一致。
+    - 管理员密钥生成/解析页面保留在 `/license-admin`：勾选授权的传感器类型（支持分组全选和快捷预设） → 设置有效天数 → 点击生成密钥 → 密钥通过 AES-ECB 加密后可复制分发 → 也可在「密钥解析」标签页粘贴密钥查看授权详情；「写入应用」按钮会等待后端 `licenseSaved` 回包后才提示写入成功，保存失败时直接展示后端错误。
+    - `/license-admin` 的“定制”分组包含 `matCol` / 小床褥采集；生成密钥时会写入 `file` 授权范围，解析密钥时按同一传感器列表回显名称。
 
 5. **自动更新流程**
     - 应用启动 30 秒后 → `autoUpdater.js` 检查自建服务器 `http://sensor.bodyta.com/shroom1` → 发现新版本后通过 `update-status` IPC 通道通知前端 → 前端 `UpdateNotifier` 组件弹出通知 → 用户点击「下载更新」后通过 `update-command` IPC 通道触发下载 → 下载过程中实时推送进度到前端 → 下载完成后弹窗询问是否立即安装并重启。
@@ -395,6 +407,33 @@ graph TD
 | 2026-06-05 | Codex | Minzhen 3D 点图方向调整 | `client/src/components/three/minzhen.jsx` 仅在 3D 模型模式的点云坐标投影中逆时针旋转 90 度并做左右镜像，原始数据、CSV、左侧统计、串口解析和模型变换保持不变。 |
 | 2026-06-05 | Codex | Minzhen 显示名称改为轮椅 | 前端 `sensorMinzhen` 中文显示名改为“轮椅”、英文显示名改为 `Wheelchair`，授权配置页标签同步为“轮椅”；内部系统 key 仍为 `minzhen`，协议、模型路径和数据链路不变。 |
 | 2026-06-05 | Codex | 32*32(检测点) 下拉顺序调整 | `Title.jsx` 主传感器下拉框中将 `handSinglePoint` / 32*32(检测点) 移到 `fast1024` / 32*32高速 后面，系统 key、授权分组和渲染逻辑保持不变。 |
+| 2026-06-24 | Codex | 小床褥采集入口与授权配置 | `Title.jsx` 主传感器下拉新增 `matCol` / 小床褥采集，`License.jsx` 的“定制”授权分组同步加入 `matCol`，并补齐中英文显示文案和密钥规则文档。 |
+| 2026-06-24 | Codex | matCol 采集停止与标签修正 | `Title.jsx` 取消 `matCol` 停止采集时自动发送 CSV 下载请求，补齐首次进入 `matCol` 时的采集标签下拉默认项；`server.js` 修正 `sitCol/matCol` CSV 标签解析，避免时间戳覆盖标签。 |
+| 2026-06-24 | Codex | 采集特征标签语义调整 | `Title.jsx` 将采集记录名改为“采集名称 + 特征标签1 + 特征标签2”，明确特征标签1只追加到文件名后面；`server.js` 仅把特征标签2 末尾 `_数字` 写入 `sitCol/matCol` CSV 的 `label` 列。 |
+| 2026-06-24 | Codex | CSV 标签文本列 | `sitCol/matCol` CSV 在保留原有数字 `label` 列的基础上新增 `labelText` / `标签文本` 列，记录特征标签2 的完整文本。 |
+| 2026-06-25 | Codex | 历史记录空日期兜底 | `util.js` 的 `dedupli()` 过滤 null/空 date 并兼容非数组输入，避免历史列表合并时对 null 调用 `includes()` 导致 Electron 主进程弹错。 |
+| 2026-06-25 | Codex | 小床褥原始数据 16x10 展示 | `matCol` 新增 `numoriginal` 原始数据模式，`Title.jsx` 显示原始数据切换项，`Home.jsx` 复用 `Fast1024` 并传入 16x10 尺寸，`NumThreeColor1024.jsx` 支持矩形矩阵渲染。 |
+| 2026-06-25 | Codex | 小床褥 2D/CSV 方向统一 | `matCol` 以 3D 点图方向为基准，2D 原始数据和 CSV `realData` 导出都把 `matColLine()` 的 16x10 数据转为 10x16 行优先数组，保证传感器、3D、2D 和 CSV 方向一致。 |
+| 2026-06-25 | Codex | 小床褥 CSV 表头对齐手部检测 | `server.js` 的 `matCol` CSV 导出改用手部检测同款核心表头 `秒数/矩阵最大值/时间戳/矩阵大于0的点数/矩阵总和/矩阵数据`，并继续在末尾追加 `label` / `labelText` 标签列。 |
+| 2026-06-25 | Codex | 密钥行业方案体验页 | 新增 `client/src/page/licensePortal/LicensePortal.jsx` / `LicensePortal.css`，`/license` 切换为深色行业方案访问密钥页，旧密钥配置中心保留到 `/license-admin`。 |
+| 2026-06-25 | Codex | 启动密钥输入页改版 | `client/src/page/date/Date.jsx` 改用行业解决方案体验中心样式，复用 `licensePortal/solutionConfig.jsx` 的卡片配置，保留 WebSocket 校验和过期判断；验证成功后默认停留在当前页，用户手动点击“进入系统”进入 `/system`。 |
+| 2026-06-25 | Codex | 密钥输入页一屏适配 | `LicensePortal.css` 将行业方案体验中心改为 `height: 100vh` 的纵向 flex 布局，并按 1702x940 截图比例设置主内容宽度约 `85.5vw`、方案卡片区约 `48.3vh`、底部密钥框约 `20.2vh`；移动/窄屏仍回退为可滚动布局。 |
+| 2026-06-25 | Codex | matCol 可视化调节 | `Title.jsx` 将 `matCol` 加入展示设置调节组并按 `matCol + 模式` 独立保存颜色、过滤和初始值；`Home.jsx` 将 `matCol` 加入渲染器配置同步名单，切换系统或模式后会把当前配置推送给 3D/原始数据组件。 |
+| 2026-06-25 | Codex | 密钥保存确认修复 | `server.js` 将密钥写入改为同步落盘、临时文件替换和回读校验，失败时广播 `licenseError`；`/`、`/license` 与 `/license-admin` 提交可解密密钥后会立即保存到本地缓存，`/license` 与 `/license-admin` 页面等待 `licenseSaved` 回包后才提示应用配置写入成功。 |
+| 2026-06-25 | Codex | 开屏图标图片替换 | `licensePortal/solutionConfig.jsx` 改为使用 `assets/开屏IMG` 中的图片资源渲染行业方案和模块图标，`/` 与 `/license` 两个密钥页共享同一套图片配置。 |
+| 2026-06-25 | Codex | 密钥输入框读取配置 | `server.js` 在 WebSocket 连接和密钥写入成功回包中下发 `config.txt` 当前加密密钥 `licenseKey`；`/` 与 `/license` 输入框收到后优先使用该值作为默认显示。 |
+| 2026-06-25 | Codex | 密钥页明文输入与模块选择 | `/` 与 `/license` 的访问密钥输入框改为明文显示；模块图标通过 focus/click 切换选中状态。 |
+| 2026-06-25 | Codex | 座椅定制方案分类调整 | `licensePortal/solutionConfig.jsx` 将“汽车定制方案”改为“座椅定制方案”，并恢复第二个模块为“人体工学椅”，与“汽车座椅”并列展示。 |
+| 2026-06-25 | Codex | 密钥页模块图标与宠物检测调整 | `licensePortal/solutionConfig.jsx` 将康养第二个模块从坐垫监测改为 `petCare` / 宠物检测并使用新宠物图标；人体工学椅模块切换到新人体工学椅图标。 |
+| 2026-06-25 | Codex | 定制LAB 方案卡 | `licensePortal/solutionConfig.jsx` 新增“定制LAB”方案卡，包含“足垫”和“步道”两个模块并使用新增图片资源；`LicensePortal.css` 将方案网格扩展为四列并补充青色主题。 |
+| 2026-06-26 | Codex | 密钥页四列布局溢出修复 | `LicensePortal.css` 调整四列方案卡高度、间距、详情区伸缩和解锁状态定位，避免底部说明文案溢出或与“已解锁”状态重叠。 |
+| 2026-06-26 | Codex | 座椅定制标题单行显示 | `solutionConfig.jsx` 恢复“座椅定制方案”完整标题，`LicensePortal.css` 让方案标题保持单行显示，避免四列布局下自动换行。 |
+| 2026-06-26 | Codex | 方案模块三项轮播 | `solutionConfig.jsx` 新增每 3 个模块一页的轮播分组，不足 3 个时补“正在探索”；`/` 与 `/license` 的模块区统一按三列展示，只有超过 3 个模块时才启用 viewport/track/slide 横向轮播，方案标题和描述保持单行。 |
+| 2026-06-26 | Codex | 方案轮播进度与状态精简 | `/` 与 `/license` 的多页方案模块轮播在左右切换下方新增进度条，补位模块文案改为“正在探索”，并移除方案卡片底部“已解锁/等待密钥”状态行。 |
+| 2026-06-26 | Codex | 密钥页标题区视觉调整 | `/` 与 `/license` 的行业方案副标题改为两行居中展示，并在右上系统状态下方新增“SDK 开发中”胶囊状态。 |
+| 2026-06-26 | Codex | 方案探索模块替换 | `solutionConfig.jsx` 将康养、座椅定制、定制LAB 的“正在探索”补位替换为高精密小垫、自适应座椅、握力评估三个真实方案模块，并接入新增图标资源。 |
+| 2026-06-26 | Codex | 密钥页方案区信息层级调整 | `/` 与 `/license` 移除方案卡底部的模块详情说明区，恢复方案标题下方场景描述，并将访问密钥输入面板上移到方案模块区下方居中展示。 |
+| 2026-06-26 | Codex | 密钥页主按钮与模块 hover 调整 | `/` 启动密钥页将“进入系统/回到系统”和“保存”合并为底部同一个主按钮；模块图标取消鼠标 hover 高亮，只保留点击和键盘焦点选中。 |
 | 2026-06-05 | Codex | 32*32(检测点) CSV 命名与检测点列 | `server.js` 中 `handSinglePoint` CSV 下载按语言输出 `检测点...csv` / `detection...csv` 文件名前缀，并在该系统 CSV 中新增 `检测点` / `detectionPoint` 列，值来自 1024 点矩阵最后一个点。 |
 | 2026-06-05 | Codex | 新增 32*32(检测点) | 新增 `handSinglePoint` 系统类型，沿用 `hand` 的单串口 1024 点协议和默认波特率；线序只在后端按用户提供的 1-based 表重排一次，展示、入库和 CSV 下载都使用同一份后端处理后的矩阵；前端复用手部检测 3D 点阵/原始数据展示，并补齐授权页和密钥脚本入口。 |
 | 2026-06-03 | Codex | CSV 表头中英文自适配 | 前端下载请求携带当前 `i18n.language`，后端按语言输出中文表头或旧版英文简写表头；手套部位列和 `清零帧` 也同步跟随语言。 |
@@ -707,6 +746,32 @@ graph TD
 | 2026-06-05 | Codex | 配置变更 | `minzhen` 系统显示名称改为中文“轮椅”/英文 `Wheelchair`，授权页标签同步更新，内部 key、协议和数据链路保持不变。 |
 | 2026-06-05 | Codex | 配置变更 | `minzhen` 3D 模型模式中的压力点图展示坐标改为逆时针旋转 90 度并左右镜像，未改动原始数据展示、CSV、统计或模型本体。 |
 | 2026-06-05 | Codex | 配置变更 | 主传感器下拉框中 `handSinglePoint` / 32*32(检测点) 顺序调整到 `fast1024` / 32*32高速 后方。 |
+| 2026-06-24 | Codex | 配置变更 | 主界面传感器下拉和密钥配置“定制”分组新增 `matCol` / 小床褥采集授权入口。 |
+| 2026-06-24 | Codex | 修复缺陷 | `matCol` 停止采集不再自动下载 CSV，且 `sitCol/matCol` CSV 导出的 `label` 字段改为从采集记录名中稳定解析真实标签。 |
+| 2026-06-24 | Codex | 配置变更 | 采集弹窗中特征标签1改为文件名后缀语义，特征标签2 改为 CSV 标签语义，导出时只记录其下划线后的数字。 |
+| 2026-06-24 | Codex | 配置变更 | `sitCol/matCol` CSV 追加 `labelText` / `标签文本` 列，保留原有 `label` 数字列不变。 |
+| 2026-06-25 | Codex | 修复缺陷 | 历史记录列表合并 `dedupli()` 过滤 null/空 date，避免数据库异常记录触发 `Cannot read properties of null (reading 'includes')`。 |
+| 2026-06-25 | Codex | 新增功能 | `matCol` / 小床褥采集增加原始数据模式，使用 `Fast1024` 以 16x10（宽16高10）矩形矩阵渲染，并在密钥模块配置中明确支持 `numoriginal`。 |
+| 2026-06-25 | Codex | 修复缺陷 | `matCol` 的 2D 原始数据和 CSV `realData` 导出方向改为跟随正确的 3D/传感器方向，避免 2D、CSV 与 3D 不一致。 |
+| 2026-06-25 | Codex | 配置变更 | `matCol` CSV 表头对齐手部检测核心字段，并按转换后的 10x16 矩阵补齐秒数、最大值、时间戳、有效点数和矩阵总和；标签列继续保留在末尾。 |
+| 2026-06-25 | Codex | 配置变更 | `/license` 路由切换到行业解决方案体验中心，支持访问密钥输入、AES 校验和 WebSocket 写入；原密钥配置中心移动到 `/license-admin`。 |
+| 2026-06-25 | Codex | 配置变更 | 根路由 `/` 的启动密钥输入页改为行业解决方案体验中心样式，并与 `/license` 共享方案卡片配置；密钥验证成功后不再自动跳转，改为显示“进入系统”手动入口。 |
+| 2026-06-25 | Codex | 优化调整 | 行业方案体验中心按用户截图比例重排：主内容从原窄版放宽到约 85.5% 视口宽，三张方案卡和底部密钥框使用固定视口比例分配，避免视觉比例失真。 |
+| 2026-06-25 | Codex | 修复缺陷 | 密钥提交后立即写入前端本地缓存并用于下次打开预填；写入应用配置则以后端同步保存 `config.txt` 并回读校验为准，`/license` 和 `/license-admin` 等待 `licenseSaved` 回包后才提示配置写入成功。 |
+| 2026-06-25 | Codex | 配置变更 | 行业方案体验中心的方案卡和模块按钮图标从 Ant Design 图标切换为 `client/src/assets/开屏IMG` 中的图片资源，并通过 `solutionConfig.jsx` 统一供 `/` 与 `/license` 复用。 |
+| 2026-06-25 | Codex | 配置变更 | 密钥输入框默认值改为以后端 `config.txt` 为准：连接建立后后端读取当前配置密钥并通过 `licenseKey` 下发，前端同步填入 `/` 与 `/license` 的输入框。 |
+| 2026-06-25 | Codex | 配置变更 | 密钥输入框由 `password` 改为 `text` 明文显示；行业方案模块按钮通过 focus/click 切换选中状态。 |
+| 2026-06-25 | Codex | 配置变更 | 行业方案卡片文案调整为“座椅定制方案”，下方模块固定为“汽车座椅”和“人体工学椅”。 |
+| 2026-06-25 | Codex | 配置变更 | 康养方案模块由“坐垫监测”改为“宠物检测”，授权 key 改为 `petCare`，并分别使用新增宠物检测和人体工学椅图标文件。 |
+| 2026-06-25 | Codex | 新增功能 | 密钥行业方案页新增“定制LAB”卡片，模块包含“足垫”和“步道”，并使用新增 LAB、足垫、步道与 Shroom 标识图片。 |
+| 2026-06-26 | Codex | 优化调整 | 行业方案体验中心四列卡片布局加高并压缩内部间距，详情区改为自适应高度，“已解锁/等待密钥”状态改为静态底部行，避免覆盖说明文字。 |
+| 2026-06-26 | Codex | 优化调整 | 座椅定制方案卡标题恢复单行展示，避免标题在四列布局下断行。 |
+| 2026-06-26 | Codex | 优化调整 | 行业方案模块区改为每页固定三项，不足三项自动补“正在探索”；刚好一页时静态展示，超过一页时使用横向 track 轮播和上一页/下一页控制。 |
+| 2026-06-26 | Codex | 优化调整 | 行业方案多页轮播在上一页/下一页控件下方新增进度条，卡片底部不再展示“已解锁/等待密钥”状态，补位模块统一显示“正在探索”。 |
+| 2026-06-26 | Codex | 优化调整 | 行业方案体验页标题说明文案拆为两行居中排版，右上角增加“SDK 开发中”状态胶囊并与系统连接状态上下排列。 |
+| 2026-06-26 | Codex | 配置变更 | 行业方案体验页新增高精密小垫、自适应座椅、握力评估模块，分别替换康养、座椅定制、定制LAB 卡片中的“正在探索”补位项。 |
+| 2026-06-26 | Codex | 优化调整 | 行业方案卡片移除底部模块详情说明区，保留标题下方场景描述；访问密钥输入面板恢复标题提示并上移到方案模块区下方居中展示。 |
+| 2026-06-26 | Codex | 优化调整 | 启动密钥页底部操作合并为单个主按钮，验证前显示“保存”，验证后显示“进入系统”，从系统页返回时显示“回到系统”；模块按钮不再响应 hover 高亮。 |
 | 2026-06-05 | Codex | 配置变更 | `handSinglePoint` / 32*32(检测点) CSV 下载文件名前缀改为随语言输出中文 `检测点` 或英文 `detection`，并新增 `检测点` / `detectionPoint` 表头列记录矩阵最后一个点。 |
 | 2026-06-05 | Codex | 新增功能 | 新增 `handSinglePoint` / 32*32(检测点)：串口协议与 `hand` 保持一致，默认 `1000000` 波特率，线序只在后端重排一次，前端展示、采集入库和 CSV 下载复用同一份 1024 点矩阵；前端与授权配置复用手部检测普通 3D/原始数据模式。 |
 | 2026-06-03 | Codex | 配置变更 | CSV 下载表头改为跟随界面语言：中文系统使用中文表头，英文系统保留旧版英文简写表头。 |

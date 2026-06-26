@@ -75,6 +75,11 @@ var animationRequestId
 var materialRef = null // 用于 sitValue 更新纹理
 export default React.forwardRef((props, refs) => {
   const { size = 2 } = props
+  const matrixWidth = Number(props.matrixWidth) || 0;
+  const matrixHeight = Number(props.matrixHeight) || 0;
+  const gridWidth = matrixWidth > 0 ? matrixWidth : 64 / size;
+  const gridHeight = matrixHeight > 0 ? matrixHeight : 64 / size;
+  const worldCellSize = 2 / Math.max(gridWidth, gridHeight);
   const stats = new Stats();
   stats.showPanel(0); // 0: FPS, 1: ms, 2: memory
   // document.body.appendChild(stats.dom);
@@ -437,9 +442,8 @@ export default React.forwardRef((props, refs) => {
     material.toneMapped = false;
     materialRef = material; // 暴露给 sitValue 使用
     // const size = 4
-    const gridSize = 64 / size;
-    const count = gridSize * gridSize;
-    const geometry = new THREE.PlaneGeometry(0.032 * size, 0.032 * size);
+    const count = gridWidth * gridHeight;
+    const geometry = new THREE.PlaneGeometry(worldCellSize * 1.024, worldCellSize * 1.024);
 
     // const geometry = new THREE.PlaneGeometry(0.1, 0.1);
     const uvOffsets = new Float32Array(count * 2);
@@ -448,11 +452,15 @@ export default React.forwardRef((props, refs) => {
     const dummy = new THREE.Object3D();
     // mesh.rotation.x = Math.PI
     for (let i = 0; i < count; i++) {
-      const x = i % gridSize;
-      const y = Math.floor(i / gridSize);
+      const x = i % gridWidth;
+      const y = Math.floor(i / gridWidth);
       // dummy.position.set((x - 31.5) / 32, (y - 31.5) / 32, 0); // 居中
 
-      dummy.position.set((x) / 32 * size, (y) / 32 * size, 0); // 居中
+      dummy.position.set(
+        (x - (gridWidth - 1) / 2) * worldCellSize,
+        (y - (gridHeight - 1) / 2) * worldCellSize,
+        0
+      );
       // dummy.rotation.set(0, Math.PI, 0,)
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
@@ -526,9 +534,13 @@ export default React.forwardRef((props, refs) => {
       animationRequestId = requestAnimationFrame(animate);
       //  = rangeValue/Math.PI/2
       for (let i = 0; i < count; i++) {
-        const x = i % gridSize;
-        const y = Math.floor(i / gridSize);
-        dummy.position.set((x - (32 / size - 0.5)) / 32 * size, (y - (32 / size - 0.5)) / 32 * size, 0); // 居中
+        const x = i % gridWidth;
+        const y = Math.floor(i / gridWidth);
+        dummy.position.set(
+          (x - (gridWidth - 1) / 2) * worldCellSize,
+          (y - (gridHeight - 1) / 2) * worldCellSize,
+          0
+        );
 
         // dummy.position.set((x ) / 32, (y ) / 32, 0);
         dummy.updateMatrix();

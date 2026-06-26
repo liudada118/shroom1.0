@@ -3,14 +3,23 @@
 来源：
 
 - `client/src/page/license/License.jsx`
+- `client/src/page/date/Date.jsx`
+- `client/src/page/licensePortal/LicensePortal.jsx`
+- `client/src/page/licensePortal/solutionConfig.jsx`
 - `client/src/page/license/aesUtil.js`
 - `aes_ecb.js`
 - `server.js`
 - `licenseHelper.js`
 
+## 页面入口
+
+- `/`：应用启动密钥输入页，使用行业解决方案体验中心样式，输入密钥后通过 WebSocket 交给后端验证；验证成功后默认停留在当前页，显示“进入系统”按钮，由用户手动进入 `/system`。
+- `/license`：面向用户的行业解决方案体验中心，只负责输入访问密钥、前端 AES-ECB 校验、展示已解锁方案，并通过 WebSocket 写入应用。
+- `/license-admin`：管理员密钥配置中心，负责生成、复制、写入和解析密钥，沿用 `client/src/page/license/License.jsx`。
+
 ## 密钥生成规则
 
-1. 管理员进入 `/license` 页面，在“生成密钥”页签中选择授权范围。
+1. 管理员进入 `/license-admin` 页面，在“生成密钥”页签中选择授权范围。
 2. 授权范围必须满足二选一：
    - 开启“全部授权”，生成 `file: "all"`。
    - 自定义选择至少 1 个传感器，生成单个 key 或 key 数组。
@@ -49,7 +58,7 @@
 
 ## 密钥写入规则
 
-License 页面点击“写入应用”时，通过 WebSocket `ws://localhost:19999` 发送：
+`/` 启动输入页点击“保存”、`/license` 体验页点击“保存”或 `/license-admin` 管理页点击“写入应用”时，通过 WebSocket `ws://localhost:19999` 发送：
 
 ```json
 {
@@ -162,24 +171,25 @@ License 页面点击“写入应用”时，通过 WebSocket `ws://localhost:199
 | 4 | lab | `bed4096` | OneStep |
 | 5 | 定制 | `smallBedNoAlg` | 小床检测(数据) |
 | 6 | 定制 | `smallBed12B` | 小床检测(12B) |
-| 7 | 定制 | `tempFullBed` | 温度全床系统 |
-| 8 | 定制 | `wholeChair` | 整椅展示 |
-| 9 | 定制 | `minzhen` | 轮椅 |
-| 10 | 精密 | `handSinglePoint` | 32*32(检测点) |
-| 11 | 精密 | `hand0205` | 触觉手套 |
-| 12 | 精密 | `hand0205Double` | 触觉手套2 |
-| 13 | 精密 | `handGlove115200` | 触觉手套(115200) |
-| 14 | 精密 | `handGloveFullPacket` | 触觉手套(整包) |
-| 15 | 精密 | `smallSample` | 10*10小样 |
-| 16 | 精密 | `robot1` | 宇树G1触觉上衣 |
-| 17 | 精密 | `robotSY` | 松延N2触觉上衣 |
-| 18 | 精密 | `robotLCF` | 零次方H1触觉上衣 |
-| 19 | 精密 | `footVideo` | 触觉足底 |
-| 20 | 精密 | `daliegu` | 14x20高速 |
-| 21 | 精密 | `fast256` | 16x16高速 |
-| 22 | 精密 | `fast1024` | 32x32高速 |
-| 23 | 精密 | `humanBody` | 人体全身 |
-| 24 | 关怀 | `petCareMini` | mini看护 |
+| 7 | 定制 | `matCol` | 小床褥采集 |
+| 8 | 定制 | `tempFullBed` | 温度全床系统 |
+| 9 | 定制 | `wholeChair` | 整椅展示 |
+| 10 | 定制 | `minzhen` | 轮椅 |
+| 11 | 精密 | `handSinglePoint` | 32*32(检测点) |
+| 12 | 精密 | `hand0205` | 触觉手套 |
+| 13 | 精密 | `hand0205Double` | 触觉手套2 |
+| 14 | 精密 | `handGlove115200` | 触觉手套(115200) |
+| 15 | 精密 | `handGloveFullPacket` | 触觉手套(整包) |
+| 16 | 精密 | `smallSample` | 10*10小样 |
+| 17 | 精密 | `robot1` | 宇树G1触觉上衣 |
+| 18 | 精密 | `robotSY` | 松延N2触觉上衣 |
+| 19 | 精密 | `robotLCF` | 零次方H1触觉上衣 |
+| 20 | 精密 | `footVideo` | 触觉足底 |
+| 21 | 精密 | `daliegu` | 14x20高速 |
+| 22 | 精密 | `fast256` | 16x16高速 |
+| 23 | 精密 | `fast1024` | 32x32高速 |
+| 24 | 精密 | `humanBody` | 人体全身 |
+| 25 | 关怀 | `petCareMini` | mini看护 |
 
 ## numMatrixFlag 模块 Key/Value
 
@@ -201,6 +211,7 @@ License 页面点击“写入应用”时，通过 WebSocket `ws://localhost:199
 | `handSinglePoint` | 32*32(检测点) | `normal`=3D模型<br>`numoriginal`=原始数据 |
 | `humanBody` | 人体全身 | `skin`=3D皮肤 |
 | `jqbed` | 小床监测 | `normal`=3D模型<br>`numoriginal`=原始数据 |
+| `matCol` | 小床褥采集 | `normal`=3D模型<br>`numoriginal`=原始数据（16x10，宽16高10） |
 | `minzhen` | 轮椅 | `normal`=3D模型<br>`numoriginal`=原始数据 |
 | `petCare` | 宠物看护 | `normal`=3D模型<br>`numoriginal`=原始数据 |
 | `petCareMini` | mini看护 | `normal`=3D模型<br>`numoriginal`=原始数据 |

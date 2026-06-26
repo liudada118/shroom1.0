@@ -1115,6 +1115,7 @@ const CSV_TITLES = {
     zeroFrame: '清零帧',
     detectionPoint: '检测点',
     label: '标签',
+    labelText: '标签文本',
   },
   en: {
     index: 'seconds',
@@ -1135,6 +1136,7 @@ const CSV_TITLES = {
     zeroFrame: 'zeroFrame',
     detectionPoint: 'detectionPoint',
     label: 'label',
+    labelText: 'labelText',
   },
 };
 
@@ -1691,6 +1693,36 @@ logger.info("[Path] writableRoot=", runtimeWritableRoot);
 logger.info("[Path] db=", filePath, "data=", csvPath, "config=", nameTxt);
 logger.info("[Path] configCandidates=", getConfigFileCandidates().join(", "));
 
+function persistLicenseKey(encryptedKey) {
+  const configDir = path.dirname(writableNameTxt);
+  const tempFile = path.join(configDir, `config.txt.tmp-${Date.now()}-${Math.floor(Math.random() * 1e6)}`);
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(tempFile, encryptedKey, 'utf8');
+  fs.renameSync(tempFile, writableNameTxt);
+
+  const savedKey = fs.readFileSync(writableNameTxt, 'utf8').trim();
+  if (savedKey !== encryptedKey) {
+    throw new Error('config.txt write verification failed');
+  }
+
+  nameTxt = writableNameTxt;
+  return writableNameTxt;
+}
+
+function readSavedLicenseKey() {
+  try {
+    const configFile = resolveConfigFile();
+    if (!configFile || !fs.existsSync(configFile)) {
+      return null;
+    }
+    const savedKey = fs.readFileSync(configFile, 'utf8').trim();
+    return savedKey || null;
+  } catch (error) {
+    logger.warn('[License] Failed to read saved license key:', error.message);
+    return null;
+  }
+}
+
 function validateWritableDirectory(targetDir) {
   const dir = String(targetDir || '').trim();
   if (!dir) {
@@ -2203,6 +2235,89 @@ function formatCsvDatePart(value) {
     str = timeStampTo_Date(Number(str));
   }
   return str;
+}
+
+function getCollectionCsvLabelInfo(value) {
+  const datePart = formatCsvDatePart(value);
+  const namePart = datePart.replace(/_\d{4}-\d{1,2}-\d{1,2}-\d{2}-\d{2}-\d{2}-\d+$/, '');
+  if (!namePart || namePart === datePart && /^\d+$/.test(namePart)) return { label: '', labelText: '' };
+  const labelTextMatch = namePart.match(/([^_]+_\d+)$/);
+  const labelText = labelTextMatch ? labelTextMatch[1] : '';
+  const labelMatch = labelText.match(/_(\d+)$/);
+  return {
+    label: labelMatch ? labelMatch[1] : '',
+    labelText,
+  };
+}
+
+function parseCsvMatrixData(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== 'string') return [];
+  try {
+    const parsed = JSON.parse(value || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function transposeMatColToVisualDirection(data) {
+  const source = Array.isArray(data) ? data : [];
+  const sourceWidth = 10;
+  const sourceHeight = 16;
+  if (source.length !== sourceWidth * sourceHeight) {
+    return source;
+  }
+
+  const result = [];
+  for (let row = 0; row < sourceWidth; row++) {
+    for (let col = 0; col < sourceHeight; col++) {
+      result.push(source[col * sourceWidth + row]);
+    }
+  }
+  return result;
+}
+
+function formatMatColCsvRealData(value) {
+  const parsed = parseCsvMatrixData(value);
+  if (!parsed.length) return value;
+  return JSON.stringify(transposeMatColToVisualDirection(parsed));
+}
+
+function buildCollectionCsvHeaders(csvTitle, { includeLabel = true } = {}) {
+  const headers = getDefaultSitCsvHeaders(csvTitle);
+  if (includeLabel) {
+    headers.push(
+      { id: "label", title: csvTitle.label },
+      { id: "labelText", title: csvTitle.labelText },
+    );
+  }
+  return headers;
+}
+
+function buildCollectionCsvRow(row, { absoluteIndex = 0, relativeIndex = 0, baseTimestamp = null } = {}, csvTitle, {
+  transformRealData = (value) => value,
+  label = '',
+  labelText = '',
+} = {}) {
+  const matrixData = parseCsvMatrixData(transformRealData(row?.data));
+  const press = matrixData.reduce((sum, value) => sum + Number(value || 0), 0);
+  const newData = {
+    index: getCsvElapsedSecondsFromBase(row, absoluteIndex, baseTimestamp, relativeIndex),
+    max: matrixData.length ? findMax(matrixData) : 0,
+    time: timeStampToDate(row?.timestamp),
+    pressureArea: matrixData.filter((value) => Number(value) > 0).length,
+    pressure: formatMatrixTotalForFile(press, file),
+    realData: matrixData.length ? JSON.stringify(matrixData) : transformRealData(row?.data),
+  };
+  if (label || labelText) {
+    newData.label = label;
+    newData.labelText = labelText;
+  } else {
+    newData.label = '';
+    newData.labelText = '';
+  }
+  return newData;
 }
 
 function getCsvElapsedSecondsFromBase(row, rowIndex, baseTimestamp, fallbackIndex = 0) {
@@ -2817,23 +2932,33 @@ async function exportHistoryCsvStreaming({ date, csvTitle, csvTargetPath, sendCs
     }
 
     if (file === 'sitCol' || file === 'matCol') {
-      const label = String(date).split('_')[1];
+      const { label, labelText } = getCollectionCsvLabelInfo(date);
       const csvFilePath = csvTargetPath(`${file}${str}.csv`);
       await writeCsvFileInBatches({
         csvFilePath,
-        header: [
-          { id: "realData", title: csvTitle.realData },
-          { id: "label", title: csvTitle.label },
-        ],
+        header: file === 'matCol'
+          ? buildCollectionCsvHeaders(csvTitle)
+          : [
+            { id: "realData", title: csvTitle.realData },
+            { id: "label", title: csvTitle.label },
+            { id: "labelText", title: csvTitle.labelText },
+          ],
         dbRef: db,
         date,
         start: 0,
         end: null,
         onProgress: createProgressReporter(csvFilePath, 1, 1),
-        mapRow: (row) => ({
-          realData: row?.data,
-          label,
-        }),
+        mapRow: (row, meta) => file === 'matCol'
+          ? buildCollectionCsvRow(row, meta, csvTitle, {
+            transformRealData: formatMatColCsvRealData,
+            label,
+            labelText,
+          })
+          : ({
+            realData: row?.data,
+            label,
+            labelText,
+          }),
       });
       files.push(csvFilePath);
       sendCsvSuccess(files);
@@ -3443,6 +3568,7 @@ module.exports = {
       ws.on('close', () => clearInterval(heartbeatInterval));
       // ======================================================
 
+      const savedLicenseKey = readSavedLicenseKey();
       server.clients.forEach(function each(client) {
         /**
          * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
@@ -3450,7 +3576,8 @@ module.exports = {
         const jsonData = JSON.stringify({
           port: serialport,
           file: licenseFile || file,
-          selectFlag: selectFlag
+          selectFlag: selectFlag,
+          licenseKey: savedLicenseKey,
           // length: csvSitData.length,
           // sitData: csvSitData[0], backData: csvBackData[0]
         });
@@ -3466,7 +3593,8 @@ module.exports = {
             date: endDate,
             nowDate: nowDate,
             file: licenseFile || file,
-            selectFlag: selectFlag
+            selectFlag: selectFlag,
+            licenseKey: savedLicenseKey,
           });
           if (client.readyState === WebSocket.OPEN) {
             client.send(jsonData);
@@ -3476,7 +3604,7 @@ module.exports = {
         // 没有有效密钥时，发送错误信息给前端
         server.clients.forEach(function each(client) {
           if (client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify({ licenseError: '未检测到有效密钥，请输入密钥后使用', noLicense: true }));
+            client.send(JSON.stringify({ licenseError: '未检测到有效密钥，请输入密钥后使用', noLicense: true, licenseKey: savedLicenseKey }));
           }
         });
       }
@@ -3521,15 +3649,20 @@ module.exports = {
               return;
             }
 
-            fs.mkdirSync(path.dirname(writableNameTxt), { recursive: true });
-            fs.writeFile(writableNameTxt, date, err => {
-              if (err) {
-                logger.error(err);
-              }
-            });
-            nameTxt = writableNameTxt;
-
             const parsedLicense = JSON.parse(dateRes);
+            try {
+              const savedConfigFile = persistLicenseKey(date);
+              logger.info('[License] License key saved to config file:', savedConfigFile);
+            } catch (saveErr) {
+              logger.error('[License] Failed to save license key:', saveErr.message);
+              server.clients.forEach(function each(client) {
+                if (client.readyState === WebSocket.OPEN) {
+                  client.send(JSON.stringify({ licenseError: `密钥保存失败：${saveErr.message}` }));
+                }
+              });
+              return;
+            }
+
             licenseFile = parsedLicense.file || null;
             selectFlag = getSelectFlagFromLicense(parsedLicense.file);
             // 支持 moduleConfig 字段：各传感器类型的默认功能模块配置
@@ -3549,6 +3682,9 @@ module.exports = {
                 nowDate: nowDate,
                 file: licenseFile || file,
                 selectFlag: selectFlag,
+                licenseSaved: true,
+                configFile: nameTxt,
+                licenseKey: date,
               };
               // 将功能模块配置一并下发给前端
               if (rawModuleConfig) {
@@ -5528,12 +5664,13 @@ module.exports = {
                   logger.error(err);
                 } else {
                   //閹跺﹥妞傞梻?閸樺濮忛棃銏⑿?楠炲啿娼庨崢瀣閺佺増宓乸ush鏉╂矞svWriter鏉╂稖顢戝Ч鍥ㄢ偓?
-                  const label = getMessage.download.split('_')[1]
+                  const { label, labelText } = getCollectionCsvLabelInfo(getMessage.download)
                   if (!rows.length) return;
                   for (var i = 0, j = 0; i < rows.length; i++, j++) {
                     const newData = {
-                      realData: rows[i][`data`],
-                      label: label
+                      realData: formatMatColCsvRealData(rows[i][`data`]),
+                      label: label,
+                      labelText: labelText
                     };
                     csvWriteData.push(newData);
                   }
@@ -5555,6 +5692,7 @@ module.exports = {
                     header: [
                       { id: "realData", title: csvTitle.realData },
                       { id: "label", title: csvTitle.label },
+                      { id: "labelText", title: csvTitle.labelText },
                     ],
                   });
 
@@ -5576,13 +5714,19 @@ module.exports = {
                   logger.error(err);
                 } else {
                   //閹跺﹥妞傞梻?閸樺濮忛棃銏⑿?楠炲啿娼庨崢瀣閺佺増宓乸ush鏉╂矞svWriter鏉╂稖顢戝Ч鍥ㄢ偓?
-                  const label = getMessage.download.split('_')[1]
+                  const { label, labelText } = getCollectionCsvLabelInfo(getMessage.download)
                   if (!rows.length) return;
+                  const baseTimestamp = rows[0]?.timestamp;
                   for (var i = 0, j = 0; i < rows.length; i++, j++) {
-                    const newData = {
-                      realData: rows[i][`data`],
-                      label: label
-                    };
+                    const newData = buildCollectionCsvRow(rows[i], {
+                      absoluteIndex: i,
+                      relativeIndex: j,
+                      baseTimestamp,
+                    }, csvTitle, {
+                      transformRealData: formatMatColCsvRealData,
+                      label,
+                      labelText,
+                    });
                     csvWriteData.push(newData);
                   }
                   // 鐏忓棙鐪归幀鑽ゆ畱閸樺濮忛弫鐗堝祦閸愭瑥鍙?CSV 閺傚洣娆?
@@ -5600,10 +5744,7 @@ module.exports = {
                   const csvFilePath = csvTargetPath(`${file}${str}.csv`);
                   const csvWriter = createUtf8BomCsvWriter({
                     path: csvFilePath, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
-                    header: [
-                      { id: "realData", title: csvTitle.realData },
-                      { id: "label", title: csvTitle.label },
-                    ],
+                    header: buildCollectionCsvHeaders(csvTitle),
                   });
 
                   csvWriter
