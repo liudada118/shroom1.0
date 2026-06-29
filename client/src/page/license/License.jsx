@@ -423,6 +423,19 @@ const License = () => {
                   ? `${licenseStatus.type === 'offline' ? '离线授权' : '在线授权'}${licenseStatus.offline ? '（断网缓存兜底）' : ''} · 剩余 ${licenseStatus.remainingDays ?? '—'} 天 · 到期 ${licenseStatus.date ? new Date(licenseStatus.date).toLocaleString() : '—'}`
                   : (licenseStatus.error || '未检测到有效授权')
           }
+          action={
+            (!licenseStatus.checking && !licenseStatus.valid && !licenseStatus.locked && !licenseStatus.noLicense) ? (
+              <Button
+                size="small"
+                type="primary"
+                onClick={() => {
+                  // 清缓存 + 立刻联网复查：后台续期/恢复后无需重启即时生效
+                  try { wsRef.current && wsRef.current.send(JSON.stringify({ refreshLicense: true })); } catch (e) { /* ignore */ }
+                  setLicenseStatus({ checking: true });
+                }}
+              >重新获取授权</Button>
+            ) : undefined
+          }
         />
       )}
 

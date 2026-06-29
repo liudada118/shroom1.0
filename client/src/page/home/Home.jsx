@@ -1581,10 +1581,23 @@ class Home extends React.Component {
           }
         });
       } else {
-        Modal.error({
-          title: '密钥错误',
-          content: jsonObject.licenseError,
-        });
+        // 过期/暂停/吊销等：给“重新获取授权”按钮，点一下清缓存 + 立刻联网复查
+        //（后台续期或恢复后无需重启即时生效）。用单例避免每次轮询重复弹窗。
+        if (!this._licenseModal) {
+          this._licenseModal = Modal.confirm({
+            title: '授权提示',
+            content: (jsonObject.licenseError || '授权校验未通过') + '。如已在后台续期或恢复，请点击“重新获取授权”。',
+            okText: '重新获取授权',
+            keyboard: false,                                   // 禁 ESC 关闭
+            maskClosable: false,                               // 点遮罩不关
+            cancelButtonProps: { style: { display: 'none' } }, // 隐藏“关闭”：暂停/吊销/过期时不允许关掉继续用
+            onOk: () => {
+              // 点击后清缓存+立刻复查；仍无效会由状态广播再次弹出，恢复有效才不再弹——不留“关了继续用”的口子
+              this._licenseModal = null;
+              this.wsSendObj({ refreshLicense: true });
+            },
+          });
+        }
       }
     }
 

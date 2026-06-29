@@ -3360,6 +3360,27 @@ module.exports = {
           }
         }
 
+        // 「重新获取授权」：前端阻断弹窗点按钮 → 清在线缓存 + 立刻联网复查当前密钥。
+        // 续期/恢复后无需等轮询、无需重启，点一下即时生效；吊销/暂停仍由 30s 复检自动停用。
+        if (getMessage.refreshLicense) {
+          try {
+            const curKey = licenseManager.getState().rawKey;
+            if (!curKey) {
+              sendLicenseErrorToAll('未检测到密钥，请先输入密钥');
+            } else {
+              licenseManager.clearOnlineCache();   // 清缓存 → 强制下次校验真正联网
+              const rp = licenseManager.loadFromKey(curKey);
+              broadcastLicenseStatus();             // 先推「校验中」
+              rp.then(() => {
+                licenseManager.startRuntimeRecheck(onLicensePollChange);
+                broadcastLicenseStatus();           // 推最新结果
+              }).catch((err) => logger.error('[License] 刷新校验异常', err));
+            }
+          } catch (err) {
+            logger.error('[License] refreshLicense 异常：' + (err && err.message));
+          }
+        }
+
         // 传感器类型清单请求-应答（不受授权守卫限制：下拉/密钥页未授权时也要能拿到清单）
         if (getMessage.getSensorTypes) {
           sendSensorTypesTo(ws);
