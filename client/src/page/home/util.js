@@ -45,6 +45,23 @@ const normalizeWholeChairFrame = (data, mapper) => {
   return frame.length === 1024 ? mapper(frame) : frame;
 };
 
+const transposeMatColToVisualDirection = (data) => {
+  const source = Array.isArray(data) ? data : [];
+  const sourceWidth = 10;
+  const sourceHeight = 16;
+  if (source.length !== sourceWidth * sourceHeight) {
+    return source;
+  }
+
+  const result = [];
+  for (let row = 0; row < sourceWidth; row++) {
+    for (let col = 0; col < sourceHeight; col++) {
+      result.push(source[col * sourceWidth + row]);
+    }
+  }
+  return result;
+};
+
 let totalArr = [],
   totalPointArr = [];
 let selectArr = [];
@@ -103,15 +120,16 @@ let welArr = [], timeflag = 0
 const sitModelData = ['二郎腿', '正常',]
 const xyModelData = ['平躺', '侧躺', '侧躺']
 let newArr = new Array(5).fill(0)
-const transposeSquareMatrix = (data, size = 32) => {
-  if (!Array.isArray(data) || data.length !== size * size) {
+const transposeSquareMatrix = (data, size = null) => {
+  const matrixSize = Number(size) || (Array.isArray(data) ? Math.sqrt(data.length) : 0);
+  if (!Array.isArray(data) || !Number.isInteger(matrixSize) || data.length !== matrixSize * matrixSize) {
     return Array.isArray(data) ? [...data] : [];
   }
 
   return data.map((_, index) => {
-    const row = Math.floor(index / size);
-    const col = index % size;
-    return data[col * size + row];
+    const row = Math.floor(index / matrixSize);
+    const col = index % matrixSize;
+    return data[col * matrixSize + row];
   });
 }
 
@@ -2365,9 +2383,12 @@ export const sitTypeEvent = {
     }
   }, smallBedNoAlg({ that, wsPointData, compen }) {
     return this.smallBed({ that, wsPointData, compen });
-  }, smallBed12B({ that, wsPointData }) {
+  }, smallBed12B({ that, wsPointData, jsonObject }) {
     if (that.state.numMatrixFlag == "numoriginal") {
-      that.com.current?.changeWsDataRaw(transposeSquareMatrix(wsPointData));
+      const rawDisplayData = jsonObject?.matrixOrientation === 'transposed'
+        ? [...wsPointData]
+        : transposeSquareMatrix(wsPointData);
+      that.com.current?.changeWsDataRaw(rawDisplayData);
       return;
     }
 
@@ -2564,9 +2585,13 @@ export const sitTypeEvent = {
     // wsPointData = matColLine(wsPointData);
     //     const res = [7,2,2,6,79,5,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,20,28,29,47,54,20,1,1,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,23,152,73,38,83,124,95,5,5,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,27,11,61,124,107,118,18,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,4,22,74,82,81,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,11,4,3,38,51,33,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,52,52,25,39,34,7,2,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,12,19,101,2,2,1,21,171,63,11,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,3,33,1,0,0,13,180,29,8,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,13,2,0,0,12,17,6,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,3,91,56,5,9,131,19,15,6,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,5,3,57,56,24,41,58,10,4,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,6,4,60,64,35,50,55,12,3,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,8,4,50,90,117,85,101,5,4,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,14,8,35,86,78,91,64,0,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
     // const wsPointData1 = matColLine(res)
-    that.com.current?.sitData({
-      wsPointData: wsPointData,
-    });
+    if (that.state.numMatrixFlag == "numoriginal") {
+      that.com.current?.changeWsDataRaw(transposeMatColToVisualDirection(wsPointData));
+    } else {
+      that.com.current?.sitData({
+        wsPointData: wsPointData,
+      });
+    }
   },
   matColPos({ that, wsPointData, press }) {
     // wsPointData = matColLine(wsPointData);

@@ -60,6 +60,7 @@ const SENSOR_GROUPS = [
     items: [
       { label: '小床检测(数据)', value: 'smallBedNoAlg' },
       { label: '小床检测(12B)', value: 'smallBed12B' },
+      { label: '小床褥采集', value: 'matCol' },
       { label: '温度全床系统', value: 'tempFullBed' },
       { label: '整椅展示', value: 'wholeChair' },
       { label: '轮椅', value: 'minzhen' },
@@ -185,6 +186,10 @@ const SENSOR_MODULES = {
     { value: 'normal', label: '3D模型' },
     { value: 'numoriginal', label: '原始数据' },
   ],
+  matCol: [
+    { value: 'normal', label: '3D模型' },
+    { value: 'numoriginal', label: '原始数据' },
+  ],
   tempFullBed: [
     { value: 'normal', label: '3D模型' },
     { value: 'numoriginal', label: '原始数据' },
@@ -268,14 +273,44 @@ const License = () => {
 
   // ---- WebSocket ----
   const wsRef = useRef(null);
+  const pendingSendKeyRef = useRef('');
   const [wsConnected, setWsConnected] = useState(false);
+  const [sendSaving, setSendSaving] = useState(false);
 
   useEffect(() => {
     try {
       const ws = new WebSocket('ws://localhost:19999');
       ws.onopen = () => setWsConnected(true);
-      ws.onclose = () => setWsConnected(false);
-      ws.onerror = () => setWsConnected(false);
+      ws.onclose = () => {
+        setWsConnected(false);
+        setSendSaving(false);
+        pendingSendKeyRef.current = '';
+      };
+      ws.onerror = () => {
+        setWsConnected(false);
+        setSendSaving(false);
+      };
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.licenseError != null) {
+            if (data.noLicense && !pendingSendKeyRef.current) {
+              return;
+            }
+            setSendSaving(false);
+            pendingSendKeyRef.current = '';
+            message.error(data.licenseError);
+            return;
+          }
+          if (pendingSendKeyRef.current && data.licenseSaved) {
+            setSendSaving(false);
+            pendingSendKeyRef.current = '';
+            message.success('密钥已写入应用并保存到配置文件');
+          }
+        } catch (error) {
+          console.warn('License websocket message parse failed', error);
+        }
+      };
       wsRef.current = ws;
     } catch (e) {
       console.warn('WebSocket connect failed', e);
@@ -431,8 +466,10 @@ const License = () => {
       message.error('WebSocket 未连接，请确保应用正在运行');
       return;
     }
+    localStorage.setItem('shroomAccessKey', generatedKey);
+    pendingSendKeyRef.current = generatedKey;
+    setSendSaving(true);
     wsRef.current.send(JSON.stringify({ date: { date: generatedKey } }));
-    message.success('密钥已发送到应用，将立即生效');
   }, [generatedKey]);
 
   // 解析密钥
@@ -779,8 +816,8 @@ const License = () => {
                           <Space style={{ marginTop: 8, width: '100%', justifyContent: 'space-between' }}>
                             <Button icon={<CopyOutlined />} onClick={handleCopy}>复制</Button>
                             <Tooltip title={wsConnected ? '发送密钥到正在运行的应用' : '应用未连接'}>
-                              <Button type="primary" icon={<SendOutlined />} onClick={handleSendToApp} disabled={!wsConnected}>
-                                写入应用
+                              <Button type="primary" icon={<SendOutlined />} onClick={handleSendToApp} disabled={!wsConnected || sendSaving}>
+                                {sendSaving ? '写入中' : '写入应用'}
                               </Button>
                             </Tooltip>
                           </Space>

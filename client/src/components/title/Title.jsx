@@ -32,6 +32,15 @@ const HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES = [20, 60]
 const MINZHEN_NORMAL_DEFAULT_COLOR = 415
 const MINZHEN_RAW_DEFAULT_COLOR = 25
 const MINZHEN_OLD_DEFAULT_COLOR_VALUES = [1205]
+const SMALL_BED_12B_PRESSURE_DEFAULT_COLOR = 25
+const SMALL_BED_12B_PRESSURE_COLOR_MAX = 30
+const SMALL_BED_12B_PRESSURE_DEFAULT_SMOOTH = 2
+const SMALL_BED_12B_OLD_DEFAULT_COLOR_VALUES = [30, 80, 2205, 4000]
+const SMALL_BED_12B_OLD_DEFAULT_SMOOTH_VALUES = [5]
+const SMALL_BED_12B_PRESSURE_DEFAULT_FILTER = 0
+const SMALL_BED_12B_OLD_DEFAULT_FILTER_VALUES = [6]
+const SMALL_BED_12B_PRESSURE_DEFAULT_INIT_FILTER = 0
+const SMALL_BED_12B_OLD_DEFAULT_INIT_FILTER_VALUES = [500]
 
 const canvasToPngBlob = (canvas) => new Promise((resolve) => {
   if (!canvas || typeof canvas.toBlob !== 'function') {
@@ -61,7 +70,7 @@ const configureOneStepPdfMessage = () => {
 // Default config values (same as Home.jsx initConfig)
 const titleInitConfig = {
   bed: { valueg1: 2, valuej1: 1205, valuel1: 5, valuef1: 6, value1: 0.72 },
-  smallBed12B: { valueg1: 2, valuej1: 2205, valuel1: 5, valuef1: 6, value1: 0.1 },
+  smallBed12B: { valueg1: 2, valuej1: SMALL_BED_12B_PRESSURE_DEFAULT_COLOR, valuel1: SMALL_BED_12B_PRESSURE_DEFAULT_SMOOTH, valuef1: SMALL_BED_12B_PRESSURE_DEFAULT_FILTER, value1: 0.1, valuelInit1: SMALL_BED_12B_PRESSURE_DEFAULT_INIT_FILTER },
   wholeChair: { valueg1: 2, valuej1: 25, valuel1: 4, valuef1: 6, value1: 15, valuelInit1: 500 },
   minzhen: { valueg1: 2, valuej1: MINZHEN_NORMAL_DEFAULT_COLOR, valuel1: 5, valuef1: 6, value1: 0.72, valuelInit1: 500 },
   petCare: { valueg1: 2, valuej1: 2900, valuel1: 5, valuef1: 6, value1: 0.7, valuelInit1: 500 },
@@ -91,10 +100,10 @@ const tactileGloveTypes_title = ['hand0205', 'handGlove115200', 'handGloveFullPa
 const fullPacketGloveType_title = 'handGloveFullPacket'
 const calibratableGloveTypes_title = tactileGloveTypes_title.filter((type) => type !== fullPacketGloveType_title)
 const isPetCareMatrixTitle = (type) => petCareMatrixTypes_title.includes(type)
-const bedArr_title = ['bigBed', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'bed4096', 'bed4096num', 'matCol', 'matColPos', 'jqbed', tempFullBedType_title, ...petCareMatrixTypes_title]
+const bedArr_title = ['bigBed', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'bed4096', 'bed4096num', 'matColPos', 'jqbed', tempFullBedType_title, ...petCareMatrixTypes_title]
 const matrixNameToType_title = (type) => type === smallBed12BType_title ? type : isPetCareMatrixTitle(type) ? type : bedArr_title.includes(type) ? 'bed' : type
 const getColorSliderMax = (matrixName) => {
-  if (matrixName === smallBed12BType_title) return 4000
+  if (matrixName === smallBed12BType_title) return SMALL_BED_12B_PRESSURE_COLOR_MAX
   if (isPetCareMatrixTitle(matrixName)) return 5000
   if (matrixName === 'humanBody') return HUMAN_BODY_COLOR_SLIDER_MAX
   return 1000
@@ -161,6 +170,33 @@ const getConfig = ({ sensorType, mode }) => {
     ) {
       mergedConfig.valuej1 = modeDefaultColor
     }
+  }
+  if (
+    realType === smallBed12BType_title &&
+    (
+      Number(mergedConfig.valuej1) > SMALL_BED_12B_PRESSURE_COLOR_MAX ||
+      SMALL_BED_12B_OLD_DEFAULT_COLOR_VALUES.includes(Number(mergedConfig.valuej1))
+    )
+  ) {
+    mergedConfig.valuej1 = SMALL_BED_12B_PRESSURE_DEFAULT_COLOR
+  }
+  if (
+    realType === smallBed12BType_title &&
+    SMALL_BED_12B_OLD_DEFAULT_SMOOTH_VALUES.includes(Number(mergedConfig.valuel1))
+  ) {
+    mergedConfig.valuel1 = SMALL_BED_12B_PRESSURE_DEFAULT_SMOOTH
+  }
+  if (
+    realType === smallBed12BType_title &&
+    SMALL_BED_12B_OLD_DEFAULT_FILTER_VALUES.includes(Number(mergedConfig.valuef1))
+  ) {
+    mergedConfig.valuef1 = SMALL_BED_12B_PRESSURE_DEFAULT_FILTER
+  }
+  if (
+    realType === smallBed12BType_title &&
+    SMALL_BED_12B_OLD_DEFAULT_INIT_FILTER_VALUES.includes(Number(mergedConfig.valuelInit1))
+  ) {
+    mergedConfig.valuelInit1 = SMALL_BED_12B_PRESSURE_DEFAULT_INIT_FILTER
   }
   return mergedConfig
 }
@@ -275,8 +311,11 @@ class Title extends React.Component {
       collectionModalOpen: false,
       collectLabel: '',
       collectFrequencyMode: 'serial',
-      collectMatrixMode: 'raw',
+      collectMatrixMode: '16x16',
       collectSamplePoint: 'topLeft',
+      smallBed12BDisplaySettingsOpen: false,
+      smallBed12BRealtimeMatrixMode: localStorage.getItem('smallBed12BRealtimeMatrixMode') === '16x16' ? '16x16' : '32x32',
+      smallBed12BRealtimeSamplePoint: localStorage.getItem('smallBed12BRealtimeSamplePoint') || 'topLeft',
       pdfLoading: false,
       humanTransform: createDefaultHumanTransform(),
     }
@@ -299,6 +338,18 @@ class Title extends React.Component {
         console.log('setState')
         this.setState({
           items1: ['正常_1', '脊柱侧弯_2', '前倾_3', '驼背_4', '二郎腿_5']
+        })
+      }
+    } else if (this.props.matrixName === 'matCol') {
+      if (localStorage.getItem('sitType1')) {
+        console.log('localSetState')
+        this.setState({
+          items1: ['其他_1', '平躺_2', '侧睡_3', '趴睡_4', '其他_5', ...JSON.parse(localStorage.getItem('sitType1'))]
+        })
+      } else {
+        console.log('setState')
+        this.setState({
+          items1: ['其他_1', '平躺_2', '侧睡_3', '趴睡_4', '其他_5',]
         })
       }
     } else if (this.props.matrixName === 'matColPos') {
@@ -328,6 +379,39 @@ class Title extends React.Component {
     }
   }
 
+  getSmallBed12BDisplayState = () => {
+    if (this.props.matrixName !== smallBed12BType_title) return {};
+    const matrixMode = this.props.smallBed12BRealtimeMatrixMode === '16x16' ? '16x16' : '32x32';
+    const matrixSize = matrixMode === '16x16' ? 16 : 32;
+    return {
+      smallBed12BDisplayOptions: {
+        matrixMode,
+        samplePoint: this.props.smallBed12BRealtimeSamplePoint || 'topLeft',
+      },
+      smallBedMatrixWidth: matrixSize,
+      smallBedMatrixHeight: matrixSize,
+    };
+  }
+
+  withSmallBed12BDisplayOptions = (payload = {}) => {
+    const displayState = this.getSmallBed12BDisplayState();
+    if (!displayState.smallBed12BDisplayOptions) return payload;
+    return {
+      ...payload,
+      smallBed12BDisplayOptions: displayState.smallBed12BDisplayOptions,
+    };
+  }
+
+  withSmallBed12BDisplayState = (state = {}) => {
+    const displayState = this.getSmallBed12BDisplayState();
+    if (!displayState.smallBed12BDisplayOptions) return state;
+    const { smallBed12BDisplayOptions, ...matrixState } = displayState;
+    return {
+      ...state,
+      ...matrixState,
+    };
+  }
+
 
   onClick = (e) => {
     console.log('click ', e.key);
@@ -344,29 +428,29 @@ class Title extends React.Component {
       this.props.changeStateData({ history: 'now', local: false })
     } else if (e.key === 'playback') {
       // this.props.changeLocal(true)
-      this.props.wsSendObj({
+      this.props.wsSendObj(this.withSmallBed12BDisplayOptions({
         local: true,
         history: false
-      })
-      this.props.changeStateData({ history: 'playback', index: 0, local: true })
+      }))
+      this.props.changeStateData(this.withSmallBed12BDisplayState({ history: 'playback', index: 0, local: true }))
 
 
 
     } else {
-      this.props.changeStateData({ history: 'history', index: 0, local: true })
+      this.props.changeStateData(this.withSmallBed12BDisplayState({ history: 'history', index: 0, local: true }))
       // this.props.changeLocal(true)
 
 
       if (this.state.dataTime != '') {
-        this.props.wsSendObj({
+        this.props.wsSendObj(this.withSmallBed12BDisplayOptions({
           local: true,
           history: true
-        })
+        }))
       } else {
-        this.props.wsSendObj({
+        this.props.wsSendObj(this.withSmallBed12BDisplayOptions({
           local: true,
           // history : true
-        })
+        }))
       }
     }
     this.setState({
@@ -726,15 +810,15 @@ class Title extends React.Component {
 
   getCollectionBaseName = () => {
     const manualName = (this.state.collectLabel || '').trim();
-    const featureName = `${this.state.realname || ''}${this.state.realname1 || ''}`.trim();
-    return manualName || featureName;
+    const featureName1 = (this.state.realname || '').trim();
+    const featureName2 = (this.state.realname1 || '').trim();
+    return [manualName, featureName1, featureName2].filter(Boolean).join('_');
   }
 
   openCollectionModal = () => {
     this.setState({
       collectionModalOpen: true,
       collectLabel: this.state.collectLabel || '',
-      collectMatrixMode: this.props.matrixName === smallBed12BType_title ? this.state.collectMatrixMode : 'raw',
     });
   }
 
@@ -745,7 +829,7 @@ class Title extends React.Component {
   stopCollection = () => {
     const flag = this.props.colFlag;
     this.props.wsSendObj({ colHZ: this.state.colHZ, flag });
-    if (this.props.matrixName == 'sitCol' || this.props.matrixName == 'matCol') {
+    if (this.props.matrixName == 'sitCol' && loadData) {
       this.props.wsSendObj({
         colHZ: this.state.colHZ,
         download: loadData,
@@ -766,18 +850,7 @@ class Title extends React.Component {
     const collectOptions = {
       frequencyMode,
       frequencyHz: frequencyMode === 'custom' ? collectHz : null,
-      matrixDownsample: this.props.matrixName === smallBed12BType_title && this.state.collectMatrixMode === '16x16'
-        ? {
-          enabled: true,
-          sourceWidth: 32,
-          sourceHeight: 32,
-          targetWidth: 16,
-          targetHeight: 16,
-          blockWidth: 2,
-          blockHeight: 2,
-          samplePoint: this.state.collectSamplePoint,
-        }
-        : { enabled: false },
+      matrixDownsample: { enabled: false },
     };
     const nextLoadData = baseName
       ? `${baseName}_${timeStampToDateNospace(formattedDate)} ${formattedDate}`
@@ -792,6 +865,8 @@ class Title extends React.Component {
 
     if (nextLoadData) {
       loadData = nextLoadData;
+    } else {
+      loadData = '';
     }
 
     this.props.changeStateData({ colFlag: false });
@@ -800,8 +875,6 @@ class Title extends React.Component {
   }
 
   renderCollectionModal(t) {
-    const isSmallBed12B = this.props.matrixName === smallBed12BType_title;
-
     return (
       <Modal
         className='collectionModal'
@@ -817,7 +890,7 @@ class Title extends React.Component {
           <div>
             <div style={{ marginBottom: 4 }}>采集名称</div>
             <Input
-              placeholder='可不填，默认使用特征标签'
+              placeholder='可不填，后面会追加特征标签1和特征标签2'
               value={this.state.collectLabel}
               onChange={(e) => this.setState({ collectLabel: e.target.value })}
             />
@@ -825,11 +898,11 @@ class Title extends React.Component {
           <div>
             <div style={{ marginBottom: 4 }}>特征标签</div>
             <div className='collectionHelpText'>
-              用来给本次采集记录命名分类，方便后续在历史回放和 CSV 导出时识别；不参与矩阵计算，可不选。
+              特征标签1用于追加到采集文件名后面；特征标签2需使用“名称_数字”格式，数字写入 CSV label 列，完整文本写入新增标签文本列。
             </div>
             <div className='collectionFeatureRow'>
               <div className='collectionFieldLabel'>特征标签1</div>
-              <div className='collectionHelpText'>主标签，建议填写采集对象、实验分组或大类，例如测试人、床垫区域、样本组。</div>
+              <div className='collectionHelpText'>文件名标签，会拼到采集名称后面，建议填写采集对象、实验分组或大类。</div>
               <Select
                 popupClassName='collectionSelectDropdown'
                 style={{ width: '100%' }}
@@ -861,7 +934,7 @@ class Title extends React.Component {
             </div>
             <div className='collectionFeatureRow'>
               <div className='collectionFieldLabel'>特征标签2</div>
-              <div className='collectionHelpText'>副标签，建议填写姿态、动作、状态或场景，例如平躺、左侧躺、坐姿异常。</div>
+              <div className='collectionHelpText'>CSV 标签，导出时“平躺_2”会在 label 列写入 2，并在标签文本列写入平躺_2。</div>
               <Select
                 popupClassName='collectionSelectDropdown'
                 style={{ width: '100%' }}
@@ -924,39 +997,82 @@ class Title extends React.Component {
               </div>
             )}
           </div>
-          {isSmallBed12B ? (
-            <>
-              <div>
-                <div style={{ marginBottom: 4 }}>采集矩阵</div>
-                <Radio.Group
-                  value={this.state.collectMatrixMode}
-                  onChange={(e) => this.setState({ collectMatrixMode: e.target.value })}
-                  optionType='button'
-                  buttonStyle='solid'
-                  options={[
-                    { label: '32x32 原始', value: 'raw' },
-                    { label: '16x16 缩小', value: '16x16' },
-                  ]}
-                />
-              </div>
-              {this.state.collectMatrixMode === '16x16' ? (
-                <div>
-                  <div style={{ marginBottom: 4 }}>2x2 取点位置</div>
-                  <Radio.Group
-                    value={this.state.collectSamplePoint}
-                    onChange={(e) => this.setState({ collectSamplePoint: e.target.value })}
-                    optionType='button'
-                    buttonStyle='solid'
-                    options={[
-                      { label: '左上', value: 'topLeft' },
-                      { label: '右上', value: 'topRight' },
-                      { label: '左下', value: 'bottomLeft' },
-                      { label: '右下', value: 'bottomRight' },
-                    ]}
-                  />
-                </div>
-              ) : null}
-            </>
+        </Space>
+      </Modal>
+    );
+  }
+
+  applySmallBed12BDisplaySettings = (next = {}) => {
+    const matrixMode = next.matrixMode || this.state.smallBed12BRealtimeMatrixMode;
+    const samplePoint = next.samplePoint || this.state.smallBed12BRealtimeSamplePoint;
+    const normalizedMode = matrixMode === '16x16' ? '16x16' : '32x32';
+    const normalizedSamplePoint = samplePoint || 'topLeft';
+    localStorage.setItem('smallBed12BRealtimeMatrixMode', normalizedMode);
+    localStorage.setItem('smallBed12BRealtimeSamplePoint', normalizedSamplePoint);
+    this.setState({
+      smallBed12BRealtimeMatrixMode: normalizedMode,
+      smallBed12BRealtimeSamplePoint: normalizedSamplePoint,
+    });
+    this.props.changeStateData({
+      numMatrixFlag: 'numoriginal',
+      smallBed12BRealtimeMatrixMode: normalizedMode,
+      smallBed12BRealtimeSamplePoint: normalizedSamplePoint,
+      smallBedMatrixWidth: normalizedMode === '16x16' ? 16 : 32,
+      smallBedMatrixHeight: normalizedMode === '16x16' ? 16 : 32,
+    });
+    this.props.wsSendObj({
+      smallBed12BDisplayOptions: {
+        matrixMode: normalizedMode,
+        samplePoint: normalizedSamplePoint,
+      },
+    });
+  }
+
+  renderSmallBed12BDisplaySettings() {
+    return (
+      <Modal
+        className='collectionModal'
+        title='展示设置'
+        open={this.state.smallBed12BDisplaySettingsOpen}
+        okText='确定'
+        cancelText='取消'
+        onOk={() => this.setState({ smallBed12BDisplaySettingsOpen: false })}
+        onCancel={() => this.setState({ smallBed12BDisplaySettingsOpen: false })}
+        destroyOnClose
+      >
+        <Space direction='vertical' style={{ width: '100%' }} size={12}>
+          <div>
+            <div style={{ marginBottom: 4 }}>实时矩阵</div>
+            <Radio.Group
+              value={this.state.smallBed12BRealtimeMatrixMode}
+              onChange={(e) => this.applySmallBed12BDisplaySettings({ matrixMode: e.target.value })}
+              optionType='button'
+              buttonStyle='solid'
+              options={[
+                { label: '32x32', value: '32x32' },
+                { label: '16x16', value: '16x16' },
+              ]}
+            />
+            <div className='collectionHelpText' style={{ marginTop: 8 }}>
+              这里会同时影响实时原始数据展示、采集入库和 CSV 下载矩阵尺寸。
+            </div>
+          </div>
+          {this.state.smallBed12BRealtimeMatrixMode === '16x16' ? (
+            <div>
+              <div style={{ marginBottom: 4 }}>2x2 取点位置</div>
+              <Radio.Group
+                value={this.state.smallBed12BRealtimeSamplePoint}
+                onChange={(e) => this.applySmallBed12BDisplaySettings({ samplePoint: e.target.value })}
+                optionType='button'
+                buttonStyle='solid'
+                options={[
+                  { label: '左上', value: 'topLeft' },
+                  { label: '右上', value: 'topRight' },
+                  { label: '左下', value: 'bottomLeft' },
+                  { label: '右下', value: 'bottomRight' },
+                ]}
+              />
+            </div>
           ) : null}
         </Space>
       </Modal>
@@ -1075,7 +1191,7 @@ class Title extends React.Component {
     const group1 = ['hand', 'handSinglePoint', 'normal', 'footVideo', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, wholeChairType_title, minzhenType_title, 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', 'bed4096', 'bed4096num']; // 3D point scene / WebGL heatmap
     const group2 = ['robot1', 'robotSY', 'robotLCF']; // Robots
     const group3 = tactileGloveTypes_title; // Tactile gloves
-    const group4 = ['fast256', 'fast1024']; // High-speed
+    const group4 = ['fast256', 'fast1024', 'matCol']; // High-speed / compact matrix raw point renderers
 
     // Determine which parameters to show
     let showGuass = false;    // Smoothness
@@ -1452,6 +1568,7 @@ class Title extends React.Component {
       { label: t('sensorJqbed'), value: 'jqbed' },
       { label: t('sensorSmallBedNoAlg'), value: smallBedNoAlgType_title },
       { label: t('sensorSmallBed12B'), value: smallBed12BType_title },
+      { label: t('sensorMatCol'), value: 'matCol' },
       { label: '温度全床系统', value: tempFullBedType_title },
       { label: t('sensorPetCare'), value: 'petCare' },
       { label: t('sensorPetCareMini'), value: 'petCareMini' },
@@ -1666,11 +1783,11 @@ class Title extends React.Component {
             console.log(e);
             this.props.changeStateData({ dataTime: e })
             this.setState({ dataTime: e })
-            this.props.wsSendObj({ getTime: e, index: 0 })
+            this.props.wsSendObj(this.withSmallBed12BDisplayOptions({ getTime: e, index: 0 }))
             if (this.props.history === 'history') {
-              this.props.wsSendObj({ getTime: e, index: 0, history: true })
+              this.props.wsSendObj(this.withSmallBed12BDisplayOptions({ getTime: e, index: 0, history: true }))
             } else {
-              this.props.wsSendObj({ getTime: e, index: 0 })
+              this.props.wsSendObj(this.withSmallBed12BDisplayOptions({ getTime: e, index: 0 }))
             }
             // this.props.wsSendObj({port : e})
             // if (ws && ws.readyState === 1)
@@ -1694,7 +1811,7 @@ class Title extends React.Component {
 
 
 
-        {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'handSinglePoint', 'normal', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody'].includes(this.props.matrixName) ?
+        {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'handSinglePoint', 'normal', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'matCol', 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody'].includes(this.props.matrixName) ?
           <Select
             defaultValue={this.props.numMatrixFlag}
             style={{ width: 90 }}
@@ -1728,7 +1845,9 @@ class Title extends React.Component {
                 }
               }
             }}
-            options={this.props.matrixName === fullPacketGloveType_title ? [
+            options={this.props.matrixName === smallBed12BType_title ? [
+              { value: 'numoriginal', label: t('rawData') },
+            ] : this.props.matrixName === fullPacketGloveType_title ? [
               { value: 'num', label: t('data2D') },
               { value: 'numoriginal', label: t('rawData') },
             ] : tactileGloveTypes_title.includes(this.props.matrixName) ? [
@@ -1747,7 +1866,7 @@ class Title extends React.Component {
             ] : this.props.matrixName === tempFullBedType_title ? [
               { value: 'normal', label: t('modal3D') },
               { value: 'numoriginal', label: t('rawData') },
-            ] : ['hand', 'handSinglePoint', 'normal', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'jqbed', 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample'].includes(this.props.matrixName) ? [
+            ] : ['hand', 'handSinglePoint', 'normal', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'matCol', 'jqbed', 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample'].includes(this.props.matrixName) ? [
               { value: 'normal', label: t('modal3D') },
               { value: 'numoriginal', label: t('rawData') },
             ] : this.props.matrixName == 'bed4096' || this.props.matrixName == 'bed4096num' ? [
@@ -1759,6 +1878,15 @@ class Title extends React.Component {
             ] : []}
           /> : ''
         }
+
+        {this.props.matrixName === smallBed12BType_title ? (
+          <Button
+            className='titleButton'
+            onClick={() => this.setState({ smallBed12BDisplaySettingsOpen: true })}
+          >
+            展示设置
+          </Button>
+        ) : null}
 
         {
           calibratableGloveTypes_title.includes(this.props.matrixName) ?
@@ -2141,6 +2269,7 @@ class Title extends React.Component {
 
       {this.renderCsvDownloadModal()}
       {this.renderCollectionModal(t)}
+      {this.renderSmallBed12BDisplaySettings()}
 
       <div style={{ position: 'relative', flexShrink: 0 }}>
         <img onClick={() => {

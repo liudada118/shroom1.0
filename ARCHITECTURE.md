@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-06-12
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-06-29
 
 ## 1. 项目概述
 
@@ -114,12 +114,17 @@ shroom1.0/
 │       ├── page/            # 页面级组件
 │       │   ├── home/        # 主页（Home.js 3610 行 + HomeFun.js）
 │       │   ├── col/         # 数据采集页
-│       │   ├── date/        # 历史数据页
-│       │   └── license/     # 密钥配置可视化页面
-│       │       ├── License.js    # 密钥生成/解析/管理页面
-│       │       ├── License.css   # 页面样式
-│       │       └── aesUtil.js    # 前端 AES-ECB 加解密工具
+│       │   ├── date/        # 启动密钥输入页（/）
+│       │   ├── license/     # 管理员密钥配置页面
+│       │   │   ├── License.js    # 密钥生成/解析/管理页面（/license-admin）
+│       │   │   ├── License.css   # 页面样式
+│       │   │   └── aesUtil.js    # 前端 AES-ECB 加解密工具
+│       │   └── licensePortal/ # 行业解决方案访问密钥页（/license）
+│       │       ├── LicensePortal.jsx # 密钥输入与行业方案展示页面
+│       │       ├── LicensePortal.css # 独立深色页面样式
+│       │       └── solutionConfig.jsx # 行业方案卡片与授权 key 映射
 │       └── assets/          # 静态资源
+│           ├── 开屏IMG/     # 行业方案体验中心图标图片资源
 │           ├── images/      # 图片资源
 │           ├── json/        # JSON 配置
 │           └── util/        # 前端工具函数
@@ -218,10 +223,11 @@ graph TD
 
 1. **传感器数据采集流程**
     - 硬件传感器通过 USB 串口发送原始二进制数据帧 → `serialHelper.js` 接收并触发 `parser.on('data')` 事件 → `server.js` 调用 `dataProcessor.js` 进行线序映射（`openWeb.js`）、归零校准、高斯平滑 → 处理后的矩阵数据通过 `wsHelper.js` 广播到 WebSocket 端口 19999 → 前端 `useWebSocket` Hook 接收数据 → 更新 `usePressureStore` → React 重新渲染热力图和 3D 模型。
-    - `smallBed12B`（小床检测 12B）使用 `1500000` 波特率和独立帧尾 `AA 00 55 00 03 00 99 00`，`@serialport/parser-delimiter` 按 8 字节帧尾切分后得到 2048 字节 payload；`server.js` 按 1024 个 `uint16LE` 解析为 32x32 压力矩阵，并复用 `jqbed(pointArr)` 小床检测线序后通过通用 `sitData` 下发。该类型不加入 `jqbed/smallBed` 生命体征集合，因此前端 `Aside.jsx` 仅展示 Pressure Area 与 Pressure Data，不触发 Python 算法数据面板；左侧 Pressure Data / Pressure Area 统计使用 3D 插值和高斯处理前的 32x32 原始矩阵值。
-    - `smallBed12B` 的采集按钮现在先打开 `Title.jsx` 采集配置弹窗；用户可设置采集名称、特征标签、入库频率，以及是否把采集矩阵从 32x32 缩小为 16x16。16x16 模式由前端通过 `collectOptions.matrixDownsample` 传入按当前原始数据展示方向选择的 2x2 块取点位置，后端 `server.js` 仍实时下发 32x32 原始帧，但采集入库时会先换算到未转置矩阵的实际取点位置：右上与左下互换，左上与右下保持不变，然后抽样为 256 点，并保存 `matrixWidth/matrixHeight/matrixDownsample` 元数据。
+    - `smallBed12B`（小床检测 12B）使用 `1500000` 波特率和独立帧尾 `AA 00 55 00 03 00 99 00`，`@serialport/parser-delimiter` 按 8 字节帧尾切分后得到 2048 字节 payload；`server.js` 按 1024 个 `uint16LE` 解析为 32x32 ADC 矩阵，复用 `jqbed(pointArr)` 小床检测线序并清零后，立即调用 `estimatePointPressure` 将整帧转换为 kPa 压强矩阵并统一保留 1 位小数，后续 `sitData/rawSitData/pressureData`、左侧统计、回放、采集入库和 CSV 下载都使用这份 kPa 数据。该类型不加入 `jqbed/smallBed` 生命体征集合，因此前端 `Aside.jsx` 仅展示 Pressure Area 与 Pressure Data，不触发 Python 算法数据面板；左侧 Pressure Data / Pressure Area 统计使用 3D 插值和高斯处理前的 32x32 压强矩阵值。
+    - `smallBed12B` 的标题栏新增 `展示设置`，实时矩阵可在 32x32 与 16x16 间切换；16x16 模式会按当前原始数据展示方向选择 2x2 块取点位置，前端通过 `smallBed12BDisplayOptions` 下发给后端，`server.js` 在串口入口转换为 kPa 后先把 32x32 转为原始数据显示方向，再从这份 32x32 展示矩阵按 2x2 抽点为 16x16，并用 `matrixOrientation: 'transposed'` 标记该帧已是展示方向；采集入库和 CSV 下载直接沿用实时展示尺寸与方向。12B 仅保留原始数据展示模式，前端切换到该系统时会强制使用 `numoriginal`，不再提供 3D 展示模式。`client/src/page/home/util.js` 的原始矩阵转置入口会按方阵长度自动识别 32x32 或 16x16；遇到已标记为展示方向的 12B 16x16 帧时不再二次转置。
+    - `smallBed12B` 的采集按钮现在先打开 `Title.jsx` 采集配置弹窗；用户可设置采集名称、特征标签和入库频率。矩阵尺寸不再在采集弹窗里单独设置，而是跟随实时 `展示设置`，避免实时展示、采集入库和 CSV 下载尺寸不一致。
     - `handSinglePoint`（32*32(检测点)）沿用 `hand` 的单串口 32x32 / 1024 点协议和默认 `1000000` 波特率，实时串口数据只在后端 `openWeb.handSinglePoint()` 中按 1-based 点位表重排一次：先输出 481-992，每 32 点一行；再输出 449-1 的 15 行倒序块；最后输出 993-1024。WebSocket 展示、采集入库和 CSV 下载都使用这份后端处理后的 1024 点矩阵，前端不再参与线序转换；前端复用 `hand` 的 `CanvasHand` 渲染链路和 `normal` / `numoriginal` 模式，授权页和密钥脚本使用独立 key `handSinglePoint`，密钥配置页归入“精密”分组；CSV 下载按语言使用 `检测点` / `detection` 文件名前缀，并新增 `检测点` / `detectionPoint` 列写入 1024 点矩阵的最后一个点。
-    - `smallBed12B` 使用独立的前端显示配置，不再复用通用 `bed` 颜色默认值；默认高斯为 `2`，颜色上限默认值为 `2205`，设置面板颜色滑块范围为 `5-4000` 且步进为 `10`，高度默认值为 `0.1`。`Home.jsx` 会通过通用 `syncDisplayRendererConfig()` 将进度条 state 同步到 3D/原始数据组件 ref，确保初始值、系统切换和滑块变更都会下发到渲染器内部变量。
+    - `smallBed12B` 使用独立的前端显示配置，不再复用通用 `bed` 颜色默认值；默认高斯为 `2`，3D 数字润滑为 `2`，颜色默认值为 `25`，过滤为 `0`，初始值为 `0`，高度默认值为 `0.1`。设置面板颜色滑块范围为 `5-30` 且步进为 `10`。`Home.jsx` 会通过通用 `syncDisplayRendererConfig()` 将进度条 state 同步到 3D/原始数据组件 ref，确保初始值、系统切换和滑块变更都会下发到渲染器内部变量。
     - 当系统类型为 `petCare` / `petCareMini` 时，`server.js` 先按 `jqbed` 线序将 32x32 数据重排，再以 50Hz（20ms）分别调用 `python/app/petCare/pet_care_wrapper` / `pet_care_wrappermini`；算法输出通过 `python/app/onbed_filter_example.py` 的 JSON-line RPC 回传给 Electron，前端 Title/Home/Aside/License 复用宠物看护链路展示呼吸率、姿态、体动、信号质量、模拟心率和压力系数；其中 `Aside.jsx` 会在前端层对 `petCareMini` 的离床状态（`petInBed=0` 或 `posture_state=0`）做展示归一化，强制将面板上的 `pressure_coefficient` 显示为 `0.00`，并依据呼吸频率在前端生成 `55-100` 区间的模拟心率替换原来的 SNR 展示；为避免心率跳变过快，模拟心率现在按 1 秒节拍更新一次，其余呼吸、姿态和质量数据仍保持实时刷新；同时 `server.js` 关闭了 `petCareMini` 的 `[petCareMini] algorithm result` 周期性信息日志，避免运行期刷屏。
     - 当系统类型为 `hand0205` / `hand0205Double` / `handGlove115200` / `handGloveFullPacket` 且前端处于普通 3D 遥操模式时，`Home.jsx` 使用模型渲染矩阵继续驱动手部姿态与手指弯曲，但 Aside 面板中的 `meanPres`、`maxPres`、`totalPres`、`point` 以及 Pressure Area / Pressure Data 图表改为直接基于原始 256 点矩阵（`realArr` / `rawPressureData`）计算和渲染，避免统计值被映射后的控制数据覆盖。
     - `hand0205Double`（触觉手套2）是独立于旧 `hand0205 copy.jsx` 的双手 3D 展示系统，前端使用新增 `client/src/components/three/hand0205Double.jsx`：左手继续沿用 `sitData/changeHandAngle/calibration` 旧手套接口，右手由 `backData` 分支调用 `rightData/changeRightHandAngle/calibrationRight` 驱动；右手模型从同一个 `hand1.glb` 克隆并设置镜像缩放，因此旧触觉手套系统和单手左右切换行为不受影响。`Title.jsx` 主传感器下拉与 `License.jsx` 授权配置页已恢复该系统入口；标题栏新增“一键连接双手套”，后端自动打开两个可用手套串口，并按每包第二个字节 `01=左手`、`02=右手` 将任意串口收到的数据路由到对应左右手通道。前端在双手模式下优先使用当前包的 `handSide` 区分左右手校准和姿态接口，`hand0205Double.jsx` 会把 147/256 点控制数据补成手形 32x32 渲染源，并在收到四元数/弯折数据时立即作用到左右手模型。
@@ -235,17 +241,21 @@ graph TD
     - 用户点击"开始采集" → 前端通过 WebSocket 发送 `col` 指令 → `server.js` 开启采集模式 → 每帧数据同时写入 `dbHelper.js`（SQLite）和 `csvHelper.js`（CSV 文件） → 用户点击"停止采集"结束录制。
     - `Title.jsx` 的采集入口改为开始采集时弹出配置 Modal；原设置抽屉里的特征标签选择移动到该 Modal，采集频率通过 `colHZ/collectOptions.frequencyHz` 下发。`server.js` 使用每个通道独立的入库时间戳按频率跳帧，避免坐垫、靠背、头枕共用一个 `oldTimeStamp` 互相影响。
     - CSV 导出的最左侧 `seconds` 列使用数据库帧时间戳计算真实相对秒数（当前帧 `timestamp` - 导出首帧 `timestamp`），仅在缺失时间戳时回退到采集频率估算，不再固定按 12Hz 用 `j / 12` 生成。
-    - CSV 表头根据前端当前语言自动选择：`Title.jsx` / `useSerialControl.js` 在 `downloadOptions.language` 中传入当前语言；`server.js` 中文模式输出 `秒数/矩阵最大值/时间戳/矩阵大于 0 的点数/矩阵总和/矩阵数据/四元数/温度/平均温度/温度K值` 等中文表头，英文模式继续输出旧版 `seconds/max/time/area/press/data/quaternion/temperatureCelsius/temperatureAvg/temperatureK` 简写表头；`handSinglePoint` 额外输出 `检测点` / `detectionPoint` 列，取 CSV `data` 矩阵的最后一个点。
-    - `smallBed12B` 的 CSV 文件名前缀使用系统简写 `12B`，例如 `12B2026-05-21...csv`；其它系统保持既有 `file` 或通道名前缀。
+    - CSV 表头根据前端当前语言自动选择：`Title.jsx` / `useSerialControl.js` 在 `downloadOptions.language` 中传入当前语言；`server.js` 中文模式输出 `秒数/矩阵最大值/时间戳/矩阵大于 0 的点数/矩阵总和/矩阵数据/四元数/温度/平均温度/温度K值` 等中文表头，英文模式继续输出旧版 `seconds/max/time/area/press/data/quaternion/temperatureCelsius/temperatureAvg/temperatureK` 简写表头；所有 CSV 文件开头统一写入 UTF-8 BOM，便于 Windows Excel/WPS 直接双击打开时识别中文；`handSinglePoint` 额外输出 `检测点` / `detectionPoint` 列，取 CSV `data` 矩阵的最后一个点。
+    - `matCol` 停止采集不再自动触发 CSV 下载；采集记录名由“采集名称 + 特征标签1 + 特征标签2 + 时间片”组成，其中特征标签1只追加到文件名后面，`sitCol/matCol` 的 CSV `label` 列由 `server.js` 先去掉末尾时间片，再解析特征标签2 末尾的 `_数字`，并新增 `labelText` / `标签文本` 列记录特征标签2 的完整文本。
+    - `smallBed12B` 的 CSV 文件名前缀使用系统简写 `12B`，例如 `12B2026-05-21...csv`；CSV `矩阵总和/press` 与选区矩阵总和按 kPa 压强数据求和并统一保留 1 位小数；其它系统保持既有 `file` 或通道名前缀。
     - 手套类 CSV 导出在保留整体 `data` 矩阵、`清零帧` 和 `quaternion` 姿态列的基础上，额外按左右手原始 256 点位表拆出 `小拇指`、`无名指`、`中指`、`食指`、`大拇指`、`指根`、`手掌` 七个 JSON 数组列；点位表为 1-based，代码读取时减 1 访问数组，`指根` 按小拇指到大拇指顺序写入 5 个弯折点。`hand0205`、`handGlove115200` 和 `handGloveFullPacket` 的 sit/back 导出都会写入这些部位列，但文件名前缀对用户改为左手 `left`、右手 `right`；`hand0205Double` 专用导出改为单个 `触觉手套2...csv` / `glove2...csv`，同一行同时写入左手和右手矩阵、统计、清零帧、四元数与分指数据；触觉足底和 robot 类触觉上衣也会写入 `清零帧`，但不会写入手套部位列。
     - `jqbed`、`smallBed`、`smallBedNoAlg` 与 `smallBed12B` 的原始数据展示和 CSV `data` 列会沿左上-右下对角线转置 32x32 矩阵，即 `(row, col)` 显示/导出为 `(col, row)`，用于匹配小床检测/监测系统原始矩阵方向；`jqbed/smallBed/smallBedNoAlg` 的前端原始 2D 数字矩阵入口仍在 `Num2Doriginal.jsx` 做兜底转置，`smallBed12B` 在 `util.js` 进入 `Fast1024` 前完成转置。
-    - `smallBed12B` 的原始数据模式单独复用 `32*32高速` 的 `Fast1024` 渲染组件，进入组件前仍执行 32x32 对角线转置；该模式使用 `0-1024` 的数字材质/颜色范围，其它系统的原始数字矩阵颜色范围、配色逻辑和渲染组件保持原样。
+    - `smallBed12B` 的原始数据模式单独复用 `32*32高速` 的 `Fast1024` 渲染组件，进入组件前仍执行 32x32 对角线转置；该模式按压强值保留 1 位小数显示，颜色/数值上限按 `30` 处理，其它系统的原始数字矩阵颜色范围、配色逻辑和渲染组件保持原样。
+    - `matCol` / 小床褥采集新增 `numoriginal` 原始数据模式，复用 `32*32高速` 的 `Fast1024` 彩色数字矩阵渲染；`Home.jsx` 固定传入 `matrixWidth=16`、`matrixHeight=10`，`NumThreeColor1024.jsx` 支持矩形矩阵尺寸后按 16x10 共 160 点居中渲染，旧 32x32/16x16 方阵模式保持默认行为不变。为保持与传感器和 3D 点图方向一致，2D 原始数据展示前会把 `matColLine()` 输出的 16 行 x 10 列矩阵转置为 10 行 x 16 列；`server.js` 的 `matCol` CSV `realData` 导出也执行同一转换。
+    - `matCol` 现在纳入标题栏 `展示设置` 可视化调节范围，支持颜色上限、过滤值和初始过滤值；`Title.jsx` 按 `matCol + 当前展示模式` 独立读写 `valueConfig` 缓存，`Home.jsx` 通过 `syncDisplayRendererConfig()` 在系统切换和模式切换后把当前参数同步给 3D `MatCol` 与原始数据 `Fast1024` 渲染组件。
     - 大体量历史 CSV 下载不再先把所有帧和所有 CSV 行放入数组；`server.js` 使用 `matrix(date,id)` 索引按 `id` 游标分批读取历史帧，并用 `csv-writer` stringifier 写入文件流，覆盖通用 sit/back/head、整椅、大小床、选区标签和触觉手套2合并导出，降低 90 万帧下载时主进程内存压力。导出过程中后端会按批次通过 WebSocket 发送 `csvDownloadProgress`，前端 `Title.jsx` 的 CSV 下载弹窗展示百分比、当前文件、已写行数和多文件序号。
 
 3. **历史数据回放流程**
     - 用户在历史数据页选择记录 → 前端发送 `play` 指令 → `server.js` 从 SQLite 读取历史帧数据 → 按时间间隔逐帧通过 WebSocket 推送 → 前端 `usePlayback` Hook 管理播放状态（播放/暂停/变速/跳帧）。
-    - `smallBed12B` 回放兼容 32x32 原始采集和 16x16 缩小采集两种历史格式；`server.js` 会把对象格式历史帧还原为 `sitData` 并携带 `matrixWidth/matrixHeight`，`Home.jsx` 根据尺寸变化重挂载 `SmallBed` 渲染组件，避免 16x16 历史帧继续按 32x32 显示。
+    - `smallBed12B` 回放兼容 32x32 原始采集和 16x16 缩小采集两种历史格式；`server.js` 会把对象格式历史帧还原为 `sitData` 并携带 `matrixWidth/matrixHeight`，32x32 采集按 32x32 回放，16x16 采集按 16x16 回放，不再把 256 点历史帧扩回 1024 点；`Home.jsx` 默认按标题栏 `展示设置` 初始化 12B 视图尺寸，`Title.jsx` 的回放/历史入口和历史时间选择都会同步 `smallBed12BDisplayOptions` 给后端，`server.js` 的主 WebSocket 与辅助 WebSocket 消息入口都会先应用该设置再处理 `getTime/loadSelectedHistory`，因此历史选择空帧也会按展示设置输出 16x16 或 32x32；前端只根据真实矩阵帧的 `matrixWidth/matrixHeight` 或历史回放帧的 `sitData` 方阵长度同步尺寸，控制/进度/切换清空类 WebSocket 消息不会再把尺寸回退到 32x32，避免默认展示和回放时反复重挂载闪烁。
     - 大体量历史记录（如几十万帧以上）选中时，`server.js` 不再一次性 `SELECT *` 加载全部帧到内存；改为先查询 `COUNT/MIN(id)/MAX(id)` 元信息、建立 `matrix(date,id)` 索引、生成最多约 2000 点的抽样压力/面积曲线，并通过懒加载代理在回放或拖动进度时按当前帧索引读取单帧，避免 90 万帧记录选中和回放时阻塞 Electron 主进程。
+    - 历史记录列表合并时，`util.js` 的 `dedupli()` 会先过滤 `null`、空字符串和非数组输入，并把有效 `date` 统一转成字符串后再判断 `includes()`，避免数据库异常记录触发 Electron 主进程弹错。
 
 4. **授权验证流程**
     - 应用启动 → `licenseHelper.js` 读取外部 `config.txt`（打包后优先读取 exe 同级文件，兼容 `resources/config.txt`，开发态读取项目根目录） → 使用 AES-ECB 解密 → 通过 HTTPS 获取网络时间 → 比对授权有效期 → 若过期则限制功能。
@@ -253,7 +263,10 @@ graph TD
     - 前端 `Title.jsx` 始终展示完整系统类型下拉框，渲染不再受 `matrixTitle` / `allowedTypes` 控制；`Home.jsx` 会清除旧的 `allowedTypes` 本地缓存，并忽略空的 `file` 值，避免密钥类型与实际传感器类型不一致时导致传感器不可选、不可用或当前类型被置空。
 
 6. **密钥配置管理流程**
-    - 管理员访问 `/license` 页面 → 勾选授权的传感器类型（支持分组全选和快捷预设） → 设置有效天数 → 点击生成密钥 → 密钥通过 AES-ECB 加密后可复制分发 → 也可在「密钥解析」标签页粘贴密钥查看授权详情。
+    - 用户启动应用进入 `/` 密钥输入页，或访问 `/license` 页面进入 `LicensePortal` 行业解决方案体验中心；两处都使用同一套行业方案卡片与访问密钥输入样式，输入框先用 `localStorage.shroomAccessKey` 占位，WebSocket 连上后由 `server.js` 读取实际 `config.txt` 并通过 `licenseKey` 回传，前端再以 `config.txt` 内容覆盖输入框默认值。访问密钥输入框使用明文 `text` 输入，模块图标仅在 click/focus 时切换选中状态，鼠标 hover 不再触发高亮切换。用户提交可解密密钥后，前端会立即把密钥保存到本地缓存，再按 `file` 授权范围点亮康养、座椅定制、具身智能方案，并通过 WebSocket `ws://localhost:19999` 发送 `{ date: { date: key } }` 写入应用；`server.js` 会先解析密钥，再把密钥同步写入可写 `config.txt`，通过临时文件 rename 和回读校验确认落盘成功后才广播 `licenseSaved`。根路由 `/` 校验成功后默认停留在密钥页，底部主按钮由“保存”切换为“进入系统”或从系统页返回时的“回到系统”。
+    - `licensePortal/solutionConfig.jsx` 集中导入 `assets/开屏IMG` 中的图标图片，渲染康养、座椅定制、具身智能、定制LAB 四张行业方案卡片和智能床垫、宠物检测、汽车座椅、人体工学椅、触觉手套、智能鞋垫、机器人、足垫、步道模块按钮；根路由 `/` 与 `/license` 复用同一份配置，避免两处页面图标不一致。
+    - 管理员密钥生成/解析页面保留在 `/license-admin`：勾选授权的传感器类型（支持分组全选和快捷预设） → 设置有效天数 → 点击生成密钥 → 密钥通过 AES-ECB 加密后可复制分发 → 也可在「密钥解析」标签页粘贴密钥查看授权详情；「写入应用」按钮会等待后端 `licenseSaved` 回包后才提示写入成功，保存失败时直接展示后端错误。
+    - `/license-admin` 的“定制”分组包含 `matCol` / 小床褥采集；生成密钥时会写入 `file` 授权范围，解析密钥时按同一传感器列表回显名称。
 
 5. **自动更新流程**
     - 应用启动 30 秒后 → `autoUpdater.js` 检查自建服务器 `http://sensor.bodyta.com/shroom1` → 发现新版本后通过 `update-status` IPC 通道通知前端 → 前端 `UpdateNotifier` 组件弹出通知 → 用户点击「下载更新」后通过 `update-command` IPC 通道触发下载 → 下载过程中实时推送进度到前端 → 下载完成后弹窗询问是否立即安装并重启。
@@ -328,6 +341,32 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-06-29 | Codex | Shroom Vision 新稿视觉收敛 | `/` 与 `/license` 密钥入口按新稿移除底部能力条，将反馈入口收敛为右下角紧凑按钮，右上角 SDK 文案改为“SDK 定制”，并统一方案卡片为蓝青色科技风格。 |
+| 2026-06-29 | Codex | Shroom Vision 内页布局收敛 | `/` 与 `/license` 密钥入口移除人工窗口圆点和外层边框，只保留顶部 Logo/状态/SDK、主标题、密钥框、方案卡片和右下反馈入口组成的页面内部布局。 |
+| 2026-06-29 | Codex | Shroom Vision 方案模块静态化 | `/` 与 `/license` 密钥入口取消方案卡和模块项的默认高亮与 hover 反馈，模块改为纯展示列表，并固定左侧 icon 容器尺寸避免图标压缩。 |
+| 2026-06-26 | Codex | Shroom Vision 反馈入口与新版布局 | `/` 与 `/license` 密钥入口按新版视觉优化：方案模块改为卡片内竖向列表，底部新增核心能力条，右下角新增“提供反馈”入口，点击后在右侧弹出反馈类型、内容和联系方式表单。 |
+| 2026-06-26 | Codex | Shroom Vision 密钥入口布局 | `/` 与 `/license` 密钥入口统一改为 Shroom Vision 标题和压力可视化/动态采集/报告输出副标题，左上角使用新增品牌 Logo 图片，并将访问密钥输入面板移动到解决方案模块上方居中展示。 |
+| 2026-06-16 | Codex | 小床检测 12B 主回放连接设置顺序修复 | `server.js` 主 WebSocket 入口现在会在处理 `getTime/loadSelectedHistory` 前优先应用 `smallBed12BDisplayOptions`，避免应用重启后实时 16x16 切到回放时历史空帧仍按服务端默认 32x32 输出。 |
+| 2026-06-16 | Codex | 小床检测 12B 实时切回放尺寸保持 | `Title.jsx` 的回放/历史按钮和历史时间选择消息会携带 `smallBed12BDisplayOptions` 并同步前端 12B 视图尺寸；`server.js` 在 WebSocket 消息入口优先应用该设置，再加载历史数据，避免实时 16x16 切换到回放时历史空帧按旧默认 32x32 下发。 |
+| 2026-06-16 | Codex | 小床检测 12B 回放入口默认尺寸跟随展示设置 | `Home.jsx` 在点击回放进入本地模式时立即按 `smallBed12BRealtimeMatrixMode` 设置 12B 视图尺寸并同步 `smallBed12BDisplayOptions`；`server.js` 的历史选择空帧不再固定发 1024 点，而是按展示设置发送 16x16/32x32 和尺寸元数据。 |
+| 2026-06-16 | Codex | 小床检测 12B 默认展示跟随展示设置 | `Home.jsx` 将 12B 默认矩阵尺寸计算收敛到展示设置，系统切换时直接按 `smallBed12BRealtimeMatrixMode` 初始化视图并把 `smallBed12BDisplayOptions` 与 `file` 合并发送给后端；实时无尺寸清空帧不再覆盖展示设置。 |
+| 2026-06-16 | Codex | 小床检测 12B 回放尺寸闪烁修复 | `Home.jsx` 的 12B 矩阵尺寸同步不再对缺少 `matrixWidth/matrixHeight` 的非矩阵消息默认使用 32x32；只有真实 `sitData` 帧或明确尺寸元数据才会更新 `smallBedMatrixWidth/smallBedMatrixHeight`，避免回放 16x16/32x32 时视图尺寸来回切换。 |
+| 2026-06-16 | Codex | 小床检测 12B 回放尺寸保持采集尺寸 | `server.js` 移除 12B 历史回放中 256 点扩回 1024 点的逻辑；对象格式和旧数组格式的 256 点历史帧都会按 `16x16` 下发，32x32 采集仍按 `32x32` 下发，前端按 `matrixWidth/matrixHeight` 重挂载原始矩阵视图。 |
+| 2026-06-16 | Codex | 小床检测 12B 16x16 抽点基准修正 | `server.js` 将 12B 16x16 实时缩小改为先把 32x32 压强矩阵转为原始数据显示方向，再按用户选择的 2x2 位置抽点；新 256 点帧保存 `matrixOrientation: 'transposed'`，前端和 CSV 导出据此跳过二次转置，保证实时、采集、下载方向一致。 |
+| 2026-06-16 | Codex | 小床检测 12B 实时矩阵展示设置 | `Title.jsx` 为 `smallBed12B` 增加展示设置弹窗，支持 32x32/16x16 和 2x2 取点位置；`Home.jsx` 将 12B 强制锁定为原始数据模式并按尺寸重挂载 `Fast1024`；`server.js` 在串口压强入口按 `smallBed12BDisplayOptions` 下发 32x32 或 16x16 kPa 矩阵，采集入库和 CSV 下载直接使用同一尺寸。 |
+| 2026-06-16 | Codex | 小床检测 12B 16x16 实时方向修正 | `client/src/page/home/util.js` 将原始矩阵转置函数从固定 32x32 改为按方阵长度自动识别，16x16 实时缩小矩阵现在会像 32x32 一样经过同一左上-右下方向转置，避免实时展示沿对角线翻转。 |
+| 2026-06-16 | Codex | CSV Excel 乱码方案入 QA | 新增 `QA.md`，记录 Windows Excel 直接打开中文 CSV 乱码的原因、项目内统一写 UTF-8 BOM 的解决方式，以及老版本 Excel 使用“从文本/CSV”按 UTF-8 导入的排查步骤。 |
+| 2026-06-16 | Codex | CSV 中文编码兼容 | `server.js` 将流式 CSV 导出和旧 `writeRecords` 导出统一改为 UTF-8 BOM 文件输出，降低中文表头和中文文件内容在其它 Windows 电脑上用 Excel/WPS 直接打开时乱码的概率。 |
+| 2026-06-16 | Codex | 小床检测 12B 矩阵总和精度统一 | `server.js` 为 `smallBed12B` 增加矩阵总和格式化入口，整帧 CSV 下载、选区下载和历史曲线抽样中的压强矩阵总和统一保留 1 位小数，其它展示系统继续沿用原来的总和格式。 |
+| 2026-06-16 | Codex | 小床检测 12B 串口入口统一压强化 | `server.js` 将 `smallBed12B` 的 ADC→kPa 标定前移到串口解析入口，线序与清零后立即把整帧转换为压强并保留 1 位小数；实时 `sitData/rawSitData/pressureData`、采集入库、缩小采集、历史回放、选区统计和 CSV 下载都使用 kPa 数据，并通过 `pressureUnit: 'kPa'` 兼容新存储格式，旧 ADC 历史帧仍会自动标定后展示/导出。 |
+| 2026-06-16 | Codex | 回放右侧滑块 hover 时间修复 | `server.js` 在历史数据选中后额外广播覆盖完整回放范围的 `historyTimeArr` 抽样时间轴，`Home.jsx` 单独缓存并传入 `Progress.jsx`；右侧结束滑块 hover 现在优先按 `historyTimeArr` 和当前手柄位置换算对应时间，避免误用历史日期列表或起始时间样本导致右侧显示不准。 |
+| 2026-06-16 | Codex | 回放范围滑块 hover 时间索引修复 | `Home.jsx` 将历史 `timeArr` 缓存并传给 `Progress.jsx`；`Progress.jsx` 改为按左右手柄当前像素位置换算帧索引后读取对应时间，并用自定义 hover 提示显示，`progress/util.js` 同步修正最大帧索引换算，避免左右手柄都显示最初时间。 |
+| 2026-06-16 | Codex | 小床检测 12B 左侧压强文案 | `Aside.jsx` 针对 `smallBed12B` 保持左侧面积卡片标题为 Pressure Area，并将数据卡片文案切换为压强数据，明细只展示平均压强和最大压强；`smallBed.jsx` 与 `NumThreeColor1024.jsx` 在 12B 模式下不再把压力总和写入左侧主数值和压力曲线，改用最大压强。 |
+| 2026-06-16 | Codex | 小床检测 12B 原始/3D 左侧图表小数一致 | `smallBed.jsx` 针对 `smallBed12B` 取消 3D 模式左侧统计的压力取整，Pressure Data 曲线改为写入最大压强小数值，列均值可视化保留 1 位小数；`smallBed.jsx` 与 `NumThreeColor1024.jsx` 将 12B 曲线缩放从旧 ADC 大范围改为按压强小数动态缩放，避免原始数据 0.7 在 3D 视图中显示为 0。 |
+| 2026-06-16 | Codex | 小床检测 12B 默认显示参数重置 | `Home.jsx` / `Title.jsx` 将 `smallBed12B` 默认参数重置为高斯 `2`、3D 数字润滑 `2`、颜色 `25`、过滤 `0`、初始值 `0`，并把旧的 `30/80/2205/4000` 颜色缓存和 `5` 润滑缓存自动回退；`NumThreeColor1024.jsx` 缩小 12B 一位小数贴图字号，避免 `10.0` 以上数字被单元格裁切。 |
+| 2026-06-16 | Codex | 小床检测 12B 左侧统计与原始矩阵显示修复 | `smallBed.jsx` 将 `smallBed12B` 左侧 Pressure Data/Area 的统计阈值改为 0，并把 12B 整帧过滤阈值从旧 ADC 场景的 500 回退为 0，使左侧统计与原始矩阵展示同源；`NumThreeColor1024.jsx` 针对 12B 原始矩阵保留 1 位小数，并按 30 作为颜色/数值上限。 |
+| 2026-06-16 | Codex | 小床检测 12B 压强显示全 0 修复 | `smallBed12B` 压强展示改用 kPa 后，前端默认过滤阈值从旧 ADC 场景的 `6` 降为 `0`，并兼容旧缓存回退；`smallBed.jsx` 的参数传入判断改为允许 `0` 生效，避免低压强点被渲染前全部扣成 0。 |
+| 2026-06-16 | Codex | 小床检测 12B 压强标定展示 | `server.js` 接入 `util/pressureCalibration_V2.7.54.js` 的 `estimatePointPressure`，实时展示、历史回放和曲线统计会将 `smallBed12B` 每个点由 ADC 转为 kPa 压强；`Home.jsx` / `Title.jsx` 将 12B 默认颜色上限切换到 kPa 范围，并兼容旧 ADC 色阶缓存。 |
 | 2026-06-15 | Codex | 回放范围滑块时间提示 | `Progress.jsx` 为播放控件左右范围滑块增加 hover 时间提示，拖动范围时同步维护左右帧索引，并从历史 `time` 数组按索引显示对应时间。 |
 | 2026-06-15 | Codex | 回放滑块时间提示修复 | `Progress.jsx` 缓存历史时间轴数组，避免播放中单帧 `time` 覆盖左右范围滑块的时间来源，并兼容数字时间戳和已格式化时间字符串。 |
 | 2026-06-15 | Codex | 采集数据库满盘保护 | `server.js` 在采集入库前检查数据库所在磁盘剩余空间，低于阈值或遇到 `SQLITE_FULL/database or disk is full` 时自动停止采集并广播错误；`Home.jsx` 收到 `collectionStorageError` 后弹出提示。 |
@@ -373,6 +412,33 @@ graph TD
 | 2026-06-05 | Codex | Minzhen 3D 点图方向调整 | `client/src/components/three/minzhen.jsx` 仅在 3D 模型模式的点云坐标投影中逆时针旋转 90 度并做左右镜像，原始数据、CSV、左侧统计、串口解析和模型变换保持不变。 |
 | 2026-06-05 | Codex | Minzhen 显示名称改为轮椅 | 前端 `sensorMinzhen` 中文显示名改为“轮椅”、英文显示名改为 `Wheelchair`，授权配置页标签同步为“轮椅”；内部系统 key 仍为 `minzhen`，协议、模型路径和数据链路不变。 |
 | 2026-06-05 | Codex | 32*32(检测点) 下拉顺序调整 | `Title.jsx` 主传感器下拉框中将 `handSinglePoint` / 32*32(检测点) 移到 `fast1024` / 32*32高速 后面，系统 key、授权分组和渲染逻辑保持不变。 |
+| 2026-06-24 | Codex | 小床褥采集入口与授权配置 | `Title.jsx` 主传感器下拉新增 `matCol` / 小床褥采集，`License.jsx` 的“定制”授权分组同步加入 `matCol`，并补齐中英文显示文案和密钥规则文档。 |
+| 2026-06-24 | Codex | matCol 采集停止与标签修正 | `Title.jsx` 取消 `matCol` 停止采集时自动发送 CSV 下载请求，补齐首次进入 `matCol` 时的采集标签下拉默认项；`server.js` 修正 `sitCol/matCol` CSV 标签解析，避免时间戳覆盖标签。 |
+| 2026-06-24 | Codex | 采集特征标签语义调整 | `Title.jsx` 将采集记录名改为“采集名称 + 特征标签1 + 特征标签2”，明确特征标签1只追加到文件名后面；`server.js` 仅把特征标签2 末尾 `_数字` 写入 `sitCol/matCol` CSV 的 `label` 列。 |
+| 2026-06-24 | Codex | CSV 标签文本列 | `sitCol/matCol` CSV 在保留原有数字 `label` 列的基础上新增 `labelText` / `标签文本` 列，记录特征标签2 的完整文本。 |
+| 2026-06-25 | Codex | 历史记录空日期兜底 | `util.js` 的 `dedupli()` 过滤 null/空 date 并兼容非数组输入，避免历史列表合并时对 null 调用 `includes()` 导致 Electron 主进程弹错。 |
+| 2026-06-25 | Codex | 小床褥原始数据 16x10 展示 | `matCol` 新增 `numoriginal` 原始数据模式，`Title.jsx` 显示原始数据切换项，`Home.jsx` 复用 `Fast1024` 并传入 16x10 尺寸，`NumThreeColor1024.jsx` 支持矩形矩阵渲染。 |
+| 2026-06-25 | Codex | 小床褥 2D/CSV 方向统一 | `matCol` 以 3D 点图方向为基准，2D 原始数据和 CSV `realData` 导出都把 `matColLine()` 的 16x10 数据转为 10x16 行优先数组，保证传感器、3D、2D 和 CSV 方向一致。 |
+| 2026-06-25 | Codex | 小床褥 CSV 表头对齐手部检测 | `server.js` 的 `matCol` CSV 导出改用手部检测同款核心表头 `秒数/矩阵最大值/时间戳/矩阵大于0的点数/矩阵总和/矩阵数据`，并继续在末尾追加 `label` / `labelText` 标签列。 |
+| 2026-06-25 | Codex | 密钥行业方案体验页 | 新增 `client/src/page/licensePortal/LicensePortal.jsx` / `LicensePortal.css`，`/license` 切换为深色行业方案访问密钥页，旧密钥配置中心保留到 `/license-admin`。 |
+| 2026-06-25 | Codex | 启动密钥输入页改版 | `client/src/page/date/Date.jsx` 改用行业解决方案体验中心样式，复用 `licensePortal/solutionConfig.jsx` 的卡片配置，保留 WebSocket 校验和过期判断；验证成功后默认停留在当前页，用户手动点击“进入系统”进入 `/system`。 |
+| 2026-06-25 | Codex | 密钥输入页一屏适配 | `LicensePortal.css` 将行业方案体验中心改为 `height: 100vh` 的纵向 flex 布局，并按 1702x940 截图比例设置主内容宽度约 `85.5vw`、方案卡片区约 `48.3vh`、底部密钥框约 `20.2vh`；移动/窄屏仍回退为可滚动布局。 |
+| 2026-06-25 | Codex | matCol 可视化调节 | `Title.jsx` 将 `matCol` 加入展示设置调节组并按 `matCol + 模式` 独立保存颜色、过滤和初始值；`Home.jsx` 将 `matCol` 加入渲染器配置同步名单，切换系统或模式后会把当前配置推送给 3D/原始数据组件。 |
+| 2026-06-25 | Codex | 密钥保存确认修复 | `server.js` 将密钥写入改为同步落盘、临时文件替换和回读校验，失败时广播 `licenseError`；`/`、`/license` 与 `/license-admin` 提交可解密密钥后会立即保存到本地缓存，`/license` 与 `/license-admin` 页面等待 `licenseSaved` 回包后才提示应用配置写入成功。 |
+| 2026-06-25 | Codex | 开屏图标图片替换 | `licensePortal/solutionConfig.jsx` 改为使用 `assets/开屏IMG` 中的图片资源渲染行业方案和模块图标，`/` 与 `/license` 两个密钥页共享同一套图片配置。 |
+| 2026-06-25 | Codex | 密钥输入框读取配置 | `server.js` 在 WebSocket 连接和密钥写入成功回包中下发 `config.txt` 当前加密密钥 `licenseKey`；`/` 与 `/license` 输入框收到后优先使用该值作为默认显示。 |
+| 2026-06-25 | Codex | 密钥页明文输入与模块选择 | `/` 与 `/license` 的访问密钥输入框改为明文显示；模块图标通过 focus/click 切换选中状态。 |
+| 2026-06-25 | Codex | 座椅定制方案分类调整 | `licensePortal/solutionConfig.jsx` 将“汽车定制方案”改为“座椅定制方案”，并恢复第二个模块为“人体工学椅”，与“汽车座椅”并列展示。 |
+| 2026-06-25 | Codex | 密钥页模块图标与宠物检测调整 | `licensePortal/solutionConfig.jsx` 将康养第二个模块从坐垫监测改为 `petCare` / 宠物检测并使用新宠物图标；人体工学椅模块切换到新人体工学椅图标。 |
+| 2026-06-25 | Codex | 定制LAB 方案卡 | `licensePortal/solutionConfig.jsx` 新增“定制LAB”方案卡，包含“足垫”和“步道”两个模块并使用新增图片资源；`LicensePortal.css` 将方案网格扩展为四列并补充青色主题。 |
+| 2026-06-26 | Codex | 密钥页四列布局溢出修复 | `LicensePortal.css` 调整四列方案卡高度、间距、详情区伸缩和解锁状态定位，避免底部说明文案溢出或与“已解锁”状态重叠。 |
+| 2026-06-26 | Codex | 座椅定制标题单行显示 | `solutionConfig.jsx` 恢复“座椅定制方案”完整标题，`LicensePortal.css` 让方案标题保持单行显示，避免四列布局下自动换行。 |
+| 2026-06-26 | Codex | 方案模块三项轮播 | `solutionConfig.jsx` 新增每 3 个模块一页的轮播分组，不足 3 个时补“正在探索”；`/` 与 `/license` 的模块区统一按三列展示，只有超过 3 个模块时才启用 viewport/track/slide 横向轮播，方案标题和描述保持单行。 |
+| 2026-06-26 | Codex | 方案轮播进度与状态精简 | `/` 与 `/license` 的多页方案模块轮播在左右切换下方新增进度条，补位模块文案改为“正在探索”，并移除方案卡片底部“已解锁/等待密钥”状态行。 |
+| 2026-06-26 | Codex | 密钥页标题区视觉调整 | `/` 与 `/license` 的行业方案副标题改为两行居中展示，并在右上系统状态下方新增“SDK 开发中”胶囊状态。 |
+| 2026-06-26 | Codex | 方案探索模块替换 | `solutionConfig.jsx` 将康养、座椅定制、定制LAB 的“正在探索”补位替换为高精密小垫、自适应座椅、握力评估三个真实方案模块，并接入新增图标资源。 |
+| 2026-06-26 | Codex | 密钥页方案区信息层级调整 | `/` 与 `/license` 移除方案卡底部的模块详情说明区，恢复方案标题下方场景描述，并将访问密钥输入面板上移到方案模块区下方居中展示。 |
+| 2026-06-26 | Codex | 密钥页主按钮与模块 hover 调整 | `/` 启动密钥页将“进入系统/回到系统”和“保存”合并为底部同一个主按钮；模块图标取消鼠标 hover 高亮，只保留点击和键盘焦点选中。 |
 | 2026-06-05 | Codex | 32*32(检测点) CSV 命名与检测点列 | `server.js` 中 `handSinglePoint` CSV 下载按语言输出 `检测点...csv` / `detection...csv` 文件名前缀，并在该系统 CSV 中新增 `检测点` / `detectionPoint` 列，值来自 1024 点矩阵最后一个点。 |
 | 2026-06-05 | Codex | 新增 32*32(检测点) | 新增 `handSinglePoint` 系统类型，沿用 `hand` 的单串口 1024 点协议和默认波特率；线序只在后端按用户提供的 1-based 表重排一次，展示、入库和 CSV 下载都使用同一份后端处理后的矩阵；前端复用手部检测 3D 点阵/原始数据展示，并补齐授权页和密钥脚本入口。 |
 | 2026-06-03 | Codex | CSV 表头中英文自适配 | 前端下载请求携带当前 `i18n.language`，后端按语言输出中文表头或旧版英文简写表头；手套部位列和 `清零帧` 也同步跟随语言。 |
@@ -644,6 +710,11 @@ graph TD
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-06-29 | Codex | 配置变更 | Shroom Vision 密钥入口根据新稿移除 `SolutionFeatureStrip` 使用，反馈按钮改为“反馈 >”紧凑形态，SDK 徽标改为“SDK 定制”，方案卡、模块按钮、密钥框和背景地面光效统一为蓝青色视觉。 |
+| 2026-06-29 | Codex | 配置变更 | Shroom Vision 密钥入口移除参考图外层窗口 chrome 的模拟，包括三色窗口圆点和页面外层描边圆角，保留内页布局本身。 |
+| 2026-06-29 | Codex | 配置变更 | Shroom Vision 方案卡片不再响应点击/聚焦切换选中态，模块项不再使用按钮选中样式；方案头部 icon 与列表 icon 均设置固定 flex 基准，防止窄卡片下图片被压缩。 |
+| 2026-06-26 | Codex | 新增功能 | Shroom Vision 密钥入口新增共享 `LicensePortalWidgets.jsx`，提供底部核心能力条和右下角反馈入口；点击“提供反馈”后弹出反馈表单，支持类型切换、500 字内容计数和选填联系方式。 |
+| 2026-06-26 | Codex | 配置变更 | 密钥入口主标题改为 `Shroom Vision`，副标题改为一站式压力可视化、动态数据采集和专业报告输出文案；访问密钥面板移至解决方案卡片上方居中，左上角品牌图改用新增 `shroom-vision-logo.png`。 |
 | 2026-06-12 | Codex | 配置变更 | `smallBed12B` 缩小采集 CSV 下载保持真实采集的 256 点 `data`，不再为下载扩回 1024；回放链路仍会扩回 1024 并把未采样位置填 0。 |
 | 2026-06-12 | Codex | 新增功能 | CSV 下载弹窗新增进度条；后端流式写入每批 CSV 记录后上报总进度，前端展示当前文件、已写行数/总行数和文件序号，适配百万级历史帧导出。 |
 | 2026-06-12 | Codex | 配置变更 | `smallBed12B` 16x16 缩小采集的“左上/右上/左下/右下”按当前原始数据展示方向定义；由于展示链路会做对角线转置，后端入库时会把右上与左下互换为实际矩阵取点。 |
@@ -685,6 +756,32 @@ graph TD
 | 2026-06-05 | Codex | 配置变更 | `minzhen` 系统显示名称改为中文“轮椅”/英文 `Wheelchair`，授权页标签同步更新，内部 key、协议和数据链路保持不变。 |
 | 2026-06-05 | Codex | 配置变更 | `minzhen` 3D 模型模式中的压力点图展示坐标改为逆时针旋转 90 度并左右镜像，未改动原始数据展示、CSV、统计或模型本体。 |
 | 2026-06-05 | Codex | 配置变更 | 主传感器下拉框中 `handSinglePoint` / 32*32(检测点) 顺序调整到 `fast1024` / 32*32高速 后方。 |
+| 2026-06-24 | Codex | 配置变更 | 主界面传感器下拉和密钥配置“定制”分组新增 `matCol` / 小床褥采集授权入口。 |
+| 2026-06-24 | Codex | 修复缺陷 | `matCol` 停止采集不再自动下载 CSV，且 `sitCol/matCol` CSV 导出的 `label` 字段改为从采集记录名中稳定解析真实标签。 |
+| 2026-06-24 | Codex | 配置变更 | 采集弹窗中特征标签1改为文件名后缀语义，特征标签2 改为 CSV 标签语义，导出时只记录其下划线后的数字。 |
+| 2026-06-24 | Codex | 配置变更 | `sitCol/matCol` CSV 追加 `labelText` / `标签文本` 列，保留原有 `label` 数字列不变。 |
+| 2026-06-25 | Codex | 修复缺陷 | 历史记录列表合并 `dedupli()` 过滤 null/空 date，避免数据库异常记录触发 `Cannot read properties of null (reading 'includes')`。 |
+| 2026-06-25 | Codex | 新增功能 | `matCol` / 小床褥采集增加原始数据模式，使用 `Fast1024` 以 16x10（宽16高10）矩形矩阵渲染，并在密钥模块配置中明确支持 `numoriginal`。 |
+| 2026-06-25 | Codex | 修复缺陷 | `matCol` 的 2D 原始数据和 CSV `realData` 导出方向改为跟随正确的 3D/传感器方向，避免 2D、CSV 与 3D 不一致。 |
+| 2026-06-25 | Codex | 配置变更 | `matCol` CSV 表头对齐手部检测核心字段，并按转换后的 10x16 矩阵补齐秒数、最大值、时间戳、有效点数和矩阵总和；标签列继续保留在末尾。 |
+| 2026-06-25 | Codex | 配置变更 | `/license` 路由切换到行业解决方案体验中心，支持访问密钥输入、AES 校验和 WebSocket 写入；原密钥配置中心移动到 `/license-admin`。 |
+| 2026-06-25 | Codex | 配置变更 | 根路由 `/` 的启动密钥输入页改为行业解决方案体验中心样式，并与 `/license` 共享方案卡片配置；密钥验证成功后不再自动跳转，改为显示“进入系统”手动入口。 |
+| 2026-06-25 | Codex | 优化调整 | 行业方案体验中心按用户截图比例重排：主内容从原窄版放宽到约 85.5% 视口宽，三张方案卡和底部密钥框使用固定视口比例分配，避免视觉比例失真。 |
+| 2026-06-25 | Codex | 修复缺陷 | 密钥提交后立即写入前端本地缓存并用于下次打开预填；写入应用配置则以后端同步保存 `config.txt` 并回读校验为准，`/license` 和 `/license-admin` 等待 `licenseSaved` 回包后才提示配置写入成功。 |
+| 2026-06-25 | Codex | 配置变更 | 行业方案体验中心的方案卡和模块按钮图标从 Ant Design 图标切换为 `client/src/assets/开屏IMG` 中的图片资源，并通过 `solutionConfig.jsx` 统一供 `/` 与 `/license` 复用。 |
+| 2026-06-25 | Codex | 配置变更 | 密钥输入框默认值改为以后端 `config.txt` 为准：连接建立后后端读取当前配置密钥并通过 `licenseKey` 下发，前端同步填入 `/` 与 `/license` 的输入框。 |
+| 2026-06-25 | Codex | 配置变更 | 密钥输入框由 `password` 改为 `text` 明文显示；行业方案模块按钮通过 focus/click 切换选中状态。 |
+| 2026-06-25 | Codex | 配置变更 | 行业方案卡片文案调整为“座椅定制方案”，下方模块固定为“汽车座椅”和“人体工学椅”。 |
+| 2026-06-25 | Codex | 配置变更 | 康养方案模块由“坐垫监测”改为“宠物检测”，授权 key 改为 `petCare`，并分别使用新增宠物检测和人体工学椅图标文件。 |
+| 2026-06-25 | Codex | 新增功能 | 密钥行业方案页新增“定制LAB”卡片，模块包含“足垫”和“步道”，并使用新增 LAB、足垫、步道与 Shroom 标识图片。 |
+| 2026-06-26 | Codex | 优化调整 | 行业方案体验中心四列卡片布局加高并压缩内部间距，详情区改为自适应高度，“已解锁/等待密钥”状态改为静态底部行，避免覆盖说明文字。 |
+| 2026-06-26 | Codex | 优化调整 | 座椅定制方案卡标题恢复单行展示，避免标题在四列布局下断行。 |
+| 2026-06-26 | Codex | 优化调整 | 行业方案模块区改为每页固定三项，不足三项自动补“正在探索”；刚好一页时静态展示，超过一页时使用横向 track 轮播和上一页/下一页控制。 |
+| 2026-06-26 | Codex | 优化调整 | 行业方案多页轮播在上一页/下一页控件下方新增进度条，卡片底部不再展示“已解锁/等待密钥”状态，补位模块统一显示“正在探索”。 |
+| 2026-06-26 | Codex | 优化调整 | 行业方案体验页标题说明文案拆为两行居中排版，右上角增加“SDK 开发中”状态胶囊并与系统连接状态上下排列。 |
+| 2026-06-26 | Codex | 配置变更 | 行业方案体验页新增高精密小垫、自适应座椅、握力评估模块，分别替换康养、座椅定制、定制LAB 卡片中的“正在探索”补位项。 |
+| 2026-06-26 | Codex | 优化调整 | 行业方案卡片移除底部模块详情说明区，保留标题下方场景描述；访问密钥输入面板恢复标题提示并上移到方案模块区下方居中展示。 |
+| 2026-06-26 | Codex | 优化调整 | 启动密钥页底部操作合并为单个主按钮，验证前显示“保存”，验证后显示“进入系统”，从系统页返回时显示“回到系统”；模块按钮不再响应 hover 高亮。 |
 | 2026-06-05 | Codex | 配置变更 | `handSinglePoint` / 32*32(检测点) CSV 下载文件名前缀改为随语言输出中文 `检测点` 或英文 `detection`，并新增 `检测点` / `detectionPoint` 表头列记录矩阵最后一个点。 |
 | 2026-06-05 | Codex | 新增功能 | 新增 `handSinglePoint` / 32*32(检测点)：串口协议与 `hand` 保持一致，默认 `1000000` 波特率，线序只在后端重排一次，前端展示、采集入库和 CSV 下载复用同一份 1024 点矩阵；前端与授权配置复用手部检测普通 3D/原始数据模式。 |
 | 2026-06-03 | Codex | 配置变更 | CSV 下载表头改为跟随界面语言：中文系统使用中文表头，英文系统保留旧版英文简写表头。 |

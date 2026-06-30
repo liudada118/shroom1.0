@@ -26,7 +26,8 @@ import HandLine0123 from "./components/demo/handLine0123";
 import LineAdjust from "./components/demo/LineAdjust";
 import Can from "./components/demo/can";
 import Num3D from "./components/num/NumWs";
-import License from "./page/license/License";
+import LicenseAdmin from "./page/license/License";
+import LicensePortal from "./page/licensePortal/LicensePortal";
 i18next.init({
   resources: {
     en: {
@@ -53,6 +54,10 @@ i18next.init({
         meanPress: 'Average Pressure',
         maxPress: 'Maximum pressure',
         pressTotal: 'The sum of pressures',
+        pressureIntensityArea: 'Pressure Intensity Area',
+        pressureIntensityData: 'Pressure Intensity Data',
+        meanPressureIntensity: 'Average Pressure Intensity',
+        maxPressureIntensity: 'Maximum Pressure Intensity',
         points: "Data points",
         area: "Area",
         allPress: "Overall pressure",
@@ -160,6 +165,7 @@ i18next.init({
         sensorSmallBedNoAlg: 'Small Bed Detection(Data)',
         smallBed: 'Small Bed Detection',
         sensorSmallBed12B: 'Small Bed Detection(12B)',
+        sensorMatCol: 'Small Mattress Collection',
         sensorPetCare: 'Pet Care',
         sensorPetCareMini: 'Mini Care',
         sensorFast256: '16*16 High Speed',
@@ -201,6 +207,10 @@ i18next.init({
         meanPress: '平均压力',
         maxPress: '最大压力',
         pressTotal: '压力总和',
+        pressureIntensityArea: '压强面积',
+        pressureIntensityData: '压强数据',
+        meanPressureIntensity: '平均压强',
+        maxPressureIntensity: '最大压强',
         points: '点数',
         area: '面积',
         allPress: '压力总和',
@@ -307,6 +317,7 @@ i18next.init({
         sensorSmallBedNoAlg: '小床检测(数据)',
         smallBed: '小床检测',
         sensorSmallBed12B: '小床检测(12B)',
+        sensorMatCol: '小床褥采集',
         sensorPetCare: '宠物看护',
         sensorFast256: '16*16高速',
         sensorFast1024: '32*32高速',
@@ -395,7 +406,8 @@ function App() {
         <Route exact path="/log" element={<Log />} />
         <Route exact path="/diff" element={<MatrixDiff />} />
         <Route exact path="/3Dnum" element={<Num3D />} />
-        <Route exact path="/license" element={<License />} />
+        <Route exact path="/license" element={<LicensePortal />} />
+        <Route exact path="/license-admin" element={<LicenseAdmin />} />
         {/* <Route exact path="/local" element={<Local />} /> */}
         {/* <Route exact path="/back" element={<Back />} /> */}
       </Routes>

@@ -28,6 +28,11 @@ const clampTextureValue = (value, textureValueMax) => {
   const { max } = getTextureRange(textureValueMax);
   return Math.max(0, Math.min(max, Math.round(Number(value) || 0)));
 }
+const getDecimalScale = (matrixName) => (matrixName === 'smallBed12B' ? 10 : 1);
+const formatDisplayValue = (value, decimalScale) => (
+  decimalScale > 1 ? (Number(value) / decimalScale).toFixed(1) : String(value)
+);
+const getPressureChartPadding = (matrixName) => (matrixName === 'smallBed12B' ? 5 : 1000);
 function jet(min, max, x) {
   let red, g, blue;
   let dv;
@@ -70,6 +75,11 @@ var animationRequestId
 var materialRef = null // 用于 sitValue 更新纹理
 export default React.forwardRef((props, refs) => {
   const { size = 2 } = props
+  const matrixWidth = Number(props.matrixWidth) || 0;
+  const matrixHeight = Number(props.matrixHeight) || 0;
+  const gridWidth = matrixWidth > 0 ? matrixWidth : 64 / size;
+  const gridHeight = matrixHeight > 0 ? matrixHeight : 64 / size;
+  const worldCellSize = 2 / Math.max(gridWidth, gridHeight);
   const stats = new Stats();
   stats.showPanel(0); // 0: FPS, 1: ms, 2: memory
   // document.body.appendChild(stats.dom);
@@ -171,27 +181,28 @@ export default React.forwardRef((props, refs) => {
     let press = dataArr.reduce((a, b) => a + b, 0)
     // press = pressTommhg(press, point)
     const mean = press / (point == 0 ? 1 : point)
+    const displayPress = props.matrixName === 'smallBed12B' ? max : press
     if (props.matrixName !== 'minzhen') {
       props.data.current?.changeData({
         meanPres: mean.toFixed(2),
         maxPres: max,
         point: point,
         // area: areaSmooth.toFixed(0),
-        totalPres: press,
+        totalPres: displayPress,
         // pressure: pressureSmooth.toFixed(2),
       });
 
       if (totalArr.length < 20) {
-        totalArr.push(press);
+        totalArr.push(displayPress);
       } else {
         totalArr.shift();
-        totalArr.push(press);
+        totalArr.push(displayPress);
       }
 
       const maxTotal = findMax(totalArr);
 
       if (!local)
-        props.data.current?.handleCharts(totalArr, maxTotal + 1000);
+        props.data.current?.handleCharts(totalArr, maxTotal + getPressureChartPadding(props.matrixName));
 
       if (totalPointArr.length < 20) {
         totalPointArr.push(point);
@@ -210,25 +221,26 @@ export default React.forwardRef((props, refs) => {
 
   function sitValue(config) {
     const { valuej, valueg, value, valuel, valuef, valuelInit, press, prop } = config;
-    if (valuej) {
+    if (valuej !== undefined) {
       valuej1 = valuej;
       // 颜色变化时重新生成精灵图纹理并更新材质
       if (materialRef) {
-        const textureMax = props.textureValueMax || 255;
-        const newTex = createDigitSpriteSheetWithJet(props.textureValueMax ? textureMax : valuej1, textureMax);
+        const decimalScale = getDecimalScale(props.matrixName);
+        const textureMax = props.textureValueMax || (decimalScale > 1 ? valuej1 * decimalScale : 255);
+        const newTex = createDigitSpriteSheetWithJet(valuej1, textureMax, decimalScale);
         materialRef.uniforms.map.value = newTex;
         const { cols, rows } = getTextureRange(textureMax);
         materialRef.uniforms.tileSize.value.set(1.0 / cols, 1.0 / rows);
         materialRef.uniforms.map.value.needsUpdate = true;
       }
     }
-    if (valueg) valueg1 = valueg;
-    if (value) value1 = value;
-    if (valuel) valuel1 = valuel;
-    if (valuef) valuef1 = valuef;
+    if (valueg !== undefined) valueg1 = valueg;
+    if (value !== undefined) value1 = value;
+    if (valuel !== undefined) valuel1 = valuel;
+    if (valuef !== undefined) valuef1 = valuef;
     if (typeof press == 'number') valuep = press
     if (typeof prop == 'number') valueprop = prop
-    if (valuelInit) valuelInit1 = valuelInit;
+    if (valuelInit !== undefined) valuelInit1 = valuelInit;
   }
 
   useImperativeHandle(refs, () => ({
@@ -243,7 +255,7 @@ export default React.forwardRef((props, refs) => {
   }));
 
 
-  function createDigitSpriteSheetWithJet(maxVal, textureValueMax = 255) {
+  function createDigitSpriteSheetWithJet(maxVal, textureValueMax = 255, decimalScale = 1) {
     const { max: textureMax, cols, rows } = getTextureRange(textureValueMax);
     const canvas = document.createElement("canvas");
     const cellSize = 32;
@@ -252,7 +264,7 @@ export default React.forwardRef((props, refs) => {
     const ctx = canvas.getContext("2d");
     const colorMax = (maxVal && maxVal > 0) ? maxVal : 30;
 
-    ctx.font = `bold ${textureMax > 255 ? 16 : 18}px monospace`;
+    ctx.font = `bold ${decimalScale > 1 ? 11 : textureMax > 255 ? 16 : 18}px monospace`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
@@ -263,7 +275,8 @@ export default React.forwardRef((props, refs) => {
       const cy = y * cellSize;
 
       // 计算背景颜色（使用 colorMax 作为映射最大值）
-      const [r, g, b] = jet(0, colorMax, i);
+      const displayValue = i / decimalScale;
+      const [r, g, b] = jet(0, colorMax, displayValue);
       ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
       ctx.fillRect(cx, cy, cellSize, cellSize);
 
@@ -274,7 +287,7 @@ export default React.forwardRef((props, refs) => {
 
       // 白色数字
       ctx.fillStyle = "white";
-      ctx.fillText(i.toString(), cx + cellSize / 2, cy + cellSize / 2);
+      ctx.fillText(formatDisplayValue(i, decimalScale), cx + cellSize / 2, cy + cellSize / 2);
     }
 
     const tex = new THREE.CanvasTexture(canvas);
@@ -376,9 +389,10 @@ export default React.forwardRef((props, refs) => {
     canvas.addEventListener('pointerleave', onPointerUp);
     canvas.addEventListener('pointercancel', onPointerUp);
 
-    const textureMax = props.textureValueMax || 255;
+    const decimalScale = getDecimalScale(props.matrixName);
+    const textureMax = props.textureValueMax || (decimalScale > 1 ? valuej1 * decimalScale : 255);
     const { max: textureValueMax, cols: textureCols, rows: textureRows } = getTextureRange(textureMax);
-    const texture = createDigitSpriteSheetWithJet(props.textureValueMax ? textureValueMax : valuej1, textureValueMax);
+    const texture = createDigitSpriteSheetWithJet(valuej1, textureValueMax, decimalScale);
 
     const material = new THREE.ShaderMaterial({
 
@@ -428,9 +442,8 @@ export default React.forwardRef((props, refs) => {
     material.toneMapped = false;
     materialRef = material; // 暴露给 sitValue 使用
     // const size = 4
-    const gridSize = 64 / size;
-    const count = gridSize * gridSize;
-    const geometry = new THREE.PlaneGeometry(0.032 * size, 0.032 * size);
+    const count = gridWidth * gridHeight;
+    const geometry = new THREE.PlaneGeometry(worldCellSize * 1.024, worldCellSize * 1.024);
 
     // const geometry = new THREE.PlaneGeometry(0.1, 0.1);
     const uvOffsets = new Float32Array(count * 2);
@@ -439,11 +452,15 @@ export default React.forwardRef((props, refs) => {
     const dummy = new THREE.Object3D();
     // mesh.rotation.x = Math.PI
     for (let i = 0; i < count; i++) {
-      const x = i % gridSize;
-      const y = Math.floor(i / gridSize);
+      const x = i % gridWidth;
+      const y = Math.floor(i / gridWidth);
       // dummy.position.set((x - 31.5) / 32, (y - 31.5) / 32, 0); // 居中
 
-      dummy.position.set((x) / 32 * size, (y) / 32 * size, 0); // 居中
+      dummy.position.set(
+        (x - (gridWidth - 1) / 2) * worldCellSize,
+        (y - (gridHeight - 1) / 2) * worldCellSize,
+        0
+      );
       // dummy.rotation.set(0, Math.PI, 0,)
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
@@ -500,7 +517,12 @@ export default React.forwardRef((props, refs) => {
       // }
 
 
-      res = res.map((a, index) => (a - valuef1 < 0 ? 0 : parseInt(a)));
+      const decimalScale = getDecimalScale(props.matrixName);
+      res = res.map((a) => {
+        const numberValue = Number(a);
+        if (!Number.isFinite(numberValue) || numberValue - valuef1 < 0) return 0;
+        return decimalScale > 1 ? Number(numberValue.toFixed(1)) : parseInt(numberValue);
+      });
       let data = res
 
       const max = Math.max(...res)
@@ -512,15 +534,19 @@ export default React.forwardRef((props, refs) => {
       animationRequestId = requestAnimationFrame(animate);
       //  = rangeValue/Math.PI/2
       for (let i = 0; i < count; i++) {
-        const x = i % gridSize;
-        const y = Math.floor(i / gridSize);
-        dummy.position.set((x - (32 / size - 0.5)) / 32 * size, (y - (32 / size - 0.5)) / 32 * size, 0); // 居中
+        const x = i % gridWidth;
+        const y = Math.floor(i / gridWidth);
+        dummy.position.set(
+          (x - (gridWidth - 1) / 2) * worldCellSize,
+          (y - (gridHeight - 1) / 2) * worldCellSize,
+          0
+        );
 
         // dummy.position.set((x ) / 32, (y ) / 32, 0);
         dummy.updateMatrix();
         mesh.setMatrixAt(i, dummy.matrix);
 
-        const d = clampTextureValue(data[i], textureValueMax)//Math.floor(Math.random() * 256);
+        const d = clampTextureValue(data[i] * decimalScale, textureValueMax)//Math.floor(Math.random() * 256);
         uvOffsets[i * 2] = (d % textureCols) / textureCols;
         uvOffsets[i * 2 + 1] = Math.floor(d / textureCols) / textureRows;
 
