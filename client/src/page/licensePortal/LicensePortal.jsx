@@ -3,7 +3,6 @@ import { message } from 'antd';
 import {
   CodeOutlined,
   LockOutlined,
-  SafetyCertificateOutlined,
 } from '@ant-design/icons';
 import { decryptStr } from '../license/aesUtil';
 import {
@@ -13,6 +12,7 @@ import {
   normalizeLicenseFiles,
   SOLUTIONS,
 } from './solutionConfig';
+import { FeedbackWidget } from './LicensePortalWidgets';
 import './LicensePortal.css';
 
 const LicensePortal = () => {
@@ -20,7 +20,6 @@ const LicensePortal = () => {
   const [wsConnected, setWsConnected] = useState(false);
   const [saving, setSaving] = useState(false);
   const [activeSolution, setActiveSolution] = useState('care');
-  const [activeModuleBySolution, setActiveModuleBySolution] = useState({});
   const [carouselIndexBySolution, setCarouselIndexBySolution] = useState({});
   const wsRef = useRef(null);
   const pendingKeyRef = useRef('');
@@ -84,21 +83,12 @@ const LicensePortal = () => {
     [activeSolution]
   );
 
-  const handleModuleActivate = useCallback((solutionKey, moduleKey) => {
-    setActiveSolution(solutionKey);
-    setActiveModuleBySolution((prev) => ({ ...prev, [solutionKey]: moduleKey }));
-  }, []);
-
   const handleCarouselStep = useCallback((solutionKey, carouselSlides, direction) => {
     setActiveSolution(solutionKey);
     const slideCount = carouselSlides.length;
     setCarouselIndexBySolution((prev) => {
       const currentIndex = prev[solutionKey] || 0;
       const nextIndex = (currentIndex + direction + slideCount) % slideCount;
-      const nextModule = carouselSlides[nextIndex]?.[0];
-      if (nextModule) {
-        setActiveModuleBySolution((modulePrev) => ({ ...modulePrev, [solutionKey]: nextModule.key }));
-      }
       return {
         ...prev,
         [solutionKey]: nextIndex,
@@ -141,8 +131,7 @@ const LicensePortal = () => {
     <main className="solution-license-page">
       <header className="solution-topbar">
         <div className="solution-brand">
-          <img alt="" className="solution-logo-img" draggable={false} src={BRAND_LOGO_SRC} />
-          <strong>Shroom</strong>
+          <img alt="Shroom" className="solution-logo-img" draggable={false} src={BRAND_LOGO_SRC} />
         </div>
         <div className="solution-top-actions">
           <div className="solution-status">
@@ -151,32 +140,48 @@ const LicensePortal = () => {
           </div>
           <div className="solution-sdk-badge">
             <CodeOutlined />
-            <span>SDK 开发中</span>
+            <span>SDK 定制</span>
           </div>
         </div>
       </header>
 
       <section className="solution-hero">
-        <h1>Shroom 行业解决方案体验中心</h1>
+        <h1>Shroom Vision</h1>
         <p>
-          <span>面向康养、汽车、具身智能等行业场景，快速生成可展示、可沟通、可验证的解决方案内容，</span>
-          <span>帮助团队完成方案构思、客户演示与决策验证。</span>
+          <span>面向康养、汽车、具身智能等行业场景，一站式完成压力可视化展示、动态数据采集与专业报告输出。</span>
         </p>
+      </section>
+
+      <section className={`solution-access-panel theme-${activeSolutionInfo.color}`}>
+        <div className="solution-access-form">
+          <input
+            aria-label="访问密钥"
+            onChange={(event) => setAccessKey(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') handleSave();
+            }}
+            placeholder="请输入访问密钥"
+            type="text"
+            value={accessKey}
+          />
+          <button type="button" onClick={handleSave} disabled={saving}>
+            {saving ? '保存中' : '保存'}
+          </button>
+        </div>
+        <div className="solution-access-note">
+          <LockOutlined />
+          密钥验证通过后，将自动加载并解锁对应方案内容
+        </div>
       </section>
 
       <section className="solution-grid" aria-label="行业方案">
         {SOLUTIONS.map((solution) => {
-          const isActive = activeSolution === solution.key;
           const carouselSlides = getSolutionCarouselSlides(solution);
           const carouselIndex = Math.min(carouselIndexBySolution[solution.key] || 0, carouselSlides.length - 1);
-          const carouselModuleList = carouselSlides.flat();
-          const activeModuleKey = activeModuleBySolution[solution.key] || solution.modules[0]?.key;
-          const activeModule = carouselModuleList.find((module) => module.key === activeModuleKey) || carouselModuleList[0];
           return (
             <article
-              className={`solution-card theme-${solution.color} ${isActive ? 'is-active' : ''}`}
+              className={`solution-card theme-${solution.color}`}
               key={solution.key}
-              onClick={() => setActiveSolution(solution.key)}
             >
               <div className="solution-card-head">
                 <div className="solution-head-icon">
@@ -201,16 +206,13 @@ const LicensePortal = () => {
                         <div className="solution-carousel-slide" key={`${solution.key}-${slideIndex}`}>
                           <div className="solution-module-row">
                             {slide.map((module) => (
-                              <button
-                                className={`solution-module ${module.key === activeModule?.key ? 'is-selected' : ''} ${module.isResearch ? 'is-research' : ''}`}
+                              <div
+                                className={`solution-module ${module.isResearch ? 'is-research' : ''}`}
                                 key={module.key}
-                                onClick={() => handleModuleActivate(solution.key, module.key)}
-                                onFocus={() => handleModuleActivate(solution.key, module.key)}
-                                type="button"
                               >
                                 <span className="solution-module-icon">{module.icon}</span>
                                 <span>{module.label}</span>
-                              </button>
+                              </div>
                             ))}
                           </div>
                         </div>
@@ -220,16 +222,13 @@ const LicensePortal = () => {
                 ) : (
                   <div className="solution-module-row">
                     {(carouselSlides[0] || []).map((module) => (
-                      <button
-                        className={`solution-module ${module.key === activeModule?.key ? 'is-selected' : ''} ${module.isResearch ? 'is-research' : ''}`}
+                      <div
+                        className={`solution-module ${module.isResearch ? 'is-research' : ''}`}
                         key={module.key}
-                        onClick={() => handleModuleActivate(solution.key, module.key)}
-                        onFocus={() => handleModuleActivate(solution.key, module.key)}
-                        type="button"
                       >
                         <span className="solution-module-icon">{module.icon}</span>
                         <span>{module.label}</span>
-                      </button>
+                      </div>
                     ))}
                   </div>
                 )}
@@ -251,31 +250,8 @@ const LicensePortal = () => {
         })}
       </section>
 
-      <section className={`solution-access-panel theme-${activeSolutionInfo.color}`}>
-        <div className="solution-access-title">
-          <SafetyCertificateOutlined />
-          <span>请输入访问密钥以解锁对应行业方案</span>
-        </div>
-        <div className="solution-access-form">
-          <input
-            aria-label="访问密钥"
-            onChange={(event) => setAccessKey(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') handleSave();
-            }}
-            placeholder="请输入访问密钥"
-            type="text"
-            value={accessKey}
-          />
-          <button type="button" onClick={handleSave} disabled={saving}>
-            {saving ? '保存中' : '保存'}
-          </button>
-        </div>
-        <div className="solution-access-note">
-          <LockOutlined />
-          密钥验证通过后，将自动加载并解锁对应方案内容
-        </div>
-      </section>
+      <FeedbackWidget />
+
     </main>
   );
 };

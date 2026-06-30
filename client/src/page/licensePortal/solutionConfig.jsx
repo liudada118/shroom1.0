@@ -12,7 +12,7 @@ import petCareIcon from '../../assets/开屏IMG/ChatGPT Image 2026年6月25日 1
 import customLabIcon from '../../assets/开屏IMG/ChatGPT Image 2026年6月25日 21_52_37 (1).png';
 import footPadIcon from '../../assets/开屏IMG/ChatGPT Image 2026年6月25日 21_52_37 (2).png';
 import walkwayIcon from '../../assets/开屏IMG/ChatGPT Image 2026年6月25日 21_52_38 (3).png';
-import brandLogoIcon from '../../assets/开屏IMG/ChatGPT Image 2026年6月25日 21_52_51.png';
+import brandLogoIcon from '../../assets/开屏IMG/shroom-vision-logo.png';
 import highPrecisionPadIcon from '../../assets/开屏IMG/ChatGPT Image 2026年6月26日 13_52_17 (1).png';
 import adaptiveSeatIcon from '../../assets/开屏IMG/ChatGPT Image 2026年6月26日 13_52_17 (2).png';
 import gripAssessmentIcon from '../../assets/开屏IMG/ChatGPT Image 2026年6月26日 13_52_18 (3).png';
