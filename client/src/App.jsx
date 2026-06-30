@@ -27,6 +27,7 @@ import LineAdjust from "./components/demo/LineAdjust";
 import Can from "./components/demo/can";
 import Num3D from "./components/num/NumWs";
 import License from "./page/license/License";
+import LicensePortal from "./page/licensePortal/LicensePortal";
 i18next.init({
   resources: {
     en: {
@@ -371,9 +372,12 @@ function App() {
           // </I18nProvider> 
         } />
         <Route exact path="/" element={
-          // <I18nProvider lng="en">
+          // 开屏门户页：展示产品方案 + 输入/缓存密钥（不自动进入，需点击「进入系统」）
+          <LicensePortal />
+        } />
+        <Route exact path="/key" element={
+          // 旧密钥输入页（保留兜底：Home/Title 跳转 /?from=system 仍可用此页更新密钥）
           <Date i18n={i18next} />
-          // </I18nProvider> 
         } />
         <Route exact path="/system" element={
           // <I18nProvider lng="en">

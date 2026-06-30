@@ -173,3 +173,8 @@ export const THREE_CONFIG = {
   CAMERA_FAR: 10000,
   DEFAULT_CAMERA_POSITION: [0, 100, 200],
 };
+
+// ─── 授权后台（密钥管理系统）地址 ──────────────────────────────────────────────
+// 用于反馈提交等纯 REST 接口（与桌面端 configManager.js 的 keyServer.BASE_URL 保持一致）。
+// 线上正式地址。本地联调时可临时改为 http://localhost:3000（CSP 已放行）。
+export const LICENSE_SERVER_BASE_URL = 'https://shroom.jq-industries.com';
