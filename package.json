@@ -84,6 +84,7 @@
     "appId": "com.shroom.pressure-sensor",
     "productName": "Shroom",
     "asar": true,
+    "npmRebuild": false,
     "afterPack": "scripts/electron-builder-after-pack.js",
     "files": [
       "**/*",

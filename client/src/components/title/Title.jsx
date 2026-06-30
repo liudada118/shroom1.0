@@ -1555,6 +1555,7 @@ class Title extends React.Component {
     const allSensorArr = [
       { label: t('sensorHand'), value: 'hand' },
       { label: t('sensorHand0205'), value: 'hand0205' },
+      { label: t('sensorHand0205Double'), value: 'hand0205Double' },
       { label: t('sensorHandGlove115200'), value: 'handGlove115200' },
       { label: t('sensorHandGloveFullPacket'), value: 'handGloveFullPacket' },
       { label: t('sensorSmallSample'), value: 'smallSample' },

@@ -12,7 +12,7 @@ const fs = require('fs');
 const { SerialPort } = require("serialport");
 const { DelimiterParser } = require("@serialport/parser-delimiter");
 const sqlite3 = require("./sqlite3-compat").verbose();
-const { createObjectCsvStringifier: createCsvStringifier } = require("csv-writer");
+const { createObjectCsvWriter: createCsvWriter, createObjectCsvStringifier: createCsvStringifier } = require("csv-writer");
 const {
   openWeb,
   interp,
@@ -78,10 +78,11 @@ const {
   endiSit1024,
   carYLine,
 } = require("./openWeb");
-const module2 = require('./aes_ecb')
 const { resolveConfigFile, getConfigFileCandidates, getWritableConfigFile } = require('./licenseHelper');
+const licenseManager = require('./licenseManager');
+const sensorTypeStore = require('./sensorTypeStore');
+const appConfig = require('./configManager');
 const { isCar, dedupli, totalToN, } = require("./util");
-const { estimatePointPressure, FILTER_THRESHOLD: PRESSURE_CALIBRATION_FILTER_THRESHOLD } = require("./util/pressureCalibration_V2.7.54");
 const { pressSmallBed } = require("./utilMatrix");
 const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine, pressNew12203131 } = require('./server/mathUtils');
 const { initDb: _initDbFromModule } = require('./server/dbManager');
@@ -115,9 +116,6 @@ const isThreePortFile = (sensorType) => THREE_PORT_SENSOR_TYPES.has(sensorType);
 const getFrameMatrixData = (frame, key) => Array.isArray(frame?.[key]) ? frame[key] : [];
 const HAND_GLOVE_REALTIME_SEND_INTERVAL_MS = 1000 / 60;
 const COLLECTION_MIN_FREE_BYTES = Number(process.env.SHROOM_MIN_COLLECTION_FREE_BYTES) || 2 * 1024 * 1024 * 1024;
-const COLLECTION_INSERT_SQL = "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
-const COLLECTION_INSERT_BATCH_SIZE = Number(process.env.SHROOM_COLLECTION_INSERT_BATCH_SIZE) || 200;
-const COLLECTION_INSERT_FLUSH_INTERVAL_MS = Number(process.env.SHROOM_COLLECTION_INSERT_FLUSH_INTERVAL_MS) || 250;
 let lastHandGloveRealtimeSendAt = {
   sit: 0,
   back: 0,
@@ -279,7 +277,7 @@ function takeNextMinzhenSensorFrame() {
 
 let minzhenSensorTextBuffer = '';
 function handleMinzhenSensorPortData(data) {
-  if (file !== MINZHEN_TYPE || new Date().getTime() >= endDate) return;
+  if (file !== MINZHEN_TYPE || !licenseManager.isLicenseValid()) return;
 
   minzhenSensorTextBuffer += Buffer.from(data).toString();
   if (minzhenSensorTextBuffer.length > 4096) {
@@ -601,77 +599,14 @@ function getHistoryPressureData(row) {
 }
 
 function normalizeHistoryPressureData(row, file = '') {
-  const storedData = parseStoredFrameData(row);
   const data = getHistoryPressureData(row);
   const pressureData = isHandStorageType(file) && data.length > 256 ? data.slice(0, 256) : data;
   const normalizedData = pressureData.map((value) => {
     const numberValue = Number(value);
     return Number.isFinite(numberValue) ? numberValue : 0;
   });
-  if (file === SMALL_BED_12B_TYPE) {
-    return normalizeSmallBed12BPressureData(normalizedData, storedData);
-  }
   if (file !== TEMP_FULL_BED_TYPE) return normalizedData;
   return normalizedData.map((value) => value < TEMP_FULL_BED_PRESSURE_THRESHOLD ? 0 : value);
-}
-
-function isSmallBed12BPressureStoredData(storedData) {
-  return storedData && typeof storedData === 'object' && !Array.isArray(storedData) && (
-    storedData.pressureUnit === 'kPa' ||
-    storedData.dataUnit === 'kPa' ||
-    storedData.unit === 'kPa'
-  );
-}
-
-function normalizeSmallBed12BPressureData(data, storedData = null) {
-  const normalizedData = Array.isArray(data)
-    ? data.map((value) => {
-      const numberValue = Number(value);
-      return Number.isFinite(numberValue) ? numberValue : 0;
-    })
-    : [];
-
-  if (isSmallBed12BPressureStoredData(storedData)) {
-    return normalizedData.map(roundSmallBed12BPressureValue);
-  }
-
-  return applySmallBed12BPressureCalibration(normalizedData);
-}
-
-function roundSmallBed12BPressureValue(value) {
-  const numberValue = Number(value);
-  return Number((Number.isFinite(numberValue) ? numberValue : 0).toFixed(1));
-}
-
-function formatMatrixTotalForFile(value, targetFile = file) {
-  const numberValue = Number(value);
-  const safeValue = Number.isFinite(numberValue) ? numberValue : 0;
-  if (targetFile === SMALL_BED_12B_TYPE) {
-    return Number(safeValue.toFixed(1));
-  }
-  return totalToN(safeValue);
-}
-
-function applySmallBed12BPressureCalibration(data) {
-  if (!Array.isArray(data) || data.length === 0) return [];
-
-  let sum = 0;
-  let count = 0;
-  const adcData = data.map((value) => {
-    const numberValue = Number(value);
-    return Number.isFinite(numberValue) ? numberValue : 0;
-  });
-
-  for (const value of adcData) {
-    if (value > PRESSURE_CALIBRATION_FILTER_THRESHOLD) {
-      sum += value;
-      count += 1;
-    }
-  }
-
-  if (!count) return adcData.map(() => 0);
-  const adcAvg = sum / count;
-  return adcData.map((value) => roundSmallBed12BPressureValue(estimatePointPressure(adcAvg, value)));
 }
 
 function getCsvElapsedSeconds(rows, rowIndex, baseIndex = 0, frameIndex = 0) {
@@ -735,61 +670,6 @@ function normalizeCollectOptions(options = {}) {
       blockHeight: Number(matrixDownsample.blockHeight) || 2,
       samplePoint: matrixDownsample.samplePoint || 'topLeft',
     },
-  };
-}
-
-function normalizeSmallBed12BDisplayOptions(options = {}) {
-  const matrixMode = options.matrixMode === '16x16' ? '16x16' : '32x32';
-  return {
-    matrixMode,
-    samplePoint: options.samplePoint || 'topLeft',
-  };
-}
-
-function buildSmallBed12BRealtimeFrame(pressureData) {
-  const normalizedPressureData = Array.isArray(pressureData) ? pressureData : [];
-  const options = normalizeSmallBed12BDisplayOptions(smallBed12BDisplayOptions);
-  if (options.matrixMode !== '16x16') {
-    return {
-      sitData: normalizedPressureData,
-      rawSitData: normalizedPressureData,
-      pressureData: normalizedPressureData,
-      matrixWidth: 32,
-      matrixHeight: 32,
-      pressureUnit: 'kPa',
-      hz: colHZ,
-    };
-  }
-
-  const displayPressureData = transposeSquareMatrix(normalizedPressureData, 32);
-  const downsampled = downsampleMatrixByPoint(displayPressureData, {
-    sourceWidth: 32,
-    sourceHeight: 32,
-    targetWidth: 16,
-    targetHeight: 16,
-    blockWidth: 2,
-    blockHeight: 2,
-    samplePoint: options.samplePoint,
-  });
-
-  return {
-    sitData: downsampled,
-    rawSitData: downsampled,
-    pressureData: downsampled,
-    matrixWidth: 16,
-    matrixHeight: 16,
-    sourceMatrixWidth: 32,
-    sourceMatrixHeight: 32,
-    matrixOrientation: 'transposed',
-    pressureUnit: 'kPa',
-    matrixDownsample: {
-      enabled: true,
-      samplePoint: options.samplePoint,
-      displaySamplePoint: options.samplePoint,
-      blockWidth: 2,
-      blockHeight: 2,
-    },
-    hz: colHZ,
   };
 }
 
@@ -866,48 +746,44 @@ function downsampleMatrixByPoint(data, options = {}) {
   return result;
 }
 
+function expandDownsampledMatrixByPoint(data, options = {}) {
+  if (!Array.isArray(data)) return [];
+  const targetWidth = Number(options.targetWidth) || 16;
+  const targetHeight = Number(options.targetHeight) || 16;
+  const blockWidth = Number(options.blockWidth) || 2;
+  const blockHeight = Number(options.blockHeight) || 2;
+  const sourceWidth = Number(options.sourceWidth) || targetWidth * blockWidth;
+  const sourceHeight = Number(options.sourceHeight) || targetHeight * blockHeight;
+  const offset = getDownsampleOffset(options.samplePoint);
+  const result = new Array(sourceWidth * sourceHeight).fill(0);
+
+  for (let row = 0; row < targetHeight; row++) {
+    for (let col = 0; col < targetWidth; col++) {
+      const sourceRow = Math.min(sourceHeight - 1, row * blockHeight + Math.min(offset.row, blockHeight - 1));
+      const sourceCol = Math.min(sourceWidth - 1, col * blockWidth + Math.min(offset.col, blockWidth - 1));
+      result[sourceRow * sourceWidth + sourceCol] = data[row * targetWidth + col] ?? 0;
+    }
+  }
+
+  return result;
+}
+
 function shouldDownsampleSmallBed12BCollection() {
   return file === SMALL_BED_12B_TYPE && collectOptions.matrixDownsample?.enabled === true;
 }
 
 function buildSmallBed12BCollectionStorageData(frameToStore) {
-  const sourceData = Array.isArray(frameToStore?.sitData)
-    ? frameToStore.sitData
-    : (Array.isArray(frameToStore?.rawSitData) ? frameToStore.rawSitData : []);
+  const sourceData = Array.isArray(frameToStore?.sitData) ? frameToStore.sitData : [];
   if (!shouldDownsampleSmallBed12BCollection()) {
-    return JSON.stringify({
-      sitData: sourceData,
-      pressureData: sourceData,
-      matrixWidth: Number(frameToStore?.matrixWidth) || 32,
-      matrixHeight: Number(frameToStore?.matrixHeight) || 32,
-      matrixOrientation: frameToStore?.matrixOrientation,
-      sourceMatrixWidth: frameToStore?.sourceMatrixWidth,
-      sourceMatrixHeight: frameToStore?.sourceMatrixHeight,
-      pressureUnit: 'kPa',
-      matrixDownsample: frameToStore?.matrixDownsample,
-    });
-  }
-
-  if (Number(frameToStore?.matrixWidth) === 16 || sourceData.length === 256) {
-    return JSON.stringify({
-      sitData: sourceData,
-      pressureData: sourceData,
-      matrixWidth: Number(frameToStore?.matrixWidth) || 16,
-      matrixHeight: Number(frameToStore?.matrixHeight) || 16,
-      sourceMatrixWidth: Number(frameToStore?.sourceMatrixWidth) || 32,
-      sourceMatrixHeight: Number(frameToStore?.sourceMatrixHeight) || 32,
-      matrixOrientation: frameToStore?.matrixOrientation,
-      pressureUnit: 'kPa',
-      matrixDownsample: frameToStore?.matrixDownsample,
-    });
+    return JSON.stringify(sourceData);
   }
 
   const options = collectOptions.matrixDownsample || {};
   const displaySamplePoint = options.samplePoint || 'topLeft';
-  const displaySourceData = transposeSquareMatrix(sourceData, Number(options.sourceWidth) || 32);
-  const downsampled = downsampleMatrixByPoint(displaySourceData, {
+  const storageSamplePoint = getSmallBed12BStorageSamplePoint(displaySamplePoint);
+  const downsampled = downsampleMatrixByPoint(sourceData, {
     ...options,
-    samplePoint: displaySamplePoint,
+    samplePoint: storageSamplePoint,
   });
   return JSON.stringify({
     sitData: downsampled,
@@ -916,11 +792,9 @@ function buildSmallBed12BCollectionStorageData(frameToStore) {
     matrixHeight: Number(options.targetHeight) || 16,
     sourceMatrixWidth: Number(options.sourceWidth) || 32,
     sourceMatrixHeight: Number(options.sourceHeight) || 32,
-    matrixOrientation: 'transposed',
-    pressureUnit: 'kPa',
     matrixDownsample: {
       enabled: true,
-      samplePoint: displaySamplePoint,
+      samplePoint: storageSamplePoint,
       displaySamplePoint,
       blockWidth: Number(options.blockWidth) || 2,
       blockHeight: Number(options.blockHeight) || 2,
@@ -939,22 +813,30 @@ function buildSmallBedPlaybackPayload(row, extra = {}) {
     if (file === SMALL_BED_12B_TYPE && storedSitData.length === 256) {
       const matrixDownsample = storedData.matrixDownsample || {};
       return {
-        sitData: normalizeSmallBed12BPressureData(storedSitData, storedData),
-        matrixWidth: Number(storedData.matrixWidth) || 16,
-        matrixHeight: Number(storedData.matrixHeight) || 16,
+        sitData: expandDownsampledMatrixByPoint(storedSitData, {
+          targetWidth: Number(storedData.matrixWidth) || 16,
+          targetHeight: Number(storedData.matrixHeight) || 16,
+          sourceWidth: Number(storedData.sourceMatrixWidth) || 32,
+          sourceHeight: Number(storedData.sourceMatrixHeight) || 32,
+          blockWidth: Number(matrixDownsample.blockWidth) || 2,
+          blockHeight: Number(matrixDownsample.blockHeight) || 2,
+          samplePoint: matrixDownsample.samplePoint || 'topLeft',
+        }),
+        matrixWidth: Number(storedData.sourceMatrixWidth) || 32,
+        matrixHeight: Number(storedData.sourceMatrixHeight) || 32,
         sourceMatrixWidth: Number(storedData.sourceMatrixWidth) || 32,
         sourceMatrixHeight: Number(storedData.sourceMatrixHeight) || 32,
-        matrixOrientation: storedData.matrixOrientation,
         matrixDownsample,
+        playbackExpandedFromMatrixWidth: Number(storedData.matrixWidth) || 16,
+        playbackExpandedFromMatrixHeight: Number(storedData.matrixHeight) || 16,
         time: row?.timestamp,
         ...extra,
       };
     }
     return {
-      sitData: file === SMALL_BED_12B_TYPE ? normalizeSmallBed12BPressureData(storedSitData, storedData) : storedSitData,
+      sitData: storedSitData,
       matrixWidth: storedData.matrixWidth,
       matrixHeight: storedData.matrixHeight,
-      matrixOrientation: storedData.matrixOrientation,
       matrixDownsample: storedData.matrixDownsample,
       time: row?.timestamp,
       ...extra,
@@ -963,18 +845,26 @@ function buildSmallBedPlaybackPayload(row, extra = {}) {
 
   if (file === SMALL_BED_12B_TYPE && Array.isArray(storedData) && storedData.length === 256) {
     return {
-      sitData: normalizeSmallBed12BPressureData(storedData),
-      matrixWidth: 16,
-      matrixHeight: 16,
+      sitData: expandDownsampledMatrixByPoint(storedData, {
+        targetWidth: 16,
+        targetHeight: 16,
+        sourceWidth: 32,
+        sourceHeight: 32,
+        blockWidth: 2,
+        blockHeight: 2,
+        samplePoint: 'topLeft',
+      }),
+      matrixWidth: 32,
+      matrixHeight: 32,
+      playbackExpandedFromMatrixWidth: 16,
+      playbackExpandedFromMatrixHeight: 16,
       time: row?.timestamp,
       ...extra,
     };
   }
 
   return {
-    sitData: file === SMALL_BED_12B_TYPE
-      ? normalizeSmallBed12BPressureData(Array.isArray(storedData) ? storedData : [], storedData)
-      : (Array.isArray(storedData) ? storedData : []),
+    sitData: Array.isArray(storedData) ? storedData : [],
     time: row?.timestamp,
     ...extra,
   };
@@ -1093,8 +983,6 @@ const HAND_GLOVE_CSV_SEGMENT_HEADER_IDS = [
   'palm',
 ];
 
-const CSV_UTF8_BOM = '\ufeff';
-
 const CSV_TITLES = {
   zh: {
     index: '秒数',
@@ -1115,7 +1003,6 @@ const CSV_TITLES = {
     zeroFrame: '清零帧',
     detectionPoint: '检测点',
     label: '标签',
-    labelText: '标签文本',
   },
   en: {
     index: 'seconds',
@@ -1136,7 +1023,6 @@ const CSV_TITLES = {
     zeroFrame: 'zeroFrame',
     detectionPoint: 'detectionPoint',
     label: 'label',
-    labelText: 'labelText',
   },
 };
 
@@ -1341,7 +1227,7 @@ function exportHandGloveDoubleCsv({ selectQuery, params, csvTitle, csvTargetPath
       appendPrefixedHandGloveCsvHeaders(csvHeaders, 'right', csvTitle);
 
       const csvFilePath = csvTargetPath(`${csvTitle === CSV_TITLES.en ? 'glove2' : '触觉手套2'}${str}.csv`);
-      const csvWriter = createUtf8BomCsvWriter({
+      const csvWriter = createCsvWriter({
         path: csvFilePath,
         header: csvHeaders,
       });
@@ -1374,10 +1260,6 @@ function transposeSquareMatrix(data, size = 32) {
 
 function shouldTransposeSmallBedRawMatrix(sensorType) {
   return sensorType === JQ_BED_TYPE || sensorType === SMALL_BED_TYPE || sensorType === SMALL_BED_NO_ALG_TYPE || sensorType === SMALL_BED_12B_TYPE;
-}
-
-function shouldTransposeSmallBedRawMatrixFrame(sensorType, frame = null) {
-  return shouldTransposeSmallBedRawMatrix(sensorType) && frame?.matrixOrientation !== 'transposed';
 }
 
 function normalizeTempFullBedPlaybackPressureArray(data, frame = {}) {
@@ -1636,29 +1518,8 @@ const backTotal = backnum1 * backnum2;
 const sitTotal = sitnum1 * sitnum2;
 let length, history, nowGetTime;
 
-let nowDate = 0
-let endDate = 0
-
-const https = require('https')
-// 浣跨敤鍐呯疆 http 妯″潡鏇夸唬宸插簾寮冪殑 request 鍖?
-const http = require('http');
-http.get('http://sensor.bodyta.com:8080/rcv/login/getSystemTime', {
-  headers: { 'content-type': 'application/json; charset=utf-8;' }
-}, (res) => {
-  let data = '';
-  res.on('data', (chunk) => { data += chunk; });
-  res.on('end', () => {
-    try {
-      const body = JSON.parse(data);
-      logger.debug(body.time, 'body');
-      nowDate = parseInt(body.time);
-    } catch (e) {
-      logger.warn('Failed to parse system time response', e);
-    }
-  });
-}).on('error', (err) => {
-  logger.warn('Failed to get system time', err);
-});
+// 授权校验已统一到 licenseManager（在线版服务器时间 / 离线版防回拨可信时间）；
+// 全局 nowDate、endDate 与旧的 sensor.bodyta.com getSystemTime 均已删除，过期/到期由 licenseManager 维护。
 
 const runtimeResourceRoot = app.isPackaged ? process.resourcesPath : __dirname;
 const runtimeWritableRoot = app.isPackaged ? app.getPath('userData') : __dirname;
@@ -1692,36 +1553,6 @@ logger.info("[Path] resourceRoot=", runtimeResourceRoot);
 logger.info("[Path] writableRoot=", runtimeWritableRoot);
 logger.info("[Path] db=", filePath, "data=", csvPath, "config=", nameTxt);
 logger.info("[Path] configCandidates=", getConfigFileCandidates().join(", "));
-
-function persistLicenseKey(encryptedKey) {
-  const configDir = path.dirname(writableNameTxt);
-  const tempFile = path.join(configDir, `config.txt.tmp-${Date.now()}-${Math.floor(Math.random() * 1e6)}`);
-  fs.mkdirSync(configDir, { recursive: true });
-  fs.writeFileSync(tempFile, encryptedKey, 'utf8');
-  fs.renameSync(tempFile, writableNameTxt);
-
-  const savedKey = fs.readFileSync(writableNameTxt, 'utf8').trim();
-  if (savedKey !== encryptedKey) {
-    throw new Error('config.txt write verification failed');
-  }
-
-  nameTxt = writableNameTxt;
-  return writableNameTxt;
-}
-
-function readSavedLicenseKey() {
-  try {
-    const configFile = resolveConfigFile();
-    if (!configFile || !fs.existsSync(configFile)) {
-      return null;
-    }
-    const savedKey = fs.readFileSync(configFile, 'utf8').trim();
-    return savedKey || null;
-  } catch (error) {
-    logger.warn('[License] Failed to read saved license key:', error.message);
-    return null;
-  }
-}
 
 function validateWritableDirectory(targetDir) {
   const dir = String(targetDir || '').trim();
@@ -1810,7 +1641,6 @@ function getCollectionFreeBytes() {
 }
 
 function stopCollectionForStorageError(error, extra = {}) {
-  flushCollectionInsertQueues();
   flag = false;
   const message = error?.message || String(error || '数据库写入失败，已停止采集');
   logger.error('[Collection] stop collection:', message);
@@ -1850,84 +1680,6 @@ function handleCollectionDbError(err, channel) {
     return;
   }
   logger.error(err);
-}
-
-const collectionInsertQueues = new Set();
-const collectionInsertQueueByDb = new WeakMap();
-let collectionInsertFlushTimer = null;
-
-function getCollectionInsertQueue(dbRef, channel = 'sit') {
-  if (!dbRef) return null;
-  let queue = collectionInsertQueueByDb.get(dbRef);
-  if (!queue) {
-    queue = {
-      dbRef,
-      channel,
-      rows: [],
-      flushing: false,
-      stmt: null,
-      tx: null,
-    };
-    collectionInsertQueueByDb.set(dbRef, queue);
-    collectionInsertQueues.add(queue);
-  }
-  queue.channel = channel || queue.channel;
-  return queue;
-}
-
-function ensureCollectionInsertFlushTimer() {
-  if (collectionInsertFlushTimer) return;
-  collectionInsertFlushTimer = setInterval(flushCollectionInsertQueues, COLLECTION_INSERT_FLUSH_INTERVAL_MS);
-  if (typeof collectionInsertFlushTimer.unref === 'function') {
-    collectionInsertFlushTimer.unref();
-  }
-}
-
-function flushCollectionInsertQueue(queue) {
-  if (!queue || queue.flushing || queue.rows.length === 0) return;
-  const rows = queue.rows.splice(0, queue.rows.length);
-  queue.flushing = true;
-  try {
-    const nativeDb = getNativeDb(queue.dbRef);
-    if (nativeDb && typeof nativeDb.transaction === 'function' && typeof nativeDb.prepare === 'function') {
-      if (!queue.stmt) {
-        queue.stmt = nativeDb.prepare(COLLECTION_INSERT_SQL);
-      }
-      if (!queue.tx) {
-        queue.tx = nativeDb.transaction((batchRows) => {
-          for (const params of batchRows) {
-            queue.stmt.run(...params);
-          }
-        });
-      }
-      queue.tx(rows);
-    } else {
-      for (const params of rows) {
-        queue.dbRef.run(COLLECTION_INSERT_SQL, params, function (err) {
-          handleCollectionDbError(err, queue.channel);
-        });
-      }
-    }
-  } catch (err) {
-    handleCollectionDbError(err, queue.channel);
-  } finally {
-    queue.flushing = false;
-  }
-}
-
-function flushCollectionInsertQueues() {
-  collectionInsertQueues.forEach(flushCollectionInsertQueue);
-}
-
-function enqueueCollectionInsert(dbRef, params, channel = 'sit') {
-  const queue = getCollectionInsertQueue(dbRef, channel);
-  if (!queue) return;
-  queue.rows.push(params);
-  if (queue.rows.length >= COLLECTION_INSERT_BATCH_SIZE) {
-    flushCollectionInsertQueue(queue);
-  } else {
-    ensureCollectionInsertFlushTimer();
-  }
 }
 
 // initDb 鍖呰鍑芥暟锛岃嚜鍔ㄤ紶鍏?filePath 鍜?runtimeResourceRoot
@@ -2089,7 +1841,7 @@ function getHistorySeries({ sitRows = [], backRows = [], start = 0, end = null, 
     const backAreaValue = backData ? backData.filter((a) => a > 10).length : 0;
 
     press.push(
-      (sitData ? formatMatrixTotalForFile(sitTotalValue, file) : 0) +
+      (sitData ? totalToN(sitTotalValue) : 0) +
       (backData ? totalToN(backTotalValue, 1.3) : 0)
     );
     area.push(sitAreaValue + backAreaValue);
@@ -2124,29 +1876,9 @@ function createHistoryRowsForPlayback(dbRef, date, stats, eager) {
 }
 
 function buildZeroPlaybackFrame() {
-  if (file === SMALL_BED_12B_TYPE) {
-    return smallBed12BDisplayOptions.matrixMode === '16x16'
-      ? new Array(256).fill(0)
-      : new Array(1024).fill(0);
-  }
   return file === "bigBed"
     ? new Array(2048).fill(0)
     : new Array(1024).fill(0);
-}
-
-function buildZeroPlaybackPayload() {
-  const sitData = buildZeroPlaybackFrame();
-  if (file === SMALL_BED_12B_TYPE) {
-    const matrixSize = smallBed12BDisplayOptions.matrixMode === '16x16' ? 16 : 32;
-    return {
-      sitData,
-      matrixWidth: matrixSize,
-      matrixHeight: matrixSize,
-      pressureUnit: 'kPa',
-      matrixOrientation: matrixSize === 16 ? 'transposed' : undefined,
-    };
-  }
-  return { sitData };
 }
 
 function broadcastHistorySelectionPayload(payload) {
@@ -2208,10 +1940,9 @@ function loadSelectedHistory(dateLabel) {
       index: nowIndex,
       pressArr: historySeries.press,
       areaArr: historySeries.area,
-      historyTimeArr: historySeries.time,
       historySampleStep: historySeries.sampleStep || 1,
       historyLazy: !eager,
-      ...buildZeroPlaybackPayload(),
+      sitData: buildZeroPlaybackFrame(),
     });
 
     if (isThreePortFile(file)) {
@@ -2235,89 +1966,6 @@ function formatCsvDatePart(value) {
     str = timeStampTo_Date(Number(str));
   }
   return str;
-}
-
-function getCollectionCsvLabelInfo(value) {
-  const datePart = formatCsvDatePart(value);
-  const namePart = datePart.replace(/_\d{4}-\d{1,2}-\d{1,2}-\d{2}-\d{2}-\d{2}-\d+$/, '');
-  if (!namePart || namePart === datePart && /^\d+$/.test(namePart)) return { label: '', labelText: '' };
-  const labelTextMatch = namePart.match(/([^_]+_\d+)$/);
-  const labelText = labelTextMatch ? labelTextMatch[1] : '';
-  const labelMatch = labelText.match(/_(\d+)$/);
-  return {
-    label: labelMatch ? labelMatch[1] : '',
-    labelText,
-  };
-}
-
-function parseCsvMatrixData(value) {
-  if (Array.isArray(value)) return value;
-  if (typeof value !== 'string') return [];
-  try {
-    const parsed = JSON.parse(value || '[]');
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function transposeMatColToVisualDirection(data) {
-  const source = Array.isArray(data) ? data : [];
-  const sourceWidth = 10;
-  const sourceHeight = 16;
-  if (source.length !== sourceWidth * sourceHeight) {
-    return source;
-  }
-
-  const result = [];
-  for (let row = 0; row < sourceWidth; row++) {
-    for (let col = 0; col < sourceHeight; col++) {
-      result.push(source[col * sourceWidth + row]);
-    }
-  }
-  return result;
-}
-
-function formatMatColCsvRealData(value) {
-  const parsed = parseCsvMatrixData(value);
-  if (!parsed.length) return value;
-  return JSON.stringify(transposeMatColToVisualDirection(parsed));
-}
-
-function buildCollectionCsvHeaders(csvTitle, { includeLabel = true } = {}) {
-  const headers = getDefaultSitCsvHeaders(csvTitle);
-  if (includeLabel) {
-    headers.push(
-      { id: "label", title: csvTitle.label },
-      { id: "labelText", title: csvTitle.labelText },
-    );
-  }
-  return headers;
-}
-
-function buildCollectionCsvRow(row, { absoluteIndex = 0, relativeIndex = 0, baseTimestamp = null } = {}, csvTitle, {
-  transformRealData = (value) => value,
-  label = '',
-  labelText = '',
-} = {}) {
-  const matrixData = parseCsvMatrixData(transformRealData(row?.data));
-  const press = matrixData.reduce((sum, value) => sum + Number(value || 0), 0);
-  const newData = {
-    index: getCsvElapsedSecondsFromBase(row, absoluteIndex, baseTimestamp, relativeIndex),
-    max: matrixData.length ? findMax(matrixData) : 0,
-    time: timeStampToDate(row?.timestamp),
-    pressureArea: matrixData.filter((value) => Number(value) > 0).length,
-    pressure: formatMatrixTotalForFile(press, file),
-    realData: matrixData.length ? JSON.stringify(matrixData) : transformRealData(row?.data),
-  };
-  if (label || labelText) {
-    newData.label = label;
-    newData.labelText = labelText;
-  } else {
-    newData.label = '';
-    newData.labelText = '';
-  }
-  return newData;
 }
 
 function getCsvElapsedSecondsFromBase(row, rowIndex, baseTimestamp, fallbackIndex = 0) {
@@ -2371,27 +2019,6 @@ function closeWriteStream(stream) {
   });
 }
 
-async function writeCsvRecordsWithBom(csvFilePath, header, records = []) {
-  const stringifier = createCsvStringifier({ header });
-  const stream = fs.createWriteStream(csvFilePath, { encoding: 'utf8' });
-  try {
-    await writeStreamChunk(stream, CSV_UTF8_BOM + stringifier.getHeaderString());
-    if (records.length) {
-      await writeStreamChunk(stream, stringifier.stringifyRecords(records));
-    }
-    await closeWriteStream(stream);
-  } catch (error) {
-    stream.destroy();
-    throw error;
-  }
-}
-
-function createUtf8BomCsvWriter({ path: csvFilePath, header }) {
-  return {
-    writeRecords: (records) => writeCsvRecordsWithBom(csvFilePath, header, records),
-  };
-}
-
 async function writeCsvFileInBatches({
   csvFilePath,
   header,
@@ -2430,7 +2057,7 @@ async function writeCsvFileInBatches({
   };
 
   try {
-    await writeStreamChunk(stream, CSV_UTF8_BOM + stringifier.getHeaderString());
+    await writeStreamChunk(stream, stringifier.getHeaderString());
     emitProgress(true);
     while (written < rangeEnd - rangeStart) {
       const rows = queryHistoryRowsFromId(
@@ -2472,7 +2099,6 @@ function buildGenericSitCsvRow(row, { absoluteIndex, relativeIndex, baseTimestam
     shouldWriteDetectionPoint = false,
   } = options;
   const rawData = JSON.parse(row?.data || '[]');
-  const storedMatrixFrame = parseStoredFrameData(row);
   let pressureData, rotateData, zeroFrameData = [];
   let tempFullBedPayload = null;
   if (file === TEMP_FULL_BED_TYPE) {
@@ -2499,17 +2125,15 @@ function buildGenericSitCsvRow(row, { absoluteIndex, relativeIndex, baseTimestam
   if (file === WHOLE_CHAIR_TYPE) {
     pressureData = normalizeWholeChairFrame('sit', pressureData);
   }
-  const matrixWidth = Number(storedMatrixFrame?.matrixWidth) || Math.sqrt(pressureData.length) || 32;
-  const matrixHeight = Number(storedMatrixFrame?.matrixHeight) || matrixWidth;
-  if (shouldTransposeSmallBedRawMatrixFrame(file, storedMatrixFrame) && matrixWidth === matrixHeight) {
-    pressureData = transposeSquareMatrix(pressureData, matrixWidth);
+  if (shouldTransposeSmallBedRawMatrix(file)) {
+    pressureData = transposeSquareMatrix(pressureData);
   }
   const press = pressureData.reduce((a, b) => a + b, 0);
   const area = pressureData.filter((a) => a > 0).length;
   const newData = {
     time: timeStampToDate(row?.timestamp),
     pressureArea: area,
-    pressure: formatMatrixTotalForFile(press, file),
+    pressure: totalToN(press),
     realData: JSON.stringify(pressureData),
     index: getCsvElapsedSecondsFromBase(row, absoluteIndex, baseTimestamp, relativeIndex),
     max: findMax(pressureData),
@@ -2739,7 +2363,7 @@ async function exportHandGloveDoubleCsvStreaming({ date, csvTitle, csvTargetPath
   };
 
   try {
-    await writeStreamChunk(stream, CSV_UTF8_BOM + stringifier.getHeaderString());
+    await writeStreamChunk(stream, stringifier.getHeaderString());
     emitProgress(true);
     while (written < end - start) {
       const limit = Math.min(batchSize, end - start - written);
@@ -2911,7 +2535,7 @@ async function exportHistoryCsvStreaming({ date, csvTitle, csvTargetPath, sendCs
           let matrixWidth = Number(storedFrame?.matrixWidth) || Math.sqrt(normalizeHistoryPressureData(row, file).length) || 32;
           let matrixHeight = Number(storedFrame?.matrixHeight) || matrixWidth;
           let sitData = normalizeHistoryPressureData(row, file);
-          if (shouldTransposeSmallBedRawMatrixFrame(file, storedFrame) && matrixWidth === matrixHeight) {
+          if (shouldTransposeSmallBedRawMatrix(file) && matrixWidth === matrixHeight) {
             sitData = transposeSquareMatrix(sitData, matrixWidth);
           }
           const press = sitData.reduce((a, b) => a + b, 0);
@@ -2919,7 +2543,7 @@ async function exportHistoryCsvStreaming({ date, csvTitle, csvTargetPath, sendCs
           return {
             time: timeStampToDate(row?.timestamp),
             pressureArea: area,
-            pressure: formatMatrixTotalForFile(press, file),
+            pressure: totalToN(press),
             realData: JSON.stringify(sitData),
             index: getCsvElapsedSecondsFromBase(row, meta.absoluteIndex, meta.baseTimestamp, meta.relativeIndex),
             max: findMax(sitData),
@@ -2932,33 +2556,23 @@ async function exportHistoryCsvStreaming({ date, csvTitle, csvTargetPath, sendCs
     }
 
     if (file === 'sitCol' || file === 'matCol') {
-      const { label, labelText } = getCollectionCsvLabelInfo(date);
+      const label = String(date).split('_')[1];
       const csvFilePath = csvTargetPath(`${file}${str}.csv`);
       await writeCsvFileInBatches({
         csvFilePath,
-        header: file === 'matCol'
-          ? buildCollectionCsvHeaders(csvTitle)
-          : [
-            { id: "realData", title: csvTitle.realData },
-            { id: "label", title: csvTitle.label },
-            { id: "labelText", title: csvTitle.labelText },
-          ],
+        header: [
+          { id: "realData", title: csvTitle.realData },
+          { id: "label", title: csvTitle.label },
+        ],
         dbRef: db,
         date,
         start: 0,
         end: null,
         onProgress: createProgressReporter(csvFilePath, 1, 1),
-        mapRow: (row, meta) => file === 'matCol'
-          ? buildCollectionCsvRow(row, meta, csvTitle, {
-            transformRealData: formatMatColCsvRealData,
-            label,
-            labelText,
-          })
-          : ({
-            realData: row?.data,
-            label,
-            labelText,
-          }),
+        mapRow: (row) => ({
+          realData: row?.data,
+          label,
+        }),
       });
       files.push(csvFilePath);
       sendCsvSuccess(files);
@@ -3315,22 +2929,119 @@ function getDefaultFileFromLicense(licenseFile, fallback = null) {
   return fallback;
 }
 
+/**
+ * 给单个客户端推送当前授权状态（在线/离线、到期时间、剩余天数、原因）。
+ * 无 payload → 提示输入密钥（校验中只发 checking）；有 payload 但未放行 → 附带 licenseError（踢停会话）。
+ */
+function sendLicenseStatusTo(client) {
+  if (!client || client.readyState !== WebSocket.OPEN) return;
+  const st = licenseManager.getState();
+  // 永久锁定（回拨/篡改）→ 弹解锁窗，需厂商解锁码
+  if (st.locked) {
+    client.send(JSON.stringify({ licenseLocked: true, reason: st.reason || '检测到异常行为，请联系厂商解锁' }));
+    return;
+  }
+  if (!st.payload) {
+    // 校验中（首检未回）时只发 checking，避免启动瞬间闪红"未授权"
+    client.send(JSON.stringify(st.checking
+      ? { licenseChecking: true }
+      : { licenseError: '未检测到有效密钥，请输入密钥后使用', noLicense: true }));
+    return;
+  }
+  const payload = {
+    date: st.expireTimestamp,
+    nowDate: st.lastCheckedAt || Date.now(), // 服务器/可信时间，供前端算剩余天数
+    file: licenseFile || file,
+    selectFlag: selectFlag,
+    checking: !!st.checking,
+    valid: !!st.valid,
+    licenseType: st.type,          // 'online' | 'offline'，供前端区分展示
+    remainingDays: st.remainingDays,
+    offline: !!st.offline,         // 在线密钥是否走了断网缓存兜底
+  };
+  if (st.payload.moduleConfig) payload.moduleConfig = st.payload.moduleConfig;
+  client.send(JSON.stringify(payload));
+  // 仅在校验已完成且未放行时才报错，避免"校验中"被误判为未授权
+  if (!st.checking && !st.valid) {
+    client.send(JSON.stringify({ licenseError: st.reason || '授权校验未通过', noLicense: false }));
+  }
+}
+
+/** 向所有前端连接广播当前授权状态。 */
+function broadcastLicenseStatus() {
+  if (!server) return;
+  server.clients.forEach(sendLicenseStatusTo);
+}
+
+/** 给单个客户端下发当前传感器类型清单（请求-应答 / 连接时主动 push 都走这）。 */
+function sendSensorTypesTo(client) {
+  if (!client || client.readyState !== WebSocket.OPEN) return;
+  client.send(JSON.stringify({ sensorTypeList: sensorTypeStore.getSnapshot() }));
+}
+
+/** 向所有前端广播传感器类型清单（远程拉取更新后调用）。 */
+function broadcastSensorTypes() {
+  if (!server) return;
+  server.clients.forEach(sendSensorTypesTo);
+}
+
+/** 向所有前端广播一条 licenseError（写入校验失败等即时反馈用）。 */
+function sendLicenseErrorToAll(msg) {
+  if (!server) return;
+  server.clients.forEach(function each(client) {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify({ licenseError: msg }));
+    }
+  });
+}
+
+/** 5min 复检回调：valid 由 true→false（吊销/过期/回拨锁定/断网无缓存）时通知前端停用。 */
+function onLicensePollChange(st, prevValid) {
+  if (prevValid && !st.valid) {
+    logger.warn('[License] 复检失效，通知前端停止使用：' + (st.reason || '') + (st.locked ? '（已锁定）' : ''));
+  }
+  broadcastLicenseStatus();
+}
+
 if (fs.existsSync(nameTxt)) {
   try {
-    const dateRes = fs.readFileSync(nameTxt, 'utf8');
-    const parsedData = JSON.parse(module2.decryptStr(dateRes));
-    endDate = parseFloat(parsedData.date);
-    licenseFile = parsedData.file || null;
-    selectFlag = getSelectFlagFromLicense(parsedData.file);
-    file = getDefaultFileFromLicense(parsedData.file, defauleFile);
-    // 鏍规嵁 file 绫诲瀷璁剧疆娉㈢壒鐜?
-    baudRate = getSensorBaudRate(file);
+    const startupRawKey = fs.readFileSync(nameTxt, 'utf8').trim();
+
+    // 1) 同步预取 payload：仅用于配置 db/串口（不联网、不判有效性）。
+    //    在线/离线统一归一化为 { date, file, moduleConfig }；旧 ECB config.txt 走在线分支，零兼容差异。
+    const peeked = licenseManager.peekPayload(startupRawKey);
+    if (peeked) {
+      licenseFile = peeked.payload.file || null;
+      selectFlag = getSelectFlagFromLicense(peeked.payload.file);
+      file = getDefaultFileFromLicense(peeked.payload.file, defauleFile);
+      // 鏍规嵁 file 绫诲瀷璁剧疆娉㈢壒鐜?
+      baudRate = getSensorBaudRate(file);
+    } else {
+      logger.warn('[License] 启动预取密钥失败（格式无法识别或解密失败），按未授权处理。');
+    }
+
+    // 2) 异步校验有效性（在线版联网 /licenseCheck、离线版 RSA+防回拨可信时间）。
+    //    isLicenseValid() 基线为 false，首检返回前数据通道保持关闭（fail-closed），不会在首检完成前放数据。
+    licenseManager.loadFromKey(startupRawKey)
+      .then((ok) => {
+        logger.info(`[License] 启动校验完成：valid=${ok} type=${licenseManager.getState().type}`);
+        // 在线/离线都启动 5min 复检：持续顶高水位、catch 开机后回拨时钟
+        licenseManager.startRuntimeRecheck(onLicensePollChange);
+        broadcastLicenseStatus();
+      })
+      .catch((err) => logger.error('[License] 启动校验异常', err));
   } catch (err) {
     logger.error(err);
   }
 } else {
   logger.info("[Config] config.txt not found, skip loading license at startup.");
 }
+
+// 后台拉取传感器类型清单：不阻塞启动（getSnapshot 已有缓存/内置兜底可立即下发），
+// 断网时不会白等超时；远程拉到后再广播一次，让已连接前端刷新到最新清单。
+sensorTypeStore.initSensorTypes(appConfig.keyServer.BASE_URL)
+  .then((updated) => { if (updated) broadcastSensorTypes(); })
+  .catch((err) => logger.warn('[SensorTypes] 初始化异常：' + (err && err.message)));
 
 // let db = new sqlite3.Database(`${filePath}/foot.db`);
 // let db1 = new sqlite3.Database(`${filePath}/back.db`);
@@ -3350,20 +3061,6 @@ let saveTime,
   comSensor;
 // db = new sqlite3.Database(`${filePath}/${file}.db`);
 
-// try {
-//   const dateRes = fs.readFileSync(nameTxt, 'utf8');
-
-//   console.log(dateRes)
-//   file = dateRes
-//   // date = JSON.parse(module2.decryptStr(dateRes)).dateRes
-//   // // endDate = JSON.parse(module2.decryptStr(dateRes)).dateRes
-//   // sysStartTime = (`${JSON.parse(module2.decryptStr(dateRes)).startTimeRes}`)
-//   // console.log(JSON.parse(module2.decryptStr(dateRes)).startTimeRes);
-//   // endDate = parseFloat(module2.decryptStr(date))
-// } catch (err) {
-//   logger.error(err);
-// }
-
 
 
 
@@ -3375,7 +3072,6 @@ db2 = dbObj.db2
 let flag = false;
 let colHZ = 12, oldTimeStamp = new Date().getTime();
 let collectOptions = { frequencyMode: 'serial', frequencyHz: 12, matrixDownsample: { enabled: false } };
-let smallBed12BDisplayOptions = { matrixMode: '32x32', samplePoint: 'topLeft' };
 let lastCollectionStorageAt = { sit: 0, back: 0, head: 0 };
 let splitBuffer = Buffer.from([0xaa, 0x55, 0x03, 0x99]);
 // let splitBuffer1 = Buffer.from([0xaa, 0x55, 0x03, 0x09]);
@@ -3433,14 +3129,11 @@ module.exports = {
         logger.debug("received: %s from %s", message, clientName, localFlag);
 
         const getMessage = JSON.parse(message);
-        if (getMessage.smallBed12BDisplayOptions != null) {
-          smallBed12BDisplayOptions = normalizeSmallBed12BDisplayOptions(getMessage.smallBed12BDisplayOptions);
-        }
 
         /**
          * 鐏忓棗鐤勯弮鍫曟浆閼冲本鏆熼幑顕€鈧岸浜鹃幍鎾崇磻
          */
-        if (nowDate < endDate) {
+        if (licenseManager.isLicenseValid()) {
           if (JSON.parse(message).backPort != null) {
             com1 = JSON.parse(message).backPort;
             try {
@@ -3568,7 +3261,6 @@ module.exports = {
       ws.on('close', () => clearInterval(heartbeatInterval));
       // ======================================================
 
-      const savedLicenseKey = readSavedLicenseKey();
       server.clients.forEach(function each(client) {
         /**
          * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
@@ -3576,8 +3268,7 @@ module.exports = {
         const jsonData = JSON.stringify({
           port: serialport,
           file: licenseFile || file,
-          selectFlag: selectFlag,
-          licenseKey: savedLicenseKey,
+          selectFlag: selectFlag
           // length: csvSitData.length,
           // sitData: csvSitData[0], backData: csvBackData[0]
         });
@@ -3587,35 +3278,15 @@ module.exports = {
         }
       });
 
-      if (endDate && endDate > 0) {
-        server.clients.forEach(function each(client) {
-          const jsonData = JSON.stringify({
-            date: endDate,
-            nowDate: nowDate,
-            file: licenseFile || file,
-            selectFlag: selectFlag,
-            licenseKey: savedLicenseKey,
-          });
-          if (client.readyState === WebSocket.OPEN) {
-            client.send(jsonData);
-          }
-        });
-      } else {
-        // 没有有效密钥时，发送错误信息给前端
-        server.clients.forEach(function each(client) {
-          if (client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify({ licenseError: '未检测到有效密钥，请输入密钥后使用', noLicense: true, licenseKey: savedLicenseKey }));
-          }
-        });
-      }
+      // 向新连接的客户端推送当前授权状态（在线/离线、剩余天数、checking、未授权原因）
+      sendLicenseStatusTo(ws);
+      // 连接时主动 push 一次传感器类型清单（配合渲染端的请求-应答，避免首屏空列表）
+      sendSensorTypesTo(ws);
 
       ws.on("message", function incoming(message) {
 
 
         const getMessage = JSON.parse(message);
-        if (getMessage.smallBed12BDisplayOptions != null) {
-          smallBed12BDisplayOptions = normalizeSmallBed12BDisplayOptions(getMessage.smallBed12BDisplayOptions);
-        }
 
         // if(getMessage.compen != null){
         //   compen = getMessage.compen
@@ -3623,108 +3294,99 @@ module.exports = {
 
         if (getMessage.date != null) {
           try {
-            const content = (getMessage.date.date)
-            const date = content
+            const newKey = (getMessage.date && getMessage.date.date ? String(getMessage.date.date) : '').trim();
 
-            if (!date || date.trim() === '') {
-              // 空密钥处理：发送错误提示给前端
+            if (!newKey) {
               logger.warn('[License] Empty license key received');
-              server.clients.forEach(function each(client) {
-                if (client.readyState === WebSocket.OPEN) {
-                  client.send(JSON.stringify({ licenseError: '密钥不能为空，请输入有效密钥' }));
-                }
-              });
+              sendLicenseErrorToAll('密钥不能为空，请输入有效密钥');
               return;
             }
 
-            const dateRes = module2.decryptStr(date)
-
-            if (!dateRes) {
-              logger.warn('[License] Failed to decrypt license key');
-              server.clients.forEach(function each(client) {
-                if (client.readyState === WebSocket.OPEN) {
-                  client.send(JSON.stringify({ licenseError: '密钥无效，解密失败' }));
-                }
-              });
+            // 识别 + 预取（同时校验格式：在线 ECB 解密、离线 RSA 验签）；失败即拒绝、不写入
+            const peeked = licenseManager.peekPayload(newKey);
+            if (!peeked) {
+              logger.warn('[License] Failed to parse/verify license key');
+              sendLicenseErrorToAll('密钥无效，解密或验签失败');
               return;
             }
 
-            const parsedLicense = JSON.parse(dateRes);
-            try {
-              const savedConfigFile = persistLicenseKey(date);
-              logger.info('[License] License key saved to config file:', savedConfigFile);
-            } catch (saveErr) {
-              logger.error('[License] Failed to save license key:', saveErr.message);
-              server.clients.forEach(function each(client) {
-                if (client.readyState === WebSocket.OPEN) {
-                  client.send(JSON.stringify({ licenseError: `密钥保存失败：${saveErr.message}` }));
-                }
-              });
-              return;
+            // 锁定 / 换密钥处理：
+            //  - 锁定态下重输【同一把】被锁密钥 → 拒绝（必须联系厂商重签新密钥）；
+            //  - 锁定态下写入【不同】新密钥 → clearLockState（清锁 + 清缓存）后重校验；
+            //  - 未锁定但写入【不同】新密钥 → 清旧缓存，强制新密钥先联网激活一次
+            //    （缓存不与密钥绑定，不清的话新密钥断网会沿用旧密钥缓存被误判有效）。
+            const currentKey = licenseManager.getState().rawKey;
+            const sameKey = currentKey && newKey === currentKey;
+            if (licenseManager.isLockedNow().locked) {
+              if (sameKey) {
+                logger.warn('[License] 锁定态下重复输入同一密钥，已拒绝');
+                sendLicenseErrorToAll('该密钥已因系统时间异常被锁定，请联系厂商重新获取新密钥');
+                return;
+              }
+              licenseManager.clearLockState();
+            } else if (!sameKey) {
+              licenseManager.clearOnlineCache();
             }
 
-            licenseFile = parsedLicense.file || null;
-            selectFlag = getSelectFlagFromLicense(parsedLicense.file);
-            // 支持 moduleConfig 字段：各传感器类型的默认功能模块配置
-            // { [sensorValue]: numMatrixFlag }
-            const rawModuleConfig = parsedLicense.moduleConfig || null;
-            const nextFile = getDefaultFileFromLicense(parsedLicense.file);
+            // 写入 config.txt（原始密钥串：在线为 hex、离线为 base64 JSON）
+            fs.mkdirSync(path.dirname(writableNameTxt), { recursive: true });
+            fs.writeFile(writableNameTxt, newKey, err => {
+              if (err) { logger.error(err); }
+            });
+            nameTxt = writableNameTxt;
+
+            // 更新运行期变量（file/baudRate 等），在线/离线统一用归一化 payload
+            licenseFile = peeked.payload.file || null;
+            selectFlag = getSelectFlagFromLicense(peeked.payload.file);
+            const nextFile = getDefaultFileFromLicense(peeked.payload.file);
             if (nextFile) {
               file = nextFile;
               Object.keys(petCareSystems).forEach(resetPetCareRuntime);
             }
-            endDate = parseFloat(parsedLicense.date);
-
             baudRate = getSensorBaudRate(file);
-            server.clients.forEach(function each(client) {
-              const payload = {
-                date: endDate,
-                nowDate: nowDate,
-                file: licenseFile || file,
-                selectFlag: selectFlag,
-                licenseSaved: true,
-                configFile: nameTxt,
-                licenseKey: date,
-              };
-              // 将功能模块配置一并下发给前端
-              if (rawModuleConfig) {
-                payload.moduleConfig = rawModuleConfig;
-              }
-              const jsonData = JSON.stringify(payload);
-              if (client.readyState === WebSocket.OPEN) {
-                client.send(jsonData);
-              }
-            });
+
+            // 异步校验有效性（在线联网 /licenseCheck、离线 RSA+可信时间），据类型启停轮询；先推"校验中"
+            const p = licenseManager.loadFromKey(newKey);
+            broadcastLicenseStatus();
+            p.then(() => {
+              // 在线/离线都重启 5min 复检
+              licenseManager.startRuntimeRecheck(onLicensePollChange);
+              broadcastLicenseStatus();
+            }).catch((err) => logger.error('[License] 写入后校验异常', err));
 
           } catch (err) {
-            logger.error('[License] Invalid license key:', err.message);
-            server.clients.forEach(function each(client) {
-              if (client.readyState === WebSocket.OPEN) {
-                client.send(JSON.stringify({ licenseError: '密钥无效，请检查后重新输入' }));
-              }
-            });
+            logger.error('[License] Invalid license key:', err && err.message);
+            sendLicenseErrorToAll('密钥无效，请检查后重新输入');
           }
         }
 
+        // 「重新获取授权」：前端阻断弹窗点按钮 → 清在线缓存 + 立刻联网复查当前密钥。
+        // 续期/恢复后无需等轮询、无需重启，点一下即时生效；吊销/暂停仍由 30s 复检自动停用。
+        if (getMessage.refreshLicense) {
+          try {
+            const curKey = licenseManager.getState().rawKey;
+            if (!curKey) {
+              sendLicenseErrorToAll('未检测到密钥，请先输入密钥');
+            } else {
+              licenseManager.clearOnlineCache();   // 清缓存 → 强制下次校验真正联网
+              const rp = licenseManager.loadFromKey(curKey);
+              broadcastLicenseStatus();             // 先推「校验中」
+              rp.then(() => {
+                licenseManager.startRuntimeRecheck(onLicensePollChange);
+                broadcastLicenseStatus();           // 推最新结果
+              }).catch((err) => logger.error('[License] 刷新校验异常', err));
+            }
+          } catch (err) {
+            logger.error('[License] refreshLicense 异常：' + (err && err.message));
+          }
+        }
 
+        // 传感器类型清单请求-应答（不受授权守卫限制：下拉/密钥页未授权时也要能拿到清单）
+        if (getMessage.getSensorTypes) {
+          sendSensorTypesTo(ws);
+        }
 
-        // if(new Date().getTime() >= parseInt(sysStartTime) + parseInt(module2.decryptStr(date)) * 24 * 60 * 60 * 1000){
-        //   server.clients.forEach(function each(client) {
-        //     /**
-        //      * 妫ｆ牗顐肩拠璇插絿娑撴彃褰涢敍灞界殺閺佺増宓侀梹鍨閸滃奔瑕嗛崣锝囶伂閸欙絾鏆?
-        //      *  */
-        //     const jsonData = JSON.stringify({
-        //       timeExpires: true,
-        //       // length: csvSitData.length,
-        //       // sitData: csvSitData[0], backData: csvBackData[0]
-        //     });
-        //     if (client.readyState === WebSocket.OPEN) {
-        //       client.send(jsonData);
-        //     }
-        //   });
-        // }
-
-        if (nowDate < endDate) {
+        if (licenseManager.isLicenseValid()) {
 
 
 
@@ -4306,7 +3968,6 @@ module.exports = {
             flag = true;
             resetCollectionStorageClock();
           } else if (JSON.parse(message).flag === false) {
-            flushCollectionInsertQueues();
             flag = false;
           }
 
@@ -4321,10 +3982,6 @@ module.exports = {
           if (JSON.parse(message).collectOptions != null) {
             collectOptions = normalizeCollectOptions(JSON.parse(message).collectOptions);
             colHZ = collectOptions.frequencyHz;
-          }
-
-          if (JSON.parse(message).smallBed12BDisplayOptions != null) {
-            smallBed12BDisplayOptions = normalizeSmallBed12BDisplayOptions(JSON.parse(message).smallBed12BDisplayOptions);
           }
 
           /**
@@ -5381,9 +5038,7 @@ module.exports = {
               if (isSmallBedMatrixType(file) || file === SMALL_BED_12B_TYPE || file === TEMP_FULL_BED_TYPE) {
                 const storedSitData = file === TEMP_FULL_BED_TYPE
                   ? buildTempFullBedPlaybackPayload(localData[i]).sitData
-                  : file === SMALL_BED_12B_TYPE
-                    ? normalizeHistoryPressureData(localData[i], file)
-                    : getStoredSitData(localData[i]);
+                  : getStoredSitData(localData[i]);
                 const storedFrame = parseStoredFrameData(localData[i]);
                 const storedWidth = file === TEMP_FULL_BED_TYPE ? 15 : Number(storedFrame?.matrixWidth) || 32;
                 for (let x = sitArr[0]; x < sitArr[1]; x++) {
@@ -5406,7 +5061,7 @@ module.exports = {
               let b = newsit.filter((a) => a > 10).length;
               // sitPressSelect.push(pressToN(b, a));
               // sitAreaSelect.push(b * 2.1);
-              sitPressSelect.push(formatMatrixTotalForFile(a, file));
+              sitPressSelect.push(totalToN(a));
               sitAreaSelect.push(b);
             }
 
@@ -5563,7 +5218,7 @@ module.exports = {
                   // const timeStamp = Date.now()
                   const str = nowGetTime.replace(/[/:]/g, "-");
                   const csvFilePath = csvTargetPath(`${file}${str}.csv`);
-                  const csvWriter = createUtf8BomCsvWriter({
+                  const csvWriter = createCsvWriter({
                     path: csvFilePath, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                     header: [
                       { id: "time", title: csvTitle.time },
@@ -5601,7 +5256,7 @@ module.exports = {
                     let sitData = normalizeHistoryPressureData(rows[i], file);
                     let matrixWidth = Number(storedFrame?.matrixWidth) || Math.sqrt(sitData.length) || 32;
                     let matrixHeight = Number(storedFrame?.matrixHeight) || matrixWidth;
-                    if (shouldTransposeSmallBedRawMatrixFrame(file, storedFrame) && matrixWidth === matrixHeight) {
+                    if (shouldTransposeSmallBedRawMatrix(file) && matrixWidth === matrixHeight) {
                       sitData = transposeSquareMatrix(sitData, matrixWidth);
                     }
                     // sitData = zeroLine(sitData,32,32)
@@ -5622,7 +5277,7 @@ module.exports = {
                         : area, //閸樼喎顫愰惌鈺呮█
                       pressure: sitPressSelect.length
                         ? sitPressSelect[i]
-                        : formatMatrixTotalForFile(press, file),
+                        : totalToN(press),
                       realData: JSON.stringify(sitData),
                       index: getCsvElapsedSeconds(rows, i, historyArr[0], j),
                       max: findMax(sitData),
@@ -5641,7 +5296,7 @@ module.exports = {
                   }
 
                   const csvFilePath = csvTargetPath(`${file}${str}.csv`);
-                  const csvWriter = createUtf8BomCsvWriter({
+                  const csvWriter = createCsvWriter({
                     path: csvFilePath, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                     header: getDefaultSitCsvHeaders(csvTitle),
                   });
@@ -5664,13 +5319,12 @@ module.exports = {
                   logger.error(err);
                 } else {
                   //閹跺﹥妞傞梻?閸樺濮忛棃銏⑿?楠炲啿娼庨崢瀣閺佺増宓乸ush鏉╂矞svWriter鏉╂稖顢戝Ч鍥ㄢ偓?
-                  const { label, labelText } = getCollectionCsvLabelInfo(getMessage.download)
+                  const label = getMessage.download.split('_')[1]
                   if (!rows.length) return;
                   for (var i = 0, j = 0; i < rows.length; i++, j++) {
                     const newData = {
-                      realData: formatMatColCsvRealData(rows[i][`data`]),
-                      label: label,
-                      labelText: labelText
+                      realData: rows[i][`data`],
+                      label: label
                     };
                     csvWriteData.push(newData);
                   }
@@ -5687,12 +5341,11 @@ module.exports = {
                   }
 
                   const csvFilePath = csvTargetPath(`${file}${str}.csv`);
-                  const csvWriter = createUtf8BomCsvWriter({
+                  const csvWriter = createCsvWriter({
                     path: csvFilePath, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                     header: [
                       { id: "realData", title: csvTitle.realData },
                       { id: "label", title: csvTitle.label },
-                      { id: "labelText", title: csvTitle.labelText },
                     ],
                   });
 
@@ -5714,19 +5367,13 @@ module.exports = {
                   logger.error(err);
                 } else {
                   //閹跺﹥妞傞梻?閸樺濮忛棃銏⑿?楠炲啿娼庨崢瀣閺佺増宓乸ush鏉╂矞svWriter鏉╂稖顢戝Ч鍥ㄢ偓?
-                  const { label, labelText } = getCollectionCsvLabelInfo(getMessage.download)
+                  const label = getMessage.download.split('_')[1]
                   if (!rows.length) return;
-                  const baseTimestamp = rows[0]?.timestamp;
                   for (var i = 0, j = 0; i < rows.length; i++, j++) {
-                    const newData = buildCollectionCsvRow(rows[i], {
-                      absoluteIndex: i,
-                      relativeIndex: j,
-                      baseTimestamp,
-                    }, csvTitle, {
-                      transformRealData: formatMatColCsvRealData,
-                      label,
-                      labelText,
-                    });
+                    const newData = {
+                      realData: rows[i][`data`],
+                      label: label
+                    };
                     csvWriteData.push(newData);
                   }
                   // 鐏忓棙鐪归幀鑽ゆ畱閸樺濮忛弫鐗堝祦閸愭瑥鍙?CSV 閺傚洣娆?
@@ -5742,9 +5389,12 @@ module.exports = {
                   }
 
                   const csvFilePath = csvTargetPath(`${file}${str}.csv`);
-                  const csvWriter = createUtf8BomCsvWriter({
+                  const csvWriter = createCsvWriter({
                     path: csvFilePath, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
-                    header: buildCollectionCsvHeaders(csvTitle),
+                    header: [
+                      { id: "realData", title: csvTitle.realData },
+                      { id: "label", title: csvTitle.label },
+                    ],
                   });
 
                   csvWriter
@@ -5773,7 +5423,6 @@ module.exports = {
                   console.log(historyArr)
                   for (var i = historyArr[0], j = 0; i < historyArr[1] - 1; i++, j++) {
                     const rawData = JSON.parse(rows[i][`data`]);
-                    const storedMatrixFrame = parseStoredFrameData(rows[i]);
                     let pressureData, rotateData, zeroFrameData = [];
                     let tempFullBedPayload = null;
                     if (file === TEMP_FULL_BED_TYPE) {
@@ -5803,10 +5452,8 @@ module.exports = {
                     if (file === WHOLE_CHAIR_TYPE) {
                       pressureData = normalizeWholeChairFrame('sit', pressureData);
                     }
-                    const matrixWidth = Number(storedMatrixFrame?.matrixWidth) || Math.sqrt(pressureData.length) || 32;
-                    const matrixHeight = Number(storedMatrixFrame?.matrixHeight) || matrixWidth;
-                    if (shouldTransposeSmallBedRawMatrixFrame(file, storedMatrixFrame) && matrixWidth === matrixHeight) {
-                      pressureData = transposeSquareMatrix(pressureData, matrixWidth);
+                    if (shouldTransposeSmallBedRawMatrix(file)) {
+                      pressureData = transposeSquareMatrix(pressureData);
                     }
                     console.log(pressureData.length)
                     const press = sitPressSelect.length
@@ -5825,7 +5472,7 @@ module.exports = {
                         : area,
                       pressure: sitPressSelect.length
                         ? sitPressSelect[i]
-                        : formatMatrixTotalForFile(press, file),
+                        : totalToN(press),
                       realData: JSON.stringify(pressureData),
                       index: getCsvElapsedSeconds(rows, i, historyArr[0], j),
                       max,
@@ -5880,7 +5527,7 @@ module.exports = {
                   }
 
                   const csvFilePath = csvTargetPath(`${getCsvFilePrefix(file, 'sit', getMessage.downloadOptions || {})}${str}.csv`);
-                  const csvWriter = createUtf8BomCsvWriter({
+                  const csvWriter = createCsvWriter({
                     path: csvFilePath,
                     header: csvHeaders,
                   });
@@ -5997,7 +5644,7 @@ module.exports = {
                     backCsvHeaders.push({ id: "rotate", title: csvTitle.rotate });
                   }
                   const backCsvFilePath = csvTargetPath(`${getCsvFilePrefix(file, 'back', getMessage.downloadOptions || {})}${str}.csv`);
-                  const csvWriter1 = createUtf8BomCsvWriter({
+                  const csvWriter1 = createCsvWriter({
                     path: backCsvFilePath,
                     header: backCsvHeaders,
                   });
@@ -6072,7 +5719,7 @@ module.exports = {
                     }
 
                     const headCsvFilePath = csvTargetPath(`head${str}.csv`);
-                    const csvWriter1 = createUtf8BomCsvWriter({
+                    const csvWriter1 = createCsvWriter({
                       path: headCsvFilePath,
                       // path: `./data/back${str}.csv`, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
                       header: [
@@ -6659,7 +6306,7 @@ parser.on("data", function (data) {
   let buffer = Buffer.from(data);
   newData = new Array();
   // console.log(buffer.length)
-  if (nowDate < endDate) {
+  if (licenseManager.isLicenseValid()) {
     if (file === HAND_GLOVE_FULL_PACKET && buffer.length === HAND_GLOVE_FULL_PACKET_LENGTH) {
       handleHandGloveFullPacket(buffer, 'left');
       return;
@@ -7550,7 +7197,7 @@ parserSmallBed12B.on("data", function (data) {
   let buffer = Buffer.from(data);
   newData = new Array();
 
-  if (nowDate < endDate && file === SMALL_BED_12B_TYPE && buffer.length === SMALL_BED_12B_PAYLOAD_LENGTH) {
+  if (licenseManager.isLicenseValid() && file === SMALL_BED_12B_TYPE && buffer.length === SMALL_BED_12B_PAYLOAD_LENGTH) {
     for (var i = 0; i < SMALL_BED_12B_PAYLOAD_LENGTH / 2; i++) {
       pointArr[i] = buffer.readUInt16LE(i * 2);
     }
@@ -7563,18 +7210,13 @@ parserSmallBed12B.on("data", function (data) {
       pointArr = pointArr.map((a, index) => numLessZeroToZero(a - pointArr1zero[index]));
     }
 
-    const pressureData = applySmallBed12BPressureCalibration(pointArr);
-    pointArr = pressureData;
-    newData = [...pressureData];
-    const jsonData = JSON.stringify(buildSmallBed12BRealtimeFrame(pressureData));
+    const jsonData = JSON.stringify({ sitData: pointArr, hz: colHZ });
     colOrSendData(jsonData);
   }
 });
 
 function colOrSendData(jsonData) {
-  // console.log(JSON.stringify(JSON.parse(jsonData).sitData) , 'jsonData')
-  const nowDate = new Date().getTime()
-  let frameToStore = null;
+  // console.log(JSON.stringify(JSON.parse(jsonData).sitData) , 'jsonData')  let frameToStore = null;
   if (file === MINZHEN_TYPE) {
     try {
       frameToStore = JSON.parse(jsonData);
@@ -7599,6 +7241,10 @@ function colOrSendData(jsonData) {
     // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
     const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
     const date = saveTime;
+    const insertQuery =
+      "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
+
+
     // 1.0 閺堝搫娅掓禍杞扮閸?
     // db.run(
     //   insertQuery,
@@ -7635,7 +7281,13 @@ function colOrSendData(jsonData) {
           ? JSON.stringify(getFrameMatrixData(frameToStore, 'sitData'))
           : JSON.stringify([...frameToStore.sitData]);
 
-    enqueueCollectionInsert(db, [dataToStore, timestamp, date], 'sit');
+    db.run(
+      insertQuery,
+      [dataToStore, timestamp, date],
+      function (err) {
+        handleCollectionDbError(err, 'sit');
+      }
+    );
   }
 
   if (!localFlag && shouldSendRealtimeFrame('sit')) {
@@ -7654,7 +7306,7 @@ var pointArr2;
 parser2.on("data", function (data) {
   pointArr2 = new Array();
   let buffer = Buffer.from(data);
-  if (nowDate < endDate) {
+  if (licenseManager.isLicenseValid()) {
     if (file === MINZHEN_TYPE) {
       const minzhenSensorFrame = parseMinzhenSensorFrame(buffer);
       if (minzhenSensorFrame) {
@@ -7708,7 +7360,20 @@ parser2.on("data", function (data) {
 
         const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
         const date = saveTime;
-        enqueueCollectionInsert(db1, [JSON.stringify(pointArr2), timestamp, date], 'back');
+        const insertQuery =
+          "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
+
+        db1.run(
+          insertQuery,
+          [JSON.stringify(pointArr2), timestamp, date],
+          function (err) {
+            if (err) {
+              logger.error(err);
+              return;
+            }
+            console.log(`Event inserted with ID ${this.lastID}`);
+          }
+        );
       }
 
       if (!localFlag) {
@@ -7924,8 +7589,6 @@ parser2.on("data", function (data) {
 });
 
 function colOrSendData1(jsonData) {
-
-  const nowDate = new Date().getTime()
   if (flag && shouldStoreCollectionFrame('back') && hasEnoughCollectionDiskSpace()) {
     const resDataArr = {
       data: JSON.stringify(pointArr),
@@ -7939,6 +7602,9 @@ function colOrSendData1(jsonData) {
     // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
     const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
     const date = saveTime;
+    const insertQuery =
+      "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
+
     const frameToStore = JSON.parse(jsonData);
     const dataToStore = frameToStore.tempObj
       ? JSON.stringify(frameToStore.tempObj)
@@ -7948,7 +7614,13 @@ function colOrSendData1(jsonData) {
           ? JSON.stringify(getFrameMatrixData(frameToStore, 'backData'))
           : JSON.stringify([...frameToStore.backData]);
 
-    enqueueCollectionInsert(db1, [dataToStore, timestamp, date], 'back');
+    db1.run(
+      insertQuery,
+      [dataToStore, timestamp, date],
+      function (err) {
+        handleCollectionDbError(err, 'back');
+      }
+    );
   }
 
   if (!localFlag && shouldSendRealtimeFrame('back')) {
@@ -7968,7 +7640,7 @@ parser3.on("data", function (data) {
     let buffer = Buffer.from(data);
 
     let res = [];
-    if (nowDate < endDate) {
+    if (licenseManager.isLicenseValid()) {
       if (buffer.length === 1025) {
         for (var i = 0; i < buffer.length; i++) {
           pointArr3[i] = buffer.readUInt8(i);
@@ -8016,7 +7688,15 @@ parser3.on("data", function (data) {
             if (dataFalg % 10 == 0) {
               const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
               const date = saveTime;
-              enqueueCollectionInsert(db, [JSON.stringify(res), timestamp, date], 'sit');
+              const insertQuery =
+                "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
+              db.run(
+                insertQuery,
+                [JSON.stringify(res), timestamp, date],
+                function (err) {
+                  handleCollectionDbError(err, 'sit');
+                }
+              );
             }
             if (dataFalg >= 10) {
               dataFalg = 0;
@@ -8037,7 +7717,7 @@ var pointArr4;
 parser4.on("data", function (data) {
   pointArr4 = new Array();
   let buffer = Buffer.from(data);
-  if (nowDate < endDate) {
+  if (licenseManager.isLicenseValid()) {
     if (buffer.length === 1024) {
 
       for (var i = 0; i < buffer.length; i++) {
@@ -8065,7 +7745,16 @@ parser4.on("data", function (data) {
 
         const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
         const date = saveTime;
-        enqueueCollectionInsert(db2, [JSON.stringify(pointArr4), timestamp, date], 'head');
+        const insertQuery =
+          "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
+
+        db2.run(
+          insertQuery,
+          [JSON.stringify(pointArr4), timestamp, date],
+          function (err) {
+            handleCollectionDbError(err, 'head');
+          }
+        );
       }
 
       if (!localFlag) {
@@ -8205,8 +7894,6 @@ parser4.on("data", function (data) {
 
 
 function colOrSendData2(jsonData) {
-
-  const nowDate = new Date().getTime()
   if (flag && shouldStoreCollectionFrame('head') && hasEnoughCollectionDiskSpace()) {
     const resDataArr = {
       data: JSON.stringify(pointArr),
@@ -8220,11 +7907,17 @@ function colOrSendData2(jsonData) {
     // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
     const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
     const date = saveTime;
+    const insertQuery =
+      "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
+
+
     const frameToStore = JSON.parse(jsonData);
-    enqueueCollectionInsert(
-      db2,
+    db2.run(
+      insertQuery,
       [isZeroFrameStorageType(file) ? buildZeroAwareStorageData(frameToStore, 'headData', 'head') : isSmallBedMatrixType(file) ? JSON.stringify(getFrameMatrixData(frameToStore, 'headData')) : JSON.stringify([...frameToStore.backData]), timestamp, date],
-      'head',
+      function (err) {
+        handleCollectionDbError(err, 'head');
+      }
     );
   }
 

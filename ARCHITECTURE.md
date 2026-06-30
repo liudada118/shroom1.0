@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-06-29
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-06-30
 
 ## 1. 项目概述
 
@@ -48,7 +48,9 @@ shroom1.0/
 ├── dbHelper.js              # better-sqlite3 数据库操作封装
 ├── logger.js                # 结构化日志模块（带文件输出和性能计时）
 ├── serialHelper.js          # 串口生命周期管理
-├── licenseHelper.js         # 授权验证（AES 解密 + 在线时间校验）
+├── licenseHelper.js         # 授权配置路径解析与 config.txt 候选文件管理
+├── licenseManager.js        # 在线/离线密钥统一解析、校验、缓存与运行期复检
+├── sensorTypeStore.js       # 传感器类型清单缓存、远程拉取与前端下发
 ├── configManager.js         # 统一配置中心
 ├── dataProcessor.js         # 传感器数据处理管线
 ├── csvHelper.js             # CSV 导出工具
@@ -258,15 +260,15 @@ graph TD
     - 历史记录列表合并时，`util.js` 的 `dedupli()` 会先过滤 `null`、空字符串和非数组输入，并把有效 `date` 统一转成字符串后再判断 `includes()`，避免数据库异常记录触发 Electron 主进程弹错。
 
 4. **授权验证流程**
-    - 应用启动 → `licenseHelper.js` 读取外部 `config.txt`（打包后优先读取 exe 同级文件，兼容 `resources/config.txt`，开发态读取项目根目录） → 使用 AES-ECB 解密 → 通过 HTTPS 获取网络时间 → 比对授权有效期 → 若过期则限制功能。
-    - 密钥 `file` 字段仍保留在密钥结构中用于兼容旧密钥和解析展示，但运行期不再用它锁定、切换或过滤当前传感器系统类型。
-    - 前端 `Title.jsx` 始终展示完整系统类型下拉框，渲染不再受 `matrixTitle` / `allowedTypes` 控制；`Home.jsx` 会清除旧的 `allowedTypes` 本地缓存，并忽略空的 `file` 值，避免密钥类型与实际传感器类型不一致时导致传感器不可选、不可用或当前类型被置空。
+    - 应用启动 → `licenseHelper.js` 解析外部 `config.txt` 候选路径 → `licenseManager.js` 读取原始密钥并统一识别在线 hex 密钥或离线 base64 激活码 → 在线密钥走远程授权检查与断网缓存兜底，离线密钥走签名验签与防时间回拨可信时间校验 → `server.js` 只在 `licenseManager.isLicenseValid()` 通过后开放串口数据处理、采集和 WebSocket 数据通道。
+    - `licenseManager` 会在启动和密钥写入后启动运行期复检，持续广播 `licenseType`、`remainingDays`、`licenseChecking`、`licenseError` 或 `licenseLocked`；前端 `Date.jsx`、`LicensePortal.jsx`、`License.jsx` 和 `Home.jsx` 根据这些状态展示验证中、过期、暂停、吊销或时间异常锁定提示。
+    - 密钥 `file` 字段继续用于授权范围、默认系统、模块配置和前端可选系统过滤；`server.js` 通过 `getSelectFlagFromLicense()` 下发 `selectFlag`，`Home.jsx` 将授权范围写入 `allowedTypes` 并在系统页过滤展示。
 
 6. **密钥配置管理流程**
-    - 用户启动应用进入 `/` 密钥输入页，或访问 `/license` 页面进入 `LicensePortal` 行业解决方案体验中心；两处都使用同一套行业方案卡片与访问密钥输入样式，输入框先用 `localStorage.shroomAccessKey` 占位，WebSocket 连上后由 `server.js` 读取实际 `config.txt` 并通过 `licenseKey` 回传，前端再以 `config.txt` 内容覆盖输入框默认值。访问密钥输入框使用明文 `text` 输入，模块图标仅在 click/focus 时切换选中状态，鼠标 hover 不再触发高亮切换。用户提交可解密密钥后，前端会立即把密钥保存到本地缓存，再按 `file` 授权范围点亮康养、座椅定制、具身智能方案，并通过 WebSocket `ws://localhost:19999` 发送 `{ date: { date: key } }` 写入应用；`server.js` 会先解析密钥，再把密钥同步写入可写 `config.txt`，通过临时文件 rename 和回读校验确认落盘成功后才广播 `licenseSaved`。根路由 `/` 校验成功后默认停留在密钥页，底部主按钮由“保存”切换为“进入系统”或从系统页返回时的“回到系统”。
-    - `licensePortal/solutionConfig.jsx` 集中导入 `assets/开屏IMG` 中的图标图片，渲染康养、座椅定制、具身智能、定制LAB 四张行业方案卡片和智能床垫、宠物检测、汽车座椅、人体工学椅、触觉手套、智能鞋垫、机器人、足垫、步道模块按钮；根路由 `/` 与 `/license` 复用同一份配置，避免两处页面图标不一致。
-    - 管理员密钥生成/解析页面保留在 `/license-admin`：勾选授权的传感器类型（支持分组全选和快捷预设） → 设置有效天数 → 点击生成密钥 → 密钥通过 AES-ECB 加密后可复制分发 → 也可在「密钥解析」标签页粘贴密钥查看授权详情；「写入应用」按钮会等待后端 `licenseSaved` 回包后才提示写入成功，保存失败时直接展示后端错误。
-    - `/license-admin` 的“定制”分组包含 `matCol` / 小床褥采集；生成密钥时会写入 `file` 授权范围，解析密钥时按同一传感器列表回显名称。
+    - 用户启动应用默认进入 `/` 的 `Date.jsx` 密钥输入页；该页只在用户主动提交后展示错误弹窗，收到有效 `date` 且 `valid !== false` 后再进入 `/system`。从系统页返回输入密钥时，不会因为后端主动推送有效授权而自动跳走。
+    - `/license` 保留行业解决方案体验中心 `LicensePortal`，用于展示 Shroom Vision 方案卡片、SDK 状态和访问密钥入口；提交密钥时仍通过 WebSocket `ws://localhost:19999` 发送 `{ date: { date: key } }`，后端由 `licenseManager` 判断在线/离线密钥格式并写入可写 `config.txt`。
+    - `/license-admin` 的 `License.jsx` 改为验证方密钥管理页：自动识别在线 hex 与离线 base64 激活码，支持解析预览、写入应用、展示当前授权状态、传感器类型映射、剩余天数、离线/在线状态和锁定提示；密钥统一由外部密钥管理系统生成，桌面端不再承担发证生成逻辑。
+    - 后端支持前端请求 `getSensorTypes`，由 `sensorTypeStore.js` 拉取/缓存传感器类型清单并通过 `sensorTypeList` 下发，密钥页和系统页可用后台动态映射替代本地硬编码名称。
 
 5. **自动更新流程**
     - 应用启动 30 秒后 → `autoUpdater.js` 检查自建服务器 `http://sensor.bodyta.com/shroom1` → 发现新版本后通过 `update-status` IPC 通道通知前端 → 前端 `UpdateNotifier` 组件弹出通知 → 用户点击「下载更新」后通过 `update-command` IPC 通道触发下载 → 下载过程中实时推送进度到前端 → 下载完成后弹窗询问是否立即安装并重启。
@@ -333,7 +335,7 @@ graph TD
 | 授权信息 | 外部 `config.txt`（AES 加密文件，不随安装包内置） | 授权有效期、设备标识 | 无 |
 | 数据库路径 | `configManager.js` | SQLite 数据库文件位置 | `./db/info.db` |
 | CSV 导出路径 | `configManager.js` | 采集数据 CSV 导出目录 | `./data/` |
-| 在线时间服务器 | `server.js` 硬编码 | 用于授权时间校验的 HTTPS 端点 | `https://worldtimeapi.org/api/ip` |
+| 授权服务配置 | `configManager.js` / `licenseManager.js` | 在线授权检查、离线密钥复检、传感器类型清单拉取 | `appConfig.keyServer.BASE_URL` |
 
 ## 8. 项目进度
 
@@ -341,6 +343,7 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-06-30 | Codex | 离线密钥分支合并 | 将 `feature/离线密钥功能增加/260616/sqt` 合并进 `sqliteOpti`，冲突文件以该分支为准，接入 `licenseManager` 在线/离线密钥统一校验、运行期复检、锁定提示和动态传感器类型清单。 |
 | 2026-06-29 | Codex | Shroom Vision 新稿视觉收敛 | `/` 与 `/license` 密钥入口按新稿移除底部能力条，将反馈入口收敛为右下角紧凑按钮，右上角 SDK 文案改为“SDK 定制”，并统一方案卡片为蓝青色科技风格。 |
 | 2026-06-29 | Codex | Shroom Vision 内页布局收敛 | `/` 与 `/license` 密钥入口移除人工窗口圆点和外层边框，只保留顶部 Logo/状态/SDK、主标题、密钥框、方案卡片和右下反馈入口组成的页面内部布局。 |
 | 2026-06-29 | Codex | Shroom Vision 方案模块静态化 | `/` 与 `/license` 密钥入口取消方案卡和模块项的默认高亮与 hover 反馈，模块改为纯展示列表，并固定左侧 icon 容器尺寸避免图标压缩。 |
@@ -710,6 +713,7 @@ graph TD
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-06-30 | Codex | 新增功能 | 合并离线密钥功能分支：新增 `licenseManager.js`、`crypto-lib.cjs`、`sensorTypeStore.js`，密钥校验从旧 `endDate/nowDate` 判断切换为 `licenseManager.isLicenseValid()`，并支持在线密钥、离线激活码、防回拨锁定、授权状态广播和传感器类型清单下发。 |
 | 2026-06-29 | Codex | 配置变更 | Shroom Vision 密钥入口根据新稿移除 `SolutionFeatureStrip` 使用，反馈按钮改为“反馈 >”紧凑形态，SDK 徽标改为“SDK 定制”，方案卡、模块按钮、密钥框和背景地面光效统一为蓝青色视觉。 |
 | 2026-06-29 | Codex | 配置变更 | Shroom Vision 密钥入口移除参考图外层窗口 chrome 的模拟，包括三色窗口圆点和页面外层描边圆角，保留内页布局本身。 |
 | 2026-06-29 | Codex | 配置变更 | Shroom Vision 方案卡片不再响应点击/聚焦切换选中态，模块项不再使用按钮选中样式；方案头部 icon 与列表 icon 均设置固定 flex 基准，防止窄卡片下图片被压缩。 |
