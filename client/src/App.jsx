@@ -171,6 +171,7 @@ i18next.init({
         sensorWholeChair: 'Whole Chair',
         sensorMinzhen: 'Wheelchair',
         enterBaudRate: 'Enter baud rate',
+        sensorMatCol : 'Smart Bed',
       },
     },
     zh: {
@@ -316,6 +317,7 @@ i18next.init({
         sensorHumanBody: '人体全身',
         sensorWholeChair: '整椅展示',
         enterBaudRate: '请输入波特率',
+        sensorMatCol : '小床褥监测',
       },
     },
   },

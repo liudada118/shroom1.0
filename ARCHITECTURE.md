@@ -343,6 +343,15 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-07-01 | Codex | Shroom Vision 保存密钥对齐 | `LicensePortal.css` 将“保存密钥”字号和复选框缩小，并让其左边距跟访问密钥输入框保持一致，桌面与 1280 响应式宽度分别同步到输入区缩进。 |
+| 2026-07-01 | Codex | Shroom Vision 密钥区细节调整 | `LicensePortal.css` 缩小“保存密钥”文字，移除访问密钥图片外层背景/边框/阴影，并在 `html` / `body` / `#root` 层限制横向溢出，避免密钥页出现横向滚动条。 |
+| 2026-07-01 | Codex | Shroom Vision 访问密钥图标替换 | `LicensePortal.jsx` 将访问密钥标题左侧 icon 从 `LockOutlined` 替换为 `assets/开屏IMG/ChatGPT Image 2026年7月1日 11_54_17.png`，并在 `LicensePortal.css` 固定图片尺寸，避免拉伸变形。 |
+| 2026-06-30 | Codex | Shroom Vision 门户放大与底部对齐 | `LicensePortal.css` 放大密钥入口、方案卡片与 1280 宽度下的字号/间距，并将底部 `Shroom Vision · © 2026 JQ Industries` 固定到与右下角“反馈”文字同一水平线。 |
+| 2026-06-30 | Codex | Shroom Vision 门户尺寸微调 | `LicensePortal.css` 将访问密钥面板背景改为 `#0072ef`，并在保持无横向滚动的前提下回放门户页整体字号、卡片和密钥区域间距，避免界面过度紧凑。 |
+| 2026-06-30 | Codex | Shroom Vision 门户布局更新 | `LicensePortal.jsx` / `LicensePortal.css` 按新参考图调整为顶部品牌与状态、左侧主标题、横向访问密钥面板、四列方案卡片、底部版权和右下反馈按钮的一屏布局，并保留原密钥提交与反馈弹窗逻辑。 |
+| 2026-06-30 | Codex | 采集标签 CSV 写入扩展 | `server.js` 将采集记录名里的特征标签2解析结果复用到大床、小床矩阵、通用座面、靠背、头枕和 `hand0205Double` CSV 导出；除小床褥外，其它带采集标签的下载也会追加 `label` / `labelText` 列。 |
+| 2026-06-30 | Codex | 采集 CSV 表头恢复 | 将 `sitCol` / `matCol` 下载表头恢复为合并前 `sqliteOpti` 规则：`sitCol` 输出 `realData,label,labelText`，`matCol` 输出矩阵统计列加 `label,labelText`，并恢复小床褥矩阵方向格式化。 |
+| 2026-06-30 | Codex | 采集写入运行时错误修复 | 修复 `server.js` 中 `colOrSendData()` 的 `frameToStore` 声明被合并冲突注释吞掉的问题，避免实时采集进入存储分支时报 `ReferenceError: frameToStore is not defined`。 |
 | 2026-06-30 | Codex | 离线密钥分支合并 | 将 `feature/离线密钥功能增加/260616/sqt` 合并进 `sqliteOpti`，冲突文件以该分支为准，接入 `licenseManager` 在线/离线密钥统一校验、运行期复检、锁定提示和动态传感器类型清单。 |
 | 2026-06-29 | Codex | Shroom Vision 新稿视觉收敛 | `/` 与 `/license` 密钥入口按新稿移除底部能力条，将反馈入口收敛为右下角紧凑按钮，右上角 SDK 文案改为“SDK 定制”，并统一方案卡片为蓝青色科技风格。 |
 | 2026-06-29 | Codex | Shroom Vision 内页布局收敛 | `/` 与 `/license` 密钥入口移除人工窗口圆点和外层边框，只保留顶部 Logo/状态/SDK、主标题、密钥框、方案卡片和右下反馈入口组成的页面内部布局。 |
@@ -713,6 +722,15 @@ graph TD
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-07-01 | Codex | 配置变更 | Shroom Vision 密钥区“保存密钥”缩小为更轻量的文字与复选框，并与访问密钥输入框左边缘对齐。 |
+| 2026-07-01 | Codex | 配置变更 | Shroom Vision 密钥区缩小“保存密钥”字号，取消访问密钥 icon 外层底色，并在页面根层隐藏横向溢出，防止整页出现横向滚动条。 |
+| 2026-07-01 | Codex | 配置变更 | Shroom Vision 访问密钥模块左侧 icon 改为新增图片 `ChatGPT Image 2026年7月1日 11_54_17.png`，替换原 antd 锁图标。 |
+| 2026-06-30 | Codex | 配置变更 | Shroom Vision 门户页整体比例放大，1280 宽度下同步放宽卡片/密钥区字号与间距，并让底部版权文字与右下角反馈按钮文字保持同一行视觉对齐。 |
+| 2026-06-30 | Codex | 配置变更 | Shroom Vision 访问密钥面板背景色调整为 `#0072ef`，并放宽上一轮压缩后的整体间距与字号；浏览器检查确认 1280 宽度无横向滚动。 |
+| 2026-06-30 | Codex | 配置变更 | Shroom Vision 门户页改为新稿布局：移除 hero 核心能力块，访问密钥面板横向铺满主内容区，方案模块改为深色列表卡片并保持四列展示，宽屏下避免一屏溢出。 |
+| 2026-06-30 | Codex | 修复缺陷 | 采集标签不再只写入 `sitCol` / `matCol`：流式 CSV 导出会在大床、小床矩阵、通用座面、靠背、头枕和双手套记录中按需追加 `label` / `labelText`，确保填写采集标签后下载文件能保留标签数据。 |
+| 2026-06-30 | Codex | 修复缺陷 | 恢复合并前 `sqliteOpti` 的采集 CSV 下载表头与行构造逻辑，避免离线密钥分支合并后 `sitCol` / `matCol` 下载列退回旧格式。 |
+| 2026-06-30 | Codex | 修复缺陷 | `server.js` 的 `colOrSendData()` 恢复 `frameToStore` 局部变量声明，修复离线密钥合并后采集写入路径中的未定义变量异常。 |
 | 2026-06-30 | Codex | 新增功能 | 合并离线密钥功能分支：新增 `licenseManager.js`、`crypto-lib.cjs`、`sensorTypeStore.js`，密钥校验从旧 `endDate/nowDate` 判断切换为 `licenseManager.isLicenseValid()`，并支持在线密钥、离线激活码、防回拨锁定、授权状态广播和传感器类型清单下发。 |
 | 2026-06-29 | Codex | 配置变更 | Shroom Vision 密钥入口根据新稿移除 `SolutionFeatureStrip` 使用，反馈按钮改为“反馈 >”紧凑形态，SDK 徽标改为“SDK 定制”，方案卡、模块按钮、密钥框和背景地面光效统一为蓝青色视觉。 |
 | 2026-06-29 | Codex | 配置变更 | Shroom Vision 密钥入口移除参考图外层窗口 chrome 的模拟，包括三色窗口圆点和页面外层描边圆角，保留内页布局本身。 |

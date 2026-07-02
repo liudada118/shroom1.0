@@ -1,16 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, message } from 'antd';
 import {
-  AppstoreOutlined,
   ArrowRightOutlined,
-  AreaChartOutlined,
   CodeOutlined,
-  LockOutlined,
   SafetyCertificateOutlined,
-  ThunderboltOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { WS_URLS } from '../../constants';
+import accessKeyIcon from '../../assets/开屏IMG/ChatGPT Image 2026年7月1日 11_54_17.png';
 import {
   BRAND_LOGO_SRC,
   getSolutionCarouselSlides,
@@ -18,13 +15,6 @@ import {
 } from './solutionConfig';
 import { FeedbackWidget } from './LicensePortalWidgets';
 import './LicensePortal.css';
-
-// 产品核心能力（hero 左下三个小块）：可视化展示 / 动态采集 / 多种场景展示
-const CAPABILITIES = [
-  { key: 'visual', label: '压力可视化展示', icon: <AreaChartOutlined /> },
-  { key: 'collect', label: '动态数据采集', icon: <ThunderboltOutlined /> },
-  { key: 'scene', label: '多种场景展示', icon: <AppstoreOutlined /> },
-];
 
 const LicensePortal = () => {
   const navigate = useNavigate();
@@ -152,8 +142,6 @@ const LicensePortal = () => {
   return (
     <main className="portal-page">
       <div className="portal-bg" aria-hidden="true">
-        <span className="portal-bg-orb orb-a" />
-        <span className="portal-bg-orb orb-b" />
         <span className="portal-bg-grid" />
       </div>
 
@@ -186,45 +174,27 @@ const LicensePortal = () => {
           <p className="portal-hero-desc">
             面向康养、汽车、具身智能等行业场景，一站式完成压力可视化展示、动态数据采集与专业报告输出。
           </p>
-
-          <div className="portal-hero-capabilities">
-            <span className="portal-hero-cap-label">核心能力</span>
-            <div className="portal-cap-row">
-              {CAPABILITIES.map((cap) => (
-                <div className="portal-cap-item" key={cap.key}>
-                  <span className="portal-cap-icon">{cap.icon}</span>
-                  <span className="portal-cap-label-text">{cap.label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
+      </section>
 
-        <div className="portal-access">
-          <div className="portal-access-head">
-            <h2>访问密钥</h2>
-            <p>输入授权密钥，点击进入系统完成验证并开始测量</p>
-          </div>
-          <div className="portal-access-form">
-            <input
-              aria-label="访问密钥"
-              onChange={(event) => setAccessKey(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') handleEnterSystem();
-              }}
-              placeholder="请输入访问密钥"
-              type="text"
-              value={accessKey}
-            />
-          </div>
-          <label className="portal-access-save">
-            <input
-              type="checkbox"
-              checked={saveKey}
-              onChange={(event) => setSaveKey(event.target.checked)}
-            />
-            <span>保存密钥（下次自动填入）</span>
-          </label>
+      <section className="portal-access" aria-label="访问密钥">
+        <div className="portal-access-title">
+          <span className="portal-access-icon">
+            <img alt="访问密钥" draggable={false} src={accessKeyIcon} />
+          </span>
+          <h2>访问密钥</h2>
+        </div>
+        <div className="portal-access-main">
+          <input
+            aria-label="访问密钥"
+            onChange={(event) => setAccessKey(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') handleEnterSystem();
+            }}
+            placeholder="请输入访问密钥"
+            type="text"
+            value={accessKey}
+          />
           <button
             className="portal-btn-primary"
             type="button"
@@ -234,11 +204,15 @@ const LicensePortal = () => {
             {entering ? '验证中…' : '进入系统'}
             {entering ? null : <ArrowRightOutlined />}
           </button>
-          <div className="portal-access-note">
-            <LockOutlined />
-            密钥验证通过后，将自动加载并解锁对应方案内容
-          </div>
         </div>
+        <label className="portal-access-save">
+          <input
+            type="checkbox"
+            checked={saveKey}
+            onChange={(event) => setSaveKey(event.target.checked)}
+          />
+          <span>保存密钥（下次自动填入）</span>
+        </label>
       </section>
 
       <section className="portal-grid" aria-label="行业方案">
@@ -334,7 +308,7 @@ const LicensePortal = () => {
       </section>
 
       <footer className="portal-footer">
-        <span>Shroom Vision · 柔性压力感知系统</span>
+        <span>Shroom Vision</span>
         <span className="portal-footer-dot" />
         <span>© {new window.Date().getFullYear()} JQ Industries</span>
       </footer>

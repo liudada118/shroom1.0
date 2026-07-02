@@ -1003,6 +1003,7 @@ const CSV_TITLES = {
     zeroFrame: '清零帧',
     detectionPoint: '检测点',
     label: '标签',
+    labelText: '标签文本',
   },
   en: {
     index: 'seconds',
@@ -1023,6 +1024,7 @@ const CSV_TITLES = {
     zeroFrame: 'zeroFrame',
     detectionPoint: 'detectionPoint',
     label: 'label',
+    labelText: 'labelText',
   },
 };
 
@@ -1165,6 +1167,7 @@ function exportHandGloveDoubleCsv({ selectQuery, params, csvTitle, csvTargetPath
       const start = Math.max(0, historyArr[0] || 0);
       const end = Math.min(historyArr[1] || totalLength, totalLength);
       const csvWriteData = [];
+      const collectionLabelInfo = getCollectionCsvLabelInfo(params[0]);
 
       for (let i = start, j = 0; i < end; i++, j++) {
         const leftFrame = buildStoredHandGloveCsvFrame(leftRows[i], 'left');
@@ -1177,7 +1180,7 @@ function exportHandGloveDoubleCsv({ selectQuery, params, csvTitle, csvTargetPath
         const rightArea = rightData.filter((value) => value > 0).length;
         const baseRows = leftRows.length ? leftRows : rightRows;
 
-        csvWriteData.push({
+        csvWriteData.push(applyCollectionLabelInfo({
           index: getCsvElapsedSeconds(baseRows, i, start, j),
           time: timeStampToDate(leftFrame.timestamp || rightFrame.timestamp || Date.now()),
           leftMax: leftData.length ? findMax(leftData) : 0,
@@ -1194,7 +1197,7 @@ function exportHandGloveDoubleCsv({ selectQuery, params, csvTitle, csvTargetPath
           rightRotate: rightFrame.rotateData.length ? JSON.stringify(rightFrame.rotateData) : '',
           ...buildPrefixedHandGloveCsvSegments(leftData, 'left'),
           ...buildPrefixedHandGloveCsvSegments(rightData, 'right'),
-        });
+        }, collectionLabelInfo));
       }
 
       let str = params[0];
@@ -1225,6 +1228,7 @@ function exportHandGloveDoubleCsv({ selectQuery, params, csvTitle, csvTargetPath
       ];
       appendPrefixedHandGloveCsvHeaders(csvHeaders, 'left', csvTitle);
       appendPrefixedHandGloveCsvHeaders(csvHeaders, 'right', csvTitle);
+      appendCollectionLabelHeaders(csvHeaders, csvTitle, collectionLabelInfo);
 
       const csvFilePath = csvTargetPath(`${csvTitle === CSV_TITLES.en ? 'glove2' : '触觉手套2'}${str}.csv`);
       const csvWriter = createCsvWriter({
@@ -1968,6 +1972,120 @@ function formatCsvDatePart(value) {
   return str;
 }
 
+function getCollectionCsvLabelInfo(value) {
+  const datePart = formatCsvDatePart(value);
+  const namePart = datePart.replace(/_\d{4}-\d{1,2}-\d{1,2}-\d{2}-\d{2}-\d{2}-\d+$/, '');
+  if (!namePart || namePart === datePart && /^\d+$/.test(namePart)) return { label: '', labelText: '' };
+  const labelTextMatch = namePart.match(/([^_]+_\d+)$/);
+  const labelText = labelTextMatch ? labelTextMatch[1] : '';
+  const labelMatch = labelText.match(/_(\d+)$/);
+  return {
+    label: labelMatch ? labelMatch[1] : '',
+    labelText,
+  };
+}
+
+function parseCsvMatrixData(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== 'string') return [];
+  try {
+    const parsed = JSON.parse(value || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function transposeMatColToVisualDirection(data) {
+  const source = Array.isArray(data) ? data : [];
+  const sourceWidth = 10;
+  const sourceHeight = 16;
+  if (source.length !== sourceWidth * sourceHeight) {
+    return source;
+  }
+
+  const result = [];
+  for (let row = 0; row < sourceWidth; row++) {
+    for (let col = 0; col < sourceHeight; col++) {
+      result.push(source[col * sourceWidth + row]);
+    }
+  }
+  return result;
+}
+
+function formatMatColCsvRealData(value) {
+  const parsed = parseCsvMatrixData(value);
+  if (!parsed.length) return value;
+  return JSON.stringify(transposeMatColToVisualDirection(parsed));
+}
+
+function formatMatrixTotalForFile(value, targetFile = file) {
+  const numberValue = Number(value);
+  const safeValue = Number.isFinite(numberValue) ? numberValue : 0;
+  if (targetFile === SMALL_BED_12B_TYPE) {
+    return Number(safeValue.toFixed(1));
+  }
+  return totalToN(safeValue);
+}
+
+function buildCollectionCsvHeaders(csvTitle, { includeLabel = true } = {}) {
+  const headers = getDefaultSitCsvHeaders(csvTitle);
+  if (includeLabel) {
+    headers.push(
+      { id: "label", title: csvTitle.label },
+      { id: "labelText", title: csvTitle.labelText },
+    );
+  }
+  return headers;
+}
+
+function buildCollectionCsvRow(row, { absoluteIndex = 0, relativeIndex = 0, baseTimestamp = null } = {}, csvTitle, {
+  transformRealData = (value) => value,
+  label = '',
+  labelText = '',
+} = {}) {
+  const matrixData = parseCsvMatrixData(transformRealData(row?.data));
+  const press = matrixData.reduce((sum, value) => sum + Number(value || 0), 0);
+  const newData = {
+    index: getCsvElapsedSecondsFromBase(row, absoluteIndex, baseTimestamp, relativeIndex),
+    max: matrixData.length ? findMax(matrixData) : 0,
+    time: timeStampToDate(row?.timestamp),
+    pressureArea: matrixData.filter((value) => Number(value) > 0).length,
+    pressure: formatMatrixTotalForFile(press, file),
+    realData: matrixData.length ? JSON.stringify(matrixData) : transformRealData(row?.data),
+  };
+  if (label || labelText) {
+    newData.label = label;
+    newData.labelText = labelText;
+  } else {
+    newData.label = '';
+    newData.labelText = '';
+  }
+  return newData;
+}
+
+function hasCollectionLabelInfo(labelInfo = {}) {
+  return Boolean(labelInfo && (labelInfo.label || labelInfo.labelText));
+}
+
+function appendCollectionLabelHeaders(headers, csvTitle, labelInfo = {}) {
+  if (!hasCollectionLabelInfo(labelInfo)) return headers;
+  headers.push(
+    { id: "label", title: csvTitle.label },
+    { id: "labelText", title: csvTitle.labelText },
+  );
+  return headers;
+}
+
+function applyCollectionLabelInfo(row, labelInfo = {}) {
+  if (!hasCollectionLabelInfo(labelInfo)) return row;
+  return {
+    ...row,
+    label: labelInfo.label || '',
+    labelText: labelInfo.labelText || '',
+  };
+}
+
 function getCsvElapsedSecondsFromBase(row, rowIndex, baseTimestamp, fallbackIndex = 0) {
   if (row?.timestamp != null && baseTimestamp != null) {
     const diffMs = Number(row.timestamp) - Number(baseTimestamp);
@@ -2097,6 +2215,7 @@ function buildGenericSitCsvRow(row, { absoluteIndex, relativeIndex, baseTimestam
     isHandGloveCsvType = false,
     shouldWriteZeroFrame = false,
     shouldWriteDetectionPoint = false,
+    collectionLabelInfo = null,
   } = options;
   const rawData = JSON.parse(row?.data || '[]');
   let pressureData, rotateData, zeroFrameData = [];
@@ -2149,7 +2268,7 @@ function buildGenericSitCsvRow(row, { absoluteIndex, relativeIndex, baseTimestam
   if (isHandGloveCsvType) {
     Object.assign(newData, buildHandGloveCsvSegments(pressureData, 'left'));
   }
-  return newData;
+  return applyCollectionLabelInfo(newData, collectionLabelInfo);
 }
 
 function buildGenericBackCsvRow(row, { absoluteIndex, relativeIndex, baseTimestamp }, options = {}) {
@@ -2157,6 +2276,7 @@ function buildGenericBackCsvRow(row, { absoluteIndex, relativeIndex, baseTimesta
     isBackHandType = false,
     isBackHandGloveType = false,
     shouldWriteBackZeroFrame = false,
+    collectionLabelInfo = null,
   } = options;
   const rawBackData = JSON.parse(row?.data || '[]');
   let backData, backRotateData, backZeroFrameData = [];
@@ -2203,10 +2323,11 @@ function buildGenericBackCsvRow(row, { absoluteIndex, relativeIndex, baseTimesta
   if (isBackHandGloveType) {
     Object.assign(newData, buildHandGloveCsvSegments(backData, 'right'));
   }
-  return newData;
+  return applyCollectionLabelInfo(newData, collectionLabelInfo);
 }
 
-function buildHeadCsvRow(row, { absoluteIndex, relativeIndex, baseTimestamp }) {
+function buildHeadCsvRow(row, { absoluteIndex, relativeIndex, baseTimestamp }, options = {}) {
+  const { collectionLabelInfo = null } = options;
   const headData = file === WHOLE_CHAIR_TYPE
     ? normalizeWholeChairFrame('head', row?.data)
     : JSON.parse(row?.data || '[]');
@@ -2216,7 +2337,7 @@ function buildHeadCsvRow(row, { absoluteIndex, relativeIndex, baseTimestamp }) {
   const area10Data = headData.filter((a) => a > 10);
   const total10 = area10Data.reduce((a, b) => a + b, 0);
   const total1 = headData.reduce((a, b) => a + b, 0);
-  return {
+  return applyCollectionLabelInfo({
     time: timeStampToDate(row?.timestamp),
     pressureArea: area,
     pressure: totalToN(press, 1.3),
@@ -2229,7 +2350,7 @@ function buildHeadCsvRow(row, { absoluteIndex, relativeIndex, baseTimestamp }) {
     total10area10: total10 / (area10Data.length || 1),
     total1area1: total1 / (area1 || 1),
     max: findMax(headData),
-  };
+  }, collectionLabelInfo);
 }
 
 function getDefaultSitCsvHeaders(csvTitle, {
@@ -2237,6 +2358,7 @@ function getDefaultSitCsvHeaders(csvTitle, {
   shouldWriteDetectionPoint = false,
   shouldWriteZeroFrame = false,
   isHandType = false,
+  collectionLabelInfo = null,
 } = {}) {
   const csvHeaders = [
     { id: "index", title: csvTitle.index },
@@ -2265,6 +2387,7 @@ function getDefaultSitCsvHeaders(csvTitle, {
       { id: "temperatureK", title: csvTitle.temperatureK },
     );
   }
+  appendCollectionLabelHeaders(csvHeaders, csvTitle, collectionLabelInfo);
   return csvHeaders;
 }
 
@@ -2272,6 +2395,7 @@ function getDefaultBackCsvHeaders(csvTitle, {
   isBackHandGloveType = false,
   shouldWriteBackZeroFrame = false,
   isBackHandType = false,
+  collectionLabelInfo = null,
 } = {}) {
   const backCsvHeaders = [
     { id: "index", title: csvTitle.index },
@@ -2290,11 +2414,12 @@ function getDefaultBackCsvHeaders(csvTitle, {
   if (isBackHandType) {
     backCsvHeaders.push({ id: "rotate", title: csvTitle.rotate });
   }
+  appendCollectionLabelHeaders(backCsvHeaders, csvTitle, collectionLabelInfo);
   return backCsvHeaders;
 }
 
-function getHeadCsvHeaders(csvTitle) {
-  return [
+function getHeadCsvHeaders(csvTitle, { collectionLabelInfo = null } = {}) {
+  const headers = [
     { id: "index", title: csvTitle.index },
     { id: "time", title: csvTitle.time },
     { id: "max", title: csvTitle.max },
@@ -2302,6 +2427,8 @@ function getHeadCsvHeaders(csvTitle) {
     { id: "pressure", title: csvTitle.pressure },
     { id: "realData", title: csvTitle.realData },
   ];
+  appendCollectionLabelHeaders(headers, csvTitle, collectionLabelInfo);
+  return headers;
 }
 
 async function exportHandGloveDoubleCsvStreaming({ date, csvTitle, csvTargetPath, sendCsvSuccess, sendCsvFailed, sendCsvProgress }) {
@@ -2317,6 +2444,7 @@ async function exportHandGloveDoubleCsvStreaming({ date, csvTitle, csvTargetPath
   const sideLabel = csvTitle === CSV_TITLES.en
     ? { left: 'left', right: 'right' }
     : { left: '左手', right: '右手' };
+  const collectionLabelInfo = getCollectionCsvLabelInfo(date);
   const csvHeaders = [
     { id: "index", title: csvTitle.index },
     { id: "time", title: csvTitle.time },
@@ -2335,6 +2463,7 @@ async function exportHandGloveDoubleCsvStreaming({ date, csvTitle, csvTargetPath
   ];
   appendPrefixedHandGloveCsvHeaders(csvHeaders, 'left', csvTitle);
   appendPrefixedHandGloveCsvHeaders(csvHeaders, 'right', csvTitle);
+  appendCollectionLabelHeaders(csvHeaders, csvTitle, collectionLabelInfo);
 
   let str = formatCsvDatePart(nowGetTime || date);
   const csvFilePath = csvTargetPath(`${csvTitle === CSV_TITLES.en ? 'glove2' : '触觉手套2'}${str}.csv`);
@@ -2382,7 +2511,7 @@ async function exportHandGloveDoubleCsvStreaming({ date, csvTitle, csvTargetPath
         const leftArea = leftData.filter((value) => value > 0).length;
         const rightArea = rightData.filter((value) => value > 0).length;
         const baseFrameRow = leftRows[index] || rightRows[index];
-        records.push({
+        records.push(applyCollectionLabelInfo({
           index: getCsvElapsedSecondsFromBase(baseFrameRow, start + written + index, baseTimestamp, written + index),
           time: timeStampToDate(leftFrame.timestamp || rightFrame.timestamp || Date.now()),
           leftMax: leftData.length ? findMax(leftData) : 0,
@@ -2399,7 +2528,7 @@ async function exportHandGloveDoubleCsvStreaming({ date, csvTitle, csvTargetPath
           rightRotate: rightFrame.rotateData.length ? JSON.stringify(rightFrame.rotateData) : '',
           ...buildPrefixedHandGloveCsvSegments(leftData, 'left'),
           ...buildPrefixedHandGloveCsvSegments(rightData, 'right'),
-        });
+        }, collectionLabelInfo));
       }
       await writeStreamChunk(stream, stringifier.stringifyRecords(records));
       written += count;
@@ -2452,6 +2581,7 @@ async function exportHistoryCsvStreaming({ date, csvTitle, csvTargetPath, sendCs
         currentFilePath: csvFilePath,
       });
     };
+    const collectionLabelInfo = getCollectionCsvLabelInfo(date);
 
     if (file === HAND_GLOVE_DOUBLE) {
       await exportHandGloveDoubleCsvStreaming({ date, csvTitle, csvTargetPath, sendCsvSuccess, sendCsvFailed, sendCsvProgress, downloadOptions });
@@ -2465,7 +2595,7 @@ async function exportHistoryCsvStreaming({ date, csvTitle, csvTargetPath, sendCs
       const csvFilePath = csvTargetPath(`${file}${String(nowGetTime || date).replace(/[/:]/g, "-")}.csv`);
       await writeCsvFileInBatches({
         csvFilePath,
-        header: [
+        header: appendCollectionLabelHeaders([
           { id: "time", title: csvTitle.time },
           { id: "pressureArea", title: csvTitle.pressureArea },
           { id: "pressValue", title: csvTitle.pressValue },
@@ -2473,7 +2603,7 @@ async function exportHistoryCsvStreaming({ date, csvTitle, csvTargetPath, sendCs
           { id: "pressuremmgH", title: csvTitle.pressuremmgH },
           { id: "realData", title: csvTitle.realData },
           { id: "pressLine", title: csvTitle.pressLine },
-        ],
+        ], csvTitle, collectionLabelInfo),
         dbRef: db,
         date,
         start,
@@ -2504,7 +2634,7 @@ async function exportHistoryCsvStreaming({ date, csvTitle, csvTargetPath, sendCs
             pressure = calculatePressure(calPress(startPressure, newPressure, pressureTime));
             if (pressureTime > 240 * 13) pressureTime = 240 * 13;
           }
-          return {
+          return applyCollectionLabelInfo({
             time: timeStampToDate(row?.timestamp),
             pressureArea: realArr.filter((a) => a > 0).length,
             pressure: total / nonZeroLength,
@@ -2512,7 +2642,7 @@ async function exportHistoryCsvStreaming({ date, csvTitle, csvTargetPath, sendCs
             pressValue: wsData.reduce((a, b) => a + b, 0),
             pressuremmgH: pressure,
             pressLine: bodyArr,
-          };
+          }, collectionLabelInfo);
         },
       });
       files.push(csvFilePath);
@@ -2524,7 +2654,7 @@ async function exportHistoryCsvStreaming({ date, csvTitle, csvTargetPath, sendCs
       const csvFilePath = csvTargetPath(`${file}${str}.csv`);
       await writeCsvFileInBatches({
         csvFilePath,
-        header: getDefaultSitCsvHeaders(csvTitle),
+        header: getDefaultSitCsvHeaders(csvTitle, { collectionLabelInfo }),
         dbRef: db,
         date,
         start,
@@ -2540,14 +2670,14 @@ async function exportHistoryCsvStreaming({ date, csvTitle, csvTargetPath, sendCs
           }
           const press = sitData.reduce((a, b) => a + b, 0);
           const area = sitData.filter((a) => a > 0).length;
-          return {
+          return applyCollectionLabelInfo({
             time: timeStampToDate(row?.timestamp),
             pressureArea: area,
             pressure: totalToN(press),
             realData: JSON.stringify(sitData),
             index: getCsvElapsedSecondsFromBase(row, meta.absoluteIndex, meta.baseTimestamp, meta.relativeIndex),
             max: findMax(sitData),
-          };
+          }, collectionLabelInfo);
         },
       });
       files.push(csvFilePath);
@@ -2556,23 +2686,33 @@ async function exportHistoryCsvStreaming({ date, csvTitle, csvTargetPath, sendCs
     }
 
     if (file === 'sitCol' || file === 'matCol') {
-      const label = String(date).split('_')[1];
+      const { label, labelText } = getCollectionCsvLabelInfo(date);
       const csvFilePath = csvTargetPath(`${file}${str}.csv`);
       await writeCsvFileInBatches({
         csvFilePath,
-        header: [
-          { id: "realData", title: csvTitle.realData },
-          { id: "label", title: csvTitle.label },
-        ],
+        header: file === 'matCol'
+          ? buildCollectionCsvHeaders(csvTitle)
+          : [
+            { id: "realData", title: csvTitle.realData },
+            { id: "label", title: csvTitle.label },
+            { id: "labelText", title: csvTitle.labelText },
+          ],
         dbRef: db,
         date,
         start: 0,
         end: null,
         onProgress: createProgressReporter(csvFilePath, 1, 1),
-        mapRow: (row) => ({
-          realData: row?.data,
-          label,
-        }),
+        mapRow: (row, meta) => file === 'matCol'
+          ? buildCollectionCsvRow(row, meta, csvTitle, {
+            transformRealData: formatMatColCsvRealData,
+            label,
+            labelText,
+          })
+          : ({
+            realData: row?.data,
+            label,
+            labelText,
+          }),
       });
       files.push(csvFilePath);
       sendCsvSuccess(files);
@@ -2595,6 +2735,7 @@ async function exportHistoryCsvStreaming({ date, csvTitle, csvTargetPath, sendCs
           shouldWriteDetectionPoint,
           shouldWriteZeroFrame,
           isHandType,
+          collectionLabelInfo,
         }),
         dbRef: db,
         date,
@@ -2606,6 +2747,7 @@ async function exportHistoryCsvStreaming({ date, csvTitle, csvTargetPath, sendCs
           isHandGloveCsvType,
           shouldWriteZeroFrame,
           shouldWriteDetectionPoint,
+          collectionLabelInfo,
         }),
       });
       files.push(csvFilePath);
@@ -2623,6 +2765,7 @@ async function exportHistoryCsvStreaming({ date, csvTitle, csvTargetPath, sendCs
           isBackHandGloveType,
           shouldWriteBackZeroFrame,
           isBackHandType,
+          collectionLabelInfo,
         }),
         dbRef: db1,
         date,
@@ -2633,6 +2776,7 @@ async function exportHistoryCsvStreaming({ date, csvTitle, csvTargetPath, sendCs
           isBackHandType,
           isBackHandGloveType,
           shouldWriteBackZeroFrame,
+          collectionLabelInfo,
         }),
       });
       files.push(backCsvFilePath);
@@ -2642,13 +2786,13 @@ async function exportHistoryCsvStreaming({ date, csvTitle, csvTargetPath, sendCs
         genericFileIndex += 1;
         await writeCsvFileInBatches({
           csvFilePath: headCsvFilePath,
-          header: getHeadCsvHeaders(csvTitle),
+          header: getHeadCsvHeaders(csvTitle, { collectionLabelInfo }),
           dbRef: db2,
           date,
           start,
           end,
           onProgress: createProgressReporter(headCsvFilePath, genericFileIndex, genericFileCount || 1),
-          mapRow: buildHeadCsvRow,
+          mapRow: (row, meta) => buildHeadCsvRow(row, meta, { collectionLabelInfo }),
         });
         files.push(headCsvFilePath);
       }
@@ -5121,6 +5265,7 @@ module.exports = {
             const selectQuery = "select * from matrix WHERE date=?";
             // const params = [1287154796066,1887154796066,'2023-06-19-14:05'];
             const params = [getMessage.download];
+            const collectionLabelInfo = getCollectionCsvLabelInfo(getMessage.download);
 
             exportHistoryCsvStreaming({
               date: getMessage.download,
@@ -5319,12 +5464,13 @@ module.exports = {
                   logger.error(err);
                 } else {
                   //閹跺﹥妞傞梻?閸樺濮忛棃銏⑿?楠炲啿娼庨崢瀣閺佺増宓乸ush鏉╂矞svWriter鏉╂稖顢戝Ч鍥ㄢ偓?
-                  const label = getMessage.download.split('_')[1]
+                  const { label, labelText } = getCollectionCsvLabelInfo(getMessage.download)
                   if (!rows.length) return;
                   for (var i = 0, j = 0; i < rows.length; i++, j++) {
                     const newData = {
                       realData: rows[i][`data`],
-                      label: label
+                      label: label,
+                      labelText: labelText
                     };
                     csvWriteData.push(newData);
                   }
@@ -5346,6 +5492,7 @@ module.exports = {
                     header: [
                       { id: "realData", title: csvTitle.realData },
                       { id: "label", title: csvTitle.label },
+                      { id: "labelText", title: csvTitle.labelText },
                     ],
                   });
 
@@ -5367,13 +5514,19 @@ module.exports = {
                   logger.error(err);
                 } else {
                   //閹跺﹥妞傞梻?閸樺濮忛棃銏⑿?楠炲啿娼庨崢瀣閺佺増宓乸ush鏉╂矞svWriter鏉╂稖顢戝Ч鍥ㄢ偓?
-                  const label = getMessage.download.split('_')[1]
+                  const { label, labelText } = getCollectionCsvLabelInfo(getMessage.download)
                   if (!rows.length) return;
+                  const baseTimestamp = rows[0]?.timestamp;
                   for (var i = 0, j = 0; i < rows.length; i++, j++) {
-                    const newData = {
-                      realData: rows[i][`data`],
-                      label: label
-                    };
+                    const newData = buildCollectionCsvRow(rows[i], {
+                      absoluteIndex: i,
+                      relativeIndex: j,
+                      baseTimestamp,
+                    }, csvTitle, {
+                      transformRealData: formatMatColCsvRealData,
+                      label,
+                      labelText,
+                    });
                     csvWriteData.push(newData);
                   }
                   // 鐏忓棙鐪归幀鑽ゆ畱閸樺濮忛弫鐗堝祦閸愭瑥鍙?CSV 閺傚洣娆?
@@ -5391,10 +5544,7 @@ module.exports = {
                   const csvFilePath = csvTargetPath(`${file}${str}.csv`);
                   const csvWriter = createCsvWriter({
                     path: csvFilePath, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
-                    header: [
-                      { id: "realData", title: csvTitle.realData },
-                      { id: "label", title: csvTitle.label },
-                    ],
+                    header: buildCollectionCsvHeaders(csvTitle),
                   });
 
                   csvWriter
@@ -5488,7 +5638,7 @@ module.exports = {
                     if (isHandGloveCsvType) {
                       Object.assign(newData, buildHandGloveCsvSegments(pressureData, 'left'));
                     }
-                    csvWriteData.push(newData);
+                    csvWriteData.push(applyCollectionLabelInfo(newData, collectionLabelInfo));
                   }
 
                   let str = nowGetTime;
@@ -5525,6 +5675,7 @@ module.exports = {
                       { id: "temperatureK", title: csvTitle.temperatureK },
                     );
                   }
+                  appendCollectionLabelHeaders(csvHeaders, csvTitle, collectionLabelInfo);
 
                   const csvFilePath = csvTargetPath(`${getCsvFilePrefix(file, 'sit', getMessage.downloadOptions || {})}${str}.csv`);
                   const csvWriter = createCsvWriter({
@@ -5614,7 +5765,7 @@ module.exports = {
                     if (isBackHandGloveType) {
                       Object.assign(newData, buildHandGloveCsvSegments(backData, 'right'));
                     }
-                    csvWriteBackData.push(newData);
+                    csvWriteBackData.push(applyCollectionLabelInfo(newData, collectionLabelInfo));
                   }
                   // 鐏忓棙鐪归幀鑽ゆ畱閸樺濮忛弫鐗堝祦閸愭瑥鍙?CSV 閺傚洣娆?
 
@@ -5643,6 +5794,7 @@ module.exports = {
                   if (isBackHandType) {
                     backCsvHeaders.push({ id: "rotate", title: csvTitle.rotate });
                   }
+                  appendCollectionLabelHeaders(backCsvHeaders, csvTitle, collectionLabelInfo);
                   const backCsvFilePath = csvTargetPath(`${getCsvFilePrefix(file, 'back', getMessage.downloadOptions || {})}${str}.csv`);
                   const csvWriter1 = createCsvWriter({
                     path: backCsvFilePath,
@@ -5706,7 +5858,7 @@ module.exports = {
                         total1area1: headData.reduce((a, b) => a + b, 0) / [...headData].filter(a => a > 1).length,
                         max
                       };
-                      csvWriteHeadData.push(newData);
+                      csvWriteHeadData.push(applyCollectionLabelInfo(newData, collectionLabelInfo));
                     }
                     // 鐏忓棙鐪归幀鑽ゆ畱閸樺濮忛弫鐗堝祦閸愭瑥鍙?CSV 閺傚洣娆?
 
@@ -5722,7 +5874,7 @@ module.exports = {
                     const csvWriter1 = createCsvWriter({
                       path: headCsvFilePath,
                       // path: `./data/back${str}.csv`, // 閹稿洤鐣炬潏鎾冲毉閺傚洣娆㈤惃鍕熅瀵板嫬鎷伴崥宥囆?
-                      header: [
+                      header: appendCollectionLabelHeaders([
                         { id: "index", title: "seconds" },
                         { id: "time", title: "time" },
                         { id: "max", title: "max" },
@@ -5730,7 +5882,7 @@ module.exports = {
                         { id: "pressure", title: "press" },
                         { id: "realData", title: "data" },
 
-                      ],
+                      ], csvTitle, collectionLabelInfo),
                     });
 
                     csvWriter1
@@ -7216,7 +7368,8 @@ parserSmallBed12B.on("data", function (data) {
 });
 
 function colOrSendData(jsonData) {
-  // console.log(JSON.stringify(JSON.parse(jsonData).sitData) , 'jsonData')  let frameToStore = null;
+  // console.log(JSON.stringify(JSON.parse(jsonData).sitData) , 'jsonData')
+  let frameToStore = null;
   if (file === MINZHEN_TYPE) {
     try {
       frameToStore = JSON.parse(jsonData);
