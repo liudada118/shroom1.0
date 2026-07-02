@@ -1,6 +1,6 @@
 {
   "name": "shroom",
-  "version": "1.1.32",
+  "version": "1.1.33",
   "description": "Shroom - Pressure Sensor Data Acquisition & Visualization System",
   "main": "index.js",
   "win": {
@@ -84,6 +84,7 @@
     "appId": "com.shroom.pressure-sensor",
     "productName": "Shroom",
     "asar": true,
+    "npmRebuild": false,
     "afterPack": "scripts/electron-builder-after-pack.js",
     "files": [
       "**/*",

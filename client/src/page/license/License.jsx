@@ -1,28 +1,24 @@
 ﻿/**
- * License.js
- * 密钥配置可视化页面
+ * License.jsx
+ * 密钥管理页面（验证方）
  *
  * 功能：
- * 1. 可视化选择传感器类型（多选/全选）
- * 2. 设置授权有效期（天数或日期选择）
- * 3. 为每个传感器类型配置默认功能模块（numMatrixFlag）
- * 4. 一键生成密钥
- * 5. 密钥解析（粘贴密钥查看内容）
- * 6. 通过 WebSocket 直接写入到应用
- * 7. 直接选择到期时间（用于测试过期弹窗）
+ * 1. 解析/预览密钥（自动识别：在线 hex / 离线 base64 激活码）
+ * 2. 将密钥写入应用（WebSocket）
+ * 3. 展示当前授权状态（在线/离线 + 剩余天数 + 校验中）
+ *
+ * 密钥统一在密钥管理系统（发证方）生成，桌面端不再生成。
  */
-import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
-  Card, Checkbox, Button, InputNumber, DatePicker, Input, message,
-  Tag, Divider, Row, Col, Typography, Space, Tooltip, Badge, Tabs, Switch, Radio, Alert, Select, Table
+  Card, Button, Input, message, Modal,
+  Tag, Divider, Row, Col, Typography, Space, Tooltip, Badge, Tabs, Alert
 } from 'antd';
 import {
-  KeyOutlined, CopyOutlined, SendOutlined, UnlockOutlined,
-  CheckCircleOutlined, ClockCircleOutlined, AppstoreOutlined,
-  SafetyCertificateOutlined, ReloadOutlined, ExperimentOutlined, EyeOutlined, SettingOutlined
+  SendOutlined, UnlockOutlined, CheckCircleOutlined,
+  SafetyCertificateOutlined, EyeOutlined, SettingOutlined, LockOutlined
 } from '@ant-design/icons';
-import dayjs from 'dayjs';
-import { encStr, decryptStr } from './aesUtil';
+import { decryptStr } from './aesUtil';
 import './License.css';
 
 const { Title, Text } = Typography;
@@ -60,7 +56,6 @@ const SENSOR_GROUPS = [
     items: [
       { label: '小床检测(数据)', value: 'smallBedNoAlg' },
       { label: '小床检测(12B)', value: 'smallBed12B' },
-      { label: '小床褥采集', value: 'matCol' },
       { label: '温度全床系统', value: 'tempFullBed' },
       { label: '整椅展示', value: 'wholeChair' },
       { label: '轮椅', value: 'minzhen' },
@@ -186,10 +181,6 @@ const SENSOR_MODULES = {
     { value: 'normal', label: '3D模型' },
     { value: 'numoriginal', label: '原始数据' },
   ],
-  matCol: [
-    { value: 'normal', label: '3D模型' },
-    { value: 'numoriginal', label: '原始数据' },
-  ],
   tempFullBed: [
     { value: 'normal', label: '3D模型' },
     { value: 'numoriginal', label: '原始数据' },
@@ -233,82 +224,109 @@ const getModulesForSensor = (sensorValue) => {
   ];
 };
 
-/** 过期测试快捷按钮 */
-const EXPIRED_PRESETS = [
-  { label: '已过期1天', offset: -1 },
-  { label: '已过期7天', offset: -7 },
-  { label: '已过期30天', offset: -30 },
-  { label: '1分钟后过期', offsetMs: 60 * 1000 },
-  { label: '5分钟后过期', offsetMs: 5 * 60 * 1000 },
-  { label: '1小时后过期', offsetMs: 60 * 60 * 1000 },
-];
-
-/** 天数快捷预设 */
-const DAY_PRESETS = [30, 90, 180, 365, 730, 1095];
-
-/** 传感器快捷预设 */
-const SENSOR_PRESETS = [
-  { label: '触觉全套', types: ['hand0205', 'handGlove115200', 'handGloveFullPacket', 'robot1', 'robotSY', 'robotLCF', 'footVideo'] },
-  { label: '高速矩阵', types: ['fast256', 'fast1024', 'daliegu'] },
-];
+/**
+ * 离线激活码解码预览：base64(JSON{payload,signature}) → 内层 payload。
+ * 仅做解码展示，不做 RSA 验签（浏览器无 Node crypto）；真正验签在"写入应用"时由后端做。
+ * @returns 解析结果对象或 null（非离线格式）
+ */
+const tryDecodeOffline = (input) => {
+  try {
+    const envelope = JSON.parse(atob(input));
+    if (!envelope || !envelope.payload || !envelope.signature) return null;
+    const payload = JSON.parse(atob(envelope.payload));
+    const expireTs = parseFloat(payload.expireDate);
+    const remainDays = Math.ceil((expireTs - Date.now()) / 86400000);
+    const f = payload.sensorTypes;
+    let fileDisplay;
+    if (f === 'all') fileDisplay = { type: 'all', label: '全部传感器', list: [] };
+    else if (Array.isArray(f)) fileDisplay = { type: 'multi', label: `${f.length} 个传感器`, list: f };
+    else fileDisplay = { type: 'single', label: f, list: [f] };
+    return {
+      version: 'offline',
+      raw: payload,
+      expireDate: Number.isNaN(expireTs) ? '—' : new Date(expireTs).toLocaleString(),
+      remainDays,
+      expired: remainDays < 0,
+      fileDisplay,
+      moduleConfig: null,
+    };
+  } catch (e) {
+    return null;
+  }
+};
 
 const License = () => {
-  // ---- 生成密钥 ----
-  const [selectedTypes, setSelectedTypes] = useState([]);
-  const [isAll, setIsAll] = useState(false);
-  const [days, setDays] = useState(365);
-  const [generatedKey, setGeneratedKey] = useState('');
-
-  // ---- 功能模块配置：{ [sensorValue]: numMatrixFlag } ----
-  // 记录每个传感器类型的默认功能模块
-  const [moduleConfig, setModuleConfig] = useState({});
-
-  // ---- 时间模式 ----
-  const [timeMode, setTimeMode] = useState('days'); // 'days' | 'picker'
-  const [pickerDate, setPickerDate] = useState(null);
-
   // ---- 解析密钥 ----
   const [parseInput, setParseInput] = useState('');
   const [parseResult, setParseResult] = useState(null);
 
   // ---- WebSocket ----
   const wsRef = useRef(null);
-  const pendingSendKeyRef = useRef('');
   const [wsConnected, setWsConnected] = useState(false);
-  const [sendSaving, setSendSaving] = useState(false);
+  // 当前授权状态（来自后端广播：在线/离线、剩余天数、校验中、未授权原因、锁定）
+  const [licenseStatus, setLicenseStatus] = useState(null);
+  // 后台传感器类型 value→中文名映射（首屏从 localStorage 兜底，WS 连上后刷新）
+  const [sensorTypeMap, setSensorTypeMap] = useState(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem('sensorTypeList') || 'null');
+      if (parsed && parsed.map && typeof parsed.map === 'object') return parsed.map;
+    } catch (e) { /* ignore */ }
+    return null;
+  });
+
+  // value→中文名：优先后台动态映射，回退到本地写死 ALL_SENSORS，再回退原样
+  const sensorLabelOf = useCallback((value) => {
+    if (sensorTypeMap && sensorTypeMap[value]) return sensorTypeMap[value];
+    const sensor = ALL_SENSORS.find((s) => s.value === value);
+    return sensor ? sensor.label : value;
+  }, [sensorTypeMap]);
 
   useEffect(() => {
     try {
       const ws = new WebSocket('ws://localhost:19999');
-      ws.onopen = () => setWsConnected(true);
-      ws.onclose = () => {
-        setWsConnected(false);
-        setSendSaving(false);
-        pendingSendKeyRef.current = '';
+      ws.onopen = () => {
+        setWsConnected(true);
+        // 主动请求传感器类型清单（请求-应答；主进程连接时也会主动 push 一次）
+        try { ws.send(JSON.stringify({ getSensorTypes: true })); } catch (e) { /* ignore */ }
       };
-      ws.onerror = () => {
-        setWsConnected(false);
-        setSendSaving(false);
-      };
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.licenseError != null) {
-            if (data.noLicense && !pendingSendKeyRef.current) {
-              return;
-            }
-            setSendSaving(false);
-            pendingSendKeyRef.current = '';
-            message.error(data.licenseError);
-            return;
-          }
-          if (pendingSendKeyRef.current && data.licenseSaved) {
-            setSendSaving(false);
-            pendingSendKeyRef.current = '';
-            message.success('密钥已写入应用并保存到配置文件');
-          }
-        } catch (error) {
-          console.warn('License websocket message parse failed', error);
+      ws.onclose = () => setWsConnected(false);
+      ws.onerror = () => setWsConnected(false);
+      ws.onmessage = (evt) => {
+        let msg;
+        try { msg = JSON.parse(evt.data); } catch (e) { return; }
+        if (msg.sensorTypeList && msg.sensorTypeList.map && typeof msg.sensorTypeList.map === 'object') {
+          // 传感器类型清单：存映射并落地 localStorage 兜底
+          setSensorTypeMap(msg.sensorTypeList.map);
+          try { localStorage.setItem('sensorTypeList', JSON.stringify(msg.sensorTypeList)); } catch (e) { /* ignore */ }
+          return;
+        }
+        if (msg.licenseLocked) {
+          // 锁定（时间回拨/篡改）→ 弹"请联系厂商重新获取密钥"
+          setLicenseStatus({ locked: true, valid: false, error: msg.reason || '检测到异常行为' });
+        } else if (msg.licenseChecking) {
+          // 校验中：只显示"校验中…"，不闪红
+          setLicenseStatus({ checking: true });
+        } else if (msg.licenseType !== undefined && msg.date != null) {
+          // 授权状态广播
+          setLicenseStatus({
+            checking: !!msg.checking,
+            valid: !!msg.valid,
+            locked: false,
+            type: msg.licenseType,
+            date: msg.date,
+            remainingDays: msg.remainingDays,
+            offline: !!msg.offline,
+          });
+        } else if (msg.licenseError != null) {
+          // 未授权 / 校验失败原因（覆盖在状态之上）
+          setLicenseStatus((prev) => ({
+            ...(prev || {}),
+            checking: false,
+            valid: false,
+            locked: false,
+            error: msg.licenseError,
+            noLicense: !!msg.noLicense,
+          }));
         }
       };
       wsRef.current = ws;
@@ -318,165 +336,19 @@ const License = () => {
     return () => { if (wsRef.current) wsRef.current.close(); };
   }, []);
 
-  // 全选切换
-  const handleToggleAll = useCallback((checked) => {
-    setIsAll(checked);
-    if (checked) setSelectedTypes([]);
-  }, []);
-
-  // 按组全选
-  const handleGroupCheckAll = useCallback((groupItems, checked) => {
-    const vals = groupItems.map((i) => i.value);
-    setSelectedTypes((prev) =>
-      checked ? [...new Set([...prev, ...vals])] : prev.filter((v) => !vals.includes(v))
-    );
-    if (checked) setIsAll(false);
-  }, []);
-
-  // 单个选择
-  const handleTypeChange = useCallback((value, checked) => {
-    setSelectedTypes((prev) => {
-      const next = checked ? [...prev, value] : prev.filter((v) => v !== value);
-      return next;
-    });
-    // 取消选中时清除该传感器的功能模块配置
-    if (!checked) {
-      setModuleConfig((prev) => {
-        const next = { ...prev };
-        delete next[value];
-        return next;
-      });
-    }
-    setIsAll(false);
-  }, []);
-
-  // 设置某传感器类型的功能模块
-  const handleModuleChange = useCallback((sensorValue, moduleValue) => {
-    setModuleConfig((prev) => ({ ...prev, [sensorValue]: moduleValue }));
-  }, []);
-
-  // 计算到期时间戳
-  const computeExpireTimestamp = useCallback(() => {
-    if (timeMode === 'picker' && pickerDate) return pickerDate.valueOf();
-    return Date.now() + (days || 0) * 86400000;
-  }, [timeMode, pickerDate, days]);
-
-  // 是否过期预览
-  const isExpiredPreview = useMemo(() => {
-    if (timeMode === 'picker' && pickerDate) return pickerDate.valueOf() < Date.now();
-    return false;
-  }, [timeMode, pickerDate]);
-
-  // 到期时间预览
-  const expireDatePreview = useMemo(() => {
-    if (timeMode === 'picker' && pickerDate) return pickerDate.format('YYYY-MM-DD HH:mm:ss');
-    return new Date(Date.now() + (days || 0) * 86400000).toLocaleDateString();
-  }, [timeMode, pickerDate, days]);
-
-  // 当前需要配置功能模块的传感器列表（已选且有多个功能模块可选的）
-  const configurableSensors = useMemo(() => {
-    const types = isAll ? ALL_SENSORS.map(s => s.value) : selectedTypes;
-    return types
-      .map(v => ALL_SENSORS.find(s => s.value === v))
-      .filter(Boolean)
-      .filter(s => getModulesForSensor(s.value).length > 1);
-  }, [isAll, selectedTypes]);
-
-  // 生成密钥
-  const handleGenerate = useCallback(() => {
-    if (!isAll && selectedTypes.length === 0) {
-      message.warning('请至少选择一个传感器类型，或勾选"全部授权"');
-      return;
-    }
-    if (timeMode === 'days' && (!days || days <= 0)) {
-      message.warning('请设置有效天数');
-      return;
-    }
-    if (timeMode === 'picker' && !pickerDate) {
-      message.warning('请选择到期时间');
-      return;
-    }
-
-    const date = computeExpireTimestamp();
-    // file 字段：全部授权时为 'all'，否则为授权类型数组（保持向下兼容）
-    let file;
-    if (isAll) {
-      file = 'all';
-    } else if (selectedTypes.length === 1) {
-      file = selectedTypes[0];
-    } else {
-      file = selectedTypes;
-    }
-
-    // moduleConfig 字段：各传感器类型的默认功能模块配置
-    // 只写入有配置的项，未配置的不写（前端会用默认值）
-    const hasModuleConfig = Object.keys(moduleConfig).length > 0;
-
-    const obj = {
-      date,
-      file,
-      ...(hasModuleConfig ? { moduleConfig } : {}),
-    };
-    const key = encStr(JSON.stringify(obj));
-    setGeneratedKey(key);
-    message[isExpiredPreview ? 'warning' : 'success'](
-      isExpiredPreview ? '已生成过期密钥（用于测试）' : '密钥生成成功'
-    );
-  }, [isAll, selectedTypes, moduleConfig, days, timeMode, pickerDate, computeExpireTimestamp, isExpiredPreview]);
-
-  // 复制密钥
-  const handleCopy = useCallback(() => {
-    if (!generatedKey) {
-      message.warning('请先生成密钥');
-      return;
-    }
-
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(generatedKey).then(
-        () => message.success('已复制到剪贴板'),
-        () => message.error('复制失败，请手动复制')
-      );
-      return;
-    }
-
-    try {
-      const textarea = document.createElement('textarea');
-      textarea.value = generatedKey;
-      textarea.setAttribute('readonly', '');
-      textarea.style.position = 'fixed';
-      textarea.style.left = '-9999px';
-      document.body.appendChild(textarea);
-      textarea.select();
-      const copied = document.execCommand('copy');
-      document.body.removeChild(textarea);
-      if (copied) {
-        message.success('已复制到剪贴板');
-      } else {
-        message.error('复制失败，请手动复制');
-      }
-    } catch (error) {
-      message.error('复制失败，请手动复制');
-    }
-  }, [generatedKey]);
-
-  // 发送到应用
-  const handleSendToApp = useCallback(() => {
-    if (!generatedKey) { message.warning('请先生成密钥'); return; }
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      message.error('WebSocket 未连接，请确保应用正在运行');
-      return;
-    }
-    localStorage.setItem('shroomAccessKey', generatedKey);
-    pendingSendKeyRef.current = generatedKey;
-    setSendSaving(true);
-    wsRef.current.send(JSON.stringify({ date: { date: generatedKey } }));
-  }, [generatedKey]);
-
-  // 解析密钥
+  // 解析密钥（自动识别：base64=离线、hex=在线）
   const handleParse = useCallback(() => {
-    if (!parseInput.trim()) { message.warning('请输入密钥'); return; }
+    const input = parseInput.trim();
+    if (!input) { message.warning('请输入密钥'); return; }
+
+    // 离线格式优先：能解码出 {payload, signature} → 离线版预览（不验签）
+    const offline = tryDecodeOffline(input);
+    if (offline) { setParseResult(offline); return; }
+
+    // 在线格式：hex → ECB 解密
     try {
-      const decrypted = decryptStr(parseInput.trim());
+      const decrypted = decryptStr(input);
+      if (!decrypted) throw new Error('decrypt empty');
       const obj = JSON.parse(decrypted);
       const expireDate = new Date(obj.date);
       const now = new Date();
@@ -492,6 +364,7 @@ const License = () => {
       }
 
       setParseResult({
+        version: 'online',
         raw: obj,
         expireDate: expireDate.toLocaleString(),
         remainDays,
@@ -505,7 +378,17 @@ const License = () => {
     }
   }, [parseInput]);
 
-  const selectedCount = isAll ? ALL_SENSORS.length : selectedTypes.length;
+  // 将当前输入的密钥写入应用（在线 hex / 离线 base64 均可；后端按格式校验）
+  const handleWriteToApp = useCallback(() => {
+    const input = parseInput.trim();
+    if (!input) { message.warning('请先输入密钥'); return; }
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      message.error('应用未连接，请确保应用正在运行');
+      return;
+    }
+    wsRef.current.send(JSON.stringify({ date: { date: input } }));
+    message.success('密钥已写入应用，正在校验…');
+  }, [parseInput]);
 
   return (
     <div className="license-page">
@@ -524,311 +407,42 @@ const License = () => {
         </div>
       </div>
 
+      {/* 当前授权状态：校验中 / 锁定 / 在线·离线(+断网缓存) + 剩余天数 / 未授权原因 */}
+      {licenseStatus && (
+        <Alert
+          style={{ marginBottom: 16 }}
+          showIcon
+          type={licenseStatus.checking ? 'info' : licenseStatus.valid ? 'success' : 'error'}
+          icon={licenseStatus.locked ? <LockOutlined /> : undefined}
+          message={
+            licenseStatus.checking
+              ? '正在校验授权…'
+              : licenseStatus.locked
+                ? `${licenseStatus.error || '检测到异常行为'}，请联系厂商重新获取密钥`
+                : licenseStatus.valid
+                  ? `${licenseStatus.type === 'offline' ? '离线授权' : '在线授权'}${licenseStatus.offline ? '（断网缓存兜底）' : ''} · 剩余 ${licenseStatus.remainingDays ?? '—'} 天 · 到期 ${licenseStatus.date ? new Date(licenseStatus.date).toLocaleString() : '—'}`
+                  : (licenseStatus.error || '未检测到有效授权')
+          }
+          action={
+            (!licenseStatus.checking && !licenseStatus.valid && !licenseStatus.locked && !licenseStatus.noLicense) ? (
+              <Button
+                size="small"
+                type="primary"
+                onClick={() => {
+                  // 清缓存 + 立刻联网复查：后台续期/恢复后无需重启即时生效
+                  try { wsRef.current && wsRef.current.send(JSON.stringify({ refreshLicense: true })); } catch (e) { /* ignore */ }
+                  setLicenseStatus({ checking: true });
+                }}
+              >重新获取授权</Button>
+            ) : undefined
+          }
+        />
+      )}
+
       <Tabs
-        defaultActiveKey="generate"
+        defaultActiveKey="parse"
         className="license-tabs"
         items={[
-          {
-            key: 'generate',
-            label: <span><KeyOutlined /> 生成密钥</span>,
-            children: (
-              <div className="license-content">
-                <Row gutter={[24, 24]}>
-                  {/* 左侧：传感器选择 */}
-                  <Col xs={24} lg={16}>
-                    <Card
-                      title={
-                        <Space>
-                          <AppstoreOutlined />
-                          <span>选择授权传感器类型</span>
-                          <Tag color="blue">{selectedCount} / {ALL_SENSORS.length}</Tag>
-                        </Space>
-                      }
-                      extra={
-                        <Space>
-                          <Switch checkedChildren="全部授权" unCheckedChildren="自定义" checked={isAll} onChange={handleToggleAll} />
-                          <Button size="small" icon={<ReloadOutlined />} onClick={() => { setSelectedTypes([]); setIsAll(false); setModuleConfig({}); }}>清空</Button>
-                        </Space>
-                      }
-                      className="sensor-card"
-                    >
-                      <div className="preset-bar">
-                        <Text type="secondary" style={{ marginRight: 8 }}>快捷预设：</Text>
-                        {SENSOR_PRESETS.map((p) => (
-                          <Tag key={p.label} className="preset-tag" onClick={() => { setSelectedTypes(p.types); setIsAll(false); }}>
-                            {p.label}
-                          </Tag>
-                        ))}
-                      </div>
-
-                      {!isAll && (
-                        <div className="sensor-groups">
-                          {SENSOR_GROUPS.map((group) => {
-                            const groupVals = group.items.map((i) => i.value);
-                            const checkedCount = groupVals.filter((v) => selectedTypes.includes(v)).length;
-                            const allChecked = checkedCount === group.items.length;
-                            const indeterminate = checkedCount > 0 && !allChecked;
-                            return (
-                              <div key={group.group} className="sensor-group">
-                                <div className="group-header">
-                                  <Checkbox
-                                    indeterminate={indeterminate}
-                                    checked={allChecked}
-                                    onChange={(e) => handleGroupCheckAll(group.items, e.target.checked)}
-                                  >
-                                    <span className="group-label">{group.icon} {group.group}</span>
-                                  </Checkbox>
-                                  <Tag color="default" style={{ marginLeft: 8 }}>{checkedCount}/{group.items.length}</Tag>
-                                </div>
-                                <div className="sensor-items">
-                                  {group.items.map((item) => (
-                                    <Checkbox
-                                      key={item.value}
-                                      checked={selectedTypes.includes(item.value)}
-                                      onChange={(e) => handleTypeChange(item.value, e.target.checked)}
-                                      className="sensor-item"
-                                    >
-                                      {item.label}
-                                      <Text type="secondary" style={{ fontSize: 11, marginLeft: 4 }}>({item.value})</Text>
-                                    </Checkbox>
-                                  ))}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      {isAll && (
-                        <div className="all-auth-tip">
-                          <CheckCircleOutlined style={{ color: '#52c41a', marginRight: 8 }} />
-                          <Text>已开启全部传感器授权</Text>
-                        </div>
-                      )}
-                    </Card>
-                  </Col>
-
-                  {/* 右侧：时间设置 + 功能模块配置 + 摘要 */}
-                  <Col xs={24} lg={8}>
-                    <Card
-                      title={<Space><ClockCircleOutlined /><span>授权有效期</span></Space>}
-                      className="time-card"
-                    >
-                      <Radio.Group
-                        value={timeMode}
-                        onChange={(e) => setTimeMode(e.target.value)}
-                        style={{ marginBottom: 16, width: '100%' }}
-                        optionType="button"
-                        buttonStyle="solid"
-                        options={[
-                          { label: '按天数', value: 'days' },
-                          { label: '指定日期', value: 'picker' },
-                        ]}
-                      />
-
-                      {timeMode === 'days' ? (
-                        <>
-                          <InputNumber
-                            min={1}
-                            max={9999}
-                            value={days}
-                            onChange={setDays}
-                            addonAfter="天"
-                            style={{ width: '100%', marginBottom: 12 }}
-                          />
-                          <div className="day-presets">
-                            {DAY_PRESETS.map((d) => (
-                              <Tag
-                                key={d}
-                                className={`day-preset-tag ${days === d ? 'active' : ''}`}
-                                onClick={() => setDays(d)}
-                              >
-                                {d >= 365 ? `${d / 365}年` : `${d}天`}
-                              </Tag>
-                            ))}
-                          </div>
-                        </>
-                      ) : (
-                        <div>
-                          <DatePicker
-                            showTime
-                            style={{ width: '100%', marginBottom: 12 }}
-                            value={pickerDate}
-                            onChange={setPickerDate}
-                            placeholder="选择到期时间"
-                          />
-                          <div className="time-presets">
-                            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>测试快捷：</Text>
-                            <div className="time-preset-tags">
-                              {EXPIRED_PRESETS.map((p) => {
-                                const isExpired = p.offset != null && p.offset < 0;
-                                return (
-                                  <Tag
-                                    key={p.label}
-                                    className={`time-preset-tag ${isExpired ? 'expired-preset' : ''}`}
-                                    onClick={() => {
-                                      const ts = p.offsetMs != null
-                                        ? Date.now() + p.offsetMs
-                                        : Date.now() + p.offset * 86400000;
-                                      setPickerDate(dayjs(ts));
-                                    }}
-                                  >
-                                    {isExpired ? '⚠ ' : ''}{p.label}
-                                  </Tag>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* 到期时间预览 */}
-                      <div className={`expire-preview ${isExpiredPreview ? 'expire-preview-danger' : ''}`}>
-                        <Text type="secondary">到期时间：</Text>
-                        <Text strong type={isExpiredPreview ? 'danger' : undefined}>
-                          {expireDatePreview}
-                        </Text>
-                      </div>
-
-                      {isExpiredPreview && (
-                        <Alert
-                          message="测试模式：生成的密钥已过期"
-                          description="写入应用后将触发过期弹窗"
-                          type="warning"
-                          showIcon
-                          icon={<ExperimentOutlined />}
-                          style={{ marginTop: 12 }}
-                          className="expired-alert"
-                        />
-                      )}
-                    </Card>
-
-                    {/* 功能模块配置卡片 */}
-                    {configurableSensors.length > 0 && (
-                      <Card
-                        title={
-                          <Space>
-                            <SettingOutlined />
-                            <span>默认功能模块</span>
-                            <Tag color="purple">{Object.keys(moduleConfig).length} 已配置</Tag>
-                          </Space>
-                        }
-                        style={{ marginTop: 16 }}
-                        className="module-config-card"
-                      >
-                        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
-                          为每个传感器类型设置应用启动后默认进入的功能模块
-                        </Text>
-                        {configurableSensors.map((sensor) => {
-                          const modules = getModulesForSensor(sensor.value);
-                          const currentVal = moduleConfig[sensor.value] || modules[0].value;
-                          const isCustomized = !!moduleConfig[sensor.value];
-                          return (
-                            <div key={sensor.value} style={{ marginBottom: 12 }}>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                                <Text style={{ fontSize: 13, fontWeight: 500 }}>{sensor.label}</Text>
-                                {isCustomized ? (
-                                  <Tag color="purple" style={{ margin: 0, fontSize: 11 }}>已配置</Tag>
-                                ) : (
-                                  <Tag color="default" style={{ margin: 0, fontSize: 11 }}>默认</Tag>
-                                )}
-                              </div>
-                              <Select
-                                size="small"
-                                style={{ width: '100%' }}
-                                value={currentVal}
-                                onChange={(val) => handleModuleChange(sensor.value, val)}
-                                options={modules}
-                              />
-                            </div>
-                          );
-                        })}
-                      </Card>
-                    )}
-
-                    {/* 授权摘要 */}
-                    <Card
-                      title={<Space><CheckCircleOutlined /><span>授权摘要</span></Space>}
-                      style={{ marginTop: 16 }}
-                      className="summary-card"
-                    >
-                      <div className="summary-item">
-                        <Text type="secondary">授权模式：</Text>
-                        <Text strong>
-                          {isAll ? '全部授权' : selectedTypes.length === 1 ? '单类型' : `多类型 (${selectedTypes.length})`}
-                        </Text>
-                      </div>
-                      {!isAll && selectedTypes.length > 0 && (
-                        <div className="summary-types">
-                          {selectedTypes.map((t) => {
-                            const sensor = ALL_SENSORS.find((s) => s.value === t);
-                            return (
-                              <Tag key={t} closable onClose={() => handleTypeChange(t, false)} color="blue">
-                                {sensor ? sensor.label : t}
-                              </Tag>
-                            );
-                          })}
-                        </div>
-                      )}
-                      <div className="summary-item">
-                        <Text type="secondary">{timeMode === 'days' ? '有效天数：' : '到期时间：'}</Text>
-                        <Text strong type={isExpiredPreview ? 'danger' : undefined}>
-                          {timeMode === 'days'
-                            ? `${days} 天`
-                            : pickerDate ? pickerDate.format('YYYY-MM-DD HH:mm:ss') : '未选择'}
-                        </Text>
-                      </div>
-                      {Object.keys(moduleConfig).length > 0 && (
-                        <>
-                          <Divider style={{ margin: '8px 0' }} />
-                          <Text type="secondary" style={{ fontSize: 12 }}>功能模块配置：</Text>
-                          {Object.entries(moduleConfig).map(([sensorVal, moduleVal]) => {
-                            const sensor = ALL_SENSORS.find(s => s.value === sensorVal);
-                            const modules = getModulesForSensor(sensorVal);
-                            const mod = modules.find(m => m.value === moduleVal);
-                            return (
-                              <div key={sensorVal} style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
-                                <Text style={{ fontSize: 12 }}>{sensor?.label || sensorVal}</Text>
-                                <Tag color="purple" style={{ margin: 0, fontSize: 11 }}>{mod?.label || moduleVal}</Tag>
-                              </div>
-                            );
-                          })}
-                        </>
-                      )}
-
-                      <Divider />
-
-                      <Button
-                        type="primary"
-                        size="large"
-                        block
-                        icon={isExpiredPreview ? <ExperimentOutlined /> : <KeyOutlined />}
-                        onClick={handleGenerate}
-                        className={`generate-btn ${isExpiredPreview ? 'generate-btn-expired' : ''}`}
-                      >
-                        {isExpiredPreview ? '生成过期密钥（测试）' : '生成密钥'}
-                      </Button>
-
-                      {generatedKey && (
-                        <div className="key-output">
-                          <Text type="secondary" style={{ fontSize: 12 }}>生成的密钥：</Text>
-                          <TextArea value={generatedKey} readOnly autoSize={{ minRows: 3, maxRows: 6 }} className="key-textarea" />
-                          <Space style={{ marginTop: 8, width: '100%', justifyContent: 'space-between' }}>
-                            <Button icon={<CopyOutlined />} onClick={handleCopy}>复制</Button>
-                            <Tooltip title={wsConnected ? '发送密钥到正在运行的应用' : '应用未连接'}>
-                              <Button type="primary" icon={<SendOutlined />} onClick={handleSendToApp} disabled={!wsConnected || sendSaving}>
-                                {sendSaving ? '写入中' : '写入应用'}
-                              </Button>
-                            </Tooltip>
-                          </Space>
-                        </div>
-                      )}
-                    </Card>
-                  </Col>
-                </Row>
-              </div>
-            ),
-          },
           {
             key: 'parse',
             label: <span><UnlockOutlined /> 解析密钥</span>,
@@ -838,15 +452,22 @@ const License = () => {
                   <Col xs={24} lg={12}>
                     <Card title={<Space><UnlockOutlined /> 输入密钥</Space>}>
                       <TextArea
-                        placeholder="请粘贴密钥字符串..."
+                        placeholder="粘贴在线密钥(hex) 或 离线激活码(base64)..."
                         value={parseInput}
                         onChange={(e) => setParseInput(e.target.value)}
                         autoSize={{ minRows: 4, maxRows: 8 }}
                         style={{ marginBottom: 16 }}
                       />
-                      <Button type="primary" block icon={<UnlockOutlined />} onClick={handleParse}>
-                        解析密钥
-                      </Button>
+                      <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                        <Button icon={<UnlockOutlined />} onClick={handleParse}>
+                          解析预览
+                        </Button>
+                        <Tooltip title={wsConnected ? '将密钥写入正在运行的应用' : '应用未连接'}>
+                          <Button type="primary" icon={<SendOutlined />} onClick={handleWriteToApp} disabled={!wsConnected}>
+                            写入应用
+                          </Button>
+                        </Tooltip>
+                      </Space>
                     </Card>
                   </Col>
                   <Col xs={24} lg={12}>
@@ -854,11 +475,22 @@ const License = () => {
                       {parseResult ? (
                         <div className="parse-result">
                           <div className="parse-item">
+                            <Text type="secondary">密钥类型：</Text>
+                            <Tag color={parseResult.version === 'offline' ? 'purple' : 'blue'}>
+                              {parseResult.version === 'offline' ? '离线激活码' : '在线密钥'}
+                            </Tag>
+                          </div>
+                          <div className="parse-item">
                             <Text type="secondary">授权状态：</Text>
                             <Tag color={parseResult.expired ? 'red' : 'green'}>
                               {parseResult.expired ? '已过期' : '有效'}
                             </Tag>
                           </div>
+                          {parseResult.version === 'offline' && (
+                            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+                              注：此处仅解码预览，签名将在「写入应用」时由后端校验。
+                            </Text>
+                          )}
                           <div className="parse-item">
                             <Text type="secondary">到期时间：</Text>
                             <Text strong>{parseResult.expireDate}</Text>
@@ -882,10 +514,9 @@ const License = () => {
                           </div>
                           {parseResult.fileDisplay.type !== 'all' && (
                             <div className="parse-types">
-                              {parseResult.fileDisplay.list.map((t) => {
-                                const sensor = ALL_SENSORS.find((s) => s.value === t);
-                                return <Tag key={t} color="blue">{sensor ? sensor.label : t}</Tag>;
-                              })}
+                              {parseResult.fileDisplay.list.map((val) => (
+                                <Tag key={val} color="blue">{sensorLabelOf(val)}</Tag>
+                              ))}
                             </div>
                           )}
                           {parseResult.moduleConfig && Object.keys(parseResult.moduleConfig).length > 0 && (
@@ -895,12 +526,11 @@ const License = () => {
                                 <SettingOutlined style={{ marginRight: 4 }} />功能模块配置：
                               </Text>
                               {Object.entries(parseResult.moduleConfig).map(([sensorVal, moduleVal]) => {
-                                const sensor = ALL_SENSORS.find(s => s.value === sensorVal);
                                 const modules = getModulesForSensor(sensorVal);
                                 const mod = modules.find(m => m.value === moduleVal);
                                 return (
                                   <div key={sensorVal} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                                    <Text style={{ fontSize: 12 }}>{sensor?.label || sensorVal}</Text>
+                                    <Text style={{ fontSize: 12 }}>{sensorLabelOf(sensorVal)}</Text>
                                     <Tag color="purple" icon={<EyeOutlined />} style={{ margin: 0, fontSize: 11 }}>
                                       {mod?.label || moduleVal}
                                     </Tag>
@@ -923,6 +553,28 @@ const License = () => {
           },
         ]}
       />
+
+      {/* 锁定模态框：检测到时间回拨/篡改时弹出，提示联系厂商重新获取密钥 */}
+      <Modal
+        open={!!(licenseStatus && licenseStatus.locked)}
+        title={<span><LockOutlined style={{ color: '#cf1322', marginRight: 8 }} />授权异常</span>}
+        closable={false}
+        maskClosable={false}
+        keyboard={false}
+        okText="确定"
+        cancelButtonProps={{ style: { display: 'none' } }}
+        onOk={() => {
+          setLicenseStatus((prev) => ({ ...(prev || {}), locked: false }));
+          window.location.hash = '#/?from=system';
+        }}
+      >
+        <p style={{ marginBottom: 8 }}>
+          {(licenseStatus && licenseStatus.error) || '检测到异常行为'}。
+        </p>
+        <p style={{ color: '#888' }}>
+          串口连接、数据采集等功能已被禁用。请联系厂商重新获取密钥，点击「确定」前往密钥输入页写入新密钥。
+        </p>
+      </Modal>
     </div>
   );
 };

@@ -26,7 +26,7 @@ import HandLine0123 from "./components/demo/handLine0123";
 import LineAdjust from "./components/demo/LineAdjust";
 import Can from "./components/demo/can";
 import Num3D from "./components/num/NumWs";
-import LicenseAdmin from "./page/license/License";
+import License from "./page/license/License";
 import LicensePortal from "./page/licensePortal/LicensePortal";
 i18next.init({
   resources: {
@@ -54,10 +54,6 @@ i18next.init({
         meanPress: 'Average Pressure',
         maxPress: 'Maximum pressure',
         pressTotal: 'The sum of pressures',
-        pressureIntensityArea: 'Pressure Intensity Area',
-        pressureIntensityData: 'Pressure Intensity Data',
-        meanPressureIntensity: 'Average Pressure Intensity',
-        maxPressureIntensity: 'Maximum Pressure Intensity',
         points: "Data points",
         area: "Area",
         allPress: "Overall pressure",
@@ -165,7 +161,6 @@ i18next.init({
         sensorSmallBedNoAlg: 'Small Bed Detection(Data)',
         smallBed: 'Small Bed Detection',
         sensorSmallBed12B: 'Small Bed Detection(12B)',
-        sensorMatCol: 'Small Mattress Collection',
         sensorPetCare: 'Pet Care',
         sensorPetCareMini: 'Mini Care',
         sensorFast256: '16*16 High Speed',
@@ -176,6 +171,7 @@ i18next.init({
         sensorWholeChair: 'Whole Chair',
         sensorMinzhen: 'Wheelchair',
         enterBaudRate: 'Enter baud rate',
+        sensorMatCol : 'Smart Bed',
       },
     },
     zh: {
@@ -207,10 +203,6 @@ i18next.init({
         meanPress: '平均压力',
         maxPress: '最大压力',
         pressTotal: '压力总和',
-        pressureIntensityArea: '压强面积',
-        pressureIntensityData: '压强数据',
-        meanPressureIntensity: '平均压强',
-        maxPressureIntensity: '最大压强',
         points: '点数',
         area: '面积',
         allPress: '压力总和',
@@ -317,7 +309,6 @@ i18next.init({
         sensorSmallBedNoAlg: '小床检测(数据)',
         smallBed: '小床检测',
         sensorSmallBed12B: '小床检测(12B)',
-        sensorMatCol: '小床褥采集',
         sensorPetCare: '宠物看护',
         sensorFast256: '16*16高速',
         sensorFast1024: '32*32高速',
@@ -326,6 +317,7 @@ i18next.init({
         sensorHumanBody: '人体全身',
         sensorWholeChair: '整椅展示',
         enterBaudRate: '请输入波特率',
+        sensorMatCol : '小床褥监测',
       },
     },
   },
@@ -382,9 +374,12 @@ function App() {
           // </I18nProvider> 
         } />
         <Route exact path="/" element={
-          // <I18nProvider lng="en">
+          // 开屏门户页：展示产品方案 + 输入/缓存密钥（不自动进入，需点击「进入系统」）
+          <LicensePortal />
+        } />
+        <Route exact path="/key" element={
+          // 旧密钥输入页（保留兜底：Home/Title 跳转 /?from=system 仍可用此页更新密钥）
           <Date i18n={i18next} />
-          // </I18nProvider> 
         } />
         <Route exact path="/system" element={
           // <I18nProvider lng="en">
@@ -406,8 +401,7 @@ function App() {
         <Route exact path="/log" element={<Log />} />
         <Route exact path="/diff" element={<MatrixDiff />} />
         <Route exact path="/3Dnum" element={<Num3D />} />
-        <Route exact path="/license" element={<LicensePortal />} />
-        <Route exact path="/license-admin" element={<LicenseAdmin />} />
+        <Route exact path="/license" element={<License />} />
         {/* <Route exact path="/local" element={<Local />} /> */}
         {/* <Route exact path="/back" element={<Back />} /> */}
       </Routes>

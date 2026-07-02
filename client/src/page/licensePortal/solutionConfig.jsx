@@ -18,7 +18,7 @@ import adaptiveSeatIcon from '../../assets/开屏IMG/ChatGPT Image 2026年6月26
 import gripAssessmentIcon from '../../assets/开屏IMG/ChatGPT Image 2026年6月26日 13_52_18 (3).png';
 
 const renderIcon = (src, alt) => (
-  <img alt={alt} className="solution-icon-img" draggable={false} src={src} />
+  <img alt={alt} className="portal-icon-img" draggable={false} src={src} />
 );
 
 export const BRAND_LOGO_SRC = brandLogoIcon;
@@ -27,7 +27,7 @@ const CAROUSEL_PAGE_SIZE = 3;
 const createResearchModule = (solutionKey, index) => ({
   key: `${solutionKey}-research-${index}`,
   label: '正在探索',
-  icon: <span className="solution-research-icon" aria-hidden="true">...</span>,
+  icon: <span className="portal-research-icon" aria-hidden="true">...</span>,
   detailTitle: '正在探索',
   detail: '更多定制方向正在探索中。',
   isResearch: true,
@@ -164,7 +164,7 @@ export const SOLUTIONS = [
     ],
     detailTitle: '智能足垫方案',
     detail:
-      '采集足垫压力分布数据，输出一份精准的足垫压力分布报告。。',
+      '采集足垫压力分布数据，输出一份精准的足垫压力分布报告。',
   },
 ];
 
