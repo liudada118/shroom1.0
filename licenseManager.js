@@ -267,6 +267,7 @@ function loadOffline(code) {
  * @returns {Promise<boolean>} 是否放行
  */
 async function loadFromKey(rawKey) {
+  state.rawKey = rawKey && typeof rawKey === 'string' ? rawKey.trim() : rawKey;
   state.checking = true;
   try {
     const type = identifyKeyType(rawKey);

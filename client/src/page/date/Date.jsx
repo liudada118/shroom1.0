@@ -38,6 +38,10 @@ export default function Date1() {
       try {
         const data = JSON.parse(e.data)
 
+        if (typeof data.licenseKey === 'string' && data.licenseKey.trim()) {
+          setDate(data.licenseKey.trim())
+        }
+
         // 处理密钥验证错误
         if (data.licenseError != null) {
           const wasSubmitting = isSubmitting.current
@@ -160,6 +164,7 @@ export default function Date1() {
           }}
           className='dateInput'
           placeholder='请输入密钥'
+          value={date}
           onChange={(e) => {
             setDate((e.target.value).trim())
           }}

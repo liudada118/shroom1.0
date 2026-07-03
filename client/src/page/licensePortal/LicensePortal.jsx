@@ -18,8 +18,8 @@ import './LicensePortal.css';
 
 const LicensePortal = () => {
   const navigate = useNavigate();
-  const [accessKey, setAccessKey] = useState(() => localStorage.getItem('shroomAccessKey') || '');
-  // 保存密钥：默认勾选；勾选则验证通过后记住密钥，下次自动填入输入框
+  const [accessKey, setAccessKey] = useState('');
+  // 密钥保存和下次回填以后端 config.txt 为准，前端只负责展示后端下发的 licenseKey。
   const [saveKey, setSaveKey] = useState(true);
   const [wsConnected, setWsConnected] = useState(false);
   const [entering, setEntering] = useState(false);
@@ -27,13 +27,11 @@ const LicensePortal = () => {
   const [carouselIndexBySolution, setCarouselIndexBySolution] = useState({});
 
   const wsRef = useRef(null);
-  // ws.onmessage 闭包只创建一次，用 ref 读取最新的输入值 / 勾选状态 / 提交标记
+  // ws.onmessage 闭包只创建一次，用 ref 读取最新的输入值 / 提交标记
   const accessKeyRef = useRef(accessKey);
-  const saveKeyRef = useRef(saveKey);
   const isSubmittingRef = useRef(false);
 
   useEffect(() => { accessKeyRef.current = accessKey; }, [accessKey]);
-  useEffect(() => { saveKeyRef.current = saveKey; }, [saveKey]);
 
   // 连接桌面端本地服务：用于「进入系统」时提交密钥做校验（不改原有验证逻辑）
   useEffect(() => {
@@ -53,6 +51,13 @@ const LicensePortal = () => {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+
+          if (typeof data.licenseKey === 'string' && data.licenseKey.trim()) {
+            const key = data.licenseKey.trim();
+            if (!accessKeyRef.current.trim()) {
+              setAccessKey(key);
+            }
+          }
 
           // 密钥验证错误：仅在用户点击「进入系统」提交后才弹错误框
           // （后端连接/复检时主动推送的 licenseError 不弹，避免一打开就报错）
@@ -80,12 +85,6 @@ const LicensePortal = () => {
               return;
             }
 
-            // 验证成功：按勾选决定是否记住密钥（输入框自动回显用）
-            if (saveKeyRef.current) {
-              localStorage.setItem('shroomAccessKey', accessKeyRef.current.trim());
-            } else {
-              localStorage.removeItem('shroomAccessKey');
-            }
             message.success('密钥验证成功');
             setTimeout(() => navigate('/system'), 500);
           }

@@ -46,6 +46,13 @@ function getConfigFileCandidates() {
     if (process.resourcesPath) {
       candidates.push(path.join(process.resourcesPath, 'config.txt'));
     }
+
+    if (process.platform === 'win32') {
+      if (process.execPath) {
+        candidates.push(path.join(path.dirname(process.execPath), 'resources', 'config.txt'));
+      }
+      candidates.push(path.join(process.cwd(), 'resources', 'config.txt'));
+    }
   }
 
   return [...new Set(candidates)];

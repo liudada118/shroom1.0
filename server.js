@@ -1558,6 +1558,87 @@ logger.info("[Path] writableRoot=", runtimeWritableRoot);
 logger.info("[Path] db=", filePath, "data=", csvPath, "config=", nameTxt);
 logger.info("[Path] configCandidates=", getConfigFileCandidates().join(", "));
 
+function readTrimmedConfigFile(configPath) {
+  try {
+    return fs.readFileSync(configPath, 'utf8').trim();
+  } catch (err) {
+    logger.warn(`[License] 读取密钥文件失败：${configPath}，${err && err.message}`);
+    return '';
+  }
+}
+
+function findStartupLicenseConfig() {
+  let firstExisting = null;
+
+  for (const candidate of getConfigFileCandidates()) {
+    if (!fs.existsSync(candidate)) continue;
+    if (!firstExisting) firstExisting = candidate;
+
+    const rawKey = readTrimmedConfigFile(candidate);
+    if (!rawKey) {
+      logger.warn(`[License] 跳过空密钥文件：${candidate}`);
+      continue;
+    }
+
+    const peeked = licenseManager.peekPayload(rawKey);
+    if (peeked) {
+      if (candidate !== firstExisting) {
+        logger.info(`[License] 使用兼容路径中的有效密钥：${candidate}`);
+      }
+      return { path: candidate, rawKey, peeked };
+    }
+
+    logger.warn(`[License] 跳过无法解析的密钥文件：${candidate}`);
+  }
+
+  if (firstExisting) {
+    return {
+      path: firstExisting,
+      rawKey: readTrimmedConfigFile(firstExisting),
+      peeked: null,
+    };
+  }
+
+  return null;
+}
+
+function persistStartupLicenseToWritable(sourcePath, rawKey) {
+  const source = path.normalize(sourcePath || '');
+  const target = path.normalize(writableNameTxt || '');
+  if (!source || !target || source.toLowerCase() === target.toLowerCase() || !rawKey) {
+    return true;
+  }
+
+  try {
+    const existing = fs.existsSync(writableNameTxt) ? readTrimmedConfigFile(writableNameTxt) : '';
+    if (existing === rawKey) return true;
+
+    fs.mkdirSync(path.dirname(writableNameTxt), { recursive: true });
+    fs.writeFileSync(writableNameTxt, rawKey, 'utf8');
+    logger.info(`[License] 已将旧路径密钥迁移到当前可写路径：${writableNameTxt}`);
+    return true;
+  } catch (err) {
+    logger.warn(`[License] 迁移旧路径密钥失败：${err && err.message}`);
+    return false;
+  }
+}
+
+function getSavedLicenseKeyForClient() {
+  const candidates = [
+    nameTxt,
+    writableNameTxt,
+    ...getConfigFileCandidates(),
+  ].filter(Boolean);
+
+  for (const candidate of [...new Set(candidates)]) {
+    if (!fs.existsSync(candidate)) continue;
+    const rawKey = readTrimmedConfigFile(candidate);
+    if (rawKey) return rawKey;
+  }
+
+  return licenseManager.getState().rawKey || '';
+}
+
 function validateWritableDirectory(targetDir) {
   const dir = String(targetDir || '').trim();
   if (!dir) {
@@ -3080,21 +3161,23 @@ function getDefaultFileFromLicense(licenseFile, fallback = null) {
 function sendLicenseStatusTo(client) {
   if (!client || client.readyState !== WebSocket.OPEN) return;
   const st = licenseManager.getState();
+  const savedLicenseKey = getSavedLicenseKeyForClient();
   // 永久锁定（回拨/篡改）→ 弹解锁窗，需厂商解锁码
   if (st.locked) {
-    client.send(JSON.stringify({ licenseLocked: true, reason: st.reason || '检测到异常行为，请联系厂商解锁' }));
+    client.send(JSON.stringify({ licenseLocked: true, licenseKey: savedLicenseKey, reason: st.reason || '检测到异常行为，请联系厂商解锁' }));
     return;
   }
   if (!st.payload) {
     // 校验中（首检未回）时只发 checking，避免启动瞬间闪红"未授权"
     client.send(JSON.stringify(st.checking
-      ? { licenseChecking: true }
-      : { licenseError: '未检测到有效密钥，请输入密钥后使用', noLicense: true }));
+      ? { licenseChecking: true, licenseKey: savedLicenseKey }
+      : { licenseError: '未检测到有效密钥，请输入密钥后使用', noLicense: true, licenseKey: savedLicenseKey }));
     return;
   }
   const payload = {
     date: st.expireTimestamp,
     nowDate: st.lastCheckedAt || Date.now(), // 服务器/可信时间，供前端算剩余天数
+    licenseKey: savedLicenseKey,
     file: licenseFile || file,
     selectFlag: selectFlag,
     checking: !!st.checking,
@@ -3147,14 +3230,19 @@ function onLicensePollChange(st, prevValid) {
   broadcastLicenseStatus();
 }
 
-if (fs.existsSync(nameTxt)) {
+const startupLicenseConfig = findStartupLicenseConfig();
+if (startupLicenseConfig) {
   try {
-    const startupRawKey = fs.readFileSync(nameTxt, 'utf8').trim();
+    nameTxt = startupLicenseConfig.path;
+    const startupRawKey = startupLicenseConfig.rawKey;
 
     // 1) 同步预取 payload：仅用于配置 db/串口（不联网、不判有效性）。
     //    在线/离线统一归一化为 { date, file, moduleConfig }；旧 ECB config.txt 走在线分支，零兼容差异。
-    const peeked = licenseManager.peekPayload(startupRawKey);
+    const peeked = startupLicenseConfig.peeked || licenseManager.peekPayload(startupRawKey);
     if (peeked) {
+      if (persistStartupLicenseToWritable(nameTxt, startupRawKey)) {
+        nameTxt = writableNameTxt;
+      }
       licenseFile = peeked.payload.file || null;
       selectFlag = getSelectFlagFromLicense(peeked.payload.file);
       file = getDefaultFileFromLicense(peeked.payload.file, defauleFile);
@@ -3474,9 +3562,7 @@ module.exports = {
 
             // 写入 config.txt（原始密钥串：在线为 hex、离线为 base64 JSON）
             fs.mkdirSync(path.dirname(writableNameTxt), { recursive: true });
-            fs.writeFile(writableNameTxt, newKey, err => {
-              if (err) { logger.error(err); }
-            });
+            fs.writeFileSync(writableNameTxt, newKey, 'utf8');
             nameTxt = writableNameTxt;
 
             // 更新运行期变量（file/baudRate 等），在线/离线统一用归一化 payload

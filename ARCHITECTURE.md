@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-06-30
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-07-03
 
 ## 1. 项目概述
 
@@ -261,6 +261,8 @@ graph TD
 
 4. **授权验证流程**
     - 应用启动 → `licenseHelper.js` 解析外部 `config.txt` 候选路径 → `licenseManager.js` 读取原始密钥并统一识别在线 hex 密钥或离线 base64 激活码 → 在线密钥走远程授权检查与断网缓存兜底，离线密钥走签名验签与防时间回拨可信时间校验 → `server.js` 只在 `licenseManager.isLicenseValid()` 通过后开放串口数据处理、采集和 WebSocket 数据通道。
+    - Windows 打包版启动时按密钥保存位置读取 `config.txt`：优先当前 `userData/config.txt`，并兼容安装目录同级、`process.resourcesPath/config.txt`、旧版安装目录 `resources/config.txt` 与当前工作目录 `resources/config.txt` 候选；`server.js` 会用 `licenseManager.peekPayload()` 过滤无法解析的候选文件，并在安装目录或资源目录密钥有效时自动迁移到当前可写 `userData/config.txt`，避免远程更新后因读取路径变化丢失本地密钥。
+    - `server.js` 在授权状态下发时重新按 `licenseHelper.js` 的保存位置候选读取当前 `config.txt` 原始 `licenseKey`，包括启动校验中、有效、无效和锁定状态；`Date.jsx` 与 `LicensePortal.jsx` 收到后回填密钥输入框，确保旧版本本地密钥被新版本读取后能在访问密钥页显示，前端不再把 `localStorage` 作为首屏读取来源。
     - `licenseManager` 会在启动和密钥写入后启动运行期复检，持续广播 `licenseType`、`remainingDays`、`licenseChecking`、`licenseError` 或 `licenseLocked`；前端 `Date.jsx`、`LicensePortal.jsx`、`License.jsx` 和 `Home.jsx` 根据这些状态展示验证中、过期、暂停、吊销或时间异常锁定提示。
     - 密钥 `file` 字段继续用于授权范围、默认系统、模块配置和前端可选系统过滤；`server.js` 通过 `getSelectFlagFromLicense()` 下发 `selectFlag`，`Home.jsx` 将授权范围写入 `allowedTypes` 并在系统页过滤展示。
 
@@ -343,6 +345,9 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-07-03 | Codex | 密钥输入框回填修复 | `server.js` 授权状态按保存位置读取并携带 `licenseKey`，`Date.jsx` 与 `LicensePortal.jsx` 在 WebSocket 收到本地配置密钥后回填输入框，修复访问密钥页不显示已读取密钥的问题。 |
+| 2026-07-03 | Codex | 旧版 Windows 密钥路径兼容 | `licenseHelper.js` 在打包版候选中补充安装目录 `resources/config.txt` 与当前工作目录 `resources/config.txt`，兼容 1.0/1.1.0 旧版把密钥写入资源目录的安装方式。 |
+| 2026-07-03 | Codex | 远程更新后密钥读取修复 | `server.js` 启动时按 `licenseHelper.js` 的保存位置候选验证 `config.txt`，并将安装目录或资源目录中的有效密钥迁移到当前可写目录，避免远程更新后无法读取本地已保存密钥。 |
 | 2026-07-01 | Codex | Shroom Vision 保存密钥对齐 | `LicensePortal.css` 将“保存密钥”字号和复选框缩小，并让其左边距跟访问密钥输入框保持一致，桌面与 1280 响应式宽度分别同步到输入区缩进。 |
 | 2026-07-01 | Codex | Shroom Vision 密钥区细节调整 | `LicensePortal.css` 缩小“保存密钥”文字，移除访问密钥图片外层背景/边框/阴影，并在 `html` / `body` / `#root` 层限制横向溢出，避免密钥页出现横向滚动条。 |
 | 2026-07-01 | Codex | Shroom Vision 访问密钥图标替换 | `LicensePortal.jsx` 将访问密钥标题左侧 icon 从 `LockOutlined` 替换为 `assets/开屏IMG/ChatGPT Image 2026年7月1日 11_54_17.png`，并在 `LicensePortal.css` 固定图片尺寸，避免拉伸变形。 |
@@ -722,6 +727,9 @@ graph TD
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-07-03 | Codex | 修复缺陷 | 修复访问密钥页不回填本地配置密钥：授权状态包按 `config.txt` 保存位置读取并带回 `licenseKey`，`/` 与 `/license` 两个密钥入口收到后填入输入框。 |
+| 2026-07-03 | Codex | 修复缺陷 | `licenseHelper.js` 明确补充旧版 Windows 安装目录 `resources/config.txt` 候选，确保旧版本保存在资源目录的本地密钥仍会被新版本启动扫描和迁移。 |
+| 2026-07-03 | Codex | 修复缺陷 | 修复远程更新后不读取本地密钥的问题：启动时按保存位置候选逐个解析 `config.txt`，跳过空文件/无效文件，并把安装目录或资源目录中的有效密钥迁移到当前 `userData/config.txt`。 |
 | 2026-07-01 | Codex | 配置变更 | Shroom Vision 密钥区“保存密钥”缩小为更轻量的文字与复选框，并与访问密钥输入框左边缘对齐。 |
 | 2026-07-01 | Codex | 配置变更 | Shroom Vision 密钥区缩小“保存密钥”字号，取消访问密钥 icon 外层底色，并在页面根层隐藏横向溢出，防止整页出现横向滚动条。 |
 | 2026-07-01 | Codex | 配置变更 | Shroom Vision 访问密钥模块左侧 icon 改为新增图片 `ChatGPT Image 2026年7月1日 11_54_17.png`，替换原 antd 锁图标。 |
