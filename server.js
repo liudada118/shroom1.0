@@ -1623,6 +1623,22 @@ function persistStartupLicenseToWritable(sourcePath, rawKey) {
   }
 }
 
+function getSavedLicenseKeyForClient() {
+  const candidates = [
+    nameTxt,
+    writableNameTxt,
+    ...getConfigFileCandidates(),
+  ].filter(Boolean);
+
+  for (const candidate of [...new Set(candidates)]) {
+    if (!fs.existsSync(candidate)) continue;
+    const rawKey = readTrimmedConfigFile(candidate);
+    if (rawKey) return rawKey;
+  }
+
+  return licenseManager.getState().rawKey || '';
+}
+
 function validateWritableDirectory(targetDir) {
   const dir = String(targetDir || '').trim();
   if (!dir) {
@@ -3145,21 +3161,23 @@ function getDefaultFileFromLicense(licenseFile, fallback = null) {
 function sendLicenseStatusTo(client) {
   if (!client || client.readyState !== WebSocket.OPEN) return;
   const st = licenseManager.getState();
+  const savedLicenseKey = getSavedLicenseKeyForClient();
   // 永久锁定（回拨/篡改）→ 弹解锁窗，需厂商解锁码
   if (st.locked) {
-    client.send(JSON.stringify({ licenseLocked: true, reason: st.reason || '检测到异常行为，请联系厂商解锁' }));
+    client.send(JSON.stringify({ licenseLocked: true, licenseKey: savedLicenseKey, reason: st.reason || '检测到异常行为，请联系厂商解锁' }));
     return;
   }
   if (!st.payload) {
     // 校验中（首检未回）时只发 checking，避免启动瞬间闪红"未授权"
     client.send(JSON.stringify(st.checking
-      ? { licenseChecking: true }
-      : { licenseError: '未检测到有效密钥，请输入密钥后使用', noLicense: true }));
+      ? { licenseChecking: true, licenseKey: savedLicenseKey }
+      : { licenseError: '未检测到有效密钥，请输入密钥后使用', noLicense: true, licenseKey: savedLicenseKey }));
     return;
   }
   const payload = {
     date: st.expireTimestamp,
     nowDate: st.lastCheckedAt || Date.now(), // 服务器/可信时间，供前端算剩余天数
+    licenseKey: savedLicenseKey,
     file: licenseFile || file,
     selectFlag: selectFlag,
     checking: !!st.checking,
