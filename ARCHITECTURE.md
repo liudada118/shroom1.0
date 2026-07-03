@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-06-30
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-07-03
 
 ## 1. 项目概述
 
@@ -261,6 +261,7 @@ graph TD
 
 4. **授权验证流程**
     - 应用启动 → `licenseHelper.js` 解析外部 `config.txt` 候选路径 → `licenseManager.js` 读取原始密钥并统一识别在线 hex 密钥或离线 base64 激活码 → 在线密钥走远程授权检查与断网缓存兜底，离线密钥走签名验签与防时间回拨可信时间校验 → `server.js` 只在 `licenseManager.isLicenseValid()` 通过后开放串口数据处理、采集和 WebSocket 数据通道。
+    - Windows 打包版启动时按密钥保存位置读取 `config.txt`：优先当前 `userData/config.txt`，并兼容安装目录与 `resources` 目录候选；`server.js` 会用 `licenseManager.peekPayload()` 过滤无法解析的候选文件，并在安装目录或资源目录密钥有效时自动迁移到当前可写 `userData/config.txt`，避免远程更新后因读取路径变化丢失本地密钥。
     - `licenseManager` 会在启动和密钥写入后启动运行期复检，持续广播 `licenseType`、`remainingDays`、`licenseChecking`、`licenseError` 或 `licenseLocked`；前端 `Date.jsx`、`LicensePortal.jsx`、`License.jsx` 和 `Home.jsx` 根据这些状态展示验证中、过期、暂停、吊销或时间异常锁定提示。
     - 密钥 `file` 字段继续用于授权范围、默认系统、模块配置和前端可选系统过滤；`server.js` 通过 `getSelectFlagFromLicense()` 下发 `selectFlag`，`Home.jsx` 将授权范围写入 `allowedTypes` 并在系统页过滤展示。
 
@@ -343,6 +344,7 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-07-03 | Codex | 远程更新后密钥读取修复 | `server.js` 启动时按 `licenseHelper.js` 的保存位置候选验证 `config.txt`，并将安装目录或资源目录中的有效密钥迁移到当前可写目录，避免远程更新后无法读取本地已保存密钥。 |
 | 2026-07-01 | Codex | Shroom Vision 保存密钥对齐 | `LicensePortal.css` 将“保存密钥”字号和复选框缩小，并让其左边距跟访问密钥输入框保持一致，桌面与 1280 响应式宽度分别同步到输入区缩进。 |
 | 2026-07-01 | Codex | Shroom Vision 密钥区细节调整 | `LicensePortal.css` 缩小“保存密钥”文字，移除访问密钥图片外层背景/边框/阴影，并在 `html` / `body` / `#root` 层限制横向溢出，避免密钥页出现横向滚动条。 |
 | 2026-07-01 | Codex | Shroom Vision 访问密钥图标替换 | `LicensePortal.jsx` 将访问密钥标题左侧 icon 从 `LockOutlined` 替换为 `assets/开屏IMG/ChatGPT Image 2026年7月1日 11_54_17.png`，并在 `LicensePortal.css` 固定图片尺寸，避免拉伸变形。 |
@@ -722,6 +724,7 @@ graph TD
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-07-03 | Codex | 修复缺陷 | 修复远程更新后不读取本地密钥的问题：启动时按保存位置候选逐个解析 `config.txt`，跳过空文件/无效文件，并把安装目录或资源目录中的有效密钥迁移到当前 `userData/config.txt`。 |
 | 2026-07-01 | Codex | 配置变更 | Shroom Vision 密钥区“保存密钥”缩小为更轻量的文字与复选框，并与访问密钥输入框左边缘对齐。 |
 | 2026-07-01 | Codex | 配置变更 | Shroom Vision 密钥区缩小“保存密钥”字号，取消访问密钥 icon 外层底色，并在页面根层隐藏横向溢出，防止整页出现横向滚动条。 |
 | 2026-07-01 | Codex | 配置变更 | Shroom Vision 访问密钥模块左侧 icon 改为新增图片 `ChatGPT Image 2026年7月1日 11_54_17.png`，替换原 antd 锁图标。 |
