@@ -52,11 +52,13 @@ const LicensePortal = () => {
         try {
           const data = JSON.parse(event.data);
 
-          if (typeof data.licenseKey === 'string' && data.licenseKey.trim()) {
-            const key = data.licenseKey.trim();
-            if (!accessKeyRef.current.trim()) {
-              setAccessKey(key);
-            }
+          const savedKey = typeof data.licenseKey === 'string' && data.licenseKey.trim()
+            ? data.licenseKey.trim()
+            : (typeof data.savedAccessKey === 'string' && data.savedAccessKey.trim()
+              ? data.savedAccessKey.trim()
+              : '');
+          if (savedKey && !accessKeyRef.current.trim()) {
+            setAccessKey(savedKey);
           }
 
           // 密钥验证错误：仅在用户点击「进入系统」提交后才弹错误框

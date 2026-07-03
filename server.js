@@ -1567,6 +1567,21 @@ function readTrimmedConfigFile(configPath) {
   }
 }
 
+function getSavedLicenseKey() {
+  const stateKey = licenseManager.getState().rawKey;
+  if (stateKey && String(stateKey).trim()) {
+    return String(stateKey).trim();
+  }
+
+  for (const candidate of getConfigFileCandidates()) {
+    if (!fs.existsSync(candidate)) continue;
+    const rawKey = readTrimmedConfigFile(candidate);
+    if (rawKey) return rawKey;
+  }
+
+  return '';
+}
+
 function findStartupLicenseConfig() {
   let firstExisting = null;
 
@@ -3162,6 +3177,9 @@ function sendLicenseStatusTo(client) {
   if (!client || client.readyState !== WebSocket.OPEN) return;
   const st = licenseManager.getState();
   const savedLicenseKey = getSavedLicenseKeyForClient();
+  if (savedLicenseKey) {
+    client.send(JSON.stringify({ licenseKey: savedLicenseKey, savedAccessKey: savedLicenseKey }));
+  }
   // 永久锁定（回拨/篡改）→ 弹解锁窗，需厂商解锁码
   if (st.locked) {
     client.send(JSON.stringify({ licenseLocked: true, licenseKey: savedLicenseKey, reason: st.reason || '检测到异常行为，请联系厂商解锁' }));
@@ -8625,4 +8643,3 @@ const HTTP_PORT = 19245;
 reportHttpServer = httpApp.listen(HTTP_PORT, '127.0.0.1', () => {
   logger.info(`[HTTP] OneStep report server listening on http://127.0.0.1:${HTTP_PORT}`);
 });
-
