@@ -6,6 +6,7 @@
 
 | 日期 | 类型 | 说明 |
 | :--- | :--- | :--- |
+| 2026-07-06 | 优化重构 | 新增 `backend/license/licenseKeyStore.js`，统一负责授权密钥的读取和写入；主 WebSocket 新连接时通过私有消息下发 `licenseKey` 给授权门户。 |
 | 2026-07-03 | 优化重构 | 新增 `backend/runtime/zeroCommandService.js`，将旧 WebSocket `resetZero` 命令中的零点捕获和清空逻辑从连接层迁入 runtime 服务。 |
 | 2026-07-03 | 优化重构 | `backend/server/webSocketHandlerFactory.js` 不再直接读写 `pointArr*zero`、`pointArr*RawZero` 和 `pointArr147zero` 等零点字段，只调用 `zeroCommandService.handleResetZero()`。 |
 | 2026-07-03 | 优化重构 | 新增 `backend/server/bootstrapServer.js`，将启动串口扫描 `scanStartupSerialPorts` 和本地 HTTP 监听 `startLocalHttpServer` 从 `server.js` 迁出。 |
@@ -25,7 +26,7 @@
 | 2026-06-23 | 优化重构 | 将 legacy 分段协议缓存 `firstBlueData/lastBlueData/newArr` 从 `server.js` 局部变量迁入 `runtimeStateStore` 内部 state，减少主服务文件直接持有的旧协议缓存。 |
 | 2026-06-23 | 优化重构 | 新增 `backend/sensors/runtime/legacySerialRuntimeBinding.js`，将 legacy runtime 创建、五路 handler 注册和 `serialParserManager` 绑定从 `server.js` 迁入 sensors/runtime 层。 |
 | 2026-06-23 | 优化重构 | 新增 `backend/serial/serialPortFilterService.js`，将 WCH/CH34x 串口识别、Windows/macOS 串口过滤和串口扫描日志摘要从 `server.js` 迁入 serial 层。 |
-| 2026-06-23 | 优化重构 | 新增 `backend/services/historyFrameTransformService.js`，将历史 matrix 行解析、压力帧归一化、CSV 表头/文件名前缀、温度床/小床回放 payload 和清零入库存储 payload 从 `server.js` 迁出。 |
+| 2026-06-23 | 优化重构 | 新增 `backend/services/history/historyFrameTransformService.js`，将历史 matrix 行解析、压力帧归一化、CSV 表头/文件名前缀、温度床/小床回放 payload 和清零入库存储 payload 从 `server.js` 迁出。 |
 | 2026-06-23 | 文档更新 | 为 `backend/sensors` 下传感器注册表、协议解析、矩阵归一化和 runtime processor 补充中文模块职责与关键函数 JSDoc，清理整椅等模块旧错码注释。 |
 | 2026-06-23 | 优化重构 | 新增 `backend/sensors/runtime/legacySegmentedFrameProcessor.js`，将 `legacySerialFrameRuntime.js` 中 130/142/146/158 字节分片压力帧处理迁出，覆盖 SIT/BACK/HEAD 的手、足、眼部旧协议。 |
 | 2026-06-23 | 优化重构 | 新增 `backend/sensors/runtime/legacyGenericMatrixFrameProcessor.js` 和 `legacyBigBedFrameProcessor.js`，从 `legacySerialFrameRuntime.js` 拆出通用字节矩阵帧、bed4096 矩阵和 bigBed 双分片拼接逻辑。 |
@@ -45,15 +46,15 @@
 | 2026-06-22 | 优化重构 | 新增 `backend/sensors/runtime/bindSerialSensorRuntimes.js`，统一维护 SIT/BACK/HEAD/BIG_BED/SMALL_BED_12B 与 `serialParserManager.channels` 的绑定关系，`server.js` 不再直接调用 `serialParserManager.onData`。 |
 | 2026-06-22 | 优化重构 | 新增 `backend/sensors/runtime/backHead1024FrameProcessor.js`，将 BACK/HEAD 1024 字节矩阵帧的线序转换、零点扣除和 payload 构造从 `server.js` 拆出，HEAD 主矩阵帧改为统一通过 `colOrSendData2` 进入 FramePipeline。 |
 | 2026-06-22 | 优化重构 | 新增 `backend/sensors/runtime/sit1024FrameProcessor.js`，将 SIT 1024 字节矩阵帧的线序转换、零点扣除和实时 payload 构造从 `server.js` 拆出，保留原有 `colOrSendData` 输出语义。 |
-| 2026-06-22 | 优化重构 | 新增 `backend/services/frameOutputPipelineService.js`，统一处理 sit/back/head 三路实时帧的 JSON 解析、采集入库和实时通道发布，`server.js` 保留 `colOrSendData*` 兼容包装函数。 |
+| 2026-06-22 | 优化重构 | 新增 `backend/services/realtime/frameOutputPipelineService.js`，统一处理 sit/back/head 三路实时帧的 JSON 解析、采集入库和实时通道发布，`server.js` 保留 `colOrSendData*` 兼容包装函数。 |
 | 2026-06-22 | 优化重构 | 新增 `backend/sensors/runtime/smallBed12BRuntime.js`，把小床 12B 的 buffer 解析、零点扣除、压力标定、实时帧状态同步和 sit 通道输出从 `server.js` 的 `serialParserManager.onData` 回调中拆出。 |
 | 2026-06-22 | 文档更新 | 为 HTTP 控制面、WebSocket command router、runtime/serial command handlers 和前端 SDK HTTP 控制方法补充中文职责注释，明确 HTTP 控制与 WebSocket 实时订阅的边界。|
 | 2026-06-22 | 优化重构 | 新增 `backend/http/controlRoutes.js`，将串口、传感器类型、采集、回放、历史加载和 CSV 导出暴露为 HTTP 控制 API；WebSocket 继续保留实时数据订阅和旧命令兼容。|
 | 2026-06-22 | SDK 优化 | `sdk/frontend/src/client/SensorClient.js` 新增 HTTP 控制面方法，支持 `serial.open/close/status`、`sensor.setType`、`collection.start/stop`、`history.load`、`export.csv` 等 SDK 调用。|
 | 2026-06-22 | 优化重构 | 新增 `backend/ws/registerSerialCommandHandlers.js`，将串口打开/关闭、传感器类型切换、local 回放切换、getTime 历史加载、串口刷新和手套自动连接从 WebSocket 回调迁入 command handler。|
 | 2026-06-18 | 优化重构 | 新增 `backend/ws/webSocketCommandRouter.js` 和 `backend/ws/registerRuntimeCommandHandlers.js`，将播放、采集、下载、历史删除、显示配置等低风险 WebSocket 命令从 `server.js` 拆入 command handler。|
-| 2026-06-18 | 优化重构 | 新增 `backend/services/petCareRuntimeService.js`，将 petCare/petCareMini 和 jqbed/smallBed 生命体征算法运行时、心率模拟、定时器逻辑从 `server.js` 拆出，主服务文件减少约 340 行。|
-| 2026-06-18 | 优化重构 | 新增 `backend/services/realtimeTelemetryGateway.js`，集中处理 legacy 实时通道发布、telemetry normalizer 调用、标准 channel 发布和 WebSocket 精确订阅推送，`server.js` 只保留兼容入口。|
+| 2026-06-18 | 优化重构 | 新增 `backend/services/petcare/petCareRuntimeService.js`，将 petCare/petCareMini 和 jqbed/smallBed 生命体征算法运行时、心率模拟、定时器逻辑从 `server.js` 拆出，主服务文件减少约 340 行。|
+| 2026-06-18 | 优化重构 | 新增 `backend/services/realtime/realtimeTelemetryGateway.js`，集中处理 legacy 实时通道发布、telemetry normalizer 调用、标准 channel 发布和 WebSocket 精确订阅推送，`server.js` 只保留兼容入口。|
 | 2026-06-18 | 优化重构 | 新增 `backend/normalizers/telemetryNormalizer.js`，将旧实时 payload 到标准 telemetry 帧的转换从 channel 定义服务中拆出，数据链路进一步接近 `Parser -> Normalizer -> ChannelBus`。|
 | 2026-06-18 | 优化重构 | 串口重连职责下沉到 `backend/serial/serialManager.js`，新增 `reconnectAll/reconnectPort/startReconnectLoop/stopReconnectLoop/setReconnect`，`server.js` 不再手写 sit/back/sensor 的重连定时器。|
 | 2026-06-18 | 优化重构 | `backend/serial/serialManager.js` 升级为注册式串口生命周期管理器，维护注册配置和运行 worker 两张表，提供 `registerPort/start/stop/getStatus`，并继续兼容旧 `open/close`。 |
@@ -66,15 +67,15 @@
 | 2026-06-18 | 优化重构 | 新增 `backend/sensors/handGloveDouble.js`，集中解析触觉手套2的 130/146 字节分包协议，负责左右手半包缓存、256 点压力帧合成和 16 字节 IMU 提取；`server.js` 只保留清零、入库和通道发送。 |
 | 2026-06-18 | 优化重构 | 新增 `backend/serial/serialManager.js`，集中管理 `sit/back/head/sensor` 串口角色的打开、关闭、重复端口互斥、parser/data handler 绑定和关停清理，`server.js` 不再直接调用 `createSerialPort` 或 `port.close()`。 |
 | 2026-06-18 | 优化重构 | 新增 `backend/serial/serialParserManager.js`，集中创建和管理 `sit/back/head/bigBedSit/smallBed12B` 命名串口 parser，替换 `server.js` 中的 `parser/parser2/parser3/parser4` 编号式定义。 |
-| 2026-06-18 | 优化重构 | 新增 `backend/services/csvDownloadService.js`，集中处理 CSV 导出目录校验、UTF-8 BOM 写入、导出进度、成功/失败消息和基础历史数据导出。 |
+| 2026-06-18 | 优化重构 | 新增 `backend/services/export/csvDownloadService.js`，集中处理 CSV 导出目录校验、UTF-8 BOM 写入、导出进度、成功/失败消息和基础历史数据导出。 |
 | 2026-06-18 | 优化重构 | 删除 `server.js` 中 `exportHistoryCsvStreaming(...); return;` 后不可达的旧 CSV 导出分支，主文件减少约 700 行历史包袱。 |
-| 2026-06-18 | 优化重构 | 新增 `backend/services/historyMaintenanceService.js`，历史删除改为服务层参数化 SQL，避免 `date` 字符串拼接。 |
-| 2026-06-18 | 优化重构 | 新增 `backend/services/playbackFrameService.js`，将 robot、手套、足底、小床、整椅和温度床的历史回放帧 payload 构造从 `server.js` 拆出。 |
-| 2026-06-18 | 优化重构 | 新增 `backend/services/playbackTimerService.js`，播放/停止/调速统一通过定时器服务管理，`server.js` 不再持有回放 timer 句柄。 |
+| 2026-06-18 | 优化重构 | 新增 `backend/services/history/historyMaintenanceService.js`，历史删除改为服务层参数化 SQL，避免 `date` 字符串拼接。 |
+| 2026-06-18 | 优化重构 | 新增 `backend/services/playback/playbackFrameService.js`，将 robot、手套、足底、小床、整椅和温度床的历史回放帧 payload 构造从 `server.js` 拆出。 |
+| 2026-06-18 | 优化重构 | 新增 `backend/services/playback/playbackTimerService.js`，播放/停止/调速统一通过定时器服务管理，`server.js` 不再持有回放 timer 句柄。 |
 | 2026-06-18 | 优化重构 | 新增 `backend/services/websocketConnectionService.js`，主 WebSocket 连接心跳从业务入口中拆出，连接层职责独立维护。 |
 | 2026-06-18 | 优化重构 | `sdk/src/ShroomSensorSDK.js` 与 `sdk/src/serial/SensorSession.js` 不再直接依赖 `serialport`，统一复用 `backend/serial/serialHelper.js` 的 `listPorts/createSerialPort`。 |
-| 2026-06-18 | 优化重构 | 新增 `backend/services/historyPlaybackService.js`，将历史曲线抽样、同步回放长度计算和空白回放 payload 构造从 `server.js` 拆出，并删除 `getTime` 后不可达的旧 SQL 回调分支。 |
-| 2026-06-18 | 优化重构 | 新增 `backend/services/collectionFrameStorageService.js`，将 sit/back/head 三路采集帧的存储载荷构建和入队逻辑从 `server.js` 迁出。 |
+| 2026-06-18 | 优化重构 | 新增 `backend/services/history/historyPlaybackService.js`，将历史曲线抽样、同步回放长度计算和空白回放 payload 构造从 `server.js` 拆出，并删除 `getTime` 后不可达的旧 SQL 回调分支。 |
+| 2026-06-18 | 优化重构 | 新增 `backend/services/collection/collectionFrameStorageService.js`，将 sit/back/head 三路采集帧的存储载荷构建和入队逻辑从 `server.js` 迁出。 |
 | 2026-06-18 | 优化重构 | 将未被生产路径引用的旧 WebSocket/串口调试脚本迁入 `runtime/legacy`，避免 backend 主路径继续暴露旧广播和直连串口示例。 |
 | 2026-06-18 | 优化重构 | 拆分 `server.js` 中 `colOrSendData*` 的职责：`storeSit/Back/HeadCollectionFrame` 专注采集入库载荷，`publishRealtimeChannel` 专注实时 channel 发布。 |
 | 2026-06-18 | 优化重构 | 继续收口主 WebSocket 客户端遍历，活跃 `forEachMainWsClient` 循环已清零，系统事件统一通过 `publishSystemEvent` 发送。 |
@@ -82,7 +83,7 @@
 | 2026-06-18 | 优化重构 | 新增 `backend/channel/channelBus.js`，实时帧先发布到后端内部 ChannelBus，再由 WebSocket 订阅服务按 channel 推送。 |
 | 2026-06-18 | 优化重构 | `server.js` 中直接 `server.clients.forEach`、`broadcast(server, ...)`、`new SerialPort`、`SerialPort.list()` 已继续收口为 `publishSystemEvent`、`publishRealtimeFrame`、`serialManager` 和 `listPorts`；串口实例创建只保留在 `backend/serial` 边界内。 |
 | 2026-06-18 | 优化重构 | `client/src/hooks/useWebSocket.js` 和 `sdk/frontend/src/client/SensorClient.js` 增加 `channels`、`subscribe`、`unsubscribe`，前端统一入口开始支持按需订阅。 |
-| 2026-06-18 | 优化重构 | 新增 `backend/services/websocketSubscriptionService.js`，集中管理 WebSocket 客户端订阅关系，支持 `subscribe/unsubscribe/getSubscriptions` 控制消息。 |
+| 2026-06-18 | 优化重构 | 新增 `backend/services/websocket/websocketSubscriptionService.js`，集中管理 WebSocket 客户端订阅关系，支持 `subscribe/unsubscribe/getSubscriptions` 控制消息。 |
 | 2026-06-18 | 优化重构 | `server.js` 的 sit/back/head 实时帧开始通过订阅服务发布；主端口默认使用 `*` 通配订阅兼容旧页面，独立端口默认订阅各自通道。 |
 | 2026-06-18 | 新增接口 | OneStep 本地 HTTP 服务新增 `/api/channels` 和 `/api/ws/status`，用于查看实时通道元数据和当前订阅统计。 |
 | 2026-06-18 | 修复缺陷 | 清理 `server.js` 中的 U+FFFD 替换符和残留 mojibake 注释，恢复授权提示、jqbed 变量说明、触觉手套兼容逻辑、CSV 保存和时间戳等中文说明。 |
@@ -129,7 +130,7 @@
 | 2026-06-22 | SMALL_BED_12B runtime 拆分 | 小床 12B 实时串口帧处理迁入 `backend/sensors/runtime/smallBed12BRuntime.js`，`server.js` 只负责注入运行时状态并在 `onData` 中调用 `smallBed12BRuntime.handleFrame(data)`。 |
 | 2026-06-18 | SerialManager 重连闭环 | 串口注册配置增加 `reconnect` 状态，管理器内部提供重连循环；手动关闭会关闭该端口重连，异常断开会按注册配置恢复。 |
 | 2026-06-18 | Telemetry Normalizer 独立层 | 标准 telemetry 帧由 `backend/normalizers/telemetryNormalizer.js` 生成，`channel` 模块只保留通道元数据定义，降低后续新增传感器指标时对 WebSocket 和通道服务的耦合。 |
-| 2026-06-18 | petCare 运行时服务化 | 宠物护理和 jqbed/smallBed 生命体征算法定时器迁入 `backend/services/petCareRuntimeService.js`，`server.js` 通过 getter/setter 注入运行时状态。 |
+| 2026-06-18 | petCare 运行时服务化 | 宠物护理和 jqbed/smallBed 生命体征算法定时器迁入 `backend/services/petcare/petCareRuntimeService.js`，`server.js` 通过 getter/setter 注入运行时状态。 |
 | 2026-06-18 | WebSocket Command Router | WebSocket 回调开始改为调用 command router，播放、采集、导出、删除和运行参数类命令已迁入 `backend/ws/registerRuntimeCommandHandlers.js`。 |
 | 2026-06-18 | SerialManager 注册式接口 | 串口层从单纯 `open/close` 升级为 `registerPort/start/stop/getStatus`，为后续 PortWorker、重连策略和状态上报继续下沉打基础。 |
 | 2026-06-18 | 标准 Telemetry 模型入口 | 实时矩阵帧开始同步生成 `{ channelId, deviceId, portId, metric, value, unit, timestamp, quality }` 标准数据，`/api/channels` 同时返回旧通道和标准通道。 |
@@ -156,7 +157,7 @@
 
 ---
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-06-18
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-07-06
 
 ## 1. 项目概述
 
@@ -492,6 +493,10 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-07-06 | Codex | 后端阅读导航层 | 新增 `backend/README.md`，提供核心数据流图、控制命令流图、模块阅读入口、命名约定和剩余迁移说明；`server.js` 顶部增加阅读路线注释。 |
+| 2026-07-06 | Codex | 历史会话与关闭流程服务化 | 新增 `backend/services/history/historySessionService.js` 和 `backend/server/serverShutdownOrchestrator.js`，把历史日期列表、历史加载、趋势曲线、空白回放帧以及服务关闭流程从 `server.js` 拆出。 |
+| 2026-07-06 | Codex | 串口与 legacy runtime 编排继续拆分 | 新增 `backend/serial/serialPortOrchestrator.js`、`backend/sensors/runtime/legacySerialContextFactory.js` 和 `backend/services/realtime/realtimeFrameDispatchService.js`，把串口打开规则、legacy accessor 拼装和旧实时发送函数适配从 `server.js` 继续下沉。 |
+| 2026-07-06 | Codex | WebSocket Context Factory 拆分 | 新增 `backend/server/webSocketContextFactory.js`，把 WebSocket handler context 创建和旧变量 accessor 规范化从 `server.js` 中抽出，`server.js` 只保留依赖注入和旧运行态变量绑定。 |
 | 2026-06-17 | Codex | 根目录模块化重组 | 将根目录业务文件按功能迁移到 `app/electron`、`app/update`、`backend/*`、`assets/*`、`tools/generators`、`runtime/*` 和 `docs/markdown`，并同步更新 Electron 入口、打包图标路径、后端 require 路径、SDK 线序加载路径和测试授权工具路径。 |
 | 2026-06-17 | Codex | 核心函数中文注释补充 | 为 Electron 主入口、Python worker 桥接、后端关键传感器解析、历史数据归一化、采集配置和服务关闭链路补充中文 JSDoc 注释，说明职责、参数和返回值。 |
 | 2026-06-17 | Codex | 传感器注册表抽取 | 新增 `backend/sensors/registry.js`，集中维护传感器类型常量、分类判断、矩阵取值工具和默认串口波特率；`backend/server/server.js` 改为从 registry 读取这些能力，为后续传感器插件化拆分打基础。 |
@@ -502,8 +507,8 @@ graph TD
 | 2026-06-17 | Codex | minzhen 传感器模块化 | 新增 `backend/sensors/minzhen.js`，将敏枕/轮椅的附加传感器文本帧解析、串口文本缓冲切帧、矩阵点位屏蔽和后端高斯处理从 `server.js` 抽出；`server.js` 保留串口打开/关闭和 WebSocket 发送编排。 |
 | 2026-06-17 | Codex | 全类型传感器元数据收口 | 扩展 `backend/sensors/registry.js` 为全类型注册表，统一维护主要传感器的矩阵尺寸、通道、波特率、能力分类、存储策略判断和插件引用；扩展 `client/src/displays/registry.js` 覆盖前端主要展示系统的矩阵、默认模式、通道和能力。 |
 | 2026-06-17 | Codex | WebSocket 广播服务抽取 | 新增 `backend/services/websocketBroadcastService.js`，统一提供载荷序列化、在线客户端判断、连接数统计和广播能力；`backend/runtime/websocketHub.js` 与 `server.js` 的 CSV 下载、采集错误、历史选择广播开始复用该服务。 |
-| 2026-06-17 | Codex | WebSocket 通道与生命周期服务抽取 | 新增 `backend/services/websocketChannelService.js` 管理 `sit/back/head` 三路通道、实时广播和客户端统计；新增 `backend/services/serverLifecycleService.js` 管理超时关闭、串口关闭、HTTP 关闭和 WebSocket 关闭，`runtime` 与 `server.js` 改为调用服务层。 |
-| 2026-06-17 | Codex | 采集与历史查询服务抽取 | 新增 `backend/services/collectionService.js`、`collectionInsertQueueService.js` 和 `historyQueryService.js`，将采集频率/配置归一化、按通道采集限频、磁盘空间保护、批量入库队列、历史查询 prepared statement 缓存、索引保障和懒加载历史行代理从 `server.js` 抽出。 |
+| 2026-06-17 | Codex | WebSocket 通道与生命周期服务抽取 | 新增 `backend/services/websocketChannelService.js` 管理 `sit/back/head` 三路通道、实时广播和客户端统计；新增 `backend/services/lifecycle/serverLifecycleService.js` 管理超时关闭、串口关闭、HTTP 关闭和 WebSocket 关闭，`runtime` 与 `server.js` 改为调用服务层。 |
+| 2026-06-17 | Codex | 采集与历史查询服务抽取 | 新增 `backend/services/collection/collectionService.js`、`collectionInsertQueueService.js` 和 `historyQueryService.js`，将采集频率/配置归一化、按通道采集限频、磁盘空间保护、批量入库队列、历史查询 prepared statement 缓存、索引保障和懒加载历史行代理从 `server.js` 抽出。 |
 | 2026-06-18 | Codex | 回放定时器停止函数恢复 | 恢复 `server.js` 中被历史查询拆分误删的 `stopPlaybackTimer()`，确保历史加载、回放切换、服务关闭和播放速度切换时能正确停止并清空回放定时器。 |
 | 2026-06-18 | Codex | 整椅与整包手套传感器模块化 | 新增 `backend/sensors/wholeChair.js` 和 `backend/sensors/handGloveFullPacket.js`，将整椅 sit/back/head 线序、方向、高斯处理，以及整包手套 15x13 点位映射、1024 点模型矩阵和 274 字节整包解析从 `server.js` 抽出。 |
 | 2026-06-18 | Codex | server.js 变量中文注释补充 | 为 `backend/server/server.js` 的关键全局变量组补充中文说明，覆盖传感器常量、串口/回放状态、历史统计、运行路径、生命周期定时器、授权与数据库句柄、采集配置、WebSocket 三通道、实时协议缓存、双手套分包缓存和 OneStep 报告服务状态。 |
@@ -844,6 +849,10 @@ graph TD
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-07-06 | Codex | 文档更新 | 新增 `backend/README.md` 作为后端短导航，补充实时数据流、控制命令流、文件阅读入口和命名规则；在 `server.js` 顶部标注主要逻辑所在文件。 |
+| 2026-07-06 | Codex | 优化重构 | 新增 `historySessionService` 承接历史日期列表、历史加载和回放空白帧构造；新增 `serverShutdownOrchestrator` 承接定时器、串口、WebSocket、HTTP、数据库和 Python worker 关闭编排。 |
+| 2026-07-06 | Codex | 优化重构 | 继续压缩 `server.js`：串口 sit/back/head 打开规则迁入 `serialPortOrchestrator`，legacy 串口 runtime context/accessor 拼装迁入 `legacySerialContextFactory`，旧 `colOrSendData*` 实时输出函数迁入 `realtimeFrameDispatchService`。 |
+| 2026-07-06 | Codex | 优化重构 | 拆出 `backend/server/webSocketContextFactory.js`，集中创建 WebSocket handler context 和运行态 accessor，减少 `server.js` 对 WebSocket 上下文细节的直接维护。 |
 | 2026-06-23 | Codex | 优化重构 | 继续压缩 legacy 传感器运行时：新增分片压力帧 processor，迁出 130/142/146/158 字节手、足、眼部旧协议处理。 |
 | 2026-06-23 | Codex | 优化重构 | 继续拆分 legacy 传感器运行时：新增通用矩阵帧 processor 和 bigBed 分片 processor，减少 `legacySerialFrameRuntime.js` 中纯矩阵处理分支。 |
 | 2026-06-22 | Codex | 优化重构 | 按 1/2/3 继续拆分：遗留串口帧 handler 迁入 `legacySerialFrameRuntime`；runtime/serial 控制命令迁入 application service；HTTP app 和三路 WebSocket server 创建迁入 server factory。 |
@@ -1231,3 +1240,73 @@ graph TD
 - `smallBedNoAlg` is intentionally excluded from `VITAL_SIGNS_SYSTEM_TYPES` and the `['jqbed', 'smallBed']` Python algorithm timer condition, so it does not call the algorithm package and does not show the vital-signs panel.
 - Raw matrix display and CSV/raw-data handling treat `smallBedNoAlg` like `jqbed` / `smallBed`: 32x32 data is transposed on the raw display/export path to keep the small-bed matrix direction consistent.
 - License configuration exposes `smallBedNoAlg` (`小床检测(数据)`) with `normal` and `numoriginal` module options; the legacy `smallBed` key is not listed as an authorization sensor entry.
+
+## 2026-07-06 授权门户密钥回填
+
+- 维护记录：合并前端授权门户的已保存密钥回填能力，`backend/license/licenseKeyStore.js` 统一读取和写入 `config.txt`。
+- 项目进度：`backend/server/server.js` 将密钥读写入口注入 WebSocket 上下文，`backend/server/webSocketHandlerFactory.js` 在主 WebSocket 新连接时只向当前连接私有下发 `licenseKey`，提交新密钥时不再直接操作文件系统。
+## 2026-07-06 授权校验服务化
+
+- 新增 `backend/license/licenseValidationService.js`，统一处理授权密钥解密、JSON 解析、`file/selectFlag/moduleConfig` 运行态构建。
+- `backend/server/server.js` 的启动期授权加载和授权门户提交激活现在复用同一套 `validateLicenseKey()` 规则。
+- `backend/server/webSocketHandlerFactory.js` 不再直接解密密钥、写入 `config.txt` 或修改 `licenseFile/selectFlag/baudRate`，只调用 `activateSubmittedLicenseKey()` 并转发 payload。
+## 2026-07-06 WebSocket Context 显式化
+
+- `backend/server/webSocketHandlerFactory.js` 移除 `with (ctx)`，改为显式解构服务依赖、通过 `ctx.xxx` 访问运行态 getter/setter。
+- WebSocket handler 的授权、历史回放、框选统计仍保持原行为，但依赖边界更清晰，后续可以继续拆 `historySelectionService`。
+## 2026-07-06 WebSocket 历史命令服务化
+
+- 新增 `backend/services/websocket/webSocketHistoryCommandService.js`，承接旧主 WebSocket 中的历史差值、回放跳帧、坐面/靠背框选统计和历史曲线统计。
+- `backend/server/webSocketHandlerFactory.js` 现在只负责连接、订阅、授权入口和消息分发，历史/框选业务通过 `historyCommandService.handle()` 转交服务层。
+## 2026-07-06 运行路径配置拆分
+
+- 新增 `backend/server/serverPathConfig.js`，统一计算 `db/data/img/pdf/config.txt` 等运行期路径，并集中创建目录。
+- `backend/server/server.js` 不再直接维护打包态 `resourcesPath/userData` 路径细节；打包态 macOS 导出路径改为通过 `electronApp.getPath('desktop')` 获取，避免旧代码里的未定义 `app.getPath` 隐患。
+
+## 2026-07-06 WebSocket Context Factory 拆分
+
+- 新增 `backend/server/webSocketContextFactory.js`，集中创建 WebSocket handler context，并把旧运行态变量 getter/setter 转换为统一 accessor。
+- `backend/server/server.js` 不再直接调用 `createWebSocketContextAccessors(...)` 组装 WebSocket 上下文，只保留稳定服务依赖和旧变量绑定声明。
+- WebSocket handler 仍通过显式注入依赖工作，授权、历史命令、回放、零点和串口状态访问边界进一步清晰，后续可以继续把剩余 legacy 变量迁入 runtime store。
+
+## 2026-07-06 串口与 Legacy Runtime 继续拆分
+
+- 新增 `backend/serial/serialPortOrchestrator.js`，集中维护 sit/back/head 串口的 parser channel、波特率、自动重连和敏枕文本 handler 选择规则。
+- 新增 `backend/sensors/runtime/legacySerialContextFactory.js`，把 legacy 串口 runtime 的 baseContext 和旧变量 accessor 拼装从 `server.js` 下沉到传感器 runtime 层。
+- 新增 `backend/services/realtime/realtimeFrameDispatchService.js`，承接旧 `colOrSendData/colOrSendData1/colOrSendData2` 函数名，把实时帧输出统一转交 `frameOutputPipelineService`。
+- `backend/server/server.js` 继续收敛为启动编排层，当前保留兼容函数名和旧变量 getter/setter，后续迁移重点是历史 session、采集 orchestrator 和剩余 legacy 变量 store 化。
+
+## 2026-07-06 历史会话与 Shutdown 编排拆分
+
+- 新增 `backend/services/history/historySessionService.js`，承接 `publishHistoryDateList()`、`loadSelectedHistory()`、历史趋势曲线生成、历史空白帧 payload 和历史帧间隔推算。
+- 新增 `backend/server/serverShutdownOrchestrator.js`，集中处理重复关闭保护、定时器清理、串口重连停止、WebSocket/HTTP/DB 关闭和 Python worker 停止。
+- `backend/server/server.js` 保留旧函数名作为兼容入口，但历史会话和关闭生命周期的主要业务流程已经迁入独立服务，启动文件职责继续向“依赖装配层”收敛。
+
+## 2026-07-06 后端阅读导航层
+
+- 新增 `backend/README.md`，作为拆分后的后端短导航，说明“想看某个功能从哪里开始”。
+- `backend/README.md` 补充实时数据流图、控制命令流图、模块入口表、命名规则和当前剩余迁移债务。
+- `backend/server/server.js` 顶部增加阅读路线注释，明确该文件现在主要负责对象创建、依赖注入和旧兼容入口。
+
+## 2026-07-06 Services 目录领域分组
+
+本次调整把 `backend/services` 从平铺目录改成按领域分组的服务层目录，业务入口仍通过原有 service factory 注入依赖，运行链路不变。
+
+| 子目录 | 放置内容 | 代表文件 |
+| :--- | :--- | :--- |
+| `backend/services/collection/` | 采集控制、采集入库、批量写入队列 | `collectionService.js`、`collectionFrameStorageService.js` |
+| `backend/services/history/` | 历史查询、历史加载、历史帧转换、历史维护 | `historySessionService.js`、`historyFrameTransformService.js` |
+| `backend/services/playback/` | 回放帧构造和回放定时器 | `playbackFrameService.js`、`playbackTimerService.js` |
+| `backend/services/realtime/` | 实时帧管线、旧发送函数适配、telemetry 网关 | `frameOutputPipelineService.js`、`realtimeTelemetryGateway.js` |
+| `backend/services/websocket/` | WebSocket 连接、消息、订阅、广播和旧历史命令 | `websocketSubscriptionService.js`、`webSocketHistoryCommandService.js` |
+| `backend/services/lifecycle/` | 后端资源关闭和生命周期保护 | `serverLifecycleService.js` |
+| `backend/services/petcare/` | 宠物看护生命体征算法运行时 | `petCareRuntimeService.js` |
+| `backend/services/export/` | CSV 导出和下载状态消息 | `csvDownloadService.js` |
+
+效果：`services` 根目录不再堆积文件，后续新增服务时先按业务领域落目录；如果一个目录继续变大，再在该领域内拆 `commands/queries/adapters` 等更细层级。
+
+## 2026-07-06 System Time Sync 服务化
+
+- 新增 `backend/server/systemTimeSyncService.js`，封装启动时远端系统时间同步逻辑。
+- `backend/server/server.js` 不再内联 `http.get(.../getSystemTime)` 响应拼接和 JSON 解析，只负责传入 `setNowDate` 回写运行时状态。
+- 该拆分降低启动入口副作用代码密度，也让时间同步逻辑后续可以单独测试和替换数据源。

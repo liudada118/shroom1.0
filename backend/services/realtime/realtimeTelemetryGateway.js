@@ -1,16 +1,16 @@
-/**
- * 实时 telemetry 网关。
+﻿/**
+ * 瀹炴椂 telemetry 缃戝叧銆?
  *
- * 负责把旧 sit/back/head 实时 payload 同时发布到旧 WebSocket 通道和新的
- * 标准 telemetry channel。它是旧前端兼容通道与新 ChannelBus 模型之间的桥。
+ * 璐熻矗鎶婃棫 sit/back/head 瀹炴椂 payload 鍚屾椂鍙戝竷鍒版棫 WebSocket 閫氶亾鍜屾柊鐨?
+ * 鏍囧噯 telemetry channel銆傚畠鏄棫鍓嶇鍏煎閫氶亾涓庢柊 ChannelBus 妯″瀷涔嬮棿鐨勬ˉ銆?
  */
-const { normalizeLegacyRealtimeFrame } = require('../normalizers/telemetryNormalizer');
+const { normalizeLegacyRealtimeFrame } = require('../../normalizers/telemetryNormalizer');
 
 /**
- * 创建实时 telemetry 网关。
+ * 鍒涘缓瀹炴椂 telemetry 缃戝叧銆?
  *
- * @param {object} deps ChannelBus、订阅管理器和传感器类型读取器。
- * @returns {{ publishRealtimeFrame: Function }} 实时发布 API。
+ * @param {object} deps ChannelBus銆佽闃呯鐞嗗櫒鍜屼紶鎰熷櫒绫诲瀷璇诲彇鍣ㄣ€?
+ * @returns {{ publishRealtimeFrame: Function }} 瀹炴椂鍙戝竷 API銆?
  */
 function createRealtimeTelemetryGateway({
   channelBus,
@@ -26,10 +26,10 @@ function createRealtimeTelemetryGateway({
   }
 
   /**
-   * 发布实时帧：兼容旧通道推送，同时生成标准 telemetry 通道帧。
+   * 鍙戝竷瀹炴椂甯э細鍏煎鏃ч€氶亾鎺ㄩ€侊紝鍚屾椂鐢熸垚鏍囧噯 telemetry 閫氶亾甯с€?
    *
-   * @param {string} channel 旧实时通道，例如 sit/back/head。
-   * @param {string | object} payload 旧通道 payload。
+   * @param {string} channel 鏃у疄鏃堕€氶亾锛屼緥濡?sit/back/head銆?
+   * @param {string | object} payload 鏃ч€氶亾 payload銆?
    * @returns {{legacySent: number, telemetrySent: number, telemetryFrame: object | null}}
    */
   function publishRealtimeFrame(channel, payload) {
@@ -74,3 +74,4 @@ function createRealtimeTelemetryGateway({
 module.exports = {
   createRealtimeTelemetryGateway,
 };
+

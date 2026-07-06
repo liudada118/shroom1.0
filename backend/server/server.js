@@ -1,30 +1,45 @@
+/**
+ * 后端启动编排入口。
+ *
+ * 阅读路线：
+ * - 串口如何打开：看 backend/serial/serialManager.js
+ * - 串口如何分帧：看 backend/serial/serialParserManager.js
+ * - 传感器数据如何解析：看 backend/sensors/runtime/*
+ * - 实时帧如何入库和推送：看 backend/services/realtime/frameOutputPipelineService.js
+ * - 历史回放如何加载：看 backend/services/history/historyPlaybackService.js
+ * - WebSocket 如何连接和兼容旧消息：看 backend/server/webSocketHandlerFactory.js
+ * - 服务如何关闭：看 backend/services/lifecycle/serverLifecycleService.js
+ *
+ * 当前文件只负责创建对象、注入依赖和保留旧兼容入口。
+ */
 const logger = require('../common/logger');
 const { createChannelBus } = require('../channel/channelBus');
 const {
   buildTelemetryChannelDefinitions,
 } = require('../channel/telemetryChannelService');
 const { startWorker, callPy, stopWorker } = require('../python/pyWorker');
-const { normalizeChannel } = require('../services/websocketChannelService');
+const { normalizeChannel } = require('../services/websocket/websocketChannelService');
 const { createWebSocketServers } = require('./webSocketServerFactory');
 const { createWebSocketHandlerAttacher } = require('./webSocketHandlerFactory');
 const {
   WILDCARD_CHANNEL,
   createWebSocketSubscriptionManager,
-} = require('../services/websocketSubscriptionService');
-const { attachHeartbeat } = require('../services/websocketConnectionService');
-const { parseJsonMessage } = require('../services/websocketMessageService');
+} = require('../services/websocket/websocketSubscriptionService');
+const { attachHeartbeat } = require('../services/websocket/websocketConnectionService');
+const { parseJsonMessage } = require('../services/websocket/websocketMessageService');
 const {
   closeHttpServer,
   closeWithTimeout,
   closeWsServer,
-} = require('../services/serverLifecycleService');
-const { createRealtimeTelemetryGateway } = require('../services/realtimeTelemetryGateway');
-const { createPetCareRuntimeService } = require('../services/petCareRuntimeService');
+} = require('../services/lifecycle/serverLifecycleService');
+const { createRealtimeTelemetryGateway } = require('../services/realtime/realtimeTelemetryGateway');
+const { createPetCareRuntimeService } = require('../services/petcare/petCareRuntimeService');
 const { createWebSocketCommandRouter } = require('../ws/webSocketCommandRouter');
 const { registerRuntimeCommandHandlers } = require('../ws/registerRuntimeCommandHandlers');
 const { registerSerialCommandHandlers } = require('../ws/registerSerialCommandHandlers');
 const { createControlCommandService } = require('../application/controlCommandService');
 const { createHttpApp } = require('./httpAppFactory');
+const { syncSystemTime } = require('./systemTimeSyncService');
 const {
   DEFAULT_REPORT_HTTP_PORT,
   scanStartupSerialPorts,
@@ -49,26 +64,26 @@ const {
   createCollectionStorageClock,
   normalizeCollectFrequency,
   normalizeCollectOptions,
-} = require('../services/collectionService');
-const { createCollectionInsertQueueService } = require('../services/collectionInsertQueueService');
-const { createCollectionFrameStorageService } = require('../services/collectionFrameStorageService');
-const { createFrameOutputPipeline } = require('../services/frameOutputPipelineService');
+} = require('../services/collection/collectionService');
+const { createCollectionInsertQueueService } = require('../services/collection/collectionInsertQueueService');
+const { createCollectionFrameStorageService } = require('../services/collection/collectionFrameStorageService');
+const { createFrameOutputPipeline } = require('../services/realtime/frameOutputPipelineService');
 const {
   createHistoryRowsForPlayback,
   getHistoryStats,
   queryHistoryDates,
   queryHistoryRows,
-} = require('../services/historyQueryService');
+} = require('../services/history/historyQueryService');
 const {
   buildZeroPlaybackPayload: buildHistoryZeroPlaybackPayload,
   getHistoryLengthFromCounts,
   getHistorySeries: createHistorySeries,
-} = require('../services/historyPlaybackService');
-const { createPlaybackFrameService } = require('../services/playbackFrameService');
-const { createPlaybackTimerService } = require('../services/playbackTimerService');
-const { createCsvDownloadService } = require('../services/csvDownloadService');
-const { createHistoryMaintenanceService } = require('../services/historyMaintenanceService');
-const { createHistoryFrameTransformService } = require('../services/historyFrameTransformService');
+} = require('../services/history/historyPlaybackService');
+const { createPlaybackFrameService } = require('../services/playback/playbackFrameService');
+const { createPlaybackTimerService } = require('../services/playback/playbackTimerService');
+const { createCsvDownloadService } = require('../services/export/csvDownloadService');
+const { createHistoryMaintenanceService } = require('../services/history/historyMaintenanceService');
+const { createHistoryFrameTransformService } = require('../services/history/historyFrameTransformService');
 let electronApp = null;
 try {
   ({ app: electronApp } = require('electron'));
@@ -440,28 +455,15 @@ const backTotal = backnum1 * backnum2;
 const sitTotal = sitnum1 * sitnum2;
 let length, history, nowGetTime;
 
-let nowDate = 0
-let endDate = 0
+let nowDate = 0;
+let endDate = 0;
 
-const https = require('https')
-// 使用内置 http 模块替代已废弃的 request 包。
-const http = require('http');
-http.get('http://sensor.bodyta.com:8080/rcv/login/getSystemTime', {
-  headers: { 'content-type': 'application/json; charset=utf-8;' }
-}, (res) => {
-  let data = '';
-  res.on('data', (chunk) => { data += chunk; });
-  res.on('end', () => {
-    try {
-      const body = JSON.parse(data);
-      logger.debug(body.time, 'body');
-      nowDate = parseInt(body.time);
-    } catch (e) {
-      logger.warn('Failed to parse system time response', e);
-    }
-  });
-}).on('error', (err) => {
-  logger.warn('Failed to get system time', err);
+syncSystemTime({
+  http: require('http'),
+  logger,
+  setNowDate: (timestamp) => {
+    nowDate = timestamp;
+  },
 });
 
 // ===== 运行路径与资源目录 =====

@@ -1,1 +1,1 @@
-module.exports = require('../services/websocketBroadcastService');
+﻿module.exports = require('../services/websocket/websocketBroadcastService');

@@ -1,10 +1,10 @@
-const legacyServer = require('../server/server');
+﻿const legacyServer = require('../server/server');
 const logger = require('../common/logger');
 const { CommandRouter } = require('./commandRouter');
 const {
   broadcastToChannel,
   getChannelClientCounts,
-} = require('../services/websocketChannelService');
+} = require('../services/websocket/websocketChannelService');
 
 const commandRouter = new CommandRouter({ logger });
 

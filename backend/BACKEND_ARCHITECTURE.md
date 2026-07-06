@@ -27,11 +27,11 @@ flowchart LR
   SerialManager --> ParserManager["serial/serialParserManager<br/>命名 parser"]
   ParserManager --> RuntimeRegistry["sensors/runtime<br/>runtime registry + processors"]
   RuntimeRegistry --> Normalizer["normalizers/telemetryNormalizer<br/>标准 telemetry"]
-  RuntimeRegistry --> FramePipeline["services/frameOutputPipelineService<br/>采集入库 + 实时输出"]
+  RuntimeRegistry --> FramePipeline["services/realtime/frameOutputPipelineService<br/>采集入库 + 实时输出"]
   FramePipeline --> Storage["db/services<br/>SQLite + collection queue"]
-  FramePipeline --> Gateway["services/realtimeTelemetryGateway"]
+  FramePipeline --> Gateway["services/realtime/realtimeTelemetryGateway"]
   Gateway --> ChannelBus["channel/channelBus"]
-  ChannelBus --> WsSub["services/websocketSubscriptionService"]
+  ChannelBus --> WsSub["services/websocket/websocketSubscriptionService"]
   WsSub --> Frontend["前端页面/SDK 实时订阅"]
 
   Sdk["SDK"] --> SdkContract["contracts/sdkApiContract<br/>API/WS/telemetry 契约"]
@@ -310,3 +310,27 @@ flowchart LR
 3. 继续拆 `legacySerialFrameRuntime.js` 中剩余的 262 字节旧手套帧和旧状态写回逻辑；1024 主矩阵、4096 通用矩阵、bigBed 双分片和 130/142/146/158 分片压力帧已迁出。
 4. 新增 `server/appRuntimeFactory.js`，把 state store、service、processor、command handlers 的创建集中封装。
 5. 明确“新 SDK 只走 HTTP 控制 + WS 订阅实时数据”，逐步冻结 WS 控制命令。
+
+## 2026-07-06 Services 目录领域分组
+
+本次调整把 `backend/services` 从平铺目录改成按领域分组的服务层目录，业务入口仍通过原有 service factory 注入依赖，运行链路不变。
+
+| 子目录 | 放置内容 | 代表文件 |
+| :--- | :--- | :--- |
+| `backend/services/collection/` | 采集控制、采集入库、批量写入队列 | `collectionService.js`、`collectionFrameStorageService.js` |
+| `backend/services/history/` | 历史查询、历史加载、历史帧转换、历史维护 | `historySessionService.js`、`historyFrameTransformService.js` |
+| `backend/services/playback/` | 回放帧构造和回放定时器 | `playbackFrameService.js`、`playbackTimerService.js` |
+| `backend/services/realtime/` | 实时帧管线、旧发送函数适配、telemetry 网关 | `frameOutputPipelineService.js`、`realtimeTelemetryGateway.js` |
+| `backend/services/websocket/` | WebSocket 连接、消息、订阅、广播和旧历史命令 | `websocketSubscriptionService.js`、`webSocketHistoryCommandService.js` |
+| `backend/services/lifecycle/` | 后端资源关闭和生命周期保护 | `serverLifecycleService.js` |
+| `backend/services/petcare/` | 宠物看护生命体征算法运行时 | `petCareRuntimeService.js` |
+| `backend/services/export/` | CSV 导出和下载状态消息 | `csvDownloadService.js` |
+
+效果：`services` 根目录不再堆积文件，后续新增服务时先按业务领域落目录；如果一个目录继续变大，再在该领域内拆 `commands/queries/adapters` 等更细层级。
+
+## 2026-07-06 System Time Sync 服务化
+
+| 文件 | 职责 |
+| :--- | :--- |
+| `server/systemTimeSyncService.js` | 负责请求远端系统时间、解析响应、处理异常，并通过回调写回运行时 `nowDate`。 |
+| `server/server.js` | 只在启动阶段调用 `syncSystemTime` 并注入 `http/logger/setNowDate`，不再内联 HTTP 请求细节。 |
