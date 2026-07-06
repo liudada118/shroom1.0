@@ -2,6 +2,17 @@
 
 第一版 SDK 只负责后端数据链路，不包含 UI。它把当前后端里的 WebSocket 命令、串口读取、协议解析、采集、回放和下载拆成可复用模块。
 
+## 推荐边界
+
+外部应用优先使用“薄 SDK”：只依赖后端 HTTP 控制 API、WebSocket 实时订阅和标准 telemetry 数据模型。
+
+- 后端契约入口：`GET /api/sdk/contract`
+- 控制类操作：HTTP
+- 实时数据：WebSocket 订阅
+- SDK 不直接依赖：`server.js`、串口 parser、legacy runtime、零点缓存、采集内部状态
+
+当前 `sdk/src` 里的串口、协议、线序和存储模块更适合作为“后端能力包”或离线工具复用。对外发布 SDK 时，应优先封装 `/api/sdk/contract` 暴露的稳定契约，避免把内部重构债务带给 SDK 使用者。
+
 ## 后端操作映射
 
 当前 `server.js` 的后端能力可以拆成这些 SDK 域：

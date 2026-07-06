@@ -589,7 +589,13 @@ flowchart TB
 	- 历史回放索引
 	- 采集控制状态
 	- 采集频率配置
-	- 后续迁移端口状态
+	- 零点状态仓库
+	- 零点命令服务
+	- 端口实例状态
+	- legacy accessor factory
+	- WS context accessor factory
+	- bootstrapServer
+	- 后续拆分 appRuntimeFactory
 - legacy runtime 收敛
 	- 旧帧继续拆 processor
 	- 旧状态写回集中

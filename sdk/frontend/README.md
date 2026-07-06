@@ -28,6 +28,8 @@ const client = new SensorClient({
 const frameStore = new FrameStore();
 const registry = createDefaultDisplayRegistry();
 
+await client.getContract();
+
 client.on('frame', (frame) => {
   frameStore.update(frame);
 });
@@ -56,6 +58,16 @@ const rendererKey = registry.getRendererKey('hand0205', 'normal');
 ```js
 { sitPort: 'COM3' }
 ```
+
+## 后端契约
+
+新版后端提供：
+
+```text
+GET /api/sdk/contract
+```
+
+`SensorClient.getContract()` 会读取这个契约，并同步更新 HTTP 路由、WebSocket 订阅消息类型和 telemetry 元信息。这样前端 SDK 不需要读取 `server.js`、`controlRoutes.js` 或后端 runtime 内部状态。
 
 ## 迁移策略
 

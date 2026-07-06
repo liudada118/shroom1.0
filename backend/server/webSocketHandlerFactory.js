@@ -222,29 +222,8 @@ function createWebSocketHandlerAttacher(ctx) {
             }
           }
 
-          // 保留旧版调试分支。
-          if (getMessage.resetZero === true) {
-            if (pointArr) pointArr1zero = [...pointArr1zeroData]
-            if (pointArr2) pointArr2zero = [...pointArr2zeroData]
-            if (pointArr3) pointArr3zero = [...pointArr3zeroData]
-            if (pointArr4) pointArr4zero = [...pointArr4zeroData]
-            if (pointArr1RawZeroData.length) pointArr1RawZero = [...pointArr1RawZeroData]
-            if (pointArr2RawZeroData.length) pointArr2RawZero = [...pointArr2RawZeroData]
-            if (newArr147) pointArr147zero = [...newArr147]
-            if (newArr147_2) pointArr147zero_2 = [...newArr147_2]
-
-          }
-
-          if (getMessage.resetZero === false) {
-            pointArr1zero = []
-            pointArr2zero = []
-            pointArr3zero = []
-            pointArr4zero = []
-            pointArr1RawZero = []
-            pointArr2RawZero = []
-            pointArr147zero = []
-            pointArr147zero_2 = []
-          }
+          // 保留旧版 resetZero 命令，具体零点状态操作交给 runtime service。
+          zeroCommandService.handleResetZero(getMessage.resetZero);
 
           /**
            * 打开本地保存数据通道。

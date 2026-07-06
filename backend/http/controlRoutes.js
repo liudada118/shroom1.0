@@ -1,13 +1,16 @@
 const HttpResult = require('../common/HttpResult');
+const {
+  HTTP_ROUTES,
+  SERIAL_ROLES,
+  normalizeSerialRole,
+} = require('../contracts/sdkApiContract');
 
 /**
  * 统一前端、SDK 和旧协议里对串口角色的命名。
  * HTTP API 对外推荐使用 sit/back/head/sensor，seat 仅作为兼容别名。
  */
 function normalizeRole(role) {
-  const normalized = String(role || '').trim();
-  if (normalized === 'seat') return 'sit';
-  return normalized;
+  return normalizeSerialRole(role);
 }
 
 /**
@@ -31,10 +34,10 @@ function buildOpenSerialCommand(body = {}) {
     throw new Error('role and port/path are required');
   }
 
-  if (role === 'sit') return { sitPort: portPath };
-  if (role === 'back') return { backPort: portPath };
-  if (role === 'head') return { headPort: portPath };
-  if (role === 'sensor') return { sensorPort: portPath };
+  if (role === SERIAL_ROLES.SIT) return { sitPort: portPath };
+  if (role === SERIAL_ROLES.BACK) return { backPort: portPath };
+  if (role === SERIAL_ROLES.HEAD) return { headPort: portPath };
+  if (role === SERIAL_ROLES.SENSOR) return { sensorPort: portPath };
   throw new Error(`unsupported serial role: ${role}`);
 }
 
@@ -45,10 +48,10 @@ function buildCloseSerialCommand(body = {}) {
   const role = normalizeRole(body.role || body.channel || body.portId);
   if (!role) throw new Error('role is required');
 
-  if (role === 'sit') return { sitClose: true };
-  if (role === 'back') return { backClose: true };
-  if (role === 'head') return { headClose: true };
-  if (role === 'sensor') return { sensorClose: true };
+  if (role === SERIAL_ROLES.SIT) return { sitClose: true };
+  if (role === SERIAL_ROLES.BACK) return { backClose: true };
+  if (role === SERIAL_ROLES.HEAD) return { headClose: true };
+  if (role === SERIAL_ROLES.SENSOR) return { sensorClose: true };
   throw new Error(`unsupported serial role: ${role}`);
 }
 
@@ -86,12 +89,12 @@ function registerControlRoutes(app, {
     }
   }
 
-  app.post('/api/commands', (req, res) => {
+  app.post(HTTP_ROUTES.commands, (req, res) => {
     dispatchCommand(req.body || {}, res);
   });
 
   // 串口控制：SDK 和自动化脚本优先使用这些 HTTP API。
-  app.get('/api/serial/ports', async (req, res) => {
+  app.get(HTTP_ROUTES.serialPorts, async (req, res) => {
     try {
       const ports = getPort(await listPorts());
       res.json(new HttpResult(0, { ports }, 'success'));
@@ -101,42 +104,42 @@ function registerControlRoutes(app, {
     }
   });
 
-  app.get('/api/serial/status', (req, res) => {
+  app.get(HTTP_ROUTES.serialStatus, (req, res) => {
     const role = req.query.role || req.query.portId;
     res.json(new HttpResult(0, {
       serial: role ? serialManager.getStatus(role) : serialManager.getStatus(),
     }, 'success'));
   });
 
-  app.post('/api/serial/open', (req, res) => {
+  app.post(HTTP_ROUTES.serialOpen, (req, res) => {
     dispatchCommand(buildOpenSerialCommand(req.body), res);
   });
 
-  app.post('/api/serial/close', (req, res) => {
+  app.post(HTTP_ROUTES.serialClose, (req, res) => {
     dispatchCommand(buildCloseSerialCommand(req.body), res);
   });
 
-  app.post('/api/serial/exchange', (req, res) => {
+  app.post(HTTP_ROUTES.serialExchange, (req, res) => {
     dispatchCommand({ exchange: true }, res);
   });
 
-  app.post('/api/serial/refresh', (req, res) => {
+  app.post(HTTP_ROUTES.serialRefresh, (req, res) => {
     dispatchCommand({ serialReset: true }, res);
   });
 
-  app.post('/api/serial/auto-connect-hand-glove-double', (req, res) => {
+  app.post(HTTP_ROUTES.serialAutoConnectHandGloveDouble, (req, res) => {
     dispatchCommand({ autoConnectHand0205Double: true }, res);
   });
 
   // 传感器类型和当前通道状态查询。
-  app.get('/api/sensor/current', (req, res) => {
+  app.get(HTTP_ROUTES.sensorCurrent, (req, res) => {
     res.json(new HttpResult(0, {
       channels: getRealtimeChannels(),
       serial: serialManager.getStatus(),
     }, 'success'));
   });
 
-  app.post('/api/sensor/type', (req, res) => {
+  app.post(HTTP_ROUTES.sensorType, (req, res) => {
     const sensorType = req.body?.type || req.body?.file || req.body?.sensorType;
     if (!sensorType) {
       res.status(400).json(new HttpResult(1, {}, 'type is required'));
@@ -145,7 +148,7 @@ function registerControlRoutes(app, {
     dispatchCommand({ file: sensorType }, res);
   });
 
-  app.post('/api/history/load', (req, res) => {
+  app.post(HTTP_ROUTES.historyLoad, (req, res) => {
     const date = req.body?.date || req.body?.getTime;
     if (!date) {
       res.status(400).json(new HttpResult(1, {}, 'date is required'));
@@ -155,7 +158,7 @@ function registerControlRoutes(app, {
   });
 
   // 回放、采集和导出仍通过 command router 进入原有服务，避免双写业务规则。
-  app.post('/api/playback/control', (req, res) => {
+  app.post(HTTP_ROUTES.playbackControl, (req, res) => {
     const command = {};
     ['local', 'play', 'speed', 'index', 'history', 'value'].forEach((key) => {
       if (req.body?.[key] != null) command[key] = req.body[key];
@@ -163,7 +166,7 @@ function registerControlRoutes(app, {
     dispatchCommand(command, res);
   });
 
-  app.post('/api/collection/start', (req, res) => {
+  app.post(HTTP_ROUTES.collectionStart, (req, res) => {
     dispatchCommand({
       flag: true,
       colHZ: req.body?.frequencyHz ?? req.body?.colHZ,
@@ -173,11 +176,11 @@ function registerControlRoutes(app, {
     }, res);
   });
 
-  app.post('/api/collection/stop', (req, res) => {
+  app.post(HTTP_ROUTES.collectionStop, (req, res) => {
     dispatchCommand({ flag: false }, res);
   });
 
-  app.post('/api/export/csv', (req, res) => {
+  app.post(HTTP_ROUTES.exportCsv, (req, res) => {
     const date = req.body?.date || req.body?.download;
     if (!date) {
       res.status(400).json(new HttpResult(1, {}, 'date is required'));

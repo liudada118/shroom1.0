@@ -1,6 +1,6 @@
 # Backend 架构说明
 
-> 更新时间：2026-06-23  
+> 更新时间：2026-07-03
 > 目的：说明 `backend/` 每个目录和主要文件的职责，帮助后续继续拆分 `server.js`、新增传感器、接入 HTTP/SDK 控制面和维护实时数据通道。
 
 ## 当前架构评价
@@ -13,9 +13,9 @@
 | 串口解析绑定 | `serialParserManager` 创建命名 parser，`bindSerialSensorRuntimes` 统一绑定 `onData` | 比 `parser1/parser2/parser3` 编号式写法更可维护 |
 | 传感器协议处理 | 1024 主矩阵、通用矩阵、bigBed 分片、130/146/142/158 分片压力帧已进入 `sensors/runtime/*Processor`，`legacySerialFrameRuntime` 主要保留分发和旧状态适配 | 模块化程度继续提升，剩余重点是少量 262 字节旧帧和运行时状态外移 |
 | 实时数据通道 | `FrameOutputPipeline -> RealtimeTelemetryGateway -> ChannelBus -> WebSocketSubscription` | 基本符合目标文档的 Parser/Normalizer/Channel/Gateway 思路 |
-| 控制命令 | HTTP 和 WS 统一通过 `controlCommandService`，具体控制逻辑下沉到 `application/*Service` | 方向正确，后续 SDK 更容易接 HTTP |
+| 控制命令 | HTTP 和 WS 统一通过 `controlCommandService`，具体控制逻辑下沉到 `application/*Service`，SDK 对外契约由 `contracts/sdkApiContract.js` 定义 | 方向正确，SDK 可以优先依赖 HTTP/WS 契约而不是读取后端内部模块 |
 | HTTP/WS 边界 | HTTP 承担控制和查询，WS 承担实时推送和旧命令兼容 | 比全部放 WS 更合理 |
-| 主服务文件 | `server/server.js` 约 2040 行，历史帧转换、串口过滤和 legacy runtime 绑定细节已迁入服务/serial/sensors 层，仍负责运行时状态和启动编排 | 仍偏大，下一步应拆旧运行时状态 accessor 和初始化 bootstrap |
+| 主服务文件 | `server/server.js` 约 2070 行，历史帧转换、串口过滤、legacy runtime 绑定、零点状态/命令、端口实例状态、legacy accessor、WebSocket context accessor 和部分启动动作已迁入独立模块 | 仍偏大，下一步应拆 app runtime factory 和更多启动编排 |
 
 结论：当前大约处在“从大单体服务向模块化后端迁移的中后段”。核心边界已经建立，但还没有完全达到推荐架构里的“server 只做启动编排、所有业务都在 application/domain/service 层”的状态。
 
@@ -33,6 +33,10 @@ flowchart LR
   Gateway --> ChannelBus["channel/channelBus"]
   ChannelBus --> WsSub["services/websocketSubscriptionService"]
   WsSub --> Frontend["前端页面/SDK 实时订阅"]
+
+  Sdk["SDK"] --> SdkContract["contracts/sdkApiContract<br/>API/WS/telemetry 契约"]
+  SdkContract --> HttpRoutes
+  SdkContract --> WsSub
 
   HttpClient["HTTP 控制面/SDK"] --> HttpRoutes["http/controlRoutes"]
   LegacyWsCommand["旧 WS 命令"] --> WsRouter["ws/webSocketCommandRouter"]
@@ -72,6 +76,7 @@ flowchart LR
 | `channel/` | 实时通道模型。维护 ChannelBus 和标准 telemetry channel 定义。 |
 | `common/` | 通用工具、日志、HTTP 返回结构。 |
 | `config/` | 配置文件读取、写入和路径管理。 |
+| `contracts/` | 面向前端和 SDK 的稳定契约定义，包括 HTTP 路由、串口角色、WebSocket 消息类型和 telemetry frame shape。 |
 | `db/` | 数据库 helper 和 sqlite 兼容层。 |
 | `export/` | 导出相关基础工具，目前主要是 CSV helper。 |
 | `http/` | HTTP API 路由。控制面和报告接口都在这里注册。 |
@@ -79,7 +84,7 @@ flowchart LR
 | `normalizers/` | 把旧实时 payload 转为标准 telemetry 数据。 |
 | `processing/` | 矩阵、压力、线序、算法处理函数集合，很多传感器 processor 依赖这里。 |
 | `python/` | Python worker 桥接，用于调用外部算法。 |
-| `runtime/` | 后端运行时入口、旧兼容 hub、命令路由和运行时状态存取适配。 |
+| `runtime/` | 后端运行时入口、旧兼容 hub、命令路由、通用运行时状态仓库和零点状态仓库。 |
 | `sensors/` | 传感器插件、协议解析和传感器类型 registry。 |
 | `serial/` | 串口扫描、端口创建、生命周期管理和 parser 管理。 |
 | `server/` | 服务启动编排层。当前仍包含主 `server.js`，以及 HTTP/WS factory 和 server 级工具模块。 |
@@ -117,6 +122,12 @@ flowchart LR
 | :--- | :--- |
 | `configManager.js` | 配置读取、保存和默认值管理。 |
 
+### `contracts/`
+
+| 文件 | 职责 |
+| :--- | :--- |
+| `sdkApiContract.js` | SDK/API 稳定契约源头。定义 HTTP 路由、串口角色、WS 订阅消息类型、telemetry 指标/质量枚举，并提供 `/api/sdk/contract` 的快照构造函数。 |
+
 ### `db/`
 
 | 文件 | 职责 |
@@ -134,7 +145,7 @@ flowchart LR
 
 | 文件 | 职责 |
 | :--- | :--- |
-| `controlRoutes.js` | HTTP 控制 API，包括串口、传感器、采集、历史、导出等控制命令。 |
+| `controlRoutes.js` | HTTP 控制 API，包括串口、传感器、采集、历史、导出等控制命令；路由路径和串口角色复用 `contracts/sdkApiContract.js`。 |
 | `reportRoutes.js` | OneStep 报告相关 API，包括热力图数据、canvas 上传和 PDF 生成。 |
 
 ### `license/`
@@ -171,7 +182,11 @@ flowchart LR
 | :--- | :--- |
 | `commandRouter.js` | 通用命令路由基础实现。 |
 | `index.js` | 后端运行时入口适配。 |
+| `legacyRuntimeAccessorFactory.js` | legacy 串口 runtime accessor 拼装工厂。集中合并 collection/runtime/zero/serialManager 状态 accessor，并保留尚未迁出的旧变量 accessor 注入点。 |
 | `runtimeStateStore.js` | 用 getter/setter accessor 和内部 state 管理旧运行时状态读写；当前已承接手套、零点、legacy 分段协议缓存、历史回放行缓存和采集控制状态。 |
+| `webSocketContextAccessorFactory.js` | WebSocket handler context accessor 拼装工厂。集中生成旧 WS 兼容层需要的历史回放、零点、串口扫描和授权状态 descriptor。 |
+| `zeroCommandService.js` | 零点命令服务。承接旧 WS `resetZero` 命令，统一执行零点捕获和清空，避免连接层直接操作零点字段。 |
+| `zeroStateStore.js` | 零点状态仓库。统一保存 `pointArr*zero`、原始零点源帧和 legacy 映射缓存，供历史入库、WebSocket context、手套 runtime 和 legacy runtime 共享。 |
 | `websocketHub.js` | 旧 WebSocket hub 兼容层。 |
 
 ### `sensors/`
@@ -215,7 +230,8 @@ flowchart LR
 | 文件 | 职责 |
 | :--- | :--- |
 | `server.js` | 当前主编排文件。负责初始化状态、创建服务、连接各模块和保留旧兼容入口。仍是后续重点拆分对象。 |
-| `httpAppFactory.js` | 创建 Express app 并挂载 HTTP 路由。 |
+| `bootstrapServer.js` | 启动编排 helper。当前承接启动串口扫描和本地 OneStep HTTP 服务监听，后续继续承接更多 bootstrap 流程。 |
+| `httpAppFactory.js` | 创建 Express app 并挂载 HTTP 路由；同时暴露 `/api/sdk/contract`，方便 SDK 获取当前后端契约。 |
 | `webSocketServerFactory.js` | 创建 sit/back/head 三个 WebSocket server。 |
 | `webSocketHandlerFactory.js` | 挂载 sit/back/head 三个 WebSocket server 的连接、订阅和旧消息处理逻辑。 |
 | `modules/dbManager.js` | server 旧模块中的数据库初始化逻辑。 |
@@ -258,6 +274,14 @@ flowchart LR
 
 | 日期 | 类型 | 说明 |
 | :--- | :--- | :--- |
+| 2026-07-03 | 优化重构 | 新增 `runtime/zeroCommandService.js`，将旧 WS `resetZero` 命令的零点捕获和清空逻辑从 `webSocketHandlerFactory.js` 迁入 runtime 层。 |
+| 2026-07-03 | 优化重构 | 新增 `server/bootstrapServer.js`，将启动串口扫描和本地 HTTP 服务监听从 `server.js` 迁出。 |
+| 2026-07-03 | 优化重构 | 新增 `runtime/webSocketContextAccessorFactory.js`，将 WebSocket handler context 的旧状态 accessor 拼装从 `server.js` 迁入 runtime 层。 |
+| 2026-07-03 | 优化重构 | 新增 `runtime/legacyRuntimeAccessorFactory.js`，将 legacy 串口 runtime 的状态 accessor 拼装从 `server.js` 迁入 runtime 层。 |
+| 2026-07-03 | 优化重构 | `server.js` 移除 `port1/port2/portHead/portSensor` 顶层变量，实际端口实例统一由 `serialManager.getPort(role)` 提供，旧 runtime 只接收兼容快照。 |
+| 2026-07-03 | 优化重构 | 新增 `serialPortStateStore` 管理串口扫描候选列表 `serialport`，避免扫描结果继续作为 `server.js` 散变量存在。 |
+| 2026-07-03 | 优化重构 | 新增 `runtime/zeroStateStore.js`，将零点基准帧、原始零点源帧和 legacy 映射缓存从 `server.js` 局部变量迁入运行时状态仓库。 |
+| 2026-07-03 | SDK 契约优化 | 新增 `backend/contracts/sdkApiContract.js`，集中定义 HTTP 路由、串口角色、WebSocket 订阅消息和 telemetry frame shape，并通过 `/api/sdk/contract` 暴露给 SDK。 |
 | 2026-06-23 | 优化重构 | 将采集控制状态 `flag/saveTime/colHZ/collectOptions` 从 `server.js` 顶层变量迁入基于 `RuntimeStateStore` 的 `collectionStateStore`。 |
 | 2026-06-23 | 优化重构 | 将历史回放状态 `localData/localDataBack/localDataHead/indexArr/nowIndex` 从 `server.js` 顶层变量迁入基于 `RuntimeStateStore` 的 `playbackStateStore`。 |
 | 2026-06-23 | 优化重构 | 将 legacy 分段协议缓存 `firstBlueData/lastBlueData/newArr` 从 `server.js` 局部变量迁入 `runtimeStateStore` 内部 state，减少主服务文件直接持有的旧协议缓存。 |
@@ -273,7 +297,7 @@ flowchart LR
 
 | 技术债 | 影响 | 建议 |
 | :--- | :--- | :--- |
-| `server/server.js` 仍偏大 | 已拆出历史帧转换、串口过滤和 legacy runtime 绑定，legacy 分段缓存、历史回放和采集控制状态已迁入 state store；但零点和端口状态仍较集中 | 后续继续迁移旧运行时状态 accessor、`createAppRuntime`、`createSerialRuntime` |
+| `server/server.js` 仍偏大 | 已拆出历史帧转换、串口过滤和 legacy runtime 绑定，legacy 分段缓存、历史回放、采集控制状态、零点状态/命令、端口实例状态、legacy accessor、WebSocket context accessor 和部分启动动作已迁入明确模块；但运行时依赖图创建仍集中 | 后续继续拆 `createAppRuntime` 和更多 bootstrap 流程 |
 | `legacySerialFrameRuntime.js` 仍是兼容层 | 已拆出 1024 主矩阵、72/144/256/4096 通用矩阵、bigBed 双分片和 130/142/146/158 分片压力帧；仍保留少量 262 字节旧手套帧、旧状态 accessor 和发送编排 | 继续把 262 字节旧帧、清零状态和发送编排迁入独立 runtime/service |
 | `processing/openWeb.js` 仍是算法大杂烩 | 很多线序和矩阵函数缺少领域归属 | 按传感器类型和矩阵类型迁到 `sensors/*` 或 `processing/matrix/*` |
 | 运行时状态仍在 `server.js` 持有 | application/service 需要通过 getter/setter 访问旧状态 | 建立集中 `runtimeState` 对象，逐步移除散落变量 |
@@ -284,5 +308,5 @@ flowchart LR
 1. 新增 `server/appRuntimeFactory.js`，把 `server.js` 中的 runtime 状态初始化、service 创建和依赖注入集中封装。
 2. 已新增 `server/webSocketHandlerFactory.js`，把 `openServer()` 里的三个 WebSocket connection handler 拆出；后续继续缩小其中旧命令处理逻辑。
 3. 继续拆 `legacySerialFrameRuntime.js` 中剩余的 262 字节旧手套帧和旧状态写回逻辑；1024 主矩阵、4096 通用矩阵、bigBed 双分片和 130/142/146/158 分片压力帧已迁出。
-4. 把散落运行时变量迁到集中 `runtimeState`，让 application service 不再依赖大量 getter/setter。
+4. 新增 `server/appRuntimeFactory.js`，把 state store、service、processor、command handlers 的创建集中封装。
 5. 明确“新 SDK 只走 HTTP 控制 + WS 订阅实时数据”，逐步冻结 WS 控制命令。

@@ -1,5 +1,9 @@
 const express = require('express');
 const cors = require('cors');
+const {
+  HTTP_ROUTES,
+  buildSdkContractSnapshot,
+} = require('../contracts/sdkApiContract');
 const { registerControlRoutes } = require('../http/controlRoutes');
 const { registerReportRoutes } = require('../http/reportRoutes');
 
@@ -26,20 +30,28 @@ function createHttpApp({
   httpApp.use(express.json({ limit: '50mb' }));
   httpApp.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-  httpApp.get('/api/channels', (req, res) => {
+  httpApp.get(HTTP_ROUTES.channels, (req, res) => {
     res.json({
       channels: getRealtimeChannels(),
       subscriptions: getWsSubscriptionStatus(),
     });
   });
 
-  httpApp.get('/api/ws/status', (req, res) => {
+  httpApp.get(HTTP_ROUTES.wsStatus, (req, res) => {
     res.json({
       channels: getRealtimeChannels(),
       channelBus: getChannelBusStatus(),
       serial: getSerialStatus(),
       subscriptions: getWsSubscriptionStatus(),
     });
+  });
+
+  httpApp.get(HTTP_ROUTES.sdkContract, (req, res) => {
+    res.json(buildSdkContractSnapshot({
+      channels: getRealtimeChannels(),
+      serialStatus: getSerialStatus(),
+      subscriptions: getWsSubscriptionStatus(),
+    }));
   });
 
   registerControlRoutes(httpApp, {

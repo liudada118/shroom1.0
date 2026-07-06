@@ -1,11 +1,25 @@
 # 架构文档
 
-> 最新维护：2026-06-23。本次维护继续推进运行时状态迁移，将采集控制状态移入 `collectionStateStore`。
+> 最新维护：2026-07-03。本次维护继续推进后端架构拆分，新增 `backend/runtime/zeroCommandService.js` 承接旧 WS `resetZero` 命令的零点操作。
 
 ## 当前维护记录
 
 | 日期 | 类型 | 说明 |
 | :--- | :--- | :--- |
+| 2026-07-03 | 优化重构 | 新增 `backend/runtime/zeroCommandService.js`，将旧 WebSocket `resetZero` 命令中的零点捕获和清空逻辑从连接层迁入 runtime 服务。 |
+| 2026-07-03 | 优化重构 | `backend/server/webSocketHandlerFactory.js` 不再直接读写 `pointArr*zero`、`pointArr*RawZero` 和 `pointArr147zero` 等零点字段，只调用 `zeroCommandService.handleResetZero()`。 |
+| 2026-07-03 | 优化重构 | 新增 `backend/server/bootstrapServer.js`，将启动串口扫描 `scanStartupSerialPorts` 和本地 HTTP 监听 `startLocalHttpServer` 从 `server.js` 迁出。 |
+| 2026-07-03 | 优化重构 | `server.js` 底部启动流程改为调用 bootstrap helper，减少内联副作用代码，为后续完整 `bootstrapServer` 和 `appRuntimeFactory` 拆分做铺垫。 |
+| 2026-07-03 | 优化重构 | 新增 `backend/runtime/webSocketContextAccessorFactory.js`，集中生成 WebSocket handler context 需要的历史回放、零点、串口扫描和旧变量状态 descriptor。 |
+| 2026-07-03 | 优化重构 | `server.js` 中 `Object.defineProperties(webSocketHandlerContext, ...)` 从大块 getter/setter 收敛为 factory 调用，进一步减少启动编排文件里的兼容映射。 |
+| 2026-07-03 | 优化重构 | 新增 `backend/runtime/legacyRuntimeAccessorFactory.js`，集中拼装 legacy 串口 runtime 需要的 collection/runtime/zero/serialManager 状态 accessor。 |
+| 2026-07-03 | 优化重构 | `server.js` 的 `legacySerialFrameRuntimeAccessors` 从大对象收敛为 factory 调用，启动文件只保留尚未迁出的少量可变变量 accessor。 |
+| 2026-07-03 | 优化重构 | `server.js` 移除 `port1/port2/portHead/portSensor` 顶层变量，端口实例统一通过 `serialManager.getPort(role)` 即时读取。 |
+| 2026-07-03 | 优化重构 | 新增 `serialPortStateStore` 保存串口扫描候选列表 `serialport`，WebSocket context 和 command handlers 通过状态仓库读写扫描结果。 |
+| 2026-07-03 | 优化重构 | 新增 `backend/runtime/zeroStateStore.js`，将 `pointArr*zero`、原始零点源帧和 legacy 映射缓存从 `server.js` 局部变量迁入零点状态仓库。 |
+| 2026-07-03 | 优化重构 | `server.js` 中 WebSocket context、hand runtime、legacy runtime 和历史帧转换服务统一通过 `getZeroState/setZeroState/zeroStateAccessor` 访问零点状态。 |
+| 2026-07-03 | SDK 契约优化 | 新增 `backend/contracts/sdkApiContract.js`，集中定义 HTTP 路由、串口角色、WebSocket 订阅消息类型、telemetry 指标/质量枚举和 `/api/sdk/contract` 快照，SDK 不再需要读取 `server.js` 或内部 runtime 才能理解后端能力。 |
+| 2026-07-03 | HTTP 边界优化 | `backend/http/controlRoutes.js` 与 `backend/server/httpAppFactory.js` 改为复用 SDK 契约常量，并新增 `GET /api/sdk/contract`，方便前端、SDK 和自动化工具发现当前后端 API/WS/telemetry 契约。 |
 | 2026-06-23 | 优化重构 | 将采集控制状态 `flag/saveTime/colHZ/collectOptions` 从 `server.js` 顶层变量迁入基于 `RuntimeStateStore` 的 `collectionStateStore`。 |
 | 2026-06-23 | 优化重构 | 将历史回放状态 `localData/localDataBack/localDataHead/indexArr/nowIndex` 从 `server.js` 顶层变量迁入基于 `RuntimeStateStore` 的 `playbackStateStore`。 |
 | 2026-06-23 | 优化重构 | 将 legacy 分段协议缓存 `firstBlueData/lastBlueData/newArr` 从 `server.js` 局部变量迁入 `runtimeStateStore` 内部 state，减少主服务文件直接持有的旧协议缓存。 |
@@ -78,6 +92,14 @@
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
+| 2026-07-03 | 零点命令服务化 | 新增 `zeroCommandService`，旧 WS resetZero 命令只做路由，零点捕获和清空由 runtime 服务统一处理。 |
+| 2026-07-03 | Bootstrap helper 拆分 | 新增 `bootstrapServer.js`，启动期串口扫描和 OneStep HTTP 服务监听从 `server.js` 迁入 server 层 helper。 |
+| 2026-07-03 | WebSocket context accessor factory | 新增 `webSocketContextAccessorFactory`，把 WS handler 旧状态映射从 `server.js` 拆到 runtime 层，保留旧前端 resetZero、历史框选和授权流程兼容。 |
+| 2026-07-03 | Legacy accessor factory | 新增 `legacyRuntimeAccessorFactory`，把 legacy 串口 runtime 的状态映射从 `server.js` 拆到 runtime 层，减少启动编排文件里的兼容字段堆积。 |
+| 2026-07-03 | 端口实例状态迁移 | `server.js` 不再缓存 `port1/port2/portHead/portSensor`，旧 runtime 通过 `getManagedSerialPorts()` 获取兼容快照，真实生命周期只由 `serialManager` 管理。 |
+| 2026-07-03 | 零点状态迁移 | 新增 `zeroStateStore`，统一保存坐面、靠背、头枕、手套和 legacy 分段协议使用的零点基准帧、原始零点源帧和映射缓存。 |
+| 2026-07-03 | SDK/API 契约层 | 新增 `backend/contracts/sdkApiContract.js` 和 `/api/sdk/contract`，将外部 SDK 需要依赖的 HTTP 路由、WS 订阅消息和 telemetry frame shape 从后端内部实现中抽离。 |
+| 2026-07-03 | 前端 SDK 契约发现 | `sdk/frontend` 的 `SensorClient` 支持 `getContract()`，读取后端契约后动态使用路由和 WS 消息类型，减少硬编码路径和内部模块耦合。 |
 | 2026-06-23 | 采集控制状态迁移 | `flag/saveTime/colHZ/collectOptions` 迁入 `collectionStateStore`，采集频率、入库时间和采集开关通过状态仓库读写。 |
 | 2026-06-23 | 历史回放状态迁移 | `localData/localDataBack/localDataHead/indexArr/nowIndex` 迁入 `playbackStateStore`，历史加载、回放定时器和 WS command handler 通过状态仓库读写。 |
 | 2026-06-23 | legacy 分段缓存状态迁移 | `firstBlueData/lastBlueData/newArr` 等 130+146 分包缓存迁入 `runtimeStateStore`，legacy runtime 通过状态仓库 accessor 读写。 |

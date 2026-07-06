@@ -2,6 +2,26 @@ import { sensorCommands } from './commands.js';
 import { toLegacyCommand } from './legacyCommands.js';
 import { normalizeIncomingMessage } from '../store/normalizeFrame.js';
 
+export const DEFAULT_HTTP_ROUTES = Object.freeze({
+  channels: '/api/channels',
+  wsStatus: '/api/ws/status',
+  sdkContract: '/api/sdk/contract',
+  serialPorts: '/api/serial/ports',
+  serialStatus: '/api/serial/status',
+  serialOpen: '/api/serial/open',
+  serialClose: '/api/serial/close',
+  serialExchange: '/api/serial/exchange',
+  serialRefresh: '/api/serial/refresh',
+  serialAutoConnectHandGloveDouble: '/api/serial/auto-connect-hand-glove-double',
+  sensorCurrent: '/api/sensor/current',
+  sensorType: '/api/sensor/type',
+  historyLoad: '/api/history/load',
+  playbackControl: '/api/playback/control',
+  collectionStart: '/api/collection/start',
+  collectionStop: '/api/collection/stop',
+  exportCsv: '/api/export/csv',
+});
+
 /**
  * 根据 WebSocket 地址推导本地 HTTP 控制面地址。
  * 默认后端 HTTP 控制面监听 127.0.0.1:19245。
@@ -17,16 +37,41 @@ function createHttpBaseUrl(wsUrl, explicitBaseUrl) {
 }
 
 export class SensorClient {
-  constructor({ url = 'ws://127.0.0.1:19999', httpBaseUrl, WebSocketImpl = globalThis.WebSocket, fetchImpl = globalThis.fetch, legacyProtocol = false, channels = [] } = {}) {
+  constructor({
+    url = 'ws://127.0.0.1:19999',
+    httpBaseUrl,
+    WebSocketImpl = globalThis.WebSocket,
+    fetchImpl = globalThis.fetch,
+    legacyProtocol = false,
+    channels = [],
+    apiContract = null,
+    routes = {},
+  } = {}) {
     this.url = url;
     this.httpBaseUrl = createHttpBaseUrl(url, httpBaseUrl);
     this.WebSocketImpl = WebSocketImpl;
     this.fetchImpl = fetchImpl;
     this.legacyProtocol = legacyProtocol;
     this.channels = channels;
+    this.apiContract = apiContract;
+    this.routes = {
+      ...DEFAULT_HTTP_ROUTES,
+      ...(apiContract?.http?.routes || {}),
+      ...routes,
+    };
     this.ws = null;
     this.listeners = new Map();
     this.isConnected = false;
+  }
+
+  getRoute(name) {
+    const route = this.routes[name] || DEFAULT_HTTP_ROUTES[name];
+    if (!route) throw new Error(`unknown HTTP route "${name}"`);
+    return route;
+  }
+
+  getWsMessageType(name, fallback) {
+    return this.apiContract?.websocket?.messageTypes?.[name] || fallback;
   }
 
   connect() {
@@ -93,6 +138,18 @@ export class SensorClient {
    * - 实时数据继续走 WebSocket subscribe/unsubscribe。
    */
   async request(path, { method = 'GET', body } = {}) {
+    const payload = await this.requestRaw(path, { method, body });
+    if (payload.code !== 0) {
+      throw new Error(payload.message || 'request failed');
+    }
+    return payload.data;
+  }
+
+  /**
+   * 读取非 HttpResult 包装的后端响应。
+   * `/api/sdk/contract` 直接返回契约对象，因此需要使用原始请求。
+   */
+  async requestRaw(path, { method = 'GET', body } = {}) {
     if (!this.fetchImpl) {
       throw new Error('fetch implementation is not available');
     }
@@ -103,10 +160,25 @@ export class SensorClient {
       body: body == null ? undefined : JSON.stringify(body),
     });
     const payload = await response.json();
-    if (!response.ok || payload.code !== 0) {
+    if (!response.ok) {
       throw new Error(payload.message || `HTTP ${response.status}`);
     }
-    return payload.data;
+    return payload;
+  }
+
+  /**
+   * 从后端读取 SDK/API 契约。
+   * 读取后会同步更新客户端路由表，避免 SDK 长期硬编码后端路径。
+   */
+  async getContract({ refresh = false } = {}) {
+    if (this.apiContract && !refresh) return this.apiContract;
+    const contract = await this.requestRaw(this.getRoute('sdkContract'));
+    this.apiContract = contract;
+    this.routes = {
+      ...DEFAULT_HTTP_ROUTES,
+      ...(contract?.http?.routes || {}),
+    };
+    return contract;
   }
 
   /**
@@ -114,27 +186,27 @@ export class SensorClient {
    * 这些方法不需要 WebSocket 已连接，适合 SDK、测试脚本和第三方系统调用。
    */
   serial = {
-    ports: () => this.request('/api/serial/ports'),
-    status: (role) => this.request(role ? `/api/serial/status?role=${encodeURIComponent(role)}` : '/api/serial/status'),
-    open: ({ role = 'sit', port, path, portPath } = {}) => this.request('/api/serial/open', {
+    ports: () => this.request(this.getRoute('serialPorts')),
+    status: (role) => this.request(role ? `${this.getRoute('serialStatus')}?role=${encodeURIComponent(role)}` : this.getRoute('serialStatus')),
+    open: ({ role = 'sit', port, path, portPath } = {}) => this.request(this.getRoute('serialOpen'), {
       method: 'POST',
       body: { role, port: port || path || portPath },
     }),
-    close: ({ role = 'sit' } = {}) => this.request('/api/serial/close', {
+    close: ({ role = 'sit' } = {}) => this.request(this.getRoute('serialClose'), {
       method: 'POST',
       body: { role },
     }),
-    refresh: () => this.request('/api/serial/refresh', { method: 'POST', body: {} }),
-    exchange: () => this.request('/api/serial/exchange', { method: 'POST', body: {} }),
-    autoConnectHandGloveDouble: () => this.request('/api/serial/auto-connect-hand-glove-double', { method: 'POST', body: {} }),
+    refresh: () => this.request(this.getRoute('serialRefresh'), { method: 'POST', body: {} }),
+    exchange: () => this.request(this.getRoute('serialExchange'), { method: 'POST', body: {} }),
+    autoConnectHandGloveDouble: () => this.request(this.getRoute('serialAutoConnectHandGloveDouble'), { method: 'POST', body: {} }),
   };
 
   /**
    * 传感器类型控制和当前状态查询。
    */
   sensor = {
-    current: () => this.request('/api/sensor/current'),
-    setType: (type) => this.request('/api/sensor/type', {
+    current: () => this.request(this.getRoute('sensorCurrent')),
+    setType: (type) => this.request(this.getRoute('sensorType'), {
       method: 'POST',
       body: { type },
     }),
@@ -144,7 +216,7 @@ export class SensorClient {
    * 历史数据控制。load 会让后端进入对应日期的本地回放状态。
    */
   history = {
-    load: (date) => this.request('/api/history/load', {
+    load: (date) => this.request(this.getRoute('historyLoad'), {
       method: 'POST',
       body: { date },
     }),
@@ -154,7 +226,7 @@ export class SensorClient {
    * 回放控制，例如播放/暂停、速度、索引跳转。
    */
   playback = {
-    control: (options = {}) => this.request('/api/playback/control', {
+    control: (options = {}) => this.request(this.getRoute('playbackControl'), {
       method: 'POST',
       body: options,
     }),
@@ -164,11 +236,11 @@ export class SensorClient {
    * 采集控制。start/stop 通过 HTTP 修改后端采集状态。
    */
   collection = {
-    start: (options = {}) => this.request('/api/collection/start', {
+    start: (options = {}) => this.request(this.getRoute('collectionStart'), {
       method: 'POST',
       body: options,
     }),
-    stop: () => this.request('/api/collection/stop', {
+    stop: () => this.request(this.getRoute('collectionStop'), {
       method: 'POST',
       body: {},
     }),
@@ -178,7 +250,7 @@ export class SensorClient {
    * 导出控制。目前支持 CSV 导出。
    */
   export = {
-    csv: ({ date, downloadOptions, options } = {}) => this.request('/api/export/csv', {
+    csv: ({ date, downloadOptions, options } = {}) => this.request(this.getRoute('exportCsv'), {
       method: 'POST',
       body: { date, downloadOptions: downloadOptions || options || {} },
     }),
@@ -189,14 +261,14 @@ export class SensorClient {
    */
   subscribe(channels) {
     this.send({
-      type: 'subscribe',
+      type: this.getWsMessageType('SUBSCRIBE', 'subscribe'),
       channels: Array.isArray(channels) ? channels : [channels],
     });
   }
 
   unsubscribe(channels) {
     this.send({
-      type: 'unsubscribe',
+      type: this.getWsMessageType('UNSUBSCRIBE', 'unsubscribe'),
       channels: Array.isArray(channels) ? channels : [channels],
     });
   }

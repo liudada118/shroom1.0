@@ -25,12 +25,24 @@ const { registerRuntimeCommandHandlers } = require('../ws/registerRuntimeCommand
 const { registerSerialCommandHandlers } = require('../ws/registerSerialCommandHandlers');
 const { createControlCommandService } = require('../application/controlCommandService');
 const { createHttpApp } = require('./httpAppFactory');
+const {
+  DEFAULT_REPORT_HTTP_PORT,
+  scanStartupSerialPorts,
+  startLocalHttpServer,
+} = require('./bootstrapServer');
 const { createSmallBed12BRuntime } = require('../sensors/runtime/smallBed12BRuntime');
 const { createSit1024FrameProcessor } = require('../sensors/runtime/sit1024FrameProcessor');
 const { createBackHead1024FrameProcessor } = require('../sensors/runtime/backHead1024FrameProcessor');
 const { createHandPacketRuntime } = require('../sensors/runtime/handPacketRuntime');
 const { createLegacySerialRuntimeBinding } = require('../sensors/runtime/legacySerialRuntimeBinding');
 const { createRuntimeStateStore } = require('../runtime/runtimeStateStore');
+const { createZeroStateStore } = require('../runtime/zeroStateStore');
+const { createZeroCommandService } = require('../runtime/zeroCommandService');
+const {
+  createLegacySerialFrameRuntimeAccessors,
+  createMutableAccessor,
+} = require('../runtime/legacyRuntimeAccessorFactory');
+const { createWebSocketContextAccessors } = require('../runtime/webSocketContextAccessorFactory');
 const {
   DEFAULT_COLLECTION_FREQUENCY_HZ,
   createCollectionDiskSpaceGuard,
@@ -237,7 +249,7 @@ function handleMinzhenSensorPortData(data) {
  * 当前保留为兼容入口，实际打开/关闭由 SerialManager 统一处理。
  */
 function bindBackPortParser() {
-  syncManagedSerialPorts();
+  return getManagedSerialPort(serialRoles.BACK);
 }
 
 /**
@@ -293,6 +305,15 @@ const {
   logSerialPortList,
 } = serialPortFilterService;
 
+// zeroStateStore 统一保存零点基准帧、原始零点源帧和 legacy 映射缓存。
+const zeroStateStore = createZeroStateStore();
+const getZeroState = (key) => zeroStateStore.get(key);
+const setZeroState = (key, value) => zeroStateStore.set(key, value);
+const zeroStateAccessor = (key) => ({
+  get: () => getZeroState(key),
+  set: (value) => setZeroState(key, value),
+});
+
 // 历史帧转换服务集中处理回放、导出和采集存储中的数据格式细节。
 const historyFrameTransformService = createHistoryFrameTransformService({
   HAND_SINGLE_POINT_TYPE,
@@ -312,11 +333,11 @@ const historyFrameTransformService = createHistoryFrameTransformService({
   getRuntime: () => ({
     file,
     colHZ: getCollectionState('colHZ'),
-    pointArr1RawZero,
-    pointArr1zero,
-    pointArr2RawZero,
-    pointArr2zero,
-    pointArr4zero,
+    pointArr1RawZero: getZeroState('pointArr1RawZero'),
+    pointArr1zero: getZeroState('pointArr1zero'),
+    pointArr2RawZero: getZeroState('pointArr2RawZero'),
+    pointArr2zero: getZeroState('pointArr2zero'),
+    pointArr4zero: getZeroState('pointArr4zero'),
   }),
 });
 const {
@@ -377,17 +398,12 @@ function shouldStoreCollectionFrame(channel = 'sit') {
 }
 
 // ===== 串口、实时和回放状态 =====
-// baudRate 是当前主串口波特率；port1/port2/portHead/portSensor 分别对应坐面、靠背、头枕和附加传感器串口。
+// baudRate 是当前主串口波特率；实际端口实例统一由 serialManager 按角色管理。
 // localFlag、playFlag、interval、timer 描述历史回放状态；nowIndex 和历史行缓存已迁入 playbackStateStore。
 let baudRate = 1000000
 
-let serialport = { a: 1, b: 2 }
 const timeNum = 1000 / 12;
-let port2,
-  port1,
-  portHead,
-  portSensor,
-  localFlag = false,
+let localFlag = false,
   playFlag = false,
   interval = timeNum,
   detectedInterval = timeNum,
@@ -634,6 +650,10 @@ const playbackStateStore = createRuntimeStateStore({
 const getPlaybackState = (key) => playbackStateStore.get(key);
 const setPlaybackState = (key, value) => playbackStateStore.set(key, value);
 const patchPlaybackState = (next = {}) => playbackStateStore.patch(next);
+const playbackStateAccessor = (key) => ({
+  get: () => getPlaybackState(key),
+  set: (value) => setPlaybackState(key, value),
+});
 
 /**
  * 生成历史回放曲线数据，统一处理坐面和靠背历史行。
@@ -956,10 +976,6 @@ function shutdownServer() {
     closeWithTimeout("db1", closeDatabase(db1, "db1")),
     closeWithTimeout("db2", closeDatabase(db2, "db2")),
   ]).then(() => {
-    port1 = null;
-    port2 = null;
-    portHead = null;
-    portSensor = null;
     serverOpened = false;
   });
 
@@ -1085,6 +1101,10 @@ const collectionStateStore = createRuntimeStateStore({
 });
 const getCollectionState = (key) => collectionStateStore.get(key);
 const setCollectionState = (key, value) => collectionStateStore.set(key, value);
+const collectionStateAccessor = (key) => ({
+  get: () => getCollectionState(key),
+  set: (value) => setCollectionState(key, value),
+});
 const collectionStorageClock = createCollectionStorageClock({
   getOptions: () => getCollectionState('collectOptions'),
   getFallbackFrequencyHz: () => getCollectionState('colHZ'),
@@ -1101,15 +1121,40 @@ const serialManager = createSerialManager({
   logger,
 });
 const serialRoles = serialManager.roles;
+const serialPortStateStore = createRuntimeStateStore({
+  initialState: {
+    serialport: { a: 1, b: 2 },
+  },
+});
+const getSerialPortState = (key) => serialPortStateStore.get(key);
+const setSerialPortState = (key, value) => serialPortStateStore.set(key, value);
+const serialPortStateAccessor = (key) => ({
+  get: () => getSerialPortState(key),
+  set: (value) => setSerialPortState(key, value),
+});
 
 /**
- * 从 SerialManager 同步当前四个串口角色的实例引用。
+ * 按串口角色即时读取托管端口实例。
+ *
+ * @param {string} role 串口角色。
+ * @returns {object | null} 当前端口实例。
  */
-function syncManagedSerialPorts() {
-  port1 = serialManager.getPort(serialRoles.SIT);
-  port2 = serialManager.getPort(serialRoles.BACK);
-  portHead = serialManager.getPort(serialRoles.HEAD);
-  portSensor = serialManager.getPort(serialRoles.SENSOR);
+function getManagedSerialPort(role) {
+  return serialManager.getPort(role);
+}
+
+/**
+ * 获取旧 runtime 仍使用的四个端口别名。
+ *
+ * 这些别名只做兼容快照，端口生命周期仍由 serialManager 持有。
+ */
+function getManagedSerialPorts() {
+  return {
+    port1: getManagedSerialPort(serialRoles.SIT),
+    port2: getManagedSerialPort(serialRoles.BACK),
+    portHead: getManagedSerialPort(serialRoles.HEAD),
+    portSensor: getManagedSerialPort(serialRoles.SENSOR),
+  };
 }
 
 /**
@@ -1136,9 +1181,7 @@ function openManagedSerialPort(role, options = {}) {
     role,
     reconnect: options.reconnect === true,
   });
-  const port = serialManager.start(role);
-  syncManagedSerialPorts();
-  return port;
+  return serialManager.start(role);
 }
 
 /**
@@ -1150,7 +1193,6 @@ function openManagedSerialPort(role, options = {}) {
 function closeManagedSerialPort(role, reason) {
   serialManager.setReconnect(role, false);
   serialManager.stop(role, reason);
-  syncManagedSerialPorts();
 }
 
 /**
@@ -1214,11 +1256,13 @@ function openHeadSerialPort(portPath, reason = 'open head') {
   });
 }
 // ===== WebSocket 三通道与清零基准缓存 =====
-// server/server1/server2 分别对应坐面、靠背、头枕推送通道；pointArr*zero 保存各路清零基准帧。
+// server/server1/server2 分别对应坐面、靠背、头枕推送通道；串口重连状态由 SerialManager 自己维护。
 serialManager.startReconnectLoop({
   intervalMs: 3000,
   reason: 'registered serial reconnect',
-  onReconnect: syncManagedSerialPorts,
+  onReconnect: (results) => {
+    logger.info('[SerialManager] reconnect results', results);
+  },
 });
 
 let server, server1, server2;
@@ -1339,7 +1383,7 @@ const petCareRuntimeService = createPetCareRuntimeService({
   callPy,
   getPointArr: () => pointArr,
   getFile: () => file,
-  getPort: () => port1,
+  getPort: () => getManagedSerialPort(serialRoles.SIT),
   publishSystemEvent,
   // 宠物看护算法会返回 jqbed matrix_origin，这里写回主运行时状态供实时帧输出使用。
   setJqbedMatrixOrigin: (matrixOrigin) => {
@@ -1415,9 +1459,7 @@ registerRuntimeCommandHandlers(wsCommandRouter, {
     file,
     nowDate,
     playFlag,
-    port1,
-    port2,
-    portHead,
+    ...getManagedSerialPorts(),
     sitTotal,
   }),
   setRuntime: (next = {}) => {
@@ -1454,7 +1496,7 @@ registerRuntimeCommandHandlers(wsCommandRouter, {
     if (Object.prototype.hasOwnProperty.call(next, 'com1')) com1 = next.com1;
     if (Object.prototype.hasOwnProperty.call(next, 'comhead')) comhead = next.comhead;
     if (Object.prototype.hasOwnProperty.call(next, 'comSensor')) comSensor = next.comSensor;
-    if (Object.prototype.hasOwnProperty.call(next, 'serialport')) serialport = next.serialport;
+    if (Object.prototype.hasOwnProperty.call(next, 'serialport')) setSerialPortState('serialport', next.serialport);
   },
 });
 
@@ -1472,9 +1514,7 @@ registerSerialCommandHandlers(wsCommandRouter, {
     endDate,
     file,
     nowDate,
-    port1,
-    port2,
-    portHead,
+    ...getManagedSerialPorts(),
     sitTotal,
   }),
   getSensorBaudRate,
@@ -1515,7 +1555,7 @@ registerSerialCommandHandlers(wsCommandRouter, {
     if (Object.prototype.hasOwnProperty.call(next, 'com1')) com1 = next.com1;
     if (Object.prototype.hasOwnProperty.call(next, 'comhead')) comhead = next.comhead;
     if (Object.prototype.hasOwnProperty.call(next, 'comSensor')) comSensor = next.comSensor;
-    if (Object.prototype.hasOwnProperty.call(next, 'serialport')) serialport = next.serialport;
+    if (Object.prototype.hasOwnProperty.call(next, 'serialport')) setSerialPortState('serialport', next.serialport);
   },
   stopPlaybackTimer,
 });
@@ -1526,25 +1566,29 @@ const controlCommandService = createControlCommandService({
 });
 
 let up = 1245, down = 2
-let pointArr1zero = []
-let pointArr147zero = []
-let pointArr147zero_2 = []
-let pointArr2zero = []
-let pointArr3zero = []
-let pointArr4zero = []
-let pointArr2RawZero = []
-
-let pointArr1zeroData = []
-let pointArr2zeroData = []
-let pointArr3zeroData = []
-let pointArr4zeroData = [], pointArr2RawZeroData = [], newArr147 = [], newArr147_2 = [];
-let pointArr1RawZero = []
-let pointArr1RawZeroData = []
 
 const wsServers = createWebSocketServers();
 server = wsServers.sit;
 server1 = wsServers.back;
 server2 = wsServers.head;
+
+const zeroCommandService = createZeroCommandService({
+  getRuntime: () => ({
+    newArr147: getZeroState('newArr147'),
+    newArr147_2: getZeroState('newArr147_2'),
+    pointArr,
+    pointArr1RawZeroData: getZeroState('pointArr1RawZeroData'),
+    pointArr1zeroData: getZeroState('pointArr1zeroData'),
+    pointArr2,
+    pointArr2RawZeroData: getZeroState('pointArr2RawZeroData'),
+    pointArr2zeroData: getZeroState('pointArr2zeroData'),
+    pointArr3,
+    pointArr3zeroData: getZeroState('pointArr3zeroData'),
+    pointArr4,
+    pointArr4zeroData: getZeroState('pointArr4zeroData'),
+  }),
+  setZeroState,
+});
 
 // WebSocket 连接处理已迁入 factory；这里集中声明它仍需访问的旧运行时上下文。
 const webSocketHandlerContext = {
@@ -1577,53 +1621,38 @@ const webSocketHandlerContext = {
   totalToN,
   writableNameTxt,
   wsSubscriptions,
+  zeroCommandService,
 };
 
-Object.defineProperties(webSocketHandlerContext, {
-  backAreaSelect: { get: () => backAreaSelect, set: (value) => { backAreaSelect = value; } },
-  backPressSelect: { get: () => backPressSelect, set: (value) => { backPressSelect = value; } },
-  baudRate: { get: () => baudRate, set: (value) => { baudRate = value; } },
-  endDate: { get: () => endDate, set: (value) => { endDate = value; } },
-  file: { get: () => file, set: (value) => { file = value; } },
-  historyArr: { get: () => historyArr, set: (value) => { historyArr = value; } },
-  indexArr: { get: () => getPlaybackState('indexArr'), set: (value) => setPlaybackState('indexArr', value) },
-  length: { get: () => length, set: (value) => { length = value; } },
-  licenseFile: { get: () => licenseFile, set: (value) => { licenseFile = value; } },
-  localData: { get: () => getPlaybackState('localData'), set: (value) => setPlaybackState('localData', value) },
-  localDataBack: { get: () => getPlaybackState('localDataBack'), set: (value) => setPlaybackState('localDataBack', value) },
-  localFlag: { get: () => localFlag, set: (value) => { localFlag = value; } },
-  nameTxt: { get: () => nameTxt, set: (value) => { nameTxt = value; } },
-  newArr147: { get: () => newArr147, set: (value) => { newArr147 = value; } },
-  newArr147_2: { get: () => newArr147_2, set: (value) => { newArr147_2 = value; } },
-  newback: { get: () => newback, set: (value) => { newback = value; } },
-  nowDate: { get: () => nowDate, set: (value) => { nowDate = value; } },
-  nowIndex: { get: () => getPlaybackState('nowIndex'), set: (value) => setPlaybackState('nowIndex', value) },
-  pointArr: { get: () => pointArr, set: (value) => { pointArr = value; } },
-  pointArr1RawZero: { get: () => pointArr1RawZero, set: (value) => { pointArr1RawZero = value; } },
-  pointArr1RawZeroData: { get: () => pointArr1RawZeroData, set: (value) => { pointArr1RawZeroData = value; } },
-  pointArr1zero: { get: () => pointArr1zero, set: (value) => { pointArr1zero = value; } },
-  pointArr1zeroData: { get: () => pointArr1zeroData, set: (value) => { pointArr1zeroData = value; } },
-  pointArr2: { get: () => pointArr2, set: (value) => { pointArr2 = value; } },
-  pointArr2RawZero: { get: () => pointArr2RawZero, set: (value) => { pointArr2RawZero = value; } },
-  pointArr2RawZeroData: { get: () => pointArr2RawZeroData, set: (value) => { pointArr2RawZeroData = value; } },
-  pointArr2zero: { get: () => pointArr2zero, set: (value) => { pointArr2zero = value; } },
-  pointArr2zeroData: { get: () => pointArr2zeroData, set: (value) => { pointArr2zeroData = value; } },
-  pointArr3: { get: () => pointArr3, set: (value) => { pointArr3 = value; } },
-  pointArr3zero: { get: () => pointArr3zero, set: (value) => { pointArr3zero = value; } },
-  pointArr3zeroData: { get: () => pointArr3zeroData, set: (value) => { pointArr3zeroData = value; } },
-  pointArr4: { get: () => pointArr4, set: (value) => { pointArr4 = value; } },
-  pointArr4zero: { get: () => pointArr4zero, set: (value) => { pointArr4zero = value; } },
-  pointArr4zeroData: { get: () => pointArr4zeroData, set: (value) => { pointArr4zeroData = value; } },
-  pointArr147zero: { get: () => pointArr147zero, set: (value) => { pointArr147zero = value; } },
-  pointArr147zero_2: { get: () => pointArr147zero_2, set: (value) => { pointArr147zero_2 = value; } },
-  selectFlag: { get: () => selectFlag, set: (value) => { selectFlag = value; } },
-  serialport: { get: () => serialport, set: (value) => { serialport = value; } },
-  serverOpened: { get: () => serverOpened, set: (value) => { serverOpened = value; } },
-  serverShutdownRequested: { get: () => serverShutdownRequested, set: (value) => { serverShutdownRequested = value; } },
-  sitAreaSelect: { get: () => sitAreaSelect, set: (value) => { sitAreaSelect = value; } },
-  sitPressSelect: { get: () => sitPressSelect, set: (value) => { sitPressSelect = value; } },
-  timeStamp: { get: () => timeStamp, set: (value) => { timeStamp = value; } },
-});
+Object.defineProperties(webSocketHandlerContext, createWebSocketContextAccessors({
+  mutableAccessors: {
+    backAreaSelect: createMutableAccessor(() => backAreaSelect, (value) => { backAreaSelect = value; }),
+    backPressSelect: createMutableAccessor(() => backPressSelect, (value) => { backPressSelect = value; }),
+    baudRate: createMutableAccessor(() => baudRate, (value) => { baudRate = value; }),
+    endDate: createMutableAccessor(() => endDate, (value) => { endDate = value; }),
+    file: createMutableAccessor(() => file, (value) => { file = value; }),
+    historyArr: createMutableAccessor(() => historyArr, (value) => { historyArr = value; }),
+    length: createMutableAccessor(() => length, (value) => { length = value; }),
+    licenseFile: createMutableAccessor(() => licenseFile, (value) => { licenseFile = value; }),
+    localFlag: createMutableAccessor(() => localFlag, (value) => { localFlag = value; }),
+    nameTxt: createMutableAccessor(() => nameTxt, (value) => { nameTxt = value; }),
+    newback: createMutableAccessor(() => newback, (value) => { newback = value; }),
+    nowDate: createMutableAccessor(() => nowDate, (value) => { nowDate = value; }),
+    pointArr: createMutableAccessor(() => pointArr, (value) => { pointArr = value; }),
+    pointArr2: createMutableAccessor(() => pointArr2, (value) => { pointArr2 = value; }),
+    pointArr3: createMutableAccessor(() => pointArr3, (value) => { pointArr3 = value; }),
+    pointArr4: createMutableAccessor(() => pointArr4, (value) => { pointArr4 = value; }),
+    selectFlag: createMutableAccessor(() => selectFlag, (value) => { selectFlag = value; }),
+    serverOpened: createMutableAccessor(() => serverOpened, (value) => { serverOpened = value; }),
+    serverShutdownRequested: createMutableAccessor(() => serverShutdownRequested, (value) => { serverShutdownRequested = value; }),
+    sitAreaSelect: createMutableAccessor(() => sitAreaSelect, (value) => { sitAreaSelect = value; }),
+    sitPressSelect: createMutableAccessor(() => sitPressSelect, (value) => { sitPressSelect = value; }),
+    timeStamp: createMutableAccessor(() => timeStamp, (value) => { timeStamp = value; }),
+  },
+  playbackStateAccessor,
+  serialPortStateAccessor,
+  zeroStateAccessor,
+}));
 
 const attachWebSocketHandlers = createWebSocketHandlerAttacher(webSocketHandlerContext);
 
@@ -1632,11 +1661,12 @@ module.exports = {
 };
 
 // 启动时先扫描一次串口列表，给前端和自动连接逻辑提供初始候选端口。
-listPorts().then((ports) => {
-  serialport = getPort(ports)//ports; //.filter((a,index) => a.manufacturer === 'wch.cn');
-  logSerialPortList('startup', serialport);
-}).catch((err) => {
-  logger.error('[SerialList] startup failed', err);
+scanStartupSerialPorts({
+  getPort,
+  listPorts,
+  logger,
+  logSerialPortList,
+  setSerialPortState,
 });
 // ===== 实时协议临时帧缓存 =====
 // pointArr/newData 是当前解析帧；分段协议缓存已迁入 RuntimeStateStore。
@@ -1649,7 +1679,7 @@ const smallBed12BRuntime = createSmallBed12BRuntime({
   sensorType: SMALL_BED_12B_TYPE,
   getSensorType: () => file,
   getLineOrder: () => jqbed,
-  getZeroFrame: () => pointArr1zero,
+  getZeroFrame: () => getZeroState('pointArr1zero'),
   subtractZero: numLessZeroToZero,
   calibration: smallBed12BCalibration,
   getDisplayOptions: () => smallBed12BDisplayOptions,
@@ -1663,7 +1693,7 @@ const smallBed12BRuntime = createSmallBed12BRuntime({
   },
   // 保存小床当前原始零点源帧，供 resetZero 命令复制到 pointArr1zero。
   setZeroSourceFrame: (frame) => {
-    pointArr1zeroData = frame;
+    setZeroState('pointArr1zeroData', frame);
   },
   // 保存小床当前展示帧，兼容旧前端和部分导出逻辑读取 newData。
   setCurrentDisplayData: (frame) => {
@@ -1743,22 +1773,22 @@ const runtimeStateStore = createRuntimeStateStore({
   },
   accessors: {
     file: { get: () => file, set: (value) => { file = value; } },
-    newArr147: { get: () => newArr147, set: (value) => { newArr147 = value; } },
-    newArr147_2: { get: () => newArr147_2, set: (value) => { newArr147_2 = value; } },
+    newArr147: zeroStateAccessor('newArr147'),
+    newArr147_2: zeroStateAccessor('newArr147_2'),
     pointArr: { get: () => pointArr, set: (value) => { pointArr = value; } },
-    pointArr1RawZero: { get: () => pointArr1RawZero, set: (value) => { pointArr1RawZero = value; } },
-    pointArr1RawZeroData: { get: () => pointArr1RawZeroData, set: (value) => { pointArr1RawZeroData = value; } },
-    pointArr1zero: { get: () => pointArr1zero, set: (value) => { pointArr1zero = value; } },
-    pointArr1zeroData: { get: () => pointArr1zeroData, set: (value) => { pointArr1zeroData = value; } },
+    pointArr1RawZero: zeroStateAccessor('pointArr1RawZero'),
+    pointArr1RawZeroData: zeroStateAccessor('pointArr1RawZeroData'),
+    pointArr1zero: zeroStateAccessor('pointArr1zero'),
+    pointArr1zeroData: zeroStateAccessor('pointArr1zeroData'),
     pointArr2: { get: () => pointArr2, set: (value) => { pointArr2 = value; } },
-    pointArr2RawZero: { get: () => pointArr2RawZero, set: (value) => { pointArr2RawZero = value; } },
-    pointArr2RawZeroData: { get: () => pointArr2RawZeroData, set: (value) => { pointArr2RawZeroData = value; } },
-    pointArr2zero: { get: () => pointArr2zero, set: (value) => { pointArr2zero = value; } },
-    pointArr2zeroData: { get: () => pointArr2zeroData, set: (value) => { pointArr2zeroData = value; } },
-    pointArr147zero: { get: () => pointArr147zero, set: (value) => { pointArr147zero = value; } },
-    pointArr147zero_2: { get: () => pointArr147zero_2, set: (value) => { pointArr147zero_2 = value; } },
-    port1: { get: () => port1 },
-    port2: { get: () => port2 },
+    pointArr2RawZero: zeroStateAccessor('pointArr2RawZero'),
+    pointArr2RawZeroData: zeroStateAccessor('pointArr2RawZeroData'),
+    pointArr2zero: zeroStateAccessor('pointArr2zero'),
+    pointArr2zeroData: zeroStateAccessor('pointArr2zeroData'),
+    pointArr147zero: zeroStateAccessor('pointArr147zero'),
+    pointArr147zero_2: zeroStateAccessor('pointArr147zero_2'),
+    port1: { get: () => getManagedSerialPort(serialRoles.SIT) },
+    port2: { get: () => getManagedSerialPort(serialRoles.BACK) },
   },
 });
 const runtimeStateAccessor = (key) => ({
@@ -1931,52 +1961,33 @@ const legacySerialFrameRuntimeBaseContext = {
   zeroLineMatrix,
 };
 
-// legacy runtime 使用 accessor 读写 server.js 中尚未迁出的旧变量。
-// 每个属性都应视为迁移债务，后续按协议 processor 逐步删除。
-const legacySerialFrameRuntimeAccessors = {
-  baudRate: { get: () => baudRate, set: (value) => { baudRate = value; } },
-  colHZ: { get: () => getCollectionState('colHZ'), set: (value) => setCollectionState('colHZ', value) },
-  dataFalg: { get: () => dataFalg, set: (value) => { dataFalg = value; } },
-  db: { get: () => db, set: (value) => { db = value; } },
-  endDate: { get: () => endDate, set: (value) => { endDate = value; } },
-  file: { get: () => file, set: (value) => { file = value; } },
-  firstBlueData: runtimeStateAccessor('firstBlueData'),
-  firstBlueData1: runtimeStateAccessor('firstBlueData1'),
-  firstBlueData2: runtimeStateAccessor('firstBlueData2'),
-  firstData: { get: () => firstData, set: (value) => { firstData = value; } },
-  flag: { get: () => getCollectionState('flag'), set: (value) => setCollectionState('flag', value) },
-  jqbedMatrixOrigin: { get: () => jqbedMatrixOrigin, set: (value) => { jqbedMatrixOrigin = value; } },
-  lastBlueData: runtimeStateAccessor('lastBlueData'),
-  lastBlueData1: runtimeStateAccessor('lastBlueData1'),
-  lastBlueData2: runtimeStateAccessor('lastBlueData2'),
-  lastData: { get: () => lastData, set: (value) => { lastData = value; } },
-  localFlag: { get: () => localFlag, set: (value) => { localFlag = value; } },
-  newArr: runtimeStateAccessor('newArr'),
-  newArr147: { get: () => newArr147, set: (value) => { newArr147 = value; } },
-  newArr147_2: { get: () => newArr147_2, set: (value) => { newArr147_2 = value; } },
-  newData: { get: () => newData, set: (value) => { newData = value; } },
-  nowDate: { get: () => nowDate, set: (value) => { nowDate = value; } },
-  pointArr: { get: () => pointArr, set: (value) => { pointArr = value; } },
-  pointArr1RawZero: { get: () => pointArr1RawZero, set: (value) => { pointArr1RawZero = value; } },
-  pointArr1RawZeroData: { get: () => pointArr1RawZeroData, set: (value) => { pointArr1RawZeroData = value; } },
-  pointArr1zero: { get: () => pointArr1zero, set: (value) => { pointArr1zero = value; } },
-  pointArr1zeroData: { get: () => pointArr1zeroData, set: (value) => { pointArr1zeroData = value; } },
-  pointArr2: { get: () => pointArr2, set: (value) => { pointArr2 = value; } },
-  pointArr2RawZero: { get: () => pointArr2RawZero, set: (value) => { pointArr2RawZero = value; } },
-  pointArr2RawZeroData: { get: () => pointArr2RawZeroData, set: (value) => { pointArr2RawZeroData = value; } },
-  pointArr2zero: { get: () => pointArr2zero, set: (value) => { pointArr2zero = value; } },
-  pointArr2zeroData: { get: () => pointArr2zeroData, set: (value) => { pointArr2zeroData = value; } },
-  pointArr3: { get: () => pointArr3, set: (value) => { pointArr3 = value; } },
-  pointArr4: { get: () => pointArr4, set: (value) => { pointArr4 = value; } },
-  pointArr4zero: { get: () => pointArr4zero, set: (value) => { pointArr4zero = value; } },
-  pointArr4zeroData: { get: () => pointArr4zeroData, set: (value) => { pointArr4zeroData = value; } },
-  pointArr147zero: { get: () => pointArr147zero, set: (value) => { pointArr147zero = value; } },
-  pointArr147zero_2: { get: () => pointArr147zero_2, set: (value) => { pointArr147zero_2 = value; } },
-  port1: { get: () => port1, set: (value) => { port1 = value; } },
-  port2: { get: () => port2, set: (value) => { port2 = value; } },
-  saveTime: { get: () => getCollectionState('saveTime'), set: (value) => setCollectionState('saveTime', value) },
-  useMatrixOrigin: { get: () => useMatrixOrigin, set: (value) => { useMatrixOrigin = value; } },
-};
+// legacy runtime 使用 accessor 读写尚未完全迁出的旧变量。
+// 已迁移到 collection/runtime/zero/serialManager 的状态由 factory 统一拼装。
+const legacySerialFrameRuntimeAccessors = createLegacySerialFrameRuntimeAccessors({
+  collectionStateAccessor,
+  getManagedSerialPort,
+  mutableAccessors: {
+    baudRate: createMutableAccessor(() => baudRate, (value) => { baudRate = value; }),
+    dataFalg: createMutableAccessor(() => dataFalg, (value) => { dataFalg = value; }),
+    db: createMutableAccessor(() => db, (value) => { db = value; }),
+    endDate: createMutableAccessor(() => endDate, (value) => { endDate = value; }),
+    file: createMutableAccessor(() => file, (value) => { file = value; }),
+    firstData: createMutableAccessor(() => firstData, (value) => { firstData = value; }),
+    jqbedMatrixOrigin: createMutableAccessor(() => jqbedMatrixOrigin, (value) => { jqbedMatrixOrigin = value; }),
+    lastData: createMutableAccessor(() => lastData, (value) => { lastData = value; }),
+    localFlag: createMutableAccessor(() => localFlag, (value) => { localFlag = value; }),
+    newData: createMutableAccessor(() => newData, (value) => { newData = value; }),
+    nowDate: createMutableAccessor(() => nowDate, (value) => { nowDate = value; }),
+    pointArr: createMutableAccessor(() => pointArr, (value) => { pointArr = value; }),
+    pointArr2: createMutableAccessor(() => pointArr2, (value) => { pointArr2 = value; }),
+    pointArr3: createMutableAccessor(() => pointArr3, (value) => { pointArr3 = value; }),
+    pointArr4: createMutableAccessor(() => pointArr4, (value) => { pointArr4 = value; }),
+    useMatrixOrigin: createMutableAccessor(() => useMatrixOrigin, (value) => { useMatrixOrigin = value; }),
+  },
+  runtimeStateAccessor,
+  serialRoles,
+  zeroStateAccessor,
+});
 
 createLegacySerialRuntimeBinding({
   accessors: legacySerialFrameRuntimeAccessors,
@@ -2070,8 +2081,9 @@ const httpApp = createHttpApp({
 
 
 // ===== OneStep 足压报告 HTTP 服务状态 =====
-// HTTP_PORT 是本地 OneStep 报告服务端口，仅监听 127.0.0.1，供前端上传截图和生成 PDF。
-const HTTP_PORT = 19245;
-reportHttpServer = httpApp.listen(HTTP_PORT, '127.0.0.1', () => {
-  logger.info(`[HTTP] OneStep report server listening on http://127.0.0.1:${HTTP_PORT}`);
+// 默认仅监听 127.0.0.1，供前端上传截图、生成 PDF 和调用控制 API。
+reportHttpServer = startLocalHttpServer({
+  app: httpApp,
+  logger,
+  port: DEFAULT_REPORT_HTTP_PORT,
 });

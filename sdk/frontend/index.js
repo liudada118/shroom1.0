@@ -1,4 +1,7 @@
-export { SensorClient } from './src/client/SensorClient.js';
+export {
+  DEFAULT_HTTP_ROUTES,
+  SensorClient,
+} from './src/client/SensorClient.js';
 export {
   createMessage,
   createCommand,
