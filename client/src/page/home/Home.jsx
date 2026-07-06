@@ -408,15 +408,6 @@ const HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES = [20, 60]
 const MINZHEN_NORMAL_DEFAULT_COLOR = 415
 const MINZHEN_RAW_DEFAULT_COLOR = 25
 const MINZHEN_OLD_DEFAULT_COLOR_VALUES = [1205]
-const SMALL_BED_12B_PRESSURE_DEFAULT_COLOR = 25
-const SMALL_BED_12B_PRESSURE_COLOR_MAX = 30
-const SMALL_BED_12B_PRESSURE_DEFAULT_SMOOTH = 2
-const SMALL_BED_12B_OLD_DEFAULT_COLOR_VALUES = [30, 80, 2205, 4000]
-const SMALL_BED_12B_OLD_DEFAULT_SMOOTH_VALUES = [5]
-const SMALL_BED_12B_PRESSURE_DEFAULT_FILTER = 0
-const SMALL_BED_12B_OLD_DEFAULT_FILTER_VALUES = [6]
-const SMALL_BED_12B_PRESSURE_DEFAULT_INIT_FILTER = 0
-const SMALL_BED_12B_OLD_DEFAULT_INIT_FILTER_VALUES = [500]
 
 const initConfig = {
   bed: {
@@ -428,11 +419,10 @@ const initConfig = {
   },
   smallBed12B: {
     valueg1: 2,
-    valuej1: SMALL_BED_12B_PRESSURE_DEFAULT_COLOR,
-    valuel1: SMALL_BED_12B_PRESSURE_DEFAULT_SMOOTH,
-    valuef1: SMALL_BED_12B_PRESSURE_DEFAULT_FILTER,
+    valuej1: 2205,
+    valuel1: 5,
+    valuef1: 6,
     value1: 0.1,
-    valuelInit1: SMALL_BED_12B_PRESSURE_DEFAULT_INIT_FILTER,
   },
   wholeChair: {
     valueg1: 2,
@@ -606,40 +596,10 @@ const getConfig = ({ sensorType, mode }) => {
       mergedConfig.valuej1 = modeDefaultColor
     }
   }
-  if (
-    realType === SMALL_BED_12B_MATRIX &&
-    (
-      Number(mergedConfig.valuej1) > SMALL_BED_12B_PRESSURE_COLOR_MAX ||
-      SMALL_BED_12B_OLD_DEFAULT_COLOR_VALUES.includes(Number(mergedConfig.valuej1))
-    )
-  ) {
-    mergedConfig.valuej1 = SMALL_BED_12B_PRESSURE_DEFAULT_COLOR
-  }
-  if (
-    realType === SMALL_BED_12B_MATRIX &&
-    SMALL_BED_12B_OLD_DEFAULT_SMOOTH_VALUES.includes(Number(mergedConfig.valuel1))
-  ) {
-    mergedConfig.valuel1 = SMALL_BED_12B_PRESSURE_DEFAULT_SMOOTH
-  }
-  if (
-    realType === SMALL_BED_12B_MATRIX &&
-    SMALL_BED_12B_OLD_DEFAULT_FILTER_VALUES.includes(Number(mergedConfig.valuef1))
-  ) {
-    mergedConfig.valuef1 = SMALL_BED_12B_PRESSURE_DEFAULT_FILTER
-  }
-  if (
-    realType === SMALL_BED_12B_MATRIX &&
-    SMALL_BED_12B_OLD_DEFAULT_INIT_FILTER_VALUES.includes(Number(mergedConfig.valuelInit1))
-  ) {
-    mergedConfig.valuelInit1 = SMALL_BED_12B_PRESSURE_DEFAULT_INIT_FILTER
-  }
   return mergedConfig
 }
 
 const getDefaultModeForMatrix = (matrixName, currentMode = "normal") => {
-  if (matrixName === SMALL_BED_12B_MATRIX) {
-    return "numoriginal";
-  }
   if (matrixName === WHOLE_CHAIR_MATRIX) {
     return "normal";
   }
@@ -657,22 +617,6 @@ const getDefaultModeForMatrix = (matrixName, currentMode = "normal") => {
   }
   return currentMode;
 }
-
-const normalizeSmallBed12BRealtimeMatrixMode = (value) => value === '16x16' ? '16x16' : '32x32';
-const normalizeSmallBed12BRealtimeSamplePoint = (value) => value || 'topLeft';
-
-const getSmallBed12BMatrixSizeByMode = (matrixMode) => {
-  const size = normalizeSmallBed12BRealtimeMatrixMode(matrixMode) === '16x16' ? 16 : 32;
-  return {
-    smallBedMatrixWidth: size,
-    smallBedMatrixHeight: size,
-  };
-}
-
-const getSmallBed12BDisplayOptions = (matrixMode, samplePoint) => ({
-  matrixMode: normalizeSmallBed12BRealtimeMatrixMode(matrixMode),
-  samplePoint: normalizeSmallBed12BRealtimeSamplePoint(samplePoint),
-})
 
 const createDefaultFingerPoints = (fallbackValue = 0) => new Array(5).fill(fallbackValue)
 
@@ -838,9 +782,14 @@ class Home extends React.Component {
       storedAllowedTypes = null;
     }
 
-    const smallBed12BRealtimeMatrixMode = normalizeSmallBed12BRealtimeMatrixMode(localStorage.getItem('smallBed12BRealtimeMatrixMode'));
-    const smallBed12BRealtimeSamplePoint = normalizeSmallBed12BRealtimeSamplePoint(localStorage.getItem('smallBed12BRealtimeSamplePoint'));
-    const smallBed12BMatrixSize = getSmallBed12BMatrixSizeByMode(smallBed12BRealtimeMatrixMode);
+    // 上次收到的传感器类型清单（{time,flat,map}）：首屏先用它兜底，避免空列表；WS 连上后会刷新
+    let storedSensorTypeList = null;
+    try {
+      const parsed = JSON.parse(localStorage.getItem('sensorTypeList') || 'null');
+      if (parsed && Array.isArray(parsed.flat)) storedSensorTypeList = parsed;
+    } catch (err) {
+      storedSensorTypeList = null;
+    }
 
     this.state = {
       hand: true,
@@ -861,6 +810,7 @@ class Home extends React.Component {
       portnameSensor: '',
       matrixTitle: localStorage.getItem('matrixTitle') === 'false' ? false : true,
       allowedTypes: storedAllowedTypes,
+      sensorTypeList: storedSensorTypeList,
       local: false,
       dataArr: [],
       index: 0,
@@ -878,8 +828,6 @@ class Home extends React.Component {
       pressNum: false,
       press: false,
       dataTime: "",
-      timeArr: [],
-      historyTimeArr: [],
       pointFlag: false,
       pressChart: false,
       newArr: [],
@@ -913,13 +861,13 @@ class Home extends React.Component {
       licenseModalType: '',
       licenseModalExpireDate: '',
       licenseModalRemainDays: 0,
+      licenseLockedVisible: false,
+      licenseLockReason: '',
       minzhenSensorInfo: {},
       hz: 12,
       realHz: 0,
-      smallBed12BRealtimeMatrixMode,
-      smallBed12BRealtimeSamplePoint,
-      smallBedMatrixWidth: smallBed12BMatrixSize.smallBedMatrixWidth,
-      smallBedMatrixHeight: smallBed12BMatrixSize.smallBedMatrixHeight,
+      smallBedMatrixWidth: 32,
+      smallBedMatrixHeight: 32,
     };
     this.com = React.createRef();
     this.data = React.createRef();
@@ -1052,6 +1000,8 @@ class Home extends React.Component {
         backClose: true,
         sensorClose: true
       })
+      // 主动请求传感器类型清单（请求-应答；主进程连接时也会主动 push 一次）
+      this.wsSendObj({ getSensorTypes: true })
     };
     ws.onmessage = (e) => {
       this.wsData(e);
@@ -1416,37 +1366,8 @@ class Home extends React.Component {
       return;
     }
 
-    let nextWidth = Number(jsonObject.matrixWidth);
-    let nextHeight = Number(jsonObject.matrixHeight);
-    if (!Number.isFinite(nextWidth) || !Number.isFinite(nextHeight)) {
-      if (jsonObject.sitData == null) {
-        return;
-      }
-      if (!this.state.local && jsonObject.time == null && jsonObject.index == null) {
-        return;
-      }
-
-      let frameData = jsonObject.sitData;
-      if (!Array.isArray(frameData)) {
-        try {
-          frameData = JSON.parse(frameData);
-        } catch (error) {
-          return;
-        }
-      }
-
-      const matrixSize = Math.sqrt(frameData.length);
-      if (!Number.isInteger(matrixSize)) {
-        return;
-      }
-      nextWidth = matrixSize;
-      nextHeight = matrixSize;
-    }
-
-    if (nextWidth <= 0 || nextHeight <= 0) {
-      return;
-    }
-
+    const nextWidth = Number(jsonObject.matrixWidth) || 32;
+    const nextHeight = Number(jsonObject.matrixHeight) || 32;
     if (
       nextWidth !== this.state.smallBedMatrixWidth ||
       nextHeight !== this.state.smallBedMatrixHeight
@@ -1462,6 +1383,13 @@ class Home extends React.Component {
     sitPress = 0;
     let jsonObject = JSON.parse(e.data);
     this.syncSmallBed12BMatrixSize(jsonObject);
+
+    // 传感器类型清单（{time,flat,map}）：存到 state 并落地 localStorage 兜底
+    if (jsonObject.sensorTypeList && Array.isArray(jsonObject.sensorTypeList.flat)) {
+      this.setState({ sensorTypeList: jsonObject.sensorTypeList });
+      try { localStorage.setItem('sensorTypeList', JSON.stringify(jsonObject.sensorTypeList)); } catch (err) { /* ignore */ }
+      return;
+    }
 
     if (jsonObject.collectionStorageError != null) {
       const errorInfo = jsonObject.collectionStorageError || {};
@@ -1632,6 +1560,14 @@ class Home extends React.Component {
       // })
     }
 
+    // ====== 授权锁定（时间回拨/篡改）→ 弹"请联系厂商重新获取密钥" ======
+    if (jsonObject.licenseLocked) {
+      this.setState({
+        licenseLockedVisible: true,
+        licenseLockReason: jsonObject.reason || '检测到异常行为',
+      });
+    }
+
     // ====== 密钥过期检查 ======
     // 处理密钥错误提示
     if (jsonObject.licenseError != null) {
@@ -1645,10 +1581,23 @@ class Home extends React.Component {
           }
         });
       } else {
-        Modal.error({
-          title: '密钥错误',
-          content: jsonObject.licenseError,
-        });
+        // 过期/暂停/吊销等：给“重新获取授权”按钮，点一下清缓存 + 立刻联网复查
+        //（后台续期或恢复后无需重启即时生效）。用单例避免每次轮询重复弹窗。
+        if (!this._licenseModal) {
+          this._licenseModal = Modal.confirm({
+            title: '授权提示',
+            content: (jsonObject.licenseError || '授权校验未通过') + '。如已在后台续期或恢复，请点击“重新获取授权”。',
+            okText: '重新获取授权',
+            keyboard: false,                                   // 禁 ESC 关闭
+            maskClosable: false,                               // 点遮罩不关
+            cancelButtonProps: { style: { display: 'none' } }, // 隐藏“关闭”：暂停/吊销/过期时不允许关掉继续用
+            onOk: () => {
+              // 点击后清缓存+立刻复查；仍无效会由状态广播再次弹出，恢复有效才不再弹——不留“关了继续用”的口子
+              this._licenseModal = null;
+              this.wsSendObj({ refreshLicense: true });
+            },
+          });
+        }
       }
     }
 
@@ -1687,7 +1636,6 @@ class Home extends React.Component {
         const allowedTypes = filterVisibleDisplayMatrixTypes(jsonObject.file)
         const nextMatrixName = normalizeDisplayMatrixName(allowedTypes[0] || jsonObject.file[0])
         const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag)
-        const smallBed12BMatrixSize = getSmallBed12BMatrixSizeByMode(this.state.smallBed12BRealtimeMatrixMode)
         localStorage.setItem('matrixTitle', false)
         localStorage.setItem('allowedTypes', JSON.stringify(allowedTypes))
         this.setState({
@@ -1696,8 +1644,6 @@ class Home extends React.Component {
           matrixName: nextMatrixName,
           numMatrixFlag: nextMode,
           minzhenSensorInfo: {},
-          smallBedMatrixWidth: nextMatrixName === SMALL_BED_12B_MATRIX ? smallBed12BMatrixSize.smallBedMatrixWidth : 32,
-          smallBedMatrixHeight: nextMatrixName === SMALL_BED_12B_MATRIX ? smallBed12BMatrixSize.smallBedMatrixHeight : 32,
           ...getConfig({ sensorType: nextMatrixName, mode: nextMode }),
         })
         localStorage.setItem('file', nextMatrixName)
@@ -1705,7 +1651,6 @@ class Home extends React.Component {
         const nextMatrixName = normalizeDisplayMatrixName(jsonObject.file)
         const allowedTypes = HIDDEN_DISPLAY_MATRIX_TYPES.includes(jsonObject.file) ? [] : [jsonObject.file]
         const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag)
-        const smallBed12BMatrixSize = getSmallBed12BMatrixSizeByMode(this.state.smallBed12BRealtimeMatrixMode)
         localStorage.setItem('matrixTitle', false)
         localStorage.setItem('allowedTypes', JSON.stringify(allowedTypes))
         this.setState({
@@ -1714,8 +1659,6 @@ class Home extends React.Component {
           matrixName: nextMatrixName,
           numMatrixFlag: nextMode,
           minzhenSensorInfo: {},
-          smallBedMatrixWidth: nextMatrixName === SMALL_BED_12B_MATRIX ? smallBed12BMatrixSize.smallBedMatrixWidth : 32,
-          smallBedMatrixHeight: nextMatrixName === SMALL_BED_12B_MATRIX ? smallBed12BMatrixSize.smallBedMatrixHeight : 32,
           ...getConfig({ sensorType: nextMatrixName, mode: nextMode }),
         })
         localStorage.setItem('file', nextMatrixName)
@@ -2376,11 +2319,6 @@ class Home extends React.Component {
         time: jsonObject.time,
       });
     }
-    if (jsonObject.historyTimeArr != null) {
-      this.setState({
-        historyTimeArr: Array.isArray(jsonObject.historyTimeArr) ? jsonObject.historyTimeArr : [],
-      });
-    }
     if (jsonObject.timeArr != null) {
       // const arr = []
       const arr = jsonObject.timeArr; //.map((a, index) => a.date);
@@ -2395,7 +2333,7 @@ class Home extends React.Component {
         });
       });
 
-      this.setState({ dataArr: obj, timeArr: arr });
+      this.setState({ dataArr: obj });
       // } else {
       //   let obj = [];
       //   arr.forEach((a, index) => {
@@ -2878,7 +2816,7 @@ class Home extends React.Component {
           label: a.name,
         });
       });
-      this.setState({ dataArr: obj, timeArr: arr });
+      this.setState({ dataArr: obj });
     }
 
     if (jsonObject.length != null) {
@@ -2889,11 +2827,6 @@ class Home extends React.Component {
     if (jsonObject.time != null) {
       this.setState({
         time: jsonObject.time,
-      });
-    }
-    if (jsonObject.historyTimeArr != null) {
-      this.setState({
-        historyTimeArr: Array.isArray(jsonObject.historyTimeArr) ? jsonObject.historyTimeArr : [],
       });
     }
 
@@ -2928,34 +2861,6 @@ class Home extends React.Component {
   };
 
   componentDidUpdate(prevProps, prevState) {
-    if (
-      this.state.matrixName === SMALL_BED_12B_MATRIX &&
-      this.state.numMatrixFlag !== "numoriginal"
-    ) {
-      const nextMode = getDefaultModeForMatrix(this.state.matrixName, this.state.numMatrixFlag);
-      this.setState({
-        numMatrixFlag: nextMode,
-        ...getConfig({ sensorType: this.state.matrixName, mode: nextMode }),
-      });
-      return;
-    }
-
-    if (
-      this.state.matrixName === SMALL_BED_12B_MATRIX &&
-      (
-        prevState.matrixName !== this.state.matrixName ||
-        prevState.smallBed12BRealtimeMatrixMode !== this.state.smallBed12BRealtimeMatrixMode ||
-        prevState.smallBed12BRealtimeSamplePoint !== this.state.smallBed12BRealtimeSamplePoint
-      )
-    ) {
-      this.wsSendObj({
-        smallBed12BDisplayOptions: {
-          matrixMode: this.state.smallBed12BRealtimeMatrixMode,
-          samplePoint: this.state.smallBed12BRealtimeSamplePoint,
-        },
-      });
-    }
-
     if (
       this.state.matrixName === WHOLE_CHAIR_MATRIX &&
       this.state.numMatrixFlag !== "normal"
@@ -3083,20 +2988,13 @@ class Home extends React.Component {
     const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag);
     const configObj = getConfig({ sensorType: nextMatrixName, mode: nextMode })
     const wasLocal = this.state.local;
-    const smallBed12BDisplayOptions = getSmallBed12BDisplayOptions(
-      this.state.smallBed12BRealtimeMatrixMode,
-      this.state.smallBed12BRealtimeSamplePoint,
-    );
-    const smallBed12BMatrixSize = getSmallBed12BMatrixSizeByMode(smallBed12BDisplayOptions.matrixMode);
 
     // 1. 先停止回放，确保后端不再发送旧数据
     this.wsSendObj({ play: false });
     // 2. 关闭所有串口，确保切换前旧串口完全停止
     this.wsSendObj({ sitClose: true, backClose: true, headClose: true, sensorClose: true });
     // 3. 再发送 file 切换，后端切换数据库并重置回放状态
-    this.wsSendObj(nextMatrixName === SMALL_BED_12B_MATRIX
-      ? { file: nextMatrixName, smallBed12BDisplayOptions }
-      : { file: nextMatrixName });
+    this.wsSendObj({ file: nextMatrixName });
 
     // 4. 清空前端数据
     this.data.current?.changeData({ meanPres: 0, maxPres: 0, point: 0, area: 0, totalPres: 0, pressure: 0 });
@@ -3123,8 +3021,8 @@ class Home extends React.Component {
       portnameHead: '',
       portnameSensor: '',
       minzhenSensorInfo: {},
-      smallBedMatrixWidth: nextMatrixName === SMALL_BED_12B_MATRIX ? smallBed12BMatrixSize.smallBedMatrixWidth : 32,
-      smallBedMatrixHeight: nextMatrixName === SMALL_BED_12B_MATRIX ? smallBed12BMatrixSize.smallBedMatrixHeight : 32,
+      smallBedMatrixWidth: 32,
+      smallBedMatrixHeight: 32,
     });
 
     // 6. 如果当前在回放模式，重新请求新 db 的时间列表
@@ -3288,25 +3186,12 @@ class Home extends React.Component {
   }
 
   changeLocal = (value) => {
-    const nextState = { local: value };
-    if (this.state.matrixName === SMALL_BED_12B_MATRIX && value) {
-      Object.assign(nextState, getSmallBed12BMatrixSizeByMode(this.state.smallBed12BRealtimeMatrixMode));
-    }
-    this.setState(nextState);
+    this.setState({ local: value });
     // changeDateArr(matrixName)
 
     if (ws && ws.readyState === 1) {
       if (value) {
-        const localPayload = this.state.matrixName === SMALL_BED_12B_MATRIX
-          ? {
-            local: true,
-            smallBed12BDisplayOptions: getSmallBed12BDisplayOptions(
-              this.state.smallBed12BRealtimeMatrixMode,
-              this.state.smallBed12BRealtimeSamplePoint,
-            ),
-          }
-          : { local: true };
-        ws.send(JSON.stringify(localPayload));
+        ws.send(JSON.stringify({ local: true }));
       } else {
         ws.send(JSON.stringify({ play: false, local: false, history: false }));
       }
@@ -3651,9 +3536,7 @@ class Home extends React.Component {
     const text = t('rotate');
     const text2 = t('boxSelection');
     const textReset = t('reset')
-    const modeCanvasMatrixName = this.state.matrixName === SMALL_BED_12B_MATRIX
-      ? `${this.state.matrixName}:${this.state.numMatrixFlag}:${this.state.smallBedMatrixWidth}x${this.state.smallBedMatrixHeight}`
-      : `${this.state.matrixName}:${this.state.numMatrixFlag}`;
+    const modeCanvasMatrixName = `${this.state.matrixName}:${this.state.numMatrixFlag}`;
     const contentReset = (
       <div>
         <p>{t('resetContent')}</p>
@@ -4072,6 +3955,7 @@ class Home extends React.Component {
             ref={this.title}
             matrixTitle={this.state.matrixTitle}
             allowedTypes={this.state.allowedTypes}
+            sensorTypeList={this.state.sensorTypeList ? this.state.sensorTypeList.flat : null}
             com={this.com}
             track={this.track}
             port={this.state.port}
@@ -4109,8 +3993,6 @@ class Home extends React.Component {
             calibration={this.state.calibration}
             changeCalibration={this.changeCalibration.bind(this)}
             colFingerData={this.colFingerData.bind(this)}
-            smallBed12BRealtimeMatrixMode={this.state.smallBed12BRealtimeMatrixMode}
-            smallBed12BRealtimeSamplePoint={this.state.smallBed12BRealtimeSamplePoint}
           />
 
 
@@ -4186,11 +4068,10 @@ class Home extends React.Component {
                   :
                   this.state.numMatrixFlag == "numoriginal" && ['hand', 'handSinglePoint', MINZHEN_MATRIX, 'smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed12B'].includes(this.state.matrixName) ?
                   <>
-                    <CanvasCom key={modeCanvasMatrixName} matrixName={modeCanvasMatrixName} local={this.state.local}>
+                    <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
                       <Fast1024
                         ref={this.com}
                         matrixName={this.state.matrixName}
-                        size={this.state.matrixName === SMALL_BED_12B_MATRIX && this.state.smallBedMatrixWidth === 16 ? 4 : 2}
                         data={this.data}
                         local={this.state.local}
                         handleChartsBody={this.handleChartsBody.bind(this)}
@@ -5012,8 +4893,6 @@ class Home extends React.Component {
               length={this.state.length - 1}
               max={this.max}
               time={this.state.time}
-              timeArr={this.state.timeArr}
-              historyTimeArr={this.state.historyTimeArr}
               pressMax={this.pressMax}
               wsSendObj={this.wsSendObj}
             />
@@ -5173,6 +5052,29 @@ class Home extends React.Component {
                 <p className="hint">请尽快联系管理员续期，以免影响正常使用。</p>
               </div>
             )}
+          </Modal>
+
+          {/* ====== 授权锁定弹窗（时间回拨/篡改，需厂商解锁码） ====== */}
+          <Modal
+            open={this.state.licenseLockedVisible}
+            centered
+            width={480}
+            closable={false}
+            maskClosable={false}
+            keyboard={false}
+            okText="确定"
+            cancelButtonProps={{ style: { display: 'none' } }}
+            className="license-expired-modal"
+            title={<span>🔒 授权异常</span>}
+            onOk={() => {
+              this.setState({ licenseLockedVisible: false });
+              window.location.hash = '#/?from=system';
+            }}
+          >
+            <div>
+              <p>{this.state.licenseLockReason || '检测到异常行为'}。</p>
+              <p className="hint">串口连接、数据采集等功能已被禁用。请联系厂商重新获取密钥，点击「确定」前往密钥输入页写入新密钥。</p>
+            </div>
           </Modal>
 
       </ConfigProvider>

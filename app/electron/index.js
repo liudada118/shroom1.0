@@ -15,6 +15,18 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
+
+// Windows 控制台默认代码页(936/GBK)会把 UTF-8 中文日志显示成乱码。
+// 在引入后端服务（触发授权等中文日志）之前，把控制台切到 UTF-8(65001)，
+// 让 PowerShell / cmd 正确渲染中文。切换失败不影响启动。
+if (process.platform === "win32") {
+  try {
+    require("child_process").execSync("chcp 65001", { stdio: "ignore" });
+  } catch {
+    // 忽略：仅日志可能继续显示乱码，不影响功能
+  }
+}
+
 const { openServer, shutdownServer, getWsServer, handleCommand } = require("../../backend/runtime");
 const { AppUpdater } = require("../update/autoUpdater");
 const logger = require('../../backend/common/logger');
@@ -664,8 +676,22 @@ function startStaticServer({ hostname, port, win }) {
   closeStaticServer();
 
   staticServer = http.createServer((req, res) => {
-    const urlPath = req.url === "/" ? "index.html" : req.url.split("?")[0].replace(/^\/+/, "");
+    let urlPath = req.url === "/" ? "index.html" : req.url.split("?")[0].replace(/^\/+/, "");
+    // 解码 URL：资源名可能含空格/中文（如开屏图 "ChatGPT Image …(1).png"），
+    // 不解码会按字面 %20/转义串去磁盘找文件导致 404（图片裂开）。
+    try {
+      urlPath = decodeURIComponent(urlPath);
+    } catch (e) {
+      // 非法编码则保持原值
+    }
     const filePath = path.join(buildRoot, urlPath);
+
+    // 防目录穿越：解码后的真实路径必须仍位于 buildRoot 内
+    if (!path.resolve(filePath).startsWith(path.resolve(buildRoot))) {
+      res.writeHead(403, { "Content-Type": "text/plain" });
+      res.end("Forbidden");
+      return;
+    }
 
     fs.readFile(filePath, (err, data) => {
       if (err) {

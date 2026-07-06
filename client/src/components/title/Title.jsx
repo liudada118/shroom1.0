@@ -100,7 +100,7 @@ const tactileGloveTypes_title = ['hand0205', 'handGlove115200', 'handGloveFullPa
 const fullPacketGloveType_title = 'handGloveFullPacket'
 const calibratableGloveTypes_title = tactileGloveTypes_title.filter((type) => type !== fullPacketGloveType_title)
 const isPetCareMatrixTitle = (type) => petCareMatrixTypes_title.includes(type)
-const bedArr_title = ['bigBed', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'bed4096', 'bed4096num', 'matCol', 'matColPos', 'jqbed', tempFullBedType_title, ...petCareMatrixTypes_title]
+const bedArr_title = ['bigBed', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'bed4096', 'bed4096num', 'matColPos', 'jqbed', tempFullBedType_title, ...petCareMatrixTypes_title]
 const matrixNameToType_title = (type) => type === smallBed12BType_title ? type : isPetCareMatrixTitle(type) ? type : bedArr_title.includes(type) ? 'bed' : type
 const getColorSliderMax = (matrixName) => {
   if (matrixName === smallBed12BType_title) return SMALL_BED_12B_PRESSURE_COLOR_MAX
@@ -338,6 +338,18 @@ class Title extends React.Component {
         console.log('setState')
         this.setState({
           items1: ['正常_1', '脊柱侧弯_2', '前倾_3', '驼背_4', '二郎腿_5']
+        })
+      }
+    } else if (this.props.matrixName === 'matCol') {
+      if (localStorage.getItem('sitType1')) {
+        console.log('localSetState')
+        this.setState({
+          items1: ['其他_1', '平躺_2', '侧睡_3', '趴睡_4', '其他_5', ...JSON.parse(localStorage.getItem('sitType1'))]
+        })
+      } else {
+        console.log('setState')
+        this.setState({
+          items1: ['其他_1', '平躺_2', '侧睡_3', '趴睡_4', '其他_5',]
         })
       }
     } else if (this.props.matrixName === 'matColPos') {
@@ -798,8 +810,9 @@ class Title extends React.Component {
 
   getCollectionBaseName = () => {
     const manualName = (this.state.collectLabel || '').trim();
-    const featureName = `${this.state.realname || ''}${this.state.realname1 || ''}`.trim();
-    return manualName || featureName;
+    const featureName1 = (this.state.realname || '').trim();
+    const featureName2 = (this.state.realname1 || '').trim();
+    return [manualName, featureName1, featureName2].filter(Boolean).join('_');
   }
 
   openCollectionModal = () => {
@@ -816,7 +829,7 @@ class Title extends React.Component {
   stopCollection = () => {
     const flag = this.props.colFlag;
     this.props.wsSendObj({ colHZ: this.state.colHZ, flag });
-    if (this.props.matrixName == 'sitCol' || this.props.matrixName == 'matCol') {
+    if (this.props.matrixName == 'sitCol' && loadData) {
       this.props.wsSendObj({
         colHZ: this.state.colHZ,
         download: loadData,
@@ -852,6 +865,8 @@ class Title extends React.Component {
 
     if (nextLoadData) {
       loadData = nextLoadData;
+    } else {
+      loadData = '';
     }
 
     this.props.changeStateData({ colFlag: false });
@@ -875,7 +890,7 @@ class Title extends React.Component {
           <div>
             <div style={{ marginBottom: 4 }}>采集名称</div>
             <Input
-              placeholder='可不填，默认使用特征标签'
+              placeholder='可不填，后面会追加特征标签1和特征标签2'
               value={this.state.collectLabel}
               onChange={(e) => this.setState({ collectLabel: e.target.value })}
             />
@@ -883,11 +898,11 @@ class Title extends React.Component {
           <div>
             <div style={{ marginBottom: 4 }}>特征标签</div>
             <div className='collectionHelpText'>
-              用来给本次采集记录命名分类，方便后续在历史回放和 CSV 导出时识别；不参与矩阵计算，可不选。
+              特征标签1用于追加到采集文件名后面；特征标签2需使用“名称_数字”格式，数字写入 CSV label 列，完整文本写入新增标签文本列。
             </div>
             <div className='collectionFeatureRow'>
               <div className='collectionFieldLabel'>特征标签1</div>
-              <div className='collectionHelpText'>主标签，建议填写采集对象、实验分组或大类，例如测试人、床垫区域、样本组。</div>
+              <div className='collectionHelpText'>文件名标签，会拼到采集名称后面，建议填写采集对象、实验分组或大类。</div>
               <Select
                 popupClassName='collectionSelectDropdown'
                 style={{ width: '100%' }}
@@ -919,7 +934,7 @@ class Title extends React.Component {
             </div>
             <div className='collectionFeatureRow'>
               <div className='collectionFieldLabel'>特征标签2</div>
-              <div className='collectionHelpText'>副标签，建议填写姿态、动作、状态或场景，例如平躺、左侧躺、坐姿异常。</div>
+              <div className='collectionHelpText'>CSV 标签，导出时“平躺_2”会在 label 列写入 2，并在标签文本列写入平躺_2。</div>
               <Select
                 popupClassName='collectionSelectDropdown'
                 style={{ width: '100%' }}
@@ -1176,7 +1191,7 @@ class Title extends React.Component {
     const group1 = ['hand', 'handSinglePoint', 'normal', 'footVideo', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, wholeChairType_title, minzhenType_title, 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', 'bed4096', 'bed4096num']; // 3D point scene / WebGL heatmap
     const group2 = ['robot1', 'robotSY', 'robotLCF']; // Robots
     const group3 = tactileGloveTypes_title; // Tactile gloves
-    const group4 = ['fast256', 'fast1024']; // High-speed
+    const group4 = ['fast256', 'fast1024', 'matCol']; // High-speed / compact matrix raw point renderers
 
     // Determine which parameters to show
     let showGuass = false;    // Smoothness
@@ -1540,6 +1555,7 @@ class Title extends React.Component {
     const allSensorArr = [
       { label: t('sensorHand'), value: 'hand' },
       { label: t('sensorHand0205'), value: 'hand0205' },
+      { label: t('sensorHand0205Double'), value: 'hand0205Double' },
       { label: t('sensorHandGlove115200'), value: 'handGlove115200' },
       { label: t('sensorHandGloveFullPacket'), value: 'handGloveFullPacket' },
       { label: t('sensorSmallSample'), value: 'smallSample' },
@@ -1553,6 +1569,7 @@ class Title extends React.Component {
       { label: t('sensorJqbed'), value: 'jqbed' },
       { label: t('sensorSmallBedNoAlg'), value: smallBedNoAlgType_title },
       { label: t('sensorSmallBed12B'), value: smallBed12BType_title },
+      { label: t('sensorMatCol'), value: 'matCol' },
       { label: '温度全床系统', value: tempFullBedType_title },
       { label: t('sensorPetCare'), value: 'petCare' },
       { label: t('sensorPetCareMini'), value: 'petCareMini' },
@@ -1795,7 +1812,7 @@ class Title extends React.Component {
 
 
 
-        {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'handSinglePoint', 'normal', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody'].includes(this.props.matrixName) ?
+        {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'handSinglePoint', 'normal', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'matCol', 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody'].includes(this.props.matrixName) ?
           <Select
             defaultValue={this.props.numMatrixFlag}
             style={{ width: 90 }}
@@ -1850,7 +1867,7 @@ class Title extends React.Component {
             ] : this.props.matrixName === tempFullBedType_title ? [
               { value: 'normal', label: t('modal3D') },
               { value: 'numoriginal', label: t('rawData') },
-            ] : ['hand', 'handSinglePoint', 'normal', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'jqbed', 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample'].includes(this.props.matrixName) ? [
+            ] : ['hand', 'handSinglePoint', 'normal', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'matCol', 'jqbed', 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample'].includes(this.props.matrixName) ? [
               { value: 'normal', label: t('modal3D') },
               { value: 'numoriginal', label: t('rawData') },
             ] : this.props.matrixName == 'bed4096' || this.props.matrixName == 'bed4096num' ? [

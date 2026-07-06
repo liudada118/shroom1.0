@@ -120,15 +120,15 @@ def build():
         '--exclude-module', 'tensorflow',
     ]
 
-    # 添加 onbed_filter 动态库为二进制文件
+    # 添加动态库为二进制文件 (--add-binary "source;destination", Windows用;, Unix用:)
+    # 注意: petCare 库需独立于 onbed_filter 打包, 否则缺 onbed_filter 时宠物看护也会被漏掉
+    sep = ';' if platform.system() == 'Windows' else ':'
     if pyd_file:
-        # --add-binary "source;destination" (Windows用;, Unix用:)
-        sep = ';' if platform.system() == 'Windows' else ':'
         args.extend(['--add-binary', f'{pyd_file}{sep}.'])
-        if pet_care_binary:
-            args.extend(['--add-binary', f'{pet_care_binary}{sep}petCare'])
-        if pet_care_mini_binary:
-            args.extend(['--add-binary', f'{pet_care_mini_binary}{sep}petCare'])
+    if pet_care_binary:
+        args.extend(['--add-binary', f'{pet_care_binary}{sep}petCare'])
+    if pet_care_mini_binary:
+        args.extend(['--add-binary', f'{pet_care_mini_binary}{sep}petCare'])
 
     args.append(entry)
 

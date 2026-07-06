@@ -122,6 +122,19 @@ function getSensorMatrix(sensorType) {
   return SENSOR_MATRIX_MAP[sensorType] || { width: 32, height: 32, total: 1024 };
 }
 
+// ─── 密钥管理系统（验证方）配置 ─────────────────────────────────────────────────
+// 在线版校时/校状态用。变更服务器地址只改这里，替代旧的 sensor.bodyta.com 调用。
+
+const keyServer = {
+  // 线上正式地址（HTTPS 域名）。本地联调改回 http://localhost:3000。
+  BASE_URL: 'https://shroom.jq-industries.com',
+  LICENSE_CHECK_PATH: '/licenseCheck',     // POST { key } → { time, valid, status, reason, expireTimestamp, remainingDays, sensorTypes, isAllTypes }
+  SERVER_TIME_PATH: '/serverTime',         // GET → { time: <毫秒> }（备用）
+  CACHE_REFRESH_MS: 60 * 1000,             // 在线缓存刷新间隔 1min：超过才真正联网拉 /licenseCheck（配合 30s 复检，吊销/暂停/续期约 1min 内生效）；断网仍用缓存撑到真实到期
+  RECHECK_INTERVAL_MS: 30 * 1000,          // 运行中复检间隔 30s：尽快检测时间回拨弹锁定（本地校验无网络开销）；到点(2h)才联网刷新
+  TIMEOUT_MS: 5000,                        // /licenseCheck 请求超时
+};
+
 // ─── 压力阈值配置 ─────────────────────────────────────────────────────────────
 
 const pressure = {
@@ -137,6 +150,7 @@ module.exports = {
   DATA_DIR,
   ws,
   serial,
+  keyServer,
   CAR_TYPES,
   THREE_PORT_TYPES,
   isCar,

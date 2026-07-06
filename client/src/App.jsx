@@ -27,6 +27,7 @@ import LineAdjust from "./components/demo/LineAdjust";
 import Can from "./components/demo/can";
 import Num3D from "./components/num/NumWs";
 import License from "./page/license/License";
+import LicensePortal from "./page/licensePortal/LicensePortal";
 i18next.init({
   resources: {
     en: {
@@ -53,10 +54,6 @@ i18next.init({
         meanPress: 'Average Pressure',
         maxPress: 'Maximum pressure',
         pressTotal: 'The sum of pressures',
-        pressureIntensityArea: 'Pressure Intensity Area',
-        pressureIntensityData: 'Pressure Intensity Data',
-        meanPressureIntensity: 'Average Pressure Intensity',
-        maxPressureIntensity: 'Maximum Pressure Intensity',
         points: "Data points",
         area: "Area",
         allPress: "Overall pressure",
@@ -174,6 +171,7 @@ i18next.init({
         sensorWholeChair: 'Whole Chair',
         sensorMinzhen: 'Wheelchair',
         enterBaudRate: 'Enter baud rate',
+        sensorMatCol : 'Smart Bed',
       },
     },
     zh: {
@@ -205,10 +203,6 @@ i18next.init({
         meanPress: '平均压力',
         maxPress: '最大压力',
         pressTotal: '压力总和',
-        pressureIntensityArea: '压强面积',
-        pressureIntensityData: '压强数据',
-        meanPressureIntensity: '平均压强',
-        maxPressureIntensity: '最大压强',
         points: '点数',
         area: '面积',
         allPress: '压力总和',
@@ -323,6 +317,7 @@ i18next.init({
         sensorHumanBody: '人体全身',
         sensorWholeChair: '整椅展示',
         enterBaudRate: '请输入波特率',
+        sensorMatCol : '小床褥监测',
       },
     },
   },
@@ -379,9 +374,12 @@ function App() {
           // </I18nProvider> 
         } />
         <Route exact path="/" element={
-          // <I18nProvider lng="en">
+          // 开屏门户页：展示产品方案 + 输入/缓存密钥（不自动进入，需点击「进入系统」）
+          <LicensePortal />
+        } />
+        <Route exact path="/key" element={
+          // 旧密钥输入页（保留兜底：Home/Title 跳转 /?from=system 仍可用此页更新密钥）
           <Date i18n={i18next} />
-          // </I18nProvider> 
         } />
         <Route exact path="/system" element={
           // <I18nProvider lng="en">

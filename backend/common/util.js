@@ -9,11 +9,17 @@ module.exports = {
   dedupli(obj1, obj2) {
     const valueArr1 = [],
       valueArr2 = [];
-    obj1.forEach((a, index) => {
-      valueArr1.push(a.date);
+    const rows1 = Array.isArray(obj1) ? obj1 : [];
+    const rows2 = Array.isArray(obj2) ? obj2 : [];
+    rows1.forEach((a, index) => {
+      if (a?.date != null && String(a.date).trim() !== '') {
+        valueArr1.push(String(a.date));
+      }
     });
-    obj2.forEach((a, index) => {
-      valueArr2.push(a.date);
+    rows2.forEach((a, index) => {
+      if (a?.date != null && String(a.date).trim() !== '') {
+        valueArr2.push(String(a.date));
+      }
     });
     // Object.values(obj1)
     // const valueArr2 = Object.values(obj2)
@@ -42,7 +48,7 @@ module.exports = {
     });
 
     // let resStamp = resArr.map((a, index) => Date.parse(a))
-    objArr = objArr.filter((a) => !a.date.includes(":"));
+    objArr = objArr.filter((a) => a.date && !String(a.date).includes(":"));
     console.log(objArr, "objArr");
     let resStamp = objArr.sort((a, b) => b.date - a.date);
 

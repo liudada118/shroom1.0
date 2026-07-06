@@ -7,7 +7,7 @@
 本项目 CSV 下载目前主要覆盖三类场景：
 
 1. 历史/回放数据下载：用户在历史数据中选中一条采集记录后，点击标题栏的“下载”按钮导出 CSV。
-2. 采集模式自动下载：`sitCol`、`matCol` 在停止采集时，会根据本次采集标签自动触发下载。
+2. 采集模式自动下载：`sitCol` 在停止采集时，会根据本次采集标签自动触发下载；`matCol` 需要从历史记录手动导出。
 3. `localCar` 本地数据下载：前端直接使用 `CSVLink` 将内存中的 `csvData` 导出为 CSV。
 
 其中前两类由后端读取数据库并写 CSV；`localCar` 不走后端数据库导出流程。历史/回放数据下载现在会先打开配置弹窗，支持选择保存目录、选择导出格式、查看导出进度和打开生成文件。
@@ -32,11 +32,13 @@
 
 这里的 `dataTime` 是当前选中的历史记录标识。后端收到后会按该标识查询 `matrix` 表。
 
-`sitCol`、`matCol` 在停止采集时，如果本次采集已经生成了 `loadData`，前端会额外发送：
+`sitCol` 在停止采集时，如果本次采集已经生成了 `loadData`，前端会额外发送：
 
 ```js
 { colHZ: this.state.colHZ, download: loadData }
 ```
+
+`matCol` 停止采集不再自动发送 `download`，需要导出时走历史记录 CSV 下载入口。
 
 `localCar` 的下载按钮使用 `react-csv` 的 `CSVLink`，文件名为当前时间戳，不进入后端 `download` 分支。
 
@@ -145,6 +147,7 @@ CSV 导出会尽量与前端展示方向保持一致。
 2. `wholeChair` 会按 sit/back/head 分别调用 `normalizeWholeChairFrame()`，保证三路方向与展示一致。
 3. `tempFullBed` 会通过专用回放 payload 处理压力与温度数据。
 4. 手套类数据会拆分压力矩阵和四元数，避免把姿态数据混入压力矩阵。
+5. `matCol` CSV 会把数据库中 `matColLine()` 后的 16 行 x 10 列数据转置为 10 行 x 16 列后写入 `realData`，与 3D 点图和 2D 原始数据展示方向保持一致；导出表头沿用手部检测的核心字段 `seconds/max/time/area/press/data`，并在末尾追加采集标签列。
 
 因此 CSV 中的 `data` 字段不是单纯数据库原始字符串，而是经过当前系统线序/方向规则处理后的导出数据。
 
@@ -189,7 +192,7 @@ CSV 导出会尽量与前端展示方向保持一致。
 
 | 字段 | 写入来源 | 计算逻辑 |
 | :--- | :--- | :--- |
-| `data` | `realData` | 写入当前系统导出用矩阵。通用分支会先从数据库解析数据，再按系统处理手套拆包、`smallBed/jqbed/12B` 转置、`wholeChair` 三路线序、`tempFullBed` 压力阈值等，最后 `JSON.stringify()` 写入。 |
+| `data` | `realData` | 写入当前系统导出用矩阵。通用分支会先从数据库解析数据，再按系统处理手套拆包、`smallBed/jqbed/12B` 转置、`wholeChair` 三路线序、`tempFullBed` 压力阈值、`matCol` 10x16 方向转换等，最后 `JSON.stringify()` 写入。 |
 | `realInitData` | `realInitData` | `smallBed/smallBed1` 专用，直接写入数据库原始 `rows[i].data`，用于保留未处理前的数据。 |
 | `algorData` | `dataToInterpGauss` | `smallBed/smallBed1` 专用。先对 32x32 数据调用 `interpSmall(sitData, 32, 32, 1, 2)` 做插值，再调用 `gaussBlur_2(..., 32, 64, 1)` 做高斯处理。 |
 | `pressLine` | `pressLine` | `bigBed` 专用。按 64 列统计纵向压力，并用 `smoothValue = smoothValue + (num / 32 - smoothValue) / 3` 做平滑，生成横向压力曲线。 |
@@ -198,7 +201,8 @@ CSV 导出会尽量与前端展示方向保持一致。
 
 | 字段 | 写入来源 | 计算逻辑 |
 | :--- | :--- | :--- |
-| `label` | `label` | `sitCol/matCol` 专用，从 `getMessage.download.split('_')[1]` 取采集标签。 |
+| `label` | `label` | `sitCol/matCol` 专用，从采集记录名去掉末尾时间片后解析最后一个 `_数字`；如果没有 `_数字`，写入空标签。 |
+| `labelText` | `labelText` / `标签文本` | `sitCol/matCol` 专用，新增列，记录特征标签2 的完整文本，例如 `平躺_2`。 |
 
 ### 手套和姿态字段
 
@@ -273,10 +277,16 @@ back/head 导出分支会计算一些内部统计字段：
 
 | 字段 | 来源字段 | 逻辑 |
 | :--- | :--- | :--- |
-| `data` | `realData` | 直接写入数据库 `rows[i].data`。 |
-| `label` | `label` | 从下载记录名中按 `_` 拆分取第二段作为采集标签。 |
+| `seconds` | `index` | `matCol` 与手部检测同款核心表头一致，使用当前帧时间戳减首帧时间戳计算秒数；`sitCol` 仍保留旧版标签采集表头。 |
+| `max` | `max` | `matCol` 按转换后的 10x16 矩阵计算最大值。 |
+| `time` | `time` | `matCol` 写入当前帧可读时间戳。 |
+| `area` | `pressureArea` | `matCol` 统计转换后矩阵中大于 0 的点数。 |
+| `press` | `pressure` | `matCol` 写入转换后矩阵总和。 |
+| `data` | `realData` | `sitCol` 直接写入数据库 `rows[i].data`；`matCol` 会先把数据库中 16 行 x 10 列数据转置为 10 行 x 16 列，保证 CSV 与 3D/2D 展示方向一致。 |
+| `label` | `label` | 从采集记录名去掉末尾时间片后解析最后一个 `_数字`；如果没有 `_数字`，写入空标签。 |
+| `labelText` | `labelText` / `标签文本` | 新增列，记录特征标签2 的完整文本，例如 `平躺_2`。 |
 
-这两个系统主要用于采集标签数据，字段较少。
+`matCol` 现在使用手部检测同款核心表头，并把 `label` / `labelText` 追加在末尾；`sitCol` 仍保留旧版 `data/label/labelText` 标签采集表头。
 
 ### 通用单路系统
 
