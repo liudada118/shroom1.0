@@ -129,3 +129,19 @@ flowchart LR
 | 你想看什么 | 入口文件 |
 | :--- | :--- |
 | 系统时间同步 | `backend/server/systemTimeSyncService.js` |
+
+## WebSocket 相关阅读入口
+
+| 你想看什么 | 入口文件 |
+| :--- | :--- |
+| WebSocket 连接和旧消息入口 | `backend/server/webSocketHandlerFactory.js` |
+| WebSocket 上下文装配 | `backend/server/webSocketContextFactory.js` |
+| WebSocket 旧状态 accessor | `backend/runtime/webSocketContextAccessorFactory.js` |
+
+## Legacy Runtime 相关阅读入口
+
+| 你想看什么 | 入口文件 |
+| :--- | :--- |
+| Legacy runtime 上下文装配 | `backend/sensors/runtime/legacySerialContextFactory.js` |
+| Legacy runtime 串口绑定 | `backend/sensors/runtime/legacySerialRuntimeBinding.js` |
+| Legacy runtime 状态 accessor 底层工厂 | `backend/runtime/legacyRuntimeAccessorFactory.js` |

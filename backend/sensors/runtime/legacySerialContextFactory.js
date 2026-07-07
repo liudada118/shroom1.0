@@ -6,7 +6,7 @@ const {
 /**
  * 把旧串口 runtime 需要的可变变量描述转换成 accessor。
  *
- * server.js 只传入 getter/setter 描述，本模块统一包成 legacy runtime
+ * server.js 只传入 getter/setter 描述，本模块统一包装成 legacy runtime
  * 可以通过 Object.defineProperties 挂载的 accessor。
  *
  * @param {Record<string, { get: Function, set: Function }>} mutableBindings 可变运行态变量绑定。

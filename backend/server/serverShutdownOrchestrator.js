@@ -1,12 +1,17 @@
-﻿const {
+const {
   closeHttpServer,
   closeWithTimeout,
   closeWsServer,
 } = require('../services/lifecycle/serverLifecycleService');
 
 /**
- * 娓呯悊鎵樼瀹氭椂鍣ㄥ苟璁板綍鏃ュ織銆? *
- * @param {object} logger 鏃ュ織瀵硅薄銆? * @param {string} name 鏃ュ織涓睍绀虹殑瀹氭椂鍣ㄥ悕绉般€? * @param {NodeJS.Timeout | null} timerRef 瀹氭椂鍣ㄥ彞鏌勩€? * @returns {null} 娓呯悊鍚庣粺涓€杩斿洖 null锛屼究浜庤皟鐢ㄦ柟閲嶇疆寮曠敤銆? */
+ * 清理托管定时器并记录日志。
+ *
+ * @param {object} logger 日志对象。
+ * @param {string} name 日志中展示的定时器名称。
+ * @param {NodeJS.Timeout | null} timerRef 定时器句柄。
+ * @returns {null} 清理后统一返回 null，便于调用方重置引用。
+ */
 function clearManagedInterval(logger, name, timerRef) {
   if (!timerRef) return null;
   clearInterval(timerRef);
@@ -15,8 +20,13 @@ function clearManagedInterval(logger, name, timerRef) {
 }
 
 /**
- * 鍏抽棴 SQLite 鏁版嵁搴撹繛鎺ワ紝骞舵妸鍥炶皟寮?close 鍖呰鎴?Promise銆? *
- * @param {object} logger 鏃ュ織瀵硅薄銆? * @param {object | null} dbRef 鏁版嵁搴撹繛鎺ャ€? * @param {string} name 鏃ュ織涓睍绀虹殑鏁版嵁搴撳悕绉般€? * @returns {Promise<void>} 鍏抽棴瀹屾垚 Promise銆? */
+ * 关闭 SQLite 数据库连接，并把回调式 close 包装成 Promise。
+ *
+ * @param {object} logger 日志对象。
+ * @param {object | null} dbRef 数据库连接。
+ * @param {string} name 日志中展示的数据库名称。
+ * @returns {Promise<void>} 关闭完成 Promise。
+ */
 function closeDatabase(logger, dbRef, name) {
   if (!dbRef || typeof dbRef.close !== 'function') return Promise.resolve();
 
@@ -38,10 +48,20 @@ function closeDatabase(logger, dbRef, name) {
 }
 
 /**
- * 鍒涘缓鏈嶅姟鍏抽棴缂栨帓鍣ㄣ€? *
- * server.js 鍙彁渚涘綋鍓嶈祫婧愬揩鐓у拰鐘舵€佸啓鍥炲叆鍙ｏ紱鍏抽棴椤哄簭銆佽秴鏃朵繚鎶ゅ拰閲嶅鍏抽棴淇濇姢
- * 缁熶竴鏀舵暃鍦ㄨ繖閲屻€? *
- * @param {object} options 鍒涘缓鍙傛暟銆? * @param {Function} options.getRuntime 鑾峰彇褰撳墠鍏抽棴鐩稿叧璧勬簮鍜岀姸鎬併€? * @param {object} options.logger 鏃ュ織瀵硅薄銆? * @param {object} options.serialManager 涓插彛绠＄悊鍣ㄣ€? * @param {Function} options.setRuntime 鍐欏洖鍏抽棴鍚庣殑杩愯鎬併€? * @param {Function} options.stopPlaybackTimer 鍋滄鍘嗗彶鍥炴斁瀹氭椂鍣ㄣ€? * @param {Function} options.stopWorker 鍋滄 Python worker銆? * @returns {{ shutdownServer: Function }} 鍏抽棴缂栨帓鑳藉姏銆? */
+ * 创建服务关闭编排器。
+ *
+ * server.js 只提供当前资源快照和状态写回入口；关闭顺序、超时保护和重复关闭保护
+ * 统一收敛在这里。
+ *
+ * @param {object} options 创建参数。
+ * @param {Function} options.getRuntime 获取当前关闭相关资源和状态。
+ * @param {object} options.logger 日志对象。
+ * @param {object} options.serialManager 串口管理器。
+ * @param {Function} options.setRuntime 写回关闭后的运行态。
+ * @param {Function} options.stopPlaybackTimer 停止历史回放定时器。
+ * @param {Function} options.stopWorker 停止 Python worker。
+ * @returns {{ shutdownServer: Function }} 关闭编排能力。
+ */
 function createServerShutdownOrchestrator({
   getRuntime,
   logger,
@@ -111,4 +131,3 @@ module.exports = {
   closeDatabase,
   createServerShutdownOrchestrator,
 };
-

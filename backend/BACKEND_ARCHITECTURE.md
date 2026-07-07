@@ -334,3 +334,27 @@ flowchart LR
 | :--- | :--- |
 | `server/systemTimeSyncService.js` | 负责请求远端系统时间、解析响应、处理异常，并通过回调写回运行时 `nowDate`。 |
 | `server/server.js` | 只在启动阶段调用 `syncSystemTime` 并注入 `http/logger/setNowDate`，不再内联 HTTP 请求细节。 |
+
+## 2026-07-07 WebSocket Context 装配下沉
+
+| 文件 | 职责变化 |
+| :--- | :--- |
+| `server/server.js` | 只声明 WebSocket handler 需要的稳定依赖和旧状态 getter/setter，不再直接挂载 accessor descriptor。 |
+| `server/webSocketContextFactory.js` | 统一创建 WebSocket handler context，并调用 runtime 层的 `createWebSocketContextAccessors` 完成旧状态访问器挂载。 |
+| `runtime/webSocketContextAccessorFactory.js` | 继续作为旧运行态 accessor descriptor 的底层工厂。 |
+
+## 2026-07-07 Shutdown 编排接入
+
+| 文件 | 职责变化 |
+| :--- | :--- |
+| `server/server.js` | 只暴露 `shutdownServer()` 兼容入口，并通过懒加载方式获取关闭编排器。 |
+| `server/serverShutdownOrchestrator.js` | 统一关闭回放定时器、串口重连、业务定时器、Python worker、WebSocket/HTTP 服务和 SQLite 连接。 |
+| `services/lifecycle/serverLifecycleService.js` | 继续提供底层 close/timeout helper，不再被主入口直接调用。 |
+
+## 2026-07-07 Legacy Runtime Context 装配下沉
+
+| 文件 | 职责变化 |
+| :--- | :--- |
+| `server/server.js` | 只提供 legacy runtime 的固定能力和旧变量 getter/setter 声明，不再直接创建底层 accessor。 |
+| `sensors/runtime/legacySerialContextFactory.js` | 统一创建 legacy runtime context 和 accessors，并包装旧变量 mutable bindings。 |
+| `runtime/legacyRuntimeAccessorFactory.js` | 继续作为底层 accessor 工厂，被 legacy context factory 间接使用。 |

@@ -21,17 +21,14 @@ const { startWorker, callPy, stopWorker } = require('../python/pyWorker');
 const { normalizeChannel } = require('../services/websocket/websocketChannelService');
 const { createWebSocketServers } = require('./webSocketServerFactory');
 const { createWebSocketHandlerAttacher } = require('./webSocketHandlerFactory');
+const { createWebSocketHandlerContext } = require('./webSocketContextFactory');
 const {
   WILDCARD_CHANNEL,
   createWebSocketSubscriptionManager,
 } = require('../services/websocket/websocketSubscriptionService');
 const { attachHeartbeat } = require('../services/websocket/websocketConnectionService');
 const { parseJsonMessage } = require('../services/websocket/websocketMessageService');
-const {
-  closeHttpServer,
-  closeWithTimeout,
-  closeWsServer,
-} = require('../services/lifecycle/serverLifecycleService');
+const { createServerShutdownOrchestrator } = require('./serverShutdownOrchestrator');
 const { createRealtimeTelemetryGateway } = require('../services/realtime/realtimeTelemetryGateway');
 const { createPetCareRuntimeService } = require('../services/petcare/petCareRuntimeService');
 const { createWebSocketCommandRouter } = require('../ws/webSocketCommandRouter');
@@ -49,15 +46,11 @@ const { createSmallBed12BRuntime } = require('../sensors/runtime/smallBed12BRunt
 const { createSit1024FrameProcessor } = require('../sensors/runtime/sit1024FrameProcessor');
 const { createBackHead1024FrameProcessor } = require('../sensors/runtime/backHead1024FrameProcessor');
 const { createHandPacketRuntime } = require('../sensors/runtime/handPacketRuntime');
+const { createLegacySerialRuntimeContext } = require('../sensors/runtime/legacySerialContextFactory');
 const { createLegacySerialRuntimeBinding } = require('../sensors/runtime/legacySerialRuntimeBinding');
 const { createRuntimeStateStore } = require('../runtime/runtimeStateStore');
 const { createZeroStateStore } = require('../runtime/zeroStateStore');
 const { createZeroCommandService } = require('../runtime/zeroCommandService');
-const {
-  createLegacySerialFrameRuntimeAccessors,
-  createMutableAccessor,
-} = require('../runtime/legacyRuntimeAccessorFactory');
-const { createWebSocketContextAccessors } = require('../runtime/webSocketContextAccessorFactory');
 const {
   DEFAULT_COLLECTION_FREQUENCY_HZ,
   createCollectionDiskSpaceGuard,
@@ -889,99 +882,65 @@ let serverOpened = false;
 let serverShutdownRequested = false;
 let serverShutdownPromise = null;
 
-/**
- * 清理托管定时器并记录日志。
- *
- * @param {string} name 日志中展示的定时器名称。
- * @param {NodeJS.Timeout | null} timerRef 定时器句柄。
- * @returns {null} 清理后统一返回 null，便于调用方重置引用。
- */
-function clearManagedInterval(name, timerRef) {
-  if (!timerRef) return null;
-  clearInterval(timerRef);
-  logger.info(`[Server] Cleared ${name}`);
-  return null;
-}
+let shutdownOrchestrator = null;
 
-/**
- * 关闭 SQLite 数据库连接，并把回调式 close 包装成 Promise。
- *
- * @param {object | null} dbRef 数据库连接。
- * @param {string} name 日志中展示的数据库名称。
- * @returns {Promise<void>} 关闭完成 Promise。
- */
-function closeDatabase(dbRef, name) {
-  if (!dbRef || typeof dbRef.close !== 'function') return Promise.resolve();
+function getShutdownOrchestrator() {
+  if (shutdownOrchestrator) return shutdownOrchestrator;
 
-  return new Promise((resolve) => {
-    try {
-      dbRef.close((err) => {
-        if (err) {
-          logger.warn(`[Server] ${name} close failed:`, err.message || err);
-        } else {
-          logger.info(`[Server] ${name} closed`);
-        }
-        resolve();
-      });
-    } catch (err) {
-      logger.warn(`[Server] ${name} close threw:`, err.message);
-      resolve();
-    }
+  shutdownOrchestrator = createServerShutdownOrchestrator({
+    logger,
+    serialManager,
+    stopPlaybackTimer,
+    stopWorker,
+    getRuntime: () => ({
+      backClose,
+      com,
+      com1,
+      comSensor,
+      comhead,
+      db,
+      db1,
+      db2,
+      headClose,
+      jqbedTimer,
+      localFlag,
+      petCareMiniTimer,
+      petCareTimer,
+      reportHttpServer,
+      sensorClose,
+      server,
+      server1,
+      server2,
+      serverOpened,
+      serverShutdownPromise,
+      serverShutdownRequested,
+      sitClose,
+    }),
+    setRuntime: (next = {}) => {
+      if (Object.prototype.hasOwnProperty.call(next, 'backClose')) backClose = next.backClose;
+      if (Object.prototype.hasOwnProperty.call(next, 'com')) com = next.com;
+      if (Object.prototype.hasOwnProperty.call(next, 'com1')) com1 = next.com1;
+      if (Object.prototype.hasOwnProperty.call(next, 'comSensor')) comSensor = next.comSensor;
+      if (Object.prototype.hasOwnProperty.call(next, 'comhead')) comhead = next.comhead;
+      if (Object.prototype.hasOwnProperty.call(next, 'headClose')) headClose = next.headClose;
+      if (Object.prototype.hasOwnProperty.call(next, 'jqbedTimer')) jqbedTimer = next.jqbedTimer;
+      if (Object.prototype.hasOwnProperty.call(next, 'localFlag')) localFlag = next.localFlag;
+      if (Object.prototype.hasOwnProperty.call(next, 'petCareMiniTimer')) petCareMiniTimer = next.petCareMiniTimer;
+      if (Object.prototype.hasOwnProperty.call(next, 'petCareTimer')) petCareTimer = next.petCareTimer;
+      if (Object.prototype.hasOwnProperty.call(next, 'reportHttpServer')) reportHttpServer = next.reportHttpServer;
+      if (Object.prototype.hasOwnProperty.call(next, 'sensorClose')) sensorClose = next.sensorClose;
+      if (Object.prototype.hasOwnProperty.call(next, 'serverOpened')) serverOpened = next.serverOpened;
+      if (Object.prototype.hasOwnProperty.call(next, 'serverShutdownPromise')) serverShutdownPromise = next.serverShutdownPromise;
+      if (Object.prototype.hasOwnProperty.call(next, 'serverShutdownRequested')) serverShutdownRequested = next.serverShutdownRequested;
+      if (Object.prototype.hasOwnProperty.call(next, 'sitClose')) sitClose = next.sitClose;
+    },
   });
+
+  return shutdownOrchestrator;
 }
 
-/**
- * 关闭定时器、串口、WebSocket/HTTP 服务、数据库和 Python worker。
- *
- * @returns {Promise<void>} 共享的关闭 Promise，保证重复调用时不会重复释放资源。
- */
 function shutdownServer() {
-  if (serverShutdownRequested) {
-    return serverShutdownPromise || Promise.resolve();
-  }
-  serverShutdownRequested = true;
-
-  logger.info("[Server] Shutdown requested, closing sockets/timers/workers...");
-
-  stopPlaybackTimer();
-  serialManager.stopReconnectLoop();
-  jqbedTimer = clearManagedInterval("jqbed timer", jqbedTimer);
-  petCareTimer = clearManagedInterval("petCare timer", petCareTimer);
-  petCareMiniTimer = clearManagedInterval("petCareMini timer", petCareMiniTimer);
-
-  localFlag = false;
-  sitClose = true;
-  backClose = true;
-  headClose = true;
-  sensorClose = true;
-  com = undefined;
-  com1 = undefined;
-  comhead = undefined;
-  comSensor = undefined;
-
-  try {
-    stopWorker();
-  } catch (err) {
-    logger.warn("[Server] stopWorker failed:", err.message);
-  }
-
-  const reportServer = reportHttpServer;
-  reportHttpServer = null;
-
-  serverShutdownPromise = Promise.all([
-    closeWithTimeout("serial ports", serialManager.closeAll("shutdown")),
-    closeWithTimeout("server", closeWsServer(server, "server")),
-    closeWithTimeout("server1", closeWsServer(server1, "server1")),
-    closeWithTimeout("server2", closeWsServer(server2, "server2")),
-    closeWithTimeout("report HTTP server", closeHttpServer(reportServer, "report HTTP server")),
-    closeWithTimeout("db", closeDatabase(db, "db")),
-    closeWithTimeout("db1", closeDatabase(db1, "db1")),
-    closeWithTimeout("db2", closeDatabase(db2, "db2")),
-  ]).then(() => {
-    serverOpened = false;
-  });
-
-  return serverShutdownPromise;
+  return getShutdownOrchestrator().shutdownServer();
 }
 
 
@@ -1593,68 +1552,67 @@ const zeroCommandService = createZeroCommandService({
 });
 
 // WebSocket 连接处理已迁入 factory；这里集中声明它仍需访问的旧运行时上下文。
-const webSocketHandlerContext = {
-  SMALL_BED_12B_TYPE,
-  TEMP_FULL_BED_TYPE,
-  WILDCARD_CHANNEL,
-  attachHeartbeat,
-  buildTempFullBedPlaybackPayload,
-  controlCommandService,
-  formatMatrixTotalForFile,
-  fs,
-  getDefaultFileFromLicense,
-  getHistorySeries,
-  getSelectFlagFromLicense,
-  getSensorBaudRate,
-  getStoredSitData,
-  isSmallBedMatrixType,
-  logger,
-  module2,
-  normalizeHistoryPressureData,
-  parseJsonMessage,
-  parseStoredFrameData,
-  path,
-  petCareRuntimeService,
-  publishPlaybackFrame,
-  publishSystemEvent,
-  server,
-  server1,
-  server2,
-  totalToN,
-  writableNameTxt,
-  wsSubscriptions,
-  zeroCommandService,
-};
-
-Object.defineProperties(webSocketHandlerContext, createWebSocketContextAccessors({
+const webSocketHandlerContext = createWebSocketHandlerContext({
+  dependencies: {
+    SMALL_BED_12B_TYPE,
+    TEMP_FULL_BED_TYPE,
+    WILDCARD_CHANNEL,
+    attachHeartbeat,
+    buildTempFullBedPlaybackPayload,
+    controlCommandService,
+    formatMatrixTotalForFile,
+    fs,
+    getDefaultFileFromLicense,
+    getHistorySeries,
+    getSelectFlagFromLicense,
+    getSensorBaudRate,
+    getStoredSitData,
+    isSmallBedMatrixType,
+    logger,
+    module2,
+    normalizeHistoryPressureData,
+    parseJsonMessage,
+    parseStoredFrameData,
+    path,
+    petCareRuntimeService,
+    publishPlaybackFrame,
+    publishSystemEvent,
+    server,
+    server1,
+    server2,
+    totalToN,
+    writableNameTxt,
+    wsSubscriptions,
+    zeroCommandService,
+  },
   mutableAccessors: {
-    backAreaSelect: createMutableAccessor(() => backAreaSelect, (value) => { backAreaSelect = value; }),
-    backPressSelect: createMutableAccessor(() => backPressSelect, (value) => { backPressSelect = value; }),
-    baudRate: createMutableAccessor(() => baudRate, (value) => { baudRate = value; }),
-    endDate: createMutableAccessor(() => endDate, (value) => { endDate = value; }),
-    file: createMutableAccessor(() => file, (value) => { file = value; }),
-    historyArr: createMutableAccessor(() => historyArr, (value) => { historyArr = value; }),
-    length: createMutableAccessor(() => length, (value) => { length = value; }),
-    licenseFile: createMutableAccessor(() => licenseFile, (value) => { licenseFile = value; }),
-    localFlag: createMutableAccessor(() => localFlag, (value) => { localFlag = value; }),
-    nameTxt: createMutableAccessor(() => nameTxt, (value) => { nameTxt = value; }),
-    newback: createMutableAccessor(() => newback, (value) => { newback = value; }),
-    nowDate: createMutableAccessor(() => nowDate, (value) => { nowDate = value; }),
-    pointArr: createMutableAccessor(() => pointArr, (value) => { pointArr = value; }),
-    pointArr2: createMutableAccessor(() => pointArr2, (value) => { pointArr2 = value; }),
-    pointArr3: createMutableAccessor(() => pointArr3, (value) => { pointArr3 = value; }),
-    pointArr4: createMutableAccessor(() => pointArr4, (value) => { pointArr4 = value; }),
-    selectFlag: createMutableAccessor(() => selectFlag, (value) => { selectFlag = value; }),
-    serverOpened: createMutableAccessor(() => serverOpened, (value) => { serverOpened = value; }),
-    serverShutdownRequested: createMutableAccessor(() => serverShutdownRequested, (value) => { serverShutdownRequested = value; }),
-    sitAreaSelect: createMutableAccessor(() => sitAreaSelect, (value) => { sitAreaSelect = value; }),
-    sitPressSelect: createMutableAccessor(() => sitPressSelect, (value) => { sitPressSelect = value; }),
-    timeStamp: createMutableAccessor(() => timeStamp, (value) => { timeStamp = value; }),
+    backAreaSelect: { get: () => backAreaSelect, set: (value) => { backAreaSelect = value; } },
+    backPressSelect: { get: () => backPressSelect, set: (value) => { backPressSelect = value; } },
+    baudRate: { get: () => baudRate, set: (value) => { baudRate = value; } },
+    endDate: { get: () => endDate, set: (value) => { endDate = value; } },
+    file: { get: () => file, set: (value) => { file = value; } },
+    historyArr: { get: () => historyArr, set: (value) => { historyArr = value; } },
+    length: { get: () => length, set: (value) => { length = value; } },
+    licenseFile: { get: () => licenseFile, set: (value) => { licenseFile = value; } },
+    localFlag: { get: () => localFlag, set: (value) => { localFlag = value; } },
+    nameTxt: { get: () => nameTxt, set: (value) => { nameTxt = value; } },
+    newback: { get: () => newback, set: (value) => { newback = value; } },
+    nowDate: { get: () => nowDate, set: (value) => { nowDate = value; } },
+    pointArr: { get: () => pointArr, set: (value) => { pointArr = value; } },
+    pointArr2: { get: () => pointArr2, set: (value) => { pointArr2 = value; } },
+    pointArr3: { get: () => pointArr3, set: (value) => { pointArr3 = value; } },
+    pointArr4: { get: () => pointArr4, set: (value) => { pointArr4 = value; } },
+    selectFlag: { get: () => selectFlag, set: (value) => { selectFlag = value; } },
+    serverOpened: { get: () => serverOpened, set: (value) => { serverOpened = value; } },
+    serverShutdownRequested: { get: () => serverShutdownRequested, set: (value) => { serverShutdownRequested = value; } },
+    sitAreaSelect: { get: () => sitAreaSelect, set: (value) => { sitAreaSelect = value; } },
+    sitPressSelect: { get: () => sitPressSelect, set: (value) => { sitPressSelect = value; } },
+    timeStamp: { get: () => timeStamp, set: (value) => { timeStamp = value; } },
   },
   playbackStateAccessor,
   serialPortStateAccessor,
   zeroStateAccessor,
-}));
+});
 
 const attachWebSocketHandlers = createWebSocketHandlerAttacher(webSocketHandlerContext);
 
@@ -1965,26 +1923,27 @@ const legacySerialFrameRuntimeBaseContext = {
 
 // legacy runtime 使用 accessor 读写尚未完全迁出的旧变量。
 // 已迁移到 collection/runtime/zero/serialManager 的状态由 factory 统一拼装。
-const legacySerialFrameRuntimeAccessors = createLegacySerialFrameRuntimeAccessors({
+const legacySerialRuntimeContext = createLegacySerialRuntimeContext({
+  baseContext: legacySerialFrameRuntimeBaseContext,
   collectionStateAccessor,
   getManagedSerialPort,
-  mutableAccessors: {
-    baudRate: createMutableAccessor(() => baudRate, (value) => { baudRate = value; }),
-    dataFalg: createMutableAccessor(() => dataFalg, (value) => { dataFalg = value; }),
-    db: createMutableAccessor(() => db, (value) => { db = value; }),
-    endDate: createMutableAccessor(() => endDate, (value) => { endDate = value; }),
-    file: createMutableAccessor(() => file, (value) => { file = value; }),
-    firstData: createMutableAccessor(() => firstData, (value) => { firstData = value; }),
-    jqbedMatrixOrigin: createMutableAccessor(() => jqbedMatrixOrigin, (value) => { jqbedMatrixOrigin = value; }),
-    lastData: createMutableAccessor(() => lastData, (value) => { lastData = value; }),
-    localFlag: createMutableAccessor(() => localFlag, (value) => { localFlag = value; }),
-    newData: createMutableAccessor(() => newData, (value) => { newData = value; }),
-    nowDate: createMutableAccessor(() => nowDate, (value) => { nowDate = value; }),
-    pointArr: createMutableAccessor(() => pointArr, (value) => { pointArr = value; }),
-    pointArr2: createMutableAccessor(() => pointArr2, (value) => { pointArr2 = value; }),
-    pointArr3: createMutableAccessor(() => pointArr3, (value) => { pointArr3 = value; }),
-    pointArr4: createMutableAccessor(() => pointArr4, (value) => { pointArr4 = value; }),
-    useMatrixOrigin: createMutableAccessor(() => useMatrixOrigin, (value) => { useMatrixOrigin = value; }),
+  mutableBindings: {
+    baudRate: { get: () => baudRate, set: (value) => { baudRate = value; } },
+    dataFalg: { get: () => dataFalg, set: (value) => { dataFalg = value; } },
+    db: { get: () => db, set: (value) => { db = value; } },
+    endDate: { get: () => endDate, set: (value) => { endDate = value; } },
+    file: { get: () => file, set: (value) => { file = value; } },
+    firstData: { get: () => firstData, set: (value) => { firstData = value; } },
+    jqbedMatrixOrigin: { get: () => jqbedMatrixOrigin, set: (value) => { jqbedMatrixOrigin = value; } },
+    lastData: { get: () => lastData, set: (value) => { lastData = value; } },
+    localFlag: { get: () => localFlag, set: (value) => { localFlag = value; } },
+    newData: { get: () => newData, set: (value) => { newData = value; } },
+    nowDate: { get: () => nowDate, set: (value) => { nowDate = value; } },
+    pointArr: { get: () => pointArr, set: (value) => { pointArr = value; } },
+    pointArr2: { get: () => pointArr2, set: (value) => { pointArr2 = value; } },
+    pointArr3: { get: () => pointArr3, set: (value) => { pointArr3 = value; } },
+    pointArr4: { get: () => pointArr4, set: (value) => { pointArr4 = value; } },
+    useMatrixOrigin: { get: () => useMatrixOrigin, set: (value) => { useMatrixOrigin = value; } },
   },
   runtimeStateAccessor,
   serialRoles,
@@ -1992,8 +1951,8 @@ const legacySerialFrameRuntimeAccessors = createLegacySerialFrameRuntimeAccessor
 });
 
 createLegacySerialRuntimeBinding({
-  accessors: legacySerialFrameRuntimeAccessors,
-  baseContext: legacySerialFrameRuntimeBaseContext,
+  accessors: legacySerialRuntimeContext.accessors,
+  baseContext: legacySerialRuntimeContext.baseContext,
   serialParserManager,
 });
 

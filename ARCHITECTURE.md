@@ -1310,3 +1310,21 @@ graph TD
 - 新增 `backend/server/systemTimeSyncService.js`，封装启动时远端系统时间同步逻辑。
 - `backend/server/server.js` 不再内联 `http.get(.../getSystemTime)` 响应拼接和 JSON 解析，只负责传入 `setNowDate` 回写运行时状态。
 - 该拆分降低启动入口副作用代码密度，也让时间同步逻辑后续可以单独测试和替换数据源。
+
+## 2026-07-07 WebSocket Context 装配下沉
+
+- `backend/server/server.js` 不再直接调用 `createWebSocketContextAccessors` 和 `Object.defineProperties` 拼装 WebSocket handler context。
+- `backend/server/webSocketContextFactory.js` 统一负责把稳定依赖、旧运行态 getter/setter、回放状态、串口状态和零点状态挂载成 handler 可用上下文。
+- 该调整进一步收敛 server 启动入口中的兼容映射逻辑，让 WebSocket 连接层和运行态 accessor 的边界更清晰。
+
+## 2026-07-07 Shutdown 编排接入
+
+- `backend/server/server.js` 不再直接依赖 `closeHttpServer/closeWithTimeout/closeWsServer` 等底层生命周期函数。
+- `backend/server/serverShutdownOrchestrator.js` 统一负责停止回放定时器、停止串口重连、清理 jqbed/petCare 定时器、停止 Python worker、关闭 WebSocket/HTTP/SQLite 资源。
+- `server.js` 保留一个懒加载的 `getShutdownOrchestrator()`，避免在串口管理器初始化前创建关闭编排器，同时保留旧 `shutdownServer()` 导出语义。
+
+## 2026-07-07 Legacy Runtime Context 装配下沉
+
+- `backend/server/server.js` 不再直接 import `createLegacySerialFrameRuntimeAccessors` 和 `createMutableAccessor`。
+- `backend/sensors/runtime/legacySerialContextFactory.js` 统一负责把 legacy 串口 runtime 的固定上下文、旧变量 getter/setter、collection/runtime/zero 状态 accessor 拼成 binding 入参。
+- `server.js` 只声明 legacy runtime 还需要哪些旧变量绑定，减少主启动入口对旧协议 accessor 细节的直接耦合。
