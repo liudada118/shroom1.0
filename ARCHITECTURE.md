@@ -1328,3 +1328,11 @@ graph TD
 - `backend/server/server.js` 不再直接 import `createLegacySerialFrameRuntimeAccessors` 和 `createMutableAccessor`。
 - `backend/sensors/runtime/legacySerialContextFactory.js` 统一负责把 legacy 串口 runtime 的固定上下文、旧变量 getter/setter、collection/runtime/zero 状态 accessor 拼成 binding 入参。
 - `server.js` 只声明 legacy runtime 还需要哪些旧变量绑定，减少主启动入口对旧协议 accessor 细节的直接耦合。
+
+## 2026-07-07 Display Systems 配置层
+
+- 新增 `backend/displaySystems/`，作为“线序文件 + 点位顺序文件 + 算法数据文件生成展示系统”的后端基础层。
+- `displaySystemConfigValidator.js` 定义展示系统 manifest 最小契约：`id/name/sensor.matrix/files.lineOrder/files.pointOrder/algorithm`。
+- `displaySystemConfigLoader.js` 支持从目录发现 `display-system.json` 或 `system.json`，解析相对文件路径，并可校验线序、点位和算法文件存在。
+- `displaySystemRegistry.js` 提供已校验展示系统配置的注册、查询、列表和快照能力。
+- `contracts/sdkApiContract.js` 增加 `displaySystems` 契约说明，便于后续 SDK 和前端发现配置驱动能力。

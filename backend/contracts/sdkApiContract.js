@@ -49,6 +49,13 @@ const TELEMETRY_QUALITY = Object.freeze({
   ERROR: 'error',
 });
 
+const DISPLAY_SYSTEM_SCHEMA_VERSION = 1;
+
+const DISPLAY_SYSTEM_MANIFEST_FILES = Object.freeze([
+  'display-system.json',
+  'system.json',
+]);
+
 function normalizeSerialRole(role) {
   const normalized = String(role || '').trim();
   if (!normalized) return '';
@@ -106,12 +113,41 @@ function buildSdkContractSnapshot({
       aliases: SERIAL_ROLE_ALIASES,
       status: serialStatus,
     },
+    displaySystems: {
+      schemaVersion: DISPLAY_SYSTEM_SCHEMA_VERSION,
+      manifestFiles: DISPLAY_SYSTEM_MANIFEST_FILES,
+      manifestShape: {
+        id: 'string',
+        name: 'string',
+        version: 'string',
+        sensor: {
+          type: 'string',
+          matrix: {
+            rows: 'positive integer',
+            cols: 'positive integer',
+          },
+          ports: 'string[]',
+        },
+        files: {
+          lineOrder: 'string',
+          pointOrder: 'string',
+        },
+        algorithm: {
+          type: 'none|js|python|external',
+          entry: 'string|null',
+          dataFile: 'string|null',
+        },
+        display: 'object',
+      },
+    },
     subscriptions,
   };
 }
 
 module.exports = {
   API_VERSION,
+  DISPLAY_SYSTEM_MANIFEST_FILES,
+  DISPLAY_SYSTEM_SCHEMA_VERSION,
   HTTP_ROUTES,
   SDK_CONTRACT_VERSION,
   SERIAL_ROLES,

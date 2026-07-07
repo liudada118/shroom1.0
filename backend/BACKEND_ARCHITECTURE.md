@@ -358,3 +358,15 @@ flowchart LR
 | `server/server.js` | 只提供 legacy runtime 的固定能力和旧变量 getter/setter 声明，不再直接创建底层 accessor。 |
 | `sensors/runtime/legacySerialContextFactory.js` | 统一创建 legacy runtime context 和 accessors，并包装旧变量 mutable bindings。 |
 | `runtime/legacyRuntimeAccessorFactory.js` | 继续作为底层 accessor 工厂，被 legacy context factory 间接使用。 |
+
+## 2026-07-07 Display Systems 配置层
+
+| 文件/目录 | 职责 |
+| :--- | :--- |
+| `displaySystems/displaySystemConfigValidator.js` | 校验展示系统 manifest 的身份、矩阵尺寸、线序文件、点位文件和算法声明。 |
+| `displaySystems/displaySystemConfigLoader.js` | 从展示系统目录加载 manifest，解析相对文件路径，并可校验引用文件是否存在。 |
+| `displaySystems/displaySystemRegistry.js` | 保存已校验的展示系统配置，提供注册、查询、列表和快照能力。 |
+| `displaySystems/index.js` | 对外统一导出 displaySystems 能力。 |
+| `contracts/sdkApiContract.js` | 增加 displaySystems manifest 契约描述，为 SDK/前端动态发现做准备。 |
+
+该层当前不直接接管现有传感器 runtime，避免影响生产链路；后续可把现有固定传感器逐步迁移为 manifest 注册。

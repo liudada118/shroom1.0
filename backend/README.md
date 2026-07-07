@@ -145,3 +145,12 @@ flowchart LR
 | Legacy runtime 上下文装配 | `backend/sensors/runtime/legacySerialContextFactory.js` |
 | Legacy runtime 串口绑定 | `backend/sensors/runtime/legacySerialRuntimeBinding.js` |
 | Legacy runtime 状态 accessor 底层工厂 | `backend/runtime/legacyRuntimeAccessorFactory.js` |
+
+## Display Systems 相关阅读入口
+
+| 你想看什么 | 入口文件 |
+| :--- | :--- |
+| 展示系统配置层 | `backend/displaySystems/README.md` |
+| Manifest 校验 | `backend/displaySystems/displaySystemConfigValidator.js` |
+| 配置目录加载 | `backend/displaySystems/displaySystemConfigLoader.js` |
+| 展示系统注册表 | `backend/displaySystems/displaySystemRegistry.js` |
