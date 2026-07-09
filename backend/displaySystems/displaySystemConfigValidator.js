@@ -2,6 +2,7 @@ const DISPLAY_SYSTEM_SCHEMA_VERSION = 1;
 
 const ALGORITHM_TYPES = Object.freeze({
   NONE: 'none',
+  JSON: 'json',
   JS: 'js',
   PYTHON: 'python',
   EXTERNAL: 'external',

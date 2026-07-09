@@ -1,12 +1,19 @@
 import { Button, Input, Modal, message } from 'antd'
-import React, { useEffect, useState, useRef, useMemo } from 'react'
+import React, { useCallback, useState, useRef, useMemo } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import useMainWebSocket from '../../services/ws/useMainWebSocket'
+import {
+  applyLicenseScopeToStorage,
+  getLicenseKeyFromMessage,
+  hasValidLicenseDate,
+  isExpiredLicenseMessage,
+  isObjectMessage,
+} from '../../services/ws/messages'
 import './index.scss'
 
 export default function Date1() {
   const nav = useNavigate()
   const param = useLocation()
-  const wsRef = useRef(null)
   const [date, setDate] = useState('')
   const [loading, setLoading] = useState(false)
   const [messageApi, contextHolder] = message.useMessage()
@@ -28,101 +35,62 @@ export default function Date1() {
   // 标记用户是否正在提交密钥（区分后端主动推送 vs 用户提交后的响应）
   const isSubmitting = useRef(false)
 
-  useEffect(() => {
-    const ws = new WebSocket("ws://127.0.0.1:19999");
-    wsRef.current = ws
+  const handleSocketMessage = useCallback((data) => {
+    if (!isObjectMessage(data)) return
 
-    ws.onopen = () => {};
-
-    ws.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data)
-
-        if (typeof data.licenseKey === 'string' && data.licenseKey.trim()) {
-          setDate(data.licenseKey.trim())
-        }
-
-        // 处理密钥验证错误
-        if (data.licenseError != null) {
-          const wasSubmitting = isSubmitting.current
-          setLoading(false)
-          isSubmitting.current = false
-          // 仅在用户主动提交密钥后才弹错误框；
-          // 后端在连接/复检时主动推送的 licenseError（如未授权、已过期）不弹，避免一打开页面就弹窗
-          if (wasSubmitting) {
-            Modal.error({
-              title: '密钥错误',
-              content: data.licenseError,
-            })
-          }
-          return
-        }
-
-        // 处理 selectFlag（授权类型）
-        if (data.selectFlag != null) {
-          if (data.selectFlag === 'all') {
-            localStorage.setItem('matrixTitle', true)
-            localStorage.removeItem('allowedTypes')
-          } else if (Array.isArray(data.selectFlag)) {
-            localStorage.setItem('matrixTitle', true)
-            localStorage.setItem('allowedTypes', JSON.stringify(data.selectFlag))
-          } else {
-            localStorage.removeItem('matrixTitle')
-            localStorage.removeItem('allowedTypes')
-          }
-        }
-
-        // 密钥验证成功：收到有效的 date 且后端判定有效（valid !== false）
-        // 防止「能本地解密但被服务器判无效/吊销」的密钥仅凭 date>0 就被放进系统页
-        if (data.date != null && data.date > 0 && data.valid !== false) {
-          setLoading(false)
-          const wasSubmitting = isSubmitting.current
-          isSubmitting.current = false
-
-          // 检查密钥是否已过期
-          const serverNow = data.nowDate ? parseFloat(data.nowDate) : window.Date.now()
-          const endDate = parseFloat(data.date)
-          if (endDate <= serverNow) {
-            // 密钥已过期
-            if (wasSubmitting) {
-              // 用户提交的密钥过期，提示错误
-              Modal.error({
-                title: '密钥已过期',
-                content: '该密钥已过期，请输入有效的密钥',
-              })
-            }
-            // 停留在密钥输入页
-            return
-          }
-
-          // 密钥有效
-          if (isFromSystem && !wasSubmitting) {
-            // 从系统页手动跳转过来更新密钥：后端主动推送的密钥信息，不自动跳转
-            // 用户可以在此页面输入新密钥
-            return
-          }
-
-          // 首次启动且密钥有效 → 自动跳转到系统页
-          // 或者用户提交新密钥验证成功 → 跳转到系统页
-          messageApi.success('密钥验证成功')
-          setTimeout(() => {
-            nav('/system')
-          }, 500)
-        }
-      } catch (err) {
-        console.error('解析消息失败:', err)
-      }
+    const key = getLicenseKeyFromMessage(data)
+    if (key) {
+      setDate(key)
     }
 
-    ws.onerror = (e) => {};
-    ws.onclose = (e) => {};
-
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close()
+    if (data.licenseError != null) {
+      const wasSubmitting = isSubmitting.current
+      setLoading(false)
+      isSubmitting.current = false
+      if (wasSubmitting) {
+        Modal.error({
+          title: '密钥错误',
+          content: data.licenseError,
+        })
       }
+      return
     }
-  }, [])
+
+    applyLicenseScopeToStorage(data)
+
+    if (!hasValidLicenseDate(data)) return
+
+    setLoading(false)
+    const wasSubmitting = isSubmitting.current
+    isSubmitting.current = false
+
+    if (isExpiredLicenseMessage(data)) {
+      if (wasSubmitting) {
+        Modal.error({
+          title: '密钥已过期',
+          content: '该密钥已过期，请输入有效的密钥',
+        })
+      }
+      return
+    }
+
+    if (isFromSystem && !wasSubmitting) {
+      return
+    }
+
+    messageApi.success('密钥验证成功')
+    setTimeout(() => {
+      nav('/system')
+    }, 500)
+  }, [isFromSystem, messageApi, nav])
+
+  const { connected: wsConnected, submitLicenseKey } = useMainWebSocket({
+    onMessage: handleSocketMessage,
+    onClose: () => {
+      setLoading(false)
+      isSubmitting.current = false
+    },
+  })
 
   const handleSubmit = () => {
     const trimmed = date.trim()
@@ -136,14 +104,8 @@ export default function Date1() {
 
     setLoading(true)
     isSubmitting.current = true
-    const ws = wsRef.current
-    if (ws && ws.readyState === 1) {
-      ws.send(JSON.stringify({
-        date: {
-          date: trimmed,
-          startTime: window.Date.now()
-        }
-      }))
+    if (wsConnected) {
+      submitLicenseKey(trimmed)
     } else {
       setLoading(false)
       isSubmitting.current = false

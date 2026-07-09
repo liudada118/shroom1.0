@@ -6,6 +6,7 @@ const { CsvExporter } = require('./src/export/CsvExporter');
 const { ZeroCalibrator } = require('./src/processing/ZeroCalibrator');
 const { ReplayService } = require('./src/replay/ReplayService');
 const { BackendCommandRouter } = require('./src/backend/BackendCommandRouter');
+const { BackendSdkClient } = require('./src/backend/BackendSdkClient');
 const { LicenseService } = require('./src/license/LicenseService');
 const { PathService } = require('./src/config/PathService');
 const { ReportService } = require('./src/report/ReportService');
@@ -28,6 +29,7 @@ module.exports = {
   ZeroCalibrator,
   ReplayService,
   BackendCommandRouter,
+  BackendSdkClient,
   LicenseService,
   PathService,
   ReportService,

@@ -4,6 +4,7 @@ import { carBackLine, handLine, pressNew, zeroLine } from "../../assets/util/lin
 import { Button, Input, Select, Slider, Switch } from "antd";
 import { CSVLink } from "react-csv";
 import { NavLink, useLocation, useParams } from "react-router-dom";
+import { buildCollectionRow } from "./collectionValue";
 let data = [];
 
 // for (let i = 0; i < 32; i++) {
@@ -307,7 +308,7 @@ export default function Demo() {
 
 
     // setData(newData)
-    ws = new WebSocket(" ws://localhost:19999");
+    ws = new WebSocket("ws://localhost:19999");
     ws.onopen = () => {
       // connection opened
       console.info("connect success");
@@ -497,7 +498,7 @@ export default function Demo() {
             } else {
               res = resarr.filter((a) => a > resarr.reduce((a, b) => a + b, 0) / resarr.length)
             }
-            collection.push([JSON.stringify(wsPointData), area, name, eval(name), objArea, eval(objArea)]);
+            collection.push(buildCollectionRow(wsPointData, area, name, objArea, { area, length, total }));
             console.log(collection)
             // collection.push([res[0], res[1], res[2], collection.length >= 3 ? res[0] - collection[collection.length - 1][0] : null, collection.length >= 3 ? res[1] - collection[collection.length - 1][1] : null, collection.length >= 3 ? res[2] - collection[collection.length - 1][2] : null]);
             localStorage.setItem("collection", JSON.stringify(collection));

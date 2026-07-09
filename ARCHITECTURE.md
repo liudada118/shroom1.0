@@ -1,11 +1,87 @@
 # 架构文档
 
-> 最新维护：2026-07-03。本次维护继续推进后端架构拆分，新增 `backend/runtime/zeroCommandService.js` 承接旧 WS `resetZero` 命令的零点操作。
+## 2026-07-09 Client WebSocket Boundary Split
+
+- Added `client/src/services/ws/messages.js` to centralize frontend WebSocket command builders, JSON send/parse helpers, license message classification, license scope storage updates, sensor type list extraction, and license status mapping.
+- Added `client/src/services/ws/useMainWebSocket.js` as the application-level main WebSocket hook on top of `client/src/hooks/useWebSocket.js`, exposing `connected`, `submitLicenseKey`, `requestSensorTypes`, and `refreshLicense` so pages no longer hand-roll the same connection/send code.
+- Refactored `LicensePortal.jsx`, `Date.jsx`, and `License.jsx` to consume the shared hook and message helpers. These pages now keep UI state and navigation locally while connection lifecycle, command payload shape, and response classification live under `services/ws`.
+- Started reducing `Home.jsx` coupling by moving the main local WS URL, JSON send helper, and common startup commands to the shared WS service layer while preserving the existing realtime frame parsing paths.
+- Stabilized the default `channels` dependency in `useWebSocket.js` to avoid unnecessary reconnects when callers do not subscribe to explicit channels. Verification: `npm run lint` and `npm run build` in `client` complete with no errors.
+- Added `client/src/components/demo/collectionValue.js` and migrated demo CSV collection rows away from `eval(name)` / `eval(objArea)` to explicit field lookup. Demo components that collect from WebSocket callbacks now keep the latest collection labels in refs, avoiding stale React state closures without reconnecting sockets. Client lint warnings dropped from 106 to 78; the only remaining `eval` warning is the explicit formula editor in `handDemoPress.jsx`.
+- Added `client/src/services/ws/controlMessages.js` and moved Home control-channel message parsing, command-list expansion, 10x10 row summaries, and collection row building out of inline `wsControl.onmessage` handlers. `Home.jsx` now uses one `connectControlSocket` / `handleControlMessage` path for both initial `localCar` control and `changeWs`, and closes `wsControl` on unmount.
+- Added `client/src/components/demo/formulaEvaluator.js` and replaced the remaining `handDemoPress.jsx` formula `eval` with a constrained formula compiler that only exposes `y` and a small Math allowlist. Client lint warnings are now 77, with no remaining `no-eval` warning and no Vite `eval` build warning.
+
+## 2026-07-09 Client/Backend Optimization Pass
+
+- Client routing now uses `React.lazy` and `Suspense` in `client/src/App.jsx`, splitting heavy pages and 3D/display modules out of the initial route bundle. The production build main app chunk dropped from roughly 1.7 MB minified to roughly 244 KB, with `Home` emitted as an on-demand chunk.
+- Added `client/eslint.config.js` for ESLint 9 flat config. The lint gate now runs successfully against active JS/JSX sources, ignores the unused legacy `HomeFun.jsx` and TS declaration files until TypeScript linting is configured, and reports remaining `eval` and hook dependency risks as warnings.
+- Cleaned client build warnings by removing duplicate inline style keys, normalizing WebSocket URL literals that had leading spaces, and fixing several `pointerup` listener cleanup typos in Three.js components.
+- Backend HTTP app creation now installs a JSON body parse error middleware in `backend/server/httpAppFactory.js`, returning stable JSON `400` / `413` responses for malformed or oversized request bodies instead of Express defaults.
+- Added HTTP coverage in `backend/tests/http/displaySystemsApi.test.js` for malformed JSON handling. Verification: `npm run lint` in `client`, `npm run build` in `client`, and root `npm test` all complete with no errors.
+
+## 2026-07-08 Backend SDK Demo
+
+- Added `sdk/src/backend/BackendSdkClient.js`, a thin SDK client for the stable backend HTTP/WS contract.
+- Added `sdk/examples/backend-sdk-demo.js` and `npm run sdk:demo` for a read-only demo that loads `/api/sdk/contract`, reads serial/display-system status, and subscribes to realtime frames.
+- Added `backend/tests/sdk/backendSdkClient.test.js` to cover contract loading, HttpResult unwrapping, serial open request shape, display-system detail routing, and realtime frame events.
+- Added `sdk/examples/serial-chain-demo.js` and `npm run sdk:serial-demo` for the local SDK serial chain: SerialPort -> DelimiterParser -> ProtocolRegistry -> ZeroCalibrator -> frame event -> MemoryCaptureStore.
+
+## 2026-07-08 Server Bootstrap Recovery
+
+- Restored `backend/server/server.js` bootstrap imports and legacy runtime state declarations that are still required during module load.
+- Recovered sensor registry constants, zero-state accessors, history frame transform helpers, minzhen port helpers, realtime throttling helpers, and legacy matrix caches.
+- Added a mock-load verification path for `server.js` that bypasses the local Node/better-sqlite3 ABI mismatch and validates bootstrap wiring reaches HTTP startup.
+
+## 2026-07-08 Sensor Runtime Factory Split
+
+- Added `backend/server/sensorProcessorFactory.js` to assemble `sit1024FrameProcessor` and `backHead1024FrameProcessor` outside `server.js`.
+- Added `backend/server/smallBedRuntimeFactory.js` to assemble the small-bed 12B runtime outside the bootstrap file.
+- Added `backend/server/handRuntimeFactory.js` to assemble hand full-packet and double-packet runtime handlers.
+- `backend/server/server.js` now keeps only the high-level runtime wiring for these modules, not their detailed dependency maps.
+- Added factory tests for sensor processors, small-bed runtime, and hand runtime; `npm test` now covers 22 test files.
+
+## 2026-07-08 Store-backed 状态写入与 Display Systems 边界收紧
+
+- `backend/server/runtimeStatePatchFactory.js` 支持后绑定 `RuntimeStateStore`，`file`、`baudRate`、`localFlag`、`nowDate`、`db/db1/db2` 的命令写入优先经过 store-backed accessor，再回写旧变量。
+- `backend/server/server.js` 为上述旧状态补齐 `runtimeStateStore` accessor，减少 command handler 直接持有旧变量写入规则。
+- 新增 `backend/displaySystems/displaySystemRuntimePolicy.js`，默认保护 `sit/back/head/sensor` legacy parser channel；manifest 只有显式设置 `metadata.runtimeMode: "parallel"` 才允许与旧 runtime 并行消费同一 parser。
+- `displaySystemRuntimeDispatcher` 状态增加 skipped binding 明细，并保证 `stop()` 移除 parser listener、重复 `start()` 不重复挂载 listener。
+- 新增 `backend/displaySystems/examples/jqbed-manifest-demo/` 和 `backend/displaySystems/examples/hand-glove-manifest-demo/`，作为真实传感器迁移到 manifest 的模板，当前标记为 `runtimeMode: "template"`，只校验不接管生产实时链路。
+- 新增 `backend/tests/run-tests.js`，`npm test` 收敛为统一测试入口，新增 runtime policy 和 dispatcher 生命周期覆盖。
+
+## 2026-07-08 Server Runtime Factory 继续拆分
+
+- 新增 `backend/server/displaySystemRuntimeFactory.js`，集中管理 Display Systems runtime binding、dispatcher 创建、重复绑定时旧 dispatcher stop 和关闭入口。
+- `backend/server/appRuntimeFactory.js` 退回到 discovery + 状态聚合层，不再直接知道 Display Systems dispatcher 的创建细节。
+- 新增 `backend/server/runtimeStateStoreFactory.js`，集中管理 legacy runtime 初始 state、store-backed key 清单，以及 `runtimeStatePatchers.bindRuntimeStateStore(...)` 绑定规则。
+- `backend/server/server.js` 不再直接维护 `firstBlueData/lastBlueData/newArr` 初始状态清单，也不再直接维护 `file/baudRate/localFlag/nowDate/db/db1/db2` 的 store-backed key 列表。
+- 新增 `backend/tests/server/displaySystemRuntimeFactory.test.js` 和 `backend/tests/server/runtimeStateStoreFactory.test.js`，覆盖 Display Systems dispatcher 重绑清理和 store-backed 状态装配。
+
+## 2026-07-08 Legacy OpenWeb 归档与 Runtime Mode 扩展
+
+- `backend/processing/openWeb.js` 已迁移到 `backend/legacy/openWeb.js`，processing 目录不再放旧算法大文件。
+- processing 回归测试改为从 `backend/legacy/openWeb.js` 读取旧输出基线，生产运行时仍不依赖 legacy openWeb。
+- 新增 `backend/legacy/README.md`，明确 legacy 目录只保留历史兼容和回归基线文件。
+- Display Systems runtime mode 扩展为 `template`、`parallel`、`shadow`、`active`、`disabled`。
+- `shadow` 模式会执行 frame processor 但不发布到 `frameOutputPipeline`；`active` 模式必须由启动侧显式开启 `allowActiveDisplaySystem` 才能接管 legacy parser channel。
+
+## 2026-07-08 Runtime Context 与 Frame Pipeline 下沉
+
+- 新增 `backend/server/runtimeContextFactory.js`，旧状态读取优先走 `RuntimeStateStore`，store 未就绪时回退闭包变量。
+- 新增 `backend/server/framePipelineFactory.js`，集中创建 `collectionFrameStorage` 和 `frameOutputPipeline`。
+- `server.js` 中串口打开、WebSocket runtime、实时发布、小床 runtime、Display Systems 绑定和 frame pipeline 开始改用 `runtimeContext`。
+- 新增 `runtimeContextFactory` 和 `framePipelineFactory` 测试，覆盖 store 优先读取、闭包兜底和三路数据库映射。
+
+> 最新维护：2026-07-09。本次维护继续推进前端 WebSocket 边界拆分和 demo 采集治理，新增 `client/src/services/ws` 承接主 WS 命令构造、连接 hook、授权消息分类与 Home 控制通道消息解析，并新增 `client/src/components/demo/collectionValue.js` / `formulaEvaluator.js` 收口采集 CSV 和分压公式中的动态执行逻辑。
 
 ## 当前维护记录
 
 | 日期 | 类型 | 说明 |
 | :--- | :--- | :--- |
+| 2026-07-09 | 优化重构 | 新增 `client/src/components/demo/formulaEvaluator.js`，将 `handDemoPress.jsx` 的分压公式 `eval` 替换为受限公式编译器，移除前端最后一个 `no-eval` 警告。 |
+| 2026-07-09 | 优化重构 | 新增 `client/src/services/ws/controlMessages.js`，合并 `Home.jsx` 中两套 `wsControl` 消息解析和采集写入逻辑，并在卸载时关闭控制通道连接。 |
+| 2026-07-09 | 优化重构 | 新增 `client/src/components/demo/collectionValue.js`，将多个 demo 采集组件中的 `eval(name)` / `eval(objArea)` 替换为显式字段取值，并用 ref 修正 WS 回调里的采集标签闭包。 |
+| 2026-07-09 | 优化重构 | 新增 `client/src/services/ws/messages.js` 和 `useMainWebSocket.js`，将授权、传感器类型请求、刷新授权和 JSON 发送等前端 WS 逻辑从页面中拆出。 |
 | 2026-07-06 | 优化重构 | 新增 `backend/license/licenseKeyStore.js`，统一负责授权密钥的读取和写入；主 WebSocket 新连接时通过私有消息下发 `licenseKey` 给授权门户。 |
 | 2026-07-03 | 优化重构 | 新增 `backend/runtime/zeroCommandService.js`，将旧 WebSocket `resetZero` 命令中的零点捕获和清空逻辑从连接层迁入 runtime 服务。 |
 | 2026-07-03 | 优化重构 | `backend/server/webSocketHandlerFactory.js` 不再直接读写 `pointArr*zero`、`pointArr*RawZero` 和 `pointArr147zero` 等零点字段，只调用 `zeroCommandService.handleResetZero()`。 |
@@ -93,6 +169,10 @@
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
+| 2026-07-09 | Demo 分压公式安全化 | `handDemoPress.jsx` 的公式编辑器改用 `compileValueFormula`，只允许 `y` 和白名单 Math 表达式，移除剩余 `eval` 与打包警告。 |
+| 2026-07-09 | Home 控制通道拆分 | 新增 `client/src/services/ws/controlMessages.js`，`Home.jsx` 的 `localCar` 初始化和 `changeWs` 复用同一套控制消息解析、控制列表生成和采集行写入方法。 |
+| 2026-07-09 | Demo 采集 eval 收口 | `Block`、`Demo*`、`handDemo*`、`handLine*` 等 demo 采集组件改用 `buildCollectionRow` 生成 CSV 行，减少动态代码执行和打包警告。 |
+| 2026-07-09 | 前端 WebSocket 边界拆分 | `LicensePortal.jsx`、`Date.jsx`、`License.jsx` 改用 `useMainWebSocket` 和 `services/ws/messages`，`Home.jsx` 的主 WS 地址、JSON 发送和启动命令开始收口到共享服务。 |
 | 2026-07-03 | 零点命令服务化 | 新增 `zeroCommandService`，旧 WS resetZero 命令只做路由，零点捕获和清空由 runtime 服务统一处理。 |
 | 2026-07-03 | Bootstrap helper 拆分 | 新增 `bootstrapServer.js`，启动期串口扫描和 OneStep HTTP 服务监听从 `server.js` 迁入 server 层 helper。 |
 | 2026-07-03 | WebSocket context accessor factory | 新增 `webSocketContextAccessorFactory`，把 WS handler 旧状态映射从 `server.js` 拆到 runtime 层，保留旧前端 resetZero、历史框选和授权流程兼容。 |
@@ -158,6 +238,15 @@
 ---
 
 > 本文档由 Manus 自动生成和维护。最后更新于：2026-07-06
+
+## 2026-07-07 Display Systems Runtime 定义与复杂线序迁移
+
+- `backend/displaySystems/displaySystemDefinitionBuilder.js` 新增 manifest 到 runtime 定义的转换层，统一生成 `sensorDefinition`、`parserChannels` 和 `displayMetadata`。
+- `backend/displaySystems/displaySystemRuntimeDiscovery.js` 发现配置后会附加 `runtimeDefinition`，`/api/display-systems` 状态可直接返回 runtime 定义快照。
+- `backend/server/appRuntimeFactory.js` 新增应用运行时装配入口，`server.js` 不再直接创建 Display Systems runtime discovery。
+- `backend/processing/lineOrders.js` 继续从旧 `openWeb.js` 迁出复杂线序：`carSitLine`、`carBackLine`、`wowSitLine`、`wowBackLine`、`footL`、`footR`、`footVideo` 已变成真实实现。
+- 本轮迁移用固定样本对比旧 `openWeb.js` 输出，车座/车背、wow 座/背、脚部线序结果一致。
+- `openWeb.js` 仍保留为未迁移函数的兼容仓库，主要剩余债务是插值/平滑算法以及其它零散视频映射函数。
 
 ## 1. 项目概述
 
@@ -1336,3 +1425,133 @@ graph TD
 - `displaySystemConfigLoader.js` 支持从目录发现 `display-system.json` 或 `system.json`，解析相对文件路径，并可校验线序、点位和算法文件存在。
 - `displaySystemRegistry.js` 提供已校验展示系统配置的注册、查询、列表和快照能力。
 - `contracts/sdkApiContract.js` 增加 `displaySystems` 契约说明，便于后续 SDK 和前端发现配置驱动能力。
+
+## 2026-07-07 Display Systems HTTP 发现接口
+
+- `backend/server/server.js` 在启动期扫描 `runtimeResourceRoot` 和 `runtimeWritableRoot` 下的 `display-systems/`、`displaySystems/` 目录，把通过校验的展示系统 manifest 注册到 `displaySystemRegistry`。
+- `backend/server/httpAppFactory.js` 新增 `GET /api/display-systems`，返回当前发现到的展示系统数量、配置摘要、扫描根目录和加载错误，供前端授权门户、配置页面或后续 SDK 做能力发现。
+- `backend/server/httpAppFactory.js` 新增 `GET /api/display-systems/:id`，按展示系统 id 返回单个 manifest 解析结果；不存在时返回 `404`。
+- `backend/contracts/sdkApiContract.js` 的 `/api/sdk/contract` 快照现在包含 `displaySystems.routes`、`manifestFiles`、`schemaVersion` 和当前发现状态，SDK 不需要读取后端内部文件就能知道配置驱动展示系统能力。
+- 这轮改造仍然是只读发现层，不直接接管现有串口 runtime 和实时数据链路；后续可以逐步把固定写死的传感器系统迁移成 manifest 注册。
+
+## 2026-07-07 Legacy Runtime 显式依赖化
+
+- `backend/sensors/runtime/legacySerialFrameRuntime.js` 移除 `with (ctx)`，所有旧运行时状态、服务和处理器依赖都改为显式 `ctx.xxx` 访问。
+- 旧 runtime 仍保持五个串口 handler：`sit`、`smallBed12B`、`back`、`bigBedSit`、`head`，但依赖边界更清楚，后续可继续把剩余旧状态迁入 runtime store。
+- `backend/displaySystems/displaySystemRuntimeDiscovery.js` 承接展示系统运行时扫描、注册表创建和 HTTP 状态查询函数，`server.js` 不再内联 display system 目录拼装和注册细节。
+- `backend/runtime/index.js` 改为懒加载旧 `server.js` 兼容入口，避免 runtime 模块加载时立刻形成 `runtime -> server` 反向初始化依赖。
+
+## 2026-07-07 Processing 分类入口层
+
+- 新增 `backend/processing/index.js` 作为 processing 聚合入口，新代码优先从这里或具体分类模块引入能力。
+- 新增 `lineOrders.js`、`matrixTransforms.js`、`pressureTransforms.js`、`interpolation.js`、`timeFormatters.js`、`webStaticServer.js`，先作为 `openWeb.js` 的分类 facade，保持旧算法实现不变。
+- `backend/server/server.js` 改为从 `backend/processing` 聚合入口引入线序、压力、插值和静态服务能力。
+- `backend/common/util.js` 改为从 `processing/timeFormatters.js` 引入时间格式化函数。
+- `sdk/src/line/projectLineOrders.js` 改为从 `processing/lineOrders.js` 注册项目线序，SDK 不再直接读取整个 `openWeb.js`。
+- `openWeb.js` 暂时保留为旧实现仓库；后续迁移时可逐个把实现移动到对应 facade，调用方无需再次大改。
+
+## 2026-07-07 Processing 纯函数迁移
+
+- `backend/processing/matrixTransforms.js` 已承接 `zeroLine`、`zeroLineMatrix`、`smallBedZero` 的真实实现，不再通过 `legacyOpenWebExports` 代理这三个矩阵清零函数。
+- `backend/processing/timeFormatters.js` 已承接 `timeStampToDate`、`timeStampTo_Date`、`timeStampToDateNum` 的真实实现，不再通过 `legacyOpenWebExports` 代理时间格式化。
+- 迁移时保留旧输出细节：`zeroLineMatrix` 继续使用历史固定阈值 `100/40`，`timeStampToDateNum` 继续保留旧隐式加法导致的 `number|string` 返回行为。
+- `openWeb.js` 仍保留旧导出用于兼容和对比测试，但后端新入口已经优先使用分类模块里的真实实现。
+
+## 2026-07-07 Processing 静态服务和压力工具迁移
+
+- `backend/processing/webStaticServer.js` 已承接 `openWeb()` 的真实实现，静态页面 HTTP 服务不再通过 `legacyOpenWebExports` 加载算法大文件。
+- `backend/processing/pressureTransforms.js` 已承接 `calPressArr`、`pressToN`、`carFitting`、`mmghToPress` 的真实实现。
+- `pressToN` 保持旧公式输出，同时移除旧实现里未声明变量 `N` 带来的隐式全局副作用。
+- `legacyOpenWebExports.js` 现在只服务尚未迁移的线序、插值和部分压力算法，后续迁移范围继续缩小。
+
+## 2026-07-07 LineOrders 真实实现迁移
+
+- `backend/processing/lineOrders.js` 已承接 `jqbed`、`newHand`、`tempFullBed` 的真实实现，减少对旧 `openWeb.js` 线序实现的依赖。
+- `lineOrders.js` 同步承接 `tempFullBed` 需要的 `convertTempFullBedTemperature` 和 `normalizeTempFullBedPressure` helper，方便后续配置驱动展示系统复用。
+- `sdk/src/line/projectLineOrders.js` 的 deny list 新增 `rotate90`、`convertTempFullBedTemperature`、`normalizeTempFullBedPressure`，避免内部 helper 被 SDK 当成可选线序注册。
+- 已用固定矩阵对比 `jqbed`、`newHand`、`tempFullBed` 新旧输出，保持行为一致。
+
+## 2026-07-07 LineOrder Definitions 数据化拆分
+
+- 新增 `backend/processing/lineOrderMapper.js`，把 1 基 ADC 顺序抽取和坐标填点沉淀为通用 mapper，后续不再为每个传感器重复写点位填充循环。
+- 新增 `backend/processing/lineOrderDefinitions/foot.js`、`hand.js`、`gloves.js`，把脚部、手部、手套的大点位表从执行逻辑里拆成数据定义。
+- `backend/processing/lineOrders.js` 继续作为线序执行入口，但 `footL`、`footR`、`footVideo`、`handR`、`handL`、`handRVideo1470506`、`gloves`、`gloves1`、`gloves2`、`gloves0123` 已改为复用 definitions 和 mapper。
+- `backend/server/server.js` 改为使用 `backend/server/serverPathConfig.js` 提供的路径配置，减少启动文件里的 packaged/dev 路径判断。
+- 已用固定样本对比上述线序函数的新旧输出，保持行为一致。
+
+## 2026-07-07 Processing 算法与视频映射继续迁移
+
+- 新增 `backend/processing/interpolationAlgorithms.js`，真实承接 `interp`、`interp1016`、`addSide`、`gaussBlur_1`，`interpolation.js` 不再代理旧 `openWeb.js`。
+- 新增 `backend/processing/smoothingAlgorithms.js` 和 `backend/processing/algorithmDefinitions/index.js`，为后续 Display Systems 通过 manifest 选择算法提供注册入口。
+- 新增 `backend/processing/videoPointMappings.js`，集中承接 `smallM`、`smallM1`、`rect`、`short`、`matColLine`、`handBlue`、`handSinglePoint`、`carCol`、`gloves0123Res`、`footVideo1`、`footArrToNormal`、`rightEye` 等零散视频映射。
+- 新增 `backend/ARCHITECTURE_MAP.md`，用数据流、目录职责和 legacy/new 分界解释当前后端架构，降低继续拆分后的阅读成本。
+- 已用固定样本对比插值、平滑和视频映射函数的新旧输出，保持行为一致。
+
+## 2026-07-07 OpenWeb Legacy 依赖继续收缩
+
+- `backend/processing/lineOrders.js` 不再依赖 `legacyOpenWebExports.js`，已真实承接 `handLine`、`sit10Line`、`sit100Line`、`endiSit1024`、`yanfeng10sit`、`yanfeng10back`、`wowhead`、`xiyueReal1`。
+- `backend/processing/videoPointMappings.js` 不再依赖 `legacyOpenWebExports.js`，已真实承接 `handVideo1_0416_0506` 和 `handVideoRealPoint_0506_3`。
+- `backend/processing/pressureTransforms.js` 已真实承接 `press`、`press12`、`calculatePressure`、`calPress`、`car10Sit`、`car10Back`、`objChange`；当前 legacy 代理只剩小床系列 `smallBed/smallBed1/smallBedReal/smallBedReal1`。
+- `backend/processing/matrixTransforms.js` 移除对旧视频映射函数的 re-export，避免覆盖 `videoPointMappings.js` 的新实现。
+- `backend/displaySystems/displaySystemRuntimeChannelPlanner.js` 新增 runtime channel plan，manifest 现在能生成 serial role、parser channel、lineOrder、pointOrder、algorithm 的计划结构，但仍不直接打开串口。
+
+## 2026-07-07 Processing 断开 OpenWeb 依赖
+
+- `backend/processing/pressureTransforms.js` 真实承接 `smallBed`、`smallBed1`、`smallBedReal`、`smallBedReal1`，processing 聚合入口不再需要旧兼容代理。
+- 删除 `backend/processing/legacyOpenWebExports.js`，运行时模块不再通过它加载 `openWeb.js`。
+- 新增 `backend/processing/configMappingExecutor.js`，支持 JSON 风格 `line-order`、`point-order` 定义的通用执行。
+- 新增 `backend/server/legacyStateBindingsFactory.js`，把 `server.js` 中一段旧 runtime state store 和 accessor 装配下沉到独立 factory。
+- 新增 `backend/tests/processing/*.test.js` 和 `backend/tests/displaySystems/runtimeChannelPlanner.test.js`，并把 `npm test` 改为运行这些后端迁移回归测试。
+
+## 2026-07-07 Server Runtime 装配继续下沉
+
+- 新增 `backend/server/serialRuntimeFactory.js`，集中创建 `serialParserManager`、`serialManager` 和串口状态 store，`server.js` 不再直接创建串口 parser/manager。
+- 新增 `backend/server/websocketRuntimeFactory.js`，集中创建三路 legacy WebSocket server、`wsSubscriptions`、`ChannelBus` 和 `RealtimeTelemetryGateway`。
+- 新增 `backend/server/runtimeBindingsFactory.js`，把 legacy 串口 runtime context 创建和 parser 绑定合并为一个入口。
+- `server.js` 继续保留启动、状态注入、旧兼容函数和关闭流程，但底层 runtime 装配细节进一步减少。
+
+## 2026-07-07 Display Systems Runtime Binding
+
+- 新增 `backend/displaySystems/displaySystemRuntimeRegistry.js`，manifest 生成的 runtime channel plan 会注册到运行时通道注册表，HTTP 状态中可见 `runtimeChannelRegistry`。
+- 新增 `backend/displaySystems/displaySystemFrameProcessorFactory.js`，支持按 `line-order.json`、`point-order.json`、`algorithm-data.json` 创建通用帧处理器。
+- 新增 `backend/displaySystems/displaySystemRuntimeBinder.js`，把 runtime channel plan 解析为 serial role、parser channel、frame processor 和 `frameOutputPipeline` 输出绑定。
+- `backend/server/appRuntimeFactory.js` 现在负责 Display Systems discovery + runtime binding，`GET /api/display-systems` 会返回 `runtimeDefinitions`、`runtimeChannelRegistry` 和 `runtimeBindings`。
+- 当前仍不自动打开物理串口；真实 COM 口生命周期继续由 `serialManager` 和现有串口控制命令负责。
+
+## 2026-07-07 Display Systems 实时接管链路
+
+- 新增 `backend/displaySystems/displaySystemRuntimeDispatcher.js`，把已绑定的 Display System runtime channel 自动挂到 `serialParserManager.onData(...)`。
+- `appRuntimeFactory` 在 `bindRuntimeChannels()` 后会启动 dispatcher，parser 输出会先规范化为数组，再进入 Display System frame processor，最后输出到 `frameOutputPipeline`。
+- `server.js` 的关闭流程会调用 `appRuntime.displaySystems.stopRuntimeDispatch()`，避免 parser 监听残留。
+- Display System frame processor 现在同时输出 `data` 和通道兼容字段，例如 `sitData/backData/headData`，方便复用旧实时输出和采集管线。
+
+## 2026-07-07 Display Systems 配置校验和 Demo
+
+- 新增 `backend/displaySystems/displaySystemConfigFileValidator.js`，加载 manifest 时会校验 `line-order.json`、`point-order.json` 和 `algorithm-data.json`。
+- 校验范围包括 line order 越界、point 坐标越界、matrix 尺寸不匹配、algorithm 参数类型和 operation 类型。
+- `algorithm.type` 新增 `json`，用于纯配置化算法数据文件。
+- 新增 `backend/displaySystems/examples/byte-matrix-demo/`，作为“manifest + line-order + point-order + algorithm-data”的完整样板。
+- 新增 Display Systems dispatcher/config validation 测试和 WebSocket command router 契约测试，并纳入 `npm test`。
+
+## 2026-07-08 Server 旧状态 Patch 下沉
+
+- 新增 `backend/server/runtimeStatePatchFactory.js`，集中处理 runtime/serial command 返回的旧状态 patch。
+- `server.js` 中两段重复的 `setRuntime(next)` 字段判断已改为 `runtimeStatePatchers.applyRuntimeCommandPatch` 和 `applySerialCommandPatch`。
+- 这一步没有改变 `file/baudRate/localFlag/db/nowDate` 等旧变量的读写语义，但把“命令如何修改旧状态”的规则集中到独立 factory，后续迁到 RuntimeStateStore 时只需要改这一层。
+
+## 2026-07-08 Legacy Runtime 继续拆分
+
+- 新增 `backend/sensors/runtime/legacyGloveFrameProcessor.js`，把 `legacySerialFrameRuntime` 中 262 字节手套帧处理分支拆出。
+- `legacySerialFrameRuntime` 对该分支只负责按帧长度分发，点位整理、手套映射和系统事件输出由 processor 承担。
+- `server.js` 入口处补充清晰中文阅读说明，关闭状态块补充中文注释；历史乱码注释未做大面积删除，避免误伤业务代码。
+
+## 2026-07-08 真实传感器 Manifest 模板和测试
+
+- 新增 `backend/displaySystems/examples/small-bed-12b-manifest-demo/`，使用真实传感器类型 `smallBed12B`，作为现有小床 12B runtime 迁往 manifest 的配置模板。
+- 模板包含 `display-system.json`、`line-order.json`、`point-order.json` 和 `algorithm-data.json`，当前只作为迁移样板，不替代生产小床 runtime。
+- 新增 `runtimeStatePatchFactory`、runtime factories 和 `legacyGloveFrameProcessor` 测试，并把这些测试纳入 `npm test`。
+## 2026-07-08 Runtime Context 读取覆盖扩大
+
+- `backend/server/server.js` 中的历史回放加载、历史日期发布、CSV 导出、历史维护、HTTP 注入、WebSocket command runtime 快照、shutdown runtime 快照和 legacy 串口 runtime getter 已继续改为通过 `runtimeContext` 读取 `file/db/db1/db2/nowDate/localFlag/baudRate`。
+- `runtimeContext` 仍然是迁移期桥接层：读取优先走 `RuntimeStateStore`，store 未就绪时回退旧闭包变量；setter 暂时保留旧闭包写入，避免破坏旧前端命令和旧 runtime 写入路径。
+- 这轮之后，`server.js` 里剩余的 `file/db/nowDate/localFlag` 直接引用主要是初始化、fallback accessor 和 store 自身 accessor，后续可以再把变量本体迁成更纯的 store-native 结构。

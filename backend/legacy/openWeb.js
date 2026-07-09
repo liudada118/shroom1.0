@@ -3,7 +3,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { exec } = require("child_process");
-const { pressSmallBed } = require("./utilMatrix");
+const { pressSmallBed } = require("../processing/utilMatrix");
 const { handLArr } = require("../../util/constant");
 
 const PROJECT_ROOT = path.resolve(__dirname, "../..");

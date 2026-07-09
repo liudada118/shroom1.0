@@ -121,7 +121,7 @@ export default function Home() {
 
   useEffect(() => {
 
-    ws = new WebSocket(" ws://127.0.0.1:19999");
+    ws = new WebSocket("ws://127.0.0.1:19999");
     ws.onopen = () => {
       // connection opened
       console.info("connect success");

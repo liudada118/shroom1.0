@@ -6,7 +6,13 @@ import {
   SafetyCertificateOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { WS_URLS } from '../../constants';
+import useMainWebSocket from '../../services/ws/useMainWebSocket';
+import {
+  getLicenseKeyFromMessage,
+  hasValidLicenseDate,
+  isExpiredLicenseMessage,
+  isObjectMessage,
+} from '../../services/ws/messages';
 import accessKeyIcon from '../../assets/开屏IMG/ChatGPT Image 2026年7月1日 11_54_17.png';
 import {
   BRAND_LOGO_SRC,
@@ -21,90 +27,57 @@ const LicensePortal = () => {
   const [accessKey, setAccessKey] = useState('');
   // 密钥保存和下次回填以后端 config.txt 为准，前端只负责展示后端下发的 licenseKey。
   const [saveKey, setSaveKey] = useState(true);
-  const [wsConnected, setWsConnected] = useState(false);
   const [entering, setEntering] = useState(false);
   const [activeSolution, setActiveSolution] = useState('care');
   const [carouselIndexBySolution, setCarouselIndexBySolution] = useState({});
 
-  const wsRef = useRef(null);
   // ws.onmessage 闭包只创建一次，用 ref 读取最新的输入值 / 提交标记
   const accessKeyRef = useRef(accessKey);
   const isSubmittingRef = useRef(false);
 
   useEffect(() => { accessKeyRef.current = accessKey; }, [accessKey]);
 
-  // 连接桌面端本地服务：用于「进入系统」时提交密钥做校验（不改原有验证逻辑）
-  useEffect(() => {
-    let ws;
-    try {
-      ws = new WebSocket(WS_URLS.MAIN);
-      ws.onopen = () => setWsConnected(true);
-      ws.onclose = () => {
-        setWsConnected(false);
-        setEntering(false);
-        isSubmittingRef.current = false;
-      };
-      ws.onerror = () => {
-        setWsConnected(false);
-        setEntering(false);
-      };
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
+  const handleSocketMessage = useCallback((data) => {
+    if (!isObjectMessage(data)) return;
 
-          if (typeof data.licenseKey === 'string' && data.licenseKey.trim()) {
-            const key = data.licenseKey.trim();
-            if (!accessKeyRef.current.trim()) {
-              setAccessKey(key);
-            }
-          }
-
-          // 密钥验证错误：仅在用户点击「进入系统」提交后才弹错误框
-          // （后端连接/复检时主动推送的 licenseError 不弹，避免一打开就报错）
-          if (data.licenseError != null) {
-            const wasSubmitting = isSubmittingRef.current;
-            isSubmittingRef.current = false;
-            setEntering(false);
-            if (wasSubmitting) {
-              Modal.error({ title: '密钥错误', content: data.licenseError });
-            }
-            return;
-          }
-
-          // 收到有效 date 且后端判定有效（valid !== false）
-          if (data.date != null && data.date > 0 && data.valid !== false) {
-            // 只响应用户主动点击「进入系统」触发的校验，忽略后端被动推送
-            if (!isSubmittingRef.current) return;
-            isSubmittingRef.current = false;
-
-            const serverNow = data.nowDate ? parseFloat(data.nowDate) : window.Date.now();
-            const endDate = parseFloat(data.date);
-            if (endDate <= serverNow) {
-              setEntering(false);
-              Modal.error({ title: '密钥已过期', content: '该密钥已过期，请输入有效的密钥' });
-              return;
-            }
-
-            message.success('密钥验证成功');
-            setTimeout(() => navigate('/system'), 500);
-          }
-        } catch (err) {
-          console.error('解析密钥回包失败:', err);
-        }
-      };
-      wsRef.current = ws;
-    } catch (error) {
-      setWsConnected(false);
+    const key = getLicenseKeyFromMessage(data);
+    if (key && !accessKeyRef.current.trim()) {
+      setAccessKey(key);
     }
 
-    return () => {
-      try {
-        wsRef.current?.close();
-      } catch (error) {
-        // ignore
+    if (data.licenseError != null) {
+      const wasSubmitting = isSubmittingRef.current;
+      isSubmittingRef.current = false;
+      setEntering(false);
+      if (wasSubmitting) {
+        Modal.error({ title: '密钥错误', content: data.licenseError });
       }
-    };
+      return;
+    }
+
+    if (!hasValidLicenseDate(data) || !isSubmittingRef.current) return;
+    isSubmittingRef.current = false;
+
+    if (isExpiredLicenseMessage(data)) {
+      setEntering(false);
+      Modal.error({ title: '密钥已过期', content: '该密钥已过期，请输入有效的密钥' });
+      return;
+    }
+
+    message.success('密钥验证成功');
+    setTimeout(() => navigate('/system'), 500);
   }, [navigate]);
+
+  const handleSocketDisconnect = useCallback(() => {
+    setEntering(false);
+    isSubmittingRef.current = false;
+  }, []);
+
+  const { connected: wsConnected, submitLicenseKey } = useMainWebSocket({
+    onMessage: handleSocketMessage,
+    onClose: handleSocketDisconnect,
+    onError: handleSocketDisconnect,
+  });
 
   const activeSolutionInfo = useMemo(
     () => SOLUTIONS.find((solution) => solution.key === activeSolution) || SOLUTIONS[0],
@@ -128,15 +101,14 @@ const LicensePortal = () => {
       Modal.error({ title: '密钥错误', content: '密钥不能为空，请输入有效密钥' });
       return;
     }
-    const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    if (wsConnected) {
       isSubmittingRef.current = true;
       setEntering(true);
-      ws.send(JSON.stringify({ date: { date: key, startTime: window.Date.now() } }));
+      submitLicenseKey(key);
     } else {
       Modal.error({ title: '连接错误', content: '与应用的连接已断开，请重启应用后重试' });
     }
-  }, [accessKey]);
+  }, [accessKey, submitLicenseKey, wsConnected]);
 
   return (
     <main className="portal-page">

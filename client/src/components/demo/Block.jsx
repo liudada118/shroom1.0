@@ -3,6 +3,7 @@ import { findMax } from "../../assets/util/util";
 import { carBackLine, pressNew } from "../../assets/util/line";
 import { Button, Input, Slider } from "antd";
 import { CSVLink } from "react-csv";
+import { buildCollectionRow } from "./collectionValue";
 let data = [];
 
 function jet(min, max, x) {
@@ -169,7 +170,7 @@ export default function Demo() {
 
     }, [flag]);
 
-    ws = new WebSocket(" ws://localhost:19999");
+    ws = new WebSocket("ws://localhost:19999");
     ws.onopen = () => {
       // connection opened
       console.info("connect success");
@@ -235,13 +236,12 @@ export default function Demo() {
 
       if (jsonObject.backData != null) {
         wsPointData = jsonObject.backData;
-        console.log(eval(objArea), eval)
         wsPointData = wsPointData.map((a) => (a < 10 ? 0 : a));
         const length = wsPointData.filter((a) => a > 0).length;
         const total = wsPointData.reduce((a, b) => a + b, 0);
         const area = (total / length).toFixed(2);
         if (colFalg) {
-          collection.push([JSON.stringify(wsPointData), area, name, eval(name), objArea, eval(objArea)]);
+          collection.push(buildCollectionRow(wsPointData, area, name, objArea, { area, length, total }));
           setLength(collection.length - 1);
           setCsvData(collection);
           localStorage.setItem("collection", JSON.stringify(collection));
@@ -399,7 +399,7 @@ export default function Demo() {
                         const length = wsPointData.filter((a) => a > 0).length;
                         const total = wsPointData.reduce((a, b) => a + b, 0);
                         const area = (total / length).toFixed(2);
-                        collection.push([JSON.stringify(wsPointData), area, name, eval(name), objArea, eval(objArea)]);
+                        collection.push(buildCollectionRow(wsPointData, area, name, objArea, { area, length, total }));
                         localStorage.setItem("collection", JSON.stringify(collection));
                         setCsvData(collection);
                         setLength(collection.length);

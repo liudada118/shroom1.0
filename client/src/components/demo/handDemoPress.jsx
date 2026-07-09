@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import { findMax, gaussBlur_return, jetWhite3 } from "../../assets/util/util";
 import { carBackLine, handLine, pressNew, zeroLine } from "../../assets/util/line";
-import { Button, Input, Select, Slider, Switch } from "antd";
+import { Button, Input, message, Select, Slider, Switch } from "antd";
 import { CSVLink } from "react-csv";
 import { NavLink, useLocation, useParams } from "react-router-dom";
+import { buildCollectionRow } from "./collectionValue";
+import { compileValueFormula } from "./formulaEvaluator";
 let data = [];
 
 var changeValue = (value) => {
@@ -354,7 +356,7 @@ export default function Demo() {
 
     // setData(newData)
     // [优化] 统一使用主 WS 端口
-    ws = new WebSocket(" ws://localhost:19999");
+    ws = new WebSocket("ws://localhost:19999");
     ws.onopen = () => {
       // connection opened
       console.info("connect success");
@@ -651,7 +653,7 @@ export default function Demo() {
             } else {
               res = resarr.filter((a) => a > resarr.reduce((a, b) => a + b, 0) / resarr.length)
             }
-            collection.push([JSON.stringify(wsPointData), area, name, eval(name), objArea, eval(objArea)]);
+            collection.push(buildCollectionRow(wsPointData, area, name, objArea, { area, length, total }));
             console.log(collection)
             // collection.push([res[0], res[1], res[2], collection.length >= 3 ? res[0] - collection[collection.length - 1][0] : null, collection.length >= 3 ? res[1] - collection[collection.length - 1][1] : null, collection.length >= 3 ? res[2] - collection[collection.length - 1][2] : null]);
             localStorage.setItem("collection", JSON.stringify(collection));
@@ -736,11 +738,12 @@ export default function Demo() {
           <div style={{ fontWeight: 'bold' }}>分压模块</div>
           <textarea name="" id="" value={formula} onChange={(e) => { setFormula(e.target.value) }} ></textarea>
           <Button onClick={() => {
-            eval(`
-                changeValue = (y) => {
-                  ${formula}
-                }              
-                `)
+            try {
+              changeValue = compileValueFormula(formula);
+              message.success('公式已应用');
+            } catch (error) {
+              message.error(error.message);
+            }
           }}>使用</Button>
         </div>
       </div>

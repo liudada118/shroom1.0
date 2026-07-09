@@ -1,5 +1,77 @@
 # 后端阅读入口
 
+## 2026-07-08 Backend SDK Demo
+
+| Need | Entry |
+| :--- | :--- |
+| Node SDK client for backend HTTP/WS | `sdk/src/backend/BackendSdkClient.js` |
+| Runnable SDK demo | `sdk/examples/backend-sdk-demo.js` |
+| Demo command | `npm run sdk:demo` |
+| Local serial chain demo | `sdk/examples/serial-chain-demo.js` / `npm run sdk:serial-demo` |
+| SDK client test | `backend/tests/sdk/backendSdkClient.test.js` |
+
+The demo uses the public backend contract instead of importing `server.js` internals.
+
+## 2026-07-08 Server Bootstrap Recovery
+
+| Need | Entry |
+| :--- | :--- |
+| Bootstrap imports and legacy state bridge | `backend/server/server.js` |
+| Sensor runtime factory split | `backend/server/sensorProcessorFactory.js`, `backend/server/smallBedRuntimeFactory.js`, `backend/server/handRuntimeFactory.js` |
+
+This repair restored module-load dependencies that are still needed before the next store-native migration.
+
+## 2026-07-08 Sensor Runtime Factory Entries
+
+| Need | Entry |
+| :--- | :--- |
+| 1024 sit/back/head processor wiring | `backend/server/sensorProcessorFactory.js` |
+| Small-bed 12B runtime wiring | `backend/server/smallBedRuntimeFactory.js` |
+| Hand full-packet and double-packet runtime wiring | `backend/server/handRuntimeFactory.js` |
+| Tests | `backend/tests/server/sensorProcessorFactory.test.js`, `backend/tests/server/smallBedRuntimeFactory.test.js`, `backend/tests/server/handRuntimeFactory.test.js` |
+
+`server.js` now calls these factory entries instead of holding their detailed dependency maps directly.
+
+## 2026-07-08 新增阅读入口
+
+| 想看什么 | 入口 |
+| :--- | :--- |
+| 旧状态命令写入如何走 store-backed | `backend/server/runtimeStatePatchFactory.js` |
+| Display Systems 和 legacy parser 的并行/保护策略 | `backend/displaySystems/displaySystemRuntimePolicy.js` |
+| Display Systems parser listener 生命周期 | `backend/displaySystems/displaySystemRuntimeDispatcher.js` |
+| jqbed manifest 迁移模板 | `backend/displaySystems/examples/jqbed-manifest-demo/` |
+| hand glove manifest 迁移模板 | `backend/displaySystems/examples/hand-glove-manifest-demo/` |
+| 后端测试总入口 | `backend/tests/run-tests.js` |
+
+当前 Display Systems 默认不会抢 `sit/back/head/sensor` 旧通道。模板使用 `runtimeMode: "template"`；需要并行验证时才把 manifest metadata 改成 `runtimeMode: "parallel"`。
+
+## 2026-07-08 Server Factory 新入口
+
+| 想看什么 | 入口 |
+| :--- | :--- |
+| Display Systems runtime binding/dispatcher 生命周期 | `backend/server/displaySystemRuntimeFactory.js` |
+| legacy runtime state store 初始化和 store-backed key 清单 | `backend/server/runtimeStateStoreFactory.js` |
+| Display Systems runtime factory 测试 | `backend/tests/server/displaySystemRuntimeFactory.test.js` |
+| runtime state store factory 测试 | `backend/tests/server/runtimeStateStoreFactory.test.js` |
+
+## 2026-07-08 Legacy OpenWeb 归档
+
+| 想看什么 | 入口 |
+| :--- | :--- |
+| 旧 openWeb 对比基线 | `backend/legacy/openWeb.js` |
+| 旧文件归档说明 | `backend/legacy/README.md` |
+
+`backend/processing/openWeb.js` 已经移走，processing 目录只保留新分类入口和真实迁出的实现。需要做新功能时不要再从 legacy 目录引入能力，只有回归测试可以把它作为旧输出基线。
+
+## 2026-07-08 Runtime Context 新入口
+
+| 想看什么 | 入口 |
+| :--- | :--- |
+| 旧状态读取如何 store 优先、闭包兜底 | `backend/server/runtimeContextFactory.js` |
+| frame pipeline 如何获取当前传感器和三路数据库 | `backend/server/framePipelineFactory.js` |
+| runtime context 测试 | `backend/tests/server/runtimeContextFactory.test.js` |
+| frame pipeline factory 测试 | `backend/tests/server/framePipelineFactory.test.js` |
+
 这份文档只回答一个问题：**现在代码拆开以后，应该从哪里看？**
 
 长文档在 `backend/BACKEND_ARCHITECTURE.md`，这里是日常维护用的短导航。
@@ -154,3 +226,163 @@ flowchart LR
 | Manifest 校验 | `backend/displaySystems/displaySystemConfigValidator.js` |
 | 配置目录加载 | `backend/displaySystems/displaySystemConfigLoader.js` |
 | 展示系统注册表 | `backend/displaySystems/displaySystemRegistry.js` |
+
+## Display Systems HTTP 发现接口
+
+| 你想看什么 | 入口 |
+| :--- | :--- |
+| 展示系统列表 | `GET /api/display-systems` |
+| 单个展示系统详情 | `GET /api/display-systems/:id` |
+| SDK 能力快照 | `GET /api/sdk/contract` 里的 `displaySystems` 字段 |
+| 运行时扫描目录 | `runtimeResourceRoot/display-systems`、`runtimeResourceRoot/displaySystems`、`runtimeWritableRoot/display-systems`、`runtimeWritableRoot/displaySystems` |
+
+这个入口现在只负责发现和查询配置，不直接处理串口数据。实时数据仍然走 `serial -> sensors/runtime -> frameOutputPipeline -> websocketSubscription`。
+
+## 本轮架构优化入口
+
+| 你想看什么 | 入口 |
+| :--- | :--- |
+| 旧串口 runtime 显式依赖 | `backend/sensors/runtime/legacySerialFrameRuntime.js` |
+| 展示系统运行时发现 | `backend/displaySystems/displaySystemRuntimeDiscovery.js` |
+| runtime 旧 server 懒加载兼容入口 | `backend/runtime/index.js` |
+
+当前重点变化：后端已经没有 `with (ctx)`，展示系统扫描细节也不再堆在 `server.js` 里。
+
+## Processing 分类入口
+
+| 你想看什么 | 入口 |
+| :--- | :--- |
+| processing 总入口 | `backend/processing/index.js` |
+| 线序/点位映射 | `backend/processing/lineOrders.js` |
+| 矩阵清零/形状变换 | `backend/processing/matrixTransforms.js` |
+| 压力换算 | `backend/processing/pressureTransforms.js` |
+| 插值/平滑 | `backend/processing/interpolation.js` |
+| 时间格式化 | `backend/processing/timeFormatters.js` |
+| 打包前端静态服务 | `backend/processing/webStaticServer.js` |
+
+`openWeb.js` 现在仍是旧实现仓库，但后端和 SDK 新入口已经通过这些分类 facade 访问。
+
+## Processing 已迁出的真实实现
+
+| 能力 | 当前位置 |
+| :--- | :--- |
+| 32x32 断线修补 `zeroLine` | `backend/processing/matrixTransforms.js` |
+| 任意正方矩阵断线修补 `zeroLineMatrix` | `backend/processing/matrixTransforms.js` |
+| 小床固定坏列修补 `smallBedZero` | `backend/processing/matrixTransforms.js` |
+| 时间格式化 `timeStampToDate` / `timeStampTo_Date` / `timeStampToDateNum` | `backend/processing/timeFormatters.js` |
+| 打包前端静态服务 `openWeb` | `backend/processing/webStaticServer.js` |
+| 区域压力统计 `calPressArr` | `backend/processing/pressureTransforms.js` |
+| 压力换算 `pressToN` / `carFitting` / `mmghToPress` | `backend/processing/pressureTransforms.js` |
+| 主床垫线序 `jqbed` | `backend/processing/lineOrders.js` |
+| 新手部线序 `newHand` | `backend/processing/lineOrders.js` |
+| 温度床线序和温度抽取 `tempFullBed` | `backend/processing/lineOrders.js` |
+
+这些函数已经不是简单代理 `openWeb.js`，后续同类纯函数继续按这个方式迁出。
+
+## 2026-07-07 本轮架构优化
+
+| 优化点 | 结果 |
+| :--- | :--- |
+| Display Systems runtime 定义 | 新增 `backend/displaySystems/displaySystemDefinitionBuilder.js`，manifest 现在可以生成 `sensorDefinition`、`parserChannels` 和前端可读 `displayMetadata`。 |
+| Display Systems 发现服务 | `displaySystemRuntimeDiscovery` 注册配置时会附带 `runtimeDefinition`，列表状态额外返回 `runtimeDefinitions`。 |
+| server runtime 装配 | 新增 `backend/server/appRuntimeFactory.js`，`server.js` 不再直接创建 Display Systems runtime discovery。 |
+| 复杂线序迁移 | `lineOrders.js` 继续承接 `carSitLine`、`carBackLine`、`wowSitLine`、`wowBackLine`、`footL`、`footR`、`footVideo` 的真实实现。 |
+| `openWeb.js` 依赖收缩 | 车座/车背、wow 座/背和脚部线序不再通过旧文件执行；旧文件仍作为手套、手部视频映射和插值等未迁移函数的兼容仓库。 |
+
+剩余重点：手套和手部视频线序中仍有大块点位表，下一步应拆成 `lineOrderDefinitions` 数据文件，再让 `lineOrders.js` 只保留映射执行器。
+
+## 2026-07-07 线序数据定义拆分
+
+| 优化点 | 结果 |
+| :--- | :--- |
+| 通用线序 mapper | 新增 `backend/processing/lineOrderMapper.js`，提供 1 基 ADC 顺序抽取和坐标填点能力。 |
+| 点位定义目录 | 新增 `backend/processing/lineOrderDefinitions/`，把脚部、手部、手套的大点位表从执行逻辑里拆出来。 |
+| 手部线序迁移 | `handR`、`handL`、`handRVideo1470506` 已从旧 `openWeb.js` 迁出，并复用 `lineOrderDefinitions/hand.js`。 |
+| 手套线序迁移 | `gloves`、`gloves1`、`gloves2`、`gloves0123` 已从旧 `openWeb.js` 迁出，并复用 `lineOrderDefinitions/gloves.js`。 |
+| server 路径装配 | `server.js` 改为使用 `serverPathConfig.js` 返回的路径配置，不再手写 packaged/dev 路径判断和目录创建。 |
+
+这一轮后，`lineOrders.js` 的方向变成“执行器入口”，点位表逐步迁入 definitions；`openWeb.js` 剩余重点主要是插值/平滑算法和其它零散视频映射函数。
+
+## 2026-07-07 算法与视频映射继续拆分
+
+| 想改的内容 | 优先入口 |
+| :--- | :--- |
+| 插值算法 | `backend/processing/interpolationAlgorithms.js` |
+| 平滑算法 | `backend/processing/smoothingAlgorithms.js` |
+| manifest 可选算法注册 | `backend/processing/algorithmDefinitions/index.js` |
+| 零散视频映射/裁剪 | `backend/processing/videoPointMappings.js` |
+| 后端整体阅读路线 | `backend/ARCHITECTURE_MAP.md` |
+
+`interpolation.js` 已不再代理旧 `openWeb.js`；`videoPointMappings.js` 已迁出一批小型映射函数，较大的手部视频映射函数先集中代理，后续继续拆点位定义。
+
+## 2026-07-07 OpenWeb 依赖继续收缩
+
+| 当前状态 | 说明 |
+| :--- | :--- |
+| `lineOrders.js` | 已不再依赖旧 `openWeb.js`。 |
+| `videoPointMappings.js` | 已不再依赖旧 `openWeb.js`。 |
+| `matrixTransforms.js` | 已移除对旧视频映射的 re-export。 |
+| `pressureTransforms.js` | 已迁出小床系列和压力换算函数，不再依赖旧 `openWeb.js`。 |
+| `displaySystems/displaySystemRuntimeChannelPlanner.js` | 已能从 manifest 生成实时链路计划，但还不执行串口绑定。 |
+
+`processing` 聚合入口已经彻底断开对旧 `openWeb.js` 的直接依赖；如果继续瘦 `server.js`，优先拆 `runtimeBindingsFactory.js` 和 `serialRuntimeFactory.js`。
+
+## 2026-07-07 测试与配置化执行器
+
+| 新增内容 | 说明 |
+| :--- | :--- |
+| `backend/processing/configMappingExecutor.js` | 支持读取/执行 JSON 风格的 `line-order`、`point-order` 配置，为 Display Systems 从配置生成展示链路做准备。 |
+| `backend/tests/processing/*.test.js` | 固化线序、视频映射、压力转换和配置化 mapper 的回归测试。 |
+| `backend/tests/displaySystems/runtimeChannelPlanner.test.js` | 固化 manifest 到 runtime channel plan 的结构测试。 |
+| `package.json` | `npm test` 改为运行后端迁移回归测试。 |
+
+## 2026-07-07 新增阅读入口
+
+| 想看什么 | 入口文件 |
+| :--- | :--- |
+| 串口运行时装配 | `backend/server/serialRuntimeFactory.js` |
+| WebSocket 运行时装配 | `backend/server/websocketRuntimeFactory.js` |
+| Legacy 串口 runtime 绑定装配 | `backend/server/runtimeBindingsFactory.js` |
+| Display Systems runtime channel 注册表 | `backend/displaySystems/displaySystemRuntimeRegistry.js` |
+| Display Systems JSON 帧处理器 | `backend/displaySystems/displaySystemFrameProcessorFactory.js` |
+| Display Systems runtime 绑定 | `backend/displaySystems/displaySystemRuntimeBinder.js` |
+| Display Systems HTTP 契约测试 | `backend/tests/http/displaySystemsApi.test.js` |
+
+现在 `GET /api/display-systems` 不只返回 manifest 发现结果，也会返回 `runtimeChannelRegistry` 和 `runtimeBindings`。这表示配置已经进入运行时注册/绑定层，但仍不会自动打开物理串口。
+
+## 2026-07-07 实时接管入口
+
+| 想看什么 | 入口文件 |
+| :--- | :--- |
+| Display Systems parser 数据接管 | `backend/displaySystems/displaySystemRuntimeDispatcher.js` |
+| Display Systems 配置文件校验 | `backend/displaySystems/displaySystemConfigFileValidator.js` |
+| 配置化展示系统样板 | `backend/displaySystems/examples/byte-matrix-demo/` |
+| WS command router 契约测试 | `backend/tests/ws/webSocketCommandRouter.test.js` |
+
+现在 Display Systems 的状态分三层：
+
+- `runtimeChannelRegistry`：manifest 生成的通道计划已经注册。
+- `runtimeBindings`：通道计划已经解析到 parser、processor 和输出 pipeline。
+- `runtimeDispatcher`：已绑定通道已经挂到 `serialParserManager.onData(...)`。
+
+物理串口生命周期仍由 `serialManager` 管理；Display Systems 接管的是 parser 产出后的配置化处理链路。
+
+## 2026-07-08 新增阅读入口
+
+| 想看什么 | 入口文件 |
+| :--- | :--- |
+| 旧 runtime/serial command 如何写回状态 | `backend/server/runtimeStatePatchFactory.js` |
+| 262 字节手套帧处理 | `backend/sensors/runtime/legacyGloveFrameProcessor.js` |
+| smallBed12B manifest 迁移模板 | `backend/displaySystems/examples/small-bed-12b-manifest-demo/` |
+| runtime factory 装配测试 | `backend/tests/server/runtimeFactories.test.js` |
+
+这一轮没有把所有旧变量一次性迁到 store，而是先把 command 写状态的规则集中起来。这样后续替换 `file/baudRate/localFlag/db/nowDate` 时可以在一个 factory 内逐项迁移。
+## 2026-07-08 Runtime Context 读取入口继续扩大
+
+| 想看什么 | 入口 |
+| :--- | :--- |
+| 旧状态读取如何 store 优先、闭包兜底 | `backend/server/runtimeContextFactory.js` |
+| 哪些 server.js 链路已改用 runtimeContext | `backend/server/server.js` 中历史回放、CSV/历史维护、WS command、shutdown、legacy 串口 runtime getter |
+| runtime context 测试 | `backend/tests/server/runtimeContextFactory.test.js` |
+
+当前策略是先统一读取入口，setter 暂时兼容旧闭包写入；等旧前端命令和 legacy runtime 进一步收缩后，再把变量本体迁成更纯的 store-native 状态。

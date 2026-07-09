@@ -169,7 +169,7 @@ export default function HandBlock() {
     return (
         <div style={{ position: 'relative', display: 'flex', fontSize: 12, border: '1px solid black' }}>
             <div style={{ position: 'relative' }}>
-                <img src={img} style={{ position: 'absolute', top: 0,
+                <img src={img} style={{ position: 'absolute',
                     //  width: `${display == 'width' ? `${32*(boxSize + 2)}px` : "unset"}`, height: `${display == 'height' ? `${32*(boxSize + 2)}px` : "unset"}`,
                     width : '1307px', height : '900px',
                     left : '-371px',top : '-40px',

@@ -20,6 +20,8 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 
+const EMPTY_CHANNELS = [];
+
 /** WebSocket 连接状态枚举 */
 export const ReadyState = {
   CONNECTING: 0,
@@ -51,7 +53,7 @@ export default function useWebSocket(url, options = {}) {
     onOpen,
     onClose,
     onError,
-    channels = [],
+    channels = EMPTY_CHANNELS,
   } = options;
 
   const wsRef = useRef(null);

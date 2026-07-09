@@ -57,7 +57,7 @@ export default function Robot() {
         })
         const file = document.getElementById('file')
         const data = document.getElementById('data')
-        const ws = new WebSocket(" ws://127.0.0.1:19999");
+        const ws = new WebSocket("ws://127.0.0.1:19999");
         let length = 0
         ws.onopen = () => {
             // connection opened

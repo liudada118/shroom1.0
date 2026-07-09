@@ -3,6 +3,9 @@ const path = require('path');
 const {
   validateDisplaySystemConfig,
 } = require('./displaySystemConfigValidator');
+const {
+  validateDisplaySystemDefinitionFiles,
+} = require('./displaySystemConfigFileValidator');
 
 const DEFAULT_MANIFEST_FILENAMES = Object.freeze([
   'display-system.json',
@@ -124,6 +127,20 @@ function loadDisplaySystemDirectory(directory, {
       errors: missingFiles,
       manifestPath,
     };
+  }
+
+  if (validateFiles) {
+    const definitionValidation = validateDisplaySystemDefinitionFiles(config, {
+      readJsonFile,
+    });
+    if (!definitionValidation.ok) {
+      return {
+        ok: false,
+        config: null,
+        errors: definitionValidation.errors,
+        manifestPath,
+      };
+    }
   }
 
   return {

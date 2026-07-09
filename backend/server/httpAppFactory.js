@@ -7,6 +7,32 @@ const {
 const { registerControlRoutes } = require('../http/controlRoutes');
 const { registerReportRoutes } = require('../http/reportRoutes');
 
+function createJsonBodyErrorHandler(logger) {
+  return (error, req, res, next) => {
+    if (!error) {
+      next();
+      return;
+    }
+
+    if (error.type === 'entity.parse.failed') {
+      res.status(400).json({
+        error: 'invalid json body',
+      });
+      return;
+    }
+
+    if (error.type === 'entity.too.large') {
+      res.status(413).json({
+        error: 'request body too large',
+      });
+      return;
+    }
+
+    logger?.error?.('[http] request body parse failed', error);
+    next(error);
+  };
+}
+
 /**
  * 创建 HTTP 应用并挂载控制接口、通道状态接口和报表接口。
  * server.js 只负责传入运行时依赖，HTTP 路由定义集中在这里。
@@ -14,6 +40,8 @@ const { registerReportRoutes } = require('../http/reportRoutes');
 function createHttpApp({
   controlCommandService,
   getChannelBusStatus,
+  getDisplaySystemById = () => null,
+  getDisplaySystemStatus = () => ({ count: 0, systems: [] }),
   getPort,
   getRealtimeChannels,
   getSerialStatus,
@@ -29,6 +57,7 @@ function createHttpApp({
   httpApp.use(cors());
   httpApp.use(express.json({ limit: '50mb' }));
   httpApp.use(express.urlencoded({ limit: '50mb', extended: true }));
+  httpApp.use(createJsonBodyErrorHandler(logger));
 
   httpApp.get(HTTP_ROUTES.channels, (req, res) => {
     res.json({
@@ -49,9 +78,31 @@ function createHttpApp({
   httpApp.get(HTTP_ROUTES.sdkContract, (req, res) => {
     res.json(buildSdkContractSnapshot({
       channels: getRealtimeChannels(),
+      displaySystems: getDisplaySystemStatus(),
       serialStatus: getSerialStatus(),
       subscriptions: getWsSubscriptionStatus(),
     }));
+  });
+
+  httpApp.get(HTTP_ROUTES.displaySystems, (req, res) => {
+    res.json({
+      displaySystems: getDisplaySystemStatus(),
+    });
+  });
+
+  httpApp.get(`${HTTP_ROUTES.displaySystems}/:id`, (req, res) => {
+    const displaySystem = getDisplaySystemById(req.params.id);
+    if (!displaySystem) {
+      res.status(404).json({
+        error: 'display system not found',
+        id: req.params.id,
+      });
+      return;
+    }
+
+    res.json({
+      displaySystem,
+    });
   });
 
   registerControlRoutes(httpApp, {
@@ -75,4 +126,5 @@ function createHttpApp({
 
 module.exports = {
   createHttpApp,
+  createJsonBodyErrorHandler,
 };

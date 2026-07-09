@@ -16,6 +16,8 @@ const HTTP_ROUTES = Object.freeze({
   channels: '/api/channels',
   wsStatus: '/api/ws/status',
   sdkContract: '/api/sdk/contract',
+  displaySystems: '/api/display-systems',
+  displaySystemById: '/api/display-systems/:id',
   commands: '/api/commands',
   serialPorts: '/api/serial/ports',
   serialStatus: '/api/serial/status',
@@ -68,6 +70,7 @@ function listSerialRoles() {
 
 function buildSdkContractSnapshot({
   channels = [],
+  displaySystems = {},
   serialStatus = {},
   subscriptions = {},
 } = {}) {
@@ -116,6 +119,11 @@ function buildSdkContractSnapshot({
     displaySystems: {
       schemaVersion: DISPLAY_SYSTEM_SCHEMA_VERSION,
       manifestFiles: DISPLAY_SYSTEM_MANIFEST_FILES,
+      routes: {
+        list: HTTP_ROUTES.displaySystems,
+        detail: HTTP_ROUTES.displaySystemById,
+      },
+      status: displaySystems,
       manifestShape: {
         id: 'string',
         name: 'string',

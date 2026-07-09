@@ -46,10 +46,15 @@ function createSerialParserManager({
     getParser(channel).on('data', handler);
   }
 
+  function offData(channel, handler) {
+    getParser(channel).removeListener('data', handler);
+  }
+
   return {
     channels: SERIAL_PARSER_CHANNELS,
     getParser,
     getSitParser,
+    offData,
     onData,
     pipe,
     pipeSit,

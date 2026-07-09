@@ -36,7 +36,7 @@ export default function Demo() {
     const [max, setMax] = useState(0)
     const [maxCol, setMaxCol] = useState(0)
     useEffect(() => {
-        ws = new WebSocket(" ws://localhost:19999");
+        ws = new WebSocket("ws://localhost:19999");
         ws.onopen = () => {
             // connection opened
             console.info("connect success");

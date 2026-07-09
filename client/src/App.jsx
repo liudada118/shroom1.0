@@ -1,33 +1,35 @@
 ﻿import "./App.css";
+import { lazy, Suspense } from "react";
 import { HashRouter, Routes, Route } from "react-router-dom";
 import { App as AntdApp, message } from "antd";
 import UpdateNotifier from "./components/updater/UpdateNotifier";
 
-import Home from './page/home/Home'
-import Demo from "./components/demo/Demo";
-import HandDemo from "./components/demo/handDemo";
-import HandLinePressDemo from "./components/demo/handDemoPress";
-import Demo1016 from "./components/demo/Demo1016";
-import Demo1010 from "./components/demo/Demo1010";
-import Demo24 from "./components/demo/Demo2419";
-import Block from "./components/demo/Block";
-import { Heatmap } from "./components/heatmap/canvas";
 import i18next from "i18next";
-import Log from "./components/log/log";
-import MatrixDiff from "./components/demo/matrixDiff";
-import Date from "./page/date/Date";
-import HandBlock from "./components/demo/handBlock";
-import HandBlock32 from "./components/demo/handBlock32";
-import HandBlock24 from "./components/demo/handBlock24";
-import HandBlock20 from './components/demo/handBlock20'
-import CsvData from "./components/demo/robot";
-import HandLine from "./components/demo/handLine0116";
-import HandLine0123 from "./components/demo/handLine0123";
-import LineAdjust from "./components/demo/LineAdjust";
-import Can from "./components/demo/can";
-import Num3D from "./components/num/NumWs";
-import License from "./page/license/License";
-import LicensePortal from "./page/licensePortal/LicensePortal";
+
+const Home = lazy(() => import("./page/home/Home"));
+const Demo = lazy(() => import("./components/demo/Demo"));
+const HandDemo = lazy(() => import("./components/demo/handDemo"));
+const HandLinePressDemo = lazy(() => import("./components/demo/handDemoPress"));
+const Demo1016 = lazy(() => import("./components/demo/Demo1016"));
+const Demo1010 = lazy(() => import("./components/demo/Demo1010"));
+const Demo24 = lazy(() => import("./components/demo/Demo2419"));
+const Block = lazy(() => import("./components/demo/Block"));
+const Heatmap = lazy(() => import("./components/heatmap/canvas").then((module) => ({ default: module.Heatmap })));
+const Log = lazy(() => import("./components/log/log"));
+const MatrixDiff = lazy(() => import("./components/demo/matrixDiff"));
+const Date = lazy(() => import("./page/date/Date"));
+const HandBlock = lazy(() => import("./components/demo/handBlock"));
+const HandBlock32 = lazy(() => import("./components/demo/handBlock32"));
+const HandBlock24 = lazy(() => import("./components/demo/handBlock24"));
+const HandBlock20 = lazy(() => import("./components/demo/handBlock20"));
+const CsvData = lazy(() => import("./components/demo/robot"));
+const HandLine = lazy(() => import("./components/demo/handLine0116"));
+const HandLine0123 = lazy(() => import("./components/demo/handLine0123"));
+const LineAdjust = lazy(() => import("./components/demo/LineAdjust"));
+const Can = lazy(() => import("./components/demo/can"));
+const Num3D = lazy(() => import("./components/num/NumWs"));
+const License = lazy(() => import("./page/license/License"));
+const LicensePortal = lazy(() => import("./page/licensePortal/LicensePortal"));
 i18next.init({
   resources: {
     en: {
@@ -337,6 +339,7 @@ function App() {
     <AntdApp>
     <UpdateNotifier />
     <HashRouter>
+      <Suspense fallback={null}>
       <Routes>
         <Route exact path="/handPoint" element={
           // <I18nProvider lng="en">
@@ -405,6 +408,7 @@ function App() {
         {/* <Route exact path="/local" element={<Local />} /> */}
         {/* <Route exact path="/back" element={<Back />} /> */}
       </Routes>
+      </Suspense>
     </HashRouter>
     </AntdApp>
   );

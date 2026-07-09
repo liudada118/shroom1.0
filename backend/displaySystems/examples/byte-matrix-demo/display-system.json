@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "byte-matrix-demo",
+  "name": "Byte Matrix Demo",
+  "version": "0.1.0",
+  "description": "Demo display system that maps byte frames through JSON configuration.",
+  "sensor": {
+    "type": "byteMatrixDemo",
+    "matrix": {
+      "rows": 2,
+      "cols": 3
+    },
+    "ports": ["sit"]
+  },
+  "files": {
+    "lineOrder": "line-order.json",
+    "pointOrder": "point-order.json"
+  },
+  "algorithm": {
+    "type": "json",
+    "dataFile": "algorithm-data.json"
+  },
+  "display": {
+    "views": ["heatmap"],
+    "defaultView": "heatmap"
+  },
+  "metadata": {
+    "demo": true
+  }
+}

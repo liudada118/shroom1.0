@@ -154,7 +154,7 @@ export default function HandBlock() {
     return (
         <div style={{ position: 'relative', display: 'flex', fontSize: 6, border: '1px solid black' }}>
             <div style={{ position: 'relative' }}>
-                <img src={img} style={{ position: 'absolute', top: 0, width: `${display == 'width' ? 512 + 'px' : "unset"}`, height: `${display == 'height' ? 512 + 'px' : "unset"}`, opacity: 1, zIndex: -1, left: `${left}px`, top: `${up}px` }} alt="" />
+                <img src={img} style={{ position: 'absolute', width: `${display == 'width' ? 512 + 'px' : "unset"}`, height: `${display == 'height' ? 512 + 'px' : "unset"}`, opacity: 1, zIndex: -1, left: `${left}px`, top: `${up}px` }} alt="" />
                 <div style={{ display: 'flex', position: 'relative', zIndex: 1 }}>
                     <div style={{ width: boxSize }}>{0}</div>
                     {

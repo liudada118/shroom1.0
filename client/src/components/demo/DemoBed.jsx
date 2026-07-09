@@ -81,7 +81,7 @@ export default function Demo() {
       : 1000
   );
   useEffect(() => {
-    ws = new WebSocket(" ws://localhost:19999");
+    ws = new WebSocket("ws://localhost:19999");
     ws.onopen = () => {
       // connection opened
       console.info("connect success");

@@ -1,0 +1,973 @@
+# Shroom 架构笔记
+
+## 文档信息
+- 更新时间
+	- 2026-07-09
+- 来源依据
+	- 当前代码结构
+	- `package.json`
+	- `client/src/App.jsx`
+	- `client/src/services/ws`
+	- `backend/server/server.js`
+	- `backend/README.md`
+	- `backend/ARCHITECTURE_MAP.md`
+	- `sdk/README.md`
+- 笔记格式
+	- Obsidian 大纲
+	- 可折叠层级
+	- 无表格结构
+
+## 系统定位
+- 产品名称
+	- Shroom
+- 应用类型
+	- Electron 桌面应用
+- 核心场景
+	- 压力传感矩阵
+	- 实时采集
+	- 实时可视化
+	- 本地存储
+	- 历史回放
+	- CSV 导出
+	- 授权控制
+- 传感器对象
+	- 座椅
+	- 靠背
+	- 头枕
+	- 小床
+	- 触觉手套
+	- 触觉足底
+	- 触觉上衣
+	- 轮椅
+	- 宠物看护
+	- 人体全身
+	- 整椅
+- 用户侧入口
+	- 授权门户
+	- 实时系统
+	- 历史回放
+	- 采集配置
+	- 报告导出
+	- 调试 Demo
+
+## 技术栈
+- 桌面层
+	- Electron
+	- Electron Forge
+	- electron-builder
+	- electron-updater
+- 后端层
+	- Node.js
+	- Express 5
+	- WebSocket `ws`
+	- SerialPort
+	- better-sqlite3
+	- crypto-js
+	- csv-writer
+- 前端层
+	- React 19
+	- Vite
+	- React Router
+	- Ant Design
+	- Three.js
+	- ECharts
+	- react-i18next
+	- Zustand
+- 算法层
+	- 线序映射
+	- 点位映射
+	- 清零校准
+	- 插值
+	- 平滑
+	- 压力换算
+	- 视频点位映射
+- Python 层
+	- 宠物看护算法
+	- OneStep 报告辅助
+	- 打包运行时资源
+
+## 顶层目录
+- `app/`
+	- Electron 主进程
+	- preload 桥接
+	- 更新模块
+- `client/`
+	- React 前端
+	- Vite 构建
+	- 页面和展示组件
+- `backend/`
+	- 后端编排
+	- 串口 runtime
+	- HTTP 接口
+	- WebSocket 接口
+	- Display Systems
+	- 业务服务层
+- `sdk/`
+	- 后端薄 SDK
+	- 本地串口 SDK
+	- 示例脚本
+- `python/`
+	- Python 算法运行时
+	- 打包资源源目录
+- `build/`
+	- 前端生产构建产物
+	- Electron extraResources 输入
+- `db/`
+	- SQLite 数据库
+- `data/`
+	- CSV 导出数据
+- `pack-resources/`
+	- 打包资源
+	- DB 资源
+	- Python 资源
+- `docs/`
+	- 项目文档
+	- 架构说明
+	- 发布说明
+- `runtime/`
+	- 运行期文件
+	- 临时文件
+	- 日志入口
+
+## 启动入口
+- Electron 入口
+	- `app/electron/index.js`
+	- 负责桌面窗口
+	- 负责加载前端资源
+	- 负责主进程能力桥接
+- 后端入口
+	- `backend/server/server.js`
+	- 负责 HTTP 装配
+	- 负责 WebSocket 装配
+	- 负责串口 runtime 装配
+	- 负责 Display Systems 装配
+	- 保留 legacy 兼容桥
+- 前端入口
+	- `client/src/App.jsx`
+	- HashRouter
+	- 路由懒加载
+	- 授权门户
+	- 系统主页
+	- 调试 Demo
+- 构建入口
+	- `npm run build-client`
+	- `npm run prepare-pack-resources`
+	- `npm run package`
+	- `npm run make`
+	- `npm run build`
+
+## 前端
+- 主页面
+	- `client/src/page/home/Home.jsx`
+	- 实时展示总入口
+	- 传感器切换
+	- WebSocket 数据分发
+	- 渲染组件装配
+	- 历史回放控制
+	- 采集控制
+- 授权页面
+	- `client/src/page/licensePortal/LicensePortal.jsx`
+	- `client/src/page/license/License.jsx`
+	- `client/src/page/date/Date.jsx`
+	- 密钥输入
+	- 密钥状态
+	- 授权范围
+- 页面路由
+	- `/`
+		- 授权门户
+	- `/system`
+		- 主系统
+	- `/key`
+		- 旧密钥页
+	- `/license`
+		- 授权配置
+	- `/num/:type`
+		- 数字矩阵 Demo
+	- `/handReal`
+		- 手部 Demo
+	- `/handLinePressData`
+		- 分压 Demo
+	- `/3Dnum`
+		- 3D 数字
+- 展示组件
+	- `components/three/`
+		- 3D 模型
+		- 手套
+		- 座椅
+		- 小床
+		- 轮椅
+		- 整椅
+	- `components/video/`
+		- 视频映射展示
+		- 人体全身
+		- 触觉上衣
+		- 触觉足底
+	- `components/num/`
+		- 2D 数字矩阵
+		- 3D 数字矩阵
+		- 原始数据视图
+	- `components/heatmap/`
+		- 2D 热力图
+	- `components/webgl/`
+		- WebGL 热力图
+	- `components/title/`
+		- 系统选择
+		- 串口选择
+		- 模式选择
+		- 采集配置
+	- `components/aside/`
+		- 指标面板
+		- 压力统计
+		- 生命体征
+		- 传感器辅助信息
+	- `components/progress/`
+		- 历史回放进度
+		- 播放控制
+		- 区间选择
+- 前端 WS 服务
+	- `client/src/services/ws/messages.js`
+		- 命令构造
+		- JSON 发送
+		- JSON 解析
+		- 授权消息分类
+		- 传感器列表提取
+	- `client/src/services/ws/useMainWebSocket.js`
+		- 主 WS hook
+		- 连接状态
+		- 授权提交
+		- 传感器类型请求
+		- 授权刷新
+	- `client/src/services/ws/controlMessages.js`
+		- 控制通道解析
+		- 座椅控制命令
+		- 采集行构建
+		- 10x10 汇总
+- 前端 hooks
+	- `client/src/hooks/useWebSocket.js`
+		- 通用 WebSocket hook
+		- readyState
+		- 自动消息处理
+		- channels 订阅兜底
+- Demo 工具
+	- `collectionValue.js`
+		- CSV 字段显式取值
+		- 替代动态 `eval`
+	- `formulaEvaluator.js`
+		- 分压公式编译
+		- `y` 变量白名单
+		- Math 白名单
+
+## 后端
+- 启动编排
+	- `backend/server/server.js`
+		- 创建服务实例
+		- 注入依赖
+		- 装配 runtime
+		- 保留兼容入口
+		- 避免承载新业务细节
+- HTTP 层
+	- `backend/server/httpAppFactory.js`
+		- Express app
+		- 控制路由
+		- Display Systems API
+		- SDK contract API
+		- JSON 错误处理
+	- `backend/http/`
+		- HTTP 路由模块
+		- 报告接口
+		- 控制接口
+- WebSocket 层
+	- `backend/server/webSocketHandlerFactory.js`
+		- 连接挂载
+		- legacy 消息入口
+		- 心跳
+		- 私有下发
+	- `backend/server/webSocketContextFactory.js`
+		- 上下文装配
+		- mutable accessor
+		- playback accessor
+		- zero accessor
+	- `backend/ws/`
+		- 命令 router
+		- runtime handler
+		- serial handler
+- 串口层
+	- `backend/serial/serialManager.js`
+		- 串口生命周期
+		- 打开
+		- 关闭
+		- 重连
+	- `backend/serial/serialParserManager.js`
+		- parser channel
+		- sit
+		- back
+		- head
+		- sensor
+	- `backend/serial/serialPortFilterService.js`
+		- 串口筛选
+		- WCH
+		- CH34x
+		- Windows/macOS
+- 传感器层
+	- `backend/sensors/registry.js`
+		- 类型注册
+		- 波特率
+		- 矩阵尺寸
+		- 存储策略
+		- 通道能力
+	- `backend/sensors/runtime/`
+		- legacy 串口帧处理
+		- 1024 点处理
+		- 靠背头枕处理
+		- 小床 12B runtime
+		- 手套整包处理
+		- 手套双包处理
+- 业务服务层
+	- `backend/services/collection/`
+		- 采集频率
+		- 采集状态
+		- 磁盘保护
+		- 入库队列
+	- `backend/services/history/`
+		- 历史日期
+		- 历史行查询
+		- 历史帧转换
+		- 历史维护
+	- `backend/services/playback/`
+		- 回放帧构建
+		- 回放定时器
+		- 播放速度
+		- 区间回放
+	- `backend/services/realtime/`
+		- 实时帧管线
+		- 入库分流
+		- WebSocket 输出
+		- telemetry 网关
+	- `backend/services/websocket/`
+		- 订阅服务
+		- 连接服务
+		- 消息解析
+		- 历史命令兼容
+	- `backend/services/export/`
+		- CSV 下载
+		- 文件前缀
+		- 进度消息
+		- 多通道导出
+	- `backend/services/petcare/`
+		- 宠物看护 runtime
+		- Python worker 调用
+		- 姿态结果转发
+	- `backend/services/lifecycle/`
+		- 服务关闭
+		- 资源释放
+		- 超时保护
+- Runtime 状态
+	- `backend/runtime/runtimeStateStore.js`
+		- 通用运行状态
+	- `backend/runtime/zeroStateStore.js`
+		- 清零状态
+		- 原始零点
+		- 映射零点
+	- `backend/runtime/zeroCommandService.js`
+		- resetZero
+		- 清零捕获
+		- 清零取消
+	- `backend/server/runtimeContextFactory.js`
+		- store 优先读取
+		- 旧闭包兜底
+	- `backend/server/runtimeStatePatchFactory.js`
+		- 命令状态写入
+		- store-backed 过渡
+- 数据库层
+	- SQLite
+		- sit 数据库
+		- back 数据库
+		- head 数据库
+	- 入库方式
+		- frameOutputPipeline
+		- collectionInsertQueue
+		- batch flush
+	- 历史读取
+		- queryHistoryDates
+		- queryHistoryRows
+		- playback payload
+
+## 数据流
+- 实时采集流
+	- 硬件传感器
+		- 串口字节流
+	- SerialManager
+		- 打开串口
+		- 维护重连
+		- 绑定 parser
+	- SerialParserManager
+		- 切帧
+		- 通道命名
+		- 产出 buffer
+	- sensors/runtime
+		- 协议解析
+		- 原始数组
+		- 清零处理
+		- 系统分支
+	- processing
+		- 线序映射
+		- 点位映射
+		- 平滑插值
+		- 压力换算
+	- frameOutputPipeline
+		- 采集入库
+		- 实时发布
+		- 通道适配
+	- WebSocket
+		- sit `19999`
+		- back `19998`
+		- head `19997`
+		- main 兼容流
+	- 前端 Home
+		- wsData
+		- ws1Data
+		- ws2Data
+		- 组件 ref 分发
+	- 渲染组件
+		- 2D 矩阵
+		- 3D 模型
+		- 热力图
+		- 指标面板
+- 历史回放流
+	- 前端命令
+		- getTime
+		- local
+		- play
+		- speed
+		- loadSelectedHistory
+	- 后端历史服务
+		- historyQueryService
+		- historySessionService
+		- historyPlaybackService
+	- 回放构建
+		- playbackFrameService
+		- playbackTimerService
+	- 前端接收
+		- timeArr
+		- sitData
+		- backData
+		- headData
+		- historyTimeArr
+- 采集入库流
+	- 前端采集开关
+		- flag
+		- saveTime
+		- colHZ
+		- collectOptions
+	- 后端采集状态
+		- collectionStateStore
+		- collectionStorageClock
+		- collectionDiskSpaceGuard
+	- 入库队列
+		- collectionInsertQueueService
+		- batchSize
+		- flushInterval
+	- SQLite
+		- matrix 表
+		- data
+		- timestamp
+		- date
+- 导出流
+	- 前端 download
+		- csv options
+		- 进度弹窗
+	- csvDownloadService
+		- 查询历史
+		- 格式转换
+		- 写 CSV
+		- 发布进度
+	- 前端提示
+		- download progress
+		- success
+		- failed
+
+## 控制流
+- HTTP 控制
+	- 前端请求
+	- `http/controlRoutes`
+	- `controlCommandService`
+	- runtimeControlService
+	- serialControlService
+- WebSocket 控制
+	- 前端 WS 命令
+	- `webSocketCommandRouter`
+	- runtime command handlers
+	- serial command handlers
+	- state patchers
+- 串口控制
+	- sitPort
+	- backPort
+	- headPort
+	- sensorPort
+	- baudRate
+	- auto reconnect
+- 展示控制
+	- file 切换
+	- mode 切换
+	- display options
+	- gauss
+	- color
+	- filter
+	- height
+- 清零控制
+	- resetZero
+	- cancelZero
+	- raw zero frame
+	- mapped zero frame
+	- zero-aware storage
+- 授权控制
+	- license key
+	- selectFlag
+	- allowedTypes
+	- licenseStatus
+	- offline 状态
+	- locked 状态
+
+## Processing
+- 聚合入口
+	- `backend/processing/index.js`
+- 线序
+	- `lineOrders.js`
+	- `lineOrderMapper.js`
+	- `lineOrderDefinitions/`
+	- foot
+	- hand
+	- gloves
+- 矩阵变换
+	- `matrixTransforms.js`
+	- zeroLine
+	- zeroLineMatrix
+	- smallBedZero
+- 压力换算
+	- `pressureTransforms.js`
+	- pressToN
+	- carFitting
+	- mmghToPress
+	- calPressArr
+- 插值
+	- `interpolation.js`
+	- `interpolationAlgorithms.js`
+	- interp
+	- interp1016
+	- addSide
+- 平滑
+	- `smoothingAlgorithms.js`
+	- gaussBlur
+	- backend gauss
+- 视频映射
+	- `videoPointMappings.js`
+	- 手部视频
+	- 足底视频
+	- 上衣映射
+	- 小矩阵映射
+- 配置执行
+	- `configMappingExecutor.js`
+	- JSON line-order
+	- JSON point-order
+	- algorithm-data
+- 静态服务
+	- `webStaticServer.js`
+	- build 静态资源
+	- OneStep 辅助服务
+
+## Display Systems
+- 目标
+	- 配置驱动展示系统
+	- manifest 发现
+	- runtime definition
+	- parser channel 绑定
+	- frame processor 生成
+- 配置文件
+	- `display-system.json`
+	- `system.json`
+	- `line-order.json`
+	- `point-order.json`
+	- `algorithm-data.json`
+- 发现层
+	- `displaySystemConfigLoader.js`
+	- `displaySystemConfigValidator.js`
+	- `displaySystemConfigFileValidator.js`
+	- `displaySystemRegistry.js`
+- 运行定义
+	- `displaySystemDefinitionBuilder.js`
+	- `displaySystemRuntimeChannelPlanner.js`
+	- `displaySystemRuntimeRegistry.js`
+- 运行绑定
+	- `displaySystemFrameProcessorFactory.js`
+	- `displaySystemRuntimeBinder.js`
+	- `displaySystemRuntimeDispatcher.js`
+	- `displaySystemRuntimePolicy.js`
+- HTTP 发现
+	- `GET /api/display-systems`
+	- `GET /api/display-systems/:id`
+	- `GET /api/sdk/contract`
+- 示例系统
+	- `byte-matrix-demo`
+	- `small-bed-12b-manifest-demo`
+	- `jqbed-manifest-demo`
+	- `hand-glove-manifest-demo`
+- 运行模式
+	- template
+	- parallel
+	- shadow
+	- active
+	- disabled
+- 当前边界
+	- 默认保护 legacy channel
+	- 不自动打开物理串口
+	- 接管 parser 后处理链路
+	- 仍复用 frameOutputPipeline
+
+## SDK
+- 后端薄 SDK
+	- `sdk/src/backend/BackendSdkClient.js`
+	- HTTP contract
+	- WebSocket 订阅
+	- 串口状态
+	- Display Systems 列表
+- 本地串口 SDK
+	- `ShroomSensorSDK.js`
+	- `ProtocolRegistry.js`
+	- `SensorSession.js`
+	- `ZeroCalibrator.js`
+	- `MemoryCaptureStore.js`
+- SDK 示例
+	- `sdk/examples/backend-sdk-demo.js`
+	- `sdk/examples/serial-chain-demo.js`
+	- `npm run sdk:demo`
+	- `npm run sdk:serial-demo`
+- SDK 能力
+	- listPorts
+	- open
+	- parse
+	- zero calibrate
+	- capture
+	- replay
+	- csv export
+	- report
+- 推荐边界
+	- 外部应用优先走后端 contract
+	- 不直接依赖 `server.js`
+	- 不直接依赖 legacy runtime
+	- 不暴露内部状态债务
+
+## 授权
+- 文件入口
+	- `backend/license/`
+	- `licenseKeyStore.js`
+	- `licenseValidationService.js`
+	- `licenseManager.js`
+- 前端入口
+	- LicensePortal
+	- License
+	- Date
+	- useMainWebSocket
+- 消息字段
+	- licenseKey
+	- licenseType
+	- date
+	- nowDate
+	- remainingDays
+	- selectFlag
+	- licenseLocked
+	- licenseError
+- 授权范围
+	- all
+	- allowedTypes
+	- matrixTitle
+	- sensor 下拉展示
+- 风险控制
+	- 到期提示
+	- 锁定提示
+	- 离线状态
+	- 异常行为提示
+
+## 前端状态与展示
+- 系统类型状态
+	- matrixName
+	- allowedTypes
+	- sensorTypeList
+	- file
+- 模式状态
+	- normal
+	- num
+	- numoriginal
+	- num3D
+	- skin
+- 渲染参数
+	- valueg
+	- valuej
+	- valuel
+	- valuef
+	- value
+	- sizeValue
+	- valuelInit
+- 数据状态
+	- wsPointData
+	- wsPointDataSit
+	- wsPointDataBack
+	- wsPointDataHead
+	- dataArr
+	- historyTimeArr
+- 采集状态
+	- colFlag
+	- colWebFlag
+	- csvData
+	- dataName
+	- length
+- 控制状态
+	- control
+	- hunch
+	- front
+	- flank
+	- pressToArea
+	- backTime
+
+## 后端状态
+- runtime 状态
+	- file
+	- baudRate
+	- localFlag
+	- nowDate
+	- db
+	- db1
+	- db2
+- collection 状态
+	- flag
+	- saveTime
+	- colHZ
+	- collectOptions
+- playback 状态
+	- localData
+	- localDataBack
+	- localDataHead
+	- indexArr
+	- nowIndex
+- serial 状态
+	- com
+	- com1
+	- comhead
+	- comSensor
+	- sitClose
+	- backClose
+	- headClose
+	- sensorClose
+- zero 状态
+	- pointArr1zero
+	- pointArr2zero
+	- pointArr4zero
+	- pointArr147zero
+	- raw zero data
+	- mapped zero data
+
+## 测试
+- 测试入口
+	- `npm test`
+	- `backend/tests/run-tests.js`
+- Display Systems
+	- configValidation
+	- runtimeBinding
+	- runtimeChannelPlanner
+	- runtimeDispatcher
+	- runtimePolicy
+- Processing
+	- lineOrders
+	- pressureTransforms
+	- videoPointMappings
+	- configMappingExecutor
+- Server factories
+	- runtimeContextFactory
+	- framePipelineFactory
+	- sensorProcessorFactory
+	- smallBedRuntimeFactory
+	- handRuntimeFactory
+	- runtimeStatePatchFactory
+	- runtimeStateStoreFactory
+	- displaySystemRuntimeFactory
+- SDK
+	- backendSdkClient
+	- serialChainDemo
+- WS
+	- webSocketCommandRouter
+- HTTP
+	- displaySystemsApi
+- 当前前端验证
+	- `npm run lint`
+	- `npm run build`
+	- 仍有 hook dependency warning
+	- 已无 `eval` warning
+
+## 构建发布
+- 开发启动
+	- `npm start`
+	- Electron Forge start
+- 前端构建
+	- `npm run build-client`
+	- `client/npm run build`
+	- 输出 `build/`
+- Python 资源
+	- `npm run build-python-runtime`
+	- `pack-resources/python`
+- 打包资源
+	- `npm run prepare-pack-resources`
+	- `pack-resources/db`
+	- `pack-resources/python`
+- Windows 打包
+	- `npm run package`
+	- `npm run make`
+	- `npm run build`
+- macOS 打包
+	- `npm run make-mac`
+	- `npm run build-mac`
+	- `npm run build-mac-share`
+- 发布资源
+	- build 静态资源
+	- DB 资源
+	- Python 资源
+	- NSIS license
+	- release notes
+
+## Legacy
+- 仍存在的兼容层
+	- `backend/server/server.js`
+	- `backend/sensors/runtime/legacySerialFrameRuntime.js`
+	- `backend/legacy/openWeb.js`
+	- Home 大组件
+- 已收口内容
+	- processing 分类入口
+	- runtime factories
+	- state patch factory
+	- WebSocket context factory
+	- control command service
+	- display system runtime
+- 遗留原因
+	- 旧前端协议
+	- 多传感器分支
+	- 运行状态闭包
+	- 历史数据兼容
+	- 串口生命周期复杂
+
+## 当前优化边界
+- 后端已拆
+	- 串口生命周期
+	- WebSocket 装配
+	- HTTP app
+	- runtime context
+	- frame pipeline
+	- sensor processors
+	- smallBed runtime
+	- hand runtime
+	- Display Systems
+- 前端已拆
+	- 路由懒加载
+	- WS 消息 helper
+	- 主 WS hook
+	- 控制 WS 解析
+	- Demo CSV 取值
+	- 公式求值器
+- 仍需继续
+	- Home 组件拆分
+	- active display registry
+	- 渲染组件 hook 修复
+	- 控制协议类型化
+	- 前端 display metadata 化
+	- build 产物管理策略
+
+## 新节点
+- 前端下一步
+	- Home 数据通道服务化
+		- wsData 分支拆分
+		- ws1Data 拆分
+		- ws2Data 拆分
+		- frame adapter
+	- 渲染注册表
+		- matrixName -> renderer
+		- mode -> component
+		- default config
+		- supported channels
+	- Hook warning 治理
+		- animation ref
+		- init callback
+		- event listener cleanup
+		- renderer lifecycle
+	- Demo 归档
+		- active demo
+		- legacy demo
+		- internal tools
+- 后端下一步
+	- store-native 迁移
+		- file
+		- db
+		- nowDate
+		- localFlag
+		- baudRate
+	- server.js 减负
+		- 初始化保留
+		- 编排保留
+		- 旧变量下沉
+		- legacy bridge 收口
+	- Display Systems 激活
+		- shadow mode 对比
+		- active mode 开关
+		- manifest 系统迁移
+		- processor 对比测试
+	- 协议契约
+		- WebSocket payload schema
+		- serial command schema
+		- runtime command schema
+		- SDK contract version
+- 数据下一步
+	- 历史格式版本化
+		- array legacy
+		- object payload
+		- zeroFrame
+		- matrix metadata
+	- CSV 策略统一
+		- 标题映射
+		- 通道输出
+		- 进度事件
+		- 错误事件
+	- 采集保护
+		- 磁盘阈值
+		- 队列 flush
+		- DB 写入异常
+		- UI 错误提示
+
+## 阅读路线
+- 快速理解
+	- `README.md`
+	- `ARCHITECTURE.md`
+	- `backend/README.md`
+	- `backend/ARCHITECTURE_MAP.md`
+- 看前端
+	- `client/src/App.jsx`
+	- `client/src/page/home/Home.jsx`
+	- `client/src/services/ws`
+	- `client/src/components/title`
+	- `client/src/components/aside`
+	- `client/src/components/three`
+	- `client/src/components/num`
+- 看后端
+	- `backend/server/server.js`
+	- `backend/server/*Factory.js`
+	- `backend/serial`
+	- `backend/sensors/registry.js`
+	- `backend/sensors/runtime`
+	- `backend/services/realtime`
+	- `backend/services/history`
+- 看算法
+	- `backend/processing/index.js`
+	- `backend/processing/lineOrders.js`
+	- `backend/processing/lineOrderDefinitions`
+	- `backend/processing/videoPointMappings.js`
+	- `backend/processing/pressureTransforms.js`
+- 看扩展
+	- `backend/displaySystems/README.md`
+	- `backend/displaySystems/examples`
+	- `sdk/README.md`
+	- `sdk/src/backend/BackendSdkClient.js`

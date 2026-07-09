@@ -1,7 +1,10 @@
 const { LineOrderRegistry } = require('./LineOrderRegistry');
 
 const LINE_ORDER_EXPORT_DENY_LIST = new Set([
+  'convertTempFullBedTemperature',
   'openWeb',
+  'normalizeTempFullBedPressure',
+  'rotate90',
   'timeStampToDate',
   'timeStampToDateNum',
   'timeStampTo_Date',
@@ -11,7 +14,7 @@ function loadProjectLineOrderSources() {
   const sources = [];
 
   try {
-    sources.push(require('../../../backend/processing/openWeb'));
+    sources.push(require('../../../backend/processing/lineOrders'));
   } catch (error) {
     sources.push({});
   }

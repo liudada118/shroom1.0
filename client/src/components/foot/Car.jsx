@@ -233,7 +233,7 @@ class Car extends React.Component {
     // myChart1 = echarts.init(document.getElementById(`myChart1`));
 
     // ws = new WebSocket("ws://127.0.0.1:19999");
-    // ws = new WebSocket(" ws://sensor.bodyta.com:8888/bed/ec4d3e7ec6e9");
+    // ws = new WebSocket("ws://sensor.bodyta.com:8888/bed/ec4d3e7ec6e9");
     function setRem() {
       document.documentElement.style.fontSize = `${
         document.documentElement.clientWidth / 100
@@ -246,7 +246,7 @@ class Car extends React.Component {
       console.log(document.documentElement.style.fontSize);
     });
 
-    ws = new WebSocket(" ws://localhost:19999");
+    ws = new WebSocket("ws://localhost:19999");
     ws.onopen = () => {
       // connection opened
       console.info("connect success");

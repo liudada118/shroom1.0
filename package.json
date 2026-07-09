@@ -7,7 +7,9 @@
     "icon": "./assets/icons/logo.ico"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node backend/tests/run-tests.js",
+    "sdk:demo": "node sdk/examples/backend-sdk-demo.js",
+    "sdk:serial-demo": "node sdk/examples/serial-chain-demo.js",
     "start": "electron-forge start",
     "build-client": "npm --prefix client run build",
     "build-python-runtime": "node scripts/build-python-runtime.js",

@@ -170,7 +170,6 @@ export const Num = React.forwardRef((props, refs) => {
                                                 key={index}
                                                 style={{
                                                     width: '2rem',
-                                                    color: 'blue',
                                                     fontSize: `${scale * 20 * 0.8}px`,
                                                     lineHeight: '1.5rem',
                                                     transform: `translateY(${-item * 3}px)`,

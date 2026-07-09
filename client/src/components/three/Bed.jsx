@@ -819,7 +819,7 @@ const Canvas = React.forwardRef((props, refs) => {
       cancelAnimationFrame(animationRequestId);
       document.removeEventListener('pointerdown', pointDown)
       document.removeEventListener('pointermove', pointMove)
-      document.removeEventListener('pointup', pointUp)
+      document.removeEventListener('pointerup', pointUp)
       selectHelper.dispose()
     };
   }, []);

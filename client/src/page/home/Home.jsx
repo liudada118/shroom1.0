@@ -99,6 +99,16 @@ import {
 import { withTranslation } from "react-i18next";
 import { chestLine, flLine, frLine, genWebglData, handSkinChange, heatMapMax, hlLine, hrLine, robot0401 } from "./robotUtil";
 import { WebGLCanvas } from "../../components/webgl/WebGL.HeatMap copy 2";
+import { WS_URLS } from "../../constants";
+import { createJsonWebSocket, isOpenSocket, sendJsonMessage, wsCommands } from "../../services/ws/messages";
+import {
+  buildBasicControlCollectionRow,
+  buildExtendedControlCollectionRow,
+  CONTROL_COMMANDS,
+  getControlList,
+  getMetricStateUpdate,
+  parseControlMessage,
+} from "../../services/ws/controlMessages";
 
 const FULL_PACKET_GLOVE_MATRIX = 'handGloveFullPacket'
 const HAND_0205_DOUBLE_MATRIX = 'hand0205Double'
@@ -955,6 +965,114 @@ class Home extends React.Component {
     return true;
   }
 
+  appendControlCollectionRow = (row) => {
+    collection.push(row);
+    localStorage.setItem("collection", JSON.stringify(collection));
+    this.setState({ csvData: collection, length: collection.length });
+  }
+
+  getControlCollectionState = (updates = {}) => ({
+    ...this.state,
+    ...updates,
+  })
+
+  handleControlMessage = (rawMessage, options = {}) => {
+    const parsedMessage = parseControlMessage(rawMessage);
+    const metricStateUpdate = getMetricStateUpdate(parsedMessage);
+
+    if (metricStateUpdate) {
+      const nextState = this.getControlCollectionState(metricStateUpdate);
+      this.setState(metricStateUpdate);
+
+      if (
+        options.welcomeFlow &&
+        parsedMessage.type === '2' &&
+        oneFlag &&
+        nextState.hunch &&
+        nextState.front &&
+        nextState.flank
+      ) {
+        this.appendControlCollectionRow([
+          nextState.hunch,
+          nextState.front,
+          nextState.flank,
+          CONTROL_COMMANDS.WELCOME_END,
+        ]);
+        oneFlag = false;
+      }
+
+      if (options.collectOnFrontMetric && parsedMessage.type === '2' && nextState.colWebFlag) {
+        this.appendControlCollectionRow(
+          buildBasicControlCollectionRow(nextState, wsPointDataSit, wsPointDataBack)
+        );
+      }
+
+      if (options.collectEveryMessage && nextState.colWebFlag) {
+        this.appendControlCollectionRow(
+          buildExtendedControlCollectionRow(nextState, wsPointDataSit, wsPointDataBack)
+        );
+      }
+      return;
+    }
+
+    if (options.welcomeFlow && parsedMessage.raw === CONTROL_COMMANDS.WELCOME_END) {
+      oneFlag = true;
+      this.setState({ welFlag: true });
+    }
+
+    const commandStateUpdate = {};
+    if (!options.legacySideAirbag && parsedMessage.backTime !== undefined) {
+      commandStateUpdate.backTime = parsedMessage.backTime;
+    }
+
+    const controlCommandName = options.legacySideAirbag ? parsedMessage.raw : parsedMessage.name;
+    if (controlFlag) {
+      const controlList = getControlList(controlCommandName, {
+        expandInitialBackAirbag: options.expandInitialBackAirbag,
+        legacySideAirbag: options.legacySideAirbag,
+      });
+      commandStateUpdate.control = controlList;
+
+      if (
+        (options.expandInitialBackAirbag || options.legacySideAirbag) &&
+        controlList.length > 1
+      ) {
+        controlFlag = false;
+      }
+    } else {
+      commandStateUpdate.control = getControlList(controlCommandName);
+    }
+
+    const nextState = this.getControlCollectionState(commandStateUpdate);
+    this.setState(commandStateUpdate);
+
+    if (options.collectEveryMessage && nextState.colWebFlag) {
+      this.appendControlCollectionRow(
+        buildExtendedControlCollectionRow(nextState, wsPointDataSit, wsPointDataBack)
+      );
+    }
+  }
+
+  connectControlSocket = (ip, options = {}) => {
+    if (wsControl) {
+      try {
+        wsControl.onclose = null;
+        wsControl.onerror = null;
+        wsControl.close();
+      } catch {}
+    }
+
+    wsControl = new WebSocket(`ws://${ip}:23001/ws/msg`);
+    wsControl.onopen = () => {
+      console.info("connect success");
+    };
+    wsControl.onmessage = (event) => {
+      this.handleControlMessage(event.data, options);
+    };
+    wsControl.onerror = () => {};
+    wsControl.onclose = () => {};
+  }
+
   componentDidMount() {
     // window.alert(window.innerWidth)
     document.documentElement.style.fontSize = `${window.innerWidth / 120}px`;
@@ -982,26 +1100,21 @@ class Home extends React.Component {
     //   ws1 = new WebSocket(`ws://${ip}:23001/ws/data1`)
     // }
     // // else if (this.state.matrixName === 'yanfeng10') {
-    // //   ws = new WebSocket(" ws://sensor.bodyta.com:8888/bed/ec4d3e7ec6e5");
+    // //   ws = new WebSocket("ws://sensor.bodyta.com:8888/bed/ec4d3e7ec6e5");
     // // }
     // else {
-    //   ws = new WebSocket(" ws://127.0.0.1:19999");
-    //   ws1 = new WebSocket(" ws://127.0.0.1:19998");
-    //   ws2 = new WebSocket(" ws://127.0.0.1:19997");
+    //   ws = new WebSocket("ws://127.0.0.1:19999");
+    //   ws1 = new WebSocket("ws://127.0.0.1:19998");
+    //   ws2 = new WebSocket("ws://127.0.0.1:19997");
     // }
-    ws = new WebSocket(" ws://127.0.0.1:19999");
+    ws = createJsonWebSocket(WS_URLS.MAIN);
     // [优化] 统一使用单 WS 连接，不再需要 ws1(19998) 和 ws2(19997)
     ws.onopen = () => {
       // connection opened
       console.info("connect success");
-      this.wsSendObj({
-        // file: this.state.matrixName,
-        sitClose: true,
-        backClose: true,
-        sensorClose: true
-      })
+      this.wsSendObj(wsCommands.closeAllSensors())
       // 主动请求传感器类型清单（请求-应答；主进程连接时也会主动 push 一次）
-      this.wsSendObj({ getSensorTypes: true })
+      this.wsSendObj(wsCommands.requestSensorTypes())
     };
     ws.onmessage = (e) => {
       this.wsData(e);
@@ -1030,168 +1143,11 @@ class Home extends React.Component {
     };
 
     if (this.state.matrixName === "localCar") {
-      wsControl = new WebSocket(`ws://${ip}:23001/ws/msg`);
-      // wsControl = new WebSocket(`ws://${ip}:1880/ws/msg`)
-      wsControl.onopen = () => {
-        // connection opened
-        console.info("connect success");
-      };
-      wsControl.onmessage = (e) => {
-        // that.ws1Data(e)
-
-        let jsonObject = e.data;
-
-        if (jsonObject[0] == 1) {
-          const data = jsonObject.split(" ")[1];
-
-          this.setState({
-            hunch: data,
-          });
-        } else if (jsonObject[0] == 3) {
-          const data = jsonObject.split(" ")[1];
-
-          this.setState({
-            flank: data,
-          });
-        }
-        else if (jsonObject[0] == 4) {
-          const data = jsonObject.split(" ")[1];
-
-          this.setState({
-            pressToArea: data,
-          });
-        }
-
-
-
-        else if (jsonObject[0] == 2) {
-          const data = jsonObject.split(" ")[1];
-
-          this.setState({
-            front: data,
-          });
-          if (
-            oneFlag &&
-            this.state.hunch &&
-            this.state.front &&
-            this.state.flank
-          ) {
-            collection.push([
-              this.state.hunch,
-              this.state.front,
-              this.state.flank,
-              "迎宾结束",
-            ]);
-            localStorage.setItem("collection", JSON.stringify(collection));
-            this.setState({ csvData: collection, length: collection.length });
-            oneFlag = false;
-          }
-        } else {
-          if (jsonObject === "迎宾结束") {
-            // collection.push([this.state.hunch, this.state.front, '迎宾结束']);
-            // localStorage.setItem('collection', JSON.stringify(collection))
-            // this.setState({ csvData: collection, length: collection.length });
-            oneFlag = true;
-            this.setState({
-              welFlag: true
-            })
-          }
-
-          // if (controlFlag && (jsonObject === "靠背气囊充气" || jsonObject.split('|').includes("靠背气囊充气"))) {
-          //   this.setState({
-          //     // control: [jsonObject, "侧翼气囊充气"],
-          //     control : ['座椅向前|-2000']
-          //   });
-          //   controlFlag = false;
-          // } else {
-          //   this.setState({
-          //     // control: [jsonObject],
-          //     control : ['座椅向前|-2000']
-          //   });
-          // }
-
-          // if(jsonObject)
-          // jsonObject = '靠背向后|2000'
-          let newjson
-          if (jsonObject.includes('|')) {
-            newjson = jsonObject.split('|')[0]
-            this.setState({
-              backTime: jsonObject.split('|')[1]
-            })
-          } else {
-            newjson = jsonObject
-          }
-
-          if (controlFlag && (newjson === "靠背气囊充气")) {
-
-            this.setState({
-              control: [newjson, "侧翼左侧气囊充气", "侧翼右侧气囊充气"],
-            });
-
-
-            controlFlag = false;
-          } else {
-            if (newjson === "侧翼左侧气囊充气") {
-
-              this.setState({
-                control: [newjson, "侧翼右侧气囊放气"],
-
-              });
-            } else if (newjson === "侧翼右侧气囊充气") {
-              this.setState({
-                control: [newjson, "侧翼左侧气囊放气"],
-
-              });
-            } else {
-              this.setState({
-                control: [newjson],
-
-              });
-            }
-          }
-        }
-        const sitArr = []
-        for (let i = 0; i < 10; i++) {
-          sitArr[i] = 0
-          for (let j = 0; j < 10; j++) {
-            sitArr[i] += wsPointDataSit[i * 10 + j]
-          }
-        }
-
-        const backArr = []
-        for (let i = 0; i < 10; i++) {
-          backArr[i] = 0
-          for (let j = 0; j < 10; j++) {
-            backArr[i] += wsPointDataBack[i * 10 + j]
-          }
-        }
-
-        // console.log(sitArr ,backArr)
-        if (this.state.colWebFlag) {
-
-
-          collection.push([
-            this.state.hunch,
-            this.state.front,
-            this.state.flank,
-            this.state.dataName,
-            JSON.stringify(wsPointDataSit),
-            JSON.stringify(wsPointDataBack),
-            'sit',
-            ...sitArr,
-            'back',
-            ...backArr
-          ]);
-          localStorage.setItem("collection", JSON.stringify(collection));
-          this.setState({ csvData: collection, length: collection.length });
-        }
-      };
-      wsControl.onerror = (e) => {
-        // an error occurred
-      };
-      wsControl.onclose = (e) => {
-        // connection closed
-      };
+      this.connectControlSocket(ip, {
+        collectEveryMessage: true,
+        expandInitialBackAirbag: true,
+        welcomeFlow: true,
+      });
     }
 
     // 监听主进程的息屏/唤醒事件，唤醒后重连 WebSocket
@@ -1226,6 +1182,12 @@ class Home extends React.Component {
       ws.onclose = null; // 移除 onclose 防止卸载时触发重连
       ws.close();
     }
+    if (wsControl) {
+      wsControl.onclose = null;
+      wsControl.onerror = null;
+      wsControl.close();
+      wsControl = null;
+    }
     // 清理节流定时器，防止内存泄漏
     if (timer) {
       clearTimeout(timer);
@@ -1238,16 +1200,9 @@ class Home extends React.Component {
   }
 
   colPushData() {
-    collection.push([
-      this.state.hunch,
-      this.state.front,
-      this.state.flank,
-      this.state.dataName,
-      JSON.stringify(wsPointDataSit),
-      JSON.stringify(wsPointDataBack),
-    ]);
-    localStorage.setItem("collection", JSON.stringify(collection));
-    this.setState({ csvData: collection, length: collection.length });
+    this.appendControlCollectionRow(
+      buildBasicControlCollectionRow(this.state, wsPointDataSit, wsPointDataBack)
+    );
   }
 
   delPushData() {
@@ -1268,7 +1223,7 @@ class Home extends React.Component {
     const that = this;
 
     // ws = new WebSocket(`ws://${ip}:1880/ws/data`)
-    ws = new WebSocket(`ws://${ip}:23001/ws/data`);
+    ws = createJsonWebSocket(`ws://${ip}:23001/ws/data`);
     ws.onopen = () => {
       // connection opened
       console.info("connect success");
@@ -1296,67 +1251,10 @@ class Home extends React.Component {
       }, 3000);
     };
 
-    wsControl = new WebSocket(`ws://${ip}:23001/ws/msg`);
-    // wsControl = new WebSocket(`ws://${ip}:1880/ws/msg`)
-    wsControl.onopen = () => {
-      // connection opened
-      console.info("connect success");
-    };
-    wsControl.onmessage = (e) => {
-      // that.ws1Data(e)
-      let jsonObject = e.data;
-      if (jsonObject[0] == 1) {
-        const data = jsonObject.split(" ")[1];
-
-        this.setState({
-          hunch: data,
-        });
-      } else if (jsonObject[0] == 3) {
-        const data = jsonObject.split(" ")[1];
-
-        this.setState({
-          flank: data,
-        });
-      } else if (jsonObject[0] == 2) {
-        const data = jsonObject.split(" ")[1];
-
-        this.setState({
-          front: data,
-        });
-
-        if (this.state.colWebFlag) {
-          collection.push([
-            this.state.hunch,
-            this.state.front,
-            this.state.flank,
-            this.state.dataName,
-            JSON.stringify(wsPointDataSit),
-            JSON.stringify(wsPointDataBack),
-          ]);
-          localStorage.setItem("collection", JSON.stringify(collection));
-          this.setState({ csvData: collection, length: collection.length });
-        }
-      } else {
-        if (controlFlag && (jsonObject === "靠背气囊充气" || jsonObject.split('|').includes("靠背气囊充气"))) {
-          this.setState({
-            control: [jsonObject, "侧翼气囊充气"],
-            // control : ['座椅向前|-2000']
-          });
-          controlFlag = false;
-        } else {
-          this.setState({
-            control: [jsonObject],
-            // control : ['座椅向前|-2000']
-          });
-        }
-      }
-    };
-    wsControl.onerror = (e) => {
-      // an error occurred
-    };
-    wsControl.onclose = (e) => {
-      // connection closed
-    };
+    this.connectControlSocket(ip, {
+      collectOnFrontMetric: true,
+      legacySideAirbag: true,
+    });
   }
 
 
@@ -2975,9 +2873,7 @@ class Home extends React.Component {
     const state = ws ? ws.readyState : 'no ws';
     // readyState: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
     console.log(`[WS Send] readyState=${state}`, obj);
-    if (ws && ws.readyState === 1) {
-      ws.send(JSON.stringify(obj));
-    } else {
+    if (!sendJsonMessage(ws, obj)) {
       console.warn(`[WS Send] 无法发送， ws.readyState=${state}`, obj);
     }
   };
@@ -3035,7 +2931,7 @@ class Home extends React.Component {
     // 网络版
     // if (e === 'yanfeng10') {
     //   ws.close()
-    //   ws = new WebSocket(" ws://sensor.bodyta.com:8888/bed/ec4d3e7ec6e5");
+    //   ws = new WebSocket("ws://sensor.bodyta.com:8888/bed/ec4d3e7ec6e5");
 
     //   ws.onopen = () => {
     //     // connection opened
@@ -3058,9 +2954,9 @@ class Home extends React.Component {
     //   };
     // }else{
     //   ws.close()
-    //   ws = new WebSocket(" ws://127.0.0.1:19999");
-    //   ws1 = new WebSocket(" ws://127.0.0.1:19998");
-    //   ws2 = new WebSocket(" ws://127.0.0.1:19997");
+    //   ws = new WebSocket("ws://127.0.0.1:19999");
+    //   ws1 = new WebSocket("ws://127.0.0.1:19998");
+    //   ws2 = new WebSocket("ws://127.0.0.1:19997");
     //   ws.onopen = () => {
     //     // connection opened
     //     console.info("connect success");
@@ -3189,12 +3085,8 @@ class Home extends React.Component {
     this.setState({ local: value });
     // changeDateArr(matrixName)
 
-    if (ws && ws.readyState === 1) {
-      if (value) {
-        ws.send(JSON.stringify({ local: true }));
-      } else {
-        ws.send(JSON.stringify({ play: false, local: false, history: false }));
-      }
+    if (isOpenSocket(ws)) {
+      this.wsSendObj(value ? { local: true } : { play: false, local: false, history: false });
     }
   };
 

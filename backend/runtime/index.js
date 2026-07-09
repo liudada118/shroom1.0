@@ -1,4 +1,3 @@
-﻿const legacyServer = require('../server/server');
 const logger = require('../common/logger');
 const { CommandRouter } = require('./commandRouter');
 const {
@@ -7,11 +6,28 @@ const {
 } = require('../services/websocket/websocketChannelService');
 
 const commandRouter = new CommandRouter({ logger });
+let legacyServer;
+
+/**
+ * 懒加载旧 server 入口。
+ *
+ * runtime 模块被 require 时不再立刻反向加载 server.js，避免初始化阶段形成
+ * server -> runtime -> server 的隐式循环；只有真正调用兼容入口时才读取旧服务。
+ *
+ * @returns {object} 旧 server 导出对象。
+ */
+function getLegacyServer() {
+  if (!legacyServer) {
+    legacyServer = require('../server/server');
+  }
+  return legacyServer;
+}
 
 function registerLegacyHandler(type) {
   commandRouter.register(type, (command) => {
-    if (typeof legacyServer.handleCommand === 'function') {
-      return legacyServer.handleCommand(command);
+    const server = getLegacyServer();
+    if (typeof server.handleCommand === 'function') {
+      return server.handleCommand(command);
     }
     logger.warn('[Runtime] legacy handler is unavailable', { type });
     return null;
@@ -21,22 +37,25 @@ function registerLegacyHandler(type) {
 ['serial', 'license-check', 'export-csv', 'db-query', 'ws-send'].forEach(registerLegacyHandler);
 
 function openServer() {
-  if (typeof legacyServer.openServer !== 'function') {
+  const server = getLegacyServer();
+  if (typeof server.openServer !== 'function') {
     throw new Error('legacy server does not export openServer');
   }
-  return legacyServer.openServer();
+  return server.openServer();
 }
 
 function shutdownServer() {
-  if (typeof legacyServer.shutdownServer === 'function') {
-    return legacyServer.shutdownServer();
+  const server = getLegacyServer();
+  if (typeof server.shutdownServer === 'function') {
+    return server.shutdownServer();
   }
   return Promise.resolve();
 }
 
 function getWsServer(channel = 'sit') {
-  if (typeof legacyServer.getWsServer === 'function') {
-    return legacyServer.getWsServer(channel);
+  const server = getLegacyServer();
+  if (typeof server.getWsServer === 'function') {
+    return server.getWsServer(channel);
   }
   return null;
 }
@@ -50,16 +69,17 @@ function broadcastRealtime(data, channel = 'sit') {
 }
 
 function getRuntimeStatus() {
+  const server = getLegacyServer();
   return {
     clients: getChannelClientCounts(getWsServer),
-    channels: typeof legacyServer.getRealtimeChannels === 'function'
-      ? legacyServer.getRealtimeChannels()
+    channels: typeof server.getRealtimeChannels === 'function'
+      ? server.getRealtimeChannels()
       : [],
-    channelBus: typeof legacyServer.getChannelBusStatus === 'function'
-      ? legacyServer.getChannelBusStatus()
+    channelBus: typeof server.getChannelBusStatus === 'function'
+      ? server.getChannelBusStatus()
       : {},
-    subscriptions: typeof legacyServer.getWsSubscriptionStatus === 'function'
-      ? legacyServer.getWsSubscriptionStatus()
+    subscriptions: typeof server.getWsSubscriptionStatus === 'function'
+      ? server.getWsSubscriptionStatus()
       : null,
   };
 }

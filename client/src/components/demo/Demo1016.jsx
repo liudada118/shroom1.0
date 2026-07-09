@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { findMax, jetWhite3 } from "../../assets/util/util";
 import { carBackLine, handLine, pressNew, zeroLine } from "../../assets/util/line";
 import { Button, Input, Slider } from "antd";
 import { CSVLink } from "react-csv";
+import { buildCollectionRow } from "./collectionValue";
 let data = [];
 
 // for (let i = 0; i < 32; i++) {
@@ -178,6 +179,8 @@ export default function Demo() {
   const [flag, setFlag] = useState(false);
   const [name, setName] = useState("");
   const [objArea, setArea] = useState("");
+  const collectionLabelsRef = useRef({ name, objArea });
+  collectionLabelsRef.current = { name, objArea };
   useEffect(() => {
     // const data = [0,10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,10,10,10,15,13,0,0,0,27,32,25,25,23,18,19,0,0,0,27,32,25,25,23,18,19,0,0,0,18,30,27,27,26,24,0,0,0,0,0,14,11,11,10,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,11,11,0,11,0,0,0,0,0,0,12,12,25,31,30,39,0,0,19,12,18,18,24,27,41,20,0,0,20,0,11,11,16,17,24,20,0,0,20,0,11,11,16,17,24,20,0,0,0,0,0,0,0,11,0,0,0,0,11,15,20,20,18,14,12,20,0,0,19,14,16,16,13,13,13,0,0,0,20,13,21,21,14,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
     // const data = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 5, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 3, 3, 6, 12, 13, 22, 36, 27, 29, 20, 11, 7, 4, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 2, 4, 8, 7, 14, 23, 24, 31, 39, 38, 30, 23, 19, 12, 10, 5, 3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 13, 13, 12, 33, 23, 24, 24, 54, 38, 31, 27, 43, 33, 42, 31, 31, 33, 37, 46, 66, 29, 16, 8, 2, 2, 1, 0, 0, 0, 0, 2, 4, 26, 26, 34, 35, 23, 24, 33, 42, 31, 37, 34, 29, 46, 40, 32, 40, 31, 26, 34, 35, 29, 49, 30, 19, 9, 3, 0, 0, 0, 1, 5, 17, 15, 15, 14, 17, 28, 37, 29, 40, 31, 44, 42, 36, 44, 38, 50, 37, 41, 36, 48, 31, 45, 18, 19, 24, 18, 5, 0, 0, 1, 2, 18, 25, 6, 5, 3, 9, 19, 23, 20, 21, 41, 39, 36, 49, 41, 57, 74, 36, 37, 30, 44, 20, 18, 3, 4, 17, 29, 7, 0, 0, 2, 5, 43, 24, 4, 4, 2, 2, 5, 17, 26, 21, 46, 33, 42, 32, 48, 53, 47, 45, 43, 44, 28, 9, 3, 2, 3, 8, 40, 84, 17, 0, 2, 5, 18, 3, 1, 1, 1, 1, 2, 7, 11, 15, 22, 31, 56, 45, 38, 45, 56, 49, 42, 27, 17, 3, 1, 0, 0, 1, 4, 15, 1, 0, 5, 3, 4, 2, 1, 1, 1, 1, 2, 3, 8, 26, 45, 47, 37, 31, 30, 33, 35, 31, 45, 33, 8, 2, 0, 0, 0, 0, 1, 3, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 1, 3, 15, 28, 30, 26, 24, 13, 38, 38, 26, 37, 16, 3, 1, 0, 0, 0, 0, 2, 2, 0, 0, 3, 1, 3, 3, 1, 1, 1, 1, 1, 2, 9, 13, 37, 22, 22, 12, 6, 24, 18, 30, 19, 29, 10, 3, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 3, 10, 23, 20, 23, 21, 35, 31, 42, 23, 29, 17, 32, 18, 5, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 2, 3, 21, 22, 45, 22, 21, 30, 41, 30, 16, 22, 36, 35, 35, 17, 4, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 2, 1, 0, 1, 2, 6, 31, 50, 36, 31, 39, 51, 69, 51, 26, 23, 26, 31, 28, 15, 4, 1, 0, 0, 0, 1, 2, 0, 0, 1, 0, 1, 2, 3, 4, 16, 23, 43, 63, 32, 54, 50, 31, 42, 44, 42, 47, 43, 52, 47, 31, 45, 29, 3, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 1, 2, 2, 11, 77, 47, 45, 30, 33, 41, 46, 52, 28, 24, 30, 57, 50, 32, 40, 53, 36, 5, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 2, 3, 12, 35, 75, 32, 49, 38, 47, 61, 35, 28, 53, 31, 34, 28, 32, 37, 26, 41, 13, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 2, 2, 16, 46, 34, 58, 50, 40, 31, 45, 36, 26, 43, 53, 40, 32, 44, 44, 42, 22, 3, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 2, 2, 16, 25, 62, 45, 56, 51, 29, 23, 18, 6, 14, 33, 34, 56, 35, 48, 31, 24, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 14, 21, 36, 26, 44, 24, 7, 5, 3, 1, 1, 2, 7, 23, 25, 26, 20, 28, 4, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 2, 2, 21, 22, 14, 18, 31, 11, 3, 1, 1, 0, 1, 1, 2, 18, 16, 12, 22, 18, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 11, 26, 17, 32, 27, 6, 1, 1, 0, 0, 0, 0, 1, 10, 14, 12, 13, 11, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 9, 27, 29, 16, 6, 0, 0, 0, 0, 0, 0, 0, 0, 2, 3, 17, 16, 9, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 4, 12, 5, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 15, 4, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 3, 2, 1, 1, 3, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 3, 26, 25, 6, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 20, 10, 4, 1, 0, 0, 0, 0, 1, 2, 7, 19, 69, 69, 9, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 10, 53, 62, 45, 22, 6, 2, 0, 0, 3, 18, 85, 93, 115, 115, 16, 3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 6, 32, 76, 92, 119, 104, 36, 7, 0, 0, 5, 45, 108, 118, 139, 139, 19, 3, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 4, 22, 66, 79, 141, 121, 62, 13, 0, 1]
@@ -194,7 +197,7 @@ export default function Demo() {
       }
     }
     setData(newData)
-    ws = new WebSocket(" ws://localhost:19999");
+    ws = new WebSocket("ws://localhost:19999");
     ws.onopen = () => {
       // connection opened
       console.info("connect success");
@@ -213,7 +216,7 @@ export default function Demo() {
         // wsPointData = wsPointData.map((a) => (a < 5 ? 0 : a));
 
         if (colFalg) {
-          collection.push([[...wsPointData], name]);
+          collection.push([[...wsPointData], collectionLabelsRef.current.name]);
           setLength(collection.length - 1);
           setCsvData(collection);
           localStorage.setItem("collection", JSON.stringify(collection));
@@ -270,7 +273,8 @@ export default function Demo() {
         const total = wsPointData.reduce((a, b) => a + b, 0);
         const area = (total / length).toFixed(2);
         if (colFalg) {
-          collection.push([JSON.stringify(wsPointData), area, name, eval(name), objArea, eval(objArea)]);
+          const labels = collectionLabelsRef.current;
+          collection.push(buildCollectionRow(wsPointData, area, labels.name, labels.objArea, { area, length, total }));
           setLength(collection.length - 1);
           setCsvData(collection);
           localStorage.setItem("collection", JSON.stringify(collection));
@@ -436,8 +440,6 @@ export default function Demo() {
             }else{
               res = resarr.filter((a) => a > resarr.reduce((a,b) => a+b , 0) / resarr.length)
             }
-            // collection.push([JSON.stringify(wsPointData), area, name, eval(name), objArea, eval(objArea)]);
-            console.log(collection)
             collection.push([res[0], res[1], res[2], collection.length >=3 ? res[0] - collection[collection.length - 1][0] : null, collection.length >=3 ? res[1] - collection[collection.length - 1][1] : null,collection.length >=3 ? res[2] - collection[collection.length - 1][2] : null]);
             localStorage.setItem("collection", JSON.stringify(collection));
             setCsvData(collection);

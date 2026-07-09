@@ -9,7 +9,7 @@
  *
  * 密钥统一在密钥管理系统（发证方）生成，桌面端不再生成。
  */
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   Card, Button, Input, message, Modal,
   Tag, Divider, Row, Col, Typography, Space, Tooltip, Badge, Tabs, Alert
@@ -19,6 +19,12 @@ import {
   SafetyCertificateOutlined, EyeOutlined, SettingOutlined, LockOutlined
 } from '@ant-design/icons';
 import { decryptStr } from './aesUtil';
+import useMainWebSocket from '../../services/ws/useMainWebSocket';
+import {
+  getSensorTypeListMap,
+  mergeLicenseErrorStatus,
+  toLicenseStatus,
+} from '../../services/ws/messages';
 import './License.css';
 
 const { Title, Text } = Typography;
@@ -261,8 +267,6 @@ const License = () => {
   const [parseResult, setParseResult] = useState(null);
 
   // ---- WebSocket ----
-  const wsRef = useRef(null);
-  const [wsConnected, setWsConnected] = useState(false);
   // 当前授权状态（来自后端广播：在线/离线、剩余天数、校验中、未授权原因、锁定）
   const [licenseStatus, setLicenseStatus] = useState(null);
   // 后台传感器类型 value→中文名映射（首屏从 localStorage 兜底，WS 连上后刷新）
@@ -281,60 +285,39 @@ const License = () => {
     return sensor ? sensor.label : value;
   }, [sensorTypeMap]);
 
-  useEffect(() => {
-    try {
-      const ws = new WebSocket('ws://localhost:19999');
-      ws.onopen = () => {
-        setWsConnected(true);
-        // 主动请求传感器类型清单（请求-应答；主进程连接时也会主动 push 一次）
-        try { ws.send(JSON.stringify({ getSensorTypes: true })); } catch (e) { /* ignore */ }
-      };
-      ws.onclose = () => setWsConnected(false);
-      ws.onerror = () => setWsConnected(false);
-      ws.onmessage = (evt) => {
-        let msg;
-        try { msg = JSON.parse(evt.data); } catch (e) { return; }
-        if (msg.sensorTypeList && msg.sensorTypeList.map && typeof msg.sensorTypeList.map === 'object') {
-          // 传感器类型清单：存映射并落地 localStorage 兜底
-          setSensorTypeMap(msg.sensorTypeList.map);
-          try { localStorage.setItem('sensorTypeList', JSON.stringify(msg.sensorTypeList)); } catch (e) { /* ignore */ }
-          return;
-        }
-        if (msg.licenseLocked) {
-          // 锁定（时间回拨/篡改）→ 弹"请联系厂商重新获取密钥"
-          setLicenseStatus({ locked: true, valid: false, error: msg.reason || '检测到异常行为' });
-        } else if (msg.licenseChecking) {
-          // 校验中：只显示"校验中…"，不闪红
-          setLicenseStatus({ checking: true });
-        } else if (msg.licenseType !== undefined && msg.date != null) {
-          // 授权状态广播
-          setLicenseStatus({
-            checking: !!msg.checking,
-            valid: !!msg.valid,
-            locked: false,
-            type: msg.licenseType,
-            date: msg.date,
-            remainingDays: msg.remainingDays,
-            offline: !!msg.offline,
-          });
-        } else if (msg.licenseError != null) {
-          // 未授权 / 校验失败原因（覆盖在状态之上）
-          setLicenseStatus((prev) => ({
-            ...(prev || {}),
-            checking: false,
-            valid: false,
-            locked: false,
-            error: msg.licenseError,
-            noLicense: !!msg.noLicense,
-          }));
-        }
-      };
-      wsRef.current = ws;
-    } catch (e) {
-      console.warn('WebSocket connect failed', e);
+  const handleSocketMessage = useCallback((msg) => {
+    const sensorTypeMapPayload = getSensorTypeListMap(msg);
+    if (sensorTypeMapPayload) {
+      setSensorTypeMap(sensorTypeMapPayload);
+      try { localStorage.setItem('sensorTypeList', JSON.stringify(msg.sensorTypeList)); } catch (e) { /* ignore */ }
+      return;
     }
-    return () => { if (wsRef.current) wsRef.current.close(); };
+
+    const nextLicenseStatus = toLicenseStatus(msg);
+    if (nextLicenseStatus) {
+      setLicenseStatus(nextLicenseStatus);
+      return;
+    }
+
+    if (msg?.licenseError != null) {
+      setLicenseStatus((prev) => mergeLicenseErrorStatus(prev, msg));
+    }
   }, []);
+
+  const {
+    connected: wsConnected,
+    submitLicenseKey,
+    requestSensorTypes,
+    refreshLicense,
+  } = useMainWebSocket({
+    onMessage: handleSocketMessage,
+  });
+
+  useEffect(() => {
+    if (wsConnected) {
+      requestSensorTypes();
+    }
+  }, [requestSensorTypes, wsConnected]);
 
   // 解析密钥（自动识别：base64=离线、hex=在线）
   const handleParse = useCallback(() => {
@@ -382,13 +365,13 @@ const License = () => {
   const handleWriteToApp = useCallback(() => {
     const input = parseInput.trim();
     if (!input) { message.warning('请先输入密钥'); return; }
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+    if (!wsConnected) {
       message.error('应用未连接，请确保应用正在运行');
       return;
     }
-    wsRef.current.send(JSON.stringify({ date: { date: input } }));
+    submitLicenseKey(input, { includeStartTime: false });
     message.success('密钥已写入应用，正在校验…');
-  }, [parseInput]);
+  }, [parseInput, submitLicenseKey, wsConnected]);
 
   return (
     <div className="license-page">
@@ -430,7 +413,7 @@ const License = () => {
                 type="primary"
                 onClick={() => {
                   // 清缓存 + 立刻联网复查：后台续期/恢复后无需重启即时生效
-                  try { wsRef.current && wsRef.current.send(JSON.stringify({ refreshLicense: true })); } catch (e) { /* ignore */ }
+                  refreshLicense();
                   setLicenseStatus({ checking: true });
                 }}
               >重新获取授权</Button>

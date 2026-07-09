@@ -1,4 +1,4 @@
-const { timeStampToDate } = require("../processing/openWeb");
+const { timeStampToDate } = require("../processing/timeFormatters");
 
 module.exports = {
   isCar: (value) => {

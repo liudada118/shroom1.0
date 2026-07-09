@@ -11,7 +11,7 @@ export default function Can() {
     const [maxCol, setMaxCol] = useState(0)
     const [progressMax , setProgressMax] = useState(100)
     useEffect(() => {
-        ws = new WebSocket(" ws://localhost:29999");
+        ws = new WebSocket("ws://localhost:29999");
         ws.onopen = () => {
             // connection opened
             console.info("connect success");
