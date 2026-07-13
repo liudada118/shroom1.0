@@ -43,6 +43,32 @@ assert.strictEqual(missed.handled, false);
 assert.strictEqual(missed.stop, false);
 assert.deepStrictEqual(missed.results, []);
 
+const protocolRouter = createWebSocketCommandRouter();
+let protocolContext;
+protocolRouter.register({
+  name: 'serial-open',
+  when: (message) => message.sitPort != null,
+  handle: (message, context) => {
+    protocolContext = context;
+    return { path: message.sitPort };
+  },
+});
+const protocolResult = protocolRouter.handle({
+  type: 'serial.open',
+  payload: { role: 'sit', path: 'COM7' },
+  requestId: 'req-router-1',
+});
+assert.strictEqual(protocolResult.handled, true);
+assert.strictEqual(protocolResult.ok, true);
+assert.strictEqual(protocolResult.results[0].path, 'COM7');
+assert.strictEqual(protocolContext.legacyProtocol, false);
+assert.strictEqual(protocolContext.commandEnvelope.requestId, 'req-router-1');
+assert.throws(() => protocolRouter.handle({
+  type: 'serial.open',
+  payload: { role: 'sit' },
+  requestId: 'req-router-2',
+}), /missing required payload field/);
+
 const errorRouter = createWebSocketCommandRouter({
   logger: {
     warn: (...args) => warnings.push(args),

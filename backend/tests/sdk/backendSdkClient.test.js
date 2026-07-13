@@ -42,6 +42,20 @@ const fetchImpl = async (url, options = {}) => {
   if (url.endsWith('/api/serial/open')) {
     return createResponse({ code: 0, data: { handled: true }, message: 'success' });
   }
+  if (url.endsWith('/api/commands')) {
+    const command = JSON.parse(options.body);
+    return createResponse({
+      code: 0,
+      data: {
+        type: 'command.ack',
+        requestId: command.requestId,
+        commandType: command.type,
+        ok: true,
+        code: 'OK',
+      },
+      message: 'success',
+    });
+  }
   if (url.endsWith('/api/display-systems/demo')) {
     return createResponse({ displaySystem: { id: 'demo' } });
   }
@@ -93,6 +107,15 @@ async function run() {
 
   const displaySystem = await client.getDisplaySystem('demo');
   assert.deepStrictEqual(displaySystem, { displaySystem: { id: 'demo' } });
+
+  const commandAck = await client.executeCommand('serial.close', { roles: ['sit'] }, { requestId: 'req-sdk-1' });
+  assert.strictEqual(commandAck.type, 'command.ack');
+  assert.strictEqual(commandAck.requestId, 'req-sdk-1');
+  assert.deepStrictEqual(JSON.parse(requests.at(-1).options.body), {
+    type: 'serial.close',
+    payload: { roles: ['sit'] },
+    requestId: 'req-sdk-1',
+  });
 
   const messages = [];
   client.on('frame', (frame) => messages.push(frame));

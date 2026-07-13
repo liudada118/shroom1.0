@@ -14,6 +14,7 @@ const testFiles = [
   'backend/tests/displaySystems/configValidation.test.js',
   'backend/tests/serial/serialParserManager.test.js',
   'backend/tests/http/displaySystemsApi.test.js',
+  'backend/tests/http/commandApi.test.js',
   'backend/tests/ws/webSocketCommandRouter.test.js',
   'backend/tests/sdk/backendSdkClient.test.js',
   'backend/tests/sdk/serialChainDemo.test.js',

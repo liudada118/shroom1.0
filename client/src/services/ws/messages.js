@@ -1,24 +1,3 @@
-export const wsCommands = {
-  submitLicenseKey: (key, { includeStartTime = true } = {}) => ({
-    date: {
-      date: key,
-      ...(includeStartTime ? { startTime: window.Date.now() } : {}),
-    },
-  }),
-  requestSensorTypes: () => ({ getSensorTypes: true }),
-  refreshLicense: () => ({ refreshLicense: true }),
-  closeAllSensors: () => ({
-    sitClose: true,
-    backClose: true,
-    headClose: true,
-    sensorClose: true,
-  }),
-};
-
-export function isOpenSocket(socket) {
-  return socket?.readyState === WebSocket.OPEN;
-}
-
 export function parseJsonMessage(event) {
   if (!event || typeof event.data !== 'string') return event?.data;
   try {
@@ -26,15 +5,6 @@ export function parseJsonMessage(event) {
   } catch {
     return event.data;
   }
-}
-
-export function sendJsonMessage(socket, payload, { logger = console } = {}) {
-  if (!isOpenSocket(socket)) {
-    logger.warn?.('[ws] socket is not open, message skipped', payload);
-    return false;
-  }
-  socket.send(JSON.stringify(payload));
-  return true;
 }
 
 export function createJsonWebSocket(url, handlers = {}) {

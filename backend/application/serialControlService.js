@@ -68,6 +68,14 @@ function registerSerialControlHandlers(router, deps) {
     return nowDate < endDate;
   }
 
+  function requireAuthorizedRuntime() {
+    if (isAuthorizedRuntime()) return;
+    const error = new Error('a valid license is required for this command');
+    error.code = 'LICENSE_REQUIRED';
+    error.httpStatus = 403;
+    throw error;
+  }
+
   // 加载指定日期的历史数据，并进入 local 回放状态。
   router.register({
     name: 'history-load-date',
@@ -88,7 +96,7 @@ function registerSerialControlHandlers(router, deps) {
     name: 'sensor-file-switch',
     when: (message) => message.file != null,
     handle: (message) => {
-      if (!isAuthorizedRuntime()) return {};
+      requireAuthorizedRuntime();
       const runtime = getRuntime();
 
       setRuntime({
@@ -155,7 +163,7 @@ function registerSerialControlHandlers(router, deps) {
       message.sensorClose === true
     ),
     handle: (message, context = {}) => {
-      if (!isAuthorizedRuntime()) return {};
+      requireAuthorizedRuntime();
       if (message.sitPort != null) {
         setRuntime({ sitClose: false, com: message.sitPort });
         openSitSerialPort(message.sitPort, `${context.scope || 'main'} sitPort`);
@@ -195,7 +203,7 @@ function registerSerialControlHandlers(router, deps) {
     name: 'local-playback-switch',
     when: (message) => message.local === true || message.local === false,
     handle: (message, context = {}) => {
-      if (!isAuthorizedRuntime()) return {};
+      requireAuthorizedRuntime();
       const runtime = getRuntime();
       if (context.scope === 'back') {
         if (message.local === true) {
@@ -233,7 +241,7 @@ function registerSerialControlHandlers(router, deps) {
     name: 'exchange-sit-back-ports',
     when: (message) => message.exchange != null,
     handle: () => {
-      if (!isAuthorizedRuntime()) return {};
+      requireAuthorizedRuntime();
       const runtime = getRuntime();
       const nextCom = runtime.com1;
       const nextCom1 = runtime.com;

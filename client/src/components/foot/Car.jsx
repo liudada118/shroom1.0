@@ -8,6 +8,7 @@ import * as echarts from "echarts";
 import plane from "../../assets/images/plane.png";
 import { Select } from "element-react";
 import "element-theme-default";
+import { commandClient } from '../../services/command/commandClient';
 let myChart1;
 let ws, ws1;
 
@@ -457,8 +458,9 @@ class Car extends React.Component {
                 onChange={(e) => {
                   // this.handleChangeCom(e);
                   console.log(e);
-                  if (ws && ws.readyState === 1)
-                    ws.send(JSON.stringify({ sitPort: e }));
+                  commandClient.execute('serial.open', { role: 'sit', path: e }).catch((error) => {
+                    console.warn('[command] serial.open failed', error);
+                  });
                 }}
               >
                 {this.state.port.map((el) => {
@@ -474,8 +476,9 @@ class Car extends React.Component {
             ) : null}
             <Button
               onClick={() => {
-                if (ws && ws.readyState === 1)
-                  ws.send(JSON.stringify({ sitClose: true }));
+                commandClient.execute('serial.close', { roles: ['sit'] }).catch((error) => {
+                  console.warn('[command] serial.close failed', error);
+                });
               }}
             >
               关闭串口

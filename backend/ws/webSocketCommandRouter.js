@@ -1,3 +1,8 @@
+const {
+  COMMAND_ERROR_CODES,
+  normalizeCommand,
+} = require('../contracts/commandProtocol');
+
 /**
  * 创建 WebSocket/HTTP 共用的命令路由器。
  *
@@ -31,15 +36,23 @@ function createWebSocketCommandRouter({ logger } = {}) {
    * @returns {{handled: boolean, stop: boolean, results: object[]}} 执行摘要。
    */
   function handle(message, context = {}) {
+    const normalized = normalizeCommand(message);
+    const command = normalized.command;
+    const commandContext = {
+      ...context,
+      commandEnvelope: normalized.envelope,
+      legacyProtocol: normalized.legacy,
+      originalMessage: message,
+    };
     const results = [];
     for (const handler of handlers) {
       try {
         const shouldHandle = typeof handler.when === 'function'
-          ? handler.when(message, context)
+          ? handler.when(command, commandContext)
           : true;
         if (!shouldHandle) continue;
 
-        const result = handler.handle(message, context) || {};
+        const result = handler.handle(command, commandContext) || {};
         results.push({
           name: handler.name || 'anonymous',
           ...result,
@@ -49,12 +62,17 @@ function createWebSocketCommandRouter({ logger } = {}) {
             handled: true,
             stop: true,
             results,
+            ok: !results.some((item) => item.error),
+            command: normalized.envelope,
+            legacyProtocol: normalized.legacy,
           };
         }
       } catch (error) {
         logger?.warn?.(`[WSCommand] ${handler.name || 'anonymous'} failed`, error.message || error);
         results.push({
           name: handler.name || 'anonymous',
+          code: error.code || COMMAND_ERROR_CODES.COMMAND_EXECUTION_FAILED,
+          httpStatus: error.httpStatus,
           error: error.message || String(error),
         });
       }
@@ -64,6 +82,9 @@ function createWebSocketCommandRouter({ logger } = {}) {
       handled: results.length > 0,
       stop: false,
       results,
+      ok: results.length > 0 && !results.some((result) => result.error),
+      command: normalized.envelope,
+      legacyProtocol: normalized.legacy,
     };
   }
 

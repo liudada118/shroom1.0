@@ -1,48 +1,47 @@
-export function createMessage(type, payload = {}, meta = {}) {
-  if (!type) {
-    throw new Error('message type is required');
-  }
-  return {
-    type,
-    payload,
-    meta: {
-      timestamp: Date.now(),
-      ...meta,
-    },
-  };
+import schema from '../../../../shared/commandSchema.json';
+
+export function createRequestId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return `cmd_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export function createCommand(type, payload = {}, meta = {}) {
-  return createMessage(type, payload, meta);
+export function createMessage(type, payload = {}, requestId = createRequestId()) {
+  const definition = schema.commands[type];
+  if (!definition) throw new Error(`unsupported command type: ${type}`);
+  const missing = (definition.required || []).filter((field) => payload[field] == null);
+  if (missing.length) throw new Error(`missing required payload field(s): ${missing.join(', ')}`);
+  return { type, payload, requestId };
 }
+
+export const createCommand = createMessage;
 
 export const sensorCommands = {
-  serialList: () => createCommand('serial.list'),
-  serialOpen: ({ sensorType, channels, baudRate } = {}) => createCommand('serial.open', {
-    sensorType,
-    channels,
-    baudRate,
+  serialList: () => createCommand('serial.refresh'),
+  serialOpen: ({ role = 'sit', path, port, portPath, channels, baudRate } = {}) => {
+    const channelEntry = channels && Object.entries(channels).find(([, value]) => value);
+    return createCommand('serial.open', {
+      role: channelEntry?.[0] || role,
+      path: channelEntry?.[1] || path || port || portPath,
+      baudRate,
+    });
+  },
+  serialClose: ({ roles, channels } = {}) => createCommand('serial.close', { roles: roles || channels }),
+  systemSwitch: ({ sensorType } = {}) => createCommand('sensor.switch', { sensorType }),
+  captureStart: ({ name, hz, metadata } = {}) => createCommand('collection.control', {
+    active: true,
+    name,
+    frequencyHz: hz,
+    options: metadata,
   }),
-  serialClose: ({ channels } = {}) => createCommand('serial.close', { channels }),
-  systemSwitch: ({ sensorType, mode } = {}) => createCommand('system.switch', { sensorType, mode }),
-  captureStart: ({ name, hz, metadata } = {}) => createCommand('capture.start', { name, hz, metadata }),
-  captureStop: () => createCommand('capture.stop'),
-  captureList: (payload = {}) => createCommand('capture.list', payload),
-  replayLoad: ({ captureName, captureId, sensorType } = {}) => createCommand('replay.load', {
-    captureName,
-    captureId,
-    sensorType,
+  captureStop: () => createCommand('collection.control', { active: false }),
+  replayLoad: ({ captureName, captureId } = {}) => createCommand('history.load', { date: captureName || captureId }),
+  replayPlay: ({ speed = 1 } = {}) => createCommand('playback.control', { play: true, speed }),
+  replayPause: () => createCommand('playback.control', { play: false }),
+  replaySeek: ({ index } = {}) => createCommand('playback.control', { value: index }),
+  exportCsv: ({ captureName, captureId, language, path } = {}) => createCommand('export.csv', {
+    date: captureName || captureId,
+    options: { language, path, format: 'csv' },
   }),
-  replayPlay: ({ speed = 1 } = {}) => createCommand('replay.play', { speed }),
-  replayPause: () => createCommand('replay.pause'),
-  replaySeek: ({ index } = {}) => createCommand('replay.seek', { index }),
-  exportCsv: ({ captureName, captureId, sensorType, language, path } = {}) => createCommand('export.csv', {
-    captureName,
-    captureId,
-    sensorType,
-    language,
-    path,
-  }),
-  zeroCapture: ({ sensorType, channel } = {}) => createCommand('zero.capture', { sensorType, channel }),
-  zeroClear: ({ sensorType, channel } = {}) => createCommand('zero.clear', { sensorType, channel }),
+  zeroCapture: () => createCommand('calibration.zero', { enabled: true }),
+  zeroClear: () => createCommand('calibration.zero', { enabled: false }),
 };

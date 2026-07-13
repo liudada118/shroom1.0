@@ -1,5 +1,6 @@
 const API_VERSION = 'v1';
-const SDK_CONTRACT_VERSION = '2026-07-03';
+const SDK_CONTRACT_VERSION = '2026-07-13';
+const commandSchema = require('../../shared/commandSchema.json');
 
 const SERIAL_ROLES = Object.freeze({
   SIT: 'sit',
@@ -81,9 +82,21 @@ function buildSdkContractSnapshot({
       basePath: '/api',
       routes: HTTP_ROUTES,
       controlTransport: 'http',
+      commandSchema,
+      commandAckShape: {
+        type: 'command.ack',
+        requestId: 'string',
+        commandType: 'string',
+        status: 'accepted|rejected',
+        ok: 'boolean',
+        code: 'string',
+        message: 'string',
+        data: 'object?',
+      },
     },
     websocket: {
       realtimeTransport: 'websocket',
+      acceptsControlCommands: false,
       messageTypes: WS_MESSAGE_TYPES,
       subscribeExample: {
         type: WS_MESSAGE_TYPES.SUBSCRIBE,

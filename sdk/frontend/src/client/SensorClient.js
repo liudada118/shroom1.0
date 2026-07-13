@@ -6,6 +6,7 @@ export const DEFAULT_HTTP_ROUTES = Object.freeze({
   channels: '/api/channels',
   wsStatus: '/api/ws/status',
   sdkContract: '/api/sdk/contract',
+  commands: '/api/commands',
   serialPorts: '/api/serial/ports',
   serialStatus: '/api/serial/status',
   serialOpen: '/api/serial/open',
@@ -115,6 +116,10 @@ export class SensorClient {
       ? { type: messageOrType, payload }
       : messageOrType;
 
+    if (message?.requestId && message?.payload) {
+      throw new Error('control commands must use command() over HTTP');
+    }
+
     if (!this.ws || this.ws.readyState !== this.WebSocketImpl.OPEN) {
       throw new Error('WebSocket is not connected');
     }
@@ -127,7 +132,10 @@ export class SensorClient {
     if (!commandFactory) {
       throw new Error(`unknown command "${name}"`);
     }
-    this.send(commandFactory(payload));
+    return this.request(this.getRoute('commands'), {
+      method: 'POST',
+      body: commandFactory(payload),
+    });
   }
 
   /**

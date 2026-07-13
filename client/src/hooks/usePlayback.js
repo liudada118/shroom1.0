@@ -6,16 +6,17 @@
  * 和回放控制逻辑统一封装。
  *
  * 使用示例：
- *   const playback = usePlayback(sendMessage);
+ *   const playback = usePlayback(commandClient);
  *   playback.play();
  *   playback.seekTo(100);
  *   playback.setSpeed(2);
  */
 
 import { useState, useCallback, useRef } from 'react';
+import { commandClient as defaultCommandClient } from '../services/command/commandClient';
 
 /**
- * @param {function} sendMessage - WebSocket 发送函数
+ * @param {object} client - HTTP command client
  * @returns {{
  *   isPlaying: boolean,
  *   currentIndex: number,
@@ -36,7 +37,7 @@ import { useState, useCallback, useRef } from 'react';
  *   setIsLocal: function,
  * }}
  */
-export function usePlayback(sendMessage) {
+export function usePlayback(client = defaultCommandClient) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [totalFrames, setTotalFrames] = useState(0);
@@ -46,22 +47,27 @@ export function usePlayback(sendMessage) {
 
   const speedRef = useRef(speed);
   speedRef.current = speed;
+  const executePlayback = useCallback((payload) => {
+    client.execute('playback.control', payload).catch((error) => {
+      console.warn('[command] playback control failed', error);
+    });
+  }, [client]);
 
   /**
    * 开始回放
    */
   const play = useCallback(() => {
     setIsPlaying(true);
-    sendMessage({ play: true });
-  }, [sendMessage]);
+    executePlayback({ play: true });
+  }, [executePlayback]);
 
   /**
    * 暂停回放
    */
   const pause = useCallback(() => {
     setIsPlaying(false);
-    sendMessage({ play: false });
-  }, [sendMessage]);
+    executePlayback({ play: false });
+  }, [executePlayback]);
 
   /**
    * 切换播放/暂停
@@ -69,10 +75,10 @@ export function usePlayback(sendMessage) {
   const toggle = useCallback(() => {
     setIsPlaying((prev) => {
       const next = !prev;
-      sendMessage({ play: next });
+      executePlayback({ play: next });
       return next;
     });
-  }, [sendMessage]);
+  }, [executePlayback]);
 
   /**
    * 跳转到指定帧
@@ -81,8 +87,8 @@ export function usePlayback(sendMessage) {
   const seekTo = useCallback((index) => {
     const clampedIndex = Math.max(0, Math.min(index, totalFrames - 1));
     setCurrentIndex(clampedIndex);
-    sendMessage({ index: clampedIndex });
-  }, [sendMessage, totalFrames]);
+    executePlayback({ index: clampedIndex });
+  }, [executePlayback, totalFrames]);
 
   /**
    * 前进一帧
@@ -90,10 +96,10 @@ export function usePlayback(sendMessage) {
   const stepForward = useCallback(() => {
     setCurrentIndex((prev) => {
       const next = Math.min(prev + 1, totalFrames - 1);
-      sendMessage({ index: next });
+      executePlayback({ index: next });
       return next;
     });
-  }, [sendMessage, totalFrames]);
+  }, [executePlayback, totalFrames]);
 
   /**
    * 后退一帧
@@ -101,10 +107,10 @@ export function usePlayback(sendMessage) {
   const stepBackward = useCallback(() => {
     setCurrentIndex((prev) => {
       const next = Math.max(prev - 1, 0);
-      sendMessage({ index: next });
+      executePlayback({ index: next });
       return next;
     });
-  }, [sendMessage]);
+  }, [executePlayback]);
 
   /**
    * 设置回放速度
@@ -112,8 +118,8 @@ export function usePlayback(sendMessage) {
    */
   const setSpeed = useCallback((newSpeed) => {
     setSpeedState(newSpeed);
-    sendMessage({ speed: newSpeed });
-  }, [sendMessage]);
+    executePlayback({ speed: newSpeed });
+  }, [executePlayback]);
 
   /**
    * 加载历史数据
@@ -123,8 +129,10 @@ export function usePlayback(sendMessage) {
     setCurrentLabel(dateLabel);
     setCurrentIndex(0);
     setIsPlaying(false);
-    sendMessage({ history: dateLabel });
-  }, [sendMessage]);
+    client.execute('history.load', { date: dateLabel }).catch((error) => {
+      console.warn('[command] history load failed', error);
+    });
+  }, [client]);
 
   return {
     isPlaying,

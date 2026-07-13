@@ -29,6 +29,24 @@ function createControlCommandService({ commandRouter, logger } = {}) {
   }
 
   function executeWs(command, context = {}) {
+    const isNewCommand = !!(
+      command &&
+      typeof command === 'object' &&
+      Object.prototype.hasOwnProperty.call(command, 'payload') &&
+      Object.prototype.hasOwnProperty.call(command, 'requestId')
+    );
+    if (isNewCommand) {
+      return {
+        handled: false,
+        stop: true,
+        ok: false,
+        command,
+        error: {
+          code: 'TRANSPORT_NOT_ALLOWED',
+          message: 'control commands must use HTTP POST /api/commands',
+        },
+      };
+    }
     return execute(command, {
       transport: 'websocket',
       ...context,
@@ -39,6 +57,7 @@ function createControlCommandService({ commandRouter, logger } = {}) {
     execute,
     executeHttp,
     executeWs,
+    registerHandler: (handler) => commandRouter.register(handler),
   };
 }
 

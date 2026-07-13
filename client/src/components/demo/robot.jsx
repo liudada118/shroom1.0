@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { commandClient } from '../../services/command/commandClient'
 function jet1(min, max, x) {
     let red, g, blue;
     let dv;
@@ -53,7 +54,9 @@ export default function Robot() {
             // progress.max = length
             const value = e.target.value
             console.log(value, progress.max)
-            ws.send(JSON.stringify({ value: value }))
+            commandClient.execute('playback.control', { value }).catch((error) => {
+                console.warn('[command] playback seek failed', error)
+            })
         })
         const file = document.getElementById('file')
         const data = document.getElementById('data')

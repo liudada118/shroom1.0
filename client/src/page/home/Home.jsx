@@ -100,7 +100,8 @@ import { withTranslation } from "react-i18next";
 import { chestLine, flLine, frLine, genWebglData, handSkinChange, heatMapMax, hlLine, hrLine, robot0401 } from "./robotUtil";
 import { WebGLCanvas } from "../../components/webgl/WebGL.HeatMap copy 2";
 import { WS_URLS } from "../../constants";
-import { createJsonWebSocket, isOpenSocket, sendJsonMessage, wsCommands } from "../../services/ws/messages";
+import { createJsonWebSocket } from "../../services/ws/messages";
+import { commandClient } from "../../services/command/commandClient";
 import {
   buildBasicControlCollectionRow,
   buildExtendedControlCollectionRow,
@@ -1112,9 +1113,9 @@ class Home extends React.Component {
     ws.onopen = () => {
       // connection opened
       console.info("connect success");
-      this.wsSendObj(wsCommands.closeAllSensors())
+      this.wsSendObj({ sitClose: true, backClose: true, headClose: true, sensorClose: true })
       // 主动请求传感器类型清单（请求-应答；主进程连接时也会主动 push 一次）
-      this.wsSendObj(wsCommands.requestSensorTypes())
+      this.wsSendObj({ getSensorTypes: true })
     };
     ws.onmessage = (e) => {
       this.wsData(e);
@@ -2870,12 +2871,10 @@ class Home extends React.Component {
   }
 
   wsSendObj = (obj) => {
-    const state = ws ? ws.readyState : 'no ws';
-    // readyState: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
-    console.log(`[WS Send] readyState=${state}`, obj);
-    if (!sendJsonMessage(ws, obj)) {
-      console.warn(`[WS Send] 无法发送， ws.readyState=${state}`, obj);
-    }
+    return commandClient.executeLegacyControl(obj).catch((error) => {
+      console.warn('[command] control request failed', error, obj);
+      return [];
+    });
   };
 
   changeMatrix = (e) => {
@@ -3085,9 +3084,7 @@ class Home extends React.Component {
     this.setState({ local: value });
     // changeDateArr(matrixName)
 
-    if (isOpenSocket(ws)) {
-      this.wsSendObj(value ? { local: true } : { play: false, local: false, history: false });
-    }
+    this.wsSendObj(value ? { local: true } : { play: false, local: false, history: false });
   };
 
   // formatter = (value) => {

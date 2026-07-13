@@ -21,6 +21,7 @@ import { handLine, footLine, carSitLine, carBackLine } from '../../assets/util/l
 import { Select, Slider, Popover } from 'antd'
 import * as echarts from 'echarts'
 import { SelectOutlined } from '@ant-design/icons'
+import { commandClient } from '../../services/command/commandClient'
 
 let ws, xvalue = 0, yvalue = 0, myChart2, sitIndexArr = new Array(4).fill(0), backIndexArr = new Array(4).fill(0), sitPress = 0, backPress = 0;
 let backTotal = 0, backMean = 0, backMax = 0, backMin = 0, backPoint = 0, backArea = 0, sitTotal = 0, sitMean = 0, sitMax = 0, sitMin = 0, sitPoint = 0, sitArea = 0
@@ -388,9 +389,9 @@ export default function Home() {
   }
 
   const wsSendObj = (obj) => {
-    if (ws && ws.readyState === 1) {
-      ws.send(JSON.stringify(obj));
-    }
+    commandClient.executeLegacyControl(obj).catch((error) => {
+      console.warn('[command] control request failed', error, obj)
+    })
     // if (obj.file) {
     //   if (ws && ws.readyState === 1) {
     //     ws.send(JSON.stringify({ file: obj.file }));
@@ -455,10 +456,8 @@ export default function Home() {
   }
 
   const playData = (value) => {
-    if (ws && ws.readyState === 1) {
-      ws.send(JSON.stringify({ play: value }));
-      setPlayflag(value)
-    }
+    wsSendObj({ play: value })
+    setPlayflag(value)
   }
 
   const changeMatrix = (e) => {
@@ -487,14 +486,7 @@ export default function Home() {
     setLocal(value)
     // changeDateArr(matrixName)
 
-    if (ws && ws.readyState === 1) {
-      if (value) {
-        ws.send(JSON.stringify({ local: true }));
-      } else {
-        ws.send(JSON.stringify({ local: false }));
-      }
-
-    }
+    wsSendObj({ local: value });
   }
 
   const formatter = (value) => {
@@ -757,9 +749,7 @@ export default function Home() {
                 localStorage.setItem("localValuej", value);
                 console.log(value)
                 setIndex(value)
-                if (ws && ws.readyState === 1) {
-                  ws.send(JSON.stringify({ value }))
-                }
+                wsSendObj({ value })
               }}
               value={index}
               step={1}
@@ -1036,9 +1026,7 @@ class Home extends React.Component{
                 localStorage.setItem("localValuej", value);
                 console.log(value)
                 setIndex(value)
-                if (ws && ws.readyState === 1) {
-                  ws.send(JSON.stringify({ value }))
-                }
+                wsSendObj({ value })
               }}
               value={index}
               step={1}

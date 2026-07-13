@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1.0.0",
+  "envelope": {
+    "required": ["type", "payload", "requestId"],
+    "additionalProperties": false
+  },
+  "commands": {
+    "serial.open": { "required": ["role", "path"] },
+    "serial.close": { "required": [] },
+    "serial.refresh": { "required": [] },
+    "serial.exchange": { "required": [] },
+    "serial.autoConnect": { "required": [] },
+    "sensor.switch": { "required": ["sensorType"] },
+    "history.mode": { "required": ["local"] },
+    "history.load": { "required": ["date"] },
+    "history.delete": { "required": ["date"] },
+    "playback.control": { "required": [] },
+    "collection.control": { "required": ["active"] },
+    "export.csv": { "required": ["date"] },
+    "runtime.configure": { "required": [] },
+    "calibration.zero": { "required": ["enabled"] },
+    "analysis.selection": { "required": [] },
+    "license.activate": { "required": ["key"] },
+    "license.refresh": { "required": [] },
+    "sensor.types.list": { "required": [] }
+  }
+}

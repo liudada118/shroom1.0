@@ -1,5 +1,26 @@
 # 架构文档
 
+## 2026-07-13 统一 Command 与通信边界
+
+- `shared/commandSchema.json` 是前端、后端与 SDK 共用的 command 清单，统一信封为 `{ type, payload, requestId }`。
+- 前端控制面统一通过 `client/src/services/command/commandClient.js` 调用 `POST /api/commands`；`Home`、授权页、回放/串口 Hook 和 SDK 不再通过主 WebSocket 发送新控制命令。
+- 后端 `commandProtocol` 负责 schema 校验、标准命令到旧 handler 字段的单向转换；旧字段仅允许从 legacy WebSocket 兼容入口进入。
+- HTTP command 响应统一返回 `command.ack`，包含 `requestId`、`commandType`、`status`、`ok`、`code` 和可选 `data`。无效命令、未知命令、授权不足和执行失败使用稳定错误码及对应 HTTP 状态。
+- WebSocket 只承担实时帧、系统事件和 `subscribe/unsubscribe/getSubscriptions`；通过 WebSocket 提交新 command 会返回 `TRANSPORT_NOT_ALLOWED` ACK，旧字段暂时继续兼容。
+
+```mermaid
+flowchart LR
+    UI["React UI / SDK"] -->|"POST /api/commands\n{type,payload,requestId}"| HTTP["HTTP Control Routes"]
+    HTTP --> PROTOCOL["Command Protocol Validator"]
+    PROTOCOL --> ROUTER["Command Router"]
+    ROUTER --> SERVICES["Application / Runtime Services"]
+    HTTP -->|"command.ack"| UI
+    SERVICES --> BUS["ChannelBus / System Events"]
+    BUS -->|"Realtime push"| WS["WebSocket Subscriptions"]
+    WS --> UI
+    LEGACY["Legacy WS fields"] -. "compatibility only" .-> ROUTER
+```
+
 ## 2026-07-09 Client WebSocket Boundary Split
 
 - Added `client/src/services/ws/messages.js` to centralize frontend WebSocket command builders, JSON send/parse helpers, license message classification, license scope storage updates, sensor type list extraction, and license status mapping.
@@ -72,12 +93,14 @@
 - `server.js` 中串口打开、WebSocket runtime、实时发布、小床 runtime、Display Systems 绑定和 frame pipeline 开始改用 `runtimeContext`。
 - 新增 `runtimeContextFactory` 和 `framePipelineFactory` 测试，覆盖 store 优先读取、闭包兜底和三路数据库映射。
 
-> 最新维护：2026-07-09。本次维护继续推进前端 WebSocket 边界拆分和 demo 采集治理，新增 `client/src/services/ws` 承接主 WS 命令构造、连接 hook、授权消息分类与 Home 控制通道消息解析，并新增 `client/src/components/demo/collectionValue.js` / `formulaEvaluator.js` 收口采集 CSV 和分压公式中的动态执行逻辑。
+> 最新维护：2026-07-13。本次维护完成统一 command schema、HTTP 控制面、WebSocket 实时推送边界、标准 ACK/错误码，以及前端与 SDK 控制 client 迁移。
 
 ## 当前维护记录
 
 | 日期 | 类型 | 说明 |
 | :--- | :--- | :--- |
+| 2026-07-13 | 优化重构 | 新增共享 command schema、前后端协议适配器和统一 HTTP command client；WS 仅保留实时订阅与旧字段兼容。 |
+| 2026-07-13 | 测试完善 | 新增 command router 新协议、HTTP ACK/错误码、WS 传输拒绝和前端 command client 测试，根测试入口增加 command API 回归。 |
 | 2026-07-09 | 优化重构 | 新增 `client/src/components/demo/formulaEvaluator.js`，将 `handDemoPress.jsx` 的分压公式 `eval` 替换为受限公式编译器，移除前端最后一个 `no-eval` 警告。 |
 | 2026-07-09 | 优化重构 | 新增 `client/src/services/ws/controlMessages.js`，合并 `Home.jsx` 中两套 `wsControl` 消息解析和采集写入逻辑，并在卸载时关闭控制通道连接。 |
 | 2026-07-09 | 优化重构 | 新增 `client/src/components/demo/collectionValue.js`，将多个 demo 采集组件中的 `eval(name)` / `eval(objArea)` 替换为显式字段取值，并用 ref 修正 WS 回调里的采集标签闭包。 |
@@ -169,6 +192,8 @@
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
+| 2026-07-13 | 前后端通信协议统一 | 控制命令统一使用 `{ type, payload, requestId }` 经 HTTP 执行，响应返回 `command.ack`；WebSocket 只负责实时推送和订阅。 |
+| 2026-07-13 | 前端统一 Command Client | `Home`、授权、串口、回放和 SDK 控制入口统一走 command client，旧页面字段在前端过渡适配器中拆成标准命令。 |
 | 2026-07-09 | Demo 分压公式安全化 | `handDemoPress.jsx` 的公式编辑器改用 `compileValueFormula`，只允许 `y` 和白名单 Math 表达式，移除剩余 `eval` 与打包警告。 |
 | 2026-07-09 | Home 控制通道拆分 | 新增 `client/src/services/ws/controlMessages.js`，`Home.jsx` 的 `localCar` 初始化和 `changeWs` 复用同一套控制消息解析、控制列表生成和采集行写入方法。 |
 | 2026-07-09 | Demo 采集 eval 收口 | `Block`、`Demo*`、`handDemo*`、`handLine*` 等 demo 采集组件改用 `buildCollectionRow` 生成 CSV 行，减少动态代码执行和打包警告。 |
@@ -237,7 +262,7 @@
 
 ---
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-07-06
+> 本文档由 Codex 自动生成和维护。最后更新于：2026-07-13
 
 ## 2026-07-07 Display Systems Runtime 定义与复杂线序迁移
 

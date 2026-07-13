@@ -1,4 +1,5 @@
 const { EventEmitter } = require('events');
+const { createCommand } = require('../../../backend/contracts/commandProtocol');
 
 const DEFAULT_HTTP_BASE_URL = 'http://127.0.0.1:19245';
 const DEFAULT_WS_URL = 'ws://127.0.0.1:19999';
@@ -9,6 +10,7 @@ const DEFAULT_ROUTES = Object.freeze({
   sdkContract: '/api/sdk/contract',
   displaySystems: '/api/display-systems',
   displaySystemById: '/api/display-systems/:id',
+  commands: '/api/commands',
   serialPorts: '/api/serial/ports',
   serialStatus: '/api/serial/status',
   serialOpen: '/api/serial/open',
@@ -145,6 +147,13 @@ class BackendSdkClient extends EventEmitter {
 
   getCurrentSensor() {
     return this.request('sensorCurrent');
+  }
+
+  executeCommand(type, payload = {}, options = {}) {
+    return this.request('commands', {
+      method: 'POST',
+      body: createCommand(type, payload, options.requestId),
+    });
   }
 
   setSensorType(type) {

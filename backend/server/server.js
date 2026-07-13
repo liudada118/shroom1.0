@@ -150,6 +150,8 @@ const {
   carYLine,
 } = require("../processing");
 const module2 = require('../license/aes_ecb')
+const { validateLicenseKey } = require('../license/licenseValidationService');
+const { readStoredLicenseKey, writeStoredLicenseKey } = require('../license/licenseKeyStore');
 const { createServerPathConfig } = require('./serverPathConfig');
 const { isCar, dedupli, totalToN, } = require("../common/util");
 const { estimatePointPressure, FILTER_THRESHOLD: PRESSURE_CALIBRATION_FILTER_THRESHOLD } = require("../../util/pressureCalibration_V2.7.54");
@@ -1201,6 +1203,43 @@ const runtimeStatePatchers = createRuntimeStatePatchers({
   },
 });
 
+function getStoredLicenseKey() {
+  return readStoredLicenseKey({ preferredPath: writableNameTxt || nameTxt });
+}
+
+function activateSubmittedLicenseKey(licenseKey) {
+  const validation = validateLicenseKey(licenseKey, {
+    decryptStr: module2.decryptStr,
+    fallbackFile: runtimeContext.getSensorType() || defauleFile,
+  });
+  if (!validation.ok) return validation;
+
+  const state = validation.state;
+  writeStoredLicenseKey(licenseKey, { targetPath: writableNameTxt });
+  licenseFile = state.licenseFile;
+  selectFlag = state.selectFlag;
+  endDate = state.endDate;
+
+  if (state.nextFile) {
+    file = state.nextFile;
+    baudRate = getSensorBaudRate(file);
+    petCareRuntimeService.resetAll();
+    runtimeStatePatchers.applySerialCommandPatch({ file, baudRate });
+  }
+
+  return {
+    ok: true,
+    code: 'OK',
+    payload: {
+      date: endDate,
+      nowDate: runtimeContext.getNowDate(),
+      file: licenseFile || file,
+      selectFlag,
+      ...(state.moduleConfig ? { moduleConfig: state.moduleConfig } : {}),
+    },
+  };
+}
+
 // 娉ㄥ唽杩愯鏃舵帶鍒跺懡浠わ紝getRuntime/setRuntime 鏄棫杩愯鏃跺彉閲忕殑杩囨浮閫傞厤灞傘€?
 registerRuntimeCommandHandlers(wsCommandRouter, {
   csvDownloadService,
@@ -1294,6 +1333,7 @@ const webSocketHandlerContext = createWebSocketHandlerContext({
     SMALL_BED_12B_TYPE,
     TEMP_FULL_BED_TYPE,
     WILDCARD_CHANNEL,
+    activateSubmittedLicenseKey,
     attachHeartbeat,
     buildTempFullBedPlaybackPayload,
     controlCommandService,
@@ -1301,6 +1341,7 @@ const webSocketHandlerContext = createWebSocketHandlerContext({
     fs,
     getDefaultFileFromLicense,
     getHistorySeries,
+    getStoredLicenseKey,
     getSelectFlagFromLicense,
     getSensorBaudRate,
     getStoredSitData,

@@ -1,5 +1,7 @@
 ﻿const { createWebSocketHistoryCommandService } = require('../services/websocket/webSocketHistoryCommandService');
 
+const { createCommandAck } = require('../contracts/commandProtocol');
+
 /**
  * WebSocket 杩炴帴澶勭悊鎸傝浇鍣ㄣ€? *
  * 璇ユā鍧楀彧璐熻矗涓夌鍙?WebSocket 杩炴帴銆佽闃呮敞鍐屻€佸績璺冲拰鏃ф秷鎭叆鍙ｅ垎鍙戙€? * 鎺堟潈婵€娲荤敱 server.js 娉ㄥ叆鐨勮涔夊叆鍙ｅ鐞嗭紝鍘嗗彶/妗嗛€?鍥炴斁鍛戒护涓嬫矇鍒?service銆? */
@@ -16,6 +18,19 @@ function sendPrivateSystemEvent(ws, data, logger) {
   } catch (err) {
     logger.warn('[WebSocket] Failed to send private system event:', err.message);
   }
+}
+
+function sendCommandResultAck(ws, message, result, logger) {
+  if (!message?.requestId || !message?.type) return;
+  const error = result?.error || result?.results?.find((item) => item.error);
+  sendPrivateSystemEvent(ws, createCommandAck({
+    requestId: message.requestId,
+    commandType: message.type,
+    ok: !error && result?.handled === true,
+    code: error?.code,
+    message: error?.message || error?.error,
+    data: error ? undefined : { handlers: result?.results?.map((item) => item.name) || [] },
+  }), logger);
 }
 
 function createWebSocketHandlerAttacher(ctx) {
@@ -74,6 +89,62 @@ function createWebSocketHandlerAttacher(ctx) {
       zeroCommandService,
     });
 
+    controlCommandService.registerHandler({
+      name: 'history-compatibility',
+      when: (message) => (
+        message.variety != null ||
+        message.resetZero != null ||
+        message.value != null ||
+        message.backIndex != null ||
+        message.sitIndex != null ||
+        message.indexArr != null
+      ),
+      handle: (message, context) => {
+        historyCommandService.handle(message, { clientName: context.clientName });
+      },
+    });
+
+    controlCommandService.registerHandler({
+      name: 'license-activation',
+      when: (message) => message.date?.date != null,
+      handle: (message) => {
+        if (typeof activateSubmittedLicenseKey !== 'function') {
+          const error = new Error('license activation service is not available');
+          error.code = 'COMMAND_EXECUTION_FAILED';
+          throw error;
+        }
+        const activation = activateSubmittedLicenseKey(message.date.date);
+        if (!activation.ok) {
+          const error = new Error(activation.message);
+          error.code = activation.code || 'COMMAND_EXECUTION_FAILED';
+          throw error;
+        }
+        publishSystemEvent(activation.payload);
+        return { activationCode: activation.code || 'OK' };
+      },
+    });
+
+    controlCommandService.registerHandler({
+      name: 'license-status-refresh',
+      when: (message) => message.refreshLicense === true,
+      handle: () => {
+        const payload = {
+          date: ctx.endDate,
+          nowDate: ctx.nowDate,
+          file: ctx.licenseFile || ctx.file,
+          selectFlag: ctx.selectFlag,
+        };
+        publishSystemEvent(payload);
+        return { payload };
+      },
+    });
+
+    controlCommandService.registerHandler({
+      name: 'sensor-types-status',
+      when: (message) => message.getSensorTypes === true,
+      handle: () => ({ selectFlag: ctx.selectFlag }),
+    });
+
     ctx.serverOpened = true;
     ctx.serverShutdownRequested = false;
 
@@ -113,7 +184,8 @@ function createWebSocketHandlerAttacher(ctx) {
 
         const getMessage = parseJsonMessage(message, { logger, clientName });
         if (!getMessage) return;
-        controlCommandService.executeWs(getMessage, { clientName, scope: 'back' });
+        const commandResult = controlCommandService.executeWs(getMessage, { clientName, scope: 'back' });
+        sendCommandResultAck(ws, getMessage, commandResult, logger);
       });
     });
 
@@ -168,21 +240,8 @@ server.on('connection', function connection(ws, req) {
         if (!getMessage) return;
 
         const commandResult = controlCommandService.executeWs(getMessage, { clientName, scope: 'main' });
+        sendCommandResultAck(ws, getMessage, commandResult, logger);
         if (commandResult.stop) return;
-
-        if (getMessage.date != null) {
-          const content = getMessage.date.date;
-          const activation = activateSubmittedLicenseKey(content);
-          if (!activation.ok) {
-            logger.warn('[License] License activation failed:', activation.code);
-            publishSystemEvent({ licenseError: activation.message });
-            return;
-          }
-
-          publishSystemEvent(activation.payload);
-        }
-
-        historyCommandService.handle(getMessage, { clientName });
       });
     });
   };
