@@ -620,14 +620,19 @@ function getCsvElapsedSeconds(rows, rowIndex, baseIndex = 0, frameIndex = 0) {
   return (frameIndex / fallbackHz).toFixed(3);
 }
 
-function isEnglishCsvDownload(downloadOptions = {}) {
+function getCsvLanguage(downloadOptions = {}) {
   const language = String(downloadOptions.language || downloadOptions.locale || 'zh').toLowerCase();
-  return language.startsWith('en');
+  if (language.startsWith('en')) return 'en';
+  if (language.startsWith('ja')) return 'ja';
+  return 'zh';
 }
 
 function getCsvFilePrefix(sensorType, fallbackPrefix, downloadOptions = {}) {
   if (sensorType === SMALL_BED_12B_TYPE) return '12B';
-  if (sensorType === HAND_SINGLE_POINT_TYPE) return isEnglishCsvDownload(downloadOptions) ? 'detection' : '检测点';
+  if (sensorType === HAND_SINGLE_POINT_TYPE) {
+    const detectionPrefixes = { zh: '检测点', en: 'detection', ja: '検出点' };
+    return detectionPrefixes[getCsvLanguage(downloadOptions)];
+  }
   if (isHandGloveType(sensorType) && fallbackPrefix === 'sit') return 'left';
   if (isHandGloveType(sensorType) && fallbackPrefix === 'back') return 'right';
   return fallbackPrefix;
@@ -971,6 +976,15 @@ const HAND_GLOVE_CSV_SEGMENT_HEADER_TITLES = {
     fingerRoot: 'fingerRoot',
     palm: 'palm',
   },
+  ja: {
+    littleFinger: '小指',
+    ringFinger: '薬指',
+    middleFinger: '中指',
+    indexFinger: '人差し指',
+    thumb: '親指',
+    fingerRoot: '指の付け根',
+    palm: '手のひら',
+  },
 };
 
 const HAND_GLOVE_CSV_SEGMENT_HEADER_IDS = [
@@ -1026,11 +1040,48 @@ const CSV_TITLES = {
     label: 'label',
     labelText: 'labelText',
   },
+  ja: {
+    index: '秒数',
+    max: '最大値',
+    time: 'タイムスタンプ',
+    pressureArea: '0より大きいポイント数',
+    pressure: '圧力合計',
+    pressValue: '圧力合計',
+    pressuremmgH: '圧力',
+    realData: 'マトリックスデータ',
+    realInitData: '元のマトリックスデータ',
+    dataToInterpGauss: 'アルゴリズムデータ',
+    pressLine: '圧力曲線',
+    rotate: 'クォータニオン',
+    temperatureData: '温度',
+    temperatureAvg: '平均温度',
+    temperatureK: '温度K値',
+    zeroFrame: 'ゼロ補正フレーム',
+    detectionPoint: '検出点',
+    label: 'ラベル',
+    labelText: 'ラベルテキスト',
+  },
 };
 
 function getCsvTitleMap(downloadOptions = {}) {
-  const language = String(downloadOptions.language || downloadOptions.locale || 'zh').toLowerCase();
-  return language.startsWith('en') ? CSV_TITLES.en : CSV_TITLES.zh;
+  return CSV_TITLES[getCsvLanguage(downloadOptions)];
+}
+
+function getCsvTitleLanguage(languageTitles = CSV_TITLES.zh) {
+  if (languageTitles === CSV_TITLES.en) return 'en';
+  if (languageTitles === CSV_TITLES.ja) return 'ja';
+  return 'zh';
+}
+
+function getHandGloveSideLabels(languageTitles = CSV_TITLES.zh) {
+  return getCsvTitleLanguage(languageTitles) === 'en'
+    ? { left: 'left', right: 'right' }
+    : { left: '左手', right: '右手' };
+}
+
+function getHandGloveCsvFilePrefix(languageTitles = CSV_TITLES.zh) {
+  const prefixes = { zh: '触觉手套2', en: 'glove2', ja: '触覚グローブ2' };
+  return prefixes[getCsvTitleLanguage(languageTitles)];
 }
 
 const HAND_GLOVE_CSV_SEGMENT_POINTS = {
@@ -1069,9 +1120,7 @@ const HAND_GLOVE_CSV_SEGMENT_POINTS = {
 };
 
 function appendHandGloveCsvHeaders(csvHeaders, languageTitles = CSV_TITLES.zh) {
-  const segmentTitles = languageTitles === CSV_TITLES.en
-    ? HAND_GLOVE_CSV_SEGMENT_HEADER_TITLES.en
-    : HAND_GLOVE_CSV_SEGMENT_HEADER_TITLES.zh;
+  const segmentTitles = HAND_GLOVE_CSV_SEGMENT_HEADER_TITLES[getCsvTitleLanguage(languageTitles)];
   csvHeaders.push(
     ...HAND_GLOVE_CSV_SEGMENT_HEADER_IDS.map((id) => ({
       id,
@@ -1097,19 +1146,14 @@ function buildHandGloveCsvSegments(pressureData, side = 'left') {
 }
 
 function appendPrefixedHandGloveCsvHeaders(csvHeaders, side, languageTitles = CSV_TITLES.zh) {
-  const segmentTitles = languageTitles === CSV_TITLES.en
-    ? HAND_GLOVE_CSV_SEGMENT_HEADER_TITLES.en
-    : HAND_GLOVE_CSV_SEGMENT_HEADER_TITLES.zh;
-  const sideTitle = languageTitles === CSV_TITLES.en
-    ? side
-    : side === 'left'
-      ? '左手'
-      : '右手';
+  const language = getCsvTitleLanguage(languageTitles);
+  const segmentTitles = HAND_GLOVE_CSV_SEGMENT_HEADER_TITLES[language];
+  const sideTitle = getHandGloveSideLabels(languageTitles)[side];
   HAND_GLOVE_CSV_SEGMENT_HEADER_IDS.forEach((id) => {
     const suffix = id.charAt(0).toUpperCase() + id.slice(1);
     csvHeaders.push({
       id: `${side}${suffix}`,
-      title: languageTitles === CSV_TITLES.en ? `${side}${suffix}` : `${sideTitle}${segmentTitles[id]}`,
+      title: language === 'en' ? `${side}${suffix}` : `${sideTitle}${segmentTitles[id]}`,
     });
   });
 }
@@ -1207,9 +1251,7 @@ function exportHandGloveDoubleCsv({ selectQuery, params, csvTitle, csvTargetPath
         str = timeStampTo_Date(Number(str));
       }
 
-      const sideLabel = csvTitle === CSV_TITLES.en
-        ? { left: 'left', right: 'right' }
-        : { left: '左手', right: '右手' };
+      const sideLabel = getHandGloveSideLabels(csvTitle);
       const csvHeaders = [
         { id: "index", title: csvTitle.index },
         { id: "time", title: csvTitle.time },
@@ -1230,7 +1272,7 @@ function exportHandGloveDoubleCsv({ selectQuery, params, csvTitle, csvTargetPath
       appendPrefixedHandGloveCsvHeaders(csvHeaders, 'right', csvTitle);
       appendCollectionLabelHeaders(csvHeaders, csvTitle, collectionLabelInfo);
 
-      const csvFilePath = csvTargetPath(`${csvTitle === CSV_TITLES.en ? 'glove2' : '触觉手套2'}${str}.csv`);
+      const csvFilePath = csvTargetPath(`${getHandGloveCsvFilePrefix(csvTitle)}${str}.csv`);
       const csvWriter = createCsvWriter({
         path: csvFilePath,
         header: csvHeaders,
@@ -2537,9 +2579,7 @@ async function exportHandGloveDoubleCsvStreaming({ date, csvTitle, csvTargetPath
   }
   const start = Math.max(0, historyArr[0] || 0);
   const end = Math.min(historyArr[1] || totalLength, totalLength);
-  const sideLabel = csvTitle === CSV_TITLES.en
-    ? { left: 'left', right: 'right' }
-    : { left: '左手', right: '右手' };
+  const sideLabel = getHandGloveSideLabels(csvTitle);
   const collectionLabelInfo = getCollectionCsvLabelInfo(date);
   const csvHeaders = [
     { id: "index", title: csvTitle.index },
@@ -2562,7 +2602,7 @@ async function exportHandGloveDoubleCsvStreaming({ date, csvTitle, csvTargetPath
   appendCollectionLabelHeaders(csvHeaders, csvTitle, collectionLabelInfo);
 
   let str = formatCsvDatePart(nowGetTime || date);
-  const csvFilePath = csvTargetPath(`${csvTitle === CSV_TITLES.en ? 'glove2' : '触觉手套2'}${str}.csv`);
+  const csvFilePath = csvTargetPath(`${getHandGloveCsvFilePrefix(csvTitle)}${str}.csv`);
   const stringifier = createCsvStringifier({ header: csvHeaders });
   const stream = fs.createWriteStream(csvFilePath, { encoding: 'utf8' });
   let written = 0;
@@ -3197,6 +3237,7 @@ function sendLicenseStatusTo(client) {
     nowDate: st.lastCheckedAt || Date.now(), // 服务器/可信时间，供前端算剩余天数
     licenseKey: savedLicenseKey,
     file: licenseFile || file,
+    activeSensorType: file,
     selectFlag: selectFlag,
     checking: !!st.checking,
     valid: !!st.valid,
@@ -3518,6 +3559,7 @@ module.exports = {
         const jsonData = JSON.stringify({
           port: serialport,
           file: licenseFile || file,
+          activeSensorType: file,
           selectFlag: selectFlag
           // length: csvSitData.length,
           // sitData: csvSitData[0], backData: csvBackData[0]

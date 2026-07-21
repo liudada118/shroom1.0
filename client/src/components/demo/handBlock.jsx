@@ -5,11 +5,13 @@ import img1 from '../../assets/images/heatmap.png'
 import body from '../../assets/images/body.png'
 import nullImg from '../../assets/images/add.png'
 import { Button, message, Select, Spin } from 'antd'
+import { useTranslation } from 'react-i18next'
 import { compressionFile } from '../../assets/util/uploadImg'
 import axios from 'axios'
 let arrxy = []
 
 function ImgUpload(props) {
+    const { t } = useTranslation()
     const netUrl = "http://sensor.bodyta.com:8080/rcv";
     // const token = useSelector(tokenSelect)
     // const token = 'f891d611f4ff4005994ab29556800cd7'
@@ -31,7 +33,7 @@ function ImgUpload(props) {
         }).then((res) => {
 
             setSpinning(false);
-            message.success('上传成功')
+            message.success(t('demo.uploadSuccess'))
             const imgUrl = res.data.data.src
             finish(imgUrl)
         });
@@ -45,7 +47,7 @@ function ImgUpload(props) {
             let res = await compressionFile(e.target.files[0])
             fileUpload(res)
         } else {
-            message.error('获取文件失败')
+            message.error(t('demo.fetchFileFailed'))
         }
     }
 
@@ -64,6 +66,7 @@ function ImgUpload(props) {
 }
 
 export default function HandBlock() {
+    const { t } = useTranslation()
     const [img, setImg] = useState()
 
 
@@ -232,26 +235,26 @@ export default function HandBlock() {
                 <div style={{ position: 'relative', height: 40, width: 40 }}>
                     <ImgUpload img={nullImg} finish={setImg} token={token}/>
                 </div>
-                <div style={{ display: 'flex' }}> <div style={{ width: '4rem' }}>token</div><input style={{ flex: 1 }} placeholder='token' value={token} onChange={(e) => { 
+                <div style={{ display: 'flex' }}> <div style={{ width: '4rem' }}>{t('demo.token')}</div><input style={{ flex: 1 }} placeholder={t('demo.token')} value={token} onChange={(e) => {
                     setToken(e.target.value) 
                     localStorage.setItem('token' , e.target.value)
                     }} /></div>
-                <div style={{ display: 'flex' }}> <div style={{ width: '4rem' }}>上</div><input style={{ flex: 1 }} placeholder='上' type="number" value={up} onChange={(e) => { setUp(e.target.value) }} /></div>
-                <div style={{ display: 'flex' }}> <div style={{ width: '4rem' }}>左</div><input style={{ flex: 1 }} placeholder='左' type="number" value={left} onChange={(e) => { setLeft(e.target.value) }} /></div>
-                <div style={{ display: 'flex' }}><div style={{ width: '4rem' }}>对齐方式</div> 
+                <div style={{ display: 'flex' }}> <div style={{ width: '4rem' }}>{t('demo.top')}</div><input style={{ flex: 1 }} placeholder={t('demo.top')} type="number" value={up} onChange={(e) => { setUp(e.target.value) }} /></div>
+                <div style={{ display: 'flex' }}> <div style={{ width: '4rem' }}>{t('left')}</div><input style={{ flex: 1 }} placeholder={t('left')} type="number" value={left} onChange={(e) => { setLeft(e.target.value) }} /></div>
+                <div style={{ display: 'flex' }}><div style={{ width: '4rem' }}>{t('demo.alignment')}</div>
                 <Select
                     defaultValue="width"
                     onChange={(e) => {
                         setDisplay(e)
                     }}
                     options={[
-                        { value: 'width', label: '宽' },
-                        { value: 'height', label: '高' },
+                        { value: 'width', label: t('demo.width') },
+                        { value: 'height', label: t('demo.height') },
                     ]}
                 /></div>
-                <div style={{ display: 'flex' }}> <div style={{ width: '4rem' }}>字体大小</div><input style={{ flex: 1 }} placeholder='字体大小' type="number" value={fontSize} onChange={(e) => { setFontSize(e.target.value) }} /></div>
-                <div style={{ display: 'flex' }}> <div style={{ width: '4rem' }}>行列长</div><input style={{ flex: 1 }} placeholder='行列长' type="number" value={col} onChange={(e) => { setCol(e.target.value) }} /></div>
-                <div style={{ display: 'flex' }}> <div style={{ width: '4rem' }}>删除</div><input style={{ flex: 1 }} placeholder='删除' type="number" value={deleteValue} onChange={(e) => { setDelete(e.target.value) }} /></div>
+                <div style={{ display: 'flex' }}> <div style={{ width: '4rem' }}>{t('demo.fontSize')}</div><input style={{ flex: 1 }} placeholder={t('demo.fontSize')} type="number" value={fontSize} onChange={(e) => { setFontSize(e.target.value) }} /></div>
+                <div style={{ display: 'flex' }}> <div style={{ width: '4rem' }}>{t('demo.rowColumnLength')}</div><input style={{ flex: 1 }} placeholder={t('demo.rowColumnLength')} type="number" value={col} onChange={(e) => { setCol(e.target.value) }} /></div>
+                <div style={{ display: 'flex' }}> <div style={{ width: '4rem' }}>{t('delete')}</div><input style={{ flex: 1 }} placeholder={t('delete')} type="number" value={deleteValue} onChange={(e) => { setDelete(e.target.value) }} /></div>
                 
                 {/* <div style={{ display: 'flex' }}> <div style={{ width: '4rem' }}>矩阵</div>
                     高<input style={{ flex: 1 }} placeholder='长' type="number" value={col} onChange={(e) => {
@@ -266,7 +269,7 @@ export default function HandBlock() {
                     }} /></div> */}
 
                 {/* <div style={{ display: 'flex' }}> <div style={{ width: '4rem' }}>行长</div><input style={{ flex: 1 }} placeholder='左' type="number" value={row} onChange={(e) => { setRow(e.target.value) }} /></div> */}
-                <Button onClick={genColOrRow} >生成行/列</Button>
+                <Button onClick={genColOrRow} >{t('demo.generateRowsColumns')}</Button>
                 <Button onClick={() => {
                     const arr = [...blueArr]
                     // arr.slice()
@@ -274,7 +277,7 @@ export default function HandBlock() {
                     arr.splice(arr.length - Number(deleteValue) , Number(deleteValue))
                     console.log(arr,Number(deleteValue) - 1)
                     setBlueArr(arr)
-                }} >删除</Button>
+                }} >{t('delete')}</Button>
                 {/* <Button onClick={genColOrRow} >生成矩阵</Button> */}
                 {/* <div style={{ display: 'flex' }}> <div style={{ width: '4rem' }}>矩阵</div><input style={{ flex: 1 }} placeholder='左' type="number" value={left} onChange={(e) => { setLeft(e.target.value) }} /></div> */}
 

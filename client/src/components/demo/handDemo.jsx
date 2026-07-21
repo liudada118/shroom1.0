@@ -4,6 +4,7 @@ import { carBackLine, handLine, pressNew, zeroLine } from "../../assets/util/lin
 import { Button, Input, Select, Slider, Switch } from "antd";
 import { CSVLink } from "react-csv";
 import { NavLink, useLocation, useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 let data = [];
 
 // for (let i = 0; i < 32; i++) {
@@ -190,6 +191,7 @@ function press6(arr, width, height, type = "row", value = (1245), prop = 1000) {
 }
 
 export default function Demo() {
+  const { t } = useTranslation();
   const location = useLocation()
   const params = useParams();
 
@@ -474,7 +476,7 @@ export default function Demo() {
             setArea(e.target.value);
           }}
         /> */}
-        <NavLink to={'/'}> <Button>回到首页</Button></NavLink>
+        <NavLink to={'/'}> <Button>{t('demo.backHome')}</Button></NavLink>
         <Button
           onClick={() => {
             const res = !flag;
@@ -482,7 +484,7 @@ export default function Demo() {
             colFalg = !colFalg;
           }}
         >
-          采集{length - 1}
+          {t('col')}{length - 1}
         </Button>
         <Button
           onClick={() => {
@@ -505,7 +507,7 @@ export default function Demo() {
             setLength(collection.length);
           }}
         >
-          单次采集{length - 1}
+          {t('demo.singleCollection')}{length - 1}
         </Button>
         <Button
           onClick={() => {
@@ -516,7 +518,7 @@ export default function Demo() {
             setLength(1);
           }}
         >
-          删除
+          {t('delete')}
         </Button>
         <CSVLink
           // ref={downloadRef}
@@ -525,12 +527,12 @@ export default function Demo() {
           data={csvData}
           style={{ color: "#5A5A89", textDecoration: "none" }}
         >
-          下载
+          {t('download')}
         </CSVLink>
       </div>
 
       <div style={{marginLeft : '20px'}}>
-        <div style={{ fontWeight: 'bold' }}>分压模块</div>
+        <div style={{ fontWeight: 'bold' }}>{t('demo.pressureDivisionModule')}</div>
         <Select
           defaultValue="col"
           onChange={(e) => {
@@ -541,16 +543,16 @@ export default function Demo() {
           }}
           // value={}
           options={[
-            { value: 'col', label: 'col' },
-            { value: 'row', label: 'row' },
+            { value: 'col', label: t('demo.column') },
+            { value: 'row', label: t('demo.row') },
           ]}
         />
         <div>
-          分压开关<Switch value={valueData.current.open} onChange={(checked) => {
+          {t('demo.pressureDivisionSwitch')}<Switch value={valueData.current.open} onChange={(checked) => {
             valueData.current.open = checked
           }} />
         </div>
-        <div> 分母 <Slider
+        <div> {t('demo.denominator')} <Slider
           min={0}
           max={5000}
           value={valueData.current.value}
@@ -564,7 +566,7 @@ export default function Demo() {
           style={{ width: '200px' }}
         /></div>
 
-        <div> 分子*倍数 <Slider
+        <div> {t('demo.numeratorMultiplier')} <Slider
           min={0}
           max={5000}
           value={valueData.current.prop}

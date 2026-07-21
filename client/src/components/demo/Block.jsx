@@ -3,6 +3,7 @@ import { findMax } from "../../assets/util/util";
 import { carBackLine, pressNew } from "../../assets/util/line";
 import { Button, Input, Slider } from "antd";
 import { CSVLink } from "react-csv";
+import { useTranslation } from "react-i18next";
 let data = [];
 
 function jet(min, max, x) {
@@ -114,6 +115,7 @@ function interpSmall(smallMat, width, height, interp1, interp2) {
   }
 
 export default function Demo() {
+    const { t } = useTranslation();
     const [data, setData] = useState([]);
     const [max, setMax] = useState(0);
     const [maxCol, setMaxCol] = useState(0);
@@ -392,7 +394,7 @@ export default function Demo() {
                         colFalg = !colFalg;
                     }}
                 >
-                    采集{length - 1}
+          {t('col')}{length - 1}
                 </Button>
                 <Button
                     onClick={() => {
@@ -405,7 +407,7 @@ export default function Demo() {
                         setLength(collection.length);
                     }}
                 >
-                    单次采集{length - 1}
+          {t('demo.singleCollection')}{length - 1}
                 </Button>
                 <Button
                     onClick={() => {
@@ -416,7 +418,7 @@ export default function Demo() {
                         setLength(1);
                     }}
                 >
-                    删除
+          {t('delete')}
                 </Button>
                 <CSVLink
                     // ref={downloadRef}
@@ -425,7 +427,7 @@ export default function Demo() {
                     data={csvData}
                     style={{ color: "#5A5A89", textDecoration: "none" }}
                 >
-                    下载
+          {t('download')}
                 </CSVLink>
             </div>
         </>

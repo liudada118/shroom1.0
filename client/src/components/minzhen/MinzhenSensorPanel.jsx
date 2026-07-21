@@ -58,26 +58,24 @@ const formatAverageTemperature = (sensorInfo, thermistorValues) => {
 };
 
 const MinzhenSensorPanel = ({ sensorInfo = {} }) => {
-  const { i18n } = useTranslation();
-  const isEnglish = String(i18n.language || "").startsWith("en");
+  const { t } = useTranslation();
   const gyroscopeValues = splitSensorValues(sensorInfo.gyroscope);
   const thermistorValues = splitSensorValues(sensorInfo.thermistor);
 
   const sensorPanelItems = [
-    { zh: "加速度计", en: "Acceleration", value: formatSensorValues(gyroscopeValues.slice(0, 3), 3) },
-    { zh: "陀螺仪", en: "Gyroscope", value: formatSensorValues(gyroscopeValues.slice(3, 6), 3) },
-    { zh: "温度", en: "Temperature", value: formatAverageTemperature(sensorInfo, thermistorValues) },
-    { zh: "湿度", en: "Humidity", value: getSensorValue(sensorInfo, "humidity") },
-    { zh: "脊柱前后角度", en: "Front/Back Angle", value: getSensorValue(sensorInfo, "angle_fb") },
-    { zh: "脊柱左右角度", en: "Left/Right Angle", value: getSensorValue(sensorInfo, "angle_lr") },
+    { labelKey: "minzhen.accelerometer", value: formatSensorValues(gyroscopeValues.slice(0, 3), 3) },
+    { labelKey: "minzhen.gyroscope", value: formatSensorValues(gyroscopeValues.slice(3, 6), 3) },
+    { labelKey: "minzhen.temperature", value: formatAverageTemperature(sensorInfo, thermistorValues) },
+    { labelKey: "minzhen.humidity", value: getSensorValue(sensorInfo, "humidity") },
+    { labelKey: "minzhen.spineFrontBack", value: getSensorValue(sensorInfo, "angle_fb") },
+    { labelKey: "minzhen.spineLeftRight", value: getSensorValue(sensorInfo, "angle_lr") },
   ];
 
-  const renderSensorItem = ({ zh, en, value, unit }) => {
-    const label = isEnglish ? en : zh;
+  const renderSensorItem = ({ labelKey, value, unit }) => {
     return (
-      <div className="dataItem" key={en} style={{ alignItems: "center", gap: 8 }}>
+      <div className="dataItem" key={labelKey} style={{ alignItems: "center", gap: 8 }}>
         <div style={{ flex: "0 0 48%", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {label}
+          {t(labelKey)}
         </div>
         <div className="dataIteminfo" style={{ flex: "1 1 52%", justifyContent: "flex-end", minWidth: 0 }}>
           <div style={{ minWidth: 0, maxWidth: "100%", textAlign: "right" }}>
@@ -101,7 +99,7 @@ const MinzhenSensorPanel = ({ sensorInfo = {} }) => {
       }}
     >
       <div className="asideContent firstAside">
-        <h2 className="asideTitle">{isEnglish ? "Other Data" : "其他数据"}</h2>
+        <h2 className="asideTitle">{t("minzhen.otherData")}</h2>
         {sensorPanelItems.map((item) => renderSensorItem(item))}
       </div>
     </div>

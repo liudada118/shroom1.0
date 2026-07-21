@@ -1,9 +1,12 @@
 import { Button, Input, Modal, message } from 'antd'
 import React, { useEffect, useState, useRef, useMemo } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
+import { translateBackendMessage } from '../../i18n/translateBackendMessage'
 import './index.scss'
 
 export default function Date1() {
+  const { t } = useTranslation()
   const nav = useNavigate()
   const param = useLocation()
   const wsRef = useRef(null)
@@ -51,8 +54,8 @@ export default function Date1() {
           // 后端在连接/复检时主动推送的 licenseError（如未授权、已过期）不弹，避免一打开页面就弹窗
           if (wasSubmitting) {
             Modal.error({
-              title: '密钥错误',
-              content: data.licenseError,
+              title: t('license.errorTitle'),
+              content: translateBackendMessage(data.licenseError, t),
             })
           }
           return
@@ -87,8 +90,8 @@ export default function Date1() {
             if (wasSubmitting) {
               // 用户提交的密钥过期，提示错误
               Modal.error({
-                title: '密钥已过期',
-                content: '该密钥已过期，请输入有效的密钥',
+                title: t('license.expiredTitle'),
+                content: t('license.expiredContent'),
               })
             }
             // 停留在密钥输入页
@@ -104,7 +107,7 @@ export default function Date1() {
 
           // 首次启动且密钥有效 → 自动跳转到系统页
           // 或者用户提交新密钥验证成功 → 跳转到系统页
-          messageApi.success('密钥验证成功')
+          messageApi.success(t('license.success'))
           setTimeout(() => {
             nav('/system')
           }, 500)
@@ -128,8 +131,8 @@ export default function Date1() {
     const trimmed = date.trim()
     if (!trimmed) {
       Modal.error({
-        title: '密钥错误',
-        content: '密钥不能为空，请输入有效密钥',
+        title: t('license.errorTitle'),
+        content: t('license.emptyContent'),
       })
       return
     }
@@ -148,8 +151,8 @@ export default function Date1() {
       setLoading(false)
       isSubmitting.current = false
       Modal.error({
-        title: '连接错误',
-        content: '与服务器的连接已断开，请刷新页面重试',
+        title: t('license.connectionErrorTitle'),
+        content: t('license.serverDisconnected'),
       })
     }
   }
@@ -163,7 +166,7 @@ export default function Date1() {
             backgroundColor: '#000',
           }}
           className='dateInput'
-          placeholder='请输入密钥'
+          placeholder={t('license.inputPlaceholder')}
           value={date}
           onChange={(e) => {
             setDate((e.target.value).trim())
@@ -176,12 +179,12 @@ export default function Date1() {
             style={{ width: '100%', marginRight: '10px' }}
             onClick={() => {
               nav('/system')
-            }}>返回主页</Button> : ''}
+            }}>{t('common.backHome')}</Button> : ''}
           <Button
             className='dateButton'
             style={{ width: '100%' }}
             loading={loading}
-            onClick={handleSubmit}>提交</Button>
+            onClick={handleSubmit}>{t('common.submit')}</Button>
         </div>
       </div>
     </div>

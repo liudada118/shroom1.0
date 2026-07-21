@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { gaussBlur_1 } from '../../assets/util/util'
 import { press } from '../../assets/util/line';
 
@@ -24,6 +25,7 @@ function gaussBlur_2(scl, w, h, r) {
 }
 
 export default function MatrixDiff() {
+    const { t } = useTranslation()
     const [data1, setData1] = useState([[]])
     const [data2, setData2] = useState([[]])
     const [data3, setData3] = useState([[]])
@@ -170,7 +172,7 @@ export default function MatrixDiff() {
                         </div>
                     )
                 })}
-                <button onClick={diff}>diff</button>
+                <button onClick={diff}>{t('demo.difference')}</button>
                 {arr3.filter((a) => a > 0).reduce((a, b) => a + b, 0)}  {Math.round(arr3.filter((a) => a > 5).reduce((a, b) => a + b, 0) / arr3.filter((a) => a > 5).length)}
             </div>
         </div>

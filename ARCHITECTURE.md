@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-07-03
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-07-21
 
 ## 1. 项目概述
 
@@ -147,6 +147,7 @@ shroom1.0/
 | :--- | :--- |
 | `/index.js` | Electron 主进程入口，窗口管理、IPC 桥梁、安全配置（contextIsolation + sandbox），开发模式下会从 Vite 输出中识别并校验真实本地地址，避免误连其他 `localhost:3000` 页面 |
 | `/client/src/components/title/` | 顶部标题栏组件，负责品牌字标、传感器切换、采集/回放控制、语言切换与设置抽屉 |
+| `/client/src/i18n/` | 前端国际化入口与统一中英日资源目录；负责语言标准化、持久化，以及后端授权中文原因到当前界面语言的适配 |
 | `/preload.js` | Electron 预加载脚本，建立渲染进程与主进程之间的安全 IPC 通道 |
 | `/server.js` | 后端核心调度器，协调串口通信、数据处理、WebSocket 分发、数据库存储 |
 | `/client/src/hooks/` | 7 个自定义 React Hook，封装 WebSocket、压力数据、串口控制、3D 场景等逻辑 |
@@ -187,6 +188,7 @@ graph TD
         HOME["Home.js<br/>主页面"]
         HOOKS["hooks/<br/>7个自定义Hook"]
         STORE["store/<br/>Zustand"]
+        I18N["i18n/<br/>中英日资源与语言状态"]
         THREE["three/<br/>3D组件"]
         HEAT["heatmap/<br/>热力图"]
     end
@@ -210,6 +212,8 @@ graph TD
     DATA --> OPENWEB
 
     PRELOAD <--> HOME
+    APP --> I18N
+    HOME --> I18N
     HOME --> HOOKS
     HOME --> STORE
     HOOKS --> STORE
@@ -264,7 +268,7 @@ graph TD
     - Windows 打包版启动时按密钥保存位置读取 `config.txt`：优先当前 `userData/config.txt`，并兼容安装目录同级、`process.resourcesPath/config.txt`、旧版安装目录 `resources/config.txt` 与当前工作目录 `resources/config.txt` 候选；`server.js` 会用 `licenseManager.peekPayload()` 过滤无法解析的候选文件，并在安装目录或资源目录密钥有效时自动迁移到当前可写 `userData/config.txt`，避免远程更新后因读取路径变化丢失本地密钥。
     - `server.js` 在授权状态下发时重新按 `licenseHelper.js` 的保存位置候选读取当前 `config.txt` 原始 `licenseKey`，包括启动校验中、有效、无效和锁定状态；`Date.jsx` 与 `LicensePortal.jsx` 收到后回填密钥输入框，确保旧版本本地密钥被新版本读取后能在访问密钥页显示，前端不再把 `localStorage` 作为首屏读取来源。
     - `licenseManager` 会在启动和密钥写入后启动运行期复检，持续广播 `licenseType`、`remainingDays`、`licenseChecking`、`licenseError` 或 `licenseLocked`；前端 `Date.jsx`、`LicensePortal.jsx`、`License.jsx` 和 `Home.jsx` 根据这些状态展示验证中、过期、暂停、吊销或时间异常锁定提示。
-    - 密钥 `file` 字段继续用于授权范围、默认系统、模块配置和前端可选系统过滤；`server.js` 通过 `getSelectFlagFromLicense()` 下发 `selectFlag`，`Home.jsx` 将授权范围写入 `allowedTypes` 并在系统页过滤展示。
+    - 密钥 `file` 字段继续用于授权范围、默认系统、模块配置和前端可选系统过滤；`server.js` 通过 `getSelectFlagFromLicense()` 下发 `selectFlag`，并用独立的 `activeSensorType` 下发后端当前实际运行系统。`Home.jsx` 将授权范围写入 `allowedTypes`，同时优先用 `activeSensorType` 设置前端默认展示，保证界面、串口协议和数据库系统一致。
 
 6. **密钥配置管理流程**
     - 用户启动应用默认进入 `/` 的 `Date.jsx` 密钥输入页；该页只在用户主动提交后展示错误弹窗，收到有效 `date` 且 `valid !== false` 后再进入 `/system`。从系统页返回输入密钥时，不会因为后端主动推送有效授权而自动跳走。
@@ -278,6 +282,13 @@ graph TD
     - 用户确认立即安装后，`autoUpdater.js` 会先调用主进程传入的 `beforeInstall` 清理钩子，关闭静态资源服务、WebSocket 服务、串口、数据库、Python worker 和 OneStep 报告 HTTP 服务，再触发 `quitAndInstall()`，避免 Windows NSIS 安装器因旧版进程未完全退出而弹出“Shroom 无法关闭”重试对话框。
     - IPC 通道：`update-command`（前端 → 主进程：checkForUpdate / downloadUpdate / installUpdate）、`update-status`（主进程 → 前端：checking / available / downloading / downloaded / error）。
     - 仅在打包后（`app.isPackaged`）启用自动更新，开发环境不触发。
+
+7. **国际化流程**
+    - `client/src/App.jsx` 统一加载 `client/src/i18n/index.js`；初始化层将 `zh-CN` / `en-US` / `ja-JP` 等语言值归一化为 `zh` / `en` / `ja`，从 `localStorage.language` 恢复用户选择，并在语言变化时同步持久化和更新 `document.documentElement.lang`。
+    - `client/src/i18n/resources.js` 维护中文和英文基准文案，`client/src/i18n/ja.js` 按同一键路径以 `compare(中文, 日文)` 维护逐项对照目录，再生成 i18next 所需的三套同构资源；入口、授权、更新、采集、CSV、报告、主工具栏、传感器面板、人体分区、回放、足压分析和演示调节组件均通过 `t(key)` 读取。
+    - `client/src/i18n/translateBackendMessage.js` 只在展示层转换授权服务返回的固定中文原因和带前缀异常；WebSocket 协议值、密钥内容、数据库字段、采集标签和 CSV 数据保持原值，避免国际化影响后端匹配与历史数据兼容。
+    - Shroom Vision 入口页和系统标题栏都提供中、英、日文切换；入口页可在未授权状态下直接选择语言，系统标题栏沿用同一全局语言状态。日期、浏览器语音和 Ant Design 组件同步使用当前语言的区域设置。
+    - CSV 下载请求携带当前语言；`server.js` 分别输出中文、旧版英文简写或日文表头，并同步本地化检测点、触觉手套部位和左右手文件名，不修改历史数据字段和值。
 
 ## 5. API 端点 (Endpoints)
 
@@ -345,6 +356,10 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-07-21 | Codex | 授权默认系统前后端对齐 | 授权状态新增 `activeSensorType` 表示后端实际运行系统；前端多类型/全部授权默认展示优先跟随该值，修复精密类全选时前端显示触觉手套、后端运行检测点而导致串口无法连接的问题。 |
+| 2026-07-21 | Codex | 日文资源中文对照 | `client/src/i18n/ja.js` 的 642 项资源改为 `compare(中文, 日文)` 逐项对照结构，运行时读取其中 `ja` 值，便于直接核对翻译。 |
+| 2026-07-21 | Codex | 软件日文版 | 新增 642 项日文资源并接入 `ja` / `ja-JP`，入口和标题栏支持第三语言切换；日期、语音、Ant Design 组件及 CSV 表头/手套分区同步支持日文，协议与历史数据值保持不变。 |
+| 2026-07-21 | Codex | 软件完整中英文配置 | 新增 `client/src/i18n/index.js`、`resources.js` 和授权消息转换层，将入口、授权、更新、主工具栏、采集/CSV/PDF、数据面板、人体分区、足压及演示组件统一接入中英文资源；入口页新增语言切换，协议与存储值保持不变。 |
 | 2026-07-03 | Codex | 密钥输入框回填修复 | `server.js` 授权状态按保存位置读取并携带 `licenseKey`，`Date.jsx` 与 `LicensePortal.jsx` 在 WebSocket 收到本地配置密钥后回填输入框，修复访问密钥页不显示已读取密钥的问题。 |
 | 2026-07-03 | Codex | 旧版 Windows 密钥路径兼容 | `licenseHelper.js` 在打包版候选中补充安装目录 `resources/config.txt` 与当前工作目录 `resources/config.txt`，兼容 1.0/1.1.0 旧版把密钥写入资源目录的安装方式。 |
 | 2026-07-03 | Codex | 远程更新后密钥读取修复 | `server.js` 启动时按 `licenseHelper.js` 的保存位置候选验证 `config.txt`，并将安装目录或资源目录中的有效密钥迁移到当前可写目录，避免远程更新后无法读取本地已保存密钥。 |
@@ -727,6 +742,10 @@ graph TD
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-07-21 | Codex | 修复缺陷 | 授权状态显式下发后端 `activeSensorType`，系统页优先以该值同步默认展示，并在展示系统变化时清空旧串口选择，避免多类型密钥下前后端系统错位造成串口连接失败。 |
+| 2026-07-21 | Codex | 配置变更 | 将日文目录改为中文原文与日文译文同列的 642 项对照结构，i18next 日文资源继续从 `ja` 字段生成。 |
+| 2026-07-21 | Codex | 配置变更 | 增加完整日文资源目录和 `ja-JP` 区域设置，语言切换扩展为中英日三种；日文模式下日期、语音、Ant Design 和 CSV 导出同步本地化，资源键与模板占位符完整性检查通过。 |
+| 2026-07-21 | Codex | 配置变更 | 建立统一中英文资源目录与语言初始化层，迁移全部运行时可见页面和展示组件文案，补充授权后端原因翻译，并在未授权入口提供语言切换；生产构建与资源键完整性检查通过。 |
 | 2026-07-03 | Codex | 修复缺陷 | 修复访问密钥页不回填本地配置密钥：授权状态包按 `config.txt` 保存位置读取并带回 `licenseKey`，`/` 与 `/license` 两个密钥入口收到后填入输入框。 |
 | 2026-07-03 | Codex | 修复缺陷 | `licenseHelper.js` 明确补充旧版 Windows 安装目录 `resources/config.txt` 候选，确保旧版本保存在资源目录的本地密钥仍会被新版本启动扫描和迁移。 |
 | 2026-07-03 | Codex | 修复缺陷 | 修复远程更新后不读取本地密钥的问题：启动时按保存位置候选逐个解析 `config.txt`，跳过空文件/无效文件，并把安装目录或资源目录中的有效密钥迁移到当前 `userData/config.txt`。 |

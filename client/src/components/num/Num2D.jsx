@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useImperativeHandle, useRef, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import './num.css'
 import { addSide, findMax } from '../../assets/util/util';
 import { pressData } from '../../assets/util/matrixToPress';
@@ -306,6 +307,7 @@ function prewarmWebGL() {
 
 
 export const Num2D = React.forwardRef((props, refs) => {
+    const { t } = useTranslation()
 
     let width = 32, height = 32
     if (props.matrixName == 'carCol') {
@@ -802,7 +804,7 @@ export const Num2D = React.forwardRef((props, refs) => {
     const cs = cellSize;
     const { maxW: containerWidth } = getMatrixViewportBounds();
     const showDualFoot = footLayout === 'dual';
-    const primaryFootLabel = footLayout === 'single-right' ? '\u53f3\u811a' : '\u5de6\u811a';
+    const primaryFootLabel = footLayout === 'single-right' ? t('bodyParts.rightFoot') : t('bodyParts.leftFoot');
 
     return (
         <div
@@ -855,7 +857,7 @@ export const Num2D = React.forwardRef((props, refs) => {
                             ref={overlayCanvasRef2}
                             style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
                         />
-                        <div style={{ textAlign: 'center', marginTop: '4px' }}>右脚</div>
+                        <div style={{ textAlign: 'center', marginTop: '4px' }}>{t('bodyParts.rightFoot')}</div>
                     </div>
                 )}
             </div>

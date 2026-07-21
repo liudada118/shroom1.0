@@ -15,6 +15,8 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { Modal, Progress, Button, notification, Tag, Spin } from "antd";
+import { useTranslation } from "react-i18next";
+import { getLanguageLocale } from "../../i18n";
 import {
   CloudDownloadOutlined,
   CheckCircleOutlined,
@@ -63,6 +65,7 @@ function normalizeReleaseNotes(releaseNotes) {
 }
 
 export default function UpdateNotifier() {
+  const { t, i18n } = useTranslation();
   const [updateState, setUpdateState] = useState(UPDATE_STATE.IDLE);
   const [updateInfo, setUpdateInfo] = useState({});
   const [downloadProgress, setDownloadProgress] = useState(0);
@@ -94,8 +97,8 @@ export default function UpdateNotifier() {
           });
           // 弹出通知
           notification.info({
-            message: "发现新版本",
-            description: `新版本 ${data.version} 可用，点击查看详情。`,
+            message: t("update.foundTitle"),
+            description: t("update.foundDescription", { version: data.version }),
             icon: <RocketOutlined style={{ color: "#1890ff" }} />,
             duration: 10,
             onClick: () => setShowModal(true),
@@ -106,8 +109,8 @@ export default function UpdateNotifier() {
           setUpdateState(UPDATE_STATE.NOT_AVAILABLE);
           setUpdateInfo({ version: data.version });
           notification.success({
-            message: "已是最新版本",
-            description: `当前版本 ${data.version} 已是最新。`,
+            message: t("update.latestTitle"),
+            description: t("update.latestDescription", { version: data.version }),
             icon: <CheckCircleOutlined style={{ color: "#52c41a" }} />,
             duration: 5,
           });
@@ -133,8 +136,8 @@ export default function UpdateNotifier() {
           setUpdateState(UPDATE_STATE.ERROR);
           setUpdateInfo((prev) => ({ ...prev, error: data.message }));
           notification.error({
-            message: "更新检查失败",
-            description: data.message || "请检查网络连接后重试。",
+            message: t("update.checkFailed"),
+            description: data.message || t("update.checkNetwork"),
             icon: <ExclamationCircleOutlined style={{ color: "#ff4d4f" }} />,
             duration: 8,
           });
@@ -150,7 +153,7 @@ export default function UpdateNotifier() {
         unsubscribe();
       }
     };
-  }, [isElectron]);
+  }, [isElectron, t]);
 
   // 手动检查更新
   const handleCheckUpdate = useCallback(async () => {
@@ -218,37 +221,37 @@ export default function UpdateNotifier() {
       case UPDATE_STATE.CHECKING:
         return (
           <Tag icon={<SyncOutlined spin />} color="processing">
-            检查中...
+            {t("update.checking")}
           </Tag>
         );
       case UPDATE_STATE.AVAILABLE:
         return (
           <Tag icon={<RocketOutlined />} color="warning">
-            有新版本 {updateInfo.version}
+            {t("update.available", { version: updateInfo.version })}
           </Tag>
         );
       case UPDATE_STATE.DOWNLOADING:
         return (
           <Tag icon={<CloudDownloadOutlined />} color="processing">
-            下载中 {downloadProgress}%
+            {t("update.downloading", { percent: downloadProgress })}
           </Tag>
         );
       case UPDATE_STATE.DOWNLOADED:
         return (
           <Tag icon={<CheckCircleOutlined />} color="success">
-            下载完成
+            {t("update.downloaded")}
           </Tag>
         );
       case UPDATE_STATE.NOT_AVAILABLE:
         return (
           <Tag icon={<CheckCircleOutlined />} color="success">
-            已是最新
+            {t("update.latest")}
           </Tag>
         );
       case UPDATE_STATE.ERROR:
         return (
           <Tag icon={<ExclamationCircleOutlined />} color="error">
-            更新失败
+            {t("update.failed")}
           </Tag>
         );
       default:
@@ -262,7 +265,7 @@ export default function UpdateNotifier() {
       title={
         <span>
           <RocketOutlined style={{ marginRight: 8 }} />
-          软件更新
+          {t("update.title")}
         </span>
       }
       open={showModal}
@@ -275,11 +278,15 @@ export default function UpdateNotifier() {
         {updateInfo.version && (
           <div style={{ marginBottom: 16 }}>
             <p style={{ fontSize: 16, fontWeight: "bold", margin: "0 0 8px" }}>
-              新版本: v{updateInfo.version}
+              {t("update.newVersion", { version: updateInfo.version })}
             </p>
             {updateInfo.releaseDate && (
               <p style={{ color: "#999", margin: 0 }}>
-                发布日期: {new Date(updateInfo.releaseDate).toLocaleDateString()}
+                {t("update.releaseDate", {
+                  date: new Date(updateInfo.releaseDate).toLocaleDateString(
+                    getLanguageLocale(i18n.language)
+                  ),
+                })}
               </p>
             )}
           </div>
@@ -297,7 +304,7 @@ export default function UpdateNotifier() {
               overflow: "auto",
             }}
           >
-            <p style={{ fontWeight: "bold", margin: "0 0 8px" }}>更新说明:</p>
+            <p style={{ fontWeight: "bold", margin: "0 0 8px" }}>{t("update.releaseNotes")}</p>
             <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.6 }}>
               {releaseNotesText}
             </div>
@@ -343,7 +350,7 @@ export default function UpdateNotifier() {
               icon={<CloudDownloadOutlined />}
               onClick={handleDownload}
             >
-              下载更新
+              {t("update.download")}
             </Button>
           )}
           {updateState === UPDATE_STATE.DOWNLOADED && (
@@ -353,17 +360,17 @@ export default function UpdateNotifier() {
               onClick={handleInstall}
               danger
             >
-              立即安装并重启
+              {t("update.install")}
             </Button>
           )}
           {(updateState === UPDATE_STATE.ERROR ||
             updateState === UPDATE_STATE.IDLE ||
             updateState === UPDATE_STATE.NOT_AVAILABLE) && (
             <Button icon={<SyncOutlined />} onClick={handleCheckUpdate}>
-              检查更新
+              {t("update.check")}
             </Button>
           )}
-          <Button onClick={() => setShowModal(false)}>关闭</Button>
+          <Button onClick={() => setShowModal(false)}>{t("common.close")}</Button>
         </div>
       </div>
     </Modal>
@@ -410,7 +417,7 @@ export default function UpdateNotifier() {
               handleCheckUpdate();
             }
           }}
-          title="检查更新"
+          title={t("update.check")}
           style={{
             backgroundColor:
               updateState === UPDATE_STATE.AVAILABLE

@@ -6,7 +6,10 @@ import {
   SafetyCertificateOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { WS_URLS } from '../../constants';
+import { normalizeLanguage } from '../../i18n';
+import { translateBackendMessage } from '../../i18n/translateBackendMessage';
 import accessKeyIcon from '../../assets/开屏IMG/ChatGPT Image 2026年7月1日 11_54_17.png';
 import {
   BRAND_LOGO_SRC,
@@ -16,8 +19,16 @@ import {
 import { FeedbackWidget } from './LicensePortalWidgets';
 import './LicensePortal.css';
 
+const LANGUAGE_LABEL_KEYS = Object.freeze({
+  zh: 'common.chinese',
+  en: 'common.english',
+  ja: 'common.japanese',
+});
+
 const LicensePortal = () => {
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation();
+  const currentLanguage = normalizeLanguage(i18n.resolvedLanguage);
   const [accessKey, setAccessKey] = useState('');
   // 密钥保存和下次回填以后端 config.txt 为准，前端只负责展示后端下发的 licenseKey。
   const [saveKey, setSaveKey] = useState(true);
@@ -68,7 +79,10 @@ const LicensePortal = () => {
             isSubmittingRef.current = false;
             setEntering(false);
             if (wasSubmitting) {
-              Modal.error({ title: '密钥错误', content: data.licenseError });
+              Modal.error({
+                title: t('license.errorTitle'),
+                content: translateBackendMessage(data.licenseError, t),
+              });
             }
             return;
           }
@@ -83,11 +97,11 @@ const LicensePortal = () => {
             const endDate = parseFloat(data.date);
             if (endDate <= serverNow) {
               setEntering(false);
-              Modal.error({ title: '密钥已过期', content: '该密钥已过期，请输入有效的密钥' });
+              Modal.error({ title: t('license.expiredTitle'), content: t('license.expiredContent') });
               return;
             }
 
-            message.success('密钥验证成功');
+            message.success(t('license.success'));
             setTimeout(() => navigate('/system'), 500);
           }
         } catch (err) {
@@ -106,7 +120,7 @@ const LicensePortal = () => {
         // ignore
       }
     };
-  }, [navigate]);
+  }, [navigate, t]);
 
   const activeSolutionInfo = useMemo(
     () => SOLUTIONS.find((solution) => solution.key === activeSolution) || SOLUTIONS[0],
@@ -127,7 +141,7 @@ const LicensePortal = () => {
   const handleEnterSystem = useCallback(() => {
     const key = accessKey.trim();
     if (!key) {
-      Modal.error({ title: '密钥错误', content: '密钥不能为空，请输入有效密钥' });
+      Modal.error({ title: t('license.errorTitle'), content: t('license.emptyContent') });
       return;
     }
     const ws = wsRef.current;
@@ -136,9 +150,9 @@ const LicensePortal = () => {
       setEntering(true);
       ws.send(JSON.stringify({ date: { date: key, startTime: window.Date.now() } }));
     } else {
-      Modal.error({ title: '连接错误', content: '与应用的连接已断开，请重启应用后重试' });
+      Modal.error({ title: t('license.connectionErrorTitle'), content: t('license.appDisconnected') });
     }
-  }, [accessKey]);
+  }, [accessKey, t]);
 
   return (
     <main className="portal-page">
@@ -154,13 +168,26 @@ const LicensePortal = () => {
           </div>
         </div>
         <div className="portal-topbar-right">
+          <div className="portal-language-switch" role="group" aria-label={t('common.language')}>
+            {Object.keys(LANGUAGE_LABEL_KEYS).map((language) => (
+              <button
+                aria-pressed={currentLanguage === language}
+                className={currentLanguage === language ? 'is-active' : ''}
+                key={language}
+                onClick={() => i18n.changeLanguage(language)}
+                type="button"
+              >
+                {t(LANGUAGE_LABEL_KEYS[language])}
+              </button>
+            ))}
+          </div>
           <div className={`portal-status ${wsConnected ? 'is-online' : 'is-offline'}`}>
             <i />
-            {wsConnected ? '系统已就绪' : '系统未连接'}
+            {wsConnected ? t('portal.ready') : t('portal.disconnected')}
           </div>
           <div className="portal-sdk-badge">
             <CodeOutlined />
-            <span>SDK 定制</span>
+            <span>{t('portal.sdkCustom')}</span>
           </div>
         </div>
       </header>
@@ -169,30 +196,30 @@ const LicensePortal = () => {
         <div className="portal-hero-text">
           <span className="portal-hero-tag">
             <SafetyCertificateOutlined />
-            柔性压力感知 · 全场景解决方案
+            {t('portal.heroTag')}
           </span>
           <h1>Shroom Vision</h1>
           <p className="portal-hero-desc">
-            面向康养、汽车、具身智能等行业场景，一站式完成压力可视化展示、动态数据采集与专业报告输出。
+            {t('portal.heroDescription')}
           </p>
         </div>
       </section>
 
-      <section className="portal-access" aria-label="访问密钥">
+      <section className="portal-access" aria-label={t('portal.accessKey')}>
         <div className="portal-access-title">
           <span className="portal-access-icon">
-            <img alt="访问密钥" draggable={false} src={accessKeyIcon} />
+            <img alt="" draggable={false} src={accessKeyIcon} />
           </span>
-          <h2>访问密钥</h2>
+          <h2>{t('portal.accessKey')}</h2>
         </div>
         <div className="portal-access-main">
           <input
-            aria-label="访问密钥"
+            aria-label={t('portal.accessKey')}
             onChange={(event) => setAccessKey(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter') handleEnterSystem();
             }}
-            placeholder="请输入访问密钥"
+            placeholder={t('portal.accessKeyPlaceholder')}
             type="text"
             value={accessKey}
           />
@@ -202,7 +229,7 @@ const LicensePortal = () => {
             onClick={handleEnterSystem}
             disabled={entering}
           >
-            {entering ? '验证中…' : '进入系统'}
+            {entering ? t('portal.validating') : t('portal.enterSystem')}
             {entering ? null : <ArrowRightOutlined />}
           </button>
         </div>
@@ -212,11 +239,11 @@ const LicensePortal = () => {
             checked={saveKey}
             onChange={(event) => setSaveKey(event.target.checked)}
           />
-          <span>保存密钥（下次自动填入）</span>
+          <span>{t('portal.saveKey')}</span>
         </label>
       </section>
 
-      <section className="portal-grid" aria-label="行业方案">
+      <section className="portal-grid" aria-label={t('portal.industrySolutions')}>
         {SOLUTIONS.map((solution) => {
           const carouselSlides = getSolutionCarouselSlides(solution);
           const carouselIndex = Math.min(
@@ -231,8 +258,8 @@ const LicensePortal = () => {
               <div className="portal-card-head">
                 <div className="portal-card-icon">{solution.icon}</div>
                 <div className="portal-card-title">
-                  <h3>{solution.title}</h3>
-                  <p>{solution.subtitle}</p>
+                  <h3>{t(solution.titleKey)}</h3>
+                  <p>{t(solution.subtitleKey)}</p>
                 </div>
               </div>
 
@@ -254,7 +281,7 @@ const LicensePortal = () => {
                                 key={module.key}
                               >
                                 <span className="portal-module-icon">{module.icon}</span>
-                                <span className="portal-module-label">{module.label}</span>
+                                <span className="portal-module-label">{t(module.labelKey)}</span>
                               </div>
                             ))}
                           </div>
@@ -270,7 +297,7 @@ const LicensePortal = () => {
                         key={module.key}
                       >
                         <span className="portal-module-icon">{module.icon}</span>
-                        <span className="portal-module-label">{module.label}</span>
+                        <span className="portal-module-label">{t(module.labelKey)}</span>
                       </div>
                     ))}
                   </div>
@@ -280,7 +307,7 @@ const LicensePortal = () => {
                   <div className="portal-carousel-controls">
                     <button
                       type="button"
-                      aria-label="上一组"
+                      aria-label={t('portal.previousGroup')}
                       onClick={() => handleCarouselStep(solution.key, carouselSlides, -1)}
                     >
                       ‹
@@ -293,7 +320,7 @@ const LicensePortal = () => {
                     </span>
                     <button
                       type="button"
-                      aria-label="下一组"
+                      aria-label={t('portal.nextGroup')}
                       onClick={() => handleCarouselStep(solution.key, carouselSlides, 1)}
                     >
                       ›
@@ -302,7 +329,7 @@ const LicensePortal = () => {
                 ) : null}
               </div>
 
-              <p className="portal-card-detail">{solution.detail}</p>
+              <p className="portal-card-detail">{t(solution.detailKey)}</p>
             </article>
           );
         })}

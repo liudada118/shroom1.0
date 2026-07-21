@@ -87,12 +87,15 @@
   "date": 1790000000000,
   "nowDate": 1780000000000,
   "file": ["hand0205", "fast1024"],
+  "activeSensorType": "hand0205",
   "selectFlag": ["hand0205", "fast1024"],
   "moduleConfig": {
     "hand0205": "skin"
   }
 }
 ```
+
+其中 `file` / `selectFlag` 表示授权范围，`activeSensorType` 表示后端当前实际使用的展示系统、串口协议和数据库。前端系统页必须优先按 `activeSensorType` 设置默认展示，避免“界面系统已授权但与后端当前解析系统不同”导致串口无法正确连接。
 
 如果 JSON 解析或处理失败，广播 `licenseError: "密钥无效，请检查后重新输入"`。
 
@@ -109,7 +112,8 @@
    - 字符串且不是 `all`：使用该字符串。
    - `all` 或无有效值：回退到默认 `hand0205`。
 6. 根据默认系统 key 计算串口波特率。
-7. 如果文件不存在，只记录日志并跳过加载；前端连接时会收到无有效密钥提示。
+7. 前端连接时，后端同时下发授权范围 `file/selectFlag` 和实际运行系统 `activeSensorType`；多类型授权时前端默认选中 `activeSensorType`，与后端串口解析保持一致。
+8. 如果文件不存在，只记录日志并跳过加载；前端连接时会收到无有效密钥提示。
 
 `licenseHelper.js` 也保留了一套授权文件路径和有效期辅助函数，用于统一解析 `config.txt`、读取在线时间和计算剩余天数。
 

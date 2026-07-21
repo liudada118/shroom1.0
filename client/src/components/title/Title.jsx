@@ -12,11 +12,11 @@ import { timeStampToDate, timeStampToDateNospace } from '../../assets/util/util'
 import enUS from 'antd/locale/en_US';
 import zhCN from 'antd/locale/zh_CN';
 import { withTranslation } from "react-i18next";
-
-import { useTranslation, initReactI18next } from "react-i18next";
 import { NavLink, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { bthClickHandle as heatmapBthClickHandle } from '../onestep/heatmap';
+import { translateDomainLabel } from '../../i18n/translateDomainLabel';
+import { getLanguageLocale } from '../../i18n';
 let collection = JSON.parse(localStorage.getItem('collection'))
   ? JSON.parse(localStorage.getItem('collection'))
   : [['hunch', 'front', '标签']];
@@ -595,7 +595,7 @@ class Title extends React.Component {
 
   openCsvDownloadModal = () => {
     if (!this.state.dataTime) {
-      message.warning('请先选择要下载的历史数据');
+      message.warning(this.props.t('collection.chooseHistory'));
       return;
     }
     this.setState({
@@ -611,12 +611,12 @@ class Title extends React.Component {
 
   chooseCsvDownloadPath = async () => {
     if (!window.electronAPI?.invoke) {
-      message.warning('当前环境不支持选择文件夹');
+      message.warning(this.props.t('csv.selectUnsupported'));
       return;
     }
     const result = await window.electronAPI.invoke('file-dialog', {
       properties: ['openDirectory', 'createDirectory'],
-      title: '选择 CSV 保存文件夹',
+      title: this.props.t('csv.chooseFolderTitle'),
     });
     const selectedPath = result?.filePaths?.[0];
     if (selectedPath) {
@@ -628,29 +628,31 @@ class Title extends React.Component {
   openCsvPath = async (targetPath) => {
     if (!targetPath) return;
     if (!window.electronAPI?.invoke) {
-      message.warning('当前环境不支持打开路径');
+      message.warning(this.props.t('csv.openUnsupported'));
       return;
     }
     const result = await window.electronAPI.invoke('open-path', { filePath: targetPath });
     if (!result?.success) {
-      message.error(result?.error || '打开失败');
+      message.error(result?.error || this.props.t('csv.openFailed'));
     }
   }
 
   startCsvDownload = async () => {
     if (!this.state.dataTime) {
-      message.warning('请先选择要下载的历史数据');
+      message.warning(this.props.t('collection.chooseHistory'));
       return;
     }
     if (this.state.csvDownloadFormat !== 'csv') {
-      message.warning('当前仅支持 CSV 格式');
+      message.warning(this.props.t('csv.csvOnly'));
       return;
     }
     const downloadPath = (this.state.csvDownloadPath || '').trim();
     if (downloadPath && window.electronAPI?.invoke) {
       const validateResult = await window.electronAPI.invoke('validate-path', { path: downloadPath });
       if (!validateResult?.success) {
-        message.error(`保存路径不可用：${validateResult?.error || '未知错误'}`);
+        message.error(this.props.t('csv.pathUnavailable', {
+          error: validateResult?.error || this.props.t('csv.unknownError'),
+        }));
         return;
       }
       localStorage.setItem('csvDownloadPath', downloadPath);
@@ -661,7 +663,7 @@ class Title extends React.Component {
       csvDownloadDir: downloadPath,
       csvDownloadProgress: 0,
       csvDownloadProgressDetail: null,
-      csvDownloadMessage: '正在导出 CSV...',
+      csvDownloadMessage: this.props.t('csv.exportingShort'),
     });
     this.props.wsSendObj({
       download: this.state.dataTime,
@@ -684,8 +686,8 @@ class Title extends React.Component {
         csvDownloadProgress: Math.max(0, Math.min(100, Number(progress.percent) || 0)),
         csvDownloadProgressDetail: progress,
         csvDownloadMessage: progress.currentFile
-          ? `Exporting ${progress.currentFile}`
-          : 'Exporting CSV...',
+          ? this.props.t('csv.exportingFile', { file: progress.currentFile })
+          : this.props.t('csv.exportingShort'),
       });
       return;
     }
@@ -701,7 +703,7 @@ class Title extends React.Component {
         csvDownloadFiles: mergedFiles,
         csvDownloadDir: detail.downloadDir || this.state.csvDownloadDir || this.state.csvDownloadPath,
         csvDownloadProgress: 100,
-        csvDownloadMessage: detail.displayMsg || '导出 CSV 成功',
+        csvDownloadMessage: detail.displayMsg || this.props.t('export csv success'),
       });
       return;
     }
@@ -710,11 +712,11 @@ class Title extends React.Component {
       csvDownloadStage: 'error',
       csvDownloadFiles: mergedFiles,
       csvDownloadDir: detail.downloadDir || this.state.csvDownloadDir || this.state.csvDownloadPath,
-      csvDownloadMessage: detail.downloadError || detail.displayMsg || '导出 CSV 失败',
+      csvDownloadMessage: detail.downloadError || detail.displayMsg || this.props.t('export csv failed'),
     });
   }
 
-  renderCsvDownloadModal() {
+  renderCsvDownloadModal(t) {
     const stage = this.state.csvDownloadStage;
     const isConfig = stage === 'config';
     const isExporting = stage === 'exporting';
@@ -729,10 +731,10 @@ class Title extends React.Component {
 
     return (
       <Modal
-        title={isConfig ? 'CSV 下载配置' : 'CSV 下载进度'}
+        title={isConfig ? t('csv.config') : t('csv.progress')}
         open={this.state.csvDownloadModalOpen}
-        okText={isConfig ? '开始下载' : '关闭'}
-        cancelText='取消'
+        okText={isConfig ? t('csv.start') : t('common.close')}
+        cancelText={t('common.cancel')}
         confirmLoading={isExporting}
         closable={!isExporting}
         maskClosable={!isExporting}
@@ -747,19 +749,19 @@ class Title extends React.Component {
         {isConfig ? (
           <Space direction='vertical' style={{ width: '100%' }} size={12}>
             <div>
-              <div style={{ marginBottom: 4 }}>保存路径</div>
+              <div style={{ marginBottom: 4 }}>{t('csv.savePath')}</div>
               <Input
-                placeholder='不填写则使用默认 data 目录'
+                placeholder={t('csv.defaultPath')}
                 value={this.state.csvDownloadPath}
                 onChange={(e) => this.setState({ csvDownloadPath: e.target.value })}
               />
             </div>
             <Space>
-              <Button onClick={this.chooseCsvDownloadPath}>选择文件夹</Button>
-              <Button disabled={!folderPath} onClick={() => this.openCsvPath(folderPath)}>打开文件夹</Button>
+              <Button onClick={this.chooseCsvDownloadPath}>{t('csv.chooseFolder')}</Button>
+              <Button disabled={!folderPath} onClick={() => this.openCsvPath(folderPath)}>{t('csv.openFolder')}</Button>
             </Space>
             <div>
-              <div style={{ marginBottom: 4 }}>导出格式</div>
+              <div style={{ marginBottom: 4 }}>{t('csv.format')}</div>
               <Select
                 style={{ width: '100%' }}
                 value={this.state.csvDownloadFormat}
@@ -774,34 +776,43 @@ class Title extends React.Component {
           <div>
             <Progress percent={progressPercent} status='active' />
             <div style={{ marginTop: 8, color: '#666', fontSize: 12 }}>
-              {progressDetail.currentFile ? `File: ${progressDetail.currentFile}` : 'Preparing file...'}
+              {progressDetail.currentFile
+                ? t('csv.fileProgress', { file: progressDetail.currentFile })
+                : t('csv.preparingFile')}
             </div>
             <div style={{ color: '#666', fontSize: 12 }}>
-              {progressTotal ? `${progressWritten.toLocaleString()} / ${progressTotal.toLocaleString()} rows` : 'Calculating rows...'}
-              {progressDetail.fileCount ? `, file ${progressDetail.fileIndex || 1}/${progressDetail.fileCount}` : ''}
+              {progressTotal
+                ? t('csv.rowProgress', {
+                  written: progressWritten.toLocaleString(getLanguageLocale(this.props.i18n?.language)),
+                  total: progressTotal.toLocaleString(getLanguageLocale(this.props.i18n?.language)),
+                })
+                : t('csv.calculatingRows')}
+              {progressDetail.fileCount
+                ? t('csv.fileCount', { index: progressDetail.fileIndex || 1, count: progressDetail.fileCount })
+                : ''}
             </div>
-            <p>正在导出 CSV，请稍候...</p>
-            <p style={{ color: '#666' }}>文件生成完成后会显示在这里。</p>
+            <p>{t('csv.exporting')}</p>
+            <p style={{ color: '#666' }}>{t('csv.outputHint')}</p>
           </div>
         ) : null}
 
         {isDone ? (
           <Space direction='vertical' style={{ width: '100%' }} size={12}>
-            <div>{this.state.csvDownloadMessage || '导出 CSV 成功'}</div>
+            <div>{this.state.csvDownloadMessage || t('export csv success')}</div>
             {fileList.length ? fileList.map((filePath) => (
               <div key={filePath} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{filePath}</span>
-                <Button size='small' onClick={() => this.openCsvPath(filePath)}>打开</Button>
+                <Button size='small' onClick={() => this.openCsvPath(filePath)}>{t('common.open')}</Button>
               </div>
-            )) : <div>已导出完成，但未收到文件路径。</div>}
-            <Button disabled={!folderPath} onClick={() => this.openCsvPath(folderPath)}>打开下载文件夹</Button>
+            )) : <div>{t('csv.noPath')}</div>}
+            <Button disabled={!folderPath} onClick={() => this.openCsvPath(folderPath)}>{t('csv.openDownloadFolder')}</Button>
           </Space>
         ) : null}
 
         {isError ? (
           <Space direction='vertical' style={{ width: '100%' }} size={12}>
-            <div style={{ color: '#ff4d4f' }}>{this.state.csvDownloadMessage || '导出 CSV 失败'}</div>
-            <Button disabled={!folderPath} onClick={() => this.openCsvPath(folderPath)}>打开下载文件夹</Button>
+            <div style={{ color: '#ff4d4f' }}>{this.state.csvDownloadMessage || t('export csv failed')}</div>
+            <Button disabled={!folderPath} onClick={() => this.openCsvPath(folderPath)}>{t('csv.openDownloadFolder')}</Button>
           </Space>
         ) : null}
       </Modal>
@@ -878,35 +889,35 @@ class Title extends React.Component {
     return (
       <Modal
         className='collectionModal'
-        title='采集配置'
+        title={t('collection.config')}
         open={this.state.collectionModalOpen}
-        okText='开始采集'
-        cancelText='取消'
+        okText={t('collection.start')}
+        cancelText={t('common.cancel')}
         onOk={this.startCollectionWithOptions}
         onCancel={this.closeCollectionModal}
         destroyOnClose
       >
         <Space direction='vertical' style={{ width: '100%' }} size={12}>
           <div>
-            <div style={{ marginBottom: 4 }}>采集名称</div>
+            <div style={{ marginBottom: 4 }}>{t('collection.name')}</div>
             <Input
-              placeholder='可不填，后面会追加特征标签1和特征标签2'
+              placeholder={t('collection.nameHint')}
               value={this.state.collectLabel}
               onChange={(e) => this.setState({ collectLabel: e.target.value })}
             />
           </div>
           <div>
-            <div style={{ marginBottom: 4 }}>特征标签</div>
+            <div style={{ marginBottom: 4 }}>{t('collection.featureLabel')}</div>
             <div className='collectionHelpText'>
-              特征标签1用于追加到采集文件名后面；特征标签2需使用“名称_数字”格式，数字写入 CSV label 列，完整文本写入新增标签文本列。
+              {t('collection.featureHelp')}
             </div>
             <div className='collectionFeatureRow'>
-              <div className='collectionFieldLabel'>特征标签1</div>
-              <div className='collectionHelpText'>文件名标签，会拼到采集名称后面，建议填写采集对象、实验分组或大类。</div>
+              <div className='collectionFieldLabel'>{t('collection.feature1')}</div>
+              <div className='collectionHelpText'>{t('collection.feature1Hint')}</div>
               <Select
                 popupClassName='collectionSelectDropdown'
                 style={{ width: '100%' }}
-                placeholder='选择特征标签1'
+                placeholder={t('collection.selectFeature1')}
                 value={this.state.realname || undefined}
                 onChange={this.onChange}
                 dropdownRender={(menu) => (
@@ -915,7 +926,7 @@ class Title extends React.Component {
                     <Divider style={{ margin: '8px 0' }} />
                     <Space style={{ padding: '0 8px 4px' }}>
                       <Input
-                        placeholder='新增标签'
+                        placeholder={t('collection.addLabel')}
                         ref={this.inputRef}
                         value={this.state.name}
                         onChange={this.onNameChange}
@@ -929,16 +940,19 @@ class Title extends React.Component {
                     </Space>
                   </>
                 )}
-                options={this.state.items.map((item) => ({ label: item, value: item }))}
+                options={this.state.items.map((item) => ({
+                  label: translateDomainLabel(item, t),
+                  value: item,
+                }))}
               />
             </div>
             <div className='collectionFeatureRow'>
-              <div className='collectionFieldLabel'>特征标签2</div>
-              <div className='collectionHelpText'>CSV 标签，导出时“平躺_2”会在 label 列写入 2，并在标签文本列写入平躺_2。</div>
+              <div className='collectionFieldLabel'>{t('collection.feature2')}</div>
+              <div className='collectionHelpText'>{t('collection.feature2Hint')}</div>
               <Select
                 popupClassName='collectionSelectDropdown'
                 style={{ width: '100%' }}
-                placeholder='选择特征标签2'
+                placeholder={t('collection.selectFeature2')}
                 value={this.state.realname1 || undefined}
                 onChange={this.onChange1}
                 dropdownRender={(menu) => (
@@ -947,7 +961,7 @@ class Title extends React.Component {
                     <Divider style={{ margin: '8px 0' }} />
                     <Space style={{ padding: '0 8px 4px' }}>
                       <Input
-                        placeholder='新增标签'
+                        placeholder={t('collection.addLabel')}
                         ref={this.inputRef1}
                         value={this.state.name1}
                         onChange={this.onNameChange1}
@@ -961,25 +975,28 @@ class Title extends React.Component {
                     </Space>
                   </>
                 )}
-                options={this.state.items1.map((item) => ({ label: item, value: item }))}
+                options={this.state.items1.map((item) => ({
+                  label: translateDomainLabel(item, t),
+                  value: item,
+                }))}
               />
             </div>
           </div>
           <div>
-            <div style={{ marginBottom: 4 }}>采集频率</div>
+            <div style={{ marginBottom: 4 }}>{t('collection.frequency')}</div>
             <Radio.Group
               value={this.state.collectFrequencyMode}
               onChange={(e) => this.setState({ collectFrequencyMode: e.target.value })}
               optionType='button'
               buttonStyle='solid'
               options={[
-                { label: '跟随串口频率', value: 'serial' },
-                { label: '自定义保存频率', value: 'custom' },
+                { label: t('collection.followSerial'), value: 'serial' },
+                { label: t('collection.customFrequency'), value: 'custom' },
               ]}
             />
             {this.state.collectFrequencyMode === 'serial' ? (
               <div className='collectionHelpText' style={{ marginTop: 8 }}>
-                按串口实际发送频率保存，每收到一帧就写入一帧。
+                {t('collection.serialRateHint')}
               </div>
             ) : (
               <div style={{ marginTop: 8 }}>
@@ -992,7 +1009,7 @@ class Title extends React.Component {
                   addonAfter='Hz'
                 />
                 <div className='collectionHelpText' style={{ marginTop: 6 }}>
-                  按目标 Hz 保存，建议设置为小于串口实际发送 Hz；高于串口频率时最多也只能按串口实际帧率保存。
+                  {t('collection.targetRateHint')}
                 </div>
               </div>
             )}
@@ -1028,21 +1045,21 @@ class Title extends React.Component {
     });
   }
 
-  renderSmallBed12BDisplaySettings() {
+  renderSmallBed12BDisplaySettings(t) {
     return (
       <Modal
         className='collectionModal'
-        title='展示设置'
+        title={t('display.settings')}
         open={this.state.smallBed12BDisplaySettingsOpen}
-        okText='确定'
-        cancelText='取消'
+        okText={t('common.confirm')}
+        cancelText={t('common.cancel')}
         onOk={() => this.setState({ smallBed12BDisplaySettingsOpen: false })}
         onCancel={() => this.setState({ smallBed12BDisplaySettingsOpen: false })}
         destroyOnClose
       >
         <Space direction='vertical' style={{ width: '100%' }} size={12}>
           <div>
-            <div style={{ marginBottom: 4 }}>实时矩阵</div>
+            <div style={{ marginBottom: 4 }}>{t('display.realtimeMatrix')}</div>
             <Radio.Group
               value={this.state.smallBed12BRealtimeMatrixMode}
               onChange={(e) => this.applySmallBed12BDisplaySettings({ matrixMode: e.target.value })}
@@ -1054,22 +1071,22 @@ class Title extends React.Component {
               ]}
             />
             <div className='collectionHelpText' style={{ marginTop: 8 }}>
-              这里会同时影响实时原始数据展示、采集入库和 CSV 下载矩阵尺寸。
+              {t('display.matrixHint')}
             </div>
           </div>
           {this.state.smallBed12BRealtimeMatrixMode === '16x16' ? (
             <div>
-              <div style={{ marginBottom: 4 }}>2x2 取点位置</div>
+              <div style={{ marginBottom: 4 }}>{t('display.samplePosition')}</div>
               <Radio.Group
                 value={this.state.smallBed12BRealtimeSamplePoint}
                 onChange={(e) => this.applySmallBed12BDisplaySettings({ samplePoint: e.target.value })}
                 optionType='button'
                 buttonStyle='solid'
                 options={[
-                  { label: '左上', value: 'topLeft' },
-                  { label: '右上', value: 'topRight' },
-                  { label: '左下', value: 'bottomLeft' },
-                  { label: '右下', value: 'bottomRight' },
+                  { label: t('display.topLeft'), value: 'topLeft' },
+                  { label: t('display.topRight'), value: 'topRight' },
+                  { label: t('display.bottomLeft'), value: 'bottomLeft' },
+                  { label: t('display.bottomRight'), value: 'bottomRight' },
                 ]}
               />
             </div>
@@ -1081,7 +1098,7 @@ class Title extends React.Component {
 
   openOneStepPdfModal = () => {
     if (!this.state.dataTime) {
-      message.warning('请先选择要导出的采集数据');
+      message.warning(this.props.t('collection.chooseExportData'));
       return;
     }
     this.setState({ pdfModalOpen: true });
@@ -1089,14 +1106,14 @@ class Title extends React.Component {
 
   generateOneStepPdfReport = async () => {
     const date = this.state.dataTime;
-    const collectName = (this.state.realname || '').trim() || '未知';
+    const collectName = (this.state.realname || '').trim() || this.props.t('common.unknown');
     const collectAge = (this.state.collectAge || '').trim() || '0';
     const collectGender = this.state.collectGender || '男';
     const colName = this.state.colName || date;
     this.setState({ pdfLoading: true });
     const pdfMessageKey = 'oneStepPdfExport';
     configureOneStepPdfMessage();
-    message.loading({ content: '正在生成报告，请稍候...', key: pdfMessageKey, duration: 0 });
+    message.loading({ content: this.props.t('report.generating'), key: pdfMessageKey, duration: 0 });
     try {
       const res = await axios({
         method: 'post',
@@ -1104,25 +1121,25 @@ class Title extends React.Component {
         data: { time: date, collectName, age: collectAge, gender: collectGender, date }
       });
       if (res.status !== 200 || res.data?.code !== 0) {
-        message.error({ content: res.data?.message || '获取峰值帧失败', key: pdfMessageKey, duration: 3 });
+        message.error({ content: res.data?.message || this.props.t('report.peakFailed'), key: pdfMessageKey, duration: 3 });
         return;
       }
 
       const peakFrameData = res.data?.data?.peak_frame_data;
       if (!Array.isArray(peakFrameData) || peakFrameData.length < 4096) {
-        message.error({ content: '峰值帧数据为空，无法生成 PDF', key: pdfMessageKey, duration: 3 });
+        message.error({ content: this.props.t('report.emptyPeak'), key: pdfMessageKey, duration: 3 });
         return;
       }
 
       const canvas = createOneStepPdfHeatmapCanvas(peakFrameData);
       if (!canvas) {
-        message.error({ content: 'OneStep 热力图生成失败', key: pdfMessageKey, duration: 3 });
+        message.error({ content: this.props.t('report.heatmapFailed'), key: pdfMessageKey, duration: 3 });
         return;
       }
 
       const blob = await canvasToPngBlob(canvas);
       if (!blob) {
-        message.error({ content: '热力图导出失败', key: pdfMessageKey, duration: 3 });
+        message.error({ content: this.props.t('report.exportHeatmapFailed'), key: pdfMessageKey, duration: 3 });
         return;
       }
 
@@ -1140,7 +1157,7 @@ class Title extends React.Component {
       });
 
       if (uploadRes.data?.code !== 0) {
-        message.error({ content: uploadRes.data?.message || 'PDF 生成失败', key: pdfMessageKey, duration: 3 });
+        message.error({ content: uploadRes.data?.message || this.props.t('report.pdfFailed'), key: pdfMessageKey, duration: 3 });
         return;
       }
 
@@ -1150,14 +1167,16 @@ class Title extends React.Component {
       setTimeout(() => {
         configureOneStepPdfMessage();
         if (this.props.messageApi) {
-          this.props.messageApi.success('PDF 导出成功', 5);
+          this.props.messageApi.success(this.props.t('report.pdfSuccess'), 5);
         } else {
-          message.success({ content: 'PDF 导出成功', duration: 5 });
+          message.success({ content: this.props.t('report.pdfSuccess'), duration: 5 });
         }
       }, 100);
       notification.success({
-        message: 'PDF 报告生成成功',
-        description: pdfFilePath ? `已保存至：${pdfFilePath}` : '报告已生成',
+        message: this.props.t('report.reportSuccess'),
+        description: pdfFilePath
+          ? this.props.t('report.savedAt', { path: pdfFilePath })
+          : this.props.t('report.generated'),
         duration: 0,
         btn: pdfFilePath ? (
           <Button
@@ -1168,11 +1187,11 @@ class Title extends React.Component {
                 window.electronAPI.invoke('open-folder', { filePath: pdfFilePath });
               }
             }}
-          >打开文件夹</Button>
+          >{this.props.t('csv.openFolder')}</Button>
         ) : null,
       });
     } catch (err) {
-      message.error({ content: err?.response?.data?.message || err?.message || '请求失败', key: pdfMessageKey, duration: 3 });
+      message.error({ content: err?.response?.data?.message || err?.message || this.props.t('report.requestFailed'), key: pdfMessageKey, duration: 3 });
     } finally {
       this.setState({ pdfLoading: false });
     }
@@ -1475,10 +1494,10 @@ class Title extends React.Component {
 
           {showHumanTransform && (
             <>
-              <Divider style={{ borderColor: 'rgba(255,255,255,0.18)', margin: '12px 0 8px' }}>Human Transform</Divider>
+              <Divider style={{ borderColor: 'rgba(255,255,255,0.18)', margin: '12px 0 8px' }}>{t('display.humanTransform')}</Divider>
 
               <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
-                <div className='dataTitle'>Pos X</div>
+                <div className='dataTitle'>{t('display.positionX')}</div>
                 <Slider
                   min={-200} max={200} step={0.5}
                   value={this.state.humanTransform.position.x}
@@ -1488,7 +1507,7 @@ class Title extends React.Component {
               </div>
 
               <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
-                <div className='dataTitle'>Pos Y</div>
+                <div className='dataTitle'>{t('display.positionY')}</div>
                 <Slider
                   min={-200} max={200} step={0.5}
                   value={this.state.humanTransform.position.y}
@@ -1498,7 +1517,7 @@ class Title extends React.Component {
               </div>
 
               <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
-                <div className='dataTitle'>Pos Z</div>
+                <div className='dataTitle'>{t('display.positionZ')}</div>
                 <Slider
                   min={-200} max={200} step={0.5}
                   value={this.state.humanTransform.position.z}
@@ -1508,7 +1527,7 @@ class Title extends React.Component {
               </div>
 
               <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
-                <div className='dataTitle'>Rot X</div>
+                <div className='dataTitle'>{t('display.rotationX')}</div>
                 <Slider
                   min={-180} max={180} step={1}
                   value={this.state.humanTransform.rotation.x}
@@ -1518,7 +1537,7 @@ class Title extends React.Component {
               </div>
 
               <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
-                <div className='dataTitle'>Rot Y</div>
+                <div className='dataTitle'>{t('display.rotationY')}</div>
                 <Slider
                   min={-180} max={180} step={1}
                   value={this.state.humanTransform.rotation.y}
@@ -1528,7 +1547,7 @@ class Title extends React.Component {
               </div>
 
               <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
-                <div className='dataTitle'>Rot Z</div>
+                <div className='dataTitle'>{t('display.rotationZ')}</div>
                 <Slider
                   min={-180} max={180} step={1}
                   value={this.state.humanTransform.rotation.z}
@@ -1537,7 +1556,7 @@ class Title extends React.Component {
                 />
               </div>
 
-              <Button style={{ marginTop: 8 }} onClick={resetHumanTransform}>Reset Human</Button>
+              <Button style={{ marginTop: 8 }} onClick={resetHumanTransform}>{t('display.resetHuman')}</Button>
             </>
           )}
 
@@ -1570,7 +1589,7 @@ class Title extends React.Component {
       { label: t('sensorSmallBedNoAlg'), value: smallBedNoAlgType_title },
       { label: t('sensorSmallBed12B'), value: smallBed12BType_title },
       { label: t('sensorMatCol'), value: 'matCol' },
-      { label: '温度全床系统', value: tempFullBedType_title },
+      { label: t('sensorTempFullBed'), value: tempFullBedType_title },
       { label: t('sensorPetCare'), value: 'petCare' },
       { label: t('sensorPetCareMini'), value: 'petCareMini' },
       { label: t('sensorWholeChair'), value: wholeChairType_title },
@@ -1709,9 +1728,9 @@ class Title extends React.Component {
 
 
           {this.props.matrixName === minzhenType_title ? <Select
-            placeholder='温度陀螺仪串口'
+            placeholder={t('minzhen.otherData')}
             style={{ marginRight: 6, width: 160 }}
-            value={this.props.portnameSensor ? `${this.props.portnameSensor}(温度陀螺仪)` : undefined}
+            value={this.props.portnameSensor ? `${this.props.portnameSensor} (${t('minzhen.otherData')})` : undefined}
             onOpenChange={() => {
               this.props.wsSendObj({ serialReset: true })
             }}
@@ -1803,8 +1822,8 @@ class Title extends React.Component {
             <Input value={this.state.ip} onChange={(e) => {
               localStorage.setItem('ip', e.target.value)
               this.setState({ ip: e.target.value })
-            }} placeholder='请输入IP' />
-            <Button onClick={() => { this.props.changeWs(this.state.ip) }}>连接</Button>
+            }} placeholder={t('display.ipPlaceholder')} />
+            <Button onClick={() => { this.props.changeWs(this.state.ip) }}>{t('display.connect')}</Button>
           </>
 
         }
@@ -1832,11 +1851,11 @@ class Title extends React.Component {
                   const fingerL = localStorage.getItem('fingerArrL')
                   const fingerR = localStorage.getItem('fingerArrR')
                   if (!fingerL && !fingerR) {
-                    message.warning(this.props.t ? this.props.t('noCalibData') : '未检测到手指校准数据，请先进行手指校准')
+                    message.warning(t('noCalibData'))
                   } else if (!fingerL) {
-                    message.warning(this.props.t ? this.props.t('noCalibDataL') : '未检测到左手校准数据，请先校准左手')
+                    message.warning(t('noCalibDataL'))
                   } else if (!fingerR) {
-                    message.warning(this.props.t ? this.props.t('noCalibDataR') : '未检测到右手校准数据，请先校准右手')
+                    message.warning(t('noCalibDataR'))
                   }
                   this.props.wsSendObj({ resetZero: false })
                   this.setState({ resetZero: false })
@@ -1885,7 +1904,7 @@ class Title extends React.Component {
             className='titleButton'
             onClick={() => this.setState({ smallBed12BDisplaySettingsOpen: true })}
           >
-            展示设置
+            {t('display.settings')}
           </Button>
         ) : null}
 
@@ -2049,7 +2068,7 @@ class Title extends React.Component {
             // this.props.changeCalibration()
             this.props.com.current?.handZero()
           }}
-        >固定</Button> : ''}
+        >{t('display.fixed')}</Button> : ''}
 
         <Button onClick={() => {
           this.props.wsSendObj({
@@ -2074,14 +2093,15 @@ class Title extends React.Component {
 
         <Select
           defaultValue={this.props.i18n.language}
-          style={{ width: 60 }}
+          style={{ width: 108 }}
           onChange={(value) => {
             localStorage.setItem('language', value)
             this.props.i18n.changeLanguage(value)
           }}
           options={[
-            { value: 'zh', label: '中' },
-            { value: 'en', label: 'En' },
+            { value: 'zh', label: t('common.chinese') },
+            { value: 'en', label: t('common.english') },
+            { value: 'ja', label: t('common.japanese') },
           ]}
         />
 
@@ -2096,7 +2116,7 @@ class Title extends React.Component {
             {/* {this.props.matrixName == 'car' ? <Input placeholder='输入采集文件名称' onChange={(e) => { this.setState({ colName: e.target.value }) }} /> : null} */}
 
             {this.props.matrixName == 'localCar' ?
-              <Input placeholder='输入采集标签' onChange={(e) => { this.props.changeStateData({ dataName: e.target.value }) }} />
+              <Input placeholder={t('collection.featureLabel')} onChange={(e) => { this.props.changeStateData({ dataName: e.target.value }) }} />
               : null}
             {/* <Input type='number' placeholder={t('enterColHZ')} onChange={(e) => { this.setState({ colHZ: e.target.value }) }} /> */}
             <Button
@@ -2124,7 +2144,7 @@ class Title extends React.Component {
                 <Button onClick={() => {
                   this.props.colPushData()
                 }} className='titleButton'>
-                  单次采集
+                  {t('display.singleCollection')}
                 </Button>
                 <Button className='titleButton'>
                   <CSVLink
@@ -2134,14 +2154,14 @@ class Title extends React.Component {
                     data={this.props.csvData}
                     style={{ color: '#5A5A89', textDecoration: 'none' }}
                   >
-                    下载
+                    {t('download')}
                   </CSVLink> </Button> </> : null}
 
             {this.props.matrixName == 'localCar' ?
               <Button className='titleButton' onClick={() => {
 
                 this.props.delPushData()
-              }}>删除</Button> : null}
+              }}>{t('delete')}</Button> : null}
           </>
           : <> <Button
             className='titleButton'
@@ -2160,14 +2180,14 @@ class Title extends React.Component {
         {
           this.props.matrixName === 'car' && this.props.local ? <Button className='titleButton' onClick={() => {
             this.props.wsSendObj({ variety: true })
-          }} >压力变化</Button> : null
+          }} >{t('display.pressureChange')}</Button> : null
         }
 
         {this.props.matrixName === 'bigBed' ? <Button className='titleButton' onClick={() => {
           const flag = this.props.pressChart
           this.props.changeStateData({ pressChart: !flag })
           this.props.initBigCtx()
-        }}>压力曲线</Button> : null}
+        }}>{t('display.pressureCurve')}</Button> : null}
 
         {this.props.matrixName === 'bigBed' ? <Button className='titleButton' onClick={() => {
 
@@ -2175,7 +2195,7 @@ class Title extends React.Component {
             this.props.com.current.logData()
           }
           // this.props.initPressCtx()
-        }}>打印曲线</Button> : null}
+        }}>{t('display.printCurve')}</Button> : null}
 
 
 
@@ -2189,7 +2209,7 @@ class Title extends React.Component {
             if (flag) {
               this.props.track.current?.canvasInit()
             }
-          }}>{!this.props.centerFlag ? '重心' : '隐藏'}</Button> : null}
+          }}>{!this.props.centerFlag ? t('display.centerOfPressure') : t('display.hide')}</Button> : null}
         {this.props.matrixName === 'bed4096' && this.props.local ? (
           <>
             <Button
@@ -2197,41 +2217,44 @@ class Title extends React.Component {
               disabled={!this.state.dataTime || this.state.pdfLoading}
               loading={this.state.pdfLoading}
               onClick={this.openOneStepPdfModal}
-            >导出PDF</Button>
+            >{t('report.exportPdf')}</Button>
             <Modal
-              title='填写报告信息'
+              title={t('report.formTitle')}
               open={this.state.pdfModalOpen}
               confirmLoading={this.state.pdfLoading}
-              okText='生成报告'
-              cancelText='取消'
+              okText={t('report.generate')}
+              cancelText={t('common.cancel')}
               onOk={this.generateOneStepPdfReport}
               onCancel={() => this.setState({ pdfModalOpen: false })}
               destroyOnClose
             >
               <Space direction='vertical' style={{ width: '100%' }} size={12}>
                 <div>
-                  <div style={{ marginBottom: 4 }}>姓名</div>
+                  <div style={{ marginBottom: 4 }}>{t('report.name')}</div>
                   <Input
-                    placeholder='请输入姓名'
+                    placeholder={t('report.namePlaceholder')}
                     value={this.state.realname}
                     onChange={(e) => this.setState({ realname: e.target.value })}
                   />
                 </div>
                 <div>
-                  <div style={{ marginBottom: 4 }}>年龄</div>
+                  <div style={{ marginBottom: 4 }}>{t('report.age')}</div>
                   <Input
-                    placeholder='请输入年龄'
+                    placeholder={t('report.agePlaceholder')}
                     value={this.state.collectAge}
                     onChange={(e) => this.setState({ collectAge: e.target.value })}
                   />
                 </div>
                 <div>
-                  <div style={{ marginBottom: 4 }}>性别</div>
+                  <div style={{ marginBottom: 4 }}>{t('report.gender')}</div>
                   <Select
                     style={{ width: '100%' }}
                     value={this.state.collectGender}
                     onChange={(e) => this.setState({ collectGender: e })}
-                    options={[{ label: '男', value: '男' }, { label: '女', value: '女' }]}
+                    options={[
+                      { label: t('common.male'), value: '男' },
+                      { label: t('common.female'), value: '女' },
+                    ]}
                   />
                 </div>
               </Space>
@@ -2261,16 +2284,16 @@ class Title extends React.Component {
           }}
 
           options={[
-            { value: 'finger', label: '中指' },
-            { value: 'palm', label: '手掌' },
-            { value: 'hand', label: '全手' },
+            { value: 'finger', label: t('display.middleFinger') },
+            { value: 'palm', label: t('display.palm') },
+            { value: 'hand', label: t('display.wholeHand') },
           ]}
         ></Select> : ''
       }
 
-      {this.renderCsvDownloadModal()}
+      {this.renderCsvDownloadModal(t)}
       {this.renderCollectionModal(t)}
-      {this.renderSmallBed12BDisplaySettings()}
+      {this.renderSmallBed12BDisplaySettings(t)}
 
       <div style={{ position: 'relative', flexShrink: 0 }}>
         <img onClick={() => {

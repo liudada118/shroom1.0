@@ -12,6 +12,7 @@
 
 import React, { useEffect, useState } from "react";
 import { Modal, Button, Timeline, Tag } from "antd";
+import { useTranslation } from "react-i18next";
 import {
   HistoryOutlined,
   RocketOutlined,
@@ -23,54 +24,55 @@ const VERSION_HISTORY = [
   {
     version: "1.1.9",
     date: "2026-03-25",
-    changes: ["增加32*32高速测试功能"],
+    changeKeys: ["update.historyChanges.highSpeedTest"],
   },
   {
     version: "1.1.8",
     date: "2026-03-24",
-    changes: ["取消32*32线序和算法"],
+    changeKeys: ["update.historyChanges.removeLineOrderAlgorithm"],
   },
   {
     version: "1.1.7",
     date: "2026-03-24",
-    changes: [
-      "优化数据回放切换问题",
-      "降低图表和数据渲染帧率",
-      "修复机器人原始数据展示",
+    changeKeys: [
+      "update.historyChanges.playbackSwitch",
+      "update.historyChanges.lowerRenderRate",
+      "update.historyChanges.robotRawData",
     ],
   },
   {
     version: "1.1.6",
     date: "2026-03-23",
-    changes: ["图表渲染改为使用原始数据"],
+    changeKeys: ["update.historyChanges.chartsUseRawData"],
   },
   {
     version: "1.1.5",
     date: "2026-03-23",
-    changes: ["图表渲染使用原始数据"],
+    changeKeys: ["update.historyChanges.chartsUseRawDataLegacy"],
   },
   {
     version: "1.1.3",
     date: "2026-03-22",
-    changes: ["稳定版"],
+    changeKeys: ["update.historyChanges.stable"],
   },
   {
     version: "1.1.2",
     date: "2026-03-22",
-    changes: ["修改 title 类型"],
+    changeKeys: ["update.historyChanges.titleType"],
   },
   {
     version: "1.1.1",
     date: "2026-03-18",
-    changes: [
-      "Windows 安装包现在内置 Python runtime，目标机器不再要求预装 Python",
-      "应用内更新弹窗会显示本版本更新说明，用户能直接看到更新内容",
-      "修复 Windows 打包链路里的资源同步问题，降低因环境差异导致的更新失败风险",
+    changeKeys: [
+      "update.historyChanges.bundledPython",
+      "update.historyChanges.releaseNotesInApp",
+      "update.historyChanges.buildResources",
     ],
   },
 ];
 
 export default function VersionHistory() {
+  const { t } = useTranslation();
   const [showModal, setShowModal] = useState(false);
   const [currentVersion, setCurrentVersion] = useState("");
 
@@ -94,7 +96,7 @@ export default function VersionHistory() {
         size="small"
         icon={<HistoryOutlined />}
         onClick={() => setShowModal(true)}
-        title="版本历史"
+        title={t("update.history")}
         style={{
           backgroundColor: "#722ed1",
           borderColor: "transparent",
@@ -106,13 +108,13 @@ export default function VersionHistory() {
         title={
           <span>
             <HistoryOutlined style={{ marginRight: 8 }} />
-            版本历史
+            {t("update.history")}
           </span>
         }
         open={showModal}
         onCancel={() => setShowModal(false)}
         footer={
-          <Button onClick={() => setShowModal(false)}>关闭</Button>
+          <Button onClick={() => setShowModal(false)}>{t("common.close")}</Button>
         }
         width={520}
       >
@@ -132,7 +134,7 @@ export default function VersionHistory() {
               }}
             >
               <div>
-                <div style={{ fontSize: 14, opacity: 0.85 }}>当前版本</div>
+                <div style={{ fontSize: 14, opacity: 0.85 }}>{t("update.currentVersion")}</div>
                 <div style={{ fontSize: 22, fontWeight: "bold" }}>
                   v{currentVersion}
                 </div>
@@ -167,7 +169,7 @@ export default function VersionHistory() {
                       </span>
                       {currentVersion === item.version && (
                         <Tag color="green" style={{ margin: 0 }}>
-                          当前
+                          {t("common.current")}
                         </Tag>
                       )}
                       <span style={{ color: "#999", fontSize: 12 }}>
@@ -182,8 +184,8 @@ export default function VersionHistory() {
                         lineHeight: 1.8,
                       }}
                     >
-                      {item.changes.map((change, i) => (
-                        <li key={i}>{change}</li>
+                      {item.changeKeys.map((changeKey) => (
+                        <li key={changeKey}>{t(changeKey)}</li>
                       ))}
                     </ul>
                   </div>

@@ -61,6 +61,7 @@ import reset from "../../assets/images/reset.png";
 import frontView from "../../assets/images/frontView.svg";
 import load from "../../assets/images/load.png";
 import enUS from 'antd/locale/en_US';
+import jaJP from 'antd/locale/ja_JP';
 import zhCN from 'antd/locale/zh_CN';
 import refresh from "../../assets/images/refresh.png";
 import { useNavigate } from 'react-router-dom'
@@ -97,8 +98,13 @@ import {
 } from "./util";
 
 import { withTranslation } from "react-i18next";
+import { getLanguageLocale, normalizeLanguage } from '../../i18n';
+import { translateBackendMessage } from '../../i18n/translateBackendMessage';
+import { translateDomainLabel } from '../../i18n/translateDomainLabel';
 import { chestLine, flLine, frLine, genWebglData, handSkinChange, heatMapMax, hlLine, hrLine, robot0401 } from "./robotUtil";
 import { WebGLCanvas } from "../../components/webgl/WebGL.HeatMap copy 2";
+
+const ANT_DESIGN_LOCALES = Object.freeze({ zh: zhCN, en: enUS, ja: jaJP });
 
 const FULL_PACKET_GLOVE_MATRIX = 'handGloveFullPacket'
 const HAND_0205_DOUBLE_MATRIX = 'hand0205Double'
@@ -112,6 +118,19 @@ const normalizeDisplayMatrixName = (matrixName) =>
   HIDDEN_DISPLAY_MATRIX_TYPES.includes(matrixName) ? 'hand0205' : matrixName
 const filterVisibleDisplayMatrixTypes = (types) =>
   types.filter((type) => !HIDDEN_DISPLAY_MATRIX_TYPES.includes(type))
+const resolveBackendDisplayMatrixName = (activeSensorType, allowedTypes, currentMatrixName) => {
+  const backendMatrixName = normalizeDisplayMatrixName(activeSensorType)
+  const normalizedCurrentMatrixName = normalizeDisplayMatrixName(currentMatrixName)
+  const hasRestrictedTypes = Array.isArray(allowedTypes) && allowedTypes.length > 0
+
+  if (backendMatrixName && (!hasRestrictedTypes || allowedTypes.includes(backendMatrixName))) {
+    return backendMatrixName
+  }
+  if (!hasRestrictedTypes || allowedTypes.includes(normalizedCurrentMatrixName)) {
+    return normalizedCurrentMatrixName
+  }
+  return allowedTypes[0] || normalizedCurrentMatrixName
+}
 const tactileGloveTypes = ['hand0205', 'handGlove115200', FULL_PACKET_GLOVE_MATRIX]
 const isTactileGloveMappedLength = (matrixName, length) => {
   return length === 147 || (matrixName === 'handGloveFullPacket' && length === 195)
@@ -200,19 +219,19 @@ let newArr = new Array(5).fill(0)
 let rightHandNewArr = new Array(5).fill(0)
 let controlFlag = true;
 const controlArr = [
-  { name: "座椅向前", info: "座椅向前" },
-  { name: "靠背向后", info: "靠背向后" },
-  { name: "靠背向前", info: "靠背向前" },
-  { name: "靠背气囊充气", info: "靠背气囊充气" },
-  { name: "靠背气囊放气", info: "靠背气囊放气" },
-  { name: "坐垫向下移动", info: "坐垫向下移动腿部气囊放气" },
-  { name: "腿部气囊放气", info: "坐垫向下移动腿部气囊放气" },
-  { name: "坐垫向上移动", info: "坐垫向上移动腿部气囊充气" },
-  { name: "腿部气囊充气", info: "坐垫向上移动腿部气囊充气" },
-  { name: "侧翼右侧气囊充气", info: "侧翼右侧气囊充气" },
-  { name: "侧翼左侧气囊充气", info: "侧翼左侧气囊充气" },
-  { name: "侧翼右侧气囊放气", info: "侧翼右侧气囊放气" },
-  { name: "侧翼左侧气囊放气", info: "侧翼左侧气囊放气" },
+  { labelKey: 'home.seatControls.seatForward', info: "座椅向前" },
+  { labelKey: 'home.seatControls.backrestBackward', info: "靠背向后" },
+  { labelKey: 'home.seatControls.backrestForward', info: "靠背向前" },
+  { labelKey: 'home.seatControls.backrestInflate', info: "靠背气囊充气" },
+  { labelKey: 'home.seatControls.backrestDeflate', info: "靠背气囊放气" },
+  { labelKey: 'home.seatControls.cushionDown', info: "坐垫向下移动腿部气囊放气" },
+  { labelKey: 'home.seatControls.legDeflate', info: "坐垫向下移动腿部气囊放气" },
+  { labelKey: 'home.seatControls.cushionUp', info: "坐垫向上移动腿部气囊充气" },
+  { labelKey: 'home.seatControls.legInflate', info: "坐垫向上移动腿部气囊充气" },
+  { labelKey: 'home.seatControls.rightBolsterInflate', info: "侧翼右侧气囊充气" },
+  { labelKey: 'home.seatControls.leftBolsterInflate', info: "侧翼左侧气囊充气" },
+  { labelKey: 'home.seatControls.rightBolsterDeflate', info: "侧翼右侧气囊放气" },
+  { labelKey: 'home.seatControls.leftBolsterDeflate', info: "侧翼左侧气囊放气" },
 ];
 
 let collection = JSON.parse(localStorage.getItem("collection"))
@@ -337,17 +356,6 @@ let num = 0,
   canvasWidth = 300;
 
 
-const content3 = (
-  <div>
-    <p>刷新轨迹图</p>
-  </div>
-);
-
-const content4 = (
-  <div>
-    <p>下载轨迹图</p>
-  </div>
-);
 let ctxbig,
   ctxsit,
   ctxback,
@@ -699,47 +707,17 @@ var backFlag, hz = 12, sitFlag, realHzFrameCount = 0, realHzLastTime = Date.now(
   fingerArrR = readFingerCalibration('fingerArrR'),
   fingerArr = fingerArrL; // 默认指向左手，兼容旧逻辑
 
-// jqbed 健康监测语音播报
-const speechDict = {
-  "已离床": {
-    zh: "已离床",
-    en: "Left the bed",
-    ja: "ベッドから離れました"
-  },
-  "坠床风险": {
-    zh: "坠床风险",
-    en: "Risk of falling from bed",
-    ja: "ベッドから転落の危険があります"
-  },
-  "已坐起": {
-    zh: "已坐起",
-    en: "Sat up",
-    ja: "起き上がりました"
-  },
-  "SOS紧急求助": {
-    zh: "S O S 紧急求助",
-    en: "S O S Emergency Help",
-    ja: "S O S 緊急ヘルプ"
-  }
-};
-
-function speakMessage(key, lang = "zh") {
-
-
-  if (!speechDict[key] || !speechDict[key][lang]) {
-    console.warn("未找到对应翻译:", key, lang);
-    return;
-  }
-  const text = speechDict[key][lang];
+// jqbed health-monitoring voice alert.
+function speakMessage(text, lang = "zh") {
+  if (!text) return;
+  const normalizedLanguage = normalizeLanguage(lang);
   const utter = new SpeechSynthesisUtterance(text);
 
 
 
 
   // 设置语言
-  if (lang === "zh") utter.lang = "zh-CN";   // 中文
-  if (lang === "en") utter.lang = "en-US";   // 英文
-  if (lang === "ja") utter.lang = "ja-JP";   // 日文
+  utter.lang = getLanguageLocale(normalizedLanguage);
 
 
   // 优先选择女声 voice
@@ -1393,7 +1371,7 @@ class Home extends React.Component {
 
     if (jsonObject.collectionStorageError != null) {
       const errorInfo = jsonObject.collectionStorageError || {};
-      const text = errorInfo.message || '数据库空间不足，已停止采集';
+      const text = errorInfo.message || this.props.t('home.databaseFull');
       if (this.props.messageApi) {
         this.props.messageApi.error(text, 6);
       } else {
@@ -1440,14 +1418,14 @@ class Home extends React.Component {
           portnameBack: result.portnameBack || '',
           hand: true,
         });
-        const text = result.message || '触觉手套2 已连接左右手套';
+        const text = result.message || this.props.t('home.glovesConnected');
         if (this.props.messageApi) {
           this.props.messageApi.success(text);
         } else {
           message.success(text);
         }
       } else {
-        const text = result.message || '触觉手套2 自动连接失败';
+        const text = result.message || this.props.t('home.glovesConnectFailed');
         if (this.props.messageApi) {
           this.props.messageApi.error(text);
         } else {
@@ -1564,7 +1542,8 @@ class Home extends React.Component {
     if (jsonObject.licenseLocked) {
       this.setState({
         licenseLockedVisible: true,
-        licenseLockReason: jsonObject.reason || '检测到异常行为',
+        licenseLockReason: translateBackendMessage(jsonObject.reason, this.props.t)
+          || this.props.t('license.anomalyDetected'),
       });
     }
 
@@ -1574,8 +1553,8 @@ class Home extends React.Component {
       // 无有效密钥时跳转到密钥输入页
       if (jsonObject.noLicense) {
         Modal.error({
-          title: '密钥错误',
-          content: jsonObject.licenseError,
+          title: this.props.t('license.errorTitle'),
+          content: translateBackendMessage(jsonObject.licenseError, this.props.t),
           onOk: () => {
             window.location.hash = '#/?from=system';
           }
@@ -1585,9 +1564,12 @@ class Home extends React.Component {
         //（后台续期或恢复后无需重启即时生效）。用单例避免每次轮询重复弹窗。
         if (!this._licenseModal) {
           this._licenseModal = Modal.confirm({
-            title: '授权提示',
-            content: (jsonObject.licenseError || '授权校验未通过') + '。如已在后台续期或恢复，请点击“重新获取授权”。',
-            okText: '重新获取授权',
+            title: this.props.t('license.statusPrompt'),
+            content: this.props.t('license.refreshInstruction', {
+              reason: translateBackendMessage(jsonObject.licenseError, this.props.t)
+                || this.props.t('license.validationFailed'),
+            }),
+            okText: this.props.t('license.refreshAuthorization'),
             keyboard: false,                                   // 禁 ESC 关闭
             maskClosable: false,                               // 点遮罩不关
             cancelButtonProps: { style: { display: 'none' } }, // 隐藏“关闭”：暂停/吊销/过期时不允许关掉继续用
@@ -1606,7 +1588,9 @@ class Home extends React.Component {
       const serverNow = jsonObject.nowDate ? parseFloat(jsonObject.nowDate) : Date.now();
       const remainMs = endDate - serverNow;
       const remainDays = Math.ceil(remainMs / 86400000);
-      const expireDateStr = new Date(endDate).toLocaleString();
+      const expireDateStr = new Date(endDate).toLocaleString(
+        getLanguageLocale(this.props.i18n.language)
+      );
       console.log('[密钥检查] endDate:', endDate, 'serverNow:', serverNow, 'remainMs:', remainMs, 'remainDays:', remainDays);
 
       if (remainMs <= 0) {
@@ -1672,7 +1656,27 @@ class Home extends React.Component {
       localStorage.setItem('matrixTitle', true)
       if (jsonObject.selectFlag === 'all') {
         localStorage.removeItem('allowedTypes')
-        this.setState({ matrixTitle: true, allowedTypes: null })
+        const nextMatrixName = resolveBackendDisplayMatrixName(
+          jsonObject.activeSensorType,
+          null,
+          this.state.matrixName
+        )
+        const nextState = { matrixTitle: true, allowedTypes: null }
+        if (nextMatrixName !== this.state.matrixName) {
+          const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag)
+          Object.assign(nextState, {
+            matrixName: nextMatrixName,
+            numMatrixFlag: nextMode,
+            minzhenSensorInfo: {},
+            portname: '',
+            portnameBack: '',
+            portnameHead: '',
+            portnameSensor: '',
+            ...getConfig({ sensorType: nextMatrixName, mode: nextMode }),
+          })
+          localStorage.setItem('file', nextMatrixName)
+        }
+        this.setState(nextState)
       } else {
         const allowedTypesRaw = Array.isArray(jsonObject.selectFlag)
           ? jsonObject.selectFlag
@@ -1680,18 +1684,29 @@ class Home extends React.Component {
         const allowedTypes = filterVisibleDisplayMatrixTypes(allowedTypesRaw)
         localStorage.setItem('allowedTypes', JSON.stringify(allowedTypes))
         const nextState = { matrixTitle: true, allowedTypes }
-        const currentMatrixName = normalizeDisplayMatrixName(this.state.matrixName)
-        if (currentMatrixName !== this.state.matrixName || (allowedTypes.length && !allowedTypes.includes(this.state.matrixName))) {
-          const nextMatrixName = allowedTypes[0] || currentMatrixName
+        const nextMatrixName = resolveBackendDisplayMatrixName(
+          jsonObject.activeSensorType,
+          allowedTypes,
+          this.state.matrixName
+        )
+        if (nextMatrixName !== this.state.matrixName) {
           const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag)
           Object.assign(nextState, {
             matrixName: nextMatrixName,
             numMatrixFlag: nextMode,
             minzhenSensorInfo: {},
+            portname: '',
+            portnameBack: '',
+            portnameHead: '',
+            portnameSensor: '',
             ...getConfig({ sensorType: nextMatrixName, mode: nextMode }),
           })
           localStorage.setItem('file', nextMatrixName)
-          this.wsSendObj({ file: nextMatrixName })
+
+          const backendMatrixName = normalizeDisplayMatrixName(jsonObject.activeSensorType)
+          if (!backendMatrixName || backendMatrixName !== nextMatrixName) {
+            this.wsSendObj({ file: nextMatrixName })
+          }
         }
         this.setState(nextState)
       }
@@ -1734,7 +1749,7 @@ class Home extends React.Component {
         //   msg.lang = "en-US"; // 设定语言
         //   speechSynthesis.speak(msg);
         // }
-        speakMessage("已离床", this.props.i18n.language)
+        speakMessage(this.props.t('home.alerts.leftBed'), this.props.i18n.language)
 
 
       }
@@ -1744,7 +1759,7 @@ class Home extends React.Component {
         // const msg = new SpeechSynthesisUtterance("坠床风险");
         // msg.lang = "zh-CN"; // 设定语言
         // speechSynthesis.speak(msg);
-        speakMessage("坠床风险", this.props.i18n.language)
+        speakMessage(this.props.t('home.alerts.fallRisk'), this.props.i18n.language)
       }
 
 
@@ -1752,7 +1767,7 @@ class Home extends React.Component {
         // const msg = new SpeechSynthesisUtterance("已坐起");
         // msg.lang = "zh-CN"; // 设定语言
         // speechSynthesis.speak(msg);
-        speakMessage("已坐起", this.props.i18n.language)
+        speakMessage(this.props.t('home.alerts.satUp'), this.props.i18n.language)
       }
 
 
@@ -1762,7 +1777,7 @@ class Home extends React.Component {
         // const msg = new SpeechSynthesisUtterance("SOS紧急求助");
         // msg.lang = "zh-CN"; // 设定语言
         // speechSynthesis.speak(msg);
-        speakMessage("SOS紧急求助", this.props.i18n.language)
+        speakMessage(this.props.t('home.alerts.emergency'), this.props.i18n.language)
       }
     }
 
@@ -2329,7 +2344,7 @@ class Home extends React.Component {
       arr.forEach((a, index) => {
         obj.push({
           value: a.info || a.date,
-          label: a.name || a.date,
+          label: translateDomainLabel(a.name || a.date, this.props.t),
         });
       });
 
@@ -2813,7 +2828,7 @@ class Home extends React.Component {
       arr.forEach((a, index) => {
         obj.push({
           value: a.info,
-          label: a.name,
+          label: translateDomainLabel(a.name, this.props.t),
         });
       });
       this.setState({ dataArr: obj });
@@ -3532,6 +3547,7 @@ class Home extends React.Component {
     // rotateY: "绕y轴旋转30°",
     // selectBox: "框选一个矩形区域"
     const { t, i18n } = this.props;
+    const antdLocale = ANT_DESIGN_LOCALES[normalizeLanguage(i18n.language)];
 
     const text = t('rotate');
     const text2 = t('boxSelection');
@@ -3563,7 +3579,7 @@ class Home extends React.Component {
       ? rainbowTextColorsxy.slice(0, rainbowTextColorsxy.length - 7) //rainbowTextColors 
       : rainbowTextColorsxy.slice(0, rainbowTextColorsxy.length - 7)
     return (
-      <ConfigProvider locale={this.state.locale}>
+      <ConfigProvider locale={antdLocale}>
         <div className="home">
           {this.state.matrixName != "robot0428" ? <div className="setIcons">
             <div className="setIconItem setIconItem1">
@@ -3779,7 +3795,11 @@ class Home extends React.Component {
 
             </div>
             {this.state.matrixName == "foot" ? (
-              <Popover placement="top" title={"刷新"} content={content3}>
+              <Popover
+                placement="top"
+                title={t('common.refresh')}
+                content={<div><p>{t('home.refreshTrack')}</p></div>}
+              >
                 <div className="setIconItem setIconItem2">
                   <div className="setIcon">
                     <img
@@ -3796,7 +3816,11 @@ class Home extends React.Component {
 
             <div className="setIconItem setIconItem2">
               {this.state.matrixName == "foot" ? (
-                <Popover placement="top" title={"下载"} content={content4}>
+                <Popover
+                  placement="top"
+                  title={t('download')}
+                  content={<div><p>{t('home.downloadTrack')}</p></div>}
+                >
                   <div
                     className="setIcon marginB10"
                     onClick={() => {
@@ -4919,6 +4943,7 @@ class Home extends React.Component {
                 // console.log(this.searchName(this.state.control, a.info))
                 return (
                   <p
+                    key={a.labelKey}
                     style={{
                       color: this.state.control.includes(a.info)
                         ? "#0cf862"
@@ -4927,17 +4952,17 @@ class Home extends React.Component {
                       transition: 'color 0.5s ease'
                     }}
                   >
-                    {a.name}
+                    {t(a.labelKey)}
                   </p>
                 );
               })}
-              <p>hunch : {this.state.hunch}</p>
-              <p>front : {this.state.front}</p>
-              <p>flank : {this.state.flank}</p>
-              <p>sitValue : {this.state.pressToArea}</p>
+              <p>{t('home.debug.hunch')}: {this.state.hunch}</p>
+              <p>{t('home.debug.front')}: {this.state.front}</p>
+              <p>{t('home.debug.flank')}: {this.state.flank}</p>
+              <p>{t('home.debug.seatValue')}: {this.state.pressToArea}</p>
               {/* wsPointData.filter(a => a > 40).length > 45 ? 2 : wsPointData.filter(a => a > 40).length <10  ? 0 : 1 */}
-              <p>体型类型 : {this.state.newValue > 45 ? 2 : this.state.newValue < 10 ? 0 : 1} -- {this.state.newValue}</p>
-              <p>backtime : {this.state.backTime}</p>
+              <p>{t('home.bodyType')} {this.state.newValue > 45 ? 2 : this.state.newValue < 10 ? 0 : 1} -- {this.state.newValue}</p>
+              <p>{t('home.debug.backTime')}: {this.state.backTime}</p>
 
             </div>
           ) : null}
@@ -5026,7 +5051,7 @@ class Home extends React.Component {
               }
             }}
             onCancel={() => this.setState({ licenseModalVisible: false })}
-            okText={this.state.licenseModalType === 'expired' ? '去输入密钥' : '我知道了'}
+            okText={this.state.licenseModalType === 'expired' ? t('license.goEnterKey') : t('license.acknowledge')}
             cancelButtonProps={{ style: { display: this.state.licenseModalType === 'expired' ? 'none' : 'none' } }}
             centered
             width={480}
@@ -5035,21 +5060,21 @@ class Home extends React.Component {
             className={this.state.licenseModalType === 'expired' ? 'license-expired-modal' : 'license-warning-modal'}
             title={
               <span>
-                {this.state.licenseModalType === 'expired' ? '⚠ 密钥已过期' : '⚠ 密钥即将过期'}
+                {this.state.licenseModalType === 'expired' ? t('license.expiredHeading') : t('license.expiringHeading')}
               </span>
             }
           >
             {this.state.licenseModalType === 'expired' ? (
               <div>
-                <p>您的授权密钥已于 <strong className="expire-date">{this.state.licenseModalExpireDate}</strong> 过期。</p>
-                <p>串口连接、数据采集等功能已被禁用。</p>
-                <p className="hint">请联系管理员获取新的授权密钥，点击下方按钮跳转到密钥输入页面。</p>
+                <p>{t('license.expiredAt', { date: this.state.licenseModalExpireDate })}</p>
+                <p>{t('license.featuresDisabled')}</p>
+                <p className="hint">{t('license.obtainNewKey')}</p>
               </div>
             ) : (
               <div>
-                <p>您的授权密钥将于 <strong className="expire-date">{this.state.licenseModalExpireDate}</strong> 过期。</p>
-                <p>剩余有效期：<strong className="remain-days">{this.state.licenseModalRemainDays} 天</strong></p>
-                <p className="hint">请尽快联系管理员续期，以免影响正常使用。</p>
+                <p>{t('license.expiresAt', { date: this.state.licenseModalExpireDate })}</p>
+                <p>{t('license.remaining', { days: this.state.licenseModalRemainDays })}</p>
+                <p className="hint">{t('license.renewSoon')}</p>
               </div>
             )}
           </Modal>
@@ -5062,18 +5087,18 @@ class Home extends React.Component {
             closable={false}
             maskClosable={false}
             keyboard={false}
-            okText="确定"
+            okText={t('common.confirm')}
             cancelButtonProps={{ style: { display: 'none' } }}
             className="license-expired-modal"
-            title={<span>🔒 授权异常</span>}
+            title={<span>{t('license.anomaly')}</span>}
             onOk={() => {
               this.setState({ licenseLockedVisible: false });
               window.location.hash = '#/?from=system';
             }}
           >
             <div>
-              <p>{this.state.licenseLockReason || '检测到异常行为'}。</p>
-              <p className="hint">串口连接、数据采集等功能已被禁用。请联系厂商重新获取密钥，点击「确定」前往密钥输入页写入新密钥。</p>
+              <p>{this.state.licenseLockReason || t('license.anomalyDetected')}</p>
+              <p className="hint">{t('license.anomalyAction')}</p>
             </div>
           </Modal>
 

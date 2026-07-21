@@ -1,17 +1,24 @@
 import React, { useState } from 'react';
 import { message } from 'antd';
 import { CloseOutlined, CommentOutlined, RightOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
 import { LICENSE_SERVER_BASE_URL } from '../../constants';
 
-const FEEDBACK_TYPES = ['功能建议', '问题反馈', '商务合作', '其他'];
+const FEEDBACK_TYPES = [
+  { value: '功能建议', labelKey: 'feedback.types.feature' },
+  { value: '问题反馈', labelKey: 'feedback.types.issue' },
+  { value: '商务合作', labelKey: 'feedback.types.business' },
+  { value: '其他', labelKey: 'feedback.types.other' },
+];
 
 /**
  * 反馈浮窗：提交到授权后台（密钥管理系统）的 /feedback 接口。
  * - accessKey / activeSolution：作为上下文一并提交，便于后台定位来源。
  */
 export const FeedbackWidget = ({ accessKey = '', activeSolution = '' }) => {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const [feedbackType, setFeedbackType] = useState(FEEDBACK_TYPES[0]);
+  const [feedbackType, setFeedbackType] = useState(FEEDBACK_TYPES[0].value);
   const [content, setContent] = useState('');
   const [contact, setContact] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -26,7 +33,7 @@ export const FeedbackWidget = ({ accessKey = '', activeSolution = '' }) => {
   const handleSubmit = async () => {
     const trimmed = content.trim();
     if (!trimmed) {
-      message.warning('请填写反馈内容');
+      message.warning(t('feedback.required'));
       return;
     }
     if (submitting) return;
@@ -63,11 +70,11 @@ export const FeedbackWidget = ({ accessKey = '', activeSolution = '' }) => {
         throw new Error(data.error || '提交失败');
       }
 
-      message.success('反馈已提交，感谢你的建议');
+      message.success(t('feedback.success'));
       resetAndClose();
     } catch (error) {
       console.error('提交反馈失败:', error);
-      message.error('反馈提交失败，请稍后重试或检查网络');
+      message.error(t('feedback.failed'));
       setSubmitting(false);
     }
   };
@@ -77,54 +84,54 @@ export const FeedbackWidget = ({ accessKey = '', activeSolution = '' }) => {
       {open ? (
         <>
           <div className="portal-feedback-mask" onClick={() => !submitting && setOpen(false)} />
-          <aside className="portal-feedback-modal" role="dialog" aria-modal="false" aria-label="提交反馈">
+          <aside className="portal-feedback-modal" role="dialog" aria-modal="false" aria-label={t('feedback.title')}>
             <button
               className="portal-feedback-close"
               type="button"
               onClick={() => !submitting && setOpen(false)}
-              aria-label="关闭反馈"
+              aria-label={t('feedback.close')}
             >
               <CloseOutlined />
             </button>
-            <h3>提交反馈</h3>
+            <h3>{t('feedback.title')}</h3>
 
-            <label className="portal-feedback-label">反馈类型</label>
+            <label className="portal-feedback-label">{t('feedback.type')}</label>
             <div className="portal-feedback-types">
               {FEEDBACK_TYPES.map((type) => (
                 <button
-                  className={type === feedbackType ? 'is-active' : ''}
-                  key={type}
+                  className={type.value === feedbackType ? 'is-active' : ''}
+                  key={type.value}
                   type="button"
-                  onClick={() => setFeedbackType(type)}
+                  onClick={() => setFeedbackType(type.value)}
                 >
-                  {type}
+                  {t(type.labelKey)}
                 </button>
               ))}
             </div>
 
             <label className="portal-feedback-label" htmlFor="portal-feedback-content">
-              反馈内容
+              {t('feedback.content')}
             </label>
             <div className="portal-feedback-textarea">
               <textarea
                 id="portal-feedback-content"
                 maxLength={500}
                 onChange={(event) => setContent(event.target.value)}
-                placeholder="请详细描述您的建议或问题..."
+                placeholder={t('feedback.contentPlaceholder')}
                 value={content}
               />
               <span>{content.length}/500</span>
             </div>
 
             <label className="portal-feedback-label" htmlFor="portal-feedback-contact">
-              联系方式（选填）
+              {t('feedback.contact')}
             </label>
             <input
               className="portal-feedback-input"
               id="portal-feedback-contact"
               maxLength={120}
               onChange={(event) => setContact(event.target.value)}
-              placeholder="邮箱 / 手机号 / 微信号"
+              placeholder={t('feedback.contactPlaceholder')}
               type="text"
               value={contact}
             />
@@ -135,15 +142,21 @@ export const FeedbackWidget = ({ accessKey = '', activeSolution = '' }) => {
               onClick={handleSubmit}
               disabled={submitting}
             >
-              {submitting ? '提交中…' : '提交反馈'}
+              {submitting ? t('feedback.submitting') : t('feedback.submit')}
             </button>
           </aside>
         </>
       ) : null}
 
-      <button className="portal-feedback-trigger" type="button" onClick={() => setOpen(true)}>
+      <button
+        aria-label={t('feedback.trigger')}
+        className="portal-feedback-trigger"
+        title={t('feedback.trigger')}
+        type="button"
+        onClick={() => setOpen(true)}
+      >
         <CommentOutlined />
-        <strong>反馈</strong>
+        <strong>{t('feedback.trigger')}</strong>
         <RightOutlined />
       </button>
     </>

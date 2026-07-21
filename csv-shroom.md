@@ -153,23 +153,23 @@ CSV 导出会尽量与前端展示方向保持一致。
 
 ## 8. 字段计算逻辑
 
-本项目 CSV 字段主要来自 `server.js` 中各导出分支构造的 `newData` 对象，再由 `csv-writer` 根据 header 写入文件。中文界面下载时使用中文表头，英文界面下载时保留旧版英文简写表头；字段 id 和计算逻辑不变。不同系统字段不完全一致，但核心字段逻辑如下。
+本项目 CSV 字段主要来自 `server.js` 中各导出分支构造的 `newData` 对象，再由 `csv-writer` 根据 header 写入文件。中文界面下载时使用中文表头，英文界面下载时保留旧版英文简写表头，日文界面下载时使用日文表头；字段 id 和计算逻辑不变。不同系统字段不完全一致，但核心字段逻辑如下。
 
 ### 表头语言
 
-| 字段 id | 中文表头 | 英文表头 |
-| :--- | :--- | :--- |
-| `index` | `秒数` | `seconds` |
-| `max` | `矩阵最大值` | `max` |
-| `time` | `时间戳` | `time` |
-| `pressureArea` | `矩阵大于 0 的点数` | `area` |
-| `pressure` | `矩阵总和` | `press` |
-| `realData` | `矩阵数据` | `data` |
-| `rotate` | `四元数` | `quaternion` |
-| `temperatureData` | `温度` | `temperatureCelsius` |
-| `temperatureAvg` | `平均温度` | `temperatureAvg` |
-| `temperatureK` | `温度K值` | `temperatureK` |
-| `zeroFrame` | `清零帧` | `zeroFrame` |
+| 字段 id | 中文表头 | 英文表头 | 日文表头 |
+| :--- | :--- | :--- | :--- |
+| `index` | `秒数` | `seconds` | `秒数` |
+| `max` | `矩阵最大值` | `max` | `最大値` |
+| `time` | `时间戳` | `time` | `タイムスタンプ` |
+| `pressureArea` | `矩阵大于 0 的点数` | `area` | `0より大きいポイント数` |
+| `pressure` | `矩阵总和` | `press` | `圧力合計` |
+| `realData` | `矩阵数据` | `data` | `マトリックスデータ` |
+| `rotate` | `四元数` | `quaternion` | `クォータニオン` |
+| `temperatureData` | `温度` | `temperatureCelsius` | `温度` |
+| `temperatureAvg` | `平均温度` | `temperatureAvg` | `平均温度` |
+| `temperatureK` | `温度K值` | `temperatureK` | `温度K値` |
+| `zeroFrame` | `清零帧` | `zeroFrame` | `ゼロ補正フレーム` |
 
 ### 通用时间字段
 
@@ -364,13 +364,13 @@ seconds, time, max, area, press, data
 
 `Title.jsx` 中的下载进度窗口会根据 `downloadStatus` 展示导出中、导出成功、导出失败、已生成文件列表，并提供打开单个 CSV 文件和打开下载文件夹的入口。
 
-当前中英文文案来自 `client/src/App.jsx`：
+当前中英日文案来自 `client/src/i18n/resources.js` 和 `client/src/i18n/ja.js`：
 
-| key | 中文 |
-| :--- | :--- |
-| `export csv success` | `导出 CSV 成功` |
-| `export csv failed` | `导出 CSV 失败` |
-| `deleteSuccess` | `删除成功` |
+| key | 中文 | 英文 | 日文 |
+| :--- | :--- | :--- | :--- |
+| `export csv success` | `导出 CSV 成功` | `CSV exported successfully` | `CSVが正常にエクスポートされました` |
+| `export csv failed` | `导出 CSV 失败` | `CSV export failed` | `CSVエクスポートに失敗しました` |
+| `deleteSuccess` | `删除成功` | `Deleted successfully` | `正常に削除されました` |
 
 ## 11. 当前项目与通用文档的差异
 

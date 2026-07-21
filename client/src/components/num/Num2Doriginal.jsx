@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback, useImperativeHandle } from 'react'
+import { useTranslation } from 'react-i18next'
 import './num.css'
 import { addSide, findMax } from '../../assets/util/util';
 import { pressData } from '../../assets/util/matrixToPress';
@@ -556,6 +557,7 @@ function getMatrixViewportBounds(widthRatio = MATRIX_WIDTH_RATIO) {
 const ROBOT_LAYOUT_GAP = 2; // 分区间距（格子数）
 
 export const Num2DOriginal = React.forwardRef((props, refs) => {
+    const { t } = useTranslation()
     let width = 32, height = 32
     if (props.matrixName == 'carCol') {
         width = 10
@@ -974,12 +976,12 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             const handR = [177, 162, 146, 130, 178, 161, 145, 129]
 
             processRobotParts(wsPointData, {
-                back: { posArr: back, text: '脑袋', w: 5, h: 5 },
-                handL: { posArr: handL, text: '左臂', w: 4, h: 2 },
-                shoulderL: { posArr: shoulderL, text: '左肩', w: 4, h: 1 },
-                shoulderR: { posArr: shoulderR, text: '右肩', w: 4, h: 1 },
-                handR: { posArr: handR, text: '右臂', w: 4, h: 2 },
-                chest: { posArr: chest, text: '前胸', w: 8, h: 6 },
+                back: { posArr: back, text: t('bodyParts.head'), w: 5, h: 5 },
+                handL: { posArr: handL, text: t('bodyParts.leftArm'), w: 4, h: 2 },
+                shoulderL: { posArr: shoulderL, text: t('bodyParts.leftShoulder'), w: 4, h: 1 },
+                shoulderR: { posArr: shoulderR, text: t('bodyParts.rightShoulder'), w: 4, h: 1 },
+                handR: { posArr: handR, text: t('bodyParts.rightArm'), w: 4, h: 2 },
+                chest: { posArr: chest, text: t('bodyParts.frontChest'), w: 8, h: 6 },
             });
         } else if (props.matrixName == 'robotLCF') {
             layoutData([...wsPointData])
@@ -990,11 +992,11 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             const handR = [177, 162, 146, 130, 178, 161, 145, 129]
 
             processRobotParts(wsPointData, {
-                handL: { posArr: handL, text: '左臂', w: 4, h: 2 },
-                shoulderL: { posArr: shoulderL, text: '左肩', w: 4, h: 1 },
-                shoulderR: { posArr: shoulderR, text: '右肩', w: 4, h: 1 },
-                handR: { posArr: handR, text: '右臂', w: 4, h: 2 },
-                chest: { posArr: chest, text: '前胸', w: 8, h: 12 },
+                handL: { posArr: handL, text: t('bodyParts.leftArm'), w: 4, h: 2 },
+                shoulderL: { posArr: shoulderL, text: t('bodyParts.leftShoulder'), w: 4, h: 1 },
+                shoulderR: { posArr: shoulderR, text: t('bodyParts.rightShoulder'), w: 4, h: 1 },
+                handR: { posArr: handR, text: t('bodyParts.rightArm'), w: 4, h: 2 },
+                chest: { posArr: chest, text: t('bodyParts.frontChest'), w: 8, h: 12 },
             });
         } else if (props.matrixName == 'robot1') {
             layoutData([...wsPointData])
@@ -1007,12 +1009,12 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             const handR = [178, 162, 146, 130, 177, 161, 145, 129]
 
             processRobotParts(wsPointData, {
-                back: { posArr: back, text: '后背', w: 8, h: 5 },
-                handL: { posArr: handL, text: '左臂', w: 4, h: 2 },
-                shoulderL: { posArr: shoulderL, text: '左肩', w: 4, h: 1 },
-                shoulderR: { posArr: shoulderR, text: '右肩', w: 4, h: 1 },
-                handR: { posArr: handR, text: '右臂', w: 4, h: 2 },
-                chest: { posArr: chest, text: '前胸', w: 8, h: 6 },
+                back: { posArr: back, text: t('bodyParts.rearBack'), w: 8, h: 5 },
+                handL: { posArr: handL, text: t('bodyParts.leftArm'), w: 4, h: 2 },
+                shoulderL: { posArr: shoulderL, text: t('bodyParts.leftShoulder'), w: 4, h: 1 },
+                shoulderR: { posArr: shoulderR, text: t('bodyParts.rightShoulder'), w: 4, h: 1 },
+                handR: { posArr: handR, text: t('bodyParts.rightArm'), w: 4, h: 2 },
+                chest: { posArr: chest, text: t('bodyParts.frontChest'), w: 8, h: 6 },
             });
         }
     }
@@ -1146,7 +1148,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     const cs = cellSize;
     const { maxW: containerWidth } = getMatrixViewportBounds(isRobot ? ROBOT_MATRIX_WIDTH_RATIO : MATRIX_WIDTH_RATIO);
     const showDualFoot = footLayout === 'dual';
-    const primaryFootLabel = footLayout === 'single-right' ? '\u53f3\u811a' : '\u5de6\u811a';
+    const primaryFootLabel = footLayout === 'single-right' ? t('bodyParts.rightFoot') : t('bodyParts.leftFoot');
 
     return (
         <div
@@ -1198,7 +1200,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                             ref={overlayCanvasRef2}
                             style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
                         />
-                        <div style={{ textAlign: 'center', marginTop: '4px' }}>右脚</div>
+                        <div style={{ textAlign: 'center', marginTop: '4px' }}>{t('bodyParts.rightFoot')}</div>
                     </div>
                 )}
             </div>

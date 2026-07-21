@@ -1,4 +1,5 @@
 import React, { useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { findMax } from '../../assets/util/util'
 
 const BACK_IDX = [
@@ -100,16 +101,16 @@ const FRONT_PANTS_RIGHT_IDX = [
 ]
 
 const PART_CONFIGS = [
-  { key: 'back', title: '背部', indexMatrix: BACK_IDX },
-  { key: 'chest', title: '胸部', indexMatrix: CHEST_IDX },
-  { key: 'rightArm', title: '右臂', indexMatrix: RIGHT_ARM_IDX },
-  { key: 'rightShoulder', title: '右肩', indexMatrix: RIGHT_SHOULDER_IDX },
-  { key: 'leftArm', title: '左臂', indexMatrix: LEFT_ARM_IDX },
-  { key: 'leftShoulder', title: '左肩', indexMatrix: LEFT_SHOULDER_IDX },
-  { key: 'backPantsRight', title: '后裤右', indexMatrix: BACK_PANTS_RIGHT_IDX },
-  { key: 'backPantsLeft', title: '后裤左', indexMatrix: BACK_PANTS_LEFT_IDX },
-  { key: 'frontPantsLeft', title: '前裤左', indexMatrix: FRONT_PANTS_LEFT_IDX },
-  { key: 'frontPantsRight', title: '前裤右', indexMatrix: FRONT_PANTS_RIGHT_IDX },
+  { key: 'back', titleKey: 'bodyParts.back', indexMatrix: BACK_IDX },
+  { key: 'chest', titleKey: 'bodyParts.chest', indexMatrix: CHEST_IDX },
+  { key: 'rightArm', titleKey: 'bodyParts.rightArm', indexMatrix: RIGHT_ARM_IDX },
+  { key: 'rightShoulder', titleKey: 'bodyParts.rightShoulder', indexMatrix: RIGHT_SHOULDER_IDX },
+  { key: 'leftArm', titleKey: 'bodyParts.leftArm', indexMatrix: LEFT_ARM_IDX },
+  { key: 'leftShoulder', titleKey: 'bodyParts.leftShoulder', indexMatrix: LEFT_SHOULDER_IDX },
+  { key: 'backPantsRight', titleKey: 'bodyParts.backPantsRight', indexMatrix: BACK_PANTS_RIGHT_IDX },
+  { key: 'backPantsLeft', titleKey: 'bodyParts.backPantsLeft', indexMatrix: BACK_PANTS_LEFT_IDX },
+  { key: 'frontPantsLeft', titleKey: 'bodyParts.frontPantsLeft', indexMatrix: FRONT_PANTS_LEFT_IDX },
+  { key: 'frontPantsRight', titleKey: 'bodyParts.frontPantsRight', indexMatrix: FRONT_PANTS_RIGHT_IDX },
 ].map((part) => ({
   ...part,
   width: part.indexMatrix[0].length,
@@ -164,7 +165,7 @@ const getPartValues = (source, part) => {
   return orientPartValues(values, part)
 }
 
-const drawPart = (canvas, part, values) => {
+const drawPart = (canvas, part, values, title) => {
   if (!canvas) return
 
   const cellSize = part.width >= 32 ? 18 : 20
@@ -189,7 +190,7 @@ const drawPart = (canvas, part, values) => {
   ctx.font = 'bold 14px Arial'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillText(`${part.title} ${part.width}x${part.height}`, width / 2, titleHeight / 2)
+  ctx.fillText(`${title} ${part.width}x${part.height}`, width / 2, titleHeight / 2)
 
   const gridTop = titleHeight
   const gridLeft = (width - gridWidth) / 2
@@ -214,6 +215,7 @@ const drawPart = (canvas, part, values) => {
 }
 
 const HumanBodyRawData = React.forwardRef((props, refs) => {
+  const { t } = useTranslation()
   const canvasRefs = useRef({})
   const [sourceData, setSourceData] = useState(() => createDefaultSource())
   const parts = useMemo(() => PART_CONFIGS.reduce((result, part) => {
@@ -247,9 +249,9 @@ const HumanBodyRawData = React.forwardRef((props, refs) => {
 
   useEffect(() => {
     PART_CONFIGS.forEach((part) => {
-      drawPart(canvasRefs.current[part.key], part, parts[part.key] || [])
+      drawPart(canvasRefs.current[part.key], part, parts[part.key] || [], t(part.titleKey))
     })
-  }, [parts])
+  }, [parts, t])
 
   return (
     <div
