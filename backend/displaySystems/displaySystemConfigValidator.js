@@ -1,4 +1,14 @@
-const DISPLAY_SYSTEM_SCHEMA_VERSION = 1;
+const {
+  normalizeProtocolConfig,
+  validateProtocolConfig,
+} = require('./displaySystemProtocol');
+const {
+  normalizeDisplayConfig,
+  validateDisplayConfig,
+} = require('./displaySystemPage');
+
+const DISPLAY_SYSTEM_SCHEMA_VERSION = 2;
+const SUPPORTED_DISPLAY_SYSTEM_SCHEMA_VERSIONS = Object.freeze([1, 2]);
 
 const ALGORITHM_TYPES = Object.freeze({
   NONE: 'none',
@@ -44,6 +54,7 @@ function normalizeAlgorithmConfig(algorithm = {}) {
     dataFile: algorithm.dataFile || null,
     input: algorithm.input || {},
     output: algorithm.output || {},
+    timeoutMs: Number(algorithm.timeoutMs || 1000),
   };
 }
 
@@ -73,10 +84,10 @@ function validateDisplaySystemConfig(config, { source = 'display system manifest
   if (!isNonEmptyString(config.name)) errors.push(`${source}: name is required`);
 
   const schemaVersion = config.schemaVersion == null
-    ? DISPLAY_SYSTEM_SCHEMA_VERSION
+    ? 1
     : Number(config.schemaVersion);
-  if (schemaVersion !== DISPLAY_SYSTEM_SCHEMA_VERSION) {
-    errors.push(`${source}: schemaVersion must be ${DISPLAY_SYSTEM_SCHEMA_VERSION}`);
+  if (!SUPPORTED_DISPLAY_SYSTEM_SCHEMA_VERSIONS.includes(schemaVersion)) {
+    errors.push(`${source}: schemaVersion must be one of ${SUPPORTED_DISPLAY_SYSTEM_SCHEMA_VERSIONS.join(', ')}`);
   }
 
   const sensor = config.sensor || {};
@@ -98,6 +109,15 @@ function validateDisplaySystemConfig(config, { source = 'display system manifest
   if (algorithm.type !== ALGORITHM_TYPES.NONE && !isNonEmptyString(algorithm.entry) && !isNonEmptyString(algorithm.dataFile)) {
     errors.push(`${source}: algorithm.entry or algorithm.dataFile is required when algorithm.type is not none`);
   }
+  if (!Number.isInteger(algorithm.timeoutMs) || algorithm.timeoutMs <= 0) {
+    errors.push(`${source}: algorithm.timeoutMs must be a positive integer`);
+  }
+
+  if (schemaVersion >= 2 && config.protocol == null) {
+    errors.push(`${source}: protocol is required for schemaVersion 2`);
+  }
+  errors.push(...validateProtocolConfig(config.protocol, { source }));
+  errors.push(...validateDisplayConfig(config.display, { source }));
 
   if (errors.length > 0) {
     return {
@@ -128,8 +148,9 @@ function validateDisplaySystemConfig(config, { source = 'display system manifest
         lineOrder: files.lineOrder.trim(),
         pointOrder: files.pointOrder.trim(),
       },
+      protocol: normalizeProtocolConfig(config.protocol),
       algorithm,
-      display: config.display || {},
+      display: normalizeDisplayConfig(config.display),
       metadata: config.metadata || {},
     },
   };
@@ -138,5 +159,6 @@ function validateDisplaySystemConfig(config, { source = 'display system manifest
 module.exports = {
   ALGORITHM_TYPES,
   DISPLAY_SYSTEM_SCHEMA_VERSION,
+  SUPPORTED_DISPLAY_SYSTEM_SCHEMA_VERSIONS,
   validateDisplaySystemConfig,
 };

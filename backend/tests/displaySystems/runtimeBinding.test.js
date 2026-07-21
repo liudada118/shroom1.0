@@ -36,6 +36,14 @@ const fixtureFiles = {
     max: 70,
     zeroBelow: 30,
   }),
+  '/algorithm-metrics.json': JSON.stringify({
+    metrics: [
+      { id: 'supportRate', operation: 'activeRatio', threshold: 10, scale: 100 },
+      { id: 'pressureSum', operation: 'sum', scale: 0.5 },
+    ],
+  }),
+  '/algorithm.js': 'module.exports = (values, context) => values.map((value) => value * context.data.scale);',
+  '/algorithm-object.js': 'module.exports = (values) => ({ data: values.map((value) => value * 3), metrics: { score: 88.5, state: "stable" } });',
 };
 
 const fsLike = {
@@ -54,6 +62,103 @@ assert.deepStrictEqual(processed.data, [70, 0, 0, 0, 40, 0]);
 assert.deepStrictEqual(processed.sitData, [70, 0, 0, 0, 40, 0]);
 assert.strictEqual(processed.displaySystemId, 'demo');
 assert.strictEqual(processed.outputChannel, 'sit');
+assert.deepStrictEqual(processed.metrics, {
+  totalPressure: 110,
+  maxPressure: 70,
+  averagePressure: 110 / 6,
+  nonZeroCount: 2,
+});
+
+const protocolProcessor = createDisplaySystemFrameProcessor({
+  runtimeChannel: {
+    ...runtimeChannel,
+    protocol: {
+      baudRate: 115200,
+      framing: { type: 'fixedLength', frameLength: 6 },
+      decoding: { valueType: 'uint16le', byteOffset: 2, valueCount: 2 },
+    },
+    processing: {
+      ...runtimeChannel.processing,
+      lineOrder: { source: null },
+      pointOrder: { source: null },
+      algorithm: { type: 'none', enabled: false },
+    },
+  },
+  fsLike,
+});
+const protocolFrame = protocolProcessor.processFrame([0xaa, 0x55, 0x01, 0x00, 0x02, 0x00]);
+assert.deepStrictEqual(protocolFrame.rawData, [1, 2]);
+assert.deepStrictEqual(protocolFrame.data, [1, 2]);
+
+const jsAlgorithmProcessor = createDisplaySystemFrameProcessor({
+  runtimeChannel: {
+    ...runtimeChannel,
+    processing: {
+      lineOrder: { source: null },
+      pointOrder: { source: null },
+      algorithm: {
+        type: 'js',
+        entry: '/algorithm.js',
+        dataFile: '/algorithm-data.json',
+        timeoutMs: 100,
+        enabled: true,
+      },
+    },
+  },
+  fsLike,
+});
+assert.deepStrictEqual(jsAlgorithmProcessor.processFrame([2, 3]).data, [4, 6]);
+
+const metricAlgorithmProcessor = createDisplaySystemFrameProcessor({
+  runtimeChannel: {
+    ...runtimeChannel,
+    processing: {
+      lineOrder: { source: null },
+      pointOrder: { source: null },
+      algorithm: {
+        type: 'json',
+        dataFile: '/algorithm-metrics.json',
+        enabled: true,
+      },
+    },
+  },
+  fsLike,
+});
+const metricFrame = metricAlgorithmProcessor.processFrame([0, 20, 30, 0]);
+assert.deepStrictEqual(metricFrame.normalizedData, [0, 20, 30, 0]);
+assert.deepStrictEqual(metricFrame.algorithmMetrics, { supportRate: 50, pressureSum: 25 });
+assert.deepStrictEqual(metricFrame.metrics.algorithm, { supportRate: 50, pressureSum: 25 });
+
+const objectAlgorithmProcessor = createDisplaySystemFrameProcessor({
+  runtimeChannel: {
+    ...runtimeChannel,
+    processing: {
+      lineOrder: { source: null },
+      pointOrder: { source: null },
+      algorithm: {
+        type: 'js',
+        entry: '/algorithm-object.js',
+        enabled: true,
+      },
+    },
+  },
+  fsLike,
+});
+const objectAlgorithmFrame = objectAlgorithmProcessor.processFrame([2, 3]);
+assert.deepStrictEqual(objectAlgorithmFrame.data, [6, 9]);
+assert.deepStrictEqual(objectAlgorithmFrame.algorithmMetrics, { score: 88.5, state: 'stable' });
+
+assert.throws(() => createDisplaySystemFrameProcessor({
+  runtimeChannel: {
+    ...runtimeChannel,
+    processing: {
+      lineOrder: { source: null },
+      pointOrder: { source: null },
+      algorithm: { type: 'python', entry: '/algorithm.py', enabled: true },
+    },
+  },
+  fsLike,
+}).processFrame([1]), /algorithm runner is not registered: python/);
 
 const runtimeRegistry = createDisplaySystemRuntimeRegistry();
 runtimeRegistry.register(runtimeChannel);
@@ -82,6 +187,58 @@ const output = bindings[0].handleFrame([1, 2, 3]);
 assert.strictEqual(output.published, true);
 assert.strictEqual(output.output.sent, 1);
 assert.deepStrictEqual(output.processedFrame.data, [1, 2, 3]);
+
+let registeredParser = null;
+const configuredBindings = bindDisplaySystemRuntimeChannels({
+  runtimeChannelRegistry: {
+    list: () => [{
+      ...runtimeChannel,
+      parserChannel: {
+        id: 'demo:sit',
+        role: 'sit',
+        protocol: {
+          baudRate: 921600,
+          framing: { type: 'fixedLength', frameLength: 6 },
+          decoding: { valueType: 'uint8' },
+        },
+      },
+    }],
+  },
+  serialManager: { getStatus: () => ({ status: 'registered' }) },
+  serialParserManager: {
+    registerChannel: (id, protocol) => {
+      registeredParser = { id, protocol };
+      return id;
+    },
+  },
+  frameOutputPipeline: { publishSit: () => ({ sent: 1 }) },
+  createFrameProcessor: () => ({ processFrame: (frame) => ({ data: frame }) }),
+});
+assert.strictEqual(configuredBindings[0].parserChannel, 'demo:sit');
+assert.strictEqual(registeredParser.id, 'demo:sit');
+assert.strictEqual(registeredParser.protocol.baudRate, 921600);
+
+const isolatedBindings = bindDisplaySystemRuntimeChannels({
+  runtimeChannelRegistry: {
+    list: () => [
+      runtimeChannel,
+      { ...runtimeChannel, id: 'broken:sit', displaySystemId: 'broken' },
+    ],
+  },
+  serialManager: { getStatus: () => ({ status: 'registered' }) },
+  serialParserManager: { channels: { SIT: 'sit' } },
+  frameOutputPipeline: { publishSit: () => ({ sent: 1 }) },
+  createFrameProcessor: ({ runtimeChannel: currentChannel }) => {
+    if (currentChannel.displaySystemId === 'broken') {
+      throw new Error('invalid algorithm module');
+    }
+    return { processFrame: (frame) => ({ data: frame }) };
+  },
+});
+assert.strictEqual(isolatedBindings[0].status, 'bound');
+assert.strictEqual(isolatedBindings[1].status, 'error');
+assert.strictEqual(isolatedBindings[1].error, 'invalid algorithm module');
+assert.match(isolatedBindings[1].handleFrame().reason, /invalid algorithm module/);
 
 runtimeRegistry.register({
   ...runtimeChannel,

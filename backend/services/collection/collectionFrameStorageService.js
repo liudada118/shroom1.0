@@ -51,12 +51,41 @@ function createCollectionFrameStorageService(options = {}) {
   }
 
   /**
+   * 展示系统帧需要保留算法指标和映射后矩阵，供历史回放恢复左侧数据面板。
+   * 旧设备没有 displaySystemId，仍沿用原来的数组存储格式。
+   *
+   * @param {object} frameToStore 实时帧对象。
+   * @param {'sitData' | 'backData' | 'headData'} dataKey 当前通道矩阵字段。
+   * @returns {string | null} 展示系统存储数据；非展示系统帧返回 null。
+   */
+  function buildDisplaySystemCollectionData(frameToStore, dataKey) {
+    if (!frameToStore?.displaySystemId || !Array.isArray(frameToStore[dataKey])) {
+      return null;
+    }
+
+    return JSON.stringify({
+      [dataKey]: frameToStore[dataKey],
+      normalizedData: Array.isArray(frameToStore.normalizedData)
+        ? frameToStore.normalizedData
+        : frameToStore[dataKey],
+      algorithmMetrics: frameToStore.algorithmMetrics || {},
+      metrics: frameToStore.metrics || {},
+      displaySystemId: frameToStore.displaySystemId,
+      channelId: frameToStore.channelId,
+      outputChannel: frameToStore.outputChannel,
+    });
+  }
+
+  /**
    * 构建坐面通道的 matrix.data 存储字符串。
    *
    * @param {object} frameToStore 实时帧对象。
    * @returns {string} 序列化后的存储数据。
    */
   function buildSitCollectionData(frameToStore) {
+    const displaySystemData = buildDisplaySystemCollectionData(frameToStore, 'sitData');
+    if (displaySystemData) return displaySystemData;
+
     const type = sensorType();
     return type === tempFullBedType
       ? JSON.stringify({
@@ -88,6 +117,9 @@ function createCollectionFrameStorageService(options = {}) {
    * @returns {string} 序列化后的存储数据。
    */
   function buildBackCollectionData(frameToStore) {
+    const displaySystemData = buildDisplaySystemCollectionData(frameToStore, 'backData');
+    if (displaySystemData) return displaySystemData;
+
     const type = sensorType();
     return frameToStore.tempObj
       ? JSON.stringify(frameToStore.tempObj)
@@ -105,6 +137,9 @@ function createCollectionFrameStorageService(options = {}) {
    * @returns {string} 序列化后的存储数据。
    */
   function buildHeadCollectionData(frameToStore) {
+    const displaySystemData = buildDisplaySystemCollectionData(frameToStore, 'headData');
+    if (displaySystemData) return displaySystemData;
+
     const type = sensorType();
     return isZeroFrameStorageType(type)
       ? buildZeroAwareStorageData(frameToStore, 'headData', 'head')
@@ -139,6 +174,7 @@ function createCollectionFrameStorageService(options = {}) {
 
   return {
     buildBackCollectionData,
+    buildDisplaySystemCollectionData,
     buildHeadCollectionData,
     buildSitCollectionData,
     store,

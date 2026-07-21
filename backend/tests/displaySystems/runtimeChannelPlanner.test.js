@@ -27,8 +27,13 @@ const runtimeDefinition = buildDisplaySystemRuntimeDefinition({
     input: { frame: 'raw' },
     output: { frame: 'processed' },
   },
+  protocol: {
+    baudRate: 921600,
+    framing: { type: 'fixedLength', frameLength: 6 },
+    decoding: { valueType: 'uint8', byteOffset: 0, valueCount: 6 },
+  },
   display: {
-    views: ['heatmap'],
+    views: [{ id: 'heatmap', type: 'heatmap', source: 'data' }],
     defaultView: 'heatmap',
   },
 });
@@ -38,6 +43,8 @@ const planned = attachRuntimeChannelPlan(runtimeDefinition);
 assert.strictEqual(planned.runtimeChannelCount, 2);
 assert.strictEqual(planned.runtimeChannels[0].serialRole, 'sit');
 assert.strictEqual(planned.runtimeChannels[0].parserChannel.role, 'sit');
+assert.strictEqual(planned.runtimeChannels[0].parserChannel.protocol.baudRate, 921600);
+assert.strictEqual(planned.runtimeChannels[0].protocol.framing.frameLength, 6);
 assert.strictEqual(planned.runtimeChannels[0].processing.lineOrder.source, 'C:/demo/line-order.json');
 assert.strictEqual(planned.runtimeChannels[0].processing.pointOrder.source, 'C:/demo/point-order.json');
 assert.strictEqual(planned.runtimeChannels[0].processing.algorithm.enabled, true);

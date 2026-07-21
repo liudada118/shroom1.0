@@ -37,4 +37,23 @@ assert.deepStrictEqual(queued.map((item) => [item.db, item.channel]), [
   ['headDb', 'head'],
 ]);
 
+const displayFrame = {
+  displaySystemId: 'custom-seat',
+  channelId: 'custom-seat:sit',
+  outputChannel: 'sit',
+  sitData: [10, 20],
+  normalizedData: [5, 10],
+  algorithmMetrics: { supportRate: 50 },
+  metrics: { totalPressure: 30, algorithm: { supportRate: 50 } },
+};
+const storedDisplayFrame = JSON.parse(
+  pipeline.collectionFrameStorage.buildSitCollectionData(displayFrame),
+);
+assert.deepStrictEqual(storedDisplayFrame, displayFrame);
+
+assert.strictEqual(
+  pipeline.collectionFrameStorage.buildSitCollectionData({ sitData: [7, 8] }),
+  JSON.stringify([7, 8]),
+);
+
 console.log('framePipelineFactory.test.js passed');

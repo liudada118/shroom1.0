@@ -13,6 +13,7 @@ function buildRuntimeBindingSnapshot(runtimeBindings = []) {
       parserChannel: binding.parserChannel,
       outputChannel: binding.outputChannel,
       status: binding.status,
+      error: binding.error || null,
       serialStatus: binding.serialStatus?.status || null,
       runtimeMode: binding.runtimeMode || null,
     })),

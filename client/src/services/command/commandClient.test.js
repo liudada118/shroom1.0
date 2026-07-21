@@ -33,6 +33,33 @@ describe('CommandClient', () => {
     expect(ack.requestId).toBe('req-client-1');
   });
 
+  it('calls browser fetch with the global receiver', async () => {
+    const fetchImpl = vi.fn(function fetchWithReceiverCheck() {
+      if (this !== globalThis) throw new TypeError('Illegal invocation');
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          code: 0,
+          data: {
+            type: 'command.ack',
+            requestId: 'req-browser-fetch',
+            commandType: 'license.activate',
+            ok: true,
+            code: 'OK',
+          },
+        }),
+      });
+    });
+    const client = new CommandClient({ fetchImpl });
+
+    await expect(client.execute(
+      'license.activate',
+      { key: 'test-key' },
+      { requestId: 'req-browser-fetch' },
+    )).resolves.toMatchObject({ ok: true, requestId: 'req-browser-fetch' });
+  });
+
   it('splits a combined legacy control message into typed commands', () => {
     const commands = commandFromLegacyFields({
       sitClose: true,

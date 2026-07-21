@@ -26,6 +26,11 @@ async function main() {
     controlCommandService: { executeHttp: () => ({ handled: false, stop: false, results: [] }) },
     getChannelBusStatus: () => ({}),
     getDisplaySystemById: (id) => (id === 'demo' ? { id: 'demo', name: 'Demo' } : null),
+    getDisplaySystemBuilderCatalog: () => ({
+      renderers: [{ id: 'heatmap' }],
+      writableRoot: os.tmpdir(),
+    }),
+    getDisplaySystemEditorById: (id) => (id === 'demo' ? { manifest: { id: 'demo' } } : null),
     getDisplaySystemStatus: () => displaySystemStatus,
     getPort: (ports) => ports,
     getRealtimeChannels: () => [],
@@ -37,6 +42,8 @@ async function main() {
     logger: { error: () => {}, warn: () => {} },
     pdfPath: os.tmpdir(),
     serialManager: { getStatus: () => [] },
+    reloadDisplaySystems: () => displaySystemStatus,
+    saveDisplaySystem: (input) => ({ id: input.manifest.id }),
   });
 
   const server = http.createServer(httpApp);
@@ -56,6 +63,29 @@ async function main() {
     const detailBody = await detailResponse.json();
     assert.strictEqual(detailResponse.status, 200);
     assert.strictEqual(detailBody.displaySystem.id, 'demo');
+
+    const catalogResponse = await fetch(`http://127.0.0.1:${port}/api/display-systems/catalog`);
+    const catalogBody = await catalogResponse.json();
+    assert.strictEqual(catalogBody.catalog.renderers[0].id, 'heatmap');
+    assert.ok(catalogBody.catalog.writableRoot);
+
+    const editorResponse = await fetch(`http://127.0.0.1:${port}/api/display-systems/demo/editor`);
+    const editorBody = await editorResponse.json();
+    assert.strictEqual(editorBody.editor.manifest.id, 'demo');
+
+    const saveResponse = await fetch(`http://127.0.0.1:${port}/api/display-systems`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ manifest: { id: 'created' } }),
+    });
+    const saveBody = await saveResponse.json();
+    assert.strictEqual(saveResponse.status, 201);
+    assert.strictEqual(saveBody.result.id, 'created');
+
+    const reloadResponse = await fetch(`http://127.0.0.1:${port}/api/display-systems/reload`, {
+      method: 'POST',
+    });
+    assert.strictEqual(reloadResponse.status, 200);
 
     const invalidJsonResponse = await fetch(`http://127.0.0.1:${port}/api/display-systems`, {
       method: 'POST',

@@ -1,6 +1,6 @@
 import React from 'react'
 import { Menu, Slider, Button, Select, message, notification, Divider, Space, Radio, Drawer, Modal, Progress } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { PlusOutlined, SettingOutlined } from '@ant-design/icons';
 import exchange from '../../assets/images/exchange.png'
 import option from '../../assets/images/Option.png'
 import logo from '../../assets/images/logo.png'
@@ -17,6 +17,7 @@ import { useTranslation, initReactI18next } from "react-i18next";
 import { NavLink, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { bthClickHandle as heatmapBthClickHandle } from '../onestep/heatmap';
+import { registerRuntimeDisplayDefinition } from '../../displays/registry';
 let collection = JSON.parse(localStorage.getItem('collection'))
   ? JSON.parse(localStorage.getItem('collection'))
   : [['hunch', 'front', '标签']];
@@ -318,6 +319,7 @@ class Title extends React.Component {
       smallBed12BRealtimeSamplePoint: localStorage.getItem('smallBed12BRealtimeSamplePoint') || 'topLeft',
       pdfLoading: false,
       humanTransform: createDefaultHumanTransform(),
+      dynamicSensors: [],
     }
     this.inputRef = React.createRef(null)
     this.inputRef1 = React.createRef(null)
@@ -327,6 +329,17 @@ class Title extends React.Component {
   componentDidMount() {
     console.log(this.props, 'props')
     window.addEventListener('shroom-csv-download-status', this.handleCsvDownloadStatus)
+    fetch('http://127.0.0.1:19245/api/display-systems')
+      .then((response) => response.json())
+      .then((payload) => {
+        const definitions = payload?.displaySystems?.runtimeDefinitions || []
+        const dynamicSensors = definitions
+          .map((definition) => registerRuntimeDisplayDefinition(definition))
+          .filter(Boolean)
+          .map((definition) => ({ label: definition.label, value: definition.type }))
+        this.setState({ dynamicSensors })
+      })
+      .catch((error) => console.warn('[DisplaySystems] load failed', error))
 
     if (this.props.matrixName === 'sitCol' || this.props.matrixName === 'handBlue') {
       if (localStorage.getItem('sitType1')) {
@@ -1552,7 +1565,7 @@ class Title extends React.Component {
 
 
     // 全量传感器类型列表
-    const allSensorArr = [
+    const builtInSensorArr = [
       { label: t('sensorHand'), value: 'hand' },
       { label: t('sensorHand0205'), value: 'hand0205' },
       { label: t('sensorHand0205Double'), value: 'hand0205Double' },
@@ -1580,6 +1593,12 @@ class Title extends React.Component {
       { label: t('sensorHandSinglePoint'), value: 'handSinglePoint' },
       { label: t('sensorNormal'), value: 'normal' },
       { label: t('sensorHumanBody'), value: 'humanBody' },
+    ]
+
+    const builtInSensorTypes = new Set(builtInSensorArr.map((sensor) => sensor.value))
+    const allSensorArr = [
+      ...builtInSensorArr,
+      ...this.state.dynamicSensors.filter((sensor) => !builtInSensorTypes.has(sensor.value)),
     ]
 
     const allowedTypes = Array.isArray(this.props.allowedTypes) ? this.props.allowedTypes : [];
@@ -1632,8 +1651,16 @@ class Title extends React.Component {
         <img className="titleBrandLogo" src={logo} alt="JQ Industries" />
         <img className="titleBrandWordmark" src={shroomWordmark} alt="Shroom" />
       </div>
-      <div className="titleItems">
-        <Select
+        <div className="titleItems">
+          <NavLink to="/display-systems">
+            <Button
+              className="titleButton"
+              icon={<SettingOutlined />}
+              title="展示系统配置器"
+              aria-label="展示系统配置器"
+            />
+          </NavLink>
+          <Select
           style={{ width: '130px' }}
           placeholder={t('chooseSensor')}
           value={this.props.matrixName}

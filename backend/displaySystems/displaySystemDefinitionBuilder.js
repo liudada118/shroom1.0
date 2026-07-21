@@ -63,6 +63,7 @@ function buildSensorDefinitionFromDisplaySystem(config) {
     type: config.sensor?.type,
     matrix,
     ports: Array.isArray(config.sensor?.ports) ? [...config.sensor.ports] : [],
+    protocol: config.protocol ? { ...config.protocol } : null,
     files,
     algorithm: {
       ...(config.algorithm || {}),
@@ -100,6 +101,7 @@ function buildParserChannelDefinitionsFromDisplaySystem(config) {
     displaySystemId: config.id,
     sensorType: config.sensor?.type,
     matrix,
+    protocol: config.protocol ? { ...config.protocol } : null,
     lineOrderFile: files.lineOrder,
     pointOrderFile: files.pointOrder,
     algorithm: {
@@ -121,7 +123,8 @@ function buildParserChannelDefinitionsFromDisplaySystem(config) {
 function buildDisplayMetadataFromDisplaySystem(config) {
   const matrix = buildMatrixDefinition(config);
   const files = buildFileDefinition(config);
-  const views = Array.isArray(config.display?.views) ? [...config.display.views] : [];
+  const views = Array.isArray(config.display?.views) ? config.display.views.map((view) => ({ ...view })) : [];
+  const widgets = Array.isArray(config.display?.widgets) ? config.display.widgets.map((widget) => ({ ...widget })) : [];
   return {
     id: config.id,
     name: config.name,
@@ -130,7 +133,22 @@ function buildDisplayMetadataFromDisplaySystem(config) {
     sensorType: config.sensor?.type,
     matrix,
     views,
-    defaultView: config.display?.defaultView || views[0] || 'heatmap',
+    widgets,
+    layout: config.display?.layout || { type: 'grid', columns: 12 },
+    controls: config.display?.controls || {},
+    sidebar: config.display?.sidebar ? { ...config.display.sidebar } : null,
+    defaultView: config.display?.defaultView || views[0]?.id || views[0]?.type || 'heatmap',
+    renderers: Array.isArray(config.display?.renderers)
+      ? config.display.renderers.map((renderer) => ({ ...renderer }))
+      : [],
+    visualizationAlgorithms: Array.isArray(config.display?.visualizationAlgorithms)
+      ? config.display.visualizationAlgorithms.map((algorithm) => ({ ...algorithm }))
+      : [],
+    profiles: Array.isArray(config.display?.profiles)
+      ? config.display.profiles.map((profile) => ({ ...profile }))
+      : [],
+    defaultProfile: config.display?.defaultProfile || null,
+    protocol: config.protocol ? { ...config.protocol } : null,
     files: {
       lineOrder: getFileName(files.lineOrder),
       pointOrder: getFileName(files.pointOrder),

@@ -14,6 +14,7 @@ function normalizeAlgorithmBinding(algorithm = {}) {
     dataFile: algorithm.dataFile || null,
     input: algorithm.input || {},
     output: algorithm.output || {},
+    timeoutMs: Number(algorithm.timeoutMs || 1000),
     enabled: type !== 'none',
   };
 }
@@ -34,7 +35,9 @@ function buildRuntimeChannelPlan(runtimeDefinition) {
       role: channel.channel,
       sensorType: channel.sensorType,
       matrix: channel.matrix,
+      protocol: channel.protocol || null,
     },
+    protocol: channel.protocol || null,
     processing: {
       lineOrder: {
         source: channel.lineOrderFile,
@@ -50,6 +53,14 @@ function buildRuntimeChannelPlan(runtimeDefinition) {
       metadataId: displayMetadata.id,
       defaultView: displayMetadata.defaultView,
       matrix: displayMetadata.matrix || channel.matrix,
+      layout: displayMetadata.layout,
+      views: displayMetadata.views || [],
+      widgets: displayMetadata.widgets || [],
+      controls: displayMetadata.controls || {},
+      renderers: displayMetadata.renderers || [],
+      visualizationAlgorithms: displayMetadata.visualizationAlgorithms || [],
+      profiles: displayMetadata.profiles || [],
+      defaultProfile: displayMetadata.defaultProfile || null,
     },
     metadata: { ...(displayMetadata.metadata || {}) },
     runtimeMode: displayMetadata.metadata?.runtimeMode || null,

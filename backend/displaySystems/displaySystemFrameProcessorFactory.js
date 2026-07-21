@@ -3,6 +3,8 @@ const {
   executeConfiguredMapping,
   loadJsonDefinition: defaultLoadJsonDefinition,
 } = require('../processing/configMappingExecutor');
+const { decodeProtocolValues } = require('./displaySystemProtocol');
+const { createJavaScriptAlgorithmRunner } = require('./displaySystemAlgorithmRunner');
 
 function loadOptionalJson(filePath, fsLike) {
   if (!filePath) return null;
@@ -57,6 +59,103 @@ function getChannelDataField(outputChannel) {
   return 'sitData';
 }
 
+function buildPressureMetrics(values) {
+  const numeric = values.map(Number).filter(Number.isFinite);
+  const totalPressure = numeric.reduce((sum, value) => sum + value, 0);
+  return {
+    totalPressure,
+    maxPressure: numeric.length ? Math.max(...numeric) : 0,
+    averagePressure: numeric.length ? totalPressure / numeric.length : 0,
+    nonZeroCount: numeric.filter((value) => value > 0).length,
+  };
+}
+
+function calculateConfiguredMetric(values, definition = {}) {
+  const numeric = values.map(Number).filter(Number.isFinite);
+  const operation = definition.operation || 'sum';
+  const threshold = Number(definition.threshold || 0);
+  let result = 0;
+
+  if (operation === 'average') {
+    result = numeric.length ? numeric.reduce((sum, value) => sum + value, 0) / numeric.length : 0;
+  } else if (operation === 'max') {
+    result = numeric.length ? Math.max(...numeric) : 0;
+  } else if (operation === 'min') {
+    result = numeric.length ? Math.min(...numeric) : 0;
+  } else if (operation === 'activeCount') {
+    result = numeric.filter((value) => value > threshold).length;
+  } else if (operation === 'activeRatio') {
+    result = numeric.length
+      ? numeric.filter((value) => value > threshold).length / numeric.length
+      : 0;
+  } else {
+    result = numeric.reduce((sum, value) => sum + value, 0);
+  }
+
+  return result * Number(definition.scale ?? 1) + Number(definition.offset ?? 0);
+}
+
+function calculateConfiguredMetrics(values, definitions = []) {
+  return Object.fromEntries(
+    (Array.isArray(definitions) ? definitions : [])
+      .filter((definition) => definition?.id && definition.operation !== 'external')
+      .map((definition) => [definition.id, calculateConfiguredMetric(values, definition)]),
+  );
+}
+
+function sanitizeAlgorithmMetrics(metrics) {
+  if (!metrics || typeof metrics !== 'object' || Array.isArray(metrics)) return {};
+  return Object.fromEntries(Object.entries(metrics).filter(([key, value]) => (
+    /^[A-Za-z][A-Za-z0-9._-]*$/.test(key)
+    && (
+      (typeof value === 'number' && Number.isFinite(value))
+      || typeof value === 'string'
+      || typeof value === 'boolean'
+    )
+  )));
+}
+
+function normalizeAlgorithmResult(result, fallbackValues) {
+  if (Array.isArray(result)) return { data: result, metrics: {} };
+  if (!result || typeof result !== 'object') {
+    throw new Error('display system algorithm must return an array or { data, metrics }');
+  }
+  const data = Array.isArray(result.data)
+    ? result.data
+    : Array.isArray(result.values)
+      ? result.values
+      : fallbackValues;
+  return {
+    data: Array.from(data),
+    metrics: sanitizeAlgorithmMetrics(result.metrics),
+  };
+}
+
+function executeAlgorithmResult(values, algorithm, algorithmData, algorithmRunners = {}) {
+  const type = algorithm?.type || 'none';
+  if (!algorithm?.enabled || type === 'none') return { data: values, metrics: {} };
+  if (type === 'json') {
+    const data = applyNumericConfig(values, algorithmData || {});
+    return {
+      data,
+      metrics: calculateConfiguredMetrics(data, algorithmData?.metrics),
+    };
+  }
+
+  const runner = algorithmRunners[type];
+  if (typeof runner !== 'function') {
+    throw new Error(`display system algorithm runner is not registered: ${type}`);
+  }
+  return normalizeAlgorithmResult(runner([...values], {
+    algorithm,
+    data: algorithmData,
+  }), values);
+}
+
+function executeAlgorithm(values, algorithm, algorithmData, algorithmRunners = {}) {
+  return executeAlgorithmResult(values, algorithm, algorithmData, algorithmRunners).data;
+}
+
 /**
  * 创建 Display System 通用帧处理器。
  *
@@ -72,6 +171,7 @@ function getChannelDataField(outputChannel) {
 function createDisplaySystemFrameProcessor({
   runtimeChannel,
   fsLike = fs,
+  algorithmRunners = {},
 }) {
   if (!runtimeChannel) {
     throw new Error('runtimeChannel is required');
@@ -80,6 +180,19 @@ function createDisplaySystemFrameProcessor({
   let cachedLineOrder;
   let cachedPointOrder;
   let cachedAlgorithmData;
+  const resolvedAlgorithmRunners = { ...algorithmRunners };
+  const algorithmBinding = runtimeChannel.processing?.algorithm || {};
+  if (
+    algorithmBinding.type === 'js'
+    && !resolvedAlgorithmRunners.js
+    && algorithmBinding.entry
+  ) {
+    resolvedAlgorithmRunners.js = createJavaScriptAlgorithmRunner({
+      entry: algorithmBinding.entry,
+      timeoutMs: algorithmBinding.timeoutMs,
+      fsLike,
+    });
+  }
 
   function getLineOrderDefinition() {
     if (cachedLineOrder !== undefined) return cachedLineOrder;
@@ -100,15 +213,22 @@ function createDisplaySystemFrameProcessor({
   }
 
   function processFrame(frame) {
-    const values = getFrameValues(frame);
+    const frameValues = getFrameValues(frame);
+    const values = runtimeChannel.protocol
+      ? decodeProtocolValues(frameValues, runtimeChannel.protocol)
+      : frameValues;
     const mapped = executeConfiguredMapping(values, {
       lineOrder: getLineOrderDefinition(),
       pointOrder: getPointOrderDefinition(),
     });
     const algorithmData = getAlgorithmData();
-    const processed = runtimeChannel.processing?.algorithm?.enabled
-      ? applyNumericConfig(mapped, algorithmData || {})
-      : mapped;
+    const algorithmResult = executeAlgorithmResult(
+      mapped,
+      runtimeChannel.processing?.algorithm,
+      algorithmData,
+      resolvedAlgorithmRunners,
+    );
+    const processed = algorithmResult.data;
 
     const outputChannel = runtimeChannel.outputChannel || runtimeChannel.serialRole;
     const channelDataField = getChannelDataField(outputChannel);
@@ -116,8 +236,14 @@ function createDisplaySystemFrameProcessor({
       channelId: runtimeChannel.id,
       displaySystemId: runtimeChannel.displaySystemId,
       outputChannel,
+      rawData: values,
+      normalizedData: mapped,
       data: processed,
       [channelDataField]: processed,
+      metrics: Object.keys(algorithmResult.metrics).length
+        ? { ...buildPressureMetrics(processed), algorithm: algorithmResult.metrics }
+        : buildPressureMetrics(processed),
+      algorithmMetrics: algorithmResult.metrics,
       metadata: runtimeChannel.display,
     };
   }
@@ -129,7 +255,14 @@ function createDisplaySystemFrameProcessor({
 
 module.exports = {
   applyNumericConfig,
+  buildPressureMetrics,
+  calculateConfiguredMetric,
+  calculateConfiguredMetrics,
   createDisplaySystemFrameProcessor,
+  executeAlgorithm,
+  executeAlgorithmResult,
   getChannelDataField,
   getFrameValues,
+  normalizeAlgorithmResult,
+  sanitizeAlgorithmMetrics,
 };

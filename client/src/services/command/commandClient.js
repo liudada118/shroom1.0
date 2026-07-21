@@ -115,11 +115,11 @@ export class CommandClient {
     if (!this.fetchImpl) throw new CommandClientError('fetch is not available');
     let response;
     try {
-      response = await this.fetchImpl(`${this.baseUrl}/api/commands`, {
+      response = await Reflect.apply(this.fetchImpl, globalThis, [`${this.baseUrl}/api/commands`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(command),
-      });
+      }]);
     } catch (error) {
       throw new CommandClientError(error.message || 'command request failed', { requestId: command.requestId });
     }

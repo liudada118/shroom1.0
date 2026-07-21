@@ -1,5 +1,5 @@
 const API_VERSION = 'v1';
-const SDK_CONTRACT_VERSION = '2026-07-13';
+const SDK_CONTRACT_VERSION = '2026-07-14';
 const commandSchema = require('../../shared/commandSchema.json');
 
 const SERIAL_ROLES = Object.freeze({
@@ -17,8 +17,11 @@ const HTTP_ROUTES = Object.freeze({
   channels: '/api/channels',
   wsStatus: '/api/ws/status',
   sdkContract: '/api/sdk/contract',
-  displaySystems: '/api/display-systems',
-  displaySystemById: '/api/display-systems/:id',
+    displaySystems: '/api/display-systems',
+    displaySystemById: '/api/display-systems/:id',
+    displaySystemCatalog: '/api/display-systems/catalog',
+    displaySystemEditor: '/api/display-systems/:id/editor',
+    displaySystemReload: '/api/display-systems/reload',
   commands: '/api/commands',
   serialPorts: '/api/serial/ports',
   serialStatus: '/api/serial/status',
@@ -52,7 +55,7 @@ const TELEMETRY_QUALITY = Object.freeze({
   ERROR: 'error',
 });
 
-const DISPLAY_SYSTEM_SCHEMA_VERSION = 1;
+const DISPLAY_SYSTEM_SCHEMA_VERSION = 2;
 
 const DISPLAY_SYSTEM_MANIFEST_FILES = Object.freeze([
   'display-system.json',
@@ -135,6 +138,9 @@ function buildSdkContractSnapshot({
       routes: {
         list: HTTP_ROUTES.displaySystems,
         detail: HTTP_ROUTES.displaySystemById,
+        catalog: HTTP_ROUTES.displaySystemCatalog,
+        editor: HTTP_ROUTES.displaySystemEditor,
+        reload: HTTP_ROUTES.displaySystemReload,
       },
       status: displaySystems,
       manifestShape: {
@@ -153,12 +159,35 @@ function buildSdkContractSnapshot({
           lineOrder: 'string',
           pointOrder: 'string',
         },
+        protocol: {
+          baudRate: 'positive integer',
+          framing: {
+            type: 'delimiter|fixedLength',
+            delimiter: 'byte[]',
+            frameLength: 'positive integer|null',
+          },
+          decoding: {
+            valueType: 'uint8|int8|uint16le|uint16be|int16le|int16be',
+            byteOffset: 'non-negative integer',
+            valueCount: 'positive integer|null',
+          },
+        },
         algorithm: {
           type: 'none|js|python|external',
           entry: 'string|null',
           dataFile: 'string|null',
         },
-        display: 'object',
+        display: {
+          layout: 'object|string',
+          views: 'DisplayView[]',
+            widgets: 'DisplayWidget[]',
+            controls: 'object|array',
+            defaultView: 'string',
+            renderers: 'DisplayRenderer[]',
+            visualizationAlgorithms: 'DisplayVisualizationAlgorithm[]',
+            profiles: 'DisplayProfile[]',
+            defaultProfile: 'string',
+          },
       },
     },
     subscriptions,

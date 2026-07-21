@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "id": "byte-matrix-demo",
   "name": "Byte Matrix Demo",
   "version": "0.1.0",
@@ -16,13 +16,138 @@
     "lineOrder": "line-order.json",
     "pointOrder": "point-order.json"
   },
+  "protocol": {
+    "baudRate": 921600,
+    "framing": {
+      "type": "fixedLength",
+      "frameLength": 6
+    },
+    "decoding": {
+      "valueType": "uint8",
+      "byteOffset": 0,
+      "valueCount": 6
+    }
+  },
   "algorithm": {
     "type": "json",
     "dataFile": "algorithm-data.json"
   },
   "display": {
-    "views": ["heatmap"],
-    "defaultView": "heatmap"
+    "layout": {
+      "type": "grid",
+      "columns": 12
+    },
+    "views": [
+      {
+        "id": "heatmap",
+        "type": "heatmap",
+        "label": "Pressure Heatmap",
+        "source": "data"
+      },
+      {
+        "id": "stats",
+        "type": "pressureStats",
+        "label": "Pressure Statistics",
+        "source": "metrics"
+      }
+    ],
+    "widgets": [
+      {
+        "id": "heatmap",
+        "type": "heatmap",
+        "label": "Pressure Heatmap",
+        "source": "data",
+        "columnSpan": 8
+      },
+      {
+        "id": "stats",
+        "type": "pressureStats",
+        "label": "Pressure Statistics",
+        "source": "metrics",
+        "columnSpan": 4
+      }
+    ],
+    "renderers": [
+      {
+        "id": "heatmap",
+        "type": "heatmap",
+        "label": "热力图"
+      },
+      {
+        "id": "matrix",
+        "type": "matrix",
+        "label": "数值矩阵"
+      },
+      {
+        "id": "raw2d",
+        "type": "raw2d",
+        "label": "原始二维数据"
+      }
+    ],
+    "visualizationAlgorithms": [
+      {
+        "id": "identity",
+        "type": "identity",
+        "label": "原始数据"
+      },
+      {
+        "id": "normalized",
+        "type": "normalize",
+        "label": "归一化",
+        "options": {
+          "max": 100
+        }
+      },
+      {
+        "id": "noise-filter",
+        "type": "threshold",
+        "label": "阈值过滤",
+        "options": {
+          "threshold": 20
+        }
+      },
+      {
+        "id": "smooth",
+        "type": "smooth",
+        "label": "邻域平滑",
+        "options": {
+          "radius": 1
+        }
+      }
+    ],
+    "profiles": [
+      {
+        "id": "pressure-overview",
+        "label": "压力总览",
+        "renderer": "heatmap",
+        "visualizationAlgorithm": "identity",
+        "widgets": ["heatmap", "stats"]
+      },
+      {
+        "id": "contact-focus",
+        "label": "接触区域",
+        "renderer": "heatmap",
+        "visualizationAlgorithm": "noise-filter",
+        "widgets": ["heatmap", "stats"]
+      },
+      {
+        "id": "numeric-analysis",
+        "label": "数值分析",
+        "renderer": "matrix",
+        "visualizationAlgorithm": "normalized",
+        "widgets": ["heatmap", "stats"]
+      }
+    ],
+    "controls": {
+      "serial": true,
+      "capture": true,
+      "replay": true,
+      "download": true,
+      "threshold": true,
+      "color": true
+    },
+    "defaultView": "heatmap",
+    "defaultProfile": "pressure-overview"
   },
   "metadata": {
     "demo": true

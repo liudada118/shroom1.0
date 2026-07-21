@@ -1,5 +1,54 @@
 # 架构文档
 
+## 2026-07-14 Display System Manifest v2
+
+### 展示系统配置文件
+
+- 开发环境中，页面新建的展示系统写入 `E:\shroom1\display-systems\<系统ID>\`。
+- 打包环境中，配置写入 Electron `app.getPath('userData')/display-systems/<系统ID>/`；Windows 默认通常是 `%APPDATA%\Shroom\display-systems\<系统ID>\`。
+- 每个目录固定包含 `display-system.json`、`line-order.json` 和 `point-order.json`；选择 JSON 后端算法时额外生成 `algorithm-data.json`。
+- `display.sidebar` 定义左侧压力数据和受压区域面板，包括可见性、标题、主指标、指标集合、有效点阈值、单点面积及面积单位。统计输入使用协议解码、线序和点位归一化后的原始矩阵，不使用前端可视算法处理后的绘制数组。
+
+### 快速模板
+
+- 配置器主流程按“传输形式 → 是否分包 → 波特率 → 分隔符/帧长度 → 8/12 Bit”组织。字节偏移、数值数量、线序、算法和左侧面板继续放在高级配置区。
+- 串口解析提供三个经典模板：`pressure-u8-tail` 使用 921600 baud、`AA 55 03 99` 帧尾和 `uint8`；`pressure-adc16-tail` 使用 1500000 baud、`AA 00 55 00 03 00 99 00` 帧尾和 `uint16le`；`pressure-fixed-length` 使用 1000000 baud、不使用分隔符，并按矩阵点数自动计算完整 `uint8` 帧长度。
+- 页面将 12 Bit 选择映射为项目现有的 `uint16le` 两字节承载格式；固定长度模式在矩阵尺寸或数据精度变化时自动同步 `frameLength` 和 `valueCount`。
+- 数据展示模板固定为 `heatmap-overview` 热力图总览和 `numeric-matrix` 数字矩阵。模板只负责填充现有 manifest 字段，不新增运行时分支，主项目和 SDK 继续消费同一份 `display-system.json`。
+
+### 左侧算法输出
+
+- 后端算法返回值兼容原有 `number[]`，并新增 `{ data: number[], metrics: Record<string, number|string|boolean> }`。命名指标通过实时帧的 `algorithmMetrics` 发布，同时保存在 `metrics.algorithm` 便于 SDK 和采集数据读取。
+- 页面安全算法可在 `algorithm-data.json.metrics` 中配置 `sum/average/max/min/activeCount/activeRatio` 聚合、阈值、乘数和偏移，不执行用户表达式或动态代码。
+- `display.sidebar.algorithmMetrics` 定义指标显示名称、单位和小数位；面板的 `pressure.metrics`、`area.metrics` 和 `primaryMetric` 通过 `algorithm.<id>` 引用算法输出。
+- 内置压力指标继续基于协议解析、线序和点位映射后的 `normalizedData` 计算；只有显式选择的 `algorithm.<id>` 才展示算法结果，避免可视算法污染基础统计。
+- 展示系统采集帧以对象格式保存通道矩阵、`normalizedData`、`algorithmMetrics` 和 `metrics`；历史回放识别该格式并恢复同一 payload，因此左侧算法指标在实时展示与回放中保持一致。没有 `displaySystemId` 的旧设备仍保存原数组格式。
+
+- 新增 `#/display-systems` 展示系统配置器，页面可新建或选择已有系统，并配置矩阵/端口、串口分帧与解码、线序、点位、后端 JSON 算法、渲染器、可视算法和默认展示方案。
+- `displaySystemWorkspaceService` 将页面输入限制写入 `userData/display-systems/<safe-id>/`，只允许 `none/json` 页面算法；保存后 runtime discovery、channel registry、parser binding 和 dispatcher 原地重载。
+- Display Systems HTTP 增加 catalog、editor、save、reload 接口，SDK `SensorClient.displaySystems` 暴露同样的管理能力。
+- Manifest 页面契约新增渲染器目录、可视算法目录和展示 profiles；主前端的方案菜单可以整体切换 renderer、visualization algorithm 和 widgets，也允许分别覆盖渲染方式与算法，并将选择按展示系统持久化。
+- `identity/normalize/threshold/smooth` 只处理绘制数组，原始压力统计、采集、回放和 CSV 保持使用后端标准矩阵，避免显示调节污染业务数据。
+- Display System runtime 采用逐插件故障隔离；动态 parser 或算法初始化失败只生成带错误原因的 binding，不中断其他系统和后端启动。
+- Display System 配置升级到兼容 v1 的 schema v2，同一 manifest 统一描述 `protocol`、线序、点位、算法、页面 layout/widgets/controls 和运行模式。
+- `displaySystemProtocol.js` 负责协议规范化、校验和字节解码，支持 delimiter/fixedLength 分帧及 8/16 位大小端数值；`serialParserManager` 可按 manifest 注册动态 parser channel。
+- 串口打开时，主后端按当前 `sensor.type + role` 查询 manifest runtime channel，优先使用配置的波特率和 parser channel；未声明 protocol 的旧系统继续使用原 parser。
+- `displaySystemFrameProcessorFactory` 按“协议解码 → 线序 → 点位 → 算法”处理帧，同时生成 `rawData/data/metrics`。JSON 算法内置，JavaScript 算法在禁用 `require/process` 且带超时的 VM context 中执行；Python/external 需要显式 runner。
+- 主前端启动后从 `/api/display-systems` 注册外部系统，并由 `ManifestDisplayRenderer` 按白名单 widget 渲染热力矩阵、数字矩阵和压力统计；前端 SDK 提供同样的 manifest 注册能力。
+- 打包态会创建并扫描 `userData/display-systems/`，因此用户可在不修改 asar 的情况下放入新配置，重启后加载。
+
+```mermaid
+flowchart LR
+    PACKAGE["Display System Package"] --> DISCOVERY["Discovery + Validation"]
+    DISCOVERY --> PARSER["Dynamic Serial Parser"]
+    PARSER --> PROCESSOR["Decode / Mapping / Algorithm"]
+    PROCESSOR --> PIPELINE["Realtime + Collection Pipeline"]
+    PIPELINE --> WS["WebSocket Push"]
+    DISCOVERY --> API["Display Systems API"]
+    API --> MAIN["Main Manifest Page"]
+    API --> SDK["SDK / Product Lab Registry"]
+```
+
 ## 2026-07-13 统一 Command 与通信边界
 
 - `shared/commandSchema.json` 是前端、后端与 SDK 共用的 command 清单，统一信封为 `{ type, payload, requestId }`。
@@ -7,6 +56,7 @@
 - 后端 `commandProtocol` 负责 schema 校验、标准命令到旧 handler 字段的单向转换；旧字段仅允许从 legacy WebSocket 兼容入口进入。
 - HTTP command 响应统一返回 `command.ack`，包含 `requestId`、`commandType`、`status`、`ok`、`code` 和可选 `data`。无效命令、未知命令、授权不足和执行失败使用稳定错误码及对应 HTTP 状态。
 - WebSocket 只承担实时帧、系统事件和 `subscribe/unsubscribe/getSubscriptions`；通过 WebSocket 提交新 command 会返回 `TRANSPORT_NOT_ALLOWED` ACK，旧字段暂时继续兼容。
+- 浏览器侧 Command Client 和前端 SDK 通过 `Reflect.apply(fetchImpl, globalThis, args)` 调用原生 `fetch`，满足 Electron `Window.fetch` 的接收者约束；授权页在 HTTP command 失败时统一退出等待状态并显示错误。
 
 ```mermaid
 flowchart LR
@@ -93,12 +143,22 @@ flowchart LR
 - `server.js` 中串口打开、WebSocket runtime、实时发布、小床 runtime、Display Systems 绑定和 frame pipeline 开始改用 `runtimeContext`。
 - 新增 `runtimeContextFactory` 和 `framePipelineFactory` 测试，覆盖 store 优先读取、闭包兜底和三路数据库映射。
 
-> 最新维护：2026-07-13。本次维护完成统一 command schema、HTTP 控制面、WebSocket 实时推送边界、标准 ACK/错误码，以及前端与 SDK 控制 client 迁移。
+> 最新维护：2026-07-14。本次维护完成 Display System manifest v2、动态串口协议、受限 JS 算法模块和主前端/SDK 动态页面注册。
 
 ## 当前维护记录
 
 | 日期 | 类型 | 说明 |
 | :--- | :--- | :--- |
+| 2026-07-14 | 新增功能 | 新增页面展示系统配置器和可写 HTTP API，可从串口协议一直配置到渲染方案，保存后立即重建 Display Systems runtime。 |
+| 2026-07-14 | 优化重构 | 展示系统配置器改为串口解析模板与数据展示模板优先，详细协议、映射、算法和左栏参数折叠为高级配置。 |
+| 2026-07-14 | 优化重构 | 串口配置收敛为传输形式、是否分包、波特率、分隔符和 8/12 Bit 五项，并新增固定长度原始帧，组成三个经典协议模板。 |
+| 2026-07-14 | 新增功能 | 左侧数据面板支持算法命名输出；后端算法可返回 `{data, metrics}`，页面安全算法可配置常用聚合指标。 |
+| 2026-07-14 | 优化重构 | 展示系统采集与回放保留 `normalizedData` 和算法命名指标，回放左侧面板与实时数据保持一致；旧设备数组存储格式不变。 |
+| 2026-07-14 | 新增功能 | Display System 新增可选择展示方案，支持从菜单组合渲染方式、可视算法和页面 widgets；SDK 同步提供 profile 查询接口。 |
+| 2026-07-14 | 优化重构 | Display System 升级为兼容 v1 的 manifest v2，新增协议分帧/解码、结构化页面、动态 parser、受限 JavaScript 算法 runner 和 SDK manifest 注册。 |
+| 2026-07-14 | 新增功能 | 主前端从 `/api/display-systems` 加载外部展示系统，传感器列表自动加入 manifest 系统，并通过通用页面容器渲染热力矩阵、数字矩阵和压力统计 widget。 |
+| 2026-07-14 | 测试完善 | 增加 v2 配置校验、固定长度/自定义分隔符 parser、协议数值解码、JavaScript 算法和前端 SDK manifest 注册测试。 |
+| 2026-07-13 | 修复缺陷 | 修复 Electron 渲染进程中 Command Client 将原生 `fetch` 作为实例方法调用导致的 `Illegal invocation`；同步修复前端 SDK，并为授权页补充 HTTP 命令失败反馈。 |
 | 2026-07-13 | 优化重构 | 新增共享 command schema、前后端协议适配器和统一 HTTP command client；WS 仅保留实时订阅与旧字段兼容。 |
 | 2026-07-13 | 测试完善 | 新增 command router 新协议、HTTP ACK/错误码、WS 传输拒绝和前端 command client 测试，根测试入口增加 command API 回归。 |
 | 2026-07-09 | 优化重构 | 新增 `client/src/components/demo/formulaEvaluator.js`，将 `handDemoPress.jsx` 的分压公式 `eval` 替换为受限公式编译器，移除前端最后一个 `no-eval` 警告。 |
@@ -192,6 +252,15 @@ flowchart LR
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
+| 2026-07-14 | 展示系统页面配置器 | 支持新建/编辑配置、自动或自定义线序点位、安全 JSON 算法、渲染方案选择和热加载。 |
+| 2026-07-14 | 展示系统快速模板 | 支持选择通用 8 位/12-bit ADC 串口解析模板及热力图/数字矩阵展示模板。 |
+| 2026-07-14 | 三种经典串口模板 | 支持经典 8 Bit 帧、经典 12 Bit ADC 和固定长度原始帧，固定帧长度随矩阵与数据精度自动计算。 |
+| 2026-07-14 | 左侧算法指标 | 支持配置算法输出 Key、聚合方式、阈值、单位、小数位和左侧显示位置。 |
+| 2026-07-14 | 算法指标采集回放 | 展示系统历史帧保存并恢复算法指标、基础统计和归一化矩阵，左侧自定义数据可随历史帧回放。 |
+| 2026-07-14 | 可选择展示方案 | Manifest 可声明 renderer、可视算法和 widgets 组合，主前端与 SDK 使用同一 profile 契约。 |
+| 2026-07-14 | 配置驱动展示系统 v2 | 同一展示系统目录可描述串口协议、线序、点位、算法数据、受限 JS 算法和页面 widgets；打包态从用户可写目录发现并接入主项目与 SDK。 |
+| 2026-07-14 | 动态展示页面基础 | 主前端可加载 manifest 展示系统并按数据源渲染通用热力矩阵、原始矩阵和压力统计，为产品实验室复用页面定义建立运行入口。 |
+| 2026-07-13 | 授权 Command 调用修复 | 浏览器 Command Client 保留原生 `fetch` 的全局调用上下文，恢复 `license.activate` HTTP 提交、ACK 和后续 WS 授权状态跳转，并增加接收者约束回归测试。 |
 | 2026-07-13 | 前后端通信协议统一 | 控制命令统一使用 `{ type, payload, requestId }` 经 HTTP 执行，响应返回 `command.ack`；WebSocket 只负责实时推送和订阅。 |
 | 2026-07-13 | 前端统一 Command Client | `Home`、授权、串口、回放和 SDK 控制入口统一走 command client，旧页面字段在前端过渡适配器中拆成标准命令。 |
 | 2026-07-09 | Demo 分压公式安全化 | `handDemoPress.jsx` 的公式编辑器改用 `compileValueFormula`，只允许 `y` 和白名单 Math 表达式，移除剩余 `eval` 与打包警告。 |
@@ -590,7 +659,7 @@ graph TD
 
 ## 7. 环境变量
 
-本项目为 Electron 桌面应用，不使用传统的 `.env` 环境变量文件。配置通过以下方式管理：
+本项目为 Electron 桌面应用，生产默认值由应用配置管理；前端开发服务允许用 Vite 环境变量覆盖本地 API 地址。配置通过以下方式管理：
 
 | 配置项 | 来源 | 描述 | 默认值 |
 | :--- | :--- | :--- | :--- |
@@ -600,6 +669,7 @@ graph TD
 | 数据库路径 | `configManager.js` | SQLite 数据库文件位置 | `./db/info.db` |
 | CSV 导出路径 | `configManager.js` | 采集数据 CSV 导出目录 | `./data/` |
 | 在线时间服务器 | `server.js` 硬编码 | 用于授权时间校验的 HTTPS 端点 | `https://worldtimeapi.org/api/ip` |
+| 展示系统 API | `VITE_API_BASE` | 开发或独立部署时覆盖展示系统配置器的后端地址 | `http://127.0.0.1:19245` |
 
 ## 8. 项目进度
 

@@ -73,10 +73,20 @@ const LicensePortal = () => {
     isSubmittingRef.current = false;
   }, []);
 
+  const handleCommandError = useCallback((error) => {
+    setEntering(false);
+    isSubmittingRef.current = false;
+    Modal.error({
+      title: '命令提交失败',
+      content: error?.message || '授权请求未能提交，请稍后重试',
+    });
+  }, []);
+
   const { connected: wsConnected, submitLicenseKey } = useMainWebSocket({
     onMessage: handleSocketMessage,
     onClose: handleSocketDisconnect,
     onError: handleSocketDisconnect,
+    onCommandError: handleCommandError,
   });
 
   const activeSolutionInfo = useMemo(

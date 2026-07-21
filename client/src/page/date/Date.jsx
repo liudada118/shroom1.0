@@ -84,12 +84,22 @@ export default function Date1() {
     }, 500)
   }, [isFromSystem, messageApi, nav])
 
+  const handleCommandError = useCallback((error) => {
+    setLoading(false)
+    isSubmitting.current = false
+    Modal.error({
+      title: '命令提交失败',
+      content: error?.message || '授权请求未能提交，请稍后重试',
+    })
+  }, [])
+
   const { connected: wsConnected, submitLicenseKey } = useMainWebSocket({
     onMessage: handleSocketMessage,
     onClose: () => {
       setLoading(false)
       isSubmitting.current = false
     },
+    onCommandError: handleCommandError,
   })
 
   const handleSubmit = () => {

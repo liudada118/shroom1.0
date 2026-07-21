@@ -18,6 +18,7 @@ const controller = createDisplaySystemRuntimeController({
       parserChannel: 'sit',
       outputChannel: 'sit',
       status: 'bound',
+      error: null,
     }];
   },
   createRuntimeDispatcher: ({ bindings, getSensorType }) => {
@@ -47,6 +48,7 @@ assert.deepStrictEqual(started, [1, 2]);
 assert.deepStrictEqual(stopped, [1]);
 assert.strictEqual(controller.getRuntimeBindings()[0].id, 'binding-2');
 assert.strictEqual(controller.getStatus().runtimeBindings.count, 1);
+assert.strictEqual(controller.getStatus().runtimeBindings.bindings[0].error, null);
 assert.strictEqual(controller.getStatus().runtimeDispatcher.activeHandlerCount, 1);
 
 controller.stop();

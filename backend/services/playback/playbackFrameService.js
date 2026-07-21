@@ -30,6 +30,31 @@ function createPlaybackFrameService(deps) {
   } = deps;
 
   /**
+   * 解析配置化展示系统保存的对象帧。旧数组帧和无效 JSON 返回 null。
+   *
+   * @param {{ data?: string }} row 历史数据行。
+   * @param {'sitData' | 'backData' | 'headData'} dataKey 当前通道字段。
+   * @returns {object | null} 可直接推送给前端的展示系统帧。
+   */
+  function parseDisplaySystemPlaybackFrame(row, dataKey) {
+    if (!row?.data) return null;
+    try {
+      const frame = JSON.parse(row.data);
+      if (
+        !frame
+        || Array.isArray(frame)
+        || !frame.displaySystemId
+        || !Array.isArray(frame[dataKey])
+      ) {
+        return null;
+      }
+      return frame;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /**
    * 解析历史行中的传感器帧，并标准化为压力/旋转/清零字段。
    *
    * @param {{ data?: string }} row 历史数据库行。
@@ -187,16 +212,21 @@ function createPlaybackFrameService(deps) {
     const headRow = headRows[index];
     const hasBack = backRows.length > 0;
     const baseFields = includeIndex ? { index } : {};
+    const storedSitDisplayFrame = parseDisplaySystemPlaybackFrame(sitRow, 'sitData');
+    const storedBackDisplayFrame = parseDisplaySystemPlaybackFrame(backRow, 'backData');
+    const storedHeadDisplayFrame = parseDisplaySystemPlaybackFrame(headRow, 'headData');
 
     let sitPayload = {
-      sitData: sitRow?.data,
+      ...(storedSitDisplayFrame || {}),
+      sitData: storedSitDisplayFrame?.sitData || sitRow?.data,
       ...(includeTime ? { time: sitRow?.timestamp } : {}),
       ...baseFields,
       backFlag: hasBack,
     };
     let backPayload = hasBack
       ? {
-        backData: backRow?.data,
+        ...(storedBackDisplayFrame || {}),
+        backData: storedBackDisplayFrame?.backData || backRow?.data,
         ...(includeTime ? { time: backRow?.timestamp } : {}),
         ...baseFields,
         sitFlag: sitRows.length > 0,
@@ -232,11 +262,12 @@ function createPlaybackFrameService(deps) {
       });
     }
 
-    const headPayload = isThreePortFile(sensorType)
+    const headPayload = storedHeadDisplayFrame || isThreePortFile(sensorType)
       ? {
-        headData: sensorType === wholeChairType
+        ...(storedHeadDisplayFrame || {}),
+        headData: storedHeadDisplayFrame?.headData || (sensorType === wholeChairType
           ? normalizeWholeChairFrame('head', headRow?.data)
-          : headRow?.data,
+          : headRow?.data),
         ...(includeTime ? { time: headRow?.timestamp } : {}),
         ...baseFields,
         sitFlag: sitRows.length > 0,
@@ -246,7 +277,7 @@ function createPlaybackFrameService(deps) {
     return { sitPayload, backPayload, headPayload };
   }
 
-  return { buildPayloads };
+  return { buildPayloads, parseDisplaySystemPlaybackFrame };
 }
 
 module.exports = {

@@ -9,6 +9,10 @@ function resolveParserChannel(serialParserManager, parserChannel) {
   const role = parserChannel?.role || parserChannel;
   if (!role) return null;
 
+  if (parserChannel?.protocol && parserChannel?.id && serialParserManager?.registerChannel) {
+    return serialParserManager.registerChannel(parserChannel.id, parserChannel.protocol);
+  }
+
   const channels = serialParserManager?.channels || {};
   const direct = Object.values(channels).find((channel) => channel === role);
   if (direct) return direct;
@@ -49,36 +53,9 @@ function bindDisplaySystemRuntimeChannels({
   const channels = runtimeChannelRegistry?.list?.() || [];
 
   return channels.map((channel) => {
-    const parserChannel = resolveParserChannel(serialParserManager, channel.parserChannel);
-    const outputPublisher = resolveOutputPublisher(frameOutputPipeline, channel.serialRole);
-    const frameProcessor = createFrameProcessor({ runtimeChannel: channel });
     const serialStatus = serialManager?.getStatus?.(channel.serialRole) || null;
     const runtimeMode = channel.runtimeMode || channel.metadata?.runtimeMode || null;
-
-    function handleFrame(frame) {
-      const processedFrame = frameProcessor.processFrame(frame);
-      if (getRuntimeMode({ runtimeMode }) === 'shadow') {
-        return {
-          published: false,
-          processedFrame,
-          reason: 'runtime mode shadow does not publish output',
-        };
-      }
-      if (!outputPublisher) {
-        return {
-          published: false,
-          processedFrame,
-          reason: 'output publisher is not available',
-        };
-      }
-      return {
-        published: true,
-        processedFrame,
-        output: outputPublisher(processedFrame),
-      };
-    }
-
-    return {
+    const bindingBase = {
       id: channel.id,
       displaySystemId: channel.displaySystemId,
       serialRole: channel.serialRole,
@@ -87,11 +64,57 @@ function bindDisplaySystemRuntimeChannels({
       metadata: { ...(channel.metadata || {}) },
       runtimeChannel: channel,
       serialStatus,
-      parserChannel,
       outputChannel: channel.serialRole,
-      status: parserChannel && outputPublisher ? 'bound' : 'registered',
-      handleFrame,
     };
+
+    try {
+      const parserChannel = resolveParserChannel(serialParserManager, channel.parserChannel);
+      const outputPublisher = resolveOutputPublisher(frameOutputPipeline, channel.serialRole);
+      const frameProcessor = createFrameProcessor({ runtimeChannel: channel });
+
+      function handleFrame(frame) {
+        const processedFrame = frameProcessor.processFrame(frame);
+        if (getRuntimeMode({ runtimeMode }) === 'shadow') {
+          return {
+            published: false,
+            processedFrame,
+            reason: 'runtime mode shadow does not publish output',
+          };
+        }
+        if (!outputPublisher) {
+          return {
+            published: false,
+            processedFrame,
+            reason: 'output publisher is not available',
+          };
+        }
+        return {
+          published: true,
+          processedFrame,
+          output: outputPublisher(processedFrame),
+        };
+      }
+
+      return {
+        ...bindingBase,
+        parserChannel,
+        status: parserChannel && outputPublisher ? 'bound' : 'registered',
+        error: null,
+        handleFrame,
+      };
+    } catch (error) {
+      const reason = error?.message || String(error);
+      return {
+        ...bindingBase,
+        parserChannel: null,
+        status: 'error',
+        error: reason,
+        handleFrame: () => ({
+          published: false,
+          reason: `display system runtime binding failed: ${reason}`,
+        }),
+      };
+    }
   });
 }
 

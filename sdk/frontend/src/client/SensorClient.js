@@ -6,6 +6,11 @@ export const DEFAULT_HTTP_ROUTES = Object.freeze({
   channels: '/api/channels',
   wsStatus: '/api/ws/status',
   sdkContract: '/api/sdk/contract',
+  displaySystems: '/api/display-systems',
+  displaySystemById: '/api/display-systems/:id',
+  displaySystemCatalog: '/api/display-systems/catalog',
+  displaySystemEditor: '/api/display-systems/:id/editor',
+  displaySystemReload: '/api/display-systems/reload',
   commands: '/api/commands',
   serialPorts: '/api/serial/ports',
   serialStatus: '/api/serial/status',
@@ -162,14 +167,14 @@ export class SensorClient {
       throw new Error('fetch implementation is not available');
     }
 
-    const response = await this.fetchImpl(`${this.httpBaseUrl}${path}`, {
+    const response = await Reflect.apply(this.fetchImpl, globalThis, [`${this.httpBaseUrl}${path}`, {
       method,
       headers: body == null ? undefined : { 'content-type': 'application/json' },
       body: body == null ? undefined : JSON.stringify(body),
-    });
+    }]);
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.message || `HTTP ${response.status}`);
+      throw new Error(payload.message || payload.error || `HTTP ${response.status}`);
     }
     return payload;
   }
@@ -218,6 +223,60 @@ export class SensorClient {
       method: 'POST',
       body: { type },
     }),
+  };
+
+  displaySystems = {
+    list: async () => {
+      const payload = await this.requestRaw(this.getRoute('displaySystems'));
+      return payload.displaySystems || payload;
+    },
+    detail: async (id) => {
+      const route = this.getRoute('displaySystemById').replace(':id', encodeURIComponent(id));
+      const payload = await this.requestRaw(route);
+      return payload.displaySystem || payload;
+    },
+    catalog: async () => {
+      const payload = await this.requestRaw(this.getRoute('displaySystemCatalog'));
+      return payload.catalog || payload;
+    },
+    editor: async (id) => {
+      const route = this.getRoute('displaySystemEditor').replace(':id', encodeURIComponent(id));
+      const payload = await this.requestRaw(route);
+      return payload.editor || payload;
+    },
+    save: async (input) => {
+      const payload = await this.requestRaw(this.getRoute('displaySystems'), {
+        method: 'POST',
+        body: input,
+      });
+      return payload.result || payload;
+    },
+    reload: async () => {
+      const payload = await this.requestRaw(this.getRoute('displaySystemReload'), {
+        method: 'POST',
+      });
+      return payload.displaySystems || payload;
+    },
+    register: async (registry) => {
+      if (!registry?.registerManifest) {
+        throw new Error('display registry with registerManifest() is required');
+      }
+      const status = await this.displaySystems.list();
+      const definitions = Array.isArray(status.runtimeDefinitions) ? status.runtimeDefinitions : [];
+      return definitions.map((runtimeDefinition) => registry.registerManifest({
+        id: runtimeDefinition.displayMetadata?.id,
+        name: runtimeDefinition.displayMetadata?.name,
+        sensor: {
+          type: runtimeDefinition.sensorDefinition?.type,
+          matrix: runtimeDefinition.sensorDefinition?.matrix,
+          ports: runtimeDefinition.sensorDefinition?.ports,
+        },
+        protocol: runtimeDefinition.sensorDefinition?.protocol,
+        algorithm: runtimeDefinition.sensorDefinition?.algorithm,
+        displayMetadata: runtimeDefinition.displayMetadata,
+        display: runtimeDefinition.displayMetadata,
+      }));
+    },
   };
 
   /**

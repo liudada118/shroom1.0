@@ -29,6 +29,7 @@ const frameStore = new FrameStore();
 const registry = createDefaultDisplayRegistry();
 
 await client.getContract();
+await client.displaySystems.register(registry);
 
 client.on('frame', (frame) => {
   frameStore.update(frame);
@@ -46,6 +47,12 @@ client.send(sensorCommands.serialOpen({
 const system = registry.get('hand0205');
 const rendererKey = registry.getRendererKey('hand0205', 'normal');
 ```
+
+Manifest v2 的 `display.profiles` 可以组合 `renderers`、`visualizationAlgorithms` 和 widgets。SDK 可通过 `registry.getProfiles(sensorType)` 与 `registry.getProfile(sensorType, profileId)` 获取可选择方案，再由产品实验室或独立客户端映射到自己的菜单和渲染组件。
+
+`SensorClient.displaySystems` 还提供 `catalog()`、`editor(id)`、`save(input)` 和 `reload()`，产品实验室可以复用主项目相同的页面配置与热加载接口。
+
+`client.displaySystems.register(registry)` 会读取 `/api/display-systems` 的 runtime definitions，并通过 `DisplayRegistry.registerManifest()` 注册打包后新增的展示系统。注册结果包含页面 layout、widgets、controls、协议摘要和算法声明，可供主项目或产品实验室使用同一份 manifest 构建页面。
 
 `legacyProtocol: true` 会把标准命令转换成当前老后端仍在使用的消息格式，例如：
 

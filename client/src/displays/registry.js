@@ -109,8 +109,46 @@ export const DISPLAY_REGISTRY = {
   bed4096num: defineDisplay('bed4096num', { matrix: MATRIX_64 }),
 };
 
+const RUNTIME_DISPLAY_REGISTRY = new Map();
+
+export function registerRuntimeDisplayDefinition(runtimeDefinition = {}) {
+  const metadata = runtimeDefinition.displayMetadata || runtimeDefinition;
+  const sensor = runtimeDefinition.sensorDefinition || {};
+  const sensorType = sensor.type || metadata.sensorType;
+  if (!sensorType) return null;
+
+  const views = Array.isArray(metadata.views) ? metadata.views : [];
+  const definition = defineDisplay(sensorType, {
+    label: metadata.name || sensorType,
+    matrix: metadata.matrix || sensor.matrix,
+    channels: sensor.ports || ['sit'],
+    defaultMode: metadata.defaultView || views[0]?.id || views[0]?.type || 'num',
+  });
+  definition.source = 'manifest';
+  definition.displaySystemId = metadata.id || sensor.id;
+  definition.protocol = metadata.protocol || sensor.protocol || null;
+  definition.algorithmType = metadata.algorithmType || sensor.algorithm?.type || 'none';
+  definition.page = {
+    layout: metadata.layout,
+    views,
+    widgets: metadata.widgets || views,
+    controls: metadata.controls || {},
+    sidebar: metadata.sidebar || null,
+    renderers: metadata.renderers || [],
+    visualizationAlgorithms: metadata.visualizationAlgorithms || [],
+    profiles: metadata.profiles || [],
+    defaultProfile: metadata.defaultProfile || null,
+  };
+  RUNTIME_DISPLAY_REGISTRY.set(sensorType, definition);
+  return definition;
+}
+
+export function listRuntimeDisplayDefinitions() {
+  return [...RUNTIME_DISPLAY_REGISTRY.values()];
+}
+
 export function getDisplayDefinition(sensorType) {
-  return DISPLAY_REGISTRY[sensorType] || null;
+  return RUNTIME_DISPLAY_REGISTRY.get(sensorType) || DISPLAY_REGISTRY[sensorType] || null;
 }
 
 export function getDisplayMatrix(sensorType, fallback = MATRIX_32) {

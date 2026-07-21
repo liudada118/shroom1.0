@@ -54,6 +54,13 @@ class Com extends React.Component {
 const arr = ['meanPres', 'maxPres', 'totalPres', 'presStan']
 const arrArea = ['point', 'area',]
 const footArr = ['meanPres', 'maxPres', 'point', 'area',]
+const CONFIGURABLE_METRICS = {
+    totalPressure: { key: 'totalPres', label: '总压力', eng: 'Total Pressure', color: '#F05D5E', decimals: 2 },
+    averagePressure: { key: 'meanPres', label: '平均压力', eng: 'Average Pressure', color: '#2A99FF', decimals: 2 },
+    maxPressure: { key: 'maxPres', label: '最大压力', eng: 'Maximum Pressure', color: '#FF2A2A', decimals: 2 },
+    activePoints: { key: 'point', label: '有效点数', eng: 'Active Points', color: '#FFA63F', decimals: 0, unit: '个' },
+    area: { key: 'area', label: '受压面积', eng: 'Pressure Area', color: '#20B486', decimals: 2 },
+}
 let ctx1, ctx2, ctx3
 const PET_CARE_IN_BED_POSTURE_STATES = new Set([1, 2, 3])
 const PET_CARE_MONITOR_TYPES = new Set(['petCare', 'petCareMini'])
@@ -261,6 +268,7 @@ class Aside extends React.Component {
             petInBed: null,
             temperatureData: [],
             temperatureAvg: '--',
+            algorithmMetrics: {},
         }
         this.canvas = React.createRef()
         this._petHeartRateSimulator = createPetHeartRateSimulatorState()
@@ -324,6 +332,7 @@ class Aside extends React.Component {
     }
 
     drawChart({ ctx, arr, max, canvas, index }) {
+        if (!ctx || !canvas || !Array.isArray(arr) || arr.length === 0) return
         // 清空画布
         let min = Math.min(...arr)
         let realMax = Math.max(...arr)
@@ -527,6 +536,85 @@ class Aside extends React.Component {
         }
     }
 
+    getConfiguredMetric(metricId = '', sidebar, areaUnit) {
+        if (metricId.startsWith('algorithm.')) {
+            const id = metricId.slice(10)
+            const definition = (sidebar.algorithmMetrics || []).find((metric) => metric.id === id)
+            if (!definition) return null
+            return {
+                label: definition.label || id,
+                eng: `Algorithm · ${id}`,
+                color: '#B88AF2',
+                decimals: definition.decimals ?? 2,
+                unit: definition.unit || '',
+                value: this.state.algorithmMetrics?.[id],
+            }
+        }
+        const metric = CONFIGURABLE_METRICS[metricId]
+        if (!metric) return null
+        return {
+            ...metric,
+            unit: metricId === 'area' ? areaUnit : metric.unit,
+            value: this.state[metric.key],
+        }
+    }
+
+    formatConfiguredMetricValue(value, decimals) {
+        const numeric = Number(value)
+        if (value !== '' && value !== null && value !== undefined && Number.isFinite(numeric)) {
+            return numeric.toFixed(decimals)
+        }
+        return value === null || value === undefined || value === '' ? '--' : String(value)
+    }
+
+    renderConfiguredMetric(metricId, sidebar, areaUnit) {
+        const metric = this.getConfiguredMetric(metricId, sidebar, areaUnit)
+        if (!metric) return null
+        const value = this.formatConfiguredMetricValue(metric.value, metric.decimals)
+        return (
+            <div className='dataItem' key={metricId}>
+                <div className='dataItemCircle'>
+                    <div className='circleItem' style={{ backgroundColor: metric.color }}></div>
+                    <div>{metric.label}</div>
+                </div>
+                <div className='dataIteminfo'>
+                    <div className='standardColor'>{metric.eng}</div>
+                    <div>{value}{metric.unit ? <span style={{ color: '#999' }}> {metric.unit}</span> : null}</div>
+                </div>
+            </div>
+        )
+    }
+
+    renderConfigurableSidebar(sidebar) {
+        const pressure = sidebar.pressure || {}
+        const area = sidebar.area || {}
+        const primary = this.getConfiguredMetric(pressure.primaryMetric, sidebar, area.unit)
+            || this.getConfiguredMetric('totalPressure', sidebar, area.unit)
+        const primaryValue = this.formatConfiguredMetricValue(primary.value, primary.decimals)
+        const primaryUnit = primary.unit
+        return (
+            <div className='aside'>
+                {area.visible !== false ? (
+                    <div className="asideContent firstAside">
+                        <h2 className="asideTitle">{area.title || 'Pressure Area'}</h2>
+                        <canvas id="myChart2" style={{ height: `${150 * this.state.fontSize}px`, width: '100%' }}></canvas>
+                        {(area.metrics || []).map((metricId) => this.renderConfiguredMetric(metricId, sidebar, area.unit))}
+                    </div>
+                ) : null}
+                {pressure.visible !== false ? (
+                    <div className="asideContent firstAside">
+                        <h2 className="asideTitle">{pressure.title || 'Pressure Data'}</h2>
+                        <span className='pressData'>{primaryValue}</span>
+                        {primaryUnit ? <span style={{ color: '#999' }}> {primaryUnit}</span> : null}
+                        <div className='pressTitle standardColor'>{primary.eng}</div>
+                        <canvas id="myChart1" style={{ height: `${150 * this.state.fontSize}px`, width: '100%' }}></canvas>
+                        {(pressure.metrics || []).map((metricId) => this.renderConfiguredMetric(metricId, sidebar, area.unit))}
+                    </div>
+                ) : null}
+            </div>
+        )
+    }
+
     render() {
         const { t, i18n } = this.props;
         const isGlove = ['hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket'].includes(this.props.matrixName);
@@ -566,6 +654,10 @@ class Aside extends React.Component {
                 decimals: 0,
             },
         ]
+
+        if (this.props.sidebarConfig) {
+            return this.renderConfigurableSidebar(this.props.sidebarConfig)
+        }
 
         const onBedStatus = {
             0: {

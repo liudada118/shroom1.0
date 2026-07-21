@@ -321,6 +321,10 @@ function getDisplaySystemById(id) {
   return appRuntime.displaySystems.getById(id);
 }
 
+function getDisplaySystemEditorById(id) {
+  return appRuntime.displaySystems.getEditorById(id);
+}
+
 const serialPortFilterService = createSerialPortFilterService({ logger });
 const {
   getPort,
@@ -979,13 +983,14 @@ function closeManagedSerialPort(role, reason) {
 
 function openSitSerialPort(portPath, reason = 'open sit') {
   if (!portPath) return null;
+  const configured = appRuntime.displaySystems.getSerialConfig(runtimeContext.getSensorType(), serialRoles.SIT);
   return openManagedSerialPort(serialRoles.SIT, {
     path: portPath,
-    baudRate: runtimeContext.getBaudRate(),
+    baudRate: configured?.baudRate || runtimeContext.getBaudRate(),
     reconnect: true,
-    parserChannel: runtimeContext.getSensorType() === 'bigBed'
+    parserChannel: configured?.parserChannel || (runtimeContext.getSensorType() === 'bigBed'
       ? serialParserManager.channels.BIG_BED_SIT
-      : getSitParserChannel(),
+      : getSitParserChannel()),
     onOpenError: (err) => logger.warn(err, `${reason} err`),
   });
 }
@@ -993,14 +998,15 @@ function openSitSerialPort(portPath, reason = 'open sit') {
 function openBackSerialPort(portPath, reason = 'open back') {
   if (!portPath) return null;
   const useRawMinzhenText = runtimeContext.getSensorType() === MINZHEN_TYPE;
+  const configured = appRuntime.displaySystems.getSerialConfig(runtimeContext.getSensorType(), serialRoles.BACK);
   if (useRawMinzhenText) {
     minzhenSensorExtractor.reset();
   }
   return openManagedSerialPort(serialRoles.BACK, {
     path: portPath,
-    baudRate: runtimeContext.getBaudRate(),
+    baudRate: configured?.baudRate || runtimeContext.getBaudRate(),
     reconnect: true,
-    parserChannel: useRawMinzhenText ? undefined : serialParserManager.channels.BACK,
+    parserChannel: useRawMinzhenText ? undefined : (configured?.parserChannel || serialParserManager.channels.BACK),
     dataHandler: useRawMinzhenText ? handleMinzhenSensorPortData : undefined,
     onOpenError: (err) => logger.warn(err, `${reason} err`),
   });
@@ -1008,11 +1014,12 @@ function openBackSerialPort(portPath, reason = 'open back') {
 
 function openHeadSerialPort(portPath, reason = 'open head') {
   if (!portPath) return null;
+  const configured = appRuntime.displaySystems.getSerialConfig(runtimeContext.getSensorType(), serialRoles.HEAD);
   return openManagedSerialPort(serialRoles.HEAD, {
     path: portPath,
-    baudRate: runtimeContext.getBaudRate(),
+    baudRate: configured?.baudRate || runtimeContext.getBaudRate(),
     reconnect: true,
-    parserChannel: serialParserManager.channels.HEAD,
+    parserChannel: configured?.parserChannel || serialParserManager.channels.HEAD,
     onOpenError: (err) => logger.warn(err, `${reason} err`),
   });
 }
@@ -1684,6 +1691,8 @@ const httpApp = createHttpApp({
   controlCommandService,
   getChannelBusStatus,
   getDisplaySystemById,
+  getDisplaySystemBuilderCatalog: appRuntime.displaySystems.getBuilderCatalog,
+  getDisplaySystemEditorById,
   getDisplaySystemStatus,
   getPort,
   getRealtimeChannels,
@@ -1695,6 +1704,8 @@ const httpApp = createHttpApp({
   logger,
   pdfPath,
   serialManager,
+  reloadDisplaySystems: appRuntime.displaySystems.reload,
+  saveDisplaySystem: appRuntime.displaySystems.save,
 });
 // ===== OneStep 足压报告 HTTP 服务状态 =====
 // 默认仅监听 127.0.0.1，供前端上传截图、生成 PDF 和调用控制 API。

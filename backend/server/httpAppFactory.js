@@ -41,6 +41,8 @@ function createHttpApp({
   controlCommandService,
   getChannelBusStatus,
   getDisplaySystemById = () => null,
+  getDisplaySystemBuilderCatalog = () => ({}),
+  getDisplaySystemEditorById = () => null,
   getDisplaySystemStatus = () => ({ count: 0, systems: [] }),
   getPort,
   getRealtimeChannels,
@@ -52,6 +54,8 @@ function createHttpApp({
   logger,
   pdfPath,
   serialManager,
+  reloadDisplaySystems = () => ({}),
+  saveDisplaySystem = () => null,
 }) {
   const httpApp = express();
   httpApp.use(cors());
@@ -88,6 +92,36 @@ function createHttpApp({
     res.json({
       displaySystems: getDisplaySystemStatus(),
     });
+  });
+
+  httpApp.get(HTTP_ROUTES.displaySystemCatalog, (req, res) => {
+    res.json({ catalog: getDisplaySystemBuilderCatalog() });
+  });
+
+  httpApp.post(HTTP_ROUTES.displaySystemReload, (req, res) => {
+    res.json({ displaySystems: reloadDisplaySystems() });
+  });
+
+  httpApp.get(HTTP_ROUTES.displaySystemEditor, (req, res) => {
+    const editor = getDisplaySystemEditorById(req.params.id);
+    if (!editor) {
+      res.status(404).json({ error: 'display system not found', id: req.params.id });
+      return;
+    }
+    res.json({ editor });
+  });
+
+  httpApp.post(HTTP_ROUTES.displaySystems, (req, res) => {
+    try {
+      const result = saveDisplaySystem(req.body);
+      res.status(req.body?.overwrite ? 200 : 201).json({ result });
+    } catch (error) {
+      res.status(error.code === 'DISPLAY_SYSTEM_EXISTS' ? 409 : 400).json({
+        error: error.message,
+        code: error.code || 'DISPLAY_SYSTEM_INVALID',
+        details: error.details || [],
+      });
+    }
   });
 
   httpApp.get(`${HTTP_ROUTES.displaySystems}/:id`, (req, res) => {

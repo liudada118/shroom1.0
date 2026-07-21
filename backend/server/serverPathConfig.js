@@ -42,6 +42,7 @@ function createServerPathConfig({
     : runtimeWritableRoot;
 
   const filePath = path.join(runtimeWritableRoot, 'db');
+  const displaySystemsPath = path.join(runtimeWritableRoot, 'display-systems');
   const csvPath = path.join(exportRoot, 'data');
   const imgPath = path.join(runtimeWritableRoot, 'img');
   const pdfPath = isPackagedRuntime
@@ -51,11 +52,12 @@ function createServerPathConfig({
   const writableNameTxt = getWritableConfigFile();
   const configCandidates = getConfigFileCandidates();
 
-  [filePath, csvPath, imgPath, pdfPath].forEach(ensureDirectory);
+  [filePath, csvPath, imgPath, pdfPath, displaySystemsPath].forEach(ensureDirectory);
 
   return {
     configCandidates,
     csvPath,
+    displaySystemsPath,
     exportRoot,
     filePath,
     imgPath,

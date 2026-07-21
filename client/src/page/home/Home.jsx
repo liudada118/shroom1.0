@@ -102,6 +102,8 @@ import { WebGLCanvas } from "../../components/webgl/WebGL.HeatMap copy 2";
 import { WS_URLS } from "../../constants";
 import { createJsonWebSocket } from "../../services/ws/messages";
 import { commandClient } from "../../services/command/commandClient";
+import { getDisplayDefinition } from '../../displays/registry';
+import ManifestDisplayRenderer from '../../components/displaySystem/ManifestDisplayRenderer';
 import {
   buildBasicControlCollectionRow,
   buildExtendedControlCollectionRow,
@@ -611,6 +613,10 @@ const getConfig = ({ sensorType, mode }) => {
 }
 
 const getDefaultModeForMatrix = (matrixName, currentMode = "normal") => {
+  const runtimeDefinition = getDisplayDefinition(matrixName)
+  if (runtimeDefinition?.source === 'manifest') {
+    return runtimeDefinition.defaultMode || 'num'
+  }
   if (matrixName === WHOLE_CHAIR_MATRIX) {
     return "normal";
   }
@@ -964,6 +970,24 @@ class Home extends React.Component {
     });
 
     return true;
+  }
+
+  handleManifestSidebarData = ({ values = [], metrics = {}, algorithmMetrics = {} }) => {
+    this.data.current?.changeData({
+      totalPres: metrics.totalPressure || 0,
+      meanPres: metrics.averagePressure || 0,
+      maxPres: metrics.maxPressure || 0,
+      point: metrics.activePoints || 0,
+      area: metrics.area || 0,
+      algorithmMetrics,
+    });
+    if (!values.length) return;
+    const chartMax = values.reduce((max, value) => {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? Math.max(max, numeric) : max;
+    }, 1);
+    this.data.current?.handleCharts(values, chartMax);
+    this.data.current?.handleChartsArea(values, chartMax);
   }
 
   appendControlCollectionRow = (row) => {
@@ -3426,6 +3450,7 @@ class Home extends React.Component {
     const text2 = t('boxSelection');
     const textReset = t('reset')
     const modeCanvasMatrixName = `${this.state.matrixName}:${this.state.numMatrixFlag}`;
+    const runtimeDisplayDefinition = getDisplayDefinition(this.state.matrixName)
     const contentReset = (
       <div>
         <p>{t('resetContent')}</p>
@@ -3884,10 +3909,24 @@ class Home extends React.Component {
             colFingerData={this.colFingerData.bind(this)}
           />
 
+          {runtimeDisplayDefinition?.source === 'manifest' ? (
+            <ManifestDisplayRenderer
+              definition={runtimeDisplayDefinition}
+              onSidebarData={this.handleManifestSidebarData}
+            />
+          ) : null}
+
 
 
           {this.state.matrixName != "robot0428" ? <CanvasCom matrixName={modeCanvasMatrixName}>
-            <Aside i18n={i18n} locale={this.state.locale} ref={this.data} matrixName={this.state.matrixName} numMatrixFlag={this.state.numMatrixFlag} />
+            <Aside
+              i18n={i18n}
+              locale={this.state.locale}
+              ref={this.data}
+              matrixName={this.state.matrixName}
+              numMatrixFlag={this.state.numMatrixFlag}
+              sidebarConfig={runtimeDisplayDefinition?.source === 'manifest' ? runtimeDisplayDefinition.page?.sidebar : null}
+            />
           </CanvasCom> : ''}
 
           {this.state.numMatrixFlag == "num" &&

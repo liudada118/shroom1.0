@@ -20,6 +20,7 @@ export {
 export {
   DisplayRegistry,
   createDisplaySystem,
+  createDisplaySystemFromManifest,
 } from './src/display/DisplayRegistry.js';
 export {
   DEFAULT_DISPLAY_SYSTEMS,

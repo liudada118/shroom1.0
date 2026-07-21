@@ -1,5 +1,86 @@
 # Display Systems
 
+## 2026-07-14 Manifest v2
+
+页面新建配置的实际目录：
+
+- 开发环境：`<projectRoot>/display-systems/<系统ID>/`。
+- 打包环境：Electron `app.getPath('userData')/display-systems/<系统ID>/`；Windows 默认通常位于 `%APPDATA%/Shroom/display-systems/<系统ID>/`。
+- 固定文件：`display-system.json`、`line-order.json`、`point-order.json`；使用 JSON 后端算法时还会生成 `algorithm-data.json`。
+
+`display.sidebar` 配置左侧可视化数据面板。`pressure` 可选择总压力、平均压力、最大压力、有效点数和面积，并指定主指标；`area` 可设置有效点阈值、单点面积和面积单位。该面板始终基于映射后的原始压力矩阵统计，不受 `normalize/threshold/smooth` 等前端可视算法影响。
+
+页面配置器的串口主流程按传输形式、是否按分隔符分包、波特率、分隔符/完整帧字节数和 8/12 Bit 数据精度组织。协议模板提供经典 8 Bit 帧、经典 12 Bit ADC 和固定长度原始帧三种选择；12 Bit 使用 `uint16le` 两字节承载，固定帧长度按矩阵点数自动计算。数据展示继续提供热力图总览和数字矩阵。模板参数由 `GET /api/display-systems/catalog` 返回，选择后写入标准 `protocol`、`display` 和 `metadata.builder` 字段。
+
+算法输出支持两种兼容返回值：旧算法继续返回 `number[]`；需要向页面暴露业务结果的算法返回 `{ data, metrics }`。`metrics` 只接受有限数字、字符串或布尔值，并通过实时帧的 `algorithmMetrics` 发布。页面 JSON 算法也可以在 `algorithm-data.json.metrics` 声明安全聚合指标，例如：
+
+```json
+{
+  "metrics": [
+    {
+      "id": "supportRate",
+      "operation": "activeRatio",
+      "threshold": 20,
+      "scale": 100
+    }
+  ]
+}
+```
+
+左侧通过 `display.sidebar.algorithmMetrics` 定义标签、单位和精度，再使用 `algorithm.supportRate` 作为面板指标或主指标。
+
+采集开启时，带 `displaySystemId` 的帧会以对象格式保存通道矩阵、`normalizedData`、`algorithmMetrics` 和 `metrics`。通用回放服务会恢复这些字段，因此算法指标可以在实时和历史模式下复用；旧设备的数组存储格式保持不变。
+
+运行时按展示系统逐项绑定；协议注册或算法模块初始化失败时，该系统会进入 `error` 状态并记录原因，不会阻止其他展示系统和后端服务启动。
+
+`display.renderers`、`display.visualizationAlgorithms` 和 `display.profiles` 构成可复用的展示方案目录。每个 profile 可以选择已有渲染器、可视算法和 widgets；主前端会显示方案/渲染方式/可视算法菜单，并按展示系统保存用户选择。内置可视算法为 `identity`、`normalize`、`threshold`、`smooth`，只作用于绘制数据，采集、回放、CSV 和压力统计继续使用后端标准矩阵。
+
+`#/display-systems` 是页面配置器。它通过 `GET /api/display-systems/catalog` 获取可选协议、算法和渲染目录，通过 `POST /api/display-systems` 将 manifest、线序、点位和算法数据安全写入用户目录；保存后 discovery、runtime registry、parser binding 和 dispatcher 会原地重建，无需再次重启。
+
+Manifest v2 在原有线序、点位和算法数据文件基础上，增加可执行串口协议、结构化页面和算法模块契约。v1 配置继续兼容；新系统应使用 `schemaVersion: 2`。
+
+```text
+custom-system/
+  display-system.json
+  line-order.json
+  point-order.json
+  algorithm-data.json
+  algorithm.js            # algorithm.type=js 时可选
+  assets/                 # 模型和纹理等可选资源
+```
+
+核心数据流：
+
+```mermaid
+flowchart LR
+  Manifest["display-system.json"] --> Parser["Dynamic Serial Parser"]
+  Parser --> Decode["Protocol Decode"]
+  Decode --> Mapping["Line / Point Mapping"]
+  Mapping --> Algorithm["JSON / Sandboxed JS Algorithm"]
+  Algorithm --> Pipeline["Realtime / Collection Pipeline"]
+  Manifest --> Page["Display Page Metadata"]
+  Page --> Main["Main Client"]
+  Page --> SDK["Frontend SDK Registry"]
+```
+
+`protocol` 当前支持：
+
+- `framing.type=delimiter`：按字节序列分帧。
+- `framing.type=fixedLength`：按固定字节长度分帧。
+- `decoding.valueType`：`uint8/int8/uint16le/uint16be/int16le/int16be`。
+- `decoding.byteOffset/valueCount`：从帧中选择压力数据区域。
+
+`display.views/widgets` 使用结构化定义，内置页面容器支持 `heatmap`、`matrix`、`raw2d` 和 `pressureStats`。复杂模型继续通过受信任 renderer 插件扩展，不允许 manifest 注入任意 React 代码。
+
+算法执行规则：
+
+- `none`：不执行算法。
+- `json`：执行 `scale/offset/clamp/zeroBelow` 数值操作。
+- `js`：加载 `algorithm.entry`，在无 `require/process` 的 VM context 中同步执行并限制超时；模块必须 `module.exports = (values, context) => number[]`。
+- `python/external`：契约保留，但当前必须注册专用 runner，否则返回明确错误。
+
+打包后自定义目录为 Electron `userData/display-systems/`。应用启动会创建并扫描该目录；通过页面配置器新增或修改时会立即重新发现和绑定，手工复制文件后可调用 `POST /api/display-systems/reload`。
+
 ## 2026-07-08 Runtime 调度策略
 
 Display Systems 现在不会无条件监听 legacy parser channel。默认保护的通道是 `sit`、`back`、`head`、`sensor`，避免新 manifest runtime 和旧 `sensors/runtime` 同时消费同一帧导致重复入库、重复推送或状态竞争。

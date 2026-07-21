@@ -9,6 +9,16 @@ const ALGORITHM_OPERATION_TYPES = new Set([
   'clamp',
   'zeroBelow',
 ]);
+const ALGORITHM_METRIC_OPERATION_TYPES = new Set([
+  'sum',
+  'average',
+  'max',
+  'min',
+  'activeCount',
+  'activeRatio',
+  'external',
+]);
+const SAFE_METRIC_ID = /^[A-Za-z][A-Za-z0-9._-]*$/;
 
 function readJsonDefinition(filePath, readJsonFile) {
   try {
@@ -113,6 +123,33 @@ function validateAlgorithmDataDefinition(definition, { source }) {
     if (!ALGORITHM_OPERATION_TYPES.has(operation.type)) {
       errors.push(`${source}: operations[${offset}].type is not supported`);
     }
+  });
+
+  const metricIds = new Set();
+  const metrics = Array.isArray(definition.metrics) ? definition.metrics : [];
+  if (definition.metrics != null && !Array.isArray(definition.metrics)) {
+    errors.push(`${source}: metrics must be an array`);
+  }
+  metrics.forEach((metric, offset) => {
+    if (!metric || typeof metric !== 'object' || Array.isArray(metric)) {
+      errors.push(`${source}: metrics[${offset}] must be an object`);
+      return;
+    }
+    if (!SAFE_METRIC_ID.test(String(metric.id || ''))) {
+      errors.push(`${source}: metrics[${offset}].id is invalid`);
+    } else if (metricIds.has(metric.id)) {
+      errors.push(`${source}: duplicate metric id ${metric.id}`);
+    } else {
+      metricIds.add(metric.id);
+    }
+    if (!ALGORITHM_METRIC_OPERATION_TYPES.has(metric.operation)) {
+      errors.push(`${source}: metrics[${offset}].operation is not supported`);
+    }
+    ['threshold', 'scale', 'offset'].forEach((key) => {
+      if (metric[key] != null && typeof metric[key] !== 'number') {
+        errors.push(`${source}: metrics[${offset}].${key} must be a number`);
+      }
+    });
   });
 
   return errors;

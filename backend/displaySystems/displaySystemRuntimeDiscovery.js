@@ -59,19 +59,28 @@ function createDisplaySystemRuntimeDiscovery({
   });
   const registry = createDisplaySystemRegistry({ logger });
   const runtimeRegistry = createDisplaySystemRuntimeRegistry({ logger });
-  const discovery = discoverDisplaySystems(roots, {
-    logger,
-    validateFiles,
-  });
+  let discoveryErrors = [];
 
-  const configs = discovery.configs.map((config) => ({
-    ...config,
-    runtimeDefinition: attachRuntimeChannelPlan(buildDisplaySystemRuntimeDefinition(config)),
-  }));
-  registry.registerMany(configs);
-  configs.forEach((config) => {
-    runtimeRegistry.registerMany(config.runtimeDefinition?.runtimeChannels || []);
-  });
+  function reload() {
+    const discovery = discoverDisplaySystems(roots, {
+      logger,
+      validateFiles,
+    });
+    const configs = discovery.configs.map((config) => ({
+      ...config,
+      runtimeDefinition: attachRuntimeChannelPlan(buildDisplaySystemRuntimeDefinition(config)),
+    }));
+    registry.clear();
+    runtimeRegistry.clear();
+    registry.registerMany(configs);
+    configs.forEach((config) => {
+      runtimeRegistry.registerMany(config.runtimeDefinition?.runtimeChannels || []);
+    });
+    discoveryErrors = discovery.errors;
+    return configs;
+  }
+
+  reload();
 
   return {
     roots,
@@ -83,12 +92,16 @@ function createDisplaySystemRuntimeDiscovery({
         roots,
         runtimeDefinitions: registry.list().map((system) => system.runtimeDefinition),
         runtimeChannelRegistry: runtimeRegistry.snapshot(),
-        errors: discovery.errors,
+        errors: discoveryErrors,
       };
     },
     getById(id) {
       return registry.get(id);
     },
+    getBySensorType(sensorType) {
+      return registry.findBySensorType(sensorType);
+    },
+    reload,
   };
 }
 

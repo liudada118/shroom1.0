@@ -49,6 +49,10 @@ function createDisplaySystemRuntimeRegistry({ logger } = {}) {
     return list().filter((channel) => channel.displaySystemId === displaySystemId);
   }
 
+  function clear() {
+    channels.clear();
+  }
+
   function snapshot() {
     const runtimeChannels = list();
     return {
@@ -68,6 +72,7 @@ function createDisplaySystemRuntimeRegistry({ logger } = {}) {
   }
 
   return {
+    clear,
     get,
     list,
     listByDisplaySystem,

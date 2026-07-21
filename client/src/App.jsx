@@ -30,6 +30,7 @@ const Can = lazy(() => import("./components/demo/can"));
 const Num3D = lazy(() => import("./components/num/NumWs"));
 const License = lazy(() => import("./page/license/License"));
 const LicensePortal = lazy(() => import("./page/licensePortal/LicensePortal"));
+const DisplaySystemBuilder = lazy(() => import("./page/displaySystemBuilder/DisplaySystemBuilder"));
 i18next.init({
   resources: {
     en: {
@@ -389,6 +390,7 @@ function App() {
           <Home i18n={i18next} />
           // </I18nProvider> 
         } />
+        <Route exact path="/display-systems" element={<DisplaySystemBuilder />} />
         <Route exact path="/heatmap" element={<Heatmap />} />
         <Route exact path="/num/:type" element={<Demo />} />
         <Route exact path="/handReal" element={<HandDemo />} />

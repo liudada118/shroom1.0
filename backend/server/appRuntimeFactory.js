@@ -1,6 +1,8 @@
 const {
   createDisplaySystemRuntimeDiscovery,
+  createDisplaySystemWorkspaceService,
 } = require('../displaySystems');
+const path = require('path');
 const {
   buildRuntimeBindingSnapshot,
   createDisplaySystemRuntimeController,
@@ -33,6 +35,18 @@ function createAppRuntime({
     runtimeChannelRegistry: displaySystemRuntimeDiscovery.runtimeRegistry,
     logger,
   });
+  const displaySystemWorkspace = createDisplaySystemWorkspaceService({
+    writableRoot: path.join(runtimeWritableRoot, 'display-systems'),
+  });
+  let runtimeBindingOptions = null;
+
+  function reloadDisplaySystems() {
+    displaySystemRuntimeDiscovery.reload();
+    if (runtimeBindingOptions) {
+      displaySystemRuntimeController.bind(runtimeBindingOptions);
+    }
+    return displaySystemRuntimeDiscovery.getStatus();
+  }
 
   return {
     displaySystems: {
@@ -44,14 +58,15 @@ function createAppRuntime({
         allowParallelWithLegacy,
         allowActiveDisplaySystem,
       }) => {
-        return displaySystemRuntimeController.bind({
+        runtimeBindingOptions = {
           serialManager,
           serialParserManager,
           frameOutputPipeline,
           getSensorType,
           allowParallelWithLegacy,
           allowActiveDisplaySystem,
-        });
+        };
+        return displaySystemRuntimeController.bind(runtimeBindingOptions);
       },
       stopRuntimeDispatch: () => displaySystemRuntimeController.stop(),
       getRuntimeBindings: () => displaySystemRuntimeController.getRuntimeBindings(),
@@ -60,6 +75,30 @@ function createAppRuntime({
         ...displaySystemRuntimeController.getStatus(),
       }),
       getById: (id) => displaySystemRuntimeDiscovery.getById(id),
+      getEditorById: (id) => {
+        const config = displaySystemRuntimeDiscovery.getById(id);
+        return config ? displaySystemWorkspace.read(config) : null;
+      },
+      getBuilderCatalog: () => displaySystemWorkspace.getCatalog(),
+      reload: reloadDisplaySystems,
+      save: (input) => {
+        const saved = displaySystemWorkspace.save(input);
+        reloadDisplaySystems();
+        return {
+          ...saved,
+          displaySystem: displaySystemRuntimeDiscovery.getById(saved.id),
+        };
+      },
+      getSerialConfig: (sensorType, role) => {
+        const system = displaySystemRuntimeDiscovery.getBySensorType(sensorType);
+        const channel = system?.runtimeDefinition?.runtimeChannels?.find((item) => item.serialRole === role);
+        if (!channel?.protocol) return null;
+        return {
+          baudRate: channel.protocol.baudRate,
+          parserChannel: channel.parserChannel?.id || channel.serialRole,
+          protocol: channel.protocol,
+        };
+      },
     },
   };
 }

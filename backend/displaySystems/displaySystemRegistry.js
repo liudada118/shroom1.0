@@ -40,6 +40,14 @@ function createDisplaySystemRegistry({ logger } = {}) {
     return systems.has(id);
   }
 
+  function clear() {
+    systems.clear();
+  }
+
+  function findBySensorType(sensorType) {
+    return list().find((system) => system.sensor?.type === sensorType) || null;
+  }
+
   function snapshot() {
     return {
       count: systems.size,
@@ -58,7 +66,9 @@ function createDisplaySystemRegistry({ logger } = {}) {
   }
 
   return {
+    clear,
     get,
+    findBySensorType,
     has,
     list,
     register,
