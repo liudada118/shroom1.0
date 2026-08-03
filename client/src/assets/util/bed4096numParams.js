@@ -2,12 +2,12 @@
  * bed4096num（64*64高速）共享调参模块
  * Bed4096（3D点图）和 Fast256（原始数据）共用同一套调参变量
  * 切换模式时调参不重置
+ *
+ * 六个键的读取本身已经收进 `runtime/displayThresholds.js`（全仓唯一出口）。
+ * 这个模块要单独留着的理由只剩那个「共用」—— 它是**模块级单例对象**，两个模式
+ * 拿到的是同一个引用，所以在一边调完参切到另一边不会重置。各自调
+ * `createThresholdState()` 就会各读各的，那正是这里要避免的。
  */
-export const bed4096numParams = {
-  valuej1: localStorage.getItem('carValuej') ? JSON.parse(localStorage.getItem('carValuej')) : 200,
-  valueg1: localStorage.getItem('carValueg') ? JSON.parse(localStorage.getItem('carValueg')) : 2,
-  value1: localStorage.getItem('carValue') ? JSON.parse(localStorage.getItem('carValue')) : 2,
-  valuel1: localStorage.getItem('carValuel') ? JSON.parse(localStorage.getItem('carValuel')) : 2,
-  valuef1: localStorage.getItem('carValuef') ? JSON.parse(localStorage.getItem('carValuef')) : 2,
-  valuelInit1: localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2,
-};
+import { SINGLE_CHANNEL_DEFAULTS, createThresholdState } from '../../runtime/displayThresholds';
+
+export const bed4096numParams = createThresholdState(SINGLE_CHANNEL_DEFAULTS);

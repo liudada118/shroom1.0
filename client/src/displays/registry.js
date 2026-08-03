@@ -1,3 +1,9 @@
+import {
+  deriveTransformedMatrix,
+  normalizeMatrixTransform,
+  transformCoordinateMap,
+} from './matrixTransform.js';
+
 export const DISPLAY_CAPABILITIES = {
   REALTIME: 'realtime',
   PLAYBACK: 'playback',
@@ -110,6 +116,7 @@ export const DISPLAY_REGISTRY = {
 };
 
 const RUNTIME_DISPLAY_REGISTRY = new Map();
+let runtimeDisplayRevision = 0;
 
 export function registerRuntimeDisplayDefinition(runtimeDefinition = {}) {
   const metadata = runtimeDefinition.displayMetadata || runtimeDefinition;
@@ -118,20 +125,40 @@ export function registerRuntimeDisplayDefinition(runtimeDefinition = {}) {
   if (!sensorType) return null;
 
   const views = Array.isArray(metadata.views) ? metadata.views : [];
+  const sourceMatrix = metadata.matrix || sensor.matrix;
+  const matrixTransform = normalizeMatrixTransform(metadata.matrixTransform);
+  const renderMatrix = deriveTransformedMatrix(sourceMatrix, matrixTransform);
   const definition = defineDisplay(sensorType, {
     label: metadata.name || sensorType,
-    matrix: metadata.matrix || sensor.matrix,
+    matrix: renderMatrix,
     channels: sensor.ports || ['sit'],
     defaultMode: metadata.defaultView || views[0]?.id || views[0]?.type || 'num',
   });
   definition.source = 'manifest';
+  definition.sceneMode = 'numoriginal';
+  definition.runtimeRevision = ++runtimeDisplayRevision;
   definition.displaySystemId = metadata.id || sensor.id;
+  definition.editable = metadata.editable === true;
+  definition.origin = metadata.origin || 'system';
   definition.protocol = metadata.protocol || sensor.protocol || null;
   definition.algorithmType = metadata.algorithmType || sensor.algorithm?.type || 'none';
+  definition.sourceMatrix = sourceMatrix;
+  definition.matrixTransform = matrixTransform;
+  definition.sourceCoordinateMap = metadata.coordinateMap || null;
+  definition.coordinateMap = transformCoordinateMap(metadata.coordinateMap, matrixTransform);
   definition.page = {
     layout: metadata.layout,
+    matrixTransform,
     views,
     widgets: metadata.widgets || views,
+    // manifest 声明的画布默认值（配色 / 叠加层 / 组件）。没声明时
+    // buildDisplayProfileModel 会用 widgets 反推，老 manifest 行为不变。
+    canvas: metadata.canvas || null,
+    // 侧栏曲线的默认外观和默认卡片。刻意不合成一个 `charts`：前者对应
+    // `selection.charts`（配色 / 叠加层），后者对应另一个存储键里的卡片清单，
+    // 两件完全不同的东西共用一个名字是必踩的坑。
+    chartAppearance: metadata.chartAppearance || null,
+    chartCards: metadata.chartCards || [],
     controls: metadata.controls || {},
     sidebar: metadata.sidebar || null,
     renderers: metadata.renderers || [],

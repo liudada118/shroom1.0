@@ -33,6 +33,20 @@ function sendCommandResultAck(ws, message, result, logger) {
   }), logger);
 }
 
+/**
+ * 构造同时包含授权范围和当前运行类型的系统状态。
+ *
+ * file/selectFlag 保留旧授权协议，currentSensorType 只描述当前 runtime 选择。
+ */
+function createSensorStatusPayload(ctx, extra = {}) {
+  return {
+    file: ctx.licenseFile ?? null,
+    currentSensorType: ctx.file,
+    selectFlag: ctx.selectFlag,
+    ...extra,
+  };
+}
+
 function createWebSocketHandlerAttacher(ctx) {
   if (!ctx || typeof ctx !== 'object') {
     throw new Error('webSocket handler context is required');
@@ -128,12 +142,10 @@ function createWebSocketHandlerAttacher(ctx) {
       name: 'license-status-refresh',
       when: (message) => message.refreshLicense === true,
       handle: () => {
-        const payload = {
+        const payload = createSensorStatusPayload(ctx, {
           date: ctx.endDate,
           nowDate: ctx.nowDate,
-          file: ctx.licenseFile || ctx.file,
-          selectFlag: ctx.selectFlag,
-        };
+        });
         publishSystemEvent(payload);
         return { payload };
       },
@@ -142,7 +154,10 @@ function createWebSocketHandlerAttacher(ctx) {
     controlCommandService.registerHandler({
       name: 'sensor-types-status',
       when: (message) => message.getSensorTypes === true,
-      handle: () => ({ selectFlag: ctx.selectFlag }),
+      handle: () => ({
+        currentSensorType: ctx.file,
+        selectFlag: ctx.selectFlag,
+      }),
     });
 
     ctx.serverOpened = true;
@@ -211,11 +226,9 @@ server.on('connection', function connection(ws, req) {
 
       attachHeartbeat(ws, { clientName, logger, intervalMs: 30000 });
 
-      publishSystemEvent({
+      publishSystemEvent(createSensorStatusPayload(ctx, {
         port: ctx.serialport,
-        file: ctx.licenseFile || ctx.file,
-        selectFlag: ctx.selectFlag,
-      });
+      }));
 
       const storedLicenseKey = typeof getStoredLicenseKey === 'function'
         ? getStoredLicenseKey()
@@ -225,12 +238,10 @@ server.on('connection', function connection(ws, req) {
       }
 
       if (ctx.endDate && ctx.endDate > 0) {
-        publishSystemEvent({
+        publishSystemEvent(createSensorStatusPayload(ctx, {
           date: ctx.endDate,
           nowDate: ctx.nowDate,
-          file: ctx.licenseFile || ctx.file,
-          selectFlag: ctx.selectFlag,
-        });
+        }));
       } else {
         publishSystemEvent({ licenseError: '未检测到有效密钥，请输入密钥后使用', noLicense: true });
       }
@@ -248,5 +259,6 @@ server.on('connection', function connection(ws, req) {
 }
 
 module.exports = {
+  createSensorStatusPayload,
   createWebSocketHandlerAttacher,
 };

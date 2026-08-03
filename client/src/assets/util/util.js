@@ -4,7 +4,9 @@
  * @returns 10*10
  */
 import { rainbowTextColors, rainbowTextColorsxy } from "./color";
+import { jetRgb } from "./jetLadder.js";
 import { garyColors, rainbowBackColors, rainbowColors } from "./value";
+import { createThresholdState } from "../../runtime/displayThresholds";
 
 export function findArr(arr) {
   let ndata = [];
@@ -456,82 +458,98 @@ export function gaussBlur_return(scl, w, h, r) {
 // }
 
 /**
- * 最初版本
- * @param {*} min 
- * @param {*} max 
- * @param {*} x 
- * @returns 
+ * jet 系列的唯一一条分支阶梯，是 `jetRgb`（见下）。
+ *
+ * 抽这一层之前，这条阶梯在全仓有 18 份复制粘贴，而且**它们不是同一个函数** ——
+ * 逐份比对后是四种形状：
+ *
+ * | 形状 | 出口 | 份数 |
+ * | :--- | :--- | ---: |
+ * | `parseInt` 取整三元组 | `jet` | 14（本文件 + demo/ 9 个 + NumThreeColor 3 个 + num/Num + foot/Num32DetectLocal） |
+ * | 不取整四元组带 alpha | `jetRgba` | 2（heatmap/canvas、onestep/heatmap） |
+ * | `Math.round` + 零跨度返白 | `jetRound` | 1（num/NumWs） |
+ * | 0..1 浮点对象 | `jetRgb` | 1（本文件） |
+ *
+ * 所以下面是**一条阶梯 + 四个薄出口**，不是一个函数。三个取整出口的差异都是
+ * 真实的、肉眼可能看不出但数值上确实不同的差异，**刻意全部保留**：
+ * `Math.round(178.5)=179` 而 `parseInt(178.5)=178`。想统一是另一件事，
+ * 要单独决定、单独手测，不能夹带在抽公共层里做。
+ *
+ * 对应测试见 `util.jet.test.js` —— 它把被替换掉的四份原实现逐字抄进测试当基准。
+ */
+
+/**
+ * 最初版本。整数三元组 `[r, g, b]`，各分量 0-255。
+ *
+ * 注意 `max === min` 时返回 `[255, NaN, 0]` —— 这是原实现的行为，
+ * 调用方里只有 `num/NumWs` 挡了这一情况（用 `jetRound`），其余 13 处都没挡，
+ * 所以这里**不加保护**，加了就是静默改行为。
+ *
+ * @param {number} min 值域下界。
+ * @param {number} max 值域上界。
+ * @param {number} x 取样值，超出 [min, max] 会被夹取。
+ * @returns {number[]} `[r, g, b]`，各分量取值 0-255 的整数。
  */
 export function jet(min, max, x) {
-  let red, g, blue;
-  let dv;
-  red = 1.0;
-  g = 1.0;
-  blue = 1.0;
-  if (x < min) {
-    x = min;
-  }
-  if (x > max) {
-    x = max;
-  }
-  dv = max - min;
-  if (x < min + 0.25 * dv) {
-    // red = 0;
-    // g = 0;
-    // blue = 0;
-
-    red = 0;
-    g = (4 * (x - min)) / dv;
-  } else if (x < min + 0.5 * dv) {
-    red = 0;
-    blue = 1 + (4 * (min + 0.25 * dv - x)) / dv;
-  } else if (x < min + 0.75 * dv) {
-    red = (4 * (x - min - 0.5 * dv)) / dv;
-    blue = 0;
-  } else {
-    g = 1 + (4 * (min + 0.75 * dv - x)) / dv;
-    blue = 0;
-  }
+  const { r, g, b } = jetRgb(min, max, x);
   var rgb = new Array();
-  rgb[0] = parseInt(255 * red + '');
+  rgb[0] = parseInt(255 * r + '');
   rgb[1] = parseInt(255 * g + '');
-  rgb[2] = parseInt(255 * blue + '');
+  rgb[2] = parseInt(255 * b + '');
   return rgb;
 }
 
-export function jetRgb(min, max, x) {
-  let red, g, blue;
-  let dv;
-  red = 1.0;
-  g = 1.0;
-  blue = 1.0;
-  if (x < min) {
-    x = min;
-  }
-  if (x > max) {
-    x = max;
-  }
-  dv = max - min;
-  if (x < min + 0.25 * dv) {
-    // red = 0;
-    // g = 0;
-    // blue = 0;
-
-    red = 0;
-    g = (4 * (x - min)) / dv;
-  } else if (x < min + 0.5 * dv) {
-    red = 0;
-    blue = 1 + (4 * (min + 0.25 * dv - x)) / dv;
-  } else if (x < min + 0.75 * dv) {
-    red = (4 * (x - min - 0.5 * dv)) / dv;
-    blue = 0;
-  } else {
-    g = 1 + (4 * (min + 0.75 * dv - x)) / dv;
-    blue = 0;
-  }
-
-  return { r: red, g: g, b: blue };
+/**
+ * 不取整的四元组 `[r, g, b, 1]`，前三个分量是 0-255 的浮点数。
+ *
+ * `heatmap/canvas.jsx` 与 `onestep/heatmap.js` 用的形状。第四位恒为 1
+ * （原实现就是写死的 `rgba[3] = 1`，不是 alpha 参数）。
+ *
+ * @param {number} min 值域下界。
+ * @param {number} max 值域上界。
+ * @param {number} x 取样值。
+ * @returns {number[]} `[r, g, b, 1]`，前三位是 0-255 的浮点数。
+ */
+export function jetRgba(min, max, x) {
+  const { r, g, b } = jetRgb(min, max, x);
+  var rgba = new Array();
+  rgba[0] = 255 * r;
+  rgba[1] = 255 * g;
+  rgba[2] = 255 * b;
+  rgba[3] = 1;
+  return rgba;
 }
+
+/**
+ * 四舍五入的三元组，且**零跨度时返回白色**。
+ *
+ * `num/NumWs.jsx` 用的形状。和 `jet` 有两处真实差异，都是原实现的行为：
+ * 用 `Math.round` 而非 `parseInt`（差最多 1/255），以及 `max === min` 时
+ * 返回 `[255, 255, 255]` 而不是 `[255, NaN, 0]`。零跨度的判断在夹取之后、
+ * 走阶梯之前，顺序照抄。
+ *
+ * @param {number} min 值域下界。
+ * @param {number} max 值域上界。
+ * @param {number} x 取样值。
+ * @returns {number[]} `[r, g, b]`，各分量取值 0-255 的整数。
+ */
+export function jetRound(min, max, x) {
+  if (x < min) x = min;
+  if (x > max) x = max;
+  if (max - min === 0) return [255, 255, 255];
+  const { r, g, b } = jetRgb(min, max, x);
+  return [Math.round(255 * r), Math.round(255 * g), Math.round(255 * b)];
+}
+
+/**
+ * 那条唯一的分支阶梯，实现搬到了 `./jetLadder.js`。
+ *
+ * 搬出去的原因写在那个文件的头部：`components/displaySystem/colormaps.js`
+ * 也要用这条阶梯，而它会被后端测试用裸 Node ESM 加载，导入不了 `util.js`
+ * （扩展名补全 + 顶层 `localStorage`）。这里原样 re-export，所以那 80 个
+ * `from '../../assets/util/util'` 的消费文件一行都不用改。
+ */
+export { jetRgb };
 
 export function jetWhite(min, max, x) {
   // #4800f9  72,0,249  #1c41f9  28,65,249  #1cf993 28,249,147  #cdf91c  205,249,28
@@ -1320,25 +1338,24 @@ export function timeStampToDateNospace(data) {
   return Y + M + D + h + m + s + us
 }
 
+/**
+ * 全仓第三份「六键阈值」读取（另两份是各文件顶部的声明块和 `bed4096numParams`）。
+ * 六个键已经收进 `runtime/displayThresholds.js`，这里只留它自己那套默认值 ——
+ * 注意 `valuelInit1` 在这份里默认 **500**，与别处都不同；`valuef1` 默认 **0**，
+ * 是个真实默认值而不是「没设」。
+ *
+ * 后面四个键（`valueMult` / `compen` / `press` / `ymax1`）不是那六个阈值，
+ * 另有主人，原样留在这里。
+ */
 export const initValue = {
-  valueg1: localStorage.getItem("carValueg")
-    ? JSON.parse(localStorage.getItem("carValueg"))
-    : 3.3,
-  valuej1: localStorage.getItem("carValuej")
-    ? JSON.parse(localStorage.getItem("carValuej"))
-    : 2655,
-  valuel1: localStorage.getItem("carValuel")
-    ? JSON.parse(localStorage.getItem("carValuel"))
-    : 4,
-  valuef1: localStorage.getItem("carValuef")
-    ? JSON.parse(localStorage.getItem("carValuef"))
-    : 0,
-  value1: localStorage.getItem("carValue")
-    ? JSON.parse(localStorage.getItem("carValue"))
-    : 2.08,
-  valuelInit1: localStorage.getItem("carValueInit")
-    ? JSON.parse(localStorage.getItem("carValueInit"))
-    : 500,
+  ...createThresholdState({
+    valueg1: 3.3,
+    valuej1: 2655,
+    valuel1: 4,
+    valuef1: 0,
+    value1: 2.08,
+    valuelInit1: 500,
+  }),
   valueMult: localStorage.getItem("valueMult")
     ? JSON.parse(localStorage.getItem("valueMult"))
     : 1,

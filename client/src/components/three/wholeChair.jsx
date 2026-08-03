@@ -18,6 +18,7 @@ import {
 import { SelectionHelper } from "./SelectionHelper";
 import { checkRectIndex, checkRectangleIntersection, getPointCoordinate, getPointCoordinateWowback, getPointCoordinateWowhead, getPointCoordinateback } from "./threeUtil1";
 import { objAddOrder, rowInterp, rowPointInterp } from "../../assets/util/line";
+import { DUAL_CHANNEL_DEFAULTS, createThresholdState } from '../../runtime/displayThresholds';
 
 let timer
 
@@ -120,18 +121,15 @@ const Canvas = React.forwardRef((props, refs) => {
   const AMOUNTXhead = (headnum1 * headInterp + headOrder * 2);
   const AMOUNTYhead = (headnum2 * headInterp + headOrder * 2);
   let controlsFlag = true;
-  var valuej1 = localStorage.getItem('carValuej') ? JSON.parse(localStorage.getItem('carValuej')) : 255,
-    valueg1 = localStorage.getItem('carValueg') ? JSON.parse(localStorage.getItem('carValueg')) : 4,
-    value1 = localStorage.getItem('carValue') ? JSON.parse(localStorage.getItem('carValue')) : 2.1,
-    valuel1 = localStorage.getItem('carValuel') ? JSON.parse(localStorage.getItem('carValuel')) : 1,
-    valuef1 = localStorage.getItem('carValuef') ? JSON.parse(localStorage.getItem('carValuef')) : 2,
-    valuej2 = localStorage.getItem('carValuej') ? JSON.parse(localStorage.getItem('carValuej')) : 255,
-    valueg2 = localStorage.getItem('carValueg') ? JSON.parse(localStorage.getItem('carValueg')) : 2,
-    value2 = localStorage.getItem('carValue') ? JSON.parse(localStorage.getItem('carValue')) : 2,
-    valuel2 = localStorage.getItem('carValuel') ? JSON.parse(localStorage.getItem('carValuel')) : 2,
-    valuef2 = localStorage.getItem('carValuef') ? JSON.parse(localStorage.getItem('carValuef')) : 2,
-    valuelInit1 = localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2,
-    valuelInit2 = localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2;
+  var { valuej1, valueg1, value1, valuel1, valuef1, valuej2, valueg2, value2, valuel2, valuef2,
+    valuelInit1, valuelInit2 } = createThresholdState({
+    ...DUAL_CHANNEL_DEFAULTS,
+    valuej1: 255,
+    valueg1: 4,
+    value1: 2.1,
+    valuel1: 1,
+    valuej2: 255,
+  });
   let particles,
     particles1,
     particlesHead,

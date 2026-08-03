@@ -56,6 +56,8 @@ function createHttpApp({
   serialManager,
   reloadDisplaySystems = () => ({}),
   saveDisplaySystem = () => null,
+  saveDisplaySystemDisplaySection = () => null,
+  duplicateDisplaySystem = () => null,
 }) {
   const httpApp = express();
   httpApp.use(cors());
@@ -111,16 +113,59 @@ function createHttpApp({
     res.json({ editor });
   });
 
+  /**
+   * 展示系统写接口的统一错误映射。
+   *
+   * 只读被拒是 403 而不是 400 —— 请求本身没问题，是目标不许写。前端要靠这个
+   * 区别决定提示语（「这是自带展示系统，请用另存为」而不是「参数有误」）。
+   */
+  function respondDisplaySystemWriteError(res, error) {
+    const status = error.code === 'DISPLAY_SYSTEM_EXISTS' ? 409
+      : error.code === 'DISPLAY_SYSTEM_READ_ONLY' ? 403
+        : 400;
+    res.status(status).json({
+      error: error.message,
+      code: error.code || 'DISPLAY_SYSTEM_INVALID',
+      details: error.details || [],
+    });
+  }
+
   httpApp.post(HTTP_ROUTES.displaySystems, (req, res) => {
     try {
       const result = saveDisplaySystem(req.body);
       res.status(req.body?.overwrite ? 200 : 201).json({ result });
     } catch (error) {
-      res.status(error.code === 'DISPLAY_SYSTEM_EXISTS' ? 409 : 400).json({
-        error: error.message,
-        code: error.code || 'DISPLAY_SYSTEM_INVALID',
-        details: error.details || [],
-      });
+      respondDisplaySystemWriteError(res, error);
+    }
+  });
+
+  // 只写 manifest 的 display 段：主界面拖出来的画布 / 图表外观固化到基线。
+  // 刻意不走 POST /api/display-systems —— 那条通路会按 Builder 的向导假设重写
+  // schemaVersion / files / algorithm，拿一份 v3 多传感器 manifest 过一遍会改坏。
+  httpApp.patch(HTTP_ROUTES.displaySystemDisplaySection, (req, res) => {
+    try {
+      const result = saveDisplaySystemDisplaySection(req.params.id, req.body);
+      if (!result) {
+        res.status(404).json({ error: 'display system not found', id: req.params.id });
+        return;
+      }
+      res.json({ result });
+    } catch (error) {
+      respondDisplaySystemWriteError(res, error);
+    }
+  });
+
+  // 整目录复制成一个新 id 的新模块。自带展示系统唯一的保存出路。
+  httpApp.post(HTTP_ROUTES.displaySystemDuplicate, (req, res) => {
+    try {
+      const result = duplicateDisplaySystem(req.params.id, req.body);
+      if (!result) {
+        res.status(404).json({ error: 'display system not found', id: req.params.id });
+        return;
+      }
+      res.status(201).json({ result });
+    } catch (error) {
+      respondDisplaySystemWriteError(res, error);
     }
   });
 

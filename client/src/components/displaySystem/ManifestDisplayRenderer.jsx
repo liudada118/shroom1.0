@@ -8,67 +8,52 @@ import {
   isDataRendererType,
   resolveDisplayProfile,
 } from './displayProfileRuntime';
+import { buildCoordinatePointLayout } from './coordinatePointLayout';
+import { readDisplaySelection, writeDisplaySelection } from './displayProfileStorage';
+import {
+  applyMatrixTransform,
+  transformCoordinateMap,
+} from '../../displays/matrixTransform';
+import RendererHost from '../../renderers/RendererHost.jsx';
+import MatrixWidget from './widgets/MatrixWidget.jsx';
+import CoordinatePointWidget from './widgets/CoordinatePointWidget.jsx';
+import StatsWidget from './widgets/StatsWidget.jsx';
+import DisplayCanvasConfigurator from './canvasConfigurator/DisplayCanvasConfigurator.jsx';
 import './ManifestDisplayRenderer.css';
 
-function getChannelFromSource(source = '') {
-  if (source.startsWith('back')) return 'back';
-  if (source.startsWith('head')) return 'head';
-  if (source.startsWith('sensor')) return 'sensor';
+/**
+ * 把 widget 的 source 解析成数据通道名。
+ *
+ * 多传感器 manifest 的通道名由 `sensors[].outputChannel` 自由声明（例如 armLeft），
+ * 所以先按 manifest 精确匹配，匹配不到再退回 sit/back/head/sensor 这套旧前缀规则，
+ * 让既有的 v1/v2 展示系统行为不变。
+ *
+ * @param {string} source widget 声明的数据来源。
+ * @param {Array<{id: string, outputChannel: string}>} sensors manifest 声明的传感器。
+ * @returns {string} 通道名。
+ */
+function getChannelFromSource(source = '', sensors = []) {
+  const key = String(source || '');
+  const candidates = sensors
+    .map((sensor) => ({ channel: sensor?.outputChannel || sensor?.id, id: sensor?.id }))
+    .filter((item) => item.channel);
+
+  const exact = candidates.find((item) => key === item.channel || key === item.id);
+  if (exact) return exact.channel;
+  const prefixed = candidates.find((item) => (
+    (item.channel && key.startsWith(item.channel)) || (item.id && key.startsWith(item.id))
+  ));
+  if (prefixed) return prefixed.channel;
+
+  if (key.startsWith('back')) return 'back';
+  if (key.startsWith('head')) return 'head';
+  if (key.startsWith('sensor')) return 'sensor';
   return 'sit';
-}
-
-function MatrixWidget({ values, matrix, label, showValues = false, columnSpan }) {
-  const cols = Number(matrix?.width || matrix?.cols || Math.sqrt(values.length) || 1);
-  const max = Math.max(1, ...values.map(Number).filter(Number.isFinite));
-  return (
-    <section className="manifest-widget manifest-matrix-widget" style={{ gridColumn: `span ${columnSpan || 8}` }}>
-      <h3>{label}</h3>
-      <div
-        className="manifest-matrix"
-        style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
-      >
-        {values.map((value, index) => {
-          const ratio = Math.max(0, Number(value) || 0) / max;
-          const hue = 195 - ratio * 195;
-          return (
-            <span
-              key={index}
-              title={`${index}: ${value}`}
-              style={{ backgroundColor: `hsl(${hue} 88% ${42 + ratio * 8}%)` }}
-            >
-              {showValues ? (Number.isInteger(value) ? value : Number(value).toFixed(1)) : ''}
-            </span>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
-function StatsWidget({ metrics, label, columnSpan }) {
-  const items = [
-    ['Total', metrics.totalPressure.toFixed(2)],
-    ['Maximum', metrics.maxPressure.toFixed(2)],
-    ['Average', metrics.averagePressure.toFixed(2)],
-    ['Active Points', metrics.activePoints],
-  ];
-  return (
-    <section className="manifest-widget manifest-stats-widget" style={{ gridColumn: `span ${columnSpan || 4}` }}>
-      <h3>{label}</h3>
-      <div className="manifest-stats-grid">
-        {items.map(([name, value]) => (
-          <div key={name}>
-            <span>{name}</span>
-            <strong>{value}</strong>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
 }
 
 export default function ManifestDisplayRenderer({ definition, onSidebarData }) {
   const [frames, setFrames] = useState({ sit: [], back: [], head: [], sensor: [] });
+  const [rawFrames, setRawFrames] = useState({ sit: [], back: [], head: [], sensor: [] });
   const [normalizedFrames, setNormalizedFrames] = useState({ sit: [], back: [], head: [], sensor: [] });
   const [algorithmMetricFrames, setAlgorithmMetricFrames] = useState({});
   const [selection, setSelection] = useState({});
@@ -90,6 +75,12 @@ export default function ManifestDisplayRenderer({ definition, onSidebarData }) {
         [message.outputChannel]: message.normalizedData,
       }));
     }
+    if (message.outputChannel && Array.isArray(message.rawData)) {
+      setRawFrames((current) => ({
+        ...current,
+        [message.outputChannel]: message.rawData,
+      }));
+    }
     const algorithmMetrics = message.algorithmMetrics || message.metrics?.algorithm;
     if (message.outputChannel && algorithmMetrics && typeof algorithmMetrics === 'object') {
       setAlgorithmMetricFrames((current) => ({
@@ -100,7 +91,29 @@ export default function ManifestDisplayRenderer({ definition, onSidebarData }) {
   }, []);
   useMainWebSocket({ onMessage: handleMessage });
 
-  const matrix = definition?.matrix;
+  const matrix = definition?.sourceMatrix || definition?.matrix;
+  // schemaVersion 3 的 manifest 会带上 sensors[]；v1/v2 升格后同样有，缺失时按单通道处理。
+  const sensors = useMemo(
+    () => (Array.isArray(definition?.sensors) ? definition.sensors : []),
+    [definition?.sensors],
+  );
+  const matrixTransform = useMemo(
+    () => definition?.matrixTransform
+      || definition?.page?.matrixTransform
+      || { type: 'none' },
+    [definition?.matrixTransform, definition?.page?.matrixTransform],
+  );
+  const coordinateMap = useMemo(
+    () => transformCoordinateMap(
+      definition?.sourceCoordinateMap || definition?.coordinateMap,
+      matrixTransform,
+    ),
+    [definition?.coordinateMap, definition?.sourceCoordinateMap, matrixTransform],
+  );
+  const coordinatePointLayout = useMemo(
+    () => buildCoordinatePointLayout(coordinateMap),
+    [coordinateMap],
+  );
   const sidebar = definition?.page?.sidebar;
   const columns = Number(definition?.page?.layout?.columns || 12);
   const profileModel = useMemo(
@@ -111,24 +124,16 @@ export default function ManifestDisplayRenderer({ definition, onSidebarData }) {
     () => resolveDisplayProfile(profileModel, selection),
     [profileModel, selection],
   );
-  const storageKey = `display-profile:${definition?.displaySystemId || definition?.type || 'unknown'}`;
+  const profileId = definition?.displaySystemId || definition?.type || 'unknown';
 
   useEffect(() => {
-    try {
-      setSelection(JSON.parse(localStorage.getItem(storageKey)) || {});
-    } catch {
-      setSelection({});
-    }
-  }, [storageKey]);
+    setSelection(readDisplaySelection(profileId));
+  }, [profileId]);
 
   const updateSelection = useCallback((nextSelection) => {
     setSelection(nextSelection);
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(nextSelection));
-    } catch {
-      // The selection remains active for this session when storage is unavailable.
-    }
-  }, [storageKey]);
+    writeDisplaySelection(profileId, nextSelection);
+  }, [profileId]);
 
   const selectProfile = useCallback((profileId) => {
     const profile = profileModel.profiles.find((item) => item.id === profileId);
@@ -140,26 +145,41 @@ export default function ManifestDisplayRenderer({ definition, onSidebarData }) {
   }, [profileModel, updateSelection]);
 
   const widgetModels = useMemo(() => {
-    return profileModel.widgets
+    // 画布 widget 来自 activeProfile：manifest 的 display.canvas.widgets
+    // 被用户偏好覆盖后的结果，缺省时就是原来的 display.widgets。
+    return activeProfile.canvasWidgets
       .filter((widget) => activeProfile.visibleWidgetIds.has(widget.id))
       .map((widget) => {
-      const channel = getChannelFromSource(widget.source);
+      const channel = getChannelFromSource(widget.source, sensors);
       const values = frames[channel] || [];
+      // 多传感器系统每一路矩阵可能都不一样，widget 要用自己那一路的矩阵，
+      // 否则第二路会被按第一路的行列数摆放。找不到就沿用顶层矩阵。
+      const channelMatrix = sensors.find(
+        (sensor) => (sensor.outputChannel || sensor.id) === channel,
+      )?.matrix || matrix;
       const widgetType = isDataRendererType(widget.type)
         ? activeProfile.renderer?.type || widget.type
         : widget.type;
-      const renderedValues = isDataRendererType(widgetType)
-        ? applyVisualizationAlgorithm(values, activeProfile.algorithm, matrix)
+      const visualizedValues = isDataRendererType(widgetType)
+        ? applyVisualizationAlgorithm(values, activeProfile.algorithm, channelMatrix)
         : values;
+      const transformed = isDataRendererType(widgetType)
+        ? applyMatrixTransform(visualizedValues, channelMatrix, matrixTransform)
+        : { values: visualizedValues, matrix: channelMatrix };
       return {
         widget: { ...widget, type: widgetType },
-        values: renderedValues,
+        values: transformed.values,
+        matrix: transformed.matrix,
         metrics: calculatePressureMetrics(values),
       };
     });
-  }, [activeProfile, frames, matrix, profileModel]);
+  }, [activeProfile, frames, matrix, matrixTransform, sensors]);
 
-  const sidebarChannel = getChannelFromSource(sidebar?.source);
+  const updateCanvas = useCallback((canvas) => {
+    updateSelection({ ...selection, profileId: activeProfile.profileId, canvas });
+  }, [activeProfile.profileId, selection, updateSelection]);
+
+  const sidebarChannel = getChannelFromSource(sidebar?.source, sensors);
   const sidebarValues = useMemo(
     () => normalizedFrames[sidebarChannel]?.length
       ? normalizedFrames[sidebarChannel]
@@ -170,6 +190,12 @@ export default function ManifestDisplayRenderer({ definition, onSidebarData }) {
     () => algorithmMetricFrames[sidebarChannel] || {},
     [algorithmMetricFrames, sidebarChannel],
   );
+  const sidebarRawData = useMemo(
+    () => rawFrames[sidebarChannel]?.length
+      ? rawFrames[sidebarChannel]
+      : sidebarValues,
+    [rawFrames, sidebarChannel, sidebarValues],
+  );
   const sidebarMetrics = useMemo(
     () => calculatePressureMetrics(sidebarValues, sidebar),
     [sidebar, sidebarValues],
@@ -179,10 +205,18 @@ export default function ManifestDisplayRenderer({ definition, onSidebarData }) {
     if (!sidebar || !onSidebarData) return;
     onSidebarData({
       values: sidebarValues,
+      rawData: sidebarRawData,
       metrics: sidebarMetrics,
       algorithmMetrics: sidebarAlgorithmMetrics,
     });
-  }, [onSidebarData, sidebar, sidebarAlgorithmMetrics, sidebarMetrics, sidebarValues]);
+  }, [
+    onSidebarData,
+    sidebar,
+    sidebarAlgorithmMetrics,
+    sidebarMetrics,
+    sidebarRawData,
+    sidebarValues,
+  ]);
 
   return (
     <div className="manifest-display" data-display-system={definition?.displaySystemId}>
@@ -219,31 +253,65 @@ export default function ManifestDisplayRenderer({ definition, onSidebarData }) {
           />
         </label>
       </nav>
-      <div className="manifest-widget-grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
-        {widgetModels.map(({ widget, values, metrics }) => {
-          if (widget.type === 'pressureStats') {
-            return <StatsWidget key={widget.id} label={widget.label || widget.id} metrics={metrics} columnSpan={widget.columnSpan} />;
-          }
-          if (['heatmap', 'matrix', 'raw2d'].includes(widget.type)) {
+      <DisplayCanvasConfigurator
+        value={activeProfile.canvas}
+        onChange={updateCanvas}
+        renderers={profileModel.renderers}
+      >
+        <div className="manifest-widget-grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
+          {widgetModels.map(({ widget, values, matrix: widgetMatrix, metrics }) => {
+            if (widget.type === 'pressureStats') {
+              return <StatsWidget key={widget.id} label={widget.label || widget.id} metrics={metrics} columnSpan={widget.columnSpan} />;
+            }
+            if (['heatmap', 'matrix', 'raw2d'].includes(widget.type)) {
+              if (coordinatePointLayout) {
+                return (
+                  <CoordinatePointWidget
+                    key={widget.id}
+                    label={widget.label || widget.id}
+                    layout={coordinatePointLayout}
+                    values={values}
+                    showValues={widget.type !== 'heatmap'}
+                    columnSpan={widget.columnSpan}
+                    colormap={activeProfile.colormap}
+                    overlays={activeProfile.overlays}
+                  />
+                );
+              }
+              return (
+                <MatrixWidget
+                  key={widget.id}
+                  label={widget.label || widget.id}
+                  matrix={widgetMatrix}
+                  values={values}
+                  showValues={widget.type !== 'heatmap' && values.length <= 1024}
+                  columnSpan={widget.columnSpan}
+                  colormap={activeProfile.colormap}
+                  overlays={activeProfile.overlays}
+                />
+              );
+            }
+            // 内置视图之外的类型交给渲染器插件注册表。未注册时 RendererHost
+            // 自己会显示"未注册渲染器"提示，行为与原先的兜底分支一致。
             return (
-              <MatrixWidget
+              <div
                 key={widget.id}
-                label={widget.label || widget.id}
-                matrix={matrix}
-                values={values}
-                showValues={widget.type !== 'heatmap' && values.length <= 1024}
-                columnSpan={widget.columnSpan}
-              />
+                className="manifest-widget-slot"
+                style={{ gridColumn: `span ${widget.columnSpan || 8}` }}
+              >
+                <RendererHost
+                  rendererId={widget.type}
+                  label={widget.label || widget.id}
+                  params={activeProfile.renderer?.params}
+                  values={values}
+                  channel={getChannelFromSource(widget.source, sensors)}
+                  local
+                />
+              </div>
             );
-          }
-          return (
-            <section key={widget.id} className="manifest-widget manifest-unsupported-widget">
-              <h3>{widget.label || widget.id}</h3>
-              <span>当前客户端未注册渲染器：{widget.type}</span>
-            </section>
-          );
-        })}
-      </div>
+          })}
+        </div>
+      </DisplayCanvasConfigurator>
     </div>
   );
 }

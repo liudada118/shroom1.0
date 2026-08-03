@@ -3,8 +3,11 @@ const {
   executeConfiguredMapping,
   loadJsonDefinition: defaultLoadJsonDefinition,
 } = require('../processing/configMappingExecutor');
-const { decodeProtocolValues } = require('./displaySystemProtocol');
-const { createJavaScriptAlgorithmRunner } = require('./displaySystemAlgorithmRunner');
+const { decodeProtocolValues, validateFrame } = require('./displaySystemProtocol');
+const {
+  createJavaScriptAlgorithmRunner,
+  createPythonAlgorithmRunner,
+} = require('./displaySystemAlgorithmRunner');
 
 function loadOptionalJson(filePath, fsLike) {
   if (!filePath) return null;
@@ -53,10 +56,20 @@ function applyNumericConfig(values, config = {}) {
   }, values);
 }
 
+/**
+ * 解析实时帧里承载数据的字段名。
+ *
+ * sit/back/head/default 沿用旧的三个字段名，legacy 前端依赖它们。
+ * 其余通道用 `${通道名}Data`，避免多个传感器在同一个 sitData 字段上互相覆盖。
+ *
+ * @param {string} outputChannel 输出通道名。
+ * @returns {string} 字段名。
+ */
 function getChannelDataField(outputChannel) {
   if (outputChannel === 'back') return 'backData';
   if (outputChannel === 'head') return 'headData';
-  return 'sitData';
+  if (outputChannel === 'sit' || outputChannel === 'default' || !outputChannel) return 'sitData';
+  return `${outputChannel}Data`;
 }
 
 function buildPressureMetrics(values) {
@@ -131,7 +144,13 @@ function normalizeAlgorithmResult(result, fallbackValues) {
   };
 }
 
-function executeAlgorithmResult(values, algorithm, algorithmData, algorithmRunners = {}) {
+function executeAlgorithmResult(
+  values,
+  algorithm,
+  algorithmData,
+  algorithmRunners = {},
+  executionContext = {},
+) {
   const type = algorithm?.type || 'none';
   if (!algorithm?.enabled || type === 'none') return { data: values, metrics: {} };
   if (type === 'json') {
@@ -146,10 +165,20 @@ function executeAlgorithmResult(values, algorithm, algorithmData, algorithmRunne
   if (typeof runner !== 'function') {
     throw new Error(`display system algorithm runner is not registered: ${type}`);
   }
-  return normalizeAlgorithmResult(runner([...values], {
+  const rawData = Array.isArray(executionContext.rawData)
+    ? executionContext.rawData
+    : values;
+  const result = runner([...rawData], {
     algorithm,
     data: algorithmData,
-  }), values);
+    rawData: [...rawData],
+    normalizedData: [...values],
+    matrix: executionContext.matrix || null,
+  });
+  if (result && typeof result.then === 'function') {
+    return result.then((resolved) => normalizeAlgorithmResult(resolved, values));
+  }
+  return normalizeAlgorithmResult(result, values);
 }
 
 function executeAlgorithm(values, algorithm, algorithmData, algorithmRunners = {}) {
@@ -180,6 +209,8 @@ function createDisplaySystemFrameProcessor({
   let cachedLineOrder;
   let cachedPointOrder;
   let cachedAlgorithmData;
+  let droppedFrames = 0;
+  let lastDropReason = null;
   const resolvedAlgorithmRunners = { ...algorithmRunners };
   const algorithmBinding = runtimeChannel.processing?.algorithm || {};
   if (
@@ -191,6 +222,16 @@ function createDisplaySystemFrameProcessor({
       entry: algorithmBinding.entry,
       timeoutMs: algorithmBinding.timeoutMs,
       fsLike,
+    });
+  }
+  if (
+    algorithmBinding.type === 'python'
+    && !resolvedAlgorithmRunners.python
+    && algorithmBinding.entry
+  ) {
+    resolvedAlgorithmRunners.python = createPythonAlgorithmRunner({
+      entry: algorithmBinding.entry,
+      timeoutMs: algorithmBinding.timeoutMs,
     });
   }
 
@@ -214,6 +255,26 @@ function createDisplaySystemFrameProcessor({
 
   function processFrame(frame) {
     const frameValues = getFrameValues(frame);
+
+    // 帧校验在解码之前：帧头或校验和不对的帧直接丢弃，不进入线序映射和算法。
+    // 未声明 protocol.validation 时 validateFrame 恒为 ok，既有 manifest 无影响。
+    if (runtimeChannel.protocol) {
+      const frameValidation = validateFrame(frameValues, runtimeChannel.protocol);
+      if (!frameValidation.ok) {
+        droppedFrames += 1;
+        lastDropReason = frameValidation.detail || frameValidation.reason;
+        return {
+          channelId: runtimeChannel.id,
+          displaySystemId: runtimeChannel.displaySystemId,
+          outputChannel: runtimeChannel.outputChannel || runtimeChannel.serialRole,
+          dropped: true,
+          dropReason: frameValidation.reason,
+          dropDetail: frameValidation.detail || null,
+          metrics: { droppedFrames, lastDropReason },
+        };
+      }
+    }
+
     const values = runtimeChannel.protocol
       ? decodeProtocolValues(frameValues, runtimeChannel.protocol)
       : frameValues;
@@ -222,30 +283,39 @@ function createDisplaySystemFrameProcessor({
       pointOrder: getPointOrderDefinition(),
     });
     const algorithmData = getAlgorithmData();
-    const algorithmResult = executeAlgorithmResult(
+    const algorithmResultOrPromise = executeAlgorithmResult(
       mapped,
       runtimeChannel.processing?.algorithm,
       algorithmData,
       resolvedAlgorithmRunners,
+      {
+        rawData: values,
+        matrix: runtimeChannel.display?.matrix || runtimeChannel.sensor?.matrix || null,
+      },
     );
-    const processed = algorithmResult.data;
 
-    const outputChannel = runtimeChannel.outputChannel || runtimeChannel.serialRole;
-    const channelDataField = getChannelDataField(outputChannel);
-    return {
-      channelId: runtimeChannel.id,
-      displaySystemId: runtimeChannel.displaySystemId,
-      outputChannel,
-      rawData: values,
-      normalizedData: mapped,
-      data: processed,
-      [channelDataField]: processed,
-      metrics: Object.keys(algorithmResult.metrics).length
-        ? { ...buildPressureMetrics(processed), algorithm: algorithmResult.metrics }
-        : buildPressureMetrics(processed),
-      algorithmMetrics: algorithmResult.metrics,
-      metadata: runtimeChannel.display,
+    const buildProcessedFrame = (algorithmResult) => {
+      const processed = algorithmResult.data;
+      const outputChannel = runtimeChannel.outputChannel || runtimeChannel.serialRole;
+      const channelDataField = getChannelDataField(outputChannel);
+      return {
+        channelId: runtimeChannel.id,
+        displaySystemId: runtimeChannel.displaySystemId,
+        outputChannel,
+        rawData: values,
+        normalizedData: mapped,
+        data: processed,
+        [channelDataField]: processed,
+        metrics: Object.keys(algorithmResult.metrics).length
+          ? { ...buildPressureMetrics(processed), algorithm: algorithmResult.metrics }
+          : buildPressureMetrics(processed),
+        algorithmMetrics: algorithmResult.metrics,
+        metadata: runtimeChannel.display,
+      };
     };
+    return algorithmResultOrPromise && typeof algorithmResultOrPromise.then === 'function'
+      ? algorithmResultOrPromise.then(buildProcessedFrame)
+      : buildProcessedFrame(algorithmResultOrPromise);
   }
 
   return {

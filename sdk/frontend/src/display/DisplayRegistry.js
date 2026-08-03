@@ -57,6 +57,7 @@ export function createDisplaySystemFromManifest(manifest = {}) {
     controls: display.controls || {},
     sidebar: display.sidebar || null,
     matrix: runtimeMetadata.matrix || manifest.sensor?.matrix || null,
+    coordinateMap: runtimeMetadata.coordinateMap || manifest.coordinateMap || null,
     page: {
       layout: display.layout || { type: 'grid', columns: 12 },
       widgets: display.widgets || views,

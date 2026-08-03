@@ -1,3 +1,5 @@
+@import './widgets/widgets.css';
+
 .manifest-display {
   position: absolute;
   z-index: 20;
@@ -67,92 +69,39 @@
   font-size: 14px;
 }
 
-.manifest-widget-grid {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.manifest-widget {
-  grid-column: span 6;
-  min-width: 0;
-  padding: 14px;
-  background: #182126;
-  border: 1px solid #34454d;
-  border-radius: 6px;
-}
-
-.manifest-matrix-widget {
-  grid-column: span 8;
-}
-
-.manifest-matrix {
-  display: grid;
-  width: 100%;
-  aspect-ratio: 1;
-  gap: 1px;
-  background: #26343a;
-  border: 1px solid #3b4c54;
-}
-
-.manifest-matrix span {
-  display: grid;
-  place-items: center;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  color: #fff;
-  font-size: 9px;
-}
-
-.manifest-stats-widget {
-  grid-column: span 4;
-}
-
 .manifest-unsupported-widget span {
   color: #e5a84b;
   font-size: 12px;
 }
 
-.manifest-stats-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.manifest-stats-grid div {
+/* 渲染器插件挂载槽。RendererHost 内部自带 .manifest-widget 外框，
+   这里只负责占据网格列宽。 */
+.manifest-widget-slot {
+  display: flex;
   min-width: 0;
-  padding: 12px;
-  background: #10171a;
-  border-left: 3px solid #27b4a8;
 }
 
-.manifest-stats-grid span,
-.manifest-stats-grid strong {
-  display: block;
-  overflow-wrap: anywhere;
+.manifest-widget-slot > * {
+  flex: 1;
+  min-width: 0;
 }
 
-.manifest-stats-grid span {
-  margin-bottom: 5px;
-  color: #91a5ae;
-  font-size: 11px;
+.manifest-renderer-loading span {
+  color: #7f8c9b;
+  font-size: 12px;
 }
 
-.manifest-stats-grid strong {
-  color: #f4c95d;
-  font-size: 18px;
+/* 插件崩溃或加载失败用红色区分于"未注册"的橙色提示——
+   前者是故障，后者是能力缺失，用户的处理动作不同。 */
+.manifest-renderer-error span {
+  color: #e05c5c;
+  font-size: 12px;
+  word-break: break-all;
 }
 
 @media (max-width: 900px) {
   .manifest-display {
     inset: 9% 3% 3%;
-  }
-
-  .manifest-widget,
-  .manifest-matrix-widget,
-  .manifest-stats-widget {
-    grid-column: 1 / -1 !important;
   }
 
   .manifest-profile-menu {

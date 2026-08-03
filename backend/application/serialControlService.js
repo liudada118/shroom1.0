@@ -49,11 +49,13 @@ function registerSerialControlHandlers(router, deps) {
     logger,
     openBackSerialPort,
     openHeadSerialPort,
+    openManifestSerialPort,
     openMinzhenSensorPort,
     openSitSerialPort,
     petCareRuntimeService,
     publishHistoryDateList,
     publishSystemEvent,
+    rebindDisplaySystemRuntime,
     serialRoles,
     setRuntime,
     stopPlaybackTimer,
@@ -146,6 +148,11 @@ function registerSerialControlHandlers(router, deps) {
         localDataHead: [],
         indexArr: [0, 0],
       });
+      // Display System dispatcher 的策略依赖当前传感器类型，切换后立即重绑，
+      // 让刚保存的 parser/line-order/algorithm 链路无需重启软件即可接收数据。
+      rebindDisplaySystemRuntime?.();
+      // 当前选择与密钥授权范围是两类状态，不能再复用 file 字段，否则会覆盖前端授权列表。
+      publishSystemEvent({ currentSensorType: receiveFile });
     },
   });
 
@@ -157,6 +164,8 @@ function registerSerialControlHandlers(router, deps) {
       message.headPort != null ||
       message.sensorPort != null ||
       message.backPort != null ||
+      message.channelPorts != null ||
+      message.channelClose != null ||
       message.sitClose === true ||
       message.backClose === true ||
       message.headClose === true ||
@@ -164,6 +173,19 @@ function registerSerialControlHandlers(router, deps) {
     ),
     handle: (message, context = {}) => {
       requireAuthorizedRuntime();
+      // manifest 多传感器系统用 channelPorts 这一个字段承载任意数量的通道，
+      // 而不是给每个新传感器再加一对 xxxPort / xxxClose 命令字段。
+      if (message.channelPorts && typeof message.channelPorts === 'object') {
+        Object.entries(message.channelPorts).forEach(([serialRole, portPath]) => {
+          if (portPath == null) return;
+          openManifestSerialPort?.(serialRole, portPath, `${context.scope || 'main'} ${serialRole}`);
+        });
+      }
+      if (Array.isArray(message.channelClose)) {
+        message.channelClose.forEach((serialRole) => {
+          if (serialRole) closeManagedSerialPort(serialRole, `${context.scope || 'main'} manual close`);
+        });
+      }
       if (message.sitPort != null) {
         setRuntime({ sitClose: false, com: message.sitPort });
         openSitSerialPort(message.sitPort, `${context.scope || 'main'} sitPort`);

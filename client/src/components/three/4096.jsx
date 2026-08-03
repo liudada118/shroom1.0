@@ -22,6 +22,7 @@ import {
 
 import { obj } from "../../assets/util/config";
 import { bed4096numParams } from "../../assets/util/bed4096numParams";
+import { SECOND_CHANNEL_DEFAULTS, createThresholdState } from '../../runtime/displayThresholds';
 let group = new THREE.Group();
 const sitInit = 0;
 const backInit = 0;
@@ -40,12 +41,7 @@ var ndata = new Array(backnum1 * backnum2).fill(0), ndata1 = new Array(sitnum1 *
 // 使用共享调参对象（与 Fast256 共享，切换模式时调参不重置）
 // 用 p 作为别名，所有 p.valuej1 等属性与 Fast256 实时共享
 const p = bed4096numParams;
-var valuej2 = localStorage.getItem('carValuej') ? JSON.parse(localStorage.getItem('carValuej')) : 200,
-  valueg2 = localStorage.getItem('carValueg') ? JSON.parse(localStorage.getItem('carValueg')) : 2,
-  value2 = localStorage.getItem('carValue') ? JSON.parse(localStorage.getItem('carValue')) : 2,
-  valuel2 = localStorage.getItem('carValuel') ? JSON.parse(localStorage.getItem('carValuel')) : 2,
-  valuef2 = localStorage.getItem('carValuef') ? JSON.parse(localStorage.getItem('carValuef')) : 2,
-  valuelInit2 = localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2;
+var { valuej2, valueg2, value2, valuel2, valuef2, valuelInit2 } = createThresholdState(SECOND_CHANNEL_DEFAULTS);
 let enableControls = true;
 let isShiftPressed = false;
 

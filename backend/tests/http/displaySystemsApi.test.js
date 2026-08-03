@@ -44,6 +44,24 @@ async function main() {
     serialManager: { getStatus: () => [] },
     reloadDisplaySystems: () => displaySystemStatus,
     saveDisplaySystem: (input) => ({ id: input.manifest.id }),
+    saveDisplaySystemDisplaySection: (id, patch) => {
+      if (id === 'built-in') {
+        const error = new Error('system display systems are read-only');
+        error.code = 'DISPLAY_SYSTEM_READ_ONLY';
+        throw error;
+      }
+      if (id !== 'demo') return null;
+      return { id, patch };
+    },
+    duplicateDisplaySystem: (id, options) => {
+      if (id !== 'demo' && id !== 'built-in') return null;
+      if (options?.id === 'taken') {
+        const error = new Error('display system already exists');
+        error.code = 'DISPLAY_SYSTEM_EXISTS';
+        throw error;
+      }
+      return { id: options?.id, sourceId: id };
+    },
   });
 
   const server = http.createServer(httpApp);
@@ -86,6 +104,57 @@ async function main() {
       method: 'POST',
     });
     assert.strictEqual(reloadResponse.status, 200);
+
+    // ── PATCH /:id/display —— 只写 display 段 ──
+    const patchDisplay = (id, body) => fetch(
+      `http://127.0.0.1:${port}/api/display-systems/${id}/display`,
+      {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    );
+
+    const sectionResponse = await patchDisplay('demo', { canvas: { colormap: 'viridis' } });
+    const sectionBody = await sectionResponse.json();
+    assert.strictEqual(sectionResponse.status, 200);
+    assert.strictEqual(sectionBody.result.patch.canvas.colormap, 'viridis');
+
+    // 只读被拒是 403 而不是 400：请求没问题，是目标不许写。前端要靠这个区别
+    // 决定提示语（「这是自带展示系统，请用另存为」而不是「参数有误」）。
+    const readOnlyResponse = await patchDisplay('built-in', { canvas: {} });
+    const readOnlyBody = await readOnlyResponse.json();
+    assert.strictEqual(readOnlyResponse.status, 403);
+    assert.strictEqual(readOnlyBody.code, 'DISPLAY_SYSTEM_READ_ONLY');
+
+    const missingResponse = await patchDisplay('no-such', {});
+    assert.strictEqual(missingResponse.status, 404);
+
+    // ── POST /:id/duplicate —— 另存为 ──
+    const duplicateOf = (id, body) => fetch(
+      `http://127.0.0.1:${port}/api/display-systems/${id}/duplicate`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    );
+
+    // 自带展示系统必须能被另存为 —— 那是它唯一的保存出路，别写成 403。
+    const duplicateResponse = await duplicateOf('built-in', { id: 'built-in-copy' });
+    const duplicateBody = await duplicateResponse.json();
+    assert.strictEqual(duplicateResponse.status, 201);
+    assert.strictEqual(duplicateBody.result.id, 'built-in-copy');
+    assert.strictEqual(duplicateBody.result.sourceId, 'built-in');
+
+    // 撞名是 409，前端据此提示改名而不是当成参数错误。
+    const collisionResponse = await duplicateOf('demo', { id: 'taken' });
+    const collisionBody = await collisionResponse.json();
+    assert.strictEqual(collisionResponse.status, 409);
+    assert.strictEqual(collisionBody.code, 'DISPLAY_SYSTEM_EXISTS');
+
+    const duplicateMissingResponse = await duplicateOf('no-such', { id: 'x' });
+    assert.strictEqual(duplicateMissingResponse.status, 404);
 
     const invalidJsonResponse = await fetch(`http://127.0.0.1:${port}/api/display-systems`, {
       method: 'POST',

@@ -1,3 +1,10 @@
+const {
+  CANVAS_COLORMAP_IDS,
+  CANVAS_OVERLAY_IDS,
+  CHART_OVERLAY_IDS,
+  DISPLAY_CHART_CARD_LIMIT,
+} = require('./displaySystemCanvasCatalog');
+
 const DEFAULT_VIEW_SOURCES = Object.freeze({
   heatmap: 'data',
   matrix: 'data',
@@ -7,6 +14,8 @@ const DEFAULT_VIEW_SOURCES = Object.freeze({
   pressureStats: 'metrics',
 });
 
+const DEFAULT_CANVAS_COLORMAP_ID = 'classic';
+
 const DEFAULT_RENDERER_TYPES = Object.freeze(['heatmap', 'matrix', 'raw2d']);
 const DEFAULT_VISUALIZATION_ALGORITHM = Object.freeze({
   id: 'identity',
@@ -14,6 +23,33 @@ const DEFAULT_VISUALIZATION_ALGORITHM = Object.freeze({
   label: 'Original data',
   options: {},
 });
+const MATRIX_TRANSFORM_TYPES = Object.freeze(['none', 'interpolate', 'downsample']);
+
+function normalizeMatrixTransform(transform) {
+  if (!transform || typeof transform !== 'object' || Array.isArray(transform)) {
+    return { type: 'none', factor: 1, method: 'none' };
+  }
+  const type = MATRIX_TRANSFORM_TYPES.includes(transform.type)
+    ? transform.type
+    : 'none';
+  if (type === 'interpolate') {
+    return {
+      type,
+      factor: Math.max(2, Math.min(4, Number(transform.factor) || 2)),
+      method: 'bilinear',
+    };
+  }
+  if (type === 'downsample') {
+    return {
+      type,
+      factor: [0.25, 0.5].includes(Number(transform.factor))
+        ? Number(transform.factor)
+        : 0.5,
+      method: 'average',
+    };
+  }
+  return { type: 'none', factor: 1, method: 'none' };
+}
 
 const SIDEBAR_METRIC_IDS = Object.freeze([
   'totalPressure',
@@ -153,6 +189,113 @@ function buildDefaultRenderers(views, widgets) {
   }));
 }
 
+/**
+ * 归一 display.canvas。
+ *
+ * canvas 是可选段：老 manifest 没有它，就用顶层 widgets 反推一份等价配置，
+ * 因此 v1/v2/v3 的展示系统都能拿到同一个结构，前端不必再分版本。
+ * 未知的配色 id 和叠加层名一律丢弃而不是报错——坏配置只该退回默认外观，
+ * 不该把整个展示系统卡死。
+ *
+ * @param {object} canvas manifest 声明的画布配置。
+ * @param {object[]} widgets 已归一的顶层 widgets，作为 canvas.widgets 的回落。
+ * @returns {{colormap: object, overlays: string[], widgets: object[]}} 画布配置。
+ */
+function normalizeCanvasConfig(canvas, widgets) {
+  const source = canvas && typeof canvas === 'object' && !Array.isArray(canvas) ? canvas : {};
+  const colormapId = typeof source.colormap === 'string'
+    ? source.colormap
+    : source.colormap?.id;
+  const canvasWidgets = (Array.isArray(source.widgets) ? source.widgets : widgets)
+    .map(normalizeView)
+    .filter(Boolean);
+  const seenOverlays = new Set();
+  const overlays = (Array.isArray(source.overlays) ? source.overlays : [])
+    .map((item) => String(item || ''))
+    .filter((item) => {
+      if (!CANVAS_OVERLAY_IDS.has(item) || seenOverlays.has(item)) return false;
+      seenOverlays.add(item);
+      return true;
+    });
+
+  return {
+    colormap: {
+      id: CANVAS_COLORMAP_IDS.has(String(colormapId || ''))
+        ? String(colormapId)
+        : DEFAULT_CANVAS_COLORMAP_ID,
+      reverse: Boolean(typeof source.colormap === 'object' && source.colormap?.reverse),
+    },
+    overlays,
+    widgets: canvasWidgets,
+  };
+}
+
+/**
+ * 归一 display.chartAppearance —— 侧栏曲线的默认外观。
+ *
+ * 结构和 `normalizeCanvasConfig` 同构，只少一个 `widgets`（曲线没有可拖的零件）。
+ * 叠加层按 `CHART_OVERLAY_IDS` 过滤，所以 manifest 里写了 `legend` 也不会漏到
+ * 运行时 —— 曲线画布放不下色带。和画布一样：坏值丢弃，不报错。
+ *
+ * @param {object} chartAppearance manifest 声明的图表外观。
+ * @returns {{colormap: object, overlays: string[]}} 图表外观。
+ */
+function normalizeChartAppearanceConfig(chartAppearance) {
+  const source = chartAppearance && typeof chartAppearance === 'object' && !Array.isArray(chartAppearance)
+    ? chartAppearance
+    : {};
+  const colormapId = typeof source.colormap === 'string'
+    ? source.colormap
+    : source.colormap?.id;
+  const seen = new Set();
+  const overlays = (Array.isArray(source.overlays) ? source.overlays : [])
+    .map((item) => String(item || ''))
+    .filter((item) => {
+      if (!CHART_OVERLAY_IDS.has(item) || seen.has(item)) return false;
+      seen.add(item);
+      return true;
+    });
+
+  return {
+    colormap: {
+      id: CANVAS_COLORMAP_IDS.has(String(colormapId || ''))
+        ? String(colormapId)
+        : DEFAULT_CANVAS_COLORMAP_ID,
+      reverse: Boolean(typeof source.colormap === 'object' && source.colormap?.reverse),
+    },
+    overlays,
+  };
+}
+
+/**
+ * 归一 display.chartCards —— manifest 声明的默认公式图表卡片。
+ *
+ * **不校验公式本身。** AST 解析器 `formulaChartRuntime.js` 是前端 ESM 模块，
+ * 在后端复制一份会立刻变成两份漂移的白名单。这里只要求公式是非空字符串；
+ * 真正的关卡是绘制时的 `compileFormulaChartExpression`，它对坏公式返回 0。
+ *
+ * 每条不带 `id`：运行时播种到 localStorage 时会 stamp 新 id，
+ * manifest 里写死 id 只会和用户已有的卡片撞上。
+ *
+ * @param {object[]} cards manifest 声明的卡片清单。
+ * @returns {object[]} 归一后的卡片清单。
+ */
+function normalizeChartCardsConfig(cards) {
+  return (Array.isArray(cards) ? cards : [])
+    .filter((card) => card && typeof card === 'object' && String(card.formula || '').trim())
+    .slice(0, DISPLAY_CHART_CARD_LIMIT)
+    .map((card, index) => ({
+      templateId: String(card.templateId || card.id || `chart-${index + 1}`),
+      name: String(card.name || card.templateId || card.id || `图表 ${index + 1}`),
+      formula: String(card.formula),
+      unit: String(card.unit || ''),
+      // 缺省 2 位而不是 0 位，和前端模板的 `template.decimals ?? 2` 对齐 ——
+      // 后端归一成 0 之后前端的 `??` 就不会兜住了，那是个静默的行为差异。
+      decimals: Math.max(0, Math.min(6, Number(card.decimals ?? 2) || 0)),
+      color: String(card.color || ''),
+    }));
+}
+
 function normalizeDisplayConfig(display = {}) {
   const views = (Array.isArray(display.views) ? display.views : [])
     .map(normalizeView)
@@ -187,8 +330,15 @@ function normalizeDisplayConfig(display = {}) {
 
   return {
     layout: display.layout || { type: 'grid', columns: 12 },
+    matrixTransform: normalizeMatrixTransform(display.matrixTransform),
     views,
     widgets,
+    canvas: normalizeCanvasConfig(display.canvas, widgets),
+    // 图表外观和卡片清单刻意分成两个字段。`chartAppearance` 对应用户偏好里的
+    // `selection.charts`（配色 / 叠加层），`chartCards` 对应另一个存储键里的
+    // 卡片清单 —— 合成一个 `display.charts` 会让两种完全不同的东西共用一个名字。
+    chartAppearance: normalizeChartAppearanceConfig(display.chartAppearance),
+    chartCards: normalizeChartCardsConfig(display.chartCards),
     defaultView,
     controls: display.controls || {},
     sidebar: normalizeSidebarConfig(display.sidebar),
@@ -215,6 +365,21 @@ function validateDisplayConfig(display, { source = 'display system manifest' } =
   }
 
   const errors = [];
+  if (display.matrixTransform != null) {
+    if (typeof display.matrixTransform !== 'object' || Array.isArray(display.matrixTransform)) {
+      errors.push(`${source}: display.matrixTransform must be an object`);
+    } else {
+      const type = display.matrixTransform.type || 'none';
+      const factor = Number(display.matrixTransform.factor ?? 1);
+      if (!MATRIX_TRANSFORM_TYPES.includes(type)) {
+        errors.push(`${source}: display.matrixTransform.type must be none, interpolate or downsample`);
+      } else if (type === 'interpolate' && ![2, 4].includes(factor)) {
+        errors.push(`${source}: interpolate matrix factor must be 2 or 4`);
+      } else if (type === 'downsample' && ![0.25, 0.5].includes(factor)) {
+        errors.push(`${source}: downsample matrix factor must be 0.25 or 0.5`);
+      }
+    }
+  }
   if (display.sidebar != null) {
     if (typeof display.sidebar !== 'object' || Array.isArray(display.sidebar)) {
       errors.push(`${source}: display.sidebar must be an object`);
@@ -277,6 +442,95 @@ function validateDisplayConfig(display, { source = 'display system manifest' } =
     if (ids.has(widget.id)) errors.push(`${source}: duplicate display widget id ${widget.id}`);
     ids.add(widget.id);
   });
+  // display.canvas 是可选段。未知配色/叠加层在归一时已被丢弃，这里对显式写错的值报错，
+  // 让 Builder 保存时就能看到问题，而不是保存成功却静默变回默认外观。
+  if (display.canvas != null) {
+    if (typeof display.canvas !== 'object' || Array.isArray(display.canvas)) {
+      errors.push(`${source}: display.canvas must be an object`);
+    } else {
+      const colormapId = typeof display.canvas.colormap === 'string'
+        ? display.canvas.colormap
+        : display.canvas.colormap?.id;
+      if (colormapId != null && !CANVAS_COLORMAP_IDS.has(String(colormapId))) {
+        errors.push(`${source}: display.canvas.colormap.id must be one of ${[...CANVAS_COLORMAP_IDS].join(', ')}`);
+      }
+      if (display.canvas.overlays != null && !Array.isArray(display.canvas.overlays)) {
+        errors.push(`${source}: display.canvas.overlays must be an array`);
+      } else {
+        (display.canvas.overlays || []).forEach((overlay) => {
+          if (!CANVAS_OVERLAY_IDS.has(String(overlay))) {
+            errors.push(`${source}: display.canvas.overlays contains unknown overlay ${overlay}`);
+          }
+        });
+      }
+      if (display.canvas.widgets != null && !Array.isArray(display.canvas.widgets)) {
+        errors.push(`${source}: display.canvas.widgets must be an array`);
+      } else {
+        const canvasIds = new Set();
+        normalized.canvas.widgets.forEach((widget, index) => {
+          if (!widget.type) errors.push(`${source}: display.canvas.widgets[${index}].type is required`);
+          if (canvasIds.has(widget.id)) {
+            errors.push(`${source}: duplicate display canvas widget id ${widget.id}`);
+          }
+          canvasIds.add(widget.id);
+        });
+      }
+    }
+  }
+  // display.chartAppearance 和 display.canvas 同一套待遇：归一时丢弃，
+  // 显式写错时报错。差别只有一处 —— `legend` 在这块表面上就是非法的。
+  if (display.chartAppearance != null) {
+    if (typeof display.chartAppearance !== 'object' || Array.isArray(display.chartAppearance)) {
+      errors.push(`${source}: display.chartAppearance must be an object`);
+    } else {
+      const colormapId = typeof display.chartAppearance.colormap === 'string'
+        ? display.chartAppearance.colormap
+        : display.chartAppearance.colormap?.id;
+      if (colormapId != null && !CANVAS_COLORMAP_IDS.has(String(colormapId))) {
+        errors.push(`${source}: display.chartAppearance.colormap.id must be one of ${[...CANVAS_COLORMAP_IDS].join(', ')}`);
+      }
+      if (display.chartAppearance.overlays != null && !Array.isArray(display.chartAppearance.overlays)) {
+        errors.push(`${source}: display.chartAppearance.overlays must be an array`);
+      } else {
+        (display.chartAppearance.overlays || []).forEach((overlay) => {
+          if (!CHART_OVERLAY_IDS.has(String(overlay))) {
+            errors.push(`${source}: display.chartAppearance.overlays contains unknown overlay ${overlay}`);
+          }
+        });
+      }
+    }
+  }
+  // display.chartCards 只检查形状，**不检查公式的语义** —— 解析器在前端。
+  if (display.chartCards != null) {
+    if (!Array.isArray(display.chartCards)) {
+      errors.push(`${source}: display.chartCards must be an array`);
+    } else {
+      if (display.chartCards.length > DISPLAY_CHART_CARD_LIMIT) {
+        errors.push(`${source}: display.chartCards must contain at most ${DISPLAY_CHART_CARD_LIMIT} cards`);
+      }
+      const templateIds = new Set();
+      display.chartCards.forEach((card, index) => {
+        if (!card || typeof card !== 'object' || Array.isArray(card)) {
+          errors.push(`${source}: display.chartCards[${index}] must be an object`);
+          return;
+        }
+        if (!String(card.formula || '').trim()) {
+          errors.push(`${source}: display.chartCards[${index}].formula is required`);
+        }
+        if (card.decimals != null
+          && (!Number.isInteger(Number(card.decimals))
+            || Number(card.decimals) < 0
+            || Number(card.decimals) > 6)) {
+          errors.push(`${source}: display.chartCards[${index}].decimals must be an integer between 0 and 6`);
+        }
+        const templateId = String(card.templateId || card.id || '');
+        if (templateId && templateIds.has(templateId)) {
+          errors.push(`${source}: duplicate display chart card templateId ${templateId}`);
+        }
+        templateIds.add(templateId);
+      });
+    }
+  }
   if (
     normalized.views.length > 0
     && !normalized.views.some((view) => view.id === normalized.defaultView || view.type === normalized.defaultView)
@@ -312,9 +566,14 @@ function validateDisplayConfig(display, { source = 'display system manifest' } =
 
 module.exports = {
   DEFAULT_RENDERER_TYPES,
+  MATRIX_TRANSFORM_TYPES,
   SIDEBAR_METRIC_IDS,
   isSidebarMetricId,
+  normalizeCanvasConfig,
+  normalizeChartAppearanceConfig,
+  normalizeChartCardsConfig,
   normalizeDisplayConfig,
+  normalizeMatrixTransform,
   normalizeSidebarConfig,
   normalizeProfile,
   normalizeView,

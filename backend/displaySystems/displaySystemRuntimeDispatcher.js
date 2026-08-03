@@ -58,7 +58,16 @@ function createDisplaySystemRuntimeDispatcher({
 
     const handler = (frame) => {
       try {
-        binding.handleFrame(normalizeIncomingFrame(frame));
+        const result = binding.handleFrame(normalizeIncomingFrame(frame));
+        if (result && typeof result.catch === 'function') {
+          result.catch((error) => {
+            if (error?.code === 'DISPLAY_ALGORITHM_FRAME_DROPPED') return;
+            logger?.warn?.('[DisplaySystems] async runtime frame dispatch failed', {
+              bindingId: binding.id,
+              message: error.message || String(error),
+            });
+          });
+        }
       } catch (error) {
         logger?.warn?.('[DisplaySystems] runtime frame dispatch failed', {
           bindingId: binding.id,

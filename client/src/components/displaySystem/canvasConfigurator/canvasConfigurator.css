@@ -1,0 +1,366 @@
+/* 展示画布配置器。配色对齐 ManifestDisplayRenderer.css，
+   Builder 和主界面共用同一套样式，两处观感一致。 */
+
+.display-canvas-configurator {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.canvas-drop-area {
+  position: relative;
+  min-width: 0;
+  min-height: 120px;
+  padding: 2px;
+  border: 1px dashed transparent;
+  border-radius: 6px;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.canvas-drop-area.is-drag-over {
+  background: rgb(39 180 168 / 8%);
+  border-color: #27b4a8;
+}
+
+.canvas-drop-hint {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  color: #0f171a;
+  font-size: 12px;
+  background: #27b4a8;
+  border-radius: 12px;
+  pointer-events: none;
+}
+
+.canvas-empty-state {
+  display: grid;
+  gap: 8px;
+  place-content: center;
+  place-items: center;
+  min-height: 220px;
+  padding: 24px;
+  color: #8ba0aa;
+  text-align: center;
+  background: #182126;
+  border: 1px solid #34454d;
+  border-radius: 6px;
+}
+
+.canvas-empty-state strong {
+  color: #eef4f7;
+  font-size: 14px;
+}
+
+.canvas-empty-state small {
+  max-width: 320px;
+  font-size: 12px;
+}
+
+/* 已放置组件的胶囊列表。它同时是换序和删除的操作把手，
+   因为画布上的卡片本身要留给数据展示，不适合再挂拖放语义。 */
+.canvas-widget-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.canvas-widget-chips-label {
+  margin-right: 2px;
+  color: #91a5ae;
+  font-size: 11px;
+}
+
+.canvas-widget-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px 3px 10px;
+  color: #d6e3e9;
+  font-size: 12px;
+  background: #182126;
+  border: 1px solid #34454d;
+  border-radius: 12px;
+  cursor: grab;
+}
+
+.canvas-widget-chip button {
+  padding: 0 3px;
+  color: #91a5ae;
+  font-size: 13px;
+  line-height: 1;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.canvas-widget-chip button:hover {
+  color: #e05c5c;
+}
+
+.canvas-part-rail {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #11171b;
+  border: 1px solid #33434a;
+  border-radius: 6px;
+}
+
+.canvas-part-rail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.canvas-part-rail-head small {
+  color: #7f939c;
+  font-size: 11px;
+}
+
+/* 主界面一次列六类（画布三类 + 图表三类），窄窗口下必须能换行，
+   否则这排按钮会把右边的提示文字挤出栏外。 */
+.canvas-part-categories {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px;
+  background: #182126;
+  border: 1px solid #34454d;
+  border-radius: 14px;
+}
+
+.canvas-part-categories button {
+  padding: 4px 12px;
+  color: #91a5ae;
+  font-size: 12px;
+  background: none;
+  border: 0;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.canvas-part-categories button.is-selected {
+  color: #0f171a;
+  background: #27b4a8;
+}
+
+.canvas-part-rail-body {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.canvas-rail-arrow {
+  width: 26px;
+  height: 60px;
+  color: #cfdde3;
+  font-size: 16px;
+  background: #182126;
+  border: 1px solid #34454d;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.canvas-rail-arrow:disabled {
+  color: #4a5b63;
+  cursor: default;
+}
+
+.canvas-part-track {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+}
+
+.canvas-part-tile {
+  display: grid;
+  flex: 0 0 78px;
+  gap: 5px;
+  justify-items: center;
+  padding: 7px 5px;
+  color: #b9c9d0;
+  background: #182126;
+  border: 1px solid #34454d;
+  border-radius: 6px;
+  cursor: grab;
+  scroll-snap-align: start;
+}
+
+.canvas-part-tile:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.canvas-part-tile.is-active {
+  color: #eef4f7;
+  border-color: #27b4a8;
+  box-shadow: inset 0 0 0 1px rgb(39 180 168 / 45%);
+}
+
+.canvas-part-visual {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 30px;
+  overflow: hidden;
+  color: #cfe3ea;
+  font-size: 15px;
+  background: #10171a;
+  border: 1px solid #3b4c54;
+  border-radius: 4px;
+}
+
+/* 图表卡片零件的缩略曲线。撑满方块的预览区，颜色跟着方块的 color 走，
+   高亮时会随 .is-active 一起变亮。 */
+.canvas-part-visual svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.canvas-part-label {
+  overflow: hidden;
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* ── overlay 形态：主界面的 3D 场景是 100vh，零件栏只能浮在它上面 ── */
+
+.canvas-drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+}
+
+.canvas-drop-overlay.is-drag-over {
+  background: rgb(39 180 168 / 8%);
+  outline: 2px dashed #27b4a8;
+  outline-offset: -6px;
+}
+
+.canvas-drop-overlay .canvas-drop-hint {
+  top: 16px;
+}
+
+.canvas-overlay-bar {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 1210;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 16px 12px;
+  background: rgb(17 23 27 / 92%);
+  border-top: 1px solid #33434a;
+  backdrop-filter: blur(6px);
+}
+
+.canvas-overlay-bar.is-collapsed {
+  padding: 6px 16px;
+}
+
+.canvas-overlay-toggle {
+  align-self: flex-end;
+  padding: 2px 10px;
+  color: #9fb4bd;
+  font-size: 11px;
+  background: #1b262c;
+  border: 1px solid #33434a;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.canvas-overlay-toggle:hover {
+  color: #eef4f7;
+  border-color: #27b4a8;
+}
+
+.canvas-overlay-legend {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: #8ba0aa;
+  font-size: 11px;
+}
+
+.canvas-overlay-legend i {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+}
+
+/* ── 草稿状态带 ── */
+
+/* 只在有未保存改动时出现。收起状态下也照样显示，所以它必须自己撑住一行的
+   排版，不能依赖零件栏的存在。窄窗口下允许换行，和类别按钮同一套纪律。 */
+.canvas-draft-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  font-size: 11px;
+  background: #1b262c;
+  border: 1px solid #33434a;
+  border-radius: 6px;
+}
+
+.canvas-draft-status {
+  color: #e0a05c;
+  white-space: nowrap;
+}
+
+/* 提示文字吃掉中间的空间，把三个按钮顶到右边。 */
+.canvas-draft-hint {
+  flex: 1;
+  min-width: 0;
+  color: #7f939c;
+}
+
+.canvas-draft-bar button {
+  padding: 2px 10px;
+  color: #9fb4bd;
+  font-size: 11px;
+  white-space: nowrap;
+  background: #11171b;
+  border: 1px solid #33434a;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+/* 没有 .canvas-draft-hint 时（自建系统三个按钮全在），按钮组也要靠右。 */
+.canvas-draft-status + button {
+  margin-left: auto;
+}
+
+.canvas-draft-bar button:hover {
+  color: #eef4f7;
+  border-color: #27b4a8;
+}
+
+@media (max-width: 900px) {
+  .canvas-part-rail-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .canvas-rail-arrow {
+    display: none;
+  }
+}

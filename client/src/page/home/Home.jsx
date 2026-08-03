@@ -24,7 +24,6 @@ import Fast1024sit from '../../components/three/NumThreeColor1024sit'
 import CanvasnewHand from "../../components/three/newhand";
 import Gloves from "../../components/three/gloves";
 import Gloves1 from "../../components/three/gloves1";
-import Carcol from "../../components/three/carCol";
 import Hand0205 from "../../components/three/hand0205 copy";
 import Hand0205Double from "../../components/three/hand0205Double";
 import Minzhen from "../../components/three/minzhen";
@@ -44,7 +43,6 @@ import RobotBlueSY from '../../components/video/robotSY'
 import RobotBlueLCF from "../../components/video/robotLCF";
 import RobotBlue0428 from "../../components/video/robot0428";
 import HumanBodyCanvas from '../../components/video/humanBody';
-import MatCol from "../../components/three/matCol";
 import CarTq from "../../components/three/carTq";
 import Bed from "../../components/three/Bed";
 import SmallBed from "../../components/three/smallBed";
@@ -75,7 +73,7 @@ import {
   objChange,
   arr10to5,
 } from "../../assets/util/line";
-import { ConfigProvider, Input, Popover, message, Modal } from "antd";
+import { ConfigProvider, Input, Popover, message, Modal, Spin } from "antd";
 
 import { SelectOutlined } from "@ant-design/icons";
 import { Num } from "../../components/num/Num";
@@ -102,8 +100,53 @@ import { WebGLCanvas } from "../../components/webgl/WebGL.HeatMap copy 2";
 import { WS_URLS } from "../../constants";
 import { createJsonWebSocket } from "../../services/ws/messages";
 import { commandClient } from "../../services/command/commandClient";
-import { getDisplayDefinition } from '../../displays/registry';
-import ManifestDisplayRenderer from '../../components/displaySystem/ManifestDisplayRenderer';
+import { getCurrentSensorTypeFromStatus } from "../../services/sensorStatus";
+import {
+  getDisplayDefinition,
+  listRuntimeDisplayDefinitions,
+  registerRuntimeDisplayDefinition,
+} from '../../displays/registry';
+import { buildManifestSceneFrame } from '../../components/displaySystem/manifestSceneAdapter';
+import RendererHost from '../../renderers/RendererHost.jsx';
+import { resolveRendererFromDefinition } from '../../renderers/registry';
+// 只引参数表，不引渲染器本体 —— params.js 是纯函数模块（无 three.js），
+// PointGridRenderer.jsx 仍然由 RendererHost 懒加载，不进 Home 的 chunk。
+import { LEGACY_PRESETS as POINT_GRID_PRESETS } from '../../renderers/pointGrid/params';
+import { clearLastFrame, publishFrame } from '../../runtime/frameBus';
+import { SCENE_CHANNELS, buildSceneFrame } from '../../runtime/sceneFrame';
+import DisplayCanvasConfigurator from '../../components/displaySystem/canvasConfigurator/DisplayCanvasConfigurator.jsx';
+import {
+  buildDisplayProfileModel,
+  resolveChartAppearance,
+  resolveDisplayProfile,
+} from '../../components/displaySystem/displayProfileRuntime';
+import {
+  buildDisplaySectionPayload,
+  clearDisplayDraftSelection,
+  describeDisplayDraft,
+} from '../../components/displaySystem/displayDraftState';
+import {
+  duplicateDisplaySystem,
+  saveDisplaySection,
+} from '../../services/displaySystemApi';
+import { CHART_OVERLAY_IDS } from '../../components/aside/chartAppearance';
+import { FORMULA_CHART_TEMPLATES } from '../../components/aside/formulaChartTemplates';
+import {
+  FORMULA_CHART_LIMIT,
+  addFormulaChartFromTemplate,
+  formulaChartStorageKey,
+  hasFormulaCharts,
+  listFormulaChartTemplateIds,
+  loadFormulaCharts,
+  removeFormulaChart,
+  resetFormulaCharts,
+  subscribeFormulaCharts,
+} from '../../components/aside/formulaChartStore';
+import {
+  readDisplaySelection,
+  writeDisplaySelection,
+} from '../../components/displaySystem/displayProfileStorage';
+import { isClassicColormap } from '../../components/displaySystem/colormaps';
 import {
   buildBasicControlCollectionRow,
   buildExtendedControlCollectionRow,
@@ -114,6 +157,7 @@ import {
 } from "../../services/ws/controlMessages";
 
 const FULL_PACKET_GLOVE_MATRIX = 'handGloveFullPacket'
+const DisplaySystemBuilder = React.lazy(() => import('../displaySystemBuilder/DisplaySystemBuilder'))
 const HAND_0205_DOUBLE_MATRIX = 'hand0205Double'
 const MINZHEN_MATRIX = 'minzhen'
 const SMALL_BED_NO_ALG_MATRIX = 'smallBedNoAlg'
@@ -171,6 +215,16 @@ const parseMaybeJsonPayload = (payload, fallback = null) => {
   } catch {
     return fallback
   }
+}
+
+/**
+ * 兼容浏览器字符串消息和桌面运行时已经解析好的对象消息。
+ */
+const parseWebSocketEventPayload = (event) => {
+  const payload = parseMaybeJsonPayload(event?.data, null)
+  return payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? payload
+    : null
 }
 
 const getHumanBodyPartArray = (part) => {
@@ -282,7 +336,23 @@ class CanvasCom extends React.Component {
   constructor(props) {
     super(props);
   }
+  // colormapKey 和 variantKey 的区别在于要不要重建场景：
+  // variantKey 进了 childBaseKey，一变就换 key、整场重挂（数字精灵图这类
+  // 烘焙资源只能这么换）；colormapKey 只放行一次 re-render，子组件原地收到新
+  // 的 colormap prop，逐帧上色的场景（hand）当场换色，相机视角不丢。
+  // 两者都必须是稳定字符串 —— resolveDisplayProfile 每次返回的都是新对象，
+  // 直接比对象会让这个 shouldComponentUpdate 形同虚设。
+  // chartKey 同理，它放行的是包着 Aside 的那一层：侧栏曲线换了外观要重画，
+  // 但 Aside 绝不能重挂（它持有全部实时读数），所以只放行 re-render。
+  // viewKey 走的是和 colormapKey 一样的路子：旋转角、正视图、框选开关这些
+  // 「视图状态」本来是靠 this.com.current.changeGroupRotate(...) 命令式推的，
+  // 但它们是拖滑块才变的低频状态，不是每帧数据，该走 props。
+  // 同样必须是稳定字符串（如 `${rotX}:${rotZ}:${view}:${selectFlag}`）——
+  // 传对象等于没写这一行。
   shouldComponentUpdate(nextProps, nextState) {
+    if (this.props.colormapKey != nextProps.colormapKey) return true;
+    if (this.props.chartKey != nextProps.chartKey) return true;
+    if (this.props.viewKey != nextProps.viewKey) return true;
     if (this.props.local !== null && this.props.local !== undefined) {
       return this.props.matrixName != nextProps.matrixName
         || this.props.local != nextProps.local
@@ -612,10 +682,64 @@ const getConfig = ({ sensorType, mode }) => {
   return mergedConfig
 }
 
+// 3D 场景能落地的叠加层，只有图例一个 —— 它由零件栏自己画在 DOM 上，
+// 与是哪个场景组件无关，所以两条链都成立。其余几个都落不了地：
+// Fast1024 的数值和格子描边是数字精灵图本身画上去的、恒为开；CanvasHand 是
+// 点云，压根没有格子；坐标轴和峰值环在 3D 里没有对应物。都是二维 widget
+// 才有的能力，留在配置器那条链里。模块级常量，引用稳定。
+const CANVAS_SCENE_OVERLAY_IDS = ['legend'];
+
+/**
+ * 取展示系统的偏好存储 id。manifest 系统与 ManifestDisplayRenderer 用同一份
+ * 规则，读写的是同一个 localStorage 键。
+ *
+ * 老展示系统没有 `displaySystemId`，回落到 `definition.type`；`normal` 这类
+ * 连注册表条目都没有的，再回落到矩阵名。总之每个展示系统一个键，配色不互相串味。
+ *
+ * @param {object} definition 展示系统运行时定义，可为空。
+ * @param {string} matrixName 当前矩阵名，兜底用。
+ * @returns {string} 偏好 id。
+ */
+const getDisplayProfileId = (definition, matrixName) => (
+  definition?.displaySystemId || definition?.type || matrixName || 'unknown'
+);
+
+/**
+ * 读某个矩阵对应展示系统的画布偏好。没存过就是空对象，一切按默认值渲染。
+ *
+ * 不区分 manifest 与老展示系统 —— 读本身对谁都无副作用；真正的收口在
+ * "零件栏挂不挂"，那是 render 里各分支自己决定的（见 `renderCanvasRail`）。
+ *
+ * @param {string} matrixName 当前矩阵名。
+ * @returns {object} 画布偏好，无则空对象。
+ */
+const readDisplayCanvasSelection = (matrixName) => (
+  readDisplaySelection(getDisplayProfileId(getDisplayDefinition(matrixName), matrixName))
+);
+
+/**
+ * 读图表卡片清单；第一次进这个展示系统时用 manifest 声明的默认卡片播种。
+ *
+ * 靠 `hasFormulaCharts` 而不是"清单是不是空的"来判断有没有播过 —— 用户主动
+ * 把卡片全删了也是一种状态，不该每次进来又给他种回去。
+ *
+ * manifest 没声明默认卡片时**什么都不写**：写一个空数组会把键建出来，
+ * 以后 manifest 真的声明了默认卡片也再也播不进去了。
+ *
+ * @param {string} matrixName 当前矩阵名。
+ * @returns {object[]} 图表卡片清单。
+ */
+const seedFormulaChartsFromManifest = (matrixName) => {
+  if (hasFormulaCharts(matrixName)) return loadFormulaCharts(matrixName);
+  const baseline = getDisplayDefinition(matrixName)?.page?.chartCards;
+  if (!baseline?.length) return [];
+  return resetFormulaCharts(matrixName, baseline);
+};
+
 const getDefaultModeForMatrix = (matrixName, currentMode = "normal") => {
   const runtimeDefinition = getDisplayDefinition(matrixName)
   if (runtimeDefinition?.source === 'manifest') {
-    return runtimeDefinition.defaultMode || 'num'
+    return runtimeDefinition.sceneMode || 'numoriginal'
   }
   if (matrixName === WHOLE_CHAIR_MATRIX) {
     return "normal";
@@ -808,16 +932,23 @@ class Home extends React.Component {
       storedSensorTypeList = null;
     }
 
+    // 使用上次由配置器或传感器选择器激活的类型，避免重新进入主界面后回退到固定传感器。
+    const initialMatrixName = normalizeDisplayMatrixName(localStorage.getItem('file') || 'hand0205');
+    const initialMatrixConfig = getConfig({ sensorType: initialMatrixName });
+    // 播种必须在读 chartWidgetIds 之前 —— 后者从存储里算高亮，
+    // 顺序反了首帧的零件方块就不会亮。
+    const initialChartCards = seedFormulaChartsFromManifest(initialMatrixName);
+
     this.state = {
       hand: true,
-      matrixName: 'hand0205',//localStorage.getItem('file'),
-      valueg1: getConfig({ sensorType: localStorage.getItem('file') }).valueg1,
-      valuej1: getConfig({ sensorType: localStorage.getItem('file') }).valuej1,
-      valuel1: getConfig({ sensorType: localStorage.getItem('file') }).valuel1,
-      valuef1: getConfig({ sensorType: localStorage.getItem('file') }).valuef1,
-      value1: getConfig({ sensorType: localStorage.getItem('file') }).value1,
-      sizeValue: getConfig({ sensorType: localStorage.getItem('file') }).sizeValue ?? HUMAN_BODY_DEFAULT_SIZE,
-      valuelInit1: getConfig({ sensorType: localStorage.getItem('file') }).valuelInit1 ?? initValue.valuelInit1,
+      matrixName: initialMatrixName,
+      valueg1: initialMatrixConfig.valueg1,
+      valuej1: initialMatrixConfig.valuej1,
+      valuel1: initialMatrixConfig.valuel1,
+      valuef1: initialMatrixConfig.valuef1,
+      value1: initialMatrixConfig.value1,
+      sizeValue: initialMatrixConfig.sizeValue ?? HUMAN_BODY_DEFAULT_SIZE,
+      valuelInit1: initialMatrixConfig.valuelInit1 ?? initValue.valuelInit1,
       valueMult: initValue.valueMult,
       compen: initValue.compen,
       port: [{ value: " ", label: "" }],
@@ -885,6 +1016,21 @@ class Home extends React.Component {
       realHz: 0,
       smallBedMatrixWidth: 32,
       smallBedMatrixHeight: 32,
+      displaySystemBuilderOpen: false,
+      // manifest 展示系统的画布偏好（配色 / 叠加层）。构造时就读出来，
+      // 免得首帧按 classic 渲染完再因为偏好不同重建一次场景。
+      displaySelection: readDisplayCanvasSelection(initialMatrixName),
+      // 已经在侧栏里的图表卡片对应的模板 id，只用来给零件方块加高亮。
+      // 卡片本身由 Aside 从 store 里读，这里不重复持有定义。
+      chartWidgetIds: listFormulaChartTemplateIds(
+        initialMatrixName,
+        FORMULA_CHART_TEMPLATES,
+        initialChartCards,
+      ),
+      // 完整的图表卡片清单，只给草稿层的脏判定用。上面那份 id 清单不够 ——
+      // 用弹窗建的卡片没有 templateId，不在 FORMULA_CHART_TEMPLATES 里，
+      // 但它同样是"用户还没保存的改动"。
+      chartCards: initialChartCards,
     };
     this.com = React.createRef();
     this.data = React.createRef();
@@ -899,6 +1045,36 @@ class Home extends React.Component {
     this.sitIndexArr = new Array(4).fill(0);
     this.backIndexArr = new Array(4).fill(0);
     this.headIndexArr = new Array(4).fill(0);
+
+    // 场景组件的图表回调，原先在 render 里写作
+    // `handleChartsBody={this.handleChartsBody.bind(this)}`，重复了 60 次。
+    // 每次 render 都 bind 一次会生成新函数引用 —— 对 CanvasCom 那道
+    // shouldComponentUpdate 来说无所谓（它本来就只认几个稳定字符串键），
+    // 但对任何走 memo/浅比较的子树来说等于每帧都在说"我变了"。
+    // 在构造函数里绑一次，render 里只做展开。
+    this.handleChartsBody = this.handleChartsBody.bind(this);
+    this.handleChartsBody1 = this.handleChartsBody1.bind(this);
+    // Title 那一束同理，原先在 render 里各 bind 一次。
+    this.changeWs = this.changeWs.bind(this);
+    this.colPushData = this.colPushData.bind(this);
+    this.delPushData = this.delPushData.bind(this);
+    this.changeCalibration = this.changeCalibration.bind(this);
+    this.colFingerData = this.colFingerData.bind(this);
+
+    // 两条现成的组合。分两条而不是一条，是因为仓库里本来就有 10 处
+    // 刻意不传 changeStateData —— 合成一条会给那 10 个组件多喂一个 prop，
+    // 收敛重复不该顺手改变谁收到什么。
+    this.sceneChartProps = {
+      handleChartsBody: this.handleChartsBody,
+      handleChartsBody1: this.handleChartsBody1,
+      changeStateData: this.changeStateData,
+      changeSelect: this.changeSelect,
+    };
+    this.sceneChartPropsBasic = {
+      handleChartsBody: this.handleChartsBody,
+      handleChartsBody1: this.handleChartsBody1,
+      changeSelect: this.changeSelect,
+    };
   }
 
   syncDisplayRendererConfig = () => {
@@ -972,7 +1148,12 @@ class Home extends React.Component {
     return true;
   }
 
-  handleManifestSidebarData = ({ values = [], metrics = {}, algorithmMetrics = {} }) => {
+  handleManifestSidebarData = ({
+    values = [],
+    rawData = values,
+    metrics = {},
+    algorithmMetrics = {},
+  }) => {
     this.data.current?.changeData({
       totalPres: metrics.totalPressure || 0,
       meanPres: metrics.averagePressure || 0,
@@ -981,6 +1162,7 @@ class Home extends React.Component {
       area: metrics.area || 0,
       algorithmMetrics,
     });
+    this.data.current?.updateFormulaCharts(values, metrics, algorithmMetrics, rawData);
     if (!values.length) return;
     const chartMax = values.reduce((max, value) => {
       const numeric = Number(value);
@@ -988,6 +1170,32 @@ class Home extends React.Component {
     }, 1);
     this.data.current?.handleCharts(values, chartMax);
     this.data.current?.handleChartsArea(values, chartMax);
+  }
+
+  /**
+   * 将当前 Display System 帧送入主界面已有的数值渲染场景。
+   *
+   * 算法输出用于绘图，normalizedData 用于左侧统计，避免可视化算法改变业务指标。
+   */
+  handleManifestSceneFrame = (message, definition) => {
+    const sceneFrame = buildManifestSceneFrame(message, definition);
+    if (!sceneFrame) return false;
+
+    if (typeof this.com.current?.sitData === 'function') {
+      this.com.current.sitData({
+        wsPointData: sceneFrame.renderValues,
+      }, this.state.local);
+    } else {
+      this.com.current?.changeWsData?.(sceneFrame.renderValues);
+    }
+
+    this.handleManifestSidebarData({
+      values: sceneFrame.normalizedValues,
+      rawData: sceneFrame.rawValues,
+      metrics: sceneFrame.metrics,
+      algorithmMetrics: sceneFrame.algorithmMetrics,
+    });
+    return true;
   }
 
   appendControlCollectionRow = (row) => {
@@ -1102,6 +1310,10 @@ class Home extends React.Component {
     // window.alert(window.innerWidth)
     document.documentElement.style.fontSize = `${window.innerWidth / 120}px`;
     this.syncDisplayRendererConfig();
+    // componentDidMount 被 window.__wsReconnect 反复重入，订阅只能建一次。
+    if (!this._unsubscribeFormulaCharts) {
+      this._unsubscribeFormulaCharts = subscribeFormulaCharts(this.handleFormulaChartsChanged);
+    }
     // 暴露全局重连函数，供主进程 executeJavaScript 直接调用
     // 确保重连时 onmessage、wsData 等 React 回调完整绑定
     window.__wsReconnect = () => {
@@ -1198,6 +1410,10 @@ class Home extends React.Component {
   }
 
   componentWillUnmount() {
+    if (this._unsubscribeFormulaCharts) {
+      this._unsubscribeFormulaCharts();
+      this._unsubscribeFormulaCharts = null;
+    }
     // 清理自动重连定时器
     if (wsReconnectTimer) {
       clearTimeout(wsReconnectTimer);
@@ -1302,10 +1518,51 @@ class Home extends React.Component {
     }
   }
 
+  /**
+   * 将后端切换结果立即应用到主界面。
+   * WebSocket 状态消息和配置器“保存并显示”共用该入口，避免两套切换状态发生偏差。
+   */
+  applyCurrentSensorType = (sensorType) => {
+    if (!sensorType) return;
+    const nextMatrixName = normalizeDisplayMatrixName(sensorType);
+    const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag);
+    this.setState({
+      matrixName: nextMatrixName,
+      numMatrixFlag: nextMode,
+      minzhenSensorInfo: {},
+      ...getConfig({ sensorType: nextMatrixName, mode: nextMode }),
+    });
+    localStorage.setItem('file', nextMatrixName);
+  };
+
   wsData = (e) => {
     sitPress = 0;
-    let jsonObject = JSON.parse(e.data);
+    let jsonObject = parseWebSocketEventPayload(e);
+    if (!jsonObject) return;
+    if (
+      jsonObject.sitData != null
+      && !Array.isArray(jsonObject.sitData)
+      && typeof jsonObject.sitData !== 'string'
+    ) {
+      // 控制类消息可能复用 sitData 字段，但不是压力矩阵，不能交给旧矩阵解析链路。
+      jsonObject = { ...jsonObject, sitData: null };
+    }
     this.syncSmallBed12BMatrixSize(jsonObject);
+
+    const currentDisplayDefinition = getDisplayDefinition(this.state.matrixName);
+    const hasPressureFrame = (
+      jsonObject.sitData != null
+      || jsonObject.backData != null
+      || jsonObject.headData != null
+      || (jsonObject.outputChannel && jsonObject.data != null)
+    );
+    if (currentDisplayDefinition?.source === 'manifest' && hasPressureFrame) {
+      const handled = this.handleManifestSceneFrame(jsonObject, currentDisplayDefinition);
+      if (handled || jsonObject.displaySystemId) return;
+    } else if (jsonObject.displaySystemId && hasPressureFrame) {
+      // 后台可同时发布其它 Display System 的帧，旧场景不能消费这些带身份的帧。
+      return;
+    }
 
     // 传感器类型清单（{time,flat,map}）：存到 state 并落地 localStorage 兜底
     if (jsonObject.sensorTypeList && Array.isArray(jsonObject.sensorTypeList.flat)) {
@@ -1551,28 +1808,18 @@ class Home extends React.Component {
       }
     }
 
-    if (jsonObject.file != null && jsonObject.selectFlag == null) {
+    const currentSensorType = getCurrentSensorTypeFromStatus(jsonObject)
+    if (currentSensorType) this.applyCurrentSensorType(currentSensorType)
+
+    // 旧版数组 file 仍作为授权范围兼容；标量 file/currentSensorType 只切换当前系统。
+    if (jsonObject.file != null && jsonObject.selectFlag == null && !currentSensorType) {
       if (jsonObject.file === 'all') {
-        this.setState({ matrixTitle: true })
+        localStorage.removeItem('allowedTypes')
+        this.setState({ matrixTitle: true, allowedTypes: null })
       } else if (Array.isArray(jsonObject.file) && jsonObject.file.length) {
         // 多类型模式：使用数组第一个作为默认类型
         const allowedTypes = filterVisibleDisplayMatrixTypes(jsonObject.file)
         const nextMatrixName = normalizeDisplayMatrixName(allowedTypes[0] || jsonObject.file[0])
-        const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag)
-        localStorage.setItem('matrixTitle', false)
-        localStorage.setItem('allowedTypes', JSON.stringify(allowedTypes))
-        this.setState({
-          matrixTitle: false,
-          allowedTypes,
-          matrixName: nextMatrixName,
-          numMatrixFlag: nextMode,
-          minzhenSensorInfo: {},
-          ...getConfig({ sensorType: nextMatrixName, mode: nextMode }),
-        })
-        localStorage.setItem('file', nextMatrixName)
-      } else if (jsonObject.file) {
-        const nextMatrixName = normalizeDisplayMatrixName(jsonObject.file)
-        const allowedTypes = HIDDEN_DISPLAY_MATRIX_TYPES.includes(jsonObject.file) ? [] : [jsonObject.file]
         const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag)
         localStorage.setItem('matrixTitle', false)
         localStorage.setItem('allowedTypes', JSON.stringify(allowedTypes))
@@ -1603,8 +1850,9 @@ class Home extends React.Component {
         const allowedTypes = filterVisibleDisplayMatrixTypes(allowedTypesRaw)
         localStorage.setItem('allowedTypes', JSON.stringify(allowedTypes))
         const nextState = { matrixTitle: true, allowedTypes }
-        const currentMatrixName = normalizeDisplayMatrixName(this.state.matrixName)
-        if (currentMatrixName !== this.state.matrixName || (allowedTypes.length && !allowedTypes.includes(this.state.matrixName))) {
+        const currentMatrixName = normalizeDisplayMatrixName(currentSensorType || this.state.matrixName)
+        // 新协议已经明确给出当前 runtime 时，授权刷新只更新范围，不再把自定义系统强制切走。
+        if (!currentSensorType && (currentMatrixName !== this.state.matrixName || (allowedTypes.length && !allowedTypes.includes(this.state.matrixName)))) {
           const nextMatrixName = allowedTypes[0] || currentMatrixName
           const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag)
           Object.assign(nextState, {
@@ -1783,6 +2031,28 @@ class Home extends React.Component {
 
         });
       }
+
+      // 发布一帧规范数据到帧总线。
+      //
+      // **和上面的 sitTypeEvent 并行，不是替代。** 已经迁到 renderers/ 的
+      // 渲染器传 frameChannel 就能自己订到帧（见 RendererHost），不必让 Home
+      // 认识它的方法名；还留在 components/three/ 的场景组件继续走
+      // sitTypeEvent → util.js → this.com.current.xxx() 那条老路。
+      // 两条路并存是绞杀者模式的必要状态：一组一组往总线上搬，
+      // 每搬完一组就从老路上摘一段，不需要一次性切换。
+      publishFrame(buildSceneFrame({
+        values: wsPointData,
+        side: this.state.matrixName === HAND_0205_DOUBLE_MATRIX
+          ? (backFlag ? SCENE_CHANNELS.RIGHT : SCENE_CHANNELS.LEFT)
+          : undefined,
+        showType: this.state.showType,
+        width: wsPointDataSitWidth,
+        meta: {
+          matrixName: this.state.matrixName,
+          numMatrixFlag: this.state.numMatrixFlag,
+          local: this.state.local,
+        },
+      }));
     }
 
     if (jsonObject.handReset != null) {
@@ -2302,7 +2572,8 @@ class Home extends React.Component {
 
 
   ws1Data = (e) => {
-    let jsonObject = JSON.parse(e.data);
+    const jsonObject = parseWebSocketEventPayload(e);
+    if (!jsonObject) return;
     // let wsPointData = jsonObject.backData;
     // if (!Array.isArray(wsPointData)) {
     //   wsPointData = JSON.parse(wsPointData);
@@ -2784,6 +3055,12 @@ class Home extends React.Component {
   };
 
   componentDidUpdate(prevProps, prevState) {
+    // 换展示形式时丢掉总线上的末帧。不丢的话，下一个渲染器挂上来会先收到
+    // 一帧属于上一台设备的数据（订阅时的补发），画出一帧错的东西。
+    if (prevState.matrixName !== this.state.matrixName) {
+      clearLastFrame();
+    }
+
     if (
       this.state.matrixName === WHOLE_CHAIR_MATRIX &&
       this.state.numMatrixFlag !== "normal"
@@ -2821,10 +3098,273 @@ class Home extends React.Component {
     if (rendererConfigChanged) {
       this.syncDisplayRendererConfig();
     }
+
+    // 换展示系统就换一套画布偏好，否则上一个系统选的配色会跟着带过来。
+    if (prevState.matrixName !== this.state.matrixName) {
+      const cards = seedFormulaChartsFromManifest(this.state.matrixName);
+      this.setState({
+        displaySelection: readDisplayCanvasSelection(this.state.matrixName),
+        chartWidgetIds: listFormulaChartTemplateIds(
+          this.state.matrixName,
+          FORMULA_CHART_TEMPLATES,
+          cards,
+        ),
+        chartCards: cards,
+      });
+    }
   }
 
+  /**
+   * 拖一张图表卡片到页面上。
+   *
+   * 图表清单不在 `displaySelection` 里（那是画布和曲线外观的键），而在
+   * `shroom.formulaCharts.v1.<matrixName>`，所以这里走 store 而不是
+   * `persistDisplaySelection`；`Aside` 自己订阅 store，不需要再传 props 下去。
+   *
+   * @param {{id: string}} part 图表卡片零件。
+   * @returns {void}
+   */
+  addChartWidget = (part) => {
+    const template = FORMULA_CHART_TEMPLATES.find((item) => item.id === part?.id);
+    if (!template) return;
+    const result = addFormulaChartFromTemplate(this.state.matrixName, template);
+    if (result.ok) return;
+    // 加是幂等的：再拖一次不当成删除 —— 用户可能已经改过这张图的公式，
+    // 静默毁掉他的编辑比"什么都没发生"糟得多。
+    if (result.reason === 'exists') {
+      message.info(`“${template.name}”已经在侧栏了`);
+      return;
+    }
+    if (result.reason === 'limit') {
+      message.warning(`最多同时显示 ${FORMULA_CHART_LIMIT} 张公式图表`);
+    }
+  };
+
+  /**
+   * 把图表卡片拖回零件栏 = 删除它。
+   *
+   * @param {string} id 图表 id。
+   * @returns {void}
+   */
+  removeChartWidget = (id) => {
+    removeFormulaChart(this.state.matrixName, id);
+  };
+
+  /**
+   * store 里的图表清单变了，重算零件方块的高亮。
+   *
+   * @param {string} matrixName 发生变化的展示系统。
+   * @param {object[]} definitions 新的图表清单。
+   * @returns {void}
+   */
+  handleFormulaChartsChanged = (matrixName, definitions) => {
+    if (formulaChartStorageKey(matrixName) !== formulaChartStorageKey(this.state.matrixName)) return;
+    this.setState({
+      chartWidgetIds: listFormulaChartTemplateIds(matrixName, FORMULA_CHART_TEMPLATES, definitions),
+      chartCards: Array.isArray(definitions) ? definitions : [],
+    });
+  };
+
+  /**
+   * 保存画布配置（零件栏拖放的落点）。
+   *
+   * 写的是 ManifestDisplayRenderer 用的那个键，所以配置器页面和主界面
+   * 看到的是同一份偏好。老展示系统按 `definition.type` 各存各的。
+   *
+   * @param {object} canvas 新的画布配置。
+   * @returns {void}
+   */
+  updateDisplayCanvas = (canvas) => {
+    this.persistDisplaySelection({ canvas });
+  };
+
+  /**
+   * 保存侧栏压力曲线的外观偏好。
+   *
+   * 和画布配置分开存（`selection.charts` 对 `selection.canvas`），换画布配色
+   * 不会顺手把曲线也换掉，两块表面各记各的。
+   *
+   * @param {object} charts 新的图表外观。
+   * @returns {void}
+   */
+  updateChartAppearance = (charts) => {
+    this.persistDisplaySelection({ charts });
+  };
+
+  /**
+   * 把偏好合并进 state 并落盘。两块表面共用这一条通路，
+   * 存储键的算法只有一处。
+   *
+   * @param {object} patch 要合并的偏好字段。
+   * @param {{replace?: boolean}} [options] `replace` 时整份替换而不是合并 ——
+   *        撤销要的是"删掉 canvas / charts 两个字段"，合并做不到删。
+   * @returns {void}
+   */
+  persistDisplaySelection = (patch, options = {}) => {
+    const { matrixName } = this.state;
+    const nextSelection = options.replace
+      ? { ...patch }
+      : { ...this.state.displaySelection, ...patch };
+    this.setState({ displaySelection: nextSelection });
+    writeDisplaySelection(
+      getDisplayProfileId(getDisplayDefinition(matrixName), matrixName),
+      nextSelection,
+    );
+  };
+
+  /**
+   * 撤销：把外观和图表卡片一起退回基线。
+   *
+   * 基线 = 展示系统 manifest 里声明的那份（没声明就是内置默认值），
+   * 不是"出厂设置" —— 保存过一次之后，基线就是刚保存的样子。
+   *
+   * 弹确认框而不是直接撤：一键全撤很彻底，但用户可能辛苦建了几张公式图表，
+   * 所以把会丢的东西逐条列出来，让他自己决定。
+   *
+   * @param {{changes: Array<{label: string}>}} draft 草稿状态，来自 `describeDisplayDraft`。
+   * @returns {void}
+   */
+  revertDisplayDraft = (draft) => {
+    if (!draft?.changes?.length) return;
+    Modal.confirm({
+      title: '撤销未保存的改动？',
+      okText: '撤销',
+      cancelText: '再想想',
+      content: (
+        <div>
+          <p>会做这几件事：</p>
+          <ul style={{ paddingLeft: 18, margin: 0 }}>
+            {draft.changes.map((change) => <li key={change.label}>{change.label}</li>)}
+          </ul>
+        </div>
+      ),
+      onOk: () => {
+        const { matrixName } = this.state;
+        // 只删 canvas / charts 两个字段。整键删掉会把 profileId / rendererId /
+        // algorithmId 一起带走 —— 那是"我在看哪个模式"，撤销不该把视图也切走。
+        this.persistDisplaySelection(
+          clearDisplayDraftSelection(this.state.displaySelection),
+          { replace: true },
+        );
+        resetFormulaCharts(matrixName, getDisplayDefinition(matrixName)?.page?.chartCards);
+      },
+    });
+  };
+
+  /**
+   * 把草稿层落回这个展示系统自己的 `display-system.json`（保存）。
+   *
+   * **保存 = 写基线 + 清草稿。** 少了后半步，草稿层会一直盖在新基线上面，
+   * 状态带就永远显示"有未保存的改动"。
+   *
+   * 失败时**绝不清草稿** —— 后端没开着的时候清掉，用户拖了半天的东西就凭空
+   * 没了，这比保存失败本身严重得多。
+   *
+   * @param {object} payload `buildDisplaySectionPayload` 的结果。
+   * @returns {Promise<void>} 落盘完成。
+   */
+  saveDisplayDraft = async (payload) => {
+    const { matrixName } = this.state;
+    const displaySystemId = getDisplayDefinition(matrixName)?.displaySystemId;
+    if (!displaySystemId) return;
+    try {
+      const result = await saveDisplaySection(displaySystemId, payload);
+      // 先把新基线注册进去，再清草稿 —— 顺序反了的话中间那一帧会拿旧基线
+      // 配空草稿，界面会闪一下回到保存前的样子。
+      if (result?.displaySystem?.runtimeDefinition) {
+        registerRuntimeDisplayDefinition(result.displaySystem.runtimeDefinition);
+      }
+      this.persistDisplaySelection(
+        clearDisplayDraftSelection(this.state.displaySelection),
+        { replace: true },
+      );
+      resetFormulaCharts(matrixName, getDisplayDefinition(matrixName)?.page?.chartCards);
+      message.success('已保存到展示系统目录，这就是新的基线');
+    } catch (error) {
+      message.error(
+        error?.code === 'DISPLAY_SYSTEM_READ_ONLY'
+          ? '这是软件自带的展示系统，改不了它本身，请用「另存为」建一份自己的'
+          : `保存失败：${error?.message || error}`,
+      );
+    }
+  };
+
+  /**
+   * 另存为：把整个展示系统目录复制一份，把当前外观写进新的那份。
+   *
+   * 这是自带展示系统唯一的保存出路。成功后**留在原地只提示**，不切展示系统 ——
+   * 现场正在采数据时突然切走会中断串口和采集。
+   *
+   * @param {object} payload `buildDisplaySectionPayload` 的结果。
+   * @returns {void}
+   */
+  saveDisplayDraftAs = (payload) => {
+    const definition = getDisplayDefinition(this.state.matrixName);
+    const sourceId = definition?.displaySystemId;
+    if (!sourceId) return;
+    // 名字用户改，id 从源 id 派生 —— 名字可以是中文，id 要落成文件夹名。
+    let name = `${definition.label || sourceId} 副本`;
+    Modal.confirm({
+      title: '另存为新的展示模块',
+      okText: '另存为',
+      cancelText: '取消',
+      content: (
+        <div>
+          <p style={{ margin: '0 0 8px' }}>
+            会把整个展示系统文件夹复制一份，把当前外观写进新的那份。
+            原来那份不受影响，当前测量也不会中断。
+          </p>
+          <Input
+            defaultValue={name}
+            maxLength={40}
+            onChange={(event) => { name = event.target.value; }}
+          />
+        </div>
+      ),
+      onOk: () => this.duplicateCurrentDisplaySystem(sourceId, name, payload),
+    });
+  };
+
+  /**
+   * 执行另存为的请求。id 在已加载的展示系统里避重，撞上了就加后缀。
+   *
+   * @param {string} sourceId 源展示系统 id。
+   * @param {string} name 新模块的名字。
+   * @param {object} payload `buildDisplaySectionPayload` 的结果。
+   * @returns {Promise<void>} 请求完成。
+   */
+  duplicateCurrentDisplaySystem = async (sourceId, name, payload) => {
+    const taken = new Set(
+      listRuntimeDisplayDefinitions().map((item) => item.displaySystemId).filter(Boolean),
+    );
+    let id = `${sourceId}-copy`;
+    for (let index = 2; taken.has(id); index += 1) id = `${sourceId}-copy-${index}`;
+    try {
+      const result = await duplicateDisplaySystem(sourceId, {
+        id,
+        name: String(name || '').trim(),
+        ...payload,
+      });
+      if (result?.displaySystem?.runtimeDefinition) {
+        registerRuntimeDisplayDefinition(result.displaySystem.runtimeDefinition);
+      }
+      // 顶部传感器菜单在听这个事件，收到就重新拉一次清单，新模块立刻出现在里面。
+      window.dispatchEvent(new CustomEvent('shroom-display-systems-updated'));
+      message.success(`已另存为「${result?.manifest?.name || name}」，可在顶部传感器菜单里切换过去`);
+    } catch (error) {
+      message.error(
+        error?.code === 'DISPLAY_SYSTEM_EXISTS'
+          ? `目录里已经有一个叫 ${id} 的展示系统了，先把它改名或删掉再试`
+          : `另存为失败：${error?.message || error}`,
+      );
+      // 抛回去让确认框留在原地，用户改个名字就能重试，不用从头再点一遍。
+      throw error;
+    }
+  };
+
   ws2Data = (e) => {
-    let jsonObject = JSON.parse(e.data);
+    const jsonObject = parseWebSocketEventPayload(e);
+    if (!jsonObject) return;
     if (jsonObject.headData != null) {
       let wsPointData = jsonObject.headData
       wsPointDataHead = wsPointData;
@@ -2907,6 +3447,7 @@ class Home extends React.Component {
     const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag);
     const configObj = getConfig({ sensorType: nextMatrixName, mode: nextMode })
     const wasLocal = this.state.local;
+    localStorage.setItem('file', nextMatrixName);
 
     // 1. 先停止回放，确保后端不再发送旧数据
     this.wsSendObj({ play: false });
@@ -3451,6 +3992,89 @@ class Home extends React.Component {
     const textReset = t('reset')
     const modeCanvasMatrixName = `${this.state.matrixName}:${this.state.numMatrixFlag}`;
     const runtimeDisplayDefinition = getDisplayDefinition(this.state.matrixName)
+    // 展示系统 manifest 声明了已注册的渲染器插件时走插件路径，否则为 null
+    // 并回落到下面的既有场景分支。当前没有任何 manifest 声明插件渲染器，
+    // 因此该值恒为 null，现网行为不变。
+    const manifestRenderer = runtimeDisplayDefinition?.source === 'manifest'
+      ? resolveRendererFromDefinition(runtimeDisplayDefinition)
+      : null;
+    // 画布配置走和 ManifestDisplayRenderer 完全相同的解析链，保证配置器里
+    // 预览到的效果和主界面一致。老展示系统没有 `page`，buildDisplayProfileModel
+    // 会给出全默认（classic + 无叠加层），所以这两个值对谁都成立、不用判空 ——
+    // 零件栏挂不挂由各分支自己决定，不由这里的 null 与否决定。
+    const canvasProfileModel = buildDisplayProfileModel(runtimeDisplayDefinition?.page);
+    const canvasProfile = resolveDisplayProfile(canvasProfileModel, this.state.displaySelection);
+    // 配色标识拆成两个 prop 是因为两类场景换色的代价不同：
+    // - Fast1024 的颜色烘在数字精灵图里，只能整场重建 → 并进 variantKey；
+    // - CanvasHand 逐帧算色 → 只需 colormapKey 放行一次 re-render，原地换色。
+    // classic（= 改动前的样子）不进 key：没动过配色的展示系统拿到的
+    // variantKey 与改动前逐字一致，重建时机一点没变。3D 场景的 classic 走各自
+    // 原有的 jet，本来就没有 reverse 这一说，所以 reverse 也一并忽略。
+    const canvasColormap = canvasProfile.colormap;
+    const canvasColormapKey = isClassicColormap(canvasColormap)
+      ? undefined
+      : `${canvasColormap.id}${canvasColormap.reverse ? '|reverse' : ''}`;
+    // 侧栏压力曲线的外观。图表和画布是两块表面，各自一个字段、互不影响。
+    // 和画布同样是三层：manifest 的 chartAppearance 在下、用户偏好在上。
+    const chartAppearance = resolveChartAppearance(canvasProfileModel, this.state.displaySelection);
+    // Aside 外面那层 CanvasCom 的 shouldComponentUpdate 会拦掉 re-render，
+    // 换了图表零件必须靠这个稳定字符串放行一次；它不进 childBaseKey，
+    // 所以 Aside 不重挂 —— 它持有全部实时状态，重挂就等于清空侧栏读数。
+    const chartAppearanceKey = [
+      chartAppearance.colormap.id,
+      chartAppearance.colormap.reverse ? 'reverse' : '',
+      ...chartAppearance.overlays,
+    ].filter(Boolean).join('|');
+    // 只在场景组件真的认 colormap 的分支里调用它 —— 摆一排拖上去没反应的
+    // 方块比没有零件栏更糟。当前认的是 Fast1024 和 CanvasHand 两条链。
+    // 图表三类零件跟着同一条栏走：侧栏在这些分支上都在，多挂一条栏只会
+    // 让右下角两个入口按钮打架。「图表卡片」拖出来的是侧栏里的一张新卡片，
+    // 它写的是另一个存储键，所以不走 value/onChange 那条纯值变换的路。
+    // 拖零件写的只是 localStorage，展示系统目录里那份 manifest 一个字节都没动过。
+    // 状态带就是把这件事说出来的地方；不脏时它自己不渲染，界面和改动前一致。
+    const displayDraft = describeDisplayDraft({
+      model: canvasProfileModel,
+      selection: this.state.displaySelection,
+      cards: this.state.chartCards,
+      baselineCards: runtimeDisplayDefinition?.page?.chartCards,
+    });
+    // 保存 / 另存为要有个文件夹才谈得上。约 55 个写死的展示形式没有目录，
+    // 它们只有撤销 —— 而撤销对谁都成立。`editable` 前后端都已经算好了
+    // （资源目录只读、用户目录可写），这里不重新推导。
+    const canDuplicateDisplay = runtimeDisplayDefinition?.source === 'manifest'
+      && Boolean(runtimeDisplayDefinition.displaySystemId);
+    const canSaveDisplay = canDuplicateDisplay && runtimeDisplayDefinition.editable === true;
+    const buildDraftPayload = () => buildDisplaySectionPayload({
+      model: canvasProfileModel,
+      selection: this.state.displaySelection,
+      cards: this.state.chartCards,
+    });
+    const renderCanvasRail = () => (
+      <DisplayCanvasConfigurator
+        value={canvasProfile.canvas}
+        onChange={this.updateDisplayCanvas}
+        renderers={canvasProfileModel.renderers}
+        variant="overlay"
+        categoryIds={['colormap', 'overlay', 'chartColormap', 'chartOverlay', 'chartWidget']}
+        overlayIds={CANVAS_SCENE_OVERLAY_IDS}
+        chartValue={chartAppearance}
+        onChartChange={this.updateChartAppearance}
+        chartOverlayIds={CHART_OVERLAY_IDS}
+        chartTemplates={FORMULA_CHART_TEMPLATES}
+        chartWidgetIds={this.state.chartWidgetIds}
+        onChartWidgetAdd={this.addChartWidget}
+        onChartWidgetRemove={this.removeChartWidget}
+        draft={displayDraft}
+        onRevert={() => this.revertDisplayDraft(displayDraft)}
+        onSave={canSaveDisplay ? () => this.saveDisplayDraft(buildDraftPayload()) : null}
+        onSaveAs={canDuplicateDisplay ? () => this.saveDisplayDraftAs(buildDraftPayload()) : null}
+        saveHint={canDuplicateDisplay && !canSaveDisplay ? '自带展示系统只能另存为' : ''}
+      />
+    );
+    const canvasVariantKey = [
+      runtimeDisplayDefinition?.runtimeRevision,
+      canvasColormapKey,
+    ].filter(Boolean).join('|') || undefined;
     const contentReset = (
       <div>
         <p>{t('resetContent')}</p>
@@ -3896,34 +4520,47 @@ class Home extends React.Component {
             pointFlag={this.state.pointFlag}
             valueMult={this.state.valueMult}
             pressChart={this.state.pressChart}
-            changeWs={this.changeWs.bind(this)}
+            changeWs={this.changeWs}
             hunch={this.state.hunch}
             front={this.state.front}
             csvData={this.state.csvData}
             length={this.state.length}
             colWebFlag={this.state.colWebFlag}
-            colPushData={this.colPushData.bind(this)}
-            delPushData={this.delPushData.bind(this)}
+            colPushData={this.colPushData}
+            delPushData={this.delPushData}
             calibration={this.state.calibration}
-            changeCalibration={this.changeCalibration.bind(this)}
-            colFingerData={this.colFingerData.bind(this)}
+            changeCalibration={this.changeCalibration}
+            colFingerData={this.colFingerData}
+            openDisplaySystemBuilder={() => this.setState({ displaySystemBuilderOpen: true })}
           />
 
-          {runtimeDisplayDefinition?.source === 'manifest' ? (
-            <ManifestDisplayRenderer
-              definition={runtimeDisplayDefinition}
-              onSidebarData={this.handleManifestSidebarData}
-            />
-          ) : null}
+          <Modal
+            className="display-system-builder-shell"
+            open={this.state.displaySystemBuilderOpen}
+            footer={null}
+            width="calc(100vw - 32px)"
+            style={{ maxWidth: 1500, top: 16, paddingBottom: 0 }}
+            maskClosable={false}
+            destroyOnHidden
+            onCancel={() => this.setState({ displaySystemBuilderOpen: false })}
+          >
+            <React.Suspense fallback={<div className="display-system-builder-loading"><Spin /></div>}>
+              <DisplaySystemBuilder
+                embedded
+                onActivated={this.applyCurrentSensorType}
+                onClose={() => this.setState({ displaySystemBuilderOpen: false })}
+              />
+            </React.Suspense>
+          </Modal>
 
-
-
-          {this.state.matrixName != "robot0428" ? <CanvasCom matrixName={modeCanvasMatrixName}>
+          {this.state.matrixName != "robot0428" ? <CanvasCom matrixName={modeCanvasMatrixName} chartKey={chartAppearanceKey}>
             <Aside
               i18n={i18n}
               locale={this.state.locale}
               ref={this.data}
+              chartAppearance={chartAppearance}
               matrixName={this.state.matrixName}
+              matrixShape={runtimeDisplayDefinition?.matrix}
               numMatrixFlag={this.state.numMatrixFlag}
               sidebarConfig={runtimeDisplayDefinition?.source === 'manifest' ? runtimeDisplayDefinition.page?.sidebar : null}
             />
@@ -3951,10 +4588,7 @@ class Home extends React.Component {
                   matrixName={this.state.matrixName}
                   data={this.data}
                   local={this.state.local}
-                  handleChartsBody={this.handleChartsBody.bind(this)}
-                  handleChartsBody1={this.handleChartsBody1.bind(this)}
-                  changeStateData={this.changeStateData}
-                  changeSelect={this.changeSelect} />
+                  {...this.sceneChartProps} />
               </CanvasCom>
               : this.state.numMatrixFlag == "num" && [...tactileGloveTypes, 'robot1', 'footVideo'].includes(this.state.matrixName) ?
                 <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
@@ -3962,10 +4596,7 @@ class Home extends React.Component {
                     matrixName={this.state.matrixName}
                     data={this.data}
                     local={this.state.local}
-                    handleChartsBody={this.handleChartsBody.bind(this)}
-                    handleChartsBody1={this.handleChartsBody1.bind(this)}
-                    changeStateData={this.changeStateData}
-                    changeSelect={this.changeSelect} />
+                    {...this.sceneChartProps} />
                 </CanvasCom>
                 :
 
@@ -3975,10 +4606,7 @@ class Home extends React.Component {
                       ref={this.com}
                       data={this.data}
                       local={this.state.local}
-                      handleChartsBody={this.handleChartsBody.bind(this)}
-                      handleChartsBody1={this.handleChartsBody1.bind(this)}
-                      changeStateData={this.changeStateData}
-                      changeSelect={this.changeSelect} />
+                      {...this.sceneChartProps} />
                   </CanvasCom>
                   :
                   this.state.numMatrixFlag == "numoriginal" && this.state.matrixName == 'bed4096num' ?
@@ -3988,28 +4616,51 @@ class Home extends React.Component {
                       size={1}
                       data={this.data}
                       local={this.state.local}
-                      handleChartsBody={this.handleChartsBody.bind(this)}
-                      handleChartsBody1={this.handleChartsBody1.bind(this)}
-                      changeStateData={this.changeStateData}
-                      changeSelect={this.changeSelect} />
+                      {...this.sceneChartProps} />
                   </CanvasCom>
                   :
-                  this.state.numMatrixFlag == "numoriginal" && ['hand', 'handSinglePoint', MINZHEN_MATRIX, 'smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed12B'].includes(this.state.matrixName) ?
+                  this.state.numMatrixFlag == "numoriginal" && manifestRenderer ?
+                  <CanvasCom
+                    matrixName={modeCanvasMatrixName}
+                    local={this.state.local}
+                    variantKey={runtimeDisplayDefinition?.runtimeRevision}
+                  >
+                    <RendererHost
+                      rendererId={manifestRenderer.rendererId}
+                      params={manifestRenderer.params}
+                      label={runtimeDisplayDefinition?.label}
+                      rendererRef={this.com}
+                      data={this.data}
+                      local={this.state.local}
+                      {...this.sceneChartProps} />
+                  </CanvasCom>
+                  :
+                  this.state.numMatrixFlag == "numoriginal" && (
+                    runtimeDisplayDefinition?.source === 'manifest'
+                    || ['hand', 'handSinglePoint', MINZHEN_MATRIX, 'smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed12B'].includes(this.state.matrixName)
+                  ) ?
                   <>
-                    <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
+                    <CanvasCom
+                      matrixName={modeCanvasMatrixName}
+                      local={this.state.local}
+                      variantKey={canvasVariantKey}
+                    >
                       <Fast1024
                         ref={this.com}
                         matrixName={this.state.matrixName}
+                        colormap={canvasColormap}
+                        matrixWidth={runtimeDisplayDefinition?.source === 'manifest' ? runtimeDisplayDefinition.matrix?.width : undefined}
+                        matrixHeight={runtimeDisplayDefinition?.source === 'manifest' ? runtimeDisplayDefinition.matrix?.height : undefined}
+                        coordinateMap={runtimeDisplayDefinition?.source === 'manifest' ? runtimeDisplayDefinition.coordinateMap : undefined}
+                        manageSidebar={runtimeDisplayDefinition?.source !== 'manifest'}
                         data={this.data}
                         local={this.state.local}
-                        handleChartsBody={this.handleChartsBody.bind(this)}
-                        handleChartsBody1={this.handleChartsBody1.bind(this)}
-                        changeStateData={this.changeStateData}
-                        changeSelect={this.changeSelect} />
+                        {...this.sceneChartProps} />
                     </CanvasCom>
                     {this.state.matrixName === MINZHEN_MATRIX ? (
                       <MinzhenSensorPanel sensorInfo={this.state.minzhenSensorInfo} />
                     ) : null}
+                    {renderCanvasRail()}
                   </>
                   :
                   this.state.numMatrixFlag == "numoriginal" && [...tactileGloveTypes, 'robot1', 'footVideo', 'robotSY', 'robotLCF', 'normal', 'jqbed', tempFullBedMatrix, 'petCare', 'petCareMini', 'daliegu', 'smallSample'].includes(this.state.matrixName) ?
@@ -4018,10 +4669,7 @@ class Home extends React.Component {
                       matrixName={this.state.matrixName}
                       data={this.data}
                       local={this.state.local}
-                      handleChartsBody={this.handleChartsBody.bind(this)}
-                      handleChartsBody1={this.handleChartsBody1.bind(this)}
-                      changeStateData={this.changeStateData}
-                      changeSelect={this.changeSelect} />
+                      {...this.sceneChartProps} />
                   </CanvasCom>
                   :
                   this.state.numMatrixFlag == "skin" && [...tactileGloveTypes, 'robot1', 'footVideo'].includes(this.state.matrixName) ?
@@ -4031,10 +4679,7 @@ class Home extends React.Component {
                         data={this.data}
                         local={this.state.local}
                         hand={this.state.hand}
-                        handleChartsBody={this.handleChartsBody.bind(this)}
-                        handleChartsBody1={this.handleChartsBody1.bind(this)}
-                        changeStateData={this.changeStateData}
-                        changeSelect={this.changeSelect} />
+                        {...this.sceneChartProps} />
                     </CanvasCom>
                     :
                     this.state.numMatrixFlag == "numoriginal" && this.state.matrixName == 'humanBody' ?
@@ -4057,10 +4702,7 @@ class Home extends React.Component {
                           size: this.state.sizeValue ?? HUMAN_BODY_DEFAULT_SIZE,
                           filter: this.state.valuef1,
                         }}
-                        handleChartsBody={this.handleChartsBody.bind(this)}
-                        handleChartsBody1={this.handleChartsBody1.bind(this)}
-                        changeStateData={this.changeStateData}
-                        changeSelect={this.changeSelect} />
+                        {...this.sceneChartProps} />
                     </CanvasCom>
                     :
 
@@ -4076,24 +4718,23 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "hand" || this.state.matrixName == "handSinglePoint" || this.state.matrixName == "handBlue" || this.state.matrixName == "sit" ? (
-                      <CanvasCom matrixName={this.state.matrixName}
-                        local={this.state.local}
-                      >
-                        <CanvasHand
-                          ref={this.com}
-                          data={this.data}
+                      <>
+                        <CanvasCom matrixName={this.state.matrixName}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
-                      </CanvasCom>
+                          colormapKey={canvasColormapKey}
+                        >
+                          <CanvasHand
+                            ref={this.com}
+                            colormap={canvasColormap}
+                            data={this.data}
+                            local={this.state.local}
+                            {...this.sceneChartProps} />
+                        </CanvasCom>
+                        {renderCanvasRail()}
+                      </>
                     ) : this.state.matrixName == "sit100" || this.state.matrixName == "back100" ? (
                       <CanvasCom matrixName={this.state.matrixName}
                         local={this.state.local}
@@ -4102,10 +4743,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "car100" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4115,10 +4753,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "bed4096" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4128,10 +4763,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "bed1616" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4141,10 +4773,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "fast256" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4154,10 +4783,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "normalFast" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4167,10 +4793,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "fast1024" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4180,10 +4803,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "fast1024sit" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4193,10 +4813,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "bed4096num" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4206,23 +4823,20 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "carCol" ? (
                       <CanvasCom matrixName={this.state.matrixName}
                         local={this.state.local}
                       >
-                        <Carcol
-                          ref={this.com}
+                        <RendererHost
+                          rendererId="pointGrid"
+                          params={POINT_GRID_PRESETS.carCol}
+                          label="点阵热力（3D）"
+                          rendererRef={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "Num3D" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4232,10 +4846,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : tactileGloveTypes.includes(this.state.matrixName) ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4246,20 +4857,14 @@ class Home extends React.Component {
                             ref={this.com}
                             data={this.data}
                             local={this.state.local}
-                            handleChartsBody={this.handleChartsBody.bind(this)}
-                            handleChartsBody1={this.handleChartsBody1.bind(this)}
-                            changeStateData={this.changeStateData}
-                            changeSelect={this.changeSelect} />
+                            {...this.sceneChartProps} />
                         ) : (
                           <Hand0205
                             hand={this.state.hand}
                             ref={this.com}
                             data={this.data}
                             local={this.state.local}
-                            handleChartsBody={this.handleChartsBody.bind(this)}
-                            handleChartsBody1={this.handleChartsBody1.bind(this)}
-                            changeStateData={this.changeStateData}
-                            changeSelect={this.changeSelect} />
+                            {...this.sceneChartProps} />
                         )}
                       </CanvasCom>
                     ) : this.state.matrixName == "hand0507" ? (
@@ -4270,10 +4875,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "hand0205Point" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4283,10 +4885,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "hand0205Point147" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4296,10 +4895,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "ware" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4309,10 +4905,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "footVideo" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4322,10 +4915,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "footVideo256" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4335,10 +4925,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "handVideo" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4348,10 +4935,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "handVideo1" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4361,10 +4945,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "robot" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4374,10 +4955,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "robot1" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4387,10 +4965,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "chairQX" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4400,10 +4975,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "robotSY" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4413,10 +4985,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "robotLCF" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4426,10 +4995,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "robot0428" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4439,10 +5005,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "humanBody" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4457,24 +5020,23 @@ class Home extends React.Component {
                             size: this.state.sizeValue ?? HUMAN_BODY_DEFAULT_SIZE,
                             filter: this.state.valuef1,
                           }}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "normal" ? (
-                      <CanvasCom matrixName={this.state.matrixName}
-                        local={this.state.local}
-                      >
-                        <CanvasHand
-                          ref={this.com}
-                          data={this.data}
+                      <>
+                        <CanvasCom matrixName={this.state.matrixName}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
-                      </CanvasCom>
+                          colormapKey={canvasColormapKey}
+                        >
+                          <CanvasHand
+                            ref={this.com}
+                            colormap={canvasColormap}
+                            data={this.data}
+                            local={this.state.local}
+                            {...this.sceneChartProps} />
+                        </CanvasCom>
+                        {renderCanvasRail()}
+                      </>
                     ) : this.state.matrixName == "newHand" ? (
                       <CanvasCom matrixName={this.state.matrixName}
                         local={this.state.local}
@@ -4483,10 +5045,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "gloves" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4496,10 +5055,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "gloves1" || this.state.matrixName == "gloves2" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4509,49 +5065,48 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "sitCol" ? (
-                      <CanvasCom matrixName={this.state.matrixName}
-                        local={this.state.local}
-                      >
-                        <CanvasHand
-                          ref={this.com}
-                          data={this.data}
+                      <>
+                        <CanvasCom matrixName={this.state.matrixName}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
-                      </CanvasCom>
+                          colormapKey={canvasColormapKey}
+                        >
+                          <CanvasHand
+                            ref={this.com}
+                            colormap={canvasColormap}
+                            data={this.data}
+                            local={this.state.local}
+                            {...this.sceneChartProps} />
+                        </CanvasCom>
+                        {renderCanvasRail()}
+                      </>
                     ) : this.state.matrixName == "matCol" ? (
                       <CanvasCom matrixName={this.state.matrixName}
                         local={this.state.local}
                       >
-                        <MatCol
-                          ref={this.com}
+                        <RendererHost
+                          rendererId="pointGrid"
+                          params={POINT_GRID_PRESETS.matCol}
+                          label="点阵热力（3D）"
+                          rendererRef={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "matColPos" ? (
                       <CanvasCom matrixName={this.state.matrixName}
                         local={this.state.local}
                       >
-                        <MatCol
-                          ref={this.com}
+                        <RendererHost
+                          rendererId="pointGrid"
+                          params={POINT_GRID_PRESETS.matCol}
+                          label="点阵热力（3D）"
+                          rendererRef={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "CarTq" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -4561,10 +5116,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "car" ? (
                       <CanvasCom matrixName={this.state.matrixName}>
@@ -4614,23 +5166,15 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect} />
+                          {...this.sceneChartProps} />
                       </CanvasCom>
                     ) : this.state.matrixName == "daliegu" ? (
                       <CanvasCom matrixName={this.state.matrixName}>
                         <CanvasDaliegu
                           ref={this.com}
-                          changeSelect={this.changeSelect}
-                          changeStateData={this.changeStateData}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-
-            
+                          {...this.sceneChartProps}
                         />
                       </CanvasCom>
                     ) : this.state.matrixName == "eye" ? (
@@ -4646,18 +5190,14 @@ class Home extends React.Component {
                         <Bed
                           ref={this.com}
                           data={this.data}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeSelect={this.changeSelect}
+                          {...this.sceneChartPropsBasic}
                         />
                       </CanvasCom>
                     ) : this.state.matrixName == "sit10" ? (
                       <CanvasCom matrixName={this.state.matrixName}>
                         <Sit10
                           ref={this.com}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeSelect={this.changeSelect}
+                          {...this.sceneChartPropsBasic}
                         />
                       </CanvasCom>
                     ) : this.state.matrixName == "smallBed" || this.state.matrixName == SMALL_BED_NO_ALG_MATRIX || this.state.matrixName == SMALL_BED_12B_MATRIX ? (
@@ -4672,9 +5212,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeSelect={this.changeSelect}
+                          {...this.sceneChartPropsBasic}
                         />
                       </CanvasCom>
                     ) : this.state.matrixName == "jqbed" ? (
@@ -4683,9 +5221,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeSelect={this.changeSelect}
+                          {...this.sceneChartPropsBasic}
                         />
                       </CanvasCom>
                     ) : this.state.matrixName == tempFullBedMatrix ? (
@@ -4697,32 +5233,31 @@ class Home extends React.Component {
                           xStretch={1}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeSelect={this.changeSelect}
+                          {...this.sceneChartPropsBasic}
                         />
                       </CanvasCom>
                     ) : ['petCare', 'petCareMini'].includes(this.state.matrixName) ? (
-                      <CanvasCom matrixName={this.state.matrixName}>
-                        <CanvasHand
-                          ref={this.com}
-                          data={this.data}
-                          local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeStateData={this.changeStateData}
-                          changeSelect={this.changeSelect}
-                        />
-                      </CanvasCom>
+                      <>
+                        <CanvasCom matrixName={this.state.matrixName}
+                          colormapKey={canvasColormapKey}
+                        >
+                          <CanvasHand
+                            ref={this.com}
+                            colormap={canvasColormap}
+                            data={this.data}
+                            local={this.state.local}
+                            {...this.sceneChartProps}
+                          />
+                        </CanvasCom>
+                        {renderCanvasRail()}
+                      </>
                     ) : this.state.matrixName == "xiyueReal1" ? (
                       <CanvasCom matrixName={this.state.matrixName}>
                         <SmallBed
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeSelect={this.changeSelect}
+                          {...this.sceneChartPropsBasic}
                         />
                       </CanvasCom>
                     ) : this.state.matrixName == "smallBed1" ? (
@@ -4731,9 +5266,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeSelect={this.changeSelect}
+                          {...this.sceneChartPropsBasic}
                         />
                       </CanvasCom>
                     ) : this.state.matrixName == "smallM" ? (
@@ -4742,9 +5275,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeSelect={this.changeSelect}
+                          {...this.sceneChartPropsBasic}
                         />
                       </CanvasCom>
                     ) : this.state.matrixName == "rect" ? (
@@ -4754,9 +5285,7 @@ class Home extends React.Component {
                           data={this.data}
                           local={this.state.local}
 
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeSelect={this.changeSelect}
+                          {...this.sceneChartPropsBasic}
                         />
                       </CanvasCom>
                     ) : this.state.matrixName == "short" ? (
@@ -4765,9 +5294,7 @@ class Home extends React.Component {
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
-                          handleChartsBody={this.handleChartsBody.bind(this)}
-                          handleChartsBody1={this.handleChartsBody1.bind(this)}
-                          changeSelect={this.changeSelect}
+                          {...this.sceneChartPropsBasic}
                         />
                       </CanvasCom>
                     ) : this.state.matrixName == "yanfeng10" ? (

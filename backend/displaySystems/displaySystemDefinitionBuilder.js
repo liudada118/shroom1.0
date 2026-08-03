@@ -7,8 +7,11 @@ const path = require('path');
  * @returns {{ rows: number, cols: number, width: number, height: number, total: number }} 标准矩阵尺寸。
  */
 function buildMatrixDefinition(config) {
-  const rows = Number(config.sensor?.matrix?.rows || 0);
-  const cols = Number(config.sensor?.matrix?.cols || 0);
+  // 兼容两种入参：系统级 config（矩阵在 sensor.matrix 下）与
+  // 单个传感器条目（矩阵直接在 matrix 下）。
+  const source = config?.matrix ? config : config?.sensor;
+  const rows = Number(source?.matrix?.rows || 0);
+  const cols = Number(source?.matrix?.cols || 0);
   return {
     rows,
     cols,
@@ -36,9 +39,11 @@ function getFileName(filePath) {
  * @returns {object} 文件定义。
  */
 function buildFileDefinition(config) {
+  // 同样兼容系统级 config 与单个传感器条目，两者都带 resolvedFiles/files/algorithm。
   return {
     lineOrder: config.resolvedFiles?.lineOrder || config.files?.lineOrder || null,
     pointOrder: config.resolvedFiles?.pointOrder || config.files?.pointOrder || null,
+    coordinateMap: config.resolvedFiles?.coordinateMap || config.files?.coordinateMap || null,
     algorithmData: config.resolvedFiles?.algorithmData || config.algorithm?.dataFile || null,
     algorithmEntry: config.resolvedFiles?.algorithmEntry || config.algorithm?.entry || null,
   };
@@ -63,6 +68,15 @@ function buildSensorDefinitionFromDisplaySystem(config) {
     type: config.sensor?.type,
     matrix,
     ports: Array.isArray(config.sensor?.ports) ? [...config.sensor.ports] : [],
+    sensors: (config.sensors || []).map((sensor) => ({
+      id: sensor.id,
+      label: sensor.label,
+      outputChannel: sensor.outputChannel,
+      type: sensor.type,
+      matrix: buildMatrixDefinition(sensor),
+      protocol: sensor.protocol ? { ...sensor.protocol } : null,
+      stored: sensor.stored === true,
+    })),
     protocol: config.protocol ? { ...config.protocol } : null,
     files,
     algorithm: {
@@ -73,6 +87,7 @@ function buildSensorDefinitionFromDisplaySystem(config) {
     capabilities: {
       lineOrder: Boolean(config.files?.lineOrder),
       pointOrder: Boolean(config.files?.pointOrder),
+      coordinateMap: Boolean(config.files?.coordinateMap),
       algorithm: Boolean(config.algorithm?.type && config.algorithm.type !== 'none'),
       displayMetadata: true,
     },
@@ -89,27 +104,40 @@ function buildSensorDefinitionFromDisplaySystem(config) {
  * @returns {object[]} parser channel 定义列表。
  */
 function buildParserChannelDefinitionsFromDisplaySystem(config) {
-  const matrix = buildMatrixDefinition(config);
-  const files = buildFileDefinition(config);
-  const ports = Array.isArray(config.sensor?.ports) && config.sensor.ports.length > 0
-    ? config.sensor.ports
-    : ['default'];
+  const sensors = Array.isArray(config.sensors) && config.sensors.length > 0
+    ? config.sensors
+    // 未经 validator 归一化的旧结构（直接调用本函数的测试与内部工具）在这里就地展开：
+    // 每个 port 生成一个条目，继承顶层矩阵/协议/文件/算法。
+    : (config.sensor?.ports?.length ? config.sensor.ports : ['default']).map((port) => ({
+      ...config,
+      id: port,
+      outputChannel: port,
+      type: config.sensor?.type,
+      matrix: config.sensor?.matrix,
+    }));
 
-  return ports.map((channel) => ({
-    id: `${config.id}:${channel}`,
-    channel,
-    displaySystemId: config.id,
-    sensorType: config.sensor?.type,
-    matrix,
-    protocol: config.protocol ? { ...config.protocol } : null,
-    lineOrderFile: files.lineOrder,
-    pointOrderFile: files.pointOrder,
-    algorithm: {
-      ...(config.algorithm || {}),
-      dataFile: files.algorithmData,
-      entry: files.algorithmEntry,
-    },
-  }));
+  return sensors.map((sensor, index) => {
+    const files = buildFileDefinition(sensor);
+    const channel = sensor.id || config.sensor?.ports?.[index] || 'default';
+    return {
+      id: `${config.id}:${channel}`,
+      channel,
+      outputChannel: sensor.outputChannel || channel,
+      label: sensor.label || channel,
+      displaySystemId: config.id,
+      sensorType: sensor.type || config.sensor?.type,
+      matrix: buildMatrixDefinition(sensor),
+      protocol: sensor.protocol ? { ...sensor.protocol } : null,
+      coordinateMap: sensor.coordinateMap || null,
+      lineOrderFile: files.lineOrder,
+      pointOrderFile: files.pointOrder,
+      algorithm: {
+        ...(sensor.algorithm || {}),
+        dataFile: files.algorithmData,
+        entry: files.algorithmEntry,
+      },
+    };
+  });
 }
 
 /**
@@ -132,9 +160,32 @@ function buildDisplayMetadataFromDisplaySystem(config) {
     description: config.description || '',
     sensorType: config.sensor?.type,
     matrix,
+    coordinateMap: config.coordinateMap || null,
+    // 前端按 outputChannel 把 WebSocket 帧分发到对应 widget，需要知道有哪些通道。
+    sensors: (config.sensors || []).map((sensor) => ({
+      id: sensor.id,
+      label: sensor.label,
+      outputChannel: sensor.outputChannel,
+      type: sensor.type,
+      matrix: buildMatrixDefinition(sensor),
+      coordinateMap: sensor.coordinateMap || null,
+      stored: sensor.stored === true,
+    })),
     views,
     widgets,
+    // 画布 / 图表的默认外观和默认卡片。这三段是「基线」—— 前端的撤销就是退回
+    // 到它们，保存就是把用户偏好写进它们。少转发一段，那一段的默认值就到不了
+    // 前端，撤销会退到内置默认而不是 manifest 声明的样子（`canvas` 就出过这个
+    // 问题：README 写着已经穿线，实际上 displayMetadata 里一直没有这个字段）。
+    canvas: config.display?.canvas ? { ...config.display.canvas } : null,
+    chartAppearance: config.display?.chartAppearance
+      ? { ...config.display.chartAppearance }
+      : null,
+    chartCards: Array.isArray(config.display?.chartCards)
+      ? config.display.chartCards.map((card) => ({ ...card }))
+      : [],
     layout: config.display?.layout || { type: 'grid', columns: 12 },
+    matrixTransform: config.display?.matrixTransform || { type: 'none', factor: 1, method: 'none' },
     controls: config.display?.controls || {},
     sidebar: config.display?.sidebar ? { ...config.display.sidebar } : null,
     defaultView: config.display?.defaultView || views[0]?.id || views[0]?.type || 'heatmap',
@@ -152,10 +203,13 @@ function buildDisplayMetadataFromDisplaySystem(config) {
     files: {
       lineOrder: getFileName(files.lineOrder),
       pointOrder: getFileName(files.pointOrder),
+      coordinateMap: getFileName(files.coordinateMap),
       algorithmData: getFileName(files.algorithmData),
       algorithmEntry: getFileName(files.algorithmEntry),
     },
     algorithmType: config.algorithm?.type || 'none',
+    editable: config.editable === true,
+    origin: config.origin || 'system',
     metadata: { ...(config.metadata || {}) },
   };
 }

@@ -2,6 +2,9 @@ const {
   normalizeOrderDefinition,
   normalizePointDefinition,
 } = require('../processing/configMappingExecutor');
+const {
+  validateCoordinateMapDefinition,
+} = require('./displaySystemCoordinateMap');
 
 const ALGORITHM_OPERATION_TYPES = new Set([
   'scale',
@@ -69,7 +72,8 @@ function validatePointOrderDefinition(definition, {
   let normalized;
 
   try {
-    normalized = normalizePointDefinition(definition);
+    // 文件校验需要继续逐点报告越界位置，运行时执行器仍使用严格边界检查。
+    normalized = normalizePointDefinition(definition, { enforceMatrixBounds: false });
   } catch (error) {
     return [`${source}: ${error.message}`];
   }
@@ -202,6 +206,18 @@ function validateDisplaySystemDefinitionFiles(config, {
     }
   }
 
+  if (config.resolvedFiles?.coordinateMap) {
+    const coordinateMapResult = readJsonDefinition(config.resolvedFiles.coordinateMap, readJsonFile);
+    if (!coordinateMapResult.ok) {
+      errors.push(...coordinateMapResult.errors);
+    } else {
+      errors.push(...validateCoordinateMapDefinition(coordinateMapResult.value, {
+        source: config.resolvedFiles.coordinateMap,
+        matrix,
+      }));
+    }
+  }
+
   return {
     ok: errors.length === 0,
     errors,
@@ -210,6 +226,7 @@ function validateDisplaySystemDefinitionFiles(config, {
 
 module.exports = {
   validateAlgorithmDataDefinition,
+  validateCoordinateMapDefinition,
   validateDisplaySystemDefinitionFiles,
   validateLineOrderDefinition,
   validatePointOrderDefinition,

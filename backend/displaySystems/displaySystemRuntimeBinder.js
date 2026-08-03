@@ -21,12 +21,24 @@ function resolveParserChannel(serialParserManager, parserChannel) {
   return channels[key] || null;
 }
 
-function resolveOutputPublisher(frameOutputPipeline, serialRole) {
+/**
+ * 按输出通道解析实时帧发布函数。
+ *
+ * sit/back/head 仍走各自原有的 publisher，行为不变（保留民真高斯处理、
+ * 头枕不限频、以及采集入库）。其余通道走 publishAux：只做实时下发，不入库
+ * —— 采集存储只有这三张表，未知通道没有落库目标。
+ *
+ * @param {object} frameOutputPipeline 实时帧输出管线。
+ * @param {string} outputChannel 输出通道名。
+ * @returns {Function | null} 发布函数。
+ */
+function resolveOutputPublisher(frameOutputPipeline, outputChannel) {
   if (!frameOutputPipeline) return null;
-  if (serialRole === 'sit') return frameOutputPipeline.publishSit;
-  if (serialRole === 'back') return frameOutputPipeline.publishBack;
-  if (serialRole === 'head') return frameOutputPipeline.publishHead;
-  return null;
+  if (outputChannel === 'sit') return frameOutputPipeline.publishSit;
+  if (outputChannel === 'back') return frameOutputPipeline.publishBack;
+  if (outputChannel === 'head') return frameOutputPipeline.publishHead;
+  if (typeof frameOutputPipeline.publishAux !== 'function') return null;
+  return (frame) => frameOutputPipeline.publishAux(outputChannel, frame);
 }
 
 /**
@@ -64,16 +76,15 @@ function bindDisplaySystemRuntimeChannels({
       metadata: { ...(channel.metadata || {}) },
       runtimeChannel: channel,
       serialStatus,
-      outputChannel: channel.serialRole,
+      outputChannel: channel.outputChannel || channel.serialRole,
     };
 
     try {
       const parserChannel = resolveParserChannel(serialParserManager, channel.parserChannel);
-      const outputPublisher = resolveOutputPublisher(frameOutputPipeline, channel.serialRole);
+      const outputPublisher = resolveOutputPublisher(frameOutputPipeline, bindingBase.outputChannel);
       const frameProcessor = createFrameProcessor({ runtimeChannel: channel });
 
-      function handleFrame(frame) {
-        const processedFrame = frameProcessor.processFrame(frame);
+      function publishProcessedFrame(processedFrame) {
         if (getRuntimeMode({ runtimeMode }) === 'shadow') {
           return {
             published: false,
@@ -93,6 +104,13 @@ function bindDisplaySystemRuntimeChannels({
           processedFrame,
           output: outputPublisher(processedFrame),
         };
+      }
+
+      function handleFrame(frame) {
+        const processedFrame = frameProcessor.processFrame(frame);
+        return processedFrame && typeof processedFrame.then === 'function'
+          ? processedFrame.then(publishProcessedFrame)
+          : publishProcessedFrame(processedFrame);
       }
 
       return {

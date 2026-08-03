@@ -1,8 +1,13 @@
 const assert = require('assert');
 const path = require('path');
 const {
+  classifyDisplaySystemAccess,
   loadDisplaySystemDirectory,
+  normalizeCanvasConfig,
+  normalizeDisplayConfig,
+  resolveDisplaySystemAccessConflicts,
   validateAlgorithmDataDefinition,
+  validateCoordinateMapDefinition,
   validateLineOrderDefinition,
   validatePointOrderDefinition,
   validateProtocolConfig,
@@ -23,6 +28,42 @@ const loaded = loadDisplaySystemDirectory(demoDirectory, { validateFiles: true }
 const loadedSmallBed12B = loadDisplaySystemDirectory(smallBed12BDemoDirectory, { validateFiles: true });
 const loadedJqbed = loadDisplaySystemDirectory(jqbedDemoDirectory, { validateFiles: true });
 const loadedHandGlove = loadDisplaySystemDirectory(handGloveDemoDirectory, { validateFiles: true });
+
+assert.deepStrictEqual(classifyDisplaySystemAccess({
+  sourceDirectory: path.resolve('C:/app/display-systems/builtin'),
+  metadata: {},
+}, {
+  runtimeResourceRoot: path.resolve('C:/app'),
+  runtimeWritableRoot: path.resolve('C:/users/test'),
+}), { origin: 'system', editable: false });
+assert.deepStrictEqual(classifyDisplaySystemAccess({
+  sourceDirectory: path.resolve('C:/users/test/display-systems/custom'),
+  metadata: { createdBy: 'display-system-builder' },
+}, {
+  runtimeResourceRoot: path.resolve('C:/app'),
+  runtimeWritableRoot: path.resolve('C:/users/test'),
+}), { origin: 'user', editable: true });
+assert.deepStrictEqual(resolveDisplaySystemAccessConflicts([
+  {
+    id: 'builtin',
+    origin: 'system',
+    manifestPath: 'C:/app/display-systems/builtin/display-system.json',
+  },
+  {
+    id: 'builtin',
+    origin: 'user',
+    manifestPath: 'C:/users/test/display-systems/builtin/display-system.json',
+  },
+]), {
+  configs: [{
+    id: 'builtin',
+    origin: 'system',
+    manifestPath: 'C:/app/display-systems/builtin/display-system.json',
+  }],
+  errors: [
+    'C:/users/test/display-systems/builtin/display-system.json: user display system cannot override read-only system "builtin"',
+  ],
+});
 
 assert.strictEqual(loaded.ok, true);
 assert.strictEqual(loaded.config.id, 'byte-matrix-demo');
@@ -51,6 +92,21 @@ assert.deepStrictEqual(validateLineOrderDefinition({ order: [1, 7] }, {
   source: 'line-order.json',
   matrixTotal: 6,
 }), ['line-order.json: order[1] exceeds matrix total 6']);
+
+assert.deepStrictEqual(validateCoordinateMapDefinition([
+  [[10, 20], [20, 20]],
+  [[10, 10], [20, 10]],
+], {
+  source: 'coordinate-map.json',
+  matrix: { rows: 2, cols: 2 },
+}), []);
+assert.deepStrictEqual(validateCoordinateMapDefinition([
+  [[10, 20], [20, 20]],
+  [[10, 10], [20, 10]],
+], {
+  source: 'coordinate-map.json',
+  matrix: { rows: 3, cols: 2 },
+}), ['coordinate-map.json: matrix.rows must match sensor.matrix.rows 3']);
 
 assert.deepStrictEqual(validatePointOrderDefinition({
   matrix: { rows: 2, cols: 3 },
@@ -108,6 +164,18 @@ assert.deepStrictEqual(validateDisplayConfig({
 
 assert.deepStrictEqual(validateDisplayConfig({
   widgets: [{ id: 'main', type: 'heatmap' }],
+  matrixTransform: { type: 'interpolate', factor: 2 },
+}, { source: 'display-system.json' }), []);
+
+assert.deepStrictEqual(validateDisplayConfig({
+  widgets: [{ id: 'main', type: 'heatmap' }],
+  matrixTransform: { type: 'downsample', factor: 0.3 },
+}, { source: 'display-system.json' }), [
+  'display-system.json: downsample matrix factor must be 0.25 or 0.5',
+]);
+
+assert.deepStrictEqual(validateDisplayConfig({
+  widgets: [{ id: 'main', type: 'heatmap' }],
   sidebar: {
     pressure: { primaryMetric: 'unknown', metrics: ['maxPressure', 'invalid'] },
     area: { metrics: 'activePoints', threshold: -1, pointArea: 'invalid' },
@@ -137,5 +205,84 @@ assert.deepStrictEqual(validateDisplayConfig({
   'display-system.json: display profile invalid references unknown widget missing-widget',
   'display-system.json: display.defaultProfile must reference a configured profile',
 ]);
+
+// display.canvas 全字段合法时不该报任何错。
+assert.deepStrictEqual(validateDisplayConfig({
+  widgets: [{ id: 'main', type: 'heatmap' }],
+  canvas: {
+    colormap: { id: 'viridis', reverse: true },
+    overlays: ['valueLabels', 'legend'],
+    widgets: [
+      { id: 'main', type: 'heatmap', source: 'sitData', columnSpan: 8 },
+      { id: 'stats', type: 'pressureStats', source: 'sitData', columnSpan: 4 },
+    ],
+  },
+}, { source: 'display-system.json' }), []);
+
+// 不带 canvas 的老 manifest 行为不变：既不报错，归一后也拿到与顶层 widgets
+// 等价的画布配置（配色 classic、无叠加层）。
+assert.deepStrictEqual(validateDisplayConfig({
+  widgets: [{ id: 'main', type: 'heatmap', source: 'sitData' }],
+}, { source: 'display-system.json' }), []);
+assert.deepStrictEqual(
+  normalizeDisplayConfig({ widgets: [{ id: 'main', type: 'heatmap', source: 'sitData' }] }).canvas,
+  {
+    colormap: { id: 'classic', reverse: false },
+    overlays: [],
+    widgets: [{ id: 'main', type: 'heatmap', label: 'main', source: 'sitData' }],
+  }
+);
+
+// 显式写错的配色/叠加层要在保存时就报出来，而不是静默变回默认外观。
+assert.deepStrictEqual(validateDisplayConfig({
+  widgets: [{ id: 'main', type: 'heatmap' }],
+  canvas: {
+    colormap: { id: 'rainbow' },
+    overlays: ['legend', 'sparkles'],
+  },
+}, { source: 'display-system.json' }), [
+  'display-system.json: display.canvas.colormap.id must be one of '
+    + 'classic, thermal, viridis, inferno, grayscale, iceFire, jet',
+  'display-system.json: display.canvas.overlays contains unknown overlay sparkles',
+]);
+
+assert.deepStrictEqual(validateDisplayConfig({
+  widgets: [{ id: 'main', type: 'heatmap' }],
+  canvas: { overlays: 'legend' },
+}, { source: 'display-system.json' }), [
+  'display-system.json: display.canvas.overlays must be an array',
+]);
+
+assert.deepStrictEqual(validateDisplayConfig({
+  widgets: [{ id: 'main', type: 'heatmap' }],
+  canvas: ['heatmap'],
+}, { source: 'display-system.json' }), [
+  'display-system.json: display.canvas must be an object',
+]);
+
+assert.deepStrictEqual(validateDisplayConfig({
+  widgets: [{ id: 'main', type: 'heatmap' }],
+  canvas: {
+    widgets: [
+      { id: 'main', type: 'heatmap' },
+      { id: 'main', type: 'matrix' },
+    ],
+  },
+}, { source: 'display-system.json' }), [
+  'display-system.json: duplicate display canvas widget id main',
+]);
+
+// 归一只丢弃坏值、不抛错：坏偏好落到磁盘上也只该退回默认外观。
+assert.deepStrictEqual(
+  normalizeCanvasConfig({
+    colormap: 'no-such-colormap',
+    overlays: ['legend', 'bogus', 'legend'],
+  }, [{ id: 'main', type: 'heatmap', label: 'main', source: 'sitData' }]),
+  {
+    colormap: { id: 'classic', reverse: false },
+    overlays: ['legend'],
+    widgets: [{ id: 'main', type: 'heatmap', label: 'main', source: 'sitData' }],
+  }
+);
 
 console.log('configValidation.test.js passed');

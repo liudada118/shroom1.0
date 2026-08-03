@@ -18,9 +18,11 @@ import {
   jet,
   jetgGrey,
 } from "../../assets/util/util";
+import { isClassicColormap, sampleColormapRgb } from "../displaySystem/colormaps";
 // import { withData } from "./WithData";
 
 import { obj } from "../../assets/util/config";
+import { DUAL_CHANNEL_DEFAULTS, createThresholdState } from '../../runtime/displayThresholds';
 let group = new THREE.Group();
 const sitInit = 0;
 const backInit = 0;
@@ -36,18 +38,8 @@ const backOrder = 4;
 let controlsFlag = true;
 var ndata = new Array(backnum1 * backnum2).fill(0), ndata1 = new Array(sitnum1 * sitnum2).fill(0);
 
-var valuej1 = localStorage.getItem('carValuej') ? JSON.parse(localStorage.getItem('carValuej')) : 200,
-  valueg1 = localStorage.getItem('carValueg') ? JSON.parse(localStorage.getItem('carValueg')) : 2,
-  value1 = localStorage.getItem('carValue') ? JSON.parse(localStorage.getItem('carValue')) : 2,
-  valuel1 = localStorage.getItem('carValuel') ? JSON.parse(localStorage.getItem('carValuel')) : 2,
-  valuef1 = localStorage.getItem('carValuef') ? JSON.parse(localStorage.getItem('carValuef')) : 2,
-  valuej2 = localStorage.getItem('carValuej') ? JSON.parse(localStorage.getItem('carValuej')) : 200,
-  valueg2 = localStorage.getItem('carValueg') ? JSON.parse(localStorage.getItem('carValueg')) : 2,
-  value2 = localStorage.getItem('carValue') ? JSON.parse(localStorage.getItem('carValue')) : 2,
-  valuel2 = localStorage.getItem('carValuel') ? JSON.parse(localStorage.getItem('carValuel')) : 2,
-  valuef2 = localStorage.getItem('carValuef') ? JSON.parse(localStorage.getItem('carValuef')) : 2,
-  valuelInit1 = localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2,
-  valuelInit2 = localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2;
+var { valuej1, valueg1, value1, valuel1, valuef1, valuej2, valueg2, value2, valuel2, valuef2,
+  valuelInit1, valuelInit2 } = createThresholdState(DUAL_CHANNEL_DEFAULTS);
 let enableControls = true;
 let isShiftPressed = false;
 
@@ -73,10 +65,33 @@ let particles,
   backGeometry,
   sitGeometry
 let controls;
+
+/**
+ * 取一个点在数据色带上的颜色。
+ *
+ * `classic`（以及压根没选配色）必须继续走原来的 `jet`，手部/坐垫这些老场景
+ * 的观感一个像素都不能变；只有显式选了别的配色才改成色标采样。是否 classic
+ * 在每帧的循环外判断一次，这里只做一个三元分支，不给 60fps 的逐点循环加负担。
+ *
+ * @param {boolean} useClassic 是否走原来的 jet。
+ * @param {{id: string, reverse?: boolean}} colormap 当前配色。
+ * @param {number} value 该点的平滑后数值。
+ * @param {number} max 映射到色带顶端的数值。
+ * @returns {number[]} 0-255 的 rgb 三元组。
+ */
+function sampleDataRgb(useClassic, colormap, value, max) {
+  if (useClassic) return jet(0, max, value);
+  return sampleColormapRgb(colormap.id, max > 0 ? value / max : 0, colormap);
+}
+
 const Canvas = React.forwardRef((props, refs) => {
   console.log('render')
   local = props.local
   console.log(camera)
+  // 逐帧的 render 闭包是挂载那一次建立的，之后拿不到新的 props。用 ref 兜住
+  // 当前配色，换配色就能当场生效、不用重建场景（相机视角因此得以保留）。
+  const colormapRef = useRef(props.colormap);
+  colormapRef.current = props.colormap;
   var newDiv, newDiv1, selectStartArr = [], selectEndArr = [], sitArr, backArr, sitMatrix = [], backMatrix = [], selectMatrix = [];
   let sitIndexArr = [], sitIndexEndArr = [], backIndexArr = [], backIndexEndArr = []
   var animationRequestId, colSelectFlag = false
@@ -433,6 +448,10 @@ const Canvas = React.forwardRef((props, refs) => {
     let k = 0,
       l = 0;
     let dataArr = []
+    // 配色每帧只读一次 ref，判断也只做一次；框选外的灰化（jetgGrey）是"弱化"
+    // 而不是数据色带，换配色不该动它，否则选区内外就分不出来了。
+    const activeColormap = colormapRef.current;
+    const useClassicColor = isClassicColormap(activeColormap);
     for (let iy = 0; iy < AMOUNTY; iy++) {
       for (let ix = 0; ix < AMOUNTX; ix++) {
         const value = bigArrg[l] * 10;
@@ -449,7 +468,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
           if (ix >= sitIndexArr[0] && ix < sitIndexArr[1] && iy >= sitIndexArr[2] && iy < sitIndexArr[3]) {
             // rgb = [255, 0, 0];
-            rgb = jet(0, valuej1, smoothBig[l]);
+            rgb = sampleDataRgb(useClassicColor, activeColormap, smoothBig[l], valuej1);
             // scales1[l] = 2;
             // positions1[k + 1] = smoothBig[l] / value2 - 1000
             dataArr.push(bigArrg[l])
@@ -458,7 +477,7 @@ const Canvas = React.forwardRef((props, refs) => {
             // scales1[l] = 1;
           }
         } else {
-          rgb = jet(0, valuej1, smoothBig[l]);
+          rgb = sampleDataRgb(useClassicColor, activeColormap, smoothBig[l], valuej1);
           // scales1[l] = 1;
         }
 

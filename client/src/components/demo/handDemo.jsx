@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { findMax, gaussBlur_return, jetWhite3 } from "../../assets/util/util";
+import { findMax, gaussBlur_return, jet, jetWhite3 } from "../../assets/util/util";
 import { carBackLine, handLine, pressNew, zeroLine } from "../../assets/util/line";
 import { Button, Input, Select, Slider, Switch } from "antd";
 import { CSVLink } from "react-csv";
@@ -55,44 +55,6 @@ function colRowArr(arr) {
   }
   return resArr;
 }
-
-function jet(min, max, x) {
-  let red, g, blue;
-  let dv;
-  red = 1.0;
-  g = 1.0;
-  blue = 1.0;
-  if (x < min) {
-    x = min;
-  }
-  if (x > max) {
-    x = max;
-  }
-  dv = max - min;
-  if (x < min + 0.25 * dv) {
-    // red = 0;
-    // g = 0;
-    // blue = 0;
-
-    red = 0;
-    g = (4 * (x - min)) / dv;
-  } else if (x < min + 0.5 * dv) {
-    red = 0;
-    blue = 1 + (4 * (min + 0.25 * dv - x)) / dv;
-  } else if (x < min + 0.75 * dv) {
-    red = (4 * (x - min - 0.5 * dv)) / dv;
-    blue = 0;
-  } else {
-    g = 1 + (4 * (min + 0.75 * dv - x)) / dv;
-    blue = 0;
-  }
-  var rgb = new Array();
-  rgb[0] = parseInt(255 * red + '');
-  rgb[1] = parseInt(255 * g + '');
-  rgb[2] = parseInt(255 * blue + '');
-  return rgb;
-}
-
 
 function jet1(min, max, x) {
   let red, g, blue;

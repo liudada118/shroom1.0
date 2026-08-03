@@ -3,6 +3,7 @@ const {
   applyLineOrderDefinition,
   applyPointOrderDefinition,
   executeConfiguredMapping,
+  normalizePointDefinition,
 } = require('../../processing/configMappingExecutor');
 
 const source = [10, 20, 30, 40];
@@ -22,5 +23,21 @@ assert.deepStrictEqual(executeConfiguredMapping(source, {
   lineOrder,
   pointOrder,
 }), [40, 0, 0, 0, 20, 10]);
+assert.deepStrictEqual(
+  normalizePointDefinition([[0, 1], [1, 2]]),
+  { points: [[0, 1], [1, 2]], rows: 2, cols: 3 },
+);
+assert.deepStrictEqual(
+  applyPointOrderDefinition([7, 8], [[0, 1], [1, 2]]),
+  [0, 7, 0, 0, 0, 8],
+);
+assert.throws(
+  () => normalizePointDefinition({ matrix: { rows: 1, cols: 2 }, points: [[1, 1]] }),
+  /does not contain every point/,
+);
+assert.throws(
+  () => normalizePointDefinition([[0, 0], [0, 0]]),
+  /duplicates coordinate/,
+);
 
 console.log('configMappingExecutor.test.js passed');

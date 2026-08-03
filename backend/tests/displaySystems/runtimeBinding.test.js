@@ -5,6 +5,8 @@ const {
   createDisplaySystemRuntimeRegistry,
 } = require('../../displaySystems');
 
+(async () => {
+
 const runtimeChannel = {
   id: 'demo:sit',
   displaySystemId: 'demo',
@@ -44,6 +46,7 @@ const fixtureFiles = {
   }),
   '/algorithm.js': 'module.exports = (values, context) => values.map((value) => value * context.data.scale);',
   '/algorithm-object.js': 'module.exports = (values) => ({ data: values.map((value) => value * 3), metrics: { score: 88.5, state: "stable" } });',
+  '/algorithm-raw.js': 'module.exports = (rawData, context) => ({ data: context.normalizedData, metrics: { firstRaw: rawData[0] } });',
 };
 
 const fsLike = {
@@ -148,7 +151,27 @@ const objectAlgorithmFrame = objectAlgorithmProcessor.processFrame([2, 3]);
 assert.deepStrictEqual(objectAlgorithmFrame.data, [6, 9]);
 assert.deepStrictEqual(objectAlgorithmFrame.algorithmMetrics, { score: 88.5, state: 'stable' });
 
-assert.throws(() => createDisplaySystemFrameProcessor({
+const rawInputAlgorithmProcessor = createDisplaySystemFrameProcessor({
+  runtimeChannel: {
+    ...runtimeChannel,
+    processing: {
+      ...runtimeChannel.processing,
+      algorithm: {
+        type: 'js',
+        entry: '/algorithm-raw.js',
+        enabled: true,
+      },
+    },
+  },
+  fsLike,
+});
+const rawInputFrame = rawInputAlgorithmProcessor.processFrame([10, 20, 30, 40]);
+assert.deepStrictEqual(rawInputFrame.rawData, [10, 20, 30, 40]);
+assert.deepStrictEqual(rawInputFrame.normalizedData, [40, 0, 0, 0, 20, 10]);
+assert.deepStrictEqual(rawInputFrame.data, rawInputFrame.normalizedData);
+assert.strictEqual(rawInputFrame.algorithmMetrics.firstRaw, 10);
+
+const pythonAlgorithmProcessor = createDisplaySystemFrameProcessor({
   runtimeChannel: {
     ...runtimeChannel,
     processing: {
@@ -158,7 +181,16 @@ assert.throws(() => createDisplaySystemFrameProcessor({
     },
   },
   fsLike,
-}).processFrame([1]), /algorithm runner is not registered: python/);
+  algorithmRunners: {
+    python: async (rawData, context) => ({
+      data: context.normalizedData.map((value) => value + 1),
+      metrics: { firstRaw: rawData[0] },
+    }),
+  },
+});
+const pythonAlgorithmFrame = await pythonAlgorithmProcessor.processFrame([2, 3]);
+assert.deepStrictEqual(pythonAlgorithmFrame.data, [3, 4]);
+assert.deepStrictEqual(pythonAlgorithmFrame.algorithmMetrics, { firstRaw: 2 });
 
 const runtimeRegistry = createDisplaySystemRuntimeRegistry();
 runtimeRegistry.register(runtimeChannel);
@@ -268,3 +300,7 @@ assert.strictEqual(shadowOutput.reason, 'runtime mode shadow does not publish ou
 assert.deepStrictEqual(shadowOutput.processedFrame.data, [4, 5]);
 
 console.log('runtimeBinding.test.js passed');
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

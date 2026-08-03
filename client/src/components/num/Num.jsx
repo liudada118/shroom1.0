@@ -1,11 +1,8 @@
 import React, { useEffect, useState, useImperativeHandle } from 'react'
 import './num.css'
-var valuej1 = localStorage.getItem('carValuej') ? JSON.parse(localStorage.getItem('carValuej')) : 200,
-    valueg1 = localStorage.getItem('carValueg') ? JSON.parse(localStorage.getItem('carValueg')) : 2,
-    value1 = localStorage.getItem('carValue') ? JSON.parse(localStorage.getItem('carValue')) : 2,
-    valuel1 = localStorage.getItem('carValuel') ? JSON.parse(localStorage.getItem('carValuel')) : 2,
-    valuef1 = localStorage.getItem('carValuef') ? JSON.parse(localStorage.getItem('carValuef')) : 2,
-    valuelInit1 = localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2
+import { jet } from '../../assets/util/util';
+import { SINGLE_CHANNEL_DEFAULTS, createThresholdState } from '../../runtime/displayThresholds';
+var { valuej1, valueg1, value1, valuel1, valuef1, valuelInit1 } = createThresholdState(SINGLE_CHANNEL_DEFAULTS);
 
 export const Num = React.forwardRef((props, refs) => {
     let width = 32 , height = 32
@@ -66,35 +63,6 @@ export const Num = React.forwardRef((props, refs) => {
         drawContent: drawContent,
         sitValue
     }));
-
-    function jet(min, max, x) {
-        let r, g, b;
-        let dv;
-        r = 1;
-        g = 1;
-        b = 1;
-        if (x < min) x = min;
-        if (x > max) x = max;
-        dv = max - min;
-        if (x < min + 0.25 * dv) {
-            r = 0;
-            g = (4 * (x - min)) / dv;
-        } else if (x < min + 0.5 * dv) {
-            r = 0;
-            b = 1 + (4 * (min + 0.25 * dv - x)) / dv;
-        } else if (x < min + 0.75 * dv) {
-            r = (4 * (x - min - 0.5 * dv)) / dv;
-            b = 0;
-        } else {
-            g = 1 + (4 * (min + 0.75 * dv - x)) / dv;
-            b = 0;
-        }
-        var rgb = new Array();
-        rgb[0] = parseInt(255 * r);
-        rgb[1] = parseInt(255 * g);
-        rgb[2] = parseInt(255 * b);
-        return rgb;
-    }
 
     function boxesForGauss(sigma, n)  // standard deviation, number of boxes
     {

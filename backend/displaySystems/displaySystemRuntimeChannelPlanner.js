@@ -29,7 +29,11 @@ function buildRuntimeChannelPlan(runtimeDefinition) {
   return parserChannels.map((channel) => ({
     id: channel.id,
     displaySystemId: channel.displaySystemId,
+    // serialRole 是这一路传感器在系统内的标识（用于串口/parser 键），
+    // outputChannel 是它推送到前端和采集存储的通道名，两者可以不同。
     serialRole: channel.channel,
+    outputChannel: channel.outputChannel || channel.channel,
+    label: channel.label || channel.channel,
     parserChannel: {
       id: channel.id,
       role: channel.channel,
@@ -52,7 +56,9 @@ function buildRuntimeChannelPlan(runtimeDefinition) {
     display: {
       metadataId: displayMetadata.id,
       defaultView: displayMetadata.defaultView,
-      matrix: displayMetadata.matrix || channel.matrix,
+      // 通道自己的矩阵优先：多传感器系统里 displayMetadata.matrix 只是第一路的尺寸。
+      matrix: channel.matrix?.total ? channel.matrix : displayMetadata.matrix,
+      matrixTransform: displayMetadata.matrixTransform || { type: 'none', factor: 1, method: 'none' },
       layout: displayMetadata.layout,
       views: displayMetadata.views || [],
       widgets: displayMetadata.widgets || [],
@@ -66,8 +72,8 @@ function buildRuntimeChannelPlan(runtimeDefinition) {
     runtimeMode: displayMetadata.metadata?.runtimeMode || null,
     sensor: {
       id: sensorDefinition.id,
-      type: sensorDefinition.type,
-      matrix: sensorDefinition.matrix || channel.matrix,
+      type: channel.sensorType || sensorDefinition.type,
+      matrix: channel.matrix?.total ? channel.matrix : sensorDefinition.matrix,
     },
     status: 'planned',
   }));

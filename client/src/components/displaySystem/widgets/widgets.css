@@ -1,0 +1,197 @@
+/* 画布卡片样式。运行时 ManifestDisplayRenderer 和配置器的显示验证步骤
+   共用这些组件，样式跟着组件走，任何一处挂载都能拿到完整外观。 */
+
+.manifest-widget-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.manifest-widget {
+  grid-column: span 6;
+  min-width: 0;
+  padding: 14px;
+  background: #182126;
+  border: 1px solid #34454d;
+  border-radius: 6px;
+}
+
+.manifest-widget h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+.manifest-matrix-widget {
+  grid-column: span 8;
+}
+
+.manifest-matrix {
+  display: grid;
+  width: 100%;
+  aspect-ratio: 1;
+  gap: 1px;
+  background: #26343a;
+  border: 1px solid #3b4c54;
+}
+
+.manifest-matrix span {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  color: #fff;
+  font-size: 9px;
+}
+
+/* gridLines 叠加层：加宽格间距并补一层描边，点位边界更清楚。 */
+.manifest-matrix.has-grid-lines {
+  gap: 2px;
+  background: #46606a;
+}
+
+/* peakMarker 叠加层：给峰值单元/点位加一个描边环，不改颜色本身。 */
+.manifest-matrix span.is-peak {
+  outline: 2px solid #f4c95d;
+  outline-offset: -2px;
+}
+
+/* axes 叠加层：矩阵左侧标行号、下方标列号。 */
+.manifest-matrix-frame.has-axes {
+  display: grid;
+  grid-template-areas:
+    'rows matrix'
+    '.    cols';
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px;
+}
+
+.manifest-matrix-frame.has-axes > .manifest-matrix {
+  grid-area: matrix;
+}
+
+.manifest-axis {
+  display: grid;
+  color: #7f939c;
+  font-size: 9px;
+  text-align: center;
+}
+
+.manifest-axis span {
+  overflow: hidden;
+  min-width: 0;
+}
+
+.manifest-axis-row {
+  grid-area: rows;
+  grid-auto-rows: minmax(0, 1fr);
+  align-items: center;
+}
+
+.manifest-axis-col {
+  grid-area: cols;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+}
+
+/* legend 叠加层：配色色带 + 当前帧的最小/最大值。 */
+.manifest-widget-legend {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: #91a5ae;
+  font-size: 11px;
+}
+
+.manifest-widget-legend i {
+  display: block;
+  height: 8px;
+  border: 1px solid #3b4c54;
+  border-radius: 4px;
+}
+
+.manifest-coordinate-plot {
+  max-width: 100%;
+  max-height: 66vh;
+  margin: 0 auto;
+  overflow: hidden;
+  background: #26343a;
+  border: 1px solid #3b4c54;
+}
+
+.manifest-coordinate-plot svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.manifest-coordinate-plot circle {
+  stroke: rgb(255 255 255 / 18%);
+  stroke-width: 0.7;
+}
+
+.manifest-coordinate-plot.has-grid-lines circle {
+  stroke: rgb(255 255 255 / 45%);
+  stroke-width: 1.1;
+}
+
+.manifest-coordinate-plot circle.is-peak {
+  stroke: #f4c95d;
+  stroke-width: 2;
+}
+
+.manifest-coordinate-plot text.manifest-axis-label {
+  fill: #7f939c;
+}
+
+.manifest-coordinate-plot text {
+  fill: #fff;
+  text-anchor: middle;
+  dominant-baseline: central;
+  pointer-events: none;
+}
+
+.manifest-stats-widget {
+  grid-column: span 4;
+}
+
+.manifest-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.manifest-stats-grid div {
+  min-width: 0;
+  padding: 12px;
+  background: #10171a;
+  border-left: 3px solid #27b4a8;
+}
+
+.manifest-stats-grid span,
+.manifest-stats-grid strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.manifest-stats-grid span {
+  margin-bottom: 5px;
+  color: #91a5ae;
+  font-size: 11px;
+}
+
+.manifest-stats-grid strong {
+  color: #f4c95d;
+  font-size: 18px;
+}
+
+@media (max-width: 900px) {
+  .manifest-widget,
+  .manifest-matrix-widget,
+  .manifest-stats-widget {
+    grid-column: 1 / -1 !important;
+  }
+}

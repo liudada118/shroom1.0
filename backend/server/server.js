@@ -1023,6 +1023,35 @@ function openHeadSerialPort(portPath, reason = 'open head') {
     onOpenError: (err) => logger.warn(err, `${reason} err`),
   });
 }
+/**
+ * 按 manifest 声明打开展示系统的某一路串口。
+ *
+ * sit/back/head 之外的传感器没有专用的 openXxxSerialPort 函数，这里按
+ * serialRole 从 manifest 的 runtimeChannels 里取波特率和 parser 通道。
+ * 找不到声明就不开——不猜默认值，避免用错波特率把串口跑成乱码。
+ *
+ * @param {string} serialRole manifest 里的传感器 id。
+ * @param {string} portPath 串口路径。
+ * @param {string} [reason] 日志原因。
+ * @returns {object | null} 串口启动结果。
+ */
+function openManifestSerialPort(serialRole, portPath, reason = 'open manifest channel') {
+  if (!portPath || !serialRole) return null;
+  const channels = appRuntime.displaySystems.listSerialChannels(runtimeContext.getSensorType()) || [];
+  const configured = channels.find((channel) => channel.serialRole === serialRole);
+  if (!configured) {
+    logger.warn({ serialRole, portPath }, `${reason}: no manifest channel declared`);
+    return null;
+  }
+  return openManagedSerialPort(serialRole, {
+    path: portPath,
+    baudRate: configured.baudRate,
+    reconnect: true,
+    parserChannel: configured.parserChannel,
+    onOpenError: (err) => logger.warn(err, `${reason} err`),
+  });
+}
+
 serialManager.startReconnectLoop({
   intervalMs: 3000,
   reason: 'registered serial reconnect',
@@ -1241,6 +1270,7 @@ function activateSubmittedLicenseKey(licenseKey) {
       date: endDate,
       nowDate: runtimeContext.getNowDate(),
       file: licenseFile || file,
+      currentSensorType: file,
       selectFlag,
       ...(state.moduleConfig ? { moduleConfig: state.moduleConfig } : {}),
     },
@@ -1300,11 +1330,13 @@ registerSerialCommandHandlers(wsCommandRouter, {
   logger,
   openBackSerialPort,
   openHeadSerialPort,
+  openManifestSerialPort,
   openMinzhenSensorPort,
   openSitSerialPort,
   petCareRuntimeService,
   publishHistoryDateList,
   publishSystemEvent,
+  rebindDisplaySystemRuntime: appRuntime.displaySystems.rebindRuntimeChannels,
   serialRoles,
   setRuntime: runtimeStatePatchers.applySerialCommandPatch,
   stopPlaybackTimer,
@@ -1706,6 +1738,8 @@ const httpApp = createHttpApp({
   serialManager,
   reloadDisplaySystems: appRuntime.displaySystems.reload,
   saveDisplaySystem: appRuntime.displaySystems.save,
+  saveDisplaySystemDisplaySection: appRuntime.displaySystems.saveDisplaySection,
+  duplicateDisplaySystem: appRuntime.displaySystems.duplicate,
 });
 // ===== OneStep 足压报告 HTTP 服务状态 =====
 // 默认仅监听 127.0.0.1，供前端上传截图、生成 PDF 和调用控制 API。

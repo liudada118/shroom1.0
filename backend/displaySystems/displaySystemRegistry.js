@@ -58,6 +58,8 @@ function createDisplaySystemRegistry({ logger } = {}) {
         sensorType: system.sensor?.type,
         matrix: system.sensor?.matrix,
         algorithmType: system.algorithm?.type,
+        editable: system.editable === true,
+        origin: system.origin || 'system',
         parserChannelCount: system.runtimeDefinition?.parserChannels?.length || 0,
         runtimeChannelCount: system.runtimeDefinition?.runtimeChannelCount || 0,
         defaultView: system.runtimeDefinition?.displayMetadata?.defaultView,

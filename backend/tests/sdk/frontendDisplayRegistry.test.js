@@ -45,6 +45,17 @@ const { pathToFileURL } = require('url');
         area: { visible: true, threshold: 5, pointArea: 2.1 },
       },
     },
+    runtimeDefinition: {
+      displayMetadata: {
+        coordinateMap: {
+          matrix: { rows: 2, cols: 3 },
+          coordinates: [
+            [[0, 1], [1, 1], [2, 1]],
+            [[0, 0], [1, 0], [2, 0]],
+          ],
+        },
+      },
+    },
   };
 
   const system = createDisplaySystemFromManifest(manifest);
@@ -56,6 +67,7 @@ const { pathToFileURL } = require('url');
   assert.strictEqual(system.defaultProfile, 'overview');
   assert.strictEqual(system.visualizationAlgorithms[0].type, 'identity');
   assert.strictEqual(system.page.sidebar.area.pointArea, 2.1);
+  assert.strictEqual(system.coordinateMap.coordinates.length, 2);
 
   const registry = new DisplayRegistry();
   registry.registerManifest(manifest);

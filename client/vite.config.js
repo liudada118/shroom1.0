@@ -71,6 +71,12 @@ export default defineConfig({
         // 性能策略：关闭影响运行时性能的选项（controlFlowFlattening/deadCodeInjection/numbersToExpressions）
         // 保留不影响性能的静态保护（变量名混淆/字符串数组/字符串拆分）
         obfuscatorPlugin({
+          // 渲染器注册表必须排除在混淆之外。插件是 transform 阶段工作的，
+          // stringArray/splitStrings 会把 import('./xxx') 的路径字面量改写成
+          // 运行时表达式，Rollup 随即无法静态分析，懒加载 chunk 拆不出来、
+          // 被内联回主包——正好抵消掉插件化拆包的收益。
+          // 这里只是注册表样板代码，没有需要保护的算法。
+          exclude: ['node_modules/**', '**/src/renderers/**'],
           options: {
             compact: true,
             // ✘ 关闭 - 将 if/for/while 转为 switch-case，破坏 V8 JIT 优化，导致 requestAnimationFrame 和 message handler 耗时激增
@@ -121,6 +127,16 @@ export default defineConfig({
         // additionalData: `@import "@/styles/variables.scss";`
       },
     },
+  },
+
+  // 测试配置
+  // 写在 vite.config.js 而不是单独的 vitest.config.js，是为了让测试复用
+  // 上面的 alias 与 esbuild jsx loader —— 单独配置文件会整个取代本文件。
+  test: {
+    environment: "node",
+    // util.js 在模块顶层读取 localStorage，需要在导入前注入垫片
+    setupFiles: ["./vitest.setup.js"],
+    include: ["src/**/*.{test,spec}.{js,jsx}"],
   },
 
   // 允许 .js 和 .jsx 文件包含 JSX 语法

@@ -20,6 +20,7 @@ import {
   interp,
   interpSmall
 } from "../../assets/util/util";
+import { DUAL_CHANNEL_DEFAULTS, createThresholdState } from '../../runtime/displayThresholds';
 
 import './index.scss'
 
@@ -39,19 +40,21 @@ let totalArr = [],
 let controlsFlag = true;
 var newData1 = new Array(sitnum1 * sitnum2).fill(0), ndata1 = new Array(sitnum1 * sitnum2).fill(0), centerFlag = true;
 
-var valuej1 = localStorage.getItem('carValuej') ? JSON.parse(localStorage.getItem('carValuej')) : 2655,
-  valueg1 = localStorage.getItem('carValueg') ? JSON.parse(localStorage.getItem('carValueg')) : 3.3,
-  value1 = localStorage.getItem('carValue') ? JSON.parse(localStorage.getItem('carValue')) : 2.08,
-  valuel1 = localStorage.getItem('carValuel') ? JSON.parse(localStorage.getItem('carValuel')) : 4,
-  valuef1 = localStorage.getItem('carValuef') ? JSON.parse(localStorage.getItem('carValuef')) : 0,
-  ymax1 = localStorage.getItem('ymax') ? JSON.parse(localStorage.getItem('ymax')) : 251,
-  valuej2 = localStorage.getItem('carValuej') ? JSON.parse(localStorage.getItem('carValuej')) : 200,
-  valueg2 = localStorage.getItem('carValueg') ? JSON.parse(localStorage.getItem('carValueg')) : 2,
-  value2 = localStorage.getItem('carValue') ? JSON.parse(localStorage.getItem('carValue')) : 2,
-  valuel2 = localStorage.getItem('carValuel') ? JSON.parse(localStorage.getItem('carValuel')) : 2,
-  valuef2 = localStorage.getItem('carValuef') ? JSON.parse(localStorage.getItem('carValuef')) : 2,
-  valuelInit1 = localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2001,
-  valuelInit2 = localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2;
+var { valuej1, valueg1, value1, valuel1, valuef1, valuej2, valueg2, value2, valuel2, valuef2,
+  valuelInit1, valuelInit2 } = createThresholdState({
+  ...DUAL_CHANNEL_DEFAULTS,
+  // 通道 1 走的是 util.js `initValue` 那套默认值（2655 / 3.3 / 2.08 / 4 / 0），
+  // 通道 2 才是那 37 份的 200 / 2。`valuef1` 的默认值是 **0** —— 它是个真实默认值，
+  // 不是「没设」，所以不能让它回落到 2。
+  valuej1: 2655,
+  valueg1: 3.3,
+  value1: 2.08,
+  valuel1: 4,
+  valuef1: 0,
+  valuelInit1: 2001,
+});
+// `ymax` 不是那六个阈值键之一（它是 y 轴上限，另有主人），原样留在这里。
+var ymax1 = localStorage.getItem('ymax') ? JSON.parse(localStorage.getItem('ymax')) : 251;
 let enableControls = true;
 let isShiftPressed = false;
 

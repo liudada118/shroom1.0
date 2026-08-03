@@ -22,6 +22,7 @@ import { Select, Slider, Popover } from 'antd'
 import * as echarts from 'echarts'
 import { SelectOutlined } from '@ant-design/icons'
 import { commandClient } from '../../services/command/commandClient'
+import { SINGLE_CHANNEL_DEFAULTS, createThresholdState } from '../../runtime/displayThresholds'
 
 let ws, xvalue = 0, yvalue = 0, myChart2, sitIndexArr = new Array(4).fill(0), backIndexArr = new Array(4).fill(0), sitPress = 0, backPress = 0;
 let backTotal = 0, backMean = 0, backMax = 0, backMin = 0, backPoint = 0, backArea = 0, sitTotal = 0, sitMean = 0, sitMax = 0, sitMin = 0, sitPoint = 0, sitArea = 0
@@ -94,12 +95,16 @@ let num = 0, colValueFlag = false, meanSmooth = 0, maxSmooth = 0, pointSmooth = 
 export default function Home() {
   const com = useRef()
   const data = useRef()
-  const [valueg1, setValueg1] = useState(localStorage.getItem('carValueg') ? JSON.parse(localStorage.getItem('carValueg')) : 2)
-  const [valuej1, setValuej1] = useState(localStorage.getItem('carValuej') ? JSON.parse(localStorage.getItem('carValuej')) : 200)
-  const [valuel1, setValuel1] = useState(localStorage.getItem('carValuel') ? JSON.parse(localStorage.getItem('carValuel')) : 2)
-  const [valuef1, setValuef1] = useState(localStorage.getItem('carValuef') ? JSON.parse(localStorage.getItem('carValuef')) : 2)
-  const [value1, setValue1] = useState(localStorage.getItem('carValue') ? JSON.parse(localStorage.getItem('carValue')) : 2)
-  const [valuelInit1, setValuelInit1] = useState(localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2)
+  // 六个滑块的初值。`useState(x)` 只在首帧用这个 x，但表达式每帧都会求值 ——
+  // 原来是每帧 12 次 `getItem`，现在一次 `createThresholdState` 读六个键，
+  // 首帧取到的值逐字相同。
+  const initialThresholds = createThresholdState(SINGLE_CHANNEL_DEFAULTS)
+  const [valueg1, setValueg1] = useState(initialThresholds.valueg1)
+  const [valuej1, setValuej1] = useState(initialThresholds.valuej1)
+  const [valuel1, setValuel1] = useState(initialThresholds.valuel1)
+  const [valuef1, setValuef1] = useState(initialThresholds.valuef1)
+  const [value1, setValue1] = useState(initialThresholds.value1)
+  const [valuelInit1, setValuelInit1] = useState(initialThresholds.valuelInit1)
   const [port, setPort] = useState([{ value: ' ', label: ' ' }])
   const [portname, setPortname] = useState('')
   const [portnameBack, setPortnameBack] = useState('')

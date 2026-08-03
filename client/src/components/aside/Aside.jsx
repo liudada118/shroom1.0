@@ -1,6 +1,21 @@
 import React from 'react'
 import './aside.scss'
+import { Button, Popconfirm, Tooltip } from 'antd'
+import { DeleteOutlined, EditOutlined } from '@ant-design/icons'
 import { CanvasDemo } from '../chart/Chart'
+import FormulaChartPanel from './FormulaChartPanel'
+import {
+    drawChartDecorations,
+    drawChartGrid,
+    resolveChartStroke,
+} from './chartAppearance'
+import {
+    formulaChartStorageKey,
+    loadFormulaCharts,
+    removeFormulaChart,
+    subscribeFormulaCharts,
+} from './formulaChartStore'
+import { PART_DRAG_TYPE } from '../displaySystem/canvasConfigurator/canvasParts'
 import { withTranslation } from 'react-i18next'
 import dropBed from '../../assets/images/dropBed.png'
 import offBed from '../../assets/images/offBed.png'
@@ -32,11 +47,6 @@ const dataArr1 = [
 ]
 
 
-
-let myChart1, myChart2
-
-
-
 class Com extends React.Component {
     constructor(props) {
         super(props)
@@ -61,7 +71,37 @@ const CONFIGURABLE_METRICS = {
     activePoints: { key: 'point', label: '有效点数', eng: 'Active Points', color: '#FFA63F', decimals: 0, unit: '个' },
     area: { key: 'area', label: '受压面积', eng: 'Pressure Area', color: '#20B486', decimals: 2 },
 }
+const BUILTIN_FORMULA_CHARTS = [
+    {
+        id: 'pressure',
+        name: 'Pressure Data',
+        formula: 'total',
+        unit: '',
+        decimals: 2,
+        color: '#991BFA',
+    },
+    {
+        id: 'area',
+        name: 'Pressure Area',
+        formula: 'points',
+        unit: '',
+        decimals: 0,
+        color: '#20B486',
+    },
+]
 let ctx1, ctx2, ctx3
+
+/**
+ * 把公式结果压成卡片上显示的那个数字。
+ *
+ * @param {unknown} value 公式算出的值。
+ * @param {number} [decimals] 小数位。
+ * @returns {string} 显示文本。
+ */
+function formatFormulaChartValue(value, decimals = 2) {
+    const numeric = Number(value)
+    return Number.isFinite(numeric) ? numeric.toFixed(decimals) : '--'
+}
 const PET_CARE_IN_BED_POSTURE_STATES = new Set([1, 2, 3])
 const PET_CARE_MONITOR_TYPES = new Set(['petCare', 'petCareMini'])
 const PET_CARE_REALTIME_FIELDS = [
@@ -269,8 +309,22 @@ class Aside extends React.Component {
             temperatureData: [],
             temperatureAvg: '--',
             algorithmMetrics: {},
+            // 从零件栏拖出来的图表卡片。真相在 formulaChartStore 里，这里只是它的镜像；
+            // 构造函数拿不到 props（super() 没传），所以在 componentDidMount 里首次装载。
+            customCharts: [],
+            customChartValues: {},
         }
         this.canvas = React.createRef()
+        this.formulaCharts = React.createRef()
+        this._builtinFormulaSeries = {}
+        this._customFormulaSeries = {}
+        // 自定义卡片的画布按 id 存在 Map 里，而不是再往 ctx1/ctx2/ctx3 那套
+        // 模块级变量上添人：卡片数量是变的，getElementById 那条路撑不住。
+        this._customChartTargets = new Map()
+        this._unsubscribeFormulaCharts = null
+        this.handleBuiltinFormulaSeries = this.handleBuiltinFormulaSeries.bind(this)
+        this.handleCustomFormulaSeries = this.handleCustomFormulaSeries.bind(this)
+        this.handleFormulaChartsChanged = this.handleFormulaChartsChanged.bind(this)
         this._petHeartRateSimulator = createPetHeartRateSimulatorState()
 
         // ========== 10Hz 节流控制 ==========
@@ -295,6 +349,231 @@ class Aside extends React.Component {
         })
     }
 
+    /**
+     * 将串口原始数据、标准矩阵和统计指标推送给用户公式图表。
+     */
+    updateFormulaCharts(values = [], metrics = {}, algorithmMetrics = {}, rawData = values) {
+        this.formulaCharts.current?.pushFrame({
+            values,
+            rawData,
+            metrics,
+            algorithmMetrics,
+            matrix: this.props.matrixShape,
+        })
+    }
+
+    /**
+     * 接收两张内置图表的公式历史，并立即刷新当前可见画布。
+     */
+    handleBuiltinFormulaSeries(series = {}) {
+        this._builtinFormulaSeries = series
+        this.drawFormulaAwareChart('pressure')
+        this.drawFormulaAwareChart('area')
+    }
+
+    /**
+     * 接收自定义图表的公式历史。和内置那条通路一模一样：存下来、立刻重画。
+     *
+     * 卡片上的当前数值进 state（Aside 本来就以 10Hz 刷新读数，同一批里多一个字段
+     * 不额外增加渲染次数），曲线走 canvas，不进 React。
+     */
+    handleCustomFormulaSeries(series = {}) {
+        this._customFormulaSeries = series
+        this.drawCustomCharts()
+        const customChartValues = {}
+        Object.keys(series).forEach((id) => {
+            customChartValues[id] = series[id]?.latest
+        })
+        this.setState({ customChartValues })
+    }
+
+    /**
+     * store 里的图表清单变了（零件栏加了一张、卡片上删了一张、弹窗改了公式）。
+     * 只认自己这个展示系统的那把键。
+     */
+    handleFormulaChartsChanged(matrixName, definitions) {
+        if (formulaChartStorageKey(matrixName) !== formulaChartStorageKey(this.props.matrixName)) return
+        this.setState({ customCharts: definitions })
+    }
+
+    /**
+     * 记住某张自定义卡片的画布。ref 回调传 null 表示卡片被卸载了。
+     */
+    setCustomChartTarget(id, node) {
+        if (!node) {
+            this._customChartTargets.delete(id)
+            return
+        }
+        this._customChartTargets.set(id, { canvas: node, ctx: node.getContext('2d') })
+        // 卡片刚挂上来时可能已经攒了一段历史（拖零件的这一瞬间数据没停），
+        // 立刻补一笔，不然要等到下一帧才出现曲线。
+        this.drawCustomChart(id)
+    }
+
+    /**
+     * 把一张自定义图表的曲线画到它自己的画布上。
+     */
+    drawCustomChart(id) {
+        const target = this._customChartTargets.get(id)
+        if (!target) return
+        const drawInput = this.buildFormulaDrawInput(this._customFormulaSeries?.[id])
+        if (!drawInput) return
+        this.drawChart({ ctx: target.ctx, canvas: target.canvas, ...drawInput })
+    }
+
+    /**
+     * 重画全部自定义图表。
+     */
+    drawCustomCharts() {
+        this._customChartTargets.forEach((target, id) => this.drawCustomChart(id))
+    }
+
+    /**
+     * 打开指定内置图表的公式编辑器。
+     */
+    openBuiltinFormulaEditor(kind) {
+        this.formulaCharts.current?.openBuiltinEditor(kind)
+    }
+
+    /**
+     * 打开某张自定义图表的公式编辑器。
+     */
+    openCustomFormulaEditor(id) {
+        this.formulaCharts.current?.openEdit(id)
+    }
+
+    /**
+     * 把卡片拖回底部零件栏就删除它，和画布组件"拖出画布"的语义一致。
+     */
+    handleCustomChartDragStart(event, definition) {
+        const payload = JSON.stringify({ kind: 'placedChartWidget', id: definition.id })
+        event.dataTransfer.setData(PART_DRAG_TYPE, payload)
+        event.dataTransfer.setData('text/plain', payload)
+        event.dataTransfer.effectAllowed = 'move'
+    }
+
+    /**
+     * 渲染从零件栏拖出来的图表卡片。
+     *
+     * 结构和 Pressure Data / Pressure Area 完全一样（标题 + 当前值 + 150px 画布），
+     * 曲线也走同一个 `drawChart`，所以图表配色和四个叠加层零件对它一并生效。
+     */
+    renderCustomChartCards() {
+        const charts = this.state.customCharts
+        if (!Array.isArray(charts) || !charts.length) return null
+        return charts.map((definition) => {
+            const openEditor = () => this.openCustomFormulaEditor(definition.id)
+            return (
+                <div
+                    className="asideContent firstAside customChartCard"
+                    draggable
+                    key={definition.id}
+                    onDragStart={(event) => this.handleCustomChartDragStart(event, definition)}
+                >
+                    <div className="builtinChartHeading">
+                        <h2 className="asideTitle">{definition.name}</h2>
+                        <div className="customChartActions">
+                            <Tooltip title={`编辑 ${definition.name} 公式`}>
+                                <Button
+                                    aria-label={`编辑 ${definition.name} 公式`}
+                                    icon={<EditOutlined />}
+                                    onClick={openEditor}
+                                    shape="circle"
+                                    size="small"
+                                    type="text"
+                                />
+                            </Tooltip>
+                            <Popconfirm
+                                cancelText="取消"
+                                okText="删除"
+                                onConfirm={() => removeFormulaChart(this.props.matrixName, definition.id)}
+                                title={`删除“${definition.name}”？`}
+                            >
+                                <Tooltip title="删除图表">
+                                    <Button
+                                        aria-label={`删除 ${definition.name}`}
+                                        danger
+                                        icon={<DeleteOutlined />}
+                                        shape="circle"
+                                        size="small"
+                                        type="text"
+                                    />
+                                </Tooltip>
+                            </Popconfirm>
+                        </div>
+                    </div>
+                    <span className='pressData'>
+                        {formatFormulaChartValue(
+                            this.state.customChartValues?.[definition.id],
+                            definition.decimals
+                        )}
+                    </span>
+                    {definition.unit ? <span style={{ color: '#999' }}> {definition.unit}</span> : null}
+                    <canvas
+                        aria-label={`编辑 ${definition.name} 公式`}
+                        className="editableBuiltinChart"
+                        onClick={openEditor}
+                        onKeyDown={(event) => {
+                            if (event.key !== 'Enter' && event.key !== ' ') return
+                            event.preventDefault()
+                            openEditor()
+                        }}
+                        ref={(node) => this.setCustomChartTarget(definition.id, node)}
+                        role="button"
+                        style={{ height: `${150 * this.state.fontSize}px`, width: '100%' }}
+                        tabIndex={0}
+                    />
+                </div>
+            )
+        })
+    }
+
+    /**
+     * 为内置图表标题提供统一的编辑入口。
+     */
+    renderBuiltinChartHeading(title, kind) {
+        return (
+            <div className="builtinChartHeading">
+                <h2 className="asideTitle">{title}</h2>
+                <Tooltip title={`编辑 ${title} 公式`}>
+                    <Button
+                        aria-label={`编辑 ${title} 图表公式`}
+                        icon={<EditOutlined />}
+                        onClick={() => this.openBuiltinFormulaEditor(kind)}
+                        shape="circle"
+                        size="small"
+                        type="text"
+                    />
+                </Tooltip>
+            </div>
+        )
+    }
+
+    /**
+     * 渲染可点击编辑公式的旧版 Canvas 图表。
+     */
+    renderBuiltinChartCanvas(kind, style) {
+        const title = kind === 'pressure' ? 'Pressure Data' : 'Pressure Area'
+        const canvasId = kind === 'pressure' ? 'myChart1' : 'myChart2'
+        const openEditor = () => this.openBuiltinFormulaEditor(kind)
+        return (
+            <canvas
+                aria-label={`编辑 ${title} 图表公式`}
+                className="editableBuiltinChart"
+                id={canvasId}
+                onClick={openEditor}
+                onKeyDown={(event) => {
+                    if (event.key !== 'Enter' && event.key !== ' ') return
+                    event.preventDefault()
+                    openEditor()
+                }}
+                role="button"
+                style={style}
+                tabIndex={0}
+            />
+        )
+    }
+
     componentDidMount() {
 
         this.setState({
@@ -310,10 +589,16 @@ class Aside extends React.Component {
         var c2 = document.getElementById("myChart3");
         if (c2) ctx3 = c2.getContext("2d");
 
+        // 图表卡片清单的主人是 store：零件栏在 Home 里加、卡片上删、弹窗里改，
+        // 三条路都从这条订阅回到侧栏。Aside 绝不能重挂（它持有全部实时读数），
+        // 所以自己订阅，而不是让 Home 用 props 把清单灌进来。
+        this.setState({ customCharts: loadFormulaCharts(this.props.matrixName) })
+        this._unsubscribeFormulaCharts = subscribeFormulaCharts(this.handleFormulaChartsChanged)
+
         // jqbed 在床/离床计时 - 由后端 server.js 计算并通过 WebSocket 发送
     }
 
-    componentDidUpdate() {
+    componentDidUpdate(prevProps) {
         var c = document.getElementById("myChart1");
         if (c) ctx1 = c.getContext("2d");
 
@@ -322,6 +607,24 @@ class Aside extends React.Component {
 
         var c2 = document.getElementById("myChart3");
         if (c2) ctx3 = c2.getContext("2d");
+
+        // 曲线是在收到数据时才重画的，换了图表零件却没有新数据进来（暂停、
+        // 回放停在某一帧）时画面会一直停在旧外观上。用上一帧缓存立刻重画一次。
+        if (prevProps?.chartAppearance !== this.props.chartAppearance) {
+            this.drawFormulaAwareChart('pressure', this._pendingChart || null)
+            this.drawFormulaAwareChart('area', this._pendingArea || null)
+            this.drawCustomCharts()
+        }
+
+        // 换了传感器/展示系统就换一份清单：卡片按 matrixName 各自独立，
+        // 上一个系统的图表不该跟过来。
+        if (prevProps?.matrixName !== this.props.matrixName) {
+            this._customFormulaSeries = {}
+            this.setState({
+                customCharts: loadFormulaCharts(this.props.matrixName),
+                customChartValues: {},
+            })
+        }
     }
 
     componentWillUnmount() {
@@ -329,25 +632,109 @@ class Aside extends React.Component {
         if (this._chartTimer) clearTimeout(this._chartTimer);
         if (this._areaTimer) clearTimeout(this._areaTimer);
         if (this._bodyTimer) clearTimeout(this._bodyTimer);
+        if (this._unsubscribeFormulaCharts) {
+            this._unsubscribeFormulaCharts()
+            this._unsubscribeFormulaCharts = null
+        }
     }
 
-    drawChart({ ctx, arr, max, canvas, index }) {
+    /**
+     * 把一条公式序列翻成 `drawChart` 的入参。
+     *
+     * 内置和自定义图表共用这一段：公式的量纲是任意的（可能是总压力，也可能是
+     * 有效点占比），所以一律 normalize 到画布高度，`max` 只作为兜底。
+     *
+     * @param {{values?: number[], definition?: object} | null} series 公式序列。
+     * @returns {object | null} drawChart 的入参；序列为空时返回 null。
+     */
+    buildFormulaDrawInput(series) {
+        if (!Array.isArray(series?.values) || !series.values.length) return null
+        const values = series.values.map((value) => {
+            const numeric = Number(value)
+            return Number.isFinite(numeric) ? numeric : 0
+        })
+        const max = values.reduce(
+            (currentMax, value) => Math.max(currentMax, Math.abs(value)),
+            1
+        )
+        return {
+            arr: values,
+            color: series.definition?.color || '#991BFA',
+            index: null,
+            max,
+            normalize: true,
+        }
+    }
+
+    /**
+     * 优先返回用户配置后的内置公式序列。
+     */
+    getBuiltinFormulaDrawInput(kind) {
+        return this.buildFormulaDrawInput(this._builtinFormulaSeries?.[kind])
+    }
+
+    /**
+     * 将内置公式曲线画到原有 Pressure Canvas 上。
+     */
+    drawFormulaAwareChart(kind, fallback = null) {
+        const drawInput = this.getBuiltinFormulaDrawInput(kind) || fallback
+        if (!drawInput) return
+        const canvasId = kind === 'pressure' ? 'myChart1' : 'myChart2'
+        const canvas = document.getElementById(canvasId)
+        if (!canvas) return
+        const context = kind === 'pressure' ? ctx1 : ctx2
+        this.drawChart({
+            ctx: context || canvas.getContext('2d'),
+            canvas,
+            ...drawInput,
+        })
+    }
+
+    drawChart({
+        ctx,
+        arr,
+        max,
+        canvas,
+        index,
+        color = '#991BFA',
+        normalize = false,
+    }) {
         if (!ctx || !canvas || !Array.isArray(arr) || arr.length === 0) return
         // 清空画布
-        let min = Math.min(...arr)
-        let realMax = Math.max(...arr)
+        const numericValues = arr.map((value) => {
+            const numeric = Number(value)
+            return Number.isFinite(numeric) ? numeric : 0
+        })
+        let min = Math.min(...numericValues)
+        let realMax = Math.max(...numericValues)
         let data
-        if (this.props.matrixName == 'yanfeng10') {
-            let res = arr.map((a) => a - min + 10)
+        if (normalize) {
+            const padding = Math.max(6, canvas.height * 0.08)
+            const range = realMax - min
+            data = range === 0
+                ? numericValues.map(() => canvas.height / 2)
+                : numericValues.map(
+                    (value) => padding + ((value - min) / range) * (canvas.height - padding * 2)
+                )
+        } else if (this.props.matrixName == 'yanfeng10') {
+            let res = numericValues.map((a) => a - min + 10)
             data = res.map((a) => a * 150 * this.state.fontSize / (realMax - min + 20))
         } else {
-            data = arr.map((a) => a * 150 / max)
+            const safeMax = Number(max) > 0 ? Number(max) : Math.max(Math.abs(realMax), 1)
+            data = numericValues.map((a) => a * 150 / safeMax)
         }
 
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         // 计算数据点之间的间距
         var gap = canvas.width / (data.length + 1);
+
+        // 用户拖进零件栏的图表外观。没选过任何零件时 appearance 是
+        // { classic, [] }，下面每一步都退回原来那条通路，观感零变化。
+        const appearance = this.props.chartAppearance
+        const overlays = appearance?.overlays
+        // 网格必须在曲线之前画，否则会盖在曲线上面。
+        drawChartGrid(ctx, { width: canvas.width, height: canvas.height, overlays })
 
         // 绘制曲线
         ctx.beginPath();
@@ -369,9 +756,23 @@ class Aside extends React.Component {
         );
 
         // 设置曲线样式
-        ctx.strokeStyle = "#991BFA";
+        ctx.strokeStyle = resolveChartStroke(ctx, {
+            height: canvas.height,
+            colormap: appearance?.colormap,
+            fallbackColor: color,
+        });
         ctx.lineWidth = 2;
         ctx.stroke();
+
+        drawChartDecorations(ctx, {
+            width: canvas.width,
+            height: canvas.height,
+            overlays,
+            data,
+            gap,
+            values: numericValues,
+            color,
+        });
 
         // 测试文字
         if (index != null) {
@@ -394,16 +795,14 @@ class Aside extends React.Component {
         this._pendingChart = { arr, max, index };
         if (now - this._lastChartTime >= this._ASIDE_INTERVAL) {
             this._lastChartTime = now;
-            const canvas = document.getElementById('myChart1');
-            if (canvas) this.drawChart({ ctx: ctx1, arr, max, canvas, index });
+            this.drawFormulaAwareChart('pressure', { arr, max, index });
             if (this._chartTimer) { clearTimeout(this._chartTimer); this._chartTimer = null; }
         } else if (!this._chartTimer) {
             this._chartTimer = setTimeout(() => {
                 this._lastChartTime = performance.now();
                 if (this._pendingChart) {
                     const { arr: a, max: m, index: i } = this._pendingChart;
-                    const canvas = document.getElementById('myChart1');
-                    if (canvas) this.drawChart({ ctx: ctx1, arr: a, max: m, canvas, index: i });
+                    this.drawFormulaAwareChart('pressure', { arr: a, max: m, index: i });
                 }
                 this._chartTimer = null;
             }, this._ASIDE_INTERVAL - (now - this._lastChartTime));
@@ -415,16 +814,14 @@ class Aside extends React.Component {
         this._pendingArea = { arr, max, index };
         if (now - this._lastAreaTime >= this._ASIDE_INTERVAL) {
             this._lastAreaTime = now;
-            const canvas = document.getElementById('myChart2');
-            if (canvas) this.drawChart({ ctx: ctx2, arr, max, canvas, index });
+            this.drawFormulaAwareChart('area', { arr, max, index });
             if (this._areaTimer) { clearTimeout(this._areaTimer); this._areaTimer = null; }
         } else if (!this._areaTimer) {
             this._areaTimer = setTimeout(() => {
                 this._lastAreaTime = performance.now();
                 if (this._pendingArea) {
                     const { arr: a, max: m, index: i } = this._pendingArea;
-                    const canvas = document.getElementById('myChart2');
-                    if (canvas) this.drawChart({ ctx: ctx2, arr: a, max: m, canvas, index: i });
+                    this.drawFormulaAwareChart('area', { arr: a, max: m, index: i });
                 }
                 this._areaTimer = null;
             }, this._ASIDE_INTERVAL - (now - this._lastAreaTime));
@@ -491,6 +888,20 @@ class Aside extends React.Component {
             ...(this._pendingData || {}),
             ...normalizedObj,
         };
+
+        if (!this.props.sidebarConfig) {
+            const formulaState = {
+                ...baseRealtimeState,
+                ...normalizedObj,
+            }
+            this.updateFormulaCharts([], {
+                totalPressure: formulaState.totalPres,
+                averagePressure: formulaState.meanPres,
+                maxPressure: formulaState.maxPres,
+                activePoints: formulaState.point,
+                area: formulaState.area,
+            }, formulaState.algorithmMetrics)
+        }
 
         const hasRealtimeDetectionData =
             normalizedObj.rate !== undefined ||
@@ -594,21 +1005,43 @@ class Aside extends React.Component {
         const primaryUnit = primary.unit
         return (
             <div className='aside'>
-                {area.visible !== false ? (
-                    <div className="asideContent firstAside">
-                        <h2 className="asideTitle">{area.title || 'Pressure Area'}</h2>
-                        <canvas id="myChart2" style={{ height: `${150 * this.state.fontSize}px`, width: '100%' }}></canvas>
-                        {(area.metrics || []).map((metricId) => this.renderConfiguredMetric(metricId, sidebar, area.unit))}
-                    </div>
-                ) : null}
                 {pressure.visible !== false ? (
                     <div className="asideContent firstAside">
-                        <h2 className="asideTitle">{pressure.title || 'Pressure Data'}</h2>
+                        {this.renderBuiltinChartHeading(
+                            pressure.title || 'Pressure Data',
+                            'pressure'
+                        )}
                         <span className='pressData'>{primaryValue}</span>
                         {primaryUnit ? <span style={{ color: '#999' }}> {primaryUnit}</span> : null}
                         <div className='pressTitle standardColor'>{primary.eng}</div>
-                        <canvas id="myChart1" style={{ height: `${150 * this.state.fontSize}px`, width: '100%' }}></canvas>
+                        {this.renderBuiltinChartCanvas('pressure', {
+                            height: `${150 * this.state.fontSize}px`,
+                            width: '100%',
+                        })}
                         {(pressure.metrics || []).map((metricId) => this.renderConfiguredMetric(metricId, sidebar, area.unit))}
+                    </div>
+                ) : null}
+                {this.renderCustomChartCards()}
+                <FormulaChartPanel
+                    algorithmMetricDefinitions={sidebar.algorithmMetrics || []}
+                    builtinDefinitions={BUILTIN_FORMULA_CHARTS}
+                    matrixName={this.props.matrixName}
+                    matrixShape={this.props.matrixShape}
+                    onBuiltinSeries={this.handleBuiltinFormulaSeries}
+                    onCustomSeries={this.handleCustomFormulaSeries}
+                    ref={this.formulaCharts}
+                />
+                {area.visible !== false ? (
+                    <div className="asideContent firstAside">
+                        {this.renderBuiltinChartHeading(
+                            area.title || 'Pressure Area',
+                            'area'
+                        )}
+                        {this.renderBuiltinChartCanvas('area', {
+                            height: `${150 * this.state.fontSize}px`,
+                            width: '100%',
+                        })}
+                        {(area.metrics || []).map((metricId) => this.renderConfiguredMetric(metricId, sidebar, area.unit))}
                     </div>
                 ) : null}
             </div>
@@ -732,8 +1165,11 @@ class Aside extends React.Component {
         return (
             <div className='aside'>
                {this.props.matrixName != 'bed40' ? <div className="asideContent firstAside">
-                    {this.props.matrixName != 'foot' ? <><h2 className="asideTitle">Pressure Area</h2>
-                        <canvas id="myChart2" style={{ height: `${150 * this.state.fontSize}px`, width: '100%' }}></canvas>
+                    {this.props.matrixName != 'foot' ? <>{this.renderBuiltinChartHeading('Pressure Area', 'area')}
+                        {this.renderBuiltinChartCanvas('area', {
+                            height: `${150 * this.state.fontSize}px`,
+                            width: '100%',
+                        })}
                         <>
                             {
                                 dataArr.map((a, index) => {
@@ -876,12 +1312,22 @@ class Aside extends React.Component {
                     </>
                     : this.props.matrixName != 'bed40' ?
                 <div className="asideContent firstAside">
-                    <h2 className="asideTitle">{isSmallBed12B ? this.props.i18n.t('pressureIntensityData') : 'Pressure Data'}</h2>
+                    {this.renderBuiltinChartHeading(
+                        this.props.matrixName === 'foot'
+                            ? 'Pressure Area'
+                            : isSmallBed12B
+                                ? this.props.i18n.t('pressureIntensityData')
+                                : 'Pressure Data',
+                        this.props.matrixName === 'foot' ? 'area' : 'pressure'
+                    )}
                     <span className='pressData'>{isGloveRemoteControl ? `${this.state.indexAngle || 0}°` : isSmallBed12B ? Number(this.state.totalPres).toFixed(1) : Number(this.state.totalPres).toFixed(0)}</span> <span style={{ color: '#999' }}>{isSmallBed12B ? 'kPa' : ''}</span>
 
                     {this.props.matrixName != 'foot' ? <>
                         <div className='pressTitle standardColor'>{isGloveRemoteControl ? this.props.i18n.t('bendAngle') : isSmallBed12B ? this.props.i18n.t('maxPressureIntensity') : this.props.i18n.t('allPress')}</div>
-                        <canvas id="myChart1" style={{ height: `${150 * this.state.fontSize}px`, width: '100%' }}></canvas>
+                        {this.renderBuiltinChartCanvas('pressure', {
+                            height: `${150 * this.state.fontSize}px`,
+                            width: '100%',
+                        })}
                         {
                             pressureDataFields.map((a, index) => {
                                 return (
@@ -925,7 +1371,10 @@ class Aside extends React.Component {
                     </>
                         : <>
                             <div className='pressTitle standardColor'>总体面积 Total Area</div>
-                            <canvas id="myChart2" style={{ height: '150px', width: '100%' }}></canvas>
+                            {this.renderBuiltinChartCanvas('area', {
+                                height: '150px',
+                                width: '100%',
+                            })}
                             {
                                 dataArr1.map((a, index) => {
                                     return (
@@ -946,6 +1395,16 @@ class Aside extends React.Component {
                         </>}
                 </div> : ''}
 
+                {this.renderCustomChartCards()}
+                <FormulaChartPanel
+                    algorithmMetricDefinitions={this.props.sidebarConfig?.algorithmMetrics || []}
+                    builtinDefinitions={BUILTIN_FORMULA_CHARTS}
+                    matrixName={this.props.matrixName}
+                    matrixShape={this.props.matrixShape}
+                    onBuiltinSeries={this.handleBuiltinFormulaSeries}
+                    onCustomSeries={this.handleCustomFormulaSeries}
+                    ref={this.formulaCharts}
+                />
 
             </div>
         )

@@ -18,6 +18,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { bthClickHandle as heatmapBthClickHandle } from '../onestep/heatmap';
 import { registerRuntimeDisplayDefinition } from '../../displays/registry';
+import { buildAccessibleSensorOptions } from '../../services/sensorStatus';
 let collection = JSON.parse(localStorage.getItem('collection'))
   ? JSON.parse(localStorage.getItem('collection'))
   : [['hunch', 'front', '标签']];
@@ -329,6 +330,13 @@ class Title extends React.Component {
   componentDidMount() {
     console.log(this.props, 'props')
     window.addEventListener('shroom-csv-download-status', this.handleCsvDownloadStatus)
+    window.addEventListener('shroom-display-systems-updated', this.loadDynamicSensors)
+    this.loadDynamicSensors()
+    this.initializeLegacyState()
+  }
+
+  /** 重新读取后端已加载的 Display Systems，并同步前端运行时注册表。 */
+  loadDynamicSensors = () => {
     fetch('http://127.0.0.1:19245/api/display-systems')
       .then((response) => response.json())
       .then((payload) => {
@@ -340,7 +348,9 @@ class Title extends React.Component {
         this.setState({ dynamicSensors })
       })
       .catch((error) => console.warn('[DisplaySystems] load failed', error))
+  }
 
+  initializeLegacyState() {
     if (this.props.matrixName === 'sitCol' || this.props.matrixName === 'handBlue') {
       if (localStorage.getItem('sitType1')) {
         console.log('localSetState')
@@ -382,6 +392,7 @@ class Title extends React.Component {
 
   componentWillUnmount() {
     window.removeEventListener('shroom-csv-download-status', this.handleCsvDownloadStatus)
+    window.removeEventListener('shroom-display-systems-updated', this.loadDynamicSensors)
   }
 
   componentDidUpdate(prevProps) {
@@ -897,7 +908,7 @@ class Title extends React.Component {
         cancelText='取消'
         onOk={this.startCollectionWithOptions}
         onCancel={this.closeCollectionModal}
-        destroyOnClose
+        destroyOnHidden
       >
         <Space direction='vertical' style={{ width: '100%' }} size={12}>
           <div>
@@ -1051,7 +1062,7 @@ class Title extends React.Component {
         cancelText='取消'
         onOk={() => this.setState({ smallBed12BDisplaySettingsOpen: false })}
         onCancel={() => this.setState({ smallBed12BDisplaySettingsOpen: false })}
-        destroyOnClose
+        destroyOnHidden
       >
         <Space direction='vertical' style={{ width: '100%' }} size={12}>
           <div>
@@ -1595,16 +1606,11 @@ class Title extends React.Component {
       { label: t('sensorHumanBody'), value: 'humanBody' },
     ]
 
-    const builtInSensorTypes = new Set(builtInSensorArr.map((sensor) => sensor.value))
-    const allSensorArr = [
-      ...builtInSensorArr,
-      ...this.state.dynamicSensors.filter((sensor) => !builtInSensorTypes.has(sensor.value)),
-    ]
-
-    const allowedTypes = Array.isArray(this.props.allowedTypes) ? this.props.allowedTypes : [];
-    const sensorArr = allowedTypes.length
-      ? allSensorArr.filter((sensor) => allowedTypes.includes(sensor.value))
-      : allSensorArr;
+    const sensorArr = buildAccessibleSensorOptions({
+      builtInSensors: builtInSensorArr,
+      dynamicSensors: this.state.dynamicSensors,
+      allowedTypes: this.props.allowedTypes,
+    });
 
     const navItems = [
       {
@@ -1652,23 +1658,19 @@ class Title extends React.Component {
         <img className="titleBrandWordmark" src={shroomWordmark} alt="Shroom" />
       </div>
         <div className="titleItems">
-          <NavLink to="/display-systems">
-            <Button
-              className="titleButton"
-              icon={<SettingOutlined />}
-              title="展示系统配置器"
-              aria-label="展示系统配置器"
-            />
-          </NavLink>
+          <Button
+            className="titleButton"
+            icon={<SettingOutlined />}
+            title="展示系统配置器"
+            aria-label="展示系统配置器"
+            onClick={() => this.props.openDisplaySystemBuilder?.()}
+          />
           <Select
           style={{ width: '130px' }}
           placeholder={t('chooseSensor')}
           value={this.props.matrixName}
           onChange={(e) => {
             this.changeMatrixType(e)
-            this.props.changeStateData({
-              numMatrixFlag: 'normal'
-            })
 
             this.props.wsSendObj({ resetZero: false })
             this.setState({ resetZero: false, dataTime: '' })
@@ -2233,7 +2235,7 @@ class Title extends React.Component {
               cancelText='取消'
               onOk={this.generateOneStepPdfReport}
               onCancel={() => this.setState({ pdfModalOpen: false })}
-              destroyOnClose
+              destroyOnHidden
             >
               <Space direction='vertical' style={{ width: '100%' }} size={12}>
                 <div>

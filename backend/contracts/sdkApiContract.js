@@ -22,6 +22,8 @@ const HTTP_ROUTES = Object.freeze({
     displaySystemCatalog: '/api/display-systems/catalog',
     displaySystemEditor: '/api/display-systems/:id/editor',
     displaySystemReload: '/api/display-systems/reload',
+    displaySystemDisplaySection: '/api/display-systems/:id/display',
+    displaySystemDuplicate: '/api/display-systems/:id/duplicate',
   commands: '/api/commands',
   serialPorts: '/api/serial/ports',
   serialStatus: '/api/serial/status',

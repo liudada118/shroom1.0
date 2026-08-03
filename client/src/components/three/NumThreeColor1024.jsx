@@ -2,21 +2,14 @@ import React, { useContext, useEffect, useImperativeHandle, useRef } from 'react
 import Stats from "three/examples/jsm/libs/stats.module.js";
 import * as THREE from "three";
 import './canvas.scss'
-import { findMax } from '../../assets/util/util';
+import { findMax, jet } from '../../assets/util/util';
 import { press, press256 } from '../../assets/util/line';
+import { buildCoordinateWorldLayout } from '../displaySystem/coordinatePointLayout';
+import { isClassicColormap, sampleColormapRgb } from '../displaySystem/colormaps';
+import { DUAL_CHANNEL_DEFAULTS, createThresholdState } from '../../runtime/displayThresholds';
 
-var valuej1 = localStorage.getItem('carValuej') ? JSON.parse(localStorage.getItem('carValuej')) : 200,
-  valueg1 = localStorage.getItem('carValueg') ? JSON.parse(localStorage.getItem('carValueg')) : 2,
-  value1 = localStorage.getItem('carValue') ? JSON.parse(localStorage.getItem('carValue')) : 2,
-  valuel1 = localStorage.getItem('carValuel') ? JSON.parse(localStorage.getItem('carValuel')) : 2,
-  valuef1 = localStorage.getItem('carValuef') ? JSON.parse(localStorage.getItem('carValuef')) : 2,
-  valuej2 = localStorage.getItem('carValuej') ? JSON.parse(localStorage.getItem('carValuej')) : 200,
-  valueg2 = localStorage.getItem('carValueg') ? JSON.parse(localStorage.getItem('carValueg')) : 2,
-  value2 = localStorage.getItem('carValue') ? JSON.parse(localStorage.getItem('carValue')) : 2,
-  valuel2 = localStorage.getItem('carValuel') ? JSON.parse(localStorage.getItem('carValuel')) : 2,
-  valuef2 = localStorage.getItem('carValuef') ? JSON.parse(localStorage.getItem('carValuef')) : 2,
-  valuelInit1 = localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2,
-  valuelInit2 = localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2;
+var { valuej1, valueg1, value1, valuel1, valuef1, valuej2, valueg2, value2, valuel2, valuef2,
+  valuelInit1, valuelInit2 } = createThresholdState(DUAL_CHANNEL_DEFAULTS);
 var valuep = 0, valueprop = 1
 const getTextureRange = (textureValueMax) => {
   const max = textureValueMax && textureValueMax > 255 ? Math.round(textureValueMax) : 255;
@@ -33,41 +26,22 @@ const formatDisplayValue = (value, decimalScale) => (
   decimalScale > 1 ? (Number(value) / decimalScale).toFixed(1) : String(value)
 );
 const getPressureChartPadding = (matrixName) => (matrixName === 'smallBed12B' ? 5 : 1000);
-function jet(min, max, x) {
-  let red, g, blue;
-  let dv;
-  red = 1.0;
-  g = 1.0;
-  blue = 1.0;
-  if (x < min) {
-    x = min;
-  }
-  if (x > max) {
-    x = max;
-  }
-  dv = max - min;
-  if (x < min + 0.25 * dv) {
-    // red = 0;
-    // g = 0;
-    // blue = 0;
+// 主界面的画布配置器可以换配色。`classic` 和不传 colormap 都必须走
+// 原来的 jet + 逐实例 (r, 0.2, 1-r) 染色，让 smallBed / hand / MINZHEN 这些
+// 老展示系统的观感一个像素都不变；只有显式选了别的配色才换成色标采样。
+// 判定规则从 colormaps.js 取，和 hand.jsx 那条链共用一份。
 
-    red = 0;
-    g = (4 * (x - min)) / dv;
-  } else if (x < min + 0.5 * dv) {
-    red = 0;
-    blue = 1 + (4 * (min + 0.25 * dv - x)) / dv;
-  } else if (x < min + 0.75 * dv) {
-    red = (4 * (x - min - 0.5 * dv)) / dv;
-    blue = 0;
-  } else {
-    g = 1 + (4 * (min + 0.75 * dv - x)) / dv;
-    blue = 0;
-  }
-  var rgb = new Array();
-  rgb[0] = parseInt(255 * red + '');
-  rgb[1] = parseInt(255 * g + '');
-  rgb[2] = parseInt(255 * blue + '');
-  return rgb;
+/**
+ * 算一格精灵图的背景色。
+ *
+ * @param {{id: string, reverse: boolean}} colormap 当前配色，缺省即 classic。
+ * @param {number} displayValue 这一格代表的实际数值。
+ * @param {number} colorMax 映射到色标顶端的数值。
+ * @returns {number[]} 0-255 的 rgb 三元组。
+ */
+function sampleCellRgb(colormap, displayValue, colorMax) {
+  if (isClassicColormap(colormap)) return jet(0, colorMax, displayValue);
+  return sampleColormapRgb(colormap.id, colorMax > 0 ? displayValue / colorMax : 0, colormap);
 }
 
 let ndata1 = new Array(1024).fill(0)
@@ -79,7 +53,15 @@ export default React.forwardRef((props, refs) => {
   const matrixHeight = Number(props.matrixHeight) || 0;
   const gridWidth = matrixWidth > 0 ? matrixWidth : 64 / size;
   const gridHeight = matrixHeight > 0 ? matrixHeight : 64 / size;
-  const worldCellSize = 2 / Math.max(gridWidth, gridHeight);
+  // 场景构建的 useEffect 依赖是 []，闭包里拿到的是挂载时的 props。配色换了会由
+  // CanvasCom 的 variantKey 整场重建，所以挂载时的值就是对的；用 ref 兜一层，
+  // 让 sitValue 之类的命令式入口也不会读到旧配色。
+  const colormapRef = useRef(props.colormap);
+  colormapRef.current = props.colormap;
+  const coordinateWorldLayout = buildCoordinateWorldLayout(props.coordinateMap);
+  const coordinatePoints = coordinateWorldLayout?.points || null;
+  const worldCellSize = coordinateWorldLayout?.worldCellSize || 2 / Math.max(gridWidth, gridHeight);
+  const instanceCount = coordinatePoints?.length || gridWidth * gridHeight;
   const stats = new Stats();
   stats.showPanel(0); // 0: FPS, 1: ms, 2: memory
   // document.body.appendChild(stats.dom);
@@ -182,7 +164,7 @@ export default React.forwardRef((props, refs) => {
     // press = pressTommhg(press, point)
     const mean = press / (point == 0 ? 1 : point)
     const displayPress = props.matrixName === 'smallBed12B' ? max : press
-    if (props.matrixName !== 'minzhen') {
+    if (props.manageSidebar !== false && props.matrixName !== 'minzhen') {
       props.data.current?.changeData({
         meanPres: mean.toFixed(2),
         maxPres: max,
@@ -276,7 +258,7 @@ export default React.forwardRef((props, refs) => {
 
       // 计算背景颜色（使用 colorMax 作为映射最大值）
       const displayValue = i / decimalScale;
-      const [r, g, b] = jet(0, colorMax, displayValue);
+      const [r, g, b] = sampleCellRgb(colormapRef.current, displayValue, colorMax);
       ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
       ctx.fillRect(cx, cy, cellSize, cellSize);
 
@@ -442,25 +424,42 @@ export default React.forwardRef((props, refs) => {
     material.toneMapped = false;
     materialRef = material; // 暴露给 sitValue 使用
     // const size = 4
-    const count = gridWidth * gridHeight;
+    const count = instanceCount;
     const geometry = new THREE.PlaneGeometry(worldCellSize * 1.024, worldCellSize * 1.024);
 
     // const geometry = new THREE.PlaneGeometry(0.1, 0.1);
     const uvOffsets = new Float32Array(count * 2);
     const colorArray = new Float32Array(count * 3);
+    // 非 classic 配色的 tint 恒为白色，填一次即可，animate 里不再逐帧重算。
+    const useClassicTint = isClassicColormap(colormapRef.current);
+    if (!useClassicTint) colorArray.fill(1);
     const mesh = new THREE.InstancedMesh(geometry, material, count);
     const dummy = new THREE.Object3D();
-    // mesh.rotation.x = Math.PI
-    for (let i = 0; i < count; i++) {
-      const x = i % gridWidth;
-      const y = Math.floor(i / gridWidth);
-      // dummy.position.set((x - 31.5) / 32, (y - 31.5) / 32, 0); // 居中
 
+    /**
+     * 把实例放到物理坐标位置；没有坐标文件时保持原来的规则矩阵布局。
+     */
+    const setInstancePosition = (index) => {
+      const coordinatePoint = coordinatePoints?.[index];
+      if (coordinatePoint) {
+        dummy.position.set(coordinatePoint.worldX, coordinatePoint.worldY, 0);
+        return;
+      }
+
+      const x = index % gridWidth;
+      const y = Math.floor(index / gridWidth);
       dummy.position.set(
         (x - (gridWidth - 1) / 2) * worldCellSize,
         (y - (gridHeight - 1) / 2) * worldCellSize,
         0
       );
+    };
+
+    // mesh.rotation.x = Math.PI
+    for (let i = 0; i < count; i++) {
+      // dummy.position.set((x - 31.5) / 32, (y - 31.5) / 32, 0); // 居中
+
+      setInstancePosition(i);
       // dummy.rotation.set(0, Math.PI, 0,)
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
@@ -534,30 +533,27 @@ export default React.forwardRef((props, refs) => {
       animationRequestId = requestAnimationFrame(animate);
       //  = rangeValue/Math.PI/2
       for (let i = 0; i < count; i++) {
-        const x = i % gridWidth;
-        const y = Math.floor(i / gridWidth);
-        dummy.position.set(
-          (x - (gridWidth - 1) / 2) * worldCellSize,
-          (y - (gridHeight - 1) / 2) * worldCellSize,
-          0
-        );
+        setInstancePosition(i);
 
         // dummy.position.set((x ) / 32, (y ) / 32, 0);
         dummy.updateMatrix();
         mesh.setMatrixAt(i, dummy.matrix);
 
-        const d = clampTextureValue(data[i] * decimalScale, textureValueMax)//Math.floor(Math.random() * 256);
+        const dataIndex = coordinatePoints?.[i]?.index ?? i;
+        const d = clampTextureValue(data[dataIndex] * decimalScale, textureValueMax)//Math.floor(Math.random() * 256);
         uvOffsets[i * 2] = (d % textureCols) / textureCols;
         uvOffsets[i * 2 + 1] = Math.floor(d / textureCols) / textureRows;
 
         // const d = Math.floor(Math.random() * 256);
-        const r = d / textureValueMax;
-        const g = 0.2;
-        const b = 1.0 - r;
-
-        colorArray[i * 3 + 0] = r;
-        colorArray[i * 3 + 1] = g;
-        colorArray[i * 3 + 2] = b;
+        // instanceColor 在片元着色器里乘到精灵图上。classic 保留原来的
+        // (r, 0.2, 1-r) 渐变叠加；选了别的配色时必须乘 1，否则会把色标压暗、
+        // 用户看到的就不是他挑的那条色带了。
+        if (useClassicTint) {
+          const r = d / textureValueMax;
+          colorArray[i * 3 + 0] = r;
+          colorArray[i * 3 + 1] = 0.2;
+          colorArray[i * 3 + 2] = 1.0 - r;
+        }
 
         // const rgb = jet(0 , 30 , d)
 
@@ -595,6 +591,8 @@ export default React.forwardRef((props, refs) => {
       canvas.removeEventListener('pointercancel', onPointerUp);
     }
 
+    // CanvasCom 会在系统、模式或 manifest revision 变化时重建整个场景。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
 

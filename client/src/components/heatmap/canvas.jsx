@@ -1,22 +1,25 @@
 import React, { useEffect, useState, useImperativeHandle } from 'react'
-import { addSide, gaussBlur_1, interp, interpSmall } from '../../assets/util/util'
+import { addSide, gaussBlur_1, interp, interpSmall, jetRgba as jet } from '../../assets/util/util'
 import { calculatePressure, footLine } from '../../assets/util/line'
 import { rotateArray90Degrees } from '../../assets/util/line'
 import { rotateArrayCounter90Degrees } from '../../assets/util/line'
+import { createThresholdState } from '../../runtime/displayThresholds'
 // import { Intensity } from '../../assets/util/heatmap'
 
 var data = []
 var options = {
     min: 0,
-    max: localStorage.getItem('carValuej') ? JSON.parse(localStorage.getItem('carValuej')) : 600,
+    // 这一份没有 `valuej1` 变量 —— 同一个 `carValuej` 键在这里读成了 `options.max`，
+    // 而且默认值是 **600** 而非 200（全仓唯一一处）。走 store 是为了让六个键的读取
+    // 只有一个出口，默认值仍是这个文件自己的。
+    max: createThresholdState({ valuej1: 600 }).valuej1,
     size: 50
 }
 var isShadow = true
-var canvas, context,
-    valueg1 = localStorage.getItem('carValueg') ? JSON.parse(localStorage.getItem('carValueg')) : 2,
-    valuef1 = localStorage.getItem('carValuef') ? JSON.parse(localStorage.getItem('carValuef')) : 2,
-    valuelInit1 = localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2,
-    valuel1 = localStorage.getItem('carValuel') ? JSON.parse(localStorage.getItem('carValuel')) : 2
+var canvas, context
+var { valueg1, valuef1, valuelInit1, valuel1 } = createThresholdState({
+    valueg1: 2, valuef1: 2, valuelInit1: 2, valuel1: 2,
+})
 
 
 export const Heatmap = React.forwardRef((props, refs) => {
@@ -237,45 +240,6 @@ export const Heatmap = React.forwardRef((props, refs) => {
             // pixels[i] = 256 *0
         }
     }
-
-    function jet(min, max, x) {
-        let red, g, blue;
-        let dv;
-        red = 1.0;
-        g = 1.0;
-        blue = 1.0;
-        if (x < min) {
-            x = min;
-        }
-        if (x > max) {
-            x = max;
-        }
-        dv = max - min;
-        if (x < min + 0.25 * dv) {
-            // red = 0;
-            // g = 0;
-            // blue = 0;
-
-            red = 0;
-            g = (4 * (x - min)) / dv;
-        } else if (x < min + 0.5 * dv) {
-            red = 0;
-            blue = 1 + (4 * (min + 0.25 * dv - x)) / dv;
-        } else if (x < min + 0.75 * dv) {
-            red = (4 * (x - min - 0.5 * dv)) / dv;
-            blue = 0;
-        } else {
-            g = 1 + (4 * (min + 0.75 * dv - x)) / dv;
-            blue = 0;
-        }
-        var rgba = new Array();
-        rgba[0] = 255 * red;
-        rgba[1] = 255 * g;
-        rgba[2] = 255 * blue;
-        rgba[3] = 1;
-        return rgba;
-    }
-
 
     function bthClickHandle(arr) {
         // console.log(111)

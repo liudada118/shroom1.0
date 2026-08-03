@@ -1,5 +1,6 @@
 import { color } from 'echarts';
 import React, { useEffect, useRef, useState, useImperativeHandle } from 'react';
+import { jet } from '../../assets/util/util';
 
 let firstData, lastData;
 const Data = React.forwardRef((porps, refs) => {
@@ -34,35 +35,6 @@ const Data = React.forwardRef((porps, refs) => {
     changeWsData: changeWsData,
     drawContent: drawContent,
   }));
-
-  function jet(min, max, x) {
-    let r, g, b;
-    let dv;
-    r = 1;
-    g = 1;
-    b = 1;
-    if (x < min) x = min;
-    if (x > max) x = max;
-    dv = max - min;
-    if (x < min + 0.25 * dv) {
-      r = 0;
-      g = (4 * (x - min)) / dv;
-    } else if (x < min + 0.5 * dv) {
-      r = 0;
-      b = 1 + (4 * (min + 0.25 * dv - x)) / dv;
-    } else if (x < min + 0.75 * dv) {
-      r = (4 * (x - min - 0.5 * dv)) / dv;
-      b = 0;
-    } else {
-      g = 1 + (4 * (min + 0.75 * dv - x)) / dv;
-      b = 0;
-    }
-    var rgb = new Array();
-    rgb[0] = parseInt(255 * r);
-    rgb[1] = parseInt(255 * g);
-    rgb[2] = parseInt(255 * b);
-    return rgb;
-  }
 
   function boxesForGauss(sigma, n) {
     // standard deviation, number of boxes

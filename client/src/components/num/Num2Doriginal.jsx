@@ -3,12 +3,8 @@ import './num.css'
 import { addSide, findMax } from '../../assets/util/util';
 import { pressData } from '../../assets/util/matrixToPress';
 import hand from '../../assets/images/hand0509.png'
-var valuej1 = localStorage.getItem('carValuej') ? JSON.parse(localStorage.getItem('carValuej')) : 200,
-    valueg1 = localStorage.getItem('carValueg') ? JSON.parse(localStorage.getItem('carValueg')) : 2,
-    value1 = localStorage.getItem('carValue') ? JSON.parse(localStorage.getItem('carValue')) : 2,
-    valuel1 = localStorage.getItem('carValuel') ? JSON.parse(localStorage.getItem('carValuel')) : 2,
-    valuef1 = localStorage.getItem('carValuef') ? JSON.parse(localStorage.getItem('carValuef')) : 2,
-    valuelInit1 = localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2
+import { SINGLE_CHANNEL_DEFAULTS, createThresholdState } from '../../runtime/displayThresholds';
+var { valuej1, valueg1, value1, valuel1, valuef1, valuelInit1 } = createThresholdState(SINGLE_CHANNEL_DEFAULTS);
 
 
 

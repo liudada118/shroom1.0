@@ -1,31 +1,612 @@
 # 架构文档
 
+## 2026-08-03 横切共用层（二）：47 个阈值声明块收成一个 store
+
+### 这一块是「55 份复制粘贴」的正主
+
+`renderers/pointGrid/PointGridRenderer.jsx` 的文件头点名过一个根因，指的就是它：54 个文件顶部都有同一段模块级声明，形状逐字如下（抄自 `three/hand.jsx:40-51`）：
+
+```js
+var valuej1 = localStorage.getItem('carValuej') ? JSON.parse(localStorage.getItem('carValuej')) : 200,
+  valueg1 = localStorage.getItem('carValueg') ? JSON.parse(localStorage.getItem('carValueg')) : 2,
+  … 一共 12 行 …
+```
+
+**47 个可解析的声明块 / 2206 个读写点。** 现在收进 `client/src/runtime/displayThresholds.js` 一个模块，六个键（`carValuej` / `carValueg` / `carValue` / `carValuel` / `carValuef` / `carValueInit`）在全仓只有这一个读取出口。
+
+### 消费方式是解构，不是取对象 —— 这是刻意的
+
+```js
+var { valuej1, valueg1, value1, valuel1, valuef1, valuelInit1,
+      valuej2, valueg2, value2, valuel2, valuef2, valuelInit2 }
+  = createThresholdState(DUAL_CHANNEL_DEFAULTS);
+```
+
+解构出来的是**普通局部绑定**，所以每个文件里那个 `sitValue(prop)` 照样能 `valuej1 = prop.valuej` 直接改，**2206 个读写点一个字都没动**。改成 `t.valuej1` 那种「更干净」的写法，就得动 2206 处没有任何测试覆盖的 legacy 代码 —— 风险和这一步的收益不成比例。`sitValue` 里 `if (prop.valuej)` 那个真值守卫（**传 0 会被忽略**）也因此原样保留，它是个 quirk，但改它属于修 bug，不属于抽公共层。
+
+### 计划里的「模块加载时读一次存快照」是错的，没有照做
+
+动手前先数了一遍作用域，发现 47 个块**并不统一**：
+
+- **23 个在模块顶层** —— 所有实例共享，冻结在该模块被 import 的时刻；
+- **24 个在 `React.forwardRef((props, refs) => {` 的函数体内** —— 本来就是每实例、每次挂载重读。
+
+共享快照对**两种**作用域都不等价：函数内那 24 个今天切走再切回会拿到新阈值，模块顶层那 23 个因为场景是懒加载的、「改完阈值再切到一个还没加载过的展示形式」也会读到新值。一个模块级快照会把两者一起冻结在**第一个消费者**加载的时刻。所以实现成 `createThresholdState()` 里现读 —— 调用点就是原来的声明处，时机逐字相同。这条有测试守着（`displayThresholds.test.js` 的「每次调用都现读 localStorage，不用模块级共享快照」）。
+
+**作用域一律保持原样**：原来模块级共享的仍是共享，原来每实例的仍是每实例。把那 23 个也改成每实例需要 `stateRef`（见 `PointGridRenderer` 的 `createTuningState`），那是各文件被改写成渲染器时顺带做的事。
+
+### 默认值按变量名给，因为通道之间都能不一样
+
+计划里说「默认值不统一是最容易踩的坑」，实际比预想的更深 —— **六个键全都有离群值**，不是只有 `carValuej`：
+
+| 键 | 默认值分布 |
+| :--- | :--- |
+| `carValuej` | 200 ×84、335 ×2、255 ×2、600 ×1、2655 ×1 |
+| `carValueg` | 2 ×86、3.6 ×2、4 ×1、3.3 ×1 |
+| `carValue` | 2 ×87、2.1 ×1、2.08 ×1 |
+| `carValuel` | 2 ×88、4 ×1、1 ×1 |
+| `carValuef` | 2 ×89、**0** ×1 |
+| `carValueInit` | 2 ×87、2000 ×2、2001 ×1、500 ×1 |
+
+而且 `three/wholeChair.jsx` 的**两个通道默认值不对称**（`valueg1` 是 4 而 `valueg2` 是 2、`value1` 是 2.1 而 `value2` 是 2、`valuel1` 是 1 而 `valuel2` 是 2）。所以默认值按**变量名**给（`valueg1` / `valueg2` 各是一条），不能按 localStorage 键给 —— 按键给的话这三处会被静默改掉首屏表现，而且不会有任何测试失败。
+
+`carValuef` 的那个 **0** 是同类陷阱的另一面：它是个真实默认值，不是「没设」，不能让它回落到 2。
+
+三条预设 `DUAL_CHANNEL_DEFAULTS`（37 份）/ `SINGLE_CHANNEL_DEFAULTS`（7 份）/ `SECOND_CHANNEL_DEFAULTS`（2 份），三个离群文件用 `{ ...DUAL_CHANNEL_DEFAULTS, valuej1: 335, … }` 覆盖。
+
+### 只有后缀 2 的那两个文件
+
+`three/4096.jsx` 与 `three/NumThreeColor copy.jsx` 只声明 `value*2`。它们的后缀 1 侧不是本地变量，而是 `assets/util/bed4096numParams.js` 那个**共享调参对象**（文件里以 `const p = bed4096numParams` 别名出现），为的是「Bed4096 与 Fast256 切换模式时调参不重置」。所以 `bed4096numParams` 这个模块留着 —— 它的价值不在读取（读取已经收走了），而在那个**模块级单例**语义：两个模式拿到同一个引用。各自 `createThresholdState()` 就会各读各的，正是这里要避免的。
+
+### 四个手工改的消费方
+
+脚本批量换了 39 个块，剩下四处形状特殊，手工改：
+
+- **`three/Short.jsx`** —— 块中间**夹着一行 `ymax1`**（读 `ymax` 键，不属于这六个），拆出来单放。通道 1 走的是 `2655 / 3.3 / 2.08 / 4 / 0`（与 `util.js` 的 `initValue` 同源），通道 2 才是 200 / 2。
+- **`heatmap/canvas.jsx`** —— 没有 `valuej1` 变量，同一个 `carValuej` 键在这里读成了 `options.max`，**默认值 600**（全仓唯一）。另外四个阈值和 `canvas, context` 挤在同一条 `var` 里。
+- **`page/home/HomeFun.jsx`** —— 六个 `useState(localStorage.getItem(...))` 初值。`useState(x)` 只在首帧用这个 x，但表达式每帧都求值，原来是每帧 12 次 `getItem`，现在一次调用读六个键。
+- **`assets/util/util.js` 的 `initValue`** —— 全仓第三份读取。它的 `valuelInit1` 默认 **500**，与别处都不同；后面四个键（`valueMult` / `compen` / `press` / `ymax1`）不是这六个阈值，另有主人，原样留着。
+
+`PointGridRenderer.jsx` 自己那份 `readStoredNumber` + `createTuningState` 也一并删了 —— 那份实现就是这个 store 的原型，现在改成直接调，行为逐字相同。store 里 `globalThis.localStorage?.` 这个写法也是从它那儿继承的，为的是能在非浏览器环境被导入。
+
+### 与老写法唯一的两处差异：坏数据不再让页面打不开
+
+老写法 `getItem(k) ? JSON.parse(getItem(k)) : d` 有两个真实缺陷，测试里是**证出来的**而不是断言的：
+
+- `getItem` 返回 `"abc"` → **在模块加载期抛异常**，整个页面打不开（`expect(() => legacyDualBlock()).toThrow()`）；
+- 返回 `"null"` → 把 `null` 当阈值用（`expect(legacyDualBlock().valuej1).toBe(null)`）。
+
+新实现 try/catch + `Number.isFinite` 判定，这两种情况回落默认值。**正常值逐字相同 —— 包括 `"0"`**（非空字符串为真，老写法取到 0 而不是默认值，这个 quirk 保留了）。
+
+### 本节的明确边界
+
+- **只收「启动时的初值从哪来」。** 写入侧不动：`Title.jsx` 的滑块 `setItem` 之后走 `pushSitBack(...)` → 各文件的 `sitValue(prop)` 直接改内存绑定，不重读 localStorage。
+- **不动 2206 个读写点，不动 `sitValue` 的真值守卫。**
+- **不改任何块的作用域。**
+- **`carValuePress` 不在这一刀里。** 它是第七个键，只在 `demo/` 9 个文件里出现（各两处：模块级声明 + 函数内重读），形状和这六个一样但主人不同，挂账。
+
+## 2026-08-03 横切共用层（一）：18 份 jet 收成一条阶梯
+
+### 为什么先做这个
+
+上一轮把 `matCol` / `carCol` 合成了 `pointGrid` 的两条预设，但那只解决了「同源组件」。盘点前端渲染方式时冒出来的数字更要紧：**9 种互不相干的渲染机制，只有 2 种有声明式契约**，而「在格子里画一个数字」这件事有 **4 套毫不相干的实现**。
+
+直接去合那 4 套实现是走不通的 —— 它们代码量里将近一半是同一批横切重复件（`jet` / 阈值块 / `layoutData` / 高斯模糊），不先抽掉，合并的 diff 里就分不清哪些是真实差异。所以顺序定成**先抽横切共用层，再合数字渲染器**。共用层这一步的好处是对全部 9 种渲染方式立刻生效，不只服务数字矩阵这一路。
+
+| 横切重复件 | 份数 | 状态 |
+| :--- | ---: | :--- |
+| `function jet(min, max, x)` | 18 | ✅ 本节 |
+| 模块级六键阈值块 + `sitValue` | 51 个文件 / 180 处读取 | 待做 |
+| `layoutData(dataArr)` | 8 | 待做 |
+| `boxesForGauss` / `gaussBlur_2` / `boxBlur_2` | 5 | 待做 |
+
+### 18 份不是同一个函数，是一条阶梯 + 四个出口
+
+按空白与注释归一化后取 md5，18 份分成四组 —— **它们的分支阶梯逐字节相同，差异全在最后的取整与返回形状上**：
+
+| 出口 | 份数 | 返回 |
+| :--- | ---: | :--- |
+| `jet` | 14（util.js 自己 + `demo/` 9 个 + `NumThreeColor` 3 个 + `num/Num` + `foot/Num32DetectLocal`） | `parseInt(255 * r + '')` 整数三元组 |
+| `jetRgba` | 2（`heatmap/canvas.jsx`、`onestep/heatmap.js`） | 不取整，且多一个写死的 `rgba[3] = 1` |
+| `jetRound` | 1（`num/NumWs.jsx`） | `Math.round`，且 `dv === 0` 时返回白 |
+| `jetRgb` | 1（util.js 自己） | 就是那条阶梯，0..1 浮点分量 |
+
+**计划里原本要新建的 `jetUnit` 是多余的** —— `assets/util/util.js` 早就有 `jetRgb`，分支结构与 `jet` 逐字相同，只是不取整。所以最终形态是**已有的 `jetRgb` 当唯一阶梯，上面挂三个薄出口**，没有新增第四个函数。阶梯本体后来因为一条运行时约束搬去了 `assets/util/jetLadder.js`（见下文「阶梯为什么不在 util.js 里」），`util.js` 原样 re-export，对外的导入路径没变。
+
+`num/Num.jsx` 与 `foot/Num32DetectLocal.jsx` 写的是 `parseInt(255 * r)`（少个 `+ ''`），理论上等价 —— 但那是推理不是事实，所以在测试里单列一份基准和 `jet` 一起比。
+
+### 三个出口的差异刻意全部保留
+
+`Math.round(178.5) = 179` 而 `parseInt(178.5) = 178`，差 1/255 肉眼无别。但「本轮界面零变化」的承诺比顺手统一值钱，所以 `jetRound` 保住 `NumWs` 的原样输出，要不要收敛留给以后单独决定。`util.jet.test.js` 里有一条断言守着这个差异：哪天想把 `jetRound` 并回 `jet`，那条断言会失败，提醒那不是无损合并。
+
+### 顺带查出一个既有 bug：`parseInt` 撞上科学计数法
+
+写等价性测试时先断言「三个出口互相最多差 1」，结果失败在 `expected 7 to be less than or equal to 1`。查下去是 14 份 canonical 副本一直存在的缺陷：
+
+```
+x = 49.9999999999993 在 [0, 100] 上 → blue ≈ 2.8e-14
+255 * blue = 7.105427357601002e-12
+parseInt('7.105427357601002e-12') === 7   ← 在 'e' 处停下，取了尾数
+Math.round(7.105427357601002e-12) === 0   ← 正确答案
+```
+
+也就是 `jet` 在四个段界附近会把某个通道输出成 7 而不是 0。现象是黑色里掺一点点蓝，实际看不出来，但确实是错的。**按「界面零变化」的约定没有去修**（修它会同时动 14 处配色，属于「统一取整策略」那件单独的事），改为写一条断言把它钉住并注明是 bug，别让后人以为是设计。
+
+### `as jet` 别名：15 个消费文件的 diff 是 2 行
+
+替换时把导入写成 `import { jetRgba as jet }` / `jetRound as jet`，并把 `jet` 按字母序并进各文件**已有**的 `assets/util/util` 具名导入列表（全仓已有 80 个文件从这里导入，零路径成本）。于是每个文件的改动就是「删掉一个函数块 + 改一行导入」，**所有调用点逐字节不变**。
+
+`onestep/heatmap.js` 是唯一没有任何 `import` 语句的文件（头部是一行巨大的 `export let arr = [...]`），批量脚本的导入锚点在它身上没匹配到，单独插在文件首行。
+
+### 附带查明：`onestep/heatmap.js` 的那次 jet 调用是死的
+
+它的调用点是 `context.fillStyle = \`rgb(${jet(value)})\``，而 `value` 来自 `createCircle(size, value)` —— 全文件唯一的调用处是 `createCircle(options.size)`，**第二个参数从来没传**。于是 `jet(undefined)` 走进 `dv = NaN` 的 else 分支，产出 `rgb(255,NaN,0,1)`：一个非法 CSS 颜色，赋值被 canvas 忽略，圆点用默认黑色画出来。这恰好是这张热力图需要的 —— 它先画黑色 alpha 蒙版，颜色由后面的 `colorize(pixels, gradient)` 上。
+
+所以这处 jet 是死代码。**没有改**：换成 `jetRgba` 之后它继续产出同一个非法字符串，行为一致；真去修它反而会把图改掉。
+
+### jet 成为第 7 条 colormap
+
+`components/displaySystem/colormaps.js` 原来注册了 classic/thermal/viridis/inferno/grayscale/iceFire 六条，**jet 不在其中** —— `classic` 是 `hsl(195 - ratio * 195, 88%, 42% + ratio * 8%)`，和 jet 毫无关系。而 `NumThreeColor1024` / `hand` 的 classic 分支调的恰恰是各自的 `jet()`。也就是说在此之前**jet 只能靠「不选配色」隐式命中，选不到**。
+
+现在按 `classic` 立好的先例补上第七条（公式逐字走 `jetRgb` + `sampleRgb` 孪生函数 + 注释锁死数值），排在既有六条之后 —— 画布配置器的配色下拉直接遍历 `COLORMAPS`，插在中间会让用户的下拉顺序变。
+
+两处有意的决定：
+
+- **配色栏这条通路用 `Math.round`，不是老场景那个 `parseInt`。** 这是新通路，没有观感要保，所以从一开始就用正确的取整，不把上面那个 sci-notation bug 带进来。
+- **`isClassicColormap({ id: 'jet' })` 必须是 `false`。** 显式选 jet 和「没选配色」是两条不同通路：后者还额外走逐实例 `(r, 0.2, 1-r)` 染色。判成 classic 就等于把老展示系统的观感换掉了。
+
+### 后端也有一份配色白名单，只登记前端会让「保存」拒掉 jet
+
+`backend/displaySystems/displaySystemCanvasCatalog.js` 里的 `CANVAS_COLORMAPS` / `CANVAS_COLORMAP_IDS` 是前端 `COLORMAPS` 的**重复清单**，`displaySystemPage.js` 用它做两件事：归一（未知 id 静默回落 `classic`）和校验（未知 id 直接报错）。所以只在前端登记 jet 的话，画布配置器能选到、预览也对，但一按**保存**（`PATCH /api/display-systems/:id/display`）就会被后端判成非法配色。
+
+于是同步在后端目录里追加同一条，并把 `configValidation.test.js` 里那句期望的错误串（两处：`display.canvas.colormap.id` 与 `display.chartAppearance.colormap.id`）更新成含 `jet` 的版本。**两份清单的顺序必须一致** —— 零件栏按后端目录渲染下拉。这份重复本身是笔账，前后端共享一份配色定义是以后的事。
+
+### 阶梯为什么不在 util.js 里
+
+`colormaps.js` 一开始是直接 `import { jetRgb } from '../../assets/util/util'` 的，后端测试当场红了：
+
+```
+ERR_MODULE_NOT_FOUND: Cannot find module 'E:\shroom1\client\src\assets\util\util'
+  imported from ...\colormaps.js
+```
+
+原因是 `backend/tests/sdk/displayProfileRuntime.test.js` 用 `await import(pathToFileURL(modulePath).href)` **裸 Node ESM** 加载前端模块，没有 Vite 的解析器。这带来两条硬约束，`util.js` 两条都不满足：
+
+1. **导入必须写全 `.js` 扩展名**（Node ESM 不做扩展名补全），而 `util.js` 内部写的是 `from "./color"` / `from "./value"`。这也正是 `colormaps.js` / `displayProfileRuntime.js` / `displayDraftState.js` / `manifestSceneAdapter.js` 这一圈文件的导入本来就都带 `.js` 的原因 —— 之前没写下来，所以踩了。
+2. **不能在模块顶层读 `localStorage`**，而 `util.js` 顶层就有（`initValue`），裸 Node 下直接抛。
+
+三条出路里选了第三条：① 让 `colormaps.js` 抄一份公式 —— 那就是第 19 份拷贝，正好是本节要消灭的东西；② 改造 `util.js` 去满足两条约束 —— 动 80 个消费文件的公共依赖，风险与收益不成比例；③ **把阶梯单独放进零依赖、零副作用的 `assets/util/jetLadder.js`**，`util.js` 与 `colormaps.js` 各自 import 它。
+
+`util.js` 里于是只剩 `export { jetRgb };` 一行 re-export，对外接口不变。`util.jet.test.js` 补了一条 `expect(jetRgb).toBe(jetRgbFromLadder)` —— 防的是有人图省事在 `util.js` 里再写一份函数体：那样「全仓唯一一条阶梯」又变成两条，而在没有这条断言时**不会有任何测试失败**。
+
+### 本节的明确边界
+
+- 只碰 `jet` / `jetRgb` 两个函数。util.js 里另外 7 个 jet 家族函数（`jetWhite` / `jetWhite1` 是**不同的**阶梯，断点在 0.01/0.3/0.8；`jetWhite2/3/4` / `jetgGrey` / `jetWhite2Back` 是查 `rainbowColors` / `garyColors` 之类的 LUT）一律不动。
+- 不统一三个出口的取整差异，不修 `parseInt` 的 sci-notation bug。
+- 不改用户可见的任何文案。
+
+## 2026-07-31 渲染器插件与三条通道
+
+### 起点：一个写完了但没接线的渲染器
+
+`client/src/renderers/` 这套插件机制（`registry.js` / `RendererHost.jsx` / `contract.js` / `pointGrid/`）早就写完，`pointGrid` 连逐帧一致性测试（`pointGrid/pipeline.test.js`）都有，但 `grep -rn pointGrid` 在生产代码里一处都搜不到 —— `Home.jsx` 渲染的仍然是 `<MatCol>` 和 `<Carcol>`。`registry.js` 的文件头自己写着它为什么存在：Home 静态导入了几十个场景组件，全部打进同一个 chunk，而运行时只用得到其中一个。
+
+所以这一轮不是设计新架构，是**把停在半路的那条路走完**。核查出的数字：
+
+| 事实 | 改前 | 改后 |
+| :--- | ---: | ---: |
+| `components/three/` 场景组件 | 45 个 / 47,661 行 | 38 个 |
+| `Home.jsx` 静态导入的场景组件 | 35 | 33 |
+| `Home.jsx` 行数 | 5,655 | ~5,340 |
+| 同一束 7 个 prop 在 render 里重复 | 60 处 | 0 |
+| render 里的 `.bind(this)` | 125 处 | 0 |
+| `build/assets/Home-*.js` | 978 KB | 974 KB + 独立 12 KB 懒加载块 |
+
+### `ref.current` 的耦合到底在哪
+
+「`current` 感觉不够组件化、耦合性太强」这个判断是对的，但**「改成 props」这个直接解法会造成性能倒退**。`Home` 每帧不 `setState`：数据走两条命令式 ref 通道（`this.com` 给 3D 场景、`this.data` 给侧栏），`CanvasCom.shouldComponentUpdate`（**定义在 `Home.jsx` 里，没有独立的 `CanvasCom.jsx`**）只放行几个**稳定字符串**键，其余 prop 一律挡住。这堵墙是故意砌的 —— 它保证 30–100Hz 的数据不会触发 React 对 5,000 多行 render 树的调和。把帧数据改成 prop 就是正面撞它。
+
+真正的耦合不是「用了 ref」，而是**Home 必须知道每个场景组件的私有方法名和私有数据形状**：
+
+```js
+this.com.current?.changeWsData147([...newArr])            // 映射点
+this.com.current?.changeWsData256([...rawData])           // 原始 16×16
+this.com.current?.changeWsDatafinger(newArr)              // 手指
+this.com.current?.changeWsData147R({ left: [...newArr] }) // 左右手
+```
+
+**把依赖方向反过来就解耦了**：Home 只发布一帧规范数据，渲染器自己订阅、自己挑自己那条通道。数据在物理上仍然绕开 React，但 Home 不再需要知道 `changeWsData147` 这个名字存在。
+
+### 三条通道，按性质分流
+
+145 个 `this.com.current.xxx()` 调用点按语义分成三类，各走各的路。**明说：不是 145 处都能消灭。**
+
+| 类别 | 处数 | 走哪条 | 落点 |
+| :--- | ---: | :--- | :--- |
+| **每帧数据**（`sitData` / `changeWsData147` / `changeWsData256` / `changeWsDatafinger` / `changeWsData147R` …） | 72 | **帧总线** | `runtime/frameBus.js` + `RendererHost` 的 `frameChannel` prop |
+| **视图状态**（`changeGroupRotate` / `setFrontView` / `changeSelectFlag` / `sitValue` …） | 41 | **props** | `CanvasCom` 新增 `viewKey` 稳定字符串键 |
+| **真命令**（`calibration` / `handZero` / `resetHand` / `handL` …） | 18 | **保留 ref** | 但收成 `descriptor.methods` 声明并校验过的窄契约 |
+
+「现在归零标定」是一次性副作用，不是状态。硬塞进 props 要靠 `nonce` 递增之类的花招，比 ref 更难懂 —— 这 18 处该留就留，只是暴露面从 25 个各叫各名的方法收成声明过的契约。
+
+### 帧总线为什么不进 React state
+
+`runtime/frameBus.js` 照抄 `components/aside/formulaChartStore.js` 已有的惯用法：`Set` 存 listener、`notify` 时逐个 try/catch，一个订阅者抛异常不带塌其余。两点专门的设计：
+
+- **订阅时同步补发 `lastFrame`。** 渲染器是懒加载的，挂上来那一刻上一帧已经发完了；不补发的话画面要空白到下一帧才出来。补发过程中抛的异常被吞掉，保证订阅本身仍然注册成功。
+- **总线本身不是 React state，一帧都不触发重渲染。** `RendererHost` 订到帧之后直接调渲染器的命令式方法，和旧的 ref 推送性能等价，区别只在依赖方向。
+
+配套的 `runtime/useSceneFrame.js` 把 handler 存在 ref 里，所以每帧换 handler 也不会重订阅。**刻意不叫 `useFrame`** —— 避开 react-three-fiber 的同名 API。
+
+### 规范帧：900 行阶梯其实是三份拷贝
+
+`runtime/sceneFrame.js` 收的是 `Home.jsx` ws handler 里那段约 900 行的 `if (matrixName == ...)` 阶梯。逐段读下来它是**同一条阶梯的三份拷贝**（单手 / 左手 / 右手），每份里四个 `numMatrixFlag` 分支又只有注释不同 —— 真正不同的整形只有 `padThumbGap`（拇指位补三个 0）和 `toRaw256`（取原始 16×16）两种，全是纯函数。`sceneFrame.test.js` 的每一组都先把旧的内联代码**逐字抄一遍**当基准再比对，抄的时候不做任何顺手优化，否则比的就不是等价性而是对旧代码的理解了。
+
+两处**有意偏离**旧实现，都写了测试钉住：
+
+1. `padThumbGap` 返回新数组、不改入参。旧代码原地改 `newArr`，而那个数组在补零**之前**已经作为 hand 通道推出去了 —— 渲染器留了引用就会读到补零后的数据。
+2. `toRaw256` 给 `JSON.parse` 包了 try/catch。旧代码没有，一帧坏数据会打断整个 `onmessage`。
+
+**不收的东西：遥操的五点折弯量与标定不在规范帧里。** 那条链算的是机械手要弯多少度、不是要画什么，还带着跨帧累积状态（`bendArr[i] += (value - bendArr[i]) / 3`）。混进来会让「帧」同时意味着两件事，它属于命令通道。
+
+### `descriptor.methods` 从注释变成契约
+
+`builtins.js` 里的 `methods: [...]` 字段一直存在但从来没人校验 —— 它是注释。`RendererHost.auditRendererContract` 给它加上牙齿：**声明了却没实现** → `console.error`（这是最难查的一类 bug：宿主侧全是 `?.` 可选链，方法名对不上只会静默 no-op，现象是"这个展示形式没数据"）；**实现了却没声明** → `console.warn`，说明契约在漂移。
+
+**刻意不做的事：不把未声明的方法挡掉。** 挡掉会引入一个新的静默失败模式（descriptor 漏写一行，功能就没了），比现在更难查。只报不挡，每个渲染器只报一次不刷屏。
+
+### 绞杀者模式：两条路并存是必要状态
+
+`publishFrame(buildSceneFrame(...))` 插在原有的 `sitTypeEvent[matrixName]({...})` **之后、和它并行，不是替代**。已迁到 `renderers/` 的渲染器传 `frameChannel` 就能自己订到帧；还留在 `components/three/` 的场景组件继续走 `sitTypeEvent` → `util.js` → `this.com.current.xxx()` 那条老路。一组一组往总线上搬，每搬完一组就从老路上摘一段，不需要一次性切换。`componentDidUpdate` 里换 `matrixName` 时 `clearLastFrame()` —— 不丢的话下一个渲染器挂上来会先收到一帧属于上一台设备的数据。
+
+`frameChannel` 是**显式 opt-in** 而不是「有 `values` 就自动订阅」，因为前者可 grep、后者是隐式行为。
+
+### 同源组件合并：`matCol` 与 `carCol` 是同一个渲染器的两条预设
+
+这两个文件逐行 diff 只差 `sit.num1`（16 / 9）与 `sit.order`（2 / 4）两个数字。所以它们不是两个渲染器，是 `pointGrid` 的两条预设，挂在 `descriptor.presets` 上（`LEGACY_PRESETS`）。原文件已删除，历史在 git 里。`Home.jsx` 只 import `pointGrid/params.js`（纯函数、无 three.js），渲染器本体仍由 `RendererHost` 懒加载，不进 Home 的 chunk。
+
+`PointGridRenderer.jsx` 的文件头写着这套三步配方，后续每一组照办：写死的常量参数化进 `params` → 模块级状态收进 `stateRef`（文件头明说模块级状态正是复制粘贴的根因）→ 补上真正的卸载清理。**帧运算逐字搬运，等价性由 `pipeline.test.js` 证完之前不做任何优化。**
+
+### 本轮的明确边界
+
+- **界面与交互零变化。** 这是结构改造，用户看得出区别就是 bug。
+- **不引入 react-three-fiber。** 47,661 行重写不该在任何一次范围内。
+- **不动 `this.data`（侧栏通道）**、**不动 `page/home/util.js`**（5,564 行 / 23 个 matrixName 分支，本轮只读不改）。
+- **数字精灵组、hand 组、car/bed/box 组约 32 个文件本轮未合并**，用同一份配方跟进。`hand0205` 与 `hand0205 copy` 已漂移 509/1119 行，合并前必须逐行比对并当面确认哪份是对的。
+- **`Home.jsx` 里嵌套三元链换 `matrixName → {rendererId, params}` 查找表本轮未做** —— 它是 Home 剩下最大的一处重构，应当单独一步。
+
+## 2026-07-31 草稿层与三个动作（撤销 / 保存 / 另存为）
+
+### 缺的不是层次，是动作
+
+零件栏做到上一轮，用户能拖出很多东西，却回不去也带不走：`displayProfileStorage.js` 只有读和写、**没有 clear**，配置器里也没有任何「恢复默认」入口 —— 拖坏了只能一个零件一个零件拖回去，或者去开发者工具删 localStorage。另一头更要紧：拖出来的成果全在 localStorage 里，**不在展示系统目录里**，换台电脑就没了，交给客户也带不走。而 `display-systems/<id>/` 本来就是那个「可传递的文件夹 = 一个新的小展示模块」。
+
+层次本来就是对的。解析优先级 `manifest 的 display.canvas` ＜ `profile.canvas` ＜ 用户偏好 `selection.canvas` 是逐字段合并，用户偏好**盖住** manifest 但没有**改掉** manifest。所以这一轮只加动作，不动解析：
+
+| | 存在哪 | 谁写 |
+| :--- | :--- | :--- |
+| **基线** | 文件夹里的 `display-system.json` 的 `display` 段 | 保存 / 另存为 |
+| **草稿** | `display-profile:<id>` + `shroom.formulaCharts.v1.<matrixName>` 两个 localStorage 键 | 拖零件 |
+
+零件栏上方多一条状态带，**只在有未保存改动时出现**：`● 有未保存的改动　撤销 / 保存 / 另存为`。
+
+### 脏判定看解析结果，不看键在不在
+
+`displayDraftState.js` 是一组纯函数（不碰 DOM、不碰 localStorage）。`describeDisplayDraft` 把同一个 `resolveDisplayProfile` 跑两遍 —— 一遍传只含 `profileId`/`rendererId`/`algorithmId` 的 `viewOnly` 得到基线，一遍传完整 selection 得到当前 —— 再比较解析结果。**不能看「localStorage 键在不在」**：用户把配色拖走又拖回原值，键在但语义没变，那就不该一直亮着「有未保存的改动」。基线复用同一条解析通路，所以这里没有第二套解析逻辑，也不会和真正的渲染通路漂移。
+
+`changes` 直接就是确认框的文案（`配色：热成像 → 经典蓝红` / `移除叠加层：网格线` / `恢复图表卡片：原始数据总和`）。「移除」是撤掉用户加的，「恢复」是把 manifest 声明过、被用户关掉的那份放回来 —— 撤销是**回到基线**而不是清空。
+
+### 撤销绝不整键删除
+
+`display-profile:<id>` 里除了 `canvas` / `charts` 还有 `profileId` / `rendererId` / `algorithmId`，那是「我在看哪个模式」，不是「它长什么样」。整键 `removeItem` 会把用户的视图也切走 —— 撤销一个配色不该有这种副作用。所以 `clearDisplayDraftSelection` 只删两个字段，再由 `persistDisplaySelection(..., { replace: true })` 整体覆盖写回（默认的合并语义删不掉字段）。图表卡片走 `resetFormulaCharts(matrixName, page.chartCards)`，同样是**重置到基线**而不是清空。
+
+撤销对谁都成立，包括那约 55 个写死的老展示系统 —— 它们没有文件夹，没东西可写回也没东西可复制，所以**只有撤销**。而撤销正是用户最急的那半件事。
+
+### 保存绝不走 Builder 的 `save()`
+
+`displaySystemWorkspaceService.save()` 内嵌了 Builder 的单传感器向导假设：强制 `schemaVersion: 2`、重写 `sensor.matrix` 和 `protocol.decoding`、把 `files` 压成扁平路径、重建 `algorithm` 段。拿一份 v3 多传感器 manifest（`sensors[]` + `cushion/line-order.json` 这种嵌套路径）过一遍它，只为了加一个配色，**会把 manifest 改坏**。所以另开一条只动 `display` 段的窄通路 `saveDisplaySection`：读原文 → 只合并 `canvas` / `chartAppearance` / `chartCards` 三段 → 原子写回，其余字段逐字保留（测试里有一份手写的 v3 manifest 专门守这件事）。
+
+三段的合并语义是 **`undefined` = 这次不改，`null` = 删掉**。所以前端 `buildDisplaySectionPayload` 在没有卡片时给的是 `[]`（清空）而不是 `undefined`（不动）。
+
+**先校验、后归一。** 合并完先跑 `validateDisplayConfig`，让显式写错的东西（比如往 `chartAppearance.overlays` 里写 `legend`）报错而不是被静默丢弃；通过之后再对三段做归一，把 `"iceFire"` 这种字符串简写展开成 `{ id, reverse }` 的标准形。落盘的是归一后的形态 —— 这个文件是给做二开的人读的，磁盘上就该是规范写法。唯一的例外是 **`canvas.widgets` 要显式删掉**：它缺省的含义是「跟随 `display.widgets`」，解析时被填成了当时那份清单，照原样写回去就冻成一份写死的显式清单，以后改 `display.widgets` 画布反而跟不上了。前端打包请求体和后端归一两处**都**做了这一步。
+
+**保存 = 写基线 + 清草稿**，所以「脏」不会在保存之后永远为真；再点撤销回到的是**刚保存的样子**，不是出厂样子。**保存失败时绝不清草稿** —— 后端没起来、目录只读，用户的改动凭空消失比保存失败严重得多。
+
+### 另存为 = 目录逐文件复制
+
+`duplicate` 递归复制整个源目录（必须递归，v3 有 `cushion/` 这类子目录）到 `writableRoot/<newId>/`，只重写 manifest 的 `id` / `name` / `metadata` / `display` 段。不做 JSON 往返重写，于是 v1/v2/v3、多传感器子目录、`algorithm.js` / `algorithm.py`、`assets/` 全都自动正确 —— 语义上就是用户说的那句「把这个文件夹复制一份传出去」。
+
+`metadata.origin` 必须**显式改成 `'user'`**。`classifyDisplaySystemAccess` 把它当最高优先级的判据，自带系统那份写着 `'system'`，照抄过来的话副本明明躺在可写目录里也会被判成不可编辑，用户再也保存不了第二次。同时记一条 `metadata.derivedFrom` 留住来源。
+
+**两个动作的权限方向不同，别写反：**
+
+| | 检查什么 | 自带展示系统 |
+| :--- | :--- | :--- |
+| `saveDisplaySection` | `existing.editable === true` | 拒绝（`DISPLAY_SYSTEM_READ_ONLY`） |
+| `duplicate` | 目标 id 有没有被占 | **允许** —— 另存为是它唯一的保存出路 |
+
+另存为成功后**留在原地**，只弹一句「已另存为「XXX」，可在顶部传感器菜单里切换过去」。不做 `sensor.switch`：现场正在采数据时突然切展示系统会中断串口和采集。新定义就地 `registerRuntimeDisplayDefinition` 并派发 `shroom-display-systems-updated`（`Title.jsx` 已在监听），顶部菜单立刻多一项。
+
+### manifest 新增的两个字段
+
+保存要落地的其实是三样东西，而 manifest 原来只有 `display.canvas` 一个对应字段：
+
+| 草稿里的东西 | 存在哪 | manifest 字段 |
+| :--- | :--- | :--- |
+| 画布外观 | `selection.canvas` | `display.canvas`（已有） |
+| 侧栏曲线外观 | `selection.charts` | `display.chartAppearance`（新增） |
+| 图表卡片清单 | `shroom.formulaCharts.v1.<matrixName>` | `display.chartCards`（新增） |
+
+**刻意不叫 `display.charts`。** 那个名字对得上 `selection.charts`（外观），却会被直觉理解成「卡片清单」，是个必踩的坑。
+
+`resolveChartAppearance` 因此从 `(selection)` 改成 `(model, selection)`，manifest 层在下、偏好层在上逐字段合并，和 `canvas` 一模一样的写法。卡片是**替换语义而不是合并** —— 一条条带公式的定义合并没有意义：`hasFormulaCharts()` 为假（键根本不存在）才用 `page.chartCards` 播种，为真就用本机那份，所以用户主动删空六张卡片不会在下次进页面时被重新播回来。
+
+后端**不校验公式本身**：AST 解析器 `formulaChartRuntime.js` 是前端 ESM 模块，在后端复制一份会立刻变成两份漂移的白名单。后端只检查「是非空字符串」，真正的关卡是绘制时的 `compileFormulaChartExpression`（坏公式返回 0）。
+
+### 两条新路由
+
+| 路由 | 用途 |
+| :--- | :--- |
+| `PATCH /api/display-systems/:id/display` | 保存 —— 只写 `display` 段 |
+| `POST /api/display-systems/:id/duplicate` | 另存为 —— 复制目录并写 `display` 段 |
+
+错误码映射抽成 `respondDisplaySystemWriteError` 三条路由共用：`DISPLAY_SYSTEM_EXISTS` → **409**，`DISPLAY_SYSTEM_READ_ONLY` → **403**，其余 → 400。只读不是 400 —— 请求本身没问题，是目标不许写，前端要靠这个区别决定提示语（「这是自带展示系统，请用另存为」而不是「参数有误」）。前端客户端在 `client/src/services/displaySystemApi.js`，`DisplaySystemApiError` 带上 `code` 供调用方分支。
+
+### 这也是接 AI 的前置条件
+
+一个人手拖零件一次改一个，拖坏了自己知道哪步坏的；AI 一句话改十个，出问题时用户根本不知道刚才发生了什么。没有草稿层和撤销，AI 生成展示配置这件事不能上。
+
+> 状态带由 prop 驱动是否出现：没传 `onRevert` 就一行都不渲染（Builder 里配置器的 value 本身就是 manifest 草稿，状态带在那儿没有意义）；没传 `onSave` 就不画保存按钮，自带系统因此天然只有「撤销 / 另存为」。这条纪律和既有的 `onChartWidgetAdd` 完全一致。
+
+## 2026-07-29 主界面接入画布零件栏
+
+### 为什么要补这一刀
+
+上一轮把零件栏接在了 `ManifestDisplayRenderer` 上，而那个组件在 2026-07-23 的「配置器与运行展示解耦」里已经从 `Home.jsx` 摘掉、**当前没有任何地方挂载**。主界面真正在渲染 manifest 帧的是 `buildManifestSceneFrame` → `NumThreeColor1024`（Home 里叫 `Fast1024`）这条 Three.js 通路，所以零件栏虽然写完了、测试也过了，用户在主界面上根本看不到。这一轮把它接进主界面实际在跑的那条链。
+
+### overlay 形态：固定在场景底部
+
+`.canvasNum` 是 `height: 100vh`，3D 场景占满视口，零件栏不能像 Builder 那样堆在画布下方（会被推到屏幕外）。`DisplayCanvasConfigurator` 因此新增 `variant` 形态：
+
+- `inline`（缺省，Builder 用）—— 画布作为 `children` 排在零件栏上方，行为与上一轮完全一致。
+- `overlay`（主界面用）—— 零件栏 `position: fixed` 贴在视口底部浮在场景上，带一个收起/展开按钮；拖放区是一层 `inset: 0` 的全视口透明层。**默认收起**，因为展开的栏会盖住场景左下角的最大值读数（`.maxNum` 是 `bottom: 5%`），平时只在右下角留一个入口按钮。
+
+那层全视口拖放层**只在拖拽进行中才挂载** —— 常驻会吞掉整个界面的点击。组件在 `document` 上听 `dragstart` / `dragend` / `drop`（零件方块的拖拽事件会冒泡到这里）来开关它。
+
+### 3D 场景换配色
+
+场景的颜色来自 `createDigitSpriteSheetWithJet` 生成的**数字精灵图**：第 `i` 格代表数值 `i`，背景是 `jet()` 采样、黑色描边、白色数字，每个实例用 `uvOffset` 挑格子，再在片元着色器里乘上 `instanceColor`。所以换配色要同时改两处，而且精灵图只在挂载时生成一次：
+
+- **精灵图格子** —— `classic` 与不传 `colormap` 走原来的 `jet(0, colorMax, value)`；其它配色走 `sampleColormapRgb`（`colormaps.js` 新增的数值三元组通路，与既有 CSS 字符串通路同源，`colormaps.test.js` 断言两者给出同一个颜色）。
+- **逐实例 tint** —— `classic` 保留原来的 `(r, 0.2, 1-r)` 渐变叠加；其它配色恒为白色 `(1,1,1)`，否则会把用户挑的色带压暗成另一条。因为是常量，`colorArray` 挂载时填一次，animate 循环里不再逐帧重算。
+
+「重新生成精灵图」靠 `CanvasCom` 已有的 `variantKey` 机制：Home 把配色 id 与 `reverse` 并进 `variantKey`，值一变整场重建，不去 628 行的场景组件里做外科手术式的纹理替换。老场景（非 manifest）两项都为空，`variantKey` 仍是 `undefined`，重建时机与改动前一致。
+
+### 偏好读写与 Home 是 class 组件
+
+`Home` 是 class 组件用不了 hook，所以 `localStorage` 读写抽成 `displayProfileStorage.js`（`readDisplaySelection` / `writeDisplaySelection` / `displaySelectionStorageKey`），`ManifestDisplayRenderer` 一并改用它 —— 两处共用一段逻辑，键名和容错行为不会只改一处。Home 在构造时就把偏好读出来（避免首帧按 `classic` 渲染完再因偏好不同重建一次场景），换展示系统时在 `componentDidUpdate` 里重载。存储 id 取 `displaySystemId → definition.type → matrixName`，所以每个展示系统一个键、配色互不串味（见下面「补」一节）。
+
+解析链与 `ManifestDisplayRenderer` 完全相同（`buildDisplayProfileModel` + `resolveDisplayProfile`），保证配置器里预览到的效果和主界面一致。前端 `displays/registry.js` 的 `definition.page` 补上 `canvas: metadata.canvas || null` —— 之前没有转发，manifest 声明的画布默认值到不了前端。
+
+### 主界面上的零件栏范围（刻意收窄）
+
+- **类别** —— 只列「配色方案」和「叠加层」，通过新增的 `categoryIds` 收窄。3D 场景只有一块画布、没有 widget 网格，列出「画布组件」会让用户拖进一张没人渲染的卡片。
+- **叠加层** —— 只列「图例」，通过新增的 `overlayIds` 收窄。图例是零件栏自己画在 DOM 上的，与是哪个场景组件无关。其余几个落不了地：`valueLabels` 和 `gridLines` 是数字精灵图本身画上去的、一直都在（`CanvasHand` 是点云，压根没有格子），`axes` 在 3D 里没有对应物，`peakMarker` 需要改逐帧循环。这四个仍是二维 widget（Builder / `ManifestDisplayRenderer`）那条链的能力。两个收窄参数都在全部过滤掉时退回完整清单，坏配置不会让某一类变成空栏。
+
+### 补：老场景（CanvasHand）也能换配色
+
+上面那一刀只覆盖了 `numMatrixFlag == "numoriginal"` 那条 `Fast1024` 分支。用户在 `32*32(检测点)` + `3D模型`（`matrixName: handSinglePoint`，`numMatrixFlag: normal`）这个页面上看不到零件栏 —— 它走的是 legacy 的 `CanvasHand`（`components/three/hand.jsx`），既不是 manifest 系统也不是 `Fast1024`。这一节把那条链也接上。
+
+**两类场景换色的代价完全不同**，所以用两个不同的 prop 驱动，而不是一个：
+
+| | `Fast1024`（`NumThreeColor1024`） | `CanvasHand`（`hand.jsx`） |
+| :--- | :--- | :--- |
+| 颜色来源 | 挂载时**烘焙**的数字精灵图 + 逐实例 tint | 每帧在渲染循环里 `jet(0, valuej1, smoothBig[l])` 现算 |
+| 换色代价 | 必须重新生成精灵图 → **整场重建** | 改一个值即可 → **原地生效** |
+| 驱动 prop | `variantKey`（进 `childBaseKey`，换 key 重挂） | `colormapKey`（只放行一次 re-render，key 不变） |
+| 相机视角 | 重建后回到初始视角 | **保留** |
+
+`CanvasCom.shouldComponentUpdate` 原来只比 `matrixName` / `local` / `variantKey`，任何新 prop 都到不了子组件 —— 这是这条链的实际拦路虎。现在多比一个 `colormapKey`。两个 key **都必须是稳定字符串**：`resolveDisplayProfile` 每次返回的都是新对象，直接比对象会让这个 `shouldComponentUpdate` 形同虚设。`classic`（= 改动前的样子）一律不进 key，于是没动过配色的展示系统拿到的 `variantKey` 与改动前逐字一致，重建时机一点没变。
+
+`hand.jsx` 侧：逐帧的 `render` 闭包是挂载那一次建立的（`useEffect` 依赖为 `[]`），拿不到新 props，所以用 `colormapRef` 兜住当前配色 —— ref 对象跨渲染稳定，旧闭包读到的是新值。是否 `classic` 在每帧的循环**外**判断一次，循环内只走一个三元分支，不给 60fps × 4096 点的循环加负担。**框选外的灰化 `jetgGrey` 不动** —— 那是「弱化」而不是数据色带，跟着换色就分不出选区内外了。
+
+「什么算 classic」这条规则收进 `colormaps.js` 的 `isClassicColormap`，两个场景组件和 Home 共用一份，不各写一遍 `id === 'classic'`。它把 `{id:'classic', reverse:true}` 也判成 classic —— 3D 场景的 classic 走各自原有的 `jet()`，本来就没有 reverse 这一说，判成非 classic 会让它掉进色标采样、观感当场变掉。
+
+**现在哪些页面有零件栏**（`renderCanvasRail()` 的 5 个挂载点）：
+
+| 分支 | 场景组件 |
+| :--- | :--- |
+| `numMatrixFlag == "numoriginal"` 且 manifest / `hand` / `handSinglePoint` / MINZHEN / `smallBed` / `smallBed12B` | `Fast1024` |
+| `hand` / `handSinglePoint` / `handBlue` / `sit` | `CanvasHand` |
+| `normal` | `CanvasHand` |
+| `sitCol` | `CanvasHand` |
+| `petCare` / `petCareMini` | `CanvasHand` |
+
+挂载点**只加在场景组件真的认 `colormap` 的分支上** —— 摆一排拖上去没反应的方块比没有零件栏更糟。其余约 50 个 legacy scene 组件（`Box100`、`MatCol`、`CanvasnewHand`、`SmallBed` 等）各有自己的上色写法，要接零件栏得逐个改，本轮没做。
+
+顺带把两处判空去掉：`buildDisplayProfileModel(undefined)` 本来就返回全默认（`classic` + 无叠加层），所以 `canvasProfileModel` / `canvasProfile` 对任何展示系统都成立，不必再用 `source === 'manifest'` 把老场景挡在外面。存储 id 多一层 `matrixName` 兜底，因为 `normal` 这类连 `displays/registry.js` 的注册表条目都没有，原来会退化成共享的 `unknown` 键。
+
+### 补：侧栏压力曲线也能拖零件
+
+用户接着提出「图表这块应该也需要这样的」。这里的图表是侧栏 `Aside` 的 **Pressure Data / Pressure Area** 两条曲线（另有一条 `myChart3`，它的 `<canvas>` 在 JSX 里已经不存在，只剩绘制代码，本轮不管）。它们全部经过**同一个** `drawChart({ctx, arr, max, canvas, index, color, normalize})`：`quadraticCurveTo` 平滑折线 + `strokeStyle = color` + `lineWidth = 2`，没有网格、刻度、标记。`FormulaChartPanel` 的自定义公式图是另一条 SVG 通路，有自己的颜色表单，不在本轮范围内。
+
+**图表和画布是两块独立表面。** 换压力图的配色不该顺手把侧栏曲线也换掉，所以偏好分成 `selection.canvas` 和 `selection.charts` 两个字段，存在同一个 `display-profile:<id>` 键里。`resolveChartAppearance(selection)` 复用 `normalizeColormap` / `normalizeOverlays`，因此「归一丢弃坏值」的纪律两块表面共用一份。返回值刻意和画布配置同构（多一个空的 `widgets`），能直接喂给零件栏，不必再写一套零件应用逻辑。
+
+manifest 目前**没有**声明图表默认外观的字段，所以图表只有「用户偏好」一层，缺省就是改动前的样子。
+
+**一条零件栏，两块表面。** 不新开一条栏 —— overlay 形态的栏是右下角固定入口，两条会打架。`PART_CATEGORIES` 增加 `chartColormap` / `chartOverlay` 两类，零件带 `chart` 前缀的 kind；`partSurface(part)` 决定它落到哪个 value 上，`applySurfacePart` / `isSurfacePartActive` 把前缀去掉后复用既有的 `applyCanvasPart` / `isCanvasPartActive` —— 两块表面的零件语义本来就一样（配色是替换、叠加层是开关），不该有两套。配置器新增 `chartValue` / `onChartChange` / `chartOverlayIds` 三个 prop；不传 `chartOverlayIds` 就一个图表零件都不列，`PartRail` 也会把零件为空的类别按钮隐掉，避免点进去是一片空白。
+
+**曲线怎么换色**（`components/aside/chartAppearance.js`）：
+
+| 叠加层 | 曲线上的样子 |
+| :--- | :--- |
+| `gridLines` | 4 横 6 竖的浅色网格，画在曲线**之前** |
+| `axes` | 左上角标最大值、左下角标最小值 |
+| `peakMarker` | 峰值点一个实心点 + 一个描边环 |
+| `valueLabels` | 右上角标末值 |
+| `legend` | **不列** —— 300×150 的画布放不下色带，画上去只会盖住曲线 |
+
+配色：`classic`（含没选过）继续用公式自己那个纯色，`resolveChartStroke` 连 `createLinearGradient` 都不调，观感逐像素不变；其它配色换成**纵向**渐变（`createLinearGradient(0, height, 0, 0)`），因为曲线的高度就是压力大小，低在下高在上才和压力图的色带含义对齐。峰值标记的横坐标必须沿用 `drawChart` 的 `gap * (i + 1)` 排布，算错就飘到曲线外面去了。所有叠加层都用 `save()` / `restore()` 包住，否则样式会泄给它后面那条虚线游标。
+
+**props 怎么到得了 Aside。** `Aside` 外面同样包着 `CanvasCom`，`shouldComponentUpdate` 会拦掉一切 re-render，所以增比一个稳定字符串 `chartKey`（配色 id + reverse + 叠加层拼成）。它**不进 `childBaseKey`** —— `Aside` 持有全部实时读数，重挂等于把侧栏清空。曲线本来只在收到数据时才重画，暂停或回放停帧时换零件会看不出变化，所以 `componentDidUpdate` 比较 `chartAppearance` 的对象身份，变了就用 `_pendingChart` / `_pendingArea` 缓存立刻重画一次。
+
+> 图表零件跟着 `renderCanvasRail()` 的 5 个挂载点走，所以只有上面那张表里的页面能拖。侧栏在几乎所有展示系统上都在，但零件栏不在 —— 把栏挂到 `Aside` 那一层能覆盖全部页面，代价是要把 5 条渲染分支的条件复制成一个判定式（判断该页的场景组件认不认 `colormap`），容易和分支本身漂移。本轮没做。
+
+### 补：图表卡片本身也是零件
+
+上一节做的是「给已有的两条曲线换皮」。用户接着说的是另一件事：
+
+> 我想的是这个图表模块 一拖动可以直接在页面上去展示 跟 Pressure Area 并列
+
+也就是拖一个零件出来**页面上真的多一张图表**，而且这张图在侧栏里和 Pressure Area 是对等的一张大卡片。这才是 neal.fun 那个交互的核心动作。
+
+**没有新造图表系统。** 这件事九成的能力已经在 `FormulaChartPanel` 里跑着了（新建 / 编辑 / 删除 / 上限 6 张 / 按 `matrixName` 本机持久化 / 安全公式编译 / 逐帧求值），只是入口是一个 `+` 号弹窗。这一轮加的是**一个拖放入口和一套大卡片长相**：零件用 `formulaChartTemplates.js` 里已有的 6 个模板（它们本来就带中文名、说明和缩略曲线点），新卡片就是一条普通的公式图表定义，只多一个 `templateId` 字段。
+
+**`chartWidget` 是第三块表面。** 配色和叠加层是**纯值变换**，写的是 `display-profile:<id>`；而加一张图表是**写另一个 localStorage 键**（`shroom.formulaCharts.v1.<matrixName>`）。硬塞进 `selection.charts.widgets` 会造出两套真相，所以 `partSurface(part)` 多返回一个 `'chartWidget'`，`applySurfacePart` / `isSurfacePartActive` 遇到它**原样返回 / 返回 false**，由配置器交给 `onChartWidgetAdd` 回调。上面两块表面因此一行没改。
+
+**清单下沉成一个 store**（`components/aside/formulaChartStore.js`）。零件栏在 `Home` 里（要高亮）、卡片画在 `Aside` 上（要实时曲线）、编辑弹窗在 `FormulaChartPanel` 里，三处要看同一份清单，中间还隔着 `CanvasCom.shouldComponentUpdate` 那道闸。所以这个键只有一个主人，读写走它，外加一个模块级 `Set` 做 `subscribe` —— 谁改了谁通知。`Home` 和 `Aside` **各自直接订阅 store**，不靠 props 穿闸；`Aside` 的构造函数是 `super()` 不带 props，所以首次加载放在 `componentDidMount`。容错沿用 `displayProfileStorage.js` 的纪律：读坏了返回空数组，写失败只丢持久化。
+
+**加是幂等的，删走卡片。** 拖一个已经在侧栏的零件 = 一条 `message.info`，什么都不做。理由不是对称性而是：用户可能已经进弹窗改过这张图的公式和名字，「再拖一次当删除」等于静默毁掉他的编辑。删除只有两个明确入口 —— 卡片上的 Popconfirm 删除按钮，以及把卡片拖到底部零件栏上（`.canvas-overlay-bar` 兼作回收区，收 `{kind:'placedChartWidget', id}`）。那个 drop 处理器**只在真的删掉了东西时才 `preventDefault`/`stopPropagation`**，否则这条 `z-index: 1210` 的栏会把落到画布上的普通零件也吞掉。
+
+**防重复添加靠两级匹配。** 新定义带 `templateId`，按 id 命中；早先用 `+` 号弹窗建的老定义没有这个字段，回退到 `formulasMatch`（比较 `extractFormulaChartExpression` 归一后的表达式）。少了这一级，同一张图会被拖出第二份、零件方块也不会高亮。反过来，一旦带了 `templateId` 就**只**按 id 匹配，所以用户把公式改成别的之后，这张卡片仍然属于那个模板。
+
+**卡片由 `Aside` 画，Panel 只管算和编辑。** 完全照抄已经在跑的 `onBuiltinSeries` 通路，多一个 `onCustomSeries(series)`：`pushFrame` 算完历史值 emit 给 `Aside`，`Aside` 用**自己的** `drawChart` 画。这样新卡片免费获得上一节的图表配色和四个叠加层，曲线和 Pressure Area 逐像素同源。两处副产品：
+
+- 自定义图表的历史值从 `useState` 移到 `customHistoriesRef` —— 原来那份 state 会让 Panel 以 10Hz re-render，而它现在只剩一个按钮和一个弹窗。卡片上的当前值放在 `Aside` 的 state 里，那里本来就在以 10Hz 重渲染，多一个字段是免费的。
+- 卡片的 `<canvas>` **不写 width/height 属性**，沿用 300×150 的固有 backing store —— `drawChart` 的 `gap = canvas.width / (data.length + 1)` 依赖它。
+
+`FormulaChartPanel` 随之删掉自己那段 SVG 小曲线列表（`.formulaChartList` 等 7 组样式一并清掉），只留常显的「添加公式图表」入口和编辑弹窗，并通过 `useImperativeHandle` 多暴露一个 `openEdit(id)` 给卡片标题调。原来用 `+` 号建的图表因此一并升级成大卡片，不留两套长相。
+
+> 卡片不支持拖动换序，顺序就是添加顺序；上限仍是 6 张，和弹窗新建的共享额度。零件跟着零件栏走，所以 `foot` / `jqbed` / `carCol` 这些没挂零件栏的页面仍然只能用 `+` 号弹窗建图表。
+
+## 2026-07-28 展示画布配置器（display.canvas）
+
+### 一段配置，两处共用
+
+「画布长什么样」以前散在三个地方：颜色硬编码在 `ManifestDisplayRenderer.jsx` 的两处 `hsl(...)` 里，卡片布局由 Builder 的 `showStats` 复选框写死成两项，叠加显示层根本不存在。现在收敛成 manifest 的可选段 `display.canvas`：`{ colormap: {id, reverse}, overlays: string[], widgets: [...] }`，整段不声明时行为与引入前完全一致。
+
+同一个受控组件 `DisplayCanvasConfigurator` 服务两处，因此「配置时看到的」和「运行时看到的」是同一套渲染代码：
+
+- **Builder 的显示验证步骤** —— `value/onChange` 挂在隐藏 Form.Item `canvasConfig` 上，保存时写进 manifest 的 `display.canvas`，同时 `display.widgets` 直接取 `canvas.widgets`（`showStats` 复选框已移除，避免两套真相；模板的默认值经 `buildDefaultCanvasConfig` 翻译成画布 widget）。
+- **运行时 `ManifestDisplayRenderer`** —— `onChange` 走既有的 `updateSelection`，落进 `localStorage['display-profile:<displaySystemId>']` 的 `selection.canvas`，不新开存储键。顶部三个 Select（展示方案 / 渲染方式 / 可视算法）保持不变，配置器作为底部栏加在 widget 网格下方。
+
+### 交互：拖零件到画布
+
+底部零件栏按三个类别（配色方案 / 叠加层 / 画布组件）横向排列方块，用**原生 HTML5 拖放**（`dataTransfer` 自定义 MIME `application/x-display-part` + `text/plain` 兜底），不引入任何 DnD 依赖。三类零件语义不同：配色是**替换**、叠加层是**开关**、画布组件是**追加**；已放置的卡片拖到零件栏即删除，拖到另一张卡片上即换序。每个方块同时可点击、每张卡片带 `×`，拖放是加分项不是唯一通路。
+
+这些变换全部是 `canvasParts.js` 里的纯函数（`applyCanvasPart` / `removeCanvasWidget` / `moveCanvasWidget` / `isCanvasPartActive`），拖放与点击两条通路共用一段逻辑，测试也不需要 DOM —— vitest 跑在 `environment: "node"`，本来无法渲染 React。
+
+预览**只用真实数据**：Builder 的画布通过既有 `useMainWebSocket` 接实时帧，没有模拟兜底；无帧时显示「未收到数据」空状态和一个跳回数据接入步骤的按钮。模板卡片格里的小号 `DisplayTemplatePreview` 保留，那本来就是「还没选模板」时的示意图。
+
+### 配色与叠加层
+
+> 后续变化：2026-08-03 补进第 7 条 `jet`（老场景一直在用、但在此之前列表里选不到），详见本文档顶部那一节。下面写的六套是本节当天的状态。
+
+`colormaps.js` 是新增的唯一领域概念：六套方案（`classic` / `thermal` / `viridis` / `inferno` / `grayscale` / `iceFire`），首项 `classic` **逐字复刻**改动前的硬编码公式 `hsl(195 - ratio * 195, 88%, 42% + ratio * 8%)`，`colormaps.test.js` 有一条断言专门守「既有展示系统观感零变化」这件事，改公式必须先改那条断言。其余按 stop 数组线性插值；`previewCss` 直接给零件栏色卡当背景，不必逐格采样。
+
+叠加层是白名单：`valueLabels` / `gridLines` / `legend` / `axes` / `peakMarker`，全是纯绘制，不碰 `values`，采集、回放、CSV 和压力统计一律不受影响。
+
+`MatrixWidget` / `CoordinatePointWidget` / `StatsWidget` 从 `ManifestDisplayRenderer.jsx` 平移到 `displaySystem/widgets/`，Builder 与运行时共用同一份；widget 作用域的 CSS 一并抽到 `widgets/widgets.css`，由三个组件各自 import，`ManifestDisplayRenderer.css` 只留展示外壳的规则。
+
+### 解析与校验
+
+前端 `displayProfileRuntime.js` 仍是选择状态的唯一解析点：`buildDisplayProfileModel` 增加 `canvas` 段，`resolveDisplayProfile` 返回 `colormap` / `overlays`（`Set`）/ `canvasWidgets`，优先级 **manifest 顶层 < `profile.canvas` < `selection.canvas`**，逐字段合并。用户在运行时拖上画布的 widget 会并进 `visibleWidgetIds`，否则会被 profile 的可见性过滤悄悄吃掉。
+
+后端 `displaySystemPage.js` 的 `normalizeCanvasConfig` 做同一件事：`canvas.widgets` 缺省时回落到顶层 `display.widgets`，所以 v1/v2/v3 manifest 都拿到同构结构。坏值的两种待遇刻意分开 —— **归一丢弃**未知配色 id 与未知叠加层名（一个过期的 localStorage 键不能让界面打不开），**校验报错**显式写错的值（Builder 保存时就看到问题，而不是保存成功却静默变回默认外观）。可选值目录由新增的 `displaySystemCanvasCatalog.js` 单独持有，`buildDisplaySystemBuilderCatalog()` 通过 `colormaps` / `overlays` 下发 id + 中文名；色值实现留在前端，后端只管白名单，两边不会漂移。
+
+> 范围外：非 manifest 的 legacy 场景组件（约 55 个）不动；渲染器插件契约（`renderers/registry.js`）不改，只是被零件栏列成可拖零件。
+>
+> 更正：本节原写「legacy `Home.jsx` 那条链不动」，但 `Home.jsx` 才是主界面实际渲染 manifest 帧的地方，`ManifestDisplayRenderer` 当时已无人挂载 —— 上一轮的零件栏因此在主界面上看不见。见 2026-07-29 那节。
+
+## 2026-07-27 Display System Manifest v3 多传感器与帧校验
+
+### sensors[] 多传感器 schema
+
+`display-system.json` 升到 `schemaVersion: 3`，一个展示系统可以声明多个传感器，每个条目自带 `protocol`、`matrix`、`files`（线序 / 点位 / 坐标）和 `algorithm`。链路上的键统一为 `${systemId}:${sensorId}`：一个 `sensors[]` 条目对应一个 parser 通道、一个串口和一个输出通道。
+
+`displaySystemConfigValidator.js` 是唯一的归一化点：v1/v2 的单数 `sensor` + 顶层 `protocol`/`files`/`algorithm` 会按 `sensor.ports` 展开成等价的 `sensors[]`，因此下游只见 `sensors[]`；校验结果同时保留 `sensor`/`files`/`protocol`/`algorithm` 作为首个条目的别名，既有调用方和前端注册表不受影响。`sensors[].id` 与 `outputChannel` 都要求系统内唯一。
+
+### 输出路由与串口开启
+
+`displaySystemRuntimeBinder.resolveOutputPublisher` 由三个写死的 if 改为按 `outputChannel` 解析：`sit`/`back`/`head` 仍走原 publisher（实时 + 入库 + 原有频率与高斯规则），其它通道走新增的 `frameOutputPipelineService.publishAux`，**只有实时推送，不入库**（`collectionFrameStorageService` 只有这三路的记录构造器和数据表）。改动前第四路拿不到 publisher，绑定停在 `registered` 并被 dispatcher 静默过滤。
+
+串口开启改为 manifest 驱动：`appRuntimeFactory.listSerialChannels(sensorType)` 列出全部声明通道，`server.js` 新增 `openManifestSerialPort(serialRole, portPath, reason)` 按通道声明的波特率和 parser 通道开口，未声明的角色只告警而不猜波特率。控制命令新增 `channelPorts: { "armLeft": "COM7" }` 与 `channelClose: ["armLeft"]`，旧的 `sitPort`/`backPort`/`headPort`/`sensorPort` 字段保持可用。
+
+### 协议层帧校验与数据类型
+
+`displaySystemProtocol.js` 的数值类型改为读取表驱动，新增 `uint32le/be`、`int32le/be`、`float32le/be` 和按位展开的 `bit`（低位在前）。新增可选的 `protocol.validation`：`header`（`"AA 55"` 或字节数组）与 `checksum`（`sum8` / `xor8` / `crc16-modbus`，`byteOffset` 与 `range` 支持负数从帧尾倒数，`range` 可写数组或 `{start, end}`）。`validateFrame` 在解码之前调用，失败帧直接丢弃并累加 `metrics.droppedFrames` / `metrics.lastDropReason`；`reason` 是稳定短码（`header` / `checksum` / `length`），`detail` 供日志。未声明 `validation` 的 manifest 行为完全不变。
+
+### 前端
+
+`ManifestDisplayRenderer` 的 `getChannelFromSource` 先按 `definition.sensors[].outputChannel` 精确匹配，再退回 `sit/back/head/sensor` 前缀规则；widget 使用自己那一路的矩阵，避免多传感器系统按第一路的行列数摆放。配置器目录新增 `outputChannelSuggestions`（标注哪几路入库）和 `checksumTypes`，`valueTypes` 改为直接取协议层支持列表以免漂移；串口步骤新增帧头与校验和表单。
+
+> 本轮未做：一通道多帧型分派、多包组帧（有状态拼接）、非 sit/back/head 通道的采集入库，以及配置器的多传感器条目编辑（多传感器系统目前需手写 manifest 放入用户目录，由升格规则接住）。
+
 ## 2026-07-14 Display System Manifest v2
 
 ### 展示系统配置文件
 
 - 开发环境中，页面新建的展示系统写入 `E:\shroom1\display-systems\<系统ID>\`。
 - 打包环境中，配置写入 Electron `app.getPath('userData')/display-systems/<系统ID>/`；Windows 默认通常是 `%APPDATA%\Shroom\display-systems\<系统ID>\`。
-- 每个目录固定包含 `display-system.json`、`line-order.json` 和 `point-order.json`；选择 JSON 后端算法时额外生成 `algorithm-data.json`。
+- 每个目录固定包含 `display-system.json`、`line-order.json` 和 `point-order.json`；需要按真实传感器形状绘图时增加 `coordinate-map.json`，选择 JSON 后端算法时增加 `algorithm-data.json`。
+- `coordinate-map.json` 保存 `rows × cols × [x, y]` 物理坐标矩阵，是传感器几何形状和矩阵尺寸的优先数据源；配置器会根据它自动生成 row-major 默认点序，不再要求用户手填行列数。
+- `point-order.json` 只描述解析值落入矩阵单元的顺序，可直接提供 `[[row, col], ...]`，也可提供 `{ "points": [...] }`。旧系统没有物理坐标文件时，仍由该文件推导规则矩阵尺寸。
+- 保存服务会分别规范化物理坐标和点序，校验两者矩阵一致，再回写 `display-system.json` 的 `sensor.matrix` 与 `protocol.decoding.valueCount`。物理坐标必须是有限数值并具有非零宽高，点序坐标必须是非负整数且不能重复。
 - `display.sidebar` 定义左侧压力数据和受压区域面板，包括可见性、标题、主指标、指标集合、有效点阈值、单点面积及面积单位。统计输入使用协议解码、线序和点位归一化后的原始矩阵，不使用前端可视算法处理后的绘制数组。
 
 ### 快速模板
 
-- 配置器主流程按“传输形式 → 是否分包 → 波特率 → 分隔符/帧长度 → 8/12 Bit”组织。字节偏移、数值数量、线序、算法和左侧面板继续放在高级配置区。
-- 串口解析提供三个经典模板：`pressure-u8-tail` 使用 921600 baud、`AA 55 03 99` 帧尾和 `uint8`；`pressure-adc16-tail` 使用 1500000 baud、`AA 00 55 00 03 00 99 00` 帧尾和 `uint16le`；`pressure-fixed-length` 使用 1000000 baud、不使用分隔符，并按矩阵点数自动计算完整 `uint8` 帧长度。
-- 页面将 12 Bit 选择映射为项目现有的 `uint16le` 两字节承载格式；固定长度模式在矩阵尺寸或数据精度变化时自动同步 `frameLength` 和 `valueCount`。
-- 数据展示模板固定为 `heatmap-overview` 热力图总览和 `numeric-matrix` 数字矩阵。模板只负责填充现有 manifest 字段，不新增运行时分支，主项目和 SDK 继续消费同一份 `display-system.json`。
+- 配置器采用“传感器列表 / 当前步骤 / 配置摘要”三栏工作台，并把原来的长表单收敛为“数据接入 → 传感器映射 → 显示验证”三步。数据接入负责经典协议模板与通信参数，传感器映射负责身份、形状坐标、线序和后端数据算法，显示验证负责展示模板、渲染器、可视算法、页面组件和指标。
+- 串口模块顶部先展示三个经典配置卡片，选择后自动填充波特率、数据精度、分帧方式及帧尾/帧长度；下方始终提供对应输入控件，模板只提供初始值，不限制继续修改。
+- 渲染模块使用带真实界面示意的缩略图卡选择热力图或数字矩阵，并在参数区同步显示较大的实时预览；预览只表达布局和渲染类型，真实主界面仍由现有场景读取坐标和实时矩阵绘制。
+- “新建展示系统”使用轻量弹窗收集名称、传感器类型、系统 ID 和串口角色，不再要求填写矩阵行列；确认后在主编辑区导入 `rows × cols × [x, y]` 坐标 JSON，页面只读显示自动矩阵、点数和物理宽高比。
+- 主软件标题栏的配置入口不再跳转页面，而是在 `Home` 上方打开完整配置器弹窗；`Home`、WebSocket 和当前实时画面保持挂载。`#/display-systems` 仅保留为可直接访问的独立调试入口。
+- 配置器采用“保存并显示”单步流程：保存配置并热加载 Display Systems runtime 后，调用 `sensor.switch`，将新传感器应用到 `Home` 并立即关闭配置弹窗；`license.refresh` 在后台执行，不再阻塞返回主界面。主界面直接渲染新系统，不显示“配置已保存/加载到软件”二级确认弹窗。
+- 主页面从 `localStorage.file` 恢复最近激活的传感器；后端使用 `currentSensorType` 单独广播当前 runtime 类型，`file/selectFlag` 只保留密钥授权语义。前端更新当前系统时不再改写 `allowedTypes`，避免加载自定义系统后覆盖密钥授权列表。
+- 传感器下拉框由“密钥允许的内置系统 + 本机安装的外部 Display Systems”组合而成。外部系统不会被写入密钥授权范围；配置保存后会立即注册 runtime definition，并通过 `shroom-display-systems-updated` 事件热刷新标题栏清单。
+- 版本、运行模式、字节偏移、自动采样点数、线序和后端算法进入串口模块的“高级数据处理”；左侧指标及算法命名输出进入渲染模块的“渲染与指标细节”。物理坐标文件属于主流程，自动生成的默认点序不再暴露为重复输入项。
+- 页面右侧固定配置摘要实时显示三步完成状态、自动矩阵尺寸、采样点数、串口角色、波特率、数据精度、预计单帧字节数、分帧方式和展示模板；窄屏下三栏改为纵向布局，摘要自动移动到主表单下方。
+- 串口解析提供三个经典模板：`pressure-fixed-length` 是默认经典 8 Bit 协议，使用 1000000 baud、不分包，并按点位文件中的采样点数自动计算完整 `uint8` 帧长度；`pressure-u8-tail` 是 921600 分包协议，使用 `AA 55 03 99` 帧尾和 `uint8`；`pressure-adc16-tail` 使用 1500000 baud、`AA 00 55 00 03 00 99 00` 帧尾和 `uint16le`。
+- 页面将 12 Bit 选择映射为项目现有的 `uint16le` 两字节承载格式；固定长度模式在坐标点数或数据精度变化时自动同步 `frameLength`，`valueCount` 始终等于点序数量。
+- 配置编辑器读取帧分隔符时兼容历史十六进制字符串与标准字节数组；Workspace 保存服务统一将协议写成规范化字节数组，避免编辑旧配置时出现字符串 `.map()` 异常。
+- 数据展示模板固定为 `heatmap-overview` 热力图总览和 `numeric-matrix` 数字矩阵。配置页缩略图及实时预览只负责帮助用户选择，模板本身仍只填充现有 manifest 字段，不新增运行时分支，主项目和 SDK 继续消费同一份 `display-system.json`。
 
 ### 左侧算法输出
 
 - 后端算法返回值兼容原有 `number[]`，并新增 `{ data: number[], metrics: Record<string, number|string|boolean> }`。命名指标通过实时帧的 `algorithmMetrics` 发布，同时保存在 `metrics.algorithm` 便于 SDK 和采集数据读取。
 - 页面安全算法可在 `algorithm-data.json.metrics` 中配置 `sum/average/max/min/activeCount/activeRatio` 聚合、阈值、乘数和偏移，不执行用户表达式或动态代码。
+- 用户新建的展示系统还可选择 JavaScript 或 Python 代码算法。统一函数契约为 `calculate(rawData, context)` / `calculate(raw_data, context)`：首个参数是协议解码后的原始一维数据，`context.normalizedData` / `context["normalized_data"]` 是完成线序和点位映射后的标准矩阵。
+- JavaScript 代码在受限 VM 中同步执行；Python 代码通过常驻 Python worker 异步执行，并采用“最多一帧执行中、只保留最新等待帧”的背压策略。两者都属于本机可信扩展能力，不是面向不可信代码的安全沙箱。
 - `display.sidebar.algorithmMetrics` 定义指标显示名称、单位和小数位；面板的 `pressure.metrics`、`area.metrics` 和 `primaryMetric` 通过 `algorithm.<id>` 引用算法输出。
 - 内置压力指标继续基于协议解析、线序和点位映射后的 `normalizedData` 计算；只有显式选择的 `algorithm.<id>` 才展示算法结果，避免可视算法污染基础统计。
 - 展示系统采集帧以对象格式保存通道矩阵、`normalizedData`、`algorithmMetrics` 和 `metrics`；历史回放识别该格式并恢复同一 payload，因此左侧算法指标在实时展示与回放中保持一致。没有 `displaySystemId` 的旧设备仍保存原数组格式。
 
+### 展示系统编辑权限与矩阵变换
+
+- runtime discovery 根据资源目录、用户可写目录以及 builder 来源标记，把系统分为 `origin: system` 和 `origin: user`；系统内置配置只读，前端禁用表单和保存按钮，后端保存接口再次拒绝覆盖。
+- 扫描目录中出现重复 ID 时系统内置配置始终优先，用户目录中的同名 manifest 不会覆盖内置系统，冲突会进入 Display Systems 发现错误列表。
+- 用户新建的系统可独立修改串口协议、算法语言与代码、渲染器、可视算法和矩阵展示方式。当前矩阵展示支持原始点位、2/4 倍双线性插值、1/2 或 1/4 区域平均缩小。
+- 插值和缩小只作用于前端绘制矩阵及坐标映射；左侧压力、面积、公式指标、采集、回放和导出继续使用未经过显示变换的标准矩阵，防止视觉分辨率改变业务结果。
+
+### 主界面公式图表
+
+- `client/src/components/aside/FormulaChartPanel.jsx` 在主界面左栏提供公式图表的新建、点击编辑和删除能力，每个传感器最多保存 6 张图表，每张保留最近 60 个趋势点。
+- 新建或编辑公式图表时可从 6 个模板开始：原始数据总和、原始数据平均值、峰值压力、有效点数、有效点占比和中心区域压力。模板会整体填充名称、公式、单位、小数位和曲线颜色，用户仍可继续修改。
+- 公式编辑器以中文计算方式为主信息：6 个模板提供业务化说明，自定义公式则复用安全表达式 AST 生成中文解释；变量和函数按基础统计、标准原始矩阵、数学与条件、算法输出分组。
+- 新建和重新保存的公式使用固定 `function calculate(rawData) { return ...; }` 函数契约，支持 `rawData[index]` 读取原始值。运行时只提取唯一的 `return` 表达式交给白名单 AST，不执行任意 JavaScript；旧版无参函数和纯表达式仍可直接运行。
+- 公式编辑弹窗的标签、输入框、代码区、数值控件、颜色控件、按钮和变量下拉菜单使用局部深色样式；聚焦、禁用、错误和选中状态均限制在 `formulaChartEditorModal` 与专用下拉类内，不影响其它 Ant Design 页面。
+- 编辑器右侧展示当前帧的尺寸、点数、帧序号和前 128 个原始值，并可复制包含完整 `rawData`、标准矩阵、基础 `metrics` 和 `algorithmMetrics` 的 JSON。Display System 帧优先提供协议解码后的 `rawData`；没有该字段的旧传感器回退到标准矩阵。
+- 图表定义按传感器类型保存到浏览器本地配置 `shroom.formulaCharts.v1.<sensorType>`，切换传感器时自动加载对应图表，不修改展示系统 manifest 和后端算法文件。
+- `formulaChartRuntime.js` 使用白名单词法与表达式解析器，不执行 `eval`、`Function` 或用户 JavaScript。公式支持 `total/avg/max/points/area/frame`、`point(index)`、`sum(start,end)`、`average(start,end)`、`countAbove(threshold)`、条件和常用数学函数。
+- 原始矩阵计算新增 `rawLength/rows/cols`，以及 `raw()`、`sum()`、`average()`、`rawMax()`、`stddev()`、`percentile()`、`rowSum()`、`columnSum()`、`regionSum()` 和 `regionAverage()`；编辑器使用当前实时帧即时显示公式结果。
+- Display System 公式的 `rawData` 输入来自协议解码结果，矩阵行列和基础压力指标继续来自线序、点序处理后的 `normalizedData`，算法指标通过 `algorithm_<id>` 变量进入作用域；公式不读取 Three.js 插值、颜色或显示滤波数据。
+- 公式图表前端不直接执行任意 Python。需要 Python 时，应在 Display System 后端算法层处理标准矩阵并返回命名 `algorithmMetrics`，图表再引用 `algorithm_<id>`；当前 manifest 已保留 `python` runner 契约，但在专用 runner、超时、背压和进程隔离完成前不开放页面代码执行。
+- 原有 `Pressure Data` 与 `Pressure Area` Canvas 也由同一公式运行时驱动，默认公式分别为 `total` 和 `points`；用户可以点击标题编辑图标或曲线本身修改公式、单位、小数位和颜色。
+- 两张内置图表的覆盖配置按传感器保存到 `shroom.formulaCharts.builtin.v1.<sensorType>`。内置公式历史会优先进入旧 `handleCharts/handleChartsArea` 绘制入口，避免被旧实时曲线再次覆盖。
+- 公式计算和图表刷新限制为 10Hz，避免高频串口帧触发过量 React 重绘。没有自定义图表时只显示一条弱化的“添加公式图表”入口，不再占用整张空状态卡片。
+
 - 新增 `#/display-systems` 展示系统配置器，页面可新建或选择已有系统，并配置矩阵/端口、串口分帧与解码、线序、点位、后端 JSON 算法、渲染器、可视算法和默认展示方案。
-- `displaySystemWorkspaceService` 将页面输入限制写入 `userData/display-systems/<safe-id>/`，只允许 `none/json` 页面算法；保存后 runtime discovery、channel registry、parser binding 和 dispatcher 原地重载。
+- `displaySystemWorkspaceService` 将页面输入限制写入 `userData/display-systems/<safe-id>/`，支持 `none/json/js/python` 算法；代码分别保存为 `algorithm.js` 或 `algorithm.py`，保存后 runtime discovery、channel registry、parser binding 和 dispatcher 原地重载。
 - Display Systems HTTP 增加 catalog、editor、save、reload 接口，SDK `SensorClient.displaySystems` 暴露同样的管理能力。
 - Manifest 页面契约新增渲染器目录、可视算法目录和展示 profiles；主前端的方案菜单可以整体切换 renderer、visualization algorithm 和 widgets，也允许分别覆盖渲染方式与算法，并将选择按展示系统持久化。
 - `identity/normalize/threshold/smooth` 只处理绘制数组，原始压力统计、采集、回放和 CSV 保持使用后端标准矩阵，避免显示调节污染业务数据。
@@ -33,8 +614,10 @@
 - Display System 配置升级到兼容 v1 的 schema v2，同一 manifest 统一描述 `protocol`、线序、点位、算法、页面 layout/widgets/controls 和运行模式。
 - `displaySystemProtocol.js` 负责协议规范化、校验和字节解码，支持 delimiter/fixedLength 分帧及 8/16 位大小端数值；`serialParserManager` 可按 manifest 注册动态 parser channel。
 - 串口打开时，主后端按当前 `sensor.type + role` 查询 manifest runtime channel，优先使用配置的波特率和 parser channel；未声明 protocol 的旧系统继续使用原 parser。
-- `displaySystemFrameProcessorFactory` 按“协议解码 → 线序 → 点位 → 算法”处理帧，同时生成 `rawData/data/metrics`。JSON 算法内置，JavaScript 算法在禁用 `require/process` 且带超时的 VM context 中执行；Python/external 需要显式 runner。
-- 主前端启动后从 `/api/display-systems` 注册外部系统，并由 `ManifestDisplayRenderer` 按白名单 widget 渲染热力矩阵、数字矩阵和压力统计；前端 SDK 提供同样的 manifest 注册能力。
+- `displaySystemFrameProcessorFactory` 按“协议解码 → 线序 → 点位 → 算法”处理帧，同时生成 `rawData/normalizedData/data/metrics`。JSON 算法内置，JavaScript 算法在禁用 `require/process` 且带超时的 VM context 中执行；Python 算法由常驻 worker 执行并支持异步帧处理。
+- 主前端启动后从 `/api/display-systems` 注册外部系统。配置器只承担编辑，保存后 `Home` 直接复用现有 `NumThreeColor1024` Three.js 数值场景；`manifestSceneAdapter` 将 Display System 帧适配到旧场景接口，`coordinatePointLayout` 将 `coordinate-map.json` 的真实 `[x, y]` 转换成保持物理宽高比的世界坐标，无坐标文件时回退等距规则矩阵。前端 SDK 同步暴露坐标 metadata。
+- Display System 绘图数据使用后端算法输出 `data`，左侧压力统计和趋势图使用线序、点序归一化后的 `normalizedData`。带 `displaySystemId` 的实时帧只允许进入对应的当前场景，避免并行系统相互污染。
+- `sensor.switch` 更新当前运行时类型后会重绑 Display Systems dispatcher，使刚保存的 parser、line-order、point-order 和 algorithm 链路无需重启即可开始接收串口帧。
 - 打包态会创建并扫描 `userData/display-systems/`，因此用户可在不修改 asar 的情况下放入新配置，重启后加载。
 
 ```mermaid
@@ -45,7 +628,8 @@ flowchart LR
     PROCESSOR --> PIPELINE["Realtime + Collection Pipeline"]
     PIPELINE --> WS["WebSocket Push"]
     DISCOVERY --> API["Display Systems API"]
-    API --> MAIN["Main Manifest Page"]
+    API --> CONFIG["Configuration Modal"]
+    CONFIG --> HOME["Home Existing Three.js Scene"]
     API --> SDK["SDK / Product Lab Registry"]
 ```
 
@@ -143,15 +727,61 @@ flowchart LR
 - `server.js` 中串口打开、WebSocket runtime、实时发布、小床 runtime、Display Systems 绑定和 frame pipeline 开始改用 `runtimeContext`。
 - 新增 `runtimeContextFactory` 和 `framePipelineFactory` 测试，覆盖 store 优先读取、闭包兜底和三路数据库映射。
 
-> 最新维护：2026-07-14。本次维护完成 Display System manifest v2、动态串口协议、受限 JS 算法模块和主前端/SDK 动态页面注册。
+> 最新维护：2026-07-24。公式图表统一升级为固定 `calculate` 计算函数，同时保留中文计算说明、AST 安全解释、旧表达式兼容和分组函数菜单。
 
 ## 当前维护记录
 
 | 日期 | 类型 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-03 | 优化重构 | 横切共用层第二步：**47 个阈值声明块 / 2206 个读写点收成一个 store**（`client/src/runtime/displayThresholds.js`），六个键（`carValuej`/`carValueg`/`carValue`/`carValuel`/`carValuef`/`carValueInit`）在全仓只剩一个读取出口 —— 这就是 `PointGridRenderer.jsx` 文件头点名的「55 份复制粘贴的根因」。**消费方式是解构而非取对象**：`var { valuej1, … } = createThresholdState(DUAL_CHANNEL_DEFAULTS)` 拿到的是普通局部绑定，各文件的 `sitValue(prop)` 照样能 `valuej1 = prop.valuej` 直接改，**2206 个读写点一个字没动**（改成 `t.valuej1` 要动 2206 处零测试覆盖的 legacy 代码，风险与收益不成比例）；`if (prop.valuej)` 那个「传 0 被忽略」的真值守卫也原样保留。**计划里的「模块加载时读一次存快照」没有照做** —— 动手前数出这 47 个块作用域并不统一：**23 个在模块顶层**（实例共享、冻结在 import 时刻），**24 个在 `React.forwardRef((props, refs) => {` 函数体内**（本来就每实例、每次挂载重读）。共享快照对两种作用域都不等价（函数内那 24 个今天切走再切回会拿到新值；模块级那 23 个因场景懒加载、改完阈值再切到未加载过的展示形式也会读到新值），会把两者一起冻结在**第一个消费者**加载的时刻，所以实现成每次调用现读、调用点就是原声明处，并有测试钉住。作用域一律保持原样，把那 23 个也改成每实例需要 `stateRef`（见 `PointGridRenderer.createTuningState`），留给各文件改写成渲染器时顺带做。**默认值按变量名给而不是按 localStorage 键给**：实测**六个键全都有离群值**（`carValuej` 200×84/335×2/255×2/600×1/2655×1；`carValueg` 2×86/3.6×2/4×1/3.3×1；`carValue` 2×87/2.1×1/2.08×1；`carValuel` 2×88/4×1/1×1；`carValuef` 2×89/**0**×1；`carValueInit` 2×87/2000×2/2001×1/500×1），而且 `three/wholeChair.jsx` **两个通道默认值不对称**（`valueg1`=4 而 `valueg2`=2、`value1`=2.1 而 `value2`=2、`valuel1`=1 而 `valuel2`=2）—— 按键给会静默改掉这三处首屏表现且不会有任何测试失败；`carValuef` 的那个 **0** 是同类陷阱的另一面，是真实默认值而非「没设」。三条预设 `DUAL_CHANNEL_DEFAULTS`(37)/`SINGLE_CHANNEL_DEFAULTS`(7)/`SECOND_CHANNEL_DEFAULTS`(2)，离群三个文件用展开覆盖。`SECOND_CHANNEL_DEFAULTS` 存在是因为 `three/4096.jsx` 与 `three/NumThreeColor copy.jsx` 只声明 `value*2`，后缀 1 侧走 `assets/util/bed4096numParams.js` 那个**共享调参对象**（「切换模式时调参不重置」）—— 该模块保留，价值不在读取（已收走）而在**模块级单例**语义。脚本批量换 39 个块，四处形状特殊手工改：`three/Short.jsx`（块中间**夹着一行 `ymax1`**，读的是 `ymax` 键，拆出单放）、`heatmap/canvas.jsx`（没有 `valuej1` 变量，同一个 `carValuej` 键读成 `options.max` 且默认 **600**）、`page/home/HomeFun.jsx`（六个 `useState` 初值，原来每帧 12 次 `getItem`）、`assets/util/util.js` 的 `initValue`（`valuelInit1` 默认 **500**，另四个非阈值键 `valueMult`/`compen`/`press`/`ymax1` 原样留）。`PointGridRenderer.jsx` 自己那份 `readStoredNumber` + `createTuningState`（这个 store 的原型）一并删掉改为直接调；store 的 `globalThis.localStorage?.` 写法从它继承，为的是能在非浏览器环境导入。与老写法的差异只有两处坏数据，且是在测试里**证出来**而非断言的：`"abc"` 老写法**在模块加载期抛异常**（页面打不开，`expect(() => legacyDualBlock()).toThrow()`）、`"null"` 老写法把 `null` 当阈值用（`toBe(null)`），新实现 try/catch + `Number.isFinite` 回落默认值；**正常值逐字相同，包括 `"0"`**（非空字符串为真，取到 0 而非默认值，quirk 保留）。写入侧未动（`Title.jsx` 滑块 → `pushSitBack` → `sitValue` 改内存绑定，不重读 localStorage）。`carValuePress` 是第七个键、只在 `demo/` 9 个文件里、主人不同，不在这一刀里，挂账。 |
+| 2026-08-03 | 优化重构 | 横切共用层第一步：全仓 18 份 `function jet(min, max, x)` 收成一条阶梯 + 三个薄出口。按空白/注释归一化取 md5 后确认这 18 份**分支阶梯逐字节相同、差异全在取整与返回形状**，分四组：`jet`（14 份，`parseInt(255*r + '')`）、`jetRgba`（2 份，不取整 + 写死的 `rgba[3]=1`）、`jetRound`（1 份，`Math.round` + `dv===0` 返白）、`jetRgb`（阶梯本身）。**计划里的 `jetUnit` 是多余的** —— `util.js` 早有 `jetRgb`，分支结构与 `jet` 逐字相同，直接当唯一阶梯用，没有新增函数。三个出口的差异（`Math.round(178.5)=179` vs `parseInt(178.5)=178`）**刻意全部保留**，有断言守着：想把 `jetRound` 并回 `jet` 时会失败，提醒那不是无损合并。消费文件的导入写成 `jetRgba as jet` / `jetRound as jet` 并按字母序并进各文件**已有**的 util 具名导入，所以**每个文件只改 2 行、调用点逐字节不变**；`onestep/heatmap.js` 是唯一没有任何 `import` 的文件（头部是一行巨大的 `export let arr`），单独插在首行。写等价测试时查出 14 份 canonical 副本的一个**既有 bug**：`x=49.9999999999993` 时 `255*blue = 7.105e-12`，`parseInt('7.105e-12') === 7` 而正确答案是 0 —— 段界附近某个通道会输出 7 而不是 0。**按「界面零变化」没有修**（修它会同时动 14 处配色），改为写一条断言钉住并注明是 bug。另查明 `onestep/heatmap.js` 的那次 jet 调用是**死代码**：`createCircle(size, value)` 全文件唯一调用处 `createCircle(options.size)` 没传第二个参数，`jet(undefined)` 产出非法 CSS `rgb(255,NaN,0,1)`、赋值被 canvas 忽略、圆点用默认黑画出 —— 而这正是这张图要的（黑 alpha 蒙版，颜色由后面的 `colorize` 上），所以没有改。顺带把 jet 注册成 `colormaps.js` 第 7 条（原来六条里**没有** jet，`classic` 是 `hsl(195-ratio*195, …)`，jet 只能靠「不选配色」隐式命中、选不到）：排在既有六条**之后**（下拉直接遍历 `COLORMAPS`，插中间会改用户的下拉顺序）；配色栏这条通路用 `Math.round` 而非老 `parseInt`（新通路没有观感要保，不把上面那个 bug 带进来）；`isClassicColormap({id:'jet'})` 必须为 `false` —— 显式选 jet 与「没选配色」是两条通路，后者还额外走逐实例 `(r, 0.2, 1-r)` 染色。util.js 里另外 7 个 jet 家族函数（`jetWhite`/`jetWhite1` 是**不同的**阶梯，断点 0.01/0.3/0.8；`jetWhite2/3/4`/`jetgGrey`/`jetWhite2Back` 是 LUT 查表）一律没动。**阶梯最终不在 `util.js` 而在新建的 `assets/util/jetLadder.js`**：`colormaps.js` 直接 import `util.js` 会让后端测试报 `ERR_MODULE_NOT_FOUND`，因为 `backend/tests/sdk/displayProfileRuntime.test.js` 用 `await import(pathToFileURL(...))` **裸 Node ESM** 加载前端模块 —— 没有 Vite 解析器，于是「导入必须写全 `.js` 扩展名」+「顶层不能读 `localStorage`」两条硬约束 `util.js` 都不满足（内部写的是 `from "./color"`，且顶层 `initValue` 就在读）。没选「在 colormaps.js 里抄一份公式」（那是第 19 份拷贝）也没选「改造 80 个文件的公共依赖 util.js」，而是把阶梯放进**零依赖零副作用**的 `jetLadder.js`，`util.js` 只留 `export { jetRgb };` 一行 re-export，对外接口不变；`util.jet.test.js` 补一条 `expect(jetRgb).toBe(jetRgbFromLadder)`，防的是有人在 `util.js` 里再写一份函数体 —— 那种情况下没有这条断言**不会有任何测试失败**。另外 `backend/displaySystems/displaySystemCanvasCatalog.js` 的 `CANVAS_COLORMAPS` 是前端 `COLORMAPS` 的**重复清单**（`displaySystemPage.js` 拿它归一 + 校验），只登记前端会让**保存**（`PATCH /api/display-systems/:id/display`）把 jet 判成非法配色，所以同步追加同一条并更新 `configValidation.test.js` 里两处期望错误串；两份清单顺序必须一致（零件栏按后端目录渲染下拉）。这份前后端重复是笔账，共享一份配色定义留待以后。 |
+| 2026-07-31 | 优化重构 | 前端场景组件收敛成渲染器插件，并把 `this.com.current.xxx()` 那 145 个调用点按性质分成三条通道。新增 `client/src/runtime/`（`frameBus.js` 帧总线 + `useSceneFrame.js` + `sceneFrame.js` 规范帧）。**帧数据刻意不改成 props** —— `Home` 每帧不 `setState`，`CanvasCom.shouldComponentUpdate`（定义在 `Home.jsx` 里，**没有独立的 `CanvasCom.jsx`**）只放行稳定字符串键，那堵墙正是为了挡住 30–100Hz 的数据；总线也不进 React state，一帧都不触发重渲染，真正解耦的是依赖方向（Home 不再需要知道 `changeWsData147` 这个名字）。视图状态改走 props，`CanvasCom` 照 `colormapKey` / `chartKey` 的现成模式加 `viewKey`；18 处真命令（`calibration` / `handZero` 等一次性副作用）保留 ref，但收成 `descriptor.methods` 声明并由 `auditRendererContract` 校验的窄契约 —— **只报不挡**，挡掉会引入「descriptor 漏写一行功能就没了」这个更难查的静默失败。`sceneFrame.js` 有两处有意偏离旧实现并有测试钉住：`padThumbGap` 不再原地改那个已经推出去的数组，`toRaw256` 给 `JSON.parse` 补 try/catch。`publishFrame` 与旧的 `sitTypeEvent` **并行而非替代**（绞杀者模式，一组一组搬），换 `matrixName` 时 `clearLastFrame()` 免得下一个渲染器先收到上一台设备的末帧。`matCol.jsx` / `carCol.jsx` 逐行 diff 只差两个数字，合并成 `pointGrid` 的两条 `presets` 后删除。另删 5 个零引用场景文件与 6 个从未被消费的 hook。 |
+| 2026-07-31 | 新增功能 | 草稿层的三个动作：**撤销 / 保存 / 另存为**。基线 = 文件夹里的 `display-system.json`，草稿 = 两个 localStorage 键；新增 `displayDraftState.js` 用双 `resolveDisplayProfile` 对比**解析结果**判脏（不看键在不在，否则拖走又拖回原值会一直报脏）。撤销只删 `canvas` / `charts` 两个字段并 `replace` 覆盖写回 —— 整键删掉会把 `profileId`/`rendererId`/`algorithmId` 即用户正在看的模式也带走；卡片走 `resetFormulaCharts` 回到 manifest 基线而非清空。保存另开 `saveDisplaySection` 窄通路只动 `display` 段，**不走 Builder 的 `save()`**（它强制 `schemaVersion: 2` 并压平 `files`，会改坏 v3 多传感器 manifest）；先校验后归一，`canvas.widgets` 显式删掉以保住「跟随 `display.widgets`」的语义；写失败绝不清草稿。另存为递归复制整个目录、只重写 `id`/`name`/`metadata`/`display`，`metadata.origin` 必须显式改 `'user'` 否则副本不可编辑；成功后留在原地只提示，不切换以免中断采集。 |
+| 2026-07-31 | 新增功能 | manifest 新增 `display.chartAppearance` / `display.chartCards` 两段，补上侧栏曲线外观与图表卡片清单原来没有的落点（**刻意不叫 `display.charts`** —— 那个名字会被读成「卡片清单」）。`resolveChartAppearance` 从 `(selection)` 改成 `(model, selection)` 加上 manifest 基线层；卡片是替换语义，靠 `hasFormulaCharts()` 区分「键不存在」与「用户主动删空」，后者不再被重新播种。后端只校验公式是非空字符串 —— AST 解析器是前端 ESM，复制一份会变成两份漂移的白名单。 |
+| 2026-07-31 | 新增功能 | 新增两条写路由 `PATCH /api/display-systems/:id/display` 与 `POST /api/display-systems/:id/duplicate`，错误码映射抽成 `respondDisplaySystemWriteError` 三条路由共用（`DISPLAY_SYSTEM_EXISTS` → 409、`DISPLAY_SYSTEM_READ_ONLY` → **403** 而非 400 —— 请求没问题、是目标不许写，前端靠这个区别决定提示语）。两个动作的权限方向刻意不同：保存要求 `editable === true`，另存为**不检查源能不能写**，自带展示系统正是要能被另存为。新增前端客户端 `client/src/services/displaySystemApi.js`。 |
+| 2026-07-30 | 新增功能 | 图表卡片本身成为零件：拖一个模板方块，侧栏立刻多一张和 Pressure Area 同款的实时曲线大卡片。`chartWidget` 是**第三块表面** —— 它写的是 `shroom.formulaCharts.v1.<matrixName>` 而不是 `display-profile:<id>`，所以 `applySurfacePart` / `isSurfacePartActive` 遇到它原样返回，改由 `onChartWidgetAdd` 回调处理。清单下沉成 `formulaChartStore.js`（一个键一个主人 + 模块级 `subscribe`），`Home` 与 `Aside` 各自订阅、不靠 props 穿 `shouldComponentUpdate` 那道闸。加是幂等的（用户可能已改过公式，再拖一次不能当删除），删只走卡片按钮或把卡片拖回零件栏。 |
+| 2026-07-29 | 新增功能 | 侧栏 Pressure Data / Pressure Area 曲线接入零件栏：新增 `chartAppearance.js`（纵向渐变描边 + 网格 / 刻度 / 峰值 / 末值四个叠加层，不含放不下的图例），偏好独立存在 `selection.charts`，与画布互不影响。零件栏增加 `chartColormap` / `chartOverlay` 两类，`partSurface` 决定零件落到哪块表面。`chartKey` 只解锁 `Aside` 的 re-render 不进 `childBaseKey`（重挂会清空实时读数），暂停/停帧时由 `componentDidUpdate` 用上一帧缓存补画一次。 |
+| 2026-07-29 | 新增功能 | 零件栏覆盖到 legacy 的 `CanvasHand`（`handSinglePoint` + `3D模型` 等 4 条分支）。`hand.jsx` 逐帧算色，因此换配色**原地生效、相机视角保留**：`CanvasCom.shouldComponentUpdate` 增比一个稳定字符串 `colormapKey`（不进 `childBaseKey`，故不重挂），与 `Fast1024` 必须整场重建的 `variantKey` 分开。`jetgGrey`（框选外灰化）不动。 |
+| 2026-07-29 | 优化重构 | `isClassicColormap` 收进 `colormaps.js` 供两个场景组件与 Home 共用；`canvasProfile` 不再按 `source === 'manifest'` 判空（`buildDisplayProfileModel(undefined)` 本就返回全默认），零件栏挂不挂改由各渲染分支自己决定；偏好存储 id 增加 `matrixName` 兜底，避免 `normal` 这类无注册表条目的展示系统共用 `unknown` 键。 |
+| 2026-07-29 | 修复缺陷 | 上一轮的零件栏接在无人挂载的 `ManifestDisplayRenderer` 上、主界面看不见；改为接进 `Home.jsx` 实际在跑的 Three.js 场景：配置器新增 `overlay` 形态（底部固定栏 + 仅拖拽时挂载的全视口拖放层），`Fast1024` 接 `colormap`，配色并进 `CanvasCom` 的 `variantKey` 触发重建。 |
+| 2026-07-29 | 优化重构 | `localStorage` 偏好读写抽成 `displayProfileStorage.js` 供 class 组件 `Home` 与函数组件 `ManifestDisplayRenderer` 共用；`colormaps.js` 增加数值三元组通路 `sampleColormapRgb` 供 canvas 精灵图使用；`displays/registry.js` 补转发 `page.canvas`。 |
+| 2026-07-28 | 新增功能 | 新增 manifest 可选段 `display.canvas`（配色 / 叠加层 / 卡片布局）与共享的 `DisplayCanvasConfigurator` 拖放配置器；Builder 显示验证步骤改为真实实时帧预览，运行时偏好落在既有 `display-profile:<id>` 键。 |
+| 2026-07-28 | 新增功能 | 新增 `colormaps.js` 六套配色（`classic` 逐字复刻原硬编码公式并有断言守护）与 `valueLabels`/`gridLines`/`legend`/`axes`/`peakMarker` 五个纯绘制叠加层；`MatrixWidget`/`CoordinatePointWidget`/`StatsWidget` 抽到 `displaySystem/widgets/` 供配置器与运行时共用。 |
+| 2026-07-27 | 新增功能 | Manifest 升到 `schemaVersion: 3` 的 `sensors[]` 多传感器 schema，v1/v2 在校验入口自动升格；输出路由按 `outputChannel` 解析并新增 `publishAux`，串口开启改为按 manifest 声明驱动。 |
+| 2026-07-27 | 新增功能 | 协议层新增可选帧校验（帧头 + `sum8`/`xor8`/`crc16-modbus`，位置支持从帧尾倒数），失败帧在解码前丢弃并计入 `droppedFrames`；数值类型补齐 uint32/int32/float32 与按位展开的 `bit`。 |
+| 2026-07-24 | 架构优化 | 公式图表从裸表达式升级为固定 `function calculate() { return ...; }` 契约；只解析单一返回表达式，拒绝额外语句和任意 JavaScript，旧配置在编辑时自动升级。 |
+| 2026-07-24 | 交互优化 | 公式图表把中文计算方式提升为主信息；内置模板提供业务说明，自定义表达式由同一安全 AST 自动解释，变量与函数菜单按业务类别分组。 |
+| 2026-07-24 | 交互优化 | 统一公式图表编辑器的标签、输入框、代码区、数值控件、颜色控件、按钮和变量下拉菜单配色，并补齐悬停、聚焦、禁用和错误状态。 |
+| 2026-07-23 | 公式图表增强 | 新增 6 个计算模板、标准原始矩阵预览与复制、当前帧结果验证，以及行、列、区域、标准差和百分位聚合函数；Python 继续限定在后端算法 runner 边界。 |
+| 2026-07-23 | 协议模板修正 | 经典 8 Bit 模板改为默认 `1000000 baud + fixedLength + uint8`；`921600 baud + AA 55 03 99` 独立命名为分包协议，保留原模板 ID 兼容已有配置。 |
+| 2026-07-23 | 配置器重构 | 展示系统生成界面拆为“串口数据配置 / 渲染配置”两个模块；经典协议模板置顶并保留全部参数编辑，渲染模板提供缩略图选择、实时预览和页面组件开关。 |
+| 2026-07-23 | 架构审计 | 按软件运行图逐项对照串口发现、协议分帧、矩阵映射、算法、渲染、框选、采集和下载，明确 Legacy 专用能力与 Display System 通用能力的差距。 |
+| 2026-07-23 | 文档更新 | 新增 `业务流程.md`，以非思维导图的分阶段流程图描述从串口连接到主场景、侧栏统计和公式图表渲染的完整链路，并列出每一步的输入、处理、输出与核心文件。 |
+| 2026-07-23 | 交互优化 | 无自定义图表时改为弱化的单行添加入口；Pressure Data 与 Pressure Area 的标题和 Canvas 均可打开公式编辑器。 |
+| 2026-07-23 | 数据链路优化 | 内置趋势图默认使用 `total`/`points`，公式历史接管旧 Canvas 绘制入口，并按传感器持久化覆盖配置。 |
+| 2026-07-23 | 兼容性修复 | Home 实时消息同时接受字符串和对象 payload，并阻止复用 `sitData` 的控制对象进入旧压力矩阵解析链路。 |
+| 2026-07-23 | 新增功能 | 主界面左栏新增自定义公式图表，支持新建、点击图表编辑、删除、颜色/单位/小数位设置和按传感器本地持久化。 |
+| 2026-07-23 | 安全优化 | 新增白名单公式解释器，支持标准压力变量、矩阵点位/区间函数和算法指标，不执行动态 JavaScript；实时趋势按 10Hz、60 点窗口更新。 |
+| 2026-07-23 | 架构优化 | 配置器与运行展示解耦：配置弹窗保存后退出，Manifest 实时帧通过 `manifestSceneAdapter` 进入 Home 现有 `NumThreeColor1024` 场景，不再挂载独立展示容器。 |
+| 2026-07-23 | 渲染优化 | `coordinate-map.json` 转换为 Three.js 世界坐标并保持物理宽高比；算法输出负责绘图，`normalizedData` 独立驱动左侧统计。 |
+| 2026-07-23 | 运行时修复 | `sensor.switch` 完成状态切换后立即重绑 Display Systems dispatcher，保存的新 parser、映射和算法无需重启即可生效。 |
+| 2026-07-23 | 交互优化 | 展示系统配置改为“保存并显示”：写入、热加载、传感器切换、授权刷新和主界面更新一次完成，成功后自动关闭配置弹窗。 |
+| 2026-07-23 | 优化重构 | `Home.applyCurrentSensorType` 统一处理 WebSocket 切换事件和配置器主动激活，避免关闭弹窗后仍停留在旧展示画面。 |
+| 2026-07-22 | 修复缺陷 | WebSocket 新增 `currentSensorType` 表示当前 runtime，`file/selectFlag` 保持授权语义；传感器切换不再覆盖浏览器中的 `allowedTypes`。 |
+| 2026-07-22 | 架构优化 | 标题栏分别组合授权内置系统和本机外部 Display Systems，保存配置后立即注册定义并热刷新清单，无需重启软件。 |
+| 2026-07-22 | 新增功能 | Display Systems 新增可选 `coordinate-map.json`，支持直接读取 `rows × cols × [x, y]` 物理坐标矩阵，独立于数据映射使用的 `point-order.json`。 |
+| 2026-07-22 | 交互优化 | 配置主流程改为导入传感器形状坐标，自动生成默认 row-major 点序并展示矩阵、采样点数和真实宽高比，不再显示大段点序 JSON。 |
+| 2026-07-22 | 渲染优化 | Manifest 热力图、数字矩阵和原始二维图统一按物理坐标绘制 SVG 点图；`111` 已接入 32×32、1024 点坐标文件，旧系统保持规则矩阵回退。 |
+| 2026-07-22 | 修复缺陷 | 修复已配置系统的字符串分隔符被编辑器当作数组调用 `.map()`；前端兼容旧格式，后端后续保存统一持久化为字节数组。 |
+| 2026-07-22 | 架构优化 | `point-order.json` 成为矩阵尺寸和采样点数的唯一数据源；Workspace 保存服务自动推导、规范化并回写 manifest，支持稀疏矩阵点位。 |
+| 2026-07-22 | 交互优化 | 新建弹窗和主配置移除矩阵行列输入，主流程改为导入/粘贴点位 JSON，并只读展示自动矩阵、采样点数和矩阵单元数。 |
+| 2026-07-22 | 优化重构 | 主软件标题栏的展示系统配置入口改为大弹窗，配置期间不卸载 Home 和实时连接；配置器内部新建仍使用轻量二级弹窗。 |
+| 2026-07-22 | 新增功能 | 展示系统新建入口改为基础信息弹窗；保存结果明确区分继续配置与加载到软件，加载操作复用 HTTP `sensor.switch`。 |
+| 2026-07-22 | 修复缺陷 | 主界面恢复最近激活的传感器，后端切换后广播当前类型，并让新 WebSocket 连接优先返回 runtime 类型，避免自定义配置重新进入后被旧类型覆盖。 |
+| 2026-07-21 | 优化重构 | 传感器配置器重排为三步主流程，串口解析成为核心区域；高级配置改为三个标签页，并新增实时配置摘要和桌面/移动响应式布局。 |
 | 2026-07-14 | 新增功能 | 新增页面展示系统配置器和可写 HTTP API，可从串口协议一直配置到渲染方案，保存后立即重建 Display Systems runtime。 |
 | 2026-07-14 | 优化重构 | 展示系统配置器改为串口解析模板与数据展示模板优先，详细协议、映射、算法和左栏参数折叠为高级配置。 |
-| 2026-07-14 | 优化重构 | 串口配置收敛为传输形式、是否分包、波特率、分隔符和 8/12 Bit 五项，并新增固定长度原始帧，组成三个经典协议模板。 |
+| 2026-07-14 | 优化重构 | 串口配置收敛为传输形式、是否分包、波特率、分隔符和 8/12 Bit 五项，并以经典 8 Bit、921600 分包协议和经典 12 Bit ADC 组成三个协议模板。 |
 | 2026-07-14 | 新增功能 | 左侧数据面板支持算法命名输出；后端算法可返回 `{data, metrics}`，页面安全算法可配置常用聚合指标。 |
 | 2026-07-14 | 优化重构 | 展示系统采集与回放保留 `normalizedData` 和算法命名指标，回放左侧面板与实时数据保持一致；旧设备数组存储格式不变。 |
 | 2026-07-14 | 新增功能 | Display System 新增可选择展示方案，支持从菜单组合渲染方式、可视算法和页面 widgets；SDK 同步提供 profile 查询接口。 |
@@ -252,9 +882,42 @@ flowchart LR
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-03 | 六个调参滑块的默认值现在只写在一个地方 | 界面和交互一点没变，改的是「改一个默认值要动多少文件」。原来 54 个展示形式各自在文件顶部抄了同一段读取代码（六个阈值 × 两个通道，共 47 份、2206 个使用点），要调某个形式的初始灵敏度就得翻进那个文件；现在这段读取收成一处，每个展示形式只留一行「我的默认值是多少」。清点时发现**六个滑块的默认值全都有例外**（不是只有主阈值），甚至有一个展示形式的两个通道默认值互不相同 —— 这些逐个原样保留了，清空浏览器数据后的首屏与改动前一致。顺带修掉一个真实故障：以前如果本地存的调参值坏了（被别的程序写脏、或手动改错），页面会**直接打不开**（读取时抛异常）；现在坏值自动回落到默认值。 |
+| 2026-08-03 | 配色下拉多一条「彩虹 Jet」，界面其余一切不变 | 画布配置器和 manifest 渲染器的配色列表末尾多出「彩虹 Jet」，选中即生效，**按保存也能存进展示系统**（后端另有一份配色清单，漏登记会让保存被拒，已一并补上）—— 这套彩虹配色其实一直是主界面 3D 场景在用的那一套，但在此之前**只有「不选配色」时才会命中，列表里选不到它**。其余部分用户看不出任何区别：这一轮做的是把同一段配色代码的 18 份拷贝收成 1 份，所有页面的出图逐像素不变。顺带在测试里钉住了老代码的一个既有瑕疵（彩虹色带四个分界点附近，某个通道会算出 7 而不是 0，观感上是黑色里掺一丝蓝，看不出来）—— 这次刻意**没有修**，因为修它会同时改动 14 个页面的配色，要单独安排一次真机确认。 |
+| 2026-07-31 | 展示形式从「复制一个文件」变成「加一条预设」 | 界面和交互一点没变 —— 这一轮改的是加新展示形式要花多少功夫。原来是复制一个上千行的场景文件、改里面几个数字，改完 45 个文件里就多一份漂移的拷贝（`matCol` 和 `carCol` 逐行只差两个数字，`hand0205` 和它的 copy 已经差了 509 行）；现在同源的形式共用一个渲染器、各自只是一条参数预设。渲染器改成按需加载，进主界面不再一次性拖上几十个用不到的 3D 场景。清掉了 5 个谁都没引用的场景文件和 6 个从未被调用的 hook。剩下 38 个老场景组件按同一份配方逐组跟进。 |
+| 2026-07-31 | 改坏了能复原，改好了能留下 | 零件栏上方多一条状态带，只在有未保存的改动时出现。**撤销**弹确认框列清单（「配色：热成像 → 经典蓝红」「移除叠加层：网格线」「恢复图表卡片：原始数据总和」），确认后回到基线，顶部菜单选的方案 / 渲染方式 / 可视算法不受影响；**保存**把当前样子写进这个展示系统自己的 `display-system.json`，刷新、换电脑都还在，再点撤销回到的是刚保存的样子；**另存为**把整个文件夹复制成一个新的小展示模块（子目录和算法文件一并带走），顶部传感器菜单立刻多一项，当前测量与串口不中断。自带展示系统只有撤销和另存为 —— 另存为是它唯一的保存出路。约 55 个写死的老展示形式没有文件夹，只有撤销。 |
+| 2026-07-30 | 拖一个零件多一张图表 | 零件栏多一类「图表卡片」，6 个方块各带一条缩略曲线；拖一个到页面上，侧栏立刻多一张和 Pressure Area 同款的实时曲线大卡片，刷新后还在，点标题进原有公式编辑器改公式，拖回零件栏或点删除按钮移除。新卡片走的是同一条 `drawChart`，所以图表配色和四个叠加层对它自动生效。原来用 `+` 号建的公式图表一并升级成这个长相。上限仍是 6 张，与弹窗新建共享额度。 |
+| 2026-07-29 | 侧栏曲线可换外观 | Pressure Data / Pressure Area 两条曲线能拖零件了：换配色把 2px 纯色变成纵向渐变（低在下高在上，和压力图色带同向），网格 / 最大最小刻度 / 峰值标记 / 末值标签四个叠加层各自开关。图表和画布是两块独立表面，互不影响。零件跟着零件栏走，所以只在已挂零件栏的那几个页面能拖。 |
+| 2026-07-29 | 零件栏覆盖 legacy 3D 场景 | `handSinglePoint`（`32*32(检测点)` + `3D模型`）、`hand`、`handBlue`、`sit`、`normal`、`sitCol`、`petCare` 这些走 `CanvasHand` 的页面也有零件栏了，且因为逐帧算色而**换配色不重建、相机视角保留**。其余约 50 个 legacy scene 组件各有自己的上色写法，仍需逐个改。 |
+| 2026-07-29 | 主界面画布零件栏 | 主界面的 3D 场景底部固定一条零件栏，拖色卡即换配色（刷新后保留）；只列配色与图例两类 —— 3D 场景没有 widget 网格，数值和格线是精灵图本身画的，其余叠加层仍是二维 widget 的能力。 |
+| 2026-07-28 | 展示画布配置器 | 底部零件栏拖放配置配色、叠加层和卡片布局；同一组件在配置器里决定 manifest 默认值、在主界面里决定本机偏好，`display.canvas` 缺省时老 manifest 行为不变。 |
+| 2026-07-27 | 多传感器展示系统 | 一个 manifest 可声明多个传感器，各自独立的协议、矩阵、线序和算法；parser 通道、串口和输出通道统一按 `${systemId}:${sensorId}` 分配，v1/v2 配置自动升格。 |
+| 2026-07-27 | 串口帧校验 | 协议支持可选帧头与 sum8/xor8/CRC16-Modbus 校验，位置可从帧尾倒数；坏帧在解码前丢弃并计入丢帧指标，配置器可直接填写。 |
+| 2026-07-24 | 配置器三栏工作台 | 设置页重构为左侧传感器列表、中间三步配置、右侧实时摘要；经典协议、点位映射和显示验证各自聚焦，底部主操作保持可见。 |
+| 2026-07-24 | 原始数据代码算法 | 用户展示系统支持 JavaScript/Python `calculate` 函数，首参为串口协议解码后的原始数组，并可访问标准矩阵上下文。 |
+| 2026-07-24 | 展示系统只读边界 | 系统内置展示系统在前端、保存服务和运行时发现层均不可被用户配置覆盖；用户自建系统保持可编辑。 |
+| 2026-07-24 | 显示矩阵变换 | 用户系统可选择原始矩阵、双线性插值或区域平均缩小，显示变换不影响压力统计、公式、采集和回放数据。 |
+| 2026-07-24 | 安全计算函数契约 | 图表公式以完整 `calculate` 函数编辑和保存，实时计算仍由白名单表达式解释器执行；历史纯表达式无需迁移即可继续工作。 |
+| 2026-07-24 | 公式中文语义解释 | 编辑图表时优先展示公式的中文业务含义；复杂区域、阈值、条件和算法指标公式也可根据 AST 实时解释，英文表达式降级为高级编码。 |
+| 2026-07-24 | 公式图表编辑器视觉统一 | 编辑图表时所有表单控件与下拉选项使用一致的深色中性层级，输入文字、占位文字和状态反馈具有稳定对比度。 |
+| 2026-07-23 | 原始矩阵公式模板 | 公式编辑器可选择 6 个模板，查看/复制当前标准矩阵，并通过点、区间、行列、矩形区域和分布统计函数直接计算实时数据。 |
+| 2026-07-23 | 业务能力缺口与优先级 | 已确认主实时链完整；下一阶段重点是通用 PacketAssembler、ProcessingPipeline、RendererRegistry、ROI、采集/导出任务以及 diagnostics，而不是继续机械拆分文件。 |
+| 2026-07-23 | 串口到渲染流程文档 | 已把控制命令、串口生命周期、parser 分帧、双 Runtime 路径、Frame Pipeline、WebSocket、Home 路由及主场景/侧栏/公式图表分支整理为可折叠业务流程。 |
+| 2026-07-23 | 内置趋势图公式化 | Pressure Data 和 Pressure Area 已复用安全公式运行时，支持按传感器编辑并持续接管原有 Canvas；空配置只保留轻量添加入口。 |
+| 2026-07-23 | 实时消息边界兼容 | WebSocket 字符串/对象事件统一解析，非矩阵控制对象不会再触发压力矩阵 `JSON.parse` 异常。 |
+| 2026-07-23 | 可编辑公式趋势图 | 用户可在主界面为每个传感器维护多张公式图表，公式读取标准化矩阵、基础统计和命名算法指标，图表定义在本机持久化。 |
+| 2026-07-23 | 配置系统接入现有主场景 | 配置弹窗只负责编辑；保存后返回 Home，复用现有 Three.js 数值场景按坐标矩阵绘制传感器形状，并保持原有左侧数据面板。 |
+| 2026-07-23 | Display Systems 热重绑 | 当前传感器切换后重新计算并挂载动态 parser dispatcher，形成“保存配置 → 切换系统 → 串口解析 → 映射算法 → 主场景”的无重启链路。 |
+| 2026-07-23 | 配置保存后直接展示 | 删除保存结果二级弹窗，配置成功后自动加载当前传感器并返回主界面，失败时保留配置器和错误提示。 |
+| 2026-07-22 | 授权与运行状态解耦 | 当前传感器切换、密钥授权范围和本机扩展系统清单使用独立状态，加载自定义系统后仍保留全部密钥系统。 |
+| 2026-07-22 | 物理坐标形状渲染 | 坐标文件贯通 Workspace 校验、runtime metadata、主前端注册表和通用 SVG 点图，SDK 注册表同步读取坐标 metadata。 |
+| 2026-07-22 | 展示系统协议格式兼容 | 已配置系统可读取字符串或数组分隔符，重新保存后统一生成标准字节数组协议。 |
+| 2026-07-22 | 主软件内配置弹窗 | 标题栏齿轮原位打开完整配置器，保存并加载后关闭弹窗，主页面路由和实时连接不重建。 |
+| 2026-07-22 | 展示系统保存与加载闭环 | 新建弹窗生成草稿，保存只负责持久化和 runtime 热加载；用户确认后再切换传感器并进入主软件。 |
+| 2026-07-21 | 传感器配置页层级优化 | 主流程聚焦传感器、串口解析和默认展示；次要参数分组折叠，右侧摘要实时反馈配置完整度与帧参数，保留原 manifest/API 契约。 |
 | 2026-07-14 | 展示系统页面配置器 | 支持新建/编辑配置、自动或自定义线序点位、安全 JSON 算法、渲染方案选择和热加载。 |
 | 2026-07-14 | 展示系统快速模板 | 支持选择通用 8 位/12-bit ADC 串口解析模板及热力图/数字矩阵展示模板。 |
-| 2026-07-14 | 三种经典串口模板 | 支持经典 8 Bit 帧、经典 12 Bit ADC 和固定长度原始帧，固定帧长度随矩阵与数据精度自动计算。 |
+| 2026-07-14 | 三种经典串口模板 | 支持 1000000 baud 经典 8 Bit、921600 baud 分包协议和经典 12 Bit ADC；固定帧长度随矩阵与数据精度自动计算。 |
 | 2026-07-14 | 左侧算法指标 | 支持配置算法输出 Key、聚合方式、阈值、单位、小数位和左侧显示位置。 |
 | 2026-07-14 | 算法指标采集回放 | 展示系统历史帧保存并恢复算法指标、基础统计和归一化矩阵，左侧自定义数据可随历史帧回放。 |
 | 2026-07-14 | 可选择展示方案 | Manifest 可声明 renderer、可视算法和 widgets 组合，主前端与 SDK 使用同一 profile 契约。 |
@@ -331,7 +994,7 @@ flowchart LR
 
 ---
 
-> 本文档由 Codex 自动生成和维护。最后更新于：2026-07-13
+> 本文档由 Codex 自动生成和维护。最后更新于：2026-08-03
 
 ## 2026-07-07 Display Systems Runtime 定义与复杂线序迁移
 
@@ -433,20 +1096,26 @@ shroom1.0/
 │       ├── App.js           # 路由配置（25+ 路由）
 │       ├── constants.js     # 前端统一常量
 │       ├── hooks/           # 自定义 Hook
-│       │   ├── useWebSocket.js        # WebSocket 连接管理（自动重连 + 心跳）
-│       │   ├── usePressureData.js     # 压力数据状态管理
-│       │   ├── useSerialControl.js    # 串口控制指令封装
-│       │   ├── useThreeScene.js       # Three.js 场景初始化
-│       │   ├── usePlayback.js         # 历史数据回放控制
-│       │   ├── useDeferredPressure.js # React 19 并发特性
-│       │   └── useInstancedMesh.js    # InstancedMesh 渲染 Hook
+│       │   └── useWebSocket.js        # WebSocket 连接管理（自动重连 + 心跳）
+│       │                              # 唯一在用的 Hook，消费方是
+│       │                              # services/ws/useMainWebSocket.js
+│       ├── runtime/         # 运行时通道层（不含 UI）
+│       │   ├── frameBus.js            # 帧总线（Set + notify，订阅时补发末帧，不进 React state）
+│       │   ├── useSceneFrame.js       # 订阅 hook（handler 存 ref，不叫 useFrame）
+│       │   └── sceneFrame.js          # 规范帧组装 + padThumbGap / toRaw256 两个纯整形
+│       ├── renderers/       # 渲染器插件（一律动态 import 懒加载）
+│       │   ├── registry.js            # 注册表：register / getDescriptor / loadRenderer
+│       │   ├── RendererHost.jsx       # 三通道宿主：帧总线 + 视图 props + 声明过的命令
+│       │   ├── contract.js            # RENDERER_CAPABILITIES 能力常量
+│       │   ├── builtins.js            # 内置 descriptor 清单（含 presets）
+│       │   └── pointGrid/             # 点阵热力渲染器 = 旧 matCol + carCol 两条预设
 │       ├── store/           # Zustand 状态管理
 │       │   ├── useAppStore.js         # 全局应用状态
 │       │   └── usePressureStore.js    # 压力数据专用 Store
 │       ├── types/           # TypeScript 类型定义
 │       │   └── index.ts
 │       ├── components/      # UI 组件
-│       │   ├── three/       # 3D 渲染组件（47 个传感器类型组件）
+│       │   ├── three/       # 3D 渲染组件（38 个场景组件，正逐组迁往 renderers/）
 │       │   ├── heatmap/     # 2D 热力图组件
 │       │   ├── chart/       # ECharts 图表组件
 │       │   ├── car/         # 汽车座椅专用组件
@@ -459,7 +1128,7 @@ shroom1.0/
 │       │   ├── video/       # 视频组件
 │       │   └── ...
 │       ├── page/            # 页面级组件
-│       │   ├── home/        # 主页（Home.js 3610 行 + HomeFun.js）
+│       │   ├── home/        # 主页（Home.jsx 约 5340 行 + util.js 5564 行）
 │       │   ├── col/         # 数据采集页
 │       │   ├── date/        # 历史数据页
 │       │   └── license/     # 密钥配置可视化页面
@@ -489,9 +1158,11 @@ shroom1.0/
 | `/client/src/components/title/` | 顶部标题栏组件，负责品牌字标、传感器切换、采集/回放控制、语言切换与设置抽屉 |
 | `/preload.js` | Electron 预加载脚本，建立渲染进程与主进程之间的安全 IPC 通道 |
 | `/server.js` | 后端核心调度器，协调串口通信、数据处理、WebSocket 分发、数据库存储 |
-| `/client/src/hooks/` | 7 个自定义 React Hook，封装 WebSocket、压力数据、串口控制、3D 场景等逻辑 |
+| `/client/src/hooks/` | 只剩 `useWebSocket`（连接管理，自动重连 + 心跳）。原先并列的 `usePressureData` / `useSerialControl` / `useThreeScene` / `usePlayback` / `useDeferredPressure` / `useInstancedMesh` 六个全仓从未被消费，已于 2026-07-31 删除 |
 | `/client/src/store/` | Zustand 状态管理，分为全局应用状态和高频压力数据状态 |
-| `/client/src/components/three/` | Three.js 3D 渲染组件与兼容入口，覆盖不同传感器类型和矩阵尺寸 |
+| `/client/src/components/three/` | Three.js 3D 渲染组件与兼容入口，覆盖不同传感器类型和矩阵尺寸。剩 38 个，正按 `PointGridRenderer` 的三步配方逐组迁往 `renderers/` |
+| `/client/src/runtime/` | 运行时通道层，不含任何 UI。`frameBus.js` 是帧总线（`Set` + `notify`，订阅时同步补发末帧；**不进 React state**，一帧都不触发重渲染），`useSceneFrame.js` 是订阅 hook，`sceneFrame.js` 把 `Home.jsx` 里约 900 行 per-matrix 整形收敛成规范帧，`displayThresholds.js` 是六个调参阈值（`carValuej` 等）在全仓的**唯一读取出口**（原来 47 个文件各抄一段模块级声明） |
+| `/client/src/renderers/` | 渲染器插件层。渲染器一律动态 `import` 懒加载，不进 Home 的 chunk；`RendererHost.jsx` 同时是懒加载入口、错误边界和三通道适配器（帧总线 / 视图 props / `descriptor.methods` 声明过的命令）。同源组件靠 `descriptor.presets` 合并，不再 fork 文件 |
 | `/client/src/components/webgl/` | WebGL/Canvas 热力图渲染兼容模块，供机器人与复合体表映射组件复用 |
 | `/client/src/page/home/` | 主页面组件（Home.js），系统核心交互界面 |
 | `/docs/` | 架构文档、优化报告、技术优化建议，以及 EULA 最终用户许可协议文本 |
@@ -525,10 +1196,12 @@ graph TD
     subgraph "Electron 渲染进程"
         APP["App.js<br/>路由"]
         HOME["Home.js<br/>主页面"]
-        HOOKS["hooks/<br/>7个自定义Hook"]
+        HOOKS["hooks/<br/>useWebSocket"]
         STORE["store/<br/>Zustand"]
-        THREE["three/<br/>3D组件"]
+        THREE["three/<br/>3D组件(legacy)"]
         HEAT["heatmap/<br/>热力图"]
+        BUS["runtime/<br/>frameBus 帧总线"]
+        REND["renderers/<br/>渲染器插件(懒加载)"]
     end
 
     subgraph "外部"
@@ -555,6 +1228,9 @@ graph TD
     HOOKS --> STORE
     STORE --> THREE
     STORE --> HEAT
+    HOME -- "publishFrame 每帧" --> BUS
+    BUS -- "subscribeFrames 不进 state" --> REND
+    HOME -. "sitTypeEvent 旧路(绞杀者并存)" .-> THREE
 
     HW -- "USB 串口" --> SERIAL
     UPDATE -- "HTTPS" --> GH
@@ -591,7 +1267,7 @@ graph TD
     - 大体量历史 CSV 下载不再先把所有帧和所有 CSV 行放入数组；`server.js` 使用 `matrix(date,id)` 索引按 `id` 游标分批读取历史帧，并用 `csv-writer` stringifier 写入文件流，覆盖通用 sit/back/head、整椅、大小床、选区标签和触觉手套2合并导出，降低 90 万帧下载时主进程内存压力。导出过程中后端会按批次通过 WebSocket 发送 `csvDownloadProgress`，前端 `Title.jsx` 的 CSV 下载弹窗展示百分比、当前文件、已写行数和多文件序号。
 
 3. **历史数据回放流程**
-    - 用户在历史数据页选择记录 → 前端发送 `play` 指令 → `server.js` 从 SQLite 读取历史帧数据 → 按时间间隔逐帧通过 WebSocket 推送 → 前端 `usePlayback` Hook 管理播放状态（播放/暂停/变速/跳帧）。
+    - 用户在历史数据页选择记录 → 前端发送 `play` 指令 → `server.js` 从 SQLite 读取历史帧数据 → 按时间间隔逐帧通过 WebSocket 推送 → 前端在 `Home.jsx` 和 `Title.jsx` 里管理播放状态（播放/暂停/变速/跳帧）。（曾计划抽成 `usePlayback` Hook，该文件从未被任何页面消费，已于 2026-07-31 删除。）
     - `smallBed12B` 回放兼容 32x32 原始采集和 16x16 缩小采集两种历史格式；`server.js` 会把对象格式历史帧还原为 `sitData` 并携带 `matrixWidth/matrixHeight`，32x32 采集按 32x32 回放，16x16 采集按 16x16 回放，不再把 256 点历史帧扩回 1024 点；`Home.jsx` 默认按标题栏 `展示设置` 初始化 12B 视图尺寸，`Title.jsx` 的回放/历史入口和历史时间选择都会同步 `smallBed12BDisplayOptions` 给后端，`server.js` 的主 WebSocket 与辅助 WebSocket 消息入口都会先应用该设置再处理 `getTime/loadSelectedHistory`，因此历史选择空帧也会按展示设置输出 16x16 或 32x32；前端只根据真实矩阵帧的 `matrixWidth/matrixHeight` 或历史回放帧的 `sitData` 方阵长度同步尺寸，控制/进度/切换清空类 WebSocket 消息不会再把尺寸回退到 32x32，避免默认展示和回放时反复重挂载闪烁。
     - 大体量历史记录（如几十万帧以上）选中时，`server.js` 不再一次性 `SELECT *` 加载全部帧到内存；改为先查询 `COUNT/MIN(id)/MAX(id)` 元信息、建立 `matrix(date,id)` 索引、生成最多约 2000 点的抽样压力/面积曲线，并通过懒加载代理在回放或拖动进度时按当前帧索引读取单帧，避免 90 万帧记录选中和回放时阻塞 Electron 主进程。
 
@@ -612,7 +1288,7 @@ graph TD
 
 ## 5. API 端点 (Endpoints)
 
-本项目不使用 HTTP REST API，而是通过 **WebSocket 消息协议**进行前后端通信。系统运行 3 个 WebSocket 服务器：
+实时数据与控制指令走 **WebSocket 消息协议**；展示系统的查询与写入另有一组 HTTP 路由（路径常量集中在 `backend/contracts/sdkApiContract.js` 的 `HTTP_ROUTES`）。系统运行 3 个 WebSocket 服务器：
 
 | WebSocket 端口 | 用途 | 数据方向 |
 | :--- | :--- | :--- |
@@ -640,6 +1316,21 @@ graph TD
 | `getMessage.history` | 历史数据查询 |
 | `getMessage.serialReset` | 串口重置 |
 | `getMessage.indexArr` | 批量索引设置 |
+
+### HTTP 路由（展示系统）
+
+| 方法 / 路径 | 描述 |
+| :--- | :--- |
+| `GET /api/display-systems` | 已发现的展示系统列表、扫描目录、运行时绑定与 dispatcher 状态 |
+| `GET /api/display-systems/:id` | 单个展示系统的 manifest 解析结果 |
+| `GET /api/display-systems/catalog` | 配置器可选目录：协议模板、算法、渲染器、配色 / 叠加层白名单、卡片上限、可写根目录 |
+| `GET /api/display-systems/:id/editor` | 配置器需要的 manifest 原文与关联文件 |
+| `POST /api/display-systems` | Builder 写入整份 manifest（含线序、点位、算法数据） |
+| `PATCH /api/display-systems/:id/display` | **保存** —— 只写 `display` 段的 `canvas` / `chartAppearance` / `chartCards` |
+| `POST /api/display-systems/:id/duplicate` | **另存为** —— 递归复制整个目录成一个新 id，并写入上述三段 |
+| `POST /api/display-systems/reload` | 手工复制文件后重新发现与绑定 |
+
+写接口的错误码：`DISPLAY_SYSTEM_EXISTS` → 409，`DISPLAY_SYSTEM_READ_ONLY` → 403，其余校验失败 → 400（`details` 里是逐条中文说明）。
 
 ## 6. 外部依赖与集成
 
@@ -677,6 +1368,9 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-03 | codeOpi | 横切共用层（二）：47 个阈值声明块 / 2206 个读写点收成一个 store | 新建 `client/src/runtime/displayThresholds.js`（`STORAGE_KEYS` / `storageKeyOf` / `readStoredNumber` / `DUAL_CHANNEL_DEFAULTS` 37 份 / `SINGLE_CHANNEL_DEFAULTS` 7 份 / `SECOND_CHANNEL_DEFAULTS` 2 份 / `createThresholdState`），六个键在全仓只剩这一个读取出口。消费方式是**解构**：`var { valuej1, … } = createThresholdState(PRESET)` 给出普通局部绑定，`sitValue(prop)` 的 `valuej1 = prop.valuej` 照旧可写，**2206 个读写点与真值守卫 `if (prop.valuej)` 一字未动**。**没有照计划做「模块加载时读一次快照」** —— 先数出 47 个块作用域不统一（23 个模块顶层 / 24 个在 `forwardRef` 函数体内），共享快照对两者都不等价，改为每次调用现读、调用点即原声明处，作用域全部保持原样。默认值按**变量名**给：实测六个键全有离群值，且 `three/wholeChair.jsx` 两通道默认值不对称（`valueg1`=4/`valueg2`=2、`value1`=2.1/`value2`=2、`valuel1`=1/`valuel2`=2），按 localStorage 键给会静默改掉首屏且无测试会失败。脚本换 39 个块，四处手工：`three/Short.jsx`（块中夹一行读 `ymax` 键的 `ymax1`，拆出单放；通道 1 是 `2655/3.3/2.08/4/0`、`valuelInit1` 为 2001）、`heatmap/canvas.jsx`（`carValuej` 在这里读成 `options.max`，默认 **600**）、`page/home/HomeFun.jsx`（六个 `useState` 初值，原每帧 12 次 `getItem` → 一次调用）、`assets/util/util.js` 的 `initValue`（`valuelInit1` 默认 **500**；非阈值的 `valueMult`/`compen`/`press`/`ymax1` 原样保留）。`assets/util/bed4096numParams.js` 改为 `createThresholdState(SINGLE_CHANNEL_DEFAULTS)` 但**保留模块**（它的价值是模块级单例，两个模式共享引用以「切换模式时调参不重置」）。`renderers/pointGrid/PointGridRenderer.jsx` 删掉自己那份 `readStoredNumber` + 12 行 `createTuningState`（本 store 的原型），改为直接调；store 的 `globalThis.localStorage?.` 写法即从它继承（非浏览器环境可导入）。新增 `displayThresholds.test.js` 42 例：`legacyDualBlock` / `legacySingleBlock` / `legacyWholeChairBlock` 三份基准逐字抄自被删的原声明块，6 个 localStorage 场景（全空 / 全设 / 部分 / **全 0** / 小数负数 / 空串）× 三组等价性，三个离群文件的 per-file 默认值，以及两条把老写法缺陷**证出来**的断言 —— `expect(() => legacyDualBlock()).toThrow()`（存 `"abc"` 时老写法在模块加载期抛异常，页面打不开）与 `expect(legacyDualBlock().valuej1).toBe(null)`（存 `"null"` 时把 `null` 当阈值用），新实现两种都回落默认值；另有一条「每次调用都现读 localStorage，不用模块级共享快照」钉住上面那个设计决定。**正常值逐字相同，含 `"0"` 取到 0 而非默认值这个 quirk。** `carValuePress`（第七个键，`demo/` 9 文件）不在本刀内。测试：前端 **303 通过 / 15 套件**（`App.test.jsx` 仍是既有的缺 `@testing-library/react`），后端 35/35，`src/renderers` / `src/runtime` / `util.js` / `bed4096numParams.js` / `heatmap/canvas.jsx` eslint `--max-warnings=0` 通过（`Short.jsx` 的 exhaustive-deps 告警经比对 HEAD 版本确认为既有，`HomeFun.jsx` 在 eslint ignore 列表内）；`npx vite build --outDir ../tmp/build-check` 通过，`git status --short build/` 仍是 85。 |
+| 2026-08-03 | codeOpi | 横切共用层（一）：jet 收敛 + 注册成第 7 条 colormap | 新建 `client/src/assets/util/jetLadder.js` 存放全仓唯一那条分支阶梯 `jetRgb`（**零依赖零副作用** —— `colormaps.js` 会被后端测试用裸 Node ESM 加载，import 不了 `util.js`：内部导入没写 `.js` 扩展名，且顶层就在读 `localStorage`），`util.js` 改为 import 后 `export { jetRgb }` 原样 re-export，对外接口与导入路径不变（**没有新建计划中的 `jetUnit`**，`jetRgb` 本就是那条 0..1 阶梯）；`jet` 改为委托它并新增 `jetRgba` / `jetRound` 两个出口。15 个消费文件删掉本地 `function jet` 块、按字母序把 `jet` / `jetRgba as jet` / `jetRound as jet` 并进各自已有的 util 具名导入，调用点逐字节不变。`components/displaySystem/colormaps.js` 新增第 7 条 `{ id: 'jet', label: '彩虹 Jet' }`（`sampleJetRgb` 走 `jetRgb` + `Math.round`，排在既有六条之后）；`backend/displaySystems/displaySystemCanvasCatalog.js` 的 `CANVAS_COLORMAPS` 同步追加同一条 —— 那是前端 `COLORMAPS` 的重复清单，只登记前端会让保存路由把 jet 判成非法配色。新增 `util.jet.test.js`（72 例，四份原实现逐字抄进测试当基准 + 19 个取样点 + 0.5 步长密扫 + 一条钉住 `parseInt` 科学计数法 bug 的断言 + 一条 `jetRgb === jetLadder.jetRgb` 的身份断言防再抄一份）；`colormaps.test.js` 补 6 例（含一条把「与老 `jet()` 差 >1 的唯一例外必须是那个 bug」写成可执行断言的检查）；`backend/tests/displaySystems/configValidation.test.js` 更新两处期望错误串。测试：前端 261 通过 / 14 套件（`App.test.jsx` 仍是既有的缺 `@testing-library/react`），后端 35/35，改动文件 eslint 零告警。 |
+| 2026-07-31 | codeOpi | 前端渲染器插件化与三条通道 | 新增 `client/src/runtime/`（`frameBus.js` / `useSceneFrame.js` / `sceneFrame.js`）；`RendererHost.jsx` 加宽成三通道宿主并新增 `frameChannel` 显式 opt-in 与 `auditRendererContract` 契约审计；`CanvasCom.shouldComponentUpdate` 增比 `viewKey`；`Home.jsx` 接总线（与 `sitTypeEvent` 并行的绞杀者模式）、60 处重复 prop 束收敛成两条 `sceneChartProps`、125 处 `.bind(this)` 提到构造函数；`matCol.jsx` / `carCol.jsx` 合并成 `pointGrid` 的两条 `presets` 后删除；另删 5 个零引用场景文件与 6 个未被消费的 hook。 |
 | 2026-07-06 | Codex | 后端阅读导航层 | 新增 `backend/README.md`，提供核心数据流图、控制命令流图、模块阅读入口、命名约定和剩余迁移说明；`server.js` 顶部增加阅读路线注释。 |
 | 2026-07-06 | Codex | 历史会话与关闭流程服务化 | 新增 `backend/services/history/historySessionService.js` 和 `backend/server/serverShutdownOrchestrator.js`，把历史日期列表、历史加载、趋势曲线、空白回放帧以及服务关闭流程从 `server.js` 拆出。 |
 | 2026-07-06 | Codex | 串口与 legacy runtime 编排继续拆分 | 新增 `backend/serial/serialPortOrchestrator.js`、`backend/sensors/runtime/legacySerialContextFactory.js` 和 `backend/services/realtime/realtimeFrameDispatchService.js`，把串口打开规则、legacy accessor 拼装和旧实时发送函数适配从 `server.js` 继续下沉。 |
@@ -1028,11 +1722,34 @@ graph TD
 
 | 2026-04-27 | Codex | 手套 3D skin 热力图切换为 WebGL 渲染层 | `client/src/components/video/hand.jsx` 将 `hand0205` / `handGlove115200` 的 3D `skin` 模式从 `HeatmapCanvas.changeHeatmap()` CPU 逐帧生成改为 `WebGLCanvas.render()` 生成离屏热力图，再回贴到原有 `CanvasTexture`；同时保留旧 `HeatmapCanvas` 的强度缩放与补边预处理，维持 `ndata1` 数据格式、`sitData/changeColor` 接口和现有贴图链路不变 |
 | 2026-05-26 | Codex | Windows 自动更新安装前退出清理 | `autoUpdater.js` 在 `quitAndInstall()` 前调用主进程清理钩子，`index.js` 统一等待静态服务和后端服务关闭，`server.js` 将串口、WebSocket、数据库和 OneStep 报告 HTTP 服务关闭流程 Promise 化，避免 NSIS 安装器提示旧版 Shroom 无法关闭 |
+| 2026-07-24 | Codex | Display System 可编程算法 | 新建展示系统可编写 JavaScript 或 Python `calculate` 函数，以协议解码原始数组为首参；Python 接入常驻 worker 和有界帧背压。 |
+| 2026-07-24 | Codex | 展示系统权限与显示矩阵 | 内置系统只读且不能被同 ID 用户 manifest 覆盖；用户系统支持双线性插值和区域平均缩小，业务统计保持读取标准矩阵。 |
+| 2026-07-24 | Codex | 展示系统配置器三栏化 | 设置页改为传感器列表、三步配置和固定摘要三栏；桌面保持高密度编辑，窄屏自动纵向排列，运行时与 Manifest 契约不变。 |
+| 2026-07-28 | codeOpi | 展示画布配置器 | 新增 `display.canvas` 配置段与共享的拖放式配置器：底部零件栏按配色 / 叠加层 / 画布组件三类排列方块，拖进画布生效、拖出画布删除、拖到卡片上换序，点击与 `×` 作为无鼠标兜底。配置器里的画布只渲染真实实时帧（无数据时给出跳回数据接入步骤的空状态），保存后写进 manifest；主界面的同一组件把选择存进既有 `display-profile:<id>` 偏好键。配色新增 6 套方案，`classic` 逐字复刻原硬编码公式以保证既有系统观感零变化；叠加层为 5 个纯绘制层，不影响采集、回放、CSV 与压力统计。 |
+| 2026-07-29 | codeOpi | 主界面画布零件栏 | 把零件栏接进主界面实际在跑的 Three.js 场景（上一轮接在了无人挂载的 `ManifestDisplayRenderer` 上）。配置器新增 `overlay` 形态：零件栏固定在视口底部浮在 100vh 场景上，全视口拖放层只在拖拽进行中挂载以免吞掉点击。`Fast1024` 接 `colormap`，精灵图格子与逐实例 tint 两处分支，缺省和 `classic` 保持原 `jet` + `(r, 0.2, 1-r)` 通路不变；配色并进 `CanvasCom` 的 `variantKey` 触发整场重建。偏好读写抽成 `displayProfileStorage.js` 与 `ManifestDisplayRenderer` 共用。主界面只列配色与图例，其余叠加层在 3D 场景里无处落地。 |
+| 2026-07-29 | codeOpi | 零件栏覆盖 legacy 3D 场景 | 零件栏从 `Fast1024` 一条分支扩到 5 条，把用户实际在看的 `32*32(检测点)` + `3D模型`（`handSinglePoint`，走 legacy `CanvasHand`）也覆盖进来，另含 `hand` / `handBlue` / `sit` / `normal` / `sitCol` / `petCare`。`hand.jsx` 逐帧现算颜色而非烘焙纹理，因此换配色**原地生效、相机视角保留** —— 用一个稳定字符串 `colormapKey` 参与 `CanvasCom.shouldComponentUpdate` 但不进 `childBaseKey`，与 `Fast1024` 必须整场重建的 `variantKey` 分作两条通路；组件内用 `colormapRef` 让挂载时建立的逐帧闭包读到新配色，classic 判定在循环外做一次。框选外的灰化 `jetgGrey` 保持不动。挂载点只加在真的认 `colormap` 的分支上，其余约 50 个 legacy scene 组件未接。 |
+| 2026-07-29 | codeOpi | 侧栏图表接入零件栏 | 零件栏从「只管画布」扩成两块表面：`selection.charts` 与 `selection.canvas` 同构、同键、互不影响，由 `resolveChartAppearance` 解析（复用同一套归一丢弃逻辑；manifest 暂无图表默认外观字段，故只有用户偏好一层）。`PART_CATEGORIES` 增加 `chartColormap` / `chartOverlay`，`partSurface` / `applySurfacePart` / `isSurfacePartActive` 三个纯函数把 `chart` 前缀剥掉后复用既有画布语义，两块表面的零件行为因此不会分叉；`PartRail` 隐藏零件为空的类别。新增 `components/aside/chartAppearance.js` 提供纵向渐变描边（`classic` 不调 `createLinearGradient`，逐像素不变）与网格 / 刻度 / 峰值 / 末值四个叠加层（不含图例 —— 300×150 的画布放不下色带）。`Aside` 的 `drawChart` 接 `chartAppearance` prop，网格画在曲线前、装饰画在曲线后并用 `save`/`restore` 包住以免污染后面的虚线游标；`CanvasCom.shouldComponentUpdate` 增比 `chartKey`（不进 `childBaseKey` —— `Aside` 持有全部实时读数，重挂等于清空侧栏），暂停 / 停帧场景由 `componentDidUpdate` 用 `_pendingChart` / `_pendingArea` 缓存补画一次。图表零件跟着 `renderCanvasRail()` 的 5 个挂载点走，其余页面的侧栏仍是原样。测试：新增 `chartAppearance.test.js` 14 例（用记录调用的假 2D 上下文断言「该画的画了、不该画的一笔没动」），`canvasParts.test.js` 补表面归属 6 例，后端 `displayProfileRuntime.test.js` 补图表偏好隔离与坏值归一（前端 95 通过，后端 34/34）。 |
+| 2026-07-30 | codeOpi | 图表卡片本身也是零件 | 把 neal.fun 那个交互的核心动作补上：拖一个零件，页面上真的多一张图表。零件用 `formulaChartTemplates.js` 已有的 6 个模板，新卡片就是一条普通的公式图表定义（多一个 `templateId`），**没有新造图表系统** —— 生命周期、公式编译、逐帧求值全是 `FormulaChartPanel` 已经在跑的东西，这一轮加的是拖放入口和大卡片长相。`chartWidget` 作为**第三块表面**：它写 `shroom.formulaCharts.v1.<matrixName>` 而不是 `display-profile:<id>`，所以 `partSurface` 多返回一个 `'chartWidget'`，`applySurfacePart` / `isSurfacePartActive` 遇到它原样返回 / 返回 false，由配置器交给 `onChartWidgetAdd` 回调 —— 前两块表面一行未改。清单下沉成 `formulaChartStore.js`（一个 localStorage 键一个主人 + 模块级 `Set` 做 `subscribe`），`Home`（要零件高亮）与 `Aside`（要画卡片）**各自订阅**而不靠 props 穿 `CanvasCom.shouldComponentUpdate` 那道闸；`Aside` 的 `super()` 不带 props，故首载放在 `componentDidMount`，`Home.componentDidMount` 会被 `window.__wsReconnect` 重入所以订阅加了幂等守卫。防重复添加靠两级匹配：新定义按 `templateId`，老定义（`+` 号弹窗建的）回退到 `formulasMatch` 比较归一表达式 —— 少这一级会拖出第二份一模一样的卡片。加是幂等的（用户可能已改过公式，再拖当删除等于静默毁掉编辑），删只走卡片 Popconfirm 或把卡片拖回零件栏；那个 drop 处理器只在真删掉东西时才 `preventDefault`，否则 `z-index: 1210` 的底栏会吞掉落向画布的普通零件。卡片由 `Aside` 用自己的 `drawChart` 画（照抄 `onBuiltinSeries` 通路，多一个 `onCustomSeries`），因此免费获得上一轮的图表配色与四个叠加层、且与 Pressure Area 逐像素同源；canvas 不写 width/height 属性以保住 `drawChart` 的 `gap` 数学。自定义图表历史值从 `useState` 移到 ref，Panel 不再以 10Hz re-render，只剩常显入口与编辑弹窗（删掉自己那段 SVG 列表与 7 组死样式），`useImperativeHandle` 多暴露 `openEdit(id)`。测试：新增 `formulaChartStore.test.js` 19 例（坏 JSON、上限、幂等、订阅隔离与抛错容错、老定义公式回退匹配），`canvasParts.test.js` 补第三表面 2 例，`chartAppearance.test.js` 补 `buildSparklinePath` 3 例（前端 119 通过 / 10 套件，`App.test.jsx` 仍是既有的缺 `@testing-library/react`；后端 34/34；eslint 零告警）。 |
+| 2026-07-31 | codeOpi | 草稿层与三个动作 | 把「改坏了想复原、改好了想保存」这半件事补齐。**基线 vs 草稿**两层：基线是文件夹里的 `display-system.json`，草稿是 `display-profile:<id>` + `shroom.formulaCharts.v1.<matrixName>` 两个 localStorage 键；层次本来就是对的（用户偏好盖住 manifest 但没改掉它），这一轮只加动作、不动解析。新增 `displayDraftState.js`（纯函数，不碰 DOM 与 localStorage）：`describeDisplayDraft` 把同一个 `resolveDisplayProfile` 跑两遍 —— 一遍传只含 `profileId`/`rendererId`/`algorithmId` 的 `viewOnly` 当基线 —— 对比**解析结果**判脏，而不是看键在不在（拖走又拖回原值不该一直报脏）；`changes` 直接就是确认框文案，「移除」是撤掉用户加的、「恢复」是把 manifest 声明过却被关掉的放回来。**撤销**只删 `canvas` / `charts` 两个字段并靠 `persistDisplaySelection(..., {replace:true})` 覆盖写回 —— 整键 `removeItem` 会把用户正在看的方案/渲染方式/可视算法一起带走；卡片走 `resetFormulaCharts(matrixName, page.chartCards)` 回到基线而非清空。**保存**另开 `saveDisplaySection` 窄通路（读原文 → 只合并三段 → 原子写回），**不走 Builder 的 `save()`**：那个函数强制 `schemaVersion: 2`、重写 `sensor.matrix` / `protocol.decoding`、把 `files` 压成扁平路径，拿一份 v3 多传感器 manifest 过一遍只为加个配色会把它改坏（测试里有一份手写 v3 manifest 专门守这条）。合并语义 `undefined` = 不改、`null` = 删，所以前端无卡片时给 `[]` 而不是 `undefined`；**先校验后归一**（显式写错的 `legend` 要报错而不是被静默丢弃，落盘的是归一后的规范形态，因为这个文件是给做二开的人读的），唯独 `canvas.widgets` 前后端都显式删掉以保住「跟随 `display.widgets`」的语义。保存 = 写基线 + 清草稿，失败时**绝不清草稿**。**另存为**递归复制整个源目录（v3 有 `cushion/` 这类子目录）只重写 `id`/`name`/`metadata`/`display`，不做 JSON 往返；`metadata.origin` 必须显式改 `'user'`，否则 `classifyDisplaySystemAccess` 会按最高优先级判据把副本判成不可编辑；成功后就地 `registerRuntimeDisplayDefinition` + 派发 `shroom-display-systems-updated`，**留在原地只提示**，不 `sensor.switch` 以免中断现场采集。manifest 补上 `display.chartAppearance` / `display.chartCards`（**刻意不叫 `display.charts`**），`resolveChartAppearance` 加 manifest 基线层，卡片按 `hasFormulaCharts()` 区分「键不存在」与「用户主动删空」。两条新路由 `PATCH /:id/display` 与 `POST /:id/duplicate`，权限方向刻意不同：保存要求 `editable === true`，另存为不检查源能不能写（那是自带系统唯一的保存出路）。边界：约 55 个写死的老展示形式没有文件夹，**只有撤销**。测试：`workspaceService.test.js` 补 v3 逐字保留与目录复制、`appRuntimeDisplaySystems.test.js` 补只读拒绝与副本可编辑、`displaySystemsApi.test.js` 补 403/409/404、`displayDraftState.test.js` 全新（前端 142 通过 / 11 套件，后端 35/35，eslint 零告警）。 |
 
 ## 9. 更新日志
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-03 | codeOpi | 优化重构 | 横切共用层第二步：47 个阈值声明块 / 2206 个读写点 → 一个 store。新建 `client/src/runtime/displayThresholds.js`：`STORAGE_KEYS`（六个变量名前缀 → localStorage 键，通道后缀 1/2 共用同一个键）、`storageKeyOf`（名字不在六个里**当场抛**，拼错要立刻知道而不是静默 `undefined`）、`readStoredNumber`（`globalThis.localStorage?.getItem` + try/catch + `Number.isFinite`）、三条预设与 `createThresholdState(defaults)`（返回键与传入默认值键**完全一致**，漏写一个得到 `undefined` 而不是静默的 200）。消费方式刻意是**解构而非取对象**：`var { valuej1, … } = createThresholdState(DUAL_CHANNEL_DEFAULTS)` 拿到普通局部绑定，各文件 `sitValue(prop)` 的 `valuej1 = prop.valuej` 照旧生效，**2206 个读写点逐字节不变**；改成 `t.valuej1` 需动 2206 处零测试覆盖的 legacy 代码，风险与本步收益不成比例。`if (prop.valuej)` 那个「传 0 被忽略」的守卫按计划照抄未改。**计划里的「store 在自己模块加载时读一次存快照」没有采纳** —— 动手前统计出这 47 个块作用域并不统一：23 个在模块顶层（`indent 0`，实例共享、冻结在 import 时刻），24 个缩进 2 格在 `React.forwardRef((props, refs) => {` **函数体内**（本来就每实例、每次挂载重读，`car10.jsx` forwardRef@18/块@35、`hand0205.jsx` forwardRef@91/块@122 逐个核过）；共享快照对两种作用域都不等价（函数内那 24 个今天切走再切回拿到新值，模块顶层那 23 个因场景懒加载、改完阈值再切到未加载过的展示形式也读到新值），会一起冻结在第一个消费者加载的时刻，故实现为每次调用现读、调用点即原声明处，并以「每次调用都现读 localStorage，不用模块级共享快照」一条测试钉住。**所有块的作用域保持原样**，模块级那 23 个改成每实例需要 `stateRef`（见 `PointGridRenderer.createTuningState`），留给各文件改写成渲染器时顺带做。默认值按**变量名**给不按键给：实测**六个键全都有离群值** —— `carValuej` 200×84/335×2/255×2/600×1/2655×1、`carValueg` 2×86/3.6×2/4×1/3.3×1、`carValue` 2×87/2.1×1/2.08×1、`carValuel` 2×88/4×1/1×1、`carValuef` 2×89/**0**×1、`carValueInit` 2×87/2000×2/2001×1/500×1 —— 且 `three/wholeChair.jsx` **两通道不对称**（ch1 `255/4/2.1/1/2`，ch2 `255/2/2/2/2`），按键给会静默改掉这三处首屏表现且**不会有任何测试失败**；`carValuef` 的 `0` 是真实默认值而非「没设」。`SECOND_CHANNEL_DEFAULTS` 这条预设的存在是因为 `three/4096.jsx` 与 `three/NumThreeColor copy.jsx` 只声明 `value*2`（后缀 1 侧是 `const p = bed4096numParams` 那个共享对象），批量脚本第一次跑到这里以「变量名集合与预设不符」中止，补了预设与对应的等价测试后才过。`assets/util/bed4096numParams.js` 改为 `createThresholdState(SINGLE_CHANNEL_DEFAULTS)` 但**模块保留** —— 读取已收走，它剩下的价值是**模块级单例**语义（Bed4096 与 Fast256 拿同一个引用，「切换模式时调参不重置」），各自 `createThresholdState()` 就会各读各的。四处手工改：`three/Short.jsx`（块中间夹一行 `ymax1 = … 'ymax' … : 251`，不属于六个键，拆成独立语句；通道 1 走 `util.js initValue` 同源的 `2655/3.3/2.08/4/0`、`valuelInit1` 为 2001）、`heatmap/canvas.jsx`（无 `valuej1` 变量，`carValuej` 在这里读成 `options.max` 且默认 **600**，另四个阈值与 `canvas, context` 挤在同一条 `var` 里，拆开）、`page/home/HomeFun.jsx`（六个 `useState(localStorage.getItem(…))`，`useState(x)` 只在首帧用 x 但表达式每帧求值，原来每帧 12 次 `getItem`，现改为一次 `createThresholdState` 读六个键，首帧取值逐字相同）、`assets/util/util.js` 的 `initValue`（全仓第三份读取，`valuelInit1` 默认 **500** 为全仓唯一；`valueMult`/`compen`/`press`/`ymax1` 四个非阈值键原样保留）。`renderers/pointGrid/PointGridRenderer.jsx` 删掉自己那份 `readStoredNumber` 与 12 行 `readStoredNumber('carValuej', 200)` 式的 `createTuningState` —— 那份实现正是本 store 的原型，改为 `createThresholdState(DUAL_CHANNEL_DEFAULTS)` 一行，行为逐字相同；store 里 `globalThis.localStorage?.` 的写法亦从它继承（裸 `localStorage` 只靠 try/catch 兜太隐晦，显式可选链才是「没有宿主环境」这一种情况的正解）。批量替换脚本本身踩了两个坑并修掉：一是导入被插在**全文件最后一条 import 之后**，在 import 排在块之后的文件里会落到使用点下方，改为「插在第一个块之前的最后一条 import 后面」，事后对全部 83 个改动文件逐个校验 `import 行号 < 首个调用行号`；二是重跑时会二次改写已完成的文件，加了 `'displayThresholds' in src` 跳过。新增 `client/src/runtime/displayThresholds.test.js` 42 例：`legacyDualBlock`（抄自 `three/hand.jsx:40-51`）/ `legacySingleBlock`（抄自 `num/NumWs.jsx:6-11`）/ `legacyWholeChairBlock`（抄自 `three/wholeChair.jsx:123-134`）三份基准逐字抄自被替换的原块，6 个 localStorage 场景（全空 / 六键全设 / 部分设 / **全 0** / 小数与负数 / 空字符串）× 双通道 · 单通道 · 后缀 2 三组等价性，三个离群文件的 per-file 默认值（含「wholeChair 在全空时两通道默认值确实不同」与「Short 的 `valuef1` 默认值是 0」两条），坏数据组把老写法的缺陷**证出来而非断言**（`expect(() => legacyDualBlock()).toThrow()` —— 存 `"abc"` 时老写法在**模块加载期**抛异常、整个页面打不开；`expect(legacyDualBlock().valuej1).toBe(null)` —— 存 `"null"` 时把 `null` 当阈值用；新实现两种都回落默认值），以及 `Infinity`/`NaN` 回落、localStorage 本身抛异常（隐私模式/配额）不炸、`valuelInit` 不被误当成 `valuel`+后缀、变量名拼错当场抛。**与老写法的差异只有那两种坏数据；正常值逐字相同，包括 `"0"` 取到 0 而不是默认值这个 quirk。** 写入侧未动（`Title.jsx` 滑块 `setItem` → `pushSitBack` → `sitValue` 改内存绑定，不重读 localStorage）。`carValuePress` 是第七个键、只出现在 `demo/` 9 个文件（各两处）、主人不同，不在本刀内。测试：前端 **303 通过 / 15 套件**（`App.test.jsx` 仍是既有的缺 `@testing-library/react`），后端 35/35，`src/renderers` / `src/runtime` / `util.js` / `bed4096numParams.js` / `heatmap/canvas.jsx` 在 `--max-warnings=0` 下零错误零告警（`Short.jsx` 那条 exhaustive-deps 告警拿 `git show HEAD:` 的版本单独跑过 eslint，确认是既有的、行号只因本次 +3 行而位移；`HomeFun.jsx` 命中 eslint ignore 规则，无法纳入门禁）；`npx vite build --outDir ../tmp/build-check --emptyOutDir` 通过、`git status --short build/` 仍是 85。 |
+| 2026-08-03 | codeOpi | 优化重构 | 横切共用层第一步：18 份 `jet` → 一条阶梯 + 三个出口，并注册成第 7 条 colormap。新建 `assets/util/jetLadder.js`：**零依赖、零副作用**，只放那条唯一的分支阶梯 `jetRgb`（**不新建计划中的 `jetUnit`** —— `jetRgb` 分支结构与 `jet` 逐字相同，本就是那条 0..1 阶梯），文件头写明它为什么不能留在 `util.js` 里。`assets/util/util.js` 改为 `import { jetRgb } from './jetLadder.js'` + `export { jetRgb };` 原样 re-export（80 个消费文件的导入路径与对外接口都不变），`jet` 改为 `const { r, g, b } = jetRgb(...)` 后走原来的 `parseInt(255 * r + '')`，新增 `jetRgba`（不取整 + 写死 `rgba[3] = 1`）与 `jetRound`（`Math.round` + 夹取后 `dv === 0` 返白）。15 个消费文件删本地 `function jet` 块并把名字按字母序并进各自**已有**的 util 具名导入：`jet` → `demo/{Block,Demo,Demo1010,Demo1016,Demo2419,handDemo,handDemoPress,handLine0116,handLine0123}.jsx` + `three/{NumThreeColor copy,NumThreeColor1024,NumThreeColor1024sit}.jsx` + `num/Num.jsx` + `foot/Num32DetectLocal.jsx`；`jetRgba as jet` → `heatmap/canvas.jsx`、`onestep/heatmap.js`（后者全文无 `import`，单独插首行）；`jetRound as jet` → `num/NumWs.jsx`。**别名保证所有调用点逐字节不变，每文件 diff 2 行。** `components/displaySystem/colormaps.js` 新增 `sampleJetRgb` / `sampleJet` 与第 7 条 `{ id: 'jet', label: '彩虹 Jet' }`，`import { jetRgb } from '../../assets/util/jetLadder.js'`；排在既有六条**之后**，且 `sampleJetRgb` 用 `Math.round` 而非老 `parseInt`。**这个导入一开始写的是 `util.js`，后端测试当场报 `ERR_MODULE_NOT_FOUND`** —— `backend/tests/sdk/displayProfileRuntime.test.js` 用 `await import(pathToFileURL(...))` 裸 Node ESM 加载前端模块，没有 Vite 解析器：`util.js` 内部写的是 `from "./color"`（Node ESM 不补全扩展名）且顶层 `initValue` 就在读 `localStorage`。三条出路（在 colormaps.js 抄一份公式 / 改造 util.js / 拆出阶梯）里选了拆阶梯，`util.jet.test.js` 因此多一条 `expect(jetRgb).toBe(jetRgbFromLadder)` 身份断言 —— 若有人图省事在 `util.js` 里再写一份函数体，没有这条断言不会有任何测试失败。`backend/displaySystems/displaySystemCanvasCatalog.js` 的 `CANVAS_COLORMAPS` 同步追加 `{ id: 'jet', label: '彩虹 Jet' }`：它是前端 `COLORMAPS` 的**重复清单**，`displaySystemPage.js` 拿它归一（未知 id 静默回落 classic）与校验（未知 id 报错），只登记前端的话配置器能选能预览、但一按保存（`PATCH /api/display-systems/:id/display`）就被判非法；顺序必须与前端一致（零件栏按后端目录渲染下拉），`backend/tests/displaySystems/configValidation.test.js` 两处期望错误串（`display.canvas.colormap.id` / `display.chartAppearance.colormap.id`）一并更新。新增 `client/src/assets/util/util.jet.test.js` 72 例：`legacyJet` / `legacyJetNoCoerce`（`num/Num.jsx` 那份少 `+ ''` 的变体，等价性是推理故必须打断言）/ `legacyJetRgba` / `legacyJetRound` 四份基准逐字抄自被删的原实现，19 个取样点覆盖 `x<min` / `x=min` / `1e-12` / 四段分界 / `x=max` / `x>max` / `min<0` / 真实阈值默认值 2·200·2655，外加 `[-10,110]` 上 0.5 步长密扫，以及一条把 `jet(0,100,49.9999999999993) === [0,255,7]` 与 `jetRound(...) === [0,255,0]` 写死的**既有 bug 锁定**断言（`parseInt('7.105e-12')` 在 `'e'` 处停下取尾数，14 份 canonical 副本一直如此，按「界面零变化」没修）。`colormaps.test.js` 补 6 例：四段分界颜色、与 `jetRound(0,1,ratio)` 逐点相等、`isClassicColormap({id:'jet'}) === false`、`COLORMAPS` id 顺序、reverse/夹取，以及一条「与老 `jet()` 差 >1 的唯一例外必须是那个 sci-notation bug（`ratio = 0.5000000000000002` 处 red 分量 `8.88e-16`）」的分类断言。附带查明 `onestep/heatmap.js` 的 `jet(value)` 是死代码（`createCircle(options.size)` 从不传第二参 → `rgb(255,NaN,0,1)` 非法、赋值被忽略、圆点用默认黑画出，正是这张 alpha 蒙版图要的），**未改**。util.js 另外 7 个 jet 家族函数未动。测试：前端 261 通过 / 14 套件（`App.test.jsx` 仍是既有的缺 `@testing-library/react`），后端 35/35，`jetLadder.js` / `util.js` / `colormaps.js` / 两个测试文件 / 15 个消费文件 eslint 零错误、无新增告警。 |
+| 2026-07-31 | codeOpi | 优化重构 | 前端场景组件收敛成渲染器插件 + 三条通道。新增 `client/src/runtime/frameBus.js`（`subscribeFrames` / `publishFrame` / `getLastFrame` / `clearLastFrame` / `resetFrameBus`，`Set` + 逐个 try/catch 的 notify，订阅时同步补发 `lastFrame`）、`useSceneFrame.js`（handler 存 ref，故意不叫 `useFrame`）、`sceneFrame.js`（`SCENE_CHANNELS` 八条通道 + `padThumbGap` + `toRaw256` + `buildSceneFrame`，通道按需生成）与 `frameBus.test.js`（11 例）/ `sceneFrame.test.js`（22 例，每组先逐字抄旧内联代码当基准）。`RendererHost.jsx` 新增 `frameChannel` prop 订阅总线（显式 opt-in，可 grep）与 `auditRendererContract` / `resetContractAudit`（声明未实现 → `error`，实现未声明 → `warn`，**不挡**，每渲染器只报一次）。`builtins.js` 的 `pointGrid` descriptor 挂上 `normalizeParams` 与 `presets: LEGACY_PRESETS`。`Home.jsx`：删 `matCol` / `carCol` 两个静态 import，3 处 JSX 换成 `<RendererHost rendererId="pointGrid" params={POINT_GRID_PRESETS.x}>`；ws handler 里在 `sitTypeEvent` 之后并行 `publishFrame(buildSceneFrame(...))`；`componentDidUpdate` 换 `matrixName` 时 `clearLastFrame()`；`CanvasCom.shouldComponentUpdate` 增比 `viewKey`；构造函数 hoist `handleChartsBody` / `handleChartsBody1` / `changeWs` / `colPushData` / `delPushData` / `changeCalibration` / `colFingerData` 并新增 `sceneChartProps` / `sceneChartPropsBasic` 两条组合（分两条是因为仓库里本来就有 10 处刻意不传 `changeStateData`）。删除 `components/three/matCol.jsx`（953 行）、`carCol.jsx`（956 行）、`box100_2.jsx`、`daliegu.jsx`、`carY.jsx`、`robot.jsx`、`NumThreeColor2.jsx` 与 `hooks/` 下 6 个未被消费的 hook 及死 barrel。`renderers/index.test.js` 补 presets 1 例与「`descriptor.methods` 是真契约」7 例。测试：前端 183 通过 / 13 套件（`App.test.jsx` 仍是既有的缺 `@testing-library/react`），eslint 零告警；`Home-*.js` 978.18 kB → 974.27 kB，`PointGridRenderer` 拆成独立 12.28 kB 懒加载块，`git status --short build/` 仍是 85。 |
+| 2026-07-31 | codeOpi | 新增功能 | 展示系统草稿层的三个动作。新增 `client/src/components/displaySystem/displayDraftState.js`（`describeDisplayDraft` / `buildDisplaySectionPayload` / `clearDisplayDraftSelection`）与 `displayDraftState.test.js`；`client/src/services/displaySystemApi.js` 新建（`DisplaySystemApiError` 带 `code` / `status` / `details`，`saveDisplaySection` / `duplicateDisplaySystem`）；`formulaChartStore.js` 增加 `hasFormulaCharts` / `resetFormulaCharts`；`displayProfileRuntime.js` 的 `resolveChartAppearance` 改签名加 manifest 基线层；`DisplayCanvasConfigurator` 增加 `draft` / `onRevert` / `onSave` / `onSaveAs` / `saveHint` 五个 prop 与 `.canvas-draft-bar` 状态带（无 `onRevert` 则一行不渲染）；`Home.jsx` 接线 `revertDisplayDraft` / `saveDisplayDraft` / `saveDisplayDraftAs` / `duplicateCurrentDisplaySystem` 与卡片基线播种 `seedFormulaChartsFromManifest`。后端 `displaySystemCanvasCatalog.js` 增加 `CHART_OVERLAYS`（画布白名单减去 `legend`）与 `DISPLAY_CHART_CARD_LIMIT`；`displaySystemPage.js` 增加 `normalizeChartAppearanceConfig` / `normalizeChartCardsConfig` 与对应校验分支；`displaySystemWorkspaceService.js` 增加 `saveDisplaySection` / `duplicate` 与共用的 `buildDisplaySection`（合并 → 校验 → 归一）；`appRuntimeFactory.js`、`httpAppFactory.js`（含共用的 `respondDisplaySystemWriteError`）、`sdkApiContract.js`、`server.js` 接线两条新路由。测试：新增 `displayDraftState.test.js` 4 组，`workspaceService.test.js` / `appRuntimeDisplaySystems.test.js` / `displaySystemsApi.test.js` / `formulaChartStore.test.js` 各有补充（前端 142 通过 / 11 套件，`App.test.jsx` 仍是既有的缺 `@testing-library/react`；后端 35/35；eslint 零告警）。 |
+| 2026-07-30 | codeOpi | 新增功能 | 图表卡片本身成为零件：拖一个模板方块，侧栏立刻多一张和 Pressure Area 同款的实时曲线大卡片。新增 `client/src/components/aside/formulaChartStore.js`（`shroom.formulaCharts.v1.*` 的唯一主人 + `subscribeFormulaCharts` / `addFormulaChartFromTemplate` / `removeFormulaChart` / `findChartByTemplate` / `listFormulaChartTemplateIds`）与 `formulaChartStore.test.js`；`chartAppearance.js` 增加 `buildSparklinePath`（零件方块与模板卡片共用一份路径数学）；`canvasParts.js` 增加 `chartWidget` 类别与第三块表面路由（`applySurfacePart` / `isSurfacePartActive` 对它原样返回）；`PartTile` 用内联 SVG 画缩略曲线；`DisplayCanvasConfigurator` 增加 `chartTemplates` / `chartWidgetIds` / `onChartWidgetAdd` / `onChartWidgetRemove`，底栏兼作回收区收 `placedChartWidget`；`Aside.jsx` 订阅 store 并渲染大卡片（`buildFormulaDrawInput` 从内置专用泛化成共用，canvas 走 ref map 而非 `getElementById`）；`FormulaChartPanel.jsx` 存储下沉到 store、历史值改 ref、emit `onCustomSeries`、暴露 `openEdit`、删掉自有列表渲染；`Home.jsx` 接线零件高亮与添加/删除；`aside.scss` 清掉 7 组随列表消失的规则。测试：新增 19 例、补 5 例（前端 119 通过，后端 34/34，eslint 零告警）。 |
+| 2026-07-29 | codeOpi | 新增功能 | 侧栏 Pressure Data / Pressure Area 曲线接入零件栏。新增 `client/src/components/aside/chartAppearance.js`（`resolveChartStroke` 纵向渐变 + `drawChartGrid` / `drawChartDecorations` 四个叠加层，`classic` 与既有观感逐像素一致）；`displayProfileRuntime.js` 新增 `resolveChartAppearance` 解析 `selection.charts`（与 `selection.canvas` 同构同键、互不影响）；`canvasParts.js` 增加 `chartColormap` / `chartOverlay` 两类零件与 `partSurface` / `applySurfacePart` / `isSurfacePartActive` 路由；`DisplayCanvasConfigurator` 增加 `chartValue` / `onChartChange` / `chartOverlayIds` 三个 prop，`PartRail` 隐藏空类别；`Aside.jsx` 的 `drawChart` 接 `chartAppearance` 并在 `componentDidUpdate` 里为停帧场景补画；`Home.jsx` 的 `updateDisplayCanvas` / `updateChartAppearance` 收敛到 `persistDisplaySelection`，`CanvasCom` 增比 `chartKey`（不进 `childBaseKey`）。测试：新增 `chartAppearance.test.js` 14 例，`canvasParts.test.js` 补 6 例，后端 `displayProfileRuntime.test.js` 补图表隔离与坏值归一（前端 95 通过，后端 34/34）。 |
+| 2026-07-29 | codeOpi | 新增功能 | 零件栏覆盖 legacy `CanvasHand`（`hand.jsx`）那条链，共 4 条渲染分支：`hand`/`handSinglePoint`/`handBlue`/`sit`、`normal`、`sitCol`、`petCare`/`petCareMini`。`hand.jsx` 新增 `colormap` prop + `colormapRef`，两处数据色带 `jet()` 改走 `sampleDataRgb`（classic 逐字不变，`jetgGrey` 不动）；`CanvasCom.shouldComponentUpdate` 增比 `colormapKey`（稳定字符串、不进 `childBaseKey`，故原地换色不重挂）；`colormaps.js` 导出 `isClassicColormap` 供两个场景组件与 Home 共用；`canvasProfile` 去掉 manifest 判空、偏好存储 id 增加 `matrixName` 兜底；5 个挂载点收敛成一个 `renderCanvasRail()`。测试：`colormaps.test.js` 补 classic 判定 3 例（前端 75 通过，后端 34/34）。 |
+| 2026-07-29 | codeOpi | 修复缺陷 | 零件栏接进 `Home.jsx` 的 Three.js 场景：`DisplayCanvasConfigurator` 新增 `variant="overlay"` / `categoryIds` / `overlayIds`，`PartRail` 支持类别收窄，`canvasParts.buildCanvasParts` 支持 `overlayIds`；`NumThreeColor1024` 接 `colormap`（精灵图 + tint 两处分支，classic 逐字不变），`colormaps.js` 增加 `sampleColormapRgb`，`displayProfileStorage.js` 新建并被 Home 与 `ManifestDisplayRenderer` 共用，`displays/registry.js` 转发 `page.canvas`。测试：`colormaps.test.js` 补数值采样 4 例、`canvasParts.test.js` 补 `overlayIds` 1 例（前端 72 通过，后端 34/34）。 |
+| 2026-07-28 | codeOpi | 新增功能 | 新增 `display.canvas`（配色 / 叠加层 / 卡片布局）、`colormaps.js` 六套配色、`canvasConfigurator/` 拖放配置器与共享 `widgets/`；后端新增 `displaySystemCanvasCatalog.js` 白名单和 `normalizeCanvasConfig` + 校验分支，Builder 显示验证步骤改为真实数据预览并移除 `showStats` 复选框。新增 `colormaps.test.js`、`canvasParts.test.js` 两个前端测试文件，后端 `configValidation` 与 `displayProfileRuntime` 测试补 canvas 用例。 |
+| 2026-07-27 | codeOpi | 新增功能 | Manifest v3 `sensors[]` 多传感器 schema、按 `outputChannel` 的输出路由与 `publishAux`、manifest 驱动的串口开启（`channelPorts` / `channelClose`）。 |
+| 2026-07-27 | codeOpi | 新增功能 | 协议层帧校验（帧头 + sum8/xor8/CRC16-Modbus）与 uint32/int32/float32/bit 数值类型；新增 `multiSensorManifest`、`protocolValidation` 两个后端测试并接入 run-tests 清单。 |
+| 2026-07-24 | Codex | 交互优化 | 展示系统设置页采用简约深色三栏布局，并将编辑流程明确为数据接入、传感器映射和显示验证三步。 |
+| 2026-07-24 | Codex | 新增功能 | Display System 算法增加 JavaScript/Python 代码模式，统一接收协议解码后的原始数组，并支持异步 Python runner。 |
+| 2026-07-24 | Codex | 优化重构 | 增加系统/用户展示系统权限模型、重复 ID 内置优先规则，以及仅影响绘制层的矩阵插值和平均缩小。 |
 | 2026-07-06 | Codex | 文档更新 | 新增 `backend/README.md` 作为后端短导航，补充实时数据流、控制命令流、文件阅读入口和命名规则；在 `server.js` 顶部标注主要逻辑所在文件。 |
 | 2026-07-06 | Codex | 优化重构 | 新增 `historySessionService` 承接历史日期列表、历史加载和回放空白帧构造；新增 `serverShutdownOrchestrator` 承接定时器、串口、WebSocket、HTTP、数据库和 Python worker 关闭编排。 |
 | 2026-07-06 | Codex | 优化重构 | 继续压缩 `server.js`：串口 sit/back/head 打开规则迁入 `serialPortOrchestrator`，legacy 串口 runtime context/accessor 拼装迁入 `legacySerialContextFactory`，旧 `colOrSendData*` 实时输出函数迁入 `realtimeFrameDispatchService`。 |

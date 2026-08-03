@@ -2,55 +2,14 @@ import React, { useContext, useEffect, useImperativeHandle, useRef } from 'react
 import Stats from "three/examples/jsm/libs/stats.module.js";
 import * as THREE from "three";
 import './canvas.scss'
-import { findMax } from '../../assets/util/util';
+import { findMax, jet } from '../../assets/util/util';
 import { press, press256 } from '../../assets/util/line';
 import { bed4096numParams } from '../../assets/util/bed4096numParams';
+import { SECOND_CHANNEL_DEFAULTS, createThresholdState } from '../../runtime/displayThresholds';
 // 使用共享调参对象（与 Bed4096 共享，切换模式时调参不重置）
 const p = bed4096numParams;
-var valuej2 = localStorage.getItem('carValuej') ? JSON.parse(localStorage.getItem('carValuej')) : 200,
-  valueg2 = localStorage.getItem('carValueg') ? JSON.parse(localStorage.getItem('carValueg')) : 2,
-  value2 = localStorage.getItem('carValue') ? JSON.parse(localStorage.getItem('carValue')) : 2,
-  valuel2 = localStorage.getItem('carValuel') ? JSON.parse(localStorage.getItem('carValuel')) : 2,
-  valuef2 = localStorage.getItem('carValuef') ? JSON.parse(localStorage.getItem('carValuef')) : 2,
-  valuelInit2 = localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2;
+var { valuej2, valueg2, value2, valuel2, valuef2, valuelInit2 } = createThresholdState(SECOND_CHANNEL_DEFAULTS);
 var valuep = 0, valueprop = 1
-function jet(min, max, x) {
-  let red, g, blue;
-  let dv;
-  red = 1.0;
-  g = 1.0;
-  blue = 1.0;
-  if (x < min) {
-    x = min;
-  }
-  if (x > max) {
-    x = max;
-  }
-  dv = max - min;
-  if (x < min + 0.25 * dv) {
-    // red = 0;
-    // g = 0;
-    // blue = 0;
-
-    red = 0;
-    g = (4 * (x - min)) / dv;
-  } else if (x < min + 0.5 * dv) {
-    red = 0;
-    blue = 1 + (4 * (min + 0.25 * dv - x)) / dv;
-  } else if (x < min + 0.75 * dv) {
-    red = (4 * (x - min - 0.5 * dv)) / dv;
-    blue = 0;
-  } else {
-    g = 1 + (4 * (min + 0.75 * dv - x)) / dv;
-    blue = 0;
-  }
-  var rgb = new Array();
-  rgb[0] = parseInt(255 * red + '');
-  rgb[1] = parseInt(255 * g + '');
-  rgb[2] = parseInt(255 * blue + '');
-  return rgb;
-}
-
 let ndata1 = new Array(256).fill(0),animationRequestId
 var materialRef = null // 用于 sitValue 更新纹理
 

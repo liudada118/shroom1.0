@@ -6,6 +6,9 @@ const {
 const {
   validateDisplaySystemDefinitionFiles,
 } = require('./displaySystemConfigFileValidator');
+const {
+  normalizeCoordinateMapDefinition,
+} = require('./displaySystemCoordinateMap');
 
 const DEFAULT_MANIFEST_FILENAMES = Object.freeze([
   'display-system.json',
@@ -52,16 +55,25 @@ function resolveDisplaySystemFiles(config, baseDirectory) {
     return path.isAbsolute(filePath) ? filePath : path.resolve(baseDirectory, filePath);
   };
 
-  const resolvedFiles = {
-    lineOrder: resolveMaybe(config.files.lineOrder),
-    pointOrder: resolveMaybe(config.files.pointOrder),
-    algorithmData: resolveMaybe(config.algorithm.dataFile),
-    algorithmEntry: resolveMaybe(config.algorithm.entry),
-  };
+  const resolveSensorFiles = (sensor) => ({
+    lineOrder: resolveMaybe(sensor.files?.lineOrder),
+    pointOrder: resolveMaybe(sensor.files?.pointOrder),
+    coordinateMap: resolveMaybe(sensor.files?.coordinateMap),
+    algorithmData: resolveMaybe(sensor.algorithm?.dataFile),
+    algorithmEntry: resolveMaybe(sensor.algorithm?.entry),
+  });
+
+  // 每个传感器条目自带一套线序/点位/算法文件，各自解析成绝对路径。
+  const sensors = (config.sensors || []).map((sensor) => ({
+    ...sensor,
+    resolvedFiles: resolveSensorFiles(sensor),
+  }));
 
   return {
     ...config,
-    resolvedFiles,
+    sensors,
+    // 顶层 resolvedFiles 保持指向第一个传感器，既有调用方无需改动。
+    resolvedFiles: sensors[0]?.resolvedFiles || resolveSensorFiles(config),
   };
 }
 
@@ -113,11 +125,13 @@ function loadDisplaySystemDirectory(directory, {
   const config = resolveDisplaySystemFiles(validation.value, path.dirname(manifestPath));
   const missingFiles = [];
   if (validateFiles) {
-    for (const [key, filePath] of Object.entries(config.resolvedFiles)) {
-      if (filePath && !fs.existsSync(filePath)) {
-        missingFiles.push(`${manifestPath}: ${key} file not found: ${filePath}`);
+    config.sensors.forEach((sensor) => {
+      for (const [key, filePath] of Object.entries(sensor.resolvedFiles)) {
+        if (filePath && !fs.existsSync(filePath)) {
+          missingFiles.push(`${manifestPath}: ${key} file not found: ${filePath}`);
+        }
       }
-    }
+    });
   }
 
   if (missingFiles.length > 0) {
@@ -130,23 +144,37 @@ function loadDisplaySystemDirectory(directory, {
   }
 
   if (validateFiles) {
-    const definitionValidation = validateDisplaySystemDefinitionFiles(config, {
-      readJsonFile,
-    });
-    if (!definitionValidation.ok) {
+    // 逐传感器校验：每个条目的矩阵尺寸要和它自己的 point-order / coordinate-map 对齐，
+    // 不能拿第一个传感器的矩阵去校验第二个传感器的文件。
+    const definitionErrors = config.sensors.flatMap((sensor) => (
+      validateDisplaySystemDefinitionFiles({
+        sensor,
+        resolvedFiles: sensor.resolvedFiles,
+      }, { readJsonFile }).errors
+    ));
+    if (definitionErrors.length > 0) {
       return {
         ok: false,
         config: null,
-        errors: definitionValidation.errors,
+        errors: definitionErrors,
         manifestPath,
       };
     }
   }
 
+  const loadCoordinateMap = (filePath) => (filePath
+    ? normalizeCoordinateMapDefinition(readJsonFile(filePath))
+    : null);
+
   return {
     ok: true,
     config: {
       ...config,
+      sensors: config.sensors.map((sensor) => ({
+        ...sensor,
+        coordinateMap: loadCoordinateMap(sensor.resolvedFiles.coordinateMap),
+      })),
+      coordinateMap: loadCoordinateMap(config.resolvedFiles.coordinateMap),
       sourceDirectory: directory,
       manifestPath,
     },

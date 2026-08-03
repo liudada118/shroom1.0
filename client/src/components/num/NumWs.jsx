@@ -1,14 +1,10 @@
 import React, { useEffect, useState, useImperativeHandle, useRef, useCallback } from 'react'
 import './num.css'
 import hand from '../../assets/images/hand(1).png'
-import { addSide, findMax, interp, rotate90, rotate90CW } from '../../assets/util/util'
+import { addSide, findMax, interp, jetRound as jet, rotate90, rotate90CW } from '../../assets/util/util'
 import { pressData } from '../../assets/util/matrixToPress'
-var valuej1 = localStorage.getItem('carValuej') ? JSON.parse(localStorage.getItem('carValuej')) : 200,
-    valueg1 = localStorage.getItem('carValueg') ? JSON.parse(localStorage.getItem('carValueg')) : 2,
-    value1 = localStorage.getItem('carValue') ? JSON.parse(localStorage.getItem('carValue')) : 2,
-    valuel1 = localStorage.getItem('carValuel') ? JSON.parse(localStorage.getItem('carValuel')) : 2,
-    valuef1 = localStorage.getItem('carValuef') ? JSON.parse(localStorage.getItem('carValuef')) : 2,
-    valuelInit1 = localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2
+import { SINGLE_CHANNEL_DEFAULTS, createThresholdState } from '../../runtime/displayThresholds';
+var { valuej1, valueg1, value1, valuel1, valuef1, valuelInit1 } = createThresholdState(SINGLE_CHANNEL_DEFAULTS);
 
 
 /**
@@ -59,29 +55,6 @@ let totalArr = [],
     totalPointArr = [];
 
 // ========== jet 颜色映射（JS 版，用于 Canvas 2D） ==========
-function jet(min, max, x) {
-    let r, g, b;
-    r = 1; g = 1; b = 1;
-    if (x < min) x = min;
-    if (x > max) x = max;
-    const dv = max - min;
-    if (dv === 0) return [255, 255, 255];
-    if (x < min + 0.25 * dv) {
-        r = 0;
-        g = (4 * (x - min)) / dv;
-    } else if (x < min + 0.5 * dv) {
-        r = 0;
-        b = 1 + (4 * (min + 0.25 * dv - x)) / dv;
-    } else if (x < min + 0.75 * dv) {
-        r = (4 * (x - min - 0.5 * dv)) / dv;
-        b = 0;
-    } else {
-        g = 1 + (4 * (min + 0.75 * dv - x)) / dv;
-        b = 0;
-    }
-    return [Math.round(255 * r), Math.round(255 * g), Math.round(255 * b)];
-}
-
 // ========== Canvas 2D 渲染 3D 柱状效果 ==========
 function render3DCanvas(ctx, flatData, texW, texH, cellW, cellH, textHeightMul, textColorMax, scale) {
     const canvasW = ctx.canvas.width;

@@ -14,17 +14,34 @@ const {
 } = require('./displaySystemProtocol');
 const {
   DEFAULT_RENDERER_TYPES,
+  MATRIX_TRANSFORM_TYPES,
+  normalizeCanvasConfig,
+  normalizeChartAppearanceConfig,
+  normalizeChartCardsConfig,
   normalizeDisplayConfig,
+  normalizeMatrixTransform,
   normalizeProfile,
   normalizeView,
   validateDisplayConfig,
 } = require('./displaySystemPage');
 const {
+  CANVAS_COLORMAPS,
+  CANVAS_OVERLAYS,
+  CHART_OVERLAYS,
+  DISPLAY_CHART_CARD_LIMIT,
+} = require('./displaySystemCanvasCatalog');
+const {
   validateAlgorithmDataDefinition,
+  validateCoordinateMapDefinition,
   validateDisplaySystemDefinitionFiles,
   validateLineOrderDefinition,
   validatePointOrderDefinition,
 } = require('./displaySystemConfigFileValidator');
+const {
+  canonicalizeCoordinateMapDefinition,
+  getCoordinateMatrix,
+  normalizeCoordinateMapDefinition,
+} = require('./displaySystemCoordinateMap');
 const {
   DEFAULT_MANIFEST_FILENAMES,
   discoverDisplaySystems,
@@ -43,7 +60,9 @@ const {
 } = require('./displaySystemRegistry');
 const {
   buildDisplaySystemRoots,
+  classifyDisplaySystemAccess,
   createDisplaySystemRuntimeDiscovery,
+  resolveDisplaySystemAccessConflicts,
 } = require('./displaySystemRuntimeDiscovery');
 const {
   attachRuntimeChannelPlan,
@@ -72,18 +91,27 @@ const {
 } = require('./displaySystemRuntimePolicy');
 const {
   createJavaScriptAlgorithmRunner,
+  createPythonAlgorithmRunner,
 } = require('./displaySystemAlgorithmRunner');
 const {
+  DEFAULT_ALGORITHM_SOURCES,
   buildDisplaySystemBuilderCatalog,
   createDisplaySystemWorkspaceService,
   createIdentityDefinitions,
+  validateBuilderAlgorithmSource,
 } = require('./displaySystemWorkspaceService');
 
 module.exports = {
   ALGORITHM_TYPES,
+  CANVAS_COLORMAPS,
+  CANVAS_OVERLAYS,
+  CHART_OVERLAYS,
+  DISPLAY_CHART_CARD_LIMIT,
   DEFAULT_MANIFEST_FILENAMES,
   DEFAULT_LEGACY_PARSER_CHANNELS,
+  DEFAULT_ALGORITHM_SOURCES,
   DEFAULT_RENDERER_TYPES,
+  MATRIX_TRANSFORM_TYPES,
   DISPLAY_SYSTEM_SCHEMA_VERSION,
   SUPPORTED_DISPLAY_SYSTEM_SCHEMA_VERSIONS,
   PROTOCOL_FRAMING_TYPES,
@@ -91,6 +119,8 @@ module.exports = {
   applyNumericConfig,
   bindDisplaySystemRuntimeChannels,
   buildDisplaySystemRoots,
+  classifyDisplaySystemAccess,
+  resolveDisplaySystemAccessConflicts,
   buildDisplaySystemBuilderCatalog,
   buildDisplayMetadataFromDisplaySystem,
   buildDisplaySystemRuntimeDefinition,
@@ -98,8 +128,10 @@ module.exports = {
   buildRuntimeChannelPlan,
   buildSensorDefinitionFromDisplaySystem,
   attachRuntimeChannelPlan,
+  canonicalizeCoordinateMapDefinition,
   createDisplaySystemFrameProcessor,
   createJavaScriptAlgorithmRunner,
+  createPythonAlgorithmRunner,
   createDisplaySystemRuntimeDispatcher,
   createDisplaySystemRegistry,
   createDisplaySystemRuntimeRegistry,
@@ -111,8 +143,14 @@ module.exports = {
   evaluateDisplaySystemDispatchPolicy,
   findManifestFile,
   getFrameValues,
+  getCoordinateMatrix,
   normalizeIncomingFrame,
+  normalizeCoordinateMapDefinition,
+  normalizeCanvasConfig,
+  normalizeChartAppearanceConfig,
+  normalizeChartCardsConfig,
   normalizeDisplayConfig,
+  normalizeMatrixTransform,
   normalizeProfile,
   normalizeProtocolConfig,
   normalizeView,
@@ -122,6 +160,8 @@ module.exports = {
   resolveParserChannel,
   resolveDisplaySystemFiles,
   validateAlgorithmDataDefinition,
+  validateBuilderAlgorithmSource,
+  validateCoordinateMapDefinition,
   validateDisplaySystemConfig,
   validateDisplaySystemDefinitionFiles,
   validateDisplayConfig,
