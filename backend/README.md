@@ -139,6 +139,7 @@ flowchart LR
 | 小床 12B 处理 | `backend/sensors/runtime/smallBed12BRuntime.js` |
 | 实时帧输出旧函数适配 | `backend/services/realtime/realtimeFrameDispatchService.js` |
 | 实时帧入库和推送管线 | `backend/services/realtime/frameOutputPipelineService.js` |
+| 一帧到底存不存（采集开关 / 频率 / 磁盘三个条件） | `backend/services/collection/collectionFrameStorageService.js` 的 `canStore()` |
 | 历史日期和历史加载 | `backend/services/history/historySessionService.js` |
 | 回放帧构造 | `backend/services/playback/playbackFrameService.js` |
 | 回放定时器 | `backend/services/playback/playbackTimerService.js` |

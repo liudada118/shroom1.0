@@ -1,0 +1,212 @@
+{
+  "schemaVersion": 2,
+  "id": "Sbed",
+  "name": "小床",
+  "version": "1.0.0",
+  "description": "Created with Display System Builder",
+  "sensor": {
+    "type": "Sbed",
+    "matrix": {
+      "rows": 32,
+      "cols": 32
+    },
+    "ports": [
+      "sit"
+    ]
+  },
+  "protocol": {
+    "validation": null,
+    "baudRate": 1000000,
+    "framing": {
+      "type": "delimiter",
+      "delimiter": [
+        170,
+        85,
+        3,
+        153
+      ],
+      "frameLength": null,
+      "includeDelimiter": false
+    },
+    "decoding": {
+      "valueType": "uint8",
+      "byteOffset": 0,
+      "valueCount": 1024
+    }
+  },
+  "algorithm": {
+    "type": "none"
+  },
+  "display": {
+    "layout": {
+      "type": "grid",
+      "columns": 12
+    },
+    "matrixTransform": {
+      "type": "none"
+    },
+    "views": [
+      {
+        "id": "heatmap",
+        "type": "heatmap",
+        "label": "热力图",
+        "source": "sitData"
+      },
+      {
+        "id": "matrix",
+        "type": "matrix",
+        "label": "数值矩阵",
+        "source": "sitData"
+      },
+      {
+        "id": "raw2d",
+        "type": "raw2d",
+        "label": "原始二维数据",
+        "source": "sitData"
+      }
+    ],
+    "widgets": [
+      {
+        "id": "main",
+        "type": "heatmap",
+        "label": "压力数据",
+        "source": "sitData",
+        "columnSpan": 8
+      },
+      {
+        "id": "stats",
+        "type": "pressureStats",
+        "label": "压力统计",
+        "source": "sitData",
+        "columnSpan": 4
+      }
+    ],
+    "canvas": {
+      "colormap": {
+        "id": "classic"
+      },
+      "overlays": [],
+      "widgets": [
+        {
+          "id": "main",
+          "type": "heatmap",
+          "label": "压力数据",
+          "source": "sitData",
+          "columnSpan": 8
+        },
+        {
+          "id": "stats",
+          "type": "pressureStats",
+          "label": "压力统计",
+          "source": "sitData",
+          "columnSpan": 4
+        }
+      ]
+    },
+    "renderers": [
+      {
+        "id": "heatmap",
+        "type": "heatmap",
+        "label": "热力图"
+      },
+      {
+        "id": "matrix",
+        "type": "matrix",
+        "label": "数值矩阵"
+      },
+      {
+        "id": "raw2d",
+        "type": "raw2d",
+        "label": "原始二维数据"
+      }
+    ],
+    "visualizationAlgorithms": [
+      {
+        "id": "identity",
+        "type": "identity",
+        "label": "原始数据",
+        "options": {}
+      },
+      {
+        "id": "normalize",
+        "type": "normalize",
+        "label": "归一化",
+        "options": {}
+      },
+      {
+        "id": "threshold",
+        "type": "threshold",
+        "label": "阈值过滤",
+        "options": {}
+      },
+      {
+        "id": "smooth",
+        "type": "smooth",
+        "label": "邻域平滑",
+        "options": {}
+      }
+    ],
+    "profiles": [
+      {
+        "id": "default",
+        "label": "默认方案",
+        "renderer": "heatmap",
+        "visualizationAlgorithm": "identity",
+        "widgets": [
+          "main",
+          "stats"
+        ]
+      }
+    ],
+    "defaultView": "heatmap",
+    "defaultProfile": "default",
+    "controls": {
+      "serial": true,
+      "capture": true,
+      "replay": true,
+      "download": true
+    },
+    "sidebar": {
+      "source": "sitData",
+      "algorithmMetrics": [],
+      "pressure": {
+        "visible": true,
+        "title": "Pressure Data",
+        "primaryMetric": "totalPressure",
+        "metrics": [
+          "averagePressure",
+          "maxPressure",
+          "totalPressure"
+        ]
+      },
+      "area": {
+        "visible": true,
+        "title": "Pressure Area",
+        "threshold": 0,
+        "pointArea": 2.1,
+        "unit": "cm²",
+        "metrics": [
+          "activePoints",
+          "area"
+        ]
+      }
+    }
+  },
+  "metadata": {
+    "runtimeMode": "parallel",
+    "createdBy": "display-system-builder",
+    "builder": {
+      "lineOrderMode": "identity",
+      "pointOrderMode": "generated-row-major",
+      "coordinateMapMode": "physical-coordinate-file",
+      "serialTemplate": "pressure-fixed-length",
+      "displayTemplate": "heatmap-overview",
+      "transportType": "binary"
+    }
+  },
+  "files": {
+    "lineOrder": "line-order.json",
+    "pointOrder": "point-order.json",
+    "coordinateMap": "coordinate-map.json"
+  }
+}

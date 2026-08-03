@@ -327,10 +327,10 @@ flowchart LR
 
 | 文件 | 职责 |
 | :--- | :--- |
-| `collectionService.js` | 采集频率、采集配置、存储时钟和磁盘保护。 |
+| `collectionService.js` | 采集频率、采集配置、存储时钟和磁盘保护。磁盘保护有 1 秒节流，**窗口内沿用上次判断结果**（不是无条件放行），空间腾出后最多等 1 秒恢复入库。 |
 | `collectionInsertQueueService.js` | 采集数据批量入库队列。 |
 | `collectionFrameStorageService.js` | sit/back/head 采集帧入库载荷构造和存储调度。 |
-| `frameOutputPipelineService.js` | 实时帧输出管线，统一处理 JSON 解析、采集入库和实时发布。 |
+| `frameOutputPipelineService.js` | 实时帧输出管线，统一处理 JSON 解析、采集入库和实时发布。**每帧都会走到，入库与否由 `collectionFrameStorageService.canStore()` 判定**（采集开关 && 频率限流 && 磁盘空间）—— 别在这里加无条件写库。 |
 | `csvDownloadService.js` | 历史 CSV 导出、进度上报和文件写入。 |
 | `historyQueryService.js` | 历史日期、统计、帧数据和回放行查询。 |
 | `historyPlaybackService.js` | 历史回放长度、曲线抽样和空白回放 payload 构造。 |

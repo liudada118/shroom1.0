@@ -1577,6 +1577,7 @@ const {
 } = createServerFramePipeline({
   runtimeContext,
   publishRealtimeChannel,
+  isCollecting: () => Boolean(getCollectionState('flag')),
   shouldStoreCollectionFrame,
   hasEnoughCollectionDiskSpace,
   enqueueCollectionFrame,

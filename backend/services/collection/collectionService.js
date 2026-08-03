@@ -130,6 +130,10 @@ function createCollectionDiskSpaceGuard({
   checkIntervalMs = DEFAULT_DISK_CHECK_INTERVAL_MS,
 } = {}) {
   let lastCheckAt = 0;
+  // 节流窗口内沿用上次的判断结果，而不是无脑放行。原来窗口内直接 `return true`，
+  // 于是空间真的不够时每秒也只有第一帧被拦住，剩下 999 毫秒的帧照写。
+  // 代价：空间腾出来之后最多要等一个检查周期（1 秒）才恢复入库 —— 这比漏写划算。
+  let lastResult = true;
 
   function getFreeBytes() {
     const dirPath = typeof getDirectory === 'function' ? getDirectory() : '';
@@ -142,12 +146,19 @@ function createCollectionDiskSpaceGuard({
 
   function hasEnoughSpace() {
     const now = Date.now();
-    if (now - lastCheckAt < checkIntervalMs) return true;
+    if (now - lastCheckAt < checkIntervalMs) return lastResult;
     lastCheckAt = now;
 
     const freeBytes = getFreeBytes();
-    if (freeBytes == null || freeBytes >= minFreeBytes) return true;
+    // 读不到剩余空间（非 Node 18+ / statfs 不可用）时按「够」处理，与原来一致：
+    // 宁可放行也不要因为探测不到就把采集停了。
+    if (freeBytes == null || freeBytes >= minFreeBytes) {
+      lastResult = true;
+      return true;
+    }
 
+    lastResult = false;
+    // 回调仍然只在真正检查的那一帧触发（每秒一次），所以日志不会被刷屏。
     if (typeof onInsufficientSpace === 'function') {
       onInsufficientSpace({ freeBytes, minFreeBytes });
     }

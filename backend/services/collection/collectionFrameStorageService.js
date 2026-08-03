@@ -16,6 +16,7 @@ function createCollectionFrameStorageService(options = {}) {
   const {
     getSensorType,
     getDbRef,
+    isCollecting,
     shouldStoreCollectionFrame,
     hasEnoughCollectionDiskSpace,
     enqueueCollectionFrame,
@@ -40,11 +41,24 @@ function createCollectionFrameStorageService(options = {}) {
   /**
    * 判断当前通道本帧是否允许入库。
    *
+   * 三个条件缺一不可，且 `isCollecting` 必须排在最前面：
+   *
+   * 1. **采集开关开着**。这一条以前漏了 —— `publishSit/Back/Head` 是实时下发路径，
+   *    每帧都会调到这里，所以少了这个判断就变成「串口一有数据就落库」，
+   *    没点开始采集也照写。对照老路径 `legacySerialFrameRuntime.js` 的
+   *    `ctx.flag && ctx.shouldStoreCollectionFrame(...) && ctx.hasEnoughCollectionDiskSpace()`，
+   *    条件顺序和语义都是照它补齐的。
+   *    连带后果是「磁盘满 → `setCollectionState('flag', false)`」这条急停链路以前
+   *    停不住任何东西（全仓没有一处读 `flag`），补上之后才真的能停。
+   * 2. 本帧没被采集频率限流。
+   * 3. 磁盘剩余空间够。
+   *
    * @param {'sit' | 'back' | 'head'} channel 采集通道。
    * @returns {boolean} 是否可以入库。
    */
   function canStore(channel) {
     return Boolean(
+      isCollecting?.() &&
       shouldStoreCollectionFrame?.(channel) &&
       hasEnoughCollectionDiskSpace?.()
     );

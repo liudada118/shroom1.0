@@ -16,6 +16,7 @@ const testFiles = [
   'backend/tests/displaySystems/multiSensorManifest.test.js',
   'backend/tests/displaySystems/protocolValidation.test.js',
   'backend/tests/displaySystems/workspaceService.test.js',
+  'backend/tests/collection/collectionDiskSpaceGuard.test.js',
   'backend/tests/serial/serialParserManager.test.js',
   'backend/tests/application/serialControlService.test.js',
   'backend/tests/http/displaySystemsApi.test.js',
