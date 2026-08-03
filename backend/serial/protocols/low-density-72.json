@@ -1,0 +1,21 @@
+{
+  "id": "low-density-72",
+  "label": "低密度坐垫 72 点",
+  "summary": "标准分隔符 + 72 个 uint8 点。矩阵形状不由协议决定，需要自己填。",
+  "doc": "low-density-72-144.md",
+  "matrix": null,
+  "channels": ["sit"],
+  "protocol": {
+    "baudRate": 1000000,
+    "framing": {
+      "type": "delimiter",
+      "delimiter": [170, 85, 3, 153],
+      "includeDelimiter": false
+    },
+    "decoding": {
+      "valueType": "uint8",
+      "byteOffset": 0,
+      "valueCount": 72
+    }
+  }
+}

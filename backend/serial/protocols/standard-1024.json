@@ -1,0 +1,21 @@
+{
+  "id": "standard-1024",
+  "label": "标准 1024 压力帧 (32x32)",
+  "summary": "AA 55 03 99 分隔，1024 个 uint8 压力点，是坐垫/靠背/头枕三条通道的默认协议。",
+  "doc": "standard-1024.md",
+  "matrix": { "width": 32, "height": 32, "total": 1024 },
+  "channels": ["sit", "back", "head"],
+  "protocol": {
+    "baudRate": 1000000,
+    "framing": {
+      "type": "delimiter",
+      "delimiter": [170, 85, 3, 153],
+      "includeDelimiter": false
+    },
+    "decoding": {
+      "valueType": "uint8",
+      "byteOffset": 0,
+      "valueCount": 1024
+    }
+  }
+}

@@ -1,5 +1,19 @@
 # 后端阅读入口
 
+## 2026-08-03 串口协议预设库
+
+| 想看什么 | 入口 |
+| :--- | :--- |
+| 目前支持哪些串口协议、一帧里每个字节是什么 | `backend/serial/protocols/README.md`（10 种协议各一份同名 md） |
+| 可直接加载的预设（`protocol` 段可整段粘进 manifest） | `backend/serial/protocols/*.json` |
+| 预设加载、用户目录覆盖、坏文件降级 | `backend/serial/protocols/index.js` |
+| 用户自己加协议放哪 | `<runtimeWritableRoot>/serial-protocols/*.json`，同 id 覆盖内置 |
+| 协议声明格式与校验（预设复用的就是它，没有第二套 schema） | `backend/displaySystems/displaySystemProtocol.js` |
+| 列出预设的接口 | `GET /api/serial/protocols`（`backend/http/controlRoutes.js`） |
+| 预设怎么变成「新建传感器」的模板卡片 | `backend/displaySystems/displaySystemWorkspaceService.js` 的 `buildSerialTemplateFromPreset` |
+| 预设目录路径在哪拼、谁注入给 Builder 目录 | `backend/server/appRuntimeFactory.js` |
+| 测试 | `backend/tests/serial/serialProtocolPresets.test.js`、`backend/tests/http/serialProtocolsApi.test.js` |
+
 ## 2026-07-08 Backend SDK Demo
 
 | Need | Entry |

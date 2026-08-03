@@ -7,6 +7,10 @@ const {
   buildRuntimeBindingSnapshot,
   createDisplaySystemRuntimeController,
 } = require('./displaySystemRuntimeFactory');
+const {
+  loadSerialProtocolPresets,
+  resolveUserPresetDirectory,
+} = require('../serial/protocols');
 
 /**
  * 创建应用运行时装配对象。
@@ -35,8 +39,23 @@ function createAppRuntime({
     runtimeChannelRegistry: displaySystemRuntimeDiscovery.runtimeRegistry,
     logger,
   });
+  const serialProtocolDirectories = [resolveUserPresetDirectory(runtimeWritableRoot)];
   const displaySystemWorkspace = createDisplaySystemWorkspaceService({
     writableRoot: path.join(runtimeWritableRoot, 'display-systems'),
+    // 「新建传感器」的串口模板列表直接来自协议预设库，和 GET /api/serial/protocols 同源。
+    // 读不出来时退化成只有三份内置模板的旧行为 —— 目录页不能因为一个坏 JSON 打不开。
+    listSerialProtocolPresets: () => {
+      try {
+        const result = loadSerialProtocolPresets({ extraDirectories: serialProtocolDirectories });
+        result.invalid.forEach((entry) => {
+          logger?.warn?.('[displaySystems] 串口协议预设无效', entry.filePath, entry.errors.join('; '));
+        });
+        return result.presets;
+      } catch (error) {
+        logger?.warn?.('[displaySystems] 串口协议预设加载失败', error.message || error);
+        return [];
+      }
+    },
   });
   let runtimeBindingOptions = null;
 
@@ -169,6 +188,9 @@ function createAppRuntime({
           }));
       },
     },
+    // 用户自定义串口协议预设目录。HTTP 层的 GET /api/serial/protocols 要用同一份，
+    // 从这里取而不是各自再拼一次，避免两处路径拼法漂移。
+    serialProtocolDirectories,
   };
 }
 

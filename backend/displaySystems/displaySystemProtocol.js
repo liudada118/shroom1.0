@@ -29,6 +29,17 @@ const VALUE_TYPE_READERS = Object.freeze({
 
 const PROTOCOL_VALUE_TYPES = Object.freeze(Object.keys(VALUE_TYPE_READERS));
 
+/**
+ * 每种数值类型占几个字节。
+ *
+ * Builder 目录要靠它把预设的 `valueType` 换算成「每点几字节」来算定长帧长度。
+ * 单独导出这张表而不是让调用方写 `valueType.includes('16') ? 2 : 1`：
+ * 那种推断遇到 uint32/float32 会静默算错帧长。
+ */
+const PROTOCOL_VALUE_TYPE_WIDTHS = Object.freeze(
+  Object.fromEntries(Object.entries(VALUE_TYPE_READERS).map(([type, reader]) => [type, reader.width])),
+);
+
 const PROTOCOL_CHECKSUM_TYPES = Object.freeze(['sum8', 'xor8', 'crc16-modbus']);
 
 /**
@@ -371,6 +382,7 @@ module.exports = {
   PROTOCOL_CHECKSUM_TYPES,
   PROTOCOL_FRAMING_TYPES,
   PROTOCOL_VALUE_TYPES,
+  PROTOCOL_VALUE_TYPE_WIDTHS,
   computeChecksum,
   decodeProtocolValues,
   normalizeProtocolConfig,

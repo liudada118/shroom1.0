@@ -1,0 +1,21 @@
+{
+  "id": "small-bed-12b",
+  "label": "小床 12B (1024 x uint16LE)",
+  "summary": "AA 00 55 00 03 00 99 00 作帧尾，2048 字节 payload 解成 1024 个 little-endian 16 位 ADC 点。",
+  "doc": "small-bed-12b.md",
+  "matrix": { "width": 32, "height": 32, "total": 1024 },
+  "channels": ["sit"],
+  "protocol": {
+    "baudRate": 1500000,
+    "framing": {
+      "type": "delimiter",
+      "delimiter": [170, 0, 85, 0, 3, 0, 153, 0],
+      "includeDelimiter": false
+    },
+    "decoding": {
+      "valueType": "uint16le",
+      "byteOffset": 0,
+      "valueCount": 1024
+    }
+  }
+}

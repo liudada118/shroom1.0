@@ -1,0 +1,21 @@
+{
+  "id": "matrix-256",
+  "label": "256 点单帧矩阵 (16x16)",
+  "summary": "标准分隔符 + 256 个 uint8 点，一帧就是一整张 16x16 矩阵。",
+  "doc": "matrix-256.md",
+  "matrix": { "width": 16, "height": 16, "total": 256 },
+  "channels": ["sit"],
+  "protocol": {
+    "baudRate": 921600,
+    "framing": {
+      "type": "delimiter",
+      "delimiter": [170, 85, 3, 153],
+      "includeDelimiter": false
+    },
+    "decoding": {
+      "valueType": "uint8",
+      "byteOffset": 0,
+      "valueCount": 256
+    }
+  }
+}

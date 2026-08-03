@@ -19,6 +19,7 @@ const {
 const {
   PROTOCOL_CHECKSUM_TYPES,
   PROTOCOL_VALUE_TYPES,
+  PROTOCOL_VALUE_TYPE_WIDTHS,
 } = require('./displaySystemProtocol');
 const {
   CANVAS_COLORMAPS,
@@ -133,9 +134,86 @@ function validateBuilderAlgorithmSource(type, source) {
   }
 }
 
-function buildDisplaySystemBuilderCatalog() {
+const BUILDER_BAUD_RATES = Object.freeze([9600, 115200, 460800, 921600, 1000000, 1500000, 2000000]);
+
+/**
+ * 把字节数组还原成 Builder 输入框里的十六进制写法。
+ *
+ * Builder 的 delimiter 字段是给人看的字符串（`AA 55 03 99`），预设里存的是字节数组。
+ * 大写补零两位、空格分隔 —— 和三份内置模板里已有的写法逐字一致，
+ * 否则同一个协议在下拉框里会显示成两种样子。
+ *
+ * @param {number[]} bytes 分隔符字节。
+ * @returns {string} 十六进制字符串，空数组返回空串。
+ */
+function formatDelimiterBytes(bytes) {
+  if (!Array.isArray(bytes) || !bytes.length) return '';
+  return bytes.map((byte) => Number(byte).toString(16).toUpperCase().padStart(2, '0')).join(' ');
+}
+
+/**
+ * 把一份串口协议预设翻译成 Builder 的 serialTemplate。
+ *
+ * 预设存的是 manifest 的 `protocol` 段（跟解码器同一份 schema），Builder 表单
+ * 用的是另一套扁平字段（`framingType` / `dataBits` / `bytesPerValue`）。这里做的
+ * 就是这层翻译，好处是「新建传感器」的模板列表和 `GET /api/serial/protocols`
+ * 永远同源 —— 用户往可写目录丢一份 JSON，下拉框里就多一项，不用改代码也不用重新构建。
+ *
+ * `dataBits` 是 Builder 的显示口径（只有 8/12 两档），真正决定帧长的是
+ * `bytesPerValue`，所以它直接取宽度表。四字节类型在界面上会显示成 8 Bit，
+ * 这是现有 Segmented 组件的表达能力上限，不是算错了。
+ *
+ * @param {object} preset 已归一化的预设。
+ * @returns {object} serialTemplate 条目。
+ */
+function buildSerialTemplateFromPreset(preset) {
+  const framing = preset.protocol?.framing || {};
+  const decoding = preset.protocol?.decoding || {};
+  const bytesPerValue = PROTOCOL_VALUE_TYPE_WIDTHS[decoding.valueType] || 1;
+  const delimiter = formatDelimiterBytes(framing.delimiter);
+  // 卡片下方已经有一行 baud / 分帧 / 位宽 的事实条，所以描述优先用预设自己的
+  // 一句话摘要，不再把同样的参数重复一遍；没写摘要的用户预设才回落成参数拼接。
+  const description = preset.summary
+    ? String(preset.summary).trim().replace(/。$/, '')
+    : [
+      `${preset.protocol?.baudRate} baud`,
+      delimiter ? `帧尾 ${delimiter}` : '不分包（固定长度）',
+      `${decoding.valueType} × ${decoding.valueCount || '按点数'}`,
+    ].join('，');
+
   return {
-    serialTemplates: [
+    id: preset.id,
+    label: preset.label,
+    description,
+    // 预设自带的元信息，Builder 现在只用 label/description/defaults，
+    // 这几项留给「查看协议文档」和矩阵形状自动填这类后续功能。
+    doc: preset.doc || '',
+    source: preset.source || '',
+    matrix: preset.matrix || null,
+    valueCount: decoding.valueCount || null,
+    defaults: {
+      transportType: 'binary',
+      baudRate: preset.protocol?.baudRate,
+      framingType: framing.type,
+      delimiter,
+      dataBits: bytesPerValue === 2 ? 12 : 8,
+      valueType: decoding.valueType,
+      byteOffset: decoding.byteOffset || 0,
+      bytesPerValue,
+    },
+  };
+}
+
+/**
+ * 组装 Builder 目录。
+ *
+ * @param {object} [options] 参数。
+ * @param {object[]} [options.serialProtocolPresets] `loadSerialProtocolPresets()` 出来的预设。
+ *   刻意从外面传进来而不是在这里读文件：这一层不该碰 fs，也不该反向依赖 serial 层。
+ * @returns {object} Builder 目录。
+ */
+function buildDisplaySystemBuilderCatalog({ serialProtocolPresets = [] } = {}) {
+  const legacySerialTemplates = [
       {
         id: 'pressure-fixed-length',
         label: '经典 8 Bit 帧',
@@ -181,7 +259,26 @@ function buildDisplaySystemBuilderCatalog() {
           bytesPerValue: 2,
         },
       },
-    ],
+  ];
+
+  // 同 id 时预设覆盖内置模板 —— 和 loader 里「用户预设覆盖内置预设」同一套规则，
+  // 保证下拉框里一个 id 只出现一次；旧 manifest 记的 serialTemplate 也仍然找得到。
+  const serialTemplateById = new Map(legacySerialTemplates.map((template) => [template.id, template]));
+  serialProtocolPresets.forEach((preset) => {
+    if (!preset?.id || !preset.protocol) return;
+    serialTemplateById.set(preset.id, buildSerialTemplateFromPreset(preset));
+  });
+  const serialTemplates = [...serialTemplateById.values()];
+
+  // 预设可能用了不在固定档位里的波特率（大床是 3000000），不并进来的话
+  // 选中预设后波特率下拉框会显示成一个没有选项的裸数字。
+  const baudRates = [...new Set([
+    ...BUILDER_BAUD_RATES,
+    ...serialTemplates.map((template) => Number(template.defaults?.baudRate)).filter(Boolean),
+  ])].sort((left, right) => left - right);
+
+  return {
+    serialTemplates,
     displayTemplates: [
       {
         id: 'heatmap-overview',
@@ -222,7 +319,7 @@ function buildDisplaySystemBuilderCatalog() {
     transportTypes: [
       { id: 'binary', label: '二进制串口' },
     ],
-    baudRates: [9600, 115200, 460800, 921600, 1000000, 1500000, 2000000],
+    baudRates,
     framingTypes: [
       { id: 'fixedLength', label: '不分包（固定长度）' },
       { id: 'delimiter', label: '按分隔符分包' },
@@ -377,6 +474,9 @@ function copyDirectoryRecursive(sourceDirectory, targetDirectory, fsLike) {
 function createDisplaySystemWorkspaceService({
   writableRoot,
   fsLike = fs,
+  // 每次取目录时重新读一遍串口协议预设：用户往可写目录丢一份 JSON 之后
+  // 刷新「新建传感器」页面就能看到，不用重启服务。
+  listSerialProtocolPresets = () => [],
 } = {}) {
   if (!writableRoot) throw new Error('display system writableRoot is required');
   fsLike.mkdirSync(writableRoot, { recursive: true });
@@ -623,7 +723,9 @@ function createDisplaySystemWorkspaceService({
 
   return {
     getCatalog: () => ({
-      ...buildDisplaySystemBuilderCatalog(),
+      ...buildDisplaySystemBuilderCatalog({
+        serialProtocolPresets: listSerialProtocolPresets(),
+      }),
       writableRoot,
     }),
     read,

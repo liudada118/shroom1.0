@@ -32,6 +32,7 @@ const HTTP_ROUTES = Object.freeze({
   serialExchange: '/api/serial/exchange',
   serialRefresh: '/api/serial/refresh',
   serialAutoConnectHandGloveDouble: '/api/serial/auto-connect-hand-glove-double',
+  serialProtocols: '/api/serial/protocols',
   sensorCurrent: '/api/sensor/current',
   sensorType: '/api/sensor/type',
   historyLoad: '/api/history/load',
@@ -79,6 +80,7 @@ function buildSdkContractSnapshot({
   displaySystems = {},
   serialStatus = {},
   subscriptions = {},
+  protocolPresets = [],
 } = {}) {
   return {
     apiVersion: API_VERSION,
@@ -133,6 +135,9 @@ function buildSdkContractSnapshot({
       roles: listSerialRoles(),
       aliases: SERIAL_ROLE_ALIASES,
       status: serialStatus,
+      // 可用的串口协议预设摘要。完整的 protocol 段走 GET /api/serial/protocols，
+      // 这里只给 id/label，让 SDK 不用先拉一遍列表就知道有哪些预设可选。
+      protocolPresets,
     },
     displaySystems: {
       schemaVersion: DISPLAY_SYSTEM_SCHEMA_VERSION,

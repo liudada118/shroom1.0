@@ -171,7 +171,7 @@ flowchart LR
 | `python/` | Python worker 桥接，用于调用外部算法。 |
 | `runtime/` | 后端运行时入口、旧兼容 hub、命令路由、通用运行时状态仓库和零点状态仓库。 |
 | `sensors/` | 传感器插件、协议解析和传感器类型 registry。 |
-| `serial/` | 串口扫描、端口创建、生命周期管理和 parser 管理。 |
+| `serial/` | 串口扫描、端口创建、生命周期管理、parser 管理，以及 `protocols/` 下的串口协议预设库（JSON 预设 + 协议字节说明 md）。 |
 | `server/` | 服务启动编排层。当前仍包含主 `server.js`，以及 HTTP/WS factory 和 server 级工具模块。 |
 | `services/` | 领域服务和基础设施服务。包含采集、历史、回放、CSV、WebSocket、生命周期、实时网关等。 |
 | `ws/` | WebSocket 命令兼容层。目标是只保留消息解析、命令路由和旧协议适配。 |
@@ -309,6 +309,8 @@ flowchart LR
 | `serialManager.js` | 串口角色生命周期管理，包括注册、打开、关闭、状态查询和重连策略。 |
 | `serialParserManager.js` | 命名 parser 创建、pipe 和 onData 绑定管理。 |
 | `serialPortFilterService.js` | WCH/CH34x 串口识别、跨平台串口过滤和串口扫描日志摘要。 |
+| `protocols/index.js` | 串口协议预设加载：内置 `protocols/*.json` + 用户 `<runtimeWritableRoot>/serial-protocols/*.json`（同 id 用户覆盖内置），校验直接复用 `displaySystems/displaySystemProtocol.js` 的 `validateProtocolConfig`。目录缺失不算错误、单个坏 JSON 只影响自己。 |
+| `protocols/*.md` | 10 种在用串口协议的字节结构说明（含 README 索引）。当前 schema 表达不了的 4 种在各自的 `## schema 缺口` 段写明缺什么。 |
 
 ### `server/`
 
@@ -359,6 +361,7 @@ flowchart LR
 
 | 日期 | 类型 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-03 | 新增功能 | 新增 `serial/protocols/`：串口协议预设库（loader + 6 份 JSON 预设 + 11 份 md）。预设格式复用 manifest 的 `protocol` 四段，不另立 schema；用户预设目录 `<runtimeWritableRoot>/serial-protocols/` 同 id 覆盖内置，打包之后加协议不需要构建工具链。出口是 `GET /api/serial/protocols`、SDK contract 的 `serial.protocolPresets`，以及 `displaySystems` 目录的 `serialTemplates`（由 `server/appRuntimeFactory.js` 注入，`displaySystems` 层不反向依赖 `serial` 层）。|
 | 2026-07-03 | 优化重构 | 新增 `runtime/zeroCommandService.js`，将旧 WS `resetZero` 命令的零点捕获和清空逻辑从 `webSocketHandlerFactory.js` 迁入 runtime 层。 |
 | 2026-07-03 | 优化重构 | 新增 `server/bootstrapServer.js`，将启动串口扫描和本地 HTTP 服务监听从 `server.js` 迁出。 |
 | 2026-07-03 | 优化重构 | 新增 `runtime/webSocketContextAccessorFactory.js`，将 WebSocket handler context 的旧状态 accessor 拼装从 `server.js` 迁入 runtime 层。 |

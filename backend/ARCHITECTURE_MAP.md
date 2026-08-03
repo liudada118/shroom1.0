@@ -27,6 +27,7 @@ flowchart LR
 | :--- | :--- |
 | 新增或修改串口打开、重连、端口筛选 | `serial/serialManager.js`、`serial/serialPortFilterService.js` |
 | 修改串口数据切帧/parser | `serial/serialParserManager.js` |
+| 查协议字节结构 / 加一种串口协议预设 | `serial/protocols/README.md`、`serial/protocols/*.json`、`serial/protocols/index.js` |
 | 修改某类传感器实时解析 | `sensors/runtime/*` |
 | 修改线序、点位映射 | `processing/lineOrders.js`、`processing/lineOrderDefinitions/*`、`processing/videoPointMappings.js` |
 | 修改插值或平滑算法 | `processing/interpolationAlgorithms.js`、`processing/smoothingAlgorithms.js` |

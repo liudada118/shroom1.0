@@ -1,4 +1,5 @@
 const HttpResult = require('../common/HttpResult');
+const { loadSerialProtocolPresets } = require('../serial/protocols');
 const {
   HTTP_ROUTES,
   SERIAL_ROLES,
@@ -77,6 +78,7 @@ function registerControlRoutes(app, {
   logger,
   serialManager,
   controlCommandService,
+  serialProtocolDirectories = [],
 }) {
   /**
    * HTTP 控制命令统一入口。
@@ -178,6 +180,30 @@ function registerControlRoutes(app, {
 
   app.post(HTTP_ROUTES.serialAutoConnectHandGloveDouble, (req, res) => {
     dispatchCommand(createCommand('serial.autoConnect'), res);
+  });
+
+  /**
+   * 串口协议预设列表。
+   *
+   * 目的是让「新建传感器」不用手抄字节：选一个预设，波特率 / 分帧 / 解码三段直接填好。
+   * 返回的 `protocol` 段就是展示系统 manifest 的 `protocol` 段，可以整段写进
+   * `display-system.json`，不需要转换。
+   *
+   * 坏掉的预设文件不会让这个接口失败 —— 它们带着原因出现在 `invalid` 里，
+   * 好的预设照常返回。用户往可写目录丢了一个写错的 JSON，不应该让整个列表变空。
+   */
+  app.get(HTTP_ROUTES.serialProtocols, (req, res) => {
+    try {
+      const result = loadSerialProtocolPresets({ extraDirectories: serialProtocolDirectories });
+      res.json(new HttpResult(0, {
+        protocols: result.presets,
+        invalid: result.invalid,
+        directories: result.directories,
+      }, 'success'));
+    } catch (error) {
+      logger?.warn?.('[HTTP] list serial protocols failed', error.message || error);
+      res.status(500).json(new HttpResult(1, {}, error.message || 'list serial protocols failed'));
+    }
   });
 
   // 传感器类型和当前通道状态查询。

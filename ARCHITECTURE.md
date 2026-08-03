@@ -1,5 +1,194 @@
 # 架构文档
 
+## 2026-08-03 串口协议预设库：10 份协议文档 + 6 份可加载预设 + 用户可扩展目录
+
+### 为什么不是新发明一套格式
+
+需求是「输出几份串口协议文档，让系统能直接按它读，用户不用点太多设置」。动手前先确认了一件事：
+**协议的声明格式早就存在** —— `backend/displaySystems/displaySystemProtocol.js` 定义的
+`baudRate` / `framing` / `decoding` / `validation` 四段，`serialParserManager.createParserFromProtocol()`
+直接消费它。所以预设库存的就是那四段的原文，一份预设的 `protocol` 块可以整段粘进
+`display-system.json` 而不需要任何转换，`validateProtocolConfig()` 也就是预设的校验器 ——
+没有第二套 schema、没有第二个校验实现。
+
+### 十份协议，六份能完整声明
+
+从运行时源码里逐个挖出来的协议是 **10 种**（不是最初估的 9 种，第 10 种是 bigBed 的 1025 字节分片帧）：
+
+| 协议 | 状态 | 说明 |
+| :--- | :--- | :--- |
+| `standard-1024` | ✅ 有预设 | `AA 55 03 99` 分隔，1024 × uint8，1000000 baud，32×32 |
+| `small-bed-12b` | ✅ 有预设 | `AA 00 55 00 03 00 99 00` 分隔，1024 × uint16LE，1500000 baud |
+| `bed-4096` | ✅ 有预设 | 与标准帧**同一个分隔符**，靠 4096 点帧长区分，3000000 baud |
+| `matrix-256` | ✅ 有预设 | 256 × uint8，921600 baud，16×16 |
+| `low-density-72` / `low-density-144` | ✅ 有预设 | 72 / 144 × uint8，矩阵形状不由协议决定（`matrix: null`） |
+| bigBed 1025 字节分片 | ⚠️ 只有文档 | 单片能声明，但一片只有半张矩阵 —— schema 没有跨帧拼装 |
+| 手套整包 274 / 手套 262 | ⚠️ 只有文档 | 帧里是「压力区 + IMU 区」混合，`decoding` 只能声明**一种** valueType |
+| 手套双包 | ❌ 只有文档 | 两个串口两个包对拼成一只手 |
+| minzhen 文本协议 | ❌ 只有文档 | 文本行协议，schema 只有二进制入口 |
+
+**刻意不给 ⚠️/❌ 那四种发预设。** bigBed 单片技术上声明得出来，但选中它会静默得到半张矩阵，
+这正是「宁可没有，也不要半成品预设」的那种情况；三个 schema 缺口逐条写在各自的 md 里
+（`## schema 缺口` 段），写明缺什么、要加什么才能补上，而不是含糊地说「暂不支持」。
+
+**`low-density-72-144` 拆成了两份 JSON。** 原计划一份文件覆盖两种点数，但一份 JSON 只能有
+一个 `valueCount`，所以是两份预设共用一份 md。
+
+### 预设从哪来：内置 + 用户目录，同 id 用户赢
+
+```
+backend/serial/protocols/*.json          内置，跟着安装包走
+<runtimeWritableRoot>/serial-protocols/*.json   用户自己丢的，打包之后也能加
+```
+
+后者是这一轮对「打包之后能二开」的直接贡献：改一个波特率、加一种自研传感器的协议，
+放一份 JSON 进可写目录就行，不需要构建工具链，也不用改源码。三条健壮性规则写进了 loader
+和测试：目录不存在**不是错误**（用户目录默认就不存在）；一个 JSON 写坏**只影响它自己**
+（带着原因进 `invalid`，其余预设照常返回）；`readdirSync` 抛异常降级成一条 `invalid`，不炸整次加载。
+
+### 两条出口：HTTP 接口和「新建传感器」的模板卡片
+
+`GET /api/serial/protocols` 返回 `{protocols, invalid, directories}` —— `directories` 也返回，
+因为用户排错时第一个问题就是「系统到底在哪找预设」。`GET /api/sdk/contract` 里同步加了
+`serial.protocolPresets` 摘要（只有 id/label/summary/doc，**不含** `protocol` 段：contract 是能力
+快照不是数据源）。
+
+真正让「不用点太多设置」落地的是第二条出口：**Builder 的模板卡片改为由预设库喂**。
+`buildDisplaySystemBuilderCatalog()` 原来硬编码 3 份 `serialTemplates`，现在接受
+`serialProtocolPresets` 参数，把每份预设翻译成 Builder 表单的扁平字段
+（`framingType` / `delimiter` 十六进制串 / `dataBits` / `bytesPerValue`）。前端**一行没改** ——
+`DisplaySystemBuilder.jsx` 早就有 `serialTemplate` 卡片和 `applySerialTemplate`，
+卡片从 3 张变 9 张，选中即把 `protocol` 段填好。
+
+三处必须说明的翻译细节：
+
+1. **同 id 时预设覆盖内置模板**，与 loader 里「用户预设覆盖内置预设」同一套规则；三份内置模板
+   id 一个都没删，旧 manifest 的 `metadata.builder.serialTemplate` 仍然找得到自己。
+2. **`bytesPerValue` 走宽度表，不靠 `valueType.includes('16')` 猜** —— 为此从
+   `displaySystemProtocol.js` 导出了 `PROTOCOL_VALUE_TYPE_WIDTHS`。猜的写法遇到
+   uint32/float32 会把定长帧长算成一半。
+3. **波特率档位并进预设用的值** —— 大床的 3000000 原来不在 7 个固定档位里，不并进去的话选中
+   预设后波特率下拉框会显示成一个没有对应选项的裸数字。
+
+`dataBits` 只有 8/12 两档（前端是写死的 `Segmented`），所以四字节类型在界面上会显示成
+8 Bit —— 帧长由 `bytesPerValue` 决定所以算得对，但显示口径是现有组件的表达能力上限。
+
+### 依赖方向
+
+`displaySystems` 层**不反向依赖 `serial` 层**：`buildDisplaySystemBuilderCatalog()` 收一个纯数组，
+读文件的事在 `appRuntimeFactory` 做（它本来就知道 `runtimeWritableRoot`），并且
+`getCatalog()` 每次调用都重新读一遍 —— 用户丢完 JSON 刷新页面就能看到，不用重启服务。
+预设目录路径只在 `appRuntimeFactory` 拼一次，HTTP 层从 `appRuntime.serialProtocolDirectories`
+取，避免两处拼法漂移。
+
+## 2026-08-03 行为修正：采集计时改成真正的秒表，不再用帧数推算
+
+### 原来那个式子是什么意思，为什么站不住
+
+Title 上「采集/停止」后面那个数字，原来是 `client/src/page/home/Home.jsx` 里的
+`this.title.current?.changeNum(num / 12 * hz)`。三个量各自是：
+
+| 量 | 来源 | 真实含义 |
+| :--- | :--- | :--- |
+| `num` | 模块级变量，每收到一帧 `sitData` 就 `num++`；`colValueFlag` 为假时归 0 | **收到的实时帧数**，不是秒 |
+| `hz` | 模块级变量默认 12，由 `jsonObject.hz` 覆盖；后端那头是 `colHZ`（`sit1024FrameProcessor.js` 等处随帧下发） | **用户设定的采集频率**，默认 12（`backend/services/collection/collectionService.js` 的 `DEFAULT_COLLECTION_FREQUENCY_HZ`），并非传感器帧率 |
+| `12` | 写死的常量 | 「传感器每秒推 12 帧」这个**假设** |
+
+所以原意是：`num / 12` 当成「过了几秒」，再 `× hz` 换成「按采集频率算这几秒该入库多少行」。
+显示时套一层 `Math.ceil`（`components/title/Title.jsx` 的采集按钮）。
+
+站不住的地方在那个 12：实时下发**根本不限频**，
+`backend/services/realtime/frameOutputPipelineService.js` 的 `publishSit/Back/Head` 每帧都
+`publishRealtimeChannel`，`num` 的增长速率就是传感器真实帧率；而真实帧率这份代码自己就在量
+（`wsData` 里的 `realHz = realHzFrameCount * 1000 / 间隔`，还显示在界面上）。正确的除数一直在手边，
+式子里用的却是常量 12。真实帧率一旦不是 12，这个数既不是秒也不是入库行数，偏差正好是
+`realHz / 12` 倍 —— 100Hz 的传感器上秒表快 8 倍多。
+
+### 修法：记时间戳，定时器驱动
+
+靠帧数推算是错的路子：帧率会抖、会丢帧、串口卡一下就少算。改成记开始时刻、按墙上时间算，
+与帧率和采集频率都无关。计时的起停挂在 `Home.jsx` 的 `setColValueFlag` 上 —— 它是采集开关的
+唯一入口（`Title.jsx` 的 `startCollectionWithOptions` 传 true、`stopCollection` 传 false）：
+
+- 新增 `startCollectionTimer()`：记 `colStartAt = Date.now()`，先 `changeNum(0)`，再挂一个 1 秒
+  `setInterval` 写 `Math.floor((Date.now() - colStartAt) / 1000)`。
+- 新增 `stopCollectionTimer()`：清 interval，**不清零显示** —— 与改动前一致（以前停止采集只把
+  `num` 归 0、并不调 `changeNum`，数字停在最后一个值上，正好能看到这次采了多久）。
+- `componentWillUnmount` 里补 `stopCollectionTimer()`，避免往已卸载的 ref 上写。
+
+两个必须点明的实现细节：
+
+1. **必须用定时器，不能再蹭帧。** 没有帧进来（串口卡住、传感器没数据）时秒表也该照走 ——
+   这正是旧实现做不到的另一半。
+2. **传给 `changeNum` 的是取整后的整数秒。** `Title.jsx` 显示时套 `Math.ceil`，而 `setInterval`
+   有几毫秒漂移，直接传 `1.003` 会被 ceil 成 2、第一秒就跳到 2。先 `Math.floor` 成整数，
+   `Math.ceil` 就成了空操作。
+
+顺带删掉了 `ws1Data` 里的第二个计数器（`isCar(matrixName) && !sitFlag` 时 `changeNum(num)`，
+显示帧数、无 `/12*hz`，走靠背通道）。上一节说过「不动它」，这次改变主意的理由是它和坐垫那个写的是
+**同一个 `changeNum` 槽位**：秒表接管之后两者会互相盖写，车类传感器上数字会在秒数和帧数之间跳。
+删掉后这个数字全局统一由秒表驱动。模块级 `num` 至此在 `Home.jsx` 内已无引用，一并移除
+（函数内那些同名的 `let num` 是局部累加变量，与此无关）。
+
+### 本节的明确边界
+
+- **这是有意的语义变化，不是等价改造**：那个数字从「按 12Hz 假设折算出的行数估算」变成了
+  **真实经过秒数**。默认 12Hz、真实帧率恰好也是 12 的场景下两者读数接近，其它场景会明显不同。
+- **没改 `Title.jsx` 的显示与文案**（仍是 `Math.ceil(this.state.num)`，仍不带单位）。
+- **没动 `client/src/page/home/util.js` 里那 8 个 `changeNum(num)`**：那些点显示的是帧数，且该文件
+  的第三份 `colValueFlag` 自 `e0c637a`（2026-03-23）起从未被置真，整段是死代码，仍挂账。
+- **没动 `hz` / `colHZ` 本身**：采集频率该怎么用（限流入库）没变，只是不再被拿去当计时乘数。
+- `client/src/page/home/HomeFun.jsx` 全仓无人 import（死文件），未跟着改。
+
+### 验证
+
+客户端 `npx vitest run` → 303 passed / 15 suites（`App.test.jsx` 为既有失败套件，缺
+`@testing-library/react`，非本次引入）；`npx eslint src/page/home/Home.jsx` 干净；
+`npx vite build --outDir ../tmp/build-check --emptyOutDir` 通过（17.08s），
+`build/model` 137MB / 20 个 fbx 未被触碰，`git status --short build/` 为 0。
+
+## 2026-08-03 缺陷修复：显示系统传感器的采集计时数字不动（本次重构引入的回归）
+
+### 现象与定位
+
+新建显示系统传感器、点开始采集之后，Title 上「停止」后面那个数字一直是 0 不变
+（它是采集计时，旧传感器上是正常走的）。
+
+`Home.jsx` 的 `wsData` 里有一处**提前 return**：manifest 类型的展示形式先交给
+`handleManifestSceneFrame`，处理掉或帧带 `displaySystemId` 就 `return` —— 旧场景不能
+消费带身份的帧，这个 return 本身是对的。问题是采集计数那段代码原来在 `realHz` 统计旁边、
+**在这个 return 之后**，于是 manifest 帧永远走不到，`num` 不增、`changeNum` 不调。
+
+**这是本次重构谱系引入的回归**，不是历史遗留：`git show` 逐个提交比对，
+`6710e5e`（2026-07-21）还没有这个提前 return，`42773c4`（渲染器插件化那次提交）起才有。
+
+### 修法
+
+把计数那段提到 return 之前，两条路径共用同一份计数，旧位置删掉（避免重复计数）。
+计时是全局采集状态，跟画谁、怎么画无关，本来就不该待在旧场景的处理链里。
+
+**只提计数，没有把 `if (jsonObject.hz != null)` 那段一起提上来** —— 不需要：带 `hz` 的是
+纯配置消息，不含压力数据，`hasPressureFrame` 为假，走不到那个 return，`hz` 照样能更新。
+`num` / `colValueFlag` / `hz` 三个都是模块级变量（`Home.jsx:392` / `:400` / `:838`），
+提前引用没有作用域问题；`this.state.matrixName != 'car10'` 守卫原样保留。
+
+### 顺手查明但**没有**修的两处
+
+1. **`page/home/util.js:116` 有第三份 `colValueFlag`，全文件没有一处给它赋 true。**
+   该文件里 8 个 `changeNum` 调用点因此全是死代码。这份是模块级私有变量，
+   `Title` 的 `setColValueFlag` 只接到 `Home.jsx:3942` 和 `HomeFun.jsx:124` 两份上。
+   `git log -S` 显示这行自 `e0c637a`（2026-03-23）起就没被赋过值 —— **历史遗留，不是本次引入**，
+   而且要修得先弄清那 8 个调用点分别服务哪个 matrixName，超出本次范围，挂账。
+2. **`ws1Data` 里第二个计数器**（`Home.jsx:2619`，`isCar(matrixName) && !sitFlag` 时
+   `changeNum(num)`，注意**没有** `/12*hz`）走的是靠背通道，与显示系统无关，原样不动。
+
+### 本节的明确边界
+
+- **没有改那个 `num / 12 * hz` 公式**。它是否真的等于秒数是另一个问题（`hz` 默认 12 时
+  它就等于帧数），这次只恢复「数字会动」，不重新设计计时语义。
+- **没有动提前 return 本身**，也没有动 `handleManifestSceneFrame`。
+- **没有修上面挂账的那两处。**
+
 ## 2026-08-03 缺陷修复：采集开关在新帧管线里没人读，串口一通就落库
 
 ### 现象与定位
@@ -786,6 +975,9 @@ flowchart LR
 
 | 日期 | 类型 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-03 | 新增功能 | **串口协议预设库 + Builder 模板改由它喂。** 新建 `backend/serial/protocols/`：6 份 JSON 预设、11 份 md（10 种协议各一份 + 目录 README）、一个 loader。**不新发明格式** —— 预设存的就是 manifest 的 `protocol` 四段原文，`validateProtocolConfig()` 直接当校验器，预设块可整段粘进 `display-system.json`。协议实测是 **10 种不是 9 种**（第 10 种是 bigBed 的 1025 字节分片帧），其中 6 种当前 schema 能完整声明并发了预设，另 4 种只发文档并在各自 md 的 `## schema 缺口` 段写明缺什么：`decoding` 只能声明一种 valueType（挡住手套的「压力区 + IMU 区」混合帧）、没有跨帧拼装（挡住 bigBed 分片与手套双包）、没有文本协议入口（挡住 minzhen）。bigBed 单片技术上声明得出来但会静默给出半张矩阵，**刻意不发预设**。`low-density-72-144` 因一份 JSON 只能有一个 `valueCount` 拆成两份预设共用一份 md。用户预设目录 `<runtimeWritableRoot>/serial-protocols/`，同 id 覆盖内置 —— 打包之后加协议只需丢一份 JSON。出口两条：`GET /api/serial/protocols`（连 `directories` 一起返回，排错时要知道系统在哪找）+ `serial.protocolPresets` 进 SDK contract（只给摘要不给 `protocol` 段）；以及 `buildDisplaySystemBuilderCatalog()` 由硬编码 3 份模板改为接收预设数组，「新建传感器」的模板卡片 3 张变 9 张，**前端一行未改**（`applySerialTemplate` 早就在）。为此从 `displaySystemProtocol.js` 导出 `PROTOCOL_VALUE_TYPE_WIDTHS`：`bytesPerValue` 必须查表，靠 `valueType.includes('16')` 猜会把 uint32/float32 的定长帧长算成一半。依赖方向保持单向（`displaySystems` 不反向依赖 `serial`，读文件在 `appRuntimeFactory`，`getCatalog()` 每次现读所以刷新即生效）。后端 36 → 38 个测试文件全通过。 |
+| 2026-08-03 | 行为修正 | **采集计时改成真正的秒表，不再用帧数推算。** 原来显示 `num / 12 * hz`：`num` 是收到的实时帧数，`hz` 是后端下发的采集频率 `colHZ`（默认 12），`12` 是写死的「传感器每秒 12 帧」假设，合起来意思是「按采集频率算这几秒该入库多少行」。站不住的是那个 12 —— 实时下发不限频（`frameOutputPipelineService.publishSit` 每帧都发），`num` 的增长速率就是真实帧率，而真实帧率同一份代码里的 `realHz` 正在现量。帧率不是 12 时该数既非秒也非行数，偏差 `realHz / 12` 倍。改法：`Home.jsx` 新增 `startCollectionTimer()` / `stopCollectionTimer()`，挂在采集开关的唯一入口 `setColValueFlag` 上，记 `colStartAt = Date.now()` 后用 1 秒 interval 写 `Math.floor((Date.now() - colStartAt) / 1000)`；必须定时器驱动而非蹭帧（无帧时秒表也要走），传整数秒是因为 `Title.jsx` 会套 `Math.ceil`、传 `1.003` 会跳成 2。停止时只停表不清零（与旧行为一致）。顺带删掉 `ws1Data` 里的第二个计数器 —— 它与坐垫那个写同一个 `changeNum` 槽位，秒表接管后会互相盖写。语义变化已明说，非等价改造。 |
+| 2026-08-03 | 缺陷修复 | **显示系统传感器的采集计时数字不动（本次重构引入的回归）。** 新建显示系统传感器点开始采集后，Title 上「停止」后面那个数字一直是 0。`Home.jsx` 的 `wsData` 里 manifest 类型走 `handleManifestSceneFrame` 后有个**提前 return**（旧场景不能消费带 `displaySystemId` 的帧，这个 return 本身是对的），而采集计数那段原来在 `realHz` 统计旁边、**在 return 之后**，manifest 帧永远走不到。逐提交比对确认是**本次重构谱系引入的回归**：`6710e5e`（2026-07-21）还没有这个提前 return，`42773c4`（渲染器插件化那次提交）起才有。修法：把计数提到 return 之前、两条路径共用，旧位置删掉避免重复计数 —— 计时是全局采集状态，跟画谁怎么画无关，本不该待在旧场景处理链里。**没有把 `if (jsonObject.hz != null)` 一起提上来**（带 `hz` 的是纯配置消息、不含压力数据，`hasPressureFrame` 为假走不到 return，`hz` 照样更新）；`num`/`colValueFlag`/`hz` 都是模块级变量（`Home.jsx:392`/`:400`/`:838`），提前引用无作用域问题；`matrixName != 'car10'` 守卫原样保留。顺手查明但**没修**两处：①`page/home/util.js:116` 有**第三份 `colValueFlag`**，全文件无一处赋 true，该文件 8 个 `changeNum` 调用点全是死代码 —— `git log -S` 显示自 `e0c637a`（2026-03-23）起就没被赋过值，**历史遗留非本次引入**，要修得先弄清那 8 个点各服务哪个 matrixName，挂账；②`ws1Data` 里第二个计数器（`Home.jsx:2619`，`isCar && !sitFlag` 时 `changeNum(num)`，**没有** `/12*hz`）走靠背通道、与显示系统无关，原样不动。边界：没改 `num / 12 * hz` 公式（它是否真等于秒数是另一个问题，`hz` 默认 12 时就等于帧数），没动提前 return 本身和 `handleManifestSceneFrame`。客户端 303 passed / 15 suites（`App.test.jsx` 仍是既有失败套件，缺 `@testing-library/react`），`Home.jsx` eslint 干净，构建通过且 `build/model` 137MB 未被触碰。 |
 | 2026-08-03 | 缺陷修复 | **采集开关在新帧管线里没人读，串口一通就落库。** 现场两条现象（新建传感器接串口后连报三次 `database or disk space is insufficient`；没点开始采集但数据库文件一直变大）同一个根因：`collectionFrameStorageService.canStore()` 只问了采集频率限流和磁盘剩余空间，**没问采集开关**，而它的调用方 `frameOutputPipelineService` 的 `publishSit/Back/Head` 是**实时下发路径、每帧都走**，实际语义就成了「串口一有数据就落库」。对照老路径 `legacySerialFrameRuntime.js` 的 `ctx.flag && ctx.shouldStoreCollectionFrame(...) && ctx.hasEnoughCollectionDiskSpace()`，是新管线迁移时漏了 `ctx.flag` 这个打头条件；决定性证据是**全仓 `getCollectionState('flag')` 读取处为零**，这个开关只有人写没有人读。一并修掉三个连带缺陷：①`canStore()` 补 `isCollecting?.()` 并排最前，由 `framePipelineFactory` 从 `server.js` 注入 `() => Boolean(getCollectionState('flag'))`；②磁盘满时 `stopCollectionForStorageError` 执行的 `setCollectionState('flag', false)` 以前**停不住任何东西**（没人读 flag），所以报了错还在写 —— 第 ① 条修完这条急停链路自动接通，它一直是设计好了但没接上的；③`createCollectionDiskSpaceGuard.hasEnoughSpace()` 在 1000ms 节流窗口内直接 `return true`，等于空间真不够时**每秒只有第一帧被拦住、剩下 999 毫秒照写**，改成窗口内沿用上次结果（新增 `lastResult`），**代价写明**：空间腾出来后最多等一个检查周期（1 秒）才恢复入库，比漏写划算；回调仍只在真正检查那一次触发，日志不会刷屏（现场那「三条」正对应三秒）。保留「探测不到剩余空间时按够处理」的原语义（`statfs` 不可用不该把采集停了）。测试：`framePipelineFactory.test.js` 加回归段（`collecting = false` 时三通道 `store*` 全返回 `false` 且入库队列长度不变）；新建 `backend/tests/collection/collectionDiskSpaceGuard.test.js`（该守卫此前**零覆盖**），覆盖空间充足/不足/探测失败三条分支 + 节流窗口内不许放行 + 回调只触发一次 —— 不注入假 fs（`getDirectoryFreeBytes` 内部用默认 `require('fs')`，注不进去），改用真实目录配 `minFreeBytes: 0` 与 `Number.MAX_SAFE_INTEGER` 两个极端阈值驱动分支，不依赖机器上还剩多少空间。两条新测试都**先拿 HEAD 的旧实现跑过确认会失败**才算数。边界：没改采集频率/降采样/入库队列批量策略，没改 `COLLECTION_MIN_FREE_BYTES`（2GB）及其 `SHROOM_MIN_COLLECTION_FREE_BYTES` 覆盖口，没动 `legacySerialFrameRuntime` 老路径（它本来就是对的，这次拿它当基准）。后端 35 → 36 个测试文件全通过。 |
 | 2026-08-03 | 优化重构 | 横切共用层第二步：**47 个阈值声明块 / 2206 个读写点收成一个 store**（`client/src/runtime/displayThresholds.js`），六个键（`carValuej`/`carValueg`/`carValue`/`carValuel`/`carValuef`/`carValueInit`）在全仓只剩一个读取出口 —— 这就是 `PointGridRenderer.jsx` 文件头点名的「55 份复制粘贴的根因」。**消费方式是解构而非取对象**：`var { valuej1, … } = createThresholdState(DUAL_CHANNEL_DEFAULTS)` 拿到的是普通局部绑定，各文件的 `sitValue(prop)` 照样能 `valuej1 = prop.valuej` 直接改，**2206 个读写点一个字没动**（改成 `t.valuej1` 要动 2206 处零测试覆盖的 legacy 代码，风险与收益不成比例）；`if (prop.valuej)` 那个「传 0 被忽略」的真值守卫也原样保留。**计划里的「模块加载时读一次存快照」没有照做** —— 动手前数出这 47 个块作用域并不统一：**23 个在模块顶层**（实例共享、冻结在 import 时刻），**24 个在 `React.forwardRef((props, refs) => {` 函数体内**（本来就每实例、每次挂载重读）。共享快照对两种作用域都不等价（函数内那 24 个今天切走再切回会拿到新值；模块级那 23 个因场景懒加载、改完阈值再切到未加载过的展示形式也会读到新值），会把两者一起冻结在**第一个消费者**加载的时刻，所以实现成每次调用现读、调用点就是原声明处，并有测试钉住。作用域一律保持原样，把那 23 个也改成每实例需要 `stateRef`（见 `PointGridRenderer.createTuningState`），留给各文件改写成渲染器时顺带做。**默认值按变量名给而不是按 localStorage 键给**：实测**六个键全都有离群值**（`carValuej` 200×84/335×2/255×2/600×1/2655×1；`carValueg` 2×86/3.6×2/4×1/3.3×1；`carValue` 2×87/2.1×1/2.08×1；`carValuel` 2×88/4×1/1×1；`carValuef` 2×89/**0**×1；`carValueInit` 2×87/2000×2/2001×1/500×1），而且 `three/wholeChair.jsx` **两个通道默认值不对称**（`valueg1`=4 而 `valueg2`=2、`value1`=2.1 而 `value2`=2、`valuel1`=1 而 `valuel2`=2）—— 按键给会静默改掉这三处首屏表现且不会有任何测试失败；`carValuef` 的那个 **0** 是同类陷阱的另一面，是真实默认值而非「没设」。三条预设 `DUAL_CHANNEL_DEFAULTS`(37)/`SINGLE_CHANNEL_DEFAULTS`(7)/`SECOND_CHANNEL_DEFAULTS`(2)，离群三个文件用展开覆盖。`SECOND_CHANNEL_DEFAULTS` 存在是因为 `three/4096.jsx` 与 `three/NumThreeColor copy.jsx` 只声明 `value*2`，后缀 1 侧走 `assets/util/bed4096numParams.js` 那个**共享调参对象**（「切换模式时调参不重置」）—— 该模块保留，价值不在读取（已收走）而在**模块级单例**语义。脚本批量换 39 个块，四处形状特殊手工改：`three/Short.jsx`（块中间**夹着一行 `ymax1`**，读的是 `ymax` 键，拆出单放）、`heatmap/canvas.jsx`（没有 `valuej1` 变量，同一个 `carValuej` 键读成 `options.max` 且默认 **600**）、`page/home/HomeFun.jsx`（六个 `useState` 初值，原来每帧 12 次 `getItem`）、`assets/util/util.js` 的 `initValue`（`valuelInit1` 默认 **500**，另四个非阈值键 `valueMult`/`compen`/`press`/`ymax1` 原样留）。`PointGridRenderer.jsx` 自己那份 `readStoredNumber` + `createTuningState`（这个 store 的原型）一并删掉改为直接调；store 的 `globalThis.localStorage?.` 写法从它继承，为的是能在非浏览器环境导入。与老写法的差异只有两处坏数据，且是在测试里**证出来**而非断言的：`"abc"` 老写法**在模块加载期抛异常**（页面打不开，`expect(() => legacyDualBlock()).toThrow()`）、`"null"` 老写法把 `null` 当阈值用（`toBe(null)`），新实现 try/catch + `Number.isFinite` 回落默认值；**正常值逐字相同，包括 `"0"`**（非空字符串为真，取到 0 而非默认值，quirk 保留）。写入侧未动（`Title.jsx` 滑块 → `pushSitBack` → `sitValue` 改内存绑定，不重读 localStorage）。`carValuePress` 是第七个键、只在 `demo/` 9 个文件里、主人不同，不在这一刀里，挂账。 |
 | 2026-08-03 | 优化重构 | 横切共用层第一步：全仓 18 份 `function jet(min, max, x)` 收成一条阶梯 + 三个薄出口。按空白/注释归一化取 md5 后确认这 18 份**分支阶梯逐字节相同、差异全在取整与返回形状**，分四组：`jet`（14 份，`parseInt(255*r + '')`）、`jetRgba`（2 份，不取整 + 写死的 `rgba[3]=1`）、`jetRound`（1 份，`Math.round` + `dv===0` 返白）、`jetRgb`（阶梯本身）。**计划里的 `jetUnit` 是多余的** —— `util.js` 早有 `jetRgb`，分支结构与 `jet` 逐字相同，直接当唯一阶梯用，没有新增函数。三个出口的差异（`Math.round(178.5)=179` vs `parseInt(178.5)=178`）**刻意全部保留**，有断言守着：想把 `jetRound` 并回 `jet` 时会失败，提醒那不是无损合并。消费文件的导入写成 `jetRgba as jet` / `jetRound as jet` 并按字母序并进各文件**已有**的 util 具名导入，所以**每个文件只改 2 行、调用点逐字节不变**；`onestep/heatmap.js` 是唯一没有任何 `import` 的文件（头部是一行巨大的 `export let arr`），单独插在首行。写等价测试时查出 14 份 canonical 副本的一个**既有 bug**：`x=49.9999999999993` 时 `255*blue = 7.105e-12`，`parseInt('7.105e-12') === 7` 而正确答案是 0 —— 段界附近某个通道会输出 7 而不是 0。**按「界面零变化」没有修**（修它会同时动 14 处配色），改为写一条断言钉住并注明是 bug。另查明 `onestep/heatmap.js` 的那次 jet 调用是**死代码**：`createCircle(size, value)` 全文件唯一调用处 `createCircle(options.size)` 没传第二个参数，`jet(undefined)` 产出非法 CSS `rgb(255,NaN,0,1)`、赋值被 canvas 忽略、圆点用默认黑画出 —— 而这正是这张图要的（黑 alpha 蒙版，颜色由后面的 `colorize` 上），所以没有改。顺带把 jet 注册成 `colormaps.js` 第 7 条（原来六条里**没有** jet，`classic` 是 `hsl(195-ratio*195, …)`，jet 只能靠「不选配色」隐式命中、选不到）：排在既有六条**之后**（下拉直接遍历 `COLORMAPS`，插中间会改用户的下拉顺序）；配色栏这条通路用 `Math.round` 而非老 `parseInt`（新通路没有观感要保，不把上面那个 bug 带进来）；`isClassicColormap({id:'jet'})` 必须为 `false` —— 显式选 jet 与「没选配色」是两条通路，后者还额外走逐实例 `(r, 0.2, 1-r)` 染色。util.js 里另外 7 个 jet 家族函数（`jetWhite`/`jetWhite1` 是**不同的**阶梯，断点 0.01/0.3/0.8；`jetWhite2/3/4`/`jetgGrey`/`jetWhite2Back` 是 LUT 查表）一律没动。**阶梯最终不在 `util.js` 而在新建的 `assets/util/jetLadder.js`**：`colormaps.js` 直接 import `util.js` 会让后端测试报 `ERR_MODULE_NOT_FOUND`，因为 `backend/tests/sdk/displayProfileRuntime.test.js` 用 `await import(pathToFileURL(...))` **裸 Node ESM** 加载前端模块 —— 没有 Vite 解析器，于是「导入必须写全 `.js` 扩展名」+「顶层不能读 `localStorage`」两条硬约束 `util.js` 都不满足（内部写的是 `from "./color"`，且顶层 `initValue` 就在读）。没选「在 colormaps.js 里抄一份公式」（那是第 19 份拷贝）也没选「改造 80 个文件的公共依赖 util.js」，而是把阶梯放进**零依赖零副作用**的 `jetLadder.js`，`util.js` 只留 `export { jetRgb };` 一行 re-export，对外接口不变；`util.jet.test.js` 补一条 `expect(jetRgb).toBe(jetRgbFromLadder)`，防的是有人在 `util.js` 里再写一份函数体 —— 那种情况下没有这条断言**不会有任何测试失败**。另外 `backend/displaySystems/displaySystemCanvasCatalog.js` 的 `CANVAS_COLORMAPS` 是前端 `COLORMAPS` 的**重复清单**（`displaySystemPage.js` 拿它归一 + 校验），只登记前端会让**保存**（`PATCH /api/display-systems/:id/display`）把 jet 判成非法配色，所以同步追加同一条并更新 `configValidation.test.js` 里两处期望错误串；两份清单顺序必须一致（零件栏按后端目录渲染下拉）。这份前后端重复是笔账，共享一份配色定义留待以后。 |
@@ -936,6 +1128,9 @@ flowchart LR
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-03 | 新建传感器时能直接挑串口协议，不用一个个填参数了 | 「新建传感器」第一步的配置卡片从 3 张变成 9 张，把目前在用的常用协议都列出来了（标准 1024 点、小床 12 位、大床 4096 点、256 点矩阵、72 / 144 点低密度）。挑一张，波特率、分帧方式、帧尾、数据类型就自动填好，下面的输入框仍然可以改。每种协议还配了一份字节结构说明文档（`backend/serial/protocols/` 下的 md），写清楚一帧里每个字节是什么、接不上时先看哪里。**协议共整理了 10 种**，其中 4 种目前的配置格式还表达不了（两个包对拼成一只手的手套、按片传的大床、压力和姿态混在一帧里的手套、文本格式的轮椅协议），这 4 种只出文档不出预设 —— 缺什么、要加什么才能支持，都写在各自文档里，而不是先放一个只能用一半的选项进去。另外，装好之后想自己加一种协议不用再改程序：往用户数据目录的 `serial-protocols/` 文件夹里放一份 JSON，刷新页面就出现在卡片里；和内置协议同名时以你自己那份为准。写错一份文件只会让那一份不出现，其它协议照常可用。 |
+| 2026-08-03 | 采集旁边那个数字现在是真的秒数了 | 以前是拿收到多少帧去折算的，还写死按「每秒 12 帧」算，所以传感器实际快一点慢一点，这个数就跟着不准（100Hz 的传感器上会快 8 倍多）。现在直接从点下「开始采集」那一刻开始掐表，跟帧率、采集频率都没关系；串口卡住没数据时秒表也照走，停止后数字停在最后的秒数上，能看出这次采了多久。 |
+| 2026-08-03 | 用显示系统建的传感器，点开始采集后计时数字会走了 | 之前用「显示系统」新建的传感器，点了开始采集，采集按钮后面那个计时数字一直停在 0 —— 老传感器上是正常的。这是前一阵重构渲染方式时带出来的问题，已修好。计时本身的算法没有改动。 |
 | 2026-08-03 | 没点「开始采集」时不会再偷偷往数据库里写数据了 | 之前只要传感器接上串口、界面上能看到实时数据，后台就已经在往数据库里存了 —— 没点开始采集也存。所以会出现「我什么都没做，数据库文件却一直在变大」，磁盘也就这么被占满的。现在必须点了开始采集才会存。连带修好的还有两件：一是磁盘快满时弹的「database or disk space is insufficient」以前**只是提示，并没有真的停下来**，现在会真的停；二是磁盘满了之后每秒仍会漏写将近一秒的数据，现在也堵住了。副作用只有一个，写明在这：磁盘腾出空间之后，最多要等 1 秒才会恢复存储。采集频率、降采样这些设置都没有变动。 |
 | 2026-08-03 | 六个调参滑块的默认值现在只写在一个地方 | 界面和交互一点没变，改的是「改一个默认值要动多少文件」。原来 54 个展示形式各自在文件顶部抄了同一段读取代码（六个阈值 × 两个通道，共 47 份、2206 个使用点），要调某个形式的初始灵敏度就得翻进那个文件；现在这段读取收成一处，每个展示形式只留一行「我的默认值是多少」。清点时发现**六个滑块的默认值全都有例外**（不是只有主阈值），甚至有一个展示形式的两个通道默认值互不相同 —— 这些逐个原样保留了，清空浏览器数据后的首屏与改动前一致。顺带修掉一个真实故障：以前如果本地存的调参值坏了（被别的程序写脏、或手动改错），页面会**直接打不开**（读取时抛异常）；现在坏值自动回落到默认值。 |
 | 2026-08-03 | 配色下拉多一条「彩虹 Jet」，界面其余一切不变 | 画布配置器和 manifest 渲染器的配色列表末尾多出「彩虹 Jet」，选中即生效，**按保存也能存进展示系统**（后端另有一份配色清单，漏登记会让保存被拒，已一并补上）—— 这套彩虹配色其实一直是主界面 3D 场景在用的那一套，但在此之前**只有「不选配色」时才会命中，列表里选不到它**。其余部分用户看不出任何区别：这一轮做的是把同一段配色代码的 18 份拷贝收成 1 份，所有页面的出图逐像素不变。顺带在测试里钉住了老代码的一个既有瑕疵（彩虹色带四个分界点附近，某个通道会算出 7 而不是 0，观感上是黑色里掺一丝蓝，看不出来）—— 这次刻意**没有修**，因为修它会同时改动 14 个页面的配色，要单独安排一次真机确认。 |
@@ -1110,6 +1305,7 @@ shroom1.0/
 ├── serialHelper.js          # 底层串口适配与端口扫描
 ├── serialManager.js         # 按 sit/back/head/sensor 角色管理串口生命周期
 ├── serialParserManager.js   # 按业务通道管理串口帧 parser
+├── serial/protocols/        # 串口协议预设库：loader + 6 份 JSON 预设 + 10 份协议字节说明 md
 ├── channel/telemetryChannelService.js # 标准 telemetry 数据模型与通道定义
 ├── sensors/handGloveDouble.js # 触觉手套2双包协议 parser
 ├── services/websocketMessageService.js # WebSocket 消息解析与非法消息保护
@@ -1387,6 +1583,18 @@ graph TD
 
 写接口的错误码：`DISPLAY_SYSTEM_EXISTS` → 409，`DISPLAY_SYSTEM_READ_ONLY` → 403，其余校验失败 → 400（`details` 里是逐条中文说明）。
 
+### HTTP 路由（串口协议预设）
+
+| 方法 / 路径 | 描述 |
+| :--- | :--- |
+| `GET /api/serial/protocols` | 可用的串口协议预设：`protocols`（每份带完整 `protocol` 段，可整段粘进 manifest）、`invalid`（写坏的预设各自带原因，不影响其余预设）、`directories`（实际扫过的目录，排错时要知道系统在哪找） |
+
+预设来自两处：内置的 `backend/serial/protocols/*.json` 与用户的
+`<runtimeWritableRoot>/serial-protocols/*.json`，**同 id 时用户那份覆盖内置**。字节结构说明在
+`backend/serial/protocols/` 下的同名 md（10 种协议各一份 + 目录 README）。同一份预设列表也喂给
+`GET /api/display-systems/catalog` 的 `serialTemplates`，所以「新建传感器」的模板卡片与这个接口永远同源；
+`GET /api/sdk/contract` 的 `serial.protocolPresets` 是它的摘要（无 `protocol` 段）。
+
 ## 6. 外部依赖与集成
 
 | 服务/库 | 用途 | 集成方式 |
@@ -1423,6 +1631,9 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-03 | codeOpi | 新增功能：串口协议预设库（文档 + 可加载 JSON + 用户目录 + Builder 接线） | 新建 `backend/serial/protocols/`（loader `index.js`、6 份 JSON 预设、11 份 md）。预设格式复用 manifest 的 `protocol` 四段，`validateProtocolConfig()` 当校验器，不另立 schema。10 种协议里 6 种发预设、4 种只发文档并写明 schema 缺口（单一 valueType / 无跨帧拼装 / 无文本入口）。新增 `GET /api/serial/protocols` 与 contract 的 `serial.protocolPresets`；`buildDisplaySystemBuilderCatalog()` 改为吃预设数组，Builder 模板卡片 3 → 9 张，前端未改。`displaySystemProtocol.js` 导出 `PROTOCOL_VALUE_TYPE_WIDTHS`。新增 `tests/serial/serialProtocolPresets.test.js` 与 `tests/http/serialProtocolsApi.test.js`，`workspaceService.test.js` 补目录翻译断言，后端 36 → 38 个测试文件全通过。 |
+| 2026-08-03 | codeOpi | 行为修正：采集计时改成真正的秒表 | `Home.jsx` 弃用 `num / 12 * hz`（帧数 ÷ 写死的 12Hz 假设 × 采集频率 `colHZ`），改为 `setColValueFlag` 上挂 `startCollectionTimer()` / `stopCollectionTimer()`，按 `Date.now() - colStartAt` 每秒更新整数秒；顺带删掉 `ws1Data` 里抢同一个 `changeNum` 槽位的第二个帧数计数器。 |
+| 2026-08-03 | codeOpi | 缺陷修复：显示系统传感器的采集计时不动（重构回归） | `Home.jsx` 的 `wsData` 里 manifest 类型走 `handleManifestSceneFrame` 后**提前 return**，而采集计数那段在 `realHz` 统计旁边、位于 return **之后**，于是显示系统传感器点开始采集后 Title 上那个计时数字一直是 0。逐提交比对确认是本次重构谱系引入（`6710e5e` 无、`42773c4` 起有）。把计数提到 return 之前、两条路径共用，旧位置删除避免重复计数；`hz` 那段不用一起提（纯配置消息不含压力数据，走不到 return）。顺手查明未修两处并挂账：`page/home/util.js:116` 第三份 `colValueFlag` 永不为 true（8 个 `changeNum` 全死，自 2026-03-23 `e0c637a` 起如此，历史遗留）、`ws1Data` 靠背通道那个计数器与显示系统无关。未改 `num / 12 * hz` 公式。 |
 | 2026-08-03 | codeOpi | 缺陷修复：采集开关在新帧管线里没人读 | `collectionFrameStorageService.canStore()` 只问采集频率限流和磁盘剩余空间、**不问采集开关**，而调用方 `frameOutputPipelineService.publishSit/Back/Head` 是实时下发路径每帧必走，于是「串口一通就落库」——「没点开始采集但数据库一直变大」和「连报三次 `database or disk space is insufficient`」是同一个根因。老路径 `legacySerialFrameRuntime.js` 的 `ctx.flag && …` 是对的，新管线迁移时漏了；定位证据是全仓 `getCollectionState('flag')` **读取处为零**。修：`canStore()` 补 `isCollecting?.()` 排最前，`framePipelineFactory` 从 `server.js` 注入 `() => Boolean(getCollectionState('flag'))`；磁盘满时的 `setCollectionState('flag', false)` 急停链路随之接通（此前设计好但没接上）；`createCollectionDiskSpaceGuard.hasEnoughSpace()` 节流窗口内由 `return true` 改为沿用 `lastResult`（原来每秒只拦第一帧、剩 999ms 照写；代价是空间腾出后最多等 1 秒恢复）。测试：`framePipelineFactory.test.js` 加「采集关着时三通道全不入队」回归段；新建 `backend/tests/collection/collectionDiskSpaceGuard.test.js`（该守卫此前零覆盖），两条都先拿 HEAD 旧实现验证过会失败。后端 35 → 36 个测试文件全通过。 |
 | 2026-08-03 | codeOpi | 横切共用层（二）：47 个阈值声明块 / 2206 个读写点收成一个 store | 新建 `client/src/runtime/displayThresholds.js`（`STORAGE_KEYS` / `storageKeyOf` / `readStoredNumber` / `DUAL_CHANNEL_DEFAULTS` 37 份 / `SINGLE_CHANNEL_DEFAULTS` 7 份 / `SECOND_CHANNEL_DEFAULTS` 2 份 / `createThresholdState`），六个键在全仓只剩这一个读取出口。消费方式是**解构**：`var { valuej1, … } = createThresholdState(PRESET)` 给出普通局部绑定，`sitValue(prop)` 的 `valuej1 = prop.valuej` 照旧可写，**2206 个读写点与真值守卫 `if (prop.valuej)` 一字未动**。**没有照计划做「模块加载时读一次快照」** —— 先数出 47 个块作用域不统一（23 个模块顶层 / 24 个在 `forwardRef` 函数体内），共享快照对两者都不等价，改为每次调用现读、调用点即原声明处，作用域全部保持原样。默认值按**变量名**给：实测六个键全有离群值，且 `three/wholeChair.jsx` 两通道默认值不对称（`valueg1`=4/`valueg2`=2、`value1`=2.1/`value2`=2、`valuel1`=1/`valuel2`=2），按 localStorage 键给会静默改掉首屏且无测试会失败。脚本换 39 个块，四处手工：`three/Short.jsx`（块中夹一行读 `ymax` 键的 `ymax1`，拆出单放；通道 1 是 `2655/3.3/2.08/4/0`、`valuelInit1` 为 2001）、`heatmap/canvas.jsx`（`carValuej` 在这里读成 `options.max`，默认 **600**）、`page/home/HomeFun.jsx`（六个 `useState` 初值，原每帧 12 次 `getItem` → 一次调用）、`assets/util/util.js` 的 `initValue`（`valuelInit1` 默认 **500**；非阈值的 `valueMult`/`compen`/`press`/`ymax1` 原样保留）。`assets/util/bed4096numParams.js` 改为 `createThresholdState(SINGLE_CHANNEL_DEFAULTS)` 但**保留模块**（它的价值是模块级单例，两个模式共享引用以「切换模式时调参不重置」）。`renderers/pointGrid/PointGridRenderer.jsx` 删掉自己那份 `readStoredNumber` + 12 行 `createTuningState`（本 store 的原型），改为直接调；store 的 `globalThis.localStorage?.` 写法即从它继承（非浏览器环境可导入）。新增 `displayThresholds.test.js` 42 例：`legacyDualBlock` / `legacySingleBlock` / `legacyWholeChairBlock` 三份基准逐字抄自被删的原声明块，6 个 localStorage 场景（全空 / 全设 / 部分 / **全 0** / 小数负数 / 空串）× 三组等价性，三个离群文件的 per-file 默认值，以及两条把老写法缺陷**证出来**的断言 —— `expect(() => legacyDualBlock()).toThrow()`（存 `"abc"` 时老写法在模块加载期抛异常，页面打不开）与 `expect(legacyDualBlock().valuej1).toBe(null)`（存 `"null"` 时把 `null` 当阈值用），新实现两种都回落默认值；另有一条「每次调用都现读 localStorage，不用模块级共享快照」钉住上面那个设计决定。**正常值逐字相同，含 `"0"` 取到 0 而非默认值这个 quirk。** `carValuePress`（第七个键，`demo/` 9 文件）不在本刀内。测试：前端 **303 通过 / 15 套件**（`App.test.jsx` 仍是既有的缺 `@testing-library/react`），后端 35/35，`src/renderers` / `src/runtime` / `util.js` / `bed4096numParams.js` / `heatmap/canvas.jsx` eslint `--max-warnings=0` 通过（`Short.jsx` 的 exhaustive-deps 告警经比对 HEAD 版本确认为既有，`HomeFun.jsx` 在 eslint ignore 列表内）；`npx vite build --outDir ../tmp/build-check` 通过，`git status --short build/` 仍是 85。 |
 | 2026-08-03 | codeOpi | 横切共用层（一）：jet 收敛 + 注册成第 7 条 colormap | 新建 `client/src/assets/util/jetLadder.js` 存放全仓唯一那条分支阶梯 `jetRgb`（**零依赖零副作用** —— `colormaps.js` 会被后端测试用裸 Node ESM 加载，import 不了 `util.js`：内部导入没写 `.js` 扩展名，且顶层就在读 `localStorage`），`util.js` 改为 import 后 `export { jetRgb }` 原样 re-export，对外接口与导入路径不变（**没有新建计划中的 `jetUnit`**，`jetRgb` 本就是那条 0..1 阶梯）；`jet` 改为委托它并新增 `jetRgba` / `jetRound` 两个出口。15 个消费文件删掉本地 `function jet` 块、按字母序把 `jet` / `jetRgba as jet` / `jetRound as jet` 并进各自已有的 util 具名导入，调用点逐字节不变。`components/displaySystem/colormaps.js` 新增第 7 条 `{ id: 'jet', label: '彩虹 Jet' }`（`sampleJetRgb` 走 `jetRgb` + `Math.round`，排在既有六条之后）；`backend/displaySystems/displaySystemCanvasCatalog.js` 的 `CANVAS_COLORMAPS` 同步追加同一条 —— 那是前端 `COLORMAPS` 的重复清单，只登记前端会让保存路由把 jet 判成非法配色。新增 `util.jet.test.js`（72 例，四份原实现逐字抄进测试当基准 + 19 个取样点 + 0.5 步长密扫 + 一条钉住 `parseInt` 科学计数法 bug 的断言 + 一条 `jetRgb === jetLadder.jetRgb` 的身份断言防再抄一份）；`colormaps.test.js` 补 6 例（含一条把「与老 `jet()` 差 >1 的唯一例外必须是那个 bug」写成可执行断言的检查）；`backend/tests/displaySystems/configValidation.test.js` 更新两处期望错误串。测试：前端 261 通过 / 14 套件（`App.test.jsx` 仍是既有的缺 `@testing-library/react`），后端 35/35，改动文件 eslint 零告警。 |
@@ -1792,6 +2003,9 @@ graph TD
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-03 | codeOpi | 新增功能 | 串口协议预设库：10 份协议文档 + 6 份可加载 JSON + 用户可扩展目录 + Builder 模板接线。**格式不新发明** —— `backend/displaySystems/displaySystemProtocol.js` 的 `baudRate` / `framing` / `decoding` / `validation` 四段本就是协议声明格式（`serialParserManager.createParserFromProtocol()` 直接消费），预设存的就是那四段原文，一份预设的 `protocol` 块可整段粘进 `display-system.json`，`validateProtocolConfig()` 即预设校验器；`loadSerialProtocolPresets()` 返回的是 `normalizeProtocolConfig()` 归一后的形状，而归一结果本身仍是合法 manifest 输入。新建 `backend/serial/protocols/index.js`（`BUILTIN_PRESET_DIRECTORY` / `PRESET_SOURCES` / `USER_PRESET_DIRECTORY_NAME` / `getSerialProtocolPreset` / `loadSerialProtocolPresets` / `normalizePreset` / `resolveUserPresetDirectory`）。协议逐个从运行时源码挖出来是 **10 种而非最初估的 9 种** —— 第 10 种是 bigBed 的 1025 字节分片帧（`chunkFlag` 在第 1024 字节，0 = 首片 / 1 = 末片 / 其余丢弃，两片按行交错拼成 32 行 × 64 列；它的判定是严格 `context.file !== 'bigBed'`，与 bed4096 的 `includes()` 不同）。6 份预设：`standard-1024`（`AA 55 03 99` / 1024 × uint8 / 1000000 / 32×32）、`small-bed-12b`（`AA 00 55 00 03 00 99 00` / 1024 × uint16LE / 1500000）、`bed-4096`（**与标准帧同一个分隔符**，只能靠帧长与类型名区分 / 3000000）、`matrix-256`（921600 / 16×16）、`low-density-72` 与 `low-density-144`（`matrix: null`，形状不由协议决定）。**`low-density-72-144` 拆成了两份 JSON** —— 计划里是一份文件覆盖两种点数，但一份 JSON 只能有一个 `valueCount`，改为两份预设共用一份 md。另 4 种只出文档不出预设，每份 md 带 `## schema 缺口` 段写明缺什么、要加什么：①`decoding` 是单字段的（一种 valueType 平铺整帧），挡住手套 274 / 262 的「压力区 + IMU 区」混合帧；②没有跨帧拼装，挡住 bigBed 分片与手套双包（两个串口两个包对拼成一只手）；③没有文本协议入口，挡住 minzhen。**bigBed 单片技术上声明得出来，刻意不发预设** —— 选中它会静默得到半张矩阵，属于「宁可没有也不要半成品预设」。每份 md 含字节布局图、带偏移的字段表、项/值表（分隔符 / 分帧 / payload / 类型 / 点数 / 波特率 / 校验）、代码位置表、排错表；README 是目录索引（10 行状态表 + 完整 `protocol` 字段表 + 13 种 valueType + 三行缺口表 + 「加自己的协议」说明）。用户预设目录 `<runtimeWritableRoot>/serial-protocols/*.json`，**同 id 覆盖内置**并在 `overrides` 留下被覆盖文件的路径 —— 这是本轮对「打包之后能二开」的直接贡献：改波特率、加自研协议都不用构建工具链。三条健壮性规则连测试一起钉住：目录不存在**不是错误**（用户目录默认不存在）、一个 JSON 写坏**只影响自己**（带原因进 `invalid`，其余照常返回）、`readdirSync` 抛异常降级成一条 `unable to read directory`。HTTP 侧：`sdkApiContract.js` 加 `serialProtocols: '/api/serial/protocols'`（`HTTP_ROUTES` 本身就嵌在 contract 的 `http.routes` 里，加进去即等于对 SDK 公开）与 `buildSdkContractSnapshot({protocolPresets})` → `serial.protocolPresets`（**只给 id/label/summary/doc，不给 `protocol` 段**：contract 是能力快照不是数据源），`SDK_CONTRACT_VERSION` 保持 `2026-07-14`（纯追加）；`controlRoutes.js` 挂 `GET /api/serial/protocols` 返回 `{protocols, invalid, directories}`（`directories` 也返回是因为排错第一问就是「系统在哪找预设」）；`httpAppFactory.js` 加 `serialProtocolDirectories` 参数与 `listSerialProtocolPresetSummaries()`（读失败整段兜底成空数组，contract 不能因此挂掉）。Builder 侧是「不用点太多设置」真正落地的地方：`buildDisplaySystemBuilderCatalog()` 原来硬编码 3 份 `serialTemplates`，现在签名变为 `({serialProtocolPresets = []} = {})`，把每份预设经 `buildSerialTemplateFromPreset()` 翻译成 Builder 表单的扁平字段（`transportType` / `baudRate` / `framingType` / `delimiter` / `dataBits` / `valueType` / `byteOffset` / `bytesPerValue`），卡片 3 张变 9 张、选中即填好 `protocol` 段，**前端一行未改** —— `DisplaySystemBuilder.jsx` 早有 `serialTemplate` 卡片网格与 `applySerialTemplate`（CSS 是 `repeat(3, minmax(0,1fr))`，9 张正好三行）。四处翻译细节：①同 id 时预设覆盖内置模板（与 loader 同一套规则），但三份内置模板 id 一个没删，旧 manifest 的 `metadata.builder.serialTemplate` 与 `inferSerialTemplate()` 的回落目标仍然找得到；②`bytesPerValue` 走新导出的 `PROTOCOL_VALUE_TYPE_WIDTHS`（由 `VALUE_TYPE_READERS` 的 `width` 派生），**不靠 `valueType.includes('16')` 猜** —— 猜的写法遇到 uint32/float32 会把定长帧长算成一半；`dataBits` 只有 8/12 两档（前端写死的 `Segmented`），四字节类型显示成 8 Bit 是现有组件表达能力上限，帧长仍由 `bytesPerValue` 算对；③分隔符还原成 Builder 输入框的十六进制写法（大写补零两位、空格分隔），与三份内置模板逐字一致，否则同一协议在卡片里会有两种长相；④预设用的波特率并进 `baudRates` 档位并去重升序 —— 大床的 3000000 原来不在 7 个固定档位里，不并进去选中后波特率框是个没有对应选项的裸数字。描述文字优先用预设自己的一句话摘要（卡片下方本来就有一行 baud / 分帧 / 位宽 的事实条，不重复），没写摘要的用户预设才回落成参数拼接。依赖方向保持单向：`displaySystems` 层**不反向依赖 `serial` 层**，`buildDisplaySystemBuilderCatalog()` 收纯数组、不碰 fs，读文件由 `appRuntimeFactory` 注入的 `listSerialProtocolPresets`（`createDisplaySystemWorkspaceService` 新参数，默认 `() => []` 所以旧调用方不传也不炸），**`getCatalog()` 每次调用都重新读**（用户丢完 JSON 刷新页面即可见，不用重启），坏预设在这条路上 `logger.warn` 逐条报出、读失败退化成只有三份内置模板；预设目录路径只在 `appRuntimeFactory` 拼一次并从 `appRuntime.serialProtocolDirectories` 透出，`server.js` 改为取它而不再自己拼第二遍。测试：新建 `tests/serial/serialProtocolPresets.test.js`（内置预设全过 `validateProtocolConfig`、关键预设逐字节锁定、**端到端证明**「选中就能用」——`createParserFromProtocol` + `decodeProtocolValues` 切出 2 帧 1024 值、小床 `0x34,0x12 → 0x1234` 钉住 uint16LE 字节序、`normalizePreset` 八条错误路径、注入 fs 的用户目录覆盖 / 坏文件 / 缺目录 / readdir 抛异常四组）与 `tests/http/serialProtocolsApi.test.js`（真 `http.createServer` + `fetch` + mkdtemp 用户目录，一个好预设一个坏预设，断言 `source` 分类、`invalid` 只有一条且列表不空、`directories` 含用户目录、contract 两处字段）；`tests/displaySystems/workspaceService.test.js` 补目录翻译一组（三份内置模板不许消失、分隔符格式、双字节 `bytesPerValue`、3000000 进档位且升序去重、同 id 覆盖只留一份、uint32le 的宽度走表、无预设时退化成 3 份、`getCatalog()` 每次现读）。后端 36 → 38 个测试文件全通过。边界：未改任何解码实现与 `serialParserManager`，未改前端任何文件，未改 `SDK_CONTRACT_VERSION`，未给 ⚠️/❌ 四种协议发预设，未动 `serialTemplates` 三份内置模板的 id 与 defaults。 |
+| 2026-08-03 | codeOpi | 行为修正 | 采集计时改成真正的秒表，不再用帧数推算。原式 `num / 12 * hz`（`client/src/page/home/Home.jsx`）三个量：`num` 是每帧 `sitData` 累加的**实时帧数**、`hz` 是后端随帧下发的采集频率 `colHZ`（默认 12，见 `backend/services/collection/collectionService.js` 的 `DEFAULT_COLLECTION_FREQUENCY_HZ`）、`12` 是写死的「传感器每秒推 12 帧」假设，合起来的原意是「`num / 12` 当秒数 × 采集频率 = 这几秒该入库多少行」。站不住的是那个 12：实时下发根本不限频（`backend/services/realtime/frameOutputPipelineService.js` 的 `publishSit/Back/Head` 每帧都 `publishRealtimeChannel`），`num` 的增长速率就是传感器真实帧率，而真实帧率同一份代码里的 `realHz`（`realHzFrameCount * 1000 / 间隔`）一直在现量 —— 正确的除数在手边，式子里用的却是常量，帧率不是 12 时该数既非秒也非行数，偏差 `realHz / 12` 倍（100Hz 传感器上快 8 倍多）。改法：计时起停挂在采集开关的唯一入口 `setColValueFlag`（`Title.jsx` 的 `startCollectionWithOptions` 传 true、`stopCollection` 传 false），新增 `startCollectionTimer()` 记 `colStartAt = Date.now()` 并挂 1 秒 `setInterval` 写 `Math.floor((Date.now() - colStartAt) / 1000)`、`stopCollectionTimer()` 清 interval，`componentWillUnmount` 一并清理。两处实现细节：①**必须定时器驱动、不能蹭帧** —— 串口卡住没帧时秒表也该走，这正是旧实现做不到的另一半；②**传整数秒** —— `Title.jsx` 显示套 `Math.ceil`，`setInterval` 有毫秒漂移，直传 `1.003` 会 ceil 成 2、第一秒就跳 2，先 `Math.floor` 让 ceil 变空操作。停止时只停表**不清零**，与旧行为一致（旧实现停止只把 `num` 归 0、不调 `changeNum`）。顺带删掉 `ws1Data` 里的第二个计数器（`isCar(matrixName) && !sitFlag` 时 `changeNum(num)`，显示帧数、无 `/12*hz`，走靠背通道）—— 上一节曾说不动它，改主意的理由是它与坐垫那个写**同一个 `changeNum` 槽位**，秒表接管后车类传感器上数字会在秒数与帧数间跳；删后模块级 `num` 在 `Home.jsx` 已无引用，一并移除（函数内同名 `let num` 是局部累加变量，无关）。边界：**这是有意的语义变化、非等价改造**（从「按 12Hz 假设折算的行数估算」变成真实秒数）；未改 `Title.jsx` 显示与文案；未动 `page/home/util.js` 那 8 个 `changeNum(num)`（显示帧数，且该文件第三份 `colValueFlag` 自 `e0c637a`（2026-03-23）起从未置真，整段死代码，仍挂账）；未动 `hz`/`colHZ` 的限流入库语义；`HomeFun.jsx` 全仓无人 import（死文件）故未跟改。验证：`npx vitest run` → 303 passed / 15 suites（`App.test.jsx` 既有失败，缺 `@testing-library/react`）；`npx eslint src/page/home/Home.jsx` 干净；`npx vite build --outDir ../tmp/build-check --emptyOutDir` 通过（17.08s），`build/model` 137MB / 20 个 fbx 未被触碰，`git status --short build/` 为 0。 |
+| 2026-08-03 | codeOpi | 缺陷修复 | 显示系统传感器的采集计时数字不动 —— **本次重构谱系引入的回归**。`client/src/page/home/Home.jsx` 的 `wsData` 中，manifest 类型的展示形式先交给 `handleManifestSceneFrame`，处理掉或帧带 `displaySystemId` 就 `return`（旧场景不能消费带身份的帧，该 return 本身正确）；而采集计数那段代码原来在 `realHz` 统计旁边、**位于该 return 之后**，manifest 帧永远走不到，`num` 不增、`this.title.current?.changeNum(...)` 不调，Title 上「停止」后面那个计时数字恒为 0。逐提交比对定性：`6710e5e`（2026-07-21）无此提前 return，`42773c4`（渲染器插件化提交）起才有 —— 属回归而非历史遗留。修法：把 `if (jsonObject.sitData != null && this.state.matrixName != 'car10') { if (colValueFlag) { num++; changeNum(num / 12 * hz) } else { num = 0 } }` 提到该 return 之前，新旧两条路径共用同一份计数，原位置删除以免重复计数（计时属全局采集状态，与画谁、怎么画无关，本不该待在旧场景处理链内）。未把 `if (jsonObject.hz != null)` 一起前移 —— 带 `hz` 的是纯配置消息、不含压力数据，`hasPressureFrame` 为假不会触发 return，`hz` 仍能正常更新；`num`/`colValueFlag`/`hz` 均为模块级变量（`Home.jsx:392`/`:400`/`:838`），前移无作用域问题。顺手查明但**未修**、已挂账两处：①`client/src/page/home/util.js:116` 存在**第三份** `colValueFlag`，全文件无任何赋 true 之处，该文件 8 个 `changeNum` 调用点全为死代码（`Title.setColValueFlag` 只接到 `Home.jsx:3942` 与 `HomeFun.jsx:124` 两份上），`git log -S` 显示自 `e0c637a`（2026-03-23）起即如此，历史遗留，修前需先厘清那 8 个点各服务哪个 matrixName；②`ws1Data` 中第二个计数器（`Home.jsx:2619`，`isCar(matrixName) && !sitFlag` 时 `changeNum(num)`，**无** `/12*hz`）走靠背通道、与显示系统无关。边界：未改 `num / 12 * hz` 公式本身（其是否真等于秒数是另一个问题，`hz` 默认 12 时该式即等于帧数），未动提前 return 与 `handleManifestSceneFrame`。验证：客户端 `npx vitest run` → 303 passed / 15 suites（`App.test.jsx` 为既有失败套件，缺 `@testing-library/react`，非本次引入）；`npx eslint src/page/home/Home.jsx` 干净；`npx vite build --outDir ../tmp/build-check --emptyOutDir` 通过且 `build/model` 137MB / 20 个 fbx 未被触碰。 |
 | 2026-08-03 | codeOpi | 缺陷修复 | 采集开关在新帧管线里没人读，串口一通就落库。`collectionFrameStorageService.canStore()` 原来只有「采集频率限流 && 磁盘剩余空间」两个条件，缺了采集开关，而调用方 `frameOutputPipelineService.publishSit/publishBack/publishHead` 是实时下发路径、每帧都走 —— 现象就是「没点开始采集，数据库文件却一直变大」，以及磁盘被写到只剩 2GB 后连报三次 `database or disk space is insufficient`。老路径 `sensors/runtime/legacySerialFrameRuntime.js` 写的是 `ctx.flag && ctx.shouldStoreCollectionFrame(...) && ctx.hasEnoughCollectionDiskSpace()`，新管线迁移时漏了打头的 `ctx.flag`；定位的决定性证据是全仓 `getCollectionState('flag')` 读取处为零（只有人写、没有人读）。三处修改：①`canStore()` 补 `isCollecting?.()` 并排在最前，`framePipelineFactory` 新增同名依赖，`server.js` 注入 `() => Boolean(getCollectionState('flag'))`；②磁盘满时 `stopCollectionForStorageError` 的 `setCollectionState('flag', false)` 急停链路随第 ① 条自动接通（此前设计好但没接上，所以报了错还在写）；③`collectionService.createCollectionDiskSpaceGuard.hasEnoughSpace()` 新增 `lastResult`，1000ms 节流窗口内由无条件 `return true` 改为沿用上次判断 —— 原来空间不够时每秒只有第一帧被拦、剩下 999 毫秒照写，代价是空间腾出后最多等一个检查周期（1 秒）恢复入库；`onInsufficientSpace` 仍只在真正检查那一次触发，日志不刷屏。保留「探测不到剩余空间（`statfs` 不可用）时按够处理」的原语义。测试：`tests/server/framePipelineFactory.test.js` 新增回归段（`collecting = false` 时三通道 `store*` 全返回 `false` 且入库队列长度不变）；新建 `tests/collection/collectionDiskSpaceGuard.test.js` 并登记进 `run-tests.js`，覆盖空间充足/不足/探测失败三分支、节流窗口内不许放行、回调只触发一次 —— 不注入假 fs（`getDirectoryFreeBytes` 内部用默认 `require('fs')`），改用真实目录配 `minFreeBytes: 0` 与 `Number.MAX_SAFE_INTEGER` 驱动分支。两条新测试均先拿 `git show HEAD:` 的旧实现跑过确认会失败。边界：未改采集频率/降采样/入库队列批量策略，未改 `COLLECTION_MIN_FREE_BYTES`（2GB）及其 `SHROOM_MIN_COLLECTION_FREE_BYTES` 环境变量覆盖口，未动 `legacySerialFrameRuntime` 老路径。后端 35 → 36 个测试文件全通过。 |
 | 2026-08-03 | codeOpi | 优化重构 | 横切共用层第二步：47 个阈值声明块 / 2206 个读写点 → 一个 store。新建 `client/src/runtime/displayThresholds.js`：`STORAGE_KEYS`（六个变量名前缀 → localStorage 键，通道后缀 1/2 共用同一个键）、`storageKeyOf`（名字不在六个里**当场抛**，拼错要立刻知道而不是静默 `undefined`）、`readStoredNumber`（`globalThis.localStorage?.getItem` + try/catch + `Number.isFinite`）、三条预设与 `createThresholdState(defaults)`（返回键与传入默认值键**完全一致**，漏写一个得到 `undefined` 而不是静默的 200）。消费方式刻意是**解构而非取对象**：`var { valuej1, … } = createThresholdState(DUAL_CHANNEL_DEFAULTS)` 拿到普通局部绑定，各文件 `sitValue(prop)` 的 `valuej1 = prop.valuej` 照旧生效，**2206 个读写点逐字节不变**；改成 `t.valuej1` 需动 2206 处零测试覆盖的 legacy 代码，风险与本步收益不成比例。`if (prop.valuej)` 那个「传 0 被忽略」的守卫按计划照抄未改。**计划里的「store 在自己模块加载时读一次存快照」没有采纳** —— 动手前统计出这 47 个块作用域并不统一：23 个在模块顶层（`indent 0`，实例共享、冻结在 import 时刻），24 个缩进 2 格在 `React.forwardRef((props, refs) => {` **函数体内**（本来就每实例、每次挂载重读，`car10.jsx` forwardRef@18/块@35、`hand0205.jsx` forwardRef@91/块@122 逐个核过）；共享快照对两种作用域都不等价（函数内那 24 个今天切走再切回拿到新值，模块顶层那 23 个因场景懒加载、改完阈值再切到未加载过的展示形式也读到新值），会一起冻结在第一个消费者加载的时刻，故实现为每次调用现读、调用点即原声明处，并以「每次调用都现读 localStorage，不用模块级共享快照」一条测试钉住。**所有块的作用域保持原样**，模块级那 23 个改成每实例需要 `stateRef`（见 `PointGridRenderer.createTuningState`），留给各文件改写成渲染器时顺带做。默认值按**变量名**给不按键给：实测**六个键全都有离群值** —— `carValuej` 200×84/335×2/255×2/600×1/2655×1、`carValueg` 2×86/3.6×2/4×1/3.3×1、`carValue` 2×87/2.1×1/2.08×1、`carValuel` 2×88/4×1/1×1、`carValuef` 2×89/**0**×1、`carValueInit` 2×87/2000×2/2001×1/500×1 —— 且 `three/wholeChair.jsx` **两通道不对称**（ch1 `255/4/2.1/1/2`，ch2 `255/2/2/2/2`），按键给会静默改掉这三处首屏表现且**不会有任何测试失败**；`carValuef` 的 `0` 是真实默认值而非「没设」。`SECOND_CHANNEL_DEFAULTS` 这条预设的存在是因为 `three/4096.jsx` 与 `three/NumThreeColor copy.jsx` 只声明 `value*2`（后缀 1 侧是 `const p = bed4096numParams` 那个共享对象），批量脚本第一次跑到这里以「变量名集合与预设不符」中止，补了预设与对应的等价测试后才过。`assets/util/bed4096numParams.js` 改为 `createThresholdState(SINGLE_CHANNEL_DEFAULTS)` 但**模块保留** —— 读取已收走，它剩下的价值是**模块级单例**语义（Bed4096 与 Fast256 拿同一个引用，「切换模式时调参不重置」），各自 `createThresholdState()` 就会各读各的。四处手工改：`three/Short.jsx`（块中间夹一行 `ymax1 = … 'ymax' … : 251`，不属于六个键，拆成独立语句；通道 1 走 `util.js initValue` 同源的 `2655/3.3/2.08/4/0`、`valuelInit1` 为 2001）、`heatmap/canvas.jsx`（无 `valuej1` 变量，`carValuej` 在这里读成 `options.max` 且默认 **600**，另四个阈值与 `canvas, context` 挤在同一条 `var` 里，拆开）、`page/home/HomeFun.jsx`（六个 `useState(localStorage.getItem(…))`，`useState(x)` 只在首帧用 x 但表达式每帧求值，原来每帧 12 次 `getItem`，现改为一次 `createThresholdState` 读六个键，首帧取值逐字相同）、`assets/util/util.js` 的 `initValue`（全仓第三份读取，`valuelInit1` 默认 **500** 为全仓唯一；`valueMult`/`compen`/`press`/`ymax1` 四个非阈值键原样保留）。`renderers/pointGrid/PointGridRenderer.jsx` 删掉自己那份 `readStoredNumber` 与 12 行 `readStoredNumber('carValuej', 200)` 式的 `createTuningState` —— 那份实现正是本 store 的原型，改为 `createThresholdState(DUAL_CHANNEL_DEFAULTS)` 一行，行为逐字相同；store 里 `globalThis.localStorage?.` 的写法亦从它继承（裸 `localStorage` 只靠 try/catch 兜太隐晦，显式可选链才是「没有宿主环境」这一种情况的正解）。批量替换脚本本身踩了两个坑并修掉：一是导入被插在**全文件最后一条 import 之后**，在 import 排在块之后的文件里会落到使用点下方，改为「插在第一个块之前的最后一条 import 后面」，事后对全部 83 个改动文件逐个校验 `import 行号 < 首个调用行号`；二是重跑时会二次改写已完成的文件，加了 `'displayThresholds' in src` 跳过。新增 `client/src/runtime/displayThresholds.test.js` 42 例：`legacyDualBlock`（抄自 `three/hand.jsx:40-51`）/ `legacySingleBlock`（抄自 `num/NumWs.jsx:6-11`）/ `legacyWholeChairBlock`（抄自 `three/wholeChair.jsx:123-134`）三份基准逐字抄自被替换的原块，6 个 localStorage 场景（全空 / 六键全设 / 部分设 / **全 0** / 小数与负数 / 空字符串）× 双通道 · 单通道 · 后缀 2 三组等价性，三个离群文件的 per-file 默认值（含「wholeChair 在全空时两通道默认值确实不同」与「Short 的 `valuef1` 默认值是 0」两条），坏数据组把老写法的缺陷**证出来而非断言**（`expect(() => legacyDualBlock()).toThrow()` —— 存 `"abc"` 时老写法在**模块加载期**抛异常、整个页面打不开；`expect(legacyDualBlock().valuej1).toBe(null)` —— 存 `"null"` 时把 `null` 当阈值用；新实现两种都回落默认值），以及 `Infinity`/`NaN` 回落、localStorage 本身抛异常（隐私模式/配额）不炸、`valuelInit` 不被误当成 `valuel`+后缀、变量名拼错当场抛。**与老写法的差异只有那两种坏数据；正常值逐字相同，包括 `"0"` 取到 0 而不是默认值这个 quirk。** 写入侧未动（`Title.jsx` 滑块 `setItem` → `pushSitBack` → `sitValue` 改内存绑定，不重读 localStorage）。`carValuePress` 是第七个键、只出现在 `demo/` 9 个文件（各两处）、主人不同，不在本刀内。测试：前端 **303 通过 / 15 套件**（`App.test.jsx` 仍是既有的缺 `@testing-library/react`），后端 35/35，`src/renderers` / `src/runtime` / `util.js` / `bed4096numParams.js` / `heatmap/canvas.jsx` 在 `--max-warnings=0` 下零错误零告警（`Short.jsx` 那条 exhaustive-deps 告警拿 `git show HEAD:` 的版本单独跑过 eslint，确认是既有的、行号只因本次 +3 行而位移；`HomeFun.jsx` 命中 eslint ignore 规则，无法纳入门禁）；`npx vite build --outDir ../tmp/build-check --emptyOutDir` 通过、`git status --short build/` 仍是 85。 |
 | 2026-08-03 | codeOpi | 优化重构 | 横切共用层第一步：18 份 `jet` → 一条阶梯 + 三个出口，并注册成第 7 条 colormap。新建 `assets/util/jetLadder.js`：**零依赖、零副作用**，只放那条唯一的分支阶梯 `jetRgb`（**不新建计划中的 `jetUnit`** —— `jetRgb` 分支结构与 `jet` 逐字相同，本就是那条 0..1 阶梯），文件头写明它为什么不能留在 `util.js` 里。`assets/util/util.js` 改为 `import { jetRgb } from './jetLadder.js'` + `export { jetRgb };` 原样 re-export（80 个消费文件的导入路径与对外接口都不变），`jet` 改为 `const { r, g, b } = jetRgb(...)` 后走原来的 `parseInt(255 * r + '')`，新增 `jetRgba`（不取整 + 写死 `rgba[3] = 1`）与 `jetRound`（`Math.round` + 夹取后 `dv === 0` 返白）。15 个消费文件删本地 `function jet` 块并把名字按字母序并进各自**已有**的 util 具名导入：`jet` → `demo/{Block,Demo,Demo1010,Demo1016,Demo2419,handDemo,handDemoPress,handLine0116,handLine0123}.jsx` + `three/{NumThreeColor copy,NumThreeColor1024,NumThreeColor1024sit}.jsx` + `num/Num.jsx` + `foot/Num32DetectLocal.jsx`；`jetRgba as jet` → `heatmap/canvas.jsx`、`onestep/heatmap.js`（后者全文无 `import`，单独插首行）；`jetRound as jet` → `num/NumWs.jsx`。**别名保证所有调用点逐字节不变，每文件 diff 2 行。** `components/displaySystem/colormaps.js` 新增 `sampleJetRgb` / `sampleJet` 与第 7 条 `{ id: 'jet', label: '彩虹 Jet' }`，`import { jetRgb } from '../../assets/util/jetLadder.js'`；排在既有六条**之后**，且 `sampleJetRgb` 用 `Math.round` 而非老 `parseInt`。**这个导入一开始写的是 `util.js`，后端测试当场报 `ERR_MODULE_NOT_FOUND`** —— `backend/tests/sdk/displayProfileRuntime.test.js` 用 `await import(pathToFileURL(...))` 裸 Node ESM 加载前端模块，没有 Vite 解析器：`util.js` 内部写的是 `from "./color"`（Node ESM 不补全扩展名）且顶层 `initValue` 就在读 `localStorage`。三条出路（在 colormaps.js 抄一份公式 / 改造 util.js / 拆出阶梯）里选了拆阶梯，`util.jet.test.js` 因此多一条 `expect(jetRgb).toBe(jetRgbFromLadder)` 身份断言 —— 若有人图省事在 `util.js` 里再写一份函数体，没有这条断言不会有任何测试失败。`backend/displaySystems/displaySystemCanvasCatalog.js` 的 `CANVAS_COLORMAPS` 同步追加 `{ id: 'jet', label: '彩虹 Jet' }`：它是前端 `COLORMAPS` 的**重复清单**，`displaySystemPage.js` 拿它归一（未知 id 静默回落 classic）与校验（未知 id 报错），只登记前端的话配置器能选能预览、但一按保存（`PATCH /api/display-systems/:id/display`）就被判非法；顺序必须与前端一致（零件栏按后端目录渲染下拉），`backend/tests/displaySystems/configValidation.test.js` 两处期望错误串（`display.canvas.colormap.id` / `display.chartAppearance.colormap.id`）一并更新。新增 `client/src/assets/util/util.jet.test.js` 72 例：`legacyJet` / `legacyJetNoCoerce`（`num/Num.jsx` 那份少 `+ ''` 的变体，等价性是推理故必须打断言）/ `legacyJetRgba` / `legacyJetRound` 四份基准逐字抄自被删的原实现，19 个取样点覆盖 `x<min` / `x=min` / `1e-12` / 四段分界 / `x=max` / `x>max` / `min<0` / 真实阈值默认值 2·200·2655，外加 `[-10,110]` 上 0.5 步长密扫，以及一条把 `jet(0,100,49.9999999999993) === [0,255,7]` 与 `jetRound(...) === [0,255,0]` 写死的**既有 bug 锁定**断言（`parseInt('7.105e-12')` 在 `'e'` 处停下取尾数，14 份 canonical 副本一直如此，按「界面零变化」没修）。`colormaps.test.js` 补 6 例：四段分界颜色、与 `jetRound(0,1,ratio)` 逐点相等、`isClassicColormap({id:'jet'}) === false`、`COLORMAPS` id 顺序、reverse/夹取，以及一条「与老 `jet()` 差 >1 的唯一例外必须是那个 sci-notation bug（`ratio = 0.5000000000000002` 处 red 分量 `8.88e-16`）」的分类断言。附带查明 `onestep/heatmap.js` 的 `jet(value)` 是死代码（`createCircle(options.size)` 从不传第二参 → `rgb(255,NaN,0,1)` 非法、赋值被忽略、圆点用默认黑画出，正是这张 alpha 蒙版图要的），**未改**。util.js 另外 7 个 jet 家族函数未动。测试：前端 261 通过 / 14 套件（`App.test.jsx` 仍是既有的缺 `@testing-library/react`），后端 35/35，`jetLadder.js` / `util.js` / `colormaps.js` / 两个测试文件 / 15 个消费文件 eslint 零错误、无新增告警。 |

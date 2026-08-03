@@ -1,5 +1,31 @@
 # Display Systems
 
+## 2026-08-03 catalog 的 serialTemplates 改由串口协议预设库喂
+
+`buildDisplaySystemBuilderCatalog()` 原来硬编码三份协议模板，现在签名是
+`({serialProtocolPresets = []} = {})`，模板列表 = 三份内置模板 + 预设库翻译过来的条目，
+**同 id 时预设覆盖内置模板**（与 `serial/protocols` 里「用户预设覆盖内置预设」同一套规则）。
+三份内置模板的 id 一个都没删 —— 旧 manifest 的 `metadata.builder.serialTemplate` 与
+`inferSerialTemplate()` 的回落目标仍然找得到自己。
+
+预设存的是 manifest 的 `protocol` 四段原文，Builder 表单用的是另一套扁平字段，
+`buildSerialTemplateFromPreset()` 做的就是这层翻译：
+
+| Builder 字段 | 从哪来 |
+| :--- | :--- |
+| `baudRate` | `protocol.baudRate`，且并进 `catalog.baudRates` 档位（大床的 3000000 原来不在 7 个固定档位里） |
+| `framingType` | `protocol.framing.type` |
+| `delimiter` | `protocol.framing.delimiter` 字节数组还原成 `AA 55 03 99` 式十六进制串（大写补零两位、空格分隔，与内置模板逐字一致） |
+| `valueType` | `protocol.decoding.valueType` |
+| `bytesPerValue` | `PROTOCOL_VALUE_TYPE_WIDTHS[valueType]` —— **必须查表**，靠 `valueType.includes('16')` 猜会把 uint32/float32 的定长帧长算成一半 |
+| `dataBits` | 宽度 2 → 12，其余 → 8（前端是写死的 8/12 `Segmented`，四字节类型显示成 8 Bit 是它的表达能力上限，帧长仍由 `bytesPerValue` 算对） |
+
+这一层**不读文件、不反向依赖 `serial` 层**：预设数组由 `createDisplaySystemWorkspaceService` 的
+`listSerialProtocolPresets`（默认 `() => []`）注入，实际读文件在 `server/appRuntimeFactory.js`。
+`getCatalog()` 每次调用都重新取一遍，所以用户往 `<runtimeWritableRoot>/serial-protocols/`
+丢一份 JSON 之后刷新页面就能看到，不用重启服务。协议清单与字节说明见
+`backend/serial/protocols/README.md`。
+
 ## 2026-07-31 display.chartAppearance / display.chartCards 与两条写路由
 
 `display` 段现在有三块外观配置，正好对应用户在主界面零件栏上能拖出来的三样东西：
@@ -200,7 +226,7 @@ HTTP 错误码由三条写路由共用的 `respondDisplaySystemWriteError` 映�
 
 `display.sidebar` 配置左侧可视化数据面板。`pressure` 可选择总压力、平均压力、最大压力、有效点数和面积，并指定主指标；`area` 可设置有效点阈值、单点面积和面积单位。该面板始终基于映射后的原始压力矩阵统计，不受 `normalize/threshold/smooth` 等前端可视算法影响。
 
-页面配置器的串口主流程按传输形式、是否按分隔符分包、波特率、分隔符/完整帧字节数和 8/12 Bit 数据精度组织。协议模板提供经典 8 Bit 帧、921600 分包协议和经典 12 Bit ADC 三种选择：经典 8 Bit 使用 `1000000 baud + fixedLength + uint8`，帧长度按矩阵点数自动计算；921600 分包协议使用 `AA 55 03 99` 帧尾；12 Bit 使用 `uint16le` 两字节承载。数据展示继续提供热力图总览和数字矩阵。模板参数由 `GET /api/display-systems/catalog` 返回，选择后写入标准 `protocol`、`display` 和 `metadata.builder` 字段。
+页面配置器的串口主流程按传输形式、是否按分隔符分包、波特率、分隔符/完整帧字节数和 8/12 Bit 数据精度组织。协议模板原本只有三种（经典 8 Bit 帧 `1000000 baud + fixedLength + uint8`，帧长度按矩阵点数自动计算；921600 分包协议用 `AA 55 03 99` 帧尾；经典 12 Bit ADC 用 `uint16le` 两字节承载），**2026-08-03 起模板列表由串口协议预设库喂**，见本文件顶部那一节。数据展示继续提供热力图总览和数字矩阵。模板参数由 `GET /api/display-systems/catalog` 返回，选择后写入标准 `protocol`、`display` 和 `metadata.builder` 字段。
 
 算法输出支持两种兼容返回值：旧算法继续返回 `number[]`；需要向页面暴露业务结果的算法返回 `{ data, metrics }`。`metrics` 只接受有限数字、字符串或布尔值，并通过实时帧的 `algorithmMetrics` 发布。页面 JSON 算法也可以在 `algorithm-data.json.metrics` 声明安全聚合指标，例如：
 

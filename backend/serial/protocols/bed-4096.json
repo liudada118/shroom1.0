@@ -1,0 +1,21 @@
+{
+  "id": "bed-4096",
+  "label": "大床 4096 压力帧 (64x64)",
+  "summary": "与标准帧同一个分隔符，但一帧 4096 个 uint8 点、波特率 3000000。",
+  "doc": "bed-4096.md",
+  "matrix": { "width": 64, "height": 64, "total": 4096 },
+  "channels": ["sit"],
+  "protocol": {
+    "baudRate": 3000000,
+    "framing": {
+      "type": "delimiter",
+      "delimiter": [170, 85, 3, 153],
+      "includeDelimiter": false
+    },
+    "decoding": {
+      "valueType": "uint8",
+      "byteOffset": 0,
+      "valueCount": 4096
+    }
+  }
+}

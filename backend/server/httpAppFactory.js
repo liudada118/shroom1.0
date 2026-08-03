@@ -6,6 +6,30 @@ const {
 } = require('../contracts/sdkApiContract');
 const { registerControlRoutes } = require('../http/controlRoutes');
 const { registerReportRoutes } = require('../http/reportRoutes');
+const { loadSerialProtocolPresets } = require('../serial/protocols');
+
+/**
+ * 取串口协议预设的摘要，塞进 SDK contract。
+ *
+ * 只给 id/label/summary/doc，不给完整 protocol 段 —— contract 是能力快照不是数据源，
+ * 完整字节配置走 `GET /api/serial/protocols`。这里读文件失败也不能让 contract 挂掉，
+ * 所以整段兜底成空数组。
+ *
+ * @param {string[]} extraDirectories 用户自定义预设目录。
+ * @returns {Array<{id: string, label: string, summary: string, doc: string}>} 预设摘要。
+ */
+function listSerialProtocolPresetSummaries(extraDirectories) {
+  try {
+    return loadSerialProtocolPresets({ extraDirectories }).presets.map((preset) => ({
+      id: preset.id,
+      label: preset.label,
+      summary: preset.summary,
+      doc: preset.doc,
+    }));
+  } catch (error) {
+    return [];
+  }
+}
 
 function createJsonBodyErrorHandler(logger) {
   return (error, req, res, next) => {
@@ -54,6 +78,8 @@ function createHttpApp({
   logger,
   pdfPath,
   serialManager,
+  // 用户自定义串口协议预设目录。打包之后用户往这里丢 JSON 就能加协议，不用重新构建。
+  serialProtocolDirectories = [],
   reloadDisplaySystems = () => ({}),
   saveDisplaySystem = () => null,
   saveDisplaySystemDisplaySection = () => null,
@@ -87,6 +113,7 @@ function createHttpApp({
       displaySystems: getDisplaySystemStatus(),
       serialStatus: getSerialStatus(),
       subscriptions: getWsSubscriptionStatus(),
+      protocolPresets: listSerialProtocolPresetSummaries(serialProtocolDirectories),
     }));
   });
 
@@ -191,6 +218,7 @@ function createHttpApp({
     listPorts,
     logger,
     serialManager,
+    serialProtocolDirectories,
   });
 
   registerReportRoutes(httpApp, {

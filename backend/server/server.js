@@ -1737,6 +1737,8 @@ const httpApp = createHttpApp({
   logger,
   pdfPath,
   serialManager,
+  // 串口协议预设：内置的在 serial/protocols/，用户自定义的在可写目录下的 serial-protocols/。
+  serialProtocolDirectories: appRuntime.serialProtocolDirectories,
   reloadDisplaySystems: appRuntime.displaySystems.reload,
   saveDisplaySystem: appRuntime.displaySystems.save,
   saveDisplaySystemDisplaySection: appRuntime.displaySystems.saveDisplaySection,

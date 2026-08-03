@@ -389,7 +389,13 @@ let totalArr = [],
   wsMatrixName = "foot";
 let startPressure = 0,
   time = 0;
-let num = 0,
+// 采集计时：Title 上「采集/停止」后面那个数字，单位秒。
+//
+// 以前是数帧推算的（`num` 计实时帧数，再 `num / 12 * hz` 折成数字），现在直接记
+// 开始时刻、按墙上时间算，所以只需要一个起点和一个定时器句柄。详见
+// `startCollectionTimer` 的注释。
+let colStartAt = 0,
+  colTimerId = null,
   wsPointDataSit = [],
   wsPointDataSitWidth = 32, // 坐垂矩阵列宽，默认 32，hand0205 为 16
   wsPointDataBack = [],
@@ -1438,6 +1444,8 @@ class Home extends React.Component {
       clearTimeout(timer1);
       timer1 = null;
     }
+    // 采集计时的秒表：卸载时不停会一直往一个已卸载的 ref 上写。
+    this.stopCollectionTimer();
   }
 
   colPushData() {
@@ -1556,6 +1564,10 @@ class Home extends React.Component {
       || jsonObject.headData != null
       || (jsonObject.outputChannel && jsonObject.data != null)
     );
+    // 采集计时不在这里了：它改成由 `startCollectionTimer` 的定时器驱动，不再蹭帧。
+    // 之前这段代码在帧处理链里，于是既受「显示系统提前 return」影响（manifest
+    // 传感器数字恒为 0），也受帧率影响（没帧进来秒表就停）。
+
     if (currentDisplayDefinition?.source === 'manifest' && hasPressureFrame) {
       const handled = this.handleManifestSceneFrame(jsonObject, currentDisplayDefinition);
       if (handled || jsonObject.displaySystemId) return;
@@ -1970,15 +1982,7 @@ class Home extends React.Component {
         realHzLastTime = now;
       }
 
-      if (this.state.matrixName != "car10") {
-        if (colValueFlag) {
-          num++;
-
-          this.title.current?.changeNum(num / 12 * hz);
-        } else {
-          num = 0;
-        }
-      }
+      // 采集计时已经提到本函数开头（显示系统提前 return 之前），这里不再重复计数。
 
       let selectArr;
       let wsPointData = jsonObject.sitData;
@@ -2600,15 +2604,10 @@ class Home extends React.Component {
         }
       }
 
-      if (isCar(this.state.matrixName) && !sitFlag) {
-        if (colValueFlag) {
-          num++;
-
-          this.title.current?.changeNum(num);
-        } else {
-          num = 0;
-        }
-      }
+      // 这里原来还有第二个计数器（`isCar(matrixName) && !sitFlag` 时 `changeNum(num)`，
+      // 显示的是帧数、没有 `/12*hz`），走靠背通道。它和上面坐垫那个写的是**同一个**
+      // `changeNum` 槽位，改成定时器计时后两者会互相盖写，所以一并删掉：
+      // 这个数字现在全局统一由 `startCollectionTimer` 的秒表驱动。
       wsPointDataBack = jsonObject.backData;
       // console.log(wsPointDataBack)
       if (!Array.isArray(wsPointDataBack)) {
@@ -3939,8 +3938,57 @@ class Home extends React.Component {
     this.setState(obj);
   };
 
+  /**
+   * 采集开关的唯一入口 —— `Title` 的「开始采集」和「停止」都会调到这里
+   * （`Title.jsx` 的 `startCollectionWithOptions` 传 true、`stopCollection` 传 false），
+   * 所以采集计时的起停也挂在这儿。
+   */
   setColValueFlag = (value) => {
     colValueFlag = value;
+    if (value) {
+      this.startCollectionTimer();
+    } else {
+      this.stopCollectionTimer();
+    }
+  };
+
+  /**
+   * 开始采集计时。Title 上「停止」后面那个数字，单位是**秒**。
+   *
+   * 以前是拿帧数推算的：`num` 每收到一帧实时坐垫数据 +1，显示 `num / 12 * hz`。
+   * 那个式子里 `hz` 是后端下发的采集频率 `colHZ`（默认 12，见
+   * `backend/services/collection/collectionService.js`），而 `12` 是写死的
+   * 「传感器每秒推 12 帧」假设 —— 于是 `num / 12` 当秒数、再乘 `hz` 换成
+   * 「这几秒该入库多少行」。问题是实时下发根本不限频
+   * （`frameOutputPipelineService.publishSit` 每帧都发），真实帧率就是同一个文件里
+   * `realHz` 现量出来的那个值。真实帧率一旦不是 12，这个数既不是秒也不是入库行数，
+   * 偏差正好是 realHz/12 倍（100Hz 的传感器上秒表快 8 倍多）。
+   *
+   * 现在改成记开始时刻、按墙上时间算，与帧率和采集频率都无关。必须用定时器驱动、
+   * 不能再蹭帧：没有帧进来（串口卡住、传感器没数据）时秒表也应该照走。
+   *
+   * 传给 `changeNum` 的是**取整后的秒数** —— `Title.jsx` 显示时会套一层
+   * `Math.ceil`，而 `setInterval` 有几毫秒漂移，直接传 `1.003` 会被 ceil 成 2，
+   * 第一秒就跳到 2。这里先 `Math.floor` 成整数，`Math.ceil` 就成了空操作。
+   */
+  startCollectionTimer = () => {
+    this.stopCollectionTimer();
+    colStartAt = Date.now();
+    this.title.current?.changeNum(0);
+    colTimerId = setInterval(() => {
+      this.title.current?.changeNum(Math.floor((Date.now() - colStartAt) / 1000));
+    }, 1000);
+  };
+
+  /**
+   * 停止采集计时。只停表，**不清零显示** —— 与改动前一致：以前停止采集时只是把
+   * `num` 归 0、并不调 `changeNum`，所以数字停在最后一个值上，正好能看到这次采了多久。
+   */
+  stopCollectionTimer = () => {
+    if (colTimerId) {
+      clearInterval(colTimerId);
+      colTimerId = null;
+    }
   };
 
   dataZero = () => {

@@ -3,10 +3,12 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const {
+  buildDisplaySystemBuilderCatalog,
   buildDisplaySystemRuntimeDefinition,
   createDisplaySystemWorkspaceService,
   loadDisplaySystemDirectory,
 } = require('../../displaySystems');
+const { loadSerialProtocolPresets } = require('../../serial/protocols');
 
 const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'shroom-display-builder-'));
 
@@ -343,6 +345,95 @@ try {
     () => service.duplicate({ manifestPath: nestedManifestPath }, { id: '../escape' }),
     /may only contain/,
   );
+
+  // -------------------------------------------------------------------------
+  // 串口协议预设 → Builder 的 serialTemplates
+  //
+  // 「新建传感器」页面的模板卡片必须和协议预设库同源：用户往可写目录丢一份 JSON，
+  // 卡片就该多一张，选中就把 protocol 段填好。这一组锁的是那层字段翻译。
+  // -------------------------------------------------------------------------
+  const presetBackedCatalog = buildDisplaySystemBuilderCatalog({
+    serialProtocolPresets: loadSerialProtocolPresets().presets,
+  });
+
+  // 三份内置模板一个都不能少 —— 旧 manifest 的 metadata.builder.serialTemplate 还指着它们。
+  ['pressure-fixed-length', 'pressure-u8-tail', 'pressure-adc16-tail'].forEach((id) => {
+    assert.ok(
+      presetBackedCatalog.serialTemplates.some((template) => template.id === id),
+      `内置模板 ${id} 不见了，旧 manifest 会认不出自己的模板`,
+    );
+  });
+
+  const standardTemplate = presetBackedCatalog.serialTemplates.find((item) => item.id === 'standard-1024');
+  assert.ok(standardTemplate, '预设没有变成 serialTemplate');
+  // 分隔符要还原成 Builder 输入框的写法，和内置模板逐字一致的格式。
+  assert.strictEqual(standardTemplate.defaults.delimiter, 'AA 55 03 99');
+  assert.strictEqual(standardTemplate.defaults.framingType, 'delimiter');
+  assert.strictEqual(standardTemplate.defaults.baudRate, 1000000);
+  assert.strictEqual(standardTemplate.defaults.valueType, 'uint8');
+  assert.strictEqual(standardTemplate.defaults.bytesPerValue, 1);
+  assert.strictEqual(standardTemplate.defaults.dataBits, 8);
+  assert.strictEqual(standardTemplate.defaults.transportType, 'binary');
+  assert.ok(standardTemplate.description, '卡片没有描述文字');
+  assert.deepStrictEqual(standardTemplate.matrix, { width: 32, height: 32, total: 1024 });
+
+  // 双字节预设：bytesPerValue 决定定长帧长，配错会算出一半长度的帧。
+  const smallBedTemplate = presetBackedCatalog.serialTemplates.find((item) => item.id === 'small-bed-12b');
+  assert.strictEqual(smallBedTemplate.defaults.bytesPerValue, 2);
+  assert.strictEqual(smallBedTemplate.defaults.dataBits, 12);
+  assert.strictEqual(smallBedTemplate.defaults.delimiter, 'AA 00 55 00 03 00 99 00');
+
+  // 预设用的波特率必须并进下拉档位，否则选中预设后波特率框是个没有选项的裸数字。
+  assert.ok(presetBackedCatalog.baudRates.includes(3000000), '大床的 3000000 没有进波特率档位');
+  assert.deepStrictEqual(
+    [...presetBackedCatalog.baudRates].sort((left, right) => left - right),
+    presetBackedCatalog.baudRates,
+    '波特率档位没有按升序排列',
+  );
+  assert.strictEqual(
+    new Set(presetBackedCatalog.baudRates).size,
+    presetBackedCatalog.baudRates.length,
+    '波特率档位有重复项',
+  );
+
+  // 同 id 时预设覆盖内置模板，且只留一份。
+  const overridden = buildDisplaySystemBuilderCatalog({
+    serialProtocolPresets: [{
+      id: 'pressure-u8-tail',
+      label: '我改过的 921600',
+      protocol: {
+        baudRate: 460800,
+        framing: { type: 'fixedLength', frameLength: 64 },
+        decoding: { valueType: 'uint32le', valueCount: 16 },
+      },
+    }],
+  }).serialTemplates.filter((template) => template.id === 'pressure-u8-tail');
+  assert.strictEqual(overridden.length, 1, '同 id 应该只保留一份');
+  assert.strictEqual(overridden[0].label, '我改过的 921600');
+  assert.strictEqual(overridden[0].defaults.delimiter, '', '定长帧不该带分隔符');
+  // 四字节类型的宽度要走宽度表，不能靠 valueType 里有没有 '16' 猜。
+  assert.strictEqual(overridden[0].defaults.bytesPerValue, 4);
+
+  // 一个预设都没有时退化成原来的三份模板，目录页不会因此变空。
+  assert.deepStrictEqual(
+    buildDisplaySystemBuilderCatalog().serialTemplates.map((template) => template.id),
+    ['pressure-fixed-length', 'pressure-u8-tail', 'pressure-adc16-tail'],
+  );
+
+  // 服务默认不带预设源，getCatalog 仍然可用（旧调用方不传也不炸）。
+  assert.ok(service.getCatalog().serialTemplates.length >= 3);
+  // 注入之后 getCatalog 每次重新读，用户新丢的 JSON 刷新页面即可见。
+  let presetCalls = 0;
+  const wiredService = createDisplaySystemWorkspaceService({
+    writableRoot: temporaryRoot,
+    listSerialProtocolPresets: () => {
+      presetCalls += 1;
+      return loadSerialProtocolPresets().presets;
+    },
+  });
+  assert.ok(wiredService.getCatalog().serialTemplates.some((item) => item.id === 'standard-1024'));
+  wiredService.getCatalog();
+  assert.strictEqual(presetCalls, 2, 'getCatalog 应该每次都重新取预设');
 
   console.log('workspaceService.test.js passed');
 } finally {
