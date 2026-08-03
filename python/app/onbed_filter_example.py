@@ -951,9 +951,64 @@ def generate_foot_pressure_report1(sensor_data, pdf_name, heatmap_png_path,
         )
 
 
+_display_system_algorithm_cache = {}
+
+
+def _json_compatible(value):
+    """把用户算法结果转换为 JSON-line 协议可序列化的数据。"""
+    if isinstance(value, dict):
+        return {str(key): _json_compatible(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_compatible(item) for item in value]
+    if hasattr(value, "tolist"):
+        return _json_compatible(value.tolist())
+    if hasattr(value, "item"):
+        return _json_compatible(value.item())
+    return value
+
+
+def _load_display_system_algorithm(entry):
+    """按文件修改时间缓存并加载用户自定义 Python 算法。"""
+    resolved = os.path.realpath(os.path.abspath(entry))
+    if not os.path.isfile(resolved):
+        raise FileNotFoundError(f"Display System Python algorithm not found: {resolved}")
+    if not resolved.lower().endswith(".py"):
+        raise ValueError("Display System Python algorithm entry must be a .py file")
+
+    modified_ns = os.stat(resolved).st_mtime_ns
+    cached = _display_system_algorithm_cache.get(resolved)
+    if cached and cached["modified_ns"] == modified_ns:
+        return cached["calculate"]
+
+    module_name = f"shroom_display_algorithm_{abs(hash((resolved, modified_ns)))}"
+    spec = importlib.util.spec_from_file_location(module_name, resolved)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Unable to load Display System Python algorithm: {resolved}")
+    module = importlib.util.module_from_spec(spec)
+    with suppress_protocol_noise():
+        spec.loader.exec_module(module)
+    calculate = getattr(module, "calculate", None)
+    if not callable(calculate):
+        raise TypeError("Python algorithm must define calculate(raw_data, context)")
+    _display_system_algorithm_cache[resolved] = {
+        "modified_ns": modified_ns,
+        "calculate": calculate,
+    }
+    return calculate
+
+
+def run_display_system_algorithm(entry, raw_data, context=None):
+    """执行用户展示系统算法，首个入参始终是串口解码后的原始数据。"""
+    calculate = _load_display_system_algorithm(entry)
+    with suppress_protocol_noise():
+        result = calculate(list(raw_data or []), context or {})
+    return _json_compatible(result)
+
+
 FUNCS = {
     "ping": ping,
     "getData": getData,
+    "run_display_system_algorithm": run_display_system_algorithm,
     # 足压分析
     "warm_foot_analysis": warm_foot_analysis,
     "realtime_server": realtime_server,
