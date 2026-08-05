@@ -1,4 +1,75 @@
-# Shroom Backend SDK
+# Shroom SDK
+
+这个目录下有**两个 SDK**，管的是二开的两侧：
+
+| | 这份文档（`sdk/examples/`） | [`sdk/frontend/`](frontend/README.md) |
+| :--- | :--- | :--- |
+| 包名 | 无 —— 是 demo 脚本，直接 `node` 跑 | `@shroom/frontend`（可 `npm i`） |
+| 管什么 | **连后端**：契约发现、串口开关、采集控制、历史查询 | **画画面**：渲染器、帧管线、配色、阈值 |
+| 跑在哪 | Node（Electron 主进程侧） | 浏览器（`/core` 也可裸 Node） |
+| 入口 | `npm run sdk:demo` / `npm run sdk:serial-demo` | `cd sdk/frontend/example && npm i && npm run dev` |
+
+**想拿这套东西起一个新项目、看到画面的，去读 [`frontend/README.md`](frontend/README.md)**，那边有
+最短可跑路径和消费者必须做的三件事（`resolve.dedupe`、peer 依赖、混淆器 `exclude`）。本文档
+往下是后端侧。
+
+---
+
+## 前端包 `@shroom/frontend`（速览）
+
+```bash
+cd frontend/example && npm i && npm run dev     # → 32×32 数字矩阵，游动的高斯斑
+```
+
+`private: true`，不发公共 registry；分发走 `file:` 依赖或 `npm pack` tarball。主应用自己就是
+第一个消费者（`client/package.json` 里 `"@shroom/frontend": "file:../sdk/frontend"`），所以包
+里的代码和主界面跑的是**同一份**，不是副本。
+
+四个入口，按「有没有 React / three / DOM」分层 —— 这条线同时决定谁能消费和能不能在裸 Node
+里加载：
+
+| 入口 | 内容 | 依赖 |
+| :--- | :--- | :--- |
+| `@shroom/frontend` | 传输（`SensorClient`）、帧存储（`FrameStore`）、展示系统定义（`DisplayRegistry`），并全量转出 `core` | 无 |
+| `@shroom/frontend/core` | 契约、渲染器注册表、帧管线、配色、阈值、坐标布局（14 文件） | 无 |
+| `@shroom/frontend/react` | `RendererHost`、`useSceneFrame`、`registerBuiltinRenderers`、`numMatrix` | peer: react ≥18 + three **≥0.127** |
+| `@shroom/frontend/styles/canvas.css` | 6 行 | 无 |
+
+根出口**刻意不含 `react/`**：一旦含了，`SensorClient` 的裸 Node 消费者（本仓 `backend/tests/sdk/`
+里就有一个）连 import 都做不到。
+
+**`three` 的 peer 范围必须宽到 `>=0.127`** —— 主应用 pin 的是 `^0.127.0`（2021 年的版本），写
+`^0.170` 会让主应用装不上。
+
+三行就能出画面：
+
+```jsx
+import { RendererHost, registerBuiltinRenderers } from '@shroom/frontend/react';
+import '@shroom/frontend/styles/canvas.css';
+
+registerBuiltinRenderers();
+<RendererHost rendererId="numMatrix" params={params} values={frame} channel="sit" />
+```
+
+在仓库根上跑它的检查：
+
+```bash
+npm run sdk:frontend-test     # vitest 121 例
+npm run sdk:frontend-smoke    # 裸 Node 跑一遍 core，12 项
+```
+
+`sdk:frontend-smoke` 不是补充测试，是**包边界的守卫** —— 无打包器、无 `localStorage` 垫片、无
+vitest，这三样在测试环境里都会把「装到新项目里就崩」那类错遮住（少写 `.js` 扩展名、模块顶层读
+`localStorage`、悄悄引入 react/three）。
+
+> **⚠️ 已知缺口：根出口在 `npm pack` 装出来的包里加载不了。** `frontend/src/client/commands.js`
+> 有一条 `import ... from '../../../../shared/commandSchema.json'` —— 四级向上跑出了包根。仓库里
+> （`file:` / `npm link`）它解析到 `<repo>/shared/`，所以主应用和 demo 都正常；tarball 装出来之后
+> 四级向上是 `node_modules/`，于是整个根 barrel 在 import 时就抛。**`/core` 与 `/react`（也就是
+> 画画面那条路）不受影响。** 修法是先定 `shared/commandSchema.json` 归后端还是归 SDK（它现在有
+> 5 个消费者），细节见 [`frontend/README.md`](frontend/README.md)。
+
+---
 
 ## Backend SDK demo
 

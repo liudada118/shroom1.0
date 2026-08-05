@@ -55,11 +55,18 @@ describe('内置渲染器注册', () => {
     expect(carCol.sit).toEqual({ num1: 9, num2: 10, interp: 2, order: 4 });
   });
 
-  it('渲染器模块可以真正加载出一个组件', async () => {
-    const component = await loadRenderer('pointGrid');
+  // 逐个 await 每一个注册项而不是只测 pointGrid：这一条抓的是渲染器模块
+  // 内部的导入错误（路径写错、拿了个不存在的导出），而描述符校验看不到那些。
+  it.each(['pointGrid', 'numMatrix'])('%s 模块可以真正加载出一个组件', async (id) => {
+    const component = await loadRenderer(id);
     expect(component).toBeTruthy();
     // forwardRef 组件是对象而非函数，两者都接受
     expect(['function', 'object']).toContain(typeof component);
+  });
+
+  it('注册表里每一项都能加载 —— 加了新渲染器忘了补测试也拦得住', async () => {
+    const loaded = await Promise.all(listRenderers().map((item) => loadRenderer(item.id)));
+    expect(loaded.every(Boolean)).toBe(true);
   });
 
   it('manifest 声明 pointGrid 时能解析出渲染器与参数', () => {
@@ -91,6 +98,40 @@ describe('内置渲染器注册', () => {
     expect(presets.matCol.sit.order).toBe(2);
     expect(presets.carCol.sit.num1).toBe(9);
     expect(presets.carCol.sit.order).toBe(4);
+  });
+
+  it('numMatrix 只声明 sit 通道，不声明框选与旋转', () => {
+    const descriptor = getRendererDescriptor('numMatrix');
+    expect(descriptor.capabilities).toEqual([RENDERER_CAPABILITIES.SIT]);
+    expect(descriptor.capabilities).not.toContain(RENDERER_CAPABILITIES.BOX_SELECT);
+  });
+
+  it('numMatrix 的四条 legacy 预设挂在描述符上', () => {
+    // 三份 NumThreeColor 的布局公式代数等价（逐点验算见
+    // numMatrix/pipeline.test.js），所以它们是同一个渲染器的三条预设；
+    // smallBed12B 是第四条，原来靠 `matrixName === 'smallBed12B'` 的字符串分支。
+    const { presets, normalizeParams } = getRendererDescriptor('numMatrix');
+    expect(Object.keys(presets)).toEqual(['fast256', 'fast1024', 'fast1024sit', 'smallBed12B']);
+
+    expect(normalizeParams(presets.fast256).size).toBe(4);
+    expect(normalizeParams(presets.fast1024sit).cameraControls).toBe(false);
+    expect(normalizeParams(presets.smallBed12B).decimalScale).toBe(10);
+  });
+
+  it('manifest 声明 numMatrix 时能解析出渲染器与参数', () => {
+    const resolved = resolveRendererFromDefinition({
+      page: {
+        defaultProfile: 'default',
+        profiles: [{ id: 'default', renderer: 'main' }],
+        renderers: [{ id: 'main', type: 'numMatrix', params: { gridWidth: 23, gridHeight: 23 } }],
+      },
+    });
+
+    expect(resolved.rendererId).toBe('numMatrix');
+    expect(resolved.params.gridWidth).toBe(23);
+    // 用户没填的项由 normalizeParams 补全，manifest 因此可以只写关心的几项。
+    expect(resolved.params.backend).toBe('sprite3d');
+    expect(resolved.params.chartWindow).toBe(20);
   });
 });
 

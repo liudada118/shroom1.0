@@ -27,6 +27,15 @@ export default defineConfig({
 
   // 路径别名（替代 Webpack 的 resolve.alias）
   resolve: {
+    // `@shroom/frontend` 是 `file:../sdk/frontend` 装进来的 symlink。它的真实路径
+    // 在 client/ 之外，Node/Vite 从那里向上找 node_modules 会走到 E:/shroom1/
+    // 而不是 client/node_modules —— 那上面既没有 react 也没有 three。
+    //
+    // dedupe 在这里干两件事，**都不能少**：
+    // 1. 让包内的裸 `react` / `three` import **能解析到**（指到 client 这一份）；
+    // 2. 保证全应用只有一份 —— 两份 React 会让 hooks 直接崩，两份 three 会让
+    //    `instanceof THREE.Xxx` 全部失效（渲染器里到处在用）。
+    dedupe: ["react", "react-dom", "three"],
     alias: {
       "@": path.resolve(__dirname, "./src"),
       "@components": path.resolve(__dirname, "./src/components"),
@@ -76,7 +85,14 @@ export default defineConfig({
           // 运行时表达式，Rollup 随即无法静态分析，懒加载 chunk 拆不出来、
           // 被内联回主包——正好抵消掉插件化拆包的收益。
           // 这里只是注册表样板代码，没有需要保护的算法。
-          exclude: ['node_modules/**', '**/src/renderers/**'],
+          //
+          // `**/sdk/frontend/**` 是拆包后必须补的一条：渲染器本体已经搬进
+          // `@shroom/frontend`，而它是 symlink，真实路径解析成
+          // `E:/shroom1/sdk/frontend/...`，**匹配不上** `node_modules/**`。
+          // 漏掉这条，包里那句 `import('./numMatrix/NumMatrixRenderer.jsx')`
+          // 就会被 stringArray/splitStrings 改写，懒加载 chunk 塌回主包 ——
+          // 正是上面这段注释警告的那个后果。
+          exclude: ['node_modules/**', '**/src/renderers/**', '**/sdk/frontend/**'],
           options: {
             compact: true,
             // ✘ 关闭 - 将 if/for/while 转为 switch-case，破坏 V8 JIT 优化，导致 requestAnimationFrame 和 message handler 耗时激增

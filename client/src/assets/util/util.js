@@ -5,6 +5,7 @@
  */
 import { rainbowTextColors, rainbowTextColorsxy } from "./color";
 import { jetRgb } from "./jetLadder.js";
+import { findMax, jet } from "@shroom/frontend/core/frameMath.js";
 import { garyColors, rainbowBackColors, rainbowColors } from "./value";
 import { createThresholdState } from "../../runtime/displayThresholds";
 
@@ -489,15 +490,13 @@ export function gaussBlur_return(scl, w, h, r) {
  * @param {number} max 值域上界。
  * @param {number} x 取样值，超出 [min, max] 会被夹取。
  * @returns {number[]} `[r, g, b]`，各分量取值 0-255 的整数。
+ *
+ * 实现搬到了 `@shroom/frontend/core/frameMath.js`（数字矩阵渲染器要用它，而
+ * 那一层不能 import `util.js`：1440 行、顶层读 `localStorage`、内部 import 不写
+ * 扩展名 —— 裸 Node 加载不了）。这里原样 re-export，14 个消费方一行不改。
+ * 做法与上面 `jetRgb` 那条一样。
  */
-export function jet(min, max, x) {
-  const { r, g, b } = jetRgb(min, max, x);
-  var rgb = new Array();
-  rgb[0] = parseInt(255 * r + '');
-  rgb[1] = parseInt(255 * g + '');
-  rgb[2] = parseInt(255 * b + '');
-  return rgb;
-}
+export { jet };
 
 /**
  * 不取整的四元组 `[r, g, b, 1]`，前三个分量是 0-255 的浮点数。
@@ -1057,13 +1056,13 @@ export function pressSj(arr, width, height) {
   return newArr1;
 }
 
-export function findMax(arr) {
-  let max = 0;
-  arr.forEach((item) => {
-    max = max > item ? max : item;
-  });
-  return max;
-}
+/**
+ * 求数组最大值。实现搬到了 `@shroom/frontend/core/frameMath.js`，理由同 `jet`。
+ *
+ * 本文件下面还有 5 处内部调用它（`returnChartMax` 那一带），所以它是 import
+ * 进来再原样导出的 —— 不是纯 re-export 语法。
+ */
+export { findMax };
 const chartValueArr = [200, 500, 1000, 1800, 3000, 5000, 10000, 18000, 30000, 45000, 60000, 80000]
 export function returnChartMax(value) {
 

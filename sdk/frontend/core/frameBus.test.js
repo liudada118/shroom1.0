@@ -5,7 +5,7 @@ import {
   publishFrame,
   resetFrameBus,
   subscribeFrames,
-} from './frameBus';
+} from './frameBus.js';
 
 const FRAME = Object.freeze({ values: [1, 2, 3] });
 

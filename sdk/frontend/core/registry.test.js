@@ -17,8 +17,8 @@ import {
   registerRenderer,
   resetRendererRegistry,
   resolveRendererFromDefinition,
-} from './registry';
-import { RENDERER_CAPABILITIES } from './contract';
+} from './registry.js';
+import { RENDERER_CAPABILITIES } from './contract.js';
 
 function makeDescriptor(overrides = {}) {
   return {

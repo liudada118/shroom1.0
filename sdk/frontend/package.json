@@ -1,4 +1,52 @@
 {
+  "name": "@shroom/frontend",
+  "version": "0.1.0",
+  "description": "压力传感前端 SDK：传输层、帧存储、展示系统定义，以及可注册的渲染器（数字矩阵）",
   "type": "module",
-  "private": true
+  "private": true,
+  "license": "UNLICENSED",
+  "exports": {
+    ".": "./index.js",
+    "./core": "./core/index.js",
+    "./core/numMatrix": "./core/numMatrix/index.js",
+    "./core/*": "./core/*",
+    "./react": "./react/index.js",
+    "./react/*": "./react/*",
+    "./styles/canvas.css": "./styles/canvas.css",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "core",
+    "react",
+    "styles",
+    "src",
+    "scripts",
+    "README.md",
+    "!core/**/*.test.js"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "smoke": "node scripts/smoke-core.mjs"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18",
+    "three": ">=0.127"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    },
+    "three": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "vitest": "^2.1.0"
+  }
 }

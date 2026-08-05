@@ -10,6 +10,8 @@
     "test": "node backend/tests/run-tests.js",
     "sdk:demo": "node sdk/examples/backend-sdk-demo.js",
     "sdk:serial-demo": "node sdk/examples/serial-chain-demo.js",
+    "sdk:frontend-test": "npm --prefix sdk/frontend test",
+    "sdk:frontend-smoke": "node sdk/frontend/scripts/smoke-core.mjs",
     "start": "electron-forge start",
     "build-client": "npm --prefix client run build",
     "build-python-runtime": "node scripts/build-python-runtime.js",

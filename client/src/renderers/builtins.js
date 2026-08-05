@@ -7,14 +7,26 @@
  * 注册只写描述符，不 import 渲染器本体——load 在真正需要时才执行。
  * 这是把 Home.jsx 那 959KB chunk 拆开的关键：目前 55 个场景组件全部
  * 静态导入，运行时却只会用到其中一个。
+ *
+ * ## 现在这里只剩 pointGrid
+ *
+ * `numMatrix` 已经拆进 `@shroom/frontend`，由包自己的
+ * `registerSdkBuiltins()` 注册（描述符与 load 路径都在包里，主应用不再重复
+ * 声明一遍 —— 抄一份就会漂移）。`pointGrid` 留在这边：它额外拖进
+ * `SelectionHelper` 与 `threeUtil1`，第二轮再搬。
+ *
+ * 两边注册进的是**同一个模块级 Map**（`./registry` 是包的壳），且注册幂等、
+ * 按 id 覆盖，所以谁先谁后都一样。
  */
+
+import { registerBuiltinRenderers as registerSdkBuiltins } from '@shroom/frontend/react';
 
 import { RENDERER_CAPABILITIES } from './contract';
 import { registerRenderer } from './registry';
 import { LEGACY_PRESETS, normalizePointGridParams } from './pointGrid/params';
 
 /**
- * 注册全部内置渲染器。
+ * 注册全部内置渲染器（主应用自带的 + SDK ships 的）。
  *
  * 幂等：重复调用不会产生副作用，注册表按 id 覆盖。
  *
@@ -51,5 +63,7 @@ export function registerBuiltinRenderers() {
     }),
   ];
 
-  return results.filter(Boolean).length;
+  // numMatrix 及其预设、能力、方法清单都在包里，见
+  // `sdk/frontend/react/builtins.js`。
+  return results.filter(Boolean).length + registerSdkBuiltins();
 }

@@ -1,34 +1,11 @@
-import { useEffect, useRef } from 'react';
-import { subscribeFrames } from './frameBus';
-
 /**
- * useSceneFrame.js - 渲染器侧的订阅 hook
+ * useSceneFrame.js - re-export 壳
  *
- * **刻意不叫 `useFrame`** —— react-three-fiber 有一个同名 API，重名会让
- * 以后读代码的人误以为这是 r3f 的东西。
+ * 实现已搬到 `@shroom/frontend/react/useSceneFrame.js`（react 层，需要 React）。
  *
- * handler 存进 ref 而不是进依赖数组：渲染器的帧回调多半是内联箭头函数，
- * 每次渲染都是新引用，直接进依赖会导致**每渲染一次就退订重订一次**。
- * 存 ref 之后订阅只在挂载时建立一次，卸载时退掉。
+ * 主应用目前 0 个引用方 —— 场景组件都还在自己订阅总线。壳仍然留着：它是
+ * SDK 侧给二开者消费帧的正式入口，主应用早晚要收敛到它上面。
  */
 
-/**
- * 订阅帧总线。
- *
- * @param {(frame: object) => void} handler 帧回调。传 null 表示暂不订阅。
- * @param {boolean} [enabled] 是否启用订阅，默认 true。
- */
-export function useSceneFrame(handler, enabled = true) {
-  const handlerRef = useRef(handler);
-  handlerRef.current = handler;
-
-  useEffect(() => {
-    if (!enabled) return undefined;
-    return subscribeFrames((frame) => {
-      const fn = handlerRef.current;
-      if (typeof fn === 'function') fn(frame);
-    });
-  }, [enabled]);
-}
-
-export default useSceneFrame;
+export * from '@shroom/frontend/react/useSceneFrame.js';
+export { default } from '@shroom/frontend/react/useSceneFrame.js';

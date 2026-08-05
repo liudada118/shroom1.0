@@ -13,7 +13,7 @@ import {
   SINGLE_CHANNEL_DEFAULTS,
   STORAGE_KEYS,
   createThresholdState,
-} from './displayThresholds';
+} from './displayThresholds.js';
 
 /**
  * 逐字抄自 `three/hand.jsx:40-51` 的那 12 行（37 个文件里一字不差的同一份）。

@@ -1,3 +1,4 @@
+import { press } from "@shroom/frontend/core/frameMath.js";
 import { findMax, rotate, rotate90, rotate90CW } from "./util";
 
 export function footLine({ wsPointData, pressFlag, pressNumFlag }) {
@@ -254,57 +255,20 @@ export function pressBed(arr, value) {
   return newArr;
 }
 
-export function press(arr, width, height, value, prop, type = "row") {
-  let wsPointData = [...arr];
-
-  if (type == "row") {
-    let colArr = [];
-    for (let i = 0; i < height; i++) {
-      let total = 0;
-      for (let j = 0; j < width; j++) {
-        total += wsPointData[i * width + j];
-      }
-      colArr.push(total);
-    }
-    // //////okok
-    for (let i = 0; i < height; i++) {
-      for (let j = 0; j < width; j++) {
-        wsPointData[i * width + j] = parseInt(
-          (wsPointData[i * width + j] /
-            (value - colArr[i] <= 0 ? 1 : value - colArr[i])) *
-          1000 * prop
-        );
-      }
-    }
-  } else {
-    let colArr = [];
-    for (let i = 0; i < height; i++) {
-      let total = 0;
-      for (let j = 0; j < width; j++) {
-        total += wsPointData[j * height + i];
-      }
-      colArr.push(total);
-    }
-    // //////okok
-
-    // console.log(first)
-    console.log(colArr)
-    for (let i = 0; i < height; i++) {
-      for (let j = 0; j < width; j++) {
-        wsPointData[j * height + i] = parseInt(
-          (wsPointData[j * height + i] /
-            (value - colArr[i] <= 0 ? 1 : value - colArr[i])) *
-          1000 * prop
-        );
-      }
-    }
-  }
-
-  //////
-
-  // wsPointData = wsPointData.map((a,index) => {return calculateY(a)})
-  return wsPointData;
-}
+/**
+ * 分压重分配。实现搬到了 `@shroom/frontend/core/frameMath.js`。
+ *
+ * 搬走的原因：只有 `Fast1024sit` 这条预设启用它
+ * （`pressureRedistribution.enabled`），而数字矩阵渲染器已经进包了，包里不能
+ * import `line.js`（它 import `./util` → 顶层读 `localStorage`，裸 Node 加载不了）。
+ * 这里原样 re-export，`matrixDiff.jsx` / `smallBed.jsx` / `tempFullBed.jsx`
+ * 三个消费方一行不改。
+ *
+ * 搬过去时只摘掉了 `type !== 'row'` 那支里每帧都打的一句 `console.log(colArr)`
+ * （调试残留），返回值一个字节没变。本文件 91 行那处内部调用走的是默认的
+ * `'row'` 支，本来就没有那句。
+ */
+export { press };
 
 export function press256(arr, width, height, value, prop, type = "row") {
   let wsPointData = [...arr];

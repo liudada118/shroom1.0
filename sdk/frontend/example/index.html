@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- 空 data URI 挡掉 favicon 的 404 —— demo 的控制台应当是干净的，
+         不然二开者第一次跑就要先分辨哪条报错是自己的。 -->
+    <link rel="icon" href="data:," />
+    <title>@shroom/frontend demo · 数字矩阵</title>
+    <style>
+      /* 渲染器自带的 .canvasNum 是 height:100vh + 黑底，页面这层只要不给它
+         添乱：清掉默认 margin，防出现滚动条。 */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #000;
+        overflow: hidden;
+      }
+      body {
+        font: 13px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        color: #eee;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

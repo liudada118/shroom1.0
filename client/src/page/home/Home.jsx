@@ -18,9 +18,6 @@ import Car100 from "../../components/car/box100_3";
 import Bed4096 from "../../components/three/4096";
 import Canvas4096WebGL from "../../components/webgl/Canvas4096WebGL";
 import Bed1616 from "../../components/three/1616";
-import Fast256 from '../../components/three/NumThreeColor copy'
-import Fast1024 from '../../components/three/NumThreeColor1024'
-import Fast1024sit from '../../components/three/NumThreeColor1024sit'
 import CanvasnewHand from "../../components/three/newhand";
 import Gloves from "../../components/three/gloves";
 import Gloves1 from "../../components/three/gloves1";
@@ -112,6 +109,7 @@ import { resolveRendererFromDefinition } from '../../renderers/registry';
 // 只引参数表，不引渲染器本体 —— params.js 是纯函数模块（无 three.js），
 // PointGridRenderer.jsx 仍然由 RendererHost 懒加载，不进 Home 的 chunk。
 import { LEGACY_PRESETS as POINT_GRID_PRESETS } from '../../renderers/pointGrid/params';
+import { LEGACY_PRESETS as NUM_MATRIX_PRESETS } from '../../renderers/numMatrix/params';
 import { clearLastFrame, publishFrame } from '../../runtime/frameBus';
 import { SCENE_CHANNELS, buildSceneFrame } from '../../runtime/sceneFrame';
 import DisplayCanvasConfigurator from '../../components/displaySystem/canvasConfigurator/DisplayCanvasConfigurator.jsx';
@@ -172,6 +170,58 @@ const filterVisibleDisplayMatrixTypes = (types) =>
 const tactileGloveTypes = ['hand0205', 'handGlove115200', FULL_PACKET_GLOVE_MATRIX]
 const isTactileGloveMappedLength = (matrixName, length) => {
   return length === 147 || (matrixName === 'handGloveFullPacket' && length === 195)
+}
+
+/**
+ * 走 `numMatrix` 渲染器的展示形式 → 参数预设。
+ *
+ * 原来是四条 `matrixName == 'xxx' ? <FastNNN .../>` 的三元分支，分别指向
+ * `NumThreeColor copy` / `NumThreeColor1024` / `NumThreeColor1024sit`。三份文件
+ * 逐行比对后的结论是它们是同一个渲染器（布局公式代数等价，逐点验算见
+ * `renderers/numMatrix/pipeline.test.js`），差异全部收进了预设，所以这里换成
+ * 一张表 —— 加一个展示形式只需在表里加一行，不必再回来加分支。
+ *
+ * `normalFast` 与 `fast1024` 两条原本是两个完全相同的分支，指向同一份文件。
+ */
+const NUM_MATRIX_SCENES = {
+  fast256: NUM_MATRIX_PRESETS.fast256,
+  normalFast: NUM_MATRIX_PRESETS.fast1024,
+  fast1024: NUM_MATRIX_PRESETS.fast1024,
+  fast1024sit: NUM_MATRIX_PRESETS.fast1024sit,
+}
+
+/**
+ * 推导 manifest / hand / minzhen / smallBed 那一路的 `numMatrix` 参数。
+ *
+ * 这一路原先传的是 `<Fast1024 matrixName=... matrixWidth=... manageSidebar=...>`，
+ * 组件内部再按 `matrixName` 字符串分出三条支路。参数化之后渲染器不再认识
+ * `matrixName`，所以那几条支路在这里折平：
+ *
+ * - `smallBed12B` 的三处分支（`getDecimalScale` / `getPressureChartPadding` /
+ *   合力取 max）合成「基础预设取 smallBed12B」一件事；
+ * - `manageSidebar` 原来的守卫是 `props.manageSidebar !== false &&
+ *   props.matrixName !== 'minzhen'`（`NumThreeColor1024.jsx:167`），**两个条件的
+ *   AND**，所以 minzhen 那一项必须在这里折进来 —— 漏掉的话 minzhen 的侧栏会
+ *   被渲染器和外层同时回写。
+ *
+ * `gridWidth` / `gridHeight` 只在 manifest 那一路有值，缺省 0 让渲染器退回
+ * `64 / size`，与原实现的 `matrixWidth > 0 ? matrixWidth : 64 / size` 一致。
+ *
+ * @param {string} matrixName 当前展示形式。
+ * @param {object} definition 运行期展示定义（`getDisplayDefinition` 的结果）。
+ * @returns {object} 传给 RendererHost 的 params。
+ */
+const buildNumMatrixParams = (matrixName, definition) => {
+  const fromManifest = definition?.source === 'manifest'
+  const base = matrixName === SMALL_BED_12B_MATRIX
+    ? NUM_MATRIX_PRESETS.smallBed12B
+    : NUM_MATRIX_PRESETS.fast1024
+  return {
+    ...base,
+    gridWidth: fromManifest ? definition.matrix?.width : undefined,
+    gridHeight: fromManifest ? definition.matrix?.height : undefined,
+    manageSidebar: !fromManifest && matrixName !== MINZHEN_MATRIX,
+  }
 }
 
 const getMappedPressurePayload = (jsonObject, matrixName) => {
@@ -4659,9 +4709,13 @@ class Home extends React.Component {
                   :
                   this.state.numMatrixFlag == "numoriginal" && this.state.matrixName == 'bed4096num' ?
                   <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
-                    <Fast256
-                      ref={this.com}
-                      size={1}
+                    <RendererHost
+                      rendererId="numMatrix"
+                      // 原来是 `<Fast256 size={1}>`：size 覆盖预设里的 4，
+                      // 网格由 `64 / size` 推出 64×64 = 4096 格。
+                      params={{ ...NUM_MATRIX_PRESETS.fast256, size: 1 }}
+                      label="数字矩阵"
+                      rendererRef={this.com}
                       data={this.data}
                       local={this.state.local}
                       {...this.sceneChartProps} />
@@ -4678,6 +4732,11 @@ class Home extends React.Component {
                       params={manifestRenderer.params}
                       label={runtimeDisplayDefinition?.label}
                       rendererRef={this.com}
+                      // 这条分支原先漏了这两项。pointGrid 不读它们所以没人踩到，
+                      // 但 numMatrix 两项都读 —— 一个声明 numMatrix 的 manifest
+                      // 会静默丢掉配色与坐标表。与下面那条分支保持一致。
+                      colormap={canvasColormap}
+                      coordinateMap={runtimeDisplayDefinition?.coordinateMap}
                       data={this.data}
                       local={this.state.local}
                       {...this.sceneChartProps} />
@@ -4693,14 +4752,16 @@ class Home extends React.Component {
                       local={this.state.local}
                       variantKey={canvasVariantKey}
                     >
-                      <Fast1024
-                        ref={this.com}
-                        matrixName={this.state.matrixName}
+                      <RendererHost
+                        rendererId="numMatrix"
+                        params={buildNumMatrixParams(this.state.matrixName, runtimeDisplayDefinition)}
+                        label={runtimeDisplayDefinition?.label || "数字矩阵"}
+                        rendererRef={this.com}
+                        // 这两项走 props 而不是 params：配色是用户在画布配置器里的
+                        // 实时选择，坐标表是数据。两者都在 contract.js 的
+                        // RENDERER_PROPS 里，由 RendererHost 原样透传。
                         colormap={canvasColormap}
-                        matrixWidth={runtimeDisplayDefinition?.source === 'manifest' ? runtimeDisplayDefinition.matrix?.width : undefined}
-                        matrixHeight={runtimeDisplayDefinition?.source === 'manifest' ? runtimeDisplayDefinition.matrix?.height : undefined}
                         coordinateMap={runtimeDisplayDefinition?.source === 'manifest' ? runtimeDisplayDefinition.coordinateMap : undefined}
-                        manageSidebar={runtimeDisplayDefinition?.source !== 'manifest'}
                         data={this.data}
                         local={this.state.local}
                         {...this.sceneChartProps} />
@@ -4823,42 +4884,17 @@ class Home extends React.Component {
                           local={this.state.local}
                           {...this.sceneChartProps} />
                       </CanvasCom>
-                    ) : this.state.matrixName == "fast256" ? (
+                    ) : NUM_MATRIX_SCENES[this.state.matrixName] ? (
+                      // 原来是 fast256 / normalFast / fast1024 / fast1024sit
+                      // 四条分支，指向三份 NumThreeColor。见 NUM_MATRIX_SCENES。
                       <CanvasCom matrixName={this.state.matrixName}
                         local={this.state.local}
                       >
-                        <Fast256
-                          ref={this.com}
-                          data={this.data}
-                          local={this.state.local}
-                          {...this.sceneChartProps} />
-                      </CanvasCom>
-                    ) : this.state.matrixName == "normalFast" ? (
-                      <CanvasCom matrixName={this.state.matrixName}
-                        local={this.state.local}
-                      >
-                        <Fast1024
-                          ref={this.com}
-                          data={this.data}
-                          local={this.state.local}
-                          {...this.sceneChartProps} />
-                      </CanvasCom>
-                    ) : this.state.matrixName == "fast1024" ? (
-                      <CanvasCom matrixName={this.state.matrixName}
-                        local={this.state.local}
-                      >
-                        <Fast1024
-                          ref={this.com}
-                          data={this.data}
-                          local={this.state.local}
-                          {...this.sceneChartProps} />
-                      </CanvasCom>
-                    ) : this.state.matrixName == "fast1024sit" ? (
-                      <CanvasCom matrixName={this.state.matrixName}
-                        local={this.state.local}
-                      >
-                        <Fast1024sit
-                          ref={this.com}
+                        <RendererHost
+                          rendererId="numMatrix"
+                          params={NUM_MATRIX_SCENES[this.state.matrixName]}
+                          label="数字矩阵"
+                          rendererRef={this.com}
                           data={this.data}
                           local={this.state.local}
                           {...this.sceneChartProps} />

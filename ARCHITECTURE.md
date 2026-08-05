@@ -1,5 +1,266 @@
 # 架构文档
 
+## 2026-08-04 渲染器层拆成可安装的前端 SDK 包（第一轮：core + numMatrix + 可跑 demo）
+
+目标消费者是**新项目的开发者**：`npm i` 之后能起一个小 demo、看到画面。做这件事之前做不到 ——
+渲染器层锁在 `client/src/` 里，没有包边界。
+
+### 先说一个必须知道的事实：这件事已经做过一次，而且分叉了
+
+`sdk/frontend/` 早就存在（8 文件 / 1091 行），但 `package.json` 只有
+`{ type: "module", private: true }` —— **没有 `name`，装不了**；`client/src` 里 grep
+`from '...sdk'` 为空，`vite.config.js` 也没有 sdk 别名，**主应用一行没接**；唯一消费者是
+`backend/tests/sdk/frontendDisplayRegistry.test.js`（后端测试在测一个前端不用的模块）。
+它立项时（2026-06-11）写的初衷是「为后续拆出 `Home.jsx` 的 `matrixName` 渲染分支提供注册表
+基础」，而**那件事后来是在 `client/src/renderers/` 做的，不在 SDK 里**。
+
+分叉的根因是**它是一份平行副本，没人 import**。所以本轮第一原则：**搬，不抄。** 每个搬走的
+模块在原路径留一行 re-export 壳，`client/src` 的 import 一行不改 —— 这是 `util.js` re-export
+`jetRgb` 已经验证过的做法。
+
+### 分层线：有没有 React / three / DOM
+
+这条线不是审美，它同时决定**谁能消费**和**能不能在裸 Node 里加载**。`pipeline.js` 能做 785 点
+逐点比对正因为它是纯的；同一个性质让它能进零依赖层。一个性质两个收益。
+
+| 入口 | 内容 | 依赖 |
+| :--- | :--- | :--- |
+| `@shroom/frontend` | 传输 / 帧存储 / 展示系统定义，**并全量转出 `core`** | 无 |
+| `@shroom/frontend/core` | 契约、注册表、帧管线、配色、阈值、坐标布局（14 文件） | 无 |
+| `@shroom/frontend/react` | `RendererHost`、`useSceneFrame`、`builtins`、`numMatrix` | peer: react ≥18 + three ≥0.127 |
+| `@shroom/frontend/styles/canvas.css` | 6 行 | 无 |
+
+**根出口刻意不含 `react/`** —— 一旦含了，`SensorClient` 的裸 Node 消费者（后端测试里就有一个）
+连 import 都做不到。**`builtins.js` 必须在 react 层而不是 core**：它的
+`load: () => import('...NumMatrixRenderer.jsx')` 会拉进 JSX，放 core 里就毁掉「裸 Node 可加载」。
+**`react/index.js` 刻意不静态导出 `NumMatrixRenderer`** —— 那会把懒加载 chunk 塌回主包，
+要取它走 `loadRenderer('numMatrix')`。**`three` 的 peer 范围必须宽到 `>=0.127`**，主应用 pin 的是
+`^0.127.0`（2021 年的版本），写 `^0.170` 会让主应用装不上。
+
+### 拆包新增的三件必做事，漏一件就崩
+
+| 事 | 漏了会怎样 |
+| :--- | :--- |
+| `client/vite.config.js` 加 `resolve.dedupe: ['react','react-dom','three']` | symlink 的真实路径向上找 node_modules 走到仓库根，**那里既没 react 也没 three** —— 包内裸 import 解析不到；就算解析到也是第二份，两份 React 让 hooks 直接崩、两份 three 让 `instanceof THREE.Xxx` 全部失效 |
+| 混淆器 `exclude` 补 `sdk/frontend` 整目录 | symlink 解析后的真实路径**匹配不上 `node_modules/**`**，`stringArray`/`splitStrings` 会改写 `import()` 的路径字面量，Rollup 无法静态分析，**懒加载 chunk 塌回主包** |
+| `core/` 里每条相对 import 都写 `.js` 扩展名、不在模块顶层读 `localStorage` | 打包器和 vitest 都会补扩展名、都有 localStorage 垫片，所以**单元测试证明不了这条**；表现是「在 client 里跑得好，装到新项目里就崩」 |
+
+第三条由新增的 `sdk/frontend/scripts/smoke-core.mjs` 守着 —— **裸 Node、无垫片、无打包器**
+import 整个 `core/` 并跑通 12 项主要通路。它是包边界的守卫，不是补充测试。
+
+### 搬了什么
+
+`core/` 14 个文件（`contract` / `registry` / `frameBus` / `sceneFrame` / `colormaps` /
+`jetLadder` / `displayThresholds` / `coordinatePointLayout` / `bed4096numParams` /
+`numMatrix/{params,pipeline}` + 两个 barrel），`react/` 5 个（`RendererHost.jsx` /
+`useSceneFrame.js` / `builtins.js` / `numMatrix/NumMatrixRenderer.jsx` /
+`numMatrix/backends/sprite3d.js`），`styles/canvas.css`（scss → 普通 css，SDK 不能假设消费者装了
+sass）。
+
+**新建 `core/frameMath.js`** 收三个纯函数：`util.js` 1440 行里的 `findMax`（7 行）与 `jet`（20 行）、
+`line.js` 的 `press`（51 行，自足，不用 `rotate`/`findMax`）。原位改成 re-export，**80 多个消费者的
+导入路径与对外接口不变**，并配一条身份断言 `expect(jet).toBe(jetFromSdk)` —— 没有它，将来有人
+图省事在 `util.js` 里再写一份函数体，不会有任何测试失败。唯一的行为变化：`press` 那句每帧
+`console.log(colArr)` 在搬过去的那份里去掉了，返回值逐字节相同。
+
+`client/src` 留了 **13 个 re-export 壳**，按引用方数量排：`runtime/displayThresholds.js`（52）、
+`displaySystem/colormaps.js`（8）、`assets/util/bed4096numParams.js`（5）、
+`coordinatePointLayout.js` / `jetLadder.js` / `frameBus.js` / `sceneFrame.js`（各 3）等。
+
+**`RendererHost.jsx` 是唯一不能做纯壳的一个。** `Home.jsx` 直接 import `RendererHost` 与
+`registry`，从不经过 `renderers/index.js`，所以纯转发会让只有 SDK 那份 `builtins` 跑过、
+`pointGrid` 没人注册 —— `matCol` / `carCol` 静默失效。它改成薄包装：转发组件与两个审计函数，
+并在模块加载时调一次本地 `registerBuiltinRenderers()`（现在只剩 `pointGrid`）。
+
+### 从零装 tarball 查出一处越界（记进积压，本轮不修）
+
+`src/client/commands.js` 第一行是 `import schema from '../../../../shared/commandSchema.json'` ——
+四级向上，**跑出了包的根目录**。仓库里（`file:` / `npm link`）它解析到 `<repo>/shared/`，所以主应用
+和 demo 都正常；tarball 装出来之后四级向上是 `node_modules/`，**整个根 barrel 在 import 时就抛**。
+
+| 入口 | `file:` / monorepo | tarball |
+| :--- | :---: | :---: |
+| `/core`（含全部子路径）、`/styles` | ✓ | ✓ |
+| `/react` | ✓ | ✓（需打包器，裸 Node 认不了 `.jsx`） |
+| 根出口（含 `SensorClient`） | ✓ | ✗ |
+
+这是拆包**之前**就存在的问题（`src/client/` 本轮按计划没动），暴露出来是因为加了「从零装 tarball」
+这一步验证 —— 这也说明为什么这一步值得加。真正的修法是一个**归属决定不是一行补丁**：
+`shared/commandSchema.json` 有 5 个消费者（两个 backend contracts、两个 client services、这里），
+得先定「这份契约归后端还是归 SDK」。渲染器那条路（`/core` + `/react`）不受影响。
+
+### 验证
+
+| 项 | 结果 |
+| :--- | :--- |
+| `cd sdk/frontend/example && npm i && npm run dev` | **画面出来** —— 32×32 数字矩阵 + 游动高斯斑，控制台零 error / 零 warning / 零失败请求 |
+| 三个控件（7 条配色下拉 / `size` / `decimalScale`） | 逐个切过都生效；**连切 5 次 canvas 数始终 1**，WebGL 上下文不累积 |
+| 「连真后端」开关（后端没起） | 状态栏「已断开（退回合成帧）」，画面继续跑合成帧 |
+| 用例对账 | client 221 passed / 11 套件（`App.test.jsx` 是既有失败）+ SDK 121 passed / 5 文件 = **342 = 341 基线 + 1 条新增身份断言** |
+| `node sdk/frontend/scripts/smoke-core.mjs` | 12 / 12 |
+| `cd backend && node tests/run-tests.js` | 38 / 38，含 `frontendDisplayRegistry` 与 `displayProfileRuntime`（后者经新壳做裸 Node ESM 加载） |
+| `npm pack` | 32 文件 / 66.5 kB，含 `core/ react/ styles/ src/ scripts/`，**无 `example/`、无 `*.test.js`** |
+| `npx eslint src --max-warnings=0` | 0 error，65 条既有 warning，改动过的文件里 0 条 |
+| `npx vite build --outDir ../tmp/build-check` | 通过；`build/model` 仍 20 个 / 137M，`git status build/` 0 行；`NumMatrixRenderer` 与 `PointGridRenderer` 都仍是独立懒加载 chunk（混淆器 exclude 生效的证据） |
+
+### 边界
+
+- **界面零变化。** 本轮是搬家 + 加包装。真机手测清单（9 项，含 `matCol`/`carCol` 与 52 个
+  `displayThresholds` 引用方）见 `plans/` 里的本轮计划，**尚未在设备上跑过**。
+- **不搬 pointGrid**（`PointGridRenderer` 633 + `params` 186 + `pipeline` 74）、`SelectionHelper`、
+  `threeUtil1` —— 它们额外拖进框选 / 点位拾取 / 视角旋转的手测项，第二轮。
+- **不动 `sdk/frontend/src/{client,store,display}/`。** `DisplayRegistry` 管「展示系统」（设备定义），
+  渲染器注册表管「把一帧画出来的实现」，两者合法共存。它的 `VIEW_RENDERERS` 里 `'Num2D'` /
+  `'Num2DOriginal'` 是失效的组件名字符串（那两个组件已参数化进 `numMatrix`），只在 manifest 没写
+  `view.renderer` 时兜底，不影响在跑的通路 —— 记进积压，README 已写明。
+- **不删任何文件**，搬走的原路径全留壳。**不 `npm publish`**，`private: true` 保留。
+- **`sideEffects` 刻意不写进 package.json** —— 一份写错的安全名单会让打包器丢掉模块加载时的注册
+  副作用，收益（边际的 tree-shaking）远小于风险。
+- **前端契约仍然没有版本号。** 这是拆 SDK 比内部收敛多出来的真实成本：后端有
+  `SDK_CONTRACT_VERSION = '2026-07-14'` 与「纯追加不升版本」的规矩，前端 `RENDERER_PROPS` /
+  `RENDERER_METHODS` 一个都没有。本轮不定版本策略，但 README 已写明「这两个对象是公开面，
+  改它是 breaking change」—— 否则下次往里补一个 prop（像上轮补 `colormap` / `coordinateMap`）
+  就会静默破坏下游。
+- **渲染器是构建期解析的**（`load: () => import()` 由打包器静态分析），所以**装机之后加不了新渲染器**。
+  二开的两条路里本包解决的是「新项目消费」，不是「装机后插件化」—— 后者仍在积压。
+
+## 2026-08-04 合并数字矩阵渲染器（二）：接线、六个渲染点收成三处、−7 文件 / −8685 行
+
+上一节把三份 `NumThreeColor` 证明成同一个渲染器并搬进了 `renderers/numMatrix/`，但**没有接线** ——
+`Home.jsx` 仍静态 import 那三份原文件，新渲染器只有注册表和测试在用它。所以那一轮的成果用户
+看不到，二开的人打开 `components/three/` 看到的还是三份拷贝。这一节把线接上并删掉旧文件。
+
+### 接线前先修掉一处自己引入的发散
+
+`params.js` 的 `smallBed12B` 预设写了 `textureValueMax: 2550`，**与原实现不符**。原式子是
+`props.textureValueMax || (decimalScale > 1 ? valuej1 * decimalScale : 255)`，而 grep 全仓确认
+**没有任何调用方传过 `textureValueMax` 这个 prop** —— 所以它走的一直是右边那支（默认 200×10 = 2000）
+并且 `valuej` 变化时跟着重烘纹理。写死 2550 会改掉 `classicTint` 的分母：数值 1000 原本映射到
+r = 0.5，写死后成 0.39，是 smallBed12B 上**看得出来的配色变化**。
+
+这一处是在动手接线前核对预设出处时查出来的，不是测试报出来的 —— `pipeline.test.js:339` 当时
+断言的正是 `toBe(2550)`，等于把发散钉住了。等价性测试只能证「实现符合基准」，基准本身抄错
+它看不出来，所以搬运常量时逐个回查出处这一步省不掉。现在预设不设该项（0 = 自动），
+参数仍保留给 manifest 显式锁量程用，测试改断言 0 并写明原因。
+
+### 六个渲染点收成三处
+
+| 位置 | 原来 | 现在 |
+| :--- | :--- | :--- |
+| `numoriginal` + `bed4096num` | `<Fast256 size={1}>` | `params={{ ...fast256, size: 1 }}`，`64/size` 推出 64×64 |
+| manifest / hand / minzhen / smallBed | `<Fast1024 matrixName matrixWidth matrixHeight manageSidebar>` | `buildNumMatrixParams(matrixName, definition)` |
+| `fast256` / `normalFast` / `fast1024` / `fast1024sit` **四条分支** | 四个 `matrixName == 'xxx' ?` 三元 | 一张 `NUM_MATRIX_SCENES` 表 + 一条分支 |
+
+第三行那四条里，`normalFast` 与 `fast1024` **原本是两个完全相同的分支**指向同一份文件。收成表之后
+加一种数字矩阵只需在表里加一行，这也是后面懒加载 54 个场景组件的前置条件 —— 三元链没法按需 import。
+
+**`manageSidebar` 是这一步唯一容易错的地方。** 原守卫是
+`props.manageSidebar !== false && props.matrixName !== 'minzhen'`（`NumThreeColor1024.jsx:167`），
+**两个条件的 AND**，而 `Home.jsx` 只传了前者、后者藏在组件内部。渲染器参数化后不再认识
+`matrixName`，所以 minzhen 那一项必须在调用点折进 `manageSidebar`：漏掉的话 minzhen 的侧栏会被
+渲染器和外层同时回写。同理 `smallBed12B` 的三处 `matrixName` 分支（`getDecimalScale` /
+`getPressureChartPadding` / 合力取 max）折成「基础预设取 `smallBed12B`」一件事。
+
+`gridWidth` / `gridHeight` 只在 manifest 那一路有值，缺省 0 让渲染器退回 `64 / size`，与原实现的
+`matrixWidth > 0 ? matrixWidth : 64 / size` 一致。`colormap` 与 `coordinateMap` 仍走 props 而不是
+params（前者是用户在画布配置器里的实时选择，后者是数据），由 `RendererHost` 的 `...contractProps`
+原样透传；配色变化由渲染器自己的 `colormapKey` 进 `useEffect` 依赖重建场景，**不需要外层再给 key**。
+
+### 顺带补上已有 manifest 分支漏掉的两个 prop
+
+`Home.jsx` 那条已经跑在生产上的 manifest `RendererHost` 分支**没有传 `colormap` 与 `coordinateMap`**。
+今天没人踩到是因为它只服务 `pointGrid`，而 `pointGrid` 两项都不读；接线后一个声明 `numMatrix` 的
+manifest 会静默丢掉配色与坐标表。补齐后两条分支一致。
+
+### 删除
+
+| 删除 | 行数 | 理由 |
+| :--- | ---: | :--- |
+| `three/NumThreeColor copy.jsx` | 515 | 被 `numMatrix` 的 `fast256` 预设替代 |
+| `three/NumThreeColor1024.jsx` | 611 | 被 `fast1024` / `smallBed12B` 预设替代 |
+| `three/NumThreeColor1024sit.jsx` | 442 | 被 `fast1024sit` 预设替代 |
+| `page/home/Home.jsx.bak` | 3870 | 死文件，最后改动 `bbabe07`（2026-03-25） |
+| `components/title/Title.jsx.bak` | 1690 | 同上 |
+| `components/num/Num2Doriginal.jsx.bak2` | 1089 | 同上 |
+| `components/num/NumWs.jsx.bak` | 468 | 同上 |
+| **合计** | **8685** | **−7 文件** |
+
+4 个 `.bak` 全部已入库，删掉可从 git 恢复；它们对二开的人是纯噪音（`Home.jsx.bak` 里还留着
+三份 `NumThreeColor` 的 import 和五个 `<FastNNN>` 渲染点，全文搜索会把人引到死代码上）。
+另外 7 个文件名带 " copy" 的**都是活文件**（生产代码起了误导性的名字），一个都没动。
+
+### 边界
+
+- **界面零变化**，第 0 步那次修正正是为了保住这一点。手测清单见 `plans/` 里的本轮计划。
+- **不搬 canvas2d / webgl 两个后端**（`num/NumWs.jsx` 517 行、`num/Num2D.jsx` 860 行、
+  `num/Num2Doriginal.jsx` 1203 行）。它们没有基准测试，且后两份已漂移 935 行近乎全文，
+  必须先逐行 diff 判断哪些差异是有意的。`BACKENDS = ['sprite3d']` 与那条「待接 canvas2d」的注释原样保留。
+- **只收 numMatrix 那 4 个分支**，三元链其余部分与 `components/three/4096`（`Bed4096`）没动。
+- Home chunk 943 kB → 925.61 kB，`NumMatrixRenderer` 成为 10.03 kB 的独立懒加载块。
+  减得少是因为三份原文件的体量主要在 three.js 共享依赖里，真正的收益是懒加载入口从此存在。
+
+## 2026-08-04 合并数字矩阵渲染器（一）：三份 NumThreeColor 是同一个渲染器，证明它
+
+### 结论先写：它们的布局公式代数等价
+
+`components/three/` 下三份 NumThreeColor（Fast256 / Fast1024 / Fast1024sit，共 1568 行（抽掉 jet 与阈值块前是 1701 行））逐行比对后的结论比预想的乐观：**不是三套算法，是同一套算法的三种写法**。
+
+| 文件 | 位置公式（原文逐字） | 化简 | 格子尺寸 |
+| :--- | :--- | :--- | :--- |
+| `NumThreeColor copy`（size=4） | `(x - (32/size - 0.5)) / 32 * size` | `(x - 7.5) × 0.125` | `0.032*size` = 0.128 |
+| `NumThreeColor1024`（通用） | `(x - (gw-1)/2) * worldCellSize`，`worldCellSize = 2/max(gw,gh)` | 同上 | `worldCellSize * 1.024` |
+| `NumThreeColor1024sit`（grid 23） | `(x - (23/2 - 0.5)) / (23/2)` | `(x - 11) × 2/23` | `2.048/23` |
+
+通用式 `(x - (gw-1)/2) * 2/max(gw,gh)` 三份都满足；格子尺寸三个写法逐位相同。**这个「代数等价」不是断言，是算出来的**：`numMatrix/pipeline.test.js` 把三份的位置公式**逐字抄成参照实现**（带行号引用），在 16×16 的 256 点与 23×23 的 529 点上**逐点比对，共 785 次**。容差取 `toBeCloseTo(..., 12)` —— 三个写法只差乘除顺序，可能差 1 ulp，而 1e-12 在 `[-1,1]` 的世界坐标里远低于一个像素。
+
+参照实现刻意写成「抄」的样子而不是复用 `pipeline.js` —— 这条是 `pointGrid/pipeline.test.js` 立下的规矩：两边共享同一份代码，测试就退化成自我验证。
+
+### 真实差异只有五个开关
+
+| 差异 | 只有谁不一样 | 收成什么参数 |
+| :--- | :--- | :--- |
+| 画布边长占视口高度 | 1024sit 是 0.5 / 0.65，另两份 0.6 / 0.8 | `canvasHeightRatio` |
+| 分压重分配 `press(...)` | **只有** 1024sit 启用，另两份注释掉了 | `pressureRedistribution` |
+| 阈值变化重烘精灵图 | 1024sit 的纹理写死 `jet(0, 30)`，**拖颜色滑块画面不动** | `retintOnThresholdChange: false` |
+| 滚轮缩放 / 拖拽平移 | 1024sit 没装 | `cameraControls` |
+| 阈值对象是否共享 | `copy` 用 `bed4096numParams` 那个模块级单例 | `sharedTuningKey: 'bed4096'` |
+
+第三条是**照抄的 quirk 不是修好的 bug**：1024sit 上颜色滑块无效，参数化后仍然无效，要不要修单独决定。第五条是 Fast256 与 Bed4096「切换展示形式时调参不重置」的来源，写成声明式的键而不是让外层传对象进来 —— 后者没法在 manifest 里表达。
+
+另有四个按 `matrixName` 字符串写死的分支一并改成声明式，二开的人加一个矩阵名不必再回来改渲染器：`getDecimalScale('smallBed12B') → 10` ⇒ `decimalScale`、`getPressureChartPadding('smallBed12B') → 5` ⇒ `chartPadding`、`matrixName === 'smallBed12B' ? max : press` ⇒ `totalMetric`、`matrixName !== 'minzhen'` 才回写侧栏 ⇒ `manageSidebar`。这四个值就是第四条预设 `smallBed12B`。
+
+### 三层切分，为的是另两个后端不用重写这一层
+
+```
+NumMatrixRenderer.jsx   阈值来源、侧栏统计、命令式接口   ← 与画法无关
+backends/sprite3d.js    three.js 精灵图 InstancedMesh    ← 只管画
+pipeline.js             纯帧运算                          ← 可测
+```
+
+`BACKEND_FACTORIES` 现在只有一个条目，标的是扩展点：`canvas2d`（`num/NumWs.jsx`）与 `webgl`（`num/Num2D.jsx` + `Num2Doriginal.jsx`）搬过来时只加一行。`params.js` 的 `backend` 填了未知值**退回 `sprite3d` 而不报错** —— 手写 manifest 拼错后端名时，看到画面出来比看到白屏更容易发现自己写错了。
+
+### 搬运时修掉的五处结构问题（都不是顺手优化，都是多实例/卸载的硬伤）
+
+1. **模块级状态收进实例。** 原文件的 `ndata1` / `animationRequestId` / `materialRef` 是模块级，两个实例互相踩。
+2. **顶点属性建一次、每帧只置 `needsUpdate`。** 原实现在**逐实例循环体内**调 `geometry.setAttribute(..., new THREE.InstancedBufferAttribute(...))`，1024 点 × 60fps ≈ 每秒 12 万个临时对象。
+3. **实例矩阵只算一次。** 原实现每帧重跑 `setMatrixAt` 却从不置 `instanceMatrix.needsUpdate`，那批计算根本没到 GPU —— 每帧白算。
+4. **卸载真的释放**（geometry / material / texture / renderer / 监听器）。浏览器活跃 WebGL 上下文上限约 16 个，反复切换展示形式会撞上。
+5. **容器由 props 注入**，不再 `document.querySelector('.canvasNum')`；峰值读数走 `peakRef` 而不是 `.maxNum` 全局选择器（两个实例才不会写到同一个 div）。仍然直接改 DOM 不进 state —— 那是 60Hz 的读数。
+
+另有三处小订正：`clampTextureValue` 现在总是生效（1024sit 用的是裸 `data[i]`，越界即取到错格）；`Math.max(...res)` 换成单趟 `findPeak` 循环（65536 点时展开参数会爆栈）；删掉每帧的 `console.log('分压')` 与一个建了却从未 append 的 `Stats` 面板。
+
+**片元着色器里的 `pow(color * 1.5, 1/2.2)` 原样保留** —— 它不是标准 sRGB（多乘了 1.5），但它就是用户现在看到的亮度。
+
+### 契约补了两项，都是既有事实不是新口子
+
+`RENDERER_METHODS` 加 `changeWsDataRaw: 11`。它一度被 `validateRendererDescriptor` 判成「契约外方法」，根因是**那张计数表只统计了 `Home.jsx`，漏掉了 `page/home/util.js`** —— 后者那 5,564 行里的 `that.com.current?.changeWsDataRaw(...)` 用的是同一个 ref（`that` 就是 Home 实例），只是调用点写在 util.js 侧，共 11 处，而 Home.jsx 侧 0 处。按契约自己写明的规则（「取的是暴露面的并集而非当前调用点的集合」）它本就该在表里。补这一项时没有回头重算其余各项，所以那些数字现在应当读作「至少这么多次」，文件头已注明。
+
+`RENDERER_PROPS` 加 `colormap` 与 `coordinateMap`。契约写着「不得引入契约之外的 prop」，而这两个是既有的事实约定：`ManifestDisplayRenderer.jsx` 早就在透传，`hand.jsx` / `NumThreeColor1024.jsx` 早就在读，`RendererHost` 通过 `...contractProps` 原样转发。与其留一处静默偏离，不如把约定写进契约。
+
+### 边界
+
+**这一节写完时还没有接线**，`Home.jsx:21-23` 仍静态 import 三份 `NumThreeColor` —— 等价性证完与换 `RendererHost` 分成两件事走。接线在同一天完成，见下一节「合并数字矩阵渲染器（二）」。
+
 ## 2026-08-03 串口协议预设库：10 份协议文档 + 6 份可加载预设 + 用户可扩展目录
 
 ### 为什么不是新发明一套格式
@@ -975,6 +1236,9 @@ flowchart LR
 
 | 日期 | 类型 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-04 | 优化重构 | **渲染器层拆成可安装的前端 SDK 包 `@shroom/frontend`（第一轮：core + numMatrix + 可跑 demo）。** 目标消费者是新项目的开发者：`npm i` 之后能起一个小 demo 看到画面。`sdk/frontend/` 其实 2026-06-11 就建过一次并且分叉了 —— `package.json` 没有 `name` 装不了、`client/src` 一行没 import、唯一消费者是一个后端测试，根因是**它是一份平行副本**。所以本轮第一原则是**搬，不抄**：19 个模块搬进包里，原路径留 13 个 re-export 壳，`client/src` 的 import 一行没改。分层线画在**「有没有 React / three / DOM」**，这条线同时决定谁能消费和能不能在裸 Node 里加载 —— `/core` 14 文件零依赖、`/react` peer react ≥18 + three ≥0.127、`/styles/canvas.css` 6 行、根出口刻意不含 `react/`（否则 `SensorClient` 的裸 Node 消费者连 import 都做不到）。新建 `core/frameMath.js` 收 `findMax`/`jet`/`press` 三个纯函数并配身份断言 `expect(jet).toBe(jetFromSdk)`（没有它，将来有人在 `util.js` 里再写一份函数体不会有任何测试失败）。**拆包多出三件必做事，漏一件就崩**：`resolve.dedupe: ['react','react-dom','three']`（symlink 真实路径向上找不到你那份，且两份 React 崩 hooks、两份 three 让 `instanceof` 全失效）、混淆器 `exclude` 补包目录（否则改写 `import()` 字面量，懒加载 chunk 塌回主包）、`core/` 不许省扩展名或在模块顶层读 `localStorage`（打包器和 vitest 都会兜住，所以单元测试证明不了 —— 由新增的 `scripts/smoke-core.mjs` 裸 Node 无垫片守着，12/12）。`RendererHost.jsx` 是唯一不能做纯壳的：`Home.jsx` 直接 import 它而从不经过 `index.js`，纯转发会让 `pointGrid` 没人注册、`matCol`/`carCol` 静默失效，改成薄包装 + 本地注册。**从零装 tarball 查出一处越界**：`src/client/commands.js` 的 `'../../../../shared/commandSchema.json'` 跑出了包根，`file:` 下正常、tarball 下整个根出口 import 就抛（`/core` + `/react` 不受影响）—— 本轮不修，因为真正的修法是「`shared/commandSchema.json` 归后端还是归 SDK」这个归属决定，它有 5 个消费者。验收：`cd sdk/frontend/example && npm i && npm run dev` **画面出来**（32×32 数字矩阵 + 游动高斯斑，控制台零 error / 零 warning，连切 5 次 canvas 数始终 1）；用例对账 client 221 + SDK 121 = 342 = 341 基线 + 1 条新增身份断言；backend 38/38；`npm pack` 32 文件 66.5 kB 无 `example/` 无测试；带护栏的 client 构建通过且 `build/model` 20 个 / 137M 完好、懒加载 chunk 仍拆得出来。界面零变化，未删任何文件，`private: true` 保留 |
+| 2026-08-04 | 优化重构 | **`numMatrix` 接进主界面，六个渲染点收成三处，删 7 个文件 / 8685 行。** 上一轮证完等价性但没接线，成果只有测试在用。接线前先修掉一处**自己搬运时引入的发散**：`params.js` 的 `smallBed12B` 预设写死了 `textureValueMax: 2550`，而原式子是 `props.textureValueMax || (decimalScale > 1 ? valuej1 * decimalScale : 255)` 且**全仓无人传过这个 prop**，所以原实现一直走右边那支（默认 200×10 = 2000）并随 `valuej` 重烘 —— 写死会改掉 `classicTint` 的分母（值 1000 从 r=0.5 变 0.39），是看得出来的配色变化。这一处是核对预设出处时查出来的**不是测试报出来的**：`pipeline.test.js:339` 当时断言的正是 `toBe(2550)`，等于把发散钉住了 —— 等价性测试只能证「实现符合基准」，基准抄错它看不出来，所以搬常量时逐个回查出处这一步省不掉。接线三处：`bed4096num` 那路 `<Fast256 size={1}>` → `params={{ ...fast256, size: 1 }}`（`64/size` 推 64×64）；manifest / hand / minzhen / smallBed 那路收进 `buildNumMatrixParams()`；`fast256`/`normalFast`/`fast1024`/`fast1024sit` **四条三元分支**（其中 `normalFast` 与 `fast1024` 原本完全相同、指向同一份文件）收成一张 `NUM_MATRIX_SCENES` 表 + 一条分支 —— 这也是后面懒加载 54 个场景组件的前置条件，三元链没法按需 import。**唯一容易错的是 `manageSidebar`**：原守卫是 `props.manageSidebar !== false && props.matrixName !== 'minzhen'`（`NumThreeColor1024.jsx:167`）**两个条件的 AND**，后者藏在组件内部，参数化后渲染器不再认识 `matrixName`，minzhen 那一项必须在调用点折进来，否则侧栏会被渲染器与外层同时回写；同理 `smallBed12B` 的三处字符串分支折成「基础预设取 smallBed12B」。`gridWidth`/`gridHeight` 只在 manifest 那路有值，缺省 0 退回 `64/size`，与原 `matrixWidth > 0 ? matrixWidth : 64/size` 一致；`colormap`/`coordinateMap` 仍走 props 由 `...contractProps` 透传，配色变化靠渲染器自己的 `colormapKey` 重建场景、**不需要外层给 key**。顺带补上已跑在生产上的 manifest 分支**漏掉的 `colormap` 与 `coordinateMap`** —— 它只服务 `pointGrid`（两项都不读）所以没人踩到，接线后一个声明 `numMatrix` 的 manifest 会静默丢掉配色与坐标表。删除：三份 `NumThreeColor`（515+611+442）+ 4 个已入库的死 `.bak`（`Home.jsx.bak` 3870 / `Title.jsx.bak` 1690 / `Num2Doriginal.jsx.bak2` 1089 / `NumWs.jsx.bak` 468），后者对二开是纯噪音 —— `Home.jsx.bak` 里还留着三份 import 与五个 `<FastNNN>` 渲染点，全文搜索会把人引到死代码上；另外 7 个名字带 " copy" 的**都是活文件**，一个没动。**不搬 canvas2d / webgl 两个后端**（`NumWs.jsx` 517 / `Num2D.jsx` 860 / `Num2Doriginal.jsx` 1203），无基准测试且后两份漂移 935 行近乎全文，须先逐行 diff。Home chunk 943 → 925.61 kB，`NumMatrixRenderer` 成 10.03 kB 独立懒加载块（减得少是因为三份原文件体量主要在 three.js 共享依赖里，真收益是懒加载入口从此存在）。前端 341 通过 / 17 套件、eslint 干净、后端 38 个测试文件全通过、`build/model` 137MB 未被触碰。 |
+| 2026-08-04 | 优化重构 | **三份 NumThreeColor（1568 行）证明是同一个渲染器，收成 `renderers/numMatrix/`。** 位置公式与格子尺寸代数等价，不是断言而是算出来的：`pipeline.test.js` 把三份的公式逐字抄成参照实现（带行号），在 256 与 529 点上**逐点比对共 785 次**，容差 1e-12（三个写法只差乘除顺序，可能差 1 ulp）。真实差异只有五个开关（画布高度比例、分压重分配、纹理是否跟随阈值、有无缩放拖拽、阈值对象是否共享），另四个按 `matrixName` 写死的分支（`decimalScale` / `chartPadding` / `totalMetric` / `manageSidebar`）也改成声明式参数，四者取值即第四条预设 `smallBed12B`。1024sit「拖颜色滑块画面不动」是照抄的 quirk（`retintOnThresholdChange: false`），不是修好的 bug。分三层：壳（阈值 / 侧栏 / 命令式接口）+ `backends/sprite3d.js`（只管画）+ `pipeline.js`（纯帧运算），另两个后端搬过来时壳不重写。搬运时修掉五处多实例/卸载硬伤：模块级 `ndata1`/`animationRequestId`/`materialRef` 收进实例、顶点属性从**逐实例循环体内 new**（每秒约 12 万临时对象）改为建一次置 `needsUpdate`、实例矩阵每帧白算（从不置 `instanceMatrix.needsUpdate`）改为只算一次、补全 dispose（WebGL 上下文上限约 16）、容器与峰值读数改走 ref 不用全局选择器。契约补两项：`changeWsDataRaw`（计数表原来只统计 `Home.jsx`，漏了 `page/home/util.js` 的 11 处，被误判成契约外方法）与 `colormap` / `coordinateMap`（既有事实约定，`ManifestDisplayRenderer` 早在透传）。**本轮不接线** —— `Home.jsx` 仍静态 import 三份原文件，等价性证完但真机手测未做，换 `RendererHost` 与删旧文件分开走。前端 341 通过 / 17 套件。 |
 | 2026-08-03 | 新增功能 | **串口协议预设库 + Builder 模板改由它喂。** 新建 `backend/serial/protocols/`：6 份 JSON 预设、11 份 md（10 种协议各一份 + 目录 README）、一个 loader。**不新发明格式** —— 预设存的就是 manifest 的 `protocol` 四段原文，`validateProtocolConfig()` 直接当校验器，预设块可整段粘进 `display-system.json`。协议实测是 **10 种不是 9 种**（第 10 种是 bigBed 的 1025 字节分片帧），其中 6 种当前 schema 能完整声明并发了预设，另 4 种只发文档并在各自 md 的 `## schema 缺口` 段写明缺什么：`decoding` 只能声明一种 valueType（挡住手套的「压力区 + IMU 区」混合帧）、没有跨帧拼装（挡住 bigBed 分片与手套双包）、没有文本协议入口（挡住 minzhen）。bigBed 单片技术上声明得出来但会静默给出半张矩阵，**刻意不发预设**。`low-density-72-144` 因一份 JSON 只能有一个 `valueCount` 拆成两份预设共用一份 md。用户预设目录 `<runtimeWritableRoot>/serial-protocols/`，同 id 覆盖内置 —— 打包之后加协议只需丢一份 JSON。出口两条：`GET /api/serial/protocols`（连 `directories` 一起返回，排错时要知道系统在哪找）+ `serial.protocolPresets` 进 SDK contract（只给摘要不给 `protocol` 段）；以及 `buildDisplaySystemBuilderCatalog()` 由硬编码 3 份模板改为接收预设数组，「新建传感器」的模板卡片 3 张变 9 张，**前端一行未改**（`applySerialTemplate` 早就在）。为此从 `displaySystemProtocol.js` 导出 `PROTOCOL_VALUE_TYPE_WIDTHS`：`bytesPerValue` 必须查表，靠 `valueType.includes('16')` 猜会把 uint32/float32 的定长帧长算成一半。依赖方向保持单向（`displaySystems` 不反向依赖 `serial`，读文件在 `appRuntimeFactory`，`getCatalog()` 每次现读所以刷新即生效）。后端 36 → 38 个测试文件全通过。 |
 | 2026-08-03 | 行为修正 | **采集计时改成真正的秒表，不再用帧数推算。** 原来显示 `num / 12 * hz`：`num` 是收到的实时帧数，`hz` 是后端下发的采集频率 `colHZ`（默认 12），`12` 是写死的「传感器每秒 12 帧」假设，合起来意思是「按采集频率算这几秒该入库多少行」。站不住的是那个 12 —— 实时下发不限频（`frameOutputPipelineService.publishSit` 每帧都发），`num` 的增长速率就是真实帧率，而真实帧率同一份代码里的 `realHz` 正在现量。帧率不是 12 时该数既非秒也非行数，偏差 `realHz / 12` 倍。改法：`Home.jsx` 新增 `startCollectionTimer()` / `stopCollectionTimer()`，挂在采集开关的唯一入口 `setColValueFlag` 上，记 `colStartAt = Date.now()` 后用 1 秒 interval 写 `Math.floor((Date.now() - colStartAt) / 1000)`；必须定时器驱动而非蹭帧（无帧时秒表也要走），传整数秒是因为 `Title.jsx` 会套 `Math.ceil`、传 `1.003` 会跳成 2。停止时只停表不清零（与旧行为一致）。顺带删掉 `ws1Data` 里的第二个计数器 —— 它与坐垫那个写同一个 `changeNum` 槽位，秒表接管后会互相盖写。语义变化已明说，非等价改造。 |
 | 2026-08-03 | 缺陷修复 | **显示系统传感器的采集计时数字不动（本次重构引入的回归）。** 新建显示系统传感器点开始采集后，Title 上「停止」后面那个数字一直是 0。`Home.jsx` 的 `wsData` 里 manifest 类型走 `handleManifestSceneFrame` 后有个**提前 return**（旧场景不能消费带 `displaySystemId` 的帧，这个 return 本身是对的），而采集计数那段原来在 `realHz` 统计旁边、**在 return 之后**，manifest 帧永远走不到。逐提交比对确认是**本次重构谱系引入的回归**：`6710e5e`（2026-07-21）还没有这个提前 return，`42773c4`（渲染器插件化那次提交）起才有。修法：把计数提到 return 之前、两条路径共用，旧位置删掉避免重复计数 —— 计时是全局采集状态，跟画谁怎么画无关，本不该待在旧场景处理链里。**没有把 `if (jsonObject.hz != null)` 一起提上来**（带 `hz` 的是纯配置消息、不含压力数据，`hasPressureFrame` 为假走不到 return，`hz` 照样更新）；`num`/`colValueFlag`/`hz` 都是模块级变量（`Home.jsx:392`/`:400`/`:838`），提前引用无作用域问题；`matrixName != 'car10'` 守卫原样保留。顺手查明但**没修**两处：①`page/home/util.js:116` 有**第三份 `colValueFlag`**，全文件无一处赋 true，该文件 8 个 `changeNum` 调用点全是死代码 —— `git log -S` 显示自 `e0c637a`（2026-03-23）起就没被赋过值，**历史遗留非本次引入**，要修得先弄清那 8 个点各服务哪个 matrixName，挂账；②`ws1Data` 里第二个计数器（`Home.jsx:2619`，`isCar && !sitFlag` 时 `changeNum(num)`，**没有** `/12*hz`）走靠背通道、与显示系统无关，原样不动。边界：没改 `num / 12 * hz` 公式（它是否真等于秒数是另一个问题，`hz` 默认 12 时就等于帧数），没动提前 return 本身和 `handleManifestSceneFrame`。客户端 303 passed / 15 suites（`App.test.jsx` 仍是既有失败套件，缺 `@testing-library/react`），`Home.jsx` eslint 干净，构建通过且 `build/model` 137MB 未被触碰。 |
@@ -1128,6 +1392,9 @@ flowchart LR
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-04 | 渲染画面那套代码打包成了一个能装的「零件包」，新项目装上就能起 demo 看到画面 | 以前想拿这套渲染能力去做新项目，只能整份代码复制走 —— 复制出去的那份从此和主项目分家，谁也不会再同步。现在它是一个正式的包（`@shroom/frontend`），新项目一条 `npm i` 装上、喂一个数组进去，画面就出来了。包里自带一个能直接跑的示例，`npm run dev` 一条命令就有画面，不需要接硬件也不需要开后端。**主项目的界面一点没变**，因为不是抄了一份，是把原来的代码搬过去、在老位置留了个转发的指路牌，主项目每一处引用都照旧。顺带发现一处只在「装成压缩包」时才会暴露的路径越界（在项目里跑一直是好的），画面那条路不受影响，修它涉及一份配置文件归谁管的决定，先记下来 |
+| 2026-08-04 | 主界面正式换上新的数字矩阵代码，删掉 7 个旧文件（8685 行），界面没有任何变化 | 上一步只是把三份重复代码合成了一份，主界面还在用旧的；这一步真的换过去了，并把被替代的三个旧文件、以及四个早就没人用的备份文件（`.bak`，最后一次改动在 3 月）一起删掉，一共少 8685 行。备份文件都在版本库里，需要时能找回来。换过去的同时还做了两件事：一是**换之前先查出并修掉一处自己搬错的数字** —— 小床垫 12 位那种传感器的颜色上限被写成了固定值，而原来是跟着「颜色」滑块动态算的，不修的话换过去当天颜色就会变（这处是靠回查原始代码发现的，测试查不出来，因为测试当时正是照着这个错值写的断言）；二是原本在这块区域的四个几乎一样的分支合成了一张表，以后想加一种数字矩阵的尺寸，在表里加一行就行。**还没搬**的是另外两种画数字的方式（下拉里的「3D数据」，以及两个 WebGL 版本），它们目前没有比对基准，其中两份文件已经互相差了 935 行，得先逐行核对清楚哪些差异是故意的，所以这一轮先不动。 |
+| 2026-08-04 | 「格子里显示数字」那种画法从三份代码收成一份，界面没有任何变化 | 显示数字矩阵的展示形式原来有三份各自独立的代码（256 点、1024 点、坐垫 23×23），一共 1568 行。这一轮把它们逐行核对完，**发现三份算的是同一件事** —— 每个格子摆在哪、格子多大，三份写法不同但算出来的数字完全一样（这次是真的一个格子一个格子算过去比的，共比了 785 个点，不是「看着差不多」）。真正的区别只有五处，比如坐垫那一份画得小一点、多做一步「按列分摊压力」、没有滚轮缩放。现在收成一份代码 + 四组参数，以后想加一种新尺寸的数字矩阵，填几个数字就行，不用再复制一份文件。顺带修掉三处性能与稳定性问题：原来每一帧都在重复创建大量临时对象（1024 点时每秒约 12 万个）、有一批每帧都在算但根本没送到显卡的白工、切换展示形式时显卡资源不释放（切十几次会撞上浏览器上限、画面变黑）。**这一轮还没有把主界面切过去用新代码**，主界面走的仍是原来那三份文件，所以现在看不出任何区别；等真机上确认过数字、配色、缩放都一致，再换过去并删掉旧文件。 |
 | 2026-08-03 | 新建传感器时能直接挑串口协议，不用一个个填参数了 | 「新建传感器」第一步的配置卡片从 3 张变成 9 张，把目前在用的常用协议都列出来了（标准 1024 点、小床 12 位、大床 4096 点、256 点矩阵、72 / 144 点低密度）。挑一张，波特率、分帧方式、帧尾、数据类型就自动填好，下面的输入框仍然可以改。每种协议还配了一份字节结构说明文档（`backend/serial/protocols/` 下的 md），写清楚一帧里每个字节是什么、接不上时先看哪里。**协议共整理了 10 种**，其中 4 种目前的配置格式还表达不了（两个包对拼成一只手的手套、按片传的大床、压力和姿态混在一帧里的手套、文本格式的轮椅协议），这 4 种只出文档不出预设 —— 缺什么、要加什么才能支持，都写在各自文档里，而不是先放一个只能用一半的选项进去。另外，装好之后想自己加一种协议不用再改程序：往用户数据目录的 `serial-protocols/` 文件夹里放一份 JSON，刷新页面就出现在卡片里；和内置协议同名时以你自己那份为准。写错一份文件只会让那一份不出现，其它协议照常可用。 |
 | 2026-08-03 | 采集旁边那个数字现在是真的秒数了 | 以前是拿收到多少帧去折算的，还写死按「每秒 12 帧」算，所以传感器实际快一点慢一点，这个数就跟着不准（100Hz 的传感器上会快 8 倍多）。现在直接从点下「开始采集」那一刻开始掐表，跟帧率、采集频率都没关系；串口卡住没数据时秒表也照走，停止后数字停在最后的秒数上，能看出这次采了多久。 |
 | 2026-08-03 | 用显示系统建的传感器，点开始采集后计时数字会走了 | 之前用「显示系统」新建的传感器，点了开始采集，采集按钮后面那个计时数字一直停在 0 —— 老传感器上是正常的。这是前一阵重构渲染方式时带出来的问题，已修好。计时本身的算法没有改动。 |
@@ -1244,7 +1511,7 @@ flowchart LR
 
 ---
 
-> 本文档由 Codex 自动生成和维护。最后更新于：2026-08-03
+> 本文档由 Codex 自动生成和维护。最后更新于：2026-08-04
 
 ## 2026-07-07 Display Systems Runtime 定义与复杂线序迁移
 
@@ -1275,7 +1542,8 @@ Shroom1.0 是一个基于 **Electron** 的跨平台桌面应用程序，专用�
 | **状态管理** | Zustand | ^5.0.0，轻量级全局状态管理 |
 | **实时通信** | WebSocket (`ws`) | ^8.14.2，前后端双向数据通信 |
 | **硬件通信** | serialport | ^12.0.0，USB 串口数据读写 |
-| **3D 渲染** | Three.js | ^0.170.0，压力分布 3D 可视化 |
+| **3D 渲染** | Three.js | **^0.127.0**（`client/package.json` 的实际 pin，2021 年的版本；本表此前写 ^0.170.0 是错的）。这个值是硬约束：`@shroom/frontend` 的 three peer 范围必须宽到 `>=0.127`，写 `^0.170` 会让主应用装不上 |
+| **前端 SDK** | `@shroom/frontend` | 0.1.0，`private: true`，`client` 用 `file:../sdk/frontend` 装。`/core` 零依赖、`/react` peer react ≥18 + three ≥0.127。**装它必须同时开 `resolve.dedupe: ['react','react-dom','three']`** |
 | **UI 组件库** | Ant Design (antd) | ^5.22.0，控制面板 UI |
 | **图表库** | ECharts | ^5.5.0，数据图表可视化 |
 | **国际化** | i18next + react-i18next | 多语言支持 |
@@ -1351,15 +1619,19 @@ shroom1.0/
 │       │                              # 唯一在用的 Hook，消费方是
 │       │                              # services/ws/useMainWebSocket.js
 │       ├── runtime/         # 运行时通道层（不含 UI）
-│       │   ├── frameBus.js            # 帧总线（Set + notify，订阅时补发末帧，不进 React state）
-│       │   ├── useSceneFrame.js       # 订阅 hook（handler 存 ref，不叫 useFrame）
-│       │   └── sceneFrame.js          # 规范帧组装 + padThumbGap / toRaw256 两个纯整形
+│       │   ├── frameBus.js            # ⇢ 壳：re-export @shroom/frontend/core（实现已搬进 SDK）
+│       │   ├── useSceneFrame.js       # ⇢ 壳：re-export @shroom/frontend/react
+│       │   ├── sceneFrame.js          # ⇢ 壳：re-export @shroom/frontend/core
+│       │   └── displayThresholds.js   # ⇢ 壳：re-export @shroom/frontend/core（52 个引用方不用改）
 │       ├── renderers/       # 渲染器插件（一律动态 import 懒加载）
-│       │   ├── registry.js            # 注册表：register / getDescriptor / loadRenderer
-│       │   ├── RendererHost.jsx       # 三通道宿主：帧总线 + 视图 props + 声明过的命令
-│       │   ├── contract.js            # RENDERER_CAPABILITIES 能力常量
-│       │   ├── builtins.js            # 内置 descriptor 清单（含 presets）
-│       │   └── pointGrid/             # 点阵热力渲染器 = 旧 matCol + carCol 两条预设
+│       │   ├── registry.js            # ⇢ 壳：re-export @shroom/frontend/core
+│       │   ├── contract.js            # ⇢ 壳：re-export @shroom/frontend/core
+│       │   ├── RendererHost.jsx       # 薄包装：转发 SDK 组件 + 本地注册 pointGrid（不能做纯壳）
+│       │   ├── builtins.js            # 只剩 pointGrid；numMatrix 由 SDK 的 builtins 注册
+│       │   ├── pointGrid/             # 点阵热力渲染器 = 旧 matCol + carCol 两条预设（本轮未搬）
+│       │   └── numMatrix/            # 只剩两个壳；组件与 sprite3d 后端已进 SDK
+│       │       ├── params.js         # ⇢ 壳：re-export @shroom/frontend/core/numMatrix
+│       │       └── pipeline.js       # ⇢ 壳：re-export @shroom/frontend/core/numMatrix
 │       ├── store/           # Zustand 状态管理
 │       │   ├── useAppStore.js         # 全局应用状态
 │       │   └── usePressureStore.js    # 压力数据专用 Store
@@ -1391,6 +1663,33 @@ shroom1.0/
 │           ├── json/        # JSON 配置
 │           └── util/        # 前端工具函数
 │
+├── sdk/                     # 对外 SDK（二开入口）
+│   ├── examples/            # 后端 SDK demo（backend-sdk-demo.js / serial-chain-demo.js）
+│   └── frontend/            # @shroom/frontend —— 可安装的前端包（private，走 file: / npm pack）
+│       ├── package.json     # name / exports / peerDependencies / files（排除 example 与测试）
+│       ├── index.js         # 根出口 = 传输层 ∪ core（刻意不含 react/，见「已知缺口」）
+│       ├── core/            # 零依赖层，裸 Node 可直接 import（14 文件）
+│       │   ├── contract.js             # RENDERER_PROPS / RENDERER_METHODS —— 本包的公开面
+│       │   ├── registry.js             # 注册 / 懒加载 / 从展示系统定义解析渲染器
+│       │   ├── frameBus.js             # 帧总线（Set + notify，订阅时补发末帧）
+│       │   ├── sceneFrame.js           # 规范帧组装 + padThumbGap / toRaw256
+│       │   ├── frameMath.js            # 新建：findMax / jet / press 三个纯函数
+│       │   ├── colormaps.js            # 7 条配色 + 采样
+│       │   ├── jetLadder.js            # jet 阶梯（全仓 18 处老配色用的那条）
+│       │   ├── displayThresholds.js    # 阈值持久化（globalThis.localStorage?.，裸 Node 不用垫片）
+│       │   ├── coordinatePointLayout.js
+│       │   ├── bed4096numParams.js
+│       │   └── numMatrix/{params,pipeline}.js   # 参数归一化 + 预设 / 纯帧运算
+│       ├── react/           # peer: react ≥18 + three ≥0.127
+│       │   ├── RendererHost.jsx         # 宿主：懒加载 + 契约审计 + values / 帧总线两条通道
+│       │   ├── useSceneFrame.js         # 订阅 hook —— 二开者消费帧的正式入口
+│       │   ├── builtins.js              # 只注册本包 ships 的 numMatrix
+│       │   └── numMatrix/{NumMatrixRenderer.jsx,backends/sprite3d.js}
+│       ├── styles/canvas.css  # 6 行（scss → css，SDK 不能假设消费者装了 sass）
+│       ├── src/{client,store,display}/  # 传输层：SensorClient / FrameStore / DisplayRegistry
+│       ├── example/         # 可跑 demo（自带 package.json，file:.. 依赖本包；不进 npm files）
+│       └── scripts/smoke-core.mjs       # 零依赖层的裸 Node 守卫（12 项）
+│
 ├── docs/                    # 项目文档
 │   ├── architecture_max.md
 │   ├── optimization_report_max.md
@@ -1412,8 +1711,9 @@ shroom1.0/
 | `/client/src/hooks/` | 只剩 `useWebSocket`（连接管理，自动重连 + 心跳）。原先并列的 `usePressureData` / `useSerialControl` / `useThreeScene` / `usePlayback` / `useDeferredPressure` / `useInstancedMesh` 六个全仓从未被消费，已于 2026-07-31 删除 |
 | `/client/src/store/` | Zustand 状态管理，分为全局应用状态和高频压力数据状态 |
 | `/client/src/components/three/` | Three.js 3D 渲染组件与兼容入口，覆盖不同传感器类型和矩阵尺寸。剩 38 个，正按 `PointGridRenderer` 的三步配方逐组迁往 `renderers/` |
-| `/client/src/runtime/` | 运行时通道层，不含任何 UI。`frameBus.js` 是帧总线（`Set` + `notify`，订阅时同步补发末帧；**不进 React state**，一帧都不触发重渲染），`useSceneFrame.js` 是订阅 hook，`sceneFrame.js` 把 `Home.jsx` 里约 900 行 per-matrix 整形收敛成规范帧，`displayThresholds.js` 是六个调参阈值（`carValuej` 等）在全仓的**唯一读取出口**（原来 47 个文件各抄一段模块级声明） |
-| `/client/src/renderers/` | 渲染器插件层。渲染器一律动态 `import` 懒加载，不进 Home 的 chunk；`RendererHost.jsx` 同时是懒加载入口、错误边界和三通道适配器（帧总线 / 视图 props / `descriptor.methods` 声明过的命令）。同源组件靠 `descriptor.presets` 合并，不再 fork 文件 |
+| `/client/src/runtime/` | 运行时通道层，不含任何 UI。**四个文件现在都只是一行 `export * from '@shroom/frontend/...'` 的壳**，实现已搬进 SDK（2026-08-04），所以主应用的 import 路径与语义一行没改。原有职责不变：`frameBus.js` 是帧总线（`Set` + `notify`，订阅时同步补发末帧；**不进 React state**，一帧都不触发重渲染），`useSceneFrame.js` 是订阅 hook，`sceneFrame.js` 把 `Home.jsx` 里约 900 行 per-matrix 整形收敛成规范帧，`displayThresholds.js` 是六个调参阈值（`carValuej` 等）在全仓的**唯一读取出口**（52 个引用方，原来 47 个文件各抄一段模块级声明）。**改行为要去 `sdk/frontend/core/` 改，别当成两份代码** |
+| `/client/src/renderers/` | 渲染器插件层，现有 **2 个注册渲染器**（`pointGrid` 2 条预设 + `numMatrix` 4 条预设）。**`numMatrix` 那一半已于 2026-08-04 搬进 `@shroom/frontend`，原路径留壳**（`registry.js` / `contract.js` / `numMatrix/{params,pipeline}.js` 都是一行 re-export；`RendererHost.jsx` 是薄包装而不是纯壳 —— `Home.jsx` 直接 import 它而从不经过 `index.js`，纯转发会让 `pointGrid` 没人注册、`matCol`/`carCol` 静默失效）。`pointGrid` 与 `builtins.js` 里它那条注册仍在本地，第二轮再搬。渲染器一律动态 `import` 懒加载，不进 Home 的 chunk；`RendererHost` 同时是懒加载入口、错误边界和三通道适配器（帧总线 / 视图 props / `descriptor.methods` 声明过的命令）。同源组件靠 `descriptor.presets` 合并，不再 fork 文件。**两个渲染器都已接进主界面**：`pointGrid` 走 matCol / carCol 两处，`numMatrix` 走 `Home.jsx` 三处（`NUM_MATRIX_SCENES` 查找表 + `buildNumMatrixParams` 一条 manifest/hand/minzhen/smallBed 支路 + `bed4096num` 一处），被替代的三份 `NumThreeColor`（1568 行）已删除。`numMatrix` 多一层 `backends/`：壳管阈值与侧栏、后端只管画、`pipeline.js` 是可测的纯帧运算，另两个后端（canvas2d / webgl，即仍在的 `num/NumWs.jsx` 与 `num/Num2D*.jsx`）搬过来时壳不用重写 |
+| `/sdk/frontend/` | **`@shroom/frontend`** —— 可安装的前端包，二开的「新项目消费」入口。`private: true`，分发走 `file:` 或 `npm pack` tarball，不发公共 registry。分层线是**「有没有 React / three / DOM」**，因为它同时决定谁能消费和能不能在裸 Node 里加载：`/core` 零依赖（由 `scripts/smoke-core.mjs` 用**裸 Node、无垫片、无打包器**守着），`/react` peer 依赖 react ≥18 + three ≥0.127（**范围必须宽到 0.127** —— 主应用 pin 的是 2021 年那个版本），`/styles/canvas.css` 6 行，根出口**刻意不含 `react/`**（否则 `SensorClient` 的裸 Node 消费者连 import 都做不到）。**消费者必须做三件事**：`resolve.dedupe: ['react','react-dom','three']`（symlink 的真实路径向上找不到你那份 react/three，且两份 React 让 hooks 直接崩、两份 three 让 `instanceof` 全部失效）、装齐 peer 依赖、混淆器把本包整目录排进 `exclude`（否则改写 `import()` 的路径字面量，懒加载 chunk 塌回主包）。`example/` 是最短可跑路径也是验收标准：`cd sdk/frontend/example && npm i && npm run dev`。**已知缺口**：`src/client/commands.js` 有一条 `'../../../../shared/commandSchema.json'` 跑出了包根，所以**根出口在 tarball 装出来的包里加载不了**（`/core` + `/react` 不受影响），修法是先定 `shared/commandSchema.json` 的归属，见 `sdk/frontend/README.md` |
 | `/client/src/components/webgl/` | WebGL/Canvas 热力图渲染兼容模块，供机器人与复合体表映射组件复用 |
 | `/client/src/page/home/` | 主页面组件（Home.js），系统核心交互界面 |
 | `/docs/` | 架构文档、优化报告、技术优化建议，以及 EULA 最终用户许可协议文本 |
@@ -1451,8 +1751,14 @@ graph TD
         STORE["store/<br/>Zustand"]
         THREE["three/<br/>3D组件(legacy)"]
         HEAT["heatmap/<br/>热力图"]
-        BUS["runtime/<br/>frameBus 帧总线"]
+        BUS["runtime/<br/>frameBus 帧总线(壳)"]
         REND["renderers/<br/>渲染器插件(懒加载)"]
+    end
+
+    subgraph "SDK 包（file: 装进 client）"
+        SDKCORE["@shroom/frontend/core<br/>零依赖：契约/注册表/帧管线/配色/阈值"]
+        SDKREACT["@shroom/frontend/react<br/>RendererHost + numMatrix<br/>peer: react + three"]
+        SDKEX["example/<br/>可跑 demo(二开起点)"]
     end
 
     subgraph "外部"
@@ -1482,6 +1788,11 @@ graph TD
     HOME -- "publishFrame 每帧" --> BUS
     BUS -- "subscribeFrames 不进 state" --> REND
     HOME -. "sitTypeEvent 旧路(绞杀者并存)" .-> THREE
+
+    BUS -- "re-export 壳" --> SDKCORE
+    REND -- "re-export 壳 + 薄包装" --> SDKREACT
+    SDKREACT --> SDKCORE
+    SDKEX -- "同一份源码，不是副本" --> SDKREACT
 
     HW -- "USB 串口" --> SERIAL
     UPDATE -- "HTTPS" --> GH
@@ -1631,6 +1942,9 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-04 | codeOpi | 渲染器层拆成可安装的前端 SDK 包 `@shroom/frontend`（第一轮：core + numMatrix + 可跑 demo） | 目标消费者是新项目的开发者。`sdk/frontend/` 2026-06-11 建过一次且分叉了（没 `name` 装不了、`client/src` 一行没 import），根因是**它是一份平行副本**，所以本轮原则是**搬不抄** —— 19 个模块搬进包、原路径留 13 个 re-export 壳、主应用 import 一行没改。分层线是「有没有 React / three / DOM」：`/core` 14 文件零依赖（`scripts/smoke-core.mjs` 用裸 Node 无垫片守着，12/12）、`/react` peer react ≥18 + three **≥0.127**（主应用 pin 的就是 0.127，写 ^0.170 会让主应用装不上）、根出口刻意不含 `react/`。新增 `core/frameMath.js`（`findMax`/`jet`/`press`）+ 身份断言防止将来有人再写一份函数体。拆包新增三件必做事：`resolve.dedupe`、混淆器 `exclude` 补包目录、`core/` 不省扩展名不在顶层读 `localStorage`。`RendererHost.jsx` 做薄包装而非纯壳（`Home.jsx` 绕过 `index.js` 直接 import 它，纯转发会让 `matCol`/`carCol` 静默失效）。**验收标准已过**：`cd sdk/frontend/example && npm i && npm run dev` 画面出来，控制台零 error / 零 warning，连切 5 次 canvas 数始终 1。对账 client 221 + SDK 121 = 342（= 341 基线 + 1 新增断言），backend 38/38，`npm pack` 32 文件无 `example/`，构建后 `build/model` 137M 完好。**已知缺口记进积压**：`src/client/commands.js` 的 `'../../../../shared/commandSchema.json'` 跑出包根，tarball 装出来根出口加载不了（`/core`+`/react` 不受影响），修法是先定这份 schema 的归属 |
+| 2026-08-04 | codeOpi | 合并数字矩阵渲染器（二）：接进主界面，六个渲染点收成三处，−7 文件 / −8685 行 | 接线前先修掉一处搬运引入的发散：`smallBed12B` 预设写死的 `textureValueMax: 2550` 与原实现的 `props.textureValueMax \|\| (decimalScale > 1 ? valuej1 * decimalScale : 255)` 不符（全仓无人传该 prop），会改掉 `classicTint` 的分母；`pipeline.test.js:339` 原本断言的正是这个错值，所以它是回查出处查出来的、不是测试报出来的。`Home.jsx` 三处接线：`bed4096num` → `{...fast256, size: 1}`；manifest/hand/minzhen/smallBed → 新增 `buildNumMatrixParams()`（把 `NumThreeColor1024.jsx:167` 那个 `manageSidebar && matrixName !== 'minzhen'` 的 AND 折进调用点，把 `smallBed12B` 三处字符串分支折成基础预设选择）；四条 `fast*` 三元分支 → 新增 `NUM_MATRIX_SCENES` 查找表 + 一条分支。顺带补上已有 manifest 分支漏掉的 `colormap` / `coordinateMap`。删除三份 `NumThreeColor`（1568 行）与 4 个已入库的死 `.bak`（7117 行）。Home chunk 943 → 925.61 kB，`NumMatrixRenderer` 成 10.03 kB 独立懒加载块。前端 341 通过 / 17 套件、eslint 干净、后端 38 个测试文件全通过、`build/model` 137MB 未被触碰。 |
+| 2026-08-04 | codeOpi | 合并数字矩阵渲染器（一）：三份 NumThreeColor → `renderers/numMatrix/` | 1568 行三份文件证明是同一个渲染器：位置公式与格子尺寸代数等价，`pipeline.test.js` 把三份公式逐字抄成参照实现后在 256 与 529 点上逐点比对共 785 次（容差 1e-12）。真实差异只有五个开关，另四个 `matrixName` 字符串分支改成声明式参数，合起来是四条预设。新增 `numMatrix/{params.js, pipeline.js, pipeline.test.js, NumMatrixRenderer.jsx, backends/sprite3d.js}`，`builtins.js` 注册渲染器数 1 → 2；契约补 `changeWsDataRaw`（计数表漏统计 `page/home/util.js` 的 11 处）与 `colormap`/`coordinateMap` 两个既有事实 prop。搬运时修掉模块级状态、逐实例循环内 new 顶点属性、每帧白算的实例矩阵、缺失的 dispose、全局 DOM 选择器五处硬伤。**本轮不接线**，`Home.jsx` 仍走三份原文件。前端 341 通过 / 17 套件。 |
 | 2026-08-03 | codeOpi | 新增功能：串口协议预设库（文档 + 可加载 JSON + 用户目录 + Builder 接线） | 新建 `backend/serial/protocols/`（loader `index.js`、6 份 JSON 预设、11 份 md）。预设格式复用 manifest 的 `protocol` 四段，`validateProtocolConfig()` 当校验器，不另立 schema。10 种协议里 6 种发预设、4 种只发文档并写明 schema 缺口（单一 valueType / 无跨帧拼装 / 无文本入口）。新增 `GET /api/serial/protocols` 与 contract 的 `serial.protocolPresets`；`buildDisplaySystemBuilderCatalog()` 改为吃预设数组，Builder 模板卡片 3 → 9 张，前端未改。`displaySystemProtocol.js` 导出 `PROTOCOL_VALUE_TYPE_WIDTHS`。新增 `tests/serial/serialProtocolPresets.test.js` 与 `tests/http/serialProtocolsApi.test.js`，`workspaceService.test.js` 补目录翻译断言，后端 36 → 38 个测试文件全通过。 |
 | 2026-08-03 | codeOpi | 行为修正：采集计时改成真正的秒表 | `Home.jsx` 弃用 `num / 12 * hz`（帧数 ÷ 写死的 12Hz 假设 × 采集频率 `colHZ`），改为 `setColValueFlag` 上挂 `startCollectionTimer()` / `stopCollectionTimer()`，按 `Date.now() - colStartAt` 每秒更新整数秒；顺带删掉 `ws1Data` 里抢同一个 `changeNum` 槽位的第二个帧数计数器。 |
 | 2026-08-03 | codeOpi | 缺陷修复：显示系统传感器的采集计时不动（重构回归） | `Home.jsx` 的 `wsData` 里 manifest 类型走 `handleManifestSceneFrame` 后**提前 return**，而采集计数那段在 `realHz` 统计旁边、位于 return **之后**，于是显示系统传感器点开始采集后 Title 上那个计时数字一直是 0。逐提交比对确认是本次重构谱系引入（`6710e5e` 无、`42773c4` 起有）。把计数提到 return 之前、两条路径共用，旧位置删除避免重复计数；`hz` 那段不用一起提（纯配置消息不含压力数据，走不到 return）。顺手查明未修两处并挂账：`page/home/util.js:116` 第三份 `colValueFlag` 永不为 true（8 个 `changeNum` 全死，自 2026-03-23 `e0c637a` 起如此，历史遗留）、`ws1Data` 靠背通道那个计数器与显示系统无关。未改 `num / 12 * hz` 公式。 |
@@ -2003,6 +2317,9 @@ graph TD
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-04 | codeOpi | 优化重构 | 渲染器层拆成可安装的前端 SDK 包 `@shroom/frontend`（第一轮）：`core/` 14 文件零依赖 + `react/` 5 文件（peer react ≥18 + three ≥0.127）+ `styles/canvas.css` + `example/` 可跑 demo + `scripts/smoke-core.mjs` 裸 Node 守卫。**搬不抄** —— `client/src` 留 13 个 re-export 壳，import 一行没改；新建 `core/frameMath.js` 收 `findMax`/`jet`/`press` 并配身份断言。`client` 侧接线三件事：`file:` 依赖、`resolve.dedupe: ['react','react-dom','three']`、混淆器 `exclude` 补包目录（否则懒加载 chunk 塌回主包）。**验收标准已过**：`cd sdk/frontend/example && npm i && npm run dev` 画面出来。client 221 + SDK 121 = 342，backend 38/38，smoke 12/12，`npm pack` 32 文件 66.5 kB。已知缺口：tarball 下根出口因 `commands.js` 的包根越界 import 加载不了（`/core`+`/react` 不受影响），已记积压 |
+| 2026-08-04 | codeOpi | 优化重构 | 合并数字矩阵渲染器第二步：接进主界面，`Home.jsx` 六个渲染点收成三处，删 7 个文件 / 8685 行。**接线前先修掉一处上一步搬运引入的发散**：`params.js` 的 `smallBed12B` 预设写死了 `textureValueMax: 2550`，而原实现是 `props.textureValueMax \|\| (decimalScale > 1 ? valuej1 * decimalScale : 255)`，且全仓 grep 确认**没有任何调用方传过这个 prop** —— 走的一直是右边那支（默认 `valuej` 200 × 10 = 2000），拖阈值还会跟着重烘纹理。写死 2550 会改掉 `classicTint` 的分母（`r = d / textureValueMax`）：数值 1000 原本映射 r = 0.5、写死后成 0.39，是 smallBed12B 上看得出来的配色变化。**这个错值正是 `pipeline.test.js:339` 当时断言的内容** —— 差分测试只能证「实现与基准一致」，基准常量本身抄错时它会老老实实把发散钉住，所以逐条回查搬过来的常量出处这一步省不掉；预设删掉该行（0 = 自动），断言改成 `toBe(0)` 并在旁写明原因，`params.js:126` 的字段注释改为「缺省就该是 0，显式覆盖只为让 manifest 锁死量程」。接线三处：①`bed4096num` / `numoriginal` 那路 `<Fast256 size={1}>` → `<RendererHost rendererId="numMatrix" params={{...fast256, size: 1}}>`（`PARAM_RANGES.size.min` 是 1 不会被夹掉，`deriveGrid` 仍得 64×64 = 4096 实例；`fast256` 预设自带的 `sharedTuningKey: 'bed4096'` 保住了「Fast256 与 Bed4096 之间切换时调参不重置」）；②manifest / hand / handSinglePoint / minzhen / smallBed / smallBedNoAlg / smallBed12B 那一路 `<Fast1024>` → 新增模块级 `buildNumMatrixParams(matrixName, definition)`，把原来散在 props 与组件内部的四件事收成一次参数推导 —— `matrixWidth`/`matrixHeight` → `gridWidth`/`gridHeight`、`matrixName === 'smallBed12B'` 触发的 `getDecimalScale`/`getPressureChartPadding`/`totalMetric` 三处字符串分支 → 基础预设选 `smallBed12B` 而非 `fast1024`，**以及最容易漏的那一格**：`NumThreeColor1024.jsx:167` 的守卫是 `props.manageSidebar !== false && props.matrixName !== 'minzhen'` 两个条件的 AND，外层只传了前半、minzhen 那半藏在组件里，参数化后渲染器不再收 `matrixName`，故必须在调用点折成 `manageSidebar: !fromManifest && matrixName !== MINZHEN_MATRIX`，否则 minzhen 会开始重复回写已由外层接管的侧栏；③`fast256` / `normalFast` / `fast1024` / `fast1024sit` 四条三元分支（其中中间两条 JSX 完全相同）→ 模块级 `NUM_MATRIX_SCENES` 查找表 + 一条分支，约 40 行 → 约 12 行，**这张表同时是后面懒加载 54 个场景组件的前置条件**（嵌套三元链没法按需 import）。顺带补上已有 manifest 分支漏掉的 `colormap={canvasColormap}` 与 `coordinateMap` —— 今天没人踩到只是因为还没有 manifest 声明 numMatrix，接线后一个声明它的 manifest 会静默丢掉配色与坐标表。配色变化由 `NumMatrixRenderer` 自己的 `colormapKey` 进 `useEffect` 依赖重建场景，**外层不需要 `variantKey`/`key`**；`RendererHost` 只 destructure `rendererId/params/label/rendererRef/values/channel/frameChannel`，其余 `{...contractProps}` 原样透传，所以 `data` / `local` / `sceneChartProps` 一个字没改。删除：三份 `NumThreeColor`（`copy` 515 + `1024` 611 + `1024sit` 442 = 1568 行，唯一真实导入方就是 `Home.jsx:21-23`，其余 15 个提到它的文件都只是注释与测试里的文字引用）+ 4 个 `.bak`（`Home.jsx.bak` 3870 + `Title.jsx.bak` 1690 + `Num2Doriginal.jsx.bak2` 1089 + `NumWs.jsx.bak` 468 = 7117 行，`git ls-files` 确认全部已入库、最后改动是 `bbabe07`（2026-03-25），删掉可从 git 恢复）。`NumMatrixRenderer.jsx:5` 的「共 1701 行」改成 1568（那是横切共用层抽掉 jet 与阈值块之前的旧数）。边界：**界面零变化，看得出区别就是 bug**；未搬 `canvas2d`（`num/NumWs.jsx`）与 `webgl`（`num/Num2D.jsx` + `Num2Doriginal.jsx`，两者已漂移 935 行，得先逐行 diff）两个后端，`BACKENDS = ['sprite3d']` 原样；未动 `Home.jsx` 里 `<Bed4096>`（`components/three/4096`，另一个组件）与三元链其余部分；未动 `page/home/util.js`（5564 行）与任何 db 文件；真机手测（9 项，含 minzhen 侧栏不重复回写、smallBed12B 除 10 显示与取最大值合力、1024sit 拖颜色滑块画面不动、反复切 10 次 WebGL 上下文不累积）仍待用户在设备上执行。验证：`npx vitest run` → **341 passed / 16 套件**（`App.test.jsx` 仍是既有失败，缺 `@testing-library/react`；套件数少 1 是因为删掉的文件带走了一个）；`npx eslint src/renderers src/runtime src/page/home/Home.jsx --max-warnings=0` 干净；后端 `node tests/run-tests.js` 38 个测试文件全通过；`npx vite build --outDir ../tmp/build-check --emptyOutDir` 通过（10.88s），Home chunk **943.24 → 925.61 kB**、`NumMatrixRenderer-DveYPzQ6.js` 10.03 kB 独立懒加载块，`build/model` 137MB / 20 个 fbx 未被触碰、`git status --short build/` 为 0。 |
+| 2026-08-04 | codeOpi | 优化重构 | 合并数字矩阵渲染器第一步：`components/three/` 三份 NumThreeColor（`copy` 515 + `1024` 611 + `1024sit` 442 = 1568 行；横切共用层抽掉 jet 与阈值块之前是 1701 行）**证明**是同一个渲染器，收成 `client/src/renderers/numMatrix/`。**等价性是算出来的不是断言的**：`pipeline.test.js`（33 例）把三份的位置公式逐字抄成参照实现并带行号引用（`referenceFast256Position` ← `NumThreeColor copy.jsx:445` 的 `(x - (32/size - 0.5)) / 32 * size`、`referenceFast1024sitPosition` ← `1024sit.jsx:375` 的 `(x - (gridSize/2 - 0.5)) / (gridSize/2)`、`referenceStats` ← `copy.jsx:97-111` 的 `sitData()` 统计段、`referenceShortQuantize` ← `copy.jsx:431` / `1024sit.jsx:361`、`referenceLongQuantize` ← `1024.jsx:520-524`），在 16×16 的 256 点与 23×23 的 529 点上**逐点比对共 785 次**，与通用式 `(x - (gw-1)/2) * 2/max(gw,gh)` 全部相符；容差 `toBeCloseTo(..., 12)` 是因为三个写法只差乘除顺序、可能差 1 ulp，而 1e-12 在 `[-1,1]` 世界坐标里远低于一个像素。格子尺寸同理：`0.032*size` = `2.048/gridSize` = `worldCellSize*1.024` 逐位相同（一条子测试在 `[[16,16],[23,23],[32,32],[64,16]]` 上钉住 1.024 的重叠比）。参照实现**刻意抄而不复用 `pipeline.js`** —— 这条规矩由 `pointGrid/pipeline.test.js` 立下：两边共享同一份代码，测试就退化成自我验证。真实差异只有五个：画布边长占视口高度（1024sit 0.5/0.65 vs 另两份 0.6/0.8）⇒ `canvasHeightRatio`；分压重分配 `press(ndata1, 23, 23, valuep, valueprop, 'col')` **只有 1024sit 启用**（另两份注释掉了）⇒ `pressureRedistribution`；纹理是否跟随阈值重烘 —— **1024sit 的精灵图写死 `jet(0, 30)`，拖颜色滑块画面不动** ⇒ `retintOnThresholdChange: false`（**照抄的 quirk，不是修好的 bug**）；滚轮缩放与拖拽平移（1024sit 没装）⇒ `cameraControls`；阈值对象是否共享（`copy` 用 `bed4096numParams` 那个模块级单例，是 Fast256 与 Bed4096「切换展示形式时调参不重置」的来源）⇒ `sharedTuningKey: 'bed4096'` —— 写成声明式的键而非让外层传对象进来，后者没法在 manifest 里表达。另四个按 `matrixName` 字符串写死的分支一并改成声明式（`getDecimalScale('smallBed12B') → 10` ⇒ `decimalScale`、`getPressureChartPadding('smallBed12B') → 5` ⇒ `chartPadding`、`matrixName === 'smallBed12B' ? max : press` ⇒ `totalMetric`、`matrixName !== 'minzhen'` 才回写侧栏 ⇒ `manageSidebar`），四者取值即第四条预设 `smallBed12B`；二开的人加一个矩阵名不再需要回来改渲染器。**以 `NumThreeColor1024` 为搬运基准**因为它是三者的代数超集。三层切分（壳 = 阈值来源/侧栏统计/命令式接口、`backends/sprite3d.js` = 只管画、`pipeline.js` = 纯帧运算）为的是 `canvas2d`（`num/NumWs.jsx`）与 `webgl`（`num/Num2D.jsx` + `Num2Doriginal.jsx`）搬过来时壳不用重写 —— `BACKEND_FACTORIES` 现在只有一个条目，标的是扩展点；`params.js` 的 `backend` 填未知值**退回 `sprite3d` 而不报错**（手写 manifest 拼错后端名时，看到画面出来比看到白屏更容易发现写错了）。搬运时修掉五处多实例/卸载硬伤，都不是顺手优化：①模块级 `ndata1` / `animationRequestId` / `materialRef` 收进 `stateRef`（原来两个实例互相踩）；②顶点属性建一次、每帧只置 `needsUpdate` —— 原实现在**逐实例循环体内**调 `geometry.setAttribute(..., new THREE.InstancedBufferAttribute(...))`，1024 点 × 60fps ≈ 每秒 12 万个临时对象；③实例矩阵只算一次 —— 原实现每帧重跑 `setMatrixAt` 却从不置 `instanceMatrix.needsUpdate`，**那批计算根本没到 GPU、每帧白算**；④补全 dispose（geometry / material / texture / renderer / 监听器；浏览器活跃 WebGL 上下文上限约 16，反复切展示形式会撞上），`retint()` 换纹理前先 dispose 旧的（原来每拖一次滑块漏一张 512×512、12 位时是 1024×2560）；⑤容器由 props 注入不再 `document.querySelector('.canvasNum')`，峰值读数走 `peakRef` 而非 `.maxNum` 全局选择器（两个实例才不会写同一个 div），仍直接改 DOM 不进 state —— 那是 60Hz 的读数。三处小订正：`clampTextureValue` 现在总是生效（1024sit 用裸 `data[i]`，越界即取错格）；`Math.max(...res)` 换成单趟 `findPeak`（65536 点时展开参数爆栈）；删掉每帧的 `console.log('分压')` 与一个建了却从未 append 的 `Stats` 面板。**片元着色器的 `pow(color * 1.5, 1/2.2)` 原样保留** —— 它不是标准 sRGB（多乘 1.5），但它就是用户现在看到的亮度。壳侧两处照抄的细节：下限过滤**做两遍**（壳里一遍不取整供浮点统计、后端画前再一遍取整），幂等，与原实现一致；`sitValue` 的守卫用 `!== undefined` 而非 `if (valuej)`，抄 `NumThreeColor1024` 那份（另两份的真值守卫会把 0 当没传）。契约补两项，都是既有事实不是新口子：`RENDERER_METHODS` 加 `changeWsDataRaw: 11` —— 它一度被 `validateRendererDescriptor` 判成「契约外方法」，根因是那张计数表**只统计了 `Home.jsx`、漏掉 `page/home/util.js`**（后者 5,564 行里 `that.com.current?.changeWsDataRaw(...)` 用的是同一个 ref，11 处；Home.jsx 侧 0 处），按契约自己写明的「取暴露面的并集而非当前调用点的集合」它本就该在表里，补这一项时未回头重算其余各项，故那些数字现在应读作「至少这么多次」，文件头已注明；`RENDERER_PROPS` 加 `colormap` 与 `coordinateMap`（`ManifestDisplayRenderer.jsx:276/289` 早在透传，`hand.jsx` / `NumThreeColor1024.jsx` 早在读，`RendererHost` 通过 `...contractProps` 原样转发 —— 与其留一处静默偏离不如写进契约）。`index.test.js` 的加载测试从只测 `pointGrid` 改成 `it.each(['pointGrid','numMatrix'])`，另加一条「注册表里每一项都能加载」（`Promise.all(listRenderers().map(loadRenderer))`，加了新渲染器忘补测试也拦得住）与 3 例 numMatrix（capabilities 恰为 `[SIT]`、四条预设按 `['fast256','fast1024','fast1024sit','smallBed12B']` 顺序且 size 4 / cameraControls false / decimalScale 10、manifest 解析补全出 `backend: 'sprite3d'` 与 `chartWindow: 20`）。`chartWindow` 默认取 20 是三份 NumThreeColor 的真实值，**不与别处那 8 份 `layoutData` 的 60 混同**。边界：**本轮不接线，一个用户可见行为都没变** —— `Home.jsx:21-23` 仍静态 import 三份原文件，六个 `Num*` 换 `RendererHost` 与删除旧文件都未做（等价性证完但真机手测未做，两件事分开走）；未动 `page/home/util.js`；未新增第二、三个后端。验证：`npx vitest run` → **341 passed / 17 套件**（`App.test.jsx` 仍是既有失败，缺 `@testing-library/react`）；`npx eslint src/renderers src/runtime --max-warnings=0` 干净；`npx vite build --outDir ../tmp/build-check --emptyOutDir` 通过（11.60s），`NumMatrixRenderer-CEOkZhhQ.js` 作为独立懒加载 chunk 产出、**没有并进 943.24 kB 的 Home chunk**，`build/model` 137MB / 20 个 fbx 未被触碰。 |
 | 2026-08-03 | codeOpi | 新增功能 | 串口协议预设库：10 份协议文档 + 6 份可加载 JSON + 用户可扩展目录 + Builder 模板接线。**格式不新发明** —— `backend/displaySystems/displaySystemProtocol.js` 的 `baudRate` / `framing` / `decoding` / `validation` 四段本就是协议声明格式（`serialParserManager.createParserFromProtocol()` 直接消费），预设存的就是那四段原文，一份预设的 `protocol` 块可整段粘进 `display-system.json`，`validateProtocolConfig()` 即预设校验器；`loadSerialProtocolPresets()` 返回的是 `normalizeProtocolConfig()` 归一后的形状，而归一结果本身仍是合法 manifest 输入。新建 `backend/serial/protocols/index.js`（`BUILTIN_PRESET_DIRECTORY` / `PRESET_SOURCES` / `USER_PRESET_DIRECTORY_NAME` / `getSerialProtocolPreset` / `loadSerialProtocolPresets` / `normalizePreset` / `resolveUserPresetDirectory`）。协议逐个从运行时源码挖出来是 **10 种而非最初估的 9 种** —— 第 10 种是 bigBed 的 1025 字节分片帧（`chunkFlag` 在第 1024 字节，0 = 首片 / 1 = 末片 / 其余丢弃，两片按行交错拼成 32 行 × 64 列；它的判定是严格 `context.file !== 'bigBed'`，与 bed4096 的 `includes()` 不同）。6 份预设：`standard-1024`（`AA 55 03 99` / 1024 × uint8 / 1000000 / 32×32）、`small-bed-12b`（`AA 00 55 00 03 00 99 00` / 1024 × uint16LE / 1500000）、`bed-4096`（**与标准帧同一个分隔符**，只能靠帧长与类型名区分 / 3000000）、`matrix-256`（921600 / 16×16）、`low-density-72` 与 `low-density-144`（`matrix: null`，形状不由协议决定）。**`low-density-72-144` 拆成了两份 JSON** —— 计划里是一份文件覆盖两种点数，但一份 JSON 只能有一个 `valueCount`，改为两份预设共用一份 md。另 4 种只出文档不出预设，每份 md 带 `## schema 缺口` 段写明缺什么、要加什么：①`decoding` 是单字段的（一种 valueType 平铺整帧），挡住手套 274 / 262 的「压力区 + IMU 区」混合帧；②没有跨帧拼装，挡住 bigBed 分片与手套双包（两个串口两个包对拼成一只手）；③没有文本协议入口，挡住 minzhen。**bigBed 单片技术上声明得出来，刻意不发预设** —— 选中它会静默得到半张矩阵，属于「宁可没有也不要半成品预设」。每份 md 含字节布局图、带偏移的字段表、项/值表（分隔符 / 分帧 / payload / 类型 / 点数 / 波特率 / 校验）、代码位置表、排错表；README 是目录索引（10 行状态表 + 完整 `protocol` 字段表 + 13 种 valueType + 三行缺口表 + 「加自己的协议」说明）。用户预设目录 `<runtimeWritableRoot>/serial-protocols/*.json`，**同 id 覆盖内置**并在 `overrides` 留下被覆盖文件的路径 —— 这是本轮对「打包之后能二开」的直接贡献：改波特率、加自研协议都不用构建工具链。三条健壮性规则连测试一起钉住：目录不存在**不是错误**（用户目录默认不存在）、一个 JSON 写坏**只影响自己**（带原因进 `invalid`，其余照常返回）、`readdirSync` 抛异常降级成一条 `unable to read directory`。HTTP 侧：`sdkApiContract.js` 加 `serialProtocols: '/api/serial/protocols'`（`HTTP_ROUTES` 本身就嵌在 contract 的 `http.routes` 里，加进去即等于对 SDK 公开）与 `buildSdkContractSnapshot({protocolPresets})` → `serial.protocolPresets`（**只给 id/label/summary/doc，不给 `protocol` 段**：contract 是能力快照不是数据源），`SDK_CONTRACT_VERSION` 保持 `2026-07-14`（纯追加）；`controlRoutes.js` 挂 `GET /api/serial/protocols` 返回 `{protocols, invalid, directories}`（`directories` 也返回是因为排错第一问就是「系统在哪找预设」）；`httpAppFactory.js` 加 `serialProtocolDirectories` 参数与 `listSerialProtocolPresetSummaries()`（读失败整段兜底成空数组，contract 不能因此挂掉）。Builder 侧是「不用点太多设置」真正落地的地方：`buildDisplaySystemBuilderCatalog()` 原来硬编码 3 份 `serialTemplates`，现在签名变为 `({serialProtocolPresets = []} = {})`，把每份预设经 `buildSerialTemplateFromPreset()` 翻译成 Builder 表单的扁平字段（`transportType` / `baudRate` / `framingType` / `delimiter` / `dataBits` / `valueType` / `byteOffset` / `bytesPerValue`），卡片 3 张变 9 张、选中即填好 `protocol` 段，**前端一行未改** —— `DisplaySystemBuilder.jsx` 早有 `serialTemplate` 卡片网格与 `applySerialTemplate`（CSS 是 `repeat(3, minmax(0,1fr))`，9 张正好三行）。四处翻译细节：①同 id 时预设覆盖内置模板（与 loader 同一套规则），但三份内置模板 id 一个没删，旧 manifest 的 `metadata.builder.serialTemplate` 与 `inferSerialTemplate()` 的回落目标仍然找得到；②`bytesPerValue` 走新导出的 `PROTOCOL_VALUE_TYPE_WIDTHS`（由 `VALUE_TYPE_READERS` 的 `width` 派生），**不靠 `valueType.includes('16')` 猜** —— 猜的写法遇到 uint32/float32 会把定长帧长算成一半；`dataBits` 只有 8/12 两档（前端写死的 `Segmented`），四字节类型显示成 8 Bit 是现有组件表达能力上限，帧长仍由 `bytesPerValue` 算对；③分隔符还原成 Builder 输入框的十六进制写法（大写补零两位、空格分隔），与三份内置模板逐字一致，否则同一协议在卡片里会有两种长相；④预设用的波特率并进 `baudRates` 档位并去重升序 —— 大床的 3000000 原来不在 7 个固定档位里，不并进去选中后波特率框是个没有对应选项的裸数字。描述文字优先用预设自己的一句话摘要（卡片下方本来就有一行 baud / 分帧 / 位宽 的事实条，不重复），没写摘要的用户预设才回落成参数拼接。依赖方向保持单向：`displaySystems` 层**不反向依赖 `serial` 层**，`buildDisplaySystemBuilderCatalog()` 收纯数组、不碰 fs，读文件由 `appRuntimeFactory` 注入的 `listSerialProtocolPresets`（`createDisplaySystemWorkspaceService` 新参数，默认 `() => []` 所以旧调用方不传也不炸），**`getCatalog()` 每次调用都重新读**（用户丢完 JSON 刷新页面即可见，不用重启），坏预设在这条路上 `logger.warn` 逐条报出、读失败退化成只有三份内置模板；预设目录路径只在 `appRuntimeFactory` 拼一次并从 `appRuntime.serialProtocolDirectories` 透出，`server.js` 改为取它而不再自己拼第二遍。测试：新建 `tests/serial/serialProtocolPresets.test.js`（内置预设全过 `validateProtocolConfig`、关键预设逐字节锁定、**端到端证明**「选中就能用」——`createParserFromProtocol` + `decodeProtocolValues` 切出 2 帧 1024 值、小床 `0x34,0x12 → 0x1234` 钉住 uint16LE 字节序、`normalizePreset` 八条错误路径、注入 fs 的用户目录覆盖 / 坏文件 / 缺目录 / readdir 抛异常四组）与 `tests/http/serialProtocolsApi.test.js`（真 `http.createServer` + `fetch` + mkdtemp 用户目录，一个好预设一个坏预设，断言 `source` 分类、`invalid` 只有一条且列表不空、`directories` 含用户目录、contract 两处字段）；`tests/displaySystems/workspaceService.test.js` 补目录翻译一组（三份内置模板不许消失、分隔符格式、双字节 `bytesPerValue`、3000000 进档位且升序去重、同 id 覆盖只留一份、uint32le 的宽度走表、无预设时退化成 3 份、`getCatalog()` 每次现读）。后端 36 → 38 个测试文件全通过。边界：未改任何解码实现与 `serialParserManager`，未改前端任何文件，未改 `SDK_CONTRACT_VERSION`，未给 ⚠️/❌ 四种协议发预设，未动 `serialTemplates` 三份内置模板的 id 与 defaults。 |
 | 2026-08-03 | codeOpi | 行为修正 | 采集计时改成真正的秒表，不再用帧数推算。原式 `num / 12 * hz`（`client/src/page/home/Home.jsx`）三个量：`num` 是每帧 `sitData` 累加的**实时帧数**、`hz` 是后端随帧下发的采集频率 `colHZ`（默认 12，见 `backend/services/collection/collectionService.js` 的 `DEFAULT_COLLECTION_FREQUENCY_HZ`）、`12` 是写死的「传感器每秒推 12 帧」假设，合起来的原意是「`num / 12` 当秒数 × 采集频率 = 这几秒该入库多少行」。站不住的是那个 12：实时下发根本不限频（`backend/services/realtime/frameOutputPipelineService.js` 的 `publishSit/Back/Head` 每帧都 `publishRealtimeChannel`），`num` 的增长速率就是传感器真实帧率，而真实帧率同一份代码里的 `realHz`（`realHzFrameCount * 1000 / 间隔`）一直在现量 —— 正确的除数在手边，式子里用的却是常量，帧率不是 12 时该数既非秒也非行数，偏差 `realHz / 12` 倍（100Hz 传感器上快 8 倍多）。改法：计时起停挂在采集开关的唯一入口 `setColValueFlag`（`Title.jsx` 的 `startCollectionWithOptions` 传 true、`stopCollection` 传 false），新增 `startCollectionTimer()` 记 `colStartAt = Date.now()` 并挂 1 秒 `setInterval` 写 `Math.floor((Date.now() - colStartAt) / 1000)`、`stopCollectionTimer()` 清 interval，`componentWillUnmount` 一并清理。两处实现细节：①**必须定时器驱动、不能蹭帧** —— 串口卡住没帧时秒表也该走，这正是旧实现做不到的另一半；②**传整数秒** —— `Title.jsx` 显示套 `Math.ceil`，`setInterval` 有毫秒漂移，直传 `1.003` 会 ceil 成 2、第一秒就跳 2，先 `Math.floor` 让 ceil 变空操作。停止时只停表**不清零**，与旧行为一致（旧实现停止只把 `num` 归 0、不调 `changeNum`）。顺带删掉 `ws1Data` 里的第二个计数器（`isCar(matrixName) && !sitFlag` 时 `changeNum(num)`，显示帧数、无 `/12*hz`，走靠背通道）—— 上一节曾说不动它，改主意的理由是它与坐垫那个写**同一个 `changeNum` 槽位**，秒表接管后车类传感器上数字会在秒数与帧数间跳；删后模块级 `num` 在 `Home.jsx` 已无引用，一并移除（函数内同名 `let num` 是局部累加变量，无关）。边界：**这是有意的语义变化、非等价改造**（从「按 12Hz 假设折算的行数估算」变成真实秒数）；未改 `Title.jsx` 显示与文案；未动 `page/home/util.js` 那 8 个 `changeNum(num)`（显示帧数，且该文件第三份 `colValueFlag` 自 `e0c637a`（2026-03-23）起从未置真，整段死代码，仍挂账）；未动 `hz`/`colHZ` 的限流入库语义；`HomeFun.jsx` 全仓无人 import（死文件）故未跟改。验证：`npx vitest run` → 303 passed / 15 suites（`App.test.jsx` 既有失败，缺 `@testing-library/react`）；`npx eslint src/page/home/Home.jsx` 干净；`npx vite build --outDir ../tmp/build-check --emptyOutDir` 通过（17.08s），`build/model` 137MB / 20 个 fbx 未被触碰，`git status --short build/` 为 0。 |
 | 2026-08-03 | codeOpi | 缺陷修复 | 显示系统传感器的采集计时数字不动 —— **本次重构谱系引入的回归**。`client/src/page/home/Home.jsx` 的 `wsData` 中，manifest 类型的展示形式先交给 `handleManifestSceneFrame`，处理掉或帧带 `displaySystemId` 就 `return`（旧场景不能消费带身份的帧，该 return 本身正确）；而采集计数那段代码原来在 `realHz` 统计旁边、**位于该 return 之后**，manifest 帧永远走不到，`num` 不增、`this.title.current?.changeNum(...)` 不调，Title 上「停止」后面那个计时数字恒为 0。逐提交比对定性：`6710e5e`（2026-07-21）无此提前 return，`42773c4`（渲染器插件化提交）起才有 —— 属回归而非历史遗留。修法：把 `if (jsonObject.sitData != null && this.state.matrixName != 'car10') { if (colValueFlag) { num++; changeNum(num / 12 * hz) } else { num = 0 } }` 提到该 return 之前，新旧两条路径共用同一份计数，原位置删除以免重复计数（计时属全局采集状态，与画谁、怎么画无关，本不该待在旧场景处理链内）。未把 `if (jsonObject.hz != null)` 一起前移 —— 带 `hz` 的是纯配置消息、不含压力数据，`hasPressureFrame` 为假不会触发 return，`hz` 仍能正常更新；`num`/`colValueFlag`/`hz` 均为模块级变量（`Home.jsx:392`/`:400`/`:838`），前移无作用域问题。顺手查明但**未修**、已挂账两处：①`client/src/page/home/util.js:116` 存在**第三份** `colValueFlag`，全文件无任何赋 true 之处，该文件 8 个 `changeNum` 调用点全为死代码（`Title.setColValueFlag` 只接到 `Home.jsx:3942` 与 `HomeFun.jsx:124` 两份上），`git log -S` 显示自 `e0c637a`（2026-03-23）起即如此，历史遗留，修前需先厘清那 8 个点各服务哪个 matrixName；②`ws1Data` 中第二个计数器（`Home.jsx:2619`，`isCar(matrixName) && !sitFlag` 时 `changeNum(num)`，**无** `/12*hz`）走靠背通道、与显示系统无关。边界：未改 `num / 12 * hz` 公式本身（其是否真等于秒数是另一个问题，`hz` 默认 12 时该式即等于帧数），未动提前 return 与 `handleManifestSceneFrame`。验证：客户端 `npx vitest run` → 303 passed / 15 suites（`App.test.jsx` 为既有失败套件，缺 `@testing-library/react`，非本次引入）；`npx eslint src/page/home/Home.jsx` 干净；`npx vite build --outDir ../tmp/build-check --emptyOutDir` 通过且 `build/model` 137MB / 20 个 fbx 未被触碰。 |

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SCENE_CHANNELS, buildSceneFrame, padThumbGap, toRaw256 } from './sceneFrame';
+import { SCENE_CHANNELS, buildSceneFrame, padThumbGap, toRaw256 } from './sceneFrame.js';
 
 /**
  * 这份测试的主张是「新路径输出 === 旧路径输出」。

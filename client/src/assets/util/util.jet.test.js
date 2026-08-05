@@ -16,8 +16,12 @@
 
 import { describe, expect, it } from 'vitest';
 
+import {
+  findMax as findMaxFromSdk,
+  jet as jetFromSdk,
+} from '@shroom/frontend/core/frameMath.js';
 import { jetRgb as jetRgbFromLadder } from './jetLadder';
-import { jet, jetRgb, jetRgba, jetRound } from './util';
+import { findMax as findMaxFromUtil, jet, jetRgb, jetRgba, jetRound } from './util';
 
 /* ------------------------------------------------------------------ *
  * 四份基准实现，全部逐字抄自被替换掉的原文件
@@ -343,5 +347,14 @@ describe('jetRgb —— 那条唯一的分支阶梯', () => {
     // util.js 只是 re-export。这条断言防的是有人图省事在 util.js 里再写一份 ——
     // 那样「全仓唯一一条阶梯」就又变成两条了，而且不会有任何测试失败。
     expect(jetRgb).toBe(jetRgbFromLadder);
+  });
+
+  it('util.js 导出的 jet / findMax 就是 SDK 包里那两个函数，不是第二份实现', () => {
+    // 拆包时 `jet` / `findMax` 搬到了 `@shroom/frontend/core/frameMath.js`
+    // （数字矩阵渲染器要用，而包里不能 import 1440 行、顶层读 localStorage 的
+    // util.js）。util.js 只是 re-export。这条断言与上面那条防的是同一件事：
+    // 有人图省事在 util.js 里再写一份函数体，行为测试全绿，但仓里就有了两份。
+    expect(jet).toBe(jetFromSdk);
+    expect(findMaxFromUtil).toBe(findMaxFromSdk);
   });
 });
