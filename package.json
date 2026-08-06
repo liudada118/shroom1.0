@@ -12,6 +12,8 @@
     "sdk:serial-demo": "node sdk/examples/serial-chain-demo.js",
     "sdk:frontend-test": "npm --prefix sdk/frontend test",
     "sdk:frontend-smoke": "node sdk/frontend/scripts/smoke-core.mjs",
+    "sdk:frontend-docs": "npm --prefix sdk/frontend/docs run dev",
+    "sdk:frontend-docs-build": "npm --prefix sdk/frontend/docs run build",
     "start": "electron-forge start",
     "build-client": "npm --prefix client run build",
     "build-python-runtime": "node scripts/build-python-runtime.js",
@@ -50,6 +52,7 @@
           "^/pack-resources($|/)",
           "^/client($|/)",
           "^/docs($|/)",
+          "^/sdk/frontend/(example|docs)($|/)",
           "(^|[/\\\\])config\\.txt$"
         ]
       },
@@ -94,6 +97,8 @@
       "**/*",
       "!client/**",
       "!build/**",
+      "!sdk/frontend/example/**",
+      "!sdk/frontend/docs/**",
       "!python/**",
       "!dist/**",
       "!out/**",

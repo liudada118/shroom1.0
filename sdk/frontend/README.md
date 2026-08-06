@@ -11,6 +11,33 @@ cd example && npm i && npm run dev     # → 32×32 数字矩阵，游动的高�
 `example/` 是最短可跑路径，也是这个包的验收标准。想看怎么用，直接读
 [example/src/main.jsx](example/src/main.jsx) —— 核心只有三行。
 
+### 系统学一遍：开文档站
+
+```bash
+npm --prefix docs i && npm --prefix docs run dev      # 或在仓库根上：npm run sdk:frontend-docs
+```
+
+[docs/](docs/) 是一个 10 页的在线文档站：讲解 + **能动的实时画面** + 「显示代码」。
+
+它和这份 README 的区别不是篇幅，是**会不会过期**。README 里的参数表、方法清单、预设名
+全是**手抄**的 —— `RENDERER_METHODS` 改一行，README 不会有任何报错。文档站里那些表格
+**从 `core` 直接 import 渲染**，每段代码样例用 Vite 的 `?raw` 显示**正在上面那块画面里
+跑的那个文件本身**（同一份源码 import 两次，一次跑一次显示）。新增一个渲染器 / 配色 /
+预设，文档站自动多一项。
+
+| 页 | 有什么 |
+| :--- | :--- |
+| 快速开始 | 最短路径；显示的源码就是 `example/src/main.jsx` 本身（跨目录 `?raw`） |
+| 数字矩阵 / 点阵热力 | 活预览 + 预设 + 7 配色 + 参数面板 |
+| 一览 | 预设 × 配色 缩略图墙（WebGL 上下文限流的实测场） |
+| **写自己的渲染器** | 一个约 140 行的 Canvas 2D 渲染器，不属于本包，走完整条正式路径。**这一页是这个站真正的产出** —— 在它之前，全仓关于「怎么写自己的渲染器」只有一句「用 `validateRendererDescriptor` 自查」 |
+| 帧总线 | `publishFrame` / `useSceneFrame` 的第一个消费者 |
+| 契约 / 入参 | 全部从 `core/contract.js` 读，包括下面那三个未声明方法 |
+| 坑 | 踩过的账：dedupe / peer / 混淆器 / png loader / tarball 缺陷 / 视口-容器 / WebGL 预算 |
+
+`docs/` 与 `example/` 都**排出装机包**（根 `package.json` 的 `build.files` 与 forge
+`packagerConfig.ignore` 各一条），也不进 `npm pack`。
+
 ---
 
 ## 三行版
@@ -19,7 +46,7 @@ cd example && npm i && npm run dev     # → 32×32 数字矩阵，游动的高�
 import { RendererHost, registerBuiltinRenderers } from '@shroom/frontend/react';
 import '@shroom/frontend/styles/canvas.css';
 
-registerBuiltinRenderers();          // 注册本包 ships 的渲染器（当前只有 numMatrix）
+registerBuiltinRenderers();          // 注册本包 ships 的渲染器：numMatrix + pointGrid
 
 <RendererHost rendererId="numMatrix" params={params} values={frame} channel="sit" />
 ```
@@ -40,7 +67,7 @@ registerBuiltinRenderers();          // 注册本包 ships 的渲染器（当前
 | :--- | :--- | :--- |
 | `@shroom/frontend` | 传输（`SensorClient`）、帧存储（`FrameStore`）、展示系统定义（`DisplayRegistry`），**并全量转出 `core`** | 无 |
 | `@shroom/frontend/core` | 契约、渲染器注册表、帧管线、配色、阈值、坐标布局 | 无 |
-| `@shroom/frontend/react` | `RendererHost`、`useSceneFrame`、`registerBuiltinRenderers` | peer: react + three |
+| `@shroom/frontend/react` | `RendererHost`、`useSceneFrame`、`registerBuiltinRenderers`，两个渲染器（`numMatrix` / `pointGrid`）+ `three/{SelectionHelper,pointPick}` | peer: react + three |
 | `@shroom/frontend/styles/canvas.css` | 6 行 canvas 样式（`.canvasNum`） | 无 |
 
 **根出口刻意不含 `react/`。** 一旦含了，`SensorClient` 的裸 Node 消费者（后端测试里
@@ -81,7 +108,7 @@ registerBuiltinRenderers();          // 注册本包 ships 的渲染器（当前
 
 ---
 
-## 消费者必须做的三件事
+## 消费者必须做的四件事
 
 ### 1. `resolve.dedupe`（不做会崩，不是优化项）
 
@@ -121,6 +148,20 @@ webpack 用 `resolve.alias` 指到你那份，rollup 用 `@rollup/plugin-node-re
 真实路径，`node_modules/**` 一条挡不住。主应用那条写法在
 [client/vite.config.js](../../client/vite.config.js) 的 `obfuscatorPlugin` 里。
 
+### 4. 你的打包器要能处理 `.png` import
+
+`pointGrid` 的点精灵贴图是 `import circleUrl from './circle.png'` 出来的打包资源
+（[react/pointGrid/PointGridRenderer.jsx](react/pointGrid/PointGridRenderer.jsx)）。
+Vite 原生支持，webpack 5 走 asset modules，Rollup 需要 `@rollup/plugin-url` 之类。
+
+**这条以前不是义务，2026-08-05 `pointGrid` 进包时才变成义务。** 它原来写的是
+`new TextureLoader().load('./circle.png')` —— 一个**运行期相对 URL**，靠
+`client/public/circle.png` 恰好被 serve 在站点根目录才成立。装进别人的项目就是 404，
+现象是**点阵整片全白**（不报错，纹理加载失败 three 只在控制台留一条）。
+
+不想让打包器碰图的话，`params.pointSprite` 传一个你自己的贴图 URL 就行 —— 它直接进
+`TextureLoader().load()`，包里那张图只是 `||` 的右侧默认值。
+
 ---
 
 ## ⚠️ 公开面：`RENDERER_PROPS` 与 `RENDERER_METHODS`
@@ -140,6 +181,28 @@ webpack 用 `resolve.alias` 指到你那份，rollup 用 `@rollup/plugin-node-re
 时也会跑一遍 `auditRendererContract`，声明了没实现、实现了没声明都会在控制台点出来
 （同一个渲染器只报一次）。注册失败**不抛错**，只记录原因并返回 `false` —— 坏插件不该
 让整个应用起不来。
+
+### ⚠️ `data.current` 上的三个方法：契约管不着的一块公开面
+
+`RENDERER_PROPS` 里有一项 `data`，说明写的是「宿主注入的 ref」。但 **`data.current` 上
+要有哪些方法，没有任何地方声明** —— 而 `pointGrid` 每帧都在调它们：
+
+| 方法 | 谁调 | 参数 | 干什么 |
+| :--- | :--- | :--- | :--- |
+| `changeData(stats)` | `pointGrid` | `{ meanPres, maxPres, point, totalPres }`（均压两位小数的字符串、最大值、受压点数、总压） | 更新侧栏读数 |
+| `handleCharts(series, max)` | `pointGrid` | 总压最近 20 帧的数组 + `findMax(series) + 1000` | 画总压曲线 |
+| `handleChartsArea(series, max)` | `pointGrid` | 受压点数最近 20 帧的数组 + `findMax(series) + 100` | 画受压面积曲线 |
+
+后两个在 `props.local` 为真时**跳过**（本地模式没有侧栏图表）。
+
+调用点写的是 `host.data?.current?.changeData({...})` —— **可选链只保住了 `current`，
+没保住那三个方法**。所以：传 `data` 就得把三个方法都挂上，或者干脆别传 `data`
+（`undefined` 走可选链是安全的）。传一个空的 `useRef({})` 进去是最容易踩的那种：
+`current` 存在，方法不存在，第一帧就 `TypeError`。
+
+**这里只补声明，没改代码。** 把它们提进 `RENDERER_METHODS` 那种正式契约是可以做的，
+但那会让所有现有渲染器的契约审计立刻开始报「未实现」—— 见上面那段「改它们是 breaking
+change」。记进积压。
 
 ---
 
@@ -175,26 +238,34 @@ core/                 零依赖层，裸 Node 可 import
   registry.js         渲染器注册 / 懒加载 / 从展示系统定义解析
   frameBus.js         帧总线（发布订阅，绕开 React 重渲染）
   sceneFrame.js       帧结构与通道常量
-  frameMath.js        findMax / jet / press 三个纯函数
-  colormaps.js        7 条配色 + 采样
+  frameMath.js        findMax / jet / press + addSide / gaussBlur_1 / interpSmall
+  colormaps.js        7 条配色 + 采样（每条自带 previewCss，色带条不用自己画）
   jetLadder.js        jet 阶梯（全仓 18 处老配色用的那条）
+  greyLadder.js       garyColors + jetgGrey（点阵的灰阶，未选中区域用）
   displayThresholds.js      阈值持久化（用 globalThis.localStorage?.，所以裸 Node 不用垫片）
   coordinatePointLayout.js  物理坐标表 → 布局
   bed4096numParams.js       共享调参对象（模块级单例）
   numMatrix/params.js       参数归一化 + 预设（fast256 / fast1024 / fast1024sit / smallBed12B）
   numMatrix/pipeline.js     量化 / 统计 / 下限过滤 / 纹理尺寸推导
+  pointGrid/params.js       参数归一化 + 预设（matCol / carCol）+ deriveGridSize
+  pointGrid/pipeline.js     插值 / 补边 / 高斯模糊（纯帧运算，有逐帧一致性测试）
 react/                peer: react + three
   RendererHost.jsx    宿主：懒加载 + 契约审计 + 声明式 values / 帧总线两条通道
   useSceneFrame.js    订阅帧总线的 hook —— 二开者消费帧的正式入口
-  builtins.js         注册本包 ships 的渲染器
+  builtins.js         注册本包 ships 的两个渲染器
   numMatrix/NumMatrixRenderer.jsx
   numMatrix/backends/sprite3d.js   three.js InstancedMesh，一次 draw call 画完整片矩阵
+  pointGrid/PointGridRenderer.jsx  three.js Points + TrackballControls，可框选
+  pointGrid/circle.png             点精灵贴图（打包资源，不是运行期相对 URL）
+  three/SelectionHelper.js         拖拽框选的那个 div
+  three/pointPick.js               世界坐标 → 屏幕矩形 → 网格下标
 styles/canvas.css     6 行
 src/client/           SensorClient —— WebSocket + HTTP 控制面
 src/store/            FrameStore + 新旧协议归一化
 src/display/          DisplayRegistry + 默认展示系统
-example/              可跑 demo（不进 npm 包的 files）
-scripts/smoke-core.mjs  零依赖层的裸 Node 守卫
+example/              可跑 demo（不进 npm 包的 files，也排出装机包）
+docs/                 在线可预览文档站（同上）
+scripts/smoke-core.mjs  零依赖层的裸 Node 守卫（15 项）
 ```
 
 ---
@@ -279,12 +350,21 @@ GET /api/sdk/contract
 ## 本地开发
 
 ```bash
-npm test        # vitest，121 例（core 的纯函数 + 参数归一化 + 逐点比对）
-npm run smoke   # 裸 Node 跑一遍 core，12 项
+npm test        # vitest，131 例（core 的纯函数 + 参数归一化 + 逐点比对）
+npm run smoke   # 裸 Node 跑一遍 core，15 项
 cd example && npm i && npm run dev
+cd docs && npm i && npm run dev      # 文档站
+cd docs && npm run check             # 逐页 SSR 渲染，10 页
 ```
 
-在仓库根上也有：`npm run sdk:frontend-test` / `npm run sdk:frontend-smoke`。
+在仓库根上也有：`npm run sdk:frontend-test` / `npm run sdk:frontend-smoke` /
+`npm run sdk:frontend-docs`。
+
+`docs` 的 `npm run check` 值得单说：`npm run build` 只证明**能打出包**，而页面里那些
+`listRenderers()` / `deriveGrid()` / `validateRendererDescriptor()` 是**渲染时**才执行
+的 —— 改一个 `core` 常量把某张表读崩了，build 照样绿。它走 Vite 的 SSR 通道逐页
+`renderToStaticMarkup`。**但它只替代「逐页点过」的一半**：证明页面不崩、表格能渲染，
+证明不了 WebGL 真的画出了东西，那部分仍然要在浏览器里看。
 
 改包内文件时 `example` 的 dev server 会热更新 —— linked 依赖默认不做预构建，源码直接
 过转换管线。
@@ -296,9 +376,17 @@ cd example && npm i && npm run dev
 - **`private: true`，不发公共 registry。** 分发走 `npm pack` tarball 或 `file:`。想真
   发布是另一件事（要定 scope 归属与版本承诺）。
 - **tarball 里根出口加载不了**，见上面「已知缺口」。渲染器那条路不受影响。
-- **当前只 ships 一个渲染器 `numMatrix`。** `pointGrid`（框选 / 点位拾取 / 视角旋转）
-  还在主应用里，第二轮再搬。
+- **ships 两个渲染器：`numMatrix` + `pointGrid`。** 后者 2026-08-05 第二轮搬入。
 - **`BACKENDS = ['sprite3d']`。** canvas2d 与 webgl 两个后端没搬。
+- **两个内置渲染器都按视口而不是按容器定尺寸**（`numMatrix/backends/sprite3d.js:247`、
+  `pointGrid/PointGridRenderer.jsx:319`）。主应用里每个展示形式独占整屏，所以这个区别
+  从没暴露过；想把画面嵌进一个小卡片，只能用视口尺寸的容器 + CSS `transform: scale()`
+  绕（文档站就是这么干的），代价是 `three/pointPick.js` 读的是 `window.innerWidth/Height`
+  —— **缩放态下框选会选错点**。新写渲染器请按容器画。已记积压。
+- **两个渲染器的 dispose 都没有 `forceContextLoss()`。** `renderer.dispose()` 不保证
+  立即归还 WebGL 上下文（浏览器同时活的上限约 8–16），同页多块时可能累积到
+  "Too many active WebGL contexts"。文档站用 `IntersectionObserver` 懒挂载 + 活跃数上限
+  4 绕开而没有改包内代码 —— 加这一行要配一整轮真机回归。已记积压。
 - **渲染器是构建期解析的。** `load: () => import()` 由打包器静态分析，所以**装机之后
   加不了新渲染器**。二开的两条路里，本包解决的是「新项目消费」，不是「装机后插件化」。
 - **主应用的迁移用 re-export 壳做的**：`client/src` 里搬走的模块原路径都留了一行

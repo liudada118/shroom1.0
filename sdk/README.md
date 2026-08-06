@@ -8,10 +8,24 @@
 | 管什么 | **连后端**：契约发现、串口开关、采集控制、历史查询 | **画画面**：渲染器、帧管线、配色、阈值 |
 | 跑在哪 | Node（Electron 主进程侧） | 浏览器（`/core` 也可裸 Node） |
 | 入口 | `npm run sdk:demo` / `npm run sdk:serial-demo` | `cd sdk/frontend/example && npm i && npm run dev` |
+| 文档 | 就是这份 README | `npm run sdk:frontend-docs` → **在线可预览文档站**，10 页 |
 
-**想拿这套东西起一个新项目、看到画面的，去读 [`frontend/README.md`](frontend/README.md)**，那边有
-最短可跑路径和消费者必须做的三件事（`resolve.dedupe`、peer 依赖、混淆器 `exclude`）。本文档
-往下是后端侧。
+**想拿这套东西起一个新项目、看到画面的，先开文档站**：
+
+```bash
+npm run sdk:frontend-docs     # 在仓库根上跑，10 页：讲解 + 活预览 + 「显示代码」
+```
+
+它比 README 多的不是篇幅，是**不会过期**：契约表、7 条配色、6 条预设、8 条帧通道全部从 `core`
+**直接 import 渲染**，每段代码样例用 Vite 的 `?raw` 显示**正在上面那块画面里跑的那个文件本身**。
+README 里的表格是手抄的 —— `RENDERER_METHODS` 改一行，README 不会有任何报错。文档站会跟着变。
+
+其中「写自己的渲染器」那一页是重点：一个约 140 行的 Canvas 2D 渲染器，不属于包，走完整条正式
+路径（`forwardRef` → `registerRenderer` → `validateRendererDescriptor` → `RendererHost`），
+源码就在页面里。「坑」那一页是踩过的账，包括下面提到的 tarball 缺陷。
+
+不想开站的话，[`frontend/README.md`](frontend/README.md) 有最短可跑路径和消费者必须做的**四**件事
+（`resolve.dedupe`、peer 依赖、混淆器 `exclude`、打包器要能处理 `.png` import）。本文档往下是后端侧。
 
 ---
 
@@ -31,8 +45,8 @@ cd frontend/example && npm i && npm run dev     # → 32×32 数字矩阵，游�
 | 入口 | 内容 | 依赖 |
 | :--- | :--- | :--- |
 | `@shroom/frontend` | 传输（`SensorClient`）、帧存储（`FrameStore`）、展示系统定义（`DisplayRegistry`），并全量转出 `core` | 无 |
-| `@shroom/frontend/core` | 契约、渲染器注册表、帧管线、配色、阈值、坐标布局（14 文件） | 无 |
-| `@shroom/frontend/react` | `RendererHost`、`useSceneFrame`、`registerBuiltinRenderers`、`numMatrix` | peer: react ≥18 + three **≥0.127** |
+| `@shroom/frontend/core` | 契约、渲染器注册表、帧管线、配色、阈值、坐标布局 | 无 |
+| `@shroom/frontend/react` | `RendererHost`、`useSceneFrame`、`registerBuiltinRenderers`、`numMatrix` + `pointGrid` | peer: react ≥18 + three **≥0.127** |
 | `@shroom/frontend/styles/canvas.css` | 6 行 | 无 |
 
 根出口**刻意不含 `react/`**：一旦含了，`SensorClient` 的裸 Node 消费者（本仓 `backend/tests/sdk/`
@@ -54,8 +68,9 @@ registerBuiltinRenderers();
 在仓库根上跑它的检查：
 
 ```bash
-npm run sdk:frontend-test     # vitest 121 例
-npm run sdk:frontend-smoke    # 裸 Node 跑一遍 core，12 项
+npm run sdk:frontend-test     # vitest 131 例
+npm run sdk:frontend-smoke    # 裸 Node 跑一遍 core，15 项
+npm run sdk:frontend-docs     # 文档站开发服务器
 ```
 
 `sdk:frontend-smoke` 不是补充测试，是**包边界的守卫** —— 无打包器、无 `localStorage` 垫片、无
