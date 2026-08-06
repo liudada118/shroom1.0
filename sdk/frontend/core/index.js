@@ -25,11 +25,14 @@
  * | 帧通路 | `frameBus` 的收发、`buildSceneFrame`、`SCENE_CHANNELS` |
  * | 配色 | `COLORMAPS` 七条 + `sampleColormap*`；`jetRgb` / `jet` 是 18 处老通路的原样出口 |
  * | 阈值 | `createThresholdState` 与三组默认值（替掉了 47 个模块级声明块） |
- * | 布局与数学 | `buildCoordinatePointLayout`、`findMax` / `press` |
+ * | 布局与数学 | `buildCoordinatePointLayout`、`findMax` / `press` / 点阵那三个帧函数 |
  * | numMatrix | `numMatrix.*` 命名空间 + 四个常用符号的顶层别名 |
+ * | pointGrid | `pointGrid.*` 命名空间 + 两个常用符号的顶层别名 |
  *
- * `numMatrix` 用命名空间而不是全部铺平：`LEGACY_PRESETS` 这种名字在
- * pointGrid 进来（第二轮）之后会撞车，现在就分好命名空间比到时候改出口便宜。
+ * 两个渲染器都用命名空间而不是全部铺平 —— 第一轮就是为这一刻留的：
+ * 它们各有一个 `LEGACY_PRESETS`、各有一个 `PARAM_RANGES`，铺平必撞。
+ * 顶层别名只给带前缀不会歧义的那几个（`NUM_MATRIX_PRESETS` /
+ * `POINT_GRID_PRESETS`、两个 `normalize*Params`）。
  *
  * @see ../react/index.js React + three 那一层（`RendererHost` 在那边）
  */
@@ -84,6 +87,11 @@ export {
 
 export { jetRgb } from './jetLadder.js';
 
+// 灰阶那一对是点阵渲染器在用的老配色。`garyColors` 是 `grayColors` 的拼写
+// 笔误，原样保留 —— 它是 `client/src/assets/util/value.js` 的对外符号，
+// 改名会把「搬家」变成「改接口」。
+export { garyColors, jetgGrey } from './greyLadder.js';
+
 /* ── 阈值 ───────────────────────────────────────────────────────── */
 export {
   DUAL_CHANNEL_DEFAULTS,
@@ -101,7 +109,14 @@ export {
   buildCoordinateWorldLayout,
 } from './coordinatePointLayout.js';
 
-export { findMax, jet, press } from './frameMath.js';
+export {
+  addSide,
+  findMax,
+  gaussBlur_1,
+  interpSmall,
+  jet,
+  press,
+} from './frameMath.js';
 
 /* ── numMatrix（命名空间 + 四个常用别名） ────────────────────────── */
 export * as numMatrix from './numMatrix/index.js';
@@ -112,3 +127,16 @@ export {
 } from './numMatrix/params.js';
 
 export { computeFrameStats, quantizeFrame } from './numMatrix/pipeline.js';
+
+/* ── pointGrid（命名空间 + 两个常用别名） ────────────────────────── */
+export * as pointGrid from './pointGrid/index.js';
+
+export {
+  LEGACY_PRESETS as POINT_GRID_PRESETS,
+  normalizePointGridParams,
+} from './pointGrid/params.js';
+
+export {
+  createPointGridPipeline,
+  runPointGridPipeline,
+} from './pointGrid/pipeline.js';

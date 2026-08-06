@@ -8,12 +8,12 @@
  * 性质（`scripts/smoke-core.mjs` 会立刻红）。注册表本体（`registerRenderer`）
  * 是纯的，所以它在 core；**注册哪些实现**这件事带实现，所以在 react。
  *
- * ## 为什么只有 numMatrix
+ * ## 现在是两个：numMatrix + pointGrid
  *
- * 本轮拆包只搬了数字矩阵。`pointGrid` 仍留在主应用
- * （`client/src/renderers/builtins.js`），它额外拖进 `SelectionHelper` 与
- * `threeUtil1`，留到第二轮。注册表按 id 覆盖且幂等，所以两侧各注册自己的那份
- * 不会互相踩 —— 主应用同时调两边是合法的，也正是它现在的做法。
+ * 第一轮（2026-08-03）只搬了数字矩阵；第二轮（2026-08-05）把点阵热力也搬了进来，
+ * 连同它依赖的 `SelectionHelper` 与 `threeUtil1` 里那 3 个函数（现在是
+ * `./three/SelectionHelper.js` 与 `./three/pointPick.js`）。
+ * `client/src/renderers/builtins.js` 随之退化成只转调本函数的壳。
  *
  * ## 注册只写描述符，不 import 本体
  *
@@ -32,6 +32,10 @@ import {
   LEGACY_PRESETS as NUM_MATRIX_PRESETS,
   normalizeNumMatrixParams,
 } from '../core/numMatrix/params.js';
+import {
+  LEGACY_PRESETS as POINT_GRID_PRESETS,
+  normalizePointGridParams,
+} from '../core/pointGrid/params.js';
 
 /**
  * 注册本包内置的渲染器。
@@ -59,6 +63,33 @@ export function registerBuiltinRenderers() {
       // 是同一个渲染器的三条预设；smallBed12B 是第四条，原来靠
       // `matrixName === 'smallBed12B'` 的字符串分支实现。
       presets: NUM_MATRIX_PRESETS,
+    }),
+    registerRenderer({
+      id: 'pointGrid',
+      label: '点阵热力（3D）',
+      description: '压力点阵的三维高度图，支持框选与视角旋转',
+      load: () => import('./pointGrid/PointGridRenderer.jsx'),
+      capabilities: [
+        RENDERER_CAPABILITIES.SIT,
+        RENDERER_CAPABILITIES.BOX_SELECT,
+        RENDERER_CAPABILITIES.ROTATE,
+      ],
+      methods: [
+        'sitData',
+        'sitValue',
+        'sitRenew',
+        'backData',
+        'backValue',
+        'changeDataFlag',
+        'changeSelectFlag',
+        'changeGroupRotate',
+        'reset',
+      ],
+      normalizeParams: normalizePointGridParams,
+      // matCol 与 carCol 两条。它们 953 行代码的净差异只有两个数字
+      // （`sit.num1` 16 vs 9、`sit.order` 2 vs 4），所以不是两个渲染器，
+      // 是同一个渲染器的两条预设 —— 逐帧一致性见 core/pointGrid/pipeline.test.js。
+      presets: POINT_GRID_PRESETS,
     }),
   ];
 

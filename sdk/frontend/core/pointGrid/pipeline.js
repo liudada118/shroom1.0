@@ -13,8 +13,11 @@
  * 一致性验证通过之前，任何改动都会污染基准。
  */
 
-import { addSide, gaussBlur_1, interpSmall } from '../../assets/util/util';
-import { deriveGridSize } from './params';
+// 扩展名必须写全 —— 这一层要能被裸 Node import（`scripts/smoke-core.mjs`
+// 守着这条性质），Node 的 ESM 解析不做补全。搬进包之前这两条写的是
+// `'../../assets/util/util'` 和 `'./params'`，靠 Vite 补的扩展名。
+import { addSide, gaussBlur_1, interpSmall } from '../frameMath.js';
+import { deriveGridSize } from './params.js';
 
 /**
  * 执行点阵数据管线。
@@ -62,7 +65,8 @@ export function runPointGridPipeline(source, channel, blurRadius, output) {
  *
  * 原实现每帧都会新建 interpSmall / addSide 的中间数组，在 30-100Hz
  * 下产生可观的 GC 压力。这里至少把最终输出缓冲区固定下来；
- * 中间数组的复用需要改动 util.js 的公共函数，留待管线验证通过后再做。
+ * 中间数组的复用要改 `../frameMath.js` 里那两个函数的签名（它们现在都返回
+ * 新数组），留待管线验证通过后再做。
  *
  * @param {{ num1: number, num2: number, interp: number, order: number }} channel 通道参数。
  * @returns {(source: number[], blurRadius: number) => number[]} 管线执行器。

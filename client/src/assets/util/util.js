@@ -6,7 +6,9 @@
 import { rainbowTextColors, rainbowTextColorsxy } from "./color";
 import { jetRgb } from "./jetLadder.js";
 import { findMax, jet } from "@shroom/frontend/core/frameMath.js";
-import { garyColors, rainbowBackColors, rainbowColors } from "./value";
+// `garyColors` 不在这里 import 了 —— 它唯一的消费者 `jetgGrey` 已经连表
+// 带函数搬进 `@shroom/frontend/core/greyLadder.js`（见本文件下方那条 re-export）。
+import { rainbowBackColors, rainbowColors } from "./value";
 import { createThresholdState } from "../../runtime/displayThresholds";
 
 export function findArr(arr) {
@@ -234,17 +236,10 @@ export function interpSquare(smallMat, Length, num) {
  * @returns 
  */
 // height , width , heightInterp , widthInterp
-export function interpSmall(smallMat, width, height, interp1, interp2) {
-
-  const bigMat = new Array((width * interp1) * (height * interp2)).fill(0)
-  for (let i = 0; i < height; i++) {
-    for (let j = 0; j < width; j++) {
-      bigMat[(width * interp1) * i * interp2 + (j * interp1)
-      ] = smallMat[i * width + j] * 10
-    }
-  }
-  return bigMat
-}
+//
+// 实现搬到了 `@shroom/frontend/core/frameMath.js`（点阵渲染器要用它，理由同
+// 下面的 `jet` / `findMax`）。这里原样 re-export，消费方一行不改。
+export { interpSmall } from "@shroom/frontend/core/frameMath.js";
 
 
 // export function interpSmall100(smallMat, width, height, interp1, interp2) {
@@ -302,38 +297,10 @@ export function interp1016(smallMat, bigMat, height, width, num) {
   }
 }
 
-export function addSide(arr, width, height, wnum, hnum, sideNum = 0) {
-  let narr = new Array(height);
-  let res = [];
-  for (let i = 0; i < height; i++) {
-    narr[i] = [];
-
-    for (let j = 0; j < width; j++) {
-      if (j == 0) {
-        narr[i].push(
-          ...new Array(wnum).fill(sideNum >= 0 ? sideNum : 1),
-          arr[i * width + j]
-        );
-      } else if (j == width - 1) {
-        narr[i].push(
-          arr[i * width + j],
-          ...new Array(wnum).fill(sideNum >= 0 ? sideNum : 1)
-        );
-      } else {
-        narr[i].push(arr[i * width + j]);
-      }
-    }
-  }
-  for (let i = 0; i < height; i++) {
-    res.push(...narr[i]);
-  }
-
-  return [
-    ...new Array(hnum * (width + 2 * wnum)).fill(sideNum >= 0 ? sideNum : 1),
-    ...res,
-    ...new Array(hnum * (width + 2 * wnum)).fill(sideNum >= 0 ? sideNum : 1),
-  ];
-}
+// 实现搬到了 `@shroom/frontend/core/frameMath.js`（点阵渲染器要用它）。
+// 注意下面的 `addSide1` **没有**跟着搬 —— 它与 addSide 只差一个默认参数，
+// 是另一次复制粘贴的产物，点阵不用它，所以留在原地。
+export { addSide } from "@shroom/frontend/core/frameMath.js";
 
 export function addSide1(arr, width, height, wnum, hnum, sideNum) {
   let narr = new Array(height);
@@ -368,24 +335,10 @@ export function addSide1(arr, width, height, wnum, hnum, sideNum) {
   ];
 }
 
-export function gaussBlur_1(scl, tcl, w, h, r) {
-  var rs = Math.ceil(r * 2.57); // significant radius
-  for (var i = 0; i < h; i++)
-    for (var j = 0; j < w; j++) {
-      var val = 0,
-        wsum = 0;
-      for (var iy = i - rs; iy < i + rs + 1; iy++)
-        for (var ix = j - rs; ix < j + rs + 1; ix++) {
-          var x = Math.min(w - 1, Math.max(0, ix));
-          var y = Math.min(h - 1, Math.max(0, iy));
-          var dsq = (ix - j) * (ix - j) + (iy - i) * (iy - i);
-          var wght = Math.exp(-dsq / (2 * r * r)) / (Math.PI * 2 * r * r);
-          val += scl[y * w + x] * wght;
-          wsum += wght;
-        }
-      tcl[i * w + j] = Math.round(val / wsum);
-    }
-}
+// 实现搬到了 `@shroom/frontend/core/frameMath.js`（点阵渲染器要用它）。
+// 下面的 `gaussBlur_return` / `gaussBlur_2` / `boxBlur_2` / `boxesForGauss`
+// 都没搬 —— 点阵走的是 gaussBlur_1 这一条，其余是另外几处复制粘贴，记进积压。
+export { gaussBlur_1 } from "@shroom/frontend/core/frameMath.js";
 
 /**
  * 高斯return
@@ -733,16 +686,10 @@ export function jetWhite4(min, max, x) {
   return rainbowTextColorsxy[length - 1 - num];
 }
 
-export function jetgGrey(min, max, x) {
-  if (!x) {
-    return garyColors[garyColors.length - 1]
-  }
-  const length = garyColors.length;
-  const count = (max - min) / length;
-  const num = Math.floor(x / count) >= length - 1 ? length - 1 : Math.floor(x / count) < 0 ? 0 : Math.floor(x / count);
-  // console.log(length,count,x  , num,Math.floor(x / count))
-  return garyColors[length - 1 - num];
-}
+// 实现连同 `garyColors` 阶梯表一起搬到了 `@shroom/frontend/core/greyLadder.js`
+// （点阵渲染器要用它）。做法与 `jetRgb` 搬进 `jetLadder.js` 那次一样：
+// 阶梯表和取样函数是一对，分开搬就会有一份留在这边慢慢漂。
+export { jetgGrey } from "@shroom/frontend/core/greyLadder.js";
 
 export function jetWhite2Back(min, max, x) {
   // let rainbowColors = [

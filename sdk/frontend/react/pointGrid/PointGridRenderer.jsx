@@ -20,22 +20,60 @@
  *
  * 渲染数学未做任何优化。sitRenew 中每帧重建 BufferAttribute 的写法予以保留，
  * 待视觉验证通过后再单独处理，避免污染一致性基准。
+ *
+ * ## 搬进 `@shroom/frontend` 时修掉的两处包边界问题（2026-08-05）
+ *
+ * 这两条在主应用里都不是 bug，一旦装进别人的项目就是。
+ *
+ * 1. **`circle.png` 原来写死成运行期相对 URL** —— `TextureLoader().load('./circle.png')`。
+ *    这张图现在靠 `client/public/circle.png` 恰好被 serve 在站点根目录，**装进
+ *    别人的项目就是 404 → 点阵全白**（`TextureLoader` 加载失败不抛错，只是贴图
+ *    永远是空的）。改成把图放进包里 `import` 进来，让打包器发出资源并给出正确
+ *    的 URL。主应用拿到的是同一张图的 hash URL，画面零变化。
+ *    → **这给消费者加了第四条义务：打包器要能处理 `.png` import。** Vite 原生
+ *      支持，webpack5 走 asset modules。README 与文档站都写了这条。
+ *    → 另开了一个 `params.pointSprite` 让消费者换图（见下面 `spriteUrl`）。
+ *    → `client/public/circle.png` **没有删**：还有约 30 个旧场景组件在用
+ *      `'./circle.png'` 那条老路。
+ *
+ * 2. **`TrackballControls` 的 import 少了 `.js`。** 主应用装的 three@0.127.0
+ *    没有 exports map，靠扩展名猜测能解析；three ≥0.150 的 exports map 是
+ *    `"./examples/jsm/*"` 通配，**不带扩展名直接解析失败**。而本包 peer 范围写的
+ *    是 `three: ">=0.127"` —— 也就是那句声明在 0.150 以上是假的。加上 `.js`
+ *    两边都对（0.127 里文件名本来就叫 `TrackballControls.js`）。
+ *
+ * ## 一处**没修**、只声明的包边界问题
+ *
+ * `props.data.current` 上的 `changeData` / `handleCharts` / `handleChartsArea`
+ * 是宿主注入的命令式回调，**契约（`core/contract.js` 的 `RENDERER_PROPS`）里
+ * 只声明了 `data` 这个 prop，没有声明 `current` 上要有哪三个方法**。而调用点
+ * 写的是 `host.data?.current?.changeData({...})` —— 可选链只护到 `current`，
+ * 传了个没有这三个方法的 ref 进来照样 `TypeError`。本轮只补声明（README +
+ * 文档站的「入参」页），不改代码：改成 `?.changeData?.()` 会静默吞掉宿主的
+ * 接线错误，比崩掉更难查。
  */
 
 import * as THREE from 'three';
 import { TextureLoader } from 'three';
-import { TrackballControls } from 'three/examples/jsm/controls/TrackballControls';
+// `.js` 不能省，理由见文件头第 2 条。
+import { TrackballControls } from 'three/examples/jsm/controls/TrackballControls.js';
 import React, { useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 
-import { SelectionHelper } from '../../components/three/SelectionHelper';
+import { SelectionHelper } from '../three/SelectionHelper.js';
 import {
   checkRectIndex,
   checkRectangleIntersection,
   getPointCoordinate,
-} from '../../components/three/threeUtil1';
-import { addSide, findMax, gaussBlur_1, interpSmall, jet, jetgGrey } from '../../assets/util/util';
-import { deriveGridSize, normalizePointGridParams } from './params';
-import { DUAL_CHANNEL_DEFAULTS, createThresholdState } from '../../runtime/displayThresholds';
+} from '../three/pointPick.js';
+// 逐个模块引，不走 `../../core/index.js` 那个 barrel —— 与
+// `../numMatrix/NumMatrixRenderer.jsx` 同一套写法。barrel 会把整个零依赖层
+// 拉进这个动态 chunk，懒加载的意义就没了。
+import { DUAL_CHANNEL_DEFAULTS, createThresholdState } from '../../core/displayThresholds.js';
+import { addSide, findMax, gaussBlur_1, interpSmall, jet } from '../../core/frameMath.js';
+import { jetgGrey } from '../../core/greyLadder.js';
+import { deriveGridSize, normalizePointGridParams } from '../../core/pointGrid/params.js';
+// 打包器把它变成一个真实存在的 URL；理由见文件头第 1 条。
+import circleUrl from './circle.png';
 
 const ALT_KEY = 18;
 const CTRL_KEY = 17;
@@ -67,6 +105,12 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
   const config = useMemo(() => JSON.parse(paramsKey), [paramsKey]);
   const sit = config.sit;
   const back = config.back;
+
+  // 点精灵贴图。缺省用包里自带的那张 4.7kB 圆点（见文件头第 1 条）；
+  // 消费者想换成方点 / 带光晕的图，传一个 URL 进来即可。
+  // 刻意不进 `normalizePointGridParams` —— 那一层在 `core/`，是零依赖层，
+  // 不该知道「有一张图被打包器发出来了」这件事。
+  const spriteUrl = props.params?.pointSprite || circleUrl;
 
   const containerRef = useRef(null);
   const propsRef = useRef(props);
@@ -305,7 +349,7 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
       state.sitGeometry.setAttribute('scale', new THREE.BufferAttribute(state.scales, 1));
       state.sitGeometry.setAttribute('color', new THREE.BufferAttribute(state.colors, 3));
 
-      state.texture = new TextureLoader().load('./circle.png');
+      state.texture = new TextureLoader().load(spriteUrl);
       state.material = new THREE.PointsMaterial({
         vertexColors: true,
         transparent: true,
@@ -603,8 +647,11 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
       state.particles = null;
       state.api = null;
     };
-    // 参数变化需要重建整个场景：网格尺寸决定了顶点缓冲区大小
-  }, [sit, back, config.separation, config.fps]);
+    // 参数变化需要重建整个场景：网格尺寸决定了顶点缓冲区大小。
+    // `spriteUrl` 也在里面 —— 换贴图本可以只 `texture.dispose()` 再 load 一张，
+    // 但那要把 material 单拎出来管生命周期。换图不是热路径（一个消费者通常
+    // 只设一次），重建整场景换来的是「这个 effect 只有一条清理路径」。
+  }, [sit, back, config.separation, config.fps, spriteUrl]);
 
   // 命令式接口转发到当前 effect 周期内的实现。
   // 走 state.api 中转而非直接闭包，是为了让参数变化重建场景后，

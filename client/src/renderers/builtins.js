@@ -1,69 +1,33 @@
 /**
- * builtins.js - 内置渲染器注册
+ * builtins.js - 壳文件：两个内置渲染器现在都由 `@shroom/frontend` 注册
  *
- * 单独成文件而不是放在 index.js，是为了让 RendererHost 能直接依赖它
- * 而不必反向引用聚合入口。
+ * 第一轮（2026-08-03）搬走 `numMatrix`，第二轮（2026-08-05）搬走 `pointGrid`，
+ * 于是这里一份描述符都不剩了。描述符与 `load` 路径都在包里
+ * （`sdk/frontend/react/builtins.js`）—— **主应用不再抄一份**，抄一份就会漂移。
  *
- * 注册只写描述符，不 import 渲染器本体——load 在真正需要时才执行。
- * 这是把 Home.jsx 那 959KB chunk 拆开的关键：目前 55 个场景组件全部
- * 静态导入，运行时却只会用到其中一个。
+ * 那为什么还留着这个文件？
  *
- * ## 现在这里只剩 pointGrid
+ * - `client/src/renderers/index.js`、`RendererHost` 与 `index.test.js` 都在
+ *   import 它。删掉就是一次纯粹为了少一个文件的连锁改名。
+ * - 它是主应用注册自己私有渲染器的**正式挂点**。将来有一个只属于主应用、
+ *   不该进包的渲染器（比如绑死某台设备的），就加在下面那个数组里，
+ *   和包里的那两个一起注册进同一个 Map。
  *
- * `numMatrix` 已经拆进 `@shroom/frontend`，由包自己的
- * `registerSdkBuiltins()` 注册（描述符与 load 路径都在包里，主应用不再重复
- * 声明一遍 —— 抄一份就会漂移）。`pointGrid` 留在这边：它额外拖进
- * `SelectionHelper` 与 `threeUtil1`，第二轮再搬。
- *
- * 两边注册进的是**同一个模块级 Map**（`./registry` 是包的壳），且注册幂等、
- * 按 id 覆盖，所以谁先谁后都一样。
+ * 注册幂等、按 id 覆盖，所以谁先谁后都一样。
  */
 
 import { registerBuiltinRenderers as registerSdkBuiltins } from '@shroom/frontend/react';
 
-import { RENDERER_CAPABILITIES } from './contract';
-import { registerRenderer } from './registry';
-import { LEGACY_PRESETS, normalizePointGridParams } from './pointGrid/params';
-
 /**
- * 注册全部内置渲染器（主应用自带的 + SDK ships 的）。
+ * 注册全部内置渲染器。
  *
  * 幂等：重复调用不会产生副作用，注册表按 id 覆盖。
  *
  * @returns {number} 成功注册的渲染器数量。
  */
 export function registerBuiltinRenderers() {
-  const results = [
-    registerRenderer({
-      id: 'pointGrid',
-      label: '点阵热力（3D）',
-      description: '压力点阵的三维高度图，支持框选与视角旋转',
-      load: () => import('./pointGrid/PointGridRenderer.jsx'),
-      capabilities: [
-        RENDERER_CAPABILITIES.SIT,
-        RENDERER_CAPABILITIES.BOX_SELECT,
-        RENDERER_CAPABILITIES.ROTATE,
-      ],
-      methods: [
-        'sitData',
-        'sitValue',
-        'sitRenew',
-        'backData',
-        'backValue',
-        'changeDataFlag',
-        'changeSelectFlag',
-        'changeGroupRotate',
-        'reset',
-      ],
-      normalizeParams: normalizePointGridParams,
-      // 旧场景组件 matCol.jsx / carCol.jsx 的参数原样搬过来。这两个文件
-      // 逐行 diff 只差 sit.num1（16 / 9）与 sit.order（2 / 4）两个数字，
-      // 所以它们不是两个渲染器，是同一个渲染器的两条预设。
-      presets: LEGACY_PRESETS,
-    }),
-  ];
+  // 主应用私有的渲染器加在这里；目前一个都没有，两个内置的都在包里。
+  const results = [];
 
-  // numMatrix 及其预设、能力、方法清单都在包里，见
-  // `sdk/frontend/react/builtins.js`。
   return results.filter(Boolean).length + registerSdkBuiltins();
 }

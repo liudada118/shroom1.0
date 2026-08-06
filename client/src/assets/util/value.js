@@ -21,24 +21,10 @@ export const rainbowColors = [
   [255, 255, 255],
   ...new Array(5).fill([255, 255, 255]),
 ];
-export const garyColors = [
-  [0, 0, 0],
-  [17, 17, 17],
-  [34, 34, 34],
-  [51, 51, 51],
-  [68, 68, 68],
-  [85, 85, 85],
-  // [102, 102, 102],
-  // [119, 119, 119],
-  // [136, 136, 136],
-  // [153, 153, 153],
-  // [170, 170, 170],
-  // [187, 187, 187],
-  // [204, 204, 204],
-  // [221, 221, 221],
-  // [238, 238, 238],
-  // [255, 255, 255],
-]
+// 灰度阶梯表搬到了 `@shroom/frontend/core/greyLadder.js`，和它唯一的取样函数
+// `jetgGrey` 放在一起（点阵渲染器要用那一对）。这里原样 re-export，本文件的
+// 对外接口一个符号都没变。注释掉的那 10 级灰阶也原样跟过去了。
+export { garyColors } from "@shroom/frontend/core/greyLadder.js";
 
 export const rainbowBackColors = [
   [255, 255, 0],

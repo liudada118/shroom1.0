@@ -29,22 +29,28 @@ import {
   COLORMAPS,
   DUAL_CHANNEL_DEFAULTS,
   NUM_MATRIX_PRESETS,
+  POINT_GRID_PRESETS,
   SCENE_CHANNELS,
   buildCoordinatePointLayout,
   buildSceneFrame,
   computeFrameStats,
+  createPointGridPipeline,
   createThresholdState,
   findMax,
   jet,
+  jetgGrey,
   listRenderers,
   normalizeNumMatrixParams,
+  normalizePointGridParams,
   numMatrix,
+  pointGrid,
   press,
   publishFrame,
   quantizeFrame,
   registerRenderer,
   resetRendererRegistry,
   resolveRendererFromDefinition,
+  runPointGridPipeline,
   sampleColormapRgb,
   subscribeFrames,
 } from '../core/index.js';
@@ -105,6 +111,19 @@ check('乱传参数不会抛，越界值被夹回范围内', () => {
   return `backend=${config.backend} size=${config.size} gridWidth=${config.gridWidth}`;
 });
 
+check('normalizePointGridParams 两条预设都能归一化并推出网格', () => {
+  const summary = Object.entries(POINT_GRID_PRESETS).map(([id, preset]) => {
+    const config = normalizePointGridParams(preset);
+    const grid = pointGrid.deriveGridSize(config.sit);
+    assert.ok(grid.total > 0, `${id} 的网格点数应大于 0`);
+    assert.ok(Number.isInteger(grid.total), `${id} 的网格点数应是整数`);
+    return `${id} ${grid.amountX}×${grid.amountY}`;
+  });
+  // 这两个尺寸抄自 matCol.jsx / carCol.jsx 的常量区，是搬包前后的对账基准。
+  assert.deepEqual(summary, ['matCol 36×24', 'carCol 26×28']);
+  return summary.join('，');
+});
+
 /* ── 3. 帧管线 ──────────────────────────────────────────────────── */
 
 const FRAME_W = 23;
@@ -152,6 +171,23 @@ check('press 分压重分配返回新数组，不改入参', () => {
   return `${out.length} 点，max=${findMax(out)}`;
 });
 
+check('点阵管线 interpSmall → addSide → gaussBlur_1 跑通一帧', () => {
+  const config = normalizePointGridParams(POINT_GRID_PRESETS.matCol);
+  const { total } = pointGrid.deriveGridSize(config.sit);
+  const source = syntheticFrame(0.3).slice(0, config.sit.num1 * config.sit.num2);
+
+  const once = runPointGridPipeline(source, config.sit, 2);
+  assert.equal(once.length, total);
+  assert.ok(once.every((v) => Number.isFinite(v)), '管线不应产出 NaN');
+  assert.ok(findMax(once) > 0, '合成帧过一遍管线后不应全是 0');
+
+  // 复用缓冲区的执行器与一次性调用必须逐点相同 —— 这条在 pipeline.test.js
+  // 里也有，这里再验一遍是因为裸 Node 抓的是另一类错（扩展名 / 顶层副作用）。
+  const reused = createPointGridPipeline(config.sit)(source, 2);
+  assert.deepEqual([...reused], once);
+  return `${total} 点，max=${findMax(once)}`;
+});
+
 /* ── 4. 配色 ────────────────────────────────────────────────────── */
 
 check('七条 colormap 在 0 / 0.5 / 1 处都给出合法 RGB', () => {
@@ -175,6 +211,17 @@ check('jet 保留原实现的 parseInt 取整行为', () => {
   // 这是 18 处老配色现在的观感，不是要修的东西（见 core/frameMath.js 头部）。
   assert.equal(jet(0, 100, 1e-12)[1], 1);
   return 'jet(0,255,178.5) = [204,255,0]；科学计数法那条 bug 仍在';
+});
+
+check('jetgGrey 保留原实现的两条反直觉行为', () => {
+  // 1. `if (!x)` 把 0 也算进去了，所以零压力点取到的是**最亮**的那一级，
+  //    而不是最暗的。点阵图里那片"底色"就是这么来的。
+  assert.deepEqual(jetgGrey(0, 4096, 0), jetgGrey(0, 4096, undefined));
+  // 2. 索引是倒着取的（`length - 1 - num`）：值越大越暗。
+  const low = jetgGrey(0, 4096, 100);
+  const high = jetgGrey(0, 4096, 4000);
+  assert.ok(high[0] <= low[0], '值越大应越暗');
+  return `x=100 → ${low.join(',')}；x=4000 → ${high.join(',')}`;
 });
 
 /* ── 5. 帧总线 ──────────────────────────────────────────────────── */

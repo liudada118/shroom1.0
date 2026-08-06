@@ -11,9 +11,9 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { addSide, gaussBlur_1, interpSmall } from '../../assets/util/util';
-import { deriveGridSize, LEGACY_PRESETS, normalizePointGridParams } from './params';
-import { createPointGridPipeline, runPointGridPipeline } from './pipeline';
+import { addSide, gaussBlur_1, interpSmall } from '../frameMath.js';
+import { deriveGridSize, LEGACY_PRESETS, normalizePointGridParams } from './params.js';
+import { createPointGridPipeline, runPointGridPipeline } from './pipeline.js';
 
 /**
  * matCol.jsx 原实现的参照版本。
