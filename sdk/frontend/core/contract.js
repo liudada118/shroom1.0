@@ -77,6 +77,27 @@ export const RENDERER_METHODS = {
   backData: 0,
   sitRenew: 0,
   changeDataFlag: 0,
+
+  // ---- 2026-08-05 第三轮渲染器迁移追加的 10 项 ----
+  //
+  // 来源是这一轮要搬进包的四条渲染路径：`NumWs.jsx`（canvas2d 后端）、
+  // `hand0205Point*.jsx`（handPoints）、`Canvas4096WebGL.jsx`（webglHeatmap）。
+  // 它们的 useImperativeHandle 里有这 10 个名字不在上面的表里，而
+  // `validateRendererDescriptor` 对契约外方法名是**静默拒绝注册**
+  // （返回 false 不抛错），所以不先补这一段，渲染器搬过去只会得到一块白屏。
+  //
+  // 数字是本轮在 `client/src` 全域按 `current?.xxx(` 实测出来的，口径同上
+  // ——「至少这么多次」。0 仍表示"暴露了但当前宿主没调"。
+  bthClickHandle: 62,   // page/home/util.js 59 + Home.jsx 3；全仓调用最密的一个
+  calibration: 18,      // 手部点云：IMU 标定
+  handZero: 10,         // 手部点云：关节角清零
+  changeHandAngle: 6,   // 手部点云：四元数驱动的手指关节旋转
+  drawContent: 1,       // components/foot/Car.jsx:380
+  changeColor: 1,       // components/title/Title.jsx:1318
+  changeType: 0,
+  changeBox: 0,
+  cancelSelect: 0,
+  changaCamera: 0,      // 原拼写如此（camera 少一个 e），照抄不改
 };
 
 /**
@@ -100,6 +121,14 @@ export const RENDERER_CAPABILITIES = {
   ROTATE: 'rotate',
   /** 需要外部 3D 模型文件 */
   MODEL: 'model',
+  /**
+   * 关节 / 骨骼驱动的布局：点位不由矩阵下标决定，而由一组外部姿态角
+   * （四元数）逐段变换出来。`handPoints` 是全仓唯一具备这个能力的渲染器。
+   *
+   * 2026-08-05 第三轮渲染器迁移追加。追加 capability 是安全方向：
+   * `validateRendererDescriptor` 只对**未知**值报错，不要求谁必须声明它。
+   */
+  ARTICULATED: 'articulated',
 };
 
 /**
@@ -144,6 +173,25 @@ export function validateRendererDescriptor(descriptor) {
       descriptor.methods
         .filter((method) => !(method in RENDERER_METHODS))
         .forEach((method) => errors.push(`契约外的命令式方法: ${method}`));
+    }
+  }
+
+  // `optionalMethods` 标的是「同一个渲染器换一套参数就不再暴露」的那几个
+  // （`numMatrix` 走 sprite3d 还是 canvas2d 后端，暴露面是 4 个还是 14 个）。
+  // 契约审计据此不把它们算作"声明了没实现"，见 `RendererHost.jsx`。
+  //
+  // **必须是 `methods` 的子集** —— 不在 `methods` 里的名字审计根本看不到，
+  // 写在这里只会给人"已经声明过了"的错觉。
+  if (descriptor.optionalMethods !== undefined) {
+    if (!Array.isArray(descriptor.optionalMethods)) {
+      errors.push('optionalMethods 必须是数组');
+    } else {
+      const declared = new Set(
+        Array.isArray(descriptor.methods) ? descriptor.methods : [],
+      );
+      descriptor.optionalMethods
+        .filter((method) => !declared.has(method))
+        .forEach((method) => errors.push(`optionalMethods 里的 ${method} 不在 methods 中`));
     }
   }
 

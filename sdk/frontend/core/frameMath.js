@@ -11,6 +11,9 @@
  * | `interpSmall` | `client/src/assets/util/util.js` | 12 | 二（pointGrid） |
  * | `addSide` | `client/src/assets/util/util.js` | 33 | 二（pointGrid） |
  * | `gaussBlur_1` | `client/src/assets/util/util.js` | 17 | 二（pointGrid） |
+ * | `jetRound` | `client/src/assets/util/util.js:488-494` | 7 | 三（canvas2d） |
+ * | `rotate90CW` | `client/src/assets/util/util.js:898-915` | 18 | 三（canvas2d） |
+ * | `gaussBlur_2` + `boxBlur_2` + `boxesForGauss` | `client/src/assets/util/util.js` | 44 | 三（canvas2d） |
  *
  * ## 为什么要新建这一个文件，而不是把 util.js 整份搬过来
  *
@@ -239,8 +242,8 @@ export function addSide(arr, width, height, wnum, hnum, sideNum = 0) {
  * 也是 `fps: 10` 这个预设值的由来。**要提速得换成可分离卷积（横竖各一遍，
  * 降到 O(w · h · rs)），那是独立的一件事，会改变浮点舍入。**
  *
- * 全仓另有 `gaussBlur_2` / `boxBlur_2` / `boxesForGauss` 共 7 份复制粘贴仍在
- * `util.js` 里 —— 那是可分离实现，但没人把点阵切过去。记进积压。
+ * 盒式的那一族（`gaussBlur_2` / `boxBlur_2` / `boxesForGauss`）在下面 —— 它是
+ * 可分离实现，`canvas2d` 后端用它；点阵仍然走本函数，没有切过去。
  *
  * @param {number[]} scl 源矩阵，行优先展开，不被修改。
  * @param {number[]} tcl **出参**，长度须为 `w * h`，结果写在这里。
@@ -266,4 +269,135 @@ export function gaussBlur_1(scl, tcl, w, h, r) {
         }
       tcl[i * w + j] = Math.round(val / wsum);
     }
+}
+
+/**
+ * jet 配色的**四舍五入**出口。
+ *
+ * 与上面的 `jet` 是同一条阶梯、不同的收尾，两个都要留着：
+ *
+ * | | 取整 | `max === min` |
+ * | :--- | :--- | :--- |
+ * | `jet`（18 处老配色） | `parseInt(255 * r + '')` | `g` 是 `NaN` |
+ * | `jetRound`（本函数） | `Math.round(255 * r)` | 返回 `[255, 255, 255]` |
+ *
+ * 逐字搬自 `util.js:488-494`。`canvas2d` 后端画的每一个数字都走它
+ * （原实现写的是 `import { jetRound as jet }`，容易看成走的是上面那个）。
+ *
+ * @param {number} min 值域下界。
+ * @param {number} max 值域上界。
+ * @param {number} x 取样值，超出 [min, max] 会被夹取。
+ * @returns {number[]} `[r, g, b]`，各分量 0-255 的整数。
+ */
+export function jetRound(min, max, x) {
+  if (x < min) x = min;
+  if (x > max) x = max;
+  if (max - min === 0) return [255, 255, 255];
+  const { r, g, b } = jetRgb(min, max, x);
+  return [Math.round(255 * r), Math.round(255 * g), Math.round(255 * b)];
+}
+
+/**
+ * 顺时针旋转 90°。
+ *
+ * 逐字搬自 `util.js:898-915`。**参数名是 `(arr, height, width)`，顺序反直觉**，
+ * 而且返回矩阵的形状是 `width × height`（行列互换）—— 唯一的调用点
+ * （`canvas2d` 后端的 `changeWsData`）传的是 32×32，方阵看不出来。
+ * 非方阵调用请自己核对下标，原实现没有非方阵的先例。
+ *
+ * @param {number[]} arr 原矩阵，行优先展开。
+ * @param {number} height 原矩阵行数。
+ * @param {number} width 原矩阵列数。
+ * @returns {number[]} 旋转后的新数组，长度不变。
+ */
+export function rotate90CW(arr, height, width) {
+  const matrix = Array.from({ length: height }, (_, i) => (
+    arr.slice(i * width, i * width + width)
+  ));
+
+  const newMatrix = [];
+  for (let col = 0; col < width; col++) {
+    newMatrix[col] = [];
+    for (let row = 0; row < height; row++) {
+      newMatrix[col][row] = matrix[height - 1 - row][col];
+    }
+  }
+
+  return newMatrix.flat();
+}
+
+/**
+ * 三次盒式模糊逼近高斯所用的三个核宽。
+ *
+ * 逐字搬自 `util.js`（那里有 7 份一模一样的复制粘贴，其中一份在 `NumWs.jsx`
+ * 的组件函数体内 —— 也就是**每次渲染重新定义一遍**）。
+ *
+ * @param {number} sigma 目标高斯标准差。
+ * @param {number} n 盒式遍数，调用点一律传 3。
+ * @returns {number[]} n 个核宽。
+ */
+function boxesForGauss(sigma, n) {
+  var wIdeal = Math.sqrt((12 * sigma * sigma / n) + 1);
+  var wl = Math.floor(wIdeal);
+  if (wl % 2 == 0) wl--;
+  var wu = wl + 2;
+  var mIdeal = (12 * sigma * sigma - n * wl * wl - 4 * n * wl - 3 * n) / (-4 * wl - 4);
+  var m = Math.round(mIdeal);
+  var sizes = [];
+  for (var i = 0; i < n; i++) sizes.push(i < m ? wl : wu);
+  return sizes;
+}
+
+/**
+ * 单遍盒式模糊。**不是纯的** —— 结果写进出参 `tcl`。
+ *
+ * @param {number[]} scl 源矩阵，行优先展开。
+ * @param {number[]} tcl **出参**，结果写在这里。
+ * @param {number} w 列数。
+ * @param {number} h 行数。
+ * @param {number} r 盒半径。
+ * @returns {void}
+ */
+function boxBlur_2(scl, tcl, w, h, r) {
+  for (var i = 0; i < h; i++)
+    for (var j = 0; j < w; j++) {
+      var val = 0;
+      for (var iy = i - r; iy < i + r + 1; iy++)
+        for (var ix = j - r; ix < j + r + 1; ix++) {
+          var x = Math.min(w - 1, Math.max(0, ix));
+          var y = Math.min(h - 1, Math.max(0, iy));
+          val += scl[y * w + x];
+        }
+      tcl[i * w + j] = val / ((r + r + 1) * (r + r + 1));
+    }
+}
+
+/**
+ * 三遍盒式模糊逼近高斯。返回新数组，**但会把入参 `scl` 也改掉**。
+ *
+ * 逐字搬自 `util.js`（`NumWs.jsx:442-449` 那一份）。与 `gaussBlur_1` 的区别
+ * 不只是快慢，还有两处会改画面的语义，所以**两个都得留着，不能互相替换**：
+ *
+ * | | 复杂度 | 输出 | 取整 |
+ * | :--- | :--- | :--- | :--- |
+ * | `gaussBlur_1` | O(w·h·rs²) | 写出参 `tcl` | `Math.round` |
+ * | `gaussBlur_2` | O(w·h·r)×3 | **返回**新数组 | 不取整，留浮点 |
+ *
+ * ⚠️ **第二遍是 `boxBlur_2(tcl, scl, ...)` —— 入参被当成中间缓冲写了一遍。**
+ * 原实现如此，调用点传的都是刚 `map` 出来的临时数组，所以没人踩到。传共享
+ * 数组进来会被就地改掉。
+ *
+ * @param {number[]} scl 源矩阵，行优先展开；**会被修改**。
+ * @param {number} w 列数。
+ * @param {number} h 行数。
+ * @param {number} r 目标高斯标准差。
+ * @returns {number[]} 模糊后的新数组，长度 `w * h`。
+ */
+export function gaussBlur_2(scl, w, h, r) {
+  let tcl = [];
+  var bxs = boxesForGauss(r, 3);
+  boxBlur_2(scl, tcl, w, h, (bxs[0] - 1) / 2);
+  boxBlur_2(tcl, scl, w, h, (bxs[1] - 1) / 2);
+  boxBlur_2(scl, tcl, w, h, (bxs[2] - 1) / 2);
+  return tcl;
 }

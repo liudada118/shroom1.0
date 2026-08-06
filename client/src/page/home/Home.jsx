@@ -77,7 +77,9 @@ import { Num } from "../../components/num/Num";
 import { Num2D } from "../../components/num/Num2D";
 import { Num2DOriginal } from "../../components/num/Num2Doriginal";
 import HumanBodyRawData from "../../components/num/HumanBodyRawData";
-import Num3D from "../../components/num/NumWs";
+// `Num3D`（components/num/NumWs.jsx）不再静态 import —— 它的两个渲染点都换成了
+// `RendererHost` + `NUM_MATRIX_PRESETS.num3dDefault`，实现在
+// `@shroom/frontend/react/numMatrix/backends/canvas2d.js`，经注册表懒加载。
 import { calFoot } from "../../assets/util/value";
 import { Heatmap } from "../../components/heatmap/canvas";
 import FootTrack from "../../components/footTrack/footTrack";
@@ -4681,9 +4683,16 @@ class Home extends React.Component {
 
             this.state.numMatrixFlag == "num3D" && [...tactileGloveTypes, 'robot1', 'footVideo'].includes(this.state.matrixName) ?
               <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
-                <Num3D
-                  ref={this.com}
-                  matrixName={this.state.matrixName}
+                <RendererHost
+                  rendererId="numMatrix"
+                  // 原来是 `<Num3D matrixName={...}>`。NumWs 只用 matrixName 判
+                  // 一件事：是不是 `carCol`（那支走 10×9）。这条分支的
+                  // matrixName 只会是手套四型 / robot1 / footVideo，所以恒定
+                  // 走 32×32 那条预设；`carCol` 那支由 num3dCarCol 预设承接。
+                  params={NUM_MATRIX_PRESETS.num3dDefault}
+                  label="3D 数字"
+                  rendererRef={this.com}
+                  colormap={canvasColormap}
                   data={this.data}
                   local={this.state.local}
                   {...this.sceneChartProps} />
@@ -4926,8 +4935,14 @@ class Home extends React.Component {
                       <CanvasCom matrixName={this.state.matrixName}
                         local={this.state.local}
                       >
-                        <Num3D
-                          ref={this.com}
+                        <RendererHost
+                          rendererId="numMatrix"
+                          // 这个渲染点原先连 matrixName 都没传，NumWs 里
+                          // `props.matrixName == 'carCol'` 恒为假 —— 32×32。
+                          params={NUM_MATRIX_PRESETS.num3dDefault}
+                          label="3D 数字"
+                          rendererRef={this.com}
+                          colormap={canvasColormap}
                           data={this.data}
                           local={this.state.local}
                           {...this.sceneChartProps} />

@@ -67,7 +67,7 @@ registerBuiltinRenderers();          // 注册本包 ships 的渲染器：numMat
 | :--- | :--- | :--- |
 | `@shroom/frontend` | 传输（`SensorClient`）、帧存储（`FrameStore`）、展示系统定义（`DisplayRegistry`），**并全量转出 `core`** | 无 |
 | `@shroom/frontend/core` | 契约、渲染器注册表、帧管线、配色、阈值、坐标布局 | 无 |
-| `@shroom/frontend/react` | `RendererHost`、`useSceneFrame`、`registerBuiltinRenderers`，两个渲染器（`numMatrix` / `pointGrid`）+ `three/{SelectionHelper,pointPick}` | peer: react + three |
+| `@shroom/frontend/react` | `RendererHost`、`useSceneFrame`、`registerBuiltinRenderers`，两个渲染器（`numMatrix`，两个后端 `sprite3d` / `canvas2d`；`pointGrid`）+ `three/{SelectionHelper,pointPick}` | peer: react + three |
 | `@shroom/frontend/styles/canvas.css` | 6 行 canvas 样式（`.canvasNum`） | 无 |
 
 **根出口刻意不含 `react/`。** 一旦含了，`SensorClient` 的裸 Node 消费者（后端测试里
@@ -182,6 +182,21 @@ Vite 原生支持，webpack 5 走 asset modules，Rollup 需要 `@rollup/plugin-
 （同一个渲染器只报一次）。注册失败**不抛错**，只记录原因并返回 `false` —— 坏插件不该
 让整个应用起不来。
 
+### 2026-08-06 第三轮往公开面追加了 11 项
+
+`RENDERER_METHODS` +10（`bthClickHandle` / `calibration` / `handZero` /
+`changeHandAngle` / `drawContent` / `changeColor` / `changeType` / `changeBox` /
+`cancelSelect` / `changaCamera` —— 最后一个原拼写就少一个 e，照抄不改），
+`RENDERER_CAPABILITIES` +1（`ARTICULATED`，关节/骨骼驱动的布局）。
+**`RENDERER_PROPS` 一个都没加**，所以下游自研渲染器的契约审计不受影响。
+
+同一轮给描述符加了一个可选字段 **`optionalMethods`**：标出「同一个渲染器换一套参数
+就不再暴露」的那几个方法。`numMatrix` 是第一个用它的 —— 走 `sprite3d` 后端是 4 个
+方法，走 `canvas2d` 是 14 个。`methods` 写**并集**（照常逐个校验在不在契约里），
+`optionalMethods` 标出可以缺席的那十个，两种后端的审计因此都干净。约束：**必须是
+`methods` 的子集**，否则注册失败（不在 `methods` 里的名字审计根本看不到）。
+**别拿它当"懒得实现"的免死金牌。**
+
 ### ⚠️ `data.current` 上的三个方法：契约管不着的一块公开面
 
 `RENDERER_PROPS` 里有一项 `data`，说明写的是「宿主注入的 ref」。但 **`data.current` 上
@@ -245,7 +260,8 @@ core/                 零依赖层，裸 Node 可 import
   displayThresholds.js      阈值持久化（用 globalThis.localStorage?.，所以裸 Node 不用垫片）
   coordinatePointLayout.js  物理坐标表 → 布局
   bed4096numParams.js       共享调参对象（模块级单例）
-  numMatrix/params.js       参数归一化 + 预设（fast256 / fast1024 / fast1024sit / smallBed12B）
+  numMatrix/params.js       参数归一化 + 预设（fast256 / fast1024 / fast1024sit / smallBed12B
+                            / num3dDefault / num3dCarCol）+ BACKENDS 白名单
   numMatrix/pipeline.js     量化 / 统计 / 下限过滤 / 纹理尺寸推导
   pointGrid/params.js       参数归一化 + 预设（matCol / carCol）+ deriveGridSize
   pointGrid/pipeline.js     插值 / 补边 / 高斯模糊（纯帧运算，有逐帧一致性测试）
@@ -255,6 +271,7 @@ react/                peer: react + three
   builtins.js         注册本包 ships 的两个渲染器
   numMatrix/NumMatrixRenderer.jsx
   numMatrix/backends/sprite3d.js   three.js InstancedMesh，一次 draw call 画完整片矩阵
+  numMatrix/backends/canvas2d.js   2D canvas 逐格 fillText + CSS perspective 的伪三维
   pointGrid/PointGridRenderer.jsx  three.js Points + TrackballControls，可框选
   pointGrid/circle.png             点精灵贴图（打包资源，不是运行期相对 URL）
   three/SelectionHelper.js         拖拽框选的那个 div
@@ -265,7 +282,7 @@ src/store/            FrameStore + 新旧协议归一化
 src/display/          DisplayRegistry + 默认展示系统
 example/              可跑 demo（不进 npm 包的 files，也排出装机包）
 docs/                 在线可预览文档站（同上）
-scripts/smoke-core.mjs  零依赖层的裸 Node 守卫（15 项）
+scripts/smoke-core.mjs  零依赖层的裸 Node 守卫（18 项）
 ```
 
 ---
@@ -350,8 +367,8 @@ GET /api/sdk/contract
 ## 本地开发
 
 ```bash
-npm test        # vitest，131 例（core 的纯函数 + 参数归一化 + 逐点比对）
-npm run smoke   # 裸 Node 跑一遍 core，15 项
+npm test        # vitest，144 例（core 的纯函数 + 参数归一化 + 逐点比对 + 两个渲染器描述符）
+npm run smoke   # 裸 Node 跑一遍 core，18 项
 cd example && npm i && npm run dev
 cd docs && npm i && npm run dev      # 文档站
 cd docs && npm run check             # 逐页 SSR 渲染，10 页
@@ -377,7 +394,11 @@ cd docs && npm run check             # 逐页 SSR 渲染，10 页
   发布是另一件事（要定 scope 归属与版本承诺）。
 - **tarball 里根出口加载不了**，见上面「已知缺口」。渲染器那条路不受影响。
 - **ships 两个渲染器：`numMatrix` + `pointGrid`。** 后者 2026-08-05 第二轮搬入。
-- **`BACKENDS = ['sprite3d']`。** canvas2d 与 webgl 两个后端没搬。
+- **`BACKENDS = ['sprite3d', 'canvas2d']`。** `canvas2d` 2026-08-06 第三轮搬入
+  （原 `client/src/components/num/NumWs.jsx`，导出名 `Num3D`，其实是 2D canvas +
+  CSS 透视，不是 WebGL）。**webgl 后端还没搬**（`Num2D` / `Num2Doriginal`）。
+  两个后端的**命令式暴露面不一样**：`sprite3d` 4 个方法，`canvas2d` 14 个 ——
+  多出来的十个由描述符的 `optionalMethods` 声明，见下面「公开面」一节。
 - **两个内置渲染器都按视口而不是按容器定尺寸**（`numMatrix/backends/sprite3d.js:247`、
   `pointGrid/PointGridRenderer.jsx:319`）。主应用里每个展示形式独占整屏，所以这个区别
   从没暴露过；想把画面嵌进一个小卡片，只能用视口尺寸的容器 + CSS `transform: scale()`

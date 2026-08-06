@@ -53,15 +53,56 @@ export function registerBuiltinRenderers() {
       label: '数字矩阵',
       description: '每格显示压力数值，背景按配色着色；一次 draw call 画完整片矩阵',
       load: () => import('./numMatrix/NumMatrixRenderer.jsx'),
-      // 只有 SIT：它没有框选，也没有 group 旋转。滚轮缩放与拖拽平移是
-      // 相机操作，不在 capabilities 的语汇里（那几项描述的是数据通道与选取能力）。
-      capabilities: [RENDERER_CAPABILITIES.SIT],
-      methods: ['sitData', 'sitValue', 'changeWsData', 'changeWsDataRaw'],
+      // 没有框选。ROTATE 是 2026-08-06 接 `canvas2d` 后端时加的 ——
+      // `num3D` 那条通路有 `changePointRotation` / `changeGroupRotate` /
+      // `reset` / `setFrontView` 四个视角命令。**它依赖 backend 参数**，
+      // 走 `sprite3d` 时没有；见下面 `optionalMethods` 那段说明。
+      // 滚轮缩放与拖拽平移不算 —— 那是相机操作，不在 capabilities 的语汇里。
+      capabilities: [RENDERER_CAPABILITIES.SIT, RENDERER_CAPABILITIES.ROTATE],
+      // 并集：前四个所有后端都有，后十个只有 `canvas2d` 有。
+      methods: [
+        'sitData',
+        'sitValue',
+        'changeWsData',
+        'changeWsDataRaw',
+        'changeWsData147',
+        'changeWsData256',
+        'changeWsDatafinger',
+        'changeWsDatapalm',
+        'drawContent',
+        'changeType',
+        'changePointRotation',
+        'changeGroupRotate',
+        'reset',
+        'setFrontView',
+      ],
+      /**
+       * 走 `sprite3d` 后端时缺席的那十个。见
+       * `RendererHost.jsx` 的 `auditRendererContract` 文档。
+       *
+       * 这份名单与 `backends/canvas2d.js` 的 `commandNames` 是同一组名字 ——
+       * **没有从那里 import 过来是刻意的**：`builtins.js` 一旦静态 import 任何
+       * 后端，`load: () => import(...)` 的懒加载 chunk 就会塌回主包（Rollup
+       * 只发 warning 不报错）。宁可两处各写一遍，也不要静默塌包。
+       */
+      optionalMethods: [
+        'changeWsData147',
+        'changeWsData256',
+        'changeWsDatafinger',
+        'changeWsDatapalm',
+        'drawContent',
+        'changeType',
+        'changePointRotation',
+        'changeGroupRotate',
+        'reset',
+        'setFrontView',
+      ],
       normalizeParams: normalizeNumMatrixParams,
       // 三份 NumThreeColor 的常量原样搬过来。它们的布局公式代数等价
       // （逐点验算见 core/numMatrix/pipeline.test.js），所以不是三个渲染器，
       // 是同一个渲染器的三条预设；smallBed12B 是第四条，原来靠
       // `matrixName === 'smallBed12B'` 的字符串分支实现。
+      // `num3dDefault` / `num3dCarCol` 是第五、六条，走 `canvas2d` 后端。
       presets: NUM_MATRIX_PRESETS,
     }),
     registerRenderer({

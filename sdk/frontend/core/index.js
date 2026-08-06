@@ -113,9 +113,12 @@ export {
   addSide,
   findMax,
   gaussBlur_1,
+  gaussBlur_2,
   interpSmall,
   jet,
+  jetRound,
   press,
+  rotate90CW,
 } from './frameMath.js';
 
 /* ── numMatrix（命名空间 + 四个常用别名） ────────────────────────── */

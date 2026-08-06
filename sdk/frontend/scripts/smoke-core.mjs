@@ -37,7 +37,9 @@ import {
   createPointGridPipeline,
   createThresholdState,
   findMax,
+  gaussBlur_2,
   jet,
+  jetRound,
   jetgGrey,
   listRenderers,
   normalizeNumMatrixParams,
@@ -50,6 +52,7 @@ import {
   registerRenderer,
   resetRendererRegistry,
   resolveRendererFromDefinition,
+  rotate90CW,
   runPointGridPipeline,
   sampleColormapRgb,
   subscribeFrames,
@@ -87,13 +90,14 @@ check('createThresholdState 在没有 localStorage 时回落默认值', () => {
 
 /* ── 2. 参数归一化 ──────────────────────────────────────────────── */
 
-check('normalizeNumMatrixParams 四条预设都能归一化并推出网格', () => {
+check('normalizeNumMatrixParams 每条预设都能归一化并推出网格', () => {
   const summary = Object.entries(NUM_MATRIX_PRESETS).map(([id, preset]) => {
     const config = normalizeNumMatrixParams(preset);
     const grid = numMatrix.deriveGrid(config);
     assert.ok(grid.count > 0, `${id} 的格子数应大于 0`);
     assert.ok(Number.isInteger(grid.count), `${id} 的格子数应是整数`);
-    return `${id} ${grid.gridWidth}×${grid.gridHeight}`;
+    assert.ok(numMatrix.BACKENDS.includes(config.backend), `${id} 的 backend 应是已实现的`);
+    return `${id} ${grid.gridWidth}×${grid.gridHeight}/${config.backend}`;
   });
   return summary.join('，');
 });
@@ -211,6 +215,37 @@ check('jet 保留原实现的 parseInt 取整行为', () => {
   // 这是 18 处老配色现在的观感，不是要修的东西（见 core/frameMath.js 头部）。
   assert.equal(jet(0, 100, 1e-12)[1], 1);
   return 'jet(0,255,178.5) = [204,255,0]；科学计数法那条 bug 仍在';
+});
+
+check('jetRound 与 jet 是同一条阶梯、不同的收尾', () => {
+  // 同一段上两者取的是同一个色，只差取整方式（parseInt 截断 vs Math.round）。
+  assert.deepEqual(jetRound(0, 255, 178.5), [204, 255, 0]);
+  // 两处刻意保留的差异，`canvas2d` 后端每个数字都走 jetRound，别互换：
+  assert.deepEqual(jetRound(5, 5, 5), [255, 255, 255]); // jet 在这里 g 是 NaN
+  assert.ok(Number.isNaN(jet(5, 5, 5)[1]));
+  return 'jetRound(5,5,5)=[255,255,255]，jet 同参数 g=NaN';
+});
+
+check('rotate90CW 顺时针转 90°，参数顺序是 (arr, height, width)', () => {
+  // 1 2      3 1
+  // 3 4  →   4 2
+  assert.deepEqual(rotate90CW([1, 2, 3, 4], 2, 2), [3, 1, 4, 2]);
+  // 非方阵会换形状：2 行 3 列 → 3 行 2 列。
+  assert.deepEqual(rotate90CW([1, 2, 3, 4, 5, 6], 2, 3), [4, 1, 5, 2, 6, 3]);
+  return '2×2 与 2×3 两例都对得上';
+});
+
+check('gaussBlur_2 返回新数组、不取整，且会改掉入参', () => {
+  const src = [0, 0, 0, 0, 100, 0, 0, 0, 0];
+  const out = gaussBlur_2(src, 3, 3, 1.6);
+  assert.equal(out.length, 9);
+  assert.ok(out.every(Number.isFinite), '不应出现 NaN');
+  // 总量守恒到边界夹取为止；中心一定被摊平了。
+  assert.ok(out[4] < 100 && out[4] > 0, '中心应被摊薄但非零');
+  // ⚠️ 第二遍 boxBlur_2 把入参当中间缓冲写了一遍 —— 这是原实现的行为，
+  // 调用点传的都是刚 map 出来的临时数组，所以没人踩到。
+  assert.notDeepEqual(src, [0, 0, 0, 0, 100, 0, 0, 0, 0]);
+  return `中心 100 → ${out[4].toFixed(2)}；入参确实被改写`;
 });
 
 check('jetgGrey 保留原实现的两条反直觉行为', () => {

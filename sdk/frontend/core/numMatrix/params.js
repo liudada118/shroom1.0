@@ -39,6 +39,19 @@ export const PARAM_RANGES = {
   chartPadding: { min: 0, max: 100000 },
   pressureRows: { min: 1, max: 256 },
   pressureCols: { min: 1, max: 256 },
+  // ---- canvas2d 后端 ----
+  pointChartPadding: { min: 0, max: 100000 },
+  totalChartOffset: { min: 0, max: 1000 },
+  cellWidth: { min: 4, max: 256 },
+  cellHeight: { min: 4, max: 256 },
+  extraTop: { min: 0, max: 2000 },
+  fontScale: { min: 4, max: 200 },
+  textHeight: { min: 0, max: 100 },
+  textColorMax: { min: 1, max: 4095 },
+  colorValueScale: { min: 0.01, max: 1000 },
+  blurSigma: { min: 0, max: 20 },
+  baseTiltDeg: { min: -180, max: 180 },
+  rotateSize: { min: 1, max: 256 },
 };
 
 /** 画布边长占视口高度的比例。`compact` 用于 <750px 的小屏。 */
@@ -104,12 +117,88 @@ function normalizePressureRedistribution(redistribution = {}) {
 /**
  * 已实现的后端。
  *
- * 计划里的另两个后端（`canvas2d` = `num/NumWs.jsx`、`webgl` =
- * `num/Num2D.jsx` + `Num2Doriginal.jsx`）还没搬过来，所以这里只有一个。
+ * | 值 | 画法 | 来源 |
+ * | :--- | :--- | :--- |
+ * | `sprite3d` | three.js `InstancedMesh` + 精灵图集，一次 draw call | 三份 `NumThreeColor*` |
+ * | `canvas2d` | Canvas 2D 文字 + CSS `perspective` 伪 3D，**无 WebGL** | `num/NumWs.jsx` |
+ *
+ * 还差一个 `webgl`（`num/Num2D.jsx` + `Num2Doriginal.jsx`），下一批搬。
+ *
  * 填了未知值会退回 `sprite3d` 而不是报错 —— 二开的人手写 manifest 拼错
  * 后端名时，看到画面出来了比看到白屏更容易发现自己写错了。
  */
-export const BACKENDS = ['sprite3d'];
+export const BACKENDS = ['sprite3d', 'canvas2d'];
+
+/**
+ * `canvas2d` 后端的默认值。
+ *
+ * 这一组数字全部是 `NumWs.jsx` 里的写死值，逐个标了出处。它们之所以要参数化
+ * 而不是留在后端里，是因为**格尺寸和字号一起决定了这个展示形式能看的矩阵有
+ * 多大** —— 32×24 的格子铺 64×64 就是 2048×1736 的画布，超出多数屏幕。二开
+ * 换一个矩阵尺寸时这几个数必须能调。
+ */
+const CANVAS2D_DEFAULTS = {
+  cellWidth: 32,        // NumWs.jsx:95
+  cellHeight: 24,       // NumWs.jsx:96
+  extraTop: 200,        // NumWs.jsx:97，画布顶部留白，给"升起来"的数字用
+  fontScale: 20,        // NumWs.jsx:64，字号 = max(8, round(视口宽/1920 × 本值))
+  textHeight: 3,        // NumWs.jsx:106 `useRef(3)`，每 1 单位数值往上抬几像素
+  textColorMax: 30,     // NumWs.jsx:107 `useRef(30)`，jet 色标上限
+  colorValueScale: 5,   // NumWs.jsx:80，取色前先把数值放大几倍
+  blurSigma: 1.6,       // NumWs.jsx:202
+  baseTiltDeg: 20,      // NumWs.jsx:110，`rotateX` 初值
+  /**
+   * `rotate90CW` 用的行列数。**故意与 `grid` 解耦**：原实现写死
+   * `rotate90CW(newData, 32, 32)`，`carCol`（10×9）走的也是这个 32，
+   * 结果是一个长 1024、大部分 `undefined` 的数组。两条预设都保 32 是为了
+   * 逐帧一致；要修 `carCol` 是单独一件事，改这个参数即可，不用动代码。
+   */
+  rotateHeight: 32,
+  rotateWidth: 32,
+};
+
+/** `changePointRotation` / `changeGroupRotate` 的可选角度（弧度）。NumWs.jsx:92。 */
+const DEFAULT_ROTATION_PRESETS = [0, Math.PI / 6, Math.PI / 3];
+
+/**
+ * 归一化 `canvas2d` 后端的嵌套参数。
+ *
+ * 走 `sprite3d` 时这一段也会算 —— 多算十几次 `clampNumber` 不值得为它加分支，
+ * 而恒定存在的形状能让 Builder 表单不必判后端。
+ *
+ * @param {object} raw 用户填的 `params.canvas2d`。
+ * @returns {object} 归一化结果，键与 `CANVAS2D_DEFAULTS` 一致，外加 `rotationPresets`。
+ */
+function normalizeCanvas2dParams(raw = {}) {
+  const presets = Array.isArray(raw.rotationPresets) && raw.rotationPresets.length > 0
+    ? raw.rotationPresets.map((v) => (Number.isFinite(Number(v)) ? Number(v) : 0))
+    : DEFAULT_ROTATION_PRESETS;
+
+  return {
+    cellWidth: clampInteger(raw.cellWidth, CANVAS2D_DEFAULTS.cellWidth, PARAM_RANGES.cellWidth),
+    cellHeight: clampInteger(raw.cellHeight, CANVAS2D_DEFAULTS.cellHeight, PARAM_RANGES.cellHeight),
+    extraTop: clampInteger(raw.extraTop, CANVAS2D_DEFAULTS.extraTop, PARAM_RANGES.extraTop),
+    fontScale: clampNumber(raw.fontScale, CANVAS2D_DEFAULTS.fontScale, PARAM_RANGES.fontScale),
+    textHeight: clampNumber(raw.textHeight, CANVAS2D_DEFAULTS.textHeight, PARAM_RANGES.textHeight),
+    textColorMax: clampNumber(
+      raw.textColorMax, CANVAS2D_DEFAULTS.textColorMax, PARAM_RANGES.textColorMax,
+    ),
+    colorValueScale: clampNumber(
+      raw.colorValueScale, CANVAS2D_DEFAULTS.colorValueScale, PARAM_RANGES.colorValueScale,
+    ),
+    blurSigma: clampNumber(raw.blurSigma, CANVAS2D_DEFAULTS.blurSigma, PARAM_RANGES.blurSigma),
+    baseTiltDeg: clampNumber(
+      raw.baseTiltDeg, CANVAS2D_DEFAULTS.baseTiltDeg, PARAM_RANGES.baseTiltDeg,
+    ),
+    rotateHeight: clampInteger(
+      raw.rotateHeight, CANVAS2D_DEFAULTS.rotateHeight, PARAM_RANGES.rotateSize,
+    ),
+    rotateWidth: clampInteger(
+      raw.rotateWidth, CANVAS2D_DEFAULTS.rotateWidth, PARAM_RANGES.rotateSize,
+    ),
+    rotationPresets: presets,
+  };
+}
 
 export function normalizeNumMatrixParams(params = {}) {
   return {
@@ -141,10 +230,34 @@ export function normalizeNumMatrixParams(params = {}) {
     retintOnThresholdChange: normalizeBoolean(params.retintOnThresholdChange, true),
     /** 是否装滚轮缩放与拖拽平移。`NumThreeColor1024sit` 没装。 */
     cameraControls: normalizeBoolean(params.cameraControls, true),
-    /** 侧栏滚动曲线的窗口长度。三份原实现都是 20（不是别处那 8 份的 60）。 */
+    /** 侧栏滚动曲线的窗口长度。三份原实现都是 20，`NumWs.jsx` 那份是 60。 */
     chartWindow: clampInteger(params.chartWindow, 20, PARAM_RANGES.chartWindow),
-    /** 曲线 Y 轴留白。12 位传感器用 5，其余 1000。 */
+    /** 总压曲线的 Y 轴留白。12 位传感器用 5，其余 1000，`NumWs.jsx` 那份 20。 */
     chartPadding: clampInteger(params.chartPadding, 1000, PARAM_RANGES.chartPadding),
+    /**
+     * 受压点数曲线的 Y 轴留白。
+     *
+     * 以前是 `NumMatrixRenderer.jsx` 里的模块常量 `POINT_CHART_PADDING = 100`，
+     * 提成参数是因为 `NumWs.jsx` 的 `layoutData` 两条曲线都用 20。
+     */
+    pointChartPadding: clampInteger(params.pointChartPadding, 100, PARAM_RANGES.pointChartPadding),
+    /**
+     * 画总压曲线前从每个采样点上减掉的常数（减完不小于 0）。
+     *
+     * `NumWs.jsx:369` 写的是 `totalArr.map(a => a - 1 > 0 ? a - 1 : 0)`，
+     * 别处 7 份 `layoutData` 都没有这一下。**它只影响曲线，不影响画面。**
+     */
+    totalChartOffset: clampInteger(params.totalChartOffset, 0, PARAM_RANGES.totalChartOffset),
+    /**
+     * 侧栏统计取过滤前还是过滤后的帧。
+     *
+     * 默认 false（过滤后）= 三份 `NumThreeColor*` 的行为。`NumWs.jsx` 的
+     * `layoutData` 收的是**原始帧**，所以 canvas2d 预设置 true —— 两者的
+     * 「合力」读数会差一个 `valuef1 × 受压点数`，不是可以忽略的舍入差。
+     */
+    statsBeforeFilter: normalizeBoolean(params.statsBeforeFilter, false),
+    /** `canvas2d` 后端专属参数；走别的后端时忽略。 */
+    canvas2d: normalizeCanvas2dParams(params.canvas2d),
     /** 侧栏「合力」读数取和还是取最大值。smallBed12B 取最大值。 */
     totalMetric: params.totalMetric === 'max' ? 'max' : 'sum',
     /** 是否由本渲染器回写侧栏统计。minzhen 那路由外层接管。 */
@@ -194,13 +307,13 @@ export function paramsFromManifest(sensor = {}, params = {}) {
 /**
  * 现有场景组件对应的参数预设。
  *
- * 这三组数字直接抄自三份 NumThreeColor 的常量区，是参数化前后逐帧
- * 一致性验证的基准。**下拉框文案与后端的对应关系反直觉，写在这里备查**：
+ * 这几组数字直接抄自原实现的常量区，是参数化前后逐帧一致性验证的基准。
+ * **下拉框文案与后端的对应关系反直觉，写在这里备查**：
  *
  * | 下拉框 | 走的组件 | 本预设 |
  * | :--- | :--- | :--- |
- * | 原始数据 `numoriginal` | `NumThreeColor*`（真 three.js 精灵图） | 本文件三条 |
- * | 3D数据 `num3D` | `num/NumWs.jsx`（2D canvas + CSS 透视，**不是** WebGL） | 待接 canvas2d 后端 |
+ * | 原始数据 `numoriginal` | `NumThreeColor*`（真 three.js 精灵图） | `fast*` / `smallBed12B` |
+ * | 3D数据 `num3D` | `num/NumWs.jsx`（2D canvas + CSS 透视，**不是** WebGL） | `num3dDefault` / `num3dCarCol` |
  */
 export const LEGACY_PRESETS = {
   /** `three/NumThreeColor copy.jsx` —— Home.jsx 里的 Fast256，16×16。 */
@@ -237,5 +350,41 @@ export const LEGACY_PRESETS = {
     decimalScale: 10,
     chartPadding: 5,
     totalMetric: 'max',
+  },
+
+  /**
+   * `num/NumWs.jsx` 的常规分支 —— 32×32，「3D数据」下拉项的默认形态。
+   *
+   * 四个非默认值都来自 `layoutData`（`NumWs.jsx:341-374`）：窗口 60 而不是 20，
+   * 两条曲线的留白都是 20，受压点数走原始帧统计。
+   */
+  num3dDefault: {
+    backend: 'canvas2d',
+    gridWidth: 32,
+    gridHeight: 32,
+    chartWindow: 60,
+    chartPadding: 20,
+    pointChartPadding: 20,
+    totalChartOffset: 1,
+    statsBeforeFilter: true,
+  },
+
+  /**
+   * `num/NumWs.jsx` 里 `props.matrixName == 'carCol'` 那一支（`NumWs.jsx:99`）。
+   *
+   * ⚠️ **只改网格，不改 `canvas2d.rotateWidth/rotateHeight`** —— 原实现的
+   * `rotate90CW` 写死 32，`carCol` 走的也是它。见 `CANVAS2D_DEFAULTS.rotateHeight`
+   * 的注释：这条预设现在的画面是有问题的，但要跟原实现逐帧一致就得照搬。
+   * 想修的话把这两项设成 9 / 10 即可，不用改后端代码。
+   */
+  num3dCarCol: {
+    backend: 'canvas2d',
+    gridWidth: 10,
+    gridHeight: 9,
+    chartWindow: 60,
+    chartPadding: 20,
+    pointChartPadding: 20,
+    totalChartOffset: 1,
+    statsBeforeFilter: true,
   },
 };

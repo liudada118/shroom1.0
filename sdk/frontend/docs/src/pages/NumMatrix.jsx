@@ -26,6 +26,8 @@ const PRESET_ORIGIN = {
   fast1024: 'three/NumThreeColor1024.jsx（Fast1024，尺寸由 manifest 决定）',
   fast1024sit: 'three/NumThreeColor1024sit.jsx（23×23，带分压，无相机操作）',
   smallBed12B: '原先靠 matrixName === "smallBed12B" 的字符串分支（12 位，除 10 显示）',
+  num3dDefault: 'num/NumWs.jsx（canvas2d 后端，32×32；2D canvas + CSS 透视，不是 WebGL）',
+  num3dCarCol: 'num/NumWs.jsx 里 matrixName === "carCol" 那一支（10×9）',
 };
 
 export default function NumMatrix() {
@@ -91,13 +93,21 @@ export default function NumMatrix() {
           {PRESET_IDS.length} 组参数。三份 <C>NumThreeColor</C> 的布局公式代数等价
           （逐点验算见 <C>core/numMatrix/pipeline.test.js</C>），所以能收敛成一个。
         </p>
+        <p>
+          <C>backend</C> 那一列是**画法**，不是参数的一部分：<C>sprite3d</C> 用
+          three 的实例化精灵一次 draw call 画完整片矩阵；<C>canvas2d</C> 是 2D
+          canvas 逐格 <C>fillText</C> 加一层 CSS <C>perspective</C> 造出来的伪三维
+          （原 <C>num/NumWs.jsx</C>）。两者的命令式暴露面不同 —— 见
+          <C>optionalMethods</C>（契约页）。
+        </p>
         <Table
-          head={['id', '网格', '来自哪个老场景', '预设里显式给了什么']}
+          head={['id', '后端', '网格', '来自哪个老场景', '预设里显式给了什么']}
           rows={PRESET_IDS.map((id) => {
             const normalized = normalizeNumMatrixParams(NUM_MATRIX_PRESETS[id]);
             const derived = numMatrix.deriveGrid(normalized);
             return [
               <C>{id}</C>,
+              <C>{normalized.backend}</C>,
               `${derived.gridWidth}×${derived.gridHeight}`,
               PRESET_ORIGIN[id] || '—',
               <C>{JSON.stringify(NUM_MATRIX_PRESETS[id])}</C>,

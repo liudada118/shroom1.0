@@ -100,22 +100,34 @@ describe('内置渲染器注册', () => {
     expect(presets.carCol.sit.order).toBe(4);
   });
 
-  it('numMatrix 只声明 sit 通道，不声明框选与旋转', () => {
+  it('numMatrix 声明 sit 与旋转，不声明框选', () => {
     const descriptor = getRendererDescriptor('numMatrix');
-    expect(descriptor.capabilities).toEqual([RENDERER_CAPABILITIES.SIT]);
+    // ROTATE 是接 canvas2d 后端时加的：`num3D` 那条通路有
+    // `changePointRotation` / `changeGroupRotate` / `reset` / `setFrontView`
+    // 四个视角命令。走 sprite3d 时没有 —— 能力标记是按渲染器 id 声明的，
+    // 这里取的是并集，与 `optionalMethods` 同一个道理。
+    expect(descriptor.capabilities).toEqual([
+      RENDERER_CAPABILITIES.SIT,
+      RENDERER_CAPABILITIES.ROTATE,
+    ]);
     expect(descriptor.capabilities).not.toContain(RENDERER_CAPABILITIES.BOX_SELECT);
   });
 
-  it('numMatrix 的四条 legacy 预设挂在描述符上', () => {
+  it('numMatrix 的六条 legacy 预设挂在描述符上', () => {
     // 三份 NumThreeColor 的布局公式代数等价（逐点验算见
     // numMatrix/pipeline.test.js），所以它们是同一个渲染器的三条预设；
     // smallBed12B 是第四条，原来靠 `matrixName === 'smallBed12B'` 的字符串分支。
+    // 后两条走 canvas2d 后端，来自 `num/NumWs.jsx`（`carCol` 那支是它的
+    // `props.matrixName == 'carCol'` 分支）。
     const { presets, normalizeParams } = getRendererDescriptor('numMatrix');
-    expect(Object.keys(presets)).toEqual(['fast256', 'fast1024', 'fast1024sit', 'smallBed12B']);
+    expect(Object.keys(presets)).toEqual([
+      'fast256', 'fast1024', 'fast1024sit', 'smallBed12B', 'num3dDefault', 'num3dCarCol',
+    ]);
 
     expect(normalizeParams(presets.fast256).size).toBe(4);
     expect(normalizeParams(presets.fast1024sit).cameraControls).toBe(false);
     expect(normalizeParams(presets.smallBed12B).decimalScale).toBe(10);
+    expect(normalizeParams(presets.num3dDefault).backend).toBe('canvas2d');
   });
 
   it('manifest 声明 numMatrix 时能解析出渲染器与参数', () => {

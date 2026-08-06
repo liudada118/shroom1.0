@@ -55,6 +55,34 @@ describe('渲染器注册', () => {
     expect(failures.find((item) => item.id === 'badCap')?.errors[0]).toContain('未知能力标记');
   });
 
+  it('optionalMethods 必须是数组且是 methods 的子集', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    // 合法用法：标出「换一套参数就不暴露」的那几个，且都在 methods 里。
+    // numMatrix 走 sprite3d 还是 canvas2d 后端，暴露面是 4 个还是 14 个。
+    expect(registerRenderer(makeDescriptor({
+      methods: ['sitData', 'reset'],
+      optionalMethods: ['reset'],
+    }))).toBe(true);
+
+    // 不在 methods 里的名字，契约审计根本看不到 —— 写在这里只会给人
+    // "已经声明过了"的错觉，所以注册阶段就拦掉。
+    expect(registerRenderer(makeDescriptor({
+      id: 'strayOptional',
+      methods: ['sitData'],
+      optionalMethods: ['reset'],
+    }))).toBe(false);
+    expect(listRegistrationFailures().find((item) => item.id === 'strayOptional')?.errors[0])
+      .toContain('不在 methods 中');
+
+    // 写成字符串（少打一对方括号）也要拦，否则 for...of 会逐字符校验。
+    expect(registerRenderer(makeDescriptor({ id: 'badType', optionalMethods: 'reset' })))
+      .toBe(false);
+
+    // 不声明是常态：前两轮的两个渲染器都没有这个字段。
+    expect(registerRenderer(makeDescriptor({ id: 'noOptional' }))).toBe(true);
+  });
+
   it('坏插件不影响其他插件注册', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
 

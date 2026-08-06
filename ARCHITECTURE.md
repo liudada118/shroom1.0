@@ -1,5 +1,116 @@
 # 架构文档
 
+## 2026-08-06 第三轮渲染实现进包（批 1/4）：`numMatrix` 的第二个后端 `canvas2d`
+
+前两轮把 `numMatrix`（三份 NumThreeColor，1568 行）和 `pointGrid`（953 行）搬进了
+`@shroom/frontend`，但主应用里**还有约 5,300 行渲染实现没进包**：`num/NumWs.jsx`（517）、
+`num/Num2D.jsx`（860）、`num/Num2Doriginal.jsx`（1203）、两份手部点云（993 + 1037）、
+WebGL 热力图（187 + 953）、Canvas 斑点热力（460）。二开者装上包，拿到的只有精灵图数字
+矩阵和三维点阵两种画法，其余仍然只能回主仓抄。这一轮分 4 批全搬，**每批单独提交**。
+本节是**批 1**：`NumWs.jsx`（导出名 `Num3D`，其实是 Canvas 2D + CSS 透视，不是 WebGL）。
+
+批 1 挑最小的那个，是为了先把三件贯穿四批的事跑通，而不是因为它最有价值。
+
+### ① 扩契约：`RENDERER_METHODS` +10、`RENDERER_CAPABILITIES` +1
+
+**这一步不做，后面三批一行代码都跑不起来。** `validateRendererDescriptor` 会过滤
+`!(method in RENDERER_METHODS)`，命中就**返回 `false` 而不抛错** —— 坏插件不该让整个
+应用起不来，代价是**注册失败时画面只是空白，控制台一条 warn 而已**。这批组件有 10 个
+方法名不在契约里：`bthClickHandle` / `calibration` / `handZero` / `changeHandAngle` /
+`drawContent` / `changeColor` / `changeType` / `changeBox` / `cancelSelect` /
+`changaCamera`（**最后一个原拼写就少一个 e，照抄不改** —— 改它等于同时改 `Home.jsx`
+的调用点，是另一件事）。`RENDERER_CAPABILITIES` 追加 `ARTICULATED`（关节/骨骼驱动的
+布局），批 3 的 `handPoints` 是全仓唯一有这个能力的渲染器。
+
+**`RENDERER_PROPS` 一个都没加** —— 往它加才是真正的 breaking：下游所有自研渲染器的
+契约审计会立刻开始报「未实现」。往 `RENDERER_METHODS` 加是安全方向（删才危险）。
+这条规矩写在 `sdk/frontend/README.md` 的「公开面」一节，本轮是它第一次被执行。
+
+新增了一个可选描述符字段 **`optionalMethods`**，因为出现了契约模型没预料到的情况：
+**`capabilities` / `methods` 是按渲染器 id 声明的，而 `numMatrix` 的暴露面是按后端变的**
+—— `sprite3d` 4 个方法，`canvas2d` 14 个。`methods` 写并集（照常逐个校验在不在契约里），
+`optionalMethods` 标出可以缺席的那十个，`auditRendererContract` 跳过它们，于是两个后端
+的审计都干净。约束是**必须是 `methods` 的子集**（不在 `methods` 里的名字审计根本看不到），
+不满足就注册失败。这是一层**纸糊**，不是修好：真正的模型问题（暴露面依赖后端）仍在积压。
+
+### ② `NumMatrixRenderer.jsx` 必须动 —— 这是计划里写明要停下来汇报的一处
+
+`BACKEND_FACTORIES` 那个扩展点的文件头注释写着「两个后端搬过来时只往这里加一行，本文件
+其余部分不动」。**这句话不成立**：`canvas2d` 比 `sprite3d` 多三样东西 —— 10 个命令式方法、
+自己算统计（`sprite3d` 的统计在壳里算）、以及要响应调参面板的实时改动。
+
+没有顺手改，而是把后端契约**扩成三个通用可选口子**，`sprite3d` 一个都不实现、代码路径
+一字未变：
+
+| 新增 | 谁提供 | 干什么 |
+| :--- | :--- | :--- |
+| `commands` | 后端实例返回值上的一个对象 | 把后端自己的命令式方法透给壳的 `useImperativeHandle` |
+| `factory.commandNames` | 挂在工厂函数上的数组 | 让 `builtins.js` 声明 `methods` 时不必静态 import 后端 |
+| `applyTuning(changed)` | 后端实例上的可选方法 | 调参变更不重建场景 |
+| `reportStats` | 工厂入参里多的一项回调 | 后端自己算完统计回吐给壳 |
+
+`factory.commandNames` 是数组而 `builtins.js` 里那 10 个名字是**手抄的第二份** —— 这是
+故意的：`builtins.js` 属于首屏，静态 import `backends/canvas2d.js` 会让懒加载 chunk
+**静默塌回主包**（Rollup 只发 warning）。重复的代价用一条测试兜住：
+`react/builtins.test.js` 断言 `optionalMethods` 与 `createCanvas2dMatrixBackend.commandNames`
+**逐字相同**。这个文件还专门断言了「10 个方法名全在契约里」—— 因为漏一个的症状是白屏
+加一行控制台日志，不是报错。
+
+### ③ 壳只在真有引用方时留
+
+`components/num/NumWs.jsx` **不能做成一行 re-export 壳**：`App.jsx:30` 为 `/3Dnum` 路由
+懒加载它，渲染的是 `<Num3D />`，**一个 prop 都不传**。`export * from` 带不出 default，
+且没有 params 会退回 sprite3d 默认值。所以它是一个 **约 60 行的适配组件**：把
+`matrixName === 'carCol'` 映射成预设，其余转发给 `RendererHost`。517 → 60 行。
+
+`Home.jsx` 两个渲染点（原 4684 / 4929）换成 `RendererHost` + `NUM_MATRIX_PRESETS.num3dDefault`，
+`Home.jsx:80` 的静态 import 删掉（改走注册表懒加载）。
+
+### 顺手删掉的三样死东西
+
+- `insertInterpFlat`（NumWs:15，37 行）—— 计划里写的是「进 `core/numMatrix/pipeline.js`
+  并补逐点测试」，实测**零调用点**，所以是删不是搬。同样零调用的还有 `pressData` /
+  `interp` / `rotate90` 三个 import。
+- `import hand from 'hand(1).png'`（**314 KB**）—— 全文再无引用。包里仍然只有 4.7KB 的
+  `circle.png`。
+- `client/src/assets/util/util.js` 的 `jetRound` 现在**零生产调用点**（只剩测试在引），
+  因为 canvas2d 每个数字都走 `core/frameMath.js` 那份了。删它要连 `util.jet.test.js`
+  一起动，记进积压。
+
+### 一处「改了但可证明默认画面相同」的行为变化
+
+两个 `Home.jsx` 渲染点现在传 `colormap={canvasColormap}`，而老的 `Num3D` **永远用 jet**。
+`isClassicColormap(undefined)` 为真且 classic 是默认，所以默认渲染逐字节相同；差异只在
+用户**显式选了别的配色**时出现 —— 那时 3D 数字会跟着变，和其余每一个 numMatrix 渲染点
+的行为一致。这是对计划里「界面零变化」边界的一处**故意**的小偏离。
+
+### 对账（每一项都跑过，不是估的）
+
+| 检查 | 基线 | 现在 |
+| :--- | :--- | :--- |
+| `sdk/frontend` smoke（裸 Node） | 15 项 | **18 项** |
+| `sdk/frontend` vitest | 131 例 / 6 文件 | **144 例 / 7 文件**（registry +1、新 `builtins.test.js` +7、pipeline +5） |
+| `client` vitest | 211 passed | **211 passed**（`App.test.jsx` 那条既有失败仍在，缺 `@testing-library/react`） |
+| `client` eslint | 0 error | **0 error**（触碰的文件 0 warning） |
+| `docs npm run check` | 10 页 | **10 页**（数字矩阵页 8276 → 8869 字符，多了后端列） |
+| build | — | 11.21s，**无 `dynamic import will not move module into another chunk`**；`NumMatrixRenderer` chunk 15.44 kB（canvas2d 在里面）；`build/model` 20 个 / 137M 完好 |
+
+> ⚠️ `backend/tests/run-tests.js` **在开工前就是红的**（`Cannot find module '../common/logger'`），
+> 原因是工作区有约 50 个未提交的 `backend/**` → `sdk/backend/**` staged rename —— 那是
+> 并行进行中的后端 SDK 拆分，本轮一个字都不动，四次提交全部**按路径 stage**。
+
+### 还欠的（批 1 的真机手测，本地做不了）
+
+`num3D` 形式下手套四型 / `robot1` / `footVideo`：数字出不出、视角旋转
+（`changePointRotation` / `changeGroupRotate`）、`reset` / `setFrontView`，外加
+`/3Dnum` 路由（它现在走新的适配壳）。
+
+### 批 2–4 的边界（未做）
+
+`BACKENDS` 现在是 `['sprite3d', 'canvas2d']`，**webgl 后端还没搬**。批 1-B 的
+`glslJetLadder()`（第 19 份 jet 阶梯，藏在着色器模板字符串里所以之前 18 份合并时漏了）
+**推到批 2** —— 消费它的着色器那时才落地，提前加就是一段没人调的死码。
+
 ## 2026-08-04 渲染器层拆成可安装的前端 SDK 包（第一轮：core + numMatrix + 可跑 demo）
 
 目标消费者是**新项目的开发者**：`npm i` 之后能起一个小 demo、看到画面。做这件事之前做不到 ——
@@ -1236,6 +1347,7 @@ flowchart LR
 
 | 日期 | 类型 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-06 | 优化重构 | **第三轮渲染实现进包，批 1/4：`numMatrix` 的第二个后端 `canvas2d`**（原 `client/src/components/num/NumWs.jsx`，导出名 `Num3D`，其实是 2D canvas 逐格 `fillText` + CSS `perspective` 的伪三维，不是 WebGL）。先做三件贯穿四批的事：**扩契约** —— `RENDERER_METHODS` +10（`bthClickHandle`/`calibration`/`handZero`/`changeHandAngle`/`drawContent`/`changeColor`/`changeType`/`changeBox`/`cancelSelect`/`changaCamera`，最后一个**原拼写就少一个 e，照抄不改**）、`RENDERER_CAPABILITIES` +1（`ARTICULATED`），**`RENDERER_PROPS` 一个都不加**（往它加才是真 breaking，会让下游自研渲染器的契约审计立刻报「未实现」）。不扩契约后面三批一行都跑不起来：`validateRendererDescriptor` 撞到契约外的方法名**返回 `false` 而不抛**，症状是白屏 + 一条控制台 warn。**`NumMatrixRenderer.jsx` 必须动** —— 这是计划里写明「要停下来汇报」的一处：那个扩展点的注释写着「加一行、其余不动」，但 `canvas2d` 比 `sprite3d` 多 10 个命令式方法、自己算统计、还要响应调参面板。解法不是顺手改，是把后端契约扩成三个**通用可选**口子（`commands` / `applyTuning(changed)` / 工厂入参 `reportStats`）加一个 `factory.commandNames`，`sprite3d` 一个都不实现、代码路径一字未变。同时给描述符加可选字段 **`optionalMethods`**，因为暴露了一个契约模型问题：**`methods` 是按渲染器 id 声明的，而 `numMatrix` 的暴露面按后端变**（sprite3d 4 个 / canvas2d 14 个）—— `methods` 写并集、`optionalMethods` 标出可缺席的十个，必须是 `methods` 的子集否则注册失败。**这是纸糊不是修好**，模型问题仍在积压。`builtins.js` 里那 10 个方法名是**故意手抄的第二份**：它属于首屏，静态 import 后端会让懒加载 chunk **静默塌回主包**（Rollup 只 warning）—— 代价用新的 `react/builtins.test.js` 兜住，断言 `optionalMethods` 与 `createCanvas2dMatrixBackend.commandNames` 逐字相同，并断言 10 个名字全在契约里。`components/num/NumWs.jsx` **不能做成一行 re-export 壳**：`App.jsx:30` 为 `/3Dnum` 路由懒加载它并渲染 `<Num3D />`，**一个 prop 都不传**，`export *` 带不出 default 且没 params 会退回 sprite3d 默认值 —— 所以是 517 → 约 60 行的**适配组件**（`matrixName === 'carCol'` 映射成预设）。顺手删三样死东西：`insertInterpFlat`（37 行，计划本来要搬进 `pipeline.js` 并补测试，实测**零调用点**所以是删不是搬）、`hand(1).png` 死 import（**314 KB**）、`pressData`/`interp`/`rotate90` 三个死 import。**一处故意的行为偏离**：两个 `Home.jsx` 渲染点现在传 `colormap`，而老 `Num3D` 永远用 jet —— 默认（classic）渲染逐字节相同，只有用户显式选了别的配色才有差别，那时行为与其余每个 numMatrix 渲染点一致。对账：SDK vitest 131 → **144**（registry +1 / builtins.test.js +7 / pipeline +5），client 211 passed 不变（`App.test.jsx` 那条既有失败仍在），smoke-core 15 → **18**，eslint 0 error，docs check 10 页，build 11.21s **无 chunk 塌包 warning**、`NumMatrixRenderer` chunk 15.44 kB、`build/model` 20 个 / 137M 完好。⚠️ `backend/tests/run-tests.js` **开工前就是红的**（约 50 个未提交的 `backend/**` → `sdk/backend/**` staged rename），本轮一个字不动，四次提交全部按路径 stage。**批 1-B 的 `glslJetLadder()`（第 19 份 jet 阶梯，藏在着色器模板字符串里，18 份合并时漏了）推到批 2** —— 消费它的着色器那时才落地。`BACKENDS` 现在是 `['sprite3d','canvas2d']`，**webgl 后端还没搬**。新增积压：`assets/util/util.js` 的 `jetRound` 零生产调用点（删它要连 `util.jet.test.js` 一起动） |
 | 2026-08-05 | 优化重构 | **第二轮：`pointGrid` 进包 + 给 `@shroom/frontend` 建了一个在线可预览的文档站。** 先说文档站为什么值得单独做一个 React 应用而不是上 VitePress：**唯一理由是「展示的代码必须是跑着的代码」** —— 同一个 demo 文件被 import 两次，一次真跑，一次 `?raw` 显示，两边不可能漂。同理，契约表 / 7 条配色 / 6 条预设 / 8 条通道**全部从 `core` 直接 import 渲染**，不手抄（两份 README 里的手抄表格才是这轮真正要解决的问题：`RENDERER_METHODS` 改一行，README 不会有任何报错）。实测契约面比计划里估的大：prop **9** 个、命令式方法 **22** 个、能力标记 7 项 —— 页面用 `Object.keys().length` 算，所以估错也不影响。`pointGrid` 搬包顺手修掉三处「主应用里不是 bug、进了包就是」：`circle.png` 从硬编码相对 URL（靠 `client/public/` 被 serve 在站点根）改成 `import` 打包资源（装进别人项目就是 404 → 点阵全白），`TrackballControls` 的 import 补 `.js`（three ≥0.150 的 exports map 是 `"./examples/jsm/*"` 通配，不带扩展名直接解析失败，而 peer 范围写的是 `>=0.127`），以及 `props.data.current` 上那三个未声明方法（`changeData`/`handleCharts`/`handleChartsArea`）**补声明不改代码**。**这一轮自己踩了一次它自己在教的坑**：`load: () => import('./HeatBarsRenderer.jsx')` 的懒加载被首屏模块的静态 import 作废，Rollup 只报 warning（`dynamic import will not move module into another chunk`），现象是**懒加载 chunk 静默塌回主包** —— 修法是把三处共用的参数归一化抽成零依赖的 `heatBarsParams.js`，分界线和包自己的一样：有没有 React / three / DOM。⚠️ **`sdk/` 此前没有被任何一层排除**，`sdk/frontend/example/` 连它的 `node_modules` 一直在装机包里，本轮 `build.files` 与 forge `packagerConfig.ignore` 各补一条把 `example/` + `docs/` 排掉。新增 `docs/render-check.mjs`（`npm run check`）：`npm run build` 只证明能打出包，页面里 `listRenderers()` / `deriveGrid()` / `validateRendererDescriptor()` 是**渲染时**才执行的，改一个 core 常量把表读崩了 build 照样绿 —— 它走 Vite 的 SSR 通道逐页 `renderToStaticMarkup`，10 页全过；**但只替代了「逐页点过」的一半**，证明不了 WebGL 真画出了东西。WebGL 上下文预算（浏览器上限约 8–16）用 `Live.jsx` 的 `IntersectionObserver` 懒挂载 + 全局活跃数上限 4 绕开，**没给两个渲染器加 `forceContextLoss()`** —— 那会动到主应用在跑的代码，要配一整轮真机回归，记进积压。用例对账：client 221 → 211（−10）、SDK 121 → 131（+10），差额就是 `pipeline.test.js` 从 client 侧搬到 SDK 侧，净额不降；backend 38/38；smoke-core 15/15；构建禁忌走护栏，`build/model` 20 个 / 137M 完好、`git status --short build/` 为 0 |
 | 2026-08-04 | 优化重构 | **渲染器层拆成可安装的前端 SDK 包 `@shroom/frontend`（第一轮：core + numMatrix + 可跑 demo）。** 目标消费者是新项目的开发者：`npm i` 之后能起一个小 demo 看到画面。`sdk/frontend/` 其实 2026-06-11 就建过一次并且分叉了 —— `package.json` 没有 `name` 装不了、`client/src` 一行没 import、唯一消费者是一个后端测试，根因是**它是一份平行副本**。所以本轮第一原则是**搬，不抄**：19 个模块搬进包里，原路径留 13 个 re-export 壳，`client/src` 的 import 一行没改。分层线画在**「有没有 React / three / DOM」**，这条线同时决定谁能消费和能不能在裸 Node 里加载 —— `/core` 14 文件零依赖、`/react` peer react ≥18 + three ≥0.127、`/styles/canvas.css` 6 行、根出口刻意不含 `react/`（否则 `SensorClient` 的裸 Node 消费者连 import 都做不到）。新建 `core/frameMath.js` 收 `findMax`/`jet`/`press` 三个纯函数并配身份断言 `expect(jet).toBe(jetFromSdk)`（没有它，将来有人在 `util.js` 里再写一份函数体不会有任何测试失败）。**拆包多出三件必做事，漏一件就崩**：`resolve.dedupe: ['react','react-dom','three']`（symlink 真实路径向上找不到你那份，且两份 React 崩 hooks、两份 three 让 `instanceof` 全失效）、混淆器 `exclude` 补包目录（否则改写 `import()` 字面量，懒加载 chunk 塌回主包）、`core/` 不许省扩展名或在模块顶层读 `localStorage`（打包器和 vitest 都会兜住，所以单元测试证明不了 —— 由新增的 `scripts/smoke-core.mjs` 裸 Node 无垫片守着，12/12）。`RendererHost.jsx` 是唯一不能做纯壳的：`Home.jsx` 直接 import 它而从不经过 `index.js`，纯转发会让 `pointGrid` 没人注册、`matCol`/`carCol` 静默失效，改成薄包装 + 本地注册。**从零装 tarball 查出一处越界**：`src/client/commands.js` 的 `'../../../../shared/commandSchema.json'` 跑出了包根，`file:` 下正常、tarball 下整个根出口 import 就抛（`/core` + `/react` 不受影响）—— 本轮不修，因为真正的修法是「`shared/commandSchema.json` 归后端还是归 SDK」这个归属决定，它有 5 个消费者。验收：`cd sdk/frontend/example && npm i && npm run dev` **画面出来**（32×32 数字矩阵 + 游动高斯斑，控制台零 error / 零 warning，连切 5 次 canvas 数始终 1）；用例对账 client 221 + SDK 121 = 342 = 341 基线 + 1 条新增身份断言；backend 38/38；`npm pack` 32 文件 66.5 kB 无 `example/` 无测试；带护栏的 client 构建通过且 `build/model` 20 个 / 137M 完好、懒加载 chunk 仍拆得出来。界面零变化，未删任何文件，`private: true` 保留 |
 | 2026-08-04 | 优化重构 | **`numMatrix` 接进主界面，六个渲染点收成三处，删 7 个文件 / 8685 行。** 上一轮证完等价性但没接线，成果只有测试在用。接线前先修掉一处**自己搬运时引入的发散**：`params.js` 的 `smallBed12B` 预设写死了 `textureValueMax: 2550`，而原式子是 `props.textureValueMax || (decimalScale > 1 ? valuej1 * decimalScale : 255)` 且**全仓无人传过这个 prop**，所以原实现一直走右边那支（默认 200×10 = 2000）并随 `valuej` 重烘 —— 写死会改掉 `classicTint` 的分母（值 1000 从 r=0.5 变 0.39），是看得出来的配色变化。这一处是核对预设出处时查出来的**不是测试报出来的**：`pipeline.test.js:339` 当时断言的正是 `toBe(2550)`，等于把发散钉住了 —— 等价性测试只能证「实现符合基准」，基准抄错它看不出来，所以搬常量时逐个回查出处这一步省不掉。接线三处：`bed4096num` 那路 `<Fast256 size={1}>` → `params={{ ...fast256, size: 1 }}`（`64/size` 推 64×64）；manifest / hand / minzhen / smallBed 那路收进 `buildNumMatrixParams()`；`fast256`/`normalFast`/`fast1024`/`fast1024sit` **四条三元分支**（其中 `normalFast` 与 `fast1024` 原本完全相同、指向同一份文件）收成一张 `NUM_MATRIX_SCENES` 表 + 一条分支 —— 这也是后面懒加载 54 个场景组件的前置条件，三元链没法按需 import。**唯一容易错的是 `manageSidebar`**：原守卫是 `props.manageSidebar !== false && props.matrixName !== 'minzhen'`（`NumThreeColor1024.jsx:167`）**两个条件的 AND**，后者藏在组件内部，参数化后渲染器不再认识 `matrixName`，minzhen 那一项必须在调用点折进来，否则侧栏会被渲染器与外层同时回写；同理 `smallBed12B` 的三处字符串分支折成「基础预设取 smallBed12B」。`gridWidth`/`gridHeight` 只在 manifest 那路有值，缺省 0 退回 `64/size`，与原 `matrixWidth > 0 ? matrixWidth : 64/size` 一致；`colormap`/`coordinateMap` 仍走 props 由 `...contractProps` 透传，配色变化靠渲染器自己的 `colormapKey` 重建场景、**不需要外层给 key**。顺带补上已跑在生产上的 manifest 分支**漏掉的 `colormap` 与 `coordinateMap`** —— 它只服务 `pointGrid`（两项都不读）所以没人踩到，接线后一个声明 `numMatrix` 的 manifest 会静默丢掉配色与坐标表。删除：三份 `NumThreeColor`（515+611+442）+ 4 个已入库的死 `.bak`（`Home.jsx.bak` 3870 / `Title.jsx.bak` 1690 / `Num2Doriginal.jsx.bak2` 1089 / `NumWs.jsx.bak` 468），后者对二开是纯噪音 —— `Home.jsx.bak` 里还留着三份 import 与五个 `<FastNNN>` 渲染点，全文搜索会把人引到死代码上；另外 7 个名字带 " copy" 的**都是活文件**，一个没动。**不搬 canvas2d / webgl 两个后端**（`NumWs.jsx` 517 / `Num2D.jsx` 860 / `Num2Doriginal.jsx` 1203），无基准测试且后两份漂移 935 行近乎全文，须先逐行 diff。Home chunk 943 → 925.61 kB，`NumMatrixRenderer` 成 10.03 kB 独立懒加载块（减得少是因为三份原文件体量主要在 three.js 共享依赖里，真收益是懒加载入口从此存在）。前端 341 通过 / 17 套件、eslint 干净、后端 38 个测试文件全通过、`build/model` 137MB 未被触碰。 |
@@ -1393,6 +1505,7 @@ flowchart LR
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-06 | 「3D 数字」这种画法也搬进了渲染包（四批里的第一批） | 软件里一共有六七种把数据画出来的方式，之前只有两种搬进了那个「别人也能装的包」。这一批搬的是「3D 数字」——就是每格显示数字、整片带一点立体倾斜的那种。搬完之后，别人装上包就能直接用这种画法，不用回来抄我们的代码。**界面上看不出区别**，只有一处是故意改的：以前 3D 数字不管你选哪种配色都是同一套颜色，现在会跟着你选的配色走，和其他画法保持一致（不选配色时和以前一模一样）。顺手删掉了三段没人用的代码和一张 314KB 的没人看的图片。剩下的三批（另外三种画法）还没搬 |
 | 2026-08-05 | 给渲染包配了一个能在浏览器里直接看的说明网站 | 以前想知道「7 种配色长什么样」「两种预设差在哪」，只能自己写代码跑一遍。现在开一个网页，十页看完：讲解、能动的实时画面、还有「显示代码」按钮 —— **按钮里那份代码就是上面这块画面正在跑的那一份**，不是另抄的一份，所以永远不会说的和做的不一样。网页上的参数表、配色表也都是当场从代码里读出来的，改了代码网页跟着变，不用手工同步。启动方式：`npm run sdk:frontend-docs`。只跑本地和内网，暂不对外部署 |
 | 2026-08-05 | 点阵热力图也搬进了渲染包 | 现在包里两种画法都齐了（数字矩阵 + 点阵热力）。搬的时候修掉三处「在我们自己软件里没事、别人装了就出问题」的地方，最要紧的是点阵那张小圆点贴图：以前是去网站根目录找，别人装到自己项目里就找不到，**点阵会整片全白**。界面一行没变 |
 | 2026-08-05 | 装机包里塞进去的多余文件清掉了 | 之前 `sdk/` 整个目录没被排除，示例程序连它下载的一大堆依赖包都跟着进了安装包。这轮把示例和文档站两个目录排掉，只留真正要发布的代码 |
@@ -1515,7 +1628,7 @@ flowchart LR
 
 ---
 
-> 本文档由 Codex 自动生成和维护。最后更新于：2026-08-05
+> 本文档由 Codex 自动生成和维护。最后更新于：2026-08-06
 
 ## 2026-07-07 Display Systems Runtime 定义与复杂线序迁移
 
@@ -1547,7 +1660,7 @@ Shroom1.0 是一个基于 **Electron** 的跨平台桌面应用程序，专用�
 | **实时通信** | WebSocket (`ws`) | ^8.14.2，前后端双向数据通信 |
 | **硬件通信** | serialport | ^12.0.0，USB 串口数据读写 |
 | **3D 渲染** | Three.js | **^0.127.0**（`client/package.json` 的实际 pin，2021 年的版本；本表此前写 ^0.170.0 是错的）。这个值是硬约束：`@shroom/frontend` 的 three peer 范围必须宽到 `>=0.127`，写 `^0.170` 会让主应用装不上 |
-| **前端 SDK** | `@shroom/frontend` | 0.1.0，`private: true`，`client` 用 `file:../sdk/frontend` 装。`/core` 零依赖、`/react` peer react ≥18 + three ≥0.127，ships `numMatrix` + `pointGrid` 两个渲染器。**装它必须同时开 `resolve.dedupe: ['react','react-dom','three']`**，且打包器要能处理 `.png` import |
+| **前端 SDK** | `@shroom/frontend` | 0.1.0，`private: true`，`client` 用 `file:../sdk/frontend` 装。`/core` 零依赖、`/react` peer react ≥18 + three ≥0.127，ships `numMatrix`（两个后端 `sprite3d` / `canvas2d`）+ `pointGrid` 两个渲染器。**装它必须同时开 `resolve.dedupe: ['react','react-dom','three']`**，且打包器要能处理 `.png` import |
 | **SDK 文档站** | `@shroom/frontend-docs` | 手写 React 应用（React ^19 + Vite ^5.4.21 + prismjs），10 页 · 活预览 · `?raw` 显示正在跑的源码 · 表格从 `core` 读。`npm run sdk:frontend-docs`；`base: './'` 所以产物挂任意静态服务器 / 子路径都能开。**只跑本地 / 内网，不加 CI 与部署**；`docs/` 与 `example/` 都排出装机包 |
 | **UI 组件库** | Ant Design (antd) | ^5.22.0，控制面板 UI |
 | **图表库** | ECharts | ^5.5.0，数据图表可视化 |
@@ -1634,7 +1747,7 @@ shroom1.0/
 │       │   ├── RendererHost.jsx       # 薄包装：转发 SDK 组件 + 本地注册 pointGrid（不能做纯壳）
 │       │   ├── builtins.js            # 只剩 pointGrid；numMatrix 由 SDK 的 builtins 注册
 │       │   ├── pointGrid/             # 点阵热力渲染器 = 旧 matCol + carCol 两条预设（本轮未搬）
-│       │   └── numMatrix/            # 只剩两个壳；组件与 sprite3d 后端已进 SDK
+│       │   └── numMatrix/            # 只剩两个壳；组件与两个后端（sprite3d / canvas2d）都在 SDK
 │       │       ├── params.js         # ⇢ 壳：re-export @shroom/frontend/core/numMatrix
 │       │       └── pipeline.js       # ⇢ 壳：re-export @shroom/frontend/core/numMatrix
 │       ├── store/           # Zustand 状态管理
@@ -1685,13 +1798,15 @@ shroom1.0/
 │       │   ├── displayThresholds.js    # 阈值持久化（globalThis.localStorage?.，裸 Node 不用垫片）
 │       │   ├── coordinatePointLayout.js
 │       │   ├── bed4096numParams.js
-│       │   ├── numMatrix/{params,pipeline}.js   # 参数归一化 + 预设 / 纯帧运算
+│       │   ├── numMatrix/{params,pipeline}.js   # 参数归一化 + 6 条预设 + BACKENDS 白名单 / 纯帧运算
 │       │   └── pointGrid/{params,pipeline}.js   # 同上（2026-08-05 第二轮搬入）
 │       ├── react/           # peer: react ≥18 + three ≥0.127
 │       │   ├── RendererHost.jsx         # 宿主：懒加载 + 契约审计 + values / 帧总线两条通道
 │       │   ├── useSceneFrame.js         # 订阅 hook —— 二开者消费帧的正式入口
 │       │   ├── builtins.js              # 注册本包 ships 的 numMatrix + pointGrid
-│       │   ├── numMatrix/{NumMatrixRenderer.jsx,backends/sprite3d.js}
+│       │   ├── numMatrix/NumMatrixRenderer.jsx  # 壳：阈值 / 侧栏 / 命令转发；后端只管画
+│       │   ├── numMatrix/backends/sprite3d.js   # three InstancedMesh，一次 draw call 画完整片
+│       │   ├── numMatrix/backends/canvas2d.js   # 2D canvas 逐格 fillText + CSS perspective 伪三维
 │       │   ├── pointGrid/{PointGridRenderer.jsx,circle.png}  # 贴图进包，不再是运行期相对 URL
 │       │   └── three/{SelectionHelper.js,pointPick.js}       # 框选 + 坐标换算
 │       ├── styles/canvas.css  # 6 行（scss → css，SDK 不能假设消费者装了 sass）
@@ -1726,8 +1841,8 @@ shroom1.0/
 | `/client/src/store/` | Zustand 状态管理，分为全局应用状态和高频压力数据状态 |
 | `/client/src/components/three/` | Three.js 3D 渲染组件与兼容入口，覆盖不同传感器类型和矩阵尺寸。剩 38 个，正按 `PointGridRenderer` 的三步配方逐组迁往 `renderers/` |
 | `/client/src/runtime/` | 运行时通道层，不含任何 UI。**四个文件现在都只是一行 `export * from '@shroom/frontend/...'` 的壳**，实现已搬进 SDK（2026-08-04），所以主应用的 import 路径与语义一行没改。原有职责不变：`frameBus.js` 是帧总线（`Set` + `notify`，订阅时同步补发末帧；**不进 React state**，一帧都不触发重渲染），`useSceneFrame.js` 是订阅 hook，`sceneFrame.js` 把 `Home.jsx` 里约 900 行 per-matrix 整形收敛成规范帧，`displayThresholds.js` 是六个调参阈值（`carValuej` 等）在全仓的**唯一读取出口**（52 个引用方，原来 47 个文件各抄一段模块级声明）。**改行为要去 `sdk/frontend/core/` 改，别当成两份代码** |
-| `/client/src/renderers/` | 渲染器插件层，现有 **2 个注册渲染器**（`pointGrid` 2 条预设 + `numMatrix` 4 条预设）。**`numMatrix` 那一半已于 2026-08-04 搬进 `@shroom/frontend`，原路径留壳**（`registry.js` / `contract.js` / `numMatrix/{params,pipeline}.js` 都是一行 re-export；`RendererHost.jsx` 是薄包装而不是纯壳 —— `Home.jsx` 直接 import 它而从不经过 `index.js`，纯转发会让 `pointGrid` 没人注册、`matCol`/`carCol` 静默失效）。**`pointGrid` 那一半已于 2026-08-05 第二轮搬完**（`core/pointGrid/{params,pipeline}.js` + `core/greyLadder.js` + `react/pointGrid/` + `react/three/{SelectionHelper.js,pointPick.js}`，`builtins.js` 退化成只调 `registerSdkBuiltins()`；`threeUtil1.js` 与 `SelectionHelper.js` 原路径必须留壳 —— 各有 10+ 个旧场景组件在 import）。渲染器一律动态 `import` 懒加载，不进 Home 的 chunk；`RendererHost` 同时是懒加载入口、错误边界和三通道适配器（帧总线 / 视图 props / `descriptor.methods` 声明过的命令）。同源组件靠 `descriptor.presets` 合并，不再 fork 文件。**两个渲染器都已接进主界面**：`pointGrid` 走 matCol / carCol 两处，`numMatrix` 走 `Home.jsx` 三处（`NUM_MATRIX_SCENES` 查找表 + `buildNumMatrixParams` 一条 manifest/hand/minzhen/smallBed 支路 + `bed4096num` 一处），被替代的三份 `NumThreeColor`（1568 行）已删除。`numMatrix` 多一层 `backends/`：壳管阈值与侧栏、后端只管画、`pipeline.js` 是可测的纯帧运算，另两个后端（canvas2d / webgl，即仍在的 `num/NumWs.jsx` 与 `num/Num2D*.jsx`）搬过来时壳不用重写 |
-| `/sdk/frontend/` | **`@shroom/frontend`** —— 可安装的前端包，二开的「新项目消费」入口。`private: true`，分发走 `file:` 或 `npm pack` tarball，不发公共 registry。分层线是**「有没有 React / three / DOM」**，因为它同时决定谁能消费和能不能在裸 Node 里加载：`/core` 零依赖（由 `scripts/smoke-core.mjs` 用**裸 Node、无垫片、无打包器**守着），`/react` peer 依赖 react ≥18 + three ≥0.127（**范围必须宽到 0.127** —— 主应用 pin 的是 2021 年那个版本），`/styles/canvas.css` 6 行，根出口**刻意不含 `react/`**（否则 `SensorClient` 的裸 Node 消费者连 import 都做不到）。**消费者必须做四件事**：`resolve.dedupe: ['react','react-dom','three']`（symlink 的真实路径向上找不到你那份 react/three，且两份 React 让 hooks 直接崩、两份 three 让 `instanceof` 全部失效）、装齐 peer 依赖、混淆器把本包整目录排进 `exclude`（否则改写 `import()` 的路径字面量，懒加载 chunk 塌回主包）、**打包器要能处理 `.png` import**（第四条，2026-08-05 加的 —— `react/pointGrid/circle.png` 现在是 `import` 出来的打包资源；Vite 原生支持，webpack5 走 asset modules）。`example/` 是最短可跑路径也是验收标准：`cd sdk/frontend/example && npm i && npm run dev`；**`docs/` 是在线可预览文档站**（10 页，`npm run sdk:frontend-docs`）—— 它的立身之本是**不可能过期**：契约 / 配色 / 预设 / 通道表全部从 `core` 直接 import 渲染，代码样例用 `?raw` 显示**正在跑的那个文件本身**（这也是它是一个手写 React 应用而不是 VitePress 的唯一理由），`render-check.mjs` 逐页 SSR 渲染当守卫（`build` 绿证明不了页面能跑，那些表格调用是渲染时才执行的）。⚠️ **`example/` 与 `docs/` 两个目录必须排出装机包**（根 `package.json` 的 `build.files` 一条 + forge `packagerConfig.ignore` 一条；此前 `sdk/` 整个没被排除，`example/` 连它的 `node_modules` 一直在包里）。**已知缺口**：① `src/client/commands.js` 有一条 `'../../../../shared/commandSchema.json'` 跑出了包根，所以**根出口在 tarball 装出来的包里加载不了**（`/core` + `/react` 不受影响，文档站因此只教这两条子路径），修法是先定 `shared/commandSchema.json` 的归属；② 两个内置渲染器都**按视口而不是按容器**定尺寸（`sprite3d.js:247` / `PointGridRenderer.jsx:319`），主应用里每个展示形式独占整屏所以从没暴露过，嵌进小卡片只能用视口尺寸容器 + CSS `transform: scale()` 绕，代价是 `pointPick.js` 读 `window.innerWidth/Height`、缩放态下指针坐标对不上；③ 两个渲染器的 dispose 都**没有 `forceContextLoss()`**，浏览器可能把 WebGL 上下文拖到 GC 才归还（文档站用活跃数上限 4 绕开）；④ `props.data.current` 上的 `changeData` / `handleCharts` / `handleChartsArea` 是宿主注入的命令式 API，渲染器里全是 `?.` 可选调用 —— 已在文档站与 README 补声明，但 `RENDERER_PROPS` 里只有 `data` 这一项，**没有机制校验这三个方法**；⑤ 前端契约没有版本号（后端有 `SDK_CONTRACT_VERSION`）；⑥ `load: () => import()` 是**构建期**解析的，所以本包解决的是「新项目消费」，**装机之后加不了新渲染器**。详见 `sdk/frontend/README.md` 与文档站的「坑」页 |
+| `/client/src/renderers/` | 渲染器插件层，现有 **2 个注册渲染器**（`pointGrid` 2 条预设 + `numMatrix` 4 条预设）。**`numMatrix` 那一半已于 2026-08-04 搬进 `@shroom/frontend`，原路径留壳**（`registry.js` / `contract.js` / `numMatrix/{params,pipeline}.js` 都是一行 re-export；`RendererHost.jsx` 是薄包装而不是纯壳 —— `Home.jsx` 直接 import 它而从不经过 `index.js`，纯转发会让 `pointGrid` 没人注册、`matCol`/`carCol` 静默失效）。**`pointGrid` 那一半已于 2026-08-05 第二轮搬完**（`core/pointGrid/{params,pipeline}.js` + `core/greyLadder.js` + `react/pointGrid/` + `react/three/{SelectionHelper.js,pointPick.js}`，`builtins.js` 退化成只调 `registerSdkBuiltins()`；`threeUtil1.js` 与 `SelectionHelper.js` 原路径必须留壳 —— 各有 10+ 个旧场景组件在 import）。渲染器一律动态 `import` 懒加载，不进 Home 的 chunk；`RendererHost` 同时是懒加载入口、错误边界和三通道适配器（帧总线 / 视图 props / `descriptor.methods` 声明过的命令）。同源组件靠 `descriptor.presets` 合并，不再 fork 文件。**两个渲染器都已接进主界面**：`pointGrid` 走 matCol / carCol 两处，`numMatrix` 走 `Home.jsx` 三处（`NUM_MATRIX_SCENES` 查找表 + `buildNumMatrixParams` 一条 manifest/hand/minzhen/smallBed 支路 + `bed4096num` 一处），被替代的三份 `NumThreeColor`（1568 行）已删除。`numMatrix` 多一层 `backends/`：壳管阈值与侧栏、后端只管画、`pipeline.js` 是可测的纯帧运算。**`canvas2d` 后端已于 2026-08-06 第三轮批 1 搬入**（原 `num/NumWs.jsx` 517 行，导出名 `Num3D`，实为 2D canvas + CSS 透视），预设从 4 条变 6 条（`+num3dDefault` / `+num3dCarCol`）；原路径留的**不是纯壳而是约 60 行的适配组件** —— `App.jsx` 的 `/3Dnum` 路由渲染 `<Num3D />` 且一个 prop 都不传，`export *` 带不出 default。这一批也证伪了「后端搬过来时壳一行不用改」那句注释：`canvas2d` 比 `sprite3d` 多 10 个命令式方法、自己算统计、要响应调参，于是壳扩了三个**通用可选**口子（`commands` / `applyTuning` / 入参 `reportStats`）加 `factory.commandNames`，`sprite3d` 一个都不实现、代码路径一字未变。**webgl 后端仍未搬**（`num/Num2D.jsx` + `num/Num2Doriginal.jsx`，批 2） |
+| `/sdk/frontend/` | **`@shroom/frontend`** —— 可安装的前端包，二开的「新项目消费」入口。`private: true`，分发走 `file:` 或 `npm pack` tarball，不发公共 registry。分层线是**「有没有 React / three / DOM」**，因为它同时决定谁能消费和能不能在裸 Node 里加载：`/core` 零依赖（由 `scripts/smoke-core.mjs` 用**裸 Node、无垫片、无打包器**守着），`/react` peer 依赖 react ≥18 + three ≥0.127（**范围必须宽到 0.127** —— 主应用 pin 的是 2021 年那个版本），`/styles/canvas.css` 6 行，根出口**刻意不含 `react/`**（否则 `SensorClient` 的裸 Node 消费者连 import 都做不到）。**消费者必须做四件事**：`resolve.dedupe: ['react','react-dom','three']`（symlink 的真实路径向上找不到你那份 react/three，且两份 React 让 hooks 直接崩、两份 three 让 `instanceof` 全部失效）、装齐 peer 依赖、混淆器把本包整目录排进 `exclude`（否则改写 `import()` 的路径字面量，懒加载 chunk 塌回主包）、**打包器要能处理 `.png` import**（第四条，2026-08-05 加的 —— `react/pointGrid/circle.png` 现在是 `import` 出来的打包资源；Vite 原生支持，webpack5 走 asset modules）。`example/` 是最短可跑路径也是验收标准：`cd sdk/frontend/example && npm i && npm run dev`；**`docs/` 是在线可预览文档站**（10 页，`npm run sdk:frontend-docs`）—— 它的立身之本是**不可能过期**：契约 / 配色 / 预设 / 通道表全部从 `core` 直接 import 渲染，代码样例用 `?raw` 显示**正在跑的那个文件本身**（这也是它是一个手写 React 应用而不是 VitePress 的唯一理由），`render-check.mjs` 逐页 SSR 渲染当守卫（`build` 绿证明不了页面能跑，那些表格调用是渲染时才执行的）。⚠️ **`example/` 与 `docs/` 两个目录必须排出装机包**（根 `package.json` 的 `build.files` 一条 + forge `packagerConfig.ignore` 一条；此前 `sdk/` 整个没被排除，`example/` 连它的 `node_modules` 一直在包里）。**2026-08-06 第三轮批 1**：`numMatrix` 多了第二个后端，`BACKENDS = ['sprite3d', 'canvas2d']`；公开面追加 11 项（`RENDERER_METHODS` +10 / `RENDERER_CAPABILITIES` +`ARTICULATED`，**`RENDERER_PROPS` +0**）外加可选描述符字段 `optionalMethods`（必须是 `methods` 的子集）—— 它只是纸糊了一个真实的模型问题：**`capabilities`/`methods` 按渲染器 id 声明，而 `numMatrix` 的暴露面按后端变**（sprite3d 4 个方法 / canvas2d 14 个）。**已知缺口**：① `src/client/commands.js` 有一条 `'../../../../shared/commandSchema.json'` 跑出了包根，所以**根出口在 tarball 装出来的包里加载不了**（`/core` + `/react` 不受影响，文档站因此只教这两条子路径），修法是先定 `shared/commandSchema.json` 的归属；② 两个内置渲染器都**按视口而不是按容器**定尺寸（`sprite3d.js:247` / `PointGridRenderer.jsx:319`），主应用里每个展示形式独占整屏所以从没暴露过，嵌进小卡片只能用视口尺寸容器 + CSS `transform: scale()` 绕，代价是 `pointPick.js` 读 `window.innerWidth/Height`、缩放态下指针坐标对不上；③ 两个渲染器的 dispose 都**没有 `forceContextLoss()`**，浏览器可能把 WebGL 上下文拖到 GC 才归还（文档站用活跃数上限 4 绕开）；④ `props.data.current` 上的 `changeData` / `handleCharts` / `handleChartsArea` 是宿主注入的命令式 API，渲染器里全是 `?.` 可选调用 —— 已在文档站与 README 补声明，但 `RENDERER_PROPS` 里只有 `data` 这一项，**没有机制校验这三个方法**；⑤ 前端契约没有版本号（后端有 `SDK_CONTRACT_VERSION`）；⑥ `load: () => import()` 是**构建期**解析的，所以本包解决的是「新项目消费」，**装机之后加不了新渲染器**。详见 `sdk/frontend/README.md` 与文档站的「坑」页 |
 | `/client/src/components/webgl/` | WebGL/Canvas 热力图渲染兼容模块，供机器人与复合体表映射组件复用 |
 | `/client/src/page/home/` | 主页面组件（Home.js），系统核心交互界面 |
 | `/docs/` | 架构文档、优化报告、技术优化建议，以及 EULA 最终用户许可协议文本 |
@@ -1771,7 +1886,7 @@ graph TD
 
     subgraph "SDK 包（file: 装进 client）"
         SDKCORE["@shroom/frontend/core<br/>零依赖：契约/注册表/帧管线/配色/阈值"]
-        SDKREACT["@shroom/frontend/react<br/>RendererHost + numMatrix<br/>peer: react + three"]
+        SDKREACT["@shroom/frontend/react<br/>RendererHost + numMatrix(sprite3d/canvas2d) + pointGrid<br/>peer: react + three"]
         SDKEX["example/<br/>可跑 demo(二开起点)"]
     end
 
@@ -1956,6 +2071,7 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-06 | codeOpi | 第三轮渲染实现进包批 1/4：`numMatrix` 新增 `canvas2d` 后端（`BACKENDS` 从 1 条变 2 条）+ 契约追加 11 项 + `optionalMethods` | 前两轮搬进包的是 `numMatrix`（三份 NumThreeColor，1568 行）和 `pointGrid`（953 行）；主应用里**还有约 5,300 行渲染实现没进包**，二开者装上包只有两种画法可用。这一轮分 4 批全搬，每批单独提交。批 1 搬 `num/NumWs.jsx`（517 行，导出名 `Num3D`，实为 2D canvas + CSS 透视）作为 `numMatrix` 的第二个后端 —— 挑最小的那个是为了先跑通三件贯穿四批的事，不是因为它最有价值。**① 扩契约（不做后面三批一行跑不起来）**：`RENDERER_METHODS` +10、`RENDERER_CAPABILITIES` +`ARTICULATED`、`RENDERER_PROPS` **+0**。`validateRendererDescriptor` 撞到契约外的方法名**返回 `false` 而不抛错**（坏插件不该让应用起不来），代价是**症状只有白屏 + 一条控制台 warn** —— 所以新建 `react/builtins.test.js` 专门断言这 10 个名字全在契约里。`changaCamera` 少的那个 e 是**原拼写，照抄不改**（改它等于同时改 `Home.jsx` 的调用点）。**② `NumMatrixRenderer.jsx` 必须动 —— 计划里写明「要停下来汇报」的那一处**：`BACKEND_FACTORIES` 的注释写着「加一行、其余不动」，实测不成立（canvas2d 多 10 个命令、自己算统计、要响应调参）。没有顺手改，而是把后端契约扩成三个**通用可选**口子 `commands` / `applyTuning(changed)` / 入参 `reportStats` 加一个 `factory.commandNames`，**`sprite3d` 一个都不实现、代码路径一字未变**。**③ 新可选字段 `optionalMethods`**，因为暴露了一个契约模型问题：`capabilities`/`methods` 按**渲染器 id** 声明，而 `numMatrix` 的暴露面按**后端**变（sprite3d 4 个方法 / canvas2d 14 个）—— `methods` 写并集、`optionalMethods` 标出可缺席的十个（必须是 `methods` 子集，否则注册失败），两个后端的审计因此都干净。**这是纸糊不是修好**，模型问题记进积压。`builtins.js` 里那 10 个名字是**故意手抄的第二份**：它属于首屏，静态 import 后端会让懒加载 chunk **静默塌回主包**（Rollup 只 warning，这是上一轮已经踩过一次的坑）—— 用测试断言它与 `factory.commandNames` 逐字相同来兜住。`components/num/NumWs.jsx` **不能做纯壳**：`App.jsx:30` 为 `/3Dnum` 路由渲染 `<Num3D />` 且**一个 prop 都不传**，`export *` 带不出 default、没 params 会退回 sprite3d 默认值 —— 做成 517 → 约 60 行的**适配组件**。删三样死东西：`insertInterpFlat`（37 行，计划本来要搬进 `pipeline.js` 补测试，实测零调用点 → 删）、`hand(1).png`（314 KB 死 import）、`pressData`/`interp`/`rotate90`。**一处故意的行为偏离**：`Home.jsx` 两个渲染点现在传 `colormap`，老 `Num3D` 永远用 jet —— 默认（classic）逐字节相同，只有显式选了别的配色才有差别，那时与其余每个 numMatrix 渲染点一致。对账：SDK 131 → **144**、client **211 passed**（既有 `App.test.jsx` 失败不变）、smoke-core 15 → **18**、eslint 0 error、docs check 10 页、build 11.21s 无塌包 warning、`build/model` 20 个 / 137M 完好。⚠️ backend 测试**开工前就是红的**（约 50 个未提交的 `backend/**` → `sdk/backend/**` staged rename），本轮不动，四次提交全部按路径 stage。**明说的边界**：批 1-B 的 `glslJetLadder()`（第 19 份 jet，藏在着色器模板字符串里所以 18 份合并时漏了）**推到批 2**，消费它的着色器那时才落地；webgl / handPoints / 两条热力图仍未搬；真机手测（`num3D` 下手套四型 / `robot1` / `footVideo` + `/3Dnum` 路由）本地做不了，仍欠 |
 | 2026-08-05 | codeOpi | `@shroom/frontend` 在线可预览文档站 `sdk/frontend/docs/`（10 页）+ 第二轮 `pointGrid` 进包 + 打包排除 | 起因是第一轮拆完包**文档没跟上**：只有两份手抄 README（11.1 kB + 14.6 kB）和一个 292 行 `example/`，参数表 / 方法清单 / 预设名全是手抄的，`RENDERER_METHODS` 改一行 README 不会有任何报错。所以这个站的立身之本是**不可能过期**：契约 / 配色 / 预设 / 通道表全部从 `core` 直接 import 渲染，代码样例用 Vite 的 `?raw` **把跑着的那个文件本身显示出来**（同一份源码 import 两次，一次跑一次显示）—— 这也是选「单个 React 应用」而不是 VitePress 的**唯一理由**。10 页：`Intro`/`QuickStart`（`?raw` 跨目录引 `example/src/main.jsx`，需 `server.fs.allow`）/`NumMatrix`/`PointGrid`/`Gallery`/`WriteRenderer`/`FrameBus`/`Contract`/`Api`/`Pitfalls`。**`WriteRenderer` 是这个站真正的产出** —— 全仓在此之前关于「怎么写自己的渲染器」只有一句「用 `validateRendererDescriptor` 自查」，唯一可抄的样例在 `react/builtins.js` 的源码里；它写了一个约 140 行的 Canvas 2D 渲染器走完整条正式路径，同时是**回归测试**（改 `RENDERER_PROPS`/`RendererHost` 破坏第三方渲染器 → 白屏或控制台契约审计告警），顺手示范了两个内置渲染器都没做对的一件事：**按容器尺寸画而不是按视口**（`sprite3d.js:247` / `PointGridRenderer.jsx:319`，主应用里每个展示形式独占整屏所以从没暴露过；`Live.jsx` 只能用视口尺寸容器 + CSS `transform: scale()` 绕，代价是 `pointPick.js` 读 `window.innerWidth/Height`，缩放态下指针坐标对不上）。`FrameBus` 页给了 `useSceneFrame` 第一个消费者（此前 0 个），并纠正了一处**自己写错的教学示范**：卸载时该调 `clearLastFrame()` 而不是 `resetFrameBus()` —— 后者踢掉**全局所有订阅者**是给测试用的，而 `subscribeFrames` **同步补发末帧**，不清就是下一个渲染器先画一帧上一个矩阵的数据。`pointGrid` 搬包修三处包边界：`circle.png` 硬编码相对 URL → `import` 打包资源（**第四条消费者义务：打包器要能处理 `.png` import**）、`TrackballControls` 补 `.js`（three ≥0.150 exports map 通配不带扩展名解析失败，而 peer 写的是 `>=0.127`）、`data.current` 三个方法补声明。新增 `core/pointGrid/{params,pipeline}.js` + `core/greyLadder.js` + `frameMath.js` 追加 `addSide`/`gaussBlur_1`/`interpSmall`，`react/{pointGrid,three}/`，原路径全部留壳（`threeUtil1.js`/`SelectionHelper.js` 各有 10+ 个旧场景组件在 import）。⚠️ **`sdk/` 此前没被任何一层排除**（`build.files` 无 `!sdk/**`、forge `ignore` 无 `^/sdk`），`example/` 连 `node_modules` 一直在装机包里 —— 本轮各补一条排掉 `example/` + `docs/`。**踩了一次自己在教的坑**：懒加载被首屏静态 import 作废，Rollup 只 warning（`dynamic import will not move module into another chunk`），现象是 chunk **静默塌回主包**；修法是抽零依赖 `heatBarsParams.js`，并把这条连 Rollup 原文一起写进 `WriteRenderer` 的 ⓪ 段。新增 `docs/render-check.mjs`（`npm run check`）逐页 SSR 渲染 —— `build` 绿证明不了页面能跑（表格调用是渲染时执行的），10 页全过，**但只替代「逐页点过」的一半**。对账：client 221 → 211（−10）/ SDK 121 → 131（+10），差额 = `pipeline.test.js` 换边，净额不降；backend 38/38；smoke-core 12 → 15；eslint 0 error；构建走护栏，`build/model` 20 个 / 137M 完好。**明说的边界**：不加 CI / 部署（`base: './'` 只为以后挂哪都不用改代码）、不加 `forceContextLoss()`（用活跃数上限 4 绕开，记进积压）、根出口 tarball 缺陷仍不修（文档站只教 `/core` + `/react` 绕开它）、前端契约仍无版本号（后端有 `SDK_CONTRACT_VERSION`，前端一个都没有，标注了「改它是 breaking change」但**没有机制拦住**）、**装机后仍加不了新渲染器**（`load: () => import()` 是构建期解析的，本轮解决的是「新项目消费」而不是「装机二开」） |
 | 2026-08-04 | codeOpi | 渲染器层拆成可安装的前端 SDK 包 `@shroom/frontend`（第一轮：core + numMatrix + 可跑 demo） | 目标消费者是新项目的开发者。`sdk/frontend/` 2026-06-11 建过一次且分叉了（没 `name` 装不了、`client/src` 一行没 import），根因是**它是一份平行副本**，所以本轮原则是**搬不抄** —— 19 个模块搬进包、原路径留 13 个 re-export 壳、主应用 import 一行没改。分层线是「有没有 React / three / DOM」：`/core` 14 文件零依赖（`scripts/smoke-core.mjs` 用裸 Node 无垫片守着，12/12）、`/react` peer react ≥18 + three **≥0.127**（主应用 pin 的就是 0.127，写 ^0.170 会让主应用装不上）、根出口刻意不含 `react/`。新增 `core/frameMath.js`（`findMax`/`jet`/`press`）+ 身份断言防止将来有人再写一份函数体。拆包新增三件必做事：`resolve.dedupe`、混淆器 `exclude` 补包目录、`core/` 不省扩展名不在顶层读 `localStorage`。`RendererHost.jsx` 做薄包装而非纯壳（`Home.jsx` 绕过 `index.js` 直接 import 它，纯转发会让 `matCol`/`carCol` 静默失效）。**验收标准已过**：`cd sdk/frontend/example && npm i && npm run dev` 画面出来，控制台零 error / 零 warning，连切 5 次 canvas 数始终 1。对账 client 221 + SDK 121 = 342（= 341 基线 + 1 新增断言），backend 38/38，`npm pack` 32 文件无 `example/`，构建后 `build/model` 137M 完好。**已知缺口记进积压**：`src/client/commands.js` 的 `'../../../../shared/commandSchema.json'` 跑出包根，tarball 装出来根出口加载不了（`/core`+`/react` 不受影响），修法是先定这份 schema 的归属 |
 | 2026-08-04 | codeOpi | 合并数字矩阵渲染器（二）：接进主界面，六个渲染点收成三处，−7 文件 / −8685 行 | 接线前先修掉一处搬运引入的发散：`smallBed12B` 预设写死的 `textureValueMax: 2550` 与原实现的 `props.textureValueMax \|\| (decimalScale > 1 ? valuej1 * decimalScale : 255)` 不符（全仓无人传该 prop），会改掉 `classicTint` 的分母；`pipeline.test.js:339` 原本断言的正是这个错值，所以它是回查出处查出来的、不是测试报出来的。`Home.jsx` 三处接线：`bed4096num` → `{...fast256, size: 1}`；manifest/hand/minzhen/smallBed → 新增 `buildNumMatrixParams()`（把 `NumThreeColor1024.jsx:167` 那个 `manageSidebar && matrixName !== 'minzhen'` 的 AND 折进调用点，把 `smallBed12B` 三处字符串分支折成基础预设选择）；四条 `fast*` 三元分支 → 新增 `NUM_MATRIX_SCENES` 查找表 + 一条分支。顺带补上已有 manifest 分支漏掉的 `colormap` / `coordinateMap`。删除三份 `NumThreeColor`（1568 行）与 4 个已入库的死 `.bak`（7117 行）。Home chunk 943 → 925.61 kB，`NumMatrixRenderer` 成 10.03 kB 独立懒加载块。前端 341 通过 / 17 套件、eslint 干净、后端 38 个测试文件全通过、`build/model` 137MB 未被触碰。 |
@@ -2332,6 +2448,7 @@ graph TD
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-06 | codeOpi | 优化重构 | 第三轮渲染实现进包**批 1/4**：新增 `sdk/frontend/react/numMatrix/backends/canvas2d.js`（原 `client/src/components/num/NumWs.jsx` 517 行，2D canvas + CSS 透视），`BACKENDS` 从 `['sprite3d']` 变 `['sprite3d','canvas2d']`，`core/numMatrix/params.js` 补 `CANVAS2D_DEFAULTS` + 两条预设 `num3dDefault`（32×32）/ `num3dCarCol`（10×9），`core/frameMath.js` 追加 `jetRound`/`rotate90CW`/`gaussBlur_2`。**契约追加 11 项**：`RENDERER_METHODS` +10（含原拼写错误的 `changaCamera`，照抄不改）、`RENDERER_CAPABILITIES` +`ARTICULATED`、**`RENDERER_PROPS` +0**；新增可选描述符字段 `optionalMethods`（必须是 `methods` 子集），解决「暴露面按后端变而 `methods` 按渲染器 id 声明」。`NumMatrixRenderer.jsx` 扩三个**通用可选**后端口子 `commands`/`applyTuning`/`reportStats` + `factory.commandNames`，`sprite3d` 路径一字未变。`Home.jsx` 两处渲染点换 `RendererHost`，`num/NumWs.jsx` 517 → 约 60 行**适配壳**（不能做纯壳：`App.jsx` 的 `/3Dnum` 路由渲染 `<Num3D />` 不传 prop）。删死码：`insertInterpFlat` 37 行、`hand(1).png` 314 KB import、`pressData`/`interp`/`rotate90`。新增 `react/builtins.test.js`（7 例，专抓「方法名不在契约里 → 静默拒绝注册 → 白屏」）。文档站数字矩阵页补「后端」列。对账：SDK 131 → 144、client 211 passed、smoke-core 15 → 18、eslint 0 error、docs check 10 页、build 无 chunk 塌包 warning、`build/model` 137M 完好；backend 测试开工前即红（未提交的 `sdk/backend/` rename 所致，本轮不动）。`glslJetLadder()` 推到批 2 |
 | 2026-08-05 | codeOpi | 优化重构 | 新建 `@shroom/frontend` 在线可预览文档站 `sdk/frontend/docs/`（10 页 · 活预览 · `?raw` 显示正在跑的源码 · 表格从 `core` 读不手抄），并完成第二轮 `pointGrid` 进包：新增 `core/pointGrid/{params,pipeline}.js`、`core/greyLadder.js`、`react/{pointGrid,three}/`，`frameMath.js` 追加 `addSide`/`gaussBlur_1`/`interpSmall`，原路径全部留壳。搬包修三处包边界：`circle.png` → 打包资源（**第四条消费者义务：`.png` import**）、`TrackballControls` 补 `.js`、`data.current` 三方法补声明。⚠️ `build.files` + forge `ignore` 各补一条排除 `sdk/frontend/{example,docs}`（此前 `example/` 连 `node_modules` 一直在装机包里）；根 `package.json` 加 `sdk:frontend-docs{,-build}` 两条脚本。修掉一处自己踩的懒加载塌包（Rollup 只 warning，chunk 静默塌回主包 → 抽零依赖 `heatBarsParams.js`）和一处错的教学示范（`resetFrameBus()` → `clearLastFrame()`）。新增 `docs/render-check.mjs` 逐页 SSR 渲染守卫。对账：client 211 + SDK 131 = 342（`pipeline.test.js` 换边，净额不降），backend 38/38，smoke-core 15/15，eslint 0 error，`build/model` 137M 完好 |
 | 2026-08-04 | codeOpi | 优化重构 | 渲染器层拆成可安装的前端 SDK 包 `@shroom/frontend`（第一轮）：`core/` 14 文件零依赖 + `react/` 5 文件（peer react ≥18 + three ≥0.127）+ `styles/canvas.css` + `example/` 可跑 demo + `scripts/smoke-core.mjs` 裸 Node 守卫。**搬不抄** —— `client/src` 留 13 个 re-export 壳，import 一行没改；新建 `core/frameMath.js` 收 `findMax`/`jet`/`press` 并配身份断言。`client` 侧接线三件事：`file:` 依赖、`resolve.dedupe: ['react','react-dom','three']`、混淆器 `exclude` 补包目录（否则懒加载 chunk 塌回主包）。**验收标准已过**：`cd sdk/frontend/example && npm i && npm run dev` 画面出来。client 221 + SDK 121 = 342，backend 38/38，smoke 12/12，`npm pack` 32 文件 66.5 kB。已知缺口：tarball 下根出口因 `commands.js` 的包根越界 import 加载不了（`/core`+`/react` 不受影响），已记积压 |
 | 2026-08-04 | codeOpi | 优化重构 | 合并数字矩阵渲染器第二步：接进主界面，`Home.jsx` 六个渲染点收成三处，删 7 个文件 / 8685 行。**接线前先修掉一处上一步搬运引入的发散**：`params.js` 的 `smallBed12B` 预设写死了 `textureValueMax: 2550`，而原实现是 `props.textureValueMax \|\| (decimalScale > 1 ? valuej1 * decimalScale : 255)`，且全仓 grep 确认**没有任何调用方传过这个 prop** —— 走的一直是右边那支（默认 `valuej` 200 × 10 = 2000），拖阈值还会跟着重烘纹理。写死 2550 会改掉 `classicTint` 的分母（`r = d / textureValueMax`）：数值 1000 原本映射 r = 0.5、写死后成 0.39，是 smallBed12B 上看得出来的配色变化。**这个错值正是 `pipeline.test.js:339` 当时断言的内容** —— 差分测试只能证「实现与基准一致」，基准常量本身抄错时它会老老实实把发散钉住，所以逐条回查搬过来的常量出处这一步省不掉；预设删掉该行（0 = 自动），断言改成 `toBe(0)` 并在旁写明原因，`params.js:126` 的字段注释改为「缺省就该是 0，显式覆盖只为让 manifest 锁死量程」。接线三处：①`bed4096num` / `numoriginal` 那路 `<Fast256 size={1}>` → `<RendererHost rendererId="numMatrix" params={{...fast256, size: 1}}>`（`PARAM_RANGES.size.min` 是 1 不会被夹掉，`deriveGrid` 仍得 64×64 = 4096 实例；`fast256` 预设自带的 `sharedTuningKey: 'bed4096'` 保住了「Fast256 与 Bed4096 之间切换时调参不重置」）；②manifest / hand / handSinglePoint / minzhen / smallBed / smallBedNoAlg / smallBed12B 那一路 `<Fast1024>` → 新增模块级 `buildNumMatrixParams(matrixName, definition)`，把原来散在 props 与组件内部的四件事收成一次参数推导 —— `matrixWidth`/`matrixHeight` → `gridWidth`/`gridHeight`、`matrixName === 'smallBed12B'` 触发的 `getDecimalScale`/`getPressureChartPadding`/`totalMetric` 三处字符串分支 → 基础预设选 `smallBed12B` 而非 `fast1024`，**以及最容易漏的那一格**：`NumThreeColor1024.jsx:167` 的守卫是 `props.manageSidebar !== false && props.matrixName !== 'minzhen'` 两个条件的 AND，外层只传了前半、minzhen 那半藏在组件里，参数化后渲染器不再收 `matrixName`，故必须在调用点折成 `manageSidebar: !fromManifest && matrixName !== MINZHEN_MATRIX`，否则 minzhen 会开始重复回写已由外层接管的侧栏；③`fast256` / `normalFast` / `fast1024` / `fast1024sit` 四条三元分支（其中中间两条 JSX 完全相同）→ 模块级 `NUM_MATRIX_SCENES` 查找表 + 一条分支，约 40 行 → 约 12 行，**这张表同时是后面懒加载 54 个场景组件的前置条件**（嵌套三元链没法按需 import）。顺带补上已有 manifest 分支漏掉的 `colormap={canvasColormap}` 与 `coordinateMap` —— 今天没人踩到只是因为还没有 manifest 声明 numMatrix，接线后一个声明它的 manifest 会静默丢掉配色与坐标表。配色变化由 `NumMatrixRenderer` 自己的 `colormapKey` 进 `useEffect` 依赖重建场景，**外层不需要 `variantKey`/`key`**；`RendererHost` 只 destructure `rendererId/params/label/rendererRef/values/channel/frameChannel`，其余 `{...contractProps}` 原样透传，所以 `data` / `local` / `sceneChartProps` 一个字没改。删除：三份 `NumThreeColor`（`copy` 515 + `1024` 611 + `1024sit` 442 = 1568 行，唯一真实导入方就是 `Home.jsx:21-23`，其余 15 个提到它的文件都只是注释与测试里的文字引用）+ 4 个 `.bak`（`Home.jsx.bak` 3870 + `Title.jsx.bak` 1690 + `Num2Doriginal.jsx.bak2` 1089 + `NumWs.jsx.bak` 468 = 7117 行，`git ls-files` 确认全部已入库、最后改动是 `bbabe07`（2026-03-25），删掉可从 git 恢复）。`NumMatrixRenderer.jsx:5` 的「共 1701 行」改成 1568（那是横切共用层抽掉 jet 与阈值块之前的旧数）。边界：**界面零变化，看得出区别就是 bug**；未搬 `canvas2d`（`num/NumWs.jsx`）与 `webgl`（`num/Num2D.jsx` + `Num2Doriginal.jsx`，两者已漂移 935 行，得先逐行 diff）两个后端，`BACKENDS = ['sprite3d']` 原样；未动 `Home.jsx` 里 `<Bed4096>`（`components/three/4096`，另一个组件）与三元链其余部分；未动 `page/home/util.js`（5564 行）与任何 db 文件；真机手测（9 项，含 minzhen 侧栏不重复回写、smallBed12B 除 10 显示与取最大值合力、1024sit 拖颜色滑块画面不动、反复切 10 次 WebGL 上下文不累积）仍待用户在设备上执行。验证：`npx vitest run` → **341 passed / 16 套件**（`App.test.jsx` 仍是既有失败，缺 `@testing-library/react`；套件数少 1 是因为删掉的文件带走了一个）；`npx eslint src/renderers src/runtime src/page/home/Home.jsx --max-warnings=0` 干净；后端 `node tests/run-tests.js` 38 个测试文件全通过；`npx vite build --outDir ../tmp/build-check --emptyOutDir` 通过（10.88s），Home chunk **943.24 → 925.61 kB**、`NumMatrixRenderer-DveYPzQ6.js` 10.03 kB 独立懒加载块，`build/model` 137MB / 20 个 fbx 未被触碰、`git status --short build/` 为 0。 |

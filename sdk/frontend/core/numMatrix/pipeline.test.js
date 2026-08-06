@@ -14,7 +14,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { findMax } from '../frameMath.js';
-import { LEGACY_PRESETS, deriveGrid, normalizeNumMatrixParams } from './params.js';
+import {
+  BACKENDS,
+  LEGACY_PRESETS,
+  deriveGrid,
+  normalizeNumMatrixParams,
+} from './params.js';
 import {
   applyFloorFilter,
   cellUvOffset,
@@ -375,5 +380,79 @@ describe('参数归一化', () => {
     expect(normalizeNumMatrixParams({ manageSidebar: false }).manageSidebar).toBe(false);
     expect(normalizeNumMatrixParams({ manageSidebar: 'false' }).manageSidebar).toBe(false);
     expect(normalizeNumMatrixParams({ manageSidebar: undefined }).manageSidebar).toBe(true);
+  });
+});
+
+describe('canvas2d 后端参数', () => {
+  it('两条 num3D 预设复现 NumWs.jsx 的常量', () => {
+    const def = normalizeNumMatrixParams(LEGACY_PRESETS.num3dDefault);
+    expect(def.backend).toBe('canvas2d');
+    expect(deriveGrid(def)).toEqual({ gridWidth: 32, gridHeight: 32, count: 1024 });
+    // layoutData（NumWs.jsx:341-374）：窗口 60、两条曲线留白都是 20、
+    // 总压曲线减 1 再画、受压点数取的是**过滤前**的原始帧。
+    expect(def.chartWindow).toBe(60);
+    expect(def.chartPadding).toBe(20);
+    expect(def.pointChartPadding).toBe(20);
+    expect(def.totalChartOffset).toBe(1);
+    expect(def.statsBeforeFilter).toBe(true);
+
+    const carCol = normalizeNumMatrixParams(LEGACY_PRESETS.num3dCarCol);
+    expect(deriveGrid(carCol)).toEqual({ gridWidth: 10, gridHeight: 9, count: 90 });
+    // ⚠️ 网格是 10×9，但 rotate90CW 的行列仍是 32 —— 原实现写死 32，carCol 走的
+    // 也是它。这条断言锁的是"保留原样"，不是"这样是对的"；要修改这两项即可。
+    expect(carCol.canvas2d.rotateHeight).toBe(32);
+    expect(carCol.canvas2d.rotateWidth).toBe(32);
+  });
+
+  it('canvas2d 这一段恒定存在，走 sprite3d 时也算', () => {
+    // Builder 的表单不必判后端 —— 形状总是在。
+    const sprite = normalizeNumMatrixParams(LEGACY_PRESETS.fast256);
+    expect(sprite.backend).toBe('sprite3d');
+    expect(sprite.canvas2d.cellWidth).toBe(32);
+    expect(sprite.canvas2d.rotationPresets).toEqual([0, Math.PI / 6, Math.PI / 3]);
+  });
+
+  it('嵌套参数缺省回落、越界夹回', () => {
+    const empty = normalizeNumMatrixParams().canvas2d;
+    expect(empty).toMatchObject({
+      cellWidth: 32,
+      cellHeight: 24,
+      extraTop: 200,
+      fontScale: 20,
+      textHeight: 3,
+      textColorMax: 30,
+      colorValueScale: 5,
+      blurSigma: 1.6,
+      baseTiltDeg: 20,
+    });
+
+    const clamped = normalizeNumMatrixParams({
+      canvas2d: { cellWidth: 1, extraTop: -50, blurSigma: 999, baseTiltDeg: 400 },
+    }).canvas2d;
+    expect(clamped.cellWidth).toBe(4);
+    expect(clamped.extraTop).toBe(0);
+    expect(clamped.blurSigma).toBe(20);
+    expect(clamped.baseTiltDeg).toBe(180);
+
+    // 坏值不该把默认值顶掉
+    expect(normalizeNumMatrixParams({ canvas2d: { fontScale: 'abc' } }).canvas2d.fontScale)
+      .toBe(20);
+  });
+
+  it('rotationPresets：空数组与非数组都回落默认三档', () => {
+    const fallback = [0, Math.PI / 6, Math.PI / 3];
+    expect(normalizeNumMatrixParams({ canvas2d: { rotationPresets: [] } })
+      .canvas2d.rotationPresets).toEqual(fallback);
+    expect(normalizeNumMatrixParams({ canvas2d: { rotationPresets: 'x' } })
+      .canvas2d.rotationPresets).toEqual(fallback);
+    // 给了就用给的，坏值逐项归 0（而不是整条丢掉）。
+    expect(normalizeNumMatrixParams({ canvas2d: { rotationPresets: [1, 'x'] } })
+      .canvas2d.rotationPresets).toEqual([1, 0]);
+  });
+
+  it('BACKENDS 是白名单，未知后端回落 sprite3d', () => {
+    expect(BACKENDS).toEqual(['sprite3d', 'canvas2d']);
+    expect(normalizeNumMatrixParams({ backend: 'canvas2d' }).backend).toBe('canvas2d');
+    expect(normalizeNumMatrixParams({ backend: 'webgl' }).backend).toBe('sprite3d');
   });
 });

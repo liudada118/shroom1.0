@@ -421,7 +421,7 @@ export function gaussBlur_return(scl, w, h, r) {
  * | :--- | :--- | ---: |
  * | `parseInt` 取整三元组 | `jet` | 14（本文件 + demo/ 9 个 + NumThreeColor 3 个 + num/Num + foot/Num32DetectLocal） |
  * | 不取整四元组带 alpha | `jetRgba` | 2（heatmap/canvas、onestep/heatmap） |
- * | `Math.round` + 零跨度返白 | `jetRound` | 1（num/NumWs） |
+ * | `Math.round` + 零跨度返白 | `jetRound` | 1（num/NumWs，2026-08-06 已随 canvas2d 后端搬进 SDK） |
  * | 0..1 浮点对象 | `jetRgb` | 1（本文件） |
  *
  * 所以下面是**一条阶梯 + 四个薄出口**，不是一个函数。三个取整出口的差异都是

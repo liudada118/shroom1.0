@@ -77,17 +77,33 @@ const CONTRACT_WARNED = new Set();
  * **刻意不做的事：不把未声明的方法挡掉。** 挡掉会引入一个新的静默失败
  * 模式（descriptor 漏写一行，功能就没了），比现在更难查。只报不挡。
  *
+ * ## `optionalMethods`：暴露面依赖参数的那一类
+ *
+ * `methods` 是按**渲染器 id** 声明的，但有的渲染器的暴露面依赖参数。
+ * `numMatrix` 是第一个：走 `sprite3d` 后端时是 4 个方法，走 `canvas2d`
+ * 时是 14 个。两种情况都得干净 —— 只声明 4 个则 canvas2d 报"未声明"，
+ * 声明 14 个则 sprite3d 报"未实现"，而两条都是误报。
+ *
+ * 所以 `methods` 写**并集**（`validateRendererDescriptor` 照常校验全部
+ * 14 个名字都在契约里），再用 `optionalMethods` 标出「这几个可以缺席」。
+ * 缺席不报错，出现也不算漂移。**别拿它当"懒得实现"的免死金牌** —— 只有
+ * 「同一个渲染器的不同参数走不同实现」才该进这个数组。
+ *
  * @param {string} rendererId 渲染器 id。
  * @param {object} instance 渲染器实例句柄。
  * @returns {{missing: string[], undeclared: string[]} | null} 审计结果，已报过的返回 null。
  */
 export function auditRendererContract(rendererId, instance) {
   if (!instance || CONTRACT_WARNED.has(rendererId)) return null;
-  const declared = getRendererDescriptor(rendererId)?.methods || [];
+  const descriptor = getRendererDescriptor(rendererId);
+  const declared = descriptor?.methods || [];
   if (!declared.length) return null;
   CONTRACT_WARNED.add(rendererId);
 
-  const missing = declared.filter((name) => typeof instance[name] !== 'function');
+  const optional = new Set(descriptor?.optionalMethods || []);
+  const missing = declared.filter(
+    (name) => !optional.has(name) && typeof instance[name] !== 'function',
+  );
   if (missing.length) {
     console.error(
       `[renderers] 渲染器 ${rendererId} 声明了这些方法但没有实现：${missing.join('、')}。`

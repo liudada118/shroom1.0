@@ -34,6 +34,26 @@
  * 只有 `colormap` 与 `coordinateMap` 仍走 props 而不是 params —— 前者是用户
  * 在画布配置器里的实时选择，后者是坐标表数据，都由外层透传。两者已补进
  * `contract.js` 的 `RENDERER_PROPS`。
+ *
+ * ## 后端接口：4 个必需 + 3 个可选
+ *
+ * 必需的仍是原来那四个（`setFrame` / `retint` / `start` / `dispose`），工厂入参
+ * 也没变，只多了一个 `reportStats`。三个可选的是 2026-08-06 接 `canvas2d` 时加的：
+ *
+ * | 可选项 | 谁实现 | 干什么 |
+ * | :--- | :--- | :--- |
+ * | `commands` | canvas2d | 后端自有的命令式方法，原样铺进 `state.api` |
+ * | `applyTuning(changed)` | canvas2d | `sitValue` 末尾回调，让后端吸收阈值变化 |
+ * | `factory.commandNames` | canvas2d | 上面那些方法的名字，供 `useImperativeHandle` 用 |
+ *
+ * **为什么非得开这三个口子。** 接 `canvas2d` 时本来只该往 `BACKEND_FACTORIES`
+ * 加一行（这个文件原来的注释就是这么写的），实际不够：`NumWs.jsx` 暴露 12 个
+ * 命令式方法而本层只有 4 个，其中 `changeWsData147` / `changeWsData256` /
+ * `changeWsDatafinger` / `changeWsDatapalm` **每次调用都换网格尺寸**
+ * （36×36 / 16×16 / 32×32），`sprite3d` 的实例数在建场景时就定死了，做不到。
+ *
+ * 加的这三条都是**通用机制**，本层不认识任何一个 canvas2d 专属的名字：
+ * `sprite3d` 一个都没实现，走的路径和以前逐字相同。
  */
 
 import React, { useEffect, useImperativeHandle, useMemo, useRef } from 'react';
@@ -45,17 +65,26 @@ import { DUAL_CHANNEL_DEFAULTS, createThresholdState } from '../../core/displayT
 import { findMax } from '../../core/frameMath.js';
 import { deriveGrid, normalizeNumMatrixParams } from '../../core/numMatrix/params.js';
 import { applyFloorFilter, computeFrameStats, createRollingWindow } from '../../core/numMatrix/pipeline.js';
+import { createCanvas2dMatrixBackend } from './backends/canvas2d.js';
 import { createSpriteMatrixBackend } from './backends/sprite3d.js';
 
 /**
  * 后端分派表。
  *
- * 只有一个条目不是过度设计 —— 它标的是扩展点：`canvas2d` 与 `webgl` 两个后端
- * 搬过来时只往这里加一行，本文件其余部分不动。
+ * `canvas2d` 是 2026-08-06 第三轮迁移加的第二条，还差一个 `webgl`。
  */
 const BACKEND_FACTORIES = {
   sprite3d: createSpriteMatrixBackend,
+  canvas2d: createCanvas2dMatrixBackend,
 };
+
+/**
+ * 本层自己实现、与后端无关的命令式方法名。
+ *
+ * 后端可以再往上挂自己的（`factory.commandNames`），两者拼起来就是
+ * `useImperativeHandle` 的全集。名字只有这一处，不会和后端那份漂移。
+ */
+const SHELL_METHODS = ['sitData', 'sitValue', 'changeWsData', 'changeWsDataRaw'];
 
 /**
  * 可共享的调参对象。
@@ -68,9 +97,6 @@ const BACKEND_FACTORIES = {
 const SHARED_TUNING = {
   bed4096: bed4096numParams,
 };
-
-/** 正点数曲线的 Y 轴留白。三份原实现都写死 100。 */
-const POINT_CHART_PADDING = 100;
 
 /**
  * 建一份调参状态。
@@ -135,39 +161,26 @@ const NumMatrixRenderer = React.forwardRef((props, refs) => {
     state.totalWindow = createRollingWindow(config.chartWindow);
     state.pointWindow = createRollingWindow(config.chartWindow);
 
-    state.backend = createBackend({
-      container,
-      config,
-      grid,
-      coordinateLayout,
-      colormap: JSON.parse(colormapKey) || {},
-      tuning: state.tuning,
-      onPeak: (index) => {
-        // 原实现是 `document.querySelector('.maxNum').innerHTML = index + 1`。
-        // 走 ref 而不是全局选择器，两个实例才不会写到同一个 div；
-        // 仍然直接改 DOM 而不进 state —— 这是 60Hz 的读数。
-        if (peakRef.current) peakRef.current.textContent = String(index);
-      },
-    });
-
     /**
-     * 收一帧数据并回写侧栏统计。
+     * 回写侧栏读数与两条滚动曲线。
      *
-     * 逐字对应 `NumThreeColor1024.jsx:98-202`。注意**下限过滤做两遍**：
-     * 这里一遍（不取整，统计走浮点），后端画之前再一遍（取整）。
-     * 两遍是幂等的，原实现就是这样，照抄。
+     * 逐字对应 `NumThreeColor1024.jsx:98-202`，也逐字对应 `NumWs.jsx:341-374`
+     * 的 `layoutData` —— 两份原实现在这一段是同一套算法，差的只是窗口长度、
+     * 留白和总压曲线那个 `-1`，全部已参数化。
      *
-     * @param {object} prop 帧数据，`wsPointData` 是压力数组。
-     * @param {boolean} local 回放模式；为真时不驱动侧栏曲线。
+     * **`changeData` 不受 `local` 影响，两条曲线才受**（回放模式没有侧栏图表）。
+     * 这个不对称是原实现的，两份都一样。
+     *
+     * 单独提出来是因为后端的自有命令（`changeWsData147` 等）绕开了 `sitData`
+     * 却仍要驱动侧栏，所以它作为 `reportStats` 传给工厂。
+     *
+     * @param {number[]} sourceArr 统计所依据的帧。
+     * @param {boolean} [local] 回放模式；为真时不驱动侧栏曲线。
      */
-    function sitData(prop, local) {
-      const t = state.tuning;
-      const dataArr = applyFloorFilter(prop?.wsPointData, t.valuef1);
-      state.backend?.setFrame(dataArr);
-
+    function reportStats(sourceArr, local = propsRef.current.local) {
       if (!config.manageSidebar) return;
 
-      const { max, point, total, mean } = computeFrameStats(dataArr);
+      const { max, point, total, mean } = computeFrameStats(sourceArr);
       const displayPress = config.totalMetric === 'max' ? max : total;
       const host = propsRef.current;
 
@@ -178,15 +191,61 @@ const NumMatrixRenderer = React.forwardRef((props, refs) => {
         totalPres: displayPress,
       });
 
+      // Y 轴上界取的是**偏移前**的最大值，偏移只作用在画出去的那份数据上
+      // —— `NumWs.jsx:360-362` 就是这么写的，照抄。
       const totalArr = state.totalWindow.push(displayPress);
+      const maxTotal = findMax(totalArr);
+      const offset = config.totalChartOffset;
+      const totalSeries = offset > 0
+        ? totalArr.map((a) => (a - offset > 0 ? a - offset : 0))
+        : totalArr;
       if (!local) {
-        host.data?.current?.handleCharts(totalArr, findMax(totalArr) + config.chartPadding);
+        host.data?.current?.handleCharts(totalSeries, maxTotal + config.chartPadding);
       }
 
       const pointArr = state.pointWindow.push(point);
       if (!local) {
-        host.data?.current?.handleChartsArea(pointArr, findMax(pointArr) + POINT_CHART_PADDING);
+        host.data?.current?.handleChartsArea(
+          pointArr, findMax(pointArr) + config.pointChartPadding,
+        );
       }
+    }
+
+    state.backend = createBackend({
+      container,
+      config,
+      grid,
+      coordinateLayout,
+      colormap: JSON.parse(colormapKey) || {},
+      tuning: state.tuning,
+      reportStats,
+      onPeak: (index) => {
+        // 原实现是 `document.querySelector('.maxNum').innerHTML = index + 1`。
+        // 走 ref 而不是全局选择器，两个实例才不会写到同一个 div；
+        // 仍然直接改 DOM 而不进 state —— 这是 60Hz 的读数。
+        if (peakRef.current) peakRef.current.textContent = String(index);
+      },
+    });
+
+    /**
+     * 收一帧数据。
+     *
+     * 注意**下限过滤做两遍**：这里一遍（不取整，统计走浮点），后端画之前再
+     * 一遍（取整）。两遍是幂等的，原实现就是这样，照抄。
+     *
+     * `statsBeforeFilter` 决定侧栏统计看过滤前还是过滤后的帧 —— 三份
+     * `NumThreeColor*` 看过滤后，`NumWs.jsx` 看过滤前，两者的「合力」读数会差
+     * 一个 `valuef1 × 受压点数`。
+     *
+     * @param {object} prop 帧数据，`wsPointData` 是压力数组。
+     * @param {boolean} local 回放模式；为真时不驱动侧栏曲线。
+     */
+    function sitData(prop, local) {
+      const t = state.tuning;
+      const source = prop?.wsPointData;
+      const dataArr = applyFloorFilter(source, t.valuef1);
+      state.backend?.setFrame(dataArr);
+      reportStats(config.statsBeforeFilter && Array.isArray(source) ? source : dataArr, local);
     }
 
     /**
@@ -212,9 +271,16 @@ const NumMatrixRenderer = React.forwardRef((props, refs) => {
       if (valuelInit !== undefined) t.valuelInit1 = valuelInit;
       if (typeof press === 'number') t.valuep = press;
       if (typeof prop === 'number') t.valueprop = prop;
+
+      // 后端可以再自己吸收一遍。`canvas2d` 用它把 `value` / `valuej` 拉进
+      // 字高与色标上限；`sprite3d` 没实现，可选链走空。
+      state.backend?.applyTuning?.(configValue);
     }
 
     state.api = {
+      // 后端自有的命令式方法铺在最前，本层那四个覆盖同名项 —— 后端不该能
+      // 改掉 `sitData` 的语义，那是所有渲染器共通的入口。
+      ...(state.backend.commands || {}),
       sitData,
       sitValue,
       changeWsData: (wsPointData) => sitData({ wsPointData }, propsRef.current.local),
@@ -234,12 +300,17 @@ const NumMatrixRenderer = React.forwardRef((props, refs) => {
 
   // 命令式接口走 state.api 中转而非直接闭包，这样参数变化重建场景后，
   // 外部持有的 ref 仍然指向新场景，不会调到已释放的 three.js 对象。
-  useImperativeHandle(refs, () => ({
-    sitData: (...args) => stateRef.current.api?.sitData(...args),
-    sitValue: (...args) => stateRef.current.api?.sitValue(...args),
-    changeWsData: (...args) => stateRef.current.api?.changeWsData(...args),
-    changeWsDataRaw: (...args) => stateRef.current.api?.changeWsDataRaw(...args),
-  }), []);
+  //
+  // 方法名来自「本层四个 + 后端工厂上挂的 `commandNames`」，不再手写一遍
+  // —— 两张平行的表一定会漂移。依赖只有 `config.backend`：换后端才换方法集，
+  // 换网格/配色不换。
+  useImperativeHandle(refs, () => {
+    const factory = BACKEND_FACTORIES[config.backend] || createSpriteMatrixBackend;
+    const names = [...SHELL_METHODS, ...(factory.commandNames || [])];
+    return Object.fromEntries(names.map(
+      (name) => [name, (...args) => stateRef.current.api?.[name]?.(...args)],
+    ));
+  }, [config.backend]);
 
   return (
     <>
