@@ -1,5 +1,5 @@
 /**
- * builtins.test.js - 本包 ships 的两个渲染器描述符能不能注册上
+ * builtins.test.js - 本包 ships 的三个渲染器描述符能不能注册上
  *
  * ## 为什么这条值得单独测
  *
@@ -11,15 +11,19 @@
  *
  * ## 为什么这个测试能在 node 环境里跑
  *
- * `builtins.js` 只 import `core/`（contract / registry / 两份 params），渲染器
+ * `builtins.js` 只 import `core/`（contract / registry / 三份 params），渲染器
  * 本体在 `load: () => import(...)` 里，本测试从不调用它。`backends/canvas2d.js`
  * 同理 —— 它整个文件只依赖 `core/`，DOM 的部分都在工厂函数体内。所以这里不需要
  * jsdom，也不需要装 react 这个 peer 依赖。
+ *
+ * 反过来说，**这个测试跑不到渲染器本体**：`HandPointsRenderer.jsx` 静态 import 了
+ * react 与 three，在这个包的 node_modules 里都不存在。它的回归靠真机手测，
+ * 见 `sdk/frontend/README.md` 里那份清单。
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { RENDERER_METHODS } from '../core/contract.js';
+import { RENDERER_CAPABILITIES, RENDERER_METHODS } from '../core/contract.js';
 import {
   getRendererDescriptor,
   listRegistrationFailures,
@@ -28,6 +32,9 @@ import {
 import createCanvas2dMatrixBackend from './numMatrix/backends/canvas2d.js';
 import createWebglMatrixBackend from './numMatrix/backends/webgl.js';
 import { registerBuiltinRenderers } from './builtins.js';
+
+/** 本包 ships 的三个渲染器 id。加第四个时这里和下面的计数一起改。 */
+const RENDERER_IDS = ['numMatrix', 'pointGrid', 'handPoints'];
 
 /** 所有后端都有的那四个，由 `NumMatrixRenderer` 自己实现，不随后端变。 */
 const SHELL_METHODS = ['sitData', 'sitValue', 'changeWsData', 'changeWsDataRaw'];
@@ -47,27 +54,91 @@ describe('内置渲染器注册', () => {
     resetRendererRegistry();
   });
 
-  it('两个渲染器都能注册上，没有一条校验失败', () => {
-    expect(registerBuiltinRenderers()).toBe(2);
-    // 失败清单要空 —— 只看返回值会漏掉"注册了 2 个但第 3 个悄悄挂了"的情况。
+  it('三个渲染器都能注册上，没有一条校验失败', () => {
+    expect(registerBuiltinRenderers()).toBe(3);
+    // 失败清单要空 —— 只看返回值会漏掉"注册了 3 个但第 4 个悄悄挂了"的情况。
     expect(listRegistrationFailures()).toEqual([]);
-    expect(getRendererDescriptor('numMatrix')).not.toBeNull();
-    expect(getRendererDescriptor('pointGrid')).not.toBeNull();
+    RENDERER_IDS.forEach((id) => {
+      expect(getRendererDescriptor(id), `${id} 没注册上`).not.toBeNull();
+    });
   });
 
   it('声明的方法名全部在契约里（漏一个就是静默拒绝注册）', () => {
     registerBuiltinRenderers();
-    ['numMatrix', 'pointGrid'].forEach((id) => {
+    RENDERER_IDS.forEach((id) => {
       const stray = getRendererDescriptor(id).methods
         .filter((method) => !(method in RENDERER_METHODS));
       expect(stray, `${id} 有契约外的方法名`).toEqual([]);
     });
   });
 
+  it('声明的能力全部在契约里', () => {
+    registerBuiltinRenderers();
+    const known = new Set(Object.values(RENDERER_CAPABILITIES));
+    RENDERER_IDS.forEach((id) => {
+      const stray = getRendererDescriptor(id).capabilities.filter((cap) => !known.has(cap));
+      expect(stray, `${id} 有契约外的能力`).toEqual([]);
+    });
+  });
+
   it('幂等：重复注册不产生失败记录', () => {
-    expect(registerBuiltinRenderers()).toBe(2);
-    expect(registerBuiltinRenderers()).toBe(2);
+    expect(registerBuiltinRenderers()).toBe(3);
+    expect(registerBuiltinRenderers()).toBe(3);
     expect(listRegistrationFailures()).toEqual([]);
+  });
+});
+
+describe('handPoints 描述符', () => {
+  beforeEach(() => {
+    resetRendererRegistry();
+    registerBuiltinRenderers();
+  });
+
+  it('那 13 个方法一个不少 —— 少一个就是「这个命令一调就静默无效」', () => {
+    // 名单与 `handPoints/HandPointsRenderer.jsx` 里 `state.api` 的键必须一致。
+    // 那边多一个这里少一个，`RendererHost` 的契约审计会告警但不拦；这边多一个
+    // 那边少一个，才是真会在真机上崩的方向 —— 而那个方向本文件测不到（跑不到
+    // 渲染器本体），只能靠这份清单 + 手测。
+    expect([...getRendererDescriptor('handPoints').methods].sort()).toEqual([
+      'calibration',
+      'cancelSelect',
+      'changaCamera', // 原拼写如此，契约里也是这个拼法
+      'changeBox',
+      'changeDataFlag',
+      'changeHandAngle',
+      'changePointRotation',
+      'changeSelectFlag',
+      'handZero',
+      'resetHand',
+      'sitData',
+      'sitRenew',
+      'sitValue',
+    ]);
+  });
+
+  it('是全仓唯一声明 ARTICULATED 的渲染器', () => {
+    const articulated = RENDERER_IDS
+      .filter((id) => getRendererDescriptor(id).capabilities
+        .includes(RENDERER_CAPABILITIES.ARTICULATED));
+    expect(articulated).toEqual(['handPoints']);
+  });
+
+  it('三条预设都在描述符里，且 normalizeParams 能吃下它们', () => {
+    const { presets, normalizeParams } = getRendererDescriptor('handPoints');
+    expect(Object.keys(presets)).toEqual(['hand0205', 'hand0205Alt', 'hand0205_147']);
+    Object.entries(presets).forEach(([id, preset]) => {
+      expect(() => normalizeParams(preset), `${id}`).not.toThrow();
+    });
+  });
+
+  it('不声明 optionalMethods —— 它只有一套实现，没有后端开关', () => {
+    expect(getRendererDescriptor('handPoints').optionalMethods).toBeUndefined();
+  });
+
+  it('三个渲染器的 id / label 都不重复', () => {
+    const labels = RENDERER_IDS.map((id) => getRendererDescriptor(id).label);
+    expect(new Set(labels).size).toBe(RENDERER_IDS.length);
+    expect(new Set(RENDERER_IDS).size).toBe(RENDERER_IDS.length);
   });
 });
 

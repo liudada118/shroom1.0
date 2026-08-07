@@ -155,8 +155,9 @@ export default function PointGrid() {
               <>点精灵贴图硬编码成 <C>&apos;./circle.png&apos;</C></>,
               <>主应用把这张 4.7kB 的图 serve 在站点根目录（<C>client/public/</C>）。
                 装进别人的项目就是 404 → 点云全白。</>,
-              <>图进包（<C>react/pointGrid/circle.png</C>），
-                <C>import circleUrl from &apos;./circle.png&apos;</C> 让打包器发出资源。
+              <>图进包（<C>react/three/circle.png</C> —— 2026-08-07 起
+                <C>handPoints</C> 也用这张，所以放在两者共用的 <C>three/</C> 下），
+                <C>import circleUrl from &apos;../three/circle.png&apos;</C> 让打包器发出资源。
                 同时开了 <C>params.pointSprite</C> 允许换图。
                 **代价是多一条消费者义务：打包器要能处理 png import。**</>,
             ],

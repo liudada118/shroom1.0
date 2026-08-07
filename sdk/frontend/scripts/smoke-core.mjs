@@ -28,6 +28,7 @@ import assert from 'node:assert/strict';
 import {
   COLORMAPS,
   DUAL_CHANNEL_DEFAULTS,
+  HAND_POINTS_PRESETS,
   NUM_MATRIX_PRESETS,
   POINT_GRID_PRESETS,
   SCENE_CHANNELS,
@@ -35,13 +36,18 @@ import {
   buildSceneFrame,
   computeFrameStats,
   createPointGridPipeline,
+  createQuaternionTracker,
   createThresholdState,
   findMax,
   gaussBlur_2,
+  handPoints,
+  interpSmall,
   jet,
   jetRound,
+  jetWhite3,
   jetgGrey,
   listRenderers,
+  normalizeHandPointsParams,
   normalizeNumMatrixParams,
   normalizePointGridParams,
   numMatrix,
@@ -52,6 +58,7 @@ import {
   registerRenderer,
   resetRendererRegistry,
   resolveRendererFromDefinition,
+  rotate90CCW,
   rotate90CW,
   runPointGridPipeline,
   sampleColormapRgb,
@@ -128,6 +135,21 @@ check('normalizePointGridParams 两条预设都能归一化并推出网格', () 
   return summary.join('，');
 });
 
+check('normalizeHandPointsParams 三条预设都能归一化并推出网格', () => {
+  const summary = Object.entries(HAND_POINTS_PRESETS).map(([id, preset]) => {
+    const config = normalizeHandPointsParams(preset);
+    const grid = handPoints.deriveGridSize(config.sit);
+    assert.ok(Number.isInteger(grid.total) && grid.total > 0, `${id} 的网格点数应是正整数`);
+    assert.ok(handPoints.POINT_TABLES[config.pointTable], `${id} 的 pointTable 应能解析到表`);
+    assert.ok(handPoints.MASK_MODES.includes(config.maskMode), `${id} 的 maskMode 应合法`);
+    assert.ok(handPoints.INTERP_MODES.includes(config.interpMode), `${id} 的 interpMode 应合法`);
+    return `${id} ${grid.amountX}×${grid.amountY}`;
+  });
+  // 这两个尺寸抄自 hand0205Point.jsx / ...147.jsx 的常量区，是搬包前后的对账基准。
+  assert.deepEqual(summary, ['hand0205 72×72', 'hand0205Alt 72×72', 'hand0205_147 140×140']);
+  return summary.join('，');
+});
+
 /* ── 3. 帧管线 ──────────────────────────────────────────────────── */
 
 const FRAME_W = 23;
@@ -190,6 +212,56 @@ check('点阵管线 interpSmall → addSide → gaussBlur_1 跑通一帧', () =>
   const reused = createPointGridPipeline(config.sit)(source, 2);
   assert.deepEqual([...reused], once);
   return `${total} 点，max=${findMax(once)}`;
+});
+
+check('手形掩码两条路径在裸 Node 里跑通，且给出的不是同一张掩码', () => {
+  const gloves = handPoints.buildGlovesMask(handPoints.GLOVES_POINTS, rotate90CCW, 32);
+  const hand147 = handPoints.buildHandPointMask147(handPoints.HAND_POINT_ARR_147, 32);
+  [gloves, hand147].forEach((mask, i) => {
+    assert.equal(mask.length, 1024, `第 ${i} 张掩码长度应是 1024`);
+    assert.deepEqual([...new Set(mask)].sort((a, b) => a - b), [0, handPoints.MASK_VALUE]);
+  });
+  assert.notDeepEqual(gloves, hand147, '两条路径不该给出同一张掩码');
+  const covered = (m) => m.filter((v) => v).length;
+  return `gloves 盖 ${covered(gloves)} 格，hand147 盖 ${covered(hand147)} 格`;
+});
+
+check('两条插值实现跑通一帧，且与 interpSmall 三者互不相同', () => {
+  const frame = Array.from({ length: 32 * 32 }, (_, i) => (i * 7) % 53);
+
+  // centered 是就地写、初值 1 的那条（`hand0205`）。
+  const centered = new Array(64 * 64).fill(1);
+  handPoints.interpCentered(frame, centered, 32, 2);
+  assert.equal(centered.length, 64 * 64, '就地写不该改变长度');
+  assert.ok(centered.some((v) => v !== 1), '应该真的写进去了');
+
+  // ramp 是新建数组、双向填斜坡的那条（`hand0205_147`）。
+  const ramp = handPoints.interpRamp(frame, 32, 32, 2, 2);
+  assert.equal(ramp.length, 64 * 64);
+  assert.ok(ramp.every(Number.isFinite), '插值不应产出 NaN');
+
+  // 计划原文写的是「147 那份本地 interp 直接删，用 core 的 interpSmall」——
+  // 这条断言就是那条计划被推翻的证据：三者结果互不相同，替换即画面变化。
+  const small = interpSmall(frame, 32, 32, 2, 2);
+  assert.notDeepEqual(ramp, small);
+  const nonZero = (arr) => arr.filter((v) => v).length;
+  assert.ok(nonZero(ramp) > nonZero(small) * 2, 'ramp 是填满的，interpSmall 是稀疏散点');
+  return `ramp 非零 ${nonZero(ramp)} 格 vs interpSmall ${nonZero(small)} 格`;
+});
+
+check('四元数跟踪器首帧归零、reset 后重新取基准', () => {
+  const tracker = createQuaternionTracker({ warn: () => {} });
+  assert.equal(tracker.hasBase(), false);
+  assert.deepEqual(tracker.transform([0, 0, 0, 1]), [0, 0, 0, 1]);
+  assert.equal(tracker.hasBase(), true);
+
+  // 基准是单位元，所以第二帧 = 交换前两位 + x 取负。
+  assert.deepEqual(tracker.transform([0.1, 0.2, 0.3, 0.4]), [-0.2, 0.1, 0.3, 0.4]);
+
+  tracker.reset();
+  assert.equal(tracker.hasBase(), false);
+  assert.deepEqual(tracker.transform([0.1, 0.2, 0.3, 0.4]), [0, 0, 0, 1]);
+  return '首帧 → 单位元；第二帧交换 + x 取负；reset 后又是单位元';
 });
 
 /* ── 4. 配色 ────────────────────────────────────────────────────── */
@@ -257,6 +329,18 @@ check('jetgGrey 保留原实现的两条反直觉行为', () => {
   const high = jetgGrey(0, 4096, 4000);
   assert.ok(high[0] <= low[0], '值越大应越暗');
   return `x=100 → ${low.join(',')}；x=4000 → ${high.join(',')}`;
+});
+
+check('jetWhite3 保留原实现的三条反直觉行为', () => {
+  // 1. `if (!x)` 把 0 也算进去 → 零压力点是**白**的（名字里 "White" 的来源）。
+  assert.deepEqual(jetWhite3(0, 4096, 0), [255, 255, 255]);
+  assert.deepEqual(jetWhite3(0, 4096, 0), jetWhite3(0, 4096, undefined));
+  // 2. 索引倒着取：值越大越红。
+  assert.deepEqual(jetWhite3(0, 100, 1e9), [255, 0, 0]);
+  // 3. `* 2` 系数：x 走到 max 都还没到表头。
+  const atMax = jetWhite3(0, 100, 100);
+  assert.notDeepEqual(atMax, [255, 0, 0], 'x = max 时不该已经是最红那级');
+  return `x=0 → 白；x=max → ${atMax.join(',')}；x≫max → 红`;
 });
 
 /* ── 5. 帧总线 ──────────────────────────────────────────────────── */

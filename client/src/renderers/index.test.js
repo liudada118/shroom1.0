@@ -57,7 +57,7 @@ describe('内置渲染器注册', () => {
 
   // 逐个 await 每一个注册项而不是只测 pointGrid：这一条抓的是渲染器模块
   // 内部的导入错误（路径写错、拿了个不存在的导出），而描述符校验看不到那些。
-  it.each(['pointGrid', 'numMatrix'])('%s 模块可以真正加载出一个组件', async (id) => {
+  it.each(['pointGrid', 'numMatrix', 'handPoints'])('%s 模块可以真正加载出一个组件', async (id) => {
     const component = await loadRenderer(id);
     expect(component).toBeTruthy();
     // forwardRef 组件是对象而非函数，两者都接受

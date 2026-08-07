@@ -8,12 +8,14 @@
  * 性质（`scripts/smoke-core.mjs` 会立刻红）。注册表本体（`registerRenderer`）
  * 是纯的，所以它在 core；**注册哪些实现**这件事带实现，所以在 react。
  *
- * ## 现在是两个：numMatrix + pointGrid
+ * ## 现在是三个：numMatrix + pointGrid + handPoints
  *
  * 第一轮（2026-08-03）只搬了数字矩阵；第二轮（2026-08-05）把点阵热力也搬了进来，
  * 连同它依赖的 `SelectionHelper` 与 `threeUtil1` 里那 3 个函数（现在是
  * `./three/SelectionHelper.js` 与 `./three/pointPick.js`）。
  * `client/src/renderers/builtins.js` 随之退化成只转调本函数的壳。
+ * 第三轮（2026-08-07）搬了手部点云 —— 它与 `pointGrid` 共用上面那三个模块，
+ * 外加同一张 `./three/circle.png`（这一轮从 `pointGrid/` 挪过去的）。
  *
  * ## 注册只写描述符，不 import 本体
  *
@@ -36,6 +38,10 @@ import {
   LEGACY_PRESETS as POINT_GRID_PRESETS,
   normalizePointGridParams,
 } from '../core/pointGrid/params.js';
+import {
+  LEGACY_PRESETS as HAND_POINTS_PRESETS,
+  normalizeHandPointsParams,
+} from '../core/handPoints/params.js';
 
 /**
  * 注册本包内置的渲染器。
@@ -139,6 +145,44 @@ export function registerBuiltinRenderers() {
       // （`sit.num1` 16 vs 9、`sit.order` 2 vs 4），所以不是两个渲染器，
       // 是同一个渲染器的两条预设 —— 逐帧一致性见 core/pointGrid/pipeline.test.js。
       presets: POINT_GRID_PRESETS,
+    }),
+    registerRenderer({
+      id: 'handPoints',
+      label: '手部点云（3D）',
+      description: '手套压力的三维点云，带 GLTF 手模与 IMU 四元数驱动的关节旋转',
+      load: () => import('./handPoints/HandPointsRenderer.jsx'),
+      capabilities: [
+        RENDERER_CAPABILITIES.SIT,
+        RENDERER_CAPABILITIES.BOX_SELECT,
+        RENDERER_CAPABILITIES.ROTATE,
+        // 全仓唯一一个有骨骼驱动的渲染器。这条能力就是为它加的。
+        RENDERER_CAPABILITIES.ARTICULATED,
+      ],
+      // ⚠️ `BOX_SELECT` 这一条在**原实现里是哑的** —— `selectHelper` 声明了
+      // 却从没赋值，`changeBox` / `cancelSelect` 一调就 TypeError。搬进包时
+      // 把它接通了（细节见 `./handPoints/HandPointsRenderer.jsx` 文件头），
+      // 所以这里声明它不是虚标。
+      methods: [
+        'sitData',
+        'sitValue',
+        'sitRenew',
+        'changeDataFlag',
+        'changeHandAngle',
+        'calibration',
+        'handZero',
+        'resetHand',
+        'changaCamera',
+        'changePointRotation',
+        'changeSelectFlag',
+        'changeBox',
+        'cancelSelect',
+      ],
+      normalizeParams: normalizeHandPointsParams,
+      // 三条预设。`hand0205` / `hand0205_147` 对应原来那两个文件，
+      // 净差异只有九个参数值（表见 core/handPoints/params.js 头部）；
+      // `hand0205Alt` 是原实现里那张定义了却没人读的第二张点表
+      // （`glovesPoints1`），搬过来时从死代码转成了可选配置。
+      presets: HAND_POINTS_PRESETS,
     }),
   ];
 

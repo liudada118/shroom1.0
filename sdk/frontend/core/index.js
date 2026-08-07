@@ -28,11 +28,12 @@
  * | 布局与数学 | `buildCoordinatePointLayout`、`findMax` / `press` / 点阵那三个帧函数 |
  * | numMatrix | `numMatrix.*` 命名空间 + 四个常用符号的顶层别名 |
  * | pointGrid | `pointGrid.*` 命名空间 + 两个常用符号的顶层别名 |
+ * | handPoints | `handPoints.*` 命名空间 + 两个常用符号的顶层别名 |
  *
- * 两个渲染器都用命名空间而不是全部铺平 —— 第一轮就是为这一刻留的：
- * 它们各有一个 `LEGACY_PRESETS`、各有一个 `PARAM_RANGES`，铺平必撞。
- * 顶层别名只给带前缀不会歧义的那几个（`NUM_MATRIX_PRESETS` /
- * `POINT_GRID_PRESETS`、两个 `normalize*Params`）。
+ * 三个渲染器都用命名空间而不是全部铺平 —— 第一轮就是为这一刻留的：
+ * 它们各有一个 `LEGACY_PRESETS`、各有一个 `PARAM_RANGES`、各有一个
+ * `deriveGridSize`，铺平必撞。顶层别名只给带前缀不会歧义的那几个
+ * （三个 `*_PRESETS`、三个 `normalize*Params`）。
  *
  * @see ../react/index.js React + three 那一层（`RendererHost` 在那边）
  */
@@ -92,6 +93,10 @@ export { jetRgb } from './jetLadder.js';
 // 改名会把「搬家」变成「改接口」。
 export { garyColors, jetgGrey } from './greyLadder.js';
 
+// 彩虹阶梯是手部点云在用的老配色（`jetWhite3`），第 19、20 条配色实现 ——
+// `util.js` 里那份 `jetWhite4` 与它逐字节相同，尚未收敛，记在积压里。
+export { jetWhite3, rainbowTextColorsxy } from './rainbowLadder.js';
+
 /* ── 阈值 ───────────────────────────────────────────────────────── */
 export {
   DUAL_CHANNEL_DEFAULTS,
@@ -118,6 +123,7 @@ export {
   jet,
   jetRound,
   press,
+  rotate90CCW,
   rotate90CW,
 } from './frameMath.js';
 
@@ -143,3 +149,13 @@ export {
   createPointGridPipeline,
   runPointGridPipeline,
 } from './pointGrid/pipeline.js';
+
+/* ── handPoints（命名空间 + 两个常用别名） ───────────────────────── */
+export * as handPoints from './handPoints/index.js';
+
+export {
+  LEGACY_PRESETS as HAND_POINTS_PRESETS,
+  normalizeHandPointsParams,
+} from './handPoints/params.js';
+
+export { createQuaternionTracker } from './handPoints/quaternion.js';

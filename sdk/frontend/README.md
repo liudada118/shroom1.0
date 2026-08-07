@@ -46,7 +46,7 @@ npm --prefix docs i && npm --prefix docs run dev      # 或在仓库根上：npm
 import { RendererHost, registerBuiltinRenderers } from '@shroom/frontend/react';
 import '@shroom/frontend/styles/canvas.css';
 
-registerBuiltinRenderers();          // 注册本包 ships 的渲染器：numMatrix + pointGrid
+registerBuiltinRenderers();          // 注册本包 ships 的渲染器：numMatrix + pointGrid + handPoints
 
 <RendererHost rendererId="numMatrix" params={params} values={frame} channel="sit" />
 ```
@@ -67,7 +67,7 @@ registerBuiltinRenderers();          // 注册本包 ships 的渲染器：numMat
 | :--- | :--- | :--- |
 | `@shroom/frontend` | 传输（`SensorClient`）、帧存储（`FrameStore`）、展示系统定义（`DisplayRegistry`），**并全量转出 `core`** | 无 |
 | `@shroom/frontend/core` | 契约、渲染器注册表、帧管线、配色、阈值、坐标布局 | 无 |
-| `@shroom/frontend/react` | `RendererHost`、`useSceneFrame`、`registerBuiltinRenderers`，两个渲染器（`numMatrix`，三个后端 `sprite3d` / `canvas2d` / `webgl`；`pointGrid`）+ `three/{SelectionHelper,pointPick}` + `webgl/glUtil.js` | peer: react + three |
+| `@shroom/frontend/react` | `RendererHost`、`useSceneFrame`、`registerBuiltinRenderers`，三个渲染器（`numMatrix`，三个后端 `sprite3d` / `canvas2d` / `webgl`；`pointGrid`；`handPoints`）+ `three/{SelectionHelper,pointPick,circle.png}` + `webgl/glUtil.js` | peer: react + three |
 | `@shroom/frontend/styles/canvas.css` | 6 行 canvas 样式（`.canvasNum`） | 无 |
 
 **根出口刻意不含 `react/`。** 一旦含了，`SensorClient` 的裸 Node 消费者（后端测试里
@@ -150,8 +150,8 @@ webpack 用 `resolve.alias` 指到你那份，rollup 用 `@rollup/plugin-node-re
 
 ### 4. 你的打包器要能处理 `.png` import
 
-`pointGrid` 的点精灵贴图是 `import circleUrl from './circle.png'` 出来的打包资源
-（[react/pointGrid/PointGridRenderer.jsx](react/pointGrid/PointGridRenderer.jsx)）。
+`pointGrid` 与 `handPoints` 的点精灵贴图是 `import circleUrl from '../three/circle.png'`
+出来的打包资源（[react/three/circle.png](react/three/circle.png)，两者共用同一张）。
 Vite 原生支持，webpack 5 走 asset modules，Rollup 需要 `@rollup/plugin-url` 之类。
 
 **这条以前不是义务，2026-08-05 `pointGrid` 进包时才变成义务。** 它原来写的是
@@ -281,7 +281,7 @@ core/                 零依赖层，裸 Node 可 import
 react/                peer: react + three
   RendererHost.jsx    宿主：懒加载 + 契约审计 + 声明式 values / 帧总线两条通道
   useSceneFrame.js    订阅帧总线的 hook —— 二开者消费帧的正式入口
-  builtins.js         注册本包 ships 的两个渲染器
+  builtins.js         注册本包 ships 的三个渲染器
   numMatrix/NumMatrixRenderer.jsx
   numMatrix/backends/sprite3d.js   three.js InstancedMesh，一次 draw call 画完整片矩阵
   numMatrix/backends/canvas2d.js   2D canvas 逐格 fillText + CSS perspective 的伪三维
@@ -289,9 +289,13 @@ react/                peer: react + three
                                    两个变体（plain = 原 Num2D，original = 原
                                    Num2Doriginal，多掩码/POT/零值显白/分区布局）
   pointGrid/PointGridRenderer.jsx  three.js Points + TrackballControls，可框选
-  pointGrid/circle.png             点精灵贴图（打包资源，不是运行期相对 URL）
+  handPoints/HandPointsRenderer.jsx three.js Points + GLTF 手模 + IMU 四元数驱动
+                                   的手指关节旋转（唯一有 ARTICULATED 能力的）
   three/SelectionHelper.js         拖拽框选的那个 div
   three/pointPick.js               世界坐标 → 屏幕矩形 → 网格下标
+  three/circle.png                 点精灵贴图（打包资源，不是运行期相对 URL）。
+                                   pointGrid 与 handPoints 共用，所以在 three/
+                                   而不是任一渲染器自己的目录下
   webgl/glUtil.js                  createShader / createProgram / 亮度纹理上传 /
                                    资源释放（唯一允许的模块级可变状态：预热过的
                                    着色器源码 Set，说明写在文件头）
@@ -386,8 +390,8 @@ GET /api/sdk/contract
 ## 本地开发
 
 ```bash
-npm test        # vitest，217 例（core 的纯函数 + 参数归一化 + 逐点比对 + 两个渲染器描述符）
-npm run smoke   # 裸 Node 跑一遍 core，23 项
+npm test        # vitest，320 例（core 的纯函数 + 参数归一化 + 逐点比对 + 三个渲染器描述符）
+npm run smoke   # 裸 Node 跑一遍 core，28 项
 cd example && npm i && npm run dev
 cd docs && npm i && npm run dev      # 文档站
 cd docs && npm run check             # 逐页 SSR 渲染，10 页
@@ -412,7 +416,11 @@ cd docs && npm run check             # 逐页 SSR 渲染，10 页
 - **`private: true`，不发公共 registry。** 分发走 `npm pack` tarball 或 `file:`。想真
   发布是另一件事（要定 scope 归属与版本承诺）。
 - **tarball 里根出口加载不了**，见上面「已知缺口」。渲染器那条路不受影响。
-- **ships 两个渲染器：`numMatrix` + `pointGrid`。** 后者 2026-08-05 第二轮搬入。
+- **ships 三个渲染器：`numMatrix` + `pointGrid` + `handPoints`。** `pointGrid`
+  2026-08-05 第二轮搬入；`handPoints` 2026-08-07 第三轮批 3 搬入（原
+  `client/src/components/three/hand0205Point.jsx` 993 行 + `...147.jsx` 1037 行，
+  **两份合成一个渲染器三条预设** —— 归一化空白与注释后净差 151 行，差的全是参数与
+  两张写死的点表。两个原文件已删，原路径没留壳：唯一的 importer 是 `Home.jsx`）。
 - **`BACKENDS = ['sprite3d', 'canvas2d', 'webgl']`，三个后端全部到位。**
   `canvas2d` 2026-08-06 第三轮批 1 搬入（原 `client/src/components/num/NumWs.jsx`，
   导出名 `Num3D`，其实是 2D canvas + CSS 透视，不是 WebGL）；`webgl` 同轮批 2 搬入
@@ -426,14 +434,14 @@ cd docs && npm run check             # 逐页 SSR 渲染，10 页
   画面变化，不是搬家该做的事），但那段 GLSL 现在是从 `core/jetLadder.js` 的断点数据
   **发码**出来的，不是第 19 份手抄 —— 要支持任意配色，改 `core/numMatrix/shaders.js`
   一处即可。已记积压。
-- **`sprite3d` / `pointGrid` 两个渲染器按视口而不是按容器定尺寸**
+- **`sprite3d` / `pointGrid` / `handPoints` 三个渲染器按视口而不是按容器定尺寸**
   （`numMatrix/backends/sprite3d.js:247`、`pointGrid/PointGridRenderer.jsx:319`）。
   主应用里每个展示形式独占整屏，所以这个区别从没暴露过；想把画面嵌进一个小卡片，
   只能用视口尺寸的容器 + CSS `transform: scale()` 绕（文档站就是这么干的），代价是
   `three/pointPick.js` 读的是 `window.innerWidth/Height` —— **缩放态下框选会选错点**。
   新搬的 `canvas2d` / `webgl` 两个后端也照抄了这个行为（`backends/webgl.js` 的
   `bounds()` 是改它时唯一要动的地方，注释已写明）。新写渲染器请按容器画。已记积压。
-- **两个渲染器的 dispose 都没有 `forceContextLoss()`。** `renderer.dispose()` 不保证
+- **三个渲染器的 dispose 都没有 `forceContextLoss()`。** `renderer.dispose()` 不保证
   立即归还 WebGL 上下文（浏览器同时活的上限约 8–16），同页多块时可能累积到
   "Too many active WebGL contexts"。文档站用 `IntersectionObserver` 懒挂载 + 活跃数上限
   4 绕开而没有改包内代码 —— 加这一行要配一整轮真机回归。已记积压。

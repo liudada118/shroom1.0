@@ -10,6 +10,7 @@
     "./core": "./core/index.js",
     "./core/numMatrix": "./core/numMatrix/index.js",
     "./core/pointGrid": "./core/pointGrid/index.js",
+    "./core/handPoints": "./core/handPoints/index.js",
     "./core/*": "./core/*",
     "./react": "./react/index.js",
     "./react/*": "./react/*",

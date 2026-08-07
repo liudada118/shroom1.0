@@ -73,7 +73,10 @@ import { addSide, findMax, gaussBlur_1, interpSmall, jet } from '../../core/fram
 import { jetgGrey } from '../../core/greyLadder.js';
 import { deriveGridSize, normalizePointGridParams } from '../../core/pointGrid/params.js';
 // 打包器把它变成一个真实存在的 URL；理由见文件头第 1 条。
-import circleUrl from './circle.png';
+// 2026-08-07 从 `./circle.png` 挪到 `../three/`：`handPoints` 渲染器也要这张图，
+// 放在两个渲染器目录之一会让另一个跨目录引资源。它和 `SelectionHelper` /
+// `pointPick` 一样是「点阵这一族共用的东西」，归 `react/three/`。
+import circleUrl from '../three/circle.png';
 
 const ALT_KEY = 18;
 const CTRL_KEY = 17;

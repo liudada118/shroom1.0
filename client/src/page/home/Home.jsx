@@ -26,8 +26,6 @@ import Hand0205Double from "../../components/three/hand0205Double";
 import Minzhen from "../../components/three/minzhen";
 import MinzhenSensorPanel from "../../components/minzhen/MinzhenSensorPanel";
 import Hand0507 from "../../components/three/hand0507";
-import Hand0205Point from "../../components/three/hand0205Point";
-import Hand0205Point147 from "../../components/three/hand0205Point147";
 import Ware from "../../components/three/ware";
 import FootVideo from '../../components/video/foot'
 import FootVideo256 from '../../components/video/foot256'
@@ -116,6 +114,10 @@ import { resolveRendererFromDefinition } from '../../renderers/registry';
 // PointGridRenderer.jsx 仍然由 RendererHost 懒加载，不进 Home 的 chunk。
 import { LEGACY_PRESETS as POINT_GRID_PRESETS } from '../../renderers/pointGrid/params';
 import { LEGACY_PRESETS as NUM_MATRIX_PRESETS } from '../../renderers/numMatrix/params';
+// 手部点云是本轮新搬进包的，原路径（components/three/hand0205Point*.jsx）除了
+// 这个文件没有别的 import，所以那两个文件直接删了、`renderers/` 下也没留壳 ——
+// 这里直接从包里取参数表。同样只引 params，渲染器本体走懒加载。
+import { LEGACY_PRESETS as HAND_POINTS_PRESETS } from '@shroom/frontend/core/handPoints';
 import { clearLastFrame, publishFrame } from '../../runtime/frameBus';
 import { SCENE_CHANNELS, buildSceneFrame } from '../../runtime/sceneFrame';
 import DisplayCanvasConfigurator from '../../components/displaySystem/canvasConfigurator/DisplayCanvasConfigurator.jsx';
@@ -5046,8 +5048,11 @@ class Home extends React.Component {
                       <CanvasCom matrixName={this.state.matrixName}
                         local={this.state.local}
                       >
-                        <Hand0205Point
-                          ref={this.com}
+                        <RendererHost
+                          rendererId="handPoints"
+                          params={HAND_POINTS_PRESETS.hand0205}
+                          label="手部点云"
+                          rendererRef={this.com}
                           data={this.data}
                           local={this.state.local}
                           {...this.sceneChartProps} />
@@ -5056,8 +5061,13 @@ class Home extends React.Component {
                       <CanvasCom matrixName={this.state.matrixName}
                         local={this.state.local}
                       >
-                        <Hand0205Point147
-                          ref={this.com}
+                        <RendererHost
+                          rendererId="handPoints"
+                          // 与上一条同一个渲染器，只换预设：147 那份的净差就是
+                          // interp 2→4、order 4→6、点表、以及另外几个尺寸参数。
+                          params={HAND_POINTS_PRESETS.hand0205_147}
+                          label="手部点云（147）"
+                          rendererRef={this.com}
                           data={this.data}
                           local={this.state.local}
                           {...this.sceneChartProps} />

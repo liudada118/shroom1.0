@@ -90,32 +90,8 @@ export const rainbowColors = [
     // ...new Array(5).fill([255, 255, 255]),
   ];
 
-  export const rainbowTextColorsxy = [
-    [255,0,0],
-    [255,69,0],
-    [255,136,0],
-    [255,170,0],
-    [255,204,0],
-    [255, 255, 0],
-    [204, 255, 0],
-    [153, 255, 0],
-    [102, 255, 0],
-    [51, 255, 0],
-    [0, 255, 0],
-    [0, 255, 51],
-    [0, 255, 102],
-    [0, 255, 153],
-    [0, 255, 204],
-    [0, 255, 255],
-    [0, 204, 255],
-    [0, 153, 255],
-    // ...new Array(1).fill([0, 102, 255]),
-    // ...new Array(1).fill([0, 255, 255]),
-    // ...new Array(1).fill([0, 204, 255]),
-    // ...new Array(1).fill([0, 153, 255]),
-    ...new Array(5).fill([0, 102, 255]),
-    [255, 255, 255],
-    [255, 255, 255],
-    [255, 255, 255],
-    // ...new Array(5).fill([255, 255, 255]),
-  ];
+  // 这张 26 级彩虹阶梯连同它的取样函数 `jetWhite3` 一起搬到了
+  // `@shroom/frontend/core/rainbowLadder.js`（手部点云渲染器要用它）。
+  // 与 `garyColors` + `jetgGrey` 搬进 `greyLadder.js` 那次做法相同：
+  // 阶梯表和取样函数是一对，分开搬就会有一份留在这边慢慢漂。
+  export { rainbowTextColorsxy } from "@shroom/frontend/core/rainbowLadder.js";

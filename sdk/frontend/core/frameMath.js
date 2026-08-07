@@ -327,6 +327,52 @@ export function rotate90CW(arr, height, width) {
 }
 
 /**
+ * 逆时针旋转 90°。
+ *
+ * 逐字搬自 `util.js:868-896`（原名就叫 `rotate90`，没有方向后缀 —— 这里补上
+ * `CCW` 是为了和上面那个 `rotate90CW` 区分，两者**不是**互为反函数的同一份代码，
+ * 实现思路和坑都不一样）。唯一的调用点是 `handPoints` 渲染器 `hand0205` 预设的
+ * 手形掩码，传的是 32×32。
+ *
+ * ⚠️ **这份实现只对方阵正确**，两处都是原实现的写法，照抄不改：
+ *
+ * 1. 拆二维时读的是 `arr[i * height + j]` —— 行跨距用的是 `height` 而不是 `width`。
+ * 2. 旋转时两层循环都跑到 `len = matrix.length`（行数），列数 `width` 根本没参与。
+ *
+ * 非方阵调用会静默给出错位结果。原实现没有非方阵的先例，本轮也没有。
+ *
+ * @param {number[]} arr 原矩阵，行优先展开。
+ * @param {number} height 原矩阵行数。
+ * @param {number} width 原矩阵列数（见上：实际未参与旋转，只用于拆二维）。
+ * @returns {number[]} 旋转后的新数组。
+ */
+export function rotate90CCW(arr, height, width) {
+  const matrix = [];
+  for (let i = 0; i < height; i += 1) {
+    matrix[i] = [];
+    for (let j = 0; j < width; j += 1) {
+      matrix[i].push(arr[i * height + j]);
+    }
+  }
+
+  const temp = [];
+  const len = matrix.length;
+  for (let i = 0; i < len; i += 1) {
+    for (let j = 0; j < len; j += 1) {
+      const k = len - 1 - j;
+      if (!temp[k]) temp[k] = [];
+      temp[k][i] = matrix[i][j];
+    }
+  }
+
+  let res = [];
+  for (let i = 0; i < temp.length; i += 1) {
+    res = res.concat(temp[i]);
+  }
+  return res;
+}
+
+/**
  * 三次盒式模糊逼近高斯所用的三个核宽。
  *
  * 逐字搬自 `util.js`（那里有 7 份一模一样的复制粘贴，其中一份在 `NumWs.jsx`

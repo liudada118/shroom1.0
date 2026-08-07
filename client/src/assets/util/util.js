@@ -664,16 +664,11 @@ export function jetWhite2(min, max, x) {
   return rainbowColors[length - 1 - num];
 }
 
-export function jetWhite3(min, max, x) {
-  if (!x) {
-    return rainbowTextColorsxy[rainbowTextColorsxy.length - 1]
-  }
-  const length = rainbowTextColorsxy.length;
-  const count = (max - min) * 2 / length;
-  const num = Math.floor(x / count) >= length - 1 ? length - 1 : Math.floor(x / count) < 0 ? 0 : Math.floor(x / count);
-  // console.log(length,count,x  , num,Math.floor(x / count))
-  return rainbowTextColorsxy[length - 1 - num];
-}
+// 实现连同 `rainbowTextColorsxy` 阶梯表一起搬到了
+// `@shroom/frontend/core/rainbowLadder.js`（手部点云渲染器要用它）。
+// ⚠️ 下面那个 `jetWhite4` 与它**逐字相同**，本轮没有一并收敛 —— 它有独立的调用方，
+// 合并是单独一件事。所以这两个现在一个在包里、一个在这边，看着像漂了，其实是同一份。
+export { jetWhite3 } from "@shroom/frontend/core/rainbowLadder.js";
 
 export function jetWhite4(min, max, x) {
   if (!x) {
