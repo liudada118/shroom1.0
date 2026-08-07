@@ -35,25 +35,30 @@
  * 在画布配置器里的实时选择，后者是坐标表数据，都由外层透传。两者已补进
  * `contract.js` 的 `RENDERER_PROPS`。
  *
- * ## 后端接口：4 个必需 + 3 个可选
+ * ## 后端接口：4 个必需 + 4 个可选
  *
  * 必需的仍是原来那四个（`setFrame` / `retint` / `start` / `dispose`），工厂入参
- * 也没变，只多了一个 `reportStats`。三个可选的是 2026-08-06 接 `canvas2d` 时加的：
+ * 也没变，只多了一个 `reportStats`。可选的四个是 2026-08-06 那两轮接后端时加的：
  *
  * | 可选项 | 谁实现 | 干什么 |
  * | :--- | :--- | :--- |
- * | `commands` | canvas2d | 后端自有的命令式方法，原样铺进 `state.api` |
- * | `applyTuning(changed)` | canvas2d | `sitValue` 末尾回调，让后端吸收阈值变化 |
- * | `factory.commandNames` | canvas2d | 上面那些方法的名字，供 `useImperativeHandle` 用 |
+ * | `commands` | canvas2d / webgl | 后端自有的命令式方法，原样铺进 `state.api` |
+ * | `applyTuning(changed)` | canvas2d / webgl | `sitValue` 末尾回调，让后端吸收阈值变化 |
+ * | `factory.commandNames` | canvas2d / webgl | 上面那些方法的名字，供 `useImperativeHandle` 用 |
+ * | `setRawFrame(data)` | webgl | 接管 `changeWsDataRaw`：不过滤、不统计、原样上屏 |
  *
- * **为什么非得开这三个口子。** 接 `canvas2d` 时本来只该往 `BACKEND_FACTORIES`
+ * **为什么非得开这几个口子。** 接 `canvas2d` 时本来只该往 `BACKEND_FACTORIES`
  * 加一行（这个文件原来的注释就是这么写的），实际不够：`NumWs.jsx` 暴露 12 个
  * 命令式方法而本层只有 4 个，其中 `changeWsData147` / `changeWsData256` /
  * `changeWsDatafinger` / `changeWsDatapalm` **每次调用都换网格尺寸**
  * （36×36 / 16×16 / 32×32），`sprite3d` 的实例数在建场景时就定死了，做不到。
  *
- * 加的这三条都是**通用机制**，本层不认识任何一个 canvas2d 专属的名字：
- * `sprite3d` 一个都没实现，走的路径和以前逐字相同。
+ * 第四条是接 `webgl` 时加的：本层的 `changeWsDataRaw` 和 `changeWsData` 走的是
+ * 同一条 `sitData`（会按 `valuef1` 过滤再回写侧栏），而 `Num2Doriginal` 的裸数据
+ * 通路**既不过滤也不转成 sitData**，还要按矩阵类型转置。硬套本层那条会改画面。
+ *
+ * 四条都是**通用机制**，本层不认识任何一个后端专属的名字：`sprite3d` 一个都没
+ * 实现，走的路径和以前逐字相同。
  */
 
 import React, { useEffect, useImperativeHandle, useMemo, useRef } from 'react';
@@ -67,15 +72,18 @@ import { deriveGrid, normalizeNumMatrixParams } from '../../core/numMatrix/param
 import { applyFloorFilter, computeFrameStats, createRollingWindow } from '../../core/numMatrix/pipeline.js';
 import { createCanvas2dMatrixBackend } from './backends/canvas2d.js';
 import { createSpriteMatrixBackend } from './backends/sprite3d.js';
+import { createWebglMatrixBackend } from './backends/webgl.js';
 
 /**
  * 后端分派表。
  *
- * `canvas2d` 是 2026-08-06 第三轮迁移加的第二条，还差一个 `webgl`。
+ * 三条都齐了：`sprite3d`（three 精灵图）、`canvas2d`（CSS 透视伪 3D）、
+ * `webgl`（热场 + 数字叠加层）。加第四条仍然只要往这里加一行。
  */
 const BACKEND_FACTORIES = {
   sprite3d: createSpriteMatrixBackend,
   canvas2d: createCanvas2dMatrixBackend,
+  webgl: createWebglMatrixBackend,
 };
 
 /**
@@ -284,7 +292,15 @@ const NumMatrixRenderer = React.forwardRef((props, refs) => {
       sitData,
       sitValue,
       changeWsData: (wsPointData) => sitData({ wsPointData }, propsRef.current.local),
-      changeWsDataRaw: (wsPointData) => sitData({ wsPointData }, propsRef.current.local),
+
+      // 裸数据通路。后端实现了 `setRawFrame` 就交给它（`webgl` 那份不过滤、
+      // 不走 `sitData`、还要按矩阵类型转置），没实现就退回和 `changeWsData`
+      // 同一条 —— 这正是接 `webgl` 之前所有后端的行为。
+      changeWsDataRaw: (wsPointData) => (
+        state.backend?.setRawFrame
+          ? state.backend.setRawFrame(wsPointData)
+          : sitData({ wsPointData }, propsRef.current.local)
+      ),
     };
 
     state.backend.start();

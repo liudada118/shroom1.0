@@ -113,21 +113,45 @@ describe('内置渲染器注册', () => {
     expect(descriptor.capabilities).not.toContain(RENDERER_CAPABILITIES.BOX_SELECT);
   });
 
-  it('numMatrix 的六条 legacy 预设挂在描述符上', () => {
+  it('numMatrix 的 24 条 legacy 预设挂在描述符上，按三个后端分组', () => {
     // 三份 NumThreeColor 的布局公式代数等价（逐点验算见
     // numMatrix/pipeline.test.js），所以它们是同一个渲染器的三条预设；
     // smallBed12B 是第四条，原来靠 `matrixName === 'smallBed12B'` 的字符串分支。
-    // 后两条走 canvas2d 后端，来自 `num/NumWs.jsx`（`carCol` 那支是它的
+    // 接着两条走 canvas2d 后端，来自 `num/NumWs.jsx`（`carCol` 那支是它的
     // `props.matrixName == 'carCol'` 分支）。
+    // 最后 18 条走 webgl 后端：`webglNum*` 五条来自 `num/Num2D.jsx`，
+    // `webglRaw*` 十三条来自 `num/Num2Doriginal.jsx` —— 两份原实现的着色器只差
+    // 18 行，合成了一个后端 + 四个开关，所以它们的差别全落在预设数据里。
     const { presets, normalizeParams } = getRendererDescriptor('numMatrix');
     expect(Object.keys(presets)).toEqual([
-      'fast256', 'fast1024', 'fast1024sit', 'smallBed12B', 'num3dDefault', 'num3dCarCol',
+      'fast256', 'fast1024', 'fast1024sit', 'smallBed12B',
+      'num3dDefault', 'num3dCarCol',
+      'webglNumDefault', 'webglNumCarCol', 'webglNumGlove',
+      'webglNumGloveFullPacket', 'webglNumFoot',
+      'webglRawDefault', 'webglRawTransposed', 'webglRawCarCol', 'webglRawDaliegu',
+      'webglRawSmallSample', 'webglRawTempFullBed', 'webglRawBed4096num',
+      'webglRawGlove', 'webglRawGloveFullPacket', 'webglRawFoot',
+      'webglRawRobotSY', 'webglRawRobotLCF', 'webglRawRobot1',
     ]);
+
+    // 每条预设归一化后落在哪个后端 —— 这一条比名单更要紧：预设名写错顶多是
+    // 找不到，`backend` 写错是画面静默走了另一套实现。
+    const byBackend = Object.entries(presets).reduce((acc, [id, preset]) => {
+      const backend = normalizeParams(preset).backend;
+      (acc[backend] = acc[backend] || []).push(id);
+      return acc;
+    }, {});
+    expect(byBackend.sprite3d.length).toBe(4);
+    expect(byBackend.canvas2d.length).toBe(2);
+    expect(byBackend.webgl.length).toBe(18);
 
     expect(normalizeParams(presets.fast256).size).toBe(4);
     expect(normalizeParams(presets.fast1024sit).cameraControls).toBe(false);
     expect(normalizeParams(presets.smallBed12B).decimalScale).toBe(10);
     expect(normalizeParams(presets.num3dDefault).backend).toBe('canvas2d');
+    // `original` 变体是 Num2Doriginal 的那一半：掩码 / POT / 零值显白三个开关。
+    expect(normalizeParams(presets.webglRawRobotSY).webgl.robot.name).toBe('robotSY');
+    expect(normalizeParams(presets.webglNumFoot).webgl.variant).toBe('plain');
   });
 
   it('manifest 声明 numMatrix 时能解析出渲染器与参数', () => {

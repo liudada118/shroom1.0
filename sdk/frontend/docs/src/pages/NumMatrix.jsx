@@ -28,6 +28,30 @@ const PRESET_ORIGIN = {
   smallBed12B: '原先靠 matrixName === "smallBed12B" 的字符串分支（12 位，除 10 显示）',
   num3dDefault: 'num/NumWs.jsx（canvas2d 后端，32×32；2D canvas + CSS 透视，不是 WebGL）',
   num3dCarCol: 'num/NumWs.jsx 里 matrixName === "carCol" 那一支（10×9）',
+
+  // 以下 18 条走 webgl 后端。前缀区分的是主应用里的两个展示形式：
+  // `webglNum*` = 「数字」（原 num/Num2D.jsx），`webglRaw*` = 「原始数据」（原
+  // num/Num2Doriginal.jsx）。两份原实现的片元着色器只差 18 行，合成了一个后端 +
+  // 四个开关（useMask / texScale / whiteOnZero / potTexture），所以这里的差别全在数据。
+  webglNumDefault: 'num/Num2D.jsx 的默认支（32×32；robot1 也落在这里，热场是空的——原实现如此）',
+  webglNumCarCol: 'num/Num2D.jsx 里 matrixName === "carCol" 那一支（10×9）',
+  webglNumGlove: 'num/Num2D.jsx 的手套支（147 点散进 32×32 再补边到 36×36）',
+  webglNumGloveFullPacket: 'num/Num2D.jsx 的整包手套支（同上，挂载时先铺一张空网格）',
+  webglNumFoot: 'num/Num2D.jsx 的 footVideo 支（60 点插值铺满 16×32，左右脚两块画布）',
+
+  webglRawDefault: 'num/Num2Doriginal.jsx 的默认支（32×32）',
+  webglRawTransposed: 'num/Num2Doriginal.jsx 的 RAW_TRANSPOSE_MATRIX_TYPES（四个键里只有 jqbed 走得到；只在方阵时转置）',
+  webglRawCarCol: 'num/Num2Doriginal.jsx 的 carCol 支（10×9）',
+  webglRawDaliegu: 'num/Num2Doriginal.jsx 的 daliegu 支（14×20）',
+  webglRawSmallSample: 'num/Num2Doriginal.jsx 的 smallSample 支（10×10）',
+  webglRawTempFullBed: 'num/Num2Doriginal.jsx 的 tempFullBed 支（15×12）',
+  webglRawBed4096num: 'num/Num2Doriginal.jsx 的 bed4096num 支（64×64，4096 个 fillText/帧；Home 现在走不到它）',
+  webglRawGlove: 'num/Num2Doriginal.jsx 的手套支（第 75 位插三个 0 凑成 15×10）',
+  webglRawGloveFullPacket: 'num/Num2Doriginal.jsx 的整包手套支（195 点 = 15×13）',
+  webglRawFoot: 'num/Num2Doriginal.jsx 的 footVideo 支（6×10 原样上屏，不插值，格子边长写死 30）',
+  webglRawRobotSY: 'num/Num2Doriginal.jsx 的 robotSY 分区布局（掩码 + POT 纹理 + u_texScale）',
+  webglRawRobotLCF: 'num/Num2Doriginal.jsx 的 robotLCF 分区布局',
+  webglRawRobot1: 'num/Num2Doriginal.jsx 的 robot1 分区布局',
 };
 
 export default function NumMatrix() {

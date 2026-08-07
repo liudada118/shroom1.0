@@ -10,7 +10,7 @@
 // 走 jetLadder.js 而不是 util.js：本文件会被后端测试用裸 Node ESM 加载
 // （backend/tests/sdk/displayProfileRuntime.test.js），import 不了 util.js
 // —— 它内部的导入没写扩展名，且顶层就在读 localStorage。详见 jetLadder.js 头部。
-import { jetRgb } from './jetLadder.js';
+import { JET_LADDER_SEGMENTS, jetRgb } from './jetLadder.js';
 
 const CLASSIC_ID = 'classic';
 
@@ -239,4 +239,55 @@ export function colormapPreviewCss(id, options = {}) {
   return options?.reverse
     ? colormap.previewCss.replace('90deg', '270deg')
     : colormap.previewCss;
+}
+
+/**
+ * 把 jet 阶梯发成一段 GLSL 源码。
+ *
+ * **为什么是生成而不是再抄一遍。** `Num2D.jsx` / `Num2Doriginal.jsx` 的片元
+ * 着色器里各躺着一份手抄的 `jet1()`，断点与斜率和 `core/jetLadder.js` 完全
+ * 一致 —— 它们是全仓 jet 阶梯的第 19、20 份拷贝。之前 18 份合并时漏了它们，
+ * 因为公式在模板字符串里，`grep "function jet"` 扫不到。所以这里从
+ * `JET_LADDER_SEGMENTS` 发码，阶梯仍然只有一个出处。
+ *
+ * **一处必须保留的行为差异**：GLSL 那份在 `dv == 0.0` 时提前返回
+ * `vec3(0.0, 0.0, 1.0)`（纯蓝），而 JS 的 `jetRgb` 在同样输入下 `g` 是
+ * `NaN`（`4 * 0 / 0`）。生成器照发 GLSL 那份的提前返回，**画面零变化** ——
+ * 这不是在修 JS 那份的 bug，是在保证搬家不改观感。
+ *
+ * **序言逐字照抄原件的「先夹 x 再相除」**，而不是写成
+ * `clamp((x - minVal) / dv, 0.0, 1.0)`。两者在 `dv > 0` 时同解，但
+ * `maxVal < minVal` 时不同（原件两次赋值后 `x` 落在 `maxVal`，`t` 恒为 1）。
+ * 实际调用永远是 `u_max > u_min`，所以这是个够不到的分支 —— 照抄就不必论证。
+ *
+ * 与原件唯一的结构差异是：原件用 `float r, g, b` + `if / else if` 链最后
+ * `return vec3(r, g, b)`，这里是四段提前 `return`。纯控制流改写，同解。
+ *
+ * @param {string} [name='jet1'] 生成的函数名，与旧着色器保持一致时传默认值。
+ * @returns {string} 可直接拼进片元着色器的 GLSL 函数定义。
+ */
+export function glslJetLadder(name = 'jet1') {
+  const glslFloat = (value) => (Number.isInteger(value) ? `${value}.0` : `${value}`);
+  const channel = (spec) => {
+    if (typeof spec === 'number') return glslFloat(spec);
+    const base = spec.slope > 0 ? 0 : 1;
+    return `${glslFloat(base)} + ${glslFloat(spec.slope)} * (t - ${glslFloat(spec.from)})`;
+  };
+
+  const branches = JET_LADDER_SEGMENTS.map((segment, index) => {
+    const body = `    return vec3(${channel(segment.r)}, ${channel(segment.g)}, ${channel(segment.b)});`;
+    // 最后一段不写条件：t 已夹到 [0,1]，`< 1.0` 会漏掉 t == 1.0。
+    if (index === JET_LADDER_SEGMENTS.length - 1) return body;
+    return `  if (t < ${glslFloat(segment.until)}) {\n${body}\n  }`;
+  }).join('\n');
+
+  return `vec3 ${name}(float minVal, float maxVal, float x) {
+  if (x < minVal) x = minVal;
+  if (x > maxVal) x = maxVal;
+  float dv = maxVal - minVal;
+  // dv == 0 时 JS 侧的 g 是 NaN，GLSL 侧历来返回纯蓝；照抄 GLSL，画面零变化。
+  if (dv == 0.0) return vec3(0.0, 0.0, 1.0);
+  float t = (x - minVal) / dv;
+${branches}
+}`;
 }

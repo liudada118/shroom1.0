@@ -451,8 +451,10 @@ describe('canvas2d 后端参数', () => {
   });
 
   it('BACKENDS 是白名单，未知后端回落 sprite3d', () => {
-    expect(BACKENDS).toEqual(['sprite3d', 'canvas2d']);
-    expect(normalizeNumMatrixParams({ backend: 'canvas2d' }).backend).toBe('canvas2d');
-    expect(normalizeNumMatrixParams({ backend: 'webgl' }).backend).toBe('sprite3d');
+    expect(BACKENDS).toEqual(['sprite3d', 'canvas2d', 'webgl']);
+    BACKENDS.forEach((id) => {
+      expect(normalizeNumMatrixParams({ backend: id }).backend).toBe(id);
+    });
+    expect(normalizeNumMatrixParams({ backend: 'webgl2' }).backend).toBe('sprite3d');
   });
 });

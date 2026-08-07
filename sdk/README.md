@@ -53,7 +53,7 @@ cd frontend/example && npm i && npm run dev     # → 32×32 数字矩阵，游�
 | :--- | :--- | :--- |
 | `@shroom/frontend` | 传输（`SensorClient`）、帧存储（`FrameStore`）、展示系统定义（`DisplayRegistry`），并全量转出 `core` | 无 |
 | `@shroom/frontend/core` | 契约、渲染器注册表、帧管线、配色、阈值、坐标布局 | 无 |
-| `@shroom/frontend/react` | `RendererHost`、`useSceneFrame`、`registerBuiltinRenderers`、`numMatrix` + `pointGrid` | peer: react ≥18 + three **≥0.127** |
+| `@shroom/frontend/react` | `RendererHost`、`useSceneFrame`、`registerBuiltinRenderers`、`numMatrix`（三后端 `sprite3d` / `canvas2d` / `webgl`，24 条预设）+ `pointGrid` | peer: react ≥18 + three **≥0.127** |
 | `@shroom/frontend/styles/canvas.css` | 6 行 | 无 |
 
 根出口**刻意不含 `react/`**：一旦含了，`SensorClient` 的裸 Node 消费者（本仓
@@ -103,8 +103,8 @@ npm run sdk:frontend-docs     # 在仓库根上跑，10 页：讲解 + 活预览
 ```bash
 npm test                      # 后端全量测试，39 个文件（含两个包边界不变量）
 npm run sdk:backend-smoke     # 后端包边界守卫，10 项
-npm run sdk:frontend-test     # vitest 144 例
-npm run sdk:frontend-smoke    # 裸 Node 跑一遍前端 core，18 项
+npm run sdk:frontend-test     # vitest 217 例
+npm run sdk:frontend-smoke    # 裸 Node 跑一遍前端 core，23 项
 npm run sdk:quickstart -- --mock
 npm run sdk:serial-demo -- --mock
 npm run sdk:demo              # 需要后端在跑；只读

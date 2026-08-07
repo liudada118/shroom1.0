@@ -44,124 +44,32 @@
  * 2. `boxesForGauss` / `gaussBlur_2` / `boxBlur_2` 原来定义在
  *    `React.forwardRef` 的**函数体内**（每次渲染重新定义一遍），现在用
  *    `core/frameMath.js` 里那一份。
+ *
+ * ## 2026-08-06 修正：147 点位铺排搬去 `core/numMatrix/layouts.js`
+ *
+ * 本文件第一版把 `applyGlove147Layout` 抄成了自己的私有函数，抄错了两处
+ * （列偏移误加到全部 150 个点、大拇指那 15 个点写错行）。搬 webgl 后端时
+ * 逐点比对原件才发现 —— 现在两个后端共用 `core` 里那一份，变体差异由
+ * `thumbRowOffsets` 参数表达，回归测试（`core/numMatrix/layouts.test.js`）
+ * 把两个变体分别钉在两份原实现上。
  */
 
 import { isClassicColormap, sampleColormapRgb } from '../../../core/colormaps.js';
 import { addSide, gaussBlur_2, jetRound, rotate90CW } from '../../../core/frameMath.js';
+import {
+  GLOVE_147_BASE,
+  GLOVE_147_PADDED,
+  GLOVE_147_THUMB_ROWS_CANVAS2D,
+  applyGlove147Layout,
+  placeGloveRegion,
+} from '../../../core/numMatrix/layouts.js';
 
-/**
- * `changeWsData147` 用的 150 点位表：手套 147 个采样点在 32×32 网格里的落点。
- *
- * 逐字搬自 `NumWs.jsx:206`。**原实现把它写在函数体内，每次调用重建一遍数组，
- * 然后就地改它**（下面那两个 `pointArr[index][1] += n` 的循环）—— 因为每次
- * 重建，就地改的副作用每帧都被抹掉，所以看不出问题。这里提到模块级之后必须
- * 改成不就地写，否则偏移会逐帧累加。做法见 `applyGlove147Layout`。
- */
-const GLOVE_147_POINTS = [
-  [16, 30], [16, 29], [16, 28], [2, 18], [2, 17], [2, 16], [1, 13], [1, 12], [1, 11],
-  [2, 8], [2, 7], [2, 6], [5, 4], [5, 3], [5, 2],
-  [17, 30], [17, 29], [17, 28], [3, 18], [3, 17], [3, 16], [2, 13], [2, 12], [2, 11],
-  [3, 8], [3, 7], [3, 6], [6, 4], [6, 3], [6, 2],
-  [18, 29], [18, 28], [18, 27], [4, 18], [4, 17], [4, 16], [3, 13], [3, 12], [3, 11],
-  [4, 8], [4, 7], [4, 6], [7, 4], [7, 3], [7, 2],
-  [19, 29], [19, 28], [19, 27], [5, 18], [5, 17], [5, 16], [4, 13], [4, 12], [4, 11],
-  [5, 8], [5, 7], [5, 6], [8, 4], [8, 3], [8, 2],
-  [22, 28], [22, 27], [22, 26], [8, 17], [8, 16], [8, 15], [7, 13], [7, 12], [7, 11],
-  [8, 9], [8, 8], [8, 7], [11, 5], [11, 4], [11, 3],
-  [19, 15], [19, 14], [19, 13], [19, 12], [19, 11], [19, 10], [19, 9], [19, 8], [19, 7],
-  [19, 6], [19, 5], [19, 4],
-  [21, 18], [21, 17], [21, 16], [21, 15], [21, 14], [21, 13], [21, 12], [21, 11], [21, 10],
-  [21, 9], [21, 8], [21, 7], [21, 6], [21, 5], [21, 4],
-  [23, 18], [23, 17], [23, 16], [23, 15], [23, 14], [23, 13], [23, 12], [23, 11], [23, 10],
-  [23, 9], [23, 8], [23, 7], [23, 6], [23, 5], [23, 4],
-  [25, 18], [25, 17], [25, 16], [25, 15], [25, 14], [25, 13], [25, 12], [25, 11], [25, 10],
-  [25, 9], [25, 8], [25, 7], [25, 6], [25, 5], [25, 4],
-  [27, 18], [27, 17], [27, 16], [27, 15], [27, 14], [27, 13], [27, 12], [27, 11], [27, 10],
-  [27, 9], [27, 8], [27, 7], [27, 6], [27, 5], [27, 4],
-];
-
-/** 手套 147 的目标网格：32×32 补边 2 圈后是 36×36。抄自 `NumWs.jsx:250-251`。 */
-const GLOVE_147_BASE = 32;
-const GLOVE_147_PADDED = 36;
+/** 手套 147 补边后的高斯半径。**只有本后端有这一步**，webgl 那份补完边就画。 */
 const GLOVE_147_BLUR = 1.2;
 
 /** 手套原始 256 数据的矩阵尺寸。抄自 `NumWs.jsx:261`。 */
 const GLOVE_256_ROWS = 16;
 const GLOVE_256_COLS = 16;
-
-/**
- * 把 147 点位铺进 32×32。
- *
- * 逐字对应 `NumWs.jsx:211-248`，只有一处改动：原实现直接改
- * `pointArr[i][0/1]`，靠「每次调用都重建这张表」把副作用抹掉。表提到模块级
- * 之后必须算到局部变量里，否则偏移会逐帧累加。
- *
- * 三段逻辑照抄，包括看起来可疑但确实是原行为的两处：
- * - 第一个循环按 `k` 落在哪个三点组里给列加 `+4 / +2 / +0 / -2`；
- * - 第二个循环里 `i >= 4*15` 那一支往下盖 3 行，其余只盖 1 行；
- *   **那一支还多写了一次 `newArr[index]`**（写两遍同一个值）。
- *
- * @param {number[]} wsPointData 手套原始帧，取前 150 个。
- * @returns {number[]} 长度 1024 的 32×32 帧。
- */
-function applyGlove147Layout(wsPointData) {
-  const newArr = new Array(GLOVE_147_BASE * GLOVE_147_BASE).fill(0);
-
-  for (let i = 0; i < GLOVE_147_POINTS.length; i++) {
-    const [baseRow, baseCol] = GLOVE_147_POINTS[i];
-    const k = i % 15;
-
-    let col = baseCol;
-    if (k >= 3 && k < 6) col += 4;
-    else if (k >= 6 && k < 9) col += 2;
-    else if (k >= 9 && k < 12) col += 0;
-    else if (k >= 12 && k < 15) col -= 2;
-
-    let row = baseRow;
-    if (i >= 15 && i < 4 * 15) row += Math.floor(i / 15);
-
-    const index = row * GLOVE_147_BASE + col;
-    newArr[index] = wsPointData[i];
-
-    if (i >= 4 * 15 && i < 5 * 15) {
-      for (let j = 1; j < 4; j++) {
-        newArr[(row + j) * GLOVE_147_BASE + col] = wsPointData[i];
-      }
-    } else {
-      newArr[(row + 1) * GLOVE_147_BASE + col] = wsPointData[i];
-    }
-  }
-
-  return newArr;
-}
-
-/**
- * 把手套的一块子矩阵盖进 32×32 的指定位置。
- *
- * `changeWsDatafinger`（`NumWs.jsx:295-316`）与 `changeWsDatapalm`
- * （`318-339`）除了取哪几列、盖到哪几行之外一字不差，合成一个。
- *
- * @param {number[]} wsPointData 手套原始帧，按 15 列排布。
- * @param {{rows: number[], cols: number[], atRow: number, atCol: number}} region 取哪块、盖到哪。
- * @returns {number[]} 长度 1024 的 32×32 帧。
- */
-function placeGloveRegion(wsPointData, region) {
-  const values = [];
-  for (let i = region.rows[0]; i < region.rows[1]; i++) {
-    for (let j = region.cols[0]; j < region.cols[1]; j++) {
-      values.push(wsPointData[i * 15 + j]);
-    }
-  }
-
-  const newArr = new Array(GLOVE_147_BASE * GLOVE_147_BASE).fill(0);
-  const width = region.cols[1] - region.cols[0];
-  for (let k = 0; k < values.length; k++) {
-    const row = region.atRow + Math.floor(k / width);
-    const col = region.atCol + (k % width);
-    newArr[row * GLOVE_147_BASE + col] = values[k];
-  }
-  return newArr;
-}
 
 /**
  * 创建 Canvas 2D 后端。
@@ -434,7 +342,9 @@ export function createCanvas2dMatrixBackend({
       changeWsData147(wsPointData) {
         if (!Array.isArray(wsPointData)) return;
         reportStats?.(wsPointData.slice());
-        const laid = applyGlove147Layout(wsPointData);
+        const laid = applyGlove147Layout(wsPointData, {
+          thumbRowOffsets: GLOVE_147_THUMB_ROWS_CANVAS2D,
+        });
         const padded = addSide(laid, GLOVE_147_BASE, GLOVE_147_BASE, 2, 2, 0);
         submit(
           gaussBlur_2(padded, GLOVE_147_PADDED, GLOVE_147_PADDED, GLOVE_147_BLUR),

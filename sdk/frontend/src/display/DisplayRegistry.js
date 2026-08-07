@@ -14,10 +14,21 @@ export function createDisplaySystem(config = {}) {
   };
 }
 
+/**
+ * manifest 里 `views[].type` 没写 `renderer` 时的兜底渲染器名。
+ *
+ * `matrix` / `raw2d` 两条原本填的是组件名 `'Num2D'` / `'Num2DOriginal'`，那两个
+ * 组件已经参数化成 `numMatrix` 渲染器的 `webgl` 后端并删除，字符串成了死引用。
+ * 现在改填**注册表 id**（`core/registry.js` 的 `numMatrix`），两条走的是同一个
+ * 渲染器、只差 `params` —— 具体是数字矩阵还是原始数据，由 manifest 自己在
+ * `renderers[].params` 里选预设（`webglNum*` / `webglRaw*`），不是靠这里区分。
+ *
+ * 其余四条仍是组件名，因为对应的展示形式还没做成渲染器。
+ */
 const VIEW_RENDERERS = Object.freeze({
   heatmap: 'Heatmap',
-  matrix: 'Num2D',
-  raw2d: 'Num2DOriginal',
+  matrix: 'numMatrix',
+  raw2d: 'numMatrix',
   model: 'Model',
   lineChart: 'LineChart',
   pressureStats: 'PressureStats',

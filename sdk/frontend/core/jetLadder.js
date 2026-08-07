@@ -38,6 +38,51 @@
  * @param {number} x 取样值，超出 [min, max] 会被夹取。
  * @returns {{r: number, g: number, b: number}} 各分量 0..1；`max === min` 时 g 为 NaN。
  */
+/**
+ * 上面那条阶梯的**声明式副本**，供代码生成用（见 `colormaps.js` 的
+ * `glslJetLadder()`）。
+ *
+ * 为什么不是让 `jetRgb` 去读这张表：`jetRgb` 的注释写着「不要改动它的数值」，
+ * 全仓 18 处配色从它出去。把它改写成表驱动就是在改那 18 处的实现，收益为零、
+ * 风险全是。所以这里放一份**平行**的表，再用测试逐点钉死两者等价
+ * （`core/jetLadder.test.js` 里对 0..1 采样逐点比对 `jetRgb`）——
+ * 表漂了测试立刻红，不会出现「GLSL 那份和 JS 那份悄悄分家」。
+ *
+ * 每段的通道值有两种写法：
+ * - 数字：常量分量；
+ * - `{ slope, from }`：`base + slope * (t - from)`，`base` 由斜率符号决定
+ *   （正斜率从 0 起、负斜率从 1 起）—— 四段全部符合这个规律。
+ *
+ * `t` 是归一化后的取样位置 `(x - min) / (max - min)`，`until` 是该段的开区间
+ * 上界（用 `<`，与 `jetRgb` 一致：恰好落在断点上走下一段）。
+ */
+export const JET_LADDER_SEGMENTS = [
+  { until: 0.25, r: 0, g: { slope: 4, from: 0 }, b: 1 },
+  { until: 0.5, r: 0, g: 1, b: { slope: -4, from: 0.25 } },
+  { until: 0.75, r: { slope: 4, from: 0.5 }, g: 1, b: 0 },
+  { until: 1, r: 1, g: { slope: -4, from: 0.75 }, b: 0 },
+];
+
+/**
+ * 按 `JET_LADDER_SEGMENTS` 求值，等价于 `jetRgb(0, 1, t)`。
+ *
+ * 只用于测试与代码生成的自证，运行期配色仍然走 `jetRgb`。
+ *
+ * @param {number} t 归一化取样位置。
+ * @returns {{r: number, g: number, b: number}} 各分量 0..1。
+ */
+export function jetLadderSegmentRgb(t) {
+  const clamped = t < 0 ? 0 : t > 1 ? 1 : t;
+  const segment = JET_LADDER_SEGMENTS.find((entry) => clamped < entry.until)
+    || JET_LADDER_SEGMENTS[JET_LADDER_SEGMENTS.length - 1];
+  const channel = (spec) => {
+    if (typeof spec === 'number') return spec;
+    const base = spec.slope > 0 ? 0 : 1;
+    return base + spec.slope * (clamped - spec.from);
+  };
+  return { r: channel(segment.r), g: channel(segment.g), b: channel(segment.b) };
+}
+
 export function jetRgb(min, max, x) {
   let red, g, blue;
   let dv;

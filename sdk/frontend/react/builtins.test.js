@@ -26,10 +26,21 @@ import {
   resetRendererRegistry,
 } from '../core/registry.js';
 import createCanvas2dMatrixBackend from './numMatrix/backends/canvas2d.js';
+import createWebglMatrixBackend from './numMatrix/backends/webgl.js';
 import { registerBuiltinRenderers } from './builtins.js';
 
 /** 所有后端都有的那四个，由 `NumMatrixRenderer` 自己实现，不随后端变。 */
 const SHELL_METHODS = ['sitData', 'sitValue', 'changeWsData', 'changeWsDataRaw'];
+
+/**
+ * 两个带命令的后端的 `commandNames` 并集，去重后排序。
+ *
+ * `sprite3d` 不在里面 —— 它一个命令都没有，这正是这些方法「可选」的原因。
+ */
+const BACKEND_COMMANDS = [...new Set([
+  ...createCanvas2dMatrixBackend.commandNames,
+  ...createWebglMatrixBackend.commandNames,
+])].sort();
 
 describe('内置渲染器注册', () => {
   beforeEach(() => {
@@ -60,7 +71,7 @@ describe('内置渲染器注册', () => {
   });
 });
 
-describe('numMatrix 的 optionalMethods 与 canvas2d 后端对账', () => {
+describe('numMatrix 的 optionalMethods 与两个后端对账', () => {
   beforeEach(() => {
     resetRendererRegistry();
     registerBuiltinRenderers();
@@ -69,21 +80,32 @@ describe('numMatrix 的 optionalMethods 与 canvas2d 后端对账', () => {
   /**
    * 这一条是那份"刻意的重复"的对账。
    *
-   * `builtins.js` 没有从 `backends/canvas2d.js` import `commandNames`，因为
-   * 一旦静态 import 任何后端，`load: () => import(...)` 的懒加载 chunk 就会塌回
-   * 主包（Rollup 只发 warning 不报错）。两处各写一遍是选定的方案，代价是会漂 ——
+   * `builtins.js` 没有从 `backends/*.js` import `commandNames`，因为一旦静态
+   * import 任何后端，`load: () => import(...)` 的懒加载 chunk 就会塌回主包
+   * （Rollup 只发 warning 不报错）。两处各写一遍是选定的方案，代价是会漂 ——
    * 所以由测试来盯。
    */
-  it('optionalMethods 与后端的 commandNames 逐字相同', () => {
+  it('optionalMethods 就是两个后端 commandNames 的并集', () => {
     const { optionalMethods } = getRendererDescriptor('numMatrix');
-    expect(optionalMethods).toEqual(createCanvas2dMatrixBackend.commandNames);
+    expect([...optionalMethods].sort()).toEqual(BACKEND_COMMANDS);
   });
 
-  it('methods 恰好是「壳的四个 + 后端命令」的并集', () => {
+  it('methods 恰好是「壳的四个 + 两个后端的命令」的并集', () => {
     const { methods } = getRendererDescriptor('numMatrix');
-    expect([...methods].sort()).toEqual(
-      [...SHELL_METHODS, ...createCanvas2dMatrixBackend.commandNames].sort(),
-    );
+    expect([...methods].sort()).toEqual([...SHELL_METHODS, ...BACKEND_COMMANDS].sort());
+  });
+
+  /**
+   * `webgl` 的四个命令必须是 `canvas2d` 那十个的子集之外还能对上契约 ——
+   * 换句话说，两个后端重名的方法（`changeWsData147` / `changeWsData256` /
+   * `drawContent`）语义必须一致，否则同一个 id 的契约声明就是在撒谎。
+   *
+   * 这条测不了语义，只能钉住「重名的确实是这三个」，重名集合变了就要人来看一眼。
+   */
+  it('两个后端重名的命令只有那三个', () => {
+    const c2d = new Set(createCanvas2dMatrixBackend.commandNames);
+    const shared = createWebglMatrixBackend.commandNames.filter((name) => c2d.has(name));
+    expect(shared.sort()).toEqual(['changeWsData147', 'changeWsData256', 'drawContent']);
   });
 
   it('壳的四个方法不在 optionalMethods 里 —— 它们任何后端都必须有', () => {

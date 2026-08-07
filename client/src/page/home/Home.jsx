@@ -74,12 +74,16 @@ import { ConfigProvider, Input, Popover, message, Modal, Spin } from "antd";
 
 import { SelectOutlined } from "@ant-design/icons";
 import { Num } from "../../components/num/Num";
-import { Num2D } from "../../components/num/Num2D";
-import { Num2DOriginal } from "../../components/num/Num2Doriginal";
 import HumanBodyRawData from "../../components/num/HumanBodyRawData";
 // `Num3D`（components/num/NumWs.jsx）不再静态 import —— 它的两个渲染点都换成了
 // `RendererHost` + `NUM_MATRIX_PRESETS.num3dDefault`，实现在
 // `@shroom/frontend/react/numMatrix/backends/canvas2d.js`，经注册表懒加载。
+//
+// `Num2D` / `Num2DOriginal`（components/num/Num2D.jsx、Num2Doriginal.jsx）同理，
+// 两份合成了一个后端 `@shroom/frontend/react/numMatrix/backends/webgl.js`
+// （`Num2DOriginal` 的掩码 / POT / 分区布局 / 裸数据转置全部做成了参数开关）。
+// 这两个原文件已随本批删除 —— 删掉它们之前 grep 过全仓，除了这两行再无引用方，
+// 留壳没有服务对象（`components/num/daliegu.jsx` 里那个 `Num2D` 是它自己的局部同名量）。
 import { calFoot } from "../../assets/util/value";
 import { Heatmap } from "../../components/heatmap/canvas";
 import FootTrack from "../../components/footTrack/footTrack";
@@ -224,6 +228,56 @@ const buildNumMatrixParams = (matrixName, definition) => {
     gridHeight: fromManifest ? definition.matrix?.height : undefined,
     manageSidebar: !fromManifest && matrixName !== MINZHEN_MATRIX,
   }
+}
+
+/**
+ * 「数字」`num` 这条通路的 `matrixName` → 预设映射。
+ *
+ * 原来是 `<Num2D matrixName={...}>` 自己在组件里判：`carCol` 一支给 10×9、
+ * `footVideo` 一支走双画布、手套四型走 147 点散布。分支就那三处，折成三行表。
+ *
+ * ⚠️ `robot1` 落到 `webglNumDefault` 是**故意的，画面本来就是空的** ——
+ * `Num2D.changeWsData147` 的 else 分支只处理足底，机器人帧进来只更新侧栏读数。
+ * 这条通路要显示机器人得用「原始数据」，见 `webglNumDefault` 的注释。
+ *
+ * @param {string} matrixName 当前展示形式。
+ * @returns {object} 传给 RendererHost 的 params。
+ */
+const buildWebglNumParams = (matrixName) => {
+  if (matrixName === FULL_PACKET_GLOVE_MATRIX) return NUM_MATRIX_PRESETS.webglNumGloveFullPacket
+  if (tactileGloveTypes.includes(matrixName)) return NUM_MATRIX_PRESETS.webglNumGlove
+  if (matrixName === 'footVideo') return NUM_MATRIX_PRESETS.webglNumFoot
+  if (matrixName === 'carCol') return NUM_MATRIX_PRESETS.webglNumCarCol
+  return NUM_MATRIX_PRESETS.webglNumDefault
+}
+
+/**
+ * 「原始数据」走 `Num2Doriginal` 那一支的 `matrixName` → 预设映射。
+ *
+ * 这张表是 `Num2Doriginal.jsx:554-571` 的尺寸 `if/else` 加
+ * `changeWsData147`（940-1014）的通路 `if/else` 合起来的全部内容。原实现有
+ * 12+ 处 `props.matrixName ==`，折平成这 10 行 —— 加一款设备从此是加一行数据。
+ *
+ * `jqbed` 是 `RAW_TRANSPOSE_MATRIX_TYPES` 四个键里**唯一走得到这条通路的**
+ * （`smallBed` 三型在更早的分支就进 sprite3d 后端了），所以只有它要转置。
+ *
+ * @param {string} matrixName 当前展示形式。
+ * @returns {object} 传给 RendererHost 的 params。
+ */
+const buildWebglRawParams = (matrixName) => {
+  if (matrixName === FULL_PACKET_GLOVE_MATRIX) return NUM_MATRIX_PRESETS.webglRawGloveFullPacket
+  if (tactileGloveTypes.includes(matrixName)) return NUM_MATRIX_PRESETS.webglRawGlove
+  if (matrixName === 'footVideo') return NUM_MATRIX_PRESETS.webglRawFoot
+  if (matrixName === 'robotSY') return NUM_MATRIX_PRESETS.webglRawRobotSY
+  if (matrixName === 'robotLCF') return NUM_MATRIX_PRESETS.webglRawRobotLCF
+  if (matrixName === 'robot1') return NUM_MATRIX_PRESETS.webglRawRobot1
+  if (matrixName === 'carCol') return NUM_MATRIX_PRESETS.webglRawCarCol
+  if (matrixName === 'daliegu') return NUM_MATRIX_PRESETS.webglRawDaliegu
+  if (matrixName === 'smallSample') return NUM_MATRIX_PRESETS.webglRawSmallSample
+  if (matrixName === tempFullBedMatrix) return NUM_MATRIX_PRESETS.webglRawTempFullBed
+  if (matrixName === 'bed4096num') return NUM_MATRIX_PRESETS.webglRawBed4096num
+  if (matrixName === 'jqbed') return NUM_MATRIX_PRESETS.webglRawTransposed
+  return NUM_MATRIX_PRESETS.webglRawDefault
 }
 
 const getMappedPressurePayload = (jsonObject, matrixName) => {
@@ -4699,8 +4753,14 @@ class Home extends React.Component {
               </CanvasCom>
               : this.state.numMatrixFlag == "num" && [...tactileGloveTypes, 'robot1', 'footVideo'].includes(this.state.matrixName) ?
                 <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
-                  <Num2D ref={this.com}
-                    matrixName={this.state.matrixName}
+                  <RendererHost
+                    rendererId="numMatrix"
+                    // 原来是 `<Num2D matrixName={...}>`。matrixName 的三处分支
+                    // 折进了 buildWebglNumParams，渲染器不再认识那串字符串。
+                    params={buildWebglNumParams(this.state.matrixName)}
+                    label="数字"
+                    rendererRef={this.com}
+                    colormap={canvasColormap}
                     data={this.data}
                     local={this.state.local}
                     {...this.sceneChartProps} />
@@ -4783,8 +4843,14 @@ class Home extends React.Component {
                   :
                   this.state.numMatrixFlag == "numoriginal" && [...tactileGloveTypes, 'robot1', 'footVideo', 'robotSY', 'robotLCF', 'normal', 'jqbed', tempFullBedMatrix, 'petCare', 'petCareMini', 'daliegu', 'smallSample'].includes(this.state.matrixName) ?
                   <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
-                    <Num2DOriginal ref={this.com}
-                      matrixName={this.state.matrixName}
+                    <RendererHost
+                      rendererId="numMatrix"
+                      // 原来是 `<Num2DOriginal matrixName={...}>`，12+ 处
+                      // matrixName 分支折进了 buildWebglRawParams。
+                      params={buildWebglRawParams(this.state.matrixName)}
+                      label="原始数据"
+                      rendererRef={this.com}
+                      colormap={canvasColormap}
                       data={this.data}
                       local={this.state.local}
                       {...this.sceneChartProps} />

@@ -59,13 +59,14 @@ export function registerBuiltinRenderers() {
       // 走 `sprite3d` 时没有；见下面 `optionalMethods` 那段说明。
       // 滚轮缩放与拖拽平移不算 —— 那是相机操作，不在 capabilities 的语汇里。
       capabilities: [RENDERER_CAPABILITIES.SIT, RENDERER_CAPABILITIES.ROTATE],
-      // 并集：前四个所有后端都有，后十个只有 `canvas2d` 有。
+      // 三个后端暴露面的**并集**：前四个人人都有，后十一个看 `backend` 参数。
       methods: [
         'sitData',
         'sitValue',
         'changeWsData',
         'changeWsDataRaw',
         'changeWsData147',
+        'changeWsData147R',
         'changeWsData256',
         'changeWsDatafinger',
         'changeWsDatapalm',
@@ -77,16 +78,23 @@ export function registerBuiltinRenderers() {
         'setFrontView',
       ],
       /**
-       * 走 `sprite3d` 后端时缺席的那十个。见
+       * 走 `sprite3d` 后端时缺席的那十一个。见
        * `RendererHost.jsx` 的 `auditRendererContract` 文档。
        *
-       * 这份名单与 `backends/canvas2d.js` 的 `commandNames` 是同一组名字 ——
+       * **可选是按后端算的，不是按渲染器算的**：`canvas2d` 有其中 10 个、
+       * `webgl` 有其中 4 个（`changeWsData147` / `changeWsData147R` /
+       * `changeWsData256` / `drawContent`），`sprite3d` 一个都没有。契约审计
+       * 只能表达「这个渲染器 id 可能缺哪些」，表达不了「哪个后端缺哪些」——
+       * 这条限制记在 `sdk/frontend/README.md` 的积压里。
+       *
+       * 这份名单与两个后端的 `commandNames` 是同一组名字 ——
        * **没有从那里 import 过来是刻意的**：`builtins.js` 一旦静态 import 任何
        * 后端，`load: () => import(...)` 的懒加载 chunk 就会塌回主包（Rollup
        * 只发 warning 不报错）。宁可两处各写一遍，也不要静默塌包。
        */
       optionalMethods: [
         'changeWsData147',
+        'changeWsData147R',
         'changeWsData256',
         'changeWsDatafinger',
         'changeWsDatapalm',

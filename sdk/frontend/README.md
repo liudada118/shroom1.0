@@ -67,7 +67,7 @@ registerBuiltinRenderers();          // 注册本包 ships 的渲染器：numMat
 | :--- | :--- | :--- |
 | `@shroom/frontend` | 传输（`SensorClient`）、帧存储（`FrameStore`）、展示系统定义（`DisplayRegistry`），**并全量转出 `core`** | 无 |
 | `@shroom/frontend/core` | 契约、渲染器注册表、帧管线、配色、阈值、坐标布局 | 无 |
-| `@shroom/frontend/react` | `RendererHost`、`useSceneFrame`、`registerBuiltinRenderers`，两个渲染器（`numMatrix`，两个后端 `sprite3d` / `canvas2d`；`pointGrid`）+ `three/{SelectionHelper,pointPick}` | peer: react + three |
+| `@shroom/frontend/react` | `RendererHost`、`useSceneFrame`、`registerBuiltinRenderers`，两个渲染器（`numMatrix`，三个后端 `sprite3d` / `canvas2d` / `webgl`；`pointGrid`）+ `three/{SelectionHelper,pointPick}` + `webgl/glUtil.js` | peer: react + three |
 | `@shroom/frontend/styles/canvas.css` | 6 行 canvas 样式（`.canvasNum`） | 无 |
 
 **根出口刻意不含 `react/`。** 一旦含了，`SensorClient` 的裸 Node 消费者（后端测试里
@@ -191,11 +191,22 @@ Vite 原生支持，webpack 5 走 asset modules，Rollup 需要 `@rollup/plugin-
 **`RENDERER_PROPS` 一个都没加**，所以下游自研渲染器的契约审计不受影响。
 
 同一轮给描述符加了一个可选字段 **`optionalMethods`**：标出「同一个渲染器换一套参数
-就不再暴露」的那几个方法。`numMatrix` 是第一个用它的 —— 走 `sprite3d` 后端是 4 个
-方法，走 `canvas2d` 是 14 个。`methods` 写**并集**（照常逐个校验在不在契约里），
-`optionalMethods` 标出可以缺席的那十个，两种后端的审计因此都干净。约束：**必须是
-`methods` 的子集**，否则注册失败（不在 `methods` 里的名字审计根本看不到）。
-**别拿它当"懒得实现"的免死金牌。**
+就不再暴露」的那几个方法。`numMatrix` 是第一个用它的 —— 壳自己实现的 4 个方法
+（`sitData` / `sitValue` / `changeWsData` / `changeWsDataRaw`）任何后端都有，其余
+**11 个**按后端而定：`sprite3d` 一个都不给，`canvas2d` 给 10 个，`webgl` 给 4 个
+（`changeWsData147` / `changeWsData147R` / `changeWsData256` / `drawContent`，其中
+除 `changeWsData147R` 外的三个与 `canvas2d` 重名 —— 重名就意味着语义必须一致，
+`builtins.test.js` 有一条断言钉住「重名的确实只有这三个」）。`methods` 写**并集**共 15 个（照常逐个校验
+在不在契约里），`optionalMethods` 标出可以缺席的那 11 个，三种后端的审计因此都干净。
+约束：**必须是 `methods` 的子集**，否则注册失败（不在 `methods` 里的名字审计根本
+看不到）。**别拿它当"懒得实现"的免死金牌。**
+
+> ⚠️ **`optionalMethods` 只能表达「可选」，不能表达「哪个后端有哪几个」。** 契约审计
+> 是按渲染器 id 做的，而 `numMatrix` 的方法集是按 `params.backend` 变的 ——
+> 结果是走 `webgl` 时那 7 个只有 `canvas2d` 才有的方法也算「合法缺席」，写错后端名
+> 导致的缺失审计看不出来。这是积压的一条：要么把审计做成按解析后的参数来判，要么让
+> 描述符能声明 per-variant 的方法集。`builtins.test.js` 现在用两个后端 `commandNames`
+> 的并集对账，至少保证名单本身不会漂。
 
 ### ⚠️ `data.current` 上的三个方法：契约管不着的一块公开面
 
@@ -238,11 +249,6 @@ change」。记进积压。
 渲染器 id 与参数，**解析不出来时返回 `null`**（不抛）。这个回落是绞杀者模式的关键 ——
 新渲染器覆盖不到的展示系统继续走旧路径，迁移可以一次一个。
 
-> **已知积压**：`src/display/DisplayRegistry.js` 的 `VIEW_RENDERERS` 里
-> `matrix: 'Num2D'` 与 `raw2d: 'Num2DOriginal'` 是**失效的组件名字符串** —— 那两个组件
-> 已经参数化进 `numMatrix` 了。这张表只在 manifest 没显式写 `view.renderer` 时兜底，
-> 所以目前不影响任何在跑的通路，但它是过期信息，别照着它写新代码。
-
 ---
 
 ## 目录
@@ -260,9 +266,16 @@ core/                 零依赖层，裸 Node 可 import
   displayThresholds.js      阈值持久化（用 globalThis.localStorage?.，所以裸 Node 不用垫片）
   coordinatePointLayout.js  物理坐标表 → 布局
   bed4096numParams.js       共享调参对象（模块级单例）
-  numMatrix/params.js       参数归一化 + 预设（fast256 / fast1024 / fast1024sit / smallBed12B
-                            / num3dDefault / num3dCarCol）+ BACKENDS 白名单
+  numMatrix/params.js       参数归一化 + 24 条预设（sprite3d 4：fast256 / fast1024 /
+                            fast1024sit / smallBed12B；canvas2d 2：num3dDefault /
+                            num3dCarCol；webgl 18：webglNum* 5 + webglRaw* 13）
+                            + BACKENDS 白名单
   numMatrix/pipeline.js     量化 / 统计 / 下限过滤 / 纹理尺寸推导
+  numMatrix/layouts.js      点位铺排：147 点手套两变体 / 60 点足底散布 + 插值 /
+                            POT 取整 / 方阵转置 / 格子边长
+  numMatrix/robotLayouts.js 三套机器人分区表 + buildRobotFrame（拼纹理 + 掩码）
+  numMatrix/shaders.js      顶点/片元着色器**源码字符串**生成（4 个变体，jet 阶梯
+                            从 jetLadder.js 发码 —— 不是第 19 份抄的）
   pointGrid/params.js       参数归一化 + 预设（matCol / carCol）+ deriveGridSize
   pointGrid/pipeline.js     插值 / 补边 / 高斯模糊（纯帧运算，有逐帧一致性测试）
 react/                peer: react + three
@@ -272,17 +285,23 @@ react/                peer: react + three
   numMatrix/NumMatrixRenderer.jsx
   numMatrix/backends/sprite3d.js   three.js InstancedMesh，一次 draw call 画完整片矩阵
   numMatrix/backends/canvas2d.js   2D canvas 逐格 fillText + CSS perspective 的伪三维
+  numMatrix/backends/webgl.js      WebGL 亮度纹理热场 + 2D 叠加层画数字/网格，
+                                   两个变体（plain = 原 Num2D，original = 原
+                                   Num2Doriginal，多掩码/POT/零值显白/分区布局）
   pointGrid/PointGridRenderer.jsx  three.js Points + TrackballControls，可框选
   pointGrid/circle.png             点精灵贴图（打包资源，不是运行期相对 URL）
   three/SelectionHelper.js         拖拽框选的那个 div
   three/pointPick.js               世界坐标 → 屏幕矩形 → 网格下标
+  webgl/glUtil.js                  createShader / createProgram / 亮度纹理上传 /
+                                   资源释放（唯一允许的模块级可变状态：预热过的
+                                   着色器源码 Set，说明写在文件头）
 styles/canvas.css     6 行
 src/client/           SensorClient —— WebSocket + HTTP 控制面
 src/store/            FrameStore + 新旧协议归一化
 src/display/          DisplayRegistry + 默认展示系统
 example/              可跑 demo（不进 npm 包的 files，也排出装机包）
 docs/                 在线可预览文档站（同上）
-scripts/smoke-core.mjs  零依赖层的裸 Node 守卫（18 项）
+scripts/smoke-core.mjs  零依赖层的裸 Node 守卫（23 项）
 ```
 
 ---
@@ -367,8 +386,8 @@ GET /api/sdk/contract
 ## 本地开发
 
 ```bash
-npm test        # vitest，144 例（core 的纯函数 + 参数归一化 + 逐点比对 + 两个渲染器描述符）
-npm run smoke   # 裸 Node 跑一遍 core，18 项
+npm test        # vitest，217 例（core 的纯函数 + 参数归一化 + 逐点比对 + 两个渲染器描述符）
+npm run smoke   # 裸 Node 跑一遍 core，23 项
 cd example && npm i && npm run dev
 cd docs && npm i && npm run dev      # 文档站
 cd docs && npm run check             # 逐页 SSR 渲染，10 页
@@ -394,16 +413,26 @@ cd docs && npm run check             # 逐页 SSR 渲染，10 页
   发布是另一件事（要定 scope 归属与版本承诺）。
 - **tarball 里根出口加载不了**，见上面「已知缺口」。渲染器那条路不受影响。
 - **ships 两个渲染器：`numMatrix` + `pointGrid`。** 后者 2026-08-05 第二轮搬入。
-- **`BACKENDS = ['sprite3d', 'canvas2d']`。** `canvas2d` 2026-08-06 第三轮搬入
-  （原 `client/src/components/num/NumWs.jsx`，导出名 `Num3D`，其实是 2D canvas +
-  CSS 透视，不是 WebGL）。**webgl 后端还没搬**（`Num2D` / `Num2Doriginal`）。
-  两个后端的**命令式暴露面不一样**：`sprite3d` 4 个方法，`canvas2d` 14 个 ——
-  多出来的十个由描述符的 `optionalMethods` 声明，见下面「公开面」一节。
-- **两个内置渲染器都按视口而不是按容器定尺寸**（`numMatrix/backends/sprite3d.js:247`、
-  `pointGrid/PointGridRenderer.jsx:319`）。主应用里每个展示形式独占整屏，所以这个区别
-  从没暴露过；想把画面嵌进一个小卡片，只能用视口尺寸的容器 + CSS `transform: scale()`
-  绕（文档站就是这么干的），代价是 `three/pointPick.js` 读的是 `window.innerWidth/Height`
-  —— **缩放态下框选会选错点**。新写渲染器请按容器画。已记积压。
+- **`BACKENDS = ['sprite3d', 'canvas2d', 'webgl']`，三个后端全部到位。**
+  `canvas2d` 2026-08-06 第三轮批 1 搬入（原 `client/src/components/num/NumWs.jsx`，
+  导出名 `Num3D`，其实是 2D canvas + CSS 透视，不是 WebGL）；`webgl` 同轮批 2 搬入
+  （原 `num/Num2D.jsx` 860 行 + `num/Num2Doriginal.jsx` 1203 行，**两份合成一个后端**
+  —— 逐行比对后确认 `Num2Doriginal ⊃ Num2D`，多出来的是掩码 / POT 纹理 / 零值显白 /
+  分区布局 / 裸数据转置，全部做成了 `params.webgl.*` 开关，两个原文件已删）。
+  三个后端的**命令式暴露面不一样**：`sprite3d` 4 个方法，`canvas2d` 14 个，
+  `webgl` 8 个 —— 差额由描述符的 `optionalMethods` 声明，见下面「公开面」一节。
+- **`webgl` 后端只画 jet，不认 `colormap`。** 两份原实现的片元着色器都把 jet 阶梯写死
+  在 GLSL 里，所以在这个后端上换配色画面不动。搬的时候保留了这个行为（改它是看得见的
+  画面变化，不是搬家该做的事），但那段 GLSL 现在是从 `core/jetLadder.js` 的断点数据
+  **发码**出来的，不是第 19 份手抄 —— 要支持任意配色，改 `core/numMatrix/shaders.js`
+  一处即可。已记积压。
+- **`sprite3d` / `pointGrid` 两个渲染器按视口而不是按容器定尺寸**
+  （`numMatrix/backends/sprite3d.js:247`、`pointGrid/PointGridRenderer.jsx:319`）。
+  主应用里每个展示形式独占整屏，所以这个区别从没暴露过；想把画面嵌进一个小卡片，
+  只能用视口尺寸的容器 + CSS `transform: scale()` 绕（文档站就是这么干的），代价是
+  `three/pointPick.js` 读的是 `window.innerWidth/Height` —— **缩放态下框选会选错点**。
+  新搬的 `canvas2d` / `webgl` 两个后端也照抄了这个行为（`backends/webgl.js` 的
+  `bounds()` 是改它时唯一要动的地方，注释已写明）。新写渲染器请按容器画。已记积压。
 - **两个渲染器的 dispose 都没有 `forceContextLoss()`。** `renderer.dispose()` 不保证
   立即归还 WebGL 上下文（浏览器同时活的上限约 8–16），同页多块时可能累积到
   "Too many active WebGL contexts"。文档站用 `IntersectionObserver` 懒挂载 + 活跃数上限

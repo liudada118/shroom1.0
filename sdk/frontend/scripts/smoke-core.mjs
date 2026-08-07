@@ -321,6 +321,87 @@ check('buildCoordinatePointLayout 接受坐标矩阵、拒绝坏输入', () => {
   return `${layout.rows}×${layout.cols}，坏输入回落 null`;
 });
 
+/* ── 8. 数字矩阵的点位铺排 / 分区布局 / 着色器源码 ──────────────── */
+
+check('147 点位两个变体铺排出的矩阵长度对、且只差大拇指那几行', () => {
+  const raw = Array.from({ length: 147 }, (_, i) => i + 1);
+  const size = numMatrix.GLOVE_147_BASE * numMatrix.GLOVE_147_BASE;
+  const c2d = numMatrix.applyGlove147Layout(raw, {
+    thumbRowOffsets: numMatrix.GLOVE_147_THUMB_ROWS_CANVAS2D,
+  });
+  const gl = numMatrix.applyGlove147Layout(raw, {
+    thumbRowOffsets: numMatrix.GLOVE_147_THUMB_ROWS_WEBGL,
+  });
+  assert.equal(c2d.length, size);
+  assert.equal(gl.length, size);
+  // 两个变体只有 `thumbRowOffsets` 不同，所以必然有差、但不能全差。
+  const diff = c2d.reduce((n, v, i) => n + (v === gl[i] ? 0 : 1), 0);
+  assert.ok(diff > 0 && diff < size, `两个变体应部分不同，实测差 ${diff} 格`);
+  return `${size} 格，两变体差 ${diff} 格`;
+});
+
+check('足底 60 点散布 + 插值铺满 16×32，手套补行给出 15×10 / 15×13', () => {
+  const foot = numMatrix.applyFootPointLayout(Array.from({ length: 60 }, () => 50));
+  assert.equal(foot.length, numMatrix.FOOT_GRID_WIDTH * numMatrix.FOOT_GRID_HEIGHT);
+  assert.ok(foot.every(Number.isFinite), '插值不应产出 NaN');
+
+  const short = numMatrix.padGlove147Rows(Array.from({ length: 147 }, () => 1), {});
+  assert.deepEqual([short.gridWidth, short.gridHeight], [15, 10]);
+  assert.equal(short.data.length, 150);
+
+  const full = numMatrix.padGlove147Rows(Array.from({ length: 195 }, () => 1), { fullPacket: true });
+  assert.deepEqual([full.gridWidth, full.gridHeight], [15, 13]);
+  assert.equal(full.data.length, 195);
+  return `足底 ${foot.length} 格；手套 150 / 195`;
+});
+
+check('三套分区布局都能拼成一整块纹理 + 掩码', () => {
+  const frame = Array.from({ length: 256 }, (_, i) => i % 40);
+  const summary = numMatrix.ROBOT_LAYOUT_NAMES.map((name) => {
+    const parts = numMatrix.getRobotLayout(name);
+    const built = numMatrix.buildRobotFrame(frame, parts, numMatrix.ROBOT_LAYOUT_GAP);
+    assert.equal(built.layoutData.length, built.layoutW * built.layoutH);
+    assert.equal(built.maskData.length, built.layoutW * built.layoutH);
+    // 标题那两行永远不在掩码里，所以掩码不可能填满。
+    assert.ok(built.maskData.some((v) => v === 0), `${name} 的掩码不该填满`);
+    assert.ok(built.maskData.some((v) => v === 255), `${name} 的掩码不该全空`);
+    return `${name} ${built.layoutW}×${built.layoutH}`;
+  });
+  assert.equal(numMatrix.getRobotLayout('查无此人'), null);
+  return summary.join('，');
+});
+
+check('POT 取整与裸数据转置：只有方阵才转', () => {
+  assert.deepEqual([1, 6, 15, 16, 17, 36].map(numMatrix.nextPOT), [1, 8, 16, 16, 32, 64]);
+  // 2×2 方阵：转置换位。
+  assert.deepEqual(
+    numMatrix.normalizeRawFrame([1, 2, 3, 4], { transpose: true, width: 2, height: 2 }),
+    [1, 3, 2, 4],
+  );
+  // 非方阵即便要求转置也原样返回 —— 原实现如此，别"顺手修正"。
+  assert.deepEqual(
+    numMatrix.normalizeRawFrame([1, 2, 3, 4, 5, 6], { transpose: true, width: 3, height: 2 }),
+    [1, 2, 3, 4, 5, 6],
+  );
+  return 'nextPOT 六例对得上；3×2 要求转置仍原样';
+});
+
+check('片元着色器四个变体都能在没有 GL 上下文的裸 Node 里发出源码', () => {
+  const summary = Object.entries(numMatrix.FRAGMENT_VARIANTS).map(([name, flags]) => {
+    const src = numMatrix.buildFragmentShader(flags);
+    assert.ok(src.includes('void main()'), `${name} 应有 main`);
+    assert.ok(src.includes('u_texScale'), `${name} 应始终声明 u_texScale`);
+    assert.equal(src.includes('u_useMask'), flags.useMask);
+    // jet 阶梯是从 core/jetLadder.js 的断点数据发码的，不是抄的第 19 份。
+    assert.ok(src.includes('0.25'), `${name} 应含 jet 的第一个断点`);
+    return `${name} ${src.split('\n').length} 行`;
+  });
+  assert.equal(numMatrix.QUAD_POSITIONS.length, 12);
+  assert.equal(numMatrix.QUAD_TEX_COORDS.length, 12);
+  assert.ok(numMatrix.VERTEX_SHADER_SRC.includes('v_texCoord'));
+  return summary.join('，');
+});
+
 /* ── 收尾 ───────────────────────────────────────────────────────── */
 
 console.log('core/ 零依赖层烟测（裸 Node，无垫片、无打包器）');
