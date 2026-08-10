@@ -17,7 +17,7 @@ cd example && npm i && npm run dev     # → 32×32 数字矩阵，游动的高�
 npm --prefix docs i && npm --prefix docs run dev      # 或在仓库根上：npm run sdk:frontend-docs
 ```
 
-[docs/](docs/) 是一个 10 页的在线文档站：讲解 + **能动的实时画面** + 「显示代码」。
+[docs/](docs/) 是一个 12 页的在线文档站：讲解 + **能动的实时画面** + 「显示代码」。
 
 它和这份 README 的区别不是篇幅，是**会不会过期**。README 里的参数表、方法清单、预设名
 全是**手抄**的 —— `RENDERER_METHODS` 改一行，README 不会有任何报错。文档站里那些表格
@@ -28,7 +28,8 @@ npm --prefix docs i && npm --prefix docs run dev      # 或在仓库根上：npm
 | 页 | 有什么 |
 | :--- | :--- |
 | 快速开始 | 最短路径；显示的源码就是 `example/src/main.jsx` 本身（跨目录 `?raw`） |
-| 数字矩阵 / 点阵热力 | 活预览 + 预设 + 7 配色 + 参数面板 |
+| 数字矩阵 / 点阵热力 / 手部点云 | 活预览 + 预设 + 8 配色 + 参数面板 |
+| 斑点热力 | 一页放 `webglHeatmap` 与 `blobHeatmap` 两条，附一张「为什么不是同一个渲染器的两个后端」对照表 |
 | 一览 | 预设 × 配色 缩略图墙（WebGL 上下文限流的实测场） |
 | **写自己的渲染器** | 一个约 140 行的 Canvas 2D 渲染器，不属于本包，走完整条正式路径。**这一页是这个站真正的产出** —— 在它之前，全仓关于「怎么写自己的渲染器」只有一句「用 `validateRendererDescriptor` 自查」 |
 | 帧总线 | `publishFrame` / `useSceneFrame` 的第一个消费者 |
@@ -46,7 +47,7 @@ npm --prefix docs i && npm --prefix docs run dev      # 或在仓库根上：npm
 import { RendererHost, registerBuiltinRenderers } from '@shroom/frontend/react';
 import '@shroom/frontend/styles/canvas.css';
 
-registerBuiltinRenderers();          // 注册本包 ships 的渲染器：numMatrix + pointGrid + handPoints
+registerBuiltinRenderers();          // 注册本包 ships 的五个渲染器（见下面「四个入口」那张表）
 
 <RendererHost rendererId="numMatrix" params={params} values={frame} channel="sit" />
 ```
@@ -67,7 +68,7 @@ registerBuiltinRenderers();          // 注册本包 ships 的渲染器：numMat
 | :--- | :--- | :--- |
 | `@shroom/frontend` | 传输（`SensorClient`）、帧存储（`FrameStore`）、展示系统定义（`DisplayRegistry`），**并全量转出 `core`** | 无 |
 | `@shroom/frontend/core` | 契约、渲染器注册表、帧管线、配色、阈值、坐标布局 | 无 |
-| `@shroom/frontend/react` | `RendererHost`、`useSceneFrame`、`registerBuiltinRenderers`，三个渲染器（`numMatrix`，三个后端 `sprite3d` / `canvas2d` / `webgl`；`pointGrid`；`handPoints`）+ `three/{SelectionHelper,pointPick,circle.png}` + `webgl/glUtil.js` | peer: react + three |
+| `@shroom/frontend/react` | `RendererHost`、`useSceneFrame`、`registerBuiltinRenderers`，五个渲染器（`numMatrix`，三个后端 `sprite3d` / `canvas2d` / `webgl`；`pointGrid`；`handPoints`；`webglHeatmap`；`blobHeatmap`）+ `three/{SelectionHelper,pointPick,circle.png}` + `webgl/glUtil.js` | peer: react + three（`blobHeatmap` 只要 react） |
 | `@shroom/frontend/styles/canvas.css` | 6 行 canvas 样式（`.canvasNum`） | 无 |
 
 **根出口刻意不含 `react/`。** 一旦含了，`SensorClient` 的裸 Node 消费者（后端测试里
@@ -208,6 +209,13 @@ Vite 原生支持，webpack 5 走 asset modules，Rollup 需要 `@rollup/plugin-
 > 描述符能声明 per-variant 的方法集。`builtins.test.js` 现在用两个后端 `commandNames`
 > 的并集对账，至少保证名单本身不会漂。
 
+**2026-08-10 第三轮批 4（两条热力）往公开面追加了 0 项。** 这是上面那 10 个方法名提前
+补进契约的兑现：`webglHeatmap` 要的 `changeColor` / `bthClickHandle` 与 `blobHeatmap`
+要的 `bthClickHandle` 当时就一并补了，所以这一批一个契约条目都不用动。**这一点是有意
+验证的** —— `registerRenderer` 对契约外的方法名是静默拒绝（返回 `false`，不抛），现象只是
+「这个展示形式一片空白」加控制台一行，所以「这一批不用改契约」得由测试来证，不能靠眼看：
+`builtins.test.js` 里那条「声明的方法名全部在契约里」现在遍历五个渲染器。
+
 ### ⚠️ `data.current` 上的三个方法：契约管不着的一块公开面
 
 `RENDERER_PROPS` 里有一项 `data`，说明写的是「宿主注入的 ref」。但 **`data.current` 上
@@ -215,11 +223,12 @@ Vite 原生支持，webpack 5 走 asset modules，Rollup 需要 `@rollup/plugin-
 
 | 方法 | 谁调 | 参数 | 干什么 |
 | :--- | :--- | :--- | :--- |
-| `changeData(stats)` | `pointGrid` | `{ meanPres, maxPres, point, totalPres }`（均压两位小数的字符串、最大值、受压点数、总压） | 更新侧栏读数 |
-| `handleCharts(series, max)` | `pointGrid` | 总压最近 20 帧的数组 + `findMax(series) + 1000` | 画总压曲线 |
-| `handleChartsArea(series, max)` | `pointGrid` | 受压点数最近 20 帧的数组 + `findMax(series) + 100` | 画受压面积曲线 |
+| `changeData(stats)` | `pointGrid` / `webglHeatmap` / `blobHeatmap` | `{ meanPres, maxPres, point, totalPres }`（均压两位小数的字符串、最大值、受压点数、总压） | 更新侧栏读数 |
+| `handleCharts(series, max)` | `pointGrid` / `webglHeatmap` | 总压最近 20 帧的数组 + `findMax(series) + 1000` | 画总压曲线 |
+| `handleChartsArea(series, max)` | `pointGrid` / `webglHeatmap` | 受压点数最近 20 帧的数组 + `findMax(series) + 100` | 画受压面积曲线 |
 
-后两个在 `props.local` 为真时**跳过**（本地模式没有侧栏图表）。
+后两个在 `props.local` 为真时**跳过**（本地模式没有侧栏图表）。`blobHeatmap` 只调第一个
+—— 它在主应用里的渲染点本来就不带侧栏曲线，搬进包时没给它补（补了就是画面变化）。
 
 调用点写的是 `host.data?.current?.changeData({...})` —— **可选链只保住了 `current`，
 没保住那三个方法**。所以：传 `data` 就得把三个方法都挂上，或者干脆别传 `data`
@@ -260,7 +269,9 @@ core/                 零依赖层，裸 Node 可 import
   frameBus.js         帧总线（发布订阅，绕开 React 重渲染）
   sceneFrame.js       帧结构与通道常量
   frameMath.js        findMax / jet / press + addSide / gaussBlur_1 / interpSmall
-  colormaps.js        7 条配色 + 采样（每条自带 previewCss，色带条不用自己画）
+  colormaps.js        8 条配色 + 采样（每条自带 previewCss，色带条不用自己画）。
+                      第 8 条 heatBlobs 原先只以 GLSL 形式活在 webglHeatmap 的
+                      着色器里，随它进包时才有了 JS 侧的对应物
   jetLadder.js        jet 阶梯（全仓 18 处老配色用的那条）
   greyLadder.js       garyColors + jetgGrey（点阵的灰阶，未选中区域用）
   displayThresholds.js      阈值持久化（用 globalThis.localStorage?.，所以裸 Node 不用垫片）
@@ -278,10 +289,24 @@ core/                 零依赖层，裸 Node 可 import
                             从 jetLadder.js 发码 —— 不是第 19 份抄的）
   pointGrid/params.js       参数归一化 + 预设（matCol / carCol）+ deriveGridSize
   pointGrid/pipeline.js     插值 / 补边 / 高斯模糊（纯帧运算，有逐帧一致性测试）
+  handPoints/params.js      参数归一化 + 3 条预设（hand0205 / hand0205Alt /
+                            hand0205_147）+ deriveGridSize
+  handPoints/layout.js      3 张点表 + 盖成 0/1 掩码
+  handPoints/pipeline.js    掩码/压力两条模糊通路（maskSource 决定谁参与判定）
+  handPoints/quaternion.js  IMU 四元数的相对旋转（手写十几行，不用 THREE.Quaternion，
+                            所以能在裸 Node 里逐点测）
+  webglHeatmap/params.js    参数归一化 + 预设（bed4096 迁移 / plain 二开起点）
+  webglHeatmap/pipeline.js  清边 → 镜像 → 下限 + frameStats
+  webglHeatmap/shaders.js   斑点强度与色带合成两趟着色器**源码字符串**生成
+                            （8 段色带从 colormaps.js 的 HEAT_BLOB_STOPS 发码）
+  blobHeatmap/params.js     参数归一化 + 预设（default / carCol）
+  blobHeatmap/pipeline.js   铺点坐标 + alpha 分桶 + frameStats（与 webglHeatmap
+                            那份同名不同源，两条子路径故意不互相依赖）
+  blobHeatmap/intensity.js  1024 格渐变调色板（要画布，所以裸 Node 里只 import 不调用）
 react/                peer: react + three
   RendererHost.jsx    宿主：懒加载 + 契约审计 + 声明式 values / 帧总线两条通道
   useSceneFrame.js    订阅帧总线的 hook —— 二开者消费帧的正式入口
-  builtins.js         注册本包 ships 的三个渲染器
+  builtins.js         注册本包 ships 的五个渲染器
   numMatrix/NumMatrixRenderer.jsx
   numMatrix/backends/sprite3d.js   three.js InstancedMesh，一次 draw call 画完整片矩阵
   numMatrix/backends/canvas2d.js   2D canvas 逐格 fillText + CSS perspective 的伪三维
@@ -291,6 +316,13 @@ react/                peer: react + three
   pointGrid/PointGridRenderer.jsx  three.js Points + TrackballControls，可框选
   handPoints/HandPointsRenderer.jsx three.js Points + GLTF 手模 + IMU 四元数驱动
                                    的手指关节旋转（唯一有 ARTICULATED 能力的）
+  webglHeatmap/WebglHeatmapRenderer.jsx  斑点热力的壳（rAF + dirty 标志，
+                                   没数据没参数变化就不重画）
+  webglHeatmap/blobs.js            真正的两趟 WebGL 绘制核。唯一允许的模块级可变
+                                   状态之外的例外：一张懒建的共享模板画布，
+                                   说明写在文件头
+  blobHeatmap/BlobHeatmapRenderer.jsx  Canvas 2D 斑点热力。**全包唯一不碰 three、
+                                   也不碰 WebGL 的渲染器**，不占上下文额度
   three/SelectionHelper.js         拖拽框选的那个 div
   three/pointPick.js               世界坐标 → 屏幕矩形 → 网格下标
   three/circle.png                 点精灵贴图（打包资源，不是运行期相对 URL）。
@@ -305,7 +337,7 @@ src/store/            FrameStore + 新旧协议归一化
 src/display/          DisplayRegistry + 默认展示系统
 example/              可跑 demo（不进 npm 包的 files，也排出装机包）
 docs/                 在线可预览文档站（同上）
-scripts/smoke-core.mjs  零依赖层的裸 Node 守卫（23 项）
+scripts/smoke-core.mjs  零依赖层的裸 Node 守卫（32 项）
 ```
 
 ---
@@ -390,11 +422,11 @@ GET /api/sdk/contract
 ## 本地开发
 
 ```bash
-npm test        # vitest，320 例（core 的纯函数 + 参数归一化 + 逐点比对 + 三个渲染器描述符）
-npm run smoke   # 裸 Node 跑一遍 core，28 项
+npm test        # vitest，443 例（core 的纯函数 + 参数归一化 + 逐点比对 + 五个渲染器描述符）
+npm run smoke   # 裸 Node 跑一遍 core，32 项
 cd example && npm i && npm run dev
 cd docs && npm i && npm run dev      # 文档站
-cd docs && npm run check             # 逐页 SSR 渲染，10 页
+cd docs && npm run check             # 逐页 SSR 渲染，12 页
 ```
 
 在仓库根上也有：`npm run sdk:frontend-test` / `npm run sdk:frontend-smoke` /
@@ -416,11 +448,23 @@ cd docs && npm run check             # 逐页 SSR 渲染，10 页
 - **`private: true`，不发公共 registry。** 分发走 `npm pack` tarball 或 `file:`。想真
   发布是另一件事（要定 scope 归属与版本承诺）。
 - **tarball 里根出口加载不了**，见上面「已知缺口」。渲染器那条路不受影响。
-- **ships 三个渲染器：`numMatrix` + `pointGrid` + `handPoints`。** `pointGrid`
-  2026-08-05 第二轮搬入；`handPoints` 2026-08-07 第三轮批 3 搬入（原
+- **ships 五个渲染器：`numMatrix` + `pointGrid` + `handPoints` + `webglHeatmap` +
+  `blobHeatmap`。至此主应用的五条渲染通路全部在包里，`client/src` 侧只剩壳。**
+  `pointGrid` 2026-08-05 第二轮搬入；`handPoints` 2026-08-07 第三轮批 3 搬入（原
   `client/src/components/three/hand0205Point.jsx` 993 行 + `...147.jsx` 1037 行，
   **两份合成一个渲染器三条预设** —— 归一化空白与注释后净差 151 行，差的全是参数与
   两张写死的点表。两个原文件已删，原路径没留壳：唯一的 importer 是 `Home.jsx`）。
+  两条热力 2026-08-10 第三轮批 4 搬入：
+  - `webglHeatmap`（原 `components/webgl/Canvas4096WebGL.jsx` 187 行的壳 +
+    `components/webgl/WebGL.HeatMap copy 2.js` 953 行的绘制核）。壳已删；**绘制核那个
+    文件留了壳**，因为 `hand.jsx` / `humanBody.jsx` / `robotLCF.jsx` / `robotSY.jsx`
+    四个 video 场景组件与 `Home.jsx` 还在直接 `new WebGLCanvas(...)` —— 文件名带
+    "copy 2" 但它不是死码。
+  - `blobHeatmap`（原 `components/heatmap/canvas.jsx` 460 行）。原路径留了个 75 行的
+    适配壳（导出 `buildBlobHeatmapParams` + `Heatmap`）。
+  - 顺手删掉零引用的 `assets/util/heatmapRect.js`（76 行）。`assets/util/heatmap.js`
+    与 `components/onestep/heatmap.js` **不动** —— 它们是旧 video 组件的画图工具，
+    不是展示形式。
 - **`BACKENDS = ['sprite3d', 'canvas2d', 'webgl']`，三个后端全部到位。**
   `canvas2d` 2026-08-06 第三轮批 1 搬入（原 `client/src/components/num/NumWs.jsx`，
   导出名 `Num3D`，其实是 2D canvas + CSS 透视，不是 WebGL）；`webgl` 同轮批 2 搬入
@@ -441,10 +485,12 @@ cd docs && npm run check             # 逐页 SSR 渲染，10 页
   `three/pointPick.js` 读的是 `window.innerWidth/Height` —— **缩放态下框选会选错点**。
   新搬的 `canvas2d` / `webgl` 两个后端也照抄了这个行为（`backends/webgl.js` 的
   `bounds()` 是改它时唯一要动的地方，注释已写明）。新写渲染器请按容器画。已记积压。
-- **三个渲染器的 dispose 都没有 `forceContextLoss()`。** `renderer.dispose()` 不保证
-  立即归还 WebGL 上下文（浏览器同时活的上限约 8–16），同页多块时可能累积到
-  "Too many active WebGL contexts"。文档站用 `IntersectionObserver` 懒挂载 + 活跃数上限
-  4 绕开而没有改包内代码 —— 加这一行要配一整轮真机回归。已记积压。
+- **占 WebGL 上下文的渲染器从 2 个变成了 4 个，而 dispose 仍然都没有
+  `forceContextLoss()`。** `renderer.dispose()` 不保证立即归还上下文（浏览器同时活的
+  上限约 8–16），同页多块时可能累积到 "Too many active WebGL contexts"。**唯一不占额度
+  的是 `blobHeatmap`** —— 它走 Canvas 2D，全包唯一既不碰 three 也不碰 WebGL 的一个。
+  文档站用 `IntersectionObserver` 懒挂载 + 活跃数上限 4 绕开而没有改包内代码 ——
+  加这一行要配一整轮真机回归。已记积压，本轮之后这条比以前更要紧。
 - **渲染器是构建期解析的。** `load: () => import()` 由打包器静态分析，所以**装机之后
   加不了新渲染器**。二开的两条路里，本包解决的是「新项目消费」，不是「装机后插件化」。
 - **主应用的迁移用 re-export 壳做的**：`client/src` 里搬走的模块原路径都留了一行

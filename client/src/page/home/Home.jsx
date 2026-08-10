@@ -16,7 +16,6 @@ import Box100 from "../../components/three/box100_3";
 import Car100 from "../../components/car/box100_3";
 
 import Bed4096 from "../../components/three/4096";
-import Canvas4096WebGL from "../../components/webgl/Canvas4096WebGL";
 import Bed1616 from "../../components/three/1616";
 import CanvasnewHand from "../../components/three/newhand";
 import Gloves from "../../components/three/gloves";
@@ -83,7 +82,14 @@ import HumanBodyRawData from "../../components/num/HumanBodyRawData";
 // 这两个原文件已随本批删除 —— 删掉它们之前 grep 过全仓，除了这两行再无引用方，
 // 留壳没有服务对象（`components/num/daliegu.jsx` 里那个 `Num2D` 是它自己的局部同名量）。
 import { calFoot } from "../../assets/util/value";
-import { Heatmap } from "../../components/heatmap/canvas";
+// `Heatmap`（components/heatmap/canvas.jsx）也不再静态 import —— 那个渲染点换成了
+// `RendererHost` + `blobHeatmap`。原路径留了适配壳（`App.jsx:17` 的 /heatmap 路由
+// 还在用，而且它一个 prop 都不传，所以壳得自己兜预设），Home 这边直接用参数表。
+// `Canvas4096WebGL`（components/webgl/Canvas4096WebGL.jsx）同理，两个渲染点都换成
+// `RendererHost` + `webglHeatmap`；那个文件只有本文件一个引用方，所以直接删了、
+// 没留壳。它依赖的绘制核 `WebGL.HeatMap copy 2.js` 另有四个 video 组件在用，
+// 那个路径留了壳。
+import { buildBlobHeatmapParams } from "../../components/heatmap/canvas";
 import FootTrack from "../../components/footTrack/footTrack";
 import {
   backTypeEvent,
@@ -118,6 +124,9 @@ import { LEGACY_PRESETS as NUM_MATRIX_PRESETS } from '../../renderers/numMatrix/
 // 这个文件没有别的 import，所以那两个文件直接删了、`renderers/` 下也没留壳 ——
 // 这里直接从包里取参数表。同样只引 params，渲染器本体走懒加载。
 import { LEGACY_PRESETS as HAND_POINTS_PRESETS } from '@shroom/frontend/core/handPoints';
+// 两条热力图是第四轮搬进包的。`webglHeatmap` 的参数表在这里取；`blobHeatmap` 的
+// 走上面那个适配壳导出的 `buildBlobHeatmapParams`（它还要读一次阈值存储）。
+import { LEGACY_PRESETS as WEBGL_HEATMAP_PRESETS } from '@shroom/frontend/core/webglHeatmap';
 import { clearLastFrame, publishFrame } from '../../runtime/frameBus';
 import { SCENE_CHANNELS, buildSceneFrame } from '../../runtime/sceneFrame';
 import DisplayCanvasConfigurator from '../../components/displaySystem/canvasConfigurator/DisplayCanvasConfigurator.jsx';
@@ -4734,7 +4743,19 @@ class Home extends React.Component {
               this.state.matrixName == "hand" ||
               this.state.carState == "back" ||
               this.state.carState == "sit") ? (
-            <Heatmap ref={this.com} matrixName={this.state.matrixName} />
+            <RendererHost
+              rendererId="blobHeatmap"
+              // 原来是 `<Heatmap matrixName={...}>`。matrixName 只判一件事：是不是
+              // `carCol`（那支走 10×9 / max 300 / radius 100）。那条判断连同
+              // `carValuej` 的存储读取一起折进了 buildBlobHeatmapParams。
+              params={buildBlobHeatmapParams(this.state.matrixName)}
+              label="斑点热力"
+              rendererRef={this.com}
+              // ⚠️ **刻意不传 `data` / `local` / sceneChartProps** —— 原件从不碰
+              // `props.data`，这条展示形式下侧栏读数与两条曲线本来就是不动的。渲染器
+              // 那边虽然补了 `changeData`，但 `data` 不传就整段不执行，画面与读数
+              // 都与原来逐一相同。要让这条通路也喂侧栏是另一件事，记在积压里。
+              />
           ) :
 
             this.state.numMatrixFlag == "num3D" && [...tactileGloveTypes, 'robot1', 'footVideo'].includes(this.state.matrixName) ?
@@ -4771,8 +4792,14 @@ class Home extends React.Component {
 
                 this.state.numMatrixFlag == "numoriginal" && this.state.matrixName == 'bed4096' ?
                   <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
-                    <Canvas4096WebGL
-                      ref={this.com}
+                    <RendererHost
+                      rendererId="webglHeatmap"
+                      // 原来是 `<Canvas4096WebGL>`，一个 prop 都不用挑 —— 它没有
+                      // matrixName 分支，写死的 64×64 / 1024² / radius 24 / 边缘清零
+                      // 窗口 [6,58] / 左右镜像 / ×1.8 全部收进了 bed4096 这条预设。
+                      params={WEBGL_HEATMAP_PRESETS.bed4096}
+                      label="热力图"
+                      rendererRef={this.com}
                       data={this.data}
                       local={this.state.local}
                       {...this.sceneChartProps} />
@@ -4945,8 +4972,11 @@ class Home extends React.Component {
                       <CanvasCom matrixName={this.state.matrixName}
                         local={this.state.local}
                       >
-                        <Canvas4096WebGL
-                          ref={this.com}
+                        <RendererHost
+                          rendererId="webglHeatmap"
+                          params={WEBGL_HEATMAP_PRESETS.bed4096}
+                          label="热力图"
+                          rendererRef={this.com}
                           data={this.data}
                           local={this.state.local}
                           {...this.sceneChartProps} />

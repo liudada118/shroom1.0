@@ -130,6 +130,83 @@ function sampleJet(ratio) {
   return `rgb(${red} ${green} ${blue})`;
 }
 
+/**
+ * 斑点热力（`webglHeatmap`）那条 8 段色带，逐字来自
+ * `components/webgl/WebGL.HeatMap copy 2.js` 的 `fragmentShader1`。
+ *
+ * **它和上面六条的区别是色标不等距**：0.14 一档走到 0.84，最后一段却是 0.16 宽。
+ * `createStopColormap` 假定等距，所以这条走 `createPositionedStopColormap`。
+ *
+ * ⚠️ **`c7` 的注释与代码不符，照代码搬。** 原件写的是
+ * `const vec3 c7 = vec3(1.0, 0.0, 0.0); /* 1.00 -> #FF1E42 *\/` —— 注释说
+ * `#FF1E42`（一个偏粉的红），代码是纯红，和 `c6` 一模一样。也就是最后那 16%
+ * 是一段**恒定色**，`mix(c6, c7, t)` 是个空插值。搬家不改观感，所以这里照代码
+ * 记 `[255, 0, 0]`；要改成注释里那个颜色是一次看得见的画面变化，另议。
+ */
+export const HEAT_BLOB_STOPS = [
+  { at: 0.00, rgb: [0, 0, 0] },       // #000000
+  { at: 0.14, rgb: [0, 0, 255] },     // #0000FF
+  { at: 0.28, rgb: [0, 102, 255] },   // #0066FF（GLSL 写作 0.4，102/255 正好是 0.4）
+  { at: 0.42, rgb: [0, 255, 0] },     // #00FF00
+  { at: 0.56, rgb: [255, 255, 0] },   // #FFFF00
+  { at: 0.70, rgb: [255, 102, 0] },   // #FF6600
+  { at: 0.84, rgb: [255, 0, 0] },     // #FF0000
+  { at: 1.00, rgb: [255, 0, 0] },     // 注释写 #FF1E42，代码是纯红 —— 见上
+];
+
+/**
+ * 在**不等距**色标上插值，返回未取整的 0-255 浮点三元组。
+ *
+ * 不取整是有意的：`heatBlobs` 还要在插值结果上做一次 gamma，先取整会把误差
+ * 放大到肉眼可见（暗端尤其明显，`pow` 在 0 附近很陡）。
+ *
+ * @param {Array<{at: number, rgb: [number, number, number]}>} stops 升序色标。
+ * @param {number} ratio 归一化比例。
+ * @returns {[number, number, number]} 0-255 的浮点 RGB。
+ */
+function interpolatePositionedStops(stops, ratio) {
+  const position = clampRatio(ratio);
+  for (let index = 0; index < stops.length - 1; index += 1) {
+    const upper = stops[index + 1];
+    if (position <= upper.at) {
+      const lower = stops[index];
+      const span = upper.at - lower.at;
+      const weight = span > 0 ? (position - lower.at) / span : 0;
+      const channel = (i) => lower.rgb[i] + (upper.rgb[i] - lower.rgb[i]) * weight;
+      return [channel(0), channel(1), channel(2)];
+    }
+  }
+  return [...stops[stops.length - 1].rgb];
+}
+
+/**
+ * `heatBlobs` 的数值形式：插值之后再跑一遍着色器里那句 `linearToSRGB`。
+ *
+ * **gamma 必须在这里跑，不能只留在 GLSL 里。** 否则色卡（`previewCss`）与实际
+ * 出图是两个颜色 —— 文档站的配色页会当场露馅。`pow(c * 1.5, 1/2.2)` 在 c > 0.4
+ * 左右就超过 1，GL 在输出时夹掉；这里显式 `Math.min(1, …)` 复现同一个夹取。
+ *
+ * @param {number} ratio 归一化比例。
+ * @returns {[number, number, number]} 0-255 的 RGB 三元组。
+ */
+function sampleHeatBlobsRgb(ratio) {
+  const linear = interpolatePositionedStops(HEAT_BLOB_STOPS, ratio);
+  return linear.map((channel) => Math.round(
+    255 * Math.min(1, Math.pow((channel / 255) * 1.5, 1 / 2.2)),
+  ));
+}
+
+/**
+ * `heatBlobs` 的 CSS 形式。
+ *
+ * @param {number} ratio 归一化比例。
+ * @returns {string} CSS 颜色字符串。
+ */
+function sampleHeatBlobs(ratio) {
+  const [red, green, blue] = sampleHeatBlobsRgb(ratio);
+  return `rgb(${red} ${green} ${blue})`;
+}
+
 export const COLORMAPS = [
   {
     id: CLASSIC_ID,
@@ -162,6 +239,15 @@ export const COLORMAPS = [
     sample: sampleJet,
     sampleRgb: sampleJetRgb,
     previewCss: buildPreviewCss(sampleJet),
+  },
+  // 第八条，2026-08-07 第三轮批 4 随 `webglHeatmap` 进包。色标不等距 +
+  // 一道 sRGB gamma，所以两条通用工厂都套不上，单独一份采样函数。
+  {
+    id: 'heatBlobs',
+    label: '斑点热力',
+    sample: sampleHeatBlobs,
+    sampleRgb: sampleHeatBlobsRgb,
+    previewCss: buildPreviewCss(sampleHeatBlobs),
   },
 ];
 
@@ -288,6 +374,46 @@ export function glslJetLadder(name = 'jet1') {
   // dv == 0 时 JS 侧的 g 是 NaN，GLSL 侧历来返回纯蓝；照抄 GLSL，画面零变化。
   if (dv == 0.0) return vec3(0.0, 0.0, 1.0);
   float t = (x - minVal) / dv;
+${branches}
+}`;
+}
+
+/**
+ * 把一条**不等距色标**发成一段 GLSL 源码（`vec3 name(float pct)`）。
+ *
+ * 和 `glslJetLadder()` 同一个理由：`WebGL.HeatMap copy 2.js` 的
+ * `getColorByPercent` 是手写的 8 段 `mix` 链，断点与颜色和 `HEAT_BLOB_STOPS`
+ * 一一对应。发码之后色带只有一个出处 —— 改 `HEAT_BLOB_STOPS` 一处，GLSL、
+ * `sampleColormapRgb('heatBlobs')` 和文档站色卡同时跟着走。
+ *
+ * 生成结果与原件的结构差异只有一处：原件把颜色声明成 `const vec3 c0..c7` 再
+ * `mix(cN, cN+1, t)`，这里直接把字面量写进 `mix`。同解，少八行。分段判断照抄
+ * 原件的 `p <= 断点` 链（**含最后一段的 `else` 兜底**，所以 `p == 1.0` 不会漏）。
+ *
+ * @param {string} name 生成的函数名。
+ * @param {Array<{at: number, rgb: [number, number, number]}>} stops 升序色标，
+ *   `rgb` 是 0-255。
+ * @returns {string} 可直接拼进片元着色器的 GLSL 函数定义。
+ */
+export function glslStopLadder(name, stops) {
+  const glslFloat = (value) => {
+    const rounded = Math.round(value * 1e6) / 1e6;
+    return Number.isInteger(rounded) ? `${rounded}.0` : `${rounded}`;
+  };
+  const vec3 = (rgb) => `vec3(${rgb.map((c) => glslFloat(c / 255)).join(', ')})`;
+
+  const branches = stops.slice(1).map((upper, index) => {
+    const lower = stops[index];
+    const body = `    float t = (p - ${glslFloat(lower.at)}) `
+      + `/ (${glslFloat(upper.at)} - ${glslFloat(lower.at)});\n`
+      + `    return mix(${vec3(lower.rgb)}, ${vec3(upper.rgb)}, t);`;
+    // 最后一段不写条件，走 else —— 否则 p == 1.0 会掉出链尾。
+    if (index === stops.length - 2) return `  {\n${body}\n  }`;
+    return `  if (p <= ${glslFloat(upper.at)}) {\n${body}\n  } else`;
+  }).join('\n');
+
+  return `vec3 ${name}(float pct) {
+  float p = clamp(pct, 0.0, 1.0);
 ${branches}
 }`;
 }

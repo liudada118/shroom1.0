@@ -23,17 +23,23 @@
  * | :--- | :--- |
  * | 契约与注册表 | `RENDERER_PROPS` / `RENDERER_METHODS` / `RENDERER_CAPABILITIES` / `registerRenderer` … |
  * | 帧通路 | `frameBus` 的收发、`buildSceneFrame`、`SCENE_CHANNELS` |
- * | 配色 | `COLORMAPS` 七条 + `sampleColormap*`；`jetRgb` / `jet` 是 18 处老通路的原样出口 |
+ * | 配色 | `COLORMAPS` 八条 + `sampleColormap*`；`jetRgb` / `jet` 是 18 处老通路的原样出口 |
  * | 阈值 | `createThresholdState` 与三组默认值（替掉了 47 个模块级声明块） |
  * | 布局与数学 | `buildCoordinatePointLayout`、`findMax` / `press` / 点阵那三个帧函数 |
  * | numMatrix | `numMatrix.*` 命名空间 + 四个常用符号的顶层别名 |
  * | pointGrid | `pointGrid.*` 命名空间 + 两个常用符号的顶层别名 |
  * | handPoints | `handPoints.*` 命名空间 + 两个常用符号的顶层别名 |
+ * | webglHeatmap | `webglHeatmap.*` 命名空间 + 四个常用符号的顶层别名 |
+ * | blobHeatmap | `blobHeatmap.*` 命名空间 + 四个常用符号的顶层别名 |
  *
- * 三个渲染器都用命名空间而不是全部铺平 —— 第一轮就是为这一刻留的：
- * 它们各有一个 `LEGACY_PRESETS`、各有一个 `PARAM_RANGES`、各有一个
- * `deriveGridSize`，铺平必撞。顶层别名只给带前缀不会歧义的那几个
- * （三个 `*_PRESETS`、三个 `normalize*Params`）。
+ * 五个渲染器都用命名空间而不是全部铺平 —— 第一轮就是为这一刻留的：
+ * 它们各有一个 `LEGACY_PRESETS`、各有一个 `PARAM_RANGES`，铺平必撞。顶层别名只给
+ * 带前缀不会歧义的那几个（五个 `*_PRESETS`、五个 `normalize*Params`）。
+ *
+ * ⚠️ 到第四轮为止已经撞上一次：`webglHeatmap` 与 `blobHeatmap` 各有一个逐字相同的
+ * `frameStats`（两条 `core/` 子路径故意不互相依赖，见 `blobHeatmap/pipeline.js`）。
+ * 所以顶层只铺 `webglHeatmap` 那一份，斑点热力那份走
+ * `blobHeatmap.frameStats` 命名空间取。**这就是不铺平的理由本身。**
  *
  * @see ../react/index.js React + three 那一层（`RendererHost` 在那边）
  */
@@ -78,6 +84,10 @@ export {
 export {
   COLORMAPS,
   DEFAULT_COLORMAP_ID,
+  // 第 8 条配色的色标数据。铺到顶层是因为 `webglHeatmap` 的着色器要拿它发码
+  // （`core/webglHeatmap/shaders.js`），文档站的色卡表也直接读它 ——
+  // 色带只有这一个出处，抄第二份就会漂。
+  HEAT_BLOB_STOPS,
   colormapPreviewCss,
   getColormap,
   isClassicColormap,
@@ -159,3 +169,25 @@ export {
 } from './handPoints/params.js';
 
 export { createQuaternionTracker } from './handPoints/quaternion.js';
+
+/* ── webglHeatmap（命名空间 + 两个常用别名） ─────────────────────── */
+export * as webglHeatmap from './webglHeatmap/index.js';
+
+export {
+  LEGACY_PRESETS as WEBGL_HEATMAP_PRESETS,
+  normalizeWebglHeatmapParams,
+} from './webglHeatmap/params.js';
+
+export { frameStats, prepareFrame } from './webglHeatmap/pipeline.js';
+
+/* ── blobHeatmap（命名空间 + 四个常用别名） ──────────────────────── */
+// ⚠️ 这里**不铺** `frameStats` / `buildBlobPoints` —— 前者与 webglHeatmap 撞名，
+//    后者带 blob 语义但不带前缀。要用走 `blobHeatmap.*`。
+export * as blobHeatmap from './blobHeatmap/index.js';
+
+export {
+  LEGACY_PRESETS as BLOB_HEATMAP_PRESETS,
+  normalizeBlobHeatmapParams,
+} from './blobHeatmap/params.js';
+
+export { colorize, createIntensity } from './blobHeatmap/intensity.js';

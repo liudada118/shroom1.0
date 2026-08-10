@@ -1,7 +1,7 @@
 {
   "name": "@shroom/frontend",
   "version": "0.1.0",
-  "description": "压力传感前端 SDK：传输层、帧存储、展示系统定义，以及可注册的渲染器（数字矩阵）",
+  "description": "压力传感前端 SDK：传输层、帧存储、展示系统定义，以及五个可注册的渲染器（数字矩阵 / 点阵热力 / 手部点云 / 两条斑点热力）",
   "type": "module",
   "private": true,
   "license": "UNLICENSED",
@@ -11,6 +11,8 @@
     "./core/numMatrix": "./core/numMatrix/index.js",
     "./core/pointGrid": "./core/pointGrid/index.js",
     "./core/handPoints": "./core/handPoints/index.js",
+    "./core/webglHeatmap": "./core/webglHeatmap/index.js",
+    "./core/blobHeatmap": "./core/blobHeatmap/index.js",
     "./core/*": "./core/*",
     "./react": "./react/index.js",
     "./react/*": "./react/*",

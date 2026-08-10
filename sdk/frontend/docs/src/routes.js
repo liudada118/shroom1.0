@@ -38,6 +38,18 @@ export const ROUTES = [
     load: () => import('./pages/PointGrid.jsx'),
   },
   {
+    id: 'hand-points',
+    title: '手部点云（3D）',
+    group: '内置渲染器',
+    load: () => import('./pages/HandPoints.jsx'),
+  },
+  {
+    id: 'heatmap',
+    title: '斑点热力（两条）',
+    group: '内置渲染器',
+    load: () => import('./pages/Heatmap.jsx'),
+  },
+  {
     id: 'gallery',
     title: '预设 × 配色 一览',
     group: '内置渲染器',

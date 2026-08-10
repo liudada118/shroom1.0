@@ -28,6 +28,7 @@ import assert from 'node:assert/strict';
 import {
   COLORMAPS,
   DUAL_CHANNEL_DEFAULTS,
+  blobHeatmap,
   HAND_POINTS_PRESETS,
   NUM_MATRIX_PRESETS,
   POINT_GRID_PRESETS,
@@ -63,6 +64,7 @@ import {
   runPointGridPipeline,
   sampleColormapRgb,
   subscribeFrames,
+  webglHeatmap,
 } from '../core/index.js';
 
 const checks = [];
@@ -484,6 +486,106 @@ check('片元着色器四个变体都能在没有 GL 上下文的裸 Node 里发
   assert.equal(numMatrix.QUAD_TEX_COORDS.length, 12);
   assert.ok(numMatrix.VERTEX_SHADER_SRC.includes('v_texCoord'));
   return summary.join('，');
+});
+
+check('斑点热力的帧运算：清边 → 镜像 → 下限，一步都不能少', () => {
+  const params = webglHeatmap.normalizeWebglHeatmapParams(
+    webglHeatmap.LEGACY_PRESETS.bed4096,
+  );
+  const raw = Array.from({ length: 4096 }, (_, i) => (i * 37) % 211);
+  const ready = webglHeatmap.prepareFrame(raw, params);
+  assert.equal(ready.length, 4096);
+  assert.deepEqual(raw, Array.from({ length: 4096 }, (_, i) => (i * 37) % 211), '不该改原数组');
+  // 清边窗口是 [6, 58]：第 0 行必空，第 30 行必有值。
+  assert.ok(ready.slice(0, 64).every((v) => v === 0), '第 0 行应被清掉');
+  assert.ok(ready.slice(30 * 64, 31 * 64).some((v) => v > 0), '第 30 行不该全空');
+
+  const points = webglHeatmap.buildHeatPoints(ready, params);
+  assert.equal(points.length, 64 * 64);
+  assert.ok(points.every((p) => p.length === 3 && p.every(Number.isFinite)), '点表不该有 NaN');
+  // 最后一个点落在画布右下角前一格：(63/64)*1024 = 1008。
+  assert.deepEqual(points[points.length - 1].slice(0, 2), [1008, 1008]);
+
+  const stats = webglHeatmap.frameStats(raw);
+  assert.equal(stats.point, raw.filter((v) => v > 0).length);
+  assert.equal(typeof stats.meanPres, 'string', 'meanPres 是 toFixed(2) 出来的字符串');
+  assert.equal(webglHeatmap.frameStats(new Array(16).fill(0)).meanPres, '0.00', '不该出 NaN');
+  return `4096 点，均压 ${stats.meanPres}`;
+});
+
+check('斑点热力的色带由数据发码，JS 色卡与 GLSL 出图同色', () => {
+  const src = webglHeatmap.COMPOSITE_FRAGMENT_SHADER;
+  assert.ok(src.includes('void main(void)'), '应有 main');
+  assert.ok(src.includes('getColorByPercent'), '色带函数应被插进来');
+  assert.ok(src.includes('linearToSRGB'), 'gamma 那句应保留');
+  // 七个断点逐个在源码里 —— 抄错一个就红。
+  [0.14, 0.28, 0.42, 0.56, 0.7, 0.84].forEach((at) => {
+    assert.ok(src.includes(`p <= ${at}`), `断点 ${at} 应在发出来的源码里`);
+  });
+  // 裸 Node 里发得出来 = 它真的只是字符串，没碰 gl / DOM。
+  const custom = webglHeatmap.buildCompositeFragmentShader({ alphaCutoff: 0.5 });
+  assert.ok(custom.includes('p_alpha > 0.5000'));
+
+  assert.deepEqual(sampleColormapRgb('heatBlobs', 0), [0, 0, 0]);
+  const hot = sampleColormapRgb('heatBlobs', 1);
+  assert.ok(hot[0] > hot[1] && hot[0] > hot[2], '满值应偏红');
+  return `${src.split('\n').length} 行 GLSL，满值 rgb(${hot.join(' ')})`;
+});
+
+check('Canvas 2D 斑点热力：铺点公式与那段死运算无关', () => {
+  const params = blobHeatmap.normalizeBlobHeatmapParams(
+    blobHeatmap.LEGACY_PRESETS.carCol,
+  );
+  assert.equal(params.dataWidth, 10);
+  assert.equal(params.dataHeight, 9);
+  assert.equal(params.max, 300);
+
+  const raw = Array.from({ length: 90 }, (_, i) => (i * 37) % 211);
+  const points = blobHeatmap.buildBlobPoints(raw, 10, 9, 100, 100);
+  assert.equal(points.length, 90, '点数应是 9 行 × 10 列');
+  // 取的是原始入参，不是任何中间结果 —— 这是「那 50 行是死的」的另一半证据。
+  assert.equal(points[0].value, raw[0]);
+  assert.equal(points[89].value, raw[89]);
+  // 错位的坐标公式照抄下来了：行下标配宽、列下标配高。
+  assert.equal(Math.max(...points.map((p) => p.x)), 80);
+  assert.equal(Math.max(...points.map((p) => p.y)), 100);
+
+  const buckets = blobHeatmap.groupByAlpha(points, params.max);
+  const total = buckets.reduce((sum, bucket) => sum + bucket.points.length, 0);
+  assert.equal(total, points.length, '分桶不该丢点');
+  buckets.forEach((bucket) => assert.match(bucket.alpha, /^(\d\.\d{2}|NaN)$/));
+
+  // 预设不串味：原件那个模块级 options 的 bug 在这一层不可能重现。
+  const next = blobHeatmap.normalizeBlobHeatmapParams(blobHeatmap.LEGACY_PRESETS.default);
+  assert.equal(next.max, 600);
+  return `carCol 90 点分 ${buckets.length} 个 alpha 桶，default 仍是 max 600`;
+});
+
+check('Canvas 2D 斑点热力：调色板要画布，所以裸 Node 里只 import 不调用', () => {
+  // import 成功了（上面 blobHeatmap 命名空间已经在用），但取调色板要 DOM。
+  assert.throws(() => blobHeatmap.createIntensity().getImageData(), /需要 DOM/);
+
+  // 注入一张假画布就能在裸 Node 里跑通 —— 这就是那个注入点存在的理由。
+  const stops = [];
+  const intensity = blobHeatmap.createIntensity({
+    createCanvas: () => ({
+      getContext: () => ({
+        createLinearGradient: () => ({ addColorStop: (o, c) => stops.push([o, c]) }),
+        fillRect() {},
+        getImageData: () => ({
+          data: Uint8ClampedArray.from({ length: 1024 }, (_, i) => i % 256),
+        }),
+      }),
+    }),
+  });
+  assert.equal(intensity.getImageData().length, 1024, '调色板应是 256×4 字节');
+  assert.equal(stops.length, 6, '六条色标一条不落');
+
+  // colorize 是纯的：热区外全透明（那条 else 每个空像素都要走）。
+  const pixels = new Uint8ClampedArray(16);
+  blobHeatmap.colorize(pixels, intensity.getImageData(), { max: 600, min: 0 });
+  assert.ok(Array.from(pixels).every((byte) => byte === 0), '空帧不该被染色');
+  return `色标 ${stops.length} 条，空帧进出全透明`;
 });
 
 /* ── 收尾 ───────────────────────────────────────────────────────── */

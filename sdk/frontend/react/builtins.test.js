@@ -1,5 +1,5 @@
 /**
- * builtins.test.js - 本包 ships 的三个渲染器描述符能不能注册上
+ * builtins.test.js - 本包 ships 的五个渲染器描述符能不能注册上
  *
  * ## 为什么这条值得单独测
  *
@@ -17,8 +17,8 @@
  * jsdom，也不需要装 react 这个 peer 依赖。
  *
  * 反过来说，**这个测试跑不到渲染器本体**：`HandPointsRenderer.jsx` 静态 import 了
- * react 与 three，在这个包的 node_modules 里都不存在。它的回归靠真机手测，
- * 见 `sdk/frontend/README.md` 里那份清单。
+ * react 与 three，两条热力的渲染器也都静态 import 了 react，在这个包的 node_modules
+ * 里都不存在。它们的回归靠真机手测，见 `sdk/frontend/README.md` 里那份清单。
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -33,8 +33,14 @@ import createCanvas2dMatrixBackend from './numMatrix/backends/canvas2d.js';
 import createWebglMatrixBackend from './numMatrix/backends/webgl.js';
 import { registerBuiltinRenderers } from './builtins.js';
 
-/** 本包 ships 的三个渲染器 id。加第四个时这里和下面的计数一起改。 */
-const RENDERER_IDS = ['numMatrix', 'pointGrid', 'handPoints'];
+/** 本包 ships 的五个渲染器 id。再加一个时这里和下面的计数一起改。 */
+const RENDERER_IDS = [
+  'numMatrix',
+  'pointGrid',
+  'handPoints',
+  'webglHeatmap',
+  'blobHeatmap',
+];
 
 /** 所有后端都有的那四个，由 `NumMatrixRenderer` 自己实现，不随后端变。 */
 const SHELL_METHODS = ['sitData', 'sitValue', 'changeWsData', 'changeWsDataRaw'];
@@ -54,9 +60,9 @@ describe('内置渲染器注册', () => {
     resetRendererRegistry();
   });
 
-  it('三个渲染器都能注册上，没有一条校验失败', () => {
-    expect(registerBuiltinRenderers()).toBe(3);
-    // 失败清单要空 —— 只看返回值会漏掉"注册了 3 个但第 4 个悄悄挂了"的情况。
+  it('五个渲染器都能注册上，没有一条校验失败', () => {
+    expect(registerBuiltinRenderers()).toBe(RENDERER_IDS.length);
+    // 失败清单要空 —— 只看返回值会漏掉"注册了 5 个但第 6 个悄悄挂了"的情况。
     expect(listRegistrationFailures()).toEqual([]);
     RENDERER_IDS.forEach((id) => {
       expect(getRendererDescriptor(id), `${id} 没注册上`).not.toBeNull();
@@ -82,8 +88,8 @@ describe('内置渲染器注册', () => {
   });
 
   it('幂等：重复注册不产生失败记录', () => {
-    expect(registerBuiltinRenderers()).toBe(3);
-    expect(registerBuiltinRenderers()).toBe(3);
+    expect(registerBuiltinRenderers()).toBe(RENDERER_IDS.length);
+    expect(registerBuiltinRenderers()).toBe(RENDERER_IDS.length);
     expect(listRegistrationFailures()).toEqual([]);
   });
 });
@@ -135,10 +141,59 @@ describe('handPoints 描述符', () => {
     expect(getRendererDescriptor('handPoints').optionalMethods).toBeUndefined();
   });
 
-  it('三个渲染器的 id / label 都不重复', () => {
+  it('五个渲染器的 id / label 都不重复', () => {
     const labels = RENDERER_IDS.map((id) => getRendererDescriptor(id).label);
     expect(new Set(labels).size).toBe(RENDERER_IDS.length);
     expect(new Set(RENDERER_IDS).size).toBe(RENDERER_IDS.length);
+  });
+});
+
+describe('两条热力的描述符', () => {
+  beforeEach(() => {
+    resetRendererRegistry();
+    registerBuiltinRenderers();
+  });
+
+  /**
+   * 这两条是「为什么不是同一个渲染器的两个后端」的可执行版本。
+   *
+   * `numMatrix` 的三个后端吃同一份参数、暴露同一组方法（差集在
+   * `optionalMethods` 里说清楚了）。两条热力不是那个关系：方法集不同、参数表不
+   * 重合。要是哪天有人把它们合成一个 id，下面这两条会红。
+   */
+  it('webglHeatmap 四个方法，blobHeatmap 三个 —— 后者没有 changeColor', () => {
+    expect([...getRendererDescriptor('webglHeatmap').methods].sort()).toEqual([
+      'bthClickHandle', 'changeColor', 'sitData', 'sitValue',
+    ]);
+    expect([...getRendererDescriptor('blobHeatmap').methods].sort()).toEqual([
+      'bthClickHandle', 'sitData', 'sitValue',
+    ]);
+  });
+
+  it('两条都只声明 SIT —— 平面图，没有视角也没有框选', () => {
+    ['webglHeatmap', 'blobHeatmap'].forEach((id) => {
+      expect(getRendererDescriptor(id).capabilities, id)
+        .toEqual([RENDERER_CAPABILITIES.SIT]);
+    });
+  });
+
+  it('两条都不声明 optionalMethods —— 各自只有一套实现', () => {
+    ['webglHeatmap', 'blobHeatmap'].forEach((id) => {
+      expect(getRendererDescriptor(id).optionalMethods, id).toBeUndefined();
+    });
+  });
+
+  it('预设都在描述符里，且 normalizeParams 能吃下它们', () => {
+    expect(Object.keys(getRendererDescriptor('webglHeatmap').presets))
+      .toEqual(['bed4096', 'plain']);
+    expect(Object.keys(getRendererDescriptor('blobHeatmap').presets))
+      .toEqual(['default', 'carCol']);
+    ['webglHeatmap', 'blobHeatmap'].forEach((id) => {
+      const { presets, normalizeParams } = getRendererDescriptor(id);
+      Object.entries(presets).forEach(([presetId, preset]) => {
+        expect(() => normalizeParams(preset), `${id}/${presetId}`).not.toThrow();
+      });
+    });
   });
 });
 

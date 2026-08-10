@@ -55,7 +55,10 @@ describe('数值 RGB 采样', () => {
   // 3D 场景要把颜色写进 canvas 的 fillStyle 和精灵图，拿不到 CSS 字符串，
   // 所以需要一条返回数值三元组的通路，两条通路必须给出同一个颜色。
   it('和 CSS 通路给出同一个颜色', () => {
-    ['grayscale', 'viridis', 'thermal', 'inferno', 'iceFire', 'jet'].forEach((id) => {
+    // heatBlobs 也在名单里：它的 CSS 通路是直接拿数值通路的结果拼字符串的
+    // （`sampleHeatBlobs` 调 `sampleHeatBlobsRgb`），那道 sRGB gamma 因此两边
+    // 必然同源。哪天有人只给其中一条加 gamma，这一行会当场红。
+    ['grayscale', 'viridis', 'thermal', 'inferno', 'iceFire', 'jet', 'heatBlobs'].forEach((id) => {
       [0, 0.33, 0.5, 1].forEach((ratio) => {
         const [red, green, blue] = sampleColormapRgb(id, ratio);
         expect(sampleColormap(id, ratio)).toBe(`rgb(${red} ${green} ${blue})`);
@@ -150,8 +153,12 @@ describe('jet 配色', () => {
 
   it('排在既有六条之后，不挪动它们的顺序', () => {
     // 画布配置器的配色下拉直接遍历 COLORMAPS，插在中间会让用户的下拉顺序变。
+    // `heatBlobs` 是随 `webglHeatmap` 进包时追加的第八条（那条 8 段色带原先只以
+    // GLSL 的形式活在着色器里，没有 JS 侧的对应物）—— 同样是**追加在末尾**，
+    // 前七条一个没动。
     expect(COLORMAPS.map((item) => item.id)).toEqual([
       'classic', 'thermal', 'viridis', 'inferno', 'grayscale', 'iceFire', 'jet',
+      'heatBlobs',
     ]);
   });
 });

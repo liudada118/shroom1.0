@@ -9,7 +9,7 @@
 | 跑在哪 | Node（Electron 主进程侧） | 浏览器（`/core` 也可裸 Node） |
 | 模块格式 | CommonJS | ESM |
 | 最短路径 | `npm run sdk:quickstart -- --mock` | `cd sdk/frontend/example && npm i && npm run dev` |
-| 文档 | [`backend/README.md`](backend/README.md) | `npm run sdk:frontend-docs` → **在线可预览文档站**，10 页 |
+| 文档 | `npm run sdk:backend-docs` → **在线可预览文档站**，10 页 | `npm run sdk:frontend-docs` → **在线可预览文档站**，12 页 |
 
 两个都是 `private: true`，不发公共 registry；分发走 `file:` 依赖或 `npm pack` tarball。
 主仓自己就是第一个消费者（根 `package.json` 装 `@shroom/backend`，`client/package.json`
@@ -17,8 +17,12 @@
 
 ```bash
 npm run sdk:quickstart -- --mock    # 后端：串口→采集→导出 CSV，没硬件也能跑完
-npm run sdk:frontend-docs           # 前端：文档站，讲解 + 活预览 + 「显示代码」
+npm run sdk:backend-docs            # 后端：文档站，讲解 + 活预览 + 「显示代码」
+npm run sdk:frontend-docs           # 前端：同一套做法的另一个站
 ```
+
+两个站的表格**都从真代码读**，不是手抄的 —— 改一个常量、加一份协议预设、加一个线序函数，
+对应的表格自己就变。这是它们比 README 值钱的地方。
 
 ---
 
@@ -36,7 +40,8 @@ npm run sdk:frontend-docs           # 前端：文档站，讲解 + 活预览 + 
 
 **要画画面** → `@shroom/frontend/react`，三行出画面。
 
-后端包的十二个入口、依赖分层、已知妥协，全在 [`backend/README.md`](backend/README.md)。
+后端包的十二个入口、依赖分层、已知妥协，全在 [`backend/README.md`](backend/README.md)，
+或者 `npm run sdk:backend-docs` 打开文档站看能拨的那个版本。
 
 ---
 
@@ -53,7 +58,7 @@ cd frontend/example && npm i && npm run dev     # → 32×32 数字矩阵，游�
 | :--- | :--- | :--- |
 | `@shroom/frontend` | 传输（`SensorClient`）、帧存储（`FrameStore`）、展示系统定义（`DisplayRegistry`），并全量转出 `core` | 无 |
 | `@shroom/frontend/core` | 契约、渲染器注册表、帧管线、配色、阈值、坐标布局 | 无 |
-| `@shroom/frontend/react` | `RendererHost`、`useSceneFrame`、`registerBuiltinRenderers`、`numMatrix`（三后端 `sprite3d` / `canvas2d` / `webgl`，24 条预设）+ `pointGrid` + `handPoints`（手部点云，三条预设，唯一有 `ARTICULATED` 能力的） | peer: react ≥18 + three **≥0.127** |
+| `@shroom/frontend/react` | `RendererHost`、`useSceneFrame`、`registerBuiltinRenderers`、`numMatrix`（三后端 `sprite3d` / `canvas2d` / `webgl`，24 条预设）+ `pointGrid` + `handPoints`（手部点云，三条预设，唯一有 `ARTICULATED` 能力的）+ `webglHeatmap` / `blobHeatmap`（两条斑点热力，后者是唯一不占 WebGL 上下文的） | peer: react ≥18 + three **≥0.127**（`blobHeatmap` 只要 react） |
 | `@shroom/frontend/styles/canvas.css` | 6 行 | 无 |
 
 根出口**刻意不含 `react/`**：一旦含了，`SensorClient` 的裸 Node 消费者（本仓
@@ -75,10 +80,10 @@ registerBuiltinRenderers();
 **想看到画面的，先开文档站**：
 
 ```bash
-npm run sdk:frontend-docs     # 在仓库根上跑，10 页：讲解 + 活预览 + 「显示代码」
+npm run sdk:frontend-docs     # 在仓库根上跑，12 页：讲解 + 活预览 + 「显示代码」
 ```
 
-它比 README 多的不是篇幅，是**不会过期**：契约表、7 条配色、8 条预设、8 条帧通道全部从
+它比 README 多的不是篇幅，是**不会过期**：契约表、8 条配色、五个渲染器的预设、8 条帧通道全部从
 `core` **直接 import 渲染**，每段代码样例用 Vite 的 `?raw` 显示**正在上面那块画面里跑的
 那个文件本身**。README 里的表格是手抄的 —— `RENDERER_METHODS` 改一行，README 不会有任何报错。
 文档站会跟着变。
@@ -103,8 +108,8 @@ npm run sdk:frontend-docs     # 在仓库根上跑，10 页：讲解 + 活预览
 ```bash
 npm test                      # 后端全量测试，39 个文件（含两个包边界不变量）
 npm run sdk:backend-smoke     # 后端包边界守卫，10 项
-npm run sdk:frontend-test     # vitest 217 例
-npm run sdk:frontend-smoke    # 裸 Node 跑一遍前端 core，23 项
+npm run sdk:frontend-test     # vitest 443 例
+npm run sdk:frontend-smoke    # 裸 Node 跑一遍前端 core，32 项
 npm run sdk:quickstart -- --mock
 npm run sdk:serial-demo -- --mock
 npm run sdk:demo              # 需要后端在跑；只读
