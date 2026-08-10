@@ -82,6 +82,7 @@ const SENSOR_GROUPS = [
       { labelKey: 'sensorFast256', value: 'fast256' },
       { labelKey: 'sensorFast1024', value: 'fast1024' },
       { labelKey: 'sensorHumanBody', value: 'humanBody' },
+      { labelKey: 'sensorHumanBodyOptimized', value: 'humanBodyOptimized' },
     ],
   },
 ];
@@ -214,6 +215,10 @@ const SENSOR_MODULES = {
   ],
   humanBody: [
     { value: 'skin', labelKey: 'skin3D' },
+  ],
+  humanBodyOptimized: [
+    { value: 'skin', labelKey: 'skin3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
   ],
 };
 

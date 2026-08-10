@@ -27,6 +27,8 @@ let loadData = ''
 const HUMAN_BODY_COLOR_SLIDER_MAX = 5000
 const HUMAN_BODY_DEFAULT_COLOR = 1555
 const HUMAN_BODY_DEFAULT_SIZE = 31
+const HUMAN_BODY_OPTIMIZED_MATRIX = 'humanBodyOptimized'
+const isHumanBodyMatrixTitle = (matrixName) => ['humanBody', HUMAN_BODY_OPTIMIZED_MATRIX].includes(matrixName)
 const HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES = [1205, 5000]
 const HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES = [20, 60]
 const MINZHEN_NORMAL_DEFAULT_COLOR = 415
@@ -78,6 +80,7 @@ const titleInitConfig = {
   sit: { valueg1: 4.3, valuej1: 1705, valuel1: 11, valuef1: 14, value1: 3.54 },
   humanBody: { valueg1: 2, valuej1: HUMAN_BODY_DEFAULT_COLOR, valuel1: 5, valuef1: 6, value1: 0.72, sizeValue: HUMAN_BODY_DEFAULT_SIZE },
 }
+titleInitConfig[HUMAN_BODY_OPTIMIZED_MATRIX] = { ...titleInitConfig.humanBody }
 titleInitConfig.minzhen__normal = {
   ...titleInitConfig.minzhen,
   valuej1: MINZHEN_NORMAL_DEFAULT_COLOR,
@@ -105,7 +108,7 @@ const matrixNameToType_title = (type) => type === smallBed12BType_title ? type :
 const getColorSliderMax = (matrixName) => {
   if (matrixName === smallBed12BType_title) return SMALL_BED_12B_PRESSURE_COLOR_MAX
   if (isPetCareMatrixTitle(matrixName)) return 5000
-  if (matrixName === 'humanBody') return HUMAN_BODY_COLOR_SLIDER_MAX
+  if (isHumanBodyMatrixTitle(matrixName)) return HUMAN_BODY_COLOR_SLIDER_MAX
   return 1000
 }
 const getColorSliderStep = () => 10
@@ -151,7 +154,7 @@ const getConfig = ({ sensorType, mode }) => {
     }
   }
   const mergedConfig = { ...init, ...result }
-  if (realType === 'humanBody') {
+  if (isHumanBodyMatrixTitle(realType)) {
     if (HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES.includes(Number(mergedConfig.valuej1))) {
       mergedConfig.valuej1 = HUMAN_BODY_DEFAULT_COLOR
     }
@@ -214,7 +217,7 @@ const changeLocalStroage = ({ sensorType, valueType, value, mode }) => {
   if (mode) {
     cacheKeys.push(`${sensorType}__${mode}`)
   }
-  if (!mode || sensorType === 'humanBody') {
+  if (!mode || isHumanBodyMatrixTitle(sensorType)) {
     cacheKeys.push(sensorType)
   }
 
@@ -1223,11 +1226,11 @@ class Title extends React.Component {
     let showInit = false;     // Initial value
     let showHumanTransform = false; // Human model transform
 
-    if (matrixName === 'humanBody' && mode !== 'numoriginal') {
+    if (isHumanBodyMatrixTitle(matrixName) && mode !== 'numoriginal') {
       showSize = true;
       showColor = true;
       showFilter = true;
-      showHumanTransform = true;
+      showHumanTransform = matrixName === 'humanBody';
     } else if (group1.includes(matrixName)) {
       if (mode === 'numoriginal' && ['hand', 'handSinglePoint', minzhenType_title, 'bed4096', 'bed4096num'].includes(matrixName)) {
         // raw data mode: no Gaussian; Gaussian only controls 3D point scenes.
@@ -1370,11 +1373,11 @@ class Title extends React.Component {
               <div className='dataTitle'>{t('size')}</div>
               <Slider
                 min={1}
-                max={matrixName === 'humanBody' ? 200 : 50}
-                step={matrixName === 'humanBody' ? 1 : 0.1}
-                value={matrixName === 'humanBody' ? (this.props.sizeValue ?? HUMAN_BODY_DEFAULT_SIZE) : undefined}
+                max={isHumanBodyMatrixTitle(matrixName) ? 200 : 50}
+                step={isHumanBodyMatrixTitle(matrixName) ? 1 : 0.1}
+                value={isHumanBodyMatrixTitle(matrixName) ? (this.props.sizeValue ?? HUMAN_BODY_DEFAULT_SIZE) : undefined}
                 onChange={(value) => {
-                  if (matrixName === 'humanBody') {
+                  if (isHumanBodyMatrixTitle(matrixName)) {
                     this.props.changeStateData({ sizeValue: value });
                   }
                   changeLocalStroage({ sensorType: matrixName, valueType: 'sizeValue', value, mode: cacheMode });
@@ -1599,6 +1602,7 @@ class Title extends React.Component {
       { label: t('sensorHandSinglePoint'), value: 'handSinglePoint' },
       { label: t('sensorNormal'), value: 'normal' },
       { label: t('sensorHumanBody'), value: 'humanBody' },
+      { label: t('sensorHumanBodyOptimized'), value: HUMAN_BODY_OPTIMIZED_MATRIX },
     ]
 
     const allowedTypes = Array.isArray(this.props.allowedTypes) ? this.props.allowedTypes : [];
@@ -1658,9 +1662,11 @@ class Title extends React.Component {
           value={this.props.matrixName}
           onChange={(e) => {
             this.changeMatrixType(e)
-            this.props.changeStateData({
-              numMatrixFlag: 'normal'
-            })
+            if (!isHumanBodyMatrixTitle(e)) {
+              this.props.changeStateData({
+                numMatrixFlag: 'normal'
+              })
+            }
 
             this.props.wsSendObj({ resetZero: false })
             this.setState({ resetZero: false, dataTime: '' })
@@ -1831,7 +1837,7 @@ class Title extends React.Component {
 
 
 
-        {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'handSinglePoint', 'normal', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'matCol', 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody'].includes(this.props.matrixName) ?
+        {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'handSinglePoint', 'normal', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'matCol', 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody', HUMAN_BODY_OPTIMIZED_MATRIX].includes(this.props.matrixName) ?
           <Select
             defaultValue={this.props.numMatrixFlag}
             style={{ width: 90 }}
@@ -1892,7 +1898,7 @@ class Title extends React.Component {
             ] : this.props.matrixName == 'bed4096' || this.props.matrixName == 'bed4096num' ? [
               { value: 'normal', label: t('modal3D') },
               { value: 'numoriginal', label: t('rawData') },
-            ] : this.props.matrixName == 'humanBody' ? [
+            ] : isHumanBodyMatrixTitle(this.props.matrixName) ? [
               { value: 'skin', label: t('skin3D') },
               { value: 'numoriginal', label: t('rawData') },
             ] : []}

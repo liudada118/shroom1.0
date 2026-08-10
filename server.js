@@ -133,7 +133,7 @@ const getSensorBaudRate = (sensorType) => {
   if (sensorType === SMALL_BED_12B_TYPE) {
     return 1500000;
   }
-  if (sensorType === 'humanBody') {
+  if (['humanBody', 'humanBodyOptimized'].includes(sensorType)) {
     return 1000000;
   }
   return 1000000;
@@ -6730,7 +6730,7 @@ parser.on("data", function (data) {
         pointArr = arrToRealLine(pointArr, [[7, 0], [8, 15]], [[0, 15]], 32)
        } else if (file == 'carY') {
         pointArr = carYLine(pointArr)
-      } else if (file == 'humanBody') {
+      } else if (['humanBody', 'humanBodyOptimized'].includes(file)) {
         // 人体全身：直接透传 1024 字节原始数据，不做线序变换
       }
       pointArr1zeroData = [...pointArr]

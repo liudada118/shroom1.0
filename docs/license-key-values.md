@@ -194,6 +194,7 @@
 | 23 | 精密 | `fast1024` | 32x32高速 |
 | 24 | 精密 | `humanBody` | 人体全身 |
 | 25 | 关怀 | `petCareMini` | mini看护 |
+| 26 | 精密 | `humanBodyOptimized` | 人体全身优化 |
 
 ## numMatrixFlag 模块 Key/Value
 
@@ -214,6 +215,7 @@
 | `handGloveFullPacket` | 触觉手套(整包) | `num`=2D数字<br>`normal`=3D遥操<br>`num3D`=3D数字<br>`numoriginal`=原始数据<br>`skin`=3D皮肤 |
 | `handSinglePoint` | 32*32(检测点) | `normal`=3D模型<br>`numoriginal`=原始数据 |
 | `humanBody` | 人体全身 | `skin`=3D皮肤 |
+| `humanBodyOptimized` | 人体全身优化 | `skin`=3D皮肤<br>`numoriginal`=原始数据 |
 | `jqbed` | 小床监测 | `normal`=3D模型<br>`numoriginal`=原始数据 |
 | `matCol` | 小床褥采集 | `normal`=3D模型<br>`numoriginal`=原始数据（16x10，宽16高10） |
 | `minzhen` | 轮椅 | `normal`=3D模型<br>`numoriginal`=原始数据 |

@@ -738,6 +738,7 @@ graph TD
 
 | 2026-04-27 | Codex | 手套 3D skin 热力图切换为 WebGL 渲染层 | `client/src/components/video/hand.jsx` 将 `hand0205` / `handGlove115200` 的 3D `skin` 模式从 `HeatmapCanvas.changeHeatmap()` CPU 逐帧生成改为 `WebGLCanvas.render()` 生成离屏热力图，再回贴到原有 `CanvasTexture`；同时保留旧 `HeatmapCanvas` 的强度缩放与补边预处理，维持 `ndata1` 数据格式、`sitData/changeColor` 接口和现有贴图链路不变 |
 | 2026-05-26 | Codex | Windows 自动更新安装前退出清理 | `autoUpdater.js` 在 `quitAndInstall()` 前调用主进程清理钩子，`index.js` 统一等待静态服务和后端服务关闭，`server.js` 将串口、WebSocket、数据库和 OneStep 报告 HTTP 服务关闭流程 Promise 化，避免 NSIS 安装器提示旧版 Shroom 无法关闭 |
+| 2026-08-10 | Codex | 人体全身优化真实渲染系统 | 新增 `humanBodyOptimized` 展示系统，迁移 `heatmapAndModal` 的 Gaussian Shader 真实渲染，复用人体 32×32 原始数据协议和 `human3.glb`，支持热力、水晶、线网、点云、叠加、部位视角与原始数据模式。 |
 
 ## 9. 更新日志
 
@@ -1125,6 +1126,8 @@ graph TD
 | 2026-04-17 18:58 | pet-care-height-default-07 | 配置变更 | 仅调整 `petCare` 的高度默认值，将其独立 `value1` 默认参数改为 `0.7`，其他系统默认值保持不变 |
 | 2026-04-17 19:05 | pet-care-chart-reset-fix | 修复缺陷 | 为 `client/src/components/three/hand.jsx` 暴露 `chartReset` ref 方法，修复 `util.js` 中 `petCare` 正常 3D 展示分支调用 `that.com.current.chartReset()` 时的运行时异常 |
 
+| 2026-08-10 | Revise | 新增功能 | 新增授权 key `humanBodyOptimized`（人体全身优化）：前后端沿用人体全身单串口、1000000 baud、1024 点原始帧；新增真实 Gaussian Shader 渲染器并从共享 UV 分区实时计算 400 个模型表面点，支持五种渲染模式、部位视角、配色和参数调节；实时与回放统一接入，原始数据模式复用 `HumanBodyRawData`，左侧压力统计及趋势始终直接来自原始矩阵。生产构建和 Chromium WebGL 实时帧验证通过。 |
+
 *变更类型：`新增功能` / `优化重构` / `修复缺陷` / `配置变更` / `文档更新` / `依赖升级` / `初始化`*
 
 ---
@@ -1161,3 +1164,14 @@ graph TD
 - `smallBedNoAlg` is intentionally excluded from `VITAL_SIGNS_SYSTEM_TYPES` and the `['jqbed', 'smallBed']` Python algorithm timer condition, so it does not call the algorithm package and does not show the vital-signs panel.
 - Raw matrix display and CSV/raw-data handling treat `smallBedNoAlg` like `jqbed` / `smallBed`: 32x32 data is transposed on the raw display/export path to keep the small-bed matrix direction consistent.
 - License configuration exposes `smallBedNoAlg` (`小床检测(数据)`) with `normal` and `numoriginal` module options; the legacy `smallBed` key is not listed as an authorization sensor entry.
+
+## 2026-08-10 人体全身优化展示系统
+
+- 系统显示名为“人体全身优化”，内部 key 为 `humanBodyOptimized`；授权管理、离线兜底传感器清单、标题栏和中英日资源均已注册该 key。
+- 主压力串口为 1 个，波特率 `1000000`；协议沿用 `humanBody` 的 1024 字节 / 32×32 原始压力帧，`server.js` 在协议解析后直接透传，不额外执行线序变换。
+- 实时数据、数据库回放和 CSV 下载继续共用后端标准采集链路；前端 `Home.jsx` 对实时 `sitData` 与回放 `data` 使用同一 `getHumanBodyFrameData()` 归一化入口。
+- 传感器映射复用 `humanBody.jsx` 的 10 个部位索引矩阵和 UV 分区：后背、前胸、左右手臂、左右肩、左右前裤和左右后裤共 400 个逻辑压力点。`HumanBodyOptimized.jsx` 在加载模型后把每个 UV 点通过三角形重心坐标投射到模型表面，不依赖源项目缺失的远端点位 JSON。
+- 渲染组件为 `client/src/components/video/HumanBodyOptimized.jsx`，模型路径为 `client/public/model/human3.glb`。组件使用浮点 `DataTexture` 向 Fragment Shader 传入三维点位和实时归一化压力值，并在模型表面执行 Gaussian falloff。
+- `skin` 模式提供热力、水晶、线网、点云和热力+点云叠加五种展示方式，同时支持扩散半径、热力强度、透明度、配色、背景/模型/点云颜色以及全身、胸、背、手臂、腿部视角缓动切换；`numoriginal` 模式复用 `HumanBodyRawData` 展示原始矩阵。
+- 左侧 Pressure Data / Pressure Area 的总和、平均值、最大值、点数、面积及两条趋势图统一由协议解析后的原始 1024 点矩阵计算，不读取 Shader DataTexture、Gaussian 插值、点云或其它仅用于可视化的数组，因此 `skin` 与 `numoriginal` 切换前后一致。
+- 验证：`npm run build` 通过；Edge/Chromium WebGL 实测成功生成 400 个模型表面点并加载 `human3.glb`。使用 10 Hz 1024 点模拟原始帧验证时，Aside 显示点数 635、平均压力 31.57、最大压力 150、压力总和 20045，五种渲染模式切换无新增控制台错误。

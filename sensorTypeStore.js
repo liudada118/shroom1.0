@@ -80,6 +80,7 @@ const BUILTIN_GROUPS = [
       { label: '32x32高速', value: 'fast1024' },
       { label: '64*64高速', value: 'bed4096num' },
       { label: '人体全身', value: 'humanBody' },
+      { label: '人体全身优化', value: 'humanBodyOptimized' },
     ],
   },
 ];

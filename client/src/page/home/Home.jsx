@@ -44,6 +44,7 @@ import RobotBlueSY from '../../components/video/robotSY'
 import RobotBlueLCF from "../../components/video/robotLCF";
 import RobotBlue0428 from "../../components/video/robot0428";
 import HumanBodyCanvas from '../../components/video/humanBody';
+import HumanBodyOptimized from '../../components/video/HumanBodyOptimized';
 import MatCol from "../../components/three/matCol";
 import CarTq from "../../components/three/carTq";
 import Bed from "../../components/three/Bed";
@@ -411,6 +412,8 @@ const bedArr = ['jqbed', tempFullBedMatrix, ...petCareMatrixArr, 'xiyueReal1', '
 const displayRendererConfigMatrixArr = ['smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed12B', WHOLE_CHAIR_MATRIX, MINZHEN_MATRIX, 'jqbed', ...petCareMatrixArr]
 const HUMAN_BODY_DEFAULT_COLOR = 1555
 const HUMAN_BODY_DEFAULT_SIZE = 31
+const HUMAN_BODY_OPTIMIZED_MATRIX = 'humanBodyOptimized'
+const isHumanBodyMatrix = (matrixName) => ['humanBody', HUMAN_BODY_OPTIMIZED_MATRIX].includes(matrixName)
 const HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES = [1205, 5000]
 const HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES = [20, 60]
 const MINZHEN_NORMAL_DEFAULT_COLOR = 415
@@ -480,6 +483,10 @@ initConfig.humanBody = {
   valuef1: 6,
   value1: 0.72,
   sizeValue: HUMAN_BODY_DEFAULT_SIZE,
+}
+
+initConfig[HUMAN_BODY_OPTIMIZED_MATRIX] = {
+  ...initConfig.humanBody,
 }
 
 initConfig.petCare = {
@@ -584,7 +591,7 @@ const getConfig = ({ sensorType, mode }) => {
       : initConfig['bed']
   const local = getLocalStorageConfig({ sensorType: realType, mode })
   const mergedConfig = { ...init, ...local }
-  if (realType === 'humanBody') {
+  if (isHumanBodyMatrix(realType)) {
     if (HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES.includes(Number(mergedConfig.valuej1))) {
       mergedConfig.valuej1 = HUMAN_BODY_DEFAULT_COLOR
     }
@@ -617,7 +624,7 @@ const getDefaultModeForMatrix = (matrixName, currentMode = "normal") => {
   if (matrixName === MINZHEN_MATRIX) {
     return currentMode === "numoriginal" ? "numoriginal" : "normal";
   }
-  if (matrixName === "humanBody") {
+  if (isHumanBodyMatrix(matrixName)) {
     return currentMode === "numoriginal" ? "numoriginal" : "skin";
   }
   if (matrixName === FULL_PACKET_GLOVE_MATRIX) {
@@ -930,6 +937,45 @@ class Home extends React.Component {
       totalPres: totalPres.toFixed(0),
     });
 
+    return true;
+  }
+
+  syncHumanBodyRawPressureStats = (rawData) => {
+    if (!isHumanBodyMatrix(this.state.matrixName)) {
+      return false;
+    }
+
+    const rawMatrix = getHumanBodyFrameData(rawData);
+    if (!Array.isArray(rawMatrix) || rawMatrix.length < 1024) {
+      return false;
+    }
+
+    const originalFrame = rawMatrix.slice(0, 1024).map((value) => {
+      const numericValue = Number(value);
+      return Number.isFinite(numericValue) ? numericValue : 0;
+    });
+    const activeValues = originalFrame.filter((value) => value > 0);
+    const point = activeValues.length;
+    const totalPres = activeValues.reduce((sum, value) => sum + value, 0);
+    const maxPres = activeValues.length ? findMax(activeValues) : 0;
+    const meanPres = totalPres / (point || 1);
+    const pressureTrend = this.humanBodyPressureTrend || (this.humanBodyPressureTrend = []);
+    const areaTrend = this.humanBodyAreaTrend || (this.humanBodyAreaTrend = []);
+
+    if (pressureTrend.length >= 20) pressureTrend.shift();
+    if (areaTrend.length >= 20) areaTrend.shift();
+    pressureTrend.push(totalPres);
+    areaTrend.push(point);
+
+    this.data.current?.changeData({
+      meanPres: meanPres.toFixed(2),
+      maxPres,
+      point,
+      area: point,
+      totalPres: totalPres.toFixed(0),
+    });
+    this.data.current?.handleCharts(pressureTrend, Math.max(1, findMax(pressureTrend)));
+    this.data.current?.handleChartsArea(areaTrend, Math.max(1, findMax(areaTrend)));
     return true;
   }
 
@@ -1488,8 +1534,9 @@ class Home extends React.Component {
         { arr: allbody, width: 32, height: 32, order: 2, interp1: 1, interp2: 1 },
         { arr: body, width: 32, height: 32, order: 2, interp1: 1, interp2: 1 },
       ])
-      if (this.state.matrixName === 'humanBody') {
+      if (isHumanBodyMatrix(this.state.matrixName)) {
         const humanBodySource = allbody.some((value) => value > 0) ? allbody : body
+        this.syncHumanBodyRawPressureStats(humanBodySource)
 
         if (this.state.numMatrixFlag === 'numoriginal') {
           this.com.current?.changeHumanBodyData?.(humanBodySource)
@@ -1841,8 +1888,9 @@ class Home extends React.Component {
       //   wsPointDataSit = yanfeng10sit(wsPointDataSit)
       // }
       // console.log(fingerArr)
-      if (this.state.matrixName === 'humanBody') {
+      if (isHumanBodyMatrix(this.state.matrixName)) {
         const humanBodySource = getHumanBodyFrameData(wsPointData)
+        this.syncHumanBodyRawPressureStats(humanBodySource)
         if (this.state.numMatrixFlag === 'numoriginal') {
           this.com.current?.changeHumanBodyData?.(humanBodySource)
         } else {
@@ -4133,7 +4181,7 @@ class Home extends React.Component {
                         changeSelect={this.changeSelect} />
                     </CanvasCom>
                     :
-                    this.state.numMatrixFlag == "numoriginal" && this.state.matrixName == 'humanBody' ?
+                    this.state.numMatrixFlag == "numoriginal" && isHumanBodyMatrix(this.state.matrixName) ?
                     <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
                       <HumanBodyRawData
                         ref={this.com}
@@ -4157,6 +4205,20 @@ class Home extends React.Component {
                         handleChartsBody1={this.handleChartsBody1.bind(this)}
                         changeStateData={this.changeStateData}
                         changeSelect={this.changeSelect} />
+                    </CanvasCom>
+                    :
+                    this.state.numMatrixFlag == "skin" && this.state.matrixName == HUMAN_BODY_OPTIMIZED_MATRIX ?
+                    <CanvasCom matrixName={this.state.matrixName} local={this.state.local}>
+                      <HumanBodyOptimized
+                        ref={this.com}
+                        data={this.data}
+                        local={this.state.local}
+                        renderOptions={{
+                          max: this.state.valuej1,
+                          size: this.state.sizeValue ?? HUMAN_BODY_DEFAULT_SIZE,
+                          filter: this.state.valuef1,
+                        }}
+                      />
                     </CanvasCom>
                     :
 

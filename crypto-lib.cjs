@@ -147,6 +147,7 @@ const SENSOR_GROUPS = [
       { label: "座椅采集", value: "sitCol" },
       { label: "小床褥采集", value: "matCol" },
       { label: "小床睡姿采集", value: "matColPos" },
+      { label: "人体全身优化", value: "humanBodyOptimized" },
     ],
   },
 ];

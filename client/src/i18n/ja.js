@@ -145,6 +145,7 @@ export const japaneseTranslations = Object.freeze({
   "sensorNormalFast": compare("32*32 高速测试", "32×32高速テスト"),
   "sensorNormal": compare("正常测试", "通常テスト"),
   "sensorHumanBody": compare("人体全身", "全身"),
+  "sensorHumanBodyOptimized": compare("人体全身优化", "全身（最適化）"),
   "sensorWholeChair": compare("整椅展示", "椅子全体"),
   "sensorMinzhen": compare("轮椅", "車椅子"),
   "sensorMatCol": compare("小床褥监测", "スマートマットレス"),
