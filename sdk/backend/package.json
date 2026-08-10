@@ -1,0 +1,71 @@
+{
+  "name": "@shroom/backend",
+  "version": "0.1.0",
+  "description": "压力传感后端 SDK：串口开关与切帧、协议解码、传感器注册表、线序与矩阵处理、采集入库、CSV 导出",
+  "private": true,
+  "license": "UNLICENSED",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./contract": "./contract/index.js",
+    "./processing": "./processing/index.js",
+    "./protocol": "./protocol/index.js",
+    "./sensors": "./sensors/index.js",
+    "./telemetry": "./telemetry/index.js",
+    "./collection": "./collection/index.js",
+    "./serial": "./serial/index.js",
+    "./storage": "./storage/index.js",
+    "./export": "./export/index.js",
+    "./client": "./client/index.js",
+    "./session": "./session/index.js",
+    "./logger": "./logger.js",
+    "./package.json": "./package.json",
+    "./*": "./*"
+  },
+  "files": [
+    "index.js",
+    "logger.js",
+    "contract",
+    "processing",
+    "protocol",
+    "sensors",
+    "telemetry",
+    "collection",
+    "serial",
+    "storage",
+    "export",
+    "client",
+    "session",
+    "examples",
+    "scripts",
+    "README.md",
+    "!**/*.test.js"
+  ],
+  "scripts": {
+    "smoke": "node scripts/smoke-backend.js"
+  },
+  "peerDependencies": {
+    "@serialport/parser-delimiter": ">=12",
+    "better-sqlite3": ">=9",
+    "csv-writer": ">=1.6",
+    "serialport": ">=12",
+    "ws": ">=8"
+  },
+  "peerDependenciesMeta": {
+    "@serialport/parser-delimiter": {
+      "optional": true
+    },
+    "better-sqlite3": {
+      "optional": true
+    },
+    "csv-writer": {
+      "optional": true
+    },
+    "serialport": {
+      "optional": true
+    },
+    "ws": {
+      "optional": true
+    }
+  }
+}

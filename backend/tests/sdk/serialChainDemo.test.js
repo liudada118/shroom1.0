@@ -3,8 +3,8 @@ const {
   buildMockFrame,
   parseArgs,
   runMock,
-} = require('../../../sdk/examples/serial-chain-demo');
-const { ShroomSensorSDK } = require('../../../sdk');
+} = require('@shroom/backend/examples/serial-chain-demo.js');
+const { ShroomSensorSDK } = require('@shroom/backend/session');
 
 async function run() {
   const args = parseArgs([

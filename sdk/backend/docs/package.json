@@ -1,0 +1,25 @@
+{
+  "name": "@shroom/backend-docs",
+  "version": "0.0.0",
+  "description": "@shroom/backend 在线文档站：文档 + 活预览 + 看源码同源",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "node render-check.mjs",
+    "click-check": "node click-check.mjs"
+  },
+  "dependencies": {
+    "@shroom/backend": "file:..",
+    "buffer": "^6.0.3",
+    "prismjs": "^1.29.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.0",
+    "vite": "^5.4.21"
+  }
+}

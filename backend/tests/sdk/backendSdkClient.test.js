@@ -3,7 +3,7 @@ const { EventEmitter } = require('events');
 const {
   BackendSdkClient,
   normalizeHttpResult,
-} = require('../../../sdk/src/backend/BackendSdkClient');
+} = require('@shroom/backend/client/BackendSdkClient.js');
 
 function createResponse(payload, { ok = true, status = 200 } = {}) {
   return {

@@ -8,12 +8,18 @@
   },
   "scripts": {
     "test": "node backend/tests/run-tests.js",
-    "sdk:demo": "node sdk/examples/backend-sdk-demo.js",
-    "sdk:serial-demo": "node sdk/examples/serial-chain-demo.js",
+    "sdk:demo": "node sdk/backend/examples/backend-sdk-demo.js",
+    "sdk:serial-demo": "node sdk/backend/examples/serial-chain-demo.js",
+    "sdk:quickstart": "node sdk/backend/examples/quickstart.js",
+    "sdk:backend-smoke": "node sdk/backend/scripts/smoke-backend.js",
     "sdk:frontend-test": "npm --prefix sdk/frontend test",
     "sdk:frontend-smoke": "node sdk/frontend/scripts/smoke-core.mjs",
     "sdk:frontend-docs": "npm --prefix sdk/frontend/docs run dev",
     "sdk:frontend-docs-build": "npm --prefix sdk/frontend/docs run build",
+    "sdk:backend-docs": "npm --prefix sdk/backend/docs run dev",
+    "sdk:backend-docs-build": "npm --prefix sdk/backend/docs run build",
+    "sdk:backend-docs-check": "npm --prefix sdk/backend/docs run check",
+    "sdk:backend-docs-click": "npm run sdk:backend-docs-build && node sdk/backend/docs/click-check.mjs",
     "start": "electron-forge start",
     "build-client": "npm --prefix client run build",
     "build-python-runtime": "node scripts/build-python-runtime.js",
@@ -36,6 +42,8 @@
       "packagerConfig": {
         "icon": "./assets/icons/logo",
         "asar": true,
+        "_derefSymlinks": "@shroom/backend 是 file: 依赖，node_modules 下是软链。packager 18.3.6 不兜 derefSymlinks 的默认值，不显式打开会去重建软链，Windows 非管理员直接 EPERM。",
+        "derefSymlinks": true,
         "extraResource": [
           "./build",
           "./pack-resources/db",
@@ -53,6 +61,9 @@
           "^/client($|/)",
           "^/docs($|/)",
           "^/sdk/frontend/(example|docs)($|/)",
+          "^/sdk/backend/docs($|/)",
+          "^/dist($|/)",
+          "^/out($|/)",
           "(^|[/\\\\])config\\.txt$"
         ]
       },
@@ -99,6 +110,7 @@
       "!build/**",
       "!sdk/frontend/example/**",
       "!sdk/frontend/docs/**",
+      "!sdk/backend/docs/**",
       "!python/**",
       "!dist/**",
       "!out/**",
@@ -217,6 +229,7 @@
   },
   "dependencies": {
     "@serialport/parser-delimiter": "^13.0.0",
+    "@shroom/backend": "file:sdk/backend",
     "better-sqlite3": "^11.10.0",
     "cors": "^2.8.6",
     "crypto-js": "^4.2.0",

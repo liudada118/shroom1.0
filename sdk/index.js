@@ -1,45 +1,16 @@
-const { ShroomSensorSDK } = require('./src/ShroomSensorSDK');
-const { ProtocolRegistry } = require('./src/protocol/ProtocolRegistry');
-const { CaptureStore } = require('./src/storage/CaptureStore');
-const { MemoryCaptureStore } = require('./src/storage/MemoryCaptureStore');
-const { CsvExporter } = require('./src/export/CsvExporter');
-const { ZeroCalibrator } = require('./src/processing/ZeroCalibrator');
-const { ReplayService } = require('./src/replay/ReplayService');
-const { BackendCommandRouter } = require('./src/backend/BackendCommandRouter');
-const { BackendSdkClient } = require('./src/backend/BackendSdkClient');
-const { LicenseService } = require('./src/license/LicenseService');
-const { PathService } = require('./src/config/PathService');
-const { ReportService } = require('./src/report/ReportService');
-const { LineOrderRegistry } = require('./src/line/LineOrderRegistry');
-const { createProjectLineOrderRegistry, PROJECT_LINE_ORDER_NAMES } = require('./src/line/projectLineOrders');
-const { listBackendOperations, BACKEND_OPERATIONS } = require('./src/backend/backendOperations');
-const {
-  DEFAULT_SENSOR_PROFILES,
-  STANDARD_FRAME_DELIMITER,
-  SMALL_BED_12B_FRAME_TAIL,
-  getDefaultBaudRate,
-} = require('./src/profiles');
-
-module.exports = {
-  ShroomSensorSDK,
-  ProtocolRegistry,
-  CaptureStore,
-  MemoryCaptureStore,
-  CsvExporter,
-  ZeroCalibrator,
-  ReplayService,
-  BackendCommandRouter,
-  BackendSdkClient,
-  LicenseService,
-  PathService,
-  ReportService,
-  LineOrderRegistry,
-  createProjectLineOrderRegistry,
-  PROJECT_LINE_ORDER_NAMES,
-  BACKEND_OPERATIONS,
-  listBackendOperations,
-  DEFAULT_SENSOR_PROFILES,
-  STANDARD_FRAME_DELIMITER,
-  SMALL_BED_12B_FRAME_TAIL,
-  getDefaultBaudRate,
-};
+/**
+ * 兼容壳：后端 SDK 已经打成可安装的包 `@shroom/backend`，代码在 `sdk/backend/`。
+ *
+ * 这里保留只是因为 `backend/tests/sdk/serialChainDemo.test.js` 和一部分脚本
+ * 还写着 `require('../../../sdk')`。新代码请直接写包名：
+ *
+ * ```js
+ * const { ShroomSensorSDK } = require('@shroom/backend/session');
+ * const { BackendSdkClient } = require('@shroom/backend/client');
+ * ```
+ *
+ * 用 `module.exports =` 整体转出而不是 `{...}` 展开 —— 根出口对
+ * serial / storage / export / client / session 用的是懒加载 getter，
+ * 展开会把 4 个原生 peer 依赖全部提前加载一遍（见 `sdk/backend/index.js` 顶部）。
+ */
+module.exports = require('@shroom/backend');

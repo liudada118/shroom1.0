@@ -1,0 +1,468 @@
+/**
+ * styles.css - 文档站自己的样式
+ *
+ * 从前端文档站（`sdk/frontend/docs/src/styles.css`）搬过来的，配色变量一致，
+ * 两个站看起来是一套。改动集中在两处：
+ *
+ * 1. **舞台不再是黑底画布**。前端站的 `.docs-stage` 是给 WebGL 画布用的（纯黑 +
+ *    绝对定位的缩放层），后端站的活预览是表格和 CSS grid 画的矩阵，
+ *    所以改成随内容撑开的普通块（`.docs-stage-flow`）。
+ * 2. **多了矩阵热力图和数据表的样式**（`.docs-matrix*` / `.docs-datatable`）——
+ *    后端这侧的"画面"就是它们。
+ */
+
+:root {
+  --bg: #0f1115;
+  --bg-raise: #171a21;
+  --bg-code: #12141a;
+  --line: #262b36;
+  --text: #d7dbe3;
+  --text-dim: #8d95a5;
+  --accent: #6aa9ff;
+  --warn: #ffb454;
+  --bad: #ff6b6b;
+  --ok: #6ee7a8;
+  --mono: 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; margin: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.75 -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+}
+
+code, pre {
+  font-family: 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace;
+}
+
+/* ── 站壳 ─────────────────────────────────────────────────────────── */
+
+.docs-shell {
+  display: grid;
+  grid-template-columns: 268px minmax(0, 1fr);
+  height: 100%;
+}
+
+.docs-nav {
+  overflow-y: auto;
+  padding: 22px 18px 32px;
+  border-right: 1px solid var(--line);
+  background: #0c0e12;
+}
+
+.docs-brand {
+  display: block;
+  margin-bottom: 22px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.docs-brand strong { font-size: 16px; }
+
+.docs-brand-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.docs-nav-group h2 {
+  margin: 18px 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+.docs-nav-group ul { margin: 0; padding: 0; list-style: none; }
+
+.docs-nav-group a {
+  display: block;
+  padding: 5px 10px;
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.docs-nav-group a:hover { background: var(--bg-raise); color: var(--text); }
+
+.docs-nav-group a.is-active {
+  background: rgba(106, 169, 255, 0.13);
+  color: var(--accent);
+}
+
+.docs-nav-foot {
+  margin-top: 26px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-dim);
+}
+
+.docs-main {
+  overflow-y: auto;
+  padding: 34px 40px 96px;
+}
+
+.docs-status { color: var(--text-dim); }
+.docs-status-error { color: var(--bad); }
+
+/* ── 正文排版（Prose.jsx） ────────────────────────────────────────── */
+
+.docs-prose { max-width: 860px; }
+
+.docs-prose h1 {
+  margin: 0 0 6px;
+  font-size: 26px;
+  line-height: 1.4;
+}
+
+.docs-prose .docs-lede {
+  margin: 0 0 28px;
+  color: var(--text-dim);
+  font-size: 15px;
+}
+
+.docs-prose h2 {
+  margin: 38px 0 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 18px;
+}
+
+.docs-prose h3 { margin: 24px 0 8px; font-size: 15px; }
+
+.docs-prose p, .docs-prose li { color: var(--text); }
+
+.docs-prose a { color: var(--accent); }
+
+.docs-prose code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-code);
+  border: 1px solid var(--line);
+  font-size: 12.5px;
+}
+
+.docs-prose table {
+  width: 100%;
+  margin: 14px 0;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+
+.docs-prose th, .docs-prose td {
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.docs-prose th { background: var(--bg-raise); font-weight: 600; }
+
+.docs-prose td code { white-space: nowrap; }
+
+.docs-note {
+  margin: 16px 0;
+  padding: 12px 14px;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  background: var(--bg-raise);
+  font-size: 14px;
+}
+
+.docs-note-warn { border-left-color: var(--warn); }
+.docs-note-bad { border-left-color: var(--bad); }
+.docs-note strong { display: block; margin-bottom: 4px; }
+
+/* ── 代码块（CodeBlock.jsx） ──────────────────────────────────────── */
+
+.docs-code {
+  margin: 0;
+  padding: 14px 16px;
+  overflow: auto;
+  max-height: 560px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-code);
+  font-size: 12.5px;
+  line-height: 1.65;
+  tab-size: 2;
+}
+
+.docs-code-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.docs-code-path { font-family: 'SFMono-Regular', Menlo, Consolas, monospace; }
+
+/* prism 的暗色配色，就地写而不引 prism 的主题 css —— 省一个跨包路径 */
+.docs-code .token.comment { color: #5d6675; font-style: italic; }
+.docs-code .token.string { color: #9ad48b; }
+.docs-code .token.number, .docs-code .token.boolean { color: #e0a35c; }
+.docs-code .token.keyword, .docs-code .token.control-flow { color: #c792ea; }
+.docs-code .token.function { color: #7cb7ff; }
+.docs-code .token.operator, .docs-code .token.punctuation { color: #98a0af; }
+.docs-code .token.tag { color: #ff8b8b; }
+.docs-code .token.attr-name { color: #ffcb6b; }
+.docs-code .token.attr-value { color: #9ad48b; }
+
+/* ── 卡片（DemoCard.jsx） ─────────────────────────────────────────── */
+
+.docs-card {
+  margin: 20px 0 28px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-raise);
+  overflow: hidden;
+}
+
+.docs-card-head {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.docs-card-title { font-size: 14px; font-weight: 600; }
+.docs-card-sub { font-size: 12px; color: var(--text-dim); }
+
+.docs-card-toggle {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-code);
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.docs-card-toggle:hover { color: var(--text); border-color: var(--accent); }
+
+.docs-card-source { padding: 12px 14px; border-top: 1px solid var(--line); }
+
+.docs-card-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.docs-field { display: flex; align-items: center; gap: 6px; }
+.docs-field > span:first-child { color: var(--text-dim); }
+
+.docs-field select, .docs-field input[type='number'] {
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg-code);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+/* ── 舞台（Live.jsx） ─────────────────────────────────────────────── */
+
+.docs-stage {
+  position: relative;
+  overflow: hidden;
+}
+
+/* 后端站的舞台：随内容撑开，不是固定高的黑底画布。
+   前端站那套「视口尺寸 + transform 缩放」在这里没有对应物，见 Live.jsx 文件头。 */
+.docs-stage-flow {
+  background: var(--bg-code);
+  border-top: 1px solid var(--line);
+}
+
+.docs-stage-body {
+  padding: 14px 16px 26px;
+}
+
+.docs-stage-hint {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  z-index: 2;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.62);
+  color: var(--text-dim);
+  font-size: 11px;
+  pointer-events: none;
+}
+
+/* ── 卡片墙（预设一览等） ────────────────────────────────────────── */
+
+.docs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+  margin: 18px 0 8px;
+}
+
+.docs-tile {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-raise);
+  overflow: hidden;
+}
+
+.docs-tile-cap {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+
+.docs-tile-cap span:last-child { color: var(--text-dim); }
+
+.docs-badge {
+  display: inline-block;
+  margin-right: 5px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: rgba(106, 169, 255, 0.14);
+  color: var(--accent);
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+
+.docs-badge-warn { background: rgba(255, 180, 84, 0.14); color: var(--warn); }
+.docs-badge-ok { background: rgba(110, 231, 168, 0.14); color: var(--ok); }
+
+/* ── 矩阵热力图（后端站的「画面」） ──────────────────────────────────
+   后端包没有渲染器，但线序 / 解码 / 清零的效果必须看得见。这里用 CSS grid
+   画一张纯 DOM 的热力图：每个点一个 div，背景色由值映射。
+   刻意不引 canvas，也不引前端包的渲染器 —— 前者要写一套绘制代码，后者会让
+   「后端文档站」偷偷依赖前端包，两个包的边界在文档层就糊了。 */
+
+.docs-matrix {
+  display: grid;
+  gap: 1px;
+  width: 100%;
+  max-width: 420px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  aspect-ratio: 1 / 1;
+}
+
+.docs-matrix-cell { border-radius: 1px; }
+
+.docs-matrix-pair {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: flex-start;
+}
+
+.docs-matrix-panel { flex: 1 1 260px; min-width: 0; }
+
+.docs-matrix-cap {
+  margin-bottom: 6px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.docs-matrix-cap strong { color: var(--text); }
+
+/* ── 数据表（从真代码读出来的那些） ─────────────────────────────── */
+
+.docs-datatable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.docs-datatable th,
+.docs-datatable td {
+  padding: 5px 9px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.docs-datatable th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-raise);
+  color: var(--text-dim);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.docs-datatable tbody tr:hover { background: rgba(106, 169, 255, 0.06); }
+
+.docs-datatable tbody tr.is-active { background: rgba(106, 169, 255, 0.13); }
+
+.docs-datatable td code { font-size: 11.5px; }
+
+.docs-scroll {
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+/* ── 键值对小卡（选中一行后的详情） ─────────────────────────────── */
+
+.docs-kv {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 14px;
+  font-size: 12.5px;
+}
+
+.docs-kv dt { color: var(--text-dim); }
+.docs-kv dd { margin: 0; }
+
+/* ── 结果徽标（真 / 假、通过 / 拒绝） ───────────────────────────── */
+
+.docs-verdict {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.docs-verdict-true { background: rgba(110, 231, 168, 0.15); color: var(--ok); }
+.docs-verdict-false { background: rgba(255, 107, 107, 0.15); color: var(--bad); }
+
+.docs-mono-out {
+  max-height: 160px;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

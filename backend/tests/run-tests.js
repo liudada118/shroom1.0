@@ -24,6 +24,7 @@ const testFiles = [
   'backend/tests/http/serialProtocolsApi.test.js',
   'backend/tests/http/commandApi.test.js',
   'backend/tests/ws/webSocketCommandRouter.test.js',
+  'backend/tests/sdk/backendPackageInvariants.test.js',
   'backend/tests/sdk/backendSdkClient.test.js',
   'backend/tests/sdk/frontendDisplayRegistry.test.js',
   'backend/tests/sdk/displayProfileRuntime.test.js',

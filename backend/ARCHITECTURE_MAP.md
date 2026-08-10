@@ -2,6 +2,14 @@
 
 这份文档只回答“数据怎么走、改哪里、哪些是新架构、哪些是 legacy”。
 
+> **2026-08-06：下面提到的一批目录，实现已经搬进可安装包 `@shroom/backend`（`sdk/backend/`）。**
+> `backend/` 里对应位置是一行转出壳，所以路径和 require 全部照旧能用，打开就知道搬去哪了。
+> 搬走的是：`contracts/`、`processing/`（除 `webStaticServer.js`）、`sensors/` 的注册表和 5 个
+> 协议插件、`serial/` 的 helper/manager/parser/filter 和 `protocols/`、`services/collection/`、
+> `db/dbHelper.js`、`export/csvHelper.js`、`channel/channelBus.js`、
+> `normalizers/telemetryNormalizer.js`、`common/logger.js`、`displaySystems/displaySystemProtocol.js`。
+> 包总览见 `sdk/backend/README.md`。
+
 ## 核心数据流
 
 ```mermaid
@@ -51,6 +59,12 @@ flowchart LR
 | `displaySystems/` | 配置驱动展示系统的 manifest 发现、校验、runtime definition 生成。 |
 | `contracts/` | SDK/HTTP/WebSocket 对外契约说明。 |
 | `runtime/` | 旧变量到新 runtime store 的过渡状态容器。 |
+
+上表里 `serial/`、`sensors/`、`processing/`、`contracts/` 以及 `services/collection/` 的实现
+现在住在 `@shroom/backend`（`sdk/backend/`），`backend/` 侧只剩转出壳。剩下真正还在
+`backend/` 里的是**应用装配和 legacy 兼容**：`server/`、`ws/`、`displaySystems/` 运行时、
+`services/` 的 history / playback / realtime / websocket / lifecycle / petcare / export，
+以及 `sensors/runtime/`。
 
 ## 新架构
 

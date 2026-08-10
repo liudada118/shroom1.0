@@ -1,5 +1,34 @@
 # 后端阅读入口
 
+## 2026-08-06 后端能力拆成可安装包 `@shroom/backend`
+
+串口、协议、传感器注册表、线序/矩阵/压力计算、采集入库、CSV 导出这几层，
+**实现已经不在 `backend/` 里了**，搬进了 `sdk/backend/`，包名 `@shroom/backend`，
+根 `package.json` 用 `"@shroom/backend": "file:sdk/backend"` 装。
+
+| 想看什么 | 现在在哪 |
+| :--- | :--- |
+| 包总览、十二个入口、依赖分层、已知妥协 | `sdk/backend/README.md` |
+| 新项目最短可跑路径（串口→采集→导出 CSV） | `sdk/backend/examples/quickstart.js` / `npm run sdk:quickstart -- --mock` |
+| 对外契约（路由表、命令信封） | `sdk/backend/contract/` |
+| 线序、矩阵、压力、插值、平滑、通用数学 | `sdk/backend/processing/` |
+| protocol schema 与串口协议预设 | `sdk/backend/protocol/` |
+| 传感器注册表与 5 个协议插件 | `sdk/backend/sensors/` |
+| 串口生命周期与切帧 | `sdk/backend/serial/` |
+| 采集限流、磁盘保护、入库队列 | `sdk/backend/collection/` |
+| SQLite 与 CSV | `sdk/backend/storage/` `sdk/backend/export/` |
+| 包边界守卫 | `npm run sdk:backend-smoke` |
+| 仓库级不变量（两处重复的漂移守卫） | `backend/tests/sdk/backendPackageInvariants.test.js` |
+
+**`backend/` 里对应位置留的是一行转出壳**，例如 `backend/serial/serialManager.js` 现在只有
+`module.exports = require('@shroom/backend/serial/serialManager.js')`。所以旧的 require 路径
+全部照旧能用，下面各节的入口表也仍然找得到东西 —— 打开壳就看到搬去哪了。
+新代码请直接写包名。
+
+没搬的（搬过去别人也用不了）：`services/export/csvDownloadService.js`、
+`serial/serialPortOrchestrator.js`、`processing/webStaticServer.js`、`sensors/runtime/*`、
+`services/history|playback`、`server/*`。原因见 `sdk/backend/README.md` 的「没进包的东西」。
+
 ## 2026-08-03 串口协议预设库
 
 | 想看什么 | 入口 |
