@@ -8,14 +8,11 @@ import React, {
   useRef,
   useState,
 } from "react";
-import {
-  HUMAN_BODY_SENSOR_PARTS,
-  HUMAN_BODY_UV_CANVAS_SIZE,
-} from "./humanBody";
+import { HUMAN_BODY_SENSOR_PARTS } from "./humanBody";
 
 const MODEL_URL = "./model/human3.glb";
-const MAX_SHADER_SENSORS = 512;
-const UV_BUCKET_COUNT = 64;
+const SENSOR_LAYOUT_URL = "./model/sensor_canvas_positions.json";
+const MAX_SHADER_SENSORS = 1200;
 const DEFAULT_OPTIONS = { max: 1555, size: 31, filter: 6 };
 
 const BG_PRESETS = ["#0a0a0f", "#10152b", "#0f2027", "#000000"];
@@ -107,135 +104,105 @@ const easeInOutCubic = (value) => (
   value < 0.5 ? 4 * value * value * value : 1 - Math.pow(-2 * value + 2, 3) / 2
 );
 
-const isFiniteVector = (vector) => (
-  Number.isFinite(vector.x) && Number.isFinite(vector.y) && Number.isFinite(vector.z)
-);
+const REGION_TO_PART_KEY = {
+  "前胸": "chest",
+  "后背": "back",
+  "右肩": "rightShoulder",
+  "右手臂": "rightArm",
+  "左肩": "leftShoulder",
+  "左手臂": "leftArm",
+};
 
-function triangleBarycentric2D(point, a, b, c) {
-  const denominator = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
-  if (Math.abs(denominator) < 1e-8) return null;
-  const wa = ((b.y - c.y) * (point.x - c.x) + (c.x - b.x) * (point.y - c.y)) / denominator;
-  const wb = ((c.y - a.y) * (point.x - c.x) + (a.x - c.x) * (point.y - c.y)) / denominator;
-  const wc = 1 - wa - wb;
-  return wa >= -0.002 && wb >= -0.002 && wc >= -0.002 ? [wa, wb, wc] : null;
+const PART_BY_KEY = new Map(HUMAN_BODY_SENSOR_PARTS.map((part) => [part.key, part]));
+
+function resolvePartKey(sensor) {
+  if (sensor.region === "前裤") {
+    return sensor.placementSide === "negative-x" ? "frontPantsLeft" : "frontPantsRight";
+  }
+  if (sensor.region === "后裤") {
+    return sensor.placementSide === "negative-x" ? "backPantsLeft" : "backPantsRight";
+  }
+  return REGION_TO_PART_KEY[sensor.region];
 }
 
-function createUvSurfaceLookup(model) {
-  const buckets = Array.from({ length: UV_BUCKET_COUNT * UV_BUCKET_COUNT }, () => []);
-  const vertices = [];
-
-  const bucketIndex = (x, y) => {
-    const bx = Math.min(UV_BUCKET_COUNT - 1, Math.max(0, Math.floor(x * UV_BUCKET_COUNT)));
-    const by = Math.min(UV_BUCKET_COUNT - 1, Math.max(0, Math.floor(y * UV_BUCKET_COUNT)));
-    return by * UV_BUCKET_COUNT + bx;
-  };
-
-  model.updateMatrixWorld(true);
-  model.traverse((child) => {
-    if (!child.isMesh || !child.geometry?.attributes?.position || !child.geometry?.attributes?.uv) return;
-    const geometry = child.geometry;
-    const position = geometry.attributes.position;
-    const normal = geometry.attributes.normal;
-    const uv = geometry.attributes.uv;
-    const index = geometry.index;
-    const triangleCount = index ? index.count / 3 : position.count / 3;
-
-    for (let triangleIndex = 0; triangleIndex < triangleCount; triangleIndex += 1) {
-      const ids = [0, 1, 2].map((offset) => (
-        index ? index.getX(triangleIndex * 3 + offset) : triangleIndex * 3 + offset
-      ));
-      const triangle = {
-        uv: ids.map((id) => new THREE.Vector2(uv.getX(id), uv.getY(id))),
-        position: ids.map((id) => new THREE.Vector3(position.getX(id), position.getY(id), position.getZ(id)).applyMatrix4(child.matrixWorld)),
-        normal: ids.map((id) => {
-          const value = normal
-            ? new THREE.Vector3(normal.getX(id), normal.getY(id), normal.getZ(id))
-            : new THREE.Vector3(0, 0, 1);
-          return value.transformDirection(child.matrixWorld);
-        }),
-      };
-      if (!triangle.position.every(isFiniteVector)) continue;
-
-      triangle.uv.forEach((uvPoint, vertexIndex) => {
-        vertices.push({ uv: uvPoint, position: triangle.position[vertexIndex], normal: triangle.normal[vertexIndex] });
-      });
-
-      const minX = Math.max(0, Math.min(...triangle.uv.map((point) => point.x)));
-      const maxX = Math.min(1, Math.max(...triangle.uv.map((point) => point.x)));
-      const minY = Math.max(0, Math.min(...triangle.uv.map((point) => point.y)));
-      const maxY = Math.min(1, Math.max(...triangle.uv.map((point) => point.y)));
-      const minBucketX = Math.min(UV_BUCKET_COUNT - 1, Math.floor(minX * UV_BUCKET_COUNT));
-      const maxBucketX = Math.min(UV_BUCKET_COUNT - 1, Math.floor(maxX * UV_BUCKET_COUNT));
-      const minBucketY = Math.min(UV_BUCKET_COUNT - 1, Math.floor(minY * UV_BUCKET_COUNT));
-      const maxBucketY = Math.min(UV_BUCKET_COUNT - 1, Math.floor(maxY * UV_BUCKET_COUNT));
-      for (let by = minBucketY; by <= maxBucketY; by += 1) {
-        for (let bx = minBucketX; bx <= maxBucketX; bx += 1) {
-          buckets[by * UV_BUCKET_COUNT + bx].push(triangle);
-        }
-      }
-    }
+function buildSample(sensor, targetRows, targetCols, part) {
+  const sourceRow = targetRows > 1
+    ? ((sensor.row - 1) / (targetRows - 1)) * (part.height - 1)
+    : 0;
+  const sourceCol = targetCols > 1
+    ? ((sensor.col - 1) / (targetCols - 1)) * (part.width - 1)
+    : 0;
+  const row0 = Math.floor(sourceRow);
+  const row1 = Math.min(part.height - 1, row0 + 1);
+  const col0 = Math.floor(sourceCol);
+  const col1 = Math.min(part.width - 1, col0 + 1);
+  const rowWeight = sourceRow - row0;
+  const colWeight = sourceCol - col0;
+  const weightedCells = [
+    [row0, col0, (1 - rowWeight) * (1 - colWeight)],
+    [row0, col1, (1 - rowWeight) * colWeight],
+    [row1, col0, rowWeight * (1 - colWeight)],
+    [row1, col1, rowWeight * colWeight],
+  ];
+  const merged = new Map();
+  weightedCells.forEach(([row, col, weight]) => {
+    if (weight <= 0) return;
+    const rawIndex = part.positions[row * part.width + col] - 1;
+    merged.set(rawIndex, (merged.get(rawIndex) || 0) + weight);
   });
-
-  return (uvPoint) => {
-    const candidates = buckets[bucketIndex(uvPoint.x, uvPoint.y)];
-    for (const triangle of candidates) {
-      const weights = triangleBarycentric2D(uvPoint, triangle.uv[0], triangle.uv[1], triangle.uv[2]);
-      if (!weights) continue;
-      const position = new THREE.Vector3();
-      const normal = new THREE.Vector3();
-      for (let index = 0; index < 3; index += 1) {
-        position.addScaledVector(triangle.position[index], weights[index]);
-        normal.addScaledVector(triangle.normal[index], weights[index]);
-      }
-      normal.normalize();
-      return { position: position.addScaledVector(normal, 0.015), normal };
-    }
-
-    let nearest = null;
-    let nearestDistance = Infinity;
-    vertices.forEach((vertex) => {
-      const distance = vertex.uv.distanceToSquared(uvPoint);
-      if (distance < nearestDistance) {
-        nearestDistance = distance;
-        nearest = vertex;
-      }
-    });
-    return nearest
-      ? { position: nearest.position.clone().addScaledVector(nearest.normal, 0.015), normal: nearest.normal.clone() }
-      : null;
-  };
+  return Array.from(merged, ([index, weight]) => ({ index, weight }));
 }
 
-function buildSensorLayout(model) {
-  const findSurfacePoint = createUvSurfaceLookup(model);
-  const sensors = [];
-  const parts = [];
+function buildSensorLayout(archive) {
+  if (Number(archive?.version) !== 7 || !Array.isArray(archive?.flat)) {
+    throw new Error("传感器点位文件格式无效，需要 v7 flat 数据");
+  }
+  const physicalSensors = archive.flat;
+  if (physicalSensors.length !== Number(archive.totalPhysicalSensors || archive.totalSensors)) {
+    throw new Error("传感器点位数量与文件声明不一致");
+  }
+  if (physicalSensors.length > MAX_SHADER_SENSORS) {
+    throw new Error(`物理点位 ${physicalSensors.length} 超过渲染上限 ${MAX_SHADER_SENSORS}`);
+  }
 
-  HUMAN_BODY_SENSOR_PARTS.forEach((part) => {
-    const partSensors = [];
-    for (let row = 0; row < part.height; row += 1) {
-      for (let col = 0; col < part.width; col += 1) {
-        const uvPoint = new THREE.Vector2(
-          (part.uv.x + ((col + 0.5) / part.width) * part.uv.w) / HUMAN_BODY_UV_CANVAS_SIZE,
-          (part.uv.y + ((row + 0.5) / part.height) * part.uv.h) / HUMAN_BODY_UV_CANVAS_SIZE,
-        );
-        const surface = findSurfacePoint(uvPoint);
-        if (!surface) continue;
-        const sensor = {
-          index: part.positions[row * part.width + col] - 1,
-          row,
-          col,
-          part: part.key,
-          position: surface.position,
-        };
-        sensors.push(sensor);
-        partSensors.push(sensor);
-      }
-    }
-    parts.push({ key: part.key, width: part.width, height: part.height, sensors: partSensors });
+  const dimensions = new Map();
+  physicalSensors.forEach((sensor) => {
+    const groupKey = `${sensor.region}::${sensor.placementSide || "single"}`;
+    const current = dimensions.get(groupKey) || { rows: 0, cols: 0 };
+    current.rows = Math.max(current.rows, Number(sensor.row));
+    current.cols = Math.max(current.cols, Number(sensor.col));
+    dimensions.set(groupKey, current);
   });
 
-  return { sensors: sensors.slice(0, MAX_SHADER_SENSORS), parts };
+  const seenIndices = new Set();
+  const sensors = physicalSensors.map((sensor) => {
+    const physicalIndex = Number(sensor.index);
+    const coordinates = [sensor.x, sensor.y, sensor.z].map(Number);
+    if (!Number.isInteger(physicalIndex) || seenIndices.has(physicalIndex)) {
+      throw new Error(`物理点位索引重复或无效：${sensor.index}`);
+    }
+    if (!coordinates.every(Number.isFinite)) {
+      throw new Error(`物理点位 ${physicalIndex} 缺少有效三维坐标`);
+    }
+    seenIndices.add(physicalIndex);
+    const partKey = resolvePartKey(sensor);
+    const part = PART_BY_KEY.get(partKey);
+    if (!part) throw new Error(`未识别的身体区域：${sensor.region}`);
+    const groupKey = `${sensor.region}::${sensor.placementSide || "single"}`;
+    const { rows, cols } = dimensions.get(groupKey);
+    return {
+      index: physicalIndex,
+      logicalIndex: Number(sensor.logicalIndex),
+      row: Number(sensor.row) - 1,
+      col: Number(sensor.col) - 1,
+      part: sensor.region,
+      placementSide: sensor.placementSide || "single",
+      position: new THREE.Vector3(...coordinates),
+      sample: buildSample(sensor, rows, cols, part),
+    };
+  }).sort((left, right) => left.index - right.index);
+
+  return sensors;
 }
 
 const panelStyle = {
@@ -276,6 +243,153 @@ const ColorRow = ({ label, value, presets, onChange }) => (
   </div>
 );
 
+const NUMBER_VIEW_PARTS = {
+  chest: ["chest"],
+  back: ["back"],
+  leftArm: ["leftShoulder", "leftArm"],
+  rightArm: ["rightShoulder", "rightArm"],
+  frontLegs: ["frontPantsLeft", "frontPantsRight"],
+  backLegs: ["backPantsLeft", "backPantsRight"],
+};
+
+const NUMBER_PART_LABELS = {
+  chest: "前胸",
+  back: "后背",
+  leftShoulder: "左肩",
+  leftArm: "左手臂",
+  rightShoulder: "右肩",
+  rightArm: "右手臂",
+  frontPantsLeft: "左前腿",
+  frontPantsRight: "右前腿",
+  backPantsLeft: "左后腿",
+  backPantsRight: "右后腿",
+};
+
+const NUMBER_HORIZONTAL_FLIP_PARTS = new Set([
+  "back",
+  "chest",
+  "rightArm",
+  "rightShoulder",
+  "leftArm",
+  "leftShoulder",
+]);
+
+const NUMBER_VERTICAL_FLIP_PARTS = new Set(["backPantsRight", "backPantsLeft"]);
+
+function getOrientedPartValues(frame, part) {
+  let rows = Array.from({ length: part.height }, (_, row) => (
+    part.positions
+      .slice(row * part.width, (row + 1) * part.width)
+      .map((position) => Number(frame[position - 1]) || 0)
+  ));
+  if (NUMBER_HORIZONTAL_FLIP_PARTS.has(part.key)) rows = rows.map((row) => [...row].reverse());
+  if (NUMBER_VERTICAL_FLIP_PARTS.has(part.key)) rows = [...rows].reverse();
+  return rows;
+}
+
+function drawNumberCell(ctx, value, x, y, size) {
+  ctx.fillStyle = value > 0 ? "rgba(0, 255, 170, 0.16)" : "rgba(255,255,255,0.025)";
+  ctx.fillRect(x, y, size, size);
+  ctx.strokeStyle = "rgba(140, 170, 195, 0.18)";
+  ctx.strokeRect(x, y, size, size);
+  ctx.fillStyle = value > 0 ? "#78ffd2" : "#607181";
+  ctx.font = `${size >= 16 ? 9 : 6}px Consolas, monospace`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(String(Math.round(value)), x + size / 2, y + size / 2);
+}
+
+const RegionNumberPanel = React.forwardRef(({ activeRegion }, ref) => {
+  const canvasRef = useRef(null);
+  const frameRef = useRef(new Array(1024).fill(0));
+
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    const isOverview = activeRegion === "overview";
+    const partKeys = NUMBER_VIEW_PARTS[activeRegion] || [];
+    const parts = partKeys.map((key) => PART_BY_KEY.get(key)).filter(Boolean);
+    const cellSize = isOverview ? 9 : 18;
+    const titleHeight = 25;
+    const padding = 10;
+    const gap = 10;
+    const layouts = [];
+    let contentWidth;
+    let contentHeight;
+
+    if (isOverview) {
+      contentWidth = 32 * cellSize;
+      contentHeight = 32 * cellSize;
+    } else {
+      let offsetX = 0;
+      parts.forEach((part) => {
+        const width = part.width * cellSize;
+        const height = part.height * cellSize + titleHeight;
+        layouts.push({ part, x: offsetX, width, height });
+        offsetX += width + gap;
+      });
+      contentWidth = Math.max(1, offsetX - gap);
+      contentHeight = Math.max(1, ...layouts.map((layout) => layout.height));
+    }
+
+    const width = contentWidth + padding * 2;
+    const height = contentHeight + padding * 2;
+    canvas.width = Math.ceil(width * ratio);
+    canvas.height = Math.ceil(height * ratio);
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+
+    if (isOverview) {
+      for (let row = 0; row < 32; row += 1) {
+        for (let col = 0; col < 32; col += 1) {
+          drawNumberCell(ctx, Number(frameRef.current[row * 32 + col]) || 0, padding + col * cellSize, padding + row * cellSize, cellSize);
+        }
+      }
+      return;
+    }
+
+    layouts.forEach(({ part, x, width: gridWidth }) => {
+      ctx.fillStyle = "#9eb1c4";
+      ctx.font = "11px Arial";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(`${NUMBER_PART_LABELS[part.key]} ${part.width}×${part.height}`, padding + x + gridWidth / 2, padding + titleHeight / 2);
+      const values = getOrientedPartValues(frameRef.current, part);
+      values.forEach((rowValues, row) => {
+        rowValues.forEach((value, col) => {
+          drawNumberCell(ctx, value, padding + x + col * cellSize, padding + titleHeight + row * cellSize, cellSize);
+        });
+      });
+    });
+  }, [activeRegion]);
+
+  useImperativeHandle(ref, () => ({
+    updateData(nextFrame) {
+      frameRef.current = nextFrame;
+      draw();
+    },
+  }), [draw]);
+
+  useEffect(() => {
+    draw();
+  }, [draw]);
+
+  return (
+    <div style={{ ...panelStyle, right: 78, bottom: 14, padding: 9, maxWidth: "calc(100vw - 500px)", overflow: "auto" }}>
+      <div style={{ fontSize: "11px", color: "#8193a5", margin: "0 2px 6px" }}>
+        2D 数字 · {REGION_VIEWS[activeRegion]?.label || "全身"}
+      </div>
+      <canvas ref={canvasRef} style={{ display: "block" }} />
+    </div>
+  );
+});
+
+RegionNumberPanel.displayName = "RegionNumberPanel";
+
 const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
   const containerRef = useRef(null);
   const sceneRef = useRef(null);
@@ -290,6 +404,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
   const bodyMeshesRef = useRef([]);
   const pointCloudRef = useRef(null);
   const lineGridRef = useRef(null);
+  const numberPanelRef = useRef(null);
   const optionsRef = useRef({ ...DEFAULT_OPTIONS, ...props.renderOptions });
   const flightRef = useRef(null);
   const [loading, setLoading] = useState(true);
@@ -312,7 +427,10 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
     const max = Math.max(1, Number(optionsRef.current.max) || DEFAULT_OPTIONS.max);
     const filter = Math.max(0, Number(optionsRef.current.filter) || 0);
     sensorsRef.current.forEach((sensor, index) => {
-      const scaledValue = (Number(rawFrameRef.current[sensor.index]) || 0) * 10;
+      const rawValue = sensor.sample.reduce((total, item) => (
+        total + (Number(rawFrameRef.current[item.index]) || 0) * item.weight
+      ), 0);
+      const scaledValue = rawValue * 10;
       data[index * 4 + 3] = scaledValue >= filter ? Math.min(1, scaledValue / max) : 0;
     });
     texture.needsUpdate = true;
@@ -322,6 +440,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
     sitData({ wsPointData }) {
       if (!Array.isArray(wsPointData)) return;
       rawFrameRef.current = wsPointData.slice(0, 1024).map((value) => Number(value) || 0);
+      numberPanelRef.current?.updateData(rawFrameRef.current);
       updateTextureValues();
     },
     changeColor({ max, size, filter }) {
@@ -389,9 +508,16 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
     const resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(container);
 
-    new GLTFLoader().load(
-      MODEL_URL,
-      (gltf) => {
+    const modelPromise = new Promise((resolve, reject) => {
+      new GLTFLoader().load(MODEL_URL, resolve, undefined, reject);
+    });
+    const layoutPromise = fetch(SENSOR_LAYOUT_URL).then((response) => {
+      if (!response.ok) throw new Error(`点位文件请求失败：HTTP ${response.status}`);
+      return response.json();
+    });
+
+    Promise.all([modelPromise, layoutPromise])
+      .then(([gltf, sensorArchive]) => {
         if (disposed) return;
         const sourceModel = gltf.scene;
         const originalBox = new THREE.Box3().setFromObject(sourceModel);
@@ -407,8 +533,8 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
         scene.add(normalizedModel);
 
         try {
-          const { sensors, parts } = buildSensorLayout(normalizedModel);
-          if (!sensors.length) throw new Error("未能从人体模型 UV 生成传感器坐标");
+          const sensors = buildSensorLayout(sensorArchive);
+          if (!sensors.length) throw new Error("点位文件中没有可渲染的物理点位");
           sensorsRef.current = sensors;
           setSensorCount(sensors.length);
 
@@ -468,9 +594,15 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
           pointCloudRef.current = pointCloud;
 
           const lines = [];
-          parts.forEach((part) => {
-            const byCell = new Map(part.sensors.map((sensor) => [`${sensor.row},${sensor.col}`, sensor]));
-            part.sensors.forEach((sensor) => {
+          const lineGroups = new Map();
+          sensors.forEach((sensor) => {
+            const groupKey = `${sensor.part}::${sensor.placementSide}`;
+            if (!lineGroups.has(groupKey)) lineGroups.set(groupKey, []);
+            lineGroups.get(groupKey).push(sensor);
+          });
+          lineGroups.forEach((groupSensors) => {
+            const byCell = new Map(groupSensors.map((sensor) => [`${sensor.row},${sensor.col}`, sensor]));
+            groupSensors.forEach((sensor) => {
               const right = byCell.get(`${sensor.row},${sensor.col + 1}`);
               const below = byCell.get(`${sensor.row + 1},${sensor.col}`);
               [right, below].forEach((neighbor) => {
@@ -492,14 +624,12 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
           setError(layoutError instanceof Error ? layoutError.message : String(layoutError));
           setLoading(false);
         }
-      },
-      undefined,
-      (loadError) => {
+      })
+      .catch((loadError) => {
         if (disposed) return;
-        setError(`人体模型加载失败：${loadError?.message || "未知错误"}`);
+        setError(`人体模型或点位加载失败：${loadError?.message || "未知错误"}`);
         setLoading(false);
-      },
-    );
+      });
 
     const animate = () => {
       animationId = requestAnimationFrame(animate);
@@ -596,7 +726,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
   };
 
   return (
-    <div style={{ width: "100%", height: "100%", minHeight: "520px", position: "relative", overflow: "hidden", background: bgColor }}>
+    <div style={{ position: "fixed", inset: 0, zIndex: 0, width: "100vw", height: "100vh", overflow: "hidden", background: bgColor }}>
       <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />
 
       {(loading || error) && (
@@ -652,6 +782,8 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
         </div>
         <button onClick={resetView} style={{ ...buttonStyle(false), width: "100%", marginTop: 8 }}>重置视角</button>
       </div>
+
+      <RegionNumberPanel ref={numberPanelRef} activeRegion={activeRegion} />
     </div>
   );
 });

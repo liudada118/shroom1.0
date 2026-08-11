@@ -739,6 +739,8 @@ graph TD
 | 2026-04-27 | Codex | 手套 3D skin 热力图切换为 WebGL 渲染层 | `client/src/components/video/hand.jsx` 将 `hand0205` / `handGlove115200` 的 3D `skin` 模式从 `HeatmapCanvas.changeHeatmap()` CPU 逐帧生成改为 `WebGLCanvas.render()` 生成离屏热力图，再回贴到原有 `CanvasTexture`；同时保留旧 `HeatmapCanvas` 的强度缩放与补边预处理，维持 `ndata1` 数据格式、`sitData/changeColor` 接口和现有贴图链路不变 |
 | 2026-05-26 | Codex | Windows 自动更新安装前退出清理 | `autoUpdater.js` 在 `quitAndInstall()` 前调用主进程清理钩子，`index.js` 统一等待静态服务和后端服务关闭，`server.js` 将串口、WebSocket、数据库和 OneStep 报告 HTTP 服务关闭流程 Promise 化，避免 NSIS 安装器提示旧版 Shroom 无法关闭 |
 | 2026-08-10 | Codex | 人体全身优化真实渲染系统 | 新增 `humanBodyOptimized` 展示系统，迁移 `heatmapAndModal` 的 Gaussian Shader 真实渲染，复用人体 32×32 原始数据协议和 `human3.glb`，支持热力、水晶、线网、点云、叠加、部位视角与原始数据模式。 |
+| 2026-08-10 | Codex | 人体全身优化点云/线网一比一还原 | 接入源项目 v7 `sensor_canvas_positions.json` 最终点位档案，以同一组 1120 个物理坐标同时构建点云和区域行列线网；800 个逻辑点中的双腿镜像展开为左右 640 个物理点，原始 32×32 压力值按身体分区双线性映射到高密度物理点。 |
+| 2026-08-10 | Codex | 人体全身优化全屏与视角数字联动 | 3D 渲染根容器改为固定覆盖 `100vw × 100vh`；场景内新增原始数据数字面板，全身显示 32×32，胸背、左右臂和前后腿视角分别显示对应身体分区矩阵，并随实时/回放帧同步刷新。 |
 
 ## 9. 更新日志
 
@@ -1127,6 +1129,8 @@ graph TD
 | 2026-04-17 19:05 | pet-care-chart-reset-fix | 修复缺陷 | 为 `client/src/components/three/hand.jsx` 暴露 `chartReset` ref 方法，修复 `util.js` 中 `petCare` 正常 3D 展示分支调用 `that.com.current.chartReset()` 时的运行时异常 |
 
 | 2026-08-10 | Revise | 新增功能 | 新增授权 key `humanBodyOptimized`（人体全身优化）：前后端沿用人体全身单串口、1000000 baud、1024 点原始帧；新增真实 Gaussian Shader 渲染器并从共享 UV 分区实时计算 400 个模型表面点，支持五种渲染模式、部位视角、配色和参数调节；实时与回放统一接入，原始数据模式复用 `HumanBodyRawData`，左侧压力统计及趋势始终直接来自原始矩阵。生产构建和 Chromium WebGL 实时帧验证通过。 |
+| 2026-08-10 | Revise | 修复缺陷 | 修复人体全身优化点云与线网未按源项目最终点位一比一还原的问题：迁入 v7 点位档案的 1120 个物理坐标，点实例、线段端点和 Shader 统一引用同一传感器数组，线网按区域、展开侧和行列邻接连接；1024 点原始压力按原人体 10 个索引分区双线性映射到高密度点位。生产构建和 Chromium 五模式回归通过。 |
+| 2026-08-10 | Revise | 新增功能 | 人体全身优化 3D 场景改为全视口渲染，消除父容器高度不足造成的页面下方空白；新增与部位视角联动的 2D 数字面板，全身视角显示原始 32×32，胸背、手臂/肩部和前后腿视角显示对应原始索引分区，实时与回放共用 `sitData` 更新入口。Chromium 全屏布局和七个视角切换验证通过。 |
 
 *变更类型：`新增功能` / `优化重构` / `修复缺陷` / `配置变更` / `文档更新` / `依赖升级` / `初始化`*
 
@@ -1170,8 +1174,10 @@ graph TD
 - 系统显示名为“人体全身优化”，内部 key 为 `humanBodyOptimized`；授权管理、离线兜底传感器清单、标题栏和中英日资源均已注册该 key。
 - 主压力串口为 1 个，波特率 `1000000`；协议沿用 `humanBody` 的 1024 字节 / 32×32 原始压力帧，`server.js` 在协议解析后直接透传，不额外执行线序变换。
 - 实时数据、数据库回放和 CSV 下载继续共用后端标准采集链路；前端 `Home.jsx` 对实时 `sitData` 与回放 `data` 使用同一 `getHumanBodyFrameData()` 归一化入口。
-- 传感器映射复用 `humanBody.jsx` 的 10 个部位索引矩阵和 UV 分区：后背、前胸、左右手臂、左右肩、左右前裤和左右后裤共 400 个逻辑压力点。`HumanBodyOptimized.jsx` 在加载模型后把每个 UV 点通过三角形重心坐标投射到模型表面，不依赖源项目缺失的远端点位 JSON。
+- 模型点位直接使用 `client/public/model/sensor_canvas_positions.json`：该文件来自源项目最终 v7 导出，包含 800 个逻辑点和 1120 个物理点（前胸 120、后背 120、左右肩各 30、左右手臂各 90、前裤 320、后裤 320）。裤区的 320 个逻辑点分别镜像展开到左右腿，物理记录保留唯一 `index`、`logicalIndex`、`placementSide`、行列和三维坐标。
+- Shader、点云和线网共用按物理 `index` 排序后的同一组 1120 个三维坐标；线网只在相同区域及相同 `placementSide` 内按行列相邻关系连接，因此每个线段端点都严格对应一个点云实例。1024 点原始帧继续复用 `humanBody.jsx` 的 10 个部位索引矩阵，并按目标区域行列对相应原始矩阵做双线性采样，左右裤腿分别使用各自原始索引，不用镜像逻辑值覆盖真实左右压力差异。
 - 渲染组件为 `client/src/components/video/HumanBodyOptimized.jsx`，模型路径为 `client/public/model/human3.glb`。组件使用浮点 `DataTexture` 向 Fragment Shader 传入三维点位和实时归一化压力值，并在模型表面执行 Gaussian falloff。
 - `skin` 模式提供热力、水晶、线网、点云和热力+点云叠加五种展示方式，同时支持扩散半径、热力强度、透明度、配色、背景/模型/点云颜色以及全身、胸、背、手臂、腿部视角缓动切换；`numoriginal` 模式复用 `HumanBodyRawData` 展示原始矩阵。
+- `HumanBodyOptimized.jsx` 的 3D 根容器固定覆盖 `100vw × 100vh`，Three.js Canvas 随视口大小自适应，页面下方不再因父级未提供百分比高度而出现空白。场景右下角常驻 2D 数字面板：全身视角绘制未经渲染插值的原始 32×32；前胸/后背显示 6×10，左右臂显示肩部 6×3 加手臂 6×7，前腿/后腿分别显示左右 8×5。点击部位视角时，摄像机与数字矩阵同步切换；数字面板通过同一个 `sitData` 入口兼容实时和回放。
 - 左侧 Pressure Data / Pressure Area 的总和、平均值、最大值、点数、面积及两条趋势图统一由协议解析后的原始 1024 点矩阵计算，不读取 Shader DataTexture、Gaussian 插值、点云或其它仅用于可视化的数组，因此 `skin` 与 `numoriginal` 切换前后一致。
-- 验证：`npm run build` 通过；Edge/Chromium WebGL 实测成功生成 400 个模型表面点并加载 `human3.glb`。使用 10 Hz 1024 点模拟原始帧验证时，Aside 显示点数 635、平均压力 31.57、最大压力 150、压力总和 20045，五种渲染模式切换无新增控制台错误。
+- 验证：`npm run build` 通过；Chromium WebGL 实测加载 `human3.glb` 和 1120 个物理点，线网/点云截图确认节点位置重合，热力、水晶、线网、点云、叠加五种模式切换无新增渲染错误。使用 10 Hz 1024 点模拟原始帧验证时，Aside 显示点数 635、平均压力 31.57、最大压力 150、压力总和 20045，且继续只取原始矩阵。
