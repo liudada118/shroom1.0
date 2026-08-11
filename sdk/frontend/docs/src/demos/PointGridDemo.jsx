@@ -25,16 +25,23 @@ import { useSyntheticFrames } from '../lib/syntheticFrame.js';
 /**
  * @param {object} props 组件属性。
  * @param {'matCol'|'carCol'} [props.presetId] 预设 id，见 `POINT_GRID_PRESETS`。
+ * @param {object} [props.params] 直接传入的矩阵渲染参数。
+ * @param {number[]} [props.values] 直接传入的一帧数据。
  * @returns {JSX.Element} 点阵热力预览。
  */
-export default function PointGridDemo({ presetId = 'matCol' }) {
+export default function PointGridDemo({ presetId = 'matCol', params: paramsOverride, values }) {
   const params = React.useMemo(
-    () => normalizePointGridParams(POINT_GRID_PRESETS[presetId]),
-    [presetId],
+    () => normalizePointGridParams(paramsOverride || POINT_GRID_PRESETS[presetId]),
+    [paramsOverride, presetId],
   );
 
   // 注意取的是 num1 / num2 本身，不是 deriveGridSize 的结果 —— 见文件头第 1 条。
-  const frame = useSyntheticFrames(params.sit.num2, params.sit.num1, { amplitude: 4000 });
+  const syntheticFrame = useSyntheticFrames(
+    params.sit.num2,
+    params.sit.num1,
+    { amplitude: 4000 },
+  );
+  const frame = Array.isArray(values) ? values : syntheticFrame;
 
   return (
     <RendererHost

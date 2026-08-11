@@ -12,7 +12,7 @@
 import React from 'react';
 
 import { subscribeFrames } from '../core/frameBus.js';
-import { registerBuiltinRenderers } from './builtins.js';
+import { registerBuiltinRenderers } from '../renderers/builtins.js';
 import { getRendererDescriptor, loadRenderer } from '../core/registry.js';
 
 // 内置渲染器在模块加载时注册一次。放在这里而不是应用入口，是为了让

@@ -56,7 +56,7 @@ export default function WriteRenderer() {
         </DemoCard>
         <Note title="它顺手示范了内置渲染器没做的一件事">
           这块画面是按**容器**尺寸画的（<C>ResizeObserver</C>），所以塞进 320px 的卡片
-          就老老实实画 320px。两个内置渲染器是按**视口**尺寸画的
+          就老老实实画 320px。数字矩阵的旧 3D 后端仍按**视口**尺寸画
           —— 主应用里每个展示形式都独占整屏，这个区别从没暴露过。
           <strong>新写渲染器的话，按容器画才是对的。</strong>
         </Note>

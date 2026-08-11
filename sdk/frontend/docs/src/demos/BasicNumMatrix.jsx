@@ -24,20 +24,41 @@ import { useSyntheticFrames } from '../lib/syntheticFrame.js';
  * @param {object} props 组件属性。
  * @param {string} [props.presetId] 预设 id，见 `NUM_MATRIX_PRESETS`。
  * @param {string} [props.colormapId] 配色 id，见 `COLORMAPS`。
+ * @param {object} [props.params] 页面直接编辑后的完整参数。
+ * @param {number[]} [props.values] 页面直接编辑的一帧数据。
+ * @param {number|null} [props.floor] 下限过滤值；文档方向校验使用 0 保留数字 1。
  * @returns {JSX.Element} 数字矩阵预览。
  */
-export default function BasicNumMatrix({ presetId = 'fast1024', colormapId = 'classic' }) {
+export default function BasicNumMatrix({
+  presetId = 'fast1024',
+  colormapId = 'classic',
+  params: paramsOverride,
+  values,
+  floor = null,
+}) {
   const params = React.useMemo(
-    () => normalizeNumMatrixParams(NUM_MATRIX_PRESETS[presetId]),
-    [presetId],
+    () => normalizeNumMatrixParams(paramsOverride || NUM_MATRIX_PRESETS[presetId]),
+    [paramsOverride, presetId],
   );
   const grid = React.useMemo(() => numMatrix.deriveGrid(params), [params]);
 
-  const frame = useSyntheticFrames(grid.gridWidth, grid.gridHeight);
+  const syntheticFrame = useSyntheticFrames(grid.gridWidth, grid.gridHeight);
+  const frame = Array.isArray(values) ? values : syntheticFrame;
 
   // 配色走 props 而不是 params：它是"用户随时可改的视图状态"，
   // 换配色不该触发场景重建。对象要 memo，否则每次渲染都是新引用。
   const colormap = React.useMemo(() => ({ id: colormapId }), [colormapId]);
+
+  // RendererHost 的声明式 values 会覆盖常规数据流。文档方向校验还要把历史默认
+  // 下限从 2 调到 0，否则第 1 个点会被过滤。ref 挂载发生在后端 effect 之前，
+  // 因此延后一帧再设阈值并重推当前帧。
+  const handleRenderer = React.useCallback((api) => {
+    if (!api || floor === null) return;
+    requestAnimationFrame(() => {
+      api.sitValue?.({ valuef: floor });
+      api.sitData?.({ wsPointData: frame });
+    });
+  }, [floor, frame]);
 
   return (
     <RendererHost
@@ -47,6 +68,7 @@ export default function BasicNumMatrix({ presetId = 'fast1024', colormapId = 'cl
       values={frame}
       channel="sit"
       colormap={colormap}
+      rendererRef={handleRenderer}
     />
   );
 }

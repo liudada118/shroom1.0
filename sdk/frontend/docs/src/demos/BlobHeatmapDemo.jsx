@@ -25,15 +25,18 @@ import { useSyntheticFrames } from '../lib/syntheticFrame.js';
 /**
  * @param {object} props 组件属性。
  * @param {'default'|'carCol'} [props.presetId] 预设 id。
+ * @param {object} [props.params] 直接传入的矩阵渲染参数。
+ * @param {number[]} [props.values] 直接传入的一帧数据。
  * @returns {JSX.Element} Canvas 2D 斑点热力预览。
  */
-export default function BlobHeatmapDemo({ presetId = 'default' }) {
+export default function BlobHeatmapDemo({ presetId = 'default', params: paramsOverride, values }) {
   const params = React.useMemo(
-    () => normalizeBlobHeatmapParams(BLOB_HEATMAP_PRESETS[presetId]),
-    [presetId],
+    () => normalizeBlobHeatmapParams(paramsOverride || BLOB_HEATMAP_PRESETS[presetId]),
+    [paramsOverride, presetId],
   );
 
-  const frame = useSyntheticFrames(params.dataWidth, params.dataHeight);
+  const syntheticFrame = useSyntheticFrames(params.dataWidth, params.dataHeight);
+  const frame = Array.isArray(values) ? values : syntheticFrame;
 
   return (
     <RendererHost

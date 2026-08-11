@@ -125,6 +125,16 @@ export {
 } from './coordinatePointLayout.js';
 
 export {
+  BUILTIN_MATRIX_RENDERER_OPTIONS,
+  MATRIX_DISPLAY_MODES,
+  createBuiltinMatrixRendererParams,
+  createDirectionCheckFrame,
+  createMatrixDisplayRenderers,
+  getMatrixDisplayMode,
+  inferMatrixDisplayModeId,
+} from './matrixDisplayModes.js';
+
+export {
   addSide,
   findMax,
   gaussBlur_1,
@@ -138,56 +148,57 @@ export {
 } from './frameMath.js';
 
 /* ── numMatrix（命名空间 + 四个常用别名） ────────────────────────── */
-export * as numMatrix from './numMatrix/index.js';
+export * as numMatrix from '../renderers/numMatrix/core/index.js';
 
 export {
   LEGACY_PRESETS as NUM_MATRIX_PRESETS,
   normalizeNumMatrixParams,
-} from './numMatrix/params.js';
+} from '../renderers/numMatrix/core/params.js';
 
-export { computeFrameStats, quantizeFrame } from './numMatrix/pipeline.js';
+export { computeFrameStats, quantizeFrame } from '../renderers/numMatrix/core/pipeline.js';
 
 /* ── pointGrid（命名空间 + 两个常用别名） ────────────────────────── */
-export * as pointGrid from './pointGrid/index.js';
+export * as pointGrid from '../renderers/pointGrid/core/index.js';
 
 export {
   LEGACY_PRESETS as POINT_GRID_PRESETS,
   normalizePointGridParams,
-} from './pointGrid/params.js';
+} from '../renderers/pointGrid/core/params.js';
 
 export {
+  buildPointGridBasePositions,
   createPointGridPipeline,
   runPointGridPipeline,
-} from './pointGrid/pipeline.js';
+} from '../renderers/pointGrid/core/pipeline.js';
 
 /* ── handPoints（命名空间 + 两个常用别名） ───────────────────────── */
-export * as handPoints from './handPoints/index.js';
+export * as handPoints from '../renderers/handPoints/core/index.js';
 
 export {
   LEGACY_PRESETS as HAND_POINTS_PRESETS,
   normalizeHandPointsParams,
-} from './handPoints/params.js';
+} from '../renderers/handPoints/core/params.js';
 
-export { createQuaternionTracker } from './handPoints/quaternion.js';
+export { createQuaternionTracker } from '../renderers/handPoints/core/quaternion.js';
 
 /* ── webglHeatmap（命名空间 + 两个常用别名） ─────────────────────── */
-export * as webglHeatmap from './webglHeatmap/index.js';
+export * as webglHeatmap from '../renderers/webglHeatmap/core/index.js';
 
 export {
   LEGACY_PRESETS as WEBGL_HEATMAP_PRESETS,
   normalizeWebglHeatmapParams,
-} from './webglHeatmap/params.js';
+} from '../renderers/webglHeatmap/core/params.js';
 
-export { frameStats, prepareFrame } from './webglHeatmap/pipeline.js';
+export { frameStats, prepareFrame } from '../renderers/webglHeatmap/core/pipeline.js';
 
 /* ── blobHeatmap（命名空间 + 四个常用别名） ──────────────────────── */
 // ⚠️ 这里**不铺** `frameStats` / `buildBlobPoints` —— 前者与 webglHeatmap 撞名，
 //    后者带 blob 语义但不带前缀。要用走 `blobHeatmap.*`。
-export * as blobHeatmap from './blobHeatmap/index.js';
+export * as blobHeatmap from '../renderers/blobHeatmap/core/index.js';
 
 export {
   LEGACY_PRESETS as BLOB_HEATMAP_PRESETS,
   normalizeBlobHeatmapParams,
-} from './blobHeatmap/params.js';
+} from '../renderers/blobHeatmap/core/params.js';
 
-export { colorize, createIntensity } from './blobHeatmap/intensity.js';
+export { colorize, createIntensity } from '../renderers/blobHeatmap/core/intensity.js';

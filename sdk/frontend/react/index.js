@@ -28,4 +28,4 @@ export {
 
 export { useSceneFrame } from './useSceneFrame.js';
 
-export { registerBuiltinRenderers } from './builtins.js';
+export { registerBuiltinRenderers } from '../renderers/builtins.js';

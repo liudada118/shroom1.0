@@ -108,21 +108,20 @@ export default function Pitfalls() {
         </Note>
       </Section>
 
-      <Section title="两个内置渲染器按视口尺寸画，不是按容器">
+      <Section title="数字矩阵旧后端仍按视口尺寸画">
         <Table
           head={['文件', '写的是什么']}
           rows={[
             [<C>react/numMatrix/backends/sprite3d.js:247</C>,
               <C>resolveCanvasSize(window.innerHeight, canvasHeightRatio)</C>],
-            [<C>react/pointGrid/PointGridRenderer.jsx:319</C>,
-              <C>setSize(window.innerWidth, window.innerHeight)</C>],
+            [<C>react/pointGrid/PointGridRenderer.jsx</C>,
+              <C>ResizeObserver + container.clientWidth/clientHeight</C>],
           ]}
         />
         <p>
-          把它们塞进一个 300px 高的卡片，它们照样画一张接近全屏的画布然后溢出去。
-          <strong>这是包的既有行为，不是 bug</strong> —— 主应用里每个展示形式都独占整屏，
-          这个区别从没暴露过。文档站的所有缩略图都是「给一个视口大小的容器 +
-          CSS <C>transform: scale()</C> 缩进卡片」这么绕过去的（<C>components/Live.jsx</C>）。
+          点阵热力已经能直接放进任意尺寸的配置预览；数字矩阵旧后端放进 300px 高的
+          卡片时仍会按视口尺寸画。文档站继续用「给一个视口大小的容器 + CSS
+          <C>transform: scale()</C> 缩进卡片」兼容它（<C>components/Live.jsx</C>）。
         </p>
         <Note tone="warn" title="缩放的代价：交互坐标错位">
           <C>react/three/pointPick.js</C> 用 <C>clientX/clientY</C> 配

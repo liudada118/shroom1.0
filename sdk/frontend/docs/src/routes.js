@@ -14,6 +14,12 @@
 
 export const ROUTES = [
   {
+    id: 'matrix-quick',
+    title: '矩阵快速使用',
+    group: '开始',
+    load: () => import('./pages/MatrixQuickStart.jsx'),
+  },
+  {
     id: 'intro',
     title: '这个包是什么',
     group: '开始',
@@ -88,7 +94,7 @@ export const ROUTES = [
 ];
 
 /** 首屏落在哪一页。 */
-export const DEFAULT_ROUTE_ID = ROUTES[0].id;
+export const DEFAULT_ROUTE_ID = 'matrix-quick';
 
 /**
  * 按 id 取路由。

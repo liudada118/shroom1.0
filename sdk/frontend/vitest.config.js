@@ -21,6 +21,11 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['core/**/*.{test,spec}.{js,jsx}', 'react/**/*.{test,spec}.{js,jsx}'],
+    include: [
+      'core/**/*.{test,spec}.{js,jsx}',
+      'react/**/*.{test,spec}.{js,jsx}',
+      'renderers/**/*.{test,spec}.{js,jsx}',
+      'docs/src/lib/**/*.{test,spec}.{js,jsx}',
+    ],
   },
 });

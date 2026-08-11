@@ -36,7 +36,8 @@
  *
  * ## 它顺手示范了内置渲染器**没有**做的一件事
  *
- * 下面用 `ResizeObserver` 按**容器**尺寸画。两个内置渲染器按**视口**尺寸画
+ * 下面用 `ResizeObserver` 按**容器**尺寸画。点阵渲染器现在也遵守这个规则，
+ * 数字矩阵的旧 3D 后端仍按**视口**尺寸画
  * （`sprite3d.js` 用 `window.innerHeight`、`PointGridRenderer` 用
  * `window.innerWidth/Height`），因为主应用里每个展示形式都独占整屏，
  * 这个区别从来没暴露过。新写渲染器的话，按容器画才是对的。

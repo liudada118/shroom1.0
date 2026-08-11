@@ -17,7 +17,7 @@ cd example && npm i && npm run dev     # → 32×32 数字矩阵，游动的高�
 npm --prefix docs i && npm --prefix docs run dev      # 或在仓库根上：npm run sdk:frontend-docs
 ```
 
-[docs/](docs/) 是一个 12 页的在线文档站：讲解 + **能动的实时画面** + 「显示代码」。
+[docs/](docs/) 是一个 13 页的在线文档站：讲解 + **能动的实时画面** + 可复制代码。
 
 它和这份 README 的区别不是篇幅，是**会不会过期**。README 里的参数表、方法清单、预设名
 全是**手抄**的 —— `RENDERER_METHODS` 改一行，README 不会有任何报错。文档站里那些表格
@@ -27,6 +27,7 @@ npm --prefix docs i && npm --prefix docs run dev      # 或在仓库根上：npm
 
 | 页 | 有什么 |
 | :--- | :--- |
+| **矩阵快速使用** | 默认首页；同一份 `8×8` 坐标与 `1..64` 数据直接切换四种通用矩阵渲染器，完整代码可复制运行 |
 | 快速开始 | 最短路径；显示的源码就是 `example/src/main.jsx` 本身（跨目录 `?raw`） |
 | 数字矩阵 / 点阵热力 / 手部点云 | 活预览 + 预设 + 8 配色 + 参数面板 |
 | 斑点热力 | 一页放 `webglHeatmap` 与 `blobHeatmap` 两条，附一张「为什么不是同一个渲染器的两个后端」对照表 |
@@ -60,15 +61,31 @@ registerBuiltinRenderers();          // 注册本包 ships 的五个渲染器（
 `<RendererHost frameChannel="sit" />` 收，或者用 `useSceneFrame()` 自己订阅。两条路
 二选一，别同时给。
 
+矩阵型传感器可以只维护一份行列、坐标和量程，再让 SDK 生成不同渲染器的参数：
+
+```jsx
+const params = createBuiltinMatrixRendererParams('pointGrid', {
+  matrix: { rows: 8, cols: 8 },
+  coordinateMap,
+  valueMax: 64,
+});
+
+<RendererHost rendererId="pointGrid" params={params} values={values} channel="sit" />
+```
+
+支持 `numMatrix`、`pointGrid`、`webglHeatmap` 和 `blobHeatmap`。默认方向校验数据用
+`createDirectionCheckFrame(rows * cols)` 生成 `[1, 2, ..., N]`。
+
 ---
 
-## 四个入口
+## 五个入口
 
 | 入口 | 内容 | 依赖 |
 | :--- | :--- | :--- |
 | `@shroom/frontend` | 传输（`SensorClient`）、帧存储（`FrameStore`）、展示系统定义（`DisplayRegistry`），**并全量转出 `core`** | 无 |
 | `@shroom/frontend/core` | 契约、渲染器注册表、帧管线、配色、阈值、坐标布局 | 无 |
-| `@shroom/frontend/react` | `RendererHost`、`useSceneFrame`、`registerBuiltinRenderers`，五个渲染器（`numMatrix`，三个后端 `sprite3d` / `canvas2d` / `webgl`；`pointGrid`；`handPoints`；`webglHeatmap`；`blobHeatmap`）+ `three/{SelectionHelper,pointPick,circle.png}` + `webgl/glUtil.js` | peer: react + three（`blobHeatmap` 只要 react） |
+| `@shroom/frontend/react` | 宿主层：`RendererHost`、`useSceneFrame`、`registerBuiltinRenderers` | peer: react + three |
+| `@shroom/frontend/renderers` | 五个渲染器的纯逻辑命名空间和注册入口；实际实现统一位于 `renderers/` | 注册时无额外依赖，加载画面时按渲染器需要 react / three |
 | `@shroom/frontend/styles/canvas.css` | 6 行 canvas 样式（`.canvasNum`） | 无 |
 
 **根出口刻意不含 `react/`。** 一旦含了，`SensorClient` 的裸 Node 消费者（后端测试里
@@ -79,7 +96,11 @@ registerBuiltinRenderers();          // 注册本包 ships 的五个渲染器（
 无 `localStorage` 垫片、无 vitest。这三样在测试环境里都会把「装到新项目里就崩」那类
 错遮住 —— 少写 `.js` 扩展名、模块顶层读 `localStorage`、悄悄引入 react/three。
 
-`core/numMatrix` 也可单独取：`import { deriveGrid } from '@shroom/frontend/core/numMatrix'`。
+新代码可从 `@shroom/frontend/renderers` 取得各渲染器纯逻辑。旧代码仍可使用
+`import { deriveGrid } from '@shroom/frontend/core/numMatrix'`；它现在由包导出映射到
+`renderers/numMatrix/core`，不会保留第二份文件。
+
+物理目录和整体搬运方式见 [renderers/README.md](renderers/README.md)。
 
 > ### ⚠️ 已知缺口：根出口在 `npm pack` 装出来的包里加载不了
 >
@@ -93,6 +114,7 @@ registerBuiltinRenderers();          // 注册本包 ships 的五个渲染器（
 > | :--- | :---: | :---: |
 > | `@shroom/frontend/core`（含全部子路径） | ✓ | ✓ |
 > | `@shroom/frontend/react` | ✓ | ✓（需打包器，裸 Node 认不了 `.jsx`） |
+> | `@shroom/frontend/renderers` | ✓ | ✓（React 实现需打包器） |
 > | `@shroom/frontend/styles/canvas.css` | ✓ | ✓ |
 > | `@shroom/frontend`（根，含 `SensorClient`） | ✓ | ✗ |
 >
@@ -151,8 +173,8 @@ webpack 用 `resolve.alias` 指到你那份，rollup 用 `@rollup/plugin-node-re
 
 ### 4. 你的打包器要能处理 `.png` import
 
-`pointGrid` 与 `handPoints` 的点精灵贴图是 `import circleUrl from '../three/circle.png'`
-出来的打包资源（[react/three/circle.png](react/three/circle.png)，两者共用同一张）。
+`pointGrid` 与 `handPoints` 的点精灵贴图是从共享资源模块导入的打包资源
+（[renderers/shared/three/circle.png](renderers/shared/three/circle.png)，两者共用同一张）。
 Vite 原生支持，webpack 5 走 asset modules，Rollup 需要 `@rollup/plugin-url` 之类。
 
 **这条以前不是义务，2026-08-05 `pointGrid` 进包时才变成义务。** 它原来写的是
@@ -445,6 +467,9 @@ cd docs && npm run check             # 逐页 SSR 渲染，12 页
 
 ## 边界
 
+- **五个渲染器已物理集中到 `renderers/`。** 每个目录内同时放 `core/` 算法和 `react/`
+  画面实现；`shared/` 只放渲染专用的 Three/WebGL 工具。顶层 `core/` 只保留宿主契约、
+  帧通道和跨渲染器工具，顶层 `react/` 只保留 `RendererHost` 与帧 hook。
 - **`private: true`，不发公共 registry。** 分发走 `npm pack` tarball 或 `file:`。想真
   发布是另一件事（要定 scope 归属与版本承诺）。
 - **tarball 里根出口加载不了**，见上面「已知缺口」。渲染器那条路不受影响。
@@ -476,7 +501,8 @@ cd docs && npm run check             # 逐页 SSR 渲染，12 页
 - **`webgl` 后端只画 jet，不认 `colormap`。** 两份原实现的片元着色器都把 jet 阶梯写死
   在 GLSL 里，所以在这个后端上换配色画面不动。搬的时候保留了这个行为（改它是看得见的
   画面变化，不是搬家该做的事），但那段 GLSL 现在是从 `core/jetLadder.js` 的断点数据
-  **发码**出来的，不是第 19 份手抄 —— 要支持任意配色，改 `core/numMatrix/shaders.js`
+  **发码**出来的，不是第 19 份手抄 —— 要支持任意配色，改
+  `renderers/numMatrix/core/shaders.js`
   一处即可。已记积压。
 - **`sprite3d` / `pointGrid` / `handPoints` 三个渲染器按视口而不是按容器定尺寸**
   （`numMatrix/backends/sprite3d.js:247`、`pointGrid/PointGridRenderer.jsx:319`）。

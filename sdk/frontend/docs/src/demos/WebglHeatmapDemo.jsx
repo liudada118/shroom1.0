@@ -24,16 +24,19 @@ import { useSyntheticFrames } from '../lib/syntheticFrame.js';
 /**
  * @param {object} props 组件属性。
  * @param {'bed4096'|'plain'} [props.presetId] 预设 id。
+ * @param {object} [props.params] 直接传入的矩阵渲染参数。
+ * @param {number[]} [props.values] 直接传入的一帧数据。
  * @returns {JSX.Element} WebGL 斑点热力预览。
  */
-export default function WebglHeatmapDemo({ presetId = 'bed4096' }) {
+export default function WebglHeatmapDemo({ presetId = 'bed4096', params: paramsOverride, values }) {
   const params = React.useMemo(
-    () => normalizeWebglHeatmapParams(WEBGL_HEATMAP_PRESETS[presetId]),
-    [presetId],
+    () => normalizeWebglHeatmapParams(paramsOverride || WEBGL_HEATMAP_PRESETS[presetId]),
+    [paramsOverride, presetId],
   );
 
   // 帧尺寸跟着参数走 —— 写死 64×64 的话切到 plain 预设就画歪了（见文件头第 2 条）。
-  const frame = useSyntheticFrames(params.dataWidth, params.dataHeight);
+  const syntheticFrame = useSyntheticFrames(params.dataWidth, params.dataHeight);
+  const frame = Array.isArray(values) ? values : syntheticFrame;
 
   return (
     <RendererHost

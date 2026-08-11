@@ -77,6 +77,7 @@ export default function DisplayCanvasConfigurator({
   colormapIds = null,
   emptyState = null,
   readOnly = false,
+  simple = false,
   title = '画布零件',
   variant = 'inline',
   categoryIds = null,
@@ -225,6 +226,16 @@ export default function DisplayCanvasConfigurator({
   // 草稿状态带。拖零件写的只是 localStorage，展示系统目录里那份 manifest 没动过，
   // 所以这里要明确告诉用户"改动还没落盘"，并给出三个出路。
   // 收起状态下也照样显示 —— 折叠是默认态，把提示藏在折叠里等于没有提示。
+  if (simple) {
+    return (
+      <div className="display-canvas-configurator is-simple">
+        <div className="canvas-drop-area">
+          {hasCanvasContent || !emptyState ? children : emptyState}
+        </div>
+      </div>
+    );
+  }
+
   const draftBar = draft?.dirty && onRevert ? (
     <div className="canvas-draft-bar">
       <span className="canvas-draft-status">● 有未保存的改动</span>

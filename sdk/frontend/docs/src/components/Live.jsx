@@ -3,10 +3,11 @@
  *
  * 这个组件存在的理由有两条，都不是装饰性的。
  *
- * ## 一、两个内置渲染器都是「按视口尺寸」画的，不是按容器
+ * ## 一、兼容按视口尺寸绘制的旧渲染器
  *
  * - `react/numMatrix/backends/sprite3d.js:247` —— `resolveCanvasSize(window.innerHeight, ratio)`
- * - `react/pointGrid/PointGridRenderer.jsx:319` —— `setSize(window.innerWidth, window.innerHeight)`
+ * `numMatrix` 的旧 3D 后端仍按视口尺寸绘制；`pointGrid` 已改为通过
+ * `ResizeObserver` 跟随容器尺寸，因此既能放在全屏场景，也能放在配置预览中。
  *
  * 也就是说，把渲染器塞进一个 300px 高的卡片，它照样会画一张接近全屏大小的画布，
  * 然后溢出去。**这是包的既有行为，不是文档站的 bug**，主应用里每个展示形式都是
@@ -88,7 +89,7 @@ function reconcile() {
  * @param {number} [props.height] 卡片高度（px）。`mode="actual"` 下被忽略。
  * @param {'scaled'|'actual'|'fill'} [props.mode] 三种：
  *   - `scaled`（默认）—— 给渲染器一个视口大小的容器，再等比缩进卡片，交互关闭。
- *     **按视口尺寸画的渲染器只能用这个**（两个内置的都是）。
+ *     **按视口尺寸画的渲染器只能用这个**。
  *   - `actual` —— 不缩放，卡片直接给到视口高度。框选 / 旋转只在这个模式下坐标正确。
  *   - `fill` —— 容器就是卡片本身，不缩放。给**按容器尺寸画**的渲染器用
  *     （比如文档站那个 Canvas 2D 示例）—— 那才是新写渲染器该有的行为。

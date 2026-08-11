@@ -27,6 +27,7 @@ import React from 'react';
  * @returns {JSX.Element} 代码块。
  */
 export default function CodeBlock({ code, language = 'jsx', path, note }) {
+  const [copied, setCopied] = React.useState(false);
   const html = React.useMemo(() => {
     const grammar = Prism.languages[language];
     // 未登记的语言（比如 bash）就不高亮，但**必须仍然转义** ——
@@ -37,14 +38,36 @@ export default function CodeBlock({ code, language = 'jsx', path, note }) {
     return Prism.highlight(String(code), grammar, language);
   }, [code, language]);
 
+  const copyCode = React.useCallback(async () => {
+    const text = String(code);
+    let success = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      success = true;
+    } catch {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      success = document.execCommand('copy');
+      textarea.remove();
+    }
+    if (!success) return;
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1400);
+  }, [code]);
+
   return (
     <div>
-      {(path || note) && (
-        <div className="docs-code-head">
-          <span className="docs-code-path">{path}</span>
-          <span>{note}</span>
-        </div>
-      )}
+      <div className="docs-code-head">
+        <span className="docs-code-path">{path}</span>
+        <span className="docs-code-note">{note}</span>
+        <button type="button" className="docs-code-copy" onClick={copyCode}>
+          {copied ? '已复制' : '复制代码'}
+        </button>
+      </div>
       <pre className="docs-code">
         {/* eslint-disable-next-line react/no-danger -- 内容是 Prism 转义后的自家源码 */}
         <code dangerouslySetInnerHTML={{ __html: html }} />

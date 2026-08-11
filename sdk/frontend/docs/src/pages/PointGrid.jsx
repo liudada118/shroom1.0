@@ -9,6 +9,7 @@
 
 import {
   POINT_GRID_PRESETS,
+  createBuiltinMatrixRendererParams,
   normalizePointGridParams,
   pointGrid,
 } from '@shroom/frontend/core';
@@ -17,16 +18,25 @@ import React from 'react';
 import DemoCard from '../components/DemoCard.jsx';
 import PointGridDemo from '../demos/PointGridDemo.jsx';
 import demoSource from '../demos/PointGridDemo.jsx?raw';
+import { createDefaultMatrixSample } from '../lib/matrixConfigurator.js';
 import { C, Note, Prose, Section, Table } from '../components/Prose.jsx';
 
 const PRESET_IDS = Object.keys(POINT_GRID_PRESETS);
+const DEFAULT_MATRIX_SAMPLE = createDefaultMatrixSample();
 
 export default function PointGrid() {
-  const [presetId, setPresetId] = React.useState('matCol');
+  const [presetId, setPresetId] = React.useState('defaultMatrix');
+  const usesDefaultMatrix = presetId === 'defaultMatrix';
 
   const params = React.useMemo(
-    () => normalizePointGridParams(POINT_GRID_PRESETS[presetId]),
-    [presetId],
+    () => (usesDefaultMatrix
+      ? createBuiltinMatrixRendererParams('pointGrid', {
+        matrix: DEFAULT_MATRIX_SAMPLE,
+        coordinateMap: DEFAULT_MATRIX_SAMPLE.coordinateMap,
+        valueMax: DEFAULT_MATRIX_SAMPLE.valueMax,
+      })
+      : normalizePointGridParams(POINT_GRID_PRESETS[presetId])),
+    [presetId, usesDefaultMatrix],
   );
   const gridSize = pointGrid.deriveGridSize(params.sit);
 
@@ -35,6 +45,7 @@ export default function PointGrid() {
       <label className="docs-field">
         <span>预设</span>
         <select value={presetId} onChange={(event) => setPresetId(event.target.value)}>
+          <option value="defaultMatrix">统一默认矩阵（8 × 8 / 1..64）</option>
           {PRESET_IDS.map((id) => <option key={id} value={id}>{id}</option>)}
         </select>
       </label>
@@ -71,7 +82,12 @@ export default function PointGrid() {
           controls={controls}
           height={400}
         >
-          <PointGridDemo key={presetId} presetId={presetId} />
+          <PointGridDemo
+            key={presetId}
+            presetId={usesDefaultMatrix ? 'matCol' : presetId}
+            params={params}
+            values={usesDefaultMatrix ? DEFAULT_MATRIX_SAMPLE.values : undefined}
+          />
         </DemoCard>
       </Section>
 
@@ -86,7 +102,12 @@ export default function PointGrid() {
           mode="actual"
           hint="实际尺寸 · 可拖拽框选与旋转"
         >
-          <PointGridDemo presetId={presetId} />
+          <PointGridDemo
+            key={`actual-${presetId}`}
+            presetId={usesDefaultMatrix ? 'matCol' : presetId}
+            params={params}
+            values={usesDefaultMatrix ? DEFAULT_MATRIX_SAMPLE.values : undefined}
+          />
         </DemoCard>
         <Note tone="bad" title="为什么另一块不能交互">
           框选的坐标换算（<C>react/three/pointPick.js</C>）用的是

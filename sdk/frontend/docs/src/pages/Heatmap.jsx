@@ -13,6 +13,7 @@ import {
   HEAT_BLOB_STOPS,
   WEBGL_HEATMAP_PRESETS,
   blobHeatmap,
+  createBuiltinMatrixRendererParams,
   getColormap,
   normalizeBlobHeatmapParams,
   normalizeWebglHeatmapParams,
@@ -25,22 +26,38 @@ import blobSource from '../demos/BlobHeatmapDemo.jsx?raw';
 import DemoCard from '../components/DemoCard.jsx';
 import WebglHeatmapDemo from '../demos/WebglHeatmapDemo.jsx';
 import webglSource from '../demos/WebglHeatmapDemo.jsx?raw';
+import { createDefaultMatrixSample } from '../lib/matrixConfigurator.js';
 import { C, Note, Prose, Section, Table } from '../components/Prose.jsx';
 
 const WEBGL_PRESET_IDS = Object.keys(WEBGL_HEATMAP_PRESETS);
 const BLOB_PRESET_IDS = Object.keys(BLOB_HEATMAP_PRESETS);
+const DEFAULT_MATRIX_SAMPLE = createDefaultMatrixSample();
 
 export default function Heatmap() {
-  const [webglPresetId, setWebglPresetId] = React.useState('bed4096');
-  const [blobPresetId, setBlobPresetId] = React.useState('default');
+  const [webglPresetId, setWebglPresetId] = React.useState('defaultMatrix');
+  const [blobPresetId, setBlobPresetId] = React.useState('defaultMatrix');
+  const usesDefaultWebglMatrix = webglPresetId === 'defaultMatrix';
+  const usesDefaultBlobMatrix = blobPresetId === 'defaultMatrix';
 
   const webglParams = React.useMemo(
-    () => normalizeWebglHeatmapParams(WEBGL_HEATMAP_PRESETS[webglPresetId]),
-    [webglPresetId],
+    () => (usesDefaultWebglMatrix
+      ? createBuiltinMatrixRendererParams('webglHeatmap', {
+        matrix: DEFAULT_MATRIX_SAMPLE,
+        coordinateMap: DEFAULT_MATRIX_SAMPLE.coordinateMap,
+        valueMax: DEFAULT_MATRIX_SAMPLE.valueMax,
+      })
+      : normalizeWebglHeatmapParams(WEBGL_HEATMAP_PRESETS[webglPresetId])),
+    [usesDefaultWebglMatrix, webglPresetId],
   );
   const blobParams = React.useMemo(
-    () => normalizeBlobHeatmapParams(BLOB_HEATMAP_PRESETS[blobPresetId]),
-    [blobPresetId],
+    () => (usesDefaultBlobMatrix
+      ? createBuiltinMatrixRendererParams('blobHeatmap', {
+        matrix: DEFAULT_MATRIX_SAMPLE,
+        coordinateMap: DEFAULT_MATRIX_SAMPLE.coordinateMap,
+        valueMax: DEFAULT_MATRIX_SAMPLE.valueMax,
+      })
+      : normalizeBlobHeatmapParams(BLOB_HEATMAP_PRESETS[blobPresetId])),
+    [blobPresetId, usesDefaultBlobMatrix],
   );
 
   const heatBlobsCss = getColormap('heatBlobs').previewCss;
@@ -50,6 +67,7 @@ export default function Heatmap() {
       <label className="docs-field">
         <span>预设</span>
         <select value={webglPresetId} onChange={(event) => setWebglPresetId(event.target.value)}>
+          <option value="defaultMatrix">统一默认矩阵（8 × 8 / 1..64）</option>
           {WEBGL_PRESET_IDS.map((id) => <option key={id} value={id}>{id}</option>)}
         </select>
       </label>
@@ -73,6 +91,7 @@ export default function Heatmap() {
       <label className="docs-field">
         <span>预设</span>
         <select value={blobPresetId} onChange={(event) => setBlobPresetId(event.target.value)}>
+          <option value="defaultMatrix">统一默认矩阵（8 × 8 / 1..64）</option>
           {BLOB_PRESET_IDS.map((id) => <option key={id} value={id}>{id}</option>)}
         </select>
       </label>
@@ -136,7 +155,12 @@ export default function Heatmap() {
           controls={webglControls}
           height={420}
         >
-          <WebglHeatmapDemo key={webglPresetId} presetId={webglPresetId} />
+          <WebglHeatmapDemo
+            key={webglPresetId}
+            presetId={usesDefaultWebglMatrix ? 'plain' : webglPresetId}
+            params={webglParams}
+            values={usesDefaultWebglMatrix ? DEFAULT_MATRIX_SAMPLE.values : undefined}
+          />
         </DemoCard>
         <Table
           head={['id', '矩阵', '画布', 'radius', 'valueScale', 'edgeClear', 'mirrorX']}
@@ -169,7 +193,12 @@ export default function Heatmap() {
           controls={blobControls}
           height={420}
         >
-          <BlobHeatmapDemo key={blobPresetId} presetId={blobPresetId} />
+          <BlobHeatmapDemo
+            key={blobPresetId}
+            presetId={usesDefaultBlobMatrix ? 'default' : blobPresetId}
+            params={blobParams}
+            values={usesDefaultBlobMatrix ? DEFAULT_MATRIX_SAMPLE.values : undefined}
+          />
         </DemoCard>
         <Note tone="info" title="这一个不占 WebGL 上下文额度">
           全包五个渲染器里唯一不碰 three、也不碰 WebGL 的一个。同页想挂多少块都行 ——

@@ -42,6 +42,7 @@ code, pre {
   display: grid;
   grid-template-columns: 268px minmax(0, 1fr);
   height: 100%;
+  min-width: 0;
 }
 
 .docs-nav {
@@ -105,6 +106,7 @@ code, pre {
 
 .docs-main {
   overflow-y: auto;
+  min-width: 0;
   padding: 34px 40px 96px;
 }
 
@@ -113,7 +115,7 @@ code, pre {
 
 /* ── 正文排版（Prose.jsx） ────────────────────────────────────────── */
 
-.docs-prose { max-width: 860px; }
+.docs-prose { width: 100%; max-width: 960px; }
 
 .docs-prose h1 {
   margin: 0 0 6px;
@@ -205,6 +207,21 @@ code, pre {
 }
 
 .docs-code-path { font-family: 'SFMono-Regular', Menlo, Consolas, monospace; }
+.docs-code-note { margin-left: auto; }
+
+.docs-code-copy {
+  min-width: 72px;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg-code);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.docs-code-copy:hover { border-color: var(--accent); color: var(--accent); }
 
 /* prism 的暗色配色，就地写而不引 prism 的主题 css —— 省一个跨包路径 */
 .docs-code .token.comment { color: #5d6675; font-style: italic; }
@@ -276,6 +293,253 @@ code, pre {
   font-size: 12.5px;
 }
 
+/* ── 数字矩阵配置台 ──────────────────────────────────────────────── */
+
+.matrix-setup {
+  display: grid;
+  width: 100%;
+  gap: 1px;
+  background: var(--line);
+}
+
+.matrix-setup-step {
+  padding: 16px;
+  background: var(--bg-raise);
+}
+
+.matrix-setup-heading {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.matrix-setup-heading > div {
+  display: grid;
+  gap: 1px;
+}
+
+.matrix-setup-heading strong { font-size: 14px; }
+.matrix-setup-heading span:not(.matrix-step-number) { color: var(--text-dim); font-size: 12px; }
+
+.matrix-step-number {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border: 1px solid rgba(106, 169, 255, 0.65);
+  border-radius: 50%;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.matrix-shape-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px;
+  gap: 16px;
+  align-items: stretch;
+}
+
+.matrix-action-row,
+.matrix-data-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.matrix-action-row button,
+.matrix-data-actions button,
+.matrix-file-button {
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg-code);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.matrix-action-row button:hover,
+.matrix-data-actions button:hover,
+.matrix-file-button:hover,
+.matrix-action-row button.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.matrix-action-row button.is-active { background: rgba(106, 169, 255, 0.11); }
+.matrix-file-button input { display: none; }
+
+.matrix-config-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 12px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.matrix-config-status strong { color: var(--text); }
+.matrix-config-status.is-valid strong { color: var(--ok); }
+
+.matrix-shape-box {
+  display: grid;
+  grid-template-rows: minmax(96px, 1fr) auto;
+  gap: 7px;
+  min-height: 132px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-code);
+}
+
+.matrix-shape-preview { width: 100%; height: 100%; min-height: 96px; }
+.matrix-shape-preview circle { fill: #596274; }
+.matrix-shape-preview circle.is-first { fill: var(--ok); }
+.matrix-shape-preview circle.is-last { fill: var(--warn); }
+
+.matrix-shape-box > span {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  align-items: center;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.matrix-shape-box i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+
+.matrix-shape-box i.is-first { background: var(--ok); }
+.matrix-shape-box i.is-last { background: var(--warn); }
+
+.matrix-data-actions { margin-bottom: 10px; }
+.matrix-data-actions .docs-field { margin-left: auto; }
+.matrix-data-actions .docs-field + .docs-field { margin-left: 0; }
+
+.matrix-data-editor {
+  display: grid;
+  gap: 5px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.matrix-data-editor textarea {
+  width: 100%;
+  min-height: 94px;
+  max-height: 180px;
+  resize: vertical;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  outline: none;
+  background: var(--bg-code);
+  color: var(--text);
+  font: 12px/1.55 'SFMono-Regular', Menlo, Consolas, monospace;
+}
+
+.matrix-data-editor textarea:focus { border-color: var(--accent); }
+.matrix-data-editor textarea[aria-invalid='true'] { border-color: var(--bad); }
+.matrix-input-error { margin-top: 7px; color: var(--bad); font-size: 12px; }
+
+.matrix-quick-controls {
+  display: grid;
+  width: 100%;
+  grid-template-columns: max-content max-content minmax(280px, 1fr);
+  gap: 18px;
+  align-items: center;
+}
+
+.matrix-quick-input { display: grid; gap: 1px; }
+.matrix-quick-input span { color: var(--text-dim); font-size: 11px; }
+.matrix-quick-input strong { font-size: 13px; white-space: nowrap; }
+
+.matrix-renderer-switch {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.matrix-renderer-switch button {
+  min-height: 34px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg-code);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.matrix-renderer-switch button:hover,
+.matrix-renderer-switch button.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.matrix-renderer-switch button.is-active { background: rgba(106, 169, 255, 0.11); }
+
+.matrix-quick-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin: 22px 0 8px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--line);
+}
+
+.matrix-quick-steps > div {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 62px;
+  padding: 12px;
+  background: var(--bg-raise);
+}
+
+.matrix-quick-steps strong {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.matrix-quick-steps span { font-size: 12px; line-height: 1.5; }
+
+@media (max-width: 760px) {
+  .docs-shell { grid-template-columns: 1fr; }
+  .docs-nav { display: none; }
+  .docs-main { padding: 22px 14px 64px; }
+  .docs-card-head { align-items: flex-start; }
+  .docs-card-controls { padding: 0; }
+  .matrix-shape-layout { grid-template-columns: 1fr; }
+  .matrix-shape-box { min-height: 160px; }
+  .matrix-data-actions .docs-field { width: 100%; margin-left: 0; }
+  .matrix-data-actions .docs-field select { flex: 1; min-width: 0; }
+  .matrix-quick-controls { grid-template-columns: 1fr 1fr; gap: 10px; padding: 10px 12px; }
+  .matrix-renderer-switch { grid-column: 1 / -1; grid-template-columns: 1fr 1fr; }
+  .matrix-quick-steps { grid-template-columns: 1fr; }
+  .docs-code-head { align-items: flex-start; flex-wrap: wrap; }
+  .docs-code-note { width: 100%; margin-left: 0; order: 3; }
+}
+
 /* ── 舞台（Live.jsx） ─────────────────────────────────────────────── */
 
 .docs-stage {
@@ -284,7 +548,7 @@ code, pre {
   background: #000;
 }
 
-/* 缩放层：渲染器按视口尺寸画，这里把整块画面等比缩进卡片里。
+/* 缩放层：兼容按视口尺寸画的渲染器，把整块画面等比缩进卡片里。
    `transform` 只影响合成，不改渲染器认的画布像素 —— 见 Live.jsx 文件头。 */
 .docs-stage-scaler {
   position: absolute;
@@ -292,6 +556,12 @@ code, pre {
   left: 50%;
   transform-origin: top center;
   will-change: transform;
+}
+
+/* numMatrix 按视口高度生成方形画布；竖屏时画布会宽于宿主，文档舞台需居中后再缩放。 */
+.docs-stage-scaler > .canvasNum {
+  display: flex;
+  justify-content: center;
 }
 
 .docs-stage-hint {

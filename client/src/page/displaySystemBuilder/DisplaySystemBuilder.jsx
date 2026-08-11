@@ -27,6 +27,12 @@ import {
   UploadOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
+import {
+  MATRIX_DISPLAY_MODES,
+  createDirectionCheckFrame,
+  createMatrixDisplayRenderers,
+  inferMatrixDisplayModeId,
+} from '@shroom/frontend/core/matrixDisplayModes.js';
 import { commandClient } from '../../services/command/commandClient';
 import { registerRuntimeDisplayDefinition } from '../../displays/registry';
 import useMainWebSocket from '../../services/ws/useMainWebSocket';
@@ -38,6 +44,7 @@ import { buildCoordinatePointLayout } from '../../components/displaySystem/coord
 import { calculatePressureMetrics } from '../../components/displaySystem/displayProfileRuntime';
 import { applyMatrixTransform } from '../../displays/matrixTransform';
 import { DEFAULT_COLORMAP_ID } from '../../components/displaySystem/colormaps';
+import RendererHost from '../../renderers/RendererHost.jsx';
 import './DisplaySystemBuilder.css';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:19245';
@@ -46,7 +53,7 @@ const DEFAULT_VALUES = {
   id: '',
   name: '',
   serialTemplate: 'pressure-fixed-length',
-  displayTemplate: 'heatmap-overview',
+  displayTemplate: 'shape-heatmap-2d',
   version: '1.0.0',
   sensorType: '',
   ports: ['sit'],
@@ -85,7 +92,7 @@ const DEFAULT_VALUES = {
   matrixTransformType: 'none',
   matrixTransformFactor: 1,
   profileLabel: '默认方案',
-  canvasConfig: null,
+  canvasConfig: buildDefaultCanvasConfig(),
   showPressurePanel: true,
   pressurePanelTitle: 'Pressure Data',
   primaryMetric: 'totalPressure',
@@ -111,7 +118,7 @@ const DEFAULT_VALUES = {
  */
 function buildDefaultCanvasConfig({
   rendererId = 'heatmap',
-  showStats = true,
+  showStats = false,
   source = 'sitData',
 } = {}) {
   const widgets = [{
@@ -386,8 +393,9 @@ function compactObject(value) {
  * 使用固定模拟数据展示热力图或数字矩阵的视觉差异，不参与真实传感器计算。
  */
 function DisplayTemplatePreview({ rendererId = 'heatmap', large = false }) {
-  const isMatrix = rendererId === 'matrix';
+  const isMatrix = rendererId === 'matrix' || rendererId === 'numMatrix';
   const isRaw = rendererId === 'raw2d';
+  const isPointGrid = rendererId === 'pointGrid';
   const cells = Array.from({ length: 48 }, (_, index) => {
     const row = Math.floor(index / 8);
     const col = index % 8;
@@ -412,6 +420,7 @@ function DisplayTemplatePreview({ rendererId = 'heatmap', large = false }) {
               key={cell.index}
             >
               {isMatrix ? cell.value : null}
+              {isPointGrid ? <b style={{ height: `${4 + cell.level * 3}px` }} /> : null}
               {isRaw ? <i /> : null}
             </span>
           ))}
@@ -501,7 +510,7 @@ function buildFormValues(editor) {
     sensorType: manifest.sensor?.type || '',
     serialTemplate: inferSerialTemplate(manifest),
     displayTemplate: manifest.metadata?.builder?.displayTemplate
-      || (profile.renderer === 'matrix' ? 'numeric-matrix' : 'heatmap-overview'),
+      || inferMatrixDisplayModeId(profile.renderer),
     ports: manifest.sensor?.ports || ['sit'],
     transportType: manifest.metadata?.builder?.transportType || 'binary',
     baudRate: manifest.protocol?.baudRate || 1000000,
@@ -609,9 +618,10 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
   const showAreaPanel = Form.useWatch('showAreaPanel', form);
   const canvasConfig = Form.useWatch('canvasConfig', form);
   const [previewFrames, setPreviewFrames] = useState({});
+  const [previewDataMode, setPreviewDataMode] = useState('direction');
 
-  // 显示验证步骤只用真实帧，不做任何模拟。这里的解包逻辑与
-  // ManifestDisplayRenderer 一致，保证配置时看到的和运行时看到的是同一份数据。
+  // 实时帧的解包逻辑与 ManifestDisplayRenderer 一致。用户可以显式选择
+  // 1..N 方向测试帧或串口实时帧，页面不再暗中切换数据来源。
   const handlePreviewMessage = useCallback((message) => {
     if (!message || typeof message !== 'object') return;
     setPreviewFrames((current) => {
@@ -671,6 +681,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
       setSelectedId(null);
       setEditorAccess({ editable: true, origin: 'user' });
       setActiveStep('connection');
+      setPreviewDataMode('direction');
       form.setFieldsValue({
         ...DEFAULT_VALUES,
         ...values,
@@ -692,6 +703,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
         origin: payload.editor?.origin || 'system',
       });
       setActiveStep('connection');
+      setPreviewDataMode('direction');
       form.setFieldsValue(buildFormValues(payload.editor));
     } catch (error) {
       message.error(error.message);
@@ -701,8 +713,11 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
   }, [form]);
 
   const rendererOptions = useMemo(
-    () => (catalog?.renderers || []).map((item) => ({ value: item.id, label: item.label })),
-    [catalog],
+    () => MATRIX_DISPLAY_MODES.map((item) => ({
+      value: item.rendererId,
+      label: item.label,
+    })),
+    [],
   );
   const visualizationOptions = useMemo(
     () => (catalog?.visualizationAlgorithms || []).map((item) => ({ value: item.id, label: item.label })),
@@ -722,7 +737,8 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     [catalog, serialTemplate],
   );
   const selectedDisplayTemplate = useMemo(
-    () => catalog?.displayTemplates?.find((item) => item.id === displayTemplate),
+    () => MATRIX_DISPLAY_MODES.find((item) => item.id === displayTemplate)
+      || catalog?.displayTemplates?.find((item) => item.id === displayTemplate),
     [catalog, displayTemplate],
   );
   const algorithmModeOptions = useMemo(
@@ -758,6 +774,19 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
   }, [coordinateMapJson]);
   const matrixInfo = coordinateMapInfo || pointOrderInfo;
   const pointCount = pointOrderInfo?.pointCount || coordinateMapInfo?.pointCount || 0;
+  const matrixRenderers = useMemo(
+    () => createMatrixDisplayRenderers({
+      matrix: matrixInfo
+        ? { rows: matrixInfo.rows, cols: matrixInfo.cols }
+        : { rows: 1, cols: Math.max(pointCount, 1) },
+      coordinateMap: coordinateMapInfo?.definition,
+    }),
+    [coordinateMapInfo, matrixInfo, pointCount],
+  );
+  const selectedRendererDefinition = useMemo(
+    () => matrixRenderers.find((item) => item.id === rendererId),
+    [matrixRenderers, rendererId],
+  );
   const renderMatrixInfo = useMemo(() => {
     if (!matrixInfo) return null;
     const factor = Number(matrixTransformFactor) || 1;
@@ -778,10 +807,18 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
   // 预览通道就是第一个串口的数据通道；多口系统在这里只验证主通道，
   // 其余通道由保存后的运行时界面按 sensors[] 各自渲染。
   const previewChannel = ports?.[0] || 'sit';
-  const previewValues = useMemo(
+  const realtimePreviewValues = useMemo(
     () => previewFrames[previewChannel] || [],
     [previewChannel, previewFrames],
   );
+  const directionCheckValues = useMemo(
+    () => createDirectionCheckFrame(pointCount),
+    [pointCount],
+  );
+  const previewUsesDirectionData = previewDataMode === 'direction';
+  const previewValues = previewUsesDirectionData
+    ? directionCheckValues
+    : realtimePreviewValues;
   const previewLayout = useMemo(
     () => buildCoordinatePointLayout(coordinateMapInfo?.definition),
     [coordinateMapInfo],
@@ -854,7 +891,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
   const activeStepDescription = {
     connection: '选择数据协议并确认串口通信参数',
     mapping: '导入点位坐标并设置数据处理规则',
-    render: '确认展示模板、矩阵变换和数据面板',
+    render: '选择矩阵展示形式并检查点位方向',
   }[activeStep];
 
   const importCoordinateMapFile = useCallback(async (file) => {
@@ -944,7 +981,20 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
   }, [form]);
 
   const applyDisplayTemplate = useCallback((templateId) => {
-    const template = catalog?.displayTemplates?.find((item) => item.id === templateId);
+    const matrixMode = MATRIX_DISPLAY_MODES.find((item) => item.id === templateId);
+    const template = matrixMode
+      ? {
+        ...matrixMode,
+        defaults: {
+          rendererId: matrixMode.rendererId,
+          visualizationAlgorithmId: 'identity',
+          profileLabel: matrixMode.label,
+          showStats: false,
+          showPressurePanel: true,
+          showAreaPanel: true,
+        },
+      }
+      : catalog?.displayTemplates?.find((item) => item.id === templateId);
     if (!template) return;
     const defaults = template.defaults || {};
     form.setFieldsValue({
@@ -1089,6 +1139,10 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
         ...widget,
         source: `${primaryPort}Data`,
       }));
+      const displayRenderers = createMatrixDisplayRenderers({
+        matrix: { rows: normalizedMatrix.rows, cols: normalizedMatrix.cols },
+        coordinateMap: normalizedCoordinateMap?.definition,
+      });
 
       const visualizationAlgorithms = (catalog.visualizationAlgorithms || []).map((algorithm) => {
         const options = { ...(algorithm.options || {}) };
@@ -1157,7 +1211,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
             type: values.matrixTransformType,
             factor: values.matrixTransformFactor,
           },
-          views: (catalog.renderers || []).map((renderer) => ({
+          views: displayRenderers.map((renderer) => ({
             id: renderer.id,
             type: renderer.type,
             label: renderer.label,
@@ -1169,7 +1223,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
             overlays: canvas.overlays || [],
             widgets,
           },
-          renderers: catalog.renderers || [],
+          renderers: displayRenderers,
           visualizationAlgorithms,
           profiles: [{
             id: 'default',
@@ -1656,125 +1710,197 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
                 className="builder-module-panel render-module"
                 hidden={activeStep !== 'render'}
               >
-                  <div className="field-cluster template-picker-cluster">
-                    <div className="cluster-heading">
-                      <div><h3>选择展示模板</h3><p>缩略图展示保存后主界面的基础结构。</p></div>
-                      <strong>{selectedDisplayTemplate?.label || '未选择'}</strong>
+                  <Form.Item name="displayTemplate" hidden><Input /></Form.Item>
+                  {/* 画布配置只由当前矩阵形式生成，表单项负责把对象带进保存流程。 */}
+                  <Form.Item name="canvasConfig" hidden><FormValueHolder /></Form.Item>
+
+                  <div className="matrix-essential-settings">
+                    <section className="matrix-essential-item shape-setting">
+                      <div className="matrix-essential-index">01</div>
+                      <div className="matrix-essential-copy">
+                        <span>设置形状</span>
+                        <strong>{matrixInfo ? `${matrixInfo.rows} × ${matrixInfo.cols} 坐标矩阵` : '尚未设置形状'}</strong>
+                        <small>
+                          {matrixInfo
+                            ? `${pointCount} 个点 · 形状完全由坐标文件决定`
+                            : '导入 rows × cols × [x, y] 坐标 JSON'}
+                        </small>
+                      </div>
+                      <Upload
+                        accept=".json,application/json"
+                        beforeUpload={importCoordinateMapFile}
+                        disabled={readOnly}
+                        maxCount={1}
+                        showUploadList={false}
+                      >
+                        <Button icon={<UploadOutlined />}>
+                          {matrixInfo ? '更换形状文件' : '导入形状文件'}
+                        </Button>
+                      </Upload>
+                    </section>
+
+                    <section className="matrix-essential-item data-setting">
+                      <div className="matrix-essential-index">02</div>
+                      <div className="matrix-essential-copy">
+                        <span>设置数据</span>
+                        <strong>
+                          {previewUsesDirectionData
+                            ? (pointCount ? `测试帧 1-${pointCount}` : '等待形状文件')
+                            : (realtimePreviewValues.length
+                              ? `实时帧 ${realtimePreviewValues.length} 点`
+                              : '等待串口数据')}
+                        </strong>
+                        <small>
+                          {previewUsesDirectionData
+                            ? '用连续数字检查起点、终点和行列方向'
+                            : '直接查看当前串口解码后的最新一帧'}
+                        </small>
+                      </div>
+                      <Segmented
+                        className="preview-data-source"
+                        value={previewDataMode}
+                        onChange={setPreviewDataMode}
+                        options={[
+                          { value: 'direction', label: '1-N 测试数据' },
+                          { value: 'realtime', label: '串口实时数据' },
+                        ]}
+                      />
+                    </section>
+                  </div>
+
+                  <div className="matrix-display-setting">
+                    <div className="matrix-display-setting-heading">
+                      <div><span>显示方式</span><strong>{selectedDisplayTemplate?.label || '未选择'}</strong></div>
+                      <small>只改变画面，不改变形状和原始数据</small>
                     </div>
-                    <Form.Item name="displayTemplate" hidden><Input /></Form.Item>
-                    {/* 画布配置由 DisplayCanvasConfigurator 拖放产生，表单项只负责携带值。 */}
-                    <Form.Item name="canvasConfig" hidden><FormValueHolder /></Form.Item>
-                    <div className="display-template-grid" role="radiogroup" aria-label="展示模板">
-                      {(catalog?.displayTemplates || []).map((template) => {
+                    <div className="matrix-mode-picker" role="radiogroup" aria-label="矩阵展示形式">
+                      {MATRIX_DISPLAY_MODES.map((template) => {
                         const selected = template.id === displayTemplate;
-                        const templateRenderer = template.defaults?.rendererId || 'heatmap';
                         return (
                           <button
                             type="button"
                             role="radio"
                             aria-checked={selected}
-                            className={`display-template-card${selected ? ' is-selected' : ''}`}
+                            className={selected ? 'is-selected' : ''}
                             key={template.id}
                             disabled={readOnly}
                             onClick={() => applyDisplayTemplate(template.id)}
                           >
-                            <DisplayTemplatePreview rendererId={templateRenderer} />
-                            <span className="display-template-copy">
-                              <strong>{template.label}</strong>
-                              <small>{template.description}</small>
-                            </span>
-                            {selected ? <CheckCircleFilled className="template-card-check" /> : null}
+                            <DisplayTemplatePreview rendererId={template.rendererId || 'heatmap'} />
+                            <strong>{template.label}</strong>
+                            {selected ? <CheckCircleFilled /> : null}
                           </button>
                         );
                       })}
                     </div>
                   </div>
 
-                  <div className="field-cluster">
-                    <div className="cluster-heading">
-                      <div><h3>展示预览与参数</h3><p>左侧是当前渲染效果示意，右侧参数可以在模板基础上继续修改。</p></div>
+                  <div className="render-live-preview matrix-primary-preview">
+                    <div className="render-live-preview-heading">
+                      <span>结果预览</span>
+                      <strong>{rendererOptions.find((item) => item.value === rendererId)?.label || rendererId}</strong>
+                      <em className={previewUsesDirectionData ? 'is-direction-check' : 'is-realtime'}>
+                        {previewUsesDirectionData
+                          ? (pointCount > 0 ? `测试数据 1-${pointCount}` : '等待形状')
+                          : (realtimePreviewValues.length ? '串口实时数据' : '等待串口')}
+                      </em>
                     </div>
-                    <div className="render-config-workbench">
-                      <div className="render-live-preview">
-                        <div className="render-live-preview-heading">
-                          <span>主界面预览</span>
-                          <strong>{rendererOptions.find((item) => item.value === rendererId)?.label || rendererId}</strong>
-                        </div>
-                        <DisplayCanvasConfigurator
-                          value={canvasConfig}
-                          onChange={updateCanvasConfig}
-                          renderers={catalog?.renderers || []}
-                          colormapIds={catalog?.colormaps?.map((item) => item.id) || null}
-                          readOnly={readOnly}
-                          emptyState={(
-                            <div className="canvas-empty-state">
-                              {previewValues.length ? (
-                                <>
-                                  <strong>画布是空的</strong>
-                                  <small>从下面的「画布组件」里拖一个卡片上来，保存后主界面就按这个布局显示。</small>
-                                </>
-                              ) : (
-                                <>
-                                  <strong>未收到数据</strong>
-                                  <small>请在「数据接入」步骤打开串口后返回此步，这里只显示真实采集到的帧。</small>
-                                  <Button size="small" onClick={() => setActiveStep('connection')}>
-                                    去打开串口
-                                  </Button>
-                                </>
-                              )}
-                            </div>
+                    <DisplayCanvasConfigurator
+                      value={canvasConfig}
+                      onChange={updateCanvasConfig}
+                      renderers={matrixRenderers}
+                      colormapIds={catalog?.colormaps?.map((item) => item.id) || null}
+                      readOnly={readOnly}
+                      simple
+                      emptyState={(
+                        <div className="canvas-empty-state">
+                          {previewUsesDirectionData ? (
+                            <>
+                              <strong>先设置形状</strong>
+                              <small>导入坐标文件后，这里会立即显示 1 到点位总数。</small>
+                            </>
+                          ) : (
+                            <>
+                              <strong>等待串口数据</strong>
+                              <small>串口解码出一帧数据后，这里会立即显示。</small>
+                            </>
                           )}
-                        >
-                          {previewValues.length ? (
-                            <div className="manifest-widget-grid">
-                              {previewCards.map(({ widget, values, matrix: cardMatrix }) => {
-                                if (widget.type === 'pressureStats') {
-                                  return (
-                                    <StatsWidget
-                                      key={widget.id}
-                                      label={widget.label || widget.id}
-                                      metrics={previewMetrics}
-                                      columnSpan={widget.columnSpan}
-                                    />
-                                  );
-                                }
-                                if (previewLayout) {
-                                  return (
-                                    <CoordinatePointWidget
-                                      key={widget.id}
-                                      label={widget.label || widget.id}
-                                      layout={previewLayout}
-                                      values={values}
-                                      showValues={widget.type !== 'heatmap'}
-                                      columnSpan={widget.columnSpan}
-                                      colormap={previewColormap}
-                                      overlays={previewOverlays}
-                                    />
-                                  );
-                                }
-                                return (
-                                  <MatrixWidget
-                                    key={widget.id}
+                        </div>
+                      )}
+                    >
+                      {previewValues.length ? (
+                        <div className="manifest-widget-grid">
+                          {previewCards.map(({ widget, values, matrix: cardMatrix }) => {
+                            if (widget.type === 'pressureStats') {
+                              return (
+                                <StatsWidget
+                                  key={widget.id}
+                                  label={widget.label || widget.id}
+                                  metrics={previewMetrics}
+                                  columnSpan={widget.columnSpan}
+                                />
+                              );
+                            }
+                            if (!['heatmap', 'matrix', 'raw2d'].includes(widget.type)) {
+                              return (
+                                <div
+                                  key={widget.id}
+                                  className="manifest-widget-slot builder-plugin-preview"
+                                  style={{ gridColumn: `span ${widget.columnSpan || 12}` }}
+                                >
+                                  <RendererHost
+                                    rendererId={widget.type}
                                     label={widget.label || widget.id}
-                                    matrix={cardMatrix}
+                                    params={selectedRendererDefinition?.params}
                                     values={values}
-                                    showValues={widget.type !== 'heatmap' && values.length <= 1024}
-                                    columnSpan={widget.columnSpan}
-                                    colormap={previewColormap}
-                                    overlays={previewOverlays}
+                                    channel={previewChannel}
+                                    local
                                   />
-                                );
-                              })}
-                            </div>
-                          ) : null}
-                        </DisplayCanvasConfigurator>
-                        <small>
-                          {matrixInfo
-                            ? `${matrixInfo.rows} × ${matrixInfo.cols} 原始矩阵 → ${renderMatrixInfo.rows} × ${renderMatrixInfo.cols} 渲染矩阵`
-                            : '导入坐标后将按真实传感器形状渲染'}
-                        </small>
-                      </div>
-                      <div className="render-main-controls">
+                                </div>
+                              );
+                            }
+                            if (previewLayout) {
+                              return (
+                                <CoordinatePointWidget
+                                  key={widget.id}
+                                  label={widget.label || widget.id}
+                                  layout={previewLayout}
+                                  values={values}
+                                  showValues={widget.type !== 'heatmap'}
+                                  columnSpan={widget.columnSpan}
+                                  colormap={previewColormap}
+                                  overlays={previewOverlays}
+                                />
+                              );
+                            }
+                            return (
+                              <MatrixWidget
+                                key={widget.id}
+                                label={widget.label || widget.id}
+                                matrix={cardMatrix}
+                                values={values}
+                                showValues={widget.type !== 'heatmap' && values.length <= 1024}
+                                columnSpan={widget.columnSpan}
+                                colormap={previewColormap}
+                                overlays={previewOverlays}
+                              />
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </DisplayCanvasConfigurator>
+                    <small>
+                      {matrixInfo
+                        ? `${matrixInfo.rows} × ${matrixInfo.cols} 原始矩阵 → ${renderMatrixInfo.rows} × ${renderMatrixInfo.cols} 渲染矩阵`
+                        : '形状文件同时决定矩阵尺寸、点位数量和方向'}
+                    </small>
+                  </div>
+
+                  <details className="render-main-controls render-advanced-controls matrix-render-advanced">
+                        <summary>
+                          <SettingOutlined />
+                          <span><strong>高级显示设置</strong><small>插值、缩小、过滤和数据面板</small></span>
+                        </summary>
                         <div className="form-grid render-fields-grid">
                           <Form.Item name="profileLabel" label="方案名称"><Input /></Form.Item>
                           <Form.Item name="rendererId" label="默认渲染器"><Select options={rendererOptions} /></Form.Item>
@@ -1808,9 +1934,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
                           <Form.Item name="showPressurePanel" valuePropName="checked"><Checkbox>压力数据图表</Checkbox></Form.Item>
                           <Form.Item name="showAreaPanel" valuePropName="checked"><Checkbox>受压面积图表</Checkbox></Form.Item>
                         </div>
-                      </div>
-                    </div>
-                  </div>
+                  </details>
 
                   <details className="advanced-config module-advanced">
                     <summary>
@@ -1939,7 +2063,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
             <dt>显示矩阵</dt>
             <dd>{renderMatrixInfo ? `${renderMatrixInfo.rows} × ${renderMatrixInfo.cols}` : '待导入'}</dd>
           </div>
-          <div><dt>展示模板</dt><dd>{selectedDisplayTemplate?.label || '未选择'}</dd></div>
+          <div><dt>矩阵形式</dt><dd>{selectedDisplayTemplate?.label || '未选择'}</dd></div>
         </dl>
 
         <p className="summary-footnote">

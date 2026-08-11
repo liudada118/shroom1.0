@@ -75,9 +75,9 @@ export default function QuickStart() {
           <BasicNumMatrix presetId="fast1024" colormapId="classic" />
         </DemoCard>
         <Note tone="warn" title="为什么画面是缩小的">
-          两个内置渲染器都是**按视口尺寸**画的，不是按容器
+          数字矩阵的旧 3D 后端仍按**视口尺寸**画，点阵热力已经按容器尺寸画
           （<C>sprite3d.js</C> 用 <C>window.innerHeight</C>，
-          <C>PointGridRenderer</C> 用 <C>window.innerWidth/Height</C>）。
+          （<C>PointGridRenderer</C> 通过 <C>ResizeObserver</C> 跟随容器）。
           本站给它一个视口大小的容器让它按自己的规矩画，再用 CSS
           <C>transform: scale()</C> 缩进卡片 —— 所以你看到的**就是**全屏装出来的那一张，
           只是小了。代价是指针坐标对不上，缩放态下交互是关掉的。

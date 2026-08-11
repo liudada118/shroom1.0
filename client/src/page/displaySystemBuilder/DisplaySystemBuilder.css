@@ -2223,6 +2223,7 @@
 }
 
 .display-template-card {
+  grid-template-columns: minmax(145px, 0.8fr) minmax(0, 1fr);
   min-height: 152px;
   padding: 11px;
   background: #0d1823;
@@ -2266,14 +2267,343 @@
   color: #79b7ff;
 }
 
+/* 显示配置只保留“形状、数据、结果”三层，复杂参数继续留在折叠区。 */
+.matrix-essential-settings {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.matrix-essential-item {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 106px;
+  padding: 16px;
+  background: #0b1722;
+  border: 1px solid #293b4d;
+  border-radius: 6px;
+}
+
+.matrix-essential-index {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  color: #7e92a4;
+  font-size: 11px;
+  background: #111f2b;
+  border: 1px solid #34495d;
+  border-radius: 50%;
+  place-items: center;
+}
+
+.matrix-essential-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.matrix-essential-copy > span,
+.matrix-display-setting-heading span {
+  color: #718599;
+  font-size: 10px;
+}
+
+.matrix-essential-copy > span {
+  color: #c1ced9;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.matrix-essential-copy > strong {
+  overflow: hidden;
+  color: #e5edf4;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matrix-essential-copy > small,
+.matrix-display-setting-heading small {
+  color: #7e90a1;
+  font-size: 10px;
+}
+
+.preview-data-source {
+  min-width: 220px;
+}
+
+.matrix-display-setting {
+  margin-bottom: 12px;
+  padding: 14px;
+  background: #0b1722;
+  border: 1px solid #293b4d;
+  border-radius: 6px;
+}
+
+.matrix-display-setting-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+
+.matrix-display-setting-heading > div {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.matrix-display-setting-heading strong {
+  color: #dbe7f1;
+  font-size: 13px;
+}
+
+.matrix-mode-picker {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.matrix-mode-picker > button {
+  position: relative;
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px;
+  color: #9caebb;
+  font: inherit;
+  background: #0d1924;
+  border: 1px solid #2b3d4e;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.matrix-mode-picker > button:hover {
+  color: #e5eef5;
+  background: #122231;
+  border-color: #476681;
+}
+
+.matrix-mode-picker > button.is-selected {
+  color: #eef6fc;
+  background: #102a45;
+  border-color: #368cff;
+  box-shadow: inset 0 0 0 1px rgb(54 140 255 / 18%);
+}
+
+.matrix-mode-picker > button > strong {
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matrix-mode-picker > button > .anticon {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  color: #63a9ff;
+  font-size: 14px;
+}
+
+.matrix-mode-picker .display-template-preview {
+  height: 76px;
+}
+
+.matrix-mode-picker .template-preview-body {
+  grid-template-columns: minmax(0, 1fr);
+  padding: 6px;
+}
+
+.matrix-mode-picker .template-preview-metrics {
+  display: none;
+}
+
+.matrix-primary-preview {
+  margin-bottom: 12px;
+  padding: 14px;
+}
+
+.matrix-primary-preview .canvas-drop-area {
+  min-height: 300px;
+}
+
+.matrix-render-advanced {
+  margin-bottom: 12px;
+}
+
+@media (max-width: 1100px) {
+  .matrix-essential-settings {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .matrix-essential-item {
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+
+  .matrix-essential-item > .ant-upload-wrapper,
+  .matrix-essential-item > .preview-data-source {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .matrix-essential-item .ant-btn,
+  .preview-data-source {
+    width: 100%;
+  }
+
+  .matrix-display-setting-heading {
+    align-items: start;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .matrix-mode-picker {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .matrix-mode-picker > button:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+.display-template-copy small {
+  text-wrap: balance;
+}
+
+.render-live-preview-heading em {
+  margin-left: auto;
+  padding: 3px 7px;
+  color: #91a4b5;
+  font-size: 10px;
+  font-style: normal;
+  background: #111f2b;
+  border: 1px solid #2c4053;
+  border-radius: 3px;
+}
+
+.render-live-preview-heading em.is-direction-check {
+  color: #f0c96d;
+  background: #251f11;
+  border-color: #5b4a22;
+}
+
+.render-live-preview-heading em.is-realtime {
+  color: #63d790;
+  background: #10251d;
+  border-color: #25503b;
+}
+
+.is-numMatrix .preview-cell {
+  color: #d8e8f8;
+  background: #12263a;
+  border-bottom: 2px solid #2f76ae;
+  transform: skewY(-5deg);
+}
+
+.is-pointGrid .template-preview-grid {
+  align-items: end;
+  perspective: 180px;
+  transform: rotateX(48deg);
+  transform-origin: center bottom;
+}
+
+.is-pointGrid .preview-cell {
+  position: relative;
+  overflow: visible;
+  background: #10202c;
+}
+
+.is-pointGrid .preview-cell b {
+  position: absolute;
+  bottom: 50%;
+  left: 50%;
+  width: 3px;
+  background: #4ca7ff;
+  border-radius: 2px 2px 0 0;
+  box-shadow: 0 0 5px rgb(76 167 255 / 55%);
+  transform: translateX(-50%);
+}
+
+.is-blobHeatmap .preview-cell {
+  border-radius: 50%;
+  filter: blur(1.5px);
+}
+
+.is-blobHeatmap .preview-cell.level-0 { background: #111d27; }
+.is-blobHeatmap .preview-cell.level-1 { background: #176a83; }
+.is-blobHeatmap .preview-cell.level-2 { background: #28a69c; }
+.is-blobHeatmap .preview-cell.level-3 { background: #d6c75a; }
+.is-blobHeatmap .preview-cell.level-4 { background: #ee8742; }
+.is-blobHeatmap .preview-cell.level-5 { background: #e24f45; }
+
+.render-advanced-controls {
+  overflow: hidden;
+  background: #0b1722;
+  border: 1px solid #293b4d;
+  border-radius: 5px;
+}
+
+.render-advanced-controls > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 54px;
+  padding: 0 14px;
+  color: #8fa2b3;
+  cursor: pointer;
+  list-style: none;
+}
+
+.render-advanced-controls > summary::-webkit-details-marker {
+  display: none;
+}
+
+.render-advanced-controls > summary > span {
+  display: grid;
+  gap: 2px;
+}
+
+.render-advanced-controls > summary strong {
+  color: #d5e0e9;
+  font-size: 12px;
+}
+
+.render-advanced-controls > summary small {
+  color: #6f8293;
+  font-size: 10px;
+}
+
+.render-advanced-controls[open] > summary {
+  border-bottom: 1px solid #293b4d;
+}
+
+.render-advanced-controls .render-fields-grid,
+.render-advanced-controls .render-widget-toggles {
+  margin: 14px;
+}
+
+.builder-plugin-preview {
+  min-width: 0;
+  min-height: 340px;
+  overflow: hidden;
+  background: #050b10;
+}
+
 .render-widget-toggles {
   border-top-color: #243444;
 }
 
 .module-footer {
-  position: sticky;
+  position: static;
   z-index: 3;
-  bottom: 0;
   min-height: 72px;
   gap: 12px;
   padding: 12px 0;
@@ -2608,6 +2938,7 @@
   }
 
   .module-footer {
+    position: static;
     align-items: stretch;
     flex-direction: column;
     padding: 16px 0;
