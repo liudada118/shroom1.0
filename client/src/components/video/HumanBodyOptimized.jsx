@@ -9,6 +9,7 @@ import React, {
   useState,
 } from "react";
 import { HUMAN_BODY_SENSOR_PARTS } from "./humanBody";
+import { HUMAN_BODY_NUMBER_PART_LABELS } from "./humanBodyNumberLabels";
 import {
   getSourceGridPosition,
   orientPartMatrix,
@@ -241,19 +242,6 @@ const NUMBER_VIEW_PARTS = {
   backLegs: ["backPantsLeft", "backPantsRight"],
 };
 
-const NUMBER_PART_LABELS = {
-  chest: "前胸",
-  back: "后背",
-  leftShoulder: "左肩",
-  leftArm: "左手臂",
-  rightShoulder: "右肩",
-  rightArm: "右手臂",
-  frontPantsLeft: "左前腿",
-  frontPantsRight: "右前腿",
-  backPantsLeft: "左后腿",
-  backPantsRight: "右后腿",
-};
-
 const NUMBER_HORIZONTAL_FLIP_PARTS = new Set([
   "back",
   "chest",
@@ -340,7 +328,7 @@ const RegionNumberPanel = React.forwardRef(({ activeRegion }, ref) => {
       ctx.font = "11px Arial";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(`${NUMBER_PART_LABELS[part.key]} ${part.width}×${part.height}`, padding + x + gridWidth / 2, padding + titleHeight / 2);
+      ctx.fillText(`${HUMAN_BODY_NUMBER_PART_LABELS[part.key]} ${part.width}×${part.height}`, padding + x + gridWidth / 2, padding + titleHeight / 2);
       const values = getOrientedPartValues(frameRef.current, part);
       values.forEach((rowValues, row) => {
         rowValues.forEach((value, col) => {

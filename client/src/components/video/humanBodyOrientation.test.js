@@ -31,18 +31,40 @@ describe("人体区域方向", () => {
     });
   });
 
-  it.each(["backPantsLeft", "backPantsRight"])("%s 的3D首尾行上下翻转", (partKey) => {
-    expect(getSourceGridPosition(partKey, 1, 1, 32, 5, 8, 5)).toEqual({
+  it("左后腿的3D同时上下和左右翻转", () => {
+    expect(getSourceGridPosition("backPantsLeft", 1, 1, 32, 5, 8, 5)).toEqual({
+      sourceRow: 7,
+      sourceCol: 4,
+    });
+    expect(getSourceGridPosition("backPantsLeft", 32, 5, 32, 5, 8, 5)).toEqual({
+      sourceRow: 0,
+      sourceCol: 0,
+    });
+  });
+
+  it("右后腿的3D只上下翻转", () => {
+    expect(getSourceGridPosition("backPantsRight", 1, 1, 32, 5, 8, 5)).toEqual({
       sourceRow: 7,
       sourceCol: 0,
     });
-    expect(getSourceGridPosition(partKey, 32, 5, 32, 5, 8, 5)).toEqual({
+    expect(getSourceGridPosition("backPantsRight", 32, 5, 32, 5, 8, 5)).toEqual({
       sourceRow: 0,
       sourceCol: 4,
     });
   });
 
-  it.each(["leftArm", "rightArm", "leftShoulder", "rightShoulder"])(
+  it("正面屏幕右侧前腿的3D首尾列左右翻转", () => {
+    expect(getSourceGridPosition("frontPantsRight", 1, 1, 32, 5, 8, 5)).toEqual({
+      sourceRow: 0,
+      sourceCol: 4,
+    });
+    expect(getSourceGridPosition("frontPantsRight", 32, 5, 32, 5, 8, 5)).toEqual({
+      sourceRow: 7,
+      sourceCol: 0,
+    });
+  });
+
+  it.each(["leftArm", "leftShoulder"])(
     "%s 的3D行列保持原方向",
     (partKey) => {
       expect(getSourceGridPosition(partKey, 1, 1, 6, 15, 6, 7)).toEqual({
@@ -56,14 +78,38 @@ describe("人体区域方向", () => {
     },
   );
 
-  it("手臂和肩部的2D矩阵保持原始行列", () => {
+  it("右手臂的3D上下保持、左右翻转", () => {
+    expect(getSourceGridPosition("rightArm", 1, 1, 6, 15, 6, 7)).toEqual({
+      sourceRow: 0,
+      sourceCol: 6,
+    });
+    expect(getSourceGridPosition("rightArm", 6, 15, 6, 15, 6, 7)).toEqual({
+      sourceRow: 5,
+      sourceCol: 0,
+    });
+  });
+
+  it("右肩的3D上下保持、左右翻转", () => {
+    expect(getSourceGridPosition("rightShoulder", 1, 1, 6, 5, 6, 3)).toEqual({
+      sourceRow: 0,
+      sourceCol: 2,
+    });
+    expect(getSourceGridPosition("rightShoulder", 6, 5, 6, 5, 6, 3)).toEqual({
+      sourceRow: 5,
+      sourceCol: 0,
+    });
+  });
+
+  it("手臂、肩部和右前腿的2D矩阵不应用3D专用左右翻转", () => {
     const armRows = [[1, 2], [3, 4]];
     const shoulderRows = [[5, 6], [7, 8]];
+    const frontLegRows = [[9, 10], [11, 12]];
 
     expect(orientPartMatrix("rightArm", armRows)).toEqual(armRows);
     expect(orientPartMatrix("leftArm", armRows)).toEqual(armRows);
     expect(orientPartMatrix("rightShoulder", shoulderRows)).toEqual(shoulderRows);
     expect(orientPartMatrix("leftShoulder", shoulderRows)).toEqual(shoulderRows);
+    expect(orientPartMatrix("frontPantsRight", frontLegRows)).toEqual(frontLegRows);
   });
 
   it.each(["back", "backPantsLeft", "backPantsRight"])(
@@ -85,17 +131,6 @@ describe("人体区域方向", () => {
 
   it("未知模型区域不会误读任意数据部位", () => {
     expect(resolveSensorPartKey("未知区域")).toBeUndefined();
-  });
-
-  it("右手臂不再执行旧的上下翻转", () => {
-    expect(getSourceGridPosition("rightArm", 1, 1, 6, 15, 6, 7)).toEqual({
-      sourceRow: 0,
-      sourceCol: 0,
-    });
-    expect(getSourceGridPosition("rightArm", 6, 15, 6, 15, 6, 7)).toEqual({
-      sourceRow: 5,
-      sourceCol: 6,
-    });
   });
 
   it("未配置区域保持原行方向", () => {
