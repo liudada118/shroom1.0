@@ -44,8 +44,8 @@ const getBrowserStorage = () => {
   }
 };
 
-const BG_PRESETS = ["#e6e6e6", "#10152b", "#0f2027", "#000000"];
-const MODEL_PRESETS = ["#d2d6dc", "#4a5568", "#718096", "#4fd1c5"];
+const BG_PRESETS = ["#afacac", "#10152b", "#0f2027", "#000000"];
+const MODEL_PRESETS = ["#718096", "#4a5568", "#d2d6dc", "#4fd1c5"];
 const VISIBLE_RENDER_MODES = [
   ["heatmap", "热力"],
   ["crystal", "水晶"],

@@ -14,14 +14,14 @@ import {
 describe("human body render settings", () => {
   it("uses the compact rendering defaults", () => {
     expect(DEFAULT_HUMAN_BODY_RENDER_SETTINGS).toMatchObject({
-      version: 2,
+      version: 3,
       mode: "heatmap",
       radius: 0.13,
       intensity: 0.8,
       opacity: 0.15,
       colorScheme: 0,
-      bgColor: "#e6e6e6",
-      modelColor: "#d2d6dc",
+      bgColor: "#afacac",
+      modelColor: "#718096",
       settingsCollapsed: false,
       overviewAutoRotate: true,
     });
@@ -69,14 +69,30 @@ describe("human body render settings", () => {
       version: 1,
       bgColor: "#0a0a0f",
       modelColor: "#6a7a8a",
-    })).toMatchObject({ version: 2, bgColor: "#e6e6e6", modelColor: "#d2d6dc" });
+    })).toMatchObject({ version: 3, bgColor: "#afacac", modelColor: "#718096" });
 
     expect(normalizeHumanBodyRenderSettings({
       ...DEFAULT_HUMAN_BODY_RENDER_SETTINGS,
       version: 1,
       bgColor: "#10152b",
       modelColor: "#4a5568",
-    })).toMatchObject({ version: 2, bgColor: "#10152b", modelColor: "#4a5568" });
+    })).toMatchObject({ version: 3, bgColor: "#10152b", modelColor: "#4a5568" });
+  });
+
+  it("migrates the version two defaults to the latest colors", () => {
+    expect(normalizeHumanBodyRenderSettings({
+      ...DEFAULT_HUMAN_BODY_RENDER_SETTINGS,
+      version: 2,
+      bgColor: "#e6e6e6",
+      modelColor: "#d2d6dc",
+    })).toMatchObject({ version: 3, bgColor: "#afacac", modelColor: "#718096" });
+
+    expect(normalizeHumanBodyRenderSettings({
+      ...DEFAULT_HUMAN_BODY_RENDER_SETTINGS,
+      version: 2,
+      bgColor: "#10152b",
+      modelColor: "#4a5568",
+    })).toMatchObject({ version: 3, bgColor: "#10152b", modelColor: "#4a5568" });
   });
 
   it("reads and writes one safe versioned localStorage object", () => {
