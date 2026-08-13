@@ -9,6 +9,7 @@ import React, {
   useState,
 } from "react";
 import { HUMAN_BODY_SENSOR_PARTS } from "./humanBody";
+import { getSourceGridPosition, orientPartRows } from "./humanBodyOrientation";
 
 const MODEL_URL = "./model/human3.glb";
 const SENSOR_LAYOUT_URL = "./model/sensor_canvas_positions.json";
@@ -126,12 +127,15 @@ function resolvePartKey(sensor) {
 }
 
 function buildSample(sensor, targetRows, targetCols, part) {
-  const sourceRow = targetRows > 1
-    ? ((sensor.row - 1) / (targetRows - 1)) * (part.height - 1)
-    : 0;
-  const sourceCol = targetCols > 1
-    ? ((sensor.col - 1) / (targetCols - 1)) * (part.width - 1)
-    : 0;
+  const { sourceRow, sourceCol } = getSourceGridPosition(
+    part.key,
+    sensor.row,
+    sensor.col,
+    targetRows,
+    targetCols,
+    part.height,
+    part.width,
+  );
   const row0 = Math.floor(sourceRow);
   const row1 = Math.min(part.height - 1, row0 + 1);
   const col0 = Math.floor(sourceCol);
@@ -282,6 +286,7 @@ function getOrientedPartValues(frame, part) {
       .slice(row * part.width, (row + 1) * part.width)
       .map((position) => Number(frame[position - 1]) || 0)
   ));
+  rows = orientPartRows(part.key, rows);
   if (NUMBER_HORIZONTAL_FLIP_PARTS.has(part.key)) rows = rows.map((row) => [...row].reverse());
   if (NUMBER_VERTICAL_FLIP_PARTS.has(part.key)) rows = [...rows].reverse();
   return rows;
