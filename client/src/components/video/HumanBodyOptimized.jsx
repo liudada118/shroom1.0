@@ -487,6 +487,8 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
   const hoveredSensorRef = useRef(null);
   const optionsRef = useRef({ ...DEFAULT_OPTIONS, ...props.renderOptions });
   const flightRef = useRef(null);
+  const resetAutoRotateTimerRef = useRef(null);
+  const viewAutoRotateRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [sensorCount, setSensorCount] = useState(0);
@@ -587,6 +589,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
     let candidateSensor = null;
     let candidatePointer = null;
     let suspendedAutoRotate = null;
+    let pendingAutoRotateEnable = false;
     const raycaster = new THREE.Raycaster();
     const pointerNdc = new THREE.Vector2();
     const canvas = renderer.domElement;
@@ -612,8 +615,9 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
 
     const restoreAutoRotate = () => {
       if (suspendedAutoRotate === null) return;
-      controls.autoRotate = suspendedAutoRotate;
+      controls.autoRotate = pendingAutoRotateEnable ? true : suspendedAutoRotate;
       suspendedAutoRotate = null;
+      pendingAutoRotateEnable = false;
     };
 
     const hideHoverPanel = () => {
@@ -632,6 +636,35 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
       candidatePointer = null;
       hideHoverPanel();
       if (restoreRotation) restoreAutoRotate();
+    };
+
+    const cancelResetAutoRotate = () => {
+      if (resetAutoRotateTimerRef.current !== null) {
+        window.clearTimeout(resetAutoRotateTimerRef.current);
+        resetAutoRotateTimerRef.current = null;
+      }
+      pendingAutoRotateEnable = false;
+    };
+
+    viewAutoRotateRef.current = {
+      beginFlight() {
+        cancelResetAutoRotate();
+        clearHover({ cancelPointer: true });
+        controls.autoRotate = false;
+      },
+      scheduleEnable() {
+        cancelResetAutoRotate();
+        resetAutoRotateTimerRef.current = window.setTimeout(() => {
+          resetAutoRotateTimerRef.current = null;
+          if (disposed) return;
+          if (dragging || suspendedAutoRotate !== null) {
+            pendingAutoRotateEnable = true;
+            controls.autoRotate = false;
+            return;
+          }
+          controls.autoRotate = true;
+        }, 1250);
+      },
     };
 
     const showStableCandidate = (sensor, pointer) => {
@@ -885,6 +918,8 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
 
     return () => {
       disposed = true;
+      cancelResetAutoRotate();
+      viewAutoRotateRef.current = null;
       canvas.removeEventListener("pointermove", handlePointerMove);
       canvas.removeEventListener("pointerleave", handlePointerLeave);
       controls.removeEventListener("start", handleControlsStart);
@@ -948,6 +983,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
     const controls = controlsRef.current;
     const view = REGION_VIEWS[regionKey];
     if (!camera || !controls || !view) return;
+    viewAutoRotateRef.current?.beginFlight();
     controls.autoRotate = false;
     setActiveRegion(regionKey);
     flightRef.current = {
@@ -962,9 +998,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
 
   const resetView = () => {
     flyTo("overview");
-    window.setTimeout(() => {
-      if (controlsRef.current) controlsRef.current.autoRotate = true;
-    }, 1250);
+    viewAutoRotateRef.current?.scheduleEnable();
   };
 
   return (
