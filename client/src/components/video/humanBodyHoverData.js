@@ -50,7 +50,7 @@ export function findNearestHumanBodySensor(point, sensors, maxDistance = HOVER_M
     const distanceSquared = (candidate.x - target.x) ** 2
       + (candidate.y - target.y) ** 2
       + (candidate.z - target.z) ** 2;
-    if (distanceSquared - maximumDistanceSquared > Number.EPSILON) return;
+    if (distanceSquared > maximumDistanceSquared) return;
 
     const isCloser = distanceSquared < nearestDistanceSquared;
     const isStableTie = distanceSquared === nearestDistanceSquared

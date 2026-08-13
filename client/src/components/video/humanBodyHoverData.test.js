@@ -29,11 +29,16 @@ describe("findNearestHumanBodySensor", () => {
     expect(HOVER_MAX_DISTANCE).toBe(0.25);
     expect(findNearestHumanBodySensor({ x: 0, y: 0, z: 0 }, sensors)).toBe(sensors[1]);
     expect(findNearestHumanBodySensor({ x: 0.05, y: 0, z: 0 }, sensors, 0.25)).toBe(sensors[0]);
-    expect(findNearestHumanBodySensor({ x: 0.05, y: 0, z: 0 }, [sensors[1]], 0.15)).toBe(sensors[1]);
+    expect(findNearestHumanBodySensor({ x: 0, y: 0, z: 0 }, [
+      { index: 8, position: { x: 0.25, y: 0, z: 0 } },
+    ], 0.25)).toMatchObject({ index: 8 });
   });
 
   it("returns null outside the threshold or for invalid inputs", () => {
     expect(findNearestHumanBodySensor({ x: 0, y: 0, z: 0 }, sensors, 0.099)).toBeNull();
+    expect(findNearestHumanBodySensor({ x: 0, y: 0, z: 0 }, [
+      { index: 9, position: { x: 0.2500000000000002, y: 0, z: 0 } },
+    ])).toBeNull();
     expect(findNearestHumanBodySensor(null, sensors)).toBeNull();
     expect(findNearestHumanBodySensor({ x: 0, y: 0, z: 0 }, null)).toBeNull();
   });

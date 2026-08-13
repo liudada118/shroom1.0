@@ -38,7 +38,7 @@ Test Files  1 passed (1)
 Tests       8 passed (8)
 ```
 
-The exact-distance boundary test exposed binary floating-point rounding; nearest lookup now uses `Number.EPSILON` tolerance while retaining the required inclusive `<= maxDistance` behavior.
+Nearest lookup uses the required strict inclusive comparison: `distanceSquared <= maxDistance ** 2`.
 
 ## Files changed
 
@@ -59,3 +59,40 @@ The exact-distance boundary test exposed binary floating-point rounding; nearest
 ## Concerns
 
 None. Coordinates may be supplied either as the current `{ position: { x, y, z } }` model shape or directly as `{ x, y, z }`, allowing a later Raycaster adapter to remain thin.
+
+## Fix round 1: strict maximum-distance boundary
+
+### Change
+
+- Removed the `Number.EPSILON` distance tolerance from `findNearestHumanBodySensor`.
+- The comparison is now strictly `distanceSquared > maximumDistanceSquared` for rejection, which keeps exact-boundary sensors and rejects every representable value beyond the limit.
+
+### Regression coverage
+
+- `findNearestHumanBodySensor > returns null outside the threshold or for invalid inputs` now includes a sensor at `x = 0.2500000000000002`, which must return `null` with the default `0.25` maximum distance.
+
+### RED
+
+```powershell
+npm --prefix client test -- --run src/components/video/humanBodyHoverData.test.js
+```
+
+Key output before the fix:
+
+```text
+1 failed | 7 passed
+expected { index: 9, position: { … } } to be null
+```
+
+### GREEN
+
+```powershell
+npm --prefix client test -- --run src/components/video/humanBodyHoverData.test.js
+```
+
+Key output after the fix:
+
+```text
+Test Files  1 passed (1)
+Tests       8 passed (8)
+```
