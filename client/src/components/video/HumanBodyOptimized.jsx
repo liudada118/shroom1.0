@@ -16,11 +16,19 @@ import {
   orientPartMatrix,
   resolveSensorPartKey,
 } from "./humanBodyOrientation";
+import {
+  buildHumanBodySensorNeighborhood,
+  clampHumanBodyHoverPosition,
+  findNearestHumanBodySensor,
+} from "./humanBodyHoverData";
 
 const MODEL_URL = "./model/human3.glb";
 const SENSOR_LAYOUT_URL = "./model/sensor_canvas_positions.json";
 const MAX_SHADER_SENSORS = 1200;
 const DEFAULT_OPTIONS = { max: 1555, size: 31, filter: 6 };
+const HOVER_DELAY_MS = 150;
+const HOVER_POINTER_OFFSET = 18;
+const HOVER_PANEL_SIZE = { width: 168, height: 144 };
 
 const BG_PRESETS = ["#0a0a0f", "#10152b", "#0f2027", "#000000"];
 const MODEL_PRESETS = ["#6a7a8a", "#4a5568", "#718096", "#4fd1c5"];
@@ -366,6 +374,100 @@ const RegionNumberPanel = React.forwardRef(({ activeRegion }, ref) => {
 
 RegionNumberPanel.displayName = "RegionNumberPanel";
 
+const HoverDataPanel = React.forwardRef(({ sensorsRef }, ref) => {
+  const [panel, setPanel] = useState({
+    visible: false,
+    sensor: null,
+    cells: [],
+    left: 0,
+    top: 0,
+  });
+
+  useImperativeHandle(ref, () => ({
+    show({ sensor, cells, left, top }) {
+      setPanel({ visible: true, sensor, cells, left, top });
+    },
+    refresh(frame) {
+      setPanel((current) => (
+        current.sensor
+          ? {
+            ...current,
+            cells: buildHumanBodySensorNeighborhood(
+              current.sensor,
+              sensorsRef.current,
+              frame,
+            ),
+          }
+          : current
+      ));
+    },
+    hide() {
+      setPanel((current) => (
+        current.visible ? { ...current, visible: false } : current
+      ));
+    },
+  }), [sensorsRef]);
+
+  const sensor = panel.sensor;
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        zIndex: 6,
+        pointerEvents: "none",
+        boxSizing: "border-box",
+        width: HOVER_PANEL_SIZE.width,
+        height: HOVER_PANEL_SIZE.height,
+        left: panel.left,
+        top: panel.top,
+        padding: "10px",
+        border: "1px solid rgba(125, 255, 211, 0.24)",
+        borderRadius: "9px",
+        background: "rgba(5, 10, 20, 0.88)",
+        color: "#dce8f5",
+        boxShadow: "0 8px 22px rgba(0, 0, 0, 0.28)",
+        backdropFilter: "blur(8px)",
+        opacity: panel.visible ? 1 : 0,
+        transform: panel.visible ? "translateY(0)" : "translateY(4px)",
+        transition: "opacity 150ms ease, transform 150ms ease",
+      }}
+      aria-hidden={!panel.visible}
+    >
+      <div style={{ fontSize: "11px", fontWeight: 700, lineHeight: "16px", color: "#b9fbe4", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {sensor?.part || "局部数据"}
+        {sensor ? ` · R${sensor.row + 1} C${sensor.col + 1}` : ""}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "4px", marginTop: "8px" }}>
+        {Array.from({ length: 9 }, (_, index) => {
+          const cell = panel.cells[index];
+          const isCenter = index === 4;
+          return (
+            <div
+              key={index}
+              style={{
+                height: "30px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                border: `1px solid ${isCenter ? "rgba(0, 255, 170, 0.72)" : "rgba(140, 170, 195, 0.16)"}`,
+                borderRadius: "4px",
+                background: isCenter ? "rgba(0, 255, 170, 0.18)" : "rgba(255, 255, 255, 0.035)",
+                color: isCenter ? "#7dffd3" : "#b5c4d2",
+                font: "11px Consolas, monospace",
+              }}
+            >
+              {cell?.value === null || cell?.value === undefined ? "—" : Math.round(cell.value)}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+});
+
+HoverDataPanel.displayName = "HoverDataPanel";
+
 const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
   const containerRef = useRef(null);
   const sceneRef = useRef(null);
@@ -381,6 +483,8 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
   const pointCloudRef = useRef(null);
   const lineGridRef = useRef(null);
   const numberPanelRef = useRef(null);
+  const hoverPanelRef = useRef(null);
+  const hoveredSensorRef = useRef(null);
   const optionsRef = useRef({ ...DEFAULT_OPTIONS, ...props.renderOptions });
   const flightRef = useRef(null);
   const [loading, setLoading] = useState(true);
@@ -418,6 +522,9 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
       rawFrameRef.current = wsPointData.slice(0, 1024).map((value) => Number(value) || 0);
       numberPanelRef.current?.updateData(rawFrameRef.current);
       updateTextureValues();
+      if (hoveredSensorRef.current) {
+        hoverPanelRef.current?.refresh(rawFrameRef.current);
+      }
     },
     changeColor({ max, size, filter }) {
       if (max !== undefined) optionsRef.current.max = max;
@@ -472,6 +579,160 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
     scene.add(keyLight);
 
     let disposed = false;
+    let dragging = false;
+    let pointerAnimationId = 0;
+    let hoverTimerId = 0;
+    let latestPointer = null;
+    let candidateKey = null;
+    let candidateSensor = null;
+    let candidatePointer = null;
+    let suspendedAutoRotate = null;
+    const raycaster = new THREE.Raycaster();
+    const pointerNdc = new THREE.Vector2();
+    const canvas = renderer.domElement;
+
+    const cancelHoverTimer = () => {
+      if (!hoverTimerId) return;
+      window.clearTimeout(hoverTimerId);
+      hoverTimerId = 0;
+    };
+
+    const cancelPointerAnimation = () => {
+      if (!pointerAnimationId) return;
+      cancelAnimationFrame(pointerAnimationId);
+      pointerAnimationId = 0;
+    };
+
+    const pauseAutoRotate = () => {
+      if (suspendedAutoRotate === null) {
+        suspendedAutoRotate = controls.autoRotate;
+      }
+      controls.autoRotate = false;
+    };
+
+    const restoreAutoRotate = () => {
+      if (suspendedAutoRotate === null) return;
+      controls.autoRotate = suspendedAutoRotate;
+      suspendedAutoRotate = null;
+    };
+
+    const hideHoverPanel = () => {
+      hoveredSensorRef.current = null;
+      hoverPanelRef.current?.hide();
+    };
+
+    const clearHover = ({ cancelPointer = false, restoreRotation = true } = {}) => {
+      cancelHoverTimer();
+      if (cancelPointer) {
+        cancelPointerAnimation();
+        latestPointer = null;
+      }
+      candidateKey = null;
+      candidateSensor = null;
+      candidatePointer = null;
+      hideHoverPanel();
+      if (restoreRotation) restoreAutoRotate();
+    };
+
+    const showStableCandidate = (sensor, pointer) => {
+      pauseAutoRotate();
+      hoveredSensorRef.current = sensor;
+      const position = clampHumanBodyHoverPosition(
+        { x: pointer.clientX, y: pointer.clientY },
+        HOVER_PANEL_SIZE,
+        { width: window.innerWidth, height: window.innerHeight },
+        HOVER_POINTER_OFFSET,
+      );
+      hoverPanelRef.current?.show({
+        sensor,
+        cells: buildHumanBodySensorNeighborhood(
+          sensor,
+          sensorsRef.current,
+          rawFrameRef.current,
+        ),
+        ...position,
+      });
+    };
+
+    const setHoverCandidate = (sensor, pointer) => {
+      const nextKey = sensor.index;
+      if (candidateKey === nextKey) return;
+
+      cancelHoverTimer();
+      candidateKey = nextKey;
+      candidateSensor = sensor;
+      candidatePointer = { ...pointer };
+      hideHoverPanel();
+
+      hoverTimerId = window.setTimeout(() => {
+        hoverTimerId = 0;
+        if (
+          disposed
+          || dragging
+          || candidateKey !== nextKey
+          || candidateSensor !== sensor
+          || !candidatePointer
+        ) return;
+        showStableCandidate(sensor, candidatePointer);
+      }, HOVER_DELAY_MS);
+    };
+
+    const processLatestPointer = () => {
+      pointerAnimationId = 0;
+      if (disposed || dragging || !latestPointer) return;
+
+      const rect = canvas.getBoundingClientRect();
+      if (!(rect.width > 0) || !(rect.height > 0)) {
+        clearHover();
+        return;
+      }
+
+      pointerNdc.set(
+        ((latestPointer.clientX - rect.left) / rect.width) * 2 - 1,
+        -((latestPointer.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      raycaster.setFromCamera(pointerNdc, camera);
+      const intersection = raycaster.intersectObjects(bodyMeshesRef.current, false)[0];
+      if (!intersection) {
+        clearHover();
+        return;
+      }
+
+      const sensor = findNearestHumanBodySensor(intersection.point, sensorsRef.current);
+      if (!sensor) {
+        clearHover();
+        return;
+      }
+      setHoverCandidate(sensor, latestPointer);
+    };
+
+    const handlePointerMove = (event) => {
+      latestPointer = { clientX: event.clientX, clientY: event.clientY };
+      if (!pointerAnimationId) {
+        pointerAnimationId = requestAnimationFrame(processLatestPointer);
+      }
+    };
+
+    const handlePointerLeave = () => {
+      clearHover({ cancelPointer: true, restoreRotation: !dragging });
+    };
+
+    const handleControlsStart = () => {
+      dragging = true;
+      clearHover({ cancelPointer: true, restoreRotation: false });
+      pauseAutoRotate();
+    };
+
+    const handleControlsEnd = () => {
+      dragging = false;
+      clearHover({ cancelPointer: true });
+    };
+
+    canvas.addEventListener("pointermove", handlePointerMove);
+    canvas.addEventListener("pointerleave", handlePointerLeave);
+    controls.addEventListener("start", handleControlsStart);
+    controls.addEventListener("end", handleControlsEnd);
+
     let animationId = 0;
     const resize = () => {
       const width = Math.max(1, container.clientWidth);
@@ -624,6 +885,11 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
 
     return () => {
       disposed = true;
+      canvas.removeEventListener("pointermove", handlePointerMove);
+      canvas.removeEventListener("pointerleave", handlePointerLeave);
+      controls.removeEventListener("start", handleControlsStart);
+      controls.removeEventListener("end", handleControlsEnd);
+      clearHover({ cancelPointer: true });
       cancelAnimationFrame(animationId);
       resizeObserver.disconnect();
       controls.dispose();
@@ -704,6 +970,8 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 0, width: "100vw", height: "100vh", overflow: "hidden", background: bgColor }}>
       <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />
+
+      <HoverDataPanel ref={hoverPanelRef} sensorsRef={sensorsRef} />
 
       {(loading || error) && (
         <div style={{ position: "absolute", inset: 0, zIndex: 8, display: "flex", alignItems: "center", justifyContent: "center", color: error ? "#ff8b8b" : "#b9cbdc", background: "rgba(2,5,12,0.72)" }}>
