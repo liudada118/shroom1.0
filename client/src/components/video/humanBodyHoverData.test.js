@@ -78,6 +78,42 @@ describe("buildHumanBodySensorNeighborhood", () => {
       { sensor: null, value: null, rowOffset: 1, colOffset: 1 },
     ]);
   });
+
+  it.each(["frontPantsRight", "backPantsLeft"])(
+    "mirrors the magnifier columns for %s to match its 3D model mapping",
+    (partKey) => {
+      const flippedCenter = { ...center, partKey };
+      const flippedSensors = [
+        flippedCenter,
+        { ...center, col: 0, sample: [{ index: 1, weight: 1 }] },
+        { ...center, col: 2, sample: [{ index: 2, weight: 1 }] },
+      ];
+      const neighborhood = buildHumanBodySensorNeighborhood(
+        flippedCenter,
+        flippedSensors,
+        [10, 20, 30],
+      );
+
+      expect(neighborhood[3]).toMatchObject({ sensor: flippedSensors[2], value: 30 });
+      expect(neighborhood[5]).toMatchObject({ sensor: flippedSensors[1], value: 20 });
+    },
+  );
+
+  it.each(["frontPantsLeft", "rightArm"])(
+    "keeps %s magnifier columns in their existing order",
+    (partKey) => {
+      const normalCenter = { ...center, partKey };
+      const normalSensors = [
+        normalCenter,
+        { ...center, col: 0, sample: [{ index: 1, weight: 1 }] },
+        { ...center, col: 2, sample: [{ index: 2, weight: 1 }] },
+      ];
+      const neighborhood = buildHumanBodySensorNeighborhood(normalCenter, normalSensors, [10, 20, 30]);
+
+      expect(neighborhood[3]).toMatchObject({ sensor: normalSensors[1], value: 20 });
+      expect(neighborhood[5]).toMatchObject({ sensor: normalSensors[2], value: 30 });
+    },
+  );
 });
 
 describe("clampHumanBodyHoverPosition", () => {

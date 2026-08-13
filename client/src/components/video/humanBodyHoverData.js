@@ -1,3 +1,5 @@
+import { isHumanBodyHoverColumnFlipped } from "./humanBodyOrientation";
+
 export const HOVER_MAX_DISTANCE = 0.25;
 
 function isFiniteNumber(value) {
@@ -77,8 +79,10 @@ export function buildHumanBodySensorNeighborhood(center, sensors, frame, radius 
     });
   }
 
+  const flipCol = isHumanBodyHoverColumnFlipped(center.partKey);
   return cells.map(({ rowOffset, colOffset }) => {
-    const sensor = matchingSensors.get(`${center.row + rowOffset},${center.col + colOffset}`) || null;
+    const sourceColOffset = flipCol ? -colOffset : colOffset;
+    const sensor = matchingSensors.get(`${center.row + rowOffset},${center.col + sourceColOffset}`) || null;
     return {
       sensor,
       value: sensor ? getHumanBodySensorValue(sensor, frame) : null,

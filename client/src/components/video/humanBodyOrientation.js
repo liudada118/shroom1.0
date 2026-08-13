@@ -72,3 +72,7 @@ export function orientPartMatrix(partKey, rows) {
   if (orientation?.flipCol) result = result.map((row) => [...row].reverse());
   return result;
 }
+
+export function isHumanBodyHoverColumnFlipped(partKey) {
+  return ["frontPantsRight", "backPantsLeft"].includes(partKey);
+}

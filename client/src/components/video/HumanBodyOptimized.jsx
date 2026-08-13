@@ -213,6 +213,7 @@ function buildSensorLayout(archive) {
       row: Number(sensor.row) - 1,
       col: Number(sensor.col) - 1,
       part: sensor.region,
+      partKey,
       placementSide: sensor.placementSide || "single",
       position: new THREE.Vector3(...coordinates),
       sample: buildSample(sensor, rows, cols, part),
