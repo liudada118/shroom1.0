@@ -21,6 +21,12 @@ import {
   clampHumanBodyHoverPosition,
   findNearestHumanBodySensor,
 } from "./humanBodyHoverData";
+import {
+  clampHumanBodyRadius,
+  getHumanBodyAutoRotate,
+  readHumanBodyRenderSettings,
+  writeHumanBodyRenderSettings,
+} from "./humanBodyRenderSettings";
 
 const MODEL_URL = "./model/human3.glb";
 const SENSOR_LAYOUT_URL = "./model/sensor_canvas_positions.json";
@@ -30,9 +36,20 @@ const HOVER_DELAY_MS = 150;
 const HOVER_POINTER_OFFSET = 18;
 const HOVER_PANEL_SIZE = { width: 168, height: 144 };
 
+const getBrowserStorage = () => {
+  try {
+    return typeof window === "undefined" ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+};
+
 const BG_PRESETS = ["#0a0a0f", "#10152b", "#0f2027", "#000000"];
 const MODEL_PRESETS = ["#6a7a8a", "#4a5568", "#718096", "#4fd1c5"];
-const ACCENT_PRESETS = ["#00ffaa", "#00d9ff", "#ff6b6b", "#ffd93d"];
+const VISIBLE_RENDER_MODES = [
+  ["heatmap", "热力"],
+  ["crystal", "水晶"],
+];
 
 const REGION_VIEWS = {
   overview: { label: "全身", position: [0, 4, 12], target: [0, 4, 0] },
@@ -66,6 +83,7 @@ const fragmentShader = `
   uniform float uOpacity;
   uniform int uColorScheme;
   uniform int uCrystal;
+  uniform vec3 uModelColor;
   varying vec3 vWorldPos;
   varying vec3 vWorldNormal;
   varying vec3 vViewDirection;
@@ -101,12 +119,12 @@ const fragmentShader = `
       heat += exp(-(distanceToSensor * distanceToSensor) / (2.0 * uRadius * uRadius)) * sensor.w * uIntensity;
     }
     heat = clamp(heat, 0.0, 1.0);
-    vec3 baseColor = vec3(0.12, 0.13, 0.16);
+    vec3 baseColor = uModelColor;
     vec3 color = heat > 0.005 ? heatColor(heat) : baseColor;
 
     if (uCrystal == 1) {
       float fresnel = pow(1.0 - max(dot(normalize(vWorldNormal), normalize(vViewDirection)), 0.0), 3.0);
-      color = mix(vec3(0.52, 0.72, 0.9), color, heat * 0.9) + vec3(0.65, 0.85, 1.0) * fresnel * 0.35;
+      color = mix(uModelColor, color, heat * 0.9) + vec3(0.65, 0.85, 1.0) * fresnel * 0.35;
       gl_FragColor = vec4(color, clamp(uOpacity + heat * 0.75 + fresnel * 0.15, 0.05, 0.95));
       return;
     }
@@ -469,6 +487,11 @@ const HoverDataPanel = React.forwardRef(({ sensorsRef }, ref) => {
 HoverDataPanel.displayName = "HoverDataPanel";
 
 const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
+  const initialSettingsRef = useRef(null);
+  if (initialSettingsRef.current === null) {
+    initialSettingsRef.current = readHumanBodyRenderSettings(getBrowserStorage());
+  }
+  const initialSettings = initialSettingsRef.current;
   const containerRef = useRef(null);
   const sceneRef = useRef(null);
   const cameraRef = useRef(null);
@@ -486,20 +509,24 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
   const hoverPanelRef = useRef(null);
   const hoveredSensorRef = useRef(null);
   const optionsRef = useRef({ ...DEFAULT_OPTIONS, ...props.renderOptions });
+  const lastExternalSizeRef = useRef(props.renderOptions?.size);
+  const activeRegionRef = useRef("overview");
+  const overviewAutoRotateRef = useRef(initialSettings.overviewAutoRotate);
   const flightRef = useRef(null);
-  const resetAutoRotateTimerRef = useRef(null);
   const viewAutoRotateRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [sensorCount, setSensorCount] = useState(0);
-  const [mode, setMode] = useState("heatmap");
-  const [radius, setRadius] = useState((optionsRef.current.size || 31) / 100);
-  const [intensity, setIntensity] = useState(0.8);
-  const [opacity, setOpacity] = useState(0.15);
-  const [colorScheme, setColorScheme] = useState(0);
-  const [bgColor, setBgColor] = useState("#0a0a0f");
-  const [modelColor, setModelColor] = useState("#6a7a8a");
-  const [accentColor, setAccentColor] = useState("#00ffaa");
+  const [mode, setMode] = useState(initialSettings.mode);
+  const [radius, setRadius] = useState(initialSettings.radius);
+  const [intensity, setIntensity] = useState(initialSettings.intensity);
+  const [opacity, setOpacity] = useState(initialSettings.opacity);
+  const [colorScheme, setColorScheme] = useState(initialSettings.colorScheme);
+  const [bgColor, setBgColor] = useState(initialSettings.bgColor);
+  const [modelColor, setModelColor] = useState(initialSettings.modelColor);
+  const accentColor = "#00ffaa";
+  const [settingsCollapsed, setSettingsCollapsed] = useState(initialSettings.settingsCollapsed);
+  const [overviewAutoRotate, setOverviewAutoRotate] = useState(initialSettings.overviewAutoRotate);
   const [activeRegion, setActiveRegion] = useState("overview");
 
   const updateTextureValues = useCallback(() => {
@@ -533,7 +560,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
       if (filter !== undefined) optionsRef.current.filter = filter;
       if (size !== undefined) {
         optionsRef.current.size = size;
-        setRadius(Math.max(0.05, Number(size) / 100));
+        setRadius(clampHumanBodyRadius(Number(size) / 100));
       }
       updateTextureValues();
     },
@@ -544,11 +571,36 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
 
   useEffect(() => {
     optionsRef.current = { ...optionsRef.current, ...props.renderOptions };
-    if (props.renderOptions?.size !== undefined) {
-      setRadius(Math.max(0.05, Number(props.renderOptions.size) / 100));
+    const externalSize = props.renderOptions?.size;
+    if (externalSize !== undefined && externalSize !== lastExternalSizeRef.current) {
+      lastExternalSizeRef.current = externalSize;
+      setRadius(clampHumanBodyRadius(Number(externalSize) / 100));
     }
     updateTextureValues();
   }, [props.renderOptions, updateTextureValues]);
+
+  useEffect(() => {
+    writeHumanBodyRenderSettings(getBrowserStorage(), {
+      mode,
+      radius,
+      intensity,
+      opacity,
+      colorScheme,
+      bgColor,
+      modelColor,
+      settingsCollapsed,
+      overviewAutoRotate,
+    });
+  }, [mode, radius, intensity, opacity, colorScheme, bgColor, modelColor, settingsCollapsed, overviewAutoRotate]);
+
+  useEffect(() => {
+    activeRegionRef.current = activeRegion;
+  }, [activeRegion]);
+
+  useEffect(() => {
+    overviewAutoRotateRef.current = overviewAutoRotate;
+    viewAutoRotateRef.current?.sync();
+  }, [overviewAutoRotate]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -571,7 +623,11 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
     controls.enableDamping = true;
     controls.dampingFactor = 0.06;
     controls.target.set(0, 4, 0);
-    controls.autoRotate = true;
+    controls.autoRotate = getHumanBodyAutoRotate({
+      activeRegion: activeRegionRef.current,
+      overviewAutoRotate: overviewAutoRotateRef.current,
+      temporarilySuspended: false,
+    });
     controls.autoRotateSpeed = 0.7;
     controlsRef.current = controls;
 
@@ -588,8 +644,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
     let candidateKey = null;
     let candidateSensor = null;
     let candidatePointer = null;
-    let suspendedAutoRotate = null;
-    let pendingAutoRotateEnable = false;
+    let temporarilySuspended = false;
     const raycaster = new THREE.Raycaster();
     const pointerNdc = new THREE.Vector2();
     const canvas = renderer.domElement;
@@ -606,18 +661,23 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
       pointerAnimationId = 0;
     };
 
+    const syncAutoRotate = () => {
+      if (disposed) return;
+      controls.autoRotate = getHumanBodyAutoRotate({
+        activeRegion: activeRegionRef.current,
+        overviewAutoRotate: overviewAutoRotateRef.current,
+        temporarilySuspended: temporarilySuspended || dragging || Boolean(flightRef.current),
+      });
+    };
+
     const pauseAutoRotate = () => {
-      if (suspendedAutoRotate === null) {
-        suspendedAutoRotate = controls.autoRotate;
-      }
+      temporarilySuspended = true;
       controls.autoRotate = false;
     };
 
     const restoreAutoRotate = () => {
-      if (suspendedAutoRotate === null) return;
-      controls.autoRotate = pendingAutoRotateEnable ? true : suspendedAutoRotate;
-      suspendedAutoRotate = null;
-      pendingAutoRotateEnable = false;
+      temporarilySuspended = false;
+      syncAutoRotate();
     };
 
     const hideHoverPanel = () => {
@@ -638,33 +698,15 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
       if (restoreRotation) restoreAutoRotate();
     };
 
-    const cancelResetAutoRotate = () => {
-      if (resetAutoRotateTimerRef.current !== null) {
-        window.clearTimeout(resetAutoRotateTimerRef.current);
-        resetAutoRotateTimerRef.current = null;
-      }
-      pendingAutoRotateEnable = false;
-    };
-
     viewAutoRotateRef.current = {
       beginFlight() {
-        cancelResetAutoRotate();
         clearHover({ cancelPointer: true, restoreRotation: !dragging });
         controls.autoRotate = false;
       },
-      scheduleEnable() {
-        cancelResetAutoRotate();
-        resetAutoRotateTimerRef.current = window.setTimeout(() => {
-          resetAutoRotateTimerRef.current = null;
-          if (disposed) return;
-          if (dragging || suspendedAutoRotate !== null) {
-            pendingAutoRotateEnable = true;
-            controls.autoRotate = false;
-            return;
-          }
-          controls.autoRotate = true;
-        }, 1250);
+      finishFlight() {
+        syncAutoRotate();
       },
+      sync: syncAutoRotate,
     };
 
     const showStableCandidate = (sensor, pointer) => {
@@ -833,6 +875,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
                 uOpacity: { value: opacity },
                 uColorScheme: { value: colorScheme },
                 uCrystal: { value: 0 },
+                uModelColor: { value: new THREE.Color(modelColor) },
               },
               side: THREE.DoubleSide,
             });
@@ -909,7 +952,10 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
         const eased = easeInOutCubic(progress);
         camera.position.lerpVectors(flight.startPosition, flight.endPosition, eased);
         controls.target.lerpVectors(flight.startTarget, flight.endTarget, eased);
-        if (progress >= 1) flightRef.current = null;
+        if (progress >= 1) {
+          flightRef.current = null;
+          viewAutoRotateRef.current?.finishFlight();
+        }
       }
       controls.update();
       renderer.render(scene, camera);
@@ -918,7 +964,6 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
 
     return () => {
       disposed = true;
-      cancelResetAutoRotate();
       viewAutoRotateRef.current = null;
       canvas.removeEventListener("pointermove", handlePointerMove);
       canvas.removeEventListener("pointerleave", handlePointerLeave);
@@ -951,11 +996,12 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
       material.uniforms.uOpacity.value = opacity;
       material.uniforms.uColorScheme.value = colorScheme;
       material.uniforms.uCrystal.value = mode === "crystal" ? 1 : 0;
+      material.uniforms.uModelColor.value.set(modelColor);
       material.transparent = mode === "crystal";
       material.depthWrite = mode !== "crystal";
       material.needsUpdate = true;
     });
-  }, [radius, intensity, opacity, colorScheme, mode]);
+  }, [radius, intensity, opacity, colorScheme, mode, modelColor, loading]);
 
   useEffect(() => {
     const showPoints = mode === "points" || mode === "both";
@@ -970,8 +1016,9 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
   }, [mode, loading]);
 
   useEffect(() => {
+    materialsRef.current.forEach((material) => material.uniforms.uModelColor.value.set(modelColor));
     ghostMaterialsRef.current.forEach((material) => material.color.set(modelColor));
-  }, [modelColor]);
+  }, [modelColor, loading]);
 
   useEffect(() => {
     pointCloudRef.current?.material?.color?.set(accentColor);
@@ -983,9 +1030,10 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
     const controls = controlsRef.current;
     const view = REGION_VIEWS[regionKey];
     if (!camera || !controls || !view) return;
+    activeRegionRef.current = regionKey;
+    setActiveRegion(regionKey);
     viewAutoRotateRef.current?.beginFlight();
     controls.autoRotate = false;
-    setActiveRegion(regionKey);
     flightRef.current = {
       startPosition: camera.position.clone(),
       endPosition: new THREE.Vector3(...view.position),
@@ -996,9 +1044,13 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
     };
   };
 
-  const resetView = () => {
-    flyTo("overview");
-    viewAutoRotateRef.current?.scheduleEnable();
+  const resetView = () => flyTo("overview");
+
+  const toggleOverviewAutoRotate = () => {
+    const nextValue = !overviewAutoRotateRef.current;
+    overviewAutoRotateRef.current = nextValue;
+    setOverviewAutoRotate(nextValue);
+    viewAutoRotateRef.current?.sync();
   };
 
   return (
@@ -1014,41 +1066,48 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
       )}
 
       <div style={{ ...panelStyle, top: 72, left: "max(250px, 19vw)", width: 222 }}>
-        <div style={{ fontSize: "14px", fontWeight: 700, letterSpacing: "0.08em" }}>人体全身优化</div>
-        <div style={{ color: "#5e748a", fontSize: "10px", marginTop: 3 }}>REALISTIC SHADER · {sensorCount} 点位</div>
-
-        <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 5 }}>
-          {[
-            ["heatmap", "热力"],
-            ["crystal", "水晶"],
-            ["lines", "线网"],
-            ["points", "点云"],
-            ["both", "叠加"],
-          ].map(([value, label]) => (
-            <button key={value} onClick={() => setMode(value)} style={buttonStyle(mode === value)}>{label}</button>
-          ))}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <div style={{ fontSize: "14px", fontWeight: 700, letterSpacing: "0.08em" }}>人体全身优化</div>
+          <button
+            type="button"
+            aria-expanded={!settingsCollapsed}
+            aria-label={settingsCollapsed ? "展开渲染设置" : "折叠渲染设置"}
+            onClick={() => setSettingsCollapsed((value) => !value)}
+            style={{ ...buttonStyle(false), minWidth: 30, padding: "3px 8px" }}
+          >
+            {settingsCollapsed ? "▾" : "▴"}
+          </button>
         </div>
-
-        <label style={{ display: "block", marginTop: 11, fontSize: "11px", color: "#8193a5" }}>扩散半径 {radius.toFixed(2)}</label>
-        <input type="range" min="5" max="100" value={Math.round(radius * 100)} onChange={(event) => setRadius(Number(event.target.value) / 100)} style={{ width: "100%", accentColor: accentColor }} />
-        <label style={{ display: "block", marginTop: 8, fontSize: "11px", color: "#8193a5" }}>热力强度 {intensity.toFixed(1)}</label>
-        <input type="range" min="5" max="50" value={Math.round(intensity * 10)} onChange={(event) => setIntensity(Number(event.target.value) / 10)} style={{ width: "100%", accentColor: accentColor }} />
-        {mode === "crystal" && (
+        {!settingsCollapsed && (
           <>
-            <label style={{ display: "block", marginTop: 8, fontSize: "11px", color: "#8193a5" }}>基础透明度 {opacity.toFixed(2)}</label>
-            <input type="range" min="5" max="80" value={Math.round(opacity * 100)} onChange={(event) => setOpacity(Number(event.target.value) / 100)} style={{ width: "100%", accentColor: accentColor }} />
+            <div style={{ color: "#5e748a", fontSize: "10px", marginTop: 3 }}>REALISTIC SHADER · {sensorCount} 点位</div>
+            <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 5 }}>
+              {VISIBLE_RENDER_MODES.map(([value, label]) => (
+                <button key={value} onClick={() => setMode(value)} style={buttonStyle(mode === value)}>{label}</button>
+              ))}
+            </div>
+
+            <label style={{ display: "block", marginTop: 11, fontSize: "11px", color: "#8193a5" }}>扩散半径 {radius.toFixed(2)}</label>
+            <input type="range" min="5" max="13" step="1" value={Math.round(radius * 100)} onChange={(event) => setRadius(clampHumanBodyRadius(Number(event.target.value) / 100))} style={{ width: "100%", accentColor: accentColor }} />
+            <label style={{ display: "block", marginTop: 8, fontSize: "11px", color: "#8193a5" }}>热力强度 {intensity.toFixed(1)}</label>
+            <input type="range" min="5" max="50" value={Math.round(intensity * 10)} onChange={(event) => setIntensity(Number(event.target.value) / 10)} style={{ width: "100%", accentColor: accentColor }} />
+            {mode === "crystal" && (
+              <>
+                <label style={{ display: "block", marginTop: 8, fontSize: "11px", color: "#8193a5" }}>基础透明度 {opacity.toFixed(2)}</label>
+                <input type="range" min="5" max="80" value={Math.round(opacity * 100)} onChange={(event) => setOpacity(Number(event.target.value) / 100)} style={{ width: "100%", accentColor: accentColor }} />
+              </>
+            )}
+
+            <div style={{ marginTop: 9, display: "flex", gap: 5 }}>
+              {["经典", "冷色", "暖色", "岩浆"].map((label, index) => (
+                <button key={label} onClick={() => setColorScheme(index)} style={buttonStyle(colorScheme === index)}>{label}</button>
+              ))}
+            </div>
+
+            <ColorRow label="背景" value={bgColor} presets={BG_PRESETS} onChange={setBgColor} />
+            <ColorRow label="模型" value={modelColor} presets={MODEL_PRESETS} onChange={setModelColor} />
           </>
         )}
-
-        <div style={{ marginTop: 9, display: "flex", gap: 5 }}>
-          {["经典", "冷色", "暖色", "岩浆"].map((label, index) => (
-            <button key={label} onClick={() => setColorScheme(index)} style={buttonStyle(colorScheme === index)}>{label}</button>
-          ))}
-        </div>
-
-        <ColorRow label="背景" value={bgColor} presets={BG_PRESETS} onChange={setBgColor} />
-        <ColorRow label="模型" value={modelColor} presets={MODEL_PRESETS} onChange={setModelColor} />
-        <ColorRow label="线条 / 点云" value={accentColor} presets={ACCENT_PRESETS} onChange={setAccentColor} />
       </div>
 
       <div style={{ ...panelStyle, top: 72, right: 14, width: 126 }}>
@@ -1058,6 +1117,11 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
             <button key={key} onClick={() => flyTo(key)} style={buttonStyle(activeRegion === key)}>{view.label}</button>
           ))}
         </div>
+        {activeRegion === "overview" && (
+          <button onClick={toggleOverviewAutoRotate} style={{ ...buttonStyle(overviewAutoRotate), width: "100%", marginTop: 8 }}>
+            {overviewAutoRotate ? "暂停旋转" : "自动旋转"}
+          </button>
+        )}
         <button onClick={resetView} style={{ ...buttonStyle(false), width: "100%", marginTop: 8 }}>重置视角</button>
       </div>
 
