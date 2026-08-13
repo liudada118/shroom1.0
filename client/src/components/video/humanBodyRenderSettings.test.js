@@ -14,9 +14,9 @@ import {
 describe("human body render settings", () => {
   it("uses the compact rendering defaults", () => {
     expect(DEFAULT_HUMAN_BODY_RENDER_SETTINGS).toMatchObject({
-      version: 3,
+      version: 4,
       mode: "heatmap",
-      radius: 0.13,
+      radius: 0.1,
       intensity: 0.8,
       opacity: 0.15,
       colorScheme: 0,
@@ -31,7 +31,7 @@ describe("human body render settings", () => {
     expect(clampHumanBodyRadius(-1)).toBe(0.05);
     expect(clampHumanBodyRadius(0.09)).toBe(0.09);
     expect(clampHumanBodyRadius(0.31)).toBe(0.13);
-    expect(clampHumanBodyRadius("invalid")).toBe(0.13);
+    expect(clampHumanBodyRadius("invalid")).toBe(0.1);
   });
 
   it("normalizes each invalid field independently", () => {
@@ -69,14 +69,14 @@ describe("human body render settings", () => {
       version: 1,
       bgColor: "#0a0a0f",
       modelColor: "#6a7a8a",
-    })).toMatchObject({ version: 3, bgColor: "#afacac", modelColor: "#718096" });
+    })).toMatchObject({ version: 4, bgColor: "#afacac", modelColor: "#718096" });
 
     expect(normalizeHumanBodyRenderSettings({
       ...DEFAULT_HUMAN_BODY_RENDER_SETTINGS,
       version: 1,
       bgColor: "#10152b",
       modelColor: "#4a5568",
-    })).toMatchObject({ version: 3, bgColor: "#10152b", modelColor: "#4a5568" });
+    })).toMatchObject({ version: 4, bgColor: "#10152b", modelColor: "#4a5568" });
   });
 
   it("migrates the version two defaults to the latest colors", () => {
@@ -85,14 +85,28 @@ describe("human body render settings", () => {
       version: 2,
       bgColor: "#e6e6e6",
       modelColor: "#d2d6dc",
-    })).toMatchObject({ version: 3, bgColor: "#afacac", modelColor: "#718096" });
+    })).toMatchObject({ version: 4, bgColor: "#afacac", modelColor: "#718096" });
 
     expect(normalizeHumanBodyRenderSettings({
       ...DEFAULT_HUMAN_BODY_RENDER_SETTINGS,
       version: 2,
       bgColor: "#10152b",
       modelColor: "#4a5568",
-    })).toMatchObject({ version: 3, bgColor: "#10152b", modelColor: "#4a5568" });
+    })).toMatchObject({ version: 4, bgColor: "#10152b", modelColor: "#4a5568" });
+  });
+
+  it("migrates only the version three default radius", () => {
+    expect(normalizeHumanBodyRenderSettings({
+      ...DEFAULT_HUMAN_BODY_RENDER_SETTINGS,
+      version: 3,
+      radius: 0.13,
+    })).toMatchObject({ version: 4, radius: 0.1 });
+
+    expect(normalizeHumanBodyRenderSettings({
+      ...DEFAULT_HUMAN_BODY_RENDER_SETTINGS,
+      version: 3,
+      radius: 0.08,
+    })).toMatchObject({ version: 4, radius: 0.08 });
   });
 
   it("reads and writes one safe versioned localStorage object", () => {
