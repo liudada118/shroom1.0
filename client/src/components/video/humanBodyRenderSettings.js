@@ -1,5 +1,5 @@
 export const HUMAN_BODY_RENDER_SETTINGS_KEY = "humanBodyOptimized.renderSettings.v1";
-export const HUMAN_BODY_RENDER_SETTINGS_VERSION = 1;
+export const HUMAN_BODY_RENDER_SETTINGS_VERSION = 2;
 
 export const DEFAULT_HUMAN_BODY_RENDER_SETTINGS = Object.freeze({
   version: HUMAN_BODY_RENDER_SETTINGS_VERSION,
@@ -8,8 +8,8 @@ export const DEFAULT_HUMAN_BODY_RENDER_SETTINGS = Object.freeze({
   intensity: 0.8,
   opacity: 0.15,
   colorScheme: 0,
-  bgColor: "#0a0a0f",
-  modelColor: "#6a7a8a",
+  bgColor: "#e6e6e6",
+  modelColor: "#d2d6dc",
   settingsCollapsed: false,
   overviewAutoRotate: true,
 });
@@ -28,6 +28,14 @@ export function clampHumanBodyRadius(value) {
 }
 
 export function normalizeHumanBodyRenderSettings(value) {
+  if (value?.version === 1) {
+    value = {
+      ...value,
+      version: HUMAN_BODY_RENDER_SETTINGS_VERSION,
+      bgColor: value.bgColor === "#0a0a0f" ? DEFAULT_HUMAN_BODY_RENDER_SETTINGS.bgColor : value.bgColor,
+      modelColor: value.modelColor === "#6a7a8a" ? DEFAULT_HUMAN_BODY_RENDER_SETTINGS.modelColor : value.modelColor,
+    };
+  }
   if (!value || value.version !== HUMAN_BODY_RENDER_SETTINGS_VERSION) {
     return { ...DEFAULT_HUMAN_BODY_RENDER_SETTINGS };
   }

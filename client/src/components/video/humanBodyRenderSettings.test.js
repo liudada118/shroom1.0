@@ -14,14 +14,14 @@ import {
 describe("human body render settings", () => {
   it("uses the compact rendering defaults", () => {
     expect(DEFAULT_HUMAN_BODY_RENDER_SETTINGS).toMatchObject({
-      version: 1,
+      version: 2,
       mode: "heatmap",
       radius: 0.13,
       intensity: 0.8,
       opacity: 0.15,
       colorScheme: 0,
-      bgColor: "#0a0a0f",
-      modelColor: "#6a7a8a",
+      bgColor: "#e6e6e6",
+      modelColor: "#d2d6dc",
       settingsCollapsed: false,
       overviewAutoRotate: true,
     });
@@ -61,6 +61,22 @@ describe("human body render settings", () => {
       version: 99,
       radius: 0.05,
     })).toEqual(DEFAULT_HUMAN_BODY_RENDER_SETTINGS);
+  });
+
+  it("migrates the old cached defaults without overwriting customized colors", () => {
+    expect(normalizeHumanBodyRenderSettings({
+      ...DEFAULT_HUMAN_BODY_RENDER_SETTINGS,
+      version: 1,
+      bgColor: "#0a0a0f",
+      modelColor: "#6a7a8a",
+    })).toMatchObject({ version: 2, bgColor: "#e6e6e6", modelColor: "#d2d6dc" });
+
+    expect(normalizeHumanBodyRenderSettings({
+      ...DEFAULT_HUMAN_BODY_RENDER_SETTINGS,
+      version: 1,
+      bgColor: "#10152b",
+      modelColor: "#4a5568",
+    })).toMatchObject({ version: 2, bgColor: "#10152b", modelColor: "#4a5568" });
   });
 
   it("reads and writes one safe versioned localStorage object", () => {
