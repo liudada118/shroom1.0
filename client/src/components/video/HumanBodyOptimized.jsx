@@ -9,7 +9,11 @@ import React, {
   useState,
 } from "react";
 import { HUMAN_BODY_SENSOR_PARTS } from "./humanBody";
-import { getSourceGridPosition, orientPartRows } from "./humanBodyOrientation";
+import {
+  getSourceGridPosition,
+  orientPartMatrix,
+  resolveSensorPartKey,
+} from "./humanBodyOrientation";
 
 const MODEL_URL = "./model/human3.glb";
 const SENSOR_LAYOUT_URL = "./model/sensor_canvas_positions.json";
@@ -24,8 +28,8 @@ const REGION_VIEWS = {
   overview: { label: "全身", position: [0, 4, 12], target: [0, 4, 0] },
   chest: { label: "前胸", position: [0, 5.5, 6], target: [0, 5.5, 0] },
   back: { label: "后背", position: [0, 5.5, -6], target: [0, 5.5, 0] },
-  leftArm: { label: "左臂", position: [-5, 5.5, 4], target: [-2.5, 5.5, 0] },
-  rightArm: { label: "右臂", position: [5, 5.5, 4], target: [2.5, 5.5, 0] },
+  leftArm: { label: "左臂", position: [5, 5.5, 4], target: [2.5, 5.5, 0] },
+  rightArm: { label: "右臂", position: [-5, 5.5, 4], target: [-2.5, 5.5, 0] },
   frontLegs: { label: "前腿", position: [0, 2, 6], target: [0, 2.5, 0] },
   backLegs: { label: "后腿", position: [0, 2, -6], target: [0, 2.5, 0] },
 };
@@ -105,26 +109,7 @@ const easeInOutCubic = (value) => (
   value < 0.5 ? 4 * value * value * value : 1 - Math.pow(-2 * value + 2, 3) / 2
 );
 
-const REGION_TO_PART_KEY = {
-  "前胸": "chest",
-  "后背": "back",
-  "右肩": "rightShoulder",
-  "右手臂": "rightArm",
-  "左肩": "leftShoulder",
-  "左手臂": "leftArm",
-};
-
 const PART_BY_KEY = new Map(HUMAN_BODY_SENSOR_PARTS.map((part) => [part.key, part]));
-
-function resolvePartKey(sensor) {
-  if (sensor.region === "前裤") {
-    return sensor.placementSide === "negative-x" ? "frontPantsLeft" : "frontPantsRight";
-  }
-  if (sensor.region === "后裤") {
-    return sensor.placementSide === "negative-x" ? "backPantsLeft" : "backPantsRight";
-  }
-  return REGION_TO_PART_KEY[sensor.region];
-}
 
 function buildSample(sensor, targetRows, targetCols, part) {
   const { sourceRow, sourceCol } = getSourceGridPosition(
@@ -189,7 +174,7 @@ function buildSensorLayout(archive) {
       throw new Error(`物理点位 ${physicalIndex} 缺少有效三维坐标`);
     }
     seenIndices.add(physicalIndex);
-    const partKey = resolvePartKey(sensor);
+    const partKey = resolveSensorPartKey(sensor.region, sensor.placementSide);
     const part = PART_BY_KEY.get(partKey);
     if (!part) throw new Error(`未识别的身体区域：${sensor.region}`);
     const groupKey = `${sensor.region}::${sensor.placementSide || "single"}`;
@@ -272,13 +257,7 @@ const NUMBER_PART_LABELS = {
 const NUMBER_HORIZONTAL_FLIP_PARTS = new Set([
   "back",
   "chest",
-  "rightArm",
-  "rightShoulder",
-  "leftArm",
-  "leftShoulder",
 ]);
-
-const NUMBER_VERTICAL_FLIP_PARTS = new Set(["backPantsRight", "backPantsLeft"]);
 
 function getOrientedPartValues(frame, part) {
   let rows = Array.from({ length: part.height }, (_, row) => (
@@ -286,9 +265,8 @@ function getOrientedPartValues(frame, part) {
       .slice(row * part.width, (row + 1) * part.width)
       .map((position) => Number(frame[position - 1]) || 0)
   ));
-  rows = orientPartRows(part.key, rows);
+  rows = orientPartMatrix(part.key, rows);
   if (NUMBER_HORIZONTAL_FLIP_PARTS.has(part.key)) rows = rows.map((row) => [...row].reverse());
-  if (NUMBER_VERTICAL_FLIP_PARTS.has(part.key)) rows = [...rows].reverse();
   return rows;
 }
 
