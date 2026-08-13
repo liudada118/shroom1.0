@@ -10,6 +10,7 @@ import React, {
 } from "react";
 import { HUMAN_BODY_SENSOR_PARTS } from "./humanBody";
 import { HUMAN_BODY_NUMBER_PART_LABELS } from "./humanBodyNumberLabels";
+import { getHumanBodyNumberViewSlots } from "./humanBodyNumberViews";
 import {
   getSourceGridPosition,
   orientPartMatrix,
@@ -233,15 +234,6 @@ const ColorRow = ({ label, value, presets, onChange }) => (
   </div>
 );
 
-const NUMBER_VIEW_PARTS = {
-  chest: ["chest"],
-  back: ["back"],
-  leftArm: ["leftShoulder", "leftArm"],
-  rightArm: ["rightShoulder", "rightArm"],
-  frontLegs: ["frontPantsLeft", "frontPantsRight"],
-  backLegs: ["backPantsLeft", "backPantsRight"],
-};
-
 const NUMBER_HORIZONTAL_FLIP_PARTS = new Set([
   "back",
   "chest",
@@ -279,8 +271,7 @@ const RegionNumberPanel = React.forwardRef(({ activeRegion }, ref) => {
     if (!canvas) return;
     const ratio = Math.min(window.devicePixelRatio || 1, 2);
     const isOverview = activeRegion === "overview";
-    const partKeys = NUMBER_VIEW_PARTS[activeRegion] || [];
-    const parts = partKeys.map((key) => PART_BY_KEY.get(key)).filter(Boolean);
+    const slots = getHumanBodyNumberViewSlots(activeRegion);
     const cellSize = isOverview ? 9 : 18;
     const titleHeight = 25;
     const padding = 10;
@@ -294,10 +285,22 @@ const RegionNumberPanel = React.forwardRef(({ activeRegion }, ref) => {
       contentHeight = 32 * cellSize;
     } else {
       let offsetX = 0;
-      parts.forEach((part) => {
-        const width = part.width * cellSize;
-        const height = part.height * cellSize + titleHeight;
-        layouts.push({ part, x: offsetX, width, height });
+      slots.forEach(({ displayPartKey, dataPartKey }) => {
+        const displayPart = PART_BY_KEY.get(displayPartKey);
+        const dataPart = PART_BY_KEY.get(dataPartKey);
+        if (!displayPart) return;
+        const width = displayPart.width * cellSize;
+        const height = displayPart.height * cellSize + titleHeight;
+        layouts.push({
+          displayPart,
+          dataPart,
+          x: offsetX,
+          width,
+          height,
+          compatible: dataPart
+            && displayPart.width === dataPart.width
+            && displayPart.height === dataPart.height,
+        });
         offsetX += width + gap;
       });
       contentWidth = Math.max(1, offsetX - gap);
@@ -323,13 +326,15 @@ const RegionNumberPanel = React.forwardRef(({ activeRegion }, ref) => {
       return;
     }
 
-    layouts.forEach(({ part, x, width: gridWidth }) => {
+    layouts.forEach(({ displayPart, dataPart, compatible, x, width: gridWidth }) => {
+      if (!compatible) return;
+      const part = displayPart;
       ctx.fillStyle = "#9eb1c4";
       ctx.font = "11px Arial";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(`${HUMAN_BODY_NUMBER_PART_LABELS[part.key]} ${part.width}×${part.height}`, padding + x + gridWidth / 2, padding + titleHeight / 2);
-      const values = getOrientedPartValues(frameRef.current, part);
+      const values = getOrientedPartValues(frameRef.current, dataPart);
       values.forEach((rowValues, row) => {
         rowValues.forEach((value, col) => {
           drawNumberCell(ctx, value, padding + x + col * cellSize, padding + titleHeight + row * cellSize, cellSize);
