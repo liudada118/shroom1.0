@@ -649,7 +649,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
     viewAutoRotateRef.current = {
       beginFlight() {
         cancelResetAutoRotate();
-        clearHover({ cancelPointer: true });
+        clearHover({ cancelPointer: true, restoreRotation: !dragging });
         controls.autoRotate = false;
       },
       scheduleEnable() {
