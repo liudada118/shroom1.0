@@ -153,6 +153,7 @@ shroom1.0/
 | `/client/src/components/title/` | 顶部标题栏组件，负责品牌字标、传感器切换、采集/回放控制、语言切换与设置抽屉 |
 | `/client/src/i18n/` | 前端国际化入口与统一中英日资源目录；负责语言标准化、持久化，以及后端授权中文原因到当前界面语言的适配 |
 | `/client/src/page/home/speechSynthesis.js` | 生命体征告警语音边界；负责区域语言标准化、系统 voice 选择、日文 voice 延迟加载与严格无跨语言回退策略 |
+| `/client/public/audio/alerts/ja/` | 日文生命体征固定告警 MP3 源资源；生产发布副本位于 `/build/audio/alerts/ja/` |
 | `/preload.js` | Electron 预加载脚本，建立渲染进程与主进程之间的安全 IPC 通道 |
 | `/server.js` | 后端核心调度器，协调串口通信、数据处理、WebSocket 分发、数据库存储 |
 | `/client/src/hooks/` | 7 个自定义 React Hook，封装 WebSocket、压力数据、串口控制、3D 场景等逻辑 |
@@ -294,6 +295,7 @@ graph TD
     - `client/src/i18n/translateBackendMessage.js` 只在展示层转换授权服务返回的固定中文原因和带前缀异常；WebSocket 协议值、密钥内容、数据库字段、采集标签和 CSV 数据保持原值，避免国际化影响后端匹配与历史数据兼容。
     - Shroom Vision 入口页和系统标题栏都提供中、英、日文切换；入口页可在未授权状态下直接选择语言，系统标题栏沿用同一全局语言状态。日期、浏览器语音和 Ant Design 组件同步使用当前语言的区域设置。
     - 生命体征告警由 `client/src/page/home/speechSynthesis.js` 统一调用 Web Speech API。voice 的大小写、下划线和地区变体会标准化后按基础语言匹配；日文模式只允许 `ja` voice，首次 voice 列表尚未加载时监听一次 `voiceschanged` 重试，仍不可用则跳过播报并告警，不回退到中文系统 voice。日文界面及播报用的 `fallBed`、`sitUp`、`home.alerts.fallRisk`、`home.alerts.satUp` 四个资源键统一为 `端座位`。
+    - `client/public/audio/alerts/ja/` 预生成 `left-bed.mp3`（`離床しました`）、`edge-seat.mp3`（`端座位`）和 `emergency.mp3`（`SOS緊急通報`），均由 `ja-JP-NanamiNeural` 以 `-5%` 语速制作，并同步到 `build/audio/alerts/ja/` 供离线分发。此批文件当前仅作为已准备的静态资源，尚未替换 `speechSynthesis.js` 的 Web Speech 运行路径。
     - CSV 下载请求携带当前语言；`server.js` 分别输出中文、旧版英文简写或日文表头，并同步本地化检测点、触觉手套部位和左右手文件名，不修改历史数据字段和值。
 
 ## 5. API 端点 (Endpoints)
@@ -759,6 +761,7 @@ graph TD
 | 2026-08-13 | Codex | 人体全身优化默认颜色再次调整 | 背景默认色更新为 `#afacac`，模型默认色更新为 `#718096`；设置缓存升级至版本 3，仅迁移上一版默认色，保留用户自定义颜色。 |
 | 2026-08-13 | Codex | 人体全身优化默认扩散半径调整 | 默认扩散半径由 `0.13` 调整为 `0.10`，设置缓存升级至版本 4；仅迁移上一版仍为默认 `0.13` 的值，用户自定义半径保持不变。 |
 | 2026-08-14 | Revise | 日文生命体征语音与状态翻译修正 | 告警播报提取为可测试的 Web Speech 适配模块；日文仅选择 `ja` voice，voice 延迟加载时单次重试，缺失时不回退中文；“已坐起”和“坠床风险”的界面与播报日文统一为 `端座位`。 |
+| 2026-08-14 | Revise | 日文生命体征固定告警音频 | 使用 `ja-JP-NanamiNeural` 生成離床、端座位、SOS 三条日文 MP3，并将源资源与当前发布目录副本做 SHA-256 一致性校验；此轮不修改现有 Web Speech 播报逻辑。 |
 
 ## 9. 更新日志
 
@@ -1162,6 +1165,7 @@ graph TD
 | 2026-08-13 | Revise | 配置变更 | 人体全身优化默认背景色进一步调整为 `#afacac`、默认模型色调整为 `#718096`，并同步颜色预设首项；设置缓存版本升级为 3，版本 2 中仍使用 `#e6e6e6 / #d2d6dc` 的旧默认值会自动迁移，自定义颜色保持不变。 |
 | 2026-08-13 | Revise | 配置变更 | 人体全身优化扩散半径默认值改为 `0.10`，可调范围继续保持 `0.05–0.13`；设置缓存版本升级为 4，版本 3 中半径仍为旧默认 `0.13` 时自动迁移至 `0.10`，其他半径不覆盖。 |
 | 2026-08-14 | Revise | 修复缺陷 | 日文生命体征告警按基础语言严格选择 `ja` 系统 voice，voice 列表延迟时通过 `voiceschanged` 单次重试，仍不可用则跳过播报而不回退中文；四个“已坐起/坠床风险”日文资源统一为 `端座位`。 |
+| 2026-08-14 | Revise | 新增功能 | 新增 `ja-JP-NanamiNeural` 日文固定告警 MP3：`left-bed.mp3`、`edge-seat.mp3`、`emergency.mp3` 同步保存于前端 public 与当前 build，支持后续离线播放接入；运行时语音逻辑和项目依赖保持不变。 |
 
 *变更类型：`新增功能` / `优化重构` / `修复缺陷` / `配置变更` / `文档更新` / `依赖升级` / `初始化`*
 
