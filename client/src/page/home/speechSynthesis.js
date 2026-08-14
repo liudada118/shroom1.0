@@ -6,6 +6,13 @@ const FEMALE_VOICE_KEYWORDS = [
   'linda', 'nanami', 'haruka', 'kyoko', 'otoya', 'google',
 ];
 
+const JAPANESE_ALERT_AUDIO_PATHS = Object.freeze({
+  leftBed: '/audio/alerts/ja/left-bed.mp3',
+  fallRisk: '/audio/alerts/ja/edge-seat.mp3',
+  satUp: '/audio/alerts/ja/edge-seat.mp3',
+  emergency: '/audio/alerts/ja/emergency.mp3',
+});
+
 export const normalizeVoiceLanguageTag = (value) => (
   String(value || '').trim().toLowerCase().replaceAll('_', '-')
 );
@@ -21,9 +28,7 @@ export function findVoiceForLanguage(voices, language) {
   ))) || matches[0] || null;
 }
 
-export function speakLocalizedMessage(text, language = 'zh', dependencies = {}) {
-  if (!text) return 'empty';
-
+function speakWithSystemVoice(text, language, dependencies = {}) {
   const normalizedLanguage = normalizeLanguage(language);
   const locale = getLanguageLocale(normalizedLanguage);
   const synthesis = dependencies.synthesis || globalThis.speechSynthesis;
@@ -38,7 +43,7 @@ export function speakLocalizedMessage(text, language = 'zh', dependencies = {}) 
     if (allowWait && typeof synthesis.addEventListener === 'function') {
       const retry = () => {
         synthesis.removeEventListener?.('voiceschanged', retry);
-        speakLocalizedMessage(text, language, {
+        speakWithSystemVoice(text, language, {
           ...dependencies,
           synthesis,
           Utterance,
@@ -60,3 +65,79 @@ export function speakLocalizedMessage(text, language = 'zh', dependencies = {}) 
   synthesis.speak(utterance);
   return 'spoken';
 }
+
+export function createLocalizedSpeechController() {
+  let activeJapaneseAlert = null;
+
+  const clearIfActive = (record) => {
+    if (activeJapaneseAlert === record) activeJapaneseAlert = null;
+  };
+
+  const speakLocalizedMessage = (text, language = 'zh', dependencies = {}) => {
+    if (!text) return 'empty';
+
+    const normalizedLanguage = normalizeLanguage(language);
+    const audioPath = normalizedLanguage === 'ja'
+      ? JAPANESE_ALERT_AUDIO_PATHS[dependencies.alertKey]
+      : null;
+
+    if (!audioPath) return speakWithSystemVoice(text, language, dependencies);
+
+    if (activeJapaneseAlert?.alertKey === dependencies.alertKey) {
+      return 'already-playing';
+    }
+
+    if (activeJapaneseAlert) {
+      activeJapaneseAlert.cancelled = true;
+      activeJapaneseAlert.audio.pause?.();
+      activeJapaneseAlert.audio.currentTime = 0;
+      activeJapaneseAlert = null;
+    }
+
+    const AudioConstructor = dependencies.AudioConstructor || globalThis.Audio;
+    if (typeof AudioConstructor !== 'function') {
+      return speakWithSystemVoice(text, language, dependencies);
+    }
+
+    let audio;
+    try {
+      audio = new AudioConstructor(audioPath);
+    } catch (_error) {
+      return speakWithSystemVoice(text, language, dependencies);
+    }
+
+    const record = {
+      alertKey: dependencies.alertKey,
+      audio,
+      cancelled: false,
+      fallbackStarted: false,
+    };
+    activeJapaneseAlert = record;
+
+    const fallbackOnce = () => {
+      if (record.cancelled || record.fallbackStarted) return null;
+      record.fallbackStarted = true;
+      clearIfActive(record);
+      return speakWithSystemVoice(text, language, dependencies);
+    };
+
+    audio.addEventListener?.('ended', () => clearIfActive(record), { once: true });
+    audio.addEventListener?.('error', fallbackOnce, { once: true });
+
+    try {
+      const playResult = audio.play();
+      playResult?.catch?.(fallbackOnce);
+      return 'playing-local';
+    } catch (_error) {
+      return fallbackOnce() || 'unavailable';
+    }
+  };
+
+  return { speakLocalizedMessage };
+}
+
+const defaultController = createLocalizedSpeechController();
+
+export const speakLocalizedMessage = (...args) => (
+  defaultController.speakLocalizedMessage(...args)
+);
