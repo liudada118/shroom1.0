@@ -86,6 +86,11 @@ const { isCar, dedupli, totalToN, } = require("./util");
 const { pressSmallBed } = require("./utilMatrix");
 const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine, pressNew12203131 } = require('./server/mathUtils');
 const { initDb: _initDbFromModule } = require('./server/dbManager');
+const smallBed12B = require('./server/smallBed12B');
+const {
+  estimatePointPressure,
+  FILTER_THRESHOLD: PRESSURE_CALIBRATION_FILTER_THRESHOLD,
+} = require('./util/pressureCalibration_V2.7.54');
 
 const HAND_GLOVE_FULL_PACKET = 'handGloveFullPacket';
 const HAND_GLOVE_DOUBLE = 'hand0205Double';
@@ -107,6 +112,10 @@ const MINZHEN_BACKEND_GAUSS_RADIUS = 0.5;
 const WHOLE_CHAIR_GAUSS_RADIUS = 0.5;
 const SMALL_BED_12B_PAYLOAD_LENGTH = 1024 * 2;
 const SMALL_BED_12B_FRAME_TAIL = Buffer.from([0xaa, 0x00, 0x55, 0x00, 0x03, 0x00, 0x99, 0x00]);
+const smallBed12BCalibration = {
+  estimatePointPressure,
+  filterThreshold: PRESSURE_CALIBRATION_FILTER_THRESHOLD,
+};
 const THREE_PORT_SENSOR_TYPES = new Set(['volvo', WHOLE_CHAIR_TYPE]);
 const isHandGloveType = (sensorType) => HAND_GLOVE_TYPES.includes(sensorType);
 const isHandStorageType = (sensorType = '') => isHandGloveType(sensorType) || String(sensorType).includes('robot');
@@ -599,7 +608,15 @@ function getHistoryPressureData(row) {
 }
 
 function normalizeHistoryPressureData(row, file = '') {
+  const storedData = parseStoredFrameData(row);
   const data = getHistoryPressureData(row);
+  if (file === SMALL_BED_12B_TYPE) {
+    return smallBed12B.normalizePressureData(
+      data,
+      storedData,
+      smallBed12BCalibration,
+    );
+  }
   const pressureData = isHandStorageType(file) && data.length > 256 ? data.slice(0, 256) : data;
   const normalizedData = pressureData.map((value) => {
     const numberValue = Number(value);
@@ -778,91 +795,28 @@ function shouldDownsampleSmallBed12BCollection() {
 }
 
 function buildSmallBed12BCollectionStorageData(frameToStore) {
-  const sourceData = Array.isArray(frameToStore?.sitData) ? frameToStore.sitData : [];
-  if (!shouldDownsampleSmallBed12BCollection()) {
-    return JSON.stringify(sourceData);
-  }
-
-  const options = collectOptions.matrixDownsample || {};
-  const displaySamplePoint = options.samplePoint || 'topLeft';
-  const storageSamplePoint = getSmallBed12BStorageSamplePoint(displaySamplePoint);
-  const downsampled = downsampleMatrixByPoint(sourceData, {
-    ...options,
-    samplePoint: storageSamplePoint,
-  });
-  return JSON.stringify({
-    sitData: downsampled,
-    pressureData: downsampled,
-    matrixWidth: Number(options.targetWidth) || 16,
-    matrixHeight: Number(options.targetHeight) || 16,
-    sourceMatrixWidth: Number(options.sourceWidth) || 32,
-    sourceMatrixHeight: Number(options.sourceHeight) || 32,
-    matrixDownsample: {
-      enabled: true,
-      samplePoint: storageSamplePoint,
-      displaySamplePoint,
-      blockWidth: Number(options.blockWidth) || 2,
-      blockHeight: Number(options.blockHeight) || 2,
-    },
+  return smallBed12B.buildCollectionStorageData(frameToStore, {
+    collectOptions,
+    transposeSquareMatrix,
   });
 }
 
 function buildSmallBedPlaybackPayload(row, extra = {}) {
   const storedData = parseStoredFrameData(row);
-  if (storedData && typeof storedData === 'object' && !Array.isArray(storedData)) {
-    const storedSitData = Array.isArray(storedData.sitData)
-      ? storedData.sitData
-      : Array.isArray(storedData.pressureData)
-        ? storedData.pressureData
-        : [];
-    if (file === SMALL_BED_12B_TYPE && storedSitData.length === 256) {
-      const matrixDownsample = storedData.matrixDownsample || {};
-      return {
-        sitData: expandDownsampledMatrixByPoint(storedSitData, {
-          targetWidth: Number(storedData.matrixWidth) || 16,
-          targetHeight: Number(storedData.matrixHeight) || 16,
-          sourceWidth: Number(storedData.sourceMatrixWidth) || 32,
-          sourceHeight: Number(storedData.sourceMatrixHeight) || 32,
-          blockWidth: Number(matrixDownsample.blockWidth) || 2,
-          blockHeight: Number(matrixDownsample.blockHeight) || 2,
-          samplePoint: matrixDownsample.samplePoint || 'topLeft',
-        }),
-        matrixWidth: Number(storedData.sourceMatrixWidth) || 32,
-        matrixHeight: Number(storedData.sourceMatrixHeight) || 32,
-        sourceMatrixWidth: Number(storedData.sourceMatrixWidth) || 32,
-        sourceMatrixHeight: Number(storedData.sourceMatrixHeight) || 32,
-        matrixDownsample,
-        playbackExpandedFromMatrixWidth: Number(storedData.matrixWidth) || 16,
-        playbackExpandedFromMatrixHeight: Number(storedData.matrixHeight) || 16,
-        time: row?.timestamp,
-        ...extra,
-      };
-    }
+  if (file === SMALL_BED_12B_TYPE) {
+    const sitData = normalizeHistoryPressureData(row, file);
+    const isStoredObject = storedData && typeof storedData === 'object' && !Array.isArray(storedData);
+    const inferredSize = sitData.length === 256 ? 16 : 32;
     return {
-      sitData: storedSitData,
-      matrixWidth: storedData.matrixWidth,
-      matrixHeight: storedData.matrixHeight,
-      matrixDownsample: storedData.matrixDownsample,
-      time: row?.timestamp,
-      ...extra,
-    };
-  }
-
-  if (file === SMALL_BED_12B_TYPE && Array.isArray(storedData) && storedData.length === 256) {
-    return {
-      sitData: expandDownsampledMatrixByPoint(storedData, {
-        targetWidth: 16,
-        targetHeight: 16,
-        sourceWidth: 32,
-        sourceHeight: 32,
-        blockWidth: 2,
-        blockHeight: 2,
-        samplePoint: 'topLeft',
-      }),
-      matrixWidth: 32,
-      matrixHeight: 32,
-      playbackExpandedFromMatrixWidth: 16,
-      playbackExpandedFromMatrixHeight: 16,
+      sitData,
+      pressureData: sitData,
+      matrixWidth: Number(isStoredObject && storedData.matrixWidth) || inferredSize,
+      matrixHeight: Number(isStoredObject && storedData.matrixHeight) || inferredSize,
+      sourceMatrixWidth: isStoredObject ? storedData.sourceMatrixWidth : undefined,
+      sourceMatrixHeight: isStoredObject ? storedData.sourceMatrixHeight : undefined,
+      matrixOrientation: isStoredObject ? storedData.matrixOrientation : undefined,
+      matrixDownsample: isStoredObject ? storedData.matrixDownsample : undefined,
+      pressureUnit: 'kPa',
       time: row?.timestamp,
       ...extra,
     };
@@ -1983,7 +1937,7 @@ function getHistorySeries({ sitRows = [], backRows = [], start = 0, end = null, 
     const backAreaValue = backData ? backData.filter((a) => a > 10).length : 0;
 
     press.push(
-      (sitData ? totalToN(sitTotalValue) : 0) +
+      (sitData ? formatMatrixTotalForFile(sitTotalValue, file) : 0) +
       (backData ? totalToN(backTotalValue, 1.3) : 0)
     );
     area.push(sitAreaValue + backAreaValue);
@@ -2021,6 +1975,19 @@ function buildZeroPlaybackFrame() {
   return file === "bigBed"
     ? new Array(2048).fill(0)
     : new Array(1024).fill(0);
+}
+
+function buildZeroPlaybackPayload() {
+  if (file !== SMALL_BED_12B_TYPE) {
+    return { sitData: buildZeroPlaybackFrame() };
+  }
+  const size = smallBed12BDisplayOptions.matrixMode === '16x16' ? 16 : 32;
+  return {
+    sitData: new Array(size * size).fill(0),
+    matrixWidth: size,
+    matrixHeight: size,
+    pressureUnit: 'kPa',
+  };
 }
 
 function broadcastHistorySelectionPayload(payload) {
@@ -2082,9 +2049,10 @@ function loadSelectedHistory(dateLabel) {
       index: nowIndex,
       pressArr: historySeries.press,
       areaArr: historySeries.area,
+      historyTimeArr: historySeries.time,
       historySampleStep: historySeries.sampleStep || 1,
       historyLazy: !eager,
-      sitData: buildZeroPlaybackFrame(),
+      ...buildZeroPlaybackPayload(),
     });
 
     if (isThreePortFile(file)) {
@@ -3363,6 +3331,7 @@ db2 = dbObj.db2
 let flag = false;
 let colHZ = 12, oldTimeStamp = new Date().getTime();
 let collectOptions = { frequencyMode: 'serial', frequencyHz: 12, matrixDownsample: { enabled: false } };
+let smallBed12BDisplayOptions = { matrixMode: '32x32', samplePoint: 'topLeft' };
 let lastCollectionStorageAt = { sit: 0, back: 0, head: 0 };
 let splitBuffer = Buffer.from([0xaa, 0x55, 0x03, 0x99]);
 // let splitBuffer1 = Buffer.from([0xaa, 0x55, 0x03, 0x09]);
@@ -3753,6 +3722,12 @@ module.exports = {
             pointArr2RawZero = []
             pointArr147zero = []
             pointArr147zero_2 = []
+          }
+
+          if (getMessage.smallBed12BDisplayOptions != null) {
+            smallBed12BDisplayOptions = smallBed12B.normalizeDisplayOptions(
+              getMessage.smallBed12BDisplayOptions,
+            );
           }
 
           if (JSON.parse(message).file != null) {
@@ -7491,26 +7466,23 @@ parser.on("data", function (data) {
 });
 
 parserSmallBed12B.on("data", function (data) {
-  pointArr = new Array();
-  let buffer = Buffer.from(data);
-  newData = new Array();
+  if (!licenseManager.isLicenseValid() || file !== SMALL_BED_12B_TYPE) return;
 
-  if (licenseManager.isLicenseValid() && file === SMALL_BED_12B_TYPE && buffer.length === SMALL_BED_12B_PAYLOAD_LENGTH) {
-    for (var i = 0; i < SMALL_BED_12B_PAYLOAD_LENGTH / 2; i++) {
-      pointArr[i] = buffer.readUInt16LE(i * 2);
-    }
+  const frame = smallBed12B.buildRealtimeFrameFromBuffer(Buffer.from(data), {
+    lineOrder: jqbed,
+    zeroFrame: pointArr1zero,
+    subtractZero: numLessZeroToZero,
+    calibration: smallBed12BCalibration,
+    displayOptions: smallBed12BDisplayOptions,
+    hz: colHZ,
+    transposeSquareMatrix,
+  });
+  if (!frame) return;
 
-    pointArr = jqbed(pointArr);
-    newData = [...pointArr];
-    pointArr1zeroData = [...pointArr];
-
-    if (pointArr1zero.length) {
-      pointArr = pointArr.map((a, index) => numLessZeroToZero(a - pointArr1zero[index]));
-    }
-
-    const jsonData = JSON.stringify({ sitData: pointArr, hz: colHZ });
-    colOrSendData(jsonData);
-  }
+  pointArr1zeroData = [...frame.orderedFrame];
+  pointArr = frame.pressureData;
+  newData = [...frame.pressureData];
+  colOrSendData(JSON.stringify(frame.realtimeFrame));
 });
 
 function colOrSendData(jsonData) {
