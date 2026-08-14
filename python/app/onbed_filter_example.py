@@ -621,16 +621,60 @@ def create_default_inputs():
     return inputs
 
 
-def getData(data):
+ALGORITHM_PAIR_KEYS = {
+    'sos_disable_area',
+    'sitting_area',
+    'leave_bed_disable_area',
+    'small_object_size',
+    'head_foot_area',
+}
+ALGORITHM_INTEGER_KEYS = {'min_sos_sequence', 'breath_detect_mode'}
+ALGORITHM_SWITCH_KEYS = {'filter_switch', 'strel_switch'}
+
+
+def _normalize_algorithm_value(key, value):
+    if key in ALGORITHM_PAIR_KEYS:
+        pair = np.asarray(value, dtype=np.float32)
+        if pair.shape != (2,) or not np.isfinite(pair).all():
+            raise ValueError(f'invalid pair: {key}')
+        first, second = (float(pair[0]), float(pair[1]))
+        if key == 'sitting_area':
+            sentinel = first == 255.0 and second == 255.0
+            normal = 0.0 <= first <= 32.0 and 0.0 <= second <= 32.0
+            if not sentinel and not normal:
+                raise ValueError(f'invalid sitting_area: {value}')
+        elif not (0.0 <= first <= 32.0 and 0.0 <= second <= 32.0):
+            raise ValueError(f'pair out of range: {key}')
+        return pair
+
+    number = float(value)
+    if not np.isfinite(number) or number < 0.0:
+        raise ValueError(f'invalid number: {key}')
+    if key in ALGORITHM_INTEGER_KEYS and not number.is_integer():
+        raise ValueError(f'invalid integer: {key}')
+    if key in ALGORITHM_SWITCH_KEYS and number not in (0.0, 1.0):
+        raise ValueError(f'invalid switch: {key}')
+    return number
+
+
+def build_step_inputs(data, config=None):
+    inputs = create_default_inputs()
+    if config is not None:
+        if not isinstance(config, dict):
+            raise ValueError('config must be an object')
+        for key, value in config.items():
+            if key not in inputs:
+                continue
+            inputs[key] = _normalize_algorithm_value(key, value)
+    inputs['frame_data'] = np.asarray(data, dtype=np.float32)
+    return inputs
+
+
+def getData(data, config=None):
     """
     处理传感器数据，返回健康监测结果（新版 API）
     """
-    inputs = create_default_inputs()
-
-    
-
-    inputs['frame_data'] = np.array(data, dtype=np.float32)
-    outputs = ncz.step(inputs)
+    outputs = ncz.step(build_step_inputs(data, config))
 
     # 安全转换 numpy 值为 Python 原生类型
     def safe_float(val, default=0.0):
