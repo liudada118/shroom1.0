@@ -1,10 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useReducer, useRef, useState } from 'react';
 import { Alert, Button, InputNumber, Modal, Space, Spin, Switch, Tag } from 'antd';
 import { useTranslation } from 'react-i18next';
 import {
   JQBED_CONFIG_FIELDS,
   JQBED_CONFIG_GROUPS,
-  cloneJqbedConfigValues,
+  createJqbedConfigModalState,
+  reduceJqbedConfigModalState,
   serializeJqbedConfigDraft,
   validateJqbedConfigDraft,
 } from './jqbedAlgorithmConfig';
@@ -28,36 +29,38 @@ export default function JqbedAlgorithmConfigModal({
 }) {
   const { t, i18n } = useTranslation();
   const [activeGroup, setActiveGroup] = useState('sos');
-  const [draft, setDraft] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [displayResult, setDisplayResult] = useState(null);
-  const resultAtOpen = useRef(operationResult);
+  const [modalState, dispatch] = useReducer(
+    reduceJqbedConfigModalState,
+    undefined,
+    createJqbedConfigModalState,
+  );
+  const envelopeAtOpen = useRef(envelope);
+  const { draft, pending, displayResult } = modalState;
+  const saving = Boolean(pending);
   const validation = draft
     ? validateJqbedConfigDraft(draft)
     : { valid: false, errors: {} };
 
   useEffect(() => {
     if (open) {
-      resultAtOpen.current = operationResult;
+      envelopeAtOpen.current = envelope;
       setActiveGroup('sos');
-      setDraft(null);
-      setSaving(false);
-      setDisplayResult(null);
+      dispatch({ type: 'open' });
       onRequest();
+    } else {
+      dispatch({ type: 'close' });
     }
   }, [open, onRequest]);
 
   useEffect(() => {
-    if (envelope?.values) {
-      setDraft(cloneJqbedConfigValues(envelope.values));
-      setSaving(false);
+    if (open && envelope?.values && envelope !== envelopeAtOpen.current) {
+      dispatch({ type: 'envelope', envelope });
     }
-  }, [envelope]);
+  }, [envelope, open]);
 
   useEffect(() => {
-    if (!open || !operationResult || operationResult === resultAtOpen.current) return;
-    setDisplayResult(operationResult);
-    if (operationResult.ok === false) setSaving(false);
+    if (!open || !operationResult) return;
+    dispatch({ type: 'result', result: operationResult });
   }, [open, operationResult]);
 
   const loading = draft === null;
@@ -69,10 +72,11 @@ export default function JqbedAlgorithmConfigModal({
 
   const renderField = (field) => {
     const value = draft[field.key];
-    const setValue = (nextValue) => setDraft((current) => ({
-      ...current,
-      [field.key]: nextValue,
-    }));
+    const setValue = (nextValue) => dispatch({
+      type: 'change',
+      key: field.key,
+      value: nextValue,
+    });
 
     if (field.kind === 'switch') {
       return <Switch checked={Number(value) === 1} onChange={(checked) => setValue(checked ? 1 : 0)} />;
@@ -109,9 +113,8 @@ export default function JqbedAlgorithmConfigModal({
 
   const handleSave = () => {
     if (!draft || !validation.valid || saving) return;
-    setSaving(true);
-    setDisplayResult(null);
-    onSave(serializeJqbedConfigDraft(draft));
+    const requestId = onSave(serializeJqbedConfigDraft(draft));
+    if (requestId) dispatch({ type: 'begin', action: 'save', requestId });
   };
 
   const handleReset = () => {
@@ -121,11 +124,15 @@ export default function JqbedAlgorithmConfigModal({
       cancelText: t('jqbedAlgorithmConfig.cancel'),
       centered: true,
       onOk: () => {
-        setSaving(true);
-        setDisplayResult(null);
-        onReset();
+        const requestId = onReset();
+        if (requestId) dispatch({ type: 'begin', action: 'reset', requestId });
       },
     });
+  };
+
+  const handleClose = () => {
+    dispatch({ type: 'close' });
+    onClose();
   };
 
   const resultMessage = displayResult
@@ -144,7 +151,7 @@ export default function JqbedAlgorithmConfigModal({
       centered
       maskClosable={false}
       styles={{ mask: { backgroundColor: 'rgba(5, 5, 18, 0.58)' } }}
-      onCancel={onClose}
+      onCancel={handleClose}
     >
       <div className="jqbedAlgorithmConfig__summary">
         <Tag color={status.color}>{t(status.labelKey)}</Tag>
@@ -204,7 +211,7 @@ export default function JqbedAlgorithmConfigModal({
         <Button disabled={loading || saving} onClick={handleReset}>
           {t('jqbedAlgorithmConfig.restore')}
         </Button>
-        <Button onClick={onClose}>{t('jqbedAlgorithmConfig.cancel')}</Button>
+        <Button onClick={handleClose}>{t('jqbedAlgorithmConfig.cancel')}</Button>
         <Button
           type="primary"
           disabled={loading || !validation.valid || saving}

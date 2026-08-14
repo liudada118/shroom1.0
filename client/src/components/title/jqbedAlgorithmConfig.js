@@ -89,6 +89,85 @@ export function cloneJqbedConfigValues(values = {}) {
   }));
 }
 
+export const createJqbedConfigModalState = () => ({
+  draft: null,
+  dirty: false,
+  pending: null,
+  deferredEnvelope: null,
+  awaitingEnvelope: false,
+  displayResult: null,
+});
+
+const applyJqbedConfigEnvelope = (state, envelope) => ({
+  ...state,
+  draft: cloneJqbedConfigValues(envelope.values),
+  dirty: false,
+  deferredEnvelope: null,
+  awaitingEnvelope: false,
+});
+
+export function reduceJqbedConfigModalState(state, event) {
+  switch (event.type) {
+    case 'open':
+    case 'close':
+      return createJqbedConfigModalState();
+    case 'change':
+      if (!state.draft) return state;
+      return {
+        ...state,
+        draft: {
+          ...state.draft,
+          [event.key]: Array.isArray(event.value) ? [...event.value] : event.value,
+        },
+        dirty: true,
+        displayResult: null,
+      };
+    case 'begin':
+      if (!event.requestId) return state;
+      return {
+        ...state,
+        pending: { action: event.action, requestId: event.requestId },
+        deferredEnvelope: null,
+        awaitingEnvelope: false,
+        displayResult: null,
+      };
+    case 'envelope':
+      if (!event.envelope?.values) return state;
+      if (state.pending) {
+        return { ...state, deferredEnvelope: event.envelope };
+      }
+      if (state.awaitingEnvelope) {
+        return applyJqbedConfigEnvelope(state, event.envelope);
+      }
+      if (state.dirty) return state;
+      return applyJqbedConfigEnvelope(state, event.envelope);
+    case 'result': {
+      const result = event.result;
+      const matchesPending = result
+        && state.pending
+        && result.action === state.pending.action
+        && result.requestId === state.pending.requestId;
+      if (!matchesPending) return state;
+      if (result.ok && state.deferredEnvelope?.values) {
+        return applyJqbedConfigEnvelope({
+          ...state,
+          pending: null,
+          displayResult: result,
+        }, state.deferredEnvelope);
+      }
+      return {
+        ...state,
+        pending: null,
+        deferredEnvelope: null,
+        awaitingEnvelope: Boolean(result.ok),
+        displayResult: result,
+      };
+    }
+    default:
+      return state;
+  }
+}
+
 export function validateJqbedConfigDraft(values) {
   const errors = Object.create(null);
   const source = values && typeof values === 'object' && !Array.isArray(values) ? values : {};

@@ -3,7 +3,9 @@ import {
   JQBED_CONFIG_FIELDS,
   JQBED_CONFIG_GROUPS,
   cloneJqbedConfigValues,
+  createJqbedConfigModalState,
   getJqbedConfigAccess,
+  reduceJqbedConfigModalState,
   validateJqbedConfigDraft,
   serializeJqbedConfigDraft,
 } from './jqbedAlgorithmConfig';
@@ -101,5 +103,83 @@ describe('jqbed algorithm configuration model', () => {
     });
     expect(serialized.sos_disable_area).not.toBe(validDraft.sos_disable_area);
     expect(serialized.sos_disable_area).toEqual([6, 10]);
+  });
+
+  it('does not let external envelopes overwrite a dirty or pending draft', () => {
+    let state = reduceJqbedConfigModalState(createJqbedConfigModalState(), {
+      type: 'envelope',
+      envelope: { version: 1, values: validDraft, savedAt: null },
+    });
+    state = reduceJqbedConfigModalState(state, {
+      type: 'change', key: 'threshold_factor', value: '9',
+    });
+
+    const externalEnvelope = {
+      version: 1,
+      values: { ...validDraft, threshold_factor: '77' },
+      savedAt: '2026-08-14T09:00:00.000Z',
+    };
+    const dirtyState = reduceJqbedConfigModalState(state, {
+      type: 'envelope', envelope: externalEnvelope,
+    });
+    expect(dirtyState.draft.threshold_factor).toBe('9');
+    expect(dirtyState.dirty).toBe(true);
+
+    const pendingState = reduceJqbedConfigModalState(dirtyState, {
+      type: 'begin', action: 'save', requestId: 'local-save-1',
+    });
+    const afterExternal = reduceJqbedConfigModalState(pendingState, {
+      type: 'envelope', envelope: externalEnvelope,
+    });
+    expect(afterExternal.draft.threshold_factor).toBe('9');
+    expect(afterExternal.pending).toEqual({ action: 'save', requestId: 'local-save-1' });
+  });
+
+  it('only a matching operation result completes pending and applies its deferred envelope', () => {
+    let state = reduceJqbedConfigModalState(createJqbedConfigModalState(), {
+      type: 'envelope',
+      envelope: { version: 1, values: validDraft, savedAt: null },
+    });
+    state = reduceJqbedConfigModalState(state, {
+      type: 'change', key: 'threshold_factor', value: '9',
+    });
+    state = reduceJqbedConfigModalState(state, {
+      type: 'begin', action: 'save', requestId: 'local-save-2',
+    });
+    state = reduceJqbedConfigModalState(state, {
+      type: 'envelope',
+      envelope: {
+        version: 1,
+        values: { ...validDraft, threshold_factor: '4' },
+        savedAt: '2026-08-14T10:00:00.000Z',
+      },
+    });
+
+    const staleResult = { ok: false, action: 'save', requestId: 'older-save' };
+    state = reduceJqbedConfigModalState(state, { type: 'result', result: staleResult });
+    expect(state.pending).toEqual({ action: 'save', requestId: 'local-save-2' });
+    expect(state.displayResult).toBe(null);
+    expect(state.draft.threshold_factor).toBe('9');
+
+    const matchingResult = { ok: true, action: 'save', requestId: 'local-save-2' };
+    state = reduceJqbedConfigModalState(state, { type: 'result', result: matchingResult });
+    expect(state.pending).toBe(null);
+    expect(state.displayResult).toBe(matchingResult);
+    expect(state.dirty).toBe(false);
+    expect(state.draft.threshold_factor).toBe('4');
+  });
+
+  it('clears session correlation on close and ignores old results after reopen', () => {
+    let state = reduceJqbedConfigModalState(createJqbedConfigModalState(), {
+      type: 'begin', action: 'reset', requestId: 'old-reset',
+    });
+    state = reduceJqbedConfigModalState(state, { type: 'close' });
+    state = reduceJqbedConfigModalState(state, { type: 'open' });
+    state = reduceJqbedConfigModalState(state, {
+      type: 'result',
+      result: { ok: false, action: 'reset', requestId: 'old-reset' },
+    });
+
+    expect(state).toEqual(createJqbedConfigModalState());
   });
 });

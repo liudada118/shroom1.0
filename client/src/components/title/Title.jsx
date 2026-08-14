@@ -383,6 +383,9 @@ class Title extends React.Component {
         humanTransform: createDefaultHumanTransform(),
       })
     }
+    if (this.state.jqbedAlgorithmConfigOpen && !this.canUseJqbedAlgorithmConfig()) {
+      this.closeJqbedAlgorithmConfig();
+    }
   }
 
   getSmallBed12BDisplayState = () => {
@@ -1575,12 +1578,26 @@ class Title extends React.Component {
     this.props.wsSendObj({ getJqbedAlgorithmConfig: true });
   }
 
+  canUseJqbedAlgorithmConfig = () => {
+    const access = getJqbedConfigAccess({
+      matrixName: this.props.matrixName,
+      history: this.props.history,
+    });
+    return access.visible && !access.disabled;
+  }
+
   saveJqbedAlgorithmConfig = (values) => {
-    this.props.wsSendObj({ setJqbedAlgorithmConfig: values });
+    if (!this.canUseJqbedAlgorithmConfig()) return null;
+    const requestId = crypto.randomUUID();
+    this.props.wsSendObj({ setJqbedAlgorithmConfig: values, requestId });
+    return requestId;
   }
 
   resetJqbedAlgorithmConfig = () => {
-    this.props.wsSendObj({ resetJqbedAlgorithmConfig: true });
+    if (!this.canUseJqbedAlgorithmConfig()) return null;
+    const requestId = crypto.randomUUID();
+    this.props.wsSendObj({ resetJqbedAlgorithmConfig: true, requestId });
+    return requestId;
   }
 
   closeJqbedAlgorithmConfig = () => {
@@ -2337,15 +2354,20 @@ class Title extends React.Component {
 
       {jqbedConfigAccess.visible ? (
         <Tooltip title={t(jqbedConfigAccess.tooltipKey)}>
-          <button
-            type="button"
-            className="jqbedAlgorithmConfigTrigger"
-            disabled={jqbedConfigAccess.disabled}
-            onClick={() => this.setState({ jqbedAlgorithmConfigOpen: true })}
-            aria-label={t('jqbedAlgorithmConfig.open')}
+          <span
+            className="jqbedAlgorithmConfigTooltipTarget"
+            tabIndex={jqbedConfigAccess.disabled ? 0 : undefined}
           >
-            <SlidersOutlined />
-          </button>
+            <button
+              type="button"
+              className="jqbedAlgorithmConfigTrigger"
+              disabled={jqbedConfigAccess.disabled}
+              onClick={() => this.setState({ jqbedAlgorithmConfigOpen: true })}
+              aria-label={t('jqbedAlgorithmConfig.open')}
+            >
+              <SlidersOutlined />
+            </button>
+          </span>
         </Tooltip>
       ) : null}
 

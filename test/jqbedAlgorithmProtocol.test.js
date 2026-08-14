@@ -88,6 +88,22 @@ test('broadcasts authoritative snapshots after successful save and reset', () =>
   assert.deepEqual(sent[1].jqbedAlgorithmConfigResult, { ok: true, action: 'reset', errors: {}, message: null });
 });
 
+test('echoes the opaque requestId on successful and rejected mutation results', () => {
+  const success = createProtocol();
+  success.protocol.handle({
+    setJqbedAlgorithmConfig: DEFAULT_JQBED_ALGORITHM_VALUES,
+    requestId: 'save-request-7',
+  }, authorizedContext);
+  assert.equal(success.sent[0].jqbedAlgorithmConfigResult.requestId, 'save-request-7');
+
+  const rejected = createProtocol();
+  rejected.protocol.handle({
+    resetJqbedAlgorithmConfig: true,
+    requestId: 'reset-request-9',
+  }, { ...authorizedContext, realtime: false });
+  assert.equal(rejected.sent[0].jqbedAlgorithmConfigResult.requestId, 'reset-request-9');
+});
+
 test('returns validation field codes only to the requesting client', () => {
   const { protocol, sent, broadcasts } = createProtocol({
     save: () => { throw new JqbedAlgorithmConfigValidationError({ threshold_factor: 'nonnegative' }); },

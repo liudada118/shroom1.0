@@ -5,6 +5,9 @@
   }
 
   .ant-modal-content {
+    display: flex;
+    flex-direction: column;
+    height: 80vh;
     max-height: 80vh;
     padding: 0;
     overflow: hidden;
@@ -12,6 +15,7 @@
   }
 
   .ant-modal-header {
+    flex: 0 0 auto;
     margin: 0;
     padding: 20px 24px 16px;
     border-bottom: 1px solid rgba(90, 90, 137, 0.65);
@@ -24,10 +28,16 @@
   }
 
   .ant-modal-body {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
     color: rgba(255, 255, 255, 0.78);
   }
 
   .ant-alert {
+    flex: 0 0 auto;
     margin: 12px 24px 0;
   }
 
@@ -56,6 +66,7 @@
 
   &__summary {
     display: flex;
+    flex: 0 0 auto;
     align-items: center;
     gap: 10px;
     padding: 14px 24px 0;
@@ -64,6 +75,7 @@
 
   &__groups {
     display: flex;
+    flex: 0 0 auto;
     gap: 8px;
     padding: 16px 24px 12px;
 
@@ -88,8 +100,9 @@
   }
 
   &__formScroll {
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
-    max-height: calc(80vh - 176px);
     padding: 0 24px 16px;
   }
 
@@ -132,10 +145,9 @@
   }
 
   &__footer {
-    position: sticky;
-    bottom: 0;
     z-index: 1;
     display: flex;
+    flex: 0 0 auto;
     gap: 10px;
     justify-content: flex-end;
     padding: 16px 24px;
@@ -151,6 +163,17 @@
     .ant-btn-primary {
       background: #55aaff;
     }
+  }
+}
+
+.jqbedAlgorithmConfigTooltipTarget {
+  display: inline-flex;
+  flex: 0 0 auto;
+  border-radius: 4px;
+
+  &:focus-visible {
+    outline: 2px solid #55aaff;
+    outline-offset: 2px;
   }
 }
 

@@ -15,9 +15,15 @@ function isConfigMessage(message) {
 }
 
 function createJqbedAlgorithmProtocol({ store, sendJson, broadcastJson, getAlgorithmStatus }) {
-  function sendResult(client, ok, action, errors = {}, message = null) {
+  function sendResult(client, ok, action, errors = {}, message = null, requestId) {
     sendJson(client, {
-      jqbedAlgorithmConfigResult: { ok, action, errors, message },
+      jqbedAlgorithmConfigResult: {
+        ok,
+        action,
+        errors,
+        message,
+        ...(requestId !== undefined ? { requestId } : {}),
+      },
     });
   }
 
@@ -26,9 +32,10 @@ function createJqbedAlgorithmProtocol({ store, sendJson, broadcastJson, getAlgor
 
     const { client, licenseValid, activeFile, realtime } = context;
     const action = message.setJqbedAlgorithmConfig ? 'save' : message.resetJqbedAlgorithmConfig ? 'reset' : null;
+    const { requestId } = message;
     if (!licenseValid || activeFile !== 'jqbed' || !realtime) {
       if (action) {
-        sendResult(client, false, action, {}, 'jqbed realtime configuration is unavailable');
+        sendResult(client, false, action, {}, 'jqbed realtime configuration is unavailable', requestId);
       }
       return true;
     }
@@ -46,12 +53,12 @@ function createJqbedAlgorithmProtocol({ store, sendJson, broadcastJson, getAlgor
         ? store.save(message.setJqbedAlgorithmConfig)
         : store.reset();
       broadcastJson({ jqbedAlgorithmConfig: snapshot });
-      sendResult(client, true, action);
+      sendResult(client, true, action, {}, null, requestId);
     } catch (error) {
       if (error instanceof JqbedAlgorithmConfigValidationError) {
-        sendResult(client, false, action, { ...error.errors }, error.message);
+        sendResult(client, false, action, { ...error.errors }, error.message, requestId);
       } else {
-        sendResult(client, false, action, {}, 'Unable to save jqbed algorithm configuration');
+        sendResult(client, false, action, {}, 'Unable to save jqbed algorithm configuration', requestId);
       }
     }
     return true;
