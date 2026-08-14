@@ -87,6 +87,11 @@ const { pressSmallBed } = require("./utilMatrix");
 const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine, pressNew12203131 } = require('./server/mathUtils');
 const { initDb: _initDbFromModule } = require('./server/dbManager');
 const { createCollectionInsertQueue } = require('./server/collectionInsertQueue');
+const { createJqbedAlgorithmConfigStore } = require('./server/jqbedAlgorithmConfig');
+const {
+  buildJqbedGetDataArgs,
+  createJqbedAlgorithmProtocol,
+} = require('./server/jqbedAlgorithmProtocol');
 const {
   createUtf8BomCsvWriter: createCsvWriter,
   prefixCsvHeaderWithBom,
@@ -1532,6 +1537,13 @@ let length, history, nowGetTime;
 
 const runtimeResourceRoot = app.isPackaged ? process.resourcesPath : __dirname;
 const runtimeWritableRoot = app.isPackaged ? app.getPath('userData') : __dirname;
+const jqbedAlgorithmConfigStore = createJqbedAlgorithmConfigStore({
+  filePath: path.join(runtimeWritableRoot, 'jqbed-algorithm-config.json'),
+  logger,
+});
+jqbedAlgorithmConfigStore.load();
+
+let jqbedAlgorithmStatus = { state: 'waiting', error: null };
 const exportRoot = app.isPackaged
   ? (process.platform === 'darwin' ? app.getPath('desktop') : process.resourcesPath)
   : runtimeWritableRoot;
@@ -3371,6 +3383,35 @@ server = new WebSocket.Server({ port: 19999 });
 server1 = new WebSocket.Server({ port: 19998 });
 server2 = new WebSocket.Server({ port: 19997 });
 
+function sendJson(client, payload) {
+  if (client?.readyState === WebSocket.OPEN) {
+    client.send(JSON.stringify(payload));
+  }
+}
+
+function broadcastJson(payload) {
+  const jsonData = JSON.stringify(payload);
+  server.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(jsonData);
+    }
+  });
+}
+
+function setJqbedAlgorithmStatus(nextStatus) {
+  const serialized = JSON.stringify(nextStatus);
+  if (serialized === JSON.stringify(jqbedAlgorithmStatus)) return;
+  jqbedAlgorithmStatus = nextStatus;
+  broadcastJson({ jqbedAlgorithmStatus });
+}
+
+const jqbedAlgorithmProtocol = createJqbedAlgorithmProtocol({
+  store: jqbedAlgorithmConfigStore,
+  sendJson,
+  broadcastJson,
+  getAlgorithmStatus: () => jqbedAlgorithmStatus,
+});
+
 module.exports = {
   openServer() {
     if (serverOpened) {
@@ -3394,6 +3435,14 @@ module.exports = {
         logger.debug("received: %s from %s", message, clientName, localFlag);
 
         const getMessage = JSON.parse(message);
+        if (jqbedAlgorithmProtocol.handle(getMessage, {
+          client: ws,
+          licenseValid: licenseManager.isLicenseValid(),
+          activeFile: file,
+          realtime: !localFlag,
+        })) {
+          return;
+        }
 
         /**
          * 鐏忓棗鐤勯弮鍫曟浆閼冲本鏆熼幑顕€鈧岸浜鹃幍鎾崇磻
@@ -8399,7 +8448,17 @@ jqbedTimer = setInterval(async () => {
     const newArr = jqbedOppo(pointArr);
     // console.log(newArr.reduce((a,b) => a+b , 0),pointArr.length,'nweArr')
     try {
-      const rawData = await callPy('getData', { data: newArr });
+      const rawData = await callPy(
+        'getData',
+        buildJqbedGetDataArgs(
+          newArr,
+          file,
+          jqbedAlgorithmConfigStore.getSnapshot(),
+        ),
+      );
+      if (file === 'jqbed') {
+        setJqbedAlgorithmStatus({ state: 'ready', error: null });
+      }
       if (rawData && rawData.rate != -1) {
         const data = normalizeVitalSignsHeartRate(rawData, file);
         // console.log('[jqbed] pyResult:', data,data.matrix_origin.reduce((a,b) => a+b , 0));
@@ -8436,6 +8495,16 @@ jqbedTimer = setInterval(async () => {
       }
     } catch (e) {
       console.error('[jqbed] callPy error:', e.message);
+      if (file === 'jqbed') {
+        const safeMessage = typeof e?.message === 'string' && e.message
+          ? e.message
+          : 'Unable to run jqbed algorithm';
+        setJqbedAlgorithmStatus({
+          state: 'error',
+          error: safeMessage,
+          errorAt: new Date().toISOString(),
+        });
+      }
     }
   }
 }, 125);
