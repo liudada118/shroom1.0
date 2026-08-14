@@ -1,0 +1,194 @@
+.jqbedAlgorithmConfig {
+  .ant-modal-content,
+  .ant-modal-header {
+    background: #191932;
+  }
+
+  .ant-modal-content {
+    max-height: 80vh;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid #5A5A89;
+  }
+
+  .ant-modal-header {
+    margin: 0;
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid rgba(90, 90, 137, 0.65);
+  }
+
+  .ant-modal-title,
+  .ant-modal-close,
+  label {
+    color: #fff;
+  }
+
+  .ant-modal-body {
+    color: rgba(255, 255, 255, 0.78);
+  }
+
+  .ant-alert {
+    margin: 12px 24px 0;
+  }
+
+  .ant-input-number,
+  .ant-input-number-input,
+  .ant-input-number-group-addon {
+    color: #fff;
+    background: #000;
+  }
+
+  .ant-input-number {
+    width: 100%;
+    border-color: #5A5A89;
+
+    &:hover,
+    &:focus,
+    &-focused {
+      border-color: #55aaff;
+      box-shadow: 0 0 0 2px rgba(85, 170, 255, 0.18);
+    }
+  }
+
+  .ant-switch.ant-switch-checked {
+    background: #55aaff;
+  }
+
+  &__summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 24px 0;
+    color: rgba(255, 255, 255, 0.62);
+  }
+
+  &__groups {
+    display: flex;
+    gap: 8px;
+    padding: 16px 24px 12px;
+
+    button {
+      padding: 7px 14px;
+      color: rgba(255, 255, 255, 0.68);
+      cursor: pointer;
+      background: #000;
+      border: 1px solid #5A5A89;
+      border-radius: 4px;
+
+      &:hover,
+      &.is-active {
+        color: #fff;
+        border-color: #55aaff;
+      }
+
+      &.is-active {
+        background: rgba(85, 170, 255, 0.18);
+      }
+    }
+  }
+
+  &__formScroll {
+    overflow-y: auto;
+    max-height: calc(80vh - 176px);
+    padding: 0 24px 16px;
+  }
+
+  &__loading {
+    display: grid;
+    min-height: 240px;
+    place-items: center;
+  }
+
+  &__field {
+    display: grid;
+    grid-template-columns: minmax(260px, 1fr) minmax(240px, 320px);
+    gap: 28px;
+    align-items: center;
+    padding: 15px 0;
+    border-bottom: 1px solid rgba(90, 90, 137, 0.32);
+  }
+
+  &__fieldCopy {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+
+    label {
+      font-weight: 600;
+    }
+
+    span {
+      color: rgba(255, 255, 255, 0.52);
+      line-height: 1.5;
+    }
+  }
+
+  &__fieldCopy &__error {
+    color: #ff7875;
+  }
+
+  &__control {
+    min-width: 0;
+  }
+
+  &__footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    padding: 16px 24px;
+    background: #191932;
+    border-top: 1px solid rgba(90, 90, 137, 0.65);
+
+    .ant-btn-default {
+      color: rgba(255, 255, 255, 0.78);
+      background: #000;
+      border-color: #5A5A89;
+    }
+
+    .ant-btn-primary {
+      background: #55aaff;
+    }
+  }
+}
+
+.jqbedAlgorithmConfigTrigger {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  place-items: center;
+
+  .anticon {
+    color: #55aaff;
+    font-size: 20px;
+  }
+
+  &:hover:not(:disabled) {
+    border-color: #55aaff;
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.42;
+  }
+}
+
+@media (max-width: 760px) {
+  .jqbedAlgorithmConfig {
+    &__groups {
+      flex-wrap: wrap;
+    }
+
+    &__field {
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+  }
+}

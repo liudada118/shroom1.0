@@ -775,6 +775,9 @@ class Home extends React.Component {
       colFlag: true,
       colNum: 0,
       history: "now",
+      jqbedAlgorithmConfig: null,
+      jqbedAlgorithmConfigResult: null,
+      jqbedAlgorithmStatus: { state: 'waiting', error: null },
       numMatrixFlag: "normal",
       centerFlag: false,
       carState: "all",
@@ -1379,6 +1382,16 @@ class Home extends React.Component {
     sitPress = 0;
     let jsonObject = JSON.parse(e.data);
     this.syncSmallBed12BMatrixSize(jsonObject);
+
+    if (jsonObject.jqbedAlgorithmConfig) {
+      this.setState({ jqbedAlgorithmConfig: jsonObject.jqbedAlgorithmConfig });
+    }
+    if (jsonObject.jqbedAlgorithmConfigResult) {
+      this.setState({ jqbedAlgorithmConfigResult: jsonObject.jqbedAlgorithmConfigResult });
+    }
+    if (jsonObject.jqbedAlgorithmStatus) {
+      this.setState({ jqbedAlgorithmStatus: jsonObject.jqbedAlgorithmStatus });
+    }
 
     // 传感器类型清单（{time,flat,map}）：存到 state 并落地 localStorage 兜底
     if (jsonObject.sensorTypeList && Array.isArray(jsonObject.sensorTypeList.flat)) {
@@ -4071,6 +4084,9 @@ class Home extends React.Component {
             smallBed12BRealtimeMatrixMode={this.state.smallBed12BRealtimeMatrixMode}
             smallBed12BRealtimeSamplePoint={this.state.smallBed12BRealtimeSamplePoint}
             history={this.state.history}
+            jqbedAlgorithmConfig={this.state.jqbedAlgorithmConfig}
+            jqbedAlgorithmConfigResult={this.state.jqbedAlgorithmConfigResult}
+            jqbedAlgorithmStatus={this.state.jqbedAlgorithmStatus}
             wsSendObj={this.wsSendObj}
             changeMatrix={this.changeMatrix}
             changeLocal={this.changeLocal}

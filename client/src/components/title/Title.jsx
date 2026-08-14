@@ -1,6 +1,6 @@
 import React from 'react'
-import { Menu, Slider, Button, Select, message, notification, Divider, Space, Radio, Drawer, Modal, Progress } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { Menu, Slider, Button, Select, message, notification, Divider, Space, Radio, Drawer, Modal, Progress, Tooltip } from 'antd';
+import { PlusOutlined, SlidersOutlined } from '@ant-design/icons';
 import exchange from '../../assets/images/exchange.png'
 import option from '../../assets/images/Option.png'
 import logo from '../../assets/images/logo.png'
@@ -17,6 +17,8 @@ import axios from 'axios';
 import { bthClickHandle as heatmapBthClickHandle } from '../onestep/heatmap';
 import { translateDomainLabel } from '../../i18n/translateDomainLabel';
 import { getLanguageLocale } from '../../i18n';
+import JqbedAlgorithmConfigModal from './JqbedAlgorithmConfigModal';
+import { getJqbedConfigAccess } from './jqbedAlgorithmConfig';
 let collection = JSON.parse(localStorage.getItem('collection'))
   ? JSON.parse(localStorage.getItem('collection'))
   : [['hunch', 'front', '标签']];
@@ -321,6 +323,7 @@ class Title extends React.Component {
       smallBed12BRealtimeSamplePoint: localStorage.getItem('smallBed12BRealtimeSamplePoint') || 'topLeft',
       pdfLoading: false,
       humanTransform: createDefaultHumanTransform(),
+      jqbedAlgorithmConfigOpen: false,
     }
     this.inputRef = React.createRef(null)
     this.inputRef1 = React.createRef(null)
@@ -1568,9 +1571,29 @@ class Title extends React.Component {
     );
   }
 
+  requestJqbedAlgorithmConfig = () => {
+    this.props.wsSendObj({ getJqbedAlgorithmConfig: true });
+  }
+
+  saveJqbedAlgorithmConfig = (values) => {
+    this.props.wsSendObj({ setJqbedAlgorithmConfig: values });
+  }
+
+  resetJqbedAlgorithmConfig = () => {
+    this.props.wsSendObj({ resetJqbedAlgorithmConfig: true });
+  }
+
+  closeJqbedAlgorithmConfig = () => {
+    this.setState({ jqbedAlgorithmConfigOpen: false });
+  }
+
   render() {
     const routerStr = this.props.matrixName == 'yanfeng10' ? '10a10' : this.props.matrixName == 'smallSample' ? '10a10' : this.props.matrixName == 'matCol' || this.props.matrixName == 'matColPos' ? '16a10' : this.props.matrixName == 'bed4096' ? '64a64' : this.props.matrixName == 'carCol' ? '10a9' : '32a32'
     const { t, i18n } = this.props;
+    const jqbedConfigAccess = getJqbedConfigAccess({
+      matrixName: this.props.matrixName,
+      history: this.props.history,
+    });
 
 
     // 全量传感器类型列表
@@ -2300,6 +2323,31 @@ class Title extends React.Component {
       {this.renderCsvDownloadModal(t)}
       {this.renderCollectionModal(t)}
       {this.renderSmallBed12BDisplaySettings(t)}
+
+      <JqbedAlgorithmConfigModal
+        open={this.state.jqbedAlgorithmConfigOpen}
+        envelope={this.props.jqbedAlgorithmConfig}
+        operationResult={this.props.jqbedAlgorithmConfigResult}
+        algorithmStatus={this.props.jqbedAlgorithmStatus}
+        onRequest={this.requestJqbedAlgorithmConfig}
+        onSave={this.saveJqbedAlgorithmConfig}
+        onReset={this.resetJqbedAlgorithmConfig}
+        onClose={this.closeJqbedAlgorithmConfig}
+      />
+
+      {jqbedConfigAccess.visible ? (
+        <Tooltip title={t(jqbedConfigAccess.tooltipKey)}>
+          <button
+            type="button"
+            className="jqbedAlgorithmConfigTrigger"
+            disabled={jqbedConfigAccess.disabled}
+            onClick={() => this.setState({ jqbedAlgorithmConfigOpen: true })}
+            aria-label={t('jqbedAlgorithmConfig.open')}
+          >
+            <SlidersOutlined />
+          </button>
+        </Tooltip>
+      ) : null}
 
       <div style={{ position: 'relative', flexShrink: 0 }}>
         <img onClick={() => {
