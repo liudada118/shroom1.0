@@ -1783,7 +1783,11 @@ class Home extends React.Component {
         //   msg.lang = "en-US"; // 设定语言
         //   speechSynthesis.speak(msg);
         // }
-        speakLocalizedMessage(this.props.t('home.alerts.leftBed'), this.props.i18n.language)
+        speakLocalizedMessage(
+          this.props.t('home.alerts.leftBed'),
+          this.props.i18n.language,
+          { alertKey: 'leftBed' },
+        )
 
 
       }
@@ -1793,7 +1797,11 @@ class Home extends React.Component {
         // const msg = new SpeechSynthesisUtterance("坠床风险");
         // msg.lang = "zh-CN"; // 设定语言
         // speechSynthesis.speak(msg);
-        speakLocalizedMessage(this.props.t('home.alerts.fallRisk'), this.props.i18n.language)
+        speakLocalizedMessage(
+          this.props.t('home.alerts.fallRisk'),
+          this.props.i18n.language,
+          { alertKey: 'fallRisk' },
+        )
       }
 
 
@@ -1801,7 +1809,11 @@ class Home extends React.Component {
         // const msg = new SpeechSynthesisUtterance("已坐起");
         // msg.lang = "zh-CN"; // 设定语言
         // speechSynthesis.speak(msg);
-        speakLocalizedMessage(this.props.t('home.alerts.satUp'), this.props.i18n.language)
+        speakLocalizedMessage(
+          this.props.t('home.alerts.satUp'),
+          this.props.i18n.language,
+          { alertKey: 'satUp' },
+        )
       }
 
 
@@ -1811,7 +1823,11 @@ class Home extends React.Component {
         // const msg = new SpeechSynthesisUtterance("SOS紧急求助");
         // msg.lang = "zh-CN"; // 设定语言
         // speechSynthesis.speak(msg);
-        speakLocalizedMessage(this.props.t('home.alerts.emergency'), this.props.i18n.language)
+        speakLocalizedMessage(
+          this.props.t('home.alerts.emergency'),
+          this.props.i18n.language,
+          { alertKey: 'emergency' },
+        )
       }
     }
 
