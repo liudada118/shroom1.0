@@ -102,6 +102,7 @@ import { withTranslation } from "react-i18next";
 import { getLanguageLocale, normalizeLanguage } from '../../i18n';
 import { translateBackendMessage } from '../../i18n/translateBackendMessage';
 import { translateDomainLabel } from '../../i18n/translateDomainLabel';
+import { speakLocalizedMessage } from './speechSynthesis';
 import { chestLine, flLine, frLine, genWebglData, handSkinChange, heatMapMax, hlLine, hrLine, robot0401 } from "./robotUtil";
 import { WebGLCanvas } from "../../components/webgl/WebGL.HeatMap copy 2";
 import {
@@ -722,45 +723,6 @@ var backFlag, hz = 12, sitFlag, realHzFrameCount = 0, realHzLastTime = Date.now(
   fingerArrL = readFingerCalibration('fingerArrL'),
   fingerArrR = readFingerCalibration('fingerArrR'),
   fingerArr = fingerArrL; // 默认指向左手，兼容旧逻辑
-
-// jqbed health-monitoring voice alert.
-function speakMessage(text, lang = "zh") {
-  if (!text) return;
-  const normalizedLanguage = normalizeLanguage(lang);
-  const utter = new SpeechSynthesisUtterance(text);
-
-
-
-
-  // 设置语言
-  utter.lang = getLanguageLocale(normalizedLanguage);
-
-
-  // 优先选择女声 voice
-  const voices = speechSynthesis.getVoices();
-  const langVoices = voices.filter(v => v.lang.startsWith(utter.lang));
-
-  // 女声关键词匹配（覆盖 Windows / macOS / Linux 常见女声名称）
-  const femaleKeywords = [
-    'xiaoxiao', 'huihui', 'yaoyao', 'female', 'woman',
-    'tingting', 'meijia', 'sinji',
-    'zira', 'hazel', 'susan', 'linda',
-    'nanami', 'haruka',
-    'google', // Google 默认中文声音通常是女声
-  ];
-
-  // 优先匹配女声
-  let voice = langVoices.find(v =>
-    femaleKeywords.some(kw => v.name.toLowerCase().includes(kw))
-  );
-
-  // 如果没找到女声关键词，选该语言第一个可用声音
-  if (!voice && langVoices.length > 0) voice = langVoices[0];
-
-  if (voice) utter.voice = voice;
-
-  speechSynthesis.speak(utter);
-}
 
 let onBedState = []
 class Home extends React.Component {
@@ -1821,7 +1783,7 @@ class Home extends React.Component {
         //   msg.lang = "en-US"; // 设定语言
         //   speechSynthesis.speak(msg);
         // }
-        speakMessage(this.props.t('home.alerts.leftBed'), this.props.i18n.language)
+        speakLocalizedMessage(this.props.t('home.alerts.leftBed'), this.props.i18n.language)
 
 
       }
@@ -1831,7 +1793,7 @@ class Home extends React.Component {
         // const msg = new SpeechSynthesisUtterance("坠床风险");
         // msg.lang = "zh-CN"; // 设定语言
         // speechSynthesis.speak(msg);
-        speakMessage(this.props.t('home.alerts.fallRisk'), this.props.i18n.language)
+        speakLocalizedMessage(this.props.t('home.alerts.fallRisk'), this.props.i18n.language)
       }
 
 
@@ -1839,7 +1801,7 @@ class Home extends React.Component {
         // const msg = new SpeechSynthesisUtterance("已坐起");
         // msg.lang = "zh-CN"; // 设定语言
         // speechSynthesis.speak(msg);
-        speakMessage(this.props.t('home.alerts.satUp'), this.props.i18n.language)
+        speakLocalizedMessage(this.props.t('home.alerts.satUp'), this.props.i18n.language)
       }
 
 
@@ -1849,7 +1811,7 @@ class Home extends React.Component {
         // const msg = new SpeechSynthesisUtterance("SOS紧急求助");
         // msg.lang = "zh-CN"; // 设定语言
         // speechSynthesis.speak(msg);
-        speakMessage(this.props.t('home.alerts.emergency'), this.props.i18n.language)
+        speakLocalizedMessage(this.props.t('home.alerts.emergency'), this.props.i18n.language)
       }
     }
 
