@@ -78,7 +78,7 @@ function normalizePair(value, kind) {
 }
 
 function normalizeJqbedAlgorithmValues(values) {
-  const errors = {};
+  const errors = Object.create(null);
   const source = values && typeof values === 'object' && !Array.isArray(values) ? values : {};
 
   for (const key of Object.keys(source)) {

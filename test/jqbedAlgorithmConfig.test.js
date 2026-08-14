@@ -43,6 +43,20 @@ test('rejects the whole payload for unknown, missing, non-finite or invalid fiel
   );
 });
 
+test('rejects an own enumerable __proto__ key as unknown', () => {
+  const payload = structuredClone(DEFAULT_JQBED_ALGORITHM_VALUES);
+  Object.defineProperty(payload, '__proto__', {
+    value: 1,
+    enumerable: true,
+    configurable: true,
+  });
+  assert.throws(
+    () => normalizeJqbedAlgorithmValues(payload),
+    (error) => error instanceof JqbedAlgorithmConfigValidationError
+      && error.errors.__proto__ === 'unknown',
+  );
+});
+
 test('atomically saves and reloads a complete snapshot', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'jqbed-config-'));
   const filePath = path.join(directory, 'jqbed-algorithm-config.json');
