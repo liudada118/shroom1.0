@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from "react";
 import Title from "../../components/title/Title";
+import { sendWebSocketJson } from './websocketTransport';
 import "./index.scss";
 import CanvasCar from "../../components/three/carnewTest copy";
 import CanvasCarWow from "../../components/three/carnewWow";
@@ -778,6 +779,8 @@ class Home extends React.Component {
       jqbedAlgorithmConfig: null,
       jqbedAlgorithmConfigResult: null,
       jqbedAlgorithmStatus: { state: 'waiting', error: null },
+      wsConnected: false,
+      wsConnectionEpoch: 0,
       numMatrixFlag: "normal",
       centerFlag: false,
       carState: "all",
@@ -955,6 +958,7 @@ class Home extends React.Component {
   }
 
   componentDidMount() {
+    this.setState({ wsConnected: false });
     // window.alert(window.innerWidth)
     document.documentElement.style.fontSize = `${window.innerWidth / 120}px`;
     this.syncDisplayRendererConfig();
@@ -993,6 +997,10 @@ class Home extends React.Component {
     ws.onopen = () => {
       // connection opened
       console.info("connect success");
+      this.setState((previousState) => ({
+        wsConnected: true,
+        wsConnectionEpoch: previousState.wsConnectionEpoch + 1,
+      }));
       this.wsSendObj({
         // file: this.state.matrixName,
         sitClose: true,
@@ -1017,6 +1025,7 @@ class Home extends React.Component {
       console.warn('[WS] 连接错误，将在 3s 后重连');
     };
     ws.onclose = (e) => {
+      this.setState({ wsConnected: false });
       // 息屏或网络中断后自动重连
       console.warn('[WS] 连接断开，3s 后自动重连...');
       if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
@@ -3071,11 +3080,11 @@ class Home extends React.Component {
     const state = ws ? ws.readyState : 'no ws';
     // readyState: 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
     console.log(`[WS Send] readyState=${state}`, obj);
-    if (ws && ws.readyState === 1) {
-      ws.send(JSON.stringify(obj));
-    } else {
+    const sent = sendWebSocketJson(ws, obj);
+    if (!sent) {
       console.warn(`[WS Send] 无法发送， ws.readyState=${state}`, obj);
     }
+    return sent;
   };
 
   changeMatrix = (e) => {
@@ -4087,6 +4096,8 @@ class Home extends React.Component {
             jqbedAlgorithmConfig={this.state.jqbedAlgorithmConfig}
             jqbedAlgorithmConfigResult={this.state.jqbedAlgorithmConfigResult}
             jqbedAlgorithmStatus={this.state.jqbedAlgorithmStatus}
+            wsConnected={this.state.wsConnected}
+            wsConnectionEpoch={this.state.wsConnectionEpoch}
             wsSendObj={this.wsSendObj}
             changeMatrix={this.changeMatrix}
             changeLocal={this.changeLocal}

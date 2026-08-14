@@ -309,11 +309,11 @@ graph TD
 
 配置链路为 `Title` 图标/弹窗 → `Home` WebSocket → `jqbedAlgorithmProtocol` → `jqbedAlgorithmConfig` store → `server.js` 的 `jqbedTimer` → `pyWorker` → `getData(data, config=None)` → `onbed_filter.pyd`。该链路只服务持有效 `jqbed` 授权的实时“小床监测”；标题栏调节图标仅在 `matrixName === 'jqbed'` 时显示并位于通用设置齿轮左侧，回放时保留入口但禁用，提示“算法参数仅对实时监测生效”，后端同时以授权、活动系统和实时状态再次拒绝越界请求。
 
-- **字段模型**：共 18 项，分为四组。SOS：`sos_peak_threshold`、`points_threshold_in`、`sos_disable_area`、`min_sos_sequence`；基础参数：`threshold_factor`、`continuous_on_bed_duration_minutes`、`unlock_sitting_alarm_duration_minutes`；滤波与区域：`filter_switch`、`strel_switch`、`leave_bed_disable_area`、`small_object_size`；高级参数：`breath_detect_mode`、`sitting_area`、`body_movement_threshold`、`step_leavebed_trigger`、`edge_align_ratio`、`head_foot_area`、`breath_th`。前后端都要求字段完整且拒绝未知字段、非有限值和负数；整数/开关/二维区域另按各自约束校验，`sitting_area` 额外允许成对哨兵 `[255, 255]`。
-- **持久化与同步**：打包环境写入 `app.getPath('userData')/jqbed-algorithm-config.json`，开发环境写入项目根目录 `jqbed-algorithm-config.json`。store 先把版本化 envelope 写入同目录唯一 `.tmp` 临时文件，再以 rename 替换正式 JSON；只有落盘成功后才更新内存快照。保存或恢复默认会向所有 WebSocket 客户端广播后端快照，弹窗按 `requestId` 关联结果并显示 18 项、PYD 状态与 `savedAt`。
+- **字段模型**：共 18 项，分为四组。SOS：`sos_peak_threshold`、`points_threshold_in`、`sos_disable_area`、`min_sos_sequence`；基础参数：`threshold_factor`、`continuous_on_bed_duration_minutes`、`unlock_sitting_alarm_duration_minutes`；滤波与区域：`filter_switch`、`strel_switch`、`leave_bed_disable_area`、`small_object_size`；高级参数：`breath_detect_mode`、`sitting_area`、`body_movement_threshold`、`step_leavebed_trigger`、`edge_align_ratio`、`head_foot_area`、`breath_th`。前后端都要求字段完整且拒绝未知字段、非有限值和负数；整数/开关/二维区域另按各自约束校验，`sitting_area` 额外允许成对哨兵 `[255, 255]`。UI 按原生算法语义分别标注二元值：SOS/离床禁用区域为前/后，坐起区域为最小/最大，头脚区域为床头/床尾，只有小目标尺寸为行/列；`points_threshold_in` 明确表示 SOS 拍打点数。
+- **持久化与同步**：打包环境写入 `app.getPath('userData')/jqbed-algorithm-config.json`，开发环境写入项目根目录 `jqbed-algorithm-config.json`。store 先把版本化 envelope 写入同目录唯一 `.tmp` 临时文件，再以 rename 替换正式 JSON；只有落盘成功后才更新内存快照。保存或恢复默认会向所有 WebSocket 客户端广播后端快照，GET/保存/恢复均按 `requestId` 返回明确结果。`Home` 只有在主 WebSocket 真正完成 `send()` 时才报告成功，并把连接状态及重连 epoch 传给弹窗；弹窗为读取和变更分别设置 10 秒超时，断线会清理 pending，重连会重新 GET。发送失败、超时、拒绝和断线都保留 dirty 草稿，远端广播/重连快照也不会覆盖未保存输入。
 - **帧边界与系统隔离**：`jqbedTimer` 每次 Python 调用前读取一次深拷贝快照；已经发出的在途帧不被修改，下一帧开始使用新配置。`buildJqbedGetDataArgs()` 仅在活动系统为 `jqbed` 时附加 `config`；兼容定时器中的 `smallBed` 仍只发送 `{ data }`，`smallBedNoAlg` 与 `smallBed12B` 不进入此 Python 配置链路。原始矩阵、采集、回放、CSV 和历史数据通道不读取算法配置。
 - **Python 与告警边界**：`python/app/onbed_filter_example.py` 的 `getData(data, config=None)` 将合法 JSON 配置转换为 `onbed_filter.pyd` 的标量或 `float32` 二元数组输入。SOS 配置本身不直接触发或改写前端告警；只有 PYD 输出经 Python RPC 返回的 `sosflag` 继续进入现有 `Home`/`Aside` 告警路径。
-- **正式 runtime**：`npm run prepare-pack-resources` 使用 Python 3.11、NumPy 和 PyInstaller 构建 `python/dist/onbed_server/onbed_server.exe`，随后同步为 `pack-resources/python/onbed_server/onbed_server.exe`；打包后的 `pyWorker` 从 `process.resourcesPath/python`（含 `app.asar.unpacked` 候选）解析该可执行文件，并保持 stdout 仅承载 JSON-line RPC。`python/app/serial_monitor_updated2.0(1).py` 仅是非运行时、未跟踪参考，不属于本隔离工作树、提交、构建输入或打包 runtime。
+- **正式 runtime**：Windows 的 `npm run prepare-pack-resources` 要求以 `ONBED_FILTER_PYD_SOURCE` 指向仓库外 `onbed_filter.cp311-win_amd64.pyd`，并以 `ONBED_FILTER_PYD_SHA256` 校验源与暂存目标；缺库、缺哈希或不匹配立即失败，临时注入文件在构建结束后删除。构建脚本对 Python 3.11 探测、PyInstaller 构建统一强制 UTF-8，生成 `python/dist/onbed_server/onbed_server.exe` 后执行 `health` JSON-line RPC，只有 `pong=true` 且 `onbedFilterAvailable=true` 才继续同步到 `pack-resources/python/onbed_server/onbed_server.exe`；`npm run check-python-runtime-health` 可独立复验。打包后的 `pyWorker` 从 `process.resourcesPath/python`（含 `app.asar.unpacked` 候选）解析该可执行文件，并保持 stdout 仅承载 JSON-line RPC。`python/app/serial_monitor_updated2.0(1).py` 仅是非运行时、未跟踪参考，不属于本隔离工作树、提交、构建输入或打包 runtime。
 
 ## 5. API 端点 (Endpoints)
 
@@ -345,10 +345,10 @@ graph TD
 | `getMessage.history` | 历史数据查询 |
 | `getMessage.serialReset` | 串口重置 |
 | `getMessage.indexArr` | 批量索引设置 |
-| `getMessage.getJqbedAlgorithmConfig` | 读取 jqbed 实时算法配置、PYD 状态和最后保存时间 |
+| `getMessage.getJqbedAlgorithmConfig` | 读取 jqbed 实时算法配置、PYD 状态和最后保存时间；成功或拒绝均返回关联结果 |
 | `getMessage.setJqbedAlgorithmConfig` | 校验、原子保存并立即应用完整的 18 项 jqbed 算法配置 |
 | `getMessage.resetJqbedAlgorithmConfig` | 恢复、原子保存并立即应用 jqbed 默认算法配置 |
-| `getMessage.requestId` | 关联 jqbed 配置保存/恢复请求与后端 `jqbedAlgorithmConfigResult`；成功快照通过 `jqbedAlgorithmConfig` 广播 |
+| `getMessage.requestId`（关联字段，非独立消息） | 关联 jqbed 配置读取/保存/恢复请求与后端 `jqbedAlgorithmConfigResult`；成功变更快照通过 `jqbedAlgorithmConfig` 广播 |
 
 ## 6. 外部依赖与集成
 
@@ -786,12 +786,14 @@ graph TD
 | 2026-08-14 | Revise | 日文固定告警离线播放接入 | 四类生命体征告警按稳定 `alertKey` 优先播放随应用分发的日文 MP3；同键防叠播、异键切换，媒体失败时仅回退严格日文系统 voice，中英文 Web Speech 与告警触发条件保持不变。 |
 | 2026-08-14 | Revise | 日文离床告警音频精简 | 将 `ja-JP-NanamiNeural` 离床 MP3 的播报内容由「離床しました」精简为「離床」，同步更新 public 与 build 资源；告警键、路径、回退逻辑及其他音频不变。 |
 | 2026-08-14 | codex/jqbed-algorithm-config | 小床监测算法配置 | 完成 jqbed 18 项四分组配置弹窗、前后端双层校验、原子持久化、WebSocket 多窗口同步、下一帧 Python 快照应用、非 jqbed/回放隔离和正式 Python runtime 打包契约。 |
+| 2026-08-14 | codex/jqbed-algorithm-config | 小床算法配置审查修复 | WebSocket 读写新增实际发送结果、读取 requestId、10 秒超时、断线失败与重连刷新，并保护 dirty 草稿；二元字段改用原生参数含义；Windows runtime 改为外部 PYD SHA-256 注入、自动 UTF-8 和原生导入 health 门禁。 |
 
 ## 9. 更新日志
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
 | 2026-08-14 | codex/jqbed-algorithm-config | 新增功能 | 同步 Jqbed Algorithm Configuration 架构：记录 18 项四分组字段、WebSocket/store/Python 数据流、原子落盘、下一帧快照、系统与回放隔离、SOS 输出边界及正式 runtime 打包路径。 |
+| 2026-08-14 | codex/jqbed-algorithm-config | 修复缺陷 | 补齐 jqbed 配置 WebSocket 的发送/超时/断线/重连状态机和 GET 明确回包，修正五种二元/拍打点数三语语义，并把 Windows Python runtime 收紧为 UTF-8、外部 PYD 哈希验证及 native health 必过。 |
 | 2026-08-14 | sqliteOpti | 修复缺陷 | 修复授权分支合并覆盖业务代码的问题：12B实时、统计、采集、回放和CSV统一使用1位小数kPa；历史新帧不重复标定，旧ADC帧兼容转换一次。 |
 | 2026-08-14 | sqliteOpti | 优化重构 | SQLite采集按200行或250ms批量落库并在停止/退出前刷新；CSV一次性和流式导出统一写入UTF-8 BOM，`matCol` 方向与标签由纯函数回归测试锁定。 |
 | 2026-08-10 | Codex | 配置变更 | 根据人工修订的《JQTOOLS中日翻译确认表》更新 `client/src/i18n/ja.js` 中 104 项日文译文，保留 4 项空白待确认译文及全部 `{{...}}` 模板占位符。 |

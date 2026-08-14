@@ -44,8 +44,9 @@ def build():
     if platform.system() == 'Windows':
         pyd_file = os.path.join(app_dir, 'onbed_filter.cp311-win_amd64.pyd')
         if not os.path.exists(pyd_file):
-            print(f"警告: 找不到 Windows 动态库 {pyd_file}")
-            pyd_file = None
+            raise FileNotFoundError(
+                f"正式 Windows runtime 缺少必需动态库: {pyd_file}"
+            )
     elif platform.system() == 'Darwin':
         so_file = os.path.join(app_dir, 'onbed_filter.cpython-311-darwin.so')
         if not os.path.exists(so_file):

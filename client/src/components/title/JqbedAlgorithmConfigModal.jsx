@@ -1,4 +1,4 @@
-import React, { useEffect, useReducer, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { Alert, Button, InputNumber, Modal, Space, Spin, Switch, Tag } from 'antd';
 import { useTranslation } from 'react-i18next';
 import {
@@ -17,11 +17,15 @@ const statusPresentation = {
   error: { color: 'error', labelKey: 'jqbedAlgorithmConfig.pydError' },
 };
 
+export const JQBED_CONFIG_REQUEST_TIMEOUT_MS = 10000;
+
 export default function JqbedAlgorithmConfigModal({
   open,
   envelope,
   operationResult,
   algorithmStatus,
+  connected,
+  connectionEpoch,
   onRequest,
   onSave,
   onReset,
@@ -34,23 +38,66 @@ export default function JqbedAlgorithmConfigModal({
     undefined,
     createJqbedConfigModalState,
   );
+  const wasOpen = useRef(false);
   const envelopeAtOpen = useRef(envelope);
-  const { draft, pending, displayResult } = modalState;
+  const connectionEpochAtOpen = useRef(connectionEpoch);
+  const wasConnected = useRef(connected);
+  const {
+    draft,
+    loadRequestId,
+    pending,
+    displayResult,
+    requestError,
+  } = modalState;
   const saving = Boolean(pending);
+  const requestInFlight = Boolean(loadRequestId || pending);
   const validation = draft
     ? validateJqbedConfigDraft(draft)
     : { valid: false, errors: {} };
 
+  const requestCurrentConfig = useCallback(() => {
+    const requestId = onRequest();
+    if (requestId) {
+      dispatch({ type: 'beginLoad', requestId });
+    } else {
+      dispatch({ type: 'requestFailure', action: 'load' });
+    }
+  }, [onRequest]);
+
   useEffect(() => {
-    if (open) {
+    const opening = open && !wasOpen.current;
+    const closing = !open && wasOpen.current;
+    wasOpen.current = open;
+
+    if (opening) {
       envelopeAtOpen.current = envelope;
+      connectionEpochAtOpen.current = connectionEpoch;
+      wasConnected.current = connected;
       setActiveGroup('sos');
       dispatch({ type: 'open' });
-      onRequest();
-    } else {
+      if (connected) {
+        requestCurrentConfig();
+      } else {
+        dispatch({ type: 'disconnect' });
+      }
+    } else if (closing) {
       dispatch({ type: 'close' });
     }
-  }, [open, onRequest]);
+  }, [connected, connectionEpoch, envelope, open, requestCurrentConfig]);
+
+  useEffect(() => {
+    if (open && connected && connectionEpoch !== connectionEpochAtOpen.current) {
+      connectionEpochAtOpen.current = connectionEpoch;
+      requestCurrentConfig();
+    }
+  }, [connected, connectionEpoch, open, requestCurrentConfig]);
+
+  useEffect(() => {
+    if (open && wasConnected.current && !connected) {
+      dispatch({ type: 'disconnect' });
+    }
+    wasConnected.current = connected;
+  }, [connected, open]);
 
   useEffect(() => {
     if (open && envelope?.values && envelope !== envelopeAtOpen.current) {
@@ -63,7 +110,23 @@ export default function JqbedAlgorithmConfigModal({
     dispatch({ type: 'result', result: operationResult });
   }, [open, operationResult]);
 
-  const loading = draft === null;
+  useEffect(() => {
+    if (!open || !loadRequestId) return undefined;
+    const timeout = setTimeout(() => dispatch({
+      type: 'timeout', action: 'load', requestId: loadRequestId,
+    }), JQBED_CONFIG_REQUEST_TIMEOUT_MS);
+    return () => clearTimeout(timeout);
+  }, [loadRequestId, open]);
+
+  useEffect(() => {
+    if (!open || !pending) return undefined;
+    const timeout = setTimeout(() => dispatch({
+      type: 'timeout', action: pending.action, requestId: pending.requestId,
+    }), JQBED_CONFIG_REQUEST_TIMEOUT_MS);
+    return () => clearTimeout(timeout);
+  }, [open, pending]);
+
+  const loading = draft === null && Boolean(loadRequestId);
   const status = statusPresentation[algorithmStatus?.state] || statusPresentation.waiting;
   const savedAt = envelope?.savedAt
     ? new Date(envelope.savedAt).toLocaleString(i18n.resolvedLanguage || i18n.language)
@@ -112,12 +175,17 @@ export default function JqbedAlgorithmConfigModal({
   };
 
   const handleSave = () => {
-    if (!draft || !validation.valid || saving) return;
+    if (!draft || !validation.valid || requestInFlight) return;
     const requestId = onSave(serializeJqbedConfigDraft(draft));
-    if (requestId) dispatch({ type: 'begin', action: 'save', requestId });
+    if (requestId) {
+      dispatch({ type: 'begin', action: 'save', requestId });
+    } else {
+      dispatch({ type: 'requestFailure', action: 'save' });
+    }
   };
 
   const handleReset = () => {
+    if (!draft || requestInFlight) return;
     Modal.confirm({
       title: t('jqbedAlgorithmConfig.restoreConfirmation'),
       okText: t('jqbedAlgorithmConfig.restore'),
@@ -125,7 +193,11 @@ export default function JqbedAlgorithmConfigModal({
       centered: true,
       onOk: () => {
         const requestId = onReset();
-        if (requestId) dispatch({ type: 'begin', action: 'reset', requestId });
+        if (requestId) {
+          dispatch({ type: 'begin', action: 'reset', requestId });
+        } else {
+          dispatch({ type: 'requestFailure', action: 'reset' });
+        }
       },
     });
   };
@@ -168,6 +240,9 @@ export default function JqbedAlgorithmConfigModal({
       {displayResult ? (
         <Alert type={displayResult.ok ? 'success' : 'error'} showIcon message={resultMessage} />
       ) : null}
+      {requestError ? (
+        <Alert type="error" showIcon message={t(requestError.message)} />
+      ) : null}
 
       <div className="jqbedAlgorithmConfig__groups" role="tablist">
         {JQBED_CONFIG_GROUPS.map((group) => (
@@ -189,6 +264,12 @@ export default function JqbedAlgorithmConfigModal({
           <div className="jqbedAlgorithmConfig__loading">
             <Spin />
           </div>
+        ) : draft === null ? (
+          <div className="jqbedAlgorithmConfig__loading">
+            <Button disabled={!connected} onClick={requestCurrentConfig}>
+              {t('jqbedAlgorithmConfig.retry')}
+            </Button>
+          </div>
         ) : activeFields.map((field) => (
           <div className="jqbedAlgorithmConfig__field" key={field.key}>
             <div className="jqbedAlgorithmConfig__fieldCopy">
@@ -208,13 +289,13 @@ export default function JqbedAlgorithmConfigModal({
       </div>
 
       <div className="jqbedAlgorithmConfig__footer">
-        <Button disabled={loading || saving} onClick={handleReset}>
+        <Button disabled={!draft || requestInFlight} onClick={handleReset}>
           {t('jqbedAlgorithmConfig.restore')}
         </Button>
         <Button onClick={handleClose}>{t('jqbedAlgorithmConfig.cancel')}</Button>
         <Button
           type="primary"
-          disabled={loading || !validation.valid || saving}
+          disabled={loading || !validation.valid || requestInFlight}
           loading={saving}
           onClick={handleSave}
         >

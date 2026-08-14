@@ -1575,7 +1575,10 @@ class Title extends React.Component {
   }
 
   requestJqbedAlgorithmConfig = () => {
-    this.props.wsSendObj({ getJqbedAlgorithmConfig: true });
+    if (!this.canUseJqbedAlgorithmConfig()) return null;
+    const requestId = crypto.randomUUID();
+    const sent = this.props.wsSendObj({ getJqbedAlgorithmConfig: true, requestId });
+    return sent ? requestId : null;
   }
 
   canUseJqbedAlgorithmConfig = () => {
@@ -1589,15 +1592,15 @@ class Title extends React.Component {
   saveJqbedAlgorithmConfig = (values) => {
     if (!this.canUseJqbedAlgorithmConfig()) return null;
     const requestId = crypto.randomUUID();
-    this.props.wsSendObj({ setJqbedAlgorithmConfig: values, requestId });
-    return requestId;
+    const sent = this.props.wsSendObj({ setJqbedAlgorithmConfig: values, requestId });
+    return sent ? requestId : null;
   }
 
   resetJqbedAlgorithmConfig = () => {
     if (!this.canUseJqbedAlgorithmConfig()) return null;
     const requestId = crypto.randomUUID();
-    this.props.wsSendObj({ resetJqbedAlgorithmConfig: true, requestId });
-    return requestId;
+    const sent = this.props.wsSendObj({ resetJqbedAlgorithmConfig: true, requestId });
+    return sent ? requestId : null;
   }
 
   closeJqbedAlgorithmConfig = () => {
@@ -2346,6 +2349,8 @@ class Title extends React.Component {
         envelope={this.props.jqbedAlgorithmConfig}
         operationResult={this.props.jqbedAlgorithmConfigResult}
         algorithmStatus={this.props.jqbedAlgorithmStatus}
+        connected={this.props.wsConnected}
+        connectionEpoch={this.props.wsConnectionEpoch}
         onRequest={this.requestJqbedAlgorithmConfig}
         onSave={this.saveJqbedAlgorithmConfig}
         onReset={this.resetJqbedAlgorithmConfig}

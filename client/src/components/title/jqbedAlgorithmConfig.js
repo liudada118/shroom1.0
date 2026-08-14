@@ -5,10 +5,28 @@ export const JQBED_CONFIG_GROUPS = Object.freeze([
   { key: 'advanced', labelKey: 'jqbedAlgorithmConfig.groups.advanced' },
 ]);
 
-const pairElementLabelKeys = Object.freeze([
-  'jqbedAlgorithmConfig.row',
-  'jqbedAlgorithmConfig.column',
-]);
+const pairElementLabelKeys = Object.freeze({
+  sos_disable_area: Object.freeze([
+    'jqbedAlgorithmConfig.front',
+    'jqbedAlgorithmConfig.back',
+  ]),
+  leave_bed_disable_area: Object.freeze([
+    'jqbedAlgorithmConfig.front',
+    'jqbedAlgorithmConfig.back',
+  ]),
+  small_object_size: Object.freeze([
+    'jqbedAlgorithmConfig.row',
+    'jqbedAlgorithmConfig.column',
+  ]),
+  sitting_area: Object.freeze([
+    'jqbedAlgorithmConfig.minimum',
+    'jqbedAlgorithmConfig.maximum',
+  ]),
+  head_foot_area: Object.freeze([
+    'jqbedAlgorithmConfig.head',
+    'jqbedAlgorithmConfig.foot',
+  ]),
+});
 
 export const JQBED_CONFIG_FIELDS = Object.freeze([
   { key: 'sos_peak_threshold', group: 'sos', kind: 'number' },
@@ -34,7 +52,7 @@ export const JQBED_CONFIG_FIELDS = Object.freeze([
   labelKey: `jqbedAlgorithmConfig.fields.${field.key}.label`,
   helpKey: `jqbedAlgorithmConfig.fields.${field.key}.help`,
   ...(field.kind === 'pair' || field.kind === 'sittingPair'
-    ? { pairElementLabelKeys }
+    ? { pairElementLabelKeys: pairElementLabelKeys[field.key] }
     : {}),
 })));
 
@@ -92,10 +110,12 @@ export function cloneJqbedConfigValues(values = {}) {
 export const createJqbedConfigModalState = () => ({
   draft: null,
   dirty: false,
+  loadRequestId: null,
   pending: null,
   deferredEnvelope: null,
   awaitingEnvelope: false,
   displayResult: null,
+  requestError: null,
 });
 
 const applyJqbedConfigEnvelope = (state, envelope) => ({
@@ -122,6 +142,13 @@ export function reduceJqbedConfigModalState(state, event) {
         dirty: true,
         displayResult: null,
       };
+    case 'beginLoad':
+      if (!event.requestId) return state;
+      return {
+        ...state,
+        loadRequestId: event.requestId,
+        requestError: null,
+      };
     case 'begin':
       if (!event.requestId) return state;
       return {
@@ -130,6 +157,7 @@ export function reduceJqbedConfigModalState(state, event) {
         deferredEnvelope: null,
         awaitingEnvelope: false,
         displayResult: null,
+        requestError: null,
       };
     case 'envelope':
       if (!event.envelope?.values) return state;
@@ -143,6 +171,17 @@ export function reduceJqbedConfigModalState(state, event) {
       return applyJqbedConfigEnvelope(state, event.envelope);
     case 'result': {
       const result = event.result;
+      if (result?.action === 'load') {
+        if (!state.loadRequestId || result.requestId !== state.loadRequestId) return state;
+        return {
+          ...state,
+          loadRequestId: null,
+          requestError: result.ok ? null : {
+            action: 'load',
+            message: result.message || 'jqbedAlgorithmConfig.loadFailure',
+          },
+        };
+      }
       const matchesPending = result
         && state.pending
         && result.action === state.pending.action
@@ -153,6 +192,7 @@ export function reduceJqbedConfigModalState(state, event) {
           ...state,
           pending: null,
           displayResult: result,
+          requestError: null,
         }, state.deferredEnvelope);
       }
       return {
@@ -161,8 +201,58 @@ export function reduceJqbedConfigModalState(state, event) {
         deferredEnvelope: null,
         awaitingEnvelope: Boolean(result.ok),
         displayResult: result,
+        requestError: null,
       };
     }
+    case 'timeout':
+      if (event.action === 'load') {
+        if (!state.loadRequestId || event.requestId !== state.loadRequestId) return state;
+        return {
+          ...state,
+          loadRequestId: null,
+          requestError: {
+            action: 'load',
+            message: 'jqbedAlgorithmConfig.requestTimeout',
+          },
+        };
+      }
+      if (!state.pending
+        || event.action !== state.pending.action
+        || event.requestId !== state.pending.requestId) return state;
+      return {
+        ...state,
+        pending: null,
+        deferredEnvelope: null,
+        awaitingEnvelope: false,
+        requestError: {
+          action: event.action,
+          message: 'jqbedAlgorithmConfig.requestTimeout',
+        },
+      };
+    case 'requestFailure':
+      return {
+        ...state,
+        loadRequestId: event.action === 'load' ? null : state.loadRequestId,
+        pending: event.action === 'load' ? state.pending : null,
+        deferredEnvelope: event.action === 'load' ? state.deferredEnvelope : null,
+        awaitingEnvelope: event.action === 'load' ? state.awaitingEnvelope : false,
+        requestError: {
+          action: event.action,
+          message: event.message || 'jqbedAlgorithmConfig.sendFailed',
+        },
+      };
+    case 'disconnect':
+      return {
+        ...state,
+        loadRequestId: null,
+        pending: null,
+        deferredEnvelope: null,
+        awaitingEnvelope: false,
+        requestError: {
+          action: state.pending?.action || 'load',
+          message: 'jqbedAlgorithmConfig.disconnected',
+        },
+      };
     default:
       return state;
   }

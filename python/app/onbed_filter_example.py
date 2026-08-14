@@ -525,6 +525,13 @@ def ping():
     return {"pong": True}
 
 
+def health():
+    return {
+        "pong": True,
+        "onbedFilterAvailable": ncz is not None,
+    }
+
+
 def find_runtime_module_file(*relative_parts):
     script_dir = os.path.dirname(os.path.abspath(__file__))
     runtime_base = getattr(sys, "_MEIPASS", script_dir)
@@ -1008,6 +1015,7 @@ def generate_foot_pressure_report1(sensor_data, pdf_name, heatmap_png_path,
 
 FUNCS = {
     "ping": ping,
+    "health": health,
     "getData": getData,
     # 足压分析
     "warm_foot_analysis": warm_foot_analysis,

@@ -46,11 +46,45 @@ const authorizedContext = { client: {}, licenseValid: true, activeFile: 'jqbed',
 
 test('returns the backend snapshot for an authorized realtime jqbed request', () => {
   const { protocol, sent, broadcasts, store } = createProtocol();
-  const handled = protocol.handle({ getJqbedAlgorithmConfig: true }, authorizedContext);
+  const handled = protocol.handle({
+    getJqbedAlgorithmConfig: true,
+    requestId: 'load-request-1',
+  }, authorizedContext);
   assert.equal(handled, true);
   assert.deepEqual(sent[0].jqbedAlgorithmConfig, store.getSnapshot());
   assert.equal(sent[0].jqbedAlgorithmStatus.state, 'ready');
+  assert.deepEqual(sent[0].jqbedAlgorithmConfigResult, {
+    ok: true,
+    action: 'load',
+    errors: {},
+    message: null,
+    requestId: 'load-request-1',
+  });
   assert.deepEqual(broadcasts, []);
+});
+
+test('explicitly rejects every unauthorized GET with its requestId', () => {
+  for (const context of [
+    { licenseValid: false, activeFile: 'jqbed', realtime: true },
+    { licenseValid: true, activeFile: 'smallBed', realtime: true },
+    { licenseValid: true, activeFile: 'jqbed', realtime: false },
+  ]) {
+    const { protocol, sent, broadcasts } = createProtocol();
+    assert.equal(protocol.handle({
+      getJqbedAlgorithmConfig: true,
+      requestId: 'rejected-load',
+    }, { client: {}, ...context }), true);
+    assert.deepEqual(sent, [{
+      jqbedAlgorithmConfigResult: {
+        ok: false,
+        action: 'load',
+        errors: {},
+        message: 'jqbedAlgorithmConfig.backend.unavailable',
+        requestId: 'rejected-load',
+      },
+    }]);
+    assert.deepEqual(broadcasts, []);
+  }
 });
 
 test('rejects save outside licensed realtime jqbed without mutating the store', () => {

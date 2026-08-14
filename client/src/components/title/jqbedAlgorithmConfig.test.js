@@ -9,6 +9,7 @@ import {
   validateJqbedConfigDraft,
   serializeJqbedConfigDraft,
 } from './jqbedAlgorithmConfig';
+import { resources } from '../../i18n/resources';
 
 const validDraft = {
   sos_peak_threshold: '22.5',
@@ -37,6 +38,54 @@ describe('jqbed algorithm configuration model', () => {
     expect(JQBED_CONFIG_GROUPS.map((group) => group.key)).toEqual([
       'sos', 'basic', 'filter', 'advanced',
     ]);
+  });
+
+  it('assigns the algorithm-defined meaning to every two-value field', () => {
+    const pairs = Object.fromEntries(JQBED_CONFIG_FIELDS
+      .filter((field) => field.pairElementLabelKeys)
+      .map((field) => [field.key, field.pairElementLabelKeys]));
+
+    expect(pairs).toEqual({
+      sos_disable_area: ['jqbedAlgorithmConfig.front', 'jqbedAlgorithmConfig.back'],
+      leave_bed_disable_area: ['jqbedAlgorithmConfig.front', 'jqbedAlgorithmConfig.back'],
+      small_object_size: ['jqbedAlgorithmConfig.row', 'jqbedAlgorithmConfig.column'],
+      sitting_area: ['jqbedAlgorithmConfig.minimum', 'jqbedAlgorithmConfig.maximum'],
+      head_foot_area: ['jqbedAlgorithmConfig.head', 'jqbedAlgorithmConfig.foot'],
+    });
+  });
+
+  it('describes SOS pat points and pair meanings consistently in all three languages', () => {
+    const zh = resources.zh.translation.jqbedAlgorithmConfig;
+    const en = resources.en.translation.jqbedAlgorithmConfig;
+    const ja = resources.ja.translation.jqbedAlgorithmConfig;
+
+    expect(zh.fields.points_threshold_in.label).toBe('SOS 拍打点数');
+    expect(en.fields.points_threshold_in.label).toBe('SOS pat point count');
+    expect(ja.fields.points_threshold_in.label).toBe('SOS叩打ポイント数');
+    expect([zh.front, zh.back, zh.minimum, zh.maximum, zh.head, zh.foot]).toEqual([
+      '前', '后', '最小', '最大', '床头', '床尾',
+    ]);
+    expect([en.front, en.back, en.minimum, en.maximum, en.head, en.foot]).toEqual([
+      'Front', 'Back', 'Minimum', 'Maximum', 'Head', 'Foot',
+    ]);
+    expect([ja.front, ja.back, ja.minimum, ja.maximum, ja.head, ja.foot]).toEqual([
+      '前', '後', '最小', '最大', 'ベッド頭側', 'ベッド足側',
+    ]);
+    expect([
+      en.fields.sos_disable_area.help,
+      en.fields.leave_bed_disable_area.help,
+      en.fields.sitting_area.help,
+      en.fields.head_foot_area.help,
+      en.fields.small_object_size.help,
+    ]).toEqual([
+      'Front and back boundaries excluded from SOS detection.',
+      'Front and back boundaries excluded from bed-exit detection.',
+      'Minimum and maximum values for sitting detection; 255,255 disables it.',
+      'Sets the head-side and foot-side area boundaries.',
+      'Defines the row and column size of objects to filter.',
+    ]);
+    expect(zh.fields.points_threshold_in.help).toBe('SOS 拍打检测使用的点数阈值。');
+    expect(ja.fields.points_threshold_in.help).toBe('SOS叩打検出に使用するポイント数のしきい値です。');
   });
 
   it('shows only for jqbed and disables playback', () => {
@@ -181,5 +230,111 @@ describe('jqbed algorithm configuration model', () => {
     });
 
     expect(state).toEqual(createJqbedConfigModalState());
+  });
+
+  it('turns a load timeout into a retryable failure and accepts a later reconnect load', () => {
+    let state = reduceJqbedConfigModalState(createJqbedConfigModalState(), {
+      type: 'beginLoad', requestId: 'load-before-timeout',
+    });
+    state = reduceJqbedConfigModalState(state, {
+      type: 'timeout', action: 'load', requestId: 'load-before-timeout',
+    });
+
+    expect(state.loadRequestId).toBe(null);
+    expect(state.requestError).toEqual({
+      action: 'load', message: 'jqbedAlgorithmConfig.requestTimeout',
+    });
+
+    state = reduceJqbedConfigModalState(state, {
+      type: 'beginLoad', requestId: 'load-after-reconnect',
+    });
+    state = reduceJqbedConfigModalState(state, {
+      type: 'envelope', envelope: { version: 1, values: validDraft, savedAt: null },
+    });
+    state = reduceJqbedConfigModalState(state, {
+      type: 'result',
+      result: { ok: true, action: 'load', requestId: 'load-after-reconnect' },
+    });
+
+    expect(state.loadRequestId).toBe(null);
+    expect(state.requestError).toBe(null);
+    expect(state.draft).toEqual(validDraft);
+  });
+
+  it('preserves a dirty draft across mutation timeout, disconnect, and reconnect refresh', () => {
+    let state = reduceJqbedConfigModalState(createJqbedConfigModalState(), {
+      type: 'envelope', envelope: { version: 1, values: validDraft, savedAt: null },
+    });
+    state = reduceJqbedConfigModalState(state, {
+      type: 'change', key: 'threshold_factor', value: '9',
+    });
+    state = reduceJqbedConfigModalState(state, {
+      type: 'begin', action: 'save', requestId: 'save-before-drop',
+    });
+    state = reduceJqbedConfigModalState(state, {
+      type: 'timeout', action: 'save', requestId: 'save-before-drop',
+    });
+    expect(state.pending).toBe(null);
+    expect(state.draft.threshold_factor).toBe('9');
+    expect(state.dirty).toBe(true);
+
+    state = reduceJqbedConfigModalState(state, { type: 'disconnect' });
+    state = reduceJqbedConfigModalState(state, {
+      type: 'beginLoad', requestId: 'load-after-drop',
+    });
+    state = reduceJqbedConfigModalState(state, {
+      type: 'envelope',
+      envelope: { version: 1, values: { ...validDraft, threshold_factor: '77' }, savedAt: null },
+    });
+    state = reduceJqbedConfigModalState(state, {
+      type: 'result', result: { ok: true, action: 'load', requestId: 'load-after-drop' },
+    });
+
+    expect(state.draft.threshold_factor).toBe('9');
+    expect(state.dirty).toBe(true);
+    expect(state.requestError).toBe(null);
+  });
+
+  it.each(['save', 'reset'])('fails a timed-out %s without discarding the draft', (action) => {
+    let state = reduceJqbedConfigModalState(createJqbedConfigModalState(), {
+      type: 'envelope', envelope: { version: 1, values: validDraft, savedAt: null },
+    });
+    state = reduceJqbedConfigModalState(state, {
+      type: 'change', key: 'threshold_factor', value: '9',
+    });
+    state = reduceJqbedConfigModalState(state, {
+      type: 'begin', action, requestId: `${action}-timeout`,
+    });
+    state = reduceJqbedConfigModalState(state, {
+      type: 'timeout', action, requestId: `${action}-timeout`,
+    });
+
+    expect(state.pending).toBe(null);
+    expect(state.requestError).toEqual({
+      action, message: 'jqbedAlgorithmConfig.requestTimeout',
+    });
+    expect(state.draft.threshold_factor).toBe('9');
+    expect(state.dirty).toBe(true);
+  });
+
+  it('ignores late results after disconnect has failed the correlated mutation', () => {
+    let state = reduceJqbedConfigModalState(createJqbedConfigModalState(), {
+      type: 'envelope', envelope: { version: 1, values: validDraft, savedAt: null },
+    });
+    state = reduceJqbedConfigModalState(state, {
+      type: 'change', key: 'threshold_factor', value: '9',
+    });
+    state = reduceJqbedConfigModalState(state, {
+      type: 'begin', action: 'reset', requestId: 'reset-before-drop',
+    });
+    state = reduceJqbedConfigModalState(state, { type: 'disconnect' });
+    state = reduceJqbedConfigModalState(state, {
+      type: 'result', result: { ok: true, action: 'reset', requestId: 'reset-before-drop' },
+    });
+
+    expect(state.pending).toBe(null);
+    expect(state.draft.threshold_factor).toBe('9');
+    expect(state.dirty).toBe(true);
+    expect(state.requestError.message).toBe('jqbedAlgorithmConfig.disconnected');
   });
 });

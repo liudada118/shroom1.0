@@ -1,9 +1,13 @@
 "use strict";
 
-const { spawnSync } = require("child_process");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const {
+  spawnPython,
+  stageOnbedFilterNative,
+  verifyRuntimeHealth,
+} = require("./python-runtime-contract");
 
 const projectRoot = path.resolve(__dirname, "..");
 const pythonRoot = path.join(projectRoot, "python");
@@ -29,7 +33,7 @@ function existingDir(dirPath) {
 function pathCommandCandidates(command) {
   if (process.platform === "win32") return [];
 
-  const result = spawnSync("which", ["-a", command], {
+  const result = spawnPython({ command: "which", args: [] }, ["-a", command], {
     encoding: "utf8",
     stdio: "pipe",
   });
@@ -155,10 +159,9 @@ function interpreterCandidates() {
 }
 
 function probeInterpreter(candidate) {
-  const result = spawnSync(
-    candidate.command,
+  const result = spawnPython(
+    candidate,
     [
-      ...candidate.args,
       "-c",
       "import sys, numpy, PyInstaller; assert sys.version_info[:2] == (3, 11), sys.version; print(sys.executable)",
     ],
@@ -217,9 +220,9 @@ function runBuild(interpreter) {
     `[pack] building python runtime with ${interpreter.label} -> ${interpreter.executable}`
   );
 
-  const result = spawnSync(
-    interpreter.command,
-    [...interpreter.args, "build_exe.py"],
+  const result = spawnPython(
+    interpreter,
+    ["build_exe.py"],
     {
       cwd: pythonRoot,
       stdio: "inherit",
@@ -247,19 +250,30 @@ function main() {
     throw new Error(`python build script not found: ${pythonBuildScript}`);
   }
 
-  if (runtimeIsFresh()) {
-    console.log(`[pack] python runtime up-to-date -> ${runtimeExe}`);
-    return;
+  const stagedNative = stageOnbedFilterNative({
+    appDir: path.join(pythonRoot, "app"),
+  });
+  console.log(`[pack] verified onbed_filter SHA-256 ${stagedNative.sha256}`);
+
+  try {
+    if (runtimeIsFresh()) {
+      console.log(`[pack] python runtime up-to-date -> ${runtimeExe}`);
+    } else {
+      const interpreter = resolveInterpreter();
+      runBuild(interpreter);
+
+      if (!fs.existsSync(runtimeExe)) {
+        throw new Error(`python runtime build completed without output: ${runtimeExe}`);
+      }
+
+      console.log(`[pack] python runtime ready -> ${runtimeExe}`);
+    }
+
+    const health = verifyRuntimeHealth(runtimeExe);
+    console.log(`[pack] python runtime health ready; onbedFilterAvailable=${health.onbedFilterAvailable}`);
+  } finally {
+    stagedNative.cleanup();
   }
-
-  const interpreter = resolveInterpreter();
-  runBuild(interpreter);
-
-  if (!fs.existsSync(runtimeExe)) {
-    throw new Error(`python runtime build completed without output: ${runtimeExe}`);
-  }
-
-  console.log(`[pack] python runtime ready -> ${runtimeExe}`);
 }
 
 try {

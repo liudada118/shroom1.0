@@ -11,6 +11,7 @@
     "start": "electron-forge start",
     "build-client": "npm --prefix client run build",
     "build-python-runtime": "node scripts/build-python-runtime.js",
+    "check-python-runtime-health": "node scripts/check-python-runtime-health.js",
     "prepare-nsis-license": "node scripts/prepare-nsis-license.js",
     "clean-pack-output": "node scripts/clean-pack-output.js",
     "prepare-pack-resources": "npm run build-python-runtime && node scripts/sync-pack-resources.js",

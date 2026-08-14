@@ -176,7 +176,7 @@ jqbed-algorithm-config.json
 
 ```js
 // 读取
-{ getJqbedAlgorithmConfig: true }
+{ getJqbedAlgorithmConfig: true, requestId: "opaque-load-id" }
 
 // 返回或广播
 {
@@ -188,13 +188,15 @@ jqbed-algorithm-config.json
 }
 
 // 保存完整配置
-{ setJqbedAlgorithmConfig: { /* 完整 18 项 */ } }
+{ setJqbedAlgorithmConfig: { /* 完整 18 项 */ }, requestId: "opaque-save-id" }
 
 // 操作结果
 {
   jqbedAlgorithmConfigResult: {
     ok: true,
-    errors: null
+    action: "load | save | reset",
+    errors: {},
+    requestId: "opaque-request-id"
   }
 }
 ```
@@ -204,6 +206,8 @@ jqbed-algorithm-config.json
 - 每次保存都是完整快照，最后一个通过校验且成功落盘的请求获胜。
 - 正在调用 Python 的帧继续使用调用开始时取得的旧快照；下一次定时帧读取新快照，不重启 PYD。
 - 广播的配置是后端事实来源，前端收到后覆盖已保存状态。
+- `Home.wsSendObj()` 只有在主通道实际接受 `send()` 时才返回成功；GET、保存和恢复分别关联 `requestId`，10 秒无结果、发送失败或连接断开都会结束 pending 并显示可重试失败，后端对不满足授权/系统/实时边界的 GET 也必须明确回包。
+- `Home` 向弹窗传递连接状态和每次 `open` 递增的重连 epoch；弹窗打开及重连后重新 GET。远端快照不得覆盖 `dirty` 草稿，断线和超时也只清理请求状态而保留用户输入。
 
 ## 8. Python 与 PYD 接入
 
@@ -252,6 +256,7 @@ callPy('getData', { data: newArr, config });
 - 底部固定展示“恢复默认”“取消”“保存并立即生效”。
 - 展示 PYD/算法服务状态和最后保存时间。
 - 数组参数使用两个清晰的数字输入框；开关参数使用 Switch；其他字段使用数字输入框并展示说明。
+- 二元字段按 PYD 参数语义分别标注：`sos_disable_area` / `leave_bed_disable_area` 为“前/后”，`sitting_area` 为“最小/最大”，`head_foot_area` 为“床头/床尾”，仅 `small_object_size` 使用“行/列”；`points_threshold_in` 表示 SOS 拍打点数，不表示在床点数。
 - 保存过程中防止重复提交；成功后更新后端返回值和保存时间，失败时保留用户输入并显示错误。
 
 前端组件应拆分为专用配置弹窗、字段元数据与纯校验/序列化辅助函数，避免继续扩大 `Title.jsx` 的业务体积。Title 只负责入口显示及弹窗打开状态。
@@ -273,6 +278,8 @@ callPy('getData', { data: newArr, config });
 
 - 正式修改落在现有 `python/app/onbed_filter_example.py`，由当前 Python runtime 构建脚本生成打包运行时。
 - 按项目现有流程运行 `build-python-runtime` 和 `prepare-pack-resources`，确保 `pack-resources/python` 中的正式服务包含新接口。
+- Windows 正式构建通过 `ONBED_FILTER_PYD_SOURCE` 注入仓库外的 `onbed_filter.cp311-win_amd64.pyd`，并要求 `ONBED_FILTER_PYD_SHA256` 与源文件及暂存目标完全匹配；缺库、缺哈希或哈希不符都必须失败，临时注入文件在构建后清理且不提交。
+- 所有 Python 探测和构建子进程自动设置 `PYTHONUTF8=1`、`PYTHONIOENCODING=utf-8`。构建完成后调用 JSON-line `health` RPC，只有 `pong=true` 且 `onbedFilterAvailable=true` 才可视为可发布 runtime；单纯 ping 不再充当原生算法可用证明。
 - Electron 安装包继续从 `pack-resources/python` 携带 Python 服务。
 - Tkinter 调参文件不参与 PyInstaller 入口、资源同步或 Electron `extraResources`。
 - 运行配置写入 Electron `userData`，不会因升级或替换安装目录而丢失。

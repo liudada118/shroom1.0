@@ -31,12 +31,19 @@ function createJqbedAlgorithmProtocol({ store, sendJson, broadcastJson, getAlgor
     if (!isConfigMessage(message)) return false;
 
     const { client, licenseValid, activeFile, realtime } = context;
-    const action = message.setJqbedAlgorithmConfig ? 'save' : message.resetJqbedAlgorithmConfig ? 'reset' : null;
+    const action = message.setJqbedAlgorithmConfig ? 'save' : message.resetJqbedAlgorithmConfig ? 'reset' : 'load';
     const { requestId } = message;
     if (!licenseValid || activeFile !== 'jqbed' || !realtime) {
-      if (action) {
-        sendResult(client, false, action, {}, 'jqbed realtime configuration is unavailable', requestId);
-      }
+      sendResult(
+        client,
+        false,
+        action,
+        {},
+        action === 'load'
+          ? 'jqbedAlgorithmConfig.backend.unavailable'
+          : 'jqbed realtime configuration is unavailable',
+        requestId,
+      );
       return true;
     }
 
@@ -44,6 +51,13 @@ function createJqbedAlgorithmProtocol({ store, sendJson, broadcastJson, getAlgor
       sendJson(client, {
         jqbedAlgorithmConfig: store.getSnapshot(),
         jqbedAlgorithmStatus: getAlgorithmStatus(),
+        jqbedAlgorithmConfigResult: {
+          ok: true,
+          action: 'load',
+          errors: {},
+          message: null,
+          ...(requestId !== undefined ? { requestId } : {}),
+        },
       });
       return true;
     }

@@ -19,6 +19,22 @@ PAIR_KEYS = {
 
 
 class JqbedAlgorithmConfigTests(unittest.TestCase):
+    def test_health_proves_whether_the_native_onbed_module_imported(self):
+        original = MODULE.ncz
+        try:
+            MODULE.ncz = object()
+            self.assertEqual(MODULE.health(), {
+                "pong": True,
+                "onbedFilterAvailable": True,
+            })
+            MODULE.ncz = None
+            self.assertEqual(MODULE.health(), {
+                "pong": True,
+                "onbedFilterAvailable": False,
+            })
+        finally:
+            MODULE.ncz = original
+
     def test_build_step_inputs_keeps_defaults_without_config(self):
         inputs = MODULE.build_step_inputs([1, 2, 3], None)
 
