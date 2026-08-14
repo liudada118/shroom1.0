@@ -76,6 +76,40 @@ class JqbedAlgorithmConfigTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     MODULE.build_step_inputs([1], config)
 
+    def test_get_data_rejects_unrounded_boundaries_and_booleans_before_step(self):
+        class FakeNcz:
+            calls = 0
+
+            @classmethod
+            def step(cls, inputs):
+                cls.calls += 1
+                return {
+                    "rate": 0,
+                    "heart_rate": 0,
+                    "stateInBbed": 0,
+                    "sosflag": 0,
+                    "merged_alarm": 0,
+                    "matrix_origin": [],
+                    "matrix_filter": [],
+                }
+
+        invalid_configs = (
+            {"sos_disable_area": [32.0000001, 0]},
+            {"sitting_area": [254.999999, 254.999999]},
+            {"sos_disable_area": [True, False]},
+            {"filter_switch": True},
+        )
+        original = MODULE.ncz
+        try:
+            MODULE.ncz = FakeNcz
+            for config in invalid_configs:
+                with self.subTest(config=config):
+                    with self.assertRaises(ValueError):
+                        MODULE.getData([0] * 1024, config)
+                    self.assertEqual(FakeNcz.calls, 0)
+        finally:
+            MODULE.ncz = original
+
     def test_build_step_inputs_rejects_non_object_config_and_ignores_unknown_keys(self):
         with self.assertRaises(ValueError):
             MODULE.build_step_inputs([1], ["not", "an", "object"])

@@ -632,12 +632,23 @@ ALGORITHM_INTEGER_KEYS = {'min_sos_sequence', 'breath_detect_mode'}
 ALGORITHM_SWITCH_KEYS = {'filter_switch', 'strel_switch'}
 
 
+def _normalize_json_number(key, value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f'invalid number: {key}')
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError(f'invalid number: {key}') from error
+    if not np.isfinite(number):
+        raise ValueError(f'invalid number: {key}')
+    return number
+
+
 def _normalize_algorithm_value(key, value):
     if key in ALGORITHM_PAIR_KEYS:
-        pair = np.asarray(value, dtype=np.float32)
-        if pair.shape != (2,) or not np.isfinite(pair).all():
+        if not isinstance(value, list) or len(value) != 2:
             raise ValueError(f'invalid pair: {key}')
-        first, second = (float(pair[0]), float(pair[1]))
+        first, second = (_normalize_json_number(key, element) for element in value)
         if key == 'sitting_area':
             sentinel = first == 255.0 and second == 255.0
             normal = 0.0 <= first <= 32.0 and 0.0 <= second <= 32.0
@@ -645,10 +656,10 @@ def _normalize_algorithm_value(key, value):
                 raise ValueError(f'invalid sitting_area: {value}')
         elif not (0.0 <= first <= 32.0 and 0.0 <= second <= 32.0):
             raise ValueError(f'pair out of range: {key}')
-        return pair
+        return np.asarray([first, second], dtype=np.float32)
 
-    number = float(value)
-    if not np.isfinite(number) or number < 0.0:
+    number = _normalize_json_number(key, value)
+    if number < 0.0:
         raise ValueError(f'invalid number: {key}')
     if key in ALGORITHM_INTEGER_KEYS and not number.is_integer():
         raise ValueError(f'invalid integer: {key}')
