@@ -72,6 +72,23 @@ describe('jqbed algorithm configuration model', () => {
     });
   });
 
+  it('rejects enumerable own prototype keys as unknown fields', () => {
+    ['constructor', 'toString', '__proto__'].forEach((key) => {
+      const draft = { ...validDraft };
+      if (key === '__proto__') {
+        Object.defineProperty(draft, key, { value: 1, enumerable: true });
+      } else {
+        draft[key] = 1;
+      }
+
+      const result = validateJqbedConfigDraft(draft);
+
+      expect(result.valid).toBe(false);
+      expect(Object.hasOwn(result.errors, key)).toBe(true);
+      expect(result.errors[key]).toBe('jqbedAlgorithmConfig.errors.unknown');
+    });
+  });
+
   it('serializes numeric strings and switches while preserving pairs', () => {
     const serialized = serializeJqbedConfigDraft(validDraft);
 

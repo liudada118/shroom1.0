@@ -90,11 +90,11 @@ export function cloneJqbedConfigValues(values = {}) {
 }
 
 export function validateJqbedConfigDraft(values) {
-  const errors = {};
+  const errors = Object.create(null);
   const source = values && typeof values === 'object' && !Array.isArray(values) ? values : {};
 
   Object.keys(source).forEach((key) => {
-    if (!FIELD_BY_KEY[key]) errors[key] = errorKey('unknown');
+    if (!Object.hasOwn(FIELD_BY_KEY, key)) errors[key] = errorKey('unknown');
   });
   JQBED_CONFIG_FIELDS.forEach((field) => {
     if (!Object.hasOwn(source, field.key)) {
