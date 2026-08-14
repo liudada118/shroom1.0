@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-08-13
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-08-14
 
 ## 1. 项目概述
 
@@ -70,7 +70,11 @@ shroom1.0/
 ├── server/                  # 从 server.js 提取的独立模块
 │   ├── index.js             # 模块入口，统一导出
 │   ├── mathUtils.js         # 数学/数据处理纯函数（高斯模糊、插值、分压等）
-│   └── dbManager.js         # 数据库初始化和管理
+│   ├── dbManager.js         # 数据库初始化和管理
+│   ├── smallBed12B.js       # 12B协议、V2.7.54压强标定与矩阵构帧
+│   ├── collectionInsertQueue.js # SQLite采集批量写入队列
+│   ├── csvUtf8.js           # 带UTF-8 BOM的CSV写入工具
+│   └── csvMatrixUtils.js    # matCol方向和采集标签纯函数
 │
 ├── # ── 配置文件 ──
 ├── forge.config.js          # Electron Forge 打包配置
@@ -356,6 +360,7 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-14 | sqliteOpti | 合并回退业务功能恢复 | 保留 `licenseManager` 在线/离线授权体系，恢复 `smallBed12B` V2.7.54 kPa 数据链、32/16显示缓存、历史时间、SQLite批量采集、CSV UTF-8 BOM 和 `matCol` 16x10原始数字方向。 |
 | 2026-08-10 | Codex | 日文译文人工校订同步 | 按《JQTOOLS中日翻译确认表》逐项回写 642 项中日目录：采用 101 项填写的新译文，并按表格当前译文恢复 3 项已勾选内容；4 项空白待确认内容保持现状，所有模板占位符不变。 |
 | 2026-07-21 | Codex | 授权默认系统前后端对齐 | 授权状态新增 `activeSensorType` 表示后端实际运行系统；前端多类型/全部授权默认展示优先跟随该值，修复精密类全选时前端显示触觉手套、后端运行检测点而导致串口无法连接的问题。 |
 | 2026-07-21 | Codex | 日文资源中文对照 | `client/src/i18n/ja.js` 的 642 项资源改为 `compare(中文, 日文)` 逐项对照结构，运行时读取其中 `ja` 值，便于直接核对翻译。 |
@@ -756,6 +761,8 @@ graph TD
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-14 | sqliteOpti | 修复缺陷 | 修复授权分支合并覆盖业务代码的问题：12B实时、统计、采集、回放和CSV统一使用1位小数kPa；历史新帧不重复标定，旧ADC帧兼容转换一次。 |
+| 2026-08-14 | sqliteOpti | 优化重构 | SQLite采集按200行或250ms批量落库并在停止/退出前刷新；CSV一次性和流式导出统一写入UTF-8 BOM，`matCol` 方向与标签由纯函数回归测试锁定。 |
 | 2026-08-10 | Codex | 配置变更 | 根据人工修订的《JQTOOLS中日翻译确认表》更新 `client/src/i18n/ja.js` 中 104 项日文译文，保留 4 项空白待确认译文及全部 `{{...}}` 模板占位符。 |
 | 2026-07-21 | Codex | 修复缺陷 | 授权状态显式下发后端 `activeSensorType`，系统页优先以该值同步默认展示，并在展示系统变化时清空旧串口选择，避免多类型密钥下前后端系统错位造成串口连接失败。 |
 | 2026-07-21 | Codex | 配置变更 | 将日文目录改为中文原文与日文译文同列的 642 项对照结构，i18next 日文资源继续从 `ja` 字段生成。 |
@@ -1211,3 +1218,14 @@ graph TD
 - 左侧 Pressure Data / Pressure Area 的总和、平均值、最大值、点数、面积及两条趋势图统一由协议解析后的原始 1024 点矩阵计算，不读取 Shader DataTexture、Gaussian 插值、点云或其它仅用于可视化的数组，因此 `skin` 与 `numoriginal` 切换前后一致。
 - 本轮后腿数字与悬停交互只修改 `humanBodyOptimized` 的场景内视角数字面板和 3D 悬停展示；既有 `humanBody`、原始 1024 路数据、模型/点云/线网几何与渲染数据、左侧统计、实时/数据库回放、CSV 下载及 `numoriginal` 原始数据模式均不受影响。
 - 验证：`npm run build` 通过；Chromium WebGL 实测加载 `human3.glb` 和 1120 个物理点，线网/点云截图确认节点位置重合，热力、水晶、线网、点云、叠加五种模式切换无新增渲染错误。使用 10 Hz 1024 点模拟原始帧验证时，Aside 显示点数 635、平均压力 31.57、最大压力 150、压力总和 20045，且继续只取原始矩阵。
+
+## 2026-08-14 Small Bed 12B Pressure Pipeline Recovery
+
+- `smallBed12B` 仅在 `licenseManager.isLicenseValid()` 通过后解析 2048 字节串口 payload：1024 个 `uint16LE` ADC 点依次执行 `jqbed` 线序、清零和 `pressureCalibration_V2.7.54.js` 标定。V2.7.54 固定使用 `P_MAX=25`、`K=0.010637`、`MID=438.05`、`HUMAN_FACTOR=2` 与 ADC 阈值 `30`。
+- `server/smallBed12B.js` 是12B协议和数值规则的单一入口。实时展示、左侧统计、采集、历史回放和 CSV 都使用保留1位小数的 kPa 矩阵；新存储对象带 `pressureUnit: "kPa"`，回放时不会重复标定，旧无单位数组按 ADC 数据兼容标定一次。
+- 12B实时原始数字显示支持 `32x32` 和 `16x16`。16x16模式先转置32x32视觉矩阵，再从每个2x2块按 `topLeft/topRight/bottomLeft/bottomRight` 指定角抽取1点，payload和存储对象保留矩阵尺寸、方向及采样元数据。
+- `Title.jsx` 继续负责设置交互和 `localStorage` 缓存；`Home.jsx` 初始化时恢复缓存，在手动切换或后端自动选中12B时通过 `smallBed12BDisplayOptions` 下发后端。旧ADC色阶缓存会迁移为kPa默认显示参数。
+- 历史选择消息包含 `historyTimeArr`，前端 `Progress` 以真实SQLite时间戳驱动回放时间。16x16历史保持256点和16x16元数据，不再扩回稀疏1024点。
+- `server/collectionInsertQueue.js` 将座面、靠背和头枕采集按数据库连接分队列，默认累计200行或250ms后用 better-sqlite3 事务批量写入；停止采集、磁盘异常和服务退出时强制刷新。
+- `server/csvUtf8.js` 为一次性与流式CSV统一写入UTF-8 BOM。`server/csvMatrixUtils.js` 固定 `matCol` 从16行10列存储顺序到10行16列视觉顺序，并稳定解析 `label` 与 `labelText`；前端原始数字模式固定以16x10尺寸展示。
+- 授权边界未回退：未恢复旧 `nowDate < endDate`、旧时间服务器或旧密钥持久化逻辑，传感器数据入口仍由当前 `licenseManager` 管理。

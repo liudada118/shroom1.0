@@ -12,7 +12,7 @@ const fs = require('fs');
 const { SerialPort } = require("serialport");
 const { DelimiterParser } = require("@serialport/parser-delimiter");
 const sqlite3 = require("./sqlite3-compat").verbose();
-const { createObjectCsvWriter: createCsvWriter, createObjectCsvStringifier: createCsvStringifier } = require("csv-writer");
+const { createObjectCsvStringifier: createCsvStringifier } = require("csv-writer");
 const {
   openWeb,
   interp,
@@ -86,6 +86,20 @@ const { isCar, dedupli, totalToN, } = require("./util");
 const { pressSmallBed } = require("./utilMatrix");
 const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine, pressNew12203131 } = require('./server/mathUtils');
 const { initDb: _initDbFromModule } = require('./server/dbManager');
+const { createCollectionInsertQueue } = require('./server/collectionInsertQueue');
+const {
+  createUtf8BomCsvWriter: createCsvWriter,
+  prefixCsvHeaderWithBom,
+} = require('./server/csvUtf8');
+const {
+  getCollectionCsvLabelInfo: getCollectionCsvLabelInfoFromValue,
+  transposeMatColToVisualDirection,
+} = require('./server/csvMatrixUtils');
+const smallBed12B = require('./server/smallBed12B');
+const {
+  estimatePointPressure,
+  FILTER_THRESHOLD: PRESSURE_CALIBRATION_FILTER_THRESHOLD,
+} = require('./util/pressureCalibration_V2.7.54');
 
 const HAND_GLOVE_FULL_PACKET = 'handGloveFullPacket';
 const HAND_GLOVE_DOUBLE = 'hand0205Double';
@@ -107,6 +121,10 @@ const MINZHEN_BACKEND_GAUSS_RADIUS = 0.5;
 const WHOLE_CHAIR_GAUSS_RADIUS = 0.5;
 const SMALL_BED_12B_PAYLOAD_LENGTH = 1024 * 2;
 const SMALL_BED_12B_FRAME_TAIL = Buffer.from([0xaa, 0x00, 0x55, 0x00, 0x03, 0x00, 0x99, 0x00]);
+const smallBed12BCalibration = {
+  estimatePointPressure,
+  filterThreshold: PRESSURE_CALIBRATION_FILTER_THRESHOLD,
+};
 const THREE_PORT_SENSOR_TYPES = new Set(['volvo', WHOLE_CHAIR_TYPE]);
 const isHandGloveType = (sensorType) => HAND_GLOVE_TYPES.includes(sensorType);
 const isHandStorageType = (sensorType = '') => isHandGloveType(sensorType) || String(sensorType).includes('robot');
@@ -599,7 +617,15 @@ function getHistoryPressureData(row) {
 }
 
 function normalizeHistoryPressureData(row, file = '') {
+  const storedData = parseStoredFrameData(row);
   const data = getHistoryPressureData(row);
+  if (file === SMALL_BED_12B_TYPE) {
+    return smallBed12B.normalizePressureData(
+      data,
+      storedData,
+      smallBed12BCalibration,
+    );
+  }
   const pressureData = isHandStorageType(file) && data.length > 256 ? data.slice(0, 256) : data;
   const normalizedData = pressureData.map((value) => {
     const numberValue = Number(value);
@@ -778,91 +804,28 @@ function shouldDownsampleSmallBed12BCollection() {
 }
 
 function buildSmallBed12BCollectionStorageData(frameToStore) {
-  const sourceData = Array.isArray(frameToStore?.sitData) ? frameToStore.sitData : [];
-  if (!shouldDownsampleSmallBed12BCollection()) {
-    return JSON.stringify(sourceData);
-  }
-
-  const options = collectOptions.matrixDownsample || {};
-  const displaySamplePoint = options.samplePoint || 'topLeft';
-  const storageSamplePoint = getSmallBed12BStorageSamplePoint(displaySamplePoint);
-  const downsampled = downsampleMatrixByPoint(sourceData, {
-    ...options,
-    samplePoint: storageSamplePoint,
-  });
-  return JSON.stringify({
-    sitData: downsampled,
-    pressureData: downsampled,
-    matrixWidth: Number(options.targetWidth) || 16,
-    matrixHeight: Number(options.targetHeight) || 16,
-    sourceMatrixWidth: Number(options.sourceWidth) || 32,
-    sourceMatrixHeight: Number(options.sourceHeight) || 32,
-    matrixDownsample: {
-      enabled: true,
-      samplePoint: storageSamplePoint,
-      displaySamplePoint,
-      blockWidth: Number(options.blockWidth) || 2,
-      blockHeight: Number(options.blockHeight) || 2,
-    },
+  return smallBed12B.buildCollectionStorageData(frameToStore, {
+    collectOptions,
+    transposeSquareMatrix,
   });
 }
 
 function buildSmallBedPlaybackPayload(row, extra = {}) {
   const storedData = parseStoredFrameData(row);
-  if (storedData && typeof storedData === 'object' && !Array.isArray(storedData)) {
-    const storedSitData = Array.isArray(storedData.sitData)
-      ? storedData.sitData
-      : Array.isArray(storedData.pressureData)
-        ? storedData.pressureData
-        : [];
-    if (file === SMALL_BED_12B_TYPE && storedSitData.length === 256) {
-      const matrixDownsample = storedData.matrixDownsample || {};
-      return {
-        sitData: expandDownsampledMatrixByPoint(storedSitData, {
-          targetWidth: Number(storedData.matrixWidth) || 16,
-          targetHeight: Number(storedData.matrixHeight) || 16,
-          sourceWidth: Number(storedData.sourceMatrixWidth) || 32,
-          sourceHeight: Number(storedData.sourceMatrixHeight) || 32,
-          blockWidth: Number(matrixDownsample.blockWidth) || 2,
-          blockHeight: Number(matrixDownsample.blockHeight) || 2,
-          samplePoint: matrixDownsample.samplePoint || 'topLeft',
-        }),
-        matrixWidth: Number(storedData.sourceMatrixWidth) || 32,
-        matrixHeight: Number(storedData.sourceMatrixHeight) || 32,
-        sourceMatrixWidth: Number(storedData.sourceMatrixWidth) || 32,
-        sourceMatrixHeight: Number(storedData.sourceMatrixHeight) || 32,
-        matrixDownsample,
-        playbackExpandedFromMatrixWidth: Number(storedData.matrixWidth) || 16,
-        playbackExpandedFromMatrixHeight: Number(storedData.matrixHeight) || 16,
-        time: row?.timestamp,
-        ...extra,
-      };
-    }
+  if (file === SMALL_BED_12B_TYPE) {
+    const sitData = normalizeHistoryPressureData(row, file);
+    const isStoredObject = storedData && typeof storedData === 'object' && !Array.isArray(storedData);
+    const inferredSize = sitData.length === 256 ? 16 : 32;
     return {
-      sitData: storedSitData,
-      matrixWidth: storedData.matrixWidth,
-      matrixHeight: storedData.matrixHeight,
-      matrixDownsample: storedData.matrixDownsample,
-      time: row?.timestamp,
-      ...extra,
-    };
-  }
-
-  if (file === SMALL_BED_12B_TYPE && Array.isArray(storedData) && storedData.length === 256) {
-    return {
-      sitData: expandDownsampledMatrixByPoint(storedData, {
-        targetWidth: 16,
-        targetHeight: 16,
-        sourceWidth: 32,
-        sourceHeight: 32,
-        blockWidth: 2,
-        blockHeight: 2,
-        samplePoint: 'topLeft',
-      }),
-      matrixWidth: 32,
-      matrixHeight: 32,
-      playbackExpandedFromMatrixWidth: 16,
-      playbackExpandedFromMatrixHeight: 16,
+      sitData,
+      pressureData: sitData,
+      matrixWidth: Number(isStoredObject && storedData.matrixWidth) || inferredSize,
+      matrixHeight: Number(isStoredObject && storedData.matrixHeight) || inferredSize,
+      sourceMatrixWidth: isStoredObject ? storedData.sourceMatrixWidth : undefined,
+      sourceMatrixHeight: isStoredObject ? storedData.sourceMatrixHeight : undefined,
+      matrixOrientation: isStoredObject ? storedData.matrixOrientation : undefined,
+      matrixDownsample: isStoredObject ? storedData.matrixDownsample : undefined,
+      pressureUnit: 'kPa',
       time: row?.timestamp,
       ...extra,
     };
@@ -1784,6 +1747,7 @@ function getCollectionFreeBytes() {
 
 function stopCollectionForStorageError(error, extra = {}) {
   flag = false;
+  collectionInsertQueue?.flushAll();
   const message = error?.message || String(error || '数据库写入失败，已停止采集');
   logger.error('[Collection] stop collection:', message);
   broadcastCollectionStorageError({
@@ -1823,6 +1787,14 @@ function handleCollectionDbError(err, channel) {
   }
   logger.error(err);
 }
+
+const COLLECTION_INSERT_SQL = "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
+const collectionInsertQueue = createCollectionInsertQueue({
+  sql: COLLECTION_INSERT_SQL,
+  batchSize: Number(process.env.SHROOM_COLLECTION_INSERT_BATCH_SIZE) || 200,
+  flushIntervalMs: Number(process.env.SHROOM_COLLECTION_INSERT_FLUSH_INTERVAL_MS) || 250,
+  onError: handleCollectionDbError,
+});
 
 // initDb 鍖呰鍑芥暟锛岃嚜鍔ㄤ紶鍏?filePath 鍜?runtimeResourceRoot
 function initDb(fileStr) {
@@ -1983,7 +1955,7 @@ function getHistorySeries({ sitRows = [], backRows = [], start = 0, end = null, 
     const backAreaValue = backData ? backData.filter((a) => a > 10).length : 0;
 
     press.push(
-      (sitData ? totalToN(sitTotalValue) : 0) +
+      (sitData ? formatMatrixTotalForFile(sitTotalValue, file) : 0) +
       (backData ? totalToN(backTotalValue, 1.3) : 0)
     );
     area.push(sitAreaValue + backAreaValue);
@@ -2021,6 +1993,19 @@ function buildZeroPlaybackFrame() {
   return file === "bigBed"
     ? new Array(2048).fill(0)
     : new Array(1024).fill(0);
+}
+
+function buildZeroPlaybackPayload() {
+  if (file !== SMALL_BED_12B_TYPE) {
+    return { sitData: buildZeroPlaybackFrame() };
+  }
+  const size = smallBed12BDisplayOptions.matrixMode === '16x16' ? 16 : 32;
+  return {
+    sitData: new Array(size * size).fill(0),
+    matrixWidth: size,
+    matrixHeight: size,
+    pressureUnit: 'kPa',
+  };
 }
 
 function broadcastHistorySelectionPayload(payload) {
@@ -2082,9 +2067,10 @@ function loadSelectedHistory(dateLabel) {
       index: nowIndex,
       pressArr: historySeries.press,
       areaArr: historySeries.area,
+      historyTimeArr: historySeries.time,
       historySampleStep: historySeries.sampleStep || 1,
       historyLazy: !eager,
-      sitData: buildZeroPlaybackFrame(),
+      ...buildZeroPlaybackPayload(),
     });
 
     if (isThreePortFile(file)) {
@@ -2111,16 +2097,7 @@ function formatCsvDatePart(value) {
 }
 
 function getCollectionCsvLabelInfo(value) {
-  const datePart = formatCsvDatePart(value);
-  const namePart = datePart.replace(/_\d{4}-\d{1,2}-\d{1,2}-\d{2}-\d{2}-\d{2}-\d+$/, '');
-  if (!namePart || namePart === datePart && /^\d+$/.test(namePart)) return { label: '', labelText: '' };
-  const labelTextMatch = namePart.match(/([^_]+_\d+)$/);
-  const labelText = labelTextMatch ? labelTextMatch[1] : '';
-  const labelMatch = labelText.match(/_(\d+)$/);
-  return {
-    label: labelMatch ? labelMatch[1] : '',
-    labelText,
-  };
+  return getCollectionCsvLabelInfoFromValue(value, formatCsvDatePart);
 }
 
 function parseCsvMatrixData(value) {
@@ -2132,23 +2109,6 @@ function parseCsvMatrixData(value) {
   } catch {
     return [];
   }
-}
-
-function transposeMatColToVisualDirection(data) {
-  const source = Array.isArray(data) ? data : [];
-  const sourceWidth = 10;
-  const sourceHeight = 16;
-  if (source.length !== sourceWidth * sourceHeight) {
-    return source;
-  }
-
-  const result = [];
-  for (let row = 0; row < sourceWidth; row++) {
-    for (let col = 0; col < sourceHeight; col++) {
-      result.push(source[col * sourceWidth + row]);
-    }
-  }
-  return result;
 }
 
 function formatMatColCsvRealData(value) {
@@ -2313,7 +2273,10 @@ async function writeCsvFileInBatches({
   };
 
   try {
-    await writeStreamChunk(stream, stringifier.getHeaderString());
+    await writeStreamChunk(
+      stream,
+      prefixCsvHeaderWithBom(stringifier.getHeaderString()),
+    );
     emitProgress(true);
     while (written < rangeEnd - rangeStart) {
       const rows = queryHistoryRowsFromId(
@@ -2356,6 +2319,7 @@ function buildGenericSitCsvRow(row, { absoluteIndex, relativeIndex, baseTimestam
     collectionLabelInfo = null,
   } = options;
   const rawData = JSON.parse(row?.data || '[]');
+  const storedFrame = parseStoredFrameData(row);
   let pressureData, rotateData, zeroFrameData = [];
   let tempFullBedPayload = null;
   if (file === TEMP_FULL_BED_TYPE) {
@@ -2376,13 +2340,18 @@ function buildGenericSitCsvRow(row, { absoluteIndex, relativeIndex, baseTimestam
       rotateData = rawData.slice(rawData.length - 4);
     }
   } else {
-    pressureData = Array.isArray(rawData) ? rawData : getHistoryPressureData(row);
+    pressureData = file === SMALL_BED_12B_TYPE
+      ? normalizeHistoryPressureData(row, file)
+      : Array.isArray(rawData) ? rawData : getHistoryPressureData(row);
     rotateData = [];
   }
   if (file === WHOLE_CHAIR_TYPE) {
     pressureData = normalizeWholeChairFrame('sit', pressureData);
   }
-  if (shouldTransposeSmallBedRawMatrix(file)) {
+  if (
+    shouldTransposeSmallBedRawMatrix(file)
+    && storedFrame?.matrixOrientation !== 'transposed'
+  ) {
     pressureData = transposeSquareMatrix(pressureData);
   }
   const press = pressureData.reduce((a, b) => a + b, 0);
@@ -2390,7 +2359,7 @@ function buildGenericSitCsvRow(row, { absoluteIndex, relativeIndex, baseTimestam
   const newData = {
     time: timeStampToDate(row?.timestamp),
     pressureArea: area,
-    pressure: totalToN(press),
+    pressure: formatMatrixTotalForFile(press, file),
     realData: JSON.stringify(pressureData),
     index: getCsvElapsedSecondsFromBase(row, absoluteIndex, baseTimestamp, relativeIndex),
     max: findMax(pressureData),
@@ -2628,7 +2597,10 @@ async function exportHandGloveDoubleCsvStreaming({ date, csvTitle, csvTargetPath
   };
 
   try {
-    await writeStreamChunk(stream, stringifier.getHeaderString());
+    await writeStreamChunk(
+      stream,
+      prefixCsvHeaderWithBom(stringifier.getHeaderString()),
+    );
     emitProgress(true);
     while (written < end - start) {
       const limit = Math.min(batchSize, end - start - written);
@@ -3130,6 +3102,7 @@ function shutdownServer() {
 
   logger.info("[Server] Shutdown requested, closing sockets/timers/workers...");
 
+  collectionInsertQueue.close();
   stopPlaybackTimer();
   reconnectTimer = clearManagedInterval("serial reconnect timer", reconnectTimer);
   jqbedTimer = clearManagedInterval("jqbed timer", jqbedTimer);
@@ -3363,6 +3336,7 @@ db2 = dbObj.db2
 let flag = false;
 let colHZ = 12, oldTimeStamp = new Date().getTime();
 let collectOptions = { frequencyMode: 'serial', frequencyHz: 12, matrixDownsample: { enabled: false } };
+let smallBed12BDisplayOptions = { matrixMode: '32x32', samplePoint: 'topLeft' };
 let lastCollectionStorageAt = { sit: 0, back: 0, head: 0 };
 let splitBuffer = Buffer.from([0xaa, 0x55, 0x03, 0x99]);
 // let splitBuffer1 = Buffer.from([0xaa, 0x55, 0x03, 0x09]);
@@ -3753,6 +3727,12 @@ module.exports = {
             pointArr2RawZero = []
             pointArr147zero = []
             pointArr147zero_2 = []
+          }
+
+          if (getMessage.smallBed12BDisplayOptions != null) {
+            smallBed12BDisplayOptions = smallBed12B.normalizeDisplayOptions(
+              getMessage.smallBed12BDisplayOptions,
+            );
           }
 
           if (JSON.parse(message).file != null) {
@@ -4259,6 +4239,7 @@ module.exports = {
             resetCollectionStorageClock();
           } else if (JSON.parse(message).flag === false) {
             flag = false;
+            collectionInsertQueue.flushAll();
           }
 
           if (JSON.parse(message).colHZ != null) {
@@ -5547,7 +5528,11 @@ module.exports = {
                     let sitData = normalizeHistoryPressureData(rows[i], file);
                     let matrixWidth = Number(storedFrame?.matrixWidth) || Math.sqrt(sitData.length) || 32;
                     let matrixHeight = Number(storedFrame?.matrixHeight) || matrixWidth;
-                    if (shouldTransposeSmallBedRawMatrix(file) && matrixWidth === matrixHeight) {
+                    if (
+                      shouldTransposeSmallBedRawMatrix(file)
+                      && storedFrame?.matrixOrientation !== 'transposed'
+                      && matrixWidth === matrixHeight
+                    ) {
                       sitData = transposeSquareMatrix(sitData, matrixWidth);
                     }
                     // sitData = zeroLine(sitData,32,32)
@@ -5568,7 +5553,7 @@ module.exports = {
                         : area, //閸樼喎顫愰惌鈺呮█
                       pressure: sitPressSelect.length
                         ? sitPressSelect[i]
-                        : totalToN(press),
+                        : formatMatrixTotalForFile(press, file),
                       realData: JSON.stringify(sitData),
                       index: getCsvElapsedSeconds(rows, i, historyArr[0], j),
                       max: findMax(sitData),
@@ -7491,26 +7476,23 @@ parser.on("data", function (data) {
 });
 
 parserSmallBed12B.on("data", function (data) {
-  pointArr = new Array();
-  let buffer = Buffer.from(data);
-  newData = new Array();
+  if (!licenseManager.isLicenseValid() || file !== SMALL_BED_12B_TYPE) return;
 
-  if (licenseManager.isLicenseValid() && file === SMALL_BED_12B_TYPE && buffer.length === SMALL_BED_12B_PAYLOAD_LENGTH) {
-    for (var i = 0; i < SMALL_BED_12B_PAYLOAD_LENGTH / 2; i++) {
-      pointArr[i] = buffer.readUInt16LE(i * 2);
-    }
+  const frame = smallBed12B.buildRealtimeFrameFromBuffer(Buffer.from(data), {
+    lineOrder: jqbed,
+    zeroFrame: pointArr1zero,
+    subtractZero: numLessZeroToZero,
+    calibration: smallBed12BCalibration,
+    displayOptions: smallBed12BDisplayOptions,
+    hz: colHZ,
+    transposeSquareMatrix,
+  });
+  if (!frame) return;
 
-    pointArr = jqbed(pointArr);
-    newData = [...pointArr];
-    pointArr1zeroData = [...pointArr];
-
-    if (pointArr1zero.length) {
-      pointArr = pointArr.map((a, index) => numLessZeroToZero(a - pointArr1zero[index]));
-    }
-
-    const jsonData = JSON.stringify({ sitData: pointArr, hz: colHZ });
-    colOrSendData(jsonData);
-  }
+  pointArr1zeroData = [...frame.orderedFrame];
+  pointArr = frame.pressureData;
+  newData = [...frame.pressureData];
+  colOrSendData(JSON.stringify(frame.realtimeFrame));
 });
 
 function colOrSendData(jsonData) {
@@ -7540,10 +7522,6 @@ function colOrSendData(jsonData) {
     // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
     const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
     const date = saveTime;
-    const insertQuery =
-      "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
-
-
     // 1.0 閺堝搫娅掓禍杞扮閸?
     // db.run(
     //   insertQuery,
@@ -7580,13 +7558,7 @@ function colOrSendData(jsonData) {
           ? JSON.stringify(getFrameMatrixData(frameToStore, 'sitData'))
           : JSON.stringify([...frameToStore.sitData]);
 
-    db.run(
-      insertQuery,
-      [dataToStore, timestamp, date],
-      function (err) {
-        handleCollectionDbError(err, 'sit');
-      }
-    );
+    collectionInsertQueue.enqueue(db, [dataToStore, timestamp, date], 'sit');
   }
 
   if (!localFlag && shouldSendRealtimeFrame('sit')) {
@@ -7659,19 +7631,10 @@ parser2.on("data", function (data) {
 
         const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
         const date = saveTime;
-        const insertQuery =
-          "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
-
-        db1.run(
-          insertQuery,
+        collectionInsertQueue.enqueue(
+          db1,
           [JSON.stringify(pointArr2), timestamp, date],
-          function (err) {
-            if (err) {
-              logger.error(err);
-              return;
-            }
-            console.log(`Event inserted with ID ${this.lastID}`);
-          }
+          'back',
         );
       }
 
@@ -7901,9 +7864,6 @@ function colOrSendData1(jsonData) {
     // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
     const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
     const date = saveTime;
-    const insertQuery =
-      "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
-
     const frameToStore = JSON.parse(jsonData);
     const dataToStore = frameToStore.tempObj
       ? JSON.stringify(frameToStore.tempObj)
@@ -7913,13 +7873,7 @@ function colOrSendData1(jsonData) {
           ? JSON.stringify(getFrameMatrixData(frameToStore, 'backData'))
           : JSON.stringify([...frameToStore.backData]);
 
-    db1.run(
-      insertQuery,
-      [dataToStore, timestamp, date],
-      function (err) {
-        handleCollectionDbError(err, 'back');
-      }
-    );
+    collectionInsertQueue.enqueue(db1, [dataToStore, timestamp, date], 'back');
   }
 
   if (!localFlag && shouldSendRealtimeFrame('back')) {
@@ -7987,14 +7941,10 @@ parser3.on("data", function (data) {
             if (dataFalg % 10 == 0) {
               const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
               const date = saveTime;
-              const insertQuery =
-                "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
-              db.run(
-                insertQuery,
+              collectionInsertQueue.enqueue(
+                db,
                 [JSON.stringify(res), timestamp, date],
-                function (err) {
-                  handleCollectionDbError(err, 'sit');
-                }
+                'sit',
               );
             }
             if (dataFalg >= 10) {
@@ -8044,15 +7994,10 @@ parser4.on("data", function (data) {
 
         const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
         const date = saveTime;
-        const insertQuery =
-          "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
-
-        db2.run(
-          insertQuery,
+        collectionInsertQueue.enqueue(
+          db2,
           [JSON.stringify(pointArr4), timestamp, date],
-          function (err) {
-            handleCollectionDbError(err, 'head');
-          }
+          'head',
         );
       }
 
@@ -8206,17 +8151,11 @@ function colOrSendData2(jsonData) {
     // const matrix = '[1,2,3,4,54,56,6,3,2,3,]';
     const timestamp = Date.now(); // 閼惧嘲褰囪ぐ鎾冲閺冨爼妫块惃鍕闂傚瓨鍩?
     const date = saveTime;
-    const insertQuery =
-      "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
-
-
     const frameToStore = JSON.parse(jsonData);
-    db2.run(
-      insertQuery,
+    collectionInsertQueue.enqueue(
+      db2,
       [isZeroFrameStorageType(file) ? buildZeroAwareStorageData(frameToStore, 'headData', 'head') : isSmallBedMatrixType(file) ? JSON.stringify(getFrameMatrixData(frameToStore, 'headData')) : JSON.stringify([...frameToStore.backData]), timestamp, date],
-      function (err) {
-        handleCollectionDbError(err, 'head');
-      }
+      'head',
     );
   }
 

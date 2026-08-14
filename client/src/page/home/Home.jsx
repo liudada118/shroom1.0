@@ -104,6 +104,12 @@ import { translateBackendMessage } from '../../i18n/translateBackendMessage';
 import { translateDomainLabel } from '../../i18n/translateDomainLabel';
 import { chestLine, flLine, frLine, genWebglData, handSkinChange, heatMapMax, hlLine, hrLine, robot0401 } from "./robotUtil";
 import { WebGLCanvas } from "../../components/webgl/WebGL.HeatMap copy 2";
+import {
+  DEFAULT_RENDERER_CONFIG as SMALL_BED_12B_DEFAULT_RENDERER_CONFIG,
+  getDisplayOptions as getSmallBed12BDisplayOptions,
+  getInitialDisplayState as getSmallBed12BInitialDisplayState,
+  normalizeRendererConfig as normalizeSmallBed12BRendererConfig,
+} from "./smallBed12BDisplay";
 
 const ANT_DESIGN_LOCALES = Object.freeze({ zh: zhCN, en: enUS, ja: jaJP });
 
@@ -409,7 +415,7 @@ const petCareMatrixArr = ['petCare', 'petCareMini']
 const isPetCareMatrix = (type) => petCareMatrixArr.includes(type)
 const tempFullBedMatrix = 'tempFullBed'
 const bedArr = ['jqbed', tempFullBedMatrix, ...petCareMatrixArr, 'xiyueReal1', 'smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed1']
-const displayRendererConfigMatrixArr = ['smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed12B', WHOLE_CHAIR_MATRIX, MINZHEN_MATRIX, 'jqbed', ...petCareMatrixArr]
+const displayRendererConfigMatrixArr = ['smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed12B', 'matCol', WHOLE_CHAIR_MATRIX, MINZHEN_MATRIX, 'jqbed', ...petCareMatrixArr]
 const HUMAN_BODY_DEFAULT_COLOR = 1555
 const HUMAN_BODY_DEFAULT_SIZE = 31
 const HUMAN_BODY_OPTIMIZED_MATRIX = 'humanBodyOptimized'
@@ -428,13 +434,7 @@ const initConfig = {
     valuef1: 6,
     value1: 0.72,  //高度
   },
-  smallBed12B: {
-    valueg1: 2,
-    valuej1: 2205,
-    valuel1: 5,
-    valuef1: 6,
-    value1: 0.1,
-  },
+  smallBed12B: { ...SMALL_BED_12B_DEFAULT_RENDERER_CONFIG },
   wholeChair: {
     valueg1: 2,
     valuej1: 25,
@@ -611,10 +611,19 @@ const getConfig = ({ sensorType, mode }) => {
       mergedConfig.valuej1 = modeDefaultColor
     }
   }
+  if (realType === SMALL_BED_12B_MATRIX) {
+    return normalizeSmallBed12BRendererConfig(mergedConfig)
+  }
   return mergedConfig
 }
 
 const getDefaultModeForMatrix = (matrixName, currentMode = "normal") => {
+  if (matrixName === SMALL_BED_12B_MATRIX) {
+    return "numoriginal";
+  }
+  if (matrixName === "matCol") {
+    return currentMode === "numoriginal" ? "numoriginal" : "normal";
+  }
   if (matrixName === WHOLE_CHAIR_MATRIX) {
     return "normal";
   }
@@ -851,8 +860,9 @@ class Home extends React.Component {
       minzhenSensorInfo: {},
       hz: 12,
       realHz: 0,
-      smallBedMatrixWidth: 32,
-      smallBedMatrixHeight: 32,
+      timeArr: [],
+      historyTimeArr: [],
+      ...getSmallBed12BInitialDisplayState(),
     };
     this.com = React.createRef();
     this.data = React.createRef();
@@ -1752,7 +1762,22 @@ class Home extends React.Component {
 
           const backendMatrixName = normalizeDisplayMatrixName(jsonObject.activeSensorType)
           if (!backendMatrixName || backendMatrixName !== nextMatrixName) {
-            this.wsSendObj({ file: nextMatrixName })
+            this.wsSendObj(nextMatrixName === SMALL_BED_12B_MATRIX
+              ? {
+                file: nextMatrixName,
+                smallBed12BDisplayOptions: getSmallBed12BDisplayOptions(
+                  this.state.smallBed12BRealtimeMatrixMode,
+                  this.state.smallBed12BRealtimeSamplePoint,
+                ),
+              }
+              : { file: nextMatrixName })
+          } else if (nextMatrixName === SMALL_BED_12B_MATRIX) {
+            this.wsSendObj({
+              smallBed12BDisplayOptions: getSmallBed12BDisplayOptions(
+                this.state.smallBed12BRealtimeMatrixMode,
+                this.state.smallBed12BRealtimeSamplePoint,
+              ),
+            })
           }
         }
         this.setState(nextState)
@@ -2380,6 +2405,14 @@ class Home extends React.Component {
     if (jsonObject.time != null) {
       this.setState({
         time: jsonObject.time,
+        timeArr: Array.isArray(jsonObject.time) ? jsonObject.time : [],
+      });
+    }
+    if (jsonObject.historyTimeArr != null) {
+      this.setState({
+        historyTimeArr: Array.isArray(jsonObject.historyTimeArr)
+          ? jsonObject.historyTimeArr
+          : [],
       });
     }
     if (jsonObject.timeArr != null) {
@@ -2890,6 +2923,15 @@ class Home extends React.Component {
     if (jsonObject.time != null) {
       this.setState({
         time: jsonObject.time,
+        timeArr: Array.isArray(jsonObject.time) ? jsonObject.time : [],
+      });
+    }
+
+    if (jsonObject.historyTimeArr != null) {
+      this.setState({
+        historyTimeArr: Array.isArray(jsonObject.historyTimeArr)
+          ? jsonObject.historyTimeArr
+          : [],
       });
     }
 
@@ -3057,7 +3099,13 @@ class Home extends React.Component {
     // 2. 关闭所有串口，确保切换前旧串口完全停止
     this.wsSendObj({ sitClose: true, backClose: true, headClose: true, sensorClose: true });
     // 3. 再发送 file 切换，后端切换数据库并重置回放状态
-    this.wsSendObj({ file: nextMatrixName });
+    const smallBed12BDisplayOptions = getSmallBed12BDisplayOptions(
+      this.state.smallBed12BRealtimeMatrixMode,
+      this.state.smallBed12BRealtimeSamplePoint,
+    );
+    this.wsSendObj(nextMatrixName === SMALL_BED_12B_MATRIX
+      ? { file: nextMatrixName, smallBed12BDisplayOptions }
+      : { file: nextMatrixName });
 
     // 4. 清空前端数据
     this.data.current?.changeData({ meanPres: 0, maxPres: 0, point: 0, area: 0, totalPres: 0, pressure: 0 });
@@ -3084,8 +3132,12 @@ class Home extends React.Component {
       portnameHead: '',
       portnameSensor: '',
       minzhenSensorInfo: {},
-      smallBedMatrixWidth: 32,
-      smallBedMatrixHeight: 32,
+      smallBedMatrixWidth: nextMatrixName === SMALL_BED_12B_MATRIX
+        ? (smallBed12BDisplayOptions.matrixMode === '16x16' ? 16 : 32)
+        : 32,
+      smallBedMatrixHeight: nextMatrixName === SMALL_BED_12B_MATRIX
+        ? (smallBed12BDisplayOptions.matrixMode === '16x16' ? 16 : 32)
+        : 32,
     });
 
     // 6. 如果当前在回放模式，重新请求新 db 的时间列表
@@ -4038,6 +4090,8 @@ class Home extends React.Component {
             local={this.state.local}
             dataArr={this.state.dataArr}
             matrixName={this.state.matrixName}
+            smallBed12BRealtimeMatrixMode={this.state.smallBed12BRealtimeMatrixMode}
+            smallBed12BRealtimeSamplePoint={this.state.smallBed12BRealtimeSamplePoint}
             history={this.state.history}
             wsSendObj={this.wsSendObj}
             changeMatrix={this.changeMatrix}
@@ -4138,12 +4192,22 @@ class Home extends React.Component {
                       changeSelect={this.changeSelect} />
                   </CanvasCom>
                   :
-                  this.state.numMatrixFlag == "numoriginal" && ['hand', 'handSinglePoint', MINZHEN_MATRIX, 'smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed12B'].includes(this.state.matrixName) ?
+                  this.state.numMatrixFlag == "numoriginal" && ['hand', 'handSinglePoint', MINZHEN_MATRIX, 'smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed12B', 'matCol'].includes(this.state.matrixName) ?
                   <>
                     <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
                       <Fast1024
                         ref={this.com}
                         matrixName={this.state.matrixName}
+                        matrixWidth={this.state.matrixName === 'matCol'
+                          ? 16
+                          : this.state.matrixName === SMALL_BED_12B_MATRIX
+                            ? this.state.smallBedMatrixWidth
+                            : undefined}
+                        matrixHeight={this.state.matrixName === 'matCol'
+                          ? 10
+                          : this.state.matrixName === SMALL_BED_12B_MATRIX
+                            ? this.state.smallBedMatrixHeight
+                            : undefined}
                         data={this.data}
                         local={this.state.local}
                         handleChartsBody={this.handleChartsBody.bind(this)}
@@ -4979,6 +5043,8 @@ class Home extends React.Component {
               length={this.state.length - 1}
               max={this.max}
               time={this.state.time}
+              timeArr={this.state.timeArr}
+              historyTimeArr={this.state.historyTimeArr}
               pressMax={this.pressMax}
               wsSendObj={this.wsSendObj}
             />
