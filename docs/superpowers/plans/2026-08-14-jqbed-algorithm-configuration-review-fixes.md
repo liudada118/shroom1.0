@@ -64,7 +64,7 @@
 - Generated: `build/**`
 
 - [x] Update architecture sections and both architecture logs with request lifecycle, semantic labels, and external native runtime contract.
-- [ ] Update ledger/report with remediation evidence; leave all 12 formal interactions exactly `USER-SELF-TEST`.
+- [x] Update ledger/report with remediation evidence; leave all 12 formal interactions exactly `USER-SELF-TEST`.
 - [x] Fresh-run relevant Node, Python and Vitest suites, `npm --prefix client run build`, and `npm run prepare-pack-resources` with the external PYD source and SHA-256.
 - [x] Run the packaged `health` RPC independently and confirm `onbedFilterAvailable: true`.
-- [ ] Review `git diff --check`, status, and staged scope; commit one or a few focused commits without any real PYD or Tk reference file.
+- [x] Review `git diff --check`, status, and staged scope; commit one or a few focused commits without any real PYD or Tk reference file.
