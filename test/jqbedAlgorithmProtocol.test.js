@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const {
   DEFAULT_JQBED_ALGORITHM_VALUES,
@@ -126,4 +128,28 @@ test('includes configuration in Python arguments only for jqbed', () => {
   const config = createSnapshot();
   assert.deepEqual(buildJqbedGetDataArgs(data, 'jqbed', config), { data, config: config.values });
   assert.deepEqual(buildJqbedGetDataArgs(data, 'smallBed', config), { data });
+});
+
+test('mounts the jqbed protocol dispatcher only on the primary 19999 websocket', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  const legacyConnection = source.indexOf('server1.on("connection", function connection(ws, req) {');
+  const primaryConnection = source.indexOf('server.on("connection", function connection(ws, req) {');
+  const dispatcher = 'jqbedAlgorithmProtocol.handle(getMessage, {';
+  assert.ok(legacyConnection >= 0);
+  assert.ok(primaryConnection > legacyConnection);
+  assert.doesNotMatch(source.slice(legacyConnection, primaryConnection), new RegExp(dispatcher.replace(/[().{}]/g, '\\$&')));
+  assert.match(source.slice(primaryConnection), new RegExp(dispatcher.replace(/[().{}]/g, '\\$&')));
+  assert.equal(source.split(dispatcher).length - 1, 1);
+});
+
+test('uses one pre-await activeFile snapshot throughout each jqbed timer call', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  const timerStart = source.indexOf('jqbedTimer = setInterval(async () => {');
+  const timerEnd = source.indexOf('function startPetCareTimer', timerStart);
+  const timer = source.slice(timerStart, timerEnd);
+  assert.ok(timerStart >= 0 && timerEnd > timerStart);
+  assert.ok(timer.indexOf('const activeFile = file;') < timer.indexOf('await callPy('));
+  assert.match(timer, /buildJqbedGetDataArgs\(\s*newArr,\s*activeFile,/);
+  assert.match(timer, /normalizeVitalSignsHeartRate\(rawData, activeFile\)/);
+  assert.equal((timer.match(/if \(activeFile === 'jqbed'\)/g) || []).length, 2);
 });

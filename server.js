@@ -3435,14 +3435,6 @@ module.exports = {
         logger.debug("received: %s from %s", message, clientName, localFlag);
 
         const getMessage = JSON.parse(message);
-        if (jqbedAlgorithmProtocol.handle(getMessage, {
-          client: ws,
-          licenseValid: licenseManager.isLicenseValid(),
-          activeFile: file,
-          realtime: !localFlag,
-        })) {
-          return;
-        }
 
         /**
          * 鐏忓棗鐤勯弮鍫曟浆閼冲本鏆熼幑顕€鈧岸浜鹃幍鎾崇磻
@@ -3602,6 +3594,14 @@ module.exports = {
 
 
         const getMessage = JSON.parse(message);
+        if (jqbedAlgorithmProtocol.handle(getMessage, {
+          client: ws,
+          licenseValid: licenseManager.isLicenseValid(),
+          activeFile: file,
+          realtime: !localFlag,
+        })) {
+          return;
+        }
 
         // if(getMessage.compen != null){
         //   compen = getMessage.compen
@@ -8445,6 +8445,7 @@ function logPetCareResult(result, systemKey) {
 // jqbed 鍋ュ悍鐩戞祴绠楁硶瀹氭椂璋冪敤锛?25ms锛?
 jqbedTimer = setInterval(async () => {
   if (pointArr&&pointArr.length  && pointArr.every((a) => typeof a == 'number') && ['jqbed', 'smallBed'].includes(file) && port1 && port1.isOpen) {
+    const activeFile = file;
     const newArr = jqbedOppo(pointArr);
     // console.log(newArr.reduce((a,b) => a+b , 0),pointArr.length,'nweArr')
     try {
@@ -8452,15 +8453,15 @@ jqbedTimer = setInterval(async () => {
         'getData',
         buildJqbedGetDataArgs(
           newArr,
-          file,
+          activeFile,
           jqbedAlgorithmConfigStore.getSnapshot(),
         ),
       );
-      if (file === 'jqbed') {
+      if (activeFile === 'jqbed') {
         setJqbedAlgorithmStatus({ state: 'ready', error: null });
       }
       if (rawData && rawData.rate != -1) {
-        const data = normalizeVitalSignsHeartRate(rawData, file);
+        const data = normalizeVitalSignsHeartRate(rawData, activeFile);
         // console.log('[jqbed] pyResult:', data,data.matrix_origin.reduce((a,b) => a+b , 0));
 
         // 缂撳瓨绠楁硶杩斿洖鐨?matrix_origin锛堜緵 useMatrixOrigin flag 浣跨敤锛?
@@ -8495,7 +8496,7 @@ jqbedTimer = setInterval(async () => {
       }
     } catch (e) {
       console.error('[jqbed] callPy error:', e.message);
-      if (file === 'jqbed') {
+      if (activeFile === 'jqbed') {
         const safeMessage = typeof e?.message === 'string' && e.message
           ? e.message
           : 'Unable to run jqbed algorithm';
