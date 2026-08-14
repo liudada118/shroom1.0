@@ -296,7 +296,7 @@ graph TD
     - Shroom Vision 入口页和系统标题栏都提供中、英、日文切换；入口页可在未授权状态下直接选择语言，系统标题栏沿用同一全局语言状态。日期、浏览器语音和 Ant Design 组件同步使用当前语言的区域设置。
     - 生命体征告警统一经过 `client/src/page/home/speechSynthesis.js`。`Home.jsx` 保持原有触发条件，只为 `leftBed`、`fallRisk`、`satUp`、`emergency` 传入稳定 `alertKey`；日文模式分别优先播放 `/audio/alerts/ja/left-bed.mp3`、`edge-seat.mp3`、`edge-seat.mp3`、`emergency.mp3`。同一活动键重复请求不叠播，不同键会暂停并归零上一条本地音频后切换。
     - 本地 MP3 的构造、加载或播放失败时回退 Web Speech API；voice 的大小写、下划线和地区变体会标准化后按基础语言匹配，日文只允许 `ja` voice，首次 voice 列表尚未加载时监听一次 `voiceschanged` 重试，仍不可用则跳过播报并告警，不回退到中文系统 voice。中文和英文继续直接使用 Web Speech，不进入日文 MP3 路径。日文界面及播报用的 `fallBed`、`sitUp`、`home.alerts.fallRisk`、`home.alerts.satUp` 四个资源键统一为 `端座位`。
-    - `client/public/audio/alerts/ja/` 保存 `left-bed.mp3`（`離床しました`）、`edge-seat.mp3`（`端座位`）和 `emergency.mp3`（`SOS緊急通報`），均由 `ja-JP-NanamiNeural` 以 `-5%` 语速制作，并由 Vite 同步到 `build/audio/alerts/ja/` 供离线运行。
+    - `client/public/audio/alerts/ja/` 保存 `left-bed.mp3`（`離床`）、`edge-seat.mp3`（`端座位`）和 `emergency.mp3`（`SOS緊急通報`），均由 `ja-JP-NanamiNeural` 以 `-5%` 语速制作，并由 Vite 同步到 `build/audio/alerts/ja/` 供离线运行。
     - CSV 下载请求携带当前语言；`server.js` 分别输出中文、旧版英文简写或日文表头，并同步本地化检测点、触觉手套部位和左右手文件名，不修改历史数据字段和值。
 
 ## 5. API 端点 (Endpoints)
@@ -764,6 +764,7 @@ graph TD
 | 2026-08-14 | Revise | 日文生命体征语音与状态翻译修正 | 告警播报提取为可测试的 Web Speech 适配模块；日文仅选择 `ja` voice，voice 延迟加载时单次重试，缺失时不回退中文；“已坐起”和“坠床风险”的界面与播报日文统一为 `端座位`。 |
 | 2026-08-14 | Revise | 日文生命体征固定告警音频 | 使用 `ja-JP-NanamiNeural` 生成離床、端座位、SOS 三条日文 MP3，并将源资源与当前发布目录副本做 SHA-256 一致性校验；此轮不修改现有 Web Speech 播报逻辑。 |
 | 2026-08-14 | Revise | 日文固定告警离线播放接入 | 四类生命体征告警按稳定 `alertKey` 优先播放随应用分发的日文 MP3；同键防叠播、异键切换，媒体失败时仅回退严格日文系统 voice，中英文 Web Speech 与告警触发条件保持不变。 |
+| 2026-08-14 | Revise | 日文离床告警音频精简 | 将 `ja-JP-NanamiNeural` 离床 MP3 的播报内容由「離床しました」精简为「離床」，同步更新 public 与 build 资源；告警键、路径、回退逻辑及其他音频不变。 |
 
 ## 9. 更新日志
 
@@ -1169,6 +1170,7 @@ graph TD
 | 2026-08-14 | Revise | 修复缺陷 | 日文生命体征告警按基础语言严格选择 `ja` 系统 voice，voice 列表延迟时通过 `voiceschanged` 单次重试，仍不可用则跳过播报而不回退中文；四个“已坐起/坠床风险”日文资源统一为 `端座位`。 |
 | 2026-08-14 | Revise | 新增功能 | 新增 `ja-JP-NanamiNeural` 日文固定告警 MP3：`left-bed.mp3`、`edge-seat.mp3`、`emergency.mp3` 同步保存于前端 public 与当前 build，支持后续离线播放接入；运行时语音逻辑和项目依赖保持不变。 |
 | 2026-08-14 | Revise | 新增功能 | `speechSynthesis.js` 新增按 `alertKey` 驱动的日文本地 MP3 播放状态机：离床、坠床风险/坐起、SOS 分别使用三条离线音频，同一活动告警不叠播、异告警安全切换；Audio 构造、媒体错误及同步/异步播放失败统一回退严格 `ja` voice，中英文继续使用 Web Speech。 |
+| 2026-08-14 | Revise | 配置变更 | 日文离床本地音频文案由「離床しました」精简为「離床」，保持 `ja-JP-NanamiNeural`、`-5%` 语速、`leftBed` 映射和其他告警资源不变。 |
 
 *变更类型：`新增功能` / `优化重构` / `修复缺陷` / `配置变更` / `文档更新` / `依赖升级` / `初始化`*
 
