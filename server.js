@@ -12,7 +12,7 @@ const fs = require('fs');
 const { SerialPort } = require("serialport");
 const { DelimiterParser } = require("@serialport/parser-delimiter");
 const sqlite3 = require("./sqlite3-compat").verbose();
-const { createObjectCsvWriter: createCsvWriter, createObjectCsvStringifier: createCsvStringifier } = require("csv-writer");
+const { createObjectCsvStringifier: createCsvStringifier } = require("csv-writer");
 const {
   openWeb,
   interp,
@@ -87,6 +87,14 @@ const { pressSmallBed } = require("./utilMatrix");
 const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine, pressNew12203131 } = require('./server/mathUtils');
 const { initDb: _initDbFromModule } = require('./server/dbManager');
 const { createCollectionInsertQueue } = require('./server/collectionInsertQueue');
+const {
+  createUtf8BomCsvWriter: createCsvWriter,
+  prefixCsvHeaderWithBom,
+} = require('./server/csvUtf8');
+const {
+  getCollectionCsvLabelInfo: getCollectionCsvLabelInfoFromValue,
+  transposeMatColToVisualDirection,
+} = require('./server/csvMatrixUtils');
 const smallBed12B = require('./server/smallBed12B');
 const {
   estimatePointPressure,
@@ -2089,16 +2097,7 @@ function formatCsvDatePart(value) {
 }
 
 function getCollectionCsvLabelInfo(value) {
-  const datePart = formatCsvDatePart(value);
-  const namePart = datePart.replace(/_\d{4}-\d{1,2}-\d{1,2}-\d{2}-\d{2}-\d{2}-\d+$/, '');
-  if (!namePart || namePart === datePart && /^\d+$/.test(namePart)) return { label: '', labelText: '' };
-  const labelTextMatch = namePart.match(/([^_]+_\d+)$/);
-  const labelText = labelTextMatch ? labelTextMatch[1] : '';
-  const labelMatch = labelText.match(/_(\d+)$/);
-  return {
-    label: labelMatch ? labelMatch[1] : '',
-    labelText,
-  };
+  return getCollectionCsvLabelInfoFromValue(value, formatCsvDatePart);
 }
 
 function parseCsvMatrixData(value) {
@@ -2110,23 +2109,6 @@ function parseCsvMatrixData(value) {
   } catch {
     return [];
   }
-}
-
-function transposeMatColToVisualDirection(data) {
-  const source = Array.isArray(data) ? data : [];
-  const sourceWidth = 10;
-  const sourceHeight = 16;
-  if (source.length !== sourceWidth * sourceHeight) {
-    return source;
-  }
-
-  const result = [];
-  for (let row = 0; row < sourceWidth; row++) {
-    for (let col = 0; col < sourceHeight; col++) {
-      result.push(source[col * sourceWidth + row]);
-    }
-  }
-  return result;
 }
 
 function formatMatColCsvRealData(value) {
@@ -2291,7 +2273,10 @@ async function writeCsvFileInBatches({
   };
 
   try {
-    await writeStreamChunk(stream, stringifier.getHeaderString());
+    await writeStreamChunk(
+      stream,
+      prefixCsvHeaderWithBom(stringifier.getHeaderString()),
+    );
     emitProgress(true);
     while (written < rangeEnd - rangeStart) {
       const rows = queryHistoryRowsFromId(
@@ -2334,6 +2319,7 @@ function buildGenericSitCsvRow(row, { absoluteIndex, relativeIndex, baseTimestam
     collectionLabelInfo = null,
   } = options;
   const rawData = JSON.parse(row?.data || '[]');
+  const storedFrame = parseStoredFrameData(row);
   let pressureData, rotateData, zeroFrameData = [];
   let tempFullBedPayload = null;
   if (file === TEMP_FULL_BED_TYPE) {
@@ -2354,13 +2340,18 @@ function buildGenericSitCsvRow(row, { absoluteIndex, relativeIndex, baseTimestam
       rotateData = rawData.slice(rawData.length - 4);
     }
   } else {
-    pressureData = Array.isArray(rawData) ? rawData : getHistoryPressureData(row);
+    pressureData = file === SMALL_BED_12B_TYPE
+      ? normalizeHistoryPressureData(row, file)
+      : Array.isArray(rawData) ? rawData : getHistoryPressureData(row);
     rotateData = [];
   }
   if (file === WHOLE_CHAIR_TYPE) {
     pressureData = normalizeWholeChairFrame('sit', pressureData);
   }
-  if (shouldTransposeSmallBedRawMatrix(file)) {
+  if (
+    shouldTransposeSmallBedRawMatrix(file)
+    && storedFrame?.matrixOrientation !== 'transposed'
+  ) {
     pressureData = transposeSquareMatrix(pressureData);
   }
   const press = pressureData.reduce((a, b) => a + b, 0);
@@ -2368,7 +2359,7 @@ function buildGenericSitCsvRow(row, { absoluteIndex, relativeIndex, baseTimestam
   const newData = {
     time: timeStampToDate(row?.timestamp),
     pressureArea: area,
-    pressure: totalToN(press),
+    pressure: formatMatrixTotalForFile(press, file),
     realData: JSON.stringify(pressureData),
     index: getCsvElapsedSecondsFromBase(row, absoluteIndex, baseTimestamp, relativeIndex),
     max: findMax(pressureData),
@@ -2606,7 +2597,10 @@ async function exportHandGloveDoubleCsvStreaming({ date, csvTitle, csvTargetPath
   };
 
   try {
-    await writeStreamChunk(stream, stringifier.getHeaderString());
+    await writeStreamChunk(
+      stream,
+      prefixCsvHeaderWithBom(stringifier.getHeaderString()),
+    );
     emitProgress(true);
     while (written < end - start) {
       const limit = Math.min(batchSize, end - start - written);
@@ -5534,7 +5528,11 @@ module.exports = {
                     let sitData = normalizeHistoryPressureData(rows[i], file);
                     let matrixWidth = Number(storedFrame?.matrixWidth) || Math.sqrt(sitData.length) || 32;
                     let matrixHeight = Number(storedFrame?.matrixHeight) || matrixWidth;
-                    if (shouldTransposeSmallBedRawMatrix(file) && matrixWidth === matrixHeight) {
+                    if (
+                      shouldTransposeSmallBedRawMatrix(file)
+                      && storedFrame?.matrixOrientation !== 'transposed'
+                      && matrixWidth === matrixHeight
+                    ) {
                       sitData = transposeSquareMatrix(sitData, matrixWidth);
                     }
                     // sitData = zeroLine(sitData,32,32)
@@ -5555,7 +5553,7 @@ module.exports = {
                         : area, //閸樼喎顫愰惌鈺呮█
                       pressure: sitPressSelect.length
                         ? sitPressSelect[i]
-                        : totalToN(press),
+                        : formatMatrixTotalForFile(press, file),
                       realData: JSON.stringify(sitData),
                       index: getCsvElapsedSeconds(rows, i, historyArr[0], j),
                       max: findMax(sitData),
