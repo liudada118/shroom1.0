@@ -29,8 +29,6 @@ import {
 } from "./humanBodyRenderSettings";
 import {
   getHumanBodyRenderPixelRatio,
-  getHumanBodyViewOffsetX,
-  getHumanBodyVisualCenter,
   shouldRenderHumanBodyFrame,
   updateHumanBodyQualityState,
 } from "./humanBodyRenderPerformance";
@@ -501,8 +499,6 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
   }
   const initialSettings = initialSettingsRef.current;
   const containerRef = useRef(null);
-  const settingsPanelRef = useRef(null);
-  const regionPanelRef = useRef(null);
   const sceneRef = useRef(null);
   const cameraRef = useRef(null);
   const controlsRef = useRef(null);
@@ -639,6 +635,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
     controls.enableDamping = true;
     controls.dampingFactor = 0.06;
     controls.target.set(0, 4, 0);
+    controls.enablePan = false;
     controls.autoRotate = getHumanBodyAutoRotate({
       activeRegion: activeRegionRef.current,
       overviewAutoRotate: overviewAutoRotateRef.current,
@@ -862,24 +859,12 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
       }
       camera.aspect = width / height;
       camera.clearViewOffset();
-      const visualCenter = getHumanBodyVisualCenter({
-        width,
-        leftPanelRight: settingsPanelRef.current?.getBoundingClientRect?.().right,
-        rightPanelLeft: regionPanelRef.current?.getBoundingClientRect?.().left,
-      });
-      const viewOffsetX = getHumanBodyViewOffsetX(width, visualCenter);
-      if (Math.abs(viewOffsetX) > 0.5) {
-        camera.setViewOffset(width, height, viewOffsetX, 0, width, height);
-      } else {
-        camera.updateProjectionMatrix();
-      }
+      camera.updateProjectionMatrix();
       invalidateRender();
     };
     resize();
     const resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(container);
-    if (settingsPanelRef.current) resizeObserver.observe(settingsPanelRef.current);
-    if (regionPanelRef.current) resizeObserver.observe(regionPanelRef.current);
     window.addEventListener("resize", resize);
     window.visualViewport?.addEventListener("resize", resize);
 
@@ -1170,7 +1155,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
         </div>
       )}
 
-      <div ref={settingsPanelRef} style={{ ...panelStyle, top: 72, left: "max(250px, 19vw)", width: 222 }}>
+      <div style={{ ...panelStyle, top: 72, left: "max(250px, 19vw)", width: 222 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <div style={{ fontSize: "14px", fontWeight: 700, letterSpacing: "0.08em" }}>人体全身优化</div>
           <button
@@ -1215,7 +1200,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
         )}
       </div>
 
-      <div ref={regionPanelRef} style={{ ...panelStyle, top: 72, right: 14, width: 126 }}>
+      <div style={{ ...panelStyle, top: 72, right: 14, width: 126 }}>
         <div style={{ fontSize: "11px", color: "#8193a5", marginBottom: 7 }}>部位视角</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
           {Object.entries(REGION_VIEWS).map(([key, view]) => (

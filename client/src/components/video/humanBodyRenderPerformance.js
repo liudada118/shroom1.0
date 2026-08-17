@@ -15,29 +15,6 @@ export function getHumanBodyRenderPixelRatio(devicePixelRatio, qualityTier = "ba
   return Math.min(ratio, cap);
 }
 
-export function getHumanBodyVisualCenter({
-  width,
-  leftPanelRight,
-  rightPanelLeft,
-  gap = 16,
-  minimumViewportWidth = 320,
-}) {
-  const viewportWidth = Math.max(1, finiteNumber(width, 1));
-  const fallbackCenter = viewportWidth / 2;
-  const safeLeft = Math.max(0, finiteNumber(leftPanelRight, -gap) + gap);
-  const safeRight = Math.min(viewportWidth, finiteNumber(rightPanelLeft, viewportWidth + gap) - gap);
-
-  if (safeRight - safeLeft < Math.min(minimumViewportWidth, viewportWidth * 0.35)) {
-    return fallbackCenter;
-  }
-  return safeLeft + (safeRight - safeLeft) / 2;
-}
-
-export function getHumanBodyViewOffsetX(width, visualCenterX) {
-  const viewportWidth = Math.max(1, finiteNumber(width, 1));
-  return viewportWidth / 2 - finiteNumber(visualCenterX, viewportWidth / 2);
-}
-
 export function updateHumanBodyQualityState(state, frameIntervalMs) {
   const interval = finiteNumber(frameIntervalMs, 0);
   const current = {

@@ -4,8 +4,6 @@ import { fileURLToPath } from "node:url";
 import {
   HUMAN_BODY_ACTIVE_FRAME_INTERVAL_MS,
   getHumanBodyRenderPixelRatio,
-  getHumanBodyViewOffsetX,
-  getHumanBodyVisualCenter,
   shouldRenderHumanBodyFrame,
   updateHumanBodyQualityState,
 } from "./humanBodyRenderPerformance";
@@ -16,24 +14,6 @@ describe("human body render performance", () => {
     expect(getHumanBodyRenderPixelRatio(2, "low")).toBe(1);
     expect(getHumanBodyRenderPixelRatio(0.9, "balanced")).toBe(0.9);
     expect(getHumanBodyRenderPixelRatio(undefined, "balanced")).toBe(1);
-  });
-
-  it("centers the model inside the unobstructed space between side panels", () => {
-    expect(getHumanBodyVisualCenter({
-      width: 1920,
-      leftPanelRight: 587,
-      rightPanelLeft: 1780,
-    })).toBe(1183.5);
-    expect(getHumanBodyViewOffsetX(1920, 1183.5)).toBe(-223.5);
-  });
-
-  it("falls back to the physical viewport center when panels leave too little room", () => {
-    expect(getHumanBodyVisualCenter({
-      width: 640,
-      leftPanelRight: 400,
-      rightPanelLeft: 520,
-    })).toBe(320);
-    expect(getHumanBodyVisualCenter({ width: 1000 })).toBe(500);
   });
 
   it("drops quality after sustained slow frames and recovers only after stability", () => {
@@ -76,10 +56,13 @@ describe("human body optimized performance wiring", () => {
     "utf8",
   );
 
-  it("measures both overlay panels and recenters the camera on every viewport change", () => {
-    expect(source).toContain("settingsPanelRef.current?.getBoundingClientRect?.().right");
-    expect(source).toContain("regionPanelRef.current?.getBoundingClientRect?.().left");
-    expect(source).toContain("camera.setViewOffset(width, height, viewOffsetX, 0, width, height)");
+  it("keeps the projection and orbit pivot on the physical screen and body center", () => {
+    expect(source).toContain("camera.clearViewOffset()");
+    expect(source).toContain("camera.updateProjectionMatrix()");
+    expect(source).toContain("controls.target.set(0, 4, 0)");
+    expect(source).toContain("controls.enablePan = false");
+    expect(source).not.toContain("camera.setViewOffset(");
+    expect(source).not.toContain("getBoundingClientRect?.().right");
     expect(source).toContain('window.visualViewport?.addEventListener("resize", resize)');
   });
 
