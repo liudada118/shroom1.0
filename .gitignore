@@ -13,6 +13,7 @@ python/dist/
 python/build/
 python/*.spec
 python/app/*.pyd
+!python/app/onbed_filter.cp311-win_amd64.pyd
 python/app/*.so
 python/venv*/
 pdf/

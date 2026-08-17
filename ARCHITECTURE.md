@@ -314,7 +314,7 @@ graph TD
 - **持久化与同步**：打包环境写入 `app.getPath('userData')/jqbed-algorithm-config.json`，开发环境写入项目根目录 `jqbed-algorithm-config.json`。store 先把版本化 envelope 写入同目录唯一 `.tmp` 临时文件，再以 rename 替换正式 JSON；只有落盘成功后才更新内存快照。保存或恢复默认会向所有 WebSocket 客户端广播后端快照，GET/保存/恢复均按 `requestId` 返回明确结果。`Home` 只有在主 WebSocket 真正完成 `send()` 时才报告成功，并把连接状态及重连 epoch 传给弹窗；弹窗为读取和变更分别设置 10 秒超时，断线会清理 pending，重连会重新 GET。发送失败、超时、拒绝和断线都保留 dirty 草稿，远端广播/重连快照也不会覆盖未保存输入。
 - **帧边界与系统隔离**：`jqbedTimer` 每次 Python 调用前读取一次深拷贝快照；已经发出的在途帧不被修改，下一帧开始使用新配置。`buildJqbedGetDataArgs()` 仅在活动系统为 `jqbed` 时附加 `config`；兼容定时器中的 `smallBed` 仍只发送 `{ data }`，`smallBedNoAlg` 与 `smallBed12B` 不进入此 Python 配置链路。原始矩阵、采集、回放、CSV 和历史数据通道不读取算法配置。
 - **Python 与告警边界**：`python/app/onbed_filter_example.py` 的 `getData(data, config=None)` 将合法 JSON 配置转换为 `onbed_filter.pyd` 的标量或 `float32` 二元数组输入。SOS 配置本身不直接触发或改写前端告警；只有 PYD 输出经 Python RPC 返回的 `sosflag` 继续进入现有 `Home`/`Aside` 告警路径。
-- **正式 runtime**：Windows 的 `npm run prepare-pack-resources` 要求以 `ONBED_FILTER_PYD_SOURCE` 指向仓库外 `onbed_filter.cp311-win_amd64.pyd`，并以 `ONBED_FILTER_PYD_SHA256` 校验源与暂存目标；缺库、缺哈希或不匹配立即失败，临时注入文件在构建结束后删除。构建脚本对 Python 3.11 探测、PyInstaller 构建统一强制 UTF-8，生成 `python/dist/onbed_server/onbed_server.exe` 后执行 `health` JSON-line RPC，只有 `pong=true` 且 `onbedFilterAvailable=true` 才继续同步到 `pack-resources/python/onbed_server/onbed_server.exe`；`npm run check-python-runtime-health` 可独立复验。打包后的 `pyWorker` 从 `process.resourcesPath/python`（含 `app.asar.unpacked` 候选）解析该可执行文件，并保持 stdout 仅承载 JSON-line RPC。`python/app/serial_monitor_updated2.0(1).py` 仅是非运行时、未跟踪参考，不属于本隔离工作树、提交、构建输入或打包 runtime。
+- **正式 runtime**：Windows 仓库直接跟踪指定的 `python/app/onbed_filter.cp311-win_amd64.pyd`，固定 SHA-256 为 `CDC003A317F8281AB126839DF4A3E94237A5856229CB3660CFAEB453B4D462E2`，保证其他电脑 `git pull` 后不会继续沿用仍要求 `head_foot_area` 的旧二进制。`npm run prepare-pack-resources` 默认校验该固定哈希；仍可用 `ONBED_FILTER_PYD_SOURCE` 与 `ONBED_FILTER_PYD_SHA256` 显式注入并校验外部候选。构建脚本对 Python 3.11 探测、PyInstaller 构建统一强制 UTF-8，生成 `python/dist/onbed_server/onbed_server.exe` 后执行 `health` JSON-line RPC，只有 `pong=true`、`onbedFilterAvailable=true` 且 `onbedFilterSensitivitySchema=true` 才继续同步到 `pack-resources/python/onbed_server/onbed_server.exe`，从打包阶段阻断旧字段协议。`npm run check-python-runtime-health` 可独立复验。打包后的 `pyWorker` 从 `process.resourcesPath/python`（含 `app.asar.unpacked` 候选）解析该可执行文件，并保持 stdout 仅承载 JSON-line RPC。`python/app/serial_monitor_updated2.0(1).py` 仅是非运行时、未跟踪参考，不属于提交、构建输入或打包 runtime。
 
 ## 5. API 端点 (Endpoints)
 
@@ -794,11 +794,13 @@ graph TD
 | 2026-08-17 | Revise | 密钥直接替换展示系统链路修复 | 密钥写入后的默认系统变化与普通系统切换统一复用完整生命周期，关闭旧串口、重建数据库并清理回放和帧缓存，避免授权与实际采集系统不一致。 |
 | 2026-08-17 | Revise | 人体全身优化最近12点热力模式 | 保留原精确全点 Shader，并新增默认的最近12点顶点热力模式；屏幕可切换且版本化缓存，降低笔记本 GPU 像素循环负载。 |
 | 2026-08-17 | Revise | 小床算法灵敏度字段升级 | 适配新版 `onbed_filter`：删除 `head_foot_area`，新增 `sensitivity_threshold` 0～3 模式及三语说明，配置 v1 自动迁移至 v2。 |
+| 2026-08-17 | Revise | 小床算法包跨电脑同步 | 将新版 `onbed_filter` 纳入版本管理并固定哈希；打包健康门禁新增灵敏度字段协议检查，避免其他电脑拉取代码后继续加载旧 PYD。 |
 
 ## 9. 更新日志
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-17 | Revise | 修复缺陷 | 修复其他电脑拉取代码后仍使用旧小床 PYD 的问题：跟踪新版二进制、默认校验固定 SHA-256，并要求打包 runtime 明确通过 `sensitivity_threshold` schema 健康检查。 |
 | 2026-08-17 | Revise | 修复缺陷 | 直接替换密钥并改变默认展示系统时执行与手动切换相同的串口、数据库和回放清理流程。 |
 | 2026-08-17 | Revise | 优化重构 | 人体全身热力新增“最近12点”顶点计算模式并作为默认值，保留“精确”全点模式供用户切换，两者选择写入本地渲染设置。 |
 | 2026-08-17 | Revise | 配置变更 | 新版小床 PYD 输入改为 `sensitivity_threshold` 0～3，移除 `head_foot_area`；配置持久化升级 v2 并迁移旧值。 |

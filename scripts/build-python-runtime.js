@@ -270,7 +270,10 @@ function main() {
     }
 
     const health = verifyRuntimeHealth(runtimeExe);
-    console.log(`[pack] python runtime health ready; onbedFilterAvailable=${health.onbedFilterAvailable}`);
+    console.log(
+      `[pack] python runtime health ready; onbedFilterAvailable=${health.onbedFilterAvailable}; `
+      + `onbedFilterSensitivitySchema=${health.onbedFilterSensitivitySchema}`
+    );
   } finally {
     stagedNative.cleanup();
   }

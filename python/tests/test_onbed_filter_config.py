@@ -21,15 +21,19 @@ class JqbedAlgorithmConfigTests(unittest.TestCase):
     def test_health_proves_whether_the_native_onbed_module_imported(self):
         original = MODULE.ncz
         try:
+            if original is not None:
+                self.assertTrue(MODULE.health()["onbedFilterSensitivitySchema"])
             MODULE.ncz = object()
             self.assertEqual(MODULE.health(), {
                 "pong": True,
                 "onbedFilterAvailable": True,
+                "onbedFilterSensitivitySchema": False,
             })
             MODULE.ncz = None
             self.assertEqual(MODULE.health(), {
                 "pong": True,
                 "onbedFilterAvailable": False,
+                "onbedFilterSensitivitySchema": False,
             })
         finally:
             MODULE.ncz = original

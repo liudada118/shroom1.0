@@ -62,7 +62,7 @@ test('rejects a mismatched external library without polluting the app directory'
   assert.equal(fs.existsSync(path.join(appDir, 'onbed_filter.cp311-win_amd64.pyd')), false);
 }));
 
-test('requires both the Windows native library and its expected SHA-256', () => withTempDir((root) => {
+test('requires the native library and verifies a tracked artifact with its pinned SHA-256', () => withTempDir((root) => {
   const appDir = path.join(root, 'app');
   fs.mkdirSync(appDir);
 
@@ -73,8 +73,15 @@ test('requires both the Windows native library and its expected SHA-256', () => 
   fs.writeFileSync(path.join(appDir, 'onbed_filter.cp311-win_amd64.pyd'), 'local bytes');
   assert.throws(
     () => stageOnbedFilterNative({ appDir, env: {} }),
-    /ONBED_FILTER_PYD_SHA256/,
+    /SHA-256 mismatch/,
   );
+
+  const staged = stageOnbedFilterNative({
+    appDir,
+    env: {},
+    trackedSha256: sha256(Buffer.from('local bytes')),
+  });
+  assert.equal(staged.injected, false);
 }));
 
 test('verifies an already staged native library without deleting it on cleanup', () => withTempDir((root) => {
@@ -107,10 +114,13 @@ test('forces UTF-8 for every spawned Python process', () => {
 
 test('accepts health output only when the native algorithm is available', () => {
   assert.deepEqual(parseRuntimeHealth(
-    '{"id":"build-health","ok":true,"data":{"pong":true,"onbedFilterAvailable":true}}\n',
-  ), { pong: true, onbedFilterAvailable: true });
+    '{"id":"build-health","ok":true,"data":{"pong":true,"onbedFilterAvailable":true,"onbedFilterSensitivitySchema":true}}\n',
+  ), { pong: true, onbedFilterAvailable: true, onbedFilterSensitivitySchema: true });
   assert.throws(() => parseRuntimeHealth(
-    '{"id":"build-health","ok":true,"data":{"pong":true,"onbedFilterAvailable":false}}\n',
+    '{"id":"build-health","ok":true,"data":{"pong":true,"onbedFilterAvailable":false,"onbedFilterSensitivitySchema":false}}\n',
   ), /native onbed_filter module is unavailable/);
+  assert.throws(() => parseRuntimeHealth(
+    '{"id":"build-health","ok":true,"data":{"pong":true,"onbedFilterAvailable":true,"onbedFilterSensitivitySchema":false}}\n',
+  ), /does not support sensitivity_threshold schema/);
   assert.throws(() => parseRuntimeHealth('not-json\n'), /valid JSON health response/);
 });

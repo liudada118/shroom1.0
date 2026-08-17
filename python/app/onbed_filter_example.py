@@ -526,9 +526,15 @@ def ping():
 
 
 def health():
+    step_doc = str(getattr(getattr(ncz, "step", None), "__doc__", "") or "")
     return {
         "pong": True,
         "onbedFilterAvailable": ncz is not None,
+        "onbedFilterSensitivitySchema": (
+            ncz is not None
+            and "sensitivity_threshold" in step_doc
+            and "head_foot_area" not in step_doc
+        ),
     }
 
 

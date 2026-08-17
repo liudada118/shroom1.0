@@ -6,6 +6,7 @@ const fs = require("fs");
 const path = require("path");
 
 const NATIVE_FILENAME = "onbed_filter.cp311-win_amd64.pyd";
+const TRACKED_ONBED_FILTER_SHA256 = "cdc003a317f8281ab126839df4a3e94237a5856229cb3660cfaeb453b4d462e2";
 
 function fileSha256(filePath) {
   return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
@@ -19,7 +20,11 @@ function normalizeExpectedSha256(value) {
   return normalized;
 }
 
-function stageOnbedFilterNative({ appDir, env = process.env }) {
+function stageOnbedFilterNative({
+  appDir,
+  env = process.env,
+  trackedSha256 = TRACKED_ONBED_FILTER_SHA256,
+}) {
   const targetPath = path.join(appDir, NATIVE_FILENAME);
   const sourceValue = String(env.ONBED_FILTER_PYD_SOURCE || "").trim();
   const targetExists = fs.existsSync(targetPath);
@@ -30,7 +35,9 @@ function stageOnbedFilterNative({ appDir, env = process.env }) {
     );
   }
 
-  const expectedSha256 = normalizeExpectedSha256(env.ONBED_FILTER_PYD_SHA256);
+  const expectedSha256 = normalizeExpectedSha256(
+    sourceValue ? env.ONBED_FILTER_PYD_SHA256 : (env.ONBED_FILTER_PYD_SHA256 || trackedSha256)
+  );
   let injected = false;
 
   try {
@@ -114,6 +121,9 @@ function parseRuntimeHealth(stdout) {
   if (response.data.onbedFilterAvailable !== true) {
     throw new Error("native onbed_filter module is unavailable in the packaged runtime");
   }
+  if (response.data.onbedFilterSensitivitySchema !== true) {
+    throw new Error("native onbed_filter module does not support sensitivity_threshold schema");
+  }
   return response.data;
 }
 
@@ -140,6 +150,7 @@ function verifyRuntimeHealth(runtimeExe) {
 
 module.exports = {
   NATIVE_FILENAME,
+  TRACKED_ONBED_FILTER_SHA256,
   fileSha256,
   parseRuntimeHealth,
   spawnPython,
