@@ -28,7 +28,7 @@ const validDraft = {
   body_movement_threshold: '30',
   step_leavebed_trigger: '50',
   edge_align_ratio: '0.25',
-  head_foot_area: ['3', '4'],
+  sensitivity_threshold: '3',
   breath_th: '0',
 };
 
@@ -50,7 +50,6 @@ describe('jqbed algorithm configuration model', () => {
       leave_bed_disable_area: ['jqbedAlgorithmConfig.front', 'jqbedAlgorithmConfig.back'],
       small_object_size: ['jqbedAlgorithmConfig.row', 'jqbedAlgorithmConfig.column'],
       sitting_area: ['jqbedAlgorithmConfig.minimum', 'jqbedAlgorithmConfig.maximum'],
-      head_foot_area: ['jqbedAlgorithmConfig.head', 'jqbedAlgorithmConfig.foot'],
     });
   });
 
@@ -75,15 +74,16 @@ describe('jqbed algorithm configuration model', () => {
       en.fields.sos_disable_area.help,
       en.fields.leave_bed_disable_area.help,
       en.fields.sitting_area.help,
-      en.fields.head_foot_area.help,
       en.fields.small_object_size.help,
     ]).toEqual([
       'Front and back boundaries excluded from SOS detection.',
       'Front and back boundaries excluded from bed-exit detection.',
       'Minimum and maximum values for sitting detection; 255,255 disables it.',
-      'Sets the head-side and foot-side area boundaries.',
       'Defines the row and column size of objects to filter.',
     ]);
+    expect(en.fields.sensitivity_threshold.help).toContain('0 Default');
+    expect(zh.fields.sensitivity_threshold.help).toContain('实时返回的预留字段第 5～8 位');
+    expect(ja.fields.sensitivity_threshold.help).toContain('予約フィールド5～8');
     expect(zh.fields.points_threshold_in.help).toBe('SOS 拍打检测使用的点数阈值。');
     expect(ja.fields.points_threshold_in.help).toBe('SOS叩打検出に使用するポイント数のしきい値です。');
   });
@@ -110,6 +110,7 @@ describe('jqbed algorithm configuration model', () => {
       filter_switch: '2',
       leave_bed_disable_area: ['33', '0'],
       sitting_area: ['255', '4'],
+      sensitivity_threshold: '4',
     });
 
     expect(invalid).toEqual({
@@ -119,6 +120,7 @@ describe('jqbed algorithm configuration model', () => {
         filter_switch: 'jqbedAlgorithmConfig.errors.switch',
         leave_bed_disable_area: 'jqbedAlgorithmConfig.errors.range',
         sitting_area: 'jqbedAlgorithmConfig.errors.sentinel',
+        sensitivity_threshold: 'jqbedAlgorithmConfig.errors.sensitivityMode',
       },
     });
   });

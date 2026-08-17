@@ -14,7 +14,6 @@ PAIR_KEYS = {
     "sitting_area",
     "leave_bed_disable_area",
     "small_object_size",
-    "head_foot_area",
 }
 
 
@@ -40,6 +39,8 @@ class JqbedAlgorithmConfigTests(unittest.TestCase):
 
         self.assertEqual(inputs["threshold_factor"], 0.0)
         self.assertEqual(inputs["filter_switch"], 1.0)
+        self.assertEqual(inputs["sensitivity_threshold"], 0.0)
+        self.assertNotIn("head_foot_area", inputs)
         np.testing.assert_array_equal(inputs["sos_disable_area"], [6.0, 10.0])
         self.assertEqual(inputs["frame_data"].dtype, np.float32)
 
@@ -58,11 +59,11 @@ class JqbedAlgorithmConfigTests(unittest.TestCase):
             "body_movement_threshold": 30,
             "step_leavebed_trigger": 50,
             "edge_align_ratio": 6,
+            "sensitivity_threshold": 3,
             "sos_disable_area": [0, 0],
             "sitting_area": [255, 255],
             "leave_bed_disable_area": [32, 0],
             "small_object_size": [0, 32],
-            "head_foot_area": [12, 24],
         }
 
         inputs = MODULE.build_step_inputs([1, 2], config)
@@ -85,6 +86,8 @@ class JqbedAlgorithmConfigTests(unittest.TestCase):
             {"breath_detect_mode": 1.5},
             {"filter_switch": 2},
             {"strel_switch": -1},
+            {"sensitivity_threshold": 4},
+            {"sensitivity_threshold": 1.5},
         )
 
         for config in invalid_configs:

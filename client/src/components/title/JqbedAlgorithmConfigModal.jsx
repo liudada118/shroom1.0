@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import { Alert, Button, InputNumber, Modal, Space, Spin, Switch, Tag } from 'antd';
+import { Alert, Button, InputNumber, Modal, Select, Space, Spin, Switch, Tag } from 'antd';
 import { useTranslation } from 'react-i18next';
 import {
   JQBED_CONFIG_FIELDS,
@@ -143,6 +143,19 @@ export default function JqbedAlgorithmConfigModal({
 
     if (field.kind === 'switch') {
       return <Switch checked={Number(value) === 1} onChange={(checked) => setValue(checked ? 1 : 0)} />;
+    }
+    if (field.kind === 'sensitivityMode') {
+      return (
+        <Select
+          value={Number(value)}
+          style={{ width: 190 }}
+          onChange={setValue}
+          options={[0, 1, 2, 3].map((mode) => ({
+            value: mode,
+            label: t(`jqbedAlgorithmConfig.sensitivityModes.${mode}`),
+          }))}
+        />
+      );
     }
     if (field.kind === 'pair' || field.kind === 'sittingPair') {
       return (

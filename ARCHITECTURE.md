@@ -281,6 +281,7 @@ graph TD
     - `server.js` 在授权状态下发时重新按 `licenseHelper.js` 的保存位置候选读取当前 `config.txt` 原始 `licenseKey`，包括启动校验中、有效、无效和锁定状态；`Date.jsx` 与 `LicensePortal.jsx` 收到后回填密钥输入框，确保旧版本本地密钥被新版本读取后能在访问密钥页显示，前端不再把 `localStorage` 作为首屏读取来源。
     - `licenseManager` 会在启动和密钥写入后启动运行期复检，持续广播 `licenseType`、`remainingDays`、`licenseChecking`、`licenseError` 或 `licenseLocked`；前端 `Date.jsx`、`LicensePortal.jsx`、`License.jsx` 和 `Home.jsx` 根据这些状态展示验证中、过期、暂停、吊销或时间异常锁定提示。
     - 密钥 `file` 字段继续用于授权范围、默认系统、模块配置和前端可选系统过滤；`server.js` 通过 `getSelectFlagFromLicense()` 下发 `selectFlag`，并用独立的 `activeSensorType` 下发后端当前实际运行系统。`Home.jsx` 将授权范围写入 `allowedTypes`，同时优先用 `activeSensorType` 设置前端默认展示，保证界面、串口协议和数据库系统一致。
+    - 运行中直接替换为默认系统不同的新密钥时，`server.js` 不再只改写 `file`；密钥入口与标题栏普通系统切换统一调用 `switchActiveDisplaySystem()`，关闭旧串口及民政传感器端口、清空自动重连端口号、重建目标系统数据库引用、停止历史回放并清空旧帧缓存，避免授权状态已切换而采集链路仍停留在旧展示系统。
 
 6. **密钥配置管理流程**
     - 用户启动应用默认进入 `/` 的 `Date.jsx` 密钥输入页；该页只在用户主动提交后展示错误弹窗，收到有效 `date` 且 `valid !== false` 后再进入 `/system`。从系统页返回输入密钥时，不会因为后端主动推送有效授权而自动跳走。
@@ -309,7 +310,7 @@ graph TD
 
 配置链路为 `Title` 图标/弹窗 → `Home` WebSocket → `jqbedAlgorithmProtocol` → `jqbedAlgorithmConfig` store → `server.js` 的 `jqbedTimer` → `pyWorker` → `getData(data, config=None)` → `onbed_filter.pyd`。该链路只服务持有效 `jqbed` 授权的实时“小床监测”；标题栏调节图标仅在 `matrixName === 'jqbed'` 时显示并位于通用设置齿轮左侧，回放时保留入口但禁用，提示“算法参数仅对实时监测生效”，后端同时以授权、活动系统和实时状态再次拒绝越界请求。
 
-- **字段模型**：共 18 项，分为四组。SOS：`sos_peak_threshold`、`points_threshold_in`、`sos_disable_area`、`min_sos_sequence`；基础参数：`threshold_factor`、`continuous_on_bed_duration_minutes`、`unlock_sitting_alarm_duration_minutes`；滤波与区域：`filter_switch`、`strel_switch`、`leave_bed_disable_area`、`small_object_size`；高级参数：`breath_detect_mode`、`sitting_area`、`body_movement_threshold`、`step_leavebed_trigger`、`edge_align_ratio`、`head_foot_area`、`breath_th`。前后端都要求字段完整且拒绝未知字段、非有限值和负数；整数/开关/二维区域另按各自约束校验，`sitting_area` 额外允许成对哨兵 `[255, 255]`。UI 按原生算法语义分别标注二元值：SOS/离床禁用区域为前/后，坐起区域为最小/最大，头脚区域为床头/床尾，只有小目标尺寸为行/列；`points_threshold_in` 明确表示 SOS 拍打点数。
+- **字段模型**：共 18 项，分为四组。SOS：`sos_peak_threshold`、`points_threshold_in`、`sos_disable_area`、`min_sos_sequence`；基础参数：`threshold_factor`、`continuous_on_bed_duration_minutes`、`unlock_sitting_alarm_duration_minutes`；滤波与区域：`filter_switch`、`strel_switch`、`leave_bed_disable_area`、`small_object_size`；高级参数：`breath_detect_mode`、`sitting_area`、`body_movement_threshold`、`step_leavebed_trigger`、`edge_align_ratio`、`sensitivity_threshold`、`breath_th`。新版原生算法删除二元输入 `head_foot_area`，新增整数模式 `sensitivity_threshold`：`0` 默认、`1` 宽松（严格参数）、`2` 标准、`3` 灵敏，用于联动三个内部阈值；实时返回预留字段第 5～8 位用于显示内部细节。前后端都要求字段完整并拒绝未知字段、非有限值和负数，灵敏度严格限制为整数 `0–3`；配置 envelope 升级至 v2，读取 v1 时保留其余公共参数、丢弃 `head_foot_area` 并补入灵敏度默认值。二维区域继续按各自约束校验，`sitting_area` 额外允许成对哨兵 `[255, 255]`。
 - **持久化与同步**：打包环境写入 `app.getPath('userData')/jqbed-algorithm-config.json`，开发环境写入项目根目录 `jqbed-algorithm-config.json`。store 先把版本化 envelope 写入同目录唯一 `.tmp` 临时文件，再以 rename 替换正式 JSON；只有落盘成功后才更新内存快照。保存或恢复默认会向所有 WebSocket 客户端广播后端快照，GET/保存/恢复均按 `requestId` 返回明确结果。`Home` 只有在主 WebSocket 真正完成 `send()` 时才报告成功，并把连接状态及重连 epoch 传给弹窗；弹窗为读取和变更分别设置 10 秒超时，断线会清理 pending，重连会重新 GET。发送失败、超时、拒绝和断线都保留 dirty 草稿，远端广播/重连快照也不会覆盖未保存输入。
 - **帧边界与系统隔离**：`jqbedTimer` 每次 Python 调用前读取一次深拷贝快照；已经发出的在途帧不被修改，下一帧开始使用新配置。`buildJqbedGetDataArgs()` 仅在活动系统为 `jqbed` 时附加 `config`；兼容定时器中的 `smallBed` 仍只发送 `{ data }`，`smallBedNoAlg` 与 `smallBed12B` 不进入此 Python 配置链路。原始矩阵、采集、回放、CSV 和历史数据通道不读取算法配置。
 - **Python 与告警边界**：`python/app/onbed_filter_example.py` 的 `getData(data, config=None)` 将合法 JSON 配置转换为 `onbed_filter.pyd` 的标量或 `float32` 二元数组输入。SOS 配置本身不直接触发或改写前端告警；只有 PYD 输出经 Python RPC 返回的 `sosflag` 继续进入现有 `Home`/`Aside` 告警路径。
@@ -790,11 +791,17 @@ graph TD
 | 2026-08-17 | Revise | 人体全身优化响应式居中与低功耗渲染 | 3D 相机按左右浮层之间的可见区域动态居中，窗口、DPI 与浏览器缩放时同步更新；渲染加入 1.25/1.0 自适应 DPR、30 FPS 活动帧率、静止按需绘制和隐藏页面暂停，不改变原始 1024 点、1120 点映射或热力方向。 |
 | 2026-08-17 | Revise | 人体全身优化物理居中与旋转轴修正 | 移除按浮层可见区域偏移相机的方案，窗口与DPI变化后始终恢复整屏物理中心投影；关闭 OrbitControls 平移，仅保留旋转和缩放，使全身视角旋转中心固定在人体中心。 |
 | 2026-08-17 | Revise | 人体全身优化视口根节点修正 | `HumanBodyOptimized` 通过 React Portal 直接挂载到 `document.body`，全屏根层不再继承 Home 或 Ant Design 容器的布局坐标系；Canvas 固定使用物理视口 `0,0 / 100vw / 100vh`，左右控制面板只作为覆盖层，不参与模型居中。 |
+| 2026-08-17 | Revise | 密钥直接替换展示系统链路修复 | 密钥写入后的默认系统变化与普通系统切换统一复用完整生命周期，关闭旧串口、重建数据库并清理回放和帧缓存，避免授权与实际采集系统不一致。 |
+| 2026-08-17 | Revise | 人体全身优化最近12点热力模式 | 保留原精确全点 Shader，并新增默认的最近12点顶点热力模式；屏幕可切换且版本化缓存，降低笔记本 GPU 像素循环负载。 |
+| 2026-08-17 | Revise | 小床算法灵敏度字段升级 | 适配新版 `onbed_filter`：删除 `head_foot_area`，新增 `sensitivity_threshold` 0～3 模式及三语说明，配置 v1 自动迁移至 v2。 |
 
 ## 9. 更新日志
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-17 | Revise | 修复缺陷 | 直接替换密钥并改变默认展示系统时执行与手动切换相同的串口、数据库和回放清理流程。 |
+| 2026-08-17 | Revise | 优化重构 | 人体全身热力新增“最近12点”顶点计算模式并作为默认值，保留“精确”全点模式供用户切换，两者选择写入本地渲染设置。 |
+| 2026-08-17 | Revise | 配置变更 | 新版小床 PYD 输入改为 `sensitivity_threshold` 0～3，移除 `head_foot_area`；配置持久化升级 v2 并迁移旧值。 |
 | 2026-08-14 | codex/jqbed-algorithm-config | 新增功能 | 同步 Jqbed Algorithm Configuration 架构：记录 18 项四分组字段、WebSocket/store/Python 数据流、原子落盘、下一帧快照、系统与回放隔离、SOS 输出边界及正式 runtime 打包路径。 |
 | 2026-08-14 | codex/jqbed-algorithm-config | 修复缺陷 | 补齐 jqbed 配置 WebSocket 的发送/超时/断线/重连状态机和 GET 明确回包，修正五种二元/拍打点数三语语义，并把 Windows Python runtime 收紧为 UTF-8、外部 PYD 哈希验证及 native health 必过。 |
 | 2026-08-17 | Revise | 优化重构 | 人体全身优化 Canvas 使用实际左右控制面板边界计算视觉中心并通过相机 view offset 响应窗口/DPI缩放；GPU 绘制限制为活动状态 30 FPS，静止只在数据/材质/交互变化时重绘，DPR 根据持续掉帧在 1.25 与 1.0 间切换，页面隐藏时暂停。 |
@@ -1251,6 +1258,7 @@ graph TD
 - 区域方向同样集中在 `humanBodyOrientation.js`，并明确拆分为 `model`（3D采样）与 `number`（2D数字）通道。两通道都让后背 `back`、左后腿 `backPantsLeft`、右后腿 `backPantsRight` 使用 `flipRow`；只有3D模型通道让 `frontPantsRight`（正面屏幕右侧前腿）、`backPantsLeft`（背面屏幕右侧后腿）、`rightArm`、`rightShoulder` 使用 `flipCol`，2D数字不继承这些列翻转。左右臂视角按交换后的实物左右定位；前腿数字块仍按 `frontPantsLeft`、`frontPantsRight` 顺序绘制，只把标题映射为“右前腿”“左前腿”。后腿视角则固定显示“左后腿 / 右后腿”两个标题槽位：左槽交叉读取 `backPantsRight`，右槽交叉读取 `backPantsLeft`，两块数据各自继续应用 2D `flipRow`；该后腿槽位交叉取数仅作用于场景内视角数字面板，3D 模型仍按独立 `model` 通道规则读取。所有转换都不改变原始1024路帧、点位三维坐标、点云线网、统计、回放或下载数据。
 - 渲染组件为 `client/src/components/video/HumanBodyOptimized.jsx`，模型路径为 `client/public/model/human3.glb`。组件使用浮点 `DataTexture` 向 Fragment Shader 传入三维点位和实时归一化压力值，并在模型表面执行 Gaussian falloff。
 - `skin` 模式界面只提供热力和水晶两种展示入口；线网、点云和叠加的底层几何资源仍保留，避免影响既有点位与拾取链，但不再暴露模式及点云颜色控件。扩散半径默认 `0.10`，滑杆及外部入口统一钳制在 `0.05–0.13`；热力强度、水晶透明度、配色、背景和模型颜色继续可调，模型色通过 `uModelColor` 同时进入热力与水晶 Shader 的基础色计算。`numoriginal` 模式继续复用 `HumanBodyRawData` 展示原始矩阵。
+- 热力计算提供“精确”和“最近12点”两种屏幕可选模式，并随版本 5 渲染设置持久化；原精确模式保留 Fragment Shader 对全部 1120 物理点的 Gaussian 累加。默认最近12点模式在模型加载时通过三维空间桶为每个顶点预计算最近 12 个物理传感点及距离，半径变化时只重算权重，每个压力帧在 CPU 汇总 12 点热值写入 `aHeat` 顶点属性，再由轻量 Fragment Shader 插值着色，避免每个屏幕像素循环 1120 点；原始帧、双线性物理点取值、配色和水晶 Fresnel 公式不变，用户可随时切回原精确效果。
 - 渲染设置面板支持折叠，`humanBodyRenderSettings.js` 使用独立版本化 `localStorage` 对模式、半径、强度、透明度、配色、背景色、模型色、折叠状态及全身旋转偏好逐字段校验和缓存；缓存缺失、字段非法、版本不兼容或存储访问失败时安全回退默认值，不缓存当前部位视角，也不覆盖 `Home.valueConfig` 的统计参数。
 - OrbitControls 只有在“全身”视角且缓存偏好为开启时自动旋转，右侧面板仅在全身视角显示“自动旋转 / 暂停旋转”按钮；进入胸、背、左右臂、前后腿视角会强制暂停，返回全身后恢复已缓存偏好。摄像机飞行、模型悬停和拖动属于临时暂停，交互结束后通过同一状态同步逻辑恢复，不再依赖延迟开启定时器。
 - `HumanBodyOptimized.jsx` 的 3D 根容器固定覆盖 `100vw × 100vh`，Three.js Canvas 随视口大小自适应，页面下方不再因父级未提供百分比高度而出现空白。场景右下角常驻 2D 数字面板：全身视角绘制未经渲染插值的原始 32×32；前胸/后背显示 6×10，左右臂显示肩部 6×3 加手臂 6×7，前腿/后腿分别显示左右 8×5。点击部位视角时，摄像机与数字矩阵同步切换；数字面板通过同一个 `sitData` 入口兼容实时和回放。

@@ -618,12 +618,12 @@ def create_default_inputs():
         'body_movement_threshold': 30.0,
         'step_leavebed_trigger': 50.0,
         'edge_align_ratio': 0.0,
+        'sensitivity_threshold': 0.0,
         # 数组参数
         'sos_disable_area': np.array([6.0, 10.0], dtype=np.float32),
         'sitting_area': np.array([0.0, 0.0], dtype=np.float32),
         'leave_bed_disable_area': np.array([0.0, 0.0], dtype=np.float32),
         'small_object_size': np.array([0.0, 0.0], dtype=np.float32),
-        'head_foot_area': np.array([0.0, 0.0], dtype=np.float32),
     }
     return inputs
 
@@ -633,9 +633,8 @@ ALGORITHM_PAIR_KEYS = {
     'sitting_area',
     'leave_bed_disable_area',
     'small_object_size',
-    'head_foot_area',
 }
-ALGORITHM_INTEGER_KEYS = {'min_sos_sequence', 'breath_detect_mode'}
+ALGORITHM_INTEGER_KEYS = {'min_sos_sequence', 'breath_detect_mode', 'sensitivity_threshold'}
 ALGORITHM_SWITCH_KEYS = {'filter_switch', 'strel_switch'}
 
 
@@ -670,6 +669,8 @@ def _normalize_algorithm_value(key, value):
         raise ValueError(f'invalid number: {key}')
     if key in ALGORITHM_INTEGER_KEYS and not number.is_integer():
         raise ValueError(f'invalid integer: {key}')
+    if key == 'sensitivity_threshold' and number not in (0.0, 1.0, 2.0, 3.0):
+        raise ValueError(f'invalid sensitivity mode: {key}')
     if key in ALGORITHM_SWITCH_KEYS and number not in (0.0, 1.0):
         raise ValueError(f'invalid switch: {key}')
     return number

@@ -22,10 +22,6 @@ const pairElementLabelKeys = Object.freeze({
     'jqbedAlgorithmConfig.minimum',
     'jqbedAlgorithmConfig.maximum',
   ]),
-  head_foot_area: Object.freeze([
-    'jqbedAlgorithmConfig.head',
-    'jqbedAlgorithmConfig.foot',
-  ]),
 });
 
 export const JQBED_CONFIG_FIELDS = Object.freeze([
@@ -45,7 +41,7 @@ export const JQBED_CONFIG_FIELDS = Object.freeze([
   { key: 'body_movement_threshold', group: 'advanced', kind: 'number' },
   { key: 'step_leavebed_trigger', group: 'advanced', kind: 'number' },
   { key: 'edge_align_ratio', group: 'advanced', kind: 'number' },
-  { key: 'head_foot_area', group: 'advanced', kind: 'pair' },
+  { key: 'sensitivity_threshold', group: 'advanced', kind: 'sensitivityMode' },
   { key: 'breath_th', group: 'advanced', kind: 'number' },
 ].map((field) => Object.freeze({
   ...field,
@@ -97,6 +93,10 @@ function normalizeFieldValue(field, value) {
   if (result.error) return result;
   if (field.kind === 'integer' && !Number.isInteger(result.value)) return { error: 'integer' };
   if (field.kind === 'switch' && result.value !== 0 && result.value !== 1) return { error: 'switch' };
+  if (field.kind === 'sensitivityMode'
+    && (!Number.isInteger(result.value) || result.value < 0 || result.value > 3)) {
+    return { error: 'sensitivityMode' };
+  }
   return result;
 }
 

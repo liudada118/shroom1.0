@@ -14,8 +14,9 @@ import {
 describe("human body render settings", () => {
   it("uses the compact rendering defaults", () => {
     expect(DEFAULT_HUMAN_BODY_RENDER_SETTINGS).toMatchObject({
-      version: 4,
+      version: 5,
       mode: "heatmap",
+      heatComputationMode: "nearest12",
       radius: 0.1,
       intensity: 0.8,
       opacity: 0.15,
@@ -69,14 +70,14 @@ describe("human body render settings", () => {
       version: 1,
       bgColor: "#0a0a0f",
       modelColor: "#6a7a8a",
-    })).toMatchObject({ version: 4, bgColor: "#afacac", modelColor: "#718096" });
+    })).toMatchObject({ version: 5, bgColor: "#afacac", modelColor: "#718096", heatComputationMode: "nearest12" });
 
     expect(normalizeHumanBodyRenderSettings({
       ...DEFAULT_HUMAN_BODY_RENDER_SETTINGS,
       version: 1,
       bgColor: "#10152b",
       modelColor: "#4a5568",
-    })).toMatchObject({ version: 4, bgColor: "#10152b", modelColor: "#4a5568" });
+    })).toMatchObject({ version: 5, bgColor: "#10152b", modelColor: "#4a5568", heatComputationMode: "nearest12" });
   });
 
   it("migrates the version two defaults to the latest colors", () => {
@@ -85,14 +86,14 @@ describe("human body render settings", () => {
       version: 2,
       bgColor: "#e6e6e6",
       modelColor: "#d2d6dc",
-    })).toMatchObject({ version: 4, bgColor: "#afacac", modelColor: "#718096" });
+    })).toMatchObject({ version: 5, bgColor: "#afacac", modelColor: "#718096", heatComputationMode: "nearest12" });
 
     expect(normalizeHumanBodyRenderSettings({
       ...DEFAULT_HUMAN_BODY_RENDER_SETTINGS,
       version: 2,
       bgColor: "#10152b",
       modelColor: "#4a5568",
-    })).toMatchObject({ version: 4, bgColor: "#10152b", modelColor: "#4a5568" });
+    })).toMatchObject({ version: 5, bgColor: "#10152b", modelColor: "#4a5568", heatComputationMode: "nearest12" });
   });
 
   it("migrates only the version three default radius", () => {
@@ -100,13 +101,22 @@ describe("human body render settings", () => {
       ...DEFAULT_HUMAN_BODY_RENDER_SETTINGS,
       version: 3,
       radius: 0.13,
-    })).toMatchObject({ version: 4, radius: 0.1 });
+    })).toMatchObject({ version: 5, radius: 0.1, heatComputationMode: "nearest12" });
 
     expect(normalizeHumanBodyRenderSettings({
       ...DEFAULT_HUMAN_BODY_RENDER_SETTINGS,
       version: 3,
       radius: 0.08,
-    })).toMatchObject({ version: 4, radius: 0.08 });
+    })).toMatchObject({ version: 5, radius: 0.08, heatComputationMode: "nearest12" });
+  });
+
+  it("migrates version four settings to the selectable nearest-12 mode", () => {
+    expect(normalizeHumanBodyRenderSettings({
+      ...DEFAULT_HUMAN_BODY_RENDER_SETTINGS,
+      version: 4,
+      heatComputationMode: undefined,
+      radius: 0.08,
+    })).toMatchObject({ version: 5, radius: 0.08, heatComputationMode: "nearest12" });
   });
 
   it("reads and writes one safe versioned localStorage object", () => {
@@ -164,6 +174,12 @@ describe("human body optimized settings UI source contract", () => {
     expect(source).not.toContain('["points", "点云"]');
     expect(source).not.toContain('["both", "叠加"]');
     expect(source).toMatch(/type="range" min="5" max="13" step="1"/);
+  });
+
+  it("offers exact and nearest-12 heat computation modes", () => {
+    expect(source).toContain('const HEAT_COMPUTATION_MODES = [');
+    expect(source).toContain('["exact", "精确"]');
+    expect(source).toContain('["nearest12", "最近12点"]');
   });
 
   it("offers an accessible collapsible settings panel without point-cloud color controls", () => {

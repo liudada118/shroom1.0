@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const JQBED_ALGORITHM_CONFIG_VERSION = 1;
+const JQBED_ALGORITHM_CONFIG_VERSION = 2;
 
 const DEFAULT_JQBED_ALGORITHM_VALUES = Object.freeze({
   threshold_factor: 0.0,
@@ -20,7 +20,7 @@ const DEFAULT_JQBED_ALGORITHM_VALUES = Object.freeze({
   body_movement_threshold: 30.0,
   step_leavebed_trigger: 50.0,
   edge_align_ratio: 0.0,
-  head_foot_area: Object.freeze([0.0, 0.0]),
+  sensitivity_threshold: 0.0,
   breath_th: 0.0,
 });
 
@@ -41,7 +41,7 @@ const FIELD_RULES = Object.freeze({
   body_movement_threshold: { kind: 'number' },
   step_leavebed_trigger: { kind: 'number' },
   edge_align_ratio: { kind: 'number' },
-  head_foot_area: { kind: 'pair' },
+  sensitivity_threshold: { kind: 'sensitivityMode' },
   breath_th: { kind: 'number' },
 });
 
@@ -106,6 +106,11 @@ function normalizeJqbedAlgorithmValues(values) {
       errors[key] = 'switch';
       continue;
     }
+    if (rule.kind === 'sensitivityMode'
+      && (!Number.isInteger(result.value) || result.value < 0 || result.value > 3)) {
+      errors[key] = 'sensitivityMode';
+      continue;
+    }
     normalized[key] = result.value;
   }
 
@@ -157,12 +162,22 @@ function createJqbedAlgorithmConfigStore({ filePath, fsImpl = fs, now = () => ne
     }
     try {
       const envelope = JSON.parse(fsImpl.readFileSync(filePath, 'utf8'));
-      if (!envelope || envelope.version !== JQBED_ALGORITHM_CONFIG_VERSION || typeof envelope.savedAt !== 'string') {
+      if (!envelope
+        || ![1, JQBED_ALGORITHM_CONFIG_VERSION].includes(envelope.version)
+        || typeof envelope.savedAt !== 'string') {
         throw new Error('incompatible configuration envelope');
       }
+      const values = envelope.version === 1
+        ? Object.fromEntries(Object.keys(DEFAULT_JQBED_ALGORITHM_VALUES).map((key) => [
+          key,
+          Object.hasOwn(envelope.values || {}, key)
+            ? envelope.values[key]
+            : DEFAULT_JQBED_ALGORITHM_VALUES[key],
+        ]))
+        : envelope.values;
       snapshot = {
         version: JQBED_ALGORITHM_CONFIG_VERSION,
-        values: normalizeJqbedAlgorithmValues(envelope.values),
+        values: normalizeJqbedAlgorithmValues(values),
         savedAt: envelope.savedAt,
       };
       return cloneEnvelope(snapshot);

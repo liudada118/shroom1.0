@@ -1,9 +1,10 @@
 export const HUMAN_BODY_RENDER_SETTINGS_KEY = "humanBodyOptimized.renderSettings.v1";
-export const HUMAN_BODY_RENDER_SETTINGS_VERSION = 4;
+export const HUMAN_BODY_RENDER_SETTINGS_VERSION = 5;
 
 export const DEFAULT_HUMAN_BODY_RENDER_SETTINGS = Object.freeze({
   version: HUMAN_BODY_RENDER_SETTINGS_VERSION,
   mode: "heatmap",
+  heatComputationMode: "nearest12",
   radius: 0.1,
   intensity: 0.8,
   opacity: 0.15,
@@ -51,6 +52,13 @@ export function normalizeHumanBodyRenderSettings(value) {
       radius: value.radius === 0.13 ? DEFAULT_HUMAN_BODY_RENDER_SETTINGS.radius : value.radius,
     };
   }
+  if (value?.version === 4) {
+    value = {
+      ...value,
+      version: HUMAN_BODY_RENDER_SETTINGS_VERSION,
+      heatComputationMode: "nearest12",
+    };
+  }
   if (!value || value.version !== HUMAN_BODY_RENDER_SETTINGS_VERSION) {
     return { ...DEFAULT_HUMAN_BODY_RENDER_SETTINGS };
   }
@@ -60,6 +68,9 @@ export function normalizeHumanBodyRenderSettings(value) {
     mode: ["heatmap", "crystal"].includes(value.mode)
       ? value.mode
       : DEFAULT_HUMAN_BODY_RENDER_SETTINGS.mode,
+    heatComputationMode: ["exact", "nearest12"].includes(value.heatComputationMode)
+      ? value.heatComputationMode
+      : DEFAULT_HUMAN_BODY_RENDER_SETTINGS.heatComputationMode,
     radius: clampHumanBodyRadius(value.radius),
     intensity: finiteInRange(value.intensity, 0.5, 5, DEFAULT_HUMAN_BODY_RENDER_SETTINGS.intensity),
     opacity: finiteInRange(value.opacity, 0.05, 0.8, DEFAULT_HUMAN_BODY_RENDER_SETTINGS.opacity),

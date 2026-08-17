@@ -16,6 +16,8 @@ test('normalizes all 18 jqbed algorithm values without sharing arrays', () => {
   assert.equal(Object.keys(normalized).length, 18);
   assert.deepEqual(normalized.sos_disable_area, [6, 10]);
   assert.notEqual(normalized.sos_disable_area, DEFAULT_JQBED_ALGORITHM_VALUES.sos_disable_area);
+  assert.equal(normalized.sensitivity_threshold, 0);
+  assert.equal(Object.hasOwn(normalized, 'head_foot_area'), false);
 });
 
 test('preserves supported 0,0 and 255,255 sentinel pairs', () => {
@@ -41,6 +43,19 @@ test('rejects the whole payload for unknown, missing, non-finite or invalid fiel
       && error.errors.body_movement_threshold === 'finite'
       && error.errors.sitting_area === 'sentinel',
   );
+});
+
+test('accepts only sensitivity modes 0 through 3', () => {
+  for (const value of [0, 1, 2, 3]) {
+    const values = structuredClone(DEFAULT_JQBED_ALGORITHM_VALUES);
+    values.sensitivity_threshold = value;
+    assert.equal(normalizeJqbedAlgorithmValues(values).sensitivity_threshold, value);
+  }
+  for (const value of [-1, 1.5, 4]) {
+    const values = structuredClone(DEFAULT_JQBED_ALGORITHM_VALUES);
+    values.sensitivity_threshold = value;
+    assert.throws(() => normalizeJqbedAlgorithmValues(values), JqbedAlgorithmConfigValidationError);
+  }
 });
 
 test('rejects an own enumerable __proto__ key as unknown', () => {
@@ -100,7 +115,7 @@ test('loads defaults when the file is missing', () => {
   const filePath = path.join(directory, 'missing.json');
   try {
     const snapshot = createJqbedAlgorithmConfigStore({ filePath }).load();
-    assert.equal(snapshot.version, 1);
+    assert.equal(snapshot.version, 2);
     assert.deepEqual(snapshot.values, DEFAULT_JQBED_ALGORITHM_VALUES);
     assert.equal(snapshot.savedAt, null);
   } finally {
@@ -120,13 +135,40 @@ test('logs and falls back for corrupt or incompatible persisted data', () => {
     }).load();
     assert.deepEqual(corrupt.values, DEFAULT_JQBED_ALGORITHM_VALUES);
 
-    fs.writeFileSync(filePath, JSON.stringify({ version: 2, values: DEFAULT_JQBED_ALGORITHM_VALUES, savedAt: 'x' }), 'utf8');
+    fs.writeFileSync(filePath, JSON.stringify({ version: 999, values: DEFAULT_JQBED_ALGORITHM_VALUES, savedAt: 'x' }), 'utf8');
     const incompatible = createJqbedAlgorithmConfigStore({
       filePath,
       logger: { warn: (message) => messages.push(message) },
     }).load();
     assert.deepEqual(incompatible.values, DEFAULT_JQBED_ALGORITHM_VALUES);
     assert.equal(messages.length, 2);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('migrates version 1 by preserving shared values and replacing head_foot_area', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'jqbed-config-'));
+  const filePath = path.join(directory, 'jqbed-algorithm-config.json');
+  try {
+    const legacyValues = {
+      ...structuredClone(DEFAULT_JQBED_ALGORITHM_VALUES),
+      threshold_factor: 7,
+      head_foot_area: [3, 4],
+    };
+    delete legacyValues.sensitivity_threshold;
+    fs.writeFileSync(filePath, JSON.stringify({
+      version: 1,
+      values: legacyValues,
+      savedAt: '2026-08-14T08:00:00.000Z',
+    }), 'utf8');
+
+    const migrated = createJqbedAlgorithmConfigStore({ filePath }).load();
+
+    assert.equal(migrated.version, 2);
+    assert.equal(migrated.values.threshold_factor, 7);
+    assert.equal(migrated.values.sensitivity_threshold, 0);
+    assert.equal(Object.hasOwn(migrated.values, 'head_foot_area'), false);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

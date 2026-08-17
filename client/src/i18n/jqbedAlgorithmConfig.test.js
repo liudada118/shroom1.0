@@ -6,7 +6,7 @@ const fieldKeys = [
   'threshold_factor', 'continuous_on_bed_duration_minutes', 'unlock_sitting_alarm_duration_minutes',
   'filter_switch', 'strel_switch', 'leave_bed_disable_area', 'small_object_size',
   'breath_detect_mode', 'sitting_area', 'body_movement_threshold', 'step_leavebed_trigger',
-  'edge_align_ratio', 'head_foot_area', 'breath_th',
+  'edge_align_ratio', 'sensitivity_threshold', 'breath_th',
 ];
 
 describe('jqbed algorithm configuration translations', () => {
@@ -24,12 +24,13 @@ describe('jqbed algorithm configuration translations', () => {
         expect(copy.fields[key].label).toEqual(expect.any(String));
         expect(copy.fields[key].help).toEqual(expect.any(String));
       });
+      expect(Object.keys(copy.sensitivityModes)).toEqual(['0', '1', '2', '3']);
       [
         'row', 'column', 'pydWaiting', 'pydReady', 'pydError', 'lastSavedAt', 'neverSaved',
         'restoreConfirmation', 'restore', 'cancel', 'saveAndApply', 'saving', 'success',
         'loadFailure',
       ].forEach((key) => expect(copy[key]).toEqual(expect.any(String)));
-      ['number', 'finite', 'nonnegative', 'integer', 'switch', 'pair', 'range', 'sentinel', 'missing', 'unknown']
+      ['number', 'finite', 'nonnegative', 'integer', 'switch', 'sensitivityMode', 'pair', 'range', 'sentinel', 'missing', 'unknown']
         .forEach((key) => expect(copy.errors[key]).toEqual(expect.any(String)));
       ['unavailable', 'saveFailed'].forEach((key) => expect(copy.backend[key]).toEqual(expect.any(String)));
     });

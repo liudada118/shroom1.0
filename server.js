@@ -3398,6 +3398,60 @@ function broadcastJson(payload) {
   });
 }
 
+function switchActiveDisplaySystem(receiveFile, reason = 'file switch') {
+  if (typeof receiveFile !== 'string' || !receiveFile.trim()) return false;
+  const previousFile = file;
+  backClose = true;
+  sitClose = true;
+  headClose = true;
+  sensorClose = true;
+  com = undefined;
+  com1 = undefined;
+  comhead = undefined;
+  comSensor = undefined;
+
+  if (port1?.isOpen) {
+    port1.close((err) => {
+      if (err) logger.warn(`port1 close error on ${reason}:`, err);
+    });
+    broadcastJson({
+      sitData: previousFile === 'bigBed'
+        ? new Array(2048).fill(0)
+        : new Array(sitTotal).fill(0),
+    });
+  }
+  if (port2?.isOpen) {
+    port2.close((err) => {
+      if (err) logger.warn(`port2 close error on ${reason}:`, err);
+    });
+    broadcastJson({ backData: new Array(backTotal).fill(0) });
+  }
+  if (portHead?.isOpen) {
+    portHead.close((err) => {
+      if (err) logger.warn(`portHead close error on ${reason}:`, err);
+    });
+    broadcastJson({ headData: new Array(100).fill(0) });
+  }
+  closeMinzhenSensorPort(reason);
+
+  file = receiveFile.trim();
+  Object.keys(petCareSystems).forEach(resetPetCareRuntime);
+  baudRate = getSensorBaudRate(file);
+  const nextDb = initDb(file);
+  db = nextDb.db;
+  db1 = nextDb.db1;
+  db2 = nextDb.db2;
+
+  stopPlaybackTimer();
+  nowIndex = 0;
+  localData = [];
+  localDataBack = [];
+  localDataHead = [];
+  indexArr = [0, 0];
+  logger.info(`[DisplaySystem] switched ${previousFile} -> ${file} (${reason})`);
+  return true;
+}
+
 function setJqbedAlgorithmStatus(nextStatus) {
   const serialized = JSON.stringify(nextStatus);
   if (serialized === JSON.stringify(jqbedAlgorithmStatus)) return;
@@ -3652,9 +3706,8 @@ module.exports = {
             licenseFile = peeked.payload.file || null;
             selectFlag = getSelectFlagFromLicense(peeked.payload.file);
             const nextFile = getDefaultFileFromLicense(peeked.payload.file);
-            if (nextFile) {
-              file = nextFile;
-              Object.keys(petCareSystems).forEach(resetPetCareRuntime);
+            if (nextFile && nextFile !== file) {
+              switchActiveDisplaySystem(nextFile, 'license replacement');
             }
             baudRate = getSensorBaudRate(file);
 
@@ -3785,83 +3838,7 @@ module.exports = {
           }
 
           if (JSON.parse(message).file != null) {
-            backClose = true
-            sitClose = true
-            headClose = true
-            sensorClose = true
-            // 清除 com 变量，防止自动重连定时器用旧值重新打开串口
-            com = undefined;
-            com1 = undefined;
-            comhead = undefined;
-            comSensor = undefined;
-            if (port1?.isOpen) {
-              port1.close((err) => {
-                if (err) logger.warn('port1 close error on file switch:', err);
-              });
-
-              const jsonData = JSON.stringify({
-                sitData:
-                  file == "bigBed"
-                    ? new Array(2048).fill(0)
-                    : new Array(sitTotal).fill(0),
-              });
-
-              server.clients.forEach(function each(client) {
-                if (client.readyState === WebSocket.OPEN) {
-                  client.send(jsonData);
-                }
-              });
-            }
-            if (port2?.isOpen) {
-              port2.close((err) => {
-                if (err) logger.warn('port2 close error on file switch:', err);
-              });
-              const jsonData = JSON.stringify({
-                backData: new Array(backTotal).fill(0),
-              });
-
-              server.clients.forEach(function each(client) {
-                if (client.readyState === WebSocket.OPEN) {
-                  client.send(jsonData);
-                }
-              });
-            }
-
-            if (portHead?.isOpen) {
-              portHead.close((err) => {
-                if (err) logger.warn('portHead close error on file switch:', err);
-              });
-              const jsonData = JSON.stringify({
-                headData: new Array(100).fill(0),
-              });
-
-              server.clients.forEach(function each(client) {
-                if (client.readyState === WebSocket.OPEN) {
-                  client.send(jsonData);
-                }
-              });
-            }
-            closeMinzhenSensorPort('file switch');
-            const receiveFile = JSON.parse(message).file
-            // db = new sqlite3.Database(`${filePath}/${receiveFile}.db`);
-            file = receiveFile;
-            Object.keys(petCareSystems).forEach(resetPetCareRuntime);
-
-            baudRate = getSensorBaudRate(receiveFile);
-
-            const dbObj = initDb(file)
-            db = dbObj.db
-            db1 = dbObj.db1
-            db2 = dbObj.db2
-
-            // 切换 file 时重置回放状态
-            stopPlaybackTimer();
-            nowIndex = 0;
-            localData = [];
-            localDataBack = [];
-            localDataHead = [];
-            indexArr = [0, 0];
-
+            switchActiveDisplaySystem(JSON.parse(message).file, 'file switch');
           }
 
           if (JSON.parse(message).baudRate != null) {
