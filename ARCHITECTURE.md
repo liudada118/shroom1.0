@@ -789,6 +789,7 @@ graph TD
 | 2026-08-14 | codex/jqbed-algorithm-config | 小床算法配置审查修复 | WebSocket 读写新增实际发送结果、读取 requestId、10 秒超时、断线失败与重连刷新，并保护 dirty 草稿；二元字段改用原生参数含义；Windows runtime 改为外部 PYD SHA-256 注入、自动 UTF-8 和原生导入 health 门禁。 |
 | 2026-08-17 | Revise | 人体全身优化响应式居中与低功耗渲染 | 3D 相机按左右浮层之间的可见区域动态居中，窗口、DPI 与浏览器缩放时同步更新；渲染加入 1.25/1.0 自适应 DPR、30 FPS 活动帧率、静止按需绘制和隐藏页面暂停，不改变原始 1024 点、1120 点映射或热力方向。 |
 | 2026-08-17 | Revise | 人体全身优化物理居中与旋转轴修正 | 移除按浮层可见区域偏移相机的方案，窗口与DPI变化后始终恢复整屏物理中心投影；关闭 OrbitControls 平移，仅保留旋转和缩放，使全身视角旋转中心固定在人体中心。 |
+| 2026-08-17 | Revise | 人体全身优化视口根节点修正 | `HumanBodyOptimized` 通过 React Portal 直接挂载到 `document.body`，全屏根层不再继承 Home 或 Ant Design 容器的布局坐标系；Canvas 固定使用物理视口 `0,0 / 100vw / 100vh`，左右控制面板只作为覆盖层，不参与模型居中。 |
 
 ## 9. 更新日志
 
@@ -798,6 +799,7 @@ graph TD
 | 2026-08-14 | codex/jqbed-algorithm-config | 修复缺陷 | 补齐 jqbed 配置 WebSocket 的发送/超时/断线/重连状态机和 GET 明确回包，修正五种二元/拍打点数三语语义，并把 Windows Python runtime 收紧为 UTF-8、外部 PYD 哈希验证及 native health 必过。 |
 | 2026-08-17 | Revise | 优化重构 | 人体全身优化 Canvas 使用实际左右控制面板边界计算视觉中心并通过相机 view offset 响应窗口/DPI缩放；GPU 绘制限制为活动状态 30 FPS，静止只在数据/材质/交互变化时重绘，DPR 根据持续掉帧在 1.25 与 1.0 间切换，页面隐藏时暂停。 |
 | 2026-08-17 | Revise | 修复缺陷 | 撤销左右浮层参与3D中心计算，ResizeObserver、window 与 visualViewport 缩放统一清除 camera view offset 并按全屏宽高更新投影；OrbitControls 禁止 pan，目标点保持人体中心，避免平移后自动旋转轴漂移。 |
+| 2026-08-17 | Revise | 修复缺陷 | 人体全身优化全屏层改由 React Portal 挂载到 `document.body`，隔离页面祖先布局及堆叠上下文对 fixed 坐标的影响，保证模型投影中心始终对应屏幕物理中心；数据、部位视角、2D数字与悬停链路不变。 |
 | 2026-08-14 | sqliteOpti | 修复缺陷 | 修复授权分支合并覆盖业务代码的问题：12B实时、统计、采集、回放和CSV统一使用1位小数kPa；历史新帧不重复标定，旧ADC帧兼容转换一次。 |
 | 2026-08-14 | sqliteOpti | 优化重构 | SQLite采集按200行或250ms批量落库并在停止/退出前刷新；CSV一次性和流式导出统一写入UTF-8 BOM，`matCol` 方向与标签由纯函数回归测试锁定。 |
 | 2026-08-10 | Codex | 配置变更 | 根据人工修订的《JQTOOLS中日翻译确认表》更新 `client/src/i18n/ja.js` 中 104 项日文译文，保留 4 项空白待确认译文及全部 `{{...}}` 模板占位符。 |
@@ -1252,7 +1254,7 @@ graph TD
 - 渲染设置面板支持折叠，`humanBodyRenderSettings.js` 使用独立版本化 `localStorage` 对模式、半径、强度、透明度、配色、背景色、模型色、折叠状态及全身旋转偏好逐字段校验和缓存；缓存缺失、字段非法、版本不兼容或存储访问失败时安全回退默认值，不缓存当前部位视角，也不覆盖 `Home.valueConfig` 的统计参数。
 - OrbitControls 只有在“全身”视角且缓存偏好为开启时自动旋转，右侧面板仅在全身视角显示“自动旋转 / 暂停旋转”按钮；进入胸、背、左右臂、前后腿视角会强制暂停，返回全身后恢复已缓存偏好。摄像机飞行、模型悬停和拖动属于临时暂停，交互结束后通过同一状态同步逻辑恢复，不再依赖延迟开启定时器。
 - `HumanBodyOptimized.jsx` 的 3D 根容器固定覆盖 `100vw × 100vh`，Three.js Canvas 随视口大小自适应，页面下方不再因父级未提供百分比高度而出现空白。场景右下角常驻 2D 数字面板：全身视角绘制未经渲染插值的原始 32×32；前胸/后背显示 6×10，左右臂显示肩部 6×3 加手臂 6×7，前腿/后腿分别显示左右 8×5。点击部位视角时，摄像机与数字矩阵同步切换；数字面板通过同一个 `sitData` 入口兼容实时和回放。
-- 响应式居中由 `HumanBodyOptimized.jsx` 在 ResizeObserver、`window.resize` 与 `visualViewport.resize` 中统一执行：每次缩放都清除 PerspectiveCamera view offset，并按完整 Canvas 宽高更新投影，因此全身视角目标点 `(0, 4, 0)` 始终落在屏幕物理中心。OrbitControls 关闭平移，只保留旋转与缩放，用户交互不会再修改旋转目标；该逻辑不平移人体模型、1120 个传感点或 Raycaster 世界坐标。
+- 响应式居中由 `HumanBodyOptimized.jsx` 通过 React Portal 将全屏根层直接挂载到 `document.body`，使 Canvas 的固定坐标与 `100vw × 100vh` 始终以物理视口为基准，不继承 Home、Ant Design 或左右面板的布局坐标。ResizeObserver、`window.resize` 与 `visualViewport.resize` 每次缩放都清除 PerspectiveCamera view offset，并按完整 Canvas 宽高更新投影，因此全身视角目标点 `(0, 4, 0)` 始终落在屏幕物理中心。OrbitControls 关闭平移，只保留旋转与缩放，用户交互不会再修改旋转目标；该逻辑不平移人体模型、1120 个传感点或 Raycaster 世界坐标。
 - 低功耗渲染默认将设备 DPR 钳制到 `1.25`，连续 10 个活动帧慢于约 24 FPS 时降至 `1.0`，稳定约 6 秒后恢复；自动旋转、拖动、阻尼和视角飞行最多按 30 FPS 绘制，静止时仅在新压力帧、材质/颜色、模式、相机或尺寸变化后绘制一次，`document.hidden` 时暂停。原始 1024 点接收和 DataTexture 更新频率不变，优化只减少 WebGL 像素与重复绘制开销。
 - 3D Canvas 的 `pointermove` 先换算标准设备坐标，再使用仅包含人体模型 Mesh 的 `THREE.Raycaster` 获取世界坐标交点；交点从全部 1120 个物理传感器中选择最近点，并仅在相同 `part` 与 `placementSide` 内构造 3×3 行列邻域，因此点云、线网及左右腿镜像点不会混入拾取或邻域。
 - 悬停面板展示的数值为每个物理传感器采样权重计算的 `Σ(raw×weight)` 原始值，不使用 Shader 专属的 `×10` 强度放大；不存在的邻域单元显示破折号，中心单元高亮，标题显示区域及一基行列 `R/C`。最近点采用严格 `0.25` 最大距离（距离不大于 `0.25` 才有效），同一传感器稳定 `150ms` 后显示；面板以首次稳定命中的指针位置为锚点、偏移 `18px` 并钳制在视口内，同一传感器内移动时不追逐指针，实时帧仅在固定锚点原位刷新数值。

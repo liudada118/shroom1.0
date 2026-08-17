@@ -8,6 +8,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { HUMAN_BODY_SENSOR_PARTS } from "./humanBody";
 import { HUMAN_BODY_NUMBER_PART_LABELS } from "./humanBodyNumberLabels";
 import { getHumanBodyNumberViewSlots } from "./humanBodyNumberViews";
@@ -1143,8 +1144,11 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
     viewAutoRotateRef.current?.sync();
   };
 
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 0, width: "100vw", height: "100vh", overflow: "hidden", background: bgColor }}>
+  const viewportContent = (
+    <div
+      data-human-body-viewport="true"
+      style={{ position: "fixed", inset: 0, zIndex: 0, width: "100vw", height: "100vh", overflow: "hidden", background: bgColor }}
+    >
       <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />
 
       <HoverDataPanel ref={hoverPanelRef} sensorsRef={sensorsRef} />
@@ -1218,6 +1222,10 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
       <RegionNumberPanel ref={numberPanelRef} activeRegion={activeRegion} />
     </div>
   );
+
+  return typeof document === "undefined"
+    ? viewportContent
+    : createPortal(viewportContent, document.body);
 });
 
 HumanBodyOptimized.displayName = "HumanBodyOptimized";

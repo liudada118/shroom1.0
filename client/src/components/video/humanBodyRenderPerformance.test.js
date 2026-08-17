@@ -66,6 +66,12 @@ describe("human body optimized performance wiring", () => {
     expect(source).toContain('window.visualViewport?.addEventListener("resize", resize)');
   });
 
+  it("mounts the full-screen renderer at the document body viewport root", () => {
+    expect(source).toContain('import { createPortal } from "react-dom"');
+    expect(source).toContain('createPortal(viewportContent, document.body)');
+    expect(source).toContain('data-human-body-viewport="true"');
+  });
+
   it("uses adaptive DPR, dirty rendering, 30 fps activity and hidden-page suspension", () => {
     expect(source).toContain("getHumanBodyRenderPixelRatio(window.devicePixelRatio, qualityState.tier)");
     expect(source).toContain("shouldRenderHumanBodyFrame({");
