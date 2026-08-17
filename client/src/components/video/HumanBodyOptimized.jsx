@@ -27,6 +27,13 @@ import {
   readHumanBodyRenderSettings,
   writeHumanBodyRenderSettings,
 } from "./humanBodyRenderSettings";
+import {
+  getHumanBodyRenderPixelRatio,
+  getHumanBodyViewOffsetX,
+  getHumanBodyVisualCenter,
+  shouldRenderHumanBodyFrame,
+  updateHumanBodyQualityState,
+} from "./humanBodyRenderPerformance";
 
 const MODEL_URL = "./model/human3.glb";
 const SENSOR_LAYOUT_URL = "./model/sensor_canvas_positions.json";
@@ -494,6 +501,8 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
   }
   const initialSettings = initialSettingsRef.current;
   const containerRef = useRef(null);
+  const settingsPanelRef = useRef(null);
+  const regionPanelRef = useRef(null);
   const sceneRef = useRef(null);
   const cameraRef = useRef(null);
   const controlsRef = useRef(null);
@@ -515,6 +524,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
   const overviewAutoRotateRef = useRef(initialSettings.overviewAutoRotate);
   const flightRef = useRef(null);
   const viewAutoRotateRef = useRef(null);
+  const invalidateRenderRef = useRef(() => {});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [sensorCount, setSensorCount] = useState(0);
@@ -544,6 +554,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
       data[index * 4 + 3] = scaledValue >= filter ? Math.min(1, scaledValue / max) : 0;
     });
     texture.needsUpdate = true;
+    invalidateRenderRef.current();
   }, []);
 
   useImperativeHandle(forwardedRef, () => ({
@@ -616,7 +627,11 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
     cameraRef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    let qualityState = { tier: "balanced", slowFrames: 0, stableFrames: 0 };
+    let appliedPixelRatio = getHumanBodyRenderPixelRatio(window.devicePixelRatio, qualityState.tier);
+    let renderWidth = 0;
+    let renderHeight = 0;
+    renderer.setPixelRatio(appliedPixelRatio);
     renderer.outputEncoding = THREE.sRGBEncoding;
     container.appendChild(renderer.domElement);
 
@@ -629,7 +644,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
       overviewAutoRotate: overviewAutoRotateRef.current,
       temporarilySuspended: false,
     });
-    controls.autoRotateSpeed = 0.7;
+    controls.autoRotateSpeed = 1.4;
     controlsRef.current = controls;
 
     scene.add(new THREE.HemisphereLight(0xd8efff, 0x172033, 0.7));
@@ -646,9 +661,18 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
     let candidateSensor = null;
     let candidatePointer = null;
     let temporarilySuspended = false;
+    let renderDirty = true;
+    let pageVisible = !document.hidden;
+    let lastRenderAt = 0;
+    let interactionUntil = 0;
     const raycaster = new THREE.Raycaster();
     const pointerNdc = new THREE.Vector2();
     const canvas = renderer.domElement;
+
+    const invalidateRender = () => {
+      renderDirty = true;
+    };
+    invalidateRenderRef.current = invalidateRender;
 
     const cancelHoverTimer = () => {
       if (!hoverTimerId) return;
@@ -669,11 +693,13 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
         overviewAutoRotate: overviewAutoRotateRef.current,
         temporarilySuspended: temporarilySuspended || dragging || Boolean(flightRef.current),
       });
+      invalidateRender();
     };
 
     const pauseAutoRotate = () => {
       temporarilySuspended = true;
       controls.autoRotate = false;
+      invalidateRender();
     };
 
     const restoreAutoRotate = () => {
@@ -795,31 +821,76 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
 
     const handleControlsStart = () => {
       dragging = true;
+      interactionUntil = performance.now() + 350;
       clearHover({ cancelPointer: true, restoreRotation: false });
       pauseAutoRotate();
     };
 
     const handleControlsEnd = () => {
       dragging = false;
+      interactionUntil = performance.now() + 350;
       clearHover({ cancelPointer: true });
+      invalidateRender();
+    };
+
+    const handleControlsChange = () => {
+      interactionUntil = performance.now() + 350;
+      invalidateRender();
     };
 
     canvas.addEventListener("pointermove", handlePointerMove);
     canvas.addEventListener("pointerleave", handlePointerLeave);
     controls.addEventListener("start", handleControlsStart);
     controls.addEventListener("end", handleControlsEnd);
+    controls.addEventListener("change", handleControlsChange);
 
     let animationId = 0;
     const resize = () => {
       const width = Math.max(1, container.clientWidth);
       const height = Math.max(1, container.clientHeight);
-      renderer.setSize(width, height, false);
+      const nextPixelRatio = getHumanBodyRenderPixelRatio(window.devicePixelRatio, qualityState.tier);
+      if (Math.abs(nextPixelRatio - appliedPixelRatio) > 0.001) {
+        appliedPixelRatio = nextPixelRatio;
+        renderer.setPixelRatio(appliedPixelRatio);
+        renderWidth = 0;
+        renderHeight = 0;
+      }
+      if (width !== renderWidth || height !== renderHeight) {
+        renderer.setSize(width, height, false);
+        renderWidth = width;
+        renderHeight = height;
+      }
       camera.aspect = width / height;
-      camera.updateProjectionMatrix();
+      camera.clearViewOffset();
+      const visualCenter = getHumanBodyVisualCenter({
+        width,
+        leftPanelRight: settingsPanelRef.current?.getBoundingClientRect?.().right,
+        rightPanelLeft: regionPanelRef.current?.getBoundingClientRect?.().left,
+      });
+      const viewOffsetX = getHumanBodyViewOffsetX(width, visualCenter);
+      if (Math.abs(viewOffsetX) > 0.5) {
+        camera.setViewOffset(width, height, viewOffsetX, 0, width, height);
+      } else {
+        camera.updateProjectionMatrix();
+      }
+      invalidateRender();
     };
     resize();
     const resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(container);
+    if (settingsPanelRef.current) resizeObserver.observe(settingsPanelRef.current);
+    if (regionPanelRef.current) resizeObserver.observe(regionPanelRef.current);
+    window.addEventListener("resize", resize);
+    window.visualViewport?.addEventListener("resize", resize);
+
+    const handleVisibilityChange = () => {
+      pageVisible = !document.hidden;
+      if (pageVisible) {
+        lastRenderAt = 0;
+        invalidateRender();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     const modelPromise = new Promise((resolve, reject) => {
       new GLTFLoader().load(MODEL_URL, resolve, undefined, reject);
@@ -945,11 +1016,24 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
         setLoading(false);
       });
 
-    const animate = () => {
+    const animate = (now) => {
       animationId = requestAnimationFrame(animate);
+      const continuous = Boolean(flightRef.current)
+        || controls.autoRotate
+        || dragging
+        || now < interactionUntil;
+      if (!shouldRenderHumanBodyFrame({
+        visible: pageVisible,
+        dirty: renderDirty,
+        continuous,
+        now,
+        lastRenderAt,
+      })) return;
+
+      const previousRenderAt = lastRenderAt;
       const flight = flightRef.current;
       if (flight) {
-        const progress = Math.min(1, (performance.now() - flight.startedAt) / flight.duration);
+        const progress = Math.min(1, (now - flight.startedAt) / flight.duration);
         const eased = easeInOutCubic(progress);
         camera.position.lerpVectors(flight.startPosition, flight.endPosition, eased);
         controls.target.lerpVectors(flight.startTarget, flight.endTarget, eased);
@@ -960,8 +1044,17 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
       }
       controls.update();
       renderer.render(scene, camera);
+      renderDirty = false;
+      lastRenderAt = now;
+
+      if (continuous && previousRenderAt > 0) {
+        const nextQualityState = updateHumanBodyQualityState(qualityState, now - previousRenderAt);
+        const tierChanged = nextQualityState.tier !== qualityState.tier;
+        qualityState = nextQualityState;
+        if (tierChanged) resize();
+      }
     };
-    animate();
+    animationId = requestAnimationFrame(animate);
 
     return () => {
       disposed = true;
@@ -970,9 +1063,14 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
       canvas.removeEventListener("pointerleave", handlePointerLeave);
       controls.removeEventListener("start", handleControlsStart);
       controls.removeEventListener("end", handleControlsEnd);
+      controls.removeEventListener("change", handleControlsChange);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("resize", resize);
+      window.visualViewport?.removeEventListener("resize", resize);
       clearHover({ cancelPointer: true });
       cancelAnimationFrame(animationId);
       resizeObserver.disconnect();
+      invalidateRenderRef.current = () => {};
       controls.dispose();
       renderer.dispose();
       materialsRef.current.forEach((material) => material.dispose());
@@ -988,6 +1086,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
 
   useEffect(() => {
     sceneRef.current?.background?.set(bgColor);
+    invalidateRenderRef.current();
   }, [bgColor]);
 
   useEffect(() => {
@@ -1002,6 +1101,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
       material.depthWrite = mode !== "crystal";
       material.needsUpdate = true;
     });
+    invalidateRenderRef.current();
   }, [radius, intensity, opacity, colorScheme, mode, modelColor, loading]);
 
   useEffect(() => {
@@ -1014,16 +1114,19 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
         ? ghostMaterialsRef.current[index]
         : materialsRef.current[index];
     });
+    invalidateRenderRef.current();
   }, [mode, loading]);
 
   useEffect(() => {
     materialsRef.current.forEach((material) => material.uniforms.uModelColor.value.set(modelColor));
     ghostMaterialsRef.current.forEach((material) => material.color.set(modelColor));
+    invalidateRenderRef.current();
   }, [modelColor, loading]);
 
   useEffect(() => {
     pointCloudRef.current?.material?.color?.set(accentColor);
     lineGridRef.current?.material?.color?.set(accentColor);
+    invalidateRenderRef.current();
   }, [accentColor]);
 
   const flyTo = (regionKey) => {
@@ -1043,6 +1146,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
       startedAt: performance.now(),
       duration: 1200,
     };
+    invalidateRenderRef.current();
   };
 
   const resetView = () => flyTo("overview");
@@ -1066,7 +1170,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
         </div>
       )}
 
-      <div style={{ ...panelStyle, top: 72, left: "max(250px, 19vw)", width: 222 }}>
+      <div ref={settingsPanelRef} style={{ ...panelStyle, top: 72, left: "max(250px, 19vw)", width: 222 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <div style={{ fontSize: "14px", fontWeight: 700, letterSpacing: "0.08em" }}>人体全身优化</div>
           <button
@@ -1111,7 +1215,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
         )}
       </div>
 
-      <div style={{ ...panelStyle, top: 72, right: 14, width: 126 }}>
+      <div ref={regionPanelRef} style={{ ...panelStyle, top: 72, right: 14, width: 126 }}>
         <div style={{ fontSize: "11px", color: "#8193a5", marginBottom: 7 }}>部位视角</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
           {Object.entries(REGION_VIEWS).map(([key, view]) => (
