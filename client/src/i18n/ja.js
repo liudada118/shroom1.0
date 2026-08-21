@@ -363,6 +363,8 @@ export const japaneseTranslations = Object.freeze({
   "licenseAdmin.remainingDays": compare("剩余天数：", "残り日数："),
   "licenseAdmin.authorizationMode": compare("授权模式：", "承認モード："),
   "licenseAdmin.allSensors": compare("全部传感器", "すべてのセンサー"),
+  "licenseAdmin.categoryAll": compare("分类全部（{{count}} 类）", "{{count}}カテゴリ内のすべてのシステム"),
+  "licenseAdmin.categoryAllTag": compare("{{category}}全部", "{{category}}すべて"),
   "licenseAdmin.sensorCount": compare("{{count}} 个传感器", "{{count}}個のセンサー"),
   "licenseAdmin.multiType": compare("多类型（{{count}}）", "複数のタイプ({{count}})"),
   "licenseAdmin.singleType": compare("单类型", "シングルタイプ"),

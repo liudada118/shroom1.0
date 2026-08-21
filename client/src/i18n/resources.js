@@ -428,6 +428,8 @@ export const bilingualConfig = {
     remainingDays: text('剩余天数：', 'Days Remaining:'),
     authorizationMode: text('授权模式：', 'Authorization Mode:'),
     allSensors: text('全部传感器', 'All Sensors'),
+    categoryAll: text('分类全部（{{count}} 类）', 'All Systems in {{count}} Categories'),
+    categoryAllTag: text('{{category}}全部', 'All {{category}}'),
     sensorCount: text('{{count}} 个传感器', '{{count}} sensors'),
     multiType: text('多类型（{{count}}）', 'Multiple Types ({{count}})'),
     singleType: text('单类型', 'Single Type'),

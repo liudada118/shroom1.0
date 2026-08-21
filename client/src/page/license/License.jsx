@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next';
 import { getLanguageLocale } from '../../i18n';
 import { translateBackendMessage } from '../../i18n/translateBackendMessage';
 import { decryptStr } from './aesUtil';
+import { describeLicenseFile, licenseSensorGroups } from './licenseScopeDisplay';
 import './License.css';
 
 const { Title, Text } = Typography;
@@ -30,73 +31,10 @@ const { TextArea } = Input;
 /**
  * 传感器类型分组定义
  */
-const SENSOR_GROUPS = [
-  {
-    groupKey: 'licenseAdmin.groups.common',
-    icon: '⭐',
-    items: [
-      { labelKey: 'sensorHand', value: 'hand' },
-    ],
-  },
-  {
-    groupKey: 'licenseAdmin.groups.care',
-    icon: '❤️',
-    items: [
-      { labelKey: 'sensorJqbed', value: 'jqbed' },
-      { labelKey: 'sensorPetCare', value: 'petCare' },
-    ],
-  },
-  {
-    groupKey: 'licenseAdmin.groups.lab',
-    icon: '🧪',
-    items: [
-      { labelKey: 'sensorBed4096', value: 'bed4096' },
-    ],
-  },
-  {
-    groupKey: 'licenseAdmin.groups.custom',
-    icon: '⚙️',
-    items: [
-      { labelKey: 'sensorSmallBedNoAlg', value: 'smallBedNoAlg' },
-      { labelKey: 'sensorSmallBed12B', value: 'smallBed12B' },
-      { labelKey: 'sensorTempFullBed', value: 'tempFullBed' },
-      { labelKey: 'sensorWholeChair', value: 'wholeChair' },
-      { labelKey: 'sensorMinzhen', value: 'minzhen' },
-    ],
-  },
-  {
-    groupKey: 'licenseAdmin.groups.precision',
-    icon: '🔬',
-    items: [
-      { labelKey: 'sensorHandSinglePoint', value: 'handSinglePoint' },
-      { labelKey: 'sensorHand0205', value: 'hand0205' },
-      { labelKey: 'sensorHand0205Double', value: 'hand0205Double' },
-      { labelKey: 'sensorHandGlove115200', value: 'handGlove115200' },
-      { labelKey: 'sensorHandGloveFullPacket', value: 'handGloveFullPacket' },
-      { labelKey: 'sensorSmallSample', value: 'smallSample' },
-      { labelKey: 'sensorRobot1', value: 'robot1' },
-      { labelKey: 'sensorRobotSY', value: 'robotSY' },
-      { labelKey: 'sensorRobotLCF', value: 'robotLCF' },
-      { labelKey: 'sensorFootVideo', value: 'footVideo' },
-      { labelKey: 'sensorDaliegu', value: 'daliegu' },
-      { labelKey: 'sensorFast256', value: 'fast256' },
-      { labelKey: 'sensorFast1024', value: 'fast1024' },
-      { labelKey: 'sensorHumanBody', value: 'humanBody' },
-      { labelKey: 'sensorHumanBodyOptimized', value: 'humanBodyOptimized' },
-    ],
-  },
-];
-
-/*
-SENSOR_GROUPS
-  .find((group) => group.items.some((item) => item.value === 'petCare'))
-  ?.items.push({ label: 'mini鐪嬫姢', value: 'petCareMini' });
-
-*/
-
-SENSOR_GROUPS
-  .find((group) => group.items.some((item) => item.value === 'petCare'))
-  ?.items.push({ labelKey: 'sensorPetCareMini', value: 'petCareMini' });
+const SENSOR_GROUPS = licenseSensorGroups.map((group) => ({
+  ...group,
+  groupKey: group.labelKey,
+}));
 
 const ALL_SENSORS = SENSOR_GROUPS.flatMap((g) => g.items);
 
@@ -245,10 +183,7 @@ const tryDecodeOffline = (input, locale) => {
     const expireTs = parseFloat(payload.expireDate);
     const remainDays = Math.ceil((expireTs - Date.now()) / 86400000);
     const f = payload.sensorTypes;
-    let fileDisplay;
-    if (f === 'all') fileDisplay = { type: 'all', list: [] };
-    else if (Array.isArray(f)) fileDisplay = { type: 'multi', list: f };
-    else fileDisplay = { type: 'single', list: [f] };
+    const fileDisplay = describeLicenseFile(f);
     return {
       version: 'offline',
       raw: payload,
@@ -365,14 +300,7 @@ const License = () => {
       const now = new Date();
       const remainDays = Math.ceil((expireDate - now) / 86400000);
 
-      let fileDisplay;
-      if (obj.file === 'all') {
-        fileDisplay = { type: 'all', list: [] };
-      } else if (Array.isArray(obj.file)) {
-        fileDisplay = { type: 'multi', list: obj.file };
-      } else {
-        fileDisplay = { type: 'single', list: [obj.file] };
-      }
+      const fileDisplay = describeLicenseFile(obj.file);
 
       setParseResult({
         version: 'online',
@@ -525,11 +453,22 @@ const License = () => {
                             <Text strong>
                               {parseResult.fileDisplay.type === 'all'
                                 ? t('licenseAdmin.allSensors')
+                                : parseResult.fileDisplay.type === 'group'
+                                  ? t('licenseAdmin.categoryAll', { count: parseResult.fileDisplay.groupKeys.length })
                                 : parseResult.fileDisplay.type === 'multi'
                                   ? t('licenseAdmin.multiType', { count: parseResult.fileDisplay.list.length })
                                   : t('licenseAdmin.singleType')}
                             </Text>
                           </div>
+                          {parseResult.fileDisplay.groupKeys.length > 0 && (
+                            <div className="parse-types">
+                              {parseResult.fileDisplay.groupKeys.map((groupKey) => (
+                                <Tag key={groupKey} color="gold">
+                                  {t('licenseAdmin.categoryAllTag', { category: t(`licenseAdmin.groups.${groupKey}`) })}
+                                </Tag>
+                              ))}
+                            </div>
+                          )}
                           {parseResult.fileDisplay.type !== 'all' && (
                             <div className="parse-types">
                               {parseResult.fileDisplay.list.map((val) => (

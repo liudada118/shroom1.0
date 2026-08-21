@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-08-17
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-08-20
 
 ## 1. 项目概述
 
@@ -156,6 +156,7 @@ shroom1.0/
 | `/client/src/i18n/` | 前端国际化入口与统一中英日资源目录；负责语言标准化、持久化，以及后端授权中文原因到当前界面语言的适配 |
 | `/client/src/page/home/speechSynthesis.js` | 生命体征告警语音边界；按稳定 `alertKey` 调度日文本地 MP3，并负责中英文系统 voice、日文播放失败后的严格 `ja` voice 回退及防叠播状态 |
 | `/client/public/audio/alerts/ja/` | 日文生命体征固定告警 MP3 源资源；生产发布副本位于 `/build/audio/alerts/ja/` |
+| `/docs/japanese-alert-mp3-generation-guide.md` | 日文告警 MP3 的可复现生成与发布指南；记录固定 TTS 参数、候选校验、public/build 同步、运行时映射和故障排查 |
 | `/preload.js` | Electron 预加载脚本，建立渲染进程与主进程之间的安全 IPC 通道 |
 | `/server.js` | 后端核心调度器，协调串口通信、数据处理、WebSocket 分发、数据库存储 |
 | `/server/jqbedAlgorithmConfig.js` | jqbed 算法配置的 18 项默认值、双层校验、版本化快照及临时文件写入后重命名的原子持久化实现 |
@@ -281,12 +282,16 @@ graph TD
     - `server.js` 在授权状态下发时重新按 `licenseHelper.js` 的保存位置候选读取当前 `config.txt` 原始 `licenseKey`，包括启动校验中、有效、无效和锁定状态；`Date.jsx` 与 `LicensePortal.jsx` 收到后回填密钥输入框，确保旧版本本地密钥被新版本读取后能在访问密钥页显示，前端不再把 `localStorage` 作为首屏读取来源。
     - `licenseManager` 会在启动和密钥写入后启动运行期复检，持续广播 `licenseType`、`remainingDays`、`licenseChecking`、`licenseError` 或 `licenseLocked`；前端 `Date.jsx`、`LicensePortal.jsx`、`License.jsx` 和 `Home.jsx` 根据这些状态展示验证中、过期、暂停、吊销或时间异常锁定提示。
     - 密钥 `file` 字段继续用于授权范围、默认系统、模块配置和前端可选系统过滤；`server.js` 通过 `getSelectFlagFromLicense()` 下发 `selectFlag`，并用独立的 `activeSensorType` 下发后端当前实际运行系统。`Home.jsx` 将授权范围写入 `allowedTypes`，同时优先用 `activeSensorType` 设置前端默认展示，保证界面、串口协议和数据库系统一致。
+    - 密钥 v3 支持分类全部令牌 `@group:<groupKey>`，分类注册表统一维护在根目录 `licenseSensorGroups.json`，发布时进入 Electron 后端包并由 Vite 内联到前端；在线 `file` 与离线 `sensorTypes` 都可混合分类令牌和具体系统。`licenseScopes.js` 在验证端按注册表顺序展开并去重，启动时校验分类 key、展示系统 key 的唯一性和非空分类，未知分类直接拒绝；`server.js` 与后端 SDK 只向消费方下发具体系统列表并以展开后的首项作为默认系统。旧单系统、固定数组及 `all` 密钥保持兼容，已有分类密钥会随新版注册表自动覆盖以后加入该分类的展示系统。
+    - 新增展示系统时只在共享注册表的一个分类中登记一次，再运行 `scripts/sync-license-registry.cjs <发证服务目标JSON>` 将同一份分类目录复制到发证服务；同步过程验证目标后缀和目录并输出 SHA-256 供发布核对。发证端必须把稳定 `@group:` 令牌原样写入 v3 payload，而不是签入当时展开的固定数组；因此分类旧密钥会在新版客户端自动纳入新增系统，固定数组密钥仍需重新签发。
+    - `docs/license-server-modification-guide.md` 是发证服务接入文档，定义共享注册表加载、分类签发请求、`/licenseCheck` 展开、`/sensorTypes` 动态名称清单、发布次序、兼容边界和端到端验收要求；线上服务源码不在桌面端仓库，实际部署须在对应服务仓库完成。
     - 运行中直接替换为默认系统不同的新密钥时，`server.js` 不再只改写 `file`；密钥入口与标题栏普通系统切换统一调用 `switchActiveDisplaySystem()`，关闭旧串口及民政传感器端口、清空自动重连端口号、重建目标系统数据库引用、停止历史回放并清空旧帧缓存，避免授权状态已切换而采集链路仍停留在旧展示系统。
 
 6. **密钥配置管理流程**
     - 用户启动应用默认进入 `/` 的 `Date.jsx` 密钥输入页；该页只在用户主动提交后展示错误弹窗，收到有效 `date` 且 `valid !== false` 后再进入 `/system`。从系统页返回输入密钥时，不会因为后端主动推送有效授权而自动跳走。
     - `/license` 保留行业解决方案体验中心 `LicensePortal`，用于展示 Shroom Vision 方案卡片、SDK 状态和访问密钥入口；提交密钥时仍通过 WebSocket `ws://localhost:19999` 发送 `{ date: { date: key } }`，后端由 `licenseManager` 判断在线/离线密钥格式并写入可写 `config.txt`。
     - `/license-admin` 的 `License.jsx` 改为验证方密钥管理页：自动识别在线 hex 与离线 base64 激活码，支持解析预览、写入应用、展示当前授权状态、传感器类型映射、剩余天数、离线/在线状态和锁定提示；密钥统一由外部密钥管理系统生成，桌面端不再承担发证生成逻辑。
+    - 密钥预览会识别 `@group:` 分类令牌，显示“分类全部”标签及展开后的具体系统；外部发证服务必须使用相同 groupKey 生成 v3 payload，`crypto-lib.cjs` 的 `generateLicenseKey()`、在线解码和离线验签共用相同展开契约。
     - 后端支持前端请求 `getSensorTypes`，由 `sensorTypeStore.js` 拉取/缓存传感器类型清单并通过 `sensorTypeList` 下发，密钥页和系统页可用后台动态映射替代本地硬编码名称。
 
 5. **自动更新流程**
@@ -304,6 +309,7 @@ graph TD
     - 生命体征告警统一经过 `client/src/page/home/speechSynthesis.js`。`Home.jsx` 保持原有触发条件，只为 `leftBed`、`fallRisk`、`satUp`、`emergency` 传入稳定 `alertKey`；日文模式分别优先播放 `/audio/alerts/ja/left-bed.mp3`、`edge-seat.mp3`、`edge-seat.mp3`、`emergency.mp3`。同一活动键重复请求不叠播，不同键会暂停并归零上一条本地音频后切换。
     - 本地 MP3 的构造、加载或播放失败时回退 Web Speech API；voice 的大小写、下划线和地区变体会标准化后按基础语言匹配，日文只允许 `ja` voice，首次 voice 列表尚未加载时监听一次 `voiceschanged` 重试，仍不可用则跳过播报并告警，不回退到中文系统 voice。中文和英文继续直接使用 Web Speech，不进入日文 MP3 路径。日文界面及播报用的 `fallBed`、`sitUp`、`home.alerts.fallRisk`、`home.alerts.satUp` 四个资源键统一为 `端座位`。
     - `client/public/audio/alerts/ja/` 保存 `left-bed.mp3`（`離床`）、`edge-seat.mp3`（`端座位`）和 `emergency.mp3`（`SOS緊急通報`），均由 `ja-JP-NanamiNeural` 以 `-5%` 语速制作，并由 Vite 同步到 `build/audio/alerts/ja/` 供离线运行。
+    - `docs/japanese-alert-mp3-generation-guide.md` 固化 `edge-tts==7.2.8` 隔离环境、三条生成命令、格式与 SHA-256 校验、构建发布和运行时回退边界；生成阶段需要联网，随应用发布后的本地 MP3 播放不需要网络或系统日文语音包。
     - CSV 下载请求携带当前语言；`server.js` 分别输出中文、旧版英文简写或日文表头，并同步本地化检测点、触觉手套部位和左右手文件名，不修改历史数据字段和值。
 
 ### 4.3. Jqbed Algorithm Configuration
@@ -795,11 +801,18 @@ graph TD
 | 2026-08-17 | Revise | 人体全身优化最近12点热力模式 | 保留原精确全点 Shader，并新增默认的最近12点顶点热力模式；屏幕可切换且版本化缓存，降低笔记本 GPU 像素循环负载。 |
 | 2026-08-17 | Revise | 小床算法灵敏度字段升级 | 适配新版 `onbed_filter`：删除 `head_foot_area`，新增 `sensitivity_threshold` 0～3 模式及三语说明，配置 v1 自动迁移至 v2。 |
 | 2026-08-17 | Revise | 小床算法包跨电脑同步 | 将新版 `onbed_filter` 纳入版本管理并固定哈希；打包健康门禁新增灵敏度字段协议检查，避免其他电脑拉取代码后继续加载旧 PYD。 |
+| 2026-08-17 | Revise | 密钥分类全部授权 | 新增 `@group:<groupKey>` v3 授权范围，五类共享注册表统一驱动生成、在线/离线验证、默认系统选择、前端过滤和密钥预览；旧密钥继续兼容。 |
+| 2026-08-19 | Revise | 新增展示系统授权同步 | 分类注册表新增启动校验与发证服务同步脚本，SDK 同步支持分类展开且保持旧单系统返回值；新增系统只需登记一次并按 SHA-256 核对两端注册表。 |
+| 2026-08-19 | Revise | 发证服务修改文档 | 新增独立服务端交付文档，覆盖分类注册表、生成接口、在线校验、动态系统清单、兼容迁移、安全和验收清单。 |
+| 2026-08-20 | Revise | 日文告警 MP3 生成文档 | 新增可直接执行的 edge-tts 隔离生成、试听与格式校验、public/build 发布、运行时映射和故障排查指南，并记录当前三条资源的 SHA-256 基线。 |
 
 ## 9. 更新日志
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-17 | Revise | 新增功能 | 密钥支持常用、关怀、实验室、定制、精密五种“分类全部”授权，分类令牌可与具体系统混合并自动去重，未知分类拒绝。 |
+| 2026-08-19 | Revise | 配置变更 | 新增分类注册表唯一性校验和 `sync-license-registry.cjs` 发证服务同步工具，明确发证端保存稳定分类令牌、新系统注册与旧分类密钥自动扩展规则。 |
+| 2026-08-19 | Revise | 文档更新 | 新增发证服务分类授权与系统同步改造指南，提供可直接落地的 Node.js 示例、接口契约、部署顺序和回归验收清单。 |
 | 2026-08-17 | Revise | 修复缺陷 | 修复其他电脑拉取代码后仍使用旧小床 PYD 的问题：跟踪新版二进制、默认校验固定 SHA-256，并要求打包 runtime 明确通过 `sensitivity_threshold` schema 健康检查。 |
 | 2026-08-17 | Revise | 修复缺陷 | 直接替换密钥并改变默认展示系统时执行与手动切换相同的串口、数据库和回放清理流程。 |
 | 2026-08-17 | Revise | 优化重构 | 人体全身热力新增“最近12点”顶点计算模式并作为默认值，保留“精确”全点模式供用户切换，两者选择写入本地渲染设置。 |
@@ -1210,6 +1223,7 @@ graph TD
 | 2026-08-14 | Revise | 新增功能 | 新增 `ja-JP-NanamiNeural` 日文固定告警 MP3：`left-bed.mp3`、`edge-seat.mp3`、`emergency.mp3` 同步保存于前端 public 与当前 build，支持后续离线播放接入；运行时语音逻辑和项目依赖保持不变。 |
 | 2026-08-14 | Revise | 新增功能 | `speechSynthesis.js` 新增按 `alertKey` 驱动的日文本地 MP3 播放状态机：离床、坠床风险/坐起、SOS 分别使用三条离线音频，同一活动告警不叠播、异告警安全切换；Audio 构造、媒体错误及同步/异步播放失败统一回退严格 `ja` voice，中英文继续使用 Web Speech。 |
 | 2026-08-14 | Revise | 配置变更 | 日文离床本地音频文案由「離床しました」精简为「離床」，保持 `ja-JP-NanamiNeural`、`-5%` 语速、`leftBed` 映射和其他告警资源不变。 |
+| 2026-08-20 | Revise | 文档更新 | 新增日文告警 MP3 生成与发布指南，明确在线生成、离线播放的边界，以及固定 voice/rate、校验、构建同步和排错流程。 |
 
 *变更类型：`新增功能` / `优化重构` / `修复缺陷` / `配置变更` / `文档更新` / `依赖升级` / `初始化`*
 

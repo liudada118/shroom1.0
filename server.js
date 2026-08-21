@@ -81,6 +81,7 @@ const {
 const { resolveConfigFile, getConfigFileCandidates, getWritableConfigFile } = require('./licenseHelper');
 const licenseManager = require('./licenseManager');
 const sensorTypeStore = require('./sensorTypeStore');
+const { expandLicenseFile } = require('./licenseScopes');
 const appConfig = require('./configManager');
 const { isCar, dedupli, totalToN, } = require("./util");
 const { pressSmallBed } = require("./utilMatrix");
@@ -3170,28 +3171,20 @@ let date, sysStartTime, file = defauleFile, selectFlag
 let licenseFile = null
 
 function getSelectFlagFromLicense(licenseFile) {
-  if (licenseFile === 'all') return 'all';
-  if (Array.isArray(licenseFile)) {
-    return licenseFile.filter((item) => typeof item === 'string' && item.trim());
-  }
-
-  if (typeof licenseFile === 'string' && licenseFile.trim() && licenseFile !== 'all') {
-    return [licenseFile];
-  }
-
-  return undefined;
+  if (licenseFile == null) return undefined;
+  const expanded = expandLicenseFile(licenseFile);
+  return expanded.isAllTypes ? 'all' : expanded.sensorTypes;
 }
 
 function getDefaultFileFromLicense(licenseFile, fallback = null) {
-  if (Array.isArray(licenseFile)) {
-    return licenseFile.find((item) => typeof item === 'string' && item.trim()) || fallback;
-  }
+  if (licenseFile == null || licenseFile === 'all') return fallback;
+  const expanded = expandLicenseFile(licenseFile);
+  return expanded.sensorTypes[0] || fallback;
+}
 
-  if (typeof licenseFile === 'string' && licenseFile.trim() && licenseFile !== 'all') {
-    return licenseFile;
-  }
-
-  return fallback;
+function getClientLicenseFile(licenseFile, fallback) {
+  const resolved = getSelectFlagFromLicense(licenseFile);
+  return resolved == null ? fallback : resolved;
 }
 
 /**
@@ -3221,7 +3214,7 @@ function sendLicenseStatusTo(client) {
     date: st.expireTimestamp,
     nowDate: st.lastCheckedAt || Date.now(), // 服务器/可信时间，供前端算剩余天数
     licenseKey: savedLicenseKey,
-    file: licenseFile || file,
+    file: getClientLicenseFile(licenseFile, file),
     activeSensorType: file,
     selectFlag: selectFlag,
     checking: !!st.checking,
@@ -3627,7 +3620,7 @@ module.exports = {
          *  */
         const jsonData = JSON.stringify({
           port: serialport,
-          file: licenseFile || file,
+          file: getClientLicenseFile(licenseFile, file),
           activeSensorType: file,
           selectFlag: selectFlag
           // length: csvSitData.length,

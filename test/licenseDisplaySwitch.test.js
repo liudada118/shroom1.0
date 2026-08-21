@@ -11,6 +11,14 @@ test('license replacement uses the same complete display-system switch lifecycle
   assert.match(serverSource, /switchActiveDisplaySystem\(JSON\.parse\(message\)\.file, 'file switch'\)/);
 });
 
+test('license category scopes are expanded before frontend filtering and default selection', () => {
+  assert.match(serverSource, /const \{ expandLicenseFile \} = require\('\.\/licenseScopes'\)/);
+  assert.match(serverSource, /const expanded = expandLicenseFile\(licenseFile\)/);
+  assert.match(serverSource, /return expanded\.isAllTypes \? 'all' : expanded\.sensorTypes/);
+  assert.match(serverSource, /return expanded\.sensorTypes\[0\] \|\| fallback/);
+  assert.match(serverSource, /file: getClientLicenseFile\(licenseFile, file\)/);
+});
+
 test('the shared lifecycle resets ports, databases and playback state', () => {
   const start = serverSource.indexOf('function switchActiveDisplaySystem');
   const end = serverSource.indexOf('\nfunction setJqbedAlgorithmStatus', start);

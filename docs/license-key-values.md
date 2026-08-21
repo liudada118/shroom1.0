@@ -15,35 +15,112 @@
 
 - `/`：应用启动密钥输入页，使用行业解决方案体验中心样式，输入密钥后通过 WebSocket 交给后端验证；验证成功后默认停留在当前页，显示“进入系统”按钮，由用户手动进入 `/system`。
 - `/license`：面向用户的行业解决方案体验中心，只负责输入访问密钥、前端 AES-ECB 校验、展示已解锁方案，并通过 WebSocket 写入应用。
-- `/license-admin`：管理员密钥配置中心，负责生成、复制、写入和解析密钥，沿用 `client/src/page/license/License.jsx`。
+- `/license-admin`：验证方密钥配置中心，负责解析、预览和写入密钥；密钥由外部发证服务生成。
 
 ## 密钥生成规则
 
-1. 管理员进入 `/license-admin` 页面，在“生成密钥”页签中选择授权范围。
-2. 授权范围必须满足二选一：
-   - 开启“全部授权”，生成 `file: "all"`。
-   - 自定义选择至少 1 个传感器，生成单个 key 或 key 数组。
-3. 有效期支持两种模式：
-   - `days`：按天数生成，要求 `days > 0`，到期时间为 `Date.now() + days * 86400000`。
-   - `picker`：指定日期生成，要求已选择 `pickerDate`，到期时间为 `pickerDate.valueOf()`。
-4. `file` 字段生成规则：
+1. 外部发证服务选择授权范围并生成密钥；桌面端 `crypto-lib.cjs` 保留相同的生成/解码契约供服务端复用和自动化验证。
+2. `file` / 离线 `sensorTypes` 授权范围支持：
    - 全部授权：`"all"`。
    - 单类型授权：单个传感器 key 字符串，例如 `"hand0205"`。
    - 多类型授权：传感器 key 数组，例如 `["hand0205", "fast1024"]`。
-5. `moduleConfig` 是可选字段，只在页面配置了默认功能模块时写入；未配置的传感器不写入，由前端按默认模块处理。
-6. 最终明文 payload 先执行 `JSON.stringify(obj)`，再用 AES-ECB 加密，输出十六进制密文字符串。
+   - 分类全部授权：稳定令牌 `"@group:<groupKey>"`，例如精密全部为 `"@group:precision"`。
+   - 混合授权：分类令牌与具体传感器可放在同一数组，例如 `["@group:care", "humanBodyOptimized"]`；运行时按顺序展开并去重。
+3. 分类令牌密钥版本为 v3；旧单类型、固定数组和 `all` 密钥继续按原规则兼容。
+4. 发证端必须只签发注册表存在的分类；验证端遇到未知 `@group:` 令牌时拒绝密钥，不能把它当成普通展示系统 key。
+5. `moduleConfig` 是可选字段，只使用具体展示系统 key，不使用分类令牌；未配置的传感器由前端按默认模块处理。
+6. 最终明文 payload 先执行 `JSON.stringify(obj)`，再用 AES-ECB 加密，输出十六进制密文字符串。离线密钥则把相同授权范围写入签名 payload 的 `sensorTypes`。
 
 生成的明文结构：
 
 ```json
 {
   "date": 1790000000000,
-  "file": ["hand0205", "fast1024"],
+  "file": ["@group:precision", "jqbed"],
   "moduleConfig": {
     "hand0205": "skin"
+  },
+  "v": 3
+}
+```
+
+### 分类全部 Key/Value
+
+分类注册表唯一来源为根目录 `licenseSensorGroups.json`，发证端与验证端必须使用相同的 `groupKey`。该文件会进入 Electron 后端运行包，同时被 Vite 内联到前端构建。已有分类密钥会在新版软件中按当前注册表重新展开；因此以后向某分类加入展示系统时，未过期的该分类密钥会自动获得新增系统。
+
+| 分类 | 令牌 | 当前展开范围 |
+| --- | --- | --- |
+| 常用全部 | `@group:common` | `hand` |
+| 关怀全部 | `@group:care` | `jqbed`、`petCare`、`petCareMini` |
+| 实验室全部 | `@group:lab` | `bed4096`、`bed4096num` |
+| 定制全部 | `@group:custom` | `smallBedNoAlg`、`smallBed12B`、`matCol`、`tempFullBed`、`wholeChair`、`minzhen` |
+| 精密全部 | `@group:precision` | 注册表中的全部精密展示系统，包括 `humanBody` 与 `humanBodyOptimized` |
+
+### 发证服务生成分类密钥
+
+发证服务不要在生成密钥时把分类展开成固定数组，而要把稳定分类令牌原样写入 `file`。这样以后向分类注册表加入系统时，已有且未过期的分类密钥才能在新版客户端中自动获得该系统。
+
+发证接口可以按下面的契约接入项目根目录的生成模块：
+
+```js
+const {
+  createGroupScopeToken,
+  generateLicenseKey,
+} = require('./crypto-lib.cjs');
+
+function issueCategoryLicense({ groupKey, days, category = 'production' }) {
+  const licenseFile = createGroupScopeToken(groupKey);
+  return generateLicenseKey(licenseFile, days, category);
+}
+
+// 精密全部
+const key = issueCategoryLicense({
+  groupKey: 'precision',
+  days: 365,
+});
+```
+
+若发证服务不是直接引用本仓库模块，也必须保持同样的 payload 契约：`file="@group:precision"`、`v=3`，并使用与客户端相同的 AES 参数。发证服务的分类下拉必须读取同步后的 `licenseSensorGroups.json`，不能再维护另一份手写分类数组；收到未知 `groupKey` 时应拒绝生成。
+
+### 新增展示系统同步到发证服务
+
+新增展示系统时按以下顺序处理：
+
+1. 在桌面端完成系统 key、协议、页面、标题与国际化注册。
+2. 把该系统的 key **只加入一次**到根目录 `licenseSensorGroups.json` 对应分类的 `items`；启动时会校验分类 key、系统 key 是否重复以及分类是否为空。
+3. 把共享注册表同步到实际发证服务仓库：
+
+   ```powershell
+   node scripts/sync-license-registry.cjs D:\实际发证服务\config\licenseSensorGroups.json
+   ```
+
+   目标目录必须已存在。命令会输出分类数量、展示系统数量和 SHA-256；发证服务应加载这个 JSON 并保留该摘要用于发布核对。
+4. 发布发证服务，再发布包含同一注册表的新桌面端。两边的注册表 SHA-256 应一致。
+5. 使用分类令牌签发的旧密钥无需重发；固定单系统/固定数组密钥不会自动增加新系统，需要重新签发才会包含它。
+
+发证服务需要同步处理三个入口：
+
+- 分类下拉：从同步后的注册表生成选项，提交值使用 `group.key`，不要提交中文名称。
+- 密钥生成：把选中的分类转成 `@group:<groupKey>` 后签入 `file`，并将版本写为 `v: 3`。
+- 密钥校验：用同一注册表展开分类，将具体 `sensorTypes` 返回给桌面端；未知分类必须返回无效。
+
+若服务端还提供桌面端正在使用的 `GET /sensorTypes`，新增系统也要出现在该接口中。接口格式保持：
+
+```json
+{
+  "time": 1790000000000,
+  "flat": [
+    { "label": "人体全身优化", "value": "humanBodyOptimized", "group": "精密" }
+  ],
+  "map": {
+    "humanBodyOptimized": "人体全身优化"
   }
 }
 ```
+
+其中 `value` 必须与共享注册表和桌面端内部系统 key 完全一致；`label` 只负责显示。发布后桌面端会后台拉取 `/sensorTypes` 并缓存，用于动态系统名称清单，但授权能否使用该系统仍由密钥中的 `file` 分类范围决定。
+
+本机当前没有 `https://shroom.jq-industries.com` 所对应的真实发证服务源码，因此本仓库只提供共享注册表、校验器和同步工具；拿到真实服务仓库路径后，将上述 JSON 接到它的分类下拉和签发入口即可。
 
 加密参数：
 
@@ -76,9 +153,9 @@
 4. 将密文写入可写 `config.txt`，路径由 `getWritableConfigFile()` 决定。
 5. JSON 解析明文，更新运行期变量：
    - `endDate = parseFloat(parsedLicense.date)`
-   - `licenseFile = parsedLicense.file || null`
-   - `selectFlag = getSelectFlagFromLicense(parsedLicense.file)`
-   - `file = getDefaultFileFromLicense(parsedLicense.file)`，如果能取到默认系统 key
+   - `licenseFile = parsedLicense.file || null`，保留密钥中的原始分类令牌用于状态管理
+   - `selectFlag = getSelectFlagFromLicense(parsedLicense.file)`，分类令牌在这里展开为具体展示系统列表
+   - `file = getDefaultFileFromLicense(parsedLicense.file)`，使用展开后的第一个展示系统作为默认系统
    - `baudRate = getSensorBaudRate(file)`
 6. 向所有前端连接广播授权状态：
 
@@ -95,7 +172,7 @@
 }
 ```
 
-其中 `file` / `selectFlag` 表示授权范围，`activeSensorType` 表示后端当前实际使用的展示系统、串口协议和数据库。前端系统页必须优先按 `activeSensorType` 设置默认展示，避免“界面系统已授权但与后端当前解析系统不同”导致串口无法正确连接。
+其中下发给前端的 `file` / `selectFlag` 已是展开、去重后的具体展示系统范围，不会把 `@group:` 伪装成可切换系统；`activeSensorType` 表示后端当前实际使用的展示系统、串口协议和数据库。前端系统页必须优先按 `activeSensorType` 设置默认展示，避免“界面系统已授权但与后端当前解析系统不同”导致串口无法正确连接。
 
 如果 JSON 解析或处理失败，广播 `licenseError: "密钥无效，请检查后重新输入"`。
 
@@ -108,8 +185,9 @@
 3. 解密结果按 JSON 解析，读取 `date` 与 `file`。
 4. `date` 转成数字后写入全局 `endDate`。
 5. `file` 决定启动默认系统：
-   - 数组：取第一个非空字符串。
-   - 字符串且不是 `all`：使用该字符串。
+   - 分类令牌或混合数组：先展开、去重，再取第一个具体展示系统。
+   - 普通数组：取第一个具体展示系统。
+   - 普通字符串且不是 `all`：使用该字符串。
    - `all` 或无有效值：回退到默认 `hand0205`。
 6. 根据默认系统 key 计算串口波特率。
 7. 前端连接时，后端同时下发授权范围 `file/selectFlag` 和实际运行系统 `activeSensorType`；多类型授权时前端默认选中 `activeSensorType`，与后端串口解析保持一致。
@@ -132,6 +210,8 @@
 | `file` 为 `all` | 视为全部授权 |
 | `file` 为字符串 | 视为单类型授权 |
 | `file` 为数组 | 过滤非空字符串后视为多类型授权 |
+| `file` / `sensorTypes` 含 `@group:<groupKey>` | 按共享注册表展开分类全部，去重后下发 |
+| `@group:` 的分类不存在 | 拒绝密钥，授权范围无效 |
 | `moduleConfig` 存在 | 原样下发给前端作为默认模块配置 |
 
 ### 有效期校验
@@ -153,17 +233,10 @@
 | Key | Value / 含义 |
 | --- | --- |
 | `date` | 到期时间戳，毫秒级 Unix timestamp |
-| `file` | 授权范围：`all`、单个传感器 key，或传感器 key 数组 |
+| `file` | 授权范围：`all`、单个传感器 key、传感器 key 数组、`@group:<groupKey>` 分类全部令牌，或分类令牌与具体 key 的混合数组 |
 | `moduleConfig` | 可选对象，形如 `{ [sensorKey]: numMatrixFlag }`，用于指定默认功能模块 |
 
-## 页面固定 Key/Value
-
-| 类型 | Key | Value |
-| --- | --- | --- |
-| Tab | `generate` | 生成密钥 |
-| Tab | `parse` | 解析密钥 |
-| 时间模式 | `days` | 按天数 |
-| 时间模式 | `picker` | 指定日期 |
+`/license-admin` 只负责解析、预览和写入密钥，不在桌面端签发密钥。分类密钥由外部发证服务按上面的 v3 规则生成。
 
 ## 授权传感器 Key/Value
 
@@ -173,6 +246,7 @@
 | 2 | 关怀 | `jqbed` | 小床监测 |
 | 3 | 关怀 | `petCare` | 宠物看护 |
 | 4 | lab | `bed4096` | OneStep |
+| 4.1 | lab | `bed4096num` | OneStep 数字展示 |
 | 5 | 定制 | `smallBedNoAlg` | 小床检测(数据) |
 | 6 | 定制 | `smallBed12B` | 小床检测(12B) |
 | 7 | 定制 | `matCol` | 小床褥采集 |

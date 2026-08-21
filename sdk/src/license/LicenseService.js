@@ -1,3 +1,5 @@
+const { expandLicenseFile } = require('../../../licenseScopes');
+
 class LicenseService {
   constructor(options = {}) {
     this.decrypt = options.decrypt || null;
@@ -37,23 +39,19 @@ class LicenseService {
   }
 
   getSelectFlag(licenseFile) {
-    if (Array.isArray(licenseFile)) {
-      return licenseFile;
+    if (!licenseFile) return null;
+    const expanded = expandLicenseFile(licenseFile);
+    if (expanded.isAllTypes) return 'all';
+    if (!Array.isArray(licenseFile) && expanded.groupKeys.length === 0) {
+      return expanded.sensorTypes[0] || null;
     }
-    if (licenseFile === 'all') {
-      return 'all';
-    }
-    return licenseFile || null;
+    return expanded.sensorTypes;
   }
 
   getDefaultFile(licenseFile, fallback = 'hand0205') {
-    if (Array.isArray(licenseFile) && licenseFile.length) {
-      return licenseFile[0];
-    }
-    if (licenseFile && licenseFile !== 'all') {
-      return licenseFile;
-    }
-    return fallback;
+    if (!licenseFile || licenseFile === 'all') return fallback;
+    const expanded = expandLicenseFile(licenseFile);
+    return expanded.sensorTypes[0] || fallback;
   }
 
   isExpired(expiresAt, now = Date.now()) {

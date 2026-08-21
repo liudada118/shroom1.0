@@ -20,6 +20,7 @@ const fs = require('fs');
 const path = require('path');
 const logger = require('./logger');
 const config = require('./configManager');
+const { expandLicenseFile } = require('./licenseScopes');
 
 // 在线密钥解密沿用现有 ECB，用于本地解出 file/moduleConfig（runtime 配置 + 展示）。
 const ecb = require('./aes_ecb');
@@ -77,6 +78,7 @@ function setInvalid(type, rawKey, reason, extra) {
 
 /** 在线原始 payload → 归一化 { date, file, moduleConfig }。 */
 function normalizeOnline(p) {
+  expandLicenseFile(p.file);
   return { date: parseFloat(p.date), file: p.file, moduleConfig: p.moduleConfig || null };
 }
 
@@ -85,6 +87,8 @@ function normalizeOffline(r) {
   let file;
   if (r.isAllTypes) {
     file = 'all';
+  } else if (r.licenseFile) {
+    file = r.licenseFile;
   } else if (Array.isArray(r.sensorTypes)) {
     file = r.sensorTypes.length === 1 ? r.sensorTypes[0] : r.sensorTypes;
   } else {
@@ -226,6 +230,13 @@ async function loadOnline(hexKey) {
     setInvalid('online', hexKey, '密钥无效，解密失败');
     return false;
   }
+  let normalizedPayload;
+  try {
+    normalizedPayload = normalizeOnline(rawPayload);
+  } catch (error) {
+    setInvalid('online', hexKey, `密钥授权范围无效：${error.message}`);
+    return false;
+  }
 
   // 2. 缓存到期(2h)才真正联网；否则用缓存兜底（省流量、扛网络抖动）。
   //    本地已锁定时强制联网上报，拿服务端权威状态（即便缓存未到刷新点）。
@@ -245,7 +256,7 @@ async function loadOnline(hexKey) {
     r.reason = r.reason || '检测到系统时间异常，请联系厂商重新获取密钥';
   }
 
-  applyEval('online', hexKey, r, normalizeOnline(rawPayload));
+  applyEval('online', hexKey, r, normalizedPayload);
   logOutcome('在线');
   return state.valid;
 }

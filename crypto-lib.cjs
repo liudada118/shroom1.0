@@ -12,6 +12,10 @@
  * 支持多选传感器类型（数组）和 "all" 全选。
  */
 const CryptoJS = require("crypto-js");
+const {
+  createGroupScopeToken,
+  expandLicenseFile,
+} = require("./licenseScopes");
 
 const KEY_STR = "JIANXINGZHEPSVMC";
 
@@ -161,7 +165,7 @@ ALL_SENSORS.forEach((s) => { SENSOR_LABEL_MAP[s.value] = s.label; });
 
 /**
  * 生成密钥
- * @param {string|string[]} sensorTypes - 传感器类型，可以是单个 string、string 数组或 "all"
+ * @param {string|string[]} sensorTypes - 授权范围：单个系统、固定数组、"all"、@group: 分类令牌或其混合数组
  * @param {number} days - 有效期天数
  * @param {string} category - 密钥类型: "production"(量产) / "rental"(在线租赁)
  * @returns {string} hex 格式密钥字符串
@@ -179,11 +183,15 @@ function generateLicenseKey(sensorTypes, days, category) {
     file = sensorTypes;
   }
 
+  const expanded = expandLicenseFile(file, {
+    allSensorTypes: ALL_SENSORS.map(function (sensor) { return sensor.value; }),
+  });
+
   const payload = JSON.stringify({
     date: expireTimestamp,
     file: file,
     cat: category,
-    v: 2,
+    v: expanded.groupKeys.length ? 3 : 2,
   });
   return aesEncrypt(payload);
 }
@@ -211,19 +219,12 @@ function decodeLicenseKey(hexKey, nowMs) {
     const remainingDays = Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
     const expireDate = new Date(expireTimestamp).toISOString();
 
-    var sensorType, sensorTypes, isAllTypes = false;
-
-    if (parsed.file === "all") {
-      isAllTypes = true;
-      sensorType = "all";
-      sensorTypes = ALL_SENSORS.map(function(s) { return s.value; });
-    } else if (Array.isArray(parsed.file)) {
-      sensorTypes = parsed.file;
-      sensorType = parsed.file.join(",");
-    } else {
-      sensorType = parsed.file;
-      sensorTypes = [parsed.file];
-    }
+    const expanded = expandLicenseFile(parsed.file, {
+      allSensorTypes: ALL_SENSORS.map(function(s) { return s.value; }),
+    });
+    const isAllTypes = expanded.isAllTypes;
+    const sensorTypes = expanded.sensorTypes;
+    const sensorType = isAllTypes ? "all" : sensorTypes.join(",");
 
     return {
       valid: remainingDays > 0,
@@ -231,6 +232,8 @@ function decodeLicenseKey(hexKey, nowMs) {
       sensorType: sensorType,
       sensorTypes: sensorTypes,
       isAllTypes: isAllTypes,
+      groupKeys: expanded.groupKeys,
+      licenseFile: parsed.file,
       category: parsed.cat || "production",
       expireDate: expireDate,
       remainingDays: remainingDays,
@@ -309,15 +312,13 @@ function verifyOfflineLicense(activationCode, options) {
     const remainingDays = Math.ceil((expireTimestamp - now) / (24 * 60 * 60 * 1000));
 
     // 解析传感器类型
-    let sensorType, sensorTypes, isAllTypes = false;
     const f = payload.sensorTypes;
-    if (f === "all") {
-      isAllTypes = true; sensorType = "all"; sensorTypes = ALL_SENSORS.map(function (s) { return s.value; });
-    } else if (Array.isArray(f)) {
-      sensorTypes = f; sensorType = f.join(",");
-    } else {
-      sensorType = f; sensorTypes = [f];
-    }
+    const expanded = expandLicenseFile(f, {
+      allSensorTypes: ALL_SENSORS.map(function (sensor) { return sensor.value; }),
+    });
+    const isAllTypes = expanded.isAllTypes;
+    const sensorTypes = expanded.sensorTypes;
+    const sensorType = isAllTypes ? "all" : sensorTypes.join(",");
 
     return {
       valid: remainingDays > 0,
@@ -325,6 +326,8 @@ function verifyOfflineLicense(activationCode, options) {
       sensorType: sensorType,
       sensorTypes: sensorTypes,
       isAllTypes: isAllTypes,
+      groupKeys: expanded.groupKeys,
+      licenseFile: f,
       remainingDays: remainingDays,
       version: payload.version || 2,
       error: remainingDays > 0 ? undefined : "授权已过期",
@@ -639,6 +642,7 @@ module.exports = {
   aesEncrypt,
   aesDecrypt,
   generateLicenseKey,
+  createGroupScopeToken,
   decodeLicenseKey,
   verifyOfflineLicense,
   // v2 统一时间闸 / 锁定 / 解锁
