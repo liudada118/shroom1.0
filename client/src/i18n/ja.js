@@ -66,6 +66,17 @@ export const japaneseTranslations = Object.freeze({
   "export csv failed": compare("导出 CSV 失败", "CSV 出力失敗"),
   "resetZero": compare("清零", "ゼロクリア"),
   "cancelZero": compare("取消清零", "ゼロクリア解除"),
+  "pressureScene.label": compare("清零场景", "ゼロ点シナリオ"),
+  "pressureScene.real": compare("真实测量", "実測"),
+  "pressureScene.demo": compare("演示展示", "デモ"),
+  "pressureScene.realHint": compare(
+    "切换展示模式不动清零基准，清零只由上面的按钮手动触发",
+    "表示モードを切り替えてもゼロ点は変わりません。ゼロクリアは上のボタンから手動で行います",
+  ),
+  "pressureScene.demoHint": compare(
+    "每次切换展示模式都以当下读数为零点，请勿在真实测量时使用",
+    "表示モードを切り替えるたびに現在値をゼロ点にします。実測時には使用しないでください",
+  ),
   "head": compare("头枕", "ヘッドレスト"),
   "rawData": compare("原始数据", "生データ"),
   "key": compare("输入密钥", "アクセスキーを入力"),

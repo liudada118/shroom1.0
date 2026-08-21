@@ -68,6 +68,19 @@ export const bilingualConfig = {
   'export csv failed': text('导出 CSV 失败', 'CSV export failed'),
   resetZero: text('清零', 'Zero'),
   cancelZero: text('取消清零', 'Cancel Zero'),
+  pressureScene: {
+    label: text('清零场景', 'Zeroing scenario'),
+    real: text('真实测量', 'Real measurement'),
+    demo: text('演示展示', 'Demo'),
+    realHint: text(
+      '切换展示模式不动清零基准，清零只由上面的按钮手动触发',
+      'Switching display mode leaves the zero baseline untouched; zero only from the button above',
+    ),
+    demoHint: text(
+      '每次切换展示模式都以当下读数为零点，请勿在真实测量时使用',
+      'Every display-mode switch re-zeroes to the current reading; do not use during real measurement',
+    ),
+  },
   head: text('头枕', 'Headrest'),
   rawData: text('原始数据', 'Raw Data'),
   key: text('输入密钥', 'Enter Key'),

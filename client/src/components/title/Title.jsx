@@ -19,6 +19,12 @@ import { translateDomainLabel } from '../../i18n/translateDomainLabel';
 import { getLanguageLocale } from '../../i18n';
 import JqbedAlgorithmConfigModal from './JqbedAlgorithmConfigModal';
 import { getJqbedConfigAccess } from './jqbedAlgorithmConfig';
+import {
+  PRESSURE_SCENES,
+  readPressureScene,
+  resolveDisplaySwitchZero,
+  writePressureScene,
+} from './displaySwitchZeroPolicy';
 let collection = JSON.parse(localStorage.getItem('collection'))
   ? JSON.parse(localStorage.getItem('collection'))
   : [['hunch', 'front', '标签']];
@@ -278,6 +284,7 @@ class Title extends React.Component {
       carCurrent: 'all',
       show: false,
       resetZero: false,
+      pressureScene: readPressureScene(),
       num: 0,
       dataTime: '',
       clickState: true,
@@ -1645,6 +1652,7 @@ class Title extends React.Component {
       { label: t('sensorHandSinglePoint'), value: 'handSinglePoint' },
       { label: t('sensorNormal'), value: 'normal' },
       { label: t('sensorHumanBody'), value: 'humanBody' },
+      { label: t('chairQX'), value: 'carQX' },
       { label: t('sensorHumanBodyOptimized'), value: HUMAN_BODY_OPTIMIZED_MATRIX },
     ]
 
@@ -1906,12 +1914,21 @@ class Title extends React.Component {
                   } else if (!fingerR) {
                     message.warning(t('noCalibDataR'))
                   }
-                  this.props.wsSendObj({ resetZero: false })
-                  this.setState({ resetZero: false })
-                } else {
-                  this.props.wsSendObj({ resetZero: true })
-                  this.setState({ resetZero: true })
                 }
+              }
+
+              // 清零决策见 displaySwitchZeroPolicy.js：演示场景每次切换都以当下读数为零点，
+              // 真实场景一律不动基准（清零只走抽屉里的手动按钮）。手套切 3D 遥操是唯一
+              // 与场景无关的例外 —— 遥操必须跑在未清零数据上，两种场景都取消清零。
+              const zeroCommand = resolveDisplaySwitchZero({
+                sensorType: this.props.matrixName,
+                nextMode: value,
+                scene: this.state.pressureScene,
+                cancelZeroSensorTypes: calibratableGloveTypes_title,
+              })
+              if (zeroCommand) {
+                this.props.wsSendObj(zeroCommand)
+                this.setState({ resetZero: zeroCommand.resetZero })
               }
             }}
             options={this.props.matrixName === smallBed12BType_title ? [
@@ -2386,6 +2403,25 @@ class Title extends React.Component {
         <Drawer style={{ backgroundColor: 'rgba(21,18,42,0.8)' }} title={t('setData')} onClose={() => { this.setState({ open: false }) }} open={this.state.open}>
           {this.renderSettingSliders(t)}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {/* 演示场景 / 真实场景：决定切展示模式时要不要自动做预压力清零 */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <span style={{ color: '#fff', fontSize: 13 }}>{t('pressureScene.label')}</span>
+              <Radio.Group
+                value={this.state.pressureScene}
+                buttonStyle='solid'
+                onChange={(e) => {
+                  this.setState({ pressureScene: writePressureScene(e.target.value) })
+                }}
+              >
+                <Radio.Button value={PRESSURE_SCENES.real}>{t('pressureScene.real')}</Radio.Button>
+                <Radio.Button value={PRESSURE_SCENES.demo}>{t('pressureScene.demo')}</Radio.Button>
+              </Radio.Group>
+              <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 12, lineHeight: 1.5 }}>
+                {this.state.pressureScene === PRESSURE_SCENES.demo
+                  ? t('pressureScene.demoHint')
+                  : t('pressureScene.realHint')}
+              </span>
+            </div>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               <Button className='titleButton' onClick={() => {
                 this.props.changeAside({ resetZero: true })
