@@ -1,0 +1,36 @@
+{
+  "version": 2,
+  "values": {
+    "threshold_factor": 0,
+    "continuous_on_bed_duration_minutes": 0,
+    "unlock_sitting_alarm_duration_minutes": 0,
+    "sos_peak_threshold": 0,
+    "points_threshold_in": 0,
+    "sos_disable_area": [
+      6,
+      10
+    ],
+    "min_sos_sequence": 0,
+    "filter_switch": 1,
+    "strel_switch": 1,
+    "leave_bed_disable_area": [
+      0,
+      0
+    ],
+    "small_object_size": [
+      0,
+      0
+    ],
+    "breath_detect_mode": 0,
+    "sitting_area": [
+      0,
+      0
+    ],
+    "body_movement_threshold": 30,
+    "step_leavebed_trigger": 50,
+    "edge_align_ratio": 0,
+    "sensitivity_threshold": 3,
+    "breath_th": 0
+  },
+  "savedAt": "2026-08-17T08:22:29.008Z"
+}
