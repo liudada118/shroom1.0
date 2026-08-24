@@ -1398,6 +1398,29 @@ class Home extends React.Component {
     }
   }
 
+  /**
+   * 读「临期提醒最近一次弹出的日期」（YYYY-MM-DD）。
+   * 存 localStorage 而不是内存，是为了关掉应用重开也不会再弹一次 —— 一天就是一天。
+   * 读不到（隐私模式、被禁用、配额满）时返回 null，也就是照常提醒：
+   * 宁可多提醒一次，也不能因为存储坏了就永远不提醒。
+   */
+  getLicenseWarnedDay() {
+    try {
+      return localStorage.getItem('licenseExpiryWarnedDay');
+    } catch (err) {
+      return null;
+    }
+  }
+
+  /** 记下今天已经提醒过。写失败就算了，下次照常弹，不影响主流程。 */
+  setLicenseWarnedDay(day) {
+    try {
+      localStorage.setItem('licenseExpiryWarnedDay', day);
+    } catch (err) {
+      console.warn('[密钥检查] 无法记录提醒日期，临期提醒可能重复弹出', err);
+    }
+  }
+
   wsData = (e) => {
     sitPress = 0;
     let jsonObject = JSON.parse(e.data);
@@ -1654,13 +1677,25 @@ class Home extends React.Component {
           licenseModalRemainDays: 0
         });
       } else if (remainDays <= 7) {
-        console.log('[密钥检查] 密钥即将过期，剩余', remainDays, '天');
-        this.setState({
-          licenseModalVisible: true,
-          licenseModalType: 'warning',
-          licenseModalExpireDate: expireDateStr,
-          licenseModalRemainDays: remainDays
-        });
+        // 临期提醒每天只弹一次。
+        //
+        // 后端每 30 秒复检一次（configManager.js RECHECK_INTERVAL_MS），复检回调无条件
+        // 广播授权状态，所以这个分支每 30 秒就会进一次。之前没有任何抑制，用户点掉
+        // 「知道了」半分钟后又弹 —— 临期 7 天里要点两万次。
+        //
+        // 用 serverNow 而不是本地时钟算「今天」：本地时钟可以被改，改一下就能骗过节流，
+        // 而 serverNow 是后端 licenseManager 维护的可信时间（防回拨），和判到期用的是同一个源。
+        const warnedDayKey = new Date(serverNow).toLocaleDateString('en-CA'); // YYYY-MM-DD
+        if (this.getLicenseWarnedDay() !== warnedDayKey) {
+          console.log('[密钥检查] 密钥即将过期，剩余', remainDays, '天，今日首次提醒');
+          this.setLicenseWarnedDay(warnedDayKey);
+          this.setState({
+            licenseModalVisible: true,
+            licenseModalType: 'warning',
+            licenseModalExpireDate: expireDateStr,
+            licenseModalRemainDays: remainDays
+          });
+        }
       }
     }
 
