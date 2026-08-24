@@ -320,7 +320,7 @@ function isLockedNow() {
 }
 
 /**
- * 运行期复检（5min）：持续顶高水位、catch 开机回拨；在线到点(2h)才联网刷新。
+ * 运行期复检（2h，见 configManager.js RECHECK_INTERVAL_MS）：持续顶高水位、catch 回拨；每次复检都会联网刷新。
  * 在线/离线都跑。每次复检后回调 onChange(state, prevValid)。
  */
 function startRuntimeRecheck(onChange) {

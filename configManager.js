@@ -129,8 +129,8 @@ const keyServer = {
   BASE_URL: 'https://shroom.jq-industries.com',
   LICENSE_CHECK_PATH: '/licenseCheck',     // POST { key } → { time, valid, status, reason, expireTimestamp, remainingDays, sensorTypes, isAllTypes }
   SERVER_TIME_PATH: '/serverTime',         // GET → { time: <毫秒> }（备用）
-  CACHE_REFRESH_MS: 60 * 1000,             // 在线缓存刷新间隔 1min：超过才真正联网拉 /licenseCheck（配合 30s 复检，吊销/暂停/续期约 1min 内生效）；断网仍用缓存撑到真实到期
-  RECHECK_INTERVAL_MS: 30 * 1000,          // 运行中复检间隔 30s：尽快检测时间回拨弹锁定（本地校验无网络开销）；到点(2h)才联网刷新
+  CACHE_REFRESH_MS: 60 * 1000,             // 在线缓存刷新门槛 1min：距上次联网超过它才真去拉 /licenseCheck。复检间隔已是 2h，远超这个门槛，所以现在每次复检都会联网；留着是为了万一把复检调快回来时仍有节流兜底
+  RECHECK_INTERVAL_MS: 2 * 60 * 60 * 1000, // 运行中复检间隔 2h：吊销/暂停/续期、时间回拨、运行中到期都要等到下一次复检才发现，最坏延迟 2h。启动时会立即校验一次，所以开机回拨照旧当场拦住
   TIMEOUT_MS: 5000,                        // /licenseCheck 请求超时
 };
 

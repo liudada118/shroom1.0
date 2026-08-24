@@ -3259,7 +3259,7 @@ function sendLicenseErrorToAll(msg) {
   });
 }
 
-/** 5min 复检回调：valid 由 true→false（吊销/过期/回拨锁定/断网无缓存）时通知前端停用。 */
+/** 2h 复检回调：valid 由 true→false（吊销/过期/回拨锁定/断网无缓存）时通知前端停用。 */
 function onLicensePollChange(st, prevValid) {
   if (prevValid && !st.valid) {
     logger.warn('[License] 复检失效，通知前端停止使用：' + (st.reason || '') + (st.locked ? '（已锁定）' : ''));
