@@ -4,7 +4,7 @@ import { sendWebSocketJson } from './websocketTransport';
 import "./index.scss";
 import CanvasCar from "../../components/three/carnewTest copy";
 import CanvasCarWow from "../../components/three/carnewWow";
-import CanvasCarQX from "../../components/three/carQX"
+import CanvasCarQX from "../../components/three/carQXFbx"
 import WholeChair from "../../components/three/wholeChair"
 import CanvasCarSofa from "../../components/three/carSofa"
 import CanvasDaliegu from "../../components/num/daliegu"
@@ -475,6 +475,17 @@ const initConfig = {
     valuel1: 11,
     valuef1: 14,
     value1: 3.54,  //高度
+  },
+  // chairQX（matrixName === 'carQX'）。数值照抄 carQXFbx.jsx 里同名变量的初值，
+  // 不给它单独一条就会落到 initConfig['bed']：颜色量程 1205、高度 0.72，
+  // 对这套 16×16 座椅点图偏得太多（实测柔化后的值只到 ~560）。
+  carQX: {
+    valueg1: 4,
+    valuej1: 255,
+    valuel1: 1,
+    valuef1: 2,
+    value1: 2.1,  //高度
+    valuelInit1: 500,
   }
 }
 
