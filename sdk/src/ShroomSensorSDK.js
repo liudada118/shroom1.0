@@ -12,6 +12,8 @@ const { BackendCommandRouter } = require('./backend/BackendCommandRouter');
 const { LicenseService } = require('./license/LicenseService');
 const { PathService } = require('./config/PathService');
 const { ReportService } = require('./report/ReportService');
+const { createPortProbe, formatProbeResult } = require('./serial/PortProbe');
+const { coverage: sensorCoverage, getSensor } = require('./sensors');
 
 function hasWchSignature(port = {}) {
   const source = [
@@ -95,6 +97,14 @@ class ShroomSensorSDK {
     return this.exporter;
   }
 
+  /**
+   * 查一个传感器的技术定义（矩阵、通道、波特率、协议）。
+   * 未知类型返回 null —— 不要瞎猜，猜错的形状比报错难查得多。
+   */
+  describeSensor(sensorType) {
+    return getSensor(sensorType);
+  }
+
   registerProfile(sensorType, profile) {
     return this.registry.registerProfile(sensorType, profile);
   }
@@ -111,13 +121,66 @@ class ShroomSensorSDK {
     return this.registry.lineOrders.apply(name, data, context);
   }
 
+  /**
+   * 列出串口。
+   *
+   * options.probe 为 true 时会真去每个口上采一小段数据，把「插上了但不通」
+   * 这类沉默故障变成结论 —— 见 diagnose()。probe 会独占串口，
+   * 所以不要在已经 open() 的会话上同时调。
+   */
   async listPorts(options = {}) {
     const ports = await SerialPort.list();
     const summarized = ports.map(summarizePort);
-    if (options.onlyLikelySensorPorts) {
-      return summarized.filter((port) => port.isLikelySensorPort);
+    const filtered = options.onlyLikelySensorPorts
+      ? summarized.filter((port) => port.isLikelySensorPort)
+      : summarized;
+    if (!options.probe) {
+      return filtered;
     }
-    return summarized;
+    const probe = this.getPortProbe();
+    const results = [];
+    // 串行探测：两个探针同时抢同一根 USB 转串口芯片会互相干扰。
+    for (const port of filtered) {
+      results.push({
+        ...port,
+        probe: await probe.probePort(port.path, options),
+      });
+    }
+    return results;
+  }
+
+  getPortProbe() {
+    if (!this.portProbe) {
+      this.portProbe = createPortProbe(this.options.probe || {});
+    }
+    return this.portProbe;
+  }
+
+  /**
+   * 接入自检 —— 客户拿到 SDK 第一条该跑的命令。
+   *
+   * 回答的是「我插的东西到底通没通、是什么」，而不是「有哪些 COM 口」。
+   * lines 可以直接打印给客户或贴进工单，比让人截图 DevTools 强。
+   */
+  async diagnose(options = {}) {
+    const ports = await this.listPorts({
+      ...options,
+      probe: true,
+      onlyLikelySensorPorts: options.onlyLikelySensorPorts !== false,
+    });
+    const lines = ports.map((port) => formatProbeResult(port.path, port.probe));
+    const identified = ports.filter((port) => port.probe && port.probe.verdict === 'identified');
+    if (ports.length === 0) {
+      lines.push('没有发现疑似传感器串口。检查 USB 是否插好、CH34x 驱动是否装了；'
+        + '如果确认插了，用 listPorts() 看全部串口，或 diagnose({ onlyLikelySensorPorts: false })。');
+    }
+    return {
+      portCount: ports.length,
+      identifiedCount: identified.length,
+      ports,
+      lines,
+      coverage: sensorCoverage(),
+    };
   }
 
   async open(options = {}) {
@@ -170,4 +233,5 @@ module.exports = {
   ShroomSensorSDK,
   summarizePort,
   hasWchSignature,
+  formatProbeResult,
 };

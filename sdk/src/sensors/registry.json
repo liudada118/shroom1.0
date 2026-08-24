@@ -1,0 +1,304 @@
+{
+  "_meta": {
+    "purpose": "传感器技术注册表 —— 唯一真相。协议、矩阵、通道、波特率都以本文件为准。",
+    "consumers": [
+      "sdk/src/profiles.js（协议画像，最终应由本表生成）",
+      "listPorts({ probe: true }) 的自动识别",
+      "客户侧的 AI / 代码生成（本表是机器可读的，不要手抄成 markdown 表格）"
+    ],
+    "invariants": [
+      "licenseSensorGroups.json 里每个可售 value 都必须在 sensors 里有条目 —— 否则客户能买到 SDK 解不出来的传感器",
+      "verified=true 的条目必须有完整 protocol.baudRate / valueType / pressureLength 和 matrix",
+      "由 test/sensorRegistry.test.js 强制，不要手工维护一致性"
+    ],
+    "verifiedMeaning": "true = sdk/src/profiles.js 里有可用画像，实机验证过。false = 可售但 SDK 尚无画像，unknown 字段列出缺什么。",
+    "delimiterFormat": "hex 字符串，无分隔符。standard = aa550399"
+  },
+
+  "delimiters": {
+    "standard": "aa550399",
+    "smallBed12BTail": "aa0055000300 9900"
+  },
+
+  "sensors": {
+    "hand": {
+      "label": "通用手部",
+      "licenseGroup": "common",
+      "verified": true,
+      "protocol": { "baudRate": 1000000, "valueType": "uint8", "delimiter": "aa550399", "pressureLength": 1024 },
+      "matrix": { "width": 32, "height": 32 },
+      "lineOrder": "jqbed",
+      "channels": ["sit"],
+      "source": "sdk/src/profiles.js"
+    },
+
+    "jqbed": {
+      "label": "JQ 床垫",
+      "licenseGroup": "care",
+      "verified": false,
+      "protocol": { "baudRate": 1000000 },
+      "unknown": ["valueType", "delimiter", "pressureLength", "matrix", "lineOrder", "channels"],
+      "note": "算法配置见仓库根 jqbed-algorithm-config.json；线序名 'jqbed' 已在 SDK 注册。",
+      "source": "getDefaultBaudRate() 兜底值"
+    },
+    "petCare": {
+      "label": "宠物监护",
+      "licenseGroup": "care",
+      "verified": false,
+      "protocol": { "baudRate": 1000000 },
+      "unknown": ["valueType", "delimiter", "pressureLength", "matrix", "lineOrder", "channels"],
+      "source": "getDefaultBaudRate() 兜底值"
+    },
+    "petCareMini": {
+      "label": "宠物监护 Mini",
+      "licenseGroup": "care",
+      "verified": false,
+      "protocol": { "baudRate": 1000000 },
+      "unknown": ["valueType", "delimiter", "pressureLength", "matrix", "lineOrder", "channels"],
+      "source": "getDefaultBaudRate() 兜底值"
+    },
+
+    "bed4096": {
+      "label": "4096 床垫",
+      "licenseGroup": "lab",
+      "verified": true,
+      "protocol": { "baudRate": 3000000, "valueType": "uint8", "delimiter": "aa550399", "pressureLength": 4096 },
+      "matrix": { "width": 64, "height": 64 },
+      "lineOrder": null,
+      "channels": ["sit"],
+      "source": "sdk/src/profiles.js"
+    },
+    "bed4096num": {
+      "label": "4096 床垫（数值）",
+      "licenseGroup": "lab",
+      "verified": true,
+      "protocol": { "baudRate": 3000000, "valueType": "uint8", "delimiter": "aa550399", "pressureLength": 4096 },
+      "matrix": { "width": 64, "height": 64 },
+      "lineOrder": null,
+      "channels": ["sit"],
+      "source": "sdk/src/profiles.js"
+    },
+
+    "smallBedNoAlg": {
+      "label": "小床（无算法）",
+      "licenseGroup": "custom",
+      "verified": false,
+      "protocol": { "baudRate": 1000000 },
+      "unknown": ["valueType", "delimiter", "pressureLength", "matrix", "lineOrder", "channels"],
+      "note": "server.js: isSmallBedMatrixType() 把 smallBed / smallBedNoAlg 归为同一矩阵类。",
+      "source": "getDefaultBaudRate() 兜底值"
+    },
+    "smallBed12B": {
+      "label": "小床 12B",
+      "licenseGroup": "custom",
+      "verified": true,
+      "protocol": {
+        "baudRate": 1500000,
+        "valueType": "uint16le",
+        "delimiter": "aa0055000300 9900",
+        "pressureLength": 1024,
+        "payloadBytes": 2048
+      },
+      "matrix": { "width": 32, "height": 32 },
+      "lineOrder": "jqbed",
+      "channels": ["sit"],
+      "note": "帧尾定界（不是帧头）。payloadBytes = 1024 点 x uint16。server.js:129 SMALL_BED_12B_PAYLOAD_LENGTH。",
+      "source": "sdk/src/profiles.js + server.js:119,128-129"
+    },
+    "matCol": {
+      "label": "垫子（列向）",
+      "licenseGroup": "custom",
+      "verified": false,
+      "protocol": { "baudRate": 1000000 },
+      "unknown": ["valueType", "delimiter", "pressureLength", "matrix", "lineOrder", "channels"],
+      "note": "server/csvMatrixUtils.js 有 transposeMatColToVisualDirection() —— 存储方向与显示方向不一致。",
+      "source": "getDefaultBaudRate() 兜底值"
+    },
+    "tempFullBed": {
+      "label": "全身床垫（温度）",
+      "licenseGroup": "custom",
+      "verified": false,
+      "protocol": { "baudRate": 1000000, "pressureThreshold": 20 },
+      "unknown": ["valueType", "delimiter", "pressureLength", "matrix", "lineOrder", "channels"],
+      "source": "server.js:115 TEMP_FULL_BED_PRESSURE_THRESHOLD"
+    },
+    "wholeChair": {
+      "label": "整椅",
+      "licenseGroup": "custom",
+      "verified": false,
+      "protocol": { "baudRate": 1000000, "gaussRadius": 0.5 },
+      "channels": ["sit", "back", "neck"],
+      "channelMatrix": {
+        "sit": { "width": 16, "height": 16 },
+        "back": { "width": 16, "height": 16 },
+        "neck": { "width": 10, "height": 10 }
+      },
+      "unknown": ["valueType", "delimiter", "pressureLength"],
+      "note": "三串口传感器（server.js:134 THREE_PORT_SENSOR_TYPES）。通道矩阵取自 client/src/components/three/wholeChair.jsx 的 allConfig，与 carQXFbx.jsx 一致。",
+      "source": "server.js:121,128,134 + client/src/components/three/wholeChair.jsx"
+    },
+    "minzhen": {
+      "label": "民振",
+      "licenseGroup": "custom",
+      "verified": false,
+      "protocol": {
+        "baudRate": 115200,
+        "frameStartPattern": "yroscope\\s*:",
+        "gaussRadius": 0.5,
+        "zeroPointIndexes": [384, 416]
+      },
+      "unknown": ["valueType", "pressureLength", "matrix", "channels"],
+      "note": "ASCII 文本协议（靠 'yroscope:' 正则找帧头），不是二进制定界。波特率 115200 与 getDefaultBaudRate('minzhen') 的兜底值 1000000 冲突 —— 以本表为准，见 test/sensorRegistry.test.js 的回归。",
+      "source": "server.js:122-126"
+    },
+
+    "handSinglePoint": {
+      "label": "手部单点",
+      "licenseGroup": "precision",
+      "verified": true,
+      "protocol": { "baudRate": 1000000, "valueType": "uint8", "delimiter": "aa550399", "pressureLength": 1024 },
+      "matrix": { "width": 32, "height": 32 },
+      "lineOrder": "handSinglePoint",
+      "channels": ["sit"],
+      "source": "sdk/src/profiles.js"
+    },
+    "hand0205": {
+      "label": "手套 0205",
+      "licenseGroup": "precision",
+      "verified": true,
+      "protocol": {
+        "baudRate": 921600, "valueType": "uint8", "delimiter": "aa550399",
+        "pressureLength": 256, "rotateOffset": 256, "rotateLength": 4
+      },
+      "matrix": { "width": 16, "height": 16 },
+      "lineOrder": null,
+      "channels": ["sit", "back"],
+      "source": "sdk/src/profiles.js"
+    },
+    "hand0205Double": {
+      "label": "手套 0205 双手",
+      "licenseGroup": "precision",
+      "verified": true,
+      "protocol": {
+        "baudRate": 921600, "valueType": "uint8", "delimiter": "aa550399",
+        "pressureLength": 256, "rotateOffset": 256, "rotateLength": 4
+      },
+      "matrix": { "width": 16, "height": 16 },
+      "lineOrder": null,
+      "channels": ["sit", "back"],
+      "source": "sdk/src/profiles.js"
+    },
+    "handGlove115200": {
+      "label": "手套 115200",
+      "licenseGroup": "precision",
+      "verified": true,
+      "protocol": {
+        "baudRate": 115200, "valueType": "uint8", "delimiter": "aa550399",
+        "pressureLength": 256, "rotateOffset": 256, "rotateLength": 4
+      },
+      "matrix": { "width": 16, "height": 16 },
+      "lineOrder": null,
+      "channels": ["sit", "back"],
+      "source": "sdk/src/profiles.js"
+    },
+    "handGloveFullPacket": {
+      "label": "手套整包",
+      "licenseGroup": "precision",
+      "verified": true,
+      "protocol": {
+        "baudRate": 921600, "valueType": "uint8", "delimiter": "aa550399",
+        "parser": "handGloveFullPacket", "packetLength": 274, "pressureLength": 256
+      },
+      "matrix": { "width": 16, "height": 16 },
+      "lineOrder": null,
+      "channels": ["sit", "back"],
+      "note": "整包 274 字节：[0]=?, [1]=packetType, [2..258)=压力 256, [258..274)=rotate 16。",
+      "source": "sdk/src/profiles.js + sdk/src/protocol/parsers.js:112"
+    },
+    "smallSample": {
+      "label": "小样本",
+      "licenseGroup": "precision",
+      "verified": false,
+      "protocol": { "baudRate": 921600 },
+      "unknown": ["valueType", "delimiter", "pressureLength", "matrix", "lineOrder", "channels"],
+      "source": "getDefaultBaudRate() 显式分支"
+    },
+    "robot1": {
+      "label": "机器人 1",
+      "licenseGroup": "precision",
+      "verified": false,
+      "protocol": { "baudRate": 921600 },
+      "unknown": ["valueType", "delimiter", "pressureLength", "matrix", "lineOrder", "channels"],
+      "note": "server.js: 名字含 'robot' 的类型走 isHandStorageType / isZeroFrameStorageType 分支。",
+      "source": "getDefaultBaudRate() 的 includes('robot') 分支"
+    },
+    "robotSY": {
+      "label": "机器人 SY",
+      "licenseGroup": "precision",
+      "verified": false,
+      "protocol": { "baudRate": 921600 },
+      "unknown": ["valueType", "delimiter", "pressureLength", "matrix", "lineOrder", "channels"],
+      "source": "getDefaultBaudRate() 的 includes('robot') 分支"
+    },
+    "robotLCF": {
+      "label": "机器人 LCF",
+      "licenseGroup": "precision",
+      "verified": false,
+      "protocol": { "baudRate": 921600 },
+      "unknown": ["valueType", "delimiter", "pressureLength", "matrix", "lineOrder", "channels"],
+      "source": "getDefaultBaudRate() 的 includes('robot') 分支"
+    },
+    "footVideo": {
+      "label": "足底（视频）",
+      "licenseGroup": "precision",
+      "verified": false,
+      "protocol": { "baudRate": 921600 },
+      "unknown": ["valueType", "delimiter", "pressureLength", "matrix", "lineOrder", "channels"],
+      "note": "server.js: isZeroFrameStorageType() 包含 footVideo —— 落库时保留零帧。",
+      "source": "getDefaultBaudRate() 显式分支"
+    },
+    "daliegu": {
+      "label": "大腿骨",
+      "licenseGroup": "precision",
+      "verified": false,
+      "protocol": { "baudRate": 921600 },
+      "unknown": ["valueType", "delimiter", "pressureLength", "matrix", "lineOrder", "channels"],
+      "source": "getDefaultBaudRate() 显式分支"
+    },
+    "fast256": {
+      "label": "高速 256",
+      "licenseGroup": "precision",
+      "verified": false,
+      "protocol": { "baudRate": 1000000 },
+      "unknown": ["valueType", "delimiter", "pressureLength", "matrix", "lineOrder", "channels"],
+      "note": "命名与 fast1024 同族，推测 256 点 / 16x16，但未验证 —— 不要当成事实用。",
+      "source": "getDefaultBaudRate() 兜底值"
+    },
+    "fast1024": {
+      "label": "高速 1024",
+      "licenseGroup": "precision",
+      "verified": true,
+      "protocol": { "baudRate": 1000000, "valueType": "uint8", "delimiter": "aa550399", "pressureLength": 1024 },
+      "matrix": { "width": 32, "height": 32 },
+      "lineOrder": null,
+      "channels": ["sit"],
+      "source": "sdk/src/profiles.js"
+    },
+    "humanBody": {
+      "label": "人体",
+      "licenseGroup": "precision",
+      "verified": false,
+      "protocol": { "baudRate": 1000000 },
+      "unknown": ["valueType", "delimiter", "pressureLength", "matrix", "lineOrder", "channels"],
+      "source": "getDefaultBaudRate() 兜底值"
+    },
+    "humanBodyOptimized": {
+      "label": "人体（优化）",
+      "licenseGroup": "precision",
+      "verified": false,
+      "protocol": { "baudRate": 1000000 },
+      "unknown": ["valueType", "delimiter", "pressureLength", "matrix", "lineOrder", "channels"],
+      "source": "getDefaultBaudRate() 兜底值"
+    }
+  }
+}
