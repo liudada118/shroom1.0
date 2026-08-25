@@ -1,5 +1,31 @@
 # 架构文档
 
+## 2026-08-25 仓库行尾钉死（`.gitattributes`）
+
+仓库此前既没有 `.gitattributes`，`core.autocrlf` 又是 `false` —— 等于把行尾完全交给
+签出时那台机器上的工具。结果是某个 Windows 侧工具把整个工作区重写成了 CRLF，`git`
+把 **575 个文件**判成改动（`132740 insertions(+) / 132740 deletions(-)`），而
+`git diff --ignore-cr-at-eol --name-only` 是 **0 个文件** —— 一个字符的内容差异都没有。
+
+范围里有 [build/assets/](build/assets/) 的 70 个构建产物、[display-systems/](display-systems/)
+的 11 份 manifest、[licenseManager.js](licenseManager.js) 和 [docs/](docs/) 全部文档。
+这种改动一旦被 `git add -A` 提交进去，blame 就废了，而且必然和并行分支冲突。
+
+只丢弃一次治不了本 —— 那个工具下次跑还会再来一遍。所以加
+[.gitattributes](.gitattributes)：
+
+- `* text=auto eol=lf` —— 文本/二进制由 git 按内容判定，判为文本的一律以 LF 签出。
+  仓库里**没有任何被跟踪的 `.bat` / `.cmd` / `.ps1`**，不存在必须保留 CRLF 才能执行
+  的脚本，所以这条没有例外。
+- 显式 `binary` 一批（`png` / `jpg` / `ico` / `icns` / `glb` / `gltf` / `fbx` / `obj` /
+  `db` / `bin` / `dat` / `so` / `pyd` / `pyc`）—— 即便 git 的自动判定失手也不许改写。
+  `build/model` 下 137 MB 的模型和几份 GB 级 db 快照被改一个字节就废了。
+
+**留了一个已知尾巴**：`forge.config.js` 是全仓唯一一个**索引里就存着 CRLF** 的文本
+文件（`git ls-files --eol` 显示 `i/crlf w/crlf`）。它现在不脏（索引与工作区字节一致），
+但下一次谁编辑它并 `git add`，会连带一整份 LF 归一化的差异。它属于打包/部署配置，
+不在本次改动范围内，等要动它时单独一条提交归一化。
+
 ## 2026-08-11 前端渲染器独立目录
 
 `sdk/frontend` 的五类渲染实现已从顶层 `core/<renderer>` 与 `react/<renderer>` 抽离到
@@ -1640,6 +1666,7 @@ flowchart LR
 
 | 日期 | 类型 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-25 | 配置变更 | 新增 `.gitattributes` 钉死行尾。起因：仓库既无 `.gitattributes` 又 `core.autocrlf=false`，某个 Windows 工具把整个工作区重写成 CRLF，`git` 判出 **575 个文件改动 / 132740 行**，而 `git diff --ignore-cr-at-eol --name-only` 是 **0** —— 纯行尾噪声，零内容差异。已丢弃那批噪声并加 `* text=auto eol=lf`（全仓无被跟踪的 `.bat`/`.cmd`/`.ps1`，无需 CRLF 例外）＋ 14 类显式 `binary`（防 `build/model` 137 MB 模型与 GB 级 db 快照被改写）。**已知尾巴**：`forge.config.js` 是全仓唯一索引里存 CRLF 的文本文件（`i/crlf w/crlf`），现在不脏，但下次编辑它会连带一整份归一化差异；它属打包配置，留待单独提交处理。 |
 | 2026-08-11 | 新增功能 | `sdk/frontend/docs/#/num-matrix` 增加两步式矩阵配置台：坐标 JSON 自动识别行列并显示首末点，一维/二维帧数组严格校验，默认生成 `1..N`，支持 90°/180° 旋转和水平/垂直镜像；所有修改直接驱动包内 `RendererHost + numMatrix`。完成桌面、390px 移动端、真实 32×32 坐标文件和 WebGL 画布验证。 |
 | 2026-08-10 | 优化重构 | **第三轮渲染实现进包，批 4/4：两条斑点热力 `webglHeatmap` + `blobHeatmap`（本包第四、五个渲染器）—— 至此主应用五条渲染通路全部进包，`client/src` 侧只剩壳。** `webgl/Canvas4096WebGL.jsx`（187，壳）+ `webgl/WebGL.HeatMap copy 2.js`（953，真 WebGL 绘制核）→ `webglHeatmap`；`heatmap/canvas.jsx`（460，Canvas 2D）→ `blobHeatmap`。**这两条刻意没合成一个渲染器的两个后端**：`numMatrix` 那三个后端能共存是因为吃同一份参数、暴露同一组方法，而这两条参数不重合、方法不重合（`webglHeatmap` 4 个、`blobHeatmap` 3 个）、连「一帧多长才算有效」都不同（前者 `minFrameLength` 4096，短帧整帧丢弃且不报错；后者非空即画）—— 硬合等于造一个「一半字段在这条通路上是死的」参数表，`builtins.test.js` 有两条断言钉住这个分界。**契约一项没加**：批 1 预先补的 10 个方法名里就有 `changeColor` / `bthClickHandle`，这一批全部命中 —— 而 `registerRenderer` 对契约外方法名是**静默拒绝**（返回 `false` 不抛，现象只是「这个展示形式一片空白」加控制台一行），所以「不用改契约」这件事由测试证、不靠眼看。**第 8 条配色 `heatBlobs` 第一次有了 JS 侧的对应物**：那条 8 段色带原先只以 GLSL 形式躺在 `WebGL.HeatMap copy 2.js` 的模板字符串里，之前 18 处配色合并扫不到它；现在进 `core/colormaps.js`，着色器改成**从 `HEAT_BLOB_STOPS` 发码**，色卡 / 数值采样 / 出图同一个出处，`sampleHeatBlobsRgb` 复现了 GLSL 那道 `pow(c*1.5, 1/2.2)` gamma 与输出夹取（不复现的话色卡与实际出图就是两个颜色）。**清掉的重复与死码**：绘制核里私有的第二份 `addSide` / `interp` / `interpSmall` 改用 `core/frameMath.js`，`create_shader` / `create_program` 改用批 2 建的 `react/webgl/glUtil.js`；`heatmap/canvas.jsx` 里**每帧算一整套插值+补边+高斯、结果从没被读过**（取数循环读的是原始 `arr`）整段删掉，逐像素相同 —— 代价是 `sitValue` 六个键里那四个本来就只喂这段死运算；无参空调用 `const value = jet()` 删；写死的 `new Array(1024)` 改成按实际尺寸算；零引用的 `assets/util/heatmapRect.js`（76 行）删。**本轮唯一一处不逐像素等同的差异，而且它修的是 bug**：`heatmap/canvas.jsx` 的 `carCol` 分支改的是**模块级** `options`，挂过一次之后同一会话里所有实例都变成 `max 300`；改成每实例参数后这个串味没了。另加 rAF 的 `dirty` 标志（没数据没参数变化就不重画，静态画面下像素完全相同）与调色板按参数记忆化（原来每次渲染重建 1024 格）。**旧路径按「真有引用方才留壳」的规矩分别处理**：绘制核那个文件**留壳**（`hand.jsx` / `humanBody.jsx` / `robotLCF.jsx` / `robotSY.jsx` 四个 video 组件与 `Home.jsx` 还在直接 `new WebGLCanvas(...)` —— 文件名带 "copy 2" 但它不是死码），`heatmap/canvas.jsx` 留 75 行适配壳，`Canvas4096WebGL.jsx` 删（唯一 importer 是 `Home.jsx`）。文档站 10 → 12 页（补 `HandPoints` 与 `Heatmap` 两页，后者一页放两个渲染器、两块各自 `?raw` 的源码）。对账：sdk vitest 443 例、smoke 32 项、client vitest 214 例（`App.test.jsx` 缺 `@testing-library/react` 是既有失败）、eslint 0 error / 56 warning、docs check 12 页、护栏构建下 `WebglHeatmapRenderer` 3.81 kB / `BlobHeatmapRenderer` 5.04 kB / `blobs` 7.79 kB **三个都是独立懒加载 chunk**（没有 `dynamic import will not move module into another chunk`），`build/model` 仍是 20 个 / 137M。**真机手测仍欠**：`bed4096` 的两个 WebGL 热力渲染点、`heatmap` 形式下 `foot`/`carCol`/`jqbed`/`petCare`/`hand`/back/sit，以及反复切 10 次展示形式看 WebGL 上下文不累积（本轮占上下文的渲染器从 2 个变 4 个）。 |
 | 2026-08-07 | 优化重构 | **第三轮渲染实现进包，批 3/4：新渲染器 `handPoints`（本包第三个）** —— `three/hand0205Point.jsx`（993）与 `hand0205Point147.jsx`（1037）**合成一个渲染器三条预设**（`hand0205` / `hand0205Alt` / `hand0205_147`，第三条来自原文件里那行注释掉的 `glovesPoints = glovesPoints1` 死数据）。它是全仓唯一有 **`ARTICULATED`** 能力的渲染器：GLTF 手模 + IMU 四元数驱动的手指关节旋转，`pointGrid` 没有对应物。分层线照旧是「有没有 React / three / DOM」，纯度做到了 `core/handPoints/quaternion.js` —— 原实现用 `THREE.Quaternion`，但只用到 `clone`/`invert`/`multiplyQuaternions`/`lengthSq` 四个方法，**手写十几行代数换来「在裸 Node 里逐点可测」**（连 `THREE.Quaternion.invert()` **其实是共轭而不是真逆**这一点也照抄：不除以 `lengthSq`，所以喂非单位四元数两次得到 `w = lengthSq(q)` 而不是 1，有测试钉住）。另新增 `core/rainbowLadder.js`（第 3 条阶梯表：26 级**离散查表**彩虹 + `jetWhite3`，与连续插值的 `jetRgb` 不是一回事，别互换），`client` 侧 `color.js` / `util.js` 在原路径 re-export。**⚠️ 计划文本里那条「147 那份本地 26 行 `interp` 直接删、改用 `core/frameMath.js` 的 `interpSmall`」被证伪** —— 全仓有**三份互不相同**的 `interp`：`util.js:190` 居中稀疏就地写、`frameMath.js` 的 `interpSmall` 稀疏散点、147 那份**双向线性填斜坡**（实测同一帧 ramp 非零 4056 格 vs interpSmall 1004 格）。替换即画面变化，所以逐字搬成 `interpRamp`，并用 `pipeline.test.js` 一个 `describe` 块 + 一条 smoke 检查把这条反证钉死，防止哪天有人「顺手去重」。**修好了一整套哑掉的框选**：原实现 import 了 `SelectionHelper`、声明了 `selectHelper`、`changeBox()`/`cancelSelect()` 都在读它，**但全文没有一处给它赋过值** —— 两个方法一调就是 `TypeError`，`sitMatrix` 恒为 `[]`、`checkRectangleIntersection` 永远返回 `null`、能置假 `controlsFlag` 的 `changeFlag()` 压根不在 `useImperativeHandle` 里。补 `new SelectionHelper(...)` + 按 `pointGrid` 的做法现算 `sitMatrix` + 把 `changeSelectFlag`（本来就在契约里）补进对外方法，`BOX_SELECT` 这条能力才是真的；**主应用画面零变化**，因为没有调用方给手部点云传过 `changeSelectFlag`。其余结构性改动同前两批的配方：8 个模块级可变量（尤其是四元数基准 —— 同页挂两块手套会互相覆盖零位）收进 `stateRef`、卸载时真清 WebGL 上下文/几何体/材质/贴图/GLTF 手模（原 cleanup 只有 `cancelAnimationFrame` 加一句对着 `undefined` 调的 `selectHelper?.dispose()`）、`circle.png` 从运行期相对 URL 改成打包资源并从 `react/pointGrid/` 挪到两者共用的 `react/three/`。删掉三行死代码：两处 `TextureLoader().load('./hand.jpg')` 赋给再没人读的局部 `const`（521 KB × 2 次纯浪费的网络请求）、一个从别处抄来但全文没创建过任何 tween 的 `TWEEN.update()`（留着等于让本包平白多一个 peer 依赖）。**这一批也没留壳**：grep 确认两个原文件唯一的 importer 就是 `Home.jsx:29-30`，换成 `RendererHost` 后归零，两文件直接删 2030 行。**测试期间纠正了四条自己上一轮写错的文档事实**（都是靠 `node -e` 实测而不是靠读代码猜出来的）：147 点表是 **147** 项不是 155；两张手套关节表是 **96** 项、分区是 `3×10 + 2×8 + 5×10` 而不是「10 行 × 10 列 100 项」（第 4、5 行只有 8 项，字面量排版骗了人）；掩码盖点循环**确实一处边界检查都没有**但两张随包点表**实测都不会踩到**（508 次写入的行范围 0..27、列 2..28，全在 32×32 内），所以代价只落在自带点表的消费者身上；以及 pipeline 头部声称「保留了原实现那个算了不用的 `colValue`」其实**没保留**（它是纯读、删掉逐点等价）。对账：SDK **217 → 320** 例（+103：quaternion 13 / layout 19 / pipeline 21 / params 31 / rainbowLadder 13 / builtins +6），client **211 → 212**（+1，`index.test.js` 的「每个渲染器都能真加载」参数化多一项），smoke-core **23 → 28** 项，eslint 0 error，docs check 10 页；构建走护栏，`HandPointsRenderer` 独立成 14 kB chunk（没有 `dynamic import will not move module` 告警），`build/model` 20 个 / 137M 完好、`git status --short build/` 为 0 |
@@ -1802,6 +1829,7 @@ flowchart LR
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-25 | 仓库行尾统一 | `.gitattributes` 落地，575 文件 / 132740 行的 CRLF 假改动清零，工作区回到干净状态；`git ls-files --eol` 复核后全仓只剩 `forge.config.js` 一个索引侧 CRLF 遗留，已记账。 |
 | 2026-08-11 | SDK 文档页可以直接设置矩阵形状和一帧数据 | 用户可加载自己的坐标 JSON，页面自动识别行列和点数；随后直接粘贴或加载数组，并用 `1..N`、旋转和镜像核对真实方向。配置变化直接送进包内数字矩阵渲染器，不需要先改代码。 |
 | 2026-08-10 | 剩下两种「热力斑点」画法也搬进了渲染包（四批里的最后一批，五种画法全搬完了） | 就是床垫那种一团一团发亮的图，还有各种小面积的热力图。这两种以前是两套完全不同的代码，一套用显卡画、一套用普通画布画，现在都进了渲染包，但**故意没有合成一种** —— 它们连「多长的一帧才算数」都不一样，硬合起来会造出一半参数是废的东西。顺手修了一个老 bug：以前只要显示过一次「汽车座椅」那种小热力图，同一次开机里后面所有热力图的满值阈值都会跟着变成它的，画面偏色，现在每一块图各管各的。另外删掉了一段「每帧都在算、算完从来没人用」的模糊运算（画面一个像素都没变，只是不白烧 CPU 了），和一个 76 行的零引用文件。文档站从 10 页变 12 页，新的两页可以直接在浏览器里看着画面读参数表。 |
 | 2026-08-07 | 「手套点云」这种画法也搬进了渲染包（四批里的第三批） | 就是主界面上戴着手套、屏幕里跟着一起动的那只手。原本是两个文件、两千多行，其实只是同一种画法配了两套参数和两张不同的"传感点位置表"，现在合成一个、用预设切换。搬的过程中发现原来那套"框选"功能**从来就是坏的** —— 代码写了、按钮也在，但一点就报错，因为有个关键对象从头到尾没被创建过。顺手修好了。还删掉了每次打开这个画面都会白白下载一张 521KB 图片的两行废代码（图片下载完就扔，没人用）。界面看起来和以前一模一样 |
@@ -1929,7 +1957,7 @@ flowchart LR
 
 ---
 
-> 本文档由 Codex 自动生成和维护。最后更新于：2026-08-10
+> 本文档由 Codex 自动生成和维护。最后更新于：2026-08-25
 
 ## 2026-07-07 Display Systems Runtime 定义与复杂线序迁移
 
@@ -2392,6 +2420,7 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-25 | codeOpi | 新增 `.gitattributes`，仓库行尾统一为 LF | 清掉 575 文件 / 132740 行的纯 CRLF 假改动（忽略行尾后内容差异为 0），并用 `* text=auto eol=lf` + 14 类显式 `binary` 防复发。遗留 `forge.config.js` 一个索引侧 CRLF 文件未归一化（属打包配置，单独处理）。 |
 | 2026-08-11 | codeOpi | SDK 数字矩阵文档页完成形状与数据直接配置 | 支持坐标 JSON 自动推导行列、`1..N` 方向帧、一维/二维数组校验、旋转/镜像和真实 `numMatrix` 活预览；真实 32×32 坐标文件、桌面与 390px 移动端验证通过。 |
 | 2026-08-10 | codeOpi | 第三轮渲染实现进包批 4/4：两条斑点热力 `webglHeatmap` + `blobHeatmap`（本包第四、五个渲染器，五条渲染通路全部进包） | `webgl/Canvas4096WebGL.jsx`（187）+ `webgl/WebGL.HeatMap copy 2.js`（953）→ `webglHeatmap`；`heatmap/canvas.jsx`（460）→ `blobHeatmap`。两条**刻意分成两个渲染器**而不是一个渲染器的两个后端（参数、方法、帧长门槛三样都不重合，`builtins.test.js` 两条断言钉住）。契约一项没加 —— 批 1 预扩的 10 个方法名全部命中。第 8 条配色 `heatBlobs` 从 GLSL 模板字符串里提出来进 `core/colormaps.js`，着色器改成从 `HEAT_BLOB_STOPS` 发码。清掉两份重复的帧运算/GL 样板、一段每帧算完没人读的死运算、一个无参空调用、一个 76 行零引用文件；修掉 `carCol` 分支改模块级 `options` 导致的跨实例串味（本轮唯一非逐像素等同处，修的是 bug）。旧路径按「真有引用方才留壳」处理：绘制核留壳（4 个 video 组件 + `Home.jsx` 在用），`heatmap/canvas.jsx` 留 75 行适配壳，`Canvas4096WebGL.jsx` 删。文档站 10 → 12 页。sdk vitest 443 / smoke 32 / client vitest 214 / eslint 0 error / docs 12 页；三个新 chunk 均独立懒加载。真机手测欠 `bed4096` 两个渲染点与 `heatmap` 形式七种矩阵。 |
 | 2026-08-07 | codeOpi | 第三轮渲染实现进包批 3/4：新渲染器 `handPoints`（本包第三个，唯一有 `ARTICULATED` 能力），两份 2030 行的原实现合并为一并删除 | `three/hand0205Point.jsx`（993）+ `hand0205Point147.jsx`（1037）→ 一个渲染器三条预设（`hand0205` / `hand0205Alt` / `hand0205_147`，第三条来自原文件里注释掉的 `glovesPoints1` 死数据）。新增 `core/handPoints/{params,layout,pipeline,quaternion}.js` + `core/rainbowLadder.js` + `react/handPoints/HandPointsRenderer.jsx`；`circle.png` 从 `react/pointGrid/` 挪到两个点云渲染器共用的 `react/three/`。`core/` 的纯度做到了手写四元数代数（不引 three，裸 Node 可逐点测；`invert()` 是共轭而非真逆这个行为照抄并有测试钉住）。**计划里「删掉 147 那份本地 `interp`、改用 `interpSmall`」被实测证伪** —— 三份 `interp` 互不相同，替换即画面变化，逐字搬成 `interpRamp` 并用一个 `describe` 块 + 一条 smoke 检查钉住反证。**修好一整套哑掉的框选**（`selectHelper` 全文从没被赋值，`changeBox`/`cancelSelect` 一调就 `TypeError`），主应用画面零变化。删三行死代码：两处 521 KB 的 `hand.jpg` 死加载 + 一个没有任何 tween 的 `TWEEN.update()`。没留壳（唯一 importer 是 `Home.jsx:29-30`）。测试期间纠正了四条自己上一轮写错的文档事实（147 表是 147 项不是 155；手套关节表是 96 项 / `3×10+2×8+5×10` 分区不是 100 项 10×10；掩码没有边界检查但两张随包表实测都不越界；那个「保留了的」`colValue` 其实没保留）。SDK 217 → **320** 例，client 211 → **212**，smoke-core 23 → **28** 项，eslint 0 error，docs 10 页，构建走护栏（`HandPointsRenderer` 独立 14 kB chunk，无 chunk 塌回告警，`build/model` 20 个 / 137M 完好） |
@@ -2773,6 +2802,7 @@ graph TD
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-25 | codeOpi | 配置变更 | 新增 `.gitattributes`：`* text=auto eol=lf` + `png`/`jpg`/`ico`/`icns`/`glb`/`gltf`/`fbx`/`obj`/`db`/`bin`/`dat`/`so`/`pyd`/`pyc` 共 14 类显式 `binary`。同时 `git checkout -- .` 丢弃 575 文件的 CRLF 假改动（`git diff --ignore-cr-at-eol` 验证零内容差异后才执行）。`ARCHITECTURE.md` 补本轮章节与四表记录。未改任何源码。 |
 | 2026-08-11 | codeOpi | 新增功能 | `sdk/frontend/docs/src/pages/NumMatrix.jsx` 改为“设置形状 + 设置一帧数据”的直接配置页；`BasicNumMatrix.jsx` 支持外部 `params`/`values` 与方向校验下限；`styles.css` 增加配置台和移动端布局。 |
 | 2026-08-10 | codeOpi | 优化重构 | 第三轮渲染实现进包**批 4/4**：新增 `sdk/frontend/react/webglHeatmap/{WebglHeatmapRenderer.jsx,blobs.js}`、`react/blobHeatmap/BlobHeatmapRenderer.jsx`、`core/webglHeatmap/{params,pipeline,shaders}.js`、`core/blobHeatmap/{params,pipeline,intensity}.js` 与各自的测试；`core/colormaps.js` 追加第 8 条配色 `heatBlobs`（+ `HEAT_BLOB_STOPS` 铺到 `core` 顶层，供着色器发码与文档站色卡共用）；`react/builtins.js` 注册数 3 → 5；`react/builtins.test.js` 计数改 5 并补两条热力的描述符断言（443 例）；`scripts/smoke-core.mjs` 32 项；文档站新增 `docs/src/pages/{HandPoints,Heatmap}.jsx` 与三份 demo，`routes.js` 10 → 12 页。删 `client/src/components/webgl/Canvas4096WebGL.jsx` 与 `client/src/assets/util/heatmapRect.js`；`components/webgl/WebGL.HeatMap copy 2.js` 与 `components/heatmap/canvas.jsx` 改成壳；`Home.jsx` 三个渲染点换 `RendererHost`。`sdk/README.md` 与 `sdk/frontend/README.md` 同步计数、目录树、边界与公开面记账。 |
 | 2026-08-07 | codeOpi | 优化重构 | 第三轮渲染实现进包**批 3/4**：新增 `sdk/frontend/react/handPoints/HandPointsRenderer.jsx` 与 `core/handPoints/{params,layout,pipeline,quaternion}.js` + `core/rainbowLadder.js`，把 `client/src/components/three/hand0205Point.jsx`（993）与 `hand0205Point147.jsx`（1037）**合成一个渲染器三条预设并删除原文件**（2030 行）。本包 ships 的渲染器 2 → **3**，新增能力 `ARTICULATED`（GLTF 手模 + IMU 四元数驱动的手指关节）。`circle.png` 从 `react/pointGrid/` 挪到 `react/three/`（两个点云渲染器共用）；`client` 侧 `assets/util/color.js` 的 `rainbowTextColorsxy` 与 `util.js` 的 `jetWhite3` 改为从包里 re-export。`Home.jsx` 两个渲染点换 `RendererHost`，**没留壳**（唯一 importer 就是那两行 import）。修好了原实现里一整套从来没能用的框选（`selectHelper` 全文未赋值），删掉两处 521 KB 的 `hand.jpg` 死加载与一个没有任何 tween 的 `TWEEN.update()`。**证伪了计划里「147 的本地 `interp` 直接删」**：三份 `interp` 互不相同，逐字搬成 `interpRamp` 并加测试钉住。SDK 217 → 320 例，client 211 → 212，smoke-core 23 → 28 项 |

@@ -1,0 +1,30 @@
+# 行尾统一。
+#
+# 2026-08-25 加这份文件的由头：工作区被某个 Windows 工具整体重写成 CRLF，
+# 而 core.autocrlf=false、仓库又没有 .gitattributes，于是 git 把 575 个文件
+# 全当成改动（132740 行「差异」，忽略行尾后内容差异为 0）。只丢弃一次治不了，
+# 那个工具下次跑还会再来一遍，所以在这里把行尾钉死。
+#
+# text=auto：由 git 按内容自己判断文本/二进制，二进制不参与任何改写。
+# eol=lf：判定为文本的一律以 LF 签出，Windows 上的编辑器改成 CRLF 也不会
+#         再产生假改动。仓库内没有任何被跟踪的 .bat/.cmd/.ps1，不存在
+#         必须保留 CRLF 才能执行的脚本。
+* text=auto eol=lf
+
+# 下面这些即便 git 的自动判定失手也不许改写 —— build/model 下 137MB 的
+# 模型和 db 快照被改一个字节就废了。
+*.png binary
+*.PNG binary
+*.jpg binary
+*.ico binary
+*.icns binary
+*.glb binary
+*.gltf binary
+*.fbx binary
+*.obj binary
+*.db  binary
+*.bin binary
+*.dat binary
+*.so  binary
+*.pyd binary
+*.pyc binary
