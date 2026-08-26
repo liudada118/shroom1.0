@@ -50,6 +50,16 @@ export function writePressureScene(scene, storage = defaultStorage()) {
 }
 
 /**
+ * 场景按钮本身就是一次明确指令：进入演示场景立即记录当前预压力，回到真实测量立即取消。
+ * 之后切换展示模式仍由 resolveDisplaySwitchZero 决定是否再次清零。
+ */
+export function resolvePressureSceneChangeZero(scene) {
+  return {
+    resetZero: normalizePressureScene(scene) === PRESSURE_SCENES.demo,
+  };
+}
+
+/**
  * @param {object} input
  * @param {string} input.sensorType    当前传感器类型（`matrixName`）
  * @param {string} input.nextMode      即将切到的展示模式（`numMatrixFlag` 的新值）

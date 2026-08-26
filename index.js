@@ -15,6 +15,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
+const { extractLocalViteUrl, stripAnsi } = require("./devServerUrl");
 
 // Windows 控制台默认代码页(936/GBK)会把 UTF-8 中文日志显示成乱码。
 // 在引入 ./server（触发授权等中文日志）之前，把控制台切到 UTF-8(65001)，
@@ -283,10 +284,6 @@ function sendToRenderer(channel, data) {
 // 导出供 server.js 使用
 module.exports = { sendToRenderer };
 
-function stripAnsi(text) {
-  return text.replace(/\u001b\[[0-9;]*m/g, "");
-}
-
 function fetchText(url) {
   return new Promise((resolve) => {
     const req = http.get(url, (res) => {
@@ -320,11 +317,6 @@ async function isExpectedFrontend(url) {
     /assets\/index-[\w-]+\.js/.test(html);
 
   return hasTitle && hasRoot && hasEntry;
-}
-
-function extractLocalViteUrl(output) {
-  const match = stripAnsi(output).match(/https?:\/\/(?:127\.0\.0\.1|localhost):\d+/i);
-  return match ? match[0] : null;
 }
 
 function waitForExpectedFrontend(url, maxRetries = DEV_SERVER_READY_TIMEOUT_MS / DEV_SERVER_RETRY_INTERVAL_MS) {
@@ -436,7 +428,7 @@ function startViteAndLoad(win) {
   }
 
   function handleViteOutput(data, logMethod) {
-    const msg = data.toString().trim();
+    const msg = stripAnsi(data.toString()).trim();
     if (!msg) return;
 
     logMethod(`[Vite] ${msg}`);

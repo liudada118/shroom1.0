@@ -14,12 +14,12 @@ import {
 describe("human body render settings", () => {
   it("uses the compact rendering defaults", () => {
     expect(DEFAULT_HUMAN_BODY_RENDER_SETTINGS).toMatchObject({
-      version: 5,
+      version: 7,
       mode: "heatmap",
       heatComputationMode: "nearest12",
       radius: 0.1,
       intensity: 0.8,
-      opacity: 0.15,
+      opacity: 0.8,
       colorScheme: 0,
       bgColor: "#afacac",
       modelColor: "#718096",
@@ -70,14 +70,14 @@ describe("human body render settings", () => {
       version: 1,
       bgColor: "#0a0a0f",
       modelColor: "#6a7a8a",
-    })).toMatchObject({ version: 5, bgColor: "#afacac", modelColor: "#718096", heatComputationMode: "nearest12" });
+    })).toMatchObject({ version: 7, bgColor: "#afacac", modelColor: "#718096", heatComputationMode: "nearest12" });
 
     expect(normalizeHumanBodyRenderSettings({
       ...DEFAULT_HUMAN_BODY_RENDER_SETTINGS,
       version: 1,
       bgColor: "#10152b",
       modelColor: "#4a5568",
-    })).toMatchObject({ version: 5, bgColor: "#10152b", modelColor: "#4a5568", heatComputationMode: "nearest12" });
+    })).toMatchObject({ version: 7, bgColor: "#10152b", modelColor: "#4a5568", heatComputationMode: "nearest12" });
   });
 
   it("migrates the version two defaults to the latest colors", () => {
@@ -86,14 +86,14 @@ describe("human body render settings", () => {
       version: 2,
       bgColor: "#e6e6e6",
       modelColor: "#d2d6dc",
-    })).toMatchObject({ version: 5, bgColor: "#afacac", modelColor: "#718096", heatComputationMode: "nearest12" });
+    })).toMatchObject({ version: 7, bgColor: "#afacac", modelColor: "#718096", heatComputationMode: "nearest12" });
 
     expect(normalizeHumanBodyRenderSettings({
       ...DEFAULT_HUMAN_BODY_RENDER_SETTINGS,
       version: 2,
       bgColor: "#10152b",
       modelColor: "#4a5568",
-    })).toMatchObject({ version: 5, bgColor: "#10152b", modelColor: "#4a5568", heatComputationMode: "nearest12" });
+    })).toMatchObject({ version: 7, bgColor: "#10152b", modelColor: "#4a5568", heatComputationMode: "nearest12" });
   });
 
   it("migrates only the version three default radius", () => {
@@ -101,13 +101,13 @@ describe("human body render settings", () => {
       ...DEFAULT_HUMAN_BODY_RENDER_SETTINGS,
       version: 3,
       radius: 0.13,
-    })).toMatchObject({ version: 5, radius: 0.1, heatComputationMode: "nearest12" });
+    })).toMatchObject({ version: 7, radius: 0.1, heatComputationMode: "nearest12" });
 
     expect(normalizeHumanBodyRenderSettings({
       ...DEFAULT_HUMAN_BODY_RENDER_SETTINGS,
       version: 3,
       radius: 0.08,
-    })).toMatchObject({ version: 5, radius: 0.08, heatComputationMode: "nearest12" });
+    })).toMatchObject({ version: 7, radius: 0.08, heatComputationMode: "nearest12" });
   });
 
   it("migrates version four settings to the selectable nearest-12 mode", () => {
@@ -116,7 +116,30 @@ describe("human body render settings", () => {
       version: 4,
       heatComputationMode: undefined,
       radius: 0.08,
-    })).toMatchObject({ version: 5, radius: 0.08, heatComputationMode: "nearest12" });
+    })).toMatchObject({ version: 7, radius: 0.08, heatComputationMode: "nearest12" });
+  });
+
+  it("keeps the numeric slider value when migrating to true transparency semantics", () => {
+    expect(normalizeHumanBodyRenderSettings({
+      ...DEFAULT_HUMAN_BODY_RENDER_SETTINGS,
+      version: 5,
+      opacity: 0.8,
+    })).toMatchObject({ version: 7, opacity: 0.8 });
+  });
+
+  it("migrates version six settings and accepts the nearest-6 energy mode", () => {
+    expect(normalizeHumanBodyRenderSettings({
+      ...DEFAULT_HUMAN_BODY_RENDER_SETTINGS,
+      version: 6,
+      heatComputationMode: "nearest6",
+    })).toMatchObject({ version: 7, heatComputationMode: "nearest6" });
+  });
+
+  it("accepts the nearest-3 ultra energy-saving mode", () => {
+    expect(normalizeHumanBodyRenderSettings({
+      ...DEFAULT_HUMAN_BODY_RENDER_SETTINGS,
+      heatComputationMode: "nearest3",
+    })).toMatchObject({ version: 7, heatComputationMode: "nearest3" });
   });
 
   it("reads and writes one safe versioned localStorage object", () => {
@@ -130,10 +153,11 @@ describe("human body render settings", () => {
     expect(writeHumanBodyRenderSettings(storage, {
       ...DEFAULT_HUMAN_BODY_RENDER_SETTINGS,
       mode: "crystal",
+      heatComputationMode: "nearest3",
       radius: 0.08,
     })).toBe(true);
-    expect(JSON.parse(values.get(HUMAN_BODY_RENDER_SETTINGS_KEY))).toMatchObject({ mode: "crystal", radius: 0.08 });
-    expect(readHumanBodyRenderSettings(storage)).toMatchObject({ mode: "crystal", radius: 0.08 });
+    expect(JSON.parse(values.get(HUMAN_BODY_RENDER_SETTINGS_KEY))).toMatchObject({ mode: "crystal", heatComputationMode: "nearest3", radius: 0.08 });
+    expect(readHumanBodyRenderSettings(storage)).toMatchObject({ mode: "crystal", heatComputationMode: "nearest3", radius: 0.08 });
   });
 
   it("survives broken storage and malformed JSON", () => {
@@ -176,10 +200,20 @@ describe("human body optimized settings UI source contract", () => {
     expect(source).toMatch(/type="range" min="5" max="13" step="1"/);
   });
 
-  it("offers exact and nearest-12 heat computation modes", () => {
+  it("offers high-efficiency, normal, energy-saving, and ultra energy-saving heat computation modes", () => {
     expect(source).toContain('const HEAT_COMPUTATION_MODES = [');
-    expect(source).toContain('["exact", "精确"]');
-    expect(source).toContain('["nearest12", "最近12点"]');
+    expect(source).toContain('["exact", "高效"]');
+    expect(source).toContain('["nearest12", "正常"]');
+    expect(source).toContain('["nearest6", "节能"]');
+    expect(source).toContain('["nearest3", "超节能"]');
+    expect(source).toContain('nearest3: 3');
+  });
+
+  it("uses the displayed raw sensor unit for filtering before heat scaling", () => {
+    expect(source).toContain("computeHumanBodySensorHeatValue(rawValue, { max, filter })");
+    expect(source).not.toContain("scaledValue >= filter");
+    expect(source).toContain("data[index * 4 + 3] = heatValue");
+    expect(source).toContain("sensorHeatValuesRef.current[index] = heatValue");
   });
 
   it("offers an accessible collapsible settings panel without point-cloud color controls", () => {

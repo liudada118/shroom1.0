@@ -6,6 +6,7 @@ import {
   normalizePressureScene,
   readPressureScene,
   resolveDisplaySwitchZero,
+  resolvePressureSceneChangeZero,
   writePressureScene,
 } from './displaySwitchZeroPolicy';
 
@@ -82,6 +83,17 @@ describe('切展示模式的清零策略', () => {
       expect(normalizePressureScene(value)).toBe(PRESSURE_SCENES.real);
     });
     expect(resolveDisplaySwitchZero({ sensorType: 'jqbed', nextMode: 'num' })).toBeNull();
+  });
+});
+
+describe('场景按钮的即时清零指令', () => {
+  it('进入演示场景立即记录预压力，进入真实测量立即取消清零', () => {
+    expect(resolvePressureSceneChangeZero(PRESSURE_SCENES.demo)).toEqual({ resetZero: true });
+    expect(resolvePressureSceneChangeZero(PRESSURE_SCENES.real)).toEqual({ resetZero: false });
+  });
+
+  it('未知场景按安全默认值处理为真实测量并取消清零', () => {
+    expect(resolvePressureSceneChangeZero('broken')).toEqual({ resetZero: false });
   });
 });
 

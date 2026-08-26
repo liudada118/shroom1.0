@@ -1,5 +1,5 @@
 export const HUMAN_BODY_RENDER_SETTINGS_KEY = "humanBodyOptimized.renderSettings.v1";
-export const HUMAN_BODY_RENDER_SETTINGS_VERSION = 5;
+export const HUMAN_BODY_RENDER_SETTINGS_VERSION = 7;
 
 export const DEFAULT_HUMAN_BODY_RENDER_SETTINGS = Object.freeze({
   version: HUMAN_BODY_RENDER_SETTINGS_VERSION,
@@ -7,7 +7,7 @@ export const DEFAULT_HUMAN_BODY_RENDER_SETTINGS = Object.freeze({
   heatComputationMode: "nearest12",
   radius: 0.1,
   intensity: 0.8,
-  opacity: 0.15,
+  opacity: 0.8,
   colorScheme: 0,
   bgColor: "#afacac",
   modelColor: "#718096",
@@ -59,6 +59,18 @@ export function normalizeHumanBodyRenderSettings(value) {
       heatComputationMode: "nearest12",
     };
   }
+  if (value?.version === 5) {
+    value = {
+      ...value,
+      version: HUMAN_BODY_RENDER_SETTINGS_VERSION,
+    };
+  }
+  if (value?.version === 6) {
+    value = {
+      ...value,
+      version: HUMAN_BODY_RENDER_SETTINGS_VERSION,
+    };
+  }
   if (!value || value.version !== HUMAN_BODY_RENDER_SETTINGS_VERSION) {
     return { ...DEFAULT_HUMAN_BODY_RENDER_SETTINGS };
   }
@@ -68,7 +80,7 @@ export function normalizeHumanBodyRenderSettings(value) {
     mode: ["heatmap", "crystal"].includes(value.mode)
       ? value.mode
       : DEFAULT_HUMAN_BODY_RENDER_SETTINGS.mode,
-    heatComputationMode: ["exact", "nearest12"].includes(value.heatComputationMode)
+    heatComputationMode: ["exact", "nearest12", "nearest6", "nearest3"].includes(value.heatComputationMode)
       ? value.heatComputationMode
       : DEFAULT_HUMAN_BODY_RENDER_SETTINGS.heatComputationMode,
     radius: clampHumanBodyRadius(value.radius),

@@ -73,12 +73,12 @@ export const bilingualConfig = {
     real: text('真实测量', 'Real measurement'),
     demo: text('演示展示', 'Demo'),
     realHint: text(
-      '切换展示模式不动清零基准，清零只由上面的按钮手动触发',
-      'Switching display mode leaves the zero baseline untouched; zero only from the button above',
+      '切换到真实测量会立即取消清零，之后切换展示模式不改零点',
+      'Entering real measurement immediately cancels zeroing; later display-mode switches keep the baseline',
     ),
     demoHint: text(
-      '每次切换展示模式都以当下读数为零点，请勿在真实测量时使用',
-      'Every display-mode switch re-zeroes to the current reading; do not use during real measurement',
+      '切换到演示展示会立即以当前读数清零，之后每次切换展示模式会再次清零',
+      'Entering demo immediately zeroes the current reading; every later display-mode switch zeroes again',
     ),
   },
   head: text('头枕', 'Headrest'),

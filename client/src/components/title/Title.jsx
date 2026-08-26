@@ -23,6 +23,7 @@ import {
   PRESSURE_SCENES,
   readPressureScene,
   resolveDisplaySwitchZero,
+  resolvePressureSceneChangeZero,
   writePressureScene,
 } from './displaySwitchZeroPolicy';
 let collection = JSON.parse(localStorage.getItem('collection'))
@@ -2412,7 +2413,14 @@ class Title extends React.Component {
                 value={this.state.pressureScene}
                 buttonStyle='solid'
                 onChange={(e) => {
-                  this.setState({ pressureScene: writePressureScene(e.target.value) })
+                  const pressureScene = writePressureScene(e.target.value)
+                  const zeroCommand = resolvePressureSceneChangeZero(pressureScene)
+                  const sent = this.props.wsSendObj(zeroCommand)
+                  this.setState({
+                    pressureScene,
+                    resetZero: sent ? zeroCommand.resetZero : this.state.resetZero,
+                  })
+                  if (sent) this.props.changeAside?.(zeroCommand)
                 }}
               >
                 <Radio.Button value={PRESSURE_SCENES.real}>{t('pressureScene.real')}</Radio.Button>
@@ -2426,12 +2434,18 @@ class Title extends React.Component {
             </div>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               <Button className='titleButton' onClick={() => {
-                this.props.changeAside({ resetZero: true })
-                this.props.wsSendObj({ resetZero: true })
+                const zeroCommand = { resetZero: true }
+                if (this.props.wsSendObj(zeroCommand)) {
+                  this.props.changeAside?.(zeroCommand)
+                  this.setState(zeroCommand)
+                }
               }}>{t('resetZero')}</Button>
               <Button className='titleButton' onClick={() => {
-                this.props.changeAside({ resetZero: false })
-                this.props.wsSendObj({ resetZero: false })
+                const zeroCommand = { resetZero: false }
+                if (this.props.wsSendObj(zeroCommand)) {
+                  this.props.changeAside?.(zeroCommand)
+                  this.setState(zeroCommand)
+                }
               }}>{t('cancelZero')}</Button>
               <NavLink to={`/num/${routerStr}`}>
                 <Button className='titleButton' onClick={() => {

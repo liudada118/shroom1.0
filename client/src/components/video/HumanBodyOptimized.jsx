@@ -30,22 +30,40 @@ import {
 } from "./humanBodyRenderSettings";
 import {
   getHumanBodyRenderPixelRatio,
+  pinHumanBodyCanvasToViewport,
   shouldRenderHumanBodyFrame,
   updateHumanBodyQualityState,
 } from "./humanBodyRenderPerformance";
 import {
   buildNearestSensorMapping,
+  computeHumanBodySensorHeatValue,
   computeNearestSensorWeights,
   computeVertexHeatValues,
 } from "./humanBodyVertexHeat";
 
-const MODEL_URL = "./model/human3.glb";
+const MODEL_URLS = ["./model/human3-low.glb", "./model/human3.glb"];
 const SENSOR_LAYOUT_URL = "./model/sensor_canvas_positions.json";
 const MAX_SHADER_SENSORS = 1200;
 const DEFAULT_OPTIONS = { max: 1555, size: 31, filter: 6 };
 const HOVER_DELAY_MS = 150;
 const HOVER_POINTER_OFFSET = 18;
 const HOVER_PANEL_SIZE = { width: 168, height: 144 };
+
+const loadHumanBodyModel = async (loader, urls = MODEL_URLS) => {
+  let lastError = null;
+  for (const url of urls) {
+    try {
+      const gltf = await new Promise((resolve, reject) => {
+        loader.load(url, resolve, undefined, reject);
+      });
+      return gltf;
+    } catch (error) {
+      lastError = error;
+      console.warn(`[HumanBodyOptimized] 模型加载失败，尝试回退：${url}`, error);
+    }
+  }
+  throw lastError || new Error("人体模型加载失败");
+};
 
 const getBrowserStorage = () => {
   try {
@@ -62,9 +80,24 @@ const VISIBLE_RENDER_MODES = [
   ["crystal", "水晶"],
 ];
 const HEAT_COMPUTATION_MODES = [
-  ["exact", "精确"],
-  ["nearest12", "最近12点"],
+  ["exact", "高效"],
+  ["nearest12", "正常"],
+  ["nearest6", "节能"],
+  ["nearest3", "超节能"],
 ];
+const HEAT_COMPUTATION_MODE_TITLES = {
+  exact: "每个像素计算全部传感点，保留最高热力精度",
+  nearest12: "每个模型顶点计算最近12个传感点，兼顾效果和性能",
+  nearest6: "每个模型顶点计算最近6个传感点，进一步降低处理负载",
+  nearest3: "每个模型顶点计算最近3个传感点，最大限度降低处理负载",
+};
+const VERTEX_HEAT_NEIGHBOR_LIMITS = {
+  nearest12: 12,
+  nearest6: 6,
+  nearest3: 3,
+};
+const isVertexHeatComputationMode = (value) => Boolean(VERTEX_HEAT_NEIGHBOR_LIMITS[value]);
+const getVertexHeatNeighborLimit = (value) => VERTEX_HEAT_NEIGHBOR_LIMITS[value] || 12;
 
 const REGION_VIEWS = {
   overview: { label: "全身", position: [0, 4, 12], target: [0, 4, 0] },
@@ -98,13 +131,9 @@ const fragmentShader = `
   uniform float uSensorCount;
   uniform float uRadius;
   uniform float uIntensity;
-  uniform float uOpacity;
   uniform int uColorScheme;
-  uniform int uCrystal;
   uniform vec3 uModelColor;
   varying vec3 vWorldPos;
-  varying vec3 vWorldNormal;
-  varying vec3 vViewDirection;
 
   vec3 heatColor(float t) {
     t = clamp(t, 0.0, 1.0);
@@ -139,25 +168,13 @@ const fragmentShader = `
     heat = clamp(heat, 0.0, 1.0);
     vec3 baseColor = uModelColor;
     vec3 color = heat > 0.005 ? heatColor(heat) : baseColor;
-
-    if (uCrystal == 1) {
-      float fresnel = pow(1.0 - max(dot(normalize(vWorldNormal), normalize(vViewDirection)), 0.0), 3.0);
-      color = mix(uModelColor, color, heat * 0.9) + vec3(0.65, 0.85, 1.0) * fresnel * 0.35;
-      gl_FragColor = vec4(color, clamp(uOpacity + heat * 0.75 + fresnel * 0.15, 0.05, 0.95));
-      return;
-    }
-
     gl_FragColor = vec4(color, 1.0);
   }
 `;
 
 const nearest12FragmentShader = `
-  uniform float uOpacity;
   uniform int uColorScheme;
-  uniform int uCrystal;
   uniform vec3 uModelColor;
-  varying vec3 vWorldNormal;
-  varying vec3 vViewDirection;
   varying float vHeat;
 
   vec3 heatColor(float t) {
@@ -184,13 +201,101 @@ const nearest12FragmentShader = `
   void main() {
     float heat = clamp(vHeat, 0.0, 1.0);
     vec3 color = heat > 0.005 ? heatColor(heat) : uModelColor;
-    if (uCrystal == 1) {
-      float fresnel = pow(1.0 - max(dot(normalize(vWorldNormal), normalize(vViewDirection)), 0.0), 3.0);
-      color = mix(uModelColor, color, heat * 0.9) + vec3(0.65, 0.85, 1.0) * fresnel * 0.35;
-      gl_FragColor = vec4(color, clamp(uOpacity + heat * 0.75 + fresnel * 0.15, 0.05, 0.95));
-      return;
-    }
     gl_FragColor = vec4(color, 1.0);
+  }
+`;
+
+const crystalShellFragmentShader = `
+  uniform float uTransparency;
+  uniform vec3 uModelColor;
+  varying vec3 vWorldNormal;
+  varying vec3 vViewDirection;
+
+  void main() {
+    float fresnel = pow(1.0 - max(dot(normalize(vWorldNormal), normalize(vViewDirection)), 0.0), 3.0);
+    vec3 color = uModelColor + vec3(0.65, 0.85, 1.0) * fresnel * 0.12;
+    float shellAlpha = clamp(1.0 - uTransparency, 0.05, 0.95);
+    gl_FragColor = vec4(color, shellAlpha);
+  }
+`;
+
+const exactCrystalHeatOverlayFragmentShader = `
+  uniform sampler2D uSensorData;
+  uniform float uSensorCount;
+  uniform float uRadius;
+  uniform float uIntensity;
+  uniform float uHeatAlpha;
+  uniform int uColorScheme;
+  varying vec3 vWorldPos;
+
+  vec3 heatColor(float t) {
+    t = clamp(t, 0.0, 1.0);
+    if (uColorScheme == 1) {
+      return mix(mix(vec3(0.02, 0.02, 0.15), vec3(0.0, 0.55, 0.9), t), vec3(0.75, 0.98, 1.0), t * t);
+    }
+    if (uColorScheme == 2) {
+      if (t < 0.5) return mix(vec3(0.15, 0.0, 0.2), vec3(0.85, 0.18, 0.0), t * 2.0);
+      return mix(vec3(0.85, 0.18, 0.0), vec3(1.0, 0.92, 0.3), (t - 0.5) * 2.0);
+    }
+    if (uColorScheme == 3) {
+      if (t < 0.33) return mix(vec3(0.0), vec3(0.5, 0.0, 0.1), t * 3.0);
+      if (t < 0.66) return mix(vec3(0.5, 0.0, 0.1), vec3(0.95, 0.42, 0.0), (t - 0.33) * 3.0);
+      return mix(vec3(0.95, 0.42, 0.0), vec3(1.0, 1.0, 0.4), (t - 0.66) * 3.0);
+    }
+    if (t < 0.2) return mix(vec3(0.04, 0.04, 0.28), vec3(0.0, 0.28, 0.85), t / 0.2);
+    if (t < 0.4) return mix(vec3(0.0, 0.28, 0.85), vec3(0.0, 0.75, 0.55), (t - 0.2) / 0.2);
+    if (t < 0.6) return mix(vec3(0.0, 0.75, 0.55), vec3(0.55, 0.85, 0.0), (t - 0.4) / 0.2);
+    if (t < 0.8) return mix(vec3(0.55, 0.85, 0.0), vec3(1.0, 0.62, 0.0), (t - 0.6) / 0.2);
+    return mix(vec3(1.0, 0.62, 0.0), vec3(0.95, 0.04, 0.0), (t - 0.8) / 0.2);
+  }
+
+  void main() {
+    float heat = 0.0;
+    for (int i = 0; i < ${MAX_SHADER_SENSORS}; i++) {
+      if (float(i) >= uSensorCount) break;
+      float u = (float(i) + 0.5) / uSensorCount;
+      vec4 sensor = texture2D(uSensorData, vec2(u, 0.5));
+      float distanceToSensor = distance(vWorldPos, sensor.xyz);
+      heat += exp(-(distanceToSensor * distanceToSensor) / (2.0 * uRadius * uRadius)) * sensor.w * uIntensity;
+    }
+    heat = clamp(heat, 0.0, 1.0);
+    float heatVisibility = smoothstep(0.02, 0.65, heat);
+    if (heatVisibility < 0.01) discard;
+    gl_FragColor = vec4(heatColor(heat), heatVisibility * uHeatAlpha);
+  }
+`;
+
+const nearest12CrystalHeatOverlayFragmentShader = `
+  uniform float uHeatAlpha;
+  uniform int uColorScheme;
+  varying float vHeat;
+
+  vec3 heatColor(float t) {
+    t = clamp(t, 0.0, 1.0);
+    if (uColorScheme == 1) {
+      return mix(mix(vec3(0.02, 0.02, 0.15), vec3(0.0, 0.55, 0.9), t), vec3(0.75, 0.98, 1.0), t * t);
+    }
+    if (uColorScheme == 2) {
+      if (t < 0.5) return mix(vec3(0.15, 0.0, 0.2), vec3(0.85, 0.18, 0.0), t * 2.0);
+      return mix(vec3(0.85, 0.18, 0.0), vec3(1.0, 0.92, 0.3), (t - 0.5) * 2.0);
+    }
+    if (uColorScheme == 3) {
+      if (t < 0.33) return mix(vec3(0.0), vec3(0.5, 0.0, 0.1), t * 3.0);
+      if (t < 0.66) return mix(vec3(0.5, 0.0, 0.1), vec3(0.95, 0.42, 0.0), (t - 0.33) * 3.0);
+      return mix(vec3(0.95, 0.42, 0.0), vec3(1.0, 1.0, 0.4), (t - 0.66) * 3.0);
+    }
+    if (t < 0.2) return mix(vec3(0.04, 0.04, 0.28), vec3(0.0, 0.28, 0.85), t / 0.2);
+    if (t < 0.4) return mix(vec3(0.0, 0.28, 0.85), vec3(0.0, 0.75, 0.55), (t - 0.2) / 0.2);
+    if (t < 0.6) return mix(vec3(0.0, 0.75, 0.55), vec3(0.55, 0.85, 0.0), (t - 0.4) / 0.2);
+    if (t < 0.8) return mix(vec3(0.55, 0.85, 0.0), vec3(1.0, 0.62, 0.0), (t - 0.6) / 0.2);
+    return mix(vec3(1.0, 0.62, 0.0), vec3(0.95, 0.04, 0.0), (t - 0.8) / 0.2);
+  }
+
+  void main() {
+    float heat = clamp(vHeat, 0.0, 1.0);
+    float heatVisibility = smoothstep(0.02, 0.65, heat);
+    if (heatVisibility < 0.01) discard;
+    gl_FragColor = vec4(heatColor(heat), heatVisibility * uHeatAlpha);
   }
 `;
 
@@ -565,6 +670,10 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
   const rawFrameRef = useRef(new Array(1024).fill(0));
   const materialsRef = useRef([]);
   const nearest12MaterialsRef = useRef([]);
+  const crystalShellMaterialsRef = useRef([]);
+  const crystalOverlayMaterialsRef = useRef([]);
+  const crystalOverlayNearest12MaterialsRef = useRef([]);
+  const crystalOverlayMeshesRef = useRef([]);
   const vertexHeatMappingsRef = useRef([]);
   const ghostMaterialsRef = useRef([]);
   const bodyMeshesRef = useRef([]);
@@ -583,6 +692,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
   const flightRef = useRef(null);
   const viewAutoRotateRef = useRef(null);
   const invalidateRenderRef = useRef(() => {});
+  const frameUpdatePendingRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [sensorCount, setSensorCount] = useState(0);
@@ -600,13 +710,15 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
   const [activeRegion, setActiveRegion] = useState("overview");
 
   const updateVertexHeatValues = useCallback((force = false) => {
-    if (!force && heatComputationModeRef.current !== "nearest12") return;
+    const currentHeatComputationMode = heatComputationModeRef.current;
+    if (!force && !isVertexHeatComputationMode(currentHeatComputationMode)) return;
     vertexHeatMappingsRef.current.forEach(({ mapping, attribute }) => {
       computeVertexHeatValues(
         mapping,
         sensorHeatValuesRef.current,
         intensityRef.current,
         attribute.array,
+        { neighborLimit: getVertexHeatNeighborLimit(currentHeatComputationMode) },
       );
       attribute.needsUpdate = true;
     });
@@ -622,8 +734,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
       const rawValue = sensor.sample.reduce((total, item) => (
         total + (Number(rawFrameRef.current[item.index]) || 0) * item.weight
       ), 0);
-      const scaledValue = rawValue * 10;
-      const heatValue = scaledValue >= filter ? Math.min(1, scaledValue / max) : 0;
+      const heatValue = computeHumanBodySensorHeatValue(rawValue, { max, filter });
       data[index * 4 + 3] = heatValue;
       sensorHeatValuesRef.current[index] = heatValue;
     });
@@ -635,12 +746,12 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
   useImperativeHandle(forwardedRef, () => ({
     sitData({ wsPointData }) {
       if (!Array.isArray(wsPointData)) return;
-      rawFrameRef.current = wsPointData.slice(0, 1024).map((value) => Number(value) || 0);
-      numberPanelRef.current?.updateData(rawFrameRef.current);
-      updateTextureValues();
-      if (hoveredSensorRef.current) {
-        hoverPanelRef.current?.refresh(rawFrameRef.current);
+      const latestFrame = rawFrameRef.current;
+      for (let index = 0; index < 1024; index += 1) {
+        latestFrame[index] = Number(wsPointData[index]) || 0;
       }
+      frameUpdatePendingRef.current = true;
+      invalidateRenderRef.current();
     },
     changeColor({ max, size, filter }) {
       if (max !== undefined) optionsRef.current.max = max;
@@ -702,13 +813,22 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
     camera.position.set(0, 4, 12);
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: false,
+      stencil: false,
+      powerPreference: "high-performance",
+    });
     let qualityState = { tier: "balanced", slowFrames: 0, stableFrames: 0 };
     let appliedPixelRatio = getHumanBodyRenderPixelRatio(window.devicePixelRatio, qualityState.tier);
     let renderWidth = 0;
     let renderHeight = 0;
     renderer.setPixelRatio(appliedPixelRatio);
     renderer.outputEncoding = THREE.sRGBEncoding;
+    // Keep the CSS viewport independent from the backing-buffer DPR. Without
+    // this, setSize(..., false) lets a 1.0 -> 0.75 quality downgrade shrink
+    // the visible canvas itself on high-DPI Windows displays.
+    pinHumanBodyCanvasToViewport(renderer.domElement);
     container.appendChild(renderer.domElement);
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -750,6 +870,16 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
       renderDirty = true;
     };
     invalidateRenderRef.current = invalidateRender;
+
+    const flushPendingFrameUpdate = () => {
+      if (!frameUpdatePendingRef.current) return;
+      frameUpdatePendingRef.current = false;
+      numberPanelRef.current?.updateData(rawFrameRef.current);
+      updateTextureValues();
+      if (hoveredSensorRef.current) {
+        hoverPanelRef.current?.refresh(rawFrameRef.current);
+      }
+    };
 
     const cancelHoverTimer = () => {
       if (!hoverTimerId) return;
@@ -957,9 +1087,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
-    const modelPromise = new Promise((resolve, reject) => {
-      new GLTFLoader().load(MODEL_URL, resolve, undefined, reject);
-    });
+    const modelPromise = loadHumanBodyModel(new GLTFLoader());
     const layoutPromise = fetch(SENSOR_LAYOUT_URL).then((response) => {
       if (!response.ok) throw new Error(`点位文件请求失败：HTTP ${response.status}`);
       return response.json();
@@ -999,6 +1127,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
           texture.needsUpdate = true;
           sensorTextureRef.current = texture;
           sensorHeatValuesRef.current = new Float32Array(sensors.length);
+          const crystalOverlayEntries = [];
 
           normalizedModel.traverse((child) => {
             if (!child.isMesh || child.geometry?.attributes?.position?.count < 100) return;
@@ -1025,9 +1154,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
                 uSensorCount: { value: sensors.length },
                 uRadius: { value: radius },
                 uIntensity: { value: intensity },
-                uOpacity: { value: opacity },
                 uColorScheme: { value: colorScheme },
-                uCrystal: { value: 0 },
                 uModelColor: { value: new THREE.Color(modelColor) },
               },
               side: THREE.DoubleSide,
@@ -1036,13 +1163,56 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
               vertexShader,
               fragmentShader: nearest12FragmentShader,
               uniforms: {
-                uOpacity: { value: opacity },
                 uColorScheme: { value: colorScheme },
-                uCrystal: { value: 0 },
                 uModelColor: { value: new THREE.Color(modelColor) },
               },
               side: THREE.DoubleSide,
             });
+            const crystalShellMaterial = new THREE.ShaderMaterial({
+              vertexShader,
+              fragmentShader: crystalShellFragmentShader,
+              uniforms: {
+                uTransparency: { value: opacity },
+                uModelColor: { value: new THREE.Color(modelColor) },
+              },
+              transparent: true,
+              depthWrite: false,
+              side: THREE.FrontSide,
+            });
+            const crystalOverlayMaterial = new THREE.ShaderMaterial({
+              vertexShader,
+              fragmentShader: exactCrystalHeatOverlayFragmentShader,
+              uniforms: {
+                uSensorData: { value: texture },
+                uSensorCount: { value: sensors.length },
+                uRadius: { value: radius },
+                uIntensity: { value: intensity },
+                uHeatAlpha: { value: 0.35 },
+                uColorScheme: { value: colorScheme },
+              },
+              transparent: true,
+              depthTest: false,
+              depthWrite: false,
+              side: THREE.BackSide,
+            });
+            const crystalOverlayFrontMaterial = crystalOverlayMaterial.clone();
+            crystalOverlayFrontMaterial.side = THREE.FrontSide;
+            crystalOverlayFrontMaterial.uniforms.uHeatAlpha.value = 0.65;
+            const crystalOverlayNearest12Material = new THREE.ShaderMaterial({
+              vertexShader,
+              fragmentShader: nearest12CrystalHeatOverlayFragmentShader,
+              uniforms: {
+                uHeatAlpha: { value: 0.35 },
+                uColorScheme: { value: colorScheme },
+              },
+              transparent: true,
+              depthTest: false,
+              depthWrite: false,
+              side: THREE.BackSide,
+            });
+            const crystalOverlayNearest12FrontMaterial = crystalOverlayNearest12Material.clone();
+            crystalOverlayNearest12FrontMaterial.side = THREE.FrontSide;
+            crystalOverlayNearest12FrontMaterial.uniforms.uHeatAlpha.value = 0.65;
             const ghostMaterial = new THREE.MeshPhongMaterial({
               color: modelColor,
               transparent: true,
@@ -1053,11 +1223,53 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
             });
             materialsRef.current.push(shaderMaterial);
             nearest12MaterialsRef.current.push(nearest12Material);
+            crystalShellMaterialsRef.current.push(crystalShellMaterial);
+            crystalOverlayMaterialsRef.current.push([
+              crystalOverlayMaterial,
+              crystalOverlayFrontMaterial,
+            ]);
+            crystalOverlayNearest12MaterialsRef.current.push([
+              crystalOverlayNearest12Material,
+              crystalOverlayNearest12FrontMaterial,
+            ]);
             ghostMaterialsRef.current.push(ghostMaterial);
             bodyMeshesRef.current.push(child);
-            child.material = heatComputationModeRef.current === "nearest12"
-              ? nearest12Material
-              : shaderMaterial;
+            child.renderOrder = mode === "crystal" ? 9 : 0;
+            child.material = mode === "crystal"
+              ? crystalShellMaterial
+              : isVertexHeatComputationMode(heatComputationModeRef.current)
+                ? nearest12Material
+                : shaderMaterial;
+            crystalOverlayEntries.push({
+              sourceMesh: child,
+              exactMaterials: [crystalOverlayMaterial, crystalOverlayFrontMaterial],
+              nearest12Materials: [
+                crystalOverlayNearest12Material,
+                crystalOverlayNearest12FrontMaterial,
+              ],
+            });
+          });
+
+          crystalOverlayEntries.forEach(({ sourceMesh, exactMaterials, nearest12Materials }) => {
+            const overlayMeshes = exactMaterials.map((exactMaterial, sideIndex) => {
+              const overlayMesh = new THREE.Mesh(
+                sourceMesh.geometry,
+                isVertexHeatComputationMode(heatComputationModeRef.current)
+                  ? nearest12Materials[sideIndex]
+                  : exactMaterial,
+              );
+              const sideName = sideIndex === 0 ? "back" : "front";
+              overlayMesh.name = `${sourceMesh.name || "human-body"}-crystal-heat-${sideName}`;
+              overlayMesh.position.copy(sourceMesh.position);
+              overlayMesh.quaternion.copy(sourceMesh.quaternion);
+              overlayMesh.scale.copy(sourceMesh.scale);
+              overlayMesh.visible = mode === "crystal";
+              overlayMesh.renderOrder = sideIndex === 0 ? 8 : 10;
+              overlayMesh.frustumCulled = sourceMesh.frustumCulled;
+              return overlayMesh;
+            });
+            sourceMesh.parent.add(...overlayMeshes);
+            crystalOverlayMeshesRef.current.push(overlayMeshes);
           });
 
           const pointGeometry = new THREE.SphereGeometry(0.035, 7, 5);
@@ -1113,19 +1325,24 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
 
     const animate = (now) => {
       animationId = requestAnimationFrame(animate);
+      const hasPendingFrameUpdate = frameUpdatePendingRef.current;
       const continuous = Boolean(flightRef.current)
         || controls.autoRotate
         || dragging
-        || now < interactionUntil;
+        || now < interactionUntil
+        || hasPendingFrameUpdate;
       if (!shouldRenderHumanBodyFrame({
         visible: pageVisible,
         dirty: renderDirty,
         continuous,
         now,
         lastRenderAt,
+        qualityTier: qualityState.tier,
+        dataPending: hasPendingFrameUpdate,
       })) return;
 
       const previousRenderAt = lastRenderAt;
+      flushPendingFrameUpdate();
       const flight = flightRef.current;
       if (flight) {
         const progress = Math.min(1, (now - flight.startedAt) / flight.duration);
@@ -1166,11 +1383,16 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
       cancelAnimationFrame(animationId);
       resizeObserver.disconnect();
       invalidateRenderRef.current = () => {};
+      frameUpdatePendingRef.current = false;
       controls.dispose();
       renderer.dispose();
       materialsRef.current.forEach((material) => material.dispose());
       nearest12MaterialsRef.current.forEach((material) => material.dispose());
+      crystalShellMaterialsRef.current.forEach((material) => material.dispose());
+      crystalOverlayMaterialsRef.current.flat().forEach((material) => material.dispose());
+      crystalOverlayNearest12MaterialsRef.current.flat().forEach((material) => material.dispose());
       ghostMaterialsRef.current.forEach((material) => material.dispose());
+      crystalOverlayMeshesRef.current = [];
       vertexHeatMappingsRef.current = [];
       sensorTextureRef.current?.dispose();
       pointCloudRef.current?.geometry?.dispose();
@@ -1200,22 +1422,30 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
     materialsRef.current.forEach((material) => {
       material.uniforms.uRadius.value = radius;
       material.uniforms.uIntensity.value = intensity;
-      material.uniforms.uOpacity.value = opacity;
       material.uniforms.uColorScheme.value = colorScheme;
-      material.uniforms.uCrystal.value = mode === "crystal" ? 1 : 0;
       material.uniforms.uModelColor.value.set(modelColor);
-      material.transparent = mode === "crystal";
-      material.depthWrite = mode !== "crystal";
-      material.needsUpdate = true;
+      material.side = THREE.DoubleSide;
     });
     nearest12MaterialsRef.current.forEach((material) => {
-      material.uniforms.uOpacity.value = opacity;
       material.uniforms.uColorScheme.value = colorScheme;
-      material.uniforms.uCrystal.value = mode === "crystal" ? 1 : 0;
       material.uniforms.uModelColor.value.set(modelColor);
-      material.transparent = mode === "crystal";
-      material.depthWrite = mode !== "crystal";
-      material.needsUpdate = true;
+      material.side = THREE.DoubleSide;
+    });
+    crystalShellMaterialsRef.current.forEach((material) => {
+      material.uniforms.uTransparency.value = opacity;
+      material.uniforms.uModelColor.value.set(modelColor);
+    });
+    crystalOverlayMaterialsRef.current.forEach((materials) => {
+      materials.forEach((material) => {
+        material.uniforms.uRadius.value = radius;
+        material.uniforms.uIntensity.value = intensity;
+        material.uniforms.uColorScheme.value = colorScheme;
+      });
+    });
+    crystalOverlayNearest12MaterialsRef.current.forEach((materials) => {
+      materials.forEach((material) => {
+        material.uniforms.uColorScheme.value = colorScheme;
+      });
     });
     invalidateRenderRef.current();
   }, [radius, intensity, opacity, colorScheme, mode, modelColor, loading]);
@@ -1226,24 +1456,45 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
     if (pointCloudRef.current) pointCloudRef.current.visible = showPoints;
     if (lineGridRef.current) lineGridRef.current.visible = showLines;
     bodyMeshesRef.current.forEach((mesh, index) => {
+      mesh.renderOrder = mode === "crystal" ? 9 : 0;
       mesh.material = (mode === "points" || mode === "lines")
         ? ghostMaterialsRef.current[index]
-        : heatComputationMode === "nearest12"
-          ? nearest12MaterialsRef.current[index]
-          : materialsRef.current[index];
+        : mode === "crystal"
+          ? crystalShellMaterialsRef.current[index]
+          : isVertexHeatComputationMode(heatComputationMode)
+            ? nearest12MaterialsRef.current[index]
+            : materialsRef.current[index];
+    });
+    crystalOverlayMeshesRef.current.forEach((meshes, index) => {
+      meshes.forEach((mesh, sideIndex) => {
+        mesh.visible = mode === "crystal";
+        mesh.material = isVertexHeatComputationMode(heatComputationMode)
+          ? crystalOverlayNearest12MaterialsRef.current[index][sideIndex]
+          : crystalOverlayMaterialsRef.current[index][sideIndex];
+      });
     });
     invalidateRenderRef.current();
   }, [mode, heatComputationMode, loading]);
 
   useEffect(() => {
     heatComputationModeRef.current = heatComputationMode;
-    if (heatComputationMode === "nearest12") updateVertexHeatValues(true);
+    if (isVertexHeatComputationMode(heatComputationMode)) updateVertexHeatValues(true);
     bodyMeshesRef.current.forEach((mesh, index) => {
-      if (mode !== "points" && mode !== "lines") {
-        mesh.material = heatComputationMode === "nearest12"
+      if (mode === "crystal") {
+        mesh.material = crystalShellMaterialsRef.current[index];
+      } else if (mode !== "points" && mode !== "lines") {
+        mesh.material = isVertexHeatComputationMode(heatComputationMode)
           ? nearest12MaterialsRef.current[index]
           : materialsRef.current[index];
       }
+    });
+    crystalOverlayMeshesRef.current.forEach((meshes, index) => {
+      meshes.forEach((mesh, sideIndex) => {
+        mesh.visible = mode === "crystal";
+        mesh.material = isVertexHeatComputationMode(heatComputationMode)
+          ? crystalOverlayNearest12MaterialsRef.current[index][sideIndex]
+          : crystalOverlayMaterialsRef.current[index][sideIndex];
+      });
     });
     invalidateRenderRef.current();
   }, [heatComputationMode, mode, loading, updateVertexHeatValues]);
@@ -1251,6 +1502,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
   useEffect(() => {
     materialsRef.current.forEach((material) => material.uniforms.uModelColor.value.set(modelColor));
     nearest12MaterialsRef.current.forEach((material) => material.uniforms.uModelColor.value.set(modelColor));
+    crystalShellMaterialsRef.current.forEach((material) => material.uniforms.uModelColor.value.set(modelColor));
     ghostMaterialsRef.current.forEach((material) => material.color.set(modelColor));
     invalidateRenderRef.current();
   }, [modelColor, loading]);
@@ -1334,7 +1586,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
                   key={value}
                   onClick={() => setHeatComputationMode(value)}
                   style={buttonStyle(heatComputationMode === value)}
-                  title={value === "nearest12" ? "每个模型顶点只计算最近的12个传感点，降低显卡负载" : "每个像素计算全部传感点，保留原有效果"}
+                  title={HEAT_COMPUTATION_MODE_TITLES[value]}
                 >
                   {label}
                 </button>

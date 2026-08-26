@@ -1,9 +1,19 @@
 export const HUMAN_BODY_VERTEX_NEIGHBOR_COUNT = 12;
 export const HUMAN_BODY_VERTEX_MAX_DISTANCE = 0.52;
+export const HUMAN_BODY_SENSOR_HEAT_SCALE = 10;
 const DEFAULT_CELL_SIZE = 0.26;
 
 const cellCoordinate = (value, cellSize) => Math.floor(Number(value) / cellSize);
 const cellKey = (x, y, z) => `${x},${y},${z}`;
+
+export function computeHumanBodySensorHeatValue(rawValue, options = {}) {
+  const numericRawValue = Number(rawValue);
+  const safeRawValue = Number.isFinite(numericRawValue) ? Math.max(0, numericRawValue) : 0;
+  const safeMax = Math.max(1, Number(options.max) || 1);
+  const filter = Math.max(0, Number(options.filter) || 0);
+  if (safeRawValue < filter) return 0;
+  return Math.min(1, (safeRawValue * HUMAN_BODY_SENSOR_HEAT_SCALE) / safeMax);
+}
 
 function insertNearest(indices, distancesSquared, offset, count, sensorIndex, distanceSquared) {
   let insertion = count;
@@ -91,13 +101,17 @@ export function computeNearestSensorWeights(mapping, radius) {
   return mapping.weights;
 }
 
-export function computeVertexHeatValues(mapping, sensorValues, intensity = 1, target) {
+export function computeVertexHeatValues(mapping, sensorValues, intensity = 1, target, options = {}) {
   const output = target || new Float32Array(mapping.vertexCount);
   const safeIntensity = Number.isFinite(Number(intensity)) ? Number(intensity) : 1;
+  const requestedNeighborLimit = Math.trunc(Number(options.neighborLimit));
+  const neighborLimit = Number.isFinite(requestedNeighborLimit) && requestedNeighborLimit > 0
+    ? Math.min(mapping.neighborCount, requestedNeighborLimit)
+    : mapping.neighborCount;
   for (let vertexIndex = 0; vertexIndex < mapping.vertexCount; vertexIndex += 1) {
     const offset = vertexIndex * mapping.neighborCount;
     let heat = 0;
-    for (let neighborIndex = 0; neighborIndex < mapping.neighborCount; neighborIndex += 1) {
+    for (let neighborIndex = 0; neighborIndex < neighborLimit; neighborIndex += 1) {
       const mappingIndex = offset + neighborIndex;
       const sensorIndex = mapping.sensorIndices[mappingIndex];
       if (sensorIndex < 0) break;
