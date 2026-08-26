@@ -1,5 +1,11 @@
 # 架构文档
 
+## 2026-08-26 授权门户单文件 HTML 特效原型
+
+新增 `client/public/shroom-vision-home-effects.html`，把当前 Shroom Vision 授权首页导出为不依赖 React、WebSocket、构建器或外部资源的单文件视觉原型。页面保留品牌头部、访问密钥、四组行业方案、反馈入口和响应式布局；18 张实际使用的图标按界面分辨率压缩后以 Data URL 内嵌，文件可脱离仓库直接打开。
+
+特效边界集中在同一文件内：CSS 变量负责颜色和强度，`initPressureField()` 负责底部压力点阵，精确指针设备支持轻量卡片倾斜；`prefers-reduced-motion` 下关闭持续动画。静态稿不连接生产授权服务，按钮只派发 `shroom:enter` / `shroom:sdk-customize` 自定义事件并显示本地反馈，防止原型被误当成生产入口。
+
 ## 2026-08-25 仓库行尾钉死（`.gitattributes`）
 
 仓库此前既没有 `.gitattributes`，`core.autocrlf` 又是 `false` —— 等于把行尾完全交给
@@ -1660,12 +1666,13 @@ flowchart LR
 - `server.js` 中串口打开、WebSocket runtime、实时发布、小床 runtime、Display Systems 绑定和 frame pipeline 开始改用 `runtimeContext`。
 - 新增 `runtimeContextFactory` 和 `framePipelineFactory` 测试，覆盖 store 优先读取、闭包兜底和三路数据库映射。
 
-> 最新维护：2026-08-11。SDK 数字矩阵文档页支持直接加载坐标 JSON、编辑一帧数组、调整数据方向并用真实渲染器预览。
+> 最新维护：2026-08-26。授权门户已输出为可脱离项目直接打开的单文件 HTML 特效原型。
 
 ## 当前维护记录
 
 | 日期 | 类型 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-26 | 新增功能 | 新增 `client/public/shroom-vision-home-effects.html`：复刻当前授权门户首页并内嵌 18 张压缩图标，提供响应式布局、压力点阵背景、轻量卡片交互、减少动态效果适配和静态事件挂点；不连接授权后端。桌面 1440×1000 与移动 390×844 验证无横向溢出、无图片失败、无控制台错误。 |
 | 2026-08-25 | 配置变更 | 新增 `.gitattributes` 钉死行尾。起因：仓库既无 `.gitattributes` 又 `core.autocrlf=false`，某个 Windows 工具把整个工作区重写成 CRLF，`git` 判出 **575 个文件改动 / 132740 行**，而 `git diff --ignore-cr-at-eol --name-only` 是 **0** —— 纯行尾噪声，零内容差异。已丢弃那批噪声并加 `* text=auto eol=lf`（全仓无被跟踪的 `.bat`/`.cmd`/`.ps1`，无需 CRLF 例外）＋ 14 类显式 `binary`（防 `build/model` 137 MB 模型与 GB 级 db 快照被改写）。**已知尾巴**：`forge.config.js` 是全仓唯一索引里存 CRLF 的文本文件（`i/crlf w/crlf`），现在不脏，但下次编辑它会连带一整份归一化差异；它属打包配置，留待单独提交处理。 |
 | 2026-08-11 | 新增功能 | `sdk/frontend/docs/#/num-matrix` 增加两步式矩阵配置台：坐标 JSON 自动识别行列并显示首末点，一维/二维帧数组严格校验，默认生成 `1..N`，支持 90°/180° 旋转和水平/垂直镜像；所有修改直接驱动包内 `RendererHost + numMatrix`。完成桌面、390px 移动端、真实 32×32 坐标文件和 WebGL 画布验证。 |
 | 2026-08-10 | 优化重构 | **第三轮渲染实现进包，批 4/4：两条斑点热力 `webglHeatmap` + `blobHeatmap`（本包第四、五个渲染器）—— 至此主应用五条渲染通路全部进包，`client/src` 侧只剩壳。** `webgl/Canvas4096WebGL.jsx`（187，壳）+ `webgl/WebGL.HeatMap copy 2.js`（953，真 WebGL 绘制核）→ `webglHeatmap`；`heatmap/canvas.jsx`（460，Canvas 2D）→ `blobHeatmap`。**这两条刻意没合成一个渲染器的两个后端**：`numMatrix` 那三个后端能共存是因为吃同一份参数、暴露同一组方法，而这两条参数不重合、方法不重合（`webglHeatmap` 4 个、`blobHeatmap` 3 个）、连「一帧多长才算有效」都不同（前者 `minFrameLength` 4096，短帧整帧丢弃且不报错；后者非空即画）—— 硬合等于造一个「一半字段在这条通路上是死的」参数表，`builtins.test.js` 有两条断言钉住这个分界。**契约一项没加**：批 1 预先补的 10 个方法名里就有 `changeColor` / `bthClickHandle`，这一批全部命中 —— 而 `registerRenderer` 对契约外方法名是**静默拒绝**（返回 `false` 不抛，现象只是「这个展示形式一片空白」加控制台一行），所以「不用改契约」这件事由测试证、不靠眼看。**第 8 条配色 `heatBlobs` 第一次有了 JS 侧的对应物**：那条 8 段色带原先只以 GLSL 形式躺在 `WebGL.HeatMap copy 2.js` 的模板字符串里，之前 18 处配色合并扫不到它；现在进 `core/colormaps.js`，着色器改成**从 `HEAT_BLOB_STOPS` 发码**，色卡 / 数值采样 / 出图同一个出处，`sampleHeatBlobsRgb` 复现了 GLSL 那道 `pow(c*1.5, 1/2.2)` gamma 与输出夹取（不复现的话色卡与实际出图就是两个颜色）。**清掉的重复与死码**：绘制核里私有的第二份 `addSide` / `interp` / `interpSmall` 改用 `core/frameMath.js`，`create_shader` / `create_program` 改用批 2 建的 `react/webgl/glUtil.js`；`heatmap/canvas.jsx` 里**每帧算一整套插值+补边+高斯、结果从没被读过**（取数循环读的是原始 `arr`）整段删掉，逐像素相同 —— 代价是 `sitValue` 六个键里那四个本来就只喂这段死运算；无参空调用 `const value = jet()` 删；写死的 `new Array(1024)` 改成按实际尺寸算；零引用的 `assets/util/heatmapRect.js`（76 行）删。**本轮唯一一处不逐像素等同的差异，而且它修的是 bug**：`heatmap/canvas.jsx` 的 `carCol` 分支改的是**模块级** `options`，挂过一次之后同一会话里所有实例都变成 `max 300`；改成每实例参数后这个串味没了。另加 rAF 的 `dirty` 标志（没数据没参数变化就不重画，静态画面下像素完全相同）与调色板按参数记忆化（原来每次渲染重建 1024 格）。**旧路径按「真有引用方才留壳」的规矩分别处理**：绘制核那个文件**留壳**（`hand.jsx` / `humanBody.jsx` / `robotLCF.jsx` / `robotSY.jsx` 四个 video 组件与 `Home.jsx` 还在直接 `new WebGLCanvas(...)` —— 文件名带 "copy 2" 但它不是死码），`heatmap/canvas.jsx` 留 75 行适配壳，`Canvas4096WebGL.jsx` 删（唯一 importer 是 `Home.jsx`）。文档站 10 → 12 页（补 `HandPoints` 与 `Heatmap` 两页，后者一页放两个渲染器、两块各自 `?raw` 的源码）。对账：sdk vitest 443 例、smoke 32 项、client vitest 214 例（`App.test.jsx` 缺 `@testing-library/react` 是既有失败）、eslint 0 error / 56 warning、docs check 12 页、护栏构建下 `WebglHeatmapRenderer` 3.81 kB / `BlobHeatmapRenderer` 5.04 kB / `blobs` 7.79 kB **三个都是独立懒加载 chunk**（没有 `dynamic import will not move module into another chunk`），`build/model` 仍是 20 个 / 137M。**真机手测仍欠**：`bed4096` 的两个 WebGL 热力渲染点、`heatmap` 形式下 `foot`/`carCol`/`jqbed`/`petCare`/`hand`/back/sit，以及反复切 10 次展示形式看 WebGL 上下文不累积（本轮占上下文的渲染器从 2 个变 4 个）。 |
@@ -1829,6 +1836,7 @@ flowchart LR
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-26 | 授权首页可作为单文件特效底稿 | 当前首页的品牌、密钥区、四类方案和反馈入口已整理为一个自包含 HTML；无需启动项目即可修改 CSS/JS 和查看效果，生产授权逻辑未被复制进原型。 |
 | 2026-08-25 | 仓库行尾统一 | `.gitattributes` 落地，575 文件 / 132740 行的 CRLF 假改动清零，工作区回到干净状态；`git ls-files --eol` 复核后全仓只剩 `forge.config.js` 一个索引侧 CRLF 遗留，已记账。 |
 | 2026-08-11 | SDK 文档页可以直接设置矩阵形状和一帧数据 | 用户可加载自己的坐标 JSON，页面自动识别行列和点数；随后直接粘贴或加载数组，并用 `1..N`、旋转和镜像核对真实方向。配置变化直接送进包内数字矩阵渲染器，不需要先改代码。 |
 | 2026-08-10 | 剩下两种「热力斑点」画法也搬进了渲染包（四批里的最后一批，五种画法全搬完了） | 就是床垫那种一团一团发亮的图，还有各种小面积的热力图。这两种以前是两套完全不同的代码，一套用显卡画、一套用普通画布画，现在都进了渲染包，但**故意没有合成一种** —— 它们连「多长的一帧才算数」都不一样，硬合起来会造出一半参数是废的东西。顺手修了一个老 bug：以前只要显示过一次「汽车座椅」那种小热力图，同一次开机里后面所有热力图的满值阈值都会跟着变成它的，画面偏色，现在每一块图各管各的。另外删掉了一段「每帧都在算、算完从来没人用」的模糊运算（画面一个像素都没变，只是不白烧 CPU 了），和一个 76 行的零引用文件。文档站从 10 页变 12 页，新的两页可以直接在浏览器里看着画面读参数表。 |
@@ -1957,7 +1965,7 @@ flowchart LR
 
 ---
 
-> 本文档由 Codex 自动生成和维护。最后更新于：2026-08-25
+> 本文档由 Codex 自动生成和维护。最后更新于：2026-08-26
 
 ## 2026-07-07 Display Systems Runtime 定义与复杂线序迁移
 
@@ -2053,6 +2061,8 @@ shroom1.0/
 ├── .gitignore               # Git 忽略规则
 │
 ├── client/                  # 前端 React 应用
+│   ├── public/
+│   │   └── shroom-vision-home-effects.html # 授权首页单文件特效原型（图标内嵌、无生产授权调用）
 │   ├── package.json         # 前端依赖（React 19 + Vite + Zustand）
 │   ├── vite.config.js       # Vite 构建配置
 │   ├── index.html           # Vite 入口 HTML
@@ -2420,6 +2430,7 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-26 | codeOpi | 输出授权门户单文件 HTML 特效原型 | `client/public/shroom-vision-home-effects.html` 无 React 和外部资源依赖，内嵌 18 张压缩图标；包含当前首页完整布局、响应式断点、Canvas 压力点阵、卡片指针响应、反馈弹层和静态事件挂点。生产授权与 WebSocket 未接入。 |
 | 2026-08-25 | codeOpi | 新增 `.gitattributes`，仓库行尾统一为 LF | 清掉 575 文件 / 132740 行的纯 CRLF 假改动（忽略行尾后内容差异为 0），并用 `* text=auto eol=lf` + 14 类显式 `binary` 防复发。遗留 `forge.config.js` 一个索引侧 CRLF 文件未归一化（属打包配置，单独处理）。 |
 | 2026-08-11 | codeOpi | SDK 数字矩阵文档页完成形状与数据直接配置 | 支持坐标 JSON 自动推导行列、`1..N` 方向帧、一维/二维数组校验、旋转/镜像和真实 `numMatrix` 活预览；真实 32×32 坐标文件、桌面与 390px 移动端验证通过。 |
 | 2026-08-10 | codeOpi | 第三轮渲染实现进包批 4/4：两条斑点热力 `webglHeatmap` + `blobHeatmap`（本包第四、五个渲染器，五条渲染通路全部进包） | `webgl/Canvas4096WebGL.jsx`（187）+ `webgl/WebGL.HeatMap copy 2.js`（953）→ `webglHeatmap`；`heatmap/canvas.jsx`（460）→ `blobHeatmap`。两条**刻意分成两个渲染器**而不是一个渲染器的两个后端（参数、方法、帧长门槛三样都不重合，`builtins.test.js` 两条断言钉住）。契约一项没加 —— 批 1 预扩的 10 个方法名全部命中。第 8 条配色 `heatBlobs` 从 GLSL 模板字符串里提出来进 `core/colormaps.js`，着色器改成从 `HEAT_BLOB_STOPS` 发码。清掉两份重复的帧运算/GL 样板、一段每帧算完没人读的死运算、一个无参空调用、一个 76 行零引用文件；修掉 `carCol` 分支改模块级 `options` 导致的跨实例串味（本轮唯一非逐像素等同处，修的是 bug）。旧路径按「真有引用方才留壳」处理：绘制核留壳（4 个 video 组件 + `Home.jsx` 在用），`heatmap/canvas.jsx` 留 75 行适配壳，`Canvas4096WebGL.jsx` 删。文档站 10 → 12 页。sdk vitest 443 / smoke 32 / client vitest 214 / eslint 0 error / docs 12 页；三个新 chunk 均独立懒加载。真机手测欠 `bed4096` 两个渲染点与 `heatmap` 形式七种矩阵。 |
@@ -2802,6 +2813,7 @@ graph TD
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-26 | codeOpi | 新增功能 | 新增 `client/public/shroom-vision-home-effects.html`，将现有授权门户首页导出为约 751 KiB 的自包含静态原型；18 张图标缩放内嵌，加入压力点阵与卡片轻交互、移动端布局、`prefers-reduced-motion`、本地反馈和 `shroom:enter` / `shroom:sdk-customize` 事件接口。桌面/移动浏览器检查通过。 |
 | 2026-08-25 | codeOpi | 配置变更 | 新增 `.gitattributes`：`* text=auto eol=lf` + `png`/`jpg`/`ico`/`icns`/`glb`/`gltf`/`fbx`/`obj`/`db`/`bin`/`dat`/`so`/`pyd`/`pyc` 共 14 类显式 `binary`。同时 `git checkout -- .` 丢弃 575 文件的 CRLF 假改动（`git diff --ignore-cr-at-eol` 验证零内容差异后才执行）。`ARCHITECTURE.md` 补本轮章节与四表记录。未改任何源码。 |
 | 2026-08-11 | codeOpi | 新增功能 | `sdk/frontend/docs/src/pages/NumMatrix.jsx` 改为“设置形状 + 设置一帧数据”的直接配置页；`BasicNumMatrix.jsx` 支持外部 `params`/`values` 与方向校验下限；`styles.css` 增加配置台和移动端布局。 |
 | 2026-08-10 | codeOpi | 优化重构 | 第三轮渲染实现进包**批 4/4**：新增 `sdk/frontend/react/webglHeatmap/{WebglHeatmapRenderer.jsx,blobs.js}`、`react/blobHeatmap/BlobHeatmapRenderer.jsx`、`core/webglHeatmap/{params,pipeline,shaders}.js`、`core/blobHeatmap/{params,pipeline,intensity}.js` 与各自的测试；`core/colormaps.js` 追加第 8 条配色 `heatBlobs`（+ `HEAT_BLOB_STOPS` 铺到 `core` 顶层，供着色器发码与文档站色卡共用）；`react/builtins.js` 注册数 3 → 5；`react/builtins.test.js` 计数改 5 并补两条热力的描述符断言（443 例）；`scripts/smoke-core.mjs` 32 项；文档站新增 `docs/src/pages/{HandPoints,Heatmap}.jsx` 与三份 demo，`routes.js` 10 → 12 页。删 `client/src/components/webgl/Canvas4096WebGL.jsx` 与 `client/src/assets/util/heatmapRect.js`；`components/webgl/WebGL.HeatMap copy 2.js` 与 `components/heatmap/canvas.jsx` 改成壳；`Home.jsx` 三个渲染点换 `RendererHost`。`sdk/README.md` 与 `sdk/frontend/README.md` 同步计数、目录树、边界与公开面记账。 |
