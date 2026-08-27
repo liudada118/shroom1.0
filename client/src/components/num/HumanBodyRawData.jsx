@@ -1,6 +1,9 @@
-import React, { useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useId, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { findMax } from '../../assets/util/util'
+import { HUMAN_BODY_RAW_VIEWS } from './humanBodyRawLayout'
+import { orientPartMatrix } from '../video/humanBodyOrientation'
+import './HumanBodyRawData.css'
 
 const BACK_IDX = [
   [619, 620, 621, 622, 623, 609, 610, 611, 612, 613],
@@ -101,21 +104,25 @@ const FRONT_PANTS_RIGHT_IDX = [
 ]
 
 const PART_CONFIGS = [
-  { key: 'back', titleKey: 'bodyParts.back', indexMatrix: BACK_IDX },
-  { key: 'chest', titleKey: 'bodyParts.chest', indexMatrix: CHEST_IDX },
-  { key: 'rightArm', titleKey: 'bodyParts.rightArm', indexMatrix: RIGHT_ARM_IDX },
-  { key: 'rightShoulder', titleKey: 'bodyParts.rightShoulder', indexMatrix: RIGHT_SHOULDER_IDX },
-  { key: 'leftArm', titleKey: 'bodyParts.leftArm', indexMatrix: LEFT_ARM_IDX },
-  { key: 'leftShoulder', titleKey: 'bodyParts.leftShoulder', indexMatrix: LEFT_SHOULDER_IDX },
-  { key: 'backPantsRight', titleKey: 'bodyParts.backPantsRight', indexMatrix: BACK_PANTS_RIGHT_IDX },
-  { key: 'backPantsLeft', titleKey: 'bodyParts.backPantsLeft', indexMatrix: BACK_PANTS_LEFT_IDX },
-  { key: 'frontPantsLeft', titleKey: 'bodyParts.frontPantsLeft', indexMatrix: FRONT_PANTS_LEFT_IDX },
-  { key: 'frontPantsRight', titleKey: 'bodyParts.frontPantsRight', indexMatrix: FRONT_PANTS_RIGHT_IDX },
+  { key: 'back', titleKey: 'bodyParts.back', fallbackLabel: '背部', indexMatrix: BACK_IDX },
+  { key: 'chest', titleKey: 'bodyParts.chest', fallbackLabel: '胸部', indexMatrix: CHEST_IDX },
+  { key: 'rightArm', titleKey: 'bodyParts.rightArm', fallbackLabel: '右臂', indexMatrix: RIGHT_ARM_IDX },
+  { key: 'rightShoulder', titleKey: 'bodyParts.rightShoulder', fallbackLabel: '右肩', indexMatrix: RIGHT_SHOULDER_IDX },
+  { key: 'leftArm', titleKey: 'bodyParts.leftArm', fallbackLabel: '左臂', indexMatrix: LEFT_ARM_IDX },
+  { key: 'leftShoulder', titleKey: 'bodyParts.leftShoulder', fallbackLabel: '左肩', indexMatrix: LEFT_SHOULDER_IDX },
+  { key: 'backPantsRight', titleKey: 'bodyParts.rightBackLeg', fallbackLabel: '右后腿', indexMatrix: BACK_PANTS_RIGHT_IDX },
+  { key: 'backPantsLeft', titleKey: 'bodyParts.leftBackLeg', fallbackLabel: '左后腿', indexMatrix: BACK_PANTS_LEFT_IDX },
+  { key: 'frontPantsLeft', titleKey: 'bodyParts.rightFrontLeg', fallbackLabel: '右前腿', indexMatrix: FRONT_PANTS_LEFT_IDX },
+  { key: 'frontPantsRight', titleKey: 'bodyParts.leftFrontLeg', fallbackLabel: '左前腿', indexMatrix: FRONT_PANTS_RIGHT_IDX },
 ].map((part) => ({
   ...part,
   width: part.indexMatrix[0].length,
   height: part.indexMatrix.length,
 }))
+
+const PART_CONFIGS_BY_KEY = Object.freeze(Object.fromEntries(
+  PART_CONFIGS.map((part) => [part.key, part]),
+))
 
 const normalizeSourceData = (value) => {
   const source = Array.isArray(value) ? value : []
@@ -134,14 +141,11 @@ const HORIZONTAL_FLIP_PARTS = new Set([
   'rightShoulder',
   'leftArm',
   'leftShoulder',
+  'frontPantsLeft',
+  'frontPantsRight',
 ])
 
-const VERTICAL_FLIP_PARTS = new Set([
-  'backPantsRight',
-  'backPantsLeft',
-])
-
-const orientPartValues = (values, part) => {
+export const orientHumanBodyRawPartValues = (values, part) => {
   let matrix = Array.from({ length: part.height }, (_, rowIndex) =>
     values.slice(rowIndex * part.width, (rowIndex + 1) * part.width)
   )
@@ -150,53 +154,96 @@ const orientPartValues = (values, part) => {
     matrix = matrix.map((row) => [...row].reverse())
   }
 
-  if (VERTICAL_FLIP_PARTS.has(part.key)) {
-    matrix = [...matrix].reverse()
-  }
+  matrix = orientPartMatrix(part.key, matrix)
 
   return matrix.flat()
 }
+
+const PART_DISPLAY_POSITIONS_BY_KEY = Object.freeze(Object.fromEntries(
+  PART_CONFIGS.map((part) => [
+    part.key,
+    Object.freeze(orientHumanBodyRawPartValues(part.indexMatrix.flat(), part)),
+  ]),
+))
+
+export const getHumanBodyRawPartStats = (values = []) => ({
+  total: values.length,
+  active: values.filter((value) => value > 0).length,
+  peak: findMax(values),
+})
+
+const getViewStats = (view, parts) => getHumanBodyRawPartStats(
+  [...view.upperSlots, ...view.lowerSlots].flatMap(
+    (slot) => parts[slot.dataPartKey] || [],
+  ),
+)
 
 const getPartValues = (source, part) => {
   const values = part.indexMatrix.flatMap((row) =>
     row.map((position) => source[position - 1] || 0)
   )
 
-  return orientPartValues(values, part)
+  return orientHumanBodyRawPartValues(values, part)
 }
 
-const drawPart = (canvas, part, values, title) => {
+const getPartCanvasMetrics = (part) => {
+  const cellWidth = 28
+  const cellHeight = 28
+  return {
+    cellWidth,
+    cellHeight,
+    width: part.width * cellWidth,
+    height: part.height * cellHeight,
+  }
+}
+
+const traceRoundedRect = (ctx, x, y, width, height, radius) => {
+  const safeRadius = Math.min(radius, width / 2, height / 2)
+  ctx.beginPath()
+  ctx.moveTo(x + safeRadius, y)
+  ctx.lineTo(x + width - safeRadius, y)
+  ctx.quadraticCurveTo(x + width, y, x + width, y + safeRadius)
+  ctx.lineTo(x + width, y + height - safeRadius)
+  ctx.quadraticCurveTo(x + width, y + height, x + width - safeRadius, y + height)
+  ctx.lineTo(x + safeRadius, y + height)
+  ctx.quadraticCurveTo(x, y + height, x, y + height - safeRadius)
+  ctx.lineTo(x, y + safeRadius)
+  ctx.quadraticCurveTo(x, y, x + safeRadius, y)
+  ctx.closePath()
+}
+
+const getCellPalette = (value, viewPeak) => {
+  if (value <= 0) {
+    return { fill: '#12527f', text: '#f2f9ff', channel: '#d9efff' }
+  }
+
+  const intensity = Math.min(1, value / Math.max(viewPeak, 1))
+  if (intensity >= 0.85) {
+    return { fill: '#b7434b', text: '#fff8f4', channel: '#ffe9e6' }
+  }
+  if (intensity >= 0.62) {
+    return { fill: '#e2bf4f', text: '#17202b', channel: '#453b17' }
+  }
+  if (intensity >= 0.38) {
+    return { fill: '#3f796b', text: '#f6fffb', channel: '#f6fffb' }
+  }
+  return { fill: '#216b95', text: '#f3fbff', channel: '#d9efff' }
+}
+
+const drawPart = (canvas, part, values, positions, viewPeak) => {
   if (!canvas) return
 
-  const cellSize = part.width >= 32 ? 18 : 20
-  const titleHeight = 28
-  const gridWidth = part.width * cellSize
-  const width = Math.max(gridWidth, 150)
-  const height = part.height * cellSize + titleHeight
-  const ratio = window.devicePixelRatio || 1
+  const { cellWidth, cellHeight, width, height } = getPartCanvasMetrics(part)
+  const ratio = Math.min(window.devicePixelRatio || 1, 2)
 
-  canvas.width = width * ratio
-  canvas.height = height * ratio
+  canvas.width = Math.round(width * ratio)
+  canvas.height = Math.round(height * ratio)
   canvas.style.width = `${width}px`
   canvas.style.height = `${height}px`
 
   const ctx = canvas.getContext('2d')
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
   ctx.clearRect(0, 0, width, height)
-  ctx.fillStyle = '#ffffff'
-  ctx.fillRect(0, 0, width, height)
-
-  ctx.fillStyle = '#151933'
-  ctx.font = 'bold 14px Arial'
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  ctx.fillText(`${title} ${part.width}x${part.height}`, width / 2, titleHeight / 2)
-
-  const gridTop = titleHeight
-  const gridLeft = (width - gridWidth) / 2
-  ctx.strokeStyle = '#e4e7f2'
-  ctx.lineWidth = 1
-  ctx.font = `${part.width >= 32 ? 8 : 10}px Arial`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
 
@@ -204,24 +251,43 @@ const drawPart = (canvas, part, values, title) => {
     for (let col = 0; col < part.width; col++) {
       const index = row * part.width + col
       const value = Math.round(values[index] || 0)
-      const x = gridLeft + col * cellSize
-      const y = gridTop + row * cellSize
+      const position = positions[index] || 0
+      const x = col * cellWidth + 2
+      const y = row * cellHeight + 2
+      const tileWidth = cellWidth - 4
+      const tileHeight = cellHeight - 4
+      const palette = getCellPalette(value, viewPeak)
+      const isPeak = viewPeak > 0 && value === viewPeak
 
-      ctx.strokeRect(x, y, cellSize, cellSize)
-      ctx.fillStyle = value > 0 ? '#1f5eff' : '#9aa0ad'
-      ctx.fillText(String(value), x + cellSize / 2, y + cellSize / 2)
+      traceRoundedRect(ctx, x, y, tileWidth, tileHeight, 7)
+      ctx.fillStyle = palette.fill
+      ctx.fill()
+      ctx.strokeStyle = isPeak ? '#fff0a6' : 'rgba(220, 242, 255, 0.24)'
+      ctx.lineWidth = isPeak ? 1.5 : 0.75
+      ctx.stroke()
+
+      ctx.fillStyle = palette.channel
+      ctx.font = '600 6.5px ui-monospace, SFMono-Regular, Consolas, monospace'
+      ctx.fillText(`#${position}`, x + tileWidth / 2, y + 7.5)
+      ctx.fillStyle = palette.text
+      ctx.font = '700 10px ui-monospace, SFMono-Regular, Consolas, monospace'
+      ctx.fillText(String(value), x + tileWidth / 2, y + 17.5)
     }
   }
 }
 
 const HumanBodyRawData = React.forwardRef((props, refs) => {
   const { t } = useTranslation()
+  const instanceId = useId().replace(/:/g, '')
   const canvasRefs = useRef({})
   const [sourceData, setSourceData] = useState(() => createDefaultSource())
   const parts = useMemo(() => PART_CONFIGS.reduce((result, part) => {
     result[part.key] = getPartValues(sourceData, part)
     return result
   }, {}), [sourceData])
+  const viewStatsByKey = useMemo(() => Object.fromEntries(
+    HUMAN_BODY_RAW_VIEWS.map((view) => [view.key, getViewStats(view, parts)]),
+  ), [parts])
 
   const updateStats = (nextSourceData) => {
     const point = nextSourceData.filter((value) => value > 0).length
@@ -248,44 +314,107 @@ const HumanBodyRawData = React.forwardRef((props, refs) => {
   }))
 
   useEffect(() => {
-    PART_CONFIGS.forEach((part) => {
-      drawPart(canvasRefs.current[part.key], part, parts[part.key] || [], t(part.titleKey))
+    HUMAN_BODY_RAW_VIEWS.forEach((view) => {
+      const viewPeak = viewStatsByKey[view.key]?.peak || 0
+      ;[...view.upperSlots, ...view.lowerSlots].forEach((slot) => {
+        const dataPart = PART_CONFIGS_BY_KEY[slot.dataPartKey]
+        drawPart(
+          canvasRefs.current[slot.slotKey],
+          dataPart,
+          parts[slot.dataPartKey] || [],
+          PART_DISPLAY_POSITIONS_BY_KEY[slot.dataPartKey] || [],
+          viewPeak,
+        )
+      })
     })
-  }, [parts, t])
+  }, [parts, viewStatsByKey])
 
-  return (
-    <div
-      style={{
-        width: '100vw',
-        height: '100vh',
-        overflow: 'auto',
-        background: '#ffffff',
-        padding: '96px 40px 40px 420px',
-        boxSizing: 'border-box',
-      }}
-    >
-      <div
+  const renderPart = (slot) => {
+    const displayPart = PART_CONFIGS_BY_KEY[slot.displayPartKey]
+    const dataPart = PART_CONFIGS_BY_KEY[slot.dataPartKey]
+    const values = parts[slot.dataPartKey] || []
+    const stats = getHumanBodyRawPartStats(values)
+    const { width } = getPartCanvasMetrics(dataPart)
+    const label = t(displayPart.titleKey, { defaultValue: displayPart.fallbackLabel })
+    const captionId = `${instanceId}-${slot.slotKey}-caption`
+
+    return (
+      <figure
+        key={slot.slotKey}
+        className="human-body-raw__part"
+        data-slot-key={slot.slotKey}
+        data-display-part-key={slot.displayPartKey}
+        data-part-key={slot.dataPartKey}
         style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(380px, max-content))',
-          gap: '24px',
-          alignItems: 'start',
+          '--human-body-part-width': `${width}px`,
+          '--human-body-part-columns': dataPart.width,
         }}
       >
-        {PART_CONFIGS.map((part) => (
+        <figcaption id={captionId} className="human-body-raw__caption">
+          <span className="human-body-raw__caption-copy">
+            <strong className="human-body-raw__part-name">{label}</strong>
+            <span className="human-body-raw__dimensions">
+              {dataPart.width} × {dataPart.height} · {stats.total}
+              {t('humanBodyRaw.points', { defaultValue: '点' })}
+            </span>
+          </span>
+          <span className="human-body-raw__part-peak">
+            {t('humanBodyRaw.peak', { defaultValue: '峰值' })} {stats.peak}
+          </span>
+          <span className="human-body-raw__part-scale" aria-hidden="true" />
+        </figcaption>
+        <span className="human-body-raw__canvas-frame">
           <canvas
-            key={part.key}
             ref={(canvas) => {
-              canvasRefs.current[part.key] = canvas
+              canvasRefs.current[slot.slotKey] = canvas
             }}
-            style={{
-              border: '1px solid #d7dce8',
-              borderRadius: 6,
-              boxShadow: '0 8px 24px rgba(20, 26, 48, 0.08)',
-            }}
+            className="human-body-raw__canvas"
+            role="img"
+            aria-labelledby={captionId}
           />
-        ))}
-      </div>
+        </span>
+      </figure>
+    )
+  }
+
+  return (
+    <div className="human-body-raw">
+      <main
+        className="human-body-raw__atlas"
+        aria-label={t('humanBodyRaw.title', { defaultValue: '人体原始数据' })}
+      >
+        <div className="human-body-raw__views">
+          {HUMAN_BODY_RAW_VIEWS.map((view) => {
+            const titleId = `${instanceId}-${view.key}-title`
+            const viewLabel = t(view.titleKey, {
+              defaultValue: view.key === 'front' ? '正面' : '背面',
+            })
+            const lowerTitle = view.key === 'front'
+              ? t('humanBodyRaw.frontLowerTitle', { defaultValue: '前腿' })
+              : t('humanBodyRaw.backLowerTitle', { defaultValue: '后腿' })
+
+            return (
+              <section
+                key={view.key}
+                className={`human-body-raw__view human-body-raw__view--${view.key}`}
+                aria-labelledby={titleId}
+              >
+                <h2 id={titleId} className="human-body-raw__view-heading">
+                  {viewLabel}
+                </h2>
+                <div className="human-body-raw__figure">
+                  <div className="human-body-raw__upper">
+                    {view.upperSlots.map(renderPart)}
+                  </div>
+                  <div className="human-body-raw__lower" role="group" aria-label={lowerTitle}>
+                    {view.lowerSlots.map(renderPart)}
+                  </div>
+                </div>
+              </section>
+            )
+          })}
+        </div>
+      </main>
     </div>
   )
 })
