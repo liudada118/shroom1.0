@@ -26,8 +26,13 @@ const PART_ORIENTATION = Object.freeze({
   rightArm: Object.freeze({
     model: Object.freeze({ flipCol: true }),
   }),
+  leftShoulder: Object.freeze({
+    model: Object.freeze({ flipRow: true }),
+    number: Object.freeze({ flipRow: true }),
+  }),
   rightShoulder: Object.freeze({
-    model: Object.freeze({ flipCol: true }),
+    model: Object.freeze({ flipRow: true, flipCol: true }),
+    number: Object.freeze({ flipRow: true }),
   }),
 });
 

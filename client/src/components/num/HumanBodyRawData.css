@@ -3,6 +3,7 @@
   --raw-line: #24344a;
   --raw-text: #f2f6fb;
   --raw-muted: #a7b5c8;
+  --raw-atlas-max-width: 1120px;
   width: 100%;
   min-width: 0;
   height: 100vh;
@@ -23,20 +24,80 @@
 }
 
 .human-body-raw__atlas {
-  width: min(100%, 1440px);
+  width: min(100%, var(--raw-atlas-max-width));
   min-width: 0;
   margin: 0 auto;
 }
 
+.human-body-raw__view-switch {
+  display: flex;
+  width: max-content;
+  max-width: 100%;
+  margin: 0 auto 16px;
+  padding: 3px;
+  gap: 3px;
+  border: 1px solid rgba(118, 151, 180, 0.2);
+  border-radius: 11px;
+  background: rgba(9, 20, 34, 0.86);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.035),
+    0 8px 24px rgba(0, 0, 0, 0.16);
+}
+
+.human-body-raw__view-switch-button {
+  min-width: 82px;
+  min-height: 30px;
+  padding: 6px 16px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--raw-muted);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    color 160ms ease,
+    background-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.human-body-raw__view-switch-button:hover {
+  color: #eaf5fb;
+  background: rgba(82, 217, 237, 0.08);
+}
+
+.human-body-raw__view-switch-button.is-active,
+.human-body-raw__view-switch-button[aria-pressed='true'] {
+  border-color: rgba(82, 217, 237, 0.58);
+  color: #f5fdff;
+  background: rgba(24, 105, 121, 0.68);
+  box-shadow: inset 0 0 0 1px rgba(82, 217, 237, 0.08);
+}
+
+.human-body-raw__view-switch-button:focus-visible {
+  outline: 2px solid #6ae4f2;
+  outline-offset: 2px;
+}
+
 .human-body-raw__views {
-  display: grid;
-  grid-template-columns: minmax(0, 1.65fr) minmax(330px, 0.75fr);
-  gap: clamp(24px, 2.4vw, 40px);
-  align-items: start;
+  width: 100%;
+  min-width: 0;
 }
 
 .human-body-raw__view {
+  width: 100%;
   min-width: 0;
+}
+
+.human-body-raw__view--front {
+  width: 100%;
+}
+
+.human-body-raw__view--back {
+  width: 100%;
 }
 
 .human-body-raw__view-heading {
@@ -85,32 +146,50 @@
 }
 
 .human-body-raw__upper {
-  display: grid;
+  display: flex;
   width: 100%;
   min-width: 0;
-  gap: 10px;
-  align-items: stretch;
-}
-
-.human-body-raw__view--front .human-body-raw__upper {
-  grid-template-columns: minmax(0, 7fr) minmax(0, 3fr) minmax(0, 10fr) minmax(0, 3fr) minmax(0, 7fr);
-}
-
-.human-body-raw__view--back .human-body-raw__upper {
-  max-width: 310px;
-  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
 }
 
 .human-body-raw__lower {
   display: grid;
-  width: min(100%, 520px);
+  width: 100%;
   min-width: 0;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(30, minmax(0, 1fr));
+  align-items: start;
 }
 
-.human-body-raw__view--back .human-body-raw__lower {
-  width: min(100%, 400px);
+.human-body-raw__upper > .human-body-raw__part {
+  width: auto;
+  flex: var(--human-body-part-columns) 1 16px;
+}
+
+.human-body-raw__lower > .human-body-raw__part {
+  width: auto;
+}
+
+.human-body-raw__lower > .human-body-raw__part:first-child {
+  margin-right: 4px;
+  grid-column: 10 / span 5;
+}
+
+.human-body-raw__lower > .human-body-raw__part:last-child {
+  margin-left: 4px;
+  grid-column: 17 / span 5;
+}
+
+.human-body-raw__lower-heading {
+  z-index: 1;
+  width: 40%;
+  margin: 0;
+  align-self: center;
+  color: var(--raw-muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
 }
 
 .human-body-raw__part {
@@ -156,6 +235,10 @@
   gap: 6px 8px;
   align-items: start;
   border-bottom: 1px solid rgba(190, 216, 235, 0.1);
+}
+
+.human-body-raw__upper .human-body-raw__caption {
+  min-height: 80px;
 }
 
 .human-body-raw__caption-copy {
@@ -226,112 +309,85 @@
   background: transparent;
 }
 
-@media (min-width: 1001px) {
-  .human-body-raw__view--front .human-body-raw__upper {
-    display: flex;
-  }
-
-  .human-body-raw__view--front .human-body-raw__upper > .human-body-raw__part {
-    width: auto;
-    flex: var(--human-body-part-columns) 1 16px;
-  }
-
-  .human-body-raw__view--front .human-body-raw__part[data-part-key='leftShoulder'] .human-body-raw__caption,
-  .human-body-raw__view--front .human-body-raw__part[data-part-key='rightShoulder'] .human-body-raw__caption {
-    padding-right: 6px;
-    padding-left: 6px;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 4px;
-  }
-
-  .human-body-raw__view--front .human-body-raw__part[data-part-key='leftShoulder'] .human-body-raw__caption-copy,
-  .human-body-raw__view--front .human-body-raw__part[data-part-key='rightShoulder'] .human-body-raw__caption-copy {
-    display: contents;
-  }
-
-  .human-body-raw__view--front .human-body-raw__part[data-part-key='leftShoulder'] .human-body-raw__part-name,
-  .human-body-raw__view--front .human-body-raw__part[data-part-key='rightShoulder'] .human-body-raw__part-name {
-    grid-row: 1;
-    grid-column: 1;
-    white-space: nowrap;
-  }
-
-  .human-body-raw__view--front .human-body-raw__part[data-part-key='leftShoulder'] .human-body-raw__dimensions,
-  .human-body-raw__view--front .human-body-raw__part[data-part-key='rightShoulder'] .human-body-raw__dimensions {
-    grid-row: 2;
-    grid-column: 1 / -1;
-    font-size: 8px;
-    white-space: nowrap;
-  }
-
-  .human-body-raw__view--front .human-body-raw__part[data-part-key='leftShoulder'] .human-body-raw__part-peak,
-  .human-body-raw__view--front .human-body-raw__part[data-part-key='rightShoulder'] .human-body-raw__part-peak {
-    min-width: 0;
-    padding: 3px;
-    grid-row: 1;
-    grid-column: 2;
-    justify-self: end;
-    font-size: 8px;
-  }
-
-  .human-body-raw__view--front .human-body-raw__part[data-part-key='leftShoulder'] .human-body-raw__part-scale,
-  .human-body-raw__view--front .human-body-raw__part[data-part-key='rightShoulder'] .human-body-raw__part-scale {
-    grid-row: 3;
-  }
+.human-body-raw__part[data-part-key='leftShoulder'] .human-body-raw__caption,
+.human-body-raw__part[data-part-key='rightShoulder'] .human-body-raw__caption {
+  padding-right: 6px;
+  padding-left: 6px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
 }
 
-@media (max-width: 1500px) {
-  .human-body-raw__views {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.human-body-raw__part[data-part-key='leftShoulder'] .human-body-raw__caption-copy,
+.human-body-raw__part[data-part-key='rightShoulder'] .human-body-raw__caption-copy {
+  display: contents;
+}
 
-  .human-body-raw__view + .human-body-raw__view {
-    margin-top: 8px;
-  }
+.human-body-raw__part[data-part-key='leftShoulder'] .human-body-raw__part-name,
+.human-body-raw__part[data-part-key='rightShoulder'] .human-body-raw__part-name {
+  grid-row: 1;
+  grid-column: 1;
+}
 
-  .human-body-raw__view--back .human-body-raw__upper {
-    max-width: 360px;
-  }
+.human-body-raw__part[data-part-key='leftShoulder'] .human-body-raw__dimensions,
+.human-body-raw__part[data-part-key='rightShoulder'] .human-body-raw__dimensions {
+  grid-row: 2;
+  grid-column: 1;
+  font-size: 8px;
+  white-space: nowrap;
+}
 
-  .human-body-raw__view--back .human-body-raw__lower {
-    width: min(100%, 440px);
-  }
+.human-body-raw__part[data-part-key='leftShoulder'] .human-body-raw__part-peak,
+.human-body-raw__part[data-part-key='rightShoulder'] .human-body-raw__part-peak {
+  min-width: 0;
+  padding: 3px;
+  grid-row: 3;
+  grid-column: 1;
+  justify-self: start;
+  font-size: 8px;
+}
+
+.human-body-raw__part[data-part-key='leftShoulder'] .human-body-raw__part-scale,
+.human-body-raw__part[data-part-key='rightShoulder'] .human-body-raw__part-scale {
+  grid-row: 4;
+}
+
+.human-body-raw__lower .human-body-raw__caption {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+}
+
+.human-body-raw__lower .human-body-raw__caption-copy {
+  display: contents;
+}
+
+.human-body-raw__lower .human-body-raw__part-name {
+  grid-row: 1;
+  grid-column: 1;
+  white-space: nowrap;
+}
+
+.human-body-raw__lower .human-body-raw__dimensions {
+  grid-row: 2;
+  grid-column: 1;
+  white-space: nowrap;
+}
+
+.human-body-raw__lower .human-body-raw__part-peak {
+  min-width: 0;
+  padding: 3px 6px;
+  grid-row: 3;
+  grid-column: 1;
+  justify-self: start;
+}
+
+.human-body-raw__lower .human-body-raw__part-scale {
+  grid-row: 4;
 }
 
 @media (max-width: 1000px) {
   .human-body-raw {
     padding-right: 12px;
     padding-left: calc(18vw + 16px);
-  }
-
-  .human-body-raw__view--front .human-body-raw__upper {
-    max-width: 640px;
-    grid-template-areas:
-      'chest chest'
-      'left-shoulder right-shoulder'
-      'left-arm right-arm';
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    justify-items: stretch;
-  }
-
-  .human-body-raw__part[data-slot-key='front-chest'] {
-    grid-area: chest;
-  }
-
-  .human-body-raw__part[data-slot-key='front-right-shoulder'] {
-    grid-area: right-shoulder;
-  }
-
-  .human-body-raw__part[data-slot-key='front-left-shoulder'] {
-    grid-area: left-shoulder;
-  }
-
-  .human-body-raw__part[data-slot-key='front-right-arm'] {
-    grid-area: right-arm;
-  }
-
-  .human-body-raw__part[data-slot-key='front-left-arm'] {
-    grid-area: left-arm;
   }
 }
 
@@ -341,16 +397,8 @@
     padding-bottom: 24px;
   }
 
-  .human-body-raw__views {
-    gap: 24px;
-  }
-
   .human-body-raw__figure {
     gap: 12px;
-  }
-
-  .human-body-raw__lower {
-    gap: 6px;
   }
 
   .human-body-raw__caption {
