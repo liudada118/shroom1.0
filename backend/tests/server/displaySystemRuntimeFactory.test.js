@@ -1,7 +1,7 @@
 const assert = require('assert');
 const {
   createDisplaySystemRuntimeController,
-} = require('../../extension-host/displaySystemRuntimeFactory');
+} = require('../../extension-host/runtime/displaySystemRuntimeFactory');
 
 const stopped = [];
 const started = [];

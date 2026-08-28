@@ -1,7 +1,7 @@
 const {
   bindDisplaySystemRuntimeChannels,
   createDisplaySystemRuntimeDispatcher,
-} = require('./index');
+} = require('../index');
 
 function buildRuntimeBindingSnapshot(runtimeBindings = []) {
   return {

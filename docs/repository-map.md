@@ -38,7 +38,10 @@ E:/shroom1/
 │  │  ├─ csv/                           # CSV 导出
 │  │  ├─ realtime/                      # 实时帧分发
 │  │  └─ algorithm-channel/             # 简单算法通道
-│  ├─ extension-host/                   # 扩展发现、校验与调度
+│  ├─ extension-host/                   # 展示系统扩展宿主
+│  │  ├─ manifest/                     # 配置发现、校验与展示定义
+│  │  ├─ runtime/                      # 通道规划、绑定与调度
+│  │  └─ workspace/                    # 用户展示系统工作区
 │  ├─ extensions/
 │  │  ├─ built-in-sensors/              # 内置传感器运行时
 │  │  └─ examples/                      # 展示系统示例
@@ -92,7 +95,9 @@ flowchart LR
 | --- | --- |
 | 新传感器应用运行时 | `backend/extensions/built-in-sensors/` |
 | 新展示系统示例 | `backend/extensions/examples/<id>/` |
-| 展示系统发现、校验、调度机制 | `backend/extension-host/` |
+| 展示系统配置发现与校验 | `backend/extension-host/manifest/` |
+| 展示系统运行调度 | `backend/extension-host/runtime/` |
+| 展示系统工作区 | `backend/extension-host/workspace/` |
 | 应用侧串口多通道编排 | `backend/kernel/serial/` |
 | 协议和串口通用能力 | `sdk/backend/protocol/`、`sdk/backend/serial/` |
 | 采集和存储通用能力 | `sdk/backend/collection/`、`sdk/backend/storage/` |
@@ -112,3 +117,21 @@ flowchart LR
 ## 6. 当前网页交付边界
 
 `build/` 是当前安装包内的网页资源和离线兜底。在线版本检测、自动缓存和离线回退属于后续产品能力；当前目录结构不把它描述为已落地功能，也不因此改动 Electron 稳定入口。
+
+## 7. 一级目录中的源码与运行产物
+
+| 目录 | 当前性质 | 处理结论 |
+| --- | --- | --- |
+| `build/` | Electron 固定读取的前端构建资源 | 保留现路径；移动会影响稳定入口 |
+| `release-notes/` | Windows/macOS 版本说明源文件 | 保留；版本历史在前端构建时读取 Windows Markdown |
+| `display-systems/` | 可配置展示系统工作区 | 保留，不是临时目录 |
+| `db/` | 初始化库与本机历史数据库 | 只跟踪 `init.db`；历史库不得移动或删除 |
+| `pack-resources/` | 打包资源暂存 | 被打包配置使用；当前保留 |
+| `dist/` | 安装包与更新清单构建产物 | 已忽略，不应提交 |
+| `data/`、`img/`、`oneStepPdf/` | 开发态 CSV、上传图片和报告输出 | 新文件已忽略；已有跟踪内容及路径迁移等待数据兼容确认 |
+| `outputs/`、`test-results/`、`runtime/temp/`、`tmp/` | 工具输出、测试状态和运行临时文件 | 新文件已忽略；已有跟踪内容尚未批量移除 |
+| `project/` | 未被生产、测试或打包引用的旧模型/原型 | 候选归档；其中大部分模型纹理与正式资源重复，尚未删除 |
+
+开发态导出仍由 `backend/kernel/platform/serverPathConfig.js` 指向根目录下的 `data/`、
+`img/` 与 `oneStepPdf/`。将其统一迁移到 `runtime/exports/` 会改变已有文件位置，必须在
+备份、兼容读取和用户可见下载位置确认后单独实施。

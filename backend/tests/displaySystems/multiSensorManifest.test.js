@@ -7,7 +7,7 @@ const {
 const {
   bindDisplaySystemRuntimeChannels,
   resolveOutputPublisher,
-} = require('../../extension-host/displaySystemRuntimeBinder');
+} = require('../../extension-host/runtime/displaySystemRuntimeBinder');
 
 // ---------------------------------------------------------------------------
 // sensors[] 归一化：v2 单 sensor 升格

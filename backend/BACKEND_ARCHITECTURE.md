@@ -38,6 +38,9 @@ backend/
 │  ├─ realtime/
 │  └─ algorithm-channel/
 ├─ extension-host/
+│  ├─ manifest/
+│  ├─ runtime/
+│  └─ workspace/
 ├─ extensions/
 │  ├─ built-in-sensors/
 │  └─ examples/
@@ -119,20 +122,19 @@ backend/
 
 ### `extension-host`
 
-该目录负责已有 Display System 能力的基础设施：
+该目录根部只保留统一出口 `index.js`、应用装配入口 `appRuntimeFactory.js` 和说明文件。具体能力按职责分为：
 
-- 查找和读取 manifest；
-- 校验配置文件与显示配置；
-- 生成展示定义和坐标映射；
-- 规划 parser channel；
-- 绑定、启动、停止和注册运行时；
-- 提供工作区读写服务。
+| 子目录 | 职责 |
+| --- | --- |
+| `manifest/` | 查找和读取 manifest，校验配置与引用文件，生成展示定义和坐标映射 |
+| `runtime/` | 规划 parser channel，绑定、启动、停止和注册展示系统运行时 |
+| `workspace/` | 提供用户展示系统工作区读写、保存与复制服务 |
 
 它是扩展与稳定内核之间的边界，不包含某个具体传感器的协议实现。
 
 ### `extensions/built-in-sensors`
 
-放随应用交付的现有传感器运行时，包括 1024 点、手套、小床和 legacy 矩阵处理器及其装配工厂。目录迁移没有改变帧解析、线序和通道语义。
+放随应用交付的现有传感器运行时，包括 1024 点、手套、小床和 legacy 矩阵处理器、装配工厂及其 `sensorRuntimeRegistry.js`。目录迁移没有改变帧解析、线序和通道语义。
 
 ### `extensions/examples`
 

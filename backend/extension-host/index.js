@@ -3,7 +3,7 @@ const {
   DISPLAY_SYSTEM_SCHEMA_VERSION,
   SUPPORTED_DISPLAY_SYSTEM_SCHEMA_VERSIONS,
   validateDisplaySystemConfig,
-} = require('./displaySystemConfigValidator');
+} = require('./manifest/displaySystemConfigValidator');
 const {
   PROTOCOL_FRAMING_TYPES,
   PROTOCOL_VALUE_TYPES,
@@ -23,72 +23,72 @@ const {
   normalizeProfile,
   normalizeView,
   validateDisplayConfig,
-} = require('./displaySystemPage');
+} = require('./manifest/displaySystemPage');
 const {
   CANVAS_COLORMAPS,
   CANVAS_OVERLAYS,
   CHART_OVERLAYS,
   DISPLAY_CHART_CARD_LIMIT,
-} = require('./displaySystemCanvasCatalog');
+} = require('./manifest/displaySystemCanvasCatalog');
 const {
   validateAlgorithmDataDefinition,
   validateCoordinateMapDefinition,
   validateDisplaySystemDefinitionFiles,
   validateLineOrderDefinition,
   validatePointOrderDefinition,
-} = require('./displaySystemConfigFileValidator');
+} = require('./manifest/displaySystemConfigFileValidator');
 const {
   canonicalizeCoordinateMapDefinition,
   getCoordinateMatrix,
   normalizeCoordinateMapDefinition,
-} = require('./displaySystemCoordinateMap');
+} = require('./manifest/displaySystemCoordinateMap');
 const {
   DEFAULT_MANIFEST_FILENAMES,
   discoverDisplaySystems,
   findManifestFile,
   loadDisplaySystemDirectory,
   resolveDisplaySystemFiles,
-} = require('./displaySystemConfigLoader');
+} = require('./manifest/displaySystemConfigLoader');
 const {
   buildDisplayMetadataFromDisplaySystem,
   buildDisplaySystemRuntimeDefinition,
   buildParserChannelDefinitionsFromDisplaySystem,
   buildSensorDefinitionFromDisplaySystem,
-} = require('./displaySystemDefinitionBuilder');
+} = require('./manifest/displaySystemDefinitionBuilder');
 const {
   createDisplaySystemRegistry,
-} = require('./displaySystemRegistry');
+} = require('./runtime/displaySystemRegistry');
 const {
   buildDisplaySystemRoots,
   classifyDisplaySystemAccess,
   createDisplaySystemRuntimeDiscovery,
   resolveDisplaySystemAccessConflicts,
-} = require('./displaySystemRuntimeDiscovery');
+} = require('./runtime/displaySystemRuntimeDiscovery');
 const {
   attachRuntimeChannelPlan,
   buildRuntimeChannelPlan,
-} = require('./displaySystemRuntimeChannelPlanner');
+} = require('./runtime/displaySystemRuntimeChannelPlanner');
 const {
   bindDisplaySystemRuntimeChannels,
   resolveOutputPublisher,
   resolveParserChannel,
-} = require('./displaySystemRuntimeBinder');
+} = require('./runtime/displaySystemRuntimeBinder');
 const {
   applyNumericConfig,
   createDisplaySystemFrameProcessor,
   getFrameValues,
-} = require('./displaySystemFrameProcessorFactory');
+} = require('./runtime/displaySystemFrameProcessorFactory');
 const {
   createDisplaySystemRuntimeRegistry,
-} = require('./displaySystemRuntimeRegistry');
+} = require('./runtime/displaySystemRuntimeRegistry');
 const {
   createDisplaySystemRuntimeDispatcher,
   normalizeIncomingFrame,
-} = require('./displaySystemRuntimeDispatcher');
+} = require('./runtime/displaySystemRuntimeDispatcher');
 const {
   DEFAULT_LEGACY_PARSER_CHANNELS,
   evaluateDisplaySystemDispatchPolicy,
-} = require('./displaySystemRuntimePolicy');
+} = require('./runtime/displaySystemRuntimePolicy');
 const {
   createJavaScriptAlgorithmRunner,
   createPythonAlgorithmRunner,
@@ -99,7 +99,7 @@ const {
   createDisplaySystemWorkspaceService,
   createIdentityDefinitions,
   validateBuilderAlgorithmSource,
-} = require('./displaySystemWorkspaceService');
+} = require('./workspace/displaySystemWorkspaceService');
 
 module.exports = {
   ALGORITHM_TYPES,

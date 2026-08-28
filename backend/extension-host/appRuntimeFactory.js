@@ -6,7 +6,7 @@ const path = require('path');
 const {
   buildRuntimeBindingSnapshot,
   createDisplaySystemRuntimeController,
-} = require('./displaySystemRuntimeFactory');
+} = require('./runtime/displaySystemRuntimeFactory');
 const {
   loadSerialProtocolPresets,
   resolveUserPresetDirectory,

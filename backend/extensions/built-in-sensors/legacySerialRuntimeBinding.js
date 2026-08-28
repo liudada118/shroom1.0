@@ -1,6 +1,6 @@
 const { createLegacySerialFrameRuntime } = require('./legacySerialFrameRuntime');
 const { bindSerialSensorRuntimes } = require('./bindSerialSensorRuntimes');
-const { createSensorRuntimeRegistry } = require('../../extension-host/sensorRuntimeRegistry');
+const { createSensorRuntimeRegistry } = require('./sensorRuntimeRegistry');
 
 /**
  * 遗留串口 runtime 绑定工厂。

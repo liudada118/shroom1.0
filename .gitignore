@@ -8,7 +8,17 @@ client/build/
 out/
 db/*
 !db/init.db
-data/
+
+# Runtime-generated exports, uploads, reports, and test state.
+/data/
+/img/
+/oneStepPdf/
+/outputs/
+/runtime/temp/
+/test-results/
+/tmp/
+/OneStep/
+
 python/dist/
 python/build/
 python/*.spec
@@ -23,7 +33,7 @@ jqbed-algorithm-config.json
 .npm-cache/
 dist/
 pack-resources/python/
-/OneStep
-/img
-/OneStep
-/OneStep
+
+# Local Git/worktree recovery leftovers.
+/.git.broken_*/
+/.worktrees/

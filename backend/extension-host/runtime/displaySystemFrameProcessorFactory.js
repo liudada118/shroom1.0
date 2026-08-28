@@ -7,7 +7,7 @@ const { decodeProtocolValues, validateFrame } = require('@shroom/backend/protoco
 const {
   createJavaScriptAlgorithmRunner,
   createPythonAlgorithmRunner,
-} = require('../kernel/algorithm-channel/displaySystemAlgorithmRunner');
+} = require('../../kernel/algorithm-channel/displaySystemAlgorithmRunner');
 
 function loadOptionalJson(filePath, fsLike) {
   if (!filePath) return null;

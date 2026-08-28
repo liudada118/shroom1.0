@@ -2,6 +2,43 @@
 
 > 最后更新于：2026-08-28
 
+## 2026-08-28 扩展宿主分类与版本笔记单一来源
+
+`backend/extension-host/` 的 JavaScript 文件均存在生产或测试调用，本轮不通过合并文件减少数字，
+而是按变化原因重新分类。宿主根目录继续保留 `index.js` 与 `appRuntimeFactory.js` 两个稳定入口；
+manifest 读取和校验、运行时发现和调度、用户工作区分别进入独立子目录。仅服务内置 legacy
+传感器的 `sensorRuntimeRegistry.js` 回到 `backend/extensions/built-in-sensors/`，避免把扩展实现
+误放在通用扩展宿主中。
+
+```text
+backend/extension-host/
+├─ index.js                    # 统一公共出口，导出名保持不变
+├─ appRuntimeFactory.js        # 应用装配入口，路径保持不变
+├─ manifest/                   # manifest、文件校验、坐标与展示定义
+├─ runtime/                    # 发现、规划、绑定、调度与帧处理
+├─ workspace/                  # 用户展示系统工作区
+└─ README.md
+```
+
+版本历史弹窗不再维护一份只到 `1.1.9` 的硬编码数组。Vite 在前端构建阶段通过
+`import.meta.glob` 读取 `release-notes/windows/*.md`，由
+`client/src/components/updater/releaseNoteHistory.js` 解析文件名版本、正文和语义版本顺序，
+再把静态结果编译进网页；Electron 运行时无需访问仓库文件。文件名作为版本权威来源，因此
+历史 Markdown 标题写错不会把条目归到错误版本，`1.1.33.md` 的已知标题错误也已修正。
+
+这只修复应用内“版本历史”页面。自动更新弹窗仍取决于发布服务器 `latest.yml` 中的
+`releaseNotes` 字段；现有 `1.1.35` 清单缺少该字段，而当前源码版本仍为 `1.1.34`。
+统一 Windows 发版入口、校验版本、补 `1.1.35` 说明并重新上传同批安装包属于生产发布流程，
+按高风险变更规则等待人工确认，本轮没有修改 `package.json`、打包脚本或线上文件。
+
+一级目录审计后，`.gitignore` 已覆盖新的 CSV、上传图片、报告、通用输出、运行时临时文件、
+测试状态和本地 worktree 恢复目录，防止继续误提交生成物。已有的 `oneStepPdf/`、`img/`、
+`outputs/`、`runtime/temp/` 与 `test-results/` 跟踪内容没有删除或迁移；开发态导出路径也未改，
+待确认数据处理与兼容策略后再统一到 `runtime/exports/`。
+
+验证覆盖完整后端 42 个测试文件、SDK 后端 smoke 10 项、扩展宿主 11 组定向测试、版本笔记
+解析 5 项测试、相关 JavaScript 语法与相对引用扫描，以及不写入仓库 `build/` 的前端生产构建。
+
 ## 2026-08-28 按产品变化边界收拢仓库目录
 
 本轮不再按零散技术名词继续拆目录，而是按“稳定内核、扩展宿主、扩展实现、历史兼容”完成
@@ -1898,6 +1935,7 @@ flowchart LR
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-28 | 扩展宿主完成职责分组，版本历史改用版本笔记源文件 | `extension-host` 根仅保留稳定出口与装配入口，内部按 `manifest/runtime/workspace` 分类；版本历史在构建时读取 32 份 Windows Markdown 并按语义版本排序。发布清单修复与运行产物迁移因涉及生产发布和已有数据，已审计但等待确认。 |
 | 2026-08-28 | 后端物理目录收拢完成 | `backend` 从 22 个一级目录收拢为 7 个、205 个文件缩减为 168 个，删除 35 个 SDK/旧路径转发壳；保留 Electron 的 `runtime` 与 `common/logger` 固定桥，SDK、协议、历史数据格式均未修改。 |
 | 2026-08-28 | 仓库按稳定内核与可变能力完成一期归类 | 后端应用能力集中到 `backend/kernel` 并保留旧路径兼容；人体展示、展示系统、JQBed 配置和历史演示分别进入 `visualization`、`extensions`、`legacy`。Electron、SDK、硬件协议与历史格式均未改动。 |
 | 2026-08-26 | 授权首页可作为单文件特效底稿 | 当前首页的品牌、密钥区、四类方案和反馈入口已整理为一个自包含 HTML；无需启动项目即可修改 CSS/JS 和查看效果，生产授权逻辑未被复制进原型。 |
@@ -2457,6 +2495,7 @@ flowchart LR
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-28 | codeOpi | 扩展宿主二级归类并修复版本历史数据源 | 将 20 个有效宿主模块按 `manifest/runtime/workspace` 分组，稳定入口与导出名不变；`VersionHistory` 构建时直接消费 `release-notes/windows/*.md`，新增解析与语义排序测试；补生成物忽略规则，未迁移已有报告、数据库或发布产物。 |
 | 2026-08-28 | codeOpi | 完成后端物理收拢并移除旧路径兼容层 | `backend` 一级目录从 22 个降到 7 个，稳定链路归入 `kernel`、扩展机制归入 `extension-host`、内置传感器归入 `extensions`、历史工具归入 `compatibility`；删除 35 个薄转发文件，Electron 固定入口和 SDK 保持不变。 |
 | 2026-08-28 | codeOpi | 按产品变化边界完成一期目录归类 | 新增 `backend/kernel/{playback,csv,realtime,algorithm-channel}` 并保留旧路径兼容壳；前端人体展示、展示系统、JQBed 配置和历史 demo 分别收拢到 `visualization/`、`extensions/` 和 `legacy/`；新增 `docs/repository-map.md`，SDK 与 Electron 稳定入口未改。 |
 | 2026-08-26 | codeOpi | 输出授权门户单文件 HTML 特效原型 | `client/public/shroom-vision-home-effects.html` 无 React 和外部资源依赖，内嵌 18 张压缩图标；包含当前首页完整布局、响应式断点、Canvas 压力点阵、卡片指针响应、反馈弹层和静态事件挂点。生产授权与 WebSocket 未接入。 |
@@ -2842,6 +2881,7 @@ flowchart LR
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-28 | codeOpi | 优化重构 / 修复缺陷 | `backend/extension-host` 按 manifest、runtime、workspace 分组，内置传感器 registry 回归扩展实现目录；版本历史由硬编码改为构建期读取 Windows release notes，并修正 1.1.33 标题；增加运行生成物忽略规则。未修改 Electron 稳定入口、SDK、协议、历史格式、版本号或发布脚本。 |
 | 2026-08-28 | codeOpi | 优化重构 | 在用户确认高风险迁移后完成后端物理收拢：移除旧目录兼容层和 SDK 转发壳，生产代码与测试统一指向 `kernel`、`extension-host`、`extensions`、`compatibility`；保留 `backend/runtime/index.js` 与 `backend/common/logger.js` 两个 Electron 固定桥。未修改 SDK、硬件协议、历史数据格式或 Electron 入口。 |
 | 2026-08-28 | codeOpi | 优化重构 | 仓库目录按稳定内核、可变扩展、可视化和历史兼容重新归类；后端生产装配指向 `backend/kernel`，旧路径继续转发；前端移动后同步修正导入与跨端测试路径，并新增目录地图。未修改 SDK、Electron、硬件协议或历史数据格式。 |
 | 2026-08-26 | codeOpi | 新增功能 | 新增 `client/public/shroom-vision-home-effects.html`，将现有授权门户首页导出为约 751 KiB 的自包含静态原型；18 张图标缩放内嵌，加入压力点阵与卡片轻交互、移动端布局、`prefers-reduced-motion`、本地反馈和 `shroom:enter` / `shroom:sdk-customize` 事件接口。桌面/移动浏览器检查通过。 |

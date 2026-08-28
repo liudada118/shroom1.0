@@ -1,8 +1,8 @@
 const path = require('path');
-const { discoverDisplaySystems } = require('./displaySystemConfigLoader');
+const { discoverDisplaySystems } = require('../manifest/displaySystemConfigLoader');
 const {
   buildDisplaySystemRuntimeDefinition,
-} = require('./displaySystemDefinitionBuilder');
+} = require('../manifest/displaySystemDefinitionBuilder');
 const {
   attachRuntimeChannelPlan,
 } = require('./displaySystemRuntimeChannelPlanner');

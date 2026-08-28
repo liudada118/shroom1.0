@@ -2,12 +2,12 @@ const fs = require('fs');
 const path = require('path');
 const {
   validateDisplaySystemConfig,
-} = require('./displaySystemConfigValidator');
+} = require('../manifest/displaySystemConfigValidator');
 const {
   validateAlgorithmDataDefinition,
   validateLineOrderDefinition,
   validatePointOrderDefinition,
-} = require('./displaySystemConfigFileValidator');
+} = require('../manifest/displaySystemConfigFileValidator');
 const {
   normalizePointDefinition,
 } = require('@shroom/backend/processing/configMappingExecutor.js');
@@ -15,7 +15,7 @@ const {
   canonicalizeCoordinateMapDefinition,
   normalizeCoordinateMapDefinition,
   validateCoordinateMapDefinition,
-} = require('./displaySystemCoordinateMap');
+} = require('../manifest/displaySystemCoordinateMap');
 const {
   PROTOCOL_CHECKSUM_TYPES,
   PROTOCOL_VALUE_TYPES,
@@ -26,13 +26,13 @@ const {
   CANVAS_OVERLAYS,
   CHART_OVERLAYS,
   DISPLAY_CHART_CARD_LIMIT,
-} = require('./displaySystemCanvasCatalog');
+} = require('../manifest/displaySystemCanvasCatalog');
 const {
   normalizeCanvasConfig,
   normalizeChartAppearanceConfig,
   normalizeChartCardsConfig,
   validateDisplayConfig,
-} = require('./displaySystemPage');
+} = require('../manifest/displaySystemPage');
 
 const SAFE_DISPLAY_SYSTEM_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const BUILDER_ALGORITHM_TYPES = new Set(['none', 'json', 'js', 'python']);

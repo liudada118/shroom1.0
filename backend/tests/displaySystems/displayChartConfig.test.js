@@ -9,7 +9,7 @@ const {
 } = require('../../extension-host');
 const {
   buildDisplayMetadataFromDisplaySystem,
-} = require('../../extension-host/displaySystemDefinitionBuilder');
+} = require('../../extension-host/manifest/displaySystemDefinitionBuilder');
 
 /** 只留下和这一段有关的错误，别的字段的报错不该影响断言。 */
 function errorsMatching(display, keyword) {

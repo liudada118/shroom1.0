@@ -18,58 +18,19 @@ import {
   RocketOutlined,
   CheckCircleOutlined,
 } from "@ant-design/icons";
+import { buildVersionHistory } from "./releaseNoteHistory";
 
-// 版本历史数据（从 release-notes 中提取，按版本倒序排列）
-const VERSION_HISTORY = [
+const RELEASE_NOTE_MODULES = import.meta.glob(
+  "../../../../release-notes/windows/*.md",
   {
-    version: "1.1.9",
-    date: "2026-03-25",
-    changeKeys: ["update.historyChanges.highSpeedTest"],
-  },
-  {
-    version: "1.1.8",
-    date: "2026-03-24",
-    changeKeys: ["update.historyChanges.removeLineOrderAlgorithm"],
-  },
-  {
-    version: "1.1.7",
-    date: "2026-03-24",
-    changeKeys: [
-      "update.historyChanges.playbackSwitch",
-      "update.historyChanges.lowerRenderRate",
-      "update.historyChanges.robotRawData",
-    ],
-  },
-  {
-    version: "1.1.6",
-    date: "2026-03-23",
-    changeKeys: ["update.historyChanges.chartsUseRawData"],
-  },
-  {
-    version: "1.1.5",
-    date: "2026-03-23",
-    changeKeys: ["update.historyChanges.chartsUseRawDataLegacy"],
-  },
-  {
-    version: "1.1.3",
-    date: "2026-03-22",
-    changeKeys: ["update.historyChanges.stable"],
-  },
-  {
-    version: "1.1.2",
-    date: "2026-03-22",
-    changeKeys: ["update.historyChanges.titleType"],
-  },
-  {
-    version: "1.1.1",
-    date: "2026-03-18",
-    changeKeys: [
-      "update.historyChanges.bundledPython",
-      "update.historyChanges.releaseNotesInApp",
-      "update.historyChanges.buildResources",
-    ],
-  },
-];
+    query: "?raw",
+    import: "default",
+    eager: true,
+  }
+);
+
+// Vite 在构建阶段把 Markdown 原文编译进前端，无需运行时读取磁盘。
+const VERSION_HISTORY = buildVersionHistory(RELEASE_NOTE_MODULES);
 
 export default function VersionHistory() {
   const { t } = useTranslation();
@@ -172,9 +133,11 @@ export default function VersionHistory() {
                           {t("common.current")}
                         </Tag>
                       )}
-                      <span style={{ color: "#999", fontSize: 12 }}>
-                        {item.date}
-                      </span>
+                      {item.date && (
+                        <span style={{ color: "#999", fontSize: 12 }}>
+                          {item.date}
+                        </span>
+                      )}
                     </div>
                     <ul
                       style={{
@@ -184,8 +147,8 @@ export default function VersionHistory() {
                         lineHeight: 1.8,
                       }}
                     >
-                      {item.changeKeys.map((changeKey) => (
-                        <li key={changeKey}>{t(changeKey)}</li>
+                      {item.changes.map((change, changeIndex) => (
+                        <li key={`${item.version}-${changeIndex}`}>{change}</li>
                       ))}
                     </ul>
                   </div>

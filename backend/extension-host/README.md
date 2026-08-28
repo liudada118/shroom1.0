@@ -6,22 +6,15 @@
 
 ## 目录职责
 
-| 文件或文件组 | 职责 |
+| 目录或入口 | 职责 |
 | --- | --- |
-| `displaySystemConfigLoader.js`、`displaySystemRuntimeDiscovery.js` | 查找并读取 Display System 配置 |
-| `displaySystemConfigValidator.js`、`displaySystemConfigFileValidator.js` | 校验 manifest 和引用文件 |
-| `displaySystemDefinitionBuilder.js`、`displaySystemPage.js` | 构造前后端使用的展示定义 |
-| `displaySystemCoordinateMap.js` | 解析展示坐标映射 |
-| `displaySystemCanvasCatalog.js` | 提供画布、配色和叠加层目录 |
-| `displaySystemFrameProcessorFactory.js` | 从已校验配置创建帧处理器 |
-| `displaySystemRuntimeChannelPlanner.js` | 规划一个或多个 parser channel |
-| `displaySystemRuntimeBinder.js`、`displaySystemRuntimeDispatcher.js` | 绑定通道并调度扩展运行时 |
-| `displaySystemRuntimePolicy.js` | 保护现有 legacy 通道，控制 template/parallel 等运行策略 |
-| `displaySystemRegistry.js`、`displaySystemRuntimeRegistry.js` | 保存已发现定义和活动运行时 |
-| `displaySystemRuntimeFactory.js`、`appRuntimeFactory.js` | 组装扩展宿主运行态 |
-| `displaySystemWorkspaceService.js` | 读取和写入展示系统工作区配置 |
-| `sensorRuntimeRegistry.js` | 注册随应用交付的传感器运行时 |
-| `index.js` | 扩展宿主统一出口 |
+| `manifest/` | 查找、读取和校验 manifest，解析坐标映射，构造展示定义与画布目录 |
+| `runtime/` | 规划 parser channel，创建帧处理器，绑定、调度并登记展示系统运行时 |
+| `workspace/` | 读取和写入用户展示系统工作区配置 |
+| `appRuntimeFactory.js` | 将发现、工作区和运行时控制器装配为应用能力 |
+| `index.js` | 保持扩展宿主的统一导出名和调用契约 |
+
+根目录只保留宿主入口和说明文件。随应用交付的 `sensorRuntimeRegistry.js` 已与使用它的 legacy 传感器绑定代码一起放在 `backend/extensions/built-in-sensors/`，不再混入通用展示系统宿主。
 
 ## 扩展从哪里来
 

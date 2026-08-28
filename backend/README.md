@@ -20,7 +20,10 @@ backend/
 │  ├─ csv/                      # CSV 导出
 │  ├─ realtime/                 # 实时帧分发
 │  └─ algorithm-channel/        # Node/Python 简单算法通道
-├─ extension-host/              # 展示系统发现、校验、绑定与运行宿主
+├─ extension-host/              # 展示系统扩展宿主
+│  ├─ manifest/                # 配置发现、校验与展示定义
+│  ├─ runtime/                 # 通道规划、绑定、调度与帧处理
+│  └─ workspace/               # 用户展示系统工作区
 ├─ extensions/
 │  ├─ built-in-sensors/         # 随应用交付的传感器运行扩展
 │  └─ examples/                 # 展示系统示例清单
@@ -61,7 +64,8 @@ flowchart LR
 | 数据库装配与历史查询 | `backend/kernel/storage/` |
 | 历史回放、CSV、实时输出 | `backend/kernel/{playback,csv,realtime}/` |
 | Display System 算法通道 | `backend/kernel/algorithm-channel/` |
-| 新传感器运行时 | `backend/extensions/built-in-sensors/`，并由 `backend/extension-host/` 注册 |
+| 新传感器运行时 | `backend/extensions/built-in-sensors/`，展示系统配置通过 `backend/extension-host/` 接入 |
+| 展示系统 manifest、运行时与工作区 | `backend/extension-host/{manifest,runtime,workspace}/` |
 | 协议、串口底层、采集、存储、处理复用能力 | `sdk/backend/` |
 
 更多信息见 [ARCHITECTURE_MAP.md](./ARCHITECTURE_MAP.md) 和 [BACKEND_ARCHITECTURE.md](./BACKEND_ARCHITECTURE.md)。
