@@ -1,7 +1,9 @@
 const {
   createDisplaySystemRuntimeDiscovery,
+} = require('./runtime/displaySystemRuntimeDiscovery');
+const {
   createDisplaySystemWorkspaceService,
-} = require('./index');
+} = require('./workspace/displaySystemWorkspaceService');
 const path = require('path');
 const {
   buildRuntimeBindingSnapshot,

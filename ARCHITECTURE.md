@@ -2,6 +2,35 @@
 
 > 最后更新于：2026-08-28
 
+## 2026-08-28 运行产物收拢与平台内部边界精简
+
+根目录继续保留 `dist/`，它是安装包与更新清单构建产物，仍由 `.gitignore` 排除；
+`build/`、`db/`、`pack-resources/`、`release-notes/` 和 `display-systems/` 也保持原位置。
+开发态生成内容统一进入未跟踪的 `runtime/`：CSV 为 `runtime/exports/csv`、报告为
+`runtime/exports/reports`、工具导出为 `runtime/exports/artifacts`、上传图片为 `runtime/uploads`，
+日志和临时文件分别进入 `runtime/logs` 与 `runtime/temp`。Windows/macOS 打包态的 CSV、报告和
+图片路径由回归测试锁定，未发生变化；11 个既有文件迁移前后逐个 SHA-256 一致。
+
+无生产或测试引用的旧 `project/` 已移除：其中 15 个模型/纹理与正式资源逐个哈希相同，
+其余 4 个旧原型引用不完整，仍可由 Git 历史恢复。`runtime/legacy/` 的人工串口/WebSocket
+调试资料迁到 `test/manual/legacy-runtime/`，不再与运行产物混放。已有数据库、初始化库和
+`dist/` 均未删除或移动。
+
+同名目录的边界已经钉死：根 `runtime/` 是运行产物；`backend/runtime/index.js` 是不可变的
+Electron 固定桥；`kernel/platform/runtime/` 是 server 进程状态源码；
+`extension-host/runtime/` 是展示系统的通道规划、绑定和调度。平台运行态删除两个单调用方
+工厂后由 9 个 JavaScript 文件减为 7 个；WebSocket 将串口命令纯转发、单调用方 server factory
+和广播基础层收进真实调用方后由 13 个减为 10 个，并以 `CHANNELS` 作为端口唯一来源。
+
+`backend/extensions/`、`backend/extension-host/`、平台 runtime 与 WebSocket 均新增逐文件
+职责说明。扩展宿主内部 factory 改为直接导入具体模块，并新增依赖边界测试，公共 `index.js`
+出口保持不变。本轮没有修改 SDK、硬件协议、线序/点序/标定、历史数据格式、数据库结构、
+Electron 固定入口或 WebSocket 消息/端口契约。
+
+已知发布边界：当前 Electron Forge ignore 与 electron-builder `files` 规则没有显式排除根
+`runtime/`。本轮遵守“生产/部署配置需人工确认”的规则，没有修改打包配置；下一次正式发版前
+应单独确认加入 `runtime/**` 排除项，并检查 asar/安装包中不包含本机导出、报告或上传文件。
+
 ## 2026-08-28 扩展宿主分类与版本笔记单一来源
 
 `backend/extension-host/` 的 JavaScript 文件均存在生产或测试调用，本轮不通过合并文件减少数字，
@@ -31,12 +60,11 @@ backend/extension-host/
 统一 Windows 发版入口、校验版本、补 `1.1.35` 说明并重新上传同批安装包属于生产发布流程，
 按高风险变更规则等待人工确认，本轮没有修改 `package.json`、打包脚本或线上文件。
 
-一级目录审计后，`.gitignore` 已覆盖新的 CSV、上传图片、报告、通用输出、运行时临时文件、
-测试状态和本地 worktree 恢复目录，防止继续误提交生成物。已有的 `oneStepPdf/`、`img/`、
-`outputs/`、`runtime/temp/` 与 `test-results/` 跟踪内容没有删除或迁移；开发态导出路径也未改，
-待确认数据处理与兼容策略后再统一到 `runtime/exports/`。
+用户确认迁移后，`.gitignore` 已覆盖 CSV、上传图片、报告、通用输出、运行时临时文件、
+测试状态和本地 worktree 恢复目录。开发态导出已按类型收进 `runtime/exports/` 与
+`runtime/uploads/`，既有文件逐个哈希验证；打包态路径保持不变。`dist/` 按要求保留根路径。
 
-验证覆盖完整后端 42 个测试文件、SDK 后端 smoke 10 项、扩展宿主 11 组定向测试、版本笔记
+验证覆盖完整后端 45 个测试文件、SDK 后端 smoke 10 项、扩展宿主 12 组定向测试、版本笔记
 解析 5 项测试、相关 JavaScript 语法与相对引用扫描，以及不写入仓库 `build/` 的前端生产构建。
 
 ## 2026-08-28 按产品变化边界收拢仓库目录
@@ -1935,7 +1963,8 @@ flowchart LR
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
-| 2026-08-28 | 扩展宿主完成职责分组，版本历史改用版本笔记源文件 | `extension-host` 根仅保留稳定出口与装配入口，内部按 `manifest/runtime/workspace` 分类；版本历史在构建时读取 32 份 Windows Markdown 并按语义版本排序。发布清单修复与运行产物迁移因涉及生产发布和已有数据，已审计但等待确认。 |
+| 2026-08-28 | 运行产物归位并精简 platform runtime/WebSocket 内部层 | `dist` 保留；开发态导出与上传进入忽略的根 `runtime`，11 个文件迁移前后哈希一致；platform runtime 9→7、WebSocket 13→10，端口与消息契约不变，并补四类 runtime 和逐文件说明。 |
+| 2026-08-28 | 扩展宿主完成职责分组，版本历史改用版本笔记源文件 | `extension-host` 根仅保留稳定出口与装配入口，内部按 `manifest/runtime/workspace` 分类；版本历史在构建时读取 32 份 Windows Markdown 并按语义版本排序。发布清单修复仍属于生产发布流程，已审计但等待确认。 |
 | 2026-08-28 | 后端物理目录收拢完成 | `backend` 从 22 个一级目录收拢为 7 个、205 个文件缩减为 168 个，删除 35 个 SDK/旧路径转发壳；保留 Electron 的 `runtime` 与 `common/logger` 固定桥，SDK、协议、历史数据格式均未修改。 |
 | 2026-08-28 | 仓库按稳定内核与可变能力完成一期归类 | 后端应用能力集中到 `backend/kernel` 并保留旧路径兼容；人体展示、展示系统、JQBed 配置和历史演示分别进入 `visualization`、`extensions`、`legacy`。Electron、SDK、硬件协议与历史格式均未改动。 |
 | 2026-08-26 | 授权首页可作为单文件特效底稿 | 当前首页的品牌、密钥区、四类方案和反馈入口已整理为一个自包含 HTML；无需启动项目即可修改 CSS/JS 和查看效果，生产授权逻辑未被复制进原型。 |
@@ -2495,7 +2524,8 @@ flowchart LR
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
-| 2026-08-28 | codeOpi | 扩展宿主二级归类并修复版本历史数据源 | 将 20 个有效宿主模块按 `manifest/runtime/workspace` 分组，稳定入口与导出名不变；`VersionHistory` 构建时直接消费 `release-notes/windows/*.md`，新增解析与语义排序测试；补生成物忽略规则，未迁移已有报告、数据库或发布产物。 |
+| 2026-08-28 | codeOpi | 归位运行产物并收敛 platform runtime/WebSocket | 根 `dist` 保留；开发态 CSV/报告/上传和工具导出进入忽略的 `runtime`，11 个文件迁移前后 SHA-256 一致；移除无引用旧 `project`，人工 legacy runtime 迁入测试区；platform runtime 9→7、WebSocket 13→10，未改固定入口、SDK、协议或历史格式。 |
+| 2026-08-28 | codeOpi | 扩展宿主二级归类并修复版本历史数据源 | 将 19 个 JavaScript 宿主模块按 `manifest/runtime/workspace` 分组，稳定入口与导出名不变；`VersionHistory` 构建时直接消费 `release-notes/windows/*.md`，新增解析与语义排序测试；补生成物忽略规则，已有报告随后在用户确认下迁移，数据库和发布产物未动。 |
 | 2026-08-28 | codeOpi | 完成后端物理收拢并移除旧路径兼容层 | `backend` 一级目录从 22 个降到 7 个，稳定链路归入 `kernel`、扩展机制归入 `extension-host`、内置传感器归入 `extensions`、历史工具归入 `compatibility`；删除 35 个薄转发文件，Electron 固定入口和 SDK 保持不变。 |
 | 2026-08-28 | codeOpi | 按产品变化边界完成一期目录归类 | 新增 `backend/kernel/{playback,csv,realtime,algorithm-channel}` 并保留旧路径兼容壳；前端人体展示、展示系统、JQBed 配置和历史 demo 分别收拢到 `visualization/`、`extensions/` 和 `legacy/`；新增 `docs/repository-map.md`，SDK 与 Electron 稳定入口未改。 |
 | 2026-08-26 | codeOpi | 输出授权门户单文件 HTML 特效原型 | `client/public/shroom-vision-home-effects.html` 无 React 和外部资源依赖，内嵌 18 张压缩图标；包含当前首页完整布局、响应式断点、Canvas 压力点阵、卡片指针响应、反馈弹层和静态事件挂点。生产授权与 WebSocket 未接入。 |
@@ -2881,6 +2911,7 @@ flowchart LR
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-28 | codeOpi | 优化重构 / 目录治理 | 保留根 `dist`，将开发态 CSV、报告、上传、工具输出和临时状态收进忽略的 `runtime`；移除无引用且已核验重复/残缺的 `project`，人工 legacy runtime 归入测试区；platform runtime 由 9 文件减为 7，WebSocket 由 13 减为 10，扩展与平台目录补逐文件 README。45 个后端测试与 SDK smoke 10 项通过；未改 Electron 固定入口、SDK、硬件协议、历史格式或打包态路径。 |
 | 2026-08-28 | codeOpi | 优化重构 / 修复缺陷 | `backend/extension-host` 按 manifest、runtime、workspace 分组，内置传感器 registry 回归扩展实现目录；版本历史由硬编码改为构建期读取 Windows release notes，并修正 1.1.33 标题；增加运行生成物忽略规则。未修改 Electron 稳定入口、SDK、协议、历史格式、版本号或发布脚本。 |
 | 2026-08-28 | codeOpi | 优化重构 | 在用户确认高风险迁移后完成后端物理收拢：移除旧目录兼容层和 SDK 转发壳，生产代码与测试统一指向 `kernel`、`extension-host`、`extensions`、`compatibility`；保留 `backend/runtime/index.js` 与 `backend/common/logger.js` 两个 Electron 固定桥。未修改 SDK、硬件协议、历史数据格式或 Electron 入口。 |
 | 2026-08-28 | codeOpi | 优化重构 | 仓库目录按稳定内核、可变扩展、可视化和历史兼容重新归类；后端生产装配指向 `backend/kernel`，旧路径继续转发；前端移动后同步修正导入与跨端测试路径，并新增目录地图。未修改 SDK、Electron、硬件协议或历史数据格式。 |

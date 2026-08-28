@@ -32,6 +32,8 @@ E:/shroom1/
 │  │  └─ index.js                       # Electron 固定后端桥
 │  ├─ kernel/
 │  │  ├─ platform/                      # 启动、命令、HTTP、WS、授权、运行态
+│  │  │  ├─ runtime/                    # server 进程状态与 legacy 状态迁移
+│  │  │  └─ websocket/                  # 三路 WS、订阅、发布与兼容命令入口
 │  │  ├─ serial/                        # 应用侧串口控制与编排
 │  │  ├─ storage/                       # 数据库装配与历史查询
 │  │  ├─ playback/                      # 回放
@@ -61,6 +63,7 @@ E:/shroom1/
 │     └─ legacy/                        # 仍需参考或兼容的旧页面
 ├─ display-systems/                     # 展示系统工作区
 ├─ build/                               # 随应用交付的网页资源
+├─ runtime/                             # 开发态导出、上传、日志和临时文件
 └─ docs/
    └─ repository-map.md
 ```
@@ -89,6 +92,10 @@ flowchart LR
 - `extension-host` 是扩展接入点，具体运行时位于 `extensions`。
 - 目录迁移没有改变硬件协议、线序语义、数据库结构或历史数据格式。
 
+这里有四个容易混淆的 `runtime`：根 `runtime/` 是忽略的运行产物；`backend/runtime/index.js`
+是 Electron 固定桥；`kernel/platform/runtime/` 是 server 进程状态源码；
+`extension-host/runtime/` 是展示系统的通道规划、绑定和调度。逐文件职责见各目录 README。
+
 ## 4. 新能力应该放在哪里
 
 | 新能力 | 推荐落点 |
@@ -98,6 +105,8 @@ flowchart LR
 | 展示系统配置发现与校验 | `backend/extension-host/manifest/` |
 | 展示系统运行调度 | `backend/extension-host/runtime/` |
 | 展示系统工作区 | `backend/extension-host/workspace/` |
+| server 进程状态与兼容 patch | `backend/kernel/platform/runtime/` |
+| WebSocket 传输、订阅与发布 | `backend/kernel/platform/websocket/` |
 | 应用侧串口多通道编排 | `backend/kernel/serial/` |
 | 协议和串口通用能力 | `sdk/backend/protocol/`、`sdk/backend/serial/` |
 | 采集和存储通用能力 | `sdk/backend/collection/`、`sdk/backend/storage/` |
@@ -127,11 +136,29 @@ flowchart LR
 | `display-systems/` | 可配置展示系统工作区 | 保留，不是临时目录 |
 | `db/` | 初始化库与本机历史数据库 | 只跟踪 `init.db`；历史库不得移动或删除 |
 | `pack-resources/` | 打包资源暂存 | 被打包配置使用；当前保留 |
-| `dist/` | 安装包与更新清单构建产物 | 已忽略，不应提交 |
-| `data/`、`img/`、`oneStepPdf/` | 开发态 CSV、上传图片和报告输出 | 新文件已忽略；已有跟踪内容及路径迁移等待数据兼容确认 |
-| `outputs/`、`test-results/`、`runtime/temp/`、`tmp/` | 工具输出、测试状态和运行临时文件 | 新文件已忽略；已有跟踪内容尚未批量移除 |
-| `project/` | 未被生产、测试或打包引用的旧模型/原型 | 候选归档；其中大部分模型纹理与正式资源重复，尚未删除 |
+| `dist/` | 安装包与更新清单构建产物 | 按用户要求保留根路径；已忽略，不进入提交 |
+| `runtime/exports/` | 开发态 CSV、报告和工具导出 | `csv/`、`reports/`、`artifacts/` 分类保存，整体忽略 |
+| `runtime/uploads/` | 开发态报告上传中间图片 | 与导出分开保存，整体忽略 |
+| `runtime/temp/` | 运行临时文件及已收拢的本地残留 | 取消 Git 跟踪并忽略，不作为源码 |
+| `test-results/` | 测试工具可能重新生成的状态目录 | 已取消 Git 跟踪并忽略 |
+| `test/manual/legacy-runtime/` | 早期串口和 WebSocket 人工调试资料 | 从根 `runtime/legacy` 迁入测试区，不参与生产 |
+| `project/` | 无生产引用的旧模型/原型 | 已移除；15 个资源与正式模型逐个哈希相同，其余原型可由 Git 历史恢复 |
 
-开发态导出仍由 `backend/kernel/platform/serverPathConfig.js` 指向根目录下的 `data/`、
-`img/` 与 `oneStepPdf/`。将其统一迁移到 `runtime/exports/` 会改变已有文件位置，必须在
-备份、兼容读取和用户可见下载位置确认后单独实施。
+`backend/kernel/platform/serverPathConfig.js` 只改变开发态路径：CSV、报告和上传图片分别进入
+`runtime/exports/csv`、`runtime/exports/reports` 与 `runtime/uploads`。Windows/macOS 打包态
+原有路径由回归测试锁定不变；11 个现有文件迁移前后逐个 SHA-256 一致。
+
+注意：`.gitignore` 只控制版本库，不能替代安装包过滤。现有 Forge/electron-builder 配置尚未
+显式排除根 `runtime/`；按生产配置审批规则本轮不修改。正式发版前应单独确认排除
+`runtime/**`，并检查 asar/安装包不含本机导出和上传文件。
+
+## 8. 本轮目录收敛结果
+
+- `backend/extension-host/` 的 19 个 JavaScript 文件均有调用，按 `manifest/runtime/workspace`
+  保留职责边界；两个内部 factory 已改为直接依赖具体模块，避免通过公共 `index.js` 反向导入。
+- `backend/kernel/platform/runtime/` 由 9 个 JavaScript 文件减为 7 个：两个单调用方 accessor/
+  binding 工厂已内联，状态字段、默认值和初始化顺序不变。
+- `backend/kernel/platform/websocket/` 由 13 个 JavaScript 文件减为 10 个：串口命令纯转发层、
+  单调用方 server factory 和广播基础 service 已分别移除或内联；端口配置只保留一份。
+- `backend/extensions/`、`extension-host/`、`platform/runtime/` 和 `platform/websocket/` 均新增
+  逐文件说明与后续优化边界。

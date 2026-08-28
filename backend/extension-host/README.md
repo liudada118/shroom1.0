@@ -59,6 +59,66 @@ flowchart LR
 
 协议预设的真实来源是 `sdk/backend/protocol/`。宿主只把预设翻译为 Builder 字段，不在此目录维护第二份协议库。
 
+## 逐文件职责
+
+当前共有 19 个 JavaScript 文件。它们都有生产或测试调用；文件数来自流水线阶段的拆分，
+不是 19 套重复实现。
+
+### 根入口
+
+| 文件 | 作用 | 主要调用方 |
+| --- | --- | --- |
+| `appRuntimeFactory.js` | 装配发现服务、工作区服务、运行控制器和协议预设目录，向平台提供统一 façade | `kernel/platform/server.js` |
+| `index.js` | 保持扩展宿主的公共导出契约；内部模块不应通过它反向互相依赖 | 平台装配与测试 |
+
+### `manifest/`
+
+| 文件 | 作用 | 为什么独立保留 |
+| --- | --- | --- |
+| `displaySystemCanvasCatalog.js` | 声明允许的配色、叠加层、图表卡片及数量限制 | 是 Builder 与校验器共享的白名单 |
+| `displaySystemConfigFileValidator.js` | 校验线序、点序、坐标和 JSON 算法引用文件 | 纯文件内容校验，不负责目录扫描 |
+| `displaySystemConfigLoader.js` | 扫描目录、读取 manifest、解析相对路径并组合校验结果 | 包含文件 IO，可独立注入和测试 |
+| `displaySystemConfigValidator.js` | 校验 v1-v3 manifest，并把旧单传感器结构归一为 `sensors[]` | 承担 schema 兼容边界 |
+| `displaySystemCoordinateMap.js` | 归一化并校验物理坐标和边界 | 坐标规则可脱离文件系统测试 |
+| `displaySystemDefinitionBuilder.js` | 把已校验配置转成传感器定义、parser channel 和前端展示元数据 | 位于“配置”到“运行定义”的边界 |
+| `displaySystemPage.js` | 归一化并校验 `display` 段的 view、widget、profile、canvas、sidebar 和 chart | 实际是展示配置 schema；后续可改更准确的文件名 |
+
+### `runtime/`
+
+| 文件 | 作用 | 为什么独立保留 |
+| --- | --- | --- |
+| `displaySystemFrameProcessorFactory.js` | 按顺序执行帧校验、协议解码、线序、点位映射、算法与指标计算 | 是数据处理编排器，后续可拆纯算法结果处理 |
+| `displaySystemRegistry.js` | 保存已经发现且校验通过的展示系统配置 | 生命周期是“配置目录”，不是运行通道 |
+| `displaySystemRuntimeBinder.js` | 把运行计划绑定到 parser、处理器和实时输出，但不打开串口 | 隔离绑定关系与串口生命周期 |
+| `displaySystemRuntimeChannelPlanner.js` | 把运行定义转换为可绑定的 channel 计划 | 是定义到执行计划的独立阶段 |
+| `displaySystemRuntimeDiscovery.js` | 扫描系统/用户目录、处理 ID 冲突、可写性并刷新两个 Registry | 管理发现与刷新生命周期 |
+| `displaySystemRuntimeDispatcher.js` | 按策略挂载或卸载 parser 数据监听器 | 防止重复监听和重复消费 |
+| `displaySystemRuntimeFactory.js` | 管理 Binder、Dispatcher 的启动、停止和重绑 | 对外提供稳定运行控制入口 |
+| `displaySystemRuntimePolicy.js` | 保护 legacy channel，判断 active、parallel、shadow 是否允许 | 是兼容策略，不能下沉到通用 SDK |
+| `displaySystemRuntimeRegistry.js` | 保存运行 channel 计划和当前运行状态 | 生命周期是“运行实例”，不能与配置 Registry 强并 |
+
+### `workspace/`
+
+| 文件 | 作用 | 优化方向 |
+| --- | --- | --- |
+| `displaySystemWorkspaceService.js` | 提供 Builder 目录、创建/复制展示系统、原子写文件、读取编辑数据和只保存 `display` 段 | 745 行，后续可拆 FileStore、Catalog、DisplaySection，并保留当前 Service 作为 façade |
+
+## 可安全执行的优化顺序
+
+| 优先级 | 优化 | 边界 |
+| --- | --- | --- |
+| P0 | 内部模块改用直接导入，避免 `appRuntimeFactory` 和 RuntimeFactory 经 `index.js` 反向取内部实现 | 不删公共导出，不改行为 |
+| P0 | 增加目录依赖边界测试 | 只锁定依赖方向 |
+| P1 | 拆分 WorkspaceService，同时保留原文件、导出名和 façade | 原子写入与 v3 manifest 保护必须保持 |
+| P1 | 将 `displaySystemPage.js` 改名为 `displaySystemDisplayConfig.js` | 只改内部路径，错误文本和归一结果不变 |
+| P1 | 从 FrameProcessor 提取算法结果和指标纯函数 | 同步/异步算法、fallback 和输出字段不变 |
+| P1 | 可选把配置 Registry 文件改名为 `displaySystemConfigRegistry.js` | 工厂导出名不变 |
+| P2 | 评估坐标和纯数值处理是否进入 SDK | 属于公共 API 评审，本轮不做 |
+
+不建议为了减少文件数合并 ConfigLoader 与 Validator、DefinitionBuilder 与 ChannelPlanner、
+RuntimeFactory 与 AppRuntimeFactory，也不建议合并两个 Registry；这些模块虽然名字接近，
+但输入、生命周期和清理责任不同。
+
 ## 稳定性规则
 
 - `extension-host` 不直接修改 Electron 固定入口 `backend/runtime/index.js`。

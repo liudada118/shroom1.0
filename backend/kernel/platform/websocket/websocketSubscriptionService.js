@@ -1,5 +1,5 @@
 const WebSocket = require('ws');
-const { toPayload } = require('./websocketBroadcastService');
+const { toPayload } = require('./websocketChannelService');
 
 const WILDCARD_CHANNEL = '*';
 

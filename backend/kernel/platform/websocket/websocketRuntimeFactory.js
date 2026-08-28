@@ -1,9 +1,22 @@
+const WebSocket = require('ws');
 const { createChannelBus } = require('@shroom/backend/telemetry/channelBus.js');
 const { createRealtimeTelemetryGateway } = require('../../realtime/realtimeTelemetryGateway');
 const {
   createWebSocketSubscriptionManager,
 } = require('./websocketSubscriptionService');
-const { createWebSocketServers } = require('./webSocketServerFactory');
+const { CHANNELS } = require('./websocketChannelService');
+
+function createWebSocketServers({
+  sitPort = CHANNELS.sit.port,
+  backPort = CHANNELS.back.port,
+  headPort = CHANNELS.head.port,
+} = {}) {
+  return {
+    sit: new WebSocket.Server({ port: sitPort }),
+    back: new WebSocket.Server({ port: backPort }),
+    head: new WebSocket.Server({ port: headPort }),
+  };
+}
 
 /**
  * 创建 WebSocket 运行时装配。
@@ -54,5 +67,6 @@ function createWebSocketRuntime({
 }
 
 module.exports = {
+  createWebSocketServers,
   createWebSocketRuntime,
 };

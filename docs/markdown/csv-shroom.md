@@ -44,21 +44,19 @@
 
 ## 3. 导出保存路径
 
-CSV 保存目录由 `server.js` 中的 `csvPath` 决定：
+CSV 保存目录由 `backend/kernel/platform/serverPathConfig.js` 中的 `csvPath` 决定：
 
 ```js
-const exportRoot = app.isPackaged
-  ? (process.platform === 'darwin' ? app.getPath('desktop') : process.resourcesPath)
-  : runtimeWritableRoot;
-
-let csvPath = path.join(exportRoot, "data");
+const csvPath = app.isPackaged
+  ? path.join(exportRoot, "data")
+  : path.join(PROJECT_ROOT, "runtime", "exports", "csv");
 ```
 
 当前路径规则：
 
 | 运行环境 | CSV 输出目录 |
 | :--- | :--- |
-| 开发环境 | `E:\shroom1\data` |
+| 开发环境 | `E:\shroom1\runtime\exports\csv` |
 | Windows 打包后 | `resources\data` |
 | macOS 打包后 | 桌面 `data` 文件夹 |
 

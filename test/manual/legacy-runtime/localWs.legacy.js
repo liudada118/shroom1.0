@@ -1,5 +1,5 @@
 // Legacy debug WebSocket generator. Not used by the production runtime.
-const logger = require('../../backend/common/logger');
+const logger = require('../../../backend/common/logger');
 const WebSocket = require("ws");
 
 function colOrSendData(jsonData) {

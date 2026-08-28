@@ -60,6 +60,8 @@ flowchart LR
 | --- | --- |
 | Electron 启停后端 | `backend/runtime/index.js` |
 | HTTP、WebSocket、命令与进程生命周期 | `backend/kernel/platform/` |
+| server 进程状态与 legacy 状态迁移 | `backend/kernel/platform/runtime/`，见其 `README.md` |
+| 三路 WebSocket 传输、订阅和兼容命令入口 | `backend/kernel/platform/websocket/`，见其 `README.md` |
 | 应用侧串口打开、关闭与通道编排 | `backend/kernel/serial/` |
 | 数据库装配与历史查询 | `backend/kernel/storage/` |
 | 历史回放、CSV、实时输出 | `backend/kernel/{playback,csv,realtime}/` |
@@ -68,7 +70,8 @@ flowchart LR
 | 展示系统 manifest、运行时与工作区 | `backend/extension-host/{manifest,runtime,workspace}/` |
 | 协议、串口底层、采集、存储、处理复用能力 | `sdk/backend/` |
 
-更多信息见 [ARCHITECTURE_MAP.md](./ARCHITECTURE_MAP.md) 和 [BACKEND_ARCHITECTURE.md](./BACKEND_ARCHITECTURE.md)。
+扩展实现、扩展宿主、平台运行态和 WebSocket 目录都提供逐文件 README。更多信息见
+[ARCHITECTURE_MAP.md](./ARCHITECTURE_MAP.md) 和 [BACKEND_ARCHITECTURE.md](./BACKEND_ARCHITECTURE.md)。
 
 ## 验证
 

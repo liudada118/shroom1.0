@@ -1,5 +1,7 @@
 # 后端稳定内核
 
+> 最后更新：2026-08-28
+
 `backend/kernel/` 按产品能力组织 Electron 后端中由 Shroom 应用维护的稳定链路。
 
 | 目录 | 职责 |
@@ -17,3 +19,6 @@
 原 `backend/server`、`backend/services`、`backend/serial`、`backend/db` 等旧物理路径及其兼容转发层已经移除。新增应用代码应直接引用当前 `kernel` 路径或 `@shroom/backend/...` 公共入口。
 
 `backend/runtime/index.js` 是 Electron 固定桥；不得因为内部重构而改变其路径和外部导出。协议、线序、点序、标定、历史磁盘格式也不应在目录整理中改变。
+
+`platform/runtime/` 是 server 进程状态源码，`platform/websocket/` 是三路实时传输与兼容入口；
+它们分别在目录内 README 说明逐文件职责。仓库根 `runtime/` 只是忽略的运行产物，不能与前两者混用。

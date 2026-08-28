@@ -8,7 +8,7 @@
 
 // Legacy WebSocket helper kept for reference. Production code uses backend/services.
 const WebSocket = require('ws');
-const logger = require('../../backend/common/logger');
+const logger = require('../../../backend/common/logger');
 
 /**
  * 向指定 WebSocket 服务器的所有已连接客户端广播 JSON 数据

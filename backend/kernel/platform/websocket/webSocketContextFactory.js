@@ -1,5 +1,51 @@
-const { createMutableAccessor } = require('../runtime/legacyRuntimeAccessorFactory');
-const { createWebSocketContextAccessors } = require('../runtime/webSocketContextAccessorFactory');
+function createMutableAccessor(get, set) {
+  return { get, set };
+}
+
+function toPropertyDescriptor(accessor) {
+  return {
+    configurable: true,
+    enumerable: true,
+    get: accessor.get,
+    set: accessor.set,
+  };
+}
+
+function createWebSocketContextAccessors({
+  mutableAccessors = {},
+  playbackStateAccessor,
+  serialPortStateAccessor,
+  zeroStateAccessor,
+} = {}) {
+  const accessors = {
+    ...mutableAccessors,
+    indexArr: playbackStateAccessor('indexArr'),
+    localData: playbackStateAccessor('localData'),
+    localDataBack: playbackStateAccessor('localDataBack'),
+    nowIndex: playbackStateAccessor('nowIndex'),
+    newArr147: zeroStateAccessor('newArr147'),
+    newArr147_2: zeroStateAccessor('newArr147_2'),
+    pointArr1RawZero: zeroStateAccessor('pointArr1RawZero'),
+    pointArr1RawZeroData: zeroStateAccessor('pointArr1RawZeroData'),
+    pointArr1zero: zeroStateAccessor('pointArr1zero'),
+    pointArr1zeroData: zeroStateAccessor('pointArr1zeroData'),
+    pointArr2RawZero: zeroStateAccessor('pointArr2RawZero'),
+    pointArr2RawZeroData: zeroStateAccessor('pointArr2RawZeroData'),
+    pointArr2zero: zeroStateAccessor('pointArr2zero'),
+    pointArr2zeroData: zeroStateAccessor('pointArr2zeroData'),
+    pointArr3zero: zeroStateAccessor('pointArr3zero'),
+    pointArr3zeroData: zeroStateAccessor('pointArr3zeroData'),
+    pointArr4zero: zeroStateAccessor('pointArr4zero'),
+    pointArr4zeroData: zeroStateAccessor('pointArr4zeroData'),
+    pointArr147zero: zeroStateAccessor('pointArr147zero'),
+    pointArr147zero_2: zeroStateAccessor('pointArr147zero_2'),
+    serialport: serialPortStateAccessor('serialport'),
+  };
+
+  return Object.fromEntries(
+    Object.entries(accessors).map(([key, accessor]) => [key, toPropertyDescriptor(accessor)]),
+  );
+}
 
 /**
  * 将 getter/setter 描述转换成 WebSocket handler 可使用的运行态访问器。
@@ -49,5 +95,6 @@ function createWebSocketHandlerContext({
 
 module.exports = {
   buildMutableAccessors,
+  createWebSocketContextAccessors,
   createWebSocketHandlerContext,
 };

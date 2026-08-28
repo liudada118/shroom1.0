@@ -1,4 +1,4 @@
-const { createLegacyRuntimeStateBindings } = require('./legacyStateBindingsFactory');
+const { createRuntimeStateStore } = require('./runtimeStateStore');
 
 const DEFAULT_LEGACY_RUNTIME_STATE = Object.freeze({
   firstBlueData: [],
@@ -27,6 +27,22 @@ function cloneDefaultLegacyRuntimeState() {
       Array.isArray(value) ? value.slice() : value,
     ])
   );
+}
+
+function createLegacyRuntimeStateBindings({ initialState = {}, accessors = {} } = {}) {
+  const runtimeStateStore = createRuntimeStateStore({
+    initialState,
+    accessors,
+  });
+  const runtimeStateAccessor = (key) => ({
+    get: () => runtimeStateStore.get(key),
+    set: (value) => runtimeStateStore.set(key, value),
+  });
+
+  return {
+    runtimeStateAccessor,
+    runtimeStateStore,
+  };
 }
 
 /**
@@ -64,5 +80,6 @@ function createServerRuntimeStateStore({
 module.exports = {
   DEFAULT_LEGACY_RUNTIME_STATE,
   STORE_BACKED_RUNTIME_KEYS,
+  createLegacyRuntimeStateBindings,
   createServerRuntimeStateStore,
 };

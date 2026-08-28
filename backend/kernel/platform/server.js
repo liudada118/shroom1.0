@@ -25,7 +25,7 @@ const { createServerShutdownOrchestrator } = require('./bootstrap/serverShutdown
 const { createPetCareRuntimeService } = require('../algorithm-channel/petCareRuntimeService');
 const { createWebSocketCommandRouter } = require('./websocket/webSocketCommandRouter');
 const { registerRuntimeCommandHandlers } = require('./websocket/registerRuntimeCommandHandlers');
-const { registerSerialCommandHandlers } = require('./websocket/registerSerialCommandHandlers');
+const { registerSerialControlHandlers } = require('../serial/serialControlService');
 const { createControlCommandService } = require('./commands/controlCommandService');
 const { createHttpApp } = require('./http/httpAppFactory');
 const { syncSystemTime } = require('./bootstrap/systemTimeSyncService');
@@ -1355,7 +1355,7 @@ registerRuntimeCommandHandlers(wsCommandRouter, {
   setRuntime: runtimeStatePatchers.applyRuntimeCommandPatch,
 });
 
-registerSerialCommandHandlers(wsCommandRouter, {
+registerSerialControlHandlers(wsCommandRouter, {
   HAND_GLOVE_DOUBLE,
   closeManagedSerialPort,
   closeMinzhenSensorPort,

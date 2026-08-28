@@ -4,16 +4,44 @@
  * 统一 sit/back/head 三个旧 WebSocket server 的通道命名、server 获取、
  * 广播和连接数统计，避免业务层继续散落 server/server1/server2 判断。
  */
-const {
-  broadcast,
-  getClientCount,
-} = require('./websocketBroadcastService');
+const WebSocket = require('ws');
 
 const CHANNELS = Object.freeze({
   sit: Object.freeze({ key: 'sit', port: 19999, legacyName: 'server' }),
   back: Object.freeze({ key: 'back', port: 19998, legacyName: 'server1' }),
   head: Object.freeze({ key: 'head', port: 19997, legacyName: 'server2' }),
 });
+
+function toPayload(data) {
+  return typeof data === 'string' ? data : JSON.stringify(data);
+}
+
+function getClients(wsServer) {
+  if (!wsServer?.clients) return [];
+  return Array.from(wsServer.clients);
+}
+
+function getClientCount(wsServer) {
+  return wsServer?.clients?.size || 0;
+}
+
+function isOpenClient(client) {
+  return client?.readyState === WebSocket.OPEN;
+}
+
+function broadcast(wsServer, data) {
+  const payload = toPayload(data);
+  let sent = 0;
+
+  for (const client of getClients(wsServer)) {
+    if (isOpenClient(client)) {
+      client.send(payload);
+      sent += 1;
+    }
+  }
+
+  return sent;
+}
 
 /**
  * 归一化 WebSocket 通道名称，避免调用方散落判断 server/server1/server2。
@@ -64,8 +92,13 @@ function getChannelClientCounts(getServer) {
 
 module.exports = {
   CHANNELS,
+  broadcast,
   broadcastToChannel,
+  getClientCount,
+  getClients,
   getChannelClientCounts,
   getChannelServer,
+  isOpenClient,
   normalizeChannel,
+  toPayload,
 };

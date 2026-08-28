@@ -14,7 +14,10 @@ db/*
 /img/
 /oneStepPdf/
 /outputs/
+/runtime/exports/
+/runtime/logs/
 /runtime/temp/
+/runtime/uploads/
 /test-results/
 /tmp/
 /OneStep/
