@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import Three from "./Three1";
 // import Three from "./Three1 copy";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from 'react-i18next';
 import { Slider, Button, Input } from "antd";
 import * as echarts from "echarts";
 // import { rotate90 } from "../../assets/util/util";
@@ -134,7 +135,8 @@ class Com extends React.Component {
 function withRouter(Com) {
   return () => {
     const navigate = useNavigate();
-    return <Com navigate={navigate} />;
+    const { t } = useTranslation();
+    return <Com navigate={navigate} t={t} />;
   };
 }
 
@@ -281,7 +283,7 @@ class Car extends React.Component {
               20,
             ],
             index: 0 + 1,
-            name: "中风",
+            name: this.props.t('footAnalysis.stroke'),
             myChart: myChart1,
             //   yMax: 10000,
           });
@@ -454,7 +456,7 @@ class Car extends React.Component {
             {this.state.port ? (
               <Select
                 value={this.state.com}
-                placeholder="请选择"
+                placeholder={this.props.t('demo.selectPort')}
                 onChange={(e) => {
                   // this.handleChangeCom(e);
                   console.log(e);
@@ -481,7 +483,7 @@ class Car extends React.Component {
                 });
               }}
             >
-              关闭串口
+              {this.props.t('closeSensor')}
             </Button>
           </div>
         </div>
@@ -528,7 +530,7 @@ class Car extends React.Component {
                         textAlign: "left",
                       }}
                     >
-                      润滑
+                      {this.props.t('demo.lubrication')}
                     </div>
                     <Slider
                       min={0.1}
@@ -566,7 +568,7 @@ class Car extends React.Component {
                         //  padding : 5,borderRadius : '5px 10px',
                       }}
                     >
-                      颜色
+                      {this.props.t('color')}
                     </div>
                     <Slider
                       min={5}
@@ -599,7 +601,7 @@ class Car extends React.Component {
                         textAlign: "left",
                       }}
                     >
-                      过滤值{" "}
+                      {this.props.t('filter')}
                     </div>
                     <Slider
                       min={1}
@@ -633,7 +635,7 @@ class Car extends React.Component {
                         textAlign: "left",
                       }}
                     >
-                      高度
+                      {this.props.t('height')}
                     </div>
                     <Slider
                       min={0.1}
@@ -666,7 +668,7 @@ class Car extends React.Component {
                         textAlign: "left",
                       }}
                     >
-                      数据连贯性{" "}
+                      {this.props.t('consis')}
                     </div>
                     <Slider
                       min={1}
@@ -700,7 +702,7 @@ class Car extends React.Component {
                         textAlign: "left",
                       }}
                     >
-                      初始值{" "}
+                      {this.props.t('init')}
                     </div>
                     <Slider
                       min={1}

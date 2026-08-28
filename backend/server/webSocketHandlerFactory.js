@@ -250,7 +250,11 @@ server.on('connection', function connection(ws, req) {
         const getMessage = parseJsonMessage(message, { logger, clientName });
         if (!getMessage) return;
 
-        const commandResult = controlCommandService.executeWs(getMessage, { clientName, scope: 'main' });
+        const commandResult = controlCommandService.executeWs(getMessage, {
+          client: ws,
+          clientName,
+          scope: 'main',
+        });
         sendCommandResultAck(ws, getMessage, commandResult, logger);
         if (commandResult.stop) return;
       });

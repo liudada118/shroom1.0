@@ -41,6 +41,9 @@ const testFiles = [
   'backend/tests/server/webSocketHandlerFactory.test.js',
   'backend/tests/server/sensorProcessorFactory.test.js',
   'backend/tests/server/smallBedRuntimeFactory.test.js',
+  'backend/tests/server/jqbedAlgorithmConfig.test.js',
+  'backend/tests/server/jqbedAlgorithmProtocol.test.js',
+  'backend/tests/server/petCareRuntimeService.test.js',
   'backend/tests/sensors/runtime/legacyGloveFrameProcessor.test.js',
 ];
 

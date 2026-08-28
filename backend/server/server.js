@@ -158,6 +158,12 @@ const { estimatePointPressure, FILTER_THRESHOLD: PRESSURE_CALIBRATION_FILTER_THR
 const { pressSmallBed } = require("../processing/utilMatrix");
 const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine, pressNew12203131 } = require('./modules/mathUtils');
 const { initDb: _initDbFromModule } = require('./modules/dbManager');
+const { createJqbedAlgorithmConfigStore } = require('./modules/jqbedAlgorithmConfig');
+const {
+  buildJqbedGetDataArgs,
+  createJqbedAlgorithmCommandHandler,
+  createJqbedAlgorithmProtocol,
+} = require('./modules/jqbedAlgorithmProtocol');
 const sensorRegistry = require('../sensors/registry');
 const smallBed12B = sensorRegistry.smallBed12B;
 const minzhen = sensorRegistry.minzhen;
@@ -306,6 +312,14 @@ logger.info("[Path] resourceRoot=", runtimeResourceRoot);
 logger.info("[Path] writableRoot=", runtimeWritableRoot);
 logger.info("[Path] db=", filePath, "data=", csvPath, "config=", nameTxt);
 logger.info("[Path] configCandidates=", configCandidates.join(", "));
+
+// JQBed 参数属于可写运行态扩展，不进入 Electron 稳定内核或串口协议。
+const jqbedAlgorithmConfigStore = createJqbedAlgorithmConfigStore({
+  filePath: path.join(runtimeWritableRoot, 'jqbed-algorithm-config.json'),
+  logger,
+});
+jqbedAlgorithmConfigStore.load();
+let jqbedAlgorithmStatus = { state: 'waiting', error: null };
 
 const appRuntime = createAppRuntime({
   logger,
@@ -707,6 +721,7 @@ function calcDetectedInterval(timestamps) {
 
 let petCareTimer = null;
 let petCareMiniTimer = null;
+let jqbedTimer = null;
 let reportHttpServer = null;
 let serverOpened = false;
 let serverShutdownRequested = false;
@@ -1088,6 +1103,30 @@ function publishSystemEvent(data) {
   return wsSubscriptions.publishScope('main', data);
 }
 
+function sendJqbedAlgorithmJson(client, payload) {
+  if (!client || client.readyState !== 1) return false;
+  try {
+    client.send(JSON.stringify(payload));
+    return true;
+  } catch (error) {
+    logger.warn('[JQBed] failed to send algorithm configuration response', error.message || error);
+    return false;
+  }
+}
+
+function setJqbedAlgorithmStatus(nextStatus) {
+  if (JSON.stringify(nextStatus) === JSON.stringify(jqbedAlgorithmStatus)) return;
+  jqbedAlgorithmStatus = nextStatus;
+  publishSystemEvent({ jqbedAlgorithmStatus });
+}
+
+const jqbedAlgorithmProtocol = createJqbedAlgorithmProtocol({
+  store: jqbedAlgorithmConfigStore,
+  sendJson: sendJqbedAlgorithmJson,
+  broadcastJson: publishSystemEvent,
+  getAlgorithmStatus: () => jqbedAlgorithmStatus,
+});
+
 function getRealtimeChannelMetadata() {
   const sensorType = runtimeContext.getSensorType();
   const legacyChannels = [
@@ -1154,12 +1193,16 @@ function publishHistoryDateList() {
 }
 
 const petCareRuntimeService = createPetCareRuntimeService({
+  buildJqbedGetDataArgs,
+  getJqbedAlgorithmConfigSnapshot: jqbedAlgorithmConfigStore.getSnapshot,
   logger,
   callPy,
   getPointArr: () => pointArr,
   getFile: runtimeContext.getSensorType,
   getPort: () => getManagedSerialPort(serialRoles.SIT),
+  probeJqbedAlgorithmConfig: () => callPy('health', {}, { timeoutMs: 10000 }),
   publishSystemEvent,
+  setJqbedAlgorithmStatus,
   setJqbedMatrixOrigin: (matrixOrigin) => {
     jqbedMatrixOrigin = matrixOrigin;
   },
@@ -1207,6 +1250,14 @@ const historyMaintenanceService = createHistoryMaintenanceService({
 });
 
 const wsCommandRouter = createWebSocketCommandRouter({ logger });
+wsCommandRouter.register(createJqbedAlgorithmCommandHandler({
+  protocol: jqbedAlgorithmProtocol,
+  getRuntimeContext: () => ({
+    activeFile: runtimeContext.getSensorType(),
+    licenseValid: runtimeContext.getNowDate() < endDate,
+    realtime: !runtimeContext.isLocalPlayback(),
+  }),
+}));
 const runtimeStatePatchers = createRuntimeStatePatchers({
   setCollectionState,
   setPlaybackState,
@@ -1682,6 +1733,7 @@ const { legacySerialRuntimeContext } = bindLegacySerialRuntime({
   serialParserManager,
 });
 
+jqbedTimer = petCareRuntimeService.startVitalSignsTimer();
 petCareTimer = petCareRuntimeService.startPetCareTimer('petCare');
 petCareMiniTimer = petCareRuntimeService.startPetCareTimer('petCareMini');
 

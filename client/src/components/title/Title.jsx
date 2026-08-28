@@ -1,6 +1,6 @@
 import React from 'react'
-import { Menu, Slider, Button, Select, message, notification, Divider, Space, Radio, Drawer, Modal, Progress } from 'antd';
-import { PlusOutlined, SettingOutlined } from '@ant-design/icons';
+import { Menu, Slider, Button, Select, message, notification, Divider, Space, Radio, Drawer, Modal, Progress, Tooltip } from 'antd';
+import { PlusOutlined, SettingOutlined, SlidersOutlined } from '@ant-design/icons';
 import exchange from '../../assets/images/exchange.png'
 import option from '../../assets/images/Option.png'
 import logo from '../../assets/images/logo.png'
@@ -12,13 +12,22 @@ import { timeStampToDate, timeStampToDateNospace } from '../../assets/util/util'
 import enUS from 'antd/locale/en_US';
 import zhCN from 'antd/locale/zh_CN';
 import { withTranslation } from "react-i18next";
-
-import { useTranslation, initReactI18next } from "react-i18next";
 import { NavLink, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { bthClickHandle as heatmapBthClickHandle } from '../onestep/heatmap';
 import { registerRuntimeDisplayDefinition } from '../../displays/registry';
 import { buildAccessibleSensorOptions } from '../../services/sensorStatus';
+import { translateDomainLabel } from '../../i18n/translateDomainLabel';
+import { getLanguageLocale } from '../../i18n';
+import JqbedAlgorithmConfigModal from './JqbedAlgorithmConfigModal';
+import { getJqbedConfigAccess } from './jqbedAlgorithmConfig';
+import {
+  PRESSURE_SCENES,
+  readPressureScene,
+  resolveDisplaySwitchZero,
+  resolvePressureSceneChangeZero,
+  writePressureScene,
+} from './displaySwitchZeroPolicy';
 let collection = JSON.parse(localStorage.getItem('collection'))
   ? JSON.parse(localStorage.getItem('collection'))
   : [['hunch', 'front', '标签']];
@@ -29,6 +38,8 @@ let loadData = ''
 const HUMAN_BODY_COLOR_SLIDER_MAX = 5000
 const HUMAN_BODY_DEFAULT_COLOR = 1555
 const HUMAN_BODY_DEFAULT_SIZE = 31
+const HUMAN_BODY_OPTIMIZED_MATRIX = 'humanBodyOptimized'
+const isHumanBodyMatrixTitle = (matrixName) => ['humanBody', HUMAN_BODY_OPTIMIZED_MATRIX].includes(matrixName)
 const HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES = [1205, 5000]
 const HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES = [20, 60]
 const MINZHEN_NORMAL_DEFAULT_COLOR = 415
@@ -80,6 +91,7 @@ const titleInitConfig = {
   sit: { valueg1: 4.3, valuej1: 1705, valuel1: 11, valuef1: 14, value1: 3.54 },
   humanBody: { valueg1: 2, valuej1: HUMAN_BODY_DEFAULT_COLOR, valuel1: 5, valuef1: 6, value1: 0.72, sizeValue: HUMAN_BODY_DEFAULT_SIZE },
 }
+titleInitConfig[HUMAN_BODY_OPTIMIZED_MATRIX] = { ...titleInitConfig.humanBody }
 titleInitConfig.minzhen__normal = {
   ...titleInitConfig.minzhen,
   valuej1: MINZHEN_NORMAL_DEFAULT_COLOR,
@@ -107,7 +119,7 @@ const matrixNameToType_title = (type) => type === smallBed12BType_title ? type :
 const getColorSliderMax = (matrixName) => {
   if (matrixName === smallBed12BType_title) return SMALL_BED_12B_PRESSURE_COLOR_MAX
   if (isPetCareMatrixTitle(matrixName)) return 5000
-  if (matrixName === 'humanBody') return HUMAN_BODY_COLOR_SLIDER_MAX
+  if (isHumanBodyMatrixTitle(matrixName)) return HUMAN_BODY_COLOR_SLIDER_MAX
   return 1000
 }
 const getColorSliderStep = () => 10
@@ -153,7 +165,7 @@ const getConfig = ({ sensorType, mode }) => {
     }
   }
   const mergedConfig = { ...init, ...result }
-  if (realType === 'humanBody') {
+  if (isHumanBodyMatrixTitle(realType)) {
     if (HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES.includes(Number(mergedConfig.valuej1))) {
       mergedConfig.valuej1 = HUMAN_BODY_DEFAULT_COLOR
     }
@@ -216,7 +228,7 @@ const changeLocalStroage = ({ sensorType, valueType, value, mode }) => {
   if (mode) {
     cacheKeys.push(`${sensorType}__${mode}`)
   }
-  if (!mode || sensorType === 'humanBody') {
+  if (!mode || isHumanBodyMatrixTitle(sensorType)) {
     cacheKeys.push(sensorType)
   }
 
@@ -275,6 +287,7 @@ class Title extends React.Component {
       carCurrent: 'all',
       show: false,
       resetZero: false,
+      pressureScene: readPressureScene(),
       num: 0,
       dataTime: '',
       clickState: true,
@@ -321,6 +334,7 @@ class Title extends React.Component {
       pdfLoading: false,
       humanTransform: createDefaultHumanTransform(),
       dynamicSensors: [],
+      jqbedAlgorithmConfigOpen: false,
     }
     this.inputRef = React.createRef(null)
     this.inputRef1 = React.createRef(null)
@@ -400,6 +414,9 @@ class Title extends React.Component {
       this.setState({
         humanTransform: createDefaultHumanTransform(),
       })
+    }
+    if (this.state.jqbedAlgorithmConfigOpen && !this.canUseJqbedAlgorithmConfig()) {
+      this.closeJqbedAlgorithmConfig();
     }
   }
 
@@ -619,7 +636,7 @@ class Title extends React.Component {
 
   openCsvDownloadModal = () => {
     if (!this.state.dataTime) {
-      message.warning('请先选择要下载的历史数据');
+      message.warning(this.props.t('collection.chooseHistory'));
       return;
     }
     this.setState({
@@ -635,12 +652,12 @@ class Title extends React.Component {
 
   chooseCsvDownloadPath = async () => {
     if (!window.electronAPI?.invoke) {
-      message.warning('当前环境不支持选择文件夹');
+      message.warning(this.props.t('csv.selectUnsupported'));
       return;
     }
     const result = await window.electronAPI.invoke('file-dialog', {
       properties: ['openDirectory', 'createDirectory'],
-      title: '选择 CSV 保存文件夹',
+      title: this.props.t('csv.chooseFolderTitle'),
     });
     const selectedPath = result?.filePaths?.[0];
     if (selectedPath) {
@@ -652,29 +669,31 @@ class Title extends React.Component {
   openCsvPath = async (targetPath) => {
     if (!targetPath) return;
     if (!window.electronAPI?.invoke) {
-      message.warning('当前环境不支持打开路径');
+      message.warning(this.props.t('csv.openUnsupported'));
       return;
     }
     const result = await window.electronAPI.invoke('open-path', { filePath: targetPath });
     if (!result?.success) {
-      message.error(result?.error || '打开失败');
+      message.error(result?.error || this.props.t('csv.openFailed'));
     }
   }
 
   startCsvDownload = async () => {
     if (!this.state.dataTime) {
-      message.warning('请先选择要下载的历史数据');
+      message.warning(this.props.t('collection.chooseHistory'));
       return;
     }
     if (this.state.csvDownloadFormat !== 'csv') {
-      message.warning('当前仅支持 CSV 格式');
+      message.warning(this.props.t('csv.csvOnly'));
       return;
     }
     const downloadPath = (this.state.csvDownloadPath || '').trim();
     if (downloadPath && window.electronAPI?.invoke) {
       const validateResult = await window.electronAPI.invoke('validate-path', { path: downloadPath });
       if (!validateResult?.success) {
-        message.error(`保存路径不可用：${validateResult?.error || '未知错误'}`);
+        message.error(this.props.t('csv.pathUnavailable', {
+          error: validateResult?.error || this.props.t('csv.unknownError'),
+        }));
         return;
       }
       localStorage.setItem('csvDownloadPath', downloadPath);
@@ -685,7 +704,7 @@ class Title extends React.Component {
       csvDownloadDir: downloadPath,
       csvDownloadProgress: 0,
       csvDownloadProgressDetail: null,
-      csvDownloadMessage: '正在导出 CSV...',
+      csvDownloadMessage: this.props.t('csv.exportingShort'),
     });
     this.props.wsSendObj({
       download: this.state.dataTime,
@@ -708,8 +727,8 @@ class Title extends React.Component {
         csvDownloadProgress: Math.max(0, Math.min(100, Number(progress.percent) || 0)),
         csvDownloadProgressDetail: progress,
         csvDownloadMessage: progress.currentFile
-          ? `Exporting ${progress.currentFile}`
-          : 'Exporting CSV...',
+          ? this.props.t('csv.exportingFile', { file: progress.currentFile })
+          : this.props.t('csv.exportingShort'),
       });
       return;
     }
@@ -725,7 +744,7 @@ class Title extends React.Component {
         csvDownloadFiles: mergedFiles,
         csvDownloadDir: detail.downloadDir || this.state.csvDownloadDir || this.state.csvDownloadPath,
         csvDownloadProgress: 100,
-        csvDownloadMessage: detail.displayMsg || '导出 CSV 成功',
+        csvDownloadMessage: detail.displayMsg || this.props.t('export csv success'),
       });
       return;
     }
@@ -734,11 +753,11 @@ class Title extends React.Component {
       csvDownloadStage: 'error',
       csvDownloadFiles: mergedFiles,
       csvDownloadDir: detail.downloadDir || this.state.csvDownloadDir || this.state.csvDownloadPath,
-      csvDownloadMessage: detail.downloadError || detail.displayMsg || '导出 CSV 失败',
+      csvDownloadMessage: detail.downloadError || detail.displayMsg || this.props.t('export csv failed'),
     });
   }
 
-  renderCsvDownloadModal() {
+  renderCsvDownloadModal(t) {
     const stage = this.state.csvDownloadStage;
     const isConfig = stage === 'config';
     const isExporting = stage === 'exporting';
@@ -753,10 +772,10 @@ class Title extends React.Component {
 
     return (
       <Modal
-        title={isConfig ? 'CSV 下载配置' : 'CSV 下载进度'}
+        title={isConfig ? t('csv.config') : t('csv.progress')}
         open={this.state.csvDownloadModalOpen}
-        okText={isConfig ? '开始下载' : '关闭'}
-        cancelText='取消'
+        okText={isConfig ? t('csv.start') : t('common.close')}
+        cancelText={t('common.cancel')}
         confirmLoading={isExporting}
         closable={!isExporting}
         maskClosable={!isExporting}
@@ -771,19 +790,19 @@ class Title extends React.Component {
         {isConfig ? (
           <Space direction='vertical' style={{ width: '100%' }} size={12}>
             <div>
-              <div style={{ marginBottom: 4 }}>保存路径</div>
+              <div style={{ marginBottom: 4 }}>{t('csv.savePath')}</div>
               <Input
-                placeholder='不填写则使用默认 data 目录'
+                placeholder={t('csv.defaultPath')}
                 value={this.state.csvDownloadPath}
                 onChange={(e) => this.setState({ csvDownloadPath: e.target.value })}
               />
             </div>
             <Space>
-              <Button onClick={this.chooseCsvDownloadPath}>选择文件夹</Button>
-              <Button disabled={!folderPath} onClick={() => this.openCsvPath(folderPath)}>打开文件夹</Button>
+              <Button onClick={this.chooseCsvDownloadPath}>{t('csv.chooseFolder')}</Button>
+              <Button disabled={!folderPath} onClick={() => this.openCsvPath(folderPath)}>{t('csv.openFolder')}</Button>
             </Space>
             <div>
-              <div style={{ marginBottom: 4 }}>导出格式</div>
+              <div style={{ marginBottom: 4 }}>{t('csv.format')}</div>
               <Select
                 style={{ width: '100%' }}
                 value={this.state.csvDownloadFormat}
@@ -798,34 +817,43 @@ class Title extends React.Component {
           <div>
             <Progress percent={progressPercent} status='active' />
             <div style={{ marginTop: 8, color: '#666', fontSize: 12 }}>
-              {progressDetail.currentFile ? `File: ${progressDetail.currentFile}` : 'Preparing file...'}
+              {progressDetail.currentFile
+                ? t('csv.fileProgress', { file: progressDetail.currentFile })
+                : t('csv.preparingFile')}
             </div>
             <div style={{ color: '#666', fontSize: 12 }}>
-              {progressTotal ? `${progressWritten.toLocaleString()} / ${progressTotal.toLocaleString()} rows` : 'Calculating rows...'}
-              {progressDetail.fileCount ? `, file ${progressDetail.fileIndex || 1}/${progressDetail.fileCount}` : ''}
+              {progressTotal
+                ? t('csv.rowProgress', {
+                  written: progressWritten.toLocaleString(getLanguageLocale(this.props.i18n?.language)),
+                  total: progressTotal.toLocaleString(getLanguageLocale(this.props.i18n?.language)),
+                })
+                : t('csv.calculatingRows')}
+              {progressDetail.fileCount
+                ? t('csv.fileCount', { index: progressDetail.fileIndex || 1, count: progressDetail.fileCount })
+                : ''}
             </div>
-            <p>正在导出 CSV，请稍候...</p>
-            <p style={{ color: '#666' }}>文件生成完成后会显示在这里。</p>
+            <p>{t('csv.exporting')}</p>
+            <p style={{ color: '#666' }}>{t('csv.outputHint')}</p>
           </div>
         ) : null}
 
         {isDone ? (
           <Space direction='vertical' style={{ width: '100%' }} size={12}>
-            <div>{this.state.csvDownloadMessage || '导出 CSV 成功'}</div>
+            <div>{this.state.csvDownloadMessage || t('export csv success')}</div>
             {fileList.length ? fileList.map((filePath) => (
               <div key={filePath} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{filePath}</span>
-                <Button size='small' onClick={() => this.openCsvPath(filePath)}>打开</Button>
+                <Button size='small' onClick={() => this.openCsvPath(filePath)}>{t('common.open')}</Button>
               </div>
-            )) : <div>已导出完成，但未收到文件路径。</div>}
-            <Button disabled={!folderPath} onClick={() => this.openCsvPath(folderPath)}>打开下载文件夹</Button>
+            )) : <div>{t('csv.noPath')}</div>}
+            <Button disabled={!folderPath} onClick={() => this.openCsvPath(folderPath)}>{t('csv.openDownloadFolder')}</Button>
           </Space>
         ) : null}
 
         {isError ? (
           <Space direction='vertical' style={{ width: '100%' }} size={12}>
-            <div style={{ color: '#ff4d4f' }}>{this.state.csvDownloadMessage || '导出 CSV 失败'}</div>
-            <Button disabled={!folderPath} onClick={() => this.openCsvPath(folderPath)}>打开下载文件夹</Button>
+            <div style={{ color: '#ff4d4f' }}>{this.state.csvDownloadMessage || t('export csv failed')}</div>
+            <Button disabled={!folderPath} onClick={() => this.openCsvPath(folderPath)}>{t('csv.openDownloadFolder')}</Button>
           </Space>
         ) : null}
       </Modal>
@@ -902,35 +930,35 @@ class Title extends React.Component {
     return (
       <Modal
         className='collectionModal'
-        title='采集配置'
+        title={t('collection.config')}
         open={this.state.collectionModalOpen}
-        okText='开始采集'
-        cancelText='取消'
+        okText={t('collection.start')}
+        cancelText={t('common.cancel')}
         onOk={this.startCollectionWithOptions}
         onCancel={this.closeCollectionModal}
         destroyOnHidden
       >
         <Space direction='vertical' style={{ width: '100%' }} size={12}>
           <div>
-            <div style={{ marginBottom: 4 }}>采集名称</div>
+            <div style={{ marginBottom: 4 }}>{t('collection.name')}</div>
             <Input
-              placeholder='可不填，后面会追加特征标签1和特征标签2'
+              placeholder={t('collection.nameHint')}
               value={this.state.collectLabel}
               onChange={(e) => this.setState({ collectLabel: e.target.value })}
             />
           </div>
           <div>
-            <div style={{ marginBottom: 4 }}>特征标签</div>
+            <div style={{ marginBottom: 4 }}>{t('collection.featureLabel')}</div>
             <div className='collectionHelpText'>
-              特征标签1用于追加到采集文件名后面；特征标签2需使用“名称_数字”格式，数字写入 CSV label 列，完整文本写入新增标签文本列。
+              {t('collection.featureHelp')}
             </div>
             <div className='collectionFeatureRow'>
-              <div className='collectionFieldLabel'>特征标签1</div>
-              <div className='collectionHelpText'>文件名标签，会拼到采集名称后面，建议填写采集对象、实验分组或大类。</div>
+              <div className='collectionFieldLabel'>{t('collection.feature1')}</div>
+              <div className='collectionHelpText'>{t('collection.feature1Hint')}</div>
               <Select
                 popupClassName='collectionSelectDropdown'
                 style={{ width: '100%' }}
-                placeholder='选择特征标签1'
+                placeholder={t('collection.selectFeature1')}
                 value={this.state.realname || undefined}
                 onChange={this.onChange}
                 dropdownRender={(menu) => (
@@ -939,7 +967,7 @@ class Title extends React.Component {
                     <Divider style={{ margin: '8px 0' }} />
                     <Space style={{ padding: '0 8px 4px' }}>
                       <Input
-                        placeholder='新增标签'
+                        placeholder={t('collection.addLabel')}
                         ref={this.inputRef}
                         value={this.state.name}
                         onChange={this.onNameChange}
@@ -953,16 +981,19 @@ class Title extends React.Component {
                     </Space>
                   </>
                 )}
-                options={this.state.items.map((item) => ({ label: item, value: item }))}
+                options={this.state.items.map((item) => ({
+                  label: translateDomainLabel(item, t),
+                  value: item,
+                }))}
               />
             </div>
             <div className='collectionFeatureRow'>
-              <div className='collectionFieldLabel'>特征标签2</div>
-              <div className='collectionHelpText'>CSV 标签，导出时“平躺_2”会在 label 列写入 2，并在标签文本列写入平躺_2。</div>
+              <div className='collectionFieldLabel'>{t('collection.feature2')}</div>
+              <div className='collectionHelpText'>{t('collection.feature2Hint')}</div>
               <Select
                 popupClassName='collectionSelectDropdown'
                 style={{ width: '100%' }}
-                placeholder='选择特征标签2'
+                placeholder={t('collection.selectFeature2')}
                 value={this.state.realname1 || undefined}
                 onChange={this.onChange1}
                 dropdownRender={(menu) => (
@@ -971,7 +1002,7 @@ class Title extends React.Component {
                     <Divider style={{ margin: '8px 0' }} />
                     <Space style={{ padding: '0 8px 4px' }}>
                       <Input
-                        placeholder='新增标签'
+                        placeholder={t('collection.addLabel')}
                         ref={this.inputRef1}
                         value={this.state.name1}
                         onChange={this.onNameChange1}
@@ -985,25 +1016,28 @@ class Title extends React.Component {
                     </Space>
                   </>
                 )}
-                options={this.state.items1.map((item) => ({ label: item, value: item }))}
+                options={this.state.items1.map((item) => ({
+                  label: translateDomainLabel(item, t),
+                  value: item,
+                }))}
               />
             </div>
           </div>
           <div>
-            <div style={{ marginBottom: 4 }}>采集频率</div>
+            <div style={{ marginBottom: 4 }}>{t('collection.frequency')}</div>
             <Radio.Group
               value={this.state.collectFrequencyMode}
               onChange={(e) => this.setState({ collectFrequencyMode: e.target.value })}
               optionType='button'
               buttonStyle='solid'
               options={[
-                { label: '跟随串口频率', value: 'serial' },
-                { label: '自定义保存频率', value: 'custom' },
+                { label: t('collection.followSerial'), value: 'serial' },
+                { label: t('collection.customFrequency'), value: 'custom' },
               ]}
             />
             {this.state.collectFrequencyMode === 'serial' ? (
               <div className='collectionHelpText' style={{ marginTop: 8 }}>
-                按串口实际发送频率保存，每收到一帧就写入一帧。
+                {t('collection.serialRateHint')}
               </div>
             ) : (
               <div style={{ marginTop: 8 }}>
@@ -1016,7 +1050,7 @@ class Title extends React.Component {
                   addonAfter='Hz'
                 />
                 <div className='collectionHelpText' style={{ marginTop: 6 }}>
-                  按目标 Hz 保存，建议设置为小于串口实际发送 Hz；高于串口频率时最多也只能按串口实际帧率保存。
+                  {t('collection.targetRateHint')}
                 </div>
               </div>
             )}
@@ -1052,21 +1086,21 @@ class Title extends React.Component {
     });
   }
 
-  renderSmallBed12BDisplaySettings() {
+  renderSmallBed12BDisplaySettings(t) {
     return (
       <Modal
         className='collectionModal'
-        title='展示设置'
+        title={t('display.settings')}
         open={this.state.smallBed12BDisplaySettingsOpen}
-        okText='确定'
-        cancelText='取消'
+        okText={t('common.confirm')}
+        cancelText={t('common.cancel')}
         onOk={() => this.setState({ smallBed12BDisplaySettingsOpen: false })}
         onCancel={() => this.setState({ smallBed12BDisplaySettingsOpen: false })}
         destroyOnHidden
       >
         <Space direction='vertical' style={{ width: '100%' }} size={12}>
           <div>
-            <div style={{ marginBottom: 4 }}>实时矩阵</div>
+            <div style={{ marginBottom: 4 }}>{t('display.realtimeMatrix')}</div>
             <Radio.Group
               value={this.state.smallBed12BRealtimeMatrixMode}
               onChange={(e) => this.applySmallBed12BDisplaySettings({ matrixMode: e.target.value })}
@@ -1078,22 +1112,22 @@ class Title extends React.Component {
               ]}
             />
             <div className='collectionHelpText' style={{ marginTop: 8 }}>
-              这里会同时影响实时原始数据展示、采集入库和 CSV 下载矩阵尺寸。
+              {t('display.matrixHint')}
             </div>
           </div>
           {this.state.smallBed12BRealtimeMatrixMode === '16x16' ? (
             <div>
-              <div style={{ marginBottom: 4 }}>2x2 取点位置</div>
+              <div style={{ marginBottom: 4 }}>{t('display.samplePosition')}</div>
               <Radio.Group
                 value={this.state.smallBed12BRealtimeSamplePoint}
                 onChange={(e) => this.applySmallBed12BDisplaySettings({ samplePoint: e.target.value })}
                 optionType='button'
                 buttonStyle='solid'
                 options={[
-                  { label: '左上', value: 'topLeft' },
-                  { label: '右上', value: 'topRight' },
-                  { label: '左下', value: 'bottomLeft' },
-                  { label: '右下', value: 'bottomRight' },
+                  { label: t('display.topLeft'), value: 'topLeft' },
+                  { label: t('display.topRight'), value: 'topRight' },
+                  { label: t('display.bottomLeft'), value: 'bottomLeft' },
+                  { label: t('display.bottomRight'), value: 'bottomRight' },
                 ]}
               />
             </div>
@@ -1105,7 +1139,7 @@ class Title extends React.Component {
 
   openOneStepPdfModal = () => {
     if (!this.state.dataTime) {
-      message.warning('请先选择要导出的采集数据');
+      message.warning(this.props.t('collection.chooseExportData'));
       return;
     }
     this.setState({ pdfModalOpen: true });
@@ -1113,14 +1147,14 @@ class Title extends React.Component {
 
   generateOneStepPdfReport = async () => {
     const date = this.state.dataTime;
-    const collectName = (this.state.realname || '').trim() || '未知';
+    const collectName = (this.state.realname || '').trim() || this.props.t('common.unknown');
     const collectAge = (this.state.collectAge || '').trim() || '0';
     const collectGender = this.state.collectGender || '男';
     const colName = this.state.colName || date;
     this.setState({ pdfLoading: true });
     const pdfMessageKey = 'oneStepPdfExport';
     configureOneStepPdfMessage();
-    message.loading({ content: '正在生成报告，请稍候...', key: pdfMessageKey, duration: 0 });
+    message.loading({ content: this.props.t('report.generating'), key: pdfMessageKey, duration: 0 });
     try {
       const res = await axios({
         method: 'post',
@@ -1128,25 +1162,25 @@ class Title extends React.Component {
         data: { time: date, collectName, age: collectAge, gender: collectGender, date }
       });
       if (res.status !== 200 || res.data?.code !== 0) {
-        message.error({ content: res.data?.message || '获取峰值帧失败', key: pdfMessageKey, duration: 3 });
+        message.error({ content: res.data?.message || this.props.t('report.peakFailed'), key: pdfMessageKey, duration: 3 });
         return;
       }
 
       const peakFrameData = res.data?.data?.peak_frame_data;
       if (!Array.isArray(peakFrameData) || peakFrameData.length < 4096) {
-        message.error({ content: '峰值帧数据为空，无法生成 PDF', key: pdfMessageKey, duration: 3 });
+        message.error({ content: this.props.t('report.emptyPeak'), key: pdfMessageKey, duration: 3 });
         return;
       }
 
       const canvas = createOneStepPdfHeatmapCanvas(peakFrameData);
       if (!canvas) {
-        message.error({ content: 'OneStep 热力图生成失败', key: pdfMessageKey, duration: 3 });
+        message.error({ content: this.props.t('report.heatmapFailed'), key: pdfMessageKey, duration: 3 });
         return;
       }
 
       const blob = await canvasToPngBlob(canvas);
       if (!blob) {
-        message.error({ content: '热力图导出失败', key: pdfMessageKey, duration: 3 });
+        message.error({ content: this.props.t('report.exportHeatmapFailed'), key: pdfMessageKey, duration: 3 });
         return;
       }
 
@@ -1164,7 +1198,7 @@ class Title extends React.Component {
       });
 
       if (uploadRes.data?.code !== 0) {
-        message.error({ content: uploadRes.data?.message || 'PDF 生成失败', key: pdfMessageKey, duration: 3 });
+        message.error({ content: uploadRes.data?.message || this.props.t('report.pdfFailed'), key: pdfMessageKey, duration: 3 });
         return;
       }
 
@@ -1174,14 +1208,16 @@ class Title extends React.Component {
       setTimeout(() => {
         configureOneStepPdfMessage();
         if (this.props.messageApi) {
-          this.props.messageApi.success('PDF 导出成功', 5);
+          this.props.messageApi.success(this.props.t('report.pdfSuccess'), 5);
         } else {
-          message.success({ content: 'PDF 导出成功', duration: 5 });
+          message.success({ content: this.props.t('report.pdfSuccess'), duration: 5 });
         }
       }, 100);
       notification.success({
-        message: 'PDF 报告生成成功',
-        description: pdfFilePath ? `已保存至：${pdfFilePath}` : '报告已生成',
+        message: this.props.t('report.reportSuccess'),
+        description: pdfFilePath
+          ? this.props.t('report.savedAt', { path: pdfFilePath })
+          : this.props.t('report.generated'),
         duration: 0,
         btn: pdfFilePath ? (
           <Button
@@ -1192,11 +1228,11 @@ class Title extends React.Component {
                 window.electronAPI.invoke('open-folder', { filePath: pdfFilePath });
               }
             }}
-          >打开文件夹</Button>
+          >{this.props.t('csv.openFolder')}</Button>
         ) : null,
       });
     } catch (err) {
-      message.error({ content: err?.response?.data?.message || err?.message || '请求失败', key: pdfMessageKey, duration: 3 });
+      message.error({ content: err?.response?.data?.message || err?.message || this.props.t('report.requestFailed'), key: pdfMessageKey, duration: 3 });
     } finally {
       this.setState({ pdfLoading: false });
     }
@@ -1212,7 +1248,9 @@ class Title extends React.Component {
     const cacheMode = mode; // mode dimension for cache
 
     // Sensor type groups
-    const group1 = ['hand', 'handSinglePoint', 'normal', 'footVideo', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, wholeChairType_title, minzhenType_title, 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', 'bed4096', 'bed4096num']; // 3D point scene / WebGL heatmap
+    // 'carQX' 就是 chairQX，走的是 carQXFbx.jsx 的 3D 点场景，和 wholeChair 同一套
+    // sitValue/backValue 接口，之前漏在 group1 外面，所以设置抽屉里一个滑块都不出。
+    const group1 = ['hand', 'handSinglePoint', 'normal', 'footVideo', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, wholeChairType_title, minzhenType_title, 'carQX', 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', 'bed4096', 'bed4096num']; // 3D point scene / WebGL heatmap
     const group2 = ['robot1', 'robotSY', 'robotLCF']; // Robots
     const group3 = tactileGloveTypes_title; // Tactile gloves
     const group4 = ['fast256', 'fast1024', 'matCol']; // High-speed / compact matrix raw point renderers
@@ -1228,11 +1266,11 @@ class Title extends React.Component {
     let showInit = false;     // Initial value
     let showHumanTransform = false; // Human model transform
 
-    if (matrixName === 'humanBody' && mode !== 'numoriginal') {
+    if (isHumanBodyMatrixTitle(matrixName) && mode !== 'numoriginal') {
       showSize = true;
       showColor = true;
       showFilter = true;
-      showHumanTransform = true;
+      showHumanTransform = matrixName === 'humanBody';
     } else if (group1.includes(matrixName)) {
       if (mode === 'numoriginal' && ['hand', 'handSinglePoint', minzhenType_title, 'bed4096', 'bed4096num'].includes(matrixName)) {
         // raw data mode: no Gaussian; Gaussian only controls 3D point scenes.
@@ -1375,11 +1413,11 @@ class Title extends React.Component {
               <div className='dataTitle'>{t('size')}</div>
               <Slider
                 min={1}
-                max={matrixName === 'humanBody' ? 200 : 50}
-                step={matrixName === 'humanBody' ? 1 : 0.1}
-                value={matrixName === 'humanBody' ? (this.props.sizeValue ?? HUMAN_BODY_DEFAULT_SIZE) : undefined}
+                max={isHumanBodyMatrixTitle(matrixName) ? 200 : 50}
+                step={isHumanBodyMatrixTitle(matrixName) ? 1 : 0.1}
+                value={isHumanBodyMatrixTitle(matrixName) ? (this.props.sizeValue ?? HUMAN_BODY_DEFAULT_SIZE) : undefined}
                 onChange={(value) => {
-                  if (matrixName === 'humanBody') {
+                  if (isHumanBodyMatrixTitle(matrixName)) {
                     this.props.changeStateData({ sizeValue: value });
                   }
                   changeLocalStroage({ sensorType: matrixName, valueType: 'sizeValue', value, mode: cacheMode });
@@ -1499,10 +1537,10 @@ class Title extends React.Component {
 
           {showHumanTransform && (
             <>
-              <Divider style={{ borderColor: 'rgba(255,255,255,0.18)', margin: '12px 0 8px' }}>Human Transform</Divider>
+              <Divider style={{ borderColor: 'rgba(255,255,255,0.18)', margin: '12px 0 8px' }}>{t('display.humanTransform')}</Divider>
 
               <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
-                <div className='dataTitle'>Pos X</div>
+                <div className='dataTitle'>{t('display.positionX')}</div>
                 <Slider
                   min={-200} max={200} step={0.5}
                   value={this.state.humanTransform.position.x}
@@ -1512,7 +1550,7 @@ class Title extends React.Component {
               </div>
 
               <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
-                <div className='dataTitle'>Pos Y</div>
+                <div className='dataTitle'>{t('display.positionY')}</div>
                 <Slider
                   min={-200} max={200} step={0.5}
                   value={this.state.humanTransform.position.y}
@@ -1522,7 +1560,7 @@ class Title extends React.Component {
               </div>
 
               <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
-                <div className='dataTitle'>Pos Z</div>
+                <div className='dataTitle'>{t('display.positionZ')}</div>
                 <Slider
                   min={-200} max={200} step={0.5}
                   value={this.state.humanTransform.position.z}
@@ -1532,7 +1570,7 @@ class Title extends React.Component {
               </div>
 
               <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
-                <div className='dataTitle'>Rot X</div>
+                <div className='dataTitle'>{t('display.rotationX')}</div>
                 <Slider
                   min={-180} max={180} step={1}
                   value={this.state.humanTransform.rotation.x}
@@ -1542,7 +1580,7 @@ class Title extends React.Component {
               </div>
 
               <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
-                <div className='dataTitle'>Rot Y</div>
+                <div className='dataTitle'>{t('display.rotationY')}</div>
                 <Slider
                   min={-180} max={180} step={1}
                   value={this.state.humanTransform.rotation.y}
@@ -1552,7 +1590,7 @@ class Title extends React.Component {
               </div>
 
               <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
-                <div className='dataTitle'>Rot Z</div>
+                <div className='dataTitle'>{t('display.rotationZ')}</div>
                 <Slider
                   min={-180} max={180} step={1}
                   value={this.state.humanTransform.rotation.z}
@@ -1561,7 +1599,7 @@ class Title extends React.Component {
                 />
               </div>
 
-              <Button style={{ marginTop: 8 }} onClick={resetHumanTransform}>Reset Human</Button>
+              <Button style={{ marginTop: 8 }} onClick={resetHumanTransform}>{t('display.resetHuman')}</Button>
             </>
           )}
 
@@ -1570,9 +1608,46 @@ class Title extends React.Component {
     );
   }
 
+  requestJqbedAlgorithmConfig = () => {
+    if (!this.canUseJqbedAlgorithmConfig()) return null;
+    const requestId = crypto.randomUUID();
+    const sent = this.props.wsSendObj({ getJqbedAlgorithmConfig: true, requestId });
+    return sent ? requestId : null;
+  }
+
+  canUseJqbedAlgorithmConfig = () => {
+    const access = getJqbedConfigAccess({
+      matrixName: this.props.matrixName,
+      history: this.props.history,
+    });
+    return access.visible && !access.disabled;
+  }
+
+  saveJqbedAlgorithmConfig = (values) => {
+    if (!this.canUseJqbedAlgorithmConfig()) return null;
+    const requestId = crypto.randomUUID();
+    const sent = this.props.wsSendObj({ setJqbedAlgorithmConfig: values, requestId });
+    return sent ? requestId : null;
+  }
+
+  resetJqbedAlgorithmConfig = () => {
+    if (!this.canUseJqbedAlgorithmConfig()) return null;
+    const requestId = crypto.randomUUID();
+    const sent = this.props.wsSendObj({ resetJqbedAlgorithmConfig: true, requestId });
+    return sent ? requestId : null;
+  }
+
+  closeJqbedAlgorithmConfig = () => {
+    this.setState({ jqbedAlgorithmConfigOpen: false });
+  }
+
   render() {
     const routerStr = this.props.matrixName == 'yanfeng10' ? '10a10' : this.props.matrixName == 'smallSample' ? '10a10' : this.props.matrixName == 'matCol' || this.props.matrixName == 'matColPos' ? '16a10' : this.props.matrixName == 'bed4096' ? '64a64' : this.props.matrixName == 'carCol' ? '10a9' : '32a32'
     const { t, i18n } = this.props;
+    const jqbedConfigAccess = getJqbedConfigAccess({
+      matrixName: this.props.matrixName,
+      history: this.props.history,
+    });
 
 
     // 全量传感器类型列表
@@ -1594,7 +1669,7 @@ class Title extends React.Component {
       { label: t('sensorSmallBedNoAlg'), value: smallBedNoAlgType_title },
       { label: t('sensorSmallBed12B'), value: smallBed12BType_title },
       { label: t('sensorMatCol'), value: 'matCol' },
-      { label: '温度全床系统', value: tempFullBedType_title },
+      { label: t('sensorTempFullBed'), value: tempFullBedType_title },
       { label: t('sensorPetCare'), value: 'petCare' },
       { label: t('sensorPetCareMini'), value: 'petCareMini' },
       { label: t('sensorWholeChair'), value: wholeChairType_title },
@@ -1604,6 +1679,8 @@ class Title extends React.Component {
       { label: t('sensorHandSinglePoint'), value: 'handSinglePoint' },
       { label: t('sensorNormal'), value: 'normal' },
       { label: t('sensorHumanBody'), value: 'humanBody' },
+      { label: t('chairQX'), value: 'carQX' },
+      { label: t('sensorHumanBodyOptimized'), value: HUMAN_BODY_OPTIMIZED_MATRIX },
     ]
 
     const sensorArr = buildAccessibleSensorOptions({
@@ -1671,6 +1748,11 @@ class Title extends React.Component {
           value={this.props.matrixName}
           onChange={(e) => {
             this.changeMatrixType(e)
+            if (!isHumanBodyMatrixTitle(e)) {
+              this.props.changeStateData({
+                numMatrixFlag: 'normal'
+              })
+            }
 
             this.props.wsSendObj({ resetZero: false })
             this.setState({ resetZero: false, dataTime: '' })
@@ -1738,9 +1820,9 @@ class Title extends React.Component {
 
 
           {this.props.matrixName === minzhenType_title ? <Select
-            placeholder='温度陀螺仪串口'
+            placeholder={t('minzhen.otherData')}
             style={{ marginRight: 6, width: 160 }}
-            value={this.props.portnameSensor ? `${this.props.portnameSensor}(温度陀螺仪)` : undefined}
+            value={this.props.portnameSensor ? `${this.props.portnameSensor} (${t('minzhen.otherData')})` : undefined}
             onOpenChange={() => {
               this.props.wsSendObj({ serialReset: true })
             }}
@@ -1832,8 +1914,8 @@ class Title extends React.Component {
             <Input value={this.state.ip} onChange={(e) => {
               localStorage.setItem('ip', e.target.value)
               this.setState({ ip: e.target.value })
-            }} placeholder='请输入IP' />
-            <Button onClick={() => { this.props.changeWs(this.state.ip) }}>连接</Button>
+            }} placeholder={t('display.ipPlaceholder')} />
+            <Button onClick={() => { this.props.changeWs(this.state.ip) }}>{t('display.connect')}</Button>
           </>
 
         }
@@ -1841,7 +1923,7 @@ class Title extends React.Component {
 
 
 
-        {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'handSinglePoint', 'normal', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'matCol', 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody'].includes(this.props.matrixName) ?
+        {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'handSinglePoint', 'normal', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'matCol', 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody', HUMAN_BODY_OPTIMIZED_MATRIX].includes(this.props.matrixName) ?
           <Select
             defaultValue={this.props.numMatrixFlag}
             style={{ width: 90 }}
@@ -1861,18 +1943,27 @@ class Title extends React.Component {
                   const fingerL = localStorage.getItem('fingerArrL')
                   const fingerR = localStorage.getItem('fingerArrR')
                   if (!fingerL && !fingerR) {
-                    message.warning(this.props.t ? this.props.t('noCalibData') : '未检测到手指校准数据，请先进行手指校准')
+                    message.warning(t('noCalibData'))
                   } else if (!fingerL) {
-                    message.warning(this.props.t ? this.props.t('noCalibDataL') : '未检测到左手校准数据，请先校准左手')
+                    message.warning(t('noCalibDataL'))
                   } else if (!fingerR) {
-                    message.warning(this.props.t ? this.props.t('noCalibDataR') : '未检测到右手校准数据，请先校准右手')
+                    message.warning(t('noCalibDataR'))
                   }
-                  this.props.wsSendObj({ resetZero: false })
-                  this.setState({ resetZero: false })
-                } else {
-                  this.props.wsSendObj({ resetZero: true })
-                  this.setState({ resetZero: true })
                 }
+              }
+
+              // 清零决策见 displaySwitchZeroPolicy.js：演示场景每次切换都以当下读数为零点，
+              // 真实场景一律不动基准（清零只走抽屉里的手动按钮）。手套切 3D 遥操是唯一
+              // 与场景无关的例外 —— 遥操必须跑在未清零数据上，两种场景都取消清零。
+              const zeroCommand = resolveDisplaySwitchZero({
+                sensorType: this.props.matrixName,
+                nextMode: value,
+                scene: this.state.pressureScene,
+                cancelZeroSensorTypes: calibratableGloveTypes_title,
+              })
+              if (zeroCommand) {
+                this.props.wsSendObj(zeroCommand)
+                this.setState({ resetZero: zeroCommand.resetZero })
               }
             }}
             options={this.props.matrixName === smallBed12BType_title ? [
@@ -1902,7 +1993,7 @@ class Title extends React.Component {
             ] : this.props.matrixName == 'bed4096' || this.props.matrixName == 'bed4096num' ? [
               { value: 'normal', label: t('modal3D') },
               { value: 'numoriginal', label: t('rawData') },
-            ] : this.props.matrixName == 'humanBody' ? [
+            ] : isHumanBodyMatrixTitle(this.props.matrixName) ? [
               { value: 'skin', label: t('skin3D') },
               { value: 'numoriginal', label: t('rawData') },
             ] : []}
@@ -1914,7 +2005,7 @@ class Title extends React.Component {
             className='titleButton'
             onClick={() => this.setState({ smallBed12BDisplaySettingsOpen: true })}
           >
-            展示设置
+            {t('display.settings')}
           </Button>
         ) : null}
 
@@ -2078,7 +2169,7 @@ class Title extends React.Component {
             // this.props.changeCalibration()
             this.props.com.current?.handZero()
           }}
-        >固定</Button> : ''}
+        >{t('display.fixed')}</Button> : ''}
 
         <Button onClick={() => {
           this.props.wsSendObj({
@@ -2103,14 +2194,15 @@ class Title extends React.Component {
 
         <Select
           defaultValue={this.props.i18n.language}
-          style={{ width: 60 }}
+          style={{ width: 108 }}
           onChange={(value) => {
             localStorage.setItem('language', value)
             this.props.i18n.changeLanguage(value)
           }}
           options={[
-            { value: 'zh', label: '中' },
-            { value: 'en', label: 'En' },
+            { value: 'zh', label: t('common.chinese') },
+            { value: 'en', label: t('common.english') },
+            { value: 'ja', label: t('common.japanese') },
           ]}
         />
 
@@ -2125,7 +2217,7 @@ class Title extends React.Component {
             {/* {this.props.matrixName == 'car' ? <Input placeholder='输入采集文件名称' onChange={(e) => { this.setState({ colName: e.target.value }) }} /> : null} */}
 
             {this.props.matrixName == 'localCar' ?
-              <Input placeholder='输入采集标签' onChange={(e) => { this.props.changeStateData({ dataName: e.target.value }) }} />
+              <Input placeholder={t('collection.featureLabel')} onChange={(e) => { this.props.changeStateData({ dataName: e.target.value }) }} />
               : null}
             {/* <Input type='number' placeholder={t('enterColHZ')} onChange={(e) => { this.setState({ colHZ: e.target.value }) }} /> */}
             <Button
@@ -2153,7 +2245,7 @@ class Title extends React.Component {
                 <Button onClick={() => {
                   this.props.colPushData()
                 }} className='titleButton'>
-                  单次采集
+                  {t('display.singleCollection')}
                 </Button>
                 <Button className='titleButton'>
                   <CSVLink
@@ -2163,14 +2255,14 @@ class Title extends React.Component {
                     data={this.props.csvData}
                     style={{ color: '#5A5A89', textDecoration: 'none' }}
                   >
-                    下载
+                    {t('download')}
                   </CSVLink> </Button> </> : null}
 
             {this.props.matrixName == 'localCar' ?
               <Button className='titleButton' onClick={() => {
 
                 this.props.delPushData()
-              }}>删除</Button> : null}
+              }}>{t('delete')}</Button> : null}
           </>
           : <> <Button
             className='titleButton'
@@ -2189,14 +2281,14 @@ class Title extends React.Component {
         {
           this.props.matrixName === 'car' && this.props.local ? <Button className='titleButton' onClick={() => {
             this.props.wsSendObj({ variety: true })
-          }} >压力变化</Button> : null
+          }} >{t('display.pressureChange')}</Button> : null
         }
 
         {this.props.matrixName === 'bigBed' ? <Button className='titleButton' onClick={() => {
           const flag = this.props.pressChart
           this.props.changeStateData({ pressChart: !flag })
           this.props.initBigCtx()
-        }}>压力曲线</Button> : null}
+        }}>{t('display.pressureCurve')}</Button> : null}
 
         {this.props.matrixName === 'bigBed' ? <Button className='titleButton' onClick={() => {
 
@@ -2204,7 +2296,7 @@ class Title extends React.Component {
             this.props.com.current.logData()
           }
           // this.props.initPressCtx()
-        }}>打印曲线</Button> : null}
+        }}>{t('display.printCurve')}</Button> : null}
 
 
 
@@ -2218,7 +2310,7 @@ class Title extends React.Component {
             if (flag) {
               this.props.track.current?.canvasInit()
             }
-          }}>{!this.props.centerFlag ? '重心' : '隐藏'}</Button> : null}
+          }}>{!this.props.centerFlag ? t('display.centerOfPressure') : t('display.hide')}</Button> : null}
         {this.props.matrixName === 'bed4096' && this.props.local ? (
           <>
             <Button
@@ -2226,41 +2318,44 @@ class Title extends React.Component {
               disabled={!this.state.dataTime || this.state.pdfLoading}
               loading={this.state.pdfLoading}
               onClick={this.openOneStepPdfModal}
-            >导出PDF</Button>
+            >{t('report.exportPdf')}</Button>
             <Modal
-              title='填写报告信息'
+              title={t('report.formTitle')}
               open={this.state.pdfModalOpen}
               confirmLoading={this.state.pdfLoading}
-              okText='生成报告'
-              cancelText='取消'
+              okText={t('report.generate')}
+              cancelText={t('common.cancel')}
               onOk={this.generateOneStepPdfReport}
               onCancel={() => this.setState({ pdfModalOpen: false })}
               destroyOnHidden
             >
               <Space direction='vertical' style={{ width: '100%' }} size={12}>
                 <div>
-                  <div style={{ marginBottom: 4 }}>姓名</div>
+                  <div style={{ marginBottom: 4 }}>{t('report.name')}</div>
                   <Input
-                    placeholder='请输入姓名'
+                    placeholder={t('report.namePlaceholder')}
                     value={this.state.realname}
                     onChange={(e) => this.setState({ realname: e.target.value })}
                   />
                 </div>
                 <div>
-                  <div style={{ marginBottom: 4 }}>年龄</div>
+                  <div style={{ marginBottom: 4 }}>{t('report.age')}</div>
                   <Input
-                    placeholder='请输入年龄'
+                    placeholder={t('report.agePlaceholder')}
                     value={this.state.collectAge}
                     onChange={(e) => this.setState({ collectAge: e.target.value })}
                   />
                 </div>
                 <div>
-                  <div style={{ marginBottom: 4 }}>性别</div>
+                  <div style={{ marginBottom: 4 }}>{t('report.gender')}</div>
                   <Select
                     style={{ width: '100%' }}
                     value={this.state.collectGender}
                     onChange={(e) => this.setState({ collectGender: e })}
-                    options={[{ label: '男', value: '男' }, { label: '女', value: '女' }]}
+                    options={[
+                      { label: t('common.male'), value: '男' },
+                      { label: t('common.female'), value: '女' },
+                    ]}
                   />
                 </div>
               </Space>
@@ -2290,16 +2385,48 @@ class Title extends React.Component {
           }}
 
           options={[
-            { value: 'finger', label: '中指' },
-            { value: 'palm', label: '手掌' },
-            { value: 'hand', label: '全手' },
+            { value: 'finger', label: t('display.middleFinger') },
+            { value: 'palm', label: t('display.palm') },
+            { value: 'hand', label: t('display.wholeHand') },
           ]}
         ></Select> : ''
       }
 
-      {this.renderCsvDownloadModal()}
+      {this.renderCsvDownloadModal(t)}
       {this.renderCollectionModal(t)}
-      {this.renderSmallBed12BDisplaySettings()}
+      {this.renderSmallBed12BDisplaySettings(t)}
+
+      <JqbedAlgorithmConfigModal
+        open={this.state.jqbedAlgorithmConfigOpen}
+        envelope={this.props.jqbedAlgorithmConfig}
+        operationResult={this.props.jqbedAlgorithmConfigResult}
+        algorithmStatus={this.props.jqbedAlgorithmStatus}
+        connected={this.props.wsConnected}
+        connectionEpoch={this.props.wsConnectionEpoch}
+        onRequest={this.requestJqbedAlgorithmConfig}
+        onSave={this.saveJqbedAlgorithmConfig}
+        onReset={this.resetJqbedAlgorithmConfig}
+        onClose={this.closeJqbedAlgorithmConfig}
+      />
+
+      {jqbedConfigAccess.visible ? (
+        <Tooltip title={t(jqbedConfigAccess.tooltipKey)}>
+          <span
+            className="jqbedAlgorithmConfigTooltipTarget"
+            tabIndex={jqbedConfigAccess.disabled ? 0 : undefined}
+          >
+            <button
+              type="button"
+              className="jqbedAlgorithmConfigTrigger"
+              disabled={jqbedConfigAccess.disabled}
+              onClick={() => this.setState({ jqbedAlgorithmConfigOpen: true })}
+              aria-label={t('jqbedAlgorithmConfig.open')}
+            >
+              <SlidersOutlined />
+            </button>
+          </span>
+        </Tooltip>
+      ) : null}
 
       <div style={{ position: 'relative', flexShrink: 0 }}>
         <img onClick={() => {
@@ -2311,14 +2438,46 @@ class Title extends React.Component {
         <Drawer style={{ backgroundColor: 'rgba(21,18,42,0.8)' }} title={t('setData')} onClose={() => { this.setState({ open: false }) }} open={this.state.open}>
           {this.renderSettingSliders(t)}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {/* 演示场景 / 真实场景：决定切展示模式时要不要自动做预压力清零 */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <span style={{ color: '#fff', fontSize: 13 }}>{t('pressureScene.label')}</span>
+              <Radio.Group
+                value={this.state.pressureScene}
+                buttonStyle='solid'
+                onChange={(e) => {
+                  const pressureScene = writePressureScene(e.target.value)
+                  const zeroCommand = resolvePressureSceneChangeZero(pressureScene)
+                  const sent = this.props.wsSendObj(zeroCommand)
+                  this.setState({
+                    pressureScene,
+                    resetZero: sent ? zeroCommand.resetZero : this.state.resetZero,
+                  })
+                  if (sent) this.props.changeAside?.(zeroCommand)
+                }}
+              >
+                <Radio.Button value={PRESSURE_SCENES.real}>{t('pressureScene.real')}</Radio.Button>
+                <Radio.Button value={PRESSURE_SCENES.demo}>{t('pressureScene.demo')}</Radio.Button>
+              </Radio.Group>
+              <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 12, lineHeight: 1.5 }}>
+                {this.state.pressureScene === PRESSURE_SCENES.demo
+                  ? t('pressureScene.demoHint')
+                  : t('pressureScene.realHint')}
+              </span>
+            </div>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               <Button className='titleButton' onClick={() => {
-                this.props.changeAside({ resetZero: true })
-                this.props.wsSendObj({ resetZero: true })
+                const zeroCommand = { resetZero: true }
+                if (this.props.wsSendObj(zeroCommand)) {
+                  this.props.changeAside?.(zeroCommand)
+                  this.setState(zeroCommand)
+                }
               }}>{t('resetZero')}</Button>
               <Button className='titleButton' onClick={() => {
-                this.props.changeAside({ resetZero: false })
-                this.props.wsSendObj({ resetZero: false })
+                const zeroCommand = { resetZero: false }
+                if (this.props.wsSendObj(zeroCommand)) {
+                  this.props.changeAside?.(zeroCommand)
+                  this.setState(zeroCommand)
+                }
               }}>{t('cancelZero')}</Button>
               <NavLink to={`/num/${routerStr}`}>
                 <Button className='titleButton' onClick={() => {

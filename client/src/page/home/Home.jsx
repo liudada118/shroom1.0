@@ -1,9 +1,10 @@
 import React, { useRef, useEffect } from "react";
 import Title from "../../components/title/Title";
+import { sendWebSocketJson } from './websocketTransport';
 import "./index.scss";
 import CanvasCar from "../../components/three/carnewTest copy";
 import CanvasCarWow from "../../components/three/carnewWow";
-import CanvasCarQX from "../../components/three/carQX"
+import CanvasCarQX from "../../components/three/carQXFbx"
 import WholeChair from "../../components/three/wholeChair"
 import CanvasCarSofa from "../../components/three/carSofa"
 import CanvasDaliegu from "../../components/num/daliegu"
@@ -37,6 +38,7 @@ import RobotBlueSY from '../../components/video/robotSY'
 import RobotBlueLCF from "../../components/video/robotLCF";
 import RobotBlue0428 from "../../components/video/robot0428";
 import HumanBodyCanvas from '../../components/video/humanBody';
+import HumanBodyOptimized from '../../components/video/HumanBodyOptimized';
 import CarTq from "../../components/three/carTq";
 import Bed from "../../components/three/Bed";
 import SmallBed from "../../components/three/smallBed";
@@ -53,6 +55,7 @@ import reset from "../../assets/images/reset.png";
 import frontView from "../../assets/images/frontView.svg";
 import load from "../../assets/images/load.png";
 import enUS from 'antd/locale/en_US';
+import jaJP from 'antd/locale/ja_JP';
 import zhCN from 'antd/locale/zh_CN';
 import refresh from "../../assets/images/refresh.png";
 import { useNavigate } from 'react-router-dom'
@@ -102,6 +105,10 @@ import {
 } from "./util";
 
 import { withTranslation } from "react-i18next";
+import { getLanguageLocale, normalizeLanguage } from '../../i18n';
+import { translateBackendMessage } from '../../i18n/translateBackendMessage';
+import { translateDomainLabel } from '../../i18n/translateDomainLabel';
+import { speakLocalizedMessage } from './speechSynthesis';
 import { chestLine, flLine, frLine, genWebglData, handSkinChange, heatMapMax, hlLine, hrLine, robot0401 } from "./robotUtil";
 import { WebGLCanvas } from "../../components/webgl/WebGL.HeatMap copy 2";
 import { WS_URLS } from "../../constants";
@@ -170,6 +177,14 @@ import {
   getMetricStateUpdate,
   parseControlMessage,
 } from "../../services/ws/controlMessages";
+import {
+  DEFAULT_RENDERER_CONFIG as SMALL_BED_12B_DEFAULT_RENDERER_CONFIG,
+  getDisplayOptions as getSmallBed12BDisplayOptions,
+  getInitialDisplayState as getSmallBed12BInitialDisplayState,
+  normalizeRendererConfig as normalizeSmallBed12BRendererConfig,
+} from "./smallBed12BDisplay";
+
+const ANT_DESIGN_LOCALES = Object.freeze({ zh: zhCN, en: enUS, ja: jaJP });
 
 const FULL_PACKET_GLOVE_MATRIX = 'handGloveFullPacket'
 const DisplaySystemBuilder = React.lazy(() => import('../displaySystemBuilder/DisplaySystemBuilder'))
@@ -184,6 +199,19 @@ const normalizeDisplayMatrixName = (matrixName) =>
   HIDDEN_DISPLAY_MATRIX_TYPES.includes(matrixName) ? 'hand0205' : matrixName
 const filterVisibleDisplayMatrixTypes = (types) =>
   types.filter((type) => !HIDDEN_DISPLAY_MATRIX_TYPES.includes(type))
+const resolveBackendDisplayMatrixName = (activeSensorType, allowedTypes, currentMatrixName) => {
+  const backendMatrixName = normalizeDisplayMatrixName(activeSensorType)
+  const normalizedCurrentMatrixName = normalizeDisplayMatrixName(currentMatrixName)
+  const hasRestrictedTypes = Array.isArray(allowedTypes) && allowedTypes.length > 0
+
+  if (backendMatrixName && (!hasRestrictedTypes || allowedTypes.includes(backendMatrixName))) {
+    return backendMatrixName
+  }
+  if (!hasRestrictedTypes || allowedTypes.includes(normalizedCurrentMatrixName)) {
+    return normalizedCurrentMatrixName
+  }
+  return allowedTypes[0] || normalizedCurrentMatrixName
+}
 const tactileGloveTypes = ['hand0205', 'handGlove115200', FULL_PACKET_GLOVE_MATRIX]
 const isTactileGloveMappedLength = (matrixName, length) => {
   return length === 147 || (matrixName === 'handGloveFullPacket' && length === 195)
@@ -226,17 +254,32 @@ const NUM_MATRIX_SCENES = {
  *
  * @param {string} matrixName 当前展示形式。
  * @param {object} definition 运行期展示定义（`getDisplayDefinition` 的结果）。
+ * @param {{width?: number, height?: number}} matrixSize 后端回传的动态矩阵尺寸。
  * @returns {object} 传给 RendererHost 的 params。
  */
-const buildNumMatrixParams = (matrixName, definition) => {
+const buildNumMatrixParams = (matrixName, definition, matrixSize = {}) => {
   const fromManifest = definition?.source === 'manifest'
   const base = matrixName === SMALL_BED_12B_MATRIX
     ? NUM_MATRIX_PRESETS.smallBed12B
     : NUM_MATRIX_PRESETS.fast1024
+  const gridWidth = fromManifest
+    ? definition.matrix?.width
+    : matrixName === 'matCol'
+      ? 16
+      : matrixName === SMALL_BED_12B_MATRIX
+        ? matrixSize.width
+        : undefined
+  const gridHeight = fromManifest
+    ? definition.matrix?.height
+    : matrixName === 'matCol'
+      ? 10
+      : matrixName === SMALL_BED_12B_MATRIX
+        ? matrixSize.height
+        : undefined
   return {
     ...base,
-    gridWidth: fromManifest ? definition.matrix?.width : undefined,
-    gridHeight: fromManifest ? definition.matrix?.height : undefined,
+    gridWidth,
+    gridHeight,
     manageSidebar: !fromManifest && matrixName !== MINZHEN_MATRIX,
   }
 }
@@ -384,19 +427,19 @@ let newArr = new Array(5).fill(0)
 let rightHandNewArr = new Array(5).fill(0)
 let controlFlag = true;
 const controlArr = [
-  { name: "座椅向前", info: "座椅向前" },
-  { name: "靠背向后", info: "靠背向后" },
-  { name: "靠背向前", info: "靠背向前" },
-  { name: "靠背气囊充气", info: "靠背气囊充气" },
-  { name: "靠背气囊放气", info: "靠背气囊放气" },
-  { name: "坐垫向下移动", info: "坐垫向下移动腿部气囊放气" },
-  { name: "腿部气囊放气", info: "坐垫向下移动腿部气囊放气" },
-  { name: "坐垫向上移动", info: "坐垫向上移动腿部气囊充气" },
-  { name: "腿部气囊充气", info: "坐垫向上移动腿部气囊充气" },
-  { name: "侧翼右侧气囊充气", info: "侧翼右侧气囊充气" },
-  { name: "侧翼左侧气囊充气", info: "侧翼左侧气囊充气" },
-  { name: "侧翼右侧气囊放气", info: "侧翼右侧气囊放气" },
-  { name: "侧翼左侧气囊放气", info: "侧翼左侧气囊放气" },
+  { labelKey: 'home.seatControls.seatForward', info: "座椅向前" },
+  { labelKey: 'home.seatControls.backrestBackward', info: "靠背向后" },
+  { labelKey: 'home.seatControls.backrestForward', info: "靠背向前" },
+  { labelKey: 'home.seatControls.backrestInflate', info: "靠背气囊充气" },
+  { labelKey: 'home.seatControls.backrestDeflate', info: "靠背气囊放气" },
+  { labelKey: 'home.seatControls.cushionDown', info: "坐垫向下移动腿部气囊放气" },
+  { labelKey: 'home.seatControls.legDeflate', info: "坐垫向下移动腿部气囊放气" },
+  { labelKey: 'home.seatControls.cushionUp', info: "坐垫向上移动腿部气囊充气" },
+  { labelKey: 'home.seatControls.legInflate', info: "坐垫向上移动腿部气囊充气" },
+  { labelKey: 'home.seatControls.rightBolsterInflate', info: "侧翼右侧气囊充气" },
+  { labelKey: 'home.seatControls.leftBolsterInflate', info: "侧翼左侧气囊充气" },
+  { labelKey: 'home.seatControls.rightBolsterDeflate', info: "侧翼右侧气囊放气" },
+  { labelKey: 'home.seatControls.leftBolsterDeflate', info: "侧翼左侧气囊放气" },
 ];
 
 let collection = JSON.parse(localStorage.getItem("collection"))
@@ -543,17 +586,6 @@ let colStartAt = 0,
   canvasWidth = 300;
 
 
-const content3 = (
-  <div>
-    <p>刷新轨迹图</p>
-  </div>
-);
-
-const content4 = (
-  <div>
-    <p>下载轨迹图</p>
-  </div>
-);
 let ctxbig,
   ctxsit,
   ctxback,
@@ -606,9 +638,11 @@ const petCareMatrixArr = ['petCare', 'petCareMini']
 const isPetCareMatrix = (type) => petCareMatrixArr.includes(type)
 const tempFullBedMatrix = 'tempFullBed'
 const bedArr = ['jqbed', tempFullBedMatrix, ...petCareMatrixArr, 'xiyueReal1', 'smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed1']
-const displayRendererConfigMatrixArr = ['smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed12B', WHOLE_CHAIR_MATRIX, MINZHEN_MATRIX, 'jqbed', ...petCareMatrixArr]
+const displayRendererConfigMatrixArr = ['smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed12B', 'matCol', WHOLE_CHAIR_MATRIX, MINZHEN_MATRIX, 'jqbed', ...petCareMatrixArr]
 const HUMAN_BODY_DEFAULT_COLOR = 1555
 const HUMAN_BODY_DEFAULT_SIZE = 31
+const HUMAN_BODY_OPTIMIZED_MATRIX = 'humanBodyOptimized'
+const isHumanBodyMatrix = (matrixName) => ['humanBody', HUMAN_BODY_OPTIMIZED_MATRIX].includes(matrixName)
 const HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES = [1205, 5000]
 const HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES = [20, 60]
 const MINZHEN_NORMAL_DEFAULT_COLOR = 415
@@ -623,13 +657,7 @@ const initConfig = {
     valuef1: 6,
     value1: 0.72,  //高度
   },
-  smallBed12B: {
-    valueg1: 2,
-    valuej1: 2205,
-    valuel1: 5,
-    valuef1: 6,
-    value1: 0.1,
-  },
+  smallBed12B: { ...SMALL_BED_12B_DEFAULT_RENDERER_CONFIG },
   wholeChair: {
     valueg1: 2,
     valuej1: 25,
@@ -668,6 +696,17 @@ const initConfig = {
     valuel1: 11,
     valuef1: 14,
     value1: 3.54,  //高度
+  },
+  // chairQX（matrixName === 'carQX'）。数值照抄 carQXFbx.jsx 里同名变量的初值，
+  // 不给它单独一条就会落到 initConfig['bed']：颜色量程 1205、高度 0.72，
+  // 对这套 16×16 座椅点图偏得太多（实测柔化后的值只到 ~560）。
+  carQX: {
+    valueg1: 4,
+    valuej1: 255,
+    valuel1: 1,
+    valuef1: 2,
+    value1: 2.1,  //高度
+    valuelInit1: 500,
   }
 }
 
@@ -678,6 +717,10 @@ initConfig.humanBody = {
   valuef1: 6,
   value1: 0.72,
   sizeValue: HUMAN_BODY_DEFAULT_SIZE,
+}
+
+initConfig[HUMAN_BODY_OPTIMIZED_MATRIX] = {
+  ...initConfig.humanBody,
 }
 
 initConfig.petCare = {
@@ -782,7 +825,7 @@ const getConfig = ({ sensorType, mode }) => {
       : initConfig['bed']
   const local = getLocalStorageConfig({ sensorType: realType, mode })
   const mergedConfig = { ...init, ...local }
-  if (realType === 'humanBody') {
+  if (isHumanBodyMatrix(realType)) {
     if (HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES.includes(Number(mergedConfig.valuej1))) {
       mergedConfig.valuej1 = HUMAN_BODY_DEFAULT_COLOR
     }
@@ -801,6 +844,9 @@ const getConfig = ({ sensorType, mode }) => {
     ) {
       mergedConfig.valuej1 = modeDefaultColor
     }
+  }
+  if (realType === SMALL_BED_12B_MATRIX) {
+    return normalizeSmallBed12BRendererConfig(mergedConfig)
   }
   return mergedConfig
 }
@@ -864,6 +910,12 @@ const getDefaultModeForMatrix = (matrixName, currentMode = "normal") => {
   if (runtimeDefinition?.source === 'manifest') {
     return runtimeDefinition.sceneMode || 'numoriginal'
   }
+  if (matrixName === SMALL_BED_12B_MATRIX) {
+    return "numoriginal";
+  }
+  if (matrixName === "matCol") {
+    return currentMode === "numoriginal" ? "numoriginal" : "normal";
+  }
   if (matrixName === WHOLE_CHAIR_MATRIX) {
     return "normal";
   }
@@ -873,7 +925,7 @@ const getDefaultModeForMatrix = (matrixName, currentMode = "normal") => {
   if (matrixName === MINZHEN_MATRIX) {
     return currentMode === "numoriginal" ? "numoriginal" : "normal";
   }
-  if (matrixName === "humanBody") {
+  if (isHumanBodyMatrix(matrixName)) {
     return currentMode === "numoriginal" ? "numoriginal" : "skin";
   }
   if (matrixName === FULL_PACKET_GLOVE_MATRIX) {
@@ -963,75 +1015,6 @@ var backFlag, hz = 12, sitFlag, realHzFrameCount = 0, realHzLastTime = Date.now(
   fingerArrR = readFingerCalibration('fingerArrR'),
   fingerArr = fingerArrL; // 默认指向左手，兼容旧逻辑
 
-// jqbed 健康监测语音播报
-const speechDict = {
-  "已离床": {
-    zh: "已离床",
-    en: "Left the bed",
-    ja: "ベッドから離れました"
-  },
-  "坠床风险": {
-    zh: "坠床风险",
-    en: "Risk of falling from bed",
-    ja: "ベッドから転落の危険があります"
-  },
-  "已坐起": {
-    zh: "已坐起",
-    en: "Sat up",
-    ja: "起き上がりました"
-  },
-  "SOS紧急求助": {
-    zh: "S O S 紧急求助",
-    en: "S O S Emergency Help",
-    ja: "S O S 緊急ヘルプ"
-  }
-};
-
-function speakMessage(key, lang = "zh") {
-
-
-  if (!speechDict[key] || !speechDict[key][lang]) {
-    console.warn("未找到对应翻译:", key, lang);
-    return;
-  }
-  const text = speechDict[key][lang];
-  const utter = new SpeechSynthesisUtterance(text);
-
-
-
-
-  // 设置语言
-  if (lang === "zh") utter.lang = "zh-CN";   // 中文
-  if (lang === "en") utter.lang = "en-US";   // 英文
-  if (lang === "ja") utter.lang = "ja-JP";   // 日文
-
-
-  // 优先选择女声 voice
-  const voices = speechSynthesis.getVoices();
-  const langVoices = voices.filter(v => v.lang.startsWith(utter.lang));
-
-  // 女声关键词匹配（覆盖 Windows / macOS / Linux 常见女声名称）
-  const femaleKeywords = [
-    'xiaoxiao', 'huihui', 'yaoyao', 'female', 'woman',
-    'tingting', 'meijia', 'sinji',
-    'zira', 'hazel', 'susan', 'linda',
-    'nanami', 'haruka',
-    'google', // Google 默认中文声音通常是女声
-  ];
-
-  // 优先匹配女声
-  let voice = langVoices.find(v =>
-    femaleKeywords.some(kw => v.name.toLowerCase().includes(kw))
-  );
-
-  // 如果没找到女声关键词，选该语言第一个可用声音
-  if (!voice && langVoices.length > 0) voice = langVoices[0];
-
-  if (voice) utter.voice = voice;
-
-  speechSynthesis.speak(utter);
-}
-
 let onBedState = []
 class Home extends React.Component {
   constructor() {
@@ -1090,6 +1073,11 @@ class Home extends React.Component {
       colFlag: true,
       colNum: 0,
       history: "now",
+      jqbedAlgorithmConfig: null,
+      jqbedAlgorithmConfigResult: null,
+      jqbedAlgorithmStatus: { state: 'waiting', error: null },
+      wsConnected: false,
+      wsConnectionEpoch: 0,
       numMatrixFlag: "normal",
       centerFlag: false,
       carState: "all",
@@ -1154,6 +1142,9 @@ class Home extends React.Component {
       // 用弹窗建的卡片没有 templateId，不在 FORMULA_CHART_TEMPLATES 里，
       // 但它同样是"用户还没保存的改动"。
       chartCards: initialChartCards,
+      timeArr: [],
+      historyTimeArr: [],
+      ...getSmallBed12BInitialDisplayState(),
     };
     this.com = React.createRef();
     this.data = React.createRef();
@@ -1429,7 +1420,47 @@ class Home extends React.Component {
     wsControl.onclose = () => {};
   }
 
+  syncHumanBodyRawPressureStats = (rawData) => {
+    if (!isHumanBodyMatrix(this.state.matrixName)) {
+      return false;
+    }
+
+    const rawMatrix = getHumanBodyFrameData(rawData);
+    if (!Array.isArray(rawMatrix) || rawMatrix.length < 1024) {
+      return false;
+    }
+
+    const originalFrame = rawMatrix.slice(0, 1024).map((value) => {
+      const numericValue = Number(value);
+      return Number.isFinite(numericValue) ? numericValue : 0;
+    });
+    const activeValues = originalFrame.filter((value) => value > 0);
+    const point = activeValues.length;
+    const totalPres = activeValues.reduce((sum, value) => sum + value, 0);
+    const maxPres = activeValues.length ? findMax(activeValues) : 0;
+    const meanPres = totalPres / (point || 1);
+    const pressureTrend = this.humanBodyPressureTrend || (this.humanBodyPressureTrend = []);
+    const areaTrend = this.humanBodyAreaTrend || (this.humanBodyAreaTrend = []);
+
+    if (pressureTrend.length >= 20) pressureTrend.shift();
+    if (areaTrend.length >= 20) areaTrend.shift();
+    pressureTrend.push(totalPres);
+    areaTrend.push(point);
+
+    this.data.current?.changeData({
+      meanPres: meanPres.toFixed(2),
+      maxPres,
+      point,
+      area: point,
+      totalPres: totalPres.toFixed(0),
+    });
+    this.data.current?.handleCharts(pressureTrend, Math.max(1, findMax(pressureTrend)));
+    this.data.current?.handleChartsArea(areaTrend, Math.max(1, findMax(areaTrend)));
+    return true;
+  }
+
   componentDidMount() {
+    this.setState({ wsConnected: false });
     // window.alert(window.innerWidth)
     document.documentElement.style.fontSize = `${window.innerWidth / 120}px`;
     this.syncDisplayRendererConfig();
@@ -1472,7 +1503,17 @@ class Home extends React.Component {
     ws.onopen = () => {
       // connection opened
       console.info("connect success");
-      this.wsSendObj({ sitClose: true, backClose: true, headClose: true, sensorClose: true })
+      this.setState((previousState) => ({
+        wsConnected: true,
+        wsConnectionEpoch: previousState.wsConnectionEpoch + 1,
+      }));
+      this.wsSendObj({
+        // file: this.state.matrixName,
+        sitClose: true,
+        backClose: true,
+        headClose: true,
+        sensorClose: true
+      })
       // 主动请求传感器类型清单（请求-应答；主进程连接时也会主动 push 一次）
       this.wsSendObj({ getSensorTypes: true })
     };
@@ -1491,6 +1532,7 @@ class Home extends React.Component {
       console.warn('[WS] 连接错误，将在 3s 后重连');
     };
     ws.onclose = (e) => {
+      this.setState({ wsConnected: false });
       // 息屏或网络中断后自动重连
       console.warn('[WS] 连接断开，3s 后自动重连...');
       if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
@@ -1660,6 +1702,29 @@ class Home extends React.Component {
     localStorage.setItem('file', nextMatrixName);
   };
 
+  /**
+   * 读「临期提醒最近一次弹出的日期」（YYYY-MM-DD）。
+   * 存 localStorage 而不是内存，是为了关掉应用重开也不会再弹一次 —— 一天就是一天。
+   * 读不到（隐私模式、被禁用、配额满）时返回 null，也就是照常提醒：
+   * 宁可多提醒一次，也不能因为存储坏了就永远不提醒。
+   */
+  getLicenseWarnedDay() {
+    try {
+      return localStorage.getItem('licenseExpiryWarnedDay');
+    } catch (err) {
+      return null;
+    }
+  }
+
+  /** 记下今天已经提醒过。写失败就算了，下次照常弹，不影响主流程。 */
+  setLicenseWarnedDay(day) {
+    try {
+      localStorage.setItem('licenseExpiryWarnedDay', day);
+    } catch (err) {
+      console.warn('[密钥检查] 无法记录提醒日期，临期提醒可能重复弹出', err);
+    }
+  }
+
   wsData = (e) => {
     sitPress = 0;
     let jsonObject = parseWebSocketEventPayload(e);
@@ -1673,6 +1738,16 @@ class Home extends React.Component {
       jsonObject = { ...jsonObject, sitData: null };
     }
     this.syncSmallBed12BMatrixSize(jsonObject);
+
+    if (jsonObject.jqbedAlgorithmConfig) {
+      this.setState({ jqbedAlgorithmConfig: jsonObject.jqbedAlgorithmConfig });
+    }
+    if (jsonObject.jqbedAlgorithmConfigResult) {
+      this.setState({ jqbedAlgorithmConfigResult: jsonObject.jqbedAlgorithmConfigResult });
+    }
+    if (jsonObject.jqbedAlgorithmStatus) {
+      this.setState({ jqbedAlgorithmStatus: jsonObject.jqbedAlgorithmStatus });
+    }
 
     const currentDisplayDefinition = getDisplayDefinition(this.state.matrixName);
     const hasPressureFrame = (
@@ -1702,7 +1777,7 @@ class Home extends React.Component {
 
     if (jsonObject.collectionStorageError != null) {
       const errorInfo = jsonObject.collectionStorageError || {};
-      const text = errorInfo.message || '数据库空间不足，已停止采集';
+      const text = errorInfo.message || this.props.t('home.databaseFull');
       if (this.props.messageApi) {
         this.props.messageApi.error(text, 6);
       } else {
@@ -1749,14 +1824,14 @@ class Home extends React.Component {
           portnameBack: result.portnameBack || '',
           hand: true,
         });
-        const text = result.message || '触觉手套2 已连接左右手套';
+        const text = result.message || this.props.t('home.glovesConnected');
         if (this.props.messageApi) {
           this.props.messageApi.success(text);
         } else {
           message.success(text);
         }
       } else {
-        const text = result.message || '触觉手套2 自动连接失败';
+        const text = result.message || this.props.t('home.glovesConnectFailed');
         if (this.props.messageApi) {
           this.props.messageApi.error(text);
         } else {
@@ -1819,8 +1894,9 @@ class Home extends React.Component {
         { arr: allbody, width: 32, height: 32, order: 2, interp1: 1, interp2: 1 },
         { arr: body, width: 32, height: 32, order: 2, interp1: 1, interp2: 1 },
       ])
-      if (this.state.matrixName === 'humanBody') {
+      if (isHumanBodyMatrix(this.state.matrixName)) {
         const humanBodySource = allbody.some((value) => value > 0) ? allbody : body
+        this.syncHumanBodyRawPressureStats(humanBodySource)
 
         if (this.state.numMatrixFlag === 'numoriginal') {
           this.com.current?.changeHumanBodyData?.(humanBodySource)
@@ -1873,7 +1949,8 @@ class Home extends React.Component {
     if (jsonObject.licenseLocked) {
       this.setState({
         licenseLockedVisible: true,
-        licenseLockReason: jsonObject.reason || '检测到异常行为',
+        licenseLockReason: translateBackendMessage(jsonObject.reason, this.props.t)
+          || this.props.t('license.anomalyDetected'),
       });
     }
 
@@ -1883,8 +1960,8 @@ class Home extends React.Component {
       // 无有效密钥时跳转到密钥输入页
       if (jsonObject.noLicense) {
         Modal.error({
-          title: '密钥错误',
-          content: jsonObject.licenseError,
+          title: this.props.t('license.errorTitle'),
+          content: translateBackendMessage(jsonObject.licenseError, this.props.t),
           onOk: () => {
             window.location.hash = '#/?from=system';
           }
@@ -1894,9 +1971,12 @@ class Home extends React.Component {
         //（后台续期或恢复后无需重启即时生效）。用单例避免每次轮询重复弹窗。
         if (!this._licenseModal) {
           this._licenseModal = Modal.confirm({
-            title: '授权提示',
-            content: (jsonObject.licenseError || '授权校验未通过') + '。如已在后台续期或恢复，请点击“重新获取授权”。',
-            okText: '重新获取授权',
+            title: this.props.t('license.statusPrompt'),
+            content: this.props.t('license.refreshInstruction', {
+              reason: translateBackendMessage(jsonObject.licenseError, this.props.t)
+                || this.props.t('license.validationFailed'),
+            }),
+            okText: this.props.t('license.refreshAuthorization'),
             keyboard: false,                                   // 禁 ESC 关闭
             maskClosable: false,                               // 点遮罩不关
             cancelButtonProps: { style: { display: 'none' } }, // 隐藏“关闭”：暂停/吊销/过期时不允许关掉继续用
@@ -1915,7 +1995,9 @@ class Home extends React.Component {
       const serverNow = jsonObject.nowDate ? parseFloat(jsonObject.nowDate) : Date.now();
       const remainMs = endDate - serverNow;
       const remainDays = Math.ceil(remainMs / 86400000);
-      const expireDateStr = new Date(endDate).toLocaleString();
+      const expireDateStr = new Date(endDate).toLocaleString(
+        getLanguageLocale(this.props.i18n.language)
+      );
       console.log('[密钥检查] endDate:', endDate, 'serverNow:', serverNow, 'remainMs:', remainMs, 'remainDays:', remainDays);
 
       if (remainMs <= 0) {
@@ -1927,17 +2009,35 @@ class Home extends React.Component {
           licenseModalRemainDays: 0
         });
       } else if (remainDays <= 7) {
-        console.log('[密钥检查] 密钥即将过期，剩余', remainDays, '天');
-        this.setState({
-          licenseModalVisible: true,
-          licenseModalType: 'warning',
-          licenseModalExpireDate: expireDateStr,
-          licenseModalRemainDays: remainDays
-        });
+        // 临期提醒每天只弹一次。
+        //
+        // 后端每次复检（configManager.js RECHECK_INTERVAL_MS）都会无条件广播授权状态，
+        // 所以这个分支跟着复检的节奏进。复检原来是 30 秒一次，这个分支又没有任何抑制，
+        // 用户点掉「知道了」半分钟后又弹 —— 临期 7 天里要点两万次。
+        // 复检现在放到 2h 了，但节流仍然要留着：重连、重新校验密钥也会触发广播。
+        //
+        // 用 serverNow 而不是本地时钟算「今天」：本地时钟可以被改，改一下就能骗过节流，
+        // 而 serverNow 是后端 licenseManager 维护的可信时间（防回拨），和判到期用的是同一个源。
+        const warnedDayKey = new Date(serverNow).toLocaleDateString('en-CA'); // YYYY-MM-DD
+        if (this.getLicenseWarnedDay() !== warnedDayKey) {
+          console.log('[密钥检查] 密钥即将过期，剩余', remainDays, '天，今日首次提醒');
+          this.setLicenseWarnedDay(warnedDayKey);
+          this.setState({
+            licenseModalVisible: true,
+            licenseModalType: 'warning',
+            licenseModalExpireDate: expireDateStr,
+            licenseModalRemainDays: remainDays
+          });
+        }
       }
     }
 
     const currentSensorType = getCurrentSensorTypeFromStatus(jsonObject)
+      || (
+        typeof jsonObject.activeSensorType === 'string' && jsonObject.activeSensorType.trim()
+          ? jsonObject.activeSensorType.trim()
+          : null
+      )
     if (currentSensorType) this.applyCurrentSensorType(currentSensorType)
 
     // 旧版数组 file 仍作为授权范围兼容；标量 file/currentSensorType 只切换当前系统。
@@ -1971,7 +2071,27 @@ class Home extends React.Component {
       localStorage.setItem('matrixTitle', true)
       if (jsonObject.selectFlag === 'all') {
         localStorage.removeItem('allowedTypes')
-        this.setState({ matrixTitle: true, allowedTypes: null })
+        const nextMatrixName = resolveBackendDisplayMatrixName(
+          jsonObject.activeSensorType,
+          null,
+          this.state.matrixName
+        )
+        const nextState = { matrixTitle: true, allowedTypes: null }
+        if (nextMatrixName !== this.state.matrixName) {
+          const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag)
+          Object.assign(nextState, {
+            matrixName: nextMatrixName,
+            numMatrixFlag: nextMode,
+            minzhenSensorInfo: {},
+            portname: '',
+            portnameBack: '',
+            portnameHead: '',
+            portnameSensor: '',
+            ...getConfig({ sensorType: nextMatrixName, mode: nextMode }),
+          })
+          localStorage.setItem('file', nextMatrixName)
+        }
+        this.setState(nextState)
       } else {
         const allowedTypesRaw = Array.isArray(jsonObject.selectFlag)
           ? jsonObject.selectFlag
@@ -1988,10 +2108,33 @@ class Home extends React.Component {
             matrixName: nextMatrixName,
             numMatrixFlag: nextMode,
             minzhenSensorInfo: {},
+            portname: '',
+            portnameBack: '',
+            portnameHead: '',
+            portnameSensor: '',
             ...getConfig({ sensorType: nextMatrixName, mode: nextMode }),
           })
           localStorage.setItem('file', nextMatrixName)
-          this.wsSendObj({ file: nextMatrixName })
+
+          const backendMatrixName = normalizeDisplayMatrixName(jsonObject.activeSensorType)
+          if (!backendMatrixName || backendMatrixName !== nextMatrixName) {
+            this.wsSendObj(nextMatrixName === SMALL_BED_12B_MATRIX
+              ? {
+                file: nextMatrixName,
+                smallBed12BDisplayOptions: getSmallBed12BDisplayOptions(
+                  this.state.smallBed12BRealtimeMatrixMode,
+                  this.state.smallBed12BRealtimeSamplePoint,
+                ),
+              }
+              : { file: nextMatrixName })
+          } else if (nextMatrixName === SMALL_BED_12B_MATRIX) {
+            this.wsSendObj({
+              smallBed12BDisplayOptions: getSmallBed12BDisplayOptions(
+                this.state.smallBed12BRealtimeMatrixMode,
+                this.state.smallBed12BRealtimeSamplePoint,
+              ),
+            })
+          }
         }
         this.setState(nextState)
       }
@@ -2034,7 +2177,11 @@ class Home extends React.Component {
         //   msg.lang = "en-US"; // 设定语言
         //   speechSynthesis.speak(msg);
         // }
-        speakMessage("已离床", this.props.i18n.language)
+        speakLocalizedMessage(
+          this.props.t('home.alerts.leftBed'),
+          this.props.i18n.language,
+          { alertKey: 'leftBed' },
+        )
 
 
       }
@@ -2044,7 +2191,11 @@ class Home extends React.Component {
         // const msg = new SpeechSynthesisUtterance("坠床风险");
         // msg.lang = "zh-CN"; // 设定语言
         // speechSynthesis.speak(msg);
-        speakMessage("坠床风险", this.props.i18n.language)
+        speakLocalizedMessage(
+          this.props.t('home.alerts.fallRisk'),
+          this.props.i18n.language,
+          { alertKey: 'fallRisk' },
+        )
       }
 
 
@@ -2052,7 +2203,11 @@ class Home extends React.Component {
         // const msg = new SpeechSynthesisUtterance("已坐起");
         // msg.lang = "zh-CN"; // 设定语言
         // speechSynthesis.speak(msg);
-        speakMessage("已坐起", this.props.i18n.language)
+        speakLocalizedMessage(
+          this.props.t('home.alerts.satUp'),
+          this.props.i18n.language,
+          { alertKey: 'satUp' },
+        )
       }
 
 
@@ -2062,7 +2217,11 @@ class Home extends React.Component {
         // const msg = new SpeechSynthesisUtterance("SOS紧急求助");
         // msg.lang = "zh-CN"; // 设定语言
         // speechSynthesis.speak(msg);
-        speakMessage("SOS紧急求助", this.props.i18n.language)
+        speakLocalizedMessage(
+          this.props.t('home.alerts.emergency'),
+          this.props.i18n.language,
+          { alertKey: 'emergency' },
+        )
       }
     }
 
@@ -2118,8 +2277,9 @@ class Home extends React.Component {
       //   wsPointDataSit = yanfeng10sit(wsPointDataSit)
       // }
       // console.log(fingerArr)
-      if (this.state.matrixName === 'humanBody') {
+      if (isHumanBodyMatrix(this.state.matrixName)) {
         const humanBodySource = getHumanBodyFrameData(wsPointData)
+        this.syncHumanBodyRawPressureStats(humanBodySource)
         if (this.state.numMatrixFlag === 'numoriginal') {
           this.com.current?.changeHumanBodyData?.(humanBodySource)
         } else {
@@ -2631,6 +2791,14 @@ class Home extends React.Component {
     if (jsonObject.time != null) {
       this.setState({
         time: jsonObject.time,
+        timeArr: Array.isArray(jsonObject.time) ? jsonObject.time : [],
+      });
+    }
+    if (jsonObject.historyTimeArr != null) {
+      this.setState({
+        historyTimeArr: Array.isArray(jsonObject.historyTimeArr)
+          ? jsonObject.historyTimeArr
+          : [],
       });
     }
     if (jsonObject.timeArr != null) {
@@ -2643,7 +2811,7 @@ class Home extends React.Component {
       arr.forEach((a, index) => {
         obj.push({
           value: a.info || a.date,
-          label: a.name || a.date,
+          label: translateDomainLabel(a.name || a.date, this.props.t),
         });
       });
 
@@ -3123,7 +3291,7 @@ class Home extends React.Component {
       arr.forEach((a, index) => {
         obj.push({
           value: a.info,
-          label: a.name,
+          label: translateDomainLabel(a.name, this.props.t),
         });
       });
       this.setState({ dataArr: obj });
@@ -3137,6 +3305,15 @@ class Home extends React.Component {
     if (jsonObject.time != null) {
       this.setState({
         time: jsonObject.time,
+        timeArr: Array.isArray(jsonObject.time) ? jsonObject.time : [],
+      });
+    }
+
+    if (jsonObject.historyTimeArr != null) {
+      this.setState({
+        historyTimeArr: Array.isArray(jsonObject.historyTimeArr)
+          ? jsonObject.historyTimeArr
+          : [],
       });
     }
 
@@ -3551,6 +3728,20 @@ class Home extends React.Component {
   }
 
   wsSendObj = (obj) => {
+    const isJqbedAlgorithmCommand = Boolean(
+      obj?.getJqbedAlgorithmConfig
+      || obj?.setJqbedAlgorithmConfig
+      || obj?.resetJqbedAlgorithmConfig
+    );
+    if (isJqbedAlgorithmCommand) {
+      const state = ws ? ws.readyState : 'no ws';
+      const sent = sendWebSocketJson(ws, obj);
+      if (!sent) {
+        console.warn(`[WS Send] 无法发送， ws.readyState=${state}`, obj);
+      }
+      return sent;
+    }
+
     return commandClient.executeLegacyControl(obj).catch((error) => {
       console.warn('[command] control request failed', error, obj);
       return [];
@@ -3570,7 +3761,13 @@ class Home extends React.Component {
     // 2. 关闭所有串口，确保切换前旧串口完全停止
     this.wsSendObj({ sitClose: true, backClose: true, headClose: true, sensorClose: true });
     // 3. 再发送 file 切换，后端切换数据库并重置回放状态
-    this.wsSendObj({ file: nextMatrixName });
+    const smallBed12BDisplayOptions = getSmallBed12BDisplayOptions(
+      this.state.smallBed12BRealtimeMatrixMode,
+      this.state.smallBed12BRealtimeSamplePoint,
+    );
+    this.wsSendObj(nextMatrixName === SMALL_BED_12B_MATRIX
+      ? { file: nextMatrixName, smallBed12BDisplayOptions }
+      : { file: nextMatrixName });
 
     // 4. 清空前端数据
     this.data.current?.changeData({ meanPres: 0, maxPres: 0, point: 0, area: 0, totalPres: 0, pressure: 0 });
@@ -3597,8 +3794,12 @@ class Home extends React.Component {
       portnameHead: '',
       portnameSensor: '',
       minzhenSensorInfo: {},
-      smallBedMatrixWidth: 32,
-      smallBedMatrixHeight: 32,
+      smallBedMatrixWidth: nextMatrixName === SMALL_BED_12B_MATRIX
+        ? (smallBed12BDisplayOptions.matrixMode === '16x16' ? 16 : 32)
+        : 32,
+      smallBedMatrixHeight: nextMatrixName === SMALL_BED_12B_MATRIX
+        ? (smallBed12BDisplayOptions.matrixMode === '16x16' ? 16 : 32)
+        : 32,
     });
 
     // 6. 如果当前在回放模式，重新请求新 db 的时间列表
@@ -4151,6 +4352,7 @@ class Home extends React.Component {
     // rotateY: "绕y轴旋转30°",
     // selectBox: "框选一个矩形区域"
     const { t, i18n } = this.props;
+    const antdLocale = ANT_DESIGN_LOCALES[normalizeLanguage(i18n.language)];
 
     const text = t('rotate');
     const text2 = t('boxSelection');
@@ -4266,7 +4468,7 @@ class Home extends React.Component {
       ? rainbowTextColorsxy.slice(0, rainbowTextColorsxy.length - 7) //rainbowTextColors 
       : rainbowTextColorsxy.slice(0, rainbowTextColorsxy.length - 7)
     return (
-      <ConfigProvider locale={this.state.locale}>
+      <ConfigProvider locale={antdLocale}>
         <div className="home">
           {this.state.matrixName != "robot0428" ? <div className="setIcons">
             <div className="setIconItem setIconItem1">
@@ -4482,7 +4684,11 @@ class Home extends React.Component {
 
             </div>
             {this.state.matrixName == "foot" ? (
-              <Popover placement="top" title={"刷新"} content={content3}>
+              <Popover
+                placement="top"
+                title={t('common.refresh')}
+                content={<div><p>{t('home.refreshTrack')}</p></div>}
+              >
                 <div className="setIconItem setIconItem2">
                   <div className="setIcon">
                     <img
@@ -4499,7 +4705,11 @@ class Home extends React.Component {
 
             <div className="setIconItem setIconItem2">
               {this.state.matrixName == "foot" ? (
-                <Popover placement="top" title={"下载"} content={content4}>
+                <Popover
+                  placement="top"
+                  title={t('download')}
+                  content={<div><p>{t('home.downloadTrack')}</p></div>}
+                >
                   <div
                     className="setIcon marginB10"
                     onClick={() => {
@@ -4669,7 +4879,14 @@ class Home extends React.Component {
             local={this.state.local}
             dataArr={this.state.dataArr}
             matrixName={this.state.matrixName}
+            smallBed12BRealtimeMatrixMode={this.state.smallBed12BRealtimeMatrixMode}
+            smallBed12BRealtimeSamplePoint={this.state.smallBed12BRealtimeSamplePoint}
             history={this.state.history}
+            jqbedAlgorithmConfig={this.state.jqbedAlgorithmConfig}
+            jqbedAlgorithmConfigResult={this.state.jqbedAlgorithmConfigResult}
+            jqbedAlgorithmStatus={this.state.jqbedAlgorithmStatus}
+            wsConnected={this.state.wsConnected}
+            wsConnectionEpoch={this.state.wsConnectionEpoch}
             wsSendObj={this.wsSendObj}
             changeMatrix={this.changeMatrix}
             changeLocal={this.changeLocal}
@@ -4842,7 +5059,7 @@ class Home extends React.Component {
                   :
                   this.state.numMatrixFlag == "numoriginal" && (
                     runtimeDisplayDefinition?.source === 'manifest'
-                    || ['hand', 'handSinglePoint', MINZHEN_MATRIX, 'smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed12B'].includes(this.state.matrixName)
+                    || ['hand', 'handSinglePoint', MINZHEN_MATRIX, 'smallBed', SMALL_BED_NO_ALG_MATRIX, SMALL_BED_12B_MATRIX, 'matCol'].includes(this.state.matrixName)
                   ) ?
                   <>
                     <CanvasCom
@@ -4852,7 +5069,14 @@ class Home extends React.Component {
                     >
                       <RendererHost
                         rendererId="numMatrix"
-                        params={buildNumMatrixParams(this.state.matrixName, runtimeDisplayDefinition)}
+                        params={buildNumMatrixParams(
+                          this.state.matrixName,
+                          runtimeDisplayDefinition,
+                          {
+                            width: this.state.smallBedMatrixWidth,
+                            height: this.state.smallBedMatrixHeight,
+                          },
+                        )}
                         label={runtimeDisplayDefinition?.label || "数字矩阵"}
                         rendererRef={this.com}
                         // 这两项走 props 而不是 params：配色是用户在画布配置器里的
@@ -4895,7 +5119,7 @@ class Home extends React.Component {
                         {...this.sceneChartProps} />
                     </CanvasCom>
                     :
-                    this.state.numMatrixFlag == "numoriginal" && this.state.matrixName == 'humanBody' ?
+                    this.state.numMatrixFlag == "numoriginal" && isHumanBodyMatrix(this.state.matrixName) ?
                     <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
                       <HumanBodyRawData
                         ref={this.com}
@@ -4916,6 +5140,20 @@ class Home extends React.Component {
                           filter: this.state.valuef1,
                         }}
                         {...this.sceneChartProps} />
+                    </CanvasCom>
+                    :
+                    this.state.numMatrixFlag == "skin" && this.state.matrixName == HUMAN_BODY_OPTIMIZED_MATRIX ?
+                    <CanvasCom matrixName={this.state.matrixName} local={this.state.local}>
+                      <HumanBodyOptimized
+                        ref={this.com}
+                        data={this.data}
+                        local={this.state.local}
+                        renderOptions={{
+                          max: this.state.valuej1,
+                          size: this.state.sizeValue ?? HUMAN_BODY_DEFAULT_SIZE,
+                          filter: this.state.valuef1,
+                        }}
+                      />
                     </CanvasCom>
                     :
 
@@ -5553,6 +5791,8 @@ class Home extends React.Component {
               length={this.state.length - 1}
               max={this.max}
               time={this.state.time}
+              timeArr={this.state.timeArr}
+              historyTimeArr={this.state.historyTimeArr}
               pressMax={this.pressMax}
               wsSendObj={this.wsSendObj}
             />
@@ -5579,6 +5819,7 @@ class Home extends React.Component {
                 // console.log(this.searchName(this.state.control, a.info))
                 return (
                   <p
+                    key={a.labelKey}
                     style={{
                       color: this.state.control.includes(a.info)
                         ? "#0cf862"
@@ -5587,17 +5828,17 @@ class Home extends React.Component {
                       transition: 'color 0.5s ease'
                     }}
                   >
-                    {a.name}
+                    {t(a.labelKey)}
                   </p>
                 );
               })}
-              <p>hunch : {this.state.hunch}</p>
-              <p>front : {this.state.front}</p>
-              <p>flank : {this.state.flank}</p>
-              <p>sitValue : {this.state.pressToArea}</p>
+              <p>{t('home.debug.hunch')}: {this.state.hunch}</p>
+              <p>{t('home.debug.front')}: {this.state.front}</p>
+              <p>{t('home.debug.flank')}: {this.state.flank}</p>
+              <p>{t('home.debug.seatValue')}: {this.state.pressToArea}</p>
               {/* wsPointData.filter(a => a > 40).length > 45 ? 2 : wsPointData.filter(a => a > 40).length <10  ? 0 : 1 */}
-              <p>体型类型 : {this.state.newValue > 45 ? 2 : this.state.newValue < 10 ? 0 : 1} -- {this.state.newValue}</p>
-              <p>backtime : {this.state.backTime}</p>
+              <p>{t('home.bodyType')} {this.state.newValue > 45 ? 2 : this.state.newValue < 10 ? 0 : 1} -- {this.state.newValue}</p>
+              <p>{t('home.debug.backTime')}: {this.state.backTime}</p>
 
             </div>
           ) : null}
@@ -5686,7 +5927,7 @@ class Home extends React.Component {
               }
             }}
             onCancel={() => this.setState({ licenseModalVisible: false })}
-            okText={this.state.licenseModalType === 'expired' ? '去输入密钥' : '我知道了'}
+            okText={this.state.licenseModalType === 'expired' ? t('license.goEnterKey') : t('license.acknowledge')}
             cancelButtonProps={{ style: { display: this.state.licenseModalType === 'expired' ? 'none' : 'none' } }}
             centered
             width={480}
@@ -5695,21 +5936,21 @@ class Home extends React.Component {
             className={this.state.licenseModalType === 'expired' ? 'license-expired-modal' : 'license-warning-modal'}
             title={
               <span>
-                {this.state.licenseModalType === 'expired' ? '⚠ 密钥已过期' : '⚠ 密钥即将过期'}
+                {this.state.licenseModalType === 'expired' ? t('license.expiredHeading') : t('license.expiringHeading')}
               </span>
             }
           >
             {this.state.licenseModalType === 'expired' ? (
               <div>
-                <p>您的授权密钥已于 <strong className="expire-date">{this.state.licenseModalExpireDate}</strong> 过期。</p>
-                <p>串口连接、数据采集等功能已被禁用。</p>
-                <p className="hint">请联系管理员获取新的授权密钥，点击下方按钮跳转到密钥输入页面。</p>
+                <p>{t('license.expiredAt', { date: this.state.licenseModalExpireDate })}</p>
+                <p>{t('license.featuresDisabled')}</p>
+                <p className="hint">{t('license.obtainNewKey')}</p>
               </div>
             ) : (
               <div>
-                <p>您的授权密钥将于 <strong className="expire-date">{this.state.licenseModalExpireDate}</strong> 过期。</p>
-                <p>剩余有效期：<strong className="remain-days">{this.state.licenseModalRemainDays} 天</strong></p>
-                <p className="hint">请尽快联系管理员续期，以免影响正常使用。</p>
+                <p>{t('license.expiresAt', { date: this.state.licenseModalExpireDate })}</p>
+                <p>{t('license.remaining', { days: this.state.licenseModalRemainDays })}</p>
+                <p className="hint">{t('license.renewSoon')}</p>
               </div>
             )}
           </Modal>
@@ -5722,18 +5963,18 @@ class Home extends React.Component {
             closable={false}
             maskClosable={false}
             keyboard={false}
-            okText="确定"
+            okText={t('common.confirm')}
             cancelButtonProps={{ style: { display: 'none' } }}
             className="license-expired-modal"
-            title={<span>🔒 授权异常</span>}
+            title={<span>{t('license.anomaly')}</span>}
             onOk={() => {
               this.setState({ licenseLockedVisible: false });
               window.location.hash = '#/?from=system';
             }}
           >
             <div>
-              <p>{this.state.licenseLockReason || '检测到异常行为'}。</p>
-              <p className="hint">串口连接、数据采集等功能已被禁用。请联系厂商重新获取密钥，点击「确定」前往密钥输入页写入新密钥。</p>
+              <p>{this.state.licenseLockReason || t('license.anomalyDetected')}</p>
+              <p className="hint">{t('license.anomalyAction')}</p>
             </div>
           </Modal>
 

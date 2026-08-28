@@ -5,6 +5,7 @@ import { Button, Input, Slider } from "antd";
 import { CSVLink } from "react-csv";
 import { NavLink, useLocation, useParams } from "react-router-dom";
 import { buildCollectionRow } from "./collectionValue";
+import { useTranslation } from "react-i18next";
 let data = [];
 
 // for (let i = 0; i < 32; i++) {
@@ -101,6 +102,7 @@ function jet1(min, max, x) {
 }
 
 export default function Demo() {
+    const { t } = useTranslation();
     const location = useLocation()
     const params = useParams();
 
@@ -356,7 +358,7 @@ export default function Demo() {
             setArea(e.target.value);
           }}
         /> */}
-                <NavLink to={'/'}> <Button>回到首页</Button></NavLink>
+        <NavLink to={'/'}> <Button>{t('demo.backHome')}</Button></NavLink>
                 <Button
                     onClick={() => {
                         const res = !flag;
@@ -364,7 +366,7 @@ export default function Demo() {
                         colFalg = !colFalg;
                     }}
                 >
-                    采集{length - 1}
+          {t('col')}{length - 1}
                 </Button>
                 <Button
                     onClick={() => {
@@ -387,7 +389,7 @@ export default function Demo() {
                         setLength(collection.length);
                     }}
                 >
-                    单次采集{length - 1}
+          {t('demo.singleCollection')}{length - 1}
                 </Button>
                 <Button
                     onClick={() => {
@@ -398,7 +400,7 @@ export default function Demo() {
                         setLength(1);
                     }}
                 >
-                    删除
+          {t('delete')}
                 </Button>
                 <CSVLink
                     // ref={downloadRef}
@@ -407,7 +409,7 @@ export default function Demo() {
                     data={csvData}
                     style={{ color: "#5A5A89", textDecoration: "none" }}
                 >
-                    下载
+          {t('download')}
                 </CSVLink>
             </div>
         </>

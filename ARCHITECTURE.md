@@ -1,5 +1,30 @@
 # 架构文档
 
+## 2026-08-28 Revise 产品能力语义合并
+
+本次以 `codeOpi` 为稳定内核，把 `Revise` 作为产品能力来源进行语义合并。Electron 仍由
+`app/electron/index.js` 负责桌面壳与进程编排，后端仍由 `backend/` 分层装配，串口继续通过
+统一的多端口管理器工作；未用 Revise 的根目录 `index.js`、`server.js` 或固定
+`port1/port2` 链路覆盖现有内核。
+
+合并范围集中在人体现实数据与优化模型展示、相关模型和点位资源、渲染辅助与性能修复、
+国际化和本地语音提示，以及可隔离的 JQBed 算法配置能力。带内容哈希的 `build/` 不做
+逐文件拼接，而是由合并后的 `client/` 源码重新生成。
+
+JQBed 动态参数沿 `jqbedAlgorithmConfig`（校验与原子持久化）→
+`jqbedAlgorithmProtocol`（主 WebSocket 隔离命令）→ `petCareRuntimeService`（运行时能力探测）
+→ Python `getData(data, config=None)` 传递。原生算法不声明新参数 ABI、健康探测失败或配置不可用时，
+服务会继续调用旧的 `getData(data)`，因此配置扩展不会强制替换现有算法运行时。Python 源码只增加
+可选参数适配，本次没有改动 Python 打包流程或重新生成稳定内核资源。
+
+参数快照写入 `<runtimeWritableRoot>/jqbed-algorithm-config.json`：开发态对应项目根目录，打包态对应
+Electron `userData`。该运行态文件不进入版本库；首次运行和重置都使用代码内同一组默认值，避免把
+开发机某次调参结果带入安装包，也避免开发态与安装态出现不同默认行为。
+
+为保持稳定边界，本次不修改 SDK 公共接口、Electron 主入口、数据库结构、历史数据格式、
+授权与发证逻辑，也不接入 Revise 中可能改变硬件行为的串口探测和 12B 协议实现。这些能力
+需要独立兼容性评审、回放样本和实机验证后再进入稳定内核。
+
 ## 2026-08-26 授权门户单文件 HTML 特效原型
 
 新增 `client/public/shroom-vision-home-effects.html`，把当前 Shroom Vision 授权首页导出为不依赖 React、WebSocket、构建器或外部资源的单文件视觉原型。页面保留品牌头部、访问密钥、四组行业方案、反馈入口和响应式布局；18 张实际使用的图标按界面分辨率压缩后以 Data URL 内嵌，文件可脱离仓库直接打开。

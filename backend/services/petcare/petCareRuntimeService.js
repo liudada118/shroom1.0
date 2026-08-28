@@ -175,16 +175,22 @@ function jqbedOppo(arr) {
  * @returns {object} 宠物看护运行时 API。
  */
 function createPetCareRuntimeService({
+  buildJqbedGetDataArgs = (data) => ({ data }),
+  getJqbedAlgorithmConfigSnapshot,
   logger,
   callPy,
   getPointArr,
   getFile,
   getPort,
+  probeJqbedAlgorithmConfig,
   publishSystemEvent,
+  setJqbedAlgorithmStatus,
   setJqbedMatrixOrigin,
 } = {}) {
   let onbedArr = [];
   let onBedTime = 0;
+  let jqbedConfigCapability = null;
+  let jqbedConfigProbePromise = null;
   const vitalSignsHeartRateSimulator = {
     jqbed: createVitalSignsHeartRateSimulatorState(),
     smallBed: createVitalSignsHeartRateSimulatorState(),
@@ -212,6 +218,55 @@ function createPetCareRuntimeService({
    */
   function isPetCareSystem(type) {
     return PET_CARE_SYSTEM_TYPES.has(type);
+  }
+
+  function safeAlgorithmErrorMessage(error, fallback) {
+    const message = typeof error?.message === 'string' && error.message
+      ? error.message.split(/\r?\n/, 1)[0]
+      : fallback;
+    return message.slice(0, 500);
+  }
+
+  /**
+   * 探测当前原生 onbed_filter 是否支持 sensitivity_threshold 新 ABI。
+   * 探测失败或不支持时保留旧 getData(data) 调用，避免动态配置破坏稳定算法链路。
+   */
+  async function supportsJqbedAlgorithmConfig() {
+    if (typeof getJqbedAlgorithmConfigSnapshot !== 'function'
+      || typeof probeJqbedAlgorithmConfig !== 'function') {
+      return false;
+    }
+    if (jqbedConfigCapability !== null) return jqbedConfigCapability;
+    if (jqbedConfigProbePromise) return jqbedConfigProbePromise;
+
+    jqbedConfigProbePromise = Promise.resolve()
+      .then(() => probeJqbedAlgorithmConfig())
+      .then((health) => {
+        jqbedConfigCapability = health?.onbedFilterAvailable === true
+          && health?.onbedFilterSensitivitySchema === true;
+        if (!jqbedConfigCapability) {
+          setJqbedAlgorithmStatus?.({
+            state: 'error',
+            error: 'JQBed algorithm runtime does not support dynamic configuration',
+            code: 'JQBED_CONFIG_ABI_UNAVAILABLE',
+          });
+        }
+        return jqbedConfigCapability;
+      })
+      .catch((error) => {
+        jqbedConfigCapability = false;
+        setJqbedAlgorithmStatus?.({
+          state: 'error',
+          error: safeAlgorithmErrorMessage(error, 'Unable to inspect JQBed algorithm runtime'),
+          code: 'JQBED_CONFIG_ABI_PROBE_FAILED',
+        });
+        return false;
+      })
+      .finally(() => {
+        jqbedConfigProbePromise = null;
+      });
+
+    return jqbedConfigProbePromise;
   }
 
   /**
@@ -391,17 +446,28 @@ function createPetCareRuntimeService({
   function startVitalSignsTimer() {
     return setInterval(async () => {
       const pointArr = getPointArr?.();
-      const file = getFile?.();
+      const activeFile = getFile?.();
       const port = getPort?.();
-      if (!(pointArr && pointArr.length && pointArr.every((a) => typeof a === 'number') && VITAL_SIGNS_SYSTEM_TYPES.has(file) && port && port.isOpen)) {
+      if (!(pointArr && pointArr.length && pointArr.every((a) => typeof a === 'number') && VITAL_SIGNS_SYSTEM_TYPES.has(activeFile) && port && port.isOpen)) {
         return;
       }
+      // 首次启动 Python 可能较慢；探测期间不让 125ms 定时器堆积同一批等待任务。
+      if (activeFile === 'jqbed' && jqbedConfigProbePromise) return;
 
       const newArr = jqbedOppo(pointArr);
       try {
-        const rawData = await callPy('getData', { data: newArr });
+        const configEnvelope = activeFile === 'jqbed' && await supportsJqbedAlgorithmConfig()
+          ? getJqbedAlgorithmConfigSnapshot()
+          : null;
+        const rawData = await callPy(
+          'getData',
+          buildJqbedGetDataArgs(newArr, activeFile, configEnvelope),
+        );
+        if (activeFile === 'jqbed' && jqbedConfigCapability === true) {
+          setJqbedAlgorithmStatus?.({ state: 'ready', error: null });
+        }
         if (rawData && rawData.rate !== -1) {
-          const data = normalizeVitalSignsHeartRate(rawData, file);
+          const data = normalizeVitalSignsHeartRate(rawData, activeFile);
 
           if (Array.isArray(data.matrix_origin)) {
             setJqbedMatrixOrigin?.(data.matrix_origin);
@@ -429,6 +495,13 @@ function createPetCareRuntimeService({
         }
       } catch (error) {
         logger?.warn?.('[jqbed] callPy error:', error.message || error);
+        if (activeFile === 'jqbed') {
+          setJqbedAlgorithmStatus?.({
+            state: 'error',
+            error: safeAlgorithmErrorMessage(error, 'Unable to run jqbed algorithm'),
+            errorAt: new Date().toISOString(),
+          });
+        }
       }
     }, 125);
   }

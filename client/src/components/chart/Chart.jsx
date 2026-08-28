@@ -1,4 +1,5 @@
 import React from 'react'
+import { withTranslation } from 'react-i18next'
 import './chart.scss'
 
 
@@ -35,17 +36,17 @@ export function Chart2() {
 const dataArr1 = [
   {
     color: '#2A99FF',
-    data: '足弓分类',
+    labelKey: 'footAnalysis.archType',
   }, {
     color: '#FF2A2A',
-    data: '脚长',
+    labelKey: 'footAnalysis.footLength',
   }
 ]
 const footArr = ['footType', 'footLength']
 
 var ele, context
 
-export class CanvasDemo extends React.Component {
+class CanvasDemoBase extends React.Component {
   constructor(props) {
     super()
     this.state = {
@@ -418,6 +419,12 @@ export class CanvasDemo extends React.Component {
     LinearGradientColor2: '#499BE6'
   }
   render() {
+    const { t } = this.props
+    const footTypeKey = {
+      '正常': 'footAnalysis.normal',
+      '扁平足': 'footAnalysis.flat',
+      '高足弓': 'footAnalysis.highArch',
+    }[this.state.footType]
     console.log(this.props)
     const { width, height, canvaswidth, canvasheight } = this.props
     return (
@@ -426,7 +433,7 @@ export class CanvasDemo extends React.Component {
 
           <canvas id="time_graph_canvas" height={canvasheight}></canvas>
           <div style={{ position: 'absolute', left: '50%', top: '70%', transform: 'translate(-50% , -50%)', display: 'flex', flexDirection: "column", justifyContent: 'center', alignItems: 'center' }}>
-            <div>Total Press</div>
+            <div>{t('footAnalysis.totalPressure')}</div>
             <h2 style={{ color: '#fff' }}>{this.state.total}</h2>
           </div>
 
@@ -435,14 +442,14 @@ export class CanvasDemo extends React.Component {
           <div className='chartCircleContentCloumn'>
             <div className='chartCircleContent'>
               <div className="chartCircle"></div>
-              <div>left</div>
+              <div>{t('left')}</div>
             </div>
             <div>{this.state.leftValue}+{this.state.leftProp}%</div>
           </div>
           <div className='chartCircleContentCloumn'>
             <div className='chartCircleContent'>
               <div className="chartCircleright"></div>
-              <div>right</div>
+              <div>{t('right')}</div>
             </div>
             <div>{this.state.rightValue}+{this.state.rightProp}%</div>
           </div>
@@ -452,13 +459,17 @@ export class CanvasDemo extends React.Component {
           {
             dataArr1.map((a, index) => {
               return (
-                <div className='dataItem' key={a.eng}>
+                <div className='dataItem' key={a.labelKey}>
                   <div className='dataItemCircle'>
                     <div className='circleItem' style={{ backgroundColor: a.color }}></div>
-                    <div>{a.data}</div>
+                    <div>{t(a.labelKey)}</div>
                   </div>
                
-                    <div>{this.state[footArr[index]]} {dataArr1[index].data === '足弓分类' ? Number(this.state.footValue).toFixed(2) : null}</div>
+                    <div>
+                      {index === 0 && footTypeKey ? t(footTypeKey) : this.state[footArr[index]]}
+                      {' '}
+                      {index === 0 ? Number(this.state.footValue).toFixed(2) : null}
+                    </div>
                
                 </div>
               )
@@ -469,3 +480,5 @@ export class CanvasDemo extends React.Component {
     )
   }
 }
+
+export const CanvasDemo = withTranslation('translation', { withRef: true })(CanvasDemoBase)

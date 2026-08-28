@@ -21,27 +21,28 @@ import dropBed from '../../assets/images/dropBed.png'
 import offBed from '../../assets/images/offBed.png'
 import onBed from '../../assets/images/onBed.png'
 import sitBed from '../../assets/images/sitBed.png'
+import { translateDomainLabel } from '../../i18n/translateDomainLabel'
 
 
 
 const dataArr1 = [
     {
         color: '#2A99FF',
-        data: '平均压力',
+        labelKey: 'meanPress',
         eng: 'Mean Pres'
     }, {
         color: '#FF2A2A',
-        data: '最大压力',
+        labelKey: 'maxPress',
         eng: 'Max Pres'
     },
     {
         color: '#FFA63F',
-        data: '点数',
+        labelKey: 'points',
         eng: 'Points'
     },
     {
         color: '#2A99FF',
-        data: '面积',
+        labelKey: 'area',
         eng: 'Area'
     }
 ]
@@ -1165,7 +1166,7 @@ class Aside extends React.Component {
         return (
             <div className='aside'>
                {this.props.matrixName != 'bed40' ? <div className="asideContent firstAside">
-                    {this.props.matrixName != 'foot' ? <>{this.renderBuiltinChartHeading('Pressure Area', 'area')}
+                    {this.props.matrixName != 'foot' ? <>{this.renderBuiltinChartHeading(t('sensorPanel.pressureArea'), 'area')}
                         {this.renderBuiltinChartCanvas('area', {
                             height: `${150 * this.state.fontSize}px`,
                             width: '100%',
@@ -1184,7 +1185,7 @@ class Aside extends React.Component {
                                                 <div>
                                                     {arrArea[index] === 'area' ?
                                                         <div>{parseInt(this.state[arrArea[index]] * 2.1)} <span style={{ color: '#999' }}>cm²</span></div>
-                                                        : <div>{this.state[arrArea[index]]} <span style={{ color: '#999' }}>个</span></div>}
+                                                        : <div>{this.state[arrArea[index]]} <span style={{ color: '#999' }}>{t('common.countUnit')}</span></div>}
                                                 </div>
                                             </div>
                                         </div>
@@ -1199,7 +1200,7 @@ class Aside extends React.Component {
                                         <div>{this.props.i18n.t('area')}</div>
                                     </div>
                                     <div className='dataIteminfo'>
-                                        <div className='standardColor'>Area</div>
+                                        <div className='standardColor'>{t('area')}</div>
                                         <div>
                                             <div>{this.state.point * 4} <span style={{ color: '#999' }}>mm²</span></div>
                                         </div>
@@ -1212,19 +1213,19 @@ class Aside extends React.Component {
                 {/* jqbed 健康监测面板 */}
                 {this.props.matrixName === 'tempFullBed' ? (
                     <div className="asideContent firstAside">
-                        <h2 className="asideTitle">温度</h2>
+                        <h2 className="asideTitle">{t('sensorPanel.temperature')}</h2>
                         <span className='pressData'>{temperatureAvgText}</span> <span style={{ color: '#999' }}>℃</span>
-                        <div className='pressTitle standardColor'>Average Temperature</div>
+                        <div className='pressTitle standardColor'>{t('sensorPanel.averageTemperature')}</div>
                         {temperatureValues.map((value, index) => {
                             const numberValue = Number(value)
                             return (
                                 <div className='dataItem' key={`temperature-${index}`}>
                                     <div className='dataItemCircle'>
                                         <div className='circleItem' style={{ backgroundColor: '#FFA63F' }}></div>
-                                        <div>{`温度${index + 1}`}</div>
+                                        <div>{t('sensorPanel.temperatureIndex', { index: index + 1 })}</div>
                                     </div>
                                     <div className='dataIteminfo'>
-                                        <div className='standardColor'>{`Row ${14 + index}, Col 20`}</div>
+                                        <div className='standardColor'>{t('sensorPanel.position', { row: 14 + index, col: 20 })}</div>
                                         <div>{Number.isFinite(numberValue) ? numberValue.toFixed(1) : '--'} <span style={{ color: '#999' }}>℃</span></div>
                                     </div>
                                 </div>
@@ -1314,10 +1315,10 @@ class Aside extends React.Component {
                 <div className="asideContent firstAside">
                     {this.renderBuiltinChartHeading(
                         this.props.matrixName === 'foot'
-                            ? 'Pressure Area'
+                            ? t('sensorPanel.pressureArea')
                             : isSmallBed12B
-                                ? this.props.i18n.t('pressureIntensityData')
-                                : 'Pressure Data',
+                                ? t('pressureIntensityData')
+                                : t('sensorPanel.pressureData'),
                         this.props.matrixName === 'foot' ? 'area' : 'pressure'
                     )}
                     <span className='pressData'>{isGloveRemoteControl ? `${this.state.indexAngle || 0}°` : isSmallBed12B ? Number(this.state.totalPres).toFixed(1) : Number(this.state.totalPres).toFixed(0)}</span> <span style={{ color: '#999' }}>{isSmallBed12B ? 'kPa' : ''}</span>
@@ -1348,17 +1349,17 @@ class Aside extends React.Component {
                         {this.props.matrixName == 'sitCol' ? <> <div className='dataItem'>
                             <div className='dataItemCircle'>
                                 <div className='circleItem' style={{ backgroundColor: 'red' }}></div>
-                                <div>{this.props.matrixName == 'sitCol' ? '坐姿' : '睡姿'}</div>
+                                    <div>{this.props.matrixName == 'sitCol' ? t('sensorPanel.posture') : t('sensorPanel.sleepPosture')}</div>
                             </div>
                             <div className='dataIteminfo'>
                                 <div className='standardColor'></div>
-                                <div>{this.state.model}</div>
+                                <div>{translateDomainLabel(this.state.model, t)}</div>
                             </div>
                         </div>
                             <div className='dataItem'>
                                 <div className='dataItemCircle'>
                                     <div className='circleItem' style={{ backgroundColor: 'red' }}></div>
-                                    <div>最大索引</div>
+                                    <div>{t('sensorPanel.maxIndex')}</div>
                                 </div>
                                 <div className='dataIteminfo'>
                                     <div className='standardColor'></div>
@@ -1370,7 +1371,7 @@ class Aside extends React.Component {
 
                     </>
                         : <>
-                            <div className='pressTitle standardColor'>总体面积 Total Area</div>
+                            <div className='pressTitle standardColor'>{t('sensorPanel.totalArea')}</div>
                             {this.renderBuiltinChartCanvas('area', {
                                 height: '150px',
                                 width: '100%',
@@ -1378,14 +1379,14 @@ class Aside extends React.Component {
                             {
                                 dataArr1.map((a, index) => {
                                     return (
-                                        <div className='dataItem' key={`${a.data}-${index}`}>
+                                        <div className='dataItem' key={`${a.labelKey}-${index}`}>
                                             <div className='dataItemCircle'>
                                                 <div className='circleItem' style={{ backgroundColor: a.color }}></div>
-                                                <div>{a.data}</div>
+                                                <div>{t(a.labelKey)}</div>
                                             </div>
                                             <div className='dataIteminfo'>
                                                 <div className='standardColor'>{a.eng}</div>
-                                                <div>{this.state[footArr[index]]}</div>
+                                                <div>{index === 0 ? translateDomainLabel(this.state[footArr[index]], t) : this.state[footArr[index]]}</div>
                                             </div>
                                         </div>
                                     )

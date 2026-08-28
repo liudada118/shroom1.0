@@ -6,6 +6,7 @@ import { CSVLink } from "react-csv";
 import { NavLink, useLocation, useParams } from "react-router-dom";
 import { buildCollectionRow } from "./collectionValue";
 import { compileValueFormula } from "./formulaEvaluator";
+import { useTranslation } from "react-i18next";
 let data = [];
 
 var changeValue = (value) => {
@@ -158,6 +159,7 @@ function press6(arr, width, height, type = "row", value = (1245), prop = 1000) {
 }
 
 export default function Demo() {
+  const { t } = useTranslation();
   const location = useLocation()
   const params = useParams();
 
@@ -592,7 +594,7 @@ export default function Demo() {
             setArea(e.target.value);
           }}
         /> */}
-        <NavLink to={'/'}> <Button>回到首页</Button></NavLink>
+        <NavLink to={'/'}> <Button>{t('demo.backHome')}</Button></NavLink>
         <Button
           onClick={() => {
             const res = !flag;
@@ -600,7 +602,7 @@ export default function Demo() {
             colFalg = !colFalg;
           }}
         >
-          采集{length - 1}
+          {t('col')}{length - 1}
         </Button>
         <Button
           onClick={() => {
@@ -623,7 +625,7 @@ export default function Demo() {
             setLength(collection.length);
           }}
         >
-          单次采集{length - 1}
+          {t('demo.singleCollection')}{length - 1}
         </Button>
         <Button
           onClick={() => {
@@ -634,7 +636,7 @@ export default function Demo() {
             setLength(1);
           }}
         >
-          删除
+          {t('delete')}
         </Button>
         <CSVLink
           // ref={downloadRef}
@@ -643,12 +645,12 @@ export default function Demo() {
           data={csvData}
           style={{ color: "#5A5A89", textDecoration: "none" }}
         >
-          下载
+          {t('download')}
         </CSVLink>
       </div>
       <div style={{ display: 'flex' }}>
         <div style={{ marginLeft: '20px' }}>
-          <div style={{ fontWeight: 'bold' }}>分压模块</div>
+          <div style={{ fontWeight: 'bold' }}>{t('demo.pressureDivisionModule')}</div>
           <Select
             defaultValue="col"
             onChange={(e) => {
@@ -659,16 +661,16 @@ export default function Demo() {
             }}
             // value={}
             options={[
-              { value: 'col', label: 'col' },
-              { value: 'row', label: 'row' },
+              { value: 'col', label: t('demo.column') },
+              { value: 'row', label: t('demo.row') },
             ]}
           />
           <div>
-            分压开关<Switch value={valueData.current.open} onChange={(checked) => {
+            {t('demo.pressureDivisionSwitch')}<Switch value={valueData.current.open} onChange={(checked) => {
               valueData.current.open = checked
             }} />
           </div>
-          <div> 分母 <Slider
+          <div> {t('demo.denominator')} <Slider
             min={0}
             max={5000}
             value={valueData.current.value}
@@ -682,7 +684,7 @@ export default function Demo() {
             style={{ width: '200px' }}
           /></div>
 
-          <div> 分子*倍数 <Slider
+          <div> {t('demo.numeratorMultiplier')} <Slider
             min={0}
             max={5000}
             value={valueData.current.prop}
@@ -697,7 +699,7 @@ export default function Demo() {
           /></div>
         </div>
         <div style={{ marginLeft: '20px' }}>
-          <div style={{ fontWeight: 'bold' }}>分压模块</div>
+          <div style={{ fontWeight: 'bold' }}>{t('demo.pressureDivisionModule')}</div>
           <textarea name="" id="" value={formula} onChange={(e) => { setFormula(e.target.value) }} ></textarea>
           <Button onClick={() => {
             try {
@@ -706,7 +708,7 @@ export default function Demo() {
             } catch (error) {
               message.error(error.message);
             }
-          }}>使用</Button>
+          }}>{t('demo.use')}</Button>
         </div>
       </div>
     </>

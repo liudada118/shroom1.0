@@ -1,331 +1,35 @@
-﻿import "./App.css";
-import { lazy, Suspense } from "react";
-import { HashRouter, Routes, Route } from "react-router-dom";
-import { App as AntdApp, message } from "antd";
-import UpdateNotifier from "./components/updater/UpdateNotifier";
+import './App.css'
+import { lazy, Suspense } from 'react'
+import { HashRouter, Routes, Route } from 'react-router-dom'
+import { App as AntdApp, message } from 'antd'
+import i18next from './i18n'
+import UpdateNotifier from './components/updater/UpdateNotifier'
 
-import i18next from "i18next";
-
-const Home = lazy(() => import("./page/home/Home"));
-const Demo = lazy(() => import("./components/demo/Demo"));
-const HandDemo = lazy(() => import("./components/demo/handDemo"));
-const HandLinePressDemo = lazy(() => import("./components/demo/handDemoPress"));
-const Demo1016 = lazy(() => import("./components/demo/Demo1016"));
-const Demo1010 = lazy(() => import("./components/demo/Demo1010"));
-const Demo24 = lazy(() => import("./components/demo/Demo2419"));
-const Block = lazy(() => import("./components/demo/Block"));
-const Heatmap = lazy(() => import("./components/heatmap/canvas").then((module) => ({ default: module.Heatmap })));
-const Log = lazy(() => import("./components/log/log"));
-const MatrixDiff = lazy(() => import("./components/demo/matrixDiff"));
-const Date = lazy(() => import("./page/date/Date"));
-const HandBlock = lazy(() => import("./components/demo/handBlock"));
-const HandBlock32 = lazy(() => import("./components/demo/handBlock32"));
-const HandBlock24 = lazy(() => import("./components/demo/handBlock24"));
-const HandBlock20 = lazy(() => import("./components/demo/handBlock20"));
-const CsvData = lazy(() => import("./components/demo/robot"));
-const HandLine = lazy(() => import("./components/demo/handLine0116"));
-const HandLine0123 = lazy(() => import("./components/demo/handLine0123"));
-const LineAdjust = lazy(() => import("./components/demo/LineAdjust"));
-const Can = lazy(() => import("./components/demo/can"));
-const Num3D = lazy(() => import("./components/num/NumWs"));
-const License = lazy(() => import("./page/license/License"));
-const LicensePortal = lazy(() => import("./page/licensePortal/LicensePortal"));
-const DisplaySystemBuilder = lazy(() => import("./page/displaySystemBuilder/DisplaySystemBuilder"));
-i18next.init({
-  resources: {
-    en: {
-      translation: {
-        welcome: "Welcome",
-        chooseSensor: 'Please select a sensor.',
-        realTime: 'Real-time',
-        playBack: 'Playback',
-        chooseSitSensor: 'Select seat port.',
-        chooseLeftSensor: 'Select left port.',
-        chooseRightSensor: 'Select right port.',
-        chooseBackSensor: 'Select back port.',
-        chooseHeadSensor: 'Select head port.',
-        autoConnectDoubleGlove: 'Auto connect gloves',
-        closeSensor: 'Close serial port',
-        all: "All",
-        back: 'Back',
-        sit: 'Sit',
-        left: 'Left',
-        right: 'Right',
-        col: 'Data acquisition',
-        stop: 'Stop',
-        choosePlaybackTime: 'Select data playback time.',
-        meanPress: 'Average Pressure',
-        maxPress: 'Maximum pressure',
-        pressTotal: 'The sum of pressures',
-        points: "Data points",
-        area: "Area",
-        allPress: "Overall pressure",
-        bendAngle: "Bending Angle",
-        meanAngle: 'Average Angle',
-        maxAngle: 'Maximum Angle',
-        totalAngle: 'Total Angle',
-        allAngle: 'Total Angle',
-        download: "Download",
-        delete: 'Delete',
-        add: 'Add',
-        guass: "Lubrication level",
-        color: 'Color',
-        filter: "Filtered value",
-        height: "Height",
-        consis: "Data consistency",
-        init: "Initial value",
-        feaLabel: "Feature label",
-        matrix: "Matrix",
-        heatmap: "Heatmap",
-        rotate: "Rotate",
-        boxSelection: "Box selection",
-        rotateX: "Rotate 30° around the x-axis.",
-        rotateY: "Rotate 30° around the y-axis.",
-        selectBox: "Select a rectangular area.",
-        setData: "Data settings",
-        reset: 'Reset',
-        resetContent: 'Reset matrix position',
-        frontView: 'Front View',
-        frontViewContent: 'Switch to front view',
-        deleteSuccess: 'Delete successful',
-        'export csv success': 'Export CSV successful',
-        'export csv failed': 'Export CSV failed',
-        resetZero: 'Reset to zero',
-        cancelZero: 'Cancel Zero',
-        head: 'Head',
-        rawData: 'Raw data',
-        key: 'Enter key',
-        data2D: '2D Data',
-        tel3D: '3D Teleoperation',
-        data3D: '3D Data',
-        skin3D: '3D Skin',
-        modal3D: '3D Model',
-        leftHand: 'Left Hand',
-        rightHand: 'Right Hand',
-        FingersSpread: 'Fingers Spread',
-        fist: 'Fist',
-        calib: 'Calibrate',
-        noCalibData: 'No finger calibration data detected, please calibrate first',
-        noCalibDataL: 'No left hand calibration data detected, please calibrate left hand first',
-        noCalibDataR: 'No right hand calibration data detected, please calibrate right hand first',
-        colData: 'Collect Data',
-        clearData: 'Clear Historical Data',
-        deviceCal: 'Device Calibration',
-        enterColHZ: 'Enter Data Col HZ',
-        light: 'light',
-        speed: 'Rotation Speed',
-        x: 'X Axis',
-        y: 'Y Axis',
-        z: 'Z Axis',
-        size: 'size',
-        hand: 'Hand Touch',
-        gloves: 'Tactile Gloves',
-        robot: 'Tactile Shirt',
-        foot: 'Tactile Insoles',
-        vitalSigns: 'Vital Signs',
-        respiration: 'Respiration',
-        heartRate: 'Heart Rate',
-        leaveBed: 'Left Bed',
-        inBed: 'In Bed',
-        fallBed: 'Fall Risk',
-        sitUp: 'Sat Up',
-        inBedDuration: 'In-bed Duration',
-        leaveBedDuration: 'Off-bed Duration',
-        sos: 'SOS Emergency',
-        petCareTitle: 'Pet Care',
-        petCareMiniTitle: 'Mini Care',
-        petPosture: 'Posture',
-        petMotionFlag: 'Motion',
-        petSignalQuality: 'Signal Quality',
-        petPressureCoeff: 'Pressure Coefficient',
-        petBedExit: 'Bed Exit Alert',
-        petEmpty: 'Empty',
-        petPaws: 'Paws / Limbs',
-        petTorso: 'Torso',
-        petMotion: 'Motion',
-        petStill: 'Still',
-        petInBed: 'In Bed',
-        petOffBed: 'Off Bed',
-        sensorHand: 'Hand Detection',
-        sensorHandSinglePoint: '32*32 Detection Points',
-        sensorHand0205: 'Tactile Gloves',
-        sensorHand0205Double: 'Tactile Gloves 2',
-        sensorHandGlove115200: 'Tactile Gloves(115200)',
-        sensorHandGloveFullPacket: 'Tactile Gloves(Full Packet)',
-        sensorSmallSample: '10*10 Small Sample',
-        sensorRobot1: 'Unitree G1 Tactile Shirt',
-        sensorRobotSY: 'Songyan N2 Tactile Shirt',
-        sensorRobotLCF: 'LCF H1 Tactile Shirt',
-        sensorFootVideo: 'Tactile Insoles',
-        sensorDaliegu: '14*20 High Speed',
-        sensorBed4096: 'OneStep',
-        sensorBed4096num: '64*64 High Speed',
-        sensorJqbed: 'Small Bed Monitor',
-        sensorSmallBedNoAlg: 'Small Bed Detection(Data)',
-        smallBed: 'Small Bed Detection',
-        sensorSmallBed12B: 'Small Bed Detection(12B)',
-        sensorPetCare: 'Pet Care',
-        sensorPetCareMini: 'Mini Care',
-        sensorFast256: '16*16 High Speed',
-        sensorFast1024: '32*32 High Speed',
-        sensorNormalFast: '32*32 High Speed Test',
-        sensorNormal: 'Normal Test',
-        sensorHumanBody: 'Human Body',
-        sensorWholeChair: 'Whole Chair',
-        sensorMinzhen: 'Wheelchair',
-        enterBaudRate: 'Enter baud rate',
-        sensorMatCol : 'Smart Bed',
-      },
-    },
-    zh: {
-      translation: {
-        petCareMiniTitle: 'mini看护',
-        sensorPetCareMini: 'mini看护',
-        sensorMinzhen: '轮椅',
-        welcome: '欢迎',
-        chooseSensor: '请选择传感器',
-        realTime: '实时',
-        playBack: '回放',
-        chooseSitSensor: '请选择座椅串口',
-        chooseBackSensor: '请选择靠背串口',
-        chooseLeftSensor: '请选择左手串口',
-        chooseLeftFootSensor: '请选择左脚串口',
-        chooseRightFootSensor: '请选择右脚串口',
-        chooseRightSensor: '请选择右手串口',
-        chooseHeadSensor: '请选择头枕串口',
-        autoConnectDoubleGlove: '一键连接双手套',
-        closeSensor: '关闭串口',
-        all: '整体',
-        back: '靠背',
-        sit: '座椅',
-        left: '左',
-        right: '右',
-        col: '采集',
-        stop: '停止',
-        choosePlaybackTime: '选择数据回放时间',
-        meanPress: '平均压力',
-        maxPress: '最大压力',
-        pressTotal: '压力总和',
-        points: '点数',
-        area: '面积',
-        allPress: '压力总和',
-        bendAngle: '弯折角度',
-        meanAngle: '平均角度',
-        maxAngle: '最大角度',
-        totalAngle: '角度总和',
-        allAngle: '角度总和',
-        download: '下载',
-        add: '添加',
-        delete: '删除',
-        guass: '润滑程度',
-        color: '颜色',
-        filter: '过滤值',
-        height: '高度',
-        consis: '数据连贯性',
-        init: '初始值',
-        feaLabel: '特征标签',
-        matrix: '矩阵',
-        heatmap: '热力图',
-        rotate: '旋转',
-        boxSelection: '框选',
-        rotateX: '绕x轴旋转30°',
-        rotateY: '绕y轴旋转30°',
-        selectBox: '框选一个矩形区域',
-        setData: '数据设置',
-        reset: '重置',
-        resetContent: '重置矩阵位置',
-        frontView: '正面视角',
-        frontViewContent: '切换到正面视角',
-        deleteSuccess: '删除成功',
-        'export csv success': '导出 CSV 成功',
-        'export csv failed': '导出 CSV 失败',
-        resetZero: '清零',
-        cancelZero: '取消清零',
-        head: '头枕',
-        rawData: '原始数据',
-        key: '输入密钥',
-        data2D: '2D数字',
-        tel3D: '3D遥操',
-        data3D: '3D数字',
-        skin3D: '3D皮肤',
-        modal3D: '3D模型',
-        leftHand: '左手',
-        rightHand: '右手',
-        FingersSpread: '手指平铺',
-        fist: '手指握拳',
-        calib: '校准',
-        noCalibData: '未检测到手指校准数据，请先进行手指校准',
-        noCalibDataL: '未检测到左手校准数据，请先校准左手',
-        noCalibDataR: '未检测到右手校准数据，请先校准右手',
-        colData: '采集数据',
-        clearData: '清除历史数据',
-        deviceCal: '设备校准',
-        enterColHZ: '输入采集频率',
-        light: '灯光',
-        speed: '转动速度',
-        x: 'X轴',
-        y: 'Y轴',
-        z: 'Z轴',
-        size: '大小',
-        hand: '手部检测',
-        gloves: '手套模型',
-        robot: '机器人全身',
-        foot: '足底模型',
-        vitalSigns: '生命体征',
-        respiration: '呼吸',
-        heartRate: '心率',
-        leaveBed: '已离床',
-        inBed: '在床',
-        fallBed: '坠床风险',
-        sitUp: '已坐起',
-        inBedDuration: '在床时长',
-        leaveBedDuration: '离床时长',
-        sos: 'SOS紧急求助',
-        petCareTitle: '宠物看护',
-        petPosture: '姿态',
-        petMotionFlag: '体动',
-        petSignalQuality: '信号质量',
-        petPressureCoeff: '压力系数',
-        petBedExit: '离床告警',
-        petEmpty: '空床',
-        petPaws: '爪子/四肢受力',
-        petTorso: '躯干受力',
-        petMotion: '剧烈体动',
-        petStill: '静止',
-        petInBed: '在床',
-        petOffBed: '离床',
-        sensorHand: '手部检测',
-        sensorHandSinglePoint: '32*32(检测点)',
-        sensorHand0205: '触觉手套',
-        sensorHand0205Double: '触觉手套2',
-        sensorHandGlove115200: '触觉手套(115200)',
-        sensorHandGloveFullPacket: '触觉手套(整包)',
-        sensorSmallSample: '10*10小样',
-        sensorRobot1: '宇树G1触觉上衣',
-        sensorRobotSY: '松延N2触觉上衣',
-        sensorRobotLCF: '零次方H1触觉上衣',
-        sensorFootVideo: '触觉足底',
-        sensorDaliegu: '14*20高速',
-        sensorBed4096: 'OneStep',
-        sensorBed4096num: '64*64高速',
-        sensorJqbed: '小床监测',
-        sensorSmallBedNoAlg: '小床检测(数据)',
-        smallBed: '小床检测',
-        sensorSmallBed12B: '小床检测(12B)',
-        sensorPetCare: '宠物看护',
-        sensorFast256: '16*16高速',
-        sensorFast1024: '32*32高速',
-        sensorNormalFast: '32*32高速测试',
-        sensorNormal: '正常测试',
-        sensorHumanBody: '人体全身',
-        sensorWholeChair: '整椅展示',
-        enterBaudRate: '请输入波特率',
-        sensorMatCol : '小床褥监测',
-      },
-    },
-  },
-  lng: localStorage.getItem('language') ? localStorage.getItem('language') : 'zh',
-});
+const Home = lazy(() => import('./page/home/Home'))
+const Demo = lazy(() => import('./components/demo/Demo'))
+const HandDemo = lazy(() => import('./components/demo/handDemo'))
+const HandLinePressDemo = lazy(() => import('./components/demo/handDemoPress'))
+const Demo1016 = lazy(() => import('./components/demo/Demo1016'))
+const Demo1010 = lazy(() => import('./components/demo/Demo1010'))
+const Demo24 = lazy(() => import('./components/demo/Demo2419'))
+const Block = lazy(() => import('./components/demo/Block'))
+const Heatmap = lazy(() => import('./components/heatmap/canvas').then((module) => ({ default: module.Heatmap })))
+const Log = lazy(() => import('./components/log/log'))
+const MatrixDiff = lazy(() => import('./components/demo/matrixDiff'))
+const Date = lazy(() => import('./page/date/Date'))
+const HandBlock = lazy(() => import('./components/demo/handBlock'))
+const HandBlock32 = lazy(() => import('./components/demo/handBlock32'))
+const HandBlock24 = lazy(() => import('./components/demo/handBlock24'))
+const HandBlock20 = lazy(() => import('./components/demo/handBlock20'))
+const CsvData = lazy(() => import('./components/demo/robot'))
+const HandLine = lazy(() => import('./components/demo/handLine0116'))
+const HandLine0123 = lazy(() => import('./components/demo/handLine0123'))
+const LineAdjust = lazy(() => import('./components/demo/LineAdjust'))
+const Can = lazy(() => import('./components/demo/can'))
+const Num3D = lazy(() => import('./components/num/NumWs'))
+const License = lazy(() => import('./page/license/License'))
+const LicensePortal = lazy(() => import('./page/licensePortal/LicensePortal'))
+const DisplaySystemBuilder = lazy(() => import('./page/displaySystemBuilder/DisplaySystemBuilder'))
 
 // 配置 message 全局设置，确保在 Electron 中正确显示
 message.config({
@@ -333,89 +37,46 @@ message.config({
   duration: 3,
   maxCount: 3,
   getContainer: () => document.body,
-});
+})
 
 function App() {
   return (
     <AntdApp>
-    <UpdateNotifier />
-    <HashRouter>
-      <Suspense fallback={null}>
-      <Routes>
-        <Route exact path="/handPoint" element={
-          // <I18nProvider lng="en">
-          <HandBlock i18n={i18next} />
-          // </I18nProvider> 
-        } />
-
-        <Route exact path="/handRealPoint" element={
-          // <I18nProvider lng="en">
-          <HandBlock i18n={i18next} />
-          // </I18nProvider> 
-        } />
-
-        <Route exact path="/handPoint32" element={
-          // <I18nProvider lng="en">
-          <HandBlock32 i18n={i18next} />
-          // </I18nProvider> 
-        } />
-
-        <Route exact path="/handPoint24" element={
-          // <I18nProvider lng="en">
-          <HandBlock24 i18n={i18next} />
-          // </I18nProvider> 
-        } />
-
-        <Route exact path="/handPoint20" element={
-          // <I18nProvider lng="en">
-          <HandBlock20 i18n={i18next} />
-          // </I18nProvider> 
-        } />
-
-        <Route exact path="/robot" element={
-          // <I18nProvider lng="en">
-          <CsvData i18n={i18next} />
-          // </I18nProvider> 
-        } />
-        <Route exact path="/" element={
-          // 开屏门户页：展示产品方案 + 输入/缓存密钥（不自动进入，需点击「进入系统」）
-          <LicensePortal />
-        } />
-        <Route exact path="/key" element={
-          // 旧密钥输入页（保留兜底：Home/Title 跳转 /?from=system 仍可用此页更新密钥）
-          <Date i18n={i18next} />
-        } />
-        <Route exact path="/system" element={
-          // <I18nProvider lng="en">
-          <Home i18n={i18next} />
-          // </I18nProvider> 
-        } />
-        <Route exact path="/display-systems" element={<DisplaySystemBuilder />} />
-        <Route exact path="/heatmap" element={<Heatmap />} />
-        <Route exact path="/num/:type" element={<Demo />} />
-        <Route exact path="/handReal" element={<HandDemo />} />
-        <Route exact path="/handLinePressData" element={<HandLinePressDemo />} />
-        <Route exact path="/line" element={<LineAdjust />} />
-        <Route exact path="/can" element={<Can />} />
-        <Route exact path="/num1010" element={<Demo1010 />} />
-        <Route exact path="/num1016" element={<Demo1016 />} />
-        <Route exact path="/carNum" element={<Demo24 />} />
-        <Route exact path="/block" element={<Block />} />
-        <Route exact path="/handLine" element={<HandLine />} />
-        <Route exact path="/handLine0123" element={<HandLine0123 />} />
-        <Route exact path="/log" element={<Log />} />
-        <Route exact path="/diff" element={<MatrixDiff />} />
-        <Route exact path="/3Dnum" element={<Num3D />} />
-        <Route exact path="/license" element={<License />} />
-        {/* <Route exact path="/local" element={<Local />} /> */}
-        {/* <Route exact path="/back" element={<Back />} /> */}
-      </Routes>
-      </Suspense>
-    </HashRouter>
+      <UpdateNotifier />
+      <HashRouter>
+        <Suspense fallback={null}>
+          <Routes>
+            <Route exact path='/handPoint' element={<HandBlock i18n={i18next} />} />
+            <Route exact path='/handRealPoint' element={<HandBlock i18n={i18next} />} />
+            <Route exact path='/handPoint32' element={<HandBlock32 i18n={i18next} />} />
+            <Route exact path='/handPoint24' element={<HandBlock24 i18n={i18next} />} />
+            <Route exact path='/handPoint20' element={<HandBlock20 i18n={i18next} />} />
+            <Route exact path='/robot' element={<CsvData i18n={i18next} />} />
+            <Route exact path='/' element={<LicensePortal />} />
+            <Route exact path='/key' element={<Date i18n={i18next} />} />
+            <Route exact path='/system' element={<Home i18n={i18next} />} />
+            <Route exact path='/display-systems' element={<DisplaySystemBuilder />} />
+            <Route exact path='/heatmap' element={<Heatmap />} />
+            <Route exact path='/num/:type' element={<Demo />} />
+            <Route exact path='/handReal' element={<HandDemo />} />
+            <Route exact path='/handLinePressData' element={<HandLinePressDemo />} />
+            <Route exact path='/line' element={<LineAdjust />} />
+            <Route exact path='/can' element={<Can />} />
+            <Route exact path='/num1010' element={<Demo1010 />} />
+            <Route exact path='/num1016' element={<Demo1016 />} />
+            <Route exact path='/carNum' element={<Demo24 />} />
+            <Route exact path='/block' element={<Block />} />
+            <Route exact path='/handLine' element={<HandLine />} />
+            <Route exact path='/handLine0123' element={<HandLine0123 />} />
+            <Route exact path='/log' element={<Log />} />
+            <Route exact path='/diff' element={<MatrixDiff />} />
+            <Route exact path='/3Dnum' element={<Num3D />} />
+            <Route exact path='/license' element={<License />} />
+          </Routes>
+        </Suspense>
+      </HashRouter>
     </AntdApp>
-  );
+  )
 }
 
-export default App;
-
-
+export default App

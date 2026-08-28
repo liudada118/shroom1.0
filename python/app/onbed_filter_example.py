@@ -525,6 +525,20 @@ def ping():
     return {"pong": True}
 
 
+def health():
+    """报告原生床垫算法及动态配置 ABI 是否可用。"""
+    step_doc = str(getattr(getattr(ncz, "step", None), "__doc__", "") or "")
+    return {
+        "pong": True,
+        "onbedFilterAvailable": ncz is not None,
+        "onbedFilterSensitivitySchema": (
+            ncz is not None
+            and "sensitivity_threshold" in step_doc
+            and "head_foot_area" not in step_doc
+        ),
+    }
+
+
 def find_runtime_module_file(*relative_parts):
     script_dir = os.path.dirname(os.path.abspath(__file__))
     runtime_base = getattr(sys, "_MEIPASS", script_dir)
@@ -621,16 +635,78 @@ def create_default_inputs():
     return inputs
 
 
-def getData(data):
+ALGORITHM_PAIR_KEYS = {
+    'sos_disable_area',
+    'sitting_area',
+    'leave_bed_disable_area',
+    'small_object_size',
+}
+ALGORITHM_INTEGER_KEYS = {'min_sos_sequence', 'breath_detect_mode', 'sensitivity_threshold'}
+ALGORITHM_SWITCH_KEYS = {'filter_switch', 'strel_switch'}
+
+
+def _normalize_json_number(key, value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f'invalid number: {key}')
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError(f'invalid number: {key}') from error
+    if not np.isfinite(number):
+        raise ValueError(f'invalid number: {key}')
+    return number
+
+
+def _normalize_algorithm_value(key, value):
+    if key in ALGORITHM_PAIR_KEYS:
+        if not isinstance(value, list) or len(value) != 2:
+            raise ValueError(f'invalid pair: {key}')
+        first, second = (_normalize_json_number(key, element) for element in value)
+        if key == 'sitting_area':
+            sentinel = first == 255.0 and second == 255.0
+            normal = 0.0 <= first <= 32.0 and 0.0 <= second <= 32.0
+            if not sentinel and not normal:
+                raise ValueError(f'invalid sitting_area: {value}')
+        elif not (0.0 <= first <= 32.0 and 0.0 <= second <= 32.0):
+            raise ValueError(f'pair out of range: {key}')
+        return np.asarray([first, second], dtype=np.float32)
+
+    number = _normalize_json_number(key, value)
+    if number < 0.0:
+        raise ValueError(f'invalid number: {key}')
+    if key in ALGORITHM_INTEGER_KEYS and not number.is_integer():
+        raise ValueError(f'invalid integer: {key}')
+    if key == 'sensitivity_threshold' and number not in (0.0, 1.0, 2.0, 3.0):
+        raise ValueError(f'invalid sensitivity mode: {key}')
+    if key in ALGORITHM_SWITCH_KEYS and number not in (0.0, 1.0):
+        raise ValueError(f'invalid switch: {key}')
+    return number
+
+
+def build_step_inputs(data, config=None):
+    """构造算法输入；无配置时严格保留 codeOpi 的旧 ABI。"""
+    inputs = create_default_inputs()
+    if config is not None:
+        if not isinstance(config, dict):
+            raise ValueError('config must be an object')
+
+        # 动态配置只在 health() 证明新版原生 ABI 后由 Node 端启用。
+        inputs.pop('head_foot_area', None)
+        inputs['sensitivity_threshold'] = 0.0
+        for key, value in config.items():
+            if key not in inputs:
+                continue
+            inputs[key] = _normalize_algorithm_value(key, value)
+
+    inputs['frame_data'] = np.array(data, dtype=np.float32)
+    return inputs
+
+
+def getData(data, config=None):
     """
     处理传感器数据，返回健康监测结果（新版 API）
     """
-    inputs = create_default_inputs()
-
-    
-
-    inputs['frame_data'] = np.array(data, dtype=np.float32)
-    outputs = ncz.step(inputs)
+    outputs = ncz.step(build_step_inputs(data, config))
 
     # 安全转换 numpy 值为 Python 原生类型
     def safe_float(val, default=0.0):
@@ -1007,6 +1083,7 @@ def run_display_system_algorithm(entry, raw_data, context=None):
 
 FUNCS = {
     "ping": ping,
+    "health": health,
     "getData": getData,
     "run_display_system_algorithm": run_display_system_algorithm,
     # 足压分析

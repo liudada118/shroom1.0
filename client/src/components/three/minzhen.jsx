@@ -141,8 +141,7 @@ const normalizeMinzhenFrame = (data) => {
 
 const Canvas = React.forwardRef((props, refs) => {
   local = props.local
-  const { i18n } = useTranslation();
-  const isEnglish = String(i18n.language || "").startsWith("en");
+  const { t } = useTranslation();
   const canvasId = useRef(`minzhen-canvas-${Math.random().toString(36).slice(2)}`);
   const [sensorInfo, setSensorInfo] = useState({});
   const [pointTransform, setPointTransform] = useState(readMinzhenPointTransform);
@@ -1343,13 +1342,12 @@ const Canvas = React.forwardRef((props, refs) => {
   };
   const gyroscopeValues = splitSensorValues(sensorInfo.gyroscope);
   const thermistorValues = splitSensorValues(sensorInfo.thermistor);
-  const renderSensorItem = ({ zh, en, value, unit }) => {
-    const label = isEnglish ? en : zh;
+  const renderSensorItem = ({ labelKey, value, unit }) => {
     return (
-    <div className="dataItem" key={en} style={{ alignItems: "center", gap: 8 }}>
+    <div className="dataItem" key={labelKey} style={{ alignItems: "center", gap: 8 }}>
       <div className="dataItemCircle" style={{ flex: "0 0 48%", minWidth: 0 }}>
         <div className="circleItem" style={{ display: "none" }}></div>
-        <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</div>
+        <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t(labelKey)}</div>
       </div>
       <div className="dataIteminfo" style={{ flex: "1 1 52%", justifyContent: "flex-end", minWidth: 0 }}>
         <div style={{ minWidth: 0, maxWidth: "100%", textAlign: "right" }}>
@@ -1361,12 +1359,12 @@ const Canvas = React.forwardRef((props, refs) => {
   };
 
   const sensorPanelItems = [
-    { zh: "加速度计", en: "Acceleration", value: formatSensorValues(gyroscopeValues.slice(0, 3), 3) },
-    { zh: "陀螺仪", en: "Gyroscope", value: formatSensorValues(gyroscopeValues.slice(3, 6), 3) },
-    { zh: "温度", en: "Temperature", value: formatAverageTemperature() },
-    { zh: "湿度", en: "Humidity", value: getSensorValue("humidity") },
-    { zh: "脊柱前后角度", en: "Front/Back Angle", value: getSensorValue("angle_fb") },
-    { zh: "脊柱左右角度", en: "Left/Right Angle", value: getSensorValue("angle_lr") },
+    { labelKey: "minzhen.accelerometer", value: formatSensorValues(gyroscopeValues.slice(0, 3), 3) },
+    { labelKey: "minzhen.gyroscope", value: formatSensorValues(gyroscopeValues.slice(3, 6), 3) },
+    { labelKey: "minzhen.temperature", value: formatAverageTemperature() },
+    { labelKey: "minzhen.humidity", value: getSensorValue("humidity") },
+    { labelKey: "minzhen.spineFrontBack", value: getSensorValue("angle_fb") },
+    { labelKey: "minzhen.spineLeftRight", value: getSensorValue("angle_lr") },
   ];
 
   return (
@@ -1394,7 +1392,7 @@ const Canvas = React.forwardRef((props, refs) => {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-          <span style={{ fontSize: 13, fontWeight: 600 }}>点图调整</span>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>{t("minzhen.pointAdjustment")}</span>
           <button
             type="button"
             onClick={resetPointTransform}
@@ -1411,26 +1409,26 @@ const Canvas = React.forwardRef((props, refs) => {
               cursor: "pointer",
             }}
           >
-            重置
+            {t("reset")}
           </button>
         </div>
         <div style={{ display: "grid", gap: 6 }}>
-          <div style={{ fontSize: 12, color: "rgba(255, 255, 255, 0.86)" }}>Group</div>
+          <div style={{ fontSize: 12, color: "rgba(255, 255, 255, 0.86)" }}>{t('minzhen.group')}</div>
           {renderTransformInput("X", "groupX", 1)}
           {renderTransformInput("Y", "groupY", 1)}
           {renderTransformInput("Z", "groupZ", 1)}
           <div style={{ height: 1, background: "rgba(148, 163, 184, 0.25)", margin: "2px 0" }} />
-          <div style={{ fontSize: 12, color: "rgba(255, 255, 255, 0.86)" }}>Point</div>
+          <div style={{ fontSize: 12, color: "rgba(255, 255, 255, 0.86)" }}>{t('minzhen.point')}</div>
           {renderTransformInput("X", "pointX", 1)}
           {renderTransformInput("Y", "pointY", 1)}
           {renderTransformInput("Z", "pointZ", 1)}
           <div style={{ height: 1, background: "rgba(148, 163, 184, 0.25)", margin: "2px 0" }} />
-          <div style={{ fontSize: 12, color: "rgba(255, 255, 255, 0.86)" }}>Scale</div>
+          <div style={{ fontSize: 12, color: "rgba(255, 255, 255, 0.86)" }}>{t('minzhen.scale')}</div>
           {renderTransformInput("X", "scaleX", 0.0001)}
           {renderTransformInput("Y", "scaleY", 0.0001)}
           {renderTransformInput("Z", "scaleZ", 0.0001)}
           <div style={{ height: 1, background: "rgba(148, 163, 184, 0.25)", margin: "2px 0" }} />
-          <div style={{ fontSize: 12, color: "rgba(255, 255, 255, 0.86)" }}>Material</div>
+          <div style={{ fontSize: 12, color: "rgba(255, 255, 255, 0.86)" }}>{t('minzhen.material')}</div>
           {renderTransformInput("Size", "pointSize")}
         </div>
       </div>
@@ -1447,7 +1445,7 @@ const Canvas = React.forwardRef((props, refs) => {
         }}
       >
         <div className="asideContent firstAside">
-          <h2 className="asideTitle">{isEnglish ? "Other Data" : "其他数据"}</h2>
+          <h2 className="asideTitle">{t("minzhen.otherData")}</h2>
           {sensorPanelItems.map((item) => renderSensorItem(item))}
         </div>
       </div>

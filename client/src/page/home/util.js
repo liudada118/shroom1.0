@@ -3155,6 +3155,14 @@ export const sitTypeEvent = {
       local: that.state.local,
     });
   },
+  humanBodyOptimized: ({ that, wsPointData, local }) => {
+    that.com.current?.sitData({
+      wsPointData,
+      valuef: that.state.valuef1,
+      valuelInit: that.state.valuelInit1,
+      local: that.state.local,
+    });
+  },
 };
 
 export const backTypeEvent = {

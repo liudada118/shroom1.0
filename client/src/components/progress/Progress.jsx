@@ -1,4 +1,5 @@
 import React, { useEffect, useImperativeHandle, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import './progress.scss'
 import { Select, message } from 'antd'
 import { moveValue, changePxToValue } from './util'
@@ -30,6 +31,7 @@ const playOptions = [
 ]
 let timer
 const ProgressCom = React.forwardRef((props, refs) => {
+    const { t } = useTranslation()
 
     const [playFlag, setPlayFlag] = useState(false)
     const [leftFlag, setLeftFlag] = useState(false)
@@ -44,7 +46,7 @@ const ProgressCom = React.forwardRef((props, refs) => {
     const [hoverHandle, setHoverHandle] = useState(null)
 
     const maxFrameIndex = () => Math.max(0, Number(props.length) || 0)
-    const emptyTimeText = '\u6682\u65e0\u65f6\u95f4'
+    const emptyTimeText = t('playback.noTime')
 
     const getTimeValue = (value) => {
         if (value && typeof value === 'object') {
@@ -474,7 +476,7 @@ const ProgressCom = React.forwardRef((props, refs) => {
                                 rtl: true,
                                 prefixCls: 'my-message',
                             });
-                            message.info("请先选择回放数据时间段");
+                            message.info(t('playback.selectRange'));
                         }
                     }}
                     alt=""

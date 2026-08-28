@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useTranslation } from 'react-i18next';
 import { findMax } from "../../assets/util/util";
 import {
   calPress,
@@ -65,6 +66,7 @@ function objChange(newValue, oldValue, valueFlag) {
 }
 
 export default function Demo() {
+  const { t } = useTranslation();
   const [data, setData] = useState([]);
   const [max, setMax] = useState(0);
   const [maxCol, setMaxCol] = useState(0);
@@ -165,11 +167,11 @@ export default function Demo() {
       </div>
       <div style={{ fontSize: "30px" }}>{max}</div>
       <div style={{ fontSize: "30px" }}>{maxCol}</div>
-      <div style={{ fontSize: "30px" }}>压力总和:{total}</div>
-      <div style={{ fontSize: "30px" }}>压力面积:{length}</div>
-      <div style={{ fontSize: "30px" }}>真实压强:{realPress}</div>
-      <div style={{ fontSize: "30px" }}>压强:{pressuse}</div>
-      <div>改变: {change ? 'true' : 'false'}</div>
+      <div style={{ fontSize: "30px" }}>{t('demo.pressureTotal')}: {total}</div>
+      <div style={{ fontSize: "30px" }}>{t('demo.pressureArea')}: {length}</div>
+      <div style={{ fontSize: "30px" }}>{t('demo.actualPressure')}: {realPress}</div>
+      <div style={{ fontSize: "30px" }}>{t('demo.pressureIntensity')}: {pressuse}</div>
+      <div>{t('demo.changed')}: {change ? t('common.yes') : t('common.no')}</div>
       <div style={{ position: "fixed", bottom: "20px", color: "#000" }}>
         <div
           style={{ border: "1px solid #01F1E3" }}
@@ -179,7 +181,7 @@ export default function Demo() {
             pressFlag = !pressFlag;
           }}
         >
-          {pressValue ? "分压" : "不分压"}
+          {pressValue ? t('demo.splitPressure') : t('demo.noSplitPressure')}
         </div>
         <div
           style={{ border: "1px solid #01F1E3" }}
@@ -189,7 +191,7 @@ export default function Demo() {
             pressNumFlag = !pressNumFlag;
           }}
         >
-          {pressNum ? "压力算法" : "不压力算法"}
+          {pressNum ? t('demo.pressureAlgorithm') : t('demo.noPressureAlgorithm')}
         </div>
 
         <Slider

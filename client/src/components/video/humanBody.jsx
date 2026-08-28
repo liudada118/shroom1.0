@@ -190,6 +190,12 @@ const BODY_PARTS = [
   createPartConfig("frontPantsRight", FRONT_PANTS_RIGHT_IDX, UV_REGIONS.frontPantsRight),
 ];
 
+// Shared by the optimized full-body renderer.  Keeping the physical sensor
+// index/UV mapping in one place prevents the legacy texture renderer and the
+// realistic shader renderer from drifting apart.
+export const HUMAN_BODY_SENSOR_PARTS = BODY_PARTS;
+export const HUMAN_BODY_UV_CANVAS_SIZE = UV_CANVAS_SIZE;
+
 const HumanBodyCanvas = React.forwardRef((props, refs) => {
   const textureCanvasRef = useRef();
   const textureRef = useRef();

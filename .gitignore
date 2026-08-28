@@ -19,6 +19,7 @@ pdf/
 .DS_Store
 *.log
 config.txt
+jqbed-algorithm-config.json
 .npm-cache/
 dist/
 pack-resources/python/
