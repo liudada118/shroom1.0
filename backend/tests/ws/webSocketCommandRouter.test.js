@@ -1,6 +1,7 @@
 const assert = require('assert');
 const {
   createWebSocketCommandRouter,
+  normalizeDynamicSerialCommand,
 } = require('../../kernel/platform/websocket/webSocketCommandRouter');
 
 const warnings = [];
@@ -63,11 +64,46 @@ assert.strictEqual(protocolResult.ok, true);
 assert.strictEqual(protocolResult.results[0].path, 'COM7');
 assert.strictEqual(protocolContext.legacyProtocol, false);
 assert.strictEqual(protocolContext.commandEnvelope.requestId, 'req-router-1');
+assert.deepStrictEqual(normalizeDynamicSerialCommand({
+  type: 'serial.open',
+  payload: { role: 'seat', path: 'COM8' },
+  requestId: 'req-router-seat-open',
+}).command, { sitPort: 'COM8' });
+assert.deepStrictEqual(normalizeDynamicSerialCommand({
+  type: 'serial.close',
+  payload: { roles: ['seat'] },
+  requestId: 'req-router-seat-close',
+}).command, { sitClose: true });
 assert.throws(() => protocolRouter.handle({
   type: 'serial.open',
   payload: { role: 'sit' },
   requestId: 'req-router-2',
 }), /missing required payload field/);
+assert.strictEqual(protocolRouter.handle({ type: 'serial.open' }).handled, false);
+
+let dynamicCommand;
+protocolRouter.register({
+  name: 'dynamic-serial',
+  when: (message) => message.channelPorts != null || message.channelClose != null,
+  handle: (message) => {
+    dynamicCommand = message;
+    return { dynamic: true };
+  },
+});
+const dynamicOpenResult = protocolRouter.handle({
+  type: 'serial.open',
+  payload: { role: 'armLeft', path: 'COM11' },
+  requestId: 'req-router-dynamic-open',
+});
+assert.strictEqual(dynamicOpenResult.handled, true);
+assert.deepStrictEqual(dynamicCommand, { channelPorts: { armLeft: 'COM11' } });
+
+protocolRouter.handle({
+  type: 'serial.close',
+  payload: { roles: ['sit', 'armLeft'] },
+  requestId: 'req-router-dynamic-close',
+});
+assert.deepStrictEqual(dynamicCommand, { sitClose: true, channelClose: ['armLeft'] });
 
 const errorRouter = createWebSocketCommandRouter({
   logger: {

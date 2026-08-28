@@ -8,6 +8,9 @@ const {
   bindDisplaySystemRuntimeChannels,
   resolveOutputPublisher,
 } = require('../../extension-host/runtime/displaySystemRuntimeBinder');
+const {
+  createDisplaySystemRuntimeRegistry,
+} = require('../../extension-host/runtime/displaySystemRuntimeRegistry');
 
 // ---------------------------------------------------------------------------
 // sensors[] 归一化：v2 单 sensor 升格
@@ -127,6 +130,9 @@ assert.deepStrictEqual(planned.runtimeChannels[1].sensor.matrix, {
   height: 1,
   total: 4,
 });
+const runtimeRegistry = createDisplaySystemRuntimeRegistry();
+runtimeRegistry.registerMany(planned.runtimeChannels);
+assert.strictEqual(runtimeRegistry.snapshot().channels[1].outputChannel, 'armLeft');
 
 // ---------------------------------------------------------------------------
 // 输出路由：sit/back/head 保持原样，其余走 publishAux

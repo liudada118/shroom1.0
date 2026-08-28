@@ -47,6 +47,17 @@ function createSensorStatusPayload(ctx, extra = {}) {
   };
 }
 
+/**
+ * 单端口接入后，根据客户端当前的精确订阅恢复旧靠背端口的命令语义。
+ * 只有仅订阅 back 的连接使用 back scope；默认 * 和多通道连接仍走 main。
+ */
+function resolveCommandScope(wsSubscriptions, client) {
+  const channels = typeof wsSubscriptions?.getSubscriptions === 'function'
+    ? wsSubscriptions.getSubscriptions(client)
+    : [];
+  return channels.length === 1 && channels[0] === 'back' ? 'back' : 'main';
+}
+
 function createWebSocketHandlerAttacher(ctx) {
   if (!ctx || typeof ctx !== 'object') {
     throw new Error('webSocket handler context is required');
@@ -73,8 +84,6 @@ function createWebSocketHandlerAttacher(ctx) {
       publishPlaybackFrame,
       publishSystemEvent,
       server,
-      server1,
-      server2,
       totalToN,
       wsSubscriptions,
       zeroCommandService,
@@ -163,47 +172,6 @@ function createWebSocketHandlerAttacher(ctx) {
     ctx.serverOpened = true;
     ctx.serverShutdownRequested = false;
 
-    server1.on('open', function open() {
-      logger.info('connected');
-    });
-
-    server1.on('close', function close() {
-      logger.info('disconnected');
-    });
-
-    // 头枕端口只负责 head 实时数据订阅，控制命令统一走主端口或 HTTP。
-    server2.on('connection', function connection(ws, req) {
-      const ip = req.connection.remoteAddress;
-      const port = req.connection.remotePort;
-      const clientName = `${ip}${port}`;
-      logger.info('%s is connected to head channel', clientName);
-      wsSubscriptions.registerClient(ws, {
-        channels: ['head'],
-        clientId: clientName,
-        scope: 'head',
-      });
-    });
-
-    // 靠背端口保留少量旧命令兼容，同时默认订阅 back 通道。
-    server1.on('connection', function connection(ws, req) {
-      const ip = req.connection.remoteAddress;
-      const port = req.connection.remotePort;
-      const clientName = `${ip}${port}`;
-      wsSubscriptions.registerClient(ws, {
-        channels: ['back'],
-        clientId: clientName,
-        scope: 'back',
-      });
-      ws.on('message', function incoming(message) {
-        logger.debug('received: %s from %s', message, clientName, ctx.localFlag);
-
-        const getMessage = parseJsonMessage(message, { logger, clientName });
-        if (!getMessage) return;
-        const commandResult = controlCommandService.executeWs(getMessage, { clientName, scope: 'back' });
-        sendCommandResultAck(ws, getMessage, commandResult, logger);
-      });
-    });
-
     server.on('open', function open() {
       logger.info('connected');
     });
@@ -212,8 +180,8 @@ function createWebSocketHandlerAttacher(ctx) {
       logger.info('disconnected');
     });
 
-    // 涓荤鍙ｈ礋璐ｆ棫鍓嶇杩炴帴銆佹巿鏉冪姸鎬佷笅鍙戙€佸巻鍙插洖鏀炬帶鍒跺拰瀹炴椂鍧愰潰璁㈤槄銆?
-server.on('connection', function connection(ws, req) {
+    // 所有客户端都从共享端口接入，默认订阅 *，仍可通过订阅消息切换逻辑通道。
+    server.on('connection', function connection(ws, req) {
       const ip = req.connection.remoteAddress;
       const port = req.connection.remotePort;
       const clientName = ip + port;
@@ -253,7 +221,7 @@ server.on('connection', function connection(ws, req) {
         const commandResult = controlCommandService.executeWs(getMessage, {
           client: ws,
           clientName,
-          scope: 'main',
+          scope: resolveCommandScope(wsSubscriptions, ws),
         });
         sendCommandResultAck(ws, getMessage, commandResult, logger);
         if (commandResult.stop) return;
@@ -265,4 +233,5 @@ server.on('connection', function connection(ws, req) {
 module.exports = {
   createSensorStatusPayload,
   createWebSocketHandlerAttacher,
+  resolveCommandScope,
 };

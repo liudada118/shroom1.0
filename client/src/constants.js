@@ -12,8 +12,8 @@ import { getDisplayMatrix } from './displays/registry';
 export const WS_HOST = '127.0.0.1';
 export const WS_PORTS = {
   MAIN:  19999,  // 统一数据通道（坐垫 + 靠背 + 头枕，通过 sitData/backData/headData 字段区分）
-  BACK:  19998,  // [已废弃] 靠背数据已合并到 MAIN
-  HEAD:  19997,  // [已废弃] 头枕数据已合并到 MAIN
+  BACK:  19999,  // 逻辑别名：与 MAIN 共用一个物理 WebSocket 端口
+  HEAD:  19999,  // 逻辑别名：与 MAIN 共用一个物理 WebSocket 端口
 };
 
 export const WS_URLS = {

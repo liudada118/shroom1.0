@@ -40,6 +40,14 @@ backend/
 - 硬件协议字节定义、线序语义、历史数据库结构和历史数据格式没有因目录迁移而改变。
 - `extension-host/` 负责加载和校验扩展，`extensions/` 放具体传感器或展示系统交付物；扩展不得反向修改固定 Electron 入口。
 
+## 多串口与单 WebSocket
+
+- 一份 `SerialManager` 按 manifest `serialRole` 管理任意数量的物理串口；每个 COM 口仍有独立串口实例。
+- HTTP `serial.open` / `serial.close` 接受当前 manifest 声明的动态角色，未声明角色会被拒绝；协议与波特率只取 manifest。
+- 批量打开会先校验所有角色，展示系统切换会统一关闭旧系统的全部动态串口，避免部分执行或遗留重连。
+- 本地只监听 `19999` 一个 WebSocket 端口，数据按 manifest `outputChannel` 动态订阅与发布，不维护 `sit/back/head` 固定通道表。
+- `sit/back/head` 仅作为旧配置、旧数据字段和历史存储的兼容值继续存在。
+
 ## 运行链路
 
 ```mermaid
@@ -61,7 +69,7 @@ flowchart LR
 | Electron 启停后端 | `backend/runtime/index.js` |
 | HTTP、WebSocket、命令与进程生命周期 | `backend/kernel/platform/` |
 | server 进程状态与 legacy 状态迁移 | `backend/kernel/platform/runtime/`，见其 `README.md` |
-| 三路 WebSocket 传输、订阅和兼容命令入口 | `backend/kernel/platform/websocket/`，见其 `README.md` |
+| 单端口 WebSocket 传输、逻辑通道订阅和兼容命令入口 | `backend/kernel/platform/websocket/`，见其 `README.md` |
 | 应用侧串口打开、关闭与通道编排 | `backend/kernel/serial/` |
 | 数据库装配与历史查询 | `backend/kernel/storage/` |
 | 历史回放、CSV、实时输出 | `backend/kernel/{playback,csv,realtime}/` |

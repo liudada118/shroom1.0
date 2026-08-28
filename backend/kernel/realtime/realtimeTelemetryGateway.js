@@ -4,7 +4,25 @@
  * 璐熻矗鎶婃棫 sit/back/head 瀹炴椂 payload 鍚屾椂鍙戝竷鍒版棫 WebSocket 閫氶亾鍜屾柊鐨?
  * 鏍囧噯 telemetry channel銆傚畠鏄棫鍓嶇鍏煎閫氶亾涓庢柊 ChannelBus 妯″瀷涔嬮棿鐨勬ˉ銆?
  */
-const { normalizeLegacyRealtimeFrame } = require('@shroom/backend/telemetry/telemetryNormalizer.js');
+const {
+  normalizeLegacyRealtimeFrame,
+  parsePayload,
+} = require('@shroom/backend/telemetry/telemetryNormalizer.js');
+
+/**
+ * 旧三通道 payload 已有 sitData/backData/headData；manifest 自定义通道使用
+ * `${outputChannel}Data`。在不改 SDK 契约和原始 WebSocket payload 的前提下，
+ * 为标准 telemetry 归一化补一个统一 pressureData 视图。
+ */
+function prepareTelemetryPayload(channel, payload) {
+  const data = parsePayload(payload);
+  if (!data || Array.isArray(data.pressureData)) return payload;
+  const channelData = data[`${String(channel || '').trim()}Data`];
+  const pressureData = Array.isArray(channelData)
+    ? channelData
+    : (Array.isArray(data.data) ? data.data : null);
+  return pressureData ? { ...data, pressureData } : payload;
+}
 
 /**
  * 鍒涘缓瀹炴椂 telemetry 缃戝叧銆?
@@ -39,10 +57,14 @@ function createRealtimeTelemetryGateway({
       source,
     });
     const legacySent = wsSubscriptions.publish(channel, payload);
-    const telemetryFrame = normalizeLegacyRealtimeFrame(channel, payload, {
-      sensorType,
-      timestamp: legacyEvent.timestamp,
-    });
+    const telemetryFrame = normalizeLegacyRealtimeFrame(
+      channel,
+      prepareTelemetryPayload(channel, payload),
+      {
+        sensorType,
+        timestamp: legacyEvent.timestamp,
+      },
+    );
 
     if (!telemetryFrame) {
       return {
@@ -73,4 +95,5 @@ function createRealtimeTelemetryGateway({
 
 module.exports = {
   createRealtimeTelemetryGateway,
+  prepareTelemetryPayload,
 };

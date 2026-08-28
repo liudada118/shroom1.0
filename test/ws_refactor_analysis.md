@@ -1,31 +1,28 @@
 # 多 WS → 单 WS 重构分析
 
-## 现状
-- server(19999): 坐垫数据 sitData 广播 + 所有控制指令（sitPort/backPort/headPort/file/date 等）
-- server1(19998): 靠背数据 backData 广播 + backPort 连接指令（重复）
-- server2(19997): 头枕数据 headData 广播
+## 当前实现
+- 本地后端只创建一个 WebSocket Server：`19999`。
+- 逻辑通道由 manifest `outputChannel` 动态生成；`sit/back/head` 只是现有配置的兼容值，旧 payload 仍用 `sitData/backData/headData` 区分。
+- 旧客户端默认订阅 `*`；新客户端可通过 `subscribe` 精确订阅逻辑通道。
+- 控制命令优先走 HTTP，旧 WebSocket 命令仍在 `19999` 兼容。
 
 ## 问题
-1. 前端需要连接 3 个 WS（ws/ws1/ws2），代码冗余
-2. backPort 指令在 server 和 server1 中都有处理，逻辑重复
-3. 数据按端口分离，但数据格式已通过 sitData/backData/headData 字段区分
+旧实现同时监听三个端口，会重复维护连接、命令入口和关闭流程；而前端和 SDK 已经只连接
+`19999`，逻辑通道由订阅管理器按字符串动态维护，因此新增串口角色或 outputChannel 不需要新增物理端口。
 
 ## 优化方案
-将 server1 和 server2 的广播合并到 server(19999)：
-- sitData 已通过 server(19999) 广播
-- backData 改为通过 server(19999) 广播（添加 backData 字段）
-- headData 改为通过 server(19999) 广播（添加 headData 字段）
-- 前端只需连接 ws://127.0.0.1:19999，通过字段名区分数据来源
+`websocketRuntimeFactory` 只创建一个 Server；`webSocketHandlerFactory` 只挂载一次
+`connection`；`runtime.broadcastRealtime` 统一走订阅管理器和 telemetry 网关；shutdown 只关闭
+一次共享 Server。`getWsServer(channel)` 保留原签名，任何逻辑通道都返回同一个实例。
 
 ## 影响范围
-### 后端 server.js
-- server1.clients.forEach 广播 → 改为 server.clients.forEach（19处）
-- server2.clients.forEach 广播 → 改为 server.clients.forEach（9处）
-- server1 消息处理中的 backPort 指令 → 已在 server 中有处理，可删除
-- 保留 server1/server2 的端口监听（向后兼容），但不再必需
+### 兼容边界
+- 仓内生产前端和前后端 SDK 默认都使用 `19999`，无需修改 SDK API。
+- 直接连接旧端口的仓外客户端必须改到 `19999`。
+- 远端座椅 `23001` 与外部 CAN `29999` 是外部数据源，不是本地后端监听端口。
 
-### 前端
-- Home.jsx: 删除 ws1/ws2 连接，ws.onmessage 中同时处理 sitData/backData/headData
-- Demo1010.jsx: 删除 ws1/ws2
-- handDemoPress.jsx: 改为连接 19999
-- constants.js: 简化 WS_PORTS
+### 验证
+- 单 Server factory 只调用一次。
+- 一个连接只挂一个命令入口。
+- 默认 `*` 接收三类数据；精确订阅不串台、不重复发送。
+- 重复 shutdown 只关闭一次共享 Server。

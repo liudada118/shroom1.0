@@ -30,6 +30,8 @@ assert.deepStrictEqual(serialRuntime.getSerialPortState('serialport'), { demo: t
 serialRuntime.serialPortStateAccessor('serialport').set({ demo: false });
 assert.deepStrictEqual(serialRuntime.serialPortStateAccessor('serialport').get(), { demo: false });
 
+const sharedWsServer = {};
+let webSocketServerFactoryCalls = 0;
 const websocketRuntime = createWebSocketRuntime({
   getSensorType: () => 'demo',
   channelBusFactory: () => ({ publish: () => ({ timestamp: 1 }) }),
@@ -40,12 +42,38 @@ const websocketRuntime = createWebSocketRuntime({
       legacySent: 2,
     }),
   }),
-  webSocketServersFactory: () => ({ sit: {}, back: {}, head: {} }),
+  webSocketServerFactory: () => {
+    webSocketServerFactoryCalls += 1;
+    return sharedWsServer;
+  },
   webSocketSubscriptionManagerFactory: () => ({ publish: () => 0 }),
 });
 
 assert.strictEqual(websocketRuntime.publishRealtimeFrame('sit', { data: [1] }), 2);
-assert.deepStrictEqual(Object.keys(websocketRuntime.wsServers), ['sit', 'back', 'head']);
+assert.strictEqual(websocketRuntime.wsServer, sharedWsServer);
+assert.strictEqual(webSocketServerFactoryCalls, 1);
+
+const legacyServerModulePath = require.resolve('../../kernel/platform/server');
+const runtimeBridgeModulePath = require.resolve('../../runtime');
+const realtimeCalls = [];
+require.cache[legacyServerModulePath] = {
+  id: legacyServerModulePath,
+  filename: legacyServerModulePath,
+  loaded: true,
+  exports: {
+    publishRealtimeFrame: (channel, payload) => {
+      realtimeCalls.push({ channel, payload });
+      return 3;
+    },
+  },
+};
+delete require.cache[runtimeBridgeModulePath];
+const runtimeBridge = require('../../runtime');
+
+assert.strictEqual(runtimeBridge.broadcastRealtime({ data: [9] }, 'back'), 3);
+assert.deepStrictEqual(realtimeCalls, [{ channel: 'back', payload: { data: [9] } }]);
+delete require.cache[runtimeBridgeModulePath];
+delete require.cache[legacyServerModulePath];
 
 const legacyBinding = bindLegacySerialRuntime({
   baseContext: { publish: () => {} },

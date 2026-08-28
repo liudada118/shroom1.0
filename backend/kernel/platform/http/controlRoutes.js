@@ -2,7 +2,6 @@ const HttpResult = require('./HttpResult');
 const { loadSerialProtocolPresets } = require('@shroom/backend/protocol/presets/index.js');
 const {
   HTTP_ROUTES,
-  SERIAL_ROLES,
   normalizeSerialRole,
 } = require('@shroom/backend/contract/sdkApiContract.js');
 const {
@@ -18,7 +17,10 @@ const {
  * HTTP API 对外推荐使用 sit/back/head/sensor，seat 仅作为兼容别名。
  */
 function normalizeRole(role) {
-  return normalizeSerialRole(role);
+  const rawRole = String(role || '').trim();
+  if (!rawRole) return '';
+  const normalizedRole = normalizeSerialRole(rawRole);
+  return typeof normalizedRole === 'string' ? normalizedRole : rawRole;
 }
 
 /**
@@ -32,35 +34,34 @@ function getBodyValue(body, keys) {
 }
 
 /**
- * 将 HTTP 的串口打开请求转换成旧命令对象。
- * 这样 HTTP 与旧 WebSocket 共享同一套 command handler，不复制业务逻辑。
+ * 读取 HTTP 串口打开参数。role 不设枚举白名单，是否可打开由当前 manifest 决定。
  */
-function buildOpenSerialCommand(body = {}) {
+function parseOpenSerialRequest(body = {}) {
   const role = normalizeRole(body.role || body.channel || body.portId);
   const portPath = getBodyValue(body, ['path', 'port', 'portPath']);
   if (!role || !portPath) {
-    throw new Error('role and port/path are required');
+    throw new CommandProtocolError(
+      COMMAND_ERROR_CODES.INVALID_COMMAND,
+      'role and port/path are required',
+      { commandType: 'serial.open' },
+    );
   }
-
-  if (role === SERIAL_ROLES.SIT) return { sitPort: portPath };
-  if (role === SERIAL_ROLES.BACK) return { backPort: portPath };
-  if (role === SERIAL_ROLES.HEAD) return { headPort: portPath };
-  if (role === SERIAL_ROLES.SENSOR) return { sensorPort: portPath };
-  throw new Error(`unsupported serial role: ${role}`);
+  return { role, path: portPath };
 }
 
 /**
- * 将 HTTP 的串口关闭请求转换成旧命令对象。
+ * 读取 HTTP 串口关闭参数，保留 SDK 提供的旧角色别名归一化。
  */
-function buildCloseSerialCommand(body = {}) {
+function parseCloseSerialRequest(body = {}) {
   const role = normalizeRole(body.role || body.channel || body.portId);
-  if (!role) throw new Error('role is required');
-
-  if (role === SERIAL_ROLES.SIT) return { sitClose: true };
-  if (role === SERIAL_ROLES.BACK) return { backClose: true };
-  if (role === SERIAL_ROLES.HEAD) return { headClose: true };
-  if (role === SERIAL_ROLES.SENSOR) return { sensorClose: true };
-  throw new Error(`unsupported serial role: ${role}`);
+  if (!role) {
+    throw new CommandProtocolError(
+      COMMAND_ERROR_CODES.INVALID_COMMAND,
+      'role is required',
+      { commandType: 'serial.close' },
+    );
+  }
+  return { role };
 }
 
 /**
@@ -84,8 +85,12 @@ function registerControlRoutes(app, {
    * HTTP 控制命令统一入口。
    * 返回 command router 的执行结果，方便 SDK 判断命令是否被处理。
    */
-  function dispatchCommand(command, res, { requireEnvelope = false, scope = 'http' } = {}) {
+  function dispatchCommand(commandOrFactory, res, { requireEnvelope = false, scope = 'http' } = {}) {
+    let command = commandOrFactory;
     try {
+      if (typeof commandOrFactory === 'function') {
+        command = commandOrFactory();
+      }
       if (requireEnvelope && !isCommandEnvelope(command)) {
         throw new CommandProtocolError(
           COMMAND_ERROR_CODES.INVALID_COMMAND,
@@ -151,23 +156,24 @@ function registerControlRoutes(app, {
   });
 
   app.get(HTTP_ROUTES.serialStatus, (req, res) => {
-    const role = req.query.role || req.query.portId;
+    const role = normalizeRole(req.query.role || req.query.portId);
     res.json(new HttpResult(0, {
       serial: role ? serialManager.getStatus(role) : serialManager.getStatus(),
     }, 'success'));
   });
 
   app.post(HTTP_ROUTES.serialOpen, (req, res) => {
-    buildOpenSerialCommand(req.body);
-    const role = normalizeRole(req.body?.role || req.body?.channel || req.body?.portId);
-    const path = getBodyValue(req.body, ['path', 'port', 'portPath']);
-    dispatchCommand(createCommand('serial.open', { role, path, baudRate: req.body?.baudRate }), res);
+    dispatchCommand(() => {
+      const { role, path } = parseOpenSerialRequest(req.body);
+      return createCommand('serial.open', { role, path, baudRate: req.body?.baudRate });
+    }, res);
   });
 
   app.post(HTTP_ROUTES.serialClose, (req, res) => {
-    buildCloseSerialCommand(req.body);
-    const role = normalizeRole(req.body?.role || req.body?.channel || req.body?.portId);
-    dispatchCommand(createCommand('serial.close', { roles: [role] }), res);
+    dispatchCommand(() => {
+      const { role } = parseCloseSerialRequest(req.body);
+      return createCommand('serial.close', { roles: [role] });
+    }, res);
   });
 
   app.post(HTTP_ROUTES.serialExchange, (req, res) => {

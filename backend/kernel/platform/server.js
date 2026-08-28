@@ -13,7 +13,9 @@ const {
   buildTelemetryChannelDefinitions,
 } = require('../realtime/telemetryChannelService');
 const { startWorker, callPy, stopWorker } = require('../algorithm-channel/pythonWorker');
-const { normalizeChannel } = require('./websocket/websocketChannelService');
+const {
+  buildRealtimeChannelMetadata,
+} = require('./websocket/websocketChannelService');
 const { createWebSocketHandlerAttacher } = require('./websocket/webSocketHandlerFactory');
 const { createWebSocketHandlerContext } = require('./websocket/webSocketContextFactory');
 const {
@@ -41,6 +43,7 @@ const { createServerRuntimeStateStore } = require('./runtime/runtimeStateStoreFa
 const { bindLegacySerialRuntime } = require('../../extensions/built-in-sensors/runtimeBindingsFactory');
 const { createRuntimeStatePatchers } = require('./runtime/runtimeStatePatchFactory');
 const { createSerialRuntime } = require('../serial/serialRuntimeFactory');
+const { createSerialPortOrchestrator } = require('../serial/serialPortOrchestrator');
 const { createWebSocketRuntime } = require('./websocket/websocketRuntimeFactory');
 const { createServerRuntimeContext } = require('./runtime/runtimeContextFactory');
 const { createServerFramePipeline } = require('../realtime/framePipelineFactory');
@@ -401,7 +404,7 @@ const {
  * 判断当前通道是否可以发送实时帧。
  * 手套类传感器会按 60FPS 做限频，其他类型直接发送。
  *
- * @param {'sit' | 'back' | 'head'} channel 实时通道名称。
+ * @param {string} channel manifest outputChannel 或兼容通道名称。
  * @returns {boolean} 是否允许发送本帧。
  */
 function shouldSendRealtimeFrame(channel = 'sit') {
@@ -753,8 +756,6 @@ function getShutdownOrchestrator() {
       reportHttpServer,
       sensorClose,
       server,
-      server1,
-      server2,
       serverOpened,
       serverShutdownPromise,
       serverShutdownRequested,
@@ -962,9 +963,32 @@ const {
   setSerialPortState,
 } = serialRuntime;
 
-function getManagedSerialPort(role) {
-  return serialManager.getPort(role);
-}
+const serialPortOrchestrator = createSerialPortOrchestrator({
+  getBaudRate: runtimeContext.getBaudRate,
+  getSerialConfig: appRuntime.displaySystems.getSerialConfig,
+  getSensorType: runtimeContext.getSensorType,
+  handleMinzhenSensorPortData,
+  logger,
+  minzhenType: MINZHEN_TYPE,
+  serialManager,
+  serialParserManager,
+  serialRoles,
+  smallBed12BType: SMALL_BED_12B_TYPE,
+  listSerialChannels: appRuntime.displaySystems.listSerialChannels,
+  resetMinzhenSensorExtractor: () => minzhenSensorExtractor.reset(),
+});
+const {
+  closeAllManagedSerialPorts,
+  closeManagedSerialPort,
+  closeManagedSerialPorts,
+  getManagedSerialPort,
+  openBackSerialPort,
+  openHeadSerialPort,
+  openManagedSerialPort,
+  openManifestSerialPort,
+  openManifestSerialPorts,
+  openSitSerialPort,
+} = serialPortOrchestrator;
 
 function getManagedSerialPorts() {
   return {
@@ -973,97 +997,6 @@ function getManagedSerialPorts() {
     portHead: getManagedSerialPort(serialRoles.HEAD),
     portSensor: getManagedSerialPort(serialRoles.SENSOR),
   };
-}
-
-function getSitParserChannel() {
-  return runtimeContext.getSensorType() === SMALL_BED_12B_TYPE
-    ? serialParserManager.channels.SMALL_BED_12B
-    : serialParserManager.channels.SIT;
-}
-
-function openManagedSerialPort(role, options = {}) {
-  serialManager.registerPort(role, {
-    ...options,
-    role,
-    reconnect: options.reconnect === true,
-  });
-  return serialManager.start(role);
-}
-
-function closeManagedSerialPort(role, reason) {
-  serialManager.setReconnect(role, false);
-  serialManager.stop(role, reason);
-}
-
-function openSitSerialPort(portPath, reason = 'open sit') {
-  if (!portPath) return null;
-  const configured = appRuntime.displaySystems.getSerialConfig(runtimeContext.getSensorType(), serialRoles.SIT);
-  return openManagedSerialPort(serialRoles.SIT, {
-    path: portPath,
-    baudRate: configured?.baudRate || runtimeContext.getBaudRate(),
-    reconnect: true,
-    parserChannel: configured?.parserChannel || (runtimeContext.getSensorType() === 'bigBed'
-      ? serialParserManager.channels.BIG_BED_SIT
-      : getSitParserChannel()),
-    onOpenError: (err) => logger.warn(err, `${reason} err`),
-  });
-}
-
-function openBackSerialPort(portPath, reason = 'open back') {
-  if (!portPath) return null;
-  const useRawMinzhenText = runtimeContext.getSensorType() === MINZHEN_TYPE;
-  const configured = appRuntime.displaySystems.getSerialConfig(runtimeContext.getSensorType(), serialRoles.BACK);
-  if (useRawMinzhenText) {
-    minzhenSensorExtractor.reset();
-  }
-  return openManagedSerialPort(serialRoles.BACK, {
-    path: portPath,
-    baudRate: configured?.baudRate || runtimeContext.getBaudRate(),
-    reconnect: true,
-    parserChannel: useRawMinzhenText ? undefined : (configured?.parserChannel || serialParserManager.channels.BACK),
-    dataHandler: useRawMinzhenText ? handleMinzhenSensorPortData : undefined,
-    onOpenError: (err) => logger.warn(err, `${reason} err`),
-  });
-}
-
-function openHeadSerialPort(portPath, reason = 'open head') {
-  if (!portPath) return null;
-  const configured = appRuntime.displaySystems.getSerialConfig(runtimeContext.getSensorType(), serialRoles.HEAD);
-  return openManagedSerialPort(serialRoles.HEAD, {
-    path: portPath,
-    baudRate: configured?.baudRate || runtimeContext.getBaudRate(),
-    reconnect: true,
-    parserChannel: configured?.parserChannel || serialParserManager.channels.HEAD,
-    onOpenError: (err) => logger.warn(err, `${reason} err`),
-  });
-}
-/**
- * 按 manifest 声明打开展示系统的某一路串口。
- *
- * sit/back/head 之外的传感器没有专用的 openXxxSerialPort 函数，这里按
- * serialRole 从 manifest 的 runtimeChannels 里取波特率和 parser 通道。
- * 找不到声明就不开——不猜默认值，避免用错波特率把串口跑成乱码。
- *
- * @param {string} serialRole manifest 里的传感器 id。
- * @param {string} portPath 串口路径。
- * @param {string} [reason] 日志原因。
- * @returns {object | null} 串口启动结果。
- */
-function openManifestSerialPort(serialRole, portPath, reason = 'open manifest channel') {
-  if (!portPath || !serialRole) return null;
-  const channels = appRuntime.displaySystems.listSerialChannels(runtimeContext.getSensorType()) || [];
-  const configured = channels.find((channel) => channel.serialRole === serialRole);
-  if (!configured) {
-    logger.warn({ serialRole, portPath }, `${reason}: no manifest channel declared`);
-    return null;
-  }
-  return openManagedSerialPort(serialRole, {
-    path: portPath,
-    baudRate: configured.baudRate,
-    reconnect: true,
-    parserChannel: configured.parserChannel,
-    onOpenError: (err) => logger.warn(err, `${reason} err`),
-  });
 }
 
 serialManager.startReconnectLoop({
@@ -1081,12 +1014,10 @@ const webSocketRuntime = createWebSocketRuntime({
 const {
   channelBus,
   publishRealtimeFrame: publishRealtimeFrameToRuntime,
-  wsServers,
+  wsServer,
   wsSubscriptions,
 } = webSocketRuntime;
-let server = wsServers.sit;
-let server1 = wsServers.back;
-let server2 = wsServers.head;
+let server = wsServer;
 
 function publishRealtimeFrame(channel, jsonData) {
   return publishRealtimeFrameToRuntime(channel, jsonData);
@@ -1128,19 +1059,19 @@ const jqbedAlgorithmProtocol = createJqbedAlgorithmProtocol({
 
 function getRealtimeChannelMetadata() {
   const sensorType = runtimeContext.getSensorType();
-  const legacyChannels = [
-    { channelId: 'sit', name: 'Sit pressure legacy channel', port: 19999, legacy: true },
-    { channelId: 'back', name: 'Back pressure legacy channel', port: 19998, legacy: true },
-    { channelId: 'head', name: 'Head pressure legacy channel', port: 19997, legacy: true },
-  ].map((channel) => ({
-    ...channel,
+  const manifestChannels = appRuntime.displaySystems.listSerialChannels(sensorType);
+  const realtimeChannels = buildRealtimeChannelMetadata({
     sensorType,
-    transport: 'websocket',
-  }));
+    manifestChannels,
+    managedChannels: serialManager.getStatus(),
+  });
 
   return [
-    ...legacyChannels,
-    ...buildTelemetryChannelDefinitions(sensorType, legacyChannels.map((channel) => channel.channelId)),
+    ...realtimeChannels,
+    ...buildTelemetryChannelDefinitions(
+      sensorType,
+      realtimeChannels.map((channel) => channel.channelId),
+    ),
   ];
 }
 
@@ -1357,7 +1288,9 @@ registerRuntimeCommandHandlers(wsCommandRouter, {
 
 registerSerialControlHandlers(wsCommandRouter, {
   HAND_GLOVE_DOUBLE,
+  closeAllManagedSerialPorts,
   closeManagedSerialPort,
+  closeManagedSerialPorts,
   closeMinzhenSensorPort,
   getPort,
   getRuntime: () => ({
@@ -1381,6 +1314,7 @@ registerSerialControlHandlers(wsCommandRouter, {
   openBackSerialPort,
   openHeadSerialPort,
   openManifestSerialPort,
+  openManifestSerialPorts,
   openMinzhenSensorPort,
   openSitSerialPort,
   petCareRuntimeService,
@@ -1445,8 +1379,6 @@ const webSocketHandlerContext = createWebSocketHandlerContext({
     publishPlaybackFrame,
     publishSystemEvent,
     server,
-    server1,
-    server2,
     totalToN,
     writableNameTxt,
     wsSubscriptions,
@@ -1739,9 +1671,8 @@ petCareMiniTimer = petCareRuntimeService.startPetCareTimer('petCareMini');
 module.exports.shutdownServer = shutdownServer;
 
 function getWsServer(channel = 'sit') {
-  const normalizedChannel = normalizeChannel(channel);
-  if (normalizedChannel === 'back') return server1;
-  if (normalizedChannel === 'head') return server2;
+  // 保留 channel 参数，任意 manifest outputChannel 都映射到同一物理服务。
+  void channel;
   return server;
 }
 
@@ -1766,6 +1697,7 @@ function handleCommand(command) {
 }
 
 module.exports.getWsServer = getWsServer;
+module.exports.publishRealtimeFrame = publishRealtimeFrame;
 module.exports.getWsSubscriptionStatus = getWsSubscriptionStatus;
 module.exports.getRealtimeChannels = getRealtimeChannels;
 module.exports.getChannelBusStatus = getChannelBusStatus;

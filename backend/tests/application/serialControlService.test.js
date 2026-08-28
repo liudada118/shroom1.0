@@ -6,6 +6,9 @@ const {
 const handlers = [];
 const publishedEvents = [];
 let rebindCount = 0;
+const openedManifestPorts = [];
+const closedManagedPorts = [];
+const closeAllReasons = [];
 const runtime = {
   backTotal: 1024,
   endDate: 200,
@@ -20,7 +23,17 @@ registerSerialControlHandlers({
   },
 }, {
   HAND_GLOVE_DOUBLE: 'hand0205Double',
-  closeManagedSerialPort: () => {},
+  closeAllManagedSerialPorts: (reason) => closeAllReasons.push(reason),
+  closeManagedSerialPort: (...args) => closedManagedPorts.push(args),
+  closeManagedSerialPorts: (roles, reason, options) => {
+    if (roles.includes('missing')) {
+      const error = new Error('serial role is not declared by current manifest: missing');
+      error.code = 'INVALID_COMMAND';
+      error.httpStatus = 400;
+      throw error;
+    }
+    roles.forEach((role) => closedManagedPorts.push([role, reason, options]));
+  },
   closeMinzhenSensorPort: () => {},
   getPort: () => [],
   getRuntime: () => runtime,
@@ -34,6 +47,20 @@ registerSerialControlHandlers({
   logger: { error: () => {}, warn: () => {} },
   openBackSerialPort: () => {},
   openHeadSerialPort: () => {},
+  openManifestSerialPort: (...args) => {
+    openedManifestPorts.push(args);
+    return args[0] === 'missing' ? null : { isOpen: true };
+  },
+  openManifestSerialPorts: (channelPorts, reason) => {
+    const entries = Object.entries(channelPorts);
+    if (entries.some(([role]) => role === 'missing')) {
+      const error = new Error('serial role is not declared by current manifest: missing');
+      error.code = 'INVALID_COMMAND';
+      error.httpStatus = 400;
+      throw error;
+    }
+    entries.forEach(([role, path]) => openedManifestPorts.push([role, path, `${reason} ${role}`]));
+  },
   openMinzhenSensorPort: () => {},
   openSitSerialPort: () => {},
   petCareRuntimeService: { resetAll: () => {} },
@@ -57,8 +84,34 @@ switchHandler.handle({ file: 'custom-pressure-map' });
 assert.strictEqual(runtime.file, 'custom-pressure-map');
 assert.strictEqual(runtime.baudRate, 921600);
 assert.strictEqual(rebindCount, 1);
+assert.deepStrictEqual(closeAllReasons, ['file switch']);
 assert.deepStrictEqual(publishedEvents.at(-1), {
   currentSensorType: 'custom-pressure-map',
 });
+
+const serialPortHandler = handlers.find((handler) => handler.name === 'serial-port-control');
+assert.ok(serialPortHandler);
+serialPortHandler.handle({ channelPorts: { armLeft: 'COM11', armRight: 'COM12' } }, { scope: 'http' });
+assert.deepStrictEqual(openedManifestPorts, [
+  ['armLeft', 'COM11', 'http armLeft'],
+  ['armRight', 'COM12', 'http armRight'],
+]);
+serialPortHandler.handle({ channelClose: ['armLeft', 'armRight'] }, { scope: 'http' });
+assert.deepStrictEqual(closedManagedPorts.slice(-2), [
+  ['armLeft', 'http manual close', { strict: true }],
+  ['armRight', 'http manual close', { strict: true }],
+]);
+const openedCountBeforeInvalidBatch = openedManifestPorts.length;
+assert.throws(
+  () => serialPortHandler.handle({
+    channelPorts: { armLeft: 'COM13', missing: 'COM14' },
+  }, { scope: 'http' }),
+  /not declared by current manifest/,
+);
+assert.strictEqual(openedManifestPorts.length, openedCountBeforeInvalidBatch);
+assert.throws(
+  () => serialPortHandler.handle({ channelClose: ['missing'] }, { scope: 'http' }),
+  /not declared by current manifest/,
+);
 
 console.log('serialControlService.test.js passed');

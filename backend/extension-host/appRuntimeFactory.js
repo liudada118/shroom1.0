@@ -167,9 +167,8 @@ function createAppRuntime({
       /**
        * 列出某个展示系统声明的全部串口通道。
        *
-       * server.js 只有 sit/back/head 三个写死的开口函数，manifest 声明的第四路
-       * 及以后的传感器没人给它开串口。这个方法让串口开启改为按 manifest 驱动：
-       * 有几个 sensors 条目就有几路可开。
+       * 串口编排器和共享 WebSocket 都读取这份列表：有几个 sensors 条目就有几路
+       * 可打开、解析和按 outputChannel 发布，不需要新增后端端口或通道常量。
        *
        * @param {string} sensorType 传感器类型。
        * @returns {Array<{serialRole: string, outputChannel: string, label: string,

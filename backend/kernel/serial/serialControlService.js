@@ -35,7 +35,9 @@ function createZeroPayloads({ file, sitTotal, backTotal, isCar, isThreePortFile 
 function registerSerialControlHandlers(router, deps) {
   const {
     HAND_GLOVE_DOUBLE,
+    closeAllManagedSerialPorts,
     closeManagedSerialPort,
+    closeManagedSerialPorts,
     closeMinzhenSensorPort,
     getPort,
     getRuntime,
@@ -50,6 +52,7 @@ function registerSerialControlHandlers(router, deps) {
     openBackSerialPort,
     openHeadSerialPort,
     openManifestSerialPort,
+    openManifestSerialPorts,
     openMinzhenSensorPort,
     openSitSerialPort,
     petCareRuntimeService,
@@ -113,24 +116,28 @@ function registerSerialControlHandlers(router, deps) {
       });
 
       if (runtime.port1?.isOpen) {
-        closeManagedSerialPort(serialRoles.SIT, 'file switch');
         publishSystemEvent({
           sitData: new Array(runtime.file === 'bigBed' ? 2048 : runtime.sitTotal).fill(0),
         });
       }
       if (runtime.port2?.isOpen) {
-        closeManagedSerialPort(serialRoles.BACK, 'file switch');
         publishSystemEvent({
           backData: new Array(runtime.backTotal).fill(0),
         });
       }
       if (runtime.portHead?.isOpen) {
-        closeManagedSerialPort(serialRoles.HEAD, 'file switch');
         publishSystemEvent({
           headData: new Array(100).fill(0),
         });
       }
 
+      if (typeof closeAllManagedSerialPorts === 'function') {
+        closeAllManagedSerialPorts('file switch');
+      } else {
+        closeManagedSerialPort(serialRoles.SIT, 'file switch');
+        closeManagedSerialPort(serialRoles.BACK, 'file switch');
+        closeManagedSerialPort(serialRoles.HEAD, 'file switch');
+      }
       closeMinzhenSensorPort('file switch');
       const receiveFile = message.file;
       const dbObj = initDb(receiveFile);
@@ -176,15 +183,37 @@ function registerSerialControlHandlers(router, deps) {
       // manifest 多传感器系统用 channelPorts 这一个字段承载任意数量的通道，
       // 而不是给每个新传感器再加一对 xxxPort / xxxClose 命令字段。
       if (message.channelPorts && typeof message.channelPorts === 'object') {
-        Object.entries(message.channelPorts).forEach(([serialRole, portPath]) => {
-          if (portPath == null) return;
-          openManifestSerialPort?.(serialRole, portPath, `${context.scope || 'main'} ${serialRole}`);
-        });
+        if (typeof openManifestSerialPorts === 'function') {
+          openManifestSerialPorts(message.channelPorts, context.scope || 'main');
+        } else {
+          Object.entries(message.channelPorts).forEach(([serialRole, portPath]) => {
+            if (portPath == null) return;
+            const opened = openManifestSerialPort?.(
+              serialRole,
+              portPath,
+              `${context.scope || 'main'} ${serialRole}`,
+            );
+            if (!opened) {
+              const error = new Error(`serial role is not declared by current manifest: ${serialRole}`);
+              error.code = 'INVALID_COMMAND';
+              error.httpStatus = 400;
+              throw error;
+            }
+          });
+        }
       }
       if (Array.isArray(message.channelClose)) {
-        message.channelClose.forEach((serialRole) => {
-          if (serialRole) closeManagedSerialPort(serialRole, `${context.scope || 'main'} manual close`);
-        });
+        if (typeof closeManagedSerialPorts === 'function') {
+          closeManagedSerialPorts(
+            message.channelClose,
+            `${context.scope || 'main'} manual close`,
+            { strict: true },
+          );
+        } else {
+          message.channelClose.forEach((serialRole) => {
+            if (serialRole) closeManagedSerialPort(serialRole, `${context.scope || 'main'} manual close`);
+          });
+        }
       }
       if (message.sitPort != null) {
         setRuntime({ sitClose: false, com: message.sitPort });
@@ -235,7 +264,7 @@ function registerSerialControlHandlers(router, deps) {
           stopPlaybackTimer();
           publishSystemEvent({ backData: new Array(runtime.backTotal).fill(0) });
           if (runtime.com1) {
-            openBackSerialPort(runtime.com1, 'server1 resume back');
+            openBackSerialPort(runtime.com1, 'shared websocket resume back');
           }
         }
         return {};

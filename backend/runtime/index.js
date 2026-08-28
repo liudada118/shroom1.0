@@ -1,7 +1,6 @@
 const logger = require('../common/logger');
 const { CommandRouter } = require('../kernel/platform/commands/commandRouter');
 const {
-  broadcastToChannel,
   getChannelClientCounts,
 } = require('../kernel/platform/websocket/websocketChannelService');
 
@@ -65,16 +64,25 @@ function handleCommand(command) {
 }
 
 function broadcastRealtime(data, channel = 'sit') {
-  return broadcastToChannel(getWsServer, data, channel);
+  const server = getLegacyServer();
+  if (typeof server.publishRealtimeFrame !== 'function') {
+    logger.warn('[Runtime] realtime telemetry publisher is unavailable', { channel });
+    return 0;
+  }
+  return server.publishRealtimeFrame(channel, data);
 }
 
 function getRuntimeStatus() {
   const server = getLegacyServer();
+  const channels = typeof server.getRealtimeChannels === 'function'
+    ? server.getRealtimeChannels()
+    : [];
+  const realtimeChannelIds = channels
+    .filter((channel) => channel?.standard !== true)
+    .map((channel) => channel.channelId);
   return {
-    clients: getChannelClientCounts(getWsServer),
-    channels: typeof server.getRealtimeChannels === 'function'
-      ? server.getRealtimeChannels()
-      : [],
+    clients: getChannelClientCounts(getWsServer, realtimeChannelIds),
+    channels,
     channelBus: typeof server.getChannelBusStatus === 'function'
       ? server.getChannelBusStatus()
       : {},

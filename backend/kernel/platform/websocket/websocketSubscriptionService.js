@@ -295,7 +295,11 @@ function createWebSocketSubscriptionManager({ logger } = {}) {
 
     if (type === 'subscribe') {
       const current = ensureClientChannels(client);
-      const replace = data.replace !== false && current.has(WILDCARD_CHANNEL);
+      // 未显式传 replace 时，只把旧客户端的默认 * 换成精确订阅；
+      // 显式 replace:true 必须无条件替换当前集合，避免切换通道后继续串收旧通道。
+      const replace = data.replace === true || (
+        data.replace !== false && current.has(WILDCARD_CHANNEL)
+      );
       const channels = subscribe(client, data.channels || data.channelId || data.channel, { replace });
       sendAck(client, {
         type: 'subscribed',

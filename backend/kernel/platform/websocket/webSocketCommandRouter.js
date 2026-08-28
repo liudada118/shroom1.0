@@ -1,7 +1,81 @@
 const {
   COMMAND_ERROR_CODES,
+  isCommandEnvelope,
   normalizeCommand,
+  validateCommandEnvelope,
 } = require('@shroom/backend/contract/commandProtocol.js');
+const {
+  SERIAL_ROLES,
+  normalizeSerialRole,
+} = require('@shroom/backend/contract/sdkApiContract.js');
+
+const LEGACY_SERIAL_ROLES = new Set(Object.values(SERIAL_ROLES));
+
+function normalizeBackendSerialRole(role) {
+  const rawRole = String(role || '').trim();
+  if (!rawRole) return '';
+  const normalizedRole = normalizeSerialRole(rawRole);
+  return typeof normalizedRole === 'string' ? normalizedRole : rawRole;
+}
+
+/**
+ * SDK 合约保持只认识四个旧串口角色；应用后端在它外面补一层 manifest 动态角色适配。
+ * 这样无需修改 SDK，HTTP 的 serial.open/serial.close 也能承载 armLeft 等任意 serialRole。
+ */
+function normalizeDynamicSerialCommand(message) {
+  if (!isCommandEnvelope(message)) return null;
+  if (message.type !== 'serial.open' && message.type !== 'serial.close') return null;
+  const envelope = validateCommandEnvelope(message);
+
+  if (envelope.type === 'serial.open') {
+    const rawRole = String(envelope.payload.role || '').trim();
+    const role = normalizeBackendSerialRole(rawRole);
+    if (!role) return null;
+    if (LEGACY_SERIAL_ROLES.has(role)) {
+      if (role === rawRole) return null;
+      return normalizeCommand({
+        ...envelope,
+        payload: { ...envelope.payload, role },
+      });
+    }
+    return {
+      command: { channelPorts: { [role]: envelope.payload.path } },
+      envelope,
+      legacy: false,
+    };
+  }
+
+  const requestedRoles = envelope.payload.roles ?? envelope.payload.role;
+  if (requestedRoles == null) return null;
+  const rawRoles = [...new Set(
+    (Array.isArray(requestedRoles) ? requestedRoles : [requestedRoles])
+      .map((role) => String(role || '').trim())
+      .filter(Boolean),
+  )];
+  const roles = [...new Set(rawRoles.map(normalizeBackendSerialRole).filter(Boolean))];
+  const dynamicRoles = roles.filter((role) => !LEGACY_SERIAL_ROLES.has(role));
+  const aliasesNormalized = roles.length !== rawRoles.length || roles.some((role, index) => role !== rawRoles[index]);
+  if (!dynamicRoles.length && !aliasesNormalized) return null;
+  const legacyRoles = roles.filter((role) => LEGACY_SERIAL_ROLES.has(role));
+  const legacyCommand = legacyRoles.length
+    ? normalizeCommand({
+      ...envelope,
+      payload: { ...envelope.payload, roles: legacyRoles },
+    }).command
+    : {};
+  return {
+    command: {
+      ...legacyCommand,
+      ...(dynamicRoles.length ? { channelClose: dynamicRoles } : {}),
+    },
+    envelope,
+    legacy: false,
+  };
+}
+
+function normalizeRouterCommand(message) {
+  return normalizeDynamicSerialCommand(message) || normalizeCommand(message);
+}
 
 /**
  * 创建 WebSocket/HTTP 共用的命令路由器。
@@ -36,7 +110,7 @@ function createWebSocketCommandRouter({ logger } = {}) {
    * @returns {{handled: boolean, stop: boolean, results: object[]}} 执行摘要。
    */
   function handle(message, context = {}) {
-    const normalized = normalizeCommand(message);
+    const normalized = normalizeRouterCommand(message);
     const command = normalized.command;
     const commandContext = {
       ...context,
@@ -96,4 +170,5 @@ function createWebSocketCommandRouter({ logger } = {}) {
 
 module.exports = {
   createWebSocketCommandRouter,
+  normalizeDynamicSerialCommand,
 };

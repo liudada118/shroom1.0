@@ -315,8 +315,7 @@ export default function Demo() {
     ws.onclose = (e) => {
       // connection closed
     };
-    // [优化] ws1(19998) 和 ws2(19997) 已合并到主 ws.onmessage 中
-    // backData 和 headData 现在通过 19999 统一广播;
+    // 靠背和头枕逻辑通道已合并到主 ws.onmessage 中，统一从 19999 接收。
   }, [flag]);
   return (
     <>

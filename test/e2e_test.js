@@ -9,7 +9,7 @@ const fs = require('fs');
 
 const PROJECT_DIR = '/home/ubuntu/shroom1.0';
 const STATIC_PORT = 12321;
-const WS_PORTS = { main: 19999, back: 19998, head: 19997 };
+const WS_PORTS = { main: 19999 };
 const SCREENSHOT_DIR = path.join(PROJECT_DIR, 'test', 'screenshots');
 const REPORT_PATH = path.join(SCREENSHOT_DIR, 'test_report.json');
 

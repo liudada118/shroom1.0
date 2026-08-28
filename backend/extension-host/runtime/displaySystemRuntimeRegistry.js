@@ -65,7 +65,7 @@ function createDisplaySystemRuntimeRegistry({ logger } = {}) {
         lineOrder: channel.processing?.lineOrder?.source || null,
         pointOrder: channel.processing?.pointOrder?.source || null,
         algorithmType: channel.processing?.algorithm?.type || 'none',
-        outputChannel: channel.serialRole,
+        outputChannel: channel.outputChannel || channel.serialRole,
         status: channel.status,
       })),
     };

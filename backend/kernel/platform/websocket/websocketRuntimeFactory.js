@@ -4,24 +4,16 @@ const { createRealtimeTelemetryGateway } = require('../../realtime/realtimeTelem
 const {
   createWebSocketSubscriptionManager,
 } = require('./websocketSubscriptionService');
-const { CHANNELS } = require('./websocketChannelService');
+const { SHARED_WEBSOCKET_PORT } = require('./websocketChannelService');
 
-function createWebSocketServers({
-  sitPort = CHANNELS.sit.port,
-  backPort = CHANNELS.back.port,
-  headPort = CHANNELS.head.port,
-} = {}) {
-  return {
-    sit: new WebSocket.Server({ port: sitPort }),
-    back: new WebSocket.Server({ port: backPort }),
-    head: new WebSocket.Server({ port: headPort }),
-  };
+function createWebSocketServer({ port = SHARED_WEBSOCKET_PORT } = {}) {
+  return new WebSocket.Server({ port });
 }
 
 /**
  * 创建 WebSocket 运行时装配。
  *
- * 这里集中创建 legacy WebSocket server、订阅管理器、ChannelBus 和实时 telemetry 网关。
+ * 这里集中创建单个 WebSocket server、订阅管理器、ChannelBus 和实时 telemetry 网关。
  * server.js 只保留发布函数、连接处理器绑定和关闭生命周期。
  *
  * @param {object} options 创建参数。
@@ -34,7 +26,7 @@ function createWebSocketRuntime({
   getSensorType,
   channelBusFactory = createChannelBus,
   realtimeTelemetryGatewayFactory = createRealtimeTelemetryGateway,
-  webSocketServersFactory = createWebSocketServers,
+  webSocketServerFactory = createWebSocketServer,
   webSocketSubscriptionManagerFactory = createWebSocketSubscriptionManager,
 } = {}) {
   const wsSubscriptions = webSocketSubscriptionManagerFactory({ logger });
@@ -44,12 +36,12 @@ function createWebSocketRuntime({
     wsSubscriptions,
     getSensorType,
   });
-  const wsServers = webSocketServersFactory();
+  const wsServer = webSocketServerFactory();
 
   /**
    * 发布实时帧到旧 WebSocket 通道和标准 telemetry 通道。
    *
-   * @param {string} channel 实时通道，通常是 sit/back/head。
+   * @param {string} channel manifest 声明的任意 outputChannel。
    * @param {string | object} payload 帧数据。
    * @returns {number} 旧 WebSocket 通道发送数量。
    */
@@ -61,12 +53,12 @@ function createWebSocketRuntime({
     channelBus,
     publishRealtimeFrame,
     realtimeTelemetryGateway,
-    wsServers,
+    wsServer,
     wsSubscriptions,
   };
 }
 
 module.exports = {
-  createWebSocketServers,
+  createWebSocketServer,
   createWebSocketRuntime,
 };

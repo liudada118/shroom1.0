@@ -2,21 +2,21 @@
 
 > 压力传感矩阵数据采集、处理与可视化桌面应用
 
-## 当前代码分类（2026-06-17）
+## 当前代码分类（2026-08-28）
 
 - `app/electron/`：Electron 主进程入口和 preload 安全桥。
 - `app/update/`：自动更新模块。
-- `backend/server/`：后端核心入口，串口、WebSocket、采集、回放和导出主流程。
-- `backend/runtime/`：后端运行时门面，承接 Electron 调用、命令路由和 WebSocket 广播工具。
-- `backend/services/`：后端横向业务服务层；当前已收口 WebSocket 广播/三通道、服务关闭生命周期、采集配置、采集磁盘保护、批量入库队列和历史查询能力，供 runtime 与 server 复用。
-- `backend/sensors/`：全类型传感器注册表和插件化模块；统一维护波特率、矩阵尺寸、通道、能力分类和存储策略，`smallBed12B.js`、`minzhen.js`、`wholeChair.js`、`handGloveFullPacket.js` 已承接各自复杂解析/映射逻辑。
+- `backend/runtime/`：Electron 固定后端桥，稳定导出启动、关闭、命令和实时广播能力。
+- `backend/kernel/`：稳定运行链路，按平台、串口、存储、回放、CSV、实时和算法通道分类。
+- `backend/extension-host/`：展示系统 manifest 的发现、校验、运行时绑定、调度和用户工作区。
+- `backend/extensions/`：内置传感器运行时和可复制扩展示例。
+- `backend/compatibility/`：仍被历史链路使用的数据兼容工具，不包含旧路径转发层。
+- `sdk/backend/`：协议、串口底层、采集、存储和通用处理能力的单一来源。
 - `client/src/displays/`：前端全类型展示注册表，集中描述展示系统的矩阵尺寸、默认模式、通道和能力。
-- `backend/processing/`：线序、矩阵、压力和传感器数据处理。
-- `backend/common/`、`backend/db/`、`backend/ws/`、`backend/serial/`、`backend/export/`、`backend/license/`、`backend/config/`、`backend/python/`：后端公共能力按功能拆分。
 - `assets/`：图标和授权资源。
 - `tools/generators/`：生成和解析脚本。
-- `runtime/`：日志、临时文件和历史遗留入口文件。
-- `docs/markdown/`：从根目录归档的 Markdown 说明文档。
+- `runtime/`：开发态日志、临时文件、上传和导出产物（Git 忽略）。
+- `dist/`：安装包和更新清单构建产物（按要求保留在一级目录，Git 忽略）。
 
 ## 简介
 
@@ -66,26 +66,26 @@ xattr -dr com.apple.quarantine /Applications/Shroom.app
 ## 项目结构
 
 ```
-shroom1.0/
-├── index.js          # Electron 主进程入口
-├── server.js         # 核心后端逻辑（串口、WebSocket、数据库）
-├── openWeb.js        # 传感器数据处理函数
-├── utilMatrix.js     # 矩阵工具函数
-├── aes_ecb.js        # AES 加密/解密模块
-├── forge.config.js   # Electron Forge 打包配置
-├── client/           # React 前端应用
-│   └── src/
-│       ├── components/three/   # Three.js 3D 渲染组件
-│       ├── components/heatmap/ # 2D 热力图组件
-│       └── page/               # 页面组件
-├── db/               # SQLite 数据库目录
-└── docs/             # 项目文档
-    └── architecture.md  # 架构文档
+shroom1/
+├── app/electron/              # Electron 稳定壳与 preload
+├── backend/
+│   ├── runtime/               # Electron 固定后端桥
+│   ├── kernel/                # 稳定运行链路
+│   ├── extension-host/        # 通用扩展宿主
+│   ├── extensions/            # 内置扩展实现
+│   ├── compatibility/         # 必要历史兼容
+│   └── tests/
+├── sdk/                       # 前后端可复用能力
+├── client/                    # React 页面与可视化
+├── display-systems/           # 展示系统 manifest
+├── build/                     # 出厂离线网页
+├── runtime/                   # 开发态运行产物
+└── dist/                      # 安装包构建产物
 ```
 
 ## 文档
 
-详细架构文档请参阅 [docs/architecture.md](./docs/architecture.md)
+详细架构文档请参阅 [ARCHITECTURE.md](./ARCHITECTURE.md)
 
 Mac 正式打包与自动更新发布流程请参阅 [docs/mac_release_flow.md](./docs/mac_release_flow.md)
 

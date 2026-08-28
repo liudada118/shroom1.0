@@ -107,8 +107,6 @@ function createServerShutdownOrchestrator({
     const shutdownPromise = Promise.all([
       closeWithTimeout('serial ports', serialManager.closeAll('shutdown')),
       closeWithTimeout('server', closeWsServer(runtime.server, 'server')),
-      closeWithTimeout('server1', closeWsServer(runtime.server1, 'server1')),
-      closeWithTimeout('server2', closeWsServer(runtime.server2, 'server2')),
       closeWithTimeout('report HTTP server', closeHttpServer(runtime.reportHttpServer, 'report HTTP server')),
       closeWithTimeout('db', closeDatabase(logger, runtime.db, 'db')),
       closeWithTimeout('db1', closeDatabase(logger, runtime.db1, 'db1')),

@@ -1493,13 +1493,8 @@ class Home extends React.Component {
     // // else if (this.state.matrixName === 'yanfeng10') {
     // //   ws = new WebSocket("ws://sensor.bodyta.com:8888/bed/ec4d3e7ec6e5");
     // // }
-    // else {
-    //   ws = new WebSocket("ws://127.0.0.1:19999");
-    //   ws1 = new WebSocket("ws://127.0.0.1:19998");
-    //   ws2 = new WebSocket("ws://127.0.0.1:19997");
-    // }
     ws = createJsonWebSocket(WS_URLS.MAIN);
-    // [优化] 统一使用单 WS 连接，不再需要 ws1(19998) 和 ws2(19997)
+    // 坐垫、靠背和头枕共用这一条连接，按消息字段或订阅通道区分。
     ws.onopen = () => {
       // connection opened
       console.info("connect success");
@@ -3836,8 +3831,6 @@ class Home extends React.Component {
     // }else{
     //   ws.close()
     //   ws = new WebSocket("ws://127.0.0.1:19999");
-    //   ws1 = new WebSocket("ws://127.0.0.1:19998");
-    //   ws2 = new WebSocket("ws://127.0.0.1:19997");
     //   ws.onopen = () => {
     //     // connection opened
     //     console.info("connect success");

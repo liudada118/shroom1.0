@@ -8,12 +8,22 @@ const { registerControlRoutes } = require('../../kernel/platform/http/controlRou
 async function run() {
   const router = createWebSocketCommandRouter();
   const received = [];
+  const dynamicReceived = [];
+  const serialStatusRoles = [];
   router.register({
     name: 'serial-open',
     when: (message) => message.sitPort != null,
     handle: (message) => {
       received.push(message);
       return { opened: true };
+    },
+  });
+  router.register({
+    name: 'serial-dynamic',
+    when: (message) => message.channelPorts != null || message.channelClose != null,
+    handle: (message) => {
+      dynamicReceived.push(message);
+      return { accepted: true };
     },
   });
   const controlCommandService = createControlCommandService({ commandRouter: router });
@@ -25,7 +35,12 @@ async function run() {
     getRealtimeChannels: () => [],
     listPorts: async () => [],
     logger: { warn: () => {} },
-    serialManager: { getStatus: () => ({}) },
+    serialManager: {
+      getStatus: (role) => {
+        serialStatusRoles.push(role);
+        return { role: role || null };
+      },
+    },
   });
 
   const server = http.createServer(app);
@@ -50,6 +65,59 @@ async function run() {
     assert.strictEqual(successBody.data.code, 'OK');
     assert.strictEqual(successBody.data.ok, true);
     assert.strictEqual(received[0].sitPort, 'COM9');
+
+    const seatAliasResponse = await fetch(`${baseUrl}/api/commands`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type: 'serial.open',
+        payload: { role: 'seat', path: 'COM10' },
+        requestId: 'req-http-seat-alias',
+      }),
+    });
+    assert.strictEqual(seatAliasResponse.status, 200);
+    assert.strictEqual(received[1].sitPort, 'COM10');
+
+    const seatStatusResponse = await fetch(`${baseUrl}/api/serial/status?role=seat`);
+    assert.strictEqual(seatStatusResponse.status, 200);
+    assert.strictEqual(serialStatusRoles.at(-1), 'sit');
+
+    const dynamicCommandResponse = await fetch(`${baseUrl}/api/commands`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type: 'serial.open',
+        payload: { role: 'armLeft', path: 'COM11' },
+        requestId: 'req-http-dynamic-command',
+      }),
+    });
+    assert.strictEqual(dynamicCommandResponse.status, 200);
+    assert.deepStrictEqual(dynamicReceived[0], { channelPorts: { armLeft: 'COM11' } });
+
+    const dynamicRouteResponse = await fetch(`${baseUrl}/api/serial/open`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ role: 'armRight', path: 'COM12' }),
+    });
+    assert.strictEqual(dynamicRouteResponse.status, 200);
+    assert.deepStrictEqual(dynamicReceived[1], { channelPorts: { armRight: 'COM12' } });
+
+    const dynamicCloseResponse = await fetch(`${baseUrl}/api/serial/close`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ role: 'armLeft' }),
+    });
+    assert.strictEqual(dynamicCloseResponse.status, 200);
+    assert.deepStrictEqual(dynamicReceived[2], { channelClose: ['armLeft'] });
+
+    const invalidSerialRouteResponse = await fetch(`${baseUrl}/api/serial/open`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ role: 'armLeft' }),
+    });
+    const invalidSerialRouteBody = await invalidSerialRouteResponse.json();
+    assert.strictEqual(invalidSerialRouteResponse.status, 400);
+    assert.strictEqual(invalidSerialRouteBody.data.code, 'INVALID_COMMAND');
 
     const invalidResponse = await fetch(`${baseUrl}/api/commands`, {
       method: 'POST',
@@ -77,7 +145,7 @@ async function run() {
     });
     assert.strictEqual(wsResult.stop, true);
     assert.strictEqual(wsResult.error.code, 'TRANSPORT_NOT_ALLOWED');
-    assert.strictEqual(received.length, 1);
+    assert.strictEqual(received.length, 2);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

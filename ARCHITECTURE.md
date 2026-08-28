@@ -2,6 +2,50 @@
 
 > 最后更新于：2026-08-28
 
+## 2026-08-28 单 WebSocket 端口与统一多串口编排
+
+对照 `E:\shroom` 后确认，它的“多串口”并不是让多个设备共用一个 `SerialPort`，而是只创建
+一份 `SerialManager`，再由该管理器维护多个物理串口会话；每个真实 COM 口仍必须有自己的
+`SerialPort` 实例。`shroom1` 的 SDK 底层本来已经采用这一模型，本轮没有复制第二套 manager，
+也没有修改 SDK。应用侧把之前同时存在于 `server.js` 和
+`kernel/serial/serialPortOrchestrator.js` 的打开规则收回统一编排器：经典 `sit/back/head/sensor`
+和 manifest 自定义角色都调用同一 manager，协议、波特率和 parser channel 继续由当前展示系统
+manifest 决定。
+
+动态角色的控制入口也不再依赖四角色枚举：HTTP `serial.open` / `serial.close` 以及通用
+`/api/commands` 在应用后端把非旧角色适配为 `channelPorts` / `channelClose`，再进入同一串口
+控制服务；角色未在当前 manifest 声明时返回 `INVALID_COMMAND`，不会猜协议或接受请求中的
+临时波特率覆盖。动态角色关闭只接受当前 manifest 声明或 SerialManager 已登记的角色；切换
+展示系统会关闭管理器中的全部物理串口并禁用旧角色重连。批量打开先完整校验全部角色，同步
+失败时关闭本批已经启动的串口，避免只执行前半批。`seat` 仍归一化为 `sit`。旧四角色继续走
+原 SDK 命令转换，SDK 文件本身未修改。
+
+本轮只借鉴统一管理和统一编排边界，没有复制 `E:\shroom` 中按波特率猜设备类型、向设备发送
+AT 指令读取标识、按固定帧长硬分支的实现。多个现有设备会共用相同波特率，直接照搬会误判设备，
+还可能改变硬件协议和历史数据语义；自动扫描、协议探测、稳定打开重试和持久设备标识映射需在
+录制帧与真机测试齐备后单独评审。
+
+本地 Electron 后端的 WebSocket 从 `19999/19998/19997` 三个物理 Server 收敛为一个
+`19999` Server。WebSocket 基础设施不再维护 `sit/back/head` 常量表或白名单；当前展示系统的
+任意 `outputChannel` 由 manifest 和 SerialManager 已注册角色动态生成，例如新增 `armLeft`、
+`armRight` 不需要再改后端通道代码。`sit/back/head` 只作为现有配置与旧消息字段继续兼容：旧页面
+连接后默认订阅 `*`，继续收到 `sitData/backData/headData`；新客户端可以通过 `subscribe` 精确
+订阅任意 outputChannel；系统状态、回放和授权事件仍使用 `main` scope。Electron 固定入口
+`getWsServer(channel)` 与 SDK 地址保持不变，但任何仓外
+旧客户端若仍直连 `19998/19997`，需要迁移到 `19999`。远端座椅 `23001` 和外部 CAN 页面
+`29999` 是客户端连接的外部数据源，不是本地后端监听端口，本轮未改。
+
+关闭流程现在只释放一次共享 WebSocket Server；`runtime.broadcastRealtime()` 保留公开签名，
+内部改走订阅管理器、ChannelBus 和 telemetry 网关，避免单 Server 下绕过逻辑通道。新增测试锁定
+单实例创建、单次关闭、默认通配订阅、`armLeft` 等动态精确订阅不串台/不重复投递、动态 HTTP
+开关串口，以及自定义数据字段到标准 telemetry 的后端适配；同一
+SerialManager 承接经典和 manifest 多路串口。未修改硬件协议、线序/点序、标定、历史数据格式、数据库结构、
+Electron 固定入口或 SDK。
+
+验证结果：后端 49 个测试文件、前端 31 个测试文件（384 项）、SDK 后端 smoke 10 项和前端
+ESLint 均通过。尚未用真实多串口硬件验证同时连接，也未验证仓外旧客户端迁移；`build/` 与
+`dist/` 本轮未重新生成。
+
 ## 2026-08-28 运行产物收拢与平台内部边界精简
 
 根目录继续保留 `dist/`，它是安装包与更新清单构建产物，仍由 `.gitignore` 排除；
@@ -20,7 +64,8 @@
 Electron 固定桥；`kernel/platform/runtime/` 是 server 进程状态源码；
 `extension-host/runtime/` 是展示系统的通道规划、绑定和调度。平台运行态删除两个单调用方
 工厂后由 9 个 JavaScript 文件减为 7 个；WebSocket 将串口命令纯转发、单调用方 server factory
-和广播基础层收进真实调用方后由 13 个减为 10 个，并以 `CHANNELS` 作为端口唯一来源。
+和广播基础层收进真实调用方后由 13 个减为 10 个；共享端口只有 `SHARED_WEBSOCKET_PORT` 一个
+常量，逻辑通道来自 manifest `outputChannel` 和 SerialManager 状态，不维护固定通道表。
 
 `backend/extensions/`、`backend/extension-host/`、平台 runtime 与 WebSocket 均新增逐文件
 职责说明。扩展宿主内部 factory 改为直接导入具体模块，并新增依赖边界测试，公共 `index.js`
@@ -2412,7 +2457,7 @@ flowchart LR
 
 3. **历史数据回放流程**
     - 用户在历史数据页选择记录 → 前端发送 `play` 指令 → `kernel/storage` 查询 SQLite 历史帧，`kernel/playback` 按现有格式转换和定时 → 通过稳定 WebSocket 链路逐帧推送 → 前端在 `Home.jsx` 和 `Title.jsx` 里管理播放状态（播放/暂停/变速/跳帧）。（曾计划抽成 `usePlayback` Hook，该文件从未被任何页面消费，已于 2026-07-31 删除。）
-    - `smallBed12B` 回放兼容 32x32 原始采集和 16x16 缩小采集两种历史格式；`server.js` 会把对象格式历史帧还原为 `sitData` 并携带 `matrixWidth/matrixHeight`，32x32 采集按 32x32 回放，16x16 采集按 16x16 回放，不再把 256 点历史帧扩回 1024 点；`Home.jsx` 默认按标题栏 `展示设置` 初始化 12B 视图尺寸，`Title.jsx` 的回放/历史入口和历史时间选择都会同步 `smallBed12BDisplayOptions` 给后端，`server.js` 的主 WebSocket 与辅助 WebSocket 消息入口都会先应用该设置再处理 `getTime/loadSelectedHistory`，因此历史选择空帧也会按展示设置输出 16x16 或 32x32；前端只根据真实矩阵帧的 `matrixWidth/matrixHeight` 或历史回放帧的 `sitData` 方阵长度同步尺寸，控制/进度/切换清空类 WebSocket 消息不会再把尺寸回退到 32x32，避免默认展示和回放时反复重挂载闪烁。
+    - `smallBed12B` 回放兼容 32x32 原始采集和 16x16 缩小采集两种历史格式；`server.js` 会把对象格式历史帧还原为 `sitData` 并携带 `matrixWidth/matrixHeight`，32x32 采集按 32x32 回放，16x16 采集按 16x16 回放，不再把 256 点历史帧扩回 1024 点；`Home.jsx` 默认按标题栏 `展示设置` 初始化 12B 视图尺寸，`Title.jsx` 的回放/历史入口和历史时间选择都会同步 `smallBed12BDisplayOptions` 给后端，共享 WebSocket 消息入口会先应用该设置再处理 `getTime/loadSelectedHistory`，因此历史选择空帧也会按展示设置输出 16x16 或 32x32；前端只根据真实矩阵帧的 `matrixWidth/matrixHeight` 或历史回放帧的 `sitData` 方阵长度同步尺寸，控制/进度/切换清空类 WebSocket 消息不会再把尺寸回退到 32x32，避免默认展示和回放时反复重挂载闪烁。
     - 大体量历史记录（如几十万帧以上）选中时，`server.js` 不再一次性 `SELECT *` 加载全部帧到内存；改为先查询 `COUNT/MIN(id)/MAX(id)` 元信息、建立 `matrix(date,id)` 索引、生成最多约 2000 点的抽样压力/面积曲线，并通过懒加载代理在回放或拖动进度时按当前帧索引读取单帧，避免 90 万帧记录选中和回放时阻塞 Electron 主进程。
 
 4. **授权验证流程**
@@ -2432,13 +2477,11 @@ flowchart LR
 
 ## 5. API 端点 (Endpoints)
 
-实时数据与控制指令走 **WebSocket 消息协议**；展示系统的查询与写入另有一组 HTTP 路由（公共路径常量集中在 `sdk/backend/contract/sdkApiContract.js` 的 `HTTP_ROUTES`，应用装配位于 `backend/kernel/platform/http/`）。系统运行 3 个 WebSocket 服务器：
+实时数据走 **WebSocket 消息协议**，新控制指令优先走 HTTP；旧 WebSocket 控制消息继续由兼容入口处理。展示系统的查询与写入另有一组 HTTP 路由（公共路径常量集中在 `sdk/backend/contract/sdkApiContract.js` 的 `HTTP_ROUTES`，应用装配位于 `backend/kernel/platform/http/`）。本地后端只运行 1 个 WebSocket 服务器：
 
 | WebSocket 端口 | 用途 | 数据方向 |
 | :--- | :--- | :--- |
-| `19999` | 主数据通道（压力矩阵数据 + 控制指令） | 双向 |
-| `19998` | 辅助数据通道（靠背/头枕等附加传感器） | 后端 → 前端 |
-| `19997` | 辅助数据通道（第三路传感器数据） | 后端 → 前端 |
+| `19999` | 唯一共享传输端点；承载 manifest 动态 `outputChannel`（兼容 `sit/back/head`）、系统事件和旧控制指令 | 双向 |
 
 ### WebSocket 消息类型（前端 → 后端）
 
@@ -2906,11 +2949,13 @@ flowchart LR
 | 2026-07-29 | codeOpi | 侧栏图表接入零件栏 | 零件栏从「只管画布」扩成两块表面：`selection.charts` 与 `selection.canvas` 同构、同键、互不影响，由 `resolveChartAppearance` 解析（复用同一套归一丢弃逻辑；manifest 暂无图表默认外观字段，故只有用户偏好一层）。`PART_CATEGORIES` 增加 `chartColormap` / `chartOverlay`，`partSurface` / `applySurfacePart` / `isSurfacePartActive` 三个纯函数把 `chart` 前缀剥掉后复用既有画布语义，两块表面的零件行为因此不会分叉；`PartRail` 隐藏零件为空的类别。新增 `components/aside/chartAppearance.js` 提供纵向渐变描边（`classic` 不调 `createLinearGradient`，逐像素不变）与网格 / 刻度 / 峰值 / 末值四个叠加层（不含图例 —— 300×150 的画布放不下色带）。`Aside` 的 `drawChart` 接 `chartAppearance` prop，网格画在曲线前、装饰画在曲线后并用 `save`/`restore` 包住以免污染后面的虚线游标；`CanvasCom.shouldComponentUpdate` 增比 `chartKey`（不进 `childBaseKey` —— `Aside` 持有全部实时读数，重挂等于清空侧栏），暂停 / 停帧场景由 `componentDidUpdate` 用 `_pendingChart` / `_pendingArea` 缓存补画一次。图表零件跟着 `renderCanvasRail()` 的 5 个挂载点走，其余页面的侧栏仍是原样。测试：新增 `chartAppearance.test.js` 14 例（用记录调用的假 2D 上下文断言「该画的画了、不该画的一笔没动」），`canvasParts.test.js` 补表面归属 6 例，后端 `displayProfileRuntime.test.js` 补图表偏好隔离与坏值归一（前端 95 通过，后端 34/34）。 |
 | 2026-07-30 | codeOpi | 图表卡片本身也是零件 | 把 neal.fun 那个交互的核心动作补上：拖一个零件，页面上真的多一张图表。零件用 `formulaChartTemplates.js` 已有的 6 个模板，新卡片就是一条普通的公式图表定义（多一个 `templateId`），**没有新造图表系统** —— 生命周期、公式编译、逐帧求值全是 `FormulaChartPanel` 已经在跑的东西，这一轮加的是拖放入口和大卡片长相。`chartWidget` 作为**第三块表面**：它写 `shroom.formulaCharts.v1.<matrixName>` 而不是 `display-profile:<id>`，所以 `partSurface` 多返回一个 `'chartWidget'`，`applySurfacePart` / `isSurfacePartActive` 遇到它原样返回 / 返回 false，由配置器交给 `onChartWidgetAdd` 回调 —— 前两块表面一行未改。清单下沉成 `formulaChartStore.js`（一个 localStorage 键一个主人 + 模块级 `Set` 做 `subscribe`），`Home`（要零件高亮）与 `Aside`（要画卡片）**各自订阅**而不靠 props 穿 `CanvasCom.shouldComponentUpdate` 那道闸；`Aside` 的 `super()` 不带 props，故首载放在 `componentDidMount`，`Home.componentDidMount` 会被 `window.__wsReconnect` 重入所以订阅加了幂等守卫。防重复添加靠两级匹配：新定义按 `templateId`，老定义（`+` 号弹窗建的）回退到 `formulasMatch` 比较归一表达式 —— 少这一级会拖出第二份一模一样的卡片。加是幂等的（用户可能已改过公式，再拖当删除等于静默毁掉编辑），删只走卡片 Popconfirm 或把卡片拖回零件栏；那个 drop 处理器只在真删掉东西时才 `preventDefault`，否则 `z-index: 1210` 的底栏会吞掉落向画布的普通零件。卡片由 `Aside` 用自己的 `drawChart` 画（照抄 `onBuiltinSeries` 通路，多一个 `onCustomSeries`），因此免费获得上一轮的图表配色与四个叠加层、且与 Pressure Area 逐像素同源；canvas 不写 width/height 属性以保住 `drawChart` 的 `gap` 数学。自定义图表历史值从 `useState` 移到 ref，Panel 不再以 10Hz re-render，只剩常显入口与编辑弹窗（删掉自己那段 SVG 列表与 7 组死样式），`useImperativeHandle` 多暴露 `openEdit(id)`。测试：新增 `formulaChartStore.test.js` 19 例（坏 JSON、上限、幂等、订阅隔离与抛错容错、老定义公式回退匹配），`canvasParts.test.js` 补第三表面 2 例，`chartAppearance.test.js` 补 `buildSparklinePath` 3 例（前端 119 通过 / 10 套件，`App.test.jsx` 仍是既有的缺 `@testing-library/react`；后端 34/34；eslint 零告警）。 |
 | 2026-07-31 | codeOpi | 草稿层与三个动作 | 把「改坏了想复原、改好了想保存」这半件事补齐。**基线 vs 草稿**两层：基线是文件夹里的 `display-system.json`，草稿是 `display-profile:<id>` + `shroom.formulaCharts.v1.<matrixName>` 两个 localStorage 键；层次本来就是对的（用户偏好盖住 manifest 但没改掉它），这一轮只加动作、不动解析。新增 `displayDraftState.js`（纯函数，不碰 DOM 与 localStorage）：`describeDisplayDraft` 把同一个 `resolveDisplayProfile` 跑两遍 —— 一遍传只含 `profileId`/`rendererId`/`algorithmId` 的 `viewOnly` 当基线 —— 对比**解析结果**判脏，而不是看键在不在（拖走又拖回原值不该一直报脏）；`changes` 直接就是确认框文案，「移除」是撤掉用户加的、「恢复」是把 manifest 声明过却被关掉的放回来。**撤销**只删 `canvas` / `charts` 两个字段并靠 `persistDisplaySelection(..., {replace:true})` 覆盖写回 —— 整键 `removeItem` 会把用户正在看的方案/渲染方式/可视算法一起带走；卡片走 `resetFormulaCharts(matrixName, page.chartCards)` 回到基线而非清空。**保存**另开 `saveDisplaySection` 窄通路（读原文 → 只合并三段 → 原子写回），**不走 Builder 的 `save()`**：那个函数强制 `schemaVersion: 2`、重写 `sensor.matrix` / `protocol.decoding`、把 `files` 压成扁平路径，拿一份 v3 多传感器 manifest 过一遍只为加个配色会把它改坏（测试里有一份手写 v3 manifest 专门守这条）。合并语义 `undefined` = 不改、`null` = 删，所以前端无卡片时给 `[]` 而不是 `undefined`；**先校验后归一**（显式写错的 `legend` 要报错而不是被静默丢弃，落盘的是归一后的规范形态，因为这个文件是给做二开的人读的），唯独 `canvas.widgets` 前后端都显式删掉以保住「跟随 `display.widgets`」的语义。保存 = 写基线 + 清草稿，失败时**绝不清草稿**。**另存为**递归复制整个源目录（v3 有 `cushion/` 这类子目录）只重写 `id`/`name`/`metadata`/`display`，不做 JSON 往返；`metadata.origin` 必须显式改 `'user'`，否则 `classifyDisplaySystemAccess` 会按最高优先级判据把副本判成不可编辑；成功后就地 `registerRuntimeDisplayDefinition` + 派发 `shroom-display-systems-updated`，**留在原地只提示**，不 `sensor.switch` 以免中断现场采集。manifest 补上 `display.chartAppearance` / `display.chartCards`（**刻意不叫 `display.charts`**），`resolveChartAppearance` 加 manifest 基线层，卡片按 `hasFormulaCharts()` 区分「键不存在」与「用户主动删空」。两条新路由 `PATCH /:id/display` 与 `POST /:id/duplicate`，权限方向刻意不同：保存要求 `editable === true`，另存为不检查源能不能写（那是自带系统唯一的保存出路）。边界：约 55 个写死的老展示形式没有文件夹，**只有撤销**。测试：`workspaceService.test.js` 补 v3 逐字保留与目录复制、`appRuntimeDisplaySystems.test.js` 补只读拒绝与副本可编辑、`displaySystemsApi.test.js` 补 403/409/404、`displayDraftState.test.js` 全新（前端 142 通过 / 11 套件，后端 35/35，eslint 零告警）。 |
+| 2026-08-28 | codeOpi | 单 WebSocket 与统一多串口编排 | 对照 `E:\shroom`，确认并保留“一份 SerialManager 管多物理串口”的模型，把 `server.js` 重复串口打开规则收回 `serialPortOrchestrator`，经典与 manifest 通道继续共用现有 manager；本地 WebSocket 从三个物理 Server 收敛为唯一 `19999`，逻辑通道由 manifest `outputChannel` 与已注册串口动态生成，保留旧消息字段、Electron 固定入口和 SDK 默认地址。未复制波特率猜设备、AT 指令或硬编码协议分支。 |
 
 ## 9. 更新日志
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-28 | codeOpi | 优化重构 / 传输收口 | WebSocket 后端只监听 `19999`，删除固定 `CHANNELS` 表，任意 manifest `outputChannel` 通过同一连接动态复用；runtime 广播改走订阅与 telemetry，shutdown 只关闭一次。应用侧串口规则统一进入 `serialPortOrchestrator`，仍由单一 SDK SerialManager 和 manifest 协议驱动；未改 SDK、硬件协议、线序、标定或历史格式。 |
 | 2026-08-28 | codeOpi | 优化重构 / 目录治理 | 保留根 `dist`，将开发态 CSV、报告、上传、工具输出和临时状态收进忽略的 `runtime`；移除无引用且已核验重复/残缺的 `project`，人工 legacy runtime 归入测试区；platform runtime 由 9 文件减为 7，WebSocket 由 13 减为 10，扩展与平台目录补逐文件 README。45 个后端测试与 SDK smoke 10 项通过；未改 Electron 固定入口、SDK、硬件协议、历史格式或打包态路径。 |
 | 2026-08-28 | codeOpi | 优化重构 / 修复缺陷 | `backend/extension-host` 按 manifest、runtime、workspace 分组，内置传感器 registry 回归扩展实现目录；版本历史由硬编码改为构建期读取 Windows release notes，并修正 1.1.33 标题；增加运行生成物忽略规则。未修改 Electron 稳定入口、SDK、协议、历史格式、版本号或发布脚本。 |
 | 2026-08-28 | codeOpi | 优化重构 | 在用户确认高风险迁移后完成后端物理收拢：移除旧目录兼容层和 SDK 转发壳，生产代码与测试统一指向 `kernel`、`extension-host`、`extensions`、`compatibility`；保留 `backend/runtime/index.js` 与 `backend/common/logger.js` 两个 Electron 固定桥。未修改 SDK、硬件协议、历史数据格式或 Electron 入口。 |
