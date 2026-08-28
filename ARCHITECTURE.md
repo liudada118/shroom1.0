@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-08-27
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-08-28
 
 ## 1. 项目概述
 
@@ -139,6 +139,11 @@ shroom1.0/
 │           └── util/        # 前端工具函数
 │
 ├── docs/                    # 项目文档
+│   ├── shroom-platform-overview-and-guide.md
+│   ├── shroom-platform-target-architecture.md
+│   ├── shroom-product-concept-one-pager.md
+│   ├── patent/
+│   │   └── 三维人体压力数据优化渲染方法_专利交底草案.md
 │   ├── architecture_max.md
 │   ├── optimization_report_max.md
 │   ├── tech_optimization_proposal.md
@@ -169,7 +174,8 @@ shroom1.0/
 | `/client/src/components/three/` | Three.js 3D 渲染组件与兼容入口，覆盖不同传感器类型和矩阵尺寸 |
 | `/client/src/components/webgl/` | WebGL/Canvas 热力图渲染兼容模块，供机器人与复合体表映射组件复用 |
 | `/client/src/page/home/` | 主页面组件（Home.js），系统核心交互界面 |
-| `/docs/` | 架构文档、优化报告、技术优化建议，以及 EULA 最终用户许可协议文本 |
+| `/docs/` | 当前架构、目标平台架构、产品介绍、专利交底、优化报告、技术指南及 EULA 最终用户许可协议文本 |
+| `/build/model/human3-low-muscular*.glb` | 人体低面数参考模型及边界对比变体；用于构建资源验证，不改变 `HumanBodyOptimized` 当前默认模型入口 |
 | `/scripts/` | 打包与发布脚本目录，包含 Python runtime 同步、更新说明注入，以及打包前清理和 `afterPack`/`afterComplete` 兜底移除 `config.txt` 的脚本 |
 | `/python/app/` | Python 算法桥目录；`onbed_filter_example.py` 提供 JSON-line RPC，`oneStep/` 提供足压分析，`petCare/` 提供 `petCare` / `petCareMini` 算法二进制与调用文档 |
 | `/python/dist/onbed_server/`、`/pack-resources/python/onbed_server/` | Windows 正式 Python JSON-line runtime 的构建输出与打包同步副本；均为生成物，不进入 Git |
@@ -836,11 +842,13 @@ graph TD
 | 2026-08-27 | Revise | 人体原始数据67列展开图 | 按实物表格建立正面30列、7列中隔、背面30列的14槽位原始图谱；400个源通道投影为520个可见单元，只有前胸和后背按原表视觉重复行，Aside仍统计完整1024点原始帧。 |
 | 2026-08-27 | Revise | 人体原始数据单面切换与单位格统一 | 原始数据页新增“正面 / 背面”切换，一次只绘制当前面的7个槽位和30列布局；底层仍保留67列逻辑源表及14槽位投影。上半身按列数比例分配可用宽度并为每张卡保留一致外壳补偿，使手臂、肩膀和胸背单位格保持等大。 |
 | 2026-08-27 | Revise | 人体原始数据背面右肩臂方向修正 | 根据实物反馈将背面右肩膀与右手臂的三行顺序由 `0→1→2` 改为 `2→1→0`，肩到手的逐行列方向保持不变；通道号和值共用修正后的槽位投影，原始1024点、统计、实时、回放和CSV不变。 |
+| 2026-08-28 | Revise | 平台目标架构与人体渲染技术资料 | 新增平台介绍与使用指南、目标架构、产品概念一页纸和三维人体压力优化渲染专利交底草案，并同步人体低面数参考模型资源。 |
 
 ## 9. 更新日志
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-28 | Revise | 文档更新 | 归档 Shroom 平台目标态、产品说明、人体三维压力渲染专利交底与低模参考资源；Office 临时锁文件从版本控制移除并加入忽略规则。 |
 | 2026-08-26 | Revise | 修复缺陷 | 修复人体优化将过滤值错误应用在10倍显示值上的问题，过滤滑杆现在直接对应原始传感器读数，消除实际阈值偏低10倍的现象。 |
 | 2026-08-26 | Revise | 新增功能 | 人体热力增加“超节能”最近3点模式，将原“平均”档更名为“正常”；3/6/12点模式共享一份邻点映射，仅切换每帧顶点累加上限。 |
 | 2026-08-26 | Revise | 修复缺陷 | 人体全身优化 Canvas 显式固定为绝对定位的全视口 CSS 尺寸，使自适应 DPR 降档只降低内部渲染分辨率，不再改变可见画布尺寸或把模型投影中心推向右上角。 |

@@ -28,3 +28,4 @@ pack-resources/python/
 /OneStep
 /OneStep
 .worktrees/
+~$*.xlsx
