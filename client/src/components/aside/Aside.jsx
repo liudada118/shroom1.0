@@ -15,7 +15,7 @@ import {
     removeFormulaChart,
     subscribeFormulaCharts,
 } from './formulaChartStore'
-import { PART_DRAG_TYPE } from '../displaySystem/canvasConfigurator/canvasParts'
+import { PART_DRAG_TYPE } from '../../extensions/display-system/canvasConfigurator/canvasParts'
 import { withTranslation } from 'react-i18next'
 import dropBed from '../../assets/images/dropBed.png'
 import offBed from '../../assets/images/offBed.png'

@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "jqbed-manifest-demo",
+  "name": "JQ Bed Manifest Demo",
+  "version": "0.1.0",
+  "description": "Template for migrating the existing jqbed pressure matrix into a manifest driven display system.",
+  "sensor": {
+    "type": "jqbed",
+    "matrix": {
+      "rows": 32,
+      "cols": 32
+    },
+    "ports": ["sit"]
+  },
+  "files": {
+    "lineOrder": "line-order.json",
+    "pointOrder": "point-order.json"
+  },
+  "algorithm": {
+    "type": "json",
+    "dataFile": "algorithm-data.json"
+  },
+  "display": {
+    "views": ["heatmap"],
+    "defaultView": "heatmap"
+  },
+  "metadata": {
+    "migrationTemplate": true,
+    "runtimeMode": "template",
+    "sourceRuntime": "backend/extensions/built-in-sensors/sit1024FrameProcessor.js"
+  }
+}

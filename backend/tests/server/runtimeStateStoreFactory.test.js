@@ -2,7 +2,7 @@ const assert = require('assert');
 const {
   STORE_BACKED_RUNTIME_KEYS,
   createServerRuntimeStateStore,
-} = require('../../server/runtimeStateStoreFactory');
+} = require('../../kernel/platform/runtime/runtimeStateStoreFactory');
 
 const backedKeys = [];
 let boundStore = null;

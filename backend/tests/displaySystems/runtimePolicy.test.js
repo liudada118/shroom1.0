@@ -1,7 +1,7 @@
 const assert = require('assert');
 const {
   evaluateDisplaySystemDispatchPolicy,
-} = require('../../displaySystems');
+} = require('../../extension-host');
 
 const protectedBinding = {
   id: 'legacy:sit',

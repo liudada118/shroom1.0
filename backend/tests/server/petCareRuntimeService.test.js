@@ -3,13 +3,13 @@ const assert = require('node:assert/strict');
 
 const {
   DEFAULT_JQBED_ALGORITHM_VALUES,
-} = require('../../server/modules/jqbedAlgorithmConfig');
+} = require('../../kernel/algorithm-channel/jqbedAlgorithmConfig');
 const {
   buildJqbedGetDataArgs,
-} = require('../../server/modules/jqbedAlgorithmProtocol');
+} = require('../../kernel/algorithm-channel/jqbedAlgorithmProtocol');
 const {
   createPetCareRuntimeService,
-} = require('../../services/petcare/petCareRuntimeService');
+} = require('../../kernel/algorithm-channel/petCareRuntimeService');
 
 function createTimerHarness() {
   const timers = [];

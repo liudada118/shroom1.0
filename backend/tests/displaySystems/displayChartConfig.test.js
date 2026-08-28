@@ -6,10 +6,10 @@ const {
   normalizeChartCardsConfig,
   normalizeDisplayConfig,
   validateDisplayConfig,
-} = require('../../displaySystems');
+} = require('../../extension-host');
 const {
   buildDisplayMetadataFromDisplaySystem,
-} = require('../../displaySystems/displaySystemDefinitionBuilder');
+} = require('../../extension-host/displaySystemDefinitionBuilder');
 
 /** 只留下和这一段有关的错误，别的字段的报错不该影响断言。 */
 function errorsMatching(display, keyword) {

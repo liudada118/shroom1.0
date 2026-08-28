@@ -1,6 +1,6 @@
 const assert = require('assert');
-const legacy = require('../../legacy/openWeb');
-const lineOrders = require('../../processing/lineOrders');
+const legacy = require('../../compatibility/openWeb');
+const lineOrders = require('@shroom/backend/processing/lineOrders.js');
 
 const base = Array.from({ length: 4096 }, (_, index) => (index * 17 + 3) % 251);
 

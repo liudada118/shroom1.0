@@ -4,7 +4,7 @@ const {
   applyPointOrderDefinition,
   executeConfiguredMapping,
   normalizePointDefinition,
-} = require('../../processing/configMappingExecutor');
+} = require('@shroom/backend/processing/configMappingExecutor.js');
 
 const source = [10, 20, 30, 40];
 const lineOrder = { order: [4, 2, 1] };

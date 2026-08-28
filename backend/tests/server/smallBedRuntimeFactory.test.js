@@ -1,5 +1,5 @@
 const assert = require('assert');
-const { createServerSmallBedRuntime } = require('../../server/smallBedRuntimeFactory');
+const { createServerSmallBedRuntime } = require('../../extensions/built-in-sensors/smallBedRuntimeFactory');
 
 const state = {
   pressureFrame: null,

@@ -1,5 +1,5 @@
 const assert = require('assert');
-const { createServerSensorProcessors } = require('../../server/sensorProcessorFactory');
+const { createServerSensorProcessors } = require('../../extensions/built-in-sensors/sensorProcessorFactory');
 
 function identity(frame) {
   return frame;

@@ -1,7 +1,7 @@
 const assert = require('assert');
 const {
   createServerFramePipeline,
-} = require('../../server/framePipelineFactory');
+} = require('../../kernel/realtime/framePipelineFactory');
 
 const runtimeContext = {
   getSensorType: () => 'jqbed',

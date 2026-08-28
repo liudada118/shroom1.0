@@ -1,13 +1,13 @@
 const assert = require('assert');
 const {
   bindLegacySerialRuntime,
-} = require('../../server/runtimeBindingsFactory');
+} = require('../../extensions/built-in-sensors/runtimeBindingsFactory');
 const {
   createSerialRuntime,
-} = require('../../server/serialRuntimeFactory');
+} = require('../../kernel/serial/serialRuntimeFactory');
 const {
   createWebSocketRuntime,
-} = require('../../server/websocketRuntimeFactory');
+} = require('../../kernel/platform/websocket/websocketRuntimeFactory');
 
 const parserManager = { channels: { SIT: 'sit' } };
 const serialRuntime = createSerialRuntime({

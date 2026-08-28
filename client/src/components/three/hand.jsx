@@ -18,7 +18,7 @@ import {
   jet,
   jetgGrey,
 } from "../../assets/util/util";
-import { isClassicColormap, sampleColormapRgb } from "../displaySystem/colormaps";
+import { isClassicColormap, sampleColormapRgb } from "../../extensions/display-system/colormaps";
 // import { withData } from "./WithData";
 
 import { obj } from "../../assets/util/config";

@@ -7,8 +7,8 @@ const {
   buildDisplaySystemRuntimeDefinition,
   createDisplaySystemWorkspaceService,
   loadDisplaySystemDirectory,
-} = require('../../displaySystems');
-const { loadSerialProtocolPresets } = require('../../serial/protocols');
+} = require('../../extension-host');
+const { loadSerialProtocolPresets } = require('@shroom/backend/protocol/presets/index.js');
 
 const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'shroom-display-builder-'));
 

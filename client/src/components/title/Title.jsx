@@ -19,8 +19,8 @@ import { registerRuntimeDisplayDefinition } from '../../displays/registry';
 import { buildAccessibleSensorOptions } from '../../services/sensorStatus';
 import { translateDomainLabel } from '../../i18n/translateDomainLabel';
 import { getLanguageLocale } from '../../i18n';
-import JqbedAlgorithmConfigModal from './JqbedAlgorithmConfigModal';
-import { getJqbedConfigAccess } from './jqbedAlgorithmConfig';
+import JqbedAlgorithmConfigModal from '../../extensions/jqbed/JqbedAlgorithmConfigModal';
+import { getJqbedConfigAccess } from '../../extensions/jqbed/jqbedAlgorithmConfig';
 import {
   PRESSURE_SCENES,
   readPressureScene,

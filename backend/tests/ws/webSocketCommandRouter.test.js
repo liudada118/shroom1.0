@@ -1,7 +1,7 @@
 const assert = require('assert');
 const {
   createWebSocketCommandRouter,
-} = require('../../ws/webSocketCommandRouter');
+} = require('../../kernel/platform/websocket/webSocketCommandRouter');
 
 const warnings = [];
 const router = createWebSocketCommandRouter({

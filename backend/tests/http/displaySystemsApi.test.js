@@ -1,7 +1,7 @@
 const assert = require('assert');
 const http = require('http');
 const os = require('os');
-const { createHttpApp } = require('../../server/httpAppFactory');
+const { createHttpApp } = require('../../kernel/platform/http/httpAppFactory');
 
 async function main() {
   const displaySystemStatus = {

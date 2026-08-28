@@ -2,7 +2,7 @@ const assert = require('assert');
 const {
   HAND_RUNTIME_SNAPSHOT_KEYS,
   createServerHandRuntime,
-} = require('../../server/handRuntimeFactory');
+} = require('../../extensions/built-in-sensors/handRuntimeFactory');
 
 const calls = [];
 const runtimeStateStore = {

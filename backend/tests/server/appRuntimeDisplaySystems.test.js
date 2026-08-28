@@ -2,7 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { createAppRuntime } = require('../../server/appRuntimeFactory');
+const { createAppRuntime } = require('../../extension-host/appRuntimeFactory');
 
 const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'shroom-app-runtime-'));
 const resourceRoot = path.join(temporaryRoot, 'resources');

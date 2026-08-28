@@ -15,7 +15,7 @@ const path = require('path');
 const {
   DEFAULT_DISK_CHECK_INTERVAL_MS,
   createCollectionDiskSpaceGuard,
-} = require('../../services/collection/collectionService');
+} = require('@shroom/backend/collection/collectionService.js');
 
 const realDir = path.resolve(__dirname, '..', '..');
 

@@ -2,7 +2,7 @@ const assert = require('assert');
 const {
   createRuntimeStatePatchers,
   setIfPresent,
-} = require('../../server/runtimeStatePatchFactory');
+} = require('../../kernel/platform/runtime/runtimeStatePatchFactory');
 
 let directValue = 'old';
 const collectionState = {};

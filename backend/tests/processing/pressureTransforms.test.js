@@ -1,6 +1,6 @@
 const assert = require('assert');
-const legacy = require('../../legacy/openWeb');
-const pressure = require('../../processing/pressureTransforms');
+const legacy = require('../../compatibility/openWeb');
+const pressure = require('@shroom/backend/processing/pressureTransforms.js');
 
 const base = Array.from({ length: 4096 }, (_, index) => (index * 17 + 3) % 251);
 

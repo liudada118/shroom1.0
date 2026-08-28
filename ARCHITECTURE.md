@@ -1,5 +1,42 @@
 # 架构文档
 
+> 最后更新于：2026-08-28
+
+## 2026-08-28 按产品变化边界收拢仓库目录
+
+本轮不再按零散技术名词继续拆目录，而是按“稳定内核、扩展宿主、扩展实现、历史兼容”完成
+后端物理收拢。`backend/` 的一级目录从 22 个缩减为 7 个，文件从 205 个缩减为 168 个；
+35 个 SDK 转发壳和旧目录兼容壳被删除，不再同时维护新旧两套路由。
+
+当前后端结构为：
+
+```text
+backend/
+├─ common/logger.js              # Electron 固定日志桥
+├─ runtime/index.js              # Electron 固定后端入口
+├─ kernel/                       # 平台、串口装配、存储、回放、CSV、实时与算法通道
+├─ extension-host/               # 展示系统发现、校验、绑定与调度
+├─ extensions/                   # 内置传感器运行时与 manifest 示例
+├─ compatibility/                # 必须保留的历史数据工具
+└─ tests/                        # 后端回归测试
+```
+
+`kernel/` 下按真实职责分为 `platform/`、`serial/`、`storage/`、`playback/`、`csv/`、
+`realtime/` 和 `algorithm-channel/`。Electron 仍固定加载 `backend/runtime/index.js` 与
+`backend/common/logger.js`，因此这两个目录是稳定桥，不是未完成的散乱分类。
+
+前端把人体展示集中到 `client/src/visualization/human-body/`，把展示系统 Builder、运行时 UI、
+画布组件和 API 集中到 `client/src/extensions/display-system/`，把 JQBed 配置 UI 放到
+`client/src/extensions/jqbed/`，历史演示页统一放到 `client/src/legacy/demos/`。原
+`page/displaySystemBuilder/DisplaySystemBuilder.jsx` 继续作为稳定路由转发入口；`runtime/`、
+`renderers/`、`displays/`、`services/ws/` 等包含单例或注册副作用的前端基础设施保持原位。
+
+这次只整理物理位置和依赖方向，没有修改 Electron 稳定壳、SDK、串口协议、线序语义、标定、
+数据库结构或历史数据格式。串口、协议、采集、存储与通用处理的可复用实现仍以
+`sdk/backend/` 为单一来源，应用后端只负责装配和产品运行时，不复制第二套。
+仓库分类详见 `docs/repository-map.md`；其中也明确记录：当前 `build/` 只是安装包随附的出厂离线网页，
+在线下载后的 `current/previous/factory` 版本化缓存、完整性校验、原子切换和失败回滚尚未实现。
+
 ## 2026-08-28 Revise 产品能力语义合并
 
 本次以 `codeOpi` 为稳定内核，把 `Revise` 作为产品能力来源进行语义合并。Electron 仍由
@@ -1861,6 +1898,8 @@ flowchart LR
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-28 | 后端物理目录收拢完成 | `backend` 从 22 个一级目录收拢为 7 个、205 个文件缩减为 168 个，删除 35 个 SDK/旧路径转发壳；保留 Electron 的 `runtime` 与 `common/logger` 固定桥，SDK、协议、历史数据格式均未修改。 |
+| 2026-08-28 | 仓库按稳定内核与可变能力完成一期归类 | 后端应用能力集中到 `backend/kernel` 并保留旧路径兼容；人体展示、展示系统、JQBed 配置和历史演示分别进入 `visualization`、`extensions`、`legacy`。Electron、SDK、硬件协议与历史格式均未改动。 |
 | 2026-08-26 | 授权首页可作为单文件特效底稿 | 当前首页的品牌、密钥区、四类方案和反馈入口已整理为一个自包含 HTML；无需启动项目即可修改 CSS/JS 和查看效果，生产授权逻辑未被复制进原型。 |
 | 2026-08-25 | 仓库行尾统一 | `.gitattributes` 落地，575 文件 / 132740 行的 CRLF 假改动清零，工作区回到干净状态；`git ls-files --eol` 复核后全仓只剩 `forge.config.js` 一个索引侧 CRLF 遗留，已记账。 |
 | 2026-08-11 | SDK 文档页可以直接设置矩阵形状和一帧数据 | 用户可加载自己的坐标 JSON，页面自动识别行列和点数；随后直接粘贴或加载数组，并用 `1..N`、旋转和镜像核对真实方向。配置变化直接送进包内数字矩阵渲染器，不需要先改代码。 |
@@ -1990,7 +2029,7 @@ flowchart LR
 
 ---
 
-> 本文档由 Codex 自动生成和维护。最后更新于：2026-08-26
+> 本文档由 Codex 自动生成和维护。最后更新于：2026-08-28
 
 ## 2026-07-07 Display Systems Runtime 定义与复杂线序迁移
 
@@ -2037,7 +2076,25 @@ Shroom1.0 是一个基于 **Electron** 的跨平台桌面应用程序，专用�
 
 ## 3. 目录结构
 
-> 2026-06-17 更新：根目录业务文件已按模块迁移到 `app/`、`backend/`、`assets/`、`tools/`、`runtime/` 和 `docs/markdown/`。根目录仅保留项目级配置、入口说明和锁文件；Electron 主入口现在是 `app/electron/index.js`，后端核心入口是 `backend/server/server.js`，线序/矩阵处理入口是 `backend/processing/openWeb.js`。
+> 2026-06-17 更新：根目录业务文件已按模块迁移到 `app/`、`backend/`、`assets/`、`tools/`、`runtime/` 和 `docs/markdown/`。根目录仅保留项目级配置、入口说明和锁文件；Electron 主入口现在是 `app/electron/index.js`。
+
+> 2026-08-28 更新：后端当前入口是 `backend/runtime/index.js`，真实服务装配位于
+> `backend/kernel/platform/server.js`；展示系统能力位于 `backend/extension-host/` 与
+> `backend/extensions/`。前端产品能力以 `client/src/visualization/`、`client/src/extensions/`
+> 和 `client/src/legacy/` 为主。完整目录地图见 `docs/repository-map.md`。
+
+```text
+backend/
+├─ common/             # Electron 固定 logger 桥
+├─ runtime/            # Electron 固定后端入口
+├─ kernel/             # 稳定产品链路
+├─ extension-host/     # 可配置展示系统的宿主机制
+├─ extensions/         # 内置传感器运行时与示例
+├─ compatibility/      # 必须保留的历史兼容工具
+└─ tests/              # 回归测试
+```
+
+下方大树是早期仓库历史快照，仅用于理解演进，不代表当前物理位置。
 
 ```
 shroom1.0/
@@ -2217,10 +2274,14 @@ shroom1.0/
 
 | 目录/文件 | 主要功能 |
 | :--- | :--- |
-| `/index.js` | Electron 主进程入口，窗口管理、IPC 桥梁、安全配置（contextIsolation + sandbox），开发模式下会从 Vite 输出中识别并校验真实本地地址，避免误连其他 `localhost:3000` 页面 |
+| `/app/electron/index.js` | Electron 主进程入口，窗口管理、IPC 桥梁、安全配置（contextIsolation + sandbox），开发模式下会从 Vite 输出中识别并校验真实本地地址，避免误连其他 `localhost:3000` 页面 |
 | `/client/src/components/title/` | 顶部标题栏组件，负责品牌字标、传感器切换、采集/回放控制、语言切换与设置抽屉 |
-| `/preload.js` | Electron 预加载脚本，建立渲染进程与主进程之间的安全 IPC 通道 |
-| `/server.js` | 后端核心调度器，协调串口通信、数据处理、WebSocket 分发、数据库存储 |
+| `/app/electron/preload.js` | Electron 预加载脚本，建立渲染进程与主进程之间的安全 IPC 通道 |
+| `/backend/runtime/index.js` | Electron 固定后端桥，保持 `openServer`、`shutdownServer`、`getWsServer`、`handleCommand` 等稳定导出 |
+| `/backend/kernel/` | 应用稳定链路：平台启动、串口装配、存储、回放、CSV、实时分发和算法通道 |
+| `/backend/extension-host/` | 展示系统 manifest 的发现、校验、绑定、调度与工作区服务 |
+| `/backend/extensions/` | 内置传感器运行时和可复制的展示系统示例，不承担 Electron 启动职责 |
+| `/backend/compatibility/` | 仍被历史链路需要的数据工具；不是旧目录转发层 |
 | `/client/src/hooks/` | 只剩 `useWebSocket`（连接管理，自动重连 + 心跳）。原先并列的 `usePressureData` / `useSerialControl` / `useThreeScene` / `usePlayback` / `useDeferredPressure` / `useInstancedMesh` 六个全仓从未被消费，已于 2026-07-31 删除 |
 | `/client/src/store/` | Zustand 状态管理，分为全局应用状态和高频压力数据状态 |
 | `/client/src/components/three/` | Three.js 3D 渲染组件与兼容入口，覆盖不同传感器类型和矩阵尺寸。剩 38 个，正按 `PointGridRenderer` 的三步配方逐组迁往 `renderers/` |
@@ -2240,86 +2301,27 @@ shroom1.0/
 ### 4.1. 模块关系图 (Mermaid)
 
 ```mermaid
-graph TD
-    subgraph "Electron 主进程"
-        INDEX["index.js<br/>窗口管理 + IPC"]
-        PRELOAD["preload.js<br/>安全桥梁"]
-        SERVER["server.js<br/>核心调度器"]
-        CONFIG["configManager.js<br/>配置中心"]
-        LOGGER["logger.js<br/>日志"]
-        LICENSE["licenseHelper.js<br/>授权验证"]
-        SERIAL["serialHelper.js<br/>串口管理"]
-        DB["dbHelper.js<br/>数据库"]
-        WS["wsHelper.js<br/>WebSocket"]
-        DATA["dataProcessor.js<br/>数据处理"]
-        CSV["csvHelper.js<br/>CSV导出"]
-        UPDATE["autoUpdater.js<br/>自动更新"]
-        OPENWEB["openWeb.js<br/>线序映射"]
-    end
-
-    subgraph "Electron 渲染进程"
-        APP["App.js<br/>路由"]
-        HOME["Home.js<br/>主页面"]
-        HOOKS["hooks/<br/>useWebSocket"]
-        STORE["store/<br/>Zustand"]
-        THREE["three/<br/>3D组件(legacy)"]
-        HEAT["heatmap/<br/>热力图"]
-        BUS["runtime/<br/>frameBus 帧总线(壳)"]
-        REND["renderers/<br/>渲染器插件(懒加载)"]
-    end
-
-    subgraph "SDK 包（file: 装进 client）"
-        SDKCORE["@shroom/frontend/core<br/>零依赖：契约/注册表/帧管线/配色/阈值"]
-        SDKREACT["@shroom/frontend/react<br/>RendererHost + numMatrix(sprite3d/canvas2d/webgl)<br/>+ pointGrid + handPoints + webglHeatmap + blobHeatmap<br/>peer: react + three"]
-        SDKEX["example/<br/>可跑 demo(二开起点)"]
-    end
-
-    subgraph "外部"
-        HW["硬件传感器"]
-        GH["GitHub Releases"]
-    end
-
-    INDEX --> SERVER
-    INDEX --> PRELOAD
-    INDEX --> UPDATE
-    SERVER --> CONFIG
-    SERVER --> LOGGER
-    SERVER --> LICENSE
-    SERVER --> SERIAL
-    SERVER --> DB
-    SERVER --> WS
-    SERVER --> DATA
-    SERVER --> CSV
-    DATA --> OPENWEB
-
-    PRELOAD <--> HOME
-    HOME --> HOOKS
-    HOME --> STORE
-    HOOKS --> STORE
-    STORE --> THREE
-    STORE --> HEAT
-    HOME -- "publishFrame 每帧" --> BUS
-    BUS -- "subscribeFrames 不进 state" --> REND
-    HOME -. "sitTypeEvent 旧路(绞杀者并存)" .-> THREE
-
-    BUS -- "re-export 壳" --> SDKCORE
-    REND -- "re-export 壳 + 薄包装" --> SDKREACT
-    SDKREACT --> SDKCORE
-    SDKEX -- "同一份源码，不是副本" --> SDKREACT
-
-    HW -- "USB 串口" --> SERIAL
-    UPDATE -- "HTTPS" --> GH
-    WS -- "WebSocket" --> HOOKS
+flowchart LR
+    HW[硬件传感器] --> SDKBACKEND[sdk/backend<br/>协议、串口、采集、存储、处理]
+    SDKBACKEND --> EXT[backend/extensions<br/>传感器运行时]
+    EXT --> HOST[backend/extension-host<br/>发现、校验、绑定]
+    HOST --> KERNEL[backend/kernel<br/>稳定产品链路]
+    KERNEL --> BRIDGE[backend/runtime<br/>Electron 固定桥]
+    ELECTRON[app/electron<br/>稳定软件壳] --> BRIDGE
+    KERNEL --> WS[kernel/platform/websocket]
+    WS --> CLIENT[client/src<br/>页面与可视化]
+    CLIENT --> FRONTSDK[@shroom/frontend<br/>渲染器与帧总线]
+    KERNEL --> HISTORY[kernel/storage + playback + csv]
 ```
 
 ### 4.2. 主要数据流
 
 1. **传感器数据采集流程**
-    - 硬件传感器通过 USB 串口发送原始二进制数据帧 → `serialManager` 按 `sit/back/head/sensor` 角色打开和关闭物理端口 → `serialParserManager` 按业务通道切帧 → `server.js` 保留现有协议处理、线序映射（`openWeb.js`）、归零校准和高斯平滑 → 处理后的矩阵数据进入 ChannelBus/WebSocket 订阅网关 → 前端 `useWebSocket` Hook 接收数据 → 更新 `usePressureStore` → React 重新渲染热力图和 3D 模型。
+    - 硬件传感器通过 USB 串口发送原始二进制数据帧 → `sdk/backend/serial` 与 `sdk/backend/protocol` 负责端口、切帧和解码 → `backend/extensions/built-in-sensors` 按现有传感器语义处理 → `backend/kernel/realtime` 进入稳定实时管线 → `backend/kernel/platform/websocket` 推送 → 前端页面和渲染器更新。协议、线序和通道含义未因目录迁移改变。
     - `smallBed12B`（小床检测 12B）使用 `1500000` 波特率和独立帧尾 `AA 00 55 00 03 00 99 00`，`@serialport/parser-delimiter` 按 8 字节帧尾切分后得到 2048 字节 payload；`server.js` 按 1024 个 `uint16LE` 解析为 32x32 ADC 矩阵，复用 `jqbed(pointArr)` 小床检测线序并清零后，立即调用 `estimatePointPressure` 将整帧转换为 kPa 压强矩阵并统一保留 1 位小数，后续 `sitData/rawSitData/pressureData`、左侧统计、回放、采集入库和 CSV 下载都使用这份 kPa 数据。该类型不加入 `jqbed/smallBed` 生命体征集合，因此前端 `Aside.jsx` 仅展示 Pressure Area 与 Pressure Data，不触发 Python 算法数据面板；左侧 Pressure Data / Pressure Area 统计使用 3D 插值和高斯处理前的 32x32 压强矩阵值。
     - `smallBed12B` 的标题栏新增 `展示设置`，实时矩阵可在 32x32 与 16x16 间切换；16x16 模式会按当前原始数据展示方向选择 2x2 块取点位置，前端通过 `smallBed12BDisplayOptions` 下发给后端，`server.js` 在串口入口转换为 kPa 后先把 32x32 转为原始数据显示方向，再从这份 32x32 展示矩阵按 2x2 抽点为 16x16，并用 `matrixOrientation: 'transposed'` 标记该帧已是展示方向；采集入库和 CSV 下载直接沿用实时展示尺寸与方向。12B 仅保留原始数据展示模式，前端切换到该系统时会强制使用 `numoriginal`，不再提供 3D 展示模式。`client/src/page/home/util.js` 的原始矩阵转置入口会按方阵长度自动识别 32x32 或 16x16；遇到已标记为展示方向的 12B 16x16 帧时不再二次转置。
     - `smallBed12B` 的采集按钮现在先打开 `Title.jsx` 采集配置弹窗；用户可设置采集名称、特征标签和入库频率。矩阵尺寸不再在采集弹窗里单独设置，而是跟随实时 `展示设置`，避免实时展示、采集入库和 CSV 下载尺寸不一致。
-    - `handSinglePoint`（32*32(检测点)）沿用 `hand` 的单串口 32x32 / 1024 点协议和默认 `1000000` 波特率，实时串口数据只在后端 `openWeb.handSinglePoint()` 中按 1-based 点位表重排一次：先输出 481-992，每 32 点一行；再输出 449-1 的 15 行倒序块；最后输出 993-1024。WebSocket 展示、采集入库和 CSV 下载都使用这份后端处理后的 1024 点矩阵，前端不再参与线序转换；前端复用 `hand` 的 `CanvasHand` 渲染链路和 `normal` / `numoriginal` 模式，授权页和密钥脚本使用独立 key `handSinglePoint`，密钥配置页归入“精密”分组；CSV 下载按语言使用 `检测点` / `detection` 文件名前缀，并新增 `检测点` / `detectionPoint` 列写入 1024 点矩阵的最后一个点。
+    - `handSinglePoint`（32*32(检测点)）沿用 `hand` 的单串口 32x32 / 1024 点协议和默认 `1000000` 波特率，实时串口数据通过 `@shroom/backend/processing` 中的 `handSinglePoint()` 按 1-based 点位表重排一次：先输出 481-992，每 32 点一行；再输出 449-1 的 15 行倒序块；最后输出 993-1024。WebSocket 展示、采集入库和 CSV 下载都使用这份后端处理后的 1024 点矩阵，前端不再参与线序转换；前端复用 `hand` 的 `CanvasHand` 渲染链路和 `normal` / `numoriginal` 模式，授权页和密钥脚本使用独立 key `handSinglePoint`，密钥配置页归入“精密”分组；CSV 下载按语言使用 `检测点` / `detection` 文件名前缀，并新增 `检测点` / `detectionPoint` 列写入 1024 点矩阵的最后一个点。
     - `smallBed12B` 使用独立的前端显示配置，不再复用通用 `bed` 颜色默认值；默认高斯为 `2`，3D 数字润滑为 `2`，颜色默认值为 `25`，过滤为 `0`，初始值为 `0`，高度默认值为 `0.1`。设置面板颜色滑块范围为 `5-30` 且步进为 `10`。`Home.jsx` 会通过通用 `syncDisplayRendererConfig()` 将进度条 state 同步到 3D/原始数据组件 ref，确保初始值、系统切换和滑块变更都会下发到渲染器内部变量。
     - 当系统类型为 `petCare` / `petCareMini` 时，`server.js` 先按 `jqbed` 线序将 32x32 数据重排，再以 50Hz（20ms）分别调用 `python/app/petCare/pet_care_wrapper` / `pet_care_wrappermini`；算法输出通过 `python/app/onbed_filter_example.py` 的 JSON-line RPC 回传给 Electron，前端 Title/Home/Aside/License 复用宠物看护链路展示呼吸率、姿态、体动、信号质量、模拟心率和压力系数；其中 `Aside.jsx` 会在前端层对 `petCareMini` 的离床状态（`petInBed=0` 或 `posture_state=0`）做展示归一化，强制将面板上的 `pressure_coefficient` 显示为 `0.00`，并依据呼吸频率在前端生成 `55-100` 区间的模拟心率替换原来的 SNR 展示；为避免心率跳变过快，模拟心率现在按 1 秒节拍更新一次，其余呼吸、姿态和质量数据仍保持实时刷新；同时 `server.js` 关闭了 `petCareMini` 的 `[petCareMini] algorithm result` 周期性信息日志，避免运行期刷屏。
     - 当系统类型为 `hand0205` / `hand0205Double` / `handGlove115200` / `handGloveFullPacket` 且前端处于普通 3D 遥操模式时，`Home.jsx` 使用模型渲染矩阵继续驱动手部姿态与手指弯曲，但 Aside 面板中的 `meanPres`、`maxPres`、`totalPres`、`point` 以及 Pressure Area / Pressure Data 图表改为直接基于原始 256 点矩阵（`realArr` / `rawPressureData`）计算和渲染，避免统计值被映射后的控制数据覆盖。
@@ -2331,7 +2333,7 @@ graph TD
     - 当系统类型为 `hand0205` / `handGlove115200` / `handGloveFullPacket` 且前端处于 3D `skin` 模式时，`client/src/components/video/hand.jsx` 继续沿用现有 `ndata1` 32×32 数据格式、`sitData/changeColor` ref 接口和 `CanvasTexture` 贴图链路，但热力图生成层由原来的 `HeatmapCanvas.changeHeatmap()` 切换为 `WebGLCanvas.render()`：为避免模型热力图全透明且保持原有 size 进度条语义不变，WebGL 输入改为复用旧 `HeatmapCanvas` 的强度缩放与补边预处理（包含固定 `*10` 强度放大和补零插值），并将滑杆 `size` 按旧 Canvas 圆形阴影扩散语义换算为 WebGL 半径后，再用单张离屏 WebGL canvas 生成 1024×1024 热力图并通过 `drawImage()` 回贴到原有手部纹理 canvas，以降低高频场景下的 CPU 逐帧绘制压力。
 
 2. **数据存储与导出流程**
-    - 用户点击"开始采集" → 前端通过 WebSocket 发送 `col` 指令 → `server.js` 开启采集模式 → 每帧数据同时写入 `dbHelper.js`（SQLite）和 `csvHelper.js`（CSV 文件） → 用户点击"停止采集"结束录制。
+    - 用户点击“开始采集” → 前端通过 WebSocket 发送 `col` 指令 → `kernel/platform` 开启采集模式 → `@shroom/backend/collection` 按现有频率和队列规则写入由 `kernel/storage` 装配的 SQLite 数据库 → 用户点击“停止采集”结束录制。CSV 由 `kernel/csv` 从已有历史记录导出，不改变数据库记录格式。
     - `Title.jsx` 的采集入口改为开始采集时弹出配置 Modal；原设置抽屉里的特征标签选择移动到该 Modal，采集频率通过 `colHZ/collectOptions.frequencyHz` 下发。`server.js` 使用每个通道独立的入库时间戳按频率跳帧，避免坐垫、靠背、头枕共用一个 `oldTimeStamp` 互相影响。
     - CSV 导出的最左侧 `seconds` 列使用数据库帧时间戳计算真实相对秒数（当前帧 `timestamp` - 导出首帧 `timestamp`），仅在缺失时间戳时回退到采集频率估算，不再固定按 12Hz 用 `j / 12` 生成。
     - CSV 表头根据前端当前语言自动选择：`Title.jsx` / `useSerialControl.js` 在 `downloadOptions.language` 中传入当前语言；`server.js` 中文模式输出 `秒数/矩阵最大值/时间戳/矩阵大于 0 的点数/矩阵总和/矩阵数据/四元数/温度/平均温度/温度K值` 等中文表头，英文模式继续输出旧版 `seconds/max/time/area/press/data/quaternion/temperatureCelsius/temperatureAvg/temperatureK` 简写表头；所有 CSV 文件开头统一写入 UTF-8 BOM，便于 Windows Excel/WPS 直接双击打开时识别中文；`handSinglePoint` 额外输出 `检测点` / `detectionPoint` 列，取 CSV `data` 矩阵的最后一个点。
@@ -2342,12 +2344,12 @@ graph TD
     - 大体量历史 CSV 下载不再先把所有帧和所有 CSV 行放入数组；`server.js` 使用 `matrix(date,id)` 索引按 `id` 游标分批读取历史帧，并用 `csv-writer` stringifier 写入文件流，覆盖通用 sit/back/head、整椅、大小床、选区标签和触觉手套2合并导出，降低 90 万帧下载时主进程内存压力。导出过程中后端会按批次通过 WebSocket 发送 `csvDownloadProgress`，前端 `Title.jsx` 的 CSV 下载弹窗展示百分比、当前文件、已写行数和多文件序号。
 
 3. **历史数据回放流程**
-    - 用户在历史数据页选择记录 → 前端发送 `play` 指令 → `server.js` 从 SQLite 读取历史帧数据 → 按时间间隔逐帧通过 WebSocket 推送 → 前端在 `Home.jsx` 和 `Title.jsx` 里管理播放状态（播放/暂停/变速/跳帧）。（曾计划抽成 `usePlayback` Hook，该文件从未被任何页面消费，已于 2026-07-31 删除。）
+    - 用户在历史数据页选择记录 → 前端发送 `play` 指令 → `kernel/storage` 查询 SQLite 历史帧，`kernel/playback` 按现有格式转换和定时 → 通过稳定 WebSocket 链路逐帧推送 → 前端在 `Home.jsx` 和 `Title.jsx` 里管理播放状态（播放/暂停/变速/跳帧）。（曾计划抽成 `usePlayback` Hook，该文件从未被任何页面消费，已于 2026-07-31 删除。）
     - `smallBed12B` 回放兼容 32x32 原始采集和 16x16 缩小采集两种历史格式；`server.js` 会把对象格式历史帧还原为 `sitData` 并携带 `matrixWidth/matrixHeight`，32x32 采集按 32x32 回放，16x16 采集按 16x16 回放，不再把 256 点历史帧扩回 1024 点；`Home.jsx` 默认按标题栏 `展示设置` 初始化 12B 视图尺寸，`Title.jsx` 的回放/历史入口和历史时间选择都会同步 `smallBed12BDisplayOptions` 给后端，`server.js` 的主 WebSocket 与辅助 WebSocket 消息入口都会先应用该设置再处理 `getTime/loadSelectedHistory`，因此历史选择空帧也会按展示设置输出 16x16 或 32x32；前端只根据真实矩阵帧的 `matrixWidth/matrixHeight` 或历史回放帧的 `sitData` 方阵长度同步尺寸，控制/进度/切换清空类 WebSocket 消息不会再把尺寸回退到 32x32，避免默认展示和回放时反复重挂载闪烁。
     - 大体量历史记录（如几十万帧以上）选中时，`server.js` 不再一次性 `SELECT *` 加载全部帧到内存；改为先查询 `COUNT/MIN(id)/MAX(id)` 元信息、建立 `matrix(date,id)` 索引、生成最多约 2000 点的抽样压力/面积曲线，并通过懒加载代理在回放或拖动进度时按当前帧索引读取单帧，避免 90 万帧记录选中和回放时阻塞 Electron 主进程。
 
 4. **授权验证流程**
-    - 应用启动 → `licenseHelper.js` 读取外部 `config.txt`（打包后优先读取 exe 同级文件，兼容 `resources/config.txt`，开发态读取项目根目录） → 使用 AES-ECB 解密 → 通过 HTTPS 获取网络时间 → 比对授权有效期 → 若过期则限制功能。
+    - 应用启动 → `backend/kernel/platform/license/licenseHelper.js` 读取外部 `config.txt`（打包后优先读取 exe 同级文件，兼容 `resources/config.txt`，开发态读取项目根目录） → 使用 AES-ECB 解密 → 通过 HTTPS 获取网络时间 → 比对授权有效期 → 若过期则限制功能。
     - 密钥 `file` 字段仍保留在密钥结构中用于兼容旧密钥和解析展示，但运行期不再用它锁定、切换或过滤当前传感器系统类型。
     - 前端 `Title.jsx` 始终展示完整系统类型下拉框，渲染不再受 `matrixTitle` / `allowedTypes` 控制；`Home.jsx` 会清除旧的 `allowedTypes` 本地缓存，并忽略空的 `file` 值，避免密钥类型与实际传感器类型不一致时导致传感器不可选、不可用或当前类型被置空。
 
@@ -2363,7 +2365,7 @@ graph TD
 
 ## 5. API 端点 (Endpoints)
 
-实时数据与控制指令走 **WebSocket 消息协议**；展示系统的查询与写入另有一组 HTTP 路由（路径常量集中在 `backend/contracts/sdkApiContract.js` 的 `HTTP_ROUTES`）。系统运行 3 个 WebSocket 服务器：
+实时数据与控制指令走 **WebSocket 消息协议**；展示系统的查询与写入另有一组 HTTP 路由（公共路径常量集中在 `sdk/backend/contract/sdkApiContract.js` 的 `HTTP_ROUTES`，应用装配位于 `backend/kernel/platform/http/`）。系统运行 3 个 WebSocket 服务器：
 
 | WebSocket 端口 | 用途 | 数据方向 |
 | :--- | :--- | :--- |
@@ -2413,9 +2415,9 @@ graph TD
 | :--- | :--- |
 | `GET /api/serial/protocols` | 可用的串口协议预设：`protocols`（每份带完整 `protocol` 段，可整段粘进 manifest）、`invalid`（写坏的预设各自带原因，不影响其余预设）、`directories`（实际扫过的目录，排错时要知道系统在哪找） |
 
-预设来自两处：内置的 `backend/serial/protocols/*.json` 与用户的
+预设来自两处：内置的 `sdk/backend/protocol/presets/*.json` 与用户的
 `<runtimeWritableRoot>/serial-protocols/*.json`，**同 id 时用户那份覆盖内置**。字节结构说明在
-`backend/serial/protocols/` 下的同名 md（10 种协议各一份 + 目录 README）。同一份预设列表也喂给
+`sdk/backend/protocol/presets/` 下的同名 md（10 种协议各一份 + 目录 README）。同一份预设列表也喂给
 `GET /api/display-systems/catalog` 的 `serialTemplates`，所以「新建传感器」的模板卡片与这个接口永远同源；
 `GET /api/sdk/contract` 的 `serial.protocolPresets` 是它的摘要（无 `protocol` 段）。
 
@@ -2441,12 +2443,12 @@ graph TD
 
 | 配置项 | 来源 | 描述 | 默认值 |
 | :--- | :--- | :--- | :--- |
-| WebSocket 端口 | `configManager.js` / `server.js` 硬编码 | 主数据通道端口 | `19999` |
-| 串口波特率 | `configManager.js` / `server.js` 硬编码 | 串口通信速率 | `460800` |
+| WebSocket 端口 | `backend/kernel/platform/websocket/` | 主数据通道端口 | `19999` |
+| 串口波特率 | `sdk/backend/sensors/registry.js` 与协议预设 | 随传感器/协议选择，不再由一个全局配置文件决定 | 默认运行态 `1000000` |
 | 授权信息 | 外部 `config.txt`（AES 加密文件，不随安装包内置） | 授权有效期、设备标识 | 无 |
-| 数据库路径 | `configManager.js` | SQLite 数据库文件位置 | `./db/info.db` |
-| CSV 导出路径 | `configManager.js` | 采集数据 CSV 导出目录 | `./data/` |
-| 在线时间服务器 | `server.js` 硬编码 | 用于授权时间校验的 HTTPS 端点 | `https://worldtimeapi.org/api/ip` |
+| 数据库路径 | `backend/kernel/platform/serverPathConfig.js` + `backend/kernel/storage/dbManager.js` | SQLite 数据库目录与运行时文件 | 开发态 `./db/` |
+| CSV 导出路径 | `backend/kernel/platform/serverPathConfig.js` | 采集数据 CSV 导出目录 | 开发态 `./data/` |
+| 在线时间校验 | `backend/kernel/platform/bootstrap/systemTimeSyncService.js` | 授权时间校验的网络同步 | 保持现有实现 |
 | 展示系统 API | `VITE_API_BASE` | 开发或独立部署时覆盖展示系统配置器的后端地址 | `http://127.0.0.1:19245` |
 
 ## 8. 项目进度
@@ -2455,6 +2457,8 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-28 | codeOpi | 完成后端物理收拢并移除旧路径兼容层 | `backend` 一级目录从 22 个降到 7 个，稳定链路归入 `kernel`、扩展机制归入 `extension-host`、内置传感器归入 `extensions`、历史工具归入 `compatibility`；删除 35 个薄转发文件，Electron 固定入口和 SDK 保持不变。 |
+| 2026-08-28 | codeOpi | 按产品变化边界完成一期目录归类 | 新增 `backend/kernel/{playback,csv,realtime,algorithm-channel}` 并保留旧路径兼容壳；前端人体展示、展示系统、JQBed 配置和历史 demo 分别收拢到 `visualization/`、`extensions/` 和 `legacy/`；新增 `docs/repository-map.md`，SDK 与 Electron 稳定入口未改。 |
 | 2026-08-26 | codeOpi | 输出授权门户单文件 HTML 特效原型 | `client/public/shroom-vision-home-effects.html` 无 React 和外部资源依赖，内嵌 18 张压缩图标；包含当前首页完整布局、响应式断点、Canvas 压力点阵、卡片指针响应、反馈弹层和静态事件挂点。生产授权与 WebSocket 未接入。 |
 | 2026-08-25 | codeOpi | 新增 `.gitattributes`，仓库行尾统一为 LF | 清掉 575 文件 / 132740 行的纯 CRLF 假改动（忽略行尾后内容差异为 0），并用 `* text=auto eol=lf` + 14 类显式 `binary` 防复发。遗留 `forge.config.js` 一个索引侧 CRLF 文件未归一化（属打包配置，单独处理）。 |
 | 2026-08-11 | codeOpi | SDK 数字矩阵文档页完成形状与数据直接配置 | 支持坐标 JSON 自动推导行列、`1..N` 方向帧、一维/二维数组校验、旋转/镜像和真实 `numMatrix` 活预览；真实 32×32 坐标文件、桌面与 390px 移动端验证通过。 |
@@ -2838,6 +2842,8 @@ graph TD
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-28 | codeOpi | 优化重构 | 在用户确认高风险迁移后完成后端物理收拢：移除旧目录兼容层和 SDK 转发壳，生产代码与测试统一指向 `kernel`、`extension-host`、`extensions`、`compatibility`；保留 `backend/runtime/index.js` 与 `backend/common/logger.js` 两个 Electron 固定桥。未修改 SDK、硬件协议、历史数据格式或 Electron 入口。 |
+| 2026-08-28 | codeOpi | 优化重构 | 仓库目录按稳定内核、可变扩展、可视化和历史兼容重新归类；后端生产装配指向 `backend/kernel`，旧路径继续转发；前端移动后同步修正导入与跨端测试路径，并新增目录地图。未修改 SDK、Electron、硬件协议或历史数据格式。 |
 | 2026-08-26 | codeOpi | 新增功能 | 新增 `client/public/shroom-vision-home-effects.html`，将现有授权门户首页导出为约 751 KiB 的自包含静态原型；18 张图标缩放内嵌，加入压力点阵与卡片轻交互、移动端布局、`prefers-reduced-motion`、本地反馈和 `shroom:enter` / `shroom:sdk-customize` 事件接口。桌面/移动浏览器检查通过。 |
 | 2026-08-25 | codeOpi | 配置变更 | 新增 `.gitattributes`：`* text=auto eol=lf` + `png`/`jpg`/`ico`/`icns`/`glb`/`gltf`/`fbx`/`obj`/`db`/`bin`/`dat`/`so`/`pyd`/`pyc` 共 14 类显式 `binary`。同时 `git checkout -- .` 丢弃 575 文件的 CRLF 假改动（`git diff --ignore-cr-at-eol` 验证零内容差异后才执行）。`ARCHITECTURE.md` 补本轮章节与四表记录。未改任何源码。 |
 | 2026-08-11 | codeOpi | 新增功能 | `sdk/frontend/docs/src/pages/NumMatrix.jsx` 改为“设置形状 + 设置一帧数据”的直接配置页；`BasicNumMatrix.jsx` 支持外部 `params`/`values` 与方向校验下限；`styles.css` 增加配置台和移动端布局。 |

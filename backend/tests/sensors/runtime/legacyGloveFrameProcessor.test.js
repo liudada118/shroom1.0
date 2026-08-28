@@ -1,7 +1,7 @@
 const assert = require('assert');
 const {
   createLegacyGloveFrameProcessor,
-} = require('../../../sensors/runtime/legacyGloveFrameProcessor');
+} = require('../../../extensions/built-in-sensors/legacyGloveFrameProcessor');
 
 const published = [];
 const processor = createLegacyGloveFrameProcessor({

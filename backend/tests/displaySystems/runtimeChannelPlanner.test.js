@@ -2,7 +2,7 @@ const assert = require('assert');
 const {
   attachRuntimeChannelPlan,
   buildDisplaySystemRuntimeDefinition,
-} = require('../../displaySystems');
+} = require('../../extension-host');
 
 const runtimeDefinition = buildDisplaySystemRuntimeDefinition({
   id: 'demo',

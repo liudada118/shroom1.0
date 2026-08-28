@@ -2,7 +2,7 @@ const assert = require('assert');
 const {
   createServerRuntimeContext,
   getStoreValue,
-} = require('../../server/runtimeContextFactory');
+} = require('../../kernel/platform/runtime/runtimeContextFactory');
 
 assert.strictEqual(getStoreValue(null, 'file', 'fallback'), 'fallback');
 assert.strictEqual(getStoreValue({ get: () => undefined }, 'file', 'fallback'), 'fallback');

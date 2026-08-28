@@ -1,4 +1,4 @@
-const module2 = require('../../backend/license/aes_ecb')
+const module2 = require('../../backend/kernel/platform/license/aes_ecb')
 let str = module2.encStr(`45`);
 
 let str1 = module2.decryptStr(str)

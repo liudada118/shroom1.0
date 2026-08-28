@@ -1,4 +1,4 @@
-import { isClassicColormap, sampleColormapRgb } from '../displaySystem/colormaps';
+import { isClassicColormap, sampleColormapRgb } from '../../extensions/display-system/colormaps';
 
 /**
  * 图表能落地的叠加层。

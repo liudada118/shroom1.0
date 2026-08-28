@@ -9,7 +9,7 @@ import {
   hasOverlay,
   resolveChartStroke,
 } from './chartAppearance';
-import { sampleColormapRgb } from '../displaySystem/colormaps';
+import { sampleColormapRgb } from '../../extensions/display-system/colormaps';
 
 /**
  * 记录调用的假 2D 上下文。测试环境是 node，没有真的 canvas；

@@ -4,12 +4,12 @@ const assert = require('node:assert/strict');
 const {
   DEFAULT_JQBED_ALGORITHM_VALUES,
   JqbedAlgorithmConfigValidationError,
-} = require('../../server/modules/jqbedAlgorithmConfig');
+} = require('../../kernel/algorithm-channel/jqbedAlgorithmConfig');
 const {
   buildJqbedGetDataArgs,
   createJqbedAlgorithmCommandHandler,
   createJqbedAlgorithmProtocol,
-} = require('../../server/modules/jqbedAlgorithmProtocol');
+} = require('../../kernel/algorithm-channel/jqbedAlgorithmProtocol');
 
 function createProtocol({ save, reset } = {}) {
   const sent = [];

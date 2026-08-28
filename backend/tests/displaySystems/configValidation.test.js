@@ -12,17 +12,17 @@ const {
   validatePointOrderDefinition,
   validateProtocolConfig,
   validateDisplayConfig,
-} = require('../../displaySystems');
+} = require('../../extension-host');
 
-const demoDirectory = path.resolve(__dirname, '../../displaySystems/examples/byte-matrix-demo');
+const demoDirectory = path.resolve(__dirname, '../../extensions/examples/byte-matrix-demo');
 const smallBed12BDemoDirectory = path.resolve(
   __dirname,
-  '../../displaySystems/examples/small-bed-12b-manifest-demo'
+  '../../extensions/examples/small-bed-12b-manifest-demo'
 );
-const jqbedDemoDirectory = path.resolve(__dirname, '../../displaySystems/examples/jqbed-manifest-demo');
+const jqbedDemoDirectory = path.resolve(__dirname, '../../extensions/examples/jqbed-manifest-demo');
 const handGloveDemoDirectory = path.resolve(
   __dirname,
-  '../../displaySystems/examples/hand-glove-manifest-demo'
+  '../../extensions/examples/hand-glove-manifest-demo'
 );
 const loaded = loadDisplaySystemDirectory(demoDirectory, { validateFiles: true });
 const loadedSmallBed12B = loadDisplaySystemDirectory(smallBed12BDemoDirectory, { validateFiles: true });

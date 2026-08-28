@@ -1,9 +1,9 @@
 const logger = require('../common/logger');
-const { CommandRouter } = require('./commandRouter');
+const { CommandRouter } = require('../kernel/platform/commands/commandRouter');
 const {
   broadcastToChannel,
   getChannelClientCounts,
-} = require('../services/websocket/websocketChannelService');
+} = require('../kernel/platform/websocket/websocketChannelService');
 
 const commandRouter = new CommandRouter({ logger });
 let legacyServer;
@@ -18,7 +18,7 @@ let legacyServer;
  */
 function getLegacyServer() {
   if (!legacyServer) {
-    legacyServer = require('../server/server');
+    legacyServer = require('../kernel/platform/server');
   }
   return legacyServer;
 }

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "small-bed-12b-manifest-demo",
+  "name": "Small Bed 12B Manifest Demo",
+  "version": "0.1.0",
+  "description": "Template for migrating the existing smallBed12B sensor into a manifest driven display system.",
+  "sensor": {
+    "type": "smallBed12B",
+    "matrix": {
+      "rows": 32,
+      "cols": 32
+    },
+    "ports": ["sit"]
+  },
+  "files": {
+    "lineOrder": "line-order.json",
+    "pointOrder": "point-order.json"
+  },
+  "algorithm": {
+    "type": "json",
+    "dataFile": "algorithm-data.json"
+  },
+  "display": {
+    "views": ["heatmap"],
+    "defaultView": "heatmap"
+  },
+  "metadata": {
+    "migrationTemplate": true,
+    "sourceRuntime": "backend/extensions/built-in-sensors/smallBed12BRuntime.js"
+  }
+}

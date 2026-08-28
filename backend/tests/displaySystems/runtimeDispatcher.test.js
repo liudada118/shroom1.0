@@ -2,7 +2,7 @@ const assert = require('assert');
 const {
   createDisplaySystemRuntimeDispatcher,
   normalizeIncomingFrame,
-} = require('../../displaySystems');
+} = require('../../extension-host');
 
 const listeners = new Map();
 let attachCount = 0;

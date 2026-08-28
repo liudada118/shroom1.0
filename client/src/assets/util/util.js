@@ -496,7 +496,7 @@ export function jetRound(min, max, x) {
 /**
  * 那条唯一的分支阶梯，实现搬到了 `./jetLadder.js`。
  *
- * 搬出去的原因写在那个文件的头部：`components/displaySystem/colormaps.js`
+ * 搬出去的原因写在那个文件的头部：`extensions/display-system/colormaps.js`
  * 也要用这条阶梯，而它会被后端测试用裸 Node ESM 加载，导入不了 `util.js`
  * （扩展名补全 + 顶层 `localStorage`）。这里原样 re-export，所以那 80 个
  * `from '../../assets/util/util'` 的消费文件一行都不用改。
@@ -1377,5 +1377,4 @@ export function yanfeng10sit(arr) {
 //   }
 //   return res;
 // }
-
 

@@ -9,7 +9,7 @@ const {
   JqbedAlgorithmConfigValidationError,
   createJqbedAlgorithmConfigStore,
   normalizeJqbedAlgorithmValues,
-} = require('../../server/modules/jqbedAlgorithmConfig');
+} = require('../../kernel/algorithm-channel/jqbedAlgorithmConfig');
 
 function withTemporaryConfig(run) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'shroom-jqbed-config-'));

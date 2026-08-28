@@ -37,8 +37,8 @@ import ChairQX from "../../components/video/chairQX";
 import RobotBlueSY from '../../components/video/robotSY'
 import RobotBlueLCF from "../../components/video/robotLCF";
 import RobotBlue0428 from "../../components/video/robot0428";
-import HumanBodyCanvas from '../../components/video/humanBody';
-import HumanBodyOptimized from '../../components/video/HumanBodyOptimized';
+import HumanBodyCanvas from '../../visualization/human-body/humanBody';
+import HumanBodyOptimized from '../../visualization/human-body/HumanBodyOptimized';
 import CarTq from "../../components/three/carTq";
 import Bed from "../../components/three/Bed";
 import SmallBed from "../../components/three/smallBed";
@@ -74,7 +74,7 @@ import { ConfigProvider, Input, Popover, message, Modal, Spin } from "antd";
 
 import { SelectOutlined } from "@ant-design/icons";
 import { Num } from "../../components/num/Num";
-import HumanBodyRawData from "../../components/num/HumanBodyRawData";
+import HumanBodyRawData from "../../visualization/human-body/HumanBodyRawData";
 // `Num3D`（components/num/NumWs.jsx）不再静态 import —— 它的两个渲染点都换成了
 // `RendererHost` + `NUM_MATRIX_PRESETS.num3dDefault`，实现在
 // `@shroom/frontend/react/numMatrix/backends/canvas2d.js`，经注册表懒加载。
@@ -120,7 +120,7 @@ import {
   listRuntimeDisplayDefinitions,
   registerRuntimeDisplayDefinition,
 } from '../../displays/registry';
-import { buildManifestSceneFrame } from '../../components/displaySystem/manifestSceneAdapter';
+import { buildManifestSceneFrame } from '../../extensions/display-system/manifestSceneAdapter';
 import RendererHost from '../../renderers/RendererHost.jsx';
 import { resolveRendererFromDefinition } from '../../renderers/registry';
 // 只引参数表，不引渲染器本体 —— params.js 是纯函数模块（无 three.js），
@@ -136,21 +136,21 @@ import { LEGACY_PRESETS as HAND_POINTS_PRESETS } from '@shroom/frontend/core/han
 import { LEGACY_PRESETS as WEBGL_HEATMAP_PRESETS } from '@shroom/frontend/core/webglHeatmap';
 import { clearLastFrame, publishFrame } from '../../runtime/frameBus';
 import { SCENE_CHANNELS, buildSceneFrame } from '../../runtime/sceneFrame';
-import DisplayCanvasConfigurator from '../../components/displaySystem/canvasConfigurator/DisplayCanvasConfigurator.jsx';
+import DisplayCanvasConfigurator from '../../extensions/display-system/canvasConfigurator/DisplayCanvasConfigurator.jsx';
 import {
   buildDisplayProfileModel,
   resolveChartAppearance,
   resolveDisplayProfile,
-} from '../../components/displaySystem/displayProfileRuntime';
+} from '../../extensions/display-system/displayProfileRuntime';
 import {
   buildDisplaySectionPayload,
   clearDisplayDraftSelection,
   describeDisplayDraft,
-} from '../../components/displaySystem/displayDraftState';
+} from '../../extensions/display-system/displayDraftState';
 import {
   duplicateDisplaySystem,
   saveDisplaySection,
-} from '../../services/displaySystemApi';
+} from '../../extensions/display-system/api';
 import { CHART_OVERLAY_IDS } from '../../components/aside/chartAppearance';
 import { FORMULA_CHART_TEMPLATES } from '../../components/aside/formulaChartTemplates';
 import {
@@ -167,8 +167,8 @@ import {
 import {
   readDisplaySelection,
   writeDisplaySelection,
-} from '../../components/displaySystem/displayProfileStorage';
-import { isClassicColormap } from '../../components/displaySystem/colormaps';
+} from '../../extensions/display-system/displayProfileStorage';
+import { isClassicColormap } from '../../extensions/display-system/colormaps';
 import {
   buildBasicControlCollectionRow,
   buildExtendedControlCollectionRow,

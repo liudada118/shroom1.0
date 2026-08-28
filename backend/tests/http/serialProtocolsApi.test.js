@@ -3,9 +3,9 @@ const fs = require('fs');
 const http = require('http');
 const os = require('os');
 const path = require('path');
-const { createHttpApp } = require('../../server/httpAppFactory');
-const { HTTP_ROUTES } = require('../../contracts/sdkApiContract');
-const { USER_PRESET_DIRECTORY_NAME } = require('../../serial/protocols');
+const { createHttpApp } = require('../../kernel/platform/http/httpAppFactory');
+const { HTTP_ROUTES } = require('@shroom/backend/contract/sdkApiContract.js');
+const { USER_PRESET_DIRECTORY_NAME } = require('@shroom/backend/protocol/presets/index.js');
 
 /**
  * 造一个临时的用户预设目录，模拟「打包之后用户自己丢 JSON」。

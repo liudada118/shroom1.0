@@ -1,6 +1,6 @@
 const assert = require('assert');
-const legacy = require('../../legacy/openWeb');
-const video = require('../../processing/videoPointMappings');
+const legacy = require('../../compatibility/openWeb');
+const video = require('@shroom/backend/processing/videoPointMappings.js');
 
 const base = Array.from({ length: 4096 }, (_, index) => (index * 17 + 3) % 251);
 

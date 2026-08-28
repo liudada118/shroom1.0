@@ -1,7 +1,7 @@
 const assert = require('assert');
 const {
   createSerialParserManager,
-} = require('../../serial/serialParserManager');
+} = require('@shroom/backend/serial/serialParserManager.js');
 
 const manager = createSerialParserManager({
   frameDelimiter: Buffer.from([0xaa, 0x55]),

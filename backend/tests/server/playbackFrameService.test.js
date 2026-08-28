@@ -1,5 +1,5 @@
 const assert = require('assert');
-const { createPlaybackFrameService } = require('../../services/playback/playbackFrameService');
+const { createPlaybackFrameService } = require('../../kernel/playback/playbackFrameService');
 
 const playback = createPlaybackFrameService({
   footArrToNormal: () => [],

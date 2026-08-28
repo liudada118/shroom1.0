@@ -6,7 +6,7 @@
  * 本轮不动：
  *
  * - `components/video/hand.jsx:21`
- * - `components/video/humanBody.jsx:6`
+ * - `visualization/human-body/humanBody.jsx:6`
  * - `components/video/robotLCF.jsx:27`
  * - `components/video/robotSY.jsx:27`
  * - `page/home/Home.jsx:100`

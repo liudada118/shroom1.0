@@ -7,12 +7,12 @@ const {
   loadSerialProtocolPresets,
   normalizePreset,
   resolveUserPresetDirectory,
-} = require('../../serial/protocols');
+} = require('@shroom/backend/protocol/presets/index.js');
 const {
   decodeProtocolValues,
   validateProtocolConfig,
-} = require('../../displaySystems/displaySystemProtocol');
-const { createParserFromProtocol } = require('../../serial/serialParserManager');
+} = require('@shroom/backend/protocol/displaySystemProtocol.js');
+const { createParserFromProtocol } = require('@shroom/backend/serial/serialParserManager.js');
 
 // ---------------------------------------------------------------------------
 // 内置预设：全部必须通过现有 manifest 协议校验

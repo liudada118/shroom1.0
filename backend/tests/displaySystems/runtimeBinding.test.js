@@ -3,7 +3,7 @@ const {
   bindDisplaySystemRuntimeChannels,
   createDisplaySystemFrameProcessor,
   createDisplaySystemRuntimeRegistry,
-} = require('../../displaySystems');
+} = require('../../extension-host');
 
 (async () => {
 

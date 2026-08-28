@@ -5,7 +5,7 @@ const { pathToFileURL } = require('url');
 (async () => {
   const modulePath = path.resolve(
     __dirname,
-    '../../../client/src/components/displaySystem/displayProfileRuntime.js'
+    '../../../client/src/extensions/display-system/displayProfileRuntime.js'
   );
   const {
     applyVisualizationAlgorithm,
@@ -16,7 +16,7 @@ const { pathToFileURL } = require('url');
   } = await import(pathToFileURL(modulePath).href);
   const coordinateLayoutModulePath = path.resolve(
     __dirname,
-    '../../../client/src/components/displaySystem/coordinatePointLayout.js'
+    '../../../client/src/extensions/display-system/coordinatePointLayout.js'
   );
   const {
     buildCoordinatePointLayout,
@@ -33,7 +33,7 @@ const { pathToFileURL } = require('url');
   } = await import(pathToFileURL(matrixTransformModulePath).href);
   const manifestSceneAdapterPath = path.resolve(
     __dirname,
-    '../../../client/src/components/displaySystem/manifestSceneAdapter.js'
+    '../../../client/src/extensions/display-system/manifestSceneAdapter.js'
   );
   const {
     buildManifestSceneFrame,

@@ -1,7 +1,7 @@
 const assert = require('assert');
 const {
   registerSerialControlHandlers,
-} = require('../../application/serialControlService');
+} = require('../../kernel/serial/serialControlService');
 
 const handlers = [];
 const publishedEvents = [];

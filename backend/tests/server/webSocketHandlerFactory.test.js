@@ -2,7 +2,7 @@ const assert = require('assert');
 
 const {
   createSensorStatusPayload,
-} = require('../../server/webSocketHandlerFactory');
+} = require('../../kernel/platform/websocket/webSocketHandlerFactory');
 
 const payload = createSensorStatusPayload({
   file: 'custom-pressure-map',

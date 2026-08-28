@@ -5,7 +5,7 @@ const {
   normalizeProtocolConfig,
   validateFrame,
   validateProtocolConfig,
-} = require('../../displaySystems/displaySystemProtocol');
+} = require('@shroom/backend/protocol/displaySystemProtocol.js');
 
 // ---------------------------------------------------------------------------
 // 新数据类型

@@ -1,4 +1,4 @@
-const module2 = require('../../backend/license/aes_ecb')
+const module2 = require('../../backend/kernel/platform/license/aes_ecb')
 const readline = require('readline');
 
 const rl = readline.createInterface({

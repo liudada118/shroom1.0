@@ -1,9 +1,9 @@
 const assert = require('assert');
 const express = require('express');
 const http = require('http');
-const { createControlCommandService } = require('../../application/controlCommandService');
-const { createWebSocketCommandRouter } = require('../../ws/webSocketCommandRouter');
-const { registerControlRoutes } = require('../../http/controlRoutes');
+const { createControlCommandService } = require('../../kernel/platform/commands/controlCommandService');
+const { createWebSocketCommandRouter } = require('../../kernel/platform/websocket/webSocketCommandRouter');
+const { registerControlRoutes } = require('../../kernel/platform/http/controlRoutes');
 
 async function run() {
   const router = createWebSocketCommandRouter();

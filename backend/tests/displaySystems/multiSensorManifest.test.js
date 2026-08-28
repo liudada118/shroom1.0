@@ -3,11 +3,11 @@ const {
   attachRuntimeChannelPlan,
   buildDisplaySystemRuntimeDefinition,
   validateDisplaySystemConfig,
-} = require('../../displaySystems');
+} = require('../../extension-host');
 const {
   bindDisplaySystemRuntimeChannels,
   resolveOutputPublisher,
-} = require('../../displaySystems/displaySystemRuntimeBinder');
+} = require('../../extension-host/displaySystemRuntimeBinder');
 
 // ---------------------------------------------------------------------------
 // sensors[] 归一化：v2 单 sensor 升格
