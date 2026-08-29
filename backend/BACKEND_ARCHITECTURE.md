@@ -1,6 +1,6 @@
 # Backend 架构说明
 
-> 最后更新：2026-08-28
+> 最后更新：2026-08-29
 
 ## 1. 架构目标
 
@@ -77,11 +77,11 @@ backend/
 | 子目录 | 职责 |
 | --- | --- |
 | `bootstrap/` | 服务启动、生命周期、退出清理和系统时间同步 |
-| `commands/` | 运行控制和命令路由 |
+| `commands/` | HTTP 与旧 WebSocket 共用的传输无关命令路由、运行控制 handler |
 | `http/` | HTTP 应用、控制/报告路由和网页静态服务 |
 | `license/` | 当前授权文件读取与校验 |
-| `runtime/` | 运行态存储、旧状态绑定和归零状态 |
-| `websocket/` | 连接、订阅、广播、命令和历史消息 |
+| `runtime/` | 运行态存储、旧状态绑定、归零状态和旧 WebSocket 上下文适配 |
+| `websocket/` | 单端口连接、心跳、消息解码、逻辑通道订阅与实时发布 |
 | `server.js` | 后端主装配入口 |
 | `serverPathConfig.js` | 开发态和打包态运行路径解析 |
 
@@ -95,11 +95,15 @@ backend/
 
 ### 4.4 `kernel/playback`、`kernel/csv` 与 `kernel/realtime`
 
-- `playback/`：把已有历史记录转换为前端沿用的帧并控制回放节奏。
+- `playback/`：把已有历史记录转换为前端沿用的帧、控制回放节奏，并承接历史差值与框选/曲线统计。
 - `csv/`：按现有字段导出历史数据。
 - `realtime/`：统一实时帧管线、分发和 telemetry 输出。
 
 这些目录只重组现有职责，不重新定义采集数据或前端消息格式。
+
+控制面默认通过 HTTP 进入 `platform/commands/controlCommandRouter.js`；WebSocket 只承载实时
+订阅/推送以及旧扁平命令兼容。JQBed 算法配置仍是当前前端的一个旧 WebSocket 控制例外，
+本轮未改变其消息格式或时序。
 
 ### 4.5 `kernel/algorithm-channel`
 
@@ -228,3 +232,4 @@ npm run sdk:backend-smoke
 - 移除 35 个旧路径或 SDK CommonJS 转发壳。
 - 保留 `backend/runtime/index.js` 与 `backend/common/logger.js` 两个 Electron 固定桥。
 - SDK、硬件协议、历史数据格式和 Electron 入口均未修改。
+- WebSocket 生产目录由 10 个文件收敛为 5 个：命令路由迁入 `platform/commands`，历史分析迁入 `kernel/playback`，运行态适配迁入 `platform/runtime`，心跳与 JSON 解析合并为一个传输服务。

@@ -1,6 +1,6 @@
 # 平台进程运行态
 
-> 最后更新：2026-08-28
+> 最后更新：2026-08-29
 
 这里保存的是 `kernel/platform/server.js` 进程内的状态与迁移适配代码，不是根目录
 `runtime/` 运行产物，也不是 Electron 固定入口 `backend/runtime/index.js`。
@@ -16,7 +16,7 @@
 
 ## 逐文件职责
 
-当前 7 个 JavaScript 文件均在生产链路使用。
+当前 8 个 JavaScript 文件均在生产链路使用。
 
 | 文件 | 作用 | 处理结论 |
 | --- | --- | --- |
@@ -25,13 +25,14 @@
 | `runtimeContextFactory.js` | 提供传感器类型、波特率、日期、回放和数据库等语义化只读上下文 | 保留，支持 store 未装配时的旧变量回退 |
 | `runtimeStatePatchFactory.js` | 将旧 WS/串口命令 patch 分流到采集、回放、串口 store 或兼容 setter | 保留；旧命令彻底迁移前不能删 |
 | `legacyRuntimeAccessorFactory.js` | 拼装旧串口帧 runtime 所需的状态、归零和端口 accessor | 保留；未来应归入内置传感器扩展 |
+| `legacyWebSocketContext.js` | 把旧变量 accessor 与 store accessor 组装为 WebSocket handler 上下文 | 兼容适配职责归入 runtime，不再占用 WebSocket 传输目录 |
 | `zeroStateStore.js` | 初始化坐面、靠背、头枕、手套与 legacy 分段协议的零点基准 | 保留，涉及实时数据语义 |
 | `zeroCommandService.js` | 捕获当前源帧为零点，或清空全部零点基准 | 保留，涉及归零时序 |
 
-本轮已将只有一个调用方的 `legacyStateBindingsFactory.js` 内联到
-`runtimeStateStoreFactory.js`，并把 WebSocket 专属 accessor 内联回
-`platform/websocket/webSocketContextFactory.js`。文件由 9 个减为 7 个，字段名、默认值、
-命令 key、初始化顺序和对外导出行为不变。
+此前已将只有一个调用方的 `legacyStateBindingsFactory.js` 内联到
+`runtimeStateStoreFactory.js`。本轮把旧 WebSocket handler 的状态适配从传输目录迁入
+`legacyWebSocketContext.js`；这是职责归位，所以本目录由 7 个文件变为 8 个。字段名、默认值、
+命令 key、初始化顺序和对外行为不变。
 
 ## 后续优化边界
 

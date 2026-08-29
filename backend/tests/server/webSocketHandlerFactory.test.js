@@ -5,6 +5,9 @@ const {
   createSensorStatusPayload,
   createWebSocketHandlerAttacher,
 } = require('../../kernel/platform/websocket/webSocketHandlerFactory');
+const {
+  createWebSocketSubscriptionManager,
+} = require('../../kernel/platform/websocket/websocketSubscriptionService');
 
 const payload = createSensorStatusPayload({
   file: 'custom-pressure-map',
@@ -38,7 +41,14 @@ const commandCalls = [];
 const heartbeatClients = [];
 const publishedSystemEvents = [];
 const registeredHandlers = [];
-const clientSubscriptions = new Map();
+const wsSubscriptions = createWebSocketSubscriptionManager({
+  logger: { warn: () => {} },
+});
+const registerSubscriptionClient = wsSubscriptions.registerClient;
+wsSubscriptions.registerClient = (client, options) => {
+  registeredClients.push({ client, options });
+  return registerSubscriptionClient(client, options);
+};
 const handlerContext = {
   WILDCARD_CHANNEL: '*',
   attachHeartbeat: (client) => heartbeatClients.push(client),
@@ -60,13 +70,7 @@ const handlerContext = {
   server,
   serverOpened: false,
   serverShutdownRequested: true,
-  wsSubscriptions: {
-    getSubscriptions: (client) => clientSubscriptions.get(client) || [],
-    registerClient: (client, options) => {
-      clientSubscriptions.set(client, [...options.channels]);
-      registeredClients.push({ client, options });
-    },
-  },
+  wsSubscriptions,
 };
 
 const attachWebSocketHandlers = createWebSocketHandlerAttacher(handlerContext);
@@ -81,7 +85,8 @@ assert.strictEqual(registeredHandlers.length, 4);
 
 const client = new EventEmitter();
 client.readyState = 1;
-client.send = () => {};
+client.sent = [];
+client.send = (message) => client.sent.push(JSON.parse(message));
 server.emit('connection', client, {
   connection: {
     remoteAddress: '127.0.0.1',
@@ -96,16 +101,29 @@ assert.deepStrictEqual(registeredClients[0].options, {
 });
 assert.deepStrictEqual(heartbeatClients, [client]);
 assert.ok(publishedSystemEvents.length >= 2);
+assert.strictEqual(client.listenerCount('message'), 2);
 
 client.emit('message', Buffer.from('{"getSensorTypes":true}'));
 assert.deepStrictEqual(commandCalls[0].message, { getSensorTypes: true });
 assert.strictEqual(commandCalls[0].context.client, client);
 assert.strictEqual(commandCalls[0].context.scope, 'main');
 
-clientSubscriptions.set(client, ['back']);
-client.emit('message', Buffer.from('{"local":false}'));
-assert.deepStrictEqual(commandCalls[1].message, { local: false });
-assert.strictEqual(commandCalls[1].context.client, client);
+client.emit('message', Buffer.from('{"type":"subscribe","channels":["back"]}'));
+assert.deepStrictEqual(wsSubscriptions.getSubscriptions(client), ['back']);
+assert.deepStrictEqual(client.sent.filter((message) => message.type === 'subscribed'), [{
+  type: 'subscribed',
+  clientId: '127.0.0.145678',
+  channels: ['back'],
+}]);
+assert.deepStrictEqual(commandCalls[1].message, { type: 'subscribe', channels: ['back'] });
 assert.strictEqual(commandCalls[1].context.scope, 'back');
+
+client.emit('message', Buffer.from('{"local":false}'));
+assert.deepStrictEqual(commandCalls[2].message, { local: false });
+assert.strictEqual(commandCalls[2].context.client, client);
+assert.strictEqual(commandCalls[2].context.scope, 'back');
+
+client.emit('close');
+assert.deepStrictEqual(wsSubscriptions.getStatus(), { channels: {}, scopes: {} });
 
 console.log('webSocketHandlerFactory.test.js passed');

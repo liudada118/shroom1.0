@@ -1,11 +1,11 @@
 /**
- * WebSocket 历史回放、框选统计和旧清零命令服务。
+ * 历史回放、框选统计和旧清零命令服务。
  *
  * 连接层只负责解析消息；这里承接旧主 WebSocket 中仍保留的历史差值、
  * 回放跳帧、坐面/靠背框选统计和历史曲线统计逻辑。
  */
 
-function createWebSocketHistoryCommandService({
+function createHistoryAnalysisService({
   SMALL_BED_12B_TYPE,
   TEMP_FULL_BED_TYPE,
   buildTempFullBedPlaybackPayload,
@@ -23,7 +23,7 @@ function createWebSocketHistoryCommandService({
   zeroCommandService,
 }) {
   if (!runtime || typeof runtime !== 'object') {
-    throw new Error('webSocket history command runtime is required');
+    throw new Error('history analysis runtime is required');
   }
 
   /**
@@ -183,5 +183,5 @@ function createWebSocketHistoryCommandService({
 }
 
 module.exports = {
-  createWebSocketHistoryCommandService,
+  createHistoryAnalysisService,
 };

@@ -1,11 +1,11 @@
 const assert = require('assert');
 const {
-  createWebSocketCommandRouter,
+  createControlCommandRouter,
   normalizeDynamicSerialCommand,
-} = require('../../kernel/platform/websocket/webSocketCommandRouter');
+} = require('../../kernel/platform/commands/controlCommandRouter');
 
 const warnings = [];
-const router = createWebSocketCommandRouter({
+const router = createControlCommandRouter({
   logger: {
     warn: (...args) => warnings.push(args),
   },
@@ -44,7 +44,7 @@ assert.strictEqual(missed.handled, false);
 assert.strictEqual(missed.stop, false);
 assert.deepStrictEqual(missed.results, []);
 
-const protocolRouter = createWebSocketCommandRouter();
+const protocolRouter = createControlCommandRouter();
 let protocolContext;
 protocolRouter.register({
   name: 'serial-open',
@@ -105,7 +105,7 @@ protocolRouter.handle({
 });
 assert.deepStrictEqual(dynamicCommand, { sitClose: true, channelClose: ['armLeft'] });
 
-const errorRouter = createWebSocketCommandRouter({
+const errorRouter = createControlCommandRouter({
   logger: {
     warn: (...args) => warnings.push(args),
   },
@@ -123,4 +123,4 @@ assert.strictEqual(failed.results[0].name, 'throws');
 assert.strictEqual(failed.results[0].error, 'boom');
 assert.strictEqual(warnings.length, 1);
 
-console.log('webSocketCommandRouter.test.js passed');
+console.log('controlCommandRouter.test.js passed');

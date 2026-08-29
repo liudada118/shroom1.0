@@ -1,6 +1,23 @@
 # 架构文档
 
-> 最后更新于：2026-08-28
+> 最后更新于：2026-08-29
+
+## 2026-08-29 WebSocket 控制面归位与目录收敛
+
+`backend/kernel/platform/websocket/` 已从 10 个生产 JavaScript 文件收敛为 5 个，只保留共享
+`19999` Server 的装配、心跳/JSON 解码、动态通道发布、订阅管理和连接入口。原先放在该目录的
+通用命令路由与运行控制 handler 迁入 `platform/commands/`，历史差值与框选/曲线统计迁入
+`kernel/playback/`，旧 handler 的运行态 accessor 适配迁入 `platform/runtime/`；心跳和 JSON
+解析两个单一职责小文件合并为 `websocketTransportService.js`。
+
+控制面和实时面现在按用途分开：串口、传感器、采集、回放控制、历史维护与 CSV 导出优先走
+HTTP，WebSocket 负责实时订阅、压力/回放帧、系统事件和旧扁平命令兼容。JQBed 的
+`get/set/resetJqbedAlgorithmConfig` 仍是当前前端唯一直接走旧 WebSocket 的控制例外；本轮没有
+改变它的消息格式或时序，后续需先补等价 HTTP API 再迁移。
+
+本轮是物理归位与内部命名收敛，不改变 `19999` 端口、订阅协议、业务 payload、handler 注册
+顺序、Electron 固定入口、SDK、硬件协议、线序/标定或历史数据格式。后端总测试已扩为 50 个
+文件，并新增传输服务以及订阅/命令双监听联动回归覆盖。
 
 ## 2026-08-28 单 WebSocket 端口与统一多串口编排
 
@@ -2008,6 +2025,7 @@ flowchart LR
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-29 | WebSocket 目录收敛为纯传输边界 | 生产文件由 10→5；命令、历史分析和运行态适配分别归入 commands/playback/runtime，心跳与 JSON 解码合并。HTTP/WS 分工、端口、协议、SDK、Electron 入口和历史格式不变。 |
 | 2026-08-28 | 运行产物归位并精简 platform runtime/WebSocket 内部层 | `dist` 保留；开发态导出与上传进入忽略的根 `runtime`，11 个文件迁移前后哈希一致；platform runtime 9→7、WebSocket 13→10，端口与消息契约不变，并补四类 runtime 和逐文件说明。 |
 | 2026-08-28 | 扩展宿主完成职责分组，版本历史改用版本笔记源文件 | `extension-host` 根仅保留稳定出口与装配入口，内部按 `manifest/runtime/workspace` 分类；版本历史在构建时读取 32 份 Windows Markdown 并按语义版本排序。发布清单修复仍属于生产发布流程，已审计但等待确认。 |
 | 2026-08-28 | 后端物理目录收拢完成 | `backend` 从 22 个一级目录收拢为 7 个、205 个文件缩减为 168 个，删除 35 个 SDK/旧路径转发壳；保留 Electron 的 `runtime` 与 `common/logger` 固定桥，SDK、协议、历史数据格式均未修改。 |
@@ -2141,7 +2159,7 @@ flowchart LR
 
 ---
 
-> 本文档由 Codex 自动生成和维护。最后更新于：2026-08-28
+> 本文档由 Codex 自动生成和维护。最后更新于：2026-08-29
 
 ## 2026-07-07 Display Systems Runtime 定义与复杂线序迁移
 
@@ -2955,6 +2973,7 @@ flowchart LR
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-29 | codeOpi | 优化重构 / 职责归位 | WebSocket 生产目录由 10 个文件收敛为 5 个：控制命令归入 `platform/commands`，历史分析归入 `kernel/playback`，旧上下文适配归入 `platform/runtime`，心跳与 JSON 解码合并。保留单端口、订阅、实时/回放推送和旧命令兼容；未改 SDK、Electron 固定入口、硬件协议、线序/标定或历史格式。 |
 | 2026-08-28 | codeOpi | 优化重构 / 传输收口 | WebSocket 后端只监听 `19999`，删除固定 `CHANNELS` 表，任意 manifest `outputChannel` 通过同一连接动态复用；runtime 广播改走订阅与 telemetry，shutdown 只关闭一次。应用侧串口规则统一进入 `serialPortOrchestrator`，仍由单一 SDK SerialManager 和 manifest 协议驱动；未改 SDK、硬件协议、线序、标定或历史格式。 |
 | 2026-08-28 | codeOpi | 优化重构 / 目录治理 | 保留根 `dist`，将开发态 CSV、报告、上传、工具输出和临时状态收进忽略的 `runtime`；移除无引用且已核验重复/残缺的 `project`，人工 legacy runtime 归入测试区；platform runtime 由 9 文件减为 7，WebSocket 由 13 减为 10，扩展与平台目录补逐文件 README。45 个后端测试与 SDK smoke 10 项通过；未改 Electron 固定入口、SDK、硬件协议、历史格式或打包态路径。 |
 | 2026-08-28 | codeOpi | 优化重构 / 修复缺陷 | `backend/extension-host` 按 manifest、runtime、workspace 分组，内置传感器 registry 回归扩展实现目录；版本历史由硬编码改为构建期读取 Windows release notes，并修正 1.1.33 标题；增加运行生成物忽略规则。未修改 Electron 稳定入口、SDK、协议、历史格式、版本号或发布脚本。 |

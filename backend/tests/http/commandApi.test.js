@@ -2,11 +2,11 @@ const assert = require('assert');
 const express = require('express');
 const http = require('http');
 const { createControlCommandService } = require('../../kernel/platform/commands/controlCommandService');
-const { createWebSocketCommandRouter } = require('../../kernel/platform/websocket/webSocketCommandRouter');
+const { createControlCommandRouter } = require('../../kernel/platform/commands/controlCommandRouter');
 const { registerControlRoutes } = require('../../kernel/platform/http/controlRoutes');
 
 async function run() {
-  const router = createWebSocketCommandRouter();
+  const router = createControlCommandRouter();
   const received = [];
   const dynamicReceived = [];
   const serialStatusRoles = [];

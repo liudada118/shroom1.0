@@ -9,7 +9,7 @@
  *
  * 它同时服务旧 WebSocket 命令和新 HTTP 控制 API。
  */
-const { createRuntimeControlService } = require('../commands/runtimeControlService');
+const { createRuntimeControlService } = require('./runtimeControlService');
 
 function registerRuntimeCommandHandlers(router, deps) {
   const runtimeControlService = deps.runtimeControlService || createRuntimeControlService(deps);

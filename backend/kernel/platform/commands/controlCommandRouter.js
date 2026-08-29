@@ -78,14 +78,14 @@ function normalizeRouterCommand(message) {
 }
 
 /**
- * 创建 WebSocket/HTTP 共用的命令路由器。
+ * 创建 HTTP/旧 WebSocket 共用的传输无关命令路由器。
  *
  * 这里不关心命令来自哪里，只负责：
  * 1. 按 handler.when 判断是否命中。
  * 2. 调用 handler.handle 执行业务。
  * 3. 支持 handler 返回 { stop: true } 中断后续处理。
  */
-function createWebSocketCommandRouter({ logger } = {}) {
+function createControlCommandRouter({ logger } = {}) {
   const handlers = [];
 
   /**
@@ -142,7 +142,7 @@ function createWebSocketCommandRouter({ logger } = {}) {
           };
         }
       } catch (error) {
-        logger?.warn?.(`[WSCommand] ${handler.name || 'anonymous'} failed`, error.message || error);
+        logger?.warn?.(`[ControlCommand] ${handler.name || 'anonymous'} failed`, error.message || error);
         results.push({
           name: handler.name || 'anonymous',
           code: error.code || COMMAND_ERROR_CODES.COMMAND_EXECUTION_FAILED,
@@ -169,6 +169,6 @@ function createWebSocketCommandRouter({ logger } = {}) {
 }
 
 module.exports = {
-  createWebSocketCommandRouter,
+  createControlCommandRouter,
   normalizeDynamicSerialCommand,
 };

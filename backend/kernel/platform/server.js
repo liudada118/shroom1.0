@@ -17,16 +17,15 @@ const {
   buildRealtimeChannelMetadata,
 } = require('./websocket/websocketChannelService');
 const { createWebSocketHandlerAttacher } = require('./websocket/webSocketHandlerFactory');
-const { createWebSocketHandlerContext } = require('./websocket/webSocketContextFactory');
+const { createWebSocketHandlerContext } = require('./runtime/legacyWebSocketContext');
 const {
   WILDCARD_CHANNEL,
 } = require('./websocket/websocketSubscriptionService');
-const { attachHeartbeat } = require('./websocket/websocketConnectionService');
-const { parseJsonMessage } = require('./websocket/websocketMessageService');
+const { attachHeartbeat, parseJsonMessage } = require('./websocket/websocketTransportService');
 const { createServerShutdownOrchestrator } = require('./bootstrap/serverShutdownOrchestrator');
 const { createPetCareRuntimeService } = require('../algorithm-channel/petCareRuntimeService');
-const { createWebSocketCommandRouter } = require('./websocket/webSocketCommandRouter');
-const { registerRuntimeCommandHandlers } = require('./websocket/registerRuntimeCommandHandlers');
+const { createControlCommandRouter } = require('./commands/controlCommandRouter');
+const { registerRuntimeCommandHandlers } = require('./commands/registerRuntimeCommandHandlers');
 const { registerSerialControlHandlers } = require('../serial/serialControlService');
 const { createControlCommandService } = require('./commands/controlCommandService');
 const { createHttpApp } = require('./http/httpAppFactory');
@@ -1179,8 +1178,8 @@ const historyMaintenanceService = createHistoryMaintenanceService({
   publishSystemEvent,
 });
 
-const wsCommandRouter = createWebSocketCommandRouter({ logger });
-wsCommandRouter.register(createJqbedAlgorithmCommandHandler({
+const controlCommandRouter = createControlCommandRouter({ logger });
+controlCommandRouter.register(createJqbedAlgorithmCommandHandler({
   protocol: jqbedAlgorithmProtocol,
   getRuntimeContext: () => ({
     activeFile: runtimeContext.getSensorType(),
@@ -1259,7 +1258,7 @@ function activateSubmittedLicenseKey(licenseKey) {
 }
 
 // 娉ㄥ唽杩愯鏃舵帶鍒跺懡浠わ紝getRuntime/setRuntime 鏄棫杩愯鏃跺彉閲忕殑杩囨浮閫傞厤灞傘€?
-registerRuntimeCommandHandlers(wsCommandRouter, {
+registerRuntimeCommandHandlers(controlCommandRouter, {
   csvDownloadService,
   historyMaintenanceService,
   normalizeCollectFrequency,
@@ -1286,7 +1285,7 @@ registerRuntimeCommandHandlers(wsCommandRouter, {
   setRuntime: runtimeStatePatchers.applyRuntimeCommandPatch,
 });
 
-registerSerialControlHandlers(wsCommandRouter, {
+registerSerialControlHandlers(controlCommandRouter, {
   HAND_GLOVE_DOUBLE,
   closeAllManagedSerialPorts,
   closeManagedSerialPort,
@@ -1327,7 +1326,7 @@ registerSerialControlHandlers(wsCommandRouter, {
 });
 
 const controlCommandService = createControlCommandService({
-  commandRouter: wsCommandRouter,
+  commandRouter: controlCommandRouter,
   logger,
 });
 

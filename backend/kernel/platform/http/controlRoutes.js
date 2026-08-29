@@ -70,7 +70,7 @@ function parseCloseSerialRequest(body = {}) {
  * 架构约定：
  * - HTTP 负责控制命令、配置、查询和导出。
  * - WebSocket 负责实时订阅、实时帧推送和旧命令兼容。
- * - 这里不直接操作串口/数据库，而是转发给 wsCommandRouter 复用已有 handler。
+ * - 这里不直接操作串口/数据库，而是转发给 controlCommandRouter 复用已有 handler。
  */
 function registerControlRoutes(app, {
   getPort,

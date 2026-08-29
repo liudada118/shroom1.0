@@ -1,6 +1,6 @@
 # Shroom 后端阅读入口
 
-> 最后更新：2026-08-28
+> 最后更新：2026-08-29
 
 `backend/` 只保留 Electron 应用装配、稳定能力分层和应用扩展宿主。可复用的协议、串口、采集、存储与处理实现以 `sdk/backend/` 为单一来源，本次目录整理没有修改 SDK，也没有复制第二套实现。
 
@@ -47,6 +47,7 @@ backend/
 - 批量打开会先校验所有角色，展示系统切换会统一关闭旧系统的全部动态串口，避免部分执行或遗留重连。
 - 本地只监听 `19999` 一个 WebSocket 端口，数据按 manifest `outputChannel` 动态订阅与发布，不维护 `sit/back/head` 固定通道表。
 - `sit/back/head` 仅作为旧配置、旧数据字段和历史存储的兼容值继续存在。
+- 串口、采集、回放、历史和导出控制优先使用 HTTP；WebSocket 负责实时帧、订阅、系统事件与旧命令兼容。
 
 ## 运行链路
 
@@ -67,12 +68,14 @@ flowchart LR
 | 目标 | 入口 |
 | --- | --- |
 | Electron 启停后端 | `backend/runtime/index.js` |
-| HTTP、WebSocket、命令与进程生命周期 | `backend/kernel/platform/` |
+| HTTP 路由、静态网页与进程生命周期 | `backend/kernel/platform/{http,bootstrap}/` |
+| 传输无关控制命令和 handler 注册 | `backend/kernel/platform/commands/` |
 | server 进程状态与 legacy 状态迁移 | `backend/kernel/platform/runtime/`，见其 `README.md` |
 | 单端口 WebSocket 传输、逻辑通道订阅和兼容命令入口 | `backend/kernel/platform/websocket/`，见其 `README.md` |
 | 应用侧串口打开、关闭与通道编排 | `backend/kernel/serial/` |
 | 数据库装配与历史查询 | `backend/kernel/storage/` |
-| 历史回放、CSV、实时输出 | `backend/kernel/{playback,csv,realtime}/` |
+| 历史回放与框选/曲线分析 | `backend/kernel/playback/` |
+| CSV 与实时输出 | `backend/kernel/{csv,realtime}/` |
 | Display System 算法通道 | `backend/kernel/algorithm-channel/` |
 | 新传感器运行时 | `backend/extensions/built-in-sensors/`，展示系统配置通过 `backend/extension-host/` 接入 |
 | 展示系统 manifest、运行时与工作区 | `backend/extension-host/{manifest,runtime,workspace}/` |

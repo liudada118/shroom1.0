@@ -1,4 +1,4 @@
-const { createWebSocketHistoryCommandService } = require('./webSocketHistoryCommandService');
+const { createHistoryAnalysisService } = require('../../playback/historyAnalysisService');
 
 const { createCommandAck } = require('@shroom/backend/contract/commandProtocol.js');
 
@@ -94,7 +94,7 @@ function createWebSocketHandlerAttacher(ctx) {
       return;
     }
 
-    const historyCommandService = createWebSocketHistoryCommandService({
+    const historyCommandService = createHistoryAnalysisService({
       SMALL_BED_12B_TYPE,
       TEMP_FULL_BED_TYPE,
       buildTempFullBedPlaybackPayload,

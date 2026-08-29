@@ -61,7 +61,7 @@ function buildMutableAccessors(mutableAccessors = {}) {
 }
 
 /**
- * 创建 WebSocket handler 的完整上下文。
+ * 创建旧 WebSocket handler 的运行时兼容上下文。
  *
  * server.js 只负责把依赖和旧运行态变量以 getter/setter 形式传进来；
  * 本模块统一挂载 runtime accessor，避免 WebSocket handler 继续直接耦合 server.js 变量。
