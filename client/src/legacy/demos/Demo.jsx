@@ -7,6 +7,7 @@ import { NavLink, useLocation, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { chestLine, flLine, frLine, hrLine } from "../../page/home/robotUtil";
 import { buildCollectionRow } from "./collectionValue";
+import { decodeWebSocketPayload, getSensorFrameChannelValue, isSensorFrameForActiveDisplay } from '../../services/ws/sensorFrameDecoder';
 let data = [];
 
 // for (let i = 0; i < 32; i++) {
@@ -379,11 +380,12 @@ export default function Demo() {
       console.info("connect success");
     };
     ws.onmessage = (e) => {
-      let jsonObject = JSON.parse(e.data);
+      let jsonObject = decodeWebSocketPayload(e.data);
+      if (!isSensorFrameForActiveDisplay(jsonObject, location.state?.displaySystemId)) return;
       //处理空数组
 
-      // if (jsonObject.sitData != null) {
-      //   wsPointData = jsonObject.sitData;
+      // 旧 sit 通道处理草稿（现统一通过 getSensorFrameChannelValue 路由）
+      //   wsPointData = sitFrameValue;
       //   let newData = jsonObject.newData;
       //   if(!Array.isArray(wsPointData)){
       //     wsPointData = JSON.parse(wsPointData)
@@ -469,12 +471,10 @@ export default function Demo() {
 
       // }
 
-      if (jsonObject.sitData != null) {
-        wsPointData = jsonObject.sitData;
+      const sitFrameValue = getSensorFrameChannelValue(jsonObject, 'sit');
+      if (Array.isArray(sitFrameValue)) {
+        wsPointData = sitFrameValue;
         let newData = jsonObject.newData;
-        if (!Array.isArray(wsPointData)) {
-          wsPointData = JSON.parse(wsPointData)
-        }
 
         if (colFalg) {
           collection.push([[...wsPointData], name]);

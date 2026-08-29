@@ -1,5 +1,6 @@
 const API_VERSION = 'v1';
-const SDK_CONTRACT_VERSION = '2026-07-14';
+const SDK_CONTRACT_VERSION = '2026-08-29';
+const SENSOR_FRAME_SCHEMA_VERSION = 1;
 const commandSchema = require('./commandSchema.json');
 
 const SERIAL_ROLES = Object.freeze({
@@ -46,6 +47,7 @@ const WS_MESSAGE_TYPES = Object.freeze({
   SUBSCRIBE: 'subscribe',
   UNSUBSCRIBE: 'unsubscribe',
   SUBSCRIPTIONS: 'subscriptions',
+  SENSOR_FRAME: 'sensor.frame',
 });
 
 const TELEMETRY_METRICS = Object.freeze({
@@ -107,27 +109,49 @@ function buildSdkContractSnapshot({
       messageTypes: WS_MESSAGE_TYPES,
       subscribeExample: {
         type: WS_MESSAGE_TYPES.SUBSCRIBE,
-        channels: ['sit'],
+        channels: ['car:sit'],
       },
       unsubscribeExample: {
         type: WS_MESSAGE_TYPES.UNSUBSCRIBE,
-        channels: ['sit'],
+        channels: ['car:sit'],
       },
     },
     telemetry: {
+      frameType: WS_MESSAGE_TYPES.SENSOR_FRAME,
+      schemaVersion: SENSOR_FRAME_SCHEMA_VERSION,
       metrics: TELEMETRY_METRICS,
       quality: TELEMETRY_QUALITY,
-      channelIdPattern: '{sensorType}_{portId}.{metric}',
+      channelIdPattern: '{displaySystemId}:{sensorId}',
       frameShape: {
+        type: 'sensor.frame',
+        schemaVersion: '1',
         channelId: 'string',
-        deviceId: 'string',
-        portId: 'sit|back|head|sensor',
-        metric: 'pressure',
-        value: 'number[]',
-        unit: 'string',
+        displaySystemId: 'string',
+        sensorId: 'string',
+        sensorType: 'string',
+        outputChannel: 'string',
+        source: 'realtime|playback',
+        sequence: 'number',
         timestamp: 'number',
         quality: 'good|stale|error',
-        metadata: 'object',
+        payload: {
+          value: 'number[]',
+          stages: {
+            decoded: 'number[]|null',
+            normalized: 'number[]|null',
+            calibrated: 'number[]|null',
+            processed: 'number[]|null',
+            mapped: 'number[]|null',
+          },
+          metrics: 'object',
+          algorithmMetrics: 'object',
+          matrix: 'object|null',
+          orientation: 'number[]|null',
+          status: 'object|null',
+          temperature: 'object|null',
+          protocol: 'object|null',
+          history: 'object|null',
+        },
       },
       channels,
     },
@@ -207,6 +231,7 @@ module.exports = {
   DISPLAY_SYSTEM_SCHEMA_VERSION,
   HTTP_ROUTES,
   SDK_CONTRACT_VERSION,
+  SENSOR_FRAME_SCHEMA_VERSION,
   SERIAL_ROLES,
   SERIAL_ROLE_ALIASES,
   TELEMETRY_METRICS,
@@ -216,4 +241,3 @@ module.exports = {
   listSerialRoles,
   normalizeSerialRole,
 };
-

@@ -2,6 +2,37 @@
 
 > 最后更新于：2026-08-29
 
+## 2026-08-29 客户端统一迁移到 `sensor.frame`
+
+实时压力帧的客户端契约统一为 `sensor.frame` schema v1：展示系统和传感器身份位于
+`displaySystemId` / `sensorId` / `channelId`，逻辑通道位于 `outputChannel`，主渲染矩阵只从
+`payload.value` 读取；解码、归一、标定、处理和映射阶段分别位于
+`payload.stages.decoded/normalized/calibrated/processed/mapped`。`channelId` 使用
+`<displaySystemId>:<sensorId>`，客户端需要精确订阅时必须使用这个完整身份，不能只用会被不同
+展示系统复用的 `sensorType` 或 `sit/back/head` 名称。
+
+`client/src/services/ws/sensorFrameDecoder.js` 是浏览器端唯一兼容边界。它负责 JSON 解码、schema
+识别、通道选择和阶段选择；旧服务端的顶层 `sitData/backData/headData` 只允许在这里作为输入
+兜底。canonical 帧不会重新生成这些顶层别名，也不会生成模糊的顶层 `data`。`Home`、manifest
+渲染器、Builder 预览、脚部组件和历史 demo 均改用 selector；手部原始矩阵通过
+`payload.stages.decoded` 获取。旧合并消息仍可一次路由多个通道，空数组不会被误判为缺帧。
+
+共享 `19999` wildcard 连接收到压力帧后，先按明确的 `displaySystemId` 隔离，再按
+`outputChannel` 分发。canonical 帧一旦携带 `displaySystemId`，不得用相同 `sensorType` 绕过系统
+边界；没有身份的 legacy 帧和授权、串口状态、命令确认等系统事件继续透传。`Home` 对每条消息只
+解码一次，并把同一个解码结果交给 sit/back/head 处理器，避免高频大矩阵重复解析。独立旧页面
+优先使用路由显式传入的系统身份，其次使用主界面保存的当前身份；canonical 帧在两者都缺失时
+fail closed。`payload.protocol` 只白名单投影帧号、包类型、手侧等兼容字段，不能覆盖
+`displaySystemId/outputChannel/type/payload` 等 canonical 路由身份。
+
+`@shroom/frontend` 的 `normalizeFrame` 同步读取 `payload.value/stages`，`SensorClient` 支持直接传
+完整 `channelId`，或由 `displaySystemId + sensorId` 生成精确订阅键。后端 SDK 契约、示例和文档
+同步使用 schema v1；旧 `*Data` 与旧 telemetry 只保留为迁移期输入，不再作为新代码的输出形态。
+SDK 的 typed `sensor.frame` 事件保留完整 envelope，`FrameStore` 以 `channelId` 为主键并提供精确
+查询，避免不同展示系统复用同一 `sensorType/outputChannel` 时覆盖。硬件 E2E WebSocket 客户端
+也已改为检查 `type/outputChannel/payload.value`；本地 `ShroomSensorSDK` 串口 session 不经过
+WebSocket envelope，仍使用自身的 `frame.channel/frame.pressureData` 契约。
+
 ## 2026-08-29 WebSocket 控制面归位与目录收敛
 
 `backend/kernel/platform/websocket/` 已从 10 个生产 JavaScript 文件收敛为 5 个，只保留共享
@@ -2025,6 +2056,7 @@ flowchart LR
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-29 | 客户端与前端 SDK 完成 `sensor.frame` 同步迁移 | 新增统一 decoder/selector，所有活跃客户端消费者改读 `payload.value/stages`；canonical 帧不再投影顶层 `sitData/backData/headData/data`，wildcard 按 `displaySystemId` 隔离且 Home 单次解码。Manifest 兼容旧合并多通道消息，SDK 支持完整 `channelId` 精确订阅。 |
 | 2026-08-29 | WebSocket 目录收敛为纯传输边界 | 生产文件由 10→5；命令、历史分析和运行态适配分别归入 commands/playback/runtime，心跳与 JSON 解码合并。HTTP/WS 分工、端口、协议、SDK、Electron 入口和历史格式不变。 |
 | 2026-08-28 | 运行产物归位并精简 platform runtime/WebSocket 内部层 | `dist` 保留；开发态导出与上传进入忽略的根 `runtime`，11 个文件迁移前后哈希一致；platform runtime 9→7、WebSocket 13→10，端口与消息契约不变，并补四类 runtime 和逐文件说明。 |
 | 2026-08-28 | 扩展宿主完成职责分组，版本历史改用版本笔记源文件 | `extension-host` 根仅保留稳定出口与装配入口，内部按 `manifest/runtime/workspace` 分类；版本历史在构建时读取 32 份 Windows Markdown 并按语义版本排序。发布清单修复仍属于生产发布流程，已审计但等待确认。 |
@@ -2973,6 +3005,7 @@ flowchart LR
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-29 | codex/client-frame-payload-migration | 优化重构 / 协议迁移 | 客户端、manifest 渲染链和 `@shroom/frontend` 统一消费 `sensor.frame` schema v1 的 `payload.value/stages`；旧顶层 `sitData/backData/headData` 收口到 decoder 兼容输入。补完整 channelId 订阅、展示系统隔离、旧合并多通道路由及新旧协议测试，并同步后端 SDK 契约与示例。 |
 | 2026-08-29 | codeOpi | 优化重构 / 职责归位 | WebSocket 生产目录由 10 个文件收敛为 5 个：控制命令归入 `platform/commands`，历史分析归入 `kernel/playback`，旧上下文适配归入 `platform/runtime`，心跳与 JSON 解码合并。保留单端口、订阅、实时/回放推送和旧命令兼容；未改 SDK、Electron 固定入口、硬件协议、线序/标定或历史格式。 |
 | 2026-08-28 | codeOpi | 优化重构 / 传输收口 | WebSocket 后端只监听 `19999`，删除固定 `CHANNELS` 表，任意 manifest `outputChannel` 通过同一连接动态复用；runtime 广播改走订阅与 telemetry，shutdown 只关闭一次。应用侧串口规则统一进入 `serialPortOrchestrator`，仍由单一 SDK SerialManager 和 manifest 协议驱动；未改 SDK、硬件协议、线序、标定或历史格式。 |
 | 2026-08-28 | codeOpi | 优化重构 / 目录治理 | 保留根 `dist`，将开发态 CSV、报告、上传、工具输出和临时状态收进忽略的 `runtime`；移除无引用且已核验重复/残缺的 `project`，人工 legacy runtime 归入测试区；platform runtime 由 9 文件减为 7，WebSocket 由 13 减为 10，扩展与平台目录补逐文件 README。45 个后端测试与 SDK smoke 10 项通过；未改 Electron 固定入口、SDK、硬件协议、历史格式或打包态路径。 |

@@ -127,11 +127,12 @@ const client = new BackendSdkClient({
 });
 
 const contract = await client.getContract();   // 路由和命令格式从这儿拿，别硬编码
-client.on('frame', (frame) => console.log(frame.channelId, frame.value?.length));
-client.connectRealtime({ channels: ['sit'] });
+client.on('frame', (frame) => console.log(frame.channelId, frame.payload?.value?.length));
+client.connectRealtime({ channels: ['car:sit'] });
 ```
 
 控制走 HTTP，实时走 WebSocket 订阅。`npm run sdk:demo` 是只读版演示。
+精确订阅使用 `displaySystemId:sensorId`；省略 `channels` 时保留服务端默认的 `*` 订阅。
 
 ### 3. 我只想用算法，不碰硬件
 

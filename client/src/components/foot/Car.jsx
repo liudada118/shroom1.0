@@ -10,6 +10,7 @@ import plane from "../../assets/images/plane.png";
 import { Select } from "element-react";
 import "element-theme-default";
 import { commandClient } from '../../services/command/commandClient';
+import { decodeWebSocketPayload, getSensorFrameChannelValue, isSensorFrameForActiveDisplay } from '../../services/ws/sensorFrameDecoder';
 let myChart1;
 let ws, ws1;
 
@@ -255,20 +256,17 @@ class Car extends React.Component {
       console.info("connect success");
     };
     ws.onmessage = (e) => {
-      let jsonObject = JSON.parse(e.data);
+      let jsonObject = decodeWebSocketPayload(e.data);
+      if (!isSensorFrameForActiveDisplay(jsonObject)) return;
       //处理空数组
 
-      if (jsonObject.backData != null) {
+      const backFrameValue = getSensorFrameChannelValue(jsonObject, 'back');
+      if (Array.isArray(backFrameValue)) {
         this.setState({
           renderFlag: true,
         });
 
-        let wsPointData = jsonObject.backData;
-
-        if (!Array.isArray(wsPointData)) {
-          console.log(wsPointData);
-          wsPointData = JSON.parse(JSON.parse(wsPointData));
-        }
+        let wsPointData = backFrameValue;
         if (car.length < 20) {
           car.push(wsPointData.reduce((a, b) => a + b, 0));
         } else {
@@ -321,15 +319,13 @@ class Car extends React.Component {
         });
       }
 
-      if (jsonObject.sitData != null) {
+      const sitFrameValue = getSensorFrameChannelValue(jsonObject, 'sit');
+      if (Array.isArray(sitFrameValue)) {
         // this.setState({
         //   renderFlag : true
         // })
-        // console.log(jsonObject.sitData , this.state.local);
-        let wsPointData = jsonObject.sitData;
-        if (!Array.isArray(wsPointData)) {
-          wsPointData = JSON.parse(JSON.parse(wsPointData));
-        }
+        // console.log(sitFrameValue, this.state.local);
+        let wsPointData = sitFrameValue;
         let sitData = [],
           backData = [];
         for (let i = 0; i < 32; i++) {

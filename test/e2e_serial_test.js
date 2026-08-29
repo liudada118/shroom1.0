@@ -30,6 +30,17 @@ const REPORT_PATH = path.join(SCREENSHOT_DIR, 'serial_test_report.json');
 const results = [];
 const startTime = Date.now();
 
+function getSensorFrameValues(message, expectedChannel) {
+  if (
+    message?.type !== 'sensor.frame'
+    || message.outputChannel !== expectedChannel
+    || !Array.isArray(message.payload?.value)
+  ) {
+    return null;
+  }
+  return message.payload.value;
+}
+
 function addResult(category, name, status, detail, screenshot = null) {
   results.push({ category, name, status, detail, duration_ms: Date.now() - startTime, screenshot });
   const icon = status === 'PASSED' ? '✅' : status === 'FAILED' ? '❌' : '⏭️';
@@ -206,7 +217,7 @@ async function testSerialToWSDataFlow() {
         ws.on('message', (data) => {
           try {
             const parsed = JSON.parse(data.toString());
-            if (parsed.sitData) {
+            if (getSensorFrameValues(parsed, 'sit')) {
               receivedData.push(parsed);
             }
           } catch {}
@@ -248,16 +259,17 @@ async function testSerialToWSDataFlow() {
 
     if (received > 0) {
       const firstMsg = receivedData[0];
-      const hasSitData = Array.isArray(firstMsg.sitData);
-      const dataLen = hasSitData ? firstMsg.sitData.length : 0;
+      const sitValues = getSensorFrameValues(firstMsg, 'sit');
+      const hasSitData = Array.isArray(sitValues);
+      const dataLen = hasSitData ? sitValues.length : 0;
       addResult('数据流', 'WS 数据格式',
         hasSitData && dataLen > 0 ? 'PASSED' : 'FAILED',
-        `sitData: ${hasSitData}, 长度: ${dataLen}, hz: ${firstMsg.hz || 'N/A'}`);
+        `sensor.frame/sit: ${hasSitData}, 长度: ${dataLen}, hz: ${firstMsg.payload?.status?.rateHz || 'N/A'}`);
 
       // 检查数据值范围
       if (hasSitData) {
-        const maxVal = Math.max(...firstMsg.sitData);
-        const minVal = Math.min(...firstMsg.sitData);
+        const maxVal = Math.max(...sitValues);
+        const minVal = Math.min(...sitValues);
         addResult('数据流', '数据值范围',
           maxVal <= 255 && minVal >= 0 ? 'PASSED' : 'FAILED',
           `范围: [${minVal}, ${maxVal}]`);
@@ -281,7 +293,7 @@ async function testHandSensorFrames() {
         ws.on('message', (data) => {
           try {
             const parsed = JSON.parse(data.toString());
-            if (parsed.sitData || parsed.newArr147 || parsed.rotate) {
+            if (getSensorFrameValues(parsed, 'sit')) {
               receivedData.push(parsed);
             }
           } catch {}
@@ -319,8 +331,11 @@ async function testHandSensorFrames() {
 
     if (receivedData.length > 0) {
       const msg = receivedData[0];
+      const hasSitFrame = Array.isArray(getSensorFrameValues(msg, 'sit'));
+      const hasOrientation = Array.isArray(msg.payload?.orientation);
+      const hasMappedStage = Array.isArray(msg.payload?.stages?.mapped);
       addResult('手部传感器', '数据字段完整性', 'PASSED',
-        `sitData: ${!!msg.sitData}, rotate: ${!!msg.rotate}, newArr147: ${!!msg.newArr147}`);
+        `sit frame: ${hasSitFrame}, orientation: ${hasOrientation}, mapped stage: ${hasMappedStage}`);
     }
   } catch (e) { addResult('手部传感器', '双帧数据接收', 'FAILED', e.message); }
 }
@@ -456,8 +471,8 @@ async function testMultiSerialPorts() {
         ws.on('message', (data) => {
           try {
             const parsed = JSON.parse(data.toString());
-            if (parsed.sitData) receivedSit.push(parsed);
-            if (parsed.backData) receivedBack.push(parsed);
+            if (getSensorFrameValues(parsed, 'sit')) receivedSit.push(parsed);
+            if (getSensorFrameValues(parsed, 'back')) receivedBack.push(parsed);
           } catch {}
         });
 
@@ -485,10 +500,10 @@ async function testMultiSerialPorts() {
 
     addResult('多串口', '坐垫数据接收',
       receivedSit.length > 0 ? 'PASSED' : 'SKIPPED',
-      `接收 ${receivedSit.length} 条 sitData`);
+      `接收 ${receivedSit.length} 条 sensor.frame/sit`);
     addResult('多串口', '靠背数据接收',
       receivedBack.length > 0 ? 'PASSED' : 'SKIPPED',
-      `接收 ${receivedBack.length} 条 backData`);
+      `接收 ${receivedBack.length} 条 sensor.frame/back`);
   } catch (e) { addResult('多串口', '并行数据流', 'FAILED', e.message); }
 }
 

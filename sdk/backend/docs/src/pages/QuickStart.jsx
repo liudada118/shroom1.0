@@ -63,8 +63,8 @@ const client = new BackendSdkClient({
 
 // 路由和命令格式从这儿拿，别硬编码 —— 见「契约与命令」那页
 const contract = await client.getContract();
-client.on('frame', (frame) => console.log(frame.channelId, frame.value?.length));
-client.connectRealtime({ channels: ['sit'] });`;
+client.on('frame', (frame) => console.log(frame.channelId, frame.payload?.value?.length));
+client.connectRealtime({ channels: ['car:sit'] });`;
 
 export default function QuickStart() {
   return (

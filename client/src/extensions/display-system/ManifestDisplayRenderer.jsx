@@ -19,37 +19,11 @@ import MatrixWidget from './widgets/MatrixWidget.jsx';
 import CoordinatePointWidget from './widgets/CoordinatePointWidget.jsx';
 import StatsWidget from './widgets/StatsWidget.jsx';
 import DisplayCanvasConfigurator from './canvasConfigurator/DisplayCanvasConfigurator.jsx';
+import {
+  getManifestSourceChannel,
+  readManifestChannelFrames,
+} from './manifestSceneAdapter.js';
 import './ManifestDisplayRenderer.css';
-
-/**
- * 把 widget 的 source 解析成数据通道名。
- *
- * 多传感器 manifest 的通道名由 `sensors[].outputChannel` 自由声明（例如 armLeft），
- * 所以先按 manifest 精确匹配，匹配不到再退回 sit/back/head/sensor 这套旧前缀规则，
- * 让既有的 v1/v2 展示系统行为不变。
- *
- * @param {string} source widget 声明的数据来源。
- * @param {Array<{id: string, outputChannel: string}>} sensors manifest 声明的传感器。
- * @returns {string} 通道名。
- */
-function getChannelFromSource(source = '', sensors = []) {
-  const key = String(source || '');
-  const candidates = sensors
-    .map((sensor) => ({ channel: sensor?.outputChannel || sensor?.id, id: sensor?.id }))
-    .filter((item) => item.channel);
-
-  const exact = candidates.find((item) => key === item.channel || key === item.id);
-  if (exact) return exact.channel;
-  const prefixed = candidates.find((item) => (
-    (item.channel && key.startsWith(item.channel)) || (item.id && key.startsWith(item.id))
-  ));
-  if (prefixed) return prefixed.channel;
-
-  if (key.startsWith('back')) return 'back';
-  if (key.startsWith('head')) return 'head';
-  if (key.startsWith('sensor')) return 'sensor';
-  return 'sit';
-}
 
 export default function ManifestDisplayRenderer({ definition, onSidebarData }) {
   const [frames, setFrames] = useState({ sit: [], back: [], head: [], sensor: [] });
@@ -58,37 +32,28 @@ export default function ManifestDisplayRenderer({ definition, onSidebarData }) {
   const [algorithmMetricFrames, setAlgorithmMetricFrames] = useState({});
   const [selection, setSelection] = useState({});
   const handleMessage = useCallback((message) => {
-    if (!message || typeof message !== 'object') return;
-    setFrames((current) => {
-      const next = { ...current };
-      if (Array.isArray(message.sitData)) next.sit = message.sitData;
-      if (Array.isArray(message.backData)) next.back = message.backData;
-      if (Array.isArray(message.headData)) next.head = message.headData;
-      if (Array.isArray(message.sensorData)) next.sensor = message.sensorData;
-      if (Array.isArray(message.data) && message.outputChannel) next[message.outputChannel] = message.data;
-      if (Array.isArray(message.value) && message.portId) next[message.portId] = message.value;
-      return next;
-    });
-    if (message.outputChannel && Array.isArray(message.normalizedData)) {
-      setNormalizedFrames((current) => ({
-        ...current,
-        [message.outputChannel]: message.normalizedData,
-      }));
-    }
-    if (message.outputChannel && Array.isArray(message.rawData)) {
-      setRawFrames((current) => ({
-        ...current,
-        [message.outputChannel]: message.rawData,
-      }));
-    }
-    const algorithmMetrics = message.algorithmMetrics || message.metrics?.algorithm;
-    if (message.outputChannel && algorithmMetrics && typeof algorithmMetrics === 'object') {
-      setAlgorithmMetricFrames((current) => ({
-        ...current,
-        [message.outputChannel]: algorithmMetrics,
-      }));
-    }
-  }, []);
+    const routedFrames = readManifestChannelFrames(message, [
+      definition?.displaySystemId,
+      definition?.type,
+    ]);
+    if (!routedFrames.length) return;
+    setFrames((current) => routedFrames.reduce(
+      (next, frame) => ({ ...next, [frame.channel]: frame.renderValues }),
+      current,
+    ));
+    setNormalizedFrames((current) => routedFrames.reduce(
+      (next, frame) => ({ ...next, [frame.channel]: frame.normalizedValues }),
+      current,
+    ));
+    setRawFrames((current) => routedFrames.reduce(
+      (next, frame) => ({ ...next, [frame.channel]: frame.rawValues }),
+      current,
+    ));
+    setAlgorithmMetricFrames((current) => routedFrames.reduce(
+      (next, frame) => ({ ...next, [frame.channel]: frame.algorithmMetrics }),
+      current,
+    ));
+  }, [definition?.displaySystemId, definition?.type]);
   useMainWebSocket({ onMessage: handleMessage });
 
   const matrix = definition?.sourceMatrix || definition?.matrix;
@@ -150,7 +115,7 @@ export default function ManifestDisplayRenderer({ definition, onSidebarData }) {
     return activeProfile.canvasWidgets
       .filter((widget) => activeProfile.visibleWidgetIds.has(widget.id))
       .map((widget) => {
-      const channel = getChannelFromSource(widget.source, sensors);
+      const channel = getManifestSourceChannel(widget.source, sensors);
       const values = frames[channel] || [];
       // 多传感器系统每一路矩阵可能都不一样，widget 要用自己那一路的矩阵，
       // 否则第二路会被按第一路的行列数摆放。找不到就沿用顶层矩阵。
@@ -179,7 +144,7 @@ export default function ManifestDisplayRenderer({ definition, onSidebarData }) {
     updateSelection({ ...selection, profileId: activeProfile.profileId, canvas });
   }, [activeProfile.profileId, selection, updateSelection]);
 
-  const sidebarChannel = getChannelFromSource(sidebar?.source, sensors);
+  const sidebarChannel = getManifestSourceChannel(sidebar?.source, sensors);
   const sidebarValues = useMemo(
     () => normalizedFrames[sidebarChannel]?.length
       ? normalizedFrames[sidebarChannel]
@@ -304,7 +269,7 @@ export default function ManifestDisplayRenderer({ definition, onSidebarData }) {
                   label={widget.label || widget.id}
                   params={activeProfile.renderer?.params}
                   values={values}
-                  channel={getChannelFromSource(widget.source, sensors)}
+                  channel={getManifestSourceChannel(widget.source, sensors)}
                   local
                 />
               </div>

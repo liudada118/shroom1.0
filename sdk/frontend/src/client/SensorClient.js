@@ -1,6 +1,6 @@
 import { sensorCommands } from './commands.js';
 import { toLegacyCommand } from './legacyCommands.js';
-import { normalizeIncomingMessage } from '../store/normalizeFrame.js';
+import { SENSOR_FRAME_TYPE, normalizeIncomingMessage } from '../store/normalizeFrame.js';
 
 export const DEFAULT_HTTP_ROUTES = Object.freeze({
   channels: '/api/channels',
@@ -42,6 +42,55 @@ function createHttpBaseUrl(wsUrl, explicitBaseUrl) {
   }
 }
 
+function normalizeIdentityPart(value) {
+  return String(value ?? '').trim();
+}
+
+/**
+ * 将订阅描述解析成 WebSocket 使用的 canonical channelId。
+ *
+ * - 已给出 channelId（字符串或对象）时原样保留；
+ * - displaySystemId + sensorId/channel 组合为 `displaySystemId:sensorId`；
+ * - 没有 displaySystemId 的 `sit/back/head` 继续原样发送，兼容旧服务端。
+ */
+export function resolveChannelId(channel, { displaySystemId } = {}) {
+  if (channel == null) return null;
+
+  if (typeof channel === 'object') {
+    const explicitChannelId = normalizeIdentityPart(channel.channelId);
+    if (explicitChannelId) return explicitChannelId;
+
+    const resolvedDisplaySystemId = normalizeIdentityPart(
+      channel.displaySystemId ?? displaySystemId,
+    );
+    const sensorId = normalizeIdentityPart(
+      channel.sensorId ?? channel.channel ?? channel.portId,
+    );
+    if (!sensorId) return null;
+    if (sensorId === '*' || sensorId.includes(':') || !resolvedDisplaySystemId) {
+      return sensorId;
+    }
+    return `${resolvedDisplaySystemId}:${sensorId}`;
+  }
+
+  const channelId = normalizeIdentityPart(channel);
+  const resolvedDisplaySystemId = normalizeIdentityPart(displaySystemId);
+  if (!channelId) return null;
+  if (channelId === '*' || channelId.includes(':') || !resolvedDisplaySystemId) {
+    return channelId;
+  }
+  return `${resolvedDisplaySystemId}:${channelId}`;
+}
+
+export function normalizeSubscriptionChannels(channels, options = {}) {
+  const candidates = Array.isArray(channels) ? channels : [channels];
+  return [...new Set(
+    candidates
+      .map((channel) => resolveChannelId(channel, options))
+      .filter(Boolean),
+  )];
+}
+
 export class SensorClient {
   constructor({
     url = 'ws://127.0.0.1:19999',
@@ -49,6 +98,7 @@ export class SensorClient {
     WebSocketImpl = globalThis.WebSocket,
     fetchImpl = globalThis.fetch,
     legacyProtocol = false,
+    displaySystemId,
     channels = [],
     apiContract = null,
     routes = {},
@@ -58,7 +108,10 @@ export class SensorClient {
     this.WebSocketImpl = WebSocketImpl;
     this.fetchImpl = fetchImpl;
     this.legacyProtocol = legacyProtocol;
-    this.channels = channels;
+    this.displaySystemId = normalizeIdentityPart(displaySystemId);
+    this.channels = normalizeSubscriptionChannels(channels, {
+      displaySystemId: this.displaySystemId,
+    });
     this.apiContract = apiContract;
     this.routes = {
       ...DEFAULT_HTTP_ROUTES,
@@ -326,18 +379,24 @@ export class SensorClient {
   /**
    * 实时数据订阅仍然走 WebSocket。
    */
-  subscribe(channels) {
+  subscribe(channels, { displaySystemId = this.displaySystemId } = {}) {
+    const channelIds = normalizeSubscriptionChannels(channels, { displaySystemId });
+    if (!channelIds.length) return channelIds;
     this.send({
       type: this.getWsMessageType('SUBSCRIBE', 'subscribe'),
-      channels: Array.isArray(channels) ? channels : [channels],
+      channels: channelIds,
     });
+    return channelIds;
   }
 
-  unsubscribe(channels) {
+  unsubscribe(channels, { displaySystemId = this.displaySystemId } = {}) {
+    const channelIds = normalizeSubscriptionChannels(channels, { displaySystemId });
+    if (!channelIds.length) return channelIds;
     this.send({
       type: this.getWsMessageType('UNSUBSCRIBE', 'unsubscribe'),
-      channels: Array.isArray(channels) ? channels : [channels],
+      channels: channelIds,
     });
+    return channelIds;
   }
 
   handleMessage(rawMessage) {
@@ -354,12 +413,21 @@ export class SensorClient {
 
     normalized.frames.forEach((frame) => {
       this.emit('frame', frame);
-      this.emit(`frame:${frame.sensorType}`, frame);
-      this.emit(`frame:${frame.sensorType}:${frame.channel}`, frame);
+      const frameEvents = new Set([
+        `frame:${frame.sensorType}`,
+        `frame:${frame.sensorType}:${frame.channel}`,
+        frame.channelId ? `frame:${frame.channelId}` : '',
+      ]);
+      frameEvents.forEach((eventName) => {
+        if (eventName) this.emit(eventName, frame);
+      });
     });
 
     if (normalized.type) {
-      this.emit(normalized.type, normalized.payload);
+      this.emit(
+        normalized.type,
+        normalized.type === SENSOR_FRAME_TYPE ? normalized.raw : normalized.payload,
+      );
     }
   }
 

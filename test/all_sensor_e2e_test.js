@@ -69,7 +69,41 @@ function wsSend(ws, msg) {
   });
 }
 
-// 等待 WS 收到包含指定 key 的消息
+function getSensorFrameValues(message, expectedChannel) {
+  if (
+    message?.type !== 'sensor.frame'
+    || message.outputChannel !== expectedChannel
+    || !Array.isArray(message.payload?.value)
+  ) {
+    return null;
+  }
+  return message.payload.value;
+}
+
+// 等待 WS 收到指定 canonical outputChannel 的 sensor.frame。
+function wsWaitForChannel(ws, channel, timeoutMs = 10000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      ws.removeListener('message', handler);
+      reject(new Error(`WS wait for sensor.frame/${channel} timeout`));
+    }, timeoutMs);
+
+    function handler(data) {
+      try {
+        const msg = JSON.parse(data.toString());
+        const values = getSensorFrameValues(msg, channel);
+        if (values) {
+          clearTimeout(timer);
+          ws.removeListener('message', handler);
+          resolve({ message: msg, values });
+        }
+      } catch (e) { /* ignore non-JSON */ }
+    }
+    ws.on('message', handler);
+  });
+}
+
+// 非压力系统事件（例如旧手套 handData）仍按自身消息键等待。
 function wsWaitForMessage(ws, key, timeoutMs = 10000) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -158,19 +192,19 @@ async function testSensor(ws, sensorType) {
 
   // 4. 发送模拟数据并验证 WS 接收
   try {
-    const dataPromise = wsWaitForMessage(ws, 'sitData', 15000);
+    const dataPromise = wsWaitForChannel(ws, 'sit', 15000);
     
     // 异步发送数据
     const sendPromise = sendData(SERIAL_PORT_SIM, sensorType, 15, 100);
 
     const received = await withTimeout(dataPromise, 15000, 'WS receive');
     
-    if (received.sitData && received.sitData.length > 0) {
-      const dataLen = received.sitData.length;
-      const maxVal = Math.max(...received.sitData);
+    if (received.values.length > 0) {
+      const dataLen = received.values.length;
+      const maxVal = Math.max(...received.values);
       record(`${testPrefix} - 数据接收`, true, `len=${dataLen}, max=${maxVal}`);
     } else {
-      record(`${testPrefix} - 数据接收`, false, 'Empty sitData');
+      record(`${testPrefix} - 数据接收`, false, 'Empty sensor.frame/sit payload.value');
     }
 
     await sendPromise.catch(() => {});

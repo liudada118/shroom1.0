@@ -1,6 +1,12 @@
 import React, { useRef, useEffect } from "react";
 import Title from "../../components/title/Title";
 import { sendWebSocketJson } from './websocketTransport';
+import {
+  decodeWebSocketPayload,
+  getSensorFrameChannelValue,
+  getSensorFrameOutputChannel,
+  isSensorFrameForDisplay,
+} from '../../services/ws/sensorFrameDecoder';
 import "./index.scss";
 import CanvasCar from "../../components/three/carnewTest copy";
 import CanvasCarWow from "../../components/three/carnewWow";
@@ -355,12 +361,12 @@ const parsePressurePayload = (payload) => {
   return []
 }
 
-const getRawPressurePayload = (jsonObject, dataKey) => {
+const getRawPressurePayload = (jsonObject, channel) => {
   const rawPressureData = parseMaybeJsonPayload(jsonObject.rawPressureData, null)
   if (Array.isArray(rawPressureData) && rawPressureData.length >= 256) {
     return rawPressureData
   }
-  return jsonObject.realArr ?? jsonObject[dataKey]
+  return jsonObject.realArr ?? getSensorFrameChannelValue(jsonObject, channel)
 }
 
 const parseMaybeJsonPayload = (payload, fallback = null) => {
@@ -381,7 +387,7 @@ const parseMaybeJsonPayload = (payload, fallback = null) => {
  * 兼容浏览器字符串消息和桌面运行时已经解析好的对象消息。
  */
 const parseWebSocketEventPayload = (event) => {
-  const payload = parseMaybeJsonPayload(event?.data, null)
+  const payload = decodeWebSocketPayload(event?.data)
   return payload && typeof payload === 'object' && !Array.isArray(payload)
     ? payload
     : null
@@ -1513,13 +1519,18 @@ class Home extends React.Component {
       this.wsSendObj({ getSensorTypes: true })
     };
     ws.onmessage = (e) => {
-      this.wsData(e);
+      const message = parseWebSocketEventPayload(e);
+      if (!message || !this.isCurrentDisplayFrame(message)) return;
+      this.wsData(e, message);
       // 统一在主 WS 中处理靠背和头枕数据（原 ws1/ws2）
-      if (isCar(this.state.matrixName)) {
-        this.ws1Data(e);
+      if (isCar(this.state.matrixName) && getSensorFrameChannelValue(message, 'back')) {
+        this.ws1Data(e, message);
       }
-      if (this.state.matrixName == "volvo" || this.state.matrixName == "carQX" || this.state.matrixName == WHOLE_CHAIR_MATRIX) {
-        this.ws2Data(e);
+      if (
+        getSensorFrameChannelValue(message, 'head')
+        && (this.state.matrixName == "volvo" || this.state.matrixName == "carQX" || this.state.matrixName == WHOLE_CHAIR_MATRIX)
+      ) {
+        this.ws2Data(e, message);
       }
     };
     ws.onerror = (e) => {
@@ -1632,10 +1643,12 @@ class Home extends React.Component {
       console.info("connect success");
     };
     ws.onmessage = (e) => {
-      that.wsData(e);
+      const message = parseWebSocketEventPayload(e);
+      if (!message || !that.isCurrentDisplayFrame(message)) return;
+      that.wsData(e, message);
       // 统一在主 WS 中处理靠背数据
-      if (isCar(that.state.matrixName)) {
-        that.ws1Data(e);
+      if (isCar(that.state.matrixName) && getSensorFrameChannelValue(message, 'back')) {
+        that.ws1Data(e, message);
       }
     };
     ws.onerror = (e) => {
@@ -1659,6 +1672,19 @@ class Home extends React.Component {
       legacySideAirbag: true,
     });
   }
+
+  /**
+   * wildcard 订阅会收到所有展示系统的帧。先按展示系统身份过滤，再进入 sit/back/head
+   * 处理器，避免不同系统复用同名 outputChannel 时互相覆盖。
+   */
+  isCurrentDisplayFrame = (message) => {
+    const definition = getDisplayDefinition(this.state.matrixName);
+    return isSensorFrameForDisplay(message, [
+      this.state.matrixName,
+      definition?.displaySystemId,
+      definition?.type,
+    ]);
+  };
 
 
 
@@ -1720,18 +1746,11 @@ class Home extends React.Component {
     }
   }
 
-  wsData = (e) => {
+  wsData = (e, decodedMessage = null) => {
     sitPress = 0;
-    let jsonObject = parseWebSocketEventPayload(e);
+    const jsonObject = decodedMessage || parseWebSocketEventPayload(e);
     if (!jsonObject) return;
-    if (
-      jsonObject.sitData != null
-      && !Array.isArray(jsonObject.sitData)
-      && typeof jsonObject.sitData !== 'string'
-    ) {
-      // 控制类消息可能复用 sitData 字段，但不是压力矩阵，不能交给旧矩阵解析链路。
-      jsonObject = { ...jsonObject, sitData: null };
-    }
+    const sitFrameData = getSensorFrameChannelValue(jsonObject, 'sit');
     this.syncSmallBed12BMatrixSize(jsonObject);
 
     if (jsonObject.jqbedAlgorithmConfig) {
@@ -1745,11 +1764,9 @@ class Home extends React.Component {
     }
 
     const currentDisplayDefinition = getDisplayDefinition(this.state.matrixName);
-    const hasPressureFrame = (
-      jsonObject.sitData != null
-      || jsonObject.backData != null
-      || jsonObject.headData != null
-      || (jsonObject.outputChannel && jsonObject.data != null)
+    const hasPressureFrame = Boolean(
+      getSensorFrameOutputChannel(jsonObject)
+      && getSensorFrameChannelValue(jsonObject),
     );
     // 采集计时不在这里了：它改成由 `startCollectionTimer` 的定时器驱动，不再蹭帧。
     // 之前这段代码在帧处理链里，于是既受「显示系统提前 return」影响（manifest
@@ -1758,8 +1775,8 @@ class Home extends React.Component {
     if (currentDisplayDefinition?.source === 'manifest' && hasPressureFrame) {
       const handled = this.handleManifestSceneFrame(jsonObject, currentDisplayDefinition);
       if (handled || jsonObject.displaySystemId) return;
-    } else if (jsonObject.displaySystemId && hasPressureFrame) {
-      // 后台可同时发布其它 Display System 的帧，旧场景不能消费这些带身份的帧。
+    } else if (hasPressureFrame && !this.isCurrentDisplayFrame(jsonObject)) {
+      // canonical 帧按 displaySystemId 隔离；缺少身份的旧帧由兼容边界继续透传。
       return;
     }
 
@@ -2240,7 +2257,7 @@ class Home extends React.Component {
       this.com.current?.sensorData?.(jsonObject);
     }
 
-    if (jsonObject.sitData != null) {
+    if (sitFrameData) {
       // 统计真实采样频率
       realHzFrameCount++;
       const now = Date.now();
@@ -2256,7 +2273,7 @@ class Home extends React.Component {
       // 采集计时已经提到本函数开头（显示系统提前 return 之前），这里不再重复计数。
 
       let selectArr;
-      let wsPointData = jsonObject.sitData;
+      let wsPointData = sitFrameData;
       let rotate = jsonObject.rotate;
 
       if (!Array.isArray(wsPointData)) {
@@ -2338,7 +2355,6 @@ class Home extends React.Component {
 
 
     if ((this.state.hand || this.state.matrixName === HAND_0205_DOUBLE_MATRIX) && this.state.numMatrixFlag == 'normal' && jsonObject.rotate != null && tactileGloveTypes.includes(this.state.matrixName)) {
-      let wsPointData = jsonObject.sitData;
       let rotate = jsonObject.rotate;
       // sitTypeEvent[this.state.matrixName]({
       //   that: this,
@@ -2379,7 +2395,7 @@ class Home extends React.Component {
 
 
     const sitMappedPressurePayload = getMappedPressurePayload(jsonObject, this.state.matrixName)
-    if (jsonObject.sitData != null &&
+    if (sitFrameData &&
       sitMappedPressurePayload != null &&
       (['robot1', 'footVideo'].includes(this.state.matrixName) || this.state.matrixName.includes('robot') ||
         this.state.matrixName.includes('hand') || this.state.matrixName == 'Num3D')) {
@@ -2434,14 +2450,14 @@ class Home extends React.Component {
             if (this.state.numMatrixFlag == 'normal') {
               // 3D 遥操模式：
               // 1. 将 256 字节原始数据写入 wsPointDataSit，供 Aside 侧边栏显示压力数山
-              let rawSitData = getRawPressurePayload(jsonObject, 'sitData');
+              let rawSitData = getRawPressurePayload(jsonObject, 'sit');
               if (!Array.isArray(rawSitData)) rawSitData = JSON.parse(rawSitData);
               wsPointDataSit = [...rawSitData];
               wsPointDataSitWidth = 16; // hand0205 是 16×16 矩阵
               this.syncGloveRawPressureStats(rawSitData);
 
               if (this.state.matrixName === 'handGloveFullPacket') {
-                const renderData = parsePressurePayload(jsonObject.sitData);
+                const renderData = parsePressurePayload(sitFrameData);
                 that.com.current?.sitData({
                   wsPointData: renderData,
                   statsData: rawSitData,
@@ -2529,13 +2545,13 @@ class Home extends React.Component {
               }
             } else if (this.state.numMatrixFlag == 'num' && tactileGloveTypes.includes(this.state.matrixName)) {
               if (this.state.matrixName === 'handGloveFullPacket') {
-                const rawData = this.parseGloveRawMatrix(getRawPressurePayload(jsonObject, 'sitData'));
+                const rawData = this.parseGloveRawMatrix(getRawPressurePayload(jsonObject, 'sit'));
                 if (rawData) {
                   this.com.current?.changeWsData256([...rawData])
                 }
               } else {
                 // 手套2D数字模式：旧手套使用 sitData 的原始256数据点，以16x16矩阵显示
-                let rawData = getRawPressurePayload(jsonObject, 'sitData');
+                let rawData = getRawPressurePayload(jsonObject, 'sit');
                 if (rawData && !Array.isArray(rawData)) {
                   rawData = JSON.parse(rawData);
                 }
@@ -2613,7 +2629,7 @@ class Home extends React.Component {
               const isDoubleGlove = this.state.matrixName === HAND_0205_DOUBLE_MATRIX
               const isRightPayload = isDoubleGlove ? isRightHandPayload(jsonObject, false) : !!backFlag
               const currentFingerPoints = updateLatestFingerPoints(wsPointDataSit, isRightPayload)
-              const rawSitData = getRawPressurePayload(jsonObject, 'sitData');
+              const rawSitData = getRawPressurePayload(jsonObject, 'sit');
               this.syncGloveRawPressureStats(rawSitData);
 
               if (that.state.numMatrixFlag == "normal") {
@@ -2695,13 +2711,13 @@ class Home extends React.Component {
               }
             } else if (this.state.numMatrixFlag == 'num' && tactileGloveTypes.includes(this.state.matrixName)) {
               if (this.state.matrixName === 'handGloveFullPacket') {
-                const rawData = this.parseGloveRawMatrix(getRawPressurePayload(jsonObject, 'sitData'));
+                const rawData = this.parseGloveRawMatrix(getRawPressurePayload(jsonObject, 'sit'));
                 if (rawData) {
                   this.com.current?.changeWsData256([...rawData])
                 }
               } else {
                 // 手套2D数字模式：旧手套使用 sitData 的原始256数据点，以16x16矩阵显示
-                let rawData = getRawPressurePayload(jsonObject, 'sitData');
+                let rawData = getRawPressurePayload(jsonObject, 'sit');
                 if (rawData && !Array.isArray(rawData)) {
                   rawData = JSON.parse(rawData);
                 }
@@ -2855,10 +2871,11 @@ class Home extends React.Component {
 
 
 
-  ws1Data = (e) => {
-    const jsonObject = parseWebSocketEventPayload(e);
+  ws1Data = (e, decodedMessage = null) => {
+    const jsonObject = decodedMessage || parseWebSocketEventPayload(e);
     if (!jsonObject) return;
-    // let wsPointData = jsonObject.backData;
+    const backFrameData = getSensorFrameChannelValue(jsonObject, 'back');
+    // let wsPointData = getSensorFrameChannelValue(jsonObject, 'back');
     // if (!Array.isArray(wsPointData)) {
     //   wsPointData = JSON.parse(wsPointData);
     // }
@@ -2869,7 +2886,7 @@ class Home extends React.Component {
       sitFlag = jsonObject.sitFlag;
     }
 
-    if (jsonObject.backData != null) {
+    if (backFrameData) {
       // 右手（backData 路径）统计真实采样频率
       if (this.state.matrixName.includes('hand') || this.state.matrixName == 'handGlove115200') {
         realHzFrameCount++;
@@ -2888,7 +2905,7 @@ class Home extends React.Component {
       // 显示的是帧数、没有 `/12*hz`），走靠背通道。它和上面坐垫那个写的是**同一个**
       // `changeNum` 槽位，改成定时器计时后两者会互相盖写，所以一并删掉：
       // 这个数字现在全局统一由 `startCollectionTimer` 的秒表驱动。
-      wsPointDataBack = jsonObject.backData;
+      wsPointDataBack = backFrameData;
       // console.log(wsPointDataBack)
       if (!Array.isArray(wsPointDataBack)) {
         wsPointDataBack = JSON.parse(wsPointDataBack);
@@ -2912,7 +2929,7 @@ class Home extends React.Component {
     }
 
     const backMappedPressurePayload = getMappedPressurePayload(jsonObject, this.state.matrixName)
-    if (jsonObject.backData != null &&
+    if (backFrameData &&
       backMappedPressurePayload != null &&
       (['robot1', 'footVideo'].includes(this.state.matrixName) || this.state.matrixName.includes('hand') || this.state.matrixName == 'Num3D')) {
 
@@ -3002,7 +3019,7 @@ class Home extends React.Component {
               wsPointDataSit = wsPointDataSit.map((a) => Math.round(a));
               wsPointDataSitWidth = 32;
               const currentFingerPoints = updateLatestFingerPoints(wsPointDataSit, isRightPayload)
-              const rawBackData = getRawPressurePayload(jsonObject, 'backData');
+              const rawBackData = getRawPressurePayload(jsonObject, 'back');
               this.syncGloveRawPressureStats(rawBackData);
               const currentFingerCalibration = isDoubleGlove
                 ? (isRightPayload ? fingerArrR : fingerArrL)
@@ -3012,7 +3029,7 @@ class Home extends React.Component {
 
                 if (this.state.matrixName != 'handVideo1') {
                   const renderData = this.state.matrixName === 'handGloveFullPacket'
-                    ? parsePressurePayload(jsonObject.backData)
+                    ? parsePressurePayload(backFrameData)
                     : wsPointData;
                   writeHandData?.({
                     wsPointData: renderData ? renderData : [],
@@ -3078,13 +3095,13 @@ class Home extends React.Component {
               this.com.current?.changeWsData147([...newArr])
             } else if (this.state.numMatrixFlag == 'num' && tactileGloveTypes.includes(this.state.matrixName)) {
               if (this.state.matrixName === 'handGloveFullPacket') {
-                const rawData = this.parseGloveRawMatrix(getRawPressurePayload(jsonObject, 'backData'));
+                const rawData = this.parseGloveRawMatrix(getRawPressurePayload(jsonObject, 'back'));
                 if (rawData) {
                   this.com.current?.changeWsData256([...rawData])
                 }
               } else {
                 // 手套2D数字模式：旧手套使用 realArr（原始256字节）渲染16x16矩阵
-                let rawData = getRawPressurePayload(jsonObject, 'backData');
+                let rawData = getRawPressurePayload(jsonObject, 'back');
                 if (rawData && !Array.isArray(rawData)) {
                   rawData = JSON.parse(rawData);
                 }
@@ -3158,7 +3175,7 @@ class Home extends React.Component {
               wsPointDataSit = wsPointDataSit.map((a) => Math.round(a));
               wsPointDataSitWidth = 32;
               const currentFingerPoints = updateLatestFingerPoints(wsPointDataSit, isRightPayload)
-              const rawBackData = getRawPressurePayload(jsonObject, 'backData');
+              const rawBackData = getRawPressurePayload(jsonObject, 'back');
               this.syncGloveRawPressureStats(rawBackData);
               const currentFingerCalibration = isDoubleGlove
                 ? (isRightPayload ? fingerArrR : fingerArrL)
@@ -3229,13 +3246,13 @@ class Home extends React.Component {
               this.com.current?.changeWsData147([...newArr])
             } else if (this.state.numMatrixFlag == 'num' && tactileGloveTypes.includes(this.state.matrixName)) {
               if (this.state.matrixName === 'handGloveFullPacket') {
-                const rawData = this.parseGloveRawMatrix(getRawPressurePayload(jsonObject, 'backData'));
+                const rawData = this.parseGloveRawMatrix(getRawPressurePayload(jsonObject, 'back'));
                 if (rawData) {
                   this.com.current?.changeWsData256([...rawData])
                 }
               } else {
                 // 手套2D数字模式：旧手套使用 realArr（原始256字节）渲染16x16矩阵
-                let rawData = getRawPressurePayload(jsonObject, 'backData');
+                let rawData = getRawPressurePayload(jsonObject, 'back');
                 if (rawData && !Array.isArray(rawData)) {
                   rawData = JSON.parse(rawData);
                 }
@@ -3650,11 +3667,12 @@ class Home extends React.Component {
     }
   };
 
-  ws2Data = (e) => {
-    const jsonObject = parseWebSocketEventPayload(e);
+  ws2Data = (e, decodedMessage = null) => {
+    const jsonObject = decodedMessage || parseWebSocketEventPayload(e);
     if (!jsonObject) return;
-    if (jsonObject.headData != null) {
-      let wsPointData = jsonObject.headData
+    const headFrameData = getSensorFrameChannelValue(jsonObject, 'head');
+    if (headFrameData) {
+      let wsPointData = headFrameData
       wsPointDataHead = wsPointData;
       if (!Array.isArray(wsPointDataHead)) {
         wsPointDataHead = JSON.parse(wsPointDataHead);

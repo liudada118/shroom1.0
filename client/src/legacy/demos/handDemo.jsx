@@ -6,6 +6,12 @@ import { CSVLink } from "react-csv";
 import { NavLink, useLocation, useParams } from "react-router-dom";
 import { buildCollectionRow } from "./collectionValue";
 import { useTranslation } from "react-i18next";
+import {
+  decodeWebSocketPayload,
+  getSensorFrameChannelValue,
+  getSensorFrameStageValue,
+  isSensorFrameForActiveDisplay,
+} from '../../services/ws/sensorFrameDecoder';
 let data = [];
 
 // for (let i = 0; i < 32; i++) {
@@ -278,11 +284,16 @@ export default function Demo() {
       console.info("connect success");
     };
     ws.onmessage = (e) => {
-      let jsonObject = JSON.parse(e.data);
+      let jsonObject = decodeWebSocketPayload(e.data);
+      if (!isSensorFrameForActiveDisplay(jsonObject, location.state?.displaySystemId)) return;
       //处理空数组
+      const sitFrameData = getSensorFrameChannelValue(jsonObject, 'sit');
+      const rawFrameData = sitFrameData === null
+        ? null
+        : (getSensorFrameStageValue(jsonObject, 'decoded') ?? sitFrameData);
 
-      if (jsonObject.realArr != null) {
-        wsPointData = jsonObject.realArr;
+      if (rawFrameData != null) {
+        wsPointData = rawFrameData;
         let newData = jsonObject.newData;
 
 

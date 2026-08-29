@@ -19,6 +19,7 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { decodeWebSocketPayload } from '../services/ws/sensorFrameDecoder';
 
 const EMPTY_CHANNELS = [];
 
@@ -103,15 +104,9 @@ export default function useWebSocket(url, options = {}) {
 
       ws.onmessage = (event) => {
         if (unmountedRef.current) return;
-        try {
-          const data = JSON.parse(event.data);
-          setLastMessage(data);
-          callbacksRef.current.onMessage?.(data, event);
-        } catch {
-          // 非 JSON 数据直接传递
-          setLastMessage(event.data);
-          callbacksRef.current.onMessage?.(event.data, event);
-        }
+        const data = decodeWebSocketPayload(event.data);
+        setLastMessage(data);
+        callbacksRef.current.onMessage?.(data, event);
       };
 
       ws.onclose = (event) => {

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { commandClient } from '../../services/command/commandClient'
+import { decodeWebSocketPayload, getSensorFrameChannelValue, isSensorFrameForActiveDisplay } from '../../services/ws/sensorFrameDecoder'
 function jet1(min, max, x) {
     let red, g, blue;
     let dv;
@@ -70,7 +71,8 @@ export default function Robot() {
         ws.onmessage = (e) => {
             // this.wsData(e);
             // console.log(e)
-            let jsonObject = JSON.parse(e.data);
+            let jsonObject = decodeWebSocketPayload(e.data);
+            if (!isSensorFrameForActiveDisplay(jsonObject)) return;
 
             if (jsonObject.dataLength != null) {
                 console.log(String(jsonObject.dataLength))
@@ -88,12 +90,10 @@ export default function Robot() {
                 console.log(jsonObject.file)
             }
 
-            if (jsonObject.sitData != null) {
+            const sitFrameValue = getSensorFrameChannelValue(jsonObject, 'sit');
+            if (Array.isArray(sitFrameValue)) {
                 // console.log(first)
-                let wsPointData = jsonObject.sitData;
-                if (!Array.isArray(wsPointData)) {
-                    wsPointData = JSON.parse(wsPointData)
-                }
+                let wsPointData = sitFrameValue;
                 console.log(wsPointData)
                 let width = 32, height = 32
                 if (wsPointData.length == 256) {

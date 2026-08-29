@@ -11,7 +11,7 @@ import { getDisplayMatrix } from './displays/registry';
 // ─── WebSocket 端口配置 ───────────────────────────────────────────────────────
 export const WS_HOST = '127.0.0.1';
 export const WS_PORTS = {
-  MAIN:  19999,  // 统一数据通道（坐垫 + 靠背 + 头枕，通过 sitData/backData/headData 字段区分）
+  MAIN:  19999,  // 统一 sensor.frame 通道，通过 displaySystemId:sensorId 区分传感器
   BACK:  19999,  // 逻辑别名：与 MAIN 共用一个物理 WebSocket 端口
   HEAD:  19999,  // 逻辑别名：与 MAIN 共用一个物理 WebSocket 端口
 };

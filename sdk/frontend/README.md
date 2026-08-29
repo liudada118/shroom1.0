@@ -408,6 +408,32 @@ matrix, data, raw, stats, extra }`。不管后端发的是新协议还是 legacy
 可以直接喂给 `RendererHost` 的 `values` 的那个数组（[example](example/src/main.jsx)
 里的「连真后端」开关就是这么接的）。
 
+schema v1 的新实时协议使用 `type: 'sensor.frame'`，压力值位于
+`payload.value`，SDK 会保留 `channelId/displaySystemId/sensorId/outputChannel` 身份并投影到
+上述统一帧结构，不会重新生成顶层 `sitData/backData/headData`。旧 `type: 'frame'`、旧顶层
+`*Data` 和早期 SDK pressure telemetry 仍可作为迁移期输入。
+
+canonical 帧还会触发 `frame:<channelId>` 事件；`on('sensor.frame')` 收到完整 wire envelope，
+而 `on('frame')` 继续收到归一化帧。`FrameStore` 以 `channelId` 为主键，可用
+`getFrameByChannelId('hand0205:sit')` 精确读取，避免两个展示系统复用相同
+`sensorType/outputChannel` 时互相覆盖。
+
+显式订阅应使用服务端的 canonical `channelId`。构造器提供 `displaySystemId` 后，简写的
+`sit/back/head` 会自动转成 `displaySystemId:sensorId`；也可以直接传完整 ID 或描述对象：
+
+```js
+const canonicalClient = new SensorClient({
+  displaySystemId: 'hand0205',
+  channels: ['sit', 'back'], // 自动订阅 hand0205:sit / hand0205:back
+});
+
+canonicalClient.subscribe('hand0205:sit');
+canonicalClient.subscribe({ displaySystemId: 'hand0205', sensorId: 'back' });
+canonicalClient.subscribe({ channelId: 'hand0205:sit' });
+```
+
+未提供 `displaySystemId` 的简写仍会原样发送，以兼容只认识 `sit/back/head` 的旧服务端。
+
 Manifest v2 的 `display.profiles` 可以组合 `renderers`、`visualizationAlgorithms` 和
 widgets。用 `registry.getProfiles(sensorType)` 与 `registry.getProfile(sensorType,
 profileId)` 获取可选方案，再映射到自己的菜单和渲染组件。

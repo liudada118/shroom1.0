@@ -1,5 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react'
 import Title from '../../components/title/Title'
+import {
+  decodeWebSocketPayload,
+  getSensorFrameChannelValue,
+  isSensorFrameForActiveDisplay,
+} from '../../services/ws/sensorFrameDecoder'
 import './index.scss'
 // import Canvas from '../../components/three/Three'
 // import CanvasHand from '../../components/three/hand'
@@ -134,10 +139,13 @@ export default function Home() {
     };
     ws.onmessage = (e) => {
       sitPress = 0
-      let jsonObject = JSON.parse(e.data);
+      let jsonObject = decodeWebSocketPayload(e.data);
+      if (!isSensorFrameForActiveDisplay(jsonObject, matrixName)) return;
+      const sitFrameData = getSensorFrameChannelValue(jsonObject, 'sit')
+      const backFrameData = getSensorFrameChannelValue(jsonObject, 'back')
       //处理空数组
 
-      if (jsonObject.sitData != null) {
+      if (sitFrameData) {
 
         if (colValueFlag) {
           num++
@@ -148,7 +156,7 @@ export default function Home() {
         // console.log(num)
 
         let selectArr
-        let wsPointData = jsonObject.sitData;
+        let wsPointData = sitFrameData;
         // console.log(wsPointData)
         if (!Array.isArray(wsPointData)) {
           wsPointData = JSON.parse(wsPointData);
@@ -217,9 +225,9 @@ export default function Home() {
         // data.current?.initCharts2(totalArr)
       }
 
-      if (jsonObject.backData != null) {
+      if (backFrameData) {
         backPress = 0
-        let wsPointData = jsonObject.backData;
+        let wsPointData = backFrameData;
         // console.log(wsPointData)
         if (!Array.isArray(wsPointData)) {
           wsPointData = JSON.parse(wsPointData);
@@ -812,7 +820,8 @@ export default function Home() {
 }
 
 
-class Home extends React.Component{
+// 保留未挂载的旧 class 预览，但避免与上方默认导出的 Home 函数组件重名而阻断静态解析。
+class LegacyHomePreview extends React.Component{
   constructor(){
     super()
   }

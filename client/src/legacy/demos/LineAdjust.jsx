@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { findMax } from '../../assets/util/util'
 import { carBackLine } from '../../assets/util/line'
+import { decodeWebSocketPayload, getSensorFrameChannelValue, isSensorFrameForActiveDisplay } from '../../services/ws/sensorFrameDecoder'
 let data = []
 
 // for (let i = 0; i < 32; i++) {
@@ -42,11 +43,13 @@ export default function Demo() {
             console.info("connect success");
         };
         ws.onmessage = (e) => {
-            let jsonObject = JSON.parse(e.data);
+            let jsonObject = decodeWebSocketPayload(e.data);
+            if (!isSensorFrameForActiveDisplay(jsonObject)) return;
             //处理空数组
 
-            if (jsonObject.sitData != null) {
-                let wsPointData = jsonObject.sitData;
+            const sitFrameValue = getSensorFrameChannelValue(jsonObject, 'sit');
+            if (Array.isArray(sitFrameValue)) {
+                let wsPointData = sitFrameValue;
 
                 wsPointData = wsPointData.map((a) => a < 10 ? 0 : a)
 

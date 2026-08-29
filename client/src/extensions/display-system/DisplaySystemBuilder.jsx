@@ -45,6 +45,7 @@ import { calculatePressureMetrics } from './displayProfileRuntime';
 import { applyMatrixTransform } from '../../displays/matrixTransform';
 import { DEFAULT_COLORMAP_ID } from './colormaps';
 import RendererHost from '../../renderers/RendererHost.jsx';
+import { readManifestChannelFrames } from './manifestSceneAdapter.js';
 import './DisplaySystemBuilder.css';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:19245';
@@ -623,18 +624,13 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
   // 实时帧的解包逻辑与 ManifestDisplayRenderer 一致。用户可以显式选择
   // 1..N 方向测试帧或串口实时帧，页面不再暗中切换数据来源。
   const handlePreviewMessage = useCallback((message) => {
-    if (!message || typeof message !== 'object') return;
-    setPreviewFrames((current) => {
-      const next = { ...current };
-      if (Array.isArray(message.sitData)) next.sit = message.sitData;
-      if (Array.isArray(message.backData)) next.back = message.backData;
-      if (Array.isArray(message.headData)) next.head = message.headData;
-      if (Array.isArray(message.sensorData)) next.sensor = message.sensorData;
-      if (Array.isArray(message.data) && message.outputChannel) next[message.outputChannel] = message.data;
-      if (Array.isArray(message.value) && message.portId) next[message.portId] = message.value;
-      return next;
-    });
-  }, []);
+    const routedFrames = readManifestChannelFrames(message, systemId);
+    if (!routedFrames.length) return;
+    setPreviewFrames((current) => routedFrames.reduce(
+      (next, frame) => ({ ...next, [frame.channel]: frame.renderValues }),
+      current,
+    ));
+  }, [systemId]);
   useMainWebSocket({ onMessage: handlePreviewMessage });
 
   const loadIndex = useCallback(async () => {

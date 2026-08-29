@@ -32,6 +32,7 @@ import {
 } from "../../assets/util/util";
 import { calFoot } from "../../assets/util/value";
 import { robot0401 } from "./robotUtil";
+import { getSensorFrameChannelValue } from "../../services/ws/sensorFrameDecoder";
 
 const normalizeWholeChairFrame = (data, mapper) => {
   let frame = data;
@@ -3178,7 +3179,7 @@ export const backTypeEvent = {
     }
 
     backPress = 0;
-    let wsPointData = jsonObject.backData;
+    let wsPointData = getSensorFrameChannelValue(jsonObject, 'back');
 
     if (!Array.isArray(wsPointData)) {
       wsPointData = JSON.parse(wsPointData);
@@ -3358,7 +3359,7 @@ export const backTypeEvent = {
       }
     }
     backPress = 0;
-    let wsPointData = jsonObject.backData;
+    let wsPointData = getSensorFrameChannelValue(jsonObject, 'back');
 
     if (!Array.isArray(wsPointData)) {
       wsPointData = JSON.parse(wsPointData);
@@ -3536,7 +3537,7 @@ export const backTypeEvent = {
       that.data.current?.handleChartsArea(totalPointArr, max1 + 10);
   },
   localCar({ that, jsonObject, sitFlag, local }) {
-    let wsPointData = jsonObject.backData;
+    let wsPointData = getSensorFrameChannelValue(jsonObject, 'back');
 
     const arr = [];
     for (let i = 0; i < 5; i++) {
@@ -3695,7 +3696,7 @@ export const backTypeEvent = {
     }
 
     backPress = 0;
-    let wsPointData = jsonObject.backData;
+    let wsPointData = getSensorFrameChannelValue(jsonObject, 'back');
     if (!Array.isArray(wsPointData)) {
       wsPointData = JSON.parse(wsPointData);
     }
@@ -3877,7 +3878,7 @@ export const backTypeEvent = {
     }
 
     backPress = 0;
-    let wsPointData = jsonObject.backData;
+    let wsPointData = getSensorFrameChannelValue(jsonObject, 'back');
 
     if (wsPointDataBackZero.length) {
       wsPointData = wsPointData.map((a, index) => a - wsPointDataBackZero[index] > 0 ? a - wsPointDataBackZero[index] : 0)
@@ -4071,7 +4072,7 @@ export const backTypeEvent = {
     }
 
     backPress = 0;
-    let wsPointData = jsonObject.backData;
+    let wsPointData = getSensorFrameChannelValue(jsonObject, 'back');
 
     wsPointData = that.state.matrixName === 'wholeChair' ? normalizeWholeChairFrame(wsPointData, carQXbackLocal) : carQXsit(wsPointData, 'right')
 
@@ -4270,7 +4271,7 @@ export const backTypeEvent = {
     }
 
     backPress = 0;
-    let wsPointData = jsonObject.backData;
+    let wsPointData = getSensorFrameChannelValue(jsonObject, 'back');
 
    
     
@@ -4459,7 +4460,7 @@ export const backTypeEvent = {
     }
 
     backPress = 0;
-    let wsPointData = jsonObject.backData;
+    let wsPointData = getSensorFrameChannelValue(jsonObject, 'back');
 
     if (wsPointDataBackZero && wsPointDataBackZero.length) {
       wsPointData = wsPointData.map((a, index) => a - wsPointDataBackZero[index] > 0 ? a - wsPointDataBackZero[index] : 0)
@@ -4619,7 +4620,7 @@ export const backTypeEvent = {
     }
 
     backPress = 0;
-    let wsPointData = jsonObject.backData;
+    let wsPointData = getSensorFrameChannelValue(jsonObject, 'back');
     // console.log(wsPointData)
     // wsPointData = carQXsit(wsPointData, 'right')
     // wsPointData = carQXbackLocal(wsPointData)
@@ -4805,7 +4806,7 @@ export const backTypeEvent = {
     }
   },
   footVideo: ({ that, jsonObject, local }) => {
-    let wsPointData = jsonObject.backData;
+    let wsPointData = getSensorFrameChannelValue(jsonObject, 'back');
     if (!Array.isArray(wsPointData)) {
       wsPointData = JSON.parse(wsPointData);
     }
@@ -4829,7 +4830,7 @@ export const backTypeEvent = {
   }, hand0205: ({ that, jsonObject, local, rotate, fingerArr }) => {
     // console.log('wsPointData')
     // console.log(wsPointData.length)
-    let wsPointData = jsonObject.backData;
+    let wsPointData = getSensorFrameChannelValue(jsonObject, 'back');
     if (!Array.isArray(wsPointData)) {
       wsPointData = JSON.parse(wsPointData);
     }
@@ -4920,7 +4921,7 @@ export const backTypeEvent = {
   }, hand0507: ({ that, jsonObject, local, rotate, fingerArr }) => {
     // console.log('wsPointData')
     // console.log(wsPointData.length)
-    let wsPointData = jsonObject.backData;
+    let wsPointData = getSensorFrameChannelValue(jsonObject, 'back');
     if (!Array.isArray(wsPointData)) {
       wsPointData = JSON.parse(wsPointData);
     }
