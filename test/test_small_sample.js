@@ -8,6 +8,17 @@ const SERIAL_B = '/tmp/vserial_sit_b';  // 模拟端
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+function getCanonicalSitValue(message) {
+  if (
+    message?.type !== 'sensor.frame'
+    || message?.outputChannel !== 'sit'
+    || !Array.isArray(message?.payload?.value)
+  ) {
+    return null;
+  }
+  return message.payload.value;
+}
+
 // 构造 smallSample 的蓝牙帧数据 (与 hand0205 协议相同)
 // 帧头: AA 55 03 99, order(1byte), type(1byte), data(128bytes)
 // 第一帧 130 字节: order=01, type=06
@@ -82,8 +93,9 @@ async function runTest() {
     const handler = (msg) => {
       try {
         const json = JSON.parse(msg.toString());
-        if (json.sitData && Array.isArray(json.sitData) && json.sitData.length > 0) {
-          receivedSitData = json.sitData;
+        const sitValues = getCanonicalSitValue(json);
+        if (sitValues?.length > 0) {
+          receivedSitData = sitValues;
           dataReceived = true;
           ws.removeListener('message', handler);
           resolve();
@@ -112,7 +124,7 @@ async function runTest() {
   await dataPromise;
 
   if (dataReceived && receivedSitData) {
-    console.log(`    ✅ 收到 sitData, 长度: ${receivedSitData.length}`);
+    console.log(`    ✅ 收到 sit 通道 payload.value, 长度: ${receivedSitData.length}`);
     results.push({ test: '数据接收', pass: true });
 
     // 验证数据长度是否为 100 (10×10)
@@ -141,7 +153,7 @@ async function runTest() {
       results.push({ test: '数据非全零', pass: false });
     }
   } else {
-    console.log('    ❌ 未收到 sitData');
+    console.log('    ❌ 未收到 sit 通道 canonical 帧');
     results.push({ test: '数据接收', pass: false });
     results.push({ test: '数据长度验证(100)', pass: false });
     results.push({ test: '数据非全零', pass: false });

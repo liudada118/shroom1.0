@@ -5,7 +5,7 @@ import { Button, Input, Slider } from "antd";
 import { CSVLink } from "react-csv";
 import { buildCollectionRow } from "./collectionValue";
 import { useTranslation } from "react-i18next";
-import { decodeWebSocketPayload } from '../../services/ws/sensorFrameDecoder';
+import { decodeWebSocketPayload, getSensorFrameChannelValue, isSensorFrameForActiveDisplay } from '../../services/ws/sensorFrameDecoder';
 let data = [];
 
 let ws,
@@ -143,10 +143,12 @@ export default function Demo() {
     };
     ws.onmessage = (e) => {
       let jsonObject = decodeWebSocketPayload(e.data);
+      if (!isSensorFrameForActiveDisplay(jsonObject)) return;
       //处理空数组
 
-      if (jsonObject.sitData != null) {
-        wsPointData = jsonObject.sitData;
+      const sitFrameValue = getSensorFrameChannelValue(jsonObject, 'sit');
+      if (Array.isArray(sitFrameValue)) {
+        wsPointData = sitFrameValue;
 
         // wsPointData = wsPointData.map((a) => (a < 5 ? 0 : a));
 
@@ -200,8 +202,9 @@ export default function Demo() {
         setData(arr);
       }
 
-      if (jsonObject.backData != null) {
-        wsPointData = jsonObject.backData;
+      const backFrameValue = getSensorFrameChannelValue(jsonObject, 'back');
+      if (Array.isArray(backFrameValue)) {
+        wsPointData = backFrameValue;
         wsPointData = wsPointData.map((a) => (a < 10 ? 0 : a));
         const length = wsPointData.filter((a) => a > 0).length;
         const total = wsPointData.reduce((a, b) => a + b, 0);

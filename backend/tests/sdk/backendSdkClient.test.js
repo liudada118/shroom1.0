@@ -4,6 +4,7 @@ const {
   BackendSdkClient,
   normalizeHttpResult,
 } = require('@shroom/backend/client/BackendSdkClient.js');
+const { buildSdkContractSnapshot } = require('@shroom/backend/contract/sdkApiContract.js');
 
 function createResponse(payload, { ok = true, status = 200 } = {}) {
   return {
@@ -85,6 +86,12 @@ class FakeWebSocket extends EventEmitter {
 }
 
 async function run() {
+  const snapshot = buildSdkContractSnapshot({ channels: [{ id: 'demo:sit' }] });
+  assert.strictEqual(snapshot.websocket.messageTypes.SENSOR_FRAME, 'sensor.frame');
+  assert.deepStrictEqual(snapshot.websocket.subscribeExample.channels, ['car:sit']);
+  assert.strictEqual(snapshot.telemetry.channelIdPattern, '{displaySystemId}:{sensorId}');
+  assert.strictEqual(snapshot.telemetry.frameShape.payload.value, 'number[]');
+
   assert.deepStrictEqual(normalizeHttpResult({ code: 0, data: { ok: true } }), { ok: true });
   assert.throws(() => normalizeHttpResult({ code: 1, message: 'bad' }), /bad/);
 
@@ -119,15 +126,21 @@ async function run() {
 
   const messages = [];
   client.on('frame', (frame) => messages.push(frame));
-  const ws = client.connectRealtime({ channels: ['sit'] });
+  const ws = client.connectRealtime({ channels: ['demo:sit'] });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepStrictEqual(ws.sent[0], { type: 'subscribe', channels: ['sit'] });
+  assert.deepStrictEqual(ws.sent[0], { type: 'subscribe', channels: ['demo:sit'] });
 
   client.handleRealtimeMessage(JSON.stringify({
-    frames: [{ channelId: 'demo.sit', value: [1, 2, 3] }],
+    type: 'sensor.frame',
+    schemaVersion: 1,
+    channelId: 'demo:sit',
+    displaySystemId: 'demo',
+    sensorId: 'sit',
+    outputChannel: 'sit',
+    payload: { value: [1, 2, 3] },
   }));
   assert.strictEqual(messages.length, 1);
-  assert.deepStrictEqual(messages[0].value, [1, 2, 3]);
+  assert.deepStrictEqual(messages[0].payload.value, [1, 2, 3]);
 }
 
 run()

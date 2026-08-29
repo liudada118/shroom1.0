@@ -19,6 +19,8 @@
 export {
   DEFAULT_HTTP_ROUTES,
   SensorClient,
+  normalizeSubscriptionChannels,
+  resolveChannelId,
 } from './src/client/SensorClient.js';
 export {
   createMessage,
@@ -33,9 +35,14 @@ export {
   createFrameKey,
 } from './src/store/FrameStore.js';
 export {
+  SENSOR_FRAME_SCHEMA_VERSION,
+  SENSOR_FRAME_TYPE,
+  isSensorFrameEnvelope,
   normalizeIncomingMessage,
   normalizeFramePayload,
   normalizeLegacyPayload,
+  normalizeSensorFrameEnvelope,
+  normalizeTelemetryPayload,
 } from './src/store/normalizeFrame.js';
 
 /* ── 展示系统（设备定义层，与渲染器注册表是两回事，见 README） ──── */

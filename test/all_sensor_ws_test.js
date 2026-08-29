@@ -8,7 +8,7 @@
  *    a. 发送 file 切换命令
  *    b. 发送 sitPort 连接虚拟串口
  *    c. 通过虚拟串口发送模拟数据
- *    d. 验证 WS 是否收到 sitData
+ *    d. 验证 WS 是否收到 canonical sensor.frame/sit
  *    e. 断开串口
  * 4. 生成测试报告
  */
@@ -26,18 +26,18 @@ const REPORT_DIR = path.join(__dirname, 'all_sensor_results');
 
 // 传感器配置
 const SENSOR_CONFIG = {
-  normal:      { label: '正常测试',         frames: [1024],              baudRate: 1000000, expectedKey: 'sitData' },
-  hand0205:    { label: '触觉手套',         frames: [1024, 130, 146],    baudRate: 921600,  expectedKey: 'sitData' },
-  robot1:      { label: '宇树G1触觉上衣',  frames: [1024, 130, 146],    baudRate: 921600,  expectedKey: 'sitData' },
-  robotSY:     { label: '松延N2触觉上衣',  frames: [1024, 130, 146],    baudRate: 921600,  expectedKey: 'sitData' },
-  robotLCF:    { label: '零次方H1触觉上衣', frames: [1024, 130, 146],   baudRate: 921600,  expectedKey: 'sitData' },
-  footVideo:   { label: '触觉足底',         frames: [1024, 130, 146],    baudRate: 921600,  expectedKey: 'sitData' },
-  bed4096num:  { label: '4096数字',         frames: [4096],              baudRate: 3000000, expectedKey: 'sitData' },
-  jqbed:       { label: '小床监测',         frames: [1024],              baudRate: 1000000, expectedKey: 'sitData' },
-  bed4096:     { label: '4096',             frames: [4096],              baudRate: 3000000, expectedKey: 'sitData' },
-  fast256:     { label: '16×16高速',        frames: [256],               baudRate: 1000000, expectedKey: 'sitData' },
-  fast1024:    { label: '32×32高速',        frames: [1024],              baudRate: 1000000, expectedKey: 'sitData' },
-  daliegu:     { label: '14×20高速',        frames: [1024, 142, 158],    baudRate: 921600,  expectedKey: 'sitData' },
+  normal:      { label: '正常测试',         frames: [1024],              baudRate: 1000000, expectedChannel: 'sit' },
+  hand0205:    { label: '触觉手套',         frames: [1024, 130, 146],    baudRate: 921600,  expectedChannel: 'sit' },
+  robot1:      { label: '宇树G1触觉上衣',  frames: [1024, 130, 146],    baudRate: 921600,  expectedChannel: 'sit' },
+  robotSY:     { label: '松延N2触觉上衣',  frames: [1024, 130, 146],    baudRate: 921600,  expectedChannel: 'sit' },
+  robotLCF:    { label: '零次方H1触觉上衣', frames: [1024, 130, 146],   baudRate: 921600,  expectedChannel: 'sit' },
+  footVideo:   { label: '触觉足底',         frames: [1024, 130, 146],    baudRate: 921600,  expectedChannel: 'sit' },
+  bed4096num:  { label: '4096数字',         frames: [4096],              baudRate: 3000000, expectedChannel: 'sit' },
+  jqbed:       { label: '小床监测',         frames: [1024],              baudRate: 1000000, expectedChannel: 'sit' },
+  bed4096:     { label: '4096',             frames: [4096],              baudRate: 3000000, expectedChannel: 'sit' },
+  fast256:     { label: '16×16高速',        frames: [256],               baudRate: 1000000, expectedChannel: 'sit' },
+  fast1024:    { label: '32×32高速',         frames: [1024],              baudRate: 1000000, expectedChannel: 'sit' },
+  daliegu:     { label: '14×20高速',        frames: [1024, 142, 158],    baudRate: 921600,  expectedChannel: 'sit' },
 };
 
 const SENSORS_TO_TEST = Object.keys(SENSOR_CONFIG);
@@ -145,24 +145,29 @@ function wsSend(ws, obj) {
   });
 }
 
-function wsWaitForKey(ws, key, timeoutMs) {
+function wsWaitForChannel(ws, channel, timeoutMs) {
   timeoutMs = timeoutMs || 15000;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       ws.removeListener('message', handler);
-      reject(new Error('Timeout waiting for ' + key + ' (' + timeoutMs + 'ms)'));
+      reject(new Error('Timeout waiting for sensor.frame/' + channel + ' (' + timeoutMs + 'ms)'));
     }, timeoutMs);
 
     function handler(rawData) {
       try {
         const msg = JSON.parse(rawData.toString());
-        if (msg[key] !== undefined && Array.isArray(msg[key]) && msg[key].length > 0) {
+        const values = msg?.type === 'sensor.frame'
+          && msg.outputChannel === channel
+          && Array.isArray(msg.payload?.value)
+          ? msg.payload.value
+          : null;
+        if (values && values.length > 0) {
           // 确保不是全零数据（可能是切换时的清零帧）
-          const hasData = msg[key].some(v => v > 0);
+          const hasData = values.some(v => v > 0);
           if (hasData) {
             clearTimeout(timer);
             ws.removeListener('message', handler);
-            resolve(msg);
+            resolve({ message: msg, values });
           }
         }
       } catch (e) { /* ignore */ }
@@ -213,7 +218,7 @@ async function testSensor(ws, sensorType) {
 
   try {
     // 设置 WS 消息监听
-    const dataPromise = wsWaitForKey(ws, config.expectedKey, 20000);
+    const dataPromise = wsWaitForChannel(ws, config.expectedChannel, 20000);
     
     // 发送多轮数据
     for (let round = 0; round < 25; round++) {
@@ -225,8 +230,8 @@ async function testSensor(ws, sensorType) {
     
     const received = await dataPromise;
     
-    if (received[config.expectedKey] && Array.isArray(received[config.expectedKey])) {
-      const dataArr = received[config.expectedKey];
+    if (Array.isArray(received.values)) {
+      const dataArr = received.values;
       const dataLen = dataArr.length;
       const maxVal = Math.max(...dataArr);
       const nonZero = dataArr.filter(v => v > 0).length;

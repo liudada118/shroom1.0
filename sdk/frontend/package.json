@@ -47,6 +47,7 @@
     "src",
     "scripts",
     "README.md",
+    "!src/**/*.test.js",
     "!core/**/*.test.js",
     "!renderers/**/*.test.js"
   ],

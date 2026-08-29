@@ -10,7 +10,7 @@ import {
 } from "../../assets/util/line";
 import { Slider } from "antd";
 import fas from "../../assets/util/obj";
-import { decodeWebSocketPayload } from '../../services/ws/sensorFrameDecoder';
+import { decodeWebSocketPayload, getSensorFrameChannelValue, isSensorFrameForActiveDisplay } from '../../services/ws/sensorFrameDecoder';
 let data = [];
 
 let ws,
@@ -91,14 +91,16 @@ export default function Demo() {
     };
     ws.onmessage = (e) => {
       let jsonObject = decodeWebSocketPayload(e.data);
+      if (!isSensorFrameForActiveDisplay(jsonObject)) return;
       //处理空数组
       sfaArr = [];
       BFA = [];
       allArr = [];
       let beelArr = [];
       let beelEndArr = [];
-      if (jsonObject.sitData != null) {
-        let wsPointData = jsonObject.sitData;
+      const sitFrameValue = getSensorFrameChannelValue(jsonObject, 'sit');
+      if (Array.isArray(sitFrameValue)) {
+        let wsPointData = sitFrameValue;
 
         wsPointData = wsPointData.map((a) => (a < 10 ? 0 : a));
 

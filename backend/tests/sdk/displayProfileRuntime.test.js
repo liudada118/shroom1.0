@@ -37,7 +37,10 @@ const { pathToFileURL } = require('url');
   );
   const {
     buildManifestSceneFrame,
+    getManifestSourceChannel,
     isManifestFrameForDefinition,
+    readManifestChannelFrame,
+    readManifestChannelFrames,
   } = await import(pathToFileURL(manifestSceneAdapterPath).href);
 
   assert.deepStrictEqual(
@@ -110,14 +113,23 @@ const { pathToFileURL } = require('url');
       },
     },
   };
-  const manifestFrame = buildManifestSceneFrame({
+  const manifestWireFrame = {
+    type: 'sensor.frame',
+    schemaVersion: 1,
+    channelId: 'custom-seat:sit',
     displaySystemId: 'custom-seat',
+    sensorId: 'sit',
     outputChannel: 'sit',
-    data: [0, 30, 60],
-    rawData: [9, 8, 7],
-    normalizedData: [0, 10, 20],
-    algorithmMetrics: { score: 90 },
-  }, manifestDefinition);
+    payload: {
+      value: [0, 30, 60],
+      stages: {
+        decoded: [9, 8, 7],
+        normalized: [0, 10, 20],
+      },
+      algorithmMetrics: { score: 90 },
+    },
+  };
+  const manifestFrame = buildManifestSceneFrame(manifestWireFrame, manifestDefinition);
   assert.deepStrictEqual(manifestFrame.renderValues, [0, 30, 60]);
   assert.deepStrictEqual(manifestFrame.rawValues, [9, 8, 7]);
   assert.deepStrictEqual(manifestFrame.normalizedValues, [0, 10, 20]);
@@ -129,13 +141,37 @@ const { pathToFileURL } = require('url');
     area: 5,
   });
   assert.deepStrictEqual(manifestFrame.algorithmMetrics, { score: 90 });
+  assert.strictEqual(getManifestSourceChannel('armLeftData', [
+    { id: 'left-arm', outputChannel: 'armLeft' },
+  ]), 'armLeft');
+  assert.strictEqual(readManifestChannelFrame({
+    ...manifestWireFrame,
+    displaySystemId: 'other-system',
+  }, 'custom-seat'), null);
+  const legacyManifestFrame = readManifestChannelFrame({
+    sitData: '[1,2]',
+    normalizedData: [3, 4],
+  }, 'custom-seat');
+  assert.strictEqual(legacyManifestFrame.channel, 'sit');
+  assert.deepStrictEqual(legacyManifestFrame.renderValues, [1, 2]);
+  assert.deepStrictEqual(legacyManifestFrame.normalizedValues, [3, 4]);
+  const combinedLegacyFrames = readManifestChannelFrames({
+    sitData: [],
+    backData: [2],
+  }, 'custom-seat');
+  assert.deepStrictEqual(
+    combinedLegacyFrames.map(({ channel, renderValues }) => ({ channel, renderValues })),
+    [
+      { channel: 'sit', renderValues: [] },
+      { channel: 'back', renderValues: [2] },
+    ],
+  );
   assert.strictEqual(isManifestFrameForDefinition({
     displaySystemId: 'other-system',
   }, manifestDefinition), false);
   assert.strictEqual(buildManifestSceneFrame({
+    ...manifestWireFrame,
     displaySystemId: 'other-system',
-    outputChannel: 'sit',
-    data: [1],
   }, manifestDefinition), null);
   assert.deepStrictEqual(
     applyVisualizationAlgorithm([0, 5, 10], { type: 'normalize', options: { max: 100 } }),

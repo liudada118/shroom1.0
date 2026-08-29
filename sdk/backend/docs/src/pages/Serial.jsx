@@ -86,7 +86,7 @@ const session = await sdk.open({ sensorType: 'hand0205', channels: { sit: 'COM3'
 
 session.on('frame', (frame) => {
   // 已经解码、过线序、减完清零基准了
-  console.log(frame.channelId, frame.value.length);
+  console.log(frame.channel, frame.pressureData.length);
 });`;
 
 export default function Serial() {

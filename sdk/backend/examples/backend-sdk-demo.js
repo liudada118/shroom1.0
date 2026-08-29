@@ -4,7 +4,7 @@ const { BackendSdkClient } = require('@shroom/backend/client');
 
 function parseArgs(argv) {
   const options = {
-    channels: ['sit'],
+    channels: [],
     durationMs: 10000,
     httpBaseUrl: process.env.SHROOM_SDK_HTTP || 'http://127.0.0.1:19245',
     wsUrl: process.env.SHROOM_SDK_WS || 'ws://127.0.0.1:19999',
@@ -55,7 +55,7 @@ Safe read-only demo:
 Options:
   --http http://127.0.0.1:19245   Backend HTTP control API
   --ws ws://127.0.0.1:19999       Realtime WebSocket URL
-  --channels sit,back             Realtime channels to subscribe
+  --channels car:sit,car:back     Canonical channelId values to subscribe
   --duration 10000                Realtime listen duration in milliseconds
   --sensor hand0205               Set current sensor type before subscribing
   --open sit=COM3                 Open a serial port explicitly
@@ -120,15 +120,16 @@ async function main() {
     if (frameCount <= 5) {
       console.log('[sdk-demo] frame:', {
         channelId: frame.channelId,
-        portId: frame.portId,
-        metric: frame.metric,
-        valueLength: Array.isArray(frame.value) ? frame.value.length : undefined,
+        displaySystemId: frame.displaySystemId,
+        sensorId: frame.sensorId,
+        outputChannel: frame.outputChannel,
+        valueLength: Array.isArray(frame.payload?.value) ? frame.payload.value.length : undefined,
         timestamp: frame.timestamp,
       });
     }
   });
   client.on('message', (message) => {
-    if (message?.type && message.type !== 'frame') {
+    if (message?.type && message.type !== 'sensor.frame') {
       console.log('[sdk-demo] ws message:', message.type);
     }
   });

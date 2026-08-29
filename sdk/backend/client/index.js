@@ -13,8 +13,8 @@
  *   wsUrl: 'ws://127.0.0.1:19999',
  * });
  * await client.getContract();
- * client.on('frame', (frame) => console.log(frame.channelId, frame.value?.length));
- * client.connectRealtime({ channels: ['sit'] });
+ * client.on('frame', (frame) => console.log(frame.channelId, frame.payload?.value?.length));
+ * client.connectRealtime({ channels: ['car:sit'] });
  * ```
  *
  * `listBackendOperations()` 列出后端全部可用操作，用来对照自己还缺哪块。

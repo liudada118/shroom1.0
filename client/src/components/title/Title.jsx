@@ -2479,7 +2479,10 @@ class Title extends React.Component {
                   this.setState(zeroCommand)
                 }
               }}>{t('cancelZero')}</Button>
-              <NavLink to={`/num/${routerStr}`}>
+              <NavLink
+                to={`/num/${routerStr}`}
+                state={{ displaySystemId: this.props.matrixName }}
+              >
                 <Button className='titleButton' onClick={() => {
                   this.props.dataZero0()
                 }}>{t('rawData')}</Button>

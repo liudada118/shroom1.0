@@ -7,7 +7,12 @@ import { NavLink, useLocation, useParams } from "react-router-dom";
 import { buildCollectionRow } from "./collectionValue";
 import { compileValueFormula } from "./formulaEvaluator";
 import { useTranslation } from "react-i18next";
-import { decodeWebSocketPayload } from '../../services/ws/sensorFrameDecoder';
+import {
+  decodeWebSocketPayload,
+  getSensorFrameChannelValue,
+  getSensorFrameStageValue,
+  isSensorFrameForActiveDisplay,
+} from '../../services/ws/sensorFrameDecoder';
 let data = [];
 
 var changeValue = (value) => {
@@ -328,10 +333,15 @@ export default function Demo() {
     };
     ws.onmessage = (e) => {
       let jsonObject = decodeWebSocketPayload(e.data);
+      if (!isSensorFrameForActiveDisplay(jsonObject, location.state?.displaySystemId)) return;
       //处理空数组
+      const sitFrameData = getSensorFrameChannelValue(jsonObject, 'sit');
+      const rawFrameData = sitFrameData === null
+        ? null
+        : (getSensorFrameStageValue(jsonObject, 'decoded') ?? sitFrameData);
 
-      if (jsonObject.realArr != null) {
-        wsPointData = jsonObject.realArr;
+      if (rawFrameData != null) {
+        wsPointData = rawFrameData;
         let newData = jsonObject.newData;
 
 

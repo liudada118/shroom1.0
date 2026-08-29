@@ -8,6 +8,22 @@ const LEGACY_CHANNEL_FIELDS = {
   sensor: 'sensorData',
 };
 
+const LEGACY_STAGE_FIELDS = {
+  decoded: ['rawData', 'realArr'],
+  normalized: ['normalizedData'],
+  calibrated: ['calibratedData', 'rawPressureData'],
+  processed: ['processedData'],
+  mapped: ['mappedData', 'mappedArr195', 'newArr147', 'newArr'],
+};
+
+const LEGACY_PROTOCOL_FIELDS = [
+  'frameIndex',
+  'packetType',
+  'handSide',
+  'outputSide',
+  'packetSourcePort',
+];
+
 function isObject(value) {
   return value != null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -19,6 +35,26 @@ function parseWirePayload(payload) {
   } catch {
     return payload;
   }
+}
+
+function parseArrayValue(value) {
+  let current = value;
+  for (let attempt = 0; attempt < 2 && typeof current === 'string'; attempt += 1) {
+    try {
+      current = JSON.parse(current);
+    } catch {
+      return null;
+    }
+  }
+  return Array.isArray(current) ? current : null;
+}
+
+function firstArray(...values) {
+  for (const value of values) {
+    const array = parseArrayValue(value);
+    if (array) return array;
+  }
+  return null;
 }
 
 function resolveSensorId(frame) {
@@ -33,7 +69,8 @@ function resolveSensorId(frame) {
 }
 
 function assignArray(target, key, value) {
-  if (Array.isArray(value)) target[key] = value;
+  const array = parseArrayValue(value);
+  if (array) target[key] = array;
 }
 
 /**
@@ -49,19 +86,137 @@ export function isSensorFrameEnvelope(value) {
 }
 
 /**
- * 将 canonical sensor.frame 转成现有页面内部使用的对象。
- *
- * 旧字段只存在于浏览器进程内部，WebSocket wire 上仍只有 sensor.frame。
- * 这样现有可视化和命令式 renderer 无需在协议切换时一起重写。
+ * 解析消息所属的逻辑输出通道。canonical 帧优先使用 outputChannel，旧消息仅作为
+ * 过渡输入从 *Data 字段推断；页面代码不再直接读取这些顶层字段。
  */
-export function adaptSensorFrameForLegacyPage(frame) {
+export function getSensorFrameOutputChannel(value) {
+  const frame = parseWirePayload(value);
+  if (!isObject(frame)) return '';
+
+  const declared = String(frame.outputChannel || frame.sensorId || frame.portId || '').trim();
+  if (declared) return declared;
+
+  for (const [channel, field] of Object.entries(LEGACY_CHANNEL_FIELDS)) {
+    if (parseArrayValue(frame[field])) return channel;
+  }
+  return '';
+}
+
+/**
+ * 按逻辑通道读取压力数组。
+ *
+ * 新协议只读取 payload.value；顶层 sitData/backData/headData 仅用于兼容尚未升级的
+ * 旧服务端。所有客户端调用方都通过此边界读取，不再依赖 wire 顶层字段。
+ */
+export function getSensorFrameChannelValue(value, expectedChannel) {
+  const frame = parseWirePayload(value);
+  if (!isObject(frame)) return null;
+
+  const expected = String(expectedChannel || '').trim();
+  const actual = getSensorFrameOutputChannel(frame);
+
+  if (isSensorFrameEnvelope(frame)) {
+    if (expected && actual !== expected) return null;
+    return firstArray(frame.payload.value, frame.payload.stages?.processed);
+  }
+
+  if (expected) {
+    const legacyField = LEGACY_CHANNEL_FIELDS[expected] || `${expected}Data`;
+    const legacyValue = parseArrayValue(frame[legacyField]);
+    if (legacyValue) return legacyValue;
+    if (actual && actual !== expected) return null;
+    return firstArray(frame.data, frame.value);
+  }
+
+  if (actual) {
+    return getSensorFrameChannelValue(frame, actual);
+  }
+  for (const field of Object.values(LEGACY_CHANNEL_FIELDS)) {
+    const legacyValue = parseArrayValue(frame[field]);
+    if (legacyValue) return legacyValue;
+  }
+  return firstArray(frame.data, frame.value);
+}
+
+export function hasSensorFrameChannelValue(value, expectedChannel) {
+  return getSensorFrameChannelValue(value, expectedChannel) !== null;
+}
+
+/**
+ * wildcard 订阅下按展示系统身份隔离传感器帧。系统事件与没有身份的旧帧继续透传。
+ */
+export function isSensorFrameForDisplay(value, acceptedIdentities = []) {
+  const frame = parseWirePayload(value);
+  if (!isObject(frame)) return false;
+
+  const outputChannel = getSensorFrameOutputChannel(frame);
+  if (!outputChannel || !getSensorFrameChannelValue(frame, outputChannel)) return true;
+
+  const displaySystemId = String(frame.displaySystemId || '').trim();
+  if (!displaySystemId) return true;
+
+  const accepted = new Set(
+    (Array.isArray(acceptedIdentities) ? acceptedIdentities : [acceptedIdentities])
+      .map((identity) => String(identity || '').trim())
+      .filter(Boolean),
+  );
+  // canonical 帧一旦声明 displaySystemId，就只能按这个稳定身份路由。
+  // sensorType 可能被多个展示系统复用，不能拿它绕过明确的系统边界。
+  return accepted.has(displaySystemId);
+}
+
+/**
+ * 独立旧页面没有展示系统 definition：优先使用路由显式传入的身份，否则读取主界面写入
+ * localStorage 的当前系统。canonical wildcard 帧没有任何已知身份时 fail closed；legacy
+ * 无身份帧和系统事件仍透传。
+ */
+export function isSensorFrameForActiveDisplay(value, additionalIdentities = []) {
+  const accepted = (Array.isArray(additionalIdentities)
+    ? additionalIdentities
+    : [additionalIdentities])
+    .map((identity) => String(identity || '').trim())
+    .filter(Boolean);
+
+  if (accepted.length === 0) {
+    try {
+      const storedIdentity = globalThis.localStorage?.getItem?.('file');
+      if (storedIdentity) accepted.push(String(storedIdentity).trim());
+    } catch {
+      // 沙箱、隐私模式或 Node 测试中 localStorage 可能不可访问。
+    }
+  }
+
+  // canonical wildcard 帧没有明确当前身份时 fail closed；没有身份的 legacy 帧和系统事件
+  // 仍由 isSensorFrameForDisplay 透传。
+  return isSensorFrameForDisplay(value, accepted);
+}
+
+/**
+ * 读取 canonical 数据阶段，并为旧服务端保留单点兼容入口。
+ */
+export function getSensorFrameStageValue(value, stage) {
+  const frame = parseWirePayload(value);
+  if (!isObject(frame)) return null;
+  if (isSensorFrameEnvelope(frame)) {
+    return parseArrayValue(frame.payload.stages?.[stage]);
+  }
+  return firstArray(...(LEGACY_STAGE_FIELDS[stage] || []).map((field) => frame[field]));
+}
+
+/**
+ * 将 canonical sensor.frame 投影成现有页面的临时内部对象。
+ *
+ * 压力矩阵始终通过 getSensorFrameChannelValue 读取，因此这里不会重新制造
+ * sitData/backData/headData 顶层别名。其它旧页面字段暂时保留，便于分阶段迁移
+ * 手套姿态、温度和协议附加信息。
+ */
+export function adaptSensorFrameForClient(frame) {
   if (!isSensorFrameEnvelope(frame)) return frame;
 
   const payload = frame.payload;
   const stages = isObject(payload.stages) ? payload.stages : {};
   const sensorId = resolveSensorId(frame);
   const outputChannel = String(frame.outputChannel || sensorId || '').trim();
-  const value = payload.value;
   const internal = {
     type: frame.type,
     schemaVersion: Number(frame.schemaVersion ?? frame.version),
@@ -75,7 +230,6 @@ export function adaptSensorFrameForLegacyPage(frame) {
     timestamp: frame.timestamp,
     quality: frame.quality,
     payload,
-    value,
     metrics: isObject(payload.metrics) ? payload.metrics : {},
     algorithmMetrics: isObject(payload.algorithmMetrics) ? payload.algorithmMetrics : {},
     orientation: payload.orientation,
@@ -85,16 +239,6 @@ export function adaptSensorFrameForLegacyPage(frame) {
     history: payload.history,
     matrix: payload.matrix,
   };
-
-  if (Array.isArray(value) && outputChannel) {
-    const legacyField = LEGACY_CHANNEL_FIELDS[outputChannel];
-    if (legacyField) {
-      internal[legacyField] = value;
-    } else {
-      internal.data = value;
-      internal[`${outputChannel}Data`] = value;
-    }
-  }
 
   assignArray(internal, 'rawData', stages.decoded);
   assignArray(internal, 'realArr', stages.decoded);
@@ -127,7 +271,11 @@ export function adaptSensorFrameForLegacyPage(frame) {
     if (payload.temperature.threshold != null) internal.pressureThreshold = payload.temperature.threshold;
   }
 
-  if (isObject(payload.protocol)) Object.assign(internal, payload.protocol);
+  if (isObject(payload.protocol)) {
+    for (const field of LEGACY_PROTOCOL_FIELDS) {
+      if (payload.protocol[field] != null) internal[field] = payload.protocol[field];
+    }
+  }
   if (isObject(payload.history)) {
     if (payload.history.index != null) internal.index = payload.history.index;
     if (payload.history.recordedAt != null) internal.time = payload.history.recordedAt;
@@ -143,12 +291,12 @@ export function adaptSensorFrameForLegacyPage(frame) {
 }
 
 /**
- * 统一 WebSocket 接收边界：解析 JSON，并仅对 sensor.frame 做内部兼容适配。
+ * 统一 WebSocket 接收边界：解析 JSON，并仅对 sensor.frame 做内部兼容投影。
  */
 export function decodeWebSocketPayload(payload) {
   const parsed = parseWirePayload(payload);
   return isSensorFrameEnvelope(parsed)
-    ? adaptSensorFrameForLegacyPage(parsed)
+    ? adaptSensorFrameForClient(parsed)
     : parsed;
 }
 
