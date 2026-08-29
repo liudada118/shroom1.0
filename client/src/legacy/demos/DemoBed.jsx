@@ -10,6 +10,7 @@ import {
 } from "../../assets/util/line";
 import { Slider } from "antd";
 import fas from "../../assets/util/obj";
+import { decodeWebSocketPayload } from '../../services/ws/sensorFrameDecoder';
 let data = [];
 
 let ws,
@@ -89,7 +90,7 @@ export default function Demo() {
       console.info("connect success");
     };
     ws.onmessage = (e) => {
-      let jsonObject = JSON.parse(e.data);
+      let jsonObject = decodeWebSocketPayload(e.data);
       //处理空数组
       sfaArr = [];
       BFA = [];

@@ -1,10 +1,7 @@
+import { decodeWebSocketPayload } from './sensorFrameDecoder';
+
 export function parseJsonMessage(event) {
-  if (!event || typeof event.data !== 'string') return event?.data;
-  try {
-    return JSON.parse(event.data);
-  } catch {
-    return event.data;
-  }
+  return decodeWebSocketPayload(event?.data);
 }
 
 export function createJsonWebSocket(url, handlers = {}) {

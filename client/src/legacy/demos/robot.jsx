@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { commandClient } from '../../services/command/commandClient'
+import { decodeWebSocketPayload } from '../../services/ws/sensorFrameDecoder'
 function jet1(min, max, x) {
     let red, g, blue;
     let dv;
@@ -70,7 +71,7 @@ export default function Robot() {
         ws.onmessage = (e) => {
             // this.wsData(e);
             // console.log(e)
-            let jsonObject = JSON.parse(e.data);
+            let jsonObject = decodeWebSocketPayload(e.data);
 
             if (jsonObject.dataLength != null) {
                 console.log(String(jsonObject.dataLength))

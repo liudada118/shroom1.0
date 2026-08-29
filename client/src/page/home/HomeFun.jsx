@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import Title from '../../components/title/Title'
+import { decodeWebSocketPayload } from '../../services/ws/sensorFrameDecoder'
 import './index.scss'
 // import Canvas from '../../components/three/Three'
 // import CanvasHand from '../../components/three/hand'
@@ -134,7 +135,7 @@ export default function Home() {
     };
     ws.onmessage = (e) => {
       sitPress = 0
-      let jsonObject = JSON.parse(e.data);
+      let jsonObject = decodeWebSocketPayload(e.data);
       //处理空数组
 
       if (jsonObject.sitData != null) {

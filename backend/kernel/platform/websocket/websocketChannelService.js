@@ -1,10 +1,13 @@
 /**
  * WebSocket 通道服务。
  *
- * 统一动态逻辑通道命名、共享 server 获取、广播和连接数统计。
- * 所有 manifest outputChannel 共用一个物理 WebSocket 端口，通道隔离由订阅服务负责。
+ * 统一动态逻辑通道命名、共享 server 获取、序列化和连接数统计。
+ * 所有 manifest sensor.frame 共用一个物理 WebSocket 端口，通道隔离由订阅服务负责。
  */
-const WebSocket = require('ws');
+const {
+  SENSOR_FRAME_SCHEMA_VERSION,
+  SENSOR_FRAME_TYPE,
+} = require('../../realtime/sensorFrameEnvelope');
 
 const SHARED_WEBSOCKET_PORT = 19999;
 const LEGACY_DEFAULT_WEBSOCKET_CHANNEL = 'sit';
@@ -13,37 +16,14 @@ function toPayload(data) {
   return typeof data === 'string' ? data : JSON.stringify(data);
 }
 
-function getClients(wsServer) {
-  if (!wsServer?.clients) return [];
-  return Array.from(wsServer.clients);
-}
-
 function getClientCount(wsServer) {
   return wsServer?.clients?.size || 0;
-}
-
-function isOpenClient(client) {
-  return client?.readyState === WebSocket.OPEN;
-}
-
-function broadcast(wsServer, data) {
-  const payload = toPayload(data);
-  let sent = 0;
-
-  for (const client of getClients(wsServer)) {
-    if (isOpenClient(client)) {
-      client.send(payload);
-      sent += 1;
-    }
-  }
-
-  return sent;
 }
 
 /**
  * 归一化 WebSocket 逻辑通道名称。
  *
- * 不再维护 sit/back/head 白名单；manifest 新增 outputChannel 后可直接进入同一条链路。
+ * 不再维护 sit/back/head 白名单；manifest 新增 sensor 后可直接进入同一条链路。
  * 空值仍回退到 sit，仅用于兼容旧调用方未传 channel 的行为。
  *
  * @param {string} channel 业务通道名称。
@@ -56,7 +36,7 @@ function normalizeChannel(channel, fallback = LEGACY_DEFAULT_WEBSOCKET_CHANNEL) 
 }
 
 /**
- * 从 manifest 通道描述或字符串中提取动态 outputChannel 列表。
+ * 从 manifest 通道描述或字符串中提取 canonical channelId 列表。
  *
  * @param {Array<string | object>} channels 通道名或通道描述。
  * @returns {string[]} 去重后的通道名。
@@ -67,7 +47,7 @@ function normalizeChannelList(channels = []) {
   for (const channel of Array.isArray(channels) ? channels : [channels]) {
     const candidate = typeof channel === 'string'
       ? channel
-      : channel?.outputChannel || channel?.channelId || channel?.serialRole || channel?.key;
+      : channel?.channelId || channel?.id || channel?.outputChannel || channel?.serialRole || channel?.key;
     const channelId = normalizeChannel(candidate, '');
     if (!channelId || seen.has(channelId)) continue;
     seen.add(channelId);
@@ -78,7 +58,7 @@ function normalizeChannelList(channels = []) {
 
 /**
  * 把 manifest 声明和 SerialManager 已注册端口合并成实时通道元数据。
- * manifest 放在后面，若同一 outputChannel 同时存在，会用它的 label/serialRole 覆盖运行态占位信息。
+ * manifest 放在后面，若同一 channelId 同时存在，会用它的完整身份覆盖运行态占位信息。
  *
  * @param {object} options 元数据来源。
  * @param {string} options.sensorType 当前传感器类型。
@@ -98,6 +78,9 @@ function buildRealtimeChannelMetadata({
   const managedDescriptors = managedList.map((status) => {
     const serialRole = status.role || status.portId;
     return manifestByRole.get(serialRole) || {
+      channelId: `${sensorType || 'legacy'}:${serialRole}`,
+      displaySystemId: sensorType || 'legacy',
+      sensorId: serialRole,
       serialRole,
       outputChannel: status.outputChannel || serialRole,
       label: status.label || serialRole,
@@ -106,15 +89,23 @@ function buildRealtimeChannelMetadata({
   });
 
   [...managedDescriptors, ...manifestList].forEach((channel) => {
-    const channelId = normalizeChannel(channel?.outputChannel || channel?.serialRole, '');
+    const serialRole = normalizeChannel(channel?.serialRole || channel?.sensorId, '');
+    const outputChannel = normalizeChannel(channel?.outputChannel || serialRole, '');
+    const channelId = normalizeChannel(channel?.channelId || channel?.id, '')
+      || `${normalizeChannel(channel?.displaySystemId || sensorType, 'legacy')}:${serialRole}`;
     if (!channelId) return;
     channelsById.set(channelId, {
       channelId,
       name: channel.label || `${channelId} realtime channel`,
       port: SHARED_WEBSOCKET_PORT,
-      serialRole: channel.serialRole || channelId,
-      sensorType,
+      displaySystemId: channel.displaySystemId || sensorType || 'legacy',
+      sensorId: channel.sensorId || serialRole,
+      serialRole,
+      outputChannel,
+      sensorType: channel.sensorType || sensorType,
       transport: 'websocket',
+      messageType: SENSOR_FRAME_TYPE,
+      schemaVersion: SENSOR_FRAME_SCHEMA_VERSION,
       legacy: channel.legacy === true,
     });
   });
@@ -135,18 +126,6 @@ function getChannelServer(getServer, channel = LEGACY_DEFAULT_WEBSOCKET_CHANNEL)
 }
 
 /**
- * 向指定业务通道广播实时数据。
- *
- * @param {(channel: string) => import('ws').Server | null | undefined} getServer WebSocket Server 提供函数。
- * @param {string | object} data 待广播数据。
- * @param {string} channel 业务通道名称。
- * @returns {number} 实际发送成功的客户端数量。
- */
-function broadcastToChannel(getServer, data, channel = LEGACY_DEFAULT_WEBSOCKET_CHANNEL) {
-  return broadcast(getChannelServer(getServer, channel), data);
-}
-
-/**
  * 获取给定动态通道的共享 WebSocket 在线客户端数量。
  *
  * @param {(channel: string) => import('ws').Server | null | undefined} getServer WebSocket Server 提供函数。
@@ -163,14 +142,10 @@ function getChannelClientCounts(getServer, channels = []) {
 module.exports = {
   LEGACY_DEFAULT_WEBSOCKET_CHANNEL,
   SHARED_WEBSOCKET_PORT,
-  broadcast,
-  broadcastToChannel,
   buildRealtimeChannelMetadata,
   getClientCount,
-  getClients,
   getChannelClientCounts,
   getChannelServer,
-  isOpenClient,
   normalizeChannel,
   normalizeChannelList,
   toPayload,

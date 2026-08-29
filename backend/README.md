@@ -45,8 +45,9 @@ backend/
 - 一份 `SerialManager` 按 manifest `serialRole` 管理任意数量的物理串口；每个 COM 口仍有独立串口实例。
 - HTTP `serial.open` / `serial.close` 接受当前 manifest 声明的动态角色，未声明角色会被拒绝；协议与波特率只取 manifest。
 - 批量打开会先校验所有角色，展示系统切换会统一关闭旧系统的全部动态串口，避免部分执行或遗留重连。
-- 本地只监听 `19999` 一个 WebSocket 端口，数据按 manifest `outputChannel` 动态订阅与发布，不维护 `sit/back/head` 固定通道表。
-- `sit/back/head` 仅作为旧配置、旧数据字段和历史存储的兼容值继续存在。
+- 本地只监听 `19999` 一个 WebSocket 端口，每个传感器按 `displaySystemId:sensorId` 动态订阅，不维护 `sit/back/head` 固定通道表。
+- 传感器实时与回放数据在 wire 上只有 `sensor.frame` schema v1；不再发布顶层 `sitData/backData/headData/*Data` 或第二份 `_pressure` 帧。
+- `outputChannel` 是展示别名；`sit/back/head` 仅在内部处理、历史存储和页面迁移适配中继续存在，不是 WebSocket 通道身份。
 - 串口、采集、回放、历史和导出控制优先使用 HTTP；WebSocket 负责实时帧、订阅、系统事件与旧命令兼容。
 
 ## 运行链路
@@ -90,3 +91,46 @@ flowchart LR
 npm test
 npm run sdk:backend-smoke
 ```
+
+## 本目录文件
+
+> 追加于 2026-08-29。`backend/` 根下只有三份文档，没有 `.js` 文件。
+
+| 文件 | 作用 |
+| --- | --- |
+| `README.md` | 本文件。入口索引和职责归属表 |
+| `ARCHITECTURE_MAP.md` | 目录到能力的映射 |
+| `BACKEND_ARCHITECTURE.md` | 架构说明与设计依据 |
+
+## 逐文件 README 索引
+
+现在每个生产代码目录都有一份，说明该目录内每个文件做什么、边界在哪：
+
+| 目录 | 文件数 | README |
+| --- | --- | --- |
+| `common/` | 1 | [common/README.md](./common/README.md) |
+| `runtime/` | 1 | [runtime/README.md](./runtime/README.md) —— Electron 固定桥 |
+| `compatibility/` | — | 已有 |
+| `kernel/` | 0（全在子目录） | [kernel/README.md](./kernel/README.md) |
+| `kernel/platform/` | 2 | [→](./kernel/platform/README.md) |
+| `kernel/platform/bootstrap/` | 4 | [→](./kernel/platform/bootstrap/README.md) |
+| `kernel/platform/commands/` | 5 | [→](./kernel/platform/commands/README.md) |
+| `kernel/platform/license/` | 4 | [→](./kernel/platform/license/README.md) |
+| `kernel/platform/runtime/` | — | 已有 |
+| `kernel/platform/websocket/` | — | 已有 |
+| `kernel/serial/` | 3 | [→](./kernel/serial/README.md) |
+| `kernel/storage/` | 2 | [→](./kernel/storage/README.md) |
+| `kernel/storage/history/` | 3 | [→](./kernel/storage/history/README.md) |
+| `kernel/playback/` | 5 | [→](./kernel/playback/README.md) |
+| `kernel/csv/` | 1 | [→](./kernel/csv/README.md) |
+| `kernel/realtime/` | 5 | [→](./kernel/realtime/README.md) |
+| `kernel/algorithm-channel/` | 5 | [→](./kernel/algorithm-channel/README.md) |
+| `extension-host/` | 2 | [→](./extension-host/README.md) |
+| `extension-host/manifest/` | 7 | [→](./extension-host/manifest/README.md) |
+| `extension-host/runtime/` | 9 | [→](./extension-host/runtime/README.md) |
+| `extension-host/workspace/` | 1 | [→](./extension-host/workspace/README.md) |
+| `extensions/` | 0（全在子目录） | [→](./extensions/README.md) |
+| `extensions/built-in-sensors/` | 17 | [→](./extensions/built-in-sensors/README.md) |
+| `extensions/examples/` | 4 个样例目录 | [→](./extensions/examples/README.md)，四个样例各自也有 README |
+
+`tests/` 没有写——按约定只覆盖生产代码目录。

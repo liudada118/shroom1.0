@@ -10,6 +10,7 @@ import plane from "../../assets/images/plane.png";
 import { Select } from "element-react";
 import "element-theme-default";
 import { commandClient } from '../../services/command/commandClient';
+import { decodeWebSocketPayload } from '../../services/ws/sensorFrameDecoder';
 let myChart1;
 let ws, ws1;
 
@@ -255,7 +256,7 @@ class Car extends React.Component {
       console.info("connect success");
     };
     ws.onmessage = (e) => {
-      let jsonObject = JSON.parse(e.data);
+      let jsonObject = decodeWebSocketPayload(e.data);
       //处理空数组
 
       if (jsonObject.backData != null) {

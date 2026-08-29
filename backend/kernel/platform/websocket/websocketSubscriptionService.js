@@ -204,8 +204,8 @@ function createWebSocketSubscriptionManager({ logger } = {}) {
   }
 
   /**
-   * 按通道发布实时帧；订阅通配符 `*` 的旧客户端会继续收到所有通道数据。
-   * @param {string} channel 业务通道，例如 sit/back/head。
+   * 按 canonical channelId 发布实时帧；订阅通配符 `*` 的页面会收到所有通道数据。
+   * @param {string} channel 规范通道身份，例如 human-body:left-arm。
    * @param {string | object} data 要发送的数据。
    * @returns {number} 实际发送成功的客户端数量。
    */
@@ -218,23 +218,6 @@ function createWebSocketSubscriptionManager({ logger } = {}) {
 
     let sent = 0;
     for (const client of targets) {
-      if (send(client, payload)) {
-        sent += 1;
-      }
-    }
-    return sent;
-  }
-
-  /**
-   * 只向精确订阅指定 channel 的客户端发送，不包含通配符订阅者。
-   * @param {string} channel 业务通道。
-   * @param {string | object} data 要发送的数据。
-   * @returns {number} 实际发送成功的客户端数量。
-   */
-  function publishExact(channel, data) {
-    const payload = toPayload(data);
-    let sent = 0;
-    for (const client of channelClients.get(channel) || []) {
       if (send(client, payload)) {
         sent += 1;
       }
@@ -279,7 +262,7 @@ function createWebSocketSubscriptionManager({ logger } = {}) {
 
   /**
    * 处理前端订阅控制消息。
-   * 支持 {type:'subscribe', channels:['sit']} 和 {type:'unsubscribe', channels:['sit']}。
+   * 支持 {type:'subscribe', channels:['human-body:left-arm']} 与对应 unsubscribe。
    * @param {import('ws')} client WebSocket 客户端。
    * @param {Buffer | string} message 原始消息。
    * @returns {boolean} 是否消费了该订阅控制消息。
@@ -329,7 +312,7 @@ function createWebSocketSubscriptionManager({ logger } = {}) {
 
   /**
    * 注册新客户端的默认订阅。
-   * 主端口使用 `*` 保持旧页面兼容，独立端口使用各自的业务通道。
+   * 当前主页使用 `*` 自动接收唯一物理端口上的所有规范传感器帧。
    * @param {import('ws')} client WebSocket 客户端。
    * @param {{channels?: string[], clientId?: string}} options 注册参数。
    * @returns {string[]} 当前客户端订阅列表。
@@ -377,7 +360,6 @@ function createWebSocketSubscriptionManager({ logger } = {}) {
     getSubscriptions,
     handleControlMessage,
     publish,
-    publishExact,
     publishScope,
     registerClient,
     subscribe,

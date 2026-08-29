@@ -39,7 +39,7 @@ const websocketRuntime = createWebSocketRuntime({
     publishRealtimeFrame: (channel, payload) => ({
       channel,
       payload,
-      legacySent: 2,
+      sent: 2,
     }),
   }),
   webSocketServerFactory: () => {

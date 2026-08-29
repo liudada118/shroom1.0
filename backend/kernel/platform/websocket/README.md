@@ -10,9 +10,9 @@
 
 | 文件 | 作用 | 边界 |
 | --- | --- | --- |
-| `websocketRuntimeFactory.js` | 创建唯一的 `19999` Server、订阅管理器、ChannelBus 和实时 telemetry gateway | 每个 runtime 只创建一个 Server |
+| `websocketRuntimeFactory.js` | 创建唯一的 `19999` Server、订阅管理器、ChannelBus 和 `sensor.frame` gateway | 每个 runtime 只创建一个 Server |
 | `websocketTransportService.js` | 处理 ping/pong 心跳和 JSON 消息解码 | 不识别业务命令，不读写运行状态 |
-| `websocketChannelService.js` | 统一端口、动态逻辑通道元数据、payload 序列化、广播与连接统计 | 通道来自 manifest/SerialManager，不维护固定通道表 |
+| `websocketChannelService.js` | 统一端口、canonical 通道元数据、payload 序列化与连接统计 | 不提供可绕过帧网关的 raw broadcast |
 | `websocketSubscriptionService.js` | 维护客户端与 channel/scope 映射，处理订阅 ACK，并按订阅精确发布 | 保留 `*` 默认订阅以兼容旧页面 |
 | `webSocketHandlerFactory.js` | 给共享连接挂载心跳、消息入口、授权状态和旧命令兼容处理 | 只注册一次 `connection`，不实现历史或控制业务 |
 
@@ -37,7 +37,7 @@ Electron 固定桥 backend/runtime/index.js
         -> shared WebSocket.Server :19999
         -> websocketSubscriptionService
         -> websocketChannelService
-        -> ChannelBus + RealtimeTelemetryGateway
+        -> ChannelBus + sensor.frame gateway
      -> legacyWebSocketContext
      -> webSocketHandlerFactory
         -> controlCommandService（仅旧 WS 命令兼容）
@@ -55,6 +55,10 @@ HTTP /api/*
 - JQBed 的 `get/set/resetJqbedAlgorithmConfig` 仍是当前前端唯一直接走旧 WebSocket 的控制例外；
   本轮为保持行为不变未迁移，后续应先补等价 HTTP API 和兼容测试。
 
-旧客户端连接 `19999` 后默认订阅 `*`，继续接收 `sitData/backData/headData`；新客户端可发送
-`subscribe/unsubscribe/getSubscriptions` 精确选择 manifest 声明的任意逻辑通道。
-Electron `getWsServer(channel)`、SDK、硬件协议、历史数据格式和现有消息字段均未改变。
+页面连接 `19999` 后默认订阅 `*`，收到所有传感器的规范 `sensor.frame`；也可发送
+`subscribe/unsubscribe/getSubscriptions` 精确选择 `displaySystemId:sensorId`。传感器帧顶层
+不再出现 `sitData/backData/headData/*Data`，也不再双发 `_pressure` telemetry。系统状态、
+授权和命令确认仍是各自的低频对象，不冒充传感器帧。
+
+现有主页在浏览器接收边界把 `sensor.frame` 适配为它内部的旧状态形状；这些字段
+不再是 wire 协议。Electron `getWsServer(channel)` 固定入口、SDK 源码、硬件协议和历史数据格式未改变。

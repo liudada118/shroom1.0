@@ -2,6 +2,71 @@
 
 > 最后更新于：2026-08-29
 
+## 2026-08-29 `sensor.frame` 成为唯一传感器消息
+
+用户确认不再保留旧 WebSocket 传感器消息格式。实时和回放的每一路传感器数据现在
+都只发布一次，且 wire 上只有 `sensor.frame` schema v1：
+
+```json
+{
+  "type": "sensor.frame",
+  "schemaVersion": 1,
+  "channelId": "human-body:left-arm",
+  "displaySystemId": "human-body",
+  "sensorId": "left-arm",
+  "sensorType": "human-body",
+  "outputChannel": "armLeft",
+  "source": "realtime",
+  "sequence": 1,
+  "timestamp": 1234,
+  "quality": "good",
+  "payload": {
+    "value": [],
+    "stages": {
+      "decoded": null,
+      "normalized": null,
+      "calibrated": null,
+      "processed": [],
+      "mapped": null
+    },
+    "metrics": {},
+    "algorithmMetrics": {},
+    "matrix": null,
+    "orientation": null,
+    "status": null,
+    "temperature": null,
+    "protocol": null,
+    "history": null
+  }
+}
+```
+
+`channelId = displaySystemId:sensorId` 是订阅和消息身份，`outputChannel` 只是页面展示别名。
+多个传感器不合并成一个大对象：它们在同一条 `19999` 连接上按各自 `channelId`
+交错发送，各自维护 `sequence`，慢传感器不会阻塞快传感器。`GET /api/channels`
+返回同一组规范身份，精确订阅不再使用 `sit/back/head/armLeft` 这类别名。
+
+```mermaid
+flowchart LR
+  Device[多个物理传感器] --> Serial[SerialManager 多串口会话]
+  Serial --> Parser[协议解码]
+  Parser --> Runtime[线序 / 标定 / 算法]
+  Runtime --> Storage[采集与历史存储]
+  Runtime --> Gateway[sensor.frame 唯一封装]
+  Storage --> Playback[回放帧]
+  Playback --> Gateway
+  Gateway --> WS[单 WebSocket :19999]
+  WS --> Dispatch[按 channelId 订阅/分发]
+  Dispatch --> Web[网页渲染]
+```
+
+网络边界已删除顶层 `sitData/backData/headData/*Data` 以及额外 `_pressure` 帧。现有主页为了
+不与协议切换同时重写数十个 renderer，仅在浏览器进程内把规范帧适配为它的旧状态形状；
+该适配不是公开消息格式。系统状态、授权与命令确认仍保持各自的低频对象。本轮没有修改
+SDK 源码、Electron 固定入口、硬件协议、线序/标定或历史数据格式。
+因本轮遵守“不改 SDK”边界，`/api/sdk/contract` 中的静态 telemetry 形状和默认 `sit`
+订阅说明尚未升级，它不得被当作当前 `sensor.frame` wire 契约；这项需在后续 SDK 迁移中单独处理。
+
 ## 2026-08-29 WebSocket 控制面归位与目录收敛
 
 `backend/kernel/platform/websocket/` 已从 10 个生产 JavaScript 文件收敛为 5 个，只保留共享
@@ -15,9 +80,9 @@ HTTP，WebSocket 负责实时订阅、压力/回放帧、系统事件和旧扁�
 `get/set/resetJqbedAlgorithmConfig` 仍是当前前端唯一直接走旧 WebSocket 的控制例外；本轮没有
 改变它的消息格式或时序，后续需先补等价 HTTP API 再迁移。
 
-本轮是物理归位与内部命名收敛，不改变 `19999` 端口、订阅协议、业务 payload、handler 注册
-顺序、Electron 固定入口、SDK、硬件协议、线序/标定或历史数据格式。后端总测试已扩为 50 个
-文件，并新增传输服务以及订阅/命令双监听联动回归覆盖。
+该次物理归位本身没有改变当时的业务 payload；同日后续已在用户确认后收敛为
+本页上方的唯一 `sensor.frame` 契约。Electron 固定入口、SDK、硬件协议、线序/标定和历史格式
+在两次修改中都未改变。
 
 ## 2026-08-28 单 WebSocket 端口与统一多串口编排
 
@@ -44,18 +109,18 @@ AT 指令读取标识、按固定帧长硬分支的实现。多个现有设备�
 
 本地 Electron 后端的 WebSocket 从 `19999/19998/19997` 三个物理 Server 收敛为一个
 `19999` Server。WebSocket 基础设施不再维护 `sit/back/head` 常量表或白名单；当前展示系统的
-任意 `outputChannel` 由 manifest 和 SerialManager 已注册角色动态生成，例如新增 `armLeft`、
-`armRight` 不需要再改后端通道代码。`sit/back/head` 只作为现有配置与旧消息字段继续兼容：旧页面
-连接后默认订阅 `*`，继续收到 `sitData/backData/headData`；新客户端可以通过 `subscribe` 精确
-订阅任意 outputChannel；系统状态、回放和授权事件仍使用 `main` scope。Electron 固定入口
+任意传感器身份由 manifest 和 SerialManager 已注册角色动态生成，例如新增 `armLeft`、
+`armRight` 不需要再改后端通道代码。页面连接后默认订阅 `*`，接收所有规范
+`sensor.frame`；精确订阅使用 `displaySystemId:sensorId`。系统状态、回放控制和授权事件仍使用
+`main` scope。Electron 固定入口
 `getWsServer(channel)` 与 SDK 地址保持不变，但任何仓外
 旧客户端若仍直连 `19998/19997`，需要迁移到 `19999`。远端座椅 `23001` 和外部 CAN 页面
 `29999` 是客户端连接的外部数据源，不是本地后端监听端口，本轮未改。
 
 关闭流程现在只释放一次共享 WebSocket Server；`runtime.broadcastRealtime()` 保留公开签名，
-内部改走订阅管理器、ChannelBus 和 telemetry 网关，避免单 Server 下绕过逻辑通道。新增测试锁定
+内部改走订阅管理器、ChannelBus 和实时帧网关，避免单 Server 下绕过逻辑通道。新增测试锁定
 单实例创建、单次关闭、默认通配订阅、`armLeft` 等动态精确订阅不串台/不重复投递、动态 HTTP
-开关串口，以及自定义数据字段到标准 telemetry 的后端适配；同一
+开关串口，以及自定义数据字段到规范 `sensor.frame` 的后端适配；同一
 SerialManager 承接经典和 manifest 多路串口。未修改硬件协议、线序/点序、标定、历史数据格式、数据库结构、
 Electron 固定入口或 SDK。
 
@@ -2025,6 +2090,7 @@ flowchart LR
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-29 | WebSocket 传感器帧收敛为唯一契约 | 实时/回放均只发 `sensor.frame` schema v1，通道身份统一为 `displaySystemId:sensorId`，删除顶层旧数据字段、双发 `_pressure` 帧及其虚假通道元数据；前端在接收边界过渡。 |
 | 2026-08-29 | WebSocket 目录收敛为纯传输边界 | 生产文件由 10→5；命令、历史分析和运行态适配分别归入 commands/playback/runtime，心跳与 JSON 解码合并。HTTP/WS 分工、端口、协议、SDK、Electron 入口和历史格式不变。 |
 | 2026-08-28 | 运行产物归位并精简 platform runtime/WebSocket 内部层 | `dist` 保留；开发态导出与上传进入忽略的根 `runtime`，11 个文件迁移前后哈希一致；platform runtime 9→7、WebSocket 13→10，端口与消息契约不变，并补四类 runtime 和逐文件说明。 |
 | 2026-08-28 | 扩展宿主完成职责分组，版本历史改用版本笔记源文件 | `extension-host` 根仅保留稳定出口与装配入口，内部按 `manifest/runtime/workspace` 分类；版本历史在构建时读取 32 份 Windows Markdown 并按语义版本排序。发布清单修复仍属于生产发布流程，已审计但等待确认。 |
@@ -2973,6 +3039,7 @@ flowchart LR
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-29 | codeOpi | 破坏性契约收敛 / 用户已确认 | WebSocket 传感器数据删除 `sitData/backData/headData/*Data` 与双发 `_pressure` 格式，唯一发布 `sensor.frame` schema v1；订阅键和通道 API 统一为 `displaySystemId:sensorId`。前端入口完成解码迁移；未修改 SDK、Electron 固定入口、硬件协议、线序/标定和历史格式。 |
 | 2026-08-29 | codeOpi | 优化重构 / 职责归位 | WebSocket 生产目录由 10 个文件收敛为 5 个：控制命令归入 `platform/commands`，历史分析归入 `kernel/playback`，旧上下文适配归入 `platform/runtime`，心跳与 JSON 解码合并。保留单端口、订阅、实时/回放推送和旧命令兼容；未改 SDK、Electron 固定入口、硬件协议、线序/标定或历史格式。 |
 | 2026-08-28 | codeOpi | 优化重构 / 传输收口 | WebSocket 后端只监听 `19999`，删除固定 `CHANNELS` 表，任意 manifest `outputChannel` 通过同一连接动态复用；runtime 广播改走订阅与 telemetry，shutdown 只关闭一次。应用侧串口规则统一进入 `serialPortOrchestrator`，仍由单一 SDK SerialManager 和 manifest 协议驱动；未改 SDK、硬件协议、线序、标定或历史格式。 |
 | 2026-08-28 | codeOpi | 优化重构 / 目录治理 | 保留根 `dist`，将开发态 CSV、报告、上传、工具输出和临时状态收进忽略的 `runtime`；移除无引用且已核验重复/残缺的 `project`，人工 legacy runtime 归入测试区；platform runtime 由 9 文件减为 7，WebSocket 由 13 减为 10，扩展与平台目录补逐文件 README。45 个后端测试与 SDK smoke 10 项通过；未改 Electron 固定入口、SDK、硬件协议、历史格式或打包态路径。 |

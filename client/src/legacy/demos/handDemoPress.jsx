@@ -7,6 +7,7 @@ import { NavLink, useLocation, useParams } from "react-router-dom";
 import { buildCollectionRow } from "./collectionValue";
 import { compileValueFormula } from "./formulaEvaluator";
 import { useTranslation } from "react-i18next";
+import { decodeWebSocketPayload } from '../../services/ws/sensorFrameDecoder';
 let data = [];
 
 var changeValue = (value) => {
@@ -326,7 +327,7 @@ export default function Demo() {
       console.info("connect success");
     };
     ws.onmessage = (e) => {
-      let jsonObject = JSON.parse(e.data);
+      let jsonObject = decodeWebSocketPayload(e.data);
       //处理空数组
 
       if (jsonObject.realArr != null) {

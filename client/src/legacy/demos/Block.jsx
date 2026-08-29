@@ -5,6 +5,7 @@ import { Button, Input, Slider } from "antd";
 import { CSVLink } from "react-csv";
 import { buildCollectionRow } from "./collectionValue";
 import { useTranslation } from "react-i18next";
+import { decodeWebSocketPayload } from '../../services/ws/sensorFrameDecoder';
 let data = [];
 
 let ws,
@@ -141,7 +142,7 @@ export default function Demo() {
       console.info("connect success");
     };
     ws.onmessage = (e) => {
-      let jsonObject = JSON.parse(e.data);
+      let jsonObject = decodeWebSocketPayload(e.data);
       //处理空数组
 
       if (jsonObject.sitData != null) {

@@ -9,9 +9,6 @@
  * 业务处理逻辑应优先下沉到 application、services、serial、sensors/runtime 或 displaySystems。
  */
 const logger = require('../../common/logger');
-const {
-  buildTelemetryChannelDefinitions,
-} = require('../realtime/telemetryChannelService');
 const { startWorker, callPy, stopWorker } = require('../algorithm-channel/pythonWorker');
 const {
   buildRealtimeChannelMetadata,
@@ -590,9 +587,9 @@ function publishPlaybackFrame(index, options = {}) {
     ...options,
   });
 
-  if (backPayload) publishSystemEvent(backPayload);
-  if (headPayload) publishSystemEvent(headPayload);
-  publishSystemEvent(sitPayload);
+  if (backPayload) publishRealtimeFrame('back', backPayload, { source: 'playback' });
+  if (headPayload) publishRealtimeFrame('head', headPayload, { source: 'playback' });
+  publishRealtimeFrame('sit', sitPayload, { source: 'playback' });
 }
 
 const playbackTimer = createPlaybackTimerService({
@@ -1018,8 +1015,8 @@ const {
 } = webSocketRuntime;
 let server = wsServer;
 
-function publishRealtimeFrame(channel, jsonData) {
-  return publishRealtimeFrameToRuntime(channel, jsonData);
+function publishRealtimeFrame(channel, jsonData, options) {
+  return publishRealtimeFrameToRuntime(channel, jsonData, options);
 }
 
 function publishRealtimeChannel(channel, jsonData, { respectFrequency = true } = {}) {
@@ -1028,8 +1025,117 @@ function publishRealtimeChannel(channel, jsonData, { respectFrequency = true } =
   return publishRealtimeFrame(channel, jsonData);
 }
 
+const SENSOR_DATA_FIELDS = Object.freeze(['sitData', 'backData', 'headData', 'sensorData']);
+const SENSOR_FRAME_ONLY_FIELDS = Object.freeze([
+  'channelId',
+  'displaySystemId',
+  'sensorId',
+  'sensorType',
+  'outputChannel',
+  'source',
+  'timestamp',
+  'data',
+  'rawData',
+  'normalizedData',
+  'calibratedData',
+  'pressureData',
+  'realArr',
+  'rawSitData',
+  'rawPressureData',
+  'mappedData',
+  'mappedArr195',
+  'newArr147',
+  'newArr',
+  'rotate',
+  'orientation',
+  'metrics',
+  'algorithmMetrics',
+  'metadata',
+  'matrix',
+  'matrixWidth',
+  'matrixHeight',
+  'matrixOrientation',
+  'pressureThreshold',
+  'temperatureRawData',
+  'temperatureData',
+  'temperatureAvg',
+  'temperatureK',
+  'sitFlag',
+  'backFlag',
+  'hz',
+  'frameIndex',
+  'packetType',
+  'handSide',
+  'outputSide',
+  'packetSourcePort',
+  'time',
+  'index',
+]);
+
+function parseOutboundSystemEvent(data) {
+  if (data && typeof data === 'object' && !Buffer.isBuffer(data)) return data;
+  try {
+    const parsed = JSON.parse(String(data));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 发布低频系统事件；若旧调用把压力帧混在系统事件里，则在此边界拆成统一 sensor.frame。
+ * 这样旧硬件处理器无需改变，WebSocket wire 上也不会再出现裸 sitData/backData/headData。
+ */
 function publishSystemEvent(data) {
-  return wsSubscriptions.publishScope('main', data);
+  const event = parseOutboundSystemEvent(data);
+  if (!event) return wsSubscriptions.publishScope('main', data);
+  if (event.type === 'sensor.frame' && event.channelId) {
+    return publishRealtimeFrame(
+      event.outputChannel || event.sensorId || event.channelId,
+      event,
+      {
+        source: event.source || 'realtime',
+        timestamp: event.timestamp,
+      },
+    );
+  }
+
+  const channels = SENSOR_DATA_FIELDS
+    .filter((field) => event[field] != null)
+    .map((field) => field.slice(0, -4));
+  if (!channels.length && event.outputChannel && event.data != null) {
+    channels.push(event.outputChannel);
+  }
+  if (!channels.length) return wsSubscriptions.publishScope('main', event);
+
+  let sent = 0;
+  for (const channel of [...new Set(channels)]) {
+    const framePayload = {
+      ...event,
+      outputChannel: channels.length === 1 && event.outputChannel
+        ? event.outputChannel
+        : channel,
+    };
+    for (const field of SENSOR_DATA_FIELDS) {
+      if (field !== `${channel}Data`) delete framePayload[field];
+    }
+    sent += publishRealtimeFrame(channel, framePayload, {
+      source: event.source || 'realtime',
+      timestamp: event.timestamp || event.time,
+    });
+  }
+
+  const systemPayload = { ...event };
+  for (const field of [...SENSOR_DATA_FIELDS, ...SENSOR_FRAME_ONLY_FIELDS]) {
+    delete systemPayload[field];
+  }
+  if (event.outputChannel) {
+    delete systemPayload[`${event.outputChannel}Data`];
+  }
+  if (Object.keys(systemPayload).length) {
+    sent += wsSubscriptions.publishScope('main', systemPayload);
+  }
+  return sent;
 }
 
 function sendJqbedAlgorithmJson(client, payload) {
@@ -1065,13 +1171,7 @@ function getRealtimeChannelMetadata() {
     managedChannels: serialManager.getStatus(),
   });
 
-  return [
-    ...realtimeChannels,
-    ...buildTelemetryChannelDefinitions(
-      sensorType,
-      realtimeChannels.map((channel) => channel.channelId),
-    ),
-  ];
+  return realtimeChannels;
 }
 
 function publishHistoryDateList() {

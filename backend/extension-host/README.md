@@ -145,3 +145,20 @@ npm test
 ```
 
 测试不替代真实串口、多通道设备、用户历史数据库和打包后路径的人工验收。
+
+## 本目录文件
+
+> 追加于 2026-08-29。上面各节说明职责与约束，这一节只列本目录直接包含的文件。
+
+| 文件 | 作用 | 边界 |
+| --- | --- | --- |
+| `index.js` | 扩展宿主的公共门面，104 行代码 + 一个约 60 项的导出表。把 `manifest/`、`runtime/`、`workspace/` 三个子目录的能力和 `@shroom/backend/protocol/displaySystemProtocol.js` 的协议能力统一从一处导出 | **只做再导出，不含逻辑。** 外部（`kernel/platform/server.js`、HTTP 路由、SDK）应该只依赖这个门面，不要深挖子目录路径。导出表里同时包含常量（`ALGORITHM_TYPES`、`DISPLAY_SYSTEM_SCHEMA_VERSION`、`PROTOCOL_FRAMING_TYPES`……）和工厂函数 |
+| `appRuntimeFactory.js` | 应用级装配，203 行。`createAppRuntime` 把发现（`createDisplaySystemRuntimeDiscovery`）、工作区（`createDisplaySystemWorkspaceService`）、运行时控制器（`createDisplaySystemRuntimeController`）和串口协议预设（`loadSerialProtocolPresets` / `resolveUserPresetDirectory`）组装成一个对象。同时导出 `buildRuntimeBindingSnapshot` | 这是 `server.js` 唯一需要调的扩展宿主入口。加新能力时优先挂在返回对象上，而不是让 `server.js` 再多 require 一个子目录文件 |
+
+## 子目录逐文件说明
+
+| 目录 | 文件数 | README |
+| --- | --- | --- |
+| `manifest/` | 7 | [manifest/README.md](./manifest/README.md) —— 声明、校验、翻译成运行时定义 |
+| `runtime/` | 9 | [runtime/README.md](./runtime/README.md) —— 发现 → 计划 → 绑定 → 分发 → 处理 |
+| `workspace/` | 1 | [workspace/README.md](./workspace/README.md) —— Builder 后端 |

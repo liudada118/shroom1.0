@@ -97,9 +97,10 @@ backend/
 
 - `playback/`：把已有历史记录转换为前端沿用的帧、控制回放节奏，并承接历史差值与框选/曲线统计。
 - `csv/`：按现有字段导出历史数据。
-- `realtime/`：统一实时帧管线、分发和 telemetry 输出。
+- `realtime/`：统一实时帧管线，并在 WebSocket 边界产生唯一的 `sensor.frame` schema v1。
 
-这些目录只重组现有职责，不重新定义采集数据或前端消息格式。
+串口解码、采集入库和历史数据仍沿用原格式；只有网络传感器帧契约收敛为
+`{type, schemaVersion, channelId, displaySystemId, sensorId, outputChannel, source, sequence, timestamp, quality, payload}`。
 
 控制面默认通过 HTTP 进入 `platform/commands/controlCommandRouter.js`；WebSocket 只承载实时
 订阅/推送以及旧扁平命令兼容。JQBed 算法配置仍是当前前端的一个旧 WebSocket 控制例外，
@@ -152,7 +153,7 @@ sequenceDiagram
   participant S as SDK 串口/协议
   participant E as 传感器扩展
   participant R as kernel/realtime
-  participant W as platform/websocket
+  participant W as platform/websocket :19999
   participant F as 前端
   participant C as SDK 采集/存储
   participant H as kernel/storage/playback

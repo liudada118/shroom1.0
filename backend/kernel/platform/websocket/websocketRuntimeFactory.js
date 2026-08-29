@@ -13,7 +13,7 @@ function createWebSocketServer({ port = SHARED_WEBSOCKET_PORT } = {}) {
 /**
  * 创建 WebSocket 运行时装配。
  *
- * 这里集中创建单个 WebSocket server、订阅管理器、ChannelBus 和实时 telemetry 网关。
+ * 这里集中创建单个 WebSocket server、订阅管理器、ChannelBus 和传感器帧网关。
  * server.js 只保留发布函数、连接处理器绑定和关闭生命周期。
  *
  * @param {object} options 创建参数。
@@ -39,14 +39,14 @@ function createWebSocketRuntime({
   const wsServer = webSocketServerFactory();
 
   /**
-   * 发布实时帧到旧 WebSocket 通道和标准 telemetry 通道。
+   * 将内部帧转换成唯一 sensor.frame 后发布到 canonical channelId。
    *
    * @param {string} channel manifest 声明的任意 outputChannel。
    * @param {string | object} payload 帧数据。
-   * @returns {number} 旧 WebSocket 通道发送数量。
+   * @returns {number} 实际发送成功的客户端数量。
    */
-  function publishRealtimeFrame(channel, payload) {
-    return realtimeTelemetryGateway.publishRealtimeFrame(channel, payload).legacySent;
+  function publishRealtimeFrame(channel, payload, options) {
+    return realtimeTelemetryGateway.publishRealtimeFrame(channel, payload, options).sent;
   }
 
   return {

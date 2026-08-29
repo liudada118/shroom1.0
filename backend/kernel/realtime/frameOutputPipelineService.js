@@ -24,7 +24,8 @@ function createFrameOutputPipeline({
   }
 
   /**
-   * 将对象帧转换为旧 WebSocket 兼容的 JSON 字符串。
+   * 将对象帧转换为内部管线沿用的 JSON 字符串。
+   * WebSocket 边界会再把它投影为唯一 `sensor.frame`，这不是 wire 契约。
    *
    * @param {string | object} frame 实时帧对象或字符串。
    * @returns {string} JSON 字符串。

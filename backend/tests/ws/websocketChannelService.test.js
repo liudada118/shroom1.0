@@ -1,9 +1,7 @@
 const assert = require('assert');
-const WebSocket = require('ws');
 const {
   LEGACY_DEFAULT_WEBSOCKET_CHANNEL,
   SHARED_WEBSOCKET_PORT,
-  broadcastToChannel,
   buildRealtimeChannelMetadata,
   getChannelClientCounts,
   normalizeChannel,
@@ -17,11 +15,11 @@ assert.strictEqual(normalizeChannel('back'), 'back');
 assert.strictEqual(normalizeChannel(' armLeft '), 'armLeft');
 assert.strictEqual(normalizeChannel(''), 'sit');
 assert.deepStrictEqual(normalizeChannelList([
-  'sit',
-  { outputChannel: 'armLeft' },
+  'wearable-demo:sit',
+  { channelId: 'wearable-demo:armLeft', outputChannel: 'armLeft' },
   { serialRole: 'armRight' },
-  { channelId: 'armLeft' },
-]), ['sit', 'armLeft', 'armRight']);
+  { channelId: 'wearable-demo:armLeft' },
+]), ['wearable-demo:sit', 'wearable-demo:armLeft', 'armRight']);
 assert.deepStrictEqual(buildRealtimeChannelMetadata({
   sensorType: 'wearable-demo',
   managedChannels: [
@@ -29,50 +27,77 @@ assert.deepStrictEqual(buildRealtimeChannelMetadata({
     { portId: 'right-input', role: 'right-input' },
   ],
   manifestChannels: [
-    { serialRole: 'left-input', outputChannel: 'armLeft', label: '左臂' },
-    { serialRole: 'right-input', outputChannel: 'armRight', label: '右臂' },
+    {
+      channelId: 'wearable-demo:left-input',
+      displaySystemId: 'wearable-demo',
+      sensorId: 'left-input',
+      serialRole: 'left-input',
+      outputChannel: 'armLeft',
+      label: '左臂',
+    },
+    {
+      channelId: 'wearable-demo:right-input',
+      displaySystemId: 'wearable-demo',
+      sensorId: 'right-input',
+      serialRole: 'right-input',
+      outputChannel: 'armRight',
+      label: '右臂',
+    },
   ],
 }), [
   {
-    channelId: 'armLeft',
+    channelId: 'wearable-demo:left-input',
     name: '左臂',
     port: 19999,
+    displaySystemId: 'wearable-demo',
+    sensorId: 'left-input',
     serialRole: 'left-input',
+    outputChannel: 'armLeft',
     sensorType: 'wearable-demo',
     transport: 'websocket',
+    messageType: 'sensor.frame',
+    schemaVersion: 1,
     legacy: false,
   },
   {
-    channelId: 'armRight',
+    channelId: 'wearable-demo:right-input',
     name: '右臂',
     port: 19999,
+    displaySystemId: 'wearable-demo',
+    sensorId: 'right-input',
     serialRole: 'right-input',
+    outputChannel: 'armRight',
     sensorType: 'wearable-demo',
     transport: 'websocket',
+    messageType: 'sensor.frame',
+    schemaVersion: 1,
     legacy: false,
   },
 ]);
-assert.strictEqual(buildRealtimeChannelMetadata({
+const legacyMetadata = buildRealtimeChannelMetadata({
   sensorType: 'legacy-demo',
   managedChannels: [{ portId: 'back', role: 'back' }],
-})[0].legacy, true);
+})[0];
+assert.strictEqual(legacyMetadata.channelId, 'legacy-demo:back');
+assert.strictEqual(legacyMetadata.outputChannel, 'back');
+assert.strictEqual(legacyMetadata.legacy, true);
 assert.strictEqual(toPayload('raw'), 'raw');
 assert.strictEqual(toPayload({ type: 'status' }), '{"type":"status"}');
 
-const sent = [];
 const sharedServer = {
   clients: new Set([
-    { readyState: WebSocket.OPEN, send: (payload) => sent.push(payload) },
-    { readyState: WebSocket.CLOSED, send: () => assert.fail('closed client must not receive data') },
+    {},
+    {},
   ]),
 };
 const getServer = () => sharedServer;
 
-assert.strictEqual(broadcastToChannel(getServer, { data: [1] }, 'sit'), 1);
-assert.deepStrictEqual(sent, ['{"data":[1]}']);
 assert.deepStrictEqual(
-  getChannelClientCounts(getServer, ['sit', 'armLeft', 'armRight']),
-  { sit: 2, armLeft: 2, armRight: 2 },
+  getChannelClientCounts(getServer, [
+    'wearable-demo:left-input',
+    'wearable-demo:right-input',
+  ]),
+  { 'wearable-demo:left-input': 2, 'wearable-demo:right-input': 2 },
 );
 
 console.log('websocketChannelService.test.js passed');

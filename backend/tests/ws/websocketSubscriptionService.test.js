@@ -22,11 +22,11 @@ const defaultReplacementClient = createClient();
 
 subscriptions.registerClient(wildcardClient, {
   channels: [WILDCARD_CHANNEL],
-  clientId: 'legacy-main',
+  clientId: 'main',
   scope: 'main',
 });
 subscriptions.registerClient(backClient, {
-  channels: ['back'],
+  channels: ['demo:back'],
   clientId: 'back-only',
   scope: 'main',
 });
@@ -38,47 +38,55 @@ subscriptions.registerClient(defaultReplacementClient, {
 
 defaultReplacementClient.emit('message', JSON.stringify({
   type: 'subscribe',
-  channels: ['armLeft'],
+  channels: ['human-body:left-arm'],
 }));
-assert.deepStrictEqual(subscriptions.getSubscriptions(defaultReplacementClient), ['armLeft']);
+assert.deepStrictEqual(subscriptions.getSubscriptions(defaultReplacementClient), ['human-body:left-arm']);
 
-assert.strictEqual(subscriptions.publish('sit', { sitData: [1] }), 1);
-assert.deepStrictEqual(wildcardClient.sent, [{ sitData: [1] }]);
+const sitFrame = { type: 'sensor.frame', channelId: 'demo:sit', payload: { value: [1] } };
+assert.strictEqual(subscriptions.publish('demo:sit', sitFrame), 1);
+assert.deepStrictEqual(wildcardClient.sent, [sitFrame]);
 assert.deepStrictEqual(backClient.sent, []);
 
-assert.strictEqual(subscriptions.publish('armLeft', { armLeftData: [4] }), 2);
-assert.deepStrictEqual(wildcardClient.sent.at(-1), { armLeftData: [4] });
-assert.deepStrictEqual(defaultReplacementClient.sent.at(-1), { armLeftData: [4] });
+const armFrame = {
+  type: 'sensor.frame',
+  channelId: 'human-body:left-arm',
+  payload: { value: [4] },
+};
+assert.strictEqual(subscriptions.publish('human-body:left-arm', armFrame), 2);
+assert.deepStrictEqual(wildcardClient.sent.at(-1), armFrame);
+assert.deepStrictEqual(defaultReplacementClient.sent.at(-1), armFrame);
 subscriptions.unregisterClient(defaultReplacementClient);
 
-subscriptions.subscribe(wildcardClient, ['back']);
-assert.strictEqual(subscriptions.publish('back', { backData: [2] }), 2);
-assert.deepStrictEqual(wildcardClient.sent.at(-1), { backData: [2] });
-assert.deepStrictEqual(backClient.sent.at(-1), { backData: [2] });
+subscriptions.subscribe(wildcardClient, ['demo:back']);
+const backFrame = { type: 'sensor.frame', channelId: 'demo:back', payload: { value: [2] } };
+assert.strictEqual(subscriptions.publish('demo:back', backFrame), 2);
+assert.deepStrictEqual(wildcardClient.sent.at(-1), backFrame);
+assert.deepStrictEqual(backClient.sent.at(-1), backFrame);
 assert.strictEqual(
-  wildcardClient.sent.filter((message) => message.backData).length,
+  wildcardClient.sent.filter((message) => message.channelId === 'demo:back').length,
   1,
-  'a client subscribed through both * and back must receive the frame once',
+  'a client subscribed through both * and demo:back must receive the frame once',
 );
 
 backClient.emit('message', JSON.stringify({
   type: 'subscribe',
-  channels: ['head'],
+  channels: ['demo:head'],
   replace: true,
 }));
-assert.deepStrictEqual(subscriptions.getSubscriptions(backClient), ['head']);
+assert.deepStrictEqual(subscriptions.getSubscriptions(backClient), ['demo:head']);
 assert.deepStrictEqual(backClient.sent.at(-1), {
   type: 'subscribed',
   clientId: 'back-only',
-  channels: ['head'],
+  channels: ['demo:head'],
 });
 
-assert.strictEqual(subscriptions.publish('head', { headData: [3] }), 2);
-assert.deepStrictEqual(wildcardClient.sent.at(-1), { headData: [3] });
-assert.deepStrictEqual(backClient.sent.at(-1), { headData: [3] });
+const headFrame = { type: 'sensor.frame', channelId: 'demo:head', payload: { value: [3] } };
+assert.strictEqual(subscriptions.publish('demo:head', headFrame), 2);
+assert.deepStrictEqual(wildcardClient.sent.at(-1), headFrame);
+assert.deepStrictEqual(backClient.sent.at(-1), headFrame);
 
 assert.deepStrictEqual(subscriptions.getStatus(), {
-  channels: { '*': 1, back: 1, head: 1 },
+  channels: { '*': 1, 'demo:back': 1, 'demo:head': 1 },
   scopes: { main: 2 },
 });
 

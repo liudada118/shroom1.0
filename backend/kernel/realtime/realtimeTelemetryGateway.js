@@ -1,34 +1,12 @@
-﻿/**
- * 瀹炴椂 telemetry 缃戝叧銆?
- *
- * 璐熻矗鎶婃棫 sit/back/head 瀹炴椂 payload 鍚屾椂鍙戝竷鍒版棫 WebSocket 閫氶亾鍜屾柊鐨?
- * 鏍囧噯 telemetry channel銆傚畠鏄棫鍓嶇鍏煎閫氶亾涓庢柊 ChannelBus 妯″瀷涔嬮棿鐨勬ˉ銆?
- */
 const {
-  normalizeLegacyRealtimeFrame,
-  parsePayload,
-} = require('@shroom/backend/telemetry/telemetryNormalizer.js');
+  buildSensorFrameEnvelope,
+} = require('./sensorFrameEnvelope');
 
 /**
- * 旧三通道 payload 已有 sitData/backData/headData；manifest 自定义通道使用
- * `${outputChannel}Data`。在不改 SDK 契约和原始 WebSocket payload 的前提下，
- * 为标准 telemetry 归一化补一个统一 pressureData 视图。
- */
-function prepareTelemetryPayload(channel, payload) {
-  const data = parsePayload(payload);
-  if (!data || Array.isArray(data.pressureData)) return payload;
-  const channelData = data[`${String(channel || '').trim()}Data`];
-  const pressureData = Array.isArray(channelData)
-    ? channelData
-    : (Array.isArray(data.data) ? data.data : null);
-  return pressureData ? { ...data, pressureData } : payload;
-}
-
-/**
- * 鍒涘缓瀹炴椂 telemetry 缃戝叧銆?
+ * 创建实时传感器帧网关。
  *
- * @param {object} deps ChannelBus銆佽闃呯鐞嗗櫒鍜屼紶鎰熷櫒绫诲瀷璇诲彇鍣ㄣ€?
- * @returns {{ publishRealtimeFrame: Function }} 瀹炴椂鍙戝竷 API銆?
+ * 内部处理器仍可输出既有对象，网关在唯一的 WebSocket 边界把它们转换成
+ * `sensor.frame`。同一物理帧只发布一次，订阅键与消息身份都使用 canonical channelId。
  */
 function createRealtimeTelemetryGateway({
   channelBus,
@@ -43,48 +21,50 @@ function createRealtimeTelemetryGateway({
     throw new Error('wsSubscriptions is required');
   }
 
+  const channelSequences = new Map();
+
+  function nextSequence(channelId) {
+    const next = (channelSequences.get(channelId) || 0) + 1;
+    channelSequences.set(channelId, next);
+    return next;
+  }
+
   /**
-   * 鍙戝竷瀹炴椂甯э細鍏煎鏃ч€氶亾鎺ㄩ€侊紝鍚屾椂鐢熸垚鏍囧噯 telemetry 閫氶亾甯с€?
+   * 发布唯一格式的传感器帧。
    *
-   * @param {string} channel 鏃у疄鏃堕€氶亾锛屼緥濡?sit/back/head銆?
-   * @param {string | object} payload 鏃ч€氶亾 payload銆?
-   * @returns {{legacySent: number, telemetrySent: number, telemetryFrame: object | null}}
+   * @param {string} channel 内部输出别名，例如 sit、back、armLeft。
+   * @param {string|object} payload 内部 legacy 或 manifest 帧。
+   * @param {{source?: string, timestamp?: number}} options 来源信息。
+   * @returns {{sent:number, frame:object|null}}
    */
-  function publishRealtimeFrame(channel, payload) {
+  function publishRealtimeFrame(channel, payload, options = {}) {
     const sensorType = typeof getSensorType === 'function' ? getSensorType() : undefined;
-    const legacyEvent = channelBus.publish(channel, payload, {
+    const now = Number(options.timestamp) || Date.now();
+    const identityFrame = buildSensorFrameEnvelope({
+      channel,
+      payload,
+      sensorType,
+      source: options.source || 'realtime',
+      sequence: 0,
+      timestamp: now,
+    });
+    if (!identityFrame) return { sent: 0, frame: null };
+
+    const frame = {
+      ...identityFrame,
+      sequence: nextSequence(identityFrame.channelId),
+    };
+    channelBus.publish(frame.channelId, frame, {
       sensorType,
       source,
-    });
-    const legacySent = wsSubscriptions.publish(channel, payload);
-    const telemetryFrame = normalizeLegacyRealtimeFrame(
-      channel,
-      prepareTelemetryPayload(channel, payload),
-      {
-        sensorType,
-        timestamp: legacyEvent.timestamp,
-      },
-    );
-
-    if (!telemetryFrame) {
-      return {
-        legacySent,
-        telemetrySent: 0,
-        telemetryFrame: null,
-      };
-    }
-
-    channelBus.publish(telemetryFrame.channelId, telemetryFrame, {
-      sensorType,
-      source: 'telemetry-normalizer',
-      legacyChannel: channel,
+      frameSource: frame.source,
+      outputChannel: frame.outputChannel,
       standard: true,
     });
 
     return {
-      legacySent,
-      telemetrySent: wsSubscriptions.publishExact(telemetryFrame.channelId, telemetryFrame),
-      telemetryFrame,
+      sent: wsSubscriptions.publish(frame.channelId, frame),
+      frame,
     };
   }
 
@@ -95,5 +75,4 @@ function createRealtimeTelemetryGateway({
 
 module.exports = {
   createRealtimeTelemetryGateway,
-  prepareTelemetryPayload,
 };

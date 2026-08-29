@@ -93,3 +93,23 @@ JSON 线序/点序和数值后处理。跨帧状态机、压力与 IMU 混合类
 
 当前最大缺口是 `kernel/platform/server.js` 仍直接导入四组 built-in factory，所以这里只完成了
 “源码分目录”，还没有做到真正的插件依赖反转。
+
+## 子目录逐文件说明
+
+> 追加于 2026-08-29。本目录没有直接包含的 `.js` 文件，实现全在两个子目录里。
+
+| 目录 | 内容 | README |
+| --- | --- | --- |
+| `built-in-sensors/` | 17 个文件、2191 行。8 个帧处理器（按帧长度区分协议）+ 9 个装配层文件 | [built-in-sensors/README.md](./built-in-sensors/README.md) |
+| `examples/` | 4 个 Display System 样例目录，每个 4 个 JSON 文件 | [examples/README.md](./examples/README.md) |
+
+`examples/` 下四个目录各自也有 README，因为它们性质不同：
+
+| 目录 | 性质 | 说明 |
+| --- | --- | --- |
+| [byte-matrix-demo](./examples/byte-matrix-demo/README.md) | schema v2，**完整可跑** | 2×3 六个点，小到能手算。想知道字段怎么写看这个 |
+| [jqbed-manifest-demo](./examples/jqbed-manifest-demo/README.md) | schema v1，迁移模板 | 缺 `protocol`；点序只填了 16/1024 个点 |
+| [small-bed-12b-manifest-demo](./examples/small-bed-12b-manifest-demo/README.md) | schema v1，迁移模板 | 缺 `protocol` 和量程；点序 8/1024 |
+| [hand-glove-manifest-demo](./examples/hand-glove-manifest-demo/README.md) | schema v1，迁移模板 | 占两个串口角色；左右手路由无法在 manifest 表达 |
+
+三个迁移模板的共同状态：**只声明了传感器身份和显示部分，解帧仍走 `built-in-sensors/` 的硬编码实现**（各自 `metadata.sourceRuntime` 指明是哪一个），点序也只填了骨架。启用它们不会得到正确数据。

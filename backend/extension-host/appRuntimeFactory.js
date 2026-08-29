@@ -168,11 +168,12 @@ function createAppRuntime({
        * 列出某个展示系统声明的全部串口通道。
        *
        * 串口编排器和共享 WebSocket 都读取这份列表：有几个 sensors 条目就有几路
-       * 可打开、解析和按 outputChannel 发布，不需要新增后端端口或通道常量。
+       * 可打开、解析和按 canonical channelId 发布，不需要新增后端端口或通道常量。
        *
        * @param {string} sensorType 传感器类型。
-       * @returns {Array<{serialRole: string, outputChannel: string, label: string,
-       *   baudRate: number, parserChannel: string, protocol: object}>} 通道列表。
+       * @returns {Array<{channelId: string, displaySystemId: string, sensorId: string,
+       *   serialRole: string, outputChannel: string, label: string, baudRate: number,
+       *   parserChannel: string, protocol: object}>} 通道列表。
        */
       listSerialChannels: (sensorType) => {
         const system = displaySystemRuntimeDiscovery.getBySensorType(sensorType);
@@ -180,6 +181,10 @@ function createAppRuntime({
         return channels
           .filter((channel) => channel.protocol)
           .map((channel) => ({
+            channelId: channel.id,
+            displaySystemId: channel.displaySystemId,
+            sensorId: channel.serialRole,
+            sensorType: channel.sensor?.type || channel.parserChannel?.sensorType || sensorType,
             serialRole: channel.serialRole,
             outputChannel: channel.outputChannel || channel.serialRole,
             label: channel.label || channel.serialRole,

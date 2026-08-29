@@ -1,6 +1,7 @@
 import { color } from 'echarts';
 import React, { useEffect, useRef, useState, useImperativeHandle } from 'react';
 import { jet } from '../../assets/util/util';
+import { decodeWebSocketPayload } from '../../services/ws/sensorFrameDecoder';
 
 let firstData, lastData;
 const Data = React.forwardRef((porps, refs) => {
@@ -82,7 +83,7 @@ const Data = React.forwardRef((porps, refs) => {
       console.info('connect success');
     };
     ws.onmessage = (e) => {
-      let jsonObject = JSON.parse(e.data);
+      let jsonObject = decodeWebSocketPayload(e.data);
       //处理空数组
       // console.log(jsonObject);
       if (jsonObject.sitData != null) {

@@ -1,6 +1,7 @@
 import React, { useRef, useEffect } from "react";
 import Title from "../../components/title/Title";
 import { sendWebSocketJson } from './websocketTransport';
+import { decodeWebSocketPayload } from '../../services/ws/sensorFrameDecoder';
 import "./index.scss";
 import CanvasCar from "../../components/three/carnewTest copy";
 import CanvasCarWow from "../../components/three/carnewWow";
@@ -381,7 +382,7 @@ const parseMaybeJsonPayload = (payload, fallback = null) => {
  * 兼容浏览器字符串消息和桌面运行时已经解析好的对象消息。
  */
 const parseWebSocketEventPayload = (event) => {
-  const payload = parseMaybeJsonPayload(event?.data, null)
+  const payload = decodeWebSocketPayload(event?.data)
   return payload && typeof payload === 'object' && !Array.isArray(payload)
     ? payload
     : null
@@ -1749,6 +1750,7 @@ class Home extends React.Component {
       jsonObject.sitData != null
       || jsonObject.backData != null
       || jsonObject.headData != null
+      || jsonObject.sensorData != null
       || (jsonObject.outputChannel && jsonObject.data != null)
     );
     // 采集计时不在这里了：它改成由 `startCollectionTimer` 的定时器驱动，不再蹭帧。
@@ -1758,8 +1760,13 @@ class Home extends React.Component {
     if (currentDisplayDefinition?.source === 'manifest' && hasPressureFrame) {
       const handled = this.handleManifestSceneFrame(jsonObject, currentDisplayDefinition);
       if (handled || jsonObject.displaySystemId) return;
-    } else if (jsonObject.displaySystemId && hasPressureFrame) {
-      // 后台可同时发布其它 Display System 的帧，旧场景不能消费这些带身份的帧。
+    } else if (
+      jsonObject.displaySystemId
+      && hasPressureFrame
+      && jsonObject.displaySystemId !== this.state.matrixName
+      && jsonObject.sensorType !== this.state.matrixName
+    ) {
+      // canonical 帧都会携带身份；只拦截其它系统，当前旧场景同名帧继续进入原处理链。
       return;
     }
 
