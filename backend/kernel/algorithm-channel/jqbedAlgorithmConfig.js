@@ -1,8 +1,24 @@
+/**
+ * JQBed（智能床垫）算法参数的持久化与校验。
+ *
+ * 这里的字段名**不是本仓自己定的**：它们会被原样塞进 Python 算法的 `getData` 调用
+ * （`buildJqbedGetDataArgs` 把 `values` 当 `config` 传过去，见 jqbedAlgorithmProtocol），
+ * Python 侧按同名键取值。所以**往这里加字段之前必须先确认 Python 算法认识它**，
+ * 否则参数会被静默忽略 —— 界面上滑块动了，算法行为不变，且没有任何报错。
+ *
+ * 全部值都是 `number`（连开关都是 1.0/0.0、区域都是浮点对），也是为了对齐 Python 侧
+ * 的类型期待，不要为了「好看」在这里改成布尔。
+ */
 const fs = require('node:fs');
 const path = require('node:path');
 
+// 配置文件格式版本。改这个数字意味着旧配置文件要走迁移分支（见 load），
+// 而不是被当成不兼容直接丢回默认值。
 const JQBED_ALGORITHM_CONFIG_VERSION = 2;
 
+// 出厂默认值。它同时是**唯一一份「完整」的参数集合** —— 因为
+// normalizeJqbedAlgorithmValues 要求 18 个键全部到齐，v1 配置的迁移和 reset() 都靠它补齐。
+// 冻结（含内层数组）是为了防止某个调用方顺手改了默认值，让后续 reset 拿到被污染的基线。
 const DEFAULT_JQBED_ALGORITHM_VALUES = Object.freeze({
   threshold_factor: 0.0,
   continuous_on_bed_duration_minutes: 0.0,
@@ -24,6 +40,17 @@ const DEFAULT_JQBED_ALGORITHM_VALUES = Object.freeze({
   breath_th: 0.0,
 });
 
+// 每个字段的校验类型。键集合必须与 DEFAULT_JQBED_ALGORITHM_VALUES **完全一致** ——
+// normalizeJqbedAlgorithmValues 是按这张表遍历的：漏一个键就等于那个参数永远不会被保存，
+// 多一个键就等于默认值补不上它而每次校验都报 missing。
+//
+// kind 的含义：
+//   number         非负有限数
+//   integer        非负整数
+//   switch         只能是 0 或 1
+//   pair           两元非负数组，每个 ≤ 32（矩阵是 32×32，区域坐标不可能超出）
+//   sittingPair    同 pair，额外允许 [255, 255] 这一个「关闭该功能」的哨兵值
+//   sensitivityMode 0..3 的枚举
 const FIELD_RULES = Object.freeze({
   threshold_factor: { kind: 'number' },
   continuous_on_bed_duration_minutes: { kind: 'number' },
@@ -45,7 +72,20 @@ const FIELD_RULES = Object.freeze({
   breath_th: { kind: 'number' },
 });
 
+/**
+ * 参数校验失败。
+ *
+ * `errors` 是一张 `{字段名: 失败原因}` 的表（原因取值见 FIELD_RULES 注释以及
+ * `'unknown'`/`'missing'`），前端靠它高亮具体哪个输入框填错了。所以校验是
+ * **收集全部错误再抛**而不是遇错即抛 —— 让用户一次改完，而不是保存 18 次。
+ *
+ * 协议层（jqbedAlgorithmProtocol）会 `instanceof` 判断这个类型来区分「用户填错了」和
+ * 「后端出问题了」，两者回给前端的文案不同。所以**别把它换成普通 Error**。
+ */
 class JqbedAlgorithmConfigValidationError extends Error {
+  /**
+   * @param {Record<string, string>} errors 字段名 → 失败原因。
+   */
   constructor(errors) {
     super('Invalid jqbed algorithm configuration');
     this.name = 'JqbedAlgorithmConfigValidationError';
@@ -53,6 +93,22 @@ class JqbedAlgorithmConfigValidationError extends Error {
   }
 }
 
+/**
+ * 解析单个非负数，**不抛错**，用 `{value}` / `{error}` 两种形状回报结果。
+ *
+ * 返回而不抛，是因为调用方要把所有字段的失败原因收集成一张表（见
+ * JqbedAlgorithmConfigValidationError），抛错就只能拿到第一个。
+ *
+ * 接受数字**也接受非空数字字符串**：这些值来自前端输入框，`"0.35"` 是常态。但空串
+ * （含纯空白）判失败而不是当 0 —— 用户清空了输入框是「没填」，不是「填了 0」，
+ * 静默当 0 会让阈值意外归零。
+ *
+ * 非负是这批参数的物理性质（时长、阈值、点数、面积都不可能为负），不是随手加的约束。
+ *
+ * @param {*} value 原始值。
+ * @returns {{value: number}|{error: string}} 成功时带归一后的数字，失败时带原因
+ *          （`'number'` 类型不对 / `'finite'` 是 NaN 或 Infinity / `'nonnegative'` 是负数）。
+ */
 function parseNonnegativeNumber(value) {
   if (typeof value !== 'number' && (typeof value !== 'string' || value.trim() === '')) {
     return { error: 'number' };
@@ -63,6 +119,23 @@ function parseNonnegativeNumber(value) {
   return { value: number };
 }
 
+/**
+ * 校验一个两元区域参数。
+ *
+ * 长度必须**正好是 2**（不是「至少 2」）：多余元素说明前端传错了结构，静默截断会让
+ * 用户以为第三个值生效了。
+ *
+ * 上限 32 来自矩阵尺寸（jqbed 是 32×32），区域坐标超出就一定是错的。这个数字写死在
+ * 这里是个已知的耦合点 —— 换矩阵尺寸的传感器要一起改。
+ *
+ * `sittingPair` 那一支是唯一的例外：`[255, 255]` 是「关闭坐起报警区域」的哨兵值，
+ * 会绕过 32 的上限。**必须两个都是 255**，只有一个是 255 判 `'sentinel'` 错误 ——
+ * 因为 Python 侧是按「整对是不是哨兵」判断的，混着写会被当成一个越界的真实区域。
+ *
+ * @param {*} value 原始值，期望是两元数组。
+ * @param {string} kind FIELD_RULES 里的 kind，只有 `'sittingPair'` 会启用哨兵分支。
+ * @returns {{value: number[]}|{error: string}} 成功时带归一后的两元数组，失败时带原因。
+ */
 function normalizePair(value, kind) {
   if (!Array.isArray(value) || value.length !== 2) return { error: 'pair' };
   const normalized = value.map(parseNonnegativeNumber);
@@ -77,6 +150,26 @@ function normalizePair(value, kind) {
   return { value: pair };
 }
 
+/**
+ * 校验并归一整套算法参数，**全有或全无**。
+ *
+ * 两条严格规则，都是刻意的：
+ * - **未知字段报 `'unknown'`**（而不是忽略）。参数最终会进 Python 算法，多带一个字段
+ *   通常意味着前后端版本不一致；忽略会让用户以为新参数已生效。
+ * - **缺字段报 `'missing'`**（而不是补默认值）。保存必须是一次完整覆盖，否则「用户只
+ *   改了一个滑块」和「前端漏传了一半字段」在这一层无法区分，后者会把没传的参数悄悄
+ *   重置成默认值。前端因此必须每次都发全 18 个字段。
+ *   （v1 旧配置文件的补默认值发生在 `load` 里，那是明确的迁移语义，与这里不冲突。）
+ *
+ * 所有错误收集完再一次性抛（见 JqbedAlgorithmConfigValidationError）。
+ *
+ * 非对象输入兜成 `{}` 而不是抛错：这样 null/数组/字符串都会走进「18 个字段全 missing」
+ * 的路径，前端拿到的错误表形状一致，不用为「整个对象都不对」写单独分支。
+ *
+ * @param {*} values 待校验的参数对象。
+ * @returns {Record<string, number|number[]>} 归一后的参数（新对象，键序按 FIELD_RULES）。
+ * @throws {JqbedAlgorithmConfigValidationError} 任一字段不合法。
+ */
 function normalizeJqbedAlgorithmValues(values) {
   const errors = Object.create(null);
   const source = values && typeof values === 'object' && !Array.isArray(values) ? values : {};
@@ -118,6 +211,18 @@ function normalizeJqbedAlgorithmValues(values) {
   return normalized;
 }
 
+/**
+ * 深拷贝一份配置信封。
+ *
+ * 用 `normalizeJqbedAlgorithmValues` 来做拷贝而不是 `structuredClone`/展开，是一举两得：
+ * - **真深拷贝**。`values` 里有几个两元数组，浅拷贝会让调用方通过 `snapshot.values.sitting_area[0] = x`
+ *   改到 store 内部的状态（现象是「没点保存但算法行为变了，重启又变回来」）。
+ * - **顺带复检**。内部快照按理永远是合法的（只在 normalize 成功后才赋值），所以这里
+ *   不会抛；真抛了就说明有代码绕过 save 直接改了 `snapshot`，早炸比带着脏数据跑好。
+ *
+ * @param {{version: number, values: object, savedAt: string|null}} envelope 源信封。
+ * @returns {{version: number, values: object, savedAt: string|null}} 独立的新信封。
+ */
 function cloneEnvelope(envelope) {
   return {
     version: envelope.version,
@@ -126,6 +231,16 @@ function cloneEnvelope(envelope) {
   };
 }
 
+/**
+ * 造一份出厂默认信封。
+ *
+ * `savedAt: null` 是「**从未保存过**」的标记，前端靠它区分「用户配置过并存下来的值」和
+ * 「还在用出厂值」。注意这个 null 不会被写进文件：`reset()` 走的是 `save()`，会打上
+ * 真实时间戳；而 `load` 读文件时要求 `savedAt` 必须是字符串，null 的信封读不回来。
+ * 所以 null 只存在于内存中「没有配置文件」的那一刻。
+ *
+ * @returns {{version: number, values: object, savedAt: null}} 默认信封（每次都是新对象）。
+ */
 function defaultEnvelope() {
   return {
     version: JQBED_ALGORITHM_CONFIG_VERSION,
@@ -134,6 +249,26 @@ function defaultEnvelope() {
   };
 }
 
+/**
+ * 原子写配置文件：**先写临时文件，再 rename 覆盖**。
+ *
+ * 不直接 `writeFileSync(filePath)` 是因为断电/进程被杀会留下一个被截断的 JSON，
+ * 下次启动 `load` 解析失败就静默回落默认值 —— 用户的全套参数无声丢失。`rename` 在同
+ * 一文件系统上是原子的，配置文件要么是旧的完整版要么是新的完整版。
+ *
+ * 临时文件名带 pid 和时间戳：同时跑两个实例（开发时常见）不会互相踩掉对方的临时文件。
+ *
+ * `catch` 里清理临时文件的失败被吞掉，然后**原样抛出原始错误** —— 调用方要知道的是
+ * 「为什么没写成功」（磁盘满、权限），而不是「临时文件删不掉」。
+ *
+ * `fsImpl` 可注入是为了测试能用内存 fs，不用真落盘。
+ *
+ * @param {string} filePath 目标文件路径。
+ * @param {object} envelope 要写入的信封。
+ * @param {object} fsImpl fs 实现（需要 mkdirSync/writeFileSync/renameSync/unlinkSync）。
+ * @returns {void}
+ * @throws {Error} 写入或改名失败时原样抛出。
+ */
 function persistEnvelope(filePath, envelope, fsImpl) {
   fsImpl.mkdirSync(path.dirname(filePath), { recursive: true });
   const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
@@ -146,15 +281,56 @@ function persistEnvelope(filePath, envelope, fsImpl) {
   }
 }
 
+/**
+ * 创建 JQBed 算法参数存储（单实例，server.js 装配期建一个）。
+ *
+ * 「store」在这里的含义是「内存快照 + 一个 JSON 文件」，不涉及数据库。参数写在
+ * `runtimeWritableRoot` 下（见 server.js 的 `jqbed-algorithm-config.json`），
+ * 属于**可写运行态**而不是随包分发的只读资源 —— 打包后用户改的参数要能存下来。
+ *
+ * @param {object} options 依赖。
+ * @param {string} options.filePath 配置文件路径。
+ * @param {object} [options.fsImpl] fs 实现，测试可注入。
+ * @param {Function} [options.now] 取当前时间，测试可注入以固定 savedAt。
+ * @param {object} [options.logger] 日志器；只在回落默认值时用到。
+ * @returns {{load: Function, getSnapshot: Function, save: Function, reset: Function}} store。
+ */
 function createJqbedAlgorithmConfigStore({ filePath, fsImpl = fs, now = () => new Date(), logger } = {}) {
   let snapshot = defaultEnvelope();
 
+  /**
+   * 配置文件不可用时回落到出厂默认值。
+   *
+   * **只记 warn，不抛。** 参数文件坏了不该让整个后端起不来 —— 智能床垫的算法带着默认
+   * 参数仍然能跑（精度差一点），而抛错会让用户连界面都看不到、更没法重新配一遍。
+   * 代价是「参数被悄悄重置」只在日志里有痕迹，排查时要去看这条 warn。
+   *
+   * @param {Error} error 触发回落的错误。
+   * @returns {object} 默认信封的副本。
+   */
   function fallBackToDefaults(error) {
     logger?.warn?.(`Unable to load jqbed algorithm configuration: ${error.message}`);
     snapshot = defaultEnvelope();
     return cloneEnvelope(snapshot);
   }
 
+  /**
+   * 从磁盘读入配置，**任何异常都回落默认值**（不抛）。
+   *
+   * 文件不存在是正常情况（首次运行），直接用默认值且不记 warn —— 记了会让每次全新安装
+   * 的日志都带一条像故障的信息。
+   *
+   * 三条「不兼容」判据（不认识的 version、非字符串 savedAt、整体为空）都走 catch 回落。
+   * 判 `savedAt` 类型是在把「手改坏了的文件」挡在外面：这个字段是 ISO 字符串，
+   * 它不对通常说明整个文件都不能信。
+   *
+   * **v1 → v2 迁移**：v1 的信封字段更少，这里按 v2 的键遍历，v1 里有的沿用、没有的
+   * 从默认值补，然后**统一按 v2 写回内存快照**（`version` 直接标成 2）。磁盘上的文件
+   * 此时还是 v1，要等用户下一次保存才升级 —— 刻意的，读一次配置不该产生一次写盘。
+   * 迁移只补键、不改已有值，所以老用户的调参结果不会因为升级而变。
+   *
+   * @returns {object} 当前生效的信封副本。
+   */
   function load() {
     if (!fsImpl.existsSync(filePath)) {
       snapshot = defaultEnvelope();
@@ -186,10 +362,37 @@ function createJqbedAlgorithmConfigStore({ filePath, fsImpl = fs, now = () => ne
     }
   }
 
+  /**
+   * 读当前配置。
+   *
+   * 返回**副本**而不是内部引用：这个方法在采集期被高频调用（petCareRuntimeService 每
+   * 125ms 一轮，每次把快照塞进 Python 调用参数），如果返回引用，下游任何一次就地改动
+   * 都会污染 store。拷贝的代价是 18 个字段的一次 normalize，相对 Python 调用可忽略。
+   *
+   * @returns {object} 当前信封的副本。
+   */
   function getSnapshot() {
     return cloneEnvelope(snapshot);
   }
 
+  /**
+   * 保存一整套参数：校验 → 落盘 → 更新内存快照。
+   *
+   * **顺序是关键：先 `persistEnvelope` 成功，才改 `snapshot`。** 磁盘写失败时内存里仍是
+   * 上一份可用配置，正在跑的算法继续用它 —— 而不是用一份重启后就消失的配置（那会让
+   * 「保存失败」的现象延迟到下次开机才显现）。
+   *
+   * 校验在最前面，所以非法参数既不落盘也不改内存，抛
+   * JqbedAlgorithmConfigValidationError 给协议层转成字段级错误表。
+   *
+   * `savedAt` 用 ISO 字符串（不是时间戳数字），因为它要直接显示给用户看，也要能被
+   * `load` 的类型检查认出来。
+   *
+   * @param {object} values 完整的 18 个参数。
+   * @returns {object} 保存后的信封副本。
+   * @throws {JqbedAlgorithmConfigValidationError} 参数不合法。
+   * @throws {Error} 落盘失败（磁盘满、权限等）。
+   */
   function save(values) {
     const next = {
       version: JQBED_ALGORITHM_CONFIG_VERSION,
@@ -201,6 +404,18 @@ function createJqbedAlgorithmConfigStore({ filePath, fsImpl = fs, now = () => ne
     return cloneEnvelope(snapshot);
   }
 
+  /**
+   * 恢复出厂参数。
+   *
+   * 走 `save` 而不是 `snapshot = defaultEnvelope()`，所以**重置是持久的**：它会落盘并
+   * 打上新的 `savedAt`。这是有意的 —— 用户点「恢复默认」的预期是永久生效，而不是重启
+   * 后又回到之前调坏的那套参数。
+   *
+   * 副作用：重置之后 `savedAt` 不再是 null，所以前端无法再靠它判断「用户从没配过」。
+   *
+   * @returns {object} 重置后的信封副本。
+   * @throws {Error} 落盘失败。
+   */
   function reset() {
     return save(DEFAULT_JQBED_ALGORITHM_VALUES);
   }

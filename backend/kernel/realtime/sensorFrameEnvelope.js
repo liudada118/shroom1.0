@@ -1,6 +1,44 @@
+/**
+ * WebSocket 传感器帧信封的唯一构造处。
+ *
+ * **这个文件定义了后端与所有前端之间唯一的实时数据线格式。** 它位于「存储之后、发送之前」
+ * 这一层，所以：改这里不影响串口协议、线序表、算法和历史数据格式；反过来，
+ * 前端拿到的每个字段都只能从这里来。
+ *
+ * 设计上最重要的一条是**白名单投影**：无论内部传进来的是 legacy 帧（顶层一堆
+ * `sitData`/`newArr147`/`temperatureK` 之类的历史字段）还是已经成形的 `sensor.frame`，
+ * 输出都是重新拼出来的固定形状。这样旧字段无法夹带上线 —— 否则二开者会发现自己依赖了
+ * 一个下一版就消失的字段，而后端根本不知道它被用了。
+ *
+ * 另一条是**未知阶段返回 null 而不是猜**：`stages.decoded/normalized/calibrated` 缺就是
+ * null，绝不把「算完的结果」冒充成原始数据。二开者拿 raw 数据去做自己的算法时，
+ * 拿到一份已经被处理过的数据是最难发现的错误。
+ */
+
+// 线格式的类型标签与版本号。**当前只有 v1 一个版本**，且发送端与接收端都硬比对这两个值
+// （见下面 `data.type === ... && data.schemaVersion === ...` 那一支），所以升版必须两边同时改。
 const SENSOR_FRAME_TYPE = 'sensor.frame';
 const SENSOR_FRAME_SCHEMA_VERSION = 1;
 
+/**
+ * 把入参归一成一个帧对象：已经是对象就直接用，是 JSON 字符串/Buffer 就解析。
+ *
+ * 调用方形态不一是历史原因 —— 采集链路里有的地方传对象，有的地方早就
+ * `JSON.stringify` 过了（旧 WebSocket 广播函数收的就是字符串）。在这里统一比让每个
+ * 调用点各自判断要少出错。
+ *
+ * `!Buffer.isBuffer` 那一条是必需的：Buffer 的 `typeof` 也是 `'object'`，不排除掉就会
+ * 把一个二进制帧当成帧对象往下传，然后所有字段都读成 undefined 而**不报错**，
+ * 现象是「帧被静默丢弃」。排除后它落到 `String(payload)`（Buffer 默认按 utf8 转），
+ * 正是想要的。
+ *
+ * 解析分支里额外挡掉数组：顶层是数组的 JSON 不可能是帧。
+ * （⚠️ 不对称：直接传进来的**数组对象**会走上面那一支被放过去，不过它后面必然因为
+ * 没有 `outputChannel` 而返回 null，所以现象一致。）
+ *
+ * @param {object|string|Buffer} payload 原始帧数据。
+ * @returns {object|null} 帧对象；无法解析或不是对象时 null。
+ */
 function parseFramePayload(payload) {
   if (payload && typeof payload === 'object' && !Buffer.isBuffer(payload)) {
     return payload;
@@ -13,6 +51,19 @@ function parseFramePayload(payload) {
   }
 }
 
+/**
+ * 把一个字段转成数字数组，转不了返回 null。
+ *
+ * 同样接受 JSON 字符串：历史字段里有一批是以字符串形式存的（尤其从数据库回放时）。
+ *
+ * ⚠️ `Number(item)` **不过滤 NaN**：非数字元素会变成 NaN，而 `JSON.stringify` 把 NaN
+ * 写成 `null`，所以前端会在数组里看到 null 而不是报错。这是刻意的 —— 逐元素校验要在
+ * 每帧几千个点上跑，代价不划算，而且「某几个点坏了」比「整帧丢掉」对展示更友好。
+ * 二开者自己写算法时要预期数组里可能有 null。
+ *
+ * @param {*} value 原始字段值（数组或数组的 JSON 字符串）。
+ * @returns {number[]|null} 数字数组；不是数组时 null。
+ */
 function toNumericArray(value) {
   let candidate = value;
   if (typeof candidate === 'string') {
@@ -26,6 +77,20 @@ function toNumericArray(value) {
   return candidate.map((item) => Number(item));
 }
 
+/**
+ * 依次尝试若干候选字段，取第一个能转成数字数组的。
+ *
+ * **参数顺序就是优先级**，这是整个 legacy 映射的核心机制：同一份数据在不同型号里叫
+ * `data` / `sitData` / `pressureData` / `value`，谁在前面谁赢。所以调整下面
+ * `firstArray(...)` 各处的参数顺序会**改变前端看到的数据**，不是无害的整理。
+ *
+ * ⚠️ 空数组 `[]` 也算「转成功」并直接胜出，后面的候选不会再试。真出现这种情况说明上游
+ * 给了个空帧，此时输出一个空的 `value` 比悄悄用另一个字段的数据更诚实 —— 后者会让
+ * 「上游坏了」表现成「数据看着对但对不上」。
+ *
+ * @param {...*} values 候选字段值，按优先级排列。
+ * @returns {number[]|null} 第一个成功转换的数组；全部失败时 null。
+ */
 function firstArray(...values) {
   for (const value of values) {
     const array = toNumericArray(value);
@@ -34,6 +99,23 @@ function firstArray(...values) {
   return null;
 }
 
+/**
+ * 把一段标识符清洗成只含 `A-Za-z0-9._-` 的安全形式。
+ *
+ * 为什么要洗：`channelId` 的格式是 `displaySystemId:sensorId`，而前端的订阅是按这个字符串
+ * 精确匹配的（一个 WebSocket 端口 + 按 `displaySystemId:sensorId` 订阅）。二开者给展示系统
+ * 起名时可能用中文、空格甚至冒号 —— **一个冒号就会把 channelId 切成三段**，
+ * 让 `resolveSensorId` 解析出错误的 sensorId，订阅从此对不上。洗掉冒号就杜绝了这类问题。
+ *
+ * 连续非法字符压成一个 `-`（而不是逐字符替换）：避免「传感器 A」这种名字变成一串横线。
+ *
+ * 洗完为空时回落到 `fallback`（通常是 `'sensor'`/`'legacy'`）：宁可用一个通用名字，
+ * 也不要让 channelId 出现空段 —— 空段会让订阅字符串变成 `:sit` 这种前端匹配不上的形状。
+ *
+ * @param {*} value 原始标识片段。
+ * @param {string} fallback 清洗结果为空时的兜底值。
+ * @returns {string} 安全的标识片段。
+ */
 function normalizeIdentityPart(value, fallback) {
   const normalized = String(value || fallback || '')
     .trim()
@@ -41,6 +123,18 @@ function normalizeIdentityPart(value, fallback) {
   return normalized || fallback;
 }
 
+/**
+ * 给一个通道名找它在 legacy 帧里对应的数据字段名。
+ *
+ * 这四个字段名是老前端约定的（`sitData`/`backData`/`headData`/`sensorData`），
+ * 不是这里能改的 —— 数据库里存的历史帧也是这套字段，改名会让历史回放读不出数据。
+ *
+ * **默认回落到 `sitData`** 而不是返回 null：sit 是主压力通道，绝大多数型号只有它，
+ * 而且 `${channel}Data` 那条动态规则（见调用处）已经先试过一次了，这里是最后兜底。
+ *
+ * @param {string} channel 输出通道名。
+ * @returns {string} legacy 数据字段名。
+ */
 function getLegacyDataField(channel) {
   if (channel === 'back') return 'backData';
   if (channel === 'head') return 'headData';
@@ -48,6 +142,22 @@ function getLegacyDataField(channel) {
   return 'sitData';
 }
 
+/**
+ * 解析矩阵尺寸，顺便算出 `total`。
+ *
+ * 三个来源按优先级：`metadata.matrix`（manifest 路径）→ `matrix`（已成形帧）→
+ * 顶层 `matrixHeight`/`matrixWidth`（legacy 字段）。
+ *
+ * 校验是**正整数**而不是「有值就行」：前端拿这个尺寸去分配纹理/画网格，
+ * 一个 0 或小数会让渲染器要么画空白要么抛在 WebGL 里 —— 那时候错误现场离这里很远。
+ * 宁可返回 null（前端有「尺寸未知」的分支），也不要送一个坏尺寸出去。
+ *
+ * `total` 在这里算好而不是让前端乘：它被多个渲染器和曲线组件用到，
+ * 算一次比每处各算一次少一个出错点。
+ *
+ * @param {object} [data] 帧数据。
+ * @returns {{rows: number, cols: number, total: number}|null} 矩阵尺寸；不可用时 null。
+ */
 function extractMatrix(data = {}) {
   const source = data.metadata?.matrix || data.matrix || null;
   const rows = Number(source?.rows ?? data.matrixHeight);
@@ -58,11 +168,39 @@ function extractMatrix(data = {}) {
   return { rows, cols, total: rows * cols };
 }
 
+/**
+ * 去掉对象里所有 undefined/null 的键；**全空时返回 null 而不是 `{}`**。
+ *
+ * 返回 null 的那一条是关键：`status`/`temperature`/`protocol`/`history` 这四段都是
+ * **可选**的，前端按 `if (payload.status)` 判断「这个型号有没有这类信息」。返回 `{}` 会
+ * 让判断为真，前端于是去读里面的字段并全部拿到 undefined —— 现象是界面上多出一块空的
+ * 状态区。返回 null 让「没有」这件事在线格式上是显式的。
+ *
+ * 同时它也在压缩线格式：这些字段大多数型号都用不上，每帧带四个空对象在 20~125ms 的
+ * 帧率下是纯浪费。
+ *
+ * @param {Record<string, *>} value 待压缩的对象。
+ * @returns {object|null} 压缩后的新对象；没有任何有效键时 null。
+ */
 function compactObject(value) {
   const entries = Object.entries(value).filter(([, item]) => item !== undefined && item !== null);
   return entries.length ? Object.fromEntries(entries) : null;
 }
 
+/**
+ * 从 `channelId` 里切出 sensorId。
+ *
+ * `channelId` 的格式是 `displaySystemId:sensorId`，所以取第一个冒号之后的全部。
+ * 用 `indexOf` 取**第一个**冒号（不是 `split(':')[1]`）是为了让 sensorId 里万一还有冒号也
+ * 能完整保留 —— 不过 `normalizeIdentityPart` 已经把冒号洗掉了，所以这只是防御。
+ *
+ * 没有冒号说明 channelId 不是这个格式（老数据或调用方直接给的），此时用 `fallback`
+ * （通常是通道名）并洗一遍。
+ *
+ * @param {string} channelId 形如 `displaySystemId:sensorId` 的通道标识。
+ * @param {string} fallback 无法从 channelId 切出时的兜底值。
+ * @returns {string} sensorId。
+ */
 function resolveSensorId(channelId, fallback) {
   const separatorIndex = String(channelId || '').indexOf(':');
   return separatorIndex >= 0
@@ -75,6 +213,31 @@ function resolveSensorId(channelId, fallback) {
  *
  * 该转换位于存储之后、网络发送之前，因此不改变串口协议、线序、算法或历史格式。
  * 未知的数据阶段明确返回 null，避免把旧处理结果伪装成 raw/normalized 数据。
+ *
+ * **函数分两支，出口形状完全相同：**
+ * 1. 入参已经是 `sensor.frame` v1（manifest 路径的产物）—— 仍然逐字段重投影一遍。
+ *    看着多余，但这是白名单生效的地方：调用方在成形帧上顺手挂的顶层字段会在这里被丢掉。
+ * 2. 入参是 legacy 帧 —— 按一长串候选字段名（见各处 `firstArray` 的参数顺序）
+ *    映射到五个 stage 与四个可选段。
+ *
+ * 两支共同的返回 null 条件：解析不出对象 / 没有通道标识 / 找不到任何数据数组。
+ * **null 表示「这一帧不发」**，调用方直接跳过，不要当错误处理 —— 采集期出现空帧是常态
+ * （串口刚打开、算法还没就绪）。
+ *
+ * `timestamp` 的优先级是「调用方显式传的 > 帧自带的 > `Date.now()`」：回放历史数据时
+ * 必须用帧里的原始时间，否则前端曲线的横轴会变成回放时刻。
+ *
+ * `sequence` 由调用方递增维护而不是本模块自己数：一个通道一个序号，
+ * 这里是无状态纯函数（无状态是它能被测试和被复用的前提）。
+ *
+ * @param {object} options 参数。
+ * @param {string} options.channel 通道名（legacy 路径用作 outputChannel 兜底）。
+ * @param {object|string|Buffer} options.payload 原始帧。
+ * @param {string} options.sensorType 当前传感器型号，帧里没带时用它。
+ * @param {string} [options.source='realtime'] 数据来源标记（realtime/playback 等）。
+ * @param {number} [options.sequence=0] 帧序号。
+ * @param {number} [options.timestamp] 显式时间戳，优先于帧内时间。
+ * @returns {object|null} `sensor.frame` v1 信封；这一帧不该发时 null。
  */
 function buildSensorFrameEnvelope({
   channel,

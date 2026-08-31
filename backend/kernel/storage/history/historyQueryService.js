@@ -199,6 +199,29 @@ function createLazyHistoryRows(dbRef, date, stats) {
   const lengthValue = Number(stats?.count || 0);
   const minId = Number(stats?.minId || 0);
 
+  /**
+   * 按下标取一行，带 LRU 缓存。
+   *
+   * **下标 → id 的换算是 `minId + index`，这依赖「同一天的 id 连续无空洞」。**
+   * 用 `id >= ?` + `LIMIT 1` 而不是 `id = ?` 就是为了容忍空洞（删过行、写入失败过）：
+   * 有空洞时会取到下一条存在的行，序列会略微错位但**不会返回 undefined 让回放中断**。
+   * 这是刻意选的降级方向 —— 回放画面轻微跳一帧，比整条曲线断掉好。
+   *
+   * 越界/无效下标返回 `undefined` 而不抛：数组语义就是这样，
+   * 调用方（回放推帧、曲线遍历）本来就在用 `if (row)` 判断。
+   *
+   * 缓存是 512 条的**近似 LRU**：满了就删 `keys().next().value`，也就是**最早插入**的那条
+   * （Map 保持插入顺序），而不是最久未访问的 —— 命中时没有把该键重新插到队尾。
+   * 严格 LRU 需要每次命中都 delete+set，对拖进度条这种「局部顺序访问」的模式收益很小，
+   * 所以没做。512 × 一帧的行大小是这个代理的内存上限。
+   *
+   * ⚠️ 每次未命中都是一次**同步**数据库查询（见 sqlite3-compat 的说明），
+   * 会阻塞事件循环。所以顺序遍历一个几十万行的懒加载序列会让后端卡住 ——
+   * 遍历全序列的场景（如算整段曲线）应该走 eager 路径或分批。
+   *
+   * @param {number} index 行下标。
+   * @returns {object|undefined} 历史行；越界或查不到时 undefined。
+   */
   const readByIndex = (index) => {
     if (!Number.isInteger(index) || index < 0 || index >= lengthValue || !minId) return undefined;
     if (cache.has(index)) return cache.get(index);
@@ -219,6 +242,28 @@ function createLazyHistoryRows(dbRef, date, stats) {
   };
 
   return new Proxy([], {
+    /**
+     * 把「读数组」翻译成「查数据库」。
+     *
+     * 代理的目标是一个**真空数组** `[]`，所以任何没被下面几条拦住的属性
+     * （`map`/`filter`/`slice`/`forEach`…）都会落到 `target[prop]`，也就是**空数组的方法**。
+     * ⚠️ 这是本代理最大的限制：`rows.map(...)` 不会报错，它会返回 `[]` ——
+     * 静默地把几十万帧当成零帧。调用方要么用下标循环、要么用 `for...of`
+     * （`Symbol.iterator` 有实现），**不能用数组高阶方法**。
+     * `historySessionService` 里那条「lazy 模式下曲线可能只覆盖一部分」的注记就是这个原因。
+     *
+     * 拦截的四类：
+     * - `length` —— 来自 COUNT，不是真数组长度（真数组是空的）。
+     * - 三个 `__` 前缀标记 —— 给调用方判断「这是懒加载的」以及从哪个库/哪天来的。
+     *   用属性而不是 `instanceof` 是因为代理伪装成数组，没有自己的原型可认。
+     * - `Symbol.iterator` —— 让 `for...of` 和展开可用。⚠️ 展开（`[...rows]`）会把整段
+     *   历史逐行查出来放进内存，正好抵消懒加载的意义，不要这么用。
+     * - 纯数字字符串下标 —— 正则 `^\d+$` 精确匹配，所以 `'1.5'`、`'-1'`、`'01'` 都不算
+     *   （`'01'` 会落到 target 返回 undefined）。这与真数组的下标语义一致。
+     *
+     * 只实现了 `get`，没有 `set`/`has`/`ownKeys`：历史数据是只读的，
+     * 写入会落到那个空数组上并被静默忽略。
+     */
     get(target, prop) {
       if (prop === 'length') return lengthValue;
       if (prop === '__lazyHistoryRows') return true;

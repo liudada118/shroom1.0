@@ -73,6 +73,27 @@ function registerSerialControlHandlers(router, deps) {
     return nowDate < endDate;
   }
 
+  /**
+   * 授权守卫：没有有效授权就抛错，中断当前命令。
+   *
+   * 与 `isAuthorizedRuntime()` 的分工是「判断」与「拦截」：判断用于分支（例如某些命令在
+   * 未授权时降级而不是失败），拦截用于绝大多数控制命令的入口。
+   *
+   * **抛错而不是返回 false**，是为了让调用方无法忘记检查。这类守卫如果返回布尔值，
+   * 漏写一个 `if` 就等于绕过授权，而且不会有任何征兆 —— 抛错是唯一「默认安全」的形状。
+   *
+   * `code` + `httpStatus` 两个字段是与命令层的约定（同 `serialPortOrchestrator` 里
+   * 那个 `INVALID_COMMAND`/400）：`controlCommandService.execute` 把归一阶段的抛错原样往上
+   * 传，HTTP 层读 `httpStatus` 回状态码，WebSocket 层把 `code` 放进 `command.ack`。
+   * **403 而不是 401**：授权文件的问题不是「没登录」，重发凭据也不会变好，
+   * 前端要靠这个区别决定是弹授权输入框还是提示「授权已过期」。
+   *
+   * ⚠️ 判据是 `nowDate < endDate`，而 `nowDate` 来自运行态（由授权模块用网络时间刷新），
+   * 不是每次现取系统时间。所以时钟/授权刷新失败时这里会沿用上一次的判断结果。
+   *
+   * @returns {void} 有授权时静默返回。
+   * @throws {Error} 未授权时抛出带 `code: 'LICENSE_REQUIRED'` 与 `httpStatus: 403` 的错误。
+   */
   function requireAuthorizedRuntime() {
     if (isAuthorizedRuntime()) return;
     const error = new Error('a valid license is required for this command');

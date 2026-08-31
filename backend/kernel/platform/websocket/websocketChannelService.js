@@ -12,10 +12,39 @@ const {
 const SHARED_WEBSOCKET_PORT = 19999;
 const LEGACY_DEFAULT_WEBSOCKET_CHANNEL = 'sit';
 
+/**
+ * 把待发送内容变成 WebSocket 能发的字符串。
+ *
+ * **已经是字符串就原样返回，这一步是必需的而不是优化**：再 `JSON.stringify` 一次会
+ * 把整个 JSON 文本当成一个字符串值编码（`{"a":1}` → `"{\"a\":1}"`），前端 `JSON.parse`
+ * 之后拿到的是一个字符串而不是对象，然后在读字段时静默得到 undefined。
+ *
+ * 之所以要容忍两种输入：本仓的发送方确实两种都有 —— 例如
+ * `historyAnalysisService.publishHistoryDiffFrames` 传的是 `JSON.stringify(...)` 的结果，
+ * 而同文件另外三处传的是对象（那里也标注了这是历史不一致）。统一在这一层吸收掉，
+ * 比去改所有调用方安全。
+ *
+ * @param {string|object} data 对象或已序列化的字符串。
+ * @returns {string} 可直接 `ws.send` 的字符串。
+ */
 function toPayload(data) {
   return typeof data === 'string' ? data : JSON.stringify(data);
 }
 
+/**
+ * 数某个 WebSocket Server 上的在线连接数。
+ *
+ * 两层可选链 + `|| 0` 是给三种「没有服务器」的情况兜底，它们都**不是错误**：
+ * 通道还没启动、该型号不使用这个通道、测试里传的是没有 `clients` 的假对象。
+ * 这个值只用于状态查询和诊断接口，「查不到」的正确答案是 0 而不是抛异常 ——
+ * 让一个状态接口因为某个通道没开就整体 500 是不可接受的。
+ *
+ * 注意 `clients` 是 `ws` 库在**没有** `clientTracking: false` 时才维护的 Set。
+ * 如果哪天为了省内存关掉了 clientTracking，这里会静默恒返回 0。
+ *
+ * @param {import('ws').Server|null|undefined} wsServer WebSocket Server 实例。
+ * @returns {number} 在线连接数；拿不到时为 0。
+ */
 function getClientCount(wsServer) {
   return wsServer?.clients?.size || 0;
 }

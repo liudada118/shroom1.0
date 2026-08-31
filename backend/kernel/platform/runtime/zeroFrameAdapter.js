@@ -1,7 +1,29 @@
+/**
+ * 拷一份帧并把每项转成数字；非数组返回 **null**。
+ *
+ * 返回 null 而不是 `[]`（与零点仓库的 cloneFrame 相反）：本模块靠「null = 这个字段不
+ * 存在」和「空数组 = 字段存在但没数据」的区别来挑候选字段，见 firstFrame。
+ *
+ * `Number(item)` 是必须的：legacy payload 里同一个字段有时是数字数组、有时是字符串
+ * 数组（不同年代的串口处理器行为不同）。framesEqual 用严格 `===` 比较，不统一成数字的
+ * 话 `"12" !== 12`，同一份数据会被判成不同阶段，扣零就落不到字段上。
+ *
+ * @param {*} value 待处理的值。
+ * @returns {number[]|null} 数字数组；非数组返回 null。
+ */
 function cloneNumericFrame(value) {
   return Array.isArray(value) ? value.map((item) => Number(item)) : null;
 }
 
+/**
+ * 按优先级从多个候选字段里挑出第一份**非空**的帧。
+ *
+ * 候选顺序即优先级，各调用点的顺序都是按「越新越靠前」排的（显式传入的 sourceStages
+ * 优先于任何字段名猜测）。
+ *
+ * @param {...*} candidates 候选值，按优先级排列。
+ * @returns {number[]|null} 第一份非空帧；都为空时 null。
+ */
 function firstFrame(...candidates) {
   for (const candidate of candidates) {
     const frame = cloneNumericFrame(candidate);
@@ -13,6 +35,23 @@ function firstFrame(...candidates) {
   return null;
 }
 
+/**
+ * 求 legacy payload 里承载数据的字段名。
+ *
+ * ⚠️ **不要和 display system 侧的 `getChannelDataField` 混用**（在
+ * `extension-host/runtime/displaySystemFrameProcessorFactory.js`）。两者名字像、
+ * back/head 两条也一样，但有两处关键差别：
+ * - 这里多认一个 `sensor` → `sensorData`。
+ * - 这里的兜底是**一律 `sitData`**，而那边未知通道会拼 `${outputChannel}Data`。
+ *
+ * 兜底不同是刻意的：那边是新链路，动态字段名能让多传感器各占一个字段；这里是兼容
+ * 边界，legacy 前端只认那三四个固定字段名，拼一个它不认识的名字等于数据丢失。动态
+ * 字段名在 `prepare` 里另算一份（`dynamicDataField`）并与本函数的结果**同时**参与
+ * 候选，两者都覆盖，这样新旧消费者都能拿到扣零后的数据。
+ *
+ * @param {string} outputChannel 输出通道名。
+ * @returns {string} legacy 字段名。
+ */
 function getLegacyDataField(outputChannel) {
   if (outputChannel === 'back') return 'backData';
   if (outputChannel === 'head') return 'headData';
@@ -20,6 +59,25 @@ function getLegacyDataField(outputChannel) {
   return 'sitData';
 }
 
+/**
+ * 把 target 上「内容等于 source」的那些字段替换成 replacement（原地改 target）。
+ *
+ * 这是兼容层扣零的落地方式。legacy payload 里同一份数据常同时挂在好几个字段上
+ * （`data` / `sitData` / `pressureData` / `value` 都指向同一个数组），扣零后必须**全部**
+ * 换掉 —— 只换一个的话，不同前端组件读不同字段，会一半扣零一半没扣，画面对不上。
+ *
+ * 判等用**内容**而不是长度（行内注释已说明原因）；也不用引用相等，因为 firstFrame
+ * 已经把候选拷贝并转成数字了，引用早就不同。
+ *
+ * `!source || !replacement` 时直接返回：没选中这一阶段，或扣零没产出结果，就什么都
+ * 不改，保持原帧。
+ *
+ * @param {object} target 待修改的帧对象（**原地修改**）。
+ * @param {string[]} fields 候选字段名。
+ * @param {number[]|null} source 被选中的原始阶段数据。
+ * @param {number[]|null} replacement 扣零后的数据。
+ * @returns {void}
+ */
 function replaceMatchingFrames(target, fields, source, replacement) {
   if (!source || !replacement) return;
   fields.forEach((field) => {
@@ -32,6 +90,21 @@ function replaceMatchingFrames(target, fields, source, replacement) {
   });
 }
 
+/**
+ * 逐点判断两帧是否完全相同。
+ *
+ * 本模块用它回答的问题不是「数值是否接近」，而是「**这两个字段是不是同一份数据的
+ * 别名**」。所以用严格 `===`、不设容差 —— 容差会让两块尺寸相同、数值恰好接近的不同
+ * 传感器数据被判成同一阶段，然后被互相覆盖。
+ *
+ * 两边都必须是数组：null（字段不存在）与任何东西都不相等，于是调用点不需要判空。
+ *
+ * 定义在 replaceMatchingFrames 之后却被它调用，靠函数声明提升。
+ *
+ * @param {*} left 帧 A。
+ * @param {*} right 帧 B。
+ * @returns {boolean} 是否逐点相等。
+ */
 function framesEqual(left, right) {
   return Array.isArray(left)
     && Array.isArray(right)
@@ -39,6 +112,22 @@ function framesEqual(left, right) {
     && left.every((value, index) => value === right[index]);
 }
 
+/**
+ * 取「入库时该扣掉的那份基准」。
+ *
+ * 存历史数据的一方需要知道**写进库里的数值是哪一阶段的**，才能记录对应的零点基准 ——
+ * 否则回放时用错基准，回放画面和当时的实时画面就不一样。`prepare` 已经把判断结果放在
+ * 帧的 `zeroStorageStage` 上（它是按帧**内容**判的，不是按字段名猜的，见 prepare 里
+ * rawPressureData 那一段），这里只是照着取。
+ *
+ * 取不到就退到另一阶段：帧上没标记、或标记的那一阶段还没归零（基准为空）时，另一阶段
+ * 的基准比「没有基准」更接近事实。两个阶段都空就返回空数组，表示这一路没归过零。
+ *
+ * @param {object} zeroStateStore 零点仓库。
+ * @param {string} channelId canonical channelId。
+ * @param {{zeroStorageStage?: string}|null} [frame] 帧（读它的 zeroStorageStage 标记）。
+ * @returns {number[]} 基准数组；未归零为 []。
+ */
 function getZeroBaselineForStorage(zeroStateStore, channelId, frame = null) {
   const preferredStage = frame?.zeroStorageStage === 'processed'
     ? 'processed'
@@ -66,6 +155,38 @@ function createZeroFrameAdapter({
     throw new Error('resolveChannelIdentity is required');
   }
 
+  /**
+   * 给一帧 legacy payload 补上身份、记录零点 source、并把扣零结果写回各个别名字段。
+   *
+   * **两条提前退出决定了这个适配器的边界，改动前务必看清：**
+   * 1. 帧带了 `channelId` 且（`runtimeSource === 'display-system'` 或
+   *    `zeroApplied === true`）→ 原样返回。新链路的帧处理器已经自己记过 source、扣过零，
+   *    在这里再扣一次就是**双重扣零**（现象：归零后画面整体偏低甚至大片归零）。这也是
+   *    display system 侧刻意不写 `mapped` 阶段的同一个理由。
+   * 2. 解析不出 channelId → 原样返回。零点状态**只以完整 channelId 为键**，宁可不扣零，
+   *    也不能按旧串口角色猜一个键（猜错会让两个展示系统共享零点）。
+   *
+   * 四组候选字段名是历史包袱的清单，每组内部按「越新越靠前」排：
+   * - decoded：`rawData` / `realArr` / `rawSitData` / `rawPressureData`
+   * - normalized：`normalizedData`
+   * - processed：`data` / `${通道}Data` / legacy 固定字段 / `pressureData` / `value`
+   * - mapped：`mappedData` / `mappedArr195` / `newArr147` / `newArr`
+   *
+   * `options.sourceStages` 让调用方**显式**告知各阶段数据，优先于所有字段名猜测 ——
+   * 新增串口处理器时应该用它，而不是往上面的候选清单里再加一个名字。
+   *
+   * `rawPressureData` 单独处理是因为它在不同 legacy 分片里语义不同（有的放 processed、
+   * 有的放 decoded），所以按**内容**比对来判它属于哪一阶段，并把判定结果作为
+   * `zeroStorageStage` 传给入库方（见 getZeroBaselineForStorage）。
+   *
+   * `runtimeSource: 'legacy'` 会被打在输出帧上，这是下游区分两条链路的依据，也是本函数
+   * 第 1 条提前退出所依赖的标记。
+   *
+   * @param {string} channel 旧的通道/角色名（交给注入的 resolveChannelIdentity 解析）。
+   * @param {string|object} input 帧对象，或它的 JSON 字符串。
+   * @param {{sourceStages?: object}} [options] 显式阶段数据。
+   * @returns {{frame: object, zeroedStages: object}} 补全后的帧与四阶段扣零结果。
+   */
   function prepare(channel, input, options = {}) {
     const source = typeof input === 'string' ? JSON.parse(input) : input;
     if (!source || typeof source !== 'object' || Array.isArray(source)) {
@@ -188,6 +309,16 @@ function createZeroFrameAdapter({
     };
   }
 
+  /**
+   * prepare 的「只要帧」入口，给不关心四阶段扣零明细的调用方用。
+   *
+   * 发布链路走这个（它只需要发出去的那一帧）；需要按阶段分别落库或诊断的走 prepare。
+   *
+   * @param {string} channel 旧的通道/角色名。
+   * @param {string|object} input 帧对象或其 JSON 字符串。
+   * @param {{sourceStages?: object}} [options] 显式阶段数据。
+   * @returns {object} 补全后的帧。
+   */
   function process(channel, input, options = {}) {
     return prepare(channel, input, options).frame;
   }

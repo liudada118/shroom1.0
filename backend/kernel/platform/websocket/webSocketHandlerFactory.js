@@ -20,6 +20,35 @@ function sendPrivateSystemEvent(ws, data, logger) {
   }
 }
 
+/**
+ * 给一条命令回执（`command.ack`），点对点发回下命令的那个连接。
+ *
+ * **没有 `requestId` 或 `type` 就直接不发。** 这是新旧协议的分界：旧字段命令
+ * （`{variety: 1}`、`{sitIndex: [...]}` 这类）本来就没有 requestId，也没有能对上号的
+ * 回执概念，老前端不等这条消息。发一条无法关联的回执只会让老前端多收一条不认识的消息。
+ *
+ * 走 `sendPrivateSystemEvent` 而不是 `publishSystemEvent`：回执属于**某一个请求**，
+ * 广播出去会让其他客户端收到别人的命令结果 —— 既是噪音，也可能泄露别人在操作什么。
+ *
+ * 错误取值分两处，**顺序有意义**：先看整体 `result.error`（归一/校验层面的失败），
+ * 再看 `result.results` 里第一个带 error 的条目（某个 handler 自己失败了）。
+ * 一条命令可能被多个 handler 接，只要有一个失败就整体回失败 —— 这是保守方向，
+ * 前端看到 ok 就当作「全都成功了」。
+ *
+ * `ok` 要求 **`handled === true`**，所以「没有任何 handler 接这条命令」会回 rejected
+ * 而不是 accepted。这一条很重要：否则前端发一个拼错的命令名会得到成功回执，
+ * 然后一直等一个永远不会来的状态变化。
+ *
+ * 成功时才带 `data`（`handlers` 名单 + 各自结果），失败时传 `undefined` ——
+ * `createCommandAck` 对 undefined 的 data 是**整个字段省略**而不是发 `data: null`，
+ * 所以前端可以用 `'data' in ack` 判断。
+ *
+ * @param {WebSocket} ws 下命令的连接。
+ * @param {object} message 原始命令消息，提供 requestId/type。
+ * @param {object} result `controlCommandService.executeWs` 的执行摘要。
+ * @param {object} logger 日志对象。
+ * @returns {void}
+ */
 function sendCommandResultAck(ws, message, result, logger) {
   if (!message?.requestId || !message?.type) return;
   const error = result?.error || result?.results?.find((item) => item.error);
@@ -61,6 +90,41 @@ function resolveCommandScope(wsSubscriptions, client) {
   return channels.length === 1 && channels[0] === 'back' ? 'back' : 'main';
 }
 
+/**
+ * 造一个「把 WebSocket 监听器挂上去」的函数。
+ *
+ * 分两步（工厂 + 返回的函数）而不是一步做完，是因为**挂监听器的时机比构造时机晚**：
+ * server.js 构造上下文时数据库、串口、授权都还没就绪，而 `connection` 回调一旦挂上就
+ * 可能立刻有客户端连进来。分开之后 server.js 可以先把上下文拼好，等一切 ready 再调。
+ *
+ * ⚠️ **只有稳定依赖可以解构，运行态字段必须写 `ctx.xxx` 现读。**
+ * 下面那一大段解构（`logger`、`server`、各种纯函数……）取的都是不会变的东西。
+ * 而 `ctx.serialport`、`ctx.file`、`ctx.endDate`、`ctx.nowDate`、`ctx.selectFlag`
+ * 在代码里**一律直接写 `ctx.` 前缀**，不在解构列表里 —— 因为 `ctx` 上这些字段是
+ * `legacyWebSocketContext` 用 getter 定义的，解构等于在挂载那一刻拍快照，
+ * 之后串口列表变了、型号切了，连进来的客户端会收到过期值。
+ * 这是本文件最容易被二开踩坏的一条：把 `ctx.file` 加进解构列表不会报任何错，
+ * 只会让「切换传感器型号」从此对新连接失效。
+ *
+ * `ctx.serverOpened` 是**幂等保护**。重复挂载不会报错，但每条消息会被处理两次
+ * （命令执行两遍、回执发两条），这种问题排查起来极其费劲，所以这里直接挡掉并记一条日志。
+ *
+ * `runtime: ctx` 把整个上下文当运行态交给了 `historyAnalysisService` ——
+ * 那个模块会**直接写** `runtime.nowIndex` 这类字段（见它的文件头说明），
+ * 写进去的值通过 ctx 的 setter 落到 store 里。这是旧逻辑搬迁时保留的写法。
+ *
+ * 四个 handler 在这里注册而不是在 server.js：它们都依赖 ctx 上的运行态或
+ * 本文件的私有函数（`createSensorStatusPayload`），注册顺序不影响行为 ——
+ * `controlCommandRouter` 是按 `when` 谓词匹配的，不是按注册顺序短路。
+ *
+ * 新连接建立时**主动推三到四条消息**（传感器状态、私发授权密钥、授权期限或未授权提示），
+ * 而不是等前端来问。因为前端刚连上时界面是空的，等一个轮询周期会先闪一下空状态。
+ *
+ * @param {object} ctx 由 `createWebSocketHandlerContext` 造出的运行时上下文。
+ * @returns {Function} 调用一次即挂载全部监听器；重复调用无副作用。
+ * @throws {Error} ctx 缺失时立刻抛 —— 这类装配错误必须在启动阶段暴露，
+ *   而不是等到第一个客户端连上才炸。
+ */
 function createWebSocketHandlerAttacher(ctx) {
   if (!ctx || typeof ctx !== 'object') {
     throw new Error('webSocket handler context is required');
@@ -224,6 +288,10 @@ function createWebSocketHandlerAttacher(ctx) {
           scope: resolveCommandScope(wsSubscriptions, ws),
         });
         sendCommandResultAck(ws, getMessage, commandResult, logger);
+        // 这一行目前是空操作 —— 后面没有别的处理了，return 与自然结束等价。
+        // 留着是因为它标出了 `stop` 的语义（「到此为止，别再往下发」）：
+        // 以后在这里追加处理逻辑时，必须写在这一行**之后**，否则被拒的命令
+        // （例如新协议走了 WebSocket，见 controlCommandService.executeWs）会继续被处理。
         if (commandResult.stop) return;
       });
     });

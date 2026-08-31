@@ -8,6 +8,22 @@ const {
 
 const PROJECT_ROOT = path.resolve(__dirname, '../../..');
 
+/**
+ * 目录不存在就建出来（含中间层级）。
+ *
+ * `recursive: true` 有两个作用，第二个才是关键：建中间层级，**并且在目录已存在时不抛
+ * `EEXIST`**。所以 `existsSync` 那层判断严格来说是多余的，留着是为了少一次系统调用 ——
+ * 五个目录在每次启动时都会走一遍，而绝大多数情况下它们都已存在。
+ *
+ * ⚠️ **建目录失败会直接抛，让启动失败。** 这是刻意的：这五个目录分别放数据库、CSV 导出、
+ * 上传图片、PDF 报告和展示系统配置，任何一个建不出来（磁盘满、权限不足、
+ * 打包后误指向了 asar 内部的只读路径）都意味着后端能起但功能是坏的。
+ * 与其让用户在采集半小时后才发现数据没落盘，不如在启动时就报错。
+ *
+ * @param {string} directory 绝对路径。
+ * @returns {void}
+ * @throws {Error} 无权限或路径不可写时抛出 fs 的原始错误。
+ */
 function ensureDirectory(directory) {
   if (!fs.existsSync(directory)) {
     fs.mkdirSync(directory, { recursive: true });
