@@ -227,12 +227,40 @@ diff 搅浑。
 468 个函数覆盖率 99%（6 个假阳性），全后端 55% → 85%。后端根目录无 eslint 配置故未跑
 lint。
 
-**⚠️ 未处理，需要你决定**：`kernel/` 里有 **26 行既有注释是乱码**（UTF-8 被按 GBK 读的
-那一类）—— `platform/bootstrap/serverLifecycleService.js` 20 行、
-`platform/websocket/webSocketHandlerFactory.js` 5 行、`platform/server.js` 1 行。已用
-`iconv-lite` 验证可无损还原（`iconv.decode(iconv.encode(line,'gbk'),'utf8')`，每个 `�`
-都是一个被吞掉后续换行的 `。`）。但这是**改写既有内容**而不是新增注释，超出本任务范围，
-所以一行未动，等你定：并入本批、单独一个提交、还是不修。
+### 批 3 的收尾：26 行乱码注释还原（单独一个提交）
+
+`kernel/` 里有 26 行既有注释是乱码：`platform/bootstrap/serverLifecycleService.js` 20 行、
+`platform/websocket/webSocketHandlerFactory.js` 5 行、`platform/server.js` 1 行。成因是
+源文件本是 UTF-8，某个环节按 GBK 解码后又按 UTF-8 存了回去。按用户决定单独成一个提交
+（与「新增注释」那批分开，diff 干净、好回滚）。
+
+**还原不是一次纯机械变换 —— 这一点是本次工作里唯一需要判断的地方。** 当年那次误解码碰到
+落单的字节时直接写成了字面的 `?`（0x3F），于是**每处都丢了两个字符**：被截断那个汉字的
+第三字节，以及紧跟它的那个字符（空格或换行）。所以 GBK 往回编 + UTF-8 解只能还原到
+「一句话里缺一个字」的程度。做法不是凭上下文猜整个词，而是**先按字节把候选集缩小**：
+每处缺口都留下了被截断汉字的前两个字节，补齐第三字节只有 64 种可能，列出来再按上下文取
+唯一合理项 —— `e3 80` → `。`（句末，被吞掉的是换行）、`e5 8f` → `口`（「三端口
+WebSocket 连接」，被吞掉的是空格）、`e9 80` → `选`（「历史/框选回放」）、`e5 88` → `到`
+（「下沉到 service」）。`webSocketHandlerFactory.js` 那 5 处因为吞掉的是换行，一整块
+JSDoc 被并成了一行，还原时要按原结构拆回多行。
+
+**检出乱码行的判据也换过一次。** 一开始用「像乱码的汉字」字表，字表永远不全（漏了 6 行）。
+改成用可逆性判：一行是这类乱码，当且仅当它能**无损**地用 GBK 表示（`encode` 再 `decode`
+回到自身，否则 `encode` 会把不可映射字符换成 `?`，那就不是还原而是破坏），且那串字节按
+UTF-8 解出来是**可读的**中文。已经正确的中文行也能编成 GBK，但那串字节按 UTF-8 解几乎全
+是替换字符 —— 正是这一条把「该修的」和「本来就对的」分开。按这个判据全 `backend/` 复扫，
+剩下 8 条命中全部核对为假阳性（`SQL 语句。` / `checksum 算法` 这类短行，非 ASCII 字数太少
+撞上了阈值），确认无残余。
+
+**顺带记一条过期事实，但没有改写原文。** `webSocketHandlerFactory.js` 还原出来的
+「该模块只负责**三端口** WebSocket 连接」是 manifest 之前的模型，与本仓现状矛盾（全后端
+只有一个 WebSocket 端口 19999，通道隔离靠订阅）。把一句错话从乱码还原成可读，反而更容易
+误导人，所以在原句下方**加了一条注明**指向
+`websocketRuntimeFactory.createWebSocketServer` 的说明 —— 只加注、不动原句，因为「改写
+既有内容」和「还原乱码」是两件事。
+
+验证：3 个文件 +34 行 / -26 行，`node --check` 通过，**代码骨架逐 token 与 HEAD 相同**
+（纯注释改动），后端 55 个测试文件全过。
 
 ## 2026-08-29 `sensor.frame` 成为唯一传感器消息
 
@@ -2215,6 +2243,7 @@ flowchart LR
 
 | 日期 | 类型 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-31 | 文档更新 | **还原 `kernel/` 里 26 行乱码注释**（`serverLifecycleService.js` 20 / `webSocketHandlerFactory.js` 5 / `server.js` 1），按用户决定与「新增注释」那批分开单独提交。成因是源文件本是 UTF-8、某个环节按 GBK 解码后又按 UTF-8 存回。**还原不是纯机械变换**：当年误解码碰到落单字节时写成了字面的 `?`（0x3F），**每处都丢了两个字符** —— 被截断汉字的第三字节 + 紧跟它的那个字符（空格或换行），所以 GBK 往回编 + UTF-8 解只能还原到「一句话缺一个字」。做法不是凭上下文猜词，而是**先按字节缩小候选集**（每处缺口留下了被截断汉字的前两个字节，补第三字节只有 64 种可能，列出来再按上下文取唯一合理项）：`e3 80`→`。`（句末，吞掉的是换行）、`e5 8f`→`口`（「三端口 WebSocket 连接」，吞掉的是空格）、`e9 80`→`选`（「历史/框选回放」）、`e5 88`→`到`（「下沉到 service」）。`webSocketHandlerFactory.js` 那 5 处吞掉的是换行、一整块 JSDoc 被并成一行，还原时按原结构拆回多行。**检出判据也换过一次**：先用「像乱码的汉字」字表（漏了 6 行，字表永远不全），改成用可逆性判 —— 一行是这类乱码当且仅当它能**无损**用 GBK 表示（encode 再 decode 回到自身，否则 encode 会把不可映射字符换成 `?`、那是破坏不是还原）且那串字节按 UTF-8 解出来是**可读**中文（已经正确的中文行编成 GBK 后按 UTF-8 解几乎全是替换字符，正是这条把「该修的」和「本来就对的」分开）；按此判据全 `backend/` 复扫，剩下 8 条命中全部核对为假阳性（`SQL 语句。`/`checksum 算法` 这类短行非 ASCII 字数太少撞阈值），确认无残余。**顺带记一条过期事实但未改写原文**：`webSocketHandlerFactory.js` 还原出的「该模块只负责**三端口** WebSocket 连接」是 manifest 之前的模型，与现状矛盾（全后端只有一个端口 19999、隔离靠订阅）—— 把错话从乱码还原成可读反而更易误导，故在原句下方**加注**指向 `websocketRuntimeFactory.createWebSocketServer`，只加注不动原句。验证：3 个文件 +34/-26，`node --check` 通过，代码骨架逐 token 与 HEAD 相同，后端 55 个测试文件全过。 |
 | 2026-08-31 | 文档更新 | **`backend/` 函数级注释批 3/4：`kernel/` 60 个文件 247 个缺注释补齐至 99%（462/468，剩 6 个为扫描脚本假阳性）**，全后端覆盖率 55% → 85%。**代码一行未改**：+4512 行 / -28 行，40 个文件**逐 token 比对代码骨架完全相同**（那 28 行「删除」是注释重排与把 `//` 追加到既有代码行末尾，`git diff` 把改行记成删+增），40 个文件 `node --check` 通过，后端 55 个测试文件全过。这一层的注释重点是**改了会坏但不会报错的地方**（串口/采集/回放/实时发布/授权/归零彼此的约束大多没有测试兜住）。查实写入十六条：① **采集磁盘空间那三个函数是靠函数声明提升解开的循环引用**（`getCollectionFreeBytes` ↔ `collectionDiskSpaceGuard` ↔ `stopCollectionForStorageError`），改成 `const` 箭头函数立刻 ReferenceError —— 全仓唯一一处「不能现代化写法」的硬约束；② **`getShutdownOrchestrator.setRuntime` 的 16 个 `hasOwnProperty` 不能换成 `!== undefined`**，关闭流程正是要把 `com`/`com1`/`comhead`/`comSensor` 显式置 `undefined`，换守卫会静默跳过、串口引用被一直持有（现象是要重启软件才能再连），且它的 `getRuntime` 每次返回新对象不可缓存；③ **`shutdownServer` 用顶部一次性快照做全部 close**（中途 `setRuntime` 会置空端口与 `reportHttpServer`，重新读运行态会让端口与 db 文件无报错地保持占用），且 **`stopRuntimeDispatch()` 必须在编排器之前**（分发器是数据源头，先关端口等于让它对着死句柄跑）；④ **回放/采集/运行态三簇访问器「只留一份真相」**（旧全局 `let` 直接删，无双写中间态），⚠️ `accessor(key)` 返回 **getter/setter 函数**而非快照（`legacyWebSocketContext` 需要活描述符），`patch` 的存在理由是回放定时器异步 tick、逐个 `set` 会留下可被读到的不一致瞬间；⑤ **懒加载历史 Proxy 的目标是真空数组**，未被拦截的数组方法返回 `[]` —— `rows.map(...)` 静默报告零帧，调用方必须用下标循环，`readByIndex` 用 `minId + index` 加 `id >= ?` + `LIMIT 1`（不是 `id = ?`）使 id 空洞表现为整体前移而非读不到，缓存是 512 条**近似** LRU；⑥ **`sqlite3-compat.js` 底下是同步的**（`better-sqlite3`），每次缓存未命中与每条大查询都阻塞事件循环 —— 拖进度条卡住实时数据的根因；⑦ **`publishPlaybackFrame` 把 sit 放最后发**（前端以 sit 帧为「这一帧到齐」的重绘信号，调前面的现象是靠背/头枕慢一帧，静态看不出、拖进度条能看出错位）；⑧ **`publishRealtimeChannel` 有两道闸而裸 `publishRealtimeFrame` 一道都没有**（回放期无条件拦截无开关；手套 60FPS 节流可用 `respectFrequency: false` 绕过），二开直接调裸函数会在回放画面上叠实时数据；⑨ **`parseOutboundSystemEvent` 的 `!Buffer.isBuffer` 是承载性的**（Buffer 也是 object），去掉会让整帧数据被当低频系统事件广播，不报错、现象是画面不动；⑩ **帧序号按通道独立计数**（「序号不连续」精确等于「该通道丢帧」），从 1 开始因前端写 `if (frame.sequence)`，Map 只增不减故须用差值判断；⑪ **授权是本批唯一高风险面**：`activateSubmittedLicenseKey` 属「用户权限与身份认证」，注释写明改前须人工确认与四步顺序（校验→落盘→更新内存→有条件换型号，`file`+`baudRate`+`petCareRuntimeService.resetAll()`+`runtimeStatePatchers` 必须一起动），`payload.file`（授权范围，可能是 `'all'`/数组）与 `payload.currentSensorType`（当前型号）是两个不同的东西（历史上撞过一次），`getSelectFlagFromLicense` 返回 **`undefined` ≠ `[]`**（「密钥里没型号信息」不是「授权零个型号」）不可用 `if (!selectFlag)` 合并、其 `'all'` 分支返回字符串而其余返回数组属兼容包袱；⑫ **`aes_ecb.js` 的 AES-ECB 是对 config.txt 的混淆不是保密**（16 字符 ASCII 密钥硬编码在二进制里、无 IV），密钥/模式/填充是与每一份**已发出**的 config.txt 的兼容契约，`string_to_hex` 不做零填充只因密钥是可打印 ASCII 才正确，⚠️ **解密失败没有可靠信号**（Pkcs7 去填充不校验，错密钥要么抛 `Malformed UTF-8 data` 要么返回垃圾字符串）；⑬ **`applyMinzhenBackendGauss` 是全仓唯一在后端做模糊的传感器**，代价是入库的也是模糊后数据、原始值拿不回来（决定了敏枕历史数据不能用来重算别的算法）；⑭ **`colOrSendData`/`colOrSendData1`/`colOrSendData2` 是 "collect or send" 的缩写，而这三个名字是 `extensions/built-in-sensors/` 几十个处理器的注入契约**，名字不准也不能改（二开应改用 `publishRealtimeChannel` 加通道名）；⑮ **`handleCommand` 已是空壳且不认识的命令静默失败**（只有一条 `logger.warn`），注释点明那条日志是「新加的二开命令没反应」的第一排查点；⑯ **后端自检面是三件套** `getWsSubscriptionStatus`+`getRealtimeChannels`+`getChannelBusStatus`（总线答「有没有在产数据」、订阅答「有没有人在收」，都空=没数据、只有总线=前端没订阅）。另六条「像 bug 其实有意」已注明：`initDb` 的 `filePath`（可写）与 `runtimeResourceRoot`（只读）绝不能混用；`enqueueCollectionFrame` 的 `saveTime` 一场采集内必须不变（变了会把一场切成两条历史）；`stopCollectionForStorageError` 先 flush 再置 `flag=false`（反过来丢最后约 200 帧）；`handleCollectionDbError` 同时用 `err.code` 与字符串两条判据（只判一条会漏）；`loadSelectedHistory` 的 `eager` 阈值取三通道**最大行数**而非总数、`indexArr` 上界是 `length - 2`；`calcDetectedInterval` 用**中位数**且 `Math.max(1, ...)`（0 会让 `setInterval` 退化成尽快执行打满事件循环）。`resolveZeroTargetChannelIds` **有两种返回形状**（传 `channelIds` 时裸数组，否则 `{channelIds, skipped}`）—— 实测消费端 `zeroCommandService.normalizeResolution` 兼容数组加三个键别名并对未知形状降级为空（fail-closed），属可容忍非缺陷；`withSourcesOnly` 只在 `operation === 'capture'` 生效（对无数据源通道抓零会把基线设成 0，比不抓更糟；清零不需要数据源）。**剩下 6 个计数是扫描脚本假阳性**（`server.js` 两簇箭头函数访问器 + `runtimeStateStoreFactory.js:77`，均由簇首块注释逐个点名说明），补机械 `@param` 样板会违反本仓注释约定。**一处只记录不重构**：`publishHistoryDateList` 里 `dedupli` 算两遍、`timeArr` 广播两次（`car` 两次结果相同、`car10` 第一次是 `backRows` 第二次是合并结果），哪次生效取决于前端如何处理两次 `timeArr`，本地无法验证、要真机逐型号过，超出「加注释」范围。**验证工具本身修了一次**：上一版自制去注释脚本是手写字符状态机、**没处理正则字面量**，碰到 `reportRoutes.js` 的 `/[\x00-\x1F<>:"|?*]/g` 被里面的 `"` 带进字符串模式，报出一条**假的**「代码骨架有变化」—— 正则与除号的歧义必须靠语法上下文分辨，改用真词法分析器（acorn）切 token 流比对，并加自测（仅加注释判「相同」、改一个字面量判「不同」两条都对才算工具可信）；脚本在 `tmp/`（已被 `.gitignore` 忽略）不入库。**⚠️ 未处理待你决定**：`kernel/` 里 **26 行既有注释是乱码**（UTF-8 被按 GBK 读，`serverLifecycleService.js` 20 行 / `webSocketHandlerFactory.js` 5 行 / `server.js` 1 行），已用 `iconv-lite` 验证可无损还原（每个 `�` 都是一个被吞掉后续换行的 `。`），但这是**改写既有内容**而非新增注释、超出本任务范围，故一行未动。后端根目录无 eslint 配置故未跑 lint。 |
 | 2026-08-31 | 文档更新 | **`backend/` 函数级注释批 2/4：`extension-host/` 17 个文件 92 个缺注释补齐至 100%（142/142）**，全后端覆盖率 42% → 55%。**代码一行未改**：+1422 行 / -0 行，`git diff -w --ignore-blank-lines --numstat` 的插入数与普通 diff 完全一致且删除数为 0，14 个文件 `node --check` 通过，后端 55 个测试文件全过。这一层是二开者真正会碰的（manifest 校验、Builder 保存、运行期绑定、帧处理），注释重点是**边界与不变量**。查实写入九条：① **1 基线序 / 0 基点位表的分裂横跨三个文件**（校验器、身份映射生成、执行器）且此前无文字记录，改任一侧会让所有既有配置错位；② **`save()` 里 manifest 最后写是承载性的** —— `discoverDisplaySystems` 只在 `result.manifestPath` 为真时记错误，无 manifest 的目录被静默跳过，于是中途崩溃的结果是「还没出现」而非「出现了但坏的」，调换写顺序即破坏此性质；③ **`SAFE_DISPLAY_SYSTEM_ID` 是路径穿越边界**（id 直接成为 `path.join(writableRoot, id)` 的目录名），不只是命名规范；④ **只读资源不可写的物理保证来自单一 `writableRoot`**，不是上层 `editable` 判断（后者只负责给出错误提示）；⑤ **`writeJsonAtomic`/`writeTextAtomic` 的原子性有限**（已在注释中如实写明）：unlink-then-rename 有「文件不存在」窗口（为兼容 Windows rename 保留）、无 fsync、临时名只带 pid，同进程并发写会撞；⑥ **`validateBuilderAlgorithmSource` 是形状检查不是安全检查**，注释首句即声明，真正执行边界是 `vm`/子进程，它的价值是把失败从运行期静默空转提前到保存时明确报错；⑦ **manifest 绝对路径绕过全部包含性检查**（`resolveMaybe`），放行是为多个展示系统共用线序表，但这是加沙箱必须收口的点；⑧ **`sanitizeAlgorithmMetrics` 是用户算法到实时链路的信任边界**，键按 `SAFE_METRIC_ID` 过滤（同时排除 `__proto__` 一类）、值只放行有限数字/字符串/布尔，挡掉 NaN/Infinity（序列化成 null 致曲线断点）、对象数组（体积不可控）、函数与 undefined（序列化后消失像指标丢了）；⑨ **帧处理两处顺序即设计**：校验在解码前（坏帧字节位置不可信，解码只产出貌似合理的错值）、算法在扣零前（否则算法阈值会随用户何时按归零而漂移）。另四条「像 bug 其实有意」已注明：`normalizeMetricIds` 空数组表达不了「没有指标」（须用 `visible: false`）；`buildDefaultRenderers` 必须非空否则 `normalizeDisplayConfig` 解 `[0].id` 抛错；`normalizeSidebarConfig` 是唯一返回 `null` 而非默认值的归一函数（「没配侧栏」与「全默认侧栏」前端行为不同）；`executeAlgorithm` 已无本仓调用方（仅导出），保留属公开面但丢 metrics 且不 await（异步 runner 下返回 undefined）。挂账：位置性兜底 id（`view-N`/`renderer-N`）在中间插入项时整体位移并悄悄改变 profile 引用，生产 manifest 应显式声明 id（已写入注释，未改代码）。后端根目录无 eslint 配置故未跑 lint。 |
 | 2026-08-31 | 文档更新 | **`backend/` 函数级注释批 1/4：`runtime/` 与 `extensions/` 两层补齐至 100%。** 基线 471 个函数缺注释 / 覆盖率 42%，本批清掉 15 个（`runtime/` 7 + `extensions/` 8），两层归零。**代码一行未改**：+204 行 / -0 行，`git diff -w --ignore-blank-lines` 确认零代码变更，6 个文件 `node --check` 通过，后端 55 个测试文件全过（与开工前基线一致）。写注释过程中查实三处非显而易见行为并写入：① `runtime/index.js` 注册的五类 legacy 命令**全是空转** —— 转发目标 `server.handleCommand`（`kernel/platform/server.js:1811`）对任何命令只打一条 `unsupported command` 警告返回 null，路由表留着是为了「没人接」在日志里可见；② `getWsServer(channel)` 的 channel 参数**不影响返回值**（`server.js:1793` 直接 `void channel` 返回单例，全后端只有一个 WebSocket 端口），参数与 `'sit'` 默认值只为旧调用方保签名，**不可据此推断存在 sit/back/head 固定通道表**；③ `getRuntimeStatus()` 里 `channel?.standard !== true` 是**空转过滤** —— 通道元数据字段固定十二项不含 `standard`，该标记只存在于 `realtimeTelemetryGateway.js:62` 的 publish 选项，无害故保留但已注明。另互相指明两个同名不同义的 `getPublishedFrame`（`handPacketRuntime.js` 简单版 / `legacySerialFrameRuntime.js` 多两道判断），避免被当成重复代码互相复制。**`compatibility/openWeb.js` 的 71 个刻意不做**：它导出 64 个函数但全仓 require 扫描只命中三处基线对比测试，四类疑似依赖（`webStaticServer.js` 是重新实现、`projectLineOrders.js` 里是 deny-list 字符串、`sdk/backend/processing/*` 只在注释里提、`util/constant.js:6` 指向已不存在的路径）已逐一排除，加注释只会搅浑基线 diff。挂账：`util/constant.js:6` 过期注释指向已删除的 `backend/legacy/openWeb.js`；`legacyGloveFrameProcessor.js` 的 `splice(len-6, len)` 第二参数应为 `6`（行为等价，仅加注释未改）。后端根目录无 eslint 配置故未跑 lint。 |
@@ -2382,6 +2411,7 @@ flowchart LR
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-31 | `kernel/` 26 行乱码注释还原 | UTF-8 被按 GBK 读又存回造成的乱码，按用户决定单独一个提交。每处丢了两个字符（被截断汉字的第三字节 + 紧跟的空格或换行），所以先按留下的两个字节把候选缩到 64 个再按上下文定字，而不是猜词；被吞掉换行的那 5 处 JSDoc 按原结构拆回多行。检出判据由字表改为可逆性判定，全 `backend/` 复扫无残余（8 条命中已核对为假阳性）。还原出的「三端口」是过期说法，只在下方加注指向单端口的实现说明，未改写原句。 |
 | 2026-08-31 | `backend/` 函数级注释批 3/4（`kernel/`） | 60 个文件从 247 个缺注释补齐至 99%（462/468，剩 6 个是扫描脚本对成簇箭头函数的假阳性），全后端覆盖率 55% → 85%。+4512 行 / -28 行，40 个文件逐 token 比对代码骨架完全相同，`node --check` 全过，后端 55 个测试文件全过。重点记录「改了会坏但不会报错」的十六条约束（函数声明提升解开的循环引用、`hasOwnProperty` 不可换 `!== undefined`、关闭快照与 `stopRuntimeDispatch` 先后、访问器返回函数而非快照、懒加载 Proxy 的空数组陷阱、sqlite 同步阻塞、sit 帧最后发、实时发布两道闸、`!Buffer.isBuffer`、按通道帧序号、授权四步顺序与 `undefined ≠ []`、AES-ECB 是混淆且失败无可靠信号、敏枕后端模糊不可逆、`colOrSendData*` 是注入契约、`handleCommand` 静默失败是排查入口、自检三件套）。验证工具由手写字符状态机改为 acorn 词法分析（原版没处理正则字面量，报过一条假警）。⚠️ 26 行既有乱码注释未动，等你决定修法。 |
 | 2026-08-31 | `backend/` 函数级注释批 2/4（`extension-host/`） | 17 个文件从 92 个缺注释补齐至 100%（142/142），全后端覆盖率 42% → 55%。纯注释新增（+1422/-0，`-w --ignore-blank-lines` 与普通 diff 插入数一致、删除数 0），14 个文件 `node --check` 通过，55 个测试文件全过。这一层是二开的实际接触面，注释围绕边界与不变量展开：明确区分了**安全边界**（`SAFE_DISPLAY_SYSTEM_ID` 路径穿越、单一 `writableRoot` 的物理只读保证、`sanitizeAlgorithmMetrics` 的用户算法信任边界）与**只是形状检查**（`validateBuilderAlgorithmSource`，真正执行边界在 `vm`/子进程）；记录了三条不能动的顺序/约定（1 基线序 vs 0 基点位表横跨三文件、`save()` 的 manifest 最后写与 `discoverDisplaySystems` 静默跳过无 manifest 目录相耦合、帧处理的「校验在解码前 / 算法在扣零前」）；并如实写明两处已知不足（`writeJsonAtomic` 的原子性有限、manifest 绝对路径绕过包含性检查，后者是加沙箱的收口点）。剩余批 3 `kernel/`（247）、批 4 `tests/`（44）。 |
 | 2026-08-31 | `backend/` 函数级注释批 1/4（`runtime/` + `extensions/`） | 两层从 7/8 个缺注释补齐至 100%，全后端覆盖率 42% → 44%。纯注释新增（+204/-0），55 个测试文件全过。附带查实并记录三处空转/易误解行为（legacy 命令路由空转、`getWsServer` channel 参数被忽略、`standard` 过滤器不生效），以及 `compatibility/openWeb.js` 无运行时依赖的证据链。剩余批 2 `extension-host/`（92）、批 3 `kernel/`（247）、批 4 `tests/`（44）。 |
@@ -2949,6 +2979,7 @@ flowchart LR
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-31 | codeOpi | `kernel/` 26 行乱码注释还原 | 批 3 的收尾，单独一个提交。乱码是 UTF-8 被按 GBK 读又存回造成的，且每处额外丢了两个字符，所以还原需要按留下的字节缩小候选集再按上下文定字（不是纯机械变换）。检出判据从字表改成可逆性判定后全 `backend/` 无残余。还原出的过期说法「三端口」只加注不改写。 |
 | 2026-08-31 | codeOpi | `backend/` 函数级注释批 3/4：`kernel/` 补齐 | 三批里最大的一层（60 个文件 468 个函数），也是二开者最容易改坏而看不出的一层。247 个缺注释补齐至 99%，代码一行未改（40 个文件逐 token 比对代码骨架相同）。注释重点是那些没有测试兜住、只存在于口头知识里的约束，共十六条查实写入 + 六条「像 bug 其实有意」。`publishHistoryDateList` 的重复广播只记录不重构（需真机逐型号验证）。26 行既有乱码注释按范围纪律未动，已提请你决定。 |
 | 2026-08-31 | codeOpi | `backend/` 函数级注释批 2/4：`extension-host/` 补齐 | 继续为「打包后可二开」补后端函数级的**为什么**。`extension-host/` 是二开者真正会碰的一层（manifest 校验、Builder 保存、运行期绑定、帧处理），17 个文件从 92 个缺注释归零（142/142，100%），全后端覆盖率 42% → 55%。代码零改动（+1422/-0 纯注释，`-w --ignore-blank-lines` 插入数与普通 diff 一致、删除数 0），14 个文件 `node --check` 通过，后端 55 个测试文件全过。注释以边界与不变量为纲，查实写入九条非显而易见事实（1 基线序 vs 0 基点位表横跨三文件、`save()` manifest 最后写的承载性、`SAFE_DISPLAY_SYSTEM_ID` 的路径穿越语义、只读保证来自单一 `writableRoot`、原子写的实际局限、`validateBuilderAlgorithmSource` 只是形状检查、绝对路径绕过包含性检查、`sanitizeAlgorithmMetrics` 的信任边界、帧处理的两处顺序设计），另注明四条「像 bug 其实有意」的行为。剩余 `kernel/` 247、`tests/` 44。 |
 | 2026-08-31 | codeOpi | `backend/` 函数级注释批 1/4：`runtime/` 与 `extensions/` 补齐 | 为「打包后可二开」补上后端函数级的**为什么**，不只是做了什么。基线量化：471 个函数缺注释、覆盖率 42%；本批清 15 个（`runtime/` 7、`extensions/` 8），两层各归零，全后端升至 44%。按分层分批、每批一提交，剩余 `extension-host/` 92、`kernel/` 247、`tests/` 44。代码零改动（+204/-0 纯注释），`node --check` 全过，后端 55 个测试文件全过且与开工前基线一致。`compatibility/openWeb.js` 经 require 扫描证实无运行时消费者（仅三个基线对比测试），其 71 个函数明确不做。 |
@@ -3341,6 +3372,7 @@ flowchart LR
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-31 | codeOpi | 文档更新 | 还原 `backend/kernel/` 里 26 行乱码注释（`serverLifecycleService.js` 20 / `webSocketHandlerFactory.js` 5 / `server.js` 1），+34/-26 纯注释，代码骨架逐 token 不变，55 个测试文件全过。全 `backend/` 复扫无残余乱码。 |
 | 2026-08-31 | codeOpi | 文档更新 | `backend/kernel/` 40 个文件补齐中文 JSDoc（`@param`/`@returns` + 「为什么这么写」散文），60 个文件 468 个函数覆盖率 99%，全后端 85%。纯注释新增 +4512/-28，代码骨架逐 token 相同，55 个测试文件全过。比对工具改用 acorn 词法分析（手写状态机漏处理正则字面量、误报过一次）。 |
 | 2026-08-31 | codeOpi | 文档更新 | `backend/extension-host/` 17 个文件全部函数补齐中文 JSDoc（`@param`/`@returns` + 「为什么这么写」散文），92 → 0，该层 100%（142/142），全后端 42% → 55%。纯注释新增 +1422/-0，14 个文件 `node --check` 通过，55 个测试文件全过。同时把九条此前只存在于代码里的边界与不变量写成文字（安全边界与形状检查的区分、三条不可调换的顺序/基数约定、两处已知的原子性与包含性检查不足）。 |
 | 2026-08-31 | codeOpi | 文档更新 | `backend/runtime/` 与 `backend/extensions/` 全部函数补齐中文 JSDoc（`@param`/`@returns` + 为什么这么写的散文），两层缺注释数 7/8 → 0/0。纯注释新增 6 个文件 +204 行、删除 0 行；未改任何代码、协议、契约或测试。同时以注释形式钉住三处易误解行为：legacy 命令路由当前空转、`getWsServer` 的 channel 参数被 `void`、`getRuntimeStatus` 的 `standard` 过滤器不生效。`compatibility/openWeb.js` 排除在范围外并记录了证据。 |

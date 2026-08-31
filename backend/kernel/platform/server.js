@@ -1985,7 +1985,7 @@ function activateSubmittedLicenseKey(licenseKey) {
   };
 }
 
-// 娉ㄥ唽杩愯鏃舵帶鍒跺懡浠わ紝getRuntime/setRuntime 鏄棫杩愯鏃跺彉閲忕殑杩囨浮閫傞厤灞傘€?
+// 注册运行时控制命令，getRuntime/setRuntime 是旧运行时变量的过渡适配层。
 registerRuntimeCommandHandlers(controlCommandRouter, {
   csvDownloadService,
   historyMaintenanceService,

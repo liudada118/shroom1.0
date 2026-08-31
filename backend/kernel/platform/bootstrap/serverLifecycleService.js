@@ -1,18 +1,18 @@
 ﻿/**
- * 鏈嶅姟鐢熷懡鍛ㄦ湡杈呭姪鍑芥暟銆?
+ * 服务生命周期辅助函数。
  *
- * 缁熶竴鍏抽棴涓插彛銆丠TTP server 鍜?WebSocket server锛屽苟缁欏叧闂祦绋嬪姞瓒呮椂淇濇姢锛?
- * 閬垮厤搴旂敤閫€鍑烘垨鑷姩鏇存柊瀹夎鍓嶅崱鍦ㄦ煇涓祫婧愰噴鏀炬楠ゃ€?
+ * 统一关闭串口、HTTP server 和 WebSocket server，并给关闭流程加超时保护，
+ * 避免应用退出或自动更新安装前卡在某个资源释放步骤。
  */
 const logger = require('../../../common/logger');
 
 /**
- * 缁欏紓姝ュ叧闂换鍔″鍔犺秴鏃朵繚鎶わ紝閬垮厤閫€鍑烘祦绋嬭鍗曚釜璧勬簮姘镐箙闃诲銆?
+ * 给异步关闭任务增加超时保护，避免退出流程被单个资源永久阻塞。
  *
- * @param {string} name 璧勬簮鍚嶇О锛岀敤浜庢棩蹇楀畾浣嶃€?
- * @param {Promise<unknown>} promise 璧勬簮鍏抽棴浠诲姟銆?
- * @param {number} timeoutMs 瓒呮椂鏃堕棿锛屽崟浣嶆绉掋€?
- * @returns {Promise<unknown | false>} 鍏抽棴缁撴灉锛涜秴鏃舵垨寮傚父鏃惰繑鍥?false銆?
+ * @param {string} name 资源名称，用于日志定位。
+ * @param {Promise<unknown>} promise 资源关闭任务。
+ * @param {number} timeoutMs 超时时间，单位毫秒。
+ * @returns {Promise<unknown | false>} 关闭结果；超时或异常时返回 false。
  */
 function closeWithTimeout(name, promise, timeoutMs = 3000) {
   return new Promise((resolve) => {
@@ -35,11 +35,11 @@ function closeWithTimeout(name, promise, timeoutMs = 3000) {
 }
 
 /**
- * 鍏抽棴涓插彛杩炴帴锛屽苟鍏堢Щ闄ょ洃鍚櫒閬垮厤閫€鍑烘湡闂寸户缁Е鍙戞暟鎹鐞嗐€?
+ * 关闭串口连接，并先移除监听器避免退出期间继续触发数据处理。
  *
- * @param {object | null | undefined} portRef serialport 瀹炰緥銆?
- * @param {string} name 涓插彛鍚嶇О銆?
- * @returns {Promise<null>} 鍏抽棴瀹屾垚淇″彿銆?
+ * @param {object | null | undefined} portRef serialport 实例。
+ * @param {string} name 串口名称。
+ * @returns {Promise<null>} 关闭完成信号。
  */
 function closeSerialPort(portRef, name) {
   if (!portRef) return Promise.resolve(null);
@@ -72,11 +72,11 @@ function closeSerialPort(portRef, name) {
 }
 
 /**
- * 鍏抽棴 HTTP Server銆?
+ * 关闭 HTTP Server。
  *
- * @param {object | null | undefined} httpServer HTTP 鏈嶅姟瀹炰緥銆?
- * @param {string} name 鏈嶅姟鍚嶇О銆?
- * @returns {Promise<void>} 鍏抽棴瀹屾垚淇″彿銆?
+ * @param {object | null | undefined} httpServer HTTP 服务实例。
+ * @param {string} name 服务名称。
+ * @returns {Promise<void>} 关闭完成信号。
  */
 function closeHttpServer(httpServer, name) {
   if (!httpServer || typeof httpServer.close !== 'function') {
@@ -101,11 +101,11 @@ function closeHttpServer(httpServer, name) {
 }
 
 /**
- * 鍏抽棴 WebSocket Server锛屽苟缁堟浠嶆寕璧风殑瀹㈡埛绔繛鎺ャ€?
+ * 关闭 WebSocket Server，并终止仍挂起的客户端连接。
  *
- * @param {import('ws').Server | null | undefined} wsServer WebSocket 鏈嶅姟瀹炰緥銆?
- * @param {string} name 鏈嶅姟鍚嶇О銆?
- * @returns {Promise<void>} 鍏抽棴瀹屾垚淇″彿銆?
+ * @param {import('ws').Server | null | undefined} wsServer WebSocket 服务实例。
+ * @param {string} name 服务名称。
+ * @returns {Promise<void>} 关闭完成信号。
  */
 function closeWsServer(wsServer, name) {
   if (!wsServer) return Promise.resolve();

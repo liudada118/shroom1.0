@@ -3,13 +3,27 @@ const { createHistoryAnalysisService } = require('../../playback/historyAnalysis
 const { createCommandAck } = require('@shroom/backend/contract/commandProtocol.js');
 
 /**
- * WebSocket 杩炴帴澶勭悊鎸傝浇鍣ㄣ€? *
- * 璇ユā鍧楀彧璐熻矗涓夌鍙?WebSocket 杩炴帴銆佽闃呮敞鍐屻€佸績璺冲拰鏃ф秷鎭叆鍙ｅ垎鍙戙€? * 鎺堟潈婵€娲荤敱 server.js 娉ㄥ叆鐨勮涔夊叆鍙ｅ鐞嗭紝鍘嗗彶/妗嗛€?鍥炴斁鍛戒护涓嬫矇鍒?service銆? */
+ * WebSocket 连接处理挂载器。
+ *
+ * 该模块只负责三端口 WebSocket 连接、订阅注册、心跳和旧消息入口分发。
+ * 授权激活由 server.js 注入的语义入口处理，历史/框选回放命令下沉到 service。
+ *
+ * ⚠️ 上面「三端口」是过期说法，这次只是把乱码还原，没有改写原文。实际上
+ * **全后端只有一个 WebSocket 端口（19999）**，通道隔离靠订阅
+ * （`displaySystemId:sensorId`）而不是靠端口 —— 见
+ * `websocketRuntimeFactory.createWebSocketServer` 的说明。sit/back/head 三端口是
+ * manifest 之前的模型，不要据此推断还存在固定通道表。
+ */
 
 /**
- * 鍚戝綋鍓嶈繛鎺ュ崟鐙彂閫佺郴缁熶簨浠躲€? *
- * 鎺堟潈瀵嗛挜灞炰簬鏁忔劅鏁版嵁锛屽彧鐢ㄤ簬鎺堟潈闂ㄦ埛鍥炲～锛屼笉鑳借窡鏅€氱郴缁熺姸鎬佷竴鏍峰叏灞€骞挎挱銆? *
- * @param {WebSocket} ws 褰撳墠杩炴帴銆? * @param {object} data 瑕佸彂閫佺粰褰撳墠杩炴帴鐨勬暟鎹€? * @param {object} logger 鏃ュ織瀵硅薄銆? */
+ * 向当前连接单独发送系统事件。
+ *
+ * 授权密钥属于敏感数据，只用于授权门户回填，不能跟普通系统状态一样全局广播。
+ *
+ * @param {WebSocket} ws 当前连接。
+ * @param {object} data 要发送给当前连接的数据。
+ * @param {object} logger 日志对象。
+ */
 function sendPrivateSystemEvent(ws, data, logger) {
   try {
     if (ws && ws.readyState === 1) {
