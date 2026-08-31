@@ -36,6 +36,16 @@ function createUserPresetDirectory() {
   return { root, presetDir };
 }
 
+/**
+ * 验「打包之后用户自己往预设目录丢 JSON」这条二开路径通，守两件事：
+ * 自定义预设能被 `/api/serial-protocols` 列出来；**一个写坏的 JSON 只让自己失效**，
+ * 不能让整份列表变空（否则用户漏个逗号，界面上所有传感器一起消失）。
+ *
+ * 用真临时目录而不是假 fs，因为要测的正是真实的目录扫描和逐文件容错。
+ * 路由路径取自 `HTTP_ROUTES` 契约常量，不写字面量。
+ *
+ * @returns {Promise<void>} 断言失败时 reject。
+ */
 async function main() {
   const { root, presetDir } = createUserPresetDirectory();
 

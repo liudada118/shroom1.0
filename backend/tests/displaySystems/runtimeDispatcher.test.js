@@ -7,10 +7,28 @@ const {
 const listeners = new Map();
 let attachCount = 0;
 const serialParserManager = {
+  /**
+   * 假的「订阅某个解析通道」，记下 handler 并累加 `attachCount`。
+   *
+   * 计数是重点：分发器最容易出的错不是没订阅上，而是**订阅了两次** ——
+   * 不报任何错，只让每帧被处理两遍（压力翻倍、算法跑两次）。
+   *
+   * @param {string} channel 解析通道名（sit/back/head 这类）。
+   * @param {Function} handler 帧回调。
+   */
   onData(channel, handler) {
     attachCount += 1;
     listeners.set(channel, handler);
   },
+  /**
+   * 假的「退订」，**先比对 handler 是不是同一个引用再删**，与真实语义一致。
+   *
+   * 这个细节是可测点：分发器重绑时先 off 旧的再 on 新的，off 不比引用就会把刚挂上的
+   * 新 handler 一起摘掉 —— 现象是重载显示系统后画面彻底不动，且不报错。
+   *
+   * @param {string} channel 解析通道名。
+   * @param {Function} handler 要退订的那个具体回调。
+   */
   offData(channel, handler) {
     if (listeners.get(channel) === handler) listeners.delete(channel);
   },

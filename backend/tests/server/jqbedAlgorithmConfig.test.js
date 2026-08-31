@@ -11,6 +11,17 @@ const {
   normalizeJqbedAlgorithmValues,
 } = require('../../kernel/algorithm-channel/jqbedAlgorithmConfig');
 
+/**
+ * 在临时目录里给一次回调准备一个配置文件路径，结束后无条件删掉。
+ *
+ * 用法：`withTemporaryConfig((filePath) => { ... })`，返回值原样透出。
+ * 路径**指向一个还不存在的文件** —— 配置仓库要能自己建文件，这也是被测行为之一。
+ * `finally` 里清理，断言失败也不留垃圾目录。
+ *
+ * @param {(filePath: string) => T} run 拿到临时配置文件路径后执行的回调。
+ * @returns {T} 回调的返回值。
+ * @template T
+ */
 function withTemporaryConfig(run) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'shroom-jqbed-config-'));
   const filePath = path.join(directory, 'jqbed-algorithm-config.json');

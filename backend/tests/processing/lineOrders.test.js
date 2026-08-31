@@ -4,6 +4,19 @@ const lineOrders = require('@shroom/backend/processing/lineOrders.js');
 
 const base = Array.from({ length: 4096 }, (_, index) => (index * 17 + 3) % 251);
 
+/**
+ * 逐元素比对新旧两份实现的输出是否完全相同。本文件是**对照测试**：期望值就是
+ * `compatibility/openWeb` 的输出，所以没有写死的期望数据。
+ *
+ * 线序表编码的是硬件排线顺序，错一位画面整片乱且不报错，所以用 `deepStrictEqual`
+ * 而不是求和比对。⚠️ 这三个对照测试（本文件 + pressureTransforms +
+ * videoPointMappings）是 `openWeb.js` 至今不能删的唯一原因。
+ *
+ * @param {string} name 线序名，只用于失败定位。
+ * @param {unknown} oldValue 旧实现输出，充当期望值。
+ * @param {unknown} newValue 新实现输出。
+ * @throws {AssertionError} 两者不一致时抛。
+ */
 function assertSame(name, oldValue, newValue) {
   assert.deepStrictEqual(newValue, oldValue, `${name} should match legacy output`);
 }

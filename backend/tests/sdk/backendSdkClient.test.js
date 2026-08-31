@@ -6,6 +6,15 @@ const {
 } = require('@shroom/backend/client/BackendSdkClient.js');
 const { buildSdkContractSnapshot } = require('@shroom/backend/contract/sdkApiContract.js');
 
+/**
+ * 造一个最小的假 fetch Response，只有 `ok` / `status` / `json()` 三样。
+ *
+ * `json` 保持 async，与真实 fetch 一致 —— 写成同步的话客户端漏写 `await` 也能过测试。
+ *
+ * @param {unknown} payload `json()` 要解析出的内容。
+ * @param {{ok?: boolean, status?: number}} [options] 覆盖成功状态，用来测失败分支。
+ * @returns {object} 假 Response。
+ */
 function createResponse(payload, { ok = true, status = 200 } = {}) {
   return {
     ok,
@@ -15,6 +24,19 @@ function createResponse(payload, { ok = true, status = 200 } = {}) {
 }
 
 const requests = [];
+/**
+ * 假的 `fetch`：按 URL 后缀路由到各接口的固定响应，并把每次请求记进 `requests`。
+ *
+ * 三个要点：URL 不在名单里直接 **throw**（多发一个没预期的请求立刻失败）；
+ * 记下 url/options 以便断言请求次数（契约快照该被缓存，每次重拉功能正常但白跑网络）；
+ * `/api/commands` 分支**回读 body 里的 requestId** 拼回执，回死值就测不出客户端有没有
+ * 正确匹配回执。响应体是 `HttpResult` 形状（`code` 0 成功 / 1 失败，不是 HTTP 状态码）。
+ *
+ * @param {string} url 请求地址。
+ * @param {object} [options] fetch 选项（method/body/headers）。
+ * @returns {Promise<object>} 假 Response。
+ * @throws {Error} URL 不在预期名单内时抛。
+ */
 const fetchImpl = async (url, options = {}) => {
   requests.push({ url, options });
   if (url.endsWith('/api/sdk/contract')) {
@@ -63,7 +85,17 @@ const fetchImpl = async (url, options = {}) => {
   throw new Error(`unexpected URL: ${url}`);
 };
 
+/**
+ * 假的 WebSocket，作为 `WebSocketImpl` 注入给 `BackendSdkClient`。
+ *
+ * 关键是**异步打开**：`readyState` 先是 0，`setImmediate` 之后才置 1 并回调 `onopen`。
+ * 立刻置 1 的话，客户端里「连上之前就 send」的缺陷会被掩盖。
+ * `sent` 数组存已解析的消息对象，断言可以直接查发了什么。
+ */
 class FakeWebSocket extends EventEmitter {
+  /**
+   * @param {string} url 连接地址，原样存到 `this.url` 供断言。
+   */
   constructor(url) {
     super();
     this.url = url;
@@ -75,16 +107,31 @@ class FakeWebSocket extends EventEmitter {
     });
   }
 
+  /**
+   * 记下发出的消息。**入参必须是 JSON 字符串** —— 这里直接 `JSON.parse`，
+   * 客户端若发了对象而非序列化字符串，会在这里抛而不是静默通过。
+   *
+   * @param {string} message 序列化后的消息。
+   */
   send(message) {
     this.sent.push(JSON.parse(message));
   }
 
+  /** 关闭连接：置 `readyState = 3` 并回调 `onclose`，与浏览器语义一致。 */
   close() {
     this.readyState = 3;
     this.onclose?.({});
   }
 }
 
+/**
+ * 验 `BackendSdkClient` 与后端契约的对接：契约快照、`normalizeHttpResult`、
+ * HTTP 各接口、命令回执匹配、WebSocket 订阅与收帧。
+ *
+ * 全靠注入的 `fetchImpl` / `WebSocketImpl` 跑，不碰真网络。
+ *
+ * @returns {Promise<void>} 断言失败时 reject。
+ */
 async function run() {
   const snapshot = buildSdkContractSnapshot({ channels: [{ id: 'demo:sit' }] });
   assert.strictEqual(snapshot.websocket.messageTypes.SENSOR_FRAME, 'sensor.frame');

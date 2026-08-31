@@ -12,6 +12,14 @@ const sitFrames = [];
 const smallBedFrames = [];
 const fixedFrames = [];
 const customFrames = [];
+/**
+ * sit 通道的帧回调，**存成具名常量**是为了下面能用同一个引用去 `offData` ——
+ * 退订要求引用相同，这正是本文件要验的行为之一（退订后写入不应再进 `sitFrames`）。
+ *
+ * `[...frame]` 拷贝一份：解析器复用底层 Buffer，存引用的话之后的帧会把已存的改掉。
+ *
+ * @param {Buffer|number[]} frame 解析出的一帧。
+ */
 const sitHandler = (frame) => {
   sitFrames.push([...frame]);
 };

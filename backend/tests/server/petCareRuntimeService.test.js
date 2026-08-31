@@ -11,6 +11,19 @@ const {
   createPetCareRuntimeService,
 } = require('../../kernel/algorithm-channel/petCareRuntimeService');
 
+/**
+ * 劫持全局 `setInterval`，把注册的定时器收进 `timers` 而不真的计时。
+ *
+ * 用法：`const harness = createTimerHarness()`，之后手动调
+ * `harness.timers[0].callback()` 驱动一次轮询，**用完必须 `harness.restore()`**，
+ * 否则会影响同进程里后面的测试。
+ *
+ * 这样做是为了让测试不用真等 —— 服务的轮询周期是秒级的，靠真定时器要么很慢，
+ * 要么得靠 sleep 凑时间，那种测试会间歇性失败。同时 `intervalMs` 也被记下来，
+ * 周期本身可以断言。
+ *
+ * @returns {{restore: Function, timers: Array<{callback: Function, intervalMs: number}>}}
+ */
 function createTimerHarness() {
   const timers = [];
   const originalSetInterval = global.setInterval;
@@ -25,6 +38,13 @@ function createTimerHarness() {
   };
 }
 
+/**
+ * 造一份最小的算法输出，形状照 Python 算法真实返回的字段名。
+ *
+ * 每次调用**返回新对象**，避免多个测试共用一份被改脏。
+ *
+ * @returns {{heart_rate: number, matrix_origin: number[], rate: number, stateInBbed: number}}
+ */
 function algorithmResult() {
   return {
     heart_rate: 70,

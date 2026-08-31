@@ -90,6 +90,12 @@ const sharedServer = {
     {},
   ]),
 };
+/**
+ * 取 WebSocket server 的 getter。传 getter 而不是直接传 server，是因为真实调用点在
+ * server 还没建好时就要拿到这个函数 —— 通道统计每次都现取。
+ *
+ * @returns {{clients: Set<object>}} 固定的假 server，带两个空客户端。
+ */
 const getServer = () => sharedServer;
 
 assert.deepStrictEqual(

@@ -3,6 +3,16 @@ const http = require('http');
 const os = require('os');
 const { createHttpApp } = require('../../kernel/platform/http/httpAppFactory');
 
+/**
+ * 校验 `/api/display-systems` 一族只读接口的响应形状。
+ *
+ * 断言盯的是**结构**（count / systems / runtimeBindings…）而不是业务值 ——
+ * 这些字段名是前端「有哪些显示系统可用」的唯一来源，属于对外契约。
+ * 下面那一堆 `getXxx: () => ...` 必须全填：`createHttpApp` 一次性装配所有路由，
+ * 缺一个依赖是启动即报错，不是某个接口 404。
+ *
+ * @returns {Promise<void>} 断言失败时 reject。
+ */
 async function main() {
   const displaySystemStatus = {
     count: 1,

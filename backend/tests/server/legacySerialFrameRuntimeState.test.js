@@ -4,6 +4,16 @@ const {
   createLegacySerialFrameRuntime,
 } = require('../../extensions/built-in-sensors/legacySerialFrameRuntime');
 
+/**
+ * 恒等变换：原样拷贝一份返回。下面用它顶掉所有线序/映射函数
+ * （`zeroLineMatrix`、`footL`、`gloves0123`…）。
+ *
+ * 这样处理链路的输入输出就完全可预测，本文件才能只盯**运行态字段的读写**，
+ * 不被具体型号的换算搅进来。返回拷贝而非原数组，是为了让「原地改入参」的缺陷暴露。
+ *
+ * @param {number[]} frame 一帧数据。
+ * @returns {number[]} 同内容的新数组。
+ */
 const identity = (frame) => [...frame];
 const context = {
   nowDate: 0,

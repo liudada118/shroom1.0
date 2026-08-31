@@ -9,6 +9,15 @@ const {
 const { createZeroCommandService } = require('../../kernel/platform/runtime/zeroCommandService');
 const { registerControlRoutes } = require('../../kernel/platform/http/controlRoutes');
 
+/**
+ * 端到端跑一遍控制命令的 HTTP 入口：真起 express server、真发 HTTP 请求、真关掉。
+ *
+ * 不 mock 掉 HTTP 是有意的 —— 这条链路最容易出错的地方就在框架边界上
+ * （body 解析、路由匹配、状态码）。整体包成 async 函数是因为 CommonJS 没有顶层
+ * await；末尾 `run().then/.catch` 收尾，`run-tests.js` 只看退出码。
+ *
+ * @returns {Promise<void>} 断言失败时 reject。
+ */
 async function run() {
   const router = createControlCommandRouter();
   const received = [];

@@ -38,6 +38,15 @@ try {
   const desktopPath = path.join(packagedRoot, 'desktop');
   const electronApp = {
     isPackaged: true,
+    /**
+     * 假的 Electron `app.getPath`，只区分 `desktop`，其它一律当 userData。
+     *
+     * 配合 `isPackaged: true` 覆盖**打包态**的路径规则（数据落在 resourcesPath /
+     * userData，与开发态完全不同）—— 打包态恰恰是开发时最难顺手验的一半。
+     *
+     * @param {string} name Electron 路径名。
+     * @returns {string} 对应的临时目录路径。
+     */
     getPath(name) {
       return name === 'desktop' ? desktopPath : userDataPath;
     },

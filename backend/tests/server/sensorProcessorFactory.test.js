@@ -1,10 +1,29 @@
 const assert = require('assert');
 const { createServerSensorProcessors } = require('../../extensions/built-in-sensors/sensorProcessorFactory');
 
+/**
+ * 恒等函数，用来顶掉所有线序/映射依赖，让处理链路的输出可预测。
+ *
+ * 注意这里**直接返回原数组**（不像别处返回拷贝）：本文件只关心「工厂给每个型号
+ * 装了哪几步」，不关心数据本身，返回原引用能让断言直接比引用相等。
+ *
+ * @param {unknown} frame 一帧数据。
+ * @returns {unknown} 原样返回。
+ */
 function identity(frame) {
   return frame;
 }
 
+/**
+ * 造一份完整的依赖表，所有变换都用 `identity` 顶掉。
+ *
+ * 用法：`makeDeps({ carCol: myFn })` —— `overrides` 只覆盖关心的那几项，
+ * 其余保持恒等。**必须把每个依赖都填上**：`createServerSensorProcessors` 是按型号
+ * 挑函数的，缺一个就是运行时 TypeError，而不是某个型号不可用。
+ *
+ * @param {object} [overrides] 要覆盖的依赖项。
+ * @returns {object} 完整依赖表。
+ */
 function makeDeps(overrides = {}) {
   return {
     HAND_SINGLE_POINT_TYPE: 'handSinglePoint',

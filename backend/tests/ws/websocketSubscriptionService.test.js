@@ -7,6 +7,15 @@ const {
   createWebSocketSubscriptionManager,
 } = require('../../kernel/platform/websocket/websocketSubscriptionService');
 
+/**
+ * 造一个假 WebSocket 客户端：`EventEmitter` + `readyState = OPEN` + `sent` 收集器。
+ *
+ * 用法：`const c = createClient()`，注册订阅后用 `c.sent` 断言收到了哪些消息。
+ * `send` 里直接 `JSON.parse`，所以发的必须是序列化字符串，发对象会在这里抛。
+ * `readyState` 预置为 OPEN —— 订阅管理器会跳过非 OPEN 的连接，不置就一条也收不到。
+ *
+ * @returns {EventEmitter & {readyState: number, sent: object[], send: Function}}
+ */
 function createClient() {
   const client = new EventEmitter();
   client.readyState = WebSocket.OPEN;

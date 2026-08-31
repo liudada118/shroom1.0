@@ -6,6 +6,15 @@ const {
 } = require('@shroom/backend/examples/serial-chain-demo.js');
 const { ShroomSensorSDK } = require('@shroom/backend/session');
 
+/**
+ * 验 `@shroom/backend/examples/serial-chain-demo.js` 这个示例本身是好的：
+ * 命令行参数解析、造帧、mock 模式下跑完整条串口链路。
+ *
+ * 意义在于**示例是二开者的入口**，示例跑不通比库跑不通更劝退，所以它进了测试列表。
+ * 全程 `--capture none` / `memory`，不开真串口、不落盘。
+ *
+ * @returns {Promise<void>} 断言失败时 reject。
+ */
 async function run() {
   const args = parseArgs([
     '--sensor', 'hand0205',

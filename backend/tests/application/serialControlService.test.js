@@ -18,6 +18,13 @@ const runtime = {
 };
 
 registerSerialControlHandlers({
+  /**
+   * 假的命令注册表：按注册顺序把 handler 收进数组，供断言检查「注册了几个、是哪几个」。
+   *
+   * 注册数量就是对外的命令面，加减都该是明确决定，不该悄悄发生。
+   *
+   * @param {object} handler 命令处理器描述（含 name/when/handle）。
+   */
   register(handler) {
     handlers.push(handler);
   },

@@ -93,6 +93,12 @@ function testBackendDoesNotReachIntoSdkDirectory() {
   const backendRoot = path.resolve(__dirname, '../..');
   const offenders = [];
 
+  /**
+   * 递归扫 backend 下所有 `.js`，把「用相对路径伸进 sdk 目录」的 require 记进
+   * `offenders`。跳过 `node_modules`。
+   *
+   * @param {string} dir 当前目录。
+   */
   function walk(dir) {
     fs.readdirSync(dir, { withFileTypes: true }).forEach((entry) => {
       const full = path.join(dir, entry.name);

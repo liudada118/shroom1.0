@@ -11,6 +11,19 @@ const {
   createJqbedAlgorithmProtocol,
 } = require('../../kernel/algorithm-channel/jqbedAlgorithmProtocol');
 
+/**
+ * 装一套 jqbed 算法配置协议 + 内存假仓库，返回可观测的三个收集器。
+ *
+ * 用法：`const { protocol, sent, broadcasts, store } = createProtocol()`。
+ * `sent` 是点对点回给某个客户端的、`broadcasts` 是全局广播的 —— 分开收集是关键，
+ * 配置回读只能回给发请求的那个客户端，广播出去等于把别人的配置也刷了。
+ *
+ * 快照进出都 `structuredClone`，防止测试拿到内部引用后改动串味。
+ * `save` / `reset` 可传入覆盖，用来测「仓库抛错时协议怎么回」这类分支。
+ *
+ * @param {{save?: Function, reset?: Function}} [overrides] 覆盖仓库的写入行为。
+ * @returns {{broadcasts: object[], protocol: object, sent: object[], store: object}}
+ */
 function createProtocol({ save, reset } = {}) {
   const sent = [];
   const broadcasts = [];

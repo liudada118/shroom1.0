@@ -12,6 +12,15 @@ let workerStopCount = 0;
 const runtime = {
   server: {
     clients: new Set(),
+    /**
+     * 假的 WebSocket server 关闭：计数后**立刻同步回调**。
+     *
+     * 真实的 `close` 是异步的，这里同步回调是为了让关闭流程一次跑完、无需等待。
+     * `wsCloseCount` 用来断言只关一次 —— 重复关闭真实实现会报
+     * 「server is not running」，把关闭流程整体带成失败。
+     *
+     * @param {Function} callback 关闭完成回调。
+     */
     close(callback) {
       wsCloseCount += 1;
       callback();
