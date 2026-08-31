@@ -14,7 +14,6 @@ const { createLegacySerialRuntimeBinding } = require('./legacySerialRuntimeBindi
  * @param {object} options.mutableBindings 旧可变变量绑定。
  * @param {Function} options.runtimeStateAccessor 运行时状态访问器。
  * @param {object} options.serialRoles 串口角色常量。
- * @param {Function} options.zeroStateAccessor 零点状态访问器。
  * @param {object} options.serialParserManager parser manager。
  * @returns {object} legacy runtime 绑定结果。
  */
@@ -25,7 +24,6 @@ function bindLegacySerialRuntime({
   mutableBindings,
   runtimeStateAccessor,
   serialRoles,
-  zeroStateAccessor,
   serialParserManager,
 }) {
   const legacySerialRuntimeContext = createLegacySerialRuntimeContext({
@@ -35,7 +33,6 @@ function bindLegacySerialRuntime({
     mutableBindings,
     runtimeStateAccessor,
     serialRoles,
-    zeroStateAccessor,
   });
 
   const legacySerialRuntimeBinding = createLegacySerialRuntimeBinding({

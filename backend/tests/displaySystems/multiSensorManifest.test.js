@@ -101,6 +101,31 @@ const duplicated = validateDisplaySystemConfig({
 assert.strictEqual(duplicated.ok, false);
 assert.ok(duplicated.errors.some((message) => message.includes('duplicate')), duplicated.errors.join('; '));
 
+// canonical channelId 使用冒号分隔 displaySystemId / sensorId，身份组件
+// 自带冒号会造成不可逆的歧义，必须在 manifest 入口拒绝。
+const ambiguousDisplayId = validateDisplaySystemConfig({
+  ...multiSensorConfig,
+  id: 'multi:demo',
+}, { source: 'ambiguous-display' });
+assert.strictEqual(ambiguousDisplayId.ok, false);
+assert.ok(
+  ambiguousDisplayId.errors.includes('ambiguous-display: id must not contain ":"'),
+  ambiguousDisplayId.errors.join('; '),
+);
+
+const ambiguousSensorId = validateDisplaySystemConfig({
+  ...multiSensorConfig,
+  sensors: [
+    { ...multiSensorConfig.sensors[0], id: 'seat:pad' },
+    multiSensorConfig.sensors[1],
+  ],
+}, { source: 'ambiguous-sensor' });
+assert.strictEqual(ambiguousSensorId.ok, false);
+assert.ok(
+  ambiguousSensorId.errors.includes('ambiguous-sensor: sensors[0].id must not contain ":"'),
+  ambiguousSensorId.errors.join('; '),
+);
+
 // ---------------------------------------------------------------------------
 // 逐传感器构建 parser 通道
 // ---------------------------------------------------------------------------

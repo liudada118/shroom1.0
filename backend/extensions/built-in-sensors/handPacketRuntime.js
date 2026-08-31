@@ -2,7 +2,8 @@
  * 创建手套分包运行时。
  *
  * 该运行时负责 handGloveFullPacket 和 handGloveDouble 的分包解析、
- * 左右手路由、零点扣除、映射矩阵生成和实时 payload 输出。
+ * 左右手路由、映射矩阵生成和实时 payload 输出。
+ * 零点由统一输出边界按 channelId 应用。
  */
 function createHandPacketRuntime({
   fullPacketType,
@@ -12,7 +13,6 @@ function createHandPacketRuntime({
   createDoublePacketParser,
   normalizeFiniteFrame,
   bytes4ToInt10,
-  numLessZeroToZero,
   handL,
   handR,
   handRVideo1470506,
@@ -23,17 +23,14 @@ function createHandPacketRuntime({
 }) {
   const doublePacketParser = createDoublePacketParser();
 
-  /**
-   * 按当前零点帧扣除压力值，并把负数压到 0。
-   *
-   * @param {number[]} frame 原始或映射后的压力帧。
-   * @param {number[]} zeroFrame 零点帧。
-   * @returns {number[]} 扣零后的压力帧。
-   */
-  function subtractZeroFrame(frame, zeroFrame = []) {
-    return Array.isArray(zeroFrame) && zeroFrame.length
-      ? frame.map((value, index) => numLessZeroToZero(value - (zeroFrame[index] || 0)))
-      : frame;
+  function getPublishedFrame(publishResult, fields, fallback = []) {
+    const prepared = publishResult?.frame;
+    for (const field of fields) {
+      if (Array.isArray(prepared?.[field]) && prepared[field].length > 0) {
+        return [...prepared[field]];
+      }
+    }
+    return Array.isArray(fallback) ? [...fallback] : [];
   }
 
   /**
@@ -64,26 +61,17 @@ function createHandPacketRuntime({
     if (!packet) return false;
 
     const realArr = [...packet.pressureData];
-    let mappedFrame = [...packet.mappedData];
+    const mappedFrame = [...packet.mappedData];
     const outputSide = fallbackSide === 'right' ? 'right' : 'left';
 
     if (outputSide === 'right') {
-      const zeroedPressure = subtractZeroFrame([...packet.pressureData], runtime.pointArr2zero);
-      const mappedSourceFrame = [...mappedFrame];
-      mappedFrame = subtractZeroFrame(mappedSourceFrame, runtime.pointArr147zero_2);
+      const pressureFrame = [...packet.pressureData];
       const renderData = mapFullPacketModelMatrix(mappedFrame);
 
-      setRuntime({
-        pointArr2: zeroedPressure,
-        pointArr2zeroData: [...packet.pressureData],
-        pointArr2RawZeroData: [...packet.pressureData],
-        newArr147_2: mappedSourceFrame,
-      });
-
-      publishBack(JSON.stringify({
+      const published = publishBack(JSON.stringify({
         backData: renderData,
         realArr,
-        rawPressureData: zeroedPressure,
+        rawPressureData: pressureFrame,
         newArr147: mappedFrame,
         mappedArr195: mappedFrame,
         frameIndex: packet.frameIndex,
@@ -92,25 +80,19 @@ function createHandPacketRuntime({
         outputSide,
         ...buildPortFlags(runtime),
       }));
+      setRuntime({
+        pointArr2: getPublishedFrame(published, ['rawPressureData'], pressureFrame),
+      });
       return true;
     }
 
-    const zeroedPressure = subtractZeroFrame([...packet.pressureData], runtime.pointArr1zero);
-    const mappedSourceFrame = [...mappedFrame];
-    mappedFrame = subtractZeroFrame(mappedSourceFrame, runtime.pointArr147zero);
+    const pressureFrame = [...packet.pressureData];
     const renderData = mapFullPacketModelMatrix(mappedFrame);
 
-    setRuntime({
-      pointArr: zeroedPressure,
-      pointArr1zeroData: [...packet.pressureData],
-      pointArr1RawZeroData: [...packet.pressureData],
-      newArr147: mappedSourceFrame,
-    });
-
-    publishSit(JSON.stringify({
+    const published = publishSit(JSON.stringify({
       sitData: renderData,
       realArr,
-      rawPressureData: zeroedPressure,
+      rawPressureData: pressureFrame,
       newArr147: mappedFrame,
       mappedArr195: mappedFrame,
       frameIndex: packet.frameIndex,
@@ -119,6 +101,9 @@ function createHandPacketRuntime({
       outputSide,
       ...buildPortFlags(runtime),
     }));
+    setRuntime({
+      pointArr: getPublishedFrame(published, ['rawPressureData'], pressureFrame),
+    });
     return true;
   }
 
@@ -139,20 +124,11 @@ function createHandPacketRuntime({
     const isRight = outputSide === 'right';
 
     if (isRight) {
-      const rawPressureData = Array.isArray(runtime.pointArr2RawZero) && runtime.pointArr2RawZero.length
-        ? realPressureData.map((value, index) => numLessZeroToZero(value - (runtime.pointArr2RawZero[index] || 0)))
-        : [...realPressureData];
+      const rawPressureData = [...realPressureData];
       const mappedSourceFrame = handR([...realPressureData]);
       const pressureSourceFrame = handRVideo1470506([...realPressureData]);
-      let mappedData = subtractZeroFrame(mappedSourceFrame, runtime.pointArr147zero_2);
-      const pressureFrame = subtractZeroFrame(pressureSourceFrame, runtime.pointArr2zero);
-
-      setRuntime({
-        pointArr2: pressureFrame,
-        pointArr2RawZeroData: [...realPressureData],
-        pointArr2zeroData: pressureSourceFrame,
-        newArr147_2: mappedSourceFrame,
-      });
+      const mappedData = [...mappedSourceFrame];
+      const pressureFrame = [...pressureSourceFrame];
 
       const payload = {
         backData: pressureFrame,
@@ -166,24 +142,17 @@ function createHandPacketRuntime({
       if (rotate.length && !rotate.every((value) => value == 0)) {
         payload.rotate = rotate;
       }
-      publishBack(JSON.stringify(payload));
+      const published = publishBack(JSON.stringify(payload));
+      setRuntime({
+        pointArr2: getPublishedFrame(published, ['backData'], pressureFrame),
+      });
       return true;
     }
 
-    const rawPressureData = Array.isArray(runtime.pointArr1RawZero) && runtime.pointArr1RawZero.length
-      ? realPressureData.map((value, index) => numLessZeroToZero(value - (runtime.pointArr1RawZero[index] || 0)))
-      : [...realPressureData];
+    const rawPressureData = [...realPressureData];
     const mappedSourceFrame = handL([...realPressureData]);
-    let pressureFrame = [...realPressureData];
-    const mappedData = subtractZeroFrame(mappedSourceFrame, runtime.pointArr147zero);
-    pressureFrame = subtractZeroFrame(pressureFrame, runtime.pointArr1zero);
-
-    setRuntime({
-      pointArr: pressureFrame,
-      pointArr1RawZeroData: [...realPressureData],
-      pointArr1zeroData: [...realPressureData],
-      newArr147: mappedSourceFrame,
-    });
+    const pressureFrame = [...realPressureData];
+    const mappedData = [...mappedSourceFrame];
 
     const payload = {
       sitData: pressureFrame,
@@ -197,7 +166,10 @@ function createHandPacketRuntime({
     if (rotate.length && !rotate.every((value) => value == 0)) {
       payload.rotate = rotate;
     }
-    publishSit(JSON.stringify(payload));
+    const published = publishSit(JSON.stringify(payload));
+    setRuntime({
+      pointArr: getPublishedFrame(published, ['sitData'], pressureFrame),
+    });
     return true;
   }
 

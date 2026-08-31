@@ -55,7 +55,17 @@ const handlerContext = {
   controlCommandService: {
     executeWs: (message, context) => {
       commandCalls.push({ message, context });
-      return { handled: true, results: [] };
+      return message.resetZero != null
+        ? {
+          handled: true,
+          results: [{
+            name: 'calibration-zero',
+            affected: 1,
+            affectedChannelIds: ['display-a:seat'],
+            skipped: [],
+          }],
+        }
+        : { handled: true, results: [] };
     },
     registerHandler: (handler) => registeredHandlers.push(handler),
   },
@@ -82,6 +92,8 @@ assert.strictEqual(server.listenerCount('close'), 1);
 assert.strictEqual(handlerContext.serverOpened, true);
 assert.strictEqual(handlerContext.serverShutdownRequested, false);
 assert.strictEqual(registeredHandlers.length, 4);
+const historyHandler = registeredHandlers.find((handler) => handler.name === 'history-compatibility');
+assert.strictEqual(historyHandler.when({ resetZero: true }), false);
 
 const client = new EventEmitter();
 client.readyState = 1;
@@ -122,6 +134,20 @@ client.emit('message', Buffer.from('{"local":false}'));
 assert.deepStrictEqual(commandCalls[2].message, { local: false });
 assert.strictEqual(commandCalls[2].context.client, client);
 assert.strictEqual(commandCalls[2].context.scope, 'back');
+
+client.emit('message', Buffer.from(JSON.stringify({
+  type: 'legacy.calibration.zero',
+  requestId: 'legacy-zero-ack',
+  resetZero: true,
+})));
+const zeroAck = client.sent.find((message) => message.requestId === 'legacy-zero-ack');
+assert.strictEqual(zeroAck.ok, true);
+assert.deepStrictEqual(zeroAck.data.results, [{
+  name: 'calibration-zero',
+  affected: 1,
+  affectedChannelIds: ['display-a:seat'],
+  skipped: [],
+}]);
 
 client.emit('close');
 assert.deepStrictEqual(wsSubscriptions.getStatus(), { channels: {}, scopes: {} });

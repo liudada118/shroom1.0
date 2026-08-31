@@ -73,13 +73,11 @@ const frame = Buffer.alloc(1024, 5);
 const sitResult = processors.sit1024FrameProcessor.processFrame(frame, {
   colHZ: 100,
   file: 'jqbed',
-  pointArr1zero: [],
 });
 assert.strictEqual(JSON.parse(sitResult.jsonData).sitData.length, 1024);
 
 const backResult = processors.backHead1024FrameProcessor.processBackFrame(frame, {
   file: 'carQX',
-  zeroFrame: [],
 });
 assert.strictEqual(JSON.parse(backResult.jsonData).backData.length, 1024);
 

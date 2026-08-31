@@ -23,6 +23,9 @@ const { createServerShutdownOrchestrator } = require('./bootstrap/serverShutdown
 const { createPetCareRuntimeService } = require('../algorithm-channel/petCareRuntimeService');
 const { createControlCommandRouter } = require('./commands/controlCommandRouter');
 const { registerRuntimeCommandHandlers } = require('./commands/registerRuntimeCommandHandlers');
+const {
+  registerCalibrationZeroCommandHandler,
+} = require('./commands/registerCalibrationZeroCommandHandler');
 const { registerSerialControlHandlers } = require('../serial/serialControlService');
 const { createControlCommandService } = require('./commands/controlCommandService');
 const { createHttpApp } = require('./http/httpAppFactory');
@@ -35,6 +38,13 @@ const {
 const { createRuntimeStateStore } = require('./runtime/runtimeStateStore');
 const { createZeroStateStore } = require('./runtime/zeroStateStore');
 const { createZeroCommandService } = require('./runtime/zeroCommandService');
+const {
+  createZeroFrameAdapter,
+  getZeroBaselineForStorage,
+} = require('./runtime/zeroFrameAdapter');
+const {
+  createZeroChannelIdentityResolver,
+} = require('./runtime/zeroChannelIdentityResolver');
 const { createServerRuntimeStateStore } = require('./runtime/runtimeStateStoreFactory');
 const { bindLegacySerialRuntime } = require('../../extensions/built-in-sensors/runtimeBindingsFactory');
 const { createRuntimeStatePatchers } = require('./runtime/runtimeStatePatchFactory');
@@ -154,7 +164,7 @@ const { createServerPathConfig } = require('./serverPathConfig');
 const { isCar, dedupli, totalToN, } = require('../../compatibility/legacyDataUtils');
 const { estimatePointPressure, FILTER_THRESHOLD: PRESSURE_CALIBRATION_FILTER_THRESHOLD } = require('../../../util/pressureCalibration_V2.7.54');
 const { pressSmallBed } = require('@shroom/backend/processing/utilMatrix.js');
-const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, numLessZeroToZero, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine, pressNew12203131 } = require('@shroom/backend/processing/mathUtils.js');
+const { gaussBlur_return, gaussBlur_2, interpSmall, findMax, press6, pressNew1220, press6sit, bytes4ToInt10, arrToRealLine, pressNew12203131 } = require('@shroom/backend/processing/mathUtils.js');
 const { initDb: _initDbFromModule } = require('../storage/dbManager');
 const { createJqbedAlgorithmConfigStore } = require('../algorithm-channel/jqbedAlgorithmConfig');
 const {
@@ -344,12 +354,20 @@ const {
 } = serialPortFilterService;
 
 const zeroStateStore = createZeroStateStore();
-const getZeroState = (key) => zeroStateStore.get(key);
-const setZeroState = (key, value) => zeroStateStore.set(key, value);
-const zeroStateAccessor = (key) => ({
-  get: () => getZeroState(key),
-  set: (value) => setZeroState(key, value),
+const zeroChannelIdentityResolver = createZeroChannelIdentityResolver({
+  getActiveSensorType: () => file,
+  listSerialChannels: appRuntime.displaySystems.listSerialChannels,
 });
+const zeroFrameAdapter = createZeroFrameAdapter({
+  zeroStateStore,
+  resolveChannelIdentity: zeroChannelIdentityResolver.resolveChannelIdentity,
+});
+
+function getZeroFrameForOutputChannel(channel, frame = null) {
+  const channelId = String(frame?.channelId || '').trim()
+    || zeroChannelIdentityResolver.resolveChannelIdentity(channel).channelId;
+  return getZeroBaselineForStorage(zeroStateStore, channelId, frame);
+}
 
 const historyFrameTransformService = createHistoryFrameTransformService({
   HAND_SINGLE_POINT_TYPE,
@@ -369,12 +387,8 @@ const historyFrameTransformService = createHistoryFrameTransformService({
   getRuntime: () => ({
     file: runtimeContext.getSensorType(),
     colHZ: getCollectionState('colHZ'),
-    pointArr1RawZero: getZeroState('pointArr1RawZero'),
-    pointArr1zero: getZeroState('pointArr1zero'),
-    pointArr2RawZero: getZeroState('pointArr2RawZero'),
-    pointArr2zero: getZeroState('pointArr2zero'),
-    pointArr4zero: getZeroState('pointArr4zero'),
   }),
+  getZeroFrameForChannel: getZeroFrameForOutputChannel,
 });
 const {
   buildSmallBed12BCollectionStorageData,
@@ -1432,23 +1446,49 @@ const controlCommandService = createControlCommandService({
 
 let up = 1245, down = 2
 
+function resolveZeroTargetChannelIds({
+  displaySystemId,
+  channelIds,
+  operation,
+} = {}) {
+  if (Array.isArray(channelIds)) return channelIds;
+
+  const activeDisplaySystemId = zeroChannelIdentityResolver.getActiveDisplaySystemId();
+  const targetDisplaySystemId = displaySystemId || activeDisplaySystemId;
+  const targetDisplaySystem = targetDisplaySystemId
+    ? getDisplaySystemById(targetDisplaySystemId)
+    : null;
+  const declared = targetDisplaySystemId === activeDisplaySystemId
+    ? zeroChannelIdentityResolver.listActiveChannelIds()
+    : [];
+  const configured = (targetDisplaySystem?.runtimeDefinition?.runtimeChannels || [])
+    .filter((channel) => channel?.protocol && channel?.id)
+    .map((channel) => String(channel.id));
+  const observed = zeroStateStore.listChannelIds({
+    displaySystemId: targetDisplaySystemId,
+    withSourcesOnly: operation === 'capture',
+  });
+  const resolvedChannelIds = [...new Set([...declared, ...configured, ...observed])];
+  if (!resolvedChannelIds.length && targetDisplaySystemId !== activeDisplaySystemId) {
+    return {
+      channelIds: [],
+      skipped: [{
+        displaySystemId: targetDisplaySystemId,
+        reason: targetDisplaySystem ? 'no-target-channels' : 'unknown-display-system',
+      }],
+    };
+  }
+  return { channelIds: resolvedChannelIds, skipped: [] };
+}
+
 const zeroCommandService = createZeroCommandService({
-  getRuntime: () => ({
-    newArr147: getZeroState('newArr147'),
-    newArr147_2: getZeroState('newArr147_2'),
-    pointArr,
-    pointArr1RawZeroData: getZeroState('pointArr1RawZeroData'),
-    pointArr1zeroData: getZeroState('pointArr1zeroData'),
-    pointArr2,
-    pointArr2RawZeroData: getZeroState('pointArr2RawZeroData'),
-    pointArr2zeroData: getZeroState('pointArr2zeroData'),
-    pointArr3,
-    pointArr3zeroData: getZeroState('pointArr3zeroData'),
-    pointArr4,
-    pointArr4zeroData: getZeroState('pointArr4zeroData'),
-  }),
-  setZeroState,
+  zeroStateStore,
+  resolveTargetChannelIds: resolveZeroTargetChannelIds,
+  getActiveDisplaySystemId: zeroChannelIdentityResolver.getActiveDisplaySystemId,
 });
+// 采零/清零属于实时校准，不走历史/串口 handler 的授权有效期门控；HTTP 与
+// legacy WebSocket 共用这一份已在启动期完成的注册。
+registerCalibrationZeroCommandHandler(controlCommandService, { zeroCommandService });
 
 const webSocketHandlerContext = createWebSocketHandlerContext({
   dependencies: {
@@ -1481,7 +1521,6 @@ const webSocketHandlerContext = createWebSocketHandlerContext({
     totalToN,
     writableNameTxt,
     wsSubscriptions,
-    zeroCommandService,
   },
   mutableAccessors: {
     backAreaSelect: { get: () => backAreaSelect, set: (value) => { backAreaSelect = value; } },
@@ -1509,7 +1548,6 @@ const webSocketHandlerContext = createWebSocketHandlerContext({
   },
   playbackStateAccessor,
   serialPortStateAccessor,
-  zeroStateAccessor,
 });
 
 const attachWebSocketHandlers = createWebSocketHandlerAttacher(webSocketHandlerContext);
@@ -1533,8 +1571,8 @@ const smallBed12BRuntime = createServerSmallBedRuntime({
   smallBed12BType: SMALL_BED_12B_TYPE,
   runtimeContext,
   getLineOrder: () => jqbed,
-  getZeroFrame: () => getZeroState('pointArr1zero'),
-  subtractZero: numLessZeroToZero,
+  zeroStateStore,
+  resolveChannelIdentity: zeroChannelIdentityResolver.resolveChannelIdentity,
   calibration: smallBed12BCalibration,
   getDisplayOptions: () => smallBed12BDisplayOptions,
   getHz: () => getCollectionState('colHZ'),
@@ -1542,9 +1580,6 @@ const smallBed12BRuntime = createServerSmallBedRuntime({
   getEndDate: () => endDate,
   setCurrentPressureFrame: (frame) => {
     pointArr = frame;
-  },
-  setZeroSourceFrame: (frame) => {
-    setZeroState('pointArr1zeroData', frame);
   },
   setCurrentDisplayData: (frame) => {
     newData = frame;
@@ -1580,7 +1615,6 @@ const {
   maskMinzhenMatrixValues,
   newHand,
   normalizeWholeChairFrame,
-  numLessZeroToZero,
   press6sit,
   pressNew1220,
   pressNew12203131,
@@ -1611,21 +1645,9 @@ const {
     db2: { get: () => db2, set: (value) => { db2 = value; } },
     file: { get: () => file, set: (value) => { file = value; } },
     localFlag: { get: () => localFlag, set: (value) => { localFlag = value; } },
-    newArr147: zeroStateAccessor('newArr147'),
-    newArr147_2: zeroStateAccessor('newArr147_2'),
     nowDate: { get: () => nowDate, set: (value) => { nowDate = value; } },
     pointArr: { get: () => pointArr, set: (value) => { pointArr = value; } },
-    pointArr1RawZero: zeroStateAccessor('pointArr1RawZero'),
-    pointArr1RawZeroData: zeroStateAccessor('pointArr1RawZeroData'),
-    pointArr1zero: zeroStateAccessor('pointArr1zero'),
-    pointArr1zeroData: zeroStateAccessor('pointArr1zeroData'),
     pointArr2: { get: () => pointArr2, set: (value) => { pointArr2 = value; } },
-    pointArr2RawZero: zeroStateAccessor('pointArr2RawZero'),
-    pointArr2RawZeroData: zeroStateAccessor('pointArr2RawZeroData'),
-    pointArr2zero: zeroStateAccessor('pointArr2zero'),
-    pointArr2zeroData: zeroStateAccessor('pointArr2zeroData'),
-    pointArr147zero: zeroStateAccessor('pointArr147zero'),
-    pointArr147zero_2: zeroStateAccessor('pointArr147zero_2'),
     port1: { get: () => getManagedSerialPort(serialRoles.SIT) },
     port2: { get: () => getManagedSerialPort(serialRoles.BACK) },
   },
@@ -1644,7 +1666,6 @@ const {
   createDoublePacketParser: handGloveDouble.createHandGloveDoublePacketParser,
   normalizeFiniteFrame,
   bytes4ToInt10,
-  numLessZeroToZero,
   handL,
   handR,
   handRVideo1470506,
@@ -1671,22 +1692,24 @@ const {
   smallBed12BType: SMALL_BED_12B_TYPE,
   minzhenType: MINZHEN_TYPE,
   applyMinzhenBackendGauss,
+  zeroFrameAdapter,
 });
 appRuntime.displaySystems.bindRuntimeChannels({
   serialManager,
   serialParserManager,
   frameOutputPipeline,
   getSensorType: runtimeContext.getSensorType,
+  zeroStateStore,
 });
 
-function colOrSendData(jsonData) {
-  return frameOutputPipeline.publishSit(jsonData);
+function colOrSendData(jsonData, options) {
+  return frameOutputPipeline.publishSit(jsonData, options);
 }
 
 
 
-function colOrSendData1(jsonData) {
-  return frameOutputPipeline.publishBack(jsonData);
+function colOrSendData1(jsonData, options) {
+  return frameOutputPipeline.publishBack(jsonData, options);
 }
 
 
@@ -1695,8 +1718,8 @@ function colOrSendData1(jsonData) {
 
 
 
-function colOrSendData2(jsonData) {
-  return frameOutputPipeline.publishHead(jsonData);
+function colOrSendData2(jsonData, options) {
+  return frameOutputPipeline.publishHead(jsonData, options);
 }
 
 const legacySerialFrameRuntimeBaseContext = {
@@ -1726,7 +1749,6 @@ const legacySerialFrameRuntimeBaseContext = {
   isCar,
   isHandGloveType,
   isSmallBedMatrixType,
-  numLessZeroToZero,
   parseMinzhenSensorFrame,
   publishSystemEvent,
   shouldStoreCollectionFrame,
@@ -1759,7 +1781,6 @@ const { legacySerialRuntimeContext } = bindLegacySerialRuntime({
   },
   runtimeStateAccessor,
   serialRoles,
-  zeroStateAccessor,
   serialParserManager,
 });
 

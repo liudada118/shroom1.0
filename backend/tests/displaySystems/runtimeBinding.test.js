@@ -4,6 +4,9 @@ const {
   createDisplaySystemFrameProcessor,
   createDisplaySystemRuntimeRegistry,
 } = require('../../extension-host');
+const {
+  createZeroFrameAdapter,
+} = require('../../kernel/platform/runtime/zeroFrameAdapter');
 
 (async () => {
 
@@ -55,6 +58,30 @@ const fsLike = {
   },
 };
 
+function createTestZeroStateStore() {
+  const sources = new Map();
+  const baselines = new Map();
+  const identities = new Map();
+  return {
+    sources,
+    identities,
+    setBaseline(channelId, stage, values) {
+      baselines.set(`${channelId}:${stage}`, [...values]);
+    },
+    updateSources(channelId, stages, identity) {
+      sources.set(channelId, Object.fromEntries(
+        Object.entries(stages).map(([stage, values]) => [stage, [...values]]),
+      ));
+      identities.set(channelId, { ...identity });
+    },
+    apply(channelId, stage, values) {
+      const baseline = baselines.get(`${channelId}:${stage}`);
+      if (!baseline || baseline.length !== values.length) return [...values];
+      return values.map((value, index) => Math.max(0, value - baseline[index]));
+    },
+  };
+}
+
 const processor = createDisplaySystemFrameProcessor({
   runtimeChannel,
   fsLike,
@@ -71,6 +98,94 @@ assert.deepStrictEqual(processed.metrics, {
   averagePressure: 110 / 6,
   nonZeroCount: 2,
 });
+
+const zeroStateStore = createTestZeroStateStore();
+const zeroRuntimeBase = {
+  serialRole: 'sit',
+  outputChannel: 'sit',
+  parserChannel: { role: 'sit', sensorType: 'pressure-matrix' },
+  processing: {
+    lineOrder: { source: null },
+    pointOrder: { source: null },
+    algorithm: { type: 'none', enabled: false },
+  },
+};
+const firstDisplayProcessor = createDisplaySystemFrameProcessor({
+  runtimeChannel: {
+    ...zeroRuntimeBase,
+    id: 'first-display:seat',
+    displaySystemId: 'first-display',
+    sensor: { id: 'seat', type: 'pressure-matrix' },
+  },
+  zeroStateStore,
+});
+const secondDisplayProcessor = createDisplaySystemFrameProcessor({
+  runtimeChannel: {
+    ...zeroRuntimeBase,
+    id: 'second-display:seat',
+    displaySystemId: 'second-display',
+    sensor: { id: 'seat', type: 'pressure-matrix' },
+  },
+  zeroStateStore,
+});
+zeroStateStore.setBaseline('first-display:seat', 'processed', [10, 20]);
+zeroStateStore.setBaseline('second-display:seat', 'processed', [80, 120]);
+
+const firstZeroedFrame = firstDisplayProcessor.processFrame([15, 18]);
+const secondZeroedFrame = secondDisplayProcessor.processFrame([90, 150]);
+assert.deepStrictEqual(firstZeroedFrame.data, [5, 0]);
+assert.deepStrictEqual(firstZeroedFrame.sitData, [5, 0]);
+assert.deepStrictEqual(firstZeroedFrame.rawData, [15, 18]);
+assert.deepStrictEqual(firstZeroedFrame.normalizedData, [15, 18]);
+assert.deepStrictEqual(firstZeroedFrame.metrics, {
+  totalPressure: 5,
+  maxPressure: 5,
+  averagePressure: 2.5,
+  nonZeroCount: 1,
+});
+assert.deepStrictEqual(secondZeroedFrame.data, [10, 30]);
+assert.deepStrictEqual(secondZeroedFrame.sitData, [10, 30]);
+assert.deepStrictEqual(zeroStateStore.sources.get('first-display:seat').processed, [15, 18]);
+assert.deepStrictEqual(zeroStateStore.sources.get('second-display:seat').processed, [90, 150]);
+assert.strictEqual(zeroStateStore.identities.get('first-display:seat').sensorId, 'seat');
+
+// builder 的 sensorDefinition.id 历史上等于 displaySystemId。零点 identity
+// 必须从 canonical runtimeChannel.id 取后半段，不能被该旧字段带偏。
+const builderIdentityProcessor = createDisplaySystemFrameProcessor({
+  runtimeChannel: {
+    ...zeroRuntimeBase,
+    id: 'builder-display:sit',
+    displaySystemId: 'builder-display',
+    sensor: { id: 'builder-display', type: 'pressure-matrix' },
+  },
+  zeroStateStore,
+});
+builderIdentityProcessor.processFrame([3, 4]);
+assert.strictEqual(zeroStateStore.identities.get('builder-display:sit').sensorId, 'sit');
+
+const customChannelProcessor = createDisplaySystemFrameProcessor({
+  runtimeChannel: {
+    ...zeroRuntimeBase,
+    id: 'custom-display:armrest-array',
+    displaySystemId: 'custom-display',
+    serialRole: 'armrest-parser',
+    outputChannel: 'armrest',
+    sensor: { id: 'armrest-array', type: 'custom-pressure' },
+  },
+  zeroStateStore,
+});
+zeroStateStore.setBaseline('custom-display:armrest-array', 'processed', [1]);
+const mismatchedCustomFrame = customChannelProcessor.processFrame([7, 9]);
+assert.deepStrictEqual(mismatchedCustomFrame.data, [7, 9]);
+assert.deepStrictEqual(mismatchedCustomFrame.armrestData, [7, 9]);
+assert.strictEqual(
+  zeroStateStore.identities.get('custom-display:armrest-array').outputChannel,
+  'armrest',
+);
+assert.strictEqual(
+  zeroStateStore.identities.get('custom-display:armrest-array').sensorId,
+  'armrest-array',
+);
 
 const protocolProcessor = createDisplaySystemFrameProcessor({
   runtimeChannel: {
@@ -92,6 +207,48 @@ const protocolProcessor = createDisplaySystemFrameProcessor({
 const protocolFrame = protocolProcessor.processFrame([0xaa, 0x55, 0x01, 0x00, 0x02, 0x00]);
 assert.deepStrictEqual(protocolFrame.rawData, [1, 2]);
 assert.deepStrictEqual(protocolFrame.data, [1, 2]);
+
+let droppedSourceUpdates = 0;
+const droppedZeroStateStore = {
+  updateSources() {
+    droppedSourceUpdates += 1;
+  },
+  apply: (channelId, stage, values) => [...values],
+};
+const guardedProcessor = createDisplaySystemFrameProcessor({
+  runtimeChannel: {
+    ...zeroRuntimeBase,
+    id: 'guarded-display:seat',
+    displaySystemId: 'guarded-display',
+    sensor: { id: 'seat', type: 'pressure-matrix' },
+    protocol: {
+      framing: { type: 'fixedLength', frameLength: 4 },
+      decoding: { valueType: 'uint8', byteOffset: 2, valueCount: 2 },
+      validation: { header: [0xaa, 0x55] },
+    },
+  },
+  zeroStateStore: droppedZeroStateStore,
+});
+const droppedManifestFrame = guardedProcessor.processFrame([0xab, 0x55, 1, 2]);
+assert.strictEqual(droppedManifestFrame.dropped, true);
+assert.strictEqual(droppedManifestFrame.runtimeSource, 'display-system');
+
+const droppedFrameAdapter = createZeroFrameAdapter({
+  zeroStateStore: droppedZeroStateStore,
+  resolveChannelIdentity: () => ({
+    channelId: 'legacy-fallback:sit',
+    displaySystemId: 'legacy-fallback',
+    sensorId: 'sit',
+    sensorType: 'legacy-fallback',
+    outputChannel: 'sit',
+  }),
+});
+droppedFrameAdapter.process('sit', droppedManifestFrame);
+assert.strictEqual(
+  droppedSourceUpdates,
+  0,
+  'a dropped manifest frame must not be reclassified as legacy or update zero sources',
+);
 
 const jsAlgorithmProcessor = createDisplaySystemFrameProcessor({
   runtimeChannel: {

@@ -70,6 +70,25 @@ describe('CommandClient', () => {
     expect(commands[0].payload.roles).toEqual(['sit', 'back']);
   });
 
+  it('preserves dynamic zero targets while mapping a legacy control message', () => {
+    const [command] = commandFromLegacyFields({
+      resetZero: true,
+      displaySystemId: 'wheelchair-v2',
+      channelIds: ['wheelchair-v2:seat-left', 'wheelchair-v2:seat-right'],
+    });
+
+    expect(command.type).toBe('calibration.zero');
+    expect(command.payload).toEqual({
+      enabled: true,
+      displaySystemId: 'wheelchair-v2',
+      channelIds: ['wheelchair-v2:seat-left', 'wheelchair-v2:seat-right'],
+    });
+  });
+
+  it('rejects an explicit empty zero target instead of treating it as all channels', () => {
+    expect(() => commandFromLegacyFields({ resetZero: false, channelIds: [] })).toThrow(/must not be empty/);
+  });
+
   it('preserves backend error code and requestId', async () => {
     const client = new CommandClient({
       fetchImpl: async () => ({

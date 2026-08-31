@@ -19,7 +19,28 @@
     "collection.control": { "required": ["active"] },
     "export.csv": { "required": ["date"] },
     "runtime.configure": { "required": [] },
-    "calibration.zero": { "required": ["enabled"] },
+    "calibration.zero": {
+      "required": ["enabled"],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "displaySystemId": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^:\\s](?:[^:]*[^:\\s])?$"
+        },
+        "channelIds": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 3,
+            "pattern": "^[^:\\s](?:[^:]*[^:\\s])?:[^:\\s](?:[^:]*[^:\\s])?$"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
     "analysis.selection": { "required": [] },
     "license.activate": { "required": ["key"] },
     "license.refresh": { "required": [] },

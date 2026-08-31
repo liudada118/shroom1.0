@@ -3,12 +3,12 @@
  *
  * 负责从 legacy runtime 中拆出的纯字节矩阵协议：
  * 72/144 低密度坐垫帧、256 单帧矩阵、4096 大床矩阵。
- * 这里只做字节读取、零点扣除、线序修正和 payload 构造，不直接发送 WebSocket。
+ * 这里只做字节读取、线序修正和 payload 构造，不直接发送 WebSocket。
+ * 零点由统一输出边界按 channelId 应用。
  */
 function createLegacyGenericMatrixFrameProcessor({
   isCar,
   isSmallBedMatrixType,
-  numLessZeroToZero,
   zeroLineMatrix,
 }) {
   /**
@@ -23,18 +23,6 @@ function createLegacyGenericMatrixFrameProcessor({
       frame[index] = buffer.readUInt8(index);
     }
     return frame;
-  }
-
-  /**
-   * 按零点帧扣除压力值，并把负值强制归零。
-   * @param {number[]} frame 原始或线序修正后的压力帧。
-   * @param {number[]} zeroFrame 零点帧。
-   * @returns {number[]} 扣零后的压力帧。
-   */
-  function subtractZeroFrame(frame, zeroFrame = []) {
-    return Array.isArray(zeroFrame) && zeroFrame.length
-      ? frame.map((value, index) => numLessZeroToZero(value - zeroFrame[index]))
-      : frame;
   }
 
   /**
@@ -71,18 +59,16 @@ function createLegacyGenericMatrixFrameProcessor({
    * 处理 72/144 字节低密度坐垫矩阵帧。
    * @param {Buffer | Uint8Array | number[]} data 原始串口帧。
    * @param {object} context 当前运行时上下文。
-   * @returns {null | {frame: number[], zeroSourceFrame: number[], jsonData: string}} 处理结果。
+   * @returns {null | {frame: number[], jsonData: string}} 处理结果。
    */
   function processLowDensitySitFrame(data, context) {
     const buffer = Buffer.from(data);
     if (buffer.length !== 72 && buffer.length !== 144) return null;
 
-    const zeroSourceFrame = readUInt8Frame(buffer);
-    const frame = subtractZeroFrame(zeroSourceFrame, context.pointArr1zero);
+    const frame = readUInt8Frame(buffer);
 
     return {
       frame,
-      zeroSourceFrame: [...zeroSourceFrame],
       jsonData: buildSitPayload(frame, context),
     };
   }

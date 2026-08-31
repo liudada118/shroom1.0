@@ -32,7 +32,6 @@ function buildLegacyMutableAccessors(mutableBindings = {}) {
  * @param {Record<string, { get: Function, set: Function }>} options.mutableBindings 旧变量 getter/setter。
  * @param {Function} options.runtimeStateAccessor 通用 runtime 状态 accessor 工厂。
  * @param {object} options.serialRoles 串口角色常量。
- * @param {Function} options.zeroStateAccessor 零点状态 accessor 工厂。
  * @returns {{ baseContext: object, accessors: object }} legacy binding 入参。
  */
 function createLegacySerialRuntimeContext({
@@ -42,7 +41,6 @@ function createLegacySerialRuntimeContext({
   mutableBindings,
   runtimeStateAccessor,
   serialRoles,
-  zeroStateAccessor,
 }) {
   const accessors = createLegacySerialFrameRuntimeAccessors({
     collectionStateAccessor,
@@ -50,7 +48,6 @@ function createLegacySerialRuntimeContext({
     mutableAccessors: buildLegacyMutableAccessors(mutableBindings),
     runtimeStateAccessor,
     serialRoles,
-    zeroStateAccessor,
   });
 
   return {

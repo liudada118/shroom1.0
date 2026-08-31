@@ -29,6 +29,7 @@ function createServerFramePipeline({
   smallBed12BType,
   minzhenType,
   applyMinzhenBackendGauss,
+  zeroFrameAdapter,
 }) {
   const collectionFrameStorage = createCollectionFrameStorageService({
     getSensorType: runtimeContext.getSensorType,
@@ -52,6 +53,7 @@ function createServerFramePipeline({
     getSensorType: runtimeContext.getSensorType,
     minzhenType,
     applyMinzhenBackendGauss,
+    zeroFrameAdapter,
   });
 
   return {

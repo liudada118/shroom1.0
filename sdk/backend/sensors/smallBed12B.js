@@ -243,7 +243,7 @@ function buildRealtimeFrameFromBuffer(buffer, {
     ? lineOrder(adcFrame)
     : adcFrame;
 
-  const zeroedFrame = Array.isArray(zeroFrame) && zeroFrame.length
+  const zeroedFrame = Array.isArray(zeroFrame) && zeroFrame.length === orderedFrame.length
     ? orderedFrame.map((value, index) => (
       typeof subtractZero === 'function'
         ? subtractZero(value - (zeroFrame[index] || 0))

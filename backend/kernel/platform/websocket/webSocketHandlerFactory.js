@@ -29,7 +29,10 @@ function sendCommandResultAck(ws, message, result, logger) {
     ok: !error && result?.handled === true,
     code: error?.code,
     message: error?.message || error?.error,
-    data: error ? undefined : { handlers: result?.results?.map((item) => item.name) || [] },
+    data: error ? undefined : {
+      handlers: result?.results?.map((item) => item.name) || [],
+      results: result?.results || [],
+    },
   }), logger);
 }
 
@@ -86,7 +89,6 @@ function createWebSocketHandlerAttacher(ctx) {
       server,
       totalToN,
       wsSubscriptions,
-      zeroCommandService,
     } = ctx;
 
     if (ctx.serverOpened) {
@@ -109,14 +111,12 @@ function createWebSocketHandlerAttacher(ctx) {
       publishSystemEvent,
       runtime: ctx,
       totalToN,
-      zeroCommandService,
     });
 
     controlCommandService.registerHandler({
       name: 'history-compatibility',
       when: (message) => (
         message.variety != null ||
-        message.resetZero != null ||
         message.value != null ||
         message.backIndex != null ||
         message.sitIndex != null ||

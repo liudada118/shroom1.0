@@ -7,13 +7,11 @@
  * @param {object} options 依赖。
  * @param {Function} options.gloves0123Res 手套原始点位整理函数。
  * @param {Function} options.gloves0123 手套展示点位映射函数。
- * @param {Function} options.publishSystemEvent 系统事件发布函数。
  * @returns {{ processSit262Frame: Function }} 处理器。
  */
 function createLegacyGloveFrameProcessor({
   gloves0123Res,
   gloves0123,
-  publishSystemEvent,
 }) {
   function processSit262Frame(buffer, {
     port1,
@@ -32,12 +30,11 @@ function createLegacyGloveFrameProcessor({
       sitFlag: port1?.isOpen,
       backFlag: port2?.isOpen,
     };
-    publishSystemEvent(JSON.stringify(payload));
-
     return {
       pointArr,
       rotate,
       payload,
+      jsonData: JSON.stringify(payload),
     };
   }
 

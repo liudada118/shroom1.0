@@ -757,13 +757,14 @@
 	- backClose
 	- headClose
 	- sensorClose
-- zero 状态
-	- pointArr1zero
-	- pointArr2zero
-	- pointArr4zero
-	- pointArr147zero
-	- raw zero data
-	- mapped zero data
+- zero 状态（`Map<channelId, entry>`）
+	- identity：displaySystemId / sensorId / outputChannel
+	- sources：decoded / normalized / processed / mapped
+	- baselines：decoded / normalized / processed / mapped
+	- capture / clear：按展示系统或精确 channelIds
+	- legacy adapter：按字段语义返回 `zeroedStages`，同步内部状态与发布值
+	- history：按 `zeroStorageStage` 保存与 pressureData 同阶段的 zeroFrame
+	- smallBed12B：线序后的 1024 点 ADC 在 decoded 阶段扣零，再做非线性 kPa 换算
 
 ## 测试
 - 测试入口

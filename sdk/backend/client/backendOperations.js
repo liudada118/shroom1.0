@@ -25,9 +25,9 @@ const BACKEND_OPERATIONS = [
   },
   {
     domain: 'zero',
-    commands: ['resetZero'],
+    commands: ['calibration.zero', 'resetZero'],
     sdk: ['zeroCalibrator.captureBaseline', 'zeroCalibrator.clearBaseline', 'zeroCalibrator.apply'],
-    description: '清零帧记录、清零后压力矩阵计算。',
+    description: '按 displaySystemId/channelIds 精确记录或清除零点帧，并兼容 legacy resetZero。',
   },
   {
     domain: 'capture',

@@ -2,7 +2,8 @@
  * BACK/HEAD 1024 字节矩阵帧处理器。
  *
  * 负责靠背和头枕单帧矩阵链路：
- * 原始字节读取 -> 区域线序转换 -> 零点扣除 -> 实时 payload 构造。
+ * 原始字节读取 -> 区域线序转换 -> 实时 payload 构造。
+ * 零点在统一 frame output 边界按 channelId 应用。
  */
 function createBackHead1024FrameProcessor(deps) {
   const {
@@ -15,7 +16,6 @@ function createBackHead1024FrameProcessor(deps) {
     handSinglePoint,
     isCar,
     normalizeWholeChairFrame,
-    numLessZeroToZero,
     wowBackLine,
     wowhead,
     yanfeng10back,
@@ -65,18 +65,6 @@ function createBackHead1024FrameProcessor(deps) {
   }
 
   /**
-   * 扣除零点帧，并将负值归零。
-   * @param {number[]} frame 原始矩阵。
-   * @param {number[]} zeroFrame 零点矩阵。
-   * @returns {number[]} 扣零后的矩阵。
-   */
-  function applyZero(frame, zeroFrame = []) {
-    return Array.isArray(zeroFrame) && zeroFrame.length
-      ? frame.map((value, index) => numLessZeroToZero(value - zeroFrame[index]))
-      : frame;
-  }
-
-  /**
    * 构造 BACK/HEAD 实时输出 payload。
    * @param {'back'|'head'} channel 业务通道。
    * @param {number[]} frame 矩阵数据。
@@ -99,17 +87,15 @@ function createBackHead1024FrameProcessor(deps) {
    * 处理一帧 BACK 1024 字节矩阵数据。
    * @param {Buffer | Uint8Array | number[]} data 原始帧。
    * @param {object} context 运行时上下文。
-   * @returns {null | {frame:number[], zeroSourceFrame:number[], jsonData:string}} 处理结果。
+   * @returns {null | {frame:number[], jsonData:string}} 处理结果。
    */
   function processBackFrame(data, context) {
     const buffer = Buffer.from(data);
     if (buffer.length !== 1024) return null;
 
-    const zeroSourceFrame = mapBackFrame(readUInt8Frame(buffer), context.file);
-    const frame = applyZero(zeroSourceFrame, context.zeroFrame);
+    const frame = mapBackFrame(readUInt8Frame(buffer), context.file);
     return {
       frame,
-      zeroSourceFrame: [...zeroSourceFrame],
       jsonData: JSON.stringify(buildPayload('back', frame, context)),
     };
   }
@@ -118,17 +104,15 @@ function createBackHead1024FrameProcessor(deps) {
    * 处理一帧 HEAD 1024 字节矩阵数据。
    * @param {Buffer | Uint8Array | number[]} data 原始帧。
    * @param {object} context 运行时上下文。
-   * @returns {null | {frame:number[], zeroSourceFrame:number[], jsonData:string}} 处理结果。
+   * @returns {null | {frame:number[], jsonData:string}} 处理结果。
    */
   function processHeadFrame(data, context) {
     const buffer = Buffer.from(data);
     if (buffer.length !== 1024) return null;
 
-    const zeroSourceFrame = mapHeadFrame(readUInt8Frame(buffer), context.file);
-    const frame = applyZero(zeroSourceFrame, context.zeroFrame);
+    const frame = mapHeadFrame(readUInt8Frame(buffer), context.file);
     return {
       frame,
-      zeroSourceFrame: [...zeroSourceFrame],
       jsonData: JSON.stringify(buildPayload('head', frame, context)),
     };
   }

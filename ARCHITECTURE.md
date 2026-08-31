@@ -95,6 +95,35 @@ SDK 的 typed `sensor.frame` 事件保留完整 envelope，`FrameStore` 以 `cha
 也已改为检查 `type/outputChannel/payload.value`；本地 `ShroomSensorSDK` 串口 session 不经过
 WebSocket envelope，仍使用自身的 `frame.channel/frame.pressureData` 契约。
 
+## 2026-08-29 零点状态迁移到 canonical channel
+
+零点状态不再由按串口角色命名的一组全局数组承载。`zeroStateStore` 现在使用
+`Map<channelId, { identity, sources, baselines }>`：每个完整
+`<displaySystemId>:<sensorId>` 分别保存 `decoded/normalized/processed/mapped` 四个阶段的最新未扣零
+源帧与捕获基准。所有数组在写入、读取、捕获和快照时复制；没有源帧的通道不会生成空基准，
+基准与当前帧长度不一致时保持原帧，避免不同协议或展示系统切换后出现 `NaN`。
+
+Manifest runtime 用 runtime plan 的精确 `channelId` 记录 `decoded/normalized/processed` 源帧，
+只对算法完成后的 `processed` 阶段扣零，并用扣零结果重新计算压力指标。仍输出内部 legacy payload
+的内置处理器不再持有任何零点字段；`zeroFrameAdapter` 按 payload 实际语义选择 source stage，返回
+发布帧和 `zeroedStages`，让处理器内部的 `pointArr/pointArr2/pointArr4` 状态与最终发布值保持一致。
+大多数旧协议在线序、标定或映射后记录并扣除同阶段基准；`smallBed12B` 是明确例外：它在线序完成后
+记录 1024 点 ADC（`decoded`）源帧，先扣 ADC 基准，再进入非线性的 `estimatePointPressure`，并用
+`zeroApplied` 防止输出边界二次扣除；16x16 展示仍从同一份 1024 点 ADC 基准生成。没有 manifest 的
+旧传感器使用稳定兼容身份 `${sensorType}:${outputChannel}`。`runtimeSource` 区分 manifest 与 legacy
+存储路径，`zeroStorageStage` 让历史记录中的 `zeroFrame` 与实际保存的压力数组使用同一阶段。
+这些内部 `*Data` 字段不会越过网络边界，客户端仍只消费上一节定义的 `sensor.frame.payload`。
+
+`calibration.zero` 保持一个命令类型：`enabled=true` 捕获，`enabled=false` 清除；可选
+`displaySystemId` 或精确 `channelIds`。省略目标时只作用于当前展示系统已声明或已收到源帧的通道，
+显式空数组、格式错误、跨展示系统、未知展示系统、无活动系统或最终没有受影响通道都会 fail closed：
+HTTP 返回 `INVALID_COMMAND`（400）或 `COMMAND_EXECUTION_FAILED`（409），不会再用 accepted ACK
+掩盖零影响操作。身份规则与 manifest 一致：组件非空、首尾无空白且不含 `:`，允许 Unicode 和
+内部空格。旧 `{ resetZero }` 仍可进入同一服务；公共 handler 在控制命令服务初始化时注册，HTTP
+不再依赖 WebSocket `openServer()` 的启动时机，且仍独立于授权到期门控。HTTP 与带 requestId 的
+legacy WebSocket ACK 都返回 affected/skipped 结果。历史入库按帧自身 `channelId` 和
+`zeroStorageStage` 获取同阶段基准；HEAD/BACK 各自独立，HEAD 130 分片也改回 HEAD publisher。
+
 ## 2026-08-29 WebSocket 控制面归位与目录收敛
 
 `backend/kernel/platform/websocket/` 已从 10 个生产 JavaScript 文件收敛为 5 个，只保留共享
@@ -2118,6 +2147,8 @@ flowchart LR
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-29 | `calibration.zero` 命令契约 fail-closed | 严格校验 enabled/displaySystemId/channelIds，空目标、未知目标、无活动系统和零影响操作不再返回 accepted；公共 handler 在 HTTP/WS 共享控制服务初始化期注册，ACK 回传完整结果，SDK 与客户端保留精确目标。 |
+| 2026-08-29 | 零点状态与命令完成 `channelId` 迁移 | 删除固定零点数组和 legacy runtime/accessor 读写；动态/旧协议统一按完整 channelId 保存四阶段 source/baseline，支持展示系统或精确通道定向捕获/清除。修复 HEAD/BACK 串基准、BACK/HEAD 130 误用 SIT 基准、HEAD 130 误发 BACK 及清零受授权门控问题；新增仓库、命令、输出适配与多展示系统隔离测试。 |
 | 2026-08-29 | WebSocket 传感器帧收敛为唯一契约 | 实时/回放均只发 `sensor.frame` schema v1，通道身份统一为 `displaySystemId:sensorId`，删除顶层旧数据字段、双发 `_pressure` 帧及其虚假通道元数据；前端在接收边界过渡。 |
 | 2026-08-29 | 客户端与前端 SDK 完成 `sensor.frame` 同步迁移 | 新增统一 decoder/selector，所有活跃客户端消费者改读 `payload.value/stages`；canonical 帧不再投影顶层 `sitData/backData/headData/data`，wildcard 按 `displaySystemId` 隔离且 Home 单次解码。Manifest 兼容旧合并多通道消息，SDK 支持完整 `channelId` 精确订阅。 |
 | 2026-08-29 | WebSocket 目录收敛为纯传输边界 | 生产文件由 10→5；命令、历史分析和运行态适配分别归入 commands/playback/runtime，心跳与 JSON 解码合并。HTTP/WS 分工、端口、协议、SDK、Electron 入口和历史格式不变。 |
@@ -2543,7 +2574,7 @@ flowchart LR
 
 1. **传感器数据采集流程**
     - 硬件传感器通过 USB 串口发送原始二进制数据帧 → `sdk/backend/serial` 与 `sdk/backend/protocol` 负责端口、切帧和解码 → `backend/extensions/built-in-sensors` 按现有传感器语义处理 → `backend/kernel/realtime` 进入稳定实时管线 → `backend/kernel/platform/websocket` 推送 → 前端页面和渲染器更新。协议、线序和通道含义未因目录迁移改变。
-    - `smallBed12B`（小床检测 12B）使用 `1500000` 波特率和独立帧尾 `AA 00 55 00 03 00 99 00`，`@serialport/parser-delimiter` 按 8 字节帧尾切分后得到 2048 字节 payload；`server.js` 按 1024 个 `uint16LE` 解析为 32x32 ADC 矩阵，复用 `jqbed(pointArr)` 小床检测线序并清零后，立即调用 `estimatePointPressure` 将整帧转换为 kPa 压强矩阵并统一保留 1 位小数，后续 `sitData/rawSitData/pressureData`、左侧统计、回放、采集入库和 CSV 下载都使用这份 kPa 数据。该类型不加入 `jqbed/smallBed` 生命体征集合，因此前端 `Aside.jsx` 仅展示 Pressure Area 与 Pressure Data，不触发 Python 算法数据面板；左侧 Pressure Data / Pressure Area 统计使用 3D 插值和高斯处理前的 32x32 压强矩阵值。
+    - `smallBed12B`（小床检测 12B）使用 `1500000` 波特率和独立帧尾 `AA 00 55 00 03 00 99 00`，`@serialport/parser-delimiter` 按 8 字节帧尾切分后得到 2048 字节 payload；`server.js` 按 1024 个 `uint16LE` 解析为 32x32 ADC 矩阵并复用 `jqbed(pointArr)` 小床检测线序。该协议的零点必须在线序后、非线性压强换算前处理：运行时把完整 1024 点有序 ADC 记录为当前 channelId 的 `decoded` source，捕获/应用同阶段 baseline 后再调用 `estimatePointPressure` 转换为保留 1 位小数的 kPa 矩阵；输出以 `zeroApplied` 标记已扣零，避免统一边界再次扣除。16x16 模式也从这份已扣零的 1024 点 ADC 矩阵抽取，而不是捕获 256 点展示帧。网络端只发布 canonical `payload.value/stages`，采集、回放和 CSV 继续使用同一份 kPa 数据。该类型不加入 `jqbed/smallBed` 生命体征集合，因此前端 `Aside.jsx` 仅展示 Pressure Area 与 Pressure Data，不触发 Python 算法数据面板；左侧 Pressure Data / Pressure Area 统计使用 3D 插值和高斯处理前的 32x32 压强矩阵值。
     - `smallBed12B` 的标题栏新增 `展示设置`，实时矩阵可在 32x32 与 16x16 间切换；16x16 模式会按当前原始数据展示方向选择 2x2 块取点位置，前端通过 `smallBed12BDisplayOptions` 下发给后端，`server.js` 在串口入口转换为 kPa 后先把 32x32 转为原始数据显示方向，再从这份 32x32 展示矩阵按 2x2 抽点为 16x16，并用 `matrixOrientation: 'transposed'` 标记该帧已是展示方向；采集入库和 CSV 下载直接沿用实时展示尺寸与方向。12B 仅保留原始数据展示模式，前端切换到该系统时会强制使用 `numoriginal`，不再提供 3D 展示模式。`client/src/page/home/util.js` 的原始矩阵转置入口会按方阵长度自动识别 32x32 或 16x16；遇到已标记为展示方向的 12B 16x16 帧时不再二次转置。
     - `smallBed12B` 的采集按钮现在先打开 `Title.jsx` 采集配置弹窗；用户可设置采集名称、特征标签和入库频率。矩阵尺寸不再在采集弹窗里单独设置，而是跟随实时 `展示设置`，避免实时展示、采集入库和 CSV 下载尺寸不一致。
     - `handSinglePoint`（32*32(检测点)）沿用 `hand` 的单串口 32x32 / 1024 点协议和默认 `1000000` 波特率，实时串口数据通过 `@shroom/backend/processing` 中的 `handSinglePoint()` 按 1-based 点位表重排一次：先输出 481-992，每 32 点一行；再输出 449-1 的 15 行倒序块；最后输出 993-1024。WebSocket 展示、采集入库和 CSV 下载都使用这份后端处理后的 1024 点矩阵，前端不再参与线序转换；前端复用 `hand` 的 `CanvasHand` 渲染链路和 `normal` / `numoriginal` 模式，授权页和密钥脚本使用独立 key `handSinglePoint`，密钥配置页归入“精密”分组；CSV 下载按语言使用 `检测点` / `detection` 文件名前缀，并新增 `检测点` / `detectionPoint` 列写入 1024 点矩阵的最后一个点。
@@ -2551,8 +2582,8 @@ flowchart LR
     - 当系统类型为 `petCare` / `petCareMini` 时，`server.js` 先按 `jqbed` 线序将 32x32 数据重排，再以 50Hz（20ms）分别调用 `python/app/petCare/pet_care_wrapper` / `pet_care_wrappermini`；算法输出通过 `python/app/onbed_filter_example.py` 的 JSON-line RPC 回传给 Electron，前端 Title/Home/Aside/License 复用宠物看护链路展示呼吸率、姿态、体动、信号质量、模拟心率和压力系数；其中 `Aside.jsx` 会在前端层对 `petCareMini` 的离床状态（`petInBed=0` 或 `posture_state=0`）做展示归一化，强制将面板上的 `pressure_coefficient` 显示为 `0.00`，并依据呼吸频率在前端生成 `55-100` 区间的模拟心率替换原来的 SNR 展示；为避免心率跳变过快，模拟心率现在按 1 秒节拍更新一次，其余呼吸、姿态和质量数据仍保持实时刷新；同时 `server.js` 关闭了 `petCareMini` 的 `[petCareMini] algorithm result` 周期性信息日志，避免运行期刷屏。
     - 当系统类型为 `hand0205` / `hand0205Double` / `handGlove115200` / `handGloveFullPacket` 且前端处于普通 3D 遥操模式时，`Home.jsx` 使用模型渲染矩阵继续驱动手部姿态与手指弯曲，但 Aside 面板中的 `meanPres`、`maxPres`、`totalPres`、`point` 以及 Pressure Area / Pressure Data 图表改为直接基于原始 256 点矩阵（`realArr` / `rawPressureData`）计算和渲染，避免统计值被映射后的控制数据覆盖。
     - `hand0205Double`（触觉手套2）是独立于旧 `hand0205 copy.jsx` 的双手 3D 展示系统，前端使用新增 `client/src/components/three/hand0205Double.jsx`：左手继续沿用 `sitData/changeHandAngle/calibration` 旧手套接口，右手由 `backData` 分支调用 `rightData/changeRightHandAngle/calibrationRight` 驱动；右手模型从同一个 `hand1.glb` 克隆并设置镜像缩放，因此旧触觉手套系统和单手左右切换行为不受影响。`Title.jsx` 主传感器下拉与 `License.jsx` 授权配置页已恢复该系统入口；标题栏新增“一键连接双手套”，后端自动打开两个可用手套串口，并按每包第二个字节 `01=左手`、`02=右手` 将任意串口收到的数据路由到对应左右手通道。前端在双手模式下优先使用当前包的 `handSide` 区分左右手校准和姿态接口，`hand0205Double.jsx` 会把 147/256 点控制数据补成手形 32x32 渲染源，并在收到四元数/弯折数据时立即作用到左右手模型。
-    - 触觉手套、触觉足底和 robot 类触觉上衣清零后，后端实时包会额外下发或优先保存 `rawPressureData` 作为清零后的压力矩阵；`Home.jsx` 的侧栏统计、Pressure Data 图表和 2D 数字模式优先读取该字段，右手 `backData` 清零后也会立即反映到前端显示。采集入库时，`server.js` 对 `hand0205` / `hand0205Double` / `handGlove115200` / `handGloveFullPacket` / `footVideo` / `robot*` 改为保存 `{ pressureData, rotate, zeroFrame }` 对象格式，其中 `pressureData` 是清零后的压力矩阵，`zeroFrame` 是用户点击清零时的基准帧；历史回放和 CSV 导出继续兼容旧数组格式。
-    - 右手旧手套实时路径会在映射到 3D 模型前保留原始 256 点矩阵，并用独立的 `pointArr2RawZero` 作为右手 2D 数字/统计的清零基准；`Home.jsx` 只有在 `rawPressureData` 长度达到 256 时才使用该字段，否则回退到 `realArr`，避免右手 2D 数字误读 3D 映射数组后只显示少量点。
+    - 触觉手套、触觉足底和 robot 类触觉上衣仍在后端内部保留 `rawPressureData` 兼容阶段；统一输出边界按各字段的实际含义记录 `decoded/processed/mapped` source，并把同阶段清零结果投影为 canonical `payload.stages.calibrated`。`Home.jsx` 通过统一 decoder 读取该阶段，右手与左手、BACK 与 HEAD 不再共享基准。采集入库仍保存 `{ pressureData, rotate, zeroFrame }` 对象格式，其中 `pressureData` 是清零后的压力矩阵，`zeroFrame` 通过帧上的 `zeroStorageStage` 读取与 `pressureData` 匹配的阶段基准；历史回放和 CSV 导出继续兼容旧数组格式。
+    - 右手旧手套实时路径会在映射到 3D 模型前保留原始 256 点矩阵；其 decoded/processed/mapped 基准均保存在右手 channelId 对应的 store entry，不再使用按左右串口命名的全局变量。客户端只有在 canonical calibrated 阶段长度达到 256 时才把它用于 2D 数字/统计，否则回退 decoded 阶段，避免误读 3D 映射数组后只显示少量点。
     - 手套类系统在 200Hz 采集时仍按原始采样频率写入 SQLite 历史数据，但 `server.js` 会把实时 WebSocket 展示推送限制到约 60fps，并移除手套高频路径上的逐帧 `console.log` / 入库成功日志，降低 Electron 主进程和前端渲染压力，避免采集时 UI 卡顿。
     - 当系统类型为 `handGloveFullPacket` 时，`server.js` 在 `AA 55 03 99` 分隔符后按 274 字节整包解析：前 2 字节为帧号与类型（当前按 `01` 右手、`02` 左手路由），中间 256 字节为手套压力矩阵，末尾 16 字节陀螺仪数据暂不参与渲染；解析后按整包协议专用的左右手 1-based 点位表映射到固定 `15x13`（195 点）数组：前 4 行为手指，第 5 行为指腹（非指腹格补 0），后 8 行为手掌（掌面空白格补 0）。`mappedArr195` 专用于原始数据视图的规则排布，`realArr` / `rawPressureData` 保留原始 256 点并继续供 `num` 2D 数字模式以 `16x16` 高速矩阵显示，`sitData` / `backData` 专用于旧手套 3D 模型并承载转换后的 32x32（1024 点）矩阵；前端会跳过整包手套的旧 `hand0205` 原始数据二次映射路径，避免 256/195/1024 三种数据形态互相覆盖。
     - 当系统类型为 `hand0205` / `handGlove115200` / `handGloveFullPacket` 且前端处于 3D `skin` 模式时，`client/src/components/video/hand.jsx` 继续沿用现有 `ndata1` 32×32 数据格式、`sitData/changeColor` ref 接口和 `CanvasTexture` 贴图链路，但热力图生成层由原来的 `HeatmapCanvas.changeHeatmap()` 切换为 `WebGLCanvas.render()`：为避免模型热力图全透明且保持原有 size 进度条语义不变，WebGL 输入改为复用旧 `HeatmapCanvas` 的强度缩放与补边预处理（包含固定 `*10` 强度放大和补零插值），并将滑杆 `size` 按旧 Canvas 圆形阴影扩散语义换算为 WebGL 半径后，再用单张离屏 WebGL canvas 生成 1024×1024 热力图并通过 `drawImage()` 回贴到原有手部纹理 canvas，以降低高频场景下的 CPU 逐帧绘制压力。
@@ -2680,6 +2711,7 @@ flowchart LR
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-29 | codeOpi | 零点状态、处理链与命令按 canonical channelId 动态化 | `zeroStateStore` 改为按完整 channelId 保存四阶段 source/baseline，Manifest processor 与 legacy 输出边界统一接入；删除所有固定零点字段、runtime accessor 和处理器内扣零。`calibration.zero` 支持 display/channel 定向且旧布尔命令兼容，历史入库按帧身份取基准；修复 BACK/HEAD 串零、130 分片错通道和授权门控静默跳过。后端 55 个测试文件、客户端命令测试与 SDK 命令测试通过。 |
 | 2026-08-28 | codeOpi | 归位运行产物并收敛 platform runtime/WebSocket | 根 `dist` 保留；开发态 CSV/报告/上传和工具导出进入忽略的 `runtime`，11 个文件迁移前后 SHA-256 一致；移除无引用旧 `project`，人工 legacy runtime 迁入测试区；platform runtime 9→7、WebSocket 13→10，未改固定入口、SDK、协议或历史格式。 |
 | 2026-08-28 | codeOpi | 扩展宿主二级归类并修复版本历史数据源 | 将 19 个 JavaScript 宿主模块按 `manifest/runtime/workspace` 分组，稳定入口与导出名不变；`VersionHistory` 构建时直接消费 `release-notes/windows/*.md`，新增解析与语义排序测试；补生成物忽略规则，已有报告随后在用户确认下迁移，数据库和发布产物未动。 |
 | 2026-08-28 | codeOpi | 完成后端物理收拢并移除旧路径兼容层 | `backend` 一级目录从 22 个降到 7 个，稳定链路归入 `kernel`、扩展机制归入 `extension-host`、内置传感器归入 `extensions`、历史工具归入 `compatibility`；删除 35 个薄转发文件，Electron 固定入口和 SDK 保持不变。 |
@@ -3068,6 +3100,8 @@ flowchart LR
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-29 | codeOpi | 缺陷修复 / 契约强化 | `calibration.zero` schema 与服务端统一严格校验动态目标；空/未知/无活动/零影响命令 fail closed。零点 handler 前移到 HTTP/WS 共用控制服务初始化路径，WS ACK 补完整 results，主客户端切换系统时显式携带目标 displaySystemId，后端 SDK 事件保留 target。 |
+| 2026-08-29 | codeOpi | 优化重构 / 缺陷修复 | 零点状态从固定全局数组迁移为 `Map<channelId,...>`；Manifest 与 legacy 帧都记录未扣零 source 并按精确通道应用 baseline，命令支持 `displaySystemId/channelIds`。删除旧零点 accessor/处理器耦合，修复 HEAD/BACK 基准串用、BACK/HEAD 130 误读 SIT、HEAD 130 错发 BACK，以及清零被历史授权门控静默跳过。 |
 | 2026-08-29 | codeOpi | 破坏性契约收敛 / 用户已确认 | WebSocket 传感器数据删除 `sitData/backData/headData/*Data` 与双发 `_pressure` 格式，唯一发布 `sensor.frame` schema v1；订阅键和通道 API 统一为 `displaySystemId:sensorId`。前端入口完成解码迁移；未修改 SDK、Electron 固定入口、硬件协议、线序/标定和历史格式。 |
 | 2026-08-29 | codeOpi | 优化重构 / 协议迁移 | 客户端、manifest 渲染链和 `@shroom/frontend` 统一消费 `sensor.frame` schema v1 的 `payload.value/stages`；旧顶层 `sitData/backData/headData` 收口到 decoder 兼容输入。补完整 channelId 订阅、展示系统隔离、旧合并多通道路由及新旧协议测试，并同步后端 SDK 契约与示例。 |
 | 2026-08-29 | codeOpi | 优化重构 / 职责归位 | WebSocket 生产目录由 10 个文件收敛为 5 个：控制命令归入 `platform/commands`，历史分析归入 `kernel/playback`，旧上下文适配归入 `platform/runtime`，心跳与 JSON 解码合并。保留单端口、订阅、实时/回放推送和旧命令兼容；未改 SDK、Electron 固定入口、硬件协议、线序/标定或历史格式。 |

@@ -3,8 +3,9 @@ const {
   createServerFramePipeline,
 } = require('../../kernel/realtime/framePipelineFactory');
 
+let activeSensorType = 'jqbed';
 const runtimeContext = {
-  getSensorType: () => 'jqbed',
+  getSensorType: () => activeSensorType,
   getDatabase: (channel) => `${channel || 'sit'}Db`,
 };
 const queued = [];
@@ -17,10 +18,14 @@ const pipeline = createServerFramePipeline({
   shouldStoreCollectionFrame: () => true,
   hasEnoughCollectionDiskSpace: () => true,
   enqueueCollectionFrame: (db, data, channel) => queued.push({ db, data, channel }),
-  buildZeroAwareStorageData: () => null,
-  buildSmallBed12BCollectionStorageData: () => null,
+  buildZeroAwareStorageData: (_frame, dataKey, channel) => JSON.stringify({
+    storage: 'zero-aware',
+    dataKey,
+    channel,
+  }),
+  buildSmallBed12BCollectionStorageData: () => JSON.stringify({ storage: 'small-bed-12b' }),
   getFrameMatrixData: () => [],
-  isZeroFrameStorageType: () => false,
+  isZeroFrameStorageType: (type) => type === 'hand0507',
   isSmallBedMatrixType: () => false,
   tempFullBedType: 'tempFullBed',
   smallBed12BType: 'smallBed12B',
@@ -53,6 +58,7 @@ collecting = true;
 const displayFrame = {
   displaySystemId: 'custom-seat',
   channelId: 'custom-seat:sit',
+  runtimeSource: 'display-system',
   outputChannel: 'sit',
   sitData: [10, 20],
   normalizedData: [5, 10],
@@ -63,6 +69,20 @@ const storedDisplayFrame = JSON.parse(
   pipeline.collectionFrameStorage.buildSitCollectionData(displayFrame),
 );
 assert.deepStrictEqual(storedDisplayFrame, displayFrame);
+
+// canonical identity 也会被补到 legacy 帧上；它不能因此误走 manifest 存储格式。
+activeSensorType = 'hand0507';
+assert.deepStrictEqual(JSON.parse(pipeline.collectionFrameStorage.buildSitCollectionData({
+  displaySystemId: 'hand0507',
+  channelId: 'hand0507:sit',
+  runtimeSource: 'legacy',
+  sitData: [7, 8],
+})), {
+  storage: 'zero-aware',
+  dataKey: 'sitData',
+  channel: 'sit',
+});
+activeSensorType = 'jqbed';
 
 assert.strictEqual(
   pipeline.collectionFrameStorage.buildSitCollectionData({ sitData: [7, 8] }),

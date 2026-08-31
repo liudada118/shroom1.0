@@ -1,5 +1,5 @@
 /**
- * 历史回放、框选统计和旧清零命令服务。
+ * 历史回放和框选统计服务。
  *
  * 连接层只负责解析消息；这里承接旧主 WebSocket 中仍保留的历史差值、
  * 回放跳帧、坐面/靠背框选统计和历史曲线统计逻辑。
@@ -20,7 +20,6 @@ function createHistoryAnalysisService({
   publishSystemEvent,
   runtime,
   totalToN,
-  zeroCommandService,
 }) {
   if (!runtime || typeof runtime !== 'object') {
     throw new Error('history analysis runtime is required');
@@ -39,9 +38,6 @@ function createHistoryAnalysisService({
     if (message.variety != null) {
       publishHistoryDiffFrames();
     }
-
-    // 保留旧版 resetZero 命令，具体零点状态操作交给 runtime service。
-    zeroCommandService.handleResetZero(message.resetZero);
 
     if (runtime.localFlag && message.value != null) {
       const value = Number(message.value);

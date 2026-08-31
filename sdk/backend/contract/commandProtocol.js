@@ -43,6 +43,53 @@ function isCommandEnvelope(message) {
   );
 }
 
+function describePayloadField(commandType, field) {
+  return `${commandType} payload.${field}`;
+}
+
+function assertPayloadField(commandType, field, value, rule, options) {
+  const label = describePayloadField(commandType, field);
+  const fail = (message) => {
+    throw new CommandProtocolError(COMMAND_ERROR_CODES.INVALID_COMMAND, `${label} ${message}`, options);
+  };
+
+  if (rule.type === 'boolean' && typeof value !== 'boolean') fail('must be a boolean');
+  if (rule.type === 'string') {
+    if (typeof value !== 'string') fail('must be a string');
+    if ((rule.minLength || 0) > value.length) fail(`must contain at least ${rule.minLength} character(s)`);
+    if (rule.pattern && !new RegExp(rule.pattern).test(value)) fail('has an invalid format');
+  }
+  if (rule.type === 'array') {
+    if (!Array.isArray(value)) fail('must be an array');
+    if ((rule.minItems || 0) > value.length) fail(`must contain at least ${rule.minItems} item(s)`);
+    if (rule.uniqueItems && new Set(value).size !== value.length) fail('must contain unique items');
+    if (rule.items) {
+      value.forEach((item, index) => {
+        assertPayloadField(commandType, `${field}[${index}]`, item, rule.items, options);
+      });
+    }
+  }
+}
+
+function validatePayloadDefinition(commandType, payload, definition, options) {
+  const properties = definition.properties || {};
+  if (definition.additionalProperties === false) {
+    const unexpected = Object.keys(payload).filter((field) => !Object.prototype.hasOwnProperty.call(properties, field));
+    if (unexpected.length) {
+      throw new CommandProtocolError(
+        COMMAND_ERROR_CODES.INVALID_COMMAND,
+        `${commandType} payload contains unsupported field(s): ${unexpected.join(', ')}`,
+        options,
+      );
+    }
+  }
+
+  Object.entries(properties).forEach(([field, rule]) => {
+    if (!Object.prototype.hasOwnProperty.call(payload, field)) return;
+    assertPayloadField(commandType, field, payload[field], rule, options);
+  });
+}
+
 function validateCommandEnvelope(message) {
   const requestId = typeof message?.requestId === 'string' ? message.requestId.trim() : '';
   const commandType = typeof message?.type === 'string' ? message.type.trim() : '';
@@ -80,6 +127,11 @@ function validateCommandEnvelope(message) {
       { commandType, requestId },
     );
   }
+
+  validatePayloadDefinition(commandType, message.payload, definition, {
+    commandType,
+    requestId,
+  });
 
   return {
     type: commandType,
@@ -155,7 +207,11 @@ function toLegacyCommand(envelope) {
       ...(payload.gauss != null ? { gauss: payload.gauss } : {}),
       ...(payload.displayOptions ? { smallBed12BDisplayOptions: payload.displayOptions } : {}),
     };
-    case 'calibration.zero': return { resetZero: payload.enabled };
+    case 'calibration.zero': return {
+      resetZero: payload.enabled,
+      ...(payload.displaySystemId != null ? { displaySystemId: payload.displaySystemId } : {}),
+      ...(payload.channelIds != null ? { channelIds: payload.channelIds } : {}),
+    };
     case 'analysis.selection': return {
       ...(payload.sitIndex != null ? { sitIndex: payload.sitIndex } : {}),
       ...(payload.backIndex != null ? { backIndex: payload.backIndex } : {}),

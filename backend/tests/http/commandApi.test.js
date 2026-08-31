@@ -3,6 +3,10 @@ const express = require('express');
 const http = require('http');
 const { createControlCommandService } = require('../../kernel/platform/commands/controlCommandService');
 const { createControlCommandRouter } = require('../../kernel/platform/commands/controlCommandRouter');
+const {
+  registerCalibrationZeroCommandHandler,
+} = require('../../kernel/platform/commands/registerCalibrationZeroCommandHandler');
+const { createZeroCommandService } = require('../../kernel/platform/runtime/zeroCommandService');
 const { registerControlRoutes } = require('../../kernel/platform/http/controlRoutes');
 
 async function run() {
@@ -27,6 +31,30 @@ async function run() {
     },
   });
   const controlCommandService = createControlCommandService({ commandRouter: router });
+  const zeroOperations = [];
+  const zeroCommandService = createZeroCommandService({
+    zeroStateStore: {
+      capture: (channelIds) => {
+        zeroOperations.push({ operation: 'capture', channelIds });
+        return { affectedChannelIds: channelIds, skipped: [] };
+      },
+      clear: (channelIds) => {
+        zeroOperations.push({ operation: 'clear', channelIds });
+        return { affectedChannelIds: channelIds, skipped: [] };
+      },
+    },
+    getActiveDisplaySystemId: () => 'display-a',
+    resolveTargetChannelIds: ({ displaySystemId, channelIds }) => {
+      if (displaySystemId === 'missing') {
+        return {
+          channelIds: [],
+          skipped: [{ displaySystemId, reason: 'unknown-display-system' }],
+        };
+      }
+      return { channelIds: channelIds || ['display-a:seat'], skipped: [] };
+    },
+  });
+  registerCalibrationZeroCommandHandler(controlCommandService, { zeroCommandService });
   const app = express();
   app.use(express.json());
   registerControlRoutes(app, {
@@ -65,6 +93,67 @@ async function run() {
     assert.strictEqual(successBody.data.code, 'OK');
     assert.strictEqual(successBody.data.ok, true);
     assert.strictEqual(received[0].sitPort, 'COM9');
+
+    const zeroResponse = await fetch(`${baseUrl}/api/commands`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type: 'calibration.zero',
+        payload: {
+          enabled: true,
+          displaySystemId: 'display-a',
+          channelIds: ['display-a:seat'],
+        },
+        requestId: 'req-http-zero',
+      }),
+    });
+    const zeroBody = await zeroResponse.json();
+    assert.strictEqual(zeroResponse.status, 200);
+    assert.strictEqual(zeroBody.data.ok, true);
+    assert.deepStrictEqual(zeroBody.data.data.results[0].affectedChannelIds, ['display-a:seat']);
+    assert.deepStrictEqual(zeroOperations, [{
+      operation: 'capture',
+      channelIds: ['display-a:seat'],
+    }]);
+
+    const invalidZeroResponse = await fetch(`${baseUrl}/api/commands`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type: 'calibration.zero',
+        payload: { enabled: 'true' },
+        requestId: 'req-http-zero-invalid',
+      }),
+    });
+    const invalidZeroBody = await invalidZeroResponse.json();
+    assert.strictEqual(invalidZeroResponse.status, 400);
+    assert.strictEqual(invalidZeroBody.data.code, 'INVALID_COMMAND');
+
+    const emptyZeroResponse = await fetch(`${baseUrl}/api/commands`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type: 'calibration.zero',
+        payload: { enabled: false, channelIds: [] },
+        requestId: 'req-http-zero-empty',
+      }),
+    });
+    const emptyZeroBody = await emptyZeroResponse.json();
+    assert.strictEqual(emptyZeroResponse.status, 400);
+    assert.strictEqual(emptyZeroBody.data.code, 'INVALID_COMMAND');
+
+    const unknownZeroResponse = await fetch(`${baseUrl}/api/commands`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type: 'calibration.zero',
+        payload: { enabled: false, displaySystemId: 'missing' },
+        requestId: 'req-http-zero-unknown',
+      }),
+    });
+    const unknownZeroBody = await unknownZeroResponse.json();
+    assert.strictEqual(unknownZeroResponse.status, 409);
+    assert.strictEqual(unknownZeroBody.data.code, 'COMMAND_EXECUTION_FAILED');
 
     const seatAliasResponse = await fetch(`${baseUrl}/api/commands`, {
       method: 'POST',

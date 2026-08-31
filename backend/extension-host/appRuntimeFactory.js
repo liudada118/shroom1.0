@@ -78,6 +78,7 @@ function createAppRuntime({
         getSensorType,
         allowParallelWithLegacy,
         allowActiveDisplaySystem,
+        zeroStateStore,
       }) => {
         runtimeBindingOptions = {
           serialManager,
@@ -86,6 +87,7 @@ function createAppRuntime({
           getSensorType,
           allowParallelWithLegacy,
           allowActiveDisplaySystem,
+          zeroStateStore,
         };
         return displaySystemRuntimeController.bind(runtimeBindingOptions);
       },

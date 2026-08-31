@@ -30,7 +30,7 @@ processor  解帧 → 线序/点序映射 → 算法 → 指标 → 输出
 | `displaySystemRuntimeDispatcher.js` | 分发层，147 行。`normalizeIncomingFrame` 统一帧形态（Buffer / TypedArray / 数组）、`createDisplaySystemRuntimeDispatcher` 挂到 parser 的 data 事件 | 只把 parser 输出送进**已经绑定**的处理器，不负责绑定本身。是否分发由 policy 决定 |
 | `displaySystemRuntimePolicy.js` | 策略层，131 行。运行模式判定（`getRuntimeMode` / `isActiveRuntimeMode` / `isParallelRuntimeMode`）、分发策略（`evaluateDisplaySystemDispatchPolicy`）、绑定属性提取。`DEFAULT_LEGACY_PARSER_CHANNELS` = sit / back / head / sensor | 唯一决定「这一帧要不要给这个系统」的地方。**parallel 模式**让新 Display System 和旧传感器链路同时收同一份数据——这是渐进迁移的关键 |
 | `displaySystemRuntimeFactory.js` | 装配入口，107 行。`createDisplaySystemRuntimeController` 组合 binder + dispatcher；`buildRuntimeBindingSnapshot` 导出可观测快照 | 快照给状态查询和调试用，不参与数据流 |
-| `displaySystemFrameProcessorFactory.js` | 处理核心，338 行，11 个导出。解帧（`validateFrame` / `decodeProtocolValues`）、配置化映射（`executeConfiguredMapping`）、算法执行（`executeAlgorithm` / `normalizeAlgorithmResult` / `sanitizeAlgorithmMetrics`）、指标计算（`buildPressureMetrics` / `calculateConfiguredMetrics`） | 算法返回的东西**必须**过 `sanitizeAlgorithmMetrics`——算法是用户代码，可能返回 `NaN`、`Infinity`、超长数组或非数字。不过滤就直接进 WebSocket 送给前端 |
+| `displaySystemFrameProcessorFactory.js` | 处理核心。解帧（`validateFrame` / `decodeProtocolValues`）、配置化映射、算法执行、按 channelId 记录/应用 processed 零点、指标计算 | 算法返回值必须先消毒；零点必须作用于未扣零算法结果，并在扣零后重算压力指标 |
 
 ## parallel 模式是为迁移准备的
 

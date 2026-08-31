@@ -12,6 +12,7 @@ function createFrameOutputPipeline({
   getSensorType,
   minzhenType,
   applyMinzhenBackendGauss,
+  zeroFrameAdapter,
 }) {
   /**
    * 将旧调用传入的 JSON 字符串转换为对象。
@@ -35,14 +36,40 @@ function createFrameOutputPipeline({
   }
 
   /**
+   * 在入库和网络发布之前统一应用 legacy channel 零点。
+   * Manifest 帧已携带 channelId，adapter 会保持原样，避免重复扣零。
+   */
+  function prepareFrame(channel, frame, options = {}) {
+    const parsed = parseFrame(frame);
+    const adapterResult = zeroFrameAdapter?.prepare
+      ? zeroFrameAdapter.prepare(channel, parsed, {
+        sourceStages: options?.zeroSources,
+      })
+      : {
+        frame: zeroFrameAdapter?.process
+          ? zeroFrameAdapter.process(channel, parsed, {
+            sourceStages: options?.zeroSources,
+          })
+          : parsed,
+        zeroedStages: {},
+      };
+    return {
+      frame: adapterResult.frame,
+      payloadText: stringifyFrame(adapterResult.frame),
+      zeroedStages: adapterResult.zeroedStages || {},
+    };
+  }
+
+  /**
    * 发布坐垫实时帧。
    *
    * @param {string|object} jsonData 坐垫实时帧，兼容旧调用传入 JSON 字符串。
-   * @returns {{ stored: boolean, sent: number, jsonData: string }} 输出结果。
+   * @returns {{ stored: boolean, sent: number, jsonData: string, frame: object }} 输出结果。
    */
-  function publishSit(jsonData) {
-    let payloadText = stringifyFrame(jsonData);
-    let frameToStore = parseFrame(payloadText);
+  function publishSit(jsonData, options = {}) {
+    const prepared = prepareFrame('sit', jsonData, options);
+    let payloadText = prepared.payloadText;
+    let frameToStore = prepared.frame;
 
     if (getSensorType() === minzhenType && Array.isArray(frameToStore.sitData)) {
       frameToStore = {
@@ -52,22 +79,32 @@ function createFrameOutputPipeline({
       payloadText = JSON.stringify(frameToStore);
     }
 
-    const stored = collectionFrameStorage.storeSit(frameToStore);
-    const sent = publishRealtimeChannel('sit', payloadText);
-    return { stored, sent, jsonData: payloadText };
+    const stored = options?.store === false
+      ? false
+      : collectionFrameStorage.storeSit(frameToStore);
+    const sent = options?.publish === false
+      ? 0
+      : publishRealtimeChannel('sit', payloadText);
+    return {
+      stored,
+      sent,
+      jsonData: payloadText,
+      frame: frameToStore,
+      zeroedStages: prepared.zeroedStages,
+    };
   }
 
   /**
    * 发布靠背实时帧。
    *
    * @param {string|object} jsonData 靠背实时帧，兼容旧调用传入 JSON 字符串。
-   * @returns {{ stored: boolean, sent: number, jsonData: string }} 输出结果。
+   * @returns {{ stored: boolean, sent: number, jsonData: string, frame: object }} 输出结果。
    */
-  function publishBack(jsonData) {
-    const payloadText = stringifyFrame(jsonData);
-    const stored = collectionFrameStorage.storeBack(parseFrame(payloadText));
+  function publishBack(jsonData, options = {}) {
+    const { frame, payloadText, zeroedStages } = prepareFrame('back', jsonData, options);
+    const stored = collectionFrameStorage.storeBack(frame);
     const sent = publishRealtimeChannel('back', payloadText);
-    return { stored, sent, jsonData: payloadText };
+    return { stored, sent, jsonData: payloadText, frame, zeroedStages };
   }
 
   /**
@@ -76,13 +113,13 @@ function createFrameOutputPipeline({
    * 头枕历史上不走发送频率限制，因此这里保留 `respectFrequency: false`。
    *
    * @param {string|object} jsonData 头枕实时帧，兼容旧调用传入 JSON 字符串。
-   * @returns {{ stored: boolean, sent: number, jsonData: string }} 输出结果。
+   * @returns {{ stored: boolean, sent: number, jsonData: string, frame: object }} 输出结果。
    */
-  function publishHead(jsonData) {
-    const payloadText = stringifyFrame(jsonData);
-    const stored = collectionFrameStorage.storeHead(parseFrame(payloadText));
+  function publishHead(jsonData, options = {}) {
+    const { frame, payloadText, zeroedStages } = prepareFrame('head', jsonData, options);
+    const stored = collectionFrameStorage.storeHead(frame);
     const sent = publishRealtimeChannel('head', payloadText, { respectFrequency: false });
-    return { stored, sent, jsonData: payloadText };
+    return { stored, sent, jsonData: payloadText, frame, zeroedStages };
   }
 
   /**
@@ -94,12 +131,12 @@ function createFrameOutputPipeline({
    *
    * @param {string} channel 输出通道名，例如 armLeft。
    * @param {string|object} jsonData 实时帧。
-   * @returns {{ stored: boolean, sent: number, jsonData: string }} 输出结果。
+   * @returns {{ stored: boolean, sent: number, jsonData: string, frame: object }} 输出结果。
    */
-  function publishAux(channel, jsonData) {
-    const payloadText = stringifyFrame(jsonData);
+  function publishAux(channel, jsonData, options = {}) {
+    const { frame, payloadText, zeroedStages } = prepareFrame(channel, jsonData, options);
     const sent = publishRealtimeChannel(channel, payloadText);
-    return { stored: false, sent, jsonData: payloadText };
+    return { stored: false, sent, jsonData: payloadText, frame, zeroedStages };
   }
 
   return {

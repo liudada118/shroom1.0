@@ -60,6 +60,7 @@ function bindDisplaySystemRuntimeChannels({
   serialManager,
   serialParserManager,
   frameOutputPipeline,
+  zeroStateStore,
   createFrameProcessor = createDisplaySystemFrameProcessor,
 }) {
   const channels = runtimeChannelRegistry?.list?.() || [];
@@ -82,7 +83,7 @@ function bindDisplaySystemRuntimeChannels({
     try {
       const parserChannel = resolveParserChannel(serialParserManager, channel.parserChannel);
       const outputPublisher = resolveOutputPublisher(frameOutputPipeline, bindingBase.outputChannel);
-      const frameProcessor = createFrameProcessor({ runtimeChannel: channel });
+      const frameProcessor = createFrameProcessor({ runtimeChannel: channel, zeroStateStore });
 
       function publishProcessedFrame(processedFrame) {
         if (getRuntimeMode({ runtimeMode }) === 'shadow') {

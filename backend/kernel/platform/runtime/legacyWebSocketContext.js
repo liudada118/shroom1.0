@@ -15,7 +15,6 @@ function createWebSocketContextAccessors({
   mutableAccessors = {},
   playbackStateAccessor,
   serialPortStateAccessor,
-  zeroStateAccessor,
 } = {}) {
   const accessors = {
     ...mutableAccessors,
@@ -23,22 +22,6 @@ function createWebSocketContextAccessors({
     localData: playbackStateAccessor('localData'),
     localDataBack: playbackStateAccessor('localDataBack'),
     nowIndex: playbackStateAccessor('nowIndex'),
-    newArr147: zeroStateAccessor('newArr147'),
-    newArr147_2: zeroStateAccessor('newArr147_2'),
-    pointArr1RawZero: zeroStateAccessor('pointArr1RawZero'),
-    pointArr1RawZeroData: zeroStateAccessor('pointArr1RawZeroData'),
-    pointArr1zero: zeroStateAccessor('pointArr1zero'),
-    pointArr1zeroData: zeroStateAccessor('pointArr1zeroData'),
-    pointArr2RawZero: zeroStateAccessor('pointArr2RawZero'),
-    pointArr2RawZeroData: zeroStateAccessor('pointArr2RawZeroData'),
-    pointArr2zero: zeroStateAccessor('pointArr2zero'),
-    pointArr2zeroData: zeroStateAccessor('pointArr2zeroData'),
-    pointArr3zero: zeroStateAccessor('pointArr3zero'),
-    pointArr3zeroData: zeroStateAccessor('pointArr3zeroData'),
-    pointArr4zero: zeroStateAccessor('pointArr4zero'),
-    pointArr4zeroData: zeroStateAccessor('pointArr4zeroData'),
-    pointArr147zero: zeroStateAccessor('pointArr147zero'),
-    pointArr147zero_2: zeroStateAccessor('pointArr147zero_2'),
     serialport: serialPortStateAccessor('serialport'),
   };
 
@@ -71,7 +54,6 @@ function buildMutableAccessors(mutableAccessors = {}) {
  * @param {Record<string, { get: Function, set: Function }>} options.mutableAccessors 旧运行态变量访问器。
  * @param {Function} options.playbackStateAccessor 回放状态访问器工厂。
  * @param {Function} options.serialPortStateAccessor 串口状态访问器工厂。
- * @param {Function} options.zeroStateAccessor 零点状态访问器工厂。
  * @returns {object} 可直接传给 createWebSocketHandlerAttacher 的上下文。
  */
 function createWebSocketHandlerContext({
@@ -79,7 +61,6 @@ function createWebSocketHandlerContext({
   mutableAccessors,
   playbackStateAccessor,
   serialPortStateAccessor,
-  zeroStateAccessor,
 }) {
   const context = { ...dependencies };
 
@@ -87,7 +68,6 @@ function createWebSocketHandlerContext({
     mutableAccessors: buildMutableAccessors(mutableAccessors),
     playbackStateAccessor,
     serialPortStateAccessor,
-    zeroStateAccessor,
   }));
 
   return context;

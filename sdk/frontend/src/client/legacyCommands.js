@@ -25,7 +25,11 @@ export function toLegacyCommand(message = {}) {
     case 'history.load': return { getTime: payload.date, local: true };
     case 'playback.control': return { ...payload };
     case 'export.csv': return { download: payload.date, downloadOptions: payload.options || {} };
-    case 'calibration.zero': return { resetZero: payload.enabled };
+    case 'calibration.zero': return {
+      resetZero: payload.enabled,
+      ...(payload.displaySystemId != null ? { displaySystemId: payload.displaySystemId } : {}),
+      ...(payload.channelIds != null ? { channelIds: payload.channelIds } : {}),
+    };
     default: return message;
   }
 }

@@ -2,7 +2,8 @@
  * 遗留分片压力帧处理器。
  *
  * 负责 130/142 字节首包与 146/158 字节尾包组成的旧协议压力帧。
- * 这里集中处理分片合并、手/足/眼部线序映射、零点扣除和实时 payload 构造。
+ * 这里集中处理分片合并、手/足/眼部线序映射和实时 payload 构造。
+ * 零点由统一输出边界按 channelId 应用。
  */
 function createLegacySegmentedFrameProcessor({
   bytes4ToInt10,
@@ -16,7 +17,6 @@ function createLegacySegmentedFrameProcessor({
   handVideo1_0416_0506,
   handVideoRealPoint_0506_3,
   isHandGloveType,
-  numLessZeroToZero,
 }) {
   const SMALL_SAMPLE_SENSOR_TO_BYTE_INDEX = [
     223, 222, 221, 220, 219, 218, 217, 216, 215, 214,
@@ -58,18 +58,6 @@ function createLegacySegmentedFrameProcessor({
     const payload = bytes.slice(2);
     const imuBytes = withImu ? payload.splice(payload.length - 16, 16) : [];
     return { order, type, payload, imuBytes };
-  }
-
-  /**
-   * 按零点帧扣除压力值，并把负值强制归零。
-   * @param {number[]} frame 原始或映射后的压力帧。
-   * @param {number[]} zeroFrame 零点帧。
-   * @returns {number[]} 扣零后的压力帧。
-   */
-  function subtractZeroFrame(frame, zeroFrame = []) {
-    return Array.isArray(zeroFrame) && zeroFrame.length
-      ? frame.map((value, index) => numLessZeroToZero(value - (zeroFrame[index] || 0)))
-      : frame;
   }
 
   /**
@@ -170,12 +158,9 @@ function createLegacySegmentedFrameProcessor({
       mappedFrame = [...pressureFrame];
     }
 
-    const zeroSourceFrame = [...pressureFrame];
-    const rawPressureData = Array.isArray(context.pointArr1RawZero) && context.pointArr1RawZero.length
-      ? realArr.map((value, index) => numLessZeroToZero(value - (context.pointArr1RawZero[index] || 0)))
-      : [...realArr];
-    const pressureData = subtractZeroFrame(pressureFrame, context.pointArr1zero);
-    const mappedData = subtractZeroFrame(mappedFrame, context.pointArr147zero);
+    const rawPressureData = [...realArr];
+    const pressureData = [...pressureFrame];
+    const mappedData = [...mappedFrame];
     const rotate = bytes4ToInt10(imuBytes);
     const payloadObj = {
       sitData: pressureData,
@@ -191,10 +176,7 @@ function createLegacySegmentedFrameProcessor({
     return {
       firstData: context.firstData || [],
       lastData: payload,
-      newArr147: [...mappedFrame],
       pointArr: pressureData,
-      pointArr1RawZeroData: [...realArr],
-      pointArr1zeroData: zeroSourceFrame,
       jsonData: JSON.stringify(payloadObj),
     };
   }
@@ -218,8 +200,7 @@ function createLegacySegmentedFrameProcessor({
     } else {
       pressureFrame = footVideo1(pressureFrame);
     }
-    const rawPressureData = subtractZeroFrame(realArr, context.pointArr2RawZero);
-    pressureFrame = subtractZeroFrame(pressureFrame, context.pointArr1zero);
+    const rawPressureData = [...realArr];
     const payloadObj = {
       backData: [...pressureFrame],
       realArr,
@@ -230,9 +211,7 @@ function createLegacySegmentedFrameProcessor({
     if (mappedFrame.length) payloadObj.newArr147 = mappedFrame;
     return {
       lastData: payload,
-      newArr147_2: mappedFrame,
       pointArr: pressureFrame,
-      pointArr2RawZeroData: [...realArr],
       jsonData: JSON.stringify(payloadObj),
     };
   }
@@ -260,10 +239,9 @@ function createLegacySegmentedFrameProcessor({
       pressureFrame = [...mappedFrame];
     }
 
-    const zeroSourceFrame = [...pressureFrame];
-    const rawPressureData = subtractZeroFrame(realArr, context.rawZeroFrame);
-    const pressureData = subtractZeroFrame(pressureFrame, context.zeroFrame);
-    const mappedData = subtractZeroFrame(mappedFrame, context.mappedZeroFrame);
+    const rawPressureData = [...realArr];
+    const pressureData = [...pressureFrame];
+    const mappedData = [...mappedFrame];
     const rotate = bytes4ToInt10(imuBytes);
     const dataKey = context.channel === 'head' ? 'headData' : 'backData';
     const payloadObj = {
@@ -279,10 +257,7 @@ function createLegacySegmentedFrameProcessor({
 
     return {
       lastData: payload,
-      newArr147_2: [...mappedFrame],
       pressureData,
-      rawZeroData: [...realArr],
-      zeroSourceFrame,
       jsonData: JSON.stringify(payloadObj),
     };
   }
@@ -299,12 +274,11 @@ function createLegacySegmentedFrameProcessor({
 
     let pressureFrame = [...(context.firstData || []), ...payload];
     pressureFrame = footVideo1(pressureFrame);
-    pressureFrame = subtractZeroFrame(pressureFrame, context.pointArr1zero);
     return {
       lastData: payload,
       pointArr: pressureFrame,
       jsonData: JSON.stringify({
-        backData: [...pressureFrame],
+        headData: [...pressureFrame],
         sitFlag: context.port1?.isOpen,
         backFlag: context.port2?.isOpen,
       }),

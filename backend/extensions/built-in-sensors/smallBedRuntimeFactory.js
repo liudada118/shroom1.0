@@ -3,7 +3,7 @@ const { createSmallBed12BRuntime } = require('./smallBed12BRuntime');
 /**
  * 创建 server 侧小床 12B runtime 装配入口。
  *
- * 这里仅注入运行时状态、零点状态和实时输出函数。
+ * 这里仅注入运行时状态和实时输出函数。
  * 小床帧解析与 payload 生成仍由 sensors/runtime/smallBed12BRuntime.js 负责。
  *
  * @param {object} options 装配依赖。
@@ -14,15 +14,14 @@ function createServerSmallBedRuntime({
   smallBed12BType,
   runtimeContext,
   getLineOrder,
-  getZeroFrame,
-  subtractZero,
+  zeroStateStore,
+  resolveChannelIdentity,
   calibration,
   getDisplayOptions,
   getHz,
   transposeSquareMatrix,
   getEndDate,
   setCurrentPressureFrame,
-  setZeroSourceFrame,
   setCurrentDisplayData,
   sendSitFrame,
 }) {
@@ -31,8 +30,8 @@ function createServerSmallBedRuntime({
     sensorType: smallBed12BType,
     getSensorType: runtimeContext.getSensorType,
     getLineOrder,
-    getZeroFrame,
-    subtractZero,
+    zeroStateStore,
+    resolveChannelIdentity,
     calibration,
     getDisplayOptions,
     getHz,
@@ -40,7 +39,6 @@ function createServerSmallBedRuntime({
     getNowDate: runtimeContext.getNowDate,
     getEndDate,
     setCurrentPressureFrame,
-    setZeroSourceFrame,
     setCurrentDisplayData,
     sendSitFrame,
   });

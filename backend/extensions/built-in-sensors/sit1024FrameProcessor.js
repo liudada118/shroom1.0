@@ -2,7 +2,8 @@
  * 创建 SIT 1024 字节矩阵帧处理器。
  *
  * 该处理器负责旧 SIT onData 中最常见的 32x32 单帧矩阵链路：
- * 原始字节读取 -> 传感器线序转换 -> 零点扣除 -> 实时 payload 构造。
+ * 原始字节读取 -> 传感器线序转换 -> 实时 payload 构造。
+ * 零点由统一输出边界按 channelId 应用。
  * 串口事件绑定、运行时状态写回和通道输出由 server.js 负责。
  */
 function createSit1024FrameProcessor(deps) {
@@ -29,7 +30,6 @@ function createSit1024FrameProcessor(deps) {
     maskMinzhenMatrixValues,
     newHand,
     normalizeWholeChairFrame,
-    numLessZeroToZero,
     press6sit,
     pressNew1220,
     pressNew12203131,
@@ -167,9 +167,9 @@ function createSit1024FrameProcessor(deps) {
   }
 
   /**
-   * 将扣零后的坐垫帧包装成前端实时通道需要的 payload。
+   * 将映射后的坐垫帧包装成前端实时通道需要的 payload。
    *
-   * @param {number[]} pointArr 扣零后的压力帧。
+   * @param {number[]} pointArr 映射后的压力帧。
    * @param {unknown} newData 映射阶段产生的附加数据。
    * @param {object} context 当前运行时上下文。
    * @returns {object} 可直接 JSON 序列化的坐垫 payload。
@@ -225,22 +225,18 @@ function createSit1024FrameProcessor(deps) {
    *
    * @param {Buffer|Uint8Array|number[]} data 串口 parser 输出。
    * @param {object} context 当前运行时状态。
-   * @returns {null|{pointArr:number[], newData:unknown, zeroSourceFrame:number[], jsonData:string}}
+   * @returns {null|{pointArr:number[], newData:unknown, jsonData:string}}
    */
   function processFrame(data, context) {
     const buffer = Buffer.from(data);
     if (buffer.length !== 1024) return null;
 
     const mapped = applySensorMapping(readUInt8Frame(buffer), context);
-    const zeroSourceFrame = [...mapped.pointArr];
-    const pointArr = Array.isArray(context.pointArr1zero) && context.pointArr1zero.length
-      ? mapped.pointArr.map((value, index) => numLessZeroToZero(value - context.pointArr1zero[index]))
-      : mapped.pointArr;
+    const pointArr = mapped.pointArr;
 
     return {
       pointArr,
       newData: mapped.newData,
-      zeroSourceFrame,
       jsonData: JSON.stringify(buildPayload(pointArr, mapped.newData, context)),
     };
   }

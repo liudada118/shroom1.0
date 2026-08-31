@@ -72,6 +72,19 @@ function getChannelDataField(outputChannel) {
   return `${outputChannel}Data`;
 }
 
+function getCanonicalSensorId(runtimeChannel = {}) {
+  const channelId = String(runtimeChannel.id || '').trim();
+  const displaySystemId = String(runtimeChannel.displaySystemId || '').trim();
+  const prefix = `${displaySystemId}:`;
+  if (displaySystemId && channelId.startsWith(prefix)) {
+    const sensorId = channelId.slice(prefix.length);
+    if (sensorId && !sensorId.includes(':')) return sensorId;
+  }
+  return runtimeChannel.sensorId
+    || runtimeChannel.serialRole
+    || runtimeChannel.sensor?.id;
+}
+
 function buildPressureMetrics(values) {
   const numeric = values.map(Number).filter(Number.isFinite);
   const totalPressure = numeric.reduce((sum, value) => sum + value, 0);
@@ -195,12 +208,14 @@ function executeAlgorithm(values, algorithm, algorithmData, algorithmRunners = {
  * @param {object} options 创建参数。
  * @param {object} options.runtimeChannel runtime channel plan。
  * @param {object} [options.fsLike] 文件系统适配器，测试可注入。
+ * @param {object} [options.zeroStateStore] 按 channelId 隔离的零点状态仓库。
  * @returns {{ processFrame: Function }} 帧处理器。
  */
 function createDisplaySystemFrameProcessor({
   runtimeChannel,
   fsLike = fs,
   algorithmRunners = {},
+  zeroStateStore = null,
 }) {
   if (!runtimeChannel) {
     throw new Error('runtimeChannel is required');
@@ -266,6 +281,7 @@ function createDisplaySystemFrameProcessor({
         return {
           channelId: runtimeChannel.id,
           displaySystemId: runtimeChannel.displaySystemId,
+          runtimeSource: 'display-system',
           outputChannel: runtimeChannel.outputChannel || runtimeChannel.serialRole,
           dropped: true,
           dropReason: frameValidation.reason,
@@ -295,12 +311,50 @@ function createDisplaySystemFrameProcessor({
     );
 
     const buildProcessedFrame = (algorithmResult) => {
-      const processed = algorithmResult.data;
       const outputChannel = runtimeChannel.outputChannel || runtimeChannel.serialRole;
       const channelDataField = getChannelDataField(outputChannel);
+      const processedSource = Array.from(algorithmResult.data);
+      const identity = {
+        channelId: runtimeChannel.id,
+        displaySystemId: runtimeChannel.displaySystemId,
+        // sensorDefinition.id 在旧 builder 结构中是展示系统 ID，不是
+        // runtime channel 的 sensorId。以 canonical channelId 后半段为准。
+        sensorId: getCanonicalSensorId(runtimeChannel),
+        sensorType: runtimeChannel.sensor?.type
+          || runtimeChannel.parserChannel?.sensorType
+          || null,
+        outputChannel,
+      };
+
+      // 零点源始终记录算法完成、尚未扣零的帧。这里没有独立的 mapped 输出，
+      // 因此只记录 decoded / normalized / processed，避免把 normalized 基准
+      // 当成 mapped 基准后在兼容链路里重复扣零。
+      if (typeof zeroStateStore?.updateSources === 'function') {
+        zeroStateStore.updateSources(runtimeChannel.id, {
+          decoded: values,
+          normalized: mapped,
+          processed: processedSource,
+        }, identity);
+      }
+
+      let processed = processedSource;
+      if (typeof zeroStateStore?.apply === 'function') {
+        const zeroed = zeroStateStore.apply(
+          runtimeChannel.id,
+          'processed',
+          [...processedSource],
+        );
+        // 仓库在基准长度不匹配时应返回原帧；处理器再做一层边界保护，
+        // 防止错误长度污染实时 payload 和压力指标。
+        if (Array.isArray(zeroed) && zeroed.length === processedSource.length) {
+          processed = Array.from(zeroed);
+        }
+      }
+
       return {
         channelId: runtimeChannel.id,
         displaySystemId: runtimeChannel.displaySystemId,
+        runtimeSource: 'display-system',
         outputChannel,
         rawData: values,
         normalizedData: mapped,

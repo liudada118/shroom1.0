@@ -79,7 +79,13 @@ function commandFromLegacyFields(message = {}) {
       ...(displayOptions ? { displayOptions } : {}),
     }));
   }
-  if (message.resetZero != null) commands.push(createCommand('calibration.zero', { enabled: message.resetZero }));
+  if (message.resetZero != null) {
+    commands.push(createCommand('calibration.zero', {
+      enabled: message.resetZero,
+      ...(message.displaySystemId != null ? { displaySystemId: message.displaySystemId } : {}),
+      ...(message.channelIds != null ? { channelIds: message.channelIds } : {}),
+    }));
+  }
 
   const selectionPayload = {};
   if (message.sitIndex != null) selectionPayload.sitIndex = message.sitIndex;

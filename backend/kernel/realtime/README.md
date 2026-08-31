@@ -5,14 +5,14 @@
 串口收到一帧之后到前端看见它之间的全部环节。核心是一条管线做三件事，顺序固定：
 
 ```
-JSON 文本 → 可入库对象 → 按传感器类型做兼容处理 → 同时(写入采集存储 + 发布实时通道)
+JSON 文本 → 可入库对象 → legacy channel 零点适配 → 传感器兼容处理 → 同时(写入采集存储 + 发布实时通道)
 ```
 
 ## 本目录文件
 
 | 文件 | 作用 | 边界 |
 | --- | --- | --- |
-| `frameOutputPipelineService.js` | 管线本体，114 行。`createFrameOutputPipeline` 把上面那三步串起来 | 解析、兼容处理、落盘+发布三步顺序有意义。敏枕的后端高斯（`applyMinzhenBackendGauss`）在发布**之前**做，所以存的和看的是同一份 |
+| `frameOutputPipelineService.js` | 管线本体。`createFrameOutputPipeline` 把上面各步串起来 | legacy 帧先经 `zeroFrameAdapter`；适配后同一对象用于入库和发布，并把 `zeroedStages` 返回给调用方同步内部状态。Manifest/已扣零帧按来源标记跳过。敏枕高斯仍在发布前执行 |
 | `framePipelineFactory.js` | 装配层，65 行。`createServerFramePipeline` 组合 `@shroom/backend/collection/collectionFrameStorageService.js` 和上面的管线 | `server.js` 不再自己维护 channel → db/db1/db2 的映射，统一从 `runtimeContext` 取。**`isCollecting` 必须传**——缺了就变成「串口一有数据就落库」，见 `collectionFrameStorageService` 的 `canStore` |
 | `realtimeFrameDispatchService.js` | 旧函数名适配层，51 行。把 `colOrSendData` / `colOrSendData1` / `colOrSendData2` 三个历史命名收敛到管线上 | 三个名字分别是坐面 / 靠背 / 头枕。纯转发，不含逻辑。存在只为兼容旧串口 runtime，新代码直接用 `frameOutputPipeline` |
 | `realtimeTelemetryGateway.js` | 实时帧网关，78 行。`createRealtimeTelemetryGateway` 在唯一的 WebSocket 边界把内部对象转成 `sensor.frame` | **同一物理帧只发布一次**。订阅键和消息身份都用 canonical `channelId`，不用别名。构造时 `channelBus` 缺失直接抛错 |

@@ -42,15 +42,15 @@ if (buffer.length !== 72 && buffer.length !== 144) return null;
 
 ## 零点扣除
 
-解出来的帧会先减一次零点基线（`subtractZeroFrame(frame, context.pointArr1zero)`）再往下走。
-零点是运行时状态不是协议内容，但它解释了一个常见困惑：**刚开机没做零点时读数可能整体偏高**。
+处理器只负责解码这 72/144 个点；统一输出边界随后按完整 channelId 记录未扣零源帧并应用
+该通道的 processed baseline。零点是运行时状态，不是协议内容；刚开机没有捕获基准时读数可能整体偏高。
 
 ## 代码位置
 
 | 想看什么 | 位置 |
 | :--- | :--- |
-| 帧处理 | `backend/sensors/runtime/legacyGenericMatrixFrameProcessor.js` 的 `processLowDensitySitFrame` |
-| 矩阵定义（**这里没有 72/144**） | `backend/sensors/registry.js` |
+| 帧处理 | `backend/extensions/built-in-sensors/legacyGenericMatrixFrameProcessor.js` 的 `processLowDensitySitFrame` |
+| 矩阵定义（**这里没有 72/144**） | `sdk/backend/sensors/registry.js` |
 
 ## 排错
 

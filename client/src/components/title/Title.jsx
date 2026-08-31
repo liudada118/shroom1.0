@@ -15,7 +15,7 @@ import { withTranslation } from "react-i18next";
 import { NavLink, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { bthClickHandle as heatmapBthClickHandle } from '../onestep/heatmap';
-import { registerRuntimeDisplayDefinition } from '../../displays/registry';
+import { getDisplayDefinition, registerRuntimeDisplayDefinition } from '../../displays/registry';
 import { buildAccessibleSensorOptions } from '../../services/sensorStatus';
 import { translateDomainLabel } from '../../i18n/translateDomainLabel';
 import { getLanguageLocale } from '../../i18n';
@@ -1754,7 +1754,10 @@ class Title extends React.Component {
               })
             }
 
-            this.props.wsSendObj({ resetZero: false })
+            // 系统切换命令和零点命令都走 HTTP；显式带上目标 ID，避免并发请求
+            // 到达顺序变化时误清掉上一个展示系统的独立零点。
+            const displaySystemId = getDisplayDefinition(e)?.displaySystemId || e
+            this.props.wsSendObj({ resetZero: false, displaySystemId })
             this.setState({ resetZero: false, dataTime: '' })
 
             this.props.changeStateData({

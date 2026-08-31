@@ -26,14 +26,12 @@ function createLegacySerialFrameRuntime(ctx) {
   const genericMatrixFrameProcessor = createLegacyGenericMatrixFrameProcessor({
     isCar: ctx.isCar,
     isSmallBedMatrixType: ctx.isSmallBedMatrixType,
-    numLessZeroToZero: ctx.numLessZeroToZero,
     zeroLineMatrix: ctx.zeroLineMatrix,
   });
   const bigBedFrameProcessor = createLegacyBigBedFrameProcessor();
   const gloveFrameProcessor = createLegacyGloveFrameProcessor({
     gloves0123: ctx.gloves0123,
     gloves0123Res: ctx.gloves0123Res,
-    publishSystemEvent: ctx.publishSystemEvent,
   });
   const segmentedFrameProcessor = createLegacySegmentedFrameProcessor({
     bytes4ToInt10: ctx.bytes4ToInt10,
@@ -47,8 +45,49 @@ function createLegacySerialFrameRuntime(ctx) {
     handVideo1_0416_0506: ctx.handVideo1_0416_0506,
     handVideoRealPoint_0506_3: ctx.handVideoRealPoint_0506_3,
     isHandGloveType: ctx.isHandGloveType,
-    numLessZeroToZero: ctx.numLessZeroToZero,
   });
+
+  function parseFramePayload(value) {
+    if (value && typeof value === 'object') return value;
+    try {
+      return JSON.parse(String(value));
+    } catch {
+      return null;
+    }
+  }
+
+  function framesEqual(left, right) {
+    return Array.isArray(left)
+      && Array.isArray(right)
+      && left.length === right.length
+      && left.every((value, index) => value === right[index]);
+  }
+
+  function getPublishedFrame(publishResult, fields, fallback = [], sourcePayload = null) {
+    const zeroedProcessed = publishResult?.zeroedStages?.processed;
+    if (
+      Array.isArray(zeroedProcessed)
+      && zeroedProcessed.length > 0
+      && zeroedProcessed.length === fallback.length
+    ) {
+      return [...zeroedProcessed];
+    }
+    const prepared = publishResult?.frame;
+    const source = parseFramePayload(sourcePayload);
+    for (const field of fields) {
+      // 只把同一处理阶段的发布结果写回 runtime。jqbed 的 sitData 可以是
+      // Python matrixOrigin，而 pointArr 是下一轮算法输入；二者不能因长度相同
+      // 就互相覆盖。
+      if (
+        Array.isArray(prepared?.[field])
+        && prepared[field].length > 0
+        && framesEqual(source?.[field], fallback)
+      ) {
+        return [...prepared[field]];
+      }
+    }
+    return Array.isArray(fallback) ? [...fallback] : [];
+  }
 
   /**
    * 处理坐垫串口帧。
@@ -76,17 +115,22 @@ function createLegacySerialFrameRuntime(ctx) {
       const frameResult = ctx.sit1024FrameProcessor.processFrame(buffer, {
         file: ctx.file,
         colHZ: ctx.colHZ,
-        pointArr1zero: ctx.pointArr1zero,
         useMatrixOrigin: ctx.useMatrixOrigin,
         jqbedMatrixOrigin: ctx.jqbedMatrixOrigin,
         port1: ctx.port1,
         port2: ctx.port2,
       });
       if (frameResult) {
-        ctx.pointArr = frameResult.pointArr;
         ctx.newData = frameResult.newData;
-        ctx.pointArr1zeroData = frameResult.zeroSourceFrame;
-        ctx.colOrSendData(frameResult.jsonData);
+        const published = ctx.colOrSendData(frameResult.jsonData, {
+          zeroSources: { processed: frameResult.pointArr },
+        });
+        ctx.pointArr = getPublishedFrame(
+          published,
+          ['pressureData', 'sitData'],
+          frameResult.pointArr,
+          frameResult.jsonData,
+        );
       }
       return;
     }
@@ -95,14 +139,19 @@ function createLegacySerialFrameRuntime(ctx) {
       file: ctx.file,
       colHZ: ctx.colHZ,
       newArr: ctx.newArr,
-      pointArr1zero: ctx.pointArr1zero,
       port1: ctx.port1,
       port2: ctx.port2,
     });
     if (lowDensityFrameResult) {
-      ctx.pointArr = lowDensityFrameResult.frame;
-      ctx.pointArr1zeroData = lowDensityFrameResult.zeroSourceFrame;
-      ctx.colOrSendData(lowDensityFrameResult.jsonData);
+      const published = ctx.colOrSendData(lowDensityFrameResult.jsonData, {
+        zeroSources: { processed: lowDensityFrameResult.frame },
+      });
+      ctx.pointArr = getPublishedFrame(
+        published,
+        ['sitData'],
+        lowDensityFrameResult.frame,
+        lowDensityFrameResult.jsonData,
+      );
       return;
     }
 
@@ -111,7 +160,15 @@ function createLegacySerialFrameRuntime(ctx) {
         port1: ctx.port1,
         port2: ctx.port2,
       });
-      ctx.pointArr = gloveFrameResult.pointArr;
+      const published = ctx.colOrSendData(gloveFrameResult.jsonData, {
+        zeroSources: { processed: gloveFrameResult.pointArr },
+      });
+      ctx.pointArr = getPublishedFrame(
+        published,
+        ['sitData'],
+        gloveFrameResult.pointArr,
+        gloveFrameResult.jsonData,
+      );
       return;
     }
 
@@ -136,19 +193,20 @@ function createLegacySerialFrameRuntime(ctx) {
       const leftFrameResult = segmentedFrameProcessor.processLeftSecondSegment(buffer, {
         file: ctx.file,
         firstData: ctx.firstBlueData,
-        pointArr147zero: ctx.pointArr147zero,
-        pointArr1RawZero: ctx.pointArr1RawZero,
-        pointArr1zero: ctx.pointArr1zero,
         port1: ctx.port1,
         port2: ctx.port2,
         rawPressureMode: buffer.length === 158 ? 'pressure' : undefined,
       });
       ctx.lastBlueData = leftFrameResult.lastData;
-      ctx.pointArr = leftFrameResult.pointArr;
-      ctx.pointArr1RawZeroData = leftFrameResult.pointArr1RawZeroData;
-      ctx.pointArr1zeroData = leftFrameResult.pointArr1zeroData;
-      ctx.newArr147 = leftFrameResult.newArr147;
-      ctx.colOrSendData(leftFrameResult.jsonData, []);
+      const published = ctx.colOrSendData(leftFrameResult.jsonData, {
+        zeroSources: { processed: leftFrameResult.pointArr },
+      });
+      ctx.pointArr = getPublishedFrame(
+        published,
+        ['pressureData', 'sitData'],
+        leftFrameResult.pointArr,
+        leftFrameResult.jsonData,
+      );
       return;
     }
 
@@ -160,8 +218,15 @@ function createLegacySerialFrameRuntime(ctx) {
       port2: ctx.port2,
     });
     if (sit256FrameResult) {
-      ctx.pointArr = sit256FrameResult.frame;
-      ctx.colOrSendData(sit256FrameResult.jsonData);
+      const published = ctx.colOrSendData(sit256FrameResult.jsonData, {
+        zeroSources: { processed: sit256FrameResult.frame },
+      });
+      ctx.pointArr = getPublishedFrame(
+        published,
+        ['sitData'],
+        sit256FrameResult.frame,
+        sit256FrameResult.jsonData,
+      );
       return;
     }
 
@@ -173,8 +238,15 @@ function createLegacySerialFrameRuntime(ctx) {
       port2: ctx.port2,
     });
     if (bed4096FrameResult) {
-      ctx.pointArr = bed4096FrameResult.frame;
-      ctx.colOrSendData(bed4096FrameResult.jsonData);
+      const published = ctx.colOrSendData(bed4096FrameResult.jsonData, {
+        zeroSources: { processed: bed4096FrameResult.frame },
+      });
+      ctx.pointArr = getPublishedFrame(
+        published,
+        ['sitData'],
+        bed4096FrameResult.frame,
+        bed4096FrameResult.jsonData,
+      );
       return;
     }
 
@@ -225,14 +297,19 @@ function createLegacySerialFrameRuntime(ctx) {
     if (buffer.length === 1024) {
       const frameResult = ctx.backHead1024FrameProcessor.processBackFrame(buffer, {
         file: ctx.file,
-        zeroFrame: ctx.pointArr2zero,
         port1: ctx.port1,
         port2: ctx.port2,
       });
       if (frameResult) {
-        ctx.pointArr2 = frameResult.frame;
-        ctx.pointArr2zeroData = frameResult.zeroSourceFrame;
-        ctx.colOrSendData1(frameResult.jsonData);
+        const published = ctx.colOrSendData1(frameResult.jsonData, {
+          zeroSources: { processed: frameResult.frame },
+        });
+        ctx.pointArr2 = getPublishedFrame(
+          published,
+          ['backData'],
+          frameResult.frame,
+          frameResult.jsonData,
+        );
       }
       return;
     }
@@ -242,8 +319,6 @@ function createLegacySerialFrameRuntime(ctx) {
       const backFrameResult = segmentedFrameProcessor.processBack130Segment(buffer, {
         file: ctx.file,
         firstData: ctx.firstBlueData1,
-        pointArr1zero: ctx.pointArr1zero,
-        pointArr2RawZero: ctx.pointArr2RawZero,
         port1: ctx.port1,
         port2: ctx.port2,
       });
@@ -252,10 +327,15 @@ function createLegacySerialFrameRuntime(ctx) {
         return;
       }
       ctx.lastBlueData1 = backFrameResult.lastData;
-      ctx.pointArr = backFrameResult.pointArr;
-      ctx.pointArr2RawZeroData = backFrameResult.pointArr2RawZeroData;
-      if (backFrameResult.newArr147_2) ctx.newArr147_2 = backFrameResult.newArr147_2;
-      ctx.colOrSendData1(backFrameResult.jsonData, []);
+      const published = ctx.colOrSendData1(backFrameResult.jsonData, {
+        zeroSources: { processed: backFrameResult.pointArr },
+      });
+      ctx.pointArr2 = getPublishedFrame(
+        published,
+        ['backData'],
+        backFrameResult.pointArr,
+        backFrameResult.jsonData,
+      );
       return;
     }
 
@@ -265,18 +345,19 @@ function createLegacySerialFrameRuntime(ctx) {
         channel: 'back',
         file: ctx.file,
         firstData: ctx.firstBlueData1,
-        mappedZeroFrame: ctx.pointArr147zero_2,
         port1: ctx.port1,
         port2: ctx.port2,
-        rawZeroFrame: ctx.pointArr2RawZero,
-        zeroFrame: ctx.pointArr2zero,
       });
       ctx.lastBlueData1 = backFrameResult.lastData;
-      ctx.pointArr2 = backFrameResult.pressureData;
-      ctx.pointArr2RawZeroData = backFrameResult.rawZeroData;
-      ctx.pointArr2zeroData = backFrameResult.zeroSourceFrame;
-      ctx.newArr147_2 = backFrameResult.newArr147_2;
-      ctx.colOrSendData1(backFrameResult.jsonData, []);
+      const published = ctx.colOrSendData1(backFrameResult.jsonData, {
+        zeroSources: { processed: backFrameResult.pressureData },
+      });
+      ctx.pointArr2 = getPublishedFrame(
+        published,
+        ['backData'],
+        backFrameResult.pressureData,
+        backFrameResult.jsonData,
+      );
       return;
     }
 
@@ -307,9 +388,20 @@ function createLegacySerialFrameRuntime(ctx) {
     if (!frameResult.combinedFrame) return;
 
     const res = frameResult.combinedFrame;
-    if (!ctx.localFlag) {
-      ctx.publishSystemEvent(JSON.stringify({ sitData: res }));
-    }
+    const payloadText = JSON.stringify({ sitData: res });
+    // bigBed 保留自己的 1/10 入库节奏，但实时帧仍先经过统一零点适配，
+    // 这样动态 store 能看到完整合帧，且采零后的实时/历史数据使用同一结果。
+    const published = ctx.colOrSendData(payloadText, {
+      store: false,
+      publish: !ctx.localFlag,
+      zeroSources: { processed: res },
+    });
+    const preparedFrame = getPublishedFrame(
+      published,
+      ['sitData'],
+      res,
+      payloadText,
+    );
 
     if (
       ctx.flag
@@ -320,7 +412,7 @@ function createLegacySerialFrameRuntime(ctx) {
       if (ctx.dataFalg % 10 === 0) {
         const timestamp = Date.now();
         const date = ctx.saveTime;
-        ctx.enqueueCollectionInsert(ctx.db, [JSON.stringify(res), timestamp, date], 'sit');
+        ctx.enqueueCollectionInsert(ctx.db, [JSON.stringify(preparedFrame), timestamp, date], 'sit');
       }
       if (ctx.dataFalg >= 10) {
         ctx.dataFalg = 0;
@@ -343,14 +435,19 @@ function createLegacySerialFrameRuntime(ctx) {
     if (buffer.length === 1024) {
       const frameResult = ctx.backHead1024FrameProcessor.processHeadFrame(buffer, {
         file: ctx.file,
-        zeroFrame: ctx.pointArr4zero,
         port1: ctx.port1,
         port2: ctx.port2,
       });
       if (frameResult) {
-        ctx.pointArr4 = frameResult.frame;
-        ctx.pointArr4zeroData = frameResult.zeroSourceFrame;
-        ctx.colOrSendData2(frameResult.jsonData);
+        const published = ctx.colOrSendData2(frameResult.jsonData, {
+          zeroSources: { processed: frameResult.frame },
+        });
+        ctx.pointArr4 = getPublishedFrame(
+          published,
+          ['headData'],
+          frameResult.frame,
+          frameResult.jsonData,
+        );
       }
       return;
     }
@@ -358,7 +455,6 @@ function createLegacySerialFrameRuntime(ctx) {
     if (buffer.length === 130) {
       const headFrameResult = segmentedFrameProcessor.processHead130Segment(buffer, {
         firstData: ctx.firstBlueData2,
-        pointArr1zero: ctx.pointArr1zero,
         port1: ctx.port1,
         port2: ctx.port2,
       });
@@ -367,8 +463,15 @@ function createLegacySerialFrameRuntime(ctx) {
         return;
       }
       ctx.lastBlueData2 = headFrameResult.lastData;
-      ctx.pointArr = headFrameResult.pointArr;
-      ctx.colOrSendData1(headFrameResult.jsonData, []);
+      const published = ctx.colOrSendData2(headFrameResult.jsonData, {
+        zeroSources: { processed: headFrameResult.pointArr },
+      });
+      ctx.pointArr4 = getPublishedFrame(
+        published,
+        ['headData'],
+        headFrameResult.pointArr,
+        headFrameResult.jsonData,
+      );
       return;
     }
 
@@ -377,17 +480,19 @@ function createLegacySerialFrameRuntime(ctx) {
         channel: 'head',
         file: ctx.file,
         firstData: ctx.firstBlueData2,
-        mappedZeroFrame: ctx.pointArr147zero_2,
         port1: ctx.port1,
         port2: ctx.port2,
-        rawZeroFrame: [],
-        zeroFrame: ctx.pointArr4zero,
       });
       ctx.lastBlueData2 = headFrameResult.lastData;
-      ctx.pointArr4 = headFrameResult.pressureData;
-      ctx.pointArr4zeroData = headFrameResult.zeroSourceFrame;
-      ctx.newArr147_2 = headFrameResult.newArr147_2;
-      ctx.colOrSendData2(headFrameResult.jsonData, []);
+      const published = ctx.colOrSendData2(headFrameResult.jsonData, {
+        zeroSources: { processed: headFrameResult.pressureData },
+      });
+      ctx.pointArr4 = getPublishedFrame(
+        published,
+        ['headData'],
+        headFrameResult.pressureData,
+        headFrameResult.jsonData,
+      );
     }
   }
 

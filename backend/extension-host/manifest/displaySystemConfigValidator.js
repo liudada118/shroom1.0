@@ -44,6 +44,17 @@ function isPositiveInteger(value) {
 }
 
 /**
+ * channelId 由 `${displaySystemId}:${sensorId}` 组成，因此两个身份组件
+ * 都不能自带分隔符。否则同一字符串无法唯一还原展示系统和传感器。
+ *
+ * @param {unknown} value 待检查的 identity 组件。
+ * @returns {boolean} 是否包含 canonical channelId 分隔符。
+ */
+function containsChannelIdSeparator(value) {
+  return typeof value === 'string' && value.includes(':');
+}
+
+/**
  * 规范化算法配置。
  *
  * 算法不是必填项；没有算法时明确归一化为 none，方便后续生成系统时走默认数据通道。
@@ -109,6 +120,9 @@ function validateSensorEntry(rawSensor, { source, index, schemaVersion, label })
   }
 
   const id = isNonEmptyString(sensor.id) ? sensor.id.trim() : String(index);
+  if (containsChannelIdSeparator(id)) {
+    errors.push(`${source}: ${label}.id must not contain ":"`);
+  }
   if (!isNonEmptyString(sensor.type)) errors.push(`${source}: ${label}.type is required`);
 
   const matrix = sensor.matrix || {};
@@ -185,6 +199,9 @@ function validateDisplaySystemConfig(config, { source = 'display system manifest
   }
 
   if (!isNonEmptyString(config.id)) errors.push(`${source}: id is required`);
+  if (isNonEmptyString(config.id) && containsChannelIdSeparator(config.id.trim())) {
+    errors.push(`${source}: id must not contain ":"`);
+  }
   if (!isNonEmptyString(config.name)) errors.push(`${source}: name is required`);
 
   const schemaVersion = config.schemaVersion == null

@@ -51,6 +51,7 @@ function createDisplaySystemRuntimeController({
     getSensorType,
     allowParallelWithLegacy,
     allowActiveDisplaySystem,
+    zeroStateStore,
   } = {}) {
     runtimeDispatcher?.stop?.();
     runtimeBindings = bindRuntimeChannels({
@@ -58,6 +59,7 @@ function createDisplaySystemRuntimeController({
       serialManager,
       serialParserManager,
       frameOutputPipeline,
+      zeroStateStore,
     });
     runtimeDispatcher = createRuntimeDispatcher({
       bindings: runtimeBindings,

@@ -4,12 +4,6 @@ const HAND_RUNTIME_SNAPSHOT_KEYS = Object.freeze([
   'file',
   'port1',
   'port2',
-  'pointArr1zero',
-  'pointArr1RawZero',
-  'pointArr2zero',
-  'pointArr2RawZero',
-  'pointArr147zero',
-  'pointArr147zero_2',
 ]);
 
 /**
@@ -29,7 +23,6 @@ function createServerHandRuntime({
   createDoublePacketParser,
   normalizeFiniteFrame,
   bytes4ToInt10,
-  numLessZeroToZero,
   handL,
   handR,
   handRVideo1470506,
@@ -45,7 +38,6 @@ function createServerHandRuntime({
     createDoublePacketParser,
     normalizeFiniteFrame,
     bytes4ToInt10,
-    numLessZeroToZero,
     handL,
     handR,
     handRVideo1470506,

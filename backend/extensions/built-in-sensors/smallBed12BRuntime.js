@@ -1,8 +1,8 @@
 /**
  * 小床 12B 串口运行时。
  *
- * 该模块只负责小床 12B 的实时串口帧处理：原始 buffer 解析、零点扣除、
- * 压力值标定、运行时状态同步和实时通道输出。串口事件绑定仍留在 server.js，
+ * 该模块只负责小床 12B 的实时串口帧处理：原始 buffer 解析、压力值标定、
+ * 运行时状态同步和实时通道输出。零点按 channelId 在 decoded 阶段、标定前应用。
  * 但 onData 回调不再承载具体业务逻辑。
  */
 
@@ -16,8 +16,8 @@ function createSmallBed12BRuntime({
   sensorType,
   getSensorType,
   getLineOrder,
-  getZeroFrame,
-  subtractZero,
+  zeroStateStore,
+  resolveChannelIdentity,
   calibration,
   getDisplayOptions,
   getHz,
@@ -25,10 +25,14 @@ function createSmallBed12BRuntime({
   getNowDate,
   getEndDate,
   setCurrentPressureFrame,
-  setZeroSourceFrame,
   setCurrentDisplayData,
   sendSitFrame,
 }) {
+  function clampZero(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? Math.max(0, numeric) : 0;
+  }
+
   /**
    * 处理一帧小床 12B 串口数据。
    *
@@ -36,10 +40,17 @@ function createSmallBed12BRuntime({
    * @returns {boolean} 是否成功生成并发送实时帧。
    */
   function handleFrame(data) {
+    const identity = typeof resolveChannelIdentity === 'function'
+      ? resolveChannelIdentity('sit')
+      : null;
+    const channelId = String(identity?.channelId || '').trim();
+    const zeroFrame = channelId && typeof zeroStateStore?.getBaseline === 'function'
+      ? zeroStateStore.getBaseline(channelId, 'decoded')
+      : [];
     const frame = smallBed12B.buildRealtimeFrameFromBuffer(Buffer.from(data), {
       lineOrder: getLineOrder(),
-      zeroFrame: getZeroFrame(),
-      subtractZero,
+      zeroFrame,
+      subtractZero: clampZero,
       calibration,
       displayOptions: getDisplayOptions(),
       hz: getHz(),
@@ -50,10 +61,31 @@ function createSmallBed12BRuntime({
       return false;
     }
 
-    setZeroSourceFrame([...frame.orderedFrame]);
+    // 小床 12B 的零点定义在有线序的 ADC 阶段，必须先扣零再进入依赖
+    // 全帧 adcAvg 的非线性压力标定。不能在统一输出层对 kPa/降采样结果相减。
+    if (channelId && typeof zeroStateStore?.updateSources === 'function') {
+      zeroStateStore.updateSources(channelId, {
+        decoded: frame.orderedFrame,
+      }, identity);
+    }
+
+    const realtimeFrame = channelId
+      ? {
+        ...frame.realtimeFrame,
+        channelId,
+        displaySystemId: identity.displaySystemId,
+        sensorId: identity.sensorId,
+        sensorType: identity.sensorType,
+        outputChannel: identity.outputChannel || 'sit',
+        runtimeSource: 'legacy',
+        zeroApplied: true,
+        rawData: Array.isArray(frame.orderedFrame) ? [...frame.orderedFrame] : [],
+      }
+      : frame.realtimeFrame;
+
     setCurrentPressureFrame(frame.pressureData);
     setCurrentDisplayData([...frame.pressureData]);
-    sendSitFrame(JSON.stringify(frame.realtimeFrame));
+    sendSitFrame(JSON.stringify(realtimeFrame));
     return true;
   }
 

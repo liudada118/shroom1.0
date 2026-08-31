@@ -134,6 +134,17 @@ client.connectRealtime({ channels: ['car:sit'] });
 控制走 HTTP，实时走 WebSocket 订阅。`npm run sdk:demo` 是只读版演示。
 精确订阅使用 `displaySystemId:sensorId`；省略 `channels` 时保留服务端默认的 `*` 订阅。
 
+零点命令同样使用完整身份；不传目标时作用于当前展示系统，显式目标必须非空且合法，
+未知/空目标会由服务端拒绝而不是回退成全通道：
+
+```js
+await client.executeCommand('calibration.zero', {
+  enabled: true,
+  displaySystemId: 'chair-v2',
+  channelIds: ['chair-v2:left', 'chair-v2:right'],
+});
+```
+
 ### 3. 我只想用算法，不碰硬件
 
 ```js

@@ -402,6 +402,16 @@ const system = registry.get('hand0205');
 const rendererKey = registry.getRendererKey('hand0205', 'normal');
 ```
 
+控制命令用 `command()` 走 HTTP。零点命令可以省略目标以使用当前展示系统，也可以精确到
+非空 canonical channelId 列表；空数组或未知目标会 fail closed：
+
+```js
+await client.command('zeroCapture', {
+  displaySystemId: 'chair-v2',
+  channelIds: ['chair-v2:left', 'chair-v2:right'],
+});
+```
+
 `on('frame')` 拿到的是**归一化后**的帧：`{ sensorType, channel, mode, timestamp,
 matrix, data, raw, stats, extra }`。不管后端发的是新协议还是 legacy 字段名，到这里
 都是同一个形状 —— 归一化在 `src/store/normalizeFrame.js` 里做完了。`frame.data` 就是

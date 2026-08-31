@@ -73,7 +73,15 @@ function createCollectionFrameStorageService(options = {}) {
    * @returns {string | null} 展示系统存储数据；非展示系统帧返回 null。
    */
   function buildDisplaySystemCollectionData(frameToStore, dataKey) {
-    if (!frameToStore?.displaySystemId || !Array.isArray(frameToStore[dataKey])) {
+    // legacy zero adapter 也会补齐 canonical displaySystemId/channelId，供实时帧
+    // 寻址使用；这不代表该帧应切换到 manifest 专用历史格式。只有 runtime
+    // processor 明确标记的 Display System 帧才能走这里，否则会绕过手套零点帧、
+    // 小床 12B 和温度床等既有存储协议。
+    if (
+      frameToStore?.runtimeSource !== 'display-system'
+      || !frameToStore.displaySystemId
+      || !Array.isArray(frameToStore[dataKey])
+    ) {
       return null;
     }
 
@@ -87,6 +95,7 @@ function createCollectionFrameStorageService(options = {}) {
       displaySystemId: frameToStore.displaySystemId,
       channelId: frameToStore.channelId,
       outputChannel: frameToStore.outputChannel,
+      runtimeSource: frameToStore.runtimeSource,
     });
   }
 

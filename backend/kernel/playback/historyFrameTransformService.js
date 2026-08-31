@@ -20,6 +20,7 @@ function createHistoryFrameTransformService({
   totalToN,
   getCollectOptions,
   getRuntime,
+  getZeroFrameForChannel,
 }) {
   /**
    * 解析历史 matrix 行中的 JSON 数据，解析失败时返回 null。
@@ -340,13 +341,10 @@ function createHistoryFrameTransformService({
    * @param {'sit' | 'back' | 'head'} channel 采集通道名称。
    * @returns {unknown[]} 清零基准帧副本。
    */
-  function getZeroFrameForStorage(channel = 'sit') {
-    const runtime = getRuntime();
-    const source = channel === 'back'
-      ? (runtime.pointArr2RawZero.length ? runtime.pointArr2RawZero : runtime.pointArr2zero)
-      : channel === 'head'
-        ? runtime.pointArr4zero
-        : (runtime.pointArr1RawZero.length ? runtime.pointArr1RawZero : runtime.pointArr1zero);
+  function getZeroFrameForStorage(channel = 'sit', frameToStore = null) {
+    const source = typeof getZeroFrameForChannel === 'function'
+      ? getZeroFrameForChannel(channel, frameToStore)
+      : [];
     return Array.isArray(source) ? [...source] : [];
   }
 
@@ -367,7 +365,7 @@ function createHistoryFrameTransformService({
     return JSON.stringify({
       pressureData,
       rotate: Array.isArray(frameToStore.rotate) ? [...frameToStore.rotate] : [],
-      zeroFrame: getZeroFrameForStorage(channel),
+      zeroFrame: getZeroFrameForStorage(channel, frameToStore),
     });
   }
 

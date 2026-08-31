@@ -26,8 +26,14 @@ class BackendCommandRouter extends EventEmitter {
     if (command.backClose === true) this.emit('serial:close', { channel: 'back' });
     if (command.headClose === true) this.emit('serial:close', { channel: 'head' });
 
-    if (command.resetZero === true) this.emit('zero:capture');
-    if (command.resetZero === false) this.emit('zero:clear');
+    const zeroTarget = {
+      ...(command.displaySystemId != null ? { displaySystemId: command.displaySystemId } : {}),
+      ...(Object.prototype.hasOwnProperty.call(command, 'channelIds')
+        ? { channelIds: command.channelIds }
+        : {}),
+    };
+    if (command.resetZero === true) this.emit('zero:capture', zeroTarget);
+    if (command.resetZero === false) this.emit('zero:clear', zeroTarget);
 
     if (command.colName != null) this.emit('capture:setName', command.colName);
     if (command.time != null) this.emit('capture:setName', command.time);
