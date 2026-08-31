@@ -1,19 +1,15 @@
 /**
  * 创建串口打开/关闭编排器。
  *
- * SerialManager 负责物理串口生命周期，本模块负责把业务角色映射到
- * parser channel、波特率、自动重连和特殊数据 handler。
+ * SerialManager 管物理串口生命周期，本模块把业务角色映射到 parser channel、波特率、自动重连和
+ * 特殊数据 handler。本模块**不持有**串口状态（全部委托 SerialManager），只持有「角色 → 配置
+ * 来源」这层映射，所以切换展示系统不必重建它 —— `getSensorType()` 变了行为就跟着变。
  *
- * **这里有两族打开函数，语义不同，别混用：**
- * - 旧路径 `openSitSerialPort`/`openBackSerialPort`/`openHeadSerialPort` —— 角色写死，
- *   配置查不到就**回落**到内置波特率与 parser 通道。老传感器上线时还没有 manifest，
- *   这条路径是它们唯一的入口，不能撤。
- * - manifest 路径 `openManifestSerialPort`/`openManifestSerialPorts` —— 角色由展示系统
- *   声明，查不到就**拒绝**打开。二开新增的传感器一律走这条：宁可报「manifest 没声明」，
- *   也不要靠猜波特率把同波特率的两种设备错认成一种（那会解析出看似合理的假数据）。
- *
- * 本模块**不持有**串口状态，全部委托给 SerialManager；它持有的只是「角色 → 配置来源」
- * 这层映射。所以切换展示系统时不需要重建它，只要 `getSensorType()` 变了行为就跟着变。
+ * ⚠️ **两族打开函数语义不同，别混用**：旧路径 `openSitSerialPort`/`openBackSerialPort`/
+ * `openHeadSerialPort` 角色写死、查不到配置就**回落**到内置波特率与通道（老传感器没有
+ * manifest，这是它们唯一入口，不能撤）；manifest 路径 `openManifestSerialPort(s)` 查不到就
+ * **拒绝**打开 —— 宁可报「manifest 没声明」，也不能靠猜波特率把两种设备错认成一种（那会解析
+ * 出看似合理的假数据）。二开新增的传感器一律走后者。
  *
  * @param {object} options 创建参数。
  * @param {Function} options.getBaudRate 当前主压力串口波特率读取函数。
@@ -98,15 +94,13 @@ function createSerialPortOrchestrator({
   /**
    * 列出 SerialManager 当前**登记过**的全部角色（不只是打开着的）。
    *
-   * ⚠️ `serialManager.getStatus()` 遍历的是 `registeredPorts`，所以已经关掉但登记还在的
-   * 角色也会出现在这里。两处依赖这个语义：
-   * - `closeAllManagedSerialPorts` 借它拿到「所有该关的角色」—— 包含 status 为 closed 的
-   *   也无害（`stop` 对已关端口是幂等的），漏掉正在重连的才是真问题。
-   * - `closeManagedSerialPorts` 的 strict 校验用它兜住「manifest 已经换掉、但上一套的
-   *   端口还开着」这种情况，否则切换展示系统后就再也关不掉旧角色了。
+   * `status.role || status.portId` 是因为没显式给 role 的登记会退化成用 portId 当角色；去重是
+   * 因为多个 portId 可能映射到同一角色。
    *
-   * `status.role || status.portId` 是因为没显式给 role 的登记会退化成用 portId 当角色
-   * （见 serialManager 的 `buildStatus`）。去重是因为多个 portId 可能映射到同一角色。
+   * ⚠️ `getStatus()` 遍历的是 `registeredPorts`，**已关但登记还在的角色也会出现**。两处依赖这
+   * 个语义：`closeAllManagedSerialPorts` 借它拿「所有该关的角色」（多出已关的无害，`stop` 幂等；
+   * 漏掉正在重连的才是真问题）；`closeManagedSerialPorts` 的 strict 校验靠它兜住「manifest 已
+   * 换掉但上一套端口还开着」，否则切换展示系统后再也关不掉旧角色。
    *
    * @returns {string[]} 角色列表，去重且去掉空值。
    */
@@ -160,17 +154,15 @@ function createSerialPortOrchestrator({
   /**
    * 登记并启动一路物理串口。
    *
-   * **必须先 `registerPort` 再 `start`**：SerialManager 的 `start` 只认已登记的 portId，
-   * 没登记会直接抛 `serial port is not registered`。重连循环读的也是登记信息，
-   * 所以「登记」是配置的存放处，「启动」才碰硬件。同一角色重复调用等于用新配置覆盖旧登记
-   * 并重启该端口（`start` 内部会先 `stop` 自己）。
+   * 「登记」是配置的存放处（重连循环也读它），「启动」才碰硬件；同一角色重复调用 = 用新配置覆盖
+   * 旧登记并重启（`start` 内部先 `stop` 自己）。`reconnect: options.reconnect === true` 显式归一
+   * 成布尔，因为重连循环按 `!== true` 判断，truthy 字符串会让不该重连的端口开始自动重连。
    *
-   * `reconnect: options.reconnect === true` 显式归一成布尔：这个值会被重连循环按
-   * `!== true` 判断，传进来一个 truthy 的字符串会让「不该重连的端口」开始自动重连。
+   * ⚠️ **必须先 `registerPort` 再 `start`**：`start` 只认已登记的 portId，否则直接抛
+   * `serial port is not registered`。
    *
-   * ⚠️ 副作用：`serialManager.start` 会关掉**其他**指向同一物理路径的角色
-   * （见 serialManager 的 `closeByPath`）。这是有意的 —— 一个 COM 口不能被两个角色同时读，
-   * 但也意味着把两个角色配到同一路径时，后打开的会静默顶掉先打开的。
+   * ⚠️ 副作用：`start` 会关掉**其他**指向同一物理路径的角色（一个 COM 口不能被两个角色同时读）。
+   * 所以把两个角色配到同一路径时，后打开的会静默顶掉先打开的。
    *
    * @param {string} role 串口角色。
    * @param {object} [options] 端口配置（path/baudRate/parserChannel/dataHandler/onOpenError/reconnect）。
@@ -208,18 +200,11 @@ function createSerialPortOrchestrator({
   /**
    * 打开坐垫（sit）串口 —— 旧路径的三个固定角色之一。
    *
-   * 与 manifest 路径的关键区别是**查不到配置也照样开**：波特率回落到 `getBaudRate()`
-   * （全局主压力波特率），parser 通道回落到内置常量。这批老传感器上线时还没有 manifest，
-   * 撤掉回落就等于让它们全部打不开，所以这条路径要一直留着。
-   *
-   * 两层 parser 回落的嵌套顺序：manifest 声明 → `bigBed` 专用通道 → `getSitParserChannel()`
-   * （它自己还要再分 smallBed12B）。`bigBed` 单独判是因为它的分帧与坐垫不同但共用 sit 角色。
-   *
-   * `reconnect: true` 是这三个角色的默认策略：压力垫是主数据源，掉线要自己恢复，
-   * 否则用户得手动重开串口。
-   *
-   * 空 `portPath` 返回 null 而不是抛错：调用方常常是「配置里有就开」的循环，
-   * 没配路径是正常的未接线状态。
+   * 与 manifest 路径的关键区别是**查不到配置也照样开**（波特率回落 `getBaudRate()`、通道回落内置
+   * 常量）—— 撤掉回落等于让这批老传感器全部打不开。parser 回落顺序：manifest 声明 → `bigBed`
+   * 专用通道（它分帧与坐垫不同但共用 sit 角色）→ `getSitParserChannel()`。`reconnect: true` 是
+   * 这三个角色的默认策略（压力垫是主数据源，掉线要自己恢复）。空 `portPath` 返回 null 而不抛错，
+   * 因为调用方常是「配置里有就开」的循环，没配路径是正常的未接线状态。
    *
    * @param {string} portPath 串口设备路径（如 COM3 / /dev/ttyUSB0）。
    * @param {string} [reason] 日志前缀。
@@ -243,17 +228,15 @@ function createSerialPortOrchestrator({
   /**
    * 打开靠背（back）串口 —— 旧路径的三个固定角色之一。
    *
-   * **敏枕（minzhen）是这里唯一的分叉，而且它绕开了整个 parser 层。** 敏枕传感器发的是
-   * 换行分隔的**文本**，不是本仓统一的二进制分隔符帧，所以：
-   * - `parserChannel: undefined` —— 不接 parser（接了会按二进制分隔符切，切出来全是垃圾）。
-   * - `dataHandler` 直接挂到 port 的 `'data'` 事件上，自己做文本分帧（见 server.js 的
-   *   `handleMinzhenSensorPortData` + `minzhenSensorExtractor`）。
+   * 非敏枕分支与 sit 一致（manifest 优先，回落全局波特率 + 内置 BACK 通道）。
    *
-   * 打开前 `resetMinzhenSensorExtractor()` 是必需的：那个提取器持有一段跨 chunk 的残留
-   * 缓冲，上次断开时很可能停在半行上。不清的话新连接的第一帧会和上次的尾巴拼成一行，
-   * 解析失败 —— 现象是「重连后第一帧数据丢了」，偶发且难查。
+   * ⚠️ **敏枕（minzhen）绕开了整个 parser 层**：它发的是换行分隔的文本，不是本仓统一的二进制
+   * 分隔符帧。所以 `parserChannel: undefined`（接了 parser 会按二进制分隔符切，切出来全是垃圾），
+   * 靠 `dataHandler` 挂在 port 的 `'data'` 上自己做文本分帧。
    *
-   * 非敏枕分支与 sit 一致：manifest 配置优先，查不到回落到全局波特率 + 内置 BACK 通道。
+   * ⚠️ 打开前 `resetMinzhenSensorExtractor()` 必需：提取器持有跨 chunk 的残留缓冲，上次断开很
+   * 可能停在半行上，不清会让新连接第一帧和上次的尾巴拼成一行解析失败 —— 现象是「重连后第一帧
+   * 数据丢了」，偶发且难查。
    *
    * @param {string} portPath 串口设备路径。
    * @param {string} [reason] 日志前缀。

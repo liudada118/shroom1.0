@@ -1,28 +1,16 @@
 /**
- * sqlite3-compat.js
+ * 用 better-sqlite3 顶替 `sqlite3` 的回调式兼容层（Database + run/all/get/close/serialize）。
  *
- * Minimal sqlite3 callback-style compatibility layer backed by better-sqlite3.
- * It currently implements the subset used by server.js: Database/run/all/get/close/serialize.
+ * 依赖已换成 `better-sqlite3`，但两者 API 形状相反（回调式异步 vs 同步返回值），而 server.js 与
+ * dbManager.js 有几十处回调式调用点 —— 这个 shim 让它们一行都不用改。只实现实际用到的子集：需要
+ * `each`/`prepare`/`Statement` 时在这里补，别直接 import better-sqlite3（混用两套风格会让「这条
+ * 查询是同步还是异步」变成读代码才能确定的事）。本文件沿用双引号旧格式便于和上游 API 对照，
+ * 不要顺手格式化。
  *
- * **为什么有这一层。** 依赖已经从 `sqlite3` 换成了 `better-sqlite3`（见 package.json，
- * 现在只有后者），但两者的 API 形状完全相反：`sqlite3` 是回调式异步，`better-sqlite3`
- * 是同步返回值。server.js 与 dbManager.js 里有几十处回调式调用点，
- * 这个 shim 让那些调用点**一行都不用改**。
- *
- * 所以它**只实现被实际用到的子集**（Database + run/all/get/close/serialize），
- * 不是 sqlite3 的完整替代。二开时如果需要 `each`/`prepare`/`Statement`，
- * 要在这里补，而不是直接去 import better-sqlite3 —— 混用两套风格会让
- * 「这条查询是同步还是异步」变成读代码时才能确定的事。
- *
- * ⚠️ **底层是同步的，回调只是形状上的模拟。** 查询在 `run/all/get` 返回前就已经执行完
- * （包括磁盘 I/O），回调是靠 `process.nextTick` 在下一个 tick 触发的。后果：
- * - 语义上比真 sqlite3 更强 —— 不存在「回调还没跑就又发了一条查询」的竞态，
- *   `serialize` 因此可以是空壳。
- * - 但**大查询会阻塞事件循环**。历史库里有几 GB 的表（如 `smallBed12B.db`），
- *   一条没走索引的查询会让整个后端（含实时采集与 WebSocket）停住。写查询时要当同步代码看。
- *
- * 本文件沿用双引号与旧格式，与仓库其余部分不同 —— 它是照着 sqlite3 的 API 抄的边界层，
- * 保持原样便于和上游 API 对照，不要顺手格式化。
+ * ⚠️ **底层是同步的，回调只是形状模拟**（查询在返回前已连磁盘 I/O 执行完，回调靠
+ * `process.nextTick`）。好处是不存在真 sqlite3 那种「回调还没跑又发一条查询」的竞态，`serialize`
+ * 因此可以是空壳。代价是**大查询会阻塞事件循环** —— 历史库有几 GB 的表，一条没走索引的查询会让
+ * 整个后端（含实时采集与 WebSocket）停住。写查询时要当同步代码看。
  */
 
 const BetterSqlite3 = require("better-sqlite3");
@@ -30,12 +18,11 @@ const BetterSqlite3 = require("better-sqlite3");
 /**
  * 归一 `(sql, params?, callback?)` 这种可变参数形态。
  *
- * sqlite3 允许省略 `params` 直接给回调（`db.run(sql, cb)`），所以第二个参数是函数时要
- * 当回调用 —— 少了这一支，回调会被当成 SQL 绑定参数塞进 better-sqlite3，
- * 报的错是「参数类型不支持」，与真实原因毫无关系。
+ * 单个非数组值包成数组，因为 sqlite3 允许 `db.get(sql, id, cb)` 而 better-sqlite3 的
+ * `run(...params)` 需要展开。
  *
- * 单个非数组值包成数组：sqlite3 允许 `db.get(sql, id, cb)` 这种写法，
- * 而 better-sqlite3 的 `run(...params)` 需要展开。
+ * ⚠️ 第二个参数是函数时必须当回调（sqlite3 允许 `db.run(sql, cb)`）：少了这一支，回调会被当成 SQL
+ * 绑定参数塞进 better-sqlite3，报的是「参数类型不支持」，与真实原因毫无关系。
  *
  * @param {Array|*|Function|undefined} params 绑定参数、单个参数值，或直接是回调。
  * @param {Function} [callback] 回调。
@@ -54,13 +41,10 @@ function normalizeArgs(params, callback) {
 /**
  * 模拟 sqlite3 的 `Database`，内部持有一个 better-sqlite3 实例。
  *
- * 三个查询方法（run/all/get）形状一致，都遵守同一组约定：
- * - **返回 `this`** 以支持 sqlite3 的链式调用（`db.run(...).run(...)`）。
- * - 回调统一走 `process.nextTick`，让调用方永远在下一个 tick 拿到结果 —— 同步回调会让
- *   「回调里再发一条查询」变成同步递归，栈可能爆掉。
- * - **没给回调时把错误直接抛出**，而不是静默吞掉。sqlite3 的原行为是发 `error` 事件，
- *   这里没有事件通道；吞掉会让「表不存在」「SQL 写错」这类问题完全无声，
- *   现象是界面上永远没有数据。抛出来至少能在日志里看到。
+ * 三个查询方法（run/all/get）形状一致，共三条约定：**返回 `this`** 以支持 sqlite3 的链式调用；
+ * 回调统一走 `process.nextTick`（同步回调会让「回调里再发一条查询」变成同步递归、栈可能爆）；
+ * **没给回调时错误直接抛**而不是吞掉 —— sqlite3 原行为是发 `error` 事件，这里没有事件通道，吞掉
+ * 会让「表不存在」「SQL 写错」完全无声，现象是界面上永远没有数据。
  */
 class Database {
   /**
@@ -75,13 +59,11 @@ class Database {
   /**
    * 执行一条不返回行的语句（INSERT/UPDATE/DELETE/DDL）。
    *
-   * 回调是用 `callback.call(ctx, null)` 调的，`ctx` 上带 `lastID` 与 `changes` ——
-   * 这是 sqlite3 的约定：调用方在回调里写 `this.lastID`。**所以回调不能是箭头函数**，
-   * 箭头函数没有自己的 `this`，会拿到定义处的 this 而读不到 lastID。
+   * ⚠️ 回调用 `callback.call(ctx, null)` 调，`lastID`/`changes` 挂在 `this` 上（sqlite3 的约定），
+   * **所以调用方的回调不能是箭头函数** —— 箭头函数没有自己的 `this`，读不到 lastID。
    *
-   * `Number(...)` 转一层是因为 better-sqlite3 的 `lastInsertRowid` 在大表上可能是
-   * BigInt，而调用方（以及 JSON 序列化）都当普通数字用 —— BigInt 会让
-   * `JSON.stringify` 直接抛错。
+   * ⚠️ `Number(...)` 那层不能省：`lastInsertRowid` 在大表上是 BigInt，而调用方当普通数字用，
+   * BigInt 会让 `JSON.stringify` 直接抛错。
    *
    * @param {string} sql SQL 语句。
    * @param {Array|*|Function} [params] 绑定参数，或直接给回调。
@@ -208,15 +190,11 @@ class Database {
   /**
    * `db.serialize(cb)` 的空壳实现：直接同步调用回调。
    *
-   * sqlite3 里 `serialize` 的作用是「保证块内的查询按顺序执行」。**这里天然满足** ——
-   * 底层 better-sqlite3 是同步的，块内每条查询在下一条开始前就已经执行完了，
-   * 不存在需要序列化的乱序。
+   * sqlite3 里它保证块内查询按顺序执行，而底层同步天然满足，所以**这不是待实现的占位** ——
+   * 删掉会让 server.js 的调用点报「serialize is not a function」。
    *
-   * 所以这不是「待实现」的占位，删掉它反而会让 server.js 的调用点报
-   * 「serialize is not a function」。留着这个壳，那些调用点就不用动。
-   *
-   * 与另两类方法不同，回调是**同步**调的（不走 nextTick）：sqlite3 的语义是「在
-   * serialize 块内写查询」，异步化会让块内的查询跑到块外的代码之后，顺序反而变了。
+   * ⚠️ 回调是**同步**调的（不走 nextTick）：语义是「在 serialize 块内写查询」，异步化会让块内的
+   * 查询跑到块外代码之后，顺序反而变了。
    *
    * @param {Function} [callback] 在其中发起一批查询。
    * @returns {Database} this。

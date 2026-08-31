@@ -92,29 +92,15 @@ function createJqbedAlgorithmProtocol({ store, sendJson, broadcastJson, getAlgor
   /**
    * 处理一条算法参数命令。
    *
-   * **三重前置条件必须同时满足**（授权有效、当前型号是 jqbed、处于实时模式），否则回一条
-   * 失败结果。三条各有理由：
-   * - `licenseValid` —— 算法参数是授权功能。
-   * - `activeFile === 'jqbed'` —— 参数只对这套算法有意义，别的型号存了也没人读。
-   * - `realtime` —— 回放历史数据时改参数不会影响任何东西（历史数据是算完存下来的），
-   *   允许改只会让用户误以为改了有用。
+   * 三重前置条件必须同时满足：`licenseValid`（授权功能）、`activeFile === 'jqbed'`（别的型号存了
+   * 也没人读）、`realtime`（回放时改参数不影响任何东西，允许改只会让用户误以为有用）。`load` 单播
+   * 时**顺带发算法状态**，否则面板会先显示参数再跳出「算法未就绪」。save/reset 成功后广播参数、
+   * 单播回执（参数变更要所有客户端同步，「你这次成功了」只有发起方需要）。返回 `true` 表示已接管
+   * （无论成败），`false` 交给后面的处理器。`load` 失败回 i18n key、save/reset 回英文句子的不一致
+   * 是历史遗留：load 是切界面时自动触发的，文案要能本地化。
    *
-   * `load` 失败时回的是 i18n key（`'jqbedAlgorithmConfig.backend.unavailable'`），
-   * save/reset 失败时回的是英文句子 —— 不一致是历史遗留：load 会在切到 jqbed 界面时自动
-   * 触发（用户没主动操作，文案要能本地化），另两个是用户点按钮才发生的。
-   *
-   * `load` 单播时**顺带把算法状态一起发**：前端打开参数面板需要同时知道「参数是什么」和
-   * 「Python 算法起来了没有」，两条消息分开发会出现面板先显示参数再跳出「算法未就绪」。
-   *
-   * save/reset 成功后是**广播**参数、**单播**回执：参数变更要让所有客户端界面同步，
-   * 但「你这次操作成功了」只有发起方需要。
-   *
-   * catch 里区分两类错误（见 JqbedAlgorithmConfigValidationError）：校验错带字段表让前端
-   * 高亮输入框；其他错（落盘失败等）只回一句通用文案，**不把原始 error.message 透出去** ——
-   * 那里面可能带绝对路径。
-   *
-   * 返回 `true` 表示「这条命令我接了」（无论成败），路由层据此 stop；返回 `false` 表示
-   * 不是这类命令，交给后面的处理器。
+   * ⚠️ catch 里两类错分开：校验错带字段表让前端高亮输入框；其他错（落盘失败等）只回通用文案，
+   * **不透出原始 `error.message`** —— 那里面可能带绝对路径。
    *
    * @param {object} message 命令消息。
    * @param {object} context 运行时上下文（client/licenseValid/activeFile/realtime）。
@@ -177,20 +163,12 @@ function createJqbedAlgorithmProtocol({ store, sendJson, broadcastJson, getAlgor
 /**
  * 构造可挂载到 codeOpi 命令路由器的隔离处理器。
  *
- * 配置协议只允许主 WebSocket 入口调用；授权、当前传感器和回放状态由
- * runtimeContextFactory 的读取函数在每次请求时提供，模块本身不持有串口或
- * Electron 状态。
+ * 授权、当前传感器和回放状态由 `getRuntimeContext` **每次请求现调**取得（不是装配期快照）——
+ * 三者都会在运行期变，缓存会让刚切到回放的客户端仍然改得动参数。`handle` 返回 `{stop: handled}`
+ * 而非恒 `true`，是给「protocol 内部判据与 `when` 不一致」留的防御性转发。
  *
- * `when` 里的 `context.scope === 'main'` 是一条**权限边界**：算法参数只能从主界面那条
- * WebSocket 连接改。别的 scope（例如给外部工具用的连接）即使发同样的命令也不会命中，
- * 会一路落到「没人接」。
- *
- * `getRuntimeContext` 是**每次请求现调**（不是装配期取一次快照）：授权状态、当前型号、
- * 是否回放中都会在运行期变，缓存下来会让刚切到回放的客户端仍然改得动参数。
- *
- * `handle` 返回 `{stop: handled}` 而不是恒 `{stop: true}`：protocol 判定不是这类命令时
- * 要让责任链继续往下走。实际上 `when` 已经用同一个判据过滤过，所以 `handled` 为 false
- * 只可能是 protocol 内部判据与 `when` 不一致 —— 保留这个转发是防御性的。
+ * ⚠️ `when` 里的 `context.scope === 'main'` 是一条**权限边界**：算法参数只能从主界面那条 WebSocket
+ * 连接改。别的 scope（如给外部工具的连接）发同样的命令不会命中，会一路落到「没人接」。
  *
  * @param {object} options 依赖。
  * @param {{handle: Function}} options.protocol 由 createJqbedAlgorithmProtocol 建的处理器。
