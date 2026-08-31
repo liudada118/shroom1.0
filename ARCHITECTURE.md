@@ -25,6 +25,20 @@ manifest adapter 全程保留 `sensorLabel + channelId + serial`。canonical 帧
 为每个 sensor 至少生成一个独立 source 的数据 widget，已有合法 source 原样保留；widget 标题
 显示业务标签和当前 COM。`sidebar.source` 只选择侧栏统计的一路，不再决定其它通道是否接收。
 
+每个画布 widget 还会按自己的 `source` 解析 `sensors[]`：数据、原始矩阵和
+`coordinateMap` 必须来自同一路 sensor，矩阵变换后再生成该卡片自己的
+`coordinatePointLayout`。多传感器第二路缺少坐标文件时退回自身规则矩阵，禁止复用第一路的
+顶层坐标兼容投影。`DisplayCanvasConfigurator` 接受 `sourceOptions/defaultSource`，新增卡片前可
+选择目标通道，已放置卡片也可单独改 source；旧 `*Data` / `*.metrics` 写法只在界面解析为
+`outputChannel`，不会在读取时破坏旧 manifest。
+
+Builder 编辑链同样以 `sensors[]` 为逐路真相：编辑接口返回
+`definitions.sensors[sensorId]`（顶层 definitions 仍兼容投影第一路），页面用传感器页签分别维护
+label、outputChannel、stored、type、matrix、files、protocol、线序与算法。切页和保存前都会快照当前
+表单，保存提交 `definitions.sensors`，不会再把第一路配置复制给所有串口。新建多路的定义文件进入
+各自 `${sensorId}/` 子目录；编辑既有 v3 则保留原文件路径。传感器 ID 支持安全规则内的自定义
+tags 并去重，outputChannel 必须非空且跨传感器唯一。
+
 SQLite `matrix` 表新增可空的 channel/display/sensor/serial 身份列，并建立只覆盖 canonical 行的
 `(date, channel_id, id)` partial index。所有 manifest 通道统一写入主库，以 `channel_id` 精确
 隔离；`NULL channel_id` 严格表示旧三通道历史。历史查询动态发现当天真实通道，兼容迁移前把
@@ -40,7 +54,7 @@ COM8”；旧 `downloadFiles[]` 仅作兼容，不再依据文件数组顺序推
 发布，各通道长度不同时只跳过本帧缺失的通道，不会让一条短通道截断其它通道。SDK 契约同步
 升级为 schema v3，公开 `sensors[]` 与 `sensorLabel/serial` 帧字段。
 
-## 2026-08-31 `backend/` 注释回改成短式（5 批，进行中）
+## 2026-08-31 `backend/` 注释回改成短式（全部完成）
 
 批 4 结束时问过用户「批 1–3 已提交的长版本要不要统一成短式」，用户答**回改**。所以这一
 轮把批 1–3 的多段散文压成与批 4 一致的短式。
@@ -53,26 +67,53 @@ COM8”；旧 `downloadFiles[]` 仅作兼容，不再依据文件数组顺序推
 共十六条）在本文档下面的批次小节和四张台账里**逐条留着**；代码里只保留
 「⚠️ 一句话 + 后果」，需要机制的人来文档里查。
 
-**只改 ≥12 行的注释块。** 用 `tmp/long-blocks.mjs`（连续注释行计数）量出全量：批 1–3
-共 **313 个 ≥12 行的块、5672 行、分布在 65 个文件**。6–10 行的 JSDoc（一行说明 +
-`@param`/`@returns`）本来就是短式，一个字不动 —— 用户嫌长的是那些多段essay，不是
-`@param` 表。
+**判据换过一次，是刻意的。** 起初用 `tmp/long-blocks.mjs`（连续注释行计数）量出「批 1–3
+共 313 个 ≥12 行的块、5672 行、65 个文件」，批 A 按这个做完。之后改成
+`tmp/long-prose.mjs` 量**散文行**（剥掉 `/**`、`*`、`//` 装饰，再排除空行和以 `@` 开头的
+行），因为「一个有 8 个入参的函数天然就有 10 行标签」不该被算成注释太长 —— 用户嫌长的是
+多段 essay，不是 `@param` 表。批 B1 起改用**散文 >6 行**，批 D 起进一步放宽到**散文
+>10 行**：抽样发现 7–10 行那一档大多已经就是批 4 用户认可的形状（一句话干什么 + 两三条
+要点 + 标签），再压只能开始删事实。**6–10 行的 JSDoc 一个字没动。**
 
 分批（沿用原分层，每批一个提交）：
 
-| 回改批 | 范围 | 块数 | 状态 |
-| :--- | :--- | ---: | :--- |
-| A | `runtime/` + `extensions/` | 9 | ✅ |
-| B | `extension-host/` | 待量 | 待做 |
-| C | `kernel/` 非 `platform/` | 待量 | 待做 |
-| D | `kernel/platform/` 除 `server.js` | 待量 | 待做 |
-| E | `kernel/platform/server.js` | 33 | 待做 |
+| 回改批 | 范围 | 提交 | 文件 | 差异 | 状态 |
+| :--- | :--- | :--- | ---: | :--- | :--- |
+| A | `runtime/` + `extensions/` | `0cfb09f` | 7 | +83 / −71 | ✅ |
+| B1 | `extension-host/`（无冲突部分） | `d40713b` | 7 | +153 / −264 | ✅ |
+| C1 | `kernel/` 非 `platform/`（无冲突部分） | `55ca4a9` | 10 | +390 / −715 | ✅ |
+| D | `kernel/platform/` 除 `server.js` | `d78bf26` | 17 | +204 / −404 | ✅ |
+| C2 | 批 B/C 当时被并行改动占着的文件 | `289a762` | 3 | +44 / −80 | ✅ |
+| E | `kernel/platform/server.js` | `212d1b0` | 1 | +115 / −203 | ✅ |
+| — | 补批 D 漏掉的 `runtimeStatePatchFactory.js` | `8a9d95c` | 1 | +7 / −12 | ✅ |
 
-批 A 结果：6 个文件 +45 / -71（净 -26 行），函数注释覆盖率**一处未降**（仍是
-`runtime/` 100%、`extensions/` 100%），`node --check` 全过，逐 token 代码骨架 0 处不一致，
-55 个测试文件全过。压掉的都是同一类东西 —— 把「为什么这样、否则会怎样、历史上怎么来的」
-三段合成一句 ⚠️。例如 `runtime/index.js` 的 `getWsServer` 从 5 行压到 3 行，保留的核心是
-「`channel` 不影响返回值、别据此推断存在 sit/back/head 通道表」。
+**原计划的 B2 实测无事可做。** 并行改动（`c2e702c`）落地后重新量，`extension-host/` 里
+散文 >10 行的只剩 `displaySystemWorkspaceService.js` 的 `save` 一块，逐行数过是 **9 行
+散文** —— 多出来的 3 行是 `@param`/`@throws` 的续行被计数器算进去了。它已经就是批 4 认可
+的形状，一字未动。
+
+**收官状态**：`backend/runtime/`、`backend/extensions/` 两层散文 >10 行的块**归零**；
+`backend/extension-host/` 只剩那一块假阳性；`backend/kernel/` 剩 16 块，全部是**刻意留在
+11–16 行**的 —— 每块都有好几条彼此独立、都会「改了会坏但不报错」的 ⚠️（`pythonWorker` ×2、
+`petCareRuntimeService` ×2、`controlCommandRouter` ×2、`serverShutdownOrchestrator`、
+`runtimeControlService`、`httpAppFactory`、`webSocketHandlerFactory`、
+`displaySystemAlgorithmRunner`、`historyAnalysisService`、`historySessionService`，
+以及 `server.js` 里的 3 块，其中 `activateSubmittedLicenseKey` 还是 CLAUDE.md 点名的
+「用户权限与身份认证」高风险类别）。**不要回头再压这 16 块。**
+
+合计 6 批 + 1 次补漏：**39 个文件、+996 / −1749（净 −753 行）**。全程 `node --check` 全过，
+`tmp/strip-cmp.mjs`（acorn tokenizer 逐 token 比对）对每个文件**逐个**报代码骨架 0 处不
+一致，`backend/tests/run-tests.js` 每批后全 57 个测试文件通过，`backend/kernel/platform`
+的函数注释覆盖率始终 98%（246/252）、`runtime/` 与 `extensions/` 始终 100%。
+
+压掉的都是同一类东西 —— 把「为什么这样、否则会怎样、历史上怎么来的」三段合成一句 ⚠️。
+例如 `runtime/index.js` 的 `getWsServer` 从 5 行压到 3 行，保留的核心是「`channel` 不影响
+返回值、别据此推断存在 sit/back/head 通道表」；`server.js` 的
+`resolveZeroTargetChannelIds` 从 24 行压到 14 行，保留的是「三份来源缺一不可」
+「`withSourcesOnly` 是采零与清零唯一的行为差异」「返回值有两种形状」三条。
+
+**顺带修掉两处已经失效的行号引用**：`publishHistoryDateList` 的注释里原写「1669 行与
+1686 行」，在前几批的行号漂移后已经指错了；改成按函数名与语义描述，不再引行号。
 
 ## 2026-08-31 `backend/` 函数级注释（四批全部完成）
 
@@ -340,8 +381,8 @@ UTF-8 解出来是**可读的**中文。已经正确的中文行也能编成 GBK
 **注释风格在这一批中途改过一次。** 批 1–3 每个函数写的是多段「为什么」，用户看后反馈
 「每个描述都太多了，我最想知道他是干什么做什么怎么用的」。批 4 全部改成短式：**一行说
 干什么 → 最多一两行说用法/要点（只写不显而易见的）→ `@param`/`@returns`**，一个简单
-helper 控制在 8 行以内。批 4 第一遍写的长版本已就地缩写，**批 1–3 已提交的长版本没有
-回改**（是否统一风格由用户决定）。
+helper 控制在 8 行以内。批 4 第一遍写的长版本已就地缩写；**批 1–3 已提交的长版本当时没有
+回改**，用户随后答「回改」，落地情况见本文档前面的「`backend/` 注释回改成短式（全部完成）」一节。
 
 测试文件的注释重点不是「这个 fake 怎么实现」，而是**它为什么必须这样 fake** —— 那才是
 二开者照抄时会踩的坑。落地的几条：
@@ -2379,7 +2420,7 @@ flowchart LR
 
 | 日期 | 类型 | 说明 |
 | :--- | :--- | :--- |
-| 2026-08-31 | 优化重构 | **批 1–3 的长注释回改成短式（5 批，A 已完成）**。批 4 结束时问过用户是否统一风格，用户答「回改」。压缩规则：一行说干什么 → 用法/要点（只留不显而易见的、**每条一行**）→ `@param`/`@returns`。**不是删信息而是换存放位置** —— 批 1–3 那十六条机制推演在本文档的批次小节与四张台账里逐条留着，代码里只保留「⚠️ 一句话 + 后果」，需要机制的人来文档里查。**只改 ≥12 行的注释块**：用 `tmp/long-blocks.mjs`（连续注释行计数）量出批 1–3 共 **313 个 ≥12 行的块 / 5672 行 / 65 个文件**；6–10 行的 JSDoc（一行说明 + `@param`/`@returns`）本来就是短式、一字不动 —— 用户嫌长的是多段 essay，不是 `@param` 表。分批沿用原分层，每批一个提交：A `runtime/` + `extensions/`（9 块）✅、B `extension-host/`、C `kernel/` 非 `platform/`、D `kernel/platform/` 除 `server.js`、E `kernel/platform/server.js`（33 块）。批 A 结果：6 个文件 +45 / -71（净 -26 行），**函数注释覆盖率一处未降**（`runtime/` 与 `extensions/` 仍是 100%），`node --check` 全过，逐 token 代码骨架 0 处不一致，55 个测试文件全过。压掉的都是同一类东西 —— 把「为什么这样 / 否则会怎样 / 历史上怎么来的」三段合成一句 ⚠️，例如 `runtime/index.js` 的 `getWsServer` 从 5 行压到 3 行，保留的核心是「`channel` 不影响返回值、别据此推断存在 sit/back/head 通道表」。 |
+| 2026-08-31 | 优化重构 | **批 1–3 的长注释回改成短式（6 批 + 1 次补漏，全部完成）**。批 4 结束时问过用户是否统一风格，用户答「回改」。压缩规则：一行说干什么 → 用法/要点（只留不显而易见的、**每条一行**）→ `@param`/`@returns`。**不是删信息而是换存放位置** —— 批 1–3 那十六条机制推演在本文档的批次小节与四张台账里逐条留着，代码里只保留「⚠️ 一句话 + 后果」，需要机制的人来文档里查。**判据换过一次，是刻意的**：起初用 `tmp/long-blocks.mjs`（连续注释行计数）量出「批 1–3 共 **313 个 ≥12 行的块 / 5672 行 / 65 个文件**」，批 A 按这个做完；之后改成 `tmp/long-prose.mjs` 量**散文行**（剥掉 `/**`、`*`、`//` 装饰，再排除空行和以 `@` 开头的行），因为「一个有 8 个入参的函数天然就有 10 行标签」不该被算成注释太长。批 B1 起改用**散文 >6 行**，批 D 起进一步放宽到**散文 >10 行**（抽样发现 7–10 行那一档大多已经就是批 4 用户认可的形状，再压只能开始删事实）。**6–10 行的 JSDoc 一个字没动** —— 用户嫌长的是多段 essay，不是 `@param` 表。七个提交全部**按路径 stage**（`git commit -F <file> -- <显式路径>`），因为工作区始终有并行分支的未提交改动。落地情况：A `runtime/` + `extensions/` `0cfb09f`（7 文件 +83/−71）、B1 `extension-host/` `d40713b`（7 文件 +153/−264）、C1 `kernel/` 非 `platform/` `55ca4a9`（10 文件 +390/−715）、D `kernel/platform/` 除 `server.js` `d78bf26`（17 文件 +204/−404）、C2 批 B/C 当时被并行改动占着的文件 `289a762`（3 文件 +44/−80）、E `kernel/platform/server.js` `212d1b0`（1 文件 +115/−203，12 块，全文散文 340 → 260 行）、补漏 `runtimeStatePatchFactory.js` `8a9d95c`（1 文件 +7/−12）。**合计 39 个文件、+996 / −1749（净 −753 行）。** **原计划的批 B2 实测无事可做**：并行改动（`c2e702c`）落地后重新量，`extension-host/` 里散文 >10 行的只剩 `displaySystemWorkspaceService.js` 的 `save` 一块，逐行数过是 **9 行散文** —— 多出来的 3 行是 `@param`/`@throws` 的**续行**（不以 `@` 开头）被计数器算成散文了，这是 `long-prose.mjs` 的已知局限，11–13 行这一档必须手工复核再动。**收官状态**：`runtime/`、`extensions/` 两层散文 >10 行的块**归零**；`extension-host/` 只剩那一块假阳性；`kernel/` 剩 16 块，全部是**刻意留在 11–16 行**的（`pythonWorker` ×2、`petCareRuntimeService` ×2、`controlCommandRouter` ×2、`serverShutdownOrchestrator`、`runtimeControlService`、`httpAppFactory`、`webSocketHandlerFactory`、`displaySystemAlgorithmRunner`、`historyAnalysisService`、`historySessionService`，以及 `server.js` 里的 3 块）—— 每块都有好几条彼此独立、都会「改了会坏但不报错」的 ⚠️，其中 `activateSubmittedLicenseKey` 还是 CLAUDE.md 点名的「用户权限与身份认证」高风险类别。**不要回头再压这 16 块。** 验证（每批都跑）：`node --check` 全过；`tmp/strip-cmp.mjs`（acorn tokenizer 逐 token 比对）对每个文件**逐个**报代码骨架 0 处不一致，证明是纯注释改动（该脚本传多个目录会错算，必须一次一个路径）；`backend/tests/run-tests.js` 全 **57** 个测试文件通过；`backend/kernel/platform` 的函数注释覆盖率始终 98%（246/252），`runtime/` 与 `extensions/` 始终 100%。压掉的都是同一类东西 —— 把「为什么这样 / 否则会怎样 / 历史上怎么来的」三段合成一句 ⚠️，例如 `runtime/index.js` 的 `getWsServer` 从 5 行压到 3 行，保留「`channel` 不影响返回值、别据此推断存在 sit/back/head 通道表」；`server.js` 的 `resolveZeroTargetChannelIds` 从 24 行压到 14 行，保留「三份来源缺一不可」「`withSourcesOnly` 是采零与清零唯一的行为差异」「返回值有两种形状」三条。**顺带修掉两处已经失效的行号引用**：`publishHistoryDateList` 的注释里原写「1669 行与 1686 行」，在前几批的行号漂移后已经指错了，改成按函数名与语义描述、不再引行号。 |
 | 2026-08-31 | 文档更新 | **`backend/` 函数级注释批 4/4（收尾）：`tests/` 26 个文件 44 个缺注释补齐至 100%（52/52），`compatibility/legacyDataUtils.js` 3 个函数补齐至 100%**，全后端覆盖率 85% → 91%（735 已注释 / 77 缺，其中 71 是刻意不做的 `openWeb.js`、6 是成组箭头函数的已知假阳性）。**代码一行未改**：27 个文件 +432 行 / -0 行，全部 `node --check` 通过，`tmp/strip-cmp.mjs`（acorn 词法分析）判定 27 个文件**逐 token 代码骨架 0 处不一致**，后端 55 个测试文件全过。**⚠️ 注释风格在这一批中途按用户反馈改过一次**：用户看完批 1–3 后说「每个描述都太多了，我最想知道他是干什么做什么怎么用的」，批 4 全部改成短式（一行说干什么 → 最多一两行说用法/要点、只写不显而易见的 → `@param`/`@returns`，简单 helper 控制在 8 行内），批 4 第一遍写的长版本已就地缩写；**批 1–3 已提交的长版本没有回改**，是否统一风格待用户决定。测试文件的注释重点不是「这个 fake 怎么实现」而是**它为什么必须这样 fake**（二开者照抄时会踩的坑）：`runtimeBinding.test.js` 的 `apply` 记零点扣减两条兜底（无基线原样返回、**长度不一致也原样返回** —— 换矩阵尺寸后拿旧基线扣会错位、比不扣更糟；`Math.max(0,…)` 截负值否则配色映射出界）；同文件 `droppedZeroStateStore.updateSources` 只计数以守一条不变量 —— **校验失败被丢弃的清零帧不能被 `createZeroFrameAdapter` 兜底层重新当成旧协议帧处理**，否则串口噪声污染零点基线、画面慢慢偏且无法回溯；`backendSdkClient.test.js` 的 `FakeWebSocket` **异步 open**（`setImmediate`），否则「open 之前就 send」这类 bug 会被同步 open 掩盖，其 `fetchImpl` 记录 url/options 以便断言请求**次数**（契约快照应当被缓存）、`/api/commands` 分支回显 `requestId` 让 ack 匹配可测；`petCareRuntimeService.test.js` 的 `createTimerHarness` 劫持全局 `setInterval` 由测试自己驱动 tick（避免 sleep 型测试间歇失败），**`harness.restore()` 是必须的**否则影响同进程后续测试；`runtimeContextFactory.test.js` 的第二个 `store.get` 说明为何要**换掉外层 `store` 变量再断言** —— 验的正是每次都走 `getRuntimeStateStore()` 现取而非构造时拍快照；`serialChainDemo.test.js` 与 `serialProtocolsApi.test.js` 写明它们守的是**打包后二开路径**（示例坏了比库坏了更打击人；往预设目录丢一个 JSON 就能扩协议，且**一个坏 JSON 只能让自己失效**、不能把整张表清空）。`legacyDataUtils.js` 三个函数**名字全都名不副实**，查实后写进注释：① **`isCar` 的真实语义是「是不是多通道」**（硬编码名单里还有手套 `hand0205*`/`handGlove*`、眼罩、沙发、整椅、足垫），它决定建几个库 / 历史日期取几路 / 清零发几份 / CSV 导几通道，**且是硬编码数组不是读 manifest** —— 新增多通道型号只在 manifest 里声明多个 sensor 不够、必须往这个数组里加一条否则第二路永远拿不到库；② **`dedupli` 的返回结构与入参不同**（入参来自 `SELECT DISTINCT date FROM matrix` 只有 `date`，返回 `{date, name, info}`），而 `publishHistoryDateList` 只在多通道型号上送它的输出、单通道送原始行，所以**前端 `timeArr` 的元素结构随型号变**、不能假设 `.name` 存在；它按 `includes(" ")` 分支是因为 `date` 列有两个来源（`runtimeControlService.js:130-131` 先写 `message.time` 时间戳、再让用户手输的 `message.colName` 覆盖它），`info` 始终保留未加工原标签因为「载入那天」是拿 `date = ?` 去比它；另记两条实测行为（**未改**）：`!String(a.date).includes(":")` 会静默丢掉日期部分带冒号的条目、`sort((a,b) => b.date - a.date)` 是数值相减、非数字日期得 NaN 使比较器被当作 0（等于保持原序）；③ **`totalToN` 现在是恒等函数**（标定多项式与 `* 0.03` 都被注释掉、`mul` 根本没用），因此三处调用点（`historyAnalysisService`/`historyPlaybackService`/`csvDownloadService`）的 `totalToN(total, 1.3)` 那个 `1.3` 是**死参数**、背部压力并没有被乘，且它换算的是整块矩阵的和（不是单点）又发生在读库之后，所以**恢复标定会改变已入库历史数据的显示值**。另记一条：`backend/tests/run-tests.js` 本身没有函数（扫描器不计），但它是一张**手工维护的 55 条测试文件路径数组**（`spawnSync` + `stdio: 'inherit'` 逐个跑、只看退出码），新增测试文件**不会**被自动收录 —— 避免二开者以为是目录扫描。`compatibility/openWeb.js` 的 71 个函数按原定边界仍不注释（它只是那三个基线对比测试的逐点比对基准，加注释会把基线 diff 搅浑）。后端根目录无 eslint 配置故未跑 lint。 |
 | 2026-08-31 | 文档更新 | **还原 `kernel/` 里 26 行乱码注释**（`serverLifecycleService.js` 20 / `webSocketHandlerFactory.js` 5 / `server.js` 1），按用户决定与「新增注释」那批分开单独提交。成因是源文件本是 UTF-8、某个环节按 GBK 解码后又按 UTF-8 存回。**还原不是纯机械变换**：当年误解码碰到落单字节时写成了字面的 `?`（0x3F），**每处都丢了两个字符** —— 被截断汉字的第三字节 + 紧跟它的那个字符（空格或换行），所以 GBK 往回编 + UTF-8 解只能还原到「一句话缺一个字」。做法不是凭上下文猜词，而是**先按字节缩小候选集**（每处缺口留下了被截断汉字的前两个字节，补第三字节只有 64 种可能，列出来再按上下文取唯一合理项）：`e3 80`→`。`（句末，吞掉的是换行）、`e5 8f`→`口`（「三端口 WebSocket 连接」，吞掉的是空格）、`e9 80`→`选`（「历史/框选回放」）、`e5 88`→`到`（「下沉到 service」）。`webSocketHandlerFactory.js` 那 5 处吞掉的是换行、一整块 JSDoc 被并成一行，还原时按原结构拆回多行。**检出判据也换过一次**：先用「像乱码的汉字」字表（漏了 6 行，字表永远不全），改成用可逆性判 —— 一行是这类乱码当且仅当它能**无损**用 GBK 表示（encode 再 decode 回到自身，否则 encode 会把不可映射字符换成 `?`、那是破坏不是还原）且那串字节按 UTF-8 解出来是**可读**中文（已经正确的中文行编成 GBK 后按 UTF-8 解几乎全是替换字符，正是这条把「该修的」和「本来就对的」分开）；按此判据全 `backend/` 复扫，剩下 8 条命中全部核对为假阳性（`SQL 语句。`/`checksum 算法` 这类短行非 ASCII 字数太少撞阈值），确认无残余。**顺带记一条过期事实但未改写原文**：`webSocketHandlerFactory.js` 还原出的「该模块只负责**三端口** WebSocket 连接」是 manifest 之前的模型，与现状矛盾（全后端只有一个端口 19999、隔离靠订阅）—— 把错话从乱码还原成可读反而更易误导，故在原句下方**加注**指向 `websocketRuntimeFactory.createWebSocketServer`，只加注不动原句。验证：3 个文件 +34/-26，`node --check` 通过，代码骨架逐 token 与 HEAD 相同，后端 55 个测试文件全过。 |
 | 2026-08-31 | 文档更新 | **`backend/` 函数级注释批 3/4：`kernel/` 60 个文件 247 个缺注释补齐至 99%（462/468，剩 6 个为扫描脚本假阳性）**，全后端覆盖率 55% → 85%。**代码一行未改**：+4512 行 / -28 行，40 个文件**逐 token 比对代码骨架完全相同**（那 28 行「删除」是注释重排与把 `//` 追加到既有代码行末尾，`git diff` 把改行记成删+增），40 个文件 `node --check` 通过，后端 55 个测试文件全过。这一层的注释重点是**改了会坏但不会报错的地方**（串口/采集/回放/实时发布/授权/归零彼此的约束大多没有测试兜住）。查实写入十六条：① **采集磁盘空间那三个函数是靠函数声明提升解开的循环引用**（`getCollectionFreeBytes` ↔ `collectionDiskSpaceGuard` ↔ `stopCollectionForStorageError`），改成 `const` 箭头函数立刻 ReferenceError —— 全仓唯一一处「不能现代化写法」的硬约束；② **`getShutdownOrchestrator.setRuntime` 的 16 个 `hasOwnProperty` 不能换成 `!== undefined`**，关闭流程正是要把 `com`/`com1`/`comhead`/`comSensor` 显式置 `undefined`，换守卫会静默跳过、串口引用被一直持有（现象是要重启软件才能再连），且它的 `getRuntime` 每次返回新对象不可缓存；③ **`shutdownServer` 用顶部一次性快照做全部 close**（中途 `setRuntime` 会置空端口与 `reportHttpServer`，重新读运行态会让端口与 db 文件无报错地保持占用），且 **`stopRuntimeDispatch()` 必须在编排器之前**（分发器是数据源头，先关端口等于让它对着死句柄跑）；④ **回放/采集/运行态三簇访问器「只留一份真相」**（旧全局 `let` 直接删，无双写中间态），⚠️ `accessor(key)` 返回 **getter/setter 函数**而非快照（`legacyWebSocketContext` 需要活描述符），`patch` 的存在理由是回放定时器异步 tick、逐个 `set` 会留下可被读到的不一致瞬间；⑤ **懒加载历史 Proxy 的目标是真空数组**，未被拦截的数组方法返回 `[]` —— `rows.map(...)` 静默报告零帧，调用方必须用下标循环，`readByIndex` 用 `minId + index` 加 `id >= ?` + `LIMIT 1`（不是 `id = ?`）使 id 空洞表现为整体前移而非读不到，缓存是 512 条**近似** LRU；⑥ **`sqlite3-compat.js` 底下是同步的**（`better-sqlite3`），每次缓存未命中与每条大查询都阻塞事件循环 —— 拖进度条卡住实时数据的根因；⑦ **`publishPlaybackFrame` 把 sit 放最后发**（前端以 sit 帧为「这一帧到齐」的重绘信号，调前面的现象是靠背/头枕慢一帧，静态看不出、拖进度条能看出错位）；⑧ **`publishRealtimeChannel` 有两道闸而裸 `publishRealtimeFrame` 一道都没有**（回放期无条件拦截无开关；手套 60FPS 节流可用 `respectFrequency: false` 绕过），二开直接调裸函数会在回放画面上叠实时数据；⑨ **`parseOutboundSystemEvent` 的 `!Buffer.isBuffer` 是承载性的**（Buffer 也是 object），去掉会让整帧数据被当低频系统事件广播，不报错、现象是画面不动；⑩ **帧序号按通道独立计数**（「序号不连续」精确等于「该通道丢帧」），从 1 开始因前端写 `if (frame.sequence)`，Map 只增不减故须用差值判断；⑪ **授权是本批唯一高风险面**：`activateSubmittedLicenseKey` 属「用户权限与身份认证」，注释写明改前须人工确认与四步顺序（校验→落盘→更新内存→有条件换型号，`file`+`baudRate`+`petCareRuntimeService.resetAll()`+`runtimeStatePatchers` 必须一起动），`payload.file`（授权范围，可能是 `'all'`/数组）与 `payload.currentSensorType`（当前型号）是两个不同的东西（历史上撞过一次），`getSelectFlagFromLicense` 返回 **`undefined` ≠ `[]`**（「密钥里没型号信息」不是「授权零个型号」）不可用 `if (!selectFlag)` 合并、其 `'all'` 分支返回字符串而其余返回数组属兼容包袱；⑫ **`aes_ecb.js` 的 AES-ECB 是对 config.txt 的混淆不是保密**（16 字符 ASCII 密钥硬编码在二进制里、无 IV），密钥/模式/填充是与每一份**已发出**的 config.txt 的兼容契约，`string_to_hex` 不做零填充只因密钥是可打印 ASCII 才正确，⚠️ **解密失败没有可靠信号**（Pkcs7 去填充不校验，错密钥要么抛 `Malformed UTF-8 data` 要么返回垃圾字符串）；⑬ **`applyMinzhenBackendGauss` 是全仓唯一在后端做模糊的传感器**，代价是入库的也是模糊后数据、原始值拿不回来（决定了敏枕历史数据不能用来重算别的算法）；⑭ **`colOrSendData`/`colOrSendData1`/`colOrSendData2` 是 "collect or send" 的缩写，而这三个名字是 `extensions/built-in-sensors/` 几十个处理器的注入契约**，名字不准也不能改（二开应改用 `publishRealtimeChannel` 加通道名）；⑮ **`handleCommand` 已是空壳且不认识的命令静默失败**（只有一条 `logger.warn`），注释点明那条日志是「新加的二开命令没反应」的第一排查点；⑯ **后端自检面是三件套** `getWsSubscriptionStatus`+`getRealtimeChannels`+`getChannelBusStatus`（总线答「有没有在产数据」、订阅答「有没有人在收」，都空=没数据、只有总线=前端没订阅）。另六条「像 bug 其实有意」已注明：`initDb` 的 `filePath`（可写）与 `runtimeResourceRoot`（只读）绝不能混用；`enqueueCollectionFrame` 的 `saveTime` 一场采集内必须不变（变了会把一场切成两条历史）；`stopCollectionForStorageError` 先 flush 再置 `flag=false`（反过来丢最后约 200 帧）；`handleCollectionDbError` 同时用 `err.code` 与字符串两条判据（只判一条会漏）；`loadSelectedHistory` 的 `eager` 阈值取三通道**最大行数**而非总数、`indexArr` 上界是 `length - 2`；`calcDetectedInterval` 用**中位数**且 `Math.max(1, ...)`（0 会让 `setInterval` 退化成尽快执行打满事件循环）。`resolveZeroTargetChannelIds` **有两种返回形状**（传 `channelIds` 时裸数组，否则 `{channelIds, skipped}`）—— 实测消费端 `zeroCommandService.normalizeResolution` 兼容数组加三个键别名并对未知形状降级为空（fail-closed），属可容忍非缺陷；`withSourcesOnly` 只在 `operation === 'capture'` 生效（对无数据源通道抓零会把基线设成 0，比不抓更糟；清零不需要数据源）。**剩下 6 个计数是扫描脚本假阳性**（`server.js` 两簇箭头函数访问器 + `runtimeStateStoreFactory.js:77`，均由簇首块注释逐个点名说明），补机械 `@param` 样板会违反本仓注释约定。**一处只记录不重构**：`publishHistoryDateList` 里 `dedupli` 算两遍、`timeArr` 广播两次（`car` 两次结果相同、`car10` 第一次是 `backRows` 第二次是合并结果），哪次生效取决于前端如何处理两次 `timeArr`，本地无法验证、要真机逐型号过，超出「加注释」范围。**验证工具本身修了一次**：上一版自制去注释脚本是手写字符状态机、**没处理正则字面量**，碰到 `reportRoutes.js` 的 `/[\x00-\x1F<>:"|?*]/g` 被里面的 `"` 带进字符串模式，报出一条**假的**「代码骨架有变化」—— 正则与除号的歧义必须靠语法上下文分辨，改用真词法分析器（acorn）切 token 流比对，并加自测（仅加注释判「相同」、改一个字面量判「不同」两条都对才算工具可信）；脚本在 `tmp/`（已被 `.gitignore` 忽略）不入库。**⚠️ 未处理待你决定**：`kernel/` 里 **26 行既有注释是乱码**（UTF-8 被按 GBK 读，`serverLifecycleService.js` 20 行 / `webSocketHandlerFactory.js` 5 行 / `server.js` 1 行），已用 `iconv-lite` 验证可无损还原（每个 `�` 都是一个被吞掉后续换行的 `。`），但这是**改写既有内容**而非新增注释、超出本任务范围，故一行未动。后端根目录无 eslint 配置故未跑 lint。 |
@@ -2550,7 +2591,7 @@ flowchart LR
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
 | 2026-08-31 | 多串口业务身份、动态存储、下载与回放统一 | `sensors[].label`（Builder 兼容入口为 `sensor.portLabels`）定义左手/右手/座椅/靠背；Runtime 每帧附实际串口快照；SQLite 用 nullable identity 列和 channel partial index 兼容旧库；任意 manifest 通道统一按 canonical `channelId` 入库、查询、CSV 和回放；前端按 channelId 隔离并展示 `sensorLabel + COM`，旧三通道与 `downloadFiles` 仅保留兼容。后端 57 个测试文件、客户端 39 个文件 / 421 条、前端 SDK 30 个文件 / 491 条、Electron SQLite 迁移测试、lint 与生产构建通过。 |
-| 2026-08-31 | 注释回改成短式 批 A（`runtime/` + `extensions/`） | 按你的「回改」决定，把批 1–3 的多段散文压成与批 4 一致的短式（一行干什么 + 每条一行的要点 + `@param`/`@returns`）。只动 **≥12 行的块**（全量 313 块 / 5672 行 / 65 个文件），6–10 行的 JSDoc 一字不动。机制推演不丢，移到本文档的批次小节与台账。批 A：6 个文件 +45/-71，覆盖率未降，骨架逐 token 不变，55 个测试全过。余下 B（`extension-host/`）、C（`kernel/` 非 `platform/`）、D（`kernel/platform/` 除 `server.js`）、E（`server.js`，33 块）四批。 |
+| 2026-08-31 | 注释回改成短式，全 `backend/` 收官（6 批 + 1 次补漏） | 按你的「回改」决定，把批 1–3 的多段散文压成与批 4 一致的短式（一行干什么 + 每条一行的要点 + `@param`/`@returns`）。**合计 39 个文件、+996/−1749（净 −753 行）**：A `0cfb09f` / B1 `d40713b` / C1 `55ca4a9` / D `d78bf26` / C2 `289a762` / E `212d1b0` / 补漏 `8a9d95c`，每个提交都按路径 stage（工作区始终有并行分支的未提交改动）。判据中途换过：先按「连续注释行 ≥12」，后改成量**散文行**（排除空行与 `@` 标签行），批 B1 起 >6 行、批 D 起 >10 行 —— 7–10 行那一档大多已经就是批 4 认可的形状。**6–10 行的 JSDoc 一字未动。** 机制推演不丢，移到本文档的批次小节与四张台账。原计划的批 B2 实测无事可做（唯一命中是计数器把 `@param` 续行算成散文的假阳性）。收官后 `runtime/`、`extensions/` 归零，`kernel/` 剩 16 块**刻意留在 11–16 行**（每块都有多条独立的「改了会坏但不报错」⚠️，其中授权那块属高风险类别），不要回头再压。每批验证：`node --check` 全过、acorn 逐 token 比对证明纯注释改动、57 个后端测试文件全过、覆盖率一处未降。 |
 | 2026-08-31 | `backend/` 函数级注释批 4/4（`tests/` + `legacyDataUtils.js`），四批全部完成 | `tests/` 26 个文件 44 → 0（100%），`legacyDataUtils.js` 3 → 0，全后端 85% → 91%。27 个文件 +432/-0，逐 token 代码骨架 0 处不一致，55 个测试文件全过。**风格中途按你的反馈改成短式**（一行干什么 + 一两行用法要点 + `@param`/`@returns`），批 4 的长版本已缩写、**批 1–3 已提交的长版本未回改**（待你决定是否统一）。测试注释写的是「为什么必须这样 fake」：零点扣减长度不一致时原样返回、被丢弃的清零帧不能被兜底层当旧协议帧、`FakeWebSocket` 必须异步 open、定时器 harness 必须 restore、换掉外层 store 再断言才能证明是现取而非快照、示例与预设目录守的是打包后二开路径（一个坏 JSON 只能让自己失效）。`legacyDataUtils.js` 三个名字全都名不副实：`isCar` 实为「是不是多通道」且是**硬编码数组不读 manifest**、`dedupli` 返回结构与入参不同导致前端 `timeArr` 结构随型号变、`totalToN` 已是恒等函数所以三处 `1.3` 是死参数（恢复标定会改已入库历史的显示值）。`openWeb.js` 的 71 个按原定边界仍不注释。 |
 | 2026-08-31 | `kernel/` 26 行乱码注释还原 | UTF-8 被按 GBK 读又存回造成的乱码，按用户决定单独一个提交。每处丢了两个字符（被截断汉字的第三字节 + 紧跟的空格或换行），所以先按留下的两个字节把候选缩到 64 个再按上下文定字，而不是猜词；被吞掉换行的那 5 处 JSDoc 按原结构拆回多行。检出判据由字表改为可逆性判定，全 `backend/` 复扫无残余（8 条命中已核对为假阳性）。还原出的「三端口」是过期说法，只在下方加注指向单端口的实现说明，未改写原句。 |
 | 2026-08-31 | `backend/` 函数级注释批 3/4（`kernel/`） | 60 个文件从 247 个缺注释补齐至 99%（462/468，剩 6 个是扫描脚本对成簇箭头函数的假阳性），全后端覆盖率 55% → 85%。+4512 行 / -28 行，40 个文件逐 token 比对代码骨架完全相同，`node --check` 全过，后端 55 个测试文件全过。重点记录「改了会坏但不会报错」的十六条约束（函数声明提升解开的循环引用、`hasOwnProperty` 不可换 `!== undefined`、关闭快照与 `stopRuntimeDispatch` 先后、访问器返回函数而非快照、懒加载 Proxy 的空数组陷阱、sqlite 同步阻塞、sit 帧最后发、实时发布两道闸、`!Buffer.isBuffer`、按通道帧序号、授权四步顺序与 `undefined ≠ []`、AES-ECB 是混淆且失败无可靠信号、敏枕后端模糊不可逆、`colOrSendData*` 是注入契约、`handleCommand` 静默失败是排查入口、自检三件套）。验证工具由手写字符状态机改为 acorn 词法分析（原版没处理正则字面量，报过一条假警）。⚠️ 26 行既有乱码注释未动，等你决定修法。 |
@@ -3120,8 +3161,10 @@ flowchart LR
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-31 | codeOpi | Builder 逐传感器独立配置闭环 | Manifest v3 打开后逐路保留身份、矩阵、文件、协议、算法与定义内容；页签可分别编辑并保存，编辑 API 返回 `definitions.sensors`，新建多路使用独立子目录，自定义 sensor ID 与 outputChannel 唯一性在前端校验。 |
+| 2026-08-31 | codeOpi | 多传感器逐组件展示来源闭环 | `ManifestDisplayRenderer` 按每张 widget 的 source 选对应 sensor.matrix 与 coordinateMap；画布可选择新增组件来源并逐卡编辑，旧 source 别名兼容。前端全量 41 个文件 / 432 条测试通过，涉及文件 eslint 通过。 |
 | 2026-08-31 | codeOpi | 多串口业务身份贯穿采集、前端、下载与回放 | `sensors[].label` / `sensor.portLabels` 明确定义业务名称，`channelId` 作稳定主键，`serial` 保存每帧实际 COM；任意通道统一按 identity 列入库并动态查询、导出、回放，NULL 身份兼容旧三通道；文件和界面同时显示业务标签、channelId 与串口路径。后端/客户端/SDK/SQLite 迁移及构建验证通过。 |
-| 2026-08-31 | codeOpi | 注释回改成短式 批 A（`runtime/` + `extensions/`） | 用户确认「回改」后启动：把批 1–3 的长注释统一成批 4 的短式（一行干什么 + 每条一行的要点 + `@param`/`@returns`）。只改 ≥12 行的块，全量 313 块 / 5672 行 / 65 个文件，分 A–E 五批。批 A 6 个文件 +45/-71，覆盖率未降，代码骨架逐 token 不变，55 个测试文件全过。 |
+| 2026-08-31 | codeOpi | 注释回改成短式，全 `backend/` 收官（6 批 + 1 次补漏） | 用户确认「回改」后启动：把批 1–3 的长注释统一成批 4 的短式（一行干什么 + 每条一行的要点 + `@param`/`@returns`）。七个按路径 stage 的提交 —— A `0cfb09f`（`runtime/` + `extensions/`，7 文件 +83/−71）、B1 `d40713b`（`extension-host/`，7 文件 +153/−264）、C1 `55ca4a9`（`kernel/` 非 `platform/`，10 文件 +390/−715）、D `d78bf26`（`kernel/platform/` 除 `server.js`，17 文件 +204/−404）、C2 `289a762`（批 B/C 当时被并行改动占着的 3 个文件 +44/−80）、E `212d1b0`（`server.js` 12 块，1 文件 +115/−203，全文散文 340 → 260 行）、补漏 `8a9d95c`（`runtimeStatePatchFactory.js`，1 文件 +7/−12）—— 合计 **39 个文件、+996/−1749（净 −753 行）**。判据从「连续注释行 ≥12」换成量**散文行**（批 B1 起 >6，批 D 起 >10），6–10 行的 JSDoc 一字未动。原计划的批 B2 实测为空（`long-prose.mjs` 把 `@param` 续行算成散文的假阳性）。`kernel/` 剩 16 块刻意保留在 11–16 行。验证：`node --check` 全过、acorn 逐 token 比对代码骨架 0 处不一致（纯注释改动）、57 个后端测试文件全过、`kernel/platform` 覆盖率仍 98%（246/252）。 |
 | 2026-08-31 | codeOpi | `backend/` 函数级注释批 4/4：`tests/` + `legacyDataUtils.js`（四批收官） | `tests/` 44 → 0（100%）、`legacyDataUtils.js` 3 → 0，全后端 85% → 91%（剩 71 个是刻意不做的 `openWeb.js`、6 个是已知假阳性）。27 个文件 +432/-0，逐 token 代码骨架不变，55 个测试文件全过。注释风格中途按用户反馈改成短式，批 1–3 的长版本未回改。查实写入的三条：`isCar` 实为多通道判定且靠硬编码数组（新增型号必须改这个数组）、`dedupli` 的输出结构与入参不同使前端 `timeArr` 结构随型号变、`totalToN` 已退化为恒等函数（三处 `1.3` 是死参数，恢复标定会改已入库历史的显示值）。 |
 | 2026-08-31 | codeOpi | `kernel/` 26 行乱码注释还原 | 批 3 的收尾，单独一个提交。乱码是 UTF-8 被按 GBK 读又存回造成的，且每处额外丢了两个字符，所以还原需要按留下的字节缩小候选集再按上下文定字（不是纯机械变换）。检出判据从字表改成可逆性判定后全 `backend/` 无残余。还原出的过期说法「三端口」只加注不改写。 |
 | 2026-08-31 | codeOpi | `backend/` 函数级注释批 3/4：`kernel/` 补齐 | 三批里最大的一层（60 个文件 468 个函数），也是二开者最容易改坏而看不出的一层。247 个缺注释补齐至 99%，代码一行未改（40 个文件逐 token 比对代码骨架相同）。注释重点是那些没有测试兜住、只存在于口头知识里的约束，共十六条查实写入 + 六条「像 bug 其实有意」。`publishHistoryDateList` 的重复广播只记录不重构（需真机逐型号验证）。26 行既有乱码注释按范围纪律未动，已提请你决定。 |
@@ -3516,8 +3559,10 @@ flowchart LR
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-31 | codeOpi | 修复缺陷 / 新增功能 | Builder 新增逐传感器页签与可靠草稿状态，保存逐路 `sensors[] + definitions.sensors`，保留异构 matrix/files/protocol/algorithm/stored/label/outputChannel；编辑接口补全每路定义文件读取，新建多路采用 sensor 子目录，支持安全自定义 ID 并校验 outputChannel 唯一。 |
+| 2026-08-31 | codeOpi | 修复缺陷 / 新增功能 | 修复 manifest 多传感器 widget 共用第一路物理坐标布局的问题；新增逐 sensor 几何解析与坐标/矩阵形状校验，画布配置器支持新增默认数据源和已放置卡片 source 编辑。 |
 | 2026-08-31 | codeOpi | 缺陷修复 / 契约强化 | 多串口统一使用完整 `channelId`，业务名称由 `sensors[].label`（旧 Builder 为 `sensor.portLabels`）定义；实时帧携带实际串口快照，SQLite/历史查询/CSV/回放不再按数组或固定三库猜身份；前端按通道隔离并展示业务标签、channelId、COM 路径，同时兼容旧顶层字段和 `downloadFiles`。 |
-| 2026-08-31 | codeOpi | 优化重构 | 注释回改成短式 批 A：`backend/runtime/` + `backend/extensions/` 共 6 个文件 +45/-71，把多段散文压成「一行干什么 + 每条一行的要点」。只改 ≥12 行的块（全量 313 块 / 65 个文件，分 A–E 五批），覆盖率未降，骨架逐 token 不变，55 个测试全过。 |
+| 2026-08-31 | codeOpi | 优化重构 | 注释回改成短式，全 `backend/` 收官：6 批 + 1 次补漏共 **39 个文件 +996/−1749（净 −753 行）**，把批 1–3 的多段散文压成「一行干什么 + 每条一行的要点 + `@param`/`@returns`」。提交：A `0cfb09f` / B1 `d40713b` / C1 `55ca4a9` / D `d78bf26` / C2 `289a762` / E `212d1b0` / 补漏 `8a9d95c`，全部按路径 stage。判据从「连续注释行 ≥12」换成量散文行（B1 起 >6，D 起 >10），6–10 行的 JSDoc 一字未动；批 B2 实测为空。`kernel/` 剩 16 块刻意留在 11–16 行。纯注释改动（acorn 逐 token 比对 0 处不一致），57 个后端测试文件全过，覆盖率一处未降。 |
 | 2026-08-31 | codeOpi | 文档更新 | `backend/tests/` 26 个文件与 `backend/compatibility/legacyDataUtils.js` 补齐函数注释（44+3 → 0），全后端覆盖率 85% → 91%，`backend/` 函数级注释四批全部完成。27 个文件 +432/-0 纯注释，逐 token 代码骨架不变，55 个测试文件全过。注释风格按用户反馈改为短式（一行干什么 + 一两行用法要点 + `@param`/`@returns`）；批 1–3 已提交的长版本未回改。 |
 | 2026-08-31 | codeOpi | 文档更新 | 还原 `backend/kernel/` 里 26 行乱码注释（`serverLifecycleService.js` 20 / `webSocketHandlerFactory.js` 5 / `server.js` 1），+34/-26 纯注释，代码骨架逐 token 不变，55 个测试文件全过。全 `backend/` 复扫无残余乱码。 |
 | 2026-08-31 | codeOpi | 文档更新 | `backend/kernel/` 40 个文件补齐中文 JSDoc（`@param`/`@returns` + 「为什么这么写」散文），60 个文件 468 个函数覆盖率 99%，全后端 85%。纯注释新增 +4512/-28，代码骨架逐 token 相同，55 个测试文件全过。比对工具改用 acorn 词法分析（手写状态机漏处理正则字面量、误报过一次）。 |
