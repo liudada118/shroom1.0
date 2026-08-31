@@ -1,6 +1,67 @@
 # 架构文档
 
-> 最后更新于：2026-08-29
+> 最后更新于：2026-08-31
+
+## 2026-08-31 `backend/` 函数级注释（分层进行中，批 1/4）
+
+目标是让二开者读得懂后端每个函数**为什么这么写**，而不只是它做了什么。基线实测：
+`backend/` 共 471 个函数缺注释、覆盖率 42%。按架构分层分批，每批一个提交。
+
+分层进度（按批次推进，每批更新本表）：
+
+| 层 | 文件 | 缺注释 → 现状 | 批次 |
+| :--- | ---: | :--- | :--- |
+| `backend/runtime/` | 1 | 7 → **0（100%）** | 批 1 ✅ |
+| `backend/extensions/` | 17 | 8 → **0（100%）** | 批 1 ✅ |
+| `backend/extension-host/` | 17 | 92 | 批 2 |
+| `backend/kernel/` | 60 | 247 | 批 3 |
+| `backend/tests/` | 28 | 44 | 批 4 |
+| `backend/compatibility/openWeb.js` | 1 | 73 | **不做，见下** |
+
+**`compatibility/openWeb.js` 的 71 个函数刻意不注释。** 它导出 64 个函数，但全仓
+`require`/`import` 扫描（排除 `node_modules`/`build`/`dist`）命中只有三处，且全是基线
+对比测试：`backend/tests/processing/` 下的 `lineOrders` / `pressureTransforms` /
+`videoPointMappings`。看着像依赖实际不是的四类已逐一排除 ——
+`kernel/platform/http/webStaticServer.js` 是**自己重新实现**了一份 `openWeb()`（第 43 行，
+不是 import）；`sdk/backend/session/line/projectLineOrders.js` 里的 `'openWeb'` 是
+`LINE_ORDER_EXPORT_DENY_LIST` 的**字符串成员**；`sdk/backend/processing/*.js` 只在散文
+注释里提它（`lineOrders.js:1027` 明写「已断开对旧 openWeb.js 的依赖」）；
+`util/constant.js:6` 的注释指向**已不存在的** `backend/legacy/openWeb.js`（过期注释，
+挂账待清）。这份文件的唯一作用就是给那三个测试当逐点比对基线，往里加注释会把基线
+diff 搅浑。
+
+批 1 落地的三处非显而易见行为（都是查实后写进注释、代码一行未改）：
+
+1. **`runtime/index.js` 注册的五类 legacy 命令目前全是空转。** `registerLegacyHandler`
+   把 `serial`/`license-check`/`export-csv`/`db-query`/`ws-send` 转发给
+   `server.handleCommand`，而后者（`kernel/platform/server.js:1811`）对任何命令都只打
+   一条 `unsupported command` 警告返回 null。命令已改由各自专用服务处理，路由表留着是
+   为了「没人接」这件事在日志里可见，不是静默丢弃。
+2. **`getWsServer(channel)` 的 channel 参数不影响返回值。** 旧实现
+   （`server.js:1793`）直接 `void channel` 返回单例 —— 全后端只有一个 WebSocket 端口，
+   所有 manifest `outputChannel` 映射到同一物理服务。参数与 `'sit'` 默认值只为旧调用方
+   保签名，**不可据此推断存在 sit/back/head 固定通道表**（那张表已从线上协议移除）。
+3. **`getRuntimeStatus()` 里的 `channel?.standard !== true` 是空转过滤。** 通道元数据由
+   `websocketChannelService.buildRealtimeChannelMetadata` 构造，字段固定十二项、
+   **不含 `standard`**；`standard: true` 只出现在
+   `kernel/realtime/realtimeTelemetryGateway.js:62` 给 `channelBus.publish` 传的发布
+   选项里，不会流到元数据上。无害故保留，但已注明它现在什么都没过滤掉。
+
+另外两处同名不同义、易被互相复制的函数已在注释里互相指明：
+`handPacketRuntime.js` 与 `legacySerialFrameRuntime.js` 各有一个 `getPublishedFrame`，
+后者多了归零 processed 阶段与「来源帧逐点比对」两道判断（旧链路上同一发布结果里不同
+字段属于不同处理阶段，只按长度匹配会互相覆盖），前者所在链路无此歧义故保持简单版 ——
+**改一份不等于改另一份**。
+
+顺带记两笔挂账：`legacyGloveFrameProcessor.js` 的
+`splice(pointArr.length - 6, pointArr.length)` 第二参数传的是 `length` 而非 `6`，
+行为等价（deleteCount 超出即取到末尾）但读起来易误解，未改动只加注释；
+`handRuntimeFactory.js` 的 `sourcePort` **不参与左右手判定**（侧别取自包内第 2 字节的
+`PACKET_SIDE_BY_TYPE`），它只作为 `packetSourcePort` 透传当来源标记。
+
+验证：改动 6 个文件 **+204 行 / -0 行，纯注释新增**（`git diff -w --ignore-blank-lines`
+确认零代码变更），6 个文件 `node --check` 通过，后端 55 个测试文件全过（与开工前基线
+一致）。后端根目录无 eslint 配置（仅 `client/` 有），故未跑 lint。
 
 ## 2026-08-29 `sensor.frame` 成为唯一传感器消息
 
@@ -1983,6 +2044,7 @@ flowchart LR
 
 | 日期 | 类型 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-31 | 文档更新 | **`backend/` 函数级注释批 1/4：`runtime/` 与 `extensions/` 两层补齐至 100%。** 基线 471 个函数缺注释 / 覆盖率 42%，本批清掉 15 个（`runtime/` 7 + `extensions/` 8），两层归零。**代码一行未改**：+204 行 / -0 行，`git diff -w --ignore-blank-lines` 确认零代码变更，6 个文件 `node --check` 通过，后端 55 个测试文件全过（与开工前基线一致）。写注释过程中查实三处非显而易见行为并写入：① `runtime/index.js` 注册的五类 legacy 命令**全是空转** —— 转发目标 `server.handleCommand`（`kernel/platform/server.js:1811`）对任何命令只打一条 `unsupported command` 警告返回 null，路由表留着是为了「没人接」在日志里可见；② `getWsServer(channel)` 的 channel 参数**不影响返回值**（`server.js:1793` 直接 `void channel` 返回单例，全后端只有一个 WebSocket 端口），参数与 `'sit'` 默认值只为旧调用方保签名，**不可据此推断存在 sit/back/head 固定通道表**；③ `getRuntimeStatus()` 里 `channel?.standard !== true` 是**空转过滤** —— 通道元数据字段固定十二项不含 `standard`，该标记只存在于 `realtimeTelemetryGateway.js:62` 的 publish 选项，无害故保留但已注明。另互相指明两个同名不同义的 `getPublishedFrame`（`handPacketRuntime.js` 简单版 / `legacySerialFrameRuntime.js` 多两道判断），避免被当成重复代码互相复制。**`compatibility/openWeb.js` 的 71 个刻意不做**：它导出 64 个函数但全仓 require 扫描只命中三处基线对比测试，四类疑似依赖（`webStaticServer.js` 是重新实现、`projectLineOrders.js` 里是 deny-list 字符串、`sdk/backend/processing/*` 只在注释里提、`util/constant.js:6` 指向已不存在的路径）已逐一排除，加注释只会搅浑基线 diff。挂账：`util/constant.js:6` 过期注释指向已删除的 `backend/legacy/openWeb.js`；`legacyGloveFrameProcessor.js` 的 `splice(len-6, len)` 第二参数应为 `6`（行为等价，仅加注释未改）。后端根目录无 eslint 配置故未跑 lint。 |
 | 2026-08-26 | 新增功能 | 新增 `client/public/shroom-vision-home-effects.html`：复刻当前授权门户首页并内嵌 18 张压缩图标，提供响应式布局、压力点阵背景、轻量卡片交互、减少动态效果适配和静态事件挂点；不连接授权后端。桌面 1440×1000 与移动 390×844 验证无横向溢出、无图片失败、无控制台错误。 |
 | 2026-08-25 | 配置变更 | 新增 `.gitattributes` 钉死行尾。起因：仓库既无 `.gitattributes` 又 `core.autocrlf=false`，某个 Windows 工具把整个工作区重写成 CRLF，`git` 判出 **575 个文件改动 / 132740 行**，而 `git diff --ignore-cr-at-eol --name-only` 是 **0** —— 纯行尾噪声，零内容差异。已丢弃那批噪声并加 `* text=auto eol=lf`（全仓无被跟踪的 `.bat`/`.cmd`/`.ps1`，无需 CRLF 例外）＋ 14 类显式 `binary`（防 `build/model` 137 MB 模型与 GB 级 db 快照被改写）。**已知尾巴**：`forge.config.js` 是全仓唯一索引里存 CRLF 的文本文件（`i/crlf w/crlf`），现在不脏，但下次编辑它会连带一整份归一化差异；它属打包配置，留待单独提交处理。 |
 | 2026-08-11 | 新增功能 | `sdk/frontend/docs/#/num-matrix` 增加两步式矩阵配置台：坐标 JSON 自动识别行列并显示首末点，一维/二维帧数组严格校验，默认生成 `1..N`，支持 90°/180° 旋转和水平/垂直镜像；所有修改直接驱动包内 `RendererHost + numMatrix`。完成桌面、390px 移动端、真实 32×32 坐标文件和 WebGL 画布验证。 |
@@ -2147,6 +2209,7 @@ flowchart LR
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-31 | `backend/` 函数级注释批 1/4（`runtime/` + `extensions/`） | 两层从 7/8 个缺注释补齐至 100%，全后端覆盖率 42% → 44%。纯注释新增（+204/-0），55 个测试文件全过。附带查实并记录三处空转/易误解行为（legacy 命令路由空转、`getWsServer` channel 参数被忽略、`standard` 过滤器不生效），以及 `compatibility/openWeb.js` 无运行时依赖的证据链。剩余批 2 `extension-host/`（92）、批 3 `kernel/`（247）、批 4 `tests/`（44）。 |
 | 2026-08-29 | `calibration.zero` 命令契约 fail-closed | 严格校验 enabled/displaySystemId/channelIds，空目标、未知目标、无活动系统和零影响操作不再返回 accepted；公共 handler 在 HTTP/WS 共享控制服务初始化期注册，ACK 回传完整结果，SDK 与客户端保留精确目标。 |
 | 2026-08-29 | 零点状态与命令完成 `channelId` 迁移 | 删除固定零点数组和 legacy runtime/accessor 读写；动态/旧协议统一按完整 channelId 保存四阶段 source/baseline，支持展示系统或精确通道定向捕获/清除。修复 HEAD/BACK 串基准、BACK/HEAD 130 误用 SIT 基准、HEAD 130 误发 BACK 及清零受授权门控问题；新增仓库、命令、输出适配与多展示系统隔离测试。 |
 | 2026-08-29 | WebSocket 传感器帧收敛为唯一契约 | 实时/回放均只发 `sensor.frame` schema v1，通道身份统一为 `displaySystemId:sensorId`，删除顶层旧数据字段、双发 `_pressure` 帧及其虚假通道元数据；前端在接收边界过渡。 |
@@ -2285,7 +2348,7 @@ flowchart LR
 
 ---
 
-> 本文档由 Codex 自动生成和维护。最后更新于：2026-08-29
+> 本文档由 Codex 自动生成和维护。最后更新于：2026-08-31
 
 ## 2026-07-07 Display Systems Runtime 定义与复杂线序迁移
 
@@ -2711,6 +2774,7 @@ flowchart LR
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-31 | codeOpi | `backend/` 函数级注释批 1/4：`runtime/` 与 `extensions/` 补齐 | 为「打包后可二开」补上后端函数级的**为什么**，不只是做了什么。基线量化：471 个函数缺注释、覆盖率 42%；本批清 15 个（`runtime/` 7、`extensions/` 8），两层各归零，全后端升至 44%。按分层分批、每批一提交，剩余 `extension-host/` 92、`kernel/` 247、`tests/` 44。代码零改动（+204/-0 纯注释），`node --check` 全过，后端 55 个测试文件全过且与开工前基线一致。`compatibility/openWeb.js` 经 require 扫描证实无运行时消费者（仅三个基线对比测试），其 71 个函数明确不做。 |
 | 2026-08-29 | codeOpi | 零点状态、处理链与命令按 canonical channelId 动态化 | `zeroStateStore` 改为按完整 channelId 保存四阶段 source/baseline，Manifest processor 与 legacy 输出边界统一接入；删除所有固定零点字段、runtime accessor 和处理器内扣零。`calibration.zero` 支持 display/channel 定向且旧布尔命令兼容，历史入库按帧身份取基准；修复 BACK/HEAD 串零、130 分片错通道和授权门控静默跳过。后端 55 个测试文件、客户端命令测试与 SDK 命令测试通过。 |
 | 2026-08-28 | codeOpi | 归位运行产物并收敛 platform runtime/WebSocket | 根 `dist` 保留；开发态 CSV/报告/上传和工具导出进入忽略的 `runtime`，11 个文件迁移前后 SHA-256 一致；移除无引用旧 `project`，人工 legacy runtime 迁入测试区；platform runtime 9→7、WebSocket 13→10，未改固定入口、SDK、协议或历史格式。 |
 | 2026-08-28 | codeOpi | 扩展宿主二级归类并修复版本历史数据源 | 将 19 个 JavaScript 宿主模块按 `manifest/runtime/workspace` 分组，稳定入口与导出名不变；`VersionHistory` 构建时直接消费 `release-notes/windows/*.md`，新增解析与语义排序测试；补生成物忽略规则，已有报告随后在用户确认下迁移，数据库和发布产物未动。 |
@@ -3100,6 +3164,7 @@ flowchart LR
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-31 | codeOpi | 文档更新 | `backend/runtime/` 与 `backend/extensions/` 全部函数补齐中文 JSDoc（`@param`/`@returns` + 为什么这么写的散文），两层缺注释数 7/8 → 0/0。纯注释新增 6 个文件 +204 行、删除 0 行；未改任何代码、协议、契约或测试。同时以注释形式钉住三处易误解行为：legacy 命令路由当前空转、`getWsServer` 的 channel 参数被 `void`、`getRuntimeStatus` 的 `standard` 过滤器不生效。`compatibility/openWeb.js` 排除在范围外并记录了证据。 |
 | 2026-08-29 | codeOpi | 缺陷修复 / 契约强化 | `calibration.zero` schema 与服务端统一严格校验动态目标；空/未知/无活动/零影响命令 fail closed。零点 handler 前移到 HTTP/WS 共用控制服务初始化路径，WS ACK 补完整 results，主客户端切换系统时显式携带目标 displaySystemId，后端 SDK 事件保留 target。 |
 | 2026-08-29 | codeOpi | 优化重构 / 缺陷修复 | 零点状态从固定全局数组迁移为 `Map<channelId,...>`；Manifest 与 legacy 帧都记录未扣零 source 并按精确通道应用 baseline，命令支持 `displaySystemId/channelIds`。删除旧零点 accessor/处理器耦合，修复 HEAD/BACK 基准串用、BACK/HEAD 130 误读 SIT、HEAD 130 错发 BACK，以及清零被历史授权门控静默跳过。 |
 | 2026-08-29 | codeOpi | 破坏性契约收敛 / 用户已确认 | WebSocket 传感器数据删除 `sitData/backData/headData/*Data` 与双发 `_pressure` 格式，唯一发布 `sensor.frame` schema v1；订阅键和通道 API 统一为 `displaySystemId:sensorId`。前端入口完成解码迁移；未修改 SDK、Electron 固定入口、硬件协议、线序/标定和历史格式。 |

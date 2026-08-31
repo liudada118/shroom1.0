@@ -13,6 +13,21 @@ function createLegacyGloveFrameProcessor({
   gloves0123Res,
   gloves0123,
 }) {
+  /**
+   * 处理一帧 262 字节的旧手套数据。
+   *
+   * 帧结构是 256 点压力 + 尾部 6 字节姿态（rotate）。长度不等于 262 直接返回 null
+   * 交回上层分发 —— 本处理器只认这一种长度，不做容错解析，因为同一条串口上还跑着
+   * 别的帧长（1024 矩阵、分段帧等），猜错比不认更糟。
+   *
+   * 点位要连过两道映射：`gloves0123Res` 整理原始点序，`gloves0123` 再转成展示点位，
+   * 顺序不能换。
+   *
+   * @param {Buffer|Uint8Array|number[]} buffer 原始帧。
+   * @param {{port1?: {isOpen?: boolean}, port2?: {isOpen?: boolean}}} [options] 串口状态，用于给 payload 附加开合标记。
+   * @returns {{pointArr: number[], rotate: number[], payload: object, jsonData: string}|null}
+   *          解析结果；帧长不符时为 null。
+   */
   function processSit262Frame(buffer, {
     port1,
     port2,
@@ -20,6 +35,9 @@ function createLegacyGloveFrameProcessor({
     if (!buffer || buffer.length !== 262) return null;
 
     let pointArr = Array.from(buffer);
+    // splice 的第二个参数是 deleteCount，这里传的是 length 而不是 6。行为上没问题
+    // （deleteCount 超出剩余长度就取到末尾，等价于取那 6 个字节），但读起来容易误解成
+    // 「取到 length 位置」。保持原样是为了不动已验证过的旧行为，看的时候按「取尾部 6 字节」理解。
     const rotate = pointArr.splice(pointArr.length - 6, pointArr.length);
     pointArr = gloves0123Res(pointArr);
     pointArr = gloves0123(pointArr);

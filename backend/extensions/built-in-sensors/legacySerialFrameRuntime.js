@@ -47,6 +47,16 @@ function createLegacySerialFrameRuntime(ctx) {
     isHandGloveType: ctx.isHandGloveType,
   });
 
+  /**
+   * 把发布时的入参 payload 归一成对象。
+   *
+   * 调用方传进来的可能已经是对象，也可能是 JSON 串（旧链路上两种都出现过）。
+   * 解析失败返回 null 而不抛 —— 这个值只用于下面 getPublishedFrame 的「来源比对」，
+   * 比不上就走 fallback，不该因为一条畸形 payload 打断整帧处理。
+   *
+   * @param {object|string|*} value 待归一的 payload。
+   * @returns {object|null} 归一后的对象；无法解析时为 null。
+   */
   function parseFramePayload(value) {
     if (value && typeof value === 'object') return value;
     try {
@@ -56,6 +66,17 @@ function createLegacySerialFrameRuntime(ctx) {
     }
   }
 
+  /**
+   * 逐点比较两个数组是否完全相同。
+   *
+   * 用于判断「发布结果里某个字段的来源，是否正是我们这次传进去的那一帧」，
+   * 所以必须逐点比而不能只比长度 —— 长度相同的不同帧在这里必须判为不等，
+   * 否则会发生 getPublishedFrame 注释里说的跨阶段互相覆盖。
+   *
+   * @param {*} left 左侧数组。
+   * @param {*} right 右侧数组。
+   * @returns {boolean} 两者都是数组且长度与每一点都相同时为 true。
+   */
   function framesEqual(left, right) {
     return Array.isArray(left)
       && Array.isArray(right)
@@ -63,6 +84,27 @@ function createLegacySerialFrameRuntime(ctx) {
       && left.every((value, index) => value === right[index]);
   }
 
+  /**
+   * 从发布结果里取回「该写回旧运行时状态」的那一帧。
+   *
+   * 取值优先级：
+   * 1. 归零链路的 processed 阶段结果（长度与 fallback 一致时直接用）；
+   * 2. `fields` 里第一个满足「发布结果有值 **且** 该字段的来源帧就是本次 fallback」的字段；
+   * 3. fallback 本身。
+   *
+   * 第 2 条那个来源比对是关键，理由见下方行内注释：同一个发布结果里不同字段属于
+   * 不同处理阶段（jqbed 的 sitData 可能是 Python 侧的 matrixOrigin，pointArr 则是
+   * 下一轮算法的输入），只按长度匹配会让两个阶段的数据互相顶掉。
+   *
+   * 所有分支都返回**新数组**（`[...x]`），不把发布结果的引用漏给旧运行时状态 ——
+   * 旧状态是长期持有的可变数组，共享引用会让后续处理反向污染已发布的帧。
+   *
+   * @param {{frame?: object, zeroedStages?: {processed?: number[]}}|null} publishResult 发布结果。
+   * @param {string[]} fields 候选字段名，按优先级排列。
+   * @param {number[]} [fallback=[]] 取不到时的兜底帧，同时充当来源比对的基准。
+   * @param {object|string|null} [sourcePayload=null] 本次发布的原始 payload，用于来源比对。
+   * @returns {number[]} 应写回旧运行时状态的帧副本。
+   */
   function getPublishedFrame(publishResult, fields, fallback = [], sourcePayload = null) {
     const zeroedProcessed = publishResult?.zeroedStages?.processed;
     if (

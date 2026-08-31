@@ -23,6 +23,22 @@ function createHandPacketRuntime({
 }) {
   const doublePacketParser = createDoublePacketParser();
 
+  /**
+   * 从发布结果里按字段优先级取回一帧，取不到用 fallback。
+   *
+   * ⚠️ 同名函数在 `legacySerialFrameRuntime.js` 里还有一份，但**语义不同**：那一份
+   * 多了归零 processed 阶段和「来源帧比对」两道判断，因为它服务的旧链路上同一个
+   * 发布结果里不同字段属于不同处理阶段，只按长度匹配会互相覆盖。手套分包这条链路
+   * 每次发布只产出一个阶段的结果，不存在那个歧义，所以这里保持简单版 —— 两者不要
+   * 互相复制，改一份不等于改另一份。
+   *
+   * 返回值一律是新数组，避免把发布结果的引用漏给长期持有的运行时状态。
+   *
+   * @param {{frame?: object}|null} publishResult 发布结果。
+   * @param {string[]} fields 候选字段名，按优先级排列。
+   * @param {number[]} [fallback=[]] 取不到时的兜底帧。
+   * @returns {number[]} 帧副本。
+   */
   function getPublishedFrame(publishResult, fields, fallback = []) {
     const prepared = publishResult?.frame;
     for (const field of fields) {
