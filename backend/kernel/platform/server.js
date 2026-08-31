@@ -759,21 +759,12 @@ const playbackStateStore = createRuntimeStateStore({
 /**
  * 回放状态的四个访问器。
  *
- * 这一组是本文件「把散落的 `let` 收进 store」这条迁移路线的一环
- * （同 `serialRuntimeFactory` / `legacyWebSocketContext` 里的做法）。
- * 迁移的方式是**只留一份真相**：状态搬进 `playbackStateStore` 之后，
- * 旧的全局 `let` 就删掉，所有读写都走这四个函数，
- * 不存在「两处都写、靠人记得同步」的中间态 —— 那种中间态一定会漂移。
+ * `get`/`set` 单字段读写；`playbackStateAccessor` 生成 `{get, set}` 描述符喂给
+ * `legacyWebSocketContext`，让旧 handler 的 `ctx.nowIndex = x` 落到 store 上（⚠️ 返回的是**函数**
+ * 不是快照值，原因见那边的说明）。状态搬进 store 后旧的全局 `let` 就删掉了，只留一份真相。
  *
- * 分工：
- * - `getPlaybackState` / `setPlaybackState` —— 单字段读写。
- * - `patchPlaybackState` —— 一次改多个字段。批量改的场景（切日期、切型号）
- *   都是「这几个字段必须一起变」，逐个 set 会在中间留下不一致的瞬间；
- *   而回放定时器是异步 tick 的，真的可能读到那个瞬间。
- * - `playbackStateAccessor` —— 生成 `{get, set}` 描述符，喂给
- *   `legacyWebSocketContext`，让旧 handler 里的 `ctx.nowIndex = x` 这类写法
- *   落到 store 上。⚠️ 返回的是**函数**而不是快照值，
- *   原因见 `legacyWebSocketContext` 里那段说明。
+ * ⚠️ 切日期/切型号一律走 `patchPlaybackState` 而不是逐个 `set`：那几个字段必须一起变，逐个 set 会
+ * 留下不一致的瞬间，而回放定时器是异步 tick 的，真的会读到那个瞬间。
  */
 const getPlaybackState = (key) => playbackStateStore.get(key);
 const setPlaybackState = (key, value) => playbackStateStore.set(key, value);
@@ -941,29 +932,18 @@ function broadcastHistorySelectionPayload(payload) {
 /**
  * 加载某一天的历史数据，进入回放准备状态。
  *
- * 流程：停定时器 → 清空旧回放状态 → 统计三个通道的行数 → 决定 eager/lazy →
- * 建行序列 → 算曲线 → 广播元信息。
+ * 流程：停定时器 → 清空旧回放状态 → 统计三通道行数 → 决定 eager/lazy → 建行序列 → 算曲线 → 广播
+ * 元信息。`indexArr` 上界取 `length - 2`（回放 tick 是「先 +1 再取帧」，留一帧余量才不越界）。失败
+ * 时广播全零元信息而不是静默返回 —— 库损坏、型号不对、日期不存在都是用户操作能触发的正常情况。
  *
- * 几个关键决定：
+ * ⚠️ **先 `stopPlaybackTimer()` 再清状态**：反过来定时器可能在清空之后、新数据装上之前 tick 一次，
+ * 读到空数组并把 `nowIndex` 推过界。
  *
- * **先 `stopPlaybackTimer()` 再清状态**。反过来的话，定时器可能在清空之后、
- * 新数据装上之前 tick 一次，读到空数组并把 `nowIndex` 推过界。
+ * ⚠️ eager 阈值判据用**三通道里最大的行数**而非总数：三路分别加载，内存压力由最大那路决定，用总数
+ * 会让三通道型号过早退化成懒加载（懒加载副作用见 `historyQueryService`）。
  *
- * **`eager` 的阈值判据用三个通道里最大的行数**，不是总数。因为三路是分别加载的，
- * 内存压力取决于最大的那一路；用总数会让三通道型号过早退化成懒加载
- * （懒加载有严重的副作用，见 `historyQueryService`）。
- *
- * **`length` 取 `totalLength || historySeries.length`**。前者按行数算，
- * 后者按曲线实际算出来的点数算。正常两者相等；懒加载时曲线可能算不全
- * （代理的高阶方法返回空），这时 `totalLength` 是对的，所以它在前。
- * 反过来会让大采集的进度条只有几帧长。
- *
- * **`indexArr` 的上界是 `length - 2` 而不是 `length - 1`**：回放 tick 是
- * 「先 +1 再取帧」，留一帧余量才不会在最后一帧越界。
- *
- * **整个函数包在 try/catch 里，失败时广播一份全零元信息而不是静默返回。**
- * 历史库可能损坏、可能是别的型号的库、可能日期标签在库里不存在 ——
- * 这些都是用户操作能触发的正常情况，不该让界面卡住。
+ * ⚠️ `length` 必须是 `totalLength || historySeries.length` 这个顺序：懒加载时曲线可能算不全（代理的
+ * 高阶方法返回空），反过来会让大采集的进度条只有几帧长。
  *
  * @param {string} dateLabel 历史日期标签（即入库时的 `saveTime`）。
  * @returns {void}
@@ -1167,23 +1147,16 @@ function startPlaybackTimer() {
 }
 
 /**
- * 从历史时间戳推算回放帧间隔。
+ * 从历史时间戳推算回放帧间隔（取中位数，≥ 1ms）。
  *
- * 用**中位数**而不是平均值，因为采集过程中的卡顿（磁盘忙、串口重连）会产生几个
- * 极大的间隔，平均值会被它们拉偏，现象是整段回放都偏慢。中位数对这种离群点免疫。
+ * 用**中位数**而不是平均值：采集卡顿（磁盘忙、串口重连）会产生几个极大间隔，平均值被它们拉偏
+ * 的现象是整段回放都偏慢。只采**前 20 个**间隔 —— 采集频率在一场采集里是固定的，而这里的
+ * `timestamps` 可能来自懒加载序列，多读一个就多一次同步数据库查询。
  *
- * 只采**前 20 个间隔**：采集频率在一场采集里是固定的，采样多了没有额外信息，
- * 而这里的 `timestamps` 可能来自懒加载序列，多读一个就多一次同步数据库查询。
- *
- * `0 < d < 5000` 这个过滤窗口丢掉两类脏数据：非正的间隔（时间戳乱序或重复，
- * 系统时间被改过就会出现）和超过 5 秒的间隔（采集中断过，那不是帧率）。
- * 5000 是个经验值 —— 本仓最慢的采集频率也远快于 0.2Hz。
- *
- * 全部被过滤掉时回退到 `timeNum`（默认间隔）而不是抛错：
- * 时间戳不可用只影响回放速度，不该让「加载历史」整体失败。
- *
- * `Math.max(1, ...)` 保证至少 1ms —— 0 会让 `setInterval` 退化成尽快执行，
- * 把事件循环打满。
+ * `0 < d < 5000` 丢掉两类脏数据：非正间隔（时间戳乱序或重复，改过系统时间就会出现）与超 5 秒的
+ * 间隔（采集中断过，那不是帧率；本仓最慢的采集也远快于 0.2Hz）。全被过滤掉时回退 `timeNum` 而
+ * 不抛错 —— 时间戳不可用只影响回放速度，不该让「加载历史」整体失败。`Math.max(1, ...)` 挡住 0
+ * （0 会让 `setInterval` 退化成尽快执行，把事件循环打满）。
  *
  * @param {number[]} timestamps 按帧顺序的时间戳。
  * @returns {number} 帧间隔毫秒数（≥ 1）。
@@ -1215,24 +1188,18 @@ let shutdownOrchestrator = null;
 /**
  * 惰性创建关闭编排器（单例）。
  *
- * **惰性**而不是模块加载时就建，是因为编排器的 `getRuntime` 闭包要读本文件后面才声明的
- * `let`（`sitClose`、`baudRate` 那一大批在 1120 行之后）。模块加载时建的话，
- * 闭包本身没问题（闭包是延迟求值的），但 `serialManager`、`server` 这些依赖
- * 在那个时刻确实还没装配好。
+ * **惰性**是因为 `serialManager`/`server` 这些依赖在模块加载那一刻还没装配好。**单例**是必需而非
+ * 优化：编排器内部持有 `serverShutdownPromise` 做幂等，每次新建等于每次重走一遍关闭流程 ——
+ * 而 Electron 有多条退出路径（窗口全关、菜单退出、信号），会真的重入。
  *
- * **单例**是必需的而不是优化：编排器内部持有 `serverShutdownPromise` 用来做幂等，
- * 每次新建一个就等于每次都重新走一遍关闭流程 —— Electron 有多条退出路径
- * （窗口全关、菜单退出、信号），会真的重入。
+ * `getRuntime`/`setRuntime` 是本文件「全局 `let` → store」迁移的过渡层：编排器只认一个状态对象。
  *
- * `getRuntime` / `setRuntime` 这对适配器是本文件「全局 `let` → store」迁移的过渡层：
- * 编排器只认一个状态对象，不认这些散落的变量。`setRuntime` 里那 16 个
- * `hasOwnProperty` 判断不能简化成 `next.x !== undefined` ——
- * 关闭流程正是要把 `com`/`com1`/`comhead`/`comSensor` 显式设成 `undefined`，
- * 用 `!== undefined` 判断会让这些赋值全部被跳过，端口引用留着不放。
+ * ⚠️ `setRuntime` 里那 16 个 `hasOwnProperty` 判断不能简化成 `next.x !== undefined`：关闭流程正
+ * 是要把 `com`/`com1`/`comhead`/`comSensor` 显式设成 `undefined`，换成 `!== undefined` 会让这些
+ * 赋值全部被跳过、端口引用留着不放。
  *
- * ⚠️ `getRuntime` 返回的是**每次调用现取的快照**。编排器只在关闭开始时取一次
- * （原因见 `serverShutdownOrchestrator` 里那段顺序依赖说明），
- * 这个「取一次」的语义依赖此处每次都是新对象，不要改成缓存。
+ * ⚠️ `getRuntime` 返回的是**每次调用现取的快照**，编排器只在关闭开始时取一次（原因见
+ * `serverShutdownOrchestrator` 那段顺序依赖说明），这个语义依赖此处每次都是新对象，不要改成缓存。
  *
  * @returns {object} 关闭编排器单例。
  */
@@ -1626,20 +1593,16 @@ function publishRealtimeFrame(channel, jsonData, options) {
 }
 
 /**
- * 发布一帧实时数据，带两道门。
+ * 发布一帧实时数据，带两道门 —— 实时采集链路应该用的入口。
  *
- * 这是实时采集链路应该用的入口，两道门都是为了「不让前端收到自相矛盾的数据」：
+ * 两道门都是为了「不让前端收到自相矛盾的数据」：① **回放期间一律不发** —— 回放和实时共用同一批
+ * 通道，不拦的话串口来的实时帧会插在回放帧中间、画面在两个时间点之间跳；这道门没有开关，任何
+ * 「回放时也要看实时」的需求都得另开通道。② **手套类型限频到 60FPS**（`shouldSendRealtimeFrame`）
+ * —— 手套串口 1Mbps，帧率远高于屏幕刷新率，不限频会让 WebSocket 缓冲区堆积、延迟越跑越大。
  *
- * 1. **回放期间一律不发**（返回 0）。回放和实时用的是同一批通道，
- *    不拦的话串口来的实时帧会插在回放帧中间，画面会在两个时间点之间跳。
- *    这道门没有开关 —— 任何「回放时也要看实时」的需求都得另开通道。
- * 2. **手套类型限频到 60FPS**（`shouldSendRealtimeFrame`）。手套串口是
- *    1Mbps，帧率远高于屏幕刷新率，不限频的话 WebSocket 缓冲区会堆积，
- *    延迟越跑越大。`respectFrequency: false` 用于「这一帧必须送到」的场合
- *    （比如归零后的第一帧），它绕过限频但**绕不过回放门**。
- *
- * 返回 0 有三种含义（回放中 / 被限频 / 没有订阅者），调用方都当「这帧没发出去」
- * 处理即可，不需要区分 —— 三种情况都不是错误。
+ * `respectFrequency: false` 用于「这一帧必须送到」的场合（如归零后的第一帧），它绕过限频但
+ * **绕不过回放门**。返回 0 的三种含义（回放中 / 被限频 / 没有订阅者）都不是错误，调用方一律当
+ * 「这帧没发出去」处理即可，不需要区分。
  *
  * @param {string} channel 输出通道别名。
  * @param {string | object} jsonData 帧数据。
@@ -1705,19 +1668,13 @@ const SENSOR_FRAME_ONLY_FIELDS = Object.freeze([
 /**
  * 把 `publishSystemEvent` 的入参归一成一个普通对象，归一不了就返回 null。
  *
- * 三种入参都得认，因为调用点横跨十几年的代码：新代码传对象，
- * 旧 handler 传 `JSON.stringify(...)` 的字符串，串口链路偶尔传 Buffer。
+ * 三种入参都得认，因为调用点横跨十几年的代码：新代码传对象，旧 handler 传 `JSON.stringify` 的字
+ * 符串，串口链路偶尔传 Buffer。返回 null 的语义是「这不是可拆解的事件对象」而不是「出错了」——
+ * 调用方（`publishSystemEvent`）会把原始 data 原样广播出去，解析失败不该让消息丢掉。
  *
- * `!Buffer.isBuffer(data)` 这个判断不能省：Buffer 也是 object，
- * 少了它 Buffer 会被当成「已经是对象」直接返回，后面读 `event.sitData` 拿到
- * undefined，于是整帧数据被当成低频系统事件广播出去 —— 不报错，只是画面不动。
- *
- * `!Array.isArray(parsed)` 同理：JSON 数组解析成功但不是事件形状，
- * 当成 null 交给调用方走「原样广播」的兜底路径。
- *
- * 返回 null 的语义是「这不是可拆解的事件对象」，而不是「出错了」——
- * 调用方（`publishSystemEvent`）会把原始 data 原样广播出去。
- * 这是刻意的宽容：解析失败不该让消息丢掉。
+ * ⚠️ `!Buffer.isBuffer(data)` 不能省：Buffer 也是 object，少了它 Buffer 会被当成「已经是对象」
+ * 直接返回，后面读 `event.sitData` 拿到 undefined，于是整帧数据被当成低频系统事件广播出去 ——
+ * 不报错，只是画面不动。`!Array.isArray(parsed)` 同理，落到调用方「原样广播」的兜底路径。
  *
  * @param {object | string | Buffer} data 待归一的载荷。
  * @returns {object | null} 事件对象；归一不了时 null。
@@ -1821,18 +1778,13 @@ function sendJqbedAlgorithmJson(client, payload) {
 /**
  * 更新 JQBed 算法进程的状态，**变了才广播**。
  *
- * 去重是必需的而不是优化：状态探测是**轮询**的（`probeJqbedAlgorithmConfig`
- * 每次都会调 `health`），不去重的话每次轮询都会广播一条相同的状态，
- * 前端每次都重渲染一遍状态指示灯。
+ * 去重是必需的而非优化：状态探测是**轮询**的（`probeJqbedAlgorithmConfig` 每次都会调 `health`），
+ * 不去重就会每次轮询都广播一条相同状态，前端每次都重渲染状态指示灯。用 `JSON.stringify` 比较而不
+ * 逐字段比：状态对象是 `{state, error}` 这种小而扁平的形状、字段可能增加，逐字段比每加一个字段都
+ * 得记得改，漏了会退化成「永远认为没变」—— 状态卡住不更新比多广播几次更糟。
  *
- * 用 `JSON.stringify` 比较而不是逐字段比：状态对象是
- * `{state, error}` 这种小而扁平的形状，字段可能增加（比如加个进程 pid），
- * 逐字段比的写法每加一个字段都要记得改，漏了就退化成「永远认为没变」——
- * 那比多广播几次更糟（状态卡住不更新）。
- *
- * ⚠️ `JSON.stringify` 依赖**键顺序**。两个语义相同但键顺序不同的对象会被判成
- * 「变了」，多广播一次而已，无害。但反过来不会漏 —— 不会把变了的判成没变。
- * 所以这个不精确的方向是安全的。
+ * ⚠️ `JSON.stringify` 依赖**键顺序**，键顺序不同的等价对象会被判成「变了」，多广播一次而已；
+ * 反过来不会漏（不会把变了的判成没变），所以这个不精确的方向是安全的。
  *
  * @param {{state: string, error: string|null}} nextStatus 新状态。
  * @returns {void}
@@ -1853,17 +1805,14 @@ const jqbedAlgorithmProtocol = createJqbedAlgorithmProtocol({
 /**
  * 汇总当前可订阅的实时通道清单，供前端建立订阅。
  *
- * 三份输入合成一份清单，缺一不可：
- * - `sensorType` —— 当前型号，决定哪些旧通道（sit/back/head）有意义。
- * - `manifestChannels` —— 展示系统 manifest 声明的通道，二开加的传感器就在这里出现。
- * - `managedChannels`（`serialManager.getStatus()`）—— 每个通道**实际**开没开。
+ * 三份输入合成一份，缺一不可：`sensorType`（当前型号，决定哪些旧通道 sit/back/head 有意义）、
+ * `manifestChannels`（展示系统 manifest 声明的通道，二开加的传感器就在这里出现）、
+ * `managedChannels`（`serialManager.getStatus()`，每个通道**实际**开没开）。
  *
- * 前两份是「声明」，第三份是「现实」。前端要同时知道两者才能画出
- * 「这个通道存在但没连上」这种状态 —— 只给声明的话，用户看到通道在列表里
- * 却收不到数据，无从判断是没插线还是软件坏了。
+ * 前两份是「声明」，第三份是「现实」—— 前端要同时知道两者才能画出「这个通道存在但没连上」这种
+ * 状态；只给声明的话，用户看到通道在列表里却收不到数据，无从判断是没插线还是软件坏了。
  *
- * 每次现算而不缓存：串口开关和展示系统切换都会让结果变，
- * 而这个函数是前端主动查的（不是每帧调），现算的开销无所谓。
+ * 每次现算不缓存：串口开关和展示系统切换都会让结果变，而它是前端主动查的（不是每帧调）。
  *
  * @returns {Array<object>} 通道元信息列表。
  */
@@ -1882,29 +1831,17 @@ function getRealtimeChannelMetadata() {
 /**
  * 广播「有哪些历史采集日期可选」，并顺带清空各通道画面。
  *
- * ⚠️ **这个函数的分支结构是历史包袱，不是设计。** 它对 `car` / `car10` / `bigBed`
- * 三个型号各有一条特例，而且 `dedupli(sitTimeArr, backTimeArr)` 被算了两次
- * （1669 行与 1686 行），`car` 分支还会**先广播一次**再走通用路径广播第二次。
- * 结果是这三个型号的前端会收到两条 `timeArr`。
+ * 顺带清屏是必要的：进入历史模式前画面上还是实时数据，不清屏用户会以为那是历史的第一帧。三个通
+ * 道各清一次，单通道型号只清 sit（`isCar` / `isThreePortFile` 两层判断）。`bigBed` 的 sit 尺寸取
+ * 2048 而不是 `sitTotal`（4096）—— 它是 32×64 的双床垫，本文件里这个魔数出现多次都是同一原因。
+ * 500 条上限：日期列表是给人看的下拉框，真超过 500 天也只显示最近的（`ORDER BY timestamp DESC`）。
  *
- * 两次算出来的值对 `car` 是相同的（都是 `dedupli(sit, back)`）；
- * 对 `car10` 不同 —— 第一条是 `backRows`，第二条是合并结果。
- * 哪一条最终生效取决于前端如何处理两次 `timeArr`（未在此处验证），
- * 所以 `car10` 那条特例分支的实际效果只能确定它的清屏部分
- * （`backData: new Array(100)`，car10 的靠背是 10×10 而不是 64×64）。
- * **重构它需要在真机上逐型号验证，不属于「加注释」的范围**，
- * 所以这里只把现状记清楚。二开时如果新增型号，不要照抄这些特例分支 ——
- * 通用路径（1686 行起）就够了。
- *
- * 为什么广播日期列表时要顺带发全零帧：进入历史模式前画面上还是实时数据，
- * 不清屏用户会以为那是历史的第一帧。三个通道各清一次，
- * 单通道型号只清 sit（`isCar` / `isThreePortFile` 两层判断）。
- *
- * `bigBed` 的 sit 尺寸是 2048 而不是 `sitTotal`（4096）——
- * 它是 32×64 的双床垫，这个魔数在本文件里出现多次，全都是同一个原因。
- *
- * 500 条上限：历史日期列表是给人看的下拉框，超过 500 天的机器实际不存在；
- * 真有的话用户看到的是最近 500 天（`ORDER BY timestamp DESC`）。
+ * ⚠️ **`car` / `car10` / `bigBed` 三条特例分支是历史包袱，不是设计。** `dedupli(sitTimeArr,
+ * backTimeArr)` 被算了两次，`car` 分支还会**先广播一次**再走通用路径广播第二次 —— 这三个型号的
+ * 前端会收到**两条 `timeArr`**。两次的值对 `car` 相同，对 `car10` 不同（第一条是 `backRows`，
+ * 第二条是合并结果），哪条最终生效取决于前端怎么处理，未在此处验证；所以 `car10` 那条分支能确定
+ * 的只有清屏部分（`backData: new Array(100)`，它的靠背是 10×10 而不是 64×64）。重构需要真机逐
+ * 型号验证，不属于「加注释」的范围。**二开新增型号时不要照抄这些特例，走通用路径就够了。**
  *
  * @returns {void}
  */
@@ -2072,30 +2009,22 @@ function getStoredLicenseKey() {
 /**
  * 校验并激活用户提交的授权密钥。
  *
- * ⚠️ **属于「用户权限与身份认证」这一类，改动前要按 CLAUDE.md 走人工确认。**
- * 密钥的格式、加解密方式（见 `aes_ecb.js`）和字段语义都是与**已经发出去的
- * 每一份 config.txt** 的兼容契约。
+ * 返回内部形状 `{ok, code, payload}` 而不是 `HttpResult`：它同时服务 HTTP 路由与 WebSocket 命令
+ * 两条路，由各自的边界去转换。
  *
- * 顺序很讲究，四步不能换：
- * 1. 先 `validateLicenseKey` 校验，**不通过就原样返回校验结果，什么都不改**。
- *    这是唯一的「失败不留痕」保证 —— 输错一次密钥不该把机器搞成半激活状态。
- * 2. 再 `writeStoredLicenseKey` 落盘，然后才更新内存里的三个字段。
- *    落盘在前是因为落盘会失败（磁盘满、权限），内存更新不会 ——
- *    反过来会出现「界面显示已激活但重启后没了」。
- * 3. `state.nextFile` 存在才切型号。授权范围变了不一定意味着当前型号要变
- *    （比如从单型号扩到多型号，当前型号仍在范围内），
- *    无条件切会把用户正在用的型号踢掉。
- * 4. 切型号时同步波特率、重置 petCare 运行态、并通过
- *    `runtimeStatePatchers` 把 file/baudRate 推进运行时 —— 这三件必须一起做，
- *    只改 `file` 会让串口继续用旧波特率读新型号的数据（现象是全是乱帧）。
+ * ⚠️ **属于「用户权限与身份认证」这一类，改动前要按 CLAUDE.md 走人工确认。** 密钥格式、加解密
+ * 方式（见 `aes_ecb.js`）和字段语义都是与**已经发出去的每一份 config.txt** 的兼容契约。
  *
- * 返回值不是 `HttpResult`，而是 `{ok, code, payload}` 这个内部形状 ——
- * 因为它同时服务 HTTP 路由和 WebSocket 命令两条路，由各自的边界去转换。
+ * ⚠️ 四步顺序不能换：① 先校验，**不通过就原样返回、什么都不改**（唯一的「失败不留痕」保证 ——
+ * 输错一次密钥不该把机器搞成半激活状态）；② 先落盘再更新内存那三个字段（落盘会失败、内存更新不
+ * 会，反过来会出现「界面显示已激活但重启后没了」）；③ 只在 `state.nextFile` 存在时才切型号（授权
+ * 范围变了不一定意味着当前型号要变，无条件切会把用户正在用的型号踢掉）；④ 切型号时波特率、
+ * petCare 运行态、`runtimeStatePatchers` 三件必须一起做 —— 只改 `file` 会让串口继续用旧波特率读
+ * 新型号的数据，现象是全是乱帧。
  *
- * `payload.file` 与 `payload.currentSensorType` 是**两个不同的东西**，
- * 不能合并：前者是授权范围（可能是 `'all'` 或数组），
- * 后者是当前实际在用的型号。历史上它们共用过 `file` 字段，
- * 结果是激活后前端的授权列表被当前型号覆盖掉。
+ * ⚠️ `payload.file`（授权范围，可能是 `'all'` 或数组）与 `payload.currentSensorType`（当前实际
+ * 在用的型号）是**两个不同的东西**，不能合并 —— 历史上它们共用过 `file` 字段，结果是激活后前端
+ * 的授权列表被当前型号覆盖掉。
  *
  * @param {string} licenseKey 用户输入的密钥。
  * @returns {{ok: boolean, code: string, payload?: object}} 激活结果；
@@ -2213,33 +2142,23 @@ let up = 1245, down = 2
 /**
  * 决定一次采零/清零操作要作用到哪些通道。
  *
- * 显式传了 `channelIds` 就直接用 —— 前端点某个通道的归零按钮时走这条，
- * 不做任何推导。
+ * 显式传了 `channelIds` 就直接用（前端点某个通道的归零按钮走这条，不做任何推导）。没传时把三份
+ * 来源**并起来去重**，缺一不可：`declared`（当前活跃展示系统正在跑的通道，只有目标就是活跃系统
+ * 时才有值）、`configured`（目标 manifest 声明的通道，过滤 `channel.protocol && channel.id` ——
+ * 没有协议的是占位/分组节点，归零到它上面没有意义）、`observed`（零点存储里已经见过的通道 ——
+ * 这一份是为了让**已归零过但现在没在跑**的通道也能被清零，否则切换展示系统后就再也清不掉旧零点）。
  *
- * 没传时要把三份来源**并起来去重**，三份缺一不可：
- * - `declared` —— 当前活跃展示系统正在跑的通道（只有目标就是活跃系统时才有值）。
- * - `configured` —— 目标展示系统 manifest 里声明的通道。
- *   过滤 `channel.protocol && channel.id`：没有协议的通道是占位/分组节点，
- *   归零到它上面没有意义。
- * - `observed` —— 零点存储里已经见过的通道。这一份是为了让**已经归零过但现在
- *   没在跑的通道**也能被清零，否则用户切换展示系统之后就再也清不掉旧零点了。
+ * 采零与清零唯一的行为差异：`operation === 'capture'` 时 `observed` 加 `withSourcesOnly` 过滤 ——
+ * **采零需要有数据源才能采**（没数据采出来是一片零，等于把基线设成 0，比不采更糟）；清零不需要，
+ * 任何见过的通道都该能清。
  *
- * `operation === 'capture'` 时 `observed` 加 `withSourcesOnly` 过滤：
- * **采零需要有数据源才能采**（没数据采出来是一片零，等于把基线设成 0，
- * 比不采更糟）；清零不需要，任何见过的通道都该能清。
- * 这个参数是采零与清零唯一的行为差异。
+ * `skipped` 只在「目标不是活跃系统且一个通道都解不出来」时才填（这时用户在对另一个展示系统操作，
+ * 需要知道是 `unknown-display-system` 还是 `no-target-channels`）；目标就是活跃系统而解出空列表
+ * 时**不填**，交给下游判 409 —— 那种情况下「没有通道」本身是个更基础的问题。
  *
- * ⚠️ **返回值有两种形状**：显式传 `channelIds` 时返回**数组本身**，
- * 否则返回 `{channelIds, skipped}`。这个不一致是既有形状，
- * 消费端 `zeroCommandService.normalizeResolution` 明确兼容了两种
- * （见那边的注释），所以不算 bug；但二开时如果直接调这个函数，
- * 要记得两种都处理。
- *
- * `skipped` 只在「目标不是活跃系统且一个通道都解不出来」时才填 ——
- * 这时用户是在对另一个展示系统操作，需要知道为什么没生效
- * （`unknown-display-system` 还是 `no-target-channels`）。
- * 目标就是活跃系统而解出空列表时**不填 skipped**，交给下游判 409，
- * 因为那种情况下「没有通道」本身就是个更基础的问题。
+ * ⚠️ **返回值有两种形状**：显式传 `channelIds` 时返回**数组本身**，否则返回
+ * `{channelIds, skipped}`。消费端 `zeroCommandService.normalizeResolution` 明确兼容了两种，所以
+ * 不算 bug；但二开时直接调这个函数，要记得两种都处理。
  *
  * @param {object} [options] 参数。
  * @param {string} [options.displaySystemId] 目标展示系统；省略时用当前活跃的。
@@ -2506,17 +2425,14 @@ appRuntime.displaySystems.bindRuntimeChannels({
 /**
  * 输出一帧坐垫数据：该入库的入库，该发的发。
  *
- * 名字是历史遗留的缩写 —— **col**lect **or** **send**，
- * 反映了最初「要么存要么发」的二选一逻辑。
- * 现在两件事都做（`frameOutputPipeline` 内部按采集状态和回放状态各自决定），
- * 所以名字已经不准确了，但**这三个函数名是几十个硬件处理器的注入契约**
- * （见下面 `legacySerialFrameRuntimeBaseContext`），改名要同步改所有
- * `backend/extensions/built-in-sensors/` 下的处理器 —— 不值得。
+ * 名字是历史缩写 **col**lect **or** **send**，反映最初「要么存要么发」的二选一逻辑；现在两件事都
+ * 做（`frameOutputPipeline` 按采集状态与回放状态各自决定）。三个变体（无后缀 / `1` / `2`）对应
+ * sit / back / head，命名同样是历史的。
  *
- * 三个变体（无后缀 / `1` / `2`）对应 sit / back / head 三条通道，
- * 命名同样是历史的。二开写新的传感器处理器时**不要沿用这个命名** ——
- * manifest 系统有任意多个通道，应该走 `publishRealtimeChannel` 加通道名。
- * 这三个只是给旧的三通道处理器留的入口。
+ * ⚠️ **这三个函数名是几十个硬件处理器的注入契约**（见 `legacySerialFrameRuntimeBaseContext`），
+ * 改名要同步改所有 `backend/extensions/built-in-sensors/` 下的处理器 —— 不值得。二开写新的传感器
+ * 处理器时**不要沿用这个命名**：manifest 系统有任意多个通道，应走 `publishRealtimeChannel` 加通道
+ * 名，这三个只是给旧的三通道处理器留的入口。
  *
  * @param {string | object} jsonData 已处理好的帧数据。
  * @param {object} [options] 透传给管线的选项。
@@ -2693,17 +2609,13 @@ function getChannelBusStatus() {
 /**
  * 命令适配器的兜底分支：收到不认识的命令时记一条 warn 并返回 null。
  *
- * 这个函数**没有任何实际处理逻辑**，它是命令体系迁移留下的空壳：
- * 真正的命令处理已经全部搬到 `controlCommandService` +
- * `controlCommandRouter` 那套 handler 注册机制里（见本文件的
- * `registerRuntimeCommandHandlers` / `registerSerialControlHandlers` 等调用）。
- * 保留导出是因为 Electron 侧还 import 它。
+ * 命令体系迁移留下的空壳，**没有任何实际处理逻辑** —— 真正的处理都在 `controlCommandService` +
+ * `controlCommandRouter` 那套 handler 注册机制里（见本文件的 `registerRuntimeCommandHandlers` /
+ * `registerSerialControlHandlers` 等调用）。保留导出只因为 Electron 侧还 import 它。
  *
- * **返回 null 而不是抛错**，是刻意的：这条路径上的「不支持的命令」
- * 通常来自版本不匹配的前端，不该让后端出错。
- * 但也因此**不认识的命令会静默失败** —— 只有日志里那条 warn。
- * 二开时如果发现新加的命令「什么都没发生」，先来看这条日志，
- * 大概是命令没注册进 router，落到这里了。
+ * ⚠️ **返回 null 而不是抛错是刻意的**（这条路径上的「不支持的命令」通常来自版本不匹配的前端，
+ * 不该让后端出错），代价是**不认识的命令会静默失败**，只留日志里那条 warn。二开时新加的命令
+ * 「什么都没发生」，先看这条日志 —— 大概是没注册进 router、落到这里了。
  *
  * @param {{type?: string, action?: string}} command 收到的命令。
  * @returns {null} 恒为 null。
