@@ -1,19 +1,14 @@
 /**
  * 键**存在**就调 setter —— 判存在而不判真值，这是整个 patch 机制的地基。
  *
- * 旧命令处理器返回的是一个「本次改了哪些字段」的补丁对象，里面绝大多数字段的合法值都
- * 包含假值：`flag: false`（停止采集）、`localFlag: false`（退出回放）、`nowIndex: 0`
- * （回放跳到第一帧）、`saveTime: undefined`（清空采集起始时间）。用 `if (next[key])`
- * 或 `!= null` 判断，这些命令会被静默丢掉 —— 现象是「点了停止采集但一直在采」。
+ * ⚠️ **判存在而不判真值**：补丁里绝大多数字段的合法值都包含假值 —— `flag: false`（停止采集）、
+ * `localFlag: false`（退出回放）、`nowIndex: 0`（跳第一帧）、`saveTime: undefined`（清空采集起始
+ * 时间）。换成 `if (next[key])` 或 `!= null`，这些命令会被静默丢掉，现象是「点了停止采集但一直在
+ * 采」。反过来键**不在**补丁里就必须什么都不做（补丁是增量的，把缺失的键当 `undefined` 写进去会
+ * 清空所有未提及的状态）。
  *
- * 反过来，键**不在**补丁里就必须什么都不做：补丁是增量的，把缺失的键当成 `undefined`
- * 写进去会把所有未提及的状态清空。
- *
- * `hasOwnProperty.call` 而不是 `in`：补丁对象来自 WebSocket/HTTP 的 JSON 反序列化结果，
- * 用 `in` 会命中 `Object.prototype` 上的名字。
- *
- * setter 不做类型检查（调用点保证传的是函数），也不接返回值 —— 写入失败与否由各 setter
- * 自己负责。
+ * `hasOwnProperty.call` 而不是 `in`：补丁来自 WebSocket/HTTP 的 JSON 反序列化，`in` 会命中
+ * `Object.prototype` 上的名字。setter 不做类型检查也不接返回值，写入成败由各 setter 自己负责。
  *
  * @param {object} next 补丁对象。
  * @param {string} key 字段名。
