@@ -49,7 +49,20 @@ assert.ok(!Object.hasOwn(legacyResult.frame, 'sitData'));
 const manifestPayload = {
   channelId: 'human-body:left-arm',
   displaySystemId: 'human-body',
+  sensorId: 'left-arm',
+  sensorLabel: '左手',
+  sensorType: 'arm-pad',
   outputChannel: 'armLeft',
+  serialRole: 'leftHand',
+  serial: {
+    role: 'leftHand',
+    portId: 'leftHand',
+    path: 'COM7',
+    baudRate: 921600,
+    parserChannel: 'human-body:left-arm',
+    status: 'open',
+    isOpen: true,
+  },
   rawData: [1, 2],
   normalizedData: [2, 1],
   data: [4, 2],
@@ -67,6 +80,8 @@ const secondManifestResult = gateway.publishRealtimeFrame('armLeft', manifestPay
 
 assert.strictEqual(firstManifestResult.frame.channelId, 'human-body:left-arm');
 assert.strictEqual(firstManifestResult.frame.sensorId, 'left-arm');
+assert.strictEqual(firstManifestResult.frame.sensorLabel, '左手');
+assert.deepStrictEqual(firstManifestResult.frame.serial, manifestPayload.serial);
 assert.strictEqual(firstManifestResult.frame.sequence, 1);
 assert.strictEqual(secondManifestResult.frame.sequence, 2);
 assert.deepStrictEqual(firstManifestResult.frame.payload.stages.decoded, [1, 2]);

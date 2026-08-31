@@ -67,6 +67,15 @@ function getBindingSensorType(binding = {}) {
   );
 }
 
+/** 读取整个展示系统共用的激活键；异构多传感器不能逐路拿自己的 type 与全局选择比较。 */
+function getBindingActivationSensorType(binding = {}) {
+  return normalizeValue(
+    binding.activationSensorType
+    || binding.runtimeChannel?.activationSensorType
+    || getBindingSensorType(binding)
+  );
+}
+
 /**
  * 从 binding 上取 parser 通道名。
  *
@@ -152,7 +161,7 @@ function evaluateDisplaySystemDispatchPolicy(binding = {}, {
     return { allowed: false, reason: `runtime mode ${runtimeMode} is not active` };
   }
 
-  const expectedSensorType = getBindingSensorType(binding);
+  const expectedSensorType = getBindingActivationSensorType(binding);
   const activeSensorType = normalizeValue(currentSensorType || getSensorType?.());
   if (expectedSensorType && activeSensorType && expectedSensorType !== activeSensorType) {
     return {
@@ -203,6 +212,7 @@ function evaluateDisplaySystemDispatchPolicy(binding = {}, {
 module.exports = {
   DEFAULT_LEGACY_PARSER_CHANNELS,
   evaluateDisplaySystemDispatchPolicy,
+  getBindingActivationSensorType,
   getBindingParserChannel,
   getBindingSensorType,
   getRuntimeMode,

@@ -13,12 +13,14 @@ function createCanonicalFrame(overrides = {}) {
     channelId: 'small-bed-12b:sit',
     displaySystemId: 'small-bed-12b',
     sensorId: 'sit',
+    sensorLabel: '座椅',
     sensorType: 'smallBed12B',
     outputChannel: 'sit',
     source: 'playback',
     sequence: 12,
     timestamp: 0,
     quality: 'good',
+    serial: { role: 'seat', path: 'COM3', baudRate: 115200 },
     payload: {
       value: ['1', 2, 3, 4],
       stages: {
@@ -68,6 +70,7 @@ describe('canonical sensor.frame normalization', () => {
       channelId: 'small-bed-12b:sit',
       displaySystemId: 'small-bed-12b',
       sensorId: 'sit',
+      sensorLabel: '座椅',
       sensorType: 'smallBed12B',
       outputChannel: 'sit',
       channel: 'sit',
@@ -75,6 +78,7 @@ describe('canonical sensor.frame normalization', () => {
       sequence: 12,
       timestamp: 0,
       quality: 'good',
+      serial: { role: 'seat', path: 'COM3', baudRate: 115200 },
       data: [1, 2, 3, 4],
       matrix: {
         rows: 2,
@@ -111,6 +115,7 @@ describe('canonical sensor.frame normalization', () => {
       },
     });
     expect(frame.algorithmMetrics).toEqual({ centerX: 0.5, centerY: 0.25 });
+    expect(frame.extra.serial).toEqual(envelope.serial);
     expect(frame).not.toHaveProperty('sitData');
     expect(frame).not.toHaveProperty('backData');
     expect(frame).not.toHaveProperty('headData');

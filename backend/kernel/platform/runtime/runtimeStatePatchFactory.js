@@ -53,7 +53,14 @@ function createRuntimeStatePatchers({
   // 清单写死在这里（而不是由 server.js 传入）是刻意的：它们对应两个具体的 store
   // （playbackStateStore / collectionStateStore），字段与 store 是一对一绑定的，
   // 参数化只会让「某个字段属于哪个 store」这条事实散到两个文件里。
-  const playbackKeys = ['nowIndex', 'localData', 'localDataBack', 'localDataHead', 'indexArr'];
+  const playbackKeys = [
+    'nowIndex',
+    'localData',
+    'localDataBack',
+    'localDataHead',
+    'historyChannels',
+    'indexArr',
+  ];
   const collectionKeys = ['saveTime', 'flag', 'colHZ', 'collectOptions'];
   let boundRuntimeStateStore = runtimeStateStore || null;
   let boundStoreBackedKeys = new Set(storeBackedKeys);

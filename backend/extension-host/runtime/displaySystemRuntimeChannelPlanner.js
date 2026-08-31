@@ -9,13 +9,11 @@
 /**
  * 把 manifest 里的算法声明补全成固定形状的算法绑定。
  *
- * 关键是**每个字段都给缺省值**：这份对象会一路传到 frame processor，让下游写
- * `binding.input.xxx` 而不必层层判空。`type` 缺省 `'none'`，`enabled` 直接由
- * `type !== 'none'` 推出而不是让 manifest 单独声明 —— 两个字段各写一次必然会出现
- * 「type 是 none 但 enabled 是 true」的自相矛盾状态，这里从源头消掉。
+ * 关键是**每个字段都给缺省值**，这份对象一路传到 frame processor，让下游不必层层判空。
+ * `enabled` 由 `type !== 'none'` 推出而不让 manifest 单独声明 —— 两个字段各写一次必然出现
+ * 「type 是 none 但 enabled 是 true」的自相矛盾。
  *
- * `timeoutMs` 默认 1000：算法通道（Python 等）跑在进程外，没有超时会让一路卡死的
- * 算法把整条实时流拖住。改小要确认最慢的算法能在新值内返回。
+ * `timeoutMs` 默认 1000：算法跑在进程外，没有超时会让一路卡死的算法拖住整条实时流。
  *
  * @param {object} [algorithm={}] manifest 里的算法声明。
  * @returns {{type: string, entry: string|null, dataFile: string|null, input: object,
@@ -37,20 +35,13 @@ function normalizeAlgorithmBinding(algorithm = {}) {
 /**
  * 把 manifest 的 runtimeDefinition 摊平成「一条 parser 通道 = 一份计划」的数组。
  *
- * 输出是**一条一条独立自洽的计划**，而不是「一份公共配置 + 各通道差异」：因为
- * 下游（runtime registry、binder、dispatcher）都是按单通道处理的，让每条计划自带
- * 完整的 sensor / display / processing，下游就不用回头去查它属于哪个系统。代价是
- * 多传感器系统里 `display` 那块会在各通道间重复，这是有意的冗余。
+ * 每条计划独立自洽（自带完整 sensor/display/processing）而不是「公共配置 + 通道差异」，
+ * 因为下游全按单通道处理。代价是 `display` 在各通道重复，是有意的冗余。`status` 一律
+ * `'planned'`，真状态由 registry 注册时改写。
  *
- * 两处「通道自己的值优先于系统级值」值得注意（也是多传感器系统的正确性所系）：
- * - `matrix`：`channel.matrix?.total ? channel.matrix : displayMetadata.matrix`。
- *   系统级 `displayMetadata.matrix` 只是**第一路**的尺寸，多路不同尺寸时若不按通道
- *   取，后面的通道会拿着错误的行列数去解帧。判据用 `.total` 而不是判对象存在 ——
- *   空的 `{}` 也是对象，但不构成有效尺寸。
- * - `serialRole` 取 `channel.channel`，`outputChannel` 缺省回落到它。前者是物理/
- *   parser 键，后者只是给前端和采集存储看的展示别名，二者可以不同。
- *
- * `status` 一律为 `'planned'`：这里只是计划，真正的状态由 registry 注册时改写。
+ * ⚠️ 两处「通道值优先于系统级值」是多传感器正确性所系：`matrix` 判据是
+ * `channel.matrix?.total` 而不是判对象存在（空 `{}` 也是对象但不是有效尺寸），系统级
+ * `displayMetadata.matrix` 只是**第一路**的尺寸，不按通道取会让后面的通道拿错行列数解帧。
  *
  * @param {{sensorDefinition?: object, displayMetadata?: object, parserChannels?: object[]}}
  *        runtimeDefinition manifest 归一后的运行时定义。
@@ -66,9 +57,14 @@ function buildRuntimeChannelPlan(runtimeDefinition) {
   return parserChannels.map((channel) => ({
     id: channel.id,
     displaySystemId: channel.displaySystemId,
+    // 当前 UI 仍用展示系统第一路 sensor.type 作为切换值；同一系统内其它异构 sensor
+    // 也必须跟随这一个激活键，而不是拿各自 type 与全局选择逐路比较。
+    activationSensorType: sensorDefinition.type || channel.sensorType,
     // serialRole 是这一路传感器在系统内的标识（用于串口/parser 键），
     // outputChannel 是它推送到前端和采集存储的通道名，两者可以不同。
     serialRole: channel.channel,
+    baudRate: Number(channel.baudRate || channel.protocol?.baudRate) || null,
+    stored: channel.stored !== false,
     outputChannel: channel.outputChannel || channel.channel,
     label: channel.label || channel.channel,
     parserChannel: {
@@ -108,7 +104,10 @@ function buildRuntimeChannelPlan(runtimeDefinition) {
     metadata: { ...(displayMetadata.metadata || {}) },
     runtimeMode: displayMetadata.metadata?.runtimeMode || null,
     sensor: {
-      id: sensorDefinition.id,
+      // sensorDefinition.id 是展示系统 ID；每路真实 sensorId 必须来自 parser channel。
+      // 否则所有串口都会在诊断快照里显示成同一个展示系统名。
+      id: channel.channel,
+      label: channel.label || channel.channel,
       type: channel.sensorType || sensorDefinition.type,
       matrix: channel.matrix?.total ? channel.matrix : sensorDefinition.matrix,
     },

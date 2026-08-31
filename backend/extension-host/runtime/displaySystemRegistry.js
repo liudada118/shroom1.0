@@ -104,7 +104,11 @@ function createDisplaySystemRegistry({ logger } = {}) {
    * @returns {Readonly<object>|null} 首个匹配的配置；无匹配为 null。
    */
   function findBySensorType(sensorType) {
-    return list().find((system) => system.sensor?.type === sensorType) || null;
+    return list().find((system) => (
+      system.sensor?.type === sensorType
+      || system.id === sensorType
+      || system.sensors?.some((sensor) => sensor.type === sensorType)
+    )) || null;
   }
 
   /**

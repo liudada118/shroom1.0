@@ -410,7 +410,16 @@ runtimeRegistry.register(runtimeChannel);
 const bindings = bindDisplaySystemRuntimeChannels({
   runtimeChannelRegistry: runtimeRegistry,
   serialManager: {
-    getStatus: (role) => ({ role, status: 'registered' }),
+    getStatus: (role) => ({
+      portId: role,
+      role,
+      path: 'COM7',
+      baudRate: 921600,
+      parserChannel: 'sit',
+      status: 'open',
+      isOpen: true,
+      openedAt: 1234,
+    }),
   },
   serialParserManager: {
     channels: { SIT: 'sit' },
@@ -432,6 +441,42 @@ const output = bindings[0].handleFrame([1, 2, 3]);
 assert.strictEqual(output.published, true);
 assert.strictEqual(output.output.sent, 1);
 assert.deepStrictEqual(output.processedFrame.data, [1, 2, 3]);
+assert.strictEqual(output.processedFrame.serialRole, 'sit');
+assert.ok(Number.isFinite(output.processedFrame.timestamp));
+assert.deepStrictEqual(output.processedFrame.serial, {
+  role: 'sit',
+  portId: 'sit',
+  path: 'COM7',
+  baudRate: 921600,
+  parserChannel: 'sit',
+  status: 'open',
+  isOpen: true,
+  openedAt: 1234,
+});
+
+let asyncSerialPath = 'COM7';
+let finishAsyncFrame;
+const asyncBindings = bindDisplaySystemRuntimeChannels({
+  runtimeChannelRegistry: { list: () => [runtimeChannel] },
+  serialManager: {
+    getStatus: (role) => ({ role, portId: role, path: asyncSerialPath, isOpen: true }),
+  },
+  serialParserManager: { channels: { SIT: 'sit' } },
+  frameOutputPipeline: { publishSit: (frame) => frame },
+  createFrameProcessor: () => ({
+    processFrame: (frame) => new Promise((resolve) => {
+      finishAsyncFrame = () => resolve({ data: frame, outputChannel: 'sit' });
+    }),
+  }),
+});
+const asyncStartedAt = Date.now();
+const pendingAsyncOutput = asyncBindings[0].handleFrame([9]);
+asyncSerialPath = 'COM8';
+finishAsyncFrame();
+const asyncOutput = await pendingAsyncOutput;
+assert.strictEqual(asyncOutput.processedFrame.serial.path, 'COM7');
+assert.ok(asyncOutput.processedFrame.timestamp >= asyncStartedAt);
+assert.ok(asyncOutput.processedFrame.timestamp <= Date.now());
 
 let registeredParser = null;
 const configuredBindings = bindDisplaySystemRuntimeChannels({

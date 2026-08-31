@@ -8,7 +8,7 @@ const {
 /**
  * 把 binding 列表投影成诊断快照。
  *
- * 只取九个字段，**刻意不含 `handleFrame`、`runtimeChannel` 和 `metadata`**：
+ * 只取公开诊断字段，**刻意不含 `handleFrame`、`runtimeChannel` 和 `metadata`**：
  * 这份快照会经 HTTP 出去，带上 `handleFrame` 是把函数塞进 JSON（序列化后消失，
  * 白占地方），带上 `runtimeChannel` 则会把整份通道计划（含算法源码路径）泄到
  * 对外接口上。新增字段前先确认它该不该成为对外契约。
@@ -24,9 +24,13 @@ function buildRuntimeBindingSnapshot(runtimeBindings = []) {
     bindings: runtimeBindings.map((binding) => ({
       id: binding.id,
       displaySystemId: binding.displaySystemId,
+      sensorId: binding.sensorId,
+      sensorLabel: binding.sensorLabel,
       serialRole: binding.serialRole,
+      baudRate: binding.baudRate || null,
       parserChannel: binding.parserChannel,
       outputChannel: binding.outputChannel,
+      stored: binding.stored !== false,
       status: binding.status,
       error: binding.error || null,
       serialStatus: binding.serialStatus?.status || null,
@@ -60,14 +64,12 @@ function createDisplaySystemRuntimeController({
   /**
    * 重新绑定并启动整条实时链路。
    *
-   * **可重复调用**，每次都是全量重建（切换传感器、重新发现 manifest 之后都会走
-   * 这里）。第一行 `runtimeDispatcher?.stop?.()` 是必须的：不先停掉旧 dispatcher，
-   * 旧的 parser 监听会留在原地，同一帧被新旧两套 binding 各处理一次，现象是数据
-   * 翻倍或画面闪烁 —— 这也是本文件头注释里「重复绑定时旧 listener 清理」那句话的
-   * 具体所指。
+   * **可重复调用**，每次全量重建（切传感器、重新发现 manifest 都走这里）。两个运营开关
+   * （`allowParallelWithLegacy` / `allowActiveDisplaySystem`）只透传给 dispatcher，不参与
+   * binding 构建 —— 闸门在调度侧不在绑定侧。
    *
-   * 注意两个运营侧开关（`allowParallelWithLegacy` / `allowActiveDisplaySystem`）
-   * 只透传给 dispatcher，不参与 binding 构建 —— 闸门在调度侧，不在绑定侧。
+   * ⚠️ 第一行 `runtimeDispatcher?.stop?.()` 不能省：不先停旧 dispatcher，旧 parser 监听会
+   * 留在原地，同一帧被新旧两套 binding 各处理一次，现象是数据翻倍或画面闪烁。
    *
    * @param {object} [options] 运行时依赖。
    * @param {object} [options.serialManager] 串口管理器（只读状态，不在这里开关串口）。
@@ -127,11 +129,11 @@ function createDisplaySystemRuntimeController({
   /**
    * 取 dispatcher 状态，dispatcher 不存在时给一份形状相同的空状态。
    *
-   * 兜底对象**必须与 dispatcher.getStatus() 字段完全一致**，否则调用方（HTTP 状态
-   * 接口、前端诊断面板）在「还没 bind」和「已 bind」两种情况下拿到的形状不同，
-   * 就得到处写 `?.`。注意兜底里 `bindingCount` 用的是本地 `runtimeBindings.length`
-   * 而不是 0 —— bind 成功但 dispatcher 创建失败时，这个数能说明「binding 建出来了，
-   * 只是没人调度」，比一律报 0 更接近事实。
+   * ⚠️ 兜底对象**必须与 dispatcher.getStatus() 字段完全一致**，否则调用方在「还没 bind」和
+   * 「已 bind」两种情况下拿到的形状不同，就得到处写 `?.`。
+   *
+   * 兜底里 `bindingCount` 取本地 `runtimeBindings.length` 而不是 0 —— bind 成功但 dispatcher
+   * 创建失败时，这个数能说明「binding 建出来了，只是没人调度」。
    *
    * @returns {{started: boolean, bindingCount: number, activeHandlerCount: number,
    *            skippedBindingCount: number, handlers: object[], skippedBindings: object[]}}
@@ -151,12 +153,9 @@ function createDisplaySystemRuntimeController({
   /**
    * 整条实时链路的对外状态：binding 快照 + dispatcher 状态。
    *
-   * 这两块要一起看才能定位「展示系统没数据」：`runtimeBindings` 里每条的
-   * `status` 说明装配到哪一步（`bound` / `registered` / `error`），
-   * `runtimeDispatcher` 的三个计数说明挂载和策略拦截情况。
-   * 典型对法：`bindings` 里是 `registered` → parser 通道或输出发布器没解析出来
-   * （看 displaySystemRuntimeBinder）；是 `bound` 但没进 `handlers` 且不在
-   * `skippedBindings` 里 → 落进了 dispatcher `bindOne` 的静默 null 分支。
+   * 两块要一起看才能定位「展示系统没数据」。典型对法：binding 是 `registered` → parser 通道
+   * 或输出发布器没解析出来（看 displaySystemRuntimeBinder）；是 `bound` 但没进 `handlers`
+   * 又不在 `skippedBindings` 里 → 落进了 dispatcher `bindOne` 的静默 null 分支。
    *
    * @returns {{runtimeBindings: object, runtimeDispatcher: object}} 状态快照。
    */

@@ -204,12 +204,14 @@ export function normalizeSensorFrameEnvelope(frame = {}) {
     channelId: frame.channelId,
     displaySystemId,
     sensorId,
+    sensorLabel: frame.sensorLabel || sensorId,
     sensorType,
     outputChannel,
     channel: outputChannel || 'sensor',
     source: frame.source,
     sequence: frame.sequence,
     quality: frame.quality,
+    serial: isObject(frame.serial) ? { ...frame.serial } : null,
     mode: payload.mode || 'normal',
     timestamp: frame.timestamp ?? Date.now(),
     matrix: inferMatrix(data, payload.matrix || {}),
@@ -228,6 +230,7 @@ export function normalizeSensorFrameEnvelope(frame = {}) {
       temperature: payload.temperature ?? null,
       protocol: payload.protocol ?? null,
       history: payload.history ?? null,
+      serial: isObject(frame.serial) ? { ...frame.serial } : null,
     },
   };
 }

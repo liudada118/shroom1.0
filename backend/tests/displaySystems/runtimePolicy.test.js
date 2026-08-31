@@ -83,6 +83,19 @@ assert.strictEqual(mismatch.reason, 'sensor type mismatch: expected smallBed12B,
 
 assert.deepStrictEqual(
   evaluateDisplaySystemDispatchPolicy({
+    id: 'multi-demo:armLeft',
+    sensorType: 'arm-pressure',
+    activationSensorType: 'seat-pressure',
+    parserChannel: 'armLeft',
+    runtimeMode: 'parallel',
+  }, {
+    currentSensorType: 'seat-pressure',
+  }),
+  { allowed: true, reason: null },
+);
+
+assert.deepStrictEqual(
+  evaluateDisplaySystemDispatchPolicy({
     id: 'template:sit',
     parserChannel: 'sit',
     sensorType: 'smallBed12B',

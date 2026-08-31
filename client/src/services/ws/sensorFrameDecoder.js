@@ -73,16 +73,47 @@ function assignArray(target, key, value) {
   if (array) target[key] = array;
 }
 
+function resolveSerialMetadata(frame, payload) {
+  const declared = isObject(frame.serial)
+    ? frame.serial
+    : (isObject(payload.serial) ? payload.serial : {});
+  const serial = {
+    ...declared,
+    ...(frame.serialRole != null && declared.role == null
+      ? { role: frame.serialRole }
+      : {}),
+    ...(frame.serialPortPath != null && declared.path == null
+      ? { path: frame.serialPortPath }
+      : {}),
+    ...(frame.baudRate != null && declared.baudRate == null
+      ? { baudRate: frame.baudRate }
+      : {}),
+    ...(frame.parser != null && declared.parserChannel == null
+      ? { parserChannel: frame.parser }
+      : {}),
+  };
+  return Object.keys(serial).length ? serial : null;
+}
+
 /**
  * 判断消息是否为唯一的传感器实时/回放帧契约。
  * 系统状态、授权和命令确认仍按各自消息对象原样返回。
  */
 export function isSensorFrameEnvelope(value) {
-  return isObject(value)
-    && value.type === SENSOR_FRAME_TYPE
-    && Number(value.schemaVersion ?? value.version) === SENSOR_FRAME_SCHEMA_VERSION
-    && typeof value.channelId === 'string'
-    && isObject(value.payload);
+  if (!isObject(value)
+    || value.type !== SENSOR_FRAME_TYPE
+    || Number(value.schemaVersion ?? value.version) !== SENSOR_FRAME_SCHEMA_VERSION
+    || !isObject(value.payload)) return false;
+  const displaySystemId = String(value.displaySystemId || '').trim();
+  const sensorId = String(value.sensorId || '').trim();
+  const channelId = String(value.channelId || '').trim();
+  const outputChannel = String(value.outputChannel || '').trim();
+  return Boolean(
+    displaySystemId
+    && sensorId
+    && outputChannel
+    && channelId === `${displaySystemId}:${sensorId}`
+  );
 }
 
 /**
@@ -148,6 +179,10 @@ export function hasSensorFrameChannelValue(value, expectedChannel) {
 export function isSensorFrameForDisplay(value, acceptedIdentities = []) {
   const frame = parseWirePayload(value);
   if (!isObject(frame)) return false;
+
+  // 声明为 canonical 的消息必须满足完整身份契约；不能再把畸形 sensor.frame
+  // 降级成 legacy 后按同名 outputChannel 放行，否则不同展示系统会串路。
+  if (frame.type === SENSOR_FRAME_TYPE && !isSensorFrameEnvelope(frame)) return false;
 
   const outputChannel = getSensorFrameOutputChannel(frame);
   if (!outputChannel || !getSensorFrameChannelValue(frame, outputChannel)) return true;
@@ -217,12 +252,14 @@ export function adaptSensorFrameForClient(frame) {
   const stages = isObject(payload.stages) ? payload.stages : {};
   const sensorId = resolveSensorId(frame);
   const outputChannel = String(frame.outputChannel || sensorId || '').trim();
+  const serial = resolveSerialMetadata(frame, payload);
   const internal = {
     type: frame.type,
     schemaVersion: Number(frame.schemaVersion ?? frame.version),
     channelId: frame.channelId,
     displaySystemId: frame.displaySystemId,
     sensorId,
+    sensorLabel: frame.sensorLabel || sensorId,
     sensorType: frame.sensorType,
     outputChannel,
     source: frame.source,
@@ -238,6 +275,7 @@ export function adaptSensorFrameForClient(frame) {
     protocol: payload.protocol,
     history: payload.history,
     matrix: payload.matrix,
+    serial,
   };
 
   assignArray(internal, 'rawData', stages.decoded);

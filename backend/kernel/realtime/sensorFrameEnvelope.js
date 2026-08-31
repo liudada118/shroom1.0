@@ -188,6 +188,34 @@ function compactObject(value) {
 }
 
 /**
+ * 将运行时串口状态投影为可安全下发的稳定字段。
+ * channelId 用于长期寻址；path/状态只代表当前连接快照，二者不能互相替代。
+ *
+ * @param {object} data 内部帧或已成形的 sensor.frame。
+ * @returns {object|null} 串口快照；没有串口信息时为 null。
+ */
+function normalizeSerialMetadata(data = {}) {
+  const serial = data.serial && typeof data.serial === 'object' ? data.serial : {};
+  const rawParser = serial.parserChannel ?? data.parserChannel;
+  const parserChannel = rawParser && typeof rawParser === 'object'
+    ? (rawParser.id || rawParser.role || null)
+    : rawParser;
+  const baudRate = Number(serial.baudRate ?? data.baudRate);
+  const openedAt = Number(serial.openedAt);
+
+  return compactObject({
+    role: serial.role || data.serialRole,
+    portId: serial.portId || data.portId,
+    path: serial.path || data.serialPortPath,
+    baudRate: Number.isFinite(baudRate) && baudRate > 0 ? baudRate : undefined,
+    parserChannel: parserChannel == null ? undefined : String(parserChannel),
+    status: typeof serial.status === 'string' ? serial.status : undefined,
+    isOpen: typeof serial.isOpen === 'boolean' ? serial.isOpen : undefined,
+    openedAt: Number.isFinite(openedAt) && openedAt > 0 ? openedAt : undefined,
+  });
+}
+
+/**
  * 从 `channelId` 里切出 sensorId。
  *
  * `channelId` 的格式是 `displaySystemId:sensorId`，所以取第一个冒号之后的全部。
@@ -274,12 +302,14 @@ function buildSensorFrameEnvelope({
       channelId,
       displaySystemId,
       sensorId,
+      sensorLabel: String(data.sensorLabel || sensorId).trim(),
       sensorType: normalizedSensorType,
       outputChannel,
       source: data.source || source,
       sequence: Number(sequence) || 0,
       timestamp: Number.isFinite(resolvedTimestamp) ? resolvedTimestamp : Date.now(),
       quality: typeof data.quality === 'string' ? data.quality : 'good',
+      serial: normalizeSerialMetadata(data),
       payload: {
         value,
         stages: {
@@ -376,12 +406,14 @@ function buildSensorFrameEnvelope({
     channelId,
     displaySystemId,
     sensorId,
+    sensorLabel: String(data.sensorLabel || sensorId).trim(),
     sensorType: normalizedSensorType,
     outputChannel,
     source,
     sequence: Number(sequence) || 0,
     timestamp: Number.isFinite(resolvedTimestamp) ? resolvedTimestamp : Date.now(),
     quality: 'good',
+    serial: normalizeSerialMetadata(data),
     payload: {
       value,
       stages: {
@@ -409,6 +441,7 @@ module.exports = {
   SENSOR_FRAME_SCHEMA_VERSION,
   SENSOR_FRAME_TYPE,
   buildSensorFrameEnvelope,
+  normalizeSerialMetadata,
   parseFramePayload,
   toNumericArray,
 };

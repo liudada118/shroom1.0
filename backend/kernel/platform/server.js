@@ -65,8 +65,12 @@ const {
 } = require('@shroom/backend/collection/collectionService.js');
 const { createCollectionInsertQueueService } = require('@shroom/backend/collection/collectionInsertQueueService.js');
 const {
+  createChannelHistoryRowsForPlayback,
   createHistoryRowsForPlayback,
+  getChannelHistoryStats,
   getHistoryStats,
+  queryChannelHistoryRows,
+  queryHistoryChannels,
   queryHistoryDates,
   queryHistoryRows,
 } = require('../storage/history/historyQueryService');
@@ -76,6 +80,7 @@ const {
   getHistorySeries: createHistorySeries,
 } = require('../playback/historyPlaybackService');
 const { createPlaybackFrameService } = require('../playback/playbackFrameService');
+const { buildChannelPlaybackFrames } = require('../playback/channelPlaybackService');
 const { createPlaybackTimerService } = require('../playback/playbackTimerService');
 const { createCsvDownloadService } = require('../csv/csvDownloadService');
 const { createHistoryMaintenanceService } = require('../storage/history/historyMaintenanceService');
@@ -208,7 +213,22 @@ const SMALL_BED_12B_PAYLOAD_LENGTH = smallBed12B.PAYLOAD_LENGTH;
 const SMALL_BED_12B_FRAME_TAIL = smallBed12B.FRAME_TAIL;
 const HAND_GLOVE_REALTIME_SEND_INTERVAL_MS = 1000 / 60;
 const COLLECTION_MIN_FREE_BYTES = Number(process.env.SHROOM_MIN_COLLECTION_FREE_BYTES) || 2 * 1024 * 1024 * 1024;
-const COLLECTION_INSERT_SQL = "INSERT INTO matrix (data, timestamp,date) VALUES (?, ?,?)";
+const COLLECTION_INSERT_SQL = `INSERT INTO matrix (
+  data,
+  timestamp,
+  date,
+  channel_id,
+  display_system_id,
+  sensor_id,
+  sensor_label,
+  sensor_type,
+  output_channel,
+  schema_version,
+  serial_role,
+  serial_port_path,
+  baud_rate,
+  parser_channel
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 const COLLECTION_INSERT_BATCH_SIZE = Number(process.env.SHROOM_COLLECTION_INSERT_BATCH_SIZE) || 200;
 const COLLECTION_INSERT_FLUSH_INTERVAL_MS = Number(process.env.SHROOM_COLLECTION_INSERT_FLUSH_INTERVAL_MS) || 250;
 const smallBed12BCalibration = {
@@ -657,12 +677,15 @@ function flushCollectionInsertQueues() {
  * 混在一个批次里没法用同一个 prepared statement。
  *
  * @param {object} dbRef 目标数据库句柄。
- * @param {Array<unknown>} params 与 `COLLECTION_INSERT_SQL` 一一对应的三个值。
+ * @param {Array<unknown>} params 与 `COLLECTION_INSERT_SQL` 对应的值；旧三列参数会自动补空身份列。
  * @param {string} channel 通道名，出错上报时用来定位。
  * @returns {void}
  */
 function enqueueCollectionInsert(dbRef, params, channel = 'sit') {
-  collectionInsertQueueService.enqueue(dbRef, params, channel);
+  const normalizedParams = Array.isArray(params) && params.length === 3
+    ? [...params, null, null, null, null, null, String(channel || 'sit'), null, null, null, null, null]
+    : params;
+  collectionInsertQueueService.enqueue(dbRef, normalizedParams, channel);
 }
 
 /**
@@ -676,11 +699,31 @@ function enqueueCollectionInsert(dbRef, params, channel = 'sit') {
  *
  * @param {object} dbRef 目标数据库句柄。
  * @param {string} dataToStore 已序列化的帧数据（零点补偿后的）。
- * @param {string} channel 通道名。
+ * @param {string|object} channelOrIdentity 旧通道名或 canonical 通道/串口身份。
  * @returns {void}
  */
-function enqueueCollectionFrame(dbRef, dataToStore, channel) {
-  enqueueCollectionInsert(dbRef, [dataToStore, Date.now(), getCollectionState('saveTime')], channel);
+function enqueueCollectionFrame(dbRef, dataToStore, channelOrIdentity) {
+  const identity = channelOrIdentity && typeof channelOrIdentity === 'object'
+    ? channelOrIdentity
+    : null;
+  const outputChannel = String(identity?.outputChannel || channelOrIdentity || 'sit');
+  const capturedTimestamp = Number(identity?.timestamp);
+  enqueueCollectionInsert(dbRef, [
+    dataToStore,
+    Number.isFinite(capturedTimestamp) ? capturedTimestamp : Date.now(),
+    getCollectionState('saveTime'),
+    identity?.channelId || null,
+    identity?.displaySystemId || null,
+    identity?.sensorId || null,
+    identity?.sensorLabel || null,
+    identity?.sensorType || null,
+    outputChannel,
+    identity?.schemaVersion || null,
+    identity?.serialRole || null,
+    identity?.serialPortPath || null,
+    identity?.baudRate || null,
+    identity?.parserChannel || null,
+  ], identity?.channelId || outputChannel);
 }
 
 /**
@@ -709,6 +752,7 @@ const playbackStateStore = createRuntimeStateStore({
     localData: [],
     localDataBack: [],
     localDataHead: [],
+    historyChannels: [],
     nowIndex: 0,
   },
 });
@@ -832,6 +876,22 @@ const playbackFrameService = createPlaybackFrameService({
  * @returns {void}
  */
 function publishPlaybackFrame(index, options = {}) {
+  const historyChannels = getPlaybackState('historyChannels');
+  if (Array.isArray(historyChannels) && historyChannels.length > 0) {
+    const frames = buildChannelPlaybackFrames({
+      channels: historyChannels,
+      index,
+      parseStoredFrameData,
+    });
+    frames.forEach((frame) => {
+      publishRealtimeFrame(frame.outputChannel, frame.payload, {
+        source: 'playback',
+        timestamp: frame.timestamp ?? undefined,
+      });
+    });
+    return;
+  }
+
   const { sitPayload, backPayload, headPayload } = playbackFrameService.buildPayloads({
     sensorType: runtimeContext.getSensorType(),
     sitRows: getPlaybackState('localData'),
@@ -920,8 +980,93 @@ function loadSelectedHistory(dateLabel) {
       localData: [],
       localDataBack: [],
       localDataHead: [],
+      historyChannels: [],
       nowIndex: 0,
     });
+
+    // Canonical 历史先按库内真实 channelId 发现。所有 manifest 通道目前写入主库，
+    // 仍扫描三个兼容库是为了读取升级期间曾写入 db1/db2 的数据。
+    const databaseSources = [];
+    const seenDatabases = new Set();
+    [
+      { dbRole: 'sit', dbRef: sitDb },
+      { dbRole: 'back', dbRef: backDb },
+      { dbRole: 'head', dbRef: headDb },
+    ].forEach((source) => {
+      if (!source.dbRef || seenDatabases.has(source.dbRef)) return;
+      seenDatabases.add(source.dbRef);
+      databaseSources.push(source);
+    });
+
+    const canonicalByChannelId = new Map();
+    databaseSources.forEach((source) => {
+      queryHistoryChannels(source.dbRef, dateLabel, logger)
+        .filter((descriptor) => Boolean(descriptor?.channelId))
+        .forEach((descriptor) => {
+          const stats = getChannelHistoryStats(
+            source.dbRef,
+            dateLabel,
+            descriptor.channelId,
+            logger,
+          );
+          if (!stats.count) return;
+          const existing = canonicalByChannelId.get(descriptor.channelId);
+          if (!existing || stats.count > existing.stats.count) {
+            canonicalByChannelId.set(descriptor.channelId, {
+              dbRef: source.dbRef,
+              dbRole: source.dbRole,
+              descriptor: { ...descriptor, count: stats.count, dbRole: source.dbRole },
+              stats,
+            });
+          }
+        });
+    });
+
+    const canonicalSources = [...canonicalByChannelId.values()];
+    if (canonicalSources.length > 0) {
+      const maxCanonicalRows = Math.max(...canonicalSources.map((item) => item.stats.count));
+      const eagerCanonical = maxCanonicalRows <= HISTORY_EAGER_ROW_LIMIT;
+      const historyChannels = canonicalSources.map((item) => ({
+        descriptor: item.descriptor,
+        rows: createChannelHistoryRowsForPlayback(
+          item.dbRef,
+          dateLabel,
+          item.descriptor.channelId,
+          item.stats,
+          eagerCanonical,
+          logger,
+        ),
+      }));
+      patchPlaybackState({ historyChannels });
+
+      const primary = historyChannels.find((item) => item.descriptor.outputChannel === 'sit')
+        || historyChannels[0];
+      const historySeries = getHistorySeries({
+        sitRows: primary?.rows || [],
+        backRows: [],
+        file: sensorType,
+      });
+      length = maxCanonicalRows;
+      setPlaybackState('indexArr', [0, Math.max(length - 2, 0)]);
+      timeStamp = historySeries.time;
+      detectedInterval = calcDetectedInterval(timeStamp);
+      interval = detectedInterval;
+      historyArr = [0, length];
+
+      const historyChannelDescriptors = historyChannels.map((item) => item.descriptor);
+      broadcastHistorySelectionPayload({
+        length,
+        time: timeStamp,
+        historyTimeArr: timeStamp,
+        index: getPlaybackState('nowIndex'),
+        pressArr: historySeries.press,
+        areaArr: historySeries.area,
+        historyChannels: historyChannelDescriptors,
+        channelIds: historyChannelDescriptors.map((descriptor) => descriptor.channelId),
+        ...buildZeroPlaybackPayload(),
+      });
+      return;
+    }
 
     const sitStats = getHistoryStats(sitDb, dateLabel, logger);
     const backStats = isCar(sensorType) && backDb
@@ -1512,7 +1657,10 @@ const SENSOR_FRAME_ONLY_FIELDS = Object.freeze([
   'channelId',
   'displaySystemId',
   'sensorId',
+  'sensorLabel',
   'sensorType',
+  'serialRole',
+  'serial',
   'outputChannel',
   'source',
   'timestamp',
@@ -1840,6 +1988,9 @@ const csvDownloadService = createCsvDownloadService({
   }),
   getHistoryStats,
   queryHistoryRows,
+  queryHistoryChannels,
+  getChannelHistoryStats,
+  queryChannelHistoryRows,
   normalizeHistoryPressureData,
   formatMatrixTotalForFile,
   totalToN,
@@ -1858,9 +2009,8 @@ const historyMaintenanceService = createHistoryMaintenanceService({
   getDatabases: () => ({
     db: runtimeContext.getDatabase('sit'),
     db1: runtimeContext.getDatabase('back'),
+    db2: runtimeContext.getDatabase('head'),
   }),
-  isCar,
-  getSensorType: runtimeContext.getSensorType,
   publishSystemEvent,
 });
 

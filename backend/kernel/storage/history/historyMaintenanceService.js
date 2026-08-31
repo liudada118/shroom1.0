@@ -38,22 +38,22 @@ function runDelete(dbRef, dateLabel) {
 function createHistoryMaintenanceService({
   logger,
   getDatabases,
-  isCar,
-  getSensorType,
   publishSystemEvent,
 }) {
   /**
-   * 删除当前日期的历史记录；汽车类传感器会同时删除靠背库。
+   * 删除当前日期的历史记录；遍历所有已打开的兼容库，覆盖动态主库及旧三路库。
    *
    * @param {string} dateLabel 历史日期标签。
    * @returns {Promise<void>} 删除完成 Promise。
    */
   async function deleteHistory(dateLabel) {
     try {
-      const { db, db1 } = getDatabases();
-      await runDelete(db, dateLabel);
-      if (isCar(getSensorType()) && db1) {
-        await runDelete(db1, dateLabel);
+      const databases = getDatabases() || {};
+      const seen = new Set();
+      for (const dbRef of [databases.db, databases.db1, databases.db2]) {
+        if (!dbRef || seen.has(dbRef)) continue;
+        seen.add(dbRef);
+        await runDelete(dbRef, dateLabel);
       }
       publishSystemEvent({ download: 'deleteSuccess' });
     } catch (error) {

@@ -1,4 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useState,
+} from 'react';
 import { Select } from 'antd';
 import useMainWebSocket from '../../services/ws/useMainWebSocket';
 import {
@@ -21,47 +28,50 @@ import StatsWidget from './widgets/StatsWidget.jsx';
 import DisplayCanvasConfigurator from './canvasConfigurator/DisplayCanvasConfigurator.jsx';
 import {
   getManifestSourceChannel,
+  getManifestSourceChannelId,
+  getManifestSourceSensor,
   readManifestChannelFrames,
 } from './manifestSceneAdapter.js';
+import {
+  buildManifestWidgetLabel,
+  getManifestChannelFrame,
+  reduceManifestChannelFrames,
+} from './manifestChannelState.js';
 import './ManifestDisplayRenderer.css';
 
-export default function ManifestDisplayRenderer({ definition, onSidebarData }) {
-  const [frames, setFrames] = useState({ sit: [], back: [], head: [], sensor: [] });
-  const [rawFrames, setRawFrames] = useState({ sit: [], back: [], head: [], sensor: [] });
-  const [normalizedFrames, setNormalizedFrames] = useState({ sit: [], back: [], head: [], sensor: [] });
-  const [algorithmMetricFrames, setAlgorithmMetricFrames] = useState({});
-  const [selection, setSelection] = useState({});
-  const handleMessage = useCallback((message) => {
-    const routedFrames = readManifestChannelFrames(message, [
-      definition?.displaySystemId,
-      definition?.type,
-    ]);
-    if (!routedFrames.length) return;
-    setFrames((current) => routedFrames.reduce(
-      (next, frame) => ({ ...next, [frame.channel]: frame.renderValues }),
-      current,
-    ));
-    setNormalizedFrames((current) => routedFrames.reduce(
-      (next, frame) => ({ ...next, [frame.channel]: frame.normalizedValues }),
-      current,
-    ));
-    setRawFrames((current) => routedFrames.reduce(
-      (next, frame) => ({ ...next, [frame.channel]: frame.rawValues }),
-      current,
-    ));
-    setAlgorithmMetricFrames((current) => routedFrames.reduce(
-      (next, frame) => ({ ...next, [frame.channel]: frame.algorithmMetrics }),
-      current,
-    ));
-  }, [definition?.displaySystemId, definition?.type]);
-  useMainWebSocket({ onMessage: handleMessage });
-
-  const matrix = definition?.sourceMatrix || definition?.matrix;
+const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
+  definition,
+  onSidebarData,
+  enabled = true,
+}, rendererRef) {
   // schemaVersion 3 的 manifest 会带上 sensors[]；v1/v2 升格后同样有，缺失时按单通道处理。
   const sensors = useMemo(
     () => (Array.isArray(definition?.sensors) ? definition.sensors : []),
     [definition?.sensors],
   );
+  const [channelFrames, setChannelFrames] = useState({});
+  const [selection, setSelection] = useState({});
+  const pushFrames = useCallback((routedFrames) => {
+    if (!Array.isArray(routedFrames) || routedFrames.length === 0) return false;
+    setChannelFrames((current) => reduceManifestChannelFrames(current, routedFrames));
+    return true;
+  }, []);
+  const handleMessage = useCallback((message) => {
+    const routedFrames = readManifestChannelFrames(message, [
+      definition?.displaySystemId,
+      definition?.type,
+    ], sensors);
+    return pushFrames(routedFrames);
+  }, [definition?.displaySystemId, definition?.type, pushFrames, sensors]);
+  useImperativeHandle(rendererRef, () => ({
+    handleMessage,
+    pushFrame: handleMessage,
+    pushFrames,
+  }), [handleMessage, pushFrames]);
+  // Home 已持有主连接，嵌入时传 enabled=false；独立使用组件时仍可自行订阅。
+  useMainWebSocket({ onMessage: handleMessage, enabled });
+
+  const matrix = definition?.sourceMatrix || definition?.matrix;
   const matrixTransform = useMemo(
     () => definition?.matrixTransform
       || definition?.page?.matrixTransform
@@ -95,6 +105,10 @@ export default function ManifestDisplayRenderer({ definition, onSidebarData }) {
     setSelection(readDisplaySelection(profileId));
   }, [profileId]);
 
+  useEffect(() => {
+    setChannelFrames({});
+  }, [profileId]);
+
   const updateSelection = useCallback((nextSelection) => {
     setSelection(nextSelection);
     writeDisplaySelection(profileId, nextSelection);
@@ -115,13 +129,18 @@ export default function ManifestDisplayRenderer({ definition, onSidebarData }) {
     return activeProfile.canvasWidgets
       .filter((widget) => activeProfile.visibleWidgetIds.has(widget.id))
       .map((widget) => {
+      const sourceSensor = getManifestSourceSensor(widget.source, sensors);
       const channel = getManifestSourceChannel(widget.source, sensors);
-      const values = frames[channel] || [];
+      const channelId = getManifestSourceChannelId(
+        widget.source,
+        sensors,
+        definition?.displaySystemId,
+      );
+      const channelFrame = getManifestChannelFrame(channelFrames, channelId, channel);
+      const values = channelFrame?.renderValues || [];
       // 多传感器系统每一路矩阵可能都不一样，widget 要用自己那一路的矩阵，
       // 否则第二路会被按第一路的行列数摆放。找不到就沿用顶层矩阵。
-      const channelMatrix = sensors.find(
-        (sensor) => (sensor.outputChannel || sensor.id) === channel,
-      )?.matrix || matrix;
+      const channelMatrix = sourceSensor?.matrix || matrix;
       const widgetType = isDataRendererType(widget.type)
         ? activeProfile.renderer?.type || widget.type
         : widget.type;
@@ -136,30 +155,46 @@ export default function ManifestDisplayRenderer({ definition, onSidebarData }) {
         values: transformed.values,
         matrix: transformed.matrix,
         metrics: calculatePressureMetrics(values),
+        channel,
+        channelId,
+        channelFrame,
+        label: buildManifestWidgetLabel(
+          widget.label || widget.id,
+          channelFrame,
+          sourceSensor,
+        ),
       };
     });
-  }, [activeProfile, frames, matrix, matrixTransform, sensors]);
+  }, [activeProfile, channelFrames, definition?.displaySystemId, matrix, matrixTransform, sensors]);
 
   const updateCanvas = useCallback((canvas) => {
     updateSelection({ ...selection, profileId: activeProfile.profileId, canvas });
   }, [activeProfile.profileId, selection, updateSelection]);
 
+  const sidebarSensor = getManifestSourceSensor(sidebar?.source, sensors);
   const sidebarChannel = getManifestSourceChannel(sidebar?.source, sensors);
+  const sidebarChannelId = getManifestSourceChannelId(
+    sidebar?.source,
+    sensors,
+    definition?.displaySystemId,
+  );
+  const sidebarFrame = useMemo(
+    () => getManifestChannelFrame(channelFrames, sidebarChannelId, sidebarChannel),
+    [channelFrames, sidebarChannel, sidebarChannelId],
+  );
   const sidebarValues = useMemo(
-    () => normalizedFrames[sidebarChannel]?.length
-      ? normalizedFrames[sidebarChannel]
-      : frames[sidebarChannel] || [],
-    [frames, normalizedFrames, sidebarChannel],
+    () => (sidebarFrame?.normalizedValues?.length
+      ? sidebarFrame.normalizedValues
+      : sidebarFrame?.renderValues || []),
+    [sidebarFrame],
   );
   const sidebarAlgorithmMetrics = useMemo(
-    () => algorithmMetricFrames[sidebarChannel] || {},
-    [algorithmMetricFrames, sidebarChannel],
+    () => sidebarFrame?.algorithmMetrics || {},
+    [sidebarFrame],
   );
   const sidebarRawData = useMemo(
-    () => rawFrames[sidebarChannel]?.length
-      ? rawFrames[sidebarChannel]
-      : sidebarValues,
-    [rawFrames, sidebarChannel, sidebarValues],
+    () => (sidebarFrame?.rawValues?.length ? sidebarFrame.rawValues : sidebarValues),
+    [sidebarFrame, sidebarValues],
   );
   const sidebarMetrics = useMemo(
     () => calculatePressureMetrics(sidebarValues, sidebar),
@@ -173,6 +208,14 @@ export default function ManifestDisplayRenderer({ definition, onSidebarData }) {
       rawData: sidebarRawData,
       metrics: sidebarMetrics,
       algorithmMetrics: sidebarAlgorithmMetrics,
+      channelId: sidebarFrame?.channelId || sidebarChannelId,
+      outputChannel: sidebarFrame?.outputChannel || sidebarChannel,
+      sensorId: sidebarFrame?.sensorId || sidebarSensor?.sensorId || sidebarSensor?.id || '',
+      sensorLabel: sidebarFrame?.sensorLabel
+        || sidebarSensor?.sensorLabel
+        || sidebarSensor?.label
+        || '',
+      serial: sidebarFrame?.serial || sidebarSensor?.serial || null,
     });
   }, [
     onSidebarData,
@@ -180,6 +223,10 @@ export default function ManifestDisplayRenderer({ definition, onSidebarData }) {
     sidebarAlgorithmMetrics,
     sidebarMetrics,
     sidebarRawData,
+    sidebarChannel,
+    sidebarChannelId,
+    sidebarFrame,
+    sidebarSensor,
     sidebarValues,
   ]);
 
@@ -224,16 +271,23 @@ export default function ManifestDisplayRenderer({ definition, onSidebarData }) {
         renderers={profileModel.renderers}
       >
         <div className="manifest-widget-grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
-          {widgetModels.map(({ widget, values, matrix: widgetMatrix, metrics }) => {
+          {widgetModels.map(({
+            widget,
+            values,
+            matrix: widgetMatrix,
+            metrics,
+            channelId,
+            label,
+          }) => {
             if (widget.type === 'pressureStats') {
-              return <StatsWidget key={widget.id} label={widget.label || widget.id} metrics={metrics} columnSpan={widget.columnSpan} />;
+              return <StatsWidget key={widget.id} label={label} metrics={metrics} columnSpan={widget.columnSpan} />;
             }
             if (['heatmap', 'matrix', 'raw2d'].includes(widget.type)) {
               if (coordinatePointLayout) {
                 return (
                   <CoordinatePointWidget
                     key={widget.id}
-                    label={widget.label || widget.id}
+                    label={label}
                     layout={coordinatePointLayout}
                     values={values}
                     showValues={widget.type !== 'heatmap'}
@@ -246,7 +300,7 @@ export default function ManifestDisplayRenderer({ definition, onSidebarData }) {
               return (
                 <MatrixWidget
                   key={widget.id}
-                  label={widget.label || widget.id}
+                  label={label}
                   matrix={widgetMatrix}
                   values={values}
                   showValues={widget.type !== 'heatmap' && values.length <= 1024}
@@ -266,10 +320,10 @@ export default function ManifestDisplayRenderer({ definition, onSidebarData }) {
               >
                 <RendererHost
                   rendererId={widget.type}
-                  label={widget.label || widget.id}
+                  label={label}
                   params={activeProfile.renderer?.params}
                   values={values}
-                  channel={getManifestSourceChannel(widget.source, sensors)}
+                  channel={channelId || getManifestSourceChannel(widget.source, sensors)}
                   local
                 />
               </div>
@@ -279,4 +333,6 @@ export default function ManifestDisplayRenderer({ definition, onSidebarData }) {
       </DisplayCanvasConfigurator>
     </div>
   );
-}
+});
+
+export default ManifestDisplayRenderer;

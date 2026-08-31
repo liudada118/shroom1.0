@@ -2,6 +2,44 @@
 
 > 最后更新于：2026-08-31
 
+## 2026-08-31 多串口业务身份、动态存储、下载与回放
+
+多串口不再靠数组下标或 `db/db1/db2` 猜身份。schema v3 manifest 在 `sensors[]` 的每一路
+显式声明稳定 `id`、业务 `label`、`outputChannel` 与 `stored`；canonical 主键固定为
+`{displaySystemId}:{sensorId}`。Builder 的每个串口都有“业务名称”输入，保存时直接生成 v3
+`sensors[]`，并保留首路 `sensor/protocol/files/algorithm` 作为旧读取方的兼容投影。v1/v2
+仍可用 `sensor.ports[] + sensor.portLabels`，例如 `{ "sit": "左手", "back": "右手" }`，
+validator 会升格成同一结构。`sensorLabel` 始终来自该路 `label`，缺省只回退 `sensorId`，不会
+按 COM 号、串口顺序或采集先后猜“左手/右手/座椅/靠背”。
+
+Runtime 按 `serialRole === sensor.id` 绑定物理串口。在帧进入算法前一次性冻结采样时间与
+SerialManager 状态，并附带 `serial.role/portId/path/baudRate/parserChannel/status/isOpen/openedAt`；
+即使异步算法运行期间 COM 重连，旧帧仍属于入口时的物理端口和时间。异构 sensor.type 共享展示
+系统激活键，不会因第二路类型不同被误拦。`sensor.frame`、SDK normalize、前端 registry 和
+manifest adapter 全程保留 `sensorLabel + channelId + serial`。canonical 帧必须带匹配的
+`displaySystemId/sensorId/channelId`，且只读 `payload.value/stages`；只有 legacy 消息才回退顶层
+`sitData/backData/headData`。
+
+主界面只保留一个 WebSocket，由 Home 把已路由帧推给 `ManifestDisplayRenderer`；渲染器以完整
+`channelId` 为状态键，所以左手、右手、靠背、座椅乱序到达或单路重连都不会互相覆盖。Builder
+为每个 sensor 至少生成一个独立 source 的数据 widget，已有合法 source 原样保留；widget 标题
+显示业务标签和当前 COM。`sidebar.source` 只选择侧栏统计的一路，不再决定其它通道是否接收。
+
+SQLite `matrix` 表新增可空的 channel/display/sensor/serial 身份列，并建立只覆盖 canonical 行的
+`(date, channel_id, id)` partial index。所有 manifest 通道统一写入主库，以 `channel_id` 精确
+隔离；`NULL channel_id` 严格表示旧三通道历史。历史查询动态发现当天真实通道，兼容迁移前把
+身份留在 `matrix.data` JSON 中的帧，不做数 GB 旧库的全量回填。删除历史会遍历当前型号已打开的
+所有唯一数据库句柄。
+
+CSV 服务先动态发现通道，再按完整 `channelId` 精确导出；manifest 页面会显式提交当前系统的
+全部 channelId，避免同一天混入其它展示系统。文件名包含展示系统、`sensorLabel`、`sensorId`
+和 channel hash；每一行仍保留旧六列，同时追加 channel、label、sensorType、timestamp/schema
+与实际串口字段。服务端广播 `downloadArtifacts[]` 和缺失通道，前端按 `channelId` 合并进度，
+显示角色、全部使用过的 COM 路径、波特率与 parser，例如“左手 · glove:left-hand · COM3 →
+COM8”；旧 `downloadFiles[]` 仅作兼容，不再依据文件数组顺序推断身份。回放同样按动态通道集合
+发布，各通道长度不同时只跳过本帧缺失的通道，不会让一条短通道截断其它通道。SDK 契约同步
+升级为 schema v3，公开 `sensors[]` 与 `sensorLabel/serial` 帧字段。
+
 ## 2026-08-31 `backend/` 注释回改成短式（5 批，进行中）
 
 批 4 结束时问过用户「批 1–3 已提交的长版本要不要统一成短式」，用户答**回改**。所以这一
@@ -2511,6 +2549,7 @@ flowchart LR
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-31 | 多串口业务身份、动态存储、下载与回放统一 | `sensors[].label`（Builder 兼容入口为 `sensor.portLabels`）定义左手/右手/座椅/靠背；Runtime 每帧附实际串口快照；SQLite 用 nullable identity 列和 channel partial index 兼容旧库；任意 manifest 通道统一按 canonical `channelId` 入库、查询、CSV 和回放；前端按 channelId 隔离并展示 `sensorLabel + COM`，旧三通道与 `downloadFiles` 仅保留兼容。后端 57 个测试文件、客户端 39 个文件 / 421 条、前端 SDK 30 个文件 / 491 条、Electron SQLite 迁移测试、lint 与生产构建通过。 |
 | 2026-08-31 | 注释回改成短式 批 A（`runtime/` + `extensions/`） | 按你的「回改」决定，把批 1–3 的多段散文压成与批 4 一致的短式（一行干什么 + 每条一行的要点 + `@param`/`@returns`）。只动 **≥12 行的块**（全量 313 块 / 5672 行 / 65 个文件），6–10 行的 JSDoc 一字不动。机制推演不丢，移到本文档的批次小节与台账。批 A：6 个文件 +45/-71，覆盖率未降，骨架逐 token 不变，55 个测试全过。余下 B（`extension-host/`）、C（`kernel/` 非 `platform/`）、D（`kernel/platform/` 除 `server.js`）、E（`server.js`，33 块）四批。 |
 | 2026-08-31 | `backend/` 函数级注释批 4/4（`tests/` + `legacyDataUtils.js`），四批全部完成 | `tests/` 26 个文件 44 → 0（100%），`legacyDataUtils.js` 3 → 0，全后端 85% → 91%。27 个文件 +432/-0，逐 token 代码骨架 0 处不一致，55 个测试文件全过。**风格中途按你的反馈改成短式**（一行干什么 + 一两行用法要点 + `@param`/`@returns`），批 4 的长版本已缩写、**批 1–3 已提交的长版本未回改**（待你决定是否统一）。测试注释写的是「为什么必须这样 fake」：零点扣减长度不一致时原样返回、被丢弃的清零帧不能被兜底层当旧协议帧、`FakeWebSocket` 必须异步 open、定时器 harness 必须 restore、换掉外层 store 再断言才能证明是现取而非快照、示例与预设目录守的是打包后二开路径（一个坏 JSON 只能让自己失效）。`legacyDataUtils.js` 三个名字全都名不副实：`isCar` 实为「是不是多通道」且是**硬编码数组不读 manifest**、`dedupli` 返回结构与入参不同导致前端 `timeArr` 结构随型号变、`totalToN` 已是恒等函数所以三处 `1.3` 是死参数（恢复标定会改已入库历史的显示值）。`openWeb.js` 的 71 个按原定边界仍不注释。 |
 | 2026-08-31 | `kernel/` 26 行乱码注释还原 | UTF-8 被按 GBK 读又存回造成的乱码，按用户决定单独一个提交。每处丢了两个字符（被截断汉字的第三字节 + 紧跟的空格或换行），所以先按留下的两个字节把候选缩到 64 个再按上下文定字，而不是猜词；被吞掉换行的那 5 处 JSDoc 按原结构拆回多行。检出判据由字表改为可逆性判定，全 `backend/` 复扫无残余（8 条命中已核对为假阳性）。还原出的「三端口」是过期说法，只在下方加注指向单端口的实现说明，未改写原句。 |
@@ -2901,7 +2940,7 @@ shroom1.0/
 | 目录/文件 | 主要功能 |
 | :--- | :--- |
 | `/app/electron/index.js` | Electron 主进程入口，窗口管理、IPC 桥梁、安全配置（contextIsolation + sandbox），开发模式下会从 Vite 输出中识别并校验真实本地地址，避免误连其他 `localhost:3000` 页面 |
-| `/client/src/components/title/` | 顶部标题栏组件，负责品牌字标、传感器切换、采集/回放控制、语言切换与设置抽屉 |
+| `/client/src/components/title/` | 顶部标题栏组件，负责品牌字标、传感器切换、采集/回放控制、语言切换与设置抽屉；`csvDownloadArtifacts.js` 按 canonical `channelId` 合并动态通道导出结果并保留旧 `downloadFiles` 兼容 |
 | `/app/electron/preload.js` | Electron 预加载脚本，建立渲染进程与主进程之间的安全 IPC 通道 |
 | `/backend/runtime/index.js` | Electron 固定后端桥，保持 `openServer`、`shutdownServer`、`getWsServer`、`handleCommand` 等稳定导出 |
 | `/backend/kernel/` | 应用稳定链路：平台启动、串口装配、存储、回放、CSV、实时分发和算法通道 |
@@ -3081,6 +3120,7 @@ flowchart LR
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-31 | codeOpi | 多串口业务身份贯穿采集、前端、下载与回放 | `sensors[].label` / `sensor.portLabels` 明确定义业务名称，`channelId` 作稳定主键，`serial` 保存每帧实际 COM；任意通道统一按 identity 列入库并动态查询、导出、回放，NULL 身份兼容旧三通道；文件和界面同时显示业务标签、channelId 与串口路径。后端/客户端/SDK/SQLite 迁移及构建验证通过。 |
 | 2026-08-31 | codeOpi | 注释回改成短式 批 A（`runtime/` + `extensions/`） | 用户确认「回改」后启动：把批 1–3 的长注释统一成批 4 的短式（一行干什么 + 每条一行的要点 + `@param`/`@returns`）。只改 ≥12 行的块，全量 313 块 / 5672 行 / 65 个文件，分 A–E 五批。批 A 6 个文件 +45/-71，覆盖率未降，代码骨架逐 token 不变，55 个测试文件全过。 |
 | 2026-08-31 | codeOpi | `backend/` 函数级注释批 4/4：`tests/` + `legacyDataUtils.js`（四批收官） | `tests/` 44 → 0（100%）、`legacyDataUtils.js` 3 → 0，全后端 85% → 91%（剩 71 个是刻意不做的 `openWeb.js`、6 个是已知假阳性）。27 个文件 +432/-0，逐 token 代码骨架不变，55 个测试文件全过。注释风格中途按用户反馈改成短式，批 1–3 的长版本未回改。查实写入的三条：`isCar` 实为多通道判定且靠硬编码数组（新增型号必须改这个数组）、`dedupli` 的输出结构与入参不同使前端 `timeArr` 结构随型号变、`totalToN` 已退化为恒等函数（三处 `1.3` 是死参数，恢复标定会改已入库历史的显示值）。 |
 | 2026-08-31 | codeOpi | `kernel/` 26 行乱码注释还原 | 批 3 的收尾，单独一个提交。乱码是 UTF-8 被按 GBK 读又存回造成的，且每处额外丢了两个字符，所以还原需要按留下的字节缩小候选集再按上下文定字（不是纯机械变换）。检出判据从字表改成可逆性判定后全 `backend/` 无残余。还原出的过期说法「三端口」只加注不改写。 |
@@ -3476,6 +3516,7 @@ flowchart LR
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-31 | codeOpi | 缺陷修复 / 契约强化 | 多串口统一使用完整 `channelId`，业务名称由 `sensors[].label`（旧 Builder 为 `sensor.portLabels`）定义；实时帧携带实际串口快照，SQLite/历史查询/CSV/回放不再按数组或固定三库猜身份；前端按通道隔离并展示业务标签、channelId、COM 路径，同时兼容旧顶层字段和 `downloadFiles`。 |
 | 2026-08-31 | codeOpi | 优化重构 | 注释回改成短式 批 A：`backend/runtime/` + `backend/extensions/` 共 6 个文件 +45/-71，把多段散文压成「一行干什么 + 每条一行的要点」。只改 ≥12 行的块（全量 313 块 / 65 个文件，分 A–E 五批），覆盖率未降，骨架逐 token 不变，55 个测试全过。 |
 | 2026-08-31 | codeOpi | 文档更新 | `backend/tests/` 26 个文件与 `backend/compatibility/legacyDataUtils.js` 补齐函数注释（44+3 → 0），全后端覆盖率 85% → 91%，`backend/` 函数级注释四批全部完成。27 个文件 +432/-0 纯注释，逐 token 代码骨架不变，55 个测试文件全过。注释风格按用户反馈改为短式（一行干什么 + 一两行用法要点 + `@param`/`@returns`）；批 1–3 已提交的长版本未回改。 |
 | 2026-08-31 | codeOpi | 文档更新 | 还原 `backend/kernel/` 里 26 行乱码注释（`serverLifecycleService.js` 20 / `webSocketHandlerFactory.js` 5 / `server.js` 1），+34/-26 纯注释，代码骨架逐 token 不变，55 个测试文件全过。全 `backend/` 复扫无残余乱码。 |

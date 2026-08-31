@@ -87,7 +87,7 @@ function normalizeChannelList(channels = []) {
 
 /**
  * 把 manifest 声明和 SerialManager 已注册端口合并成实时通道元数据。
- * manifest 放在后面，若同一 channelId 同时存在，会用它的完整身份覆盖运行态占位信息。
+ * manifest 提供稳定业务身份，managed status 提供当前物理 COM 与连接状态；两者不能互相覆盖。
  *
  * @param {object} options 元数据来源。
  * @param {string} options.sensorType 当前传感器类型。
@@ -104,34 +104,68 @@ function buildRealtimeChannelMetadata({
   const manifestList = Array.isArray(manifestChannels) ? manifestChannels : [];
   const managedList = Array.isArray(managedChannels) ? managedChannels : [];
   const manifestByRole = new Map(manifestList.map((channel) => [channel.serialRole, channel]));
-  const managedDescriptors = managedList.map((status) => {
-    const serialRole = status.role || status.portId;
-    return manifestByRole.get(serialRole) || {
-      channelId: `${sensorType || 'legacy'}:${serialRole}`,
-      displaySystemId: sensorType || 'legacy',
-      sensorId: serialRole,
-      serialRole,
-      outputChannel: status.outputChannel || serialRole,
-      label: status.label || serialRole,
-      legacy: true,
-    };
-  });
+  const managedByRole = new Map(managedList.map((status) => [status.role || status.portId, status]));
+  const unmanagedDescriptors = managedList
+    .filter((status) => !manifestByRole.has(status.role || status.portId))
+    .map((status) => {
+      const serialRole = status.role || status.portId;
+      return {
+        channelId: `${sensorType || 'legacy'}:${serialRole}`,
+        displaySystemId: sensorType || 'legacy',
+        sensorId: serialRole,
+        serialRole,
+        outputChannel: status.outputChannel || serialRole,
+        label: status.label || serialRole,
+        legacy: true,
+        ...status,
+      };
+    });
+  const manifestDescriptors = manifestList.map((channel) => ({
+    ...channel,
+    serialStatus: managedByRole.get(channel.serialRole) || null,
+  }));
 
-  [...managedDescriptors, ...manifestList].forEach((channel) => {
+  [...unmanagedDescriptors, ...manifestDescriptors].forEach((channel) => {
     const serialRole = normalizeChannel(channel?.serialRole || channel?.sensorId, '');
     const outputChannel = normalizeChannel(channel?.outputChannel || serialRole, '');
     const channelId = normalizeChannel(channel?.channelId || channel?.id, '')
       || `${normalizeChannel(channel?.displaySystemId || sensorType, 'legacy')}:${serialRole}`;
     if (!channelId) return;
+    const status = channel.serialStatus || channel;
+    const rawParserChannel = status?.parserChannel ?? channel?.parserChannel;
+    const parserChannel = rawParserChannel && typeof rawParserChannel === 'object'
+      ? (rawParserChannel.id || rawParserChannel.role || null)
+      : (rawParserChannel || null);
+    const sensorLabel = channel.sensorLabel || channel.label || channel.sensorId || serialRole;
+    const serial = {
+      role: serialRole,
+      portId: status?.portId || serialRole,
+      path: status?.path || null,
+      baudRate: Number(status?.baudRate || channel?.baudRate || channel?.protocol?.baudRate) || null,
+      parserChannel,
+      isOpen: status?.isOpen === true,
+      status: status?.status || 'unregistered',
+      openedAt: status?.openedAt || null,
+      updatedAt: status?.updatedAt || null,
+      lastError: status?.lastError || null,
+    };
     channelsById.set(channelId, {
       channelId,
-      name: channel.label || `${channelId} realtime channel`,
+      name: sensorLabel || `${channelId} realtime channel`,
       port: SHARED_WEBSOCKET_PORT,
       displaySystemId: channel.displaySystemId || sensorType || 'legacy',
       sensorId: channel.sensorId || serialRole,
+      sensorLabel,
       serialRole,
       outputChannel,
       sensorType: channel.sensorType || sensorType,
+      serial,
+      serialPortPath: serial.path,
+      baudRate: serial.baudRate,
+      parserChannel: serial.parserChannel,
+      isOpen: serial.isOpen,
+      status: serial.status,
+      openedAt: serial.openedAt,
       transport: 'websocket',
       messageType: SENSOR_FRAME_TYPE,
       schemaVersion: SENSOR_FRAME_SCHEMA_VERSION,

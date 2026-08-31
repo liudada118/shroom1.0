@@ -8,17 +8,12 @@ const {
 /**
  * 把 manifest 声明的 parser 通道解析成 parser 管理器认识的通道标识。
  *
- * 三条路径按优先级：
- * 1. **自带协议就现场注册**：manifest 同时给了 `protocol` 和 `id` 时，说明这是
- *    二开自定义的协议，直接注册一个新通道 —— 这是扩展能引入新串口协议的入口。
- * 2. **按值直查**：`serialParserManager.channels` 是个枚举式映射
- *    （形如 `{ SIT: 'sit' }`），先看 role 是否本身就是一个合法的通道值。
- * 3. **按键名兜底**：把 role 里的连字符和空格换成下划线再转大写去查键
- *    （`'small-bed'` → `'SMALL_BED'`），兼容 manifest 用短横线写、常量用下划线
- *    大写的两套命名习惯。
+ * 三条路径按优先级：① **自带协议现场注册** —— manifest 同时给了 `protocol` 和 `id` 时直接
+ * 注册新通道，这是扩展引入新串口协议的入口；② **按值直查** `serialParserManager.channels`
+ * （枚举映射，形如 `{ SIT: 'sit' }`）；③ **按键名兜底**，连字符空格换下划线再转大写
+ * （`'small-bed'` → `'SMALL_BED'`），兼容 manifest 与常量的两套命名习惯。
  *
- * `parserChannel` 既接受对象也接受裸字符串（第 1 行的 `?.role || parserChannel`）——
- * 迁移期两种写法都在用。
+ * `parserChannel` 对象和裸字符串都接受（`?.role || parserChannel`），迁移期两种写法都在用。
  *
  * @param {{channels?: Record<string, string>, registerChannel?: Function}} serialParserManager parser 管理器。
  * @param {{role?: string, id?: string, protocol?: *}|string} parserChannel manifest 声明的通道。
@@ -90,13 +85,18 @@ function bindDisplaySystemRuntimeChannels({
     const bindingBase = {
       id: channel.id,
       displaySystemId: channel.displaySystemId,
+      sensorId: channel.sensor?.id || channel.serialRole,
+      sensorLabel: channel.label || channel.serialRole,
+      activationSensorType: channel.activationSensorType || channel.sensor?.type || null,
       serialRole: channel.serialRole,
+      baudRate: channel.baudRate || channel.protocol?.baudRate || null,
       sensorType: channel.sensor?.type || channel.parserChannel?.sensorType || null,
       runtimeMode,
       metadata: { ...(channel.metadata || {}) },
       runtimeChannel: channel,
       serialStatus,
       outputChannel: channel.outputChannel || channel.serialRole,
+      stored: channel.stored !== false,
     };
 
     try {
@@ -104,40 +104,58 @@ function bindDisplaySystemRuntimeChannels({
       const outputPublisher = resolveOutputPublisher(frameOutputPipeline, bindingBase.outputChannel);
       const frameProcessor = createFrameProcessor({ runtimeChannel: channel, zeroStateStore });
 
+      /** 在算法处理前冻结本帧的采样时刻和物理串口身份。 */
+      function captureFrameContext() {
+        const timestamp = Date.now();
+        const currentSerialStatus = serialManager?.getStatus?.(channel.serialRole) || null;
+        return {
+          timestamp,
+          serial: {
+            role: channel.serialRole,
+            portId: currentSerialStatus?.portId || channel.serialRole,
+            path: currentSerialStatus?.path || null,
+            baudRate: Number(currentSerialStatus?.baudRate || channel.baudRate) || null,
+            parserChannel: currentSerialStatus?.parserChannel || parserChannel || null,
+            status: currentSerialStatus?.status || null,
+            isOpen: currentSerialStatus?.isOpen === true,
+            openedAt: currentSerialStatus?.openedAt || null,
+          },
+        };
+      }
+
       /**
-       * 把处理完的帧发出去，并把「发没发、为什么没发」一起返回。
-       *
-       * 两种不发的情况都返回 `published: false` + `reason` 而**不抛错**：
-       * 调用方是每一帧都会跑到的热路径，抛错等于每帧一个异常。带 reason 返回
-       * 让上层能在诊断里说清是「shadow 模式本来就不发」还是「没有可用的发布器」——
-       * 这两件事的处置完全不同（前者正常，后者是装配错）。
-       *
-       * `getRuntimeMode({ runtimeMode })` 这个包一层的写法是为了复用策略模块里的
-       * 归一逻辑（去空白 + 转小写），不是多余的对象构造 —— manifest 里写
-       * `'Shadow'` 或 `' shadow '` 也要能判出来。
+       * 把处理完的帧与入口快照合并后发布；shadow 或缺发布器时返回明确 reason。
        *
        * @param {object} processedFrame 处理器输出的帧。
+       * @param {{timestamp: number, serial: object}} frameContext 帧入口快照。
        * @returns {{published: boolean, processedFrame: object, reason?: string, output?: *}} 发布结果。
        */
-      function publishProcessedFrame(processedFrame) {
+      function publishProcessedFrame(processedFrame, frameContext) {
+        const frameWithSerial = {
+          ...processedFrame,
+          timestamp: frameContext.timestamp,
+          serialRole: channel.serialRole,
+          serial: frameContext.serial,
+        };
+
         if (getRuntimeMode({ runtimeMode }) === 'shadow') {
           return {
             published: false,
-            processedFrame,
+            processedFrame: frameWithSerial,
             reason: 'runtime mode shadow does not publish output',
           };
         }
         if (!outputPublisher) {
           return {
             published: false,
-            processedFrame,
+            processedFrame: frameWithSerial,
             reason: 'output publisher is not available',
           };
         }
         return {
           published: true,
-          processedFrame,
-          output: outputPublisher(processedFrame),
+          processedFrame: frameWithSerial,
+          output: outputPublisher(frameWithSerial),
         };
       }
 
@@ -155,10 +173,13 @@ function bindDisplaySystemRuntimeChannels({
        * @returns {object|Promise<object>} 发布结果，见 publishProcessedFrame。
        */
       function handleFrame(frame) {
+        // 物理串口和采样时刻必须在算法开始前冻结。异步算法完成前设备可能重连到另一 COM，
+        // 若 resolve 后再读状态，就会把旧帧错误记到新串口上。
+        const frameContext = captureFrameContext();
         const processedFrame = frameProcessor.processFrame(frame);
         return processedFrame && typeof processedFrame.then === 'function'
-          ? processedFrame.then(publishProcessedFrame)
-          : publishProcessedFrame(processedFrame);
+          ? processedFrame.then((result) => publishProcessedFrame(result, frameContext))
+          : publishProcessedFrame(processedFrame, frameContext);
       }
 
       return {

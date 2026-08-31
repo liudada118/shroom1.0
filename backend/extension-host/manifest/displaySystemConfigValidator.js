@@ -10,11 +10,6 @@ const {
 const DISPLAY_SYSTEM_SCHEMA_VERSION = 3;
 const SUPPORTED_DISPLAY_SYSTEM_SCHEMA_VERSIONS = Object.freeze([1, 2, 3]);
 
-/**
- * 采集存储只有 sit/back/head 三张表，其它输出通道仅实时下发、不入库。
- */
-const STORED_OUTPUT_CHANNELS = Object.freeze(['sit', 'back', 'head']);
-
 const ALGORITHM_TYPES = Object.freeze({
   NONE: 'none',
   JSON: 'json',
@@ -89,10 +84,15 @@ function upgradeSensorsFromLegacyConfig(config) {
   const ports = Array.isArray(sensor.ports) && sensor.ports.length > 0
     ? sensor.ports
     : ['default'];
+  const portLabels = sensor.portLabels
+    && typeof sensor.portLabels === 'object'
+    && !Array.isArray(sensor.portLabels)
+    ? sensor.portLabels
+    : {};
 
   return ports.map((port) => ({
     id: port,
-    label: sensor.label || null,
+    label: portLabels[port] || sensor.label || null,
     outputChannel: port,
     type: sensor.type,
     matrix: sensor.matrix,
@@ -169,9 +169,9 @@ function validateSensorEntry(rawSensor, { source, index, schemaVersion, label })
       },
       protocol: normalizeProtocolConfig(sensor.protocol),
       algorithm,
-      stored: STORED_OUTPUT_CHANNELS.includes(
-        isNonEmptyString(sensor.outputChannel) ? sensor.outputChannel.trim() : id,
-      ),
+      // Display System 统一按 channelId 入库，任意 outputChannel 都可下载/回放。
+      // 仅显式写 stored:false 时关闭这一路采集。
+      stored: sensor.stored !== false,
     },
   };
 }

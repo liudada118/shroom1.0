@@ -20,7 +20,12 @@ const legacyShape = validateDisplaySystemConfig({
   name: 'Legacy Demo',
   version: '1.0.0',
   schemaVersion: 2,
-  sensor: { type: 'seat', matrix: { rows: 2, cols: 3 }, ports: ['sit', 'back'] },
+  sensor: {
+    type: 'seat',
+    matrix: { rows: 2, cols: 3 },
+    ports: ['sit', 'back'],
+    portLabels: { sit: '座椅', back: '靠背' },
+  },
   files: { lineOrder: 'line-order.json', pointOrder: 'point-order.json' },
   protocol: {
     baudRate: 921600,
@@ -33,6 +38,8 @@ assert.strictEqual(legacyShape.ok, true, legacyShape.errors.join('; '));
 assert.strictEqual(legacyShape.value.sensors.length, 2);
 assert.strictEqual(legacyShape.value.sensors[0].id, 'sit');
 assert.strictEqual(legacyShape.value.sensors[1].id, 'back');
+assert.strictEqual(legacyShape.value.sensors[0].label, '座椅');
+assert.strictEqual(legacyShape.value.sensors[1].label, '靠背');
 // 升格后每一路都继承顶层矩阵/协议/文件，行为与旧的「共用一份」完全一致。
 assert.deepStrictEqual(legacyShape.value.sensors[1].matrix, { rows: 2, cols: 3 });
 assert.strictEqual(legacyShape.value.sensors[1].protocol.framing.frameLength, 6);
@@ -146,6 +153,10 @@ assert.deepStrictEqual(runtimeDefinition.parserChannels[1].matrix, {
 const planned = attachRuntimeChannelPlan(runtimeDefinition);
 assert.strictEqual(planned.runtimeChannelCount, 2);
 assert.strictEqual(planned.runtimeChannels[1].serialRole, 'armLeft');
+assert.strictEqual(planned.runtimeChannels[0].sensor.id, 'seatPad');
+assert.strictEqual(planned.runtimeChannels[1].sensor.id, 'armLeft');
+assert.strictEqual(planned.runtimeChannels[0].activationSensorType, 'seat');
+assert.strictEqual(planned.runtimeChannels[1].activationSensorType, 'seat');
 assert.strictEqual(planned.runtimeChannels[1].outputChannel, 'armLeft');
 assert.strictEqual(planned.runtimeChannels[1].protocol.framing.type, 'delimiter');
 assert.deepStrictEqual(planned.runtimeChannels[1].sensor.matrix, {

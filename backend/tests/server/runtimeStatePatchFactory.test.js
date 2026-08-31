@@ -29,12 +29,14 @@ patchers.applyRuntimeCommandPatch({
   collectOptions: { frequencyMode: 'serial' },
   file: 'smallBed12B',
   localData: [1, 2],
+  historyChannels: [{ channelId: 'demo:leftHand' }],
   serialport: { a: 1 },
 });
 
 assert.strictEqual(directValue, 'smallBed12B');
 assert.deepStrictEqual(collectionState.collectOptions, { frequencyMode: 'serial' });
 assert.deepStrictEqual(playbackState.localData, [1, 2]);
+assert.deepStrictEqual(playbackState.historyChannels, [{ channelId: 'demo:leftHand' }]);
 assert.deepStrictEqual(serialState.serialport, { a: 1 });
 
 patchers.applySerialCommandPatch({

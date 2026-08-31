@@ -46,6 +46,13 @@ import { applyMatrixTransform } from '../../displays/matrixTransform';
 import { DEFAULT_COLORMAP_ID } from './colormaps';
 import RendererHost from '../../renderers/RendererHost.jsx';
 import { readManifestChannelFrames } from './manifestSceneAdapter.js';
+import {
+  buildBuilderPortViews,
+  buildBuilderSensorPlan,
+  buildBuilderSensors,
+  buildPortLabels,
+  ensureBuilderPortWidgets,
+} from './builderMultiSensor.js';
 import './DisplaySystemBuilder.css';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:19245';
@@ -58,6 +65,7 @@ const DEFAULT_VALUES = {
   version: '1.0.0',
   sensorType: '',
   ports: ['sit'],
+  portLabels: {},
   transportType: 'binary',
   baudRate: 1000000,
   framingType: 'fixedLength',
@@ -454,16 +462,32 @@ function inferSerialTemplate(manifest = {}) {
   if (manifest.metadata?.builder?.serialTemplate) {
     return manifest.metadata.builder.serialTemplate;
   }
-  if (manifest.protocol?.framing?.type === 'fixedLength') {
+  const protocol = manifest.sensors?.[0]?.protocol || manifest.protocol || {};
+  if (protocol.framing?.type === 'fixedLength') {
     return 'pressure-fixed-length';
   }
-  return manifest.protocol?.decoding?.valueType?.includes('16')
+  return protocol.decoding?.valueType?.includes('16')
     ? 'pressure-adc16-tail'
     : 'pressure-u8-tail';
 }
 
 function buildFormValues(editor) {
   const manifest = editor?.manifest || {};
+  const declaredSensors = Array.isArray(manifest.sensors) && manifest.sensors.length
+    ? manifest.sensors
+    : [];
+  const primarySensor = declaredSensors[0] || {};
+  const manifestPorts = declaredSensors.length
+    ? declaredSensors.map((sensor) => sensor.id).filter(Boolean)
+    : (manifest.sensor?.ports || ['sit']);
+  const manifestPortLabels = {
+    ...(manifest.sensor?.portLabels || {}),
+    ...Object.fromEntries(declaredSensors
+      .filter((sensor) => sensor?.id)
+      .map((sensor) => [sensor.id, sensor.label || sensor.id])),
+  };
+  const primaryProtocol = primarySensor.protocol || manifest.protocol || {};
+  const primaryAlgorithm = primarySensor.algorithm || manifest.algorithm || {};
   const display = manifest.display || {};
   const profile = display.profiles?.find((item) => item.id === display.defaultProfile)
     || display.profiles?.[0]
@@ -484,7 +508,7 @@ function buildFormValues(editor) {
   });
   const selectedVisualizationAlgorithm = display.visualizationAlgorithms
     ?.find((item) => item.id === profile.visualizationAlgorithm) || {};
-  const algorithmType = manifest.algorithm?.type || 'none';
+  const algorithmType = primaryAlgorithm.type || 'none';
   const isCodeAlgorithm = algorithmType === 'js' || algorithmType === 'python';
   const matrixTransform = display.matrixTransform || { type: 'none', factor: 1 };
   let pointOrderInfo = null;
@@ -508,25 +532,26 @@ function buildFormValues(editor) {
     id: manifest.id || '',
     name: manifest.name || '',
     version: manifest.version || '1.0.0',
-    sensorType: manifest.sensor?.type || '',
+    sensorType: primarySensor.type || manifest.sensor?.type || '',
     serialTemplate: inferSerialTemplate(manifest),
     displayTemplate: manifest.metadata?.builder?.displayTemplate
       || inferMatrixDisplayModeId(profile.renderer),
-    ports: manifest.sensor?.ports || ['sit'],
+    ports: manifestPorts,
+    portLabels: buildPortLabels(manifestPorts, manifestPortLabels),
     transportType: manifest.metadata?.builder?.transportType || 'binary',
-    baudRate: manifest.protocol?.baudRate || 1000000,
-    framingType: manifest.protocol?.framing?.type || 'fixedLength',
-    frameLength: manifest.protocol?.framing?.frameLength || 1024,
-    delimiter: formatByteSequence(manifest.protocol?.framing?.delimiter),
-    dataBits: manifest.protocol?.decoding?.valueType?.includes('16') ? 12 : 8,
-    valueType: manifest.protocol?.decoding?.valueType || 'uint8',
-    byteOffset: manifest.protocol?.decoding?.byteOffset || 0,
-    valueCount: pointOrderInfo?.pointCount || manifest.protocol?.decoding?.valueCount || null,
-    validationHeader: formatByteSequence(manifest.protocol?.validation?.header),
-    checksumType: manifest.protocol?.validation?.checksum?.type || 'none',
-    checksumByteOffset: manifest.protocol?.validation?.checksum?.byteOffset ?? -1,
-    checksumRangeStart: manifest.protocol?.validation?.checksum?.range?.[0] ?? 0,
-    checksumRangeEnd: manifest.protocol?.validation?.checksum?.range?.[1] ?? -1,
+    baudRate: primaryProtocol.baudRate || 1000000,
+    framingType: primaryProtocol.framing?.type || 'fixedLength',
+    frameLength: primaryProtocol.framing?.frameLength || 1024,
+    delimiter: formatByteSequence(primaryProtocol.framing?.delimiter),
+    dataBits: primaryProtocol.decoding?.valueType?.includes('16') ? 12 : 8,
+    valueType: primaryProtocol.decoding?.valueType || 'uint8',
+    byteOffset: primaryProtocol.decoding?.byteOffset || 0,
+    valueCount: pointOrderInfo?.pointCount || primaryProtocol.decoding?.valueCount || null,
+    validationHeader: formatByteSequence(primaryProtocol.validation?.header),
+    checksumType: primaryProtocol.validation?.checksum?.type || 'none',
+    checksumByteOffset: primaryProtocol.validation?.checksum?.byteOffset ?? -1,
+    checksumRangeStart: primaryProtocol.validation?.checksum?.range?.[0] ?? 0,
+    checksumRangeEnd: primaryProtocol.validation?.checksum?.range?.[1] ?? -1,
     lineOrderMode: manifest.metadata?.builder?.lineOrderMode
       || (editor?.definitions?.lineOrder ? 'custom' : 'identity'),
     lineOrderJson: editor?.definitions?.lineOrder ? JSON.stringify(editor.definitions.lineOrder, null, 2) : '',
@@ -535,7 +560,7 @@ function buildFormValues(editor) {
     backendAlgorithm: isCodeAlgorithm ? 'code' : algorithmType,
     algorithmLanguage: algorithmType === 'python' ? 'python' : 'js',
     algorithmSource: editor?.definitions?.algorithmSource || '',
-    algorithmTimeoutMs: manifest.algorithm?.timeoutMs || 1000,
+    algorithmTimeoutMs: primaryAlgorithm.timeoutMs || 1000,
     algorithmMetrics,
     scale: algorithmData.scale ?? 1,
     offset: algorithmData.offset ?? 0,
@@ -603,6 +628,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
   const baudRate = Form.useWatch('baudRate', form);
   const dataBits = Form.useWatch('dataBits', form);
   const ports = Form.useWatch('ports', form);
+  const createPorts = Form.useWatch('ports', createForm);
   const lineOrderMode = Form.useWatch('lineOrderMode', form);
   const pointOrderJson = Form.useWatch('pointOrderJson', form);
   const coordinateMapJson = Form.useWatch('coordinateMapJson', form);
@@ -1122,8 +1148,14 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
         }
         : null;
       const primaryPort = values.ports[0] || 'sit';
-      // 画布是 widget 的唯一真相：拖放出来的 canvasConfig.widgets 直接写进
-      // display.widgets，source 统一归到主串口通道，避免拖进来的卡片指向不存在的通道。
+      const portLabels = buildPortLabels(values.ports, values.portLabels);
+      const sensorPlan = buildBuilderSensorPlan({
+        displaySystemId: values.id,
+        ports: values.ports,
+        portLabels,
+      });
+      // 画布是 widget 的唯一真相。已经显式指向某路的 source 原样保留，
+      // 尚未出现的串口则自动补一个数据 widget，不再全部挤到主路。
       const canvas = values.canvasConfig?.widgets?.length
         ? values.canvasConfig
         : buildDefaultCanvasConfig({
@@ -1131,14 +1163,16 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
           showStats: true,
           source: `${primaryPort}Data`,
         });
-      const widgets = canvas.widgets.map((widget) => ({
-        ...widget,
-        source: `${primaryPort}Data`,
-      }));
+      const widgets = ensureBuilderPortWidgets({
+        widgets: canvas.widgets,
+        sensorPlan,
+        rendererId: values.rendererId,
+      });
       const displayRenderers = createMatrixDisplayRenderers({
         matrix: { rows: normalizedMatrix.rows, cols: normalizedMatrix.cols },
         coordinateMap: normalizedCoordinateMap?.definition,
       });
+      const displayViews = buildBuilderPortViews(displayRenderers, sensorPlan);
 
       const visualizationAlgorithms = (catalog.visualizationAlgorithms || []).map((algorithm) => {
         const options = { ...(algorithm.options || {}) };
@@ -1168,51 +1202,77 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
         && !configuredAlgorithmMetricIds.has(values.primaryMetric.slice(10))
         ? 'totalPressure'
         : values.primaryMetric;
+      const matrixDefinition = {
+        rows: normalizedMatrix.rows,
+        cols: normalizedMatrix.cols,
+      };
+      const fileDefinition = {
+        lineOrder: 'line-order.json',
+        pointOrder: 'point-order.json',
+        ...(normalizedCoordinateMap ? { coordinateMap: 'coordinate-map.json' } : {}),
+      };
+      const protocolDefinition = {
+        baudRate: values.baudRate,
+        framing: values.framingType === 'delimiter'
+          ? { type: 'delimiter', delimiter: values.delimiter }
+          : { type: 'fixedLength', frameLength: values.frameLength },
+        decoding: {
+          valueType: values.valueType,
+          byteOffset: values.byteOffset,
+          valueCount: normalizedPointOrder.pointCount,
+        },
+        ...(frameValidation ? { validation: frameValidation } : {}),
+      };
+      const algorithmDefinition = algorithmType === 'json'
+        ? {
+          type: 'json',
+          dataFile: 'algorithm-data.json',
+          input: { source: 'rawData' },
+          timeoutMs: values.algorithmTimeoutMs,
+        }
+        : algorithmType === 'js' || algorithmType === 'python'
+          ? {
+            type: algorithmType,
+            entry: algorithmType === 'python' ? 'algorithm.py' : 'algorithm.js',
+            input: { source: 'rawData' },
+            timeoutMs: values.algorithmTimeoutMs,
+          }
+          : { type: 'none' };
+      const sensors = buildBuilderSensors({
+        displaySystemId: values.id,
+        ports: sensorPlan.map((sensor) => sensor.id),
+        portLabels,
+        type: values.sensorType,
+        matrix: matrixDefinition,
+        files: fileDefinition,
+        protocol: protocolDefinition,
+        algorithm: algorithmDefinition,
+        stored: true,
+      });
       const manifest = {
-        schemaVersion: 2,
+        schemaVersion: 3,
         id: values.id,
         name: values.name,
         version: values.version,
         description: 'Created with Display System Builder',
+        sensors,
+        // 顶层单数字段是给 v1/v2 调用方的兼容投影；逐路真相只在 sensors[]。
         sensor: {
           type: values.sensorType,
-          matrix: {
-            rows: normalizedMatrix.rows,
-            cols: normalizedMatrix.cols,
-          },
-          ports: values.ports,
+          matrix: matrixDefinition,
+          ports: sensorPlan.map((sensor) => sensor.id),
+          portLabels,
         },
-        protocol: {
-          baudRate: values.baudRate,
-          framing: values.framingType === 'delimiter'
-            ? { type: 'delimiter', delimiter: values.delimiter }
-            : { type: 'fixedLength', frameLength: values.frameLength },
-          decoding: {
-            valueType: values.valueType,
-            byteOffset: values.byteOffset,
-            valueCount: normalizedPointOrder.pointCount,
-          },
-          ...(frameValidation ? { validation: frameValidation } : {}),
-        },
-        algorithm: algorithmType === 'js' || algorithmType === 'python'
-          ? {
-            type: algorithmType,
-            input: { source: 'rawData' },
-            timeoutMs: values.algorithmTimeoutMs,
-          }
-          : { type: algorithmType },
+        files: fileDefinition,
+        protocol: protocolDefinition,
+        algorithm: algorithmDefinition,
         display: {
           layout: { type: 'grid', columns: 12 },
           matrixTransform: {
             type: values.matrixTransformType,
             factor: values.matrixTransformFactor,
           },
-          views: displayRenderers.map((renderer) => ({
-            id: renderer.id,
-            type: renderer.type,
-            label: renderer.label,
-            source: `${primaryPort}Data`,
-          })),
+          views: displayViews,
           widgets,
           canvas: {
             colormap: canvas.colormap || { id: DEFAULT_COLORMAP_ID },
@@ -1474,6 +1534,16 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
                           }))}
                         />
                       </Form.Item>
+                      {(ports || []).map((role) => (
+                        <Form.Item
+                          key={`port-label-${role}`}
+                          name={['portLabels', role]}
+                          label={`${SERIAL_ROLE_LABELS[role] || role}业务名称`}
+                          tooltip={`写入 sensorLabel；例如左手、右手、座椅、靠背。物理 COM 口仍单独绑定到 ${role}。`}
+                        >
+                          <Input placeholder={SERIAL_ROLE_LABELS[role] || role} />
+                        </Form.Item>
+                      ))}
                       <Form.Item name="baudRate" label="波特率" rules={[{ required: true }]}>
                         <Select showSearch options={(catalog?.baudRates || []).map((value) => ({ value, label: String(value) }))} />
                       </Form.Item>
@@ -2114,6 +2184,15 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
               }))}
             />
           </Form.Item>
+          {(createPorts || []).map((role) => (
+            <Form.Item
+              key={`create-port-label-${role}`}
+              name={['portLabels', role]}
+              label={`${SERIAL_ROLE_LABELS[role] || role}业务名称`}
+            >
+              <Input placeholder="例如：左手、右手、座椅或靠背" />
+            </Form.Item>
+          ))}
         </div>
       </Form>
     </Modal>

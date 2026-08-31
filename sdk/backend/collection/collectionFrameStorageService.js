@@ -2,8 +2,8 @@
  * 采集帧存储服务。
  *
  * 根据当前传感器类型和通道，把实时 payload 转成 matrix.data 的存储格式，
- * 再交给入库队列。这里集中处理 sit/back/head 三路差异，避免实时输出管线
- * 直接拼接存储结构。
+ * 再交给入库队列。旧设备继续集中处理 sit/back/head 三路差异；Display System
+ * 则统一按 canonical channelId 存入主库，通道数量不再受三路模型限制。
  */
 
 /**
@@ -65,6 +65,62 @@ function createCollectionFrameStorageService(options = {}) {
   }
 
   /**
+   * 判断一帧是否来自 manifest Display System 运行时。
+   *
+   * @param {object} frame 实时帧。
+   * @returns {boolean} 是否为 canonical Display System 帧。
+   */
+  function isDisplaySystemFrame(frame) {
+    return frame?.runtimeSource === 'display-system'
+      && Boolean(String(frame?.channelId || '').trim());
+  }
+
+  /**
+   * 解析 Display System 帧的稳定身份与本次物理串口快照。
+   * channelId 是长期主键；serialPortPath 可能在重新插拔后变化，因此按帧保存。
+   *
+   * @param {object} frame 实时帧。
+   * @param {string} fallbackChannel 调用方提供的输出通道兜底。
+   * @returns {object|null} 入库身份；不是 Display System 帧时返回 null。
+   */
+  function getDisplaySystemFrameIdentity(frame, fallbackChannel = 'sit') {
+    if (!isDisplaySystemFrame(frame)) return null;
+
+    const channelId = String(frame.channelId).trim();
+    const displaySystemId = String(frame.displaySystemId || channelId.split(':')[0] || '').trim();
+    const prefix = displaySystemId ? `${displaySystemId}:` : '';
+    const sensorId = String(
+      frame.sensorId
+      || (prefix && channelId.startsWith(prefix) ? channelId.slice(prefix.length) : '')
+      || channelId.slice(channelId.indexOf(':') + 1)
+      || fallbackChannel,
+    ).trim();
+    const outputChannel = String(frame.outputChannel || fallbackChannel || sensorId).trim();
+    const serial = frame.serial && typeof frame.serial === 'object' ? frame.serial : {};
+    const rawParser = serial.parserChannel ?? frame.parserChannel;
+    const parserChannel = rawParser && typeof rawParser === 'object'
+      ? (rawParser.id || rawParser.role || null)
+      : rawParser;
+    const baudRate = Number(serial.baudRate ?? frame.baudRate);
+    const timestamp = Number(frame.timestamp);
+
+    return {
+      channelId,
+      displaySystemId,
+      sensorId,
+      sensorLabel: String(frame.sensorLabel || frame.label || sensorId).trim(),
+      sensorType: frame.sensorType || null,
+      outputChannel,
+      schemaVersion: Number(frame.schemaVersion) || 1,
+      serialRole: String(serial.role || frame.serialRole || '').trim() || null,
+      serialPortPath: String(serial.path || frame.serialPortPath || '').trim() || null,
+      baudRate: Number.isFinite(baudRate) && baudRate > 0 ? baudRate : null,
+      parserChannel: parserChannel == null ? null : String(parserChannel),
+      ...(Number.isFinite(timestamp) ? { timestamp } : {}),
+    };
+  }
+
+  /**
    * 展示系统帧需要保留算法指标和映射后矩阵，供历史回放恢复左侧数据面板。
    * 旧设备没有 displaySystemId，仍沿用原来的数组存储格式。
    *
@@ -77,25 +133,34 @@ function createCollectionFrameStorageService(options = {}) {
     // 寻址使用；这不代表该帧应切换到 manifest 专用历史格式。只有 runtime
     // processor 明确标记的 Display System 帧才能走这里，否则会绕过手套零点帧、
     // 小床 12B 和温度床等既有存储协议。
-    if (
-      frameToStore?.runtimeSource !== 'display-system'
-      || !frameToStore.displaySystemId
-      || !Array.isArray(frameToStore[dataKey])
-    ) {
-      return null;
-    }
+    const identity = getDisplaySystemFrameIdentity(frameToStore, frameToStore?.outputChannel);
+    if (!identity) return null;
 
+    const resolvedDataKey = dataKey || `${identity.outputChannel}Data`;
+    const processed = Array.isArray(frameToStore.data)
+      ? frameToStore.data
+      : Array.isArray(frameToStore[resolvedDataKey])
+        ? frameToStore[resolvedDataKey]
+        : Array.isArray(frameToStore.normalizedData)
+          ? frameToStore.normalizedData
+          : null;
+    if (!processed) return null;
+
+    const serial = frameToStore.serial && typeof frameToStore.serial === 'object'
+      ? { ...frameToStore.serial }
+      : null;
     return JSON.stringify({
-      [dataKey]: frameToStore[dataKey],
+      ...frameToStore,
+      ...identity,
+      data: processed,
+      [resolvedDataKey]: processed,
       normalizedData: Array.isArray(frameToStore.normalizedData)
         ? frameToStore.normalizedData
-        : frameToStore[dataKey],
+        : processed,
       algorithmMetrics: frameToStore.algorithmMetrics || {},
       metrics: frameToStore.metrics || {},
-      displaySystemId: frameToStore.displaySystemId,
-      channelId: frameToStore.channelId,
-      outputChannel: frameToStore.outputChannel,
-      runtimeSource: frameToStore.runtimeSource,
+      serial,
+      runtimeSource: 'display-system',
     });
   }
 
@@ -179,6 +244,22 @@ function createCollectionFrameStorageService(options = {}) {
    * @returns {boolean} 是否已入队。
    */
   function store(channel, frameToStore) {
+    const displayIdentity = getDisplaySystemFrameIdentity(frameToStore, channel);
+    if (displayIdentity) {
+      if (frameToStore?.stored === false) return false;
+      if (!canStore(displayIdentity.channelId)) return false;
+      const dataToStore = buildDisplaySystemCollectionData(
+        frameToStore,
+        `${displayIdentity.outputChannel}Data`,
+      );
+      if (!dataToStore) return false;
+
+      // 所有 manifest 通道共享当前型号的主库，并由 channel_id 精确隔离。
+      // 不能按 outputChannel 映射 db1/db2：任意多串口并不存在可无限扩展的 dbN。
+      enqueueCollectionFrame(getDbRef('sit'), dataToStore, displayIdentity);
+      return true;
+    }
+
     if (!canStore(channel)) return false;
 
     const builders = {
@@ -200,7 +281,12 @@ function createCollectionFrameStorageService(options = {}) {
     buildDisplaySystemCollectionData,
     buildHeadCollectionData,
     buildSitCollectionData,
+    getDisplaySystemFrameIdentity,
     store,
+    storeFrame: (frameToStore, options = {}) => store(
+      options.fallbackChannel || frameToStore?.outputChannel || 'sit',
+      frameToStore,
+    ),
     storeBack: (frameToStore) => store('back', frameToStore),
     storeHead: (frameToStore) => store('head', frameToStore),
     storeSit: (frameToStore) => store('sit', frameToStore),

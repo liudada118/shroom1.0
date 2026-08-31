@@ -126,7 +126,7 @@ import {
   listRuntimeDisplayDefinitions,
   registerRuntimeDisplayDefinition,
 } from '../../displays/registry';
-import { buildManifestSceneFrame } from '../../extensions/display-system/manifestSceneAdapter';
+import { readManifestChannelFrames } from '../../extensions/display-system/manifestSceneAdapter';
 import RendererHost from '../../renderers/RendererHost.jsx';
 import { resolveRendererFromDefinition } from '../../renderers/registry';
 // 只引参数表，不引渲染器本体 —— params.js 是纯函数模块（无 three.js），
@@ -194,6 +194,7 @@ const ANT_DESIGN_LOCALES = Object.freeze({ zh: zhCN, en: enUS, ja: jaJP });
 
 const FULL_PACKET_GLOVE_MATRIX = 'handGloveFullPacket'
 const DisplaySystemBuilder = React.lazy(() => import('../displaySystemBuilder/DisplaySystemBuilder'))
+const ManifestDisplayRenderer = React.lazy(() => import('../../extensions/display-system/ManifestDisplayRenderer.jsx'))
 const HAND_0205_DOUBLE_MATRIX = 'hand0205Double'
 const MINZHEN_MATRIX = 'minzhen'
 const SMALL_BED_NO_ALG_MATRIX = 'smallBedNoAlg'
@@ -1153,6 +1154,7 @@ class Home extends React.Component {
       ...getSmallBed12BInitialDisplayState(),
     };
     this.com = React.createRef();
+    this.manifestDisplay = React.createRef();
     this.data = React.createRef();
     this.title = React.createRef();
     this.line = React.createRef();
@@ -1273,6 +1275,11 @@ class Home extends React.Component {
     rawData = values,
     metrics = {},
     algorithmMetrics = {},
+    channelId = '',
+    outputChannel = '',
+    sensorId = '',
+    sensorLabel = '',
+    serial = null,
   }) => {
     this.data.current?.changeData({
       totalPres: metrics.totalPressure || 0,
@@ -1281,6 +1288,11 @@ class Home extends React.Component {
       point: metrics.activePoints || 0,
       area: metrics.area || 0,
       algorithmMetrics,
+      channelId,
+      outputChannel,
+      sensorId,
+      sensorLabel,
+      serial,
     });
     this.data.current?.updateFormulaCharts(values, metrics, algorithmMetrics, rawData);
     if (!values.length) return;
@@ -1293,28 +1305,17 @@ class Home extends React.Component {
   }
 
   /**
-   * 将当前 Display System 帧送入主界面已有的数值渲染场景。
-   *
-   * 算法输出用于绘图，normalizedData 用于左侧统计，避免可视化算法改变业务指标。
+   * 将当前 Display System 的每一路帧送进同一个 Manifest 画布。
+   * sidebar.source 只决定左侧统计取哪一路，不参与画布帧是否已处理的判断。
    */
   handleManifestSceneFrame = (message, definition) => {
-    const sceneFrame = buildManifestSceneFrame(message, definition);
-    if (!sceneFrame) return false;
+    const routedFrames = readManifestChannelFrames(message, [
+      definition?.displaySystemId,
+      definition?.type,
+    ], definition?.sensors);
+    if (!routedFrames.length) return false;
 
-    if (typeof this.com.current?.sitData === 'function') {
-      this.com.current.sitData({
-        wsPointData: sceneFrame.renderValues,
-      }, this.state.local);
-    } else {
-      this.com.current?.changeWsData?.(sceneFrame.renderValues);
-    }
-
-    this.handleManifestSidebarData({
-      values: sceneFrame.normalizedValues,
-      rawData: sceneFrame.rawValues,
-      metrics: sceneFrame.metrics,
-      algorithmMetrics: sceneFrame.algorithmMetrics,
-    });
+    this.manifestDisplay.current?.pushFrames?.(routedFrames);
     return true;
   }
 
@@ -4959,7 +4960,16 @@ class Home extends React.Component {
             />
           </CanvasCom> : ''}
 
-          {this.state.numMatrixFlag == "num" &&
+          {runtimeDisplayDefinition?.source === 'manifest' ? (
+            <React.Suspense fallback={<div className="manifest-renderer-loading"><Spin /></div>}>
+              <ManifestDisplayRenderer
+                ref={this.manifestDisplay}
+                definition={runtimeDisplayDefinition}
+                onSidebarData={this.handleManifestSidebarData}
+                enabled={false}
+              />
+            </React.Suspense>
+          ) : this.state.numMatrixFlag == "num" &&
             this.state.matrixName != WHOLE_CHAIR_MATRIX &&
             (this.state.matrixName == "foot" ||
               this.state.matrixName == "hand" || this.state.matrixName == "carCol" || this.state.matrixName == "jqbed" || this.state.matrixName == tempFullBedMatrix || ['petCare', 'petCareMini'].includes(this.state.matrixName) ||

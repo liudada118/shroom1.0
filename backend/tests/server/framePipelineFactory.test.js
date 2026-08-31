@@ -68,7 +68,64 @@ const displayFrame = {
 const storedDisplayFrame = JSON.parse(
   pipeline.collectionFrameStorage.buildSitCollectionData(displayFrame),
 );
-assert.deepStrictEqual(storedDisplayFrame, displayFrame);
+assert.deepStrictEqual(storedDisplayFrame, {
+  ...displayFrame,
+  sensorId: 'sit',
+  sensorLabel: 'sit',
+  sensorType: null,
+  schemaVersion: 1,
+  serialRole: null,
+  serialPortPath: null,
+  baudRate: null,
+  parserChannel: null,
+  data: [10, 20],
+  serial: null,
+});
+
+const auxFrame = {
+  channelId: 'custom-seat:leftHand',
+  displaySystemId: 'custom-seat',
+  sensorId: 'leftHand',
+  sensorLabel: '左手',
+  sensorType: 'hand-pad',
+  timestamp: 123456,
+  runtimeSource: 'display-system',
+  stored: true,
+  outputChannel: 'armLeft',
+  data: [31, 32],
+  normalizedData: [21, 22],
+  serialRole: 'leftHand',
+  serial: {
+    role: 'leftHand',
+    path: 'COM7',
+    baudRate: 921600,
+    parserChannel: 'custom-seat:leftHand',
+  },
+};
+const auxResult = pipeline.frameOutputPipeline.publishAux('armLeft', auxFrame);
+assert.strictEqual(auxResult.stored, true);
+assert.strictEqual(queued.at(-1).db, 'sitDb');
+assert.deepStrictEqual(queued.at(-1).channel, {
+  channelId: 'custom-seat:leftHand',
+  displaySystemId: 'custom-seat',
+  sensorId: 'leftHand',
+  sensorLabel: '左手',
+  sensorType: 'hand-pad',
+  outputChannel: 'armLeft',
+  schemaVersion: 1,
+  serialRole: 'leftHand',
+  serialPortPath: 'COM7',
+  baudRate: 921600,
+  parserChannel: 'custom-seat:leftHand',
+  timestamp: 123456,
+});
+
+const queuedBeforeOptOut = queued.length;
+assert.strictEqual(pipeline.collectionFrameStorage.storeFrame({
+  ...auxFrame,
+  stored: false,
+}), false);
+assert.strictEqual(queued.length, queuedBeforeOptOut);
 
 // canonical identity 也会被补到 legacy 帧上；它不能因此误走 manifest 存储格式。
 activeSensorType = 'hand0507';

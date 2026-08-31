@@ -1,5 +1,5 @@
 const API_VERSION = 'v1';
-const SDK_CONTRACT_VERSION = '2026-08-29';
+const SDK_CONTRACT_VERSION = '2026-08-31';
 const SENSOR_FRAME_SCHEMA_VERSION = 1;
 const commandSchema = require('./commandSchema.json');
 
@@ -60,7 +60,7 @@ const TELEMETRY_QUALITY = Object.freeze({
   ERROR: 'error',
 });
 
-const DISPLAY_SYSTEM_SCHEMA_VERSION = 2;
+const DISPLAY_SYSTEM_SCHEMA_VERSION = 3;
 
 const DISPLAY_SYSTEM_MANIFEST_FILES = Object.freeze([
   'display-system.json',
@@ -128,12 +128,14 @@ function buildSdkContractSnapshot({
         channelId: 'string',
         displaySystemId: 'string',
         sensorId: 'string',
+        sensorLabel: 'string',
         sensorType: 'string',
         outputChannel: 'string',
         source: 'realtime|playback',
         sequence: 'number',
         timestamp: 'number',
         quality: 'good|stale|error',
+        serial: 'object|null',
         payload: {
           value: 'number[]',
           stages: {
@@ -175,20 +177,76 @@ function buildSdkContractSnapshot({
       },
       status: displaySystems,
       manifestShape: {
+        schemaVersion: '1|2|3 (3 recommended)',
         id: 'string',
         name: 'string',
         version: 'string',
-        sensor: {
+        sensors: [{
+          id: 'string (optional; defaults to array index; unique; must not contain ":")',
+          label: 'string (optional; defaults to id)',
+          outputChannel: 'string (optional; defaults to id; unique)',
           type: 'string',
           matrix: {
             rows: 'positive integer',
             cols: 'positive integer',
           },
+          files: {
+            lineOrder: 'string',
+            pointOrder: 'string',
+            coordinateMap: 'string|null',
+          },
+          protocol: {
+            validation: {
+              headerOffset: 'non-negative integer',
+              header: 'byte[]',
+              checksum: {
+                type: 'sum8|xor8|crc16-modbus',
+                byteOffset: 'integer',
+                range: '[integer, integer]|null',
+              },
+            },
+            baudRate: 'positive integer',
+            framing: {
+              type: 'delimiter|fixedLength',
+              delimiter: 'byte[]',
+              frameLength: 'positive integer|null',
+              includeDelimiter: 'boolean',
+            },
+            decoding: {
+              valueType: 'uint8|int8|uint16le|uint16be|int16le|int16be|uint32le|uint32be|int32le|int32be|float32le|float32be|bit',
+              byteOffset: 'non-negative integer',
+              valueCount: 'positive integer|null',
+            },
+          },
+          algorithm: {
+            type: 'none|json|js|python|external',
+            entry: 'string|null',
+            dataFile: 'string|null',
+            input: 'object',
+            output: 'object',
+            timeoutMs: 'positive integer',
+          },
+          stored: 'boolean (optional; defaults to true)',
+        }],
+        legacyCompatibility: {
+          supportedSchemaVersions: [1, 2],
+          behavior: 'sensor.ports[] is normalized to sensors[]; each generated sensor inherits top-level files/protocol/algorithm',
+        },
+        // schema v1/v2 的单传感器声明仍受支持，并会在后端统一升格为 sensors[]。
+        sensor: {
+          type: 'string',
+          label: 'string|null',
+          matrix: {
+            rows: 'positive integer',
+            cols: 'positive integer',
+          },
           ports: 'string[]',
+          portLabels: 'Record<string, string>',
         },
         files: {
           lineOrder: 'string',
           pointOrder: 'string',
+          coordinateMap: 'string|null',
         },
         protocol: {
           baudRate: 'positive integer',
@@ -196,17 +254,21 @@ function buildSdkContractSnapshot({
             type: 'delimiter|fixedLength',
             delimiter: 'byte[]',
             frameLength: 'positive integer|null',
+            includeDelimiter: 'boolean',
           },
           decoding: {
-            valueType: 'uint8|int8|uint16le|uint16be|int16le|int16be',
+            valueType: 'uint8|int8|uint16le|uint16be|int16le|int16be|uint32le|uint32be|int32le|int32be|float32le|float32be|bit',
             byteOffset: 'non-negative integer',
             valueCount: 'positive integer|null',
           },
         },
         algorithm: {
-          type: 'none|js|python|external',
+          type: 'none|json|js|python|external',
           entry: 'string|null',
           dataFile: 'string|null',
+          input: 'object',
+          output: 'object',
+          timeoutMs: 'positive integer',
         },
         display: {
           layout: 'object|string',

@@ -4,7 +4,10 @@ const {
   BackendSdkClient,
   normalizeHttpResult,
 } = require('@shroom/backend/client/BackendSdkClient.js');
-const { buildSdkContractSnapshot } = require('@shroom/backend/contract/sdkApiContract.js');
+const {
+  DISPLAY_SYSTEM_SCHEMA_VERSION,
+  buildSdkContractSnapshot,
+} = require('@shroom/backend/contract/sdkApiContract.js');
 
 /**
  * 造一个最小的假 fetch Response，只有 `ok` / `status` / `json()` 三样。
@@ -137,7 +140,18 @@ async function run() {
   assert.strictEqual(snapshot.websocket.messageTypes.SENSOR_FRAME, 'sensor.frame');
   assert.deepStrictEqual(snapshot.websocket.subscribeExample.channels, ['car:sit']);
   assert.strictEqual(snapshot.telemetry.channelIdPattern, '{displaySystemId}:{sensorId}');
+  assert.strictEqual(snapshot.telemetry.frameShape.sensorLabel, 'string');
+  assert.strictEqual(snapshot.telemetry.frameShape.serial, 'object|null');
   assert.strictEqual(snapshot.telemetry.frameShape.payload.value, 'number[]');
+  assert.strictEqual(DISPLAY_SYSTEM_SCHEMA_VERSION, 3);
+  assert.strictEqual(snapshot.displaySystems.schemaVersion, 3);
+  assert.strictEqual(snapshot.displaySystems.manifestShape.sensors[0].label, 'string (optional; defaults to id)');
+  assert.strictEqual(snapshot.displaySystems.manifestShape.sensors[0].stored, 'boolean (optional; defaults to true)');
+  assert.strictEqual(snapshot.displaySystems.manifestShape.sensors[0].files.lineOrder, 'string');
+  assert.strictEqual(snapshot.displaySystems.manifestShape.sensors[0].protocol.baudRate, 'positive integer');
+  assert.strictEqual(snapshot.displaySystems.manifestShape.sensors[0].algorithm.timeoutMs, 'positive integer');
+  assert.deepStrictEqual(snapshot.displaySystems.manifestShape.legacyCompatibility.supportedSchemaVersions, [1, 2]);
+  assert.strictEqual(snapshot.displaySystems.manifestShape.sensor.ports, 'string[]');
 
   assert.deepStrictEqual(normalizeHttpResult({ code: 0, data: { ok: true } }), { ok: true });
   assert.throws(() => normalizeHttpResult({ code: 1, message: 'bad' }), /bad/);
@@ -183,10 +197,14 @@ async function run() {
     channelId: 'demo:sit',
     displaySystemId: 'demo',
     sensorId: 'sit',
+    sensorLabel: '座椅',
     outputChannel: 'sit',
+    serial: { role: 'seatPort', path: 'COM3', baudRate: 115200 },
     payload: { value: [1, 2, 3] },
   }));
   assert.strictEqual(messages.length, 1);
+  assert.strictEqual(messages[0].sensorLabel, '座椅');
+  assert.deepStrictEqual(messages[0].serial, { role: 'seatPort', path: 'COM3', baudRate: 115200 });
   assert.deepStrictEqual(messages[0].payload.value, [1, 2, 3]);
 }
 

@@ -121,6 +121,9 @@ let runtimeDisplayRevision = 0;
 export function registerRuntimeDisplayDefinition(runtimeDefinition = {}) {
   const metadata = runtimeDefinition.displayMetadata || runtimeDefinition;
   const sensor = runtimeDefinition.sensorDefinition || {};
+  const runtimeChannels = Array.isArray(runtimeDefinition.runtimeChannels)
+    ? runtimeDefinition.runtimeChannels
+    : [];
   const sensorType = sensor.type || metadata.sensorType;
   if (!sensorType) return null;
 
@@ -138,6 +141,93 @@ export function registerRuntimeDisplayDefinition(runtimeDefinition = {}) {
   definition.sceneMode = 'numoriginal';
   definition.runtimeRevision = ++runtimeDisplayRevision;
   definition.displaySystemId = metadata.id || sensor.id;
+  const declaredSensors = Array.isArray(metadata.sensors) && metadata.sensors.length
+    ? metadata.sensors
+    : (Array.isArray(sensor.sensors) ? sensor.sensors : []);
+  definition.sensors = declaredSensors.map((declaredSensor) => {
+    const sensorId = String(declaredSensor?.id || '').trim();
+    // serialRole 是 runtime planner 与 manifest sensor.id 之间的稳定关联键；
+    // channelId 仅作为旧 runtime definition 的兼容回退，不能用数组顺序配对。
+    const runtimeChannel = runtimeChannels.find((channel) => channel?.serialRole === sensorId)
+      || runtimeChannels.find((channel) => (
+        channel?.channelId === `${definition.displaySystemId}:${sensorId}`
+        || channel?.id === `${definition.displaySystemId}:${sensorId}`
+      ));
+    const declaredSerial = declaredSensor?.serial
+      && typeof declaredSensor.serial === 'object'
+      && !Array.isArray(declaredSensor.serial)
+      ? declaredSensor.serial
+      : {};
+    const runtimeSerial = runtimeChannel?.serial
+      && typeof runtimeChannel.serial === 'object'
+      && !Array.isArray(runtimeChannel.serial)
+      ? runtimeChannel.serial
+      : {};
+    const serialRole = runtimeChannel?.serialRole
+      || runtimeSerial.role
+      || declaredSensor?.serialRole
+      || declaredSerial.role
+      || sensorId;
+    const parser = runtimeChannel?.parserChannel
+      || runtimeChannel?.parser
+      || runtimeSerial.parserChannel
+      || runtimeSerial.parser
+      || declaredSensor?.parser
+      || declaredSensor?.parserChannel
+      || declaredSerial.parserChannel
+      || declaredSerial.parser
+      || null;
+    const protocol = runtimeChannel?.protocol || declaredSensor?.protocol || metadata.protocol || null;
+    const channelId = runtimeChannel?.channelId
+      || runtimeChannel?.id
+      || declaredSensor?.channelId
+      || (definition.displaySystemId && sensorId
+        ? `${definition.displaySystemId}:${sensorId}`
+        : sensorId);
+    const outputChannel = runtimeChannel?.outputChannel
+      || declaredSensor?.outputChannel
+      || sensorId;
+    const declaredBaudRate = runtimeChannel?.baudRate
+      ?? runtimeSerial.baudRate
+      ?? protocol?.baudRate
+      ?? declaredSensor?.baudRate
+      ?? declaredSerial.baudRate;
+    const parsedBaudRate = declaredBaudRate == null || declaredBaudRate === ''
+      ? null
+      : Number(declaredBaudRate);
+    const baudRate = Number.isFinite(parsedBaudRate) && parsedBaudRate > 0
+      ? parsedBaudRate
+      : null;
+    const sensorLabel = String(
+      runtimeChannel?.sensorLabel
+      || runtimeChannel?.label
+      || declaredSensor?.sensorLabel
+      || declaredSensor?.label
+      || sensorId,
+    ).trim();
+    return {
+      ...declaredSensor,
+      sensorId,
+      sensorLabel,
+      channelId,
+      outputChannel,
+      serialRole,
+      baudRate,
+      parser,
+      parserChannel: parser,
+      serial: {
+        ...declaredSerial,
+        ...runtimeSerial,
+        role: serialRole,
+        baudRate,
+        parser,
+        parserChannel: parser,
+      },
+    };
+  });
+  if (definition.sensors.length) {
+    definition.channels = definition.sensors.map((item) => item.outputChannel);
+  }
   definition.editable = metadata.editable === true;
   definition.origin = metadata.origin || 'system';
   definition.protocol = metadata.protocol || sensor.protocol || null;

@@ -192,13 +192,144 @@ try {
     'algorithm.py',
   );
 
+  const fourPortDefinitions = {
+    leftHand: { lineOrder: { order: [1, 2, 3, 4] }, pointOrder: [[0, 0], [0, 1], [1, 0], [1, 1]] },
+    rightHand: { lineOrder: { order: [1, 2, 3, 4] }, pointOrder: [[0, 0], [0, 1], [1, 0], [1, 1]] },
+    backrest: { lineOrder: { order: [1, 2, 3, 4] }, pointOrder: [[0, 0], [0, 1], [1, 0], [1, 1]] },
+    seat: {
+      lineOrder: { order: [1, 2, 3] },
+      pointOrder: [[0, 0], [0, 1], [0, 2]],
+      algorithmData: { scale: 2 },
+    },
+  };
+  const fourPortManifest = {
+    schemaVersion: 3,
+    id: 'builder-four-port',
+    name: 'Builder Four Port',
+    version: '1.0.0',
+    sensors: [
+      ['leftHand', '左手', 'glove-pressure', true],
+      ['rightHand', '右手', 'glove-pressure', true],
+      ['backrest', '靠背', 'seat-pressure', true],
+      ['seat', '座椅', 'seat-pressure', false],
+    ].map(([sensorId, label, type, stored]) => ({
+      id: sensorId,
+      label,
+      outputChannel: sensorId,
+      type,
+      matrix: { rows: 99, cols: 99 },
+      files: {
+        lineOrder: `${sensorId}/line-order.json`,
+        pointOrder: `${sensorId}/point-order.json`,
+      },
+      protocol: {
+        baudRate: sensorId === 'seat' ? 115200 : 921600,
+        framing: { type: 'fixedLength', frameLength: sensorId === 'seat' ? 3 : 4 },
+        decoding: { valueType: 'uint8', valueCount: 999 },
+      },
+      algorithm: sensorId === 'seat'
+        ? { type: 'json', dataFile: 'seat/algorithm-data.json' }
+        : { type: 'none' },
+      stored,
+    })),
+    display: {
+      views: [
+        { id: 'left', type: 'heatmap', source: 'leftHandData' },
+        { id: 'right', type: 'heatmap', source: 'rightHandData' },
+        { id: 'back', type: 'heatmap', source: 'backrestData' },
+        { id: 'seat', type: 'heatmap', source: 'seatData' },
+      ],
+      widgets: [
+        { id: 'left', type: 'heatmap', source: 'leftHandData' },
+        { id: 'right', type: 'heatmap', source: 'rightHandData' },
+        { id: 'back', type: 'heatmap', source: 'backrestData' },
+        { id: 'seat', type: 'heatmap', source: 'seatData' },
+      ],
+      renderers: [{ id: 'heatmap', type: 'heatmap' }],
+      visualizationAlgorithms: [{ id: 'identity', type: 'identity' }],
+      profiles: [{
+        id: 'default',
+        renderer: 'heatmap',
+        visualizationAlgorithm: 'identity',
+        widgets: ['left', 'right', 'back', 'seat'],
+      }],
+      defaultView: 'left',
+      defaultProfile: 'default',
+    },
+  };
+  const fourPortSaved = service.save({
+    manifest: fourPortManifest,
+    definitions: { sensors: fourPortDefinitions },
+  });
+  const fourPortOnDisk = JSON.parse(
+    fs.readFileSync(path.join(fourPortSaved.directory, 'display-system.json'), 'utf8'),
+  );
+  assert.strictEqual(fourPortOnDisk.schemaVersion, 3);
+  assert.deepStrictEqual(
+    fourPortOnDisk.sensors.map(({ id, label, outputChannel, stored }) => ({
+      id,
+      label,
+      outputChannel,
+      stored,
+    })),
+    [
+      { id: 'leftHand', label: '左手', outputChannel: 'leftHand', stored: true },
+      { id: 'rightHand', label: '右手', outputChannel: 'rightHand', stored: true },
+      { id: 'backrest', label: '靠背', outputChannel: 'backrest', stored: true },
+      { id: 'seat', label: '座椅', outputChannel: 'seat', stored: false },
+    ],
+  );
+  assert.deepStrictEqual(
+    fourPortOnDisk.display.widgets.map((widget) => widget.source),
+    ['leftHandData', 'rightHandData', 'backrestData', 'seatData'],
+  );
+  assert.deepStrictEqual(fourPortOnDisk.sensors[0].matrix, { rows: 2, cols: 2 });
+  assert.deepStrictEqual(fourPortOnDisk.sensors[3].matrix, { rows: 1, cols: 3 });
+  assert.deepStrictEqual(
+    fourPortOnDisk.sensors.map((sensor) => sensor.protocol.baudRate),
+    [921600, 921600, 921600, 115200],
+  );
+  assert.deepStrictEqual(
+    fourPortOnDisk.sensors.map((sensor) => sensor.protocol.decoding.valueCount),
+    [4, 4, 4, 3],
+  );
+  assert.deepStrictEqual(
+    fourPortOnDisk.sensors.map((sensor) => sensor.files.pointOrder),
+    [
+      'leftHand/point-order.json',
+      'rightHand/point-order.json',
+      'backrest/point-order.json',
+      'seat/point-order.json',
+    ],
+  );
+  assert.strictEqual(fourPortOnDisk.sensors[3].algorithm.dataFile, 'seat/algorithm-data.json');
+  assert.deepStrictEqual(fourPortOnDisk.sensor.ports, ['leftHand', 'rightHand', 'backrest', 'seat']);
+  assert.deepStrictEqual(fourPortOnDisk.sensor.portLabels, {
+    leftHand: '左手',
+    rightHand: '右手',
+    backrest: '靠背',
+    seat: '座椅',
+  });
+  assert.deepStrictEqual(fourPortOnDisk.protocol, fourPortOnDisk.sensors[0].protocol);
+  ['leftHand', 'rightHand', 'backrest', 'seat'].forEach((sensorId) => {
+    assert.ok(fs.existsSync(path.join(fourPortSaved.directory, sensorId, 'point-order.json')));
+  });
+  assert.deepStrictEqual(
+    JSON.parse(fs.readFileSync(path.join(fourPortSaved.directory, 'seat', 'algorithm-data.json'))),
+    { scale: 2 },
+  );
+  assert.strictEqual(
+    loadDisplaySystemDirectory(fourPortSaved.directory, { validateFiles: true }).ok,
+    true,
+  );
+
   // ──────────────────────────────────────────────────────────────────────
   // saveDisplaySection —— 只动 display 段，其余字段逐字保留
   // ──────────────────────────────────────────────────────────────────────
 
   // 手写一份 v3 多传感器 manifest 放在**可写根之外**，模拟自带展示系统的目录：
-  // 嵌套的 files 路径、sensors[]、自定义 metadata。这些都是 Builder 的 save()
-  // 会重写掉的东西，也正是这条窄通路必须原样留下的东西。
+  // 嵌套的 files 路径、sensors[]、自定义 metadata 都是这条窄通路必须
+  // 原样留下的字段：只保存配色时不应运行完整 Builder 编译。
   const nestedRoot = path.join(temporaryRoot, '__resource__', 'nested-multi');
   fs.mkdirSync(path.join(nestedRoot, 'cushion'), { recursive: true });
   fs.writeFileSync(
@@ -242,8 +373,7 @@ try {
   assert.strictEqual(sectionSaved.directory, nestedRoot);
 
   const sectionOnDisk = JSON.parse(fs.readFileSync(nestedManifestPath, 'utf8'));
-  // **这几条是防 manifest 被改坏的关键**：Builder 的 save() 会强制 schemaVersion 2、
-  // 把 files 扁平化成 'line-order.json'、重建 algorithm 段。走这条通路一个都不许变。
+  // **这几条是防配色窄通路误改 manifest 的关键**：非 display 字段一个都不许变。
   assert.strictEqual(sectionOnDisk.schemaVersion, 3);
   assert.deepStrictEqual(sectionOnDisk.sensors, nestedManifest.sensors);
   assert.strictEqual(sectionOnDisk.sensors[0].files.lineOrder, 'cushion/line-order.json');

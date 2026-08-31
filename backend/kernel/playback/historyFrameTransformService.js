@@ -51,7 +51,7 @@ function createHistoryFrameTransformService({
   }
 
   /**
-   * 从历史行中提取压力矩阵，兼容 pressureData、sitData、backData 和旧数组格式。
+   * 从历史行中提取压力矩阵，兼容 canonical data/normalizedData、旧三路字段和数组直存。
    *
    * @param {{ data?: string }} row 历史数据库行。
    * @returns {unknown[]} 压力数据数组。
@@ -59,9 +59,12 @@ function createHistoryFrameTransformService({
   function getHistoryPressureData(row) {
     const storedData = parseStoredFrameData(row);
     if (Array.isArray(storedData)) return storedData;
+    if (Array.isArray(storedData?.data)) return storedData.data;
+    if (Array.isArray(storedData?.normalizedData)) return storedData.normalizedData;
     if (Array.isArray(storedData?.pressureData)) return storedData.pressureData;
     if (Array.isArray(storedData?.sitData)) return storedData.sitData;
     if (Array.isArray(storedData?.backData)) return storedData.backData;
+    if (Array.isArray(storedData?.headData)) return storedData.headData;
     return [];
   }
 
@@ -272,7 +275,14 @@ function createHistoryFrameTransformService({
     if (storedData && typeof storedData === 'object' && !Array.isArray(storedData)) {
       return {
         pressureData: normalizeFiniteFrame(
-          storedData.pressureData || storedData.rawPressureData || storedData.sitData || storedData.backData || storedData.headData || [],
+          storedData.data
+            || storedData.normalizedData
+            || storedData.pressureData
+            || storedData.rawPressureData
+            || storedData.sitData
+            || storedData.backData
+            || storedData.headData
+            || [],
         ),
         rotateData: normalizeFiniteFrame(storedData.rotate || storedData.quaternion || []),
         zeroFrame: normalizeFiniteFrame(storedData.zeroFrame || []),

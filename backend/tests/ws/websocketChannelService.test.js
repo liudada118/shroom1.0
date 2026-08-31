@@ -20,11 +20,19 @@ assert.deepStrictEqual(normalizeChannelList([
   { serialRole: 'armRight' },
   { channelId: 'wearable-demo:armLeft' },
 ]), ['wearable-demo:sit', 'wearable-demo:armLeft', 'armRight']);
-assert.deepStrictEqual(buildRealtimeChannelMetadata({
+const manifestMetadata = buildRealtimeChannelMetadata({
   sensorType: 'wearable-demo',
   managedChannels: [
-    { portId: 'left-input', role: 'left-input' },
-    { portId: 'right-input', role: 'right-input' },
+    {
+      portId: 'left-input',
+      role: 'left-input',
+      path: 'COM3',
+      baudRate: 921600,
+      parserChannel: 'wearable-demo:left-input',
+      isOpen: true,
+      status: 'open',
+      openedAt: 123,
+    },
   ],
   manifestChannels: [
     {
@@ -34,6 +42,8 @@ assert.deepStrictEqual(buildRealtimeChannelMetadata({
       serialRole: 'left-input',
       outputChannel: 'armLeft',
       label: '左臂',
+      sensorType: 'arm-pressure',
+      baudRate: 921600,
     },
     {
       channelId: 'wearable-demo:right-input',
@@ -42,38 +52,53 @@ assert.deepStrictEqual(buildRealtimeChannelMetadata({
       serialRole: 'right-input',
       outputChannel: 'armRight',
       label: '右臂',
+      sensorType: 'arm-pressure',
+      baudRate: 115200,
     },
   ],
-}), [
-  {
+});
+assert.strictEqual(manifestMetadata.length, 2);
+assert.deepStrictEqual(manifestMetadata[0].serial, {
+  role: 'left-input',
+  portId: 'left-input',
+  path: 'COM3',
+  baudRate: 921600,
+  parserChannel: 'wearable-demo:left-input',
+  isOpen: true,
+  status: 'open',
+  openedAt: 123,
+  updatedAt: null,
+  lastError: null,
+});
+assert.strictEqual(manifestMetadata[0].sensorLabel, '左臂');
+assert.strictEqual(manifestMetadata[0].sensorType, 'arm-pressure');
+assert.strictEqual(manifestMetadata[0].serialPortPath, 'COM3');
+assert.strictEqual(manifestMetadata[1].sensorLabel, '右臂');
+assert.strictEqual(manifestMetadata[1].serialPortPath, null);
+assert.strictEqual(manifestMetadata[1].baudRate, 115200);
+assert.strictEqual(manifestMetadata[1].isOpen, false);
+assert.strictEqual(manifestMetadata[1].status, 'unregistered');
+
+const reconnectedMetadata = buildRealtimeChannelMetadata({
+  sensorType: 'wearable-demo',
+  manifestChannels: [{
     channelId: 'wearable-demo:left-input',
-    name: '左臂',
-    port: 19999,
     displaySystemId: 'wearable-demo',
     sensorId: 'left-input',
     serialRole: 'left-input',
     outputChannel: 'armLeft',
-    sensorType: 'wearable-demo',
-    transport: 'websocket',
-    messageType: 'sensor.frame',
-    schemaVersion: 1,
-    legacy: false,
-  },
-  {
-    channelId: 'wearable-demo:right-input',
-    name: '右臂',
-    port: 19999,
-    displaySystemId: 'wearable-demo',
-    sensorId: 'right-input',
-    serialRole: 'right-input',
-    outputChannel: 'armRight',
-    sensorType: 'wearable-demo',
-    transport: 'websocket',
-    messageType: 'sensor.frame',
-    schemaVersion: 1,
-    legacy: false,
-  },
-]);
+    label: '左臂',
+  }],
+  managedChannels: [{
+    portId: 'left-input',
+    role: 'left-input',
+    path: 'COM8',
+    isOpen: true,
+    status: 'open',
+  }],
+})[0];
+assert.strictEqual(reconnectedMetadata.serialPortPath, 'COM8');
+assert.strictEqual(reconnectedMetadata.serial.path, 'COM8');
 const legacyMetadata = buildRealtimeChannelMetadata({
   sensorType: 'legacy-demo',
   managedChannels: [{ portId: 'back', role: 'back' }],

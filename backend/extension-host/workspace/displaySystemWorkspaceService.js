@@ -61,17 +61,13 @@ const DEFAULT_ALGORITHM_SOURCES = Object.freeze({
 /**
  * 按矩阵尺寸生成「恒等」的线序表和点位表。
  *
- * 新建传感器时用它垫底：用户还没有真实的线序/点位文件，但这两个文件是必填的
- * （见 displaySystemConfigValidator 的 `files.lineOrder is required`），没有它们
- * manifest 存下去就是不合法的。恒等映射的效果是「按行优先原样铺开」——出的图大概率
- * 不对，但**能出图**，用户可以先看到东西再去调线序，而不是先面对一个存不下去的表单。
+ * 新建传感器时垫底用：线序/点位两个文件是 manifest 必填的，没有就存不下去。恒等映射
+ * 「按行优先原样铺开」，出的图大概率不对但**能出图** —— 让用户先看到东西再调线序，
+ * 而不是先面对一个存不下去的表单。尺寸为 0 时返回空表不抛错（Builder 里边填边算，
+ * 中间态正常）。
  *
- * ⚠️ 两张表的基数不同，这里必须与两个校验器的约定严格对齐：
- * `lineOrder.order` 是 **1 基**（`index + 1`），`pointOrder.points` 是 **0 基**
- * （`[floor(i/cols), i%cols]`）。写错任一侧的表现是「新建的传感器一保存就报越界」。
- *
- * 尺寸为 0 时返回空的两张表（不抛错）：Builder 里矩阵尺寸是用户边填边算的，
- * 中间态很正常。
+ * ⚠️ 两张表**基数不同**，必须与两个校验器严格对齐：`lineOrder.order` 是 **1 基**，
+ * `pointOrder.points` 是 **0 基**。写错任一侧的表现是「新建传感器一保存就报越界」。
  *
  * @param {{rows?: number, cols?: number}} matrix 矩阵尺寸。
  * @returns {{lineOrder: {order: number[]}, pointOrder: {matrix: object, points: number[][]}}}
@@ -118,20 +114,14 @@ function canonicalizePointDefinition(definition) {
 /**
  * 写 JSON：先写临时文件再改名，避免读者读到写了一半的内容。
  *
- * 为什么要这么绕：保存展示系统会连写好几个文件（manifest、线序、点位、算法源码），
- * 而**写完立刻会触发 `reloadDisplaySystems()` 去重新扫描并解析这些文件**。直接
- * `writeFileSync` 覆盖原文件时，扫描可能正好读到半个 JSON，表现是「保存后展示系统
- * 短暂消失或报解析错」。先写 `.tmp-<pid>` 再 rename 让这个中间态不可见。
+ * 为什么要绕：保存会连写好几个文件，而**写完立刻触发 `reloadDisplaySystems()` 重新扫描
+ * 解析它们**，直接覆盖时扫描可能读到半个 JSON（现象是「保存后展示系统短暂消失或报解析
+ * 错」）。末尾补 `\n` 是为了 diff 友好（展示系统目录常被纳入版本管理）。
  *
- * ⚠️ 名字里的 atomic 只保证**内容**不会被读到半截，并不是完整的原子替换：
- * - 先 `unlinkSync` 再 `renameSync`，两步之间有一个「文件不存在」的窗口
- *   （读者此刻会当成没有这份配置）。删这一步是为了迁就 Windows 上 rename 覆盖
- *   已存在文件的行为差异，去掉它需要先在 Windows 上验。
- * - 没有 fsync，断电可能留下空文件或旧内容。
- * - 临时文件名只带 pid，同进程内并发写同一个文件会互相踩。目前保存是串行的
- *   HTTP 处理，不构成问题；要并发就得换成带随机后缀。
- *
- * 末尾补 `\n` 是为了文件对 diff 工具友好（用户的展示系统目录常被纳入版本管理）。
+ * ⚠️ 名字里的 atomic 只保证**内容**不被读到半截，**不是原子替换**，三个已知窗口：先
+ * `unlinkSync` 再 `renameSync`，两步之间文件不存在（删这步是迁就 Windows 的 rename 覆盖
+ * 行为，去掉要先在 Windows 上验）；没有 fsync，断电可能留空文件；临时名只带 pid，同进程
+ * 并发写同一文件会互踩（目前保存是串行 HTTP，要并发得加随机后缀）。
  *
  * @param {string} filePath 目标文件路径。
  * @param {*} value 要序列化的值。
@@ -148,14 +138,12 @@ function writeJsonAtomic(filePath, value, fsLike = fs) {
 /**
  * 写纯文本（算法源码）：同 `writeJsonAtomic` 的临时文件 + 改名策略，另加两处规范化。
  *
- * 1. **CRLF 一律转成 LF**。源码是从浏览器的 textarea 提交上来的，Windows 上很容易
- *    带 `\r\n`；而这些文件会被 Python 解释器读、也常被纳入版本管理。混用换行符
- *    会让 diff 显示成整文件改动，本仓为此专门做过一次 CRLF 清理，写入口就该统一。
- * 2. **保证以换行结尾**。Python 对缺末尾换行更敏感，diff 也会少一条
- *    「\ No newline at end of file」。
+ * ① **CRLF 一律转 LF** —— 源码来自浏览器 textarea，Windows 上很容易带 `\r\n`，而这些文件
+ * 要被 Python 读、也常被纳入版本管理，混用换行会让 diff 变成整文件改动（本仓为此专门做过
+ * 一次 CRLF 清理）。② **保证以换行结尾**，Python 对此更敏感。
  *
- * `String(value || '')` 把 null/undefined 兜成空串：用户清空算法源码是合法操作，
- * 不该在这里抛错（内容是否必须非空由 `validateBuilderAlgorithmSource` 判断）。
+ * `String(value || '')` 把 null/undefined 兜成空串 —— 清空算法源码是合法操作，是否必须
+ * 非空由 `validateBuilderAlgorithmSource` 判。
  *
  * @param {string} filePath 目标文件路径。
  * @param {*} value 文本内容。
@@ -211,18 +199,13 @@ function readTextOptional(filePath, fsLike = fs) {
 /**
  * 检查 Builder 提交的算法源码里有没有约定的入口。
  *
- * ⚠️ **这不是安全检查，只是一次入口形状检查。** 两条正则只确认
- * `module.exports = ...` / `def calculate(raw_data, context):` 存在，代码内部做什么
- * 完全不看 —— 真正的执行边界在别处（JS 走 `vm`、Python 走子进程）。别把它当沙箱，
- * 也别以为加正则能收紧安全。
+ * 存在的理由是**把失败提前到保存时** —— 没有入口的算法在运行期表现为「装好了、没报错、
+ * 就是没有算法输出」，从现象倒查很费时。`none`/`json` 直接返回（不是代码）。抛错而不是
+ * 返回错误列表，因为调用方是保存流程：这条不过就不该继续往磁盘写。
  *
- * 它存在的理由是**把失败提前到保存时**：没有入口的算法在运行期的表现是「装好了、
- * 没报错、就是没有算法输出」，从现象倒查非常费时。保存时报一条明确的错，用户当场
- * 就知道要写什么。
- *
- * `none` 和 `json` 类型直接返回（不是代码，没有入口一说）。
- *
- * 抛错而不是返回错误列表，是因为调用方是保存流程：这一条不过就不该继续往磁盘写。
+ * ⚠️ **这不是安全检查，只是入口形状检查。** 两条正则只确认 `module.exports = ...` /
+ * `def calculate(raw_data, context):` 存在，代码内部做什么完全不看 —— 真正的执行边界在
+ * 别处（JS 走 `vm`、Python 走子进程）。别当沙箱，也别以为加正则能收紧安全。
  *
  * @param {string} type 算法类型（none/json/js/python）。
  * @param {*} source 源码文本。
@@ -262,14 +245,12 @@ function formatDelimiterBytes(bytes) {
 /**
  * 把一份串口协议预设翻译成 Builder 的 serialTemplate。
  *
- * 预设存的是 manifest 的 `protocol` 段（跟解码器同一份 schema），Builder 表单
- * 用的是另一套扁平字段（`framingType` / `dataBits` / `bytesPerValue`）。这里做的
- * 就是这层翻译，好处是「新建传感器」的模板列表和 `GET /api/serial/protocols`
- * 永远同源 —— 用户往可写目录丢一份 JSON，下拉框里就多一项，不用改代码也不用重新构建。
+ * 预设存的是 manifest 的 `protocol` 段（与解码器同一份 schema），Builder 表单用的是扁平
+ * 字段（`framingType`/`dataBits`/`bytesPerValue`），这里做这层翻译。好处是模板列表与
+ * `GET /api/serial/protocols` 永远同源 —— 往可写目录丢一份 JSON，下拉框就多一项。
  *
- * `dataBits` 是 Builder 的显示口径（只有 8/12 两档），真正决定帧长的是
- * `bytesPerValue`，所以它直接取宽度表。四字节类型在界面上会显示成 8 Bit，
- * 这是现有 Segmented 组件的表达能力上限，不是算错了。
+ * `dataBits` 只是 Builder 的显示口径（8/12 两档），真正决定帧长的是 `bytesPerValue`。
+ * 四字节类型在界面上显示成 8 Bit 是 Segmented 组件的表达上限，不是算错。
  *
  * @param {object} preset 已归一化的预设。
  * @returns {object} serialTemplate 条目。
@@ -416,13 +397,12 @@ function buildDisplaySystemBuilderCatalog({ serialProtocolPresets = [] } = {}) {
       },
     ],
     serialRoles: ['sit', 'back', 'head', 'sensor'],
-    // 多传感器系统的 outputChannel 可以任意取名，这里只给建议值而不是枚举。
-    // sit/back/head 三路会入库并进历史回放，其它通道目前只有实时显示。
+    // 多传感器系统的 outputChannel 可以任意取名；所有通道统一按 channelId 入库。
     outputChannelSuggestions: [
       { id: 'sit', label: '坐垫（入库）', stored: true },
       { id: 'back', label: '靠背（入库）', stored: true },
       { id: 'head', label: '头枕（入库）', stored: true },
-      { id: 'sensor', label: '附加传感器（仅实时显示）', stored: false },
+      { id: 'sensor', label: '附加传感器（入库）', stored: true },
     ],
     transportTypes: [
       { id: 'binary', label: '二进制串口' },
@@ -579,20 +559,181 @@ function copyDirectoryRecursive(sourceDirectory, targetDirectory, fsLike) {
   });
 }
 
+function getScopedSensorDefinitions(definitions, sensorId, index) {
+  const shared = { ...(definitions || {}) };
+  delete shared.sensors;
+  const collection = definitions?.sensors;
+  const scoped = Array.isArray(collection)
+    ? collection[index]
+    : collection?.[sensorId];
+  return scoped && typeof scoped === 'object'
+    ? { ...shared, ...scoped }
+    : shared;
+}
+
+/**
+ * 把 v1/v2 单数字段或 v3 `sensors[]` 统一编译成逐路可落盘状态。
+ * Builder 当前为多路共享同一套几何/算法定义；调用方也可用
+ * `definitions.sensors[id]` 为某路提供独立定义。
+ */
+function buildWorkspaceSensorStates(inputManifest, definitions = {}) {
+  const legacySensor = inputManifest.sensor || {};
+  const legacyPorts = Array.isArray(legacySensor.ports) && legacySensor.ports.length
+    ? legacySensor.ports
+    : ['default'];
+  const declaredSensors = Array.isArray(inputManifest.sensors) && inputManifest.sensors.length
+    ? inputManifest.sensors
+    : legacyPorts.map((port) => ({
+      id: port,
+      label: legacySensor.portLabels?.[port] || legacySensor.label || port,
+      outputChannel: port,
+      type: legacySensor.type,
+      matrix: legacySensor.matrix,
+      files: inputManifest.files,
+      protocol: inputManifest.protocol,
+      algorithm: inputManifest.algorithm,
+      stored: true,
+    }));
+
+  return declaredSensors.map((rawSensor, index) => {
+    const id = String(rawSensor?.id || index).trim();
+    const scoped = getScopedSensorDefinitions(definitions, id, index);
+    const suppliedPointOrder = scoped.pointOrder == null
+      ? null
+      : canonicalizePointDefinition(scoped.pointOrder);
+    const pointDefinition = suppliedPointOrder
+      ? normalizePointDefinition(suppliedPointOrder)
+      : null;
+    const suppliedCoordinateMap = scoped.coordinateMap == null
+      ? null
+      : canonicalizeCoordinateMapDefinition(scoped.coordinateMap);
+    const coordinateDefinition = suppliedCoordinateMap
+      ? normalizeCoordinateMapDefinition(suppliedCoordinateMap)
+      : null;
+    const matrix = coordinateDefinition
+      ? { rows: coordinateDefinition.rows, cols: coordinateDefinition.cols }
+      : pointDefinition
+        ? { rows: pointDefinition.rows, cols: pointDefinition.cols }
+        : (rawSensor?.matrix || legacySensor.matrix);
+    const derivedValueCount = pointDefinition?.points.length ?? coordinateDefinition?.pointCount;
+    const rawFiles = rawSensor?.files || inputManifest.files || {};
+    const files = {
+      lineOrder: rawFiles.lineOrder || 'line-order.json',
+      pointOrder: rawFiles.pointOrder || 'point-order.json',
+      ...(suppliedCoordinateMap
+        ? { coordinateMap: rawFiles.coordinateMap || 'coordinate-map.json' }
+        : {}),
+    };
+    const rawAlgorithm = rawSensor?.algorithm || inputManifest.algorithm || { type: 'none' };
+    const algorithmType = rawAlgorithm.type || 'none';
+    if (!BUILDER_ALGORITHM_TYPES.has(algorithmType)) {
+      throw new Error('page builder only supports none, json, js and python backend algorithms');
+    }
+    const algorithmSource = scoped.algorithmSource
+      ?? DEFAULT_ALGORITHM_SOURCES[algorithmType]
+      ?? null;
+    validateBuilderAlgorithmSource(algorithmType, algorithmSource);
+    const algorithm = algorithmType === 'json'
+      ? {
+        ...rawAlgorithm,
+        type: 'json',
+        dataFile: rawAlgorithm.dataFile || 'algorithm-data.json',
+        entry: null,
+      }
+      : CODE_ALGORITHM_TYPES.has(algorithmType)
+        ? {
+          ...rawAlgorithm,
+          type: algorithmType,
+          entry: rawAlgorithm.entry || (algorithmType === 'python' ? 'algorithm.py' : 'algorithm.js'),
+          dataFile: null,
+          input: {
+            source: 'rawData',
+            ...(rawAlgorithm.input || {}),
+          },
+          timeoutMs: Number(rawAlgorithm.timeoutMs || 1000),
+        }
+        : { type: 'none' };
+    const protocolSource = rawSensor?.protocol || inputManifest.protocol || {};
+    const protocol = {
+      ...protocolSource,
+      decoding: {
+        ...(protocolSource.decoding || {}),
+        ...(derivedValueCount == null ? {} : { valueCount: derivedValueCount }),
+      },
+    };
+    const identity = createIdentityDefinitions(matrix);
+    const pointOrder = suppliedPointOrder || identity.pointOrder;
+    const total = Number(matrix?.rows || 0) * Number(matrix?.cols || 0);
+    const pointCount = suppliedPointOrder?.points.length || total;
+    const lineOrder = scoped.lineOrder || {
+      order: Array.from({ length: pointCount }, (_, offset) => offset + 1),
+    };
+
+    return {
+      sensor: {
+        ...rawSensor,
+        id,
+        label: String(rawSensor?.label || legacySensor.portLabels?.[id] || id).trim() || id,
+        outputChannel: String(rawSensor?.outputChannel || id).trim() || id,
+        type: rawSensor?.type || legacySensor.type,
+        matrix,
+        files,
+        protocol,
+        algorithm,
+        stored: rawSensor?.stored !== false,
+      },
+      lineOrder,
+      pointOrder,
+      coordinateMap: suppliedCoordinateMap,
+      algorithmData: algorithmType === 'json' ? (scoped.algorithmData || {}) : null,
+      algorithmSource,
+    };
+  });
+}
+
+function buildWorkspaceManifest(inputManifest, id, sensorStates) {
+  const sensors = sensorStates.map((state) => state.sensor);
+  const primary = sensors[0];
+  const portLabels = Object.fromEntries(sensors.map((sensor) => [sensor.id, sensor.label]));
+  return {
+    ...inputManifest,
+    schemaVersion: 3,
+    id,
+    sensors,
+    // 保留第一路的单数字段投影，旧读取方不需要同时改造。
+    sensor: {
+      ...(inputManifest.sensor || {}),
+      type: primary.type,
+      matrix: { ...primary.matrix },
+      ports: sensors.map((sensor) => sensor.id),
+      portLabels,
+    },
+    files: { ...primary.files },
+    protocol: { ...primary.protocol },
+    algorithm: { ...primary.algorithm },
+  };
+}
+
+function resolveManifestWritePath(directory, relativePath) {
+  const root = path.resolve(directory);
+  const target = path.resolve(root, String(relativePath || ''));
+  const relative = path.relative(root, target);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error(`display system file path must stay inside its directory: ${relativePath}`);
+  }
+  return target;
+}
+
 /**
  * 创建展示系统工作区服务：Builder 的读写落盘层。
  *
- * 这是二开链路里唯一**往磁盘写展示系统**的地方。它只认一个 `writableRoot`
- * （由调用方拼成 `<用户可写目录>/display-systems`），因此打包后的只读资源目录
- * 永远不可能被写到 —— 「自带系统只读、用户系统可写」那条规则的物理保障就在这里，
- * 不是靠上层判断 `editable`（上层那道检查只是为了给出更好的错误信息）。
+ * ⚠️ 这是二开链路里唯一**往磁盘写展示系统**的地方，且只认一个 `writableRoot` ——
+ * 「自带系统只读、用户系统可写」那条规则的**物理保障就在这里**，不是靠上层判断
+ * `editable`（那道检查只为给出更好的错误信息）。改动这里等于改动只读边界。
  *
- * 构造时立刻 `mkdirSync(recursive)`：目录不存在是首次运行的常态，等到保存那一刻
- * 才发现目录没有会让第一次保存失败。
- *
- * `fsLike` 注入让整个服务能在内存文件系统上测（写盘逻辑分支多，不注入就得建真目录）。
- * `listSerialProtocolPresets` 是**函数而不是数组**，为的是每次取目录时重读预设 ——
- * 用户往可写目录丢一份协议 JSON，刷新页面就能看到，不必重启服务。
+ * 构造时立刻 `mkdirSync(recursive)`，否则第一次保存才发现目录没有。`fsLike` 注入让写盘
+ * 分支能在内存文件系统上测。`listSerialProtocolPresets` 是**函数不是数组**，好让每次取
+ * 目录都重读预设 —— 丢一份协议 JSON 刷新页面就能看到，不必重启。
  *
  * @param {object} [options] 创建参数。
  * @param {string} options.writableRoot 用户可写的 display-systems 目录。
@@ -616,36 +757,15 @@ function createDisplaySystemWorkspaceService({
   /**
    * Builder「新建/保存传感器」的落盘主流程。
    *
-   * 顺序是：校 id → 校算法 → 从几何文件反推尺寸 → 重建 manifest → 校 manifest →
-   * 校四份定义文件 → 建目录 → **先写定义文件、最后写 manifest**。
+   * 顺序：校 id → 校算法 → 从几何文件反推尺寸 → 重建 manifest → 两轮校验 → 建目录 →
+   * 先写定义文件、最后写 manifest。两轮校验都用 `error.details` 带完整错误列表再抛；目录已
+   * 存在时抛 `code = 'DISPLAY_SYSTEM_EXISTS'`，好让上层翻成「id 已被占用」而不是 500。
    *
-   * 几个必须知道的点：
-   *
-   * **① `SAFE_DISPLAY_SYSTEM_ID` 是路径安全边界，不只是命名规范。** id 会直接
-   * `path.join(writableRoot, id)` 当目录名用，允许 `..` 或分隔符就能写到可写根目录
-   * 之外。改这个正则等于改一道安全边界。
-   *
-   * **② 尺寸以几何文件为准，不以 manifest 声明为准**（`derivedMatrix` 的优先级：
-   * 坐标映射 → 点位表 → manifest 声明）。同理 `valueCount` 也从点数反推。理由是这两者
-   * 一旦不一致，画面就是错位的，而用户改的通常是几何文件；让文件当唯一真相能从根上
-   * 消掉「manifest 说 10×9、点位表是 8×8」这种不可能自己发现的错。
-   *
-   * **③ 这条通路内嵌了「Builder 单传感器向导」的假设**：强制 `schemaVersion: 2`、
-   * 把 `files` 重写成固定的扁平文件名、按类型重建整个 `algorithm` 段。所以它**不能**
-   * 用来保存 v3 多传感器 manifest —— 这正是 `saveDisplaySection` 单独存在的原因
-   * （见那个函数的注释）。
-   *
-   * **④ 两轮校验都用 `error.details` 带上完整错误列表**再抛，HTTP 层据此把每一条
-   * 摊给用户，而不是只给一句「保存失败」。
-   *
-   * **⑤ manifest 一定最后写。** 发现层是靠 `display-system.json` 是否存在来认一个
-   * 目录的，而**没有 manifest 的目录会被静默跳过**（`discoverDisplaySystems` 只在
-   * `result.manifestPath` 非空时才记错误）。所以写到一半崩掉的结果是「这个系统还没
-   * 出现」，而不是「出现了但引用的文件都不在」—— 后者会在每次启动时刷一堆错误。
-   * **调整写入顺序会破坏这个性质。**
-   *
-   * `overwrite` 默认 false，目录已存在时抛带 `code = 'DISPLAY_SYSTEM_EXISTS'` 的错，
-   * 让上层能把它翻成「id 已被占用」而不是 500。
+   * ⚠️ 四条改动前必读：① `SAFE_DISPLAY_SYSTEM_ID` **是路径安全边界**，id 直接当目录名。
+   * ② 每路尺寸**以该路几何定义为准**（坐标映射 → 点位表 → 声明）。③ v1/v2 输入
+   * 和 v3 输入都会编译为 `schemaVersion: 3` + 完整 `sensors[]`，同时保留第一路的
+   * `sensor/protocol/files/algorithm` 兼容投影。④ **manifest 一定最后写**：发现层靠它
+   * 认目录，写到一半崩掉才会是「系统还没出现」而不是「出现了但文件都不在」。
    *
    * @param {object} [options] 保存参数。
    * @param {object} options.manifest Builder 提交的 manifest。
@@ -666,105 +786,62 @@ function createDisplaySystemWorkspaceService({
       throw new Error('display system id may only contain letters, numbers, dot, underscore and hyphen');
     }
 
-    const algorithmType = inputManifest.algorithm?.type || 'none';
-    if (!BUILDER_ALGORITHM_TYPES.has(algorithmType)) {
-      throw new Error('page builder only supports none, json, js and python backend algorithms');
-    }
-    const algorithmSource = definitions.algorithmSource
-      ?? DEFAULT_ALGORITHM_SOURCES[algorithmType]
-      ?? null;
-    validateBuilderAlgorithmSource(algorithmType, algorithmSource);
-
-    const suppliedPointOrder = definitions.pointOrder == null
-      ? null
-      : canonicalizePointDefinition(definitions.pointOrder);
-    const pointDefinition = suppliedPointOrder
-      ? normalizePointDefinition(suppliedPointOrder)
-      : null;
-    const suppliedCoordinateMap = definitions.coordinateMap == null
-      ? null
-      : canonicalizeCoordinateMapDefinition(definitions.coordinateMap);
-    const coordinateDefinition = suppliedCoordinateMap
-      ? normalizeCoordinateMapDefinition(suppliedCoordinateMap)
-      : null;
-    const derivedMatrix = coordinateDefinition
-      ? { rows: coordinateDefinition.rows, cols: coordinateDefinition.cols }
-      : pointDefinition
-      ? { rows: pointDefinition.rows, cols: pointDefinition.cols }
-      : inputManifest.sensor?.matrix;
-    const derivedValueCount = pointDefinition?.points.length ?? coordinateDefinition?.pointCount;
-
-    const manifest = {
-      ...inputManifest,
-      schemaVersion: 2,
-      id,
-      sensor: {
-        ...inputManifest.sensor,
-        matrix: derivedMatrix,
-      },
-      protocol: {
-        ...inputManifest.protocol,
-        decoding: {
-          ...inputManifest.protocol?.decoding,
-          ...(derivedValueCount == null ? {} : { valueCount: derivedValueCount }),
-        },
-      },
-      files: {
-        lineOrder: 'line-order.json',
-        pointOrder: 'point-order.json',
-        ...(suppliedCoordinateMap ? { coordinateMap: 'coordinate-map.json' } : {}),
-      },
-      algorithm: algorithmType === 'json'
-        ? { ...inputManifest.algorithm, type: 'json', dataFile: 'algorithm-data.json', entry: null }
-        : CODE_ALGORITHM_TYPES.has(algorithmType)
-          ? {
-            ...inputManifest.algorithm,
-            type: algorithmType,
-            entry: algorithmType === 'python' ? 'algorithm.py' : 'algorithm.js',
-            dataFile: null,
-            input: {
-              source: 'rawData',
-              ...(inputManifest.algorithm?.input || {}),
-            },
-            timeoutMs: Number(inputManifest.algorithm?.timeoutMs || 1000),
-          }
-          : { type: 'none' },
-    };
+    const sensorStates = buildWorkspaceSensorStates(inputManifest, definitions);
+    const manifest = buildWorkspaceManifest(inputManifest, id, sensorStates);
     const validation = validateDisplaySystemConfig(manifest, { source: 'page builder' });
     if (!validation.ok) {
       const error = new Error('display system manifest validation failed');
       error.details = validation.errors;
       throw error;
     }
+    const persistedSensors = manifest.sensors.map((sensor, index) => ({
+      ...sensor,
+      protocol: validation.value.sensors[index].protocol,
+    }));
     const persistedManifest = {
       ...manifest,
-      protocol: validation.value.protocol,
+      sensors: persistedSensors,
+      sensor: {
+        ...manifest.sensor,
+        type: persistedSensors[0].type,
+        matrix: { ...persistedSensors[0].matrix },
+      },
+      files: { ...persistedSensors[0].files },
+      protocol: { ...persistedSensors[0].protocol },
+      algorithm: { ...persistedSensors[0].algorithm },
     };
 
-    const matrix = validation.value.sensor.matrix;
-    const total = matrix.rows * matrix.cols;
-    const identity = createIdentityDefinitions(matrix);
-    const pointOrder = suppliedPointOrder || identity.pointOrder;
-    const pointCount = suppliedPointOrder?.points.length || total;
-    const lineOrder = definitions.lineOrder || {
-      order: Array.from({ length: pointCount }, (_, index) => index + 1),
-    };
-    const algorithmData = algorithmType === 'json' ? (definitions.algorithmData || {}) : null;
-    const definitionErrors = [
-      ...validateLineOrderDefinition(lineOrder, { source: 'line-order.json', matrixTotal: total }),
-      ...validatePointOrderDefinition(pointOrder, {
-        source: 'point-order.json',
-        matrix,
-        maxPointCount: Array.isArray(lineOrder?.order) ? lineOrder.order.length : total,
-      }),
-      ...(suppliedCoordinateMap
-        ? validateCoordinateMapDefinition(suppliedCoordinateMap, {
-          source: 'coordinate-map.json',
+    const definitionErrors = sensorStates.flatMap((state, index) => {
+      const sensor = persistedSensors[index];
+      const matrix = sensor.matrix;
+      const total = matrix.rows * matrix.cols;
+      const lineOrderLength = Array.isArray(state.lineOrder)
+        ? state.lineOrder.length
+        : Array.isArray(state.lineOrder?.order)
+          ? state.lineOrder.order.length
+          : total;
+      const sourcePrefix = `sensor ${sensor.id}`;
+      return [
+        ...validateLineOrderDefinition(state.lineOrder, {
+          source: `${sourcePrefix}: ${sensor.files.lineOrder}`,
+          matrixTotal: total,
+        }),
+        ...validatePointOrderDefinition(state.pointOrder, {
+          source: `${sourcePrefix}: ${sensor.files.pointOrder}`,
           matrix,
-        })
-        : []),
-      ...validateAlgorithmDataDefinition(algorithmData, { source: 'algorithm-data.json' }),
-    ];
+          maxPointCount: lineOrderLength,
+        }),
+        ...(state.coordinateMap
+          ? validateCoordinateMapDefinition(state.coordinateMap, {
+            source: `${sourcePrefix}: ${sensor.files.coordinateMap}`,
+            matrix,
+          })
+          : []),
+        ...validateAlgorithmDataDefinition(state.algorithmData, {
+          source: `${sourcePrefix}: ${sensor.algorithm.dataFile || 'algorithm-data.json'}`,
+        }),
+      ];
+    });
     if (definitionErrors.length) {
       const error = new Error('display system definition validation failed');
       error.details = definitionErrors;
@@ -778,18 +855,38 @@ function createDisplaySystemWorkspaceService({
       throw error;
     }
     fsLike.mkdirSync(directory, { recursive: true });
-    writeJsonAtomic(path.join(directory, 'line-order.json'), lineOrder, fsLike);
-    writeJsonAtomic(path.join(directory, 'point-order.json'), pointOrder, fsLike);
-    if (suppliedCoordinateMap) {
-      writeJsonAtomic(path.join(directory, 'coordinate-map.json'), suppliedCoordinateMap, fsLike);
-    }
-    if (algorithmData) {
-      writeJsonAtomic(path.join(directory, 'algorithm-data.json'), algorithmData, fsLike);
-    }
-    if (CODE_ALGORITHM_TYPES.has(algorithmType)) {
-      const filename = algorithmType === 'python' ? 'algorithm.py' : 'algorithm.js';
-      writeTextAtomic(path.join(directory, filename), algorithmSource, fsLike);
-    }
+    const pendingWrites = new Map();
+    const queueWrite = (relativePath, type, value) => {
+      const filePath = resolveManifestWritePath(directory, relativePath);
+      const key = process.platform === 'win32' ? filePath.toLowerCase() : filePath;
+      const fingerprint = type === 'json'
+        ? JSON.stringify(value)
+        : String(value || '').replace(/\r\n/g, '\n');
+      const previous = pendingWrites.get(key);
+      if (previous && (previous.type !== type || previous.fingerprint !== fingerprint)) {
+        throw new Error(`multiple sensors write different definitions to ${relativePath}`);
+      }
+      pendingWrites.set(key, { filePath, type, value, fingerprint });
+    };
+    sensorStates.forEach((state, index) => {
+      const sensor = persistedSensors[index];
+      queueWrite(sensor.files.lineOrder, 'json', state.lineOrder);
+      queueWrite(sensor.files.pointOrder, 'json', state.pointOrder);
+      if (state.coordinateMap) {
+        queueWrite(sensor.files.coordinateMap, 'json', state.coordinateMap);
+      }
+      if (state.algorithmData) {
+        queueWrite(sensor.algorithm.dataFile, 'json', state.algorithmData);
+      }
+      if (CODE_ALGORITHM_TYPES.has(sensor.algorithm.type)) {
+        queueWrite(sensor.algorithm.entry, 'text', state.algorithmSource);
+      }
+    });
+    pendingWrites.forEach(({ filePath, type, value }) => {
+      fsLike.mkdirSync(path.dirname(filePath), { recursive: true });
+      if (type === 'json') writeJsonAtomic(filePath, value, fsLike);
+      else writeTextAtomic(filePath, value, fsLike);
+    });
     writeJsonAtomic(path.join(directory, 'display-system.json'), persistedManifest, fsLike);
 
     return { id, directory, manifest: persistedManifest };
@@ -798,10 +895,9 @@ function createDisplaySystemWorkspaceService({
   /**
    * 把主界面拖出来的外观固化进 manifest 的 display 段。
    *
-   * **刻意不复用 `save()`。** 那条通路内嵌了 Builder 的单传感器向导假设：
-   * 强制 `schemaVersion: 2`、把 `files` 重写成扁平路径、重建 `algorithm` 段。
-   * 拿一份 v3 多传感器 manifest 过一遍它只为了改一个配色，会把 manifest 改坏。
-   * 这里读原文、只合并 display 下那三段、逐字写回，其余字段一个都不碰。
+   * **刻意不复用 `save()`。** `save()` 是完整 Builder 编译，会重新派生逐路几何、
+   * 协议、文件和算法引用；只改一个配色不应该触发这些写入。这里读原文、只合并
+   * display 下那三段、逐字写回，其余字段一个都不碰。
    *
    * @param {object} config 已加载的展示系统配置（要有 `manifestPath`）。
    * @param {{canvas?: object, chartAppearance?: object, chartCards?: object[]}} patch 要写入的三段。
@@ -876,22 +972,14 @@ function createDisplaySystemWorkspaceService({
   /**
    * 读出一个展示系统的**可编辑视图**：manifest 原文 + 五份定义文件内容 + 权限标记。
    *
-   * 与发现层的 `getById` 不同：那个给的是归一、校验、投影之后的运行时配置；这里给的是
-   * **磁盘原文**，因为 Builder 要把用户当初写的东西一字不差地填回表单。若拿归一结果
-   * 回填，用户一打开表单就会看到被补过默认值的内容，随手一存就把默认值固化进
-   * manifest。
+   * ⚠️ 与发现层 `getById` 不同：那个给归一校验投影后的运行时配置，这里给**磁盘原文** ——
+   * Builder 要把用户当初写的东西一字不差填回表单。拿归一结果回填的话，用户一打开就看到
+   * 补过默认值的内容，随手一存就把默认值固化进 manifest。
    *
-   * 五份定义全走 `readJsonOptional`/`readTextOptional`，缺文件返回 null 而不报错 ——
-   * 只有线序和点位是必填，其余三份缺失是常态。
-   *
-   * 三个权限字段分工不同，别当成一个：
-   * - `pathIsWritable`：这份 manifest **物理上**是否在可写根目录里（用
-   *   `path.relative(...).startsWith('..')` 判包含，理由同
-   *   `displaySystemRuntimeDiscovery.isPathInside`）。
-   * - `editable`：优先采信调用方给的 `config.editable`（发现层已按 origin 判过），
-   *   没给才退回路径判断。这样两处判据不会给出互相矛盾的答案。
-   * - `writable`：两者都成立才是真能写。前端据此决定「保存」按钮是可用、还是只给
-   *   「另存为」。
+   * 五份定义全走 optional 读取，缺文件返回 null 不报错（只有线序和点位必填）。
+   * 三个权限字段**分工不同别当成一个**：`pathIsWritable` 是物理位置是否在可写根内；
+   * `editable` 优先采信发现层按 origin 判好的 `config.editable`，没给才退回路径判断（避免
+   * 两处判据矛盾）；`writable` 两者都成立才算，前端据此决定「保存」还是只给「另存为」。
    *
    * @param {{manifestPath?: string, resolvedFiles?: object, editable?: boolean,
    *          origin?: string}} config 已加载的展示系统配置。

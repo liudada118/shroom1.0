@@ -21,6 +21,7 @@ import { translateDomainLabel } from '../../i18n/translateDomainLabel';
 import { getLanguageLocale } from '../../i18n';
 import JqbedAlgorithmConfigModal from '../../extensions/jqbed/JqbedAlgorithmConfigModal';
 import { getJqbedConfigAccess } from '../../extensions/jqbed/jqbedAlgorithmConfig';
+import { commandClient } from '../../services/command/commandClient';
 import {
   PRESSURE_SCENES,
   readPressureScene,
@@ -28,6 +29,16 @@ import {
   resolvePressureSceneChangeZero,
   writePressureScene,
 } from './displaySwitchZeroPolicy';
+import {
+  collectCsvDownloadArtifacts,
+  getUnmatchedLegacyDownloadFiles,
+  mergeCsvDownloadArtifacts,
+  resolveManifestDownloadChannelIds,
+} from './csvDownloadArtifacts';
+import {
+  buildManifestSerialPortOptions,
+  resolveManifestSerialSensors,
+} from './manifestSerialControls';
 let collection = JSON.parse(localStorage.getItem('collection'))
   ? JSON.parse(localStorage.getItem('collection'))
   : [['hunch', 'front', '标签']];
@@ -316,6 +327,8 @@ class Title extends React.Component {
       csvDownloadPath: localStorage.getItem('csvDownloadPath') || '',
       csvDownloadFormat: 'csv',
       csvDownloadFiles: [],
+      csvDownloadArtifacts: [],
+      csvDownloadSkippedChannels: [],
       csvDownloadDir: '',
       csvDownloadMessage: '',
       csvDownloadProgress: 0,
@@ -334,6 +347,7 @@ class Title extends React.Component {
       pdfLoading: false,
       humanTransform: createDefaultHumanTransform(),
       dynamicSensors: [],
+      manifestPortSelections: {},
       jqbedAlgorithmConfigOpen: false,
     }
     this.inputRef = React.createRef(null)
@@ -351,17 +365,60 @@ class Title extends React.Component {
 
   /** 重新读取后端已加载的 Display Systems，并同步前端运行时注册表。 */
   loadDynamicSensors = () => {
-    fetch('http://127.0.0.1:19245/api/display-systems')
-      .then((response) => response.json())
-      .then((payload) => {
-        const definitions = payload?.displaySystems?.runtimeDefinitions || []
+    Promise.all([
+      fetch('http://127.0.0.1:19245/api/display-systems').then((response) => response.json()),
+      fetch('http://127.0.0.1:19245/api/serial/status')
+        .then((response) => response.json())
+        .catch(() => null),
+    ])
+      .then(([displayPayload, serialPayload]) => {
+        const definitions = displayPayload?.displaySystems?.runtimeDefinitions || []
         const dynamicSensors = definitions
           .map((definition) => registerRuntimeDisplayDefinition(definition))
           .filter(Boolean)
           .map((definition) => ({ label: definition.label, value: definition.type }))
-        this.setState({ dynamicSensors })
+        const statuses = serialPayload?.data?.serial || serialPayload?.serial || []
+        const manifestPortSelections = Object.fromEntries(
+          (Array.isArray(statuses) ? statuses : [statuses])
+            .filter((status) => status?.role && status?.path)
+            .map((status) => [status.role, status.path]),
+        )
+        this.setState({ dynamicSensors, manifestPortSelections })
       })
       .catch((error) => console.warn('[DisplaySystems] load failed', error))
+  }
+
+  openManifestSerialChannel = async (sensor, path) => {
+    try {
+      await commandClient.execute('serial.open', {
+        role: sensor.serialRole,
+        path,
+        ...(sensor.baudRate ? { baudRate: sensor.baudRate } : {}),
+      })
+      this.setState((state) => ({
+        manifestPortSelections: {
+          ...state.manifestPortSelections,
+          [sensor.serialRole]: path,
+        },
+      }))
+    } catch (error) {
+      message.error(`${sensor.sensorLabel}串口打开失败：${error.message}`)
+    }
+  }
+
+  closeManifestSerialChannels = async (sensors) => {
+    const roles = [...new Set(sensors.map((sensor) => sensor.serialRole).filter(Boolean))]
+    if (!roles.length) return
+    try {
+      await commandClient.execute('serial.close', { roles })
+      this.setState((state) => {
+        const manifestPortSelections = { ...state.manifestPortSelections }
+        roles.forEach((role) => { delete manifestPortSelections[role] })
+        return { manifestPortSelections }
+      })
+    } catch (error) {
+      message.error(`串口关闭失败：${error.message}`)
+    }
   }
 
   initializeLegacyState() {
@@ -643,6 +700,8 @@ class Title extends React.Component {
       csvDownloadModalOpen: true,
       csvDownloadStage: 'config',
       csvDownloadFiles: [],
+      csvDownloadArtifacts: [],
+      csvDownloadSkippedChannels: [],
       csvDownloadDir: this.state.csvDownloadPath || '',
       csvDownloadMessage: '',
       csvDownloadProgress: 0,
@@ -701,60 +760,92 @@ class Title extends React.Component {
     this.setState({
       csvDownloadStage: 'exporting',
       csvDownloadFiles: [],
+      csvDownloadArtifacts: [],
+      csvDownloadSkippedChannels: [],
       csvDownloadDir: downloadPath,
       csvDownloadProgress: 0,
       csvDownloadProgressDetail: null,
       csvDownloadMessage: this.props.t('csv.exportingShort'),
     });
+    const displayDefinition = getDisplayDefinition(this.props.matrixName);
+    const channelIds = resolveManifestDownloadChannelIds(displayDefinition);
     this.props.wsSendObj({
       download: this.state.dataTime,
       downloadOptions: {
         path: downloadPath,
         format: this.state.csvDownloadFormat,
         language: this.props.i18n?.language || 'zh',
+        ...(channelIds.length ? { channelIds } : {}),
       },
     });
   }
 
   handleCsvDownloadStatus(event) {
     const detail = event.detail || {};
+    const nextArtifacts = collectCsvDownloadArtifacts(detail);
+    const nextSkippedChannels = Array.isArray(detail.downloadSkippedChannels)
+      ? detail.downloadSkippedChannels.map((channelId) => String(channelId || '').trim()).filter(Boolean)
+      : [];
     if (detail.csvDownloadProgress != null) {
       const progress = detail.csvDownloadProgress || {};
-      this.setState({
+      this.setState((current) => ({
         csvDownloadModalOpen: true,
         csvDownloadStage: 'exporting',
-        csvDownloadDir: detail.downloadDir || progress.dir || this.state.csvDownloadDir || this.state.csvDownloadPath,
+        csvDownloadArtifacts: mergeCsvDownloadArtifacts(
+          current.csvDownloadArtifacts,
+          nextArtifacts,
+        ),
+        csvDownloadSkippedChannels: Array.from(new Set([
+          ...(current.csvDownloadSkippedChannels || []),
+          ...nextSkippedChannels,
+        ])),
+        csvDownloadDir: detail.downloadDir || progress.dir || current.csvDownloadDir || current.csvDownloadPath,
         csvDownloadProgress: Math.max(0, Math.min(100, Number(progress.percent) || 0)),
         csvDownloadProgressDetail: progress,
         csvDownloadMessage: progress.currentFile
           ? this.props.t('csv.exportingFile', { file: progress.currentFile })
           : this.props.t('csv.exportingShort'),
-      });
+      }));
       return;
     }
     if (!['export csv success', 'export csv failed'].includes(detail.download)) {
       return;
     }
     const nextFiles = Array.isArray(detail.downloadFiles) ? detail.downloadFiles : [];
-    const mergedFiles = Array.from(new Set([...(this.state.csvDownloadFiles || []), ...nextFiles]));
     if (detail.download === 'export csv success') {
-      this.setState({
+      this.setState((current) => ({
         csvDownloadModalOpen: true,
         csvDownloadStage: 'done',
-        csvDownloadFiles: mergedFiles,
-        csvDownloadDir: detail.downloadDir || this.state.csvDownloadDir || this.state.csvDownloadPath,
+        csvDownloadFiles: Array.from(new Set([...(current.csvDownloadFiles || []), ...nextFiles])),
+        csvDownloadArtifacts: mergeCsvDownloadArtifacts(
+          current.csvDownloadArtifacts,
+          nextArtifacts,
+        ),
+        csvDownloadSkippedChannels: Array.from(new Set([
+          ...(current.csvDownloadSkippedChannels || []),
+          ...nextSkippedChannels,
+        ])),
+        csvDownloadDir: detail.downloadDir || current.csvDownloadDir || current.csvDownloadPath,
         csvDownloadProgress: 100,
         csvDownloadMessage: detail.displayMsg || this.props.t('export csv success'),
-      });
+      }));
       return;
     }
-    this.setState({
+    this.setState((current) => ({
       csvDownloadModalOpen: true,
       csvDownloadStage: 'error',
-      csvDownloadFiles: mergedFiles,
-      csvDownloadDir: detail.downloadDir || this.state.csvDownloadDir || this.state.csvDownloadPath,
+      csvDownloadFiles: Array.from(new Set([...(current.csvDownloadFiles || []), ...nextFiles])),
+      csvDownloadArtifacts: mergeCsvDownloadArtifacts(
+        current.csvDownloadArtifacts,
+        nextArtifacts,
+      ),
+      csvDownloadSkippedChannels: Array.from(new Set([
+        ...(current.csvDownloadSkippedChannels || []),
+        ...nextSkippedChannels,
+      ])),
+      csvDownloadDir: detail.downloadDir || current.csvDownloadDir || current.csvDownloadPath,
       csvDownloadMessage: detail.downloadError || detail.displayMsg || this.props.t('export csv failed'),
-    });
+    }));
   }
 
   renderCsvDownloadModal(t) {
@@ -763,7 +854,12 @@ class Title extends React.Component {
     const isExporting = stage === 'exporting';
     const isDone = stage === 'done';
     const isError = stage === 'error';
-    const fileList = this.state.csvDownloadFiles || [];
+    const artifactList = this.state.csvDownloadArtifacts || [];
+    const skippedChannelList = this.state.csvDownloadSkippedChannels || [];
+    const fileList = getUnmatchedLegacyDownloadFiles(
+      this.state.csvDownloadFiles,
+      artifactList,
+    );
     const folderPath = this.state.csvDownloadDir || this.state.csvDownloadPath;
     const progressDetail = this.state.csvDownloadProgressDetail || {};
     const progressPercent = Math.max(0, Math.min(100, Math.round(Number(this.state.csvDownloadProgress) || 0)));
@@ -840,12 +936,66 @@ class Title extends React.Component {
         {isDone ? (
           <Space direction='vertical' style={{ width: '100%' }} size={12}>
             <div>{this.state.csvDownloadMessage || t('export csv success')}</div>
+            {skippedChannelList.length ? (
+              <div style={{ color: '#d48806' }}>
+                未找到历史数据：{skippedChannelList.join('、')}
+              </div>
+            ) : null}
+            {artifactList.map((artifact) => {
+              const filePath = artifact.filePath || artifact.file || '';
+              const sensorLabel = artifact.sensorLabel
+                || artifact.sensorId
+                || artifact.outputChannel
+                || artifact.channelId;
+              const serialRoles = artifact.serialRoles?.length
+                ? artifact.serialRoles
+                : [artifact.serialRole].filter(Boolean);
+              const serialPortPaths = artifact.serialPortPaths?.length
+                ? artifact.serialPortPaths
+                : [artifact.serialPortPath].filter(Boolean);
+              const baudRates = artifact.baudRates?.length
+                ? artifact.baudRates
+                : [artifact.baudRate].filter((value) => value !== '' && value != null);
+              const parserChannels = artifact.parserChannels?.length
+                ? artifact.parserChannels
+                : [artifact.parserChannel].filter(Boolean);
+              return (
+                <div
+                  key={artifact.channelId ? `channel:${artifact.channelId}` : `file:${filePath}`}
+                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 600 }}>{sensorLabel}</div>
+                    <div style={{ color: '#666', fontSize: 12 }}>
+                      {[
+                        artifact.channelId,
+                        serialRoles.length ? `角色 ${serialRoles.join(' / ')}` : '',
+                        serialPortPaths.length
+                          ? `端口 ${serialPortPaths.join(artifact.serialChanged ? ' → ' : ' / ')}`
+                          : '',
+                        baudRates.length ? `${baudRates.join(' / ')} baud` : '',
+                        parserChannels.length ? `解析 ${parserChannels.join(' / ')}` : '',
+                      ].filter(Boolean).join(' · ')}
+                    </div>
+                    {filePath ? (
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {filePath}
+                      </div>
+                    ) : null}
+                  </div>
+                  <Button disabled={!filePath} size='small' onClick={() => this.openCsvPath(filePath)}>
+                    {t('common.open')}
+                  </Button>
+                </div>
+              );
+            })}
             {fileList.length ? fileList.map((filePath) => (
               <div key={filePath} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{filePath}</span>
                 <Button size='small' onClick={() => this.openCsvPath(filePath)}>{t('common.open')}</Button>
               </div>
-            )) : <div>{t('csv.noPath')}</div>}
+            )) : null}
+            {!artifactList.length && !fileList.length ? <div>{t('csv.noPath')}</div> : null}
             <Button disabled={!folderPath} onClick={() => this.openCsvPath(folderPath)}>{t('csv.openDownloadFolder')}</Button>
           </Space>
         ) : null}
@@ -1688,6 +1838,9 @@ class Title extends React.Component {
       dynamicSensors: this.state.dynamicSensors,
       allowedTypes: this.props.allowedTypes,
     });
+    const manifestSerialSensors = resolveManifestSerialSensors(
+      getDisplayDefinition(this.props.matrixName),
+    );
 
     const navItems = [
       {
@@ -1758,7 +1911,7 @@ class Title extends React.Component {
             // 到达顺序变化时误清掉上一个展示系统的独立零点。
             const displaySystemId = getDisplayDefinition(e)?.displaySystemId || e
             this.props.wsSendObj({ resetZero: false, displaySystemId })
-            this.setState({ resetZero: false, dataTime: '' })
+            this.setState({ resetZero: false, dataTime: '', manifestPortSelections: {} })
 
             this.props.changeStateData({
               portname: '',
@@ -1782,7 +1935,27 @@ class Title extends React.Component {
         }
 
         <Menu className='menu' onClick={this.onClick} selectedKeys={[this.state.current]} mode="horizontal" items={navItems} />
-        {this.props.matrixName != 'localCar' ? this.props.history === 'now' ? this.props.matrixName != 'car' && this.props.matrixName != 'car10' && this.props.matrixName != 'sofa' && this.props.matrixName != 'yanfeng10' && this.props.matrixName != 'volvo' && this.props.matrixName != 'carQX' && this.props.matrixName != wholeChairType_title && this.props.matrixName != minzhenType_title && this.props.matrixName != 'hand0507' && !tactileGloveTypes_title.includes(this.props.matrixName) && this.props.matrixName != 'footVideo' && this.props.matrixName != 'eye' ? <><Select
+        {this.props.matrixName != 'localCar' ? this.props.history === 'now' ? manifestSerialSensors.length ? <>
+          {manifestSerialSensors.map((sensor) => (
+            <Select
+              key={sensor.channelId || sensor.serialRole}
+              style={{ marginRight: 6, width: 180 }}
+              placeholder={`选择${sensor.sensorLabel}串口`}
+              aria-label={`${sensor.sensorLabel}串口`}
+              value={this.state.manifestPortSelections[sensor.serialRole] || undefined}
+              onOpenChange={() => {
+                this.props.wsSendObj({ serialReset: true })
+              }}
+              onSelect={(path) => this.openManifestSerialChannel(sensor, path)}
+              options={buildManifestSerialPortOptions(
+                this.props.port,
+                this.state.manifestPortSelections,
+                sensor.serialRole,
+                sensor.sensorLabel,
+              )}
+            />
+          ))}
+        </> : this.props.matrixName != 'car' && this.props.matrixName != 'car10' && this.props.matrixName != 'sofa' && this.props.matrixName != 'yanfeng10' && this.props.matrixName != 'volvo' && this.props.matrixName != 'carQX' && this.props.matrixName != wholeChairType_title && this.props.matrixName != minzhenType_title && this.props.matrixName != 'hand0507' && !tactileGloveTypes_title.includes(this.props.matrixName) && this.props.matrixName != 'footVideo' && this.props.matrixName != 'eye' ? <><Select
 
           style={{ marginRight: 6, width: 140 }}
           placeholder={t('chooseSensor')}
@@ -2175,6 +2348,10 @@ class Title extends React.Component {
         >{t('display.fixed')}</Button> : ''}
 
         <Button onClick={() => {
+          if (manifestSerialSensors.length) {
+            this.closeManifestSerialChannels(manifestSerialSensors)
+            return
+          }
           this.props.wsSendObj({
             sitClose: true,
             backClose: true,

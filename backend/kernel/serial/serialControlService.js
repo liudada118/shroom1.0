@@ -174,6 +174,7 @@ function registerSerialControlHandlers(router, deps) {
         localData: [],
         localDataBack: [],
         localDataHead: [],
+        historyChannels: [],
         indexArr: [0, 0],
       });
       // Display System dispatcher 的策略依赖当前传感器类型，切换后立即重绑，

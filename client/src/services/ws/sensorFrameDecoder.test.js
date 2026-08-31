@@ -16,12 +16,19 @@ const frame = {
   channelId: 'multi-demo:armLeft',
   displaySystemId: 'multi-demo',
   sensorId: 'armLeft',
+  sensorLabel: '左手',
   outputChannel: 'armLeft',
   sensorType: 'arm',
   source: 'realtime',
   sequence: 12,
   timestamp: 1234,
   quality: 'good',
+  serial: {
+    role: 'leftHand',
+    path: 'COM7',
+    baudRate: 921600,
+    parserChannel: 'multi-demo:armLeft',
+  },
   payload: {
     value: [30, 40],
     stages: {
@@ -69,6 +76,8 @@ describe('sensorFrameDecoder', () => {
     expect(decoded.backFlag).toBe(false);
     expect(decoded.temperatureData).toEqual([36.5]);
     expect(decoded.frameIndex).toBe(9);
+    expect(decoded.sensorLabel).toBe('左手');
+    expect(decoded.serial).toEqual(frame.serial);
   });
 
   it.each(['sit', 'back', 'head'])('不重建 %s 通道的顶层旧字段', (channel) => {
@@ -163,5 +172,16 @@ describe('sensorFrameDecoder', () => {
     expect(decoded.outputChannel).toBe('armLeft');
     expect(decoded.type).toBe('sensor.frame');
     expect(decoded.payload.value).toEqual([30, 40]);
+  });
+
+  it.each([
+    { displaySystemId: '', channelId: 'multi-demo:armLeft' },
+    { sensorId: '', channelId: 'multi-demo:armLeft' },
+    { outputChannel: '' },
+    { channelId: 'other-system:armLeft' },
+  ])('canonical 身份缺失或冲突时 fail closed：%o', (identityPatch) => {
+    const malformed = { ...frame, ...identityPatch };
+    expect(isSensorFrameEnvelope(malformed)).toBe(false);
+    expect(isSensorFrameForDisplay(malformed, ['multi-demo'])).toBe(false);
   });
 });

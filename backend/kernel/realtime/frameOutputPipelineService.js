@@ -125,9 +125,8 @@ function createFrameOutputPipeline({
   /**
    * 发布 sit/back/head 之外的实时帧。
    *
-   * 展示系统的 manifest 可以声明任意数量的传感器，它们的输出通道不限于旧的三路。
-   * 这些通道只做实时下发，不入库：采集存储只建了 sit/back/head 三张表，
-   * 未知通道没有落库目标。历史回放因此也不会包含这些通道。
+   * 展示系统的 manifest 可以声明任意数量的传感器，它们统一存入主库并由
+   * canonical channelId 隔离；outputChannel 只是展示别名，不再决定数据库数量。
    *
    * @param {string} channel 输出通道名，例如 armLeft。
    * @param {string|object} jsonData 实时帧。
@@ -135,8 +134,13 @@ function createFrameOutputPipeline({
    */
   function publishAux(channel, jsonData, options = {}) {
     const { frame, payloadText, zeroedStages } = prepareFrame(channel, jsonData, options);
-    const sent = publishRealtimeChannel(channel, payloadText);
-    return { stored: false, sent, jsonData: payloadText, frame, zeroedStages };
+    const stored = options?.store === false
+      ? false
+      : collectionFrameStorage.storeFrame(frame, { fallbackChannel: channel });
+    const sent = options?.publish === false
+      ? 0
+      : publishRealtimeChannel(channel, payloadText);
+    return { stored, sent, jsonData: payloadText, frame, zeroedStages };
   }
 
   return {

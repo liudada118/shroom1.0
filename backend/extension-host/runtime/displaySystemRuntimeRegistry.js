@@ -129,12 +129,16 @@ function createDisplaySystemRuntimeRegistry({ logger } = {}) {
       channels: runtimeChannels.map((channel) => ({
         id: channel.id,
         displaySystemId: channel.displaySystemId,
+        sensorId: channel.sensor?.id || channel.serialRole,
+        sensorLabel: channel.label || channel.serialRole,
         serialRole: channel.serialRole,
+        baudRate: channel.baudRate || channel.protocol?.baudRate || null,
         parserChannel: channel.parserChannel?.role || null,
         lineOrder: channel.processing?.lineOrder?.source || null,
         pointOrder: channel.processing?.pointOrder?.source || null,
         algorithmType: channel.processing?.algorithm?.type || 'none',
         outputChannel: channel.outputChannel || channel.serialRole,
+        stored: channel.stored !== false,
         status: channel.status,
       })),
     };

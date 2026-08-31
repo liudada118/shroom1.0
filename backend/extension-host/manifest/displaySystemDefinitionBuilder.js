@@ -126,6 +126,7 @@ function buildParserChannelDefinitionsFromDisplaySystem(config) {
       label: sensor.label || channel,
       displaySystemId: config.id,
       sensorType: sensor.type || config.sensor?.type,
+      stored: sensor.stored !== false,
       matrix: buildMatrixDefinition(sensor),
       protocol: sensor.protocol ? { ...sensor.protocol } : null,
       coordinateMap: sensor.coordinateMap || null,

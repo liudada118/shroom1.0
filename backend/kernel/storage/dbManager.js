@@ -15,6 +15,75 @@ const sqlite3 = require('./sqlite3-compat').verbose();
 const logger = require('../../common/logger');
 const { isCar } = require('../../compatibility/legacyDataUtils');
 
+const CHANNEL_HISTORY_COLUMNS = Object.freeze([
+  ['channel_id', 'TEXT'],
+  ['display_system_id', 'TEXT'],
+  ['sensor_id', 'TEXT'],
+  ['sensor_label', 'TEXT'],
+  ['sensor_type', 'TEXT'],
+  ['output_channel', 'TEXT'],
+  ['schema_version', 'INTEGER'],
+  ['serial_role', 'TEXT'],
+  ['serial_port_path', 'TEXT'],
+  ['baud_rate', 'INTEGER'],
+  ['parser_channel', 'TEXT'],
+]);
+
+/**
+ * 为旧 matrix 表补齐按通道存储所需的可空列。
+ *
+ * 旧三列 INSERT 不受影响；partial index 只索引新 canonical 行，避免升级数 GB 旧库时
+ * 为全部 `channel_id IS NULL` 的历史数据构建无用索引。
+ *
+ * @param {object} dbRef sqlite3-compat 数据库句柄或 better-sqlite3 连接。
+ * @returns {object} 原数据库句柄。
+ */
+function ensureChannelHistorySchema(dbRef) {
+  const nativeDb = dbRef?._db || dbRef?.db || dbRef;
+  if (!nativeDb || typeof nativeDb.prepare !== 'function' || typeof nativeDb.exec !== 'function') {
+    throw new TypeError('channel history schema requires a SQLite database handle');
+  }
+
+  const migrate = () => {
+    nativeDb.exec(`CREATE TABLE IF NOT EXISTS matrix (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      data TEXT,
+      timestamp INTEGER,
+      date TEXT
+    )`);
+
+    const existingColumns = new Set(
+      nativeDb.prepare('PRAGMA table_info(matrix)').all().map((column) => column.name),
+    );
+    CHANNEL_HISTORY_COLUMNS.forEach(([name, type]) => {
+      if (!existingColumns.has(name)) {
+        nativeDb.exec(`ALTER TABLE matrix ADD COLUMN ${name} ${type} NULL`);
+      }
+    });
+
+    nativeDb.exec(`CREATE INDEX IF NOT EXISTS idx_matrix_date_channel_id_id
+      ON matrix(date, channel_id, id)
+      WHERE channel_id IS NOT NULL`);
+  };
+
+  if (typeof nativeDb.transaction === 'function') {
+    nativeDb.transaction(migrate)();
+  } else {
+    migrate();
+  }
+  return dbRef;
+}
+
+/**
+ * 打开数据库并在返回给调用方前完成通道历史 schema 迁移。
+ *
+ * @param {string} file 数据库文件路径。
+ * @returns {object} 已准备好的数据库句柄。
+ */
+function openDb(file) {
+  return ensureChannelHistorySchema(new sqlite3.Database(file));
+}
+
 /**
  * 初始化数据库
  * @param {string} fileStr - 传感器类型
@@ -49,10 +118,14 @@ function initDb(fileStr, filePath, runtimeResourceRoot) {
  * @returns {sqlite3.Database}
  */
 function genDb(file, filePath, runtimeResourceRoot) {
+  let exists = true;
   try {
     fs.accessSync(file);
-    return new sqlite3.Database(file);
   } catch (err) {
+    exists = false;
+  }
+
+  if (!exists) {
     logger.warn('Database file not found, creating from template:', file);
     const initCandidates = [
       path.join(filePath, "init.db"),
@@ -67,11 +140,14 @@ function genDb(file, filePath, runtimeResourceRoot) {
     }
     const data = fs.readFileSync(initDbPath);
     fs.writeFileSync(file, data);
-    return new sqlite3.Database(file);
   }
+
+  return openDb(file);
 }
 
 module.exports = {
+  CHANNEL_HISTORY_COLUMNS,
+  ensureChannelHistorySchema,
   initDb,
   genDb,
 };
