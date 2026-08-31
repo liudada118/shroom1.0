@@ -31,11 +31,11 @@ function createSmallBed12BRuntime({
   /**
    * 减零点后的截负钩子：负值和非数一律归 0。
    *
-   * 作为 `subtractZero` 传给 `smallBed12B.buildRealtimeFrameFromBuffer`，
-   * 在 decoded 阶段、压力标定**之前**逐点作用。截负是必须的：零点基线取自
-   * 空载采样，实测帧低于基线是正常噪声，负压力值往下游会污染标定（均值被拉低）
-   * 并让配色映射跑到色阶之外。非有限值归 0 而不是丢弃，是为了保持帧长不变 ——
-   * 长度一变，后续按索引取点的映射全错位。
+   * 用法：作为 `subtractZero` 传给 `smallBed12B.buildRealtimeFrameFromBuffer`，在 decoded
+   * 阶段、压力标定**之前**逐点作用。
+   *
+   * 截负必须做：实测帧低于空载基线是正常噪声，负值会污染标定（均值被拉低）并让配色映射
+   * 跑到色阶外。非有限值**归 0 而不是丢弃**，因为帧长一变、后续按索引取点全错位。
    *
    * @param {*} value 减去零点后的单点值。
    * @returns {number} 截到 0 以上的有限数。

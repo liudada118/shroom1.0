@@ -65,11 +65,9 @@ function createServerHandRuntime({
   /**
    * 双包手套入口（转发给 handPacketRuntime）。
    *
-   * 与上面同理，是给旧 server 的稳定入口。比完整包多一个 `sourcePort`，
-   * 但它**不参与左右手判定** —— 侧别由包内第 2 字节决定
-   * （`sdk/backend/sensors/handGloveDouble.js` 的 `PACKET_SIDE_BY_TYPE`：1=left、2=right），
-   * 判不出来才退到 `fallbackSide`。`sourcePort` 只是被原样带到实时 payload 的
-   * `packetSourcePort` 字段上当来源标记，供上层区分「这一帧来自哪个物理口」。
+   * ⚠️ `sourcePort` **不参与左右手判定**，只透传到 payload 的 `packetSourcePort` 当来源
+   * 标记。侧别由包内第 2 字节决定（`handGloveDouble.js` 的 `PACKET_SIDE_BY_TYPE`：
+   * 1=left、2=right），判不出来才退到 `fallbackSide`。
    *
    * @param {Buffer|Uint8Array|number[]} buffer 双包协议中的一包。
    * @param {'left'|'right'} fallbackSide 包内第 2 字节判不出侧别时使用的默认侧。

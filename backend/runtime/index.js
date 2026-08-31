@@ -1,11 +1,9 @@
 /**
  * backend/runtime —— Electron 侧唯一的后端启停入口。
  *
- * 按 `backend/README.md` 的边界约定，Electron 主进程只通过本文件启停后端、
- * 只通过 `backend/common/logger.js` 出日志，这两条路径与本文件的导出契约是冻结的：
- * 扩展可以往 `backend/extensions/` 加东西，但不得反向改这里。所以下面每个导出
- * 都是「转发给 kernel/platform/server.js 并在旧实现缺失时降级」的薄壳，
- * 真正的实现全在 server 侧。
+ * 每个导出都是「转发给 kernel/platform/server.js、旧实现缺失时降级」的薄壳，
+ * 实现全在 server 侧。**导出契约是冻结的**：扩展往 `backend/extensions/` 加，
+ * 不得反向改这里。
  */
 const logger = require('../common/logger');
 const { CommandRouter } = require('../kernel/platform/commands/commandRouter');
@@ -19,8 +17,7 @@ let legacyServer;
 /**
  * 懒加载旧 server 入口。
  *
- * runtime 模块被 require 时不再立刻反向加载 server.js，避免初始化阶段形成
- * server -> runtime -> server 的隐式循环；只有真正调用兼容入口时才读取旧服务。
+ * 必须懒加载：模块顶层 require 会形成 server → runtime → server 的初始化循环。
  *
  * @returns {object} 旧 server 导出对象。
  */
@@ -34,14 +31,11 @@ function getLegacyServer() {
 /**
  * 把一类命令注册到路由表，处理逻辑统一转发给旧 server 的 handleCommand。
  *
- * ⚠️ 当前 `kernel/platform/server.js` 的 `handleCommand`（该文件 1811 行）对任何
- * 命令都只打一条 `unsupported command` 警告并返回 null —— 也就是说下面注册的五类
- * 命令走到这里全都是「告警 + null」。这不是笔误：命令已经改由各自的专用服务
- * （串口编排、许可校验、CSV 导出等）直接处理，路由表留着是为了旧调用方 dispatch
- * 时有个明确的落点、而不是静默丢弃。保留这层的代价是一条警告日志，收益是
- * 「命令没人接」这件事在日志里可见。
+ * ⚠️ **下面注册的五类命令目前全是空转**：`server.handleCommand`（server.js:1811）
+ * 对任何命令只打一条 `unsupported command` 警告返回 null。命令已改由各自专用服务
+ * 处理，路由表留着是为了「没人接」在日志里可见，不是静默丢弃。
  *
- * @param {string} type 命令类型名，与 `commandRouter.dispatch` 收到的 `command.type` 对应。
+ * @param {string} type 命令类型名，对应 `commandRouter.dispatch` 的 `command.type`。
  * @returns {void}
  */
 function registerLegacyHandler(type) {
@@ -60,8 +54,7 @@ function registerLegacyHandler(type) {
 /**
  * 启动后端（Electron 主进程的唯一后端启动入口）。
  *
- * 这里是全后端唯一一处「旧实现缺失就抛」的地方，其余转发函数都走静默降级。
- * 原因是启动失败必须让 Electron 立刻看见：后端没起来还继续把窗口开出去，
+ * 本文件唯一一处「缺实现就抛」的转发（其余都静默降级）：后端没起来还把窗口开出去，
  * 用户看到的是一个永远连不上的界面，比直接崩更难排查。
  *
  * @returns {*} 旧 server 的 openServer 返回值。
@@ -78,8 +71,8 @@ function openServer() {
 /**
  * 关停后端（Electron 退出前调用）。
  *
- * 与 openServer 相反，这里缺实现时返回一个已完成的 Promise 而不是抛错 ——
- * 退出路径上抛异常会让 Electron 卡在关闭中间态，串口和数据库反而来不及释放。
+ * 与 `openServer` 相反，缺实现时返回 resolved Promise 而不抛 —— 退出路径上抛异常会让
+ * Electron 卡在关闭中间态，串口和数据库反而来不及释放。
  *
  * @returns {Promise<*>} 旧 server 的关停 Promise；无该导出时为 resolved Promise。
  */
@@ -94,11 +87,9 @@ function shutdownServer() {
 /**
  * 取 WebSocket Server 实例。
  *
- * ⚠️ `channel` 参数实际不影响返回值：现在全后端只有一个 WebSocket 端口（19999），
- * 所有 manifest 的 outputChannel 都映射到同一个物理服务，旧 server 的实现
- * （该文件 1793 行）直接 `void channel` 后返回单例。参数和 `'sit'` 默认值
- * 留着纯粹是为了旧调用方不用改签名 —— 别把它当成「按通道取服务」，
- * 也别据此推断存在 sit/back/head 那张固定通道表，那张表已经从线上协议里去掉了。
+ * ⚠️ **`channel` 不影响返回值**：全后端只有一个 WebSocket 端口 19999，通道隔离靠订阅，
+ * 旧实现（server.js:1793）直接 `void channel` 返回单例。参数留着只为旧调用方不改签名 ——
+ * 别当成「按通道取服务」，也别据此推断存在 sit/back/head 那张固定通道表。
  *
  * @param {string} [channel='sit'] 业务通道名，当前被旧实现忽略。
  * @returns {import('ws').Server|null} 共享 WebSocket Server；旧 server 无该导出时为 null。
@@ -124,13 +115,11 @@ function handleCommand(command) {
 /**
  * 广播一帧实时数据。
  *
- * 注意实参顺序在这里翻了一次：本函数是 `(data, channel)`，转发给旧 server 的
- * `publishRealtimeFrame` 时是 `(channel, data)`。保持本函数的顺序是因为调用方
- * 绝大多数只传数据、走默认通道。
+ * ⚠️ **实参顺序在这里翻了一次**：本函数 `(data, channel)`，转发时是
+ * `publishRealtimeFrame(channel, data)`。本函数这个顺序是因为调用方多数只传数据。
  *
- * 帧本身由 `kernel/realtime` 侧统一包成 `sensor.frame` schema v1 再发，
- * 这里不做任何字段加工 —— 不要在这一层往 payload 上贴 sitData/backData 之类的
- * 顶层字段，线上协议已经不认了。
+ * 不要在这一层往 payload 贴 sitData/backData 之类顶层字段 —— 帧由 `kernel/realtime`
+ * 统一包成 `sensor.frame` schema v1，线上协议不认别的。
  *
  * @param {*} data 帧数据。
  * @param {string} [channel='sit'] 目标通道名。
@@ -148,17 +137,13 @@ function broadcastRealtime(data, channel = 'sit') {
 /**
  * 汇总一份运行时状态快照，供上层做诊断展示。
  *
- * 四块内容分别来自：各通道在线客户端数、通道元数据、通道总线统计、WS 订阅表。
- * 除通道元数据外的三块在旧 server 未导出对应函数时降级为空值而不报错 ——
- * 状态查询属于诊断路径，缺一块不该把整个查询打挂。
+ * 四块：各通道在线客户端数、通道元数据、通道总线统计、WS 订阅表。除元数据外三块缺
+ * 导出时降级为空值 —— 诊断路径缺一块不该把整个查询打挂。
  *
- * ⚠️ 下面那句 `channel?.standard !== true` 目前是空转：通道元数据由
- * `websocketChannelService.buildRealtimeChannelMetadata` 构造，字段固定为
- * channelId/name/port/displaySystemId/sensorId/serialRole/outputChannel/
- * sensorType/transport/messageType/schemaVersion/legacy，**没有 standard**。
- * `standard: true` 只出现在 `kernel/realtime/realtimeTelemetryGateway.js`
- * 给 channelBus.publish 传的发布选项里，不会流到这份元数据上。留着不删是因为
- * 它无害，且哪天元数据真带上这个标记时语义正好；但别以为现在它过滤掉了什么。
+ * ⚠️ `channel?.standard !== true` 目前**空转**：`buildRealtimeChannelMetadata` 造出的
+ * 元数据里没有 `standard` 字段（`standard: true` 只出现在
+ * `realtimeTelemetryGateway.js` 给 `channelBus.publish` 的发布选项里）。留着无害，
+ * 但别以为它过滤掉了什么。
  *
  * @returns {{clients: Record<string, number>, channels: object[], channelBus: object, subscriptions: object|null}}
  *          运行时状态快照。

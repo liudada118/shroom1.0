@@ -16,12 +16,10 @@ function createLegacyGloveFrameProcessor({
   /**
    * 处理一帧 262 字节的旧手套数据。
    *
-   * 帧结构是 256 点压力 + 尾部 6 字节姿态（rotate）。长度不等于 262 直接返回 null
-   * 交回上层分发 —— 本处理器只认这一种长度，不做容错解析，因为同一条串口上还跑着
-   * 别的帧长（1024 矩阵、分段帧等），猜错比不认更糟。
+   * 帧结构 = 256 点压力 + 尾部 6 字节姿态。**长度不等于 262 直接返回 null 交回上层**，
+   * 不做容错解析：同一条串口上还跑着 1024 矩阵、分段帧等别的帧长，猜错比不认更糟。
    *
-   * 点位要连过两道映射：`gloves0123Res` 整理原始点序，`gloves0123` 再转成展示点位，
-   * 顺序不能换。
+   * 两道映射顺序不能换：`gloves0123Res` 整理原始点序 → `gloves0123` 转展示点位。
    *
    * @param {Buffer|Uint8Array|number[]} buffer 原始帧。
    * @param {{port1?: {isOpen?: boolean}, port2?: {isOpen?: boolean}}} [options] 串口状态，用于给 payload 附加开合标记。

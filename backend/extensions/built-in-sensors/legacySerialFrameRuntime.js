@@ -87,17 +87,13 @@ function createLegacySerialFrameRuntime(ctx) {
   /**
    * 从发布结果里取回「该写回旧运行时状态」的那一帧。
    *
-   * 取值优先级：
-   * 1. 归零链路的 processed 阶段结果（长度与 fallback 一致时直接用）；
-   * 2. `fields` 里第一个满足「发布结果有值 **且** 该字段的来源帧就是本次 fallback」的字段；
-   * 3. fallback 本身。
+   * 优先级：① 归零链路的 processed 阶段（长度与 fallback 一致）→ ② `fields` 里第一个
+   * 「有值**且**来源帧就是本次 fallback」的字段 → ③ fallback 本身。
    *
-   * 第 2 条那个来源比对是关键，理由见下方行内注释：同一个发布结果里不同字段属于
-   * 不同处理阶段（jqbed 的 sitData 可能是 Python 侧的 matrixOrigin，pointArr 则是
-   * 下一轮算法的输入），只按长度匹配会让两个阶段的数据互相顶掉。
-   *
-   * 所有分支都返回**新数组**（`[...x]`），不把发布结果的引用漏给旧运行时状态 ——
-   * 旧状态是长期持有的可变数组，共享引用会让后续处理反向污染已发布的帧。
+   * ⚠️ 第 ② 条那个**来源比对不能省**：同一个发布结果里不同字段属于不同处理阶段
+   * （jqbed 的 sitData 可能是 Python 侧的 matrixOrigin，pointArr 是下一轮算法的输入），
+   * 只按长度匹配会让两个阶段互相顶掉。所有分支返回**新数组**，否则旧状态（长期持有的
+   * 可变数组）会反向污染已发布的帧。
    *
    * @param {{frame?: object, zeroedStages?: {processed?: number[]}}|null} publishResult 发布结果。
    * @param {string[]} fields 候选字段名，按优先级排列。
