@@ -2,7 +2,7 @@
 
 > 最后更新于：2026-08-31
 
-## 2026-08-31 `backend/` 函数级注释（分层进行中，批 1/4）
+## 2026-08-31 `backend/` 函数级注释（分层进行中，批 2/4 已完成）
 
 目标是让二开者读得懂后端每个函数**为什么这么写**，而不只是它做了什么。基线实测：
 `backend/` 共 471 个函数缺注释、覆盖率 42%。按架构分层分批，每批一个提交。
@@ -13,7 +13,7 @@
 | :--- | ---: | :--- | :--- |
 | `backend/runtime/` | 1 | 7 → **0（100%）** | 批 1 ✅ |
 | `backend/extensions/` | 17 | 8 → **0（100%）** | 批 1 ✅ |
-| `backend/extension-host/` | 17 | 92 | 批 2 |
+| `backend/extension-host/` | 17 | 92 → **0（100%）** | 批 2 ✅ |
 | `backend/kernel/` | 60 | 247 | 批 3 |
 | `backend/tests/` | 28 | 44 | 批 4 |
 | `backend/compatibility/openWeb.js` | 1 | 73 | **不做，见下** |
@@ -62,6 +62,57 @@ diff 搅浑。
 验证：改动 6 个文件 **+204 行 / -0 行，纯注释新增**（`git diff -w --ignore-blank-lines`
 确认零代码变更），6 个文件 `node --check` 通过，后端 55 个测试文件全过（与开工前基线
 一致）。后端根目录无 eslint 配置（仅 `client/` 有），故未跑 lint。
+
+### 批 2：`extension-host/` 92 → 0
+
+`extension-host/` 是二开者真正会碰的那一层（manifest 校验、Builder 保存、运行期绑定、
+帧处理），所以这一批的注释重点全放在**边界与不变量**上：哪些检查是安全边界、哪些只是
+形状检查、哪些顺序不能改。查实并写入代码的九条：
+
+1. **1 基 / 0 基的分裂横跨三个文件且此前无文字记录。** 线序（ADC 采样顺序）是
+   **1 基**（`displaySystemConfigFileValidator.js` 判 `index <= 0` 即错），点位表是
+   **0 基**（判 `row < 0`）。生成身份映射的
+   `displaySystemWorkspaceService.createIdentityDefinitions` 和运行期执行器都按这个约定
+   写死。历史约定，改任一侧会让所有既有配置错位。
+2. **`save()` 里 manifest 是最后写的，这一点是承载性的。** `discoverDisplaySystems`
+   只在 `result.manifestPath` 为真时才记录错误，也就是**没有 manifest 的目录被静默跳过**。
+   于是保存中途崩溃的结果是「这个展示系统还没出现」，而不是「出现了但坏的」。调换写
+   顺序会打破这个性质。
+3. **`SAFE_DISPLAY_SYSTEM_ID` 是路径穿越边界，不只是命名规范。** id 会直接成为
+   `path.join(writableRoot, id)` 的目录名。
+4. **只读资源不可写的物理保证来自单一 `writableRoot`，不是上层的 `editable` 判断。**
+   上层检查是给出错误提示的，真正的保证是工作区服务只认一个可写根。
+5. **`writeJsonAtomic` / `writeTextAtomic` 的原子性是有限的**（已写进注释）：
+   unlink-then-rename 存在「文件不存在」窗口（为兼容 Windows rename 行为而保留）、
+   没有 fsync、临时文件名只带 pid，同进程并发写同一文件会撞。当前只有 Builder 单点
+   保存路径在用，够；要做多写入方前需重做。
+6. **`validateBuilderAlgorithmSource` 是入口形状检查，不是安全检查。** 注释首句即声明，
+   真正的执行边界是 `vm` / 子进程。它的价值是把失败从「运行期静默空转」提前到「保存
+   时明确报错」。
+7. **manifest 里的绝对路径绕过全部包含性检查**（`displaySystemConfigLoader.resolveMaybe`）。
+   放行是为了让多个展示系统共用一份线序表，但这是加沙箱时必须收口的点之一。
+8. **`sanitizeAlgorithmMetrics` 是用户算法到实时链路的信任边界。** 键按
+   `SAFE_METRIC_ID` 同规则过滤（同时排除 `__proto__` 一类），值只放行有限数字/字符串/
+   布尔 —— 挡掉 NaN/Infinity（序列化成 null 导致曲线断点）、对象数组（体积不可控）、
+   函数与 undefined（序列化后消失，像指标丢了）。不合法项静默丢弃，因为一条指标写错
+   不该让整帧发不出去。
+9. **帧处理的两处顺序即设计**（`displaySystemFrameProcessorFactory.processFrame`）：
+   校验在解码之前（坏帧的字节位置不可信，解码只会产出一屏貌似合理的错值），算法在扣零
+   之前（算法看到的是设备原始物理量，零点是展示侧偏置；反过来会让算法阈值随用户何时
+   按归零而漂移）。
+
+另有四条「读起来像 bug 其实是有意」的已注明：`normalizeMetricIds` 的空数组表达不了
+「没有指标」（要用 `visible: false`）；`buildDefaultRenderers` 必须返回非空，否则
+`normalizeDisplayConfig` 解 `normalizedRenderers[0].id` 会抛；`normalizeSidebarConfig` 是
+唯一返回 `null` 而非默认值的归一函数（「没配侧栏」与「全默认侧栏」前端行为不同）；
+`executeAlgorithm` 已无本仓调用方，保留是公开面，但它丢 metrics 且不 await（异步 runner
+下返回 undefined）。位置性兜底 id（`view-N` / `renderer-N`）在中间插入一项时会整体位移
+并悄悄改变 profile 引用 —— 生产 manifest 应显式声明 id，这条也写进了注释。
+
+验证：改动 14 个文件（含前次会话完成的 5 个）**+1422 行 / -0 行，纯注释新增**
+（`git diff -w --ignore-blank-lines --numstat` 与普通 diff 插入数完全一致、删除数为 0），
+14 个文件 `node --check` 通过，后端 55 个测试文件全过。扫描确认 `extension-host/`
+17 个文件 142 个函数覆盖率 100%，全后端 42% → 55%。
 
 ## 2026-08-29 `sensor.frame` 成为唯一传感器消息
 
@@ -2044,6 +2095,7 @@ flowchart LR
 
 | 日期 | 类型 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-31 | 文档更新 | **`backend/` 函数级注释批 2/4：`extension-host/` 17 个文件 92 个缺注释补齐至 100%（142/142）**，全后端覆盖率 42% → 55%。**代码一行未改**：+1422 行 / -0 行，`git diff -w --ignore-blank-lines --numstat` 的插入数与普通 diff 完全一致且删除数为 0，14 个文件 `node --check` 通过，后端 55 个测试文件全过。这一层是二开者真正会碰的（manifest 校验、Builder 保存、运行期绑定、帧处理），注释重点是**边界与不变量**。查实写入九条：① **1 基线序 / 0 基点位表的分裂横跨三个文件**（校验器、身份映射生成、执行器）且此前无文字记录，改任一侧会让所有既有配置错位；② **`save()` 里 manifest 最后写是承载性的** —— `discoverDisplaySystems` 只在 `result.manifestPath` 为真时记错误，无 manifest 的目录被静默跳过，于是中途崩溃的结果是「还没出现」而非「出现了但坏的」，调换写顺序即破坏此性质；③ **`SAFE_DISPLAY_SYSTEM_ID` 是路径穿越边界**（id 直接成为 `path.join(writableRoot, id)` 的目录名），不只是命名规范；④ **只读资源不可写的物理保证来自单一 `writableRoot`**，不是上层 `editable` 判断（后者只负责给出错误提示）；⑤ **`writeJsonAtomic`/`writeTextAtomic` 的原子性有限**（已在注释中如实写明）：unlink-then-rename 有「文件不存在」窗口（为兼容 Windows rename 保留）、无 fsync、临时名只带 pid，同进程并发写会撞；⑥ **`validateBuilderAlgorithmSource` 是形状检查不是安全检查**，注释首句即声明，真正执行边界是 `vm`/子进程，它的价值是把失败从运行期静默空转提前到保存时明确报错；⑦ **manifest 绝对路径绕过全部包含性检查**（`resolveMaybe`），放行是为多个展示系统共用线序表，但这是加沙箱必须收口的点；⑧ **`sanitizeAlgorithmMetrics` 是用户算法到实时链路的信任边界**，键按 `SAFE_METRIC_ID` 过滤（同时排除 `__proto__` 一类）、值只放行有限数字/字符串/布尔，挡掉 NaN/Infinity（序列化成 null 致曲线断点）、对象数组（体积不可控）、函数与 undefined（序列化后消失像指标丢了）；⑨ **帧处理两处顺序即设计**：校验在解码前（坏帧字节位置不可信，解码只产出貌似合理的错值）、算法在扣零前（否则算法阈值会随用户何时按归零而漂移）。另四条「像 bug 其实有意」已注明：`normalizeMetricIds` 空数组表达不了「没有指标」（须用 `visible: false`）；`buildDefaultRenderers` 必须非空否则 `normalizeDisplayConfig` 解 `[0].id` 抛错；`normalizeSidebarConfig` 是唯一返回 `null` 而非默认值的归一函数（「没配侧栏」与「全默认侧栏」前端行为不同）；`executeAlgorithm` 已无本仓调用方（仅导出），保留属公开面但丢 metrics 且不 await（异步 runner 下返回 undefined）。挂账：位置性兜底 id（`view-N`/`renderer-N`）在中间插入项时整体位移并悄悄改变 profile 引用，生产 manifest 应显式声明 id（已写入注释，未改代码）。后端根目录无 eslint 配置故未跑 lint。 |
 | 2026-08-31 | 文档更新 | **`backend/` 函数级注释批 1/4：`runtime/` 与 `extensions/` 两层补齐至 100%。** 基线 471 个函数缺注释 / 覆盖率 42%，本批清掉 15 个（`runtime/` 7 + `extensions/` 8），两层归零。**代码一行未改**：+204 行 / -0 行，`git diff -w --ignore-blank-lines` 确认零代码变更，6 个文件 `node --check` 通过，后端 55 个测试文件全过（与开工前基线一致）。写注释过程中查实三处非显而易见行为并写入：① `runtime/index.js` 注册的五类 legacy 命令**全是空转** —— 转发目标 `server.handleCommand`（`kernel/platform/server.js:1811`）对任何命令只打一条 `unsupported command` 警告返回 null，路由表留着是为了「没人接」在日志里可见；② `getWsServer(channel)` 的 channel 参数**不影响返回值**（`server.js:1793` 直接 `void channel` 返回单例，全后端只有一个 WebSocket 端口），参数与 `'sit'` 默认值只为旧调用方保签名，**不可据此推断存在 sit/back/head 固定通道表**；③ `getRuntimeStatus()` 里 `channel?.standard !== true` 是**空转过滤** —— 通道元数据字段固定十二项不含 `standard`，该标记只存在于 `realtimeTelemetryGateway.js:62` 的 publish 选项，无害故保留但已注明。另互相指明两个同名不同义的 `getPublishedFrame`（`handPacketRuntime.js` 简单版 / `legacySerialFrameRuntime.js` 多两道判断），避免被当成重复代码互相复制。**`compatibility/openWeb.js` 的 71 个刻意不做**：它导出 64 个函数但全仓 require 扫描只命中三处基线对比测试，四类疑似依赖（`webStaticServer.js` 是重新实现、`projectLineOrders.js` 里是 deny-list 字符串、`sdk/backend/processing/*` 只在注释里提、`util/constant.js:6` 指向已不存在的路径）已逐一排除，加注释只会搅浑基线 diff。挂账：`util/constant.js:6` 过期注释指向已删除的 `backend/legacy/openWeb.js`；`legacyGloveFrameProcessor.js` 的 `splice(len-6, len)` 第二参数应为 `6`（行为等价，仅加注释未改）。后端根目录无 eslint 配置故未跑 lint。 |
 | 2026-08-26 | 新增功能 | 新增 `client/public/shroom-vision-home-effects.html`：复刻当前授权门户首页并内嵌 18 张压缩图标，提供响应式布局、压力点阵背景、轻量卡片交互、减少动态效果适配和静态事件挂点；不连接授权后端。桌面 1440×1000 与移动 390×844 验证无横向溢出、无图片失败、无控制台错误。 |
 | 2026-08-25 | 配置变更 | 新增 `.gitattributes` 钉死行尾。起因：仓库既无 `.gitattributes` 又 `core.autocrlf=false`，某个 Windows 工具把整个工作区重写成 CRLF，`git` 判出 **575 个文件改动 / 132740 行**，而 `git diff --ignore-cr-at-eol --name-only` 是 **0** —— 纯行尾噪声，零内容差异。已丢弃那批噪声并加 `* text=auto eol=lf`（全仓无被跟踪的 `.bat`/`.cmd`/`.ps1`，无需 CRLF 例外）＋ 14 类显式 `binary`（防 `build/model` 137 MB 模型与 GB 级 db 快照被改写）。**已知尾巴**：`forge.config.js` 是全仓唯一索引里存 CRLF 的文本文件（`i/crlf w/crlf`），现在不脏，但下次编辑它会连带一整份归一化差异；它属打包配置，留待单独提交处理。 |
@@ -2209,6 +2261,7 @@ flowchart LR
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
+| 2026-08-31 | `backend/` 函数级注释批 2/4（`extension-host/`） | 17 个文件从 92 个缺注释补齐至 100%（142/142），全后端覆盖率 42% → 55%。纯注释新增（+1422/-0，`-w --ignore-blank-lines` 与普通 diff 插入数一致、删除数 0），14 个文件 `node --check` 通过，55 个测试文件全过。这一层是二开的实际接触面，注释围绕边界与不变量展开：明确区分了**安全边界**（`SAFE_DISPLAY_SYSTEM_ID` 路径穿越、单一 `writableRoot` 的物理只读保证、`sanitizeAlgorithmMetrics` 的用户算法信任边界）与**只是形状检查**（`validateBuilderAlgorithmSource`，真正执行边界在 `vm`/子进程）；记录了三条不能动的顺序/约定（1 基线序 vs 0 基点位表横跨三文件、`save()` 的 manifest 最后写与 `discoverDisplaySystems` 静默跳过无 manifest 目录相耦合、帧处理的「校验在解码前 / 算法在扣零前」）；并如实写明两处已知不足（`writeJsonAtomic` 的原子性有限、manifest 绝对路径绕过包含性检查，后者是加沙箱的收口点）。剩余批 3 `kernel/`（247）、批 4 `tests/`（44）。 |
 | 2026-08-31 | `backend/` 函数级注释批 1/4（`runtime/` + `extensions/`） | 两层从 7/8 个缺注释补齐至 100%，全后端覆盖率 42% → 44%。纯注释新增（+204/-0），55 个测试文件全过。附带查实并记录三处空转/易误解行为（legacy 命令路由空转、`getWsServer` channel 参数被忽略、`standard` 过滤器不生效），以及 `compatibility/openWeb.js` 无运行时依赖的证据链。剩余批 2 `extension-host/`（92）、批 3 `kernel/`（247）、批 4 `tests/`（44）。 |
 | 2026-08-29 | `calibration.zero` 命令契约 fail-closed | 严格校验 enabled/displaySystemId/channelIds，空目标、未知目标、无活动系统和零影响操作不再返回 accepted；公共 handler 在 HTTP/WS 共享控制服务初始化期注册，ACK 回传完整结果，SDK 与客户端保留精确目标。 |
 | 2026-08-29 | 零点状态与命令完成 `channelId` 迁移 | 删除固定零点数组和 legacy runtime/accessor 读写；动态/旧协议统一按完整 channelId 保存四阶段 source/baseline，支持展示系统或精确通道定向捕获/清除。修复 HEAD/BACK 串基准、BACK/HEAD 130 误用 SIT 基准、HEAD 130 误发 BACK 及清零受授权门控问题；新增仓库、命令、输出适配与多展示系统隔离测试。 |
@@ -2774,6 +2827,7 @@ flowchart LR
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-31 | codeOpi | `backend/` 函数级注释批 2/4：`extension-host/` 补齐 | 继续为「打包后可二开」补后端函数级的**为什么**。`extension-host/` 是二开者真正会碰的一层（manifest 校验、Builder 保存、运行期绑定、帧处理），17 个文件从 92 个缺注释归零（142/142，100%），全后端覆盖率 42% → 55%。代码零改动（+1422/-0 纯注释，`-w --ignore-blank-lines` 插入数与普通 diff 一致、删除数 0），14 个文件 `node --check` 通过，后端 55 个测试文件全过。注释以边界与不变量为纲，查实写入九条非显而易见事实（1 基线序 vs 0 基点位表横跨三文件、`save()` manifest 最后写的承载性、`SAFE_DISPLAY_SYSTEM_ID` 的路径穿越语义、只读保证来自单一 `writableRoot`、原子写的实际局限、`validateBuilderAlgorithmSource` 只是形状检查、绝对路径绕过包含性检查、`sanitizeAlgorithmMetrics` 的信任边界、帧处理的两处顺序设计），另注明四条「像 bug 其实有意」的行为。剩余 `kernel/` 247、`tests/` 44。 |
 | 2026-08-31 | codeOpi | `backend/` 函数级注释批 1/4：`runtime/` 与 `extensions/` 补齐 | 为「打包后可二开」补上后端函数级的**为什么**，不只是做了什么。基线量化：471 个函数缺注释、覆盖率 42%；本批清 15 个（`runtime/` 7、`extensions/` 8），两层各归零，全后端升至 44%。按分层分批、每批一提交，剩余 `extension-host/` 92、`kernel/` 247、`tests/` 44。代码零改动（+204/-0 纯注释），`node --check` 全过，后端 55 个测试文件全过且与开工前基线一致。`compatibility/openWeb.js` 经 require 扫描证实无运行时消费者（仅三个基线对比测试），其 71 个函数明确不做。 |
 | 2026-08-29 | codeOpi | 零点状态、处理链与命令按 canonical channelId 动态化 | `zeroStateStore` 改为按完整 channelId 保存四阶段 source/baseline，Manifest processor 与 legacy 输出边界统一接入；删除所有固定零点字段、runtime accessor 和处理器内扣零。`calibration.zero` 支持 display/channel 定向且旧布尔命令兼容，历史入库按帧身份取基准；修复 BACK/HEAD 串零、130 分片错通道和授权门控静默跳过。后端 55 个测试文件、客户端命令测试与 SDK 命令测试通过。 |
 | 2026-08-28 | codeOpi | 归位运行产物并收敛 platform runtime/WebSocket | 根 `dist` 保留；开发态 CSV/报告/上传和工具导出进入忽略的 `runtime`，11 个文件迁移前后 SHA-256 一致；移除无引用旧 `project`，人工 legacy runtime 迁入测试区；platform runtime 9→7、WebSocket 13→10，未改固定入口、SDK、协议或历史格式。 |
@@ -3164,6 +3218,7 @@ flowchart LR
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-31 | codeOpi | 文档更新 | `backend/extension-host/` 17 个文件全部函数补齐中文 JSDoc（`@param`/`@returns` + 「为什么这么写」散文），92 → 0，该层 100%（142/142），全后端 42% → 55%。纯注释新增 +1422/-0，14 个文件 `node --check` 通过，55 个测试文件全过。同时把九条此前只存在于代码里的边界与不变量写成文字（安全边界与形状检查的区分、三条不可调换的顺序/基数约定、两处已知的原子性与包含性检查不足）。 |
 | 2026-08-31 | codeOpi | 文档更新 | `backend/runtime/` 与 `backend/extensions/` 全部函数补齐中文 JSDoc（`@param`/`@returns` + 为什么这么写的散文），两层缺注释数 7/8 → 0/0。纯注释新增 6 个文件 +204 行、删除 0 行；未改任何代码、协议、契约或测试。同时以注释形式钉住三处易误解行为：legacy 命令路由当前空转、`getWsServer` 的 channel 参数被 `void`、`getRuntimeStatus` 的 `standard` 过滤器不生效。`compatibility/openWeb.js` 排除在范围外并记录了证据。 |
 | 2026-08-29 | codeOpi | 缺陷修复 / 契约强化 | `calibration.zero` schema 与服务端统一严格校验动态目标；空/未知/无活动/零影响命令 fail closed。零点 handler 前移到 HTTP/WS 共用控制服务初始化路径，WS ACK 补完整 results，主客户端切换系统时显式携带目标 displaySystemId，后端 SDK 事件保留 target。 |
 | 2026-08-29 | codeOpi | 优化重构 / 缺陷修复 | 零点状态从固定全局数组迁移为 `Map<channelId,...>`；Manifest 与 legacy 帧都记录未扣零 source 并按精确通道应用 baseline，命令支持 `displaySystemId/channelIds`。删除旧零点 accessor/处理器耦合，修复 HEAD/BACK 基准串用、BACK/HEAD 130 误读 SIT、HEAD 130 错发 BACK，以及清零被历史授权门控静默跳过。 |

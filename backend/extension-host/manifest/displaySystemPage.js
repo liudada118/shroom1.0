@@ -25,6 +25,28 @@ const DEFAULT_VISUALIZATION_ALGORITHM = Object.freeze({
 });
 const MATRIX_TRANSFORM_TYPES = Object.freeze(['none', 'interpolate', 'downsample']);
 
+/**
+ * 归一矩阵变换声明（插值放大 / 降采样 / 不变）。
+ *
+ * 本文件的通则在这里第一次出现，后面每个 normalize 都遵守：**归一函数永不抛错、
+ * 永远返回可用结构**。因为它不只跑在校验路径上，也跑在读取既有配置的路径上 ——
+ * 一份存量 manifest 里有个坏值不该让整个展示系统打不开，只该退回默认外观。
+ * 真正报错的是 `validateDisplayConfig`，它在 Builder 保存时把问题摊给用户。
+ *
+ * 由此产生一处**有意的宽严不一**：这里 interpolate 的 factor 被 clamp 到 2..4
+ * （写 3 会被收成 3），而校验器只接受 2 或 4。也就是说 factor=3 存不进来，但万一
+ * 已经存在了也能跑。想收紧就改校验器，别改这里 —— 改这里等于让存量配置打不开。
+ *
+ * `method` 一律由 type 推出（interpolate → bilinear，downsample → average），
+ * **忽略 manifest 里写的 method**：每种变换目前只有一个实现，让 manifest 声明一个
+ * 不存在的方法名只会产生「我配了它却没生效」的困惑。
+ *
+ * `Number(x) || 默认` 这个写法顺带把 0、NaN、空串都兜成默认值 —— 对 factor 来说
+ * 0 是无意义的（放大 0 倍），所以这里的「|| 吃掉 0」是想要的行为。
+ *
+ * @param {*} transform manifest 声明的矩阵变换。
+ * @returns {{type: string, factor: number, method: string}} 归一后的变换。
+ */
 function normalizeMatrixTransform(transform) {
   if (!transform || typeof transform !== 'object' || Array.isArray(transform)) {
     return { type: 'none', factor: 1, method: 'none' };
@@ -60,12 +82,40 @@ const SIDEBAR_METRIC_IDS = Object.freeze([
 ]);
 const SAFE_ALGORITHM_METRIC_ID = /^[A-Za-z][A-Za-z0-9._-]*$/;
 
+/**
+ * 判断一个侧栏指标 id 是否合法。
+ *
+ * 两类合法：内置五项（`SIDEBAR_METRIC_IDS`），或 `algorithm.` 前缀 + 一个安全标识符。
+ * 之所以给算法指标留一个前缀命名空间，是为了让二开加的自定义指标永远不可能和内置
+ * 指标撞名 —— 内置名不带点，自定义名必须带前缀，两个集合天然不交。
+ *
+ * ⚠️ `slice(10)` 里的 10 是 `'algorithm.'.length`（写死的）。改前缀就要改这个数，
+ * 本文件下面 `validateDisplayConfig` 里还有三处同样的 `slice(10)`。
+ *
+ * @param {*} id 待判 id。
+ * @returns {boolean} 是否为合法侧栏指标 id。
+ */
 function isSidebarMetricId(id) {
   const value = String(id || '');
   return SIDEBAR_METRIC_IDS.includes(value)
     || (value.startsWith('algorithm.') && SAFE_ALGORITHM_METRIC_ID.test(value.slice(10)));
 }
 
+/**
+ * 归一算法指标的**声明**（id / 显示名 / 单位 / 小数位）。
+ *
+ * 注意这里声明的是「侧栏要显示哪几个算法指标、怎么显示」，不是指标的计算方式 ——
+ * 算得出什么由算法数据文件决定（见 displaySystemConfigFileValidator）。
+ *
+ * id 不合法的条目**静默丢弃**（filter 掉）而不是报错，遵循本文件的归一通则；
+ * 显式写错时由校验器报 `algorithmMetrics[i].id is invalid`。
+ *
+ * `label` 缺省回落到 id，`decimals` clamp 到 0..6：位数没有上界会让前端
+ * `toFixed()` 直接抛 RangeError（>100 时），6 位对压力数据已经远超需要。
+ *
+ * @param {*} metrics manifest 声明的算法指标数组。
+ * @returns {Array<{id: string, label: string, unit: string, decimals: number}>} 归一后的声明。
+ */
 function normalizeAlgorithmMetricDefinitions(metrics) {
   if (!Array.isArray(metrics)) return [];
   return metrics
@@ -78,6 +128,21 @@ function normalizeAlgorithmMetricDefinitions(metrics) {
     }));
 }
 
+/**
+ * 归一一组指标 id：套用默认值、去掉非法项、去重。
+ *
+ * ⚠️ `fallback` 在「没声明」**和**「声明了但是空数组」两种情况下都会顶上
+ * （`metrics.length` 那一项）。也就是说**没法用空数组表达「这一块我一个指标都不要」**
+ * —— 想隐藏整块请用 `visible: false`。这是有意的取舍：空数组更常见的来源是配置写漏，
+ * 顶上默认值比显示一个空白区块好。
+ *
+ * `values.indexOf(id) === index` 是保序去重（保留首次出现），因为指标顺序就是侧栏
+ * 显示顺序，用 Set 重建会丢掉顺序意图。
+ *
+ * @param {*} metrics manifest 声明的 id 数组。
+ * @param {string[]} fallback 未声明或为空时使用的默认 id 列表。
+ * @returns {string[]} 去重后的合法 id 列表，保持声明顺序。
+ */
 function normalizeMetricIds(metrics, fallback) {
   const source = Array.isArray(metrics) && metrics.length ? metrics : fallback;
   return source.map(String).filter((id, index, values) => (
@@ -85,6 +150,26 @@ function normalizeMetricIds(metrics, fallback) {
   ));
 }
 
+/**
+ * 归一侧栏配置（压力区 + 面积区）。
+ *
+ * **没声明时返回 null，而不是返回一份默认配置** —— 这是本文件里唯一一个这么做的
+ * 归一函数，因为「没有侧栏配置」和「有一份全默认的侧栏配置」在前端是两种行为：
+ * 前者走前端自己的历史默认布局，后者按 manifest 接管。给它编一份默认值会静默改变
+ * 所有老 manifest 的界面。
+ *
+ * `visible: pressure.visible !== false` 是「缺省可见」：只有显式写 `false` 才隐藏。
+ * 写成 `Boolean(pressure.visible)` 会让没声明的老配置整块消失。
+ *
+ * `primaryMetric` 的回落链是 声明值 → 指标列表首项 → `'totalPressure'`：它是大字
+ * 主读数，一定要有一个，为空会让侧栏顶部空一块。
+ *
+ * `threshold` / `pointArea` 用 `Math.max(0, ...)` 夹到非负：面积阈值为负会让所有点
+ * 都算「有效」，面积读数直接失去意义。
+ *
+ * @param {*} sidebar manifest 声明的侧栏配置。
+ * @returns {object|null} 归一后的侧栏配置；未声明时为 null。
+ */
 function normalizeSidebarConfig(sidebar) {
   if (!sidebar || typeof sidebar !== 'object' || Array.isArray(sidebar)) return null;
   const pressure = sidebar.pressure || {};
@@ -118,6 +203,29 @@ function normalizeSidebarConfig(sidebar) {
   };
 }
 
+/**
+ * 归一一个视图/零件声明。
+ *
+ * 支持**字符串简写**：`"heatmap"` 等价于 `{id:'heatmap', type:'heatmap',
+ * label:'heatmap', source:'data'}`。简写存在是因为绝大多数 manifest 的 views 就是
+ * 一串形式名，展开写会让最常见的配置变得冗长。
+ *
+ * `source` 的回落走 `DEFAULT_VIEW_SOURCES`：曲线类默认读
+ * `metrics.totalPressure`、画布类默认读 `data`。没有这张表的话每份 manifest 都得为
+ * 每个视图写一遍 source，写错了则是「曲线画的是原始矩阵」这种难查的现象。
+ *
+ * `index` 只用于生成兜底 id（`view-N`）—— 一份 manifest 里同类型多个视图时，
+ * 没给 id 也不会互相撞名。⚠️ 但这个兜底 id 与**位置**绑定：在中间插入一个视图会让
+ * 后面所有未命名视图的 id 位移，进而让引用它们的 profile 失配。生产 manifest 里
+ * 应当显式写 id。
+ *
+ * 返回 `{...view, ...}` 保留未知字段：视图的额外参数（渲染器自己的选项）会原样透传
+ * 到前端，这是渲染器不必修改后端就能加参数的关键。
+ *
+ * @param {object|string} view manifest 声明的视图。
+ * @param {number} index 在数组中的下标，仅用于兜底 id。
+ * @returns {object|null} 归一后的视图；形状非法或缺 type 时为 null（调用方 filter 掉）。
+ */
 function normalizeView(view, index) {
   if (typeof view === 'string') {
     return {
@@ -140,6 +248,24 @@ function normalizeView(view, index) {
   };
 }
 
+/**
+ * 归一「目录项」——渲染器清单和可视化算法清单共用这一个形状。
+ *
+ * 与 `normalizeView` 几乎同构，两处关键差别：
+ * 1. `type` 可以回落到 `id`（`item.type || item.id`）。目录项常见写法是只给一个名字，
+ *    它既是类型也是标识；视图那边没有这个回落，因为视图的 id 和 type 经常故意不同
+ *    （同一个 heatmap 类型开两块）。
+ * 2. `options` **浅拷一份**（`{...item.options}`）。目录项的 options 会被运行时和前端
+ *    持有，直接引用 manifest 里的对象等于让下游能改到加载结果本身。
+ *
+ * `fallbackPrefix` 由调用方传（`'renderer'` / `'algorithm'`），让兜底 id 一眼能看出
+ * 是哪一类，而不是两张清单里都出现 `item-1`。
+ *
+ * @param {object|string} item manifest 声明的目录项。
+ * @param {number} index 数组下标，仅用于兜底 id。
+ * @param {string} fallbackPrefix 兜底 id 前缀。
+ * @returns {object|null} 归一后的目录项；非法时为 null。
+ */
 function normalizeCatalogItem(item, index, fallbackPrefix) {
   if (typeof item === 'string') {
     return { id: item, type: item, label: item, options: {} };
@@ -157,6 +283,21 @@ function normalizeCatalogItem(item, index, fallbackPrefix) {
   };
 }
 
+/**
+ * 归一一个展示预设（把「用哪个渲染器 + 哪个可视化算法 + 显示哪些零件」打成一包）。
+ *
+ * `visualizationAlgorithm || profile.algorithm` 是**兼容旧字段名**：早期 manifest
+ * 写的是 `algorithm`，与传感器那一层的 `algorithm`（数据算法）同名却是完全不同的
+ * 东西，所以改成了现在这个长名字。旧名保留读取、不再推荐写。
+ *
+ * `renderer` 没有默认值（回落成空串），因为预设指向哪个渲染器无法猜；空串会在校验器
+ * 里被 `references unknown renderer` 报出来。`visualizationAlgorithm` 则默认
+ * `'identity'`（原始数据不变换），这个默认是安全的。
+ *
+ * @param {*} profile manifest 声明的预设。
+ * @param {number} index 数组下标，仅用于兜底 id。
+ * @returns {object|null} 归一后的预设；形状非法时为 null。
+ */
 function normalizeProfile(profile, index) {
   if (!profile || typeof profile !== 'object' || Array.isArray(profile)) return null;
   const id = String(profile.id || `profile-${index + 1}`).trim();
@@ -175,6 +316,22 @@ function normalizeProfile(profile, index) {
   };
 }
 
+/**
+ * 没声明 renderers 时，从 views/widgets 反推一份渲染器清单。
+ *
+ * 这是老 manifest（只写 views、没有 renderers/profiles 概念）的升级路径：把出现过的
+ * 展示形式里属于 `DEFAULT_RENDERER_TYPES` 的挑出来当渲染器，于是 v1 配置不改一个字
+ * 也能拿到 v3 的渲染器/预设结构。
+ *
+ * **必须保证返回非空**（都挑不出来时给 `['heatmap']`）：`normalizeDisplayConfig` 里
+ * 直接取了 `normalizedRenderers[0].id` 去建默认预设，返回空数组会在那里抛
+ * TypeError。改这个函数时这条不变式不能破。
+ *
+ * @param {object[]} views 已归一的 views。
+ * @param {object[]} widgets 已归一的 widgets。
+ * @returns {Array<{id: string, type: string, label: string, options: object}>}
+ *          渲染器清单，保证至少一项。
+ */
 function buildDefaultRenderers(views, widgets) {
   const rendererTypes = [...views, ...widgets]
     .map((item) => item.type)
@@ -296,6 +453,28 @@ function normalizeChartCardsConfig(cards) {
     }));
 }
 
+/**
+ * 归一整个 `display` 段 —— manifest v1/v2/v3 都经这里出成同一个结构。
+ *
+ * 这是本文件的主入口，前端和运行时只认它的输出，所以**每个字段都有保底值**：
+ * 前端不必写「没有就用默认」的分支，也就不会出现前后端各有一套默认值、慢慢漂移。
+ *
+ * 三条升级链（老 manifest 免改的关键）：
+ * - `widgets` 没声明时**回落到 views**：v1 只有 views，视图即零件。
+ * - `renderers` 为空时走 `buildDefaultRenderers`，算法为空时给 `identity`。
+ * - `profiles` 为空时用「首个渲染器 + 首个算法 + 全部零件」编一个 `default` 预设，
+ *   于是「预设」这个 v3 概念对老配置也成立。
+ *
+ * 因此有一组不变式：`renderers`、`visualizationAlgorithms`、`profiles`
+ * **一定非空**，`defaultView` / `defaultProfile` 一定是字符串。下游（校验器、
+ * 前端）依赖这些不变式直接取 `[0]`，改这里要一起看那些取法。
+ *
+ * 与之相对，`views` 和 `widgets` **可以为空**（一份只做数据采集不出图的配置），
+ * 所以 defaultView 的回落链最后还兜了一个字面量 `'heatmap'`。
+ *
+ * @param {object} [display={}] manifest 的 display 段。
+ * @returns {object} 归一后的展示配置。
+ */
 function normalizeDisplayConfig(display = {}) {
   const views = (Array.isArray(display.views) ? display.views : [])
     .map(normalizeView)
@@ -349,6 +528,25 @@ function normalizeDisplayConfig(display = {}) {
   };
 }
 
+/**
+ * 检查一组条目的 id 是否唯一，并**把 id 集合返回**。
+ *
+ * 返回值才是它存在的主要理由：调用方紧接着要用这个集合做交叉引用检查
+ * （预设引用的 renderer / algorithm / widget 是否真的存在），单独再建一遍会出现
+ * 「检查唯一性用的集合」和「检查引用用的集合」不同步的可能。
+ *
+ * `errors` 是**传入的数组、就地 push**（不是返回错误列表）：`validateDisplayConfig`
+ * 全程往同一个数组里攒，最后一次性返回，这样所有问题一起报给用户。
+ *
+ * 注意重复的 id 仍会被 `add` 进集合 —— 报了错也让引用检查照常通过，避免同一个错误
+ * 引发第二条「引用了不存在的 xxx」的连带报错。
+ *
+ * @param {Array<{id: string}>} items 已归一的条目。
+ * @param {string} field 用于拼错误信息的字段名。
+ * @param {string[]} errors 错误累积数组，会被就地修改。
+ * @param {string} source 出错来源（manifest 路径）。
+ * @returns {Set<string>} 全部 id 的集合。
+ */
 function validateUniqueIds(items, field, errors, source) {
   const ids = new Set();
   items.forEach((item) => {
@@ -358,6 +556,29 @@ function validateUniqueIds(items, field, errors, source) {
   return ids;
 }
 
+/**
+ * 校验 `display` 段，一次性返回所有问题。
+ *
+ * 与归一函数是**互补的一对**（归一丢弃坏值保证能跑，这里把坏值报出来）：
+ * 二者合起来才达成「Builder 保存时看得见错误，运行时看不见崩溃」。只有归一没有校验，
+ * 用户会遇到「保存成功但外观静默变回默认」；只有校验没有归一，一份存量坏 manifest
+ * 会让展示系统直接打不开。
+ *
+ * `display == null` 返回空数组 —— 整个 display 段是可选的（纯采集型系统不出图）。
+ *
+ * 中段 `const normalized = normalizeDisplayConfig(display)` 之后的检查都是**针对
+ * 归一结果**做的，这是有意的：交叉引用（预设→渲染器/算法/零件、defaultView→views、
+ * defaultProfile→profiles）必须在补过默认值之后检查，否则老 manifest 会因为「没写
+ * renderers」而被判成引用失败。而前段那些形状检查（matrixTransform、sidebar、
+ * canvas、chartAppearance、chartCards）看的是**原始声明**，因为归一会把坏值吃掉，
+ * 归一之后就查不出「用户写错了」。这个「先查原始、后查归一」的分工是本函数的骨架。
+ *
+ * 全程只往 `errors` 里 push、不提前返回，理由同上：一次报全。
+ *
+ * @param {*} display manifest 的 display 段；null/undefined 视为未配置。
+ * @param {{source?: string}} [options] 上下文，`source` 用于拼错误信息。
+ * @returns {string[]} 错误列表；通过为空数组。
+ */
 function validateDisplayConfig(display, { source = 'display system manifest' } = {}) {
   if (display == null) return [];
   if (typeof display !== 'object' || Array.isArray(display)) {

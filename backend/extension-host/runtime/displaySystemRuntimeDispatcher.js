@@ -2,6 +2,20 @@ const {
   evaluateDisplaySystemDispatchPolicy,
 } = require('./displaySystemRuntimePolicy');
 
+/**
+ * 把 parser 输出的帧归一成普通数组。
+ *
+ * Buffer 和各种 TypedArray 都转成 number[]，其余类型**原样透传**。
+ * 转数组不是为了好看：展示系统的处理器是二开可写的代码，让它拿到 Buffer 意味着
+ * 它能通过 `buffer.buffer` 摸到底层 ArrayBuffer、进而改到 parser 复用的缓冲区，
+ * 也意味着它要处理 Buffer 的一整套 API。统一成普通数组把这两件事都挡掉了。
+ *
+ * 非数组类型不做处理是有意的：已经解析成对象的帧（回放、算法通道）不该被这层
+ * 碰，谁的格式谁负责。
+ *
+ * @param {Buffer|ArrayBufferView|*} frame parser 输出。
+ * @returns {number[]|*} Buffer/TypedArray 转成的数组，或原值。
+ */
 function normalizeIncomingFrame(frame) {
   if (Buffer.isBuffer(frame)) return [...frame];
   if (ArrayBuffer.isView(frame)) return Array.from(frame);
@@ -38,6 +52,20 @@ function createDisplaySystemRuntimeDispatcher({
   const skippedBindings = [];
   let started = false;
 
+  /**
+   * 问策略：这个 binding 能不能挂上实时流。
+   *
+   * ⚠️ `dispatchPolicy` 不是函数时**直接放行**（fail-open）。默认值是真实策略，
+   * 所以只有调用方显式传了非函数才会走到这条分支 —— 那种情况下当作「调用方
+   * 主动放弃闸门」处理。注意这是 fail-open 而非 fail-closed：想加强规则时，
+   * 这里也是要一起改的地方之一。
+   *
+   * `currentSensorType` 和 `getSensorType` 两个都传给策略：策略需要「现在是什么
+   * 传感器」这个即时值来做类型匹配，同时保留 getter 以便它自己在需要时重新取。
+   *
+   * @param {object} binding runtime binding。
+   * @returns {{allowed: boolean, reason: string|null}} 策略判断结果。
+   */
   function canBind(binding) {
     if (typeof dispatchPolicy !== 'function') {
       return { allowed: true, reason: null };
@@ -51,11 +79,35 @@ function createDisplaySystemRuntimeDispatcher({
     });
   }
 
+  /**
+   * 给一个 binding 挂上 parser 的 data 监听。
+   *
+   * ⚠️ **静默返回 null 的两种情况**：binding 没有 `parserChannel`，或者
+   * `handleFrame` 不是函数。这类畸形 binding 既不会进 `activeHandlers`，
+   * 也**不会**进 `skippedBindings`（那个数组只收策略拒绝的）—— 于是
+   * `getStatus()` 里 `activeHandlerCount + skippedBindingCount` 有可能小于
+   * `bindingCount`，差额就是这里静默丢掉的。排查「我的展示系统没数据」时，
+   * 先用这三个数对账，账不平说明 binding 本身没成形，不是策略拦的。
+   *
+   * 帧处理的异常一律吞掉只打 warn，不让它冒到 parser 的 emit 上 ——
+   * 一个展示系统的处理器抛错不该把整条串口数据流打断，别的展示系统还在用同一个
+   * parser。`DISPLAY_ALGORITHM_FRAME_DROPPED` 连 warn 都不打：那是算法通道
+   * 主动丢帧的背压信号，属正常流控，打日志会在高频下把日志刷爆。
+   *
+   * 同步和异步两条错误路径都要接：`handleFrame` 可能返回 Promise（算法通道是
+   * 异步的），只 try/catch 接不到异步拒绝。
+   *
+   * @param {object} binding runtime binding。
+   * @returns {{bindingId: string, parserChannel: string, handler: Function}|null}
+   *          已挂载记录；binding 畸形时为 null。
+   */
   function bindOne(binding) {
     if (!binding?.parserChannel || typeof binding.handleFrame !== 'function') {
       return null;
     }
 
+    // 实际挂到 parser 上的监听器。必须保留这个引用（随返回值一起交出去），
+    // stop() 摘监听时要用同一个函数身份去 offData —— 重新构造一个等价函数摘不掉。
     const handler = (frame) => {
       try {
         const result = binding.handleFrame(normalizeIncomingFrame(frame));
@@ -84,6 +136,22 @@ function createDisplaySystemRuntimeDispatcher({
     };
   }
 
+  /**
+   * 启动调度：把所有 `status === 'bound'` 的 binding 过一遍策略再挂上 parser。
+   *
+   * 幂等 —— 已启动时直接返回当前状态，不会重复挂监听（重复挂会让同一帧被处理
+   * 两次，而 parser 那边不去重）。
+   *
+   * 只挂 `status === 'bound'` 的 binding：其它状态（规划中、绑定失败）意味着
+   * 通道还没成形，挂上去只会在每一帧上抛错。
+   *
+   * `skippedBindings` 每次启动前清空，所以它记录的始终是**本次**启动的拒绝原因，
+   * 不是历史累积。
+   *
+   * @returns {object} 启动后的状态快照（见 getStatus）。
+   * @throws {Error} serialParserManager 没有 onData 时抛出 —— 这是装配错误，
+   *         静默降级会让整个展示系统链路看起来「启动成功但永远没数据」。
+   */
   function start() {
     if (started) return getStatus();
     if (!serialParserManager?.onData) {
@@ -110,6 +178,19 @@ function createDisplaySystemRuntimeDispatcher({
     return getStatus();
   }
 
+  /**
+   * 停止调度：摘掉所有已挂的监听。
+   *
+   * `splice(0)` 是「取出并清空」的惯用法：先把数组清干净再逐个摘，这样即便
+   * `offData` 抛错也不会留下「已清空一半」的中间态。
+   *
+   * ⚠️ `offData?.()` 是可选调用：`serialParserManager` 没实现 `offData` 时，
+   * 监听器**摘不掉但本地记录已清空** —— 之后再 start() 就会挂第二份，同一帧被
+   * 处理两次。`start()` 强制要求 `onData` 存在却对 `offData` 宽容，这个不对称是
+   * 现状；换 parser 管理器实现时必须确认 `offData` 存在，否则反复启停会累积监听。
+   *
+   * @returns {object} 停止后的状态快照。
+   */
   function stop() {
     if (!started) return getStatus();
     activeHandlers.splice(0).forEach((active) => {
@@ -120,6 +201,20 @@ function createDisplaySystemRuntimeDispatcher({
     return getStatus();
   }
 
+  /**
+   * 当前调度状态快照，供诊断使用。
+   *
+   * 三个计数一起看才有意义：`bindingCount` 是总数，`activeHandlerCount` 是真正
+   * 挂上的，`skippedBindingCount` 是被策略拒绝的。**三者之差是 bindOne 静默丢弃
+   * 的畸形 binding**（详见 bindOne 注释），这是目前唯一能发现那类问题的办法。
+   *
+   * `skippedBindings` 逐项浅拷后返回，不把内部数组的引用漏给调用方 ——
+   * 调用方拿到引用后 push/清空会破坏下一次 getStatus 的准确性。
+   *
+   * @returns {{started: boolean, bindingCount: number, activeHandlerCount: number,
+   *            skippedBindingCount: number, handlers: object[], skippedBindings: object[]}}
+   *          状态快照。
+   */
   function getStatus() {
     return {
       started,

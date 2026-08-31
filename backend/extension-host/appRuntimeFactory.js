@@ -61,6 +61,24 @@ function createAppRuntime({
   });
   let runtimeBindingOptions = null;
 
+  /**
+   * 重新发现展示系统，并在已经绑定过实时链路时顺带重新绑定。
+   *
+   * 这是二开闭环的关键一步：用户在 Builder 里保存了一份 manifest，如果只重新发现
+   * 而不重新绑定，注册表更新了但实时流还挂在旧 binding 上，现象是「保存成功、界面
+   * 也列出来了，就是没数据」。所有写操作（save / saveDisplaySection / duplicate）
+   * 保存后都会调这个函数，就是为了避免那种半生效状态。
+   *
+   * `runtimeBindingOptions` 是首次 `bindRuntimeChannels` 时缓存下来的那套依赖
+   * （串口管理器、parser、输出管线、两个运营开关）。缓存它是因为重载发生在 HTTP
+   * 请求上下文里，那里拿不到这些运行时对象。为 null 表示还没走过启动绑定
+   * （例如启动早期或纯发现模式），此时只重新发现、不绑定 —— 不是错误。
+   *
+   * 返回发现层状态而非绑定结果：调用方（HTTP 保存接口）要回给前端的是「现在有哪些
+   * 展示系统、有没有加载错误」。
+   *
+   * @returns {object} 发现层状态快照，见 displaySystemRuntimeDiscovery.getStatus。
+   */
   function reloadDisplaySystems() {
     displaySystemRuntimeDiscovery.reload();
     if (runtimeBindingOptions) {

@@ -58,6 +58,25 @@ const DEFAULT_ALGORITHM_SOURCES = Object.freeze({
 `,
 });
 
+/**
+ * 按矩阵尺寸生成「恒等」的线序表和点位表。
+ *
+ * 新建传感器时用它垫底：用户还没有真实的线序/点位文件，但这两个文件是必填的
+ * （见 displaySystemConfigValidator 的 `files.lineOrder is required`），没有它们
+ * manifest 存下去就是不合法的。恒等映射的效果是「按行优先原样铺开」——出的图大概率
+ * 不对，但**能出图**，用户可以先看到东西再去调线序，而不是先面对一个存不下去的表单。
+ *
+ * ⚠️ 两张表的基数不同，这里必须与两个校验器的约定严格对齐：
+ * `lineOrder.order` 是 **1 基**（`index + 1`），`pointOrder.points` 是 **0 基**
+ * （`[floor(i/cols), i%cols]`）。写错任一侧的表现是「新建的传感器一保存就报越界」。
+ *
+ * 尺寸为 0 时返回空的两张表（不抛错）：Builder 里矩阵尺寸是用户边填边算的，
+ * 中间态很正常。
+ *
+ * @param {{rows?: number, cols?: number}} matrix 矩阵尺寸。
+ * @returns {{lineOrder: {order: number[]}, pointOrder: {matrix: object, points: number[][]}}}
+ *          恒等映射的两份定义。
+ */
 function createIdentityDefinitions(matrix) {
   const rows = Number(matrix?.rows || 0);
   const cols = Number(matrix?.cols || 0);
@@ -96,6 +115,29 @@ function canonicalizePointDefinition(definition) {
   };
 }
 
+/**
+ * 写 JSON：先写临时文件再改名，避免读者读到写了一半的内容。
+ *
+ * 为什么要这么绕：保存展示系统会连写好几个文件（manifest、线序、点位、算法源码），
+ * 而**写完立刻会触发 `reloadDisplaySystems()` 去重新扫描并解析这些文件**。直接
+ * `writeFileSync` 覆盖原文件时，扫描可能正好读到半个 JSON，表现是「保存后展示系统
+ * 短暂消失或报解析错」。先写 `.tmp-<pid>` 再 rename 让这个中间态不可见。
+ *
+ * ⚠️ 名字里的 atomic 只保证**内容**不会被读到半截，并不是完整的原子替换：
+ * - 先 `unlinkSync` 再 `renameSync`，两步之间有一个「文件不存在」的窗口
+ *   （读者此刻会当成没有这份配置）。删这一步是为了迁就 Windows 上 rename 覆盖
+ *   已存在文件的行为差异，去掉它需要先在 Windows 上验。
+ * - 没有 fsync，断电可能留下空文件或旧内容。
+ * - 临时文件名只带 pid，同进程内并发写同一个文件会互相踩。目前保存是串行的
+ *   HTTP 处理，不构成问题；要并发就得换成带随机后缀。
+ *
+ * 末尾补 `\n` 是为了文件对 diff 工具友好（用户的展示系统目录常被纳入版本管理）。
+ *
+ * @param {string} filePath 目标文件路径。
+ * @param {*} value 要序列化的值。
+ * @param {typeof fs} [fsLike=fs] 注入的 fs（测试用）。
+ * @returns {void}
+ */
 function writeJsonAtomic(filePath, value, fsLike = fs) {
   const temporaryPath = `${filePath}.tmp-${process.pid}`;
   fsLike.writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
@@ -103,6 +145,23 @@ function writeJsonAtomic(filePath, value, fsLike = fs) {
   fsLike.renameSync(temporaryPath, filePath);
 }
 
+/**
+ * 写纯文本（算法源码）：同 `writeJsonAtomic` 的临时文件 + 改名策略，另加两处规范化。
+ *
+ * 1. **CRLF 一律转成 LF**。源码是从浏览器的 textarea 提交上来的，Windows 上很容易
+ *    带 `\r\n`；而这些文件会被 Python 解释器读、也常被纳入版本管理。混用换行符
+ *    会让 diff 显示成整文件改动，本仓为此专门做过一次 CRLF 清理，写入口就该统一。
+ * 2. **保证以换行结尾**。Python 对缺末尾换行更敏感，diff 也会少一条
+ *    「\ No newline at end of file」。
+ *
+ * `String(value || '')` 把 null/undefined 兜成空串：用户清空算法源码是合法操作，
+ * 不该在这里抛错（内容是否必须非空由 `validateBuilderAlgorithmSource` 判断）。
+ *
+ * @param {string} filePath 目标文件路径。
+ * @param {*} value 文本内容。
+ * @param {typeof fs} [fsLike=fs] 注入的 fs（测试用）。
+ * @returns {void}
+ */
 function writeTextAtomic(filePath, value, fsLike = fs) {
   const temporaryPath = `${filePath}.tmp-${process.pid}`;
   const text = String(value || '').replace(/\r\n/g, '\n');
@@ -111,16 +170,65 @@ function writeTextAtomic(filePath, value, fsLike = fs) {
   fsLike.renameSync(temporaryPath, filePath);
 }
 
+/**
+ * 读 JSON；路径为空或文件不存在返回 null。
+ *
+ * 「不存在返回 null」是给编辑器读取路径用的：Builder 要能打开一个只写了一半的展示
+ * 系统（比如声明了坐标映射但文件还没建），缺文件在编辑态是正常的，不该抛错。
+ *
+ * ⚠️ 但 **JSON 解析失败仍然会抛** —— 那是「文件在但内容坏了」，静默返回 null 会让
+ * 用户在编辑器里看到一个空白的段，然后一保存就把原本坏但有内容的文件覆盖掉。
+ * 抛出去让上层报错是有意的。
+ *
+ * @param {string|null} filePath 文件路径。
+ * @param {typeof fs} [fsLike=fs] 注入的 fs（测试用）。
+ * @returns {object|null} 解析结果；文件不存在为 null。
+ */
 function readJsonOptional(filePath, fsLike = fs) {
   if (!filePath || !fsLike.existsSync(filePath)) return null;
   return JSON.parse(fsLike.readFileSync(filePath, 'utf8'));
 }
 
+/**
+ * 读纯文本（算法源码）；路径为空或文件不存在返回 null。
+ *
+ * 返回 **null 而不是空串**，好让编辑器能区分「没有算法文件」和「有一个空文件」——
+ * 前者应显示默认模板（`DEFAULT_ALGORITHM_SOURCES`），后者应显示用户清空后的状态。
+ * 兜成空串会让默认模板反复冒出来覆盖用户的意图。
+ *
+ * 读出来的内容不做换行规范化（写入侧才做）：显示时保持磁盘原样，避免编辑器一打开
+ * 就显示成「有改动」。
+ *
+ * @param {string|null} filePath 文件路径。
+ * @param {typeof fs} [fsLike=fs] 注入的 fs（测试用）。
+ * @returns {string|null} 文件内容；文件不存在为 null。
+ */
 function readTextOptional(filePath, fsLike = fs) {
   if (!filePath || !fsLike.existsSync(filePath)) return null;
   return fsLike.readFileSync(filePath, 'utf8');
 }
 
+/**
+ * 检查 Builder 提交的算法源码里有没有约定的入口。
+ *
+ * ⚠️ **这不是安全检查，只是一次入口形状检查。** 两条正则只确认
+ * `module.exports = ...` / `def calculate(raw_data, context):` 存在，代码内部做什么
+ * 完全不看 —— 真正的执行边界在别处（JS 走 `vm`、Python 走子进程）。别把它当沙箱，
+ * 也别以为加正则能收紧安全。
+ *
+ * 它存在的理由是**把失败提前到保存时**：没有入口的算法在运行期的表现是「装好了、
+ * 没报错、就是没有算法输出」，从现象倒查非常费时。保存时报一条明确的错，用户当场
+ * 就知道要写什么。
+ *
+ * `none` 和 `json` 类型直接返回（不是代码，没有入口一说）。
+ *
+ * 抛错而不是返回错误列表，是因为调用方是保存流程：这一条不过就不该继续往磁盘写。
+ *
+ * @param {string} type 算法类型（none/json/js/python）。
+ * @param {*} source 源码文本。
+ * @returns {void}
+ * @throws {Error} 代码类算法缺源码或缺入口时抛出。
+ */
 function validateBuilderAlgorithmSource(type, source) {
   if (!CODE_ALGORITHM_TYPES.has(type)) return;
   if (typeof source !== 'string' || !source.trim()) {
@@ -471,6 +579,30 @@ function copyDirectoryRecursive(sourceDirectory, targetDirectory, fsLike) {
   });
 }
 
+/**
+ * 创建展示系统工作区服务：Builder 的读写落盘层。
+ *
+ * 这是二开链路里唯一**往磁盘写展示系统**的地方。它只认一个 `writableRoot`
+ * （由调用方拼成 `<用户可写目录>/display-systems`），因此打包后的只读资源目录
+ * 永远不可能被写到 —— 「自带系统只读、用户系统可写」那条规则的物理保障就在这里，
+ * 不是靠上层判断 `editable`（上层那道检查只是为了给出更好的错误信息）。
+ *
+ * 构造时立刻 `mkdirSync(recursive)`：目录不存在是首次运行的常态，等到保存那一刻
+ * 才发现目录没有会让第一次保存失败。
+ *
+ * `fsLike` 注入让整个服务能在内存文件系统上测（写盘逻辑分支多，不注入就得建真目录）。
+ * `listSerialProtocolPresets` 是**函数而不是数组**，为的是每次取目录时重读预设 ——
+ * 用户往可写目录丢一份协议 JSON，刷新页面就能看到，不必重启服务。
+ *
+ * @param {object} [options] 创建参数。
+ * @param {string} options.writableRoot 用户可写的 display-systems 目录。
+ * @param {typeof fs} [options.fsLike=fs] 注入的 fs。
+ * @param {() => object[]} [options.listSerialProtocolPresets] 串口协议预设读取函数。
+ * @returns {{save: Function, saveDisplaySection: Function, duplicate: Function,
+ *            read: Function, getCatalog: Function}} 工作区服务。
+ * @throws {Error} 缺 writableRoot 时抛出 —— 没有它就无从判断该往哪写，
+ *         静默退化会有把文件写进只读资源目录的风险。
+ */
 function createDisplaySystemWorkspaceService({
   writableRoot,
   fsLike = fs,
@@ -481,6 +613,50 @@ function createDisplaySystemWorkspaceService({
   if (!writableRoot) throw new Error('display system writableRoot is required');
   fsLike.mkdirSync(writableRoot, { recursive: true });
 
+  /**
+   * Builder「新建/保存传感器」的落盘主流程。
+   *
+   * 顺序是：校 id → 校算法 → 从几何文件反推尺寸 → 重建 manifest → 校 manifest →
+   * 校四份定义文件 → 建目录 → **先写定义文件、最后写 manifest**。
+   *
+   * 几个必须知道的点：
+   *
+   * **① `SAFE_DISPLAY_SYSTEM_ID` 是路径安全边界，不只是命名规范。** id 会直接
+   * `path.join(writableRoot, id)` 当目录名用，允许 `..` 或分隔符就能写到可写根目录
+   * 之外。改这个正则等于改一道安全边界。
+   *
+   * **② 尺寸以几何文件为准，不以 manifest 声明为准**（`derivedMatrix` 的优先级：
+   * 坐标映射 → 点位表 → manifest 声明）。同理 `valueCount` 也从点数反推。理由是这两者
+   * 一旦不一致，画面就是错位的，而用户改的通常是几何文件；让文件当唯一真相能从根上
+   * 消掉「manifest 说 10×9、点位表是 8×8」这种不可能自己发现的错。
+   *
+   * **③ 这条通路内嵌了「Builder 单传感器向导」的假设**：强制 `schemaVersion: 2`、
+   * 把 `files` 重写成固定的扁平文件名、按类型重建整个 `algorithm` 段。所以它**不能**
+   * 用来保存 v3 多传感器 manifest —— 这正是 `saveDisplaySection` 单独存在的原因
+   * （见那个函数的注释）。
+   *
+   * **④ 两轮校验都用 `error.details` 带上完整错误列表**再抛，HTTP 层据此把每一条
+   * 摊给用户，而不是只给一句「保存失败」。
+   *
+   * **⑤ manifest 一定最后写。** 发现层是靠 `display-system.json` 是否存在来认一个
+   * 目录的，而**没有 manifest 的目录会被静默跳过**（`discoverDisplaySystems` 只在
+   * `result.manifestPath` 非空时才记错误）。所以写到一半崩掉的结果是「这个系统还没
+   * 出现」，而不是「出现了但引用的文件都不在」—— 后者会在每次启动时刷一堆错误。
+   * **调整写入顺序会破坏这个性质。**
+   *
+   * `overwrite` 默认 false，目录已存在时抛带 `code = 'DISPLAY_SYSTEM_EXISTS'` 的错，
+   * 让上层能把它翻成「id 已被占用」而不是 500。
+   *
+   * @param {object} [options] 保存参数。
+   * @param {object} options.manifest Builder 提交的 manifest。
+   * @param {{lineOrder?: object, pointOrder?: object, coordinateMap?: object,
+   *          algorithmData?: object, algorithmSource?: string}} [options.definitions={}]
+   *        随 manifest 一起提交的定义文件内容。
+   * @param {boolean} [options.overwrite=false] 目录已存在时是否覆盖。
+   * @returns {{id: string, directory: string, manifest: object}} 落盘结果。
+   * @throws {Error} id 非法、算法类型不支持、算法缺入口、manifest 或定义文件校验失败、
+   *         目录已存在且未允许覆盖。
+   */
   function save({ manifest: inputManifest, definitions = {}, overwrite = false } = {}) {
     if (!inputManifest || typeof inputManifest !== 'object') {
       throw new Error('display system manifest is required');
@@ -697,6 +873,30 @@ function createDisplaySystemWorkspaceService({
     return { id, directory, manifest: nextManifest };
   }
 
+  /**
+   * 读出一个展示系统的**可编辑视图**：manifest 原文 + 五份定义文件内容 + 权限标记。
+   *
+   * 与发现层的 `getById` 不同：那个给的是归一、校验、投影之后的运行时配置；这里给的是
+   * **磁盘原文**，因为 Builder 要把用户当初写的东西一字不差地填回表单。若拿归一结果
+   * 回填，用户一打开表单就会看到被补过默认值的内容，随手一存就把默认值固化进
+   * manifest。
+   *
+   * 五份定义全走 `readJsonOptional`/`readTextOptional`，缺文件返回 null 而不报错 ——
+   * 只有线序和点位是必填，其余三份缺失是常态。
+   *
+   * 三个权限字段分工不同，别当成一个：
+   * - `pathIsWritable`：这份 manifest **物理上**是否在可写根目录里（用
+   *   `path.relative(...).startsWith('..')` 判包含，理由同
+   *   `displaySystemRuntimeDiscovery.isPathInside`）。
+   * - `editable`：优先采信调用方给的 `config.editable`（发现层已按 origin 判过），
+   *   没给才退回路径判断。这样两处判据不会给出互相矛盾的答案。
+   * - `writable`：两者都成立才是真能写。前端据此决定「保存」按钮是可用、还是只给
+   *   「另存为」。
+   *
+   * @param {{manifestPath?: string, resolvedFiles?: object, editable?: boolean,
+   *          origin?: string}} config 已加载的展示系统配置。
+   * @returns {object|null} 编辑视图；没有 manifestPath 时为 null。
+   */
   function read(config) {
     if (!config?.manifestPath) return null;
     const pathIsWritable = !path.relative(
