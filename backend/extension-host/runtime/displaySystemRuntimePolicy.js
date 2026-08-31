@@ -32,15 +32,13 @@ function normalizeLowerValue(value) {
 /**
  * 从 binding 上取运行模式。
  *
- * ⚠️ 五个取值来源按优先级短路：`runtimeMode` → `metadata.runtimeMode` →
- * `runtimeChannel.runtimeMode` → `runtimeChannel.metadata.runtimeMode` →
- * `sensor.runtimeMode`。其中 **`metadata.runtimeMode` 是 manifest 作者可以随意
- * 填写的字段** —— manifest 校验器对 `metadata` 是整体透传、不做白名单。
- * 这条路径与下面 `evaluateDisplaySystemDispatchPolicy` 里 parallel/shadow 那道
- * 判断合起来构成一处自审批口子，详见该函数的注释。
+ * 五个来源按优先级短路：`runtimeMode` → `metadata.runtimeMode` → `runtimeChannel.runtimeMode`
+ * → `runtimeChannel.metadata.runtimeMode` → `sensor.runtimeMode`。多来源不是设计，是迁移期
+ * 产物 —— 不同来源的 binding 把这个字段放在不同层级。
  *
- * 多来源不是冗余设计，是迁移期产物：不同来源的 binding（旧 runtime 拼的、
- * 通道规划器生成的、manifest 直接给的）把这个字段放在不同层级上。
+ * ⚠️ 其中 **`metadata.runtimeMode` 是 manifest 作者可随意填的**（校验器对 metadata 整体透传、
+ * 不做白名单），与 `evaluateDisplaySystemDispatchPolicy` 里 parallel/shadow 那道判断合起来
+ * 构成一处自审批口子，详见该函数注释。
  *
  * @param {object} [binding={}] runtime binding。
  * @returns {string} 小写运行模式；都取不到时为空串。
@@ -177,22 +175,14 @@ function evaluateDisplaySystemDispatchPolicy(binding = {}, {
     };
   }
 
-  // ⚠️ 这道闸有一处自审批口子，读的时候必须知道：
+  // ⚠️ 这道闸有一处自审批口子：条件里的 `&& !isParallelRuntimeMode(runtimeMode)` 意味着
+  // manifest 自己声明 `runtimeMode: 'parallel'`（或 'shadow'）就直接放行，**绕过运营侧开关
+  // `allowParallelWithLegacy`** —— 而 runtimeMode 的来源之一是校验器整体透传的
+  // `metadata.runtimeMode`，等于 manifest 作者能给自己批准并行挂载。对比上面那道 active 闸
+  // （声明 active 反而**触发**检查），四档模式里只有 active 真正有守门人。
   //
-  // 条件里含 `&& !isParallelRuntimeMode(runtimeMode)`，也就是说 manifest 只要自己
-  // 声明 `runtimeMode: 'parallel'`（或 'shadow'），整个条件立刻为假、直接放行 ——
-  // **绕过了 `allowParallelWithLegacy` 这个运营侧开关**。而 runtimeMode 的取值来源
-  // 之一是 `metadata.runtimeMode`（见 getRuntimeMode），manifest 校验器对 metadata
-  // 是整体透传不做白名单，等于 manifest 作者可以给自己批准并行挂载。
-  //
-  // 对比上面那道 active 闸：它写的是 `isActiveRuntimeMode(runtimeMode) &&
-  // !allowActiveDisplaySystem`，声明 active 反而**触发**检查、必须有开关才过。
-  // 四档模式里只有 active 真正有守门人。
-  //
-  // 现状不改是因为并行模式本身只旁听不接管、不会顶掉旧链路的输出，风险等级低于
-  // active；但要把「谁批准的」纳入规则时，闸必须改成读一个**外部批准过的档位**
-  // （或 proposedBy），而不是读 manifest 自己填的 runtimeMode —— 光在写入侧校验
-  // 拦不住，绕过点在这里的调度侧。
+  // 不改是因为并行只旁听不接管、风险低于 active。真要把「谁批准的」纳入规则时，这道闸必须
+  // 改成读**外部批准过的档位**（或 proposedBy），光在写入侧校验拦不住 —— 绕过点在调度侧。
   if (
     parserChannel
     && protectedChannels.has(parserChannel)

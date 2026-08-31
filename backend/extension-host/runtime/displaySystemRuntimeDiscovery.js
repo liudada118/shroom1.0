@@ -37,17 +37,13 @@ function buildDisplaySystemRoots({
 /**
  * 判断 target 是否位于 root 之内（含 root 自身）。
  *
- * 用 `path.relative` 而**不是字符串前缀比较**，三个理由都会真实踩到：
- * 1. 前缀法会把 `/app/resources-backup` 判成在 `/app/resources` 里面 —— 只差一个
- *    后缀的兄弟目录会被误判为子目录，进而把用户目录当成只读资源目录。
- * 2. `relative` 会先 `resolve`，于是 `..`、`.` 和大小写/分隔符差异都被折平，
- *    manifest 里写相对路径也能判对。
- * 3. Windows 上跨盘符（`C:\` 与 `D:\`）算不出相对路径，`relative` 会返回一个绝对
- *    路径 —— 这就是 `!path.isAbsolute(relative)` 那一项的用途，少了它跨盘符会误判
- *    为「在里面」。
+ * ⚠️ 用 `path.relative` 而**不是字符串前缀比较**，三个坑都会真实踩到：前缀法会把
+ * `/app/resources-backup` 判成在 `/app/resources` 里（兄弟目录被当子目录，进而把用户目录
+ * 当只读资源目录）；`relative` 先 `resolve`，把 `..`/`.`/分隔符差异折平；Windows 跨盘符算
+ * 不出相对路径会返回绝对路径 —— 那就是 `!path.isAbsolute(relative)` 那项的用途，少了它跨
+ * 盘符会误判为「在里面」。
  *
- * `relative === ''` 单独放行，表示 root 自己也算「在 root 之内」：manifest 直接放在
- * 根目录下（没有子目录）时 sourceDirectory 就等于 root。
+ * `relative === ''` 单独放行：manifest 直接放在根目录下时 sourceDirectory 就等于 root。
  *
  * @param {string} root 根目录。
  * @param {string} target 待判目录或文件路径。
@@ -177,20 +173,16 @@ function createDisplaySystemRuntimeDiscovery({
   /**
    * 重新扫描所有根目录，全量重建两张注册表。
    *
-   * **全量重建（clear + registerMany）而不是增量更新**：manifest 被删掉这件事无法
-   * 用增量表达 —— 没有「删除事件」可听，只能靠「这一轮没扫到」推断。清空重注册是
-   * 唯一能让注册表跟磁盘一致的做法。代价是重载瞬间两张表是空的，所以这个函数不能
-   * 在实时流跑着的时候随便调（调用方会先停 dispatcher）。
+   * ⚠️ **全量重建（clear + registerMany）而不是增量**：「manifest 被删掉」没有事件可听，
+   * 只能靠「这一轮没扫到」推断。代价是重载瞬间两张表是空的，所以**不能在实时流跑着时调**
+   * （调用方会先停 dispatcher）。
    *
-   * 顺序有讲究：先 `classifyDisplaySystemAccess` 定 origin，**再**做冲突消解 ——
-   * 因为「内置优先于用户」这条规则需要先知道每份配置的 origin 才能比较。
-   * `attachRuntimeChannelPlan` 在分类之后、冲突消解之前跑，是为了让被丢弃的重复
-   * 配置也已经建好计划（多花一点计算，换来两条路径的代码一致，不必区分对待）。
+   * ⚠️ 扫描错误只进 `discoveryErrors`、**不抛出** —— 一份坏 manifest 不该让应用起不来，但
+   * 也意味着二开写错 manifest 时界面只是少一个展示系统，必须去 `getStatus().errors` 看。
+   * 该数组每次整体替换而非累加（它表达「当前磁盘状态」，累加会让修好的问题一直留着）。
    *
-   * `discoveryErrors` 每次重载整体替换而非累加：它表达的是「当前磁盘状态有哪些
-   * 问题」，累加会让修好的问题一直留在诊断里。⚠️ 注意扫描错误只进这个数组、
-   * **不抛出** —— 一份坏 manifest 不该让整个应用起不来，但也意味着二开时写错了
-   * manifest 界面只是少一个展示系统，必须去 `getStatus().errors` 里看。
+   * 顺序有讲究：先定 origin **再**冲突消解（「内置优先于用户」得先知道 origin）；
+   * `attachRuntimeChannelPlan` 在两者之间跑，让被丢弃的重复配置也建好计划、代码不分叉。
    *
    * @returns {object[]} 本轮注册成功的展示系统配置（已去重）。
    */
@@ -239,13 +231,12 @@ function createDisplaySystemRuntimeDiscovery({
     /**
      * 发现层的对外状态：注册表快照 + 扫描目录 + 运行时定义 + 错误列表。
      *
-     * 这是「打包后二开为什么没生效」的第一落点，所以四块都要在：`roots` 说明去哪
-     * 几个目录找过（放错目录是最常见的原因），`errors` 说明找到了但没通过校验，
-     * 快照说明通过校验并注册成功的有哪些。
+     * 这是「打包后二开为什么没生效」的第一落点，四块都要在：`roots` 说明去哪几个目录找过
+     * （放错目录是最常见的原因），`errors` 说明找到了但没过校验，快照说明注册成功了哪些。
      *
-     * ⚠️ `runtimeDefinitions` 是**未收窄的完整定义**（含算法与顺序文件的源路径），
-     * 与 registry/runtimeRegistry 那两份刻意投影过的快照不同。它会出到 HTTP 状态
-     * 接口上，把这个接口暴露到不受信网络前需要先想清楚这一点。
+     * ⚠️ `runtimeDefinitions` 是**未收窄的完整定义**（含算法与顺序文件的源路径），与
+     * registry 那两份刻意投影过的快照不同，而它会出到 HTTP 状态接口上 —— 把这个接口暴露到
+     * 不受信网络前要先想清楚。
      *
      * @returns {object} 发现层状态。
      */

@@ -5,13 +5,11 @@ const {
 /**
  * 把 parser 输出的帧归一成普通数组。
  *
- * Buffer 和各种 TypedArray 都转成 number[]，其余类型**原样透传**。
- * 转数组不是为了好看：展示系统的处理器是二开可写的代码，让它拿到 Buffer 意味着
- * 它能通过 `buffer.buffer` 摸到底层 ArrayBuffer、进而改到 parser 复用的缓冲区，
- * 也意味着它要处理 Buffer 的一整套 API。统一成普通数组把这两件事都挡掉了。
+ * Buffer 和各种 TypedArray 转成 number[]，其余类型**原样透传**（已解析成对象的帧 ——
+ * 回放、算法通道 —— 不该被这层碰，谁的格式谁负责）。
  *
- * 非数组类型不做处理是有意的：已经解析成对象的帧（回放、算法通道）不该被这层
- * 碰，谁的格式谁负责。
+ * ⚠️ 转数组不是为了好看：处理器是二开可写的代码，拿到 Buffer 就能通过 `buffer.buffer`
+ * 摸到底层 ArrayBuffer、改掉 parser 复用的缓冲区。统一成普通数组把这条路挡掉。
  *
  * @param {Buffer|ArrayBufferView|*} frame parser 输出。
  * @returns {number[]|*} Buffer/TypedArray 转成的数组，或原值。
@@ -55,13 +53,12 @@ function createDisplaySystemRuntimeDispatcher({
   /**
    * 问策略：这个 binding 能不能挂上实时流。
    *
-   * ⚠️ `dispatchPolicy` 不是函数时**直接放行**（fail-open）。默认值是真实策略，
-   * 所以只有调用方显式传了非函数才会走到这条分支 —— 那种情况下当作「调用方
-   * 主动放弃闸门」处理。注意这是 fail-open 而非 fail-closed：想加强规则时，
-   * 这里也是要一起改的地方之一。
+   * ⚠️ `dispatchPolicy` 不是函数时**直接放行（fail-open，不是 fail-closed）**。默认值是
+   * 真实策略，走到这条分支只可能是调用方显式传了非函数 —— 按「主动放弃闸门」处理。
+   * 想加强规则，这里是要一起改的地方之一。
    *
-   * `currentSensorType` 和 `getSensorType` 两个都传给策略：策略需要「现在是什么
-   * 传感器」这个即时值来做类型匹配，同时保留 getter 以便它自己在需要时重新取。
+   * 即时值 `currentSensorType` 与 getter 两个都传给策略：前者做类型匹配，后者留给它自己
+   * 需要时重取。
    *
    * @param {object} binding runtime binding。
    * @returns {{allowed: boolean, reason: string|null}} 策略判断结果。
@@ -82,20 +79,14 @@ function createDisplaySystemRuntimeDispatcher({
   /**
    * 给一个 binding 挂上 parser 的 data 监听。
    *
-   * ⚠️ **静默返回 null 的两种情况**：binding 没有 `parserChannel`，或者
-   * `handleFrame` 不是函数。这类畸形 binding 既不会进 `activeHandlers`，
-   * 也**不会**进 `skippedBindings`（那个数组只收策略拒绝的）—— 于是
-   * `getStatus()` 里 `activeHandlerCount + skippedBindingCount` 有可能小于
-   * `bindingCount`，差额就是这里静默丢掉的。排查「我的展示系统没数据」时，
-   * 先用这三个数对账，账不平说明 binding 本身没成形，不是策略拦的。
+   * 帧处理异常一律吞掉只打 warn（一个处理器抛错不该打断整条串口流，别的展示系统还在用
+   * 同一个 parser），同步异步两条路都要接 —— `handleFrame` 可能返回 Promise。
+   * `DISPLAY_ALGORITHM_FRAME_DROPPED` 连 warn 都不打：那是背压信号，高频下会刷爆日志。
    *
-   * 帧处理的异常一律吞掉只打 warn，不让它冒到 parser 的 emit 上 ——
-   * 一个展示系统的处理器抛错不该把整条串口数据流打断，别的展示系统还在用同一个
-   * parser。`DISPLAY_ALGORITHM_FRAME_DROPPED` 连 warn 都不打：那是算法通道
-   * 主动丢帧的背压信号，属正常流控，打日志会在高频下把日志刷爆。
-   *
-   * 同步和异步两条错误路径都要接：`handleFrame` 可能返回 Promise（算法通道是
-   * 异步的），只 try/catch 接不到异步拒绝。
+   * ⚠️ binding 没有 `parserChannel` 或 `handleFrame` 不是函数时**静默返回 null**：既不进
+   * `activeHandlers` 也**不进** `skippedBindings`（那个只收策略拒绝的）。所以排查「展示系统
+   * 没数据」时先用 `getStatus()` 的三个数对账 —— `active + skipped < bindingCount` 的差额
+   * 就是这里丢掉的，说明 binding 本身没成形，不是策略拦的。
    *
    * @param {object} binding runtime binding。
    * @returns {{bindingId: string, parserChannel: string, handler: Function}|null}

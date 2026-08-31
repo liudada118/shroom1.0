@@ -53,16 +53,11 @@ function resolveDisplaySystemFiles(config, baseDirectory) {
   /**
    * 把一个可能为空的路径解析成绝对路径。
    *
-   * 相对路径基于 **manifest 所在目录**而不是进程 cwd —— manifest 里写的
-   * `"./line-order.json"` 必须指向它旁边那个文件，否则打包后从不同工作目录启动
-   * 就会解析到别处。
+   * 相对路径基于 **manifest 所在目录**而不是进程 cwd，否则打包后从不同工作目录启动会解析
+   * 到别处。空值返回 null 不抛错（这些文件几乎都是可选的，是否必须存在由 validateFiles 判）。
    *
-   * 绝对路径原样放行，让 manifest 能引用系统目录之外的共享文件（多个展示系统共用
-   * 一份线序表）。⚠️ 这条路径**没有目录包含检查**：manifest 写绝对路径可以指到磁盘
-   * 任意位置，加沙箱边界时这里是要收口的点之一。
-   *
-   * 空值返回 null 而不是抛错：这些文件几乎都是可选的（没算法就没有 algorithmEntry），
-   * 「是否必须存在」由 validateFiles 那一段单独判断。
+   * ⚠️ 绝对路径原样放行、**没有目录包含检查** —— 这让多个展示系统能共用一份线序表，但也
+   * 意味着 manifest 写绝对路径能指到磁盘任意位置。加沙箱边界时这里是要收口的点之一。
    *
    * @param {string|null|undefined} filePath manifest 里声明的路径。
    * @returns {string|null} 绝对路径；未声明时为 null。
@@ -75,11 +70,10 @@ function resolveDisplaySystemFiles(config, baseDirectory) {
   /**
    * 把单个传感器条目声明的五个文件解析成绝对路径。
    *
-   * 固定返回这五个键（缺的填 null）而不是只放存在的键：下游 `Object.entries` 遍历
-   * 校验、以及 `sensor.resolvedFiles.coordinateMap` 这类直接取值，都依赖键一定在。
+   * 固定返回这五个键（缺的填 null）而不是只放存在的键 —— 下游 `Object.entries` 遍历校验和
+   * `sensor.resolvedFiles.coordinateMap` 这类直接取值都依赖键一定在。
    *
-   * 注意两个来源层级不同：前三个来自 `sensor.files`，后两个来自 `sensor.algorithm`
-   * —— manifest 里算法配置是独立一块，别把它们当成同一个对象下的字段。
+   * ⚠️ 两个来源层级不同：前三个来自 `sensor.files`，后两个来自 `sensor.algorithm`。
    *
    * @param {{files?: object, algorithm?: object}} sensor 传感器条目（也可以是整份
    *        config —— 顶层兜底那处就是这么用的）。
@@ -196,13 +190,9 @@ function loadDisplaySystemDirectory(directory, {
   /**
    * 读入并归一坐标映射文件；没声明就返回 null。
    *
-   * ⚠️ 这里**故意不接错误**：走到这一步文件已经通过了存在性校验和
-   * `validateDisplaySystemDefinitionFiles`，此时再读失败说明磁盘/权限层面出了事，
-   * 不该被当成「这份 manifest 有问题」记进 errors 后继续 —— 让它冒到
-   * `discoverDisplaySystems` 之外去，比静默产出一个坐标为 null 的展示系统好定位。
-   *
-   * 每个传感器各读一次自己的映射文件，同一份文件被多个传感器引用时会重复读盘；
-   * 这只发生在启动和重载，没做缓存是有意的取舍。
+   * ⚠️ **故意不接错误**：文件此前已过存在性校验，这里再读失败说明磁盘/权限出了事，不该被
+   * 当成「manifest 有问题」记进 errors 继续跑 —— 让它冒出去比静默产出一个坐标为 null 的
+   * 展示系统好定位。同一份文件被多个传感器引用时会重复读盘，只发生在启动和重载，不缓存。
    *
    * @param {string|null} filePath 坐标映射文件绝对路径。
    * @returns {object|null} 归一后的坐标映射；未声明为 null。
