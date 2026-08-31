@@ -1654,7 +1654,7 @@ class Title extends React.Component {
       { label: t('sensorFast1024'), value: 'fast1024' },
       { label: t('sensorHandSinglePoint'), value: 'handSinglePoint' },
       { label: t('sensorNormal'), value: 'normal' },
-      { label: t('sensorHumanBody'), value: 'humanBody' },
+      // { label: t('sensorHumanBody'), value: 'humanBody' },
       { label: t('chairQX'), value: 'carQX' },
       { label: t('sensorHumanBodyOptimized'), value: HUMAN_BODY_OPTIMIZED_MATRIX },
     ]
