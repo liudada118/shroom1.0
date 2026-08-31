@@ -62,20 +62,14 @@ function createControlCommandService({ commandRouter, logger } = {}) {
   /**
    * WebSocket 入口：**新协议命令一律拒绝**，只放旧字段命令通过。
    *
-   * 这是一条刻意的传输面收口（ARCHITECTURE.md 也记着这条）：控制命令走 HTTP
-   * `POST /api/commands`，WebSocket 只承担实时帧、系统事件和 subscribe/unsubscribe。
-   * 理由是 WebSocket 那条连接是**广播用的、无请求-响应语义**的 —— 控制命令需要状态码、
-   * 需要与请求一一对应的回执、需要按连接鉴权，全都在 HTTP 上更自然。旧字段命令暂时继续
-   * 兼容，是因为老前端还在用；新写的代码不该走这条路。
+   * 刻意的传输面收口（ARCHITECTURE.md 也记着）：控制命令走 HTTP `POST /api/commands`，WebSocket 只
+   * 承担实时帧、系统事件和 subscribe/unsubscribe —— 那条连接是广播用的、无请求-响应语义，而控制命令
+   * 要状态码、要一一对应的回执、要按连接鉴权。旧字段命令暂时继续兼容（老前端还在用），新代码别走。
+   * 拒绝时**返回结果对象而不抛错**，形状与路由器的执行摘要对齐，WebSocket 侧回执代码就不用写分支。
    *
-   * 「是不是新协议」的判据是**同时存在 `payload` 与 `requestId` 两个键**（用
-   * `hasOwnProperty` 判存在而不判真值，`payload: {}` 也算）。故意不用
-   * `isCommandEnvelope`（它还要求有 `type`）—— 这里要拦的是「看起来想用新协议」的东西，
-   * 判得宽一点才不会让一条缺 `type` 的新协议命令漏进旧路径被误解释。
-   *
-   * 拒绝时**返回一个结果对象而不是抛错**，形状与路由器的执行摘要对齐（`handled`/`stop`/
-   * `ok`/`error`），这样 WebSocket 侧的回执代码不需要为这一种情况写分支。`stop: true`
-   * 表示「到此为止，别再往下发」。
+   * ⚠️ 判据是**同时存在 `payload` 与 `requestId` 两个键**（`hasOwnProperty` 判存在不判真值），故意
+   * 不用 `isCommandEnvelope`（它还要求有 `type`）—— 判宽一点，才不会让一条缺 `type` 的新协议命令漏
+   * 进旧路径被误解释。
    *
    * @param {object} command 命令对象。
    * @param {object} [context] 额外上下文，可覆盖 `transport`。

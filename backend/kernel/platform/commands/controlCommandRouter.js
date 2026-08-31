@@ -38,28 +38,20 @@ function normalizeBackendSerialRole(role) {
 }
 
 /**
- * SDK 合约保持只认识四个旧串口角色；应用后端在它外面补一层 manifest 动态角色适配。
- * 这样无需修改 SDK，HTTP 的 serial.open/serial.close 也能承载 armLeft 等任意 serialRole。
+ * SDK 合约只认四个旧串口角色，本函数在它外面补一层 manifest 动态角色适配，让 HTTP 的
+ * `serial.open`/`serial.close` 不改 SDK 也能承载 `armLeft` 等任意 serialRole。
  *
- * **返回 null 的含义是「这条命令不需要动态适配」**，调用方（normalizeRouterCommand）据此
- * 回落到 SDK 的 `normalizeCommand`。四条返回 null 的路径各有理由：
- * 1. 不是命令信封 → 旧 WebSocket 裸命令，与串口角色无关。
- * 2. 不是 `serial.open`/`serial.close` → 只有这两类命令带角色。
- * 3. 角色是旧角色**且拼写已经规范** → SDK 自己就能处理，绕一圈没有意义。
- * 4. `serial.close` 既没有动态角色又没有别名要归一 → 同上。
+ * **返回 null = 这条命令不需要适配**，调用方据此回落到 SDK 的 `normalizeCommand`（不是信封、
+ * 不是这两类命令、角色是旧角色且拼写已规范，都走这条）。open 与 close 输出形状不同是底层能力
+ * 差异：open 一次只开一路（`channelPorts` 单键对象，要带路径），close 可关多路（`channelClose`
+ * 数组），且 close 会把旧角色（交 SDK 生成）与动态角色（自己拼）合进同一条命令。
  *
- * 第 3、4 条那个「拼写是否已规范」的判断（`role === rawRole` / `aliasesNormalized`）容易
- * 读成多余，其实是必需的：`seat` 是旧角色的别名，归一后落进 LEGACY_SERIAL_ROLES，但
- * **SDK 的 normalizeCommand 拿到原始 `seat` 并不会自己归一**，所以必须由这里重建一条
- * payload 已换成 `sit` 的命令再交给它。
+ * ⚠️ 那两个「拼写是否已规范」的判断（`role === rawRole` / `aliasesNormalized`）看着多余，其实
+ * 必需：`seat` 是 `sit` 的别名，**SDK 的 normalizeCommand 拿到原始 `seat` 不会自己归一**，所以
+ * 必须由这里重建一条 payload 已换名的命令再交给它，否则那条命令静默不生效。
  *
- * `serial.open` 与 `serial.close` 的输出形状不同，反映的是底层能力差异：open 一次只开
- * 一路（`channelPorts` 是单键对象，因为要带路径），close 可以一次关多路
- * （`channelClose` 是数组）。close 分支还会把旧角色与动态角色**分别**处理后合并 ——
- * 旧角色那半交给 SDK 生成，动态角色那半自己拼，两者在同一条命令里共存。
- *
- * 两处 `new Set` 去重是必要的：同一个角色关两次会让串口编排器对已关闭的端口再走一遍关闭
- * 流程；`seat` 与 `sit` 同时传进来时归一后也会撞成同一个。
+ * ⚠️ 两处 `new Set` 去重不能省：同一角色关两次会让编排器对已关闭端口再走一遍关闭流程，而
+ * `seat` 与 `sit` 同时传进来归一后正好撞成同一个。
  *
  * @param {*} message 原始命令（可能是信封，也可能是旧裸命令）。
  * @returns {{command: object, envelope: object, legacy: boolean}|null} 适配结果；
@@ -177,25 +169,17 @@ function createControlCommandRouter({ logger } = {}) {
   /**
    * 处理一条命令：归一 → 逐个问 handler → 汇总结果。
    *
-   * **每个 handler 单独 try/catch，一个失败不打断其余**（失败被记成一条带 `error`/`code`
-   * 的结果条目）。这与 `commandRouter.dispatch` 让异常上冒的做法相反，原因是这里一条命令
-   * 会触发多个副作用：串口开失败不该连带着让状态记录和回执也不执行。代价是**调用方必须
-   * 检查 `ok`**，光看没抛异常不代表都成功了。
+   * `stop: true` 的语义是「这条命令到我为止」，立刻返回、后面的 handler 一个都不执行（只由返回值
+   * 决定，抛错的 handler 不会 stop）。上下文额外塞三个字段供 handler 判断来源：`commandEnvelope`
+   * （旧裸命令时为 null）、`legacyProtocol`、`originalMessage`（要读归一时被丢掉的字段时用它）。
+   * 日志只记 `error.message` 不记堆栈 —— 串口被占用、设备没插在这条链路上是常见可预期情况。
    *
-   * `ok` 的定义有个容易踩的点：`results.length > 0 && 没有 error`。**一条命令谁都没接时
-   * `ok` 是 false**（`handled` 也是 false），而不是「无事发生所以算成功」—— 这样 HTTP 层
-   * 才能把「不支持的命令」回成失败而不是 200。
+   * ⚠️ **每个 handler 单独 try/catch，一个失败不打断其余**（记成带 `error`/`code` 的结果条目）：
+   * 一条命令会触发多个副作用，串口开失败不该连带让状态记录和回执也不执行。代价是**调用方必须
+   * 检查 `ok`** —— 没抛异常不代表都成功了。
    *
-   * `stop: true` 的语义是「这条命令到我为止」，它会**立刻返回**，后面的 handler 一个都不
-   * 执行。用于独占型命令（例如某个扩展完全接管了 serial.open）。注意 stop 只由 handler 的
-   * 返回值决定，抛错的 handler 不会 stop。
-   *
-   * 上下文里额外塞了三个字段供 handler 判断来源：`commandEnvelope`（标准信封，旧裸命令时
-   * 为 null）、`legacyProtocol`、`originalMessage`（未归一的原始输入 —— 需要读归一时被丢掉
-   * 的字段时用它）。
-   *
-   * 日志只记 `error.message`，不记堆栈：命令失败在这条链路上是常见的可预期情况（串口被
-   * 占用、设备没插），打全堆栈会淹掉日志。
+   * ⚠️ `ok` = `results.length > 0 && 无 error`，所以**谁都没接时 `ok` 是 false**（不是「无事发生
+   * 算成功」）—— 这样 HTTP 层才能把「不支持的命令」回成失败而不是 200。
    *
    * @param {object} message 命令对象；三种形态都收（标准信封、动态角色串口命令、旧
    *        WebSocket 裸命令），由 normalizeRouterCommand 统一。

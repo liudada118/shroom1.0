@@ -1,21 +1,16 @@
 /**
  * 注册 HTTP 与 legacy WebSocket 共用的 calibration.zero handler。
  *
- * handler 必须在控制命令服务初始化时注册，不能依赖 WebSocket listener 的
- * 启动时机；否则本地 HTTP 服务已开始监听但 openServer 尚未执行时会出现短暂的
- * COMMAND_NOT_SUPPORTED。
+ * 必须在控制命令服务初始化时注册、不能依赖 WebSocket listener 的启动时机，否则 HTTP 已开始监听但
+ * openServer 未执行的那段窗口里会报 COMMAND_NOT_SUPPORTED。handler 里那段 payload 构造是两条协议
+ * 合流处（全链路唯一一处）：新 HTTP 协议把 `commandEnvelope.payload` **原样**交给零点服务，旧字段
+ * 协议从扁平的 `resetZero` 现拼一个。
  *
- * handler 里那段 payload 构造是**两条协议合流**的地方，也是全链路唯一一处：
- * - 新 HTTP 协议 → `context.commandEnvelope.payload` **原样交给零点服务**。不重建对象是
- *   必须的：`normalizeZeroCommand` 会拒绝任何未知字段（见 zeroCommandService 的四条严格
- *   规则），在这里顺手补一个字段就会让整条命令报 400。
- * - 旧字段协议 → 从扁平的 `resetZero` 现拼一个新协议 payload。两个可选字段都用
- *   `hasOwnProperty` 判存在后才拼进去，**不能无条件写 `displaySystemId: message.xxx`** ——
- *   那会拼出 `{displaySystemId: undefined}`，而零点服务判的是「键在不在」，
- *   于是「没指定展示系统」会被当成「指定了一个空的展示系统」而报错。
- *
- * `when` 也用 `hasOwnProperty` 而不是真值判断：`resetZero: false` 正是「取消归零」这条
- * 合法命令，真值判断会让取消归零永远无人处理。
+ * ⚠️ 三处都必须用 `hasOwnProperty` 判存在、不能判真值也不能顺手补字段：`resetZero: false` 正是
+ * 「取消归零」这条合法命令（真值判断会让它永远无人处理）；`normalizeZeroCommand` 拒绝任何未知字段，
+ * 重建对象时多补一个就整条 400；无条件写 `displaySystemId: message.xxx` 会拼出
+ * `{displaySystemId: undefined}`，而零点服务判的是「键在不在」—— 于是「没指定展示系统」被当成
+ * 「指定了一个空的」而报错。
  *
  * @param {object} controlCommandService 控制命令服务（需要 registerHandler）。
  * @param {object} options 依赖。

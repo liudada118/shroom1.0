@@ -39,23 +39,14 @@ function isPackagedRuntime() {
 /**
  * 列出 config.txt 的全部候选位置，**按查找优先级排列**。
  *
- * 授权文件的位置是个部署问题而不是代码问题：同一个安装包会被放在 Program Files
- * （目录只读）、U 盘、桌面文件夹里，装的人还可能把 config.txt 丢在 exe 旁边或
- * resources 里。所以这里穷举所有见过的位置，由 `resolveConfigFile` 取第一个存在的。
+ * 授权文件的位置是部署问题不是代码问题：同一个包会被装到 Program Files（只读）、U 盘、桌面，装的人
+ * 还可能把 config.txt 丢在 exe 旁边或 resources 里。所以穷举见过的所有位置，由 `resolveConfigFile`
+ * 取第一个存在的。**可写位置排最前**（授权更新要写回去，而随包那份可能在只读目录）。开发时只找项目
+ * 根（多找还可能读到上次打包留下的文件）。末尾 `new Set` 去重，避免多做几次 `existsSync`。
  *
- * **可写位置排在最前面**（`getWritableConfigFile`）：授权更新要能写回去，
- * 而随包分发的那份可能在只读目录里。找到可写的那份就优先用它，
- * 这样一次更新之后所有后续读取都命中同一个文件。
- *
- * 打包/未打包分成两支：开发时只找项目根（多找无意义，还可能读到上一次打包留下的文件）；
- * 打包后按平台展开：
- * - macOS 要**跳三层目录**（`Contents/MacOS/exe` → `.app` → 上一级），
- *   因为 .app 是个目录，配置要放在它旁边而不是里面 —— 放里面会破坏签名。
- * - Windows 额外找 `resources/`，两种写法（exe 旁边的和 cwd 下的）都要试：
- *   通过快捷方式启动时 cwd 不一定是安装目录。
- *
- * 最后 `new Set` 去重：几条规则在某些布局下会算出同一个路径，
- * 重复会让 `resolveConfigFile` 多做几次 `existsSync`（无害但没必要）。
+ * ⚠️ 打包后按平台展开的两条都不能省：macOS 要**跳三层目录**（`Contents/MacOS/exe` → `.app` → 上一
+ * 级），因为 .app 是目录、配置放里面会破坏签名；Windows 的 `resources/` 要试 exe 旁边和 cwd 下两种
+ * 写法 —— 通过快捷方式启动时 cwd 不一定是安装目录。
  *
  * @returns {string[]} 候选路径，去重且保持优先级顺序。
  */

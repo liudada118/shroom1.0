@@ -158,29 +158,16 @@ function createZeroFrameAdapter({
   /**
    * 给一帧 legacy payload 补上身份、记录零点 source、并把扣零结果写回各个别名字段。
    *
-   * **两条提前退出决定了这个适配器的边界，改动前务必看清：**
-   * 1. 帧带了 `channelId` 且（`runtimeSource === 'display-system'` 或
-   *    `zeroApplied === true`）→ 原样返回。新链路的帧处理器已经自己记过 source、扣过零，
-   *    在这里再扣一次就是**双重扣零**（现象：归零后画面整体偏低甚至大片归零）。这也是
-   *    display system 侧刻意不写 `mapped` 阶段的同一个理由。
-   * 2. 解析不出 channelId → 原样返回。零点状态**只以完整 channelId 为键**，宁可不扣零，
-   *    也不能按旧串口角色猜一个键（猜错会让两个展示系统共享零点）。
+   * 四组候选字段名是历史包袱清单，组内按「越新越靠前」排：decoded（`rawData`/`realArr`/…）、
+   * normalized、processed（`data`/`${通道}Data`/…）、mapped（`mappedData`/`newArr147`/…）。新增串口
+   * 处理器时用 `options.sourceStages` **显式**告知阶段数据（优先于所有字段名猜测），别往清单里再加名字。
+   * `rawPressureData` 单独按**内容**比对判阶段（不同 legacy 分片里语义不同），结果作为
+   * `zeroStorageStage` 传给入库方。输出帧打 `runtimeSource: 'legacy'`，是下游区分两条链路的依据。
    *
-   * 四组候选字段名是历史包袱的清单，每组内部按「越新越靠前」排：
-   * - decoded：`rawData` / `realArr` / `rawSitData` / `rawPressureData`
-   * - normalized：`normalizedData`
-   * - processed：`data` / `${通道}Data` / legacy 固定字段 / `pressureData` / `value`
-   * - mapped：`mappedData` / `mappedArr195` / `newArr147` / `newArr`
-   *
-   * `options.sourceStages` 让调用方**显式**告知各阶段数据，优先于所有字段名猜测 ——
-   * 新增串口处理器时应该用它，而不是往上面的候选清单里再加一个名字。
-   *
-   * `rawPressureData` 单独处理是因为它在不同 legacy 分片里语义不同（有的放 processed、
-   * 有的放 decoded），所以按**内容**比对来判它属于哪一阶段，并把判定结果作为
-   * `zeroStorageStage` 传给入库方（见 getZeroBaselineForStorage）。
-   *
-   * `runtimeSource: 'legacy'` 会被打在输出帧上，这是下游区分两条链路的依据，也是本函数
-   * 第 1 条提前退出所依赖的标记。
+   * ⚠️ 两条提前退出决定了适配器边界：帧带 `channelId` 且（`runtimeSource === 'display-system'` 或
+   * `zeroApplied === true`）→ 原样返回，否则是**双重扣零**（现象：归零后画面整体偏低甚至大片归零）；
+   * 解析不出 channelId → 原样返回，零点状态**只以完整 channelId 为键**，宁可不扣零也不能按旧串口角色
+   * 猜一个（猜错会让两个展示系统共享零点）。
    *
    * @param {string} channel 旧的通道/角色名（交给注入的 resolveChannelIdentity 解析）。
    * @param {string|object} input 帧对象，或它的 JSON 字符串。

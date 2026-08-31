@@ -97,20 +97,14 @@ function createZeroChannelIdentityResolver({
   /**
    * 把一个 legacy 输出别名解析成完整身份（channelId / 展示系统 / sensorId / 类型 / 别名）。
    *
-   * 这是兼容边界上唯一的身份来源，`zeroFrameAdapter` 全靠它给旧帧配 channelId。
+   * 兼容边界上唯一的身份来源，`zeroFrameAdapter` 全靠它给旧帧配 channelId。匹配时 `outputChannel` /
+   * `serialRole` / `channelId` **三个字段都试**（旧前端传展示别名、旧串口层传角色名、新代码可能直接
+   * 传 channelId，manifest 校验保证三者不冲突）。匹配不到就**合成** `${sensorType}:${通道}` —— 这条
+   * 路走的是没有 manifest 的旧传感器。默认 `'sit'`（旧链路不传通道名即主通道）。
    *
-   * 匹配时**三个字段都试**（`outputChannel` / `serialRole` / `channelId`），因为调用方
-   * 传进来的「通道名」历史上三种都有：旧前端传展示别名，旧串口层传角色名，新代码可能
-   * 直接传完整 channelId。三者在同一个命名空间里不会冲突（manifest 校验保证 id 唯一）。
-   *
-   * 匹配不到时**合成**兼容身份 `${sensorType}:${通道}`，两段都洗过所以一定能被零点仓库
-   * 接受。这条路走的是没有 manifest 的旧传感器。
-   *
-   * 合成结果里有一处刻意的不对称：`sensorId` 用洗过的值（要拼进 channelId，必须
-   * channelId-safe），而 `outputChannel` 保留**未洗**的原值（它是给 legacy 前端认字段名
-   * 用的展示别名，洗过之后可能就对不上 `sitData` 那套字段了）。
-   *
-   * 默认 `'sit'`：旧链路里不传通道名就意味着主通道，这个默认值遍布 legacy 代码。
+   * ⚠️ 合成结果有一处刻意的不对称：`sensorId` 用洗过的值（要拼进 channelId，必须 channelId-safe），
+   * `outputChannel` 保留**未洗**的原值 —— 它是给 legacy 前端认字段名的展示别名，洗过就可能对不上
+   * `sitData` 那套字段。
    *
    * @param {string} outputChannel 旧的输出别名 / 角色名 / channelId。
    * @returns {{channelId: string, displaySystemId: string, sensorId: string,

@@ -14,18 +14,13 @@ const { createRuntimeControlService } = require('./runtimeControlService');
 /**
  * 把六个运行时控制 handler 注册到控制命令路由器。
  *
- * 六个 handler 的 `when` 条件是**互相重叠的**：一条命令可以同时带 `flag` 和 `download`，
- * 那它会依次过采集控制和 CSV 导出两个 handler。这是责任链的正常用法（见
- * `controlCommandRouter.handle`），不是漏判 —— 每个 handler 只认它自己那几个字段，
- * 各改各的状态。
+ * 六个 handler 的 `when` **互相重叠**是正常的责任链用法：一条同时带 `flag` 和 `download` 的命令会
+ * 依次过采集控制和 CSV 导出两个 handler，各改各的状态。只有 `csv-download` 返回 `{stop: true}`
+ * （旧 WS 分支里有一条会重复触发导出的路径，stop 是挡它的手段），所以它必须留在最后，其余五个之间
+ * 顺序不重要。
  *
- * 只有 `csv-download` 返回 `{stop: true}`，因为它之后不该再有别的处理：旧 WS 分支里
- * 存在一条会重复触发导出的路径，`stop` 是挡住它的手段。其余五个都不 stop，所以顺序在
- * 它们之间不重要 —— 只有 `csv-download` 必须留在最后。
- *
- * 每个 `when` 都是 `!= null` 或严格 `=== true/false`，理由与 runtimeControlService 里
- * 逐字段判断的理由相同：`flag: false`（停止采集）、`play: false`（暂停）、`index: 0`
- * 都是合法值，真值判断会把它们丢掉。
+ * ⚠️ 每个 `when` 都是 `!= null` 或严格 `=== true/false`，不能改成真值判断：`flag: false`（停止
+ * 采集）、`play: false`（暂停）、`index: 0` 都是合法值，真值判断会把这些命令整条丢掉。
  *
  * @param {{register: Function}} router 控制命令路由器（责任链）。
  * @param {object} deps 依赖；可直接传 `runtimeControlService`，否则用剩余字段现建一个

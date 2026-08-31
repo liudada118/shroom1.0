@@ -34,29 +34,20 @@ function listSerialProtocolPresetSummaries(extraDirectories) {
 /**
  * 造一个 Express 错误中间件，把 body 解析失败翻译成有意义的状态码。
  *
- * 没有它的话，一条 JSON 格式错的请求会走到 Express 默认错误处理，回一个 500 带 HTML
- * 堆栈页 —— 前端看到的是「服务器内部错误」，而真实原因是它自己发的报文有问题。
+ * 没有它，一条 JSON 格式错的请求会走 Express 默认错误处理回 500 带 HTML 堆栈页 —— 前端看到「服务器
+ * 内部错误」，真实原因是它自己的报文有问题。认两种错：`entity.parse.failed` → 400，`entity.too.large`
+ * → 413（`express.json({limit: '50mb'})`，50mb 是为整段历史热力图留的，真触发基本意味着发错了东西）。
+ * 不认识的 `error.type` 走 `next(error)` 而不是伪装成 400。
  *
- * ⚠️ **返回的函数必须保留四个参数，`next` 看着没用也不能删。**
- * Express 是**按函数 arity** 判断中间件是不是错误处理器的（`fn.length === 4`）。
- * 删掉 `next` 变成三参数，Express 会把它当成普通中间件注册，于是这个处理器**永远不会被
- * 调用**，body 解析错误重新回到 500 —— 而且不会有任何报错或告警。
- * 同理，`error.type` 不认识时走 `next(error)` 而不是自己回一个 500：
- * 未知错误应该交给默认处理器（开发环境能看到堆栈），不该被伪装成 400。
+ * ⚠️ **必须保留四个参数，`next` 看着没用也不能删**：Express 按函数 arity 判断错误中间件
+ * （`fn.length === 4`），删成三参数它会被当普通中间件注册、**永远不被调用**，且无任何报错或告警。
  *
- * ⚠️ **注册位置必须在两个 body parser 之后**（见 `createHttpApp` 里的 `use` 顺序）。
- * 装在前面它就看不到 parser 抛的错，因为 Express 的错误传播只往注册顺序的后面走。
+ * ⚠️ **注册位置必须在两个 body parser 之后**（见 `createHttpApp` 的 `use` 顺序）—— Express 的错误
+ * 传播只往注册顺序的后面走，装前面就看不到 parser 抛的错。
  *
- * 两种已知的 body-parser 错误：
- * - `entity.parse.failed` → **400**，报文不是合法 JSON，是客户端的问题。
- * - `entity.too.large` → **413**，超过了 `express.json({limit: '50mb'})`。
- *   50mb 这个上限是为整段历史热力图数据留的（`/uploadCanvas` 那条流程），
- *   所以真触发 413 基本意味着调用方发错了东西，而不是正常数据太大。
- *
- * ⚠️ 这里回的是 `{error: '...'}` 而**不是** `HttpResult`，与其余 20 个接口的响应体不一致
- * （没有 `code` 字段）。前端 `res.data?.code !== 0` 在这种响应上得到 `undefined !== 0`，
- * 恰好也判成失败，所以现象上没问题 —— 但那是巧合。统一成 HttpResult 属于公共 API 的
- * 响应体变更，不在注释任务范围内。
+ * ⚠️ 这里回的是 `{error: '...'}` 而**不是** `HttpResult`（没有 `code` 字段），与其余 20 个接口不一致。
+ * 前端 `res.data?.code !== 0` 恰好也判成失败，所以现象上无问题 —— 但那是巧合。统一属公共 API 响应体
+ * 变更，未动。
  *
  * @param {object} logger 日志对象；用可选链调用，缺失也不会炸。
  * @returns {Function} 四参数的 Express 错误中间件。

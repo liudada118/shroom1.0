@@ -117,19 +117,12 @@ function createRuntimeStateStore({ initialState = {}, accessors = {} } = {}) {
   /**
    * 导出状态快照：给了键列表就只出这些键，没给则出全部（内部状态 ∪ 代理键）。
    *
-   * 全量时把两个来源的键**并集去重**（`Set`）：内部状态和代理是两套独立的键空间，只列
-   * 其中一套会漏掉另一套（例如 server.js 的 `file`/`db` 只在代理里，`firstBlueData` 只在
-   * 内部状态里）。
+   * 全量时把内部状态与代理两套键空间**并集去重** —— 只列一套会漏掉另一套（`file`/`db` 只在代理里，
+   * `firstBlueData` 只在内部状态里）。只判 `Array.isArray(keys)`，所以 `snapshot(null)`/`snapshot()`
+   * 都是全量。逐键走 `get` 而不是拷 `state`：代理键必须实时读，也保证「读快照」与「单读」同值。
    *
-   * 只判 `Array.isArray(keys)`，所以 `snapshot(null)` / `snapshot()` 都是全量 —— 与零点
-   * 仓库 `snapshot` 那种「按参数存在性分流」的约定不同，这里传 null 不会变成「查一个叫
-   * null 的键」。
-   *
-   * 逐键走 `get` 而不是拷 `state`：代理键必须实时读，而且这保证「读快照」和「单读」永远
-   * 返回同一个值。
-   *
-   * ⚠️ 值是**浅引用**，不拷贝。快照里的数组（`firstBlueData` 等）就是 store 里那一份，
-   * 调用方改它会直接改到状态 —— 这是为了热路径上避免每帧拷贝几个大数组而做的取舍。
+   * ⚠️ 值是**浅引用不拷贝**：快照里的数组就是 store 里那一份，调用方改它会直接改到状态。为了热路径
+   * 上不每帧拷贝几个大数组而做的取舍。
    *
    * @param {string[]} [keys] 指定键；非数组则导出全部。
    * @returns {object} 键到值的普通对象。
