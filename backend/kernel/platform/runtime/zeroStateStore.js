@@ -1,3 +1,5 @@
+const { parseSensorChannelId } = require('@shroom/backend/identity');
+
 // 四个可扣零的处理阶段。顺序即数据流顺序（解码 → 归一 → 处理 → 映射），
 // 前端「零点基准取哪一级」的选项直接对应这四个名字。
 //
@@ -77,21 +79,7 @@ function cloneStageState(state = {}) {
  * @returns {{channelId: string, displaySystemId: string, sensorId: string}|null} 解析结果。
  */
 function parseChannelId(channelId) {
-  if (typeof channelId !== 'string' || channelId !== channelId.trim()) return null;
-  const parts = channelId.split(':');
-  // canonical channelId 是严格的 `displaySystemId:sensorId` 两段式。
-  // 如果组件本身允许冒号，单凭 channelId 就无法唯一还原身份。
-  if (
-    parts.length !== 2
-    || !parts[0]
-    || !parts[1]
-    || parts.some((part) => part !== part.trim())
-  ) return null;
-  return {
-    channelId,
-    displaySystemId: parts[0],
-    sensorId: parts[1],
-  };
+  return parseSensorChannelId(channelId);
 }
 
 /**

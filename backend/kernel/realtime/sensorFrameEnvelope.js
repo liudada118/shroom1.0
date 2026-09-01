@@ -12,10 +12,12 @@
  * 「算完的结果」冒充成原始数据 —— 拿 raw 去做自己算法时收到一份已处理数据是最难发现的错误。
  */
 
-// 线格式的类型标签与版本号。**当前只有 v1 一个版本**，且发送端与接收端都硬比对这两个值
-// （见下面 `data.type === ... && data.schemaVersion === ...` 那一支），所以升版必须两边同时改。
-const SENSOR_FRAME_TYPE = 'sensor.frame';
-const SENSOR_FRAME_SCHEMA_VERSION = 1;
+const { multiSensorStableContract } = require('@shroom/backend/contract');
+const { resolveSensorIdentity } = require('@shroom/backend/identity');
+
+// 线格式的类型标签与版本号由共享稳定契约提供。升版必须新建契约版本，不能在 v1 上改语义。
+const SENSOR_FRAME_TYPE = multiSensorStableContract.frame.type;
+const SENSOR_FRAME_SCHEMA_VERSION = multiSensorStableContract.frame.schemaVersion;
 
 /**
  * 把入参归一成一个帧对象：已经是对象就直接用，是 JSON 字符串/Buffer 就解析。
@@ -47,10 +49,8 @@ function parseFramePayload(payload) {
  *
  * 同样接受 JSON 字符串：历史字段里有一批是以字符串形式存的（尤其从数据库回放时）。
  *
- * ⚠️ `Number(item)` **不过滤 NaN**：非数字元素会变成 NaN，而 `JSON.stringify` 把 NaN
- * 写成 `null`，所以前端会在数组里看到 null 而不是报错。这是刻意的 —— 逐元素校验要在
- * 每帧几千个点上跑，代价不划算，而且「某几个点坏了」比「整帧丢掉」对展示更友好。
- * 二开者自己写算法时要预期数组里可能有 null。
+ * 非数字元素显式写成 null。这样内存 ChannelBus 与 JSON WebSocket 看到的是同一份值，
+ * 不再依赖 JSON.stringify 把 NaN 隐式改成 null；单点损坏也不会导致整帧丢弃。
  *
  * @param {*} value 原始字段值（数组或数组的 JSON 字符串）。
  * @returns {number[]|null} 数字数组；不是数组时 null。
@@ -65,7 +65,10 @@ function toNumericArray(value) {
     }
   }
   if (!Array.isArray(candidate)) return null;
-  return candidate.map((item) => Number(item));
+  return candidate.map((item) => {
+    const numeric = Number(item);
+    return Number.isFinite(numeric) ? numeric : null;
+  });
 }
 
 /**
@@ -91,12 +94,11 @@ function firstArray(...values) {
 }
 
 /**
- * 把一段标识符清洗成只含 `A-Za-z0-9._-` 的安全形式。
+ * 把 legacy 自动生成的兜底标识清洗成只含 `A-Za-z0-9._-` 的安全形式。
  *
- * 为什么要洗：`channelId` 的格式是 `displaySystemId:sensorId`，而前端的订阅是按这个字符串
- * 精确匹配的（一个 WebSocket 端口 + 按 `displaySystemId:sensorId` 订阅）。二开者给展示系统
- * 起名时可能用中文、空格甚至冒号 —— **一个冒号就会把 channelId 切成三段**，
- * 让 `resolveSensorId` 解析出错误的 sensorId，订阅从此对不上。洗掉冒号就杜绝了这类问题。
+ * 它只用在旧帧没提供任何身份字段时，从 sensorType/outputChannel 生成兼容兜底。
+ * 调用方显式提供的 channelId/displaySystemId/sensorId 不会经过这个函数改写，
+ * 而是交给 `@shroom/backend/identity` 严格校验，冲突或多冒号直接丢帧。
  *
  * 连续非法字符压成一个 `-`（而不是逐字符替换）：避免「传感器 A」这种名字变成一串横线。
  *
@@ -179,6 +181,25 @@ function compactObject(value) {
 }
 
 /**
+ * 将回放诊断信息投影为稳定 history 契约。
+ *
+ * 回放服务已经按时间戳计算 `sourceIndex/alignedAt/skewMs`，这里是 WebSocket 白名单
+ * 的最后出口，必须显式保留它们；同时丢弃未登记字段，避免调用方绕过冻结契约扩散私有键。
+ */
+function normalizeHistoryMetadata(history = {}, fallback = {}) {
+  const declared = history && typeof history === 'object' && !Array.isArray(history)
+    ? history
+    : {};
+  return compactObject({
+    index: declared.index ?? fallback.index,
+    sourceIndex: declared.sourceIndex ?? fallback.sourceIndex,
+    recordedAt: declared.recordedAt ?? fallback.recordedAt,
+    alignedAt: declared.alignedAt ?? fallback.alignedAt,
+    skewMs: declared.skewMs ?? fallback.skewMs,
+  });
+}
+
+/**
  * 将运行时串口状态投影为可安全下发的稳定字段。
  * channelId 用于长期寻址；path/状态只代表当前连接快照，二者不能互相替代。
  *
@@ -204,27 +225,6 @@ function normalizeSerialMetadata(data = {}) {
     isOpen: typeof serial.isOpen === 'boolean' ? serial.isOpen : undefined,
     openedAt: Number.isFinite(openedAt) && openedAt > 0 ? openedAt : undefined,
   });
-}
-
-/**
- * 从 `channelId` 里切出 sensorId。
- *
- * `channelId` 的格式是 `displaySystemId:sensorId`，所以取第一个冒号之后的全部。
- * 用 `indexOf` 取**第一个**冒号（不是 `split(':')[1]`）是为了让 sensorId 里万一还有冒号也
- * 能完整保留 —— 不过 `normalizeIdentityPart` 已经把冒号洗掉了，所以这只是防御。
- *
- * 没有冒号说明 channelId 不是这个格式（老数据或调用方直接给的），此时用 `fallback`
- * （通常是通道名）并洗一遍。
- *
- * @param {string} channelId 形如 `displaySystemId:sensorId` 的通道标识。
- * @param {string} fallback 无法从 channelId 切出时的兜底值。
- * @returns {string} sensorId。
- */
-function resolveSensorId(channelId, fallback) {
-  const separatorIndex = String(channelId || '').indexOf(':');
-  return separatorIndex >= 0
-    ? String(channelId).slice(separatorIndex + 1)
-    : normalizeIdentityPart(fallback, 'sensor');
 }
 
 /**
@@ -260,7 +260,11 @@ function buildSensorFrameEnvelope({
 } = {}) {
   const data = parseFramePayload(payload);
   if (!data) return null;
-  if (data.type === SENSOR_FRAME_TYPE && data.schemaVersion === SENSOR_FRAME_SCHEMA_VERSION) {
+  if (data.type === SENSOR_FRAME_TYPE) {
+    // 一旦声明为标准帧，就不能再降级走 legacy 猜字段。未知版本必须由显式适配器升级，
+    // 否则这里把 v2 当 legacy 重投影成 v1，会掩盖真实的不兼容并污染稳定契约。
+    if (data.schemaVersion !== SENSOR_FRAME_SCHEMA_VERSION) return null;
+
     const framePayload = data.payload && typeof data.payload === 'object'
       ? data.payload
       : {};
@@ -268,13 +272,29 @@ function buildSensorFrameEnvelope({
       ? framePayload.stages
       : {};
     const value = firstArray(framePayload.value, frameStages.processed);
-    const channelId = String(data.channelId || '').trim();
-    if (!channelId || !value) return null;
+    const identity = resolveSensorIdentity({
+      channelId: data.channelId,
+      displaySystemId: data.displaySystemId,
+      sensorId: data.sensorId,
+    });
+    if (!identity || !value) return null;
 
     const normalizedSensorType = normalizeIdentityPart(data.sensorType || sensorType, 'legacy');
-    const displaySystemId = String(data.displaySystemId || normalizedSensorType).trim();
-    const sensorId = String(data.sensorId || resolveSensorId(channelId, channel)).trim();
-    const outputChannel = String(data.outputChannel || sensorId).trim();
+    const hasDeclaredOutputChannel = data.outputChannel !== undefined
+      && data.outputChannel !== null;
+    if (
+      hasDeclaredOutputChannel
+      && (
+        typeof data.outputChannel !== 'string'
+        || !data.outputChannel.trim()
+        || data.outputChannel !== data.outputChannel.trim()
+      )
+    ) {
+      return null;
+    }
+    const outputChannel = hasDeclaredOutputChannel
+      ? data.outputChannel
+      : identity.sensorId;
     const resolvedTimestamp = Number(timestamp ?? data.timestamp);
 
     // 即使内部调用方已经传入 sensor.frame，也只投影白名单字段。
@@ -282,10 +302,8 @@ function buildSensorFrameEnvelope({
     return {
       type: SENSOR_FRAME_TYPE,
       schemaVersion: SENSOR_FRAME_SCHEMA_VERSION,
-      channelId,
-      displaySystemId,
-      sensorId,
-      sensorLabel: String(data.sensorLabel || sensorId).trim(),
+      ...identity,
+      sensorLabel: String(data.sensorLabel || identity.sensorId).trim(),
       sensorType: normalizedSensorType,
       outputChannel,
       source: data.source || source,
@@ -320,9 +338,7 @@ function buildSensorFrameEnvelope({
         protocol: framePayload.protocol && typeof framePayload.protocol === 'object'
           ? framePayload.protocol
           : null,
-        history: framePayload.history && typeof framePayload.history === 'object'
-          ? framePayload.history
-          : null,
+        history: normalizeHistoryMetadata(framePayload.history),
       },
     };
   }
@@ -346,10 +362,17 @@ function buildSensorFrameEnvelope({
     data.sensorType || sensorType,
     'legacy',
   );
-  const channelId = String(data.channelId || '').trim()
-    || `${normalizedSensorType}:${normalizeIdentityPart(outputChannel, 'sensor')}`;
-  const displaySystemId = String(data.displaySystemId || normalizedSensorType).trim();
-  const sensorId = String(data.sensorId || resolveSensorId(channelId, outputChannel)).trim();
+  const identity = String(data.channelId || '').trim()
+    ? resolveSensorIdentity({
+      channelId: data.channelId,
+      displaySystemId: data.displaySystemId,
+      sensorId: data.sensorId,
+    }, { allowDerived: true })
+    : resolveSensorIdentity({
+      displaySystemId: data.displaySystemId || normalizedSensorType,
+      sensorId: data.sensorId || normalizeIdentityPart(outputChannel, 'sensor'),
+    }, { allowDerived: true });
+  if (!identity) return null;
   const resolvedTimestamp = Number(timestamp ?? data.timestamp ?? data.time);
 
   const decoded = firstArray(data.rawData, data.realArr, data.rawSitData);
@@ -378,7 +401,7 @@ function buildSensorFrameEnvelope({
     outputSide: data.outputSide,
     packetSourcePort: data.packetSourcePort,
   });
-  const history = compactObject({
+  const history = normalizeHistoryMetadata(data.history, {
     index: data.index,
     recordedAt: data.time,
   });
@@ -386,10 +409,8 @@ function buildSensorFrameEnvelope({
   return {
     type: SENSOR_FRAME_TYPE,
     schemaVersion: SENSOR_FRAME_SCHEMA_VERSION,
-    channelId,
-    displaySystemId,
-    sensorId,
-    sensorLabel: String(data.sensorLabel || sensorId).trim(),
+    ...identity,
+    sensorLabel: String(data.sensorLabel || identity.sensorId).trim(),
     sensorType: normalizedSensorType,
     outputChannel,
     source,
@@ -424,6 +445,7 @@ module.exports = {
   SENSOR_FRAME_SCHEMA_VERSION,
   SENSOR_FRAME_TYPE,
   buildSensorFrameEnvelope,
+  normalizeHistoryMetadata,
   normalizeSerialMetadata,
   parseFramePayload,
   toNumericArray,

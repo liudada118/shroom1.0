@@ -8,6 +8,10 @@ const {
   DISPLAY_SYSTEM_SCHEMA_VERSION,
   buildSdkContractSnapshot,
 } = require('@shroom/backend/contract/sdkApiContract.js');
+const {
+  isDeclaredSensorFrame,
+  isSensorFrameV1Envelope,
+} = require('@shroom/backend/contract/sensorFrameV1.js');
 
 /**
  * 造一个最小的假 fetch Response，只有 `ok` / `status` / `json()` 三样。
@@ -142,9 +146,13 @@ async function run() {
   assert.strictEqual(snapshot.telemetry.channelIdPattern, '{displaySystemId}:{sensorId}');
   assert.strictEqual(snapshot.telemetry.frameShape.sensorLabel, 'string');
   assert.strictEqual(snapshot.telemetry.frameShape.serial, 'object|null');
-  assert.strictEqual(snapshot.telemetry.frameShape.payload.value, 'number[]');
+  assert.strictEqual(snapshot.telemetry.frameShape.payload.value, '(finite number|null)[]');
   assert.strictEqual(DISPLAY_SYSTEM_SCHEMA_VERSION, 3);
   assert.strictEqual(snapshot.displaySystems.schemaVersion, 3);
+  assert.strictEqual(
+    snapshot.displaySystems.manifestShape.sensors[0].id,
+    'string (required in schema v3; v1/v2 defaults to array index; unique; must not contain ":")',
+  );
   assert.strictEqual(snapshot.displaySystems.manifestShape.sensors[0].label, 'string (optional; defaults to id)');
   assert.strictEqual(snapshot.displaySystems.manifestShape.sensors[0].stored, 'boolean (optional; defaults to true)');
   assert.strictEqual(snapshot.displaySystems.manifestShape.sensors[0].files.lineOrder, 'string');
@@ -152,6 +160,32 @@ async function run() {
   assert.strictEqual(snapshot.displaySystems.manifestShape.sensors[0].algorithm.timeoutMs, 'positive integer');
   assert.deepStrictEqual(snapshot.displaySystems.manifestShape.legacyCompatibility.supportedSchemaVersions, [1, 2]);
   assert.strictEqual(snapshot.displaySystems.manifestShape.sensor.ports, 'string[]');
+
+  const validFrame = {
+    type: 'sensor.frame',
+    schemaVersion: 1,
+    channelId: 'demo:sit',
+    displaySystemId: 'demo',
+    sensorId: 'sit',
+    sensorLabel: '座椅',
+    outputChannel: 'sit',
+    serial: { role: 'seatPort', path: 'COM3', baudRate: 115200 },
+    payload: { value: [1, null, 3] },
+  };
+  assert.strictEqual(isDeclaredSensorFrame(validFrame), true);
+  assert.strictEqual(isSensorFrameV1Envelope(validFrame), true);
+  [
+    { ...validFrame, schemaVersion: 2 },
+    { ...validFrame, schemaVersion: '1' },
+    { ...validFrame, payload: {} },
+    { ...validFrame, payload: { value: '[1,2]' } },
+    { ...validFrame, payload: { value: [1, '2'] } },
+    { ...validFrame, payload: { value: [1, Number.NaN] } },
+    { ...validFrame, payload: { value: [1, Number.POSITIVE_INFINITY] } },
+    { ...validFrame, displaySystemId: ' demo ' },
+    { ...validFrame, sensorId: 'sit:extra', channelId: 'demo:sit:extra' },
+    { ...validFrame, channelId: 'other:sit' },
+  ].forEach((malformed) => assert.strictEqual(isSensorFrameV1Envelope(malformed), false));
 
   assert.deepStrictEqual(normalizeHttpResult({ code: 0, data: { ok: true } }), { ok: true });
   assert.throws(() => normalizeHttpResult({ code: 1, message: 'bad' }), /bad/);
@@ -186,26 +220,27 @@ async function run() {
   });
 
   const messages = [];
+  const invalidFrames = [];
   client.on('frame', (frame) => messages.push(frame));
+  client.on('invalidFrame', (frame) => invalidFrames.push(frame));
   const ws = client.connectRealtime({ channels: ['demo:sit'] });
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepStrictEqual(ws.sent[0], { type: 'subscribe', channels: ['demo:sit'] });
 
-  client.handleRealtimeMessage(JSON.stringify({
-    type: 'sensor.frame',
-    schemaVersion: 1,
-    channelId: 'demo:sit',
-    displaySystemId: 'demo',
-    sensorId: 'sit',
-    sensorLabel: '座椅',
-    outputChannel: 'sit',
-    serial: { role: 'seatPort', path: 'COM3', baudRate: 115200 },
-    payload: { value: [1, 2, 3] },
-  }));
+  client.handleRealtimeMessage(JSON.stringify(validFrame));
   assert.strictEqual(messages.length, 1);
   assert.strictEqual(messages[0].sensorLabel, '座椅');
   assert.deepStrictEqual(messages[0].serial, { role: 'seatPort', path: 'COM3', baudRate: 115200 });
-  assert.deepStrictEqual(messages[0].payload.value, [1, 2, 3]);
+  assert.deepStrictEqual(messages[0].payload.value, [1, null, 3]);
+
+  const futureFrame = { ...validFrame, schemaVersion: 2, sitData: [99] };
+  const malformedFrame = { ...validFrame, payload: { stages: { processed: [4, 5] } } };
+  const stringSampleFrame = { ...validFrame, payload: { value: [1, '2'] } };
+  client.handleRealtimeMessage(JSON.stringify(futureFrame));
+  client.handleRealtimeMessage(JSON.stringify(malformedFrame));
+  client.handleRealtimeMessage(JSON.stringify(stringSampleFrame));
+  assert.strictEqual(messages.length, 1);
+  assert.deepStrictEqual(invalidFrames, [futureFrame, malformedFrame, stringSampleFrame]);
 }
 
 run()

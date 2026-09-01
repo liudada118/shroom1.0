@@ -148,8 +148,39 @@ describe('sensorFrameDecoder', () => {
     expect(decodeWebSocketPayload('not-json')).toBe('not-json');
     expect(isSensorFrameEnvelope(systemEvent)).toBe(false);
 
-    const futureFrame = { ...frame, schemaVersion: 2 };
+    const futureFrame = {
+      ...frame,
+      schemaVersion: 2,
+      sitData: [99],
+      rawData: [98],
+    };
     expect(decodeWebSocketPayload(futureFrame)).toBe(futureFrame);
+    expect(getSensorFrameOutputChannel(futureFrame)).toBe('');
+    expect(getSensorFrameChannelValue(futureFrame, 'sit')).toBeNull();
+    expect(getSensorFrameStageValue(futureFrame, 'decoded')).toBeNull();
+    expect(isSensorFrameForDisplay(futureFrame, ['multi-demo'])).toBe(false);
+  });
+
+  it('复用 SDK v1 校验器约束版本、payload.value 和身份', () => {
+    expect(isSensorFrameEnvelope({
+      ...frame,
+      payload: { ...frame.payload, value: [30, null, 40] },
+    })).toBe(true);
+
+    [
+      { ...frame, schemaVersion: '1' },
+      { ...frame, schemaVersion: undefined, version: 1 },
+      { ...frame, payload: { ...frame.payload, value: '[30,40]' } },
+      { ...frame, payload: { ...frame.payload, value: [30, '40'] } },
+      { ...frame, payload: { ...frame.payload, value: [30, Number.NaN] } },
+      { ...frame, payload: { ...frame.payload, value: [30, Number.POSITIVE_INFINITY] } },
+      { ...frame, payload: { stages: { processed: [30, 40] } } },
+      { ...frame, displaySystemId: ' multi-demo ' },
+      { ...frame, sensorId: 'arm:Left', channelId: 'multi-demo:arm:Left' },
+      { ...frame, channelId: 'other:armLeft' },
+    ].forEach((malformed) => {
+      expect(isSensorFrameEnvelope(malformed)).toBe(false);
+    });
   });
 
   it('protocol 附加信息不能覆盖 canonical 路由身份', () => {

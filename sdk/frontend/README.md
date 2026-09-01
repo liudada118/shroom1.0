@@ -423,6 +423,11 @@ schema v1 的新实时协议使用 `type: 'sensor.frame'`，压力值位于
 上述统一帧结构，不会重新生成顶层 `sitData/backData/headData`。旧 `type: 'frame'`、旧顶层
 `*Data` 和早期 SDK pressure telemetry 仍可作为迁移期输入。
 
+冻结契约可从 `@shroom/frontend/contract/multiSensorStableContract` 读取。canonical 身份必须满足
+`channelId === displaySystemId + ':' + sensorId`，且 `payload.value` 是
+`(finite number|null)[]`；未知版本、冲突身份或畸形 canonical 帧不会触发正常 `frame` /
+`sensor.frame` 事件，而会触发 `invalidFrame`，避免调用方在一半兼容、一半拒收的状态下继续处理。
+
 canonical 帧还会触发 `frame:<channelId>` 事件；`on('sensor.frame')` 收到完整 wire envelope，
 而 `on('frame')` 继续收到归一化帧。`FrameStore` 以 `channelId` 为主键，可用
 `getFrameByChannelId('hand0205:sit')` 精确读取，避免两个展示系统复用相同

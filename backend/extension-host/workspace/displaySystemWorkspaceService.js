@@ -573,8 +573,8 @@ function getScopedSensorDefinitions(definitions, sensorId, index) {
 
 /**
  * 把 v1/v2 单数字段或 v3 `sensors[]` 统一编译成逐路可落盘状态。
- * Builder 当前为多路共享同一套几何/算法定义；调用方也可用
- * `definitions.sensors[id]` 为某路提供独立定义。
+ * Builder 与其它调用方都可用 `definitions.sensors[id]` 提供逐路几何/算法定义；
+ * 顶层 definitions 只作为第一路兼容投影。
  */
 function buildWorkspaceSensorStates(inputManifest, definitions = {}) {
   const legacySensor = inputManifest.sensor || {};
@@ -970,13 +970,14 @@ function createDisplaySystemWorkspaceService({
   }
 
   /**
-   * 读出一个展示系统的**可编辑视图**：manifest 原文 + 五份定义文件内容 + 权限标记。
+   * 读出一个展示系统的**可编辑视图**：manifest 原文 + 每路五份定义文件内容 + 权限标记。
    *
    * ⚠️ 与发现层 `getById` 不同：那个给归一校验投影后的运行时配置，这里给**磁盘原文** ——
    * Builder 要把用户当初写的东西一字不差填回表单。拿归一结果回填的话，用户一打开就看到
    * 补过默认值的内容，随手一存就把默认值固化进 manifest。
    *
-   * 五份定义全走 optional 读取，缺文件返回 null 不报错（只有线序和点位必填）。
+   * 每路五份定义全走 optional 读取，缺文件返回 null 不报错（只有线序和点位必填）。
+   * `definitions.sensors[id]` 是 v3 逐路真相；顶层定义继续投影第一路，兼容旧编辑器。
    * 三个权限字段**分工不同别当成一个**：`pathIsWritable` 是物理位置是否在可写根内；
    * `editable` 优先采信发现层按 origin 判好的 `config.editable`，没给才退回路径判断（避免
    * 两处判据矛盾）；`writable` 两者都成立才算，前端据此决定「保存」还是只给「另存为」。
@@ -994,14 +995,27 @@ function createDisplaySystemWorkspaceService({
     const editable = typeof config.editable === 'boolean'
       ? config.editable
       : pathIsWritable;
+    const readDefinitions = (resolvedFiles = {}) => ({
+      lineOrder: readJsonOptional(resolvedFiles.lineOrder, fsLike),
+      pointOrder: readJsonOptional(resolvedFiles.pointOrder, fsLike),
+      coordinateMap: readJsonOptional(resolvedFiles.coordinateMap, fsLike),
+      algorithmData: readJsonOptional(resolvedFiles.algorithmData, fsLike),
+      algorithmSource: readTextOptional(resolvedFiles.algorithmEntry, fsLike),
+    });
+    const sensorDefinitions = Object.fromEntries(
+      (Array.isArray(config.sensors) ? config.sensors : [])
+        .filter((sensor) => sensor?.id)
+        .map((sensor) => [sensor.id, readDefinitions(sensor.resolvedFiles)]),
+    );
+    const primaryDefinitions = config.sensors?.[0]?.id
+      ? sensorDefinitions[config.sensors[0].id]
+      : readDefinitions(config.resolvedFiles);
     return {
       manifest: readJsonOptional(config.manifestPath, fsLike),
       definitions: {
-        lineOrder: readJsonOptional(config.resolvedFiles?.lineOrder, fsLike),
-        pointOrder: readJsonOptional(config.resolvedFiles?.pointOrder, fsLike),
-        coordinateMap: readJsonOptional(config.resolvedFiles?.coordinateMap, fsLike),
-        algorithmData: readJsonOptional(config.resolvedFiles?.algorithmData, fsLike),
-        algorithmSource: readTextOptional(config.resolvedFiles?.algorithmEntry, fsLike),
+        ...primaryDefinitions,
+        // v3 编辑器以这里为逐路真相；顶层五个字段继续投影第一路，兼容旧 Builder。
+        sensors: sensorDefinitions,
       },
       editable,
       origin: config.origin || (editable ? 'user' : 'system'),

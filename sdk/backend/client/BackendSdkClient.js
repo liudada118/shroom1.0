@@ -1,5 +1,9 @@
 const { EventEmitter } = require('events');
 const { createCommand } = require('../contract/commandProtocol');
+const {
+  isDeclaredSensorFrame,
+  isSensorFrameV1Envelope,
+} = require('../contract/sensorFrameV1');
 
 const DEFAULT_HTTP_BASE_URL = 'http://127.0.0.1:19245';
 const DEFAULT_WS_URL = 'ws://127.0.0.1:19999';
@@ -249,8 +253,23 @@ class BackendSdkClient extends EventEmitter {
     }
 
     this.emit('message', message);
+    if (isDeclaredSensorFrame(message)) {
+      if (!isSensorFrameV1Envelope(message)) {
+        this.emit('invalidFrame', message);
+        return;
+      }
+      this.emit('frame', message);
+      return;
+    }
+
     if (Array.isArray(message?.frames)) {
-      message.frames.forEach((frame) => this.emit('frame', frame));
+      message.frames.forEach((frame) => {
+        if (isDeclaredSensorFrame(frame) && !isSensorFrameV1Envelope(frame)) {
+          this.emit('invalidFrame', frame);
+          return;
+        }
+        this.emit('frame', frame);
+      });
     } else if (message?.channelId || message?.portId || message?.value) {
       this.emit('frame', message);
     }

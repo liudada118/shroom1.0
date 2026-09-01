@@ -133,6 +133,14 @@ client.connectRealtime({ channels: ['car:sit'] });
 
 控制走 HTTP，实时走 WebSocket 订阅。`npm run sdk:demo` 是只读版演示。
 精确订阅使用 `displaySystemId:sensorId`；省略 `channels` 时保留服务端默认的 `*` 订阅。
+`contract.stableContracts.multiSensor` 会声明当前冻结的 `shroom.multi-sensor` 版本与兼容策略；
+构建工具也可从 `@shroom/backend/contract` 读取 `multiSensorStableContract`。v1 允许追加可选字段，
+但字段改名、删除或语义变化必须发布新 contract version，不能原地修改。
+
+标准帧身份必须满足 `channelId === displaySystemId + ':' + sensorId`。已声明为
+`sensor.frame` 的未知版本、冲突身份或缺少 `payload.value` 的消息会 fail closed，不会被猜成 legacy
+帧；旧 `sitData/backData/headData` 只保留在兼容输入边界。压力数组中的坏单点在线上明确为 `null`，
+其余有限数字和整帧继续保留。
 
 零点命令同样使用完整身份；不传目标时作用于当前展示系统，显式目标必须非空且合法，
 未知/空目标会由服务端拒绝而不是回退成全通道：

@@ -162,12 +162,13 @@ export function partSurface(part) {
  *
  * @param {object} value 该表面当前的配置（与画布配置同构）。
  * @param {{kind: string, id: string}} part 零件描述。
+ * @param {{defaultSource?: string}} [options] 新组件的数据源选项。
  * @returns {object} 新配置；零件无法识别时原样返回。
  */
-export function applySurfacePart(value, part) {
+export function applySurfacePart(value, part, options = {}) {
   if (part?.kind === 'chartWidget') return value;
   const baseKind = CHART_PART_BASE_KINDS[part?.kind];
-  return applyCanvasPart(value, baseKind ? { ...part, kind: baseKind } : part);
+  return applyCanvasPart(value, baseKind ? { ...part, kind: baseKind } : part, options);
 }
 
 /**
@@ -199,19 +200,23 @@ export function createWidgetId(type, widgets = []) {
 }
 
 /**
- * 把零件转成画布 widget。source 沿用画布上第一个 widget 的通道，
- * 单传感器系统就不必再手填一次；画布为空时回落到 sitData。
+ * 把零件转成画布 widget。配置器显式选择的数据源优先，其次才沿用画布上
+ * 第一个 widget 的通道；没有来源信息时回落到 sitData 兼容旧单通道系统。
  *
  * @param {object} part widget 零件。
  * @param {object[]} widgets 画布上已有的 widget。
+ * @param {{defaultSource?: string}} [options] 新组件的显式默认数据源。
  * @returns {object} 新 widget。
  */
-export function createWidgetFromPart(part, widgets = []) {
+export function createWidgetFromPart(part, widgets = [], { defaultSource = '' } = {}) {
+  const source = [part?.source, defaultSource, widgets[0]?.source, 'sitData']
+    .map((item) => String(item || '').trim())
+    .find(Boolean);
   return {
     id: createWidgetId(part.type || part.id, widgets),
     type: part.type || part.id,
     label: part.label || part.id,
-    source: widgets[0]?.source || 'sitData',
+    source,
     columnSpan: part.columnSpan || 8,
   };
 }
@@ -225,9 +230,10 @@ export function createWidgetFromPart(part, widgets = []) {
  *
  * @param {{colormap?: object, overlays?: string[], widgets?: object[]}} canvas 当前画布配置。
  * @param {{kind: string, id: string, type?: string}} part 零件描述。
+ * @param {{defaultSource?: string}} [options] 新组件的数据源选项。
  * @returns {object} 新的画布配置；零件无法识别时原样返回。
  */
-export function applyCanvasPart(canvas, part) {
+export function applyCanvasPart(canvas, part, options = {}) {
   if (!canvas || !part) return canvas;
   if (part.kind === 'colormap') {
     return { ...canvas, colormap: { ...canvas.colormap, id: part.id } };
@@ -243,9 +249,28 @@ export function applyCanvasPart(canvas, part) {
   }
   if (part.kind === 'widget') {
     const widgets = canvas.widgets || [];
-    return { ...canvas, widgets: [...widgets, createWidgetFromPart(part, widgets)] };
+    return { ...canvas, widgets: [...widgets, createWidgetFromPart(part, widgets, options)] };
   }
   return canvas;
+}
+
+/**
+ * 修改一个已放置 widget 的数据源。只更新命中的卡片，画布其它字段保持引用稳定。
+ *
+ * @param {object} canvas 当前画布配置。
+ * @param {string} widgetId widget id。
+ * @param {string} source 新 source（sensor id / outputChannel / channelId 均可）。
+ * @returns {object} 更新后的画布；参数无效或值未变化时原样返回。
+ */
+export function updateCanvasWidgetSource(canvas, widgetId, source) {
+  const normalizedSource = String(source || '').trim();
+  if (!canvas || !widgetId || !normalizedSource) return canvas;
+  const widgets = canvas.widgets || [];
+  const index = widgets.findIndex((widget) => widget.id === widgetId);
+  if (index < 0 || widgets[index].source === normalizedSource) return canvas;
+  const nextWidgets = [...widgets];
+  nextWidgets[index] = { ...widgets[index], source: normalizedSource };
+  return { ...canvas, widgets: nextWidgets };
 }
 
 /**

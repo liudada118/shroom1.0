@@ -10,6 +10,7 @@ import {
   moveCanvasWidget,
   partSurface,
   removeCanvasWidget,
+  updateCanvasWidgetSource,
   applySurfacePart,
 } from './canvasParts';
 
@@ -116,7 +117,7 @@ describe('widget id 生成', () => {
     expect(createWidgetId('matrix', [{ id: 'matrix' }, { id: 'matrix-2' }])).toBe('matrix-3');
   });
 
-  it('新 widget 沿用画布上第一个 widget 的通道', () => {
+  it('新 widget 兼容沿用首卡片通道，但显式选择的数据源优先', () => {
     const widget = createWidgetFromPart(
       { kind: 'widget', id: 'matrix', type: 'matrix', label: '数字矩阵', columnSpan: 8 },
       BASE_CANVAS.widgets,
@@ -129,6 +130,16 @@ describe('widget id 生成', () => {
       columnSpan: 8,
     });
     expect(createWidgetFromPart({ kind: 'widget', id: 'matrix' }).source).toBe('sitData');
+    expect(createWidgetFromPart(
+      { kind: 'widget', id: 'matrix' },
+      BASE_CANVAS.widgets,
+      { defaultSource: 'seatPressure' },
+    ).source).toBe('seatPressure');
+    expect(createWidgetFromPart(
+      { kind: 'widget', id: 'matrix', source: 'rightPressure' },
+      BASE_CANVAS.widgets,
+      { defaultSource: 'seatPressure' },
+    ).source).toBe('rightPressure');
   });
 });
 
@@ -152,6 +163,18 @@ describe('零件落到画布上', () => {
     expect(next.widgets.map((widget) => widget.id)).toEqual(['main', 'stats', 'heatmap']);
   });
 
+  it('追加组件使用配置器当前选择的数据源，不固定继承第一路', () => {
+    const next = applyCanvasPart(BASE_CANVAS, {
+      kind: 'widget', id: 'matrix', type: 'matrix', label: '数字矩阵',
+    }, { defaultSource: 'seatPressure' });
+    expect(next.widgets.at(-1).source).toBe('seatPressure');
+
+    const throughSurface = applySurfacePart(BASE_CANVAS, {
+      kind: 'widget', id: 'raw2d', type: 'raw2d', label: '原始二维',
+    }, { defaultSource: 'rightPressure' });
+    expect(throughSurface.widgets.at(-1).source).toBe('rightPressure');
+  });
+
   it('不认识的零件原样返回，坏 payload 不会破坏画布', () => {
     expect(applyCanvasPart(BASE_CANVAS, { kind: 'placedWidget', id: 'main' })).toBe(BASE_CANVAS);
     expect(applyCanvasPart(BASE_CANVAS, null)).toBe(BASE_CANVAS);
@@ -159,6 +182,18 @@ describe('零件落到画布上', () => {
 });
 
 describe('已放置组件的增删换序', () => {
+  it('可单独修改某张卡片的数据源，其他卡片与画布配置不变', () => {
+    const next = updateCanvasWidgetSource(BASE_CANVAS, 'stats', 'seatPressure');
+    expect(next.widgets[0]).toBe(BASE_CANVAS.widgets[0]);
+    expect(next.widgets[1]).toEqual({
+      ...BASE_CANVAS.widgets[1],
+      source: 'seatPressure',
+    });
+    expect(next.colormap).toBe(BASE_CANVAS.colormap);
+    expect(updateCanvasWidgetSource(BASE_CANVAS, 'ghost', 'seatPressure')).toBe(BASE_CANVAS);
+    expect(updateCanvasWidgetSource(BASE_CANVAS, 'stats', '')).toBe(BASE_CANVAS);
+  });
+
   it('拖出画布即删除', () => {
     expect(removeCanvasWidget(BASE_CANVAS, 'stats').widgets.map((item) => item.id))
       .toEqual(['main']);

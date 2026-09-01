@@ -1,5 +1,8 @@
-export const SENSOR_FRAME_TYPE = 'sensor.frame';
-export const SENSOR_FRAME_SCHEMA_VERSION = 1;
+import sensorFrameV1Contract from '@shroom/frontend/contract/sensorFrameV1';
+
+export const SENSOR_FRAME_TYPE = sensorFrameV1Contract.SENSOR_FRAME_TYPE;
+export const SENSOR_FRAME_SCHEMA_VERSION = sensorFrameV1Contract.SENSOR_FRAME_SCHEMA_VERSION;
+export const isDeclaredSensorFrame = sensorFrameV1Contract.isDeclaredSensorFrame;
 
 const LEGACY_CHANNEL_FIELDS = {
   sit: 'sitData',
@@ -100,20 +103,7 @@ function resolveSerialMetadata(frame, payload) {
  * 系统状态、授权和命令确认仍按各自消息对象原样返回。
  */
 export function isSensorFrameEnvelope(value) {
-  if (!isObject(value)
-    || value.type !== SENSOR_FRAME_TYPE
-    || Number(value.schemaVersion ?? value.version) !== SENSOR_FRAME_SCHEMA_VERSION
-    || !isObject(value.payload)) return false;
-  const displaySystemId = String(value.displaySystemId || '').trim();
-  const sensorId = String(value.sensorId || '').trim();
-  const channelId = String(value.channelId || '').trim();
-  const outputChannel = String(value.outputChannel || '').trim();
-  return Boolean(
-    displaySystemId
-    && sensorId
-    && outputChannel
-    && channelId === `${displaySystemId}:${sensorId}`
-  );
+  return sensorFrameV1Contract.isSensorFrameV1Envelope(value);
 }
 
 /**
@@ -123,6 +113,7 @@ export function isSensorFrameEnvelope(value) {
 export function getSensorFrameOutputChannel(value) {
   const frame = parseWirePayload(value);
   if (!isObject(frame)) return '';
+  if (isDeclaredSensorFrame(frame) && !isSensorFrameEnvelope(frame)) return '';
 
   const declared = String(frame.outputChannel || frame.sensorId || frame.portId || '').trim();
   if (declared) return declared;
@@ -142,6 +133,7 @@ export function getSensorFrameOutputChannel(value) {
 export function getSensorFrameChannelValue(value, expectedChannel) {
   const frame = parseWirePayload(value);
   if (!isObject(frame)) return null;
+  if (isDeclaredSensorFrame(frame) && !isSensorFrameEnvelope(frame)) return null;
 
   const expected = String(expectedChannel || '').trim();
   const actual = getSensorFrameOutputChannel(frame);
@@ -182,7 +174,7 @@ export function isSensorFrameForDisplay(value, acceptedIdentities = []) {
 
   // 声明为 canonical 的消息必须满足完整身份契约；不能再把畸形 sensor.frame
   // 降级成 legacy 后按同名 outputChannel 放行，否则不同展示系统会串路。
-  if (frame.type === SENSOR_FRAME_TYPE && !isSensorFrameEnvelope(frame)) return false;
+  if (isDeclaredSensorFrame(frame) && !isSensorFrameEnvelope(frame)) return false;
 
   const outputChannel = getSensorFrameOutputChannel(frame);
   if (!outputChannel || !getSensorFrameChannelValue(frame, outputChannel)) return true;
@@ -232,6 +224,7 @@ export function isSensorFrameForActiveDisplay(value, additionalIdentities = []) 
 export function getSensorFrameStageValue(value, stage) {
   const frame = parseWirePayload(value);
   if (!isObject(frame)) return null;
+  if (isDeclaredSensorFrame(frame) && !isSensorFrameEnvelope(frame)) return null;
   if (isSensorFrameEnvelope(frame)) {
     return parseArrayValue(frame.payload.stages?.[stage]);
   }

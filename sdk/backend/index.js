@@ -11,6 +11,7 @@
  * | `@shroom/backend/sensors` | 传感器注册表 + 5 个协议插件 | 无 |
  * | `@shroom/backend/telemetry` | 通道总线 + 帧归一化 | events |
  * | `@shroom/backend/collection` | 采集限流、磁盘保护、入库队列 | 无 |
+ * | `@shroom/backend/identity` | 多传感器 channelId 构造、解析与一致性校验 | 无 |
  * | `@shroom/backend/logger` | 统一日志 | fs |
  * | `@shroom/backend/serial` | 串口生命周期与切帧 | peer: serialport |
  * | `@shroom/backend/storage` | SQLite 采集库 | peer: better-sqlite3 |
@@ -43,6 +44,7 @@ module.exports = {
   ...require('./sensors'),
   ...require('./telemetry'),
   ...require('./collection'),
+  ...require('./identity'),
   logger: require('./logger'),
 };
 

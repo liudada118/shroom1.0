@@ -1,6 +1,14 @@
 const API_VERSION = 'v1';
 const SDK_CONTRACT_VERSION = '2026-08-31';
-const SENSOR_FRAME_SCHEMA_VERSION = 1;
+
+function deepFreeze(value) {
+  if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
+  Object.values(value).forEach(deepFreeze);
+  return Object.freeze(value);
+}
+
+const multiSensorStableContract = deepFreeze(require('./multiSensorStableContract.json'));
+const SENSOR_FRAME_SCHEMA_VERSION = multiSensorStableContract.frame.schemaVersion;
 const commandSchema = require('./commandSchema.json');
 
 const SERIAL_ROLES = Object.freeze({
@@ -60,7 +68,7 @@ const TELEMETRY_QUALITY = Object.freeze({
   ERROR: 'error',
 });
 
-const DISPLAY_SYSTEM_SCHEMA_VERSION = 3;
+const DISPLAY_SYSTEM_SCHEMA_VERSION = multiSensorStableContract.manifest.schemaVersion;
 
 const DISPLAY_SYSTEM_MANIFEST_FILES = Object.freeze([
   'display-system.json',
@@ -87,6 +95,14 @@ function buildSdkContractSnapshot({
   return {
     apiVersion: API_VERSION,
     contractVersion: SDK_CONTRACT_VERSION,
+    stableContracts: {
+      multiSensor: {
+        name: multiSensorStableContract.contractName,
+        version: multiSensorStableContract.contractVersion,
+        status: multiSensorStableContract.status,
+        compatibilityPolicy: multiSensorStableContract.compatibilityPolicy,
+      },
+    },
     http: {
       basePath: '/api',
       routes: HTTP_ROUTES,
@@ -137,7 +153,7 @@ function buildSdkContractSnapshot({
         quality: 'good|stale|error',
         serial: 'object|null',
         payload: {
-          value: 'number[]',
+          value: '(finite number|null)[]',
           stages: {
             decoded: 'number[]|null',
             normalized: 'number[]|null',
@@ -182,7 +198,7 @@ function buildSdkContractSnapshot({
         name: 'string',
         version: 'string',
         sensors: [{
-          id: 'string (optional; defaults to array index; unique; must not contain ":")',
+          id: 'string (required in schema v3; v1/v2 defaults to array index; unique; must not contain ":")',
           label: 'string (optional; defaults to id)',
           outputChannel: 'string (optional; defaults to id; unique)',
           type: 'string',
@@ -301,5 +317,6 @@ module.exports = {
   WS_MESSAGE_TYPES,
   buildSdkContractSnapshot,
   listSerialRoles,
+  multiSensorStableContract,
   normalizeSerialRole,
 };

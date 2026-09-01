@@ -1,3 +1,9 @@
+const {
+  buildSensorChannelId,
+  parseSensorChannelId,
+  resolveSensorIdentity,
+} = require('@shroom/backend/identity');
+
 /**
  * 把一段身份（sensorType 或通道名）洗成可以安全拼进 channelId 的形式。
  *
@@ -25,27 +31,34 @@ function normalizeIdentityPart(value, fallback = 'unknown') {
 }
 
 /**
- * 从 channelId 里切出 sensorId 段。
+ * 从 canonical channelId 里取 sensorId 段。
  *
- * ⚠️ 用**第一个**冒号切（`indexOf`），与零点仓库那边严格两段式的解析**不同**：这里是
- * 兼容层的宽容处理，只在 manifest 没直接给出 `sensorId` 时兜底用。代价是万一 channelId
- * 里有两个冒号，切出来的结果会带冒号，进而被仓库判为不合法 —— 这属于「manifest 本身
- * 有问题」的情形，由 manifest 校验器负责在保存时拦住，不在这里重复拦。
- *
- * 注意两条路径的处理不对称：切出来的段**原样返回**（它已经是 canonical channelId 的
- * 一部分，洗一遍反而可能改掉真实 id）；走 fallback 时才洗（fallback 是旧的通道别名，
- * 不保证 channelId-safe）。
+ * 合法 channelId 交给 SDK identity helper 严格解析；无法解析时只能使用洗过的
+ * legacy fallback。因此多冒号声明不会再产生带冒号的 sensorId。
  *
  * @param {*} channelId canonical channelId。
  * @param {*} fallback 无冒号时的兜底来源。
  * @returns {string} sensorId 段。
  */
 function sensorIdFromChannelId(channelId, fallback) {
-  const value = String(channelId || '');
-  const separator = value.indexOf(':');
-  return separator >= 0
-    ? value.slice(separator + 1)
-    : normalizeIdentityPart(fallback, 'sensor');
+  return parseSensorChannelId(channelId)?.sensorId
+    || normalizeIdentityPart(fallback, 'sensor');
+}
+
+/**
+ * 校验 manifest runtime channel 的 canonical 身份。
+ * 旧 runtime plan 若缺 displaySystemId/sensorId 可从合法 channelId 补齐，
+ * 但显式字段冲突或 channelId 有多个冒号时必须返回 null。
+ *
+ * @param {object} channel manifest runtime channel。
+ * @returns {{channelId:string, displaySystemId:string, sensorId:string}|null} canonical 身份。
+ */
+function resolveDeclaredChannelIdentity(channel) {
+  if (!channel || typeof channel !== 'object') return null;
+  const candidate = { channelId: channel.channelId };
+  if (channel.displaySystemId) candidate.displaySystemId = channel.displaySystemId;
+  if (channel.sensorId) candidate.sensorId = channel.sensorId;
+  return resolveSensorIdentity(candidate, { allowDerived: true });
 }
 
 /**
@@ -89,7 +102,9 @@ function createZeroChannelIdentityResolver({
    */
   function getActiveDisplaySystemId() {
     const declared = getDeclaredChannels();
-    if (declared[0]?.displaySystemId) return String(declared[0].displaySystemId);
+    if (declared.length) {
+      return resolveDeclaredChannelIdentity(declared[0])?.displaySystemId || '';
+    }
     const sensorType = String(getActiveSensorType?.() || '').trim();
     return sensorType ? normalizeIdentityPart(sensorType, 'legacy') : '';
   }
@@ -119,20 +134,24 @@ function createZeroChannelIdentityResolver({
       || item.channelId === channel
     ));
 
-    if (match?.channelId) {
+    if (match) {
+      const canonicalIdentity = resolveDeclaredChannelIdentity(match);
+      if (!canonicalIdentity) return null;
       return {
-        channelId: String(match.channelId),
-        displaySystemId: String(match.displaySystemId || getActiveDisplaySystemId()),
-        sensorId: String(match.sensorId || sensorIdFromChannelId(match.channelId, channel)),
+        ...canonicalIdentity,
         sensorType: String(match.sensorType || getActiveSensorType?.() || 'legacy'),
         outputChannel: String(match.outputChannel || channel),
       };
     }
 
+    // 有 manifest 却找不到这个通道时，不得伪装成 legacy 身份。
+    // 只有完全没有声明通道的旧运行时才进入下面的清洗兜底。
+    if (declared.length) return null;
+
     const sensorType = normalizeIdentityPart(getActiveSensorType?.(), 'legacy');
     const normalizedChannel = normalizeIdentityPart(channel, 'sensor');
     return {
-      channelId: `${sensorType}:${normalizedChannel}`,
+      channelId: buildSensorChannelId(sensorType, normalizedChannel),
       displaySystemId: sensorType,
       sensorId: normalizedChannel,
       sensorType,
@@ -156,7 +175,7 @@ function createZeroChannelIdentityResolver({
    */
   function listActiveChannelIds() {
     return getDeclaredChannels()
-      .map((channel) => String(channel.channelId || '').trim())
+      .map((channel) => resolveDeclaredChannelIdentity(channel)?.channelId || '')
       .filter(Boolean);
   }
 

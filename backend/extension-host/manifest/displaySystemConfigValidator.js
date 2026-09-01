@@ -6,9 +6,12 @@ const {
   normalizeDisplayConfig,
   validateDisplayConfig,
 } = require('./displaySystemPage');
+const { multiSensorStableContract } = require('@shroom/backend/contract');
 
-const DISPLAY_SYSTEM_SCHEMA_VERSION = 3;
-const SUPPORTED_DISPLAY_SYSTEM_SCHEMA_VERSIONS = Object.freeze([1, 2, 3]);
+const DISPLAY_SYSTEM_SCHEMA_VERSION = multiSensorStableContract.manifest.schemaVersion;
+const SUPPORTED_DISPLAY_SYSTEM_SCHEMA_VERSIONS = Object.freeze([
+  ...multiSensorStableContract.manifest.supportedSchemaVersions,
+]);
 
 const ALGORITHM_TYPES = Object.freeze({
   NONE: 'none',
@@ -119,6 +122,9 @@ function validateSensorEntry(rawSensor, { source, index, schemaVersion, label })
     return { errors: [`${source}: ${label} must be an object`], value: null };
   }
 
+  if (schemaVersion >= DISPLAY_SYSTEM_SCHEMA_VERSION && !isNonEmptyString(sensor.id)) {
+    errors.push(`${source}: ${label}.id is required for schemaVersion ${schemaVersion}`);
+  }
   const id = isNonEmptyString(sensor.id) ? sensor.id.trim() : String(index);
   if (containsChannelIdSeparator(id)) {
     errors.push(`${source}: ${label}.id must not contain ":"`);
@@ -213,6 +219,9 @@ function validateDisplaySystemConfig(config, { source = 'display system manifest
 
   // v3 用 sensors 数组声明多传感器；v1/v2 的单数 sensor 在这里升格，下游不再分版本。
   const declaredSensors = Array.isArray(config.sensors) && config.sensors.length > 0;
+  if (schemaVersion >= DISPLAY_SYSTEM_SCHEMA_VERSION && !declaredSensors) {
+    errors.push(`${source}: sensors is required for schemaVersion ${schemaVersion}`);
+  }
   const rawSensors = declaredSensors
     ? config.sensors
     : upgradeSensorsFromLegacyConfig(config);

@@ -40,18 +40,24 @@ import DisplayCanvasConfigurator from './canvasConfigurator/DisplayCanvasConfigu
 import MatrixWidget from './widgets/MatrixWidget.jsx';
 import CoordinatePointWidget from './widgets/CoordinatePointWidget.jsx';
 import StatsWidget from './widgets/StatsWidget.jsx';
-import { buildCoordinatePointLayout } from './coordinatePointLayout';
 import { calculatePressureMetrics } from './displayProfileRuntime';
 import { applyMatrixTransform } from '../../displays/matrixTransform';
 import { DEFAULT_COLORMAP_ID } from './colormaps';
 import RendererHost from '../../renderers/RendererHost.jsx';
 import { readManifestChannelFrames } from './manifestSceneAdapter.js';
 import {
+  buildManifestWidgetRendererParams,
+  resolveManifestWidgetGeometry,
+} from './manifestWidgetGeometry.js';
+import {
   buildBuilderPortViews,
+  buildBuilderSensorFilePath,
+  buildBuilderSensorDrafts,
   buildBuilderSensorPlan,
-  buildBuilderSensors,
   buildPortLabels,
   ensureBuilderPortWidgets,
+  getInvalidBuilderSensorIds,
+  normalizeBuilderSensorIds,
 } from './builderMultiSensor.js';
 import './DisplaySystemBuilder.css';
 
@@ -114,6 +120,56 @@ const DEFAULT_VALUES = {
   areaUnit: 'cm²',
   runtimeMode: 'parallel',
 };
+
+const SENSOR_FORM_FIELDS = [
+  'sensorLabel',
+  'outputChannel',
+  'stored',
+  'sensorType',
+  'serialTemplate',
+  'transportType',
+  'baudRate',
+  'framingType',
+  'frameLength',
+  'delimiter',
+  'dataBits',
+  'valueType',
+  'byteOffset',
+  'valueCount',
+  'validationHeader',
+  'checksumType',
+  'checksumByteOffset',
+  'checksumRangeStart',
+  'checksumRangeEnd',
+  'lineOrderMode',
+  'lineOrderJson',
+  'pointOrderJson',
+  'coordinateMapJson',
+  'backendAlgorithm',
+  'algorithmLanguage',
+  'algorithmSource',
+  'algorithmTimeoutMs',
+  'algorithmMetrics',
+  'scale',
+  'offset',
+  'min',
+  'max',
+  'zeroBelow',
+];
+
+function cloneBuilderValue(value) {
+  if (Array.isArray(value)) return value.map(cloneBuilderValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, cloneBuilderValue(item)]),
+    );
+  }
+  return value;
+}
+
+function pickSensorFormValues(values = {}) {
+  return Object.fromEntries(SENSOR_FORM_FIELDS.map((field) => [field, cloneBuilderValue(values[field])]));
+}
 
 /**
  * 生成默认画布配置。展示模板只描述"用哪个渲染器、要不要压力统计"，
@@ -606,6 +662,257 @@ function buildFormValues(editor) {
   };
 }
 
+function buildSensorFormDrafts(editor) {
+  const manifest = editor?.manifest || {};
+  const builderMetadata = manifest.metadata?.builder || {};
+  const perSensorSettings = builderMetadata.sensors || {};
+  return buildBuilderSensorDrafts(editor).map((draft) => {
+    const sensor = draft.sensor || {};
+    const settings = perSensorSettings[draft.id] || {};
+    const inferredLineOrderMode = draft.definitions?.lineOrder ? 'custom' : 'identity';
+    const sensorEditor = {
+      manifest: {
+        ...manifest,
+        sensors: [sensor],
+        sensor: {
+          ...(manifest.sensor || {}),
+          type: sensor.type,
+          matrix: sensor.matrix,
+          ports: [sensor.id],
+          portLabels: { [sensor.id]: sensor.label || sensor.id },
+        },
+        files: sensor.files,
+        protocol: sensor.protocol,
+        algorithm: sensor.algorithm,
+        metadata: {
+          ...(manifest.metadata || {}),
+          builder: {
+            ...builderMetadata,
+            serialTemplate: settings.serialTemplate || inferSerialTemplate({ sensors: [sensor] }),
+            transportType: settings.transportType
+              || (draft.id === manifest.sensors?.[0]?.id ? builderMetadata.transportType : 'binary'),
+            lineOrderMode: settings.lineOrderMode || inferredLineOrderMode,
+          },
+        },
+      },
+      definitions: draft.definitions,
+    };
+    return {
+      ...draft,
+      values: pickSensorFormValues({
+        ...buildFormValues(sensorEditor),
+        sensorLabel: sensor.label || sensor.id,
+        outputChannel: sensor.outputChannel || sensor.id,
+        stored: sensor.stored !== false,
+        sensorType: sensor.type || '',
+      }),
+    };
+  });
+}
+
+function updateSensorDraftValues(drafts, sensorId, values = {}) {
+  if (!sensorId) return drafts;
+  const nextValues = pickSensorFormValues(values);
+  return (Array.isArray(drafts) ? drafts : []).map((draft) => {
+    if (draft.id !== sensorId) return draft;
+    return {
+      ...draft,
+      sensor: {
+        ...(draft.sensor || {}),
+        id: sensorId,
+        label: String(nextValues.sensorLabel || sensorId).trim() || sensorId,
+        outputChannel: String(nextValues.outputChannel || sensorId).trim() || sensorId,
+        type: String(nextValues.sensorType || draft.sensor?.type || '').trim(),
+        stored: nextValues.stored !== false,
+      },
+      values: nextValues,
+    };
+  });
+}
+
+function createSensorDraft(sensorId, sourceValues = {}, sourceDraft = null) {
+  const id = String(sensorId || '').trim();
+  const values = {
+    ...pickSensorFormValues({ ...DEFAULT_VALUES, ...sourceValues }),
+    sensorLabel: sourceValues.portLabels?.[id] || SERIAL_ROLE_LABELS[id] || id,
+    outputChannel: id,
+    stored: true,
+  };
+  return {
+    id,
+    isNew: true,
+    sensor: {
+      ...(cloneBuilderValue(sourceDraft?.sensor) || {}),
+      id,
+      label: values.sensorLabel,
+      outputChannel: id,
+      type: values.sensorType || sourceDraft?.sensor?.type || '',
+      stored: true,
+    },
+    definitions: cloneBuilderValue(sourceDraft?.definitions || {}),
+    values,
+  };
+}
+
+function compileSensorDraftForSave(draft, { multiple = false } = {}) {
+  const values = draft?.values || {};
+  const sensorId = String(draft?.id || '').trim();
+  const normalizedCoordinateMap = values.coordinateMapJson
+    ? normalizeCoordinateMapDefinition(values.coordinateMapJson, `${sensorId} 形状坐标`)
+    : null;
+  let normalizedPointOrder = values.pointOrderJson
+    ? normalizePointOrderDefinition(values.pointOrderJson, `${sensorId} 点位顺序`)
+    : null;
+  if (!normalizedPointOrder && normalizedCoordinateMap) {
+    normalizedPointOrder = normalizePointOrderDefinition(
+      createIdentityPointOrder(normalizedCoordinateMap.rows, normalizedCoordinateMap.cols),
+      `${sensorId} 点位顺序`,
+    );
+  }
+  if (!normalizedPointOrder) {
+    throw new Error(`传感器 ${sensorId} 尚未导入形状坐标`);
+  }
+  if (normalizedCoordinateMap && (
+    normalizedCoordinateMap.rows !== normalizedPointOrder.rows
+    || normalizedCoordinateMap.cols !== normalizedPointOrder.cols
+  )) {
+    throw new Error(`传感器 ${sensorId} 的形状坐标尺寸必须与点位顺序尺寸一致`);
+  }
+
+  const normalizedMatrix = normalizedCoordinateMap || normalizedPointOrder;
+  const previousSensor = cloneBuilderValue(draft.sensor || {});
+  const previousFiles = previousSensor.files || {};
+  const defaultPath = (fileName) => buildBuilderSensorFilePath(sensorId, fileName, { multiple });
+  const files = {
+    ...previousFiles,
+    lineOrder: draft.isNew
+      ? defaultPath('line-order.json')
+      : (previousFiles.lineOrder || defaultPath('line-order.json')),
+    pointOrder: draft.isNew
+      ? defaultPath('point-order.json')
+      : (previousFiles.pointOrder || defaultPath('point-order.json')),
+  };
+  if (normalizedCoordinateMap) {
+    files.coordinateMap = draft.isNew
+      ? defaultPath('coordinate-map.json')
+      : (previousFiles.coordinateMap || defaultPath('coordinate-map.json'));
+  } else {
+    delete files.coordinateMap;
+  }
+
+  const hasChecksum = values.checksumType && values.checksumType !== 'none';
+  const trimmedHeader = String(values.validationHeader || '').trim();
+  const frameValidation = trimmedHeader || hasChecksum
+    ? {
+      ...(trimmedHeader ? { header: trimmedHeader } : {}),
+      ...(hasChecksum
+        ? {
+          checksum: {
+            type: values.checksumType,
+            byteOffset: values.checksumByteOffset ?? -1,
+            range: [values.checksumRangeStart ?? 0, values.checksumRangeEnd ?? -1],
+          },
+        }
+        : {}),
+    }
+    : null;
+  const protocol = {
+    ...(previousSensor.protocol || {}),
+    baudRate: values.baudRate,
+    framing: values.framingType === 'delimiter'
+      ? { type: 'delimiter', delimiter: values.delimiter }
+      : { type: 'fixedLength', frameLength: values.frameLength },
+    decoding: {
+      ...(previousSensor.protocol?.decoding || {}),
+      valueType: values.valueType,
+      byteOffset: values.byteOffset,
+      valueCount: normalizedPointOrder.pointCount,
+    },
+  };
+  if (frameValidation) protocol.validation = frameValidation;
+  else delete protocol.validation;
+
+  const algorithmType = values.backendAlgorithm === 'code'
+    ? values.algorithmLanguage
+    : values.backendAlgorithm;
+  const previousAlgorithmType = previousSensor.algorithm?.type || 'none';
+  let algorithm = { ...(previousSensor.algorithm || {}), type: algorithmType || 'none' };
+  if (algorithmType === 'json') {
+    algorithm = {
+      ...algorithm,
+      dataFile: draft.isNew || previousAlgorithmType !== 'json'
+        ? defaultPath('algorithm-data.json')
+        : (algorithm.dataFile || defaultPath('algorithm-data.json')),
+      input: { ...(algorithm.input || {}), source: 'rawData' },
+      timeoutMs: values.algorithmTimeoutMs,
+    };
+    delete algorithm.entry;
+  } else if (algorithmType === 'js' || algorithmType === 'python') {
+    const entryName = algorithmType === 'python' ? 'algorithm.py' : 'algorithm.js';
+    algorithm = {
+      ...algorithm,
+      entry: draft.isNew || previousAlgorithmType !== algorithmType
+        ? defaultPath(entryName)
+        : (algorithm.entry || defaultPath(entryName)),
+      input: { ...(algorithm.input || {}), source: 'rawData' },
+      timeoutMs: values.algorithmTimeoutMs,
+    };
+    delete algorithm.dataFile;
+  } else {
+    algorithm = { type: 'none' };
+  }
+
+  const configuredAlgorithmMetrics = (values.algorithmMetrics || [])
+    .filter((metric) => metric?.id)
+    .map((metric) => ({ ...metric, id: metric.id.trim() }));
+  const definitions = {
+    lineOrder: values.lineOrderMode === 'custom'
+      ? parseDefinition(values.lineOrderJson, `${sensorId} 线序`)
+      : { order: Array.from({ length: normalizedPointOrder.pointCount }, (_, index) => index + 1) },
+    pointOrder: normalizedPointOrder.definition,
+    ...(normalizedCoordinateMap ? { coordinateMap: normalizedCoordinateMap.definition } : {}),
+  };
+  if (algorithmType === 'json') {
+    definitions.algorithmData = compactObject({
+      scale: values.scale,
+      offset: values.offset,
+      min: values.min,
+      max: values.max,
+      zeroBelow: values.zeroBelow,
+      metrics: configuredAlgorithmMetrics.map((metric) => compactObject({
+        id: metric.id,
+        operation: metric.operation,
+        threshold: metric.threshold,
+        scale: metric.scale,
+        offset: metric.offset,
+      })),
+    });
+  }
+  if (algorithmType === 'js' || algorithmType === 'python') {
+    definitions.algorithmSource = values.algorithmSource;
+  }
+
+  return {
+    sensor: {
+      ...previousSensor,
+      id: sensorId,
+      label: String(values.sensorLabel || sensorId).trim() || sensorId,
+      outputChannel: String(values.outputChannel || '').trim(),
+      type: String(values.sensorType || '').trim(),
+      matrix: { rows: normalizedMatrix.rows, cols: normalizedMatrix.cols },
+      files,
+      protocol,
+      algorithm,
+      stored: values.stored !== false,
+    },
+    definitions,
+    normalizedCoordinateMap,
+    normalizedPointOrder,
+    configuredAlgorithmMetrics,
+    values,
+  };
+}
+
 export default function DisplaySystemBuilder({ embedded = false, onActivated, onClose }) {
   const navigate = useNavigate();
   const [form] = Form.useForm();
@@ -618,6 +925,8 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editorAccess, setEditorAccess] = useState(null);
   const [activeStep, setActiveStep] = useState('connection');
+  const [sensorDrafts, setSensorDrafts] = useState([]);
+  const [activeSensorId, setActiveSensorId] = useState(null);
   const systemId = Form.useWatch('id', form);
   const systemName = Form.useWatch('name', form);
   const sensorType = Form.useWatch('sensorType', form);
@@ -704,10 +1013,18 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
       setEditorAccess({ editable: true, origin: 'user' });
       setActiveStep('connection');
       setPreviewDataMode('direction');
-      form.setFieldsValue({
+      const nextFormValues = {
         ...DEFAULT_VALUES,
         ...values,
-      });
+        portLabels: buildPortLabels(values.ports, values.portLabels),
+      };
+      const nextDrafts = normalizeBuilderSensorIds(values.ports).map((sensorId) => (
+        createSensorDraft(sensorId, nextFormValues)
+      ));
+      setSensorDrafts(nextDrafts);
+      setActiveSensorId(nextDrafts[0]?.id || null);
+      form.resetFields();
+      form.setFieldsValue({ ...nextFormValues, ...(nextDrafts[0]?.values || {}) });
       setCreateModalOpen(false);
       message.success('已创建配置草稿，请导入传感器形状坐标文件后继续配置');
     } catch (error) {
@@ -726,7 +1043,12 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
       });
       setActiveStep('connection');
       setPreviewDataMode('direction');
-      form.setFieldsValue(buildFormValues(payload.editor));
+      const nextDrafts = buildSensorFormDrafts(payload.editor);
+      const nextFormValues = buildFormValues(payload.editor);
+      setSensorDrafts(nextDrafts);
+      setActiveSensorId(nextDrafts[0]?.id || null);
+      form.resetFields();
+      form.setFieldsValue({ ...nextFormValues, ...(nextDrafts[0]?.values || {}) });
     } catch (error) {
       message.error(error.message);
     } finally {
@@ -826,9 +1148,50 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     }
     return { rows: matrixInfo.rows, cols: matrixInfo.cols };
   }, [matrixInfo, matrixTransformFactor, matrixTransformType]);
-  // 预览通道就是第一个串口的数据通道；多口系统在这里只验证主通道，
-  // 其余通道由保存后的运行时界面按 sensors[] 各自渲染。
-  const previewChannel = ports?.[0] || 'sit';
+  const previewSensorDefinitions = useMemo(() => {
+    const draftById = new Map(sensorDrafts.map((draft) => [draft.id, draft]));
+    return normalizeBuilderSensorIds(ports || [], { fallback: false }).flatMap((sensorId) => {
+      const draft = draftById.get(sensorId);
+      if (!draft) return [];
+      const sensorValues = draft.id === activeSensorId
+        ? { ...draft.values, pointOrderJson, coordinateMapJson }
+        : draft.values;
+      let sensorPointOrder = null;
+      let sensorCoordinateMap = null;
+      try {
+        if (sensorValues.pointOrderJson) {
+          sensorPointOrder = normalizePointOrderDefinition(sensorValues.pointOrderJson);
+        }
+      } catch {
+        sensorPointOrder = null;
+      }
+      try {
+        if (sensorValues.coordinateMapJson) {
+          sensorCoordinateMap = normalizeCoordinateMapDefinition(sensorValues.coordinateMapJson);
+        }
+      } catch {
+        sensorCoordinateMap = null;
+      }
+      const geometry = sensorCoordinateMap || sensorPointOrder;
+      return [{
+        ...(draft.sensor || {}),
+        id: sensorId,
+        label: sensorValues.sensorLabel || draft.sensor?.label || sensorId,
+        outputChannel: sensorValues.outputChannel || draft.sensor?.outputChannel || sensorId,
+        matrix: geometry
+          ? { rows: geometry.rows, cols: geometry.cols }
+          : draft.sensor?.matrix,
+        coordinateMap: sensorCoordinateMap?.definition || null,
+        previewPointCount: sensorPointOrder?.pointCount
+          || sensorCoordinateMap?.pointCount
+          || (Number(draft.sensor?.matrix?.rows || 0) * Number(draft.sensor?.matrix?.cols || 0)),
+      }];
+    });
+  }, [activeSensorId, coordinateMapJson, pointOrderJson, ports, sensorDrafts]);
+  // 预览跟随当前传感器页签；机器 id 和 outputChannel 可以不同。
+  const previewSensor = previewSensorDefinitions.find((sensor) => sensor.id === activeSensorId)
+    || previewSensorDefinitions[0];
+  const previewChannel = previewSensor?.outputChannel || activeSensorId || 'sit';
   const realtimePreviewValues = useMemo(
     () => previewFrames[previewChannel] || [],
     [previewChannel, previewFrames],
@@ -841,31 +1204,53 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
   const previewValues = previewUsesDirectionData
     ? directionCheckValues
     : realtimePreviewValues;
-  const previewLayout = useMemo(
-    () => buildCoordinatePointLayout(coordinateMapInfo?.definition),
-    [coordinateMapInfo],
-  );
-  const previewMetrics = useMemo(
-    () => calculatePressureMetrics(previewValues),
-    [previewValues],
-  );
-  // 画布上的卡片和运行时用的是同一批组件，配置时看到什么、保存后就是什么。
+  // 每张卡片按自己的 source 选传感器、帧和几何；不能拿当前页签的手形套到座椅卡片。
   const previewCards = useMemo(() => {
     const widgets = canvasConfig?.widgets || [];
-    if (!widgets.length || !previewValues.length) return [];
-    const sourceMatrix = matrixInfo
-      ? { rows: matrixInfo.rows, cols: matrixInfo.cols }
-      : { rows: 1, cols: previewValues.length };
-    const transformed = applyMatrixTransform(previewValues, sourceMatrix, {
+    if (!widgets.length || !previewSensorDefinitions.length) return [];
+    const matrixTransform = {
       type: matrixTransformType || 'none',
       factor: Number(matrixTransformFactor) || 1,
+    };
+    const primaryDefinition = {
+      sourceMatrix: previewSensorDefinitions[0]?.matrix,
+      sourceCoordinateMap: previewSensorDefinitions[0]?.coordinateMap,
+    };
+    return widgets.flatMap((widget) => {
+      const geometry = resolveManifestWidgetGeometry({
+        source: widget.source,
+        sensors: previewSensorDefinitions,
+        definition: primaryDefinition,
+        matrixTransform,
+      });
+      const sourceSensor = geometry.sourceSensor || previewSensorDefinitions[0];
+      const sourceChannel = sourceSensor?.outputChannel || sourceSensor?.id || previewChannel;
+      const rawValues = previewUsesDirectionData
+        ? createDirectionCheckFrame(sourceSensor?.previewPointCount || 0)
+        : (previewFrames[sourceChannel] || previewFrames[sourceSensor?.id] || []);
+      if (!rawValues.length) return [];
+      const sourceMatrix = geometry.sourceMatrix || { rows: 1, cols: rawValues.length };
+      const transformed = applyMatrixTransform(rawValues, sourceMatrix, matrixTransform);
+      return [{
+        widget,
+        values: widget.type === 'pressureStats' ? rawValues : transformed.values,
+        rawValues,
+        matrix: transformed.matrix,
+        coordinateMap: geometry.coordinateMap,
+        layout: geometry.coordinatePointLayout,
+        metrics: calculatePressureMetrics(rawValues),
+        channel: sourceChannel,
+      }];
     });
-    return widgets.map((widget) => ({
-      widget,
-      values: widget.type === 'pressureStats' ? previewValues : transformed.values,
-      matrix: transformed.matrix,
-    }));
-  }, [canvasConfig, matrixInfo, matrixTransformFactor, matrixTransformType, previewValues]);
+  }, [
+    canvasConfig,
+    matrixTransformFactor,
+    matrixTransformType,
+    previewChannel,
+    previewFrames,
+    previewSensorDefinitions,
+    previewUsesDirectionData,
+  ]);
   const previewColormap = canvasConfig?.colormap || { id: DEFAULT_COLORMAP_ID };
   const previewOverlays = useMemo(
     () => new Set(canvasConfig?.overlays || []),
@@ -954,6 +1339,84 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
   }, [form]);
 
   const readOnly = Boolean(selectedId && editorAccess?.editable === false);
+  const configuredSensorIds = useMemo(
+    () => normalizeBuilderSensorIds(ports || [], { fallback: false }),
+    [ports],
+  );
+  const configuredSensorDrafts = useMemo(() => {
+    const draftById = new Map(sensorDrafts.map((draft) => [draft.id, draft]));
+    return configuredSensorIds.map((id) => draftById.get(id)).filter(Boolean);
+  }, [configuredSensorIds, sensorDrafts]);
+  const configuredSensorPlan = useMemo(() => (configuredSensorIds.length
+    ? buildBuilderSensorPlan({
+      displaySystemId: systemId,
+      ports: configuredSensorIds,
+      portLabels: Object.fromEntries(configuredSensorDrafts.map((draft) => [
+        draft.id,
+        draft.sensor?.label || draft.id,
+      ])),
+      sensors: configuredSensorDrafts.map((draft) => draft.sensor),
+    })
+    : []), [configuredSensorDrafts, configuredSensorIds, systemId]);
+  const resolveBuilderSourceValue = useCallback((source) => {
+    const key = String(source || '').trim();
+    const sensor = configuredSensorPlan.find((item) => [
+      item.source,
+      item.outputChannel,
+      item.id,
+      item.channelId,
+      `${item.id}Data`,
+    ].includes(key));
+    return sensor?.outputChannel || key;
+  }, [configuredSensorPlan]);
+  const activeSensorDraft = useMemo(
+    () => sensorDrafts.find((draft) => draft.id === activeSensorId) || null,
+    [activeSensorId, sensorDrafts],
+  );
+
+  const switchActiveSensor = useCallback((nextSensorId) => {
+    if (!nextSensorId || nextSensorId === activeSensorId) return;
+    const committed = updateSensorDraftValues(
+      sensorDrafts,
+      activeSensorId,
+      form.getFieldsValue(true),
+    );
+    const nextDraft = committed.find((draft) => draft.id === nextSensorId);
+    if (!nextDraft) return;
+    setSensorDrafts(committed);
+    setActiveSensorId(nextSensorId);
+    form.setFieldsValue(nextDraft.values);
+  }, [activeSensorId, form, sensorDrafts]);
+
+  const handlePortsChange = useCallback((nextPorts = []) => {
+    const normalizedTags = [...new Set((Array.isArray(nextPorts) ? nextPorts : [])
+      .map((port) => String(port || '').trim())
+      .filter(Boolean))];
+    if (normalizedTags.some((port, index) => port !== nextPorts[index])
+      || normalizedTags.length !== nextPorts.length) {
+      form.setFieldValue('ports', normalizedTags);
+    }
+    const safeIds = normalizeBuilderSensorIds(normalizedTags, { fallback: false });
+    const currentValues = { ...form.getFieldsValue(true), ports: normalizedTags };
+    let nextDrafts = updateSensorDraftValues(sensorDrafts, activeSensorId, currentValues);
+    safeIds.forEach((sensorId) => {
+      if (nextDrafts.some((draft) => draft.id === sensorId)) return;
+      const sourceDraft = nextDrafts.find((draft) => draft.id === activeSensorId) || nextDrafts[0];
+      nextDrafts = [...nextDrafts, createSensorDraft(sensorId, currentValues, sourceDraft)];
+    });
+    const nextActiveId = safeIds.includes(activeSensorId) ? activeSensorId : (safeIds[0] || null);
+    const nextActiveDraft = nextDrafts.find((draft) => draft.id === nextActiveId);
+    setSensorDrafts(nextDrafts);
+    setActiveSensorId(nextActiveId);
+    if (nextActiveDraft && nextActiveId !== activeSensorId) {
+      form.setFieldsValue(nextActiveDraft.values);
+    }
+  }, [activeSensorId, form, sensorDrafts]);
+
+  const handleFormValuesChange = useCallback((changedValues, allValues) => {
+    if (!activeSensorId || Object.prototype.hasOwnProperty.call(changedValues, 'ports')) return;
+    setSensorDrafts((current) => updateSensorDraftValues(current, activeSensorId, allValues));
+  }, [activeSensorId]);
 
   const applySerialTemplate = useCallback((templateId) => {
     const template = catalog?.serialTemplates?.find((item) => item.id === templateId);
@@ -1105,54 +1568,44 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     setSaving(true);
     try {
       const values = await form.validateFields();
-      const algorithmType = values.backendAlgorithm === 'code'
-        ? values.algorithmLanguage
-        : values.backendAlgorithm;
-      const normalizedCoordinateMap = values.coordinateMapJson
-        ? normalizeCoordinateMapDefinition(values.coordinateMapJson)
-        : null;
-      let normalizedPointOrder = values.pointOrderJson
-        ? normalizePointOrderDefinition(values.pointOrderJson)
-        : null;
-      if (!normalizedPointOrder && normalizedCoordinateMap) {
-        normalizedPointOrder = normalizePointOrderDefinition(
-          createIdentityPointOrder(normalizedCoordinateMap.rows, normalizedCoordinateMap.cols),
-        );
+      const sensorIds = normalizeBuilderSensorIds(values.ports, { fallback: false });
+      if (!sensorIds.length) throw new Error('请至少配置一个传感器 ID');
+      const currentDrafts = updateSensorDraftValues(
+        sensorDrafts,
+        activeSensorId,
+        values,
+      );
+      const draftById = new Map(currentDrafts.map((draft) => [draft.id, draft]));
+      const orderedDrafts = sensorIds.map((sensorId) => draftById.get(sensorId));
+      if (orderedDrafts.some((draft) => !draft)) {
+        throw new Error('传感器页签状态不完整，请重新选择串口角色后再保存');
       }
-      if (!normalizedPointOrder) {
-        throw new Error('请先导入传感器形状坐标文件');
+      // setFieldsValue 不触发 onValuesChange；这里强制把当前页快照写回草稿后再编译。
+      const compiledSensors = orderedDrafts.map((draft) => compileSensorDraftForSave(draft, {
+        multiple: orderedDrafts.length > 1,
+      }));
+      const outputChannels = compiledSensors.map(({ sensor }) => sensor.outputChannel);
+      if (outputChannels.some((channel) => !channel)) {
+        throw new Error('每个传感器都必须填写 outputChannel');
       }
-      if (normalizedCoordinateMap && (
-        normalizedCoordinateMap.rows !== normalizedPointOrder.rows
-        || normalizedCoordinateMap.cols !== normalizedPointOrder.cols
-      )) {
-        throw new Error('形状坐标尺寸必须与点位顺序尺寸一致');
+      if (new Set(outputChannels).size !== outputChannels.length) {
+        throw new Error('每个传感器的 outputChannel 必须唯一');
       }
-      const normalizedMatrix = normalizedCoordinateMap || normalizedPointOrder;
-      // 帧校验整段可选：帧头和校验算法都没填就不写 validation 字段，
-      // 让协议层继续走「不校验」的老路径。
-      const hasChecksum = values.checksumType && values.checksumType !== 'none';
-      const trimmedHeader = String(values.validationHeader || '').trim();
-      const frameValidation = trimmedHeader || hasChecksum
-        ? {
-          ...(trimmedHeader ? { header: trimmedHeader } : {}),
-          ...(hasChecksum
-            ? {
-              checksum: {
-                type: values.checksumType,
-                byteOffset: values.checksumByteOffset ?? -1,
-                range: [values.checksumRangeStart ?? 0, values.checksumRangeEnd ?? -1],
-              },
-            }
-            : {}),
-        }
-        : null;
-      const primaryPort = values.ports[0] || 'sit';
-      const portLabels = buildPortLabels(values.ports, values.portLabels);
+      setSensorDrafts(currentDrafts);
+      const sensors = compiledSensors.map(({ sensor }) => sensor);
+      const primarySensorState = compiledSensors[0];
+      const primarySource = `${primarySensorState.sensor.outputChannel}Data`;
+      const normalizedCoordinateMap = primarySensorState.normalizedCoordinateMap;
+      const normalizedMatrix = normalizedCoordinateMap || primarySensorState.normalizedPointOrder;
+      const primarySensorValues = primarySensorState.values;
+      const portLabels = Object.fromEntries(
+        sensors.map((sensor) => [sensor.id, sensor.label]),
+      );
       const sensorPlan = buildBuilderSensorPlan({
         displaySystemId: values.id,
-        ports: values.ports,
+        ports: sensorIds,
         portLabels,
+        sensors,
       });
       // 画布是 widget 的唯一真相。已经显式指向某路的 source 原样保留，
       // 尚未出现的串口则自动补一个数据 widget，不再全部挤到主路。
@@ -1161,7 +1614,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
         : buildDefaultCanvasConfig({
           rendererId: values.rendererId,
           showStats: true,
-          source: `${primaryPort}Data`,
+          source: primarySource,
         });
       const widgets = ensureBuilderPortWidgets({
         widgets: canvas.widgets,
@@ -1181,9 +1634,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
         if (algorithm.id === 'smooth') options.radius = values.smoothRadius;
         return { ...algorithm, options };
       });
-      const configuredAlgorithmMetrics = (values.algorithmMetrics || [])
-        .filter((metric) => metric?.id)
-        .map((metric) => ({ ...metric, id: metric.id.trim() }));
+      const configuredAlgorithmMetrics = primarySensorState.configuredAlgorithmMetrics;
       const configuredAlgorithmMetricIds = new Set(
         configuredAlgorithmMetrics.map((metric) => metric.id),
       );
@@ -1202,53 +1653,10 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
         && !configuredAlgorithmMetricIds.has(values.primaryMetric.slice(10))
         ? 'totalPressure'
         : values.primaryMetric;
-      const matrixDefinition = {
-        rows: normalizedMatrix.rows,
-        cols: normalizedMatrix.cols,
-      };
-      const fileDefinition = {
-        lineOrder: 'line-order.json',
-        pointOrder: 'point-order.json',
-        ...(normalizedCoordinateMap ? { coordinateMap: 'coordinate-map.json' } : {}),
-      };
-      const protocolDefinition = {
-        baudRate: values.baudRate,
-        framing: values.framingType === 'delimiter'
-          ? { type: 'delimiter', delimiter: values.delimiter }
-          : { type: 'fixedLength', frameLength: values.frameLength },
-        decoding: {
-          valueType: values.valueType,
-          byteOffset: values.byteOffset,
-          valueCount: normalizedPointOrder.pointCount,
-        },
-        ...(frameValidation ? { validation: frameValidation } : {}),
-      };
-      const algorithmDefinition = algorithmType === 'json'
-        ? {
-          type: 'json',
-          dataFile: 'algorithm-data.json',
-          input: { source: 'rawData' },
-          timeoutMs: values.algorithmTimeoutMs,
-        }
-        : algorithmType === 'js' || algorithmType === 'python'
-          ? {
-            type: algorithmType,
-            entry: algorithmType === 'python' ? 'algorithm.py' : 'algorithm.js',
-            input: { source: 'rawData' },
-            timeoutMs: values.algorithmTimeoutMs,
-          }
-          : { type: 'none' };
-      const sensors = buildBuilderSensors({
-        displaySystemId: values.id,
-        ports: sensorPlan.map((sensor) => sensor.id),
-        portLabels,
-        type: values.sensorType,
-        matrix: matrixDefinition,
-        files: fileDefinition,
-        protocol: protocolDefinition,
-        algorithm: algorithmDefinition,
-        stored: true,
-      });
+      const matrixDefinition = { ...primarySensorState.sensor.matrix };
+      const fileDefinition = { ...primarySensorState.sensor.files };
+      const protocolDefinition = cloneBuilderValue(primarySensorState.sensor.protocol);
+      const algorithmDefinition = cloneBuilderValue(primarySensorState.sensor.algorithm);
       const manifest = {
         schemaVersion: 3,
         id: values.id,
@@ -1258,7 +1666,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
         sensors,
         // 顶层单数字段是给 v1/v2 调用方的兼容投影；逐路真相只在 sensors[]。
         sensor: {
-          type: values.sensorType,
+          type: primarySensorState.sensor.type,
           matrix: matrixDefinition,
           ports: sensorPlan.map((sensor) => sensor.id),
           portLabels,
@@ -1292,7 +1700,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
           defaultProfile: 'default',
           controls: { serial: true, capture: true, replay: true, download: true },
           sidebar: {
-            source: `${primaryPort}Data`,
+            source: primarySource,
             algorithmMetrics: configuredAlgorithmMetrics.map((metric) => ({
               id: metric.id,
               label: metric.label || metric.id,
@@ -1319,42 +1727,30 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
           runtimeMode: values.runtimeMode,
           createdBy: 'display-system-builder',
           builder: {
-            lineOrderMode: values.lineOrderMode,
+            lineOrderMode: primarySensorValues.lineOrderMode,
             pointOrderMode: normalizedCoordinateMap ? 'generated-row-major' : 'point-order-file',
             coordinateMapMode: normalizedCoordinateMap ? 'physical-coordinate-file' : 'regular-grid',
-            serialTemplate: values.serialTemplate,
+            serialTemplate: primarySensorValues.serialTemplate,
             displayTemplate: values.displayTemplate,
-            transportType: values.transportType,
+            transportType: primarySensorValues.transportType,
+            sensors: Object.fromEntries(compiledSensors.map(({ sensor, values: sensorValues }) => [
+              sensor.id,
+              {
+                serialTemplate: sensorValues.serialTemplate,
+                transportType: sensorValues.transportType,
+                lineOrderMode: sensorValues.lineOrderMode,
+              },
+            ])),
           },
         },
       };
-      const definitions = {};
-      if (values.lineOrderMode === 'custom') {
-        definitions.lineOrder = parseDefinition(values.lineOrderJson, '线序');
-      }
-      definitions.pointOrder = normalizedPointOrder.definition;
-      if (normalizedCoordinateMap) {
-        definitions.coordinateMap = normalizedCoordinateMap.definition;
-      }
-      if (values.backendAlgorithm === 'json') {
-        definitions.algorithmData = compactObject({
-          scale: values.scale,
-          offset: values.offset,
-          min: values.min,
-          max: values.max,
-          zeroBelow: values.zeroBelow,
-          metrics: configuredAlgorithmMetrics.map((metric) => compactObject({
-            id: metric.id,
-            operation: metric.operation,
-            threshold: metric.threshold,
-            scale: metric.scale,
-            offset: metric.offset,
-          })),
-        });
-      }
-      if (values.backendAlgorithm === 'code') {
-        definitions.algorithmSource = values.algorithmSource;
-      }
+      const definitions = {
+        ...cloneBuilderValue(primarySensorState.definitions),
+        sensors: Object.fromEntries(compiledSensors.map(({ sensor, definitions: sensorDefinitions }) => [
+          sensor.id,
+          sensorDefinitions,
+        ])),
+      };
 
       const savePayload = await requestJson('/api/display-systems', {
         method: 'POST',
@@ -1369,9 +1765,9 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
       window.dispatchEvent(new CustomEvent('shroom-display-systems-updated'));
       setSelectedId(values.id);
       setEditorAccess({ editable: true, origin: 'user' });
-      await commandClient.execute('sensor.switch', { sensorType: values.sensorType });
-      localStorage.setItem('file', values.sensorType);
-      onActivated?.(values.sensorType);
+      await commandClient.execute('sensor.switch', { sensorType: primarySensorState.sensor.type });
+      localStorage.setItem('file', primarySensorState.sensor.type);
+      onActivated?.(primarySensorState.sensor.type);
       message.success(`已保存并加载：${values.name}`);
       if (embedded && typeof onClose === 'function') {
         onClose();
@@ -1387,7 +1783,19 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     } finally {
       setSaving(false);
     }
-  }, [catalog, embedded, form, loadIndex, navigate, onActivated, onClose, readOnly, selectedId]);
+  }, [
+    activeSensorId,
+    catalog,
+    embedded,
+    form,
+    loadIndex,
+    navigate,
+    onActivated,
+    onClose,
+    readOnly,
+    selectedId,
+    sensorDrafts,
+  ]);
 
   if (loading && !catalog) {
     return <div className="display-builder-loading"><Spin /></div>;
@@ -1457,29 +1865,63 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
           </div>
         </header>
 
-        <Form form={form} layout="vertical" initialValues={DEFAULT_VALUES} className="display-builder-form" disabled={readOnly}>
+        <Form
+          form={form}
+          layout="vertical"
+          initialValues={DEFAULT_VALUES}
+          className="display-builder-form"
+          disabled={readOnly}
+          onValuesChange={handleFormValuesChange}
+        >
           <div className="display-builder-workspace">
             <div className="display-builder-primary">
-              <nav className="builder-stepper" aria-label="配置步骤">
-                {configurationSteps.map((step, index) => (
-                  <div className="builder-step-slot" key={step.id}>
+              {configuredSensorDrafts.length ? (
+                <div className="builder-sensor-tabs" role="tablist" aria-label="逐传感器配置">
+                  <span>正在配置</span>
+                  {configuredSensorDrafts.map((draft) => (
                     <button
                       type="button"
-                      className={[
-                        'builder-step',
-                        activeStep === step.id ? 'is-active' : '',
-                        step.complete ? 'is-complete' : '',
-                      ].filter(Boolean).join(' ')}
-                      aria-current={activeStep === step.id ? 'step' : undefined}
-                      onClick={() => setActiveStep(step.id)}
+                      role="tab"
+                      id={`builder-sensor-tab-${draft.id}`}
+                      aria-controls="builder-sensor-editor"
+                      aria-selected={draft.id === activeSensorId}
+                      className={draft.id === activeSensorId ? 'is-active' : ''}
+                      key={draft.id}
+                      title={`${draft.sensor?.label || draft.id} · ${draft.id} → ${draft.sensor?.outputChannel || draft.id}`}
+                      onClick={() => switchActiveSensor(draft.id)}
                     >
-                      <span>{index + 1}</span>
-                      <strong>{step.label}</strong>
+                      <strong>{draft.sensor?.label || draft.id}</strong>
+                      <small>{draft.id} → {draft.sensor?.outputChannel || draft.id}</small>
                     </button>
-                    {index < configurationSteps.length - 1 ? <i className="builder-step-line" /> : null}
-                  </div>
-                ))}
-              </nav>
+                  ))}
+                </div>
+              ) : null}
+              <div
+                id="builder-sensor-editor"
+                className="builder-sensor-editor"
+                role="tabpanel"
+                aria-labelledby={activeSensorId ? `builder-sensor-tab-${activeSensorId}` : undefined}
+              >
+                <nav className="builder-stepper" aria-label="配置步骤">
+                  {configurationSteps.map((step, index) => (
+                    <div className="builder-step-slot" key={step.id}>
+                      <button
+                        type="button"
+                        className={[
+                          'builder-step',
+                          activeStep === step.id ? 'is-active' : '',
+                          step.complete ? 'is-complete' : '',
+                        ].filter(Boolean).join(' ')}
+                        aria-current={activeStep === step.id ? 'step' : undefined}
+                        onClick={() => setActiveStep(step.id)}
+                      >
+                        <span>{index + 1}</span>
+                        <strong>{step.label}</strong>
+                      </button>
+                      {index < configurationSteps.length - 1 ? <i className="builder-step-line" /> : null}
+                    </div>
+                  ))}
+                </nav>
 
               <section
                 className="builder-module-panel connection-module"
@@ -1525,25 +1967,60 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
                     </div>
                     <Form.Item name="transportType" hidden><Input /></Form.Item>
                     <div className="form-grid serial-fields-grid">
-                      <Form.Item className="serial-role-field" name="ports" label="串口角色" rules={[{ required: true }]}>
+                      <Form.Item
+                        className="serial-role-field"
+                        name="ports"
+                        label="传感器 ID / 串口角色"
+                        tooltip="可选择内置角色，也可直接输入自定义稳定 ID；业务名称在当前传感器页签单独设置。"
+                        rules={[
+                          { required: true, message: '请至少配置一个传感器 ID' },
+                          {
+                            validator: (_, value) => {
+                              const invalid = getInvalidBuilderSensorIds(value);
+                              return invalid.length
+                                ? Promise.reject(new Error(`ID 仅允许字母、数字、点、下划线和连字符：${invalid.join('、')}`))
+                                : Promise.resolve();
+                            },
+                          },
+                        ]}
+                      >
                         <Select
-                          mode="multiple"
+                          mode="tags"
+                          tokenSeparators={[',', '，']}
+                          onChange={handlePortsChange}
                           options={(catalog?.serialRoles || []).map((role) => ({
                             value: role,
                             label: `${SERIAL_ROLE_LABELS[role] || role} (${role})`,
                           }))}
                         />
                       </Form.Item>
-                      {(ports || []).map((role) => (
-                        <Form.Item
-                          key={`port-label-${role}`}
-                          name={['portLabels', role]}
-                          label={`${SERIAL_ROLE_LABELS[role] || role}业务名称`}
-                          tooltip={`写入 sensorLabel；例如左手、右手、座椅、靠背。物理 COM 口仍单独绑定到 ${role}。`}
-                        >
-                          <Input placeholder={SERIAL_ROLE_LABELS[role] || role} />
-                        </Form.Item>
-                      ))}
+                      <Form.Item name="sensorLabel" label="当前传感器业务名称" rules={[{ required: true }]}>
+                        <Input placeholder="例如：左手、右手、座椅或靠背" />
+                      </Form.Item>
+                      <Form.Item
+                        name="outputChannel"
+                        label="当前 outputChannel"
+                        rules={[
+                          { required: true, whitespace: true, message: '请输入 outputChannel' },
+                          {
+                            validator: (_, value) => {
+                              const normalized = String(value || '').trim();
+                              const duplicate = configuredSensorDrafts.some((draft) => (
+                                draft.id !== activeSensorId
+                                && String(draft.values?.outputChannel || draft.sensor?.outputChannel || '').trim() === normalized
+                              ));
+                              return duplicate
+                                ? Promise.reject(new Error('outputChannel 必须跨传感器唯一'))
+                                : Promise.resolve();
+                            },
+                          },
+                        ]}
+                      >
+                        <Input placeholder={activeSensorId || 'sensor'} />
+                      </Form.Item>
+                      <Form.Item name="stored" label="采集存储" valuePropName="checked">
+                        <Checkbox>采集时写入数据库并支持回放 / CSV</Checkbox>
+                      </Form.Item>
                       <Form.Item name="baudRate" label="波特率" rules={[{ required: true }]}>
                         <Select showSearch options={(catalog?.baudRates || []).map((value) => ({ value, label: String(value) }))} />
                       </Form.Item>
@@ -1875,9 +2352,14 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
                       value={canvasConfig}
                       onChange={updateCanvasConfig}
                       renderers={matrixRenderers}
+                      sourceOptions={configuredSensorPlan.map((sensor) => ({
+                        value: sensor.outputChannel,
+                        label: `${sensor.label} (${sensor.id})`,
+                      }))}
+                      defaultSource={activeSensorDraft?.sensor?.outputChannel || activeSensorId || ''}
+                      resolveSourceValue={resolveBuilderSourceValue}
                       colormapIds={catalog?.colormaps?.map((item) => item.id) || null}
                       readOnly={readOnly}
-                      simple
                       emptyState={(
                         <div className="canvas-empty-state">
                           {previewUsesDirectionData ? (
@@ -1894,15 +2376,23 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
                         </div>
                       )}
                     >
-                      {previewValues.length ? (
+                      {previewCards.length ? (
                         <div className="manifest-widget-grid">
-                          {previewCards.map(({ widget, values, matrix: cardMatrix }) => {
+                          {previewCards.map(({
+                            widget,
+                            values,
+                            matrix: cardMatrix,
+                            coordinateMap: cardCoordinateMap,
+                            layout,
+                            metrics,
+                            channel,
+                          }) => {
                             if (widget.type === 'pressureStats') {
                               return (
                                 <StatsWidget
                                   key={widget.id}
                                   label={widget.label || widget.id}
-                                  metrics={previewMetrics}
+                                  metrics={metrics}
                                   columnSpan={widget.columnSpan}
                                 />
                               );
@@ -1917,20 +2407,26 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
                                   <RendererHost
                                     rendererId={widget.type}
                                     label={widget.label || widget.id}
-                                    params={selectedRendererDefinition?.params}
+                                    params={buildManifestWidgetRendererParams({
+                                      rendererId: widget.type,
+                                      params: selectedRendererDefinition?.params,
+                                      matrix: cardMatrix,
+                                      coordinateMap: cardCoordinateMap,
+                                    })}
                                     values={values}
-                                    channel={previewChannel}
+                                    channel={channel}
+                                    coordinateMap={cardCoordinateMap}
                                     local
                                   />
                                 </div>
                               );
                             }
-                            if (previewLayout) {
+                            if (layout) {
                               return (
                                 <CoordinatePointWidget
                                   key={widget.id}
                                   label={widget.label || widget.id}
-                                  layout={previewLayout}
+                                  layout={layout}
                                   values={values}
                                   showValues={widget.type !== 'heatmap'}
                                   columnSpan={widget.columnSpan}
@@ -2103,6 +2599,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
                     </Button>
                   </div>
               </section>
+              </div>
             </div>
           </div>
         </Form>
@@ -2175,9 +2672,28 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
           >
             <Input placeholder="例如：custom-seat" />
           </Form.Item>
-          <Form.Item name="ports" label="串口角色" rules={[{ required: true, message: '请选择串口角色' }]}>
+          <Form.Item
+            name="ports"
+            label="传感器 ID / 串口角色"
+            rules={[
+              { required: true, message: '请至少配置一个传感器 ID' },
+              {
+                validator: (_, value) => {
+                  const invalid = getInvalidBuilderSensorIds(value);
+                  return invalid.length
+                    ? Promise.reject(new Error(`ID 仅允许字母、数字、点、下划线和连字符：${invalid.join('、')}`))
+                    : Promise.resolve();
+                },
+              },
+            ]}
+          >
             <Select
-              mode="multiple"
+              mode="tags"
+              tokenSeparators={[',', '，']}
+              onChange={(nextPorts) => createForm.setFieldValue(
+                'ports',
+                [...new Set(nextPorts.map((port) => String(port || '').trim()).filter(Boolean))],
+              )}
               options={(catalog?.serialRoles || []).map((role) => ({
                 value: role,
                 label: `${SERIAL_ROLE_LABELS[role] || role} (${role})`,

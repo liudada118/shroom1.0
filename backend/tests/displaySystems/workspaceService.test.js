@@ -322,6 +322,22 @@ try {
     loadDisplaySystemDirectory(fourPortSaved.directory, { validateFiles: true }).ok,
     true,
   );
+  const fourPortLoaded = loadDisplaySystemDirectory(fourPortSaved.directory, { validateFiles: true });
+  const fourPortEditor = service.read(fourPortLoaded.config);
+  assert.deepStrictEqual(
+    Object.keys(fourPortEditor.definitions.sensors),
+    ['leftHand', 'rightHand', 'backrest', 'seat'],
+  );
+  assert.deepStrictEqual(
+    fourPortEditor.definitions.sensors.seat.pointOrder.points,
+    [[0, 0], [0, 1], [0, 2]],
+  );
+  assert.deepStrictEqual(fourPortEditor.definitions.sensors.seat.algorithmData, { scale: 2 });
+  assert.deepStrictEqual(
+    fourPortEditor.definitions.pointOrder,
+    fourPortEditor.definitions.sensors.leftHand.pointOrder,
+    'top-level definitions must remain the first sensor compatibility projection',
+  );
 
   // ──────────────────────────────────────────────────────────────────────
   // saveDisplaySection —— 只动 display 段，其余字段逐字保留

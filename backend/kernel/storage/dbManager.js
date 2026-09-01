@@ -14,20 +14,11 @@ try {
 const sqlite3 = require('./sqlite3-compat').verbose();
 const logger = require('../../common/logger');
 const { isCar } = require('../../compatibility/legacyDataUtils');
+const { multiSensorStableContract } = require('@shroom/backend/contract');
 
-const CHANNEL_HISTORY_COLUMNS = Object.freeze([
-  ['channel_id', 'TEXT'],
-  ['display_system_id', 'TEXT'],
-  ['sensor_id', 'TEXT'],
-  ['sensor_label', 'TEXT'],
-  ['sensor_type', 'TEXT'],
-  ['output_channel', 'TEXT'],
-  ['schema_version', 'INTEGER'],
-  ['serial_role', 'TEXT'],
-  ['serial_port_path', 'TEXT'],
-  ['baud_rate', 'INTEGER'],
-  ['parser_channel', 'TEXT'],
-]);
+const CHANNEL_HISTORY_COLUMNS = Object.freeze(
+  multiSensorStableContract.storage.identityColumns.map((column) => Object.freeze([...column])),
+);
 
 /**
  * 为旧 matrix 表补齐按通道存储所需的可空列。

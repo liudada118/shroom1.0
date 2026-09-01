@@ -80,7 +80,11 @@ const {
   getHistorySeries: createHistorySeries,
 } = require('../playback/historyPlaybackService');
 const { createPlaybackFrameService } = require('../playback/playbackFrameService');
-const { buildChannelPlaybackFrames } = require('../playback/channelPlaybackService');
+const {
+  buildChannelPlaybackFrames,
+  buildPlaybackAnchorTimeline,
+  selectPlaybackAnchorChannel,
+} = require('../playback/channelPlaybackService');
 const { createPlaybackTimerService } = require('../playback/playbackTimerService');
 const { createCsvDownloadService } = require('../csv/csvDownloadService');
 const { createHistoryMaintenanceService } = require('../storage/history/historyMaintenanceService');
@@ -439,8 +443,10 @@ const zeroFrameAdapter = createZeroFrameAdapter({
  * @returns {number[] | null} 零点基线数组；未归零过时 null（调用方按「不补偿」处理）。
  */
 function getZeroFrameForOutputChannel(channel, frame = null) {
+  const resolvedIdentity = zeroChannelIdentityResolver.resolveChannelIdentity(channel);
   const channelId = String(frame?.channelId || '').trim()
-    || zeroChannelIdentityResolver.resolveChannelIdentity(channel).channelId;
+    || resolvedIdentity?.channelId
+    || '';
   return getZeroBaselineForStorage(zeroStateStore, channelId, frame);
 }
 
@@ -1021,15 +1027,21 @@ function loadSelectedHistory(dateLabel) {
 
       const primary = historyChannels.find((item) => item.descriptor.outputChannel === 'sit')
         || historyChannels[0];
+      const playbackAnchor = selectPlaybackAnchorChannel(historyChannels) || primary;
       const historySeries = getHistorySeries({
         sitRows: primary?.rows || [],
         backRows: [],
         file: sensorType,
       });
-      length = maxCanonicalRows;
+      const playbackTimeline = buildPlaybackAnchorTimeline(playbackAnchor);
+      length = playbackTimeline.length || maxCanonicalRows;
       setPlaybackState('indexArr', [0, Math.max(length - 2, 0)]);
-      timeStamp = historySeries.time;
-      detectedInterval = calcDetectedInterval(timeStamp);
+      timeStamp = playbackTimeline.time.length ? playbackTimeline.time : historySeries.time;
+      detectedInterval = calcDetectedInterval(
+        playbackTimeline.intervalTimestamps.length
+          ? playbackTimeline.intervalTimestamps
+          : timeStamp,
+      );
       interval = detectedInterval;
       historyArr = [0, length];
 

@@ -1,6 +1,11 @@
 import { sensorCommands } from './commands.js';
 import { toLegacyCommand } from './legacyCommands.js';
-import { SENSOR_FRAME_TYPE, normalizeIncomingMessage } from '../store/normalizeFrame.js';
+import {
+  SENSOR_FRAME_TYPE,
+  isDeclaredSensorFrame,
+  isSensorFrameEnvelope,
+  normalizeIncomingMessage,
+} from '../store/normalizeFrame.js';
 
 export const DEFAULT_HTTP_ROUTES = Object.freeze({
   channels: '/api/channels',
@@ -410,6 +415,11 @@ export class SensorClient {
 
     const normalized = normalizeIncomingMessage(parsed);
     this.emit('message', normalized);
+
+    if (isDeclaredSensorFrame(parsed) && !isSensorFrameEnvelope(parsed)) {
+      this.emit('invalidFrame', parsed);
+      return;
+    }
 
     normalized.frames.forEach((frame) => {
       this.emit('frame', frame);

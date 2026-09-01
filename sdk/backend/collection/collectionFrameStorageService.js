@@ -6,6 +6,8 @@
  * 则统一按 canonical channelId 存入主库，通道数量不再受三路模型限制。
  */
 
+const { resolveSensorIdentity } = require('../identity');
+
 /**
  * 创建采集帧存储服务。
  *
@@ -68,11 +70,10 @@ function createCollectionFrameStorageService(options = {}) {
    * 判断一帧是否来自 manifest Display System 运行时。
    *
    * @param {object} frame 实时帧。
-   * @returns {boolean} 是否为 canonical Display System 帧。
+   * @returns {boolean} 是否声明为 Display System 帧（身份是否 canonical 由下一步校验）。
    */
   function isDisplaySystemFrame(frame) {
-    return frame?.runtimeSource === 'display-system'
-      && Boolean(String(frame?.channelId || '').trim());
+    return frame?.runtimeSource === 'display-system';
   }
 
   /**
@@ -81,21 +82,21 @@ function createCollectionFrameStorageService(options = {}) {
    *
    * @param {object} frame 实时帧。
    * @param {string} fallbackChannel 调用方提供的输出通道兜底。
-   * @returns {object|null} 入库身份；不是 Display System 帧时返回 null。
+   * @returns {object|null} 入库身份；非 Display System 帧或身份不一致时返回 null。
    */
   function getDisplaySystemFrameIdentity(frame, fallbackChannel = 'sit') {
     if (!isDisplaySystemFrame(frame)) return null;
 
-    const channelId = String(frame.channelId).trim();
-    const displaySystemId = String(frame.displaySystemId || channelId.split(':')[0] || '').trim();
-    const prefix = displaySystemId ? `${displaySystemId}:` : '';
-    const sensorId = String(
-      frame.sensorId
-      || (prefix && channelId.startsWith(prefix) ? channelId.slice(prefix.length) : '')
-      || channelId.slice(channelId.indexOf(':') + 1)
-      || fallbackChannel,
+    const identity = resolveSensorIdentity({
+      channelId: frame.channelId,
+      displaySystemId: frame.displaySystemId,
+      sensorId: frame.sensorId,
+    });
+    if (!identity) return null;
+
+    const outputChannel = String(
+      frame.outputChannel || fallbackChannel || identity.sensorId,
     ).trim();
-    const outputChannel = String(frame.outputChannel || fallbackChannel || sensorId).trim();
     const serial = frame.serial && typeof frame.serial === 'object' ? frame.serial : {};
     const rawParser = serial.parserChannel ?? frame.parserChannel;
     const parserChannel = rawParser && typeof rawParser === 'object'
@@ -105,10 +106,8 @@ function createCollectionFrameStorageService(options = {}) {
     const timestamp = Number(frame.timestamp);
 
     return {
-      channelId,
-      displaySystemId,
-      sensorId,
-      sensorLabel: String(frame.sensorLabel || frame.label || sensorId).trim(),
+      ...identity,
+      sensorLabel: String(frame.sensorLabel || frame.label || identity.sensorId).trim(),
       sensorType: frame.sensorType || null,
       outputChannel,
       schemaVersion: Number(frame.schemaVersion) || 1,
@@ -244,7 +243,11 @@ function createCollectionFrameStorageService(options = {}) {
    * @returns {boolean} 是否已入队。
    */
   function store(channel, frameToStore) {
+    const displaySystemFrame = isDisplaySystemFrame(frameToStore);
     const displayIdentity = getDisplaySystemFrameIdentity(frameToStore, channel);
+    // display-system 是 canonical producer 身份声明。声明存在但身份不合法时必须在
+    // enqueue 之前失败，不能落回 legacy 分支把同一坏帧写进 sit/back/head 库。
+    if (displaySystemFrame && !displayIdentity) return false;
     if (displayIdentity) {
       if (frameToStore?.stored === false) return false;
       if (!canStore(displayIdentity.channelId)) return false;

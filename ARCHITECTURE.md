@@ -4,6 +4,34 @@
 
 ## 2026-08-31 多串口业务身份、动态存储、下载与回放
 
+### 多传感器稳定契约 v1（已冻结）
+
+对二开公开的多传感器边界冻结为 `shroom.multi-sensor` contract v1。权威副本随
+`@shroom/backend/contract` 发布，浏览器可用副本随
+`@shroom/frontend/contract/multiSensorStableContract` 发布；仓库门禁会逐字段比较两份内容，
+不一致直接失败。运行中的后端也会在 `GET /api/sdk/contract` 的
+`stableContracts.multiSensor` 返回名称、版本、状态与兼容策略，agent/第三方客户端不必读取
+`server.js` 推测协议。
+
+“冻结”只约束跨层接口，不冻结后端内部实现：串口解析、算法、SQLite 查询和回放实现仍可重构，
+但 manifest v3、`sensor.frame` v1、canonical identity、历史身份列、CSV 身份列与回放对齐诊断字段
+不得原地改名、删除或改变语义。新增可选字段可保持 v1；改名、删除或语义变化必须发布新 contract
+version 并提供显式适配器。`sitData/backData/headData` 等字段固定为 **input-only legacy alias**，
+只能在兼容入口读取，不能再出现在标准 WebSocket 输出。
+
+canonical identity 固定为 `channelId === displaySystemId + ':' + sensorId`，两段 ID 均不得包含冒号。
+canonical v3 writer 必须写非空 `sensors[]`，且每一路必须显式写稳定 `id`，禁止用数组下标生成长期
+身份；v1/v2 reader 仍可接收旧 `sensor` 或提前采用的 `sensors[]` 并统一归一化。
+声明为 `sensor.frame` 的消息一旦身份冲突、缺少 `payload.value`、版本未知或结构不合法，就在生产端和
+消费端 fail closed，不能降级到 legacy 猜字段。压力数组在 JSON wire 上是
+`(finite number|null)[]`；无法转换的单点显式记为 `null`，因此内存 ChannelBus 与 WebSocket 序列化
+结果一致，且不会因一个坏点丢弃整帧。
+
+冻结门禁覆盖 SDK 两份契约漂移、manifest/frame/SQLite/CSV 的版本与字段清单、producer 白名单、
+未来版本拒收、identity 一致性、回放 `sourceIndex/alignedAt/skewMs` 穿透，以及前后端 SDK 对畸形
+canonical 帧不触发正常 frame 事件。实机协议或算法可以继续扩展，但不能绕开这些入口直接增加一套
+wire/storage/download 形状。
+
 多串口不再靠数组下标或 `db/db1/db2` 猜身份。schema v3 manifest 在 `sensors[]` 的每一路
 显式声明稳定 `id`、业务 `label`、`outputChannel` 与 `stored`；canonical 主键固定为
 `{displaySystemId}:{sensorId}`。Builder 的每个串口都有“业务名称”输入，保存时直接生成 v3
@@ -19,6 +47,16 @@ SerialManager 状态，并附带 `serial.role/portId/path/baudRate/parserChannel
 manifest adapter 全程保留 `sensorLabel + channelId + serial`。canonical 帧必须带匹配的
 `displaySystemId/sensorId/channelId`，且只读 `payload.value/stages`；只有 legacy 消息才回退顶层
 `sitData/backData/headData`。
+
+`@shroom/backend/identity` 是 channel 身份的单一 CommonJS helper：channelId 必须严格等于
+`${displaySystemId}:${sensorId}`，分隔符只允许出现一次，两个 ID 片段自身不得含冒号。
+声明为 `sensor.frame` 的 producer 输入只要版本不匹配、身份冲突/缺失或显式空
+`outputChannel`，实时网关就返回 null，不允许降级到 legacy 重发为 v1。legacy 帧只能从
+合法 channelId 补齐两个 ID，或由两个一致 ID 构造 channelId；同时提供的字段冲突仍丢帧。
+入库边界对 `runtimeSource === 'display-system'` 再做一次严格校验，失败直接返回 false，
+不得落回 sit/back/head legacy 构造器。
+历史查询、CSV、回放和零点状态也复用同一 helper：非 NULL 的多冒号或冲突身份会被跳过，
+不会伪装成 legacy 数据；只有数据库中 `channel_id IS NULL` 的旧记录继续走旧三通道兼容路径。
 
 主界面只保留一个 WebSocket，由 Home 把已路由帧推给 `ManifestDisplayRenderer`；渲染器以完整
 `channelId` 为状态键，所以左手、右手、靠背、座椅乱序到达或单路重连都不会互相覆盖。Builder
@@ -37,7 +75,10 @@ Builder 编辑链同样以 `sensors[]` 为逐路真相：编辑接口返回
 label、outputChannel、stored、type、matrix、files、protocol、线序与算法。切页和保存前都会快照当前
 表单，保存提交 `definitions.sensors`，不会再把第一路配置复制给所有串口。新建多路的定义文件进入
 各自 `${sensorId}/` 子目录；编辑既有 v3 则保留原文件路径。传感器 ID 支持安全规则内的自定义
-tags 并去重，outputChannel 必须非空且跨传感器唯一。
+tags 并去重，outputChannel 必须非空且跨传感器唯一。Builder 预览也按每张卡片的 `source`
+独立选择 sensor：方向检查为每路按自身点数生成 `1..N`，实时预览读取对应
+`previewFrames[outputChannel]`，随后使用该路 matrix/coordinateMap 做变换、布局和统计，不再把
+当前页签的数据或形状套到其它卡片。
 
 SQLite `matrix` 表新增可空的 channel/display/sensor/serial 身份列，并建立只覆盖 canonical 行的
 `(date, channel_id, id)` partial index。所有 manifest 通道统一写入主库，以 `channel_id` 精确
@@ -51,8 +92,11 @@ CSV 服务先动态发现通道，再按完整 `channelId` 精确导出；manife
 与实际串口字段。服务端广播 `downloadArtifacts[]` 和缺失通道，前端按 `channelId` 合并进度，
 显示角色、全部使用过的 COM 路径、波特率与 parser，例如“左手 · glove:left-hand · COM3 →
 COM8”；旧 `downloadFiles[]` 仅作兼容，不再依据文件数组顺序推断身份。回放同样按动态通道集合
-发布，各通道长度不同时只跳过本帧缺失的通道，不会让一条短通道截断其它通道。SDK 契约同步
-升级为 schema v3，公开 `sensors[]` 与 `sensorLabel/serial` 帧字段。
+发布，并选择行数最长的通道作为回放时间锚点；其它通道按 timestamp 取最近帧，等距时取较早帧，
+避免不同帧率或丢包后仅靠数组下标造成左右手/座椅/靠背错位。旧数据没有 timestamp 时仍回退原
+下标行为，短通道缺帧只跳过该路；每帧附 `sourceIndex/alignedAt/skewMs` 便于诊断。UI 时间轴与
+播放定时器使用同一锚点，采样间隔只读取开头连续时间戳，避免大历史抽样后把播放速度算慢。
+SDK 契约同步升级为 schema v3，公开 `sensors[]` 与 `sensorLabel/serial` 帧字段。
 
 ## 2026-08-31 `backend/` 注释回改成短式（全部完成）
 
@@ -2590,7 +2634,8 @@ flowchart LR
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
-| 2026-08-31 | 多串口业务身份、动态存储、下载与回放统一 | `sensors[].label`（Builder 兼容入口为 `sensor.portLabels`）定义左手/右手/座椅/靠背；Runtime 每帧附实际串口快照；SQLite 用 nullable identity 列和 channel partial index 兼容旧库；任意 manifest 通道统一按 canonical `channelId` 入库、查询、CSV 和回放；前端按 channelId 隔离并展示 `sensorLabel + COM`，旧三通道与 `downloadFiles` 仅保留兼容。后端 57 个测试文件、客户端 39 个文件 / 421 条、前端 SDK 30 个文件 / 491 条、Electron SQLite 迁移测试、lint 与生产构建通过。 |
+| 2026-08-31 | 多传感器身份 fail-closed | 新增可发布的 `@shroom/backend/identity` CommonJS 入口，统一构造/解析/校验 `displaySystemId:sensorId`；实时 canonical 帧拒绝冲突、缺失、多冒号、空 outputChannel 与未知版本，legacy 仅允许一致补齐；Display System 坏身份在 enqueue 前失败，不再落回旧入库。SDK smoke、npm pack dry-run 及后端全量 59 个测试文件通过。 |
+| 2026-08-31 | 多传感器配置、展示、存储、下载与回放闭环 | `sensors[].label` 定义左手/右手/座椅/靠背；Builder 逐路维护并保存 `sensors[] + definitions.sensors`，每张预览/运行时卡片按自身 source 使用对应通道、matrix 和 coordinateMap；Runtime 每帧附实际串口快照；SQLite、历史查询与 CSV 按 canonical `channelId` 隔离；回放以最长通道为时间锚点，其它路按最近 timestamp 对齐并记录 skew，缺 timestamp 的旧记录仍按下标兼容。后端 57 个测试文件、客户端 41 个文件 / 436 条、前端 SDK 30 个文件 / 491 条、lint 0 error 与生产构建通过；真实多串口插拔、异帧率长时采集仍列为硬件验收。 |
 | 2026-08-31 | 注释回改成短式，全 `backend/` 收官（6 批 + 1 次补漏） | 按你的「回改」决定，把批 1–3 的多段散文压成与批 4 一致的短式（一行干什么 + 每条一行的要点 + `@param`/`@returns`）。**合计 39 个文件、+996/−1749（净 −753 行）**：A `0cfb09f` / B1 `d40713b` / C1 `55ca4a9` / D `d78bf26` / C2 `289a762` / E `212d1b0` / 补漏 `8a9d95c`，每个提交都按路径 stage（工作区始终有并行分支的未提交改动）。判据中途换过：先按「连续注释行 ≥12」，后改成量**散文行**（排除空行与 `@` 标签行），批 B1 起 >6 行、批 D 起 >10 行 —— 7–10 行那一档大多已经就是批 4 认可的形状。**6–10 行的 JSDoc 一字未动。** 机制推演不丢，移到本文档的批次小节与四张台账。原计划的批 B2 实测无事可做（唯一命中是计数器把 `@param` 续行算成散文的假阳性）。收官后 `runtime/`、`extensions/` 归零，`kernel/` 剩 16 块**刻意留在 11–16 行**（每块都有多条独立的「改了会坏但不报错」⚠️，其中授权那块属高风险类别），不要回头再压。每批验证：`node --check` 全过、acorn 逐 token 比对证明纯注释改动、57 个后端测试文件全过、覆盖率一处未降。 |
 | 2026-08-31 | `backend/` 函数级注释批 4/4（`tests/` + `legacyDataUtils.js`），四批全部完成 | `tests/` 26 个文件 44 → 0（100%），`legacyDataUtils.js` 3 → 0，全后端 85% → 91%。27 个文件 +432/-0，逐 token 代码骨架 0 处不一致，55 个测试文件全过。**风格中途按你的反馈改成短式**（一行干什么 + 一两行用法要点 + `@param`/`@returns`），批 4 的长版本已缩写、**批 1–3 已提交的长版本未回改**（待你决定是否统一）。测试注释写的是「为什么必须这样 fake」：零点扣减长度不一致时原样返回、被丢弃的清零帧不能被兜底层当旧协议帧、`FakeWebSocket` 必须异步 open、定时器 harness 必须 restore、换掉外层 store 再断言才能证明是现取而非快照、示例与预设目录守的是打包后二开路径（一个坏 JSON 只能让自己失效）。`legacyDataUtils.js` 三个名字全都名不副实：`isCar` 实为「是不是多通道」且是**硬编码数组不读 manifest**、`dedupli` 返回结构与入参不同导致前端 `timeArr` 结构随型号变、`totalToN` 已是恒等函数所以三处 `1.3` 是死参数（恢复标定会改已入库历史的显示值）。`openWeb.js` 的 71 个按原定边界仍不注释。 |
 | 2026-08-31 | `kernel/` 26 行乱码注释还原 | UTF-8 被按 GBK 读又存回造成的乱码，按用户决定单独一个提交。每处丢了两个字符（被截断汉字的第三字节 + 紧跟的空格或换行），所以先按留下的两个字节把候选缩到 64 个再按上下文定字，而不是猜词；被吞掉换行的那 5 处 JSDoc 按原结构拆回多行。检出判据由字表改为可逆性判定，全 `backend/` 复扫无残余（8 条命中已核对为假阳性）。还原出的「三端口」是过期说法，只在下方加注指向单端口的实现说明，未改写原句。 |
@@ -3161,6 +3206,7 @@ flowchart LR
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-08-31 | codeOpi | 多传感器稳定契约 v1 冻结 | 发布 `shroom.multi-sensor` contract v1 与前后端 SDK 校验器，锁定 manifest v3、`sensor.frame` v1、canonical identity、SQLite/CSV 身份列和回放诊断字段；实时、入库、查询、下载、回放、零点均复用同一身份规则，畸形/未来版本 fail closed，旧 NULL 历史和 legacy 输入保持可读。验证：后端 Electron 运行时 60/60 个测试文件、客户端 41 个文件/437 条、前端 SDK 31 个文件/502 条、SDK smoke 10+32 项、生产构建与改动文件 eslint 全过；全仓 eslint 另有 65 条既有 Hook 告警。 |
 | 2026-08-31 | codeOpi | Builder 逐传感器独立配置闭环 | Manifest v3 打开后逐路保留身份、矩阵、文件、协议、算法与定义内容；页签可分别编辑并保存，编辑 API 返回 `definitions.sensors`，新建多路使用独立子目录，自定义 sensor ID 与 outputChannel 唯一性在前端校验。 |
 | 2026-08-31 | codeOpi | 多传感器逐组件展示来源闭环 | `ManifestDisplayRenderer` 按每张 widget 的 source 选对应 sensor.matrix 与 coordinateMap；画布可选择新增组件来源并逐卡编辑，旧 source 别名兼容。前端全量 41 个文件 / 432 条测试通过，涉及文件 eslint 通过。 |
 | 2026-08-31 | codeOpi | 多串口业务身份贯穿采集、前端、下载与回放 | `sensors[].label` / `sensor.portLabels` 明确定义业务名称，`channelId` 作稳定主键，`serial` 保存每帧实际 COM；任意通道统一按 identity 列入库并动态查询、导出、回放，NULL 身份兼容旧三通道；文件和界面同时显示业务标签、channelId 与串口路径。后端/客户端/SDK/SQLite 迁移及构建验证通过。 |
@@ -3559,8 +3605,11 @@ flowchart LR
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
-| 2026-08-31 | codeOpi | 修复缺陷 / 新增功能 | Builder 新增逐传感器页签与可靠草稿状态，保存逐路 `sensors[] + definitions.sensors`，保留异构 matrix/files/protocol/algorithm/stored/label/outputChannel；编辑接口补全每路定义文件读取，新建多路采用 sensor 子目录，支持安全自定义 ID 并校验 outputChannel 唯一。 |
-| 2026-08-31 | codeOpi | 修复缺陷 / 新增功能 | 修复 manifest 多传感器 widget 共用第一路物理坐标布局的问题；新增逐 sensor 几何解析与坐标/矩阵形状校验，画布配置器支持新增默认数据源和已放置卡片 source 编辑。 |
+| 2026-08-31 | codeOpi | 契约冻结 / 缺陷修复 | 冻结 `shroom.multi-sensor` contract v1：前后端 SDK 随包发布同内容契约并以漂移测试对账，后端 API 暴露契约版本与兼容策略；manifest v3 强制显式 `sensors[].id`，canonical 帧/身份/数值数组严格校验，坏帧触发 `invalidFrame` 而不降级；SQLite、CSV、回放、零点统一 canonical identity，回放诊断字段完整穿透。完整验证见项目进度同日记录。 |
+| 2026-08-31 | codeOpi | 缺陷修复 / 契约强化 | 新增 `@shroom/backend/identity` 可发布 CommonJS helper，严格锁定 `channelId === displaySystemId:sensorId` 且禁止冒号歧义；`sensor.frame` 冲突/缺失身份、空 outputChannel 或未知版本直接丢帧，legacy 仅从一致字段补齐；display-system 入库前二次校验，坏身份不再绕回 legacy 入库。 |
+| 2026-08-31 | codeOpi | 修复缺陷 / 契约强化 | 多通道历史回放改用最长通道的 timestamp 时间轴，较短或不同帧率通道取最近时间帧（等距取较早帧），并输出 `sourceIndex/alignedAt/skewMs`；无 timestamp 的旧记录继续按下标回放，UI 时间轴与播放间隔检测使用同一锚点。 |
+| 2026-08-31 | codeOpi | 修复缺陷 / 新增功能 | Builder 新增逐传感器页签与可靠草稿状态，保存逐路 `sensors[] + definitions.sensors`，保留异构 matrix/files/protocol/algorithm/stored/label/outputChannel；编辑接口补全每路定义文件读取，新建多路采用 sensor 子目录，支持安全自定义 ID 并校验 outputChannel 唯一。预览按 widget.source 分别读取各路实时帧或生成方向测试帧，并使用该路 matrix/coordinateMap。 |
+| 2026-08-31 | codeOpi | 修复缺陷 / 新增功能 | 修复 manifest 多传感器 widget 共用第一路物理坐标布局和 3D/Canvas SDK 渲染器继续复用第一路 params 的问题；新增逐 sensor 几何解析、坐标/矩阵形状校验与逐卡片 renderer 尺寸/points 覆写，画布配置器支持新增默认数据源和已放置卡片 source 编辑。 |
 | 2026-08-31 | codeOpi | 缺陷修复 / 契约强化 | 多串口统一使用完整 `channelId`，业务名称由 `sensors[].label`（旧 Builder 为 `sensor.portLabels`）定义；实时帧携带实际串口快照，SQLite/历史查询/CSV/回放不再按数组或固定三库猜身份；前端按通道隔离并展示业务标签、channelId、COM 路径，同时兼容旧顶层字段和 `downloadFiles`。 |
 | 2026-08-31 | codeOpi | 优化重构 | 注释回改成短式，全 `backend/` 收官：6 批 + 1 次补漏共 **39 个文件 +996/−1749（净 −753 行）**，把批 1–3 的多段散文压成「一行干什么 + 每条一行的要点 + `@param`/`@returns`」。提交：A `0cfb09f` / B1 `d40713b` / C1 `55ca4a9` / D `d78bf26` / C2 `289a762` / E `212d1b0` / 补漏 `8a9d95c`，全部按路径 stage。判据从「连续注释行 ≥12」换成量散文行（B1 起 >6，D 起 >10），6–10 行的 JSDoc 一字未动；批 B2 实测为空。`kernel/` 剩 16 块刻意留在 11–16 行。纯注释改动（acorn 逐 token 比对 0 处不一致），57 个后端测试文件全过，覆盖率一处未降。 |
 | 2026-08-31 | codeOpi | 文档更新 | `backend/tests/` 26 个文件与 `backend/compatibility/legacyDataUtils.js` 补齐函数注释（44+3 → 0），全后端覆盖率 85% → 91%，`backend/` 函数级注释四批全部完成。27 个文件 +432/-0 纯注释，逐 token 代码骨架不变，55 个测试文件全过。注释风格按用户反馈改为短式（一行干什么 + 一两行用法要点 + `@param`/`@returns`）；批 1–3 已提交的长版本未回改。 |

@@ -6,8 +6,18 @@
  */
 const { createHash } = require('crypto');
 const { createObjectCsvStringifier } = require('csv-writer');
+const { multiSensorStableContract } = require('@shroom/backend/contract');
+const {
+  buildSensorChannelId,
+  parseSensorChannelId,
+  resolveSensorIdentity,
+} = require('@shroom/backend/identity');
 
 const CSV_UTF8_BOM = '\ufeff';
+const CSV_COLUMN_IDS = Object.freeze([
+  ...multiSensorStableContract.csv.legacyColumnIds,
+  ...multiSensorStableContract.csv.identityColumnIds,
+]);
 const DATABASE_SLOTS = Object.freeze([
   { key: 'db', legacyChannel: 'sit' },
   { key: 'db1', legacyChannel: 'back' },
@@ -52,18 +62,6 @@ function sanitizeFileNameSegment(value, fallback = 'channel') {
 
 function shortChannelHash(channelId) {
   return createHash('sha256').update(String(channelId || '')).digest('hex').slice(0, 8);
-}
-
-function splitChannelId(channelId, fallbackDisplay = 'legacy', fallbackSensor = 'sensor') {
-  const value = String(channelId || '').trim();
-  const separator = value.indexOf(':');
-  if (separator > 0 && separator < value.length - 1) {
-    return {
-      displaySystemId: value.slice(0, separator),
-      sensorId: value.slice(separator + 1),
-    };
-  }
-  return { displaySystemId: fallbackDisplay, sensorId: fallbackSensor };
 }
 
 function validateWritableDirectory({ fs, path, targetDir }) {
@@ -157,26 +155,7 @@ function createCsvDownloadService({
   }
 
   function buildHeaders(csvTitle) {
-    return [
-      { id: 'index', title: title(csvTitle, 'index', 'index') },
-      { id: 'max', title: title(csvTitle, 'max', 'max') },
-      { id: 'time', title: title(csvTitle, 'time', 'time') },
-      { id: 'pressureArea', title: title(csvTitle, 'pressureArea', 'pressureArea') },
-      { id: 'pressure', title: title(csvTitle, 'pressure', 'pressure') },
-      { id: 'realData', title: title(csvTitle, 'realData', 'realData') },
-      { id: 'channelId', title: title(csvTitle, 'channelId', 'channelId') },
-      { id: 'displaySystemId', title: title(csvTitle, 'displaySystemId', 'displaySystemId') },
-      { id: 'sensorId', title: title(csvTitle, 'sensorId', 'sensorId') },
-      { id: 'sensorLabel', title: title(csvTitle, 'sensorLabel', 'sensorLabel') },
-      { id: 'sensorType', title: title(csvTitle, 'sensorType', 'sensorType') },
-      { id: 'outputChannel', title: title(csvTitle, 'outputChannel', 'outputChannel') },
-      { id: 'timestamp', title: title(csvTitle, 'timestamp', 'timestamp') },
-      { id: 'schemaVersion', title: title(csvTitle, 'schemaVersion', 'schemaVersion') },
-      { id: 'serialRole', title: title(csvTitle, 'serialRole', 'serialRole') },
-      { id: 'serialPortPath', title: title(csvTitle, 'serialPortPath', 'serialPortPath') },
-      { id: 'baudRate', title: title(csvTitle, 'baudRate', 'baudRate') },
-      { id: 'parserChannel', title: title(csvTitle, 'parserChannel', 'parserChannel') },
-    ];
+    return CSV_COLUMN_IDS.map((id) => ({ id, title: title(csvTitle, id, id) }));
   }
 
   function firstPresent(...values) {
@@ -196,15 +175,28 @@ function createCsvDownloadService({
         : stored.metadata?.serial && typeof stored.metadata.serial === 'object'
           ? stored.metadata.serial
           : {};
-    return {
-      channelId: String(descriptor.channelId || ''),
-      displaySystemId: String(firstPresent(
+    const declaredChannelIds = [
+      row?.channel_id,
+      row?.channelId,
+      stored.channelId,
+      identity.channelId,
+    ].filter((value) => value !== undefined && value !== null && value !== '');
+    if (declaredChannelIds.some((channelId) => channelId !== descriptor.channelId)) return null;
+
+    const stableIdentity = resolveSensorIdentity({
+      channelId: descriptor.channelId,
+      displaySystemId: firstPresent(
         row?.display_system_id, row?.displaySystemId, stored.displaySystemId,
         identity.displaySystemId, descriptor.displaySystemId,
-      ) || ''),
-      sensorId: String(firstPresent(
+      ),
+      sensorId: firstPresent(
         row?.sensor_id, row?.sensorId, stored.sensorId, identity.sensorId, descriptor.sensorId,
-      ) || ''),
+      ),
+    }, { allowDerived: true });
+    if (!stableIdentity || stableIdentity.channelId !== descriptor.channelId) return null;
+
+    return {
+      ...stableIdentity,
       sensorLabel: String(firstPresent(
         row?.sensor_label, row?.sensorLabel, stored.sensorLabel,
         identity.sensorLabel, descriptor.sensorLabel,
@@ -310,6 +302,7 @@ function createCsvDownloadService({
       const row = rows[i];
       const storedData = parseStoredData(row);
       const identity = resolveRecordIdentity(row, storedData, descriptor);
+      if (!identity) continue;
       const rowSensorType = identity.sensorType || descriptor.sensorType || sensorType;
       const data = normalizeHistoryPressureData(
         rowForPressureNormalization(row, storedData, descriptor),
@@ -349,16 +342,26 @@ function createCsvDownloadService({
   }
 
   function normalizeDescriptor(descriptor, source) {
-    const channelId = String(descriptor?.channelId || '').trim();
-    if (!channelId) return null;
-    const parsed = splitChannelId(channelId);
-    return {
+    const channelId = typeof descriptor?.channelId === 'string'
+      ? descriptor.channelId.trim()
+      : '';
+    const parsed = parseSensorChannelId(channelId);
+    if (!parsed || parsed.channelId !== channelId) return null;
+    const identity = resolveSensorIdentity({
       channelId,
-      displaySystemId: String(descriptor.displaySystemId || parsed.displaySystemId),
-      sensorId: String(descriptor.sensorId || parsed.sensorId),
-      sensorLabel: String(descriptor.sensorLabel || descriptor.sensorId || parsed.sensorId),
+      ...(descriptor.displaySystemId == null || descriptor.displaySystemId === ''
+        ? {}
+        : { displaySystemId: descriptor.displaySystemId }),
+      ...(descriptor.sensorId == null || descriptor.sensorId === ''
+        ? {}
+        : { sensorId: descriptor.sensorId }),
+    }, { allowDerived: true });
+    if (!identity || identity.channelId !== channelId) return null;
+    return {
+      ...identity,
+      sensorLabel: String(descriptor.sensorLabel || descriptor.sensorId || identity.sensorId),
       sensorType: String(descriptor.sensorType || ''),
-      outputChannel: String(descriptor.outputChannel || parsed.sensorId),
+      outputChannel: String(descriptor.outputChannel || identity.sensorId),
       schemaVersion: descriptor.schemaVersion ?? 1,
       count: Number(descriptor.count || 0),
       serialRole: String(descriptor.serialRole || ''),
@@ -378,7 +381,7 @@ function createCsvDownloadService({
     const displaySystemId = normalizeLegacyIdentityPart(runtime.file, 'legacy');
     const sensorId = normalizeLegacyIdentityPart(source.legacyChannel, 'sensor');
     return {
-      channelId: `${displaySystemId}:${sensorId}`,
+      channelId: buildSensorChannelId(displaySystemId, sensorId),
       displaySystemId,
       sensorId,
       sensorLabel: source.legacyChannel,
@@ -662,6 +665,7 @@ function createCsvDownloadService({
 }
 
 module.exports = {
+  CSV_COLUMN_IDS,
   createCsvDownloadService,
   parseStoredData,
   sanitizeFileNameSegment,

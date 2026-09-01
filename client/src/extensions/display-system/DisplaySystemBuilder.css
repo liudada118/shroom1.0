@@ -1227,6 +1227,71 @@
   width: 100%;
 }
 
+.builder-sensor-tabs {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  margin: 18px 0 0;
+  padding: 8px;
+  overflow-x: auto;
+  background: #101719;
+  border: 1px solid var(--builder-border-soft);
+  border-radius: 6px;
+}
+
+.builder-sensor-tabs > span {
+  display: grid;
+  flex: none;
+  padding: 0 8px;
+  color: var(--builder-muted);
+  font-size: 12px;
+  place-items: center;
+}
+
+.builder-sensor-tabs > button {
+  display: grid;
+  min-width: 132px;
+  gap: 3px;
+  padding: 8px 10px;
+  color: #b9c7cc;
+  text-align: left;
+  background: #151f23;
+  border: 1px solid #2d3a3f;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.builder-sensor-tabs > button:hover,
+.builder-sensor-tabs > button.is-active {
+  color: #eafffc;
+  background: #17302f;
+  border-color: var(--builder-primary);
+}
+
+.builder-sensor-tabs > button:focus-visible {
+  outline: 2px solid #7de3d8;
+  outline-offset: 2px;
+}
+
+.builder-sensor-tabs > button strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.builder-sensor-tabs > button small {
+  overflow: hidden;
+  color: #82949a;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.builder-sensor-editor {
+  min-width: 0;
+}
+
 .configuration-summary {
   position: sticky;
   top: 108px;

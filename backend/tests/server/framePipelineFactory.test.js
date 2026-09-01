@@ -58,6 +58,7 @@ collecting = true;
 const displayFrame = {
   displaySystemId: 'custom-seat',
   channelId: 'custom-seat:sit',
+  sensorId: 'sit',
   runtimeSource: 'display-system',
   outputChannel: 'sit',
   sitData: [10, 20],

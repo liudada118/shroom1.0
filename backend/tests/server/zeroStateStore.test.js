@@ -87,6 +87,16 @@ assert.deepStrictEqual(store.capture('system-a:empty'), {
   affectedChannelIds: [],
   skipped: [{ channelId: 'system-a:empty', reason: 'no-source-data' }],
 });
+assert.deepStrictEqual(store.capture([
+  'system-a:seat:extra',
+  ' system-a:seat',
+]), {
+  affectedChannelIds: [],
+  skipped: [
+    { channelId: 'system-a:seat:extra', reason: 'invalid-channel-id' },
+    { channelId: ' system-a:seat', reason: 'invalid-channel-id' },
+  ],
+}, 'zero state must use the shared strict canonical channelId parser');
 
 assert.deepStrictEqual(store.getBaseline('system-a:seat', 'raw'), [1, 2]);
 assert.deepStrictEqual(store.getBaseline('system-a:seat', 'processed'), [2, 5]);

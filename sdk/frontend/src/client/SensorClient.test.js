@@ -128,4 +128,40 @@ describe('SensorClient canonical frame events', () => {
     expect(legacyChannelListener).toHaveBeenCalledTimes(1);
     expect(canonicalListener).toHaveBeenCalledWith(envelope);
   });
+
+  it('routes malformed and future declared frames only to invalidFrame', () => {
+    const client = new SensorClient({ WebSocketImpl: FakeWebSocket });
+    const frameListener = vi.fn();
+    const channelListener = vi.fn();
+    const canonicalListener = vi.fn();
+    const invalidFrameListener = vi.fn();
+    client.on('frame', frameListener);
+    client.on('frame:demo:sit', channelListener);
+    client.on('sensor.frame', canonicalListener);
+    client.on('invalidFrame', invalidFrameListener);
+
+    const baseFrame = {
+      type: 'sensor.frame',
+      schemaVersion: 1,
+      channelId: 'demo:sit',
+      displaySystemId: 'demo',
+      sensorId: 'sit',
+      outputChannel: 'sit',
+      payload: { value: [1, null, 3] },
+      sitData: [99],
+    };
+    const invalidFrames = [
+      { ...baseFrame, schemaVersion: 2 },
+      { ...baseFrame, payload: { stages: { processed: [1, 2] } } },
+      { ...baseFrame, payload: { value: [1, '2'] } },
+      { ...baseFrame, channelId: 'other:sit' },
+    ];
+
+    invalidFrames.forEach((frame) => client.handleMessage(JSON.stringify(frame)));
+
+    expect(invalidFrameListener.mock.calls.map(([value]) => value)).toEqual(invalidFrames);
+    expect(frameListener).not.toHaveBeenCalled();
+    expect(channelListener).not.toHaveBeenCalled();
+    expect(canonicalListener).not.toHaveBeenCalled();
+  });
 });

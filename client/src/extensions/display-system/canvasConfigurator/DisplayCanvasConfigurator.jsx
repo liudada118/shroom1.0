@@ -8,11 +8,22 @@ import {
   moveCanvasWidget,
   partSurface,
   removeCanvasWidget,
+  updateCanvasWidgetSource,
 } from './canvasParts';
 import { DEFAULT_COLORMAP_ID, colormapPreviewCss } from '../colormaps';
 import './canvasConfigurator.css';
 
 const EMPTY_CANVAS = { colormap: { id: DEFAULT_COLORMAP_ID }, overlays: [], widgets: [] };
+
+function normalizeSourceOptions(sourceOptions) {
+  const used = new Set();
+  return (Array.isArray(sourceOptions) ? sourceOptions : []).flatMap((option) => {
+    const value = String(option?.value ?? option?.id ?? '').trim();
+    if (!value || used.has(value)) return [];
+    used.add(value);
+    return [{ value, label: String(option?.label || value) }];
+  });
+}
 
 /**
  * 从拖放事件里取出零件描述。自定义 MIME 优先，取不到再退回 text/plain。
@@ -43,6 +54,9 @@ function readPartPayload(event) {
  * @param {(next: object) => void} props.onChange 配置变化回调。
  * @param {React.ReactNode} props.children 画布内容，由调用方渲染真实数据。
  * @param {Array<{id: string, label: string, type?: string}>} [props.renderers] 可选渲染器目录。
+ * @param {Array<{value: string, label: string}>} [props.sourceOptions] widget 可选数据源。
+ * @param {string} [props.defaultSource] 新增 widget 默认绑定的数据源。
+ * @param {(source: string) => string} [props.resolveSourceValue] 把旧 source 别名解析成 option value。
  * @param {string[]} [props.colormapIds] 后端 catalog 允许的配色 id。
  * @param {React.ReactNode} [props.emptyState] 无数据时显示的空状态。
  * @param {boolean} [props.readOnly] 只读模式，禁止一切修改。
@@ -74,6 +88,9 @@ export default function DisplayCanvasConfigurator({
   onChange,
   children,
   renderers = [],
+  sourceOptions = null,
+  defaultSource = '',
+  resolveSourceValue = null,
   colormapIds = null,
   emptyState = null,
   readOnly = false,
@@ -98,6 +115,23 @@ export default function DisplayCanvasConfigurator({
   const canvas = value || EMPTY_CANVAS;
   const chart = chartValue || EMPTY_CANVAS;
   const isOverlay = variant === 'overlay';
+  const widgetSourceOptions = useMemo(
+    () => normalizeSourceOptions(sourceOptions),
+    [sourceOptions],
+  );
+  const resolveConfiguredSource = useCallback((source) => {
+    const resolved = typeof resolveSourceValue === 'function'
+      ? resolveSourceValue(source)
+      : source;
+    return String(resolved || source || '').trim();
+  }, [resolveSourceValue]);
+  const preferredNewWidgetSource = String(
+    defaultSource
+    || widgetSourceOptions[0]?.value
+    || resolveConfiguredSource(canvas.widgets?.[0]?.source)
+    || 'sitData',
+  ).trim();
+  const [newWidgetSource, setNewWidgetSource] = useState(preferredNewWidgetSource);
   const [dragOver, setDragOver] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   // overlay 形态默认收起：展开的栏会盖住 3D 场景左下角的最大值读数
@@ -109,6 +143,14 @@ export default function DisplayCanvasConfigurator({
     }),
     [chartOverlayIds, chartTemplates, colormapIds, overlayIds, renderers],
   );
+
+  useEffect(() => {
+    setNewWidgetSource((current) => {
+      const isCurrentAvailable = widgetSourceOptions.length === 0
+        || widgetSourceOptions.some((option) => option.value === current);
+      return isCurrentAvailable && current ? current : preferredNewWidgetSource;
+    });
+  }, [preferredNewWidgetSource, widgetSourceOptions]);
 
   // overlay 形态的拖放区盖住整个视口，平时必须 pointer-events: none，
   // 否则整个界面都点不动。只有真的在拖零件时才让它接管事件，所以在
@@ -151,8 +193,8 @@ export default function DisplayCanvasConfigurator({
       if (next !== chart) onChartChange(next);
       return;
     }
-    emit(applySurfacePart(canvas, part));
-  }, [canvas, chart, emit, onChartChange, onChartWidgetAdd, readOnly]);
+    emit(applySurfacePart(canvas, part, { defaultSource: newWidgetSource }));
+  }, [canvas, chart, emit, newWidgetSource, onChartChange, onChartWidgetAdd, readOnly]);
 
   const isPartActive = useCallback((part) => {
     const surface = partSurface(part);
@@ -197,6 +239,11 @@ export default function DisplayCanvasConfigurator({
   const moveWidget = useCallback((sourceId, targetId) => {
     if (readOnly) return;
     emit(moveCanvasWidget(canvas, sourceId, targetId));
+  }, [canvas, emit, readOnly]);
+
+  const updateWidgetSource = useCallback((widgetId, source) => {
+    if (readOnly) return;
+    emit(updateCanvasWidgetSource(canvas, widgetId, source));
   }, [canvas, emit, readOnly]);
 
   const handlePlacedDragStart = (widget) => (event) => {
@@ -310,9 +357,24 @@ export default function DisplayCanvasConfigurator({
         {hasCanvasContent || !emptyState ? children : emptyState}
         {dragOver ? <div className="canvas-drop-hint" aria-hidden="true">松手放到画布上</div> : null}
       </div>
-      {(canvas.widgets?.length ?? 0) > 0 ? (
+      {(canvas.widgets?.length ?? 0) > 0 || widgetSourceOptions.length ? (
         <div className="canvas-widget-chips">
           <span className="canvas-widget-chips-label">{title}</span>
+          {widgetSourceOptions.length ? (
+            <label className="canvas-new-widget-source">
+              <span>新增组件数据源</span>
+              <select
+                aria-label="新增组件数据源"
+                value={newWidgetSource}
+                disabled={readOnly}
+                onChange={(event) => setNewWidgetSource(event.target.value)}
+              >
+                {widgetSourceOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           {canvas.widgets.map((widget) => (
             <span
               className="canvas-widget-chip"
@@ -330,7 +392,33 @@ export default function DisplayCanvasConfigurator({
                 moveWidget(payload.id, widget.id);
               }}
             >
-              {widget.label || widget.id}
+              <span>{widget.label || widget.id}</span>
+              {widgetSourceOptions.length ? (() => {
+                const sourceValue = resolveConfiguredSource(widget.source);
+                const sourceIsKnown = widgetSourceOptions
+                  .some((option) => option.value === sourceValue);
+                return (
+                  <label className="canvas-widget-source">
+                    <span>数据源</span>
+                    <select
+                      aria-label={`${widget.label || widget.id} 数据源`}
+                      value={sourceValue}
+                      disabled={readOnly}
+                      draggable={false}
+                      onMouseDown={(event) => event.stopPropagation()}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={(event) => updateWidgetSource(widget.id, event.target.value)}
+                    >
+                      {!sourceIsKnown && sourceValue ? (
+                        <option value={sourceValue}>{sourceValue}</option>
+                      ) : null}
+                      {widgetSourceOptions.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                );
+              })() : null}
               {readOnly ? null : (
                 <button type="button" aria-label={`移除 ${widget.label || widget.id}`} onClick={() => removeWidget(widget.id)}>
                   ×

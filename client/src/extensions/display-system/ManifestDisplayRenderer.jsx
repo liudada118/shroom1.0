@@ -15,12 +15,8 @@ import {
   isDataRendererType,
   resolveDisplayProfile,
 } from './displayProfileRuntime';
-import { buildCoordinatePointLayout } from './coordinatePointLayout';
 import { readDisplaySelection, writeDisplaySelection } from './displayProfileStorage';
-import {
-  applyMatrixTransform,
-  transformCoordinateMap,
-} from '../../displays/matrixTransform';
+import { applyMatrixTransform } from '../../displays/matrixTransform';
 import RendererHost from '../../renderers/RendererHost.jsx';
 import MatrixWidget from './widgets/MatrixWidget.jsx';
 import CoordinatePointWidget from './widgets/CoordinatePointWidget.jsx';
@@ -37,6 +33,12 @@ import {
   getManifestChannelFrame,
   reduceManifestChannelFrames,
 } from './manifestChannelState.js';
+import {
+  buildManifestWidgetRendererParams,
+  buildManifestWidgetSourceOptions,
+  resolveManifestWidgetGeometry,
+  resolveManifestWidgetSourceValue,
+} from './manifestWidgetGeometry.js';
 import './ManifestDisplayRenderer.css';
 
 const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
@@ -78,16 +80,13 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
       || { type: 'none' },
     [definition?.matrixTransform, definition?.page?.matrixTransform],
   );
-  const coordinateMap = useMemo(
-    () => transformCoordinateMap(
-      definition?.sourceCoordinateMap || definition?.coordinateMap,
-      matrixTransform,
-    ),
-    [definition?.coordinateMap, definition?.sourceCoordinateMap, matrixTransform],
+  const widgetSourceOptions = useMemo(
+    () => buildManifestWidgetSourceOptions(sensors),
+    [sensors],
   );
-  const coordinatePointLayout = useMemo(
-    () => buildCoordinatePointLayout(coordinateMap),
-    [coordinateMap],
+  const resolveWidgetSourceValue = useCallback(
+    (source) => resolveManifestWidgetSourceValue(source, sensors),
+    [sensors],
   );
   const sidebar = definition?.page?.sidebar;
   const columns = Number(definition?.page?.layout?.columns || 12);
@@ -129,7 +128,13 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
     return activeProfile.canvasWidgets
       .filter((widget) => activeProfile.visibleWidgetIds.has(widget.id))
       .map((widget) => {
-      const sourceSensor = getManifestSourceSensor(widget.source, sensors);
+      const geometry = resolveManifestWidgetGeometry({
+        source: widget.source,
+        sensors,
+        definition,
+        matrixTransform,
+      });
+      const { sourceSensor } = geometry;
       const channel = getManifestSourceChannel(widget.source, sensors);
       const channelId = getManifestSourceChannelId(
         widget.source,
@@ -140,20 +145,31 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
       const values = channelFrame?.renderValues || [];
       // 多传感器系统每一路矩阵可能都不一样，widget 要用自己那一路的矩阵，
       // 否则第二路会被按第一路的行列数摆放。找不到就沿用顶层矩阵。
-      const channelMatrix = sourceSensor?.matrix || matrix;
+      const channelMatrix = geometry.sourceMatrix || matrix;
       const widgetType = isDataRendererType(widget.type)
         ? activeProfile.renderer?.type || widget.type
         : widget.type;
-      const visualizedValues = isDataRendererType(widgetType)
+      const usesProfileDataRenderer = isDataRendererType(widget.type);
+      const visualizedValues = usesProfileDataRenderer
         ? applyVisualizationAlgorithm(values, activeProfile.algorithm, channelMatrix)
         : values;
-      const transformed = isDataRendererType(widgetType)
+      const transformed = usesProfileDataRenderer
         ? applyMatrixTransform(visualizedValues, channelMatrix, matrixTransform)
         : { values: visualizedValues, matrix: channelMatrix };
       return {
         widget: { ...widget, type: widgetType },
         values: transformed.values,
         matrix: transformed.matrix,
+        coordinateMap: geometry.coordinateMap,
+        coordinatePointLayout: geometry.coordinatePointLayout,
+        rendererParams: buildManifestWidgetRendererParams({
+          rendererId: widgetType,
+          params: activeProfile.renderer?.params,
+          matrix: transformed.matrix,
+          coordinateMap: usesProfileDataRenderer
+            ? geometry.coordinateMap
+            : geometry.sourceCoordinateMap,
+        }),
         metrics: calculatePressureMetrics(values),
         channel,
         channelId,
@@ -165,7 +181,7 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
         ),
       };
     });
-  }, [activeProfile, channelFrames, definition?.displaySystemId, matrix, matrixTransform, sensors]);
+  }, [activeProfile, channelFrames, definition, matrix, matrixTransform, sensors]);
 
   const updateCanvas = useCallback((canvas) => {
     updateSelection({ ...selection, profileId: activeProfile.profileId, canvas });
@@ -269,12 +285,18 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
         value={activeProfile.canvas}
         onChange={updateCanvas}
         renderers={profileModel.renderers}
+        sourceOptions={widgetSourceOptions}
+        defaultSource={widgetSourceOptions[0]?.value}
+        resolveSourceValue={resolveWidgetSourceValue}
       >
         <div className="manifest-widget-grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
           {widgetModels.map(({
             widget,
             values,
             matrix: widgetMatrix,
+            coordinateMap: widgetCoordinateMap,
+            coordinatePointLayout: widgetCoordinatePointLayout,
+            rendererParams: widgetRendererParams,
             metrics,
             channelId,
             label,
@@ -283,12 +305,12 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
               return <StatsWidget key={widget.id} label={label} metrics={metrics} columnSpan={widget.columnSpan} />;
             }
             if (['heatmap', 'matrix', 'raw2d'].includes(widget.type)) {
-              if (coordinatePointLayout) {
+              if (widgetCoordinatePointLayout) {
                 return (
                   <CoordinatePointWidget
                     key={widget.id}
                     label={label}
-                    layout={coordinatePointLayout}
+                    layout={widgetCoordinatePointLayout}
                     values={values}
                     showValues={widget.type !== 'heatmap'}
                     columnSpan={widget.columnSpan}
@@ -321,9 +343,10 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
                 <RendererHost
                   rendererId={widget.type}
                   label={label}
-                  params={activeProfile.renderer?.params}
+                  params={widgetRendererParams}
                   values={values}
                   channel={channelId || getManifestSourceChannel(widget.source, sensors)}
+                  coordinateMap={widgetCoordinateMap}
                   local
                 />
               </div>

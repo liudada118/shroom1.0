@@ -1,5 +1,8 @@
-export const SENSOR_FRAME_TYPE = 'sensor.frame';
-export const SENSOR_FRAME_SCHEMA_VERSION = 1;
+import sensorFrameV1Contract from '../contract/sensorFrameV1.cjs';
+
+export const SENSOR_FRAME_TYPE = sensorFrameV1Contract.SENSOR_FRAME_TYPE;
+export const SENSOR_FRAME_SCHEMA_VERSION = sensorFrameV1Contract.SENSOR_FRAME_SCHEMA_VERSION;
+export const isDeclaredSensorFrame = sensorFrameV1Contract.isDeclaredSensorFrame;
 
 const CHANNEL_KEYS = {
   sitData: 'sit',
@@ -145,11 +148,7 @@ function resolveSensorId(frame = {}) {
  * 静默解释成当前结构。
  */
 export function isSensorFrameEnvelope(value) {
-  return isObject(value)
-    && value.type === SENSOR_FRAME_TYPE
-    && Number(value.schemaVersion ?? value.version) === SENSOR_FRAME_SCHEMA_VERSION
-    && typeof value.channelId === 'string'
-    && isObject(value.payload);
+  return sensorFrameV1Contract.isSensorFrameV1Envelope(value);
 }
 
 export function normalizeFramePayload(payload = {}) {
@@ -317,6 +316,17 @@ export function normalizeIncomingMessage(message = {}) {
       type: SENSOR_FRAME_TYPE,
       payload: message.payload,
       frames: [normalizeSensorFrameEnvelope(message)],
+      raw: message,
+    };
+  }
+
+  // 已声明 canonical 类型的消息只能按对应版本解释。身份、payload 或版本无效时
+  // 保留原消息供 invalidFrame 诊断，但绝不降级读取顶层 legacy 字段。
+  if (isDeclaredSensorFrame(message)) {
+    return {
+      type: SENSOR_FRAME_TYPE,
+      payload: message.payload || message,
+      frames: [],
       raw: message,
     };
   }

@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildBuilderPortViews,
+  buildBuilderSensorFilePath,
+  buildBuilderSensorDrafts,
   buildBuilderSensorPlan,
   buildBuilderSensors,
   ensureBuilderPortWidgets,
+  getInvalidBuilderSensorIds,
+  normalizeBuilderSensorIds,
 } from './builderMultiSensor.js';
 
 describe('display system builder multi-sensor mapping', () => {
@@ -107,5 +111,111 @@ describe('display system builder multi-sensor mapping', () => {
       'heatmap-seat',
     ]);
     expect(views.map((view) => view.source)).toEqual(plan.map((sensor) => sensor.source));
+  });
+
+  it('normalizes custom tag ids, deduplicates them, and reports unsafe ids', () => {
+    expect(normalizeBuilderSensorIds([
+      ' left-hand ',
+      'right_hand',
+      'left-hand',
+      'seat.2',
+      '../escape',
+      '中文',
+      '',
+    ], { fallback: false })).toEqual(['left-hand', 'right_hand', 'seat.2']);
+    expect(getInvalidBuilderSensorIds(['left-hand', '../escape', '中文', '../escape']))
+      .toEqual(['../escape', '中文']);
+    expect(buildBuilderSensorFilePath('left-hand', 'point-order.json', { multiple: true }))
+      .toBe('left-hand/point-order.json');
+    expect(buildBuilderSensorFilePath('left-hand', 'point-order.json')).toBe('point-order.json');
+  });
+
+  it('treats outputChannel aliases as covered widget sources', () => {
+    const plan = buildBuilderSensorPlan({
+      ports: ['left', 'seat'],
+      sensors: [
+        { id: 'left', outputChannel: 'leftPressure' },
+        { id: 'seat', outputChannel: 'seatPressure' },
+      ],
+    });
+    const widgets = ensureBuilderPortWidgets({
+      sensorPlan: plan,
+      widgets: [{ id: 'seat-card', type: 'heatmap', source: 'seatPressure' }],
+    });
+    expect(widgets.find((widget) => widget.id === 'seat-card')?.source).toBe('seatPressure');
+    expect(widgets.filter((widget) => widget.type !== 'pressureStats')).toHaveLength(2);
+  });
+
+  it('round-trips heterogeneous v3 sensor fields without projecting the first sensor over the rest', () => {
+    const editor = {
+      manifest: {
+        schemaVersion: 3,
+        id: 'heterogeneous',
+        sensors: [
+          {
+            id: 'left-hand',
+            label: '左手',
+            outputChannel: 'leftPressure',
+            type: 'glove',
+            matrix: { rows: 2, cols: 2 },
+            files: { lineOrder: 'left/line.json', pointOrder: 'left/points.json' },
+            protocol: {
+              baudRate: 921600,
+              framing: { type: 'fixedLength', frameLength: 4 },
+              decoding: { valueType: 'uint8', valueCount: 4 },
+            },
+            algorithm: { type: 'none' },
+            stored: true,
+          },
+          {
+            id: 'seat',
+            label: '座椅',
+            outputChannel: 'seatPressure',
+            type: 'seat',
+            matrix: { rows: 1, cols: 3 },
+            files: { lineOrder: 'seat/line.json', pointOrder: 'seat/points.json' },
+            protocol: {
+              baudRate: 115200,
+              framing: { type: 'delimiter', delimiter: [170, 85] },
+              decoding: { valueType: 'uint16le', byteOffset: 2, valueCount: 3 },
+            },
+            algorithm: { type: 'json', dataFile: 'seat/algorithm.json', timeoutMs: 250 },
+            stored: false,
+          },
+        ],
+      },
+      definitions: {
+        lineOrder: { order: [1, 2, 3, 4] },
+        sensors: {
+          'left-hand': {
+            lineOrder: { order: [1, 2, 3, 4] },
+            pointOrder: { matrix: { rows: 2, cols: 2 }, points: [[0, 0], [0, 1], [1, 0], [1, 1]] },
+          },
+          seat: {
+            lineOrder: { order: [3, 2, 1] },
+            pointOrder: { matrix: { rows: 1, cols: 3 }, points: [[0, 0], [0, 1], [0, 2]] },
+            algorithmData: { scale: 2 },
+          },
+        },
+      },
+    };
+    const drafts = buildBuilderSensorDrafts(editor);
+    const sensors = buildBuilderSensors({
+      displaySystemId: editor.manifest.id,
+      ports: drafts.map((draft) => draft.id),
+      portLabels: Object.fromEntries(drafts.map((draft) => [draft.id, draft.sensor.label])),
+      sensorDrafts: drafts,
+    });
+
+    expect(sensors).toEqual(editor.manifest.sensors);
+    expect(drafts[1].definitions).toEqual(editor.definitions.sensors.seat);
+    expect(buildBuilderSensorPlan({
+      displaySystemId: editor.manifest.id,
+      ports: drafts.map((draft) => draft.id),
+      sensors,
+    }).map(({ outputChannel, source }) => ({ outputChannel, source }))).toEqual([
+      { outputChannel: 'leftPressure', source: 'leftPressureData' },
+      { outputChannel: 'seatPressure', source: 'seatPressureData' },
+    ]);
   });
 });

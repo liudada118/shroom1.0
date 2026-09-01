@@ -4,6 +4,11 @@
  * 统一封装 matrix 表的索引保障、prepared statement 缓存、日期列表查询、
  * 历史行分页查询和大数据懒加载代理，避免 server.js 直接拼 SQL。
  */
+const {
+  parseSensorChannelId,
+  resolveSensorIdentity,
+} = require('@shroom/backend/identity');
+
 const historyStmtCache = new WeakMap();
 const CHANNEL_HISTORY_PAGE_SIZE = 128;
 
@@ -152,13 +157,40 @@ function emptyHistoryStats() {
 }
 
 /**
- * channelId 查询只接受 null 或非空字符串；不 trim，确保数据库严格等值。
+ * channelId 查询只接受 null 或严格 canonical 两段式；不 trim，确保数据库严格等值。
  *
  * @param {*} channelId 通道筛选值。
  * @returns {boolean} 是否可用于查询。
  */
 function isValidChannelHistoryFilter(channelId) {
-  return channelId === null || (typeof channelId === 'string' && channelId.length > 0);
+  if (channelId === null) return true;
+  const parsed = parseSensorChannelId(channelId);
+  return Boolean(parsed && parsed.channelId === channelId);
+}
+
+/**
+ * 校验 canonical 历史描述身份；空的旧元数据列视为未提供，由合法 channelId 补齐。
+ * NULL channelId 不走这里，继续作为 legacy 历史组保留。
+ */
+function resolveCanonicalHistoryIdentity(channelId, displaySystemId, sensorId) {
+  const parsed = parseSensorChannelId(channelId);
+  if (!parsed || parsed.channelId !== channelId) return null;
+  if (
+    (displaySystemId != null && displaySystemId !== '' && typeof displaySystemId !== 'string')
+    || (sensorId != null && sensorId !== '' && typeof sensorId !== 'string')
+  ) return null;
+  const declaredDisplaySystemId = typeof displaySystemId === 'string' && displaySystemId.trim()
+    ? displaySystemId
+    : null;
+  const declaredSensorId = typeof sensorId === 'string' && sensorId.trim()
+    ? sensorId
+    : null;
+  const resolved = resolveSensorIdentity({
+    channelId,
+    ...(declaredDisplaySystemId == null ? {} : { displaySystemId: declaredDisplaySystemId }),
+    ...(declaredSensorId == null ? {} : { sensorId: declaredSensorId }),
+  }, { allowDerived: true });
+  return resolved?.channelId === channelId ? resolved : null;
 }
 
 /**
@@ -381,14 +413,24 @@ function queryHistoryChannels(dbRef, date, logger) {
 
   const descriptors = new Map();
   groups.forEach((group) => {
-    const channelId = group.channelId == null ? null : String(group.channelId);
+    const rawChannelId = group.channelId == null ? null : String(group.channelId);
+    const canonicalIdentity = rawChannelId === null
+      ? null
+      : resolveCanonicalHistoryIdentity(
+        rawChannelId,
+        group.displaySystemId,
+        group.sensorId,
+      );
+    // 非 NULL 行声称自己是 canonical；形状或显式身份冲突时不能降级进 legacy 组。
+    if (rawChannelId !== null && !canonicalIdentity) return;
+    const channelId = canonicalIdentity?.channelId ?? null;
     const key = channelId === null ? '__legacy__' : `channel:${channelId}`;
     let descriptor = descriptors.get(key);
     if (!descriptor) {
       descriptor = {
         channelId,
-        displaySystemId: group.displaySystemId ?? null,
-        sensorId: group.sensorId ?? null,
+        displaySystemId: canonicalIdentity?.displaySystemId ?? group.displaySystemId ?? null,
+        sensorId: canonicalIdentity?.sensorId ?? group.sensorId ?? null,
         sensorLabel: group.sensorLabel ?? null,
         sensorType: group.sensorType ?? null,
         outputChannel: group.outputChannel ?? null,
@@ -440,12 +482,15 @@ function queryHistoryChannels(dbRef, date, logger) {
   return [...descriptors.values()]
     .sort((left, right) => left.minId - right.minId)
     .map((descriptor) => {
-      if (descriptor.channelId && (!descriptor.displaySystemId || !descriptor.sensorId)) {
-        const separatorIndex = descriptor.channelId.indexOf(':');
-        if (separatorIndex > 0) {
-          descriptor.displaySystemId ||= descriptor.channelId.slice(0, separatorIndex);
-          descriptor.sensorId ||= descriptor.channelId.slice(separatorIndex + 1);
-        }
+      if (descriptor.channelId) {
+        const identity = resolveCanonicalHistoryIdentity(
+          descriptor.channelId,
+          descriptor.displaySystemId,
+          descriptor.sensorId,
+        );
+        if (!identity) return null;
+        descriptor.displaySystemId = identity.displaySystemId;
+        descriptor.sensorId = identity.sensorId;
       }
       return {
         ...descriptor,
@@ -454,7 +499,8 @@ function queryHistoryChannels(dbRef, date, logger) {
         baudRate: getOnlyValue(descriptor.baudRates),
         parserChannel: getOnlyValue(descriptor.parserChannels),
       };
-    });
+    })
+    .filter(Boolean);
 }
 
 /**

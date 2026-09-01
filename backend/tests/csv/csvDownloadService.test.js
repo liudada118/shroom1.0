@@ -102,6 +102,22 @@ async function run() {
           outputChannel: 'right',
           schemaVersion: 1,
         },
+        {
+          channelId: 'desk:pad:raw',
+          displaySystemId: 'desk',
+          sensorId: 'pad:raw',
+          sensorLabel: '歧义通道',
+          outputChannel: 'ambiguous',
+          schemaVersion: 1,
+        },
+        {
+          channelId: 'desk:ghost',
+          displaySystemId: 'other-desk',
+          sensorId: 'ghost',
+          sensorLabel: '冲突通道',
+          outputChannel: 'ghost',
+          schemaVersion: 1,
+        },
       ]],
       [db1, []],
       [db2, [{
@@ -144,6 +160,15 @@ async function run() {
             parserChannel: 'actual-parser',
           },
         }),
+      }, {
+        id: 7,
+        timestamp: 1075,
+        data: JSON.stringify({
+          channelId: 'desk:pad/a:raw',
+          displaySystemId: 'desk',
+          sensorId: 'pad/a:raw',
+          data: [777],
+        }),
       }]],
       ['db|desk:pad?a', [{
         id: 2,
@@ -156,6 +181,16 @@ async function run() {
           baudRate: 38400,
           parserChannel: 'right-parser',
         }),
+      }]],
+      ['db|desk:pad:raw', [{
+        id: 6,
+        timestamp: 1150,
+        data: JSON.stringify({ data: [999] }),
+      }]],
+      ['db|desk:ghost', [{
+        id: 8,
+        timestamp: 1175,
+        data: JSON.stringify({ data: [998] }),
       }]],
       ['db2|desk:head', [{
         id: 3,
@@ -183,6 +218,16 @@ async function run() {
     assert.strictEqual(result.ok, true);
     assert.strictEqual(result.files.length, 4);
     assert.strictEqual(result.artifacts.length, 4);
+    assert.strictEqual(
+      result.artifacts.some((item) => item.channelId === 'desk:pad:raw'),
+      false,
+      '多冒号 channelId 不能被 CSV 当成 canonical descriptor 导出',
+    );
+    assert.strictEqual(
+      result.artifacts.some((item) => item.channelId === 'desk:ghost'),
+      false,
+      'channelId 与显式 displaySystemId 冲突的 descriptor 不能导出',
+    );
 
     const firstName = path.basename(result.artifacts.find((item) => item.channelId === 'desk:pad/a').file);
     const secondName = path.basename(result.artifacts.find((item) => item.channelId === 'desk:pad?a').file);
@@ -222,6 +267,8 @@ async function run() {
     assert.ok(leftCsv.includes('actual-left'));
     assert.ok(leftCsv.includes('COM7'));
     assert.strictEqual(leftArtifact.sensorLabel, '左手 / Left');
+    assert.strictEqual(leftArtifact.rowCount, 2, '内嵌 channelId 冲突的行不能进入 CSV');
+    assert.ok(!leftCsv.includes('[777]'));
     assert.ok(normalizeHistoryPressureData.calls.includes('left-glove-v2'));
     assert.ok(normalizeHistoryPressureData.calls.includes('right-glove'));
 

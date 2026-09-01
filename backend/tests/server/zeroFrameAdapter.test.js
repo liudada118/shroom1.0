@@ -2,6 +2,7 @@ const assert = require('assert');
 
 const {
   createZeroChannelIdentityResolver,
+  sensorIdFromChannelId,
 } = require('../../kernel/platform/runtime/zeroChannelIdentityResolver');
 const {
   createZeroFrameAdapter,
@@ -29,11 +30,35 @@ const channelsBySensorType = {
     serialRole: 'sit',
     outputChannel: 'sit',
   }],
+  'invalid-manifest': [
+    {
+      channelId: 'display-bad:seat:extra',
+      displaySystemId: 'display-bad',
+      sensorId: 'seat:extra',
+      sensorType: 'invalid-manifest',
+      serialRole: 'bad-multi',
+      outputChannel: 'bad-multi',
+    },
+    {
+      channelId: 'display-bad:seat',
+      displaySystemId: 'another-display',
+      sensorId: 'seat',
+      sensorType: 'invalid-manifest',
+      serialRole: 'bad-conflict',
+      outputChannel: 'bad-conflict',
+    },
+  ],
 };
 const identityResolver = createZeroChannelIdentityResolver({
   getActiveSensorType: () => sensorType,
   listSerialChannels: (type) => channelsBySensorType[type] || [],
 });
+assert.strictEqual(sensorIdFromChannelId('display-a:seat-pad', 'sit'), 'seat-pad');
+assert.strictEqual(
+  sensorIdFromChannelId('display-a:seat:extra', 'arm left'),
+  'arm-left',
+  'an ambiguous canonical id may only use the explicitly sanitized legacy fallback',
+);
 const zeroStateStore = createZeroStateStore();
 const adapter = createZeroFrameAdapter({
   zeroStateStore,
@@ -93,6 +118,28 @@ sensorType = 'seat-b';
 const isolatedFrame = adapter.process('sit', { sitData: [13, 18] });
 assert.strictEqual(isolatedFrame.channelId, 'display-b:seat-pad');
 assert.deepStrictEqual(isolatedFrame.sitData, [13, 18]);
+
+const unknownManifestFrame = { mysteryData: [1, 2] };
+assert.strictEqual(identityResolver.resolveChannelIdentity('mystery'), null);
+assert.strictEqual(
+  adapter.process('mystery', unknownManifestFrame),
+  unknownManifestFrame,
+  'an undeclared manifest channel must not be rewritten as a legacy zero identity',
+);
+
+sensorType = 'invalid-manifest';
+assert.strictEqual(identityResolver.getActiveDisplaySystemId(), '');
+assert.deepStrictEqual(identityResolver.listActiveChannelIds(), []);
+for (const channel of ['bad-multi', 'bad-conflict']) {
+  const invalidFrame = { [`${channel}Data`]: [1, 2] };
+  assert.strictEqual(identityResolver.resolveChannelIdentity(channel), null);
+  assert.strictEqual(
+    adapter.process(channel, invalidFrame),
+    invalidFrame,
+    'invalid manifest identity must fail closed before it reaches zeroStateStore',
+  );
+}
+assert.strictEqual(zeroStateStore.snapshot('display-bad:seat'), null);
 
 sensorType = 'legacy custom';
 const fallbackFrame = adapter.process('arm left', { armLeftData: [1, 2] });

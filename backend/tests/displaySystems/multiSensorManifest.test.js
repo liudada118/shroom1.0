@@ -100,6 +100,37 @@ assert.strictEqual(multi.value.sensors[1].protocol.validation.checksum.type, 'su
 assert.strictEqual(multi.value.sensors[0].outputChannel, 'sit');
 assert.strictEqual(multi.value.sensors[1].outputChannel, 'armLeft');
 
+// v3 是 canonical writer 形状：必须显式写 sensors[] 和每路稳定 id，避免重排数组后
+// channelId 从 0/1 变成 1/2，历史身份随位置漂移。v1/v2 reader 仍接受上面的宽松形状。
+const v3WithoutSensors = validateDisplaySystemConfig({
+  ...multiSensorConfig,
+  schemaVersion: 3,
+  sensors: undefined,
+  sensor: {
+    type: 'seat',
+    matrix: { rows: 2, cols: 3 },
+    ports: ['sit'],
+  },
+  files: multiSensorConfig.sensors[0].files,
+  protocol: multiSensorConfig.sensors[0].protocol,
+}, { source: 'v3-no-sensors' });
+assert.strictEqual(v3WithoutSensors.ok, false);
+assert.ok(
+  v3WithoutSensors.errors.includes('v3-no-sensors: sensors is required for schemaVersion 3'),
+  v3WithoutSensors.errors.join('; '),
+);
+
+const v3WithoutExplicitId = validateDisplaySystemConfig({
+  ...multiSensorConfig,
+  schemaVersion: 3,
+  sensors: [{ ...multiSensorConfig.sensors[0], id: undefined }],
+}, { source: 'v3-no-id' });
+assert.strictEqual(v3WithoutExplicitId.ok, false);
+assert.ok(
+  v3WithoutExplicitId.errors.includes('v3-no-id: sensors[0].id is required for schemaVersion 3'),
+  v3WithoutExplicitId.errors.join('; '),
+);
+
 // 重复 id 必须被拒绝：parser 通道键会撞车。
 const duplicated = validateDisplaySystemConfig({
   ...multiSensorConfig,

@@ -22,7 +22,7 @@ function createCanonicalFrame(overrides = {}) {
     quality: 'good',
     serial: { role: 'seat', path: 'COM3', baudRate: 115200 },
     payload: {
-      value: ['1', 2, 3, 4],
+      value: [1, 2, 3, 4],
       stages: {
         decoded: [9, 8, 7, 6],
         normalized: [0.1, 0.2, 0.3, 0.4],
@@ -121,7 +121,7 @@ describe('canonical sensor.frame normalization', () => {
     expect(frame).not.toHaveProperty('headData');
   });
 
-  it('derives sensorId from channelId and falls back to the processed stage', () => {
+  it('rejects a declared canonical frame with incomplete identity instead of guessing', () => {
     const envelope = createCanonicalFrame({
       channelId: 'demo-display:head',
       displaySystemId: 'demo-display',
@@ -134,20 +134,64 @@ describe('canonical sensor.frame normalization', () => {
       },
     });
 
-    const [frame] = normalizeIncomingMessage(envelope).frames;
-    expect(frame.sensorId).toBe('head');
-    expect(frame.sensorType).toBe('demo-display');
-    expect(frame.channel).toBe('head');
-    expect(frame.data).toEqual([5, 6, 7]);
-    expect(frame.matrix).toMatchObject({ width: 3, height: 1, data: [5, 6, 7] });
+    expect(isSensorFrameEnvelope(envelope)).toBe(false);
+    expect(normalizeIncomingMessage(envelope).frames).toEqual([]);
   });
 
   it('does not claim an unknown schema version as a supported frame', () => {
-    const message = createCanonicalFrame({ schemaVersion: 2 });
+    const message = createCanonicalFrame({ schemaVersion: 2, sitData: [99] });
     const normalized = normalizeIncomingMessage(message);
 
     expect(isSensorFrameEnvelope(message)).toBe(false);
     expect(normalized.frames).toEqual([]);
+  });
+
+  it('accepts null wire samples but rejects missing, coerced, or non-finite values', () => {
+    expect(isSensorFrameEnvelope(createCanonicalFrame({
+      payload: { value: [1, null, 3] },
+    }))).toBe(true);
+
+    const invalidPayloads = [
+      {},
+      { value: '[1,2]' },
+      { value: [1, '2'] },
+      { value: [1, Number.NaN] },
+      { value: [1, Number.POSITIVE_INFINITY] },
+    ];
+    invalidPayloads.forEach((payload) => {
+      expect(isSensorFrameEnvelope(createCanonicalFrame({ payload }))).toBe(false);
+    });
+  });
+
+  it('requires an exact v1 version and unambiguous matching identity', () => {
+    expect(isSensorFrameEnvelope(createCanonicalFrame({ schemaVersion: '1' }))).toBe(false);
+    expect(isSensorFrameEnvelope(createCanonicalFrame({
+      schemaVersion: undefined,
+      version: 1,
+    }))).toBe(false);
+
+    [
+      { displaySystemId: ' small-bed-12b ' },
+      { sensorId: 'sit:extra', channelId: 'small-bed-12b:sit:extra' },
+      { channelId: 'other:sit' },
+      { outputChannel: ' sit ' },
+    ].forEach((identityPatch) => {
+      expect(isSensorFrameEnvelope(createCanonicalFrame(identityPatch))).toBe(false);
+    });
+  });
+
+  it('never downgrades a malformed declared frame through legacy aliases', () => {
+    const malformed = createCanonicalFrame({
+      payload: { stages: { processed: [1, 2] } },
+      sitData: [7, 8],
+      value: [9, 10],
+    });
+
+    const normalized = normalizeIncomingMessage(malformed);
+    expect(isSensorFrameEnvelope(malformed)).toBe(false);
+    expect(normalized.type).toBe(SENSOR_FRAME_TYPE);
+    expect(normalized.frames).toEqual([]);
+    expect(normalized.raw).toBe(malformed);
   });
 });
 

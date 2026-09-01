@@ -1,0 +1,185 @@
+{
+  "contractName": "shroom.multi-sensor",
+  "contractVersion": 1,
+  "status": "stable",
+  "releasedAt": "2026-08-31",
+  "compatibilityPolicy": {
+    "additiveChanges": "allowed-without-version-bump",
+    "renameRemoveOrSemanticChange": "requires-new-contract-version",
+    "legacyAliases": "input-only"
+  },
+  "identity": {
+    "channelIdFormat": "{displaySystemId}:{sensorId}",
+    "separator": ":",
+    "partsMustBeTrimmed": true,
+    "partsMustNotContainSeparator": true,
+    "stableFields": [
+      "displaySystemId",
+      "sensorId",
+      "channelId",
+      "sensorLabel",
+      "sensorType",
+      "outputChannel"
+    ]
+  },
+  "manifest": {
+    "schemaVersion": 3,
+    "supportedSchemaVersions": [1, 2, 3],
+    "v3RequiresSensorsArray": true,
+    "v3RequiresExplicitSensorId": true,
+    "legacyReaderPolicy": "v1-v2-sensor-or-sensors-accepted-and-normalized",
+    "sensorFields": [
+      "id",
+      "label",
+      "outputChannel",
+      "type",
+      "matrix",
+      "files",
+      "protocol",
+      "algorithm",
+      "stored"
+    ],
+    "uniqueFields": ["id", "outputChannel"],
+    "legacyProjectionFields": ["sensor", "files", "protocol", "algorithm"]
+  },
+  "frame": {
+    "type": "sensor.frame",
+    "schemaVersion": 1,
+    "producerTopLevelFields": [
+      "type",
+      "schemaVersion",
+      "channelId",
+      "displaySystemId",
+      "sensorId",
+      "sensorLabel",
+      "sensorType",
+      "outputChannel",
+      "source",
+      "sequence",
+      "timestamp",
+      "quality",
+      "serial",
+      "payload"
+    ],
+    "consumerRequiredTopLevelFields": [
+      "type",
+      "schemaVersion",
+      "channelId",
+      "displaySystemId",
+      "sensorId",
+      "outputChannel",
+      "payload"
+    ],
+    "consumerRequiredPayloadFields": ["value"],
+    "validation": {
+      "declaredCanonicalFailClosed": true,
+      "futureVersionFailClosed": true,
+      "identityMustMatch": true,
+      "outputChannelMustBeTrimmedNonEmptyString": true,
+      "valueMustBeArray": true,
+      "valueItemTypes": ["finite-number", "null"],
+      "nullSampleMeaning": "invalid-numeric-sample"
+    },
+    "payloadFields": [
+      "value",
+      "stages",
+      "metrics",
+      "algorithmMetrics",
+      "matrix",
+      "orientation",
+      "status",
+      "temperature",
+      "protocol",
+      "history"
+    ],
+    "stageFields": [
+      "decoded",
+      "normalized",
+      "calibrated",
+      "processed",
+      "mapped"
+    ],
+    "serialFields": [
+      "role",
+      "portId",
+      "path",
+      "baudRate",
+      "parserChannel",
+      "status",
+      "isOpen",
+      "openedAt"
+    ],
+    "canonicalValuePath": "payload.value",
+    "legacyInputOnlyFields": [
+      "sitData",
+      "backData",
+      "headData",
+      "sensorData",
+      "data",
+      "value",
+      "rawData",
+      "realArr",
+      "normalizedData",
+      "calibratedData",
+      "rawPressureData",
+      "processedData",
+      "mappedData",
+      "mappedArr195",
+      "newArr147",
+      "newArr"
+    ]
+  },
+  "storage": {
+    "legacyChannelId": null,
+    "identityColumns": [
+      ["channel_id", "TEXT"],
+      ["display_system_id", "TEXT"],
+      ["sensor_id", "TEXT"],
+      ["sensor_label", "TEXT"],
+      ["sensor_type", "TEXT"],
+      ["output_channel", "TEXT"],
+      ["schema_version", "INTEGER"],
+      ["serial_role", "TEXT"],
+      ["serial_port_path", "TEXT"],
+      ["baud_rate", "INTEGER"],
+      ["parser_channel", "TEXT"]
+    ]
+  },
+  "csv": {
+    "legacyColumnIds": [
+      "index",
+      "max",
+      "time",
+      "pressureArea",
+      "pressure",
+      "realData"
+    ],
+    "identityColumnIds": [
+      "channelId",
+      "displaySystemId",
+      "sensorId",
+      "sensorLabel",
+      "sensorType",
+      "outputChannel",
+      "timestamp",
+      "schemaVersion",
+      "serialRole",
+      "serialPortPath",
+      "baudRate",
+      "parserChannel"
+    ]
+  },
+  "playback": {
+    "anchor": "longest-channel",
+    "alignment": "nearest-timestamp",
+    "equalDistanceTieBreak": "earlier-frame",
+    "legacyFallback": "same-index",
+    "historyFields": [
+      "index",
+      "sourceIndex",
+      "recordedAt",
+      "alignedAt",
+      "skewMs"
+    ]
+  }
+}

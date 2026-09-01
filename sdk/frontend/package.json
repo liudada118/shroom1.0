@@ -36,6 +36,8 @@
     "./renderers/blobHeatmap/core": "./renderers/blobHeatmap/core/index.js",
     "./renderers/*": "./renderers/*",
     "./styles/canvas.css": "./styles/canvas.css",
+    "./contract/multiSensorStableContract": "./src/contract/multiSensorStableContract.cjs",
+    "./contract/sensorFrameV1": "./src/contract/sensorFrameV1.cjs",
     "./package.json": "./package.json"
   },
   "files": [

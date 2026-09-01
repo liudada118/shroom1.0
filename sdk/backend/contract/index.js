@@ -11,4 +11,5 @@
 module.exports = {
   ...require('./sdkApiContract'),
   ...require('./commandProtocol'),
+  ...require('./sensorFrameV1'),
 };

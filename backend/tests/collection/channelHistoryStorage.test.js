@@ -130,6 +130,28 @@ insertCanonicalFrame(migratedDb, {
   baudRate: 115200,
   parserChannel: 'left-parser',
 });
+// 非 NULL 行声称自己是 canonical；多冒号或显式身份矛盾时必须从发现结果中剔除，
+// 不能降级混进 NULL legacy 组。
+insertCanonicalFrame(migratedDb, {
+  data: '[98]',
+  timestamp: 1004,
+  date: 'session-a',
+  channelId: 'chair:left-seat:raw',
+  displaySystemId: 'chair',
+  sensorId: 'left-seat:raw',
+  sensorLabel: '歧义通道',
+  outputChannel: 'ambiguous',
+});
+insertCanonicalFrame(migratedDb, {
+  data: '[99]',
+  timestamp: 1005,
+  date: 'session-a',
+  channelId: 'chair:ghost',
+  displaySystemId: 'other-chair',
+  sensorId: 'ghost',
+  sensorLabel: '冲突通道',
+  outputChannel: 'ghost',
+});
 
 const channels = queryHistoryChannels(migratedDb, 'session-a');
 assert.deepStrictEqual(channels.map((channel) => channel.channelId), [
@@ -177,6 +199,15 @@ assert.deepStrictEqual(channels[1], {
   baudRate: 115200,
   parserChannel: 'left-parser',
 });
+assert.deepStrictEqual(
+  getChannelHistoryStats(migratedDb, 'session-a', 'chair:left-seat:raw'),
+  { count: 0, minId: 0, maxId: 0 },
+  '精确 canonical 查询不能接受多冒号 channelId',
+);
+assert.deepStrictEqual(
+  queryChannelHistoryRows(migratedDb, 'session-a', 'chair:left-seat:raw', 10),
+  [],
+);
 
 // 串口重新插拔或改波特率时保留完整物理来源集合，避免用最后一帧覆盖会话事实。
 insertCanonicalFrame(migratedDb, {
