@@ -3,6 +3,7 @@ const path = require("path");
 
 const projectRoot = process.cwd();
 const sourceInitDb = path.join(projectRoot, "db", "init.db");
+const sourceAgentResources = path.join(projectRoot, "agent-resources");
 const packResourcesDir = path.join(projectRoot, "pack-resources");
 
 function resetDir(dirPath) {
@@ -79,5 +80,18 @@ function syncPython() {
   console.log(`[pack] synced python runtime -> ${targetDistDir}`);
 }
 
+function syncAgentResources() {
+  const targetRoot = path.join(packResourcesDir, "agent");
+
+  if (!fs.existsSync(sourceAgentResources)) {
+    throw new Error(`agent resources not found: ${sourceAgentResources}`);
+  }
+
+  resetDir(targetRoot);
+  copyDir(sourceAgentResources, targetRoot);
+  console.log(`[pack] synced agent resources -> ${targetRoot}`);
+}
+
 syncDb();
 syncPython();
+syncAgentResources();

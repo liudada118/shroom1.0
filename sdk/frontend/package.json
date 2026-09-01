@@ -37,7 +37,11 @@
     "./renderers/*": "./renderers/*",
     "./styles/canvas.css": "./styles/canvas.css",
     "./contract/multiSensorStableContract": "./src/contract/multiSensorStableContract.cjs",
-    "./contract/sensorFrameV1": "./src/contract/sensorFrameV1.cjs",
+    "./contract/sensorFrameV1": {
+      "import": "./src/contract/sensorFrameV1.js",
+      "require": "./src/contract/sensorFrameV1.cjs",
+      "default": "./src/contract/sensorFrameV1.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

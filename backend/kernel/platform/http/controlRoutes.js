@@ -80,6 +80,7 @@ function registerControlRoutes(app, {
   serialManager,
   controlCommandService,
   serialProtocolDirectories = [],
+  serialProtocolProbeService,
 }) {
   /**
    * HTTP 控制命令统一入口。
@@ -209,6 +210,26 @@ function registerControlRoutes(app, {
     } catch (error) {
       logger?.warn?.('[HTTP] list serial protocols failed', error.message || error);
       res.status(500).json(new HttpResult(1, {}, error.message || 'list serial protocols failed'));
+    }
+  });
+
+  /**
+   * 临时打开指定物理串口并从有限的协议预设中识别 wire format。
+   * 探测服务使用隔离 raw SerialPort，不进入全局 parser、实时推送或采集存储链路。
+   */
+  app.post(HTTP_ROUTES.serialProtocolDetect, async (req, res) => {
+    try {
+      const result = await serialProtocolProbeService.detect({
+        path: req.body?.path,
+        candidateIds: req.body?.candidateIds,
+      });
+      res.json(new HttpResult(0, result, 'success'));
+    } catch (error) {
+      const httpStatus = Number(error.httpStatus) || 500;
+      logger?.warn?.('[HTTP] serial protocol detect failed', error.message || error);
+      const result = new HttpResult(1, {}, error.message || 'serial protocol detect failed');
+      result.errorCode = error.code || 'SERIAL_PROTOCOL_DETECT_FAILED';
+      res.status(httpStatus).json(result);
     }
   });
 

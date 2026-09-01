@@ -280,6 +280,9 @@ function buildSerialTemplateFromPreset(preset) {
     source: preset.source || '',
     matrix: preset.matrix || null,
     valueCount: decoding.valueCount || null,
+    // Builder 手动选预设和自动识别必须消费同一份完整协议；只给扁平 defaults 会丢
+    // includeDelimiter、validation.headerOffset 和 checksum 的默认范围语义。
+    protocol: preset.protocol,
     defaults: {
       transportType: 'binary',
       baudRate: preset.protocol?.baudRate,
@@ -654,11 +657,18 @@ function buildWorkspaceSensorStates(inputManifest, definitions = {}) {
         }
         : { type: 'none' };
     const protocolSource = rawSensor?.protocol || inputManifest.protocol || {};
+    const protocolDecoding = protocolSource.decoding || {};
+    // 协议解码数量和展示几何数量是两层真相：协议可以读完整帧，lineOrder / pointOrder
+    // 再从中选择要展示的点。只有创建草稿时完全没声明 valueCount，才用几何点数补默认值；
+    // 绝不能把协议自识别得到的显式数量静默改成点位数量。
+    const protocolValueCount = protocolDecoding.valueCount == null
+      ? derivedValueCount
+      : protocolDecoding.valueCount;
     const protocol = {
       ...protocolSource,
       decoding: {
-        ...(protocolSource.decoding || {}),
-        ...(derivedValueCount == null ? {} : { valueCount: derivedValueCount }),
+        ...protocolDecoding,
+        ...(protocolValueCount == null ? {} : { valueCount: protocolValueCount }),
       },
     };
     const identity = createIdentityDefinitions(matrix);

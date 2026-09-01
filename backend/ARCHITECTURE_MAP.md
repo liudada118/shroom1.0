@@ -1,6 +1,6 @@
 # 后端架构地图
 
-> 最后更新：2026-08-28
+> 最后更新：2026-09-01
 
 这份地图用于快速判断数据如何流动、功能应该改在哪里，以及哪些边界必须保持稳定。
 
@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | Electron 固定桥 | `backend/common/`、`backend/runtime/` | 保留 Electron 已依赖的日志和后端启动入口 |
 | 应用稳定内核 | `backend/kernel/` | 平台装配、串口编排、存储、回放、CSV、实时分发和简单算法通道 |
-| 扩展宿主 | `backend/extension-host/` | 按 `manifest`、`runtime`、`workspace` 发现、校验、注册和调度展示系统扩展 |
+| 扩展宿主 | `backend/extension-host/` | 发现、校验、注册和调度展示系统，并托管隔离的 Agent 静态渲染包 |
 | 扩展实现 | `backend/extensions/` | 内置传感器运行时和可复制的展示系统示例 |
 | 兼容资料 | `backend/compatibility/` | 迁移基线和旧数据辅助函数，不作为新增功能入口 |
 | 自动验证 | `backend/tests/` | 固定链路、扩展宿主和历史兼容测试 |
@@ -52,18 +52,20 @@ flowchart LR
 
 ## 扩展边界
 
-`extension-host/` 根目录只保留 `index.js`、`appRuntimeFactory.js` 和说明文件；具体职责按以下三个子目录组织：
+`extension-host/` 根目录只保留 `index.js`、`appRuntimeFactory.js` 和说明文件；具体职责按以下四个子目录组织：
 
 | 子目录 | 职责 |
 | --- | --- |
 | `manifest/` | 配置加载、schema/引用文件校验、坐标映射和展示定义 |
 | `runtime/` | 运行通道规划、注册、绑定、策略、调度与帧处理 |
 | `workspace/` | 用户展示系统配置的读取、保存和复制 |
+| `agent-apps/` | 校验、原子安装、发现和安全解析用户 Agent 渲染包；不执行包内代码 |
 
 ```mermaid
 flowchart TB
   Host[extension-host] --> Discover[发现与校验]
   Host --> Bind[通道规划与运行时绑定]
+  Host --> AgentApps[Agent 静态渲染包]
   Builtin[extensions/built-in-sensors] --> Host
   Examples[extensions/examples] --> Host
   Host --> Kernel[kernel 稳定能力]
@@ -91,6 +93,7 @@ flowchart TB
 | 展示系统配置发现和校验 | `backend/extension-host/manifest/` |
 | 展示系统运行通道和绑定 | `backend/extension-host/runtime/` |
 | 展示系统工作区 | `backend/extension-host/workspace/` |
+| Agent 渲染包安装与发现 | `backend/extension-host/agent-apps/` |
 | 具体传感器运行时 | `backend/extensions/built-in-sensors/` |
 
 ## 依赖规则
@@ -99,5 +102,6 @@ flowchart TB
 2. `runtime/index.js` 可以装配 `kernel`，但其路径和外部导出保持稳定。
 3. `kernel` 使用 SDK 公共入口，不复制协议、串口、采集、存储或处理实现。
 4. `extension-host` 可以调用 `kernel` 与 SDK；具体扩展通过宿主注册。
+   `agent-apps` 只管理静态文件，不能依赖展示运行时或执行用户代码。
 5. `compatibility` 不得成为新增业务依赖。
 6. 任何影响硬件协议或历史数据兼容性的变化都必须单独评审，本次目录收拢不包含此类变化。

@@ -2219,6 +2219,113 @@
   font-size: 11px;
 }
 
+.protocol-detect-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.protocol-detect-heading > strong {
+  flex: none;
+  padding: 4px 8px;
+  color: #a8cffd;
+  background: #102b47;
+  border: 1px solid #274e77;
+  border-radius: 4px;
+}
+
+.protocol-detect-controls {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) auto auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.protocol-port-select {
+  display: grid;
+  gap: 6px;
+}
+
+.protocol-port-select > span {
+  color: #a8b5c1;
+  font-size: 11px;
+}
+
+.protocol-port-select .ant-select {
+  width: 100%;
+}
+
+.protocol-detect-controls > .ant-btn {
+  height: 38px;
+}
+
+.protocol-detect-feedback {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 11px 13px;
+  background: #0a1520;
+  border: 1px solid #25394c;
+  border-radius: 4px;
+}
+
+.protocol-detect-feedback-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-top: 5px;
+  background: #71859a;
+  border-radius: 50%;
+}
+
+.protocol-detect-feedback > div {
+  display: grid;
+  gap: 3px;
+}
+
+.protocol-detect-feedback strong {
+  color: #dce7f1;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.protocol-detect-feedback small {
+  color: #8394a5;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.protocol-detect-feedback.is-working .protocol-detect-feedback-dot {
+  background: #4e9eff;
+  box-shadow: 0 0 0 4px rgb(78 158 255 / 12%);
+}
+
+.protocol-detect-feedback.is-success {
+  border-color: #235c3b;
+}
+
+.protocol-detect-feedback.is-success .protocol-detect-feedback-dot {
+  background: #46cf78;
+}
+
+.protocol-detect-feedback.is-warning {
+  border-color: #665328;
+}
+
+.protocol-detect-feedback.is-warning .protocol-detect-feedback-dot {
+  background: #e4b94d;
+}
+
+.protocol-detect-feedback.is-error {
+  border-color: #69373b;
+}
+
+.protocol-detect-feedback.is-error .protocol-detect-feedback-dot {
+  background: #e4666f;
+}
+
 .coordinate-map-derived {
   background: #0a1520;
   border-color: #233344;
@@ -2893,6 +3000,24 @@
 }
 
 @media (max-width: 720px) {
+  .protocol-detect-heading {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .protocol-detect-heading > strong {
+    align-self: flex-start;
+  }
+
+  .protocol-detect-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .protocol-detect-controls > .ant-btn {
+    width: 100%;
+  }
+
   .display-builder-page,
   .display-builder-page.is-embedded {
     display: block;

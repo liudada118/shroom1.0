@@ -1,0 +1,31 @@
+const {
+  AGENT_APP_ALLOWED_PERMISSIONS,
+  AGENT_APP_ID_PATTERN,
+  AGENT_APP_MANIFEST_FILE,
+  AGENT_APP_MAX_FILE_BYTES,
+  AGENT_APP_MAX_FILES,
+  AGENT_APP_MAX_PATH_LENGTH,
+  AGENT_APP_MAX_TOTAL_BYTES,
+  AGENT_APP_SCHEMA_VERSION,
+  AgentAppError,
+  createAgentAppService,
+  normalizeAgentAppManifest,
+  normalizeBundleFiles,
+  normalizePortableRelativePath,
+} = require('./agentAppService');
+
+module.exports = {
+  AGENT_APP_ALLOWED_PERMISSIONS,
+  AGENT_APP_ID_PATTERN,
+  AGENT_APP_MANIFEST_FILE,
+  AGENT_APP_MAX_FILE_BYTES,
+  AGENT_APP_MAX_FILES,
+  AGENT_APP_MAX_PATH_LENGTH,
+  AGENT_APP_MAX_TOTAL_BYTES,
+  AGENT_APP_SCHEMA_VERSION,
+  AgentAppError,
+  createAgentAppService,
+  normalizeAgentAppManifest,
+  normalizeBundleFiles,
+  normalizePortableRelativePath,
+};

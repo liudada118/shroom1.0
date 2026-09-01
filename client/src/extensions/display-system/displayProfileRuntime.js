@@ -1,6 +1,7 @@
 // 显式带上 .js 后缀：这个模块同时被 backend/tests/sdk 用原生 Node ESM 直接加载，
 // 省略后缀只有打包器能解析。
 import { DEFAULT_COLORMAP_ID, isKnownColormapId } from './colormaps.js';
+import { isAgentRendererId } from './agentRendererBridge.js';
 
 const DATA_RENDERER_TYPES = new Set(['heatmap', 'matrix', 'raw2d']);
 
@@ -288,5 +289,5 @@ export function resolveDisplayProfile(model, selection = {}) {
 }
 
 export function isDataRendererType(type) {
-  return DATA_RENDERER_TYPES.has(type);
+  return DATA_RENDERER_TYPES.has(type) || isAgentRendererId(type);
 }

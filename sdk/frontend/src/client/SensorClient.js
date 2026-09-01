@@ -18,6 +18,7 @@ export const DEFAULT_HTTP_ROUTES = Object.freeze({
   displaySystemReload: '/api/display-systems/reload',
   commands: '/api/commands',
   serialPorts: '/api/serial/ports',
+  serialProtocolDetect: '/api/serial/protocol-detect',
   serialStatus: '/api/serial/status',
   serialOpen: '/api/serial/open',
   serialClose: '/api/serial/close',
@@ -94,6 +95,13 @@ export function normalizeSubscriptionChannels(channels, options = {}) {
       .map((channel) => resolveChannelId(channel, options))
       .filter(Boolean),
   )];
+}
+
+function createHttpRequestError(payload = {}, status = null) {
+  const error = new Error(payload.message || payload.error || (status ? `HTTP ${status}` : 'request failed'));
+  error.code = payload.errorCode || 'HTTP_REQUEST_FAILED';
+  error.status = status;
+  return error;
 }
 
 export class SensorClient {
@@ -211,7 +219,7 @@ export class SensorClient {
   async request(path, { method = 'GET', body } = {}) {
     const payload = await this.requestRaw(path, { method, body });
     if (payload.code !== 0) {
-      throw new Error(payload.message || 'request failed');
+      throw createHttpRequestError(payload);
     }
     return payload.data;
   }
@@ -232,7 +240,7 @@ export class SensorClient {
     }]);
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.message || payload.error || `HTTP ${response.status}`);
+      throw createHttpRequestError(payload, response.status);
     }
     return payload;
   }
@@ -258,6 +266,10 @@ export class SensorClient {
    */
   serial = {
     ports: () => this.request(this.getRoute('serialPorts')),
+    detectProtocol: ({ path, candidateIds } = {}) => this.request(this.getRoute('serialProtocolDetect'), {
+      method: 'POST',
+      body: { path, candidateIds },
+    }),
     status: (role) => this.request(role ? `${this.getRoute('serialStatus')}?role=${encodeURIComponent(role)}` : this.getRoute('serialStatus')),
     open: ({ role = 'sit', port, path, portPath } = {}) => this.request(this.getRoute('serialOpen'), {
       method: 'POST',

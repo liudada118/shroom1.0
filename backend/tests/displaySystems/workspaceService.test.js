@@ -92,7 +92,7 @@ try {
     protocol: {
       ...manifest.protocol,
       framing: { type: 'delimiter', delimiter: 'AA 55 03 99' },
-      decoding: { ...manifest.protocol.decoding, valueCount: 999 },
+      decoding: { ...manifest.protocol.decoding, valueCount: 4 },
     },
     algorithm: { type: 'none' },
   };
@@ -116,7 +116,11 @@ try {
     fs.readFileSync(path.join(pointDriven.directory, 'coordinate-map.json'), 'utf8'),
   );
   assert.deepStrictEqual(pointDrivenSavedManifest.sensor.matrix, { rows: 2, cols: 3 });
-  assert.strictEqual(pointDrivenSavedManifest.protocol.decoding.valueCount, 2);
+  assert.strictEqual(
+    pointDrivenSavedManifest.protocol.decoding.valueCount,
+    4,
+    'explicit protocol valueCount must not be overwritten by the two-point display geometry',
+  );
   assert.deepStrictEqual(
     pointDrivenSavedManifest.protocol.framing.delimiter,
     [0xAA, 0x55, 0x03, 0x99],
@@ -147,6 +151,27 @@ try {
   assert.deepStrictEqual(
     service.read(loadedPointDriven.config).definitions.coordinateMap.coordinates[0][0],
     [10, 30],
+  );
+
+  const derivedCountSaved = service.save({
+    manifest: {
+      ...manifest,
+      id: 'derived-count-demo',
+      name: 'Derived Count Demo',
+      sensor: { ...manifest.sensor, type: 'derivedCountDemo' },
+      protocol: {
+        ...manifest.protocol,
+        decoding: { valueType: 'uint8', byteOffset: 0 },
+      },
+      algorithm: { type: 'none' },
+    },
+    definitions: { pointOrder: [[0, 0], [0, 1]] },
+  });
+  assert.strictEqual(
+    JSON.parse(fs.readFileSync(path.join(derivedCountSaved.directory, 'display-system.json'), 'utf8'))
+      .protocol.decoding.valueCount,
+    2,
+    'geometry should only provide valueCount when the protocol omitted it',
   );
 
   assert.throws(() => service.save({ manifest }), /already exists/);
@@ -224,8 +249,8 @@ try {
       },
       protocol: {
         baudRate: sensorId === 'seat' ? 115200 : 921600,
-        framing: { type: 'fixedLength', frameLength: sensorId === 'seat' ? 3 : 4 },
-        decoding: { valueType: 'uint8', valueCount: 999 },
+        framing: { type: 'fixedLength', frameLength: 4 },
+        decoding: { valueType: 'uint8', valueCount: 4 },
       },
       algorithm: sensorId === 'seat'
         ? { type: 'json', dataFile: 'seat/algorithm-data.json' }
@@ -291,7 +316,8 @@ try {
   );
   assert.deepStrictEqual(
     fourPortOnDisk.sensors.map((sensor) => sensor.protocol.decoding.valueCount),
-    [4, 4, 4, 3],
+    [4, 4, 4, 4],
+    'seat decodes four raw values even though its display geometry selects three points',
   );
   assert.deepStrictEqual(
     fourPortOnDisk.sensors.map((sensor) => sensor.files.pointOrder),
@@ -520,6 +546,11 @@ try {
   assert.strictEqual(standardTemplate.defaults.bytesPerValue, 1);
   assert.strictEqual(standardTemplate.defaults.dataBits, 8);
   assert.strictEqual(standardTemplate.defaults.transportType, 'binary');
+  assert.deepStrictEqual(
+    standardTemplate.protocol,
+    loadSerialProtocolPresets().presets.find((preset) => preset.id === 'standard-1024').protocol,
+    'Builder 模板必须携带完整 protocol，手动和自动入口才能使用同一映射',
+  );
   assert.ok(standardTemplate.description, '卡片没有描述文字');
   assert.deepStrictEqual(standardTemplate.matrix, { width: 32, height: 32, total: 1024 });
 

@@ -2648,6 +2648,7 @@ module.exports.getChannelBusStatus = getChannelBusStatus;
 module.exports.handleCommand = handleCommand;
 
 const httpApp = createHttpApp({
+  agentAppService: appRuntime.agentApps,
   controlCommandService,
   getChannelBusStatus,
   getDisplaySystemById,

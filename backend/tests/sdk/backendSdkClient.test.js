@@ -54,6 +54,7 @@ const fetchImpl = async (url, options = {}) => {
         routes: {
           sdkContract: '/api/sdk/contract',
           serialPorts: '/api/serial/ports',
+          serialProtocolDetect: '/api/serial/protocol-detect',
           serialOpen: '/api/serial/open',
           displaySystemById: '/api/display-systems/:id',
         },
@@ -68,6 +69,17 @@ const fetchImpl = async (url, options = {}) => {
   }
   if (url.endsWith('/api/serial/ports')) {
     return createResponse({ code: 0, data: { ports: [{ path: 'COM3' }] }, message: 'success' });
+  }
+  if (url.endsWith('/api/serial/protocol-detect')) {
+    return createResponse({
+      code: 0,
+      data: {
+        status: 'matched',
+        match: { id: 'standard-1024', protocol: { baudRate: 1000000 } },
+        candidates: [],
+      },
+      message: 'success',
+    });
   }
   if (url.endsWith('/api/serial/open')) {
     return createResponse({ code: 0, data: { handled: true }, message: 'success' });
@@ -147,6 +159,8 @@ async function run() {
   assert.strictEqual(snapshot.telemetry.frameShape.sensorLabel, 'string');
   assert.strictEqual(snapshot.telemetry.frameShape.serial, 'object|null');
   assert.strictEqual(snapshot.telemetry.frameShape.payload.value, '(finite number|null)[]');
+  assert.strictEqual(snapshot.serial.protocolDetection.route, '/api/serial/protocol-detect');
+  assert.ok(snapshot.serial.protocolDetection.errorCodes.includes('SERIAL_PORT_BUSY'));
   assert.strictEqual(DISPLAY_SYSTEM_SCHEMA_VERSION, 3);
   assert.strictEqual(snapshot.displaySystems.schemaVersion, 3);
   assert.strictEqual(
@@ -202,6 +216,31 @@ async function run() {
 
   const ports = await client.listSerialPorts();
   assert.deepStrictEqual(ports, { ports: [{ path: 'COM3' }] });
+
+  const detected = await client.detectSerialProtocol({
+    path: 'COM3',
+    candidateIds: ['standard-1024'],
+  });
+  assert.strictEqual(detected.status, 'matched');
+  assert.strictEqual(detected.match.id, 'standard-1024');
+  assert.deepStrictEqual(JSON.parse(requests.at(-1).options.body), {
+    path: 'COM3',
+    candidateIds: ['standard-1024'],
+  });
+
+  const busyClient = new BackendSdkClient({
+    fetchImpl: async () => createResponse({
+      code: 1,
+      data: {},
+      message: 'serial port is busy',
+      errorCode: 'SERIAL_PORT_BUSY',
+    }, { ok: false, status: 409 }),
+    WebSocketImpl: FakeWebSocket,
+  });
+  await assert.rejects(
+    busyClient.detectSerialProtocol({ path: 'COM3' }),
+    (error) => error.code === 'SERIAL_PORT_BUSY' && error.status === 409,
+  );
 
   const openResult = await client.openSerial({ role: 'sit', port: 'COM3' });
   assert.deepStrictEqual(openResult, { handled: true });

@@ -1,4 +1,5 @@
 const { createSerialPort: defaultCreateSerialPort } = require('./serialHelper');
+const { getSerialPathReservation } = require('./serialPathReservation');
 
 const SERIAL_PORT_ROLES = Object.freeze({
   SIT: 'sit',
@@ -127,6 +128,11 @@ function createSerialManager({
 
     if (!path) {
       throw new Error(`serial path is required for port: ${normalizedPortId}`);
+    }
+    if (getSerialPathReservation(path)) {
+      const error = new Error(`serial path is reserved for protocol probe: ${path}`);
+      error.code = 'SERIAL_PORT_RESERVED';
+      throw error;
     }
 
     void stop(normalizedPortId, 'restart same port');

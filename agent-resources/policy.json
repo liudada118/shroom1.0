@@ -1,0 +1,670 @@
+{
+  "schemaVersion": 1,
+  "policyId": "shroom.agent-display-app",
+  "policyVersion": "1.0.0",
+  "status": "stable",
+  "purpose": "Machine-readable rules for generating a complete multi-sensor display system and, when needed, installing an offline sandboxed display app without changing Shroom's permanent backend pipeline.",
+  "normativeLanguage": {
+    "MUST": "required; failure stops generation or installation",
+    "MUST_NOT": "forbidden",
+    "MAY": "optional only when all MUST rules remain satisfied"
+  },
+  "bootstrap": {
+    "requiredReadOrder": [
+      {
+        "method": "GET",
+        "path": "/api/sdk/contract",
+        "responseShape": "raw contract object; this endpoint is not wrapped in HttpResult and has no data prefix",
+        "rule": "MUST read the live SDK contract before selecting routes, schemas, protocol presets, channels, or built-in renderers. Do not rely on remembered values."
+      },
+      {
+        "method": "GET",
+        "path": "/api/agent-apps/policy",
+        "rule": "MUST read the installed policy and stop when its schemaVersion or required capabilities are unsupported."
+      },
+      {
+        "method": "GET",
+        "path": "/api/agent-apps",
+        "rule": "MUST inspect installed app ids before installation. Existing apps are not overwritten by default."
+      }
+    ],
+    "failClosed": true,
+    "requiredStableContract": {
+      "name": "shroom.multi-sensor",
+      "status": "stable",
+      "minimumContractVersion": 1,
+      "manifestSchemaVersion": 3,
+      "sensorFrameType": "sensor.frame",
+      "sensorFrameSchemaVersion": 1
+    }
+  },
+  "changeBoundary": {
+    "installationMethod": "POST /api/agent-apps",
+    "rule": "A display app is installed as local data files through the public API. It MUST NOT patch application source or create a second acquisition pipeline.",
+    "protectedRepositoryPaths": [
+      "app/electron/**",
+      "backend/**",
+      "sdk/backend/**",
+      "sdk/frontend/src/contract/**",
+      "client/**",
+      "package.json",
+      "forge.config.js",
+      "db/init.db"
+    ],
+    "forbiddenActions": [
+      "modify the Electron bridge, preload, IPC, backend, SDK contract, serial lifecycle, parser, storage, playback, CSV, or WebSocket gateway",
+      "write directly into build, asar, application installation, database, or runtime internal directories",
+      "open a serial port, SQLite database, raw WebSocket, shell, child process, or Electron IPC from renderer code",
+      "create a second protocol catalog, frame envelope, storage format, replay path, or CSV path"
+    ]
+  },
+  "rendererSelection": {
+    "allowedKinds": [
+      {
+        "kind": "builtin",
+        "idRule": "Use an exact renderer id returned by the live SDK contract or platform catalog. MUST NOT guess or hardcode an unavailable built-in id."
+      },
+      {
+        "kind": "agent",
+        "idFormat": "agent:<appId>",
+        "idRule": "The platform creates this stable rendererId after the app is installed; appId is manifest.id."
+      }
+    ],
+    "customRendererWhen": "Use an agent renderer only when the requested presentation cannot be expressed by a currently advertised built-in renderer.",
+    "forbiddenRendererReferences": [
+      "http://*",
+      "https://*",
+      "ws://*",
+      "wss://*",
+      "file://*",
+      "absolute filesystem paths"
+    ]
+  },
+  "appManifest": {
+    "fileName": "app.json",
+    "schemaVersion": 1,
+    "requiredFields": [
+      "schemaVersion",
+      "id",
+      "name",
+      "version",
+      "renderer"
+    ],
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "version": {
+      "type": "string",
+      "format": "semantic-version",
+      "maxLength": 64
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "renderer": {
+      "requiredFields": [
+        "entry"
+      ],
+      "fields": {
+        "id": {
+          "type": "string",
+          "default": "main",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "label": {
+          "type": "string",
+          "defaultSource": "manifest.name",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "entry": {
+          "type": "string",
+          "rule": "MUST be a portable relative path present in install.files; no traversal, absolute path, URL, or backslash alias."
+        },
+        "height": {
+          "type": "integer",
+          "default": 480,
+          "minimum": 160,
+          "maximum": 2000
+        }
+      }
+    },
+    "permissions": {
+      "type": "array",
+      "allowed": [
+        "sensor.read"
+      ],
+      "default": [
+        "sensor.read"
+      ],
+      "rule": "Permissions are host capabilities, not browser APIs. sensor.read only supplies sanitized init/frame messages. An explicitly empty array is invalid."
+    }
+  },
+  "installApi": {
+    "httpEnvelope": {
+      "success": {
+        "code": 0,
+        "data": "route-specific object",
+        "message": "success"
+      },
+      "failure": {
+        "code": 1,
+        "data": {},
+        "message": "human-readable message",
+        "errorCode": "stable machine-readable error code"
+      },
+      "transportExceptions": "Malformed JSON and a request body larger than the host-wide 50 MiB parser limit are rejected before the Agent Apps route and may use the host's legacy raw {error} transport response. Treat any non-2xx response as failure before reading HttpResult fields."
+    },
+    "getPolicy": {
+      "method": "GET",
+      "pathSource": "/api/sdk/contract -> agentApps.routes.policy",
+      "path": "/api/agent-apps/policy",
+      "successData": {
+        "policy": "the complete policy.json object"
+      },
+      "missing": {
+        "httpStatus": 404,
+        "errorCode": "AGENT_APP_POLICY_NOT_FOUND",
+        "data": {}
+      }
+    },
+    "list": {
+      "method": "GET",
+      "pathSource": "/api/sdk/contract -> agentApps.routes.list",
+      "path": "/api/agent-apps",
+      "successData": {
+        "apps": [
+          {
+            "id": "pressure-grid-demo",
+            "name": "Offline Pressure Grid",
+            "version": "1.0.0",
+            "rendererId": "agent:pressure-grid-demo",
+            "renderer": {
+              "id": "main",
+              "label": "Offline Pressure Grid",
+              "entry": "frontend/index.html",
+              "height": 480
+            },
+            "permissions": [
+              "sensor.read"
+            ],
+            "entryUrl": "/api/agent-apps/pressure-grid-demo/files/frontend/index.html",
+            "editable": true
+          }
+        ],
+        "errors": []
+      }
+    },
+    "install": {
+      "method": "POST",
+      "pathSource": "/api/sdk/contract -> agentApps.routes.install",
+      "path": "/api/agent-apps",
+      "contentType": "application/json",
+      "body": {
+        "manifest": "the parsed app.json object",
+        "files": [
+          {
+            "path": "frontend/index.html",
+            "encoding": "utf8",
+            "content": "complete local file content"
+          },
+          {
+            "path": "frontend/app.js",
+            "encoding": "utf8",
+            "content": "complete local file content"
+          },
+          {
+            "path": "frontend/example.bin",
+            "encoding": "base64",
+            "content": "base64-encoded local bytes"
+          }
+        ],
+        "overwrite": false
+      },
+      "successData": {
+        "app": {
+          "id": "pressure-grid-demo",
+          "name": "Offline Pressure Grid",
+          "version": "1.0.0",
+          "rendererId": "agent:pressure-grid-demo",
+          "renderer": {
+            "id": "main",
+            "label": "Offline Pressure Grid",
+            "entry": "frontend/index.html",
+            "height": 480
+          },
+          "permissions": [
+            "sensor.read"
+          ],
+          "entryUrl": "/api/agent-apps/pressure-grid-demo/files/frontend/index.html",
+          "editable": true
+        }
+      },
+      "rules": [
+        "manifest is the parsed app.json and MUST NOT also be supplied as files/app.json",
+        "renderer.entry MUST exist in files",
+        "encoding MUST be utf8 or base64",
+        "overwrite MUST remain false unless the user explicitly authorizes replacement of that exact app id",
+        "all files and dependencies MUST be packaged locally; network URLs and runtime downloads are forbidden",
+        "browser installation requests MUST originate from a loopback page; a native local Agent or CLI may omit Origin"
+      ]
+    },
+    "reload": {
+      "method": "POST",
+      "pathSource": "/api/sdk/contract -> agentApps.routes.reload",
+      "path": "/api/agent-apps/reload",
+      "successData": {
+        "apps": [],
+        "errors": []
+      }
+    },
+    "staticFile": {
+      "method": "GET",
+      "pathSource": "/api/sdk/contract -> agentApps.routes.files",
+      "pathTemplate": "/api/agent-apps/:id/files/*",
+      "response": "raw local file with a safe content type",
+      "rule": "Renderer files are served only from the installed app directory after path validation."
+    },
+    "limits": {
+      "maximumFiles": 128,
+      "maximumDecodedBytesPerFile": 25165824,
+      "maximumDecodedBytesTotal": 33554432,
+      "maximumPortableRelativePathLength": 240,
+      "duplicatePaths": "forbidden",
+      "appJsonInFiles": "forbidden"
+    },
+    "errorCodes": [
+      "AGENT_APP_INVALID",
+      "AGENT_APP_EXISTS",
+      "AGENT_APP_NOT_FOUND",
+      "AGENT_APP_FILE_NOT_FOUND",
+      "AGENT_APP_FILE_INVALID",
+      "AGENT_APP_LIMIT_EXCEEDED",
+      "AGENT_APP_INSTALL_FAILED",
+      "AGENT_APP_DISCOVERY_FAILED",
+      "AGENT_APP_POLICY_INVALID",
+      "AGENT_APP_POLICY_NOT_FOUND",
+      "AGENT_APP_SERVICE_UNAVAILABLE",
+      "AGENT_APP_REQUEST_FAILED",
+      "AGENT_APP_ORIGIN_FORBIDDEN"
+    ]
+  },
+  "sandbox": {
+    "transport": "window.postMessage",
+    "iframeRule": "The host runs agent renderer HTML in a sandbox. The renderer MUST accept data only when event.source === window.parent.",
+    "originModel": "The iframe has an opaque origin. Static app responses use Cross-Origin-Resource-Policy: cross-origin so package files can load; isolation relies on sandbox flags, exact app-files CSP, path validation, and the postMessage source check rather than same-origin trust.",
+    "securityBoundary": {
+      "purpose": "capability isolation for trusted packaged renderer code",
+      "notGuaranteed": [
+        "safe execution of malicious code",
+        "absolute CPU or memory denial-of-service protection"
+      ],
+      "reviewRequirement": "Renderer source and packaged assets MUST be reviewed before installation. Do not install intentionally hostile, obfuscated, or resource-exhausting code."
+    },
+    "outboundMessageTarget": "window.parent",
+    "allowedHostToRendererTypes": [
+      "shroom.renderer.init",
+      "shroom.renderer.frame"
+    ],
+    "allowedRendererToHostTypes": [
+      "shroom.renderer.ready",
+      "shroom.renderer.error"
+    ],
+    "network": "forbidden",
+    "navigation": "forbidden",
+    "dynamicDownloads": "forbidden",
+    "samePackageResourceAccess": "MAY use fetch only for a relative file inside the current installed app when the live policy/host advertises the exact /api/agent-apps/:id/files/ prefix. This is local package access, not network authority.",
+    "directDeviceAccess": "forbidden",
+    "directStorageAccess": "forbidden",
+    "contentSecurityPolicyAuthority": "The host's dynamic HTTP response header is authoritative. Renderer files MUST NOT try to weaken or replace it; an HTML meta CSP is neither required nor sufficient and can accidentally block opaque-origin package assets.",
+    "requiredHostContentSecurityPolicy": {
+      "default-src": "'none'",
+      "script-src": "the exact current-app /api/agent-apps/:id/files/ prefix; inline script is forbidden",
+      "connect-src": {
+        "default": "'none'",
+        "allowedException": "the exact current-app /api/agent-apps/:id/files/ prefix advertised by the live host",
+        "externalOrigins": "forbidden"
+      },
+      "object-src": "'none'",
+      "frame-src": "'none'",
+      "frame-ancestors": "http://127.0.0.1:* http://localhost:*",
+      "base-uri": "'none'",
+      "form-action": "'none'",
+      "navigate-to": "'none'"
+    },
+    "forbiddenApis": [
+      "fetch or XMLHttpRequest to any URL outside the exact host-provided current-app static resource prefix",
+      "WebSocket",
+      "EventSource",
+      "WebTransport",
+      "navigator.sendBeacon",
+      "navigator.serial",
+      "require",
+      "process",
+      "electron",
+      "Node.js filesystem",
+      "SQLite",
+      "shell and child_process",
+      "eval and Function"
+    ]
+  },
+  "postMessageContract": {
+    "schemaVersion": 1,
+    "commonRequiredFields": [
+      "type",
+      "schemaVersion",
+      "payload"
+    ],
+    "init": {
+      "direction": "host-to-renderer",
+      "type": "shroom.renderer.init",
+      "payloadFields": {
+        "appId": "string",
+        "rendererId": "string",
+        "widgetId": "string",
+        "label": "string",
+        "displaySystemId": "string",
+        "sensorId": "string",
+        "sensorLabel": "string",
+        "sensorType": "string|null",
+        "outputChannel": "string",
+        "channelId": "string"
+      }
+    },
+    "frame": {
+      "direction": "host-to-renderer",
+      "type": "shroom.renderer.frame",
+      "payloadFields": {
+        "displaySystemId": "string",
+        "sensorId": "string",
+        "sensorLabel": "string",
+        "sensorType": "string|null",
+        "outputChannel": "string",
+        "channelId": "string",
+        "timestamp": "finite-number|non-empty-string|null",
+        "values": "(finite-number|null)[]",
+        "rawValues": "(finite-number|null)[]|null",
+        "matrix": "{rows:nonnegative-integer,cols:nonnegative-integer,total:rows*cols}|null",
+        "metrics": "json-object",
+        "algorithmMetrics": "json-object",
+        "serial": "read-only sanitized object declared by serialMetadata|null",
+        "channels": "optional array of channel items declared by multiChannelExtension"
+      }
+    },
+    "multiChannelExtension": {
+      "field": "frame.payload.channels",
+      "required": false,
+      "compatibility": "The top-level frame payload remains the current widget route. A host may additionally include channels; a missing channels field is a valid single-channel v1 message.",
+      "itemFields": {
+        "displaySystemId": "string",
+        "sensorId": "string",
+        "sensorLabel": "string",
+        "sensorType": "string|null",
+        "outputChannel": "string",
+        "channelId": "string",
+        "timestamp": "finite-number|non-empty-string|null",
+        "values": "(finite-number|null)[]",
+        "rawValues": "(finite-number|null)[]",
+        "matrix": "{rows:nonnegative-integer,cols:nonnegative-integer,total:rows*cols}|null",
+        "metrics": "json-object",
+        "algorithmMetrics": "json-object",
+        "serial": "read-only sanitized object declared by serialMetadata|null"
+      },
+      "rules": [
+        "Every item MUST have a canonical identity and state MUST be keyed by full channelId.",
+        "The renderer MAY combine channels for one visualization but MUST NOT infer roles from array order.",
+        "The top-level current route remains available and MUST continue to work when channels is absent."
+      ]
+    },
+    "ready": {
+      "direction": "renderer-to-host",
+      "type": "shroom.renderer.ready",
+      "payloadFields": {}
+    },
+    "error": {
+      "direction": "renderer-to-host",
+      "type": "shroom.renderer.error",
+      "payloadFields": {
+        "message": "non-empty-string"
+      }
+    },
+    "rules": [
+      "The host rebuilds every payload from a whitelist and sends JSON-safe data only.",
+      "The renderer MUST reject unsupported schemaVersion values.",
+      "init MUST be accepted before frame, MUST be idempotent, and the renderer SHOULD emit ready after every valid init so a lost startup ready can recover.",
+      "frame.channelId MUST equal the initialized channelId.",
+      "channelId MUST equal displaySystemId + ':' + sensorId.",
+      "The renderer MUST NOT mutate, reinterpret, or send sensor data back to the host."
+    ],
+    "serialMetadata": {
+      "locations": [
+        "frame.payload.serial",
+        "frame.payload.channels[].serial"
+      ],
+      "allowedFields": [
+        "role",
+        "portId",
+        "path",
+        "baudRate",
+        "parserChannel",
+        "status",
+        "isOpen",
+        "openedAt"
+      ],
+      "shape": {
+        "role": "string|null",
+        "portId": "string|null",
+        "path": "string|null",
+        "baudRate": "positive-finite-number|null",
+        "parserChannel": "string|null",
+        "status": "string|null",
+        "isOpen": "boolean|null",
+        "openedAt": "finite-number|non-empty-string|null"
+      },
+      "rules": [
+        "serial is optional, read-only diagnostic metadata and may change after reconnect",
+        "serial MUST NOT contain handles, functions, parser objects, Electron objects, or unlisted properties",
+        "serial role, portId, path, parserChannel, status, and array position MUST NOT define or infer business identity",
+        "left/right/backrest/seat identity remains the explicit sensorId, sensorLabel, outputChannel, and canonical channelId"
+      ]
+    }
+  },
+  "sensorData": {
+    "canonicalIdentity": {
+      "formula": "channelId === displaySystemId + ':' + sensorId",
+      "separator": ":",
+      "partsMustBeTrimmed": true,
+      "partsMustNotContainSeparator": true
+    },
+    "sensorLabelSource": "The host-provided sensorLabel, originating from the matching sensors[].label; fallback is sensorId.",
+    "businessRoleRule": "MUST NOT infer left hand, right hand, backrest, seat, or another role from serial role, portId, COM path, parserChannel, port order, protocol id, output arrival order, or array index.",
+    "canonicalValuesSource": "sensor.frame.payload.value projected by the host as frame.payload.values and, when present, frame.payload.channels[].values",
+    "legacyTopLevelFields": [
+      "sitData",
+      "backData",
+      "headData"
+    ],
+    "legacyRule": "MUST NOT read, generate, or depend on top-level sitData/backData/headData. They are input-only aliases inside the platform compatibility boundary.",
+    "multiSensorRule": "Keep state keyed by full channelId. Frames from different sensors or reconnect order MUST NOT overwrite each other; channels array position has no identity meaning."
+  },
+  "displaySystemGeneration": {
+    "purpose": "Generate a complete schema-v3 display system whose protocol, per-sensor mapping, algorithm, renderer, widgets, charts, realtime, storage, playback, and CSV all remain on the permanent platform pipeline.",
+    "requiredDiscovery": [
+      {
+        "method": "GET",
+        "pathSource": "/api/sdk/contract -> displaySystems.routes.catalog",
+        "defaultPath": "/api/display-systems/catalog",
+        "requiredData": "catalog including supported renderers, algorithms, chart templates, serial templates, limits, and writable capabilities"
+      },
+      {
+        "method": "GET",
+        "pathSource": "/api/sdk/contract -> http.routes.serialProtocols",
+        "defaultPath": "/api/serial/protocols",
+        "requiredData": "the live protocol preset catalog; do not maintain a second list"
+      },
+      {
+        "method": "GET",
+        "pathSource": "/api/sdk/contract -> displaySystems.routes.list",
+        "defaultPath": "/api/display-systems",
+        "requiredData": "existing display-system ids and runtime status"
+      }
+    ],
+    "manifest": {
+      "schemaVersion": 3,
+      "requiredTopLevelFields": [
+        "schemaVersion",
+        "id",
+        "name",
+        "version",
+        "sensors",
+        "display"
+      ],
+      "sensorRequiredFields": [
+        "id",
+        "label",
+        "outputChannel",
+        "stored",
+        "type",
+        "matrix",
+        "files",
+        "protocol",
+        "algorithm"
+      ],
+      "sensorRules": [
+        "sensors MUST be a non-empty array and every id MUST be explicit, stable, unique, trimmed, and contain no colon",
+        "label is the business sensorLabel and MUST be explicit; never derive it from COM, protocol, or position",
+        "outputChannel MUST be explicit, non-empty, trimmed, and unique across sensors",
+        "stored MUST be explicit; false means realtime only and true enables the existing storage/replay/CSV path",
+        "matrix is display geometry and MUST NOT rewrite protocol.decoding.valueCount or a fixed protocol.framing.frameLength",
+        "files MUST point to that sensor's definitions; multi-sensor systems SHOULD use <sensorId>/ subdirectories",
+        "protocol MUST be the complete normalized selected/detected preset rather than a partial UI projection",
+        "algorithm MUST select an existing pipeline mode; arbitrary code follows algorithmPolicy"
+      ]
+    },
+    "definitions": {
+      "shape": {
+        "sensors": {
+          "<sensorId>": {
+            "lineOrder": "object or array for this sensor only",
+            "pointOrder": "object for this sensor only",
+            "coordinateMap": "object|null for this sensor only",
+            "algorithmData": "object|null for this sensor only",
+            "algorithmSource": "string|null; code requires explicit authorization"
+          }
+        }
+      },
+      "rules": [
+        "definitions.sensors keys MUST exactly match manifest sensors[].id",
+        "Each route keeps its own line order, point order, coordinate map, algorithm data, and authorized algorithm source",
+        "Do not place only the first sensor's definition at the top level and project it over other sensors",
+        "Line order, geometry transform, and algorithm execute once in the existing backend pipeline"
+      ]
+    },
+    "protocolDetection": {
+      "pathSource": "/api/sdk/contract -> serial.protocolDetection.route",
+      "defaultPath": "/api/serial/protocol-detect",
+      "request": {
+        "path": "temporary physical serial path",
+        "candidateIds": "optional ids from the live preset catalog"
+      },
+      "statuses": [
+        "matched",
+        "ambiguous",
+        "unknown"
+      ],
+      "rules": [
+        "Only matched may populate the current sensor protocol, and it MUST copy the complete returned protocol",
+        "ambiguous and unknown preserve the draft and require manual selection or more evidence",
+        "Detection identifies a wire protocol only; it MUST NOT assign left/right/backrest/seat or another business identity",
+        "The temporary COM path is not saved into the display-system manifest",
+        "Explicit protocol.decoding.valueCount and fixed protocol.framing.frameLength MUST survive save unchanged even when matrix or point count differs"
+      ]
+    },
+    "display": {
+      "widgetSourceRule": "Every data widget in a multi-sensor system MUST explicitly set source to that sensor's exact outputChannel. New manifests SHOULD use outputChannel itself, not a *Data suffix or array position.",
+      "rendererRule": "Use an exact built-in renderer advertised by the catalog, or first install an agent app and use its stable agent:<appId> renderer id.",
+      "profileRule": "Every profile renderer reference and widget id MUST resolve to a declared renderer/widget.",
+      "charts": {
+        "builtin": "Use catalog-advertised chartCards/templates and supported formula syntax; at most the live catalog limit.",
+        "agent": "An agent renderer MAY draw local presentation-only charts from its init/frame values, metrics, algorithmMetrics, and optional channels array.",
+        "dataRule": "Chart rendering does not create another storage or analysis truth; persisted/exported values remain those from the permanent pipeline."
+      }
+    },
+    "saveApi": {
+      "method": "POST",
+      "pathSource": "/api/sdk/contract -> displaySystems.routes.list",
+      "defaultPath": "/api/display-systems",
+      "contentType": "application/json",
+      "body": {
+        "manifest": "complete schema-v3 manifest",
+        "definitions": "definitions.sensors object described above",
+        "overwrite": false
+      },
+      "success": {
+        "httpStatus": 201,
+        "body": {
+          "result": {
+            "id": "saved display-system id",
+            "manifest": "normalized persisted schema-v3 manifest"
+          }
+        }
+      },
+      "rules": [
+        "overwrite MUST remain false unless the user explicitly authorizes replacing this exact display-system id",
+        "On conflict, choose another id or stop; do not retry silently with overwrite true",
+        "After save, call the contract-advertised reload route and read the editor/detail response to verify every sensor round-tripped independently"
+      ]
+    },
+    "acceptance": [
+      "Every configured sensor has a distinct canonical channelId, visible sensorLabel, explicit widget source, and its own geometry/definitions",
+      "Protocol valueCount, fixed frameLength, includeDelimiter, headerOffset, checksum offset, and explicit checksum range round-trip unchanged",
+      "Realtime values, stored data, replay values, and CSV realData match per canonical channelId for stored:true sensors",
+      "stored:false sensors publish realtime but do not appear in storage, replay, or CSV",
+      "Multi-rate playback uses platform alignment and renderer state never depends on channels array order",
+      "No permanent backend, contract, database, WebSocket, playback, or CSV implementation was modified"
+    ]
+  },
+  "algorithmPolicy": {
+    "allowedWithoutAdditionalAuthorization": [
+      "no algorithm",
+      "an algorithm or declarative operation already exposed by the live platform contract and executed in the existing pipeline"
+    ],
+    "explicitAuthorizationRequired": [
+      "new arbitrary JavaScript algorithm",
+      "new arbitrary Python algorithm",
+      "new executable, WASM, native library, DLL, shell command, package, or runtime dependency"
+    ],
+    "rules": [
+      "Renderer HTML is presentation-only and MUST NOT implement an alternate acquisition, calibration, storage, replay, or CSV algorithm.",
+      "Authorized JavaScript or Python algorithms MUST run through the existing platform algorithm host and permanent frame pipeline, with its validation and timeout controls.",
+      "If explicit authorization is absent, stop or use an existing declared algorithm; never silently embed code in the renderer."
+    ]
+  },
+  "overwritePolicy": {
+    "default": false,
+    "rule": "MUST list installed apps first. Replacing an existing id requires explicit user authorization naming that id; otherwise choose a new id or stop.",
+    "silentOverwrite": "forbidden"
+  },
+  "acceptance": {
+    "requiredChecks": [
+      "GET /api/sdk/contract succeeds and required contract versions are supported",
+      "app.json and policy.json parse as strict JSON",
+      "manifest id and renderer id satisfy the exact safe-kebab pattern",
+      "renderer.entry and every referenced local script or asset are each included once in files; every path is local, portable, relative, and within limits",
+      "The host response has the required restrictive CSP; renderer HTML does not add a conflicting meta CSP, contains no external URL, and any optional fetch is restricted to the exact current-app static resource prefix",
+      "renderer sends shroom.renderer.ready with schemaVersion 1",
+      "renderer accepts init idempotently, replies ready after each valid init, then renders frame.payload.values and safely keys optional frame.payload.channels by full channelId",
+      "renderer reports invalid messages with shroom.renderer.error and does not render them",
+      "canonical channelId and sensorLabel remain visible and frames from another channel are rejected",
+      "installation uses overwrite:false unless exact replacement was explicitly authorized",
+      "the permanent backend and stable contract have no source changes"
+    ]
+  }
+}

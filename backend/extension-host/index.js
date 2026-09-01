@@ -100,8 +100,19 @@ const {
   createIdentityDefinitions,
   validateBuilderAlgorithmSource,
 } = require('./workspace/displaySystemWorkspaceService');
+const {
+  AGENT_APP_ALLOWED_PERMISSIONS,
+  AGENT_APP_ID_PATTERN,
+  AGENT_APP_SCHEMA_VERSION,
+  AgentAppError,
+  createAgentAppService,
+  normalizeAgentAppManifest,
+} = require('./agent-apps/agentAppService');
 
 module.exports = {
+  AGENT_APP_ALLOWED_PERMISSIONS,
+  AGENT_APP_ID_PATTERN,
+  AGENT_APP_SCHEMA_VERSION,
   ALGORITHM_TYPES,
   CANVAS_COLORMAPS,
   CANVAS_OVERLAYS,
@@ -117,6 +128,7 @@ module.exports = {
   PROTOCOL_FRAMING_TYPES,
   PROTOCOL_VALUE_TYPES,
   applyNumericConfig,
+  AgentAppError,
   bindDisplaySystemRuntimeChannels,
   buildDisplaySystemRoots,
   classifyDisplaySystemAccess,
@@ -130,6 +142,7 @@ module.exports = {
   attachRuntimeChannelPlan,
   canonicalizeCoordinateMapDefinition,
   createDisplaySystemFrameProcessor,
+  createAgentAppService,
   createJavaScriptAlgorithmRunner,
   createPythonAlgorithmRunner,
   createDisplaySystemRuntimeDispatcher,
@@ -154,6 +167,7 @@ module.exports = {
   normalizeProfile,
   normalizeProtocolConfig,
   normalizeView,
+  normalizeAgentAppManifest,
   parseByteSequence,
   loadDisplaySystemDirectory,
   resolveOutputPublisher,

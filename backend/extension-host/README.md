@@ -1,6 +1,6 @@
 # 展示与传感器扩展宿主
 
-> 最后更新：2026-08-28
+> 最后更新：2026-09-01
 
 `backend/extension-host/` 是稳定内核与可变展示系统之间的应用宿主。这里负责读取、校验、注册和调度扩展，不承载串口底层或通用协议实现。
 
@@ -11,6 +11,7 @@
 | `manifest/` | 查找、读取和校验 manifest，解析坐标映射，构造展示定义与画布目录 |
 | `runtime/` | 规划 parser channel，创建帧处理器，绑定、调度并登记展示系统运行时 |
 | `workspace/` | 读取和写入用户展示系统工作区配置 |
+| `agent-apps/` | 校验、原子安装、发现和解析沙箱 Agent 渲染包；只返回静态文件，不执行包内代码 |
 | `appRuntimeFactory.js` | 将发现、工作区和运行时控制器装配为应用能力 |
 | `index.js` | 保持扩展宿主的统一导出名和调用契约 |
 
@@ -56,13 +57,14 @@ flowchart LR
 - 展示配置保存与复制；
 - 系统/用户工作区访问分类；
 - 串口协议预设转换为 Builder 可选模板。
+- Agent 渲染包 schema v1、默认不覆盖的原子安装、策略读取和静态文件边界。
 
 协议预设的真实来源是 `sdk/backend/protocol/`。宿主只把预设翻译为 Builder 字段，不在此目录维护第二份协议库。
 
 ## 逐文件职责
 
-当前共有 19 个 JavaScript 文件。它们都有生产或测试调用；文件数来自流水线阶段的拆分，
-不是 19 套重复实现。
+当前共有 21 个 JavaScript 文件。它们都有生产或测试调用；文件数来自流水线阶段的拆分，
+不是 21 套重复实现。
 
 ### 根入口
 
@@ -103,6 +105,13 @@ flowchart LR
 | --- | --- | --- |
 | `displaySystemWorkspaceService.js` | 提供 Builder 目录、创建/复制展示系统、原子写文件、读取编辑数据和只保存 `display` 段 | 745 行，后续可拆 FileStore、Catalog、DisplaySection，并保留当前 Service 作为 façade |
 
+### `agent-apps/`
+
+| 文件 | 作用 | 边界 |
+| --- | --- | --- |
+| `agentAppService.js` | 校验 app.json/包内路径和权限，完成 staging 安装、回滚、发现、策略及静态路径解析 | 只处理用户数据文件，不 `require` 或执行 renderer 代码 |
+| `index.js` | 导出 Agent App service 与 schema 常量 | 不承载业务逻辑 |
+
 ## 可安全执行的优化顺序
 
 | 优先级 | 优化 | 边界 |
@@ -126,6 +135,7 @@ RuntimeFactory 与 AppRuntimeFactory，也不建议合并两个 Registry；这�
 - 新扩展不得改变已有硬件帧格式、通道含义或历史数据格式。
 - 默认不与 legacy parser channel 并行消费；需要并行时必须由现有 manifest 策略显式声明。
 - 保存展示外观时只修改对应的 `display` 字段，不重建无关 manifest 内容。
+- Agent App 只通过 `sensor.read` 的 iframe 消息读取清洗后的帧；不得接入串口、算法、存储、回放或 CSV 内部实现。
 - `compatibility/` 中的迁移基线不得作为新扩展依赖。
 
 ## 新增一个传感器展示
@@ -152,8 +162,8 @@ npm test
 
 | 文件 | 作用 | 边界 |
 | --- | --- | --- |
-| `index.js` | 扩展宿主的公共门面，104 行代码 + 一个约 60 项的导出表。把 `manifest/`、`runtime/`、`workspace/` 三个子目录的能力和 `@shroom/backend/protocol/displaySystemProtocol.js` 的协议能力统一从一处导出 | **只做再导出，不含逻辑。** 外部（`kernel/platform/server.js`、HTTP 路由、SDK）应该只依赖这个门面，不要深挖子目录路径。导出表里同时包含常量（`ALGORITHM_TYPES`、`DISPLAY_SYSTEM_SCHEMA_VERSION`、`PROTOCOL_FRAMING_TYPES`……）和工厂函数 |
-| `appRuntimeFactory.js` | 应用级装配，203 行。`createAppRuntime` 把发现（`createDisplaySystemRuntimeDiscovery`）、工作区（`createDisplaySystemWorkspaceService`）、运行时控制器（`createDisplaySystemRuntimeController`）和串口协议预设（`loadSerialProtocolPresets` / `resolveUserPresetDirectory`）组装成一个对象。同时导出 `buildRuntimeBindingSnapshot` | 这是 `server.js` 唯一需要调的扩展宿主入口。加新能力时优先挂在返回对象上，而不是让 `server.js` 再多 require 一个子目录文件 |
+| `index.js` | 扩展宿主的公共门面。把 `manifest/`、`runtime/`、`workspace/`、`agent-apps/` 的能力和协议能力统一从一处导出 | **只做再导出，不含逻辑。** 外部应该只依赖这个门面，不要深挖子目录路径 |
+| `appRuntimeFactory.js` | 应用级装配。把展示系统发现/工作区/运行控制器、Agent App service 和串口协议预设组装成统一对象 | 这是 `server.js` 唯一需要调的扩展宿主入口；新增能力优先挂在返回对象上 |
 
 ## 子目录逐文件说明
 
@@ -162,3 +172,4 @@ npm test
 | `manifest/` | 7 | [manifest/README.md](./manifest/README.md) —— 声明、校验、翻译成运行时定义 |
 | `runtime/` | 9 | [runtime/README.md](./runtime/README.md) —— 发现 → 计划 → 绑定 → 分发 → 处理 |
 | `workspace/` | 1 | [workspace/README.md](./workspace/README.md) —— Builder 后端 |
+| `agent-apps/` | 2 | [agent-apps/README.md](./agent-apps/README.md) —— 隔离渲染包安装与静态文件边界 |

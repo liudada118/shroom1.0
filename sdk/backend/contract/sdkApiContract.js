@@ -1,5 +1,5 @@
 const API_VERSION = 'v1';
-const SDK_CONTRACT_VERSION = '2026-08-31';
+const SDK_CONTRACT_VERSION = '2026-09-01';
 
 function deepFreeze(value) {
   if (!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
@@ -26,6 +26,10 @@ const HTTP_ROUTES = Object.freeze({
   channels: '/api/channels',
   wsStatus: '/api/ws/status',
   sdkContract: '/api/sdk/contract',
+  agentApps: '/api/agent-apps',
+  agentAppReload: '/api/agent-apps/reload',
+  agentAppPolicy: '/api/agent-apps/policy',
+  agentAppFiles: '/api/agent-apps/:id/files/*',
     displaySystems: '/api/display-systems',
     displaySystemById: '/api/display-systems/:id',
     displaySystemCatalog: '/api/display-systems/catalog',
@@ -42,6 +46,7 @@ const HTTP_ROUTES = Object.freeze({
   serialRefresh: '/api/serial/refresh',
   serialAutoConnectHandGloveDouble: '/api/serial/auto-connect-hand-glove-double',
   serialProtocols: '/api/serial/protocols',
+  serialProtocolDetect: '/api/serial/protocol-detect',
   sensorCurrent: '/api/sensor/current',
   sensorType: '/api/sensor/type',
   historyLoad: '/api/history/load',
@@ -173,6 +178,78 @@ function buildSdkContractSnapshot({
       },
       channels,
     },
+    agentApps: {
+      capability: 'sandboxed-renderer-apps',
+      schemaVersion: 1,
+      rendererIdPattern: 'agent:<appId>',
+      permissions: ['sensor.read'],
+      routes: {
+        list: HTTP_ROUTES.agentApps,
+        install: HTTP_ROUTES.agentApps,
+        reload: HTTP_ROUTES.agentAppReload,
+        policy: HTTP_ROUTES.agentAppPolicy,
+        files: HTTP_ROUTES.agentAppFiles,
+      },
+      installShape: {
+        manifest: 'AgentAppManifestV1',
+        files: [{ path: 'package-relative string', encoding: 'utf8|base64', content: 'string' }],
+        overwrite: 'boolean (optional; defaults to false)',
+      },
+      writeOriginPolicy: 'browser Origin must be loopback; native local clients without Origin are allowed',
+      descriptorShape: {
+        id: 'string',
+        name: 'string',
+        version: 'semantic-version string',
+        rendererId: 'agent:<appId>',
+        renderer: {
+          id: 'string',
+          label: 'string',
+          entry: 'package-relative string',
+          height: 'integer 160..2000',
+        },
+        permissions: ['sensor.read'],
+        entryUrl: '/api/agent-apps/:id/files/*',
+        editable: true,
+      },
+      limits: {
+        maximumFiles: 128,
+        maximumDecodedBytesPerFile: 25165824,
+        maximumDecodedBytesTotal: 33554432,
+        maximumPortableRelativePathLength: 240,
+      },
+      errorCodes: [
+        'AGENT_APP_INVALID',
+        'AGENT_APP_EXISTS',
+        'AGENT_APP_NOT_FOUND',
+        'AGENT_APP_FILE_INVALID',
+        'AGENT_APP_FILE_NOT_FOUND',
+        'AGENT_APP_LIMIT_EXCEEDED',
+        'AGENT_APP_INSTALL_FAILED',
+        'AGENT_APP_DISCOVERY_FAILED',
+        'AGENT_APP_POLICY_NOT_FOUND',
+        'AGENT_APP_POLICY_INVALID',
+        'AGENT_APP_SERVICE_UNAVAILABLE',
+        'AGENT_APP_REQUEST_FAILED',
+        'AGENT_APP_ORIGIN_FORBIDDEN',
+      ],
+      messageProtocol: {
+        transport: 'window.postMessage',
+        schemaVersion: 1,
+        envelope: {
+          type: 'shroom.renderer.*',
+          schemaVersion: 1,
+          payload: 'JSON-safe object',
+        },
+        hostToRenderer: {
+          init: 'shroom.renderer.init',
+          frame: 'shroom.renderer.frame',
+        },
+        rendererToHost: {
+          ready: 'shroom.renderer.ready',
+          error: 'shroom.renderer.error',
+        },
+      },
+    },
     serial: {
       roles: listSerialRoles(),
       aliases: SERIAL_ROLE_ALIASES,
@@ -180,6 +257,19 @@ function buildSdkContractSnapshot({
       // 可用的串口协议预设摘要。完整的 protocol 段走 GET /api/serial/protocols，
       // 这里只给 id/label，让 SDK 不用先拉一遍列表就知道有哪些预设可选。
       protocolPresets,
+      protocolDetection: {
+        route: HTTP_ROUTES.serialProtocolDetect,
+        statuses: ['matched', 'ambiguous', 'unknown'],
+        errorCodes: [
+          'SERIAL_PATH_REQUIRED',
+          'INVALID_CANDIDATE_IDS',
+          'UNKNOWN_PROTOCOL_PRESET',
+          'SERIAL_PORT_BUSY',
+          'SERIAL_STATUS_UNAVAILABLE',
+          'SERIAL_PROTOCOL_PROBE_FAILED',
+          'SERIAL_PROTOCOL_DETECT_FAILED',
+        ],
+      },
     },
     displaySystems: {
       schemaVersion: DISPLAY_SYSTEM_SCHEMA_VERSION,

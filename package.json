@@ -47,7 +47,8 @@
         "extraResource": [
           "./build",
           "./pack-resources/db",
-          "./pack-resources/python"
+          "./pack-resources/python",
+          "./pack-resources/agent"
         ],
         "ignore": [
           "^/venv($|/)",
@@ -58,6 +59,7 @@
           "^/data($|/)",
           "^/db($|/)",
           "^/pack-resources($|/)",
+          "^/agent-resources($|/)",
           "^/client($|/)",
           "^/docs($|/)",
           "^/sdk/frontend/(example|docs)($|/)",
@@ -119,6 +121,7 @@
       "!test-results/**",
       "!scripts/**",
       "!pack-resources/**",
+      "!agent-resources/**",
       "!data/**",
       "!db/**",
       "!python/**",
@@ -191,6 +194,13 @@
         "filter": [
           "**/*",
           "!**/config.txt"
+        ]
+      },
+      {
+        "from": "./agent-resources",
+        "to": "agent",
+        "filter": [
+          "**/*"
         ]
       }
     ],

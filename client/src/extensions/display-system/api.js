@@ -6,6 +6,11 @@
  * 整份 manifest，调用方只有 Builder 一个，就留在那个文件里。
  */
 
+import {
+  normalizeAgentRendererApps,
+  resolveAgentRendererEntryUrl,
+} from './agentRendererBridge.js';
+
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:19245';
 
 /**
@@ -25,20 +30,36 @@ export class DisplaySystemApiError extends Error {
   }
 }
 
-async function requestJson(path, options) {
+export async function requestJson(path, options) {
+  const requestOptions = options || {};
+  const headers = requestOptions.body
+    ? { 'content-type': 'application/json', ...(requestOptions.headers || {}) }
+    : requestOptions.headers;
   const response = await fetch(`${API_BASE}${path}`, {
-    headers: { 'content-type': 'application/json' },
-    ...options,
+    ...requestOptions,
+    ...(headers ? { headers } : {}),
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const details = Array.isArray(payload.details) ? payload.details : [];
     throw new DisplaySystemApiError(
-      `${payload.error || `HTTP ${response.status}`}${details.length ? `：${details.join('；')}` : ''}`,
+      `${payload.error || payload.msg || payload.message || `HTTP ${response.status}`}${details.length ? `：${details.join('；')}` : ''}`,
       { code: payload.code, status: response.status, details },
     );
   }
   return payload;
+}
+
+/**
+ * 读取可作为展示系统渲染器的 Agent 应用。HttpResult 在桥接 helper 中统一解包；相对
+ * entryUrl 必须以控制后端为基准，不能错误地落到 Vite/Electron 页面自身。
+ */
+export async function listAgentRendererApps() {
+  const payload = await requestJson('/api/agent-apps');
+  return normalizeAgentRendererApps(payload).flatMap((app) => {
+    const entryUrl = resolveAgentRendererEntryUrl(app.entryUrl, `${API_BASE}/`, app.appId);
+    return entryUrl ? [{ ...app, entryUrl, apiBase: API_BASE }] : [];
+  });
 }
 
 /**

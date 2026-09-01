@@ -6,7 +6,9 @@ const {
 } = require('@shroom/backend/contract/sdkApiContract.js');
 const { registerControlRoutes } = require('./controlRoutes');
 const { registerReportRoutes } = require('./reportRoutes');
+const HttpResult = require('./HttpResult');
 const { loadSerialProtocolPresets } = require('@shroom/backend/protocol/presets/index.js');
+const { createSerialProtocolProbeService } = require('../../serial/serialProtocolProbeService');
 
 /**
  * 取串口协议预设的摘要，塞进 SDK contract。
@@ -78,11 +80,78 @@ function createJsonBodyErrorHandler(logger) {
   };
 }
 
+function createUnavailableAgentAppService() {
+  const unavailable = () => {
+    const error = new Error('agent app service is unavailable');
+    error.code = 'AGENT_APP_SERVICE_UNAVAILABLE';
+    error.httpStatus = 503;
+    throw error;
+  };
+  return {
+    getStatus: () => ({ apps: [], errors: [] }),
+    install: unavailable,
+    readPolicy: () => {
+      const error = new Error('agent app policy is not available');
+      error.code = 'AGENT_APP_POLICY_NOT_FOUND';
+      error.httpStatus = 404;
+      throw error;
+    },
+    reload: unavailable,
+    resolveStaticFile: unavailable,
+  };
+}
+
+/**
+ * Agent App 安装会把用户提供的文件写进 userData。浏览器请求若带 Origin，只接受本机
+ * loopback 页面；无 Origin 的本地 CLI/Agent 调用继续允许。这样全局历史 CORS 配置不会让
+ * 任意公网网页借用户浏览器向 localhost 静默安装渲染包。
+ */
+function assertAgentAppWriteOrigin(req) {
+  const rawOrigin = String(req.get('origin') || '').trim();
+  if (!rawOrigin) return;
+  try {
+    const origin = new URL(rawOrigin);
+    const loopback = ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(origin.hostname);
+    if (['http:', 'https:'].includes(origin.protocol) && loopback) return;
+  } catch {
+    // 统一走下面的稳定错误；不能把 URL 解析细节暴露成 500。
+  }
+  const error = new Error('agent app writes are allowed only from a local client');
+  error.code = 'AGENT_APP_ORIGIN_FORBIDDEN';
+  error.httpStatus = 403;
+  throw error;
+}
+
+function buildAgentAppContentSecurityPolicy(req, appId) {
+  const rawHost = String(req.get('host') || '127.0.0.1');
+  const host = /^[A-Za-z0-9.:[\]-]+$/.test(rawHost) ? rawHost : '127.0.0.1';
+  const scheme = req.protocol === 'https' ? 'https' : 'http';
+  const fileSource = `${scheme}://${host}${HTTP_ROUTES.agentApps}/${encodeURIComponent(appId)}/files/`;
+  return [
+    "default-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "navigate-to 'none'",
+    // 主前端与 API 使用不同 loopback 端口；只允许本机前端承载 sandbox iframe。
+    'frame-ancestors http://127.0.0.1:* http://localhost:*',
+    "frame-src 'none'",
+    "object-src 'none'",
+    `script-src ${fileSource}`,
+    `style-src ${fileSource} 'unsafe-inline'`,
+    `img-src ${fileSource} data: blob:`,
+    `font-src ${fileSource} data:`,
+    `media-src ${fileSource} blob:`,
+    `connect-src ${fileSource}`,
+    `worker-src ${fileSource} blob:`,
+  ].join('; ');
+}
+
 /**
  * 创建 HTTP 应用并挂载控制接口、通道状态接口和报表接口。
  * server.js 只负责传入运行时依赖，HTTP 路由定义集中在这里。
  */
 function createHttpApp({
+  agentAppService,
   controlCommandService,
   getChannelBusStatus,
   getDisplaySystemById = () => null,
@@ -101,16 +170,94 @@ function createHttpApp({
   serialManager,
   // 用户自定义串口协议预设目录。打包之后用户往这里丢 JSON 就能加协议，不用重新构建。
   serialProtocolDirectories = [],
+  serialProtocolProbeService,
   reloadDisplaySystems = () => ({}),
   saveDisplaySystem = () => null,
   saveDisplaySystemDisplaySection = () => null,
   duplicateDisplaySystem = () => null,
 }) {
+  const agentApps = agentAppService || createUnavailableAgentAppService();
+  const protocolProbeService = serialProtocolProbeService || createSerialProtocolProbeService({
+    serialManager,
+    serialProtocolDirectories,
+    logger,
+  });
   const httpApp = express();
   httpApp.use(cors());
   httpApp.use(express.json({ limit: '50mb' }));
   httpApp.use(express.urlencoded({ limit: '50mb', extended: true }));
   httpApp.use(createJsonBodyErrorHandler(logger));
+
+  function respondAgentAppError(res, error) {
+    const status = Number(error.httpStatus) || 500;
+    const result = new HttpResult(1, {}, error.message || 'agent app request failed');
+    result.errorCode = error.code || 'AGENT_APP_REQUEST_FAILED';
+    res.status(status).json(result);
+  }
+
+  httpApp.get(HTTP_ROUTES.agentApps, (req, res) => {
+    try {
+      res.json(new HttpResult(0, agentApps.getStatus(), 'success'));
+    } catch (error) {
+      logger?.warn?.('[HTTP] list agent apps failed', error.message || error);
+      respondAgentAppError(res, error);
+    }
+  });
+
+  httpApp.post(HTTP_ROUTES.agentApps, (req, res) => {
+    try {
+      assertAgentAppWriteOrigin(req);
+      const result = agentApps.install(req.body || {});
+      res.status(req.body?.overwrite === true ? 200 : 201).json(new HttpResult(0, result, 'success'));
+    } catch (error) {
+      logger?.warn?.('[HTTP] install agent app failed', error.message || error);
+      respondAgentAppError(res, error);
+    }
+  });
+
+  httpApp.post(HTTP_ROUTES.agentAppReload, (req, res) => {
+    try {
+      assertAgentAppWriteOrigin(req);
+      res.json(new HttpResult(0, agentApps.reload(), 'success'));
+    } catch (error) {
+      logger?.warn?.('[HTTP] reload agent apps failed', error.message || error);
+      respondAgentAppError(res, error);
+    }
+  });
+
+  httpApp.get(HTTP_ROUTES.agentAppPolicy, (req, res) => {
+    try {
+      res.json(new HttpResult(0, { policy: agentApps.readPolicy() }, 'success'));
+    } catch (error) {
+      logger?.warn?.('[HTTP] read agent app policy failed', error.message || error);
+      respondAgentAppError(res, error);
+    }
+  });
+
+  // Express 5 的通配符必须命名；filePath 在多段路径时是数组。
+  httpApp.get(`${HTTP_ROUTES.agentApps}/:id/files/*filePath`, (req, res) => {
+    try {
+      const requestedPath = Array.isArray(req.params.filePath)
+        ? req.params.filePath.join('/')
+        : req.params.filePath;
+      const filePath = agentApps.resolveStaticFile(req.params.id, requestedPath);
+      res.set({
+        'Content-Security-Policy': buildAgentAppContentSecurityPolicy(req, req.params.id),
+        // sandbox iframe 不带 allow-same-origin，document origin 会变成 opaque；
+        // 这里必须允许同包外部 JS/CSS/GLB 被取到，访问边界由精确 path CSP 与服务端路径校验承担。
+        'Cross-Origin-Resource-Policy': 'cross-origin',
+        'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), serial=(), usb=(), bluetooth=(), payment=()',
+        'Referrer-Policy': 'no-referrer',
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'no-store',
+      });
+      res.type(filePath);
+      res.sendFile(filePath);
+    } catch (error) {
+      logger?.warn?.('[HTTP] read agent app file failed', error.message || error);
+      respondAgentAppError(res, error);
+    }
+  });
 
   httpApp.get(HTTP_ROUTES.channels, (req, res) => {
     res.json({
@@ -240,6 +387,7 @@ function createHttpApp({
     logger,
     serialManager,
     serialProtocolDirectories,
+    serialProtocolProbeService: protocolProbeService,
   });
 
   registerReportRoutes(httpApp, {
@@ -253,6 +401,8 @@ function createHttpApp({
 }
 
 module.exports = {
+  assertAgentAppWriteOrigin,
+  buildAgentAppContentSecurityPolicy,
   createHttpApp,
   createJsonBodyErrorHandler,
 };

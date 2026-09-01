@@ -150,6 +150,7 @@ export function readManifestChannelFrames(message, acceptedIdentities, sensors =
       sensorId,
       sensorLabel,
       outputChannel: channel,
+      timestamp: message.timestamp ?? message.payload?.timestamp ?? null,
       serial,
       renderValues,
       rawValues,

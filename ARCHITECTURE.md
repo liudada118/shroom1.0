@@ -1,6 +1,137 @@
 # 架构文档
 
-> 最后更新于：2026-08-31
+> 最后更新于：2026-09-01
+
+## 2026-09-01 前端 SDK `sensor.frame` 契约双模块入口
+
+`@shroom/frontend/contract/sensorFrameV1` 现在通过 package conditional exports 区分加载环境：ESM
+消费者进入 `sensorFrameV1.js`，CommonJS 消费者继续进入 `sensorFrameV1.cjs`。浏览器 ESM 入口使用
+冻结 v1 的 frame type、schema version 与 identity separator，并同时提供 default 和 named exports；
+测试会把这些值与稳定契约 JSON/CJS 对账，公共入口本身不依赖 Node 仍标记为实验性的 JSON modules。
+因此客户端以工作区 symlink 运行 Vite/Fast 开发服务时，不会再把仓库外的 `.cjs` 当原生
+ES module 后因缺少 `default` 导出而中断。SDK 内部 `normalizeFrame` 也统一使用 ESM 入口。
+
+CommonJS 入口没有删除，Node/Electron 旧调用方无需迁移。契约测试通过公开包子路径分别触发
+conditional `import` / `require`，并对合法帧、未来版本、身份冲突、
+缺失 value、字符串样本与非有限数同时核对 ESM/CJS 行为；实测 Vite 开发服务已将客户端 import
+解析到 `sensorFrameV1.js`。Full 验证通过：后端 68 个测试文件、客户端 43 个文件 / 451 条、前端
+SDK 31 个文件 / 505 条，以及 lint、临时生产构建、两套 smoke 和性能基线全部通过。
+
+## 2026-09-01 平台内置 / Agent 双渲染通道
+
+### 产品边界
+
+展示系统现在有两条并存的显示路径。`heatmap`、`matrix`、`numMatrix`、`pointGrid` 等平台内置
+渲染器仍是稳定默认，跟随客户端版本发布；当内置能力不足时，用户或 Agent 可以安装一个本地
+Agent Display App，并在同一 Builder 中选择它的稳定 ID `agent:<appId>`。两条路径只在最后的
+“如何画”处分叉，串口、协议、线序、算法、扣零、实时、存储、回放和 CSV 仍只走既有永久链路。
+Agent 渲染器不能自己打开串口、SQLite、WebSocket、Electron IPC、Node 或另建下载格式。
+
+完整二开仍分两层：schema v3 Display System 描述每路传感器、协议、线序/点位、后端算法、widget、
+图表和 renderer 选择；Agent Display App 只提供内置渲染无法表达的自定义画面。Agent 可生成新的
+JSON/JavaScript/Python 算法，但代码算法必须得到用户明确授权，并继续由现有算法宿主执行，不能藏在
+iframe 中形成另一份采集或存储真相。只需平台效果时不必安装 App，直接使用 catalog 返回的内置
+renderer 和 chartCards。
+
+### Agent App 包与安装 API
+
+Agent App schema v1 的最小目录是 `app.json + renderer.entry + 本地 assets`。manifest 显式声明
+安全 kebab id、语义版本、renderer label/entry/height 和唯一权限 `sensor.read`；入口与全部依赖必须
+位于包内，不允许绝对路径、反斜杠别名、`..`、远程 URL 或符号链接。安装接口为：
+
+- `GET /api/agent-apps`：列出已安装应用、`agent:<appId>` rendererId 与发现错误；
+- `POST /api/agent-apps`：提交 `{manifest, files, overwrite:false}`，文本用 UTF-8、二进制用 base64；
+- `POST /api/agent-apps/reload`：显式重新发现用户目录；
+- `GET /api/agent-apps/policy`：读取安装包内同版本的机器规则；
+- `GET /api/agent-apps/:id/files/*`：经过目录边界与真实路径校验后提供静态资源。
+
+可写位置固定为 `runtimeWritableRoot/agent-apps/<appId>/`，打包后即 Electron `userData`，不会改
+`app.asar`。安装先在同盘隐藏 staging 写完整包，再 rename 切换；默认拒绝同 ID，显式覆盖时保留旧
+目录作为 backup，只有新包重新发现成功后才清理，异常则回滚。单个坏 App 只进入 discovery errors，
+不得拖垮串口、采集和存储主服务。包限制与错误码由 `GET /api/sdk/contract` 的 `agentApps` 段公开，
+Agent 必须先读取实时契约，不能记忆常量。
+安装与 reload 写接口还会检查浏览器 `Origin`：只接受 loopback 页面；本机 CLI/Agent 不带
+`Origin` 时允许调用。该门禁避免全局历史 CORS 配置让公网网页借浏览器向 localhost 持久写包。
+
+### iframe 数据契约与隔离
+
+`AgentRendererHost` 使用只有 `allow-scripts` 的 sandbox iframe，刻意不授予 `allow-same-origin`。
+静态响应的 CSP 只放行当前 App 的 files 前缀以及必要的 data/blob 资源，父页面只允许 loopback origin；
+Node/Electron、浏览器设备权限、表单、嵌套 frame、外部连接和导航均不在能力面。该边界用于限制正常
+Agent 代码的权限，不宣称能抵御恶意代码的 CPU/内存消耗；所以 App 仍须由用户授权并完成验收。
+主前端自身的 CSP 只允许 `127.0.0.1:19245` / `localhost:19245` 作为子 frame 来源；若缺少这条
+`frame-src`，打包页面即使能查询 App 目录，也会在导航前被浏览器拦截。
+
+宿主与 iframe 只交换 `window.postMessage` schema v1。宿主先发
+`shroom.renderer.init`，再发 `shroom.renderer.frame`；iframe 只回
+`shroom.renderer.ready/error`。接收端用准确的 `iframe.contentWindow` / `window.parent` 校验 source，
+因为 opaque origin 不能作为身份依据。frame 是逐字段重建的 JSON-safe DTO，不会透传 React、Electron
+对象或串口句柄，包含当前路 `displaySystemId/sensorId/sensorLabel/sensorType/outputChannel/channelId`、
+`values/rawValues/matrix/metrics/algorithmMetrics/timestamp`、只读串口摘要，以及可选的多传感器
+`channels[]` 快照。数组坏点继续保留为 `null`，不会被重解释成 0；多路状态必须按完整 channelId
+保存，不能依赖 channels 顺序。
+iframe 每次触发 `load`（包括同 URL reload 或崩溃恢复）都会清空旧 ready/init 状态并重新发送 init，
+避免新 document 在未初始化时直接收到 frame 后永久卡死。
+
+Builder 与运行时都从同一目录 API 合并 Agent renderer；manifest 的 widget/profile/renderers 中保存
+`agent:<appId>`，内置 renderer 的注册表和懒加载方式保持不变。未安装、入口非法、加载超时或 iframe
+主动报错时只在对应 widget 显示错误，不回退成另一种数据语义。
+
+### 随安装包交付给 Agent 的规则
+
+`agent-resources/` 在 electron-builder 中通过 `extraResources`、在 Electron Forge 中通过
+`pack-resources/agent` 同步，二者都进入最终 `resources/agent/`，不再受主 asar 排除 Markdown 的规则
+影响。目录包含机器可读 `policy.json`、完整 Display System 生成 skill、Agent
+Display App 安装 skill，以及一个无网络依赖的 renderer 模板。规则要求先读 `/api/sdk/contract` 和
+`/api/agent-apps/policy`，默认不覆盖，明确区分业务身份与临时 COM，并在保存后逐路验证实时、存储、
+回放和 CSV。因规则随应用版本发布，Agent 不必读取仓库源码猜后端边界。
+
+协议 `decoding.valueCount`、定长 `framing.frameLength` 与展示几何也在 Builder/工作区正式分离：
+显式 valueCount/frameLength 描述线上一帧，`lineOrder/pointOrder/coordinateMap` 描述之后选择和摆放
+哪些点；只有协议未声明 valueCount 时才允许用几何点数补两者默认。这样协议自识别的完整帧数量和
+字节长度不会再被 Agent 导入的点位表静默覆盖。
+
+发布门禁新增 `agentAppPackaging.test.js`，同时锁定两种打包器的 `resources/agent/` 映射、主页面
+iframe CSP、policy/SDK 限额与错误码、模板外部脚本规则；这些配置任一漂移都会让后端全量测试失败。
+本轮验证结果：后端 68 个测试文件、客户端 43 个文件 / 451 条、前端 SDK 31 个文件 / 504 条、
+后端 smoke 10 项、前端 smoke 32 项全部通过；改动前端文件 ESLint 零告警，生产构建通过。
+
+## 2026-09-01 有限协议自动识别与隔离串口探测
+
+### 识别边界
+
+协议自识别的候选唯一来自现有串口协议预设加载器（内置预设与用户预设使用同一入口），不在
+Builder、HTTP 或探测器里维护第二份写死名单。当前自动识别覆盖已有预设中能够由线上的
+`baudRate + delimiter + exact valueCount` 唯一判断的协议；固定帧长协议以及仍缺完整 schema 的
+协议继续要求人工选择，避免用“猜中一个看起来像的”替代稳定契约。
+
+识别器忽略采样首尾可能被截断的碎片，只统计完整帧；至少观察 5 帧且有效帧比例达到 80% 才允许
+命中。分隔符跨串口数据块时仍能重组；若多个候选具有相同线特征则返回 `ambiguous`，没有足够证据
+则返回 `unknown`，二者都不会修改传感器草稿。匹配成功时返回预设的完整 `protocol`，包括
+`framing.includeDelimiter`、`validation.headerOffset`、校验范围是否显式等字段，手选预设与自动识别
+走同一份映射，避免保存后语义漂移。
+
+### 隔离探测与串口占用
+
+探测使用短生命周期的原始串口句柄，逐个波特率采样，完全不接入全局 parser、实时发布、算法、
+SQLite、回放或 CSV 链路。共享的串口路径 reservation 会阻止运行态 `SerialManager.start()` 与探测
+同时打开同一 COM；已经被运行态打开或正在打开的端口直接以 `SERIAL_PORT_BUSY` fail closed。
+单个波特率的驱动失败只记入诊断并继续其它候选，全部波特率均失败才返回
+`SERIAL_PROTOCOL_PROBE_FAILED`；成功、未知、歧义或异常路径都会在 `finally` 中释放句柄与 reservation。
+
+### API、SDK 与 Builder
+
+后端新增 `POST /api/serial/protocol-detect`，请求为 `{ path, candidateIds? }`，正常响应状态为
+`matched | ambiguous | unknown`；失败响应提供稳定 `errorCode` 和 HTTP status。后端 SDK 与前端
+`SensorClient` 暴露同一能力。Builder 在每个 sensor 页签中临时选择 COM 并执行一次识别：COM 只用于
+本次探测、不写入 manifest；只有 `matched` 会回填当前传感器的完整协议，歧义、未知、忙碌和失败
+均保留原配置。切换 sensor、手动修改协议或重新发起探测会使旧响应失效，探测期间禁止保存或进入
+下一步，避免迟到响应覆盖人工选择。
+
+自识别只回答“这条串口正在说哪一种协议”，不会猜左手、右手、座椅或靠背。业务身份仍由
+`sensors[].id/label/outputChannel` 明确绑定，并继续沿用已冻结的多传感器契约、存储、下载与回放链路。
+软件级录制字节与 fake 串口覆盖已纳入回归；真实四串口并发插拔、驱动差异和长时间采集仍属于硬件
+验收项，不能用单元测试结果替代。
 
 ## 2026-08-31 多串口业务身份、动态存储、下载与回放
 
@@ -642,8 +773,9 @@ manifest 决定。
 
 本轮只借鉴统一管理和统一编排边界，没有复制 `E:\shroom` 中按波特率猜设备类型、向设备发送
 AT 指令读取标识、按固定帧长硬分支的实现。多个现有设备会共用相同波特率，直接照搬会误判设备，
-还可能改变硬件协议和历史数据语义；自动扫描、协议探测、稳定打开重试和持久设备标识映射需在
-录制帧与真机测试齐备后单独评审。
+还可能改变硬件协议和历史数据语义。有限协议探测已在 2026-09-01 按“预设候选 + 隔离采样 + 歧义
+不写配置”的边界补齐；自动判断设备业务身份、稳定打开重试和持久 USB 设备映射仍需录制帧与真机
+测试齐备后单独评审。
 
 本地 Electron 后端的 WebSocket 从 `19999/19998/19997` 三个物理 Server 收敛为一个
 `19999` Server。WebSocket 基础设施不再维护 `sit/back/head` 常量表或白名单；当前展示系统的
@@ -2634,6 +2766,8 @@ flowchart LR
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
+| 2026-09-01 | 前端 SDK 契约 ESM/CJS 双入口 | 修复 Vite/Fast 直接加载工作区 `.cjs` 时缺少 default export 的启动错误；浏览器走显式 ESM，Node/CommonJS 保持原入口，并以同组合法/非法帧对账两种实现。Vite 开发模块解析与 Full 10 项门禁均已实测通过。 |
+| 2026-09-01 | 有限协议自动识别闭环 | 候选统一读取串口协议预设，按波特率、分隔符与精确值数量识别并显式返回 matched/ambiguous/unknown；探测句柄与实时、存储、回放、CSV 隔离，共享路径 reservation 防止运行态抢占。后端 API、前后端 SDK 与 Builder 逐传感器交互已贯通；成功只回填当前 sensor 的完整协议，临时 COM 不落盘，角色身份不参与猜测。验证：后端 63/63 个测试文件、客户端 42 个文件/446 条、前端 SDK 31 个文件/504 条、后端 smoke 10 项、前端 smoke 32 项、改动文件 ESLint 与生产构建通过；真实多串口并发和长时稳定性保留为硬件验收。 |
 | 2026-08-31 | 多传感器身份 fail-closed | 新增可发布的 `@shroom/backend/identity` CommonJS 入口，统一构造/解析/校验 `displaySystemId:sensorId`；实时 canonical 帧拒绝冲突、缺失、多冒号、空 outputChannel 与未知版本，legacy 仅允许一致补齐；Display System 坏身份在 enqueue 前失败，不再落回旧入库。SDK smoke、npm pack dry-run 及后端全量 59 个测试文件通过。 |
 | 2026-08-31 | 多传感器配置、展示、存储、下载与回放闭环 | `sensors[].label` 定义左手/右手/座椅/靠背；Builder 逐路维护并保存 `sensors[] + definitions.sensors`，每张预览/运行时卡片按自身 source 使用对应通道、matrix 和 coordinateMap；Runtime 每帧附实际串口快照；SQLite、历史查询与 CSV 按 canonical `channelId` 隔离；回放以最长通道为时间锚点，其它路按最近 timestamp 对齐并记录 skew，缺 timestamp 的旧记录仍按下标兼容。后端 57 个测试文件、客户端 41 个文件 / 436 条、前端 SDK 30 个文件 / 491 条、lint 0 error 与生产构建通过；真实多串口插拔、异帧率长时采集仍列为硬件验收。 |
 | 2026-08-31 | 注释回改成短式，全 `backend/` 收官（6 批 + 1 次补漏） | 按你的「回改」决定，把批 1–3 的多段散文压成与批 4 一致的短式（一行干什么 + 每条一行的要点 + `@param`/`@returns`）。**合计 39 个文件、+996/−1749（净 −753 行）**：A `0cfb09f` / B1 `d40713b` / C1 `55ca4a9` / D `d78bf26` / C2 `289a762` / E `212d1b0` / 补漏 `8a9d95c`，每个提交都按路径 stage（工作区始终有并行分支的未提交改动）。判据中途换过：先按「连续注释行 ≥12」，后改成量**散文行**（排除空行与 `@` 标签行），批 B1 起 >6 行、批 D 起 >10 行 —— 7–10 行那一档大多已经就是批 4 认可的形状。**6–10 行的 JSDoc 一字未动。** 机制推演不丢，移到本文档的批次小节与四张台账。原计划的批 B2 实测无事可做（唯一命中是计数器把 `@param` 续行算成散文的假阳性）。收官后 `runtime/`、`extensions/` 归零，`kernel/` 剩 16 块**刻意留在 11–16 行**（每块都有多条独立的「改了会坏但不报错」⚠️，其中授权那块属高风险类别），不要回头再压。每批验证：`node --check` 全过、acorn 逐 token 比对证明纯注释改动、57 个后端测试文件全过、覆盖率一处未降。 |
@@ -2780,7 +2914,7 @@ flowchart LR
 
 ---
 
-> 本文档由 Codex 自动生成和维护。最后更新于：2026-08-31
+> 本文档由 Codex 自动生成和维护。最后更新于：2026-09-01
 
 ## 2026-07-07 Display Systems Runtime 定义与复杂线序迁移
 
@@ -3605,6 +3739,8 @@ flowchart LR
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-09-01 | codeOpi | 修复缺陷 / 契约兼容 | `@shroom/frontend/contract/sensorFrameV1` 增加 conditional exports：浏览器与 ESM 使用显式 `sensorFrameV1.js`，CommonJS 保留 `.cjs`；SDK normalizeFrame 同步迁移，双实现以合法/非法 canonical 帧回归对账，消除 Vite/Fast 开发模式的缺省导出错误。 |
+| 2026-09-01 | codeOpi | 新增功能 / 契约强化 | 完成有限协议自动识别闭环：候选复用内置与用户协议预设，隔离串口探测以完整帧、最少样本和有效率门槛区分命中/歧义/未知；共享路径 reservation 防止探测与运行态争抢同一 COM。新增 HTTP 与前后端 SDK 入口，Builder 逐 sensor 临时选口并只在唯一命中时回填完整协议；并发迟到响应、人工修改、切换传感器和保存竞态均 fail closed。完整验证见项目进度同日记录。 |
 | 2026-08-31 | codeOpi | 契约冻结 / 缺陷修复 | 冻结 `shroom.multi-sensor` contract v1：前后端 SDK 随包发布同内容契约并以漂移测试对账，后端 API 暴露契约版本与兼容策略；manifest v3 强制显式 `sensors[].id`，canonical 帧/身份/数值数组严格校验，坏帧触发 `invalidFrame` 而不降级；SQLite、CSV、回放、零点统一 canonical identity，回放诊断字段完整穿透。完整验证见项目进度同日记录。 |
 | 2026-08-31 | codeOpi | 缺陷修复 / 契约强化 | 新增 `@shroom/backend/identity` 可发布 CommonJS helper，严格锁定 `channelId === displaySystemId:sensorId` 且禁止冒号歧义；`sensor.frame` 冲突/缺失身份、空 outputChannel 或未知版本直接丢帧，legacy 仅从一致字段补齐；display-system 入库前二次校验，坏身份不再绕回 legacy 入库。 |
 | 2026-08-31 | codeOpi | 修复缺陷 / 契约强化 | 多通道历史回放改用最长通道的 timestamp 时间轴，较短或不同帧率通道取最近时间帧（等距取较早帧），并输出 `sourceIndex/alignedAt/skewMs`；无 timestamp 的旧记录继续按下标回放，UI 时间轴与播放间隔检测使用同一锚点。 |

@@ -4,6 +4,9 @@ const {
 const {
   createDisplaySystemWorkspaceService,
 } = require('./workspace/displaySystemWorkspaceService');
+const {
+  createAgentAppService,
+} = require('./agent-apps/agentAppService');
 const path = require('path');
 const {
   buildRuntimeBindingSnapshot,
@@ -31,6 +34,11 @@ function createAppRuntime({
   runtimeResourceRoot,
   runtimeWritableRoot,
 }) {
+  const agentAppService = createAgentAppService({
+    logger,
+    runtimeResourceRoot,
+    runtimeWritableRoot,
+  });
   const displaySystemRuntimeDiscovery = createDisplaySystemRuntimeDiscovery({
     logger,
     runtimeResourceRoot,
@@ -83,6 +91,8 @@ function createAppRuntime({
   }
 
   return {
+    // Agent 生成的展示包只作为静态浏览器资源加载；宿主不会执行包内 JS/Node 代码。
+    agentApps: agentAppService,
     displaySystems: {
       bindRuntimeChannels: ({
         serialManager,

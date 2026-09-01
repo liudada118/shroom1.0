@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   Button,
   Checkbox,
@@ -59,9 +65,24 @@ import {
   getInvalidBuilderSensorIds,
   normalizeBuilderSensorIds,
 } from './builderMultiSensor.js';
+import {
+  buildDetectedProtocolFormPatch,
+  buildProtocolGeometryDefaults,
+  buildSerialPortOptions,
+  buildSerialTemplateFormPatch,
+  formatProtocolCandidateLabels,
+  getDetectableProtocolCandidateIds,
+  unwrapControlApiData,
+} from './protocolAutoDetect.js';
+import { listAgentRendererApps, requestJson } from './api.js';
+import AgentRendererHost from './AgentRendererHost.jsx';
+import {
+  isAgentRendererId,
+  parseAgentRendererId,
+} from './agentRendererBridge.js';
 import './DisplaySystemBuilder.css';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:19245';
+const EMPTY_PROTOCOL_DETECTION = Object.freeze({ status: 'idle' });
 
 const DEFAULT_VALUES = {
   id: '',
@@ -77,14 +98,17 @@ const DEFAULT_VALUES = {
   framingType: 'fixedLength',
   frameLength: null,
   delimiter: '',
+  includeDelimiter: false,
   dataBits: 8,
   valueType: 'uint8',
   byteOffset: 0,
   valueCount: null,
   // 帧校验默认关闭：帧头留空、校验算法选 none，行为与引入这组字段之前一致。
   validationHeader: '',
+  validationHeaderOffset: 0,
   checksumType: 'none',
   checksumByteOffset: -1,
+  checksumRangeExplicit: true,
   checksumRangeStart: 0,
   checksumRangeEnd: -1,
   lineOrderMode: 'identity',
@@ -132,13 +156,16 @@ const SENSOR_FORM_FIELDS = [
   'framingType',
   'frameLength',
   'delimiter',
+  'includeDelimiter',
   'dataBits',
   'valueType',
   'byteOffset',
   'valueCount',
   'validationHeader',
+  'validationHeaderOffset',
   'checksumType',
   'checksumByteOffset',
+  'checksumRangeExplicit',
   'checksumRangeStart',
   'checksumRangeEnd',
   'lineOrderMode',
@@ -156,6 +183,27 @@ const SENSOR_FORM_FIELDS = [
   'max',
   'zeroBelow',
 ];
+
+const PROTOCOL_FORM_FIELDS = new Set([
+  'serialTemplate',
+  'transportType',
+  'baudRate',
+  'framingType',
+  'frameLength',
+  'delimiter',
+  'includeDelimiter',
+  'dataBits',
+  'valueType',
+  'byteOffset',
+  'valueCount',
+  'validationHeader',
+  'validationHeaderOffset',
+  'checksumType',
+  'checksumByteOffset',
+  'checksumRangeExplicit',
+  'checksumRangeStart',
+  'checksumRangeEnd',
+]);
 
 function cloneBuilderValue(value) {
   if (Array.isArray(value)) return value.map(cloneBuilderValue);
@@ -252,16 +300,8 @@ function getMetricPanel(metricId, sidebar = {}) {
   return 'pressure';
 }
 
-async function requestJson(path, options) {
-  const response = await fetch(`${API_BASE}${path}`, options);
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const details = Array.isArray(payload.details) && payload.details.length
-      ? `：${payload.details.join('；')}`
-      : '';
-    throw new Error(`${payload.error || `HTTP ${response.status}`}${details}`);
-  }
-  return payload;
+async function requestControlApi(path, options) {
+  return unwrapControlApiData(await requestJson(path, options));
 }
 
 function parseDefinition(value, label) {
@@ -599,13 +639,17 @@ function buildFormValues(editor) {
     framingType: primaryProtocol.framing?.type || 'fixedLength',
     frameLength: primaryProtocol.framing?.frameLength || 1024,
     delimiter: formatByteSequence(primaryProtocol.framing?.delimiter),
+    includeDelimiter: primaryProtocol.framing?.includeDelimiter === true,
     dataBits: primaryProtocol.decoding?.valueType?.includes('16') ? 12 : 8,
     valueType: primaryProtocol.decoding?.valueType || 'uint8',
     byteOffset: primaryProtocol.decoding?.byteOffset || 0,
-    valueCount: pointOrderInfo?.pointCount || primaryProtocol.decoding?.valueCount || null,
+    // 协议点数描述线上帧，几何点数描述如何展示；两者不同时必须保留协议真值。
+    valueCount: primaryProtocol.decoding?.valueCount || pointOrderInfo?.pointCount || null,
     validationHeader: formatByteSequence(primaryProtocol.validation?.header),
+    validationHeaderOffset: primaryProtocol.validation?.headerOffset ?? 0,
     checksumType: primaryProtocol.validation?.checksum?.type || 'none',
     checksumByteOffset: primaryProtocol.validation?.checksum?.byteOffset ?? -1,
+    checksumRangeExplicit: Array.isArray(primaryProtocol.validation?.checksum?.range),
     checksumRangeStart: primaryProtocol.validation?.checksum?.range?.[0] ?? 0,
     checksumRangeEnd: primaryProtocol.validation?.checksum?.range?.[1] ?? -1,
     lineOrderMode: manifest.metadata?.builder?.lineOrderMode
@@ -804,13 +848,20 @@ function compileSensorDraftForSave(draft, { multiple = false } = {}) {
   const trimmedHeader = String(values.validationHeader || '').trim();
   const frameValidation = trimmedHeader || hasChecksum
     ? {
-      ...(trimmedHeader ? { header: trimmedHeader } : {}),
+      ...(trimmedHeader
+        ? {
+          header: trimmedHeader,
+          headerOffset: Number(values.validationHeaderOffset) || 0,
+        }
+        : {}),
       ...(hasChecksum
         ? {
           checksum: {
             type: values.checksumType,
             byteOffset: values.checksumByteOffset ?? -1,
-            range: [values.checksumRangeStart ?? 0, values.checksumRangeEnd ?? -1],
+            ...(values.checksumRangeExplicit === false
+              ? {}
+              : { range: [values.checksumRangeStart ?? 0, values.checksumRangeEnd ?? -1] }),
           },
         }
         : {}),
@@ -820,13 +871,17 @@ function compileSensorDraftForSave(draft, { multiple = false } = {}) {
     ...(previousSensor.protocol || {}),
     baudRate: values.baudRate,
     framing: values.framingType === 'delimiter'
-      ? { type: 'delimiter', delimiter: values.delimiter }
+      ? {
+        type: 'delimiter',
+        delimiter: values.delimiter,
+        includeDelimiter: values.includeDelimiter === true,
+      }
       : { type: 'fixedLength', frameLength: values.frameLength },
     decoding: {
       ...(previousSensor.protocol?.decoding || {}),
       valueType: values.valueType,
       byteOffset: values.byteOffset,
-      valueCount: normalizedPointOrder.pointCount,
+      valueCount: Number(values.valueCount) || normalizedPointOrder.pointCount,
     },
   };
   if (frameValidation) protocol.validation = frameValidation;
@@ -918,6 +973,11 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
   const [form] = Form.useForm();
   const [createForm] = Form.useForm();
   const [catalog, setCatalog] = useState(null);
+  const [agentRendererRegistry, setAgentRendererRegistry] = useState({
+    status: 'loading',
+    apps: [],
+    error: '',
+  });
   const [systems, setSystems] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -927,6 +987,14 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
   const [activeStep, setActiveStep] = useState('connection');
   const [sensorDrafts, setSensorDrafts] = useState([]);
   const [activeSensorId, setActiveSensorId] = useState(null);
+  const [serialPorts, setSerialPorts] = useState([]);
+  const [serialPortsLoading, setSerialPortsLoading] = useState(false);
+  const [serialPortsError, setSerialPortsError] = useState('');
+  const [probePortBySensor, setProbePortBySensor] = useState({});
+  const [protocolDetectionBySensor, setProtocolDetectionBySensor] = useState({});
+  const activeSensorIdRef = useRef(null);
+  const probePortBySensorRef = useRef({});
+  const protocolProbeGenerationRef = useRef(0);
   const systemId = Form.useWatch('id', form);
   const systemName = Form.useWatch('name', form);
   const sensorType = Form.useWatch('sensorType', form);
@@ -936,6 +1004,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
   const frameLength = Form.useWatch('frameLength', form);
   const baudRate = Form.useWatch('baudRate', form);
   const dataBits = Form.useWatch('dataBits', form);
+  const valueCount = Form.useWatch('valueCount', form);
   const ports = Form.useWatch('ports', form);
   const createPorts = Form.useWatch('ports', createForm);
   const lineOrderMode = Form.useWatch('lineOrderMode', form);
@@ -968,6 +1037,15 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
   }, [systemId]);
   useMainWebSocket({ onMessage: handlePreviewMessage });
 
+  useEffect(() => {
+    activeSensorIdRef.current = activeSensorId;
+  }, [activeSensorId]);
+
+  useEffect(() => () => {
+    protocolProbeGenerationRef.current += 1;
+    activeSensorIdRef.current = null;
+  }, []);
+
   const loadIndex = useCallback(async () => {
     const [systemsPayload, catalogPayload] = await Promise.all([
       requestJson('/api/display-systems'),
@@ -977,13 +1055,58 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     setCatalog(catalogPayload.catalog || {});
   }, []);
 
+  const loadSerialPorts = useCallback(async () => {
+    setSerialPortsLoading(true);
+    setSerialPortsError('');
+    try {
+      const payload = await requestControlApi('/api/serial/ports');
+      setSerialPorts(Array.isArray(payload?.ports) ? payload.ports : []);
+    } catch (error) {
+      setSerialPortsError(error.message || '串口列表读取失败');
+    } finally {
+      setSerialPortsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadIndex()
       .catch((error) => message.error(error.message))
       .finally(() => setLoading(false));
   }, [loadIndex]);
 
+  useEffect(() => {
+    let active = true;
+    listAgentRendererApps()
+      .then((apps) => {
+        if (active) setAgentRendererRegistry({ status: 'ready', apps, error: '' });
+      })
+      .catch((error) => {
+        if (active) {
+          setAgentRendererRegistry({
+            status: 'error',
+            apps: [],
+            error: error.message || 'Agent 渲染器目录读取失败',
+          });
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    loadSerialPorts();
+  }, [loadSerialPorts]);
+
+  const resetProtocolProbeUi = useCallback(() => {
+    protocolProbeGenerationRef.current += 1;
+    probePortBySensorRef.current = {};
+    setProbePortBySensor({});
+    setProtocolDetectionBySensor({});
+  }, []);
+
   const startNew = useCallback(() => {
+    resetProtocolProbeUi();
     createForm.resetFields();
     createForm.setFieldsValue({
       id: '',
@@ -993,7 +1116,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     });
     setEditorAccess(null);
     setCreateModalOpen(true);
-  }, [createForm]);
+  }, [createForm, resetProtocolProbeUi]);
 
   const createDraft = useCallback(async () => {
     try {
@@ -1033,6 +1156,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
   }, [createForm, form, systems]);
 
   const editSystem = useCallback(async (id) => {
+    resetProtocolProbeUi();
     setLoading(true);
     try {
       const payload = await requestJson(`/api/display-systems/${encodeURIComponent(id)}/editor`);
@@ -1054,14 +1178,20 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     } finally {
       setLoading(false);
     }
-  }, [form]);
+  }, [form, resetProtocolProbeUi]);
 
   const rendererOptions = useMemo(
-    () => MATRIX_DISPLAY_MODES.map((item) => ({
-      value: item.rendererId,
-      label: item.label,
-    })),
-    [],
+    () => [
+      ...MATRIX_DISPLAY_MODES.map((item) => ({
+        value: item.rendererId,
+        label: item.label,
+      })),
+      ...agentRendererRegistry.apps.map((app) => ({
+        value: app.rendererId,
+        label: `Agent · ${app.label}`,
+      })),
+    ],
+    [agentRendererRegistry.apps],
   );
   const visualizationOptions = useMemo(
     () => (catalog?.visualizationAlgorithms || []).map((item) => ({ value: item.id, label: item.label })),
@@ -1079,6 +1209,28 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
   const selectedSerialTemplate = useMemo(
     () => catalog?.serialTemplates?.find((item) => item.id === serialTemplate),
     [catalog, serialTemplate],
+  );
+  const detectableProtocolCandidateIds = useMemo(
+    () => getDetectableProtocolCandidateIds(catalog?.serialTemplates || []),
+    [catalog],
+  );
+  const serialPortOptions = useMemo(
+    () => buildSerialPortOptions(serialPorts),
+    [serialPorts],
+  );
+  const selectedProbePortPath = activeSensorId
+    ? (probePortBySensor[activeSensorId] || '')
+    : '';
+  const activeProtocolDetection = useMemo(
+    () => (activeSensorId
+      ? (protocolDetectionBySensor[activeSensorId] || EMPTY_PROTOCOL_DETECTION)
+      : EMPTY_PROTOCOL_DETECTION),
+    [activeSensorId, protocolDetectionBySensor],
+  );
+  const protocolDetectionInProgress = useMemo(
+    () => Object.values(protocolDetectionBySensor)
+      .some((state) => state?.status === 'detecting'),
+    [protocolDetectionBySensor],
   );
   const selectedDisplayTemplate = useMemo(
     () => MATRIX_DISPLAY_MODES.find((item) => item.id === displayTemplate)
@@ -1127,9 +1279,22 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     }),
     [coordinateMapInfo, matrixInfo, pointCount],
   );
+  const availableRenderers = useMemo(() => [
+    ...matrixRenderers,
+    ...agentRendererRegistry.apps.map((app) => ({
+      id: app.rendererId,
+      type: app.rendererId,
+      label: `Agent · ${app.label}`,
+      params: {},
+    })),
+  ], [agentRendererRegistry.apps, matrixRenderers]);
+  const agentRendererById = useMemo(
+    () => new Map(agentRendererRegistry.apps.map((app) => [app.rendererId, app])),
+    [agentRendererRegistry.apps],
+  );
   const selectedRendererDefinition = useMemo(
-    () => matrixRenderers.find((item) => item.id === rendererId),
-    [matrixRenderers, rendererId],
+    () => availableRenderers.find((item) => item.id === rendererId),
+    [availableRenderers, rendererId],
   );
   const renderMatrixInfo = useMemo(() => {
     if (!matrixInfo) return null;
@@ -1216,6 +1381,27 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
       sourceMatrix: previewSensorDefinitions[0]?.matrix,
       sourceCoordinateMap: previewSensorDefinitions[0]?.coordinateMap,
     };
+    const channels = previewSensorDefinitions.map((sensor) => {
+      const outputChannel = sensor.outputChannel || sensor.id;
+      const values = previewUsesDirectionData
+        ? createDirectionCheckFrame(sensor.previewPointCount || 0)
+        : (previewFrames[outputChannel] || previewFrames[sensor.id] || []);
+      return {
+        displaySystemId: systemId || '',
+        sensorId: sensor.id,
+        sensorLabel: sensor.label || sensor.id,
+        sensorType: sensor.type || sensorType || '',
+        outputChannel,
+        channelId: systemId && sensor.id ? `${systemId}:${sensor.id}` : sensor.id,
+        timestamp: null,
+        values,
+        rawValues: values,
+        matrix: sensor.matrix || { rows: 1, cols: values.length },
+        metrics: calculatePressureMetrics(values),
+        algorithmMetrics: {},
+        serial: null,
+      };
+    });
     return widgets.flatMap((widget) => {
       const geometry = resolveManifestWidgetGeometry({
         source: widget.source,
@@ -1240,6 +1426,8 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
         layout: geometry.coordinatePointLayout,
         metrics: calculatePressureMetrics(rawValues),
         channel: sourceChannel,
+        sourceSensor,
+        channels,
       }];
     });
   }, [
@@ -1250,6 +1438,8 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     previewFrames,
     previewSensorDefinitions,
     previewUsesDirectionData,
+    sensorType,
+    systemId,
   ]);
   const previewColormap = canvasConfig?.colormap || { id: DEFAULT_COLORMAP_ID };
   const previewOverlays = useMemo(
@@ -1257,9 +1447,10 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     [canvasConfig],
   );
   const bytesPerValue = Number(dataBits) === 12 ? 2 : 1;
+  const wireValueCount = Number(valueCount) > 0 ? Number(valueCount) : pointCount;
   const payloadBytes = framingType === 'fixedLength'
-    ? (Number(frameLength) || pointCount * bytesPerValue)
-    : pointCount * bytesPerValue;
+    ? (Number(frameLength) || wireValueCount * bytesPerValue)
+    : wireValueCount * bytesPerValue;
   const configurationSteps = [
     {
       id: 'connection',
@@ -1320,13 +1511,19 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
         );
       }
       const dataBitsValue = Number(form.getFieldValue('dataBits')) || 8;
+      const configuredValueCount = Number(form.getFieldValue('valueCount')) || 0;
+      const protocolGeometryDefaults = buildProtocolGeometryDefaults({
+        valueCount: configuredValueCount,
+        frameLength: form.getFieldValue('frameLength'),
+        pointCount: pointInfo.pointCount,
+        bytesPerValue: dataBitsValue === 12 ? 2 : 1,
+        fixedLength: form.getFieldValue('framingType') === 'fixedLength',
+      });
       form.setFieldsValue({
         coordinateMapJson: JSON.stringify(coordinateInfo.definition, null, 2),
         pointOrderJson: JSON.stringify(pointInfo.definition, null, 2),
-        valueCount: pointInfo.pointCount,
-        ...(form.getFieldValue('framingType') === 'fixedLength'
-          ? { frameLength: pointInfo.pointCount * (dataBitsValue === 12 ? 2 : 1) }
-          : {}),
+        // valueCount/frameLength 描述线上帧，坐标点数只在协议尚未声明时补默认。
+        ...protocolGeometryDefaults,
       });
       const shapeRatio = coordinateInfo.bounds.height >= coordinateInfo.bounds.width
         ? `1:${(coordinateInfo.bounds.height / coordinateInfo.bounds.width).toFixed(2)}`
@@ -1376,6 +1573,13 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
 
   const switchActiveSensor = useCallback((nextSensorId) => {
     if (!nextSensorId || nextSensorId === activeSensorId) return;
+    protocolProbeGenerationRef.current += 1;
+    activeSensorIdRef.current = nextSensorId;
+    setProtocolDetectionBySensor((current) => (
+      current[activeSensorId]?.status === 'detecting'
+        ? { ...current, [activeSensorId]: { status: 'idle' } }
+        : current
+    ));
     const committed = updateSensorDraftValues(
       sensorDrafts,
       activeSensorId,
@@ -1406,6 +1610,15 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     });
     const nextActiveId = safeIds.includes(activeSensorId) ? activeSensorId : (safeIds[0] || null);
     const nextActiveDraft = nextDrafts.find((draft) => draft.id === nextActiveId);
+    if (nextActiveId !== activeSensorId) {
+      protocolProbeGenerationRef.current += 1;
+      activeSensorIdRef.current = nextActiveId;
+      setProtocolDetectionBySensor((current) => (
+        current[activeSensorId]?.status === 'detecting'
+          ? { ...current, [activeSensorId]: { status: 'idle' } }
+          : current
+      ));
+    }
     setSensorDrafts(nextDrafts);
     setActiveSensorId(nextActiveId);
     if (nextActiveDraft && nextActiveId !== activeSensorId) {
@@ -1415,32 +1628,259 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
 
   const handleFormValuesChange = useCallback((changedValues, allValues) => {
     if (!activeSensorId || Object.prototype.hasOwnProperty.call(changedValues, 'ports')) return;
-    setSensorDrafts((current) => updateSensorDraftValues(current, activeSensorId, allValues));
-  }, [activeSensorId]);
+    let nextValues = allValues;
+    if (
+      Object.prototype.hasOwnProperty.call(changedValues, 'checksumRangeStart')
+      || Object.prototype.hasOwnProperty.call(changedValues, 'checksumRangeEnd')
+    ) {
+      form.setFieldsValue({ checksumRangeExplicit: true });
+      nextValues = { ...allValues, checksumRangeExplicit: true };
+    }
+    if (Object.keys(changedValues).some((field) => PROTOCOL_FORM_FIELDS.has(field))) {
+      // 用户在探测期间手动改了协议时，正在返回的旧结果必须作废，不能覆盖刚改的值。
+      protocolProbeGenerationRef.current += 1;
+      setProtocolDetectionBySensor((current) => ({
+        ...current,
+        [activeSensorId]: { status: 'idle' },
+      }));
+    }
+    setSensorDrafts((current) => updateSensorDraftValues(current, activeSensorId, nextValues));
+  }, [activeSensorId, form]);
 
   const applySerialTemplate = useCallback((templateId) => {
     const template = catalog?.serialTemplates?.find((item) => item.id === templateId);
     if (!template) return;
-    const defaults = template.defaults || {};
-    const total = getFormPointCount(form);
-    form.setFieldsValue({
-      serialTemplate: templateId,
-      transportType: defaults.transportType || 'binary',
-      baudRate: defaults.baudRate,
-      framingType: defaults.framingType,
-      delimiter: defaults.delimiter,
-      frameLength: defaults.framingType === 'fixedLength' && total
-        ? total * (defaults.bytesPerValue || 1)
-        : form.getFieldValue('frameLength'),
-      valueType: defaults.valueType,
-      dataBits: defaults.dataBits || 8,
-      byteOffset: defaults.byteOffset || 0,
-      valueCount: total || form.getFieldValue('valueCount'),
+    const currentValues = form.getFieldsValue(true);
+    const patch = buildSerialTemplateFormPatch({
+      template,
+      currentValues,
+      pointCount: getFormPointCount(form),
     });
-  }, [catalog, form]);
+    if (!patch) return;
+    if (activeSensorId) {
+      // 手动选模板和自动识别互斥；旧探测即使稍后返回也不能反向覆盖手动选择。
+      protocolProbeGenerationRef.current += 1;
+      setProtocolDetectionBySensor((current) => ({
+        ...current,
+        [activeSensorId]: { status: 'idle' },
+      }));
+    }
+    form.setFieldsValue(patch);
+    if (activeSensorId) {
+      setSensorDrafts((current) => updateSensorDraftValues(
+        current,
+        activeSensorId,
+        { ...currentValues, ...patch },
+      ));
+    }
+  }, [activeSensorId, catalog, form]);
+
+  const selectProbePort = useCallback((path) => {
+    if (!activeSensorId) return;
+    protocolProbeGenerationRef.current += 1;
+    const normalizedPath = String(path || '').trim();
+    const nextPorts = { ...probePortBySensorRef.current };
+    if (normalizedPath) nextPorts[activeSensorId] = normalizedPath;
+    else delete nextPorts[activeSensorId];
+    probePortBySensorRef.current = nextPorts;
+    setProbePortBySensor(nextPorts);
+    setProtocolDetectionBySensor((current) => ({
+      ...current,
+      [activeSensorId]: { status: 'idle' },
+    }));
+  }, [activeSensorId]);
+
+  const detectCurrentSensorProtocol = useCallback(async () => {
+    const sensorId = activeSensorId;
+    const path = String(probePortBySensorRef.current[sensorId] || '').trim();
+    if (readOnly || !sensorId) return;
+    if (!path) {
+      setProtocolDetectionBySensor((current) => ({
+        ...current,
+        [sensorId]: { status: 'error', reason: '请先选择当前传感器对应的物理串口' },
+      }));
+      return;
+    }
+    if (!detectableProtocolCandidateIds.length) {
+      setProtocolDetectionBySensor((current) => ({
+        ...current,
+        [sensorId]: { status: 'error', reason: '协议目录中没有可自动探测的预设' },
+      }));
+      return;
+    }
+
+    const generation = protocolProbeGenerationRef.current + 1;
+    protocolProbeGenerationRef.current = generation;
+    setProtocolDetectionBySensor((current) => ({
+      ...current,
+      [sensorId]: { status: 'detecting', path },
+    }));
+
+    try {
+      const result = await requestControlApi('/api/serial/protocol-detect', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          path,
+          candidateIds: detectableProtocolCandidateIds,
+        }),
+      });
+      const isStale = (
+        protocolProbeGenerationRef.current !== generation
+        || activeSensorIdRef.current !== sensorId
+        || probePortBySensorRef.current[sensorId] !== path
+      );
+      if (isStale) return;
+
+      if (result?.status === 'matched') {
+        const currentValues = form.getFieldsValue(true);
+        const patch = buildDetectedProtocolFormPatch({
+          match: result.match,
+          serialTemplates: catalog?.serialTemplates || [],
+          currentValues,
+        });
+        if (!patch) {
+          setProtocolDetectionBySensor((current) => ({
+            ...current,
+            [sensorId]: {
+              status: 'error',
+              path,
+              reason: '识别结果缺少完整协议定义，未修改当前配置',
+            },
+          }));
+          return;
+        }
+
+        form.setFieldsValue(patch);
+        setSensorDrafts((current) => updateSensorDraftValues(
+          current,
+          sensorId,
+          { ...currentValues, ...patch },
+        ));
+        const matchedTemplate = (catalog?.serialTemplates || [])
+          .find((template) => template.id === result.match.id);
+        setProtocolDetectionBySensor((current) => ({
+          ...current,
+          [sensorId]: {
+            status: 'matched',
+            path,
+            id: result.match.id,
+            label: result.match.label || matchedTemplate?.label || result.match.id,
+          },
+        }));
+        message.success(`已为 ${sensorId} 识别并应用协议：${result.match.label || matchedTemplate?.label || result.match.id}`);
+        return;
+      }
+
+      setProtocolDetectionBySensor((current) => ({
+        ...current,
+        [sensorId]: {
+          status: result?.status === 'ambiguous' ? 'ambiguous' : 'unknown',
+          path,
+          candidates: result?.candidates || [],
+          reason: result?.reason || '',
+        },
+      }));
+    } catch (error) {
+      const isStale = (
+        protocolProbeGenerationRef.current !== generation
+        || activeSensorIdRef.current !== sensorId
+        || probePortBySensorRef.current[sensorId] !== path
+      );
+      if (isStale) return;
+      setProtocolDetectionBySensor((current) => ({
+        ...current,
+        [sensorId]: {
+          status: 'error',
+          path,
+          reason: error.message || '协议识别失败',
+        },
+      }));
+    }
+  }, [
+    activeSensorId,
+    catalog,
+    detectableProtocolCandidateIds,
+    form,
+    readOnly,
+  ]);
+
+  const protocolDetectionFeedback = useMemo(() => {
+    const status = activeProtocolDetection.status || 'idle';
+    if (status === 'detecting') {
+      return {
+        tone: 'working',
+        title: `正在读取 ${activeProtocolDetection.path || selectedProbePortPath}`,
+        detail: `按目录中的 ${detectableProtocolCandidateIds.length} 个候选协议采样，请保持传感器持续发送数据。`,
+      };
+    }
+    if (status === 'matched') {
+      return {
+        tone: 'success',
+        title: `已识别：${activeProtocolDetection.label || activeProtocolDetection.id}`,
+        detail: '协议与通信字段已写入当前传感器；物理串口、业务名称、线序、算法和显示配置均未改动。',
+      };
+    }
+    if (status === 'ambiguous') {
+      const labels = formatProtocolCandidateLabels(activeProtocolDetection.candidates);
+      return {
+        tone: 'warning',
+        title: '识别结果有歧义，未修改配置',
+        detail: labels
+          ? `当前数据同时符合：${labels}。请手动选择协议或缩小候选范围。`
+          : (activeProtocolDetection.reason || '多个协议具有相同线上的可观测特征，请手动选择。'),
+      };
+    }
+    if (status === 'unknown') {
+      return {
+        tone: 'warning',
+        title: '暂未识别出协议，未修改配置',
+        detail: activeProtocolDetection.reason || '请确认串口、传感器供电和持续发帧状态后重试。',
+      };
+    }
+    if (status === 'error') {
+      return {
+        tone: 'error',
+        title: '协议识别失败，未修改配置',
+        detail: activeProtocolDetection.reason || '请刷新串口列表后重试。',
+      };
+    }
+    if (serialPortsError) {
+      return {
+        tone: 'error',
+        title: '串口列表读取失败',
+        detail: serialPortsError,
+      };
+    }
+    if (!serialPortOptions.length) {
+      return {
+        tone: 'neutral',
+        title: '暂未发现可用物理串口',
+        detail: '连接传感器后点击“刷新串口”。自动识别不会保存串口路径。',
+      };
+    }
+    return {
+      tone: 'neutral',
+      title: selectedProbePortPath ? '可以开始识别' : '请选择当前传感器对应的物理串口',
+      detail: `将只尝试目录中的 ${detectableProtocolCandidateIds.length} 个可探测协议；左右手、座椅、靠背等业务角色仍由你定义。`,
+    };
+  }, [
+    activeProtocolDetection,
+    detectableProtocolCandidateIds.length,
+    selectedProbePortPath,
+    serialPortOptions.length,
+    serialPortsError,
+  ]);
 
   const applyFramingType = useCallback((nextFramingType) => {
-    const total = getFormPointCount(form);
+    protocolProbeGenerationRef.current += 1;
+    if (activeSensorId) {
+      setProtocolDetectionBySensor((current) => ({
+        ...current,
+        [activeSensorId]: { status: 'idle' },
+      }));
+    }
+    const total = Number(form.getFieldValue('valueCount')) || getFormPointCount(form);
     const dataBits = Number(form.getFieldValue('dataBits')) || 8;
     form.setFieldsValue({
       framingType: nextFramingType,
@@ -1451,10 +1891,17 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
         ? (form.getFieldValue('delimiter') || 'AA 55 03 99')
         : form.getFieldValue('delimiter'),
     });
-  }, [form]);
+  }, [activeSensorId, form]);
 
   const applyDataBits = useCallback((dataBits) => {
-    const total = getFormPointCount(form);
+    protocolProbeGenerationRef.current += 1;
+    if (activeSensorId) {
+      setProtocolDetectionBySensor((current) => ({
+        ...current,
+        [activeSensorId]: { status: 'idle' },
+      }));
+    }
+    const total = Number(form.getFieldValue('valueCount')) || getFormPointCount(form);
     form.setFieldsValue({
       dataBits,
       valueType: dataBits === 12 ? 'uint16le' : 'uint8',
@@ -1463,7 +1910,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
         ? total * (dataBits === 12 ? 2 : 1)
         : form.getFieldValue('frameLength'),
     });
-  }, [form]);
+  }, [activeSensorId, form]);
 
   const applyDisplayTemplate = useCallback((templateId) => {
     const matrixMode = MATRIX_DISPLAY_MODES.find((item) => item.id === templateId);
@@ -1498,6 +1945,25 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
       },
     });
   }, [catalog, form]);
+
+  const applyRendererId = useCallback((nextRendererId) => {
+    const currentCanvas = form.getFieldValue('canvasConfig') || {};
+    const widgets = Array.isArray(currentCanvas.widgets) ? currentCanvas.widgets : [];
+    const shouldApplyAgent = isAgentRendererId(nextRendererId);
+    form.setFieldsValue({
+      rendererId: nextRendererId,
+      canvasConfig: {
+        ...currentCanvas,
+        widgets: widgets.map((widget) => {
+          if (widget.type === 'pressureStats') return widget;
+          if (shouldApplyAgent || isAgentRendererId(widget.type)) {
+            return { ...widget, type: nextRendererId };
+          }
+          return widget;
+        }),
+      },
+    });
+  }, [form]);
 
   const updateCanvasConfig = useCallback((next) => {
     form.setFieldsValue({ canvasConfig: next });
@@ -1549,18 +2015,27 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     }
     if (!effectivePointOrder) return;
     const currentDataBits = Number(form.getFieldValue('dataBits')) || 8;
+    const detectedValueCount = Number(form.getFieldValue('valueCount')) || 0;
+    const protocolGeometryDefaults = buildProtocolGeometryDefaults({
+      valueCount: detectedValueCount,
+      frameLength: form.getFieldValue('frameLength'),
+      pointCount: effectivePointOrder.pointCount,
+      bytesPerValue: currentDataBits === 12 ? 2 : 1,
+      fixedLength: framingType === 'fixedLength',
+    });
     form.setFieldsValue({
       ...(effectivePointOrder !== pointOrderInfo
         ? { pointOrderJson: JSON.stringify(effectivePointOrder.definition, null, 2) }
         : {}),
-      valueCount: effectivePointOrder.pointCount,
-      ...(framingType === 'fixedLength'
-        ? { frameLength: effectivePointOrder.pointCount * (currentDataBits === 12 ? 2 : 1) }
-        : {}),
+      ...protocolGeometryDefaults,
     });
-  }, [coordinateMapInfo, dataBits, form, framingType, pointOrderInfo]);
+  }, [activeSensorId, coordinateMapInfo, dataBits, form, framingType, pointOrderInfo]);
 
   const save = useCallback(async () => {
+    if (protocolDetectionInProgress) {
+      message.warning('请等待协议识别完成后再保存');
+      return;
+    }
     if (readOnly) {
       message.error('系统内置展示系统为只读，不能覆盖保存');
       return;
@@ -1616,15 +2091,34 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
           showStats: true,
           source: primarySource,
         });
+      const canvasWidgets = isAgentRendererId(values.rendererId)
+        ? canvas.widgets.map((widget) => (
+          widget.type === 'pressureStats' ? widget : { ...widget, type: values.rendererId }
+        ))
+        : canvas.widgets;
       const widgets = ensureBuilderPortWidgets({
-        widgets: canvas.widgets,
+        widgets: canvasWidgets,
         sensorPlan,
         rendererId: values.rendererId,
       });
-      const displayRenderers = createMatrixDisplayRenderers({
+      const builtInDisplayRenderers = createMatrixDisplayRenderers({
         matrix: { rows: normalizedMatrix.rows, cols: normalizedMatrix.cols },
         coordinateMap: normalizedCoordinateMap?.definition,
       });
+      const referencedAgentRendererIds = [...new Set([
+        values.rendererId,
+        ...widgets.map((widget) => widget.type),
+      ].filter(isAgentRendererId))];
+      const agentDisplayRenderers = referencedAgentRendererIds.map((agentRendererId) => {
+        const app = agentRendererById.get(agentRendererId);
+        return {
+          id: agentRendererId,
+          type: agentRendererId,
+          label: app ? `Agent · ${app.label}` : agentRendererId,
+          options: {},
+        };
+      });
+      const displayRenderers = [...builtInDisplayRenderers, ...agentDisplayRenderers];
       const displayViews = buildBuilderPortViews(displayRenderers, sensorPlan);
 
       const visualizationAlgorithms = (catalog.visualizationAlgorithms || []).map((algorithm) => {
@@ -1785,6 +2279,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     }
   }, [
     activeSensorId,
+    agentRendererById,
     catalog,
     embedded,
     form,
@@ -1792,6 +2287,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     navigate,
     onActivated,
     onClose,
+    protocolDetectionInProgress,
     readOnly,
     selectedId,
     sensorDrafts,
@@ -1927,6 +2423,64 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
                 className="builder-module-panel connection-module"
                 hidden={activeStep !== 'connection'}
               >
+                  <div className="field-cluster protocol-detect-cluster">
+                    <div className="cluster-heading protocol-detect-heading">
+                      <div>
+                        <h3>自动识别数据协议</h3>
+                        <p>临时读取物理串口，为当前传感器匹配协议预设；不会保存 COM 路径，也不会判断业务角色。</p>
+                      </div>
+                      <strong>{activeSensorDraft?.sensor?.label || activeSensorId || '当前传感器'}</strong>
+                    </div>
+                    <div className="protocol-detect-controls">
+                      <div className="protocol-port-select">
+                        <span>临时物理串口</span>
+                        <Select
+                          allowClear
+                          showSearch
+                          value={selectedProbePortPath || undefined}
+                          options={serialPortOptions}
+                          loading={serialPortsLoading}
+                          disabled={readOnly || activeProtocolDetection.status === 'detecting'}
+                          placeholder="选择当前传感器实际连接的 COM"
+                          optionFilterProp="label"
+                          onChange={selectProbePort}
+                        />
+                      </div>
+                      <Button
+                        icon={<ReloadOutlined />}
+                        loading={serialPortsLoading}
+                        disabled={readOnly || activeProtocolDetection.status === 'detecting'}
+                        onClick={loadSerialPorts}
+                      >
+                        刷新串口
+                      </Button>
+                      <Button
+                        type="primary"
+                        icon={<ApiOutlined />}
+                        loading={activeProtocolDetection.status === 'detecting'}
+                        disabled={
+                          readOnly
+                          || !selectedProbePortPath
+                          || !detectableProtocolCandidateIds.length
+                        }
+                        onClick={detectCurrentSensorProtocol}
+                      >
+                        一键识别
+                      </Button>
+                    </div>
+                    <div
+                      className={`protocol-detect-feedback is-${protocolDetectionFeedback.tone}`}
+                      role="status"
+                      aria-live="polite"
+                    >
+                      <span className="protocol-detect-feedback-dot" />
+                      <div>
+                        <strong>{protocolDetectionFeedback.title}</strong>
+                        <small>{protocolDetectionFeedback.detail}</small>
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="field-cluster template-picker-cluster">
                     <div className="cluster-heading">
                       <div><h3>选择经典配置</h3><p>选择后会自动填充通信参数，所有值仍可在下方修改。</p></div>
@@ -1966,6 +2520,9 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
                       <div><h3>通信参数</h3><p>模板只是起点，下面的值就是最终写入协议配置的参数。</p></div>
                     </div>
                     <Form.Item name="transportType" hidden><Input /></Form.Item>
+                    <Form.Item name="includeDelimiter" hidden valuePropName="checked"><Checkbox /></Form.Item>
+                    <Form.Item name="validationHeaderOffset" hidden><InputNumber /></Form.Item>
+                    <Form.Item name="checksumRangeExplicit" hidden valuePropName="checked"><Checkbox /></Form.Item>
                     <div className="form-grid serial-fields-grid">
                       <Form.Item
                         className="serial-role-field"
@@ -2085,7 +2642,13 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
 
                   <div className="module-footer">
                     <span>通信参数确认后，继续配置传感器点位。</span>
-                    <Button type="primary" icon={<ArrowRightOutlined />} iconPosition="end" onClick={() => setActiveStep('mapping')}>
+                    <Button
+                      type="primary"
+                      icon={<ArrowRightOutlined />}
+                      iconPosition="end"
+                      disabled={protocolDetectionInProgress}
+                      onClick={() => setActiveStep('mapping')}
+                    >
                       下一步：传感器映射
                     </Button>
                   </div>
@@ -2348,10 +2911,10 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
                           : (realtimePreviewValues.length ? '串口实时数据' : '等待串口')}
                       </em>
                     </div>
-                    <DisplayCanvasConfigurator
-                      value={canvasConfig}
-                      onChange={updateCanvasConfig}
-                      renderers={matrixRenderers}
+                      <DisplayCanvasConfigurator
+                        value={canvasConfig}
+                        onChange={updateCanvasConfig}
+                        renderers={availableRenderers}
                       sourceOptions={configuredSensorPlan.map((sensor) => ({
                         value: sensor.outputChannel,
                         label: `${sensor.label} (${sensor.id})`,
@@ -2386,6 +2949,9 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
                             layout,
                             metrics,
                             channel,
+                            rawValues,
+                            sourceSensor,
+                            channels,
                           }) => {
                             if (widget.type === 'pressureStats') {
                               return (
@@ -2398,6 +2964,43 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
                               );
                             }
                             if (!['heatmap', 'matrix', 'raw2d'].includes(widget.type)) {
+                              if (parseAgentRendererId(widget.type)) {
+                                const outputChannel = sourceSensor?.outputChannel
+                                  || sourceSensor?.id
+                                  || channel;
+                                const sensorId = sourceSensor?.id || outputChannel;
+                                return (
+                                  <div
+                                    key={widget.id}
+                                    className="manifest-widget-slot builder-plugin-preview"
+                                    style={{ gridColumn: `span ${widget.columnSpan || 12}` }}
+                                  >
+                                    <AgentRendererHost
+                                      rendererId={widget.type}
+                                      app={agentRendererById.get(widget.type)}
+                                      registryLoading={agentRendererRegistry.status === 'loading'}
+                                      registryError={agentRendererRegistry.error}
+                                      widgetId={widget.id}
+                                      label={widget.label || widget.id}
+                                      identity={{
+                                        displaySystemId: systemId || '',
+                                        sensorId,
+                                        sensorLabel: sourceSensor?.label || sensorId,
+                                        sensorType: sourceSensor?.type || sensorType || '',
+                                        outputChannel,
+                                        channelId: systemId && sensorId ? `${systemId}:${sensorId}` : sensorId,
+                                      }}
+                                      values={values}
+                                      rawValues={rawValues}
+                                      matrix={cardMatrix}
+                                      metrics={metrics}
+                                      algorithmMetrics={{}}
+                                      serial={null}
+                                      channels={channels}
+                                    />
+                                  </div>
+                                );
+                              }
                               return (
                                 <div
                                   key={widget.id}
@@ -2465,7 +3068,13 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
                         </summary>
                         <div className="form-grid render-fields-grid">
                           <Form.Item name="profileLabel" label="方案名称"><Input /></Form.Item>
-                          <Form.Item name="rendererId" label="默认渲染器"><Select options={rendererOptions} /></Form.Item>
+                          <Form.Item
+                            name="rendererId"
+                            label="默认渲染器"
+                            extra={agentRendererRegistry.error || 'Agent 渲染器在受限 iframe 中运行'}
+                          >
+                            <Select options={rendererOptions} onChange={applyRendererId} />
+                          </Form.Item>
                           <Form.Item name="visualizationAlgorithmId" label="可视算法"><Select options={visualizationOptions} /></Form.Item>
                           <Form.Item className="matrix-transform-field" name="matrixTransformType" label="矩阵展示方式">
                             <Segmented
@@ -2592,10 +3201,12 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
                       type="primary"
                       icon={<SaveOutlined />}
                       loading={saving}
-                      disabled={readOnly}
+                      disabled={readOnly || protocolDetectionInProgress}
                       onClick={save}
                     >
-                      {readOnly ? '系统配置只读' : '保存并显示'}
+                      {readOnly
+                        ? '系统配置只读'
+                        : (protocolDetectionInProgress ? '等待协议识别' : '保存并显示')}
                     </Button>
                   </div>
               </section>

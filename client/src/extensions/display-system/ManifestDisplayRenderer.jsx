@@ -18,6 +18,7 @@ import {
 import { readDisplaySelection, writeDisplaySelection } from './displayProfileStorage';
 import { applyMatrixTransform } from '../../displays/matrixTransform';
 import RendererHost from '../../renderers/RendererHost.jsx';
+import AgentRendererHost from './AgentRendererHost.jsx';
 import MatrixWidget from './widgets/MatrixWidget.jsx';
 import CoordinatePointWidget from './widgets/CoordinatePointWidget.jsx';
 import StatsWidget from './widgets/StatsWidget.jsx';
@@ -39,6 +40,8 @@ import {
   resolveManifestWidgetGeometry,
   resolveManifestWidgetSourceValue,
 } from './manifestWidgetGeometry.js';
+import { listAgentRendererApps } from './api.js';
+import { parseAgentRendererId } from './agentRendererBridge.js';
 import './ManifestDisplayRenderer.css';
 
 const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
@@ -53,6 +56,11 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
   );
   const [channelFrames, setChannelFrames] = useState({});
   const [selection, setSelection] = useState({});
+  const [agentRendererRegistry, setAgentRendererRegistry] = useState({
+    status: 'loading',
+    apps: [],
+    error: '',
+  });
   const pushFrames = useCallback((routedFrames) => {
     if (!Array.isArray(routedFrames) || routedFrames.length === 0) return false;
     setChannelFrames((current) => reduceManifestChannelFrames(current, routedFrames));
@@ -89,6 +97,37 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
     [sensors],
   );
   const sidebar = definition?.page?.sidebar;
+  const agentRendererById = useMemo(
+    () => new Map(agentRendererRegistry.apps.map((app) => [app.rendererId, app])),
+    [agentRendererRegistry.apps],
+  );
+  const agentChannels = useMemo(() => {
+    const displaySystemId = String(definition?.displaySystemId || definition?.type || '').trim();
+    return sensors.map((sensor) => {
+      const sensorId = String(sensor?.sensorId || sensor?.id || '').trim();
+      const outputChannel = String(sensor?.outputChannel || sensorId).trim();
+      const channelId = String(
+        sensor?.channelId || (displaySystemId && sensorId ? `${displaySystemId}:${sensorId}` : sensorId),
+      ).trim();
+      const frame = getManifestChannelFrame(channelFrames, channelId, outputChannel);
+      const values = frame?.renderValues || [];
+      return {
+        displaySystemId: frame?.displaySystemId || displaySystemId,
+        sensorId: frame?.sensorId || sensorId,
+        sensorLabel: frame?.sensorLabel || sensor?.sensorLabel || sensor?.label || sensorId,
+        sensorType: sensor?.sensorType || sensor?.type || '',
+        outputChannel: frame?.outputChannel || outputChannel,
+        channelId: frame?.channelId || channelId,
+        timestamp: frame?.timestamp ?? null,
+        values,
+        rawValues: frame?.rawValues || [],
+        matrix: sensor?.sourceMatrix || sensor?.matrix || matrix || {},
+        metrics: calculatePressureMetrics(values),
+        algorithmMetrics: frame?.algorithmMetrics || {},
+        serial: frame?.serial || null,
+      };
+    });
+  }, [channelFrames, definition?.displaySystemId, definition?.type, matrix, sensors]);
   const columns = Number(definition?.page?.layout?.columns || 12);
   const profileModel = useMemo(
     () => buildDisplayProfileModel(definition?.page),
@@ -107,6 +146,26 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
   useEffect(() => {
     setChannelFrames({});
   }, [profileId]);
+
+  useEffect(() => {
+    let active = true;
+    listAgentRendererApps()
+      .then((apps) => {
+        if (active) setAgentRendererRegistry({ status: 'ready', apps, error: '' });
+      })
+      .catch((error) => {
+        if (active) {
+          setAgentRendererRegistry({
+            status: 'error',
+            apps: [],
+            error: error.message || 'Agent 渲染器目录读取失败',
+          });
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const updateSelection = useCallback((nextSelection) => {
     setSelection(nextSelection);
@@ -174,6 +233,21 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
         channel,
         channelId,
         channelFrame,
+        identity: {
+          displaySystemId: channelFrame?.displaySystemId || definition?.displaySystemId || definition?.type || '',
+          sensorId: channelFrame?.sensorId || sourceSensor?.sensorId || sourceSensor?.id || '',
+          sensorLabel: channelFrame?.sensorLabel
+            || sourceSensor?.sensorLabel
+            || sourceSensor?.label
+            || '',
+          sensorType: sourceSensor?.sensorType || sourceSensor?.type || '',
+          outputChannel: channelFrame?.outputChannel || channel,
+          channelId: channelFrame?.channelId || channelId,
+        },
+        timestamp: channelFrame?.timestamp ?? null,
+        rawValues: channelFrame?.rawValues || [],
+        algorithmMetrics: channelFrame?.algorithmMetrics || {},
+        serial: channelFrame?.serial || null,
         label: buildManifestWidgetLabel(
           widget.label || widget.id,
           channelFrame,
@@ -299,6 +373,11 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
             rendererParams: widgetRendererParams,
             metrics,
             channelId,
+            identity,
+            timestamp,
+            rawValues,
+            algorithmMetrics,
+            serial,
             label,
           }) => {
             if (widget.type === 'pressureStats') {
@@ -330,6 +409,33 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
                   colormap={activeProfile.colormap}
                   overlays={activeProfile.overlays}
                 />
+              );
+            }
+            if (parseAgentRendererId(widget.type)) {
+              return (
+                <div
+                  key={widget.id}
+                  className="manifest-widget-slot"
+                  style={{ gridColumn: `span ${widget.columnSpan || 8}` }}
+                >
+                  <AgentRendererHost
+                    rendererId={widget.type}
+                    app={agentRendererById.get(widget.type)}
+                    registryLoading={agentRendererRegistry.status === 'loading'}
+                    registryError={agentRendererRegistry.error}
+                    widgetId={widget.id}
+                    label={label}
+                    identity={identity}
+                    timestamp={timestamp}
+                    values={values}
+                    rawValues={rawValues}
+                    matrix={widgetMatrix}
+                    metrics={metrics}
+                    algorithmMetrics={algorithmMetrics}
+                    serial={serial}
+                    channels={agentChannels}
+                  />
+                </div>
               );
             }
             // 内置视图之外的类型交给渲染器插件注册表。未注册时 RendererHost

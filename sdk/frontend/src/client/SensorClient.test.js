@@ -165,3 +165,63 @@ describe('SensorClient canonical frame events', () => {
     expect(canonicalListener).not.toHaveBeenCalled();
   });
 });
+
+describe('SensorClient serial protocol detection', () => {
+  it('posts the physical path and optional preset ids through the contract route', async () => {
+    const fetchImpl = vi.fn(async (url, options) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        code: 0,
+        data: {
+          status: 'matched',
+          match: { id: 'standard-1024', protocol: { baudRate: 1000000 } },
+          candidates: [],
+        },
+        message: 'success',
+      }),
+    }));
+    const client = new SensorClient({
+      httpBaseUrl: 'http://backend.test',
+      fetchImpl,
+      routes: { serialProtocolDetect: '/custom/protocol-detect' },
+    });
+
+    const result = await client.serial.detectProtocol({
+      path: 'COM7',
+      candidateIds: ['standard-1024'],
+    });
+
+    expect(result.status).toBe('matched');
+    expect(result.match.id).toBe('standard-1024');
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://backend.test/custom/protocol-detect',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ path: 'COM7', candidateIds: ['standard-1024'] }),
+      }),
+    );
+  });
+
+  it('exposes the stable backend error code and HTTP status', async () => {
+    const client = new SensorClient({
+      httpBaseUrl: 'http://backend.test',
+      fetchImpl: vi.fn(async () => ({
+        ok: false,
+        status: 409,
+        json: async () => ({
+          code: 1,
+          data: {},
+          message: 'serial port is busy',
+          errorCode: 'SERIAL_PORT_BUSY',
+        }),
+      })),
+    });
+
+    await expect(client.serial.detectProtocol({ path: 'COM7' })).rejects.toMatchObject({
+      code: 'SERIAL_PORT_BUSY',
+      status: 409,
+      message: 'serial port is busy',
+    });
+  });
+});

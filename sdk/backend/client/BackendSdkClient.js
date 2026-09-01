@@ -12,10 +12,14 @@ const DEFAULT_ROUTES = Object.freeze({
   channels: '/api/channels',
   wsStatus: '/api/ws/status',
   sdkContract: '/api/sdk/contract',
+  agentApps: '/api/agent-apps',
+  agentAppReload: '/api/agent-apps/reload',
+  agentAppPolicy: '/api/agent-apps/policy',
   displaySystems: '/api/display-systems',
   displaySystemById: '/api/display-systems/:id',
   commands: '/api/commands',
   serialPorts: '/api/serial/ports',
+  serialProtocolDetect: '/api/serial/protocol-detect',
   serialStatus: '/api/serial/status',
   serialOpen: '/api/serial/open',
   serialClose: '/api/serial/close',
@@ -47,11 +51,18 @@ function createDefaultWebSocket() {
   }
 }
 
-function normalizeHttpResult(payload) {
+function createBackendRequestError(payload = {}, status = null) {
+  const error = new Error(payload.message || payload.error || (status ? `HTTP ${status}` : 'backend request failed'));
+  error.code = payload.errorCode || 'BACKEND_REQUEST_FAILED';
+  error.status = status;
+  return error;
+}
+
+function normalizeHttpResult(payload, { status = null } = {}) {
   if (!payload || typeof payload !== 'object') return payload;
   if (!Object.prototype.hasOwnProperty.call(payload, 'code')) return payload;
   if (payload.code !== 0) {
-    throw new Error(payload.message || 'backend request failed');
+    throw createBackendRequestError(payload, status);
   }
   return payload.data;
 }
@@ -106,9 +117,9 @@ class BackendSdkClient extends EventEmitter {
     });
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload?.message || payload?.error || `HTTP ${response.status}`);
+      throw createBackendRequestError(payload, response.status);
     }
-    return raw ? payload : normalizeHttpResult(payload);
+    return raw ? payload : normalizeHttpResult(payload, { status: response.status });
   }
 
   async getContract({ refresh = false } = {}) {
@@ -130,6 +141,28 @@ class BackendSdkClient extends EventEmitter {
     return this.request('wsStatus', { raw: true });
   }
 
+  listAgentApps() {
+    return this.request('agentApps');
+  }
+
+  installAgentApp({ manifest, files, overwrite = false } = {}) {
+    return this.request('agentApps', {
+      method: 'POST',
+      body: { manifest, files, overwrite },
+    });
+  }
+
+  reloadAgentApps() {
+    return this.request('agentAppReload', {
+      method: 'POST',
+      body: {},
+    });
+  }
+
+  getAgentAppPolicy() {
+    return this.request('agentAppPolicy');
+  }
+
   listDisplaySystems() {
     return this.request('displaySystems', { raw: true });
   }
@@ -143,6 +176,13 @@ class BackendSdkClient extends EventEmitter {
 
   listSerialPorts() {
     return this.request('serialPorts');
+  }
+
+  detectSerialProtocol({ path, candidateIds } = {}) {
+    return this.request('serialProtocolDetect', {
+      method: 'POST',
+      body: { path, candidateIds },
+    });
   }
 
   getSerialStatus(role) {

@@ -1,4 +1,4 @@
-import sensorFrameV1Contract from '../contract/sensorFrameV1.cjs';
+import sensorFrameV1Contract from '../contract/sensorFrameV1.js';
 
 export const SENSOR_FRAME_TYPE = sensorFrameV1Contract.SENSOR_FRAME_TYPE;
 export const SENSOR_FRAME_SCHEMA_VERSION = sensorFrameV1Contract.SENSOR_FRAME_SCHEMA_VERSION;

@@ -59,8 +59,11 @@ const LAZY_EXPORTS = {
     'createSerialParserManager',
     'createSerialPort',
     'createSerialPortFilterService',
+    'getSerialPathReservation',
     'listPorts',
     'openPort',
+    'releaseSerialPath',
+    'reserveSerialPath',
     'writeToPort',
   ],
   './storage': [

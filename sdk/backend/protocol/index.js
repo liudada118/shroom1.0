@@ -23,5 +23,6 @@
  */
 module.exports = {
   ...require('./displaySystemProtocol'),
+  ...require('./serialProtocolDetector'),
   ...require('./presets'),
 };
