@@ -5,6 +5,8 @@
  * 和应用返回的授权状态。这样启动加载和前端提交密钥可以复用同一套解析规则。
  */
 
+const { expandLicenseFile } = require('../../../../licenseScopes');
+
 /**
  * 从授权 file 字段推导前端可选类型标记。
  *
@@ -13,15 +15,10 @@
  */
 function getSelectFlagFromLicense(licenseFile) {
   if (licenseFile === 'all') return 'all';
-  if (Array.isArray(licenseFile)) {
-    return licenseFile.filter((item) => typeof item === 'string' && item.trim());
+  if (licenseFile == null || licenseFile === '' || (Array.isArray(licenseFile) && !licenseFile.length)) {
+    return undefined;
   }
-
-  if (typeof licenseFile === 'string' && licenseFile.trim() && licenseFile !== 'all') {
-    return [licenseFile];
-  }
-
-  return undefined;
+  return expandLicenseFile(licenseFile).sensorTypes;
 }
 
 /**
@@ -32,15 +29,10 @@ function getSelectFlagFromLicense(licenseFile) {
  * @returns {string | null} 默认传感器类型。
  */
 function getDefaultFileFromLicense(licenseFile, fallback = null) {
-  if (Array.isArray(licenseFile)) {
-    return licenseFile.find((item) => typeof item === 'string' && item.trim()) || fallback;
+  if (licenseFile === 'all' || licenseFile == null || licenseFile === '' || (Array.isArray(licenseFile) && !licenseFile.length)) {
+    return fallback;
   }
-
-  if (typeof licenseFile === 'string' && licenseFile.trim() && licenseFile !== 'all') {
-    return licenseFile;
-  }
-
-  return fallback;
+  return expandLicenseFile(licenseFile).sensorTypes[0] || fallback;
 }
 
 /**
@@ -53,15 +45,21 @@ function getDefaultFileFromLicense(licenseFile, fallback = null) {
  */
 function buildLicenseRuntimeState(parsedLicense, options = {}) {
   const licenseFile = parsedLicense.file || null;
-  const nextFile = getDefaultFileFromLicense(licenseFile, options.fallbackFile || null);
+  const expanded = expandLicenseFile(licenseFile, {
+    allSensorTypes: options.allSensorTypes || [],
+  });
+  const nextFile = expanded.isAllTypes
+    ? options.fallbackFile || null
+    : expanded.sensorTypes[0] || options.fallbackFile || null;
 
   return {
     endDate: parseFloat(parsedLicense.date),
+    groupKeys: expanded.groupKeys,
     licenseFile,
     moduleConfig: parsedLicense.moduleConfig || null,
     nextFile,
     parsedLicense,
-    selectFlag: getSelectFlagFromLicense(licenseFile),
+    selectFlag: expanded.isAllTypes ? 'all' : expanded.sensorTypes,
   };
 }
 
@@ -101,8 +99,18 @@ function validateLicenseKey(licenseKey, options = {}) {
     };
   }
 
+  let parsedLicense;
   try {
-    const parsedLicense = JSON.parse(decrypted);
+    parsedLicense = JSON.parse(decrypted);
+  } catch (err) {
+    return {
+      ok: false,
+      code: 'LICENSE_PARSE_FAILED',
+      message: '密钥无效，请检查后重新输入',
+    };
+  }
+
+  try {
     return {
       ok: true,
       state: buildLicenseRuntimeState(parsedLicense, {
@@ -112,8 +120,8 @@ function validateLicenseKey(licenseKey, options = {}) {
   } catch (err) {
     return {
       ok: false,
-      code: 'LICENSE_PARSE_FAILED',
-      message: '密钥无效，请检查后重新输入',
+      code: 'LICENSE_SCOPE_INVALID',
+      message: '密钥授权范围无效，请联系厂商重新签发',
     };
   }
 }

@@ -167,7 +167,12 @@ const {
   carYLine,
 } = require('@shroom/backend/processing');
 const module2 = require('./license/aes_ecb')
-const { validateLicenseKey } = require('./license/licenseValidationService');
+const {
+  buildLicenseRuntimeState,
+  getDefaultFileFromLicense,
+  getSelectFlagFromLicense,
+  validateLicenseKey,
+} = require('./license/licenseValidationService');
 const { readStoredLicenseKey, writeStoredLicenseKey } = require('./license/licenseKeyStore');
 const { createServerPathConfig } = require('./serverPathConfig');
 const { isCar, dedupli, totalToN, } = require('../../compatibility/legacyDataUtils');
@@ -1334,71 +1339,17 @@ const defauleFile = 'hand0205';
 let date, sysStartTime, file = defauleFile, selectFlag;
 let licenseFile = null;
 
-/**
- * 从授权文件的 `file` 字段推出「这台机器允许使用哪些传感器型号」。
- *
- * 授权文件里 `file` 有三种历史形态，都得认（已发出去的 config.txt 改不了）：
- * - `'all'` —— 不限型号，原样返回字符串 `'all'`，调用方靠 `=== 'all'` 判断。
- * - 数组 —— 多型号授权，过滤掉空串和非字符串。
- * - 单个字符串 —— 早期的单型号授权，包成数组统一后续处理。
- *
- * 返回 `undefined`（而不是 `[]`）表示「授权文件里没有型号信息」，
- * 与「授权了空列表」是两回事：前者要走默认型号，后者应该什么都不给。
- * ⚠️ 所以调用方不能用 `if (!selectFlag)` 合并这两种情况。
- *
- * `'all'` 那条分支的返回类型和其他分支不一样（字符串 vs 数组），
- * 这个不一致是兼容包袱 —— 前端的授权列表逻辑依赖它，不能顺手统一。
- *
- * @param {'all' | string | string[] | undefined} licenseFile 授权文件的 `file` 字段。
- * @returns {'all' | string[] | undefined} 允许的型号列表。
- */
-function getSelectFlagFromLicense(licenseFile) {
-  if (licenseFile === 'all') return 'all';
-  if (Array.isArray(licenseFile)) {
-    return licenseFile.filter((item) => typeof item === 'string' && item.trim());
-  }
-
-  if (typeof licenseFile === 'string' && licenseFile.trim() && licenseFile !== 'all') {
-    return [licenseFile];
-  }
-
-  return undefined;
-}
-
-/**
- * 从授权文件推出启动时的默认传感器型号。
- *
- * 与 `getSelectFlagFromLicense` 是同一份数据的两个视图，
- * 分开两个函数是因为「允许哪些」和「默认用哪个」的取值规则不同：
- * - 数组 → 取**第一个有效项**（授权文件里的顺序就是厂里配机器时的主型号在前）。
- * - `'all'` → 落到 `fallback`。不限型号时没有「主型号」可言，
- *   全型号授权的机器启动时用什么型号只能由代码定（`defauleFile = 'hand0205'`）。
- * - 其他 → `fallback`。
- *
- * @param {'all' | string | string[] | undefined} licenseFile 授权文件的 `file` 字段。
- * @param {string | null} fallback 推不出来时的兜底型号。
- * @returns {string | null} 默认型号。
- */
-function getDefaultFileFromLicense(licenseFile, fallback = null) {
-  if (Array.isArray(licenseFile)) {
-    return licenseFile.find((item) => typeof item === 'string' && item.trim()) || fallback;
-  }
-
-  if (typeof licenseFile === 'string' && licenseFile.trim() && licenseFile !== 'all') {
-    return licenseFile;
-  }
-
-  return fallback;
-}
-
 if (fs.existsSync(nameTxt)) {
   try {
     const dateRes = fs.readFileSync(nameTxt, 'utf8');
     const parsedData = JSON.parse(module2.decryptStr(dateRes));
-    endDate = parseFloat(parsedData.date);
-    licenseFile = parsedData.file || null;
-    selectFlag = getSelectFlagFromLicense(parsedData.file);
-    file = getDefaultFileFromLicense(parsedData.file, defauleFile);
+    const startupLicenseState = buildLicenseRuntimeState(parsedData, {
+      fallbackFile: defauleFile,
+    });
+    endDate = startupLicenseState.endDate;
+    licenseFile = startupLicenseState.licenseFile;
+    selectFlag = startupLicenseState.selectFlag;
+    file = startupLicenseState.nextFile;
     baudRate = getSensorBaudRate(file);
   } catch (err) {
     logger.error(err);

@@ -1,0 +1,70 @@
+[
+  {
+    "key": "common",
+    "label": "常用",
+    "labelKey": "licenseAdmin.groups.common",
+    "icon": "⭐",
+    "items": [
+      { "label": "手部检测", "labelKey": "sensorHand", "value": "hand" },
+      { "label": "正常测试", "labelKey": "sensorNormal", "value": "normal" }
+    ]
+  },
+  {
+    "key": "care",
+    "label": "关怀",
+    "labelKey": "licenseAdmin.groups.care",
+    "icon": "❤️",
+    "items": [
+      { "label": "小床监测", "labelKey": "sensorJqbed", "value": "jqbed" },
+      { "label": "宠物看护", "labelKey": "sensorPetCare", "value": "petCare" },
+      { "label": "mini 看护", "labelKey": "sensorPetCareMini", "value": "petCareMini" }
+    ]
+  },
+  {
+    "key": "lab",
+    "label": "实验室",
+    "labelKey": "licenseAdmin.groups.lab",
+    "icon": "🧪",
+    "items": [
+      { "label": "OneStep", "labelKey": "sensorBed4096", "value": "bed4096" },
+      { "label": "64*64 高速", "labelKey": "sensorBed4096num", "value": "bed4096num" }
+    ]
+  },
+  {
+    "key": "custom",
+    "label": "定制",
+    "labelKey": "licenseAdmin.groups.custom",
+    "icon": "⚙️",
+    "items": [
+      { "label": "小床检测（数据）", "labelKey": "sensorSmallBedNoAlg", "value": "smallBedNoAlg" },
+      { "label": "小床检测（12B）", "labelKey": "sensorSmallBed12B", "value": "smallBed12B" },
+      { "label": "小床褥监测", "labelKey": "sensorMatCol", "value": "matCol" },
+      { "label": "温度全床系统", "labelKey": "sensorTempFullBed", "value": "tempFullBed" },
+      { "label": "整椅展示", "labelKey": "sensorWholeChair", "value": "wholeChair" },
+      { "label": "轮椅", "labelKey": "sensorMinzhen", "value": "minzhen" },
+      { "label": "清闲椅子", "labelKey": "chairQX", "value": "carQX" }
+    ]
+  },
+  {
+    "key": "precision",
+    "label": "精密",
+    "labelKey": "licenseAdmin.groups.precision",
+    "icon": "🔬",
+    "items": [
+      { "label": "32*32（检测点）", "labelKey": "sensorHandSinglePoint", "value": "handSinglePoint" },
+      { "label": "触觉手套", "labelKey": "sensorHand0205", "value": "hand0205" },
+      { "label": "触觉手套 2", "labelKey": "sensorHand0205Double", "value": "hand0205Double" },
+      { "label": "触觉手套（115200）", "labelKey": "sensorHandGlove115200", "value": "handGlove115200" },
+      { "label": "触觉手套（整包）", "labelKey": "sensorHandGloveFullPacket", "value": "handGloveFullPacket" },
+      { "label": "10*10 小样", "labelKey": "sensorSmallSample", "value": "smallSample" },
+      { "label": "宇树 G1 触觉上衣", "labelKey": "sensorRobot1", "value": "robot1" },
+      { "label": "松延 N2 触觉上衣", "labelKey": "sensorRobotSY", "value": "robotSY" },
+      { "label": "零次方 H1 触觉上衣", "labelKey": "sensorRobotLCF", "value": "robotLCF" },
+      { "label": "触觉足底", "labelKey": "sensorFootVideo", "value": "footVideo" },
+      { "label": "14*20 高速", "labelKey": "sensorDaliegu", "value": "daliegu" },
+      { "label": "16*16 高速", "labelKey": "sensorFast256", "value": "fast256" },
+      { "label": "32*32 高速", "labelKey": "sensorFast1024", "value": "fast1024" },
+      { "label": "人体全身优化", "labelKey": "sensorHumanBodyOptimized", "value": "humanBodyOptimized" }
+    ]
+  }
+]

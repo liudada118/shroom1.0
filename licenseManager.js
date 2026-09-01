@@ -83,7 +83,9 @@ function normalizeOnline(p) {
 /** 离线校验结果 → 归一化 { date, file, moduleConfig }（sensorTypes 还原成 file 形态）。 */
 function normalizeOffline(r) {
   let file;
-  if (r.isAllTypes) {
+  if (r.licenseFile != null) {
+    file = r.licenseFile;
+  } else if (r.isAllTypes) {
     file = 'all';
   } else if (Array.isArray(r.sensorTypes)) {
     file = r.sensorTypes.length === 1 ? r.sensorTypes[0] : r.sensorTypes;

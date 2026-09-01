@@ -40,3 +40,4 @@ pack-resources/python/
 # Local Git/worktree recovery leftovers.
 /.git.broken_*/
 /.worktrees/
+/runtime

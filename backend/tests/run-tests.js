@@ -4,6 +4,7 @@ const { spawnSync } = require('child_process');
 const projectRoot = path.resolve(__dirname, '../..');
 const testFiles = [
   'backend/tests/contracts/multiSensorStableContract.test.js',
+  'backend/tests/license/licenseScopes.test.js',
   'backend/tests/processing/lineOrders.test.js',
   'backend/tests/processing/videoPointMappings.test.js',
   'backend/tests/processing/pressureTransforms.test.js',

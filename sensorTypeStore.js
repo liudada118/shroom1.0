@@ -10,7 +10,7 @@
  *   - getSensorArr()：返回当前 flat 清单。
  *   - getSensorLabel(value)：value→中文名，查不到原样返回 value。
  *
- * 内置兜底清单 = crypto-lib.cjs 的 SENSOR_GROUPS 全量（当前最全的中文清单），
+ * 内置兜底清单 = licenseSensorGroups.json 的授权分类注册表，
  * 供断网首次安装、无缓存时使用。后台「传感器类型管理」新增的类型靠远程/缓存覆盖。
  */
 
@@ -18,71 +18,18 @@ const fs = require('fs');
 const path = require('path');
 const logger = require('./logger');
 const config = require('./configManager');
+const LICENSE_SENSOR_GROUPS = require('./licenseSensorGroups.json');
 
 const CACHE_FILE = path.join(config.APP_DATA_DIR, 'sensorTypes.cache.json');
 const FETCH_TIMEOUT_MS = 5000;
 
-// ─── 内置兜底清单（= 后台权威清单 26 项，value 逐字一致；与选择器 Title.jsx allSensorArr 对齐）──────
-// 断网首次安装、无缓存时用它；与授权清单完全一致，保证"原来有的全都在"。
-// 后台「传感器类型管理」新增的类型靠远程/缓存覆盖；本清单是权威基线，不删不改原有项。
-const BUILTIN_GROUPS = [
-  {
-    group: '常用',
-    icon: '⭐',
-    items: [
-      { label: '手部检测', value: 'hand' },
-      { label: '正常测试', value: 'normal' },
-    ],
-  },
-  {
-    group: '关怀',
-    icon: '❤️',
-    items: [
-      { label: '小床监测', value: 'jqbed' },
-      { label: '宠物看护', value: 'petCare' },
-      { label: 'mini看护', value: 'petCareMini' },
-    ],
-  },
-  {
-    group: 'lab',
-    icon: '🧪',
-    items: [
-      { label: 'OneStep', value: 'bed4096' },
-    ],
-  },
-  {
-    group: '定制',
-    icon: '⚙️',
-    items: [
-      { label: '小床检测(数据)', value: 'smallBedNoAlg' },
-      { label: '小床检测(12B)', value: 'smallBed12B' },
-      { label: '温度全床系统', value: 'tempFullBed' },
-      { label: '整椅展示', value: 'wholeChair' },
-      { label: '轮椅', value: 'minzhen' },
-    ],
-  },
-  {
-    group: '精密',
-    icon: '🔬',
-    items: [
-      { label: '32*32(检测点)', value: 'handSinglePoint' },
-      { label: '触觉手套', value: 'hand0205' },
-      { label: '触觉手套2', value: 'hand0205Double' },
-      { label: '触觉手套(115200)', value: 'handGlove115200' },
-      { label: '触觉手套(整包)', value: 'handGloveFullPacket' },
-      { label: '10*10小样', value: 'smallSample' },
-      { label: '宇树G1触觉上衣', value: 'robot1' },
-      { label: '松延N2触觉上衣', value: 'robotSY' },
-      { label: '零次方H1触觉上衣', value: 'robotLCF' },
-      { label: '触觉足底', value: 'footVideo' },
-      { label: '14x20高速', value: 'daliegu' },
-      { label: '16x16高速', value: 'fast256' },
-      { label: '32x32高速', value: 'fast1024' },
-      { label: '64*64高速', value: 'bed4096num' },
-      { label: '人体全身', value: 'humanBody' },
-    ],
-  },
-];
+// ─── 内置兜底清单（与授权分类、Title.jsx 的可见内置系统保持同源）────────────
+// 后台「传感器类型管理」新增的类型靠远程/缓存覆盖；动态类型仍可按具体 value 授权。
+const BUILTIN_GROUPS = LICENSE_SENSOR_GROUPS.map((group) => ({
+  group: group.label,
+  icon: group.icon,
+  items: group.items.map(({ label, value }) => ({ label, value })),
+}));
 
 // ─── 内部辅助 ───────────────────────────────────────────────────────────────────
 

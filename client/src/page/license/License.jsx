@@ -25,6 +25,11 @@ import {
   mergeLicenseErrorStatus,
   toLicenseStatus,
 } from '../../services/ws/messages';
+import {
+  describeLicenseFile,
+  getLicenseGroup,
+  licenseSensorGroups,
+} from './licenseScopeDisplay';
 import './License.css';
 
 const { Title, Text } = Typography;
@@ -33,72 +38,10 @@ const { TextArea } = Input;
 /**
  * 传感器类型分组定义
  */
-const SENSOR_GROUPS = [
-  {
-    group: '常用',
-    icon: '⭐',
-    items: [
-      { label: '手部检测', value: 'hand' },
-    ],
-  },
-  {
-    group: '关怀',
-    icon: '❤️',
-    items: [
-      { label: '小床监测', value: 'jqbed' },
-      { label: '宠物看护', value: 'petCare' },
-    ],
-  },
-  {
-    group: 'lab',
-    icon: '🧪',
-    items: [
-      { label: 'OneStep', value: 'bed4096' },
-    ],
-  },
-  {
-    group: '定制',
-    icon: '⚙️',
-    items: [
-      { label: '小床检测(数据)', value: 'smallBedNoAlg' },
-      { label: '小床检测(12B)', value: 'smallBed12B' },
-      { label: '温度全床系统', value: 'tempFullBed' },
-      { label: '整椅展示', value: 'wholeChair' },
-      { label: '轮椅', value: 'minzhen' },
-    ],
-  },
-  {
-    group: '精密',
-    icon: '🔬',
-    items: [
-      { label: '32*32(检测点)', value: 'handSinglePoint' },
-      { label: '触觉手套', value: 'hand0205' },
-      { label: '触觉手套2', value: 'hand0205Double' },
-      { label: '触觉手套(115200)', value: 'handGlove115200' },
-      { label: '触觉手套(整包)', value: 'handGloveFullPacket' },
-      { label: '10*10小样', value: 'smallSample' },
-      { label: '宇树G1触觉上衣', value: 'robot1' },
-      { label: '松延N2触觉上衣', value: 'robotSY' },
-      { label: '零次方H1触觉上衣', value: 'robotLCF' },
-      { label: '触觉足底', value: 'footVideo' },
-      { label: '14x20高速', value: 'daliegu' },
-      { label: '16x16高速', value: 'fast256' },
-      { label: '32x32高速', value: 'fast1024' },
-      { label: '人体全身', value: 'humanBody' },
-    ],
-  },
-];
-
-/*
-SENSOR_GROUPS
-  .find((group) => group.items.some((item) => item.value === 'petCare'))
-  ?.items.push({ label: 'mini鐪嬫姢', value: 'petCareMini' });
-
-*/
-
-SENSOR_GROUPS
-  .find((group) => group.items.some((item) => item.value === 'petCare'))
-  ?.items.push({ label: 'mini看护', value: 'petCareMini' });
+const SENSOR_GROUPS = licenseSensorGroups.map((group) => ({
+  ...group,
+  group: group.label,
+}));
 
 const ALL_SENSORS = SENSOR_GROUPS.flatMap((g) => g.items);
 
@@ -222,6 +165,7 @@ const SENSOR_MODULES = {
 
 /** 获取某传感器类型的可用功能模块，若无定义则返回通用选项 */
 SENSOR_MODULES.petCareMini = [...(SENSOR_MODULES.petCare || [])];
+SENSOR_MODULES.humanBodyOptimized = [...(SENSOR_MODULES.humanBody || [])];
 
 const getModulesForSensor = (sensorValue) => {
   return SENSOR_MODULES[sensorValue] || [
@@ -243,10 +187,7 @@ const tryDecodeOffline = (input) => {
     const expireTs = parseFloat(payload.expireDate);
     const remainDays = Math.ceil((expireTs - Date.now()) / 86400000);
     const f = payload.sensorTypes;
-    let fileDisplay;
-    if (f === 'all') fileDisplay = { type: 'all', label: '全部传感器', list: [] };
-    else if (Array.isArray(f)) fileDisplay = { type: 'multi', label: `${f.length} 个传感器`, list: f };
-    else fileDisplay = { type: 'single', label: f, list: [f] };
+    const fileDisplay = describeLicenseFile(f);
     return {
       version: 'offline',
       raw: payload,
@@ -337,14 +278,7 @@ const License = () => {
       const now = new Date();
       const remainDays = Math.ceil((expireDate - now) / 86400000);
 
-      let fileDisplay;
-      if (obj.file === 'all') {
-        fileDisplay = { type: 'all', label: '全部传感器', list: [] };
-      } else if (Array.isArray(obj.file)) {
-        fileDisplay = { type: 'multi', label: `${obj.file.length} 个传感器`, list: obj.file };
-      } else {
-        fileDisplay = { type: 'single', label: obj.file, list: [obj.file] };
-      }
+      const fileDisplay = describeLicenseFile(obj.file);
 
       setParseResult({
         version: 'online',
@@ -490,11 +424,25 @@ const License = () => {
                             <Text strong>
                               {parseResult.fileDisplay.type === 'all'
                                 ? '全部授权'
+                                : parseResult.fileDisplay.type === 'group'
+                                  ? `分类全选 (${parseResult.fileDisplay.groupKeys.length} 类)`
                                 : parseResult.fileDisplay.type === 'multi'
                                   ? `多类型 (${parseResult.fileDisplay.list.length})`
                                   : '单类型'}
                             </Text>
                           </div>
+                          {parseResult.fileDisplay.groupKeys.length > 0 && (
+                            <div className="parse-types">
+                              {parseResult.fileDisplay.groupKeys.map((groupKey) => {
+                                const group = getLicenseGroup(groupKey);
+                                return (
+                                  <Tag key={groupKey} color="gold">
+                                    {group ? `${group.label}全部` : groupKey}
+                                  </Tag>
+                                );
+                              })}
+                            </div>
+                          )}
                           {parseResult.fileDisplay.type !== 'all' && (
                             <div className="parse-types">
                               {parseResult.fileDisplay.list.map((val) => (
@@ -563,4 +511,3 @@ const License = () => {
 };
 
 export default License;
-

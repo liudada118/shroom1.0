@@ -12,6 +12,11 @@
  * 支持多选传感器类型（数组）和 "all" 全选。
  */
 const CryptoJS = require("crypto-js");
+const {
+  createGroupScopeToken,
+  expandLicenseFile,
+  LICENSE_SENSOR_GROUPS,
+} = require("./licenseScopes");
 
 const KEY_STR = "JIANXINGZHEPSVMC";
 
@@ -48,108 +53,13 @@ function aesDecrypt(hexStr) {
   }
 }
 
-/**
- * 传感器类型分组定义
- * 与 Shroom1.0 (1.0分支) License.jsx 完全一致
- */
-const SENSOR_GROUPS = [
-  {
-    group: "触觉手套",
-    icon: "🧤",
-    items: [
-      { label: "触觉手套", value: "hand0205" },
-      { label: "手套模型", value: "hand0507" },
-      { label: "手套96", value: "gloves" },
-      { label: "左手手套", value: "gloves1" },
-      { label: "右手手套", value: "gloves2" },
-      { label: "手套触觉", value: "hand0205Point" },
-      { label: "手套触觉147", value: "hand0205Point147" },
-      { label: "手部检测", value: "newHand" },
-    ],
-  },
-  {
-    group: "机器人触觉",
-    icon: "🤖",
-    items: [
-      { label: "宇树G1触觉上衣", value: "robot1" },
-      { label: "松延N2触觉上衣", value: "robotSY" },
-      { label: "零次方H1触觉上衣", value: "robotLCF" },
-      { label: "机器人", value: "robot0428" },
-      { label: "机器人出手", value: "robot" },
-    ],
-  },
-  {
-    group: "足底检测",
-    icon: "🦶",
-    items: [
-      { label: "触觉足底", value: "footVideo" },
-      { label: "脚型检测", value: "foot" },
-      { label: "256鞋垫", value: "footVideo256" },
-    ],
-  },
-  {
-    group: "高速矩阵",
-    icon: "⚡",
-    items: [
-      { label: "16×16高速", value: "fast256" },
-      { label: "32×32高速", value: "fast1024" },
-      { label: "1024高速座椅", value: "fast1024sit" },
-      { label: "14×20高速", value: "daliegu" },
-      { label: "小型样品", value: "smallSample" },
-    ],
-  },
-  {
-    group: "汽车座椅",
-    icon: "🚗",
-    items: [
-      { label: "汽车座椅", value: "car" },
-      { label: "汽车靠背(量产)", value: "car10" },
-      { label: "沃尔沃", value: "volvo" },
-      { label: "清闲椅子", value: "carQX" },
-      { label: "轮椅", value: "yanfeng10" },
-      { label: "沙发", value: "sofa" },
-      { label: "car100", value: "car100" },
-      { label: "车载传感器", value: "carCol" },
-    ],
-  },
-  {
-    group: "床垫监测",
-    icon: "🛏️",
-    items: [
-      { label: "床垫监测", value: "bigBed" },
-      { label: "小床监测", value: "jqbed" },
-      { label: "席悦1.0", value: "smallBed" },
-      { label: "席悦2.0", value: "xiyueReal1" },
-      { label: "小床128", value: "smallBed1" },
-      { label: "4096", value: "bed4096" },
-      { label: "4096数字", value: "bed4096num" },
-      { label: "256", value: "bed1616" },
-    ],
-  },
-  {
-    group: "其他",
-    icon: "📦",
-    items: [
-      { label: "眼罩", value: "eye" },
-      { label: "席悦座椅", value: "sit10" },
-      { label: "小矩阵1", value: "smallM" },
-      { label: "矩阵2", value: "rect" },
-      { label: "T-short", value: "short" },
-      { label: "唐群座椅", value: "CarTq" },
-      { label: "正常测试", value: "normal" },
-      { label: "清闲", value: "ware" },
-      { label: "清闲椅", value: "chairQX" },
-      { label: "3D数字", value: "Num3D" },
-      { label: "本地自适应", value: "localCar" },
-      { label: "手部视频", value: "handVideo" },
-      { label: "手部视频1", value: "handVideo1" },
-      { label: "手部检测(蓝)", value: "handBlue" },
-      { label: "座椅采集", value: "sitCol" },
-      { label: "小床褥采集", value: "matCol" },
-      { label: "小床睡姿采集", value: "matColPos" },
-    ],
-  },
-];
+/** 授权分类与客户端、后端共用同一份稳定注册表。 */
+const SENSOR_GROUPS = LICENSE_SENSOR_GROUPS.map((group) => ({
+  group: group.label,
+  key: group.key,
+  icon: group.icon,
+  items: group.items.map(({ label, value }) => ({ label, value })),
+}));
 
 /** 所有传感器平铺列表 */
 const ALL_SENSORS = SENSOR_GROUPS.flatMap((g) => g.items);
@@ -160,7 +70,7 @@ ALL_SENSORS.forEach((s) => { SENSOR_LABEL_MAP[s.value] = s.label; });
 
 /**
  * 生成密钥
- * @param {string|string[]} sensorTypes - 传感器类型，可以是单个 string、string 数组或 "all"
+ * @param {string|string[]} sensorTypes - 单个系统、固定数组、"all"、@group: 分类令牌或其混合数组
  * @param {number} days - 有效期天数
  * @param {string} category - 密钥类型: "production"(量产) / "rental"(在线租赁)
  * @returns {string} hex 格式密钥字符串
@@ -178,11 +88,15 @@ function generateLicenseKey(sensorTypes, days, category) {
     file = sensorTypes;
   }
 
+  const expanded = expandLicenseFile(file, {
+    allSensorTypes: ALL_SENSORS.map(function (sensor) { return sensor.value; }),
+  });
+
   const payload = JSON.stringify({
     date: expireTimestamp,
     file: file,
     cat: category,
-    v: 2,
+    v: expanded.groupKeys.length ? 3 : 2,
   });
   return aesEncrypt(payload);
 }
@@ -210,19 +124,12 @@ function decodeLicenseKey(hexKey, nowMs) {
     const remainingDays = Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
     const expireDate = new Date(expireTimestamp).toISOString();
 
-    var sensorType, sensorTypes, isAllTypes = false;
-
-    if (parsed.file === "all") {
-      isAllTypes = true;
-      sensorType = "all";
-      sensorTypes = ALL_SENSORS.map(function(s) { return s.value; });
-    } else if (Array.isArray(parsed.file)) {
-      sensorTypes = parsed.file;
-      sensorType = parsed.file.join(",");
-    } else {
-      sensorType = parsed.file;
-      sensorTypes = [parsed.file];
-    }
+    const expanded = expandLicenseFile(parsed.file, {
+      allSensorTypes: ALL_SENSORS.map(function(s) { return s.value; }),
+    });
+    const isAllTypes = expanded.isAllTypes;
+    const sensorTypes = expanded.sensorTypes;
+    const sensorType = isAllTypes ? "all" : sensorTypes.join(",");
 
     return {
       valid: remainingDays > 0,
@@ -230,6 +137,8 @@ function decodeLicenseKey(hexKey, nowMs) {
       sensorType: sensorType,
       sensorTypes: sensorTypes,
       isAllTypes: isAllTypes,
+      groupKeys: expanded.groupKeys,
+      licenseFile: parsed.file,
       category: parsed.cat || "production",
       expireDate: expireDate,
       remainingDays: remainingDays,
@@ -308,15 +217,13 @@ function verifyOfflineLicense(activationCode, options) {
     const remainingDays = Math.ceil((expireTimestamp - now) / (24 * 60 * 60 * 1000));
 
     // 解析传感器类型
-    let sensorType, sensorTypes, isAllTypes = false;
     const f = payload.sensorTypes;
-    if (f === "all") {
-      isAllTypes = true; sensorType = "all"; sensorTypes = ALL_SENSORS.map(function (s) { return s.value; });
-    } else if (Array.isArray(f)) {
-      sensorTypes = f; sensorType = f.join(",");
-    } else {
-      sensorType = f; sensorTypes = [f];
-    }
+    const expanded = expandLicenseFile(f, {
+      allSensorTypes: ALL_SENSORS.map(function (sensor) { return sensor.value; }),
+    });
+    const isAllTypes = expanded.isAllTypes;
+    const sensorTypes = expanded.sensorTypes;
+    const sensorType = isAllTypes ? "all" : sensorTypes.join(",");
 
     return {
       valid: remainingDays > 0,
@@ -324,6 +231,8 @@ function verifyOfflineLicense(activationCode, options) {
       sensorType: sensorType,
       sensorTypes: sensorTypes,
       isAllTypes: isAllTypes,
+      groupKeys: expanded.groupKeys,
+      licenseFile: f,
       remainingDays: remainingDays,
       version: payload.version || 2,
       error: remainingDays > 0 ? undefined : "授权已过期",
@@ -638,6 +547,7 @@ module.exports = {
   aesEncrypt,
   aesDecrypt,
   generateLicenseKey,
+  createGroupScopeToken,
   decodeLicenseKey,
   verifyOfflineLicense,
   // v2 统一时间闸 / 锁定 / 解锁
