@@ -1,0 +1,1 @@
+import{j as o}from"./index-DTYp8dOZ.js";import{o as t}from"./vendor-antd-D9FzHb8x.js";import{R as s,L as r}from"./RendererHost-BNIdkYoZ.js";import"./vendor-react-CMhHE6_6.js";const d=t.forwardRef(({matrixName:e,...a},m)=>o.jsx(s,{rendererId:"numMatrix",params:e==="carCol"?r.num3dCarCol:r.num3dDefault,label:"3D 数字",rendererRef:m,...a}));d.displayName="Num3D";export{d as default};

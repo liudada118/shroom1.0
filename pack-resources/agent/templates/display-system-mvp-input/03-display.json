@@ -1,0 +1,44 @@
+{
+  "preferredRenderer": "auto",
+  "allowBuiltinRenderer": true,
+  "allowCustomAgentRenderer": false,
+  "views": [
+    "heatmap",
+    "numeric-matrix",
+    "charts"
+  ],
+  "defaultView": "heatmap",
+  "colormap": "classic",
+  "overlays": [
+    "gridLines",
+    "legend",
+    "peakMarker"
+  ],
+  "widgets": [
+    {
+      "sensorId": "cushion",
+      "source": "cushion",
+      "label": "座椅压力"
+    }
+  ],
+  "charts": [
+    {
+      "metric": "totalPressure",
+      "label": "总压力"
+    },
+    {
+      "metric": "maxPressure",
+      "label": "最大压力"
+    },
+    {
+      "metric": "activeArea",
+      "label": "受压面积"
+    }
+  ],
+  "tuning": {
+    "threshold": 0,
+    "maxValue": 255,
+    "smoothing": 0
+  },
+  "customPresentationRequirements": "如需人体模型、座椅模型、品牌布局或特殊动画，请在这里描述并把模型/参考图放进 attachments"
+}

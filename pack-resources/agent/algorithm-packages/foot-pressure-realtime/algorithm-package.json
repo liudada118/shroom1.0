@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "id": "foot-pressure-realtime",
+  "name": "足压实时重心分析",
+  "version": "1.0.0",
+  "description": "复用现有 64×64 足压算法，输出左右脚压力、面积、COP坐标和COP速度。",
+  "apiVersion": 2,
+  "language": "python",
+  "entry": "algorithm.py",
+  "runtime": { "python": "3.11", "profile": "bundled-v1" },
+  "input": {
+    "mode": "single-sensor",
+    "sync": { "strategy": "latest", "maxSkewMs": 50, "maxAgeMs": 1000 }
+  },
+  "parameters": { "fps": 20.0 },
+  "output": {
+    "metrics": ["leftPressure", "leftArea", "leftCopX", "leftCopY", "leftCopSpeed", "rightPressure", "rightArea", "rightCopX", "rightCopY", "rightCopSpeed"],
+    "metricDefinitions": [
+      { "id": "leftPressure", "label": "左脚压力", "unit": "", "decimals": 2, "panel": "pressure" },
+      { "id": "leftArea", "label": "左脚面积", "unit": "cm²", "decimals": 2, "panel": "area" },
+      { "id": "leftCopX", "label": "左脚重心 X", "unit": "点", "decimals": 2, "panel": "none" },
+      { "id": "leftCopY", "label": "左脚重心 Y", "unit": "点", "decimals": 2, "panel": "none" },
+      { "id": "leftCopSpeed", "label": "左脚重心速度", "unit": "mm/s", "decimals": 2, "panel": "none" },
+      { "id": "rightPressure", "label": "右脚压力", "unit": "", "decimals": 2, "panel": "pressure" },
+      { "id": "rightArea", "label": "右脚面积", "unit": "cm²", "decimals": 2, "panel": "area" },
+      { "id": "rightCopX", "label": "右脚重心 X", "unit": "点", "decimals": 2, "panel": "none" },
+      { "id": "rightCopY", "label": "右脚重心 Y", "unit": "点", "decimals": 2, "panel": "none" },
+      { "id": "rightCopSpeed", "label": "右脚重心速度", "unit": "mm/s", "decimals": 2, "panel": "none" }
+    ]
+  },
+  "catalog": {
+    "category": "foot-pressure",
+    "tags": ["64x64", "足压", "COP", "重心"],
+    "compatibility": { "matrixTotals": [4096], "recommendedMatrices": [{ "rows": 64, "cols": 64 }] },
+    "sampleRateHz": 20,
+    "singleton": false,
+    "attachable": true
+  }
+}

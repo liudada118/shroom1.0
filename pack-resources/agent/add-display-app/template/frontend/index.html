@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Offline Pressure Grid</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, "Segoe UI", sans-serif;
+      background: #090d18;
+      color: #eaf0ff;
+    }
+
+    * { box-sizing: border-box; }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+    }
+
+    body {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      gap: 10px;
+      padding: 14px;
+      background:
+        radial-gradient(circle at 20% 0%, rgba(53, 98, 255, 0.17), transparent 42%),
+        #090d18;
+    }
+
+    header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    h1 {
+      margin: 0;
+      overflow: hidden;
+      font-size: 16px;
+      font-weight: 650;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #channel {
+      overflow: hidden;
+      color: #8ea0c8;
+      font: 12px ui-monospace, "Cascadia Mono", monospace;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .stage {
+      min-height: 0;
+      padding: 10px;
+      border: 1px solid rgba(128, 154, 214, 0.22);
+      border-radius: 12px;
+      background: rgba(4, 8, 18, 0.72);
+      box-shadow: inset 0 0 30px rgba(25, 55, 125, 0.12);
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      min-height: 180px;
+    }
+
+    footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      color: #8ea0c8;
+      font-size: 12px;
+    }
+
+    #state[data-level="error"] { color: #ff8d9a; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1 id="title">等待传感器初始化</h1>
+    <div id="channel">未绑定 channelId</div>
+  </header>
+  <main class="stage">
+    <canvas id="grid" aria-label="压力值网格"></canvas>
+  </main>
+  <footer>
+    <span id="state">sandbox ready</span>
+    <span id="summary">0 values</span>
+  </footer>
+
+  <script src="./app.js"></script>
+</body>
+</html>

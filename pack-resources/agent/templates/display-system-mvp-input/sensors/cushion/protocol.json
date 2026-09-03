@@ -1,0 +1,27 @@
+{
+  "status": "example-replace-with-real-protocol",
+  "knownPresetId": "",
+  "protocol": {
+    "baudRate": 921600,
+    "framing": {
+      "type": "fixedLength",
+      "frameLength": 20
+    },
+    "decoding": {
+      "valueType": "uint8",
+      "byteOffset": 4,
+      "valueCount": 16
+    },
+    "validation": {
+      "header": [
+        170,
+        85,
+        3,
+        153
+      ],
+      "headerOffset": 0
+    }
+  },
+  "packetNotes": "示例为 4 字节帧头 + 16 个 uint8 值。请严格按真实协议替换，不要根据 4x4 展示矩阵反推协议帧长度。",
+  "originalDocument": "../../attachments/protocol-document.pdf"
+}

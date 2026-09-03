@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "pressure-grid-demo",
+  "name": "Offline Pressure Grid",
+  "version": "1.0.0",
+  "renderer": {
+    "id": "main",
+    "label": "Pressure Grid",
+    "entry": "frontend/index.html",
+    "height": 520
+  },
+  "permissions": [
+    "sensor.read"
+  ]
+}
