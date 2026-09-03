@@ -28,6 +28,9 @@ const {
   DISPLAY_CHART_CARD_LIMIT,
 } = require('../manifest/displaySystemCanvasCatalog');
 const {
+  DISPLAY_RENDERERS,
+} = require('../manifest/displaySystemRendererCatalog');
+const {
   normalizeCanvasConfig,
   normalizeChartAppearanceConfig,
   normalizeChartCardsConfig,
@@ -489,11 +492,9 @@ function buildDisplaySystemBuilderCatalog({
       syncStrategies: ['latest', 'strict'],
       v2PythonTemplate: DEFAULT_V2_PYTHON_ALGORITHM_SOURCE,
     },
-    renderers: [
-      { id: 'heatmap', type: 'heatmap', label: '热力图' },
-      { id: 'matrix', type: 'matrix', label: '数值矩阵' },
-      { id: 'raw2d', type: 'raw2d', label: '原始二维数据' },
-    ],
+    // 渲染方式目录。内置三条由主应用直接实现，其余来自 @shroom/frontend 注册表；
+    // 与 colormaps 同理，绘制实现在前端，这里只登记 id 和中文名。
+    renderers: [...DISPLAY_RENDERERS],
     visualizationAlgorithms: [
       { id: 'identity', type: 'identity', label: '原始数据', options: {} },
       { id: 'normalize', type: 'normalize', label: '归一化', options: { max: 100 } },
