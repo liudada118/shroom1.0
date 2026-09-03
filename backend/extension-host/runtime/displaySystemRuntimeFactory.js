@@ -61,6 +61,29 @@ function createDisplaySystemRuntimeController({
   let runtimeBindings = [];
   let runtimeDispatcher = null;
 
+  function callBindingLifecycle(method, ...args) {
+    return runtimeBindings.map((binding) => {
+      try {
+        const result = binding?.[method]?.(...args);
+        if (result && typeof result.catch === 'function') {
+          result.catch((error) => logger?.warn?.(
+            `[displaySystems] algorithm ${method} failed`,
+            binding.id,
+            error?.message || error,
+          ));
+        }
+        return result;
+      } catch (error) {
+        logger?.warn?.(
+          `[displaySystems] algorithm ${method} failed`,
+          binding?.id,
+          error?.message || error,
+        );
+        return undefined;
+      }
+    });
+  }
+
   /**
    * 重新绑定并启动整条实时链路。
    *
@@ -91,6 +114,7 @@ function createDisplaySystemRuntimeController({
     zeroStateStore,
   } = {}) {
     runtimeDispatcher?.stop?.();
+    callBindingLifecycle('dispose');
     runtimeBindings = bindRuntimeChannels({
       runtimeChannelRegistry,
       serialManager,
@@ -123,7 +147,13 @@ function createDisplaySystemRuntimeController({
    * @returns {object|undefined} dispatcher 的状态快照；没有 dispatcher 时为 undefined。
    */
   function stop() {
-    return runtimeDispatcher?.stop?.();
+    const status = runtimeDispatcher?.stop?.();
+    callBindingLifecycle('dispose');
+    return status;
+  }
+
+  function resetAlgorithms(reason = 'manual') {
+    return callBindingLifecycle('resetAlgorithm', reason);
   }
 
   /**
@@ -170,6 +200,7 @@ function createDisplaySystemRuntimeController({
     bind,
     getRuntimeBindings: () => runtimeBindings,
     getStatus,
+    resetAlgorithms,
     stop,
   };
 }

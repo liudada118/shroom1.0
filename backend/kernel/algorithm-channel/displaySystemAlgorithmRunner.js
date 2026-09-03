@@ -94,6 +94,9 @@ function createJavaScriptAlgorithmRunner({
       matrix: algorithmContext.matrix || null,
       input: algorithmContext.algorithm?.input || {},
       output: algorithmContext.algorithm?.output || {},
+      frames: algorithmContext.frames || {},
+      timestamp: algorithmContext.timestamp || null,
+      identity: algorithmContext.identity || null,
     };
     sandbox.__result = null;
     executeScript.runInContext(context, { timeout: timeoutMs });
@@ -129,12 +132,14 @@ function createJavaScriptAlgorithmRunner({
 function createPythonAlgorithmRunner({
   entry,
   timeoutMs = 1000,
+  algorithmPackage = null,
   callPython = getDefaultPythonCaller(),
 } = {}) {
   if (!entry) throw new Error('Python algorithm entry is required');
 
   let running = false;
   let queued = null;
+  let disposed = false;
 
   /**
    * 把排队中的那一帧丢掉（reject 掉它的 Promise）。
@@ -172,6 +177,8 @@ function createPythonAlgorithmRunner({
     try {
       task = callPython('run_display_system_algorithm', {
         entry,
+        api_version: Number(algorithmPackage?.apiVersion || 1),
+        algorithm_package: algorithmPackage,
         raw_data: request.values,
         context: {
           data: request.context.data || null,
@@ -180,6 +187,9 @@ function createPythonAlgorithmRunner({
           matrix: request.context.matrix || null,
           input: request.context.algorithm?.input || {},
           output: request.context.algorithm?.output || {},
+          frames: request.context.frames || {},
+          timestamp: request.context.timestamp || null,
+          identity: request.context.identity || null,
         },
       }, { timeoutMs });
     } catch (error) {
@@ -191,11 +201,22 @@ function createPythonAlgorithmRunner({
         running = false;
         const next = queued;
         queued = null;
-        if (next) start(next);
+        if (next && !disposed) start(next);
+        else if (next) {
+          const error = new Error('Python algorithm runner is disposed');
+          error.code = 'DISPLAY_ALGORITHM_DISPOSED';
+          next.reject(error);
+        }
       });
   }
 
-  return (values, algorithmContext = {}) => new Promise((resolve, reject) => {
+  const run = (values, algorithmContext = {}) => new Promise((resolve, reject) => {
+    if (disposed) {
+      const error = new Error('Python algorithm runner is disposed');
+      error.code = 'DISPLAY_ALGORITHM_DISPOSED';
+      reject(error);
+      return;
+    }
     const request = {
       values: [...values],
       context: algorithmContext,
@@ -209,6 +230,24 @@ function createPythonAlgorithmRunner({
     dropQueuedRequest();
     queued = request;
   });
+
+  run.apiVersion = Number(algorithmPackage?.apiVersion || 1);
+  run.reset = (reason = 'manual') => {
+    if (disposed) return Promise.resolve({ reset: false, disposed: true });
+    return callPython('reset_display_system_algorithm', { entry, reason }, { timeoutMs });
+  };
+  run.dispose = () => {
+    if (disposed) return Promise.resolve({ shutdown: false, disposed: true });
+    disposed = true;
+    if (queued) {
+      const error = new Error('Python algorithm runner is disposed');
+      error.code = 'DISPLAY_ALGORITHM_DISPOSED';
+      queued.reject(error);
+      queued = null;
+    }
+    return callPython('shutdown_display_system_algorithm', { entry }, { timeoutMs });
+  };
+  return run;
 }
 
 module.exports = {

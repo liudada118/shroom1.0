@@ -219,4 +219,25 @@ describe('打包保存请求体', () => {
     // 再保存，要的是后者。
     expect(buildDisplaySectionPayload({ model: PLAIN_MODEL }).chartCards).toEqual([]);
   });
+
+  it('Agent 图表保存稳定 id、数据源和参数，不伪造公式', () => {
+    const payload = buildDisplaySectionPayload({
+      model: PLAIN_MODEL,
+      cards: [{
+        id: 'runtime-agent-chart',
+        templateId: 'cop-track',
+        name: '重心轨迹',
+        agentChartId: 'agent-chart:vitals:cop',
+        source: 'seat',
+        options: { trail: 60 },
+      }],
+    });
+    expect(payload.chartCards).toEqual([{
+      templateId: 'cop-track',
+      name: '重心轨迹',
+      agentChartId: 'agent-chart:vitals:cop',
+      source: 'seat',
+      options: { trail: 60 },
+    }]);
+  });
 });

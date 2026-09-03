@@ -10,6 +10,7 @@ import {
   buildAgentRendererInit,
   buildAgentRendererReadyMessages,
   getAgentRendererInitSignature,
+  hasAgentRendererFrameData,
   readAgentRendererResponse,
   resolveAgentRendererEntryUrl,
 } from './agentRendererBridge.js';
@@ -20,6 +21,9 @@ const LOAD_TIMEOUT_MS = 10000;
 export default function AgentRendererHost({
   rendererId,
   app,
+  surface = 'renderer',
+  surfaceId = '',
+  config = {},
   registryLoading = false,
   registryError = '',
   widgetId = '',
@@ -40,6 +44,7 @@ export default function AgentRendererHost({
   const initSignatureRef = useRef('');
   const initMessageRef = useRef(null);
   const frameMessageRef = useRef(null);
+  const loadTimeoutRef = useRef(null);
   const [status, setStatus] = useState({ phase: 'loading', message: '正在加载 Agent 渲染器…' });
   const entryUrl = useMemo(
     () => resolveAgentRendererEntryUrl(app?.entryUrl, app?.apiBase || app?.entryUrl, app?.appId),
@@ -50,7 +55,10 @@ export default function AgentRendererHost({
     widgetId,
     label,
     identity,
-  }), [identity, label, rendererId, widgetId]);
+    surface,
+    surfaceId,
+    config,
+  }), [config, identity, label, rendererId, surface, surfaceId, widgetId]);
   const frameMessage = useMemo(() => buildAgentRendererFrame({
     identity,
     timestamp,
@@ -62,8 +70,29 @@ export default function AgentRendererHost({
     serial,
     channels,
   }), [algorithmMetrics, channels, identity, matrix, metrics, rawValues, serial, timestamp, values]);
-  const hasValues = frameMessage.payload.values.length > 0
-    || frameMessage.payload.channels.some((channel) => channel.values.length > 0);
+  const hasValues = hasAgentRendererFrameData(frameMessage);
+  const deliverableFrame = hasValues ? frameMessage : null;
+
+  const clearLoadTimeout = useCallback(() => {
+    if (loadTimeoutRef.current != null) {
+      window.clearTimeout(loadTimeoutRef.current);
+      loadTimeoutRef.current = null;
+    }
+  }, []);
+
+  const armLoadTimeout = useCallback(() => {
+    clearLoadTimeout();
+    loadTimeoutRef.current = window.setTimeout(() => {
+      loadTimeoutRef.current = null;
+      if (!readyRef.current) {
+        setStatus((current) => (
+          current.phase === 'loading'
+            ? { phase: 'error', message: 'Agent 渲染器加载超时' }
+            : current
+        ));
+      }
+    }, LOAD_TIMEOUT_MS);
+  }, [clearLoadTimeout]);
 
   const postToIframe = useCallback((message) => {
     const target = iframeRef.current?.contentWindow;
@@ -93,13 +122,13 @@ export default function AgentRendererHost({
     initSignatureRef.current = initSignature;
     initMessageRef.current = initMessage;
     if (readyRef.current && identityChanged) {
-      postHandshake(initMessage, frameMessage, { forceInit: true });
+      postHandshake(initMessage, deliverableFrame, { forceInit: true });
     }
-  }, [frameMessage, initMessage, initSignature, postHandshake]);
+  }, [deliverableFrame, initMessage, initSignature, postHandshake]);
 
   useEffect(() => {
-    frameMessageRef.current = frameMessage;
-  }, [frameMessage]);
+    frameMessageRef.current = deliverableFrame;
+  }, [deliverableFrame]);
 
   useEffect(() => {
     readyRef.current = false;
@@ -122,6 +151,9 @@ export default function AgentRendererHost({
     const handleWindowMessage = (event) => {
       const response = readAgentRendererResponse(event, iframeRef.current?.contentWindow);
       if (!response) return;
+      // READY 或明确 ERROR 都说明 iframe 已经响应，加载阶段已经结束。错误状态必须保留，
+      // 不能再被十秒后的“加载超时”覆盖。
+      clearLoadTimeout();
       if (response.status === 'error') {
         readyRef.current = false;
         setStatus({ phase: 'error', message: response.message || 'Agent 渲染器报告错误' });
@@ -133,21 +165,19 @@ export default function AgentRendererHost({
     };
     window.addEventListener('message', handleWindowMessage);
     return () => window.removeEventListener('message', handleWindowMessage);
-  }, [entryUrl, postHandshake]);
+  }, [clearLoadTimeout, entryUrl, postHandshake]);
 
   useEffect(() => {
     if (!entryUrl) return undefined;
-    const timeout = window.setTimeout(() => {
-      if (!readyRef.current) {
-        setStatus({ phase: 'error', message: 'Agent 渲染器加载超时' });
-      }
-    }, LOAD_TIMEOUT_MS);
-    return () => window.clearTimeout(timeout);
-  }, [entryUrl]);
+    armLoadTimeout();
+    return clearLoadTimeout;
+  }, [armLoadTimeout, clearLoadTimeout, entryUrl]);
 
   useEffect(() => {
-    if (readyRef.current && status.phase !== 'error') postToIframe(frameMessage);
-  }, [frameMessage, postToIframe, status.phase]);
+    if (readyRef.current && status.phase !== 'error' && deliverableFrame) {
+      postToIframe(deliverableFrame);
+    }
+  }, [deliverableFrame, postToIframe, status.phase]);
 
   const handleLoad = useCallback(() => {
     // 同一个 URL 的 iframe 也可能由页面 reload/崩溃恢复再次触发 load；新 document 已丢失
@@ -155,8 +185,9 @@ export default function AgentRendererHost({
     readyRef.current = false;
     initPostedRef.current = false;
     setStatus({ phase: 'loading', message: '等待 Agent 渲染器就绪…' });
+    armLoadTimeout();
     if (postToIframe(initMessage)) initPostedRef.current = true;
-  }, [initMessage, postToIframe]);
+  }, [armLoadTimeout, initMessage, postToIframe]);
 
   if (!entryUrl) {
     return (
@@ -168,8 +199,9 @@ export default function AgentRendererHost({
 
   return (
     <div
-      className="agent-renderer-host"
+      className={`agent-renderer-host${surface === 'chart' ? ' is-chart' : ''}`}
       data-agent-renderer={rendererId}
+      data-agent-surface={surface}
       style={{ '--agent-renderer-height': `${app?.height || 480}px` }}
     >
       <iframe
@@ -182,6 +214,7 @@ export default function AgentRendererHost({
         allow="camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'"
         onLoad={handleLoad}
         onError={() => {
+          clearLoadTimeout();
           readyRef.current = false;
           initPostedRef.current = false;
           setStatus({ phase: 'error', message: 'Agent 渲染器页面加载失败' });

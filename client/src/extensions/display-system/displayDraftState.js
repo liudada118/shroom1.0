@@ -47,7 +47,7 @@ function colormapLabel(colormap) {
  * @returns {string} 身份键。
  */
 function cardKey(card) {
-  return String(card?.templateId || card?.formula || '');
+  return String(card?.templateId || card?.agentChartId || card?.formula || '');
 }
 
 function cardName(card) {
@@ -208,10 +208,16 @@ export function buildDisplaySectionPayload({ model, selection = {}, cards = [] }
     chartCards: toCardList(cards).map((card) => ({
       templateId: card.templateId || '',
       name: card.name || '',
-      formula: card.formula || '',
-      unit: card.unit || '',
-      decimals: card.decimals,
-      color: card.color || '',
+      ...(card.agentChartId ? {
+        agentChartId: card.agentChartId,
+        source: card.source || '',
+        options: card.options || {},
+      } : {
+        formula: card.formula || '',
+        unit: card.unit || '',
+        decimals: card.decimals,
+        color: card.color || '',
+      }),
     })),
   };
 }

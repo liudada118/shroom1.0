@@ -68,15 +68,64 @@ Use no algorithm, a declarative JSON algorithm, or another algorithm advertised 
 arbitrary JavaScript/Python/WASM/native code requires explicit authorization and must still execute through the
 existing algorithm host. Never place a data-changing algorithm in renderer HTML.
 
+Before generating new Python, inspect `catalog.algorithmPackages` and prefer an exact registered package whose
+`compatibility.matrixTotals` includes the current sensor point count. Copy its `packageManifest`,
+`algorithmSource`, and `metricDefinitions` into the display-system draft; never reference the read-only package
+directory by absolute path. Registered package ids come from the live catalog, not from this skill. If no
+compatible package exists, only then use authorized custom Python.
+
+For an authorized Python algorithm, prefer the live catalog's `algorithmPackageContract` over a bare V1 file.
+Keep V1 `calculate(raw_data, context)` for simple single-frame compatibility. Use API V2 when the algorithm
+loads a model, keeps a time window, needs reset/shutdown, or consumes multiple sensors. Submit the package
+manifest as `definitions.sensors[triggerSensor].algorithmPackage` and its Python source as `algorithmSource`;
+the corresponding sensor declares `algorithm.type: "python"` and `algorithm.packageManifest`.
+
+A multi-sensor package MUST list stable sensor ids and one trigger sensor. The host aggregates each route only
+after protocol decode and line/point mapping, keys `request["frames"]` by sensor id, and applies `latest` or
+`strict` software-time synchronization. This does not claim hardware-synchronous sampling. Attach the package
+only to its declared trigger sensor; the other routes keep their own per-channel processing and still feed the
+aggregator.
+
+Example package manifest:
+
+```json
+{
+  "schemaVersion": 1,
+  "id": "seat-back-fusion",
+  "name": "Seat Back Fusion",
+  "version": "1.0.0",
+  "apiVersion": 2,
+  "language": "python",
+  "entry": "algorithm.py",
+  "runtime": { "python": "3.11", "profile": "bundled-v1" },
+  "input": {
+    "mode": "multi-sensor",
+    "sensors": ["seat", "back"],
+    "triggerSensor": "seat",
+    "sync": { "strategy": "strict", "maxSkewMs": 20, "maxAgeMs": 200 }
+  },
+  "output": { "metrics": ["balance"] }
+}
+```
+
 Choose either:
 
 - an exact built-in renderer id from the live catalog; or
 - a custom renderer installed first with [`../add-display-app/SKILL.md`](../add-display-app/SKILL.md), then
   referenced by its returned `agent:<appId>` id.
 
-Use catalog-advertised `chartCards` for built-in formula cards. A custom Agent renderer may draw additional
-presentation-only charts from its sandbox `values`, `metrics`, `algorithmMetrics`, and optional `channels[]`.
-Neither option creates a second storage or CSV truth.
+Use catalog-advertised `chartCards` for scalar formula curves. They are rendered by the host in the existing
+sidebar chart area. For XY trajectories, multiple synchronized series, or another chart shape that formulas
+cannot express, inspect `GET /api/agent-apps` for a matching `charts[]` descriptor or install one with
+[`../add-display-app/SKILL.md`](../add-display-app/SKILL.md). Reference the returned stable id as
+`display.chartCards[].agentChartId`; never guess it. A chart card may also declare an output-channel `source`
+and JSON `options`, delivered in the sandbox init config. The chart iframe receives the same canonical frame
+and stable-identity `channels[]` as the renderer.
+
+A custom Agent renderer remains one main-canvas visualization: it must not recreate the application header,
+profile controls, summary-card column, chart sidebar, or a complete dashboard shell. Custom chart code belongs
+in `app.json.charts[]` and is mounted by the host in the sidebar, never embedded into the main renderer. Neither
+surface creates a second storage or CSV truth.
 
 ## 5. Build schema-v3 manifest and per-sensor definitions
 

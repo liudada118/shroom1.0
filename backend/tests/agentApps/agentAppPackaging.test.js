@@ -4,6 +4,7 @@ const path = require('path');
 const {
   AGENT_APP_MAX_FILE_BYTES,
   AGENT_APP_MAX_FILES,
+  AGENT_APP_MAX_CHARTS,
   AGENT_APP_MAX_PATH_LENGTH,
   AGENT_APP_MAX_TOTAL_BYTES,
 } = require('../../extension-host/agent-apps/agentAppService');
@@ -48,16 +49,20 @@ const contract = buildSdkContractSnapshot();
 assert.strictEqual(policy.appManifest.schemaVersion, templateManifest.schemaVersion);
 assert.strictEqual(templateManifest.permissions.includes('sensor.read'), true);
 assert.strictEqual(policy.installApi.limits.maximumFiles, AGENT_APP_MAX_FILES);
+assert.strictEqual(policy.installApi.limits.maximumCharts, AGENT_APP_MAX_CHARTS);
 assert.strictEqual(policy.installApi.limits.maximumDecodedBytesPerFile, AGENT_APP_MAX_FILE_BYTES);
 assert.strictEqual(policy.installApi.limits.maximumDecodedBytesTotal, AGENT_APP_MAX_TOTAL_BYTES);
 assert.strictEqual(policy.installApi.limits.maximumPortableRelativePathLength, AGENT_APP_MAX_PATH_LENGTH);
 assert.deepStrictEqual(contract.agentApps.limits, {
   maximumFiles: AGENT_APP_MAX_FILES,
+  maximumCharts: AGENT_APP_MAX_CHARTS,
   maximumDecodedBytesPerFile: AGENT_APP_MAX_FILE_BYTES,
   maximumDecodedBytesTotal: AGENT_APP_MAX_TOTAL_BYTES,
   maximumPortableRelativePathLength: AGENT_APP_MAX_PATH_LENGTH,
 });
 assert.deepStrictEqual(contract.agentApps.descriptorShape.permissions, ['sensor.read']);
+assert.deepStrictEqual(contract.agentApps.surfaces, ['renderer', 'chart']);
+assert.strictEqual(contract.agentApps.chartIdPattern, 'agent-chart:<appId>:<chartId>');
 assert.deepStrictEqual(
   [...policy.installApi.errorCodes].sort(),
   [...contract.agentApps.errorCodes].sort(),

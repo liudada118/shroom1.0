@@ -35,6 +35,21 @@
 
 **算法类型四种**：`none` / `json` / `js` / `python`，其中后两种是代码（`CODE_ALGORITHM_TYPES`），`validateBuilderAlgorithmSource` 会按类型分别校验源码。`DEFAULT_ALGORITHM_SOURCES` 提供可运行的模板骨架，让用户从一个能跑的东西开始改。
 
+Python 还可以提交 `definitions.sensors[id].algorithmPackage + algorithmSource`。Workspace 会把
+`algorithm-package.json` 和入口源码写入同一包目录：API V1 校验 `calculate(raw_data, context)`，
+API V2 校验 `process(request)`；多传感器包只能挂到其 `triggerSensor`，引用的 sensor id 必须
+都存在于同一份 schema-v3 manifest。目录接口的 `algorithmPackageContract` 是 Agent/Builder 的
+实时能力来源，不应在调用方再写一份版本和模板。
+
+目录接口同时返回 `algorithmPackages`：它来自只读 `agent-resources/algorithm-packages`（打包后为
+`Resources/agent/algorithm-packages`），每项包含已校验的可移植 Manifest、入口源码、矩阵兼容范围
+和指标定义。Builder 选中后把内容复制到用户展示系统目录，不保存安装机绝对路径。
+
+目录接口还返回 `agentChartContract`。标量趋势仍可使用宿主公式图表；XY 轨迹、多序列等自定义图表
+先通过 Agent App `charts[]` 安装，再以返回的 `agent-chart:<appId>:<chartId>` 写入
+`display.chartCards[].agentChartId`。宿主将其挂在原侧栏并转发同一 canonical 帧，Builder 读写时
+保留这些卡片，但不会把图表代码写入展示系统算法或永久后端。
+
 ## 边界
 
 - 校验逻辑不在这里，在 `../manifest/`。这里只调用。重复实现一套就会漂移。

@@ -57,8 +57,20 @@ export async function requestJson(path, options) {
 export async function listAgentRendererApps() {
   const payload = await requestJson('/api/agent-apps');
   return normalizeAgentRendererApps(payload).flatMap((app) => {
-    const entryUrl = resolveAgentRendererEntryUrl(app.entryUrl, `${API_BASE}/`, app.appId);
-    return entryUrl ? [{ ...app, entryUrl, apiBase: API_BASE }] : [];
+    const entryUrl = app.entryUrl
+      ? resolveAgentRendererEntryUrl(app.entryUrl, `${API_BASE}/`, app.appId)
+      : '';
+    const charts = (app.charts || []).flatMap((chart) => {
+      const chartEntryUrl = resolveAgentRendererEntryUrl(
+        chart.entryUrl,
+        `${API_BASE}/`,
+        chart.appId,
+      );
+      return chartEntryUrl ? [{ ...chart, entryUrl: chartEntryUrl, apiBase: API_BASE }] : [];
+    });
+    return entryUrl || charts.length
+      ? [{ ...app, entryUrl, charts, apiBase: API_BASE }]
+      : [];
   });
 }
 

@@ -25,6 +25,7 @@ onbed_filter 模块调用示例
 
 import os
 import sys
+import atexit
 
 
 def extend_runtime_module_paths():
@@ -997,10 +998,10 @@ def pet_care_mini_step(data, species=1.0, threshold_factor=1.0):
     }
 
 
-def realtime_server(sensor_data, data_prev=None):
+def realtime_server(sensor_data, data_prev=None, fps=20.0):
     """实时处理：计算左右脚压力/面积/COP速度"""
     ensure_foot_analysis_loaded()
-    return _cop_speed.process_frame_realtime(sensor_data, data_prev)
+    return _cop_speed.process_frame_realtime(sensor_data, data_prev, fps=float(fps))
 
 
 def replay_server(sensor_data, fps=20.0):
@@ -1043,8 +1044,16 @@ def _json_compatible(value):
     return value
 
 
-def _load_display_system_algorithm(entry):
-    """按文件修改时间缓存并加载用户自定义 Python 算法。"""
+def _shutdown_display_system_algorithm_record(record):
+    """尽力关闭一个 V2 算法实例；V1 没有 shutdown，直接忽略。"""
+    shutdown = record.get("shutdown") if record else None
+    if callable(shutdown):
+        with suppress_protocol_noise():
+            shutdown()
+
+
+def _load_display_system_algorithm(entry, api_version=1, algorithm_package=None):
+    """按文件修改时间缓存算法模块，同时兼容 V1 calculate 和 V2 生命周期。"""
     resolved = os.path.realpath(os.path.abspath(entry))
     if not os.path.isfile(resolved):
         raise FileNotFoundError(f"Display System Python algorithm not found: {resolved}")
@@ -1053,8 +1062,15 @@ def _load_display_system_algorithm(entry):
 
     modified_ns = os.stat(resolved).st_mtime_ns
     cached = _display_system_algorithm_cache.get(resolved)
-    if cached and cached["modified_ns"] == modified_ns:
-        return cached["calculate"]
+    normalized_api_version = int(api_version or 1)
+    if (
+        cached
+        and cached["modified_ns"] == modified_ns
+        and cached["api_version"] == normalized_api_version
+    ):
+        return cached
+    if cached:
+        _shutdown_display_system_algorithm_record(cached)
 
     module_name = f"shroom_display_algorithm_{abs(hash((resolved, modified_ns)))}"
     spec = importlib.util.spec_from_file_location(module_name, resolved)
@@ -1064,21 +1080,96 @@ def _load_display_system_algorithm(entry):
     with suppress_protocol_noise():
         spec.loader.exec_module(module)
     calculate = getattr(module, "calculate", None)
-    if not callable(calculate):
-        raise TypeError("Python algorithm must define calculate(raw_data, context)")
-    _display_system_algorithm_cache[resolved] = {
+    process = getattr(module, "process", None)
+    if normalized_api_version == 1 and not callable(calculate):
+        raise TypeError("Python V1 algorithm must define calculate(raw_data, context)")
+    if normalized_api_version == 2 and not callable(process):
+        raise TypeError("Python V2 algorithm must define process(request)")
+    record = {
         "modified_ns": modified_ns,
+        "api_version": normalized_api_version,
+        "module": module,
         "calculate": calculate,
+        "process": process,
+        "initialize": getattr(module, "initialize", None),
+        "reset": getattr(module, "reset", None),
+        "shutdown": getattr(module, "shutdown", None),
+        "initialized": False,
+        "package": algorithm_package or {},
     }
-    return calculate
+    _display_system_algorithm_cache[resolved] = record
+    return record
 
 
-def run_display_system_algorithm(entry, raw_data, context=None):
-    """执行用户展示系统算法，首个入参始终是串口解码后的原始数据。"""
-    calculate = _load_display_system_algorithm(entry)
+def run_display_system_algorithm(
+    entry,
+    raw_data,
+    context=None,
+    api_version=1,
+    algorithm_package=None,
+):
+    """执行 V1 calculate 或 V2 process；首个原始数组语义保持向后兼容。"""
+    record = _load_display_system_algorithm(entry, api_version, algorithm_package)
+    package = record.get("package") or {}
+    if record["api_version"] == 2 and not record["initialized"]:
+        initialize = record.get("initialize")
+        if callable(initialize):
+            with suppress_protocol_noise():
+                initialize(
+                    package.get("parameters") or {},
+                    package.get("resolvedResources") or {},
+                )
+        record["initialized"] = True
+
+    normalized_context = context or {}
     with suppress_protocol_noise():
-        result = calculate(list(raw_data or []), context or {})
+        if record["api_version"] == 1:
+            result = record["calculate"](list(raw_data or []), normalized_context)
+        else:
+            result = record["process"]({
+                "schema_version": 2,
+                "raw_data": list(raw_data or []),
+                "normalized_data": normalized_context.get("normalized_data") or [],
+                "frames": normalized_context.get("frames") or {},
+                "timestamp": normalized_context.get("timestamp"),
+                "identity": normalized_context.get("identity"),
+                "matrix": normalized_context.get("matrix"),
+                "input": normalized_context.get("input") or {},
+                "output": normalized_context.get("output") or {},
+                "parameters": package.get("parameters") or {},
+            })
     return _json_compatible(result)
+
+
+def reset_display_system_algorithm(entry, reason="manual"):
+    """重置已加载的 V2 算法状态；未加载或 V1 算法是安全的 no-op。"""
+    resolved = os.path.realpath(os.path.abspath(entry))
+    record = _display_system_algorithm_cache.get(resolved)
+    reset = record.get("reset") if record else None
+    if callable(reset):
+        with suppress_protocol_noise():
+            reset(reason)
+    return {"reset": bool(record), "api_version": record.get("api_version") if record else None}
+
+
+def shutdown_display_system_algorithm(entry):
+    """关闭并移除一个算法实例，下次收到帧时会重新加载并 initialize。"""
+    resolved = os.path.realpath(os.path.abspath(entry))
+    record = _display_system_algorithm_cache.pop(resolved, None)
+    _shutdown_display_system_algorithm_record(record)
+    return {"shutdown": bool(record)}
+
+
+def shutdown_all_display_system_algorithms():
+    for record in list(_display_system_algorithm_cache.values()):
+        try:
+            _shutdown_display_system_algorithm_record(record)
+        except Exception:
+            pass
+    _display_system_algorithm_cache.clear()
+
+
+atexit.register(shutdown_all_display_system_algorithms)
 
 
 FUNCS = {
@@ -1086,6 +1177,8 @@ FUNCS = {
     "health": health,
     "getData": getData,
     "run_display_system_algorithm": run_display_system_algorithm,
+    "reset_display_system_algorithm": reset_display_system_algorithm,
+    "shutdown_display_system_algorithm": shutdown_display_system_algorithm,
     # 足压分析
     "warm_foot_analysis": warm_foot_analysis,
     "realtime_server": realtime_server,

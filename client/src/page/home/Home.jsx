@@ -1275,11 +1275,16 @@ class Home extends React.Component {
     rawData = values,
     metrics = {},
     algorithmMetrics = {},
+    displaySystemId = '',
     channelId = '',
     outputChannel = '',
     sensorId = '',
     sensorLabel = '',
+    sensorType = '',
+    timestamp = null,
+    matrix = {},
     serial = null,
+    channels = [],
   }) => {
     this.data.current?.changeData({
       totalPres: metrics.totalPressure || 0,
@@ -1294,7 +1299,18 @@ class Home extends React.Component {
       sensorLabel,
       serial,
     });
-    this.data.current?.updateFormulaCharts(values, metrics, algorithmMetrics, rawData);
+    this.data.current?.updateFormulaCharts(values, metrics, algorithmMetrics, rawData, {
+      displaySystemId,
+      channelId,
+      outputChannel,
+      sensorId,
+      sensorLabel,
+      sensorType,
+      timestamp,
+      matrix,
+      serial,
+      channels,
+    });
     if (!values.length) return;
     const chartMax = values.reduce((max, value) => {
       const numeric = Number(value);

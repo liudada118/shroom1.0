@@ -116,6 +116,8 @@ const DEFAULT_VALUES = {
   pointOrderJson: '',
   coordinateMapJson: '',
   backendAlgorithm: 'none',
+  algorithmPackageId: '',
+  algorithmPackageManifest: null,
   algorithmLanguage: 'js',
   algorithmSource: '',
   algorithmTimeoutMs: 1000,
@@ -173,6 +175,8 @@ const SENSOR_FORM_FIELDS = [
   'pointOrderJson',
   'coordinateMapJson',
   'backendAlgorithm',
+  'algorithmPackageId',
+  'algorithmPackageManifest',
   'algorithmLanguage',
   'algorithmSource',
   'algorithmTimeoutMs',
@@ -276,6 +280,7 @@ const ALGORITHM_METRIC_OPERATION_OPTIONS = [
   { value: 'min', label: '最小值' },
   { value: 'activeCount', label: '阈值以上点数' },
   { value: 'activeRatio', label: '阈值以上占比' },
+  { value: 'external', label: '算法包直接输出' },
 ];
 
 const RUNTIME_MODE_OPTIONS = [
@@ -584,6 +589,7 @@ function buildFormValues(editor) {
   };
   const primaryProtocol = primarySensor.protocol || manifest.protocol || {};
   const primaryAlgorithm = primarySensor.algorithm || manifest.algorithm || {};
+  const algorithmPackageManifest = editor?.definitions?.algorithmPackage || null;
   const display = manifest.display || {};
   const profile = display.profiles?.find((item) => item.id === display.defaultProfile)
     || display.profiles?.[0]
@@ -592,7 +598,12 @@ function buildFormValues(editor) {
   const algorithmMetricDefinitions = new Map(
     (display.sidebar?.algorithmMetrics || []).map((metric) => [metric.id, metric]),
   );
-  const algorithmMetrics = (algorithmData.metrics || []).map((metric) => {
+  const algorithmMetricSource = primaryAlgorithm.type === 'json'
+    ? (algorithmData.metrics || [])
+    : (display.sidebar?.algorithmMetrics?.length
+      ? display.sidebar.algorithmMetrics
+      : (algorithmPackageManifest?.output?.metricDefinitions || []));
+  const algorithmMetrics = algorithmMetricSource.map((metric) => {
     const displayMetric = algorithmMetricDefinitions.get(metric.id) || {};
     return {
       ...metric,
@@ -657,7 +668,9 @@ function buildFormValues(editor) {
     lineOrderJson: editor?.definitions?.lineOrder ? JSON.stringify(editor.definitions.lineOrder, null, 2) : '',
     pointOrderJson: pointOrderInfo ? JSON.stringify(pointOrderInfo.definition, null, 2) : '',
     coordinateMapJson: coordinateMapInfo ? JSON.stringify(coordinateMapInfo.definition, null, 2) : '',
-    backendAlgorithm: isCodeAlgorithm ? 'code' : algorithmType,
+    backendAlgorithm: algorithmPackageManifest ? 'package' : (isCodeAlgorithm ? 'code' : algorithmType),
+    algorithmPackageId: algorithmPackageManifest?.id || '',
+    algorithmPackageManifest,
     algorithmLanguage: algorithmType === 'python' ? 'python' : 'js',
     algorithmSource: editor?.definitions?.algorithmSource || '',
     algorithmTimeoutMs: primaryAlgorithm.timeoutMs || 1000,
@@ -798,7 +811,10 @@ function createSensorDraft(sensorId, sourceValues = {}, sourceDraft = null) {
   };
 }
 
-function compileSensorDraftForSave(draft, { multiple = false } = {}) {
+function compileSensorDraftForSave(draft, {
+  multiple = false,
+  algorithmPackagesById = new Map(),
+} = {}) {
   const values = draft?.values || {};
   const sensorId = String(draft?.id || '').trim();
   const normalizedCoordinateMap = values.coordinateMapJson
@@ -887,9 +903,32 @@ function compileSensorDraftForSave(draft, { multiple = false } = {}) {
   if (frameValidation) protocol.validation = frameValidation;
   else delete protocol.validation;
 
-  const algorithmType = values.backendAlgorithm === 'code'
-    ? values.algorithmLanguage
-    : values.backendAlgorithm;
+  const selectedPackage = values.backendAlgorithm === 'package'
+    ? algorithmPackagesById.get(values.algorithmPackageId)
+    : null;
+  const algorithmPackageManifest = selectedPackage?.packageManifest
+    || values.algorithmPackageManifest
+    || null;
+  const algorithmPackageSource = selectedPackage?.algorithmSource
+    || values.algorithmSource
+    || '';
+  if (values.backendAlgorithm === 'package' && !algorithmPackageManifest) {
+    throw new Error(`传感器 ${sensorId} 尚未选择已注册算法包`);
+  }
+  const compatibleTotals = selectedPackage?.compatibility?.matrixTotals;
+  const matrixTotal = normalizedMatrix.rows * normalizedMatrix.cols;
+  if (Array.isArray(compatibleTotals) && compatibleTotals.length
+    && !compatibleTotals.includes(matrixTotal)) {
+    throw new Error(
+      `算法包 ${selectedPackage.name} 仅支持 ${compatibleTotals.join('/')} 点，`
+      + `传感器 ${sensorId} 当前为 ${matrixTotal} 点`,
+    );
+  }
+  const algorithmType = values.backendAlgorithm === 'package'
+    ? 'python'
+    : values.backendAlgorithm === 'code'
+      ? values.algorithmLanguage
+      : values.backendAlgorithm;
   const previousAlgorithmType = previousSensor.algorithm?.type || 'none';
   let algorithm = { ...(previousSensor.algorithm || {}), type: algorithmType || 'none' };
   if (algorithmType === 'json') {
@@ -902,6 +941,19 @@ function compileSensorDraftForSave(draft, { multiple = false } = {}) {
       timeoutMs: values.algorithmTimeoutMs,
     };
     delete algorithm.entry;
+  } else if (values.backendAlgorithm === 'package') {
+    algorithm = {
+      ...algorithm,
+      type: 'python',
+      packageManifest: draft.isNew || !previousSensor.algorithm?.packageManifest
+        ? defaultPath('algorithm-package.json')
+        : previousSensor.algorithm.packageManifest,
+      apiVersion: Number(algorithmPackageManifest.apiVersion || 2),
+      input: { ...(algorithm.input || {}), source: 'rawData' },
+      timeoutMs: values.algorithmTimeoutMs,
+    };
+    delete algorithm.entry;
+    delete algorithm.dataFile;
   } else if (algorithmType === 'js' || algorithmType === 'python') {
     const entryName = algorithmType === 'python' ? 'algorithm.py' : 'algorithm.js';
     algorithm = {
@@ -913,6 +965,7 @@ function compileSensorDraftForSave(draft, { multiple = false } = {}) {
       timeoutMs: values.algorithmTimeoutMs,
     };
     delete algorithm.dataFile;
+    delete algorithm.packageManifest;
   } else {
     algorithm = { type: 'none' };
   }
@@ -943,7 +996,10 @@ function compileSensorDraftForSave(draft, { multiple = false } = {}) {
       })),
     });
   }
-  if (algorithmType === 'js' || algorithmType === 'python') {
+  if (values.backendAlgorithm === 'package') {
+    definitions.algorithmPackage = algorithmPackageManifest;
+    definitions.algorithmSource = algorithmPackageSource;
+  } else if (algorithmType === 'js' || algorithmType === 'python') {
     definitions.algorithmSource = values.algorithmSource;
   }
 
@@ -984,6 +1040,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
   const [saving, setSaving] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editorAccess, setEditorAccess] = useState(null);
+  const [loadedChartCards, setLoadedChartCards] = useState([]);
   const [activeStep, setActiveStep] = useState('connection');
   const [sensorDrafts, setSensorDrafts] = useState([]);
   const [activeSensorId, setActiveSensorId] = useState(null);
@@ -1011,6 +1068,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
   const pointOrderJson = Form.useWatch('pointOrderJson', form);
   const coordinateMapJson = Form.useWatch('coordinateMapJson', form);
   const backendAlgorithm = Form.useWatch('backendAlgorithm', form);
+  const algorithmPackageId = Form.useWatch('algorithmPackageId', form);
   const algorithmLanguage = Form.useWatch('algorithmLanguage', form);
   const algorithmMetrics = Form.useWatch('algorithmMetrics', form);
   const visualizationAlgorithmId = Form.useWatch('visualizationAlgorithmId', form);
@@ -1115,6 +1173,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
       ports: ['sit'],
     });
     setEditorAccess(null);
+    setLoadedChartCards([]);
     setCreateModalOpen(true);
   }, [createForm, resetProtocolProbeUi]);
 
@@ -1134,6 +1193,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
 
       setSelectedId(null);
       setEditorAccess({ editable: true, origin: 'user' });
+      setLoadedChartCards([]);
       setActiveStep('connection');
       setPreviewDataMode('direction');
       const nextFormValues = {
@@ -1165,6 +1225,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
         editable: payload.editor?.editable === true,
         origin: payload.editor?.origin || 'system',
       });
+      setLoadedChartCards(payload.editor?.manifest?.display?.chartCards || []);
       setActiveStep('connection');
       setPreviewDataMode('direction');
       const nextDrafts = buildSensorFormDrafts(payload.editor);
@@ -1186,7 +1247,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
         value: item.rendererId,
         label: item.label,
       })),
-      ...agentRendererRegistry.apps.map((app) => ({
+      ...agentRendererRegistry.apps.filter((app) => app.rendererId).map((app) => ({
         value: app.rendererId,
         label: `Agent · ${app.label}`,
       })),
@@ -1245,6 +1306,21 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     ]).map((item) => ({ value: item.id, label: item.label })),
     [catalog],
   );
+  const algorithmPackageOptions = useMemo(
+    () => (catalog?.algorithmPackages || []).map((item) => ({
+      value: item.id,
+      label: `${item.name} · v${item.version}`,
+    })),
+    [catalog],
+  );
+  const algorithmPackagesById = useMemo(
+    () => new Map((catalog?.algorithmPackages || []).map((item) => [item.id, item])),
+    [catalog],
+  );
+  const selectedAlgorithmPackage = useMemo(
+    () => algorithmPackagesById.get(algorithmPackageId) || null,
+    [algorithmPackageId, algorithmPackagesById],
+  );
   const codeLanguageOptions = useMemo(
     () => (catalog?.codeLanguages || []).map((item) => ({
       value: item.id,
@@ -1281,7 +1357,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
   );
   const availableRenderers = useMemo(() => [
     ...matrixRenderers,
-    ...agentRendererRegistry.apps.map((app) => ({
+    ...agentRendererRegistry.apps.filter((app) => app.rendererId).map((app) => ({
       id: app.rendererId,
       type: app.rendererId,
       label: `Agent · ${app.label}`,
@@ -1289,7 +1365,9 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     })),
   ], [agentRendererRegistry.apps, matrixRenderers]);
   const agentRendererById = useMemo(
-    () => new Map(agentRendererRegistry.apps.map((app) => [app.rendererId, app])),
+    () => new Map(agentRendererRegistry.apps
+      .filter((app) => app.rendererId)
+      .map((app) => [app.rendererId, app])),
     [agentRendererRegistry.apps],
   );
   const selectedRendererDefinition = useMemo(
@@ -1973,7 +2051,38 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     catalog?.codeLanguages?.find((item) => item.id === language)?.template || ''
   ), [catalog]);
 
+  const applyAlgorithmPackage = useCallback((packageId) => {
+    const algorithmPackage = algorithmPackagesById.get(packageId);
+    if (!algorithmPackage) {
+      form.setFieldsValue({ algorithmPackageId: packageId });
+      return;
+    }
+    form.setFieldsValue({
+      backendAlgorithm: 'package',
+      algorithmPackageId: algorithmPackage.id,
+      algorithmPackageManifest: algorithmPackage.packageManifest,
+      algorithmLanguage: 'python',
+      algorithmSource: algorithmPackage.algorithmSource,
+      algorithmMetrics: (algorithmPackage.metricDefinitions || []).map((metric) => ({
+        ...metric,
+        operation: 'external',
+        panel: metric.panel || 'none',
+        scale: 1,
+        offset: 0,
+      })),
+    });
+  }, [algorithmPackagesById, form]);
+
   const applyAlgorithmMode = useCallback((mode) => {
+    if (mode === 'package') {
+      const currentId = form.getFieldValue('algorithmPackageId');
+      const nextId = algorithmPackagesById.has(currentId)
+        ? currentId
+        : algorithmPackageOptions[0]?.value;
+      if (nextId) applyAlgorithmPackage(nextId);
+      else form.setFieldsValue({ backendAlgorithm: mode });
+      return;
+    }
     const next = { backendAlgorithm: mode };
     if (mode === 'code' && !String(form.getFieldValue('algorithmSource') || '').trim()) {
       const language = form.getFieldValue('algorithmLanguage') || 'js';
@@ -1981,7 +2090,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
       next.algorithmSource = getCodeTemplate(language);
     }
     form.setFieldsValue(next);
-  }, [form, getCodeTemplate]);
+  }, [algorithmPackageOptions, algorithmPackagesById, applyAlgorithmPackage, form, getCodeTemplate]);
 
   const applyAlgorithmLanguage = useCallback((language) => {
     form.setFieldsValue({
@@ -2058,6 +2167,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
       // setFieldsValue 不触发 onValuesChange；这里强制把当前页快照写回草稿后再编译。
       const compiledSensors = orderedDrafts.map((draft) => compileSensorDraftForSave(draft, {
         multiple: orderedDrafts.length > 1,
+        algorithmPackagesById,
       }));
       const outputChannels = compiledSensors.map(({ sensor }) => sensor.outputChannel);
       if (outputChannels.some((channel) => !channel)) {
@@ -2216,6 +2326,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
               metrics: areaMetrics,
             },
           },
+          chartCards: cloneBuilderValue(loadedChartCards),
         },
         metadata: {
           runtimeMode: values.runtimeMode,
@@ -2280,6 +2391,8 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
   }, [
     activeSensorId,
     agentRendererById,
+    algorithmPackagesById,
+    loadedChartCards,
     catalog,
     embedded,
     form,
@@ -2745,6 +2858,22 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
                           <Form.Item name="backendAlgorithm" label="处理方式">
                             <Select options={algorithmModeOptions} onChange={applyAlgorithmMode} />
                           </Form.Item>
+                          <Form.Item name="algorithmPackageManifest" hidden><FormValueHolder /></Form.Item>
+                          {backendAlgorithm === 'package' ? (
+                            <Form.Item
+                              name="algorithmPackageId"
+                              label="Python 算法包"
+                              rules={[{ required: true, message: '请选择已注册算法包' }]}
+                            >
+                              <Select
+                                showSearch
+                                options={algorithmPackageOptions}
+                                onChange={applyAlgorithmPackage}
+                                optionFilterProp="label"
+                                placeholder="选择平台已注册算法包"
+                              />
+                            </Form.Item>
+                          ) : null}
                           {backendAlgorithm === 'json' ? <>
                             <Form.Item name="scale" label="缩放"><InputNumber step={0.1} /></Form.Item>
                             <Form.Item name="offset" label="偏移"><InputNumber step={0.1} /></Form.Item>
@@ -2753,6 +2882,21 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
                             <Form.Item name="max" label="最大值"><InputNumber /></Form.Item>
                           </> : null}
                         </div>
+                        {backendAlgorithm === 'package' && selectedAlgorithmPackage ? (
+                          <div className="algorithm-contract">
+                            <strong>{selectedAlgorithmPackage.name}</strong>
+                            <span>{selectedAlgorithmPackage.description || '平台内置 Python V2 算法包'}</span>
+                            <small>
+                              API V{selectedAlgorithmPackage.packageManifest?.apiVersion || 2}
+                              {' · '}
+                              {selectedAlgorithmPackage.sampleRateHz
+                                ? `建议 ${selectedAlgorithmPackage.sampleRateHz} Hz`
+                                : '跟随输入帧'}
+                              {' · '}
+                              输出 {(selectedAlgorithmPackage.metricDefinitions || []).length} 个指标
+                            </small>
+                          </div>
+                        ) : null}
                         {backendAlgorithm === 'code' ? (
                           <div className="algorithm-code-workbench">
                             <div className="algorithm-code-toolbar">

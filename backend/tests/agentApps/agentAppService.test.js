@@ -5,7 +5,9 @@ const path = require('path');
 const {
   AGENT_APP_MAX_FILE_BYTES,
   AGENT_APP_MAX_FILES,
+  AGENT_APP_MAX_CHARTS,
   createAgentAppService,
+  normalizeAgentAppManifest,
 } = require('../../extension-host/agent-apps/agentAppService');
 
 const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'shroom-agent-apps-'));
@@ -29,6 +31,7 @@ function manifest(overrides = {}) {
       entry: 'frontend/index.html',
       ...rendererOverrides,
     },
+    charts: [{ id: 'cop-track', label: '重心轨迹', entry: 'charts/cop.html', height: 260 }],
     ...manifestOverrides,
   };
 }
@@ -36,6 +39,7 @@ function manifest(overrides = {}) {
 function files(html = '<!doctype html><title>Agent App</title>') {
   return [
     { path: 'frontend/index.html', encoding: 'utf8', content: html },
+    { path: 'charts/cop.html', encoding: 'utf8', content: '<!doctype html><title>COP</title>' },
     { path: 'frontend/data.bin', encoding: 'base64', content: 'AAEC/w==' },
   ];
 }
@@ -60,6 +64,14 @@ try {
   assert.strictEqual(installed.app.renderer.id, 'main');
   assert.strictEqual(installed.app.renderer.label, 'Pressure Grid Demo');
   assert.strictEqual(installed.app.renderer.height, 480);
+  assert.deepStrictEqual(installed.app.charts, [{
+    id: 'cop-track',
+    label: '重心轨迹',
+    entry: 'charts/cop.html',
+    height: 260,
+    chartId: 'agent-chart:pressure-grid-demo:cop-track',
+    entryUrl: '/api/agent-apps/pressure-grid-demo/files/charts/cop.html',
+  }]);
   assert.deepStrictEqual(installed.app.permissions, ['sensor.read']);
   assert.strictEqual(
     installed.app.entryUrl,
@@ -71,6 +83,7 @@ try {
   const storedManifest = JSON.parse(fs.readFileSync(path.join(appDirectory, 'app.json'), 'utf8'));
   assert.deepStrictEqual(storedManifest.permissions, ['sensor.read']);
   assert.strictEqual(storedManifest.renderer.entry, 'frontend/index.html');
+  assert.strictEqual(storedManifest.charts[0].entry, 'charts/cop.html');
   assert.deepStrictEqual(
     [...fs.readFileSync(path.join(appDirectory, 'frontend/data.bin'))],
     [0, 1, 2, 255],
@@ -113,6 +126,9 @@ try {
     { manifest: manifest({ name: 123 }), files: files() },
     { manifest: manifest({ version: 'latest' }), files: files() },
     { manifest: manifest({ renderer: { entry: 'frontend/index.html', height: '520' } }), files: files() },
+    { manifest: manifest({ charts: {} }), files: files() },
+    { manifest: manifest({ charts: [{ id: 'same', entry: 'charts/cop.html' }, { id: 'same', entry: 'charts/cop.html' }] }), files: files() },
+    { manifest: manifest({ charts: [{ id: 'missing', entry: 'charts/missing.html' }] }), files: files() },
     { manifest: manifest({ permissions: ['sensor.read', 'filesystem.write'] }), files: files() },
     { manifest: manifest(), files: [{ path: '../escape.html', encoding: 'utf8', content: '' }] },
     { manifest: manifest(), files: [{ path: 'C:/escape.html', encoding: 'utf8', content: '' }] },
@@ -127,6 +143,36 @@ try {
   assert.throws(
     () => service.install({ manifest: manifest(), files: files(), overwrite: 'true' }),
     hasCode('AGENT_APP_INVALID'),
+  );
+
+  assert.strictEqual(normalizeAgentAppManifest({
+    schemaVersion: 1,
+    id: 'chart-only',
+    name: 'Chart Only',
+    version: '1.0.0',
+    charts: [{ id: 'trend', entry: 'charts/trend.html' }],
+  }).renderer, null);
+  assert.throws(
+    () => normalizeAgentAppManifest({
+      schemaVersion: 1,
+      id: 'empty-app',
+      name: 'Empty App',
+      version: '1.0.0',
+    }),
+    hasCode('AGENT_APP_INVALID'),
+  );
+  assert.throws(
+    () => normalizeAgentAppManifest({
+      schemaVersion: 1,
+      id: 'too-many-charts',
+      name: 'Too Many Charts',
+      version: '1.0.0',
+      charts: Array.from({ length: AGENT_APP_MAX_CHARTS + 1 }, (_, index) => ({
+        id: `chart-${index}`,
+        entry: `charts/${index}.html`,
+      })),
+    }),
+    hasCode('AGENT_APP_LIMIT_EXCEEDED'),
   );
 
   assert.throws(

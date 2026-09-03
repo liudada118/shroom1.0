@@ -5,7 +5,9 @@ import {
   buildAgentRendererInit,
   buildAgentRendererReadyMessages,
   getAgentRendererInitSignature,
+  hasAgentRendererFrameData,
   normalizeAgentRendererApps,
+  parseAgentChartId,
   parseAgentRendererId,
   readAgentRendererResponse,
   resolveAgentRendererEntryUrl,
@@ -15,6 +17,10 @@ describe('agent renderer bridge', () => {
   it('parses IDs and normalizes the HttpResult app catalog', () => {
     expect(parseAgentRendererId('agent:pressure-map')).toBe('pressure-map');
     expect(parseAgentRendererId('heatmap')).toBeNull();
+    expect(parseAgentChartId('agent-chart:pressure-map:cop-track')).toEqual({
+      appId: 'pressure-map',
+      chartId: 'cop-track',
+    });
     expect(normalizeAgentRendererApps({
       code: 0,
       data: {
@@ -24,6 +30,13 @@ describe('agent renderer bridge', () => {
           rendererId: 'agent:pressure-map',
           entryUrl: '/api/agent-apps/pressure-map/files/renderer.html',
           renderer: { label: 'Agent 压力地图', entry: 'renderer.html', height: 9000 },
+          charts: [{
+            id: 'cop-track',
+            chartId: 'agent-chart:pressure-map:cop-track',
+            label: '重心轨迹',
+            entryUrl: '/api/agent-apps/pressure-map/files/charts/cop.html',
+            height: 260,
+          }],
         }],
       },
     })).toEqual([{
@@ -35,6 +48,18 @@ describe('agent renderer bridge', () => {
       entryUrl: '/api/agent-apps/pressure-map/files/renderer.html',
       height: 2000,
       permissions: [],
+      charts: [{
+        appId: 'pressure-map',
+        id: 'agent-chart:pressure-map:cop-track',
+        chartId: 'agent-chart:pressure-map:cop-track',
+        localChartId: 'cop-track',
+        rendererId: 'agent:pressure-map',
+        name: '压力地图',
+        label: '重心轨迹',
+        entryUrl: '/api/agent-apps/pressure-map/files/charts/cop.html',
+        height: 260,
+        permissions: [],
+      }],
     }]);
     expect(normalizeAgentRendererApps({
       apps: [
@@ -42,6 +67,23 @@ describe('agent renderer bridge', () => {
         { id: 'default', entryUrl: '/api/agent-apps/default/files/index.html', renderer: {} },
       ],
     }).map((app) => app.height)).toEqual([160, 480]);
+    expect(normalizeAgentRendererApps({
+      apps: [{
+        id: 'chart-only',
+        rendererId: null,
+        renderer: null,
+        charts: [{
+          id: 'trend',
+          chartId: 'agent-chart:chart-only:trend',
+          entryUrl: '/api/agent-apps/chart-only/files/trend.html',
+        }],
+      }],
+    })[0]).toMatchObject({
+      appId: 'chart-only',
+      rendererId: '',
+      entryUrl: '',
+      charts: [{ chartId: 'agent-chart:chart-only:trend' }],
+    });
   });
 
   it('builds v1 init/frame DTOs and strips non-serializable host values', () => {
@@ -58,10 +100,20 @@ describe('agent renderer bridge', () => {
       widgetId: 'main',
       label: '主视图',
       identity,
+      surface: 'chart',
+      surfaceId: 'agent-chart:pressure-map:cop-track',
+      config: { trail: 60, unsafe: () => {} },
     })).toMatchObject({
       type: AGENT_RENDERER_MESSAGE_TYPES.INIT,
       schemaVersion: 1,
-      payload: { appId: 'pressure-map', rendererId: 'agent:pressure-map', channelId: 'chair:seat' },
+      payload: {
+        appId: 'pressure-map',
+        rendererId: 'agent:pressure-map',
+        surface: 'chart',
+        surfaceId: 'agent-chart:pressure-map:cop-track',
+        config: { trail: 60 },
+        channelId: 'chair:seat',
+      },
     });
 
     const frame = buildAgentRendererFrame({
@@ -139,6 +191,53 @@ describe('agent renderer bridge', () => {
       rendererId: 'agent:pressure-map',
       identity: { ...identity, sensorId: 'back', channelId: 'chair:back' },
     })));
+    expect(hasAgentRendererFrameData(frame)).toBe(false);
+  });
+
+  it('omits declared-but-missing or wrong-sized optional sensor frames', () => {
+    const identity = {
+      displaySystemId: 'chair',
+      sensorId: 'seat',
+      outputChannel: 'seat',
+      channelId: 'chair:seat',
+    };
+    const frame = buildAgentRendererFrame({
+      identity,
+      values: [1, 2, 3, 4],
+      matrix: { rows: 2, cols: 2 },
+      channels: [
+        { ...identity, values: [], matrix: { rows: 32, cols: 32 } },
+        {
+          displaySystemId: 'chair',
+          sensorId: 'back',
+          outputChannel: 'back',
+          channelId: 'chair:back',
+          values: [1, 2, 3],
+          matrix: { rows: 2, cols: 2 },
+        },
+      ],
+    });
+
+    expect(hasAgentRendererFrameData(frame)).toBe(true);
+    expect(frame.payload.channels).toHaveLength(1);
+    expect(frame.payload.channels[0]).toMatchObject({
+      channelId: 'chair:seat',
+      values: [1, 2, 3, 4],
+      matrix: { rows: 2, cols: 2, total: 4 },
+    });
+
+    const waiting = buildAgentRendererFrame({
+      identity,
+      values: [],
+      matrix: { rows: 32, cols: 32 },
+      channels: [{ ...identity, values: [], matrix: { rows: 32, cols: 32 } }],
+    });
+    expect(hasAgentRendererFrameData(waiting)).toBe(false);
+    expect(waiting.payload.channels).toEqual([]);
+    expect(buildAgentRendererReadyMessages(
+      buildAgentRendererInit({ rendererId: 'agent:pressure-map', identity }),
+      null,
+    ).map((message) => message.type)).toEqual([AGENT_RENDERER_MESSAGE_TYPES.INIT]);
   });
 
   it('accepts only ready/error messages from the bound iframe window', () => {

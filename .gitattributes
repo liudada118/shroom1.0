@@ -7,8 +7,8 @@
 #
 # text=auto：由 git 按内容自己判断文本/二进制，二进制不参与任何改写。
 # eol=lf：判定为文本的一律以 LF 签出，Windows 上的编辑器改成 CRLF 也不会
-#         再产生假改动。仓库内没有任何被跟踪的 .bat/.cmd/.ps1，不存在
-#         必须保留 CRLF 才能执行的脚本。
+#         再产生假改动。仓库没有必须依赖 CRLF 执行的脚本；PowerShell 验证脚本
+#         同样固定为 LF，避免编辑器造成整文件假改动。
 * text=auto eol=lf
 
 # 下面这些即便 git 的自动判定失手也不许改写 —— build/model 下 137MB 的

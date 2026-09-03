@@ -31,11 +31,16 @@ try {
       name: 'Runtime Agent Demo',
       version: '1.0.0',
       renderer: { entry: 'index.html' },
+      charts: [{ id: 'trend', entry: 'trend.html' }],
       permissions: ['sensor.read'],
     },
-    files: [{ path: 'index.html', encoding: 'utf8', content: '<!doctype html>' }],
+    files: [
+      { path: 'index.html', encoding: 'utf8', content: '<!doctype html>' },
+      { path: 'trend.html', encoding: 'utf8', content: '<!doctype html>' },
+    ],
   });
   assert.strictEqual(result.app.rendererId, 'agent:runtime-agent-demo');
+  assert.strictEqual(result.app.charts[0].chartId, 'agent-chart:runtime-agent-demo:trend');
   assert.deepStrictEqual(
     appRuntime.agentApps.getStatus().apps.map((app) => app.id),
     ['runtime-agent-demo'],

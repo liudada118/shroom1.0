@@ -87,7 +87,9 @@ async function main() {
     assert.strictEqual(rejectedOriginBody.errorCode, 'AGENT_APP_ORIGIN_FORBIDDEN');
 
     const installRequest = {
-      manifest: createManifest(),
+      manifest: createManifest({
+        charts: [{ id: 'cop-track', label: '重心轨迹', entry: 'charts/cop.html', height: 260 }],
+      }),
       files: [
         {
           path: 'frontend/index.html',
@@ -104,6 +106,11 @@ async function main() {
           encoding: 'base64',
           content: 'Z2xURg==',
         },
+        {
+          path: 'charts/cop.html',
+          encoding: 'utf8',
+          content: '<!doctype html><main>COP Track</main>',
+        },
       ],
       overwrite: false,
     };
@@ -116,6 +123,10 @@ async function main() {
     assert.strictEqual(installResponse.status, 201);
     assert.strictEqual(installBody.code, 0);
     assert.strictEqual(installBody.data.app.rendererId, 'agent:http-agent-demo');
+    assert.strictEqual(
+      installBody.data.app.charts[0].chartId,
+      'agent-chart:http-agent-demo:cop-track',
+    );
     assert.strictEqual(
       installBody.data.app.entryUrl,
       '/api/agent-apps/http-agent-demo/files/frontend/index.html',
@@ -144,6 +155,12 @@ async function main() {
     );
     assert.doesNotMatch(entryResponse.headers.get('content-security-policy'), /connect-src 'self'/);
     assert.match(entryResponse.headers.get('permissions-policy'), /serial=\(\)/);
+
+    const chartResponse = await fetch(
+      `${baseUrl}${installBody.data.app.charts[0].entryUrl}`,
+    );
+    assert.strictEqual(chartResponse.status, 200);
+    assert.match(await chartResponse.text(), /COP Track/);
 
     const scriptResponse = await fetch(
       `${baseUrl}/api/agent-apps/http-agent-demo/files/frontend/app.js`,
@@ -202,6 +219,7 @@ async function main() {
     assert.strictEqual(contractBody.agentApps.schemaVersion, 1);
     assert.strictEqual(contractBody.agentApps.routes.policy, '/api/agent-apps/policy');
     assert.strictEqual(contractBody.agentApps.messageProtocol.hostToRenderer.frame, 'shroom.renderer.frame');
+    assert.strictEqual(contractBody.agentApps.messageProtocol.initSurfaceContext.surface, 'renderer|chart');
     assert.strictEqual(contractBody.agentApps.messageProtocol.rendererToHost.ready, 'shroom.renderer.ready');
   } finally {
     await new Promise((resolve) => server.close(resolve));

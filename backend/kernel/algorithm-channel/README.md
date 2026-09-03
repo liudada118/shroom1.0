@@ -17,7 +17,14 @@
 | `petCareRuntimeService.js` | 定时调 Python 算法并发布结果，557 行。`startVitalSignsTimer`（jqbed / smallBed，**125ms**）、`startPetCareTimer`（petCare / petCareMini，**20ms**）。同时维护宠物在床状态的稳定窗口、模拟/补齐心率 | 两个定时器都是「够条件才跑」：点阵有效、类型匹配、串口已开，缺一就直接 return。jqbed 探测期间用 `jqbedConfigProbePromise` 挡住新任务，防止 125ms 节奏把等待任务堆起来 |
 | `jqbedAlgorithmConfig.js` | jqbed 算法的 13 个参数配置，含默认值、校验、归一化和落盘 store。导出 `JQBED_ALGORITHM_CONFIG_VERSION`（当前 **2**）、`DEFAULT_JQBED_ALGORITHM_VALUES`、`JqbedAlgorithmConfigValidationError`、`normalizeJqbedAlgorithmValues`、`createJqbedAlgorithmConfigStore` | 落盘位置由调用方给（`server.js:316` 传 `runtimeWritableRoot/jqbed-algorithm-config.json`），本文件不猜路径。**v1 配置能自动升到 v2**：缺的键用默认值补 |
 | `jqbedAlgorithmProtocol.js` | 上面那份配置的前后端协议。`isJqbedAlgorithmConfigMessage` 判形状，`createJqbedAlgorithmProtocol` 处理读/写/重置三个命令，`buildJqbedGetDataArgs` 决定调算法时带不带 config | 只有 `activeFile === 'jqbed'` 且配置非空时才把 config 传给算法——其他传感器类型不吃这套参数，传了会被 Python 侧当未知字段 |
-| `displaySystemAlgorithmRunner.js` | Display System 声明式算法的两种执行器。`createJavaScriptAlgorithmRunner` 用 `vm` 沙箱跑 JS（默认超时 **1000ms**）；`createPythonAlgorithmRunner` 转给 `pythonWorker.callPy` | `fsLike` / `vmLike` / Python caller 都可注入，所以能测。JS 沙箱不是安全边界——扩展代码是本地信任的，超时只是防死循环 |
+| `displaySystemAlgorithmRunner.js` | Display System 声明式算法的两种执行器。`createJavaScriptAlgorithmRunner` 用 `vm` 沙箱跑 JS（默认超时 **1000ms**）；`createPythonAlgorithmRunner` 转给 `pythonWorker.callPy`，并提供 reset/dispose | Python 仍是「一帧执行中 + 一个 latest 等待槽」；dispose 会拒绝等待帧，防止重绑后旧算法重新初始化。JS 沙箱不是安全边界 |
+
+## Display System Python API
+
+- V1 保持 `calculate(raw_data, context)`，裸 `algorithm.py` 和已有 manifest 不需要迁移。
+- V2 使用 `initialize(config, resources)`（可选）、`process(request)`（必需）、`reset(reason)`（可选）、`shutdown()`（可选）。模块按入口路径和修改时间缓存；热更新会先 shutdown 旧实例。
+- `request.frames` 来自 extension-host 聚合器，按稳定 sensorId 键控；Python worker 不自行读取串口或推断左右/座椅/靠背身份。
+- runtime controller 重绑和停止时会 dispose 算法，另提供通用 reset 入口；生命周期 RPC 和逐帧调用继续复用同一个 JSON-line worker。
 
 ## 配置文件带版本号的原因
 

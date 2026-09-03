@@ -17,6 +17,8 @@
 | `displaySystemPage.js` | 前端页面配置的规范化与校验，581 行。视图类型、矩阵变换、侧边栏指标、图表卡片、配色 —— 14 个导出 | 后端不渲染任何东西，但要保证前端拿到的配置是完整且合法的。默认数据源在 `DEFAULT_VIEW_SOURCES`（如 `lineChart` → `metrics.totalPressure`） |
 | `displaySystemCoordinateMap.js` | 坐标矩阵的读取、归一化、规范化、校验，134 行 | 兼容裸 `rows × cols × [x,y]` 数组和带 `coordinates` 字段的对象两种写法。都不是就抛错 |
 | `displaySystemCanvasCatalog.js` | 白名单常量表，55 行。配色（5 种）、画布叠加层、图表叠加层、图表卡片上限 | **只有 id 和中文名，没有色值。** 色值实现在前端 `client/src/extensions/display-system/colormaps.js` |
+| `displaySystemAlgorithmPackage.js` | 独立校验/加载 `algorithm-package.json`，冻结 Python API 1/2、运行环境、单/多传感器输入、同步容差、入口与资源路径 | 包内入口和资源必须使用相对路径并留在包目录；多传感器只允许 API V2 |
+| `builtinAlgorithmPackageCatalog.js` | 从开发态/打包态只读资源根发现内置算法包，输出可移植 Manifest、源码、兼容范围和指标定义 | 不暴露绝对路径；同 id 按资源根顺序去重，坏包进入诊断而不污染 Builder 下拉框 |
 
 ## 白名单为什么放在后端
 
@@ -33,5 +35,6 @@ Display System 是用户可以自己写、自己分发的——已经存在的�
 ## 边界
 
 - 到这一层结束不打开串口、不跑算法。要真跑起来看 `../runtime/`。
+- `sensor.algorithm.packageManifest` 是可选增强；未声明时继续使用原来的裸 `entry` V1 契约。
 - `ALGORITHM_TYPES` 和四种算法操作类型是对扩展作者的公开契约，删项属破坏性变更。
 - 线序、点序、坐标映射直接决定热力图的点位。校验放松一格，后果是画面镜像或错位而**不报错**。

@@ -61,6 +61,47 @@ Python 进程通过 stdin/stdout 与 Node.js 通信，使用 JSON 行协议：
 |--------|------|------|
 | `ping` | 无 | 握手测试 |
 | `getData` | `data`: 1024 个数值的数组 | 处理传感器数据，返回健康监测结果 |
+| `run_display_system_algorithm` | `entry/raw_data/context/api_version/algorithm_package` | 调用 Display System V1 或 V2 算法 |
+| `reset_display_system_algorithm` | `entry/reason` | 重置已加载 V2 算法的历史状态 |
+| `shutdown_display_system_algorithm` | `entry` | 执行 shutdown 并从模块缓存移除 |
+
+## Display System 算法 API
+
+平台内置算法包位于 `agent-resources/algorithm-packages/`，并通过
+`GET /api/display-systems/catalog` 的 `algorithmPackages` 字段提供给 Builder 和 Agent。选择后，
+包 Manifest 与入口源码会复制到具体展示系统目录，运行时不依赖资源目录绝对路径。
+
+当前注册包：`mattress-vitals`、`pet-care`、`pet-care-mini`、`foot-pressure-realtime`。
+足压峰值帧、批量回放和 PDF 报告属于报告命令，不进入逐帧算法包下拉框。
+
+V1 保持兼容：
+
+```python
+def calculate(raw_data, context):
+    return {"data": context["normalized_data"], "metrics": {}}
+```
+
+V2 用于模型、滑动窗口和多传感器融合：
+
+```python
+def initialize(config, resources):
+    pass
+
+def process(request):
+    seat = request["frames"]["seat"]["normalizedData"]
+    back = request["frames"]["back"]["normalizedData"]
+    return {"data": request["normalized_data"], "metrics": {"sensorCount": 2}}
+
+def reset(reason):
+    pass
+
+def shutdown():
+    pass
+```
+
+V2 的 `frames` 已经完成协议解码和线序/点位映射，键名是 manifest 的稳定 sensorId。算法不得
+从 COM 名称、到达顺序或数组位置推断业务身份。`runtime.profile` 当前用于声明和诊断；实际可导入
+的第三方库仍必须已经包含在打包的 Python 3.11 runtime 中。
 
 ### 返回字段说明
 

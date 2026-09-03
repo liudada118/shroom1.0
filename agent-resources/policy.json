@@ -3,7 +3,7 @@
   "policyId": "shroom.agent-display-app",
   "policyVersion": "1.0.0",
   "status": "stable",
-  "purpose": "Machine-readable rules for generating a complete multi-sensor display system and, when needed, installing an offline sandboxed display app without changing Shroom's permanent backend pipeline.",
+  "purpose": "Machine-readable rules for generating a complete multi-sensor display system and installing offline sandboxed renderer or chart surfaces without changing Shroom's permanent backend pipeline.",
   "normativeLanguage": {
     "MUST": "required; failure stops generation or installation",
     "MUST_NOT": "forbidden",
@@ -80,6 +80,22 @@
       "absolute filesystem paths"
     ]
   },
+  "chartSelection": {
+    "builtIn": "Use a catalog-advertised formula chart when one scalar history expresses the request.",
+    "agent": {
+      "idFormat": "agent-chart:<appId>:<chartId>",
+      "rule": "Use a chart id returned by GET /api/agent-apps only. The host mounts it in the existing sidebar chart area and supplies the same sanitized sensor frame contract."
+    },
+    "customChartWhen": "Use an Agent chart for XY trajectories, multiple synchronized series, or another chart shape the live formula catalog cannot express.",
+    "forbiddenChartReferences": [
+      "http://*",
+      "https://*",
+      "ws://*",
+      "wss://*",
+      "file://*",
+      "absolute filesystem paths"
+    ]
+  },
   "appManifest": {
     "fileName": "app.json",
     "schemaVersion": 1,
@@ -87,9 +103,9 @@
       "schemaVersion",
       "id",
       "name",
-      "version",
-      "renderer"
+      "version"
     ],
+    "surfaceRule": "At least one renderer or charts[] entry is required. Renderer-only, chart-only, and combined packages are valid.",
     "id": {
       "type": "string",
       "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$",
@@ -107,6 +123,7 @@
       "maxLength": 120
     },
     "renderer": {
+      "optional": true,
       "requiredFields": [
         "entry"
       ],
@@ -131,6 +148,35 @@
         "height": {
           "type": "integer",
           "default": 480,
+          "minimum": 160,
+          "maximum": 2000
+        }
+      }
+    },
+    "charts": {
+      "type": "array",
+      "optional": true,
+      "maximumItems": 16,
+      "itemRequiredFields": [
+        "entry"
+      ],
+      "itemFields": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "entry": {
+          "type": "string",
+          "rule": "MUST be a portable relative path present in install.files; no traversal, absolute path, URL, or backslash alias."
+        },
+        "height": {
+          "type": "integer",
+          "default": 240,
           "minimum": 160,
           "maximum": 2000
         }
@@ -192,6 +238,16 @@
               "entry": "frontend/index.html",
               "height": 480
             },
+            "charts": [
+              {
+                "id": "cop-track",
+                "chartId": "agent-chart:pressure-grid-demo:cop-track",
+                "label": "Center of Pressure Track",
+                "entry": "charts/cop.html",
+                "height": 260,
+                "entryUrl": "/api/agent-apps/pressure-grid-demo/files/charts/cop.html"
+              }
+            ],
             "permissions": [
               "sensor.read"
             ],
@@ -240,6 +296,7 @@
             "entry": "frontend/index.html",
             "height": 480
           },
+          "charts": [],
           "permissions": [
             "sensor.read"
           ],
@@ -249,7 +306,7 @@
       },
       "rules": [
         "manifest is the parsed app.json and MUST NOT also be supplied as files/app.json",
-        "renderer.entry MUST exist in files",
+        "every declared renderer/chart entry MUST exist in files",
         "encoding MUST be utf8 or base64",
         "overwrite MUST remain false unless the user explicitly authorizes replacement of that exact app id",
         "all files and dependencies MUST be packaged locally; network URLs and runtime downloads are forbidden",
@@ -274,6 +331,7 @@
     },
     "limits": {
       "maximumFiles": 128,
+      "maximumCharts": 16,
       "maximumDecodedBytesPerFile": 25165824,
       "maximumDecodedBytesTotal": 33554432,
       "maximumPortableRelativePathLength": 240,
@@ -298,7 +356,7 @@
   },
   "sandbox": {
     "transport": "window.postMessage",
-    "iframeRule": "The host runs agent renderer HTML in a sandbox. The renderer MUST accept data only when event.source === window.parent.",
+    "iframeRule": "The host runs Agent renderer and chart HTML in a sandbox. Every surface MUST accept data only when event.source === window.parent.",
     "originModel": "The iframe has an opaque origin. Static app responses use Cross-Origin-Resource-Policy: cross-origin so package files can load; isolation relies on sandbox flags, exact app-files CSP, path validation, and the postMessage source check rather than same-origin trust.",
     "securityBoundary": {
       "purpose": "capability isolation for trusted packaged renderer code",
@@ -370,6 +428,9 @@
         "rendererId": "string",
         "widgetId": "string",
         "label": "string",
+        "surface": "renderer|chart",
+        "surfaceId": "string",
+        "config": "json-object",
         "displaySystemId": "string",
         "sensorId": "string",
         "sensorLabel": "string",
@@ -593,7 +654,7 @@
       "profileRule": "Every profile renderer reference and widget id MUST resolve to a declared renderer/widget.",
       "charts": {
         "builtin": "Use catalog-advertised chartCards/templates and supported formula syntax; at most the live catalog limit.",
-        "agent": "An agent renderer MAY draw local presentation-only charts from its init/frame values, metrics, algorithmMetrics, and optional channels array.",
+        "agent": "An Agent renderer remains one main-canvas visualization. Custom chart code MUST be declared in app.json charts[] and referenced by display.chartCards[].agentChartId; the host mounts it in the existing sidebar chart area. Do not embed sidebar charts in the main renderer.",
         "dataRule": "Chart rendering does not create another storage or analysis truth; persisted/exported values remain those from the permanent pipeline."
       }
     },
@@ -641,6 +702,27 @@
       "new arbitrary Python algorithm",
       "new executable, WASM, native library, DLL, shell command, package, or runtime dependency"
     ],
+    "pythonAlgorithmPackageContract": {
+      "manifestFilename": "algorithm-package.json",
+      "schemaVersion": 1,
+      "supportedApiVersions": [1, 2],
+      "pythonVersion": "3.11",
+      "v1Entry": "calculate(raw_data, context)",
+      "v2Lifecycle": ["initialize(config, resources)", "process(request)", "reset(reason)", "shutdown()"],
+      "inputModes": ["single-sensor", "multi-sensor"],
+      "syncStrategies": ["latest", "strict"],
+      "multiSensorRules": [
+        "input.sensors MUST contain stable manifest sensor ids",
+        "input.triggerSensor MUST be one of input.sensors",
+        "the package MUST be attached only to its trigger sensor",
+        "request.frames is keyed by sensor id after protocol decode and line/point mapping",
+        "strict is software timestamp validation and MUST NOT be described as hardware synchronization"
+      ],
+      "saveShape": {
+        "sensorAlgorithm": { "type": "python", "packageManifest": "sensor/algorithm-package.json" },
+        "definitionFields": ["algorithmPackage", "algorithmSource"]
+      }
+    },
     "rules": [
       "Renderer HTML is presentation-only and MUST NOT implement an alternate acquisition, calibration, storage, replay, or CSV algorithm.",
       "Authorized JavaScript or Python algorithms MUST run through the existing platform algorithm host and permanent frame pipeline, with its validation and timeout controls.",

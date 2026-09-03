@@ -182,6 +182,8 @@ function buildSdkContractSnapshot({
       capability: 'sandboxed-renderer-apps',
       schemaVersion: 1,
       rendererIdPattern: 'agent:<appId>',
+      chartIdPattern: 'agent-chart:<appId>:<chartId>',
+      surfaces: ['renderer', 'chart'],
       permissions: ['sensor.read'],
       routes: {
         list: HTTP_ROUTES.agentApps,
@@ -200,19 +202,29 @@ function buildSdkContractSnapshot({
         id: 'string',
         name: 'string',
         version: 'semantic-version string',
-        rendererId: 'agent:<appId>',
+        rendererId: 'agent:<appId>|null',
+        rendererOptional: true,
         renderer: {
           id: 'string',
           label: 'string',
           entry: 'package-relative string',
           height: 'integer 160..2000',
         },
+        charts: [{
+          id: 'string',
+          chartId: 'agent-chart:<appId>:<chartId>',
+          label: 'string',
+          entry: 'package-relative string',
+          height: 'integer 160..2000',
+          entryUrl: '/api/agent-apps/:id/files/*',
+        }],
         permissions: ['sensor.read'],
         entryUrl: '/api/agent-apps/:id/files/*',
         editable: true,
       },
       limits: {
         maximumFiles: 128,
+        maximumCharts: 16,
         maximumDecodedBytesPerFile: 25165824,
         maximumDecodedBytesTotal: 33554432,
         maximumPortableRelativePathLength: 240,
@@ -243,6 +255,11 @@ function buildSdkContractSnapshot({
         hostToRenderer: {
           init: 'shroom.renderer.init',
           frame: 'shroom.renderer.frame',
+        },
+        initSurfaceContext: {
+          surface: 'renderer|chart',
+          surfaceId: 'agent:<appId>|agent-chart:<appId>:<chartId>',
+          config: 'JSON-safe object from display.chartCards[].source/options',
         },
         rendererToHost: {
           ready: 'shroom.renderer.ready',

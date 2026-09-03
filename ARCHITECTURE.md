@@ -1,6 +1,90 @@
 # 架构文档
 
-> 最后更新于：2026-09-01
+> 最后更新于：2026-09-02
+
+## 2026-09-02 Agent 算法、主渲染器与侧栏图表三类扩展
+
+Agent 的可安装能力现在分成三类，但仍共用一条永久数据链。算法包在既有 Python/JavaScript 算法
+宿主中运行，主渲染器安装到宿主主画布，图表安装到宿主原来的侧栏图表区域；三者都消费协议解码、
+线序/点位映射后的 canonical 数据，不能自行打开串口、写 SQLite、生成另一份回放或改变 CSV 真相。
+因此用户只需描述“32×32、3D 点图、呼吸趋势、重心轨迹”，Agent 可以从实时 catalog 自动选择
+兼容算法和内置组件；内置公式图表无法表达 XY/多序列时，再创建并安装 Agent 图表，不要求用户知道
+`mattress-vitals` 或任何内部 ID。
+
+Agent App schema v1 的 `renderer` 现在可选，并新增最多 16 项 `charts[]`；两者至少存在一个，所以包
+可以只提供主渲染、只提供图表，或同时提供两者。宿主分配 `agent:<appId>` 与
+`agent-chart:<appId>:<chartId>` 两类稳定 ID。Display System 通过
+`display.chartCards[].agentChartId` 引用图表，还可提供 `source/options`；保存、另存为和 Builder
+重载会保留该定义。公式标量曲线继续走原来的 `formula` 路径，XY 轨迹、多同步序列和其它自定义图形
+走 Agent chart 路径，两者共用侧栏卡片数量限制。
+
+主画布和图表都由 `AgentRendererHost` 的 `sandbox="allow-scripts"` iframe 承载，继续使用
+`shroom.renderer.init/frame/ready/error` v1。init 新增机器可读的
+`surface/surfaceId/config`：`surface` 区分 renderer/chart，`surfaceId` 给出已安装稳定 ID，`config`
+只含卡片声明的 JSON 安全 `source/options`。frame 仍逐字段重建并携带当前路及可选 `channels[]`；
+侧栏对高频帧做 latest/coalesced 限流，不把每一帧压进 React 渲染。图表页面失效、未安装或超时只在
+对应卡片内报错，不影响主渲染和数据链。
+
+公开发现面同步更新：`GET /api/agent-apps` 返回每个 App 的 `charts[]` 描述，
+`GET /api/sdk/contract` 公布 surface、图表 ID、数量上限和 init 上下文，Display System Builder catalog
+公布 `agentChartContract`。随包规则要求 Agent 先发现已有算法/渲染/图表，再决定复用或安装；自定义
+图表必须引用安装响应返回的 ID，并由宿主放在原侧栏，不能塞进主渲染 iframe 伪造整页仪表盘。
+
+## 2026-09-02 内置 Python 算法正式包目录
+
+`agent-resources/algorithm-packages/` 现在是随安装包发布的正式算法包目录。运行时分别从开发态
+`agent-resources/algorithm-packages/` 与打包态 `resources/agent/algorithm-packages/` 发现
+`algorithm-package.json`，由 `builtinAlgorithmPackageCatalog` 校验、去重并转换为 Builder/Agent
+可读取的 `catalog.algorithmPackages`；目录结果不暴露主机绝对路径，保存展示系统时复制可移植的
+manifest、入口源码和指标定义，因此安装后的用户系统不依赖仓库路径。
+
+当前注册四个实时包：`mattress-vitals`、`pet-care`、`pet-care-mini` 和
+`foot-pressure-realtime`。它们复用现有 Python worker 中的真实算法入口，均保留标准矩阵作为
+`data`，只通过命名 `metrics` 增加生命体征、宠物状态或足压/重心结果，避免改变实时、采集、回放和
+CSV 的矩阵真相。床垫包额外基于任意合法矩阵尺寸输出 `copX/copY/copDistance`，使 32x32 展示系统
+可以直接组合 3D 点图、呼吸趋势和重心指标。Builder 的算法模式新增“已注册 Python 算法包”，并在
+保存前校验当前矩阵点数是否满足包的 compatibility 声明。
+
+`get_peak_frame`、批量 `replay_server` 和 PDF 足压报告仍属于批处理/报告命令：它们需要一段会话或
+产生文件副作用，不伪装成逐帧 Display System 算法包。后续如需在 Agent 中选择，应作为独立报告
+能力注册，不进入每帧背压与生命周期通道。
+
+## 2026-09-01 展示系统 MVP 输入模板
+
+`agent-resources/templates/display-system-mvp-input/` 提供随安装包发布的真机接入资料模板。模板把
+用户需要提供的内容拆成系统范围、逐传感器业务身份、完整协议、1 基线序、真实样例帧、展示需求、
+可选算法授权和端到端验收表；多传感器身份必须来自显式 sensor id/label/outputChannel，临时 COM、
+协议或插入顺序不得用于推断座椅、靠背或左右手。Agent 使用模板时仍须先读取运行中软件公开契约、
+策略、协议预设与 catalog，并通过现有 Display System/Agent App API 安装，不能修改永久后端。
+
+普通单垫 MVP 优先使用 `agent-resources/templates/展示系统简易需求模板.md`：用户只附协议文档与
+包含行列数的线序文档，再填写业务用途、串口对应关系和展示勾选项；完整输入包只用于多传感器、
+算法包或正式验收场景。
+
+模板目录由 `package.json` 的 `agent-resources -> agent` 复制规则进入
+`resources/agent/templates/display-system-mvp-input/`。它是需求输入包，不是可直接加载的
+`display-system.json`；最终 manifest、逐 sensor 定义和可选算法/渲染包由 Agent 依据实时平台能力生成。
+
+## 2026-09-01 变更感知任务验证与可复用性能基线
+
+日常仓库任务新增 Fast / Standard / Full 三档工作流。`AGENTS.md` 定义默认 Standard、升级 Full
+的高风险边界、并行分工和交付规则；`ARCHITECTURE_INDEX.md` 保存稳定入口、两条核心数据流及
+“变更路径 → 验证域”矩阵。后续任务先读取短索引并用 `rg` 定位直接调用链，只有索引不足或需要
+历史设计依据时才读取本文档相关章节，避免重复全仓扫描。该工作流不改变应用运行时、协议、存储
+或发布行为。
+
+`scripts/verify-changed.ps1` 合并工作区、暂存区和未跟踪文件，按 backend/client/两套 SDK、Electron
+与文档路径选择验证套件。互不依赖的测试、lint 和临时生产构建并行执行；数据面微基准在其它任务
+结束后独占运行，避免 CPU 争用造成假回退。后端测试固定通过 Electron-as-Node 运行，保持
+`better-sqlite3` ABI 与应用一致；客户端生产构建只写系统临时目录并在校验路径后清理，不覆盖仓库
+现有 `build/`。已知 Windows 临时目录 `ENOTEMPTY` 仅在命中特定错误文本时允许重试一次，普通断言
+失败不重试。
+
+`scripts/perf-baseline.mjs` 使用确定性数据覆盖 4096 点 canonical 帧校验/白名单投影/JSON 往返、
+2048 点压力变换、1024 点车背线序和 point-grid 管线。`scripts/perf-baseline.json` 保存环境指纹、
+行为 checksum、wire 体积和 median/op；同平台、CPU 与 Node major 才比较相对回退，跨环境只守宽松
+硬预算，行为 checksum 与 wire 体积在所有环境都必须一致。性能基线是纯 CPU 微基准，不能替代真实
+串口 → WebSocket → Electron → GPU 的端到端压测。
 
 ## 2026-09-01 前端 SDK `sensor.frame` 契约双模块入口
 
@@ -2440,6 +2524,8 @@ manifest 目前**没有**声明图表默认外观的字段，所以图表只有�
 - 页面安全算法可在 `algorithm-data.json.metrics` 中配置 `sum/average/max/min/activeCount/activeRatio` 聚合、阈值、乘数和偏移，不执行用户表达式或动态代码。
 - 用户新建的展示系统还可选择 JavaScript 或 Python 代码算法。统一函数契约为 `calculate(rawData, context)` / `calculate(raw_data, context)`：首个参数是协议解码后的原始一维数据，`context.normalizedData` / `context["normalized_data"]` 是完成线序和点位映射后的标准矩阵。
 - JavaScript 代码在受限 VM 中同步执行；Python 代码通过常驻 Python worker 异步执行，并采用“最多一帧执行中、只保留最新等待帧”的背压策略。两者都属于本机可信扩展能力，不是面向不可信代码的安全沙箱。
+- Python 裸入口继续作为 API V1，保持 `calculate(raw_data, context)` 永久兼容。可选 `algorithm-package.json` 冻结算法 id/version、Python 3.11 runtime profile、API 版本、入口、参数、资源和输入规则；API V2 提供 `initialize/process/reset/shutdown` 生命周期，重绑/关闭会终止旧实例并拒绝等待帧。
+- 多传感器 V2 算法按稳定 sensorId 声明输入和唯一 triggerSensor。各串口先独立完成协议解码与线序/点位映射，再由共享聚合器生成 `request.frames`；`latest` 拒绝缺失/过期帧，`strict` 额外校验软件时间 skew。聚合未就绪时继续发布标准矩阵，不阻断采集、存储、回放或 CSV，也不把软件对齐宣传为硬件同步。
 - `display.sidebar.algorithmMetrics` 定义指标显示名称、单位和小数位；面板的 `pressure.metrics`、`area.metrics` 和 `primaryMetric` 通过 `algorithm.<id>` 引用算法输出。
 - 内置压力指标继续基于协议解析、线序和点位映射后的 `normalizedData` 计算；只有显式选择的 `algorithm.<id>` 才展示算法结果，避免可视算法污染基础统计。
 - 展示系统采集帧以对象格式保存通道矩阵、`normalizedData`、`algorithmMetrics` 和 `metrics`；历史回放识别该格式并恢复同一 payload，因此左侧算法指标在实时展示与回放中保持一致。没有 `displaySystemId` 的旧设备仍保存原数组格式。
@@ -2596,6 +2682,7 @@ flowchart LR
 
 | 日期 | 类型 | 说明 |
 | :--- | :--- | :--- |
+| 2026-09-02 | 新增功能 / 契约扩展 | Agent App 从单一主渲染器扩展为可选 `renderer` + `charts[]` 展示包：图表获得 `agent-chart:<appId>:<chartId>` 稳定 ID，由宿主挂载到原侧栏并接收同一 canonical 帧；Display System `chartCards`、Builder 草稿保存、公开 SDK/catalog、打包规则与 Agent skills 同步支持。算法仍在永久算法宿主运行，渲染和图表仍是只读表现层。 |
 | 2026-08-31 | 优化重构 | **批 1–3 的长注释回改成短式（6 批 + 1 次补漏，全部完成）**。批 4 结束时问过用户是否统一风格，用户答「回改」。压缩规则：一行说干什么 → 用法/要点（只留不显而易见的、**每条一行**）→ `@param`/`@returns`。**不是删信息而是换存放位置** —— 批 1–3 那十六条机制推演在本文档的批次小节与四张台账里逐条留着，代码里只保留「⚠️ 一句话 + 后果」，需要机制的人来文档里查。**判据换过一次，是刻意的**：起初用 `tmp/long-blocks.mjs`（连续注释行计数）量出「批 1–3 共 **313 个 ≥12 行的块 / 5672 行 / 65 个文件**」，批 A 按这个做完；之后改成 `tmp/long-prose.mjs` 量**散文行**（剥掉 `/**`、`*`、`//` 装饰，再排除空行和以 `@` 开头的行），因为「一个有 8 个入参的函数天然就有 10 行标签」不该被算成注释太长。批 B1 起改用**散文 >6 行**，批 D 起进一步放宽到**散文 >10 行**（抽样发现 7–10 行那一档大多已经就是批 4 用户认可的形状，再压只能开始删事实）。**6–10 行的 JSDoc 一个字没动** —— 用户嫌长的是多段 essay，不是 `@param` 表。七个提交全部**按路径 stage**（`git commit -F <file> -- <显式路径>`），因为工作区始终有并行分支的未提交改动。落地情况：A `runtime/` + `extensions/` `0cfb09f`（7 文件 +83/−71）、B1 `extension-host/` `d40713b`（7 文件 +153/−264）、C1 `kernel/` 非 `platform/` `55ca4a9`（10 文件 +390/−715）、D `kernel/platform/` 除 `server.js` `d78bf26`（17 文件 +204/−404）、C2 批 B/C 当时被并行改动占着的文件 `289a762`（3 文件 +44/−80）、E `kernel/platform/server.js` `212d1b0`（1 文件 +115/−203，12 块，全文散文 340 → 260 行）、补漏 `runtimeStatePatchFactory.js` `8a9d95c`（1 文件 +7/−12）。**合计 39 个文件、+996 / −1749（净 −753 行）。** **原计划的批 B2 实测无事可做**：并行改动（`c2e702c`）落地后重新量，`extension-host/` 里散文 >10 行的只剩 `displaySystemWorkspaceService.js` 的 `save` 一块，逐行数过是 **9 行散文** —— 多出来的 3 行是 `@param`/`@throws` 的**续行**（不以 `@` 开头）被计数器算成散文了，这是 `long-prose.mjs` 的已知局限，11–13 行这一档必须手工复核再动。**收官状态**：`runtime/`、`extensions/` 两层散文 >10 行的块**归零**；`extension-host/` 只剩那一块假阳性；`kernel/` 剩 16 块，全部是**刻意留在 11–16 行**的（`pythonWorker` ×2、`petCareRuntimeService` ×2、`controlCommandRouter` ×2、`serverShutdownOrchestrator`、`runtimeControlService`、`httpAppFactory`、`webSocketHandlerFactory`、`displaySystemAlgorithmRunner`、`historyAnalysisService`、`historySessionService`，以及 `server.js` 里的 3 块）—— 每块都有好几条彼此独立、都会「改了会坏但不报错」的 ⚠️，其中 `activateSubmittedLicenseKey` 还是 CLAUDE.md 点名的「用户权限与身份认证」高风险类别。**不要回头再压这 16 块。** 验证（每批都跑）：`node --check` 全过；`tmp/strip-cmp.mjs`（acorn tokenizer 逐 token 比对）对每个文件**逐个**报代码骨架 0 处不一致，证明是纯注释改动（该脚本传多个目录会错算，必须一次一个路径）；`backend/tests/run-tests.js` 全 **57** 个测试文件通过；`backend/kernel/platform` 的函数注释覆盖率始终 98%（246/252），`runtime/` 与 `extensions/` 始终 100%。压掉的都是同一类东西 —— 把「为什么这样 / 否则会怎样 / 历史上怎么来的」三段合成一句 ⚠️，例如 `runtime/index.js` 的 `getWsServer` 从 5 行压到 3 行，保留「`channel` 不影响返回值、别据此推断存在 sit/back/head 通道表」；`server.js` 的 `resolveZeroTargetChannelIds` 从 24 行压到 14 行，保留「三份来源缺一不可」「`withSourcesOnly` 是采零与清零唯一的行为差异」「返回值有两种形状」三条。**顺带修掉两处已经失效的行号引用**：`publishHistoryDateList` 的注释里原写「1669 行与 1686 行」，在前几批的行号漂移后已经指错了，改成按函数名与语义描述、不再引行号。 |
 | 2026-08-31 | 文档更新 | **`backend/` 函数级注释批 4/4（收尾）：`tests/` 26 个文件 44 个缺注释补齐至 100%（52/52），`compatibility/legacyDataUtils.js` 3 个函数补齐至 100%**，全后端覆盖率 85% → 91%（735 已注释 / 77 缺，其中 71 是刻意不做的 `openWeb.js`、6 是成组箭头函数的已知假阳性）。**代码一行未改**：27 个文件 +432 行 / -0 行，全部 `node --check` 通过，`tmp/strip-cmp.mjs`（acorn 词法分析）判定 27 个文件**逐 token 代码骨架 0 处不一致**，后端 55 个测试文件全过。**⚠️ 注释风格在这一批中途按用户反馈改过一次**：用户看完批 1–3 后说「每个描述都太多了，我最想知道他是干什么做什么怎么用的」，批 4 全部改成短式（一行说干什么 → 最多一两行说用法/要点、只写不显而易见的 → `@param`/`@returns`，简单 helper 控制在 8 行内），批 4 第一遍写的长版本已就地缩写；**批 1–3 已提交的长版本没有回改**，是否统一风格待用户决定。测试文件的注释重点不是「这个 fake 怎么实现」而是**它为什么必须这样 fake**（二开者照抄时会踩的坑）：`runtimeBinding.test.js` 的 `apply` 记零点扣减两条兜底（无基线原样返回、**长度不一致也原样返回** —— 换矩阵尺寸后拿旧基线扣会错位、比不扣更糟；`Math.max(0,…)` 截负值否则配色映射出界）；同文件 `droppedZeroStateStore.updateSources` 只计数以守一条不变量 —— **校验失败被丢弃的清零帧不能被 `createZeroFrameAdapter` 兜底层重新当成旧协议帧处理**，否则串口噪声污染零点基线、画面慢慢偏且无法回溯；`backendSdkClient.test.js` 的 `FakeWebSocket` **异步 open**（`setImmediate`），否则「open 之前就 send」这类 bug 会被同步 open 掩盖，其 `fetchImpl` 记录 url/options 以便断言请求**次数**（契约快照应当被缓存）、`/api/commands` 分支回显 `requestId` 让 ack 匹配可测；`petCareRuntimeService.test.js` 的 `createTimerHarness` 劫持全局 `setInterval` 由测试自己驱动 tick（避免 sleep 型测试间歇失败），**`harness.restore()` 是必须的**否则影响同进程后续测试；`runtimeContextFactory.test.js` 的第二个 `store.get` 说明为何要**换掉外层 `store` 变量再断言** —— 验的正是每次都走 `getRuntimeStateStore()` 现取而非构造时拍快照；`serialChainDemo.test.js` 与 `serialProtocolsApi.test.js` 写明它们守的是**打包后二开路径**（示例坏了比库坏了更打击人；往预设目录丢一个 JSON 就能扩协议，且**一个坏 JSON 只能让自己失效**、不能把整张表清空）。`legacyDataUtils.js` 三个函数**名字全都名不副实**，查实后写进注释：① **`isCar` 的真实语义是「是不是多通道」**（硬编码名单里还有手套 `hand0205*`/`handGlove*`、眼罩、沙发、整椅、足垫），它决定建几个库 / 历史日期取几路 / 清零发几份 / CSV 导几通道，**且是硬编码数组不是读 manifest** —— 新增多通道型号只在 manifest 里声明多个 sensor 不够、必须往这个数组里加一条否则第二路永远拿不到库；② **`dedupli` 的返回结构与入参不同**（入参来自 `SELECT DISTINCT date FROM matrix` 只有 `date`，返回 `{date, name, info}`），而 `publishHistoryDateList` 只在多通道型号上送它的输出、单通道送原始行，所以**前端 `timeArr` 的元素结构随型号变**、不能假设 `.name` 存在；它按 `includes(" ")` 分支是因为 `date` 列有两个来源（`runtimeControlService.js:130-131` 先写 `message.time` 时间戳、再让用户手输的 `message.colName` 覆盖它），`info` 始终保留未加工原标签因为「载入那天」是拿 `date = ?` 去比它；另记两条实测行为（**未改**）：`!String(a.date).includes(":")` 会静默丢掉日期部分带冒号的条目、`sort((a,b) => b.date - a.date)` 是数值相减、非数字日期得 NaN 使比较器被当作 0（等于保持原序）；③ **`totalToN` 现在是恒等函数**（标定多项式与 `* 0.03` 都被注释掉、`mul` 根本没用），因此三处调用点（`historyAnalysisService`/`historyPlaybackService`/`csvDownloadService`）的 `totalToN(total, 1.3)` 那个 `1.3` 是**死参数**、背部压力并没有被乘，且它换算的是整块矩阵的和（不是单点）又发生在读库之后，所以**恢复标定会改变已入库历史数据的显示值**。另记一条：`backend/tests/run-tests.js` 本身没有函数（扫描器不计），但它是一张**手工维护的 55 条测试文件路径数组**（`spawnSync` + `stdio: 'inherit'` 逐个跑、只看退出码），新增测试文件**不会**被自动收录 —— 避免二开者以为是目录扫描。`compatibility/openWeb.js` 的 71 个函数按原定边界仍不注释（它只是那三个基线对比测试的逐点比对基准，加注释会把基线 diff 搅浑）。后端根目录无 eslint 配置故未跑 lint。 |
 | 2026-08-31 | 文档更新 | **还原 `kernel/` 里 26 行乱码注释**（`serverLifecycleService.js` 20 / `webSocketHandlerFactory.js` 5 / `server.js` 1），按用户决定与「新增注释」那批分开单独提交。成因是源文件本是 UTF-8、某个环节按 GBK 解码后又按 UTF-8 存回。**还原不是纯机械变换**：当年误解码碰到落单字节时写成了字面的 `?`（0x3F），**每处都丢了两个字符** —— 被截断汉字的第三字节 + 紧跟它的那个字符（空格或换行），所以 GBK 往回编 + UTF-8 解只能还原到「一句话缺一个字」。做法不是凭上下文猜词，而是**先按字节缩小候选集**（每处缺口留下了被截断汉字的前两个字节，补第三字节只有 64 种可能，列出来再按上下文取唯一合理项）：`e3 80`→`。`（句末，吞掉的是换行）、`e5 8f`→`口`（「三端口 WebSocket 连接」，吞掉的是空格）、`e9 80`→`选`（「历史/框选回放」）、`e5 88`→`到`（「下沉到 service」）。`webSocketHandlerFactory.js` 那 5 处吞掉的是换行、一整块 JSDoc 被并成一行，还原时按原结构拆回多行。**检出判据也换过一次**：先用「像乱码的汉字」字表（漏了 6 行，字表永远不全），改成用可逆性判 —— 一行是这类乱码当且仅当它能**无损**用 GBK 表示（encode 再 decode 回到自身，否则 encode 会把不可映射字符换成 `?`、那是破坏不是还原）且那串字节按 UTF-8 解出来是**可读**中文（已经正确的中文行编成 GBK 后按 UTF-8 解几乎全是替换字符，正是这条把「该修的」和「本来就对的」分开）；按此判据全 `backend/` 复扫，剩下 8 条命中全部核对为假阳性（`SQL 语句。`/`checksum 算法` 这类短行非 ASCII 字数太少撞阈值），确认无残余。**顺带记一条过期事实但未改写原文**：`webSocketHandlerFactory.js` 还原出的「该模块只负责**三端口** WebSocket 连接」是 manifest 之前的模型，与现状矛盾（全后端只有一个端口 19999、隔离靠订阅）—— 把错话从乱码还原成可读反而更易误导，故在原句下方**加注**指向 `websocketRuntimeFactory.createWebSocketServer`，只加注不动原句。验证：3 个文件 +34/-26，`node --check` 通过，代码骨架逐 token 与 HEAD 相同，后端 55 个测试文件全过。 |
@@ -2766,7 +2853,12 @@ flowchart LR
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
+| 2026-09-02 | Agent 自定义图表正式扩展 | Agent App schema v1 支持可选主渲染器及最多 16 个图表 surface；安装、发现、静态资源、公共 SDK/Builder catalog 返回稳定图表 ID。Display System `chartCards` 可引用 Agent 图表，前端在原侧栏 sandbox iframe 中加载并以 10Hz latest 帧转发 canonical 单/多传感器数据；保存与 Builder 编辑保持该定义。Agent 规则已改为自动选择算法、主渲染与公式/自定义图表，用户无需说内部包名。 |
+| 2026-09-02 | 现有实时 Python 算法注册为正式包 | 新增开发态/打包态内置算法包发现与 Builder/Agent catalog，正式注册 `mattress-vitals`、`pet-care`、`pet-care-mini`、`foot-pressure-realtime`；保存时复制可移植 manifest/源码/指标并按矩阵点数校验兼容性，算法结果保留标准矩阵并输出命名 metrics。床垫包补通用 COP，足压包补左右脚 COP 坐标。批量峰值、回放分析和 PDF 报告保留为报告命令。 |
+| 2026-09-01 | 展示系统 MVP 输入模板 | 新增随 Agent 资源打包的系统、传感器、协议、线序、真实样例帧、展示、算法授权与真机验收模板，并附可直接交给 Agent 的任务说明；模板明确 1 基线序、0 基输出坐标、业务身份不可从 COM 推断，以及实时/存储/回放/CSV 同源验收。 |
+| 2026-09-01 | Python 算法包、V2 生命周期与多传感器聚合输入 | 新增独立 `algorithm-package.json` 契约与 Builder/Agent 保存形状，保持裸 V1 calculate 兼容；Python worker 支持 initialize/process/reset/shutdown、热重载和退出清理。Runtime 按 displaySystemId/sensorId 聚合已完成协议与线序映射的矩阵，支持 latest/strict 时间策略和 triggerSensor，未齐帧时透传标准矩阵。新增算法包加载、路径边界、生命周期、聚合与 V2 Python 单测。 |
 | 2026-09-01 | 前端 SDK 契约 ESM/CJS 双入口 | 修复 Vite/Fast 直接加载工作区 `.cjs` 时缺少 default export 的启动错误；浏览器走显式 ESM，Node/CommonJS 保持原入口，并以同组合法/非法帧对账两种实现。Vite 开发模块解析与 Full 10 项门禁均已实测通过。 |
+| 2026-09-01 | 变更感知任务验证与性能基线 | 新增 Fast/Standard/Full 仓库任务协议、快速架构索引、按路径选择并并行执行验证的 PowerShell 入口，以及带环境指纹、行为 checksum、wire 体积和硬预算的 6 项数据面微基准。后端测试固定使用 Electron ABI，生产构建写临时目录，微基准独占运行。首次 Full 验证中客户端 43 文件/451 项、前端 SDK 31 文件/504 项、后端 68 个测试文件、两套 smoke、lint 与临时生产构建均已跑通；Windows 临时目录清理的已知 `ENOTEMPTY` 抖动增加了精确匹配后的一次重试。 |
 | 2026-09-01 | 有限协议自动识别闭环 | 候选统一读取串口协议预设，按波特率、分隔符与精确值数量识别并显式返回 matched/ambiguous/unknown；探测句柄与实时、存储、回放、CSV 隔离，共享路径 reservation 防止运行态抢占。后端 API、前后端 SDK 与 Builder 逐传感器交互已贯通；成功只回填当前 sensor 的完整协议，临时 COM 不落盘，角色身份不参与猜测。验证：后端 63/63 个测试文件、客户端 42 个文件/446 条、前端 SDK 31 个文件/504 条、后端 smoke 10 项、前端 smoke 32 项、改动文件 ESLint 与生产构建通过；真实多串口并发和长时稳定性保留为硬件验收。 |
 | 2026-08-31 | 多传感器身份 fail-closed | 新增可发布的 `@shroom/backend/identity` CommonJS 入口，统一构造/解析/校验 `displaySystemId:sensorId`；实时 canonical 帧拒绝冲突、缺失、多冒号、空 outputChannel 与未知版本，legacy 仅允许一致补齐；Display System 坏身份在 enqueue 前失败，不再落回旧入库。SDK smoke、npm pack dry-run 及后端全量 59 个测试文件通过。 |
 | 2026-08-31 | 多传感器配置、展示、存储、下载与回放闭环 | `sensors[].label` 定义左手/右手/座椅/靠背；Builder 逐路维护并保存 `sensors[] + definitions.sensors`，每张预览/运行时卡片按自身 source 使用对应通道、matrix 和 coordinateMap；Runtime 每帧附实际串口快照；SQLite、历史查询与 CSV 按 canonical `channelId` 隔离；回放以最长通道为时间锚点，其它路按最近 timestamp 对齐并记录 skew，缺 timestamp 的旧记录仍按下标兼容。后端 57 个测试文件、客户端 41 个文件 / 436 条、前端 SDK 30 个文件 / 491 条、lint 0 error 与生产构建通过；真实多串口插拔、异帧率长时采集仍列为硬件验收。 |
@@ -2960,6 +3052,16 @@ Shroom1.0 是一个基于 **Electron** 的跨平台桌面应用程序，专用�
 | **代码混淆** | javascript-obfuscator + rollup-plugin-obfuscator | 生产构建时对业务代码进行混淆保护 |
 
 ## 3. 目录结构
+
+### 3.0 日常任务工作流（2026-09-01）
+
+- `AGENTS.md`：仓库级 Fast / Standard / Full 任务规则、验证升级条件和并行边界。
+- `ARCHITECTURE_INDEX.md`：短架构导航、核心数据流、热点入口和路径到测试域映射。
+- `scripts/verify-changed.ps1`：Windows 变更感知验证入口；Full 模式并行测试后独占运行微基准。
+- `scripts/perf-baseline.mjs` / `scripts/perf-baseline.json`：确定性数据面微基准与已接受参考值。
+
+下面的大型目录树是历史架构快照；日常定位优先使用 `ARCHITECTURE_INDEX.md`，目录边界发生变化时
+同步更新短索引和本节说明。
 
 > 2026-06-17 更新：根目录业务文件已按模块迁移到 `app/`、`backend/`、`assets/`、`tools/`、`runtime/` 和 `docs/markdown/`。根目录仅保留项目级配置、入口说明和锁文件；Electron 主入口现在是 `app/electron/index.js`。
 
@@ -3340,6 +3442,7 @@ flowchart LR
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-09-01 | codeOpi | 展示系统 MVP 真机资料输入包 | `agent-resources/templates/display-system-mvp-input/` 收敛新垫子接入所需的系统信息、逐路身份、协议、线序、样例帧、展示/算法需求和验收证据；打包后位于 `resources/agent/templates/`，可复制填写后直接交给 Agent。 |
 | 2026-08-31 | codeOpi | 多传感器稳定契约 v1 冻结 | 发布 `shroom.multi-sensor` contract v1 与前后端 SDK 校验器，锁定 manifest v3、`sensor.frame` v1、canonical identity、SQLite/CSV 身份列和回放诊断字段；实时、入库、查询、下载、回放、零点均复用同一身份规则，畸形/未来版本 fail closed，旧 NULL 历史和 legacy 输入保持可读。验证：后端 Electron 运行时 60/60 个测试文件、客户端 41 个文件/437 条、前端 SDK 31 个文件/502 条、SDK smoke 10+32 项、生产构建与改动文件 eslint 全过；全仓 eslint 另有 65 条既有 Hook 告警。 |
 | 2026-08-31 | codeOpi | Builder 逐传感器独立配置闭环 | Manifest v3 打开后逐路保留身份、矩阵、文件、协议、算法与定义内容；页签可分别编辑并保存，编辑 API 返回 `definitions.sensors`，新建多路使用独立子目录，自定义 sensor ID 与 outputChannel 唯一性在前端校验。 |
 | 2026-08-31 | codeOpi | 多传感器逐组件展示来源闭环 | `ManifestDisplayRenderer` 按每张 widget 的 source 选对应 sensor.matrix 与 coordinateMap；画布可选择新增组件来源并逐卡编辑，旧 source 别名兼容。前端全量 41 个文件 / 432 条测试通过，涉及文件 eslint 通过。 |
@@ -3739,7 +3842,12 @@ flowchart LR
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-09-02 | codeOpi | 新增功能 / 展示扩展 | Agent App 新增 `charts[]` 与 chart-only 包，Display System 图表卡片可用稳定 `agent-chart:*` 引用；宿主将其加载在原侧栏并通过既有 sandbox 消息协议发送 canonical 帧。公开 SDK/catalog、Builder 保存、随包 policy/skills 和测试同步更新，形成算法、主渲染器、侧栏图表三类 Agent 扩展。 |
+| 2026-09-02 | codeOpi | 新增功能 / 算法包注册 | 将现有四个实时 Python 算法注册为随包发布的正式算法包，新增内置目录发现、Builder/Agent catalog 与已注册包选择模式；保存时内嵌可移植契约/源码/指标并校验矩阵兼容性，床垫生命体征补通用重心指标，足压实时包补左右脚 COP 坐标。 |
+| 2026-09-01 | codeOpi | 文档更新 / 模板新增 | 新增随安装包发布的 Display System MVP 输入模板，覆盖系统范围、逐传感器身份、协议、1 基线序、真实帧、展示/算法需求、Agent 提示词和实时/采集/回放/CSV 真机验收表。 |
+| 2026-09-01 | codeOpi | 新增功能 / 契约强化 | 增加 Python `algorithm-package.json` schema v1、API V1/V2 双适配与 initialize/process/reset/shutdown 生命周期；Display System runtime 以稳定 sensorId 聚合多路标准矩阵，按 latest/strict 和 triggerSensor 调用融合算法，旧裸 calculate 系统保持原行为。 |
 | 2026-09-01 | codeOpi | 修复缺陷 / 契约兼容 | `@shroom/frontend/contract/sensorFrameV1` 增加 conditional exports：浏览器与 ESM 使用显式 `sensorFrameV1.js`，CommonJS 保留 `.cjs`；SDK normalizeFrame 同步迁移，双实现以合法/非法 canonical 帧回归对账，消除 Vite/Fast 开发模式的缺省导出错误。 |
+| 2026-09-01 | codeOpi | 优化重构 / 文档更新 | 落地 Fast/Standard/Full 任务协议与快速架构索引；新增 `verify-changed.ps1`，按路径选择 backend/client/SDK/Electron/docs 验证域，并行运行测试、lint 和临时生产构建，后端固定使用 Electron ABI，性能任务独占执行；新增 6 项确定性数据面基准及环境感知回退判断。package scripts 增加 `verify:*`、`perf` 与 `perf:update`，`.gitattributes` 同步声明 PowerShell 脚本使用 LF。 |
 | 2026-09-01 | codeOpi | 新增功能 / 契约强化 | 完成有限协议自动识别闭环：候选复用内置与用户协议预设，隔离串口探测以完整帧、最少样本和有效率门槛区分命中/歧义/未知；共享路径 reservation 防止探测与运行态争抢同一 COM。新增 HTTP 与前后端 SDK 入口，Builder 逐 sensor 临时选口并只在唯一命中时回填完整协议；并发迟到响应、人工修改、切换传感器和保存竞态均 fail closed。完整验证见项目进度同日记录。 |
 | 2026-08-31 | codeOpi | 契约冻结 / 缺陷修复 | 冻结 `shroom.multi-sensor` contract v1：前后端 SDK 随包发布同内容契约并以漂移测试对账，后端 API 暴露契约版本与兼容策略；manifest v3 强制显式 `sensors[].id`，canonical 帧/身份/数值数组严格校验，坏帧触发 `invalidFrame` 而不降级；SQLite、CSV、回放、零点统一 canonical identity，回放诊断字段完整穿透。完整验证见项目进度同日记录。 |
 | 2026-08-31 | codeOpi | 缺陷修复 / 契约强化 | 新增 `@shroom/backend/identity` 可发布 CommonJS helper，严格锁定 `channelId === displaySystemId:sensorId` 且禁止冒号歧义；`sensor.frame` 冲突/缺失身份、空 outputChannel 或未知版本直接丢帧，legacy 仅从一致字段补齐；display-system 入库前二次校验，坏身份不再绕回 legacy 入库。 |
@@ -4434,3 +4542,10 @@ flowchart LR
 - 前端：授权解析页能显示“分类全选”与分类标签，同时列出实际展开后的系统。`Revise` 隐藏的旧 `humanBody` 不再进入分类，保留当前可见 `humanBodyOptimized`；Agent 动态展示系统仍可按具体稳定 id 授权。
 - 发证与本地校验：`generateLicenseKey()` 接受分类令牌并生成 v3 payload，`decodeLicenseKey()` 和离线验签返回展开后的具体系统，同时保留原始 `licenseFile` 供重启复用稳定范围。
 - 验证：新增分类注册表、混合去重、在线/离线密钥、后端拒绝未知分类和客户端预览测试，并纳入后端统一测试入口。
+
+## 2026-09-02 Agent 渲染帧完整性与主界面分区
+
+- `agentRendererBridge` 只把已经收到且 `values.length === matrix.total` 的完整传感器帧放入可选 `channels[]`；声明存在但尚未到帧的传感器不再伪造成 `values: []` 的正尺寸矩阵。当前 widget 路由同样等到完整帧后才投递，初始化阶段只发送 `shroom.renderer.init`。
+- `AgentRendererHost` 的十秒定时器现在只覆盖初始握手；收到可信 iframe 的 `ready` 或明确 `error` 后立即结束计时，渲染错误不会再被延迟覆盖成“Agent 渲染器加载超时”。
+- manifest 运行时展示面与旧主界面重新对齐：左侧保留原有 Aside 图表区，Agent/内置 renderer 只占中间主渲染区；运行时不再重复内嵌画布零件栏，外层容器和 iframe 宿主不再绘制第二层应用窗口边框。
+- Agent 生成规范冻结表面职责：自定义 renderer 只能实现一个主画布视觉组件，不能复制应用标题、摘要列、侧栏图表或完整仪表盘；时间序列与公式图表必须通过 `display.chartCards` 落在既有侧栏。实时 catalog 无法表达的图表需报告能力缺口，不能挪进主 renderer 规避。

@@ -17,3 +17,7 @@ and after every valid idempotent `init`, accepts only parent-window
 `shroom.renderer.init` and `shroom.renderer.frame` messages, renders the current route's `payload.values`, keeps
 optional `payload.channels[]` state by full canonical `channelId`, and reports malformed messages through
 `shroom.renderer.error`. Optional whitelisted `serial` metadata is displayed only as connection diagnostics.
+The template is a single main-canvas visualization. Keep generated apps on this surface: charts are declared as
+display-system formula `chartCards` are rendered by the host in the existing sidebar. When a formula cannot
+express an XY or multi-series chart, add a local entry under `app.json.charts[]`; the host still mounts it in
+that same sidebar, never inside the main renderer iframe.

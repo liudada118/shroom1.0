@@ -64,12 +64,14 @@ try {
   assert.strictEqual(service.getCatalog().displayTemplates.length, 2);
   assert.deepStrictEqual(
     service.getCatalog().algorithmModes.map((item) => item.id),
-    ['none', 'json', 'code'],
+    ['none', 'json', 'package', 'code'],
   );
   assert.deepStrictEqual(
     service.getCatalog().codeLanguages.map((item) => item.id),
     ['js', 'python'],
   );
+  assert.deepStrictEqual(service.getCatalog().algorithmPackageContract.supportedApiVersions, [1, 2]);
+  assert.match(service.getCatalog().algorithmPackageContract.v2PythonTemplate, /def process\(request\):/);
   const serialTemplates = new Map(
     service.getCatalog().serialTemplates.map((template) => [template.id, template])
   );
@@ -215,6 +217,74 @@ try {
     JSON.parse(fs.readFileSync(path.join(pythonSaved.directory, 'display-system.json'), 'utf8'))
       .algorithm.entry,
     'algorithm.py',
+  );
+
+  const v2PackageSaved = service.save({
+    manifest: {
+      schemaVersion: 3,
+      id: 'python-v2-fusion-demo',
+      name: 'Python V2 Fusion Demo',
+      version: '1.0.0',
+      sensors: ['seat', 'back'].map((sensorId) => ({
+        id: sensorId,
+        label: sensorId,
+        outputChannel: sensorId,
+        type: `${sensorId}Pressure`,
+        matrix: { rows: 1, cols: 2 },
+        files: {
+          lineOrder: `${sensorId}/line-order.json`,
+          pointOrder: `${sensorId}/point-order.json`,
+        },
+        protocol: {
+          baudRate: 115200,
+          framing: { type: 'fixedLength', frameLength: 2 },
+          decoding: { valueType: 'uint8', valueCount: 2 },
+        },
+        algorithm: sensorId === 'seat'
+          ? { type: 'python', packageManifest: 'seat-algorithm/algorithm-package.json' }
+          : { type: 'none' },
+      })),
+    },
+    definitions: {
+      sensors: {
+        seat: {
+          lineOrder: { order: [1, 2] },
+          pointOrder: [[0, 0], [0, 1]],
+          algorithmPackage: {
+            schemaVersion: 1,
+            id: 'seat-back-fusion',
+            name: 'Seat Back Fusion',
+            version: '1.0.0',
+            apiVersion: 2,
+            language: 'python',
+            entry: 'algorithm.py',
+            input: {
+              mode: 'multi-sensor',
+              sensors: ['seat', 'back'],
+              triggerSensor: 'seat',
+              sync: { strategy: 'strict', maxSkewMs: 20, maxAgeMs: 200 },
+            },
+          },
+          algorithmSource: `def process(request):
+    return {"data": request["normalized_data"], "metrics": {"sensor_count": len(request["frames"])}}
+`,
+        },
+        back: {
+          lineOrder: { order: [1, 2] },
+          pointOrder: [[0, 0], [0, 1]],
+        },
+      },
+    },
+  });
+  assert.ok(fs.existsSync(path.join(v2PackageSaved.directory, 'seat-algorithm', 'algorithm-package.json')));
+  assert.ok(fs.existsSync(path.join(v2PackageSaved.directory, 'seat-algorithm', 'algorithm.py')));
+  const loadedV2Package = loadDisplaySystemDirectory(v2PackageSaved.directory, { validateFiles: true });
+  assert.strictEqual(loadedV2Package.ok, true, loadedV2Package.errors.join('; '));
+  assert.strictEqual(loadedV2Package.config.sensors[0].algorithm.apiVersion, 2);
+  assert.strictEqual(loadedV2Package.config.sensors[0].algorithm.package.input.mode, 'multi-sensor');
+  assert.strictEqual(
+    service.read(loadedV2Package.config).definitions.sensors.seat.algorithmPackage.id,
+    'seat-back-fusion',
   );
 
   const fourPortDefinitions = {

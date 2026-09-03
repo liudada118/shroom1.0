@@ -8,6 +8,11 @@
   },
   "scripts": {
     "test": "node backend/tests/run-tests.js",
+    "verify:fast": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-changed.ps1 -Mode Fast",
+    "verify": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-changed.ps1 -Mode Standard",
+    "verify:full": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-changed.ps1 -Mode Full",
+    "perf": "node scripts/perf-baseline.mjs --check",
+    "perf:update": "node scripts/perf-baseline.mjs --write",
     "sdk:demo": "node sdk/backend/examples/backend-sdk-demo.js",
     "sdk:serial-demo": "node sdk/backend/examples/serial-chain-demo.js",
     "sdk:quickstart": "node sdk/backend/examples/quickstart.js",

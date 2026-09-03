@@ -54,16 +54,31 @@ assert.strictEqual(normalizeChartAppearanceConfig({ colormap: 'no-such' }).color
 assert.deepStrictEqual(normalizeChartCardsConfig(), []);
 assert.deepStrictEqual(normalizeChartCardsConfig('nope'), []);
 
-// 缺公式的条目直接丢掉：没有公式的卡片画不出任何东西。
+// 公式曲线和 Agent 图表都能成为侧栏卡片；两种入口都没有的条目直接丢掉。
 assert.deepStrictEqual(
   normalizeChartCardsConfig([
     { templateId: 'a', formula: 'sum()' },
+    { templateId: 'agent', agentChartId: 'agent-chart:vitals:cop-track', source: 'seat' },
     { templateId: 'b' },
     { templateId: 'c', formula: '   ' },
     null,
   ]).map((card) => card.templateId),
-  ['a'],
+  ['a', 'agent'],
 );
+
+assert.deepStrictEqual(normalizeChartCardsConfig([{
+  templateId: 'cop',
+  name: '重心轨迹',
+  agentChartId: 'agent-chart:vitals:cop-track',
+  source: 'seat',
+  options: { trail: 60 },
+}])[0], {
+  templateId: 'cop',
+  name: '重心轨迹',
+  agentChartId: 'agent-chart:vitals:cop-track',
+  source: 'seat',
+  options: { trail: 60 },
+});
 
 // 超上限截断，与前端 FORMULA_CHART_LIMIT 同值。
 assert.strictEqual(
@@ -140,7 +155,25 @@ assert.strictEqual(
   1,
 );
 assert.strictEqual(
-  errorsMatching({ chartCards: [{ templateId: 'a' }] }, 'chartCards[0].formula is required').length,
+  errorsMatching({ chartCards: [{ templateId: 'a' }] }, 'exactly one of formula or agentChartId').length,
+  1,
+);
+assert.strictEqual(
+  errorsMatching({
+    chartCards: [{ templateId: 'a', formula: 'sum()', agentChartId: 'agent-chart:vitals:cop' }],
+  }, 'exactly one of formula or agentChartId').length,
+  1,
+);
+assert.strictEqual(
+  errorsMatching({
+    chartCards: [{ templateId: 'a', agentChartId: 'bad-agent-chart-id' }],
+  }, 'agentChartId is invalid').length,
+  1,
+);
+assert.strictEqual(
+  errorsMatching({
+    chartCards: [{ templateId: 'a', agentChartId: 'agent-chart:vitals:cop', options: [] }],
+  }, 'options must be an object').length,
   1,
 );
 assert.strictEqual(

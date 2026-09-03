@@ -45,11 +45,16 @@ async function main() {
   assert.strictEqual(snapshot.agentApps.routes.install, '/api/agent-apps');
   assert.strictEqual(snapshot.agentApps.routes.files, '/api/agent-apps/:id/files/*');
   assert.deepStrictEqual(snapshot.agentApps.permissions, ['sensor.read']);
+  assert.deepStrictEqual(snapshot.agentApps.surfaces, ['renderer', 'chart']);
+  assert.strictEqual(snapshot.agentApps.chartIdPattern, 'agent-chart:<appId>:<chartId>');
+  assert.strictEqual(snapshot.agentApps.limits.maximumCharts, 16);
   assert.strictEqual(snapshot.agentApps.limits.maximumDecodedBytesPerFile, 25165824);
   assert.strictEqual(snapshot.agentApps.limits.maximumDecodedBytesTotal, 33554432);
   assert.strictEqual(snapshot.agentApps.messageProtocol.schemaVersion, 1);
   assert.strictEqual(snapshot.agentApps.messageProtocol.hostToRenderer.init, 'shroom.renderer.init');
   assert.strictEqual(snapshot.agentApps.messageProtocol.hostToRenderer.frame, 'shroom.renderer.frame');
+  assert.strictEqual(snapshot.agentApps.messageProtocol.initSurfaceContext.surface, 'renderer|chart');
+  assert.match(snapshot.agentApps.messageProtocol.initSurfaceContext.surfaceId, /agent-chart/);
   assert.strictEqual(snapshot.agentApps.messageProtocol.rendererToHost.ready, 'shroom.renderer.ready');
   assert.strictEqual(snapshot.agentApps.messageProtocol.rendererToHost.error, 'shroom.renderer.error');
 

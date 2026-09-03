@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-01T09:14:43.491Z",
+  "environment": {
+    "platform": "win32",
+    "arch": "x64",
+    "nodeMajor": 22,
+    "cpuModel": "13th Gen Intel(R) Core(TM) i7-13620H"
+  },
+  "relativeLimit": 1.75,
+  "parameters": {
+    "pointCount": 4096,
+    "targetSampleMs": 50,
+    "sampleCount": 7
+  },
+  "signatures": {
+    "source4096": 451583429,
+    "pressure2048": 3538819901,
+    "carBack1024": 3256276677,
+    "pointGridBack2880": 3027004005
+  },
+  "wire": {
+    "bytes": 97480,
+    "rawUint16Bytes": 8192,
+    "expansionRatio": 11.8994140625
+  },
+  "benchmarks": {
+    "sensor-frame.validate-4096": {
+      "medianMs": 0.0009505208333333293,
+      "budgetMs": 0.1
+    },
+    "sensor-frame.envelope-4096": {
+      "medianMs": 0.042280390625,
+      "budgetMs": 1
+    },
+    "sensor-frame.json-roundtrip-4096": {
+      "medianMs": 0.3965453124999998,
+      "budgetMs": 2
+    },
+    "processing.press-2048": {
+      "medianMs": 0.04933964843749994,
+      "budgetMs": 1
+    },
+    "processing.car-back-line-1024": {
+      "medianMs": 0.02756267857142853,
+      "budgetMs": 1
+    },
+    "frontend.point-grid-back": {
+      "medianMs": 4.895387499999998,
+      "budgetMs": 50
+    }
+  }
+}

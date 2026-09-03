@@ -5,20 +5,25 @@ const {
 
 const stopped = [];
 const started = [];
+const disposed = [];
+const reset = [];
 let dispatcherId = 0;
 
 const controller = createDisplaySystemRuntimeController({
   runtimeChannelRegistry: { list: () => [] },
   bindRuntimeChannels: ({ runtimeChannelRegistry }) => {
     assert.ok(runtimeChannelRegistry);
+    const bindingId = `binding-${dispatcherId + 1}`;
     return [{
-      id: `binding-${dispatcherId + 1}`,
+      id: bindingId,
       displaySystemId: 'demo',
       serialRole: 'sit',
       parserChannel: 'sit',
       outputChannel: 'sit',
       status: 'bound',
       error: null,
+      dispose: () => disposed.push(bindingId),
+      resetAlgorithm: (reason) => reset.push([bindingId, reason]),
     }];
   },
   createRuntimeDispatcher: ({ bindings, getSensorType }) => {
@@ -46,12 +51,17 @@ controller.bind({ getSensorType: () => 'demoSensor' });
 
 assert.deepStrictEqual(started, [1, 2]);
 assert.deepStrictEqual(stopped, [1]);
+assert.deepStrictEqual(disposed, ['binding-1']);
 assert.strictEqual(controller.getRuntimeBindings()[0].id, 'binding-2');
 assert.strictEqual(controller.getStatus().runtimeBindings.count, 1);
 assert.strictEqual(controller.getStatus().runtimeBindings.bindings[0].error, null);
 assert.strictEqual(controller.getStatus().runtimeDispatcher.activeHandlerCount, 1);
 
+controller.resetAlgorithms('playback-seek');
+assert.deepStrictEqual(reset, [['binding-2', 'playback-seek']]);
+
 controller.stop();
 assert.deepStrictEqual(stopped, [1, 2]);
+assert.deepStrictEqual(disposed, ['binding-1', 'binding-2']);
 
 console.log('displaySystemRuntimeFactory.test.js passed');

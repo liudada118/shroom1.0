@@ -333,6 +333,9 @@ function executeAlgorithmResult(
     rawData: [...rawData],
     normalizedData: [...values],
     matrix: executionContext.matrix || null,
+    frames: executionContext.frames || {},
+    timestamp: executionContext.timestamp || null,
+    identity: executionContext.identity || null,
   });
   if (result && typeof result.then === 'function') {
     return result.then((resolved) => normalizeAlgorithmResult(resolved, values));
@@ -377,6 +380,7 @@ function createDisplaySystemFrameProcessor({
   fsLike = fs,
   algorithmRunners = {},
   zeroStateStore = null,
+  frameAggregator = null,
 }) {
   if (!runtimeChannel) {
     throw new Error('runtimeChannel is required');
@@ -408,6 +412,7 @@ function createDisplaySystemFrameProcessor({
     resolvedAlgorithmRunners.python = createPythonAlgorithmRunner({
       entry: algorithmBinding.entry,
       timeoutMs: algorithmBinding.timeoutMs,
+      algorithmPackage: algorithmBinding.package,
     });
   }
 
@@ -468,7 +473,7 @@ function createDisplaySystemFrameProcessor({
    * @param {Array|object} frame 原始帧。
    * @returns {object|Promise<object>} 处理后的帧，或丢帧结果。
    */
-  function processFrame(frame) {
+  function processFrame(frame, frameContext = {}) {
     const frameValues = getFrameValues(frame);
 
     // 帧校验在解码之前：帧头或校验和不对的帧直接丢弃，不进入线序映射和算法。
@@ -498,17 +503,69 @@ function createDisplaySystemFrameProcessor({
       lineOrder: getLineOrderDefinition(),
       pointOrder: getPointOrderDefinition(),
     });
-    const algorithmData = getAlgorithmData();
-    const algorithmResultOrPromise = executeAlgorithmResult(
-      mapped,
-      runtimeChannel.processing?.algorithm,
-      algorithmData,
-      resolvedAlgorithmRunners,
-      {
-        rawData: values,
+    const identity = {
+      channelId: runtimeChannel.id,
+      displaySystemId: runtimeChannel.displaySystemId,
+      sensorId: getCanonicalSensorId(runtimeChannel),
+      sensorLabel: runtimeChannel.label || getCanonicalSensorId(runtimeChannel),
+      sensorType: runtimeChannel.sensor?.type
+        || runtimeChannel.parserChannel?.sensorType
+        || null,
+      outputChannel: runtimeChannel.outputChannel || runtimeChannel.serialRole,
+    };
+    const timestamp = Number(frameContext.timestamp || Date.now());
+    frameAggregator?.update?.({
+      ...identity,
+      timestamp,
+      matrix: runtimeChannel.display?.matrix || runtimeChannel.sensor?.matrix || null,
+      rawData: values,
+      normalizedData: mapped,
+    });
+
+    const packageInput = algorithmBinding.package?.input || null;
+    let algorithmInputStatus = null;
+    let shouldRunAlgorithm = true;
+    let algorithmFrames = {
+      [identity.sensorId]: {
+        ...identity,
+        timestamp,
         matrix: runtimeChannel.display?.matrix || runtimeChannel.sensor?.matrix || null,
+        rawData: [...values],
+        normalizedData: [...mapped],
       },
-    );
+    };
+    if (packageInput?.mode === 'multi-sensor') {
+      const aggregate = frameAggregator?.buildSnapshot?.(
+        runtimeChannel.displaySystemId,
+        packageInput,
+        timestamp,
+      ) || { ready: false, reason: 'aggregator-unavailable', frames: {} };
+      algorithmInputStatus = {
+        ready: aggregate.ready === true,
+        reason: aggregate.reason || null,
+        skewMs: Number.isFinite(aggregate.skewMs) ? aggregate.skewMs : null,
+        missingSensors: aggregate.missingSensors || [],
+        staleSensors: aggregate.staleSensors || [],
+      };
+      shouldRunAlgorithm = identity.sensorId === packageInput.triggerSensor && aggregate.ready === true;
+      if (aggregate.ready) algorithmFrames = aggregate.frames;
+    }
+    const algorithmData = getAlgorithmData();
+    const algorithmResultOrPromise = shouldRunAlgorithm
+      ? executeAlgorithmResult(
+        mapped,
+        runtimeChannel.processing?.algorithm,
+        algorithmData,
+        resolvedAlgorithmRunners,
+        {
+          rawData: values,
+          matrix: runtimeChannel.display?.matrix || runtimeChannel.sensor?.matrix || null,
+          frames: algorithmFrames,
+          timestamp,
+          identity,
+        },
+      )
+      : { data: mapped, metrics: {} };
 
     /**
      * 拿到算法结果后组装最终 payload。
@@ -528,18 +585,6 @@ function createDisplaySystemFrameProcessor({
       const outputChannel = runtimeChannel.outputChannel || runtimeChannel.serialRole;
       const channelDataField = getChannelDataField(outputChannel);
       const processedSource = Array.from(algorithmResult.data);
-      const identity = {
-        channelId: runtimeChannel.id,
-        displaySystemId: runtimeChannel.displaySystemId,
-        // sensorDefinition.id 在旧 builder 结构中是展示系统 ID，不是
-        // runtime channel 的 sensorId。以 canonical channelId 后半段为准。
-        sensorId: getCanonicalSensorId(runtimeChannel),
-        sensorType: runtimeChannel.sensor?.type
-          || runtimeChannel.parserChannel?.sensorType
-          || null,
-        outputChannel,
-      };
-
       // 零点源始终记录算法完成、尚未扣零的帧。这里没有独立的 mapped 输出，
       // 因此只记录 decoded / normalized / processed，避免把 normalized 基准
       // 当成 mapped 基准后在兼容链路里重复扣零。
@@ -582,6 +627,15 @@ function createDisplaySystemFrameProcessor({
           ? { ...buildPressureMetrics(processed), algorithm: algorithmResult.metrics }
           : buildPressureMetrics(processed),
         algorithmMetrics: algorithmResult.metrics,
+        ...(algorithmBinding.package ? {
+          algorithm: {
+            id: algorithmBinding.package.id,
+            version: algorithmBinding.package.version,
+            apiVersion: algorithmBinding.package.apiVersion,
+            inputMode: algorithmBinding.package.input.mode,
+            inputStatus: algorithmInputStatus || { ready: true, reason: null },
+          },
+        } : {}),
         metadata: runtimeChannel.display,
       };
     };
@@ -592,6 +646,8 @@ function createDisplaySystemFrameProcessor({
 
   return {
     processFrame,
+    resetAlgorithm: (reason) => resolvedAlgorithmRunners.python?.reset?.(reason),
+    dispose: () => resolvedAlgorithmRunners.python?.dispose?.(),
   };
 }
 

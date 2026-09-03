@@ -98,20 +98,25 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
   );
   const sidebar = definition?.page?.sidebar;
   const agentRendererById = useMemo(
-    () => new Map(agentRendererRegistry.apps.map((app) => [app.rendererId, app])),
+    () => new Map(agentRendererRegistry.apps
+      .filter((app) => app.rendererId)
+      .map((app) => [app.rendererId, app])),
     [agentRendererRegistry.apps],
   );
   const agentChannels = useMemo(() => {
     const displaySystemId = String(definition?.displaySystemId || definition?.type || '').trim();
-    return sensors.map((sensor) => {
+    return sensors.flatMap((sensor) => {
       const sensorId = String(sensor?.sensorId || sensor?.id || '').trim();
       const outputChannel = String(sensor?.outputChannel || sensorId).trim();
       const channelId = String(
         sensor?.channelId || (displaySystemId && sensorId ? `${displaySystemId}:${sensorId}` : sensorId),
       ).trim();
       const frame = getManifestChannelFrame(channelFrames, channelId, outputChannel);
+      // sensors[] 是声明清单，不代表每一路都已经收到数据。Agent channels[] 只承载
+      // 实际帧，缺帧传感器必须缺席，不能伪造成 values=[] 的 32x32 帧。
+      if (!frame?.renderValues?.length) return [];
       const values = frame?.renderValues || [];
-      return {
+      return [{
         displaySystemId: frame?.displaySystemId || displaySystemId,
         sensorId: frame?.sensorId || sensorId,
         sensorLabel: frame?.sensorLabel || sensor?.sensorLabel || sensor?.label || sensorId,
@@ -125,7 +130,7 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
         metrics: calculatePressureMetrics(values),
         algorithmMetrics: frame?.algorithmMetrics || {},
         serial: frame?.serial || null,
-      };
+      }];
     });
   }, [channelFrames, definition?.displaySystemId, definition?.type, matrix, sensors]);
   const columns = Number(definition?.page?.layout?.columns || 12);
@@ -298,6 +303,10 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
       rawData: sidebarRawData,
       metrics: sidebarMetrics,
       algorithmMetrics: sidebarAlgorithmMetrics,
+      displaySystemId: sidebarFrame?.displaySystemId
+        || definition?.displaySystemId
+        || definition?.type
+        || '',
       channelId: sidebarFrame?.channelId || sidebarChannelId,
       outputChannel: sidebarFrame?.outputChannel || sidebarChannel,
       sensorId: sidebarFrame?.sensorId || sidebarSensor?.sensorId || sidebarSensor?.id || '',
@@ -305,10 +314,18 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
         || sidebarSensor?.sensorLabel
         || sidebarSensor?.label
         || '',
+      sensorType: sidebarSensor?.sensorType || sidebarSensor?.type || '',
+      timestamp: sidebarFrame?.timestamp ?? null,
+      matrix: sidebarSensor?.sourceMatrix || sidebarSensor?.matrix || matrix || {},
       serial: sidebarFrame?.serial || sidebarSensor?.serial || null,
+      channels: agentChannels,
     });
   }, [
     onSidebarData,
+    agentChannels,
+    definition?.displaySystemId,
+    definition?.type,
+    matrix,
     sidebar,
     sidebarAlgorithmMetrics,
     sidebarMetrics,
@@ -362,6 +379,7 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
         sourceOptions={widgetSourceOptions}
         defaultSource={widgetSourceOptions[0]?.value}
         resolveSourceValue={resolveWidgetSourceValue}
+        simple
       >
         <div className="manifest-widget-grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
           {widgetModels.map(({

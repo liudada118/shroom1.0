@@ -1,5 +1,6 @@
 export const AGENT_RENDERER_SCHEMA_VERSION = 1;
 export const AGENT_RENDERER_PREFIX = 'agent:';
+export const AGENT_CHART_PREFIX = 'agent-chart:';
 
 export const AGENT_RENDERER_MESSAGE_TYPES = Object.freeze({
   INIT: 'shroom.renderer.init',
@@ -115,6 +116,20 @@ function normalizeChannel(channel = {}, fallbackIdentity = {}) {
   };
 }
 
+/**
+ * Agent renderer 的矩阵视图只能消费一个完整帧。声明了 32x32、但 values 还是空数组的
+ * 通道表示“这一传感器尚未到帧”，不是一帧 0 点数据；不能把它放进 channels[]，否则
+ * 严格 renderer 会正确地拒绝 `0 !== 1024`。同样不替错误长度猜测矩阵，避免掩盖上游问题。
+ */
+function hasCompleteMatrixFrame(channel) {
+  const valueCount = Array.isArray(channel?.values) ? channel.values.length : 0;
+  const matrixTotal = Number(channel?.matrix?.total);
+  return valueCount > 0
+    && Number.isInteger(matrixTotal)
+    && matrixTotal > 0
+    && valueCount === matrixTotal;
+}
+
 export function parseAgentRendererId(rendererId) {
   const value = asTrimmedString(rendererId);
   if (!value.startsWith(AGENT_RENDERER_PREFIX)) return null;
@@ -124,6 +139,25 @@ export function parseAgentRendererId(rendererId) {
 
 export function isAgentRendererId(rendererId) {
   return Boolean(parseAgentRendererId(rendererId));
+}
+
+export function parseAgentChartId(chartId) {
+  const value = asTrimmedString(chartId);
+  if (!value.startsWith(AGENT_CHART_PREFIX)) return null;
+  const [appId, localChartId, ...rest] = value.slice(AGENT_CHART_PREFIX.length).split(':');
+  return appId && localChartId && rest.length === 0 ? { appId, chartId: localChartId } : null;
+}
+
+export function isAgentChartId(chartId) {
+  return Boolean(parseAgentChartId(chartId));
+}
+
+export function toAgentChartId(appId, chartId) {
+  const normalizedAppId = asTrimmedString(appId);
+  const normalizedChartId = asTrimmedString(chartId);
+  return normalizedAppId && normalizedChartId
+    ? `${AGENT_CHART_PREFIX}${normalizedAppId}:${normalizedChartId}`
+    : '';
 }
 
 export function toAgentRendererId(appId) {
@@ -154,19 +188,42 @@ export function normalizeAgentRendererApps(payload) {
       : toAgentRendererId(explicitAppId);
     const appId = parseAgentRendererId(rendererId);
     const entryUrl = asTrimmedString(app.entryUrl || app.renderer?.entryUrl);
-    if (!appId || !entryUrl || seen.has(rendererId)) return [];
-    seen.add(rendererId);
+    const charts = (Array.isArray(app.charts) ? app.charts : []).flatMap((chart) => {
+      if (!chart || typeof chart !== 'object' || Array.isArray(chart)) return [];
+      const chartId = asTrimmedString(chart.chartId) || toAgentChartId(explicitAppId, chart.id);
+      const parsed = parseAgentChartId(chartId);
+      const chartEntryUrl = asTrimmedString(chart.entryUrl);
+      if (!parsed || parsed.appId !== explicitAppId || !chartEntryUrl) return [];
+      return [{
+        appId: parsed.appId,
+        id: chartId,
+        chartId,
+        localChartId: parsed.chartId,
+        rendererId: toAgentRendererId(parsed.appId),
+        name: asTrimmedString(app.name || parsed.appId) || parsed.appId,
+        label: asTrimmedString(chart.label || chart.id || parsed.chartId) || parsed.chartId,
+        entryUrl: chartEntryUrl,
+        height: normalizeRendererHeight(chart.height),
+        permissions: Array.isArray(app.permissions)
+          ? app.permissions.map(asTrimmedString).filter(Boolean)
+          : [],
+      }];
+    });
+    if (!explicitAppId || ((!appId || !entryUrl) && charts.length === 0)) return [];
+    if (rendererId && seen.has(rendererId)) return [];
+    if (rendererId) seen.add(rendererId);
     return [{
-      appId,
-      id: rendererId,
-      rendererId,
+      appId: explicitAppId,
+      id: rendererId || explicitAppId,
+      rendererId: appId && entryUrl ? rendererId : '',
       name: asTrimmedString(app.name || app.label || appId) || appId,
       label: asTrimmedString(app.renderer?.label || app.name || app.label || appId) || appId,
-      entryUrl,
+      entryUrl: appId && entryUrl ? entryUrl : '',
       height: normalizeRendererHeight(app.renderer?.height ?? app.height),
       permissions: Array.isArray(app.permissions)
         ? app.permissions.map(asTrimmedString).filter(Boolean)
         : [],
+      charts,
     }];
   });
 }
@@ -197,7 +254,15 @@ export function resolveAgentRendererEntryUrl(entryUrl, baseUrl = '', appId = '')
   }
 }
 
-export function buildAgentRendererInit({ rendererId, widgetId, label, identity } = {}) {
+export function buildAgentRendererInit({
+  rendererId,
+  widgetId,
+  label,
+  identity,
+  surface = 'renderer',
+  surfaceId = '',
+  config = {},
+} = {}) {
   const normalizedRendererId = asTrimmedString(rendererId);
   return {
     type: AGENT_RENDERER_MESSAGE_TYPES.INIT,
@@ -207,6 +272,9 @@ export function buildAgentRendererInit({ rendererId, widgetId, label, identity }
       rendererId: normalizedRendererId,
       widgetId: asTrimmedString(widgetId),
       label: asTrimmedString(label),
+      surface: surface === 'chart' ? 'chart' : 'renderer',
+      surfaceId: asTrimmedString(surfaceId),
+      config: normalizeMetrics(config),
       ...normalizeIdentity(identity),
     },
   };
@@ -214,7 +282,8 @@ export function buildAgentRendererInit({ rendererId, widgetId, label, identity }
 
 /**
  * 建立 iframe 唯一允许接收的帧 DTO。字段逐项重建，避免把 React/Electron 对象、函数或
- * 串口句柄跨进程传给 Agent 页面。channels 为空时仍补入当前路，保证单路应用行为稳定。
+ * 串口句柄跨进程传给 Agent 页面。channels[] 只包含已经收到的完整矩阵帧；未到帧或
+ * 点数不一致的可选通道不会作为伪帧发送。顶层当前路仍由宿主单独决定何时投递。
  */
 export function buildAgentRendererFrame({
   identity,
@@ -240,16 +309,29 @@ export function buildAgentRendererFrame({
   });
   const normalizedChannels = (Array.isArray(channels) ? channels : [])
     .map((channel) => normalizeChannel(channel, canonicalIdentity))
-    .filter((channel) => channel.channelId || channel.sensorId || channel.outputChannel);
+    .filter((channel) => (
+      (channel.channelId || channel.sensorId || channel.outputChannel)
+      && hasCompleteMatrixFrame(channel)
+    ));
 
   return {
     type: AGENT_RENDERER_MESSAGE_TYPES.FRAME,
     schemaVersion: AGENT_RENDERER_SCHEMA_VERSION,
     payload: {
       ...current,
-      channels: normalizedChannels.length ? normalizedChannels : [current],
+      channels: normalizedChannels.length
+        ? normalizedChannels
+        : hasCompleteMatrixFrame(current)
+          ? [current]
+          : [],
     },
   };
+}
+
+/** 当前 widget 路由是否已有可安全投递的完整矩阵帧。 */
+export function hasAgentRendererFrameData(frameMessage) {
+  return frameMessage?.type === AGENT_RENDERER_MESSAGE_TYPES.FRAME
+    && hasCompleteMatrixFrame(frameMessage.payload);
 }
 
 /** ready 可能早于 iframe onLoad 冒泡；首次握手 init 在前，已握手时只补最新 frame。 */

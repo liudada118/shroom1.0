@@ -4,6 +4,12 @@ import { Button, Popconfirm, Tooltip } from 'antd'
 import { DeleteOutlined, EditOutlined } from '@ant-design/icons'
 import { CanvasDemo } from '../chart/Chart'
 import FormulaChartPanel from './FormulaChartPanel'
+import AgentRendererHost from '../../extensions/display-system/AgentRendererHost.jsx'
+import { listAgentRendererApps } from '../../extensions/display-system/api.js'
+import {
+    parseAgentChartId,
+    toAgentRendererId,
+} from '../../extensions/display-system/agentRendererBridge.js'
 import {
     drawChartDecorations,
     drawChartGrid,
@@ -314,6 +320,8 @@ class Aside extends React.Component {
             // 构造函数拿不到 props（super() 没传），所以在 componentDidMount 里首次装载。
             customCharts: [],
             customChartValues: {},
+            agentChartRegistry: { status: 'loading', charts: [], error: '' },
+            agentChartFrame: null,
         }
         this.canvas = React.createRef()
         this.formulaCharts = React.createRef()
@@ -326,6 +334,8 @@ class Aside extends React.Component {
         this.handleBuiltinFormulaSeries = this.handleBuiltinFormulaSeries.bind(this)
         this.handleCustomFormulaSeries = this.handleCustomFormulaSeries.bind(this)
         this.handleFormulaChartsChanged = this.handleFormulaChartsChanged.bind(this)
+        this.loadAgentChartRegistry = this.loadAgentChartRegistry.bind(this)
+        this.flushAgentChartFrame = this.flushAgentChartFrame.bind(this)
         this._petHeartRateSimulator = createPetHeartRateSimulatorState()
 
         // ========== 10Hz 节流控制 ==========
@@ -342,6 +352,11 @@ class Aside extends React.Component {
         this._lastBodyTime = 0;
         this._pendingBody = null;
         this._bodyTimer = null;
+        this._agentChartTimer = null;
+        this._pendingAgentChartFrame = null;
+        this._lastAgentChartTime = 0;
+        this._agentChartLoadGeneration = 0;
+        this._mounted = false;
     }
 
     changePressMult(value) {
@@ -353,7 +368,7 @@ class Aside extends React.Component {
     /**
      * 将串口原始数据、标准矩阵和统计指标推送给用户公式图表。
      */
-    updateFormulaCharts(values = [], metrics = {}, algorithmMetrics = {}, rawData = values) {
+    updateFormulaCharts(values = [], metrics = {}, algorithmMetrics = {}, rawData = values, frame = {}) {
         this.formulaCharts.current?.pushFrame({
             values,
             rawData,
@@ -361,6 +376,72 @@ class Aside extends React.Component {
             algorithmMetrics,
             matrix: this.props.matrixShape,
         })
+        this._pendingAgentChartFrame = {
+            identity: {
+                displaySystemId: frame.displaySystemId || '',
+                sensorId: frame.sensorId || '',
+                sensorLabel: frame.sensorLabel || '',
+                sensorType: frame.sensorType || '',
+                outputChannel: frame.outputChannel || '',
+                channelId: frame.channelId || '',
+            },
+            timestamp: frame.timestamp ?? null,
+            values,
+            rawValues: rawData,
+            matrix: frame.matrix || this.props.matrixShape || {},
+            metrics,
+            algorithmMetrics,
+            serial: frame.serial || null,
+            channels: Array.isArray(frame.channels) ? frame.channels : [],
+        }
+        const elapsed = Date.now() - this._lastAgentChartTime
+        if (elapsed >= this._ASIDE_INTERVAL) {
+            this.flushAgentChartFrame()
+        } else if (!this._agentChartTimer) {
+            this._agentChartTimer = window.setTimeout(
+                this.flushAgentChartFrame,
+                this._ASIDE_INTERVAL - elapsed
+            )
+        }
+    }
+
+    flushAgentChartFrame() {
+        if (this._agentChartTimer) {
+            window.clearTimeout(this._agentChartTimer)
+            this._agentChartTimer = null
+        }
+        const next = this._pendingAgentChartFrame
+        this._pendingAgentChartFrame = null
+        this._lastAgentChartTime = Date.now()
+        if (next && this._mounted) this.setState({ agentChartFrame: next })
+    }
+
+    loadAgentChartRegistry() {
+        const generation = ++this._agentChartLoadGeneration
+        this.setState((current) => ({
+            agentChartRegistry: { ...current.agentChartRegistry, status: 'loading', error: '' },
+        }))
+        listAgentRendererApps()
+            .then((apps) => {
+                if (!this._mounted || generation !== this._agentChartLoadGeneration) return
+                this.setState({
+                    agentChartRegistry: {
+                        status: 'ready',
+                        charts: apps.flatMap((app) => app.charts || []),
+                        error: '',
+                    },
+                })
+            })
+            .catch((error) => {
+                if (!this._mounted || generation !== this._agentChartLoadGeneration) return
+                this.setState({
+                    agentChartRegistry: {
+                        status: 'error',
+                        charts: [],
+                        error: error?.message || 'Agent 图表目录读取失败',
+                    },
+                })
+            })
     }
 
     /**
@@ -463,6 +544,7 @@ class Aside extends React.Component {
         const charts = this.state.customCharts
         if (!Array.isArray(charts) || !charts.length) return null
         return charts.map((definition) => {
+            if (definition.agentChartId) return this.renderAgentChartCard(definition)
             const openEditor = () => this.openCustomFormulaEditor(definition.id)
             return (
                 <div
@@ -529,6 +611,64 @@ class Aside extends React.Component {
         })
     }
 
+    renderAgentChartCard(definition) {
+        const parsed = parseAgentChartId(definition.agentChartId)
+        const registry = this.state.agentChartRegistry
+        const chart = registry.charts.find((item) => item.chartId === definition.agentChartId)
+        const frame = this.state.agentChartFrame || {}
+        return (
+            <div
+                className="asideContent firstAside customChartCard agentChartCard"
+                draggable
+                key={definition.id}
+                onDragStart={(event) => this.handleCustomChartDragStart(event, definition)}
+            >
+                <div className="builtinChartHeading">
+                    <h2 className="asideTitle">{definition.name || chart?.label || definition.agentChartId}</h2>
+                    <div className="customChartActions">
+                        <Popconfirm
+                            cancelText="取消"
+                            okText="删除"
+                            onConfirm={() => removeFormulaChart(this.props.matrixName, definition.id)}
+                            title={`删除“${definition.name || chart?.label || 'Agent 图表'}”？`}
+                        >
+                            <Tooltip title="删除图表">
+                                <Button
+                                    aria-label={`删除 ${definition.name || chart?.label || 'Agent 图表'}`}
+                                    danger
+                                    icon={<DeleteOutlined />}
+                                    shape="circle"
+                                    size="small"
+                                    type="text"
+                                />
+                            </Tooltip>
+                        </Popconfirm>
+                    </div>
+                </div>
+                <AgentRendererHost
+                    rendererId={chart?.rendererId || toAgentRendererId(parsed?.appId)}
+                    app={chart}
+                    surface="chart"
+                    surfaceId={definition.agentChartId}
+                    config={{ source: definition.source || '', options: definition.options || {} }}
+                    registryLoading={registry.status === 'loading'}
+                    registryError={registry.error}
+                    widgetId={definition.id}
+                    label={definition.name || chart?.label || definition.agentChartId}
+                    identity={frame.identity}
+                    timestamp={frame.timestamp}
+                    values={frame.values}
+                    rawValues={frame.rawValues}
+                    matrix={frame.matrix}
+                    metrics={frame.metrics}
+                    algorithmMetrics={frame.algorithmMetrics}
+                    serial={frame.serial}
+                    channels={frame.channels}
+                />
+            </div>
+        )
+    }
+
     /**
      * 为内置图表标题提供统一的编辑入口。
      */
@@ -577,6 +717,8 @@ class Aside extends React.Component {
 
     componentDidMount() {
 
+        this._mounted = true
+
         this.setState({
             fontSize: window.innerWidth / 1920
         })
@@ -595,6 +737,7 @@ class Aside extends React.Component {
         // 所以自己订阅，而不是让 Home 用 props 把清单灌进来。
         this.setState({ customCharts: loadFormulaCharts(this.props.matrixName) })
         this._unsubscribeFormulaCharts = subscribeFormulaCharts(this.handleFormulaChartsChanged)
+        this.loadAgentChartRegistry()
 
         // jqbed 在床/离床计时 - 由后端 server.js 计算并通过 WebSocket 发送
     }
@@ -624,15 +767,20 @@ class Aside extends React.Component {
             this.setState({
                 customCharts: loadFormulaCharts(this.props.matrixName),
                 customChartValues: {},
+                agentChartFrame: null,
             })
+            this.loadAgentChartRegistry()
         }
     }
 
     componentWillUnmount() {
+        this._mounted = false
+        this._agentChartLoadGeneration += 1
         if (this._dataTimer) clearTimeout(this._dataTimer);
         if (this._chartTimer) clearTimeout(this._chartTimer);
         if (this._areaTimer) clearTimeout(this._areaTimer);
         if (this._bodyTimer) clearTimeout(this._bodyTimer);
+        if (this._agentChartTimer) clearTimeout(this._agentChartTimer);
         if (this._unsubscribeFormulaCharts) {
             this._unsubscribeFormulaCharts()
             this._unsubscribeFormulaCharts = null

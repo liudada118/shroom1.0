@@ -138,6 +138,20 @@
     background: #7a2b2b;
 }
 
+.agentChartCard {
+    cursor: default;
+}
+
+.agentChartCard .agent-renderer-host {
+    margin-top: 8px;
+    border-radius: 8px;
+    background: rgb(6 13 17 / 42%);
+}
+
+.agentChartCard .agent-renderer-host iframe {
+    border-radius: 8px;
+}
+
 .formulaChartLauncher {
     display: flex;
     justify-content: flex-end;

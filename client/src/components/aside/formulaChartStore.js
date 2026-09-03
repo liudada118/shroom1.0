@@ -60,7 +60,7 @@ export function loadFormulaCharts(matrixName) {
     const parsed = JSON.parse(localStorage.getItem(formulaChartStorageKey(matrixName)) || '[]');
     return Array.isArray(parsed)
       ? parsed
-        .filter((definition) => definition?.id && definition?.formula)
+        .filter((definition) => definition?.id && (definition?.formula || definition?.agentChartId))
         .slice(0, FORMULA_CHART_LIMIT)
       : [];
   } catch {
@@ -99,7 +99,7 @@ export function hasFormulaCharts(matrixName) {
  */
 export function resetFormulaCharts(matrixName, baselineDefinitions = []) {
   const next = (Array.isArray(baselineDefinitions) ? baselineDefinitions : [])
-    .filter((definition) => definition?.formula)
+    .filter((definition) => definition?.formula || definition?.agentChartId)
     .slice(0, FORMULA_CHART_LIMIT)
     .map((definition) => ({
       ...definition,
@@ -184,7 +184,7 @@ export function findChartByTemplate(definitions, template) {
   if (!Array.isArray(definitions) || !template?.id) return null;
   return definitions.find((definition) => (
     definition.templateId === template.id
-    || (!definition.templateId && formulasMatch(definition.formula, template.formula))
+    || (!definition.templateId && definition.formula && formulasMatch(definition.formula, template.formula))
   )) || null;
 }
 

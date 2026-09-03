@@ -407,6 +407,7 @@ assert.deepStrictEqual(pythonAlgorithmFrame.algorithmMetrics, { firstRaw: 2 });
 
 const runtimeRegistry = createDisplaySystemRuntimeRegistry();
 runtimeRegistry.register(runtimeChannel);
+let frameAggregatorCreateCount = 0;
 const bindings = bindDisplaySystemRuntimeChannels({
   runtimeChannelRegistry: runtimeRegistry,
   serialManager: {
@@ -430,12 +431,17 @@ const bindings = bindDisplaySystemRuntimeChannels({
   createFrameProcessor: () => ({
     processFrame: (frame) => ({ data: frame, outputChannel: 'sit' }),
   }),
+  createFrameAggregator: () => {
+    frameAggregatorCreateCount += 1;
+    return {};
+  },
 });
 
 assert.strictEqual(runtimeRegistry.snapshot().count, 1);
 assert.strictEqual(bindings.length, 1);
 assert.strictEqual(bindings[0].status, 'bound');
 assert.strictEqual(bindings[0].parserChannel, 'sit');
+assert.strictEqual(frameAggregatorCreateCount, 0);
 
 const output = bindings[0].handleFrame([1, 2, 3]);
 assert.strictEqual(output.published, true);
@@ -453,6 +459,38 @@ assert.deepStrictEqual(output.processedFrame.serial, {
   isOpen: true,
   openedAt: 1234,
 });
+
+const aggregateMarker = {};
+let receivedFrameAggregator = null;
+const aggregateBindings = bindDisplaySystemRuntimeChannels({
+  runtimeChannelRegistry: {
+    list: () => [{
+      ...runtimeChannel,
+      processing: {
+        ...runtimeChannel.processing,
+        algorithm: {
+          type: 'python',
+          enabled: true,
+          package: { input: { mode: 'multi-sensor' } },
+        },
+      },
+    }],
+  },
+  serialManager: { getStatus: () => ({ status: 'registered' }) },
+  serialParserManager: { channels: { SIT: 'sit' } },
+  frameOutputPipeline: { publishSit: (frame) => frame },
+  createFrameProcessor: ({ frameAggregator }) => {
+    receivedFrameAggregator = frameAggregator;
+    return { processFrame: (frame) => ({ data: frame }) };
+  },
+  createFrameAggregator: () => {
+    frameAggregatorCreateCount += 1;
+    return aggregateMarker;
+  },
+});
+assert.strictEqual(aggregateBindings[0].status, 'bound');
+assert.strictEqual(frameAggregatorCreateCount, 1);
+assert.strictEqual(receivedFrameAggregator, aggregateMarker);
 
 let asyncSerialPath = 'COM7';
 let finishAsyncFrame;

@@ -126,6 +126,8 @@ def process_frame_realtime(data_current, data_prev=None, fps=20.0):
     res['left'] = {
         "pressure": float(np.sum(frame_l_curr)),
         "area": float(np.count_nonzero(frame_l_curr) * (PITCH_MM**2) / 100.0),
+        "cop_x": float(cop_l_curr[0]) if cop_l_curr is not None else 0.0,
+        "cop_y": float(cop_l_curr[1]) if cop_l_curr is not None else 0.0,
         "cop_speed": float(_calc_speed(cop_l_curr, cop_l_prev, fps)),
         # "array": frame_l_curr.astype(float).tolist()
     }
@@ -134,6 +136,8 @@ def process_frame_realtime(data_current, data_prev=None, fps=20.0):
     res['right'] = {
         "pressure": float(np.sum(frame_r_curr)),
         "area": float(np.count_nonzero(frame_r_curr) * (PITCH_MM**2) / 100.0),
+        "cop_x": float(cop_r_curr[0]) if cop_r_curr is not None else 0.0,
+        "cop_y": float(cop_r_curr[1]) if cop_r_curr is not None else 0.0,
         "cop_speed": float(_calc_speed(cop_r_curr, cop_r_prev, fps)),
         # "array": frame_r_curr.astype(float).tolist()
     }

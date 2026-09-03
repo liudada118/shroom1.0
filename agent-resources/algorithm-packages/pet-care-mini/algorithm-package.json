@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "pet-care-mini",
+  "name": "宠物看护 Mini 呼吸检测",
+  "version": "1.0.0",
+  "description": "复用 pet_care_wrappermini，输出 Mini 看护呼吸率、姿态、体动和信号质量。",
+  "apiVersion": 2,
+  "language": "python",
+  "entry": "algorithm.py",
+  "runtime": { "python": "3.11", "profile": "bundled-v1" },
+  "input": {
+    "mode": "single-sensor",
+    "sync": { "strategy": "latest", "maxSkewMs": 50, "maxAgeMs": 1000 }
+  },
+  "parameters": { "species": 3.0, "thresholdFactor": 1.0 },
+  "output": {
+    "metrics": ["breathRate", "postureState", "isMotion", "snrDb", "quality", "bedExitFlag", "pressureCoefficient"],
+    "metricDefinitions": [
+      { "id": "breathRate", "label": "呼吸率", "unit": "次/分", "decimals": 1, "panel": "pressure" },
+      { "id": "postureState", "label": "姿态状态", "unit": "", "decimals": 0, "panel": "none" },
+      { "id": "isMotion", "label": "体动", "unit": "", "decimals": 0, "panel": "none" },
+      { "id": "snrDb", "label": "信噪比", "unit": "dB", "decimals": 1, "panel": "none" },
+      { "id": "quality", "label": "信号质量", "unit": "", "decimals": 1, "panel": "none" },
+      { "id": "bedExitFlag", "label": "离床标志", "unit": "", "decimals": 0, "panel": "none" },
+      { "id": "pressureCoefficient", "label": "压力系数", "unit": "", "decimals": 2, "panel": "none" }
+    ]
+  },
+  "catalog": {
+    "category": "pet-health",
+    "tags": ["32x32", "宠物", "人体", "呼吸"],
+    "compatibility": { "matrixTotals": [1024], "recommendedMatrices": [{ "rows": 32, "cols": 32 }] },
+    "sampleRateHz": 50,
+    "singleton": true,
+    "attachable": true
+  }
+}

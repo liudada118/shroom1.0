@@ -5,6 +5,9 @@ const {
   createDisplaySystemWorkspaceService,
 } = require('./workspace/displaySystemWorkspaceService');
 const {
+  discoverBuiltinAlgorithmPackages,
+} = require('./manifest/builtinAlgorithmPackageCatalog');
+const {
   createAgentAppService,
 } = require('./agent-apps/agentAppService');
 const path = require('path');
@@ -50,6 +53,10 @@ function createAppRuntime({
     logger,
   });
   const serialProtocolDirectories = [resolveUserPresetDirectory(runtimeWritableRoot)];
+  const builtinAlgorithmPackageRoots = [
+    path.join(runtimeResourceRoot, 'agent-resources', 'algorithm-packages'),
+    path.join(runtimeResourceRoot, 'agent', 'algorithm-packages'),
+  ];
   const displaySystemWorkspace = createDisplaySystemWorkspaceService({
     writableRoot: path.join(runtimeWritableRoot, 'display-systems'),
     // 「新建传感器」的串口模板列表直接来自协议预设库，和 GET /api/serial/protocols 同源。
@@ -65,6 +72,13 @@ function createAppRuntime({
         logger?.warn?.('[displaySystems] 串口协议预设加载失败', error.message || error);
         return [];
       }
+    },
+    listAlgorithmPackages: () => {
+      const discovered = discoverBuiltinAlgorithmPackages({ roots: builtinAlgorithmPackageRoots });
+      discovered.invalid.forEach((entry) => {
+        logger?.warn?.('[displaySystems] 内置算法包无效', entry.source, entry.errors.join('; '));
+      });
+      return discovered.packages;
     },
   });
   let runtimeBindingOptions = null;
@@ -120,6 +134,7 @@ function createAppRuntime({
           : []
       ),
       stopRuntimeDispatch: () => displaySystemRuntimeController.stop(),
+      resetRuntimeAlgorithms: (reason) => displaySystemRuntimeController.resetAlgorithms(reason),
       getRuntimeBindings: () => displaySystemRuntimeController.getRuntimeBindings(),
       getStatus: () => ({
         ...displaySystemRuntimeDiscovery.getStatus(),

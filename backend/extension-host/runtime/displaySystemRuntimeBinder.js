@@ -4,6 +4,9 @@ const {
 const {
   getRuntimeMode,
 } = require('./displaySystemRuntimePolicy');
+const {
+  createDisplaySystemFrameAggregator,
+} = require('./displaySystemFrameAggregator');
 
 /**
  * 把 manifest 声明的 parser 通道解析成 parser 管理器认识的通道标识。
@@ -76,8 +79,15 @@ function bindDisplaySystemRuntimeChannels({
   frameOutputPipeline,
   zeroStateStore,
   createFrameProcessor = createDisplaySystemFrameProcessor,
+  createFrameAggregator = createDisplaySystemFrameAggregator,
 }) {
   const channels = runtimeChannelRegistry?.list?.() || [];
+  const needsFrameAggregation = channels.some((channel) => (
+    channel.processing?.algorithm?.enabled !== false
+    && channel.processing?.algorithm?.package?.input?.mode === 'multi-sensor'
+  ));
+  // 单传感器与旧 V1 链路不创建聚合器，避免在高频热路径上为每帧额外复制数组。
+  const frameAggregator = needsFrameAggregation ? createFrameAggregator() : null;
 
   return channels.map((channel) => {
     const serialStatus = serialManager?.getStatus?.(channel.serialRole) || null;
@@ -102,7 +112,11 @@ function bindDisplaySystemRuntimeChannels({
     try {
       const parserChannel = resolveParserChannel(serialParserManager, channel.parserChannel);
       const outputPublisher = resolveOutputPublisher(frameOutputPipeline, bindingBase.outputChannel);
-      const frameProcessor = createFrameProcessor({ runtimeChannel: channel, zeroStateStore });
+      const frameProcessor = createFrameProcessor({
+        runtimeChannel: channel,
+        zeroStateStore,
+        frameAggregator,
+      });
 
       /** 在算法处理前冻结本帧的采样时刻和物理串口身份。 */
       function captureFrameContext() {
@@ -176,7 +190,7 @@ function bindDisplaySystemRuntimeChannels({
         // 物理串口和采样时刻必须在算法开始前冻结。异步算法完成前设备可能重连到另一 COM，
         // 若 resolve 后再读状态，就会把旧帧错误记到新串口上。
         const frameContext = captureFrameContext();
-        const processedFrame = frameProcessor.processFrame(frame);
+        const processedFrame = frameProcessor.processFrame(frame, frameContext);
         return processedFrame && typeof processedFrame.then === 'function'
           ? processedFrame.then((result) => publishProcessedFrame(result, frameContext))
           : publishProcessedFrame(processedFrame, frameContext);
@@ -193,6 +207,8 @@ function bindDisplaySystemRuntimeChannels({
         status: parserChannel && outputPublisher ? 'bound' : 'registered',
         error: null,
         handleFrame,
+        resetAlgorithm: (reason) => frameProcessor.resetAlgorithm?.(reason),
+        dispose: () => frameProcessor.dispose?.(),
       };
     } catch (error) {
       const reason = error?.message || String(error);
@@ -205,6 +221,8 @@ function bindDisplaySystemRuntimeChannels({
           published: false,
           reason: `display system runtime binding failed: ${reason}`,
         }),
+        resetAlgorithm: () => undefined,
+        dispose: () => undefined,
       };
     }
   });

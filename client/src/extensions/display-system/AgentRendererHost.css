@@ -3,9 +3,9 @@
   width: 100%;
   min-height: var(--agent-renderer-height, 480px);
   overflow: hidden;
-  background: #0b1013;
-  border: 1px solid #33434a;
-  border-radius: 6px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
 }
 
 .agent-renderer-host iframe {

@@ -46,6 +46,7 @@ function buildFileDefinition(config) {
     coordinateMap: config.resolvedFiles?.coordinateMap || config.files?.coordinateMap || null,
     algorithmData: config.resolvedFiles?.algorithmData || config.algorithm?.dataFile || null,
     algorithmEntry: config.resolvedFiles?.algorithmEntry || config.algorithm?.entry || null,
+    algorithmPackage: config.resolvedFiles?.algorithmPackage || config.algorithm?.packageManifest || null,
   };
 }
 
@@ -83,6 +84,7 @@ function buildSensorDefinitionFromDisplaySystem(config) {
       ...(config.algorithm || {}),
       dataFile: files.algorithmData,
       entry: files.algorithmEntry,
+      packageManifest: files.algorithmPackage,
     },
     capabilities: {
       lineOrder: Boolean(config.files?.lineOrder),
@@ -136,6 +138,7 @@ function buildParserChannelDefinitionsFromDisplaySystem(config) {
         ...(sensor.algorithm || {}),
         dataFile: files.algorithmData,
         entry: files.algorithmEntry,
+        packageManifest: files.algorithmPackage,
       },
     };
   });
@@ -207,6 +210,7 @@ function buildDisplayMetadataFromDisplaySystem(config) {
       coordinateMap: getFileName(files.coordinateMap),
       algorithmData: getFileName(files.algorithmData),
       algorithmEntry: getFileName(files.algorithmEntry),
+      algorithmPackage: getFileName(files.algorithmPackage),
     },
     algorithmType: config.algorithm?.type || 'none',
     editable: config.editable === true,

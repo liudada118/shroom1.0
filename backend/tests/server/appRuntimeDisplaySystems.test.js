@@ -10,6 +10,31 @@ const writableRoot = path.join(temporaryRoot, 'writable');
 fs.mkdirSync(resourceRoot, { recursive: true });
 fs.mkdirSync(writableRoot, { recursive: true });
 
+const builtinAlgorithmDirectory = path.join(
+  resourceRoot,
+  'agent',
+  'algorithm-packages',
+  'runtime-test-algorithm',
+);
+fs.mkdirSync(builtinAlgorithmDirectory, { recursive: true });
+fs.writeFileSync(
+  path.join(builtinAlgorithmDirectory, 'algorithm.py'),
+  'def process(request):\n    return {"data": request["normalized_data"], "metrics": {}}\n',
+);
+fs.writeFileSync(
+  path.join(builtinAlgorithmDirectory, 'algorithm-package.json'),
+  JSON.stringify({
+    schemaVersion: 1,
+    id: 'runtime-test-algorithm',
+    name: 'Runtime Test Algorithm',
+    version: '1.0.0',
+    apiVersion: 2,
+    language: 'python',
+    entry: 'algorithm.py',
+    output: { metrics: [] },
+  }),
+);
+
 const builtInDirectory = path.join(resourceRoot, 'display-systems', 'built-in-demo');
 fs.mkdirSync(builtInDirectory, { recursive: true });
 fs.writeFileSync(
@@ -55,6 +80,10 @@ try {
     runtimeResourceRoot: resourceRoot,
     runtimeWritableRoot: writableRoot,
   });
+  assert.deepStrictEqual(
+    appRuntime.displaySystems.getBuilderCatalog().algorithmPackages.map((item) => item.id),
+    ['runtime-test-algorithm'],
+  );
   appRuntime.displaySystems.bindRuntimeChannels({
     serialManager: { getStatus: () => ({ status: 'registered' }) },
     serialParserManager: {

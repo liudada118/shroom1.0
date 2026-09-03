@@ -61,11 +61,20 @@ function containsChannelIdSeparator(value) {
  * @returns {object} 规范化后的算法配置。
  */
 function normalizeAlgorithmConfig(algorithm = {}) {
-  const type = isNonEmptyString(algorithm.type) ? algorithm.type.trim() : ALGORITHM_TYPES.NONE;
+  const packageManifest = isNonEmptyString(algorithm.packageManifest)
+    ? algorithm.packageManifest.trim()
+    : null;
+  const type = isNonEmptyString(algorithm.type)
+    ? algorithm.type.trim()
+    : packageManifest
+      ? ALGORITHM_TYPES.PYTHON
+      : ALGORITHM_TYPES.NONE;
   return {
     type,
     entry: algorithm.entry || null,
     dataFile: algorithm.dataFile || null,
+    packageManifest,
+    apiVersion: Number(algorithm.apiVersion || 1),
     input: algorithm.input || {},
     output: algorithm.output || {},
     timeoutMs: Number(algorithm.timeoutMs || 1000),
@@ -146,8 +155,19 @@ function validateSensorEntry(rawSensor, { source, index, schemaVersion, label })
   if (!Object.values(ALGORITHM_TYPES).includes(algorithm.type)) {
     errors.push(`${source}: ${label}.algorithm.type must be one of ${Object.values(ALGORITHM_TYPES).join(', ')}`);
   }
-  if (algorithm.type !== ALGORITHM_TYPES.NONE && !isNonEmptyString(algorithm.entry) && !isNonEmptyString(algorithm.dataFile)) {
-    errors.push(`${source}: ${label}.algorithm.entry or ${label}.algorithm.dataFile is required when algorithm.type is not none`);
+  if (
+    algorithm.type !== ALGORITHM_TYPES.NONE
+    && !isNonEmptyString(algorithm.entry)
+    && !isNonEmptyString(algorithm.dataFile)
+    && !isNonEmptyString(algorithm.packageManifest)
+  ) {
+    errors.push(`${source}: ${label}.algorithm.entry, ${label}.algorithm.dataFile or ${label}.algorithm.packageManifest is required when algorithm.type is not none`);
+  }
+  if (![1, 2].includes(algorithm.apiVersion)) {
+    errors.push(`${source}: ${label}.algorithm.apiVersion must be 1 or 2`);
+  }
+  if (algorithm.packageManifest && algorithm.type !== ALGORITHM_TYPES.PYTHON) {
+    errors.push(`${source}: ${label}.algorithm.packageManifest currently requires algorithm.type python`);
   }
   if (!Number.isInteger(algorithm.timeoutMs) || algorithm.timeoutMs <= 0) {
     errors.push(`${source}: ${label}.algorithm.timeoutMs must be a positive integer`);

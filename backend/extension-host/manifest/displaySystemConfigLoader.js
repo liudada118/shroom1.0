@@ -9,6 +9,9 @@ const {
 const {
   normalizeCoordinateMapDefinition,
 } = require('./displaySystemCoordinateMap');
+const {
+  loadAlgorithmPackageManifest,
+} = require('./displaySystemAlgorithmPackage');
 
 const DEFAULT_MANIFEST_FILENAMES = Object.freeze([
   'display-system.json',
@@ -78,7 +81,8 @@ function resolveDisplaySystemFiles(config, baseDirectory) {
    * @param {{files?: object, algorithm?: object}} sensor 传感器条目（也可以是整份
    *        config —— 顶层兜底那处就是这么用的）。
    * @returns {{lineOrder: string|null, pointOrder: string|null, coordinateMap: string|null,
-   *            algorithmData: string|null, algorithmEntry: string|null}} 绝对路径集合。
+   *            algorithmData: string|null, algorithmEntry: string|null,
+   *            algorithmPackage: string|null}} 绝对路径集合。
    */
   const resolveSensorFiles = (sensor) => ({
     lineOrder: resolveMaybe(sensor.files?.lineOrder),
@@ -86,6 +90,7 @@ function resolveDisplaySystemFiles(config, baseDirectory) {
     coordinateMap: resolveMaybe(sensor.files?.coordinateMap),
     algorithmData: resolveMaybe(sensor.algorithm?.dataFile),
     algorithmEntry: resolveMaybe(sensor.algorithm?.entry),
+    algorithmPackage: resolveMaybe(sensor.algorithm?.packageManifest),
   });
 
   // 每个传感器条目自带一套线序/点位/算法文件，各自解析成绝对路径。
@@ -147,7 +152,7 @@ function loadDisplaySystemDirectory(directory, {
     };
   }
 
-  const config = resolveDisplaySystemFiles(validation.value, path.dirname(manifestPath));
+  let config = resolveDisplaySystemFiles(validation.value, path.dirname(manifestPath));
   const missingFiles = [];
   if (validateFiles) {
     config.sensors.forEach((sensor) => {
@@ -167,6 +172,59 @@ function loadDisplaySystemDirectory(directory, {
       manifestPath,
     };
   }
+
+  // 算法包 manifest 是代码算法的权威声明：入口相对算法包目录解析，并把 API 版本、
+  // 多传感器输入规则和资源表挂到算法绑定。没有 packageManifest 的旧 V1 算法不经过这里。
+  const packageErrors = [];
+  const hydratedSensors = config.sensors.map((sensor) => {
+    const packagePath = sensor.resolvedFiles.algorithmPackage;
+    if (!packagePath) return sensor;
+    const loadedPackage = loadAlgorithmPackageManifest(packagePath);
+    if (!loadedPackage.ok) {
+      packageErrors.push(...loadedPackage.errors);
+      return sensor;
+    }
+    const algorithmPackage = loadedPackage.value;
+    return {
+      ...sensor,
+      algorithm: {
+        ...sensor.algorithm,
+        type: algorithmPackage.language,
+        entry: algorithmPackage.resolvedEntry,
+        apiVersion: algorithmPackage.apiVersion,
+        package: algorithmPackage,
+      },
+      resolvedFiles: {
+        ...sensor.resolvedFiles,
+        algorithmEntry: algorithmPackage.resolvedEntry,
+      },
+    };
+  });
+  if (packageErrors.length) {
+    return { ok: false, config: null, errors: packageErrors, manifestPath };
+  }
+  const sensorIds = new Set(hydratedSensors.map((sensor) => sensor.id));
+  hydratedSensors.forEach((sensor) => {
+    const algorithmPackage = sensor.algorithm?.package;
+    if (algorithmPackage?.input?.mode !== 'multi-sensor') return;
+    algorithmPackage.input.sensors.forEach((sensorId) => {
+      if (!sensorIds.has(sensorId)) {
+        packageErrors.push(`${algorithmPackage.manifestPath}: input sensor ${sensorId} is not declared by display system ${validation.value.id}`);
+      }
+    });
+    if (algorithmPackage.input.triggerSensor !== sensor.id) {
+      packageErrors.push(`${algorithmPackage.manifestPath}: package must be attached to its trigger sensor ${algorithmPackage.input.triggerSensor}`);
+    }
+  });
+  if (packageErrors.length) {
+    return { ok: false, config: null, errors: packageErrors, manifestPath };
+  }
+  config = {
+    ...config,
+    sensors: hydratedSensors,
+    resolvedFiles: hydratedSensors[0]?.resolvedFiles || config.resolvedFiles,
+    algorithm: hydratedSensors[0]?.algorithm || config.algorithm,
+  };
 
   if (validateFiles) {
     // 逐传感器校验：每个条目的矩阵尺寸要和它自己的 point-order / coordinate-map 对齐，

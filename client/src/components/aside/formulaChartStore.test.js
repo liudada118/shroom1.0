@@ -60,14 +60,15 @@ describe('图表清单读写', () => {
     expect(loadFormulaCharts('m32')).toEqual([]);
   });
 
-  it('缺 id 或缺公式的条目直接丢掉', () => {
+  it('缺 id 或缺图表入口的条目直接丢掉，Agent 图表保留', () => {
     saveFormulaCharts('m32', [
       { id: 'a', formula: 'sum()' },
       { id: 'b' },
+      { id: 'agent', agentChartId: 'agent-chart:vitals:cop' },
       { formula: 'sum()' },
       null,
     ]);
-    expect(loadFormulaCharts('m32').map((item) => item.id)).toEqual(['a']);
+    expect(loadFormulaCharts('m32').map((item) => item.id)).toEqual(['a', 'agent']);
   });
 
   it('不同 matrixName 各存各的', () => {
@@ -229,6 +230,22 @@ describe('基线播种与重置', () => {
     expect(next[0].id).not.toBe(added.id);
     expect(next[0].color).toBeTruthy();
     expect(loadFormulaCharts('m32')).toEqual(next);
+  });
+
+  it('重置时保留 Agent 图表引用与参数', () => {
+    const next = resetFormulaCharts('m32', [{
+      templateId: 'cop-track',
+      name: '重心轨迹',
+      agentChartId: 'agent-chart:vitals:cop',
+      source: 'seat',
+      options: { trail: 60 },
+    }]);
+    expect(next).toHaveLength(1);
+    expect(next[0]).toMatchObject({
+      agentChartId: 'agent-chart:vitals:cop',
+      source: 'seat',
+      options: { trail: 60 },
+    });
   });
 
   it('基线为空就清空，并通知订阅者', () => {

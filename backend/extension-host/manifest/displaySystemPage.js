@@ -74,6 +74,7 @@ const SIDEBAR_METRIC_IDS = Object.freeze([
   'area',
 ]);
 const SAFE_ALGORITHM_METRIC_ID = /^[A-Za-z][A-Za-z0-9._-]*$/;
+const AGENT_CHART_ID_PATTERN = /^agent-chart:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 
 /**
  * 判断一个侧栏指标 id 是否合法。
@@ -406,18 +407,35 @@ function normalizeChartAppearanceConfig(chartAppearance) {
  */
 function normalizeChartCardsConfig(cards) {
   return (Array.isArray(cards) ? cards : [])
-    .filter((card) => card && typeof card === 'object' && String(card.formula || '').trim())
+    .filter((card) => card && typeof card === 'object' && (
+      String(card.formula || '').trim() || String(card.agentChartId || '').trim()
+    ))
     .slice(0, DISPLAY_CHART_CARD_LIMIT)
-    .map((card, index) => ({
-      templateId: String(card.templateId || card.id || `chart-${index + 1}`),
-      name: String(card.name || card.templateId || card.id || `图表 ${index + 1}`),
-      formula: String(card.formula),
-      unit: String(card.unit || ''),
-      // 缺省 2 位而不是 0 位，和前端模板的 `template.decimals ?? 2` 对齐 ——
-      // 后端归一成 0 之后前端的 `??` 就不会兜住了，那是个静默的行为差异。
-      decimals: Math.max(0, Math.min(6, Number(card.decimals ?? 2) || 0)),
-      color: String(card.color || ''),
-    }));
+    .map((card, index) => {
+      const templateId = String(card.templateId || card.id || `chart-${index + 1}`);
+      const name = String(card.name || card.templateId || card.id || `图表 ${index + 1}`);
+      const agentChartId = String(card.agentChartId || '').trim();
+      if (agentChartId) {
+        return {
+          templateId,
+          name,
+          agentChartId,
+          source: String(card.source || ''),
+          options: card.options && typeof card.options === 'object' && !Array.isArray(card.options)
+            ? { ...card.options }
+            : {},
+        };
+      }
+      return {
+        templateId,
+        name,
+        formula: String(card.formula),
+        unit: String(card.unit || ''),
+        // 缺省 2 位不是 0 位，和前端模板的 `template.decimals ?? 2` 对齐。
+        decimals: Math.max(0, Math.min(6, Number(card.decimals ?? 2) || 0)),
+        color: String(card.color || ''),
+      };
+    });
 }
 
 /**
@@ -686,10 +704,24 @@ function validateDisplayConfig(display, { source = 'display system manifest' } =
           errors.push(`${source}: display.chartCards[${index}] must be an object`);
           return;
         }
-        if (!String(card.formula || '').trim()) {
-          errors.push(`${source}: display.chartCards[${index}].formula is required`);
+        const hasFormula = Boolean(String(card.formula || '').trim());
+        const agentChartId = String(card.agentChartId || '').trim();
+        const hasAgentChart = Boolean(agentChartId);
+        if (hasFormula === hasAgentChart) {
+          errors.push(`${source}: display.chartCards[${index}] must declare exactly one of formula or agentChartId`);
         }
-        if (card.decimals != null
+        if (hasAgentChart && !AGENT_CHART_ID_PATTERN.test(agentChartId)) {
+          errors.push(`${source}: display.chartCards[${index}].agentChartId is invalid`);
+        }
+        if (card.source != null && !String(card.source).trim()) {
+          errors.push(`${source}: display.chartCards[${index}].source must be a non-empty string`);
+        }
+        if (card.options != null && (
+          typeof card.options !== 'object' || Array.isArray(card.options)
+        )) {
+          errors.push(`${source}: display.chartCards[${index}].options must be an object`);
+        }
+        if (hasFormula && card.decimals != null
           && (!Number.isInteger(Number(card.decimals))
             || Number(card.decimals) < 0
             || Number(card.decimals) > 6)) {

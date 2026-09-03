@@ -1,6 +1,6 @@
 ---
 name: add-display-app
-description: Create and install a local, offline Shroom display app using a built-in renderer or a sandboxed agent renderer without modifying the permanent backend pipeline.
+description: Create and install local, offline Shroom renderer and chart surfaces without modifying the permanent backend pipeline.
 ---
 
 # Add Display App
@@ -15,7 +15,7 @@ not a replacement for the policy.
   WebSocket gateway, playback, CSV, `package.json`, or packaged application files.
 - Install through `POST /api/agent-apps`. App files are local data consumed by the sandbox host, not application
   source patches.
-- Renderer code is presentation-only. It never opens serial ports, SQLite, arbitrary HTTP, WebSocket, Electron
+- Renderer and chart code are presentation-only. They never open serial ports, SQLite, arbitrary HTTP, WebSocket, Electron
   IPC, Node, shell, or the filesystem, and it never downloads a dependency. If the live host explicitly allows
   it, `fetch` may read only a packaged file below this app's exact `/api/agent-apps/:id/files/` prefix.
 - The sandbox is a capability boundary for reviewed packaged code, not a guarantee against malicious code or
@@ -41,13 +41,23 @@ Before creating files, call these APIs in order:
 
 Stop on an unavailable or incompatible contract. Do not work around a missing API by editing the application.
 
-## Choose the renderer
+## Choose presentation surfaces
 
 Prefer an exact built-in renderer id advertised by the live contract/catalog when it can express the requested
 view. Do not guess a built-in name.
 
 Use a custom app only when needed. After installation, its platform renderer id is `agent:<appId>`, where
 `appId` is `app.json.id`. The internal `renderer.id` defaults to `main`; it is not the platform selector.
+
+An Agent renderer is a component for the host's existing main visualization surface, not a standalone
+dashboard. Fill the renderer iframe with the requested primary visualization and, when useful, a small
+in-canvas legend or status. Do not duplicate the Shroom header, renderer/profile controls, sensor summary
+cards, chart sidebar, download controls, or another application frame.
+
+For a scalar time series, prefer the host formula chart catalog. For an XY trajectory, multiple synchronized
+series, or another chart shape the formula catalog cannot express, declare an App chart in `app.json.charts[]`.
+The host assigns `agent-chart:<appId>:<chartId>` and mounts that iframe inside the existing sidebar chart area.
+Never put these charts inside the main renderer. A package may contain only a renderer, only charts, or both.
 
 ## Start from the template
 
@@ -63,7 +73,11 @@ Update `app.json`:
 - `id` is a new lowercase kebab id matching
   `^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$` and is at most 64 characters.
 - `name` is the user-facing app name and `version` is a semantic version.
-- `renderer.entry` names a supplied local file, normally `frontend/index.html`.
+- `renderer` is optional when at least one chart is declared. Its `entry` names a supplied local file, normally
+  `frontend/index.html`.
+- `charts[]` is optional. Every item declares a safe local `id`, label, local entry file, and 160–2000 height.
+  Its installed id comes from the API response; never invent it before installation.
+- At least one of `renderer` or `charts[]` must be present.
 - `permissions` remains `['sensor.read']` unless the live policy explicitly supports a narrower set.
 
 Do not put channel ids or COM paths in `app.json`; each iframe receives its sensor identity at runtime through
@@ -79,6 +93,7 @@ The host sends only these version-1 messages:
   schemaVersion: 1,
   payload: {
     appId, rendererId, widgetId, label,
+    surface, surfaceId, config,
     displaySystemId, sensorId, sensorLabel, sensorType, outputChannel, channelId
   }
 }
@@ -101,6 +116,11 @@ When optional `channels[]` is present, validate every item and keep multi-sensor
 `channelId`; never use the array index as identity. Single-channel hosts may omit `channels`. Listen only when
 `event.source === window.parent`.
 
+The host sends a current-route frame only after that route has a complete matrix frame. Optional `channels[]`
+contains only sensors that have produced a complete frame; a declared sensor may be absent until its first
+frame arrives. Treat absence as “waiting”, not as an empty matrix, and retain the last valid frame for other
+channel ids.
+
 `serial` is optional read-only diagnostic metadata at the top level and in each `channels[]` item. Use only its
 whitelisted `role`, `portId`, `path`, `baudRate`, `parserChannel`, `status`, `isOpen`, and `openedAt` fields. It may
 change after reconnect and never defines left/right/backrest/seat identity; never expect a handle, method, parser
@@ -117,6 +137,10 @@ Use `window.parent.postMessage(...)`; opaque sandbox origins require the host to
 not by trusting arbitrary message content. Do not add control messages or send frame values back.
 Treat `init` as idempotent. Emit `ready` once when the script starts and again after every valid `init`; this
 recovers when the startup `ready` fires before the host listener is attached.
+
+`surface` is `renderer` or `chart`. A chart receives its installed `agent-chart:*` id in `surfaceId`; `config`
+contains only the JSON `source/options` declared by the display-system card. Both surfaces receive the same
+sanitized frame payload and optional stable-identity `channels[]` collection.
 
 ## Algorithms
 
@@ -145,6 +169,14 @@ Encode text as UTF-8 and binary assets as base64:
       "entry": "frontend/index.html",
       "height": 520
     },
+    "charts": [
+      {
+        "id": "cop-track",
+        "label": "重心轨迹",
+        "entry": "charts/cop.html",
+        "height": 260
+      }
+    ],
     "permissions": ["sensor.read"]
   },
   "files": [
@@ -163,11 +195,13 @@ Encode text as UTF-8 and binary assets as base64:
 }
 ```
 
-Limits: renderer height 160–2000 pixels, at most 128 files, 24 MiB decoded per file, 32 MiB decoded total, and 240 characters per portable
-relative path. Duplicate paths, traversal, absolute paths, URLs, symlinks, and `files/app.json` are invalid.
+Limits: surface height 160–2000 pixels, at most 16 charts, 128 files, 24 MiB decoded per file, 32 MiB decoded
+total, and 240 characters per portable relative path. Duplicate paths, traversal, absolute paths, URLs,
+symlinks, and `files/app.json` are invalid.
 
-Send the request to `POST /api/agent-apps`. A successful `HttpResult.data.app.rendererId` must equal
-`agent:<manifest.id>`. Handle stable `AGENT_APP_*` error codes; never retry `AGENT_APP_EXISTS` with
+Send the request to `POST /api/agent-apps`. When a renderer is declared,
+`HttpResult.data.app.rendererId` must equal `agent:<manifest.id>`; every chart must return
+`agent-chart:<manifest.id>:<chart.id>`. Handle stable `AGENT_APP_*` error codes; never retry `AGENT_APP_EXISTS` with
 `overwrite:true` without explicit authorization.
 
 Call `POST /api/agent-apps/reload` only if the live contract or install response requires it, then confirm the app
@@ -185,7 +219,7 @@ Before reporting completion:
    replace this policy; keep scripts packaged and external (no inline script), with no remote URL, dynamic
    download, or forbidden API. Same-package fetch is allowed only when the live policy advertises the exact
    current-app static prefix.
-4. In the sandbox, observe startup `ready`, send the same valid `init` more than once, and verify every valid init
+4. In every renderer/chart sandbox, observe startup `ready`, send the same valid `init` more than once, and verify every valid init
    is handled idempotently and answered with `ready`; then send a `frame` and verify values render and
    `sensorLabel` plus canonical `channelId` are visible. If `serial` is present, it may be shown as read-only
    connection diagnostics without changing the sensor identity.
@@ -194,5 +228,5 @@ Before reporting completion:
    `channelId` and remains correct when array order changes.
 6. Confirm the install used `overwrite:false` and no permanent backend or stable-contract file changed.
 
-Report the app id, `agent:<appId>` renderer id, installed version, selected channel ids, test results, and any
-feature that was refused by policy.
+Report the app id, optional `agent:<appId>` renderer id, all `agent-chart:*` ids, installed version, selected
+channel ids, test results, and any feature that was refused by policy.

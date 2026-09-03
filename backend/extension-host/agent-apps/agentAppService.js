@@ -12,6 +12,8 @@ const AGENT_APP_MAX_TOTAL_BYTES = 32 * 1024 * 1024;
 const AGENT_APP_MAX_PATH_LENGTH = 240;
 const AGENT_APP_MANIFEST_FILE = 'app.json';
 const AGENT_APP_DEFAULT_RENDERER_HEIGHT = 480;
+const AGENT_APP_DEFAULT_CHART_HEIGHT = 240;
+const AGENT_APP_MAX_CHARTS = 16;
 const SEMANTIC_VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
 
 const WINDOWS_RESERVED_NAMES = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
@@ -71,6 +73,30 @@ function normalizePortableRelativePath(value, fieldName = 'path') {
   return segments.join('/');
 }
 
+function normalizePresentationSurface(input, {
+  fieldName,
+  fallbackId,
+  fallbackLabel,
+  fallbackHeight,
+}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new AgentAppError('AGENT_APP_INVALID', `${fieldName} must be an object`);
+  }
+  const id = validateSafeId(input.id == null ? fallbackId : input.id, `${fieldName}.id`);
+  const label = input.label == null
+    ? fallbackLabel
+    : typeof input.label === 'string' ? input.label.trim() : '';
+  const entry = normalizePortableRelativePath(input.entry, `${fieldName}.entry`);
+  const height = input.height == null ? fallbackHeight : input.height;
+  if (!label || label.length > 120) {
+    throw new AgentAppError('AGENT_APP_INVALID', `${fieldName}.label must be 1-120 characters`);
+  }
+  if (!Number.isInteger(height) || height < 160 || height > 2000) {
+    throw new AgentAppError('AGENT_APP_INVALID', `${fieldName}.height must be an integer from 160 to 2000`);
+  }
+  return { id, label, entry, height };
+}
+
 function normalizeAgentAppManifest(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new AgentAppError('AGENT_APP_INVALID', 'manifest must be an object');
@@ -91,26 +117,41 @@ function normalizeAgentAppManifest(input) {
   if (!version || version.length > 64 || !SEMANTIC_VERSION_PATTERN.test(version)) {
     throw new AgentAppError('AGENT_APP_INVALID', 'manifest.version must be a semantic version up to 64 characters');
   }
-  if (!input.renderer || typeof input.renderer !== 'object' || Array.isArray(input.renderer)) {
-    throw new AgentAppError('AGENT_APP_INVALID', 'manifest.renderer must be an object');
+  const renderer = input.renderer == null
+    ? null
+    : normalizePresentationSurface(input.renderer, {
+      fieldName: 'manifest.renderer',
+      fallbackId: 'main',
+      fallbackLabel: name,
+      fallbackHeight: AGENT_APP_DEFAULT_RENDERER_HEIGHT,
+    });
+  if (input.charts != null && !Array.isArray(input.charts)) {
+    throw new AgentAppError('AGENT_APP_INVALID', 'manifest.charts must be an array');
   }
-
-  const rendererId = validateSafeId(
-    input.renderer.id == null ? 'main' : input.renderer.id,
-    'manifest.renderer.id',
-  );
-  const rendererLabel = input.renderer.label == null
-    ? name
-    : typeof input.renderer.label === 'string' ? input.renderer.label.trim() : '';
-  const rendererEntry = normalizePortableRelativePath(input.renderer.entry, 'manifest.renderer.entry');
-  const rendererHeight = input.renderer.height == null
-    ? AGENT_APP_DEFAULT_RENDERER_HEIGHT
-    : input.renderer.height;
-  if (!rendererLabel || rendererLabel.length > 120) {
-    throw new AgentAppError('AGENT_APP_INVALID', 'manifest.renderer.label must be 1-120 characters');
+  const rawCharts = Array.isArray(input.charts) ? input.charts : [];
+  if (rawCharts.length > AGENT_APP_MAX_CHARTS) {
+    throw new AgentAppError(
+      'AGENT_APP_LIMIT_EXCEEDED',
+      `manifest.charts must contain at most ${AGENT_APP_MAX_CHARTS} entries`,
+      { httpStatus: 413 },
+    );
   }
-  if (!Number.isInteger(rendererHeight) || rendererHeight < 160 || rendererHeight > 2000) {
-    throw new AgentAppError('AGENT_APP_INVALID', 'manifest.renderer.height must be an integer from 160 to 2000');
+  const chartIds = new Set();
+  const charts = rawCharts.map((chart, index) => {
+    const normalized = normalizePresentationSurface(chart, {
+      fieldName: `manifest.charts[${index}]`,
+      fallbackId: `chart-${index + 1}`,
+      fallbackLabel: `图表 ${index + 1}`,
+      fallbackHeight: AGENT_APP_DEFAULT_CHART_HEIGHT,
+    });
+    if (chartIds.has(normalized.id)) {
+      throw new AgentAppError('AGENT_APP_INVALID', `duplicate manifest chart id: ${normalized.id}`);
+    }
+    chartIds.add(normalized.id);
+    return normalized;
+  });
+  if (!renderer && charts.length === 0) {
+    throw new AgentAppError('AGENT_APP_INVALID', 'manifest must declare renderer or charts');
   }
 
   const permissions = input.permissions == null
@@ -136,12 +177,8 @@ function normalizeAgentAppManifest(input) {
     id,
     name,
     version,
-    renderer: {
-      id: rendererId,
-      label: rendererLabel,
-      entry: rendererEntry,
-      height: rendererHeight,
-    },
+    renderer,
+    charts,
     permissions: uniquePermissions,
   };
 }
@@ -154,7 +191,7 @@ function decodeBase64(content, filePath) {
   return Buffer.from(content, 'base64');
 }
 
-function normalizeBundleFiles(files, rendererEntry) {
+function normalizeBundleFiles(files, requiredEntries) {
   if (!Array.isArray(files)) {
     throw new AgentAppError('AGENT_APP_FILE_INVALID', 'files must be an array');
   }
@@ -211,9 +248,13 @@ function normalizeBundleFiles(files, rendererEntry) {
     return { path: filePath, buffer };
   });
 
-  if (!seenPaths.has(rendererEntry.toLowerCase())) {
-    throw new AgentAppError('AGENT_APP_FILE_INVALID', 'manifest.renderer.entry must exist in files');
-  }
+  const entries = (Array.isArray(requiredEntries) ? requiredEntries : [requiredEntries])
+    .filter(Boolean);
+  entries.forEach((entry) => {
+    if (!seenPaths.has(entry.toLowerCase())) {
+      throw new AgentAppError('AGENT_APP_FILE_INVALID', `manifest presentation entry must exist in files: ${entry}`);
+    }
+  });
   return normalizedFiles;
 }
 
@@ -223,14 +264,20 @@ function buildEntryUrl(id, entry) {
 }
 
 function buildDescriptor(manifest) {
+  const rendererId = manifest.renderer ? `agent:${manifest.id}` : null;
   return {
     id: manifest.id,
     name: manifest.name,
     version: manifest.version,
-    rendererId: `agent:${manifest.id}`,
-    renderer: cloneJson(manifest.renderer),
+    rendererId,
+    renderer: manifest.renderer ? cloneJson(manifest.renderer) : null,
+    charts: manifest.charts.map((chart) => ({
+      ...cloneJson(chart),
+      chartId: `agent-chart:${manifest.id}:${chart.id}`,
+      entryUrl: buildEntryUrl(manifest.id, chart.entry),
+    })),
     permissions: [...manifest.permissions],
-    entryUrl: buildEntryUrl(manifest.id, manifest.renderer.entry),
+    entryUrl: manifest.renderer ? buildEntryUrl(manifest.id, manifest.renderer.entry) : null,
     editable: true,
   };
 }
@@ -291,24 +338,27 @@ function createAgentAppService({
     if (manifest.id !== directoryName) {
       throw new AgentAppError('AGENT_APP_INVALID', 'manifest.id must match its directory name');
     }
-    const entryPath = path.resolve(directoryPath, ...manifest.renderer.entry.split('/'));
-    if (!isPathWithin(directoryPath, entryPath)) {
-      throw new AgentAppError('AGENT_APP_INVALID', 'manifest.renderer.entry escapes package directory');
-    }
-    let entryStat;
-    try {
-      entryStat = fs.lstatSync(entryPath);
-    } catch {
-      throw new AgentAppError('AGENT_APP_INVALID', 'manifest.renderer.entry does not exist');
-    }
-    if (!entryStat.isFile() || entryStat.isSymbolicLink()) {
-      throw new AgentAppError('AGENT_APP_INVALID', 'manifest.renderer.entry must be a regular file');
-    }
     const realDirectory = fs.realpathSync(directoryPath);
-    const realEntry = fs.realpathSync(entryPath);
-    if (!isPathWithin(realDirectory, realEntry)) {
-      throw new AgentAppError('AGENT_APP_INVALID', 'manifest.renderer.entry escapes package directory');
-    }
+    const entries = [manifest.renderer?.entry, ...manifest.charts.map((chart) => chart.entry)].filter(Boolean);
+    entries.forEach((entry) => {
+      const entryPath = path.resolve(directoryPath, ...entry.split('/'));
+      if (!isPathWithin(directoryPath, entryPath)) {
+        throw new AgentAppError('AGENT_APP_INVALID', 'manifest presentation entry escapes package directory');
+      }
+      let entryStat;
+      try {
+        entryStat = fs.lstatSync(entryPath);
+      } catch {
+        throw new AgentAppError('AGENT_APP_INVALID', `manifest presentation entry does not exist: ${entry}`);
+      }
+      if (!entryStat.isFile() || entryStat.isSymbolicLink()) {
+        throw new AgentAppError('AGENT_APP_INVALID', `manifest presentation entry must be a regular file: ${entry}`);
+      }
+      const realEntry = fs.realpathSync(entryPath);
+      if (!isPathWithin(realDirectory, realEntry)) {
+        throw new AgentAppError('AGENT_APP_INVALID', 'manifest presentation entry escapes package directory');
+      }
+    });
     return {
       descriptor: buildDescriptor(manifest),
       directoryPath,
@@ -383,7 +433,10 @@ function createAgentAppService({
       throw new AgentAppError('AGENT_APP_INVALID', 'overwrite must be a boolean');
     }
     const manifest = normalizeAgentAppManifest(manifestInput);
-    const normalizedFiles = normalizeBundleFiles(files, manifest.renderer.entry);
+    const normalizedFiles = normalizeBundleFiles(
+      files,
+      [manifest.renderer?.entry, ...manifest.charts.map((chart) => chart.entry)].filter(Boolean),
+    );
     try {
       ensureAppsRoot();
     } catch (error) {
@@ -538,6 +591,7 @@ module.exports = {
   AGENT_APP_MANIFEST_FILE,
   AGENT_APP_MAX_FILE_BYTES,
   AGENT_APP_MAX_FILES,
+  AGENT_APP_MAX_CHARTS,
   AGENT_APP_MAX_PATH_LENGTH,
   AGENT_APP_MAX_TOTAL_BYTES,
   AGENT_APP_SCHEMA_VERSION,

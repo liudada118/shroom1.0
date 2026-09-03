@@ -31,6 +31,7 @@ processor  解帧 → 线序/点序映射 → 算法 → 指标 → 输出
 | `displaySystemRuntimePolicy.js` | 策略层，131 行。运行模式判定（`getRuntimeMode` / `isActiveRuntimeMode` / `isParallelRuntimeMode`）、分发策略（`evaluateDisplaySystemDispatchPolicy`）、绑定属性提取。`DEFAULT_LEGACY_PARSER_CHANNELS` = sit / back / head / sensor | 唯一决定「这一帧要不要给这个系统」的地方。**parallel 模式**让新 Display System 和旧传感器链路同时收同一份数据——这是渐进迁移的关键 |
 | `displaySystemRuntimeFactory.js` | 装配入口，107 行。`createDisplaySystemRuntimeController` 组合 binder + dispatcher；`buildRuntimeBindingSnapshot` 导出可观测快照 | 快照给状态查询和调试用，不参与数据流 |
 | `displaySystemFrameProcessorFactory.js` | 处理核心。解帧（`validateFrame` / `decodeProtocolValues`）、配置化映射、算法执行、按 channelId 记录/应用 processed 零点、指标计算 | 算法返回值必须先消毒；零点必须作用于未扣零算法结果，并在扣零后重算压力指标 |
+| `displaySystemFrameAggregator.js` | 保存同一 displaySystemId 下每个 sensorId 的最新标准矩阵，并按算法包生成 `request.frames` | `latest` 检查缺失/过期，`strict` 额外检查时间差；这里只做软件时间对齐，不代表硬件同步 |
 
 ## parallel 模式是为迁移准备的
 
@@ -47,6 +48,13 @@ processor  解帧 → 线序/点序映射 → 算法 → 指标 → 输出
 - 非数字类型 —— 前端计算得到 `NaN`，图变空白
 
 这几种情况都不会抛异常。消毒层是唯一的拦截点。
+
+## 多传感器算法输入
+
+所有通道仍先独立完成协议解码和线序/点位映射，然后才更新共享聚合器。只有算法包声明的
+`triggerSensor` 在所需帧齐备后调用 Python V2；其它通道照常发布自己的标准矩阵，同时为融合
+算法提供最新输入。算法未就绪时触发通道也继续发布未经过算法的标准矩阵，并在 `algorithm.inputStatus`
+暴露缺失、过期或 skew 原因，不能因为一条融合算法等待而阻断采集链。
 
 ## 边界
 

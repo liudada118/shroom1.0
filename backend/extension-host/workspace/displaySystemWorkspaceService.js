@@ -33,6 +33,11 @@ const {
   normalizeChartCardsConfig,
   validateDisplayConfig,
 } = require('../manifest/displaySystemPage');
+const {
+  ALGORITHM_PACKAGE_SCHEMA_VERSION,
+  SUPPORTED_ALGORITHM_API_VERSIONS,
+  validateAlgorithmPackageManifest,
+} = require('../manifest/displaySystemAlgorithmPackage');
 
 const SAFE_DISPLAY_SYSTEM_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const BUILDER_ALGORITHM_TYPES = new Set(['none', 'json', 'js', 'python']);
@@ -57,6 +62,24 @@ const DEFAULT_ALGORITHM_SOURCES = Object.freeze({
     }
 `,
 });
+
+const DEFAULT_V2_PYTHON_ALGORITHM_SOURCE = `def initialize(config, resources):
+    # 在这里一次性加载模型或初始化滑动窗口。
+    pass
+
+def process(request):
+    # request["frames"] 按 sensorId 提供完成线序映射后的多传感器矩阵。
+    return {
+        "data": request["normalized_data"],
+        "metrics": {},
+    }
+
+def reset(reason):
+    pass
+
+def shutdown():
+    pass
+`;
 
 /**
  * 按矩阵尺寸生成「恒等」的线序表和点位表。
@@ -212,7 +235,7 @@ function readTextOptional(filePath, fsLike = fs) {
  * @returns {void}
  * @throws {Error} 代码类算法缺源码或缺入口时抛出。
  */
-function validateBuilderAlgorithmSource(type, source) {
+function validateBuilderAlgorithmSource(type, source, { apiVersion = 1 } = {}) {
   if (!CODE_ALGORITHM_TYPES.has(type)) return;
   if (typeof source !== 'string' || !source.trim()) {
     throw new Error(`${type} algorithm source is required`);
@@ -220,8 +243,19 @@ function validateBuilderAlgorithmSource(type, source) {
   if (type === 'js' && !/module\.exports\s*=/.test(source)) {
     throw new Error('JavaScript algorithm must export calculate with module.exports');
   }
-  if (type === 'python' && !/^\s*def\s+calculate\s*\(\s*raw_data\s*,\s*context\s*\)\s*:/m.test(source)) {
-    throw new Error('Python algorithm must define calculate(raw_data, context)');
+  if (
+    type === 'python'
+    && Number(apiVersion) === 1
+    && !/^\s*def\s+calculate\s*\(\s*raw_data\s*,\s*context\s*\)\s*:/m.test(source)
+  ) {
+    throw new Error('Python V1 algorithm must define calculate(raw_data, context)');
+  }
+  if (
+    type === 'python'
+    && Number(apiVersion) === 2
+    && !/^\s*def\s+process\s*\(\s*request\s*\)\s*:/m.test(source)
+  ) {
+    throw new Error('Python V2 algorithm must define process(request)');
   }
 }
 
@@ -304,7 +338,10 @@ function buildSerialTemplateFromPreset(preset) {
  *   刻意从外面传进来而不是在这里读文件：这一层不该碰 fs，也不该反向依赖 serial 层。
  * @returns {object} Builder 目录。
  */
-function buildDisplaySystemBuilderCatalog({ serialProtocolPresets = [] } = {}) {
+function buildDisplaySystemBuilderCatalog({
+  serialProtocolPresets = [],
+  algorithmPackages = [],
+} = {}) {
   const legacySerialTemplates = [
       {
         id: 'pressure-fixed-length',
@@ -425,8 +462,10 @@ function buildDisplaySystemBuilderCatalog({ serialProtocolPresets = [] } = {}) {
     algorithmModes: [
       { id: 'none', label: '不处理' },
       { id: 'json', label: '参数化数值处理' },
+      { id: 'package', label: '已注册 Python 算法包' },
       { id: 'code', label: '自定义代码函数' },
     ],
+    algorithmPackages: algorithmPackages.filter((item) => item?.id && item.attachable !== false),
     codeLanguages: [
       {
         id: 'js',
@@ -441,6 +480,15 @@ function buildDisplaySystemBuilderCatalog({ serialProtocolPresets = [] } = {}) {
         template: DEFAULT_ALGORITHM_SOURCES.python,
       },
     ],
+    algorithmPackageContract: {
+      manifestFilename: 'algorithm-package.json',
+      schemaVersion: ALGORITHM_PACKAGE_SCHEMA_VERSION,
+      supportedApiVersions: [...SUPPORTED_ALGORITHM_API_VERSIONS],
+      pythonVersion: '3.11',
+      inputModes: ['single-sensor', 'multi-sensor'],
+      syncStrategies: ['latest', 'strict'],
+      v2PythonTemplate: DEFAULT_V2_PYTHON_ALGORITHM_SOURCE,
+    },
     renderers: [
       { id: 'heatmap', type: 'heatmap', label: '热力图' },
       { id: 'matrix', type: 'matrix', label: '数值矩阵' },
@@ -459,6 +507,19 @@ function buildDisplaySystemBuilderCatalog({ serialProtocolPresets = [] } = {}) {
     // 图表表面能落地的叠加层是画布那份的子集，不含 legend。
     chartOverlays: [...CHART_OVERLAYS],
     chartCardLimit: DISPLAY_CHART_CARD_LIMIT,
+    agentChartContract: {
+      idPattern: 'agent-chart:<appId>:<chartId>',
+      appManifestField: 'charts[]',
+      displayCardShape: {
+        templateId: 'stable string',
+        name: 'user-facing string',
+        agentChartId: 'agent-chart:<appId>:<chartId>',
+        source: 'outputChannel (optional; top-level frame follows sidebar source)',
+        options: 'JSON object (optional)',
+      },
+      hostSurface: 'existing sidebar chart area',
+      messageProtocol: 'agentApps.messageProtocol v1',
+    },
   };
 }
 
@@ -632,10 +693,29 @@ function buildWorkspaceSensorStates(inputManifest, definitions = {}) {
     if (!BUILDER_ALGORITHM_TYPES.has(algorithmType)) {
       throw new Error('page builder only supports none, json, js and python backend algorithms');
     }
+    let algorithmPackage = null;
+    if (scoped.algorithmPackage != null) {
+      const packageValidation = validateAlgorithmPackageManifest(scoped.algorithmPackage, {
+        source: `sensor ${id}: algorithm package`,
+      });
+      if (!packageValidation.ok) {
+        const error = new Error('algorithm package validation failed');
+        error.details = packageValidation.errors;
+        throw error;
+      }
+      algorithmPackage = packageValidation.value;
+      if (algorithmType !== 'python') {
+        throw new Error('algorithm packages currently require python algorithm type');
+      }
+    }
     const algorithmSource = scoped.algorithmSource
-      ?? DEFAULT_ALGORITHM_SOURCES[algorithmType]
+      ?? (algorithmPackage?.apiVersion === 2
+        ? DEFAULT_V2_PYTHON_ALGORITHM_SOURCE
+        : DEFAULT_ALGORITHM_SOURCES[algorithmType])
       ?? null;
-    validateBuilderAlgorithmSource(algorithmType, algorithmSource);
+    validateBuilderAlgorithmSource(algorithmType, algorithmSource, {
+      apiVersion: algorithmPackage?.apiVersion || rawAlgorithm.apiVersion || 1,
+    });
     const algorithm = algorithmType === 'json'
       ? {
         ...rawAlgorithm,
@@ -647,7 +727,13 @@ function buildWorkspaceSensorStates(inputManifest, definitions = {}) {
         ? {
           ...rawAlgorithm,
           type: algorithmType,
-          entry: rawAlgorithm.entry || (algorithmType === 'python' ? 'algorithm.py' : 'algorithm.js'),
+          entry: algorithmPackage
+            ? null
+            : rawAlgorithm.entry || (algorithmType === 'python' ? 'algorithm.py' : 'algorithm.js'),
+          packageManifest: algorithmPackage
+            ? rawAlgorithm.packageManifest || `${id}/algorithm-package.json`
+            : null,
+          apiVersion: algorithmPackage?.apiVersion || Number(rawAlgorithm.apiVersion || 1),
           dataFile: null,
           input: {
             source: 'rawData',
@@ -697,6 +783,7 @@ function buildWorkspaceSensorStates(inputManifest, definitions = {}) {
       coordinateMap: suppliedCoordinateMap,
       algorithmData: algorithmType === 'json' ? (scoped.algorithmData || {}) : null,
       algorithmSource,
+      algorithmPackage,
     };
   });
 }
@@ -749,6 +836,7 @@ function resolveManifestWritePath(directory, relativePath) {
  * @param {string} options.writableRoot 用户可写的 display-systems 目录。
  * @param {typeof fs} [options.fsLike=fs] 注入的 fs。
  * @param {() => object[]} [options.listSerialProtocolPresets] 串口协议预设读取函数。
+ * @param {() => object[]} [options.listAlgorithmPackages] 已校验的内置算法包读取函数。
  * @returns {{save: Function, saveDisplaySection: Function, duplicate: Function,
  *            read: Function, getCatalog: Function}} 工作区服务。
  * @throws {Error} 缺 writableRoot 时抛出 —— 没有它就无从判断该往哪写，
@@ -760,6 +848,7 @@ function createDisplaySystemWorkspaceService({
   // 每次取目录时重新读一遍串口协议预设：用户往可写目录丢一份 JSON 之后
   // 刷新「新建传感器」页面就能看到，不用重启服务。
   listSerialProtocolPresets = () => [],
+  listAlgorithmPackages = () => [],
 } = {}) {
   if (!writableRoot) throw new Error('display system writableRoot is required');
   fsLike.mkdirSync(writableRoot, { recursive: true });
@@ -797,6 +886,19 @@ function createDisplaySystemWorkspaceService({
     }
 
     const sensorStates = buildWorkspaceSensorStates(inputManifest, definitions);
+    const sensorIds = new Set(sensorStates.map((state) => state.sensor.id));
+    sensorStates.forEach((state) => {
+      const algorithmPackage = state.algorithmPackage;
+      if (algorithmPackage?.input?.mode !== 'multi-sensor') return;
+      algorithmPackage.input.sensors.forEach((sensorId) => {
+        if (!sensorIds.has(sensorId)) {
+          throw new Error(`algorithm package input sensor is not declared: ${sensorId}`);
+        }
+      });
+      if (algorithmPackage.input.triggerSensor !== state.sensor.id) {
+        throw new Error(`algorithm package must be attached to trigger sensor ${algorithmPackage.input.triggerSensor}`);
+      }
+    });
     const manifest = buildWorkspaceManifest(inputManifest, id, sensorStates);
     const validation = validateDisplaySystemConfig(manifest, { source: 'page builder' });
     if (!validation.ok) {
@@ -889,7 +991,13 @@ function createDisplaySystemWorkspaceService({
         queueWrite(sensor.algorithm.dataFile, 'json', state.algorithmData);
       }
       if (CODE_ALGORITHM_TYPES.has(sensor.algorithm.type)) {
-        queueWrite(sensor.algorithm.entry, 'text', state.algorithmSource);
+        if (state.algorithmPackage) {
+          queueWrite(sensor.algorithm.packageManifest, 'json', state.algorithmPackage);
+          const packageDirectory = path.dirname(sensor.algorithm.packageManifest);
+          queueWrite(path.join(packageDirectory, state.algorithmPackage.entry), 'text', state.algorithmSource);
+        } else {
+          queueWrite(sensor.algorithm.entry, 'text', state.algorithmSource);
+        }
       }
     });
     pendingWrites.forEach(({ filePath, type, value }) => {
@@ -1010,6 +1118,7 @@ function createDisplaySystemWorkspaceService({
       pointOrder: readJsonOptional(resolvedFiles.pointOrder, fsLike),
       coordinateMap: readJsonOptional(resolvedFiles.coordinateMap, fsLike),
       algorithmData: readJsonOptional(resolvedFiles.algorithmData, fsLike),
+      algorithmPackage: readJsonOptional(resolvedFiles.algorithmPackage, fsLike),
       algorithmSource: readTextOptional(resolvedFiles.algorithmEntry, fsLike),
     });
     const sensorDefinitions = Object.fromEntries(
@@ -1037,6 +1146,7 @@ function createDisplaySystemWorkspaceService({
     getCatalog: () => ({
       ...buildDisplaySystemBuilderCatalog({
         serialProtocolPresets: listSerialProtocolPresets(),
+        algorithmPackages: listAlgorithmPackages(),
       }),
       writableRoot,
     }),
@@ -1050,6 +1160,7 @@ function createDisplaySystemWorkspaceService({
 
 module.exports = {
   DEFAULT_ALGORITHM_SOURCES,
+  DEFAULT_V2_PYTHON_ALGORITHM_SOURCE,
   buildDisplaySystemBuilderCatalog,
   createDisplaySystemWorkspaceService,
   createIdentityDefinitions,

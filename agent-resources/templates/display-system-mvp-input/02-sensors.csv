@@ -1,0 +1,2 @@
+sensor_id,business_label,output_channel,stored,sensor_type,matrix_rows,matrix_cols,physical_position,orientation,temporary_com,protocol_file,line_order_file,sample_frames_file,notes
+cushion,座椅,cushion,true,pressure-matrix,4,4,座垫正面,"上方朝前，排线在右侧",COM3,sensors/cushion/protocol.json,sensors/cushion/line-order.csv,sensors/cushion/sample-frames.csv,"示例行：请按真实设备替换；多传感器时每个物理传感器一行"
