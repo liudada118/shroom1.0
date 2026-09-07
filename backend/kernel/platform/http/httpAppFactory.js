@@ -175,6 +175,9 @@ function createHttpApp({
   saveDisplaySystem = () => null,
   saveDisplaySystemDisplaySection = () => null,
   duplicateDisplaySystem = () => null,
+  // 展示系统目录变了要告诉正在跑的前端。Builder 在进程内保存时自己派发 DOM 事件，
+  // 但 Agent / 脚本走的是这里的 HTTP 接口，前端毫无感知 —— 不广播的话新系统要重启软件才出现。
+  publishDisplaySystemsUpdated = () => {},
 }) {
   const agentApps = agentAppService || createUnavailableAgentAppService();
   const protocolProbeService = serialProtocolProbeService || createSerialProtocolProbeService({
@@ -296,7 +299,9 @@ function createHttpApp({
   });
 
   httpApp.post(HTTP_ROUTES.displaySystemReload, (req, res) => {
-    res.json({ displaySystems: reloadDisplaySystems() });
+    const status = reloadDisplaySystems();
+    notifyDisplaySystemsUpdated('reload');
+    res.json({ displaySystems: status });
   });
 
   httpApp.get(HTTP_ROUTES.displaySystemEditor, (req, res) => {
@@ -307,6 +312,19 @@ function createHttpApp({
     }
     res.json({ editor });
   });
+
+  /**
+   * 目录变更后广播一条 `displaySystemsUpdated` 系统事件，前端据此重拉列表。
+   *
+   * 广播失败只记日志不影响响应：写盘已经成功了，不能因为通知没发出去而给调用方回 500。
+   */
+  function notifyDisplaySystemsUpdated(reason, id = null) {
+    try {
+      publishDisplaySystemsUpdated({ reason, ...(id ? { id } : {}) });
+    } catch (error) {
+      logger?.warn?.('[HTTP] publish displaySystemsUpdated failed', error.message || error);
+    }
+  }
 
   /**
    * 展示系统写接口的统一错误映射。
@@ -328,6 +346,7 @@ function createHttpApp({
   httpApp.post(HTTP_ROUTES.displaySystems, (req, res) => {
     try {
       const result = saveDisplaySystem(req.body);
+      notifyDisplaySystemsUpdated(req.body?.overwrite ? 'overwrite' : 'save', result?.id);
       res.status(req.body?.overwrite ? 200 : 201).json({ result });
     } catch (error) {
       respondDisplaySystemWriteError(res, error);
@@ -344,6 +363,7 @@ function createHttpApp({
         res.status(404).json({ error: 'display system not found', id: req.params.id });
         return;
       }
+      notifyDisplaySystemsUpdated('display-section', req.params.id);
       res.json({ result });
     } catch (error) {
       respondDisplaySystemWriteError(res, error);
@@ -358,6 +378,7 @@ function createHttpApp({
         res.status(404).json({ error: 'display system not found', id: req.params.id });
         return;
       }
+      notifyDisplaySystemsUpdated('duplicate', result?.id);
       res.status(201).json({ result });
     } catch (error) {
       respondDisplaySystemWriteError(res, error);

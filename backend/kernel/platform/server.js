@@ -2622,6 +2622,8 @@ const httpApp = createHttpApp({
   saveDisplaySystem: appRuntime.displaySystems.save,
   saveDisplaySystemDisplaySection: appRuntime.displaySystems.saveDisplaySection,
   duplicateDisplaySystem: appRuntime.displaySystems.duplicate,
+  // Agent / 脚本经 HTTP 写完展示系统后，让前端顶部菜单不用重启就能看到新系统。
+  publishDisplaySystemsUpdated: (detail) => publishSystemEvent({ displaySystemsUpdated: detail }),
 });
 // ===== OneStep 足压报告 HTTP 服务状态 =====
 // 默认仅监听 127.0.0.1，供前端上传截图、生成 PDF 和调用控制 API。

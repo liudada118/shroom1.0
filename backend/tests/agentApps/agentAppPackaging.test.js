@@ -12,7 +12,12 @@ const { buildSdkContractSnapshot } = require('@shroom/backend/contract/sdkApiCon
 
 const projectRoot = path.resolve(__dirname, '../../..');
 const packageJson = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
-const policy = JSON.parse(fs.readFileSync(path.join(projectRoot, 'agent-resources/policy.json'), 'utf8'));
+const policySource = fs.readFileSync(path.join(projectRoot, 'agent-resources/policy.json'), 'utf8');
+const skillSource = fs.readFileSync(
+  path.join(projectRoot, 'agent-resources/add-display-system/SKILL.md'),
+  'utf8',
+);
+const policy = JSON.parse(policySource);
 const templateManifest = JSON.parse(fs.readFileSync(
   path.join(projectRoot, 'agent-resources/add-display-app/template/app.json'),
   'utf8',
@@ -34,6 +39,14 @@ assert(packageJson.config.forge.packagerConfig.extraResource.includes('./pack-re
 assert(packageJson.config.forge.packagerConfig.ignore.includes('^/agent-resources($|/)'));
 assert.match(packSyncScript, /path\.join\(packResourcesDir, ["']agent["']\)/);
 assert.match(packSyncScript, /syncAgentResources\(\);/);
+assert.strictEqual(
+  fs.readFileSync(path.join(projectRoot, 'pack-resources/agent/policy.json'), 'utf8'),
+  policySource,
+);
+assert.strictEqual(
+  fs.readFileSync(path.join(projectRoot, 'pack-resources/agent/add-display-system/SKILL.md'), 'utf8'),
+  skillSource,
+);
 
 // 主页面与 API 是两个 loopback origin；没有显式 frame-src 时会回落到 default-src 'self'。
 assert.match(
@@ -63,6 +76,14 @@ assert.deepStrictEqual(contract.agentApps.limits, {
 assert.deepStrictEqual(contract.agentApps.descriptorShape.permissions, ['sensor.read']);
 assert.deepStrictEqual(contract.agentApps.surfaces, ['renderer', 'chart']);
 assert.strictEqual(contract.agentApps.chartIdPattern, 'agent-chart:<appId>:<chartId>');
+assert.match(policy.displaySystemGeneration.protocolSelection.presetFirstRule, /MUST copy/);
+assert.match(policy.displaySystemGeneration.protocolSelection.wireDocumentRule, /MUST NOT.*fixedLength/);
+assert.match(policy.displaySystemGeneration.algorithmSelection.registeredPackageRule, /MUST attach/);
+assert.match(policy.displaySystemGeneration.display.rendererRule, /MUST use it by default/);
+assert.match(policy.displaySystemGeneration.display.rendererIntentExamples['3dPointPlot'], /pointGrid/);
+assert.match(policy.displaySystemGeneration.display.charts.surfaceRule, /transparent root/);
+assert(policy.displaySystemGeneration.activation.verification.some((item) => item.includes('real canonical sensor.frame')));
+assert(policy.displaySystemGeneration.acceptance.some((item) => item.includes('open status alone is insufficient')));
 assert.deepStrictEqual(
   [...policy.installApi.errorCodes].sort(),
   [...contract.agentApps.errorCodes].sort(),

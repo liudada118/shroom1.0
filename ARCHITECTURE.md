@@ -1,6 +1,23 @@
 # 架构文档
 
-> 最后更新于：2026-09-02
+> 最后更新于：2026-09-04
+
+## 2026-09-04 Agent 自然语言生成决策门禁
+
+随包 `add-display-system` 规则现在把自然语言需求收敛成确定性选择。协议文档先与实时预设按波特率、
+分隔/帧头字节、值类型和点数比对；唯一命中时必须完整复制预设，文档中的“帧头 + payload + 总长”
+不能单凭总长改写成 `fixedLength`。因此标准 `AA 55 03 99 + 1024 × uint8` 会复用实时
+`standard-1024` 的 delimiter 语义，不再生成无法从串口中途接入位置重新对齐的 1028 字节切块。
+
+展示选择同样改为能力优先：用户说“3D 点图/3D 点阵”且实时目录存在点阵渲染器时，必须使用
+`pointGrid`；“新建展示系统”本身不代表授权新写 renderer。呼吸、重心等图表需求先转换为算法
+metric 需求，兼容正式包能提供时必须挂载该包，不能因为用户没说内部包名就改成前端代理计算。
+只有现成能力无法表达且用户明确要求自定义视觉时才安装 Agent renderer/chart；自定义图表只绘制
+透明的图形内容，卡片外壳、标题、删除控件和侧栏间距继续由宿主管理。
+
+真机验收新增数据面门禁：`bound + serial open` 只证明控制面配置完成；提供了物理 COM 时，每一路
+必须在有限等待时间内收到 identity 和映射后点数均正确的真实 canonical `sensor.frame`。样例帧不能
+冒充真机证据；收不到帧只能报告“已配置、未通过硬件验证”，并保留 parser 诊断，不能宣布完成。
 
 ## 2026-09-02 Agent 算法、主渲染器与侧栏图表三类扩展
 
@@ -2682,6 +2699,8 @@ flowchart LR
 
 | 日期 | 类型 | 说明 |
 | :--- | :--- | :--- |
+| 2026-09-04 | 修复缺陷 / 规则强化 | Agent 展示系统生成改为预设、算法包和原生渲染器优先：唯一匹配协议必须完整复制，`3D 点图/点阵` 在实时目录可用时固定选择 `pointGrid`，呼吸/重心先匹配正式包 metrics；真机完成条件新增每路真实 canonical `sensor.frame`，`bound + open` 不再算分帧成功。 |
+| 2026-09-03 | 修复缺陷 / 契约扩展 | **打包后二开三处闭环缺口。** ① 渲染方式目录：`displaySystemWorkspaceService` 的 `renderers` 原是硬编码 `heatmap/matrix/raw2d` 三条，`@shroom/frontend` 注册表里真实存在的 `numMatrix/pointGrid/webglHeatmap/blobHeatmap` 在 Builder 与 Agent catalog 里一条都选不到。新建 `backend/extension-host/manifest/displaySystemRendererCatalog.js` 照 `displaySystemCanvasCatalog` 的模式做共享目录（后端只登记 id/label，绘制实现留前端），`handPoints` 故意不登记（点表写死 32×32 手套，与 SDK 自己的 `BUILTIN_MATRIX_RENDERER_OPTIONS` 口径一致）。内置三条一条不删，老 manifest 兜底链路不受影响。② HTTP 写接口无广播：Builder 在进程内保存时自己派发 `shroom-display-systems-updated` DOM 事件让顶部菜单重拉，但 Agent / 脚本走 `POST /api/display-systems` 等四个 HTTP 写接口 + reload 时前端毫无感知，新系统要重启软件才出现。`httpAppFactory` 新增 `publishDisplaySystemsUpdated` 依赖，五条路成功后各广播一次 `{displaySystemsUpdated:{reason,id}}` 系统事件（失败不发），`server.js` 接到 `publishSystemEvent`，`Home.jsx wsData` 收到后翻译成同一个 DOM 事件。③ **Agent 技能漏了激活与开串口两步**：`add-display-system/SKILL.md` 原流程到「保存 → reload → 验证 round-trip」就结束，而保存只是写文件 —— 系统不是当前活动型号（`sensor.switch`）、串口角色没打开（`serial.open` 用 sensor `id` 当 role），dispatcher 策略就判 `sensor type mismatch`、一帧都不派发；用户看到的就是「生成了但没数据」，归零命令跟着报 409 `no-target-channels`（目标通道 = manifest 声明 ∪ 收过帧的，两边都空）。SKILL.md 新增 §7 Activate（三步 + 验证方法 + `LICENSE_REQUIRED` 停止规则），原 §7 顺延为 §8；`policy.json` 的 `displaySystemGeneration` 新增机器可读的 `activation` 段并在 `acceptance` 加一条「active + bound + open」。**诊断过程中纠正过两次自己的判断**：先误判 409 根在 `activeDisplaySystemId` 为空（用户给的响应体钉在 `zeroCommandService.js:324` 的 `no-target-channels`，是下游）；后误判打包漏拷 `display-systems` 是根因（那只影响仓库里已有的 3 个系统，Agent 生成的走 `userData`，能被扫到）。 |
 | 2026-09-02 | 新增功能 / 契约扩展 | Agent App 从单一主渲染器扩展为可选 `renderer` + `charts[]` 展示包：图表获得 `agent-chart:<appId>:<chartId>` 稳定 ID，由宿主挂载到原侧栏并接收同一 canonical 帧；Display System `chartCards`、Builder 草稿保存、公开 SDK/catalog、打包规则与 Agent skills 同步支持。算法仍在永久算法宿主运行，渲染和图表仍是只读表现层。 |
 | 2026-08-31 | 优化重构 | **批 1–3 的长注释回改成短式（6 批 + 1 次补漏，全部完成）**。批 4 结束时问过用户是否统一风格，用户答「回改」。压缩规则：一行说干什么 → 用法/要点（只留不显而易见的、**每条一行**）→ `@param`/`@returns`。**不是删信息而是换存放位置** —— 批 1–3 那十六条机制推演在本文档的批次小节与四张台账里逐条留着，代码里只保留「⚠️ 一句话 + 后果」，需要机制的人来文档里查。**判据换过一次，是刻意的**：起初用 `tmp/long-blocks.mjs`（连续注释行计数）量出「批 1–3 共 **313 个 ≥12 行的块 / 5672 行 / 65 个文件**」，批 A 按这个做完；之后改成 `tmp/long-prose.mjs` 量**散文行**（剥掉 `/**`、`*`、`//` 装饰，再排除空行和以 `@` 开头的行），因为「一个有 8 个入参的函数天然就有 10 行标签」不该被算成注释太长。批 B1 起改用**散文 >6 行**，批 D 起进一步放宽到**散文 >10 行**（抽样发现 7–10 行那一档大多已经就是批 4 用户认可的形状，再压只能开始删事实）。**6–10 行的 JSDoc 一个字没动** —— 用户嫌长的是多段 essay，不是 `@param` 表。七个提交全部**按路径 stage**（`git commit -F <file> -- <显式路径>`），因为工作区始终有并行分支的未提交改动。落地情况：A `runtime/` + `extensions/` `0cfb09f`（7 文件 +83/−71）、B1 `extension-host/` `d40713b`（7 文件 +153/−264）、C1 `kernel/` 非 `platform/` `55ca4a9`（10 文件 +390/−715）、D `kernel/platform/` 除 `server.js` `d78bf26`（17 文件 +204/−404）、C2 批 B/C 当时被并行改动占着的文件 `289a762`（3 文件 +44/−80）、E `kernel/platform/server.js` `212d1b0`（1 文件 +115/−203，12 块，全文散文 340 → 260 行）、补漏 `runtimeStatePatchFactory.js` `8a9d95c`（1 文件 +7/−12）。**合计 39 个文件、+996 / −1749（净 −753 行）。** **原计划的批 B2 实测无事可做**：并行改动（`c2e702c`）落地后重新量，`extension-host/` 里散文 >10 行的只剩 `displaySystemWorkspaceService.js` 的 `save` 一块，逐行数过是 **9 行散文** —— 多出来的 3 行是 `@param`/`@throws` 的**续行**（不以 `@` 开头）被计数器算成散文了，这是 `long-prose.mjs` 的已知局限，11–13 行这一档必须手工复核再动。**收官状态**：`runtime/`、`extensions/` 两层散文 >10 行的块**归零**；`extension-host/` 只剩那一块假阳性；`kernel/` 剩 16 块，全部是**刻意留在 11–16 行**的（`pythonWorker` ×2、`petCareRuntimeService` ×2、`controlCommandRouter` ×2、`serverShutdownOrchestrator`、`runtimeControlService`、`httpAppFactory`、`webSocketHandlerFactory`、`displaySystemAlgorithmRunner`、`historyAnalysisService`、`historySessionService`，以及 `server.js` 里的 3 块）—— 每块都有好几条彼此独立、都会「改了会坏但不报错」的 ⚠️，其中 `activateSubmittedLicenseKey` 还是 CLAUDE.md 点名的「用户权限与身份认证」高风险类别。**不要回头再压这 16 块。** 验证（每批都跑）：`node --check` 全过；`tmp/strip-cmp.mjs`（acorn tokenizer 逐 token 比对）对每个文件**逐个**报代码骨架 0 处不一致，证明是纯注释改动（该脚本传多个目录会错算，必须一次一个路径）；`backend/tests/run-tests.js` 全 **57** 个测试文件通过；`backend/kernel/platform` 的函数注释覆盖率始终 98%（246/252），`runtime/` 与 `extensions/` 始终 100%。压掉的都是同一类东西 —— 把「为什么这样 / 否则会怎样 / 历史上怎么来的」三段合成一句 ⚠️，例如 `runtime/index.js` 的 `getWsServer` 从 5 行压到 3 行，保留「`channel` 不影响返回值、别据此推断存在 sit/back/head 通道表」；`server.js` 的 `resolveZeroTargetChannelIds` 从 24 行压到 14 行，保留「三份来源缺一不可」「`withSourcesOnly` 是采零与清零唯一的行为差异」「返回值有两种形状」三条。**顺带修掉两处已经失效的行号引用**：`publishHistoryDateList` 的注释里原写「1669 行与 1686 行」，在前几批的行号漂移后已经指错了，改成按函数名与语义描述、不再引行号。 |
 | 2026-08-31 | 文档更新 | **`backend/` 函数级注释批 4/4（收尾）：`tests/` 26 个文件 44 个缺注释补齐至 100%（52/52），`compatibility/legacyDataUtils.js` 3 个函数补齐至 100%**，全后端覆盖率 85% → 91%（735 已注释 / 77 缺，其中 71 是刻意不做的 `openWeb.js`、6 是成组箭头函数的已知假阳性）。**代码一行未改**：27 个文件 +432 行 / -0 行，全部 `node --check` 通过，`tmp/strip-cmp.mjs`（acorn 词法分析）判定 27 个文件**逐 token 代码骨架 0 处不一致**，后端 55 个测试文件全过。**⚠️ 注释风格在这一批中途按用户反馈改过一次**：用户看完批 1–3 后说「每个描述都太多了，我最想知道他是干什么做什么怎么用的」，批 4 全部改成短式（一行说干什么 → 最多一两行说用法/要点、只写不显而易见的 → `@param`/`@returns`，简单 helper 控制在 8 行内），批 4 第一遍写的长版本已就地缩写；**批 1–3 已提交的长版本没有回改**，是否统一风格待用户决定。测试文件的注释重点不是「这个 fake 怎么实现」而是**它为什么必须这样 fake**（二开者照抄时会踩的坑）：`runtimeBinding.test.js` 的 `apply` 记零点扣减两条兜底（无基线原样返回、**长度不一致也原样返回** —— 换矩阵尺寸后拿旧基线扣会错位、比不扣更糟；`Math.max(0,…)` 截负值否则配色映射出界）；同文件 `droppedZeroStateStore.updateSources` 只计数以守一条不变量 —— **校验失败被丢弃的清零帧不能被 `createZeroFrameAdapter` 兜底层重新当成旧协议帧处理**，否则串口噪声污染零点基线、画面慢慢偏且无法回溯；`backendSdkClient.test.js` 的 `FakeWebSocket` **异步 open**（`setImmediate`），否则「open 之前就 send」这类 bug 会被同步 open 掩盖，其 `fetchImpl` 记录 url/options 以便断言请求**次数**（契约快照应当被缓存）、`/api/commands` 分支回显 `requestId` 让 ack 匹配可测；`petCareRuntimeService.test.js` 的 `createTimerHarness` 劫持全局 `setInterval` 由测试自己驱动 tick（避免 sleep 型测试间歇失败），**`harness.restore()` 是必须的**否则影响同进程后续测试；`runtimeContextFactory.test.js` 的第二个 `store.get` 说明为何要**换掉外层 `store` 变量再断言** —— 验的正是每次都走 `getRuntimeStateStore()` 现取而非构造时拍快照；`serialChainDemo.test.js` 与 `serialProtocolsApi.test.js` 写明它们守的是**打包后二开路径**（示例坏了比库坏了更打击人；往预设目录丢一个 JSON 就能扩协议，且**一个坏 JSON 只能让自己失效**、不能把整张表清空）。`legacyDataUtils.js` 三个函数**名字全都名不副实**，查实后写进注释：① **`isCar` 的真实语义是「是不是多通道」**（硬编码名单里还有手套 `hand0205*`/`handGlove*`、眼罩、沙发、整椅、足垫），它决定建几个库 / 历史日期取几路 / 清零发几份 / CSV 导几通道，**且是硬编码数组不是读 manifest** —— 新增多通道型号只在 manifest 里声明多个 sensor 不够、必须往这个数组里加一条否则第二路永远拿不到库；② **`dedupli` 的返回结构与入参不同**（入参来自 `SELECT DISTINCT date FROM matrix` 只有 `date`，返回 `{date, name, info}`），而 `publishHistoryDateList` 只在多通道型号上送它的输出、单通道送原始行，所以**前端 `timeArr` 的元素结构随型号变**、不能假设 `.name` 存在；它按 `includes(" ")` 分支是因为 `date` 列有两个来源（`runtimeControlService.js:130-131` 先写 `message.time` 时间戳、再让用户手输的 `message.colName` 覆盖它），`info` 始终保留未加工原标签因为「载入那天」是拿 `date = ?` 去比它；另记两条实测行为（**未改**）：`!String(a.date).includes(":")` 会静默丢掉日期部分带冒号的条目、`sort((a,b) => b.date - a.date)` 是数值相减、非数字日期得 NaN 使比较器被当作 0（等于保持原序）；③ **`totalToN` 现在是恒等函数**（标定多项式与 `* 0.03` 都被注释掉、`mul` 根本没用），因此三处调用点（`historyAnalysisService`/`historyPlaybackService`/`csvDownloadService`）的 `totalToN(total, 1.3)` 那个 `1.3` 是**死参数**、背部压力并没有被乘，且它换算的是整块矩阵的和（不是单点）又发生在读库之后，所以**恢复标定会改变已入库历史数据的显示值**。另记一条：`backend/tests/run-tests.js` 本身没有函数（扫描器不计），但它是一张**手工维护的 55 条测试文件路径数组**（`spawnSync` + `stdio: 'inherit'` 逐个跑、只看退出码），新增测试文件**不会**被自动收录 —— 避免二开者以为是目录扫描。`compatibility/openWeb.js` 的 71 个函数按原定边界仍不注释（它只是那三个基线对比测试的逐点比对基准，加注释会把基线 diff 搅浑）。后端根目录无 eslint 配置故未跑 lint。 |
@@ -2853,6 +2872,8 @@ flowchart LR
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
+| 2026-09-04 | Agent 自然语言生成选择门禁 | 协议唯一命中预设时强制完整复制；3D 点图优先原生 `pointGrid`；呼吸/重心按 metric 自动选择兼容正式算法包；自定义图表只画透明内容区；真机必须收到正确 identity/点数的真实帧。 |
+| 2026-09-03 | Agent 生成的展示系统能出数据 | 渲染方式目录改共享清单（+4 个 SDK 渲染器）；HTTP 写接口广播 `displaySystemsUpdated`，前端不重启即见新系统；Agent 技能补上 `sensor.switch` + `serial.open` 激活步骤与 policy 机器规则，"保存了但没数据 / 归零 409" 有了明确的责任方。 |
 | 2026-09-02 | Agent 自定义图表正式扩展 | Agent App schema v1 支持可选主渲染器及最多 16 个图表 surface；安装、发现、静态资源、公共 SDK/Builder catalog 返回稳定图表 ID。Display System `chartCards` 可引用 Agent 图表，前端在原侧栏 sandbox iframe 中加载并以 10Hz latest 帧转发 canonical 单/多传感器数据；保存与 Builder 编辑保持该定义。Agent 规则已改为自动选择算法、主渲染与公式/自定义图表，用户无需说内部包名。 |
 | 2026-09-02 | 现有实时 Python 算法注册为正式包 | 新增开发态/打包态内置算法包发现与 Builder/Agent catalog，正式注册 `mattress-vitals`、`pet-care`、`pet-care-mini`、`foot-pressure-realtime`；保存时复制可移植 manifest/源码/指标并按矩阵点数校验兼容性，算法结果保留标准矩阵并输出命名 metrics。床垫包补通用 COP，足压包补左右脚 COP 坐标。批量峰值、回放分析和 PDF 报告保留为报告命令。 |
 | 2026-09-01 | 展示系统 MVP 输入模板 | 新增随 Agent 资源打包的系统、传感器、协议、线序、真实样例帧、展示、算法授权与真机验收模板，并附可直接交给 Agent 的任务说明；模板明确 1 基线序、0 基输出坐标、业务身份不可从 COM 推断，以及实时/存储/回放/CSV 同源验收。 |
@@ -3442,6 +3463,8 @@ flowchart LR
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-09-04 | codeOpi | Agent 协议/算法/渲染确定性选择与真帧验收 | 自然语言先匹配实时协议预设、正式算法包 metrics 和原生 renderer；唯一匹配不得自行重构，自定义能力仅在显式需要时生成；串口接入以真实 canonical 帧而非 open 状态收口。 |
+| 2026-09-03 | codeOpi | 打包后二开闭环：渲染目录 / 目录变更广播 / Agent 激活步骤 | 后端渲染方式目录与 SDK 注册表对齐；HTTP 写接口成功后广播 `displaySystemsUpdated`；`add-display-system` 技能与 `policy.json` 补上激活（`sensor.switch`）与开串口（`serial.open`）两步及验证方法。 |
 | 2026-09-01 | codeOpi | 展示系统 MVP 真机资料输入包 | `agent-resources/templates/display-system-mvp-input/` 收敛新垫子接入所需的系统信息、逐路身份、协议、线序、样例帧、展示/算法需求和验收证据；打包后位于 `resources/agent/templates/`，可复制填写后直接交给 Agent。 |
 | 2026-08-31 | codeOpi | 多传感器稳定契约 v1 冻结 | 发布 `shroom.multi-sensor` contract v1 与前后端 SDK 校验器，锁定 manifest v3、`sensor.frame` v1、canonical identity、SQLite/CSV 身份列和回放诊断字段；实时、入库、查询、下载、回放、零点均复用同一身份规则，畸形/未来版本 fail closed，旧 NULL 历史和 legacy 输入保持可读。验证：后端 Electron 运行时 60/60 个测试文件、客户端 41 个文件/437 条、前端 SDK 31 个文件/502 条、SDK smoke 10+32 项、生产构建与改动文件 eslint 全过；全仓 eslint 另有 65 条既有 Hook 告警。 |
 | 2026-08-31 | codeOpi | Builder 逐传感器独立配置闭环 | Manifest v3 打开后逐路保留身份、矩阵、文件、协议、算法与定义内容；页签可分别编辑并保存，编辑 API 返回 `definitions.sensors`，新建多路使用独立子目录，自定义 sensor ID 与 outputChannel 唯一性在前端校验。 |
@@ -3842,6 +3865,8 @@ flowchart LR
 
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-09-04 | codeOpi | 修复缺陷 / 规则强化 | `add-display-system` 与 `policy.json` 增加协议预设优先、metric 驱动算法包选择、`3D 点图 → pointGrid` 原生渲染优先、Agent 图表透明内容区和真实 `sensor.frame` 验收门禁；打包规则测试固定这些关键字段。 |
+| 2026-09-03 | codeOpi | 修复缺陷 / 契约扩展 | 新建 `displaySystemRendererCatalog.js`（3 内置 + 4 SDK 渲染器）；`httpAppFactory` 五条展示系统写路径成功后广播 `displaySystemsUpdated`，`Home.jsx` 翻译成 `shroom-display-systems-updated`；`add-display-system/SKILL.md` 新增 §7 Activate，`policy.json` 新增 `displaySystemGeneration.activation`。 |
 | 2026-09-02 | codeOpi | 新增功能 / 展示扩展 | Agent App 新增 `charts[]` 与 chart-only 包，Display System 图表卡片可用稳定 `agent-chart:*` 引用；宿主将其加载在原侧栏并通过既有 sandbox 消息协议发送 canonical 帧。公开 SDK/catalog、Builder 保存、随包 policy/skills 和测试同步更新，形成算法、主渲染器、侧栏图表三类 Agent 扩展。 |
 | 2026-09-02 | codeOpi | 新增功能 / 算法包注册 | 将现有四个实时 Python 算法注册为随包发布的正式算法包，新增内置目录发现、Builder/Agent catalog 与已注册包选择模式；保存时内嵌可移植契约/源码/指标并校验矩阵兼容性，床垫生命体征补通用重心指标，足压实时包补左右脚 COP 坐标。 |
 | 2026-09-01 | codeOpi | 文档更新 / 模板新增 | 新增随安装包发布的 Display System MVP 输入模板，覆盖系统范围、逐传感器身份、协议、1 基线序、真实帧、展示/算法需求、Agent 提示词和实时/采集/回放/CSV 真机验收表。 |

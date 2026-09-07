@@ -49,6 +49,21 @@ The canonical identity is always `<displaySystemId>:<sensorId>`; neither part ma
 
 ## 3. Select or detect each protocol
 
+Before constructing a protocol from prose, compare the document with every live preset. Match on baud rate,
+delimiter/header bytes, decoded value type/count, and byte width. If exactly one preset matches, the Agent MUST
+copy that preset's complete `protocol` object; it must not reconstruct an equivalent-looking protocol.
+
+A wire document's “frame header + payload + total frame length” describes bytes on the wire. It does not by
+itself select Shroom `fixedLength`: that parser cuts the stream from its current byte position and does not search
+for a header. When the live preset represents the header as a delimiter with `includeDelimiter:false`, decoding
+starts at payload offset `0`; do not duplicate those delimiter bytes as validation or `byteOffset`. For example,
+`AA 55 03 99 + 1024 × uint8` at 1000000 baud MUST resolve to a matching delimiter preset when the live catalog
+advertises one, rather than being rebuilt as fixed length 1028 with offset 4.
+
+If no preset matches, only construct a protocol when the document states the framing semantics unambiguously.
+Do not infer fixed-length framing from a reported total length. Use live detection or ask for evidence when
+“header”, “delimiter”, “frame start”, or “frame end” could describe more than one parser configuration.
+
 For a temporary COM, call the contract-advertised protocol detection route with candidate ids from the live
 preset catalog. Only `matched` may populate the current sensor, and it must copy the complete returned protocol,
 including `includeDelimiter`, validation header and `headerOffset`, checksum type/offset, and whether checksum
@@ -67,6 +82,13 @@ line/point mapping selects the 256 display points later.
 Use no algorithm, a declarative JSON algorithm, or another algorithm advertised by the live pipeline. New
 arbitrary JavaScript/Python/WASM/native code requires explicit authorization and must still execute through the
 existing algorithm host. Never place a data-changing algorithm in renderer HTML.
+
+Treat requested indicators and charts as output-metric requirements before choosing `algorithm.type: "none"`.
+Match the user's words against live package names, descriptions, and `metricDefinitions`: a respiration waveform
+or trend requires a respiration-signal metric, respiration rate requires a rate metric, a center-of-pressure
+trajectory requires paired X/Y metrics, and center offset requires a distance metric. If one compatible registered
+package supplies the requested metrics, the Agent MUST select and attach it. It must not replace those outputs
+with renderer/chart-side estimates merely because the user did not say the internal package id.
 
 Before generating new Python, inspect `catalog.algorithmPackages` and prefer an exact registered package whose
 `compatibility.matrixTotals` includes the current sensor point count. Copy its `packageManifest`,
@@ -108,6 +130,13 @@ Example package manifest:
 }
 ```
 
+Resolve renderer intent against live renderer ids and labels before creating an App. If a catalog renderer
+directly expresses the request, the Agent MUST use it by default. In particular, “3D point plot”, “3D point
+grid”, “3D 点图”, and “3D 点阵” select the live point-grid renderer (currently `pointGrid` when advertised).
+Creating a new display system is not authorization to create a new renderer. A custom renderer is allowed only
+when the user explicitly requests a new/custom/reference visual that the matching catalog renderer cannot
+express, or when no compatible built-in renderer exists.
+
 Choose either:
 
 - an exact built-in renderer id from the live catalog; or
@@ -121,6 +150,11 @@ cannot express, inspect `GET /api/agent-apps` for a matching `charts[]` descript
 `display.chartCards[].agentChartId`; never guess it. A chart card may also declare an output-channel `source`
 and JSON `options`, delivered in the sandbox init config. The chart iframe receives the same canonical frame
 and stable-identity `channels[]` as the renderer.
+
+Charts consume the selected algorithm package's named metrics when those metrics exist. Presentation-only
+fallback calculations require explicit user authorization and must be labelled as proxies. A custom chart iframe
+draws only the plot body on a transparent root; it must not recreate the host card background, title, delete
+control, summary block, or sidebar spacing, because the host owns that shell.
 
 A custom Agent renderer remains one main-canvas visualization: it must not recreate the application header,
 profile controls, summary-card column, chart sidebar, or a complete dashboard shell. Custom chart code belongs
@@ -210,7 +244,34 @@ verify every sensor independently round-tripped: identity, label, outputChannel,
 algorithm, line/point order, coordinate map, and algorithm data. A first-sensor projection over another route is
 a failed installation.
 
-## 7. End-to-end acceptance
+## 7. Activate the system and open its serial channels
+
+Saving only writes files. **A saved system receives no data until it is the active sensor type and its serial
+roles are opened.** Both steps are the Agent's responsibility; the platform will not infer them.
+
+1. Activate: `POST /api/commands` with `{ "type": "sensor.switch", "payload": { "sensorType": "<sensors[0].type>" } }`
+   (route `http.routes.sensorType` is an equivalent shortcut). `sensorType` MUST be the first sensor's exact
+   `type` — it is the activation key shared by every channel of the system; a mismatch leaves every binding in
+   `sensor type mismatch` and no frame is dispatched.
+2. For every sensor, open its port: `POST /api/commands` with
+   `{ "type": "serial.open", "payload": { "role": "<sensors[].id>", "path": "<COM path>", "baudRate": <protocol.baudRate> } }`.
+   `role` is the sensor `id` (the platform's `serialRole`), not `outputChannel` and not a legacy alias.
+   A role the active manifest does not declare is rejected with `INVALID_COMMAND` before any hardware action.
+3. Verify with `GET /api/display-systems`: the system's entries under `runtimeBindings.bindings` MUST show
+   `status: "bound"` with no `error`; then `GET /api/serial/status` MUST list each role as open.
+4. When a physical COM was supplied, observe the contract-advertised realtime stream and require at least one
+   real `sensor.frame` for every opened sensor. Its canonical identity must match the saved sensor and its
+   normalized values must have the expected mapped point count (for a full matrix, `rows * cols`). Synthetic
+   samples do not satisfy this gate. `bound + open` proves only control-plane setup, not successful framing.
+
+If either command returns `LICENSE_REQUIRED` (403), stop and report — activation is gated by the platform's
+license and is not something the Agent can bypass.
+
+If no valid real frame arrives within a bounded observation window, report the system as configured but not
+hardware-verified. Do not call the installation complete; preserve parser/validation diagnostics so framing can
+be corrected without changing the permanent backend.
+
+## 8. End-to-end acceptance
 
 Use distinct sample values per channel and deliberately vary arrival order. Confirm:
 
@@ -223,7 +284,9 @@ Use distinct sample values per channel and deliberately vary arrival order. Conf
 - optional sandbox `channels[]` remains correct when reordered and is not used to infer roles;
 - optional sandbox `serial` metadata can show the physical connection but never changes or infers business identity;
 - built-in chart cards or custom presentation charts update from the intended route;
+- every supplied physical serial route produced a real canonical frame with the expected identity and value count;
 - no permanent backend or stable-contract source changed.
 
 Report display-system id, sensor-to-business-role mapping, canonical channel ids, protocol result per sensor,
-algorithm choice, renderer ids, chart strategy, save/reload result, and all acceptance evidence.
+algorithm choice, renderer ids, chart strategy, save/reload result, activation and serial-open results, and all
+acceptance evidence.

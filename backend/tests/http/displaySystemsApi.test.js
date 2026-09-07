@@ -32,6 +32,7 @@ async function main() {
       handlers: [{ bindingId: 'demo:sit', parserChannel: 'sit' }],
     },
   };
+  const publishedUpdates = [];
   const httpApp = createHttpApp({
     controlCommandService: { executeHttp: () => ({ handled: false, stop: false, results: [] }) },
     getChannelBusStatus: () => ({}),
@@ -54,6 +55,9 @@ async function main() {
     serialManager: { getStatus: () => [] },
     reloadDisplaySystems: () => displaySystemStatus,
     saveDisplaySystem: (input) => ({ id: input.manifest.id }),
+    // Agent / 脚本经 HTTP 写完目录后，前端要靠这条广播才知道有新系统；
+    // 四个写接口 + reload 每次成功都必须发一次，失败不发。
+    publishDisplaySystemsUpdated: (detail) => publishedUpdates.push(detail),
     saveDisplaySystemDisplaySection: (id, patch) => {
       if (id === 'built-in') {
         const error = new Error('system display systems are read-only');
@@ -174,6 +178,14 @@ async function main() {
     const invalidJsonBody = await invalidJsonResponse.json();
     assert.strictEqual(invalidJsonResponse.status, 400);
     assert.strictEqual(invalidJsonBody.error, 'invalid json body');
+
+    // 成功的写操作各广播一次；403 / 404 / 409 / 400 那些失败的一次都不发。
+    assert.deepStrictEqual(publishedUpdates, [
+      { reason: 'save', id: 'created' },
+      { reason: 'reload' },
+      { reason: 'display-section', id: 'demo' },
+      { reason: 'duplicate', id: 'built-in-copy' },
+    ]);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

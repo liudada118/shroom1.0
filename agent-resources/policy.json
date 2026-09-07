@@ -628,6 +628,12 @@
         "Line order, geometry transform, and algorithm execute once in the existing backend pipeline"
       ]
     },
+    "protocolSelection": {
+      "presetFirstRule": "Before constructing a protocol from prose, compare the document with every live preset. If exactly one preset matches baud rate, delimiter/header bytes, decoded value type/count, and byte width, MUST copy its complete protocol object.",
+      "wireDocumentRule": "A documented frame header plus payload plus total frame length describes the wire layout and MUST NOT by itself select fixedLength. Shroom fixedLength cuts from the current stream position and does not search for the header.",
+      "delimiterRule": "When a matching preset uses the documented header as delimiter with includeDelimiter false, decoding starts at payload byteOffset 0; do not duplicate delimiter bytes as validation or decoding offset.",
+      "ambiguityRule": "If no preset matches and header/delimiter/start/end semantics are ambiguous, use live detection or request evidence. Never infer fixedLength only from total frame length."
+    },
     "protocolDetection": {
       "pathSource": "/api/sdk/contract -> serial.protocolDetection.route",
       "defaultPath": "/api/serial/protocol-detect",
@@ -648,13 +654,30 @@
         "Explicit protocol.decoding.valueCount and fixed protocol.framing.frameLength MUST survive save unchanged even when matrix or point count differs"
       ]
     },
+    "algorithmSelection": {
+      "requestedOutputRule": "Requested indicators and charts are algorithm metric requirements. Before choosing algorithm none, match user intent against live package names, descriptions, compatibility, and metricDefinitions.",
+      "metricIntentExamples": {
+        "respirationWaveformOrTrend": "a respiration-signal metric",
+        "respirationRate": "a respiration-rate metric",
+        "centerOfPressureTrajectory": "paired center-of-pressure X and Y metrics",
+        "centerOffset": "a center-of-pressure distance metric"
+      },
+      "registeredPackageRule": "If one compatible registered package supplies the requested metrics, MUST attach it even when the user did not name its internal package id.",
+      "fallbackRule": "Renderer/chart-side estimates require explicit authorization, must be labelled as proxies, and MUST NOT replace metrics supplied by a selected registered package."
+    },
     "display": {
       "widgetSourceRule": "Every data widget in a multi-sensor system MUST explicitly set source to that sensor's exact outputChannel. New manifests SHOULD use outputChannel itself, not a *Data suffix or array position.",
-      "rendererRule": "Use an exact built-in renderer advertised by the catalog, or first install an agent app and use its stable agent:<appId> renderer id.",
+      "rendererRule": "Resolve natural-language intent against live renderer ids and labels. When an exact compatible renderer is advertised, MUST use it by default; creating a new display system does not authorize a new renderer.",
+      "rendererIntentExamples": {
+        "3dPointPlot": "3D point plot, 3D point grid, 3D 点图, and 3D 点阵 select the live point-grid renderer (currently pointGrid when advertised)."
+      },
+      "customRendererWhen": "Use agent:<appId> only when the user explicitly requests a new/custom/reference visual that the matching live renderer cannot express, or no compatible built-in renderer exists.",
       "profileRule": "Every profile renderer reference and widget id MUST resolve to a declared renderer/widget.",
       "charts": {
         "builtin": "Use catalog-advertised chartCards/templates and supported formula syntax; at most the live catalog limit.",
         "agent": "An Agent renderer remains one main-canvas visualization. Custom chart code MUST be declared in app.json charts[] and referenced by display.chartCards[].agentChartId; the host mounts it in the existing sidebar chart area. Do not embed sidebar charts in the main renderer.",
+        "metricRule": "Charts MUST consume selected algorithm package metrics when available. Presentation-only fallback estimates require explicit authorization and a visible proxy label.",
+        "surfaceRule": "A custom chart iframe draws only its plot body on a transparent root. It MUST NOT recreate the host card background, title, delete control, summary block, or sidebar spacing.",
         "dataRule": "Chart rendering does not create another storage or analysis truth; persisted/exported values remain those from the permanent pipeline."
       }
     },
@@ -683,8 +706,38 @@
         "After save, call the contract-advertised reload route and read the editor/detail response to verify every sensor round-tripped independently"
       ]
     },
+    "activation": {
+      "purpose": "A saved display system receives no data until it is the active sensor type and its serial roles are open. Saving alone is not installation.",
+      "switchCommand": {
+        "method": "POST",
+        "pathSource": "/api/sdk/contract -> http.routes.commands",
+        "defaultPath": "/api/commands",
+        "body": { "type": "sensor.switch", "payload": { "sensorType": "<sensors[0].type>" } },
+        "rule": "sensorType MUST equal the first sensor's exact type; it is the activation key shared by every channel of the system"
+      },
+      "serialOpenCommand": {
+        "method": "POST",
+        "pathSource": "/api/sdk/contract -> http.routes.commands",
+        "defaultPath": "/api/commands",
+        "body": { "type": "serial.open", "payload": { "role": "<sensors[].id>", "path": "<COM path>", "baudRate": "<protocol.baudRate>" } },
+        "rule": "role MUST be the sensor id (platform serialRole), never outputChannel or a legacy alias; undeclared roles are rejected with INVALID_COMMAND before any hardware action"
+      },
+      "verification": [
+        "GET /api/display-systems -> runtimeBindings.bindings for this system MUST all be status bound with no error",
+        "GET /api/serial/status MUST list every opened role",
+        "When a physical COM was supplied, observe at least one real canonical sensor.frame per opened sensor with matching identity and the expected mapped value count"
+      ],
+      "rules": [
+        "Activation and serial open MUST run after save/reload for every generated system; do not report success without them",
+        "bound plus open is control-plane evidence only and MUST NOT be reported as successful framing",
+        "Synthetic frames do not satisfy hardware verification. If no valid real frame arrives within a bounded window, report configured but not hardware-verified and retain parser diagnostics",
+        "LICENSE_REQUIRED (403) on either command MUST stop generation and be reported; the Agent MUST NOT attempt to bypass licensing"
+      ]
+    },
     "acceptance": [
       "Every configured sensor has a distinct canonical channelId, visible sensorLabel, explicit widget source, and its own geometry/definitions",
+      "The system is the active sensor type, every runtime binding is bound, and every declared serial role is open",
+      "Every supplied physical serial route produced a real canonical sensor.frame with matching identity and expected mapped value count; open status alone is insufficient",
       "Protocol valueCount, fixed frameLength, includeDelimiter, headerOffset, checksum offset, and explicit checksum range round-trip unchanged",
       "Realtime values, stored data, replay values, and CSV realData match per canonical channelId for stored:true sensors",
       "stored:false sensors publish realtime but do not appear in storage, replay, or CSV",

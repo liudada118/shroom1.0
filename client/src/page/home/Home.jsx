@@ -1779,6 +1779,13 @@ class Home extends React.Component {
     if (jsonObject.jqbedAlgorithmStatus) {
       this.setState({ jqbedAlgorithmStatus: jsonObject.jqbedAlgorithmStatus });
     }
+    // 后端 HTTP 写接口（Agent / 脚本）改了展示系统目录。Builder 在进程内保存时自己派发这个
+    // DOM 事件；这里把后端广播翻译成同一个事件，顶部菜单就能沿用既有的重拉逻辑。
+    if (jsonObject.displaySystemsUpdated) {
+      window.dispatchEvent(new CustomEvent('shroom-display-systems-updated', {
+        detail: jsonObject.displaySystemsUpdated,
+      }));
+    }
 
     const currentDisplayDefinition = getDisplayDefinition(this.state.matrixName);
     const hasPressureFrame = Boolean(
