@@ -24,11 +24,47 @@ import platform
 import shutil
 
 
+def configure_stdio_utf8():
+    """让 npm/PowerShell 构建日志统一按 UTF-8 输出。"""
+    for stream_name in ('stdout', 'stderr'):
+        stream = getattr(sys, stream_name, None)
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8', errors='backslashreplace')
+
+
 def first_existing_path(candidates):
+    """返回第一条存在的候选路径。"""
     for candidate in candidates:
-        if os.path.exists(candidate):
+        if candidate and os.path.exists(candidate):
             return candidate
     return None
+
+
+def resolve_onbed_filter_binary(app_dir):
+    """解析发布必须携带的 onbed_filter 原生库，支持 CI 用环境变量覆盖。"""
+    explicit = os.environ.get('SHROOM_ONBED_FILTER_BINARY')
+    if platform.system() == 'Windows':
+        candidates = [explicit, os.path.join(app_dir, 'onbed_filter.cp311-win_amd64.pyd')]
+    elif platform.system() == 'Darwin':
+        candidates = [explicit, os.path.join(app_dir, 'onbed_filter.cpython-311-darwin.so')]
+    else:
+        raise RuntimeError(f'不支持的平台 {platform.system()}')
+    binary = first_existing_path(candidates)
+    if binary is None:
+        raise FileNotFoundError(
+            '缺少 onbed_filter 原生库；请放入 python/app，'
+            '或设置 SHROOM_ONBED_FILTER_BINARY 指向 CPython 3.11 动态库'
+        )
+    return os.path.abspath(binary)
+
+
+def runtime_contains_onbed_filter(dist_dir):
+    """检查 PyInstaller 目录确实产出了 onbed_filter，而不是只生成可执行文件。"""
+    for dirpath, _dirnames, filenames in os.walk(dist_dir):
+        if any(filename.startswith('onbed_filter') and filename.endswith(('.pyd', '.so'))
+               for filename in filenames):
+            return True
+    return False
 
 
 def build():
@@ -40,22 +76,12 @@ def build():
         print(f"错误: 找不到入口文件 {entry}")
         sys.exit(1)
 
-    # 确定 onbed_filter 动态库文件
-    if platform.system() == 'Windows':
-        pyd_file = os.path.join(app_dir, 'onbed_filter.cp311-win_amd64.pyd')
-        if not os.path.exists(pyd_file):
-            print(f"警告: 找不到 Windows 动态库 {pyd_file}")
-            pyd_file = None
-    elif platform.system() == 'Darwin':
-        so_file = os.path.join(app_dir, 'onbed_filter.cpython-311-darwin.so')
-        if not os.path.exists(so_file):
-            print(f"警告: 找不到 macOS 动态库 {so_file}")
-            pyd_file = None
-        else:
-            pyd_file = so_file
-    else:
-        print(f"警告: 不支持的平台 {platform.system()}")
-        pyd_file = None
+    # onbed_filter 是正式算法包依赖，发布时缺失必须立即失败，不能生成静默降级的安装包。
+    try:
+        pyd_file = resolve_onbed_filter_binary(app_dir)
+    except (FileNotFoundError, RuntimeError) as error:
+        print(f"错误: {error}")
+        sys.exit(1)
 
     # PyInstaller 参数
     pet_care_dir = os.path.join(app_dir, 'petCare')
@@ -67,13 +93,13 @@ def build():
         ])
         if pet_care_binary is None:
             candidate = os.path.join(pet_care_dir, 'pet_care_wrapper.cp311-win_amd64.pyd')
-            print(f"璀﹀憡: 鎵句笉鍒?petCare 鍔ㄦ€佸簱 {candidate}")
+            print(f"警告: 找不到 petCare 动态库 {candidate}")
         pet_care_mini_binary = first_existing_path([
             os.path.join(pet_care_dir, 'pet_care_wrappermini.cp311-win_amd64.pyd'),
         ])
         if pet_care_mini_binary is None:
             mini_candidate = os.path.join(pet_care_dir, 'pet_care_wrappermini.cp311-win_amd64.pyd')
-            print(f"璀﹀憡: 鎵句笉鍒?petCare mini 鍔ㄦ€佸簱 {mini_candidate}")
+            print(f"警告: 找不到 petCare mini 动态库 {mini_candidate}")
     elif platform.system() == 'Darwin':
         pet_care_binary = first_existing_path([
             os.path.join(pet_care_dir, 'pet_care_wrapper.cpython-311-darwin.so'),
@@ -133,9 +159,9 @@ def build():
     args.append(entry)
 
     if pet_care_binary:
-        print(f"petCare 鍔ㄦ€佸簱: {pet_care_binary}")
+        print(f"petCare 动态库: {pet_care_binary}")
     if pet_care_mini_binary:
-        print(f"petCare mini 鍔ㄦ€佸簱: {pet_care_mini_binary}")
+        print(f"petCare mini 动态库: {pet_care_mini_binary}")
     print("=" * 60)
     print("开始 PyInstaller 打包")
     print(f"平台: {platform.system()} {platform.machine()}")
@@ -149,6 +175,9 @@ def build():
 
     if result.returncode == 0:
         dist_dir = os.path.join(script_dir, 'dist', 'onbed_server')
+        if not runtime_contains_onbed_filter(dist_dir):
+            print(f"打包失败: {dist_dir} 中没有 onbed_filter 原生库")
+            sys.exit(1)
         print("\n" + "=" * 60)
         print("打包成功！")
         print(f"输出目录: {dist_dir}")
@@ -171,4 +200,5 @@ def build():
 
 
 if __name__ == '__main__':
+    configure_stdio_utf8()
     build()

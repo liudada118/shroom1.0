@@ -28,6 +28,8 @@ python/*.spec
 python/app/*.pyd
 python/app/*.so
 python/venv*/
+__pycache__/
+*.py[cod]
 pdf/
 .DS_Store
 *.log

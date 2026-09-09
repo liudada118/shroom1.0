@@ -51,6 +51,16 @@ const {
   assert.strictEqual(mattressVitals.packageManifest.apiVersion, 2);
   assert.deepStrictEqual(mattressVitals.compatibility.matrixTotals, [1024]);
   assert.ok(mattressVitals.metricDefinitions.some((item) => item.id === 'respirationRate'));
+  assert.strictEqual(mattressVitals.version, '2.0.0');
+  assert.ok(!mattressVitals.packageManifest.output.metrics.includes('respirationSignal'));
+  assert.ok(!mattressVitals.metricDefinitions.some((item) => item.id === 'respirationSignal'));
+  for (const filename of ['algorithm.py', 'algorithm-package.json']) {
+    assert.strictEqual(
+      fs.readFileSync(path.resolve(__dirname, '../../../agent-resources/algorithm-packages/mattress-vitals', filename), 'utf8'),
+      fs.readFileSync(path.resolve(__dirname, '../../../pack-resources/agent/algorithm-packages/mattress-vitals', filename), 'utf8'),
+      '随包算法必须与源目录一致，不能继续发布旧压力代理',
+    );
+  }
   assert.match(mattressVitals.algorithmSource, /def process\(request\):/);
 
   const catalogWithPackages = buildDisplaySystemBuilderCatalog({

@@ -1,6 +1,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 const {
   AGENT_APP_MAX_FILE_BYTES,
   AGENT_APP_MAX_FILES,
@@ -17,6 +18,10 @@ const skillSource = fs.readFileSync(
   path.join(projectRoot, 'agent-resources/add-display-system/SKILL.md'),
   'utf8',
 );
+const displayAppSkillSource = fs.readFileSync(
+  path.join(projectRoot, 'agent-resources/add-display-app/SKILL.md'),
+  'utf8',
+);
 const policy = JSON.parse(policySource);
 const templateManifest = JSON.parse(fs.readFileSync(
   path.join(projectRoot, 'agent-resources/add-display-app/template/app.json'),
@@ -25,6 +30,10 @@ const templateManifest = JSON.parse(fs.readFileSync(
 const clientHtml = fs.readFileSync(path.join(projectRoot, 'client/index.html'), 'utf8');
 const templateHtml = fs.readFileSync(
   path.join(projectRoot, 'agent-resources/add-display-app/template/frontend/index.html'),
+  'utf8',
+);
+const templateScript = fs.readFileSync(
+  path.join(projectRoot, 'agent-resources/add-display-app/template/frontend/app.js'),
   'utf8',
 );
 const packSyncScript = fs.readFileSync(path.join(projectRoot, 'scripts/sync-pack-resources.js'), 'utf8');
@@ -81,6 +90,18 @@ assert.match(policy.displaySystemGeneration.protocolSelection.wireDocumentRule, 
 assert.match(policy.displaySystemGeneration.algorithmSelection.registeredPackageRule, /MUST attach/);
 assert.match(policy.displaySystemGeneration.display.rendererRule, /MUST use it by default/);
 assert.match(policy.displaySystemGeneration.display.rendererIntentExamples['3dPointPlot'], /pointGrid/);
+assert.match(policy.displaySystemGeneration.display.layoutPresentationRule, /display\.layout\.presentation/);
+assert.match(policy.displaySystemGeneration.display.layoutPresentationRule, /immersive/);
+assert.match(policy.displaySystemGeneration.display.runtimePresentationRule, /runtimeChrome absent or false/);
+assert.match(policy.displaySystemGeneration.display.runtimePresentationRule, /MUST NOT add title/);
+assert.strictEqual(
+  fs.readFileSync(path.join(projectRoot, 'pack-resources/agent/add-display-app/SKILL.md'), 'utf8'),
+  displayAppSkillSource,
+);
+assert.strictEqual(
+  fs.readFileSync(path.join(projectRoot, 'pack-resources/agent/add-display-app/template/README.md'), 'utf8'),
+  fs.readFileSync(path.join(projectRoot, 'agent-resources/add-display-app/template/README.md'), 'utf8'),
+);
 assert.match(policy.displaySystemGeneration.display.charts.surfaceRule, /transparent root/);
 assert(policy.displaySystemGeneration.activation.verification.some((item) => item.includes('real canonical sensor.frame')));
 assert(policy.displaySystemGeneration.acceptance.some((item) => item.includes('open status alone is insufficient')));
@@ -95,5 +116,55 @@ assert.doesNotMatch(templateHtml, /http-equiv=["']Content-Security-Policy["']/i)
 assert.match(templateHtml, /<script src=["']\.\/app\.js["']><\/script>/i);
 assert.doesNotMatch(templateHtml, /<script(?!\s+src=)[^>]*>/i);
 assert.doesNotMatch(templateHtml, /(?:https?|wss?):\/\//i);
+assert.doesNotMatch(templateHtml, /<(?:header|footer)\b/i);
+assert.match(templateHtml, /background:\s*transparent/);
+assert.match(templateScript, /getContext\(['"]2d['"],\s*\{\s*alpha:\s*true\s*\}\)/);
+assert.match(templateScript, /context\.clearRect\(/);
 
 console.log('agentAppPackaging.test.js passed');
+
+// 用宿主 DTO 形状实际执行模板，而不是仅匹配文字；原始数组不等长不能阻断指标。
+const posted = [];
+const listeners = {};
+const elements = new Map();
+const ctx = new Proxy({}, { get: () => () => {} });
+const parent = { postMessage: (message) => posted.push(message) };
+vm.runInNewContext(templateScript, {
+  window: { parent, devicePixelRatio: 2, addEventListener: (name, listener) => { listeners[name] = listener; } },
+  document: { getElementById: (id) => {
+    if (!elements.has(id)) elements.set(id, {
+      dataset: {}, textContent: '', width: 0, height: 0,
+      getContext: () => ctx,
+      getBoundingClientRect: () => ({ width: 300, height: 200 }),
+    });
+    return elements.get(id);
+  } },
+});
+/** 向模板投递模拟宿主消息，保留正式身份与每路独立矩阵。 */
+function sendTemplate(type, payload) {
+  listeners.message({ source: parent, data: { type: 'shroom.renderer.' + type, schemaVersion: 1, payload } });
+}
+const identity = { displaySystemId: 'test', sensorId: 'mat', channelId: 'test:mat' };
+sendTemplate('init', identity);
+for (const rawValues of [undefined, null, [], [1, 2], Array(1028).fill(1)]) {
+  posted.length = 0;
+  sendTemplate('frame', {
+    ...identity, values: Array(1024).fill(2), rawValues,
+    matrix: { rows: 32, cols: 32, total: 1024 },
+    algorithmMetrics: { respirationSignal: -0.5, copX: 5, copY: 6 },
+    channels: [{
+      displaySystemId: 'test', sensorId: 'hand', channelId: 'test:hand',
+      values: [1, 2, 3, 4], rawValues: [1],
+      matrix: { rows: 2, cols: 2, total: 4 },
+    }],
+  });
+  assert.ok(!posted.some((message) => message.type === 'shroom.renderer.error'));
+  assert.match(elements.get('summary').textContent, /1024 values/);
+}
+sendTemplate('frame', { ...identity, values: [1], matrix: { rows: 32, cols: 32, total: 1024 } });
+assert.ok(posted.some((message) => message.type === 'shroom.renderer.error'));
+assert.deepStrictEqual(policy.displaySystemGeneration.componentChoice.dimensions, ['algorithm', 'renderer', 'chart']);
+assert.strictEqual(policy.displaySystemGeneration.componentChoice.defaultMode, 'automatic');
+assert.strictEqual(policy.displaySystemGeneration.componentChoice.requireSourceConfirmation, false);
+assert.strictEqual(templateScript, fs.readFileSync(
+  path.join(projectRoot, 'pack-resources/agent/add-display-app/template/frontend/app.js'), 'utf8'));

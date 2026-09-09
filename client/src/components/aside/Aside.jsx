@@ -9,6 +9,7 @@ import { listAgentRendererApps } from '../../extensions/display-system/api.js'
 import {
     parseAgentChartId,
     toAgentRendererId,
+    resolveAgentChartFrame,
 } from '../../extensions/display-system/agentRendererBridge.js'
 import {
     drawChartDecorations,
@@ -615,7 +616,7 @@ class Aside extends React.Component {
         const parsed = parseAgentChartId(definition.agentChartId)
         const registry = this.state.agentChartRegistry
         const chart = registry.charts.find((item) => item.chartId === definition.agentChartId)
-        const frame = this.state.agentChartFrame || {}
+        const frame = resolveAgentChartFrame(this.state.agentChartFrame || {}, definition.source)
         return (
             <div
                 className="asideContent firstAside customChartCard agentChartCard"

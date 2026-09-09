@@ -17,6 +17,7 @@ const DEFAULT_VIEW_SOURCES = Object.freeze({
 const DEFAULT_CANVAS_COLORMAP_ID = 'classic';
 
 const DEFAULT_RENDERER_TYPES = Object.freeze(['heatmap', 'matrix', 'raw2d']);
+const DISPLAY_LAYOUT_PRESENTATIONS = Object.freeze(['standard', 'immersive', 'workspace']);
 const DEFAULT_VISUALIZATION_ALGORITHM = Object.freeze({
   id: 'identity',
   type: 'identity',
@@ -24,6 +25,25 @@ const DEFAULT_VISUALIZATION_ALGORITHM = Object.freeze({
   options: {},
 });
 const MATRIX_TRANSFORM_TYPES = Object.freeze(['none', 'interpolate', 'downsample']);
+
+/**
+ * 归一展示页布局；presentation 控制宿主占位，不影响 widget 的十二列网格。
+ * workspace 铺满并保留图表浮层；immersive 隐藏侧栏，standard 兼容映射为铺满。
+ *
+ * @param {*} layout manifest 的 display.layout。
+ * @returns {{type: string, columns: number, presentation: string}} 可直接交给前端的布局。
+ */
+function normalizeDisplayLayout(layout) {
+  const source = layout && typeof layout === 'object' && !Array.isArray(layout) ? layout : {};
+  return {
+    ...source,
+    type: String(source.type || 'grid'),
+    columns: Math.max(1, Math.min(24, Math.round(Number(source.columns) || 12))),
+    presentation: DISPLAY_LAYOUT_PRESENTATIONS.includes(source.presentation)
+      ? source.presentation
+      : 'workspace',
+  };
+}
 
 /**
  * 归一矩阵变换声明（插值放大 / 降采样 / 不变）。
@@ -486,7 +506,7 @@ function normalizeDisplayConfig(display = {}) {
   const defaultProfile = display.defaultProfile || normalizedProfiles[0].id;
 
   return {
-    layout: display.layout || { type: 'grid', columns: 12 },
+    layout: normalizeDisplayLayout(display.layout),
     matrixTransform: normalizeMatrixTransform(display.matrixTransform),
     views,
     widgets,
@@ -539,7 +559,7 @@ function validateUniqueIds(items, field, errors, source) {
  * 不提前返回 —— 一次把所有问题报全。
  *
  * ⚠️ 本函数的骨架是**「先查原始、后查归一」**，改动时不要打乱：前段形状检查
- * （matrixTransform / sidebar / canvas / chartAppearance / chartCards）看**原始声明**，
+ * （layout / matrixTransform / sidebar / canvas / chartAppearance / chartCards）看**原始声明**，
  * 因为归一会把坏值吃掉、之后就查不出「用户写错了」；中段 `normalizeDisplayConfig` 之后的
  * 交叉引用检查（预设→渲染器/算法/零件、defaultView→views）必须**针对归一结果**，否则老
  * manifest 会因为「没写 renderers」被判成引用失败。
@@ -555,6 +575,23 @@ function validateDisplayConfig(display, { source = 'display system manifest' } =
   }
 
   const errors = [];
+  if (display.layout != null) {
+    if (typeof display.layout !== 'object' || Array.isArray(display.layout)) {
+      errors.push(`${source}: display.layout must be an object`);
+    } else {
+      if (display.layout.presentation != null
+        && !DISPLAY_LAYOUT_PRESENTATIONS.includes(display.layout.presentation)) {
+        errors.push(`${source}: display.layout.presentation must be standard, immersive or workspace`);
+      }
+      if (display.layout.columns != null && (
+        !Number.isInteger(Number(display.layout.columns))
+        || Number(display.layout.columns) < 1
+        || Number(display.layout.columns) > 24
+      )) {
+        errors.push(`${source}: display.layout.columns must be an integer between 1 and 24`);
+      }
+    }
+  }
   if (display.matrixTransform != null) {
     if (typeof display.matrixTransform !== 'object' || Array.isArray(display.matrixTransform)) {
       errors.push(`${source}: display.matrixTransform must be an object`);
@@ -770,6 +807,7 @@ function validateDisplayConfig(display, { source = 'display system manifest' } =
 
 module.exports = {
   DEFAULT_RENDERER_TYPES,
+  DISPLAY_LAYOUT_PRESENTATIONS,
   MATRIX_TRANSFORM_TYPES,
   SIDEBAR_METRIC_IDS,
   isSidebarMetricId,
@@ -777,6 +815,7 @@ module.exports = {
   normalizeChartAppearanceConfig,
   normalizeChartCardsConfig,
   normalizeDisplayConfig,
+  normalizeDisplayLayout,
   normalizeMatrixTransform,
   normalizeSidebarConfig,
   normalizeProfile,

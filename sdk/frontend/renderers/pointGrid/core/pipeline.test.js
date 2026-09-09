@@ -15,9 +15,39 @@ import { addSide, gaussBlur_1, interpSmall } from '../../../core/frameMath.js';
 import { deriveGridSize, LEGACY_PRESETS, normalizePointGridParams } from './params.js';
 import {
   buildPointGridBasePositions,
+  copyPointGridFrame,
   createPointGridPipeline,
   runPointGridPipeline,
 } from './pipeline.js';
+
+describe('pointGrid 帧入口', () => {
+  it('拒绝空帧、短帧、超长帧以及非法点值，不截断或补齐成假帧', () => {
+    for (const values of [undefined, [], [1], [1, 2, 3], [1, NaN], [1, Infinity],
+      [1, '2'], new Array(2), new Float32Array(2)]) {
+      expect(copyPointGridFrame(values, 2)).toBeNull();
+    }
+  });
+
+  it('完整零帧合法，null 缺测只改变展示副本', () => {
+    const input = [0, null, 2, -1];
+    expect(copyPointGridFrame(input, 4)).toEqual([0, 0, 2, -1]);
+    expect(input).toEqual([0, null, 2, -1]);
+    expect(copyPointGridFrame([0, 0], 2)).toEqual([0, 0]);
+  });
+
+  it('等待首帧及坏帧期间保留安全缓冲，下一完整帧无需重建即可进入平滑', () => {
+    const channel = { num1: 32, num2: 32, interp: 1, order: 0 };
+    let current = new Array(1024).fill(0);
+    let smooth = new Array(1024).fill(1);
+    for (const input of [[], new Array(10).fill(20), new Array(1024).fill(20)]) {
+      current = copyPointGridFrame(input, 1024) || current;
+      const grid = runPointGridPipeline(current, channel, 2);
+      smooth = smooth.map((previous, i) => previous + (grid[i] * 10 - previous + 0.5) / 3);
+      expect(smooth.every(Number.isFinite)).toBe(true);
+    }
+    expect(Math.max(...smooth)).toBeGreaterThan(5);
+  });
+});
 
 /**
  * matCol.jsx 原实现的参照版本。

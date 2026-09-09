@@ -35,6 +35,10 @@ pip install pyinstaller numpy
 python build_exe.py
 ```
 
+`onbed_filter` 是发布必需项。私有动态库默认放在 `python/app/`（Git 会忽略它）；CI 或其他
+构建机也可以设置 `SHROOM_ONBED_FILTER_BINARY` 指向对应平台的 CPython 3.11 动态库。缺失时
+构建会直接失败，避免生成表面成功、生命体征实际永久降级的安装包。
+
 打包后将 `dist/onbed_server/` 目录复制到 Electron 项目的 `resources/python/` 目录下。
 
 `pyWorker.js` 会自动检测 `onbed_server.exe`（Windows）或 `onbed_server`（macOS/Linux），优先使用打包后的可执行文件。
@@ -104,6 +108,16 @@ V2 的 `frames` 已经完成协议解码和线序/点位映射，键名是 manif
 的第三方库仍必须已经包含在打包的 Python 3.11 runtime 中。
 
 ### 返回字段说明
+
+`mattress-vitals` 2.0.0 移除了 1.1.0 的压力代理 `respirationSignal`，原生包装层也不再生成
+`respiration_waveform`。当前 `onbed_filter` 接口只有呼吸率等结果，没有明确的呼吸波形输出。
+普通呼吸趋势可以将 `respirationRate` 每次返回的单值按时间入队，标题为“呼吸率趋势（次/分）”，
+不要求算法返回整段数组。-1 未稳定、88 检测中不作为测量值入队，预热/异常时中断曲线并显示状态。
+明确要求呼吸波形但算法不支持时才显示“不支持”；不能用平均压力、滤波矩阵或其趋势替代。
+需要波形时应选择或经授权实现真正提供该信号的算法包；CoP 仍独立计算，不受呼吸算法异常影响。
+已经安装的展示系统持有算法源码副本，不会随目录版本自动更新：升级时需明确替换该系统算法包，
+普通趋势改绑 `respirationRate` 并维护时间队列；明确要求波形的图表才标记为不支持。
+重新打包也不能自动迁移用户旧副本。
 
 | 字段 | 类型 | 说明 |
 |------|------|------|

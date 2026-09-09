@@ -4,6 +4,8 @@ import sys
 import types
 import unittest
 
+sys.dont_write_bytecode = True
+
 
 REPOSITORY_ROOT = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", ".."))
 PACKAGE_ROOT = os.path.join(REPOSITORY_ROOT, "agent-resources", "algorithm-packages")
@@ -76,8 +78,65 @@ class BuiltinAlgorithmPackagesTest(unittest.TestCase):
         self.assertAlmostEqual(result["metrics"]["copX"], 15.5)
         self.assertAlmostEqual(result["metrics"]["copY"], 15.5)
         self.assertAlmostEqual(result["metrics"]["copDistance"], 0.0)
+        self.assertNotIn("respirationSignal", result["metrics"])
+        self.assertEqual(result["metrics"]["onbedFilterHealthy"], 1.0)
+        next_result = algorithm.process({"normalized_data": [2] * 1024})
+        self.assertNotIn("respirationSignal", next_result["metrics"])
         algorithm.reset("test")
         self.assertIn(("onbed-reset",), self.calls)
+
+    def test_mattress_vitals_keeps_cop_when_onbed_filter_fails(self):
+        algorithm = load_package("mattress-vitals")
+        worker = sys.modules["onbed_filter_example"]
+
+        def fail_onbed(_values, config=None):
+            raise RuntimeError("native algorithm failure")
+
+        worker.getData = fail_onbed
+        algorithm.initialize({}, {})
+        result = algorithm.process({"normalized_data": [1] * 1024})
+
+        self.assertEqual(result["data"], [1] * 1024)
+        self.assertAlmostEqual(result["metrics"]["copX"], 15.5)
+        self.assertAlmostEqual(result["metrics"]["copY"], 15.5)
+        self.assertEqual(result["metrics"]["onbedFilterHealthy"], 0.0)
+        self.assertNotIn("respirationSignal", result["metrics"])
+
+    def test_pressure_changes_never_substitute_for_a_respiration_waveform(self):
+        """压力起伏、滤波矩阵和旧包装层代理字段都不能冒充原生呼吸波形。"""
+        algorithm = load_package("mattress-vitals")
+        worker = sys.modules["onbed_filter_example"]
+        native_get_data = worker.getData
+        worker.getData = lambda values, config=None: {
+            **native_get_data(values, config),
+            "matrix_filter": values,
+            "respiration_waveform": sum(values) / len(values),
+        }
+        algorithm.initialize({}, {})
+        for pressure in [10, 5, 0, 50, 10]:
+            result = algorithm.process({"normalized_data": [pressure] * 1024})
+            self.assertNotIn("respirationSignal", result["metrics"])
+            self.assertEqual(result["metrics"]["respirationRate"], 16.5)
+            self.assertEqual(result["data"], [pressure] * 1024)
+            self.assertAlmostEqual(result["metrics"]["copX"], 15.5 if pressure else 0.0)
+        algorithm.reset("seek")
+        self.assertNotIn("respirationSignal", algorithm.process({"normalized_data": [5] * 1024})["metrics"])
+
+    def test_native_respiration_scalars_are_preserved_for_a_chart_queue(self):
+        """原样提供原生呼吸单值及无效标记，由图表按契约入队，不从压力计算替代值。"""
+        algorithm = load_package("mattress-vitals")
+        worker = sys.modules["onbed_filter_example"]
+        samples = [16.0, 18.0, -1.0, 88.0, 17.0, 17.0]
+        output = iter(samples)
+        worker.getData = lambda values, config=None: {"rate": next(output)}
+        algorithm.initialize({}, {})
+        actual = []
+        for index in range(len(samples)):
+            result = algorithm.process({"normalized_data": [index + 1] * 1024})
+            actual.append(result["metrics"]["respirationRate"])
+            self.assertNotIn("respirationSignal", result["metrics"])
+            self.assertAlmostEqual(result["metrics"]["copX"], 15.5)
+        self.assertEqual(actual, samples)
 
     def test_pet_packages_preserve_matrix_and_expose_breath_rate(self):
         for package_id in ("pet-care", "pet-care-mini"):

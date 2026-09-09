@@ -1,0 +1,47 @@
+.manifest-sidebar-overlay,
+.manifest-sidebar-content:not([hidden]) {
+  display: contents;
+}
+
+.manifest-sidebar-overlay.is-enabled {
+  display: block;
+  position: absolute;
+  inset: 8% 0 0;
+  z-index: 30;
+  pointer-events: none;
+}
+
+.manifest-sidebar-overlay.is-enabled .aside {
+  top: 56px;
+  bottom: 16px;
+  left: 3%;
+  width: clamp(240px, 18vw, 340px);
+  max-width: calc(100% - 80px);
+  max-height: none;
+  box-sizing: border-box;
+  pointer-events: auto;
+}
+
+.manifest-sidebar-toggle {
+  position: absolute;
+  top: 6px;
+  left: 3%;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid #667094;
+  border-radius: 6px;
+  background: #1b1b35;
+  color: #fff;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.manifest-sidebar-toggle:focus-visible {
+  outline: 2px solid #66e0db;
+  outline-offset: 2px;
+}
+
+.manifest-sidebar-toggle:hover,
+.manifest-sidebar-toggle:active {
+  background: #303552;
+}

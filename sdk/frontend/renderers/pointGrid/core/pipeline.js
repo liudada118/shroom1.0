@@ -20,6 +20,24 @@ import { addSide, gaussBlur_1, interpSmall } from '../../../core/frameMath.js';
 import { deriveGridSize } from './params.js';
 
 /**
+ * 接收完整点阵帧；空/残缺/非法帧返回 null，缺测 null 点仅在渲染副本中按零处理。
+ * ⚠️ 不得把空数组交给插值，产生的 NaN 会永久污染平滑缓存，直到切换重建场景。
+ * @param {number[]} values 待渲染点值。
+ * @param {number} total 当前通道的矩阵点数。
+ * @returns {number[] | null} 独立数值副本，或拒收标记。
+ */
+export function copyPointGridFrame(values, total) {
+  if (!Array.isArray(values) || values.length !== total || total < 1) return null;
+  const frame = new Array(total);
+  for (let index = 0; index < total; index += 1) {
+    const value = values[index];
+    if (value !== null && !Number.isFinite(value)) return null;
+    frame[index] = value === null ? 0 : value;
+  }
+  return frame;
+}
+
+/**
  * 为 3D 点阵生成稳定的平面坐标。
  * 有物理点位表时保持传感器真实形状；没有时回退为规则矩阵。
  *

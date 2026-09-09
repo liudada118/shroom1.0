@@ -7,6 +7,8 @@ import React, {
   useState,
 } from 'react';
 import { Select } from 'antd';
+import { MATRIX_DISPLAY_MODES, createMatrixDisplayRenderers } from '@shroom/frontend/core/matrixDisplayModes.js';
+import useWorkspaceTop from './useWorkspaceTop.js';
 import useMainWebSocket from '../../services/ws/useMainWebSocket';
 import {
   applyVisualizationAlgorithm,
@@ -49,6 +51,7 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
   onSidebarData,
   enabled = true,
 }, rendererRef) {
+  const workspaceTop = useWorkspaceTop();
   // schemaVersion 3 的 manifest 会带上 sensors[]；v1/v2 升格后同样有，缺失时按单通道处理。
   const sensors = useMemo(
     () => (Array.isArray(definition?.sensors) ? definition.sensors : []),
@@ -134,9 +137,25 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
     });
   }, [channelFrames, definition?.displaySystemId, definition?.type, matrix, sensors]);
   const columns = Number(definition?.page?.layout?.columns || 12);
+  // 旧 standard 配置同样铺满；仅显式 immersive 隐藏图表，不能顺手隐藏用户要求的图表。
+  const layoutPresentation = definition?.page?.layout?.presentation === 'immersive'
+    ? 'immersive' : 'workspace';
+  const showRuntimeChrome = definition?.page?.controls?.runtimeChrome === true;
   const profileModel = useMemo(
-    () => buildDisplayProfileModel(definition?.page),
-    [definition],
+    () => {
+      const model = buildDisplayProfileModel(definition?.page);
+      const candidates = [
+        ...model.renderers,
+        ...createMatrixDisplayRenderers({ matrix, coordinateMap: definition?.coordinateMap }),
+        ...agentRendererRegistry.apps.filter((app) => app.rendererId).map((app) => ({
+          id: app.rendererId, type: app.rendererId, label: app.label, params: {},
+        })),
+      ];
+      return { ...model, renderers: candidates.filter((item, index) => (
+        candidates.findIndex((candidate) => candidate.id === item.id) === index
+      )) };
+    },
+    [definition, matrix, agentRendererRegistry.apps],
   );
   const activeProfile = useMemo(
     () => resolveDisplayProfile(profileModel, selection),
@@ -185,6 +204,22 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
       algorithmId: profile?.visualizationAlgorithm,
     });
   }, [profileModel, updateSelection]);
+
+  /** 只切换当前画布渲染组件，不修改算法、图表、通道或采集配置。 */
+  const selectRenderer = useCallback((rendererId) => {
+    const renderer = profileModel.renderers.find((item) => item.id === rendererId);
+    if (!renderer) return;
+    updateSelection({
+      ...selection, profileId: activeProfile.profileId, rendererId,
+      canvas: {
+        ...activeProfile.canvas,
+        widgets: activeProfile.canvasWidgets.map((widget) => (
+          isDataRendererType(widget.type) || MATRIX_DISPLAY_MODES.some((mode) => mode.rendererId === widget.type)
+            ? { ...widget, type: renderer.type } : widget
+        )),
+      },
+    });
+  }, [activeProfile, profileModel.renderers, selection, updateSelection]);
 
   const widgetModels = useMemo(() => {
     // 画布 widget 来自 activeProfile：manifest 的 display.canvas.widgets
@@ -338,40 +373,67 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
   ]);
 
   return (
-    <div className="manifest-display" data-display-system={definition?.displaySystemId}>
-      <header className="manifest-display-header">
-        <div>
-          <span>{definition?.displaySystemId}</span>
-          <h2>{definition?.label}</h2>
-        </div>
-        <output>{definition?.protocol?.baudRate ? `${definition.protocol.baudRate} baud` : ''}</output>
-      </header>
-      <nav className="manifest-profile-menu" aria-label="展示方案选择">
+    <div
+      className={`manifest-display is-${layoutPresentation}`}
+      data-display-system={definition?.displaySystemId}
+      data-layout-presentation={layoutPresentation}
+      style={{ top: workspaceTop }}
+    >
+      <details className="manifest-renderer-picker">
+        <summary>渲染设置</summary>
         <label>
-          <span>展示方案</span>
+          <span>渲染器（不改变算法和图表）</span>
           <Select
-            value={activeProfile.profileId}
-            onChange={selectProfile}
-            options={profileModel.profiles.map((profile) => ({ value: profile.id, label: profile.label }))}
-          />
-        </label>
-        <label>
-          <span>渲染方式</span>
-          <Select
+            aria-label="选择渲染器"
             value={activeProfile.rendererId}
-            onChange={(rendererId) => updateSelection({ ...selection, profileId: activeProfile.profileId, rendererId })}
-            options={profileModel.renderers.map((renderer) => ({ value: renderer.id, label: renderer.label }))}
+            onChange={selectRenderer}
+            options={[
+              { label: '系统自带', options: profileModel.renderers.filter((item) => !parseAgentRendererId(item.type))
+                .map((item) => ({ value: item.id, label: item.label })) },
+              { label: 'Agent 自定义', options: profileModel.renderers.filter((item) => parseAgentRendererId(item.type))
+                .map((item) => ({ value: item.id, label: item.label })) },
+            ]}
           />
         </label>
-        <label>
-          <span>可视算法</span>
-          <Select
-            value={activeProfile.algorithmId}
-            onChange={(algorithmId) => updateSelection({ ...selection, profileId: activeProfile.profileId, algorithmId })}
-            options={profileModel.visualizationAlgorithms.map((algorithm) => ({ value: algorithm.id, label: algorithm.label }))}
-          />
-        </label>
-      </nav>
+        <small>新建算法、渲染或图表可分别交给 Agent；安装后在对应目录选择。</small>
+      </details>
+      {showRuntimeChrome ? (
+        <>
+          <header className="manifest-display-header">
+            <div>
+              <span>{definition?.displaySystemId}</span>
+              <h2>{definition?.label}</h2>
+            </div>
+            <output>{definition?.protocol?.baudRate ? `${definition.protocol.baudRate} baud` : ''}</output>
+          </header>
+          <nav className="manifest-profile-menu" aria-label="展示方案选择">
+            <label>
+              <span>展示方案</span>
+              <Select
+                value={activeProfile.profileId}
+                onChange={selectProfile}
+                options={profileModel.profiles.map((profile) => ({ value: profile.id, label: profile.label }))}
+              />
+            </label>
+            <label>
+              <span>渲染方式</span>
+              <Select
+                value={activeProfile.rendererId}
+                onChange={selectRenderer}
+                options={profileModel.renderers.map((renderer) => ({ value: renderer.id, label: renderer.label }))}
+              />
+            </label>
+            <label>
+              <span>可视算法</span>
+              <Select
+                value={activeProfile.algorithmId}
+                onChange={(algorithmId) => updateSelection({ ...selection, profileId: activeProfile.profileId, algorithmId })}
+                options={profileModel.visualizationAlgorithms.map((algorithm) => ({ value: algorithm.id, label: algorithm.label }))}
+              />
+            </label>
+          </nav>
+        </>
+      ) : null}
       <DisplayCanvasConfigurator
         value={activeProfile.canvas}
         onChange={updateCanvas}
@@ -434,6 +496,7 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
                 <div
                   key={widget.id}
                   className="manifest-widget-slot"
+                  data-renderer-id={widget.type}
                   style={{ gridColumn: `span ${widget.columnSpan || 8}` }}
                 >
                   <AgentRendererHost
@@ -462,6 +525,7 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
               <div
                 key={widget.id}
                 className="manifest-widget-slot"
+                data-renderer-id={widget.type}
                 style={{ gridColumn: `span ${widget.columnSpan || 8}` }}
               >
                 <RendererHost

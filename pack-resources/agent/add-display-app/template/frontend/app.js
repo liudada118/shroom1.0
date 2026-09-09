@@ -9,7 +9,7 @@
     ERROR: 'shroom.renderer.error',
   });
   const canvas = document.getElementById('grid');
-  const context = canvas.getContext('2d', { alpha: false });
+  const context = canvas.getContext('2d', { alpha: true });
   const title = document.getElementById('title');
   const channel = document.getElementById('channel');
   const stateText = document.getElementById('state');
@@ -124,16 +124,22 @@
     requireObject(payload, fieldName);
     const identity = requireCanonicalIdentity(payload);
     const timestamp = normalizeTimestamp(payload.timestamp);
+    const values = normalizeValues(payload.values, `${fieldName}.values`);
+    const matrix = normalizeMatrix(payload.matrix, `${fieldName}.matrix`);
+    if (matrix && values.length !== matrix.total) {
+      throw new Error(`${fieldName}.values length does not match matrix.total`);
+    }
+    // rawValues 是独立的协议解码数组，不是映射后矩阵；长度可不同，也可缺席。
     return {
       ...identity,
       sensorLabel: typeof payload.sensorLabel === 'string' && payload.sensorLabel.trim()
         ? payload.sensorLabel.trim()
         : identity.sensorId,
-      values: normalizeValues(payload.values, `${fieldName}.values`),
+      values,
       rawValues: payload.rawValues == null
         ? null
         : normalizeValues(payload.rawValues, `${fieldName}.rawValues`),
-      matrix: normalizeMatrix(payload.matrix, `${fieldName}.matrix`),
+      matrix,
       timestamp,
       metrics: payload.metrics == null ? {} : { ...requireObject(payload.metrics, `${fieldName}.metrics`) },
       algorithmMetrics: payload.algorithmMetrics == null
@@ -216,8 +222,7 @@
 
   function draw() {
     const size = resizeCanvas();
-    context.fillStyle = '#050916';
-    context.fillRect(0, 0, size.width, size.height);
+    context.clearRect(0, 0, size.width, size.height);
     if (!state.frame) return;
 
     const { values } = state.frame;

@@ -1,6 +1,6 @@
 # Shroom 快速架构索引
 
-> 最后更新于：2026-09-02  
+> 最后更新于：2026-09-08
 > 用途：给日常任务提供稳定入口和验证路由。完整历史与设计说明仍以 `ARCHITECTURE.md` 为准，后端细图见 `backend/ARCHITECTURE_MAP.md`。
 
 ## 1. 一分钟判断路径
@@ -58,7 +58,9 @@ client commandClient → HTTP :19245 /api/commands
 
 | 关注点 | 主要入口 | 首选测试 |
 | :--- | :--- | :--- |
-| Electron 启动/关闭 | `app/electron/index.js`, `backend/runtime/index.js` | `backend/tests/server/serverShutdownOrchestrator.test.js` + Full |
+| Electron 启动/关闭 | `app/electron/index.js`, `app/electron/applicationQuit.js`, `backend/runtime/index.js` | `backend/tests/server/applicationQuit.test.js`, `serverShutdownOrchestrator.test.js` + Full |
+| Python worker 管道/退出 | `backend/kernel/algorithm-channel/pythonWorker.js` | `backend/tests/server/pythonWorkerLifecycle.test.js`（断管、在飞写入、重启/退出竞态）+ Full |
+| 生产依赖打包 | `scripts/pack-runtime-dependencies.js`, `scripts/electron-builder-before-*.js`, `scripts/package-hooks.js` | `backend/tests/packaging/runtimeDependencies.test.js` + Full；发布须验证最终 ASAR 并实际加载包内模块 |
 | 串口生命周期 | `sdk/backend/serial/serialManager.js` | `backend/tests/serial/`, `backend/tests/application/serialControlService.test.js` |
 | framing/协议 | `sdk/backend/serial/serialParserManager.js`, `sdk/backend/protocol/` | `backend/tests/serial/` |
 | Display System | `backend/extension-host/`, `display-systems/` | `backend/tests/displaySystems/`, `backend/tests/server/appRuntimeDisplaySystems.test.js` |
@@ -68,6 +70,7 @@ client commandClient → HTTP :19245 /api/commands
 | 采集存储 | `sdk/backend/collection/`, `backend/kernel/storage/` | `backend/tests/collection/`, 回放/CSV 测试 |
 | 前端帧边界 | `client/src/services/ws/`, `sdk/frontend/core/frameBus.js` | client Vitest + SDK frontend tests |
 | 渲染器 / Agent 图表 | `sdk/frontend/renderers/`, `client/src/extensions/display-system/`, `backend/extension-host/agent-apps/` | 对应 renderer/client/agentApps tests + 临时生产构建 |
+| 铺满画布 / 图表浮层 | `ManifestDisplayRenderer`, `ManifestSidebarOverlay`, `useWorkspaceTop`, `displaySystemPage`, `displaySystemWorkspaceService` | `node scripts/tests/manifest-workspace-layout.mjs`（独立 Chrome、合成帧、渲染切换及图表重载）+ 布局校验/catalog tests；新增布局契约执行 Full |
 | SDK 公共契约 | `sdk/backend/`, `sdk/frontend/` | 两套 SDK 测试和 smoke |
 
 ## 5. 变更路径 → 验证域

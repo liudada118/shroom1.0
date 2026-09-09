@@ -57,4 +57,15 @@ describe('renderers 可搬运目录边界', () => {
     expect(packageJson.files).toContain('renderers');
     expect(packageJson.files).toContain('!renderers/**/*.test.js');
   });
+
+  it('PointGrid 在高 DPI 下同步 Canvas CSS 尺寸，避免 ResizeObserver 尺寸反馈', () => {
+    const source = readFileSync(
+      new URL('./pointGrid/react/PointGridRenderer.jsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).not.toMatch(/renderer\.setSize\([^\n]+,\s*false\)/);
+    expect(source.match(/renderer\.setSize\([^\n]+,\s*true\)/g)).toHaveLength(2);
+    expect(source).toContain('setClearColor(0x10152b)');
+  });
 });

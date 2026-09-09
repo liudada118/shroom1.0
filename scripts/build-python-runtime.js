@@ -26,6 +26,17 @@ function existingDir(dirPath) {
   }
 }
 
+/** 检查打包目录中存在 onbed_filter CPython 3.11 原生模块。 */
+function runtimeContainsOnbedFilter(dirPath) {
+  if (!existingDir(dirPath)) return false;
+  for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+    const entryPath = path.join(dirPath, entry.name);
+    if (entry.isDirectory() && runtimeContainsOnbedFilter(entryPath)) return true;
+    if (entry.isFile() && /^onbed_filter.*\.(?:pyd|so)$/.test(entry.name)) return true;
+  }
+  return false;
+}
+
 function pathCommandCandidates(command) {
   if (process.platform === "win32") return [];
 
@@ -98,7 +109,7 @@ function latestMtime(targetPath) {
 }
 
 function runtimeIsFresh() {
-  if (!fs.existsSync(runtimeExe)) {
+  if (!fs.existsSync(runtimeExe) || !runtimeContainsOnbedFilter(runtimeDir)) {
     return false;
   }
 
@@ -257,6 +268,9 @@ function main() {
 
   if (!fs.existsSync(runtimeExe)) {
     throw new Error(`python runtime build completed without output: ${runtimeExe}`);
+  }
+  if (!runtimeContainsOnbedFilter(runtimeDir)) {
+    throw new Error(`python runtime build completed without onbed_filter: ${runtimeDir}`);
   }
 
   console.log(`[pack] python runtime ready -> ${runtimeExe}`);

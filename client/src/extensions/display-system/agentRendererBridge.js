@@ -334,6 +334,24 @@ export function hasAgentRendererFrameData(frameMessage) {
     && hasCompleteMatrixFrame(frameMessage.payload);
 }
 
+/** 图表按自己选择的 source 路由；缺帧时等待，绝不借用其他传感器的数据。 */
+export function resolveAgentChartFrame(frame = {}, source = '') {
+  const matches = (identity) => [identity?.channelId, identity?.sensorId, identity?.outputChannel].includes(source);
+  if (!source || matches(frame.identity)) return frame;
+  const channel = frame.channels?.find(matches);
+  return channel
+    ? { ...channel, identity: normalizeIdentity(channel), channels: frame.channels }
+    : { identity: {}, values: [], rawValues: [], matrix: {}, channels: [] };
+}
+
+/** 空身份不能开始沙箱握手，否则严格模块在首帧前即报错并停止接收。 */
+export function hasAgentRendererIdentity(identity = {}) {
+  const { displaySystemId, sensorId, channelId } = normalizeIdentity(identity);
+  return Boolean(displaySystemId && sensorId
+    && !displaySystemId.includes(':') && !sensorId.includes(':')
+    && channelId === displaySystemId + ':' + sensorId);
+}
+
 /** ready 可能早于 iframe onLoad 冒泡；首次握手 init 在前，已握手时只补最新 frame。 */
 export function buildAgentRendererReadyMessages(initMessage, frameMessage, { initPosted = false } = {}) {
   return [initPosted ? null : initMessage, frameMessage].filter(Boolean);

@@ -168,6 +168,31 @@ assert.deepStrictEqual(validateDisplayConfig({
 }, { source: 'display-system.json' }), []);
 
 assert.deepStrictEqual(validateDisplayConfig({
+  layout: { type: 'grid', columns: 12, presentation: 'immersive' },
+  widgets: [{ id: 'main', type: 'heatmap' }],
+}, { source: 'display-system.json' }), []);
+assert.deepStrictEqual(
+  normalizeDisplayConfig({ layout: { presentation: 'immersive' } }).layout,
+  { type: 'grid', columns: 12, presentation: 'immersive' },
+);
+assert.deepStrictEqual(validateDisplayConfig({
+  layout: { type: 'grid', columns: 12, presentation: 'workspace' },
+  widgets: [{ id: 'main', type: 'pointGrid', columnSpan: 12 }],
+}, { source: 'display-system.json' }), []);
+assert.deepStrictEqual(
+  normalizeDisplayConfig({ layout: { presentation: 'workspace' } }).layout,
+  { type: 'grid', columns: 12, presentation: 'workspace' },
+);
+assert.strictEqual(normalizeDisplayConfig({}).layout.presentation, 'workspace');
+assert.deepStrictEqual(validateDisplayConfig({
+  layout: { columns: 0, presentation: 'fullscreen' },
+  widgets: [{ id: 'main', type: 'heatmap' }],
+}, { source: 'display-system.json' }), [
+  'display-system.json: display.layout.presentation must be standard, immersive or workspace',
+  'display-system.json: display.layout.columns must be an integer between 1 and 24',
+]);
+
+assert.deepStrictEqual(validateDisplayConfig({
   widgets: [{ id: 'main', type: 'heatmap' }],
   matrixTransform: { type: 'downsample', factor: 0.3 },
 }, { source: 'display-system.json' }), [

@@ -81,6 +81,7 @@ import {
   parseAgentRendererId,
 } from './agentRendererBridge.js';
 import './DisplaySystemBuilder.css';
+import { FORMULA_CHART_TEMPLATES } from '../../components/aside/formulaChartTemplates.js';
 
 const EMPTY_PROTOCOL_DETECTION = Object.freeze({ status: 'idle' });
 
@@ -132,6 +133,7 @@ const DEFAULT_VALUES = {
   smoothRadius: 1,
   matrixTransformType: 'none',
   matrixTransformFactor: 1,
+  layoutPresentation: 'workspace',
   profileLabel: '默认方案',
   canvasConfig: buildDefaultCanvasConfig(),
   showPressurePanel: true,
@@ -687,6 +689,7 @@ function buildFormValues(editor) {
     smoothRadius: selectedVisualizationAlgorithm.options?.radius ?? 1,
     matrixTransformType: matrixTransform.type || 'none',
     matrixTransformFactor: matrixTransform.factor ?? 1,
+    layoutPresentation: display.layout?.presentation === 'immersive' ? 'immersive' : 'workspace',
     profileLabel: profile.label || '默认方案',
     // display.canvas 是可选段：老 manifest 没有它，就用顶层 widgets 反推一份等价配置。
     canvasConfig: display.canvas?.widgets?.length
@@ -1245,7 +1248,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     () => [
       ...MATRIX_DISPLAY_MODES.map((item) => ({
         value: item.rendererId,
-        label: item.label,
+        label: `系统自带 · ${item.label}`,
       })),
       ...agentRendererRegistry.apps.filter((app) => app.rendererId).map((app) => ({
         value: app.rendererId,
@@ -1313,6 +1316,18 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     })),
     [catalog],
   );
+  const chartChoices = useMemo(() => [
+    ...FORMULA_CHART_TEMPLATES.map((template) => ({
+      value: template.id, label: `系统自带 · ${template.name}`,
+      card: { templateId: template.id, name: template.name, formula: template.formula,
+        unit: template.unit, decimals: template.decimals, color: template.color },
+    })),
+    ...agentRendererRegistry.apps.flatMap((app) => app.charts || []).map((chart) => ({
+      value: chart.chartId, label: `Agent 自定义 · ${chart.label}`,
+      card: { templateId: chart.chartId, agentChartId: chart.chartId, name: chart.label },
+    })),
+  ], [agentRendererRegistry.apps]);
+
   const algorithmPackagesById = useMemo(
     () => new Map((catalog?.algorithmPackages || []).map((item) => [item.id, item])),
     [catalog],
@@ -1648,6 +1663,19 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     () => sensorDrafts.find((draft) => draft.id === activeSensorId) || null,
     [activeSensorId, sensorDrafts],
   );
+
+  /** 图表只更新卡片清单；不连带替换算法或主渲染器。 */
+  const addSelectedChart = useCallback((id) => {
+    const choice = chartChoices.find((item) => item.value === id);
+    if (!choice) return;
+    const source = (configuredSensorPlan.find((sensor) => sensor.id === activeSensorId)
+      || configuredSensorPlan[0])?.outputChannel || '';
+    setLoadedChartCards((cards) => {
+      if (cards.length >= (catalog?.chartCardLimit || 6)) return cards;
+      if (cards.some((card) => card.templateId === choice.card.templateId)) return cards;
+      return [...cards, { ...choice.card, ...(choice.card.agentChartId ? { source } : {}) }];
+    });
+  }, [activeSensorId, catalog?.chartCardLimit, chartChoices, configuredSensorPlan]);
 
   const switchActiveSensor = useCallback((nextSensorId) => {
     if (!nextSensorId || nextSensorId === activeSensorId) return;
@@ -2034,7 +2062,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
         ...currentCanvas,
         widgets: widgets.map((widget) => {
           if (widget.type === 'pressureStats') return widget;
-          if (shouldApplyAgent || isAgentRendererId(widget.type)) {
+          if (shouldApplyAgent || isAgentRendererId(widget.type) || MATRIX_DISPLAY_MODES.some((mode) => mode.rendererId === widget.type)) {
             return { ...widget, type: nextRendererId };
           }
           return widget;
@@ -2279,7 +2307,11 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
         protocol: protocolDefinition,
         algorithm: algorithmDefinition,
         display: {
-          layout: { type: 'grid', columns: 12 },
+          layout: {
+            type: 'grid',
+            columns: 12,
+            presentation: values.layoutPresentation || 'workspace',
+          },
           matrixTransform: {
             type: values.matrixTransformType,
             factor: values.matrixTransformFactor,
@@ -2851,7 +2883,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
                       </div>
                       <div className="advanced-group">
                         <div className="advanced-group-heading">
-                          <h3>实时数据函数</h3>
+                          <h3>算法 · 系统自带 / 自定义</h3>
                           <p>函数的第一个入参始终是串口解码后的原始数据；返回结果用于实时展示、采集和回放。</p>
                         </div>
                         <div className="form-grid four-columns">
@@ -3019,6 +3051,10 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
                   </div>
 
                   <div className="matrix-display-setting">
+                    <Form.Item name="rendererId" label="渲染器 · 系统自带 / Agent 自定义"
+                      extra="可以独立选择；需要新效果时让 Agent 新建并安装渲染器，图表和算法不随之替换。">
+                      <Select options={rendererOptions} onChange={applyRendererId} />
+                    </Form.Item>
                     <div className="matrix-display-setting-heading">
                       <div><span>显示方式</span><strong>{selectedDisplayTemplate?.label || '未选择'}</strong></div>
                       <small>只改变画面，不改变形状和原始数据</small>
@@ -3212,14 +3248,16 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
                         </summary>
                         <div className="form-grid render-fields-grid">
                           <Form.Item name="profileLabel" label="方案名称"><Input /></Form.Item>
-                          <Form.Item
-                            name="rendererId"
-                            label="默认渲染器"
-                            extra={agentRendererRegistry.error || 'Agent 渲染器在受限 iframe 中运行'}
-                          >
-                            <Select options={rendererOptions} onChange={applyRendererId} />
-                          </Form.Item>
                           <Form.Item name="visualizationAlgorithmId" label="可视算法"><Select options={visualizationOptions} /></Form.Item>
+                          <Form.Item name="layoutPresentation" label="运行布局">
+                            <Segmented
+                              block
+                              options={[
+                                { value: 'immersive', label: '沉浸（隐藏侧栏）' },
+                                { value: 'workspace', label: '铺满（图表浮层）' },
+                              ]}
+                            />
+                          </Form.Item>
                           <Form.Item className="matrix-transform-field" name="matrixTransformType" label="矩阵展示方式">
                             <Segmented
                               block
@@ -3250,6 +3288,33 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
                           <Form.Item name="showAreaPanel" valuePropName="checked"><Checkbox>受压面积图表</Checkbox></Form.Item>
                         </div>
                   </details>
+
+                  <section className="advanced-group" aria-label="图表选择">
+                    <h3>图表 · 系统自带 / Agent 自定义</h3>
+                    <p>按需组合图表，不改变主渲染器。新样式由 Agent 安装为图表组件后选择。</p>
+                    <Select
+                      aria-label="添加图表"
+                      placeholder="选择要添加的图表"
+                      value={null}
+                      style={{ width: '100%' }}
+                      disabled={readOnly || !configuredSensorPlan.length || loadedChartCards.length >= (catalog?.chartCardLimit || 6)}
+                      options={chartChoices.map(({ value, label, card }) => ({
+                        value, label, disabled: loadedChartCards.some((item) => item.templateId === card.templateId),
+                      }))}
+                      onChange={addSelectedChart}
+                    />
+                    {loadedChartCards.map((card, index) => (
+                      <div key={`${card.templateId}-${index}`} className="form-grid">
+                        <span>{card.agentChartId ? 'Agent 自定义' : '系统图表'} · {card.name}</span>
+                        {card.agentChartId ? <Select aria-label={`${card.name}的数据源`} value={card.source || ''}
+                          disabled={readOnly}
+                          options={configuredSensorPlan.map((sensor) => ({ value: sensor.outputChannel, label: sensor.label }))}
+                          onChange={(source) => setLoadedChartCards((cards) => cards.map((item, i) => i === index ? { ...item, source } : item))} />
+                          : <span>跟随侧栏数据源</span>}
+                        <Button disabled={readOnly} onClick={() => setLoadedChartCards((cards) => cards.filter((_, i) => i !== index))}>移除</Button>
+                      </div>
+                    ))}
+                  </section>
 
                   <details className="advanced-config module-advanced">
                     <summary>

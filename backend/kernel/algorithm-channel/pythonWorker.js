@@ -596,6 +596,8 @@ const pending = new Map(); // id → {resolve, reject, timer}，在飞的请求
 let nextId = 1;            // 请求 id，单调递增，不复用（复用会让超时后的迟到回复配错请求）
 let starting = false;      // 防止 startWorker 重入
 let manualStop = false;    // 区分「崩了要重启」和「主动停的别重启」
+let restartTimer = null;   // 主动关闭必须取消已经排队的重启
+const pendingWrites = new Set(); // worker → 写入完成回调；关闭时同时结束背压等待
 let stderrTail = '';       // stderr 的尾部环形缓冲，退出时用来说明死因
 let footWarmupPromise = null; // 足底分析预热的共享 Promise
 
@@ -632,6 +634,40 @@ function rejectAllPending(error) {
     rec.reject(error);
   }
   pending.clear();
+}
+
+/** 结束指定进程尚未完成的管道写入，不影响后来启动的 worker。 */
+function rejectWorkerWrites(worker, error) {
+  for (const record of pendingWrites) {
+    if (record.worker === worker) record.finish(error);
+  }
+}
+
+/** 只重启意外退出的 worker；定时器触发时再次检查主动关闭标志。 */
+function scheduleWorkerRestart() {
+  if (manualStop || restartTimer) return;
+  restartTimer = setTimeout(() => {
+    restartTimer = null;
+    if (manualStop || child) return;
+    try {
+      startWorker();
+    } catch (error) {
+      console.error('[PY] restart failed:', error.message);
+    }
+  }, 500);
+}
+
+/** 淘汰故障进程并结束请求；旧进程迟到的 error/exit 不能清掉新进程状态。 */
+function retireWorker(worker, error) {
+  rejectWorkerWrites(worker, error);
+  if (child !== worker) return;
+  child = null;
+  buf = '';
+  footWarmupPromise = null;
+  rejectAllPending(error);
+  worker.stdin.destroy();
+  if (!worker.killed && worker.exitCode == null) worker.kill();
+  scheduleWorkerRestart();
 }
 
 /**
@@ -710,6 +746,8 @@ function missingPackagedRuntimeError() {
  */
 function startWorker() {
   if (child || starting) return;
+  clearTimeout(restartTimer);
+  restartTimer = null;
   starting = true;
   manualStop = false;
 
@@ -752,7 +790,21 @@ function startWorker() {
     starting = false;
   }
 
-  child.stdout.on('data', (d) => {
+  const worker = child;
+  // ⚠️ stdin 的异步 EPIPE 不会进入 child 的 error 或 write 外层 try/catch，必须在管道上监听。
+  for (const [name, stream] of [['stdin', worker.stdin], ['stdout', worker.stdout], ['stderr', worker.stderr]]) {
+    stream.on('error', (error) => {
+      if (child !== worker) return;
+      console.error(`[PY] ${name} ERROR: ${error.code || ''} ${error.message}`);
+      retireWorker(worker, error);
+    });
+  }
+  worker.stdin.on('close', () => {
+    retireWorker(worker, new Error('python worker stdin closed'));
+  });
+
+  worker.stdout.on('data', (d) => {
+    if (child !== worker) return;
     buf += d.toString();
     const lines = buf.split(/\r?\n/);
     buf = lines.pop() || '';
@@ -785,28 +837,24 @@ function startWorker() {
     }
   });
 
-  child.stderr.on('data', (d) => {
+  worker.stderr.on('data', (d) => {
+    if (child !== worker) return;
     const s = d.toString();
     pushErr(s);
     console.error('[PY:stderr]', s.trim());
   });
 
-  child.on('error', (err) => {
+  worker.on('error', (err) => {
+    if (child !== worker) return;
     pushErr(String(err.stack || err));
     console.error(`[PY] worker ERROR: ${err.message}`);
-    rejectAllPending(err);
-    child = null;
+    retireWorker(worker, err);
   });
 
-  child.on('exit', (code, sig) => {
+  worker.on('exit', (code, sig) => {
+    if (child !== worker) return;
     console.error(`[PY] worker EXIT code=${code} sig=${sig}\n[PY] stderr tail:\n${stderrTail}`);
-    rejectAllPending(new Error(`python worker exited (code=${code} sig=${sig})`));
-    child = null;
-    footWarmupPromise = null;
-
-    if (!manualStop) {
-      setTimeout(startWorker, 500);
-    }
+    retireWorker(worker, new Error(`python worker exited (code=${code} sig=${sig})`));
   });
 
   callPy('ping', {}, { timeoutMs: 30000 })
@@ -817,28 +865,34 @@ function startWorker() {
 }
 
 /**
- * 往 worker 的 stdin 写一行，**处理背压**。
- *
- * `stdin.write` 返回 false 表示内核缓冲区满了 —— 此时继续写会在 Node 内部无界排队。
- * 所以这里等 `drain` 再 resolve，让调用方（callPy）天然被节流。算法定时器 20ms 一轮而
- * Python 处理更慢时，这条背压是防止内存增长的那道闸。
- *
- * ⚠️ **`drain` 那条路径没有 reject 也没有超时**：管道永远不排空的话这个 Promise 会一直挂着。
- * 目前靠 callPy 自己的 `timeoutMs` 兜住（超时会 reject 调用方的 Promise），所以现象上不会
- * 卡死；但这个 Promise 本身和它的 `once('drain')` 监听会残留到进程/管道结束。
- * 要彻底修得在这里也加超时并 `removeListener`。
- *
- * 没有 child 时立刻 reject（而不是静默丢弃）：调用方必须知道这次调用没发出去。
+ * 往指定 worker 写一行，等待 write 回调确认缓冲已交付。
+ * 关闭/错误同时拒绝尚未完成的写入，不能只等永远不会到达的 drain。
+ * ⚠️ 必须绑定原进程，超时取消和迟到回调不能写到重启后的新 worker。
  *
  * @param {string} line 已带换行的一行 JSON。
- * @returns {Promise<true>} 写入被接受（或缓冲区已排空）后 resolve。
+ * @param {import('child_process').ChildProcess|null} worker 接收本次写入的进程。
+ * @returns {Promise<true>} 写入完成后 resolve；管道失败或关闭时 reject。
  */
-function writeLine(line) {
+function writeLine(line, worker = child) {
   return new Promise((resolve, reject) => {
-    if (!child || !child.stdin) return reject(new Error('worker not running'));
-    const ok = child.stdin.write(line);
-    if (ok) return resolve(true);
-    child.stdin.once('drain', resolve);
+    const stream = worker?.stdin;
+    if (manualStop || worker !== child || !stream || stream.destroyed || stream.writableEnded || !stream.writable) {
+      return reject(new Error('worker stdin is not writable'));
+    }
+    const record = { worker, finish: null };
+    // 写入回调与关闭事件可能先后到达，同一写入只能完成一次。
+    record.finish = (error) => {
+      if (!pendingWrites.delete(record)) return;
+      if (error) reject(error);
+      else resolve(true);
+    };
+    pendingWrites.add(record);
+    try {
+      stream.write(line, record.finish);
+    } catch (error) {
+      record.finish(error);
+      retireWorker(worker, error);
+    }
   });
 }
 
@@ -857,8 +911,7 @@ function writeLine(line) {
  * `if (!rec)` 静默丢弃）；`id` 单调递增**不复用**（复用会让迟到回复配到新请求上，是最难查的
  * 数据串台）。
  *
- * ⚠️ `new Promise(async ...)` 一般算反模式（executor 内抛错不变成 rejection），此处安全**仅
- * 因为唯一的 await 被 try/catch 完整包住** —— 加代码要保持这个前提。
+ * 主动 stop 后拒绝新请求；只有显式 startWorker 才能恢复，迟到调用不能偷偷复活进程。
  *
  * @param {string} fn Python 函数名。
  * @param {unknown} args 可序列化的参数载荷。
@@ -866,6 +919,7 @@ function writeLine(line) {
  * @returns {Promise<unknown>} Python 返回的数据。
  */
 function callPy(fn, args, { timeoutMs = 10000 } = {}) {
+  if (manualStop) return Promise.reject(new Error('python worker stopped'));
   if (!child) {
     try {
       startWorker();
@@ -879,21 +933,24 @@ function callPy(fn, args, { timeoutMs = 10000 } = {}) {
   }
 
   const id = nextId++;
+  const worker = child;
 
-  return new Promise(async (resolve, reject) => {
+  return new Promise((resolve, reject) => {
     const rec = { resolve, reject };
     rec.timer = setTimeout(() => {
       pending.delete(id);
       reject(new Error(`Timeout ${timeoutMs}ms`));
-      try {
-        child?.stdin.write(JSON.stringify({ id, fn: '_cancel' }) + '\n');
-      } catch {}
+      void writeLine(JSON.stringify({ id, fn: '_cancel' }) + '\n', worker).catch(() => {});
     }, timeoutMs);
 
     pending.set(id, rec);
 
     try {
-      await writeLine(JSON.stringify({ id, fn, args }) + '\n');
+      void writeLine(JSON.stringify({ id, fn, args }) + '\n', worker).catch((error) => {
+        clearTimeout(rec.timer);
+        pending.delete(id);
+        reject(new Error('stdin write failed: ' + error.message));
+      });
     } catch (e) {
       clearTimeout(rec.timer);
       pending.delete(id);
@@ -905,23 +962,24 @@ function callPy(fn, args, { timeoutMs = 10000 } = {}) {
 /**
  * 停止 Python worker，并阻止自动重启。
  *
- * 用默认信号（SIGTERM）而不是 SIGKILL，给 Python 一个正常退出的机会。在飞的请求不在这里
- * reject —— `exit` 处理里的 `rejectAllPending` 统一做掉。
- *
- * ⚠️ `manualStop = true` **必须在 kill 之前设**：kill 会触发 `exit` 处理，那里判的就是这个
- * 标志，顺序反了会在关闭流程中又拉起一个 Python，Electron 退不干净（残留子进程）。
- *
- * ⚠️ **关闭流程之后不要再调 `callPy`**：`child` 已置 null，`callPy` 会重新 `startWorker`，而
- * `startWorker` 又把 `manualStop` 重置成 false，等于把 worker 拉回来。顺序由
- * `serverShutdownOrchestrator` 负责。
+ * 先禁止新请求并取消重启、清理请求/写入，再断开 stdin 和发送 SIGTERM。
+ * ⚠️ 不能等 exit 才清请求：等待期间的 timeout 会向已关闭管道写取消指令，触发 EPIPE。
  *
  * @returns {void}
  */
 function stopWorker() {
   manualStop = true;
-  if (child) {
-    child.kill();
-    child = null;
+  clearTimeout(restartTimer);
+  restartTimer = null;
+  const worker = child;
+  child = null;
+  footWarmupPromise = null;
+  const error = new Error('python worker stopped');
+  rejectAllPending(error);
+  if (worker) {
+    rejectWorkerWrites(worker, error);
+    worker.stdin.destroy();
+    worker.kill();
   }
 }
 

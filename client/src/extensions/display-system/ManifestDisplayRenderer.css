@@ -3,17 +3,118 @@
 .manifest-display {
   position: absolute;
   z-index: 20;
-  /* 与既有页面分区对齐：左侧 3% + 15% 是 Aside，右侧 3% 是工具栏。
-     manifest 只占中间主渲染面，不再盖住侧栏，也不再画第二层“应用窗口”。 */
-  inset: 8% 7% 3% 20%;
+  /* 顶部由实际顶栏测量；画布始终铺满，图表和工具在画布上独立浮动。 */
+  inset: 60px 0 0;
   overflow-x: hidden;
   overflow-y: auto;
   padding: 0;
   color: #eef4f7;
-  background: transparent;
+  /* 与手部监测 3D 场景使用同一主画布底色；Agent iframe 保持透明即可自然融入。 */
+  background: #10152b;
   border: 0;
   border-radius: 0;
   scrollbar-width: thin;
+}
+
+/* 沉浸模式只隐藏图表；不是操作系统级全屏。 */
+.manifest-display.is-immersive {
+  z-index: 21;
+}
+
+/* workspace 保留 Aside 为独立浮层，不改变旧 immersive 的隐藏侧栏语义。 */
+.manifest-display.is-workspace {
+  z-index: 20;
+}
+
+.manifest-renderer-picker {
+  position: absolute;
+  z-index: 25;
+  right: 6%;
+  top: 8px;
+  max-width: min(320px, 70vw);
+  border: 1px solid #667094;
+  border-radius: 6px;
+  background: #1b1b35;
+}
+
+.manifest-renderer-picker summary {
+  cursor: pointer;
+  padding: 12px 16px;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+
+.manifest-renderer-picker label,
+.manifest-renderer-picker small {
+  display: grid;
+  gap: 8px;
+  padding: 0 16px 12px;
+  color: #c1cedc;
+}
+
+.manifest-renderer-picker .ant-select { width: 100%; min-width: 220px; }
+.manifest-renderer-picker summary:focus-visible { outline: 2px solid #66e0db; }
+
+/* 由工作区向内分配高度，禁止 iframe/canvas 的固有尺寸反向撑大网格。 */
+.manifest-display {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.manifest-display > .display-canvas-configurator.is-simple,
+.manifest-display .is-simple > .canvas-drop-area {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+}
+
+.manifest-display .manifest-widget-grid {
+  flex: 1;
+  min-height: 0;
+  grid-auto-rows: minmax(0, 1fr);
+}
+
+.manifest-display .manifest-widget-grid > :only-child {
+  grid-column: 1 / -1 !important;
+}
+
+.manifest-display .manifest-widget-slot {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.manifest-display .manifest-widget-slot > * {
+  min-height: 0 !important;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.manifest-display .manifest-widget-slot[data-renderer-id="pointGrid"] > div > div {
+  position: absolute;
+  inset: 0;
+  min-height: 0 !important;
+}
+
+.manifest-display .agent-renderer-host:not(.is-chart) iframe {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+}
+
+.manifest-display .manifest-widget {
+  min-height: 0;
+  overflow: auto;
+}
+
+.manifest-display-header,
+.manifest-profile-menu {
+  flex-shrink: 0;
 }
 
 .manifest-display-header {
@@ -104,10 +205,6 @@
 }
 
 @media (max-width: 900px) {
-  .manifest-display {
-    inset: 8% 3% 3%;
-  }
-
   .manifest-profile-menu {
     grid-template-columns: 1fr;
   }

@@ -70,7 +70,7 @@
         "idRule": "The platform creates this stable rendererId after the app is installed; appId is manifest.id."
       }
     ],
-    "customRendererWhen": "Use an agent renderer only when the requested presentation cannot be expressed by a currently advertised built-in renderer.",
+    "customRendererWhen": "Use an agent renderer when the user independently chooses a new renderer, or agrees to one because no compatible built-in exists.",
     "forbiddenRendererReferences": [
       "http://*",
       "https://*",
@@ -562,7 +562,7 @@
         "method": "GET",
         "pathSource": "/api/sdk/contract -> displaySystems.routes.catalog",
         "defaultPath": "/api/display-systems/catalog",
-        "requiredData": "catalog including supported renderers, algorithms, chart templates, serial templates, limits, and writable capabilities"
+        "requiredData": "catalog including supported renderers, layoutPresentations, algorithms, chart templates, serial templates, limits, and writable capabilities"
       },
       {
         "method": "GET",
@@ -617,7 +617,7 @@
             "pointOrder": "object for this sensor only",
             "coordinateMap": "object|null for this sensor only",
             "algorithmData": "object|null for this sensor only",
-            "algorithmSource": "string|null; code requires explicit authorization"
+            "algorithmSource": "string|null; copy registered compatible package source, or supply new algorithm code only with explicit authorization"
           }
         }
       },
@@ -625,7 +625,8 @@
         "definitions.sensors keys MUST exactly match manifest sensors[].id",
         "Each route keeps its own line order, point order, coordinate map, algorithm data, and authorized algorithm source",
         "Do not place only the first sensor's definition at the top level and project it over other sensors",
-        "Line order, geometry transform, and algorithm execute once in the existing backend pipeline"
+        "Line order, geometry transform, and algorithm execute once in the existing backend pipeline",
+        "lineOrder.order[i] is a one-based input index for output position i; pointOrder.points[i] uses zero-based [row, col]. Convert a documented complete 0..N-1 permutation by adding one once at import; keep a complete 1..N permutation unchanged. For subsets, placeholder zeros, missing points or ambiguous mapping direction, verify semantics instead of guessing the base. Test output[i] equals input[order[i]-1] with distinguishable samples and then verify point placement; length and uniqueness alone do not establish correctness."
       ]
     },
     "protocolSelection": {
@@ -657,26 +658,49 @@
     "algorithmSelection": {
       "requestedOutputRule": "Requested indicators and charts are algorithm metric requirements. Before choosing algorithm none, match user intent against live package names, descriptions, compatibility, and metricDefinitions.",
       "metricIntentExamples": {
-        "respirationWaveformOrTrend": "a respiration-signal metric",
+        "respirationWaveformOrTrend": "普通呼吸趋势将算法每次输出的单值按时间入队；只有明确要求呼吸波形时才必须有呼吸信号指标。呼吸率队列准确标为呼吸率趋势（次/分），不能用压力替代。",
         "respirationRate": "a respiration-rate metric",
         "centerOfPressureTrajectory": "paired center-of-pressure X and Y metrics",
         "centerOffset": "a center-of-pressure distance metric"
       },
-      "registeredPackageRule": "If one compatible registered package supplies the requested metrics, MUST attach it even when the user did not name its internal package id.",
-      "fallbackRule": "Renderer/chart-side estimates require explicit authorization, must be labelled as proxies, and MUST NOT replace metrics supplied by a selected registered package."
+      "registeredPackageRule": "Unless the user explicitly chooses a new algorithm, if one compatible registered package supplies the requested metrics, MUST attach it even when the user did not name its internal package id.",
+      "fallbackRule": "呼吸数据只能来自所选内置或 Agent 算法包的明确呼吸输出。禁止用总压力、平均压力、滤波压力或去基线趋势替代；加代理标签或移入 Python 包也不能豁免。普通呼吸趋势可用算法呼吸率单值队列；仅在明确要求波形却无对应信号时报告缺口，不能混淆名称。其他展示估算仍需明确授权、代理标识，且不得替代所选包已有指标。",
+      "metricQueueRule": "算法每次返回一个数即可由图表按时间组成有界队列，不要求算法返回整段波形。按 channelId 和指标隔离，切换清空，去重帧时间戳而非相同数值。按算法契约排除无效标记、缺失和非有限值，缺口断线、恢复重新成段；不补零、不用压力补位。队列属于展示缓存而非新增测量算法。",
+      "respirationSourceRule": "核对算法包版本、真实输出和指标含义，不仅匹配 respirationSignal 等名称。未支持、预热、失败、缺失和过期分别展示真实状态；清除当前读数并中断曲线，不能补零、复用旧值或生成压力代理。新建呼吸算法须按算法扩展授权运行；用户另行请求的压力趋势是独立图表，不能计作呼吸功能。",
+      "metricSemanticsRule": "For every indicator chart, record package/version, source metric, meaning, unit or unitless status, validity conditions, and proxy status. Proxy semantics MUST be disclosed even when computed inside a Python package. Signed baseline-removed respiration waveform is distinct from nonnegative valid respiration rate in breaths/minute; MUST NOT rectify, clamp, or shift a waveform merely to hide its sign. Missing, warming-up, failed, or stale metrics MUST show their actual state, not fabricated zeros or unlabelled pressure-change estimates. Center-of-pressure charts MUST state coordinate range/direction and show no valid center when effective pressure is absent."
+    },
+    "componentChoice": {
+      "dimensions": ["algorithm", "renderer", "chart"],
+      "sources": ["builtin", "custom"],
+      "defaultMode": "automatic",
+      "requireSourceConfirmation": false,
+      "rule": "用户只需描述效果并提供资料。未指定来源时，Agent 自动复用当前兼容能力，用一句普通话说明后继续，不要求先选择自带/新建或提供内部标识。尊重算法、渲染器、图表各自的明确选择；新建某一项不替换另外两项。",
+      "clarificationRule": "仅追问影响正确性的缺失事实或所需新授权：附件冲突、多个物理设备的业务对应、打开硬件所需 COM、改变指标含义或新增算法/依赖、替换指定渲染效果。没有 COM 可先生成配置，不猜端口或打断当前系统。",
+      "chartImplementationRule": "请求图表已包含在公开扩展内实现该图形的授权。没有可用模板或已核实兼容的图表时，可创建仅图表应用并消费已有算法指标；不需要用户先指定 iframe 或注册方式。用户明确要求只用自带时报告缺口，不自动新建。不得因此替换主渲染器、算法或宿主外壳。",
+      "ordinaryRequestDefaults": {
+        "respirationChart": "默认将兼容注册算法的呼吸单值按时间组成队列绘图，不只显示一个数字。呼吸率输出画呼吸率趋势（次/分），呼吸信号输出画信号曲线；明确请求波形时才要求波形指标，禁止压力趋势冒充。",
+        "centerOfPressureChart": "默认压力重心 XY 轨迹和当前位置，来源为算法成对坐标；缺失和无有效压力时不伪造原点。",
+        "presentation": "默认沿用平台统一深色宿主、铺满顶栏下工作区并保留图表浮层；不需要用户补充手部监测、布局字段或隐藏描述带。仅使用当前目录实际公开的能力。"
+      }
     },
     "display": {
+      "rawValuesRule": "matrix.total constrains values only. rawValues is an optional independently sized decoded-stage array; never enforce equal matrix length, truncate, pad or substitute processed values. Validate each channels[] item against its own matrix. Charts consume algorithmMetrics when available.",
       "widgetSourceRule": "Every data widget in a multi-sensor system MUST explicitly set source to that sensor's exact outputChannel. New manifests SHOULD use outputChannel itself, not a *Data suffix or array position.",
       "rendererRule": "Resolve natural-language intent against live renderer ids and labels. When an exact compatible renderer is advertised, MUST use it by default; creating a new display system does not authorize a new renderer.",
       "rendererIntentExamples": {
         "3dPointPlot": "3D point plot, 3D point grid, 3D 点图, and 3D 点阵 select the live point-grid renderer (currently pointGrid when advertised)."
       },
-      "customRendererWhen": "Use agent:<appId> only when the user explicitly requests a new/custom/reference visual that the matching live renderer cannot express, or no compatible built-in renderer exists.",
+      "customRendererWhen": "Use agent:<appId> when the user independently chooses a new/custom renderer, or agrees to one because no compatible built-in exists. A choice to create a chart or algorithm does not authorize replacing the renderer.",
+      "nativePointRendererRule": "Adding respiration or center-of-pressure charts does not authorize replacing the main renderer. MUST NOT substitute Canvas 2D perspective projection, wireframe mesh, or another imitation for a requested native 3D point renderer. If the native renderer is incompatible, report the gap and obtain explicit agreement before substituting a different presentation. Verify the actually mounted renderer, not only its dropdown label.",
       "profileRule": "Every profile renderer reference and widget id MUST resolve to a declared renderer/widget.",
+      "layoutPresentationRule": "Main rendering MUST fill the application workspace below the permanent top bar. Default display.layout.presentation to workspace with retained collapsible chart overlays when advertised. Distinguish this from OS fullscreen and immersive (hidden charts). Do not implement fullscreen with fixed iframe heights. Unsupported hosts must report the layout capability gap.",
+      "workspaceWithChartsRule": "When the user requests workspace fill like hand monitoring while retaining charts, MUST preserve requested charts as host-owned collapsible overlays below the permanent top bar. Select display.layout.presentation workspace only when catalog.layoutPresentations advertises workspace with retainsCharts true and collapsibleCharts true. The immersive mode covers the standard sidebar and alone does not meet this combined requirement. If unsupported, report the specific host capability gap and need for separately authorized host changes; MUST NOT invent manifest fields, patch protected source, or recreate the application shell in an Agent renderer.",
+      "canvasSizingRule": "The main canvas MUST fit available host space, not simulate fullscreen with a fixed large height such as 1080px. CSS layout dimensions and backing-store pixel dimensions MUST be independent; backing-store updates MUST NOT grow the parent in a resize feedback loop. Update dimensions only when measured target size changes. Main canvas MUST NOT produce overflow scrollbars; chart sidebar may scroll independently. Verify stability during continuous rendering, window resizing, and system switches.",
+      "runtimePresentationRule": "Keep display.controls.runtimeChrome absent or false for a clean hand-monitor-aligned runtime canvas. Set it true only when the user explicitly requests on-canvas diagnostic/profile controls. Custom renderer roots stay transparent and MUST NOT add title, description, id, baud-rate, or selector bands around the plot.",
       "charts": {
         "builtin": "Use catalog-advertised chartCards/templates and supported formula syntax; at most the live catalog limit.",
         "agent": "An Agent renderer remains one main-canvas visualization. Custom chart code MUST be declared in app.json charts[] and referenced by display.chartCards[].agentChartId; the host mounts it in the existing sidebar chart area. Do not embed sidebar charts in the main renderer.",
-        "metricRule": "Charts MUST consume selected algorithm package metrics when available. Presentation-only fallback estimates require explicit authorization and a visible proxy label.",
+        "metricRule": "图表只消费所选算法包的对应指标。呼吸缺少算法输出时显示未支持/等待/失败/过期并停止曲线，禁止压力趋势替代。不得把算法包内计算的压力代理冒充呼吸；其他展示估算需要明确授权与代理标识。",
         "surfaceRule": "A custom chart iframe draws only its plot body on a transparent root. It MUST NOT recreate the host card background, title, delete control, summary block, or sidebar spacing.",
         "dataRule": "Chart rendering does not create another storage or analysis truth; persisted/exported values remain those from the permanent pipeline."
       }
@@ -728,7 +752,7 @@
         "When a physical COM was supplied, observe at least one real canonical sensor.frame per opened sensor with matching identity and the expected mapped value count"
       ],
       "rules": [
-        "Activation and serial open MUST run after save/reload for every generated system; do not report success without them",
+        "After save/reload, activate and open hardware only when the intended device and COM mapping are explicit and the user has authorized the connection. Missing COM does not block preparing a draft; ask at the hardware step, never guess a port or interrupt an existing running system for a preview. Do not claim end-to-end success without hardware verification.",
         "bound plus open is control-plane evidence only and MUST NOT be reported as successful framing",
         "Synthetic frames do not satisfy hardware verification. If no valid real frame arrives within a bounded window, report configured but not hardware-verified and retain parser diagnostics",
         "LICENSE_REQUIRED (403) on either command MUST stop generation and be reported; the Agent MUST NOT attempt to bypass licensing"
@@ -742,6 +766,12 @@
       "Realtime values, stored data, replay values, and CSV realData match per canonical channelId for stored:true sensors",
       "stored:false sensors publish realtime but do not appear in storage, replay, or CSV",
       "Multi-rate playback uses platform alignment and renderer state never depends on channels array order",
+      "Actually mounted renderer id and implementation match the requested native point renderer; labels alone are insufficient",
+      "Real data reaches the main canvas and indicator charts from the intended canonical route with consistent timestamps and metric provenance",
+      "Requested workspace layout preserves visibility and interaction of the permanent top bar and requested charts",
+      "Continuous rendering, repeated window resizing, and system switches leave stable canvas dimensions without growth loops or main-canvas overflow",
+      "Chart titles, units, signed-waveform semantics, proxy labels, and missing/warming-up/failed/stale states match the algorithm contract",
+      "Record pass, fail, or not verified with evidence for every acceptance item; distinguish fresh test-page evidence from the user's existing desktop window. Save success, renderer ready, and open serial status alone do not prove delivery. MUST NOT claim complete delivery while a required item fails or remains unverified",
       "No permanent backend, contract, database, WebSocket, playback, or CSV implementation was modified"
     ]
   },

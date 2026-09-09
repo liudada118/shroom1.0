@@ -1,6 +1,167 @@
 # 架构文档
 
-> 最后更新于：2026-09-04
+> 最后更新于：2026-09-08
+
+## 2026-09-08 撤销压力代理呼吸，使用算法单值队列
+
+此前把平均/滤波压力及快慢基线差写成“呼吸波形”是不准确的，本节取代前文历史记录中的该能力描述。
+Python `getData` 不再从 `matrix_filter` 或原始矩阵合成 `respiration_waveform`；
+`mattress-vitals` 删除压力窗口、去基线处理和 `respirationSignal` 输出，也不消费旧 worker 的同名代理字段。
+因撤销旧指标，算法包版本升为 2.0.0，目录与 metricDefinitions 同步移除波形声明，源码和随包副本一致。
+原生呼吸率及其他既有输出保持不变；CoP 仍直接读取规范化矩阵，原生生命体征失败不阻断该帧与重心。
+
+用户的“呼吸趋势”不要求算法返回一整段波形：每次输出一个标量即可由图表按帧时间排成有界队列。
+呼吸率标量应画“呼吸率趋势（次/分）”，呼吸信号采样值才画对应信号曲线。只有明确请求波形、但
+所选算法未提供信号时才报告能力缺口。队列按通道与指标隔离，去重时间戳而非数值；无效标记、缺失、
+异常和过期不补零、不用压力补位，恢复后另起一段。当前原生 respirationRate 的 -1/88 分别为未稳定/检测中。
+更新两个随包技能与 policy，保留内置/Agent 算法独立选择；队列属于图表展示缓存，不是新增测量算法。
+
+测试先复现两层代理输出，修复后检查无滤波矩阵、有滤波矩阵、压力升降、旧 worker 代理字段与原生异常
+均不会产出呼吸波形，呼吸率标量保持原生值并与压力变化无关。没有修改固定数据链路、当前安装目录、
+用户算法副本或串口状态。旧展示系统复制了算法源码，重新打包不会自动迁移，需另行明确更新该系统及图表绑定。
+
+验证：Full 8 项通过（后端 73 个文件、客户端 462 项、前端 SDK 509 项、两套 smoke、lint、
+临时生产构建和性能基线），另外 13 项 Python 定向测试通过；源码及随包两个技能均通过 UTF-8 格式验证。
+本轮只修改算法包、包装层及生成规则，没有替换当前已安装图表，也未重新生成 Python 可执行程序或安装包。
+
+## 2026-09-08 点图冷启动空帧隔离与呼吸指标语义
+
+`ManifestDisplayRenderer` 在首个传感器帧之前会传 `values=[]`。过去 pointGrid 接收空数组后，
+插值生成 NaN 并污染 `smoothBig`，后续完整帧也无法恢复，表现为必须切换渲染器才出图。
+`copyPointGridFrame` 在 sit/back 数据入口校验完整长度和有限数值，拒绝空、残缺、超长、稀疏及非法帧；
+等待期间保留初始化或上一有效缓冲。完整零帧正常接收，null 缺测点仅在展示副本中按零处理。
+不改原生点图的相机、布局、插值、配色、量程，也不改串口、采集、算法与 canonical 帧契约。
+
+浏览器夹具改为主动单帧输入：先让真实 WebGL 点图经历无数据冷启动，再送一帧，验证原 canvas
+不重挂载即可上传有限的非零高度顶点并绘制 POINTS；同时覆盖坏长度、合法零帧、DPR 1/2 和缩放。
+修复前该回归能复现 GPU 上传 NaN，修复后通过。呼吸包的 `respirationSignal` 是去基线压力差值，
+负值不是负呼吸次数；`respirationRate` 才是次/分。当前安装的 0908 图表已将负呼吸率作为无效值显示，
+本轮不改其算法或已安装文件，补 Python 正负波形与有效呼吸率独立性的合成数据测试。
+
+验证：Full 9 项通过（后端 73 个测试文件、客户端 462 项、前端 SDK 509 项、两套 smoke、lint、
+临时生产构建、脚本语法及性能基线），另通过真实 WebGL 冷启动/DPR 回归与 5 项 Python 算法包测试。
+只读实时抽样确认当前通道为 `pressure-mat-native-vitals-20260908:pressure-mat`，波形约 -1.25e-21，
+呼吸率 -1 是无效标记，不能当测量值。没有操作串口、覆盖用户安装文件或重新打包；安装版须更新前端产物。
+
+## 2026-09-08 退出时 Python 管道 EPIPE 与异步清理
+
+`pythonWorker` 为 stdin/stdout/stderr 注册进程归属明确的错误监听；异步写入失败或管道关闭时，
+统一拒绝当前请求与写入等待，并回收该 worker。超时取消指令绑定原进程，旧进程的迟到事件不再
+清空新进程状态。主动 stop 先取消重启定时器、拒绝请求并关闭 stdin，再发 SIGTERM；stop 后的 callPy
+直接拒绝，只有显式 startWorker 能恢复。写入等待使用 write 回调及统一关闭清理，不再遗留 drain 监听。
+
+Electron `applicationQuit` 在 before-quit 中 preventDefault，复用同一次清理，完成后再 app.quit；
+等待上限 8 秒，失败/超时保留日志而非无限卡住。静态服务与后端同时开始关闭，避免静态连接延迟
+阻止停采集和算法；更新安装时仍保留 updater。没有添加全局 uncaughtException 忽略器，没有改协议、
+数据帧或存储格式。故障注入用真实 Node Writable 派发 EPIPE，原 HEAD 可复现未捕获错误，修复版通过。
+测试覆盖停止时在飞写入、取消写入失败、关闭无 error、排队重启、旧 exit/error、重复退出及更新分支；
+测试不关闭用户当前安装实例，也不操作物理串口。
+
+验证：Full 8 项全部通过（后端 73 个测试文件、客户端 462 项、前端 SDK 506 项、两套 smoke、
+lint、临时生产构建与性能基线）。独立用户目录的真实 Electron 无窗口进程，连续两次 app.quit 后
+只清理一次，日志顺序为 cleanup-start → cleanup-end → will-quit，退出码 0。未重新生成安装包，
+未在用户当前运行实例上做关闭真机测试；源代码修复需要随新安装包更新后生效。
+
+## 2026-09-07 随包 Agent 技能中文化
+
+`agent-resources/add-display-system/SKILL.md`、`add-display-app/SKILL.md` 及展示应用模板说明统一为中文，
+对应 `pack-resources/agent` 副本同步更新。技能标识、API 路由、JSON 字段、错误码和协议参数保持原值；
+示例中面向用户的名称与注释译为中文。既有协议、算法、布局、权限与验收规则保持原义。
+打包测试改为核对技能源文件与随包副本的一致性，不再依赖英文说明的固定措辞。
+
+## 2026-09-07 打包生产依赖闭环
+
+此前同一 `node_modules` 混有 npm 旧目录与 pnpm 真实链接，electron-builder 24 的依赖清单与
+复制的包文件不一致，导致 Express 找不到 `qs`，并伴随 multer、updater、serialport 的版本错配。
+`scripts/pack-runtime-dependencies.js` 从根 dependencies 出发，按每个调用包的真实路径收集完整
+生产依赖及 peer/optional 依赖；同名多版本保留正确嵌套关系，通过 beforePack 的显式 FileSet 进包。
+beforeBuild 返回 false，使用打包器支持的外部依赖模式，不重新安装或改变现有 Electron native ABI。
+afterPack 在 ASAR 内按 Node 查找规则验证每条生产依赖及版本，不从宿主开发目录补齐；校验失败会
+阻止继续生成安装器。普通源码测试以外，发布验证需要实际加载包内 Express、上传及原生模块。
+
+## 2026-09-07 Manifest 沉浸布局契约
+
+`display.layout.presentation` 成为正式 Manifest 字段，合法值为 `standard`、`immersive` 与 `workspace`。默认
+`standard` 保留既有左侧摘要/图表区域；`immersive` 由宿主把展示面铺到永久顶部栏以下的安全区并
+覆盖标准侧栏，而不是让 Agent renderer 用 CSS 猜宿主尺寸。归一、保存校验、运行时定义、Builder
+编辑回读和 Agent 规则共用这一个字段，已有 manifest 缺省行为不变。
+
+2026-09-08 行为更新：默认改为 workspace；保留 standard 的合法值以便读取旧文件，但运行时也铺满，
+保留可折叠图表。新增 `useWorkspaceTop` 观察顶栏真实下沿，画布和图表浮层共用尺寸来源。
+单组件铺满全部网格列，尺寸由宿主 flex/grid 分配，不能由 canvas 绘图缓冲反向撑高。
+运行页“渲染设置”提供内置及已安装 Agent 组件，切换仅写展示偏好，不修改后端算法或图表清单；
+Builder 的算法模式、渲染器和图表目录独立选择，图表可选明确通道。Agent 未指定来源时自动选用兼容能力，
+不要求用户先确认三项组合；用户明确的自带/新建偏好仍逐项保留。
+
+自然语言生成规则：用户提供协议、线序及想要的图形后，Agent 从当前目录匹配原生渲染器、
+注册算法的命名指标和图表。呼吸图表默认呼吸波形趋势，重心图表默认 XY 轨迹与当前位置；
+模板缺口允许只补已请求图表的展示代码，不改主渲染或新增测量算法。默认沿用宿主深色背景、
+workspace 铺满与图表浮层，关闭重复描述带。单传感器内部标识自动生成，缺 COM 只阻止硬件接入，
+不阻止草稿准备；仅真实资料冲突、身份不明或需要扩展授权时追问。源码与随包规则同步维护。
+
+隔离前向测试使用用户原句及实际 protocol.md / line.md，只读查询运行平台、不安装或触碰串口。
+首次草稿暴露线序基数遗漏：附件为完整 0..1023 排列，而平台 lineOrder 为 1-based；规则明确导入时
+加 1 一次，pointOrder 坐标仍为 0-based。修正后使用实际映射器逐点验证 1024 项，并在内存文件系统中
+模拟保存（图表 id 仅测试替身）；图表包以合成帧验证握手、rawValues 独立长度、异形通道、呼吸失败与
+CoP 隔离、无压力和过期状态。Standard 的 71 个后端测试文件、462 项客户端测试及临时生产构建通过。
+未重新打包、安装或完成真机/视觉验收。现有呼吸包包含压力平均值与基线处理及回退，缺少明确有效性/
+预热与信号来源标记；试跑草稿按代理性质披露，不据此声称已验证真实呼吸测量。这项能力缺口未在本轮改算法解决。
+
+沙箱数据语义保持 v1：`matrix.total` 只约束 `values`，`rawValues` 是独立长度的协议解码数组，
+不按展示矩阵截断、补零或重映射。模板执行测试覆盖原始数组缺席/为空/不等长与异形多传感器。
+`AgentRendererHost` 等待有效身份才开始握手，错误后可单独重新加载；Aside 按各图表 source 路由，
+缺路等待，避免把其他通道送入呼吸或 CoP 图表。算法运算、串口、存储与回放未改。
+
+本轮验证：Full 15 项通过，后端 71 个测试文件、客户端 462 项、前端 SDK 506 项；
+独立 Chrome 覆盖 DPR 1/2、五种尺寸、原生渲染切换及图表故障重载，CoP 不受另一图表重载影响。
+只读观察当前安装实例得到真实 1024 点帧及呼吸/CoP 指标，onbedFilterHealthy 为 1；
+这证明后端在输出，不代表呼吸测量准确度通过真机验收。未重新发布或覆盖安装实例。
+
+`workspace` 专门表达“顶栏下铺满且保留图表”：`ManifestDisplayRenderer` 占满工作区，Home
+使用 `ManifestSidebarOverlay` 保留既有 Aside 为可折叠浮层。折叠仅隐藏、不卸载，浮层外不拦截
+画布事件。`catalog.layoutPresentations` 公布每种布局的铺满、保留图表和折叠能力；Builder 可显式
+选择。旧 `immersive` 仍覆盖侧栏，不静默改变存量系统行为。
+
+宿主以有界 flex/grid 向下分配画布高度；原生 pointGrid 容器脱离内容撑高循环，Agent 主画布
+iframe 跟随宿主尺寸而非固定 app.height，侧栏图表高度仍独立。默认原生点图选型及呼吸波形、
+频率、代理指标语义已同步到 `agent-resources` 与 `pack-resources/agent`，规则不代表医学算法验证。
+`scripts/tests/manifest-workspace-layout.mjs` 使用真实 pointGrid、合成帧和独立 Chrome 测试窗口，
+覆盖 DPR 1/2、五种窗口尺寸、持续渲染、折叠状态保持及模式切换；不操作物理串口。
+
+验证：Full 八个任务全部通过（后端 71 个测试文件、client 461 项、frontend SDK 506 项、lint、
+两侧 smoke、临时生产构建与数据面微基线）；浏览器布局回归通过。未发布安装包，未修改现有
+用户系统配置；真机输入、算法有效性以及具体点云视觉仍须在更新后的应用中验收。
+
+## 2026-09-07 onbed_filter 随包与呼吸/重心故障隔离
+
+Windows Python runtime 构建现在要求存在 CPython 3.11 的 `onbed_filter` 原生库；构建和资源同步都会
+检查最终 runtime 中确实存在 `onbed_filter*.pyd`，不再允许只生成 exe 后静默降级。私有动态库可放在
+`python/app/`，也可由 CI 通过 `SHROOM_ONBED_FILTER_BINARY` 指定，仍不进入 Git 源码。
+
+`mattress-vitals` 1.1.0 把原生滤波矩阵的真实平均压力作为时序输入，经快/慢基线差输出
+`respirationSignal`，不再拿压力系数冒充波形，也不生成正弦模拟数据。CoP 完全由规范化矩阵先行计算；
+原生算法缺失、返回异常或抛错时，本帧、CoP 和压力波形继续输出，仅
+`onbedFilterHealthy` 降为 0。Python 适配层同时补齐新版 snake_case 指标映射。
+
+## 2026-09-07 Agent 运行展示页视觉收口
+
+Manifest 展示系统的正式运行页现在默认只保留主画布：系统 id、名称、波特率以及展示方案、渲染方式、
+可视算法三组选择器不再重复占用画布顶部。它们已在应用顶部栏和设置/Builder 中有归属；只有 manifest
+显式声明 `display.controls.runtimeChrome: true` 时才恢复这层诊断界面。主展示面使用与手部监测 3D
+场景一致的 `#10152b` 深蓝底色，`pointGrid` 同步改用该清屏色，宿主与 WebGL 画布不再形成白/黑色块。
+
+随包 Agent 规则与 App 模板同步收口：自定义 renderer/chart 使用透明全尺寸根节点，只绘制图形本身，
+不再示范第二套标题、通道、波特率、状态、统计 footer、卡片边框或独立渐变背景。模板仍将 identity
+与运行状态保存在屏幕阅读器可读的隐藏状态区，并通过 sandbox error 消息交给宿主显示故障，因此视觉
+简化不删除身份校验和错误诊断能力。
+
+## 2026-09-07 PointGrid Canvas 尺寸反馈回路修复
+
+`pointGrid` 使用设备像素比放大 WebGL 绘图缓冲，但此前两次 `renderer.setSize(..., false)` 都不写
+Canvas 的 CSS 逻辑尺寸。在打包环境的高 DPI 屏幕上，Canvas 因而用放大后的 intrinsic height 参与
+布局；观察容器的 `ResizeObserver` 又会把这个高度写回绘图缓冲，形成 320 → 640 → 1280 的持续
+增长。初始化和后续 resize 现在都显式同步 CSS 逻辑尺寸，绘图缓冲仍按 DPR 保持清晰，但不再反向
+撑高展示系统主画布。SDK 结构测试固定两处尺寸调用均不得关闭 CSS 更新，防止打包后二开回归。
 
 ## 2026-09-04 Agent 自然语言生成决策门禁
 
@@ -2699,6 +2860,10 @@ flowchart LR
 
 | 日期 | 类型 | 说明 |
 | :--- | :--- | :--- |
+| 2026-09-07 | 新增功能 / 布局契约 | `display.layout.presentation` 正式支持 `standard/immersive`，归一、校验、Builder 回读保存、宿主样式及 Agent 规则已贯通；沉浸模式占满顶部栏以下安全区，不要求 renderer 猜尺寸。 |
+| 2026-09-07 | 修复缺陷 / Python 发布 | `onbed_filter` 成为 Windows Python runtime 必备产物，构建与资源同步双重验收动态库；`mattress-vitals` 输出真实压力呼吸波形并将原生异常与 CoP 隔离，新增健康状态指标和新版字段映射。 |
+| 2026-09-07 | 优化重构 / 界面一致性 | Manifest 运行页默认隐藏重复的系统元数据与方案/渲染/算法选择条，显式 `controls.runtimeChrome:true` 才恢复；主画布和 `pointGrid` 对齐手部监测深蓝背景。Agent App 模板改为透明全尺寸纯绘图区，不再示范标题、footer、卡片壳和独立背景。 |
+| 2026-09-07 | 修复缺陷 / 渲染稳定性 | 修复 `pointGrid` 在高 DPI 打包环境中 Canvas 高度持续增加：初始化与 `ResizeObserver` resize 均同步 CSS 逻辑像素尺寸，保留 DPR 绘图清晰度但切断 intrinsic height → container → setSize 的反馈回路，并增加 SDK 回归断言。 |
 | 2026-09-04 | 修复缺陷 / 规则强化 | Agent 展示系统生成改为预设、算法包和原生渲染器优先：唯一匹配协议必须完整复制，`3D 点图/点阵` 在实时目录可用时固定选择 `pointGrid`，呼吸/重心先匹配正式包 metrics；真机完成条件新增每路真实 canonical `sensor.frame`，`bound + open` 不再算分帧成功。 |
 | 2026-09-03 | 修复缺陷 / 契约扩展 | **打包后二开三处闭环缺口。** ① 渲染方式目录：`displaySystemWorkspaceService` 的 `renderers` 原是硬编码 `heatmap/matrix/raw2d` 三条，`@shroom/frontend` 注册表里真实存在的 `numMatrix/pointGrid/webglHeatmap/blobHeatmap` 在 Builder 与 Agent catalog 里一条都选不到。新建 `backend/extension-host/manifest/displaySystemRendererCatalog.js` 照 `displaySystemCanvasCatalog` 的模式做共享目录（后端只登记 id/label，绘制实现留前端），`handPoints` 故意不登记（点表写死 32×32 手套，与 SDK 自己的 `BUILTIN_MATRIX_RENDERER_OPTIONS` 口径一致）。内置三条一条不删，老 manifest 兜底链路不受影响。② HTTP 写接口无广播：Builder 在进程内保存时自己派发 `shroom-display-systems-updated` DOM 事件让顶部菜单重拉，但 Agent / 脚本走 `POST /api/display-systems` 等四个 HTTP 写接口 + reload 时前端毫无感知，新系统要重启软件才出现。`httpAppFactory` 新增 `publishDisplaySystemsUpdated` 依赖，五条路成功后各广播一次 `{displaySystemsUpdated:{reason,id}}` 系统事件（失败不发），`server.js` 接到 `publishSystemEvent`，`Home.jsx wsData` 收到后翻译成同一个 DOM 事件。③ **Agent 技能漏了激活与开串口两步**：`add-display-system/SKILL.md` 原流程到「保存 → reload → 验证 round-trip」就结束，而保存只是写文件 —— 系统不是当前活动型号（`sensor.switch`）、串口角色没打开（`serial.open` 用 sensor `id` 当 role），dispatcher 策略就判 `sensor type mismatch`、一帧都不派发；用户看到的就是「生成了但没数据」，归零命令跟着报 409 `no-target-channels`（目标通道 = manifest 声明 ∪ 收过帧的，两边都空）。SKILL.md 新增 §7 Activate（三步 + 验证方法 + `LICENSE_REQUIRED` 停止规则），原 §7 顺延为 §8；`policy.json` 的 `displaySystemGeneration` 新增机器可读的 `activation` 段并在 `acceptance` 加一条「active + bound + open」。**诊断过程中纠正过两次自己的判断**：先误判 409 根在 `activeDisplaySystemId` 为空（用户给的响应体钉在 `zeroCommandService.js:324` 的 `no-target-channels`，是下游）；后误判打包漏拷 `display-systems` 是根因（那只影响仓库里已有的 3 个系统，Agent 生成的走 `userData`，能被扫到）。 |
 | 2026-09-02 | 新增功能 / 契约扩展 | Agent App 从单一主渲染器扩展为可选 `renderer` + `charts[]` 展示包：图表获得 `agent-chart:<appId>:<chartId>` 稳定 ID，由宿主挂载到原侧栏并接收同一 canonical 帧；Display System `chartCards`、Builder 草稿保存、公开 SDK/catalog、打包规则与 Agent skills 同步支持。算法仍在永久算法宿主运行，渲染和图表仍是只读表现层。 |
@@ -2872,6 +3037,10 @@ flowchart LR
 
 | 日期 | 完成项 | 说明 |
 | :--- | :--- | :--- |
+| 2026-09-07 | Manifest 正式沉浸模式 | 新字段 `display.layout.presentation` 可由 Builder 或 Agent 写入；standard 保持旧分区，immersive 由宿主铺满安全工作区。 |
+| 2026-09-07 | onbed_filter 发布与真实呼吸波形 | Python 发布缺原生库会明确失败；床垫生命体征包以原生滤波压力提取呼吸起伏，并在生命体征算法异常时继续输出 CoP 与基础压力波形。 |
+| 2026-09-07 | Agent 展示页与手部监测视觉对齐 | 正式运行态变为无重复说明条的纯画布，宿主/PointGrid 使用统一深蓝底色；诊断条保留显式 opt-in。随包生成模板使用透明 root 和隐藏可访问状态，Agent 后续不会再生成第二套页面外壳。 |
+| 2026-09-07 | PointGrid 高 DPI 尺寸稳定 | WebGL 仍按 `devicePixelRatio` 设置绘图缓冲，同时把 Canvas CSS 固定为容器的逻辑宽高；打包应用不再因 `ResizeObserver` 反馈导致主画布高度倍增。结构测试覆盖初始化和 resize 两条路径。 |
 | 2026-09-04 | Agent 自然语言生成选择门禁 | 协议唯一命中预设时强制完整复制；3D 点图优先原生 `pointGrid`；呼吸/重心按 metric 自动选择兼容正式算法包；自定义图表只画透明内容区；真机必须收到正确 identity/点数的真实帧。 |
 | 2026-09-03 | Agent 生成的展示系统能出数据 | 渲染方式目录改共享清单（+4 个 SDK 渲染器）；HTTP 写接口广播 `displaySystemsUpdated`，前端不重启即见新系统；Agent 技能补上 `sensor.switch` + `serial.open` 激活步骤与 policy 机器规则，"保存了但没数据 / 归零 409" 有了明确的责任方。 |
 | 2026-09-02 | Agent 自定义图表正式扩展 | Agent App schema v1 支持可选主渲染器及最多 16 个图表 surface；安装、发现、静态资源、公共 SDK/Builder catalog 返回稳定图表 ID。Display System `chartCards` 可引用 Agent 图表，前端在原侧栏 sandbox iframe 中加载并以 10Hz latest 帧转发 canonical 单/多传感器数据；保存与 Builder 编辑保持该定义。Agent 规则已改为自动选择算法、主渲染与公式/自定义图表，用户无需说内部包名。 |
@@ -3459,10 +3628,25 @@ flowchart LR
 
 ## 8. 项目进度
 
+### 2026-09-08 增量完成
+
+| 完成时间 | 分支 | 完成的功能/工作 | 说明 |
+| :--- | :--- | :--- | :--- |
+| 2026-09-08 | codeOpi | 展示来源独立选择、满屏工作区与图表恢复 | 运行页可切换内置/已安装 Agent 渲染器，Builder 可独立添加自带或 Agent 图表；旧 standard 运行同样铺满并保留浮层；故障 iframe 可单独重新握手。 |
+| 2026-09-08 | codeOpi | 普通需求自动选型 | 取消生成前必答的自带/新建组合确认；从附件与实时目录匹配指标、图形和宿主布局。按项保留明确偏好，仅补缺少图表，缺端口先生成草稿。 |
+| 2026-09-08 | codeOpi | 普通请求隔离前向验证 | 使用原句与真实附件生成临时草稿，发现并补上线序 0-based → 1-based 规则；逐点映射、内存保存及图表合成帧校验通过，保留待安装引用和呼吸有效性能力缺口。 |
+| 2026-09-08 | codeOpi | 退出断管与清理等待 | Python 管道处理异步 EPIPE、停止请求和重启竞态；Electron 等待幂等清理并保留超时退出与更新安装分支，新增故障注入及主入口接线测试。 |
+| 2026-09-08 | codeOpi | 点图冷启动与呼吸符号验证 | 隔离空/残缺帧，避免平滑缓存 NaN 导致必须切换才显示；真实 WebGL 单帧回归覆盖首次显示，呼吸负波形不再与呼吸率混淆。 |
+| 2026-09-08 | codeOpi | 呼吸来源纠正与单值趋势规则 | 删除两层压力代理及虚假波形能力声明；算法包 2.0.0 保留呼吸率与独立 CoP，生成图表允许按算法单值建立有界时间队列。 |
+
 > 记录项目从开始到现在已经完成的所有工作，每次新增追加到末尾。
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-09-07 | codeOpi | Manifest 沉浸布局正式化 | 新增 `display.layout.presentation` 的 standard/immersive 契约、校验、Builder 与宿主消费，Agent 可按“全屏/沉浸”自然语言稳定生成。 |
+| 2026-09-07 | codeOpi | onbed_filter 随包与 CoP 容错 | 发布门禁要求原生库真实进入 runtime；`mattress-vitals` 1.1.0 输出真实压力呼吸波形，生命体征异常不再丢帧或阻断 CoP。 |
+| 2026-09-07 | codeOpi | Agent 运行页视觉收口 | 默认隐藏 Manifest 顶部元数据/选择器调试条，统一宿主与 PointGrid 深蓝背景；Agent App 模板改成透明纯绘图区并用隐藏状态保留可访问诊断，规则禁止重复页面外壳。 |
+| 2026-09-07 | codeOpi | PointGrid Canvas 高度反馈修复 | `setPixelRatio` 后同步 Canvas CSS 逻辑尺寸，切断高 DPI 绘图缓冲高度与容器 `ResizeObserver` 之间的倍增反馈；保留高清渲染，新增结构回归测试。 |
 | 2026-09-04 | codeOpi | Agent 协议/算法/渲染确定性选择与真帧验收 | 自然语言先匹配实时协议预设、正式算法包 metrics 和原生 renderer；唯一匹配不得自行重构，自定义能力仅在显式需要时生成；串口接入以真实 canonical 帧而非 open 状态收口。 |
 | 2026-09-03 | codeOpi | 打包后二开闭环：渲染目录 / 目录变更广播 / Agent 激活步骤 | 后端渲染方式目录与 SDK 注册表对齐；HTTP 写接口成功后广播 `displaySystemsUpdated`；`add-display-system` 技能与 `policy.json` 补上激活（`sensor.switch`）与开串口（`serial.open`）两步及验证方法。 |
 | 2026-09-01 | codeOpi | 展示系统 MVP 真机资料输入包 | `agent-resources/templates/display-system-mvp-input/` 收敛新垫子接入所需的系统信息、逐路身份、协议、线序、样例帧、展示/算法需求和验收证据；打包后位于 `resources/agent/templates/`，可复制填写后直接交给 Agent。 |
@@ -3860,11 +4044,34 @@ flowchart LR
 | 2026-07-30 | codeOpi | 图表卡片本身也是零件 | 把 neal.fun 那个交互的核心动作补上：拖一个零件，页面上真的多一张图表。零件用 `formulaChartTemplates.js` 已有的 6 个模板，新卡片就是一条普通的公式图表定义（多一个 `templateId`），**没有新造图表系统** —— 生命周期、公式编译、逐帧求值全是 `FormulaChartPanel` 已经在跑的东西，这一轮加的是拖放入口和大卡片长相。`chartWidget` 作为**第三块表面**：它写 `shroom.formulaCharts.v1.<matrixName>` 而不是 `display-profile:<id>`，所以 `partSurface` 多返回一个 `'chartWidget'`，`applySurfacePart` / `isSurfacePartActive` 遇到它原样返回 / 返回 false，由配置器交给 `onChartWidgetAdd` 回调 —— 前两块表面一行未改。清单下沉成 `formulaChartStore.js`（一个 localStorage 键一个主人 + 模块级 `Set` 做 `subscribe`），`Home`（要零件高亮）与 `Aside`（要画卡片）**各自订阅**而不靠 props 穿 `CanvasCom.shouldComponentUpdate` 那道闸；`Aside` 的 `super()` 不带 props，故首载放在 `componentDidMount`，`Home.componentDidMount` 会被 `window.__wsReconnect` 重入所以订阅加了幂等守卫。防重复添加靠两级匹配：新定义按 `templateId`，老定义（`+` 号弹窗建的）回退到 `formulasMatch` 比较归一表达式 —— 少这一级会拖出第二份一模一样的卡片。加是幂等的（用户可能已改过公式，再拖当删除等于静默毁掉编辑），删只走卡片 Popconfirm 或把卡片拖回零件栏；那个 drop 处理器只在真删掉东西时才 `preventDefault`，否则 `z-index: 1210` 的底栏会吞掉落向画布的普通零件。卡片由 `Aside` 用自己的 `drawChart` 画（照抄 `onBuiltinSeries` 通路，多一个 `onCustomSeries`），因此免费获得上一轮的图表配色与四个叠加层、且与 Pressure Area 逐像素同源；canvas 不写 width/height 属性以保住 `drawChart` 的 `gap` 数学。自定义图表历史值从 `useState` 移到 ref，Panel 不再以 10Hz re-render，只剩常显入口与编辑弹窗（删掉自己那段 SVG 列表与 7 组死样式），`useImperativeHandle` 多暴露 `openEdit(id)`。测试：新增 `formulaChartStore.test.js` 19 例（坏 JSON、上限、幂等、订阅隔离与抛错容错、老定义公式回退匹配），`canvasParts.test.js` 补第三表面 2 例，`chartAppearance.test.js` 补 `buildSparklinePath` 3 例（前端 119 通过 / 10 套件，`App.test.jsx` 仍是既有的缺 `@testing-library/react`；后端 34/34；eslint 零告警）。 |
 | 2026-07-31 | codeOpi | 草稿层与三个动作 | 把「改坏了想复原、改好了想保存」这半件事补齐。**基线 vs 草稿**两层：基线是文件夹里的 `display-system.json`，草稿是 `display-profile:<id>` + `shroom.formulaCharts.v1.<matrixName>` 两个 localStorage 键；层次本来就是对的（用户偏好盖住 manifest 但没改掉它），这一轮只加动作、不动解析。新增 `displayDraftState.js`（纯函数，不碰 DOM 与 localStorage）：`describeDisplayDraft` 把同一个 `resolveDisplayProfile` 跑两遍 —— 一遍传只含 `profileId`/`rendererId`/`algorithmId` 的 `viewOnly` 当基线 —— 对比**解析结果**判脏，而不是看键在不在（拖走又拖回原值不该一直报脏）；`changes` 直接就是确认框文案，「移除」是撤掉用户加的、「恢复」是把 manifest 声明过却被关掉的放回来。**撤销**只删 `canvas` / `charts` 两个字段并靠 `persistDisplaySelection(..., {replace:true})` 覆盖写回 —— 整键 `removeItem` 会把用户正在看的方案/渲染方式/可视算法一起带走；卡片走 `resetFormulaCharts(matrixName, page.chartCards)` 回到基线而非清空。**保存**另开 `saveDisplaySection` 窄通路（读原文 → 只合并三段 → 原子写回），**不走 Builder 的 `save()`**：那个函数强制 `schemaVersion: 2`、重写 `sensor.matrix` / `protocol.decoding`、把 `files` 压成扁平路径，拿一份 v3 多传感器 manifest 过一遍只为加个配色会把它改坏（测试里有一份手写 v3 manifest 专门守这条）。合并语义 `undefined` = 不改、`null` = 删，所以前端无卡片时给 `[]` 而不是 `undefined`；**先校验后归一**（显式写错的 `legend` 要报错而不是被静默丢弃，落盘的是归一后的规范形态，因为这个文件是给做二开的人读的），唯独 `canvas.widgets` 前后端都显式删掉以保住「跟随 `display.widgets`」的语义。保存 = 写基线 + 清草稿，失败时**绝不清草稿**。**另存为**递归复制整个源目录（v3 有 `cushion/` 这类子目录）只重写 `id`/`name`/`metadata`/`display`，不做 JSON 往返；`metadata.origin` 必须显式改 `'user'`，否则 `classifyDisplaySystemAccess` 会按最高优先级判据把副本判成不可编辑；成功后就地 `registerRuntimeDisplayDefinition` + 派发 `shroom-display-systems-updated`，**留在原地只提示**，不 `sensor.switch` 以免中断现场采集。manifest 补上 `display.chartAppearance` / `display.chartCards`（**刻意不叫 `display.charts`**），`resolveChartAppearance` 加 manifest 基线层，卡片按 `hasFormulaCharts()` 区分「键不存在」与「用户主动删空」。两条新路由 `PATCH /:id/display` 与 `POST /:id/duplicate`，权限方向刻意不同：保存要求 `editable === true`，另存为不检查源能不能写（那是自带系统唯一的保存出路）。边界：约 55 个写死的老展示形式没有文件夹，**只有撤销**。测试：`workspaceService.test.js` 补 v3 逐字保留与目录复制、`appRuntimeDisplaySystems.test.js` 补只读拒绝与副本可编辑、`displaySystemsApi.test.js` 补 403/409/404、`displayDraftState.test.js` 全新（前端 142 通过 / 11 套件，后端 35/35，eslint 零告警）。 |
 | 2026-08-28 | codeOpi | 单 WebSocket 与统一多串口编排 | 对照 `E:\shroom`，确认并保留“一份 SerialManager 管多物理串口”的模型，把 `server.js` 重复串口打开规则收回 `serialPortOrchestrator`，经典与 manifest 通道继续共用现有 manager；本地 WebSocket 从三个物理 Server 收敛为唯一 `19999`，逻辑通道由 manifest `outputChannel` 与已注册串口动态生成，保留旧消息字段、Electron 固定入口和 SDK 默认地址。未复制波特率猜设备、AT 指令或硬编码协议分支。 |
+| 2026-09-07 | codeOpi | 生产依赖打包与包内启动验证 | 按实际 npm/pnpm 调用路径打包完整依赖并保留同名多版本；afterPack 检查 ASAR 依赖闭环，Windows 临时包实际加载 Express/qs、multer、serialport、updater、HTTP 工厂并完成 SQLite 内存读写。 |
+| 2026-09-07 | codeOpi | 随包 Agent 技能中文化 | 两份技能及模板说明完整译为中文，保留技术标识与规则语义，同步打包副本并验证一致性。 |
+
+| 2026-09-07 | Codex | 原生点图工作区铺满与图表浮层 | 新增 workspace 布局目录、保存校验、Builder 和宿主消费；画布高度受控，侧栏可折叠但不卸载，同步 Agent 生成与指标语义规则并增加浏览器布局回归。 |
 
 ## 9. 更新日志
 
+### 2026-09-08 增量记录
+
 | 时间 | 分支 | 变更类型 | 描述 |
 | :--- | :--- | :--- | :--- |
+| 2026-09-08 | codeOpi | 修复缺陷 / 界面与生成规则 | Canvas 顶部跟随实际顶栏高度，消除百分比留白；Agent 模板仅以 values 校验矩阵，允许独立长度的 rawValues；生成前分别确认算法、渲染、图表的自带/新建选择，保留稳定后端链路。 |
+| 2026-09-08 | codeOpi | 生成规则修正 | 将上一轮“三项分别确认”改为默认自动选型，不要求使用者知道包名、布局字段和图表注册；同步两个技能与 policy 的随包副本，硬件接入和新增算法授权边界保留。 |
+| 2026-09-08 | codeOpi | 文档更新 / 前向测试修正 | 明确线序输入序号从 1 开始、点位坐标从 0 开始，禁止仅以数组长度证明映射正确。记录自动选型与隔离验证结果；不把准备好的草稿或代理呼吸指标当成已安装、已真机验收的系统。 |
+| 2026-09-08 | codeOpi | 修复缺陷 | 关闭前取消 Python 在飞请求和排队重启、捕获管道异步错误；主进程等待清理后再退出，最大等待 8 秒。不屏蔽无关异常、不改串口与数据契约。 |
+| 2026-09-08 | codeOpi | 修复缺陷 / 回归验证 | pointGrid 仅接收完整有限帧，冷启动空数据不再污染顶点；新增不切换、不重挂载的单帧 GPU 回归，以及负呼吸波形与非负有效呼吸率的独立测试。 |
+| 2026-09-08 | codeOpi | 修复缺陷 / 生成规则纠正 | 撤销平均/滤波压力及去基线呼吸代理；呼吸趋势可消费算法逐次单值，不要求波形数组。真实原生值及无效标记保留，图表不得用压力兜底。 |
+
+
+| 时间 | 分支 | 变更类型 | 描述 |
+| :--- | :--- | :--- | :--- |
+| 2026-09-07 | codeOpi | 文档更新 | 展示系统与展示应用技能、模板说明中文化；保持可执行示例的技术字段和既有边界，同步随包文档并调整语言无关的一致性检查。 |
+| 2026-09-07 | Codex | 新增功能 / 修复缺陷 | 新增保留图表的 workspace 模式，与覆盖侧栏的 immersive 分离；宿主约束 canvas/iframe 高度，规则禁止二维投影替代原生点图及混淆呼吸波形和频率。 |
+| 2026-09-07 | codeOpi | 修复缺陷 / 打包依赖 | 依据真实生产依赖路径生成完整 FileSet，修复 npm/pnpm 混合目录导致 qs 缺失与多包版本错配；新增 ASAR 内依赖可达性、版本门禁和回归测试。 |
+| 2026-09-07 | codeOpi | 新增功能 / 布局契约 | `display.layout.presentation` 正式支持 standard/immersive，运行时全链路与生成规则一致，旧 manifest 默认 standard。 |
+| 2026-09-07 | codeOpi | 修复缺陷 / 算法发布 | 强制 Python runtime 打入 onbed_filter；呼吸曲线改取真实滤波压力并做快慢基线差，原生异常降级但不阻断 CoP。 |
+| 2026-09-07 | codeOpi | 优化重构 / 界面一致性 | Manifest runtime 默认纯画布、`runtimeChrome` 显式 opt-in；主画布与 PointGrid 对齐手部监测深蓝底色；随包 Agent App 模板移除可见标题/footer/独立背景并保持透明，技能与策略测试同步固定。 |
+| 2026-09-07 | codeOpi | 修复缺陷 / 渲染稳定性 | 修复 `pointGrid` 打包后在高 DPI 屏幕上 Canvas 高度持续增长；初始化和 resize 统一写入 CSS 逻辑尺寸，绘图缓冲继续按 DPR 放大，SDK 测试固定两处调用。 |
 | 2026-09-04 | codeOpi | 修复缺陷 / 规则强化 | `add-display-system` 与 `policy.json` 增加协议预设优先、metric 驱动算法包选择、`3D 点图 → pointGrid` 原生渲染优先、Agent 图表透明内容区和真实 `sensor.frame` 验收门禁；打包规则测试固定这些关键字段。 |
 | 2026-09-03 | codeOpi | 修复缺陷 / 契约扩展 | 新建 `displaySystemRendererCatalog.js`（3 内置 + 4 SDK 渲染器）；`httpAppFactory` 五条展示系统写路径成功后广播 `displaySystemsUpdated`，`Home.jsx` 翻译成 `shroom-display-systems-updated`；`add-display-system/SKILL.md` 新增 §7 Activate，`policy.json` 新增 `displaySystemGeneration.activation`。 |
 | 2026-09-02 | codeOpi | 新增功能 / 展示扩展 | Agent App 新增 `charts[]` 与 chart-only 包，Display System 图表卡片可用稳定 `agent-chart:*` 引用；宿主将其加载在原侧栏并通过既有 sandbox 消息协议发送 canonical 帧。公开 SDK/catalog、Builder 保存、随包 policy/skills 和测试同步更新，形成算法、主渲染器、侧栏图表三类 Agent 扩展。 |

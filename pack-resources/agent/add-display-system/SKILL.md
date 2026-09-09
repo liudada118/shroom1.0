@@ -1,120 +1,146 @@
 ---
 name: add-display-system
-description: Generate and install a complete Shroom schema-v3 multi-sensor display system, including protocol, per-sensor mapping, existing-pipeline algorithms, renderer selection, widgets, charts, storage, replay, and CSV consistency.
+description: 生成并安装完整的 Shroom schema-v3 多传感器展示系统，涵盖串口协议、逐传感器映射、既有链路算法、渲染器选择、组件、图表，以及存储、回放和 CSV 的数据一致性。
 ---
 
-# Add Display System
+# 新增展示系统
 
-This skill generates a complete display system without modifying Shroom's permanent backend. Read
-[`../policy.json`](../policy.json) completely first, especially `displaySystemGeneration`, `sensorData`,
-`algorithmPolicy`, and `changeBoundary`.
+本技能用于生成完整的展示系统，保持 Shroom 的固定后端不变。开始前完整阅读
+[`../policy.json`](../policy.json)，重点关注 `displaySystemGeneration`、`sensorData`、
+`algorithmPolicy` 和 `changeBoundary`。
 
-## Hard boundary
+## 必须遵守的边界
 
-Use public contracts and APIs only. Do not patch Electron, backend, client, SDK, WebSocket, SQLite, replay, CSV,
-or packaged resources. A display-system manifest configures the existing pipeline; it does not replace any part
-of it.
+只使用公开契约和 API。不得修改 Electron、后端、客户端、SDK、WebSocket、SQLite、回放、CSV
+或已打包资源。展示系统配置清单（manifest）用于配置既有链路，不能替换链路的任何部分。
 
-If a required protocol, algorithm host, renderer capability, or API is not advertised by the live platform,
-stop and explain the missing capability. Do not invent a hidden route or alternate pipeline.
+如果当前运行平台没有公开所需的协议、算法宿主、渲染能力或 API，停止并说明缺少哪项能力。
+不得虚构隐藏路由或另建一条处理链路。
 
-## 1. Discover live capabilities
+## 1. 查询当前平台能力
 
-Read in this order:
+按以下顺序读取：
 
-1. `GET /api/sdk/contract` returns the raw contract object (not `HttpResult.data`); verify the stable
-   `shroom.multi-sensor` contract, manifest schema 3, and `sensor.frame` schema 1. Resolve later route names from
-   this response.
-2. `GET /api/agent-apps/policy` and obey `data.policy`.
-3. `GET /api/display-systems/catalog` through the route advertised by the SDK contract. Use its current
-   renderers, visualization algorithms, chart templates/formulas, serial templates, limits, and writable root.
-4. Read the live serial protocol preset endpoint advertised by the contract. Do not create a second list.
-5. `GET /api/display-systems` and `GET /api/agent-apps` to avoid id collisions. Default to no overwrite.
+1. `GET /api/sdk/contract` 返回原始契约对象，不是 `HttpResult.data`。确认稳定契约
+   `shroom.multi-sensor`、展示系统配置格式版本 3，以及 `sensor.frame` 格式版本 1。
+   后续使用的路由名称从该响应中解析。
+2. 调用 `GET /api/agent-apps/policy`，遵守返回的 `data.policy`。
+3. 通过 SDK 契约公开的路由调用 `GET /api/display-systems/catalog`。使用其中当前有效的渲染器、
+   `layoutPresentations` 布局模式、可视化算法、图表模板与公式、串口模板、限制和可写根目录。
+4. 读取契约公开的实时串口协议预设接口，不另行维护一份预设清单。
+5. 调用 `GET /api/display-systems` 和 `GET /api/agent-apps`，避免标识冲突。默认不覆盖已有内容。
 
-## 2. Define business identity before protocol detection
+## 2. 在协议识别前确定业务身份
 
-For every physical sensor collect or confirm:
+先从用户表达和附件提取信息。Agent 自动生成系统名称、稳定标识、输出通道及文件路径，不要求用户填写内部字段。
+单传感器且文档已明确为压力垫时，可以沿用“压力垫”业务名称；多个物理设备的左右手、靠背、
+座椅等对应关系不能猜测。未提供 COM 不阻断生成草稿，只在需要打开硬件时确认端口。
 
-- stable `id`;
-- user-facing business `label` such as 左手、右手、靠背、座椅;
-- unique `outputChannel`;
-- explicit `stored` decision;
-- sensor `type`, matrix geometry, and physical orientation;
-- the temporary COM to inspect, if detection is needed.
+为每个物理传感器确定：
 
-Business identity never comes from COM number, protocol, serial order, arrival order, or array index. Multiple
-devices may use the same protocol. The user must explicitly map each physical device to its intended sensor.
+- 稳定的 `id`；
+- 面向用户的业务名称 `label`，例如左手、右手、靠背、座椅；
+- 唯一的 `outputChannel`；
+- 明确的 `stored` 存储选择；
+- 传感器 `type`、矩阵几何信息和物理朝向；
+- 如需识别协议，明确本次临时探测的 COM 端口。
 
-The canonical identity is always `<displaySystemId>:<sensorId>`; neither part may contain a colon.
+业务身份不得由 COM 编号、协议、串口排列、数据到达顺序或数组下标推断。多个设备可能使用同一协议。
+用户必须明确每个物理设备对应哪个业务传感器。
 
-## 3. Select or detect each protocol
+标准身份始终为 `<displaySystemId>:<sensorId>`，两部分内部均不得包含冒号。
 
-Before constructing a protocol from prose, compare the document with every live preset. Match on baud rate,
-delimiter/header bytes, decoded value type/count, and byte width. If exactly one preset matches, the Agent MUST
-copy that preset's complete `protocol` object; it must not reconstruct an equivalent-looking protocol.
+## 3. 为每个传感器选择或识别协议
 
-A wire document's “frame header + payload + total frame length” describes bytes on the wire. It does not by
-itself select Shroom `fixedLength`: that parser cuts the stream from its current byte position and does not search
-for a header. When the live preset represents the header as a delimiter with `includeDelimiter:false`, decoding
-starts at payload offset `0`; do not duplicate those delimiter bytes as validation or `byteOffset`. For example,
-`AA 55 03 99 + 1024 × uint8` at 1000000 baud MUST resolve to a matching delimiter preset when the live catalog
-advertises one, rather than being rebuilt as fixed length 1028 with offset 4.
+根据文字构造协议前，先将文档与当前所有预设逐一比较。匹配依据包括波特率、分隔符或帧头字节、
+解码值类型与数量，以及每个值的字节宽度。如果恰好命中一个预设，Agent 必须完整复制该预设的
+`protocol` 对象，不得自行重建一份看似等价的协议。
 
-If no preset matches, only construct a protocol when the document states the framing semantics unambiguously.
-Do not infer fixed-length framing from a reported total length. Use live detection or ask for evidence when
-“header”, “delimiter”, “frame start”, or “frame end” could describe more than one parser configuration.
+协议文档中的“帧头 + 数据载荷 + 总帧长”描述的是传输字节，并不直接决定使用 Shroom 的
+`fixedLength`。该解析器从当前字节位置开始切割数据流，不会主动搜索帧头。
+如果当前预设将帧头表示为分隔符，且 `includeDelimiter:false`，解码应从数据载荷偏移 `0` 开始；
+不要再把分隔符字节重复加入校验或 `byteOffset`。例如，波特率 1000000、
+`AA 55 03 99 + 1024 × uint8` 的协议，在当前目录提供匹配的分隔符预设时必须直接使用该预设，
+不能改写为固定帧长 1028、偏移量 4。
 
-For a temporary COM, call the contract-advertised protocol detection route with candidate ids from the live
-preset catalog. Only `matched` may populate the current sensor, and it must copy the complete returned protocol,
-including `includeDelimiter`, validation header and `headerOffset`, checksum type/offset, and whether checksum
-range was explicit.
+只有没有匹配预设，且文档明确说明分帧语义时，才允许构造协议。不得仅凭总长度推断固定长度分帧。
+如果“帧头”“分隔符”“帧起始”或“帧结束”可能对应多种解析配置，应使用实时识别或请求补充依据。
 
-`ambiguous` and `unknown` do not change the draft. Ask for a manual preset or more evidence. Detection answers
-only “which wire protocol”; it never assigns left/right/backrest/seat. Do not save the temporary COM in the
-manifest.
+对临时 COM 端口，调用契约公开的协议识别路由，候选标识必须来自当前预设目录。
+只有结果为 `matched` 时才能填入当前传感器，并且必须完整复制返回的协议，包括
+`includeDelimiter`、校验帧头、`headerOffset`、校验和类型与偏移，以及校验和范围是否显式指定。
 
-Protocol `decoding.valueCount` / fixed `framing.frameLength` and display geometry are independent. If the
-selected protocol explicitly reads 1024 values while point mapping displays 256, preserve both wire fields;
-line/point mapping selects the 256 display points later.
+结果为 `ambiguous` 或 `unknown` 时不修改草稿，应请用户手动选择预设或补充依据。
+协议识别只回答“使用哪种传输协议”，不能分配左手、右手、靠背或座椅身份。
+不得把临时探测的 COM 写入配置清单。
 
-## 4. Choose algorithm, renderer, and charts
+协议的 `decoding.valueCount`、固定长度协议的 `framing.frameLength` 与展示几何相互独立。
+如果所选协议明确读取 1024 个值，而点位映射只展示 256 个点，应保留这两个传输字段；
+后续由线序或点位映射选出需要展示的 256 个点。
 
-Use no algorithm, a declarative JSON algorithm, or another algorithm advertised by the live pipeline. New
-arbitrary JavaScript/Python/WASM/native code requires explicit authorization and must still execute through the
-existing algorithm host. Never place a data-changing algorithm in renderer HTML.
+## 4. 选择算法、渲染器与图表
 
-Treat requested indicators and charts as output-metric requirements before choosing `algorithm.type: "none"`.
-Match the user's words against live package names, descriptions, and `metricDefinitions`: a respiration waveform
-or trend requires a respiration-signal metric, respiration rate requires a rate metric, a center-of-pressure
-trajectory requires paired X/Y metrics, and center offset requires a distance metric. If one compatible registered
-package supplies the requested metrics, the Agent MUST select and attach it. It must not replace those outputs
-with renderer/chart-side estimates merely because the user did not say the internal package id.
+用户描述“要什么”即可。Agent 负责从附件和当前能力目录完成算法、渲染器、图表选型，
+不要求用户知道包名、渲染器标识、布局字段或图表注册方式，也不要求先回答“自带还是新建”。
+未指定来源时，自动采用能满足需求的已有能力；用一句普通话说明组合后继续，不把说明变成必答确认。
+用户仍可分别指定算法、渲染器、图表使用系统自带或 Agent 新建，三者可以任意混合；
+明确选择新建只作用于对应扩展边界，不替换另外两项。“用户可以选择”不等于“用户必须先选择”。
 
-Before generating new Python, inspect `catalog.algorithmPackages` and prefer an exact registered package whose
-`compatibility.matrixTotals` includes the current sensor point count. Copy its `packageManifest`,
-`algorithmSource`, and `metricDefinitions` into the display-system draft; never reference the read-only package
-directory by absolute path. Registered package ids come from the live catalog, not from this skill. If no
-compatible package exists, only then use authorized custom Python.
+仅在附件冲突、设备业务对应关系不明、硬件接入端口未明确，或能力缺口需要改变指标含义、
+新增算法/依赖、替换用户要求的渲染效果时，才询问相关事实或请求所需授权。
+能先完成的草稿继续完成；不得把缺少 COM 变成要求用户重新编写技术提示词的理由。
 
-For an authorized Python algorithm, prefer the live catalog's `algorithmPackageContract` over a bare V1 file.
-Keep V1 `calculate(raw_data, context)` for simple single-frame compatibility. Use API V2 when the algorithm
-loads a model, keeps a time window, needs reset/shutdown, or consumes multiple sensors. Submit the package
-manifest as `definitions.sensors[triggerSensor].algorithmPackage` and its Python source as `algorithmSource`;
-the corresponding sensor declares `algorithm.type: "python"` and `algorithm.packageManifest`.
+普通请求示例：“我现在有协议和线序文件，我想新建一个展示系统，3D 点图的渲染模式，
+然后我需要页面有一个呼吸的图表，还有重心图表。”对此默认完成以下内部决策：
 
-A multi-sensor package MUST list stable sensor ids and one trigger sensor. The host aggregates each route only
-after protocol decode and line/point mapping, keys `request["frames"]` by sensor id, and applies `latest` or
-`strict` software-time synchronization. This does not claim hardware-synchronous sampling. Attach the package
-only to its declared trigger sensor; the other routes keep their own per-channel processing and still feed the
-aggregator.
+- 从附件提取矩阵与协议，按第 3 节匹配实时预设；不能看到总帧长就猜分帧方式。
+- 主画布复用当前目录的原生 3D 点图；“新建展示系统”不代表另写一套点图。
+- “呼吸图表/趋势”将所选算法的呼吸输出按时间入队绘图，不要求算法一次返回整段波形。
+  算法每次返回呼吸率就画“呼吸率趋势（次/分）”；返回呼吸信号采样值就画对应信号曲线，不能用压力替代。
+  用户明确要求呼吸波形时，才必须有该信号输出，不能将呼吸率曲线改名充数。
+  “重心图表”默认展示压力重心 XY 轨迹和当前位置；精确单位、有效条件以所选包为准。
+- 默认沿用平台（手部监测）的宿主外观：统一深色背景、顶栏下铺满、保留图表浮层，
+  不增加标题/波特率/方案说明带。用户不需要再补“像手部监测”“workspace”或“runtimeChrome”。
 
-Example package manifest:
+上述是未指定时的默认解释，不覆盖用户明确要求的其他指标或样式；实际能力缺失时不能声称已实现。
+
+可以不使用算法，也可以使用声明式 JSON 算法或当前链路公开的其他算法。
+新增任意 JavaScript、Python、WASM 或原生算法代码需要用户明确授权，并且仍须通过既有算法宿主执行。
+这项限制针对新算法与依赖，不针对在公开图表扩展内实现用户已经要求的图形。
+不得在渲染器 HTML 中放入会改变数据的算法。
+
+选择 `algorithm.type: "none"` 前，先将用户要求的指标和图表转化为算法输出指标需求。
+结合当前算法包的名称、描述和 `metricDefinitions` 理解用户表达：呼吸趋势可由算法逐次输出的单值组成；
+明确要求呼吸波形才需要呼吸信号指标；呼吸率趋势读取频率指标，压力重心轨迹读取成对 X/Y，偏移读取距离。
+如果某个兼容且已注册的算法包提供了所需指标，Agent 必须选择并挂载它。
+不能因为用户没有说出内部算法包标识，就改用渲染器或图表端的估算值。
+
+生成新的 Python 代码前，检查 `catalog.algorithmPackages`，优先选择
+`compatibility.matrixTotals` 包含当前传感器点数、且满足需求的已注册包。
+将其 `packageManifest`、`algorithmSource` 和 `metricDefinitions` 复制到展示系统草稿，
+不得通过绝对路径引用只读算法包目录。已注册包的标识以当前目录为准，不从本技能中硬编码。
+用户明确选择新建算法，或不存在兼容包且已获授权时，可以使用自定义 Python 算法。
+
+对已获授权的 Python 算法，优先遵循当前目录的 `algorithmPackageContract`，而不是仅提供一个 V1 文件。
+简单单帧算法可以继续使用 V1 `calculate(raw_data, context)`。
+算法需要加载模型、维护时间窗口、重置或关闭生命周期，或接收多个传感器时，应使用 API V2。
+将算法包清单提交到 `definitions.sensors[triggerSensor].algorithmPackage`，
+Python 源码提交为 `algorithmSource`；对应传感器声明
+`algorithm.type: "python"` 和 `algorithm.packageManifest`。
+
+多传感器算法包必须列出稳定的传感器标识，并指定一个触发传感器。
+宿主只在各通道完成协议解码和线序、点位映射后聚合数据，以传感器标识作为
+`request["frames"]` 的键，并采用 `latest` 或 `strict` 软件时间同步策略。
+这不代表硬件同步采样。算法包只挂载到其声明的触发传感器上；
+其他通道保留各自处理流程，并继续向聚合器提供数据。
+
+算法包清单示例：
 
 ```json
 {
   "schemaVersion": 1,
   "id": "seat-back-fusion",
-  "name": "Seat Back Fusion",
+  "name": "座椅靠背融合",
   "version": "1.0.0",
   "apiVersion": 2,
   "language": "python",
@@ -130,40 +156,92 @@ Example package manifest:
 }
 ```
 
-Resolve renderer intent against live renderer ids and labels before creating an App. If a catalog renderer
-directly expresses the request, the Agent MUST use it by default. In particular, “3D point plot”, “3D point
-grid”, “3D 点图”, and “3D 点阵” select the live point-grid renderer (currently `pointGrid` when advertised).
-Creating a new display system is not authorization to create a new renderer. A custom renderer is allowed only
-when the user explicitly requests a new/custom/reference visual that the matching catalog renderer cannot
-express, or when no compatible built-in renderer exists.
+创建展示应用前，先根据当前渲染器的标识和名称匹配用户意图。
+如果目录中的某个渲染器能直接满足需求，Agent 默认必须使用它。
+特别是“3D 点图”“3D 点阵”及其英文表达“3D point plot”“3D point grid”，应选择当前公开的点阵渲染器，
+目前对应 `pointGrid`（以当前目录实际提供为前提）。
+创建新展示系统不等于授权新写渲染器。用户明确选择“新建渲染器”、要求新效果，
+或者不存在兼容的内置渲染器并已获用户同意时，可以使用自定义渲染器。
 
-Choose either:
+增加呼吸或压力重心图表不等于授权替换主渲染器。
+不得用 Canvas 2D 透视投影、线框网格或其他近似实现替代用户要求的原生 3D 点图。
+如果原生渲染器无法读取所配置的通道，应说明兼容性缺口，并在改用其他展示方式前获得明确同意。
+下拉框名称匹配，不能证明实际挂载了预期渲染器。
 
-- an exact built-in renderer id from the live catalog; or
-- a custom renderer installed first with [`../add-display-app/SKILL.md`](../add-display-app/SKILL.md), then
-  referenced by its returned `agent:<appId>` id.
+渲染器选择有两种方式：
 
-Use catalog-advertised `chartCards` for scalar formula curves. They are rendered by the host in the existing
-sidebar chart area. For XY trajectories, multiple synchronized series, or another chart shape that formulas
-cannot express, inspect `GET /api/agent-apps` for a matching `charts[]` descriptor or install one with
-[`../add-display-app/SKILL.md`](../add-display-app/SKILL.md). Reference the returned stable id as
-`display.chartCards[].agentChartId`; never guess it. A chart card may also declare an output-channel `source`
-and JSON `options`, delivered in the sandbox init config. The chart iframe receives the same canonical frame
-and stable-identity `channels[]` as the renderer.
+- 使用当前目录返回的准确内置渲染器标识；
+- 先按照[`新增展示应用`](../add-display-app/SKILL.md)安装自定义渲染器，
+  再使用返回的 `agent:<appId>` 标识引用它。
 
-Charts consume the selected algorithm package's named metrics when those metrics exist. Presentation-only
-fallback calculations require explicit user authorization and must be labelled as proxies. A custom chart iframe
-draws only the plot body on a transparent root; it must not recreate the host card background, title, delete
-control, summary block, or sidebar spacing, because the host owns that shell.
+标量公式曲线使用目录公开的 `chartCards`，由宿主绘制到既有侧栏图表区域。
+对于 XY 轨迹、多条同步曲线或公式无法表达的其他图形，先在 `GET /api/agent-apps`
+中查找匹配的 `charts[]` 描述，并核实其指标语义、数据源和当前消息契约；只凭同名不能证明兼容。
+没有可用模板或兼容图表时，按照[`新增展示应用`](../add-display-app/SKILL.md)创建并安装仅图表应用，
+这是完成用户已请求图表的正常步骤，不必再要求用户理解 iframe 或注册方式。
+只补缺少的图表；不得因此重写主渲染器、算法或宿主外壳。用户明确要求“全部自带”时，
+应报告缺口而非自动新建。
+将返回的稳定标识填入 `display.chartCards[].agentChartId`，不得猜测。
+图表卡片还可以声明输出通道 `source` 和 JSON `options`，由沙箱初始化配置传入。
+图表 iframe 接收与渲染器相同的标准帧，以及具有稳定身份的 `channels[]`。
 
-A custom Agent renderer remains one main-canvas visualization: it must not recreate the application header,
-profile controls, summary-card column, chart sidebar, or a complete dashboard shell. Custom chart code belongs
-in `app.json.charts[]` and is mounted by the host in the sidebar, never embedded into the main renderer. Neither
-surface creates a second storage or CSV truth.
+所选算法包已有对应命名指标时，图表必须消费这些指标。
+呼吸只能绑定所选内置或 Agent 算法包明确提供的呼吸输出；仅有指标名称并不能证明语义正确。
+禁止用总压力、平均压力、滤波压力或其去基线趋势补成呼吸波形，即使计算写在 Python 包内或加了代理标签也不行。
+只有用户明确要求呼吸波形但算法未提供对应信号时，才报告不支持；普通呼吸趋势可以将算法呼吸率单值入队，
+准确标为“呼吸率趋势（次/分）”。不得把两种指标混名，也不要求算法返回数组。
+队列只做展示缓存，按 channelId、指标和帧时间维护，有时间/容量上限；重复时间戳不追加，相同值的新采样仍追加。
+无效标记（如所选包规定的 -1、88）、缺失和非有限值不作为测量样本入队；恢复后重新成段，不跨缺口连线。
+预热、失败、缺失、过期时清除当前读数并中断曲线，显示真实状态，不保留旧值冒充新结果。
+队列和连线属于图表展示，不是新建算法；确需新建呼吸算法时按算法扩展授权执行。
+用户另行要求的压力趋势可作为独立图表，不能计作呼吸功能。
+自定义图表 iframe 只在透明根容器中绘制图形主体，不得重新绘制宿主卡片背景、标题、
+删除控件、摘要区或侧栏间距，这些外壳由宿主管理。
 
-## 5. Build schema-v3 manifest and per-sensor definitions
+为每张指标图表记录算法包及版本、来源指标、含义、单位或明确的无单位说明、有效条件，以及是否为代理指标。
+标题和单位必须清楚，代理性质和无效状态必须可见。
+呼吸波形与呼吸率不同：去除基线后的波形可以正常包含正负值；有效呼吸率则应为非负值，并标注“次/分钟”。
+不得仅为了隐藏正负号而取绝对值、裁掉负值或平移波形。
+指标缺失、预热中、失败或过期时应展示真实状态，不得伪造为零，也不能换成压力变化估计。
+任何代理指标均须披露其性质；披露不代表允许用它替代用户要求的呼吸算法输出。
+压力重心图表应说明坐标范围和方向；没有有效压力时表示无有效重心，不能画成原点。
 
-Always submit a non-empty `sensors[]`. Every sensor explicitly contains all of these fields:
+自定义 Agent 渲染器仍只负责一个主画布可视化，不得重建应用顶栏、方案控件、摘要卡片列、
+图表侧栏或完整仪表盘外壳。自定义图表代码应声明在 `app.json.charts[]`，
+由宿主挂载到侧栏，不能嵌入主渲染器。这两种展示面都不得创建另一套存储数据或 CSV 数据来源。
+
+正式运行页面以展示为主。保持 `display.controls.runtimeChrome` 缺省或为 false，
+避免宿主在主画布上方重复放置展示系统标识、标题、波特率、方案、渲染器和可视化算法选择器。
+这些控件属于既有顶栏和设置、配置器（Builder）界面。
+只有用户明确要求在画布上显示诊断或方案控件时，才设为 true。
+自定义渲染器根容器应透明，使宿主与手部监测一致的深色背景保持连贯；
+不得在图形周围增加说明标题或元数据条。
+
+布局是独立的正式契约。应区分操作系统级全屏、铺满固定顶栏下方的应用工作区，以及隐藏侧栏。
+主渲染器始终铺满固定顶栏下方，默认使用 `display.layout.presentation: "workspace"` 并保留图表浮层。
+不能用 standard 的旧分区留白或 iframe 固定高度来满足此要求。
+不得把所有“全屏”请求都自动解释为 `immersive`。
+
+对于“像手部监测一样铺满工作区，同时保留图表”，目标是主画布铺满固定顶栏下方，
+并由宿主提供可折叠的图表浮层。必须保留用户明确要求的图表，不能把全屏理解为允许隐藏图表。
+选择模式前，应检查当前公开的布局能力及其实际行为。
+当 `catalog.layoutPresentations` 提供 `workspace`，且声明
+`retainsCharts:true` 和 `collapsibleCharts:true` 时，
+应使用 `display.layout.presentation: "workspace"` 表达这一组合需求。
+`immersive` 模式会覆盖标准侧栏，单独使用它不能同时满足“铺满工作区”和“保留图表”；
+只有它的实际行为符合用户布局要求时才使用。
+如果现有布局没有任何一种能同时满足两项要求，应说明具体缺少的宿主能力，
+以及宿主改动需要单独授权。不得虚构配置字段、修改受保护源码，或在 Agent 渲染器中重建应用外壳。
+技能规则本身不能创造平台尚未实现的功能。
+
+主画布必须适配宿主可用空间，不得用 1080px 等固定大高度模拟全屏。
+CSS 布局尺寸应与 Canvas 绘图缓冲的像素尺寸独立；更新绘图缓冲不能撑大父容器并触发尺寸反馈循环。
+只有测得的目标尺寸变化时才调整尺寸。主画布不得溢出产生滚动条，图表侧栏可以独立滚动。
+这些性质需要在窗口缩放和系统切换后验证，不能只检查首次加载。
+
+## 5. 构造 schema-v3 配置清单和逐传感器定义
+
+始终提交非空的 `sensors[]`。每个传感器都必须显式包含以下全部字段：
 
 ```json
 {
@@ -187,7 +265,14 @@ Always submit a non-empty `sensors[]`. Every sensor explicitly contains all of t
 }
 ```
 
-Use distinct per-sensor file paths for a multi-sensor system. Submit their content under the exact sensor id:
+多传感器系统中，各传感器使用独立文件路径。按准确的传感器标识提交对应内容：
+
+平台的 `lineOrder.order[i]` 表示第 i 个输出位置读取的 **从 1 开始**的输入序号；
+`pointOrder.points[i]` 则是 **从 0 开始**的 `[row, col]`。两种编号不可混用。
+从文档提取线序时先核实编号基数与映射方向；完整 0..N-1 排列转换为每项加 1，
+完整 1..N 排列保持原值。子集、占位零、缺失点或映射方向不明时不能仅凭最小值猜测，需核实含义。
+用可辨识样本逐点核对 `output[i] === input[order[i] - 1]`，再核对点位落点；
+仅校验数组长度、唯一性或 JSON 能解析不足以证明线序正确。转换只在导入定义时做一次。
 
 ```json
 {
@@ -207,19 +292,17 @@ Use distinct per-sensor file paths for a multi-sensor system. Submit their conte
 }
 ```
 
-Do not submit the first route's definitions as a shared top-level substitute. Each sensor owns its line order,
-point order, coordinate map, algorithm data, and authorized algorithm source.
+不得把第一路的定义作为共享的顶层替代项提交。
+每个传感器独立拥有线序、点位顺序、坐标映射、算法数据，以及已获授权的算法源码。
 
-For every data widget, explicitly set `source` to the sensor's exact `outputChannel`, for example `leftHand`.
-New manifests should not use `leftHandData`, `data`, or widget position as the source. Declare each renderer,
-widget, profile, default view/profile, sidebar source, and chart card explicitly, and make every reference resolve.
-For a custom renderer, its renderer catalog item, data widget type, and profile renderer use the exact
-`agent:<appId>` id.
+每个数据组件都必须将 `source` 显式设为对应传感器准确的 `outputChannel`，例如 `leftHand`。
+新配置不得使用 `leftHandData`、`data` 或组件位置作为数据来源。
+显式声明每个渲染器、组件、展示方案、默认视图与默认方案、侧栏数据来源和图表卡片，并保证所有引用均能解析。
+自定义渲染器的目录项、数据组件类型和方案中的渲染器，均使用准确的 `agent:<appId>` 标识。
 
-## 6. Save without overwrite
+## 6. 保存且默认不覆盖
 
-Send the complete draft to the contract-advertised display-system save route, currently
-`POST /api/display-systems`:
+将完整草稿发送到契约公开的展示系统保存路由，当前为 `POST /api/display-systems`：
 
 ```json
 {
@@ -236,57 +319,70 @@ Send the complete draft to the contract-advertised display-system save route, cu
 }
 ```
 
-The example's empty arrays are placeholders; never submit them empty. On id conflict, choose a new id or stop.
-Only set `overwrite:true` after the user explicitly authorizes replacement of that exact display-system id.
+示例中的空数组仅为占位，实际提交时不得为空。标识冲突时，应更换标识或停止。
+只有用户明确授权替换该准确展示系统标识时，才可设置 `overwrite:true`。
 
-After a 201 response, call the advertised reload route. Read the saved system's editor/detail response and
-verify every sensor independently round-tripped: identity, label, outputChannel, stored, protocol, matrix, files,
-algorithm, line/point order, coordinate map, and algorithm data. A first-sensor projection over another route is
-a failed installation.
+收到 201 响应后，调用公开的重新加载路由。
+读取已保存系统的编辑器或详情响应，逐个传感器独立核对保存再读取后的内容：
+身份、业务名称、`outputChannel`、`stored`、协议、矩阵、文件、算法、线序与点位顺序、坐标映射和算法数据。
+如果第一路传感器的投影覆盖了另一路，应判定安装失败。
 
-## 7. Activate the system and open its serial channels
+## 7. 激活系统并打开各串口通道
 
-Saving only writes files. **A saved system receives no data until it is the active sensor type and its serial
-roles are opened.** Both steps are the Agent's responsibility; the platform will not infer them.
+保存只会写入文件。**系统必须成为当前活动传感器类型，并打开对应串口角色后，才能收到数据。**
+这两步均由 Agent 负责执行，平台不会自动推断。没有明确设备与端口时，先交付配置并说明待接入，
+在打开硬件前询问；不要猜 COM，也不要为了生成预览切换或关闭用户正在使用的系统。
 
-1. Activate: `POST /api/commands` with `{ "type": "sensor.switch", "payload": { "sensorType": "<sensors[0].type>" } }`
-   (route `http.routes.sensorType` is an equivalent shortcut). `sensorType` MUST be the first sensor's exact
-   `type` — it is the activation key shared by every channel of the system; a mismatch leaves every binding in
-   `sensor type mismatch` and no frame is dispatched.
-2. For every sensor, open its port: `POST /api/commands` with
-   `{ "type": "serial.open", "payload": { "role": "<sensors[].id>", "path": "<COM path>", "baudRate": <protocol.baudRate> } }`.
-   `role` is the sensor `id` (the platform's `serialRole`), not `outputChannel` and not a legacy alias.
-   A role the active manifest does not declare is rejected with `INVALID_COMMAND` before any hardware action.
-3. Verify with `GET /api/display-systems`: the system's entries under `runtimeBindings.bindings` MUST show
-   `status: "bound"` with no `error`; then `GET /api/serial/status` MUST list each role as open.
-4. When a physical COM was supplied, observe the contract-advertised realtime stream and require at least one
-   real `sensor.frame` for every opened sensor. Its canonical identity must match the saved sensor and its
-   normalized values must have the expected mapped point count (for a full matrix, `rows * cols`). Synthetic
-   samples do not satisfy this gate. `bound + open` proves only control-plane setup, not successful framing.
+1. 激活：向 `POST /api/commands` 发送
+   `{ "type": "sensor.switch", "payload": { "sensorType": "<sensors[0].type>" } }`。
+   路由 `http.routes.sensorType` 是等价快捷入口。
+   `sensorType` 必须与第一个传感器的 `type` 完全一致，这是该系统所有通道共用的激活键；
+   不一致时，所有绑定都会停留在 `sensor type mismatch`，无法派发数据帧。
+2. 为每个传感器打开串口：向 `POST /api/commands` 发送
+   `{ "type": "serial.open", "payload": { "role": "<sensors[].id>", "path": "<COM path>", "baudRate": <protocol.baudRate> } }`。
+   `role` 使用传感器 `id`，即平台的 `serialRole`，不能使用 `outputChannel` 或旧版别名。
+   当前配置清单未声明的角色会在操作硬件前被拒绝，并返回 `INVALID_COMMAND`。
+3. 调用 `GET /api/display-systems` 验证：该系统的 `runtimeBindings.bindings`
+   必须显示 `status: "bound"` 且没有 `error`；
+   然后确认 `GET /api/serial/status` 将每个角色列为已打开。
+4. 用户提供了物理 COM 时，观察契约公开的实时数据流，要求每个已打开的传感器至少收到一帧真实
+   `sensor.frame`。其标准身份必须与已保存传感器一致，归一化数值必须具有预期映射点数；
+   完整矩阵的点数为 `rows * cols`。合成样本不能代替这一验收。
+   `bound + open` 只能证明控制面配置完成，不能证明分帧成功。
 
-If either command returns `LICENSE_REQUIRED` (403), stop and report — activation is gated by the platform's
-license and is not something the Agent can bypass.
+任一命令返回 `LICENSE_REQUIRED`（403）时，停止并报告。
+系统激活受平台许可控制，Agent 不得绕过。
 
-If no valid real frame arrives within a bounded observation window, report the system as configured but not
-hardware-verified. Do not call the installation complete; preserve parser/validation diagnostics so framing can
-be corrected without changing the permanent backend.
+在有限的观察时间内未收到有效真实帧时，应说明“已完成配置，尚未通过硬件验证”。
+不得宣称安装已经完整完成；保留解析和校验诊断信息，以便在不修改固定后端的前提下修正分帧配置。
 
-## 8. End-to-end acceptance
+## 8. 端到端验收
 
-Use distinct sample values per channel and deliberately vary arrival order. Confirm:
+给各通道使用不同的样本数值，并主动改变到达顺序，确认：
 
-- every widget shows the intended `sensorLabel` and full canonical `channelId`;
-- every widget reads its explicit `outputChannel` source and keeps state by `channelId`;
-- protocol decode, line order, point order, algorithm, and zeroing execute exactly once in the existing pipeline;
-- for each `stored:true` route, realtime `payload.value`, SQLite data, replay `payload.value`, and CSV `realData`
-  contain the same final array and identity;
-- `stored:false` routes remain realtime-only;
-- optional sandbox `channels[]` remains correct when reordered and is not used to infer roles;
-- optional sandbox `serial` metadata can show the physical connection but never changes or infers business identity;
-- built-in chart cards or custom presentation charts update from the intended route;
-- every supplied physical serial route produced a real canonical frame with the expected identity and value count;
-- no permanent backend or stable-contract source changed.
+- 每个组件显示正确的 `sensorLabel` 和完整标准 `channelId`；
+- 每个组件读取显式配置的 `outputChannel` 数据来源，并按 `channelId` 维护状态；
+- 协议解码、线序、点位顺序、算法和归零在既有链路中各执行一次；
+- 每条 `stored:true` 通道的实时 `payload.value`、SQLite 数据、回放 `payload.value`
+  和 CSV `realData` 包含相同的最终数组与身份；
+- `stored:false` 通道只参与实时展示；
+- 沙箱中可选的 `channels[]` 在重排后仍然正确，且不用于推断业务角色；
+- 沙箱中可选的 `serial` 元数据可以说明物理连接，但不会改变或推断业务身份；
+- 内置图表卡片或自定义展示图表均从正确通道更新；
+- 每条已提供的物理串口通道都产生了身份和数值数量符合预期的真实标准帧；
+- 实际挂载的渲染器标识及实现，与要求的原生点图渲染器一致，不能只核对显示名称；
+- 主画布和指标图表接收预期标准通道的真实数据，时间戳和指标来源一致；
+- 请求的工作区布局保留固定顶栏与所需图表，且均可见、可交互；
+- 持续渲染、重复调整窗口尺寸和切换系统时，画布尺寸能够稳定，不发生增长循环或主画布溢出；
+- 指标标题、单位、有正负值的波形语义、代理标签，以及缺失、预热中、失败、过期状态均符合算法契约；
+- 固定后端和稳定契约源码均未发生改动。
 
-Report display-system id, sensor-to-business-role mapping, canonical channel ids, protocol result per sensor,
-algorithm choice, renderer ids, chart strategy, save/reload result, activation and serial-open results, and all
-acceptance evidence.
+先校验配置和逐传感器定义；暂存草稿中的待安装图表引用不算合法安装标识，必须在安装响应后替换并重新校验。
+每项验收都记录“通过”“失败”或“尚未验证”，并附上依据。
+保存成功、收到渲染器就绪消息或仅打开串口，都不能单独作为端到端验收结论。
+明确区分新建测试页面与用户已有桌面窗口。
+必要验收项失败或尚未验证时，不得宣布整项交付完成；应说明已实现内容，以及缺少的依据或平台能力。
+
+最终先用普通话简述页面效果、实际完成到哪一步及用户仍需提供的信息。将系统/通道标识、
+逐传感器协议、算法版本、图表指标来源、保存回读、激活与硬件验收依据保存在可查阅的记录中，
+不要用一大段内部字段代替用户关心的结果，也不要要求用户照着技术报告重新下指令。

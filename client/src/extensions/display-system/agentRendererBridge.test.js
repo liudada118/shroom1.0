@@ -6,6 +6,8 @@ import {
   buildAgentRendererReadyMessages,
   getAgentRendererInitSignature,
   hasAgentRendererFrameData,
+  hasAgentRendererIdentity,
+  resolveAgentChartFrame,
   normalizeAgentRendererApps,
   parseAgentChartId,
   parseAgentRendererId,
@@ -14,6 +16,23 @@ import {
 } from './agentRendererBridge.js';
 
 describe('agent renderer bridge', () => {
+  it('缺少通道身份时等待；图表 source 独立路由且不借用其他通道', () => {
+    expect(hasAgentRendererIdentity({})).toBe(false);
+    const identity = { displaySystemId: 'chair', sensorId: 'seat', channelId: 'chair:seat', outputChannel: 'seatPressure' };
+    expect(hasAgentRendererIdentity(identity)).toBe(true);
+    expect(hasAgentRendererIdentity({ ...identity, channelId: 'chair:back' })).toBe(false);
+    const frame = { identity, values: [1], channels: [{
+      displaySystemId: 'chair', sensorId: 'back', channelId: 'chair:back', outputChannel: 'backPressure',
+      values: [1, 2], rawValues: [1, 2, 3, 4], matrix: { rows: 1, cols: 2 },
+      algorithmMetrics: { copX: 1 },
+    }] };
+    expect(resolveAgentChartFrame(frame, 'seatPressure')).toBe(frame);
+    expect(resolveAgentChartFrame(frame, 'backPressure')).toMatchObject({
+      identity: { channelId: 'chair:back' }, values: [1, 2],
+      rawValues: [1, 2, 3, 4], algorithmMetrics: { copX: 1 },
+    });
+    expect(resolveAgentChartFrame(frame, 'missing').values).toEqual([]);
+  });
   it('parses IDs and normalizes the HttpResult app catalog', () => {
     expect(parseAgentRendererId('agent:pressure-map')).toBe('pressure-map');
     expect(parseAgentRendererId('heatmap')).toBeNull();

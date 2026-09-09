@@ -11,6 +11,7 @@ import {
   buildAgentRendererReadyMessages,
   getAgentRendererInitSignature,
   hasAgentRendererFrameData,
+  hasAgentRendererIdentity,
   readAgentRendererResponse,
   resolveAgentRendererEntryUrl,
 } from './agentRendererBridge.js';
@@ -46,9 +47,11 @@ export default function AgentRendererHost({
   const frameMessageRef = useRef(null);
   const loadTimeoutRef = useRef(null);
   const [status, setStatus] = useState({ phase: 'loading', message: '正在加载 Agent 渲染器…' });
+  const [reloadKey, setReloadKey] = useState(0);
+  const hasIdentity = hasAgentRendererIdentity(identity);
   const entryUrl = useMemo(
-    () => resolveAgentRendererEntryUrl(app?.entryUrl, app?.apiBase || app?.entryUrl, app?.appId),
-    [app?.apiBase, app?.appId, app?.entryUrl],
+    () => hasIdentity ? resolveAgentRendererEntryUrl(app?.entryUrl, app?.apiBase || app?.entryUrl, app?.appId) : '',
+    [app?.apiBase, app?.appId, app?.entryUrl, hasIdentity],
   );
   const initMessage = useMemo(() => buildAgentRendererInit({
     rendererId,
@@ -189,6 +192,19 @@ export default function AgentRendererHost({
     if (postToIframe(initMessage)) initPostedRef.current = true;
   }, [armLoadTimeout, initMessage, postToIframe]);
 
+  /** 重新加载已修复的模块并重新握手，不重启串口、算法或其他图表。 */
+  const retryLoad = useCallback(() => {
+    clearLoadTimeout();
+    readyRef.current = false;
+    initPostedRef.current = false;
+    setStatus({ phase: 'loading', message: '正在重新加载模块…' });
+    setReloadKey((key) => key + 1);
+    armLoadTimeout();
+  }, [armLoadTimeout, clearLoadTimeout]);
+
+  if (!hasIdentity) {
+    return <div className="agent-renderer-host is-waiting" role="status">等待传感器通道</div>;
+  }
   if (!entryUrl) {
     return (
       <div className="agent-renderer-host is-error" role="alert">
@@ -205,7 +221,7 @@ export default function AgentRendererHost({
       style={{ '--agent-renderer-height': `${app?.height || 480}px` }}
     >
       <iframe
-        key={entryUrl}
+        key={`${entryUrl}:${reloadKey}`}
         ref={iframeRef}
         src={entryUrl}
         title={label || rendererId}
@@ -224,7 +240,10 @@ export default function AgentRendererHost({
         <div className="agent-renderer-status is-loading" role="status">{status.message}</div>
       ) : null}
       {status.phase === 'error' ? (
-        <div className="agent-renderer-status is-error" role="alert">{status.message}</div>
+        <div className="agent-renderer-status is-error" role="alert">
+          <span>{status.message}</span>
+          <button type="button" onClick={retryLoad}>重新加载模块</button>
+        </div>
       ) : null}
       {status.phase === 'ready' && !hasValues ? (
         <div className="agent-renderer-status is-empty" role="status">等待传感器数据</div>

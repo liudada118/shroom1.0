@@ -597,6 +597,16 @@ try {
   const presetBackedCatalog = buildDisplaySystemBuilderCatalog({
     serialProtocolPresets: loadSerialProtocolPresets().presets,
   });
+  assert.deepStrictEqual(presetBackedCatalog.layoutPresentations.map((item) => item.id),
+    ['standard', 'immersive', 'workspace']);
+  const workspaceLayout = presetBackedCatalog.layoutPresentations.find((item) => item.id === 'workspace');
+  assert.strictEqual(workspaceLayout.fillsWorkspace, true);
+  assert.strictEqual(workspaceLayout.retainsCharts, true);
+  assert.strictEqual(workspaceLayout.collapsibleCharts, true);
+  const legacyLayout = presetBackedCatalog.layoutPresentations.find((item) => item.id === 'standard');
+  assert.strictEqual(legacyLayout.fillsWorkspace, true);
+  assert.strictEqual(legacyLayout.collapsibleCharts, true);
+  assert.strictEqual(presetBackedCatalog.layoutPresentations.find((item) => item.id === 'immersive').retainsCharts, false);
 
   // 三份内置模板一个都不能少 —— 旧 manifest 的 metadata.builder.serialTemplate 还指着它们。
   ['pressure-fixed-length', 'pressure-u8-tail', 'pressure-adc16-tail'].forEach((id) => {

@@ -707,7 +707,10 @@ def getData(data, config=None):
     """
     处理传感器数据，返回健康监测结果（新版 API）
     """
-    outputs = ncz.step(build_step_inputs(data, config))
+    # 新版原生库即使调用方没有可调参数也强制要求 sensitivity_threshold；自动选 ABI，
+    # 避免 smallBed 这类稳定调用方因只传 data 而在打包后失效。
+    effective_config = {} if config is None and health()["onbedFilterSensitivitySchema"] else config
+    outputs = ncz.step(build_step_inputs(data, effective_config))
 
     # 安全转换 numpy 值为 Python 原生类型
     def safe_float(val, default=0.0):
@@ -717,11 +720,15 @@ def getData(data, config=None):
             return default
 
     def safe_list(val):
+        """把原生数组转成可 JSON 序列化的列表。"""
         if val is None:
             return []
         if hasattr(val, 'tolist'):
             return val.tolist()
         return list(val)
+
+    matrix_origin = safe_list(outputs.get("matrix_origin"))
+    matrix_filter = safe_list(outputs.get("matrix_filter"))
 
     result = {
         # 核心生理指标
@@ -731,14 +738,15 @@ def getData(data, config=None):
         "sosflag": safe_float(outputs.get("sosflag", outputs.get("sos_flag", 0))),
         "merged_alarm": safe_float(outputs.get("merged_alarm", 0)),
         "runtime": safe_float(outputs.get("runtime", 0)),
-        "inBedtime": safe_float(outputs.get("inBedtime", 0)),
+        "inBedtime": safe_float(outputs.get("inBedtime", outputs.get("onbed_ratio", 0))),
         "rateMin": safe_float(outputs.get("rateMin", outputs.get("rate_minute", -1))),
-        "strokerisk": safe_float(outputs.get("strokerisk", 0)),
-        "strokeriskMin": safe_float(outputs.get("strokeriskMin", 0)),
+        "strokerisk": safe_float(outputs.get("strokerisk", outputs.get("stroke_risk", 0))),
+        "strokeriskMin": safe_float(outputs.get("strokeriskMin", outputs.get("awake_state", 0))),
         "body_movement_data": safe_float(outputs.get("body_movement_data", outputs.get("bodyMovementData", 0))),
+        # ⚠️ 当前原生接口没有呼吸波形输出，不能把滤波/原始压力均值包装成呼吸信号。
         # 矩阵数据
-        "matrix_origin": safe_list(outputs.get("matrix_origin")),
-        "matrix_filter": safe_list(outputs.get("matrix_filter")),
+        "matrix_origin": matrix_origin,
+        "matrix_filter": matrix_filter,
     }
 
     return result

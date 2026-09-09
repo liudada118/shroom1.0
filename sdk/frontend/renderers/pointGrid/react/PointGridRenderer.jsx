@@ -72,7 +72,7 @@ import { DUAL_CHANNEL_DEFAULTS, createThresholdState } from '../../../core/displ
 import { addSide, findMax, gaussBlur_1, interpSmall, jet } from '../../../core/frameMath.js';
 import { jetgGrey } from '../../../core/greyLadder.js';
 import { deriveGridSize, normalizePointGridParams } from '../core/params.js';
-import { buildPointGridBasePositions } from '../core/pipeline.js';
+import { buildPointGridBasePositions, copyPointGridFrame } from '../core/pipeline.js';
 // 打包器把它变成一个真实存在的 URL；理由见文件头第 1 条。
 // 2026-08-07 从 `./circle.png` 挪到 `../../shared/three/`：`handPoints` 渲染器也要这张图，
 // 放在两个渲染器目录之一会让另一个跨目录引资源。它和 `SelectionHelper` /
@@ -329,7 +329,8 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
       if (!state.renderer || !state.camera) return;
       const width = Math.max(1, container.clientWidth || window.innerWidth);
       const height = Math.max(1, container.clientHeight || window.innerHeight);
-      state.renderer.setSize(width, height, false);
+      // 同步 CSS 逻辑尺寸，避免高 DPI 绘图缓冲尺寸反过来撑高容器并触发无限 resize。
+      state.renderer.setSize(width, height, true);
       state.camera.aspect = width / height;
       state.camera.updateProjectionMatrix();
     }
@@ -410,9 +411,11 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
 
       state.renderer = new THREE.WebGLRenderer({ antialias: true });
       state.renderer.setPixelRatio(window.devicePixelRatio);
-      state.renderer.setSize(viewportWidth, viewportHeight, false);
+      // setPixelRatio 只放大绘图缓冲；CSS 仍固定为逻辑像素，容器高度才不会按 DPR 递增。
+      state.renderer.setSize(viewportWidth, viewportHeight, true);
       state.renderer.outputEncoding = THREE.sRGBEncoding;
-      state.renderer.setClearColor(0x000000);
+      // 对齐手部监测 3D 场景，避免通用点图在宿主深蓝背景上形成突兀的纯黑矩形。
+      state.renderer.setClearColor(0x10152b);
       container.replaceChildren(state.renderer.domElement);
 
       state.controls = new TrackballControls(state.camera, state.renderer.domElement);
@@ -562,9 +565,12 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
           if (flag) propsRef.current.changeSelect?.({ sit: [0, 72, 0, 72] });
         }
       },
-      sitData(prop) {
+      sitData(prop = {}) {
+        const values = copyPointGridFrame(prop.wsPointData, sit.num1 * sit.num2);
+        // ⚠️ 首次挂载的 values=[] 不是有效矩阵，不能覆盖初始化的安全缓冲。
+        if (!values) return;
         const t = state.tuning;
-        state.ndata1 = (prop.wsPointData || []).map((a) => (a - t.valuef1 < 0 ? 0 : a));
+        state.ndata1 = values.map((a) => (a - t.valuef1 < 0 ? 0 : a));
         state.ndata1Num = state.ndata1.reduce((a, b) => a + b, 0);
         if (state.ndata1Num < prop.valuelInit) {
           state.ndata1 = new Array(sit.num1 * sit.num2).fill(0);
@@ -584,9 +590,11 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
           state.ndata1 = new Array(sit.num1 * sit.num2).fill(0);
         }
       },
-      backData(prop) {
+      backData(prop = {}) {
+        const values = copyPointGridFrame(prop.wsPointData, back.num1 * back.num2);
+        if (!values) return;
         const t = state.tuning;
-        state.ndata = prop.wsPointData || [];
+        state.ndata = values;
         state.ndataNum = state.ndata.reduce((a, b) => a + b, 0);
         state.ndata = state.ndata.map((a) => (a - t.valuef2 < 0 ? 0 : a - t.valuef2));
       },

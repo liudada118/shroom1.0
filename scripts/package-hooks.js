@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { verifyPackagedDependencies } = require('./pack-runtime-dependencies');
 
 const PACK_OUTPUT_DIRS = ['out', 'dist'];
 
@@ -47,6 +48,8 @@ function cleanPackOutputs(projectRoot = process.cwd()) {
 
 async function electronBuilderAfterPack(context) {
   removeBundledConfig(context && context.appOutDir);
+  const resources = context.packager.getResourcesDir(context.appOutDir);
+  verifyPackagedDependencies(path.join(resources, 'app.asar'));
 }
 
 async function electronForgeAfterComplete(buildPath) {

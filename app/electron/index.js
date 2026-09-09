@@ -15,6 +15,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
+const { createApplicationQuitHandler } = require('./applicationQuit');
 
 // Windows 控制台默认代码页(936/GBK)会把 UTF-8 中文日志显示成乱码。
 // 在引入后端服务（触发授权等中文日志）之前，把控制台切到 UTF-8(65001)，
@@ -595,10 +596,13 @@ function cleanupApplicationResources() {
 
   appCleanupPromise = (async () => {
     killVite();
-    await closeStaticServer();
-    if (typeof shutdownServer === "function") {
-      await shutdownServer();
-    }
+    // 两侧同时开始关闭，静态连接不能阻止后端先停分发、算法请求和串口。
+    await Promise.all([
+      closeStaticServer(),
+      Promise.resolve().then(() => {
+        if (typeof shutdownServer === 'function') return shutdownServer();
+      }),
+    ]);
   })();
 
   return appCleanupPromise;
@@ -801,16 +805,19 @@ app.on("window-all-closed", () => {
 });
 
 // 优雅退出：清理资源
-app.on("before-quit", () => {
-  logger.info("[Main] Application is quitting, cleaning up...");
-  cleanupApplicationResources().catch((err) => {
-    logger.warn("[Main] Cleanup failed:", err.message);
-  });
-  if (appUpdater) {
-    if (typeof appUpdater.isInstallingUpdate === "function" && appUpdater.isInstallingUpdate()) {
-      logger.info("[Main] Skip updater dispose because update installation is in progress");
-    } else {
-      appUpdater.dispose();
+app.on("before-quit", createApplicationQuitHandler({
+  app,
+  logger,
+  /** 保留安装更新路径的 updater，其余退出先停止更新定时器。 */
+  cleanup: async () => {
+    logger.info("[Main] Application is quitting, cleaning up...");
+    if (appUpdater) {
+      if (typeof appUpdater.isInstallingUpdate === "function" && appUpdater.isInstallingUpdate()) {
+        logger.info("[Main] Skip updater dispose because update installation is in progress");
+      } else {
+        appUpdater.dispose();
+      }
     }
-  }
-});
+    await cleanupApplicationResources();
+  },
+}));

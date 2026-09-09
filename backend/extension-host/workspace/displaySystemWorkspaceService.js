@@ -31,6 +31,7 @@ const {
   DISPLAY_RENDERERS,
 } = require('../manifest/displaySystemRendererCatalog');
 const {
+  DISPLAY_LAYOUT_PRESENTATIONS,
   normalizeCanvasConfig,
   normalizeChartAppearanceConfig,
   normalizeChartCardsConfig,
@@ -495,6 +496,13 @@ function buildDisplaySystemBuilderCatalog({
     // 渲染方式目录。内置三条由主应用直接实现，其余来自 @shroom/frontend 注册表；
     // 与 colormaps 同理，绘制实现在前端，这里只登记 id 和中文名。
     renderers: [...DISPLAY_RENDERERS],
+    layoutPresentations: DISPLAY_LAYOUT_PRESENTATIONS.map((id) => ({
+      id,
+      label: { standard: '兼容标准（铺满、图表浮层）', immersive: '沉浸（隐藏侧栏）', workspace: '铺满（图表浮层）' }[id],
+      fillsWorkspace: true,
+      retainsCharts: id !== 'immersive',
+      collapsibleCharts: id !== 'immersive',
+    })),
     visualizationAlgorithms: [
       { id: 'identity', type: 'identity', label: '原始数据', options: {} },
       { id: 'normalize', type: 'normalize', label: '归一化', options: { max: 100 } },

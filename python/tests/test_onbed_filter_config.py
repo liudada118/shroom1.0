@@ -80,6 +80,26 @@ class JqbedAlgorithmConfigTests(unittest.TestCase):
             else:
                 self.assertEqual(inputs[key], float(expected))
 
+    def test_get_data_auto_selects_the_packaged_sensitivity_schema(self):
+        class SensitivityNcz:
+            captured = None
+
+            @classmethod
+            def step(cls, inputs):
+                """sensitivity_threshold"""
+                cls.captured = inputs
+                return {"matrix_origin": [], "matrix_filter": []}
+
+        original = MODULE.ncz
+        try:
+            MODULE.ncz = SensitivityNcz
+            MODULE.getData([0] * 1024)
+        finally:
+            MODULE.ncz = original
+
+        self.assertEqual(SensitivityNcz.captured["sensitivity_threshold"], 0.0)
+        self.assertNotIn("head_foot_area", SensitivityNcz.captured)
+
     def test_build_step_inputs_rejects_invalid_dynamic_values(self):
         invalid_configs = (
             {"threshold_factor": float("inf")},
@@ -109,12 +129,15 @@ class JqbedAlgorithmConfigTests(unittest.TestCase):
                 cls.captured = inputs
                 return {
                     "rate": 12,
-                    "heart_rate": 70,
-                    "stateInBbed": 1,
-                    "sosflag": 1,
+                    "state_in_bed": 1,
+                    "sos_flag": 1,
                     "merged_alarm": 0,
+                    "onbed_ratio": 2.5,
+                    "rate_minute": 13,
+                    "stroke_risk": 3,
+                    "awake_state": 1,
                     "matrix_origin": [],
-                    "matrix_filter": [],
+                    "matrix_filter": [2] * 1024,
                 }
 
         original = MODULE.ncz
@@ -126,8 +149,33 @@ class JqbedAlgorithmConfigTests(unittest.TestCase):
 
         self.assertEqual(FakeNcz.captured["sos_peak_threshold"], 22.0)
         self.assertEqual(result["sosflag"], 1.0)
+        self.assertEqual(result["stateInBbed"], 1.0)
+        self.assertEqual(result["inBedtime"], 2.5)
+        self.assertEqual(result["rateMin"], 13.0)
+        self.assertEqual(result["strokerisk"], 3.0)
+        self.assertEqual(result["strokeriskMin"], 1.0)
+        self.assertNotIn("respiration_waveform", result)
+        self.assertEqual(result["matrix_filter"], [2] * 1024)
         self.assertIn("merged_alarm", result)
         self.assertIn("matrix_origin", result)
+
+    def test_get_data_does_not_make_a_waveform_from_unfiltered_pressure(self):
+        """原生输出缺少滤波矩阵时，也不能回退到原始压力制造呼吸波形。"""
+        class FakeNcz:
+            @staticmethod
+            def step(_inputs):
+                """模拟只有呼吸率的原生接口。"""
+                return {"rate": 14}
+
+        original = MODULE.ncz
+        try:
+            MODULE.ncz = FakeNcz
+            for pressure in [1, 20, 0, 8]:
+                result = MODULE.getData([pressure] * 1024)
+                self.assertEqual(result["rate"], 14.0)
+                self.assertNotIn("respiration_waveform", result)
+        finally:
+            MODULE.ncz = original
 
 
 if __name__ == "__main__":

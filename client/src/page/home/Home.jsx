@@ -127,6 +127,7 @@ import {
   registerRuntimeDisplayDefinition,
 } from '../../displays/registry';
 import { readManifestChannelFrames } from '../../extensions/display-system/manifestSceneAdapter';
+import ManifestSidebarOverlay from '../../extensions/display-system/ManifestSidebarOverlay.jsx';
 import RendererHost from '../../renderers/RendererHost.jsx';
 import { resolveRendererFromDefinition } from '../../renderers/registry';
 // 只引参数表，不引渲染器本体 —— params.js 是纯函数模块（无 three.js），
@@ -4970,7 +4971,9 @@ class Home extends React.Component {
             </React.Suspense>
           </Modal>
 
-          {this.state.matrixName != "robot0428" ? <CanvasCom matrixName={modeCanvasMatrixName} chartKey={chartAppearanceKey}>
+          {this.state.matrixName != "robot0428" ? <ManifestSidebarOverlay
+            enabled={runtimeDisplayDefinition?.source === 'manifest' && runtimeDisplayDefinition.page?.layout?.presentation !== 'immersive'}
+          ><CanvasCom matrixName={modeCanvasMatrixName} chartKey={chartAppearanceKey}>
             <Aside
               i18n={i18n}
               locale={this.state.locale}
@@ -4981,7 +4984,7 @@ class Home extends React.Component {
               numMatrixFlag={this.state.numMatrixFlag}
               sidebarConfig={runtimeDisplayDefinition?.source === 'manifest' ? runtimeDisplayDefinition.page?.sidebar : null}
             />
-          </CanvasCom> : ''}
+          </CanvasCom></ManifestSidebarOverlay> : ''}
 
           {runtimeDisplayDefinition?.source === 'manifest' ? (
             <React.Suspense fallback={<div className="manifest-renderer-loading"><Spin /></div>}>

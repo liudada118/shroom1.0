@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "id": "mattress-vitals",
   "name": "床垫生命体征",
-  "version": "1.0.0",
-  "description": "复用内置 onbed_filter，输出呼吸、心率、在离床、告警和压力系数。",
+  "version": "2.0.0",
+  "description": "复用 onbed_filter 的呼吸率、生命体征与独立容错重心。respirationRate 是次/分的单值，可按时间入队画呼吸率趋势；-1 为未稳定，88 为检测中，不能作为测量值。当前接口不提供呼吸波形，不输出 respirationSignal，不以压力趋势替代。",
   "apiVersion": 2,
   "language": "python",
   "entry": "algorithm.py",
@@ -19,10 +19,9 @@
       "maxAgeMs": 1000
     }
   },
-  "parameters": {},
+  "parameters": { "sampleRateHz": 50.0 },
   "output": {
     "metrics": [
-      "respirationSignal",
       "respirationRate",
       "minuteRespirationRate",
       "heartRate",
@@ -35,10 +34,10 @@
       "copDistance",
       "strokeRisk",
       "sleepState",
-      "bodyMovement"
+      "bodyMovement",
+      "onbedFilterHealthy"
     ],
     "metricDefinitions": [
-      { "id": "respirationSignal", "label": "呼吸波形代理", "unit": "", "decimals": 3, "panel": "none" },
       { "id": "respirationRate", "label": "呼吸率", "unit": "次/分", "decimals": 1, "panel": "pressure" },
       { "id": "minuteRespirationRate", "label": "分钟呼吸率", "unit": "次/分", "decimals": 1, "panel": "none" },
       { "id": "heartRate", "label": "心率", "unit": "bpm", "decimals": 1, "panel": "pressure" },
@@ -51,7 +50,8 @@
       { "id": "copDistance", "label": "重心偏移", "unit": "点", "decimals": 2, "panel": "none" },
       { "id": "strokeRisk", "label": "中风风险", "unit": "", "decimals": 0, "panel": "none" },
       { "id": "sleepState", "label": "睡眠状态", "unit": "", "decimals": 0, "panel": "none" },
-      { "id": "bodyMovement", "label": "体动", "unit": "", "decimals": 2, "panel": "none" }
+      { "id": "bodyMovement", "label": "体动", "unit": "", "decimals": 2, "panel": "none" },
+      { "id": "onbedFilterHealthy", "label": "生命体征算法状态", "unit": "", "decimals": 0, "panel": "none" }
     ]
   },
   "catalog": {
