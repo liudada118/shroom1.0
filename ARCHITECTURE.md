@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-08-28
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-09-09
 
 ## 1. 项目概述
 
@@ -69,6 +69,7 @@ shroom1.0/
 │
 ├── # ── 模块化拆分 ──
 ├── server/                  # 从 server.js 提取的独立模块
+│   ├── halowReceiver.js     # 人体优化的 HaLow TCP 接收、设备 ID、拆帧与连接控制
 │   ├── index.js             # 模块入口，统一导出
 │   ├── mathUtils.js         # 数学/数据处理纯函数（高斯模糊、插值、分压等）
 │   ├── dbManager.js         # 数据库初始化和管理
@@ -330,6 +331,14 @@ graph TD
 - **Python 与告警边界**：`python/app/onbed_filter_example.py` 的 `getData(data, config=None)` 将合法 JSON 配置转换为 `onbed_filter.pyd` 的标量或 `float32` 二元数组输入。SOS 配置本身不直接触发或改写前端告警；只有 PYD 输出经 Python RPC 返回的 `sosflag` 继续进入现有 `Home`/`Aside` 告警路径。
 - **正式 runtime**：Windows 仓库直接跟踪指定的 `python/app/onbed_filter.cp311-win_amd64.pyd`，固定 SHA-256 为 `CDC003A317F8281AB126839DF4A3E94237A5856229CB3660CFAEB453B4D462E2`，保证其他电脑 `git pull` 后不会继续沿用仍要求 `head_foot_area` 的旧二进制。`npm run prepare-pack-resources` 默认校验该固定哈希；仍可用 `ONBED_FILTER_PYD_SOURCE` 与 `ONBED_FILTER_PYD_SHA256` 显式注入并校验外部候选。构建脚本对 Python 3.11 探测、PyInstaller 构建统一强制 UTF-8，生成 `python/dist/onbed_server/onbed_server.exe` 后执行 `health` JSON-line RPC，只有 `pong=true`、`onbedFilterAvailable=true` 且 `onbedFilterSensitivitySchema=true` 才继续同步到 `pack-resources/python/onbed_server/onbed_server.exe`，从打包阶段阻断旧字段协议。`npm run check-python-runtime-health` 可独立复验。打包后的 `pyWorker` 从 `process.resourcesPath/python`（含 `app.asar.unpacked` 候选）解析该可执行文件，并保持 stdout 仅承载 JSON-line RPC。`python/app/serial_monitor_updated2.0(1).py` 仅是非运行时、未跟踪参考，不属于提交、构建输入或打包 runtime。
 
+### 4.4. 人体全身优化 HaLow 数据入口
+
+`humanBodyOptimized` 可在串口和 HaLow TCP 两种传输入口间切换。A 板通过 UART 把原始帧交给 B 板，B 板经已配置的 HaLow 网关主动连接电脑；`server/halowReceiver.js` 使用 Node.js `net` 监听选定本机 IPv4 和端口（默认网卡优先 `192.168.100.2`，端口 `12345`）。每条连接先识别 `AA 55 00 LL + ASCII ID`，随后缓存、拆分 `AA 55 03 99 + 1024 字节`；每个连接独立缓存，支持半帧、粘帧及帧间杂字节重同步。
+
+一次只将所选 B 板的完整 payload 送入现有 `parser` 的 `data` 处理器，继续执行原始1024点处理、清零、`colOrSendData`、SQLite 采集及 WebSocket `sitData` 广播。`Home.jsx` 的原始矩阵统计、3D/原始数字入口、历史回放和 CSV 沿用原实现；不修改人体模型、点位映射、方向、渲染参数或压力单位。
+
+`Title.jsx` 仅在人体优化系统挂载 `HalowConnection.jsx`，提供监听、停止、在线 ID 选择、帧率和错误提示。串口与 TCP 互斥；采集/回放期间禁止启动或切换设备。所选设备掉线后保留其 ID 等待重连，不自动改用其它板；重复在线 ID 拒绝接入。掉线/停止仅向实时视图发送清零消息，不把合成零帧写入采集记录。切换展示系统、授权失效和退出程序时停止监听；本次不写入网关或 B 板无线配置。
+
 ## 5. API 端点 (Endpoints)
 
 本项目不使用 HTTP REST API，而是通过 **WebSocket 消息协议**进行前后端通信。系统运行 3 个 WebSocket 服务器：
@@ -359,6 +368,7 @@ graph TD
 | `getMessage.backIndex` | 靠背传感器索引 |
 | `getMessage.history` | 历史数据查询 |
 | `getMessage.serialReset` | 串口重置 |
+| `halow: { action, requestId, host?, port?, deviceId? }` | WS 19999 的 HaLow 控制消息；action 为 `status/start/stop/select`。start 使用电脑本机 IPv4 与端口，select 使用在线设备 ID。返回 `halowResult`（ok、requestId、action、message）与 `halowStatus`；状态在运行时每500ms广播，包含监听状态、设备列表、帧率、字节数和错误。 |
 | `getMessage.indexArr` | 批量索引设置 |
 | `getMessage.getJqbedAlgorithmConfig` | 读取 jqbed 实时算法配置、PYD 状态和最后保存时间；成功或拒绝均返回关联结果 |
 | `getMessage.setJqbedAlgorithmConfig` | 校验、原子保存并立即应用完整的 18 项 jqbed 算法配置 |
@@ -843,6 +853,7 @@ graph TD
 | 2026-08-27 | Revise | 人体原始数据单面切换与单位格统一 | 原始数据页新增“正面 / 背面”切换，一次只绘制当前面的7个槽位和30列布局；底层仍保留67列逻辑源表及14槽位投影。上半身按列数比例分配可用宽度并为每张卡保留一致外壳补偿，使手臂、肩膀和胸背单位格保持等大。 |
 | 2026-08-27 | Revise | 人体原始数据背面右肩臂方向修正 | 根据实物反馈将背面右肩膀与右手臂的三行顺序由 `0→1→2` 改为 `2→1→0`，肩到手的逐行列方向保持不变；通道号和值共用修正后的槽位投影，原始1024点、统计、实时、回放和CSV不变。 |
 | 2026-08-28 | Revise | 平台目标架构与人体渲染技术资料 | 新增平台介绍与使用指南、目标架构、产品概念一页纸和三维人体压力优化渲染专利交底草案，并同步人体低面数参考模型资源。 |
+| 2026-09-09 | Codex | 人体优化 HaLow 数据接入 | 新增 TCP 接收和工具栏连接入口；真实 STA_002 约97～99fps接入既有原始数据与渲染流程，保持串口/网络互斥及授权生命周期。 |
 
 ## 9. 更新日志
 
@@ -1292,6 +1303,7 @@ graph TD
 | 2026-08-27 | Revise | 优化重构 | 人体原始数据页改为用户提供的67列原始展开图，建立独立14槽位投影并停止调用 `orientPartMatrix`；此条取代上一条中“原始数据拓扑页跟随 `number.flipRow`”的描述，场景内部位数字面板仍沿用该方向规则。正背躯干的重复行仅用于视觉展开，不复制采集数据。 |
 | 2026-08-27 | Revise | 优化重构 | 人体原始数据页增加正面/背面分段切换，界面每次仅挂载当前面的7槽位、30列画布，解决正背面无法在一屏完整展示的问题；67列逻辑源表、14槽位投影、400个唯一通道与520个逻辑可见单元保持不变。上半身卡片按 `7/3/10/3/7` 列数比例并预留统一外壳宽度，修复肩膀单位格再次缩小。 |
 | 2026-08-27 | Revise | 修复缺陷 | 修复原始数据背面右肩膀、右手臂上下颠倒：两个槽位只反转三行顺序，不交换卡片、不改变肩到手的逐行列方向；修正后首行分别为 `894,926,958` 与 `990,1022,862,830,798,766,734`。 |
+| 2026-09-09 | Codex | 新增功能 | 人体全身优化支持 HaLow TCP 数据源：独立 ID/帧缓存、单设备选流、端口占用反馈、掉线重连和停止清理；保留原渲染、采集、回放与CSV链路。新增9项接收器测试，前端构建及31项映射/WS、9项采集/导出/授权回归检查通过。 |
 
 *变更类型：`新增功能` / `优化重构` / `修复缺陷` / `配置变更` / `文档更新` / `依赖升级` / `初始化`*
 

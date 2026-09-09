@@ -1,4 +1,4 @@
-import{r as i}from"./vendor-antd-C-NmBJYk.js";/**
+import{r as i}from"./vendor-antd-Bc90Nnd6.js";/**
  * react-router v7.13.1
  *
  * Copyright (c) Remix Software Inc.

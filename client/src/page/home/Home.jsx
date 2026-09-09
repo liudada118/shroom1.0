@@ -788,6 +788,8 @@ class Home extends React.Component {
       colNum: 0,
       history: "now",
       jqbedAlgorithmConfig: null,
+      halowStatus: null,
+      halowResult: null,
       jqbedAlgorithmConfigResult: null,
       jqbedAlgorithmStatus: { state: 'waiting', error: null },
       wsConnected: false,
@@ -1424,6 +1426,8 @@ class Home extends React.Component {
   wsData = (e) => {
     sitPress = 0;
     let jsonObject = JSON.parse(e.data);
+    if (jsonObject.halowStatus) this.setState({ halowStatus: jsonObject.halowStatus });
+    if (jsonObject.halowResult) this.setState({ halowResult: jsonObject.halowResult });
     this.syncSmallBed12BMatrixSize(jsonObject);
 
     if (jsonObject.jqbedAlgorithmConfig) {
@@ -4141,6 +4145,8 @@ class Home extends React.Component {
             smallBed12BRealtimeSamplePoint={this.state.smallBed12BRealtimeSamplePoint}
             history={this.state.history}
             jqbedAlgorithmConfig={this.state.jqbedAlgorithmConfig}
+            halowStatus={this.state.halowStatus}
+            halowResult={this.state.halowResult}
             jqbedAlgorithmConfigResult={this.state.jqbedAlgorithmConfigResult}
             jqbedAlgorithmStatus={this.state.jqbedAlgorithmStatus}
             wsConnected={this.state.wsConnected}

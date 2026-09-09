@@ -18,6 +18,7 @@ import { bthClickHandle as heatmapBthClickHandle } from '../onestep/heatmap';
 import { translateDomainLabel } from '../../i18n/translateDomainLabel';
 import { getLanguageLocale } from '../../i18n';
 import JqbedAlgorithmConfigModal from './JqbedAlgorithmConfigModal';
+import HalowConnection from './HalowConnection';
 import { getJqbedConfigAccess } from './jqbedAlgorithmConfig';
 import {
   PRESSURE_SCENES,
@@ -1747,11 +1748,16 @@ class Title extends React.Component {
         }
 
         <Menu className='menu' onClick={this.onClick} selectedKeys={[this.state.current]} mode="horizontal" items={navItems} />
+        {this.props.matrixName === HUMAN_BODY_OPTIMIZED_MATRIX && <HalowConnection
+          status={this.props.halowStatus} result={this.props.halowResult}
+          connected={this.props.wsConnected} connectionEpoch={this.props.wsConnectionEpoch}
+          history={this.props.history} collecting={!this.props.colFlag} send={this.props.wsSendObj} />}
         {this.props.matrixName != 'localCar' ? this.props.history === 'now' ? this.props.matrixName != 'car' && this.props.matrixName != 'car10' && this.props.matrixName != 'sofa' && this.props.matrixName != 'yanfeng10' && this.props.matrixName != 'volvo' && this.props.matrixName != 'carQX' && this.props.matrixName != wholeChairType_title && this.props.matrixName != minzhenType_title && this.props.matrixName != 'hand0507' && !tactileGloveTypes_title.includes(this.props.matrixName) && this.props.matrixName != 'footVideo' && this.props.matrixName != 'eye' ? <><Select
 
           style={{ marginRight: 6, width: 140 }}
           placeholder={t('chooseSensor')}
           value={this.props.portname || undefined}
+          disabled={this.props.matrixName === HUMAN_BODY_OPTIMIZED_MATRIX && this.props.halowStatus?.running}
           onOpenChange={() => {
             this.props.wsSendObj({ serialReset: true })
           }}
@@ -2141,6 +2147,7 @@ class Title extends React.Component {
 
         <Button onClick={() => {
           this.props.wsSendObj({
+            halowStop: this.props.matrixName === HUMAN_BODY_OPTIMIZED_MATRIX,
             sitClose: true,
             backClose: true,
             headClose: true,

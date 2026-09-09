@@ -102,6 +102,7 @@ const {
   transposeMatColToVisualDirection,
 } = require('./server/csvMatrixUtils');
 const smallBed12B = require('./server/smallBed12B');
+const { HalowReceiver, createHalowProtocol } = require('./server/halowReceiver');
 const {
   estimatePointPressure,
   FILTER_THRESHOLD: PRESSURE_CALIBRATION_FILTER_THRESHOLD,
@@ -3142,6 +3143,7 @@ function shutdownServer() {
   reportHttpServer = null;
 
   serverShutdownPromise = Promise.all([
+    closeWithTimeout("HaLow TCP", halowReceiver.stop()),
     closeWithTimeout("port1", closeSerialPort(port1, "port1")),
     closeWithTimeout("port2", closeSerialPort(port2, "port2")),
     closeWithTimeout("portHead", closeSerialPort(portHead, "portHead")),
@@ -3262,6 +3264,7 @@ function sendLicenseErrorToAll(msg) {
 /** 2h 复检回调：valid 由 true→false（吊销/过期/回拨锁定/断网无缓存）时通知前端停用。 */
 function onLicensePollChange(st, prevValid) {
   if (prevValid && !st.valid) {
+    halowReceiver.stop().catch(error => logger.warn('[HaLow] Stop failed:', error.message));
     logger.warn('[License] 复检失效，通知前端停止使用：' + (st.reason || '') + (st.locked ? '（已锁定）' : ''));
   }
   broadcastLicenseStatus();
@@ -3393,6 +3396,9 @@ function broadcastJson(payload) {
 
 function switchActiveDisplaySystem(receiveFile, reason = 'file switch') {
   if (typeof receiveFile !== 'string' || !receiveFile.trim()) return false;
+  if (halowReceiver.active) {
+    halowReceiver.stop().catch(error => logger.warn('[HaLow] Stop on system switch failed:', error.message));
+  }
   const previousFile = file;
   backClose = true;
   sitClose = true;
@@ -3457,6 +3463,27 @@ const jqbedAlgorithmProtocol = createJqbedAlgorithmProtocol({
   sendJson,
   broadcastJson,
   getAlgorithmStatus: () => jqbedAlgorithmStatus,
+});
+
+// Transport only: reuse the exact existing 1024-point serial processing/recording path.
+const halowReceiver = new HalowReceiver({
+  isAllowed: () => !serverShutdownRequested && licenseManager.isLicenseValid() && file === 'humanBodyOptimized',
+  onFrame: payload => {
+    if (file === 'humanBodyOptimized' && licenseManager.isLicenseValid()) parser.emit('data', payload);
+  },
+});
+halowReceiver.on('status', status => broadcastJson({ halowStatus: status }));
+halowReceiver.on('clear', () => {
+  // Clear the view only. A synthetic zero frame must never enter recorded samples.
+  if (file === 'humanBodyOptimized' && !localFlag) broadcastJson({ sitData: new Array(1024).fill(0) });
+});
+const handleHalowMessage = createHalowProtocol({
+  receiver: halowReceiver,
+  getContext: () => ({
+    licenseValid: licenseManager.isLicenseValid(), file, playback: localFlag, collecting: flag,
+    serialOpen: Boolean(port1?.isOpen || com),
+  }),
+  sendJson,
 });
 
 module.exports = {
@@ -3636,11 +3663,16 @@ module.exports = {
       sendLicenseStatusTo(ws);
       // 连接时主动 push 一次传感器类型清单（配合渲染端的请求-应答，避免首屏空列表）
       sendSensorTypesTo(ws);
+      if (licenseManager.isLicenseValid()) sendJson(ws, { halowStatus: halowReceiver.snapshot() });
 
       ws.on("message", function incoming(message) {
 
 
         const getMessage = JSON.parse(message);
+        if (getMessage.halow) {
+          handleHalowMessage(getMessage, ws).catch(error => logger.warn('[HaLow]', error.message));
+          return;
+        }
         if (jqbedAlgorithmProtocol.handle(getMessage, {
           client: ws,
           licenseValid: licenseManager.isLicenseValid(),
@@ -4278,6 +4310,10 @@ module.exports = {
            * 鐏忓棗鐤勯弮璺洪獓濡炲懏鏆熼幑顕€鈧岸浜鹃幍鎾崇磻
            */
           if (JSON.parse(message).sitPort != null) {
+            if (halowReceiver.active) {
+              sendJson(ws, { halowResult: { ok: false, message: '请先停止 HaLow 接收，再打开串口' } });
+              return;
+            }
             sitClose = false
             com = JSON.parse(message).sitPort;
             if (port1?.isOpen) {
@@ -4440,6 +4476,9 @@ module.exports = {
            * 鐏忓棗楠囧鍛殶閹诡噣鈧岸浜鹃崗鎶芥４
            */
           if (JSON.parse(message).sitClose === true) {
+            if (getMessage.halowStop === true && halowReceiver.active) {
+              halowReceiver.stop().catch(error => logger.warn('[HaLow] Stop failed:', error.message));
+            }
             sitClose = true
             com = undefined; // 清除 com 防止自动重连
             if (port1?.isOpen) {
