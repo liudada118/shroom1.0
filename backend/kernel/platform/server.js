@@ -21,6 +21,8 @@ const {
 const { attachHeartbeat, parseJsonMessage } = require('./websocket/websocketTransportService');
 const { createServerShutdownOrchestrator } = require('./bootstrap/serverShutdownOrchestrator');
 const { createPetCareRuntimeService } = require('../algorithm-channel/petCareRuntimeService');
+const { createAlgorithmMarketService } = require('../../extension-host/runtime/algorithmMarketService');
+let algorithmMarketService = null;
 const { createControlCommandRouter } = require('./commands/controlCommandRouter');
 const { registerRuntimeCommandHandlers } = require('./commands/registerRuntimeCommandHandlers');
 const {
@@ -1292,7 +1294,7 @@ function getShutdownOrchestrator() {
  */
 function shutdownServer() {
   appRuntime.displaySystems.stopRuntimeDispatch();
-  return getShutdownOrchestrator().shutdownServer();
+  return Promise.resolve(algorithmMarketService?.dispose()).then(() => getShutdownOrchestrator().shutdownServer());
 }
 let baudRate = 1000000;
 const timeNum = 1000 / 12;
@@ -1533,6 +1535,21 @@ const {
   wsSubscriptions,
 } = webSocketRuntime;
 let server = wsServer;
+
+algorithmMarketService = createAlgorithmMarketService({
+  channelBus,
+  packages: appRuntime.getAlgorithmMarketPackages(),
+  getContext: () => {
+    const sensorType = runtimeContext.getSensorType();
+    const nativePackages = { jqbed: 'mattress-vitals', smallBed: 'mattress-vitals', petCare: 'pet-care', petCareMini: 'pet-care-mini' };
+    return {
+      sensorType,
+      allowed: runtimeContext.getNowDate() < endDate,
+      playback: runtimeContext.isLocalPlayback(),
+      reservedPackageIds: [nativePackages[sensorType], ...appRuntime.displaySystems.getActiveAlgorithmPackageIds(sensorType)].filter(Boolean),
+    };
+  },
+});
 
 /**
  * 发布一帧实时数据（无条件发）。
@@ -2599,6 +2616,7 @@ module.exports.getChannelBusStatus = getChannelBusStatus;
 module.exports.handleCommand = handleCommand;
 
 const httpApp = createHttpApp({
+  algorithmMarketService,
   agentAppService: appRuntime.agentApps,
   controlCommandService,
   getChannelBusStatus,

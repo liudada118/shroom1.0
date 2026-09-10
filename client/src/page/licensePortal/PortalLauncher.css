@@ -1,0 +1,127 @@
+/* fiber-sensor 视觉迁移后的宿主适配：真实目录、授权表单、键盘弹层与稳定 Canvas。 */
+.fiber-portal .portal-page { display: block; }
+.fiber-portal button:disabled { opacity: .45; cursor: not-allowed; }
+.fiber-portal .portal-access-hint { position: relative; color: rgba(164, 188, 214, .38); font-size: 12px; line-height: 1.5; margin: 9px 0 0; }
+.fiber-portal .portal-home-scene-status { position: absolute; z-index: 2; left: 44px; bottom: 28px; color: rgba(129, 174, 211, .4); font-size: 12px; }
+.fiber-portal .portal-status.is-offline .portal-status-dot { background: #ffbc65; box-shadow: none; animation: none; }
+/* 只锁定打开选择器时的页面，长目录仍在弹层内部滚动。 */
+html:has(.fiber-portal .system-selector-backdrop.is-open),
+body:has(.fiber-portal .system-selector-backdrop.is-open) { overflow: hidden; }
+.fiber-portal .system-selector-backdrop { --selector-gap: clamp(18px, 4vw, 56px); padding: var(--selector-gap); overflow: clip; transition: none; }
+.fiber-portal .system-selector-dust { position: absolute; inset: 0; overflow: clip; pointer-events: none; }
+.fiber-portal .system-selector-backdrop.is-open { opacity: 1; visibility: visible; pointer-events: auto; transition-delay: 0s; }
+.fiber-portal .system-selector-panel { grid-template-columns: 350px minmax(0, 1fr); height: min(680px, calc(100dvh - 2 * var(--selector-gap))); min-height: 0; max-height: calc(100dvh - 2 * var(--selector-gap)); }
+.fiber-portal .portal-particle-flight { position: fixed; z-index: 110; pointer-events: none; transform-origin: 0 0; contain: size layout; }
+.fiber-portal .system-selector-list { padding: 30px 24px 22px; }
+.fiber-portal .system-selector-heading { padding: 0 0 16px; }
+.fiber-portal .system-selector-heading h2 { font-size: 28px; line-height: 1.3; letter-spacing: -.02em; }
+.fiber-portal .system-selector-heading p { margin-top: 8px; }
+.fiber-portal .portal-filter-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.fiber-portal .portal-filter-tabs button { min-height: 36px; border: 1px solid color-mix(in srgb, var(--system-accent) 25%, rgba(139, 181, 214, .18)); border-radius: 5px; background: rgba(4, 15, 27, .68); padding: 5px 9px; color: rgba(225, 239, 250, .76); font-size: 12px; cursor: pointer; transition: border-color 200ms ease, background 200ms ease, color 200ms ease; }
+.fiber-portal .portal-filter-tabs button[aria-pressed=true], .fiber-portal .portal-filter-tabs button:hover { color: #f2f9ff; background: color-mix(in srgb, var(--system-accent) 9%, rgba(4, 16, 29, .82)); border-color: color-mix(in srgb, var(--system-accent) 58%, transparent); }
+.fiber-portal .portal-system-search { display: flex; gap: 8px; align-items: center; background: rgba(3, 13, 27, .48); border: 1px solid rgba(72, 117, 178, .4); border-radius: 6px; padding: 0 12px; color: #a4b1c8; }
+.fiber-portal .portal-system-search input { width: 100%; min-width: 0; height: 40px; background: transparent; color: #f8fbff; border: 0; font-size: 14px; }
+.fiber-portal input::placeholder { color: #a4b1c8; }
+.fiber-portal .portal-directory-status { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: rgba(164, 188, 214, .38); font-size: 12px; min-height: 42px; flex-shrink: 0; }
+.fiber-portal .portal-text-button { color: rgba(225, 239, 250, .76); background: transparent; border: 0; min-height: 36px; cursor: pointer; }
+.fiber-portal .system-options { min-height: 88px; }
+.fiber-portal .system-option { min-height: 78px; text-align: left; flex-shrink: 0; cursor: pointer; }
+.fiber-portal .system-option-copy small { font-size: 11px; letter-spacing: .04em; }
+.fiber-portal .system-option-copy strong { font-size: 15px; line-height: 1.4; overflow-wrap: anywhere; }
+.fiber-portal .portal-entry-form { flex: 0 0 auto; display: grid; gap: 8px; margin-top: 16px; }
+.fiber-portal .portal-entry-form label { font-size: 12px; color: #dce9f9; }
+.fiber-portal .portal-entry-form input { width: 100%; min-height: 42px; padding: 8px 12px; color: #f8fbff; background: rgba(3, 13, 27, .48); border: 1px solid rgba(72, 117, 178, .4); border-radius: 6px; }
+.fiber-portal .portal-entry-form input:focus, .fiber-portal .portal-system-search:focus-within { border-color: rgba(151, 207, 255, .95); box-shadow: 0 0 0 3px rgba(42, 139, 255, .2); }
+.fiber-portal .portal-entry-form small { color: rgba(164, 188, 214, .38); font-size: 11px; line-height: 1.6; }
+.fiber-portal .portal-entry-error, .fiber-portal .portal-catalog-error { margin: 0; color: #ffb2a6; font-size: 12px; line-height: 1.5; }
+.fiber-portal .portal-no-systems { padding: 18px 8px; color: rgba(203, 219, 237, .54); font-size: 13px; }
+.fiber-portal .system-scene-status { top: 26px; bottom: auto; left: 26px; right: 72px; letter-spacing: .04em; line-height: 1.6; font-size: 11px; }
+.fiber-portal .system-scene-copy { right: 26px; bottom: 26px; max-width: 360px; }
+.fiber-portal .system-scene-copy h3 { font-size: 26px; line-height: 1.35; overflow-wrap: anywhere; }
+.fiber-portal .system-selector-close { width: 44px; height: 44px; }
+.fiber-portal .system-scene-particle-root { contain: size layout; min-height: 0; min-width: 0; }
+.fiber-portal .system-scene-particle-root canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important; }
+.fiber-portal .system-scene-chrome { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.fiber-portal .system-scene-chrome .system-scene-copy { pointer-events: auto; }
+@media (max-width: 820px), (max-height: 560px) {
+  .fiber-portal .system-selector-panel { grid-template-columns: 1fr; height: auto; min-height: 0; max-height: calc(100dvh - 28px); overflow-y: auto; }
+  .fiber-portal .system-selector-backdrop { --selector-gap: 14px; }
+  .fiber-portal .system-selector-list { padding: 24px 20px; border-right: 0; }
+  .fiber-portal .system-selector-heading { padding-right: 42px; }
+  .fiber-portal .system-selector-heading h2 { font-size: 25px; }
+  .fiber-portal .system-options { max-height: 200px; overflow-y: auto; grid-template-columns: 1fr; flex: none; }
+  .fiber-portal .system-selector-scene { height: 540px; min-height: 540px; }
+  .fiber-portal .system-selector-close { position: fixed; top: 23px; right: 23px; }
+  .fiber-portal .system-scene-copy { bottom: 20px; right: 20px; width: calc(100% - 40px); }
+  .fiber-portal .system-scene-copy h3 { font-size: 22px; }
+}
+/* 原场景保留，只改变镜头与宿主边界；不会新建一张全屏预览。 */
+.fiber-portal .system-selector-backdrop.is-system-active { padding: 0; background: #020711; backdrop-filter: none; }
+.fiber-portal .system-selector-panel.is-scene-expanded { width: 100%; height: 100dvh; max-height: 100dvh; min-height: 0; grid-template-columns: 0 minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); border: 0; border-radius: 0; overflow: hidden; box-shadow: none; }
+.fiber-portal .system-selector-panel.is-scene-expanded .system-selector-list { padding: 0; border: 0; visibility: hidden; pointer-events: none; }
+.fiber-portal .system-selector-panel.is-scene-expanded .system-selector-scene { height: 100%; min-height: 0; }
+.fiber-portal .system-selector-panel.is-scene-expanded .system-scene-copy,
+.fiber-portal .system-selector-panel.is-scene-expanded .system-selector-close { opacity: 0; visibility: hidden; pointer-events: none; }
+.fiber-portal .system-selector-panel.is-scene-expanded .system-scene-copy { transform: translateY(10px); }
+.fiber-portal .portal-entry-transition-status { position: absolute; z-index: 5; bottom: 32px; left: 32px; color: rgba(230, 243, 255, .82); font-size: 14px; }
+.fiber-portal .portal-expanded-toolbar { position: absolute; z-index: 6; top: 20px; left: 24px; right: 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px; color: rgba(230, 243, 255, .82); }
+.fiber-portal .system-selector-panel.is-scene-expanded .system-scene-status { display: none; }
+.fiber-portal .system-close-line-a { transform: rotate(45deg); }
+.fiber-portal .system-close-line-b { transform: rotate(-45deg); }
+/* 真实操作层与常驻粒子共用视口；透明区域将指针交给原场景。 */
+.fiber-portal .portal-runtime-monitor { position: absolute; inset: 0; z-index: 6; pointer-events: none; color: rgba(230, 243, 255, .82); font-size: 14px; }
+.fiber-portal .portal-monitor-content { position: absolute; inset: 0; }
+.fiber-portal .portal-runtime-monitor .home { height: 100%; background: transparent; }
+.fiber-portal .portal-runtime-monitor .title { top: 76px; left: 24px; width: calc(100% - 48px); min-height: 48px; padding: 8px 12px; border-radius: 8px; overflow: visible; gap: 8px; flex-wrap: wrap; pointer-events: auto; }
+.fiber-portal .portal-runtime-monitor .titleBrand { display: none; }
+.fiber-portal .portal-runtime-monitor .titleItems { flex-wrap: wrap; gap: 6px; }
+.fiber-portal .portal-runtime-monitor .aside { top: 152px; left: 24px; width: 270px; max-height: calc(100dvh - 196px); pointer-events: auto; }
+.fiber-portal .portal-runtime-monitor .aside > * { border-radius: 8px; }
+.fiber-portal .portal-runtime-monitor .title,
+.fiber-portal .portal-runtime-monitor .aside > *,
+.fiber-portal .portal-runtime-monitor .setIconItem { border: 1px solid color-mix(in srgb, var(--system-accent) 21%, rgba(126, 170, 205, .18)); background: linear-gradient(105deg, color-mix(in srgb, var(--system-accent) 4%, transparent), transparent 30%), linear-gradient(145deg, rgba(6, 20, 34, .84), rgba(2, 9, 18, .74)); box-shadow: 0 28px 88px rgba(0, 0, 0, .34), inset 0 1px rgba(255, 255, 255, .026); backdrop-filter: blur(16px); }
+.fiber-portal .portal-runtime-monitor .setIcons { top: 152px; right: 24px; pointer-events: auto; z-index: 12; }
+.fiber-portal .portal-runtime-monitor .progressContent { pointer-events: auto; z-index: 12; }
+.fiber-portal .portal-runtime-monitor .portal-data-renderer { position: absolute; inset: 0; pointer-events: auto; }
+.fiber-portal .system-selector-backdrop.is-data-view .system-scene-particle-host { visibility: hidden; }
+/* 手部真实画布独立占满视口，后台准备不改变列表及预览的几何位置。 */
+.fiber-portal .system-selector-backdrop.is-direct-entry.is-data-view > .system-selector-panel {
+  opacity: 0 !important; visibility: hidden; pointer-events: none;
+  transition: opacity .36s ease, visibility 0s .36s;
+}
+/* 返回途中固定弹窗几何位置，只渐显外观；真实点云继续飞回同一个预览落点。 */
+.fiber-portal .system-selector-backdrop.is-direct-entry.is-data-view[data-monitor-return="true"] > .system-selector-panel {
+  opacity: var(--portal-return-opacity, 0) !important; visibility: visible; transition: none;
+}
+.fiber-portal .portal-runtime-monitor.is-direct-entry[data-handoff="preparing"] { visibility: hidden; }
+.fiber-portal .portal-runtime-monitor.is-direct-entry::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(circle at 54% 46%, rgba(16, 103, 166, .17), transparent 34%), linear-gradient(145deg, #071323, #020811 72%);
+  opacity: 0; transition: opacity .36s ease;
+}
+.fiber-portal .portal-runtime-monitor.is-direct-entry:not([data-handoff="preparing"])::before { opacity: 1; }
+.fiber-portal .portal-runtime-monitor.is-direct-entry[data-handoff="leaving"]::before {
+  opacity: var(--portal-return-background, 1); transition: none;
+}
+.fiber-portal .portal-monitor-navigation { position: absolute; top: 20px; left: 24px; right: 24px; z-index: 20; display: flex; justify-content: space-between; gap: 12px; pointer-events: none; }
+.fiber-portal .portal-monitor-navigation button,
+.fiber-portal .portal-expanded-toolbar button { min-height: 44px; padding: 8px 16px; color: rgba(230, 243, 255, .82); background: rgba(5, 16, 29, .68); border: 1px solid rgba(119, 178, 222, .28); border-radius: 999px; backdrop-filter: blur(12px); cursor: pointer; pointer-events: auto; transition: border-color 200ms ease, background 200ms ease, color 200ms ease; }
+.fiber-portal .portal-monitor-navigation button:hover,
+.fiber-portal .portal-expanded-toolbar button:hover { border-color: rgba(99, 213, 255, .62); background: rgba(13, 45, 70, .72); color: #fff; }
+@media (max-width: 820px), (max-height: 560px) {
+  .fiber-portal .portal-runtime-monitor .title { top: 70px; left: 12px; width: calc(100% - 24px); max-height: 96px; overflow-y: auto; }
+  .fiber-portal .portal-runtime-monitor .aside { top: 180px; left: 12px; width: min(230px, 44vw); max-height: calc(100dvh - 224px); }
+  .fiber-portal .portal-monitor-navigation { top: 14px; left: 12px; right: 12px; }
+  .fiber-portal .portal-monitor-navigation button { padding: 8px 10px; font-size: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fiber-portal .system-selector-backdrop.is-direct-entry.is-data-view > .system-selector-panel,
+  .fiber-portal .portal-runtime-monitor.is-direct-entry::before { transition: none; }
+  .fiber-portal .system-selector-dust::before { animation: none; }
+  .fiber-portal .system-selector-backdrop { transition: none; }
+  .fiber-portal .system-selector-backdrop.is-open .system-selector-heading { animation: none; }
+}
+@media (max-width: 560px) {
+  .fiber-portal .portal-home-scene-status { left: 20px; right: auto; bottom: 26px; max-width: 180px; font-size: 10px; }
+  .fiber-portal .portal-card-title small { font-size: 11px; }
+}

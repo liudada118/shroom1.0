@@ -17,6 +17,7 @@ def initialize(config, resources):
     """保存所选原生算法参数，不维护替代呼吸波形的压力窗口。"""
     global _config
     _config = dict(config or {})
+    reset("initialize")
 
 
 def _finite_number(value, fallback=0.0):

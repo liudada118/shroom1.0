@@ -11,6 +11,8 @@ const testFiles = [
   'backend/tests/processing/configMappingExecutor.test.js',
   'backend/tests/displaySystems/runtimeChannelPlanner.test.js',
   'backend/tests/displaySystems/algorithmPackage.test.js',
+  'backend/tests/displaySystems/algorithmMarket.test.js',
+  'backend/tests/http/algorithmMarketApi.test.js',
   'backend/tests/displaySystems/runtimeBinding.test.js',
   'backend/tests/displaySystems/runtimeDispatcher.test.js',
   'backend/tests/displaySystems/runtimePolicy.test.js',

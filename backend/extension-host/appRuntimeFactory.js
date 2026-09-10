@@ -107,6 +107,8 @@ function createAppRuntime({
   return {
     // Agent 生成的展示包只作为静态浏览器资源加载；宿主不会执行包内 JS/Node 代码。
     agentApps: agentAppService,
+    // 仅供进程内算法超市装配；HTTP 层不能直接返回含绝对路径的这份清单。
+    getAlgorithmMarketPackages: () => discoverBuiltinAlgorithmPackages({ roots: builtinAlgorithmPackageRoots, includeResolved: true }).packages,
     displaySystems: {
       bindRuntimeChannels: ({
         serialManager,
@@ -141,6 +143,8 @@ function createAppRuntime({
         ...displaySystemRuntimeController.getStatus(),
       }),
       getById: (id) => displaySystemRuntimeDiscovery.getById(id),
+      /** 标出当前 Manifest 已占用的 Python 包，超市不能重复初始化同一原生库。 */
+      getActiveAlgorithmPackageIds: (sensorType) => (displaySystemRuntimeDiscovery.getBySensorType(sensorType)?.sensors || []).map((sensor) => sensor.algorithm?.package?.id).filter(Boolean),
       getEditorById: (id) => {
         const config = displaySystemRuntimeDiscovery.getById(id);
         return config ? displaySystemWorkspace.read(config) : null;

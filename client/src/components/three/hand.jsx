@@ -6,7 +6,9 @@ import { TrackballControls } from "three/examples/jsm/controls/TrackballControls
 // import { SelectionBox } from 'three/addons/interactive/SelectionBox.js';
 // import { SelectionHelper } from 'three/addons/interactive/SelectionHelper.js';
 import brushManager from "./BrushManager";
-import React, { useEffect, useImperativeHandle, useRef, useState } from "react";
+import React, { useContext, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { SceneVisibilityContext } from '../../renderers/sceneVisibility';
+import { installParticleEntrance } from '../../renderers/particleEntrance';
 import { TextureLoader } from "three";
 import { checkRectIndex, checkRectangleIntersection, getPointCoordinate, getPointCoordinateback } from "./threeUtil1";
 import {
@@ -92,6 +94,7 @@ const Canvas = React.forwardRef((props, refs) => {
   // 当前配色，换配色就能当场生效、不用重建场景（相机视角因此得以保留）。
   const colormapRef = useRef(props.colormap);
   colormapRef.current = props.colormap;
+  const sceneVisibleRef = useContext(SceneVisibilityContext);
   var newDiv, newDiv1, selectStartArr = [], selectEndArr = [], sitArr, backArr, sitMatrix = [], backMatrix = [], selectMatrix = [];
   let sitIndexArr = [], sitIndexEndArr = [], backIndexArr = [], backIndexEndArr = []
   var animationRequestId, colSelectFlag = false
@@ -140,6 +143,7 @@ const Canvas = React.forwardRef((props, refs) => {
   let container, stats;
 
   let scene, renderer;
+  let disposeParticleEntrance;
 
   let cube, chair, mixer, clips;
   const clock = new THREE.Clock();
@@ -176,6 +180,12 @@ const Canvas = React.forwardRef((props, refs) => {
 
     camera.position.z = 300;
     camera.position.y = 200;
+    if (props.portalEmbedded) {
+      camera.fov = 32.5;
+      camera.position.set(groupX, groupY + 62, groupZ + 101);
+      camera.lookAt(groupX, groupY, groupZ);
+      camera.updateProjectionMatrix();
+    }
     //   camera.position.x = 200;
 
     // scene
@@ -197,6 +207,7 @@ const Canvas = React.forwardRef((props, refs) => {
     scene.add(group);
     const helper = new THREE.GridHelper(2000, 100);
     helper.position.y = -199;
+    helper.visible = !props.portalEmbedded;
     helper.material.opacity = 0.25;
     helper.material.transparent = true;
     scene.add(helper);
@@ -214,7 +225,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
     // renderer
 
-    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(window.devicePixelRatio);
     // renderer.setSize(window.innerWidth, window.innerHeight);
 
@@ -223,10 +234,15 @@ const Canvas = React.forwardRef((props, refs) => {
     renderer.outputEncoding = THREE.sRGBEncoding;
     container.replaceChildren(renderer.domElement);
 
-    renderer.setClearColor(0x000000);
+    renderer.setClearColor(0x000000, props.portalEmbedded ? 0 : 1);
+    disposeParticleEntrance = installParticleEntrance(renderer, scene, camera, particles, { rows: AMOUNTY, cols: AMOUNTX });
 
     //FlyControls
     controls = new TrackballControls(camera, renderer.domElement);
+    if (props.portalEmbedded) {
+      controls.target.set(groupX, groupY, groupZ);
+      controls.target0.copy(controls.target);
+    }
     controls.dynamicDampingFactor = 0.2;
     controls.domElement = container;
     controls.mouseButtons = {
@@ -309,7 +325,8 @@ const Canvas = React.forwardRef((props, refs) => {
       transparent: true,
       //   color: 0xffffff,
       map: spite,
-      size: 1,
+      size: props.portalEmbedded ? 0.55 : 1,
+      opacity: props.portalEmbedded ? 0.8 : 1,
     });
     sitGeometry.setAttribute("scale", new THREE.BufferAttribute(scales, 1));
     sitGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
@@ -320,7 +337,7 @@ const Canvas = React.forwardRef((props, refs) => {
     particles.scale.z = 0.0062;
 
 
-    particles.rotation.x = Math.PI / 3;
+    particles.rotation.x = props.portalEmbedded ? 0 : Math.PI / 3;
     // particles.rotation.y = 0; //-Math.PI / 2;
     // particles.rotation.y = Math.PI 
     // particles.rotation.z = Math.PI
@@ -338,12 +355,9 @@ const Canvas = React.forwardRef((props, refs) => {
     camera.updateProjectionMatrix();
   }
 
-  //模型动画
-
+  /** 持续更新真实点图，复用缓冲；逐帧日志会拖慢打开开发工具时的交接。 */
   function animate() {
-    console.log('animate')
     animationRequestId = requestAnimationFrame(animate);
-    const date = new Date().getTime();
     render();
   }
 
@@ -562,12 +576,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
     particles.geometry.attributes.position.needsUpdate = true;
     particles.geometry.attributes.color.needsUpdate = true;
-
-    sitGeometry.setAttribute(
-      "position",
-      new THREE.BufferAttribute(positions, 3)
-    );
-    sitGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    // ⚠️ 数组在原位写入；逐帧重建 BufferAttribute 会重复分配 GPU 缓冲并打断交接节奏。
   }
 
   function render() {
@@ -593,7 +602,8 @@ const Canvas = React.forwardRef((props, refs) => {
 
     }
 
-    renderer.render(scene, camera);
+    // ⚠️ 粒子模式下仍要计算上面的真实侧栏读数，只跳过不可见画布的 GPU 提交。
+    if (sceneVisibleRef.current) renderer.render(scene, camera);
   }
 
   //   靠背数据
@@ -736,7 +746,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
     // renderer.render(scene, camera);
 
-    group.rotation.x = -(Math.PI * 2) / 12
+    group.rotation.x = props.portalEmbedded ? 0 : -(Math.PI * 2) / 12
     group.rotation.y = 0
     // group.position.z = groupZ
     particles.rotation.z = 0;
@@ -811,6 +821,10 @@ const Canvas = React.forwardRef((props, refs) => {
 
     return () => {
       cancelAnimationFrame(animationRequestId);
+      window.removeEventListener('resize', onWindowResize);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      controls?.dispose();
       // 取消 BrushManager 订阅
       const container = document.getElementById('canvas');
       if (container && container._brushCallback) {
@@ -818,6 +832,7 @@ const Canvas = React.forwardRef((props, refs) => {
       }
       brushManager.stopBrush();
       // 清理 renderer
+      disposeParticleEntrance?.();
       if (renderer) {
         renderer.dispose();
         renderer.forceContextLoss();

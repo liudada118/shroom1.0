@@ -1,0 +1,177 @@
+/* 保留原反馈组件样式，避免旧首页卡片样式污染迁移页面。 */
+/* Shroom Vision portal page. Scoped with portal- prefix. */
+
+.fiber-portal .portal-feedback-trigger {
+  position: fixed;
+  right: clamp(18px, 6vw, 120px);
+  bottom: 18px;
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  height: 58px;
+  padding: 0 24px 0 20px;
+  border-radius: 999px;
+  border: 1px solid rgba(112, 157, 255, 0.52);
+  background: linear-gradient(135deg, #528cff 0%, #4460ff 100%);
+  color: #ffffff;
+  font-size: 18px;
+  cursor: pointer;
+  box-shadow: 0 14px 28px rgba(58, 98, 255, 0.34);
+}
+
+.fiber-portal .portal-feedback-trigger .anticon:first-child {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  font-size: 15px;
+}
+
+.fiber-portal .portal-feedback-trigger strong {
+  font-weight: 650;
+}
+
+.fiber-portal .portal-feedback-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  background: rgba(4, 7, 16, 0.5);
+  backdrop-filter: blur(2px);
+}
+
+.fiber-portal .portal-feedback-modal {
+  position: fixed;
+  right: 28px;
+  bottom: 108px;
+  z-index: 50;
+  width: min(390px, calc(100vw - 32px));
+  padding: 22px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: linear-gradient(180deg, #141a30, #0d1224);
+  box-shadow: 0 30px 70px -24px rgba(0, 0, 0, 0.85);
+  color: #eef2ff;
+}
+
+.fiber-portal .portal-feedback-modal h3 {
+  margin: 0 0 16px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.fiber-portal .portal-feedback-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #aab3cf;
+  cursor: pointer;
+}
+
+.fiber-portal .portal-feedback-label {
+  display: block;
+  margin: 14px 0 8px;
+  font-size: 12.5px;
+  color: #9aa6c4;
+}
+
+.fiber-portal .portal-feedback-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fiber-portal .portal-feedback-types button {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: #c6cfe8;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.fiber-portal .portal-feedback-types button.is-active {
+  border-color: rgba(91, 140, 255, 0.7);
+  background: rgba(91, 140, 255, 0.2);
+  color: #fff;
+}
+
+.fiber-portal .portal-feedback-textarea {
+  position: relative;
+}
+
+.fiber-portal .portal-feedback-textarea textarea {
+  width: 100%;
+  min-height: 96px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.28);
+  color: #fff;
+  font-size: 13.5px;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.fiber-portal .portal-feedback-textarea > span {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  font-size: 11px;
+  color: #6b7490;
+}
+
+.fiber-portal .portal-feedback-input {
+  width: 100%;
+  height: 42px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.28);
+  color: #fff;
+  font-size: 13.5px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.fiber-portal .portal-feedback-submit {
+  width: 100%;
+  height: 46px;
+  margin-top: 18px;
+  border: none;
+  border-radius: 12px;
+  background: linear-gradient(120deg, #4f7dff, #5b8cff);
+  color: #fff;
+  font-size: 14.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.fiber-portal .portal-feedback-submit:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+@media (max-width: 700px) {
+
+  .fiber-portal .portal-feedback-trigger {
+    right: 18px;
+    bottom: 18px;
+  }
+
+  .fiber-portal .portal-feedback-modal {
+    right: 16px;
+    bottom: 92px;
+  }
+}

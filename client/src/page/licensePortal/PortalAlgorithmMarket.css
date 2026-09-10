@@ -1,0 +1,90 @@
+/* 参考最新 SystemDisplayHud：底部横向超市，不是遮挡整个场景的配置弹窗。 */
+.fiber-portal .portal-algorithm-market {
+  position: absolute; z-index: 22; bottom: 22px;
+  left: calc(22px + var(--left-chart-width) + 18px); right: calc(22px + var(--right-tools-width) + 18px);
+  display: grid; grid-template-rows: 64px 40px 42px minmax(0, 1fr); height: 350px;
+  min-width: 0; overflow: hidden; border: 1px solid rgba(197, 220, 235, .28); border-radius: 16px;
+  color: var(--portal-text); background: radial-gradient(circle at 6% -20%, color-mix(in srgb, var(--system-accent) 12%, transparent), transparent 34%), linear-gradient(148deg, rgba(13, 27, 38, .98), rgba(3, 13, 23, .97));
+  box-shadow: 0 26px 72px rgba(0, 5, 13, .52), inset 0 1px rgba(231, 243, 250, .09);
+  backdrop-filter: blur(22px) saturate(118%); opacity: 0; pointer-events: none; visibility: hidden;
+  transform: translateY(16px) scale(.99); transform-origin: 50% 100%;
+  transition: opacity 220ms ease, transform 360ms cubic-bezier(.22, 1, .36, 1), visibility 0s 360ms;
+}
+.fiber-portal .portal-algorithm-market::before { content: ''; position: absolute; top: 0; left: 18px; width: 132px; height: 1px; background: linear-gradient(90deg, var(--system-accent), transparent); }
+.fiber-portal .portal-algorithm-market.is-open { opacity: 1; pointer-events: auto; visibility: visible; transform: none; transition-delay: 0s; }
+.fiber-portal .portal-algorithm-market-head { display: flex; align-items: center; gap: 14px; padding: 10px 14px; border-bottom: 1px solid rgba(130, 171, 201, .22); min-width: 0; }
+.fiber-portal .portal-algorithm-market-title { display: flex; align-items: center; gap: 10px; flex: 1; white-space: nowrap; }
+.fiber-portal .portal-algorithm-market-title > .anticon { font-size: 22px; color: var(--system-accent); }
+.fiber-portal .portal-algorithm-market-title > span { display: grid; gap: 3px; }
+.fiber-portal .portal-algorithm-market-title small { font: 10px 'JetBrains Mono', monospace; color: var(--portal-muted); letter-spacing: .1em; }
+.fiber-portal .portal-algorithm-market-title strong { font-size: 19px; font-weight: 650; }
+.fiber-portal .portal-algorithm-market-count { white-space: nowrap; font-size: 12px; color: var(--portal-secondary); }
+.fiber-portal .portal-algorithm-market-count b { color: var(--system-accent); font-size: 18px; }
+.fiber-portal .portal-algorithm-market-head button { display: inline-flex; gap: 7px; align-items: center; justify-content: center; min-width: 36px; height: 36px; padding: 6px 8px; border: 1px solid rgba(143, 181, 209, .32); border-radius: 7px; background: rgba(4, 15, 26, .6); color: var(--portal-text); cursor: pointer; font-size: 13px; white-space: nowrap; }
+.fiber-portal .portal-algorithm-market-status { margin: 0; padding: 7px 14px 0; color: var(--portal-secondary); font-size: 12px; line-height: 1.5; }
+.fiber-portal .portal-algorithm-market-track { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(198px, 1fr); min-height: 0; gap: 10px; padding: 10px 12px 12px; overflow-x: auto; overflow-y: hidden; overscroll-behavior-inline: contain; scrollbar-width: thin; scrollbar-color: #537b99 transparent; scroll-snap-type: inline proximity; }
+.fiber-portal .portal-algorithm-card {
+  display: grid; grid-template-rows: 24px auto minmax(36px, 1fr) 28px; gap: 6px; min-width: 0; padding: 10px 12px;
+  border: 1px solid rgba(135, 176, 205, .3); border-radius: 10px; color: var(--portal-text);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--system-accent) 5%, transparent), transparent 56%), rgba(5, 17, 29, .86);
+  text-align: left; scroll-snap-align: start; cursor: grab; user-select: none;
+  transition: border-color 180ms ease, background 180ms ease, transform 180ms ease;
+}
+.fiber-portal .portal-algorithm-card:hover, .fiber-portal .portal-algorithm-market-head button:hover { border-color: var(--system-accent); background-color: #102c40; }
+.fiber-portal .portal-algorithm-card:focus-visible, .fiber-portal .portal-algorithm-market-head button:focus-visible { outline: 2px solid var(--system-accent); outline-offset: -3px; }
+.fiber-portal .portal-algorithm-card:active { transform: scale(.985); }
+.fiber-portal .portal-algorithm-card.is-added { border-color: color-mix(in srgb, var(--system-accent) 55%, transparent); background-color: #0c2738; cursor: default; }
+.fiber-portal .portal-algorithm-card.is-dragging { opacity: .5; }
+.fiber-portal .portal-algorithm-card-top { display: flex; align-items: center; gap: 8px; color: var(--system-accent); }
+.fiber-portal .portal-algorithm-card-top small { flex: 1; font-size: 12px; color: var(--portal-secondary); }
+.fiber-portal .portal-algorithm-card > strong { font-size: 16px; font-weight: 650; line-height: 1.4; }
+.fiber-portal .portal-algorithm-card-description { font-size: 13px; color: var(--portal-secondary); line-height: 1.45; }
+.fiber-portal .portal-algorithm-card-output { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid rgba(130, 170, 199, .22); padding-top: 6px; font-size: 12px; color: var(--portal-muted); }
+.fiber-portal .portal-algorithm-card-output b { color: var(--system-accent); font-weight: 600; }
+.fiber-portal .portal-observatory.is-algorithm-drop-active { outline: 2px solid var(--system-accent); outline-offset: 4px; }
+.fiber-portal .portal-observatory.is-algorithm-drop-active::after { content: '释放以添加算法图表'; position: absolute; inset: 60px 10px 10px; z-index: 30; display: grid; place-items: center; border: 1px dashed var(--system-accent); border-radius: 10px; background: rgba(4, 24, 38, .9); color: #edf5ff; font-size: 17px; pointer-events: none; }
+/* 超市展开时暂让出底部操作区，收起后恢复原配置条及未保存状态。 */
+.fiber-portal .portal-runtime-monitor:has(.portal-algorithm-market.is-open) .canvas-overlay-bar,
+.fiber-portal .portal-runtime-monitor:has(.portal-algorithm-market.is-open) .canvas-draft-bar { visibility: hidden; pointer-events: none; }
+@media (max-width: 1099px) {
+  .fiber-portal .portal-algorithm-market { left: 14px; right: 14px; bottom: 14px; }
+}
+@media (max-width: 560px) {
+  .fiber-portal .portal-algorithm-market { height: min(414px, 80dvh); grid-template-rows: 56px auto 52px minmax(0, 1fr); }
+  .fiber-portal .portal-algorithm-market-head { gap: 8px; padding-inline: 10px; }
+  .fiber-portal .portal-algorithm-market-title > .anticon, .fiber-portal .portal-algorithm-market-count, .fiber-portal .portal-algorithm-market-title small { display: none; }
+  .fiber-portal .portal-algorithm-market-title strong { font-size: 17px; }
+  .fiber-portal .portal-algorithm-market-track { grid-auto-columns: 200px; }
+}
+.fiber-portal .portal-algorithm-categories { display: flex; align-items: center; gap: 8px; padding: 4px 12px; flex-wrap: wrap; }
+.fiber-portal .portal-algorithm-categories button, .fiber-portal .portal-algorithm-categories select { min-height: 30px; border: 1px solid #37566d; border-radius: 6px; background: #0b1c29; color: #d9e8f3; padding: 4px 8px; cursor: pointer; }
+.fiber-portal .portal-algorithm-categories button[aria-pressed=true] { background: #183c4b; border-color: var(--system-accent); color: #fff; }
+.fiber-portal .portal-algorithm-categories select { max-width: 240px; flex: 1; min-width: 130px; }
+.fiber-portal .portal-algorithm-card.is-package { cursor: pointer; min-height: 0; height: 100%; box-sizing: border-box; grid-template-rows: 20px auto minmax(0, 1fr) auto; overflow: hidden; }
+.fiber-portal .portal-algorithm-card.is-package .portal-algorithm-card-description { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; min-height: 0; }
+.fiber-portal .portal-algorithm-card.is-package .portal-algorithm-card-output { align-items: end; min-height: 32px; }
+.fiber-portal .portal-algorithm-card.is-package .portal-algorithm-card-output b { flex-shrink: 0; }
+.fiber-portal .portal-algorithm-card:disabled { cursor: not-allowed; border-color: #354653; background: #101b25; }
+.fiber-portal .portal-algorithm-card:disabled .portal-algorithm-card-output b { color: #b7c2cb; }
+.fiber-portal .portal-package-output { margin: 12px 0; padding: 14px; color: #e5eff7; background: #0a1d29; border: 1px solid #315364; border-radius: 12px; min-width: 0; }
+.fiber-portal .portal-package-output header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.fiber-portal .portal-package-output header div { display: grid; gap: 6px; min-width: 0; }
+.fiber-portal .portal-package-output strong { font-size: 17px; }
+.fiber-portal .portal-package-output small { color: #b7c9d8; font-size: 11px; overflow-wrap: anywhere; }
+.fiber-portal .portal-package-output button, .fiber-portal .portal-package-output select { background: #0c2534; color: #e5eff7; border: 1px solid #44697d; border-radius: 6px; min-height: 32px; padding: 4px 6px; cursor: pointer; }
+.fiber-portal .portal-package-output label { display: grid; gap: 6px; margin-top: 14px; font-size: 12px; color: #bacfdd; }
+.fiber-portal .portal-package-output select { width: 100%; font-size: 14px; }
+.fiber-portal .portal-package-value { font: 600 27px/1.4 monospace; margin-top: 12px; color: var(--system-accent); }
+.fiber-portal .portal-package-output svg { display: block; width: 100%; height: auto; }
+.fiber-portal .portal-package-grid { stroke: #294354; fill: none; stroke-dasharray: 2 5; }
+.fiber-portal .portal-package-line { stroke: var(--system-accent, #69dfca); fill: none; stroke-width: 2; }
+.fiber-portal .portal-package-output svg text { fill: #b8ccd9; font-size: 10px; }
+.fiber-portal .portal-package-output p { margin: 6px 0; color: #c8dbe9; font-size: 12px; }
+.fiber-portal .portal-package-output .is-error { color: #ffb3a5; }
+.fiber-portal .portal-algorithm-categories :focus-visible, .fiber-portal .portal-package-output :focus-visible { outline: 2px solid var(--system-accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .fiber-portal .portal-algorithm-market, .fiber-portal .portal-algorithm-card { transition: none; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .fiber-portal .portal-algorithm-market { background: #071523; backdrop-filter: none; }
+}

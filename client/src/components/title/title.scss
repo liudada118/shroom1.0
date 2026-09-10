@@ -3,6 +3,19 @@
     padding: 0;
 }
 
+.titlePortalLink {
+    color: #c4d5e6;
+    text-decoration: none;
+    border: 1px solid #4a5870;
+    border-radius: 4px;
+    padding: 7px 10px;
+    margin-right: 12px;
+    font-size: 12px;
+    white-space: nowrap;
+    &:hover { background: #26324a; color: #fff; }
+    &:focus-visible { outline: 2px solid #9ee6ff; outline-offset: 4px; }
+}
+
 .calibModal{
     left : 300px
 }

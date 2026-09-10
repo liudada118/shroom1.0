@@ -17,6 +17,7 @@ import {
 import brushManager from "./BrushManager";
 import { checkRectIndex, checkRectangleIntersection, getPointCoordinate, getPointCoordinateWowback, getPointCoordinateWowhead, getPointCoordinateback } from "./threeUtil1";
 import { DUAL_CHANNEL_DEFAULTS, createThresholdState } from '../../runtime/displayThresholds';
+import { installModelParticleEntrance } from '../../renderers/modelParticleEntrance';
 
 let timer
 
@@ -130,6 +131,7 @@ const Canvas = React.forwardRef((props, refs) => {
     headGeometry
 
   let camera, scene, renderer;
+  let modelEntrance, resizeObserver, removeResize, disposed = false;
   var ndata1 = new Array(sitnum1 * sitnum2).fill(0), ndata = new Array(backnum1 * backnum2).fill(0),
     ndatahead = new Array(headnum1 * headnum2).fill(0), newData1 = new Array(sitnum1 * sitnum2).fill(0),
     newData = new Array(backnum1 * backnum2).fill(0), newDatahead = new Array(backnum1 * backnum2).fill(0);
@@ -256,6 +258,13 @@ const Canvas = React.forwardRef((props, refs) => {
     scene.add(group);
     group.quaternion.set(0, 0, 0, 1)
     loader.load("./model/hand1.glb", function (gltf) {
+      if (disposed) {
+        gltf.scene.traverse((object) => {
+          object.geometry?.dispose();
+          for (const material of Array.isArray(object.material) ? object.material : [object.material]) material?.dispose();
+        });
+        return;
+      }
       chair = gltf.scene;
       // if (props.body) {
       //   chair.rotation.y = -Math.PI / 2;
@@ -373,6 +382,11 @@ const Canvas = React.forwardRef((props, refs) => {
       // });
 
       group.add(chair);
+      if (props.portalEmbedded) {
+        modelEntrance = installModelParticleEntrance(renderer, scene, camera, chair);
+        renderer.domElement.dataset.modelState = 'ready';
+        container.dataset.modelState = 'ready';
+      }
 
 
 
@@ -394,12 +408,18 @@ const Canvas = React.forwardRef((props, refs) => {
       // chair.rotation.y = 0
       // if (chair) chair.quaternion.set(0, 0, 0, 1)
       // changeHandAngle([0.97,0.10,0.17,0.05])
+    }, undefined, () => {
+      if (disposed || !props.portalEmbedded) return;
+      renderer.domElement.dataset.modelState = 'error';
+      container.dataset.modelState = 'error';
+      container.querySelector('.portal-model-status').textContent = '手模型加载失败，请返回系统列表重试';
     });
 
     const helper = new THREE.GridHelper(2000, 100);
     helper.position.y = -199;
     helper.material.opacity = 0.25;
     helper.material.transparent = true;
+    helper.visible = !props.portalEmbedded;
     scene.add(helper);
 
     // lights
@@ -434,22 +454,26 @@ const Canvas = React.forwardRef((props, refs) => {
 
           const sphereSize = 1;
           const pointLightHelper = new THREE.PointLightHelper(pointlight5, sphereSize);
-          scene.add(pointLightHelper);
+          if (!props.portalEmbedded) scene.add(pointLightHelper);
         }
       }
     }
 
     // renderer
 
-    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: Boolean(props.portalEmbedded) });
     renderer.setPixelRatio(window.devicePixelRatio);
 
     renderer.setSize(window.innerWidth, window.innerHeight);
 
     renderer.outputEncoding = THREE.sRGBEncoding;
-    container.replaceChildren(renderer.domElement);
+    container.prepend(renderer.domElement);
+    if (props.portalEmbedded) {
+      renderer.domElement.dataset.modelState = 'loading';
+      container.dataset.modelState = 'loading';
+    }
 
-    renderer.setClearColor(0x778592);
+    renderer.setClearColor(props.portalEmbedded ? 0x000000 : 0x778592, props.portalEmbedded ? 0 : 1);
 
     //FlyControls
     controls = new TrackballControls(camera, renderer.domElement);
@@ -463,11 +487,21 @@ const Canvas = React.forwardRef((props, refs) => {
     initSet();
 
     window.addEventListener("resize", onWindowResize);
+    removeResize = () => window.removeEventListener('resize', onWindowResize);
+    if (props.portalEmbedded) {
+      resizeObserver = new ResizeObserver(onWindowResize);
+      resizeObserver.observe(container);
+      onWindowResize();
+    }
 
+    /** 按宿主尺寸更新相机，CSS 尺寸不随 DPR 背板增长。 */
     function onWindowResize() {
-      renderer.setSize(window.innerWidth, window.innerHeight);
-
-      camera.aspect = window.innerWidth / window.innerHeight;
+      const width = props.portalEmbedded ? container.clientWidth : window.innerWidth;
+      const height = props.portalEmbedded ? container.clientHeight : window.innerHeight;
+      if (!width || !height || disposed) return;
+      renderer.setSize(width, height, !props.portalEmbedded);
+      if (props.portalEmbedded) Object.assign(renderer.domElement.style, { width: '100%', height: '100%', display: 'block' });
+      camera.aspect = width / height;
 
       // camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
@@ -803,6 +837,7 @@ const Canvas = React.forwardRef((props, refs) => {
       controls.mouseButtons = [];
 
     }
+    modelEntrance?.update();
     renderer.render(scene, camera);
   }
 
@@ -1016,7 +1051,10 @@ const Canvas = React.forwardRef((props, refs) => {
     init();
     animate();
     return () => {
+      disposed = true;
       if (animationRequestId) cancelAnimationFrame(animationRequestId);
+      modelEntrance?.dispose(); resizeObserver?.disconnect(); removeResize?.(); controls?.dispose();
+      renderer?.dispose(); renderer?.domElement.remove();
       // 清理 BrushManager
       const container = document.getElementById(`canvas${props.index}`);
       if (container && container._brushCallback) {
@@ -1026,11 +1064,11 @@ const Canvas = React.forwardRef((props, refs) => {
     };
   }, []);
   return (
-    <div>
+    <div style={props.portalEmbedded ? { width: '100%', height: '100%' } : undefined}>
       <div
-        style={{ width: "100%", height: "100%" }}
+        style={{ width: "100%", height: "100%", position: 'relative' }}
         id={`canvas${props.index}`}
-      ></div>
+      >{props.portalEmbedded && <div className="portal-model-status" role="status">正在加载手模型…</div>}</div>
     </div>
   );
 });

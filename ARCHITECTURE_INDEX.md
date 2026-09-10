@@ -1,6 +1,6 @@
 # Shroom 快速架构索引
 
-> 最后更新于：2026-09-08
+> 最后更新于：2026-09-10
 > 用途：给日常任务提供稳定入口和验证路由。完整历史与设计说明仍以 `ARCHITECTURE.md` 为准，后端细图见 `backend/ARCHITECTURE_MAP.md`。
 
 ## 1. 一分钟判断路径
@@ -58,7 +58,13 @@ client commandClient → HTTP :19245 /api/commands
 
 | 关注点 | 主要入口 | 首选测试 |
 | :--- | :--- | :--- |
+| 首页选择 / 进入系统 | `client/src/page/licensePortal/`（`scene/` 常驻粒子及等比宿主桥、`PortalMonitoringLayer` 自动交接真实压力画布、`usePortalMotion` GSAP）, `client/src/page/home/loadMonitoringPage.js`, `client/src/services/displaySystemOptions.js` | portalEntry / portalSystems / sceneCatalog / sceneHostBridge / sceneMorph / sceneNavigation / monitoringSurface tests + `node scripts/tests/portal-launcher.mjs`（`--monitor-only` 单独检查真实 Home）；授权、入口渲染与切换调用变更执行 Full |
+| 预览到原生点图形变 / 最新三栏控制台 | `client/src/renderers/particleEntrance.js`, `components/three/hand.jsx`, `page/licensePortal/LicensePortal.jsx`, `PortalSystemSelector.jsx`, `PortalMonitoringLayer.jsx`, `PortalMonitoringChrome.jsx`, `PortalMonitoring.css` | particleEntrance / PortalSystemSelector tests + `portal-launcher.mjs --monitor-only`：手部从列表直达、无 focused 镜头、慢加载取消/失败、GPU 进度、真实帧、三栏控件、弹窗及往返；其他渲染器不可假定已经支持顶点交接 |
 | Electron 启动/关闭 | `app/electron/index.js`, `app/electron/applicationQuit.js`, `backend/runtime/index.js` | `backend/tests/server/applicationQuit.test.js`, `serverShutdownOrchestrator.test.js` + Full |
+| 正式展示可读性 / 算法超市 | `page/licensePortal/PortalMonitoring.css`, `PortalAlgorithmMarket.jsx`, `portalAlgorithmCatalog.js`, `components/aside/formulaChartStore.js` | portalAlgorithmCatalog / PortalMonitoringChrome / formulaChartStore tests + `portal-launcher.mjs --monitor-only`：字号、点击/拖入、真实帧计算、删除同步、弹窗与窄屏；仅 UI 层采用 Standard |
+| 算法超市 Python 会话启停 | `backend/extension-host/runtime/algorithmMarketService.js`, `kernel/platform/http/httpAppFactory.js`, `client/src/page/licensePortal/portalPackageRuntime.js`, `PortalPackageOutputs.jsx` | algorithmMarket / algorithmMarketApi / portalPackageRuntime tests + Full；包含旧处理器经标准网关缺少 matrix 的输入回归，旁路消费标准帧，内部 HTTP 快照输出，不改变采集回放契约 |
+| 手套点云到原生实体 | `client/src/renderers/modelParticleEntrance.js`, `components/three/hand0205 copy.jsx`, `page/licensePortal/scene/monitoringSurface.js` | modelParticleEntrance / monitoringSurface tests + `portal-launcher.mjs --monitor-only`：真实模型顶点、骨骼姿态、直接交接与返回、减少动画；双手分屏未迁移 |
+| 监测返回选择弹窗 | `page/licensePortal/PortalMonitoringLayer.jsx`, `PortalLauncher.css`, `scene/sceneMotionClock.js`, `renderers/particleEntrance.js`, `components/three/hand.jsx` | 时钟、动态投影与末段混合单测；`portal-launcher.mjs`：GPU 归位、预览预热、材质互补混合、缓冲复用、首帧连续、固定面板、清理、inert、焦点与减少动画；前端动效采用 Standard |
 | Python worker 管道/退出 | `backend/kernel/algorithm-channel/pythonWorker.js` | `backend/tests/server/pythonWorkerLifecycle.test.js`（断管、在飞写入、重启/退出竞态）+ Full |
 | 生产依赖打包 | `scripts/pack-runtime-dependencies.js`, `scripts/electron-builder-before-*.js`, `scripts/package-hooks.js` | `backend/tests/packaging/runtimeDependencies.test.js` + Full；发布须验证最终 ASAR 并实际加载包内模块 |
 | 串口生命周期 | `sdk/backend/serial/serialManager.js` | `backend/tests/serial/`, `backend/tests/application/serialControlService.test.js` |

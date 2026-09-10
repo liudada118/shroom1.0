@@ -1,0 +1,214 @@
+/* 以 fiber-sensor 最后生效的三栏布局为准；覆盖层不替换原生数据。 */
+.fiber-portal .portal-model-status { position: absolute; inset: 0; display: grid; place-items: center; color: #c4d6e7; font-size: 15px; pointer-events: none; }
+.fiber-portal [data-model-state="ready"] > .portal-model-status { display: none; }
+.fiber-portal .portal-runtime-monitor {
+  --portal-text: #edf5ff;
+  --portal-secondary: #c4d6e7;
+  --portal-muted: #adc4d9;
+  --left-chart-width: clamp(300px, 25vw, 340px);
+  --right-tools-width: 184px;
+  --portal-chart-top: clamp(110px, 14vh, 142px);
+  --portal-chart-bottom: 22px;
+}
+.fiber-portal .portal-monitor-navigation { top: 24px; left: 26px; right: 22px; }
+.fiber-portal .portal-monitor-identity-group { display: flex; align-items: center; gap: 18px; min-width: 0; }
+.fiber-portal .portal-monitor-identity { display: grid; gap: 4px; padding-left: 18px; border-left: 1px solid rgba(122, 170, 213, .2); }
+.fiber-portal .portal-monitor-identity small { color: rgba(99, 213, 255, .48); font: 8px 'JetBrains Mono', monospace; letter-spacing: .18em; }
+.fiber-portal .portal-monitor-identity strong { color: rgba(239, 247, 255, .84); font-size: 13px; font-weight: 620; }
+.fiber-portal .portal-monitor-close { width: 44px; padding: 0; font-size: 24px; font-weight: 300; }
+.fiber-portal .portal-monitor-floor { position: absolute; top: 78%; left: 50%; width: 38%; height: 12%; border: 2px solid rgba(20, 67, 102, .24); border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; }
+
+.fiber-portal .portal-runtime-monitor .home > .title {
+  position: absolute; top: 76px; left: 22px; width: calc(100% - 44px); height: 58px;
+  min-height: 58px; max-height: none; padding: 6px; border-radius: 7px;
+  display: block; overflow: visible; z-index: 21; font-size: 12px;
+}
+.fiber-portal .portal-session-bar { display: grid; grid-template-columns: 104px minmax(170px, 1fr) 176px; align-items: center; gap: 6px; height: 44px; }
+.fiber-portal .portal-session-bar button { min-width: 0; display: flex; align-items: center; justify-content: center; gap: 5px; height: 44px; padding: 5px; border: 1px solid rgba(135, 176, 205, .14); border-radius: 4px; background: rgba(5, 17, 29, .66); color: rgba(178, 205, 224, .58); cursor: pointer; font-size: 9px; transition: border-color 180ms ease, background 180ms ease, color 180ms ease; }
+.fiber-portal .portal-session-bar button:hover:not(:disabled),
+.fiber-portal .portal-session-bar button.is-active { color: var(--system-accent); border-color: color-mix(in srgb, var(--system-accent) 42%, transparent); background: color-mix(in srgb, var(--system-accent) 9%, rgba(5, 18, 30, .82)); }
+.fiber-portal .portal-session-bar button:disabled { opacity: .35; cursor: not-allowed; }
+.fiber-portal .portal-session-modes, .fiber-portal .portal-capture-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+.fiber-portal .portal-session-modes { padding: 3px; border: 1px solid rgba(135, 176, 205, .14); border-radius: 4px; gap: 2px; }
+.fiber-portal .portal-session-modes button { height: 36px; border-color: transparent; font-size: 8px; }
+.fiber-portal .portal-session-bar .portal-device-launch { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto 5px; gap: 6px; padding-inline: 8px; border-color: color-mix(in srgb, var(--system-accent) 32%, transparent); background: color-mix(in srgb, var(--system-accent) 7%, rgba(5, 18, 30, .82)); color: rgba(232, 242, 249, .8); font-size: 10px; }
+.fiber-portal .portal-device-launch > .anticon { color: var(--system-accent); font-size: 14px; }
+.fiber-portal .portal-device-launch small { font-size: 6px; color: rgba(146, 179, 204, .5); padding-left: 6px; border-left: 1px solid rgba(135, 176, 205, .14); }
+.fiber-portal .portal-device-launch i { width: 4px; height: 4px; border-radius: 50%; background: #e5c277; }
+/* 收入设备层的都是原控件，不能因紧凑布局丢失多串口/回放/下载入口。 */
+.fiber-portal .portal-runtime-monitor .title .portal-native-controls {
+  position: absolute; top: calc(100% + 10px); left: 0; right: 0; min-width: 0;
+  display: none; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: flex-start;
+  max-height: min(440px, calc(100dvh - 150px)); overflow-y: auto; padding: 14px;
+  border: 1px solid rgba(197, 220, 235, .16); border-radius: 12px;
+  background: linear-gradient(148deg, rgba(13, 27, 38, .98), rgba(3, 13, 23, .98));
+  box-shadow: 0 24px 64px rgba(0, 5, 13, .42); backdrop-filter: blur(18px);
+}
+.fiber-portal .portal-runtime-monitor .title .portal-native-controls.is-open { display: flex; }
+.fiber-portal .portal-controls-heading { flex: 0 0 100%; display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 1px solid rgba(137, 178, 207, .11); font-size: 12px; }
+.fiber-portal .portal-controls-heading button { width: 32px; height: 32px; border: 0; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
+.fiber-portal .portal-session-title > div:last-child > .optionImg,
+.fiber-portal .portal-session-title > .jqbedAlgorithmConfigTooltipTarget { display: none; }
+
+.fiber-portal .portal-runtime-monitor .portal-observatory {
+  position: absolute; z-index: 10; top: var(--portal-chart-top); bottom: var(--portal-chart-bottom); left: 22px;
+  display: grid; width: var(--left-chart-width); grid-template-rows: 54px minmax(0, 1fr); padding: 10px 10px 12px;
+  box-sizing: border-box; isolation: isolate; overflow: hidden; border: 1px solid rgba(201, 220, 233, .16); border-radius: 16px;
+  background: radial-gradient(circle at 8% -12%, rgba(229, 194, 119, .17), transparent 38%), radial-gradient(circle at 108% 112%, color-mix(in srgb, var(--system-accent) 14%, transparent), transparent 44%), linear-gradient(145deg, rgba(27, 32, 37, .9), rgba(4, 15, 27, .86));
+  box-shadow: 0 26px 70px rgba(0, 5, 13, .44), inset 0 1px rgba(236, 245, 251, .08), inset 0 -1px rgba(93, 150, 191, .08);
+  backdrop-filter: blur(22px) saturate(125%); pointer-events: auto;
+  transition: visibility 0s;
+}
+.fiber-portal .portal-observatory::before { content: ''; position: absolute; inset: 0; z-index: -1; background: radial-gradient(circle at 18% 0%, rgba(248, 217, 151, .1), transparent 28%), linear-gradient(112deg, rgba(255, 255, 255, .025), transparent 38%, color-mix(in srgb, var(--system-accent) 5%, transparent)); pointer-events: none; }
+.fiber-portal .portal-observatory-heading { display: flex; flex-direction: column; justify-content: center; gap: 5px; padding: 0 2px; }
+.fiber-portal .portal-observatory-heading small { font: 6px 'JetBrains Mono', monospace; letter-spacing: .16em; color: color-mix(in srgb, var(--system-accent) 52%, #b6cfe1); }
+.fiber-portal .portal-observatory-heading strong { font-size: 10px; font-weight: 560; color: rgba(232, 242, 249, .8); }
+.fiber-portal .portal-observatory .manifest-sidebar-content { position: relative; display: block; min-width: 0; min-height: 0; overflow: hidden; border: 1px solid rgba(147, 185, 211, .08); border-radius: 10px; background: rgba(2, 12, 20, .24); }
+.fiber-portal .portal-runtime-monitor .home .aside {
+  position: absolute; inset: 0; width: 100%; height: 100%; max-height: none; padding: 0;
+  display: block; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin;
+  scrollbar-color: rgba(135, 176, 205, .2) transparent; overscroll-behavior-block: contain;
+}
+.fiber-portal .portal-runtime-monitor .home .aside > .asideContent {
+  min-width: 0; width: 100%; min-height: 166px; margin: 0; padding: 10px 8px 8px;
+  border: 0; border-bottom: 1px solid rgba(141, 179, 207, .12); border-radius: 0;
+  background: transparent; box-shadow: none; backdrop-filter: none; overflow: hidden;
+}
+/* 原生折线卡沿用左指标右曲线；复杂算法和自定义图表保持自身内容结构。 */
+.fiber-portal .portal-runtime-monitor .asideContent:has(> .editableBuiltinChart) {
+  display: grid; grid-template-columns: 102px minmax(0, 1fr); grid-template-rows: 24px 30px 15px repeat(4, 18px); column-gap: 6px; align-content: center;
+}
+.fiber-portal .portal-runtime-monitor .asideContent:has(> .editableBuiltinChart) > * { grid-column: 1; min-width: 0; }
+.fiber-portal .portal-runtime-monitor .asideContent > .editableBuiltinChart { grid-column: 2 !important; grid-row: 1 / 8; width: 100% !important; height: 100% !important; min-height: 0; border: 0; border-radius: 0; background: transparent; }
+.fiber-portal .portal-runtime-monitor .aside .asideTitle { font-size: 10px; line-height: 1.4; margin: 0; font-weight: 560; color: rgba(226, 238, 247, .82); }
+.fiber-portal .portal-runtime-monitor .aside .pressData { font: 500 22px 'JetBrains Mono', Consolas, monospace; color: var(--system-accent); }
+.fiber-portal .portal-runtime-monitor .aside .pressTitle { font-size: 7px; }
+.fiber-portal .portal-runtime-monitor .aside .dataItem { gap: 3px; font-size: 8px; line-height: 1.5; margin: 0; color: rgba(190, 211, 225, .7); }
+.fiber-portal .portal-runtime-monitor .aside .dataIteminfo { justify-content: flex-end; flex: 1; }
+.fiber-portal .portal-runtime-monitor .aside .dataItemCircle { min-width: 0; }
+.fiber-portal .portal-runtime-monitor .aside .circleItem { margin-right: 4px; width: 3px; height: 3px; }
+.fiber-portal .portal-runtime-monitor .aside .dataIteminfo > .standardColor { display: none; }
+.fiber-portal .portal-runtime-monitor .aside .standardColor { color: rgba(150, 181, 206, .58); }
+.fiber-portal .portal-runtime-monitor .aside .builtinChartHeading { gap: 2px; }
+.fiber-portal .portal-runtime-monitor .aside .builtinChartHeading .ant-btn { height: 20px; width: 20px; min-width: 20px; padding: 0; font-size: 9px; }
+.fiber-portal .portal-runtime-monitor .aside .formulaChartLauncher { margin: 0; padding: 8px; border: 0; background: transparent; }
+.fiber-portal .portal-runtime-monitor .aside .formulaChartLauncher .ant-btn { font-size: 10px; }
+.fiber-portal .portal-runtime-monitor.is-chart-hidden .portal-observatory { visibility: hidden; opacity: 0; pointer-events: none; }
+.fiber-portal .portal-runtime-monitor.is-chart-hidden .aside { visibility: hidden; }
+
+/* 定位不交给入场动画；否则 GSAP 清理 transform 时卡片会上下弹回。 */
+.fiber-portal .portal-quick-tools-anchor {
+  position: absolute; z-index: 12; top: 50%; right: 22px; width: var(--right-tools-width);
+  transform: translateY(-42%); pointer-events: none;
+}
+.fiber-portal .portal-quick-tools {
+  position: relative; display: grid; width: 100%;
+  grid-template-rows: 46px auto 44px; gap: 8px; padding: 10px; box-sizing: border-box; overflow: hidden;
+  border: 1px solid rgba(197, 220, 235, .16); border-radius: 16px;
+  background: radial-gradient(circle at 90% 0%, color-mix(in srgb, var(--system-accent) 11%, transparent), transparent 38%), linear-gradient(148deg, rgba(13, 27, 38, .94), rgba(3, 13, 23, .9));
+  box-shadow: 0 24px 64px rgba(0, 5, 13, .42), inset 0 1px rgba(231, 243, 250, .06);
+  backdrop-filter: blur(18px) saturate(118%); pointer-events: auto;
+}
+.fiber-portal .portal-quick-tools::before { content: ''; position: absolute; top: 0; right: 14px; width: 72px; height: 1px; background: linear-gradient(90deg, transparent, var(--system-accent)); box-shadow: 0 0 14px color-mix(in srgb, var(--system-accent) 22%, transparent); }
+.fiber-portal .portal-quick-tools header { display: flex; align-items: center; justify-content: space-between; padding: 0 3px 7px; border-bottom: 1px solid rgba(137, 178, 207, .11); }
+.fiber-portal .portal-quick-tools header > span, .fiber-portal .portal-quick-tools footer > span { display: grid; gap: 3px; }
+.fiber-portal .portal-quick-tools header small, .fiber-portal .portal-quick-tools footer small { color: color-mix(in srgb, var(--system-accent) 48%, rgba(182, 207, 225, .5)); font: 6px 'JetBrains Mono', monospace; letter-spacing: .14em; }
+.fiber-portal .portal-quick-tools header strong { color: rgba(232, 242, 249, .84); font-size: 11px; font-weight: 570; }
+.fiber-portal .portal-quick-tools header i { width: 6px; height: 6px; border-radius: 50%; background: var(--system-accent); box-shadow: 0 0 12px color-mix(in srgb, var(--system-accent) 62%, transparent); }
+.fiber-portal .portal-quick-tools-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.fiber-portal .portal-quick-tools-grid button { display: grid; min-height: 64px; grid-template-columns: 18px minmax(0, 1fr); grid-template-rows: 24px 18px; align-content: center; align-items: center; gap: 0 7px; padding: 8px; border: 1px solid rgba(135, 176, 205, .14); border-radius: 10px; background: rgba(5, 17, 29, .66); color: rgba(178, 205, 224, .58); text-align: left; cursor: pointer; transition: border-color 180ms ease, background 180ms ease, color 180ms ease, transform 180ms ease; }
+.fiber-portal .portal-quick-tools-grid button:hover, .fiber-portal .portal-quick-tools-grid button.is-active { border-color: color-mix(in srgb, var(--system-accent) 42%, transparent); background: color-mix(in srgb, var(--system-accent) 9%, rgba(5, 18, 30, .82)); color: rgba(237, 246, 252, .9); }
+.fiber-portal .portal-quick-tools-grid button:active { transform: translateY(1px); }
+.fiber-portal .portal-session-bar button:focus-visible, .fiber-portal .portal-quick-tools-grid button:focus-visible { outline: 1px solid color-mix(in srgb, var(--system-accent) 58%, transparent); outline-offset: 2px; }
+.fiber-portal .portal-quick-tools-grid button > .anticon { grid-row: 1 / span 2; font-size: 16px; color: color-mix(in srgb, var(--system-accent) 68%, #e7f3fa); }
+.fiber-portal .portal-quick-tools-grid button > span:not(.anticon) { align-self: end; font-size: 10px; font-weight: 560; }
+.fiber-portal .portal-quick-tools-grid button > small { align-self: start; color: rgba(146, 179, 204, .38); font: 6px 'JetBrains Mono', monospace; letter-spacing: .05em; }
+.fiber-portal .portal-quick-tools footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 3px 0; border-top: 1px solid rgba(137, 178, 207, .11); }
+.fiber-portal .portal-quick-tools footer strong, .fiber-portal .portal-quick-tools output { color: rgba(195, 218, 233, .6); font: 520 6px 'JetBrains Mono', monospace; letter-spacing: .08em; }
+.fiber-portal .portal-quick-tools output { color: color-mix(in srgb, var(--system-accent) 58%, #e7f3fa); white-space: nowrap; }
+.fiber-portal .portal-runtime-monitor .home .setIcons { top: auto; bottom: 30px; right: 22px; opacity: .5; transform: scale(.72); transform-origin: bottom right; }
+.fiber-portal .portal-runtime-monitor .canvas-overlay-bar.is-collapsed { left: auto; right: 82px; width: auto; background: transparent; border: 0; backdrop-filter: none; }
+.fiber-portal .portal-runtime-monitor .canvas-overlay-toggle { background: rgba(5, 17, 29, .66); border-color: rgba(135, 176, 205, .14); color: rgba(178, 205, 224, .58); }
+.fiber-portal .portal-runtime-monitor .portal-sample-rate { top: 36px; bottom: auto !important; right: 84px !important; padding: 3px 8px !important; font-size: 10px !important; border: 0 !important; background: transparent !important; color: rgba(146, 179, 204, .6) !important; z-index: 20 !important; }
+
+@media (min-width: 1100px) {
+  .fiber-portal .portal-runtime-monitor .home > .title { top: 18px; left: clamp(270px, 23vw, 360px); width: min(760px, calc(100vw - clamp(270px, 23vw, 360px) - 260px)); }
+}
+@media (min-width: 821px) and (max-width: 1099px) {
+  .fiber-portal .portal-runtime-monitor { --portal-chart-top: 150px; }
+}
+@media (max-height: 700px) and (min-width: 821px) {
+  .fiber-portal .portal-runtime-monitor { --left-chart-width: clamp(280px, 24vw, 320px); --right-tools-width: 174px; --portal-chart-bottom: 14px; }
+  .fiber-portal .portal-quick-tools-anchor { right: 14px; }
+  .fiber-portal .portal-quick-tools { grid-template-rows: 40px auto 38px; padding: 8px; }
+  .fiber-portal .portal-quick-tools-grid button { min-height: 54px; padding: 6px; }
+}
+@media (max-width: 820px) {
+  .fiber-portal .portal-runtime-monitor { --left-chart-width: min(340px, calc(100vw - 24px)); --portal-chart-top: auto; --portal-chart-bottom: 12px; }
+  .fiber-portal .portal-monitor-navigation { top: 14px; left: 12px; right: 12px; }
+  .fiber-portal .portal-monitor-identity { display: none; }
+  .fiber-portal .portal-runtime-monitor .home > .title { top: 70px; left: 12px; width: calc(100% - 24px); height: auto; min-height: 96px; }
+  .fiber-portal .portal-session-bar { grid-template-columns: 104px minmax(0, 1fr); height: auto; }
+  .fiber-portal .portal-capture-actions { grid-column: 1 / -1; }
+  .fiber-portal .portal-session-bar .portal-capture-actions button { height: 32px; }
+  .fiber-portal .portal-runtime-monitor .portal-observatory { left: 12px; height: min(330px, 40dvh); grid-template-rows: 40px minmax(0, 1fr); }
+  .fiber-portal .portal-quick-tools-anchor { top: 178px; left: 12px; right: 12px; width: auto; transform: none; }
+  .fiber-portal .portal-quick-tools { padding: 6px; display: block; border-radius: 10px; }
+  .fiber-portal .portal-quick-tools header, .fiber-portal .portal-quick-tools footer { display: none; }
+  .fiber-portal .portal-quick-tools-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; }
+  .fiber-portal .portal-quick-tools-grid button { min-height: 44px; padding: 5px; grid-template-rows: 18px 12px; gap: 0 4px; }
+  .fiber-portal .portal-runtime-monitor .portal-sample-rate { top: 26px; right: 66px !important; }
+  .fiber-portal .portal-runtime-monitor .home .setIcons { display: none; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .fiber-portal .portal-runtime-monitor .portal-observatory, .fiber-portal .portal-quick-tools { background: #071523; backdrop-filter: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fiber-portal .portal-runtime-monitor .portal-observatory, .fiber-portal .portal-quick-tools-grid button, .fiber-portal .portal-session-bar button { transition: none; }
+}
+
+/* 展示优先：读数、中文标题和操作文字不能沿用参考稿的 6–10px 微字。 */
+.fiber-portal .portal-monitor-identity strong { font-size: 17px; color: var(--portal-text); }
+.fiber-portal .portal-monitor-identity small { font-size: 10px; color: var(--portal-muted); }
+.fiber-portal .portal-session-bar { grid-template-columns: 144px minmax(140px, 1fr) 196px; }
+.fiber-portal .portal-session-bar button { color: var(--portal-secondary); font-size: 12px; }
+.fiber-portal .portal-session-modes button { font-size: 12px; white-space: nowrap; }
+.fiber-portal .portal-session-bar .portal-device-launch { font-size: 14px; color: var(--portal-text); }
+.fiber-portal .portal-device-launch small { color: var(--portal-secondary); font-size: 11px; }
+.fiber-portal .portal-controls-heading { font-size: 15px; color: var(--portal-text); }
+.fiber-portal .portal-runtime-monitor .portal-observatory { grid-template-rows: 60px minmax(0, 1fr); }
+.fiber-portal .portal-observatory-heading small { font-size: 10px; color: var(--portal-muted); }
+.fiber-portal .portal-observatory-heading strong { font-size: 16px; color: var(--portal-text); font-weight: 650; }
+.fiber-portal .portal-runtime-monitor .home .aside > .asideContent { min-height: 220px; padding: 14px 10px; }
+.fiber-portal .portal-runtime-monitor .asideContent:has(> .editableBuiltinChart) { grid-template-columns: minmax(128px, 44%) minmax(0, 1fr); grid-template-rows: 30px 44px 24px repeat(4, 24px); column-gap: 8px; }
+.fiber-portal .portal-runtime-monitor .aside .asideTitle { color: var(--portal-text); font-size: 16px; font-weight: 650; }
+.fiber-portal .portal-runtime-monitor .aside .pressData { font-size: clamp(28px, 2.4vw, 36px); font-weight: 600; font-variant-numeric: tabular-nums; }
+.fiber-portal .portal-runtime-monitor .aside .pressTitle { font-size: 12px; color: var(--portal-muted); }
+.fiber-portal .portal-runtime-monitor .aside .dataItem { font-size: 12px; color: var(--portal-secondary); }
+.fiber-portal .portal-runtime-monitor .aside .dataIteminfo { color: var(--portal-text); font-weight: 550; }
+.fiber-portal .portal-runtime-monitor .aside .standardColor { color: var(--portal-muted); }
+.fiber-portal .portal-runtime-monitor .aside .builtinChartHeading .ant-btn { width: 26px; height: 26px; font-size: 13px; color: var(--portal-secondary); }
+.fiber-portal .portal-runtime-monitor .aside .customChartCard > .builtinChartHeading { grid-column: 1 / -1; }
+.fiber-portal .portal-runtime-monitor .aside .customChartCard > .editableBuiltinChart { grid-row: 2 / 8; }
+.fiber-portal .portal-runtime-monitor .aside .customChartCard > span:not(.pressData) { color: var(--portal-muted) !important; font-size: 12px; }
+.fiber-portal .portal-runtime-monitor .aside .formulaChartLauncher .ant-btn { font-size: 13px; color: var(--portal-secondary); }
+.fiber-portal .portal-quick-tools { grid-template-rows: 48px auto 44px; }
+.fiber-portal .portal-quick-tools header strong { font-size: 16px; color: var(--portal-text); font-weight: 650; }
+.fiber-portal .portal-quick-tools header small, .fiber-portal .portal-quick-tools footer small { font-size: 10px; color: var(--portal-muted); }
+.fiber-portal .portal-quick-tools-grid button { min-height: 72px; grid-template-rows: 26px 20px; color: var(--portal-secondary); }
+.fiber-portal .portal-quick-tools-grid button > span:not(.anticon) { font-size: 14px; color: var(--portal-text); }
+.fiber-portal .portal-quick-tools-grid button > small { font-size: 10px; color: var(--portal-muted); }
+.fiber-portal .portal-quick-tools footer strong, .fiber-portal .portal-quick-tools output { font-size: 10px; color: var(--portal-secondary); }
+.fiber-portal .portal-runtime-monitor .portal-sample-rate { color: var(--portal-secondary) !important; font-size: 12px !important; }
+@media (min-width: 1100px) {
+  .fiber-portal .portal-runtime-monitor .home > .title { left: clamp(310px, 23vw, 360px); width: min(840px, calc(100vw - clamp(310px, 23vw, 360px) - 160px)); }
+}
+@media (min-width: 1100px) and (max-width: 1279px) {
+  .fiber-portal .portal-device-launch small { display: none; }
+}
+@media (max-width: 820px) {
+  .fiber-portal .portal-session-bar { grid-template-columns: 144px minmax(0, 1fr); }
+  .fiber-portal .portal-device-launch small { display: none; }
+  .fiber-portal .portal-quick-tools-grid button { min-height: 48px; grid-template-rows: 24px 16px; }
+  .fiber-portal .portal-runtime-monitor .portal-observatory { grid-template-rows: 52px minmax(0, 1fr); }
+}

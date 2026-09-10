@@ -4,8 +4,9 @@ import { HashRouter, Routes, Route } from 'react-router-dom'
 import { App as AntdApp, message } from 'antd'
 import i18next from './i18n'
 import UpdateNotifier from './components/updater/UpdateNotifier'
+import { loadMonitoringPage } from './page/home/loadMonitoringPage'
 
-const Home = lazy(() => import('./page/home/Home'))
+const Home = lazy(loadMonitoringPage)
 const Demo = lazy(() => import('./legacy/demos/Demo'))
 const HandDemo = lazy(() => import('./legacy/demos/handDemo'))
 const HandLinePressDemo = lazy(() => import('./legacy/demos/handDemoPress'))

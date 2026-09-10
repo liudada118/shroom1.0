@@ -19,6 +19,7 @@ import Eye from '../../components/three/eye'
 import Car10 from "../../components/three/car10";
 import Canvas from "../../components/three/Three";
 import CanvasHand from "../../components/three/hand";
+import { SceneVisibilityContext } from '../../renderers/sceneVisibility';
 import Box100 from "../../components/three/box100_3";
 import Car100 from "../../components/car/box100_3";
 
@@ -128,6 +129,7 @@ import {
 } from '../../displays/registry';
 import { readManifestChannelFrames } from '../../extensions/display-system/manifestSceneAdapter';
 import ManifestSidebarOverlay from '../../extensions/display-system/ManifestSidebarOverlay.jsx';
+import PortalAlgorithmMarket from '../licensePortal/PortalAlgorithmMarket.jsx';
 import RendererHost from '../../renderers/RendererHost.jsx';
 import { resolveRendererFromDefinition } from '../../renderers/registry';
 // 只引参数表，不引渲染器本体 —— params.js 是纯函数模块（无 three.js），
@@ -1027,6 +1029,7 @@ let onBedState = []
 class Home extends React.Component {
   constructor() {
     super();
+    this.sceneVisibility = { current: true };
     let storedAllowedTypes = null;
     try {
       const parsedAllowedTypes = JSON.parse(localStorage.getItem('allowedTypes') || 'null');
@@ -1136,6 +1139,7 @@ class Home extends React.Component {
       smallBedMatrixWidth: 32,
       smallBedMatrixHeight: 32,
       displaySystemBuilderOpen: false,
+      portalAlgorithmMarketOpen: false,
       // manifest 展示系统的画布偏好（配色 / 叠加层）。构造时就读出来，
       // 免得首帧按 classic 渲染完再因为偏好不同重建一次场景。
       displaySelection: readDisplayCanvasSelection(initialMatrixName),
@@ -1158,6 +1162,7 @@ class Home extends React.Component {
     this.manifestDisplay = React.createRef();
     this.data = React.createRef();
     this.title = React.createRef();
+    this.portalChartDropTarget = React.createRef();
     this.line = React.createRef();
     this.track = React.createRef();
     this.progress = React.createRef();
@@ -1486,6 +1491,7 @@ class Home extends React.Component {
   componentDidMount() {
     this.setState({ wsConnected: false });
     // window.alert(window.innerWidth)
+    if (this._portalFontSize === undefined) this._portalFontSize = document.documentElement.style.fontSize;
     document.documentElement.style.fontSize = `${window.innerWidth / 120}px`;
     this.syncDisplayRendererConfig();
     // componentDidMount 被 window.__wsReconnect 反复重入，订阅只能建一次。
@@ -1599,6 +1605,8 @@ class Home extends React.Component {
   }
 
   componentWillUnmount() {
+    clearLastFrame();
+    if (this.props.portalEmbedded) document.documentElement.style.fontSize = this._portalFontSize;
     if (this._unsubscribeFormulaCharts) {
       this._unsubscribeFormulaCharts();
       this._unsubscribeFormulaCharts = null;
@@ -3385,10 +3393,15 @@ class Home extends React.Component {
   };
 
   componentDidUpdate(prevProps, prevState) {
+    if ((prevState.matrixName === this.state.matrixName && prevState.numMatrixFlag !== this.state.numMatrixFlag)
+      || (!prevState.local && this.state.local)) {
+      this.props.onPortalDataView?.();
+    }
     // 换展示形式时丢掉总线上的末帧。不丢的话，下一个渲染器挂上来会先收到
     // 一帧属于上一台设备的数据（订阅时的补发），画出一帧错的东西。
     if (prevState.matrixName !== this.state.matrixName) {
       clearLastFrame();
+      this.props.onPortalSystemChange?.(this.state.matrixName);
     }
 
     if (
@@ -4383,6 +4396,7 @@ class Home extends React.Component {
 
   render() {
     // rotate: "旋转",
+    this.sceneVisibility.current = !this.props.externalScene;
     // boxSelection: '框选',
     // rotateX: "绕x轴旋转30°",
     // rotateY: "绕y轴旋转30°",
@@ -4505,7 +4519,7 @@ class Home extends React.Component {
       : rainbowTextColorsxy.slice(0, rainbowTextColorsxy.length - 7)
     return (
       <ConfigProvider locale={antdLocale}>
-        <div className="home">
+        <div className={`home${this.props.portalEmbedded ? ' home-portal-embedded' : ''}`}>
           {this.state.matrixName != "robot0428" ? <div className="setIcons">
             <div className="setIconItem setIconItem1">
               <Popover placement="top" title={text} content={content}>
@@ -4950,7 +4964,26 @@ class Home extends React.Component {
             changeCalibration={this.changeCalibration}
             colFingerData={this.colFingerData}
             openDisplaySystemBuilder={() => this.setState({ displaySystemBuilderOpen: true })}
+            onPortalBack={this.props.onPortalBack}
+            portalEmbedded={this.props.portalEmbedded}
+            portalToolsHost={this.props.portalToolsHost}
+            portalChartsVisible={this.props.portalChartsVisible}
+            onPortalChartsToggle={this.props.onPortalChartsToggle}
+            portalAlgorithmMarketOpen={this.state.portalAlgorithmMarketOpen}
+            onPortalAlgorithmsToggle={() => this.setState({ portalAlgorithmMarketOpen: !this.state.portalAlgorithmMarketOpen })}
           />
+
+          {this.props.portalEmbedded && <PortalAlgorithmMarket key={this.state.matrixName}
+            open={this.state.portalAlgorithmMarketOpen} matrixName={this.state.matrixName}
+            inputKind={runtimeDisplayDefinition?.source === 'manifest' ? 'matrix' : 'statistics'}
+            metricDefinitions={runtimeDisplayDefinition?.source === 'manifest' ? runtimeDisplayDefinition.page?.sidebar?.algorithmMetrics : undefined}
+            dropTargetRef={this.portalChartDropTarget}
+            onShowCharts={() => { if (!this.props.portalChartsVisible) this.props.onPortalChartsToggle?.(); }}
+            onClose={() => this.setState({ portalAlgorithmMarketOpen: false })}
+            onConfigure={() => {
+              if (this.title.current?.canUseJqbedAlgorithmConfig()) this.title.current.setState({ jqbedAlgorithmConfigOpen: true });
+              else this.setState({ displaySystemBuilderOpen: true });
+            }} />}
 
           <Modal
             className="display-system-builder-shell"
@@ -4972,7 +5005,9 @@ class Home extends React.Component {
           </Modal>
 
           {this.state.matrixName != "robot0428" ? <ManifestSidebarOverlay
-            enabled={runtimeDisplayDefinition?.source === 'manifest' && runtimeDisplayDefinition.page?.layout?.presentation !== 'immersive'}
+            containerRef={this.portalChartDropTarget}
+            portalEmbedded={this.props.portalEmbedded}
+            enabled={!this.props.portalEmbedded && runtimeDisplayDefinition?.source === 'manifest' && runtimeDisplayDefinition.page?.layout?.presentation !== 'immersive'}
           ><CanvasCom matrixName={modeCanvasMatrixName} chartKey={chartAppearanceKey}>
             <Aside
               i18n={i18n}
@@ -4986,6 +5021,11 @@ class Home extends React.Component {
             />
           </CanvasCom></ManifestSidebarOverlay> : ''}
 
+          {/* ⚠️ 旧渲染器还承担部分侧栏计算，粒子视图只隐藏画面，不能卸载后伪造读数。 */}
+          <SceneVisibilityContext.Provider value={this.sceneVisibility}>
+          <div className={this.props.portalEmbedded ? 'portal-data-renderer' : undefined}
+            style={this.props.portalEmbedded ? undefined : { display: 'contents' }}
+            inert={Boolean(this.props.externalScene)} aria-hidden={Boolean(this.props.externalScene)}>
           {runtimeDisplayDefinition?.source === 'manifest' ? (
             <React.Suspense fallback={<div className="manifest-renderer-loading"><Spin /></div>}>
               <ManifestDisplayRenderer
@@ -5226,6 +5266,7 @@ class Home extends React.Component {
                         >
                           <CanvasHand
                             ref={this.com}
+                            portalEmbedded={this.props.portalEmbedded}
                             colormap={canvasColormap}
                             data={this.data}
                             local={this.state.local}
@@ -5342,6 +5383,7 @@ class Home extends React.Component {
                             {...this.sceneChartProps} />
                         ) : (
                           <Hand0205
+                            portalEmbedded={this.props.portalEmbedded}
                             hand={this.state.hand}
                             ref={this.com}
                             data={this.data}
@@ -5520,6 +5562,7 @@ class Home extends React.Component {
                         >
                           <CanvasHand
                             ref={this.com}
+                            portalEmbedded={this.props.portalEmbedded}
                             colormap={canvasColormap}
                             data={this.data}
                             local={this.state.local}
@@ -5566,6 +5609,7 @@ class Home extends React.Component {
                           <CanvasHand
                             ref={this.com}
                             colormap={canvasColormap}
+                            portalEmbedded={this.props.portalEmbedded}
                             data={this.data}
                             local={this.state.local}
                             {...this.sceneChartProps} />
@@ -5734,6 +5778,7 @@ class Home extends React.Component {
                           <CanvasHand
                             ref={this.com}
                             colormap={canvasColormap}
+                            portalEmbedded={this.props.portalEmbedded}
                             data={this.data}
                             local={this.state.local}
                             {...this.sceneChartProps}
@@ -5800,6 +5845,8 @@ class Home extends React.Component {
                       )
           }
 
+          </div>
+          </SceneVisibilityContext.Provider>
           {/* 全床压力曲线 */}
           {this.state.matrixName === "bigBed" ? (
             <div
@@ -5944,7 +5991,7 @@ class Home extends React.Component {
         </div>
 
           {/* ====== 右下角采样频率显示 ====== */}
-          <div style={{
+          <div className="portal-sample-rate" style={{
             position: 'fixed',
             bottom: '70px',
             right: '20px',

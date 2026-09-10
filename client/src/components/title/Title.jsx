@@ -1,4 +1,6 @@
 import React from 'react'
+import { createPortal } from 'react-dom';
+import { PortalSessionBar, PortalQuickTools, PortalControlsHeading } from '../../page/licensePortal/PortalMonitoringChrome';
 import { Menu, Slider, Button, Select, message, notification, Divider, Space, Radio, Drawer, Modal, Progress, Tooltip } from 'antd';
 import { PlusOutlined, SettingOutlined, SlidersOutlined } from '@ant-design/icons';
 import exchange from '../../assets/images/exchange.png'
@@ -17,6 +19,7 @@ import axios from 'axios';
 import { bthClickHandle as heatmapBthClickHandle } from '../onestep/heatmap';
 import { getDisplayDefinition, registerRuntimeDisplayDefinition } from '../../displays/registry';
 import { buildAccessibleSensorOptions } from '../../services/sensorStatus';
+import { getBuiltinSystemOptions } from '../../services/displaySystemOptions';
 import { translateDomainLabel } from '../../i18n/translateDomainLabel';
 import { getLanguageLocale } from '../../i18n';
 import JqbedAlgorithmConfigModal from '../../extensions/jqbed/JqbedAlgorithmConfigModal';
@@ -1791,6 +1794,27 @@ class Title extends React.Component {
     this.setState({ jqbedAlgorithmConfigOpen: false });
   }
 
+  /** 快捷清零与设置抽屉共用命令及成功后的本地状态更新。 */
+  resetPortalPressure = () => {
+    const zeroCommand = { resetZero: true };
+    if (this.props.wsSendObj(zeroCommand)) {
+      this.props.changeAside?.(zeroCommand);
+      this.setState(zeroCommand);
+    }
+  };
+
+  /** 门户采集复用原有配置弹窗，保留 localCar 特殊采集。 */
+  startPortalCollection = () => {
+    if (this.props.matrixName === 'localCar') this.props.changeStateData({ colWebFlag: true });
+    else this.openCollectionModal();
+  };
+
+  /** 停止入口不绕过原生采集命令。 */
+  stopPortalCollection = () => {
+    if (this.props.matrixName === 'localCar') this.props.changeStateData({ colWebFlag: false });
+    else this.stopCollection();
+  };
+
   render() {
     const routerStr = this.props.matrixName == 'yanfeng10' ? '10a10' : this.props.matrixName == 'smallSample' ? '10a10' : this.props.matrixName == 'matCol' || this.props.matrixName == 'matColPos' ? '16a10' : this.props.matrixName == 'bed4096' ? '64a64' : this.props.matrixName == 'carCol' ? '10a9' : '32a32'
     const { t, i18n } = this.props;
@@ -1801,37 +1825,7 @@ class Title extends React.Component {
 
 
     // 全量传感器类型列表
-    const builtInSensorArr = [
-      { label: t('sensorHand'), value: 'hand' },
-      { label: t('sensorHand0205'), value: 'hand0205' },
-      { label: t('sensorHand0205Double'), value: 'hand0205Double' },
-      { label: t('sensorHandGlove115200'), value: 'handGlove115200' },
-      { label: t('sensorHandGloveFullPacket'), value: 'handGloveFullPacket' },
-      { label: t('sensorSmallSample'), value: 'smallSample' },
-      { label: t('sensorRobot1'), value: 'robot1' },
-      { label: t('sensorRobotSY'), value: 'robotSY' },
-      { label: t('sensorRobotLCF'), value: 'robotLCF' },
-      { label: t('sensorFootVideo'), value: 'footVideo' },
-      { label: t('sensorDaliegu'), value: 'daliegu' },
-      { label: t('sensorBed4096num'), value: 'bed4096num' },
-      { label: t('sensorBed4096'), value: 'bed4096' },
-      { label: t('sensorJqbed'), value: 'jqbed' },
-      { label: t('sensorSmallBedNoAlg'), value: smallBedNoAlgType_title },
-      { label: t('sensorSmallBed12B'), value: smallBed12BType_title },
-      { label: t('sensorMatCol'), value: 'matCol' },
-      { label: t('sensorTempFullBed'), value: tempFullBedType_title },
-      { label: t('sensorPetCare'), value: 'petCare' },
-      { label: t('sensorPetCareMini'), value: 'petCareMini' },
-      { label: t('sensorWholeChair'), value: wholeChairType_title },
-      { label: t('sensorMinzhen'), value: minzhenType_title },
-      { label: t('sensorFast256'), value: 'fast256' },
-      { label: t('sensorFast1024'), value: 'fast1024' },
-      { label: t('sensorHandSinglePoint'), value: 'handSinglePoint' },
-      { label: t('sensorNormal'), value: 'normal' },
-      // { label: t('sensorHumanBody'), value: 'humanBody' },
-      { label: t('chairQX'), value: 'carQX' },
-      { label: t('sensorHumanBodyOptimized'), value: HUMAN_BODY_OPTIMIZED_MATRIX },
-    ]
+    const builtInSensorArr = getBuiltinSystemOptions(t)
 
     const sensorArr = buildAccessibleSensorOptions({
       builtInSensors: builtInSensorArr,
@@ -1881,13 +1875,44 @@ class Title extends React.Component {
     ];
     const isMinzhenAnimationMode = this.props.matrixName === minzhenType_title && this.props.numMatrixFlag === 'normal';
     // console.log('title')
-    return <div className="title">
+    return <div className={`title${this.props.portalEmbedded ? ' portal-session-title' : ''}`}>
+      {this.props.portalEmbedded ? <PortalSessionBar
+        mode={this.state.current}
+        onMode={(mode) => {
+          if (mode !== this.state.current) this.onClick({ key: mode });
+          if (mode !== 'now') this.setState({ portalControlsOpen: true });
+        }}
+        controlsOpen={Boolean(this.state.portalControlsOpen)}
+        onControls={() => this.setState({ portalControlsOpen: !this.state.portalControlsOpen })}
+        selectedPorts={Object.values(this.state.manifestPortSelections || {}).some(Boolean) || [this.props.portname, this.props.portnameBack, this.props.portnameHead, this.props.portnameSensor].some(Boolean)}
+        collecting={this.props.matrixName === 'localCar' ? this.props.colWebFlag : !this.props.colFlag}
+        onStart={this.startPortalCollection} onStop={this.stopPortalCollection}
+      /> : null}
+      {this.props.portalToolsHost ? createPortal(<PortalQuickTools
+        chartsVisible={this.props.portalChartsVisible} onCharts={this.props.onPortalChartsToggle}
+        algorithmsOpen={this.props.portalAlgorithmMarketOpen} onAlgorithms={this.props.onPortalAlgorithmsToggle}
+        settingsOpen={this.state.open} onSettings={() => this.setState({ open: !this.state.open })}
+        onZero={this.resetPortalPressure}
+      />, this.props.portalToolsHost) : null}
       {/* <h2>bodyta</h2> */}
       <div className="titleBrand">
+        {this.props.onPortalBack
+          ? <button className="titlePortalLink" type="button" onClick={this.props.onPortalBack}>返回系统列表</button>
+          : <NavLink className="titlePortalLink" to={`/?category=all&system=${encodeURIComponent(this.props.matrixName)}`} aria-label="返回首页选择系统" title="返回首页选择系统">首页</NavLink>}
         <img className="titleBrandLogo" src={logo} alt="JQ Industries" />
         <img className="titleBrandWordmark" src={shroomWordmark} alt="Shroom" />
       </div>
-        <div className="titleItems">
+        <div className={`titleItems${this.props.portalEmbedded ? ` portal-native-controls${this.state.portalControlsOpen ? ' is-open' : ''}` : ''}`}
+          id={this.props.portalEmbedded ? 'portal-native-controls' : undefined}
+          inert={this.props.portalEmbedded && !this.state.portalControlsOpen ? true : undefined}
+          onKeyDown={(event) => {
+            if (this.props.portalEmbedded && event.key === 'Escape') {
+              event.stopPropagation();
+              this.setState({ portalControlsOpen: false });
+              event.currentTarget.parentElement.querySelector('.portal-device-launch')?.focus();
+            }
+          }}>
+          {this.props.portalEmbedded ? <PortalControlsHeading onClose={() => this.setState({ portalControlsOpen: false })} /> : null}
           <Button
             className="titleButton"
             icon={<SettingOutlined />}

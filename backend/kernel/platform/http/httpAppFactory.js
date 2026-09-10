@@ -151,6 +151,7 @@ function buildAgentAppContentSecurityPolicy(req, appId) {
  * server.js 只负责传入运行时依赖，HTTP 路由定义集中在这里。
  */
 function createHttpApp({
+  algorithmMarketService,
   agentAppService,
   controlCommandService,
   getChannelBusStatus,
@@ -190,6 +191,18 @@ function createHttpApp({
   httpApp.use(express.json({ limit: '50mb' }));
   httpApp.use(express.urlencoded({ limit: '50mb', extended: true }));
   httpApp.use(createJsonBodyErrorHandler(logger));
+
+  if (algorithmMarketService) {
+    httpApp.get('/api/algorithm-market', (req, res) => res.json(algorithmMarketService.snapshot()));
+    httpApp.post('/api/algorithm-market', async (req, res) => {
+      try {
+        assertAgentAppWriteOrigin(req);
+        res.json(await algorithmMarketService.toggle(req.body));
+      } catch (error) {
+        res.status(error.httpStatus || 500).json({ error: error.httpStatus ? error.message : '算法启用失败，请重试' });
+      }
+    });
+  }
 
   function respondAgentAppError(res, error) {
     const status = Number(error.httpStatus) || 500;

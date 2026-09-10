@@ -56,7 +56,7 @@ function normalizeMetricDefinitions(output = {}) {
  * 返回给 Builder/Agent 的描述只包含可移植 manifest 和源码；绝不暴露安装机绝对路径。
  * 同 id 时前面的根优先，方便开发态资源覆盖打包资源而不会在下拉框里出现两份。
  */
-function discoverBuiltinAlgorithmPackages({ roots = [], fsLike = fs } = {}) {
+function discoverBuiltinAlgorithmPackages({ roots = [], fsLike = fs, includeResolved = false } = {}) {
   const packages = [];
   const invalid = [];
   const seenIds = new Set();
@@ -115,6 +115,7 @@ function discoverBuiltinAlgorithmPackages({ roots = [], fsLike = fs } = {}) {
           metricDefinitions: normalizeMetricDefinitions(manifest.output),
           packageManifest: manifest,
           algorithmSource,
+          ...(includeResolved ? { resolvedPackage: loaded.value } : {}),
         });
       });
   });
