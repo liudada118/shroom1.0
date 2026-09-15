@@ -1,0 +1,22 @@
+.portal-control-dialog { --portal-text: #edf5ff; --portal-muted: #adc4d9; }
+.portal-control-dialog .ant-modal { max-width: calc(100vw - 32px); padding-bottom: 0; }
+.portal-control-dialog .ant-modal-content { border: 1px solid #294353; background: linear-gradient(140deg, #102332, #071421); border-radius: 16px; padding: 24px; box-shadow: 0 28px 80px #0008; }
+.portal-control-dialog .ant-modal-header { background: transparent; padding-right: 36px; margin-bottom: 20px; }
+.portal-control-dialog .ant-modal-title { color: var(--portal-text); font-size: 20px; }
+.portal-control-dialog .ant-modal-close { color: var(--portal-muted); }
+.portal-control-body { max-height: min(640px, calc(100dvh - 160px)); overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.portal-control-description { color: var(--portal-muted); font-size: 14px; line-height: 1.65; margin: 0 0 20px; }
+.portal-control-section { border: 0; padding: 0; margin: 0 0 22px; min-width: 0; }
+.portal-control-section > legend { color: var(--portal-text); font-size: 14px; font-weight: 600; margin-bottom: 12px; padding: 0; }
+.portal-control-fields { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.portal-control-fields .ant-select { min-width: 160px; max-width: 100%; flex: 1 1 180px; margin: 0 !important; }
+.portal-control-fields .ant-select-selector, .portal-control-fields .ant-input { min-height: 40px; }
+.portal-control-fields .ant-btn { min-height: 40px; white-space: normal; height: auto; }
+.portal-control-fields .menu { color: var(--portal-text); background: transparent; }
+.portal-control-dialog button:focus-visible, .portal-control-dialog input:focus-visible { outline: 2px solid #63d5ff; outline-offset: 2px; }
+.portal-control-empty { color: var(--portal-muted); font-size: 14px; line-height: 1.7; }
+.portal-session-bar .portal-session-duration { font: 12px Consolas, monospace; color: #adc4d9; }
+@media (max-width: 540px) {
+  .portal-control-dialog .ant-modal-content { padding: 18px; }
+  .portal-control-fields { align-items: stretch; }
+}

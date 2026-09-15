@@ -1,5 +1,7 @@
 # Shroom 业务定义与功能实现
 
+> 历史业务映射：下文“当前”指原记录时点，不代表本次源码。现有实现见 [数据链路](chains/data-flow.md) 与 [界面链路](chains/interface-flow.md)，分类见 [文档导航](README.md)。
+
 ## 文档范围
 
 - 本文只描述两件事：
@@ -582,4 +584,3 @@
 	- export service
 	- license service
 	- sdk service
-

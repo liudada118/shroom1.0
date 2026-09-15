@@ -4,6 +4,8 @@ mindmap-plugin: basic
 
 # Shroom 传感器系统核心数据流架构图
 
+> 历史图解：部分目录与控制入口已演进，保留原图用于追溯。当前函数、数据与状态流见 [数据与算法链路](chains/data-flow.md)，文档分类见 [导航](README.md)。
+
 ## 总览架构
 
 -

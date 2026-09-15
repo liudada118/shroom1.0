@@ -1,7 +1,9 @@
 # Shroom 快速架构索引
 
-> 最后更新于：2026-09-10
-> 用途：给日常任务提供稳定入口和验证路由。完整历史与设计说明仍以 `ARCHITECTURE.md` 为准，后端细图见 `backend/ARCHITECTURE_MAP.md`。
+> 最后更新于：2026-09-11
+> 用途：代码定位和验证路由。理解当前实现先读 [开发者手册](docs/developer-guide.md)，完整文档分类见 [docs/README.md](docs/README.md)。`ARCHITECTURE.md` 保留历史设计与维护台账，不用作默认全文入口。
+
+当前完整链路：[数据、算法、存储与回放](docs/chains/data-flow.md) · [页面、渲染与交互](docs/chains/interface-flow.md)。
 
 ## 1. 一分钟判断路径
 
@@ -52,7 +54,7 @@ client commandClient → HTTP :19245 /api/commands
   → ControlCommandService/Router → serial/playback/collection/runtime
 ```
 
-约束：传感器实时/回放数据只使用 canonical `sensor.frame`；控制命令走 HTTP，WebSocket 只承载订阅和实时推送。回放应回注同一实时发布边界。
+约束：传感器实时/回放数据使用 canonical `sensor.frame`；新控制命令走 HTTP。当前仍保留旧扁平 WebSocket 控制入口，Home 的三个 JQBed 算法配置命令尚走 WS；它们不属于规范命令的新接入方式。WebSocket 还承载订阅、实时帧和低频系统状态；回放回注同一发布边界，详见数据链路。
 
 ## 4. 高频路径入口
 
@@ -62,6 +64,8 @@ client commandClient → HTTP :19245 /api/commands
 | 预览到原生点图形变 / 最新三栏控制台 | `client/src/renderers/particleEntrance.js`, `components/three/hand.jsx`, `page/licensePortal/LicensePortal.jsx`, `PortalSystemSelector.jsx`, `PortalMonitoringLayer.jsx`, `PortalMonitoringChrome.jsx`, `PortalMonitoring.css` | particleEntrance / PortalSystemSelector tests + `portal-launcher.mjs --monitor-only`：手部从列表直达、无 focused 镜头、慢加载取消/失败、GPU 进度、真实帧、三栏控件、弹窗及往返；其他渲染器不可假定已经支持顶点交接 |
 | Electron 启动/关闭 | `app/electron/index.js`, `app/electron/applicationQuit.js`, `backend/runtime/index.js` | `backend/tests/server/applicationQuit.test.js`, `serverShutdownOrchestrator.test.js` + Full |
 | 正式展示可读性 / 算法超市 | `page/licensePortal/PortalMonitoring.css`, `PortalAlgorithmMarket.jsx`, `portalAlgorithmCatalog.js`, `components/aside/formulaChartStore.js` | portalAlgorithmCatalog / PortalMonitoringChrome / formulaChartStore tests + `portal-launcher.mjs --monitor-only`：字号、点击/拖入、真实帧计算、删除同步、弹窗与窄屏；仅 UI 层采用 Standard |
+| 系统连接 / 回放弹窗 / 批量下载 / 工具箱 | `components/title/Title.jsx`, `portalCsvBatch.js`, `portalOperationGuard.js`, `page/licensePortal/PortalControlDialog.jsx`, `PortalPlaybackDialog.jsx`, `PortalUtilityPanel.jsx` | selection / batch / guard / Title lifecycle / Chrome / Utility tests；`portal-launcher.mjs --monitor-only` 调用 `portal-workspace-controls.mjs` 检查单选与多选独立、串行结果及窄屏；完整导出范围变更涉及 `csvDownloadService`，执行 Full |
+| 快捷抽屉 / 分类视角 / 屏幕量尺 | `page/licensePortal/PortalWorkspaceTools.jsx`, `PortalScreenRuler.jsx`, `renderers/workspaceViewTools.js`, `components/three/hand.jsx`, `hand0205 copy.jsx` | WorkspaceTools / Utility / Chrome / workspaceViewTools tests + `portal-launcher.mjs --monitor-only`；仅 UI 使用 Standard，真实渲染变换执行 Full；屏幕量尺单位是 CSS px，非物理尺寸 |
 | 算法超市 Python 会话启停 | `backend/extension-host/runtime/algorithmMarketService.js`, `kernel/platform/http/httpAppFactory.js`, `client/src/page/licensePortal/portalPackageRuntime.js`, `PortalPackageOutputs.jsx` | algorithmMarket / algorithmMarketApi / portalPackageRuntime tests + Full；包含旧处理器经标准网关缺少 matrix 的输入回归，旁路消费标准帧，内部 HTTP 快照输出，不改变采集回放契约 |
 | 手套点云到原生实体 | `client/src/renderers/modelParticleEntrance.js`, `components/three/hand0205 copy.jsx`, `page/licensePortal/scene/monitoringSurface.js` | modelParticleEntrance / monitoringSurface tests + `portal-launcher.mjs --monitor-only`：真实模型顶点、骨骼姿态、直接交接与返回、减少动画；双手分屏未迁移 |
 | 监测返回选择弹窗 | `page/licensePortal/PortalMonitoringLayer.jsx`, `PortalLauncher.css`, `scene/sceneMotionClock.js`, `renderers/particleEntrance.js`, `components/three/hand.jsx` | 时钟、动态投影与末段混合单测；`portal-launcher.mjs`：GPU 归位、预览预热、材质互补混合、缓冲复用、首帧连续、固定面板、清理、inert、焦点与减少动画；前端动效采用 Standard |

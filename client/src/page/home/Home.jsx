@@ -3393,6 +3393,14 @@ class Home extends React.Component {
   };
 
   componentDidUpdate(prevProps, prevState) {
+    if (this.state.selectFlag && (prevState.matrixName !== this.state.matrixName
+      || prevState.numMatrixFlag !== this.state.numMatrixFlag || prevState.history !== this.state.history)) {
+      // 新场景已挂载，不能用旧框选命令去开启新场景的选区。
+      this.setState({ selectFlag: false, width: 0, height: 0 });
+      this.sitIndexArr = new Array(4).fill(0);
+      this.backIndexArr = new Array(4).fill(0);
+      this.handIndexArr = new Array(4).fill(0);
+    }
     if ((prevState.matrixName === this.state.matrixName && prevState.numMatrixFlag !== this.state.numMatrixFlag)
       || (!prevState.local && this.state.local)) {
       this.props.onPortalDataView?.();
@@ -4394,6 +4402,18 @@ class Home extends React.Component {
     localStorage.setItem(key, JSON.stringify(arr))
   }
 
+  /** 工具箱复用原生框选开关与统计索引，关闭时同步清掉旧选区。 */
+  changePortalSelection = (enabled) => {
+    if (typeof this.com.current?.changeSelectFlag !== 'function') return;
+    this.com.current.changeSelectFlag(!enabled, this.state.local);
+    this.setState({ selectFlag: enabled, ...(!enabled ? { width: 0, height: 0 } : {}) });
+    if (!enabled) {
+      this.sitIndexArr = new Array(4).fill(0);
+      this.backIndexArr = new Array(4).fill(0);
+      this.handIndexArr = new Array(4).fill(0);
+    }
+  };
+
   render() {
     // rotate: "旋转",
     this.sceneVisibility.current = !this.props.externalScene;
@@ -4969,6 +4989,9 @@ class Home extends React.Component {
             portalToolsHost={this.props.portalToolsHost}
             portalChartsVisible={this.props.portalChartsVisible}
             onPortalChartsToggle={this.props.onPortalChartsToggle}
+            onPortalResetPlayback={() => this.progress.current?.resetPlay()}
+            portalSelectionActive={this.state.selectFlag}
+            onPortalSelectionChange={this.changePortalSelection}
             portalAlgorithmMarketOpen={this.state.portalAlgorithmMarketOpen}
             onPortalAlgorithmsToggle={() => this.setState({ portalAlgorithmMarketOpen: !this.state.portalAlgorithmMarketOpen })}
           />

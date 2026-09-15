@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { verifyPortalWorkspaceControls } from './portal-workspace-controls.mjs';
 
 const requireClient = createRequire(new URL('../../client/package.json', import.meta.url));
 const requireRoot = createRequire(new URL('../../package.json', import.meta.url));
@@ -57,6 +58,7 @@ try {
     for (const Type of [window.WebGLRenderingContext, window.WebGL2RenderingContext]) {
       if (!Type) continue;
       const projectionLocations = new WeakSet();
+      const viewLocations = new WeakSet();
       const morphLocations = new WeakSet();
       const morphPrograms = new WeakMap();
       const locationPrograms = new WeakMap();
@@ -67,6 +69,7 @@ try {
       Type.prototype.getUniformLocation = function (...args) {
         const location = getUniformLocation.apply(this, args);
         if (location && args[1] === 'projectionMatrix') projectionLocations.add(location);
+        if (location && args[1] === 'modelViewMatrix') viewLocations.add(location);
         if (location && args[1] === 'portalProgress') {
           morphLocations.add(location); locationPrograms.set(location, args[0]); morphPrograms.set(args[0], 0);
         }
@@ -90,6 +93,7 @@ try {
       /** 透视投影矩阵的纵横缩放之比就是相机 aspect。 */
       Type.prototype.uniformMatrix4fv = function (...args) {
         if (projectionLocations.has(args[0])) projectionAspects.set(this, args[2][5] / args[2][0]);
+        if (viewLocations.has(args[0]) && this.canvas.closest('.portal-data-renderer')) window.__portalToolViewMatrix = Array.from(args[2]);
         return uniformMatrix4fv.apply(this, args);
       };
       for (const name of ['bufferData', 'bufferSubData']) {
@@ -166,6 +170,10 @@ try {
       const command = route.request().postDataJSON();
       commands.push(command);
       if (command.type === 'sensor.switch') algorithmSystem = command.payload.sensorType;
+      if (command.type === 'serial.refresh') for (const peer of sockets) peer.send(JSON.stringify({ port: [{ path: 'COM_TEST_1' }, { path: 'COM_TEST_2' }] }));
+      if (command.type === 'history.mode' && command.payload.local) for (const peer of sockets) peer.send(JSON.stringify({ timeArr: [
+        { date: 'session-one', name: '测试采集一' }, { date: 'session-two', name: '测试采集二' }, { date: 'session-three', name: '测试采集三' },
+      ] }));
       if (command.type === 'license.activate') for (const peer of sockets) peer.send(JSON.stringify(licenseFailure
         ? { licenseError: '测试：密钥错误' }
         : { date: Date.now() + 30 * 86400000, nowDate: Date.now(), selectFlag: 'all', valid: true }));
@@ -582,10 +590,19 @@ try {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   assert.equal(await page.locator('.portal-monitor-content').evaluate((node) => Number(getComputedStyle(node).opacity)), 1, '恢复动画偏好不能重播压力页入场');
   assert.ok(Math.abs((await page.locator('.portal-quick-tools').boundingBox()).y - toolsBounds.y) < 1, '改变动画偏好不能重置快捷工具位置');
-  await page.locator('.portal-device-launch').click();
-  await page.locator('.portal-native-controls.is-open').waitFor();
-  assert.equal(await page.getByRole('button', { name: '展示系统配置器', exact: true }).isVisible(), true, '紧凑栏保留原生配置入口');
-  await page.getByRole('button', { name: '关闭设备设置', exact: true }).click();
+  const device = page.getByRole('group', { name: '连接设备', exact: true });
+  await device.waitFor();
+  assert.equal(await page.locator('.portal-native-controls').count(), 0, '连接设备不能重新挂出整条旧标题栏');
+  assert.equal(await page.locator('#portal-device-controls').count(), 0, '连接设备不再挂载模态表单');
+  await device.getByRole('combobox').click();
+  assert.equal(await page.getByRole('dialog', { name: '连接设备' }).count(), 0, '直接展开串口选项，不经过连接弹窗');
+  await Promise.all([
+    page.waitForResponse((response) => response.url().endsWith('/api/commands') && response.request().postDataJSON()?.type === 'serial.open'),
+    page.locator('.ant-select-dropdown:visible .ant-select-item-option-content').getByText('COM_TEST_1', { exact: true }).click(),
+  ]);
+  assert.equal(commands.filter((command) => command.type === 'serial.open').at(-1)?.payload.path, 'COM_TEST_1', '顶部下拉复用原打开串口动作');
+  await page.screenshot({ path: join(screenshots, 'workspace-device.png') });
+  const commandsAfterDevice = commands.length;
   await page.getByRole('button', { name: '调节', exact: true }).click();
   await page.locator('.ant-drawer-open').waitFor();
   await page.keyboard.press('Escape');
@@ -596,7 +613,7 @@ try {
   await page.waitForFunction(() => Boolean(document.activeElement.closest('.ant-modal-wrap')));
   await page.keyboard.press('Escape');
   await page.locator('.collectionModal').filter({ visible: true }).first().waitFor({ state: 'hidden' });
-  assert.equal(commands.length, commandsBeforeView, '打开采集配置与调节不提前发送控制命令');
+  assert.equal(commands.length, commandsAfterDevice, '打开采集配置与调节不提前发送控制命令');
   await page.getByRole('button', { name: /编辑.*图表公式/ }).first().click();
   await page.locator('.ant-modal-wrap').filter({ visible: true }).first().waitFor();
   await page.waitForFunction(() => Boolean(document.activeElement.closest('.ant-modal-wrap')));
@@ -604,6 +621,7 @@ try {
   assert.ok(await page.evaluate(() => Boolean(document.activeElement.closest('.ant-modal-wrap'))), '宿主弹窗焦点不能被选择器抢走');
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('.portal-runtime-monitor').count(), 1, '关闭图表弹窗不能同时退出系统');
+  await verifyPortalWorkspaceControls({ page, commands, sockets, screenshots });
   for (const viewport of [{ width: 375, height: 812 }, { width: 900, height: 600 }]) {
     await page.setViewportSize(viewport);
     const fit = await page.locator('.aside').evaluate((node) => {
@@ -757,6 +775,8 @@ try {
   const gloveSize = await page.locator('.portal-data-renderer canvas').boundingBox();
   assert.ok(gloveSize.width >= 1438 && gloveSize.height >= 898, '实体手模型沿用全屏宿主尺寸');
   await page.screenshot({ path: join(screenshots, 'glove-solid-monitor.png') });
+  assert.equal(await page.getByRole('group', { name: '连接设备', exact: true }).getByRole('combobox').count(), 2,
+    '双手系统在顶部保留左右两个独立串口下拉');
   await page.getByRole('button', { name: '返回系统列表', exact: false }).first().click();
   await page.getByRole('heading', { name: '选择你的展示系统' }).waitFor();
   assert.equal(await page.locator('.portal-runtime-monitor').count(), 0);

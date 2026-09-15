@@ -2,6 +2,12 @@
 
 > 压力传感矩阵数据采集、处理与可视化桌面应用
 
+## 开发者先读
+
+从 [开发文档导航](docs/README.md) 开始；[开发者手册](docs/developer-guide.md) 讲当前启动、资源和扩展边界，
+[数据链路](docs/chains/data-flow.md) 与 [界面链路](docs/chains/interface-flow.md) 按函数、数据和状态解释完整过程。
+旧设计和架构稿已在导航中分类，不需要全部通读。
+
 ## 当前代码分类（2026-08-28）
 
 - `app/electron/`：Electron 主进程入口和 preload 安全桥。
@@ -35,9 +41,9 @@ Shroom1.0 是一个基于 **Electron + React + Node.js** 构建的跨平台桌�
 
 | 层级 | 技术 |
 |------|------|
-| 应用框架 | Electron + Electron Forge |
-| 后端 | Node.js, serialport, ws, sqlite3, crypto-js |
-| 前端 | React, React Router, Ant Design, Three.js, ECharts |
+| 应用框架 | Electron；开发启动使用 Forge，打包按命令选择 Forge 或 electron-builder |
+| 后端 | Node.js, serialport, ws, Express, better-sqlite3, crypto-js；Python 子进程算法 |
+| 前端 | React, Vite, React Router, Ant Design, Three.js, ECharts, GSAP |
 
 ## 快速开始
 
@@ -85,7 +91,9 @@ shroom1/
 
 ## 文档
 
-详细架构文档请参阅 [ARCHITECTURE.md](./ARCHITECTURE.md)
+当前实现请参阅 [开发者手册](docs/developer-guide.md)，改动与测试入口见 [ARCHITECTURE_INDEX.md](ARCHITECTURE_INDEX.md)。
+
+[ARCHITECTURE.md](ARCHITECTURE.md) 保留架构演进和维护台账，按问题查阅，不再作为当前架构的默认全文入口。
 
 Mac 正式打包与自动更新发布流程请参阅 [docs/mac_release_flow.md](./docs/mac_release_flow.md)
 

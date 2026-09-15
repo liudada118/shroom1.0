@@ -615,7 +615,8 @@ function createCsvDownloadService({
           dir: csvExportDir.dir,
           csvTitle,
           sensorType: descriptor.sensorType || runtime.file,
-          range: runtime.historyArr,
+          // ⚠️ 批量整条导出不能继承当前回放选区，否则其他日期会被静默截短。
+          range: downloadOptions.rangeMode === 'full' ? null : runtime.historyArr,
           downloadOptions,
           usedFilePaths,
         });

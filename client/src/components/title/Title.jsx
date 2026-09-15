@@ -1,7 +1,12 @@
 import React from 'react'
 import { createPortal } from 'react-dom';
-import { PortalSessionBar, PortalQuickTools, PortalControlsHeading } from '../../page/licensePortal/PortalMonitoringChrome';
-import { Menu, Slider, Button, Select, message, notification, Divider, Space, Radio, Drawer, Modal, Progress, Tooltip } from 'antd';
+import { PortalSessionBar, PortalQuickTools } from '../../page/licensePortal/PortalMonitoringChrome';
+import PortalControlDialog, { PORTAL_CONTROL_THEME } from '../../page/licensePortal/PortalControlDialog';
+import PortalPlaybackDialog from '../../page/licensePortal/PortalPlaybackDialog';
+import PortalWorkspaceTools from '../../page/licensePortal/PortalWorkspaceTools';
+import { createPortalCsvBatch } from './portalCsvBatch';
+import { capturePortalOperation, executePortalLegacyControl } from './portalOperationGuard';
+import { Menu, Slider, Button, Select, message, notification, Divider, Space, Radio, Drawer, Modal, Progress, Tooltip, ConfigProvider } from 'antd';
 import { PlusOutlined, SettingOutlined, SlidersOutlined } from '@ant-design/icons';
 import exchange from '../../assets/images/exchange.png'
 import option from '../../assets/images/Option.png'
@@ -294,6 +299,7 @@ const changeLocalStroage = ({ sensorType, valueType, value, mode }) => {
 // const [carCurrent, setCarCurrent] = useState('all');
 // const [show, setShow] = useState(false)
 class Title extends React.Component {
+  _portalScope = {};
   constructor() {
     super()
     this.state = {
@@ -304,6 +310,18 @@ class Title extends React.Component {
       pressureScene: readPressureScene(),
       num: 0,
       dataTime: '',
+      portalPlaybackOpen: false,
+      portalPlaybackValue: '',
+      portalDownloadValues: [],
+      portalBusy: false,
+      portalError: '',
+      portalDisplayOpen: false,
+      portalSpecialOpen: false,
+      portalToolsOpen: false,
+      portalToolsCollapsed: false,
+      csvBatchDates: [],
+      csvBatchCompleted: 0,
+      csvBatchFailures: [],
       clickState: true,
       colName: '',
       csvData: JSON.parse(localStorage.getItem('collection'))
@@ -465,11 +483,26 @@ class Title extends React.Component {
   }
 
   componentWillUnmount() {
+    this._portalUnmounted = true;
+    this._csvActive = false;
+    this._csvBatch?.dispose();
+    this._csvBatch = null;
     window.removeEventListener('shroom-csv-download-status', this.handleCsvDownloadStatus)
     window.removeEventListener('shroom-display-systems-updated', this.loadDynamicSensors)
   }
 
   componentDidUpdate(prevProps) {
+    if (prevProps.matrixName !== this.props.matrixName) {
+      this._portalScope = {};
+      this._csvActive = false;
+      this._csvStarting = false;
+      this._csvBatch?.dispose();
+      this._csvBatch = null;
+      this.setState({ portalPlaybackValue: '', portalDownloadValues: [], portalPlaybackOpen: false,
+        portalDisplayOpen: false, portalSpecialOpen: false, portalToolsOpen: false,
+        portalBusy: false, portalError: '', dataTime: '', csvBatchDates: [], csvDownloadModalOpen: false,
+        csvDownloadStage: 'config', csvBatchCompleted: 0, csvBatchFailures: [] });
+    }
     if (prevProps.matrixName !== this.props.matrixName && this.props.matrixName === 'humanBody') {
       this.setState({
         humanTransform: createDefaultHumanTransform(),
@@ -695,11 +728,16 @@ class Title extends React.Component {
   };
 
   openCsvDownloadModal = () => {
+    this._csvBatch?.dispose();
+    this._csvBatch = null;
     if (!this.state.dataTime) {
       message.warning(this.props.t('collection.chooseHistory'));
       return;
     }
     this.setState({
+      csvBatchDates: [],
+      csvBatchCompleted: 0,
+      csvBatchFailures: [],
       csvDownloadModalOpen: true,
       csvDownloadStage: 'config',
       csvDownloadFiles: [],
@@ -741,7 +779,8 @@ class Title extends React.Component {
   }
 
   startCsvDownload = async () => {
-    if (!this.state.dataTime) {
+    if (this.state.csvDownloadStage === 'exporting' || this._csvStarting) return;
+    if (!this.state.dataTime && !this.state.csvBatchDates.length) {
       message.warning(this.props.t('collection.chooseHistory'));
       return;
     }
@@ -749,9 +788,13 @@ class Title extends React.Component {
       message.warning(this.props.t('csv.csvOnly'));
       return;
     }
+    this._csvStarting = true;
+    const isCurrent = capturePortalOperation(this);
+    try {
     const downloadPath = (this.state.csvDownloadPath || '').trim();
     if (downloadPath && window.electronAPI?.invoke) {
       const validateResult = await window.electronAPI.invoke('validate-path', { path: downloadPath });
+      if (!isCurrent()) return;
       if (!validateResult?.success) {
         message.error(this.props.t('csv.pathUnavailable', {
           error: validateResult?.error || this.props.t('csv.unknownError'),
@@ -760,6 +803,8 @@ class Title extends React.Component {
       }
       localStorage.setItem('csvDownloadPath', downloadPath);
     }
+    if (!isCurrent()) return;
+    this._csvActive = true;
     this.setState({
       csvDownloadStage: 'exporting',
       csvDownloadFiles: [],
@@ -772,19 +817,44 @@ class Title extends React.Component {
     });
     const displayDefinition = getDisplayDefinition(this.props.matrixName);
     const channelIds = resolveManifestDownloadChannelIds(displayDefinition);
-    this.props.wsSendObj({
-      download: this.state.dataTime,
-      downloadOptions: {
+    const downloadOptions = {
         path: downloadPath,
         format: this.state.csvDownloadFormat,
         language: this.props.i18n?.language || 'zh',
         ...(channelIds.length ? { channelIds } : {}),
-      },
-    });
+        ...(this.state.csvBatchDates.length ? { rangeMode: 'full' } : {}),
+    };
+    if (this.state.csvBatchDates.length) {
+      this._csvBatch?.dispose();
+      this._csvBatch = createPortalCsvBatch({
+        dates: this.state.csvBatchDates,
+        exportOne: (date) => commandClient.execute('export.csv', { date, options: downloadOptions }),
+        onStatus: (detail) => { if (isCurrent()) this.applyCsvDownloadStatus(detail); },
+        onState: ({ completed, failures }) => {
+          if (isCurrent()) this.setState({ csvBatchCompleted: completed, csvBatchFailures: failures });
+        },
+      });
+      this._csvBatch.start();
+    } else {
+      this.props.wsSendObj({ download: this.state.dataTime, downloadOptions });
+    }
+    } catch (error) {
+      if (isCurrent()) {
+        this.applyCsvDownloadStatus({ download: 'export csv failed', downloadError: error.message });
+      }
+    } finally { if (isCurrent()) this._csvStarting = false; }
   }
 
+  /** 批量时由单一队列归并逐条结果，不能把第一条成功当成整个批次成功。 */
   handleCsvDownloadStatus(event) {
+    if (!this._csvActive || this._portalUnmounted) return;
     const detail = event.detail || {};
+    if (this._csvBatch) { this._csvBatch.handleStatus(detail); return; }
+    this.applyCsvDownloadStatus(detail);
+  }
+
+  /** 复用原下载状态展示，输入可以是一条导出，也可以是归并后的批量进度。 */
+  applyCsvDownloadStatus(detail) {
     const nextArtifacts = collectCsvDownloadArtifacts(detail);
     const nextSkippedChannels = Array.isArray(detail.downloadSkippedChannels)
       ? detail.downloadSkippedChannels.map((channelId) => String(channelId || '').trim()).filter(Boolean)
@@ -814,6 +884,9 @@ class Title extends React.Component {
     if (!['export csv success', 'export csv failed'].includes(detail.download)) {
       return;
     }
+    this._csvActive = false;
+    this._csvBatch?.dispose();
+    this._csvBatch = null;
     const nextFiles = Array.isArray(detail.downloadFiles) ? detail.downloadFiles : [];
     if (detail.download === 'export csv success') {
       this.setState((current) => ({
@@ -868,9 +941,14 @@ class Title extends React.Component {
     const progressPercent = Math.max(0, Math.min(100, Math.round(Number(this.state.csvDownloadProgress) || 0)));
     const progressWritten = Number(progressDetail.written) || 0;
     const progressTotal = Number(progressDetail.total) || 0;
+    const mutedColor = this.props.portalEmbedded ? '#adc4d9' : '#666';
 
     return (
+      <ConfigProvider theme={this.props.portalEmbedded ? PORTAL_CONTROL_THEME : undefined}>
       <Modal
+        centered={this.props.portalEmbedded}
+        rootClassName={this.props.portalEmbedded ? 'portal-control-dialog' : undefined}
+        styles={this.props.portalEmbedded ? { body: { maxHeight: 'calc(100dvh - 220px)', overflowY: 'auto' } } : undefined}
         title={isConfig ? t('csv.config') : t('csv.progress')}
         open={this.state.csvDownloadModalOpen}
         okText={isConfig ? t('csv.start') : t('common.close')}
@@ -886,6 +964,9 @@ class Title extends React.Component {
         }}
         cancelButtonProps={{ style: isConfig ? undefined : { display: 'none' } }}
       >
+        {this.state.csvBatchDates.length > 0 && <div className="portal-batch-summary" role="status">
+          <p>已选择 {this.state.csvBatchDates.length} 条记录 · 已完成 {this.state.csvBatchCompleted} 条</p>
+        </div>}
         {isConfig ? (
           <Space direction='vertical' style={{ width: '100%' }} size={12}>
             <div>
@@ -915,12 +996,12 @@ class Title extends React.Component {
         {isExporting ? (
           <div>
             <Progress percent={progressPercent} status='active' />
-            <div style={{ marginTop: 8, color: '#666', fontSize: 12 }}>
+            <div style={{ marginTop: 8, color: mutedColor, fontSize: 12 }}>
               {progressDetail.currentFile
                 ? t('csv.fileProgress', { file: progressDetail.currentFile })
                 : t('csv.preparingFile')}
             </div>
-            <div style={{ color: '#666', fontSize: 12 }}>
+            <div style={{ color: mutedColor, fontSize: 12 }}>
               {progressTotal
                 ? t('csv.rowProgress', {
                   written: progressWritten.toLocaleString(getLanguageLocale(this.props.i18n?.language)),
@@ -932,13 +1013,13 @@ class Title extends React.Component {
                 : ''}
             </div>
             <p>{t('csv.exporting')}</p>
-            <p style={{ color: '#666' }}>{t('csv.outputHint')}</p>
+            <p style={{ color: mutedColor }}>{t('csv.outputHint')}</p>
           </div>
         ) : null}
 
-        {isDone ? (
+        {isDone || (isError && (artifactList.length || fileList.length)) ? (
           <Space direction='vertical' style={{ width: '100%' }} size={12}>
-            <div>{this.state.csvDownloadMessage || t('export csv success')}</div>
+            <div>{isError ? '以下文件已生成，失败记录未自动重试。' : this.state.csvDownloadMessage || t('export csv success')}</div>
             {skippedChannelList.length ? (
               <div style={{ color: '#d48806' }}>
                 未找到历史数据：{skippedChannelList.join('、')}
@@ -964,12 +1045,12 @@ class Title extends React.Component {
                 : [artifact.parserChannel].filter(Boolean);
               return (
                 <div
-                  key={artifact.channelId ? `channel:${artifact.channelId}` : `file:${filePath}`}
+                  key={`${artifact.channelId || ''}:${filePath}`}
                   style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}
                 >
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 600 }}>{sensorLabel}</div>
-                    <div style={{ color: '#666', fontSize: 12 }}>
+                    <div style={{ color: mutedColor, fontSize: 12 }}>
                       {[
                         artifact.channelId,
                         serialRoles.length ? `角色 ${serialRoles.join(' / ')}` : '',
@@ -1005,11 +1086,12 @@ class Title extends React.Component {
 
         {isError ? (
           <Space direction='vertical' style={{ width: '100%' }} size={12}>
-            <div style={{ color: '#ff4d4f' }}>{this.state.csvDownloadMessage || t('export csv failed')}</div>
-            <Button disabled={!folderPath} onClick={() => this.openCsvPath(folderPath)}>{t('csv.openDownloadFolder')}</Button>
+            <div role="alert" style={{ color: this.props.portalEmbedded ? '#ffbdb5' : '#ff4d4f' }}>{this.state.csvDownloadMessage || t('export csv failed')}</div>
+            {!artifactList.length && !fileList.length && <Button disabled={!folderPath} onClick={() => this.openCsvPath(folderPath)}>{t('csv.openDownloadFolder')}</Button>}
           </Space>
         ) : null}
       </Modal>
+      </ConfigProvider>
     );
   }
 
@@ -1035,6 +1117,7 @@ class Title extends React.Component {
     const flag = this.props.colFlag;
     this.props.wsSendObj({ colHZ: this.state.colHZ, flag });
     if (this.props.matrixName == 'sitCol' && loadData) {
+      this._csvActive = true;
       this.props.wsSendObj({
         colHZ: this.state.colHZ,
         download: loadData,
@@ -1795,12 +1878,142 @@ class Title extends React.Component {
   }
 
   /** 快捷清零与设置抽屉共用命令及成功后的本地状态更新。 */
-  resetPortalPressure = () => {
+  resetPortalPressure = async () => {
+    const isCurrent = capturePortalOperation(this);
     const zeroCommand = { resetZero: true };
-    if (this.props.wsSendObj(zeroCommand)) {
-      this.props.changeAside?.(zeroCommand);
-      this.setState(zeroCommand);
+    try {
+      await commandClient.execute('calibration.zero', { enabled: true });
+      if (isCurrent()) {
+        this.props.changeAside?.(zeroCommand);
+        this.setState(zeroCommand);
+      }
+    } catch (error) { if (isCurrent()) message.error(`清零失败：${error.message}`); }
+  };
+
+  /** 新会话栏等待模式命令成功后才改界面；回放期间仍使用原播放条。 */
+  changePortalMode = async (mode) => {
+    if (this.state.portalBusy || this.state.csvDownloadStage === 'exporting') return;
+    if (mode !== 'now' && (this.props.matrixName === 'localCar' ? this.props.colWebFlag : !this.props.colFlag)) {
+      message.warning('请先结束采集，再选择回放数据');
+      return;
     }
+    if (mode === 'now' && this.props.history === 'now') return;
+    const isCurrent = capturePortalOperation(this);
+    const switching = this.props.history !== mode;
+    this.setState({ portalBusy: true, portalError: '',
+      ...(mode !== 'now' ? { portalPlaybackOpen: true } : {}) });
+    try {
+      if (switching) await commandClient.execute('playback.control', { play: false });
+      if (!isCurrent()) return;
+      if (!await executePortalLegacyControl(commandClient,
+        this.withSmallBed12BDisplayOptions({ local: mode !== 'now', history: false }), isCurrent)) return;
+      if (switching) {
+        this.props.onPortalResetPlayback?.();
+        this.props.data.current?.changeData({ meanPres: 0, maxPres: 0, point: 0, area: 0, totalPres: 0, pressure: 0 });
+        this.props.data.current?.initCharts();
+        this.props.changeStateData(this.withSmallBed12BDisplayState({ history: mode, local: mode !== 'now', index: 0 }));
+      }
+      this.setState({ current: mode, portalPlaybackOpen: mode !== 'now' });
+    } catch (error) {
+      if (isCurrent()) {
+        this.setState({ portalError: error.message });
+        message.error(`切换失败：${error.message}`);
+      }
+    } finally {
+      if (isCurrent()) this.setState({ portalBusy: false });
+    }
+  };
+
+  /** 仅载入单选记录；不会把批量下载的勾选项写入播放状态。 */
+  loadPortalPlayback = async (value) => {
+    if (this.state.portalBusy || !this.props.dataArr?.some((record) => record.value === value)) return;
+    const system = this.props.matrixName;
+    const isCurrent = capturePortalOperation(this);
+    this.setState({ portalBusy: true, portalError: '' });
+    try {
+      await commandClient.execute('playback.control', { play: false });
+      if (!isCurrent()) return;
+      if (!await executePortalLegacyControl(commandClient,
+        this.withSmallBed12BDisplayOptions({ getTime: value, index: 0 }), isCurrent)) return;
+      this.props.onPortalResetPlayback?.();
+      if (system === 'foot') this.props.track.current?.canvasInit();
+      this.props.changeStateData(this.withSmallBed12BDisplayState({ dataTime: value, history: 'playback', local: true, index: 0 }));
+      this.setState({ dataTime: value, current: 'playback', portalPlaybackOpen: false });
+    } catch (error) {
+      if (isCurrent()) this.setState({ portalError: `载入失败：${error.message}` });
+    } finally {
+      if (isCurrent()) this.setState({ portalBusy: false });
+    }
+  };
+
+  /** 工具箱和算法超市互斥，不重挂左侧图表或实际渲染器。 */
+  togglePortalTools = () => {
+    const open = !this.state.portalToolsOpen;
+    if (open && this.props.portalAlgorithmMarketOpen) this.props.onPortalAlgorithmsToggle?.();
+    this.setState({ portalToolsOpen: open });
+  };
+
+  /** 只删除单选记录，先明确确认；下载勾选绝不作为删除目标。 */
+  deletePortalHistory = (value) => {
+    if (this.state.portalBusy || !this.props.dataArr?.some((record) => record.value === value)) return;
+    const isCurrent = capturePortalOperation(this);
+    Modal.confirm({ title: '删除这条采集记录？', content: `记录：${value}。删除后无法恢复，不会删除其他下载勾选项。`,
+      okText: '确认删除', cancelText: '取消', okButtonProps: { danger: true },
+      onOk: async () => {
+        if (!isCurrent() || this.state.portalBusy) return;
+        const wasLoaded = this.state.dataTime === value;
+        this.setState({ portalBusy: true, portalError: '' });
+        try {
+          if (wasLoaded) await commandClient.execute('playback.control', { play: false });
+          // ⚠️ 删除命令只有日期；离开原系统后不得把它发往当前数据库。
+          if (!isCurrent()) return;
+          await commandClient.execute('history.delete', { date: value });
+          if (!isCurrent()) return;
+          this.setState((state) => ({ portalPlaybackValue: '',
+            portalDownloadValues: state.portalDownloadValues.filter((date) => date !== value),
+            ...(wasLoaded ? { dataTime: '' } : {}) }));
+          if (wasLoaded) {
+            this.props.changeStateData({ dataTime: '', length: 0 });
+            this.props.onPortalResetPlayback?.();
+          }
+          await executePortalLegacyControl(commandClient,
+            this.withSmallBed12BDisplayOptions({ local: true, history: false }), isCurrent);
+        } catch (error) {
+          if (isCurrent()) {
+            this.setState({ portalError: `删除失败：${error.message}` });
+            throw error;
+          }
+        } finally {
+          if (isCurrent()) this.setState({ portalBusy: false });
+        }
+      },
+    });
+  };
+
+  /** 只打开指定设置面板，功能按钮不会再唤起旧系统标题栏。 */
+  openPortalPanel = (name) => this.setState({ portalToolsOpen: false, [name]: true });
+
+  /** 恢复原始压力基准；命令确认失败时不假装已清除零点。 */
+  restorePortalPressure = async () => {
+    const isCurrent = capturePortalOperation(this);
+    try {
+      await commandClient.execute('calibration.zero', { enabled: false });
+      if (isCurrent()) {
+        this.props.changeAside?.({ resetZero: false });
+        this.setState({ resetZero: false });
+      }
+    } catch (error) { if (isCurrent()) message.error(`恢复零点失败：${error.message}`); }
+  };
+
+  /** 批量选择只保存导出快照，随后复用已有路径、格式及文件结果弹窗。 */
+  openPortalBatchDownload = (values) => {
+    const available = new Set(this.props.dataArr?.map((record) => record.value));
+    const dates = [...new Set(values)].filter((value) => available.has(value));
+    if (!dates.length || this.state.csvDownloadStage === 'exporting') return;
+    this.setState({ csvBatchDates: dates, csvBatchCompleted: 0, csvBatchFailures: [],
+      portalPlaybackOpen: false, csvDownloadModalOpen: true, csvDownloadStage: 'config',
+      csvDownloadFiles: [], csvDownloadArtifacts: [], csvDownloadSkippedChannels: [],
+      csvDownloadMessage: '', csvDownloadProgress: 0, csvDownloadProgressDetail: null });
   };
 
   /** 门户采集复用原有配置弹窗，保留 localCar 特殊采集。 */
@@ -1875,81 +2088,7 @@ class Title extends React.Component {
     ];
     const isMinzhenAnimationMode = this.props.matrixName === minzhenType_title && this.props.numMatrixFlag === 'normal';
     // console.log('title')
-    return <div className={`title${this.props.portalEmbedded ? ' portal-session-title' : ''}`}>
-      {this.props.portalEmbedded ? <PortalSessionBar
-        mode={this.state.current}
-        onMode={(mode) => {
-          if (mode !== this.state.current) this.onClick({ key: mode });
-          if (mode !== 'now') this.setState({ portalControlsOpen: true });
-        }}
-        controlsOpen={Boolean(this.state.portalControlsOpen)}
-        onControls={() => this.setState({ portalControlsOpen: !this.state.portalControlsOpen })}
-        selectedPorts={Object.values(this.state.manifestPortSelections || {}).some(Boolean) || [this.props.portname, this.props.portnameBack, this.props.portnameHead, this.props.portnameSensor].some(Boolean)}
-        collecting={this.props.matrixName === 'localCar' ? this.props.colWebFlag : !this.props.colFlag}
-        onStart={this.startPortalCollection} onStop={this.stopPortalCollection}
-      /> : null}
-      {this.props.portalToolsHost ? createPortal(<PortalQuickTools
-        chartsVisible={this.props.portalChartsVisible} onCharts={this.props.onPortalChartsToggle}
-        algorithmsOpen={this.props.portalAlgorithmMarketOpen} onAlgorithms={this.props.onPortalAlgorithmsToggle}
-        settingsOpen={this.state.open} onSettings={() => this.setState({ open: !this.state.open })}
-        onZero={this.resetPortalPressure}
-      />, this.props.portalToolsHost) : null}
-      {/* <h2>bodyta</h2> */}
-      <div className="titleBrand">
-        {this.props.onPortalBack
-          ? <button className="titlePortalLink" type="button" onClick={this.props.onPortalBack}>返回系统列表</button>
-          : <NavLink className="titlePortalLink" to={`/?category=all&system=${encodeURIComponent(this.props.matrixName)}`} aria-label="返回首页选择系统" title="返回首页选择系统">首页</NavLink>}
-        <img className="titleBrandLogo" src={logo} alt="JQ Industries" />
-        <img className="titleBrandWordmark" src={shroomWordmark} alt="Shroom" />
-      </div>
-        <div className={`titleItems${this.props.portalEmbedded ? ` portal-native-controls${this.state.portalControlsOpen ? ' is-open' : ''}` : ''}`}
-          id={this.props.portalEmbedded ? 'portal-native-controls' : undefined}
-          inert={this.props.portalEmbedded && !this.state.portalControlsOpen ? true : undefined}
-          onKeyDown={(event) => {
-            if (this.props.portalEmbedded && event.key === 'Escape') {
-              event.stopPropagation();
-              this.setState({ portalControlsOpen: false });
-              event.currentTarget.parentElement.querySelector('.portal-device-launch')?.focus();
-            }
-          }}>
-          {this.props.portalEmbedded ? <PortalControlsHeading onClose={() => this.setState({ portalControlsOpen: false })} /> : null}
-          <Button
-            className="titleButton"
-            icon={<SettingOutlined />}
-            title="展示系统配置器"
-            aria-label="展示系统配置器"
-            onClick={() => this.props.openDisplaySystemBuilder?.()}
-          />
-          <Select
-          style={{ width: '130px' }}
-          placeholder={t('chooseSensor')}
-          value={this.props.matrixName}
-          onChange={(e) => {
-            this.changeMatrixType(e)
-            if (!isHumanBodyMatrixTitle(e)) {
-              this.props.changeStateData({
-                numMatrixFlag: 'normal'
-              })
-            }
-
-            // 系统切换命令和零点命令都走 HTTP；显式带上目标 ID，避免并发请求
-            // 到达顺序变化时误清掉上一个展示系统的独立零点。
-            const displaySystemId = getDisplayDefinition(e)?.displaySystemId || e
-            this.props.wsSendObj({ resetZero: false, displaySystemId })
-            this.setState({ resetZero: false, dataTime: '', manifestPortSelections: {} })
-
-            this.props.changeStateData({
-              portname: '',
-              portnameBack: '',
-              portnameHead: '',
-              portnameSensor: ''
-            })
-            this.props.wsSendObj({ serialReset: true })
-          }}
-          options={sensorArr}
-        />
-
-
+    const baudControl = <>
         {
           this.props.matrixName.includes('fast') || this.props.matrixName == 'normalFast' || this.props.matrixName == 'bed4096' || this.props.matrixName == 'bed4096num' || this.props.matrixName == 'bed1616' || this.props.matrixName == 'fast256' || this.props.matrixName == 'footVideo256' || this.props.matrixName == 'daliegu' || this.props.matrixName == 'smallSample' ? <Input placeholder={t('enterBaudRate')} onChange={(e) => {
             const value = e.target.value
@@ -1958,8 +2097,8 @@ class Title extends React.Component {
             })
           }} /> : ''
         }
-
-        <Menu className='menu' onClick={this.onClick} selectedKeys={[this.state.current]} mode="horizontal" items={navItems} />
+    </>;
+    const serialControls = <>
         {this.props.matrixName != 'localCar' ? this.props.history === 'now' ? manifestSerialSensors.length ? <>
           {manifestSerialSensors.map((sensor) => (
             <Select
@@ -1984,6 +2123,7 @@ class Title extends React.Component {
 
           style={{ marginRight: 6, width: 140 }}
           placeholder={t('chooseSensor')}
+          aria-label={t('chooseSensor')}
           value={this.props.portname || undefined}
           onOpenChange={() => {
             this.props.wsSendObj({ serialReset: true })
@@ -1996,10 +2136,11 @@ class Title extends React.Component {
           }}
           options={this.props.port}
         >
-        </Select> <div></div></> : <><Select
+        </Select></> : <><Select
 
           style={{ marginRight: 6, width: 140 }}
           placeholder={tactileGloveTypes_title.includes(this.props.matrixName) ? t('chooseLeftSensor') : this.props.matrixName == 'footVideo' ? t('chooseLeftFootSensor') : t('chooseSitSensor')}
+          aria-label={tactileGloveTypes_title.includes(this.props.matrixName) ? t('chooseLeftSensor') : this.props.matrixName == 'footVideo' ? t('chooseLeftFootSensor') : t('chooseSitSensor')}
           value={this.props.portname ? `${this.props.portname}${[...tactileGloveTypes_title, 'footVideo', 'eye'].includes(this.props.matrixName) ? t('left') : (t('sit'))}` : undefined}
           onOpenChange={() => {
             this.props.wsSendObj({ serialReset: true })
@@ -2022,6 +2163,7 @@ class Title extends React.Component {
 
           {this.props.matrixName === minzhenType_title ? <Select
             placeholder={t('minzhen.otherData')}
+            aria-label={t('minzhen.otherData')}
             style={{ marginRight: 6, width: 160 }}
             value={this.props.portnameSensor ? `${this.props.portnameSensor} (${t('minzhen.otherData')})` : undefined}
             onOpenChange={() => {
@@ -2040,6 +2182,7 @@ class Title extends React.Component {
           {this.props.matrixName !== minzhenType_title ? <Select
             // value={this.props.portnameBack}
             placeholder={tactileGloveTypes_title.includes(this.props.matrixName) ? t('chooseRightSensor') : this.props.matrixName == 'footVideo' ? t('chooseRightFootSensor') : t('chooseBackSensor')}
+            aria-label={tactileGloveTypes_title.includes(this.props.matrixName) ? t('chooseRightSensor') : this.props.matrixName == 'footVideo' ? t('chooseRightFootSensor') : t('chooseBackSensor')}
             style={{ marginRight: 6, width: 140 }}
             value={this.props.portnameBack ? `${this.props.portnameBack}${[...tactileGloveTypes_title, 'footVideo'].includes(this.props.matrixName) ? t('right') : (t('back'))}` : undefined}
             onOpenChange={() => {
@@ -2066,6 +2209,7 @@ class Title extends React.Component {
           {this.props.matrixName == 'volvo' || this.props.matrixName == 'carQX' || this.props.matrixName == wholeChairType_title ? <Select
             // value={this.props.portnameBack}
             placeholder={t('chooseHeadSensor')}
+            aria-label={t('chooseHeadSensor')}
             style={{ width: 140 }}
             value={this.props.portnameHead ? `${this.props.portnameHead}(${t('head')})` : undefined}
             onOpenChange={() => {
@@ -2112,7 +2256,7 @@ class Title extends React.Component {
 
         </Select> :
           <>
-            <Input value={this.state.ip} onChange={(e) => {
+            <Input aria-label={t('display.ipPlaceholder')} value={this.state.ip} onChange={(e) => {
               localStorage.setItem('ip', e.target.value)
               this.setState({ ip: e.target.value })
             }} placeholder={t('display.ipPlaceholder')} />
@@ -2120,10 +2264,8 @@ class Title extends React.Component {
           </>
 
         }
-
-
-
-
+    </>;
+    const displayControls = <>
         {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'handSinglePoint', 'normal', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'matCol', 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody', HUMAN_BODY_OPTIMIZED_MATRIX].includes(this.props.matrixName) ?
           <Select
             defaultValue={this.props.numMatrixFlag}
@@ -2209,7 +2351,8 @@ class Title extends React.Component {
             {t('display.settings')}
           </Button>
         ) : null}
-
+    </>;
+    const calibrationControls = <>
         {
           calibratableGloveTypes_title.includes(this.props.matrixName) ?
             <Modal
@@ -2371,7 +2514,8 @@ class Title extends React.Component {
             this.props.com.current?.handZero()
           }}
         >{t('display.fixed')}</Button> : ''}
-
+    </>;
+    const closeControl = <>
         <Button onClick={() => {
           if (manifestSerialSensors.length) {
             this.closeManifestSerialChannels(manifestSerialSensors)
@@ -2393,10 +2537,8 @@ class Title extends React.Component {
         }} className='titleButton'>
           {t('closeSensor')}
         </Button>
-
-
-
-
+    </>;
+    const languageControl = <>
         <Select
           defaultValue={this.props.i18n.language}
           style={{ width: 108 }}
@@ -2410,13 +2552,15 @@ class Title extends React.Component {
             { value: 'ja', label: t('common.japanese') },
           ]}
         />
-
-
+    </>;
+    const carControls = <>
         {this.props.matrixName == 'car' || this.props.matrixName == 'car10' || this.props.matrixName == 'localCar' || this.props.matrixName == 'yanfeng10' || this.props.matrixName == 'volvo' || isMinzhenAnimationMode ?
 
 
           <Menu className='menu' onClick={this.onCarClick} selectedKeys={[this.state.carCurrent]} mode="horizontal" items={carItems} />
           : null}
+    </>;
+    const collectionControls = <>
         {!this.props.local ?
           <>
             {/* {this.props.matrixName == 'car' ? <Input placeholder='输入采集文件名称' onChange={(e) => { this.setState({ colName: e.target.value }) }} /> : null} */}
@@ -2482,7 +2626,8 @@ class Title extends React.Component {
 
           </>
         }
-
+    </>;
+    const specialControls = <>
         {
           this.props.matrixName === 'car' && this.props.local ? <Button className='titleButton' onClick={() => {
             this.props.wsSendObj({ variety: true })
@@ -2567,9 +2712,8 @@ class Title extends React.Component {
             </Modal>
           </>
         ) : null}
-      </div>
-
-
+    </>;
+    const partControls = <>
       {
         this.props.matrixName == 'Num3D' ? <Select
           // value={this.props.portnameBack}
@@ -2596,6 +2740,145 @@ class Title extends React.Component {
           ]}
         ></Select> : ''
       }
+    </>;
+
+    return <div className={`title${this.props.portalEmbedded ? ' portal-session-title' : ''}`}>
+      {this.props.portalEmbedded ? <PortalSessionBar
+        mode={this.props.history}
+        busy={this.state.portalBusy || this.state.csvDownloadStage === 'exporting'}
+        elapsed={this.state.num}
+        onMode={this.changePortalMode}
+        controlsOpen={this.state.portalPlaybackOpen}
+        onControls={() => this.changePortalMode('playback')}
+        deviceControls={<ConfigProvider theme={PORTAL_CONTROL_THEME}
+          componentDisabled={this.state.portalBusy || this.state.csvDownloadStage === 'exporting'}>
+          <div className="portal-device-inline" role="group" aria-label="连接设备">
+            <span className="portal-device-inline-label">连接设备</span>
+            <div className="portal-device-port-fields">{serialControls}</div>
+            <div className="portal-device-inline-actions">{closeControl}</div>
+          </div>
+        </ConfigProvider>}
+        selectedPorts={Object.values(this.state.manifestPortSelections || {}).some(Boolean) || [this.props.portname, this.props.portnameBack, this.props.portnameHead, this.props.portnameSensor].some(Boolean)}
+        collecting={this.props.matrixName === 'localCar' ? this.props.colWebFlag : !this.props.colFlag}
+        onStart={this.startPortalCollection} onStop={this.stopPortalCollection}
+      /> : null}
+      {this.props.portalToolsHost ? createPortal(<><PortalQuickTools
+        chartsVisible={this.props.portalChartsVisible} onCharts={this.props.onPortalChartsToggle}
+        algorithmsOpen={this.props.portalAlgorithmMarketOpen} onAlgorithms={() => {
+          this.setState({ portalToolsOpen: false }); this.props.onPortalAlgorithmsToggle?.();
+        }}
+        settingsOpen={this.state.open} onSettings={() => this.setState({ open: !this.state.open })}
+        collapsed={this.state.portalToolsCollapsed} onCollapse={(portalToolsCollapsed) => this.setState({ portalToolsCollapsed })}
+        toolsOpen={this.state.portalToolsOpen} onTools={this.togglePortalTools}
+      /><PortalWorkspaceTools key={`${this.props.matrixName}:${this.props.numMatrixFlag}:${this.props.history}`} open={this.state.portalToolsOpen}
+        rendererRef={this.props.com} selectionActive={this.props.portalSelectionActive} onSelectionChange={this.props.onPortalSelectionChange}
+        onClose={() => this.setState({ portalToolsOpen: false })}
+        items={[
+          { id: 'zero', category: 'processing', label: '压力清零', description: '以当前压力作为零点基准。', active: this.state.resetZero,
+            disabled: this.props.history !== 'now', onClick: this.resetPortalPressure },
+          { id: 'restore', category: 'processing', label: '恢复零点', description: '取消预压力扣除，恢复原始压力。',
+            disabled: this.props.history !== 'now', onClick: this.restorePortalPressure },
+          { id: 'display', label: '显示与语言', description: '选择原生渲染模式、显示区域和界面语言。', onClick: () => this.openPortalPanel('portalDisplayOpen') },
+          { id: 'system', label: '系统专用工具', description: '设备校准、曲线、重心或报告等当前系统支持的功能。', onClick: () => this.openPortalPanel('portalSpecialOpen') },
+          { id: 'builder', label: '展示系统配置', description: '配置传感器、算法、渲染和图表。', disabled: !this.props.openDisplaySystemBuilder,
+            onClick: () => { this.setState({ portalToolsOpen: false }); this.props.openDisplaySystemBuilder?.(); } },
+          ...(jqbedConfigAccess.visible ? [{ id: 'jqbed', label: '床垫算法配置', description: '调整当前床垫算法参数。', disabled: jqbedConfigAccess.disabled,
+            onClick: () => this.openPortalPanel('jqbedAlgorithmConfigOpen') }] : []),
+        ]} /></>, this.props.portalToolsHost) : null}
+      {this.props.portalEmbedded && <>
+        <PortalControlDialog open={this.state.portalDisplayOpen} title="显示与语言"
+          onClose={() => this.setState({ portalDisplayOpen: false })}>
+          {Boolean(baudControl.props.children) && <fieldset className="portal-control-section"><legend>串口参数</legend><div className="portal-control-fields">{baudControl}</div></fieldset>}
+          <fieldset className="portal-control-section"><legend>渲染与显示区域</legend><div className="portal-control-fields">{displayControls}{carControls}{partControls}</div></fieldset>
+          <fieldset className="portal-control-section"><legend>界面语言</legend><div className="portal-control-fields">{languageControl}</div></fieldset>
+        </PortalControlDialog>
+        <PortalControlDialog open={this.state.portalSpecialOpen} title="系统专用工具"
+          description="仅显示当前系统与模式支持的功能；设备校准需要先选择对应的渲染模式。"
+          onClose={() => this.setState({ portalSpecialOpen: false })}>
+          <div className="portal-control-fields">{calibrationControls}{specialControls}{this.props.matrixName === 'localCar' ? collectionControls : null}</div>
+          {!calibratableGloveTypes_title.includes(this.props.matrixName) && !['car', 'bigBed', 'foot', 'bed4096', 'localCar'].includes(this.props.matrixName)
+            && <p className="portal-control-empty">当前系统没有额外专用操作。通用清零与显示设置在工具箱中。</p>}
+        </PortalControlDialog>
+        <PortalPlaybackDialog key={this.props.matrixName} open={this.state.portalPlaybackOpen}
+          records={this.props.dataArr} playbackValue={this.state.portalPlaybackValue} downloadValues={this.state.portalDownloadValues}
+          busy={this.state.portalBusy} error={this.state.portalError}
+          onPlaybackChange={(portalPlaybackValue) => this.setState({ portalPlaybackValue })}
+          onDownloadsChange={(portalDownloadValues) => this.setState({ portalDownloadValues })}
+          onPlay={this.loadPortalPlayback} onDownload={this.openPortalBatchDownload}
+          onDelete={this.deletePortalHistory}
+          onRefresh={() => this.changePortalMode('playback')}
+          onClose={() => { if (!this.state.portalBusy) this.setState({ portalPlaybackOpen: false }); }} />
+      </>}
+      {/* <h2>bodyta</h2> */}
+      {!this.props.portalEmbedded && <><div className="titleBrand">
+        {this.props.onPortalBack
+          ? <button className="titlePortalLink" type="button" onClick={this.props.onPortalBack}>返回系统列表</button>
+          : <NavLink className="titlePortalLink" to={`/?category=all&system=${encodeURIComponent(this.props.matrixName)}`} aria-label="返回首页选择系统" title="返回首页选择系统">首页</NavLink>}
+        <img className="titleBrandLogo" src={logo} alt="JQ Industries" />
+        <img className="titleBrandWordmark" src={shroomWordmark} alt="Shroom" />
+      </div>
+        <div className="titleItems">
+          <Button
+            className="titleButton"
+            icon={<SettingOutlined />}
+            title="展示系统配置器"
+            aria-label="展示系统配置器"
+            onClick={() => this.props.openDisplaySystemBuilder?.()}
+          />
+          <Select
+          style={{ width: '130px' }}
+          placeholder={t('chooseSensor')}
+          value={this.props.matrixName}
+          onChange={(e) => {
+            this.changeMatrixType(e)
+            if (!isHumanBodyMatrixTitle(e)) {
+              this.props.changeStateData({
+                numMatrixFlag: 'normal'
+              })
+            }
+
+            // 系统切换命令和零点命令都走 HTTP；显式带上目标 ID，避免并发请求
+            // 到达顺序变化时误清掉上一个展示系统的独立零点。
+            const displaySystemId = getDisplayDefinition(e)?.displaySystemId || e
+            this.props.wsSendObj({ resetZero: false, displaySystemId })
+            this.setState({ resetZero: false, dataTime: '', manifestPortSelections: {} })
+
+            this.props.changeStateData({
+              portname: '',
+              portnameBack: '',
+              portnameHead: '',
+              portnameSensor: ''
+            })
+            this.props.wsSendObj({ serialReset: true })
+          }}
+          options={sensorArr}
+        />
+
+
+        {baudControl}
+
+        <Menu className='menu' onClick={this.onClick} selectedKeys={[this.state.current]} mode="horizontal" items={navItems} />
+        {serialControls}
+
+        {displayControls}
+
+        {calibrationControls}
+
+        {closeControl}
+
+        {languageControl}
+
+        {carControls}
+
+        {collectionControls}
+
+        {specialControls}
+
+      </div>
+
+
+        {partControls}
+      </>}
 
       {this.renderCsvDownloadModal(t)}
       {this.renderCollectionModal(t)}

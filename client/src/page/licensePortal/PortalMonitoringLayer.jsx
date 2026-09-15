@@ -89,7 +89,7 @@ export default function PortalMonitoringLayer({ component: MonitoringPage, syste
         // ⚠️ 面板保持 inert；点位贴合前预览仍隐藏，末段才接续实际预览的柔光材质。
         if (panel) backdrop.dataset.monitorReturn = 'true';
         const exit = gsap.timeline({ defaults: { ease: 'power3.out' } });
-        const hud = root.querySelectorAll('.portal-monitor-navigation, .title, .portal-observatory, .portal-quick-tools, .portal-monitor-floor, .portal-algorithm-market, .portal-sample-rate, .canvas-overlay-bar, .canvas-draft-bar, .setIcons, .progressContent');
+        const hud = root.querySelectorAll('.portal-monitor-navigation, .title, .portal-observatory, .portal-quick-tools, .portal-monitor-floor, .portal-algorithm-market, .portal-utility-panel, .portal-sample-rate, .canvas-overlay-bar, .canvas-draft-bar, .setIcons, .progressContent');
         exit.to(hud, { opacity: 0, duration: context.conditions.motion ? .3 : 0 }, 0);
         if (panel) {
           exit.fromTo(root, { '--portal-return-background': backgroundOpacity },
@@ -103,13 +103,16 @@ export default function PortalMonitoringLayer({ component: MonitoringPage, syste
           callbacksRef.current.onPreviewChange(true);
           callbacksRef.current.onBack();
         };
-        if (particleSession?.canvas.isConnected && particleSession.canvas.shroomParticleEntrance === particleSession.api) {
-          const source = directEntry ? callbacksRef.current.capturePreview?.() || particleSession.source : particleSession.source;
+        // ⚠️ 实时/回放可重建画布；返回要接当前渲染器，不能继续使用入场时已销毁的 API。
+        const returnCanvas = root.querySelector('.portal-data-renderer canvas');
+        const returnApi = returnCanvas?.shroomParticleEntrance;
+        const source = directEntry ? callbacksRef.current.capturePreview?.() || particleSession?.source : particleSession?.source;
+        if (returnApi && source) {
           let liveSource = false;
           if (previewHost) {
             const previousVisibility = previewHost.style.visibility;
             const previousOpacity = previewHost.style.opacity;
-            const canvas = particleSession.canvas;
+            const canvas = returnCanvas;
             const previousCanvasOpacity = canvas.style.opacity;
             /** 卸载或切换动画偏好时收回临时混合样式，不留透明/静止的下一次预览。 */
             restorePreviewBlend = () => {
@@ -118,7 +121,7 @@ export default function PortalMonitoringLayer({ component: MonitoringPage, syste
               canvas.style.opacity = previousCanvasOpacity;
             };
           }
-          const playing = particleSession.api.play(source, { reverse: true, signal: surfaceController.signal,
+          const playing = returnApi.play(source, { reverse: true, signal: surfaceController.signal,
             reducedMotion: !context.conditions.motion,
             /** 与本帧新投影一起提交混合权重，不逐帧创建 GSAP tween。 */
             onProgress: (progress) => {
@@ -126,7 +129,7 @@ export default function PortalMonitoringLayer({ component: MonitoringPage, syste
               const blend = liveSource ? returnPreviewBlend(progress) : 0;
               previewHost.style.visibility = blend > 0 ? 'visible' : 'hidden';
               previewHost.style.opacity = String(blend);
-              particleSession.canvas.style.opacity = String(1 - blend);
+              returnCanvas.style.opacity = String(1 - blend);
             },
             resolveSource: directEntry && context.conditions.motion
               ? (progress) => {

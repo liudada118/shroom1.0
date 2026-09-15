@@ -22,7 +22,8 @@ function normalizeHistoryPressureData(row, sensorType) {
 }
 normalizeHistoryPressureData.calls = [];
 
-function createService({ exportDir, events, databases, descriptors, rowsByKey, legacyRowsByDb }) {
+function createService({ exportDir, events, databases, descriptors, rowsByKey, legacyRowsByDb,
+  runtime = { file: 'demo', historyArr: [0, 100] }, rowsByDate = new Map() }) {
   const rowsQueries = [];
   const service = createCsvDownloadService({
     fs,
@@ -30,17 +31,17 @@ function createService({ exportDir, events, databases, descriptors, rowsByKey, l
     logger: { error() {}, warn() {} },
     csvPath: exportDir,
     publishSystemEvent: (event) => events.push(event),
-    getRuntime: () => ({ file: 'demo', historyArr: [0, 100] }),
+    getRuntime: () => runtime,
     getDatabases: () => databases,
     queryHistoryChannels: (dbRef) => descriptors.get(dbRef) || [],
-    getChannelHistoryStats: (dbRef, _date, channelId) => {
+    getChannelHistoryStats: (dbRef, date, channelId) => {
       if (channelId == null) return { count: (legacyRowsByDb.get(dbRef) || []).length };
-      return { count: (rowsByKey.get(`${dbRef.name}|${channelId}`) || []).length };
+      return { count: ((rowsByDate.get(date) || rowsByKey).get(`${dbRef.name}|${channelId}`) || []).length };
     },
-    queryChannelHistoryRows: (dbRef, _date, channelId) => {
-      rowsQueries.push({ dbRef, channelId });
+    queryChannelHistoryRows: (dbRef, date, channelId) => {
+      rowsQueries.push({ dbRef, date, channelId });
       if (channelId == null) return legacyRowsByDb.get(dbRef) || [];
-      return rowsByKey.get(`${dbRef.name}|${channelId}`) || [];
+      return (rowsByDate.get(date) || rowsByKey).get(`${dbRef.name}|${channelId}`) || [];
     },
     getHistoryStats: () => {
       throw new Error('date-only stats must not be used when exact query helpers exist');
@@ -326,6 +327,58 @@ async function run() {
     });
     assert.strictEqual(unknownResult.ok, false);
     assert.match(unknownResult.error, /no requested history channels found/);
+
+    // 整条下载按选中日期各自取完整行，不借用另一个日期或当前回放的选区。
+    const shortDate = '2026-09-10 10:00:00';
+    const longDate = '2026-09-11 10:00:00';
+    const rangeRuntime = Object.freeze({ file: 'range-demo', historyArr: Object.freeze([1, 3]) });
+    /** 不同日期使用不同数值与长度，能检测错日期、漏首尾或沿用短记录长度。 */
+    const makeRangeRows = (length, start) => Array.from({ length }, (_, index) => ({
+      id: index + 1,
+      timestamp: start + index,
+      data: JSON.stringify({ data: [start + index] }),
+    }));
+    const rangeRowsByDate = new Map([
+      [shortDate, new Map([['db|range:pad', makeRangeRows(4, 1000)]])],
+      [longDate, new Map([['db|range:pad', makeRangeRows(7, 2000)]])],
+    ]);
+    const ranged = createService({
+      exportDir: path.join(tempRoot, 'range-mode'),
+      events: [],
+      databases: { db, db1 },
+      descriptors: new Map([[db, [{ channelId: 'range:pad', displaySystemId: 'range', sensorId: 'pad' }]]]),
+      rowsByKey: new Map(),
+      rowsByDate: rangeRowsByDate,
+      legacyRowsByDb: new Map([[db1, [
+        { timestamp: 10, data: '[10]' }, { timestamp: 11, data: '[11]' }, { timestamp: 12, data: '[12]' },
+      ]]]),
+      runtime: rangeRuntime,
+    });
+    const defaultRange = await ranged.service.exportHistoryCsv({ date: shortDate });
+    assert.strictEqual(defaultRange.ok, true);
+    const defaultPad = defaultRange.artifacts.find((item) => item.channelId === 'range:pad');
+    const defaultCsv = fs.readFileSync(defaultPad.file, 'utf8');
+    assert.strictEqual(defaultPad.rowCount, 2, '未指定 full 时保留原回放范围 [1, 3)');
+    assert.ok(defaultCsv.includes(',time-1001,') && defaultCsv.includes(',time-1002,'));
+    assert.ok(!defaultCsv.includes(',time-1000,') && !defaultCsv.includes(',time-1003,'));
+    assert.strictEqual(defaultRange.artifacts.find((item) => item.legacy).rowCount, 2);
+
+    for (const [date, length, start] of [[shortDate, 4, 1000], [longDate, 7, 2000]]) {
+      const complete = await ranged.service.exportHistoryCsv({ date, downloadOptions: { rangeMode: 'full' } });
+      assert.strictEqual(complete.ok, true);
+      const pad = complete.artifacts.find((item) => item.channelId === 'range:pad');
+      const contents = fs.readFileSync(pad.file, 'utf8');
+      assert.strictEqual(pad.rowCount, length, `${date} 必须按自身长度完整导出`);
+      assert.strictEqual(contents.trim().split(/\r?\n/).length, length + 1, 'CSV 实际行数含表头必须完整');
+      assert.ok(contents.includes(`,time-${start},`) && contents.includes(`,time-${start + length - 1},`));
+      assert.strictEqual(complete.artifacts.find((item) => item.legacy).rowCount, 3, 'full 对旧 NULL 身份通道同样生效');
+    }
+    const stillDefault = await ranged.service.exportHistoryCsv({ date: longDate });
+    assert.strictEqual(stillDefault.artifacts.find((item) => item.channelId === 'range:pad').rowCount, 2,
+      '整条导出不能修改随后单条下载使用的回放范围');
+    assert.deepStrictEqual(rangeRuntime.historyArr, [1, 3]);
+    assert.ok(ranged.rowsQueries.some((query) => query.date === shortDate && query.channelId === 'range:pad'));
+    assert.ok(ranged.rowsQueries.some((query) => query.date === longDate && query.channelId === 'range:pad'));
 
     // 没有新 query helper 的旧装配仍按 db/db1/db2 全部导出，不再依赖 isCar 判断。
     const legacyEvents = [];

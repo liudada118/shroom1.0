@@ -73,8 +73,27 @@ export function normalizeCsvDownloadArtifact(value) {
 }
 
 /**
- * 同一 channelId 的进度项和最终项合并；无 channelId 的 legacy 项才按文件路径兼容。
+ * 查找同一文件、同一通道的产物；无路径项只匹配同通道的其他无路径项。
+ * ⚠️ 同一通道会导出多个采集文件，仅凭 channelId 合并会覆盖前一条下载结果。
  */
+function findArtifactIndex(artifacts, next) {
+  const exactIndex = artifacts.findIndex((item) => (
+    item.channelId === next.channelId && item.filePath === next.filePath
+  ));
+  if (exactIndex >= 0) return exactIndex;
+  if (!next.filePath) return -1;
+
+  const sameFile = artifacts.map((item, index) => ({ item, index }))
+    .filter(({ item }) => item.filePath === next.filePath);
+  if (next.channelId) {
+    const legacy = sameFile.filter(({ item }) => !item.channelId);
+    return legacy.length === 1 && !sameFile.some(({ item }) => item.channelId)
+      ? legacy[0].index : -1;
+  }
+  return sameFile.length === 1 ? sameFile[0].index : -1;
+}
+
+/** 同通道同文件的进度与最终项合并；跨文件产物和身份不明的进度各自保留。 */
 export function mergeCsvDownloadArtifacts(current = [], incoming = []) {
   const merged = (Array.isArray(current) ? current : [])
     .map(normalizeCsvDownloadArtifact)
@@ -83,12 +102,7 @@ export function mergeCsvDownloadArtifacts(current = [], incoming = []) {
   for (const candidate of Array.isArray(incoming) ? incoming : []) {
     const next = normalizeCsvDownloadArtifact(candidate);
     if (!next) continue;
-    const index = merged.findIndex((item) => (next.channelId
-      ? (
-        item.channelId === next.channelId
-        || (!item.channelId && next.filePath && item.filePath === next.filePath)
-      )
-      : (next.filePath && item.filePath === next.filePath)));
+    const index = findArtifactIndex(merged, next);
     if (index < 0) {
       merged.push(next);
       continue;

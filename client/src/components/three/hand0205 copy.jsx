@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { TrackballControls } from "three/examples/jsm/controls/TrackballControls";
-import React, { useEffect, useImperativeHandle } from "react";
+import React, { useEffect, useImperativeHandle, useRef } from "react";
 import { TextureLoader } from "three";
 import TWEEN from "@tweenjs/tween.js";
 import {
@@ -18,6 +18,7 @@ import brushManager from "./BrushManager";
 import { checkRectIndex, checkRectangleIntersection, getPointCoordinate, getPointCoordinateWowback, getPointCoordinateWowhead, getPointCoordinateback } from "./threeUtil1";
 import { DUAL_CHANNEL_DEFAULTS, createThresholdState } from '../../runtime/displayThresholds';
 import { installModelParticleEntrance } from '../../renderers/modelParticleEntrance';
+import { createWorkspaceViewTools } from '../../renderers/workspaceViewTools';
 
 let timer
 
@@ -89,6 +90,7 @@ let baseEulerX = null
 let local, quaternion, fingerArr
 let cube, chair, mixer, clips;
 const Canvas = React.forwardRef((props, refs) => {
+  const workspaceViewRef = useRef(null);
   local = props.local
   let showFlag = false
   var FPS = 10;
@@ -485,6 +487,7 @@ const Canvas = React.forwardRef((props, refs) => {
       RIGHT: THREE.MOUSE.ROTATE,
     };
     initSet();
+    workspaceViewRef.current = createWorkspaceViewTools({ object: group, camera, controls });
 
     window.addEventListener("resize", onWindowResize);
     removeResize = () => window.removeEventListener('resize', onWindowResize);
@@ -1026,6 +1029,7 @@ const Canvas = React.forwardRef((props, refs) => {
   }
 
   useImperativeHandle(refs, () => ({
+    getViewTools: () => workspaceViewRef.current,
     changeHandAngle,
     changeShow,
     sitData,
@@ -1052,6 +1056,8 @@ const Canvas = React.forwardRef((props, refs) => {
     animate();
     return () => {
       disposed = true;
+      workspaceViewRef.current?.dispose();
+      workspaceViewRef.current = null;
       if (animationRequestId) cancelAnimationFrame(animationRequestId);
       modelEntrance?.dispose(); resizeObserver?.disconnect(); removeResize?.(); controls?.dispose();
       renderer?.dispose(); renderer?.domElement.remove();

@@ -9,6 +9,7 @@ import brushManager from "./BrushManager";
 import React, { useContext, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { SceneVisibilityContext } from '../../renderers/sceneVisibility';
 import { installParticleEntrance } from '../../renderers/particleEntrance';
+import { createWorkspaceViewTools } from '../../renderers/workspaceViewTools';
 import { TextureLoader } from "three";
 import { checkRectIndex, checkRectangleIntersection, getPointCoordinate, getPointCoordinateback } from "./threeUtil1";
 import {
@@ -93,6 +94,7 @@ const Canvas = React.forwardRef((props, refs) => {
   // 逐帧的 render 闭包是挂载那一次建立的，之后拿不到新的 props。用 ref 兜住
   // 当前配色，换配色就能当场生效、不用重建场景（相机视角因此得以保留）。
   const colormapRef = useRef(props.colormap);
+  const workspaceViewRef = useRef(null);
   colormapRef.current = props.colormap;
   const sceneVisibleRef = useContext(SceneVisibilityContext);
   var newDiv, newDiv1, selectStartArr = [], selectEndArr = [], sitArr, backArr, sitMatrix = [], backMatrix = [], selectMatrix = [];
@@ -255,6 +257,7 @@ const Canvas = React.forwardRef((props, refs) => {
       CTRL_KEY, // zoom
       CMD_KEY, // pan
     ];
+    workspaceViewRef.current = createWorkspaceViewTools({ object: group, camera, controls });
 
     window.addEventListener("resize", onWindowResize);
 
@@ -362,8 +365,10 @@ const Canvas = React.forwardRef((props, refs) => {
   }
 
 
+  /** 切换原生框选；必须停用 Trackball 指针处理，否则 preventDefault 会吞掉鼠标框选事件。 */
   function changeSelectFlag(value, flag) {
     controlsFlag = value;
+    controls.enabled = Boolean(value);
     if (value) {
       // 关闭框选模式
       brushManager.stopBrush();
@@ -756,6 +761,7 @@ const Canvas = React.forwardRef((props, refs) => {
   }
 
   useImperativeHandle(refs, () => ({
+    getViewTools: () => workspaceViewRef.current,
     backData: backData,
     sitData: sitData,
     changeDataFlag: changeDataFlag,
@@ -821,6 +827,8 @@ const Canvas = React.forwardRef((props, refs) => {
 
     return () => {
       cancelAnimationFrame(animationRequestId);
+      workspaceViewRef.current?.dispose();
+      workspaceViewRef.current = null;
       window.removeEventListener('resize', onWindowResize);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
