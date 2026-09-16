@@ -1,6 +1,6 @@
 {
   "name": "shroom",
-  "version": "1.1.35",
+  "version": "1.1.36",
   "description": "Shroom - Pressure Sensor Data Acquisition & Visualization System",
   "main": "index.js",
   "win": {
@@ -21,6 +21,7 @@
     "make-mac": "npm run clean-pack-output && npm run prepare-build-assets && electron-forge make --platform darwin",
     "make-start": "electron-forge start --platform darwin",
     "build": "npm run clean-pack-output && npm run prepare-build-assets && electron-builder -w && node scripts/inject-release-notes.js",
+    "upload": "node scripts/upload-release.js",
     "build-mac": "npm run clean-pack-output && npm run prepare-build-assets && electron-builder -m",
     "build-mac-release": "npm run clean-pack-output && node scripts/build-mac-release.js",
     "build-mac-share": "npm run clean-pack-output && node scripts/build-mac-share.js",
@@ -203,7 +204,7 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "http://sensor.bodyta.com/shroom1"
+        "url": "https://shroom.jq-industries.com/shroom1"
       }
     ]
   },

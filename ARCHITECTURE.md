@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-09-09
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-09-15
 
 ## 1. 项目概述
 
@@ -43,6 +43,8 @@ shroom1.0/
 ├── preload.js               # Electron 预加载脚本（安全 IPC 通道）
 ├── server.js                # 后端核心（串口数据处理 + WebSocket 分发，4308 行）
 ├── package.json             # 后端依赖与构建配置
+├── scripts/upload-release.js # Windows 更新产物校验与 SSH/scp 上传（npm run upload）
+├── docs/shroom-update-server.md # 新更新服务器 Nginx 配置、上传与旧客户端迁移
 │
 ├── # ── 后端拆分模块 ──
 ├── wsHelper.js              # WebSocket 广播与消息路由工具
@@ -304,7 +306,8 @@ graph TD
     - 后端支持前端请求 `getSensorTypes`，由 `sensorTypeStore.js` 拉取/缓存传感器类型清单并通过 `sensorTypeList` 下发，密钥页和系统页可用后台动态映射替代本地硬编码名称。
 
 5. **自动更新流程**
-    - 应用启动 30 秒后 → `autoUpdater.js` 检查自建服务器 `http://sensor.bodyta.com/shroom1` → 发现新版本后通过 `update-status` IPC 通道通知前端 → 前端 `UpdateNotifier` 组件弹出通知 → 用户点击「下载更新」后通过 `update-command` IPC 通道触发下载 → 下载过程中实时推送进度到前端 → 下载完成后弹窗询问是否立即安装并重启。
+    - 应用启动 30 秒后 → `autoUpdater.js` 检查自建服务器 `https://shroom.jq-industries.com/shroom1` → 发现新版本后通过 `update-status` IPC 通道通知前端 → 前端 `UpdateNotifier` 组件弹出通知 → 用户点击「下载更新」后通过 `update-command` IPC 通道触发下载 → 下载过程中实时推送进度到前端 → 下载完成后弹窗询问是否立即安装并重启。
+    - Windows 发布入口为 `npm run upload`：校验构建版本、内嵌更新地址、安装包 SHA-512，使用本机 OpenSSH 上传安装包、blockmap、latest.yml 到服务器独立暂存目录，远程校验 SHA-256 并使用发布锁，最后原子替换 latest.yml。默认目录为 `/data/shroom1`，可用 `SHROOM_UPLOAD_DIR` 覆盖；私钥通过 `SHROOM_SSH_KEY` 传给 SSH/scp；`--dry-run` 仅做本地校验。服务器 `/etc/nginx/conf.d/shroom.conf` 已将 `/shroom1/` 映射到 `/data/shroom1/`，支持 HTTP 范围下载。1.1.36 为包含新 HTTPS 更新源的迁移版本；旧域名已停用，其他电脑需手动安装新版一次。本机已备份并修改安装目录的 app-update.yml，完全退出重启后从新服务器检查更新。
     - 若检查更新阶段遇到 `ERR_CONTENT_LENGTH_MISMATCH`，主进程会等待 1.5 秒后自动重试一次；若仍失败，则将归一化后的错误消息通过 `update-status` / `update-command` 返回给前端，提示优先排查更新服务器、CDN 或代理缓存的响应头与实际文件长度不一致问题。
     - 用户确认立即安装后，`autoUpdater.js` 会先调用主进程传入的 `beforeInstall` 清理钩子，关闭静态资源服务、WebSocket 服务、串口、数据库、Python worker 和 OneStep 报告 HTTP 服务，再触发 `quitAndInstall()`，避免 Windows NSIS 安装器因旧版进程未完全退出而弹出“Shroom 无法关闭”重试对话框。
     - IPC 通道：`update-command`（前端 → 主进程：checkForUpdate / downloadUpdate / installUpdate）、`update-status`（主进程 → 前端：checking / available / downloading / downloaded / error）。
@@ -403,6 +406,8 @@ graph TD
 | 数据库路径 | `configManager.js` | SQLite 数据库文件位置 | `./db/info.db` |
 | CSV 导出路径 | `configManager.js` | 采集数据 CSV 导出目录 | `./data/` |
 | 授权服务配置 | `configManager.js` / `licenseManager.js` | 在线授权检查、离线密钥复检、传感器类型清单拉取 | `appConfig.keyServer.BASE_URL` |
+| `SHROOM_UPLOAD_DIR` | 本地操作系统环境变量 | Windows 更新包在服务器上的绝对存放目录；由 `scripts/upload-release.js` 使用 | `/data/shroom1` |
+| `SHROOM_SSH_KEY` | 本地操作系统环境变量 | 上传时传给 SSH/scp 的私钥路径，脚本不读取密钥内容 | 可选；本机设为 `D:\server\server.pem` |
 
 ## 8. 项目进度
 
@@ -854,6 +859,12 @@ graph TD
 | 2026-08-27 | Revise | 人体原始数据背面右肩臂方向修正 | 根据实物反馈将背面右肩膀与右手臂的三行顺序由 `0→1→2` 改为 `2→1→0`，肩到手的逐行列方向保持不变；通道号和值共用修正后的槽位投影，原始1024点、统计、实时、回放和CSV不变。 |
 | 2026-08-28 | Revise | 平台目标架构与人体渲染技术资料 | 新增平台介绍与使用指南、目标架构、产品概念一页纸和三维人体压力优化渲染专利交底草案，并同步人体低面数参考模型资源。 |
 | 2026-09-09 | Codex | 人体优化 HaLow 数据接入 | 新增 TCP 接收和工具栏连接入口；真实 STA_002 约97～99fps接入既有原始数据与渲染流程，保持串口/网络互斥及授权生命周期。 |
+
+| 2026-09-15 | Revise | 新更新源与命令上传工具 | 更新源改为 HTTPS 新域名，新增 Windows 上传脚本、产物完整性检查和 Nginx 部署说明；服务端配置与真实上传待完成。 |
+
+| 2026-09-15 | Revise | 更新服务器下载目录上线 | 备份并修改 Nginx 站点，将 `/shroom1/` 映射到 `/data/shroom1/`；校验上传文件哈希、200/206下载、404缺失文件和原网站响应。 |
+
+| 2026-09-15 | Revise | 1.1.36 更新域名迁移发布 | 完整打包并核验 EXE 内嵌新 HTTPS 地址，密钥认证上传及公网元数据/范围下载验证通过；本机安装配置已修复，重启后生效。 |
 
 ## 9. 更新日志
 
@@ -1310,6 +1321,12 @@ graph TD
 ---
 
 *此文档旨在提供项目架构的快照，具体实现细节请参考源代码。*
+| 2026-09-15 | Revise | 配置变更 | 更新源迁移至 `https://shroom.jq-industries.com/shroom1`；新增 `npm run upload`，校验后分阶段上传并最后发布元数据，提供服务器配置与迁移指南。 |
+
+| 2026-09-15 | Revise | 修复缺陷 | 修复更新下载路径返回密钥管理 HTML：Nginx 增加静态目录映射并重载，原站点配置留有备份，更新文件和范围下载已实测；现有安装包仍需重建以切换内嵌地址。 |
+
+| 2026-09-15 | Revise | 修复缺陷 | 旧域名停用后发布 1.1.36，新安装包使用新更新源；备份并修复本机安装目录 app-update.yml，上传工具支持 SHROOM_SSH_KEY。完整构建、5项上传校验测试及实际服务器上传通过。 |
+
 ## 2026-06-04 Minzhen / Wheelchair Display System
 
 - Added `minzhen` as a custom 32x32 / 1024-point display system.

@@ -230,7 +230,7 @@ mac 客户端远程更新只需要上传:
 
 服务器目录当前配置为:
 
-- `http://sensor.bodyta.com/shroom1`
+- `https://shroom.jq-industries.com/shroom1`
 
 ## 产物说明
 
