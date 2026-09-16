@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-09-15
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-09-16
 
 ## 1. 项目概述
 
@@ -306,6 +306,7 @@ graph TD
     - 后端支持前端请求 `getSensorTypes`，由 `sensorTypeStore.js` 拉取/缓存传感器类型清单并通过 `sensorTypeList` 下发，密钥页和系统页可用后台动态映射替代本地硬编码名称。
 
 5. **自动更新流程**
+    - 当前 Windows 构建版本为 `1.1.37`，版本号由根目录 `package.json` 与 `package-lock.json` 同步管理；打包将 `release-notes/windows/1.1.37.md` 注入 `dist/latest.yml`。此版本包含工作区中“人体全身传感”的中文名称调整。
     - 应用启动 30 秒后 → `autoUpdater.js` 检查自建服务器 `https://shroom.jq-industries.com/shroom1` → 发现新版本后通过 `update-status` IPC 通道通知前端 → 前端 `UpdateNotifier` 组件弹出通知 → 用户点击「下载更新」后通过 `update-command` IPC 通道触发下载 → 下载过程中实时推送进度到前端 → 下载完成后弹窗询问是否立即安装并重启。
     - Windows 发布入口为 `npm run upload`：校验构建版本、内嵌更新地址、安装包 SHA-512，使用本机 OpenSSH 上传安装包、blockmap、latest.yml 到服务器独立暂存目录，远程校验 SHA-256 并使用发布锁，最后原子替换 latest.yml。默认目录为 `/data/shroom1`，可用 `SHROOM_UPLOAD_DIR` 覆盖；私钥通过 `SHROOM_SSH_KEY` 传给 SSH/scp；`--dry-run` 仅做本地校验。服务器 `/etc/nginx/conf.d/shroom.conf` 已将 `/shroom1/` 映射到 `/data/shroom1/`，支持 HTTP 范围下载。1.1.36 为包含新 HTTPS 更新源的迁移版本；旧域名已停用，其他电脑需手动安装新版一次。本机已备份并修改安装目录的 app-update.yml，完全退出重启后从新服务器检查更新。
     - 若检查更新阶段遇到 `ERR_CONTENT_LENGTH_MISMATCH`，主进程会等待 1.5 秒后自动重试一次；若仍失败，则将归一化后的错误消息通过 `update-status` / `update-command` 返回给前端，提示优先排查更新服务器、CDN 或代理缓存的响应头与实际文件长度不一致问题。
@@ -866,6 +867,8 @@ graph TD
 
 | 2026-09-15 | Revise | 1.1.36 更新域名迁移发布 | 完整打包并核验 EXE 内嵌新 HTTPS 地址，密钥认证上传及公网元数据/范围下载验证通过；本机安装配置已修复，重启后生效。 |
 
+| 2026-09-16 | Revise | 1.1.37 Windows 打包 | 同步根包与锁文件版本，补齐版本说明，包含“人体全身传感”的中文名称调整；完整构建通过并生成 EXE、blockmap 与 latest.yml。 |
+
 ## 9. 更新日志
 
 | 时间 | 分支 | 变更类型 | 描述 |
@@ -1326,6 +1329,8 @@ graph TD
 | 2026-09-15 | Revise | 修复缺陷 | 修复更新下载路径返回密钥管理 HTML：Nginx 增加静态目录映射并重载，原站点配置留有备份，更新文件和范围下载已实测；现有安装包仍需重建以切换内嵌地址。 |
 
 | 2026-09-15 | Revise | 修复缺陷 | 旧域名停用后发布 1.1.36，新安装包使用新更新源；备份并修复本机安装目录 app-update.yml，上传工具支持 SHROOM_SSH_KEY。完整构建、5项上传校验测试及实际服务器上传通过。 |
+
+| 2026-09-16 | Revise | 配置变更 | 版本更新至 1.1.37，生成 Windows 安装包和对应更新元数据，沿用新 HTTPS 更新服务器；本次仅本地打包。 |
 
 ## 2026-06-04 Minzhen / Wheelchair Display System
 
