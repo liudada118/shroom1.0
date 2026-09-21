@@ -1,6 +1,6 @@
 # Shroom 快速架构索引
 
-> 最后更新于：2026-09-11
+> 最后更新于：2026-09-20
 > 用途：代码定位和验证路由。理解当前实现先读 [开发者手册](docs/developer-guide.md)，完整文档分类见 [docs/README.md](docs/README.md)。`ARCHITECTURE.md` 保留历史设计与维护台账，不用作默认全文入口。
 
 当前完整链路：[数据、算法、存储与回放](docs/chains/data-flow.md) · [页面、渲染与交互](docs/chains/interface-flow.md)。
@@ -71,7 +71,7 @@ client commandClient → HTTP :19245 /api/commands
 | 监测返回选择弹窗 | `page/licensePortal/PortalMonitoringLayer.jsx`, `PortalLauncher.css`, `scene/sceneMotionClock.js`, `renderers/particleEntrance.js`, `components/three/hand.jsx` | 时钟、动态投影与末段混合单测；`portal-launcher.mjs`：GPU 归位、预览预热、材质互补混合、缓冲复用、首帧连续、固定面板、清理、inert、焦点与减少动画；前端动效采用 Standard |
 | Python worker 管道/退出 | `backend/kernel/algorithm-channel/pythonWorker.js` | `backend/tests/server/pythonWorkerLifecycle.test.js`（断管、在飞写入、重启/退出竞态）+ Full |
 | 生产依赖打包 | `scripts/pack-runtime-dependencies.js`, `scripts/electron-builder-before-*.js`, `scripts/package-hooks.js` | `backend/tests/packaging/runtimeDependencies.test.js` + Full；发布须验证最终 ASAR 并实际加载包内模块 |
-| 串口生命周期 | `sdk/backend/serial/serialManager.js` | `backend/tests/serial/`, `backend/tests/application/serialControlService.test.js` |
+| 串口生命周期 / 异常提示 | `sdk/backend/serial/serialManager.js`、`serialErrors.js` → `serialControlService` / HTTP `context.waitFor` → Home / Title / `services/serial/serialFeedback.js` | `backend/tests/serial/`、`serialControlService.test.js`、`serialConnectionApi.test.js`、Title.serialConnection / serialFeedback / commandClient；Full + `portal-launcher.mjs --monitor-only` 的合成串口异常回归 |
 | framing/协议 | `sdk/backend/serial/serialParserManager.js`, `sdk/backend/protocol/` | `backend/tests/serial/` |
 | Display System | `backend/extension-host/`, `display-systems/` | `backend/tests/displaySystems/`, `backend/tests/server/appRuntimeDisplaySystems.test.js` |
 | Python 算法包/融合输入 | `agent-resources/algorithm-packages/`, `backend/extension-host/manifest/displaySystemAlgorithmPackage.js`, `backend/extension-host/manifest/builtinAlgorithmPackageCatalog.js`, `backend/extension-host/runtime/displaySystemFrameAggregator.js`, `backend/kernel/algorithm-channel/` | `backend/tests/displaySystems/algorithmPackage.test.js`, `python/tests/test_builtin_algorithm_packages.py`, `python/tests/test_display_system_algorithm_v2.py` |

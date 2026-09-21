@@ -1,4 +1,6 @@
 import React, { lazy, Suspense } from 'react';
+// 与正式 main.jsx 保持一致，才能验证 React 19 下的 antd 静态错误提示。
+import '@ant-design/v5-patch-for-react-19';
 import gsap from 'gsap';
 import { createRoot } from 'react-dom/client';
 import { HashRouter, Link, Routes, Route } from 'react-router-dom';

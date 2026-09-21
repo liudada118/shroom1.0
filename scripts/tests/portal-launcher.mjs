@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { verifyPortalWorkspaceControls } from './portal-workspace-controls.mjs';
+import { verifyPortalSerialFeedback } from './portal-serial-feedback.mjs';
 
 const requireClient = createRequire(new URL('../../client/package.json', import.meta.url));
 const requireRoot = createRequire(new URL('../../package.json', import.meta.url));
@@ -647,6 +648,7 @@ try {
   }
   await page.setViewportSize({ width: 1440, height: 900 });
   assert.ok(Math.abs((await page.locator('.portal-quick-tools').boundingBox()).y - toolsBounds.y) < 1, '恢复桌面尺寸后快捷工具回到原位置');
+  await verifyPortalSerialFeedback({ page, sockets, screenshots });
   await page.getByRole('button', { name: '算法', exact: true }).click();
   await page.evaluate(() => {
     window.__portalReturnSamples = [];

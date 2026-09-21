@@ -121,6 +121,7 @@ import { WebGLCanvas } from "../../components/webgl/WebGL.HeatMap copy 2";
 import { WS_URLS } from "../../constants";
 import { createJsonWebSocket } from "../../services/ws/messages";
 import { commandClient } from "../../services/command/commandClient";
+import { serialFeedback } from '../../services/serial/serialFeedback';
 import { getCurrentSensorTypeFromStatus } from "../../services/sensorStatus";
 import {
   getDisplayDefinition,
@@ -1776,6 +1777,11 @@ class Home extends React.Component {
     sitPress = 0;
     const jsonObject = decodedMessage || parseWebSocketEventPayload(e);
     if (!jsonObject) return;
+    if (jsonObject.serialStatus) {
+      serialFeedback.status(jsonObject.serialStatus);
+      window.dispatchEvent(new CustomEvent('shroom-serial-status', { detail: jsonObject.serialStatus }));
+    }
+    if (jsonObject.serialNotice) serialFeedback.error(jsonObject.serialNotice);
     const sitFrameData = getSensorFrameChannelValue(jsonObject, 'sit');
     this.syncSmallBed12BMatrixSize(jsonObject);
 
@@ -3803,6 +3809,9 @@ class Home extends React.Component {
 
     return commandClient.executeLegacyControl(obj).catch((error) => {
       console.warn('[command] control request failed', error, obj);
+      if (Object.keys(obj || {}).some((key) => /^(serialReset|.*Port|.*Close)$/.test(key))) {
+        serialFeedback.error(error);
+      }
       return [];
     });
   };

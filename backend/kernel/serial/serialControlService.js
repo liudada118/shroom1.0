@@ -1,3 +1,5 @@
+const { createSerialError, serializeSerialError } = require('@shroom/backend/serial/serialErrors.js');
+
 /**
  * 构造回到实时模式时需要推送的空白帧。
  * 作用是让旧前端页面清空历史回放画面，避免残留上一帧历史数据。
@@ -62,7 +64,13 @@ function registerSerialControlHandlers(router, deps) {
     serialRoles,
     setRuntime,
     stopPlaybackTimer,
+    waitForSerialOpen,
   } = deps;
+
+  /** HTTP 调用方等待本次物理打开；旧同步入口通过系统状态事件接收结果。 */
+  function trackOpen(role, context) {
+    if (context.waitFor && waitForSerialOpen) context.waitFor(waitForSerialOpen(role));
+  }
 
   /**
    * 授权有效期保护。
@@ -203,6 +211,7 @@ function registerSerialControlHandlers(router, deps) {
       if (message.channelPorts && typeof message.channelPorts === 'object') {
         if (typeof openManifestSerialPorts === 'function') {
           openManifestSerialPorts(message.channelPorts, context.scope || 'main');
+          Object.keys(message.channelPorts).forEach((role) => trackOpen(role, context));
         } else {
           Object.entries(message.channelPorts).forEach(([serialRole, portPath]) => {
             if (portPath == null) return;
@@ -217,52 +226,65 @@ function registerSerialControlHandlers(router, deps) {
               error.httpStatus = 400;
               throw error;
             }
+            trackOpen(serialRole, context);
           });
         }
       }
       if (Array.isArray(message.channelClose)) {
         if (typeof closeManagedSerialPorts === 'function') {
-          closeManagedSerialPorts(
+          const closing = closeManagedSerialPorts(
             message.channelClose,
             `${context.scope || 'main'} manual close`,
             { strict: true },
           );
+          closing?.forEach((operation) => context.waitFor?.(operation));
         } else {
           message.channelClose.forEach((serialRole) => {
-            if (serialRole) closeManagedSerialPort(serialRole, `${context.scope || 'main'} manual close`);
+            if (serialRole) {
+              const closing = closeManagedSerialPort(serialRole, `${context.scope || 'main'} manual close`);
+              context.waitFor?.(closing);
+            }
           });
         }
       }
       if (message.sitPort != null) {
-        setRuntime({ sitClose: false, com: message.sitPort });
         openSitSerialPort(message.sitPort, `${context.scope || 'main'} sitPort`);
+        setRuntime({ sitClose: false, com: message.sitPort });
+        trackOpen(serialRoles.SIT, context);
       }
       if (message.headPort != null) {
-        setRuntime({ headClose: false, comhead: message.headPort });
         openHeadSerialPort(message.headPort, `${context.scope || 'main'} headPort`);
+        setRuntime({ headClose: false, comhead: message.headPort });
+        trackOpen(serialRoles.HEAD, context);
       }
       if (message.sensorPort != null) {
         openMinzhenSensorPort(message.sensorPort);
+        trackOpen(serialRoles.SENSOR, context);
       }
       if (message.backPort != null) {
-        setRuntime({ backClose: false, com1: message.backPort });
         openBackSerialPort(message.backPort, `${context.scope || 'main'} backPort`);
+        setRuntime({ backClose: false, com1: message.backPort });
+        trackOpen(serialRoles.BACK, context);
       }
       if (message.sitClose === true) {
         setRuntime({ sitClose: true, com: undefined });
-        closeManagedSerialPort(serialRoles.SIT, 'manual close');
+        const closing = closeManagedSerialPort(serialRoles.SIT, 'manual close');
+        context.waitFor?.(closing);
       }
       if (message.backClose === true) {
         setRuntime({ backClose: true, com1: undefined });
-        closeManagedSerialPort(serialRoles.BACK, `${context.scope || 'main'} manual close`);
+        const closing = closeManagedSerialPort(serialRoles.BACK, `${context.scope || 'main'} manual close`);
+        context.waitFor?.(closing);
       }
       if (message.headClose === true) {
         setRuntime({ headClose: true, comhead: undefined });
-        closeManagedSerialPort(serialRoles.HEAD, 'manual close');
+        const closing = closeManagedSerialPort(serialRoles.HEAD, 'manual close');
+        context.waitFor?.(closing);
       }
       if (message.sensorClose === true) {
         setRuntime({ sensorClose: true, comSensor: undefined });
-        closeMinzhenSensorPort('manual close');
+        const closing = closeMinzhenSensorPort('manual close');
+        context.waitFor?.(closing);
       }
     },
   });
@@ -333,15 +355,20 @@ function registerSerialControlHandlers(router, deps) {
   router.register({
     name: 'serial-port-list-refresh',
     when: (message) => message.serialReset != null,
-    handle: () => {
-      listPorts().then((ports) => {
+    handle: (_message, context = {}) => {
+      const scanning = listPorts({ throwOnError: true }).then((ports) => {
         const serialport = getPort(ports);
         logSerialPortList('serialReset', serialport);
         setRuntime({ serialport });
-        publishSystemEvent({ port: serialport });
+        const notice = serialport.length ? null : createSerialError(ports.length ? 'SERIAL_NO_MATCH' : 'SERIAL_NO_PORTS', '', { stage: 'scan' });
+        publishSystemEvent({ port: serialport, serialNotice: serializeSerialError(notice) });
       }).catch((error) => {
         logger.error('[SerialList] serialReset failed', error);
+        const failure = createSerialError('SERIAL_LIST_FAILED', error, { stage: 'scan' });
+        publishSystemEvent({ serialNotice: serializeSerialError(failure) });
+        return { ok: false, error: failure };
       });
+      context.waitFor?.(scanning);
     },
   });
 
@@ -349,8 +376,8 @@ function registerSerialControlHandlers(router, deps) {
   router.register({
     name: 'auto-connect-hand-glove-double',
     when: (message) => message.autoConnectHand0205Double === true,
-    handle: () => {
-      listPorts().then((ports) => {
+    handle: (_message, context = {}) => {
+      const connecting = listPorts({ throwOnError: true }).then(async (ports) => {
         const serialport = getPort(ports);
         logSerialPortList('autoConnectHand0205Double', serialport);
         setRuntime({ serialport });
@@ -363,7 +390,7 @@ function registerSerialControlHandlers(router, deps) {
               message: `触觉手套2 自动连接失败：只检测到 ${paths.length} 个可用手套串口`,
             },
           });
-          return;
+          return { ok: false, error: createSerialError('SERIAL_NO_PORTS', 'two glove ports required', { stage: 'scan' }) };
         }
 
         const [leftPath, rightPath] = paths;
@@ -374,11 +401,16 @@ function registerSerialControlHandlers(router, deps) {
           com1: rightPath,
           baudRate: getSensorBaudRate(HAND_GLOVE_DOUBLE),
         });
-        closeManagedSerialPort(serialRoles.SIT, 'autoConnectHand0205Double');
-        closeManagedSerialPort(serialRoles.BACK, 'autoConnectHand0205Double');
         try {
+          const closed = await Promise.all([
+            closeManagedSerialPort(serialRoles.SIT, 'autoConnectHand0205Double'),
+            closeManagedSerialPort(serialRoles.BACK, 'autoConnectHand0205Double'),
+          ]);
+          const closeFailure = closed.find((result) => result?.ok === false);
+          if (closeFailure) throw closeFailure.error;
           openSitSerialPort(leftPath, 'autoConnectHand0205Double sit');
           openBackSerialPort(rightPath, 'autoConnectHand0205Double back');
+          if (waitForSerialOpen) await Promise.all([waitForSerialOpen(serialRoles.SIT), waitForSerialOpen(serialRoles.BACK)]);
           publishSystemEvent({
             port: serialport,
             autoConnectHand0205Double: {
@@ -390,6 +422,10 @@ function registerSerialControlHandlers(router, deps) {
           });
         } catch (error) {
           logger.warn('[autoConnectHand0205Double] open failed', error);
+          await Promise.all([
+            closeManagedSerialPort(serialRoles.SIT, 'auto connect rollback'),
+            closeManagedSerialPort(serialRoles.BACK, 'auto connect rollback'),
+          ]);
           publishSystemEvent({
             port: serialport,
             autoConnectHand0205Double: {
@@ -397,6 +433,7 @@ function registerSerialControlHandlers(router, deps) {
               message: error?.message || '触觉手套2 自动连接失败',
             },
           });
+          return { ok: false, error };
         }
       }).catch((error) => {
         logger.error('[SerialList] autoConnectHand0205Double failed', error);
@@ -406,7 +443,9 @@ function registerSerialControlHandlers(router, deps) {
             message: error?.message || '触觉手套2 串口扫描失败',
           },
         });
+        return { ok: false, error };
       });
+      context.waitFor?.(connecting);
     },
   });
 }

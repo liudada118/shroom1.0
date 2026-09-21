@@ -139,6 +139,13 @@ async function main() {
   );
   assert.strictEqual(busyCaptureCalls, 0, 'busy ports must never be disconnected or probed');
 
+  const closingService = createSerialProtocolProbeService({
+    serialManager: { getStatus: () => [{ path: 'COM7', status: 'error', isOpen: false }], isPathBusy: () => true },
+    captureAtBaud: async () => { busyCaptureCalls += 1; return Buffer.alloc(0); },
+  });
+  await assert.rejects(closingService.detect({ path: 'COM7' }), (error) => error.code === 'SERIAL_PORT_BUSY');
+  assert.strictEqual(busyCaptureCalls, 0, 'a timed-out pending open remains reserved until the driver closes it');
+
   // 已登记但关闭不算 busy；这是常见的 Builder 配置状态。
   const registeredClosedService = createSerialProtocolProbeService({
     serialManager: { getStatus: () => [{ path: 'COM7', status: 'registered', isOpen: false }] },

@@ -1,6 +1,6 @@
 # 架构文档
 
-> 最后更新于：2026-09-11
+> 最后更新于：2026-09-20
 > 阅读定位：本文件保留架构演进、历史说明和维护台账。当前实现从 [开发者手册](docs/developer-guide.md) 开始，文档状态见 [文档导航](docs/README.md)，不要将不同日期的记录拼成当前系统行为。
 
 ## 2026-09-11 快捷抽屉与分类视图工具
@@ -4140,6 +4140,17 @@ flowchart LR
 `GET /api/display-systems/catalog` 的 `serialTemplates`，所以「新建传感器」的模板卡片与这个接口永远同源；
 `GET /api/sdk/contract` 的 `serial.protocolPresets` 是它的摘要（无 `protocol` 段）。
 
+### 串口连接结果与异常提示（2026-09-20）
+
+- `sdk/backend/serial/serialErrors.js` 统一错误码、中文提示、阶段、角色、物理路径及底层详情；不把 Windows 的 access denied 唯一解释成占用。
+- `serialManager.start()` 保留同步返回端口的兼容接口；`waitForOpen(role)` 等待当前实例的实际打开回调。`serialControlService` 通过 `context.waitFor` 登记硬件等待项，HTTP 控制路由等待后再生成 ACK。Agent 与旧 WS 的同步派发形状不变，实际结果继续从串口状态查询/广播获取。串口错误 ACK 附带诊断详情，其他命令（尤其授权失败）保持原有回执结构。
+- 状态变化经 `serialRuntimeFactory` → `server.publishSystemEvent({ serialStatus })` → `Home.wsData` → `Title`。状态带 `connectionId`、`revision`、`updatedAt`、结构化 `error` 与 `health`；前端拒绝旧快照覆盖新状态。扫描空列表、筛选后无设备、读取失败经 `serialNotice` 提示。
+- `isOpen` 保留物理句柄状态，关闭失败不能伪装成资源已释放；协议识别同时检查 `isPathBusy`，阻止访问超时后仍在打开/关闭的旧实例。manifest 打开前被拒绝时保留原有连接，不在回滚中误关它。
+- 默认物理打开超时 10 秒、关闭等待 3 秒、前端请求超时 15 秒。超时/取消撤销该实例的数据监听与发布资格；迟到打开只能关闭自身。物理资源关闭未确认前保留路径锁，不能抢占另一通道。手动关闭禁用重连，首次连接失败由用户重试；意外断连按 3 秒间隔最多自动尝试 3 次，连接中不重复启动。
+- 已打开通道每秒检查数据健康：5 秒无字节提示未收到数据；有字节但 5 秒无完整 parser 输出提示检查波特率/分帧；只有已声明协议校验的通道才检查连续 10 帧校验失败。原有分帧、解码、`sensor.frame`、采集与回放契约不变，未声明校验的通道不推测协议错误。有效帧恢复后清除告警；敏枕文本路径仅监测原始字节静默。
+- 普通与 manifest 选择器统一等待真实打开结果，连接中禁用重复选择，失败/断连清除连接选择。`serialFeedback` 合并 HTTP/WS 重复告警并抑制后台重试刷屏；失败原因保留在选择器下方，可重新选择连接。关闭失败显示原因，不伪造关闭成功。
+- 验证入口：`serialManager.test.js` 覆盖超时、迟到回调、取消、关闭失败、路径占用、有限重连和数据告警；`serialConnectionApi.test.js` 使用真实 HTTP 路由验证失败 ACK 与成功等待；Title/feedback/commandClient 测试覆盖显示状态与去重。浏览器回归 `portal-launcher.mjs --monitor-only` 接入 `portal-serial-feedback.mjs`，使用合成 HTTP/WS，无真机操作。
+
 ## 6. 外部依赖与集成
 
 | 服务/库 | 用途 | 集成方式 |
@@ -4625,6 +4636,12 @@ flowchart LR
 
 | 2026-09-07 | Codex | 原生点图工作区铺满与图表浮层 | 新增 workspace 布局目录、保存校验、Builder 和宿主消费；画布高度受控，侧栏可折叠但不卸载，同步 Agent 生成与指标语义规则并增加浏览器布局回归。 |
 
+### 2026-09-20 增量完成
+
+| 完成日期 | 完成的功能/工作 | 简要说明 |
+| --- | --- | --- |
+| 2026-09-20 | 串口连接异常闭环 | 实际打开回执、错误分类、持续状态提示、有限重连与迟到端口清理，普通和 manifest 通道共用。 |
+
 ## 9. 更新日志
 
 ### 2026-09-10 增量记录
@@ -5086,6 +5103,13 @@ flowchart LR
 ---
 
 *此文档旨在提供项目架构的快照，具体实现细节请参考源代码。*
+### 2026-09-20 增量记录
+
+| 日期 | 变更类型 | 说明 |
+| --- | --- | --- |
+| 2026-09-20 | 验证 | 最终 Full 8/8 通过；`portal-launcher.mjs --monitor-only` 的串口提示、工作区、窄屏、返回动画及单手回放回归通过。串口夹具验证实际 Home/Title 的加载禁用、HTTP/WS 提示去重、失败清空、无数据与断连；桌面/窄屏截图已目视核对。 |
+| 2026-09-20 | 修复缺陷 | 参考 E:/shroom 补齐串口错误向界面的传递；HTTP 等待真实打开、阻止重复连接与通道抢占、超时后清理迟到端口，增加无数据/无完整帧/连续校验失败提示。Full 8/8 通过：85 个后端测试文件、699 项客户端测试、512 项前端 SDK 测试、lint、临时生产构建、SDK smoke 和性能基线；真机拔插与驱动差异仍需硬件验证。 |
+
 ## 2026-06-04 Minzhen / Wheelchair Display System
 
 - Added `minzhen` as a custom 32x32 / 1024-point display system.

@@ -9,6 +9,10 @@ export class CommandClientError extends Error {
     this.code = options.code || 'COMMAND_REQUEST_FAILED';
     this.requestId = options.requestId || null;
     this.status = options.status || 0;
+    this.role = options.role;
+    this.path = options.path;
+    this.stage = options.stage;
+    this.detail = options.detail;
   }
 }
 
@@ -119,27 +123,36 @@ export class CommandClient {
 
   async executeEnvelope(command) {
     if (!this.fetchImpl) throw new CommandClientError('fetch is not available');
-    let response;
+    // 串口后端最多等待打开 10 秒/关闭 3 秒，客户端留出传输余量。
+    const controller = command.type?.startsWith('serial.') ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 15000) : null;
     try {
-      response = await Reflect.apply(this.fetchImpl, globalThis, [`${this.baseUrl}/api/commands`, {
+      const response = await Reflect.apply(this.fetchImpl, globalThis, [`${this.baseUrl}/api/commands`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(command),
+        ...(controller ? { signal: controller.signal } : {}),
       }]);
+      const body = await response.json();
+      const ack = body?.data || body;
+      if (!response.ok || body?.code !== 0 || ack?.ok !== true) {
+        throw new CommandClientError(ack?.message || body?.message || `HTTP ${response.status}`, {
+          code: ack?.code,
+          requestId: ack?.requestId || command.requestId,
+          status: response.status,
+          ...ack?.data,
+        });
+      }
+      return ack;
     } catch (error) {
-      throw new CommandClientError(error.message || 'command request failed', { requestId: command.requestId });
-    }
-
-    const body = await response.json().catch(() => ({}));
-    const ack = body?.data || body;
-    if (!response.ok || body?.code !== 0 || ack?.ok !== true) {
-      throw new CommandClientError(ack?.message || body?.message || `HTTP ${response.status}`, {
-        code: ack?.code,
-        requestId: ack?.requestId || command.requestId,
-        status: response.status,
+      if (error instanceof CommandClientError) throw error;
+      throw new CommandClientError(error.message || 'command request failed', {
+        requestId: command.requestId,
+        code: controller?.signal.aborted ? 'COMMAND_REQUEST_TIMEOUT' : 'COMMAND_REQUEST_FAILED',
       });
+    } finally {
+      if (timer) clearTimeout(timer);
     }
-    return ack;
   }
 
   async executeLegacyControl(message) {

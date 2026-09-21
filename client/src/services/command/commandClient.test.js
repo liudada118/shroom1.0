@@ -109,4 +109,28 @@ describe('CommandClient', () => {
     await expect(client.execute('serial.open', { role: 'sit', path: 'COM3' }))
       .rejects.toBeInstanceOf(CommandClientError);
   });
+
+  it('preserves serial channel details for HTTP/WS notification deduplication', async () => {
+    const client = new CommandClient({ fetchImpl: async () => ({ ok: false, status: 409,
+      json: async () => ({ code: 1, data: { ok: false, code: 'SERIAL_PORT_BUSY', message: '串口被占用',
+        data: { role: 'armLeft', path: 'COM4', stage: 'open', detail: 'busy' } } }),
+    }) });
+    await expect(client.execute('serial.open', { role: 'armLeft', path: 'COM4' })).rejects.toMatchObject({
+      code: 'SERIAL_PORT_BUSY', role: 'armLeft', path: 'COM4', stage: 'open', detail: 'busy',
+    });
+  });
+
+  it('serial request timeout aborts fetch and clears the pending operation', async () => {
+    vi.useFakeTimers();
+    try {
+      const client = new CommandClient({ fetchImpl: (_url, { signal }) => new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      }) });
+      const request = client.execute('serial.open', { role: 'sit', path: 'COM3' });
+      const result = expect(request).rejects.toMatchObject({ code: 'COMMAND_REQUEST_TIMEOUT' });
+      await vi.advanceTimersByTimeAsync(15000);
+      await result;
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
 });

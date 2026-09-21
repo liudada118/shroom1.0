@@ -17,13 +17,17 @@ const FRAME_DELIMITER = Buffer.from([0xaa, 0x55, 0x03, 0x99]);
  * 获取系统中所有可用串口列表，并按平台过滤
  * @returns {Promise<Array>} 串口信息数组
  */
-async function listPorts() {
+async function listPorts({ throwOnError = false } = {}) {
   try {
     const ports = await SerialPort.list();
     logger.info(`检测到 ${ports.length} 个串口`);
     return ports;
   } catch (err) {
     logger.error('获取串口列表失败', err);
+    if (throwOnError) {
+      const { createSerialError } = require('./serialErrors');
+      throw createSerialError('SERIAL_LIST_FAILED', err, { stage: 'scan' });
+    }
     return [];
   }
 }

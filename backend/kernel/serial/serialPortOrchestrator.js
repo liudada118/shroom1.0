@@ -154,15 +154,14 @@ function createSerialPortOrchestrator({
   /**
    * 登记并启动一路物理串口。
    *
-   * 「登记」是配置的存放处（重连循环也读它），「启动」才碰硬件；同一角色重复调用 = 用新配置覆盖
-   * 旧登记并重启（`start` 内部先 `stop` 自己）。`reconnect: options.reconnect === true` 显式归一
+   * 「登记」保存重连配置，「启动」才碰硬件；同一角色已按相同配置打开时复用端口，配置变化时等待
+   * 旧端口关闭再打开。`reconnect: options.reconnect === true` 显式归一
    * 成布尔，因为重连循环按 `!== true` 判断，truthy 字符串会让不该重连的端口开始自动重连。
    *
    * ⚠️ **必须先 `registerPort` 再 `start`**：`start` 只认已登记的 portId，否则直接抛
    * `serial port is not registered`。
    *
-   * ⚠️ 副作用：`start` 会关掉**其他**指向同一物理路径的角色（一个 COM 口不能被两个角色同时读）。
-   * 所以把两个角色配到同一路径时，后打开的会静默顶掉先打开的。
+   * ⚠️ 已占用路径会拒绝连接，不会关闭另一通道；HTTP 还需等待 waitForOpen 才能确认物理打开。
    *
    * @param {string} role 串口角色。
    * @param {object} [options] 端口配置（path/baudRate/parserChannel/dataHandler/onOpenError/reconnect）。
@@ -217,6 +216,7 @@ function createSerialPortOrchestrator({
     return openManagedSerialPort(serialRoles.SIT, {
       path: portPath,
       baudRate: configured?.baudRate || getBaudRate(),
+      protocol: configured?.protocol,
       reconnect: true,
       parserChannel: configured?.parserChannel || (sensorType === 'bigBed'
         ? serialParserManager.channels.BIG_BED_SIT
@@ -252,6 +252,7 @@ function createSerialPortOrchestrator({
     return openManagedSerialPort(serialRoles.BACK, {
       path: portPath,
       baudRate: configured?.baudRate || getBaudRate(),
+      protocol: useRawMinzhenText ? undefined : configured?.protocol,
       reconnect: true,
       parserChannel: useRawMinzhenText
         ? undefined
@@ -280,6 +281,7 @@ function createSerialPortOrchestrator({
     return openManagedSerialPort(serialRoles.HEAD, {
       path: portPath,
       baudRate: configured?.baudRate || getBaudRate(),
+      protocol: configured?.protocol,
       reconnect: true,
       parserChannel: configured?.parserChannel || serialParserManager.channels.HEAD,
       onOpenError: (err) => logger.warn(err, `${reason} err`),
@@ -303,6 +305,7 @@ function createSerialPortOrchestrator({
     return openManagedSerialPort(serialRole, {
       path: portPath,
       baudRate: configured.baudRate,
+      protocol: configured.protocol,
       reconnect: true,
       parserChannel: configured.parserChannel,
       onOpenError: (err) => logger.warn(err, `${reason} err`),
@@ -322,11 +325,17 @@ function createSerialPortOrchestrator({
     const rollbackRoles = [];
     try {
       return entries.map(([serialRole, portPath]) => {
-        // registerPort 发生在 start 之前；即使 start 同步抛错，当前角色也必须禁用重连并停止。
-        rollbackRoles.push(serialRole);
-        const port = openManifestSerialPort(serialRole, portPath, `${reason} ${serialRole}`);
-        if (!port) throw createInvalidSerialRoleError(serialRole);
-        return port;
+        const previous = serialManager.getEntry?.(serialRole);
+        try {
+          const port = openManifestSerialPort(serialRole, portPath, `${reason} ${serialRole}`);
+          if (!port) throw createInvalidSerialRoleError(serialRole);
+          if (!previous || serialManager.getEntry?.(serialRole) !== previous) rollbackRoles.push(serialRole);
+          return port;
+        } catch (error) {
+          // ⚠️ 注册前拒绝占用/重复操作时，旧实例仍然有效；不能用失败请求关闭原连接。
+          if (!serialManager.getEntry || serialManager.getEntry(serialRole) !== previous) rollbackRoles.push(serialRole);
+          throw error;
+        }
       });
     } catch (error) {
       rollbackRoles.forEach((serialRole) => {

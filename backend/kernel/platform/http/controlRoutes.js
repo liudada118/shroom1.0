@@ -86,7 +86,7 @@ function registerControlRoutes(app, {
    * HTTP 控制命令统一入口。
    * 返回 command router 的执行结果，方便 SDK 判断命令是否被处理。
    */
-  function dispatchCommand(commandOrFactory, res, { requireEnvelope = false, scope = 'http' } = {}) {
+  async function dispatchCommand(commandOrFactory, res, { requireEnvelope = false, scope = 'http' } = {}) {
     let command = commandOrFactory;
     try {
       if (typeof commandOrFactory === 'function') {
@@ -98,7 +98,15 @@ function registerControlRoutes(app, {
           'expected command envelope: { type, payload, requestId }',
         );
       }
-      const result = controlCommandService.executeHttp(command, { scope });
+      const pending = [];
+      const result = controlCommandService.executeHttp(command, { scope,
+        // 同步路由继续兼容 Agent/旧 WS；HTTP 仅等待 handler 明确登记的硬件操作。
+        waitFor: (operation) => pending.push(Promise.resolve(operation).then(
+          (value) => value?.ok === false ? value : { ok: true, value },
+          (error) => ({ ok: false, error }),
+        )),
+      });
+      const completed = await Promise.all(pending);
       const envelope = result.command || command;
       if (!result.handled) {
         throw new CommandProtocolError(
@@ -109,12 +117,17 @@ function registerControlRoutes(app, {
       }
       const failedResult = result.results?.find((item) => item.error);
       if (failedResult) {
-        throw new CommandProtocolError(
+        const error = new CommandProtocolError(
           failedResult.code || COMMAND_ERROR_CODES.COMMAND_EXECUTION_FAILED,
           failedResult.error,
           { commandType: envelope.type, httpStatus: failedResult.httpStatus || 500, requestId: envelope.requestId },
         );
+        Object.assign(error, { role: failedResult.role, path: failedResult.path, stage: failedResult.stage, detail: failedResult.detail });
+        throw error;
       }
+
+      const failedOperation = completed.find((operation) => !operation.ok);
+      if (failedOperation) throw failedOperation.error;
 
       const ack = createCommandAck({
         requestId: envelope.requestId,
@@ -124,6 +137,7 @@ function registerControlRoutes(app, {
           handlers: result.results?.map((item) => item.name) || [],
           results: result.results || [],
           stop: result.stop,
+          ...(envelope.type?.startsWith('serial.') ? { serial: serialManager.getStatus() } : {}),
         },
       });
       res.json(new HttpResult(0, ack, 'success'));
@@ -136,6 +150,9 @@ function registerControlRoutes(app, {
         ok: false,
         code: error.code || COMMAND_ERROR_CODES.COMMAND_EXECUTION_FAILED,
         message: error.message || 'command failed',
+        ...(command?.type?.startsWith('serial.') ? {
+          data: { role: error.role, path: error.path, stage: error.stage, detail: error.detail },
+        } : {}),
       });
       res.status(httpStatus).json(new HttpResult(1, ack, ack.message));
     }
@@ -148,7 +165,7 @@ function registerControlRoutes(app, {
   // 串口控制：SDK 和自动化脚本优先使用这些 HTTP API。
   app.get(HTTP_ROUTES.serialPorts, async (req, res) => {
     try {
-      const ports = getPort(await listPorts());
+      const ports = getPort(await listPorts({ throwOnError: true }));
       res.json(new HttpResult(0, { ports }, 'success'));
     } catch (error) {
       logger?.warn?.('[HTTP] list serial ports failed', error.message || error);

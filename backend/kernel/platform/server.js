@@ -308,7 +308,7 @@ function bindBackPortParser() {
  */
 function closeMinzhenSensorPort(reason = 'close') {
   minzhenSensorExtractor.reset();
-  closeManagedSerialPort(serialRoles.SENSOR, reason);
+  return closeManagedSerialPort(serialRoles.SENSOR, reason);
 }
 
 /**
@@ -321,11 +321,10 @@ function openMinzhenSensorPort(portPath) {
   if (file !== MINZHEN_TYPE) return;
   sensorClose = false;
   comSensor = portPath;
-  closeMinzhenSensorPort('reopen');
 
   try {
     minzhenSensorExtractor.reset();
-    openManagedSerialPort(serialRoles.SENSOR, {
+    return openManagedSerialPort(serialRoles.SENSOR, {
       path: portPath,
       baudRate: MINZHEN_SENSOR_BAUD_RATE,
       reconnect: true,
@@ -334,6 +333,7 @@ function openMinzhenSensorPort(portPath) {
     });
   } catch (e) {
     logger.warn(e, "minzhen sensor port open error");
+    throw e;
   }
 }
 
@@ -1454,6 +1454,7 @@ const serialRuntime = createSerialRuntime({
   frameDelimiter: splitBuffer,
   smallBed12BDelimiter: SMALL_BED_12B_FRAME_TAIL,
   logger,
+  onStatus: (serialStatus) => publishSystemEvent({ serialStatus }),
 });
 const {
   serialParserManager,
@@ -2107,6 +2108,7 @@ registerSerialControlHandlers(controlCommandRouter, {
   publishHistoryDateList,
   publishSystemEvent,
   rebindDisplaySystemRuntime: appRuntime.displaySystems.rebindRuntimeChannels,
+  waitForSerialOpen: (role) => serialManager.waitForOpen(role),
   serialRoles,
   setRuntime: runtimeStatePatchers.applySerialCommandPatch,
   stopPlaybackTimer,

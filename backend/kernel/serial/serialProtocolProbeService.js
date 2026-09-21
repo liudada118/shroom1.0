@@ -162,6 +162,7 @@ function listSerialStatuses(serialManager) {
 
 function findBusyPortStatus(serialManager, path) {
   const target = normalizePath(path);
+  if (serialManager?.isPathBusy?.(target)) return { path: target, status: 'busy' };
   const busyStates = new Set(['opening', 'open']);
   return listSerialStatuses(serialManager).find((status) => (
     normalizePath(status?.path) === target

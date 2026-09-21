@@ -30,6 +30,7 @@ import { getLanguageLocale } from '../../i18n';
 import JqbedAlgorithmConfigModal from '../../extensions/jqbed/JqbedAlgorithmConfigModal';
 import { getJqbedConfigAccess } from '../../extensions/jqbed/jqbedAlgorithmConfig';
 import { commandClient } from '../../services/command/commandClient';
+import { serialFeedback, serialErrorText } from '../../services/serial/serialFeedback';
 import {
   PRESSURE_SCENES,
   readPressureScene,
@@ -369,6 +370,8 @@ class Title extends React.Component {
       humanTransform: createDefaultHumanTransform(),
       dynamicSensors: [],
       manifestPortSelections: {},
+      serialStates: {},
+      serialPending: {},
       jqbedAlgorithmConfigOpen: false,
     }
     this.inputRef = React.createRef(null)
@@ -380,12 +383,14 @@ class Title extends React.Component {
     console.log(this.props, 'props')
     window.addEventListener('shroom-csv-download-status', this.handleCsvDownloadStatus)
     window.addEventListener('shroom-display-systems-updated', this.loadDynamicSensors)
+    window.addEventListener('shroom-serial-status', this.handleSerialStatus)
     this.loadDynamicSensors()
     this.initializeLegacyState()
   }
 
   /** 重新读取后端已加载的 Display Systems，并同步前端运行时注册表。 */
   loadDynamicSensors = () => {
+    const scope = this._portalScope;
     Promise.all([
       fetch('http://127.0.0.1:19245/api/display-systems').then((response) => response.json()),
       fetch('http://127.0.0.1:19245/api/serial/status')
@@ -393,52 +398,108 @@ class Title extends React.Component {
         .catch(() => null),
     ])
       .then(([displayPayload, serialPayload]) => {
+        if (this._portalUnmounted || scope !== this._portalScope) return;
         const definitions = displayPayload?.displaySystems?.runtimeDefinitions || []
         const dynamicSensors = definitions
           .map((definition) => registerRuntimeDisplayDefinition(definition))
           .filter(Boolean)
           .map((definition) => ({ label: definition.label, value: definition.type }))
         const statuses = serialPayload?.data?.serial || serialPayload?.serial || []
-        const manifestPortSelections = Object.fromEntries(
-          (Array.isArray(statuses) ? statuses : [statuses])
-            .filter((status) => status?.role && status?.path)
-            .map((status) => [status.role, status.path]),
-        )
-        this.setState({ dynamicSensors, manifestPortSelections })
+        this.setState({ dynamicSensors })
+        ;(Array.isArray(statuses) ? statuses : [statuses]).forEach(this.applySerialStatus)
       })
       .catch((error) => console.warn('[DisplaySystems] load failed', error))
   }
 
-  openManifestSerialChannel = async (sensor, path) => {
+  /** 同步真实端口状态，失败/断开时清除连接选择，保留可见的失败原因。 */
+  applySerialStatus = (status) => {
+    if (!status?.role || this._portalUnmounted) return;
+    const previous = this.state.serialStates[status.role];
+    if (previous?.connectionId && previous.connectionId === status.connectionId && previous.revision > status.revision) return;
+    if (previous?.updatedAt && (!status.updatedAt || previous.updatedAt > status.updatedAt)) return;
+    const connected = status.status === 'open' && status.isOpen;
+    const legacyField = { sit: 'portname', back: 'portnameBack', head: 'portnameHead', sensor: 'portnameSensor' }[status.role];
+    this.setState((state) => ({
+      serialStates: { ...state.serialStates, [status.role]: status },
+      manifestPortSelections: { ...state.manifestPortSelections, [status.role]: connected ? status.path : '' },
+    }));
+    if (legacyField) this.props.changeStateData?.({ [legacyField]: connected ? status.path : '' });
+  }
+
+  /** 接收 Home 转发的串口生命周期事件。 */
+  handleSerialStatus = (event) => this.applySerialStatus(event.detail);
+
+  /** 在打开期间禁用重复选择，并给失败的通道显示错误边框。 */
+  getSerialSelectProps = (role) => {
+    const busy = this.state.serialPending[role] || this.state.serialStates[role]?.status === 'opening';
+    return { loading: Boolean(busy), disabled: Boolean(busy), 'aria-busy': Boolean(busy),
+      status: this.state.serialStates[role]?.error ? 'error' : undefined };
+  }
+
+  /** 统一普通和 manifest 通道连接，等待真实 ACK 后再显示选中结果。 */
+  connectSerialChannel = async (role, path, { label, baudRate, hand } = {}) => {
+    this._serialOperations ||= new Map();
+    if (this._serialOperations.has(role)) {
+      message.info('正在连接中，请稍后再试');
+      return false;
+    }
+    const operation = {};
+    const scope = this._portalScope;
+    this._serialOperations.set(role, operation);
+    serialFeedback.reset(role, path);
+    this.setState((state) => ({ serialPending: { ...state.serialPending, [role]: true } }));
     try {
-      await commandClient.execute('serial.open', {
-        role: sensor.serialRole,
-        path,
-        ...(sensor.baudRate ? { baudRate: sensor.baudRate } : {}),
-      })
-      this.setState((state) => ({
-        manifestPortSelections: {
-          ...state.manifestPortSelections,
-          [sensor.serialRole]: path,
-        },
-      }))
+      const ack = await commandClient.execute('serial.open', { role, path, ...(baudRate ? { baudRate } : {}) });
+      if (this._portalUnmounted || scope !== this._portalScope) return false;
+      const status = ack?.data?.serial?.find((item) => item.role === role);
+      this.applySerialStatus(status || { role, path, status: 'open', isOpen: true, updatedAt: Date.now() });
+      if (hand != null) {
+        this.props.changeStateData?.({ hand });
+        this.props.com?.current?.changeModal?.(hand);
+      }
+      return true;
     } catch (error) {
-      message.error(`${sensor.sensorLabel}串口打开失败：${error.message}`)
+      if (this._portalUnmounted || scope !== this._portalScope) return false;
+      if (error.code === 'SERIAL_CONNECT_CANCELLED') return false;
+      serialFeedback.error(error, { role, path, label });
+      // 同步拒绝（例如目标被占用）不会关闭原连接，保留仍然打开的旧通道。
+      if (!this.state.serialStates[role]?.isOpen) {
+        this.applySerialStatus({ role, path, status: 'error', isOpen: false, error: {
+          code: error.code, message: serialErrorText({ code: error.code, message: error.message }), stage: error.stage,
+        }, updatedAt: Date.now() });
+      }
+      return false;
+    } finally {
+      if (this._serialOperations.get(role) === operation) {
+        this._serialOperations.delete(role);
+        if (!this._portalUnmounted && scope === this._portalScope) {
+          this.setState((state) => ({ serialPending: { ...state.serialPending, [role]: false } }));
+        }
+      }
     }
   }
 
+  /** 用 manifest 的标签和波特率打开动态通道。 */
+  openManifestSerialChannel = (sensor, path) => this.connectSerialChannel(sensor.serialRole, path,
+    { label: sensor.sensorLabel, baudRate: sensor.baudRate });
+
+  /** 关闭指定通道并等待资源释放，失败时保留状态供用户检查。 */
   closeManifestSerialChannels = async (sensors) => {
     const roles = [...new Set(sensors.map((sensor) => sensor.serialRole).filter(Boolean))]
     if (!roles.length) return
+    const scope = this._portalScope;
     try {
-      await commandClient.execute('serial.close', { roles })
+      const ack = await commandClient.execute('serial.close', { roles })
+      if (this._portalUnmounted || scope !== this._portalScope) return;
+      roles.forEach((role) => this.applySerialStatus(ack?.data?.serial?.find((item) => item.role === role)
+        || { role, status: 'closed', isOpen: false, updatedAt: Date.now() }));
       this.setState((state) => {
         const manifestPortSelections = { ...state.manifestPortSelections }
         roles.forEach((role) => { delete manifestPortSelections[role] })
         return { manifestPortSelections }
       })
     } catch (error) {
-      message.error(`串口关闭失败：${error.message}`)
+      if (!this._portalUnmounted && scope === this._portalScope) serialFeedback.error(error);
     }
   }
 
@@ -489,16 +550,19 @@ class Title extends React.Component {
     this._csvBatch = null;
     window.removeEventListener('shroom-csv-download-status', this.handleCsvDownloadStatus)
     window.removeEventListener('shroom-display-systems-updated', this.loadDynamicSensors)
+    window.removeEventListener('shroom-serial-status', this.handleSerialStatus)
   }
 
   componentDidUpdate(prevProps) {
     if (prevProps.matrixName !== this.props.matrixName) {
       this._portalScope = {};
+      this._serialOperations?.clear();
       this._csvActive = false;
       this._csvStarting = false;
       this._csvBatch?.dispose();
       this._csvBatch = null;
-      this.setState({ portalPlaybackValue: '', portalDownloadValues: [], portalPlaybackOpen: false,
+      this.setState({ serialPending: {}, serialStates: {}, manifestPortSelections: {},
+        portalPlaybackValue: '', portalDownloadValues: [], portalPlaybackOpen: false,
         portalDisplayOpen: false, portalSpecialOpen: false, portalToolsOpen: false,
         portalBusy: false, portalError: '', dataTime: '', csvBatchDates: [], csvDownloadModalOpen: false,
         csvDownloadStage: 'config', csvBatchCompleted: 0, csvBatchFailures: [] });
@@ -2102,13 +2166,14 @@ class Title extends React.Component {
         {this.props.matrixName != 'localCar' ? this.props.history === 'now' ? manifestSerialSensors.length ? <>
           {manifestSerialSensors.map((sensor) => (
             <Select
+              {...this.getSerialSelectProps(sensor.serialRole)}
               key={sensor.channelId || sensor.serialRole}
               style={{ marginRight: 6, width: 180 }}
               placeholder={`选择${sensor.sensorLabel}串口`}
               aria-label={`${sensor.sensorLabel}串口`}
               value={this.state.manifestPortSelections[sensor.serialRole] || undefined}
-              onOpenChange={() => {
-                this.props.wsSendObj({ serialReset: true })
+              onOpenChange={(open) => {
+                if (open) this.props.wsSendObj({ serialReset: true })
               }}
               onSelect={(path) => this.openManifestSerialChannel(sensor, path)}
               options={buildManifestSerialPortOptions(
@@ -2124,16 +2189,13 @@ class Title extends React.Component {
           style={{ marginRight: 6, width: 140 }}
           placeholder={t('chooseSensor')}
           aria-label={t('chooseSensor')}
+          {...this.getSerialSelectProps('sit')}
           value={this.props.portname || undefined}
           onOpenChange={() => {
             this.props.wsSendObj({ serialReset: true })
           }}
 
-          onSelect={(e) => {
-            this.props.wsSendObj({ sitPort: e })
-            this.props.changeStateData({ portname: e })
-
-          }}
+          onSelect={(path) => this.connectSerialChannel('sit', path)}
           options={this.props.port}
         >
         </Select></> : <><Select
@@ -2141,21 +2203,12 @@ class Title extends React.Component {
           style={{ marginRight: 6, width: 140 }}
           placeholder={tactileGloveTypes_title.includes(this.props.matrixName) ? t('chooseLeftSensor') : this.props.matrixName == 'footVideo' ? t('chooseLeftFootSensor') : t('chooseSitSensor')}
           aria-label={tactileGloveTypes_title.includes(this.props.matrixName) ? t('chooseLeftSensor') : this.props.matrixName == 'footVideo' ? t('chooseLeftFootSensor') : t('chooseSitSensor')}
+          {...this.getSerialSelectProps('sit')}
           value={this.props.portname ? `${this.props.portname}${[...tactileGloveTypes_title, 'footVideo', 'eye'].includes(this.props.matrixName) ? t('left') : (t('sit'))}` : undefined}
           onOpenChange={() => {
             this.props.wsSendObj({ serialReset: true })
           }}
-          onSelect={(e) => {
-
-            console.log(e);
-            this.props.wsSendObj({ sitPort: e })
-            this.props.changeStateData({ portname: e })
-            this.props.changeStateData({
-              hand: true
-            })
-            if (this.props.com.current?.changeModal) this.props.com.current?.changeModal(true)
-
-          }}
+          onSelect={(path) => this.connectSerialChannel('sit', path, { hand: true })}
           options={this.props.port}
         >
         </Select>
@@ -2164,16 +2217,13 @@ class Title extends React.Component {
           {this.props.matrixName === minzhenType_title ? <Select
             placeholder={t('minzhen.otherData')}
             aria-label={t('minzhen.otherData')}
+            {...this.getSerialSelectProps('sensor')}
             style={{ marginRight: 6, width: 160 }}
             value={this.props.portnameSensor ? `${this.props.portnameSensor} (${t('minzhen.otherData')})` : undefined}
             onOpenChange={() => {
               this.props.wsSendObj({ serialReset: true })
             }}
-            onSelect={(e) => {
-              console.log(e);
-              this.props.wsSendObj({ sensorPort: e })
-              this.props.changeStateData({ portnameSensor: e })
-            }}
+            onSelect={(path) => this.connectSerialChannel('sensor', path)}
             options={this.props.port}
           >
           </Select> : null}
@@ -2183,24 +2233,13 @@ class Title extends React.Component {
             // value={this.props.portnameBack}
             placeholder={tactileGloveTypes_title.includes(this.props.matrixName) ? t('chooseRightSensor') : this.props.matrixName == 'footVideo' ? t('chooseRightFootSensor') : t('chooseBackSensor')}
             aria-label={tactileGloveTypes_title.includes(this.props.matrixName) ? t('chooseRightSensor') : this.props.matrixName == 'footVideo' ? t('chooseRightFootSensor') : t('chooseBackSensor')}
+            {...this.getSerialSelectProps('back')}
             style={{ marginRight: 6, width: 140 }}
             value={this.props.portnameBack ? `${this.props.portnameBack}${[...tactileGloveTypes_title, 'footVideo'].includes(this.props.matrixName) ? t('right') : (t('back'))}` : undefined}
             onOpenChange={() => {
               this.props.wsSendObj({ serialReset: true })
             }}
-            onSelect={(e) => {
-              // this.props.handleChangeCom(e);
-              console.log(e);
-              this.props.wsSendObj({ backPort: e })
-
-              this.props.changeStateData({ portnameBack: e })
-
-              this.props.changeStateData({
-                hand: false
-              })
-              if (this.props.com.current?.changeModal) this.props.com.current?.changeModal(false)
-
-            }}
+            onSelect={(path) => this.connectSerialChannel('back', path, { hand: false })}
 
             options={this.props.port}
           >
@@ -2210,18 +2249,13 @@ class Title extends React.Component {
             // value={this.props.portnameBack}
             placeholder={t('chooseHeadSensor')}
             aria-label={t('chooseHeadSensor')}
+            {...this.getSerialSelectProps('head')}
             style={{ width: 140 }}
             value={this.props.portnameHead ? `${this.props.portnameHead}(${t('head')})` : undefined}
             onOpenChange={() => {
               this.props.wsSendObj({ serialReset: true })
             }}
-            onSelect={(e) => {
-              // this.props.handleChangeCom(e);
-              console.log(e);
-              this.props.wsSendObj({ headPort: e })
-              this.props.changeStateData({ portnameHead: e })
-
-            }}
+            onSelect={(path) => this.connectSerialChannel('head', path)}
 
             options={this.props.port}
           >
@@ -2265,6 +2299,14 @@ class Title extends React.Component {
 
         }
     </>;
+    const serialStatusControls = this.props.history === 'now' ? <div className="serial-connection-status" role="status" aria-live="polite">
+      {Object.values(this.state.serialStates).filter((status) => status.error || status.status === 'opening')
+        .map((status) => <span key={status.role} className={status.error ? 'is-error' : ''}>
+          {serialErrorText(status.error || { message: status.retryAttempt ? '正在重新连接…' : '正在连接…' }, {
+            ...status, label: manifestSerialSensors.find((sensor) => sensor.serialRole === status.role)?.sensorLabel,
+          })}
+        </span>)}
+    </div> : null;
     const displayControls = <>
         {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'handSinglePoint', 'normal', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'matCol', 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody', HUMAN_BODY_OPTIMIZED_MATRIX].includes(this.props.matrixName) ?
           <Select
@@ -2521,19 +2563,7 @@ class Title extends React.Component {
             this.closeManifestSerialChannels(manifestSerialSensors)
             return
           }
-          this.props.wsSendObj({
-            sitClose: true,
-            backClose: true,
-            headClose: true,
-            sensorClose: true
-          })
-          // 清空前端串口选择状态
-          this.props.changeStateData({
-            portname: '',
-            portnameBack: '',
-            portnameHead: '',
-            portnameSensor: ''
-          })
+          this.closeManifestSerialChannels(['sit', 'back', 'head', 'sensor'].map((serialRole) => ({ serialRole })))
         }} className='titleButton'>
           {t('closeSensor')}
         </Button>
@@ -2762,6 +2792,7 @@ class Title extends React.Component {
         collecting={this.props.matrixName === 'localCar' ? this.props.colWebFlag : !this.props.colFlag}
         onStart={this.startPortalCollection} onStop={this.stopPortalCollection}
       /> : null}
+      {this.props.portalEmbedded ? serialStatusControls : null}
       {this.props.portalToolsHost ? createPortal(<><PortalQuickTools
         chartsVisible={this.props.portalChartsVisible} onCharts={this.props.onPortalChartsToggle}
         algorithmsOpen={this.props.portalAlgorithmMarketOpen} onAlgorithms={() => {
@@ -2859,6 +2890,7 @@ class Title extends React.Component {
 
         <Menu className='menu' onClick={this.onClick} selectedKeys={[this.state.current]} mode="horizontal" items={navItems} />
         {serialControls}
+        {serialStatusControls}
 
         {displayControls}
 

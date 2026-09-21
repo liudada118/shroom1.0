@@ -18,6 +18,7 @@ function createSerialRuntime({
   frameDelimiter,
   smallBed12BDelimiter,
   logger,
+  onStatus,
   parserManagerFactory = createSerialParserManager,
   serialManagerFactory = createSerialManager,
 }) {
@@ -28,6 +29,7 @@ function createSerialRuntime({
   const serialManager = serialManagerFactory({
     parserManager: serialParserManager,
     logger,
+    onStatus,
   });
   const serialRoles = serialManager.roles;
   // 只有一个键 `serialport`：启动期扫到的串口候选列表（见 bootstrapServer 的

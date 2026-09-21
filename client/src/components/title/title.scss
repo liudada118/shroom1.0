@@ -432,3 +432,30 @@
         color: #fff !important;
     }
 }
+.serial-connection-status {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    padding: 6px 10px;
+    border: 1px solid #e8c7c4;
+    border-radius: 5px;
+    background: #fff8f7;
+    color: #4c4645;
+    font-size: 12px;
+    line-height: 20px;
+    overflow-wrap: anywhere;
+
+    &:empty { display: none; }
+    .is-error { color: #a52d25; }
+}
+
+.fiber-portal .serial-connection-status {
+    background: #182530;
+    border-color: #735451;
+    color: #d4e3f0;
+    .is-error { color: #ffb0aa; }
+}

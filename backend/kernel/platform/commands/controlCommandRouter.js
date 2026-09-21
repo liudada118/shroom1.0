@@ -225,6 +225,10 @@ function createControlCommandRouter({ logger } = {}) {
           name: handler.name || 'anonymous',
           code: error.code || COMMAND_ERROR_CODES.COMMAND_EXECUTION_FAILED,
           httpStatus: error.httpStatus,
+          role: error.role,
+          path: error.path,
+          stage: error.stage,
+          detail: error.detail,
           error: error.message || String(error),
         });
       }
