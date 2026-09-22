@@ -49,6 +49,17 @@ const VALID_RECEIVE_CHANNELS = [
 ];
 
 contextBridge.exposeInMainWorld("electronAPI", {
+  agent: {
+    /** 调用主进程校验过的 Agent 动作，不暴露任意 IPC。 */
+    invoke: (action, payload = {}) => ipcRenderer.invoke('agent:invoke', action, payload),
+    /** 监听 Agent 状态并返回独立清理函数，不把 Electron 事件交给页面。 */
+    subscribe: (listener) => {
+      if (typeof listener !== 'function') return () => {};
+      const handler = (_event, message) => listener(message);
+      ipcRenderer.on('agent:event', handler);
+      return () => ipcRenderer.removeListener('agent:event', handler);
+    },
+  },
   /**
    * 向主进程发送消息
    * @param {string} channel - IPC 通道名称

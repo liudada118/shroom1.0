@@ -72,4 +72,22 @@ const legacyPayload = playback.buildPayloads({
 }).sitPayload;
 assert.strictEqual(legacyPayload.sitData, '[1,2]');
 
+const { glovePlaybackFrames } = require('../fixtures/glovePlayback.cjs');
+const pressureData = Array.from({ length: 256 }, (_, index) => index % 64);
+const orientation = [0, 0, 0, 1];
+for (const data of [pressureData, [...pressureData, ...orientation], { pressureData, rotate: orientation, zeroFrame: [] }]) {
+  const row = { data: JSON.stringify(data), timestamp: 1000 };
+  for (const channel of ['sit', 'back']) {
+    const frames = glovePlaybackFrames({ [`${channel}Rows`]: [row] });
+    assert.strictEqual(frames.length, 1, '单手记录不能产生缺失通道的空帧');
+    assert.strictEqual(frames[0].outputChannel, channel);
+    assert.deepStrictEqual(frames[0].payload.value, pressureData);
+    assert.strictEqual(frames[0].payload.stages.mapped.length, 147);
+    if (!Array.isArray(data) || data.length === 260) assert.deepStrictEqual(frames[0].payload.orientation, orientation);
+  }
+  assert.strictEqual(glovePlaybackFrames({ sitRows: [row], backRows: [row] }).length, 2);
+}
+const mapped = Array.from({ length: 147 }, (_, index) => index);
+assert.strictEqual(glovePlaybackFrames({ backRows: [{ data: JSON.stringify([...mapped, ...orientation]) }] })[0].payload.stages.mapped.length, 147);
+
 console.log('playbackFrameService.test.js passed');

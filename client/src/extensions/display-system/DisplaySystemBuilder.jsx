@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import BuiltinTemplateDialog from './BuiltinTemplateDialog';
 import {
   Button,
   Checkbox,
@@ -1042,6 +1043,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [builtinDialog, setBuiltinDialog] = useState(null);
   const [editorAccess, setEditorAccess] = useState(null);
   const [loadedChartCards, setLoadedChartCards] = useState([]);
   const [activeStep, setActiveStep] = useState('connection');
@@ -1223,6 +1225,11 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     setLoading(true);
     try {
       const payload = await requestJson(`/api/display-systems/${encodeURIComponent(id)}/editor`);
+      if (payload.editor?.kind === 'builtin-template') {
+        const system = systems.find((item) => item.id === id);
+        setBuiltinDialog({ existing: system });
+        return;
+      }
       setSelectedId(id);
       setEditorAccess({
         editable: payload.editor?.editable === true,
@@ -1242,7 +1249,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     } finally {
       setLoading(false);
     }
-  }, [form, resetProtocolProbeUi]);
+  }, [form, resetProtocolProbeUi, systems]);
 
   const rendererOptions = useMemo(
     () => [
@@ -1310,7 +1317,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     [catalog],
   );
   const algorithmPackageOptions = useMemo(
-    () => (catalog?.algorithmPackages || []).map((item) => ({
+    () => (catalog?.algorithmPackages || []).filter((item) => item.runtime !== 'restricted-python-v1').map((item) => ({
       value: item.id,
       label: `${item.name} · v${item.version}`,
     })),
@@ -2438,6 +2445,24 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     sensorDrafts,
   ]);
 
+  // 原生编辑使用独立表单，避免隐藏的通用表单仍参与弹窗更新和焦点管理。
+  if (builtinDialog) return <BuiltinTemplateDialog templates={catalog?.builtinTemplates || []} packages={catalog?.algorithmPackages || []} existing={builtinDialog.existing}
+    onDeleted={(id) => { setSystems((items) => items.filter((item) => item.id !== id)); window.dispatchEvent(new CustomEvent('shroom-display-systems-updated')); }}
+    onClose={() => setBuiltinDialog(null)}
+    onCreated={async (system) => {
+      registerRuntimeDisplayDefinition(system.runtimeDefinition);
+      setSystems((items) => items.some((item) => item.id === system.id)
+        ? items.map((item) => item.id === system.id ? system : item) : [...items, system]);
+      window.dispatchEvent(new CustomEvent('shroom-display-systems-updated'));
+    }}
+    onActivate={async (system) => {
+      registerRuntimeDisplayDefinition(system.runtimeDefinition);
+      await commandClient.execute('sensor.switch', { sensorType: system.id });
+      localStorage.setItem('file', system.id);
+      onActivated?.(system.id);
+      if (embedded && onClose) onClose(); else navigate('/system');
+    }} />;
+
   if (loading && !catalog) {
     return <div className="display-builder-loading"><Spin /></div>;
   }
@@ -2463,6 +2488,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
             aria-label="新建展示系统"
           />
         </div>
+        <Button style={{ margin: '12px 16px' }} onClick={() => setBuiltinDialog({})}>以内置系统为模板创建</Button>
         <div className="display-builder-list-label">展示系统</div>
         <div className="display-builder-list" role="list">
           {systems.map((system) => (
@@ -2477,9 +2503,9 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
             >
               <strong>
                 {system.name}
-                <em>{system.editable ? '自定义' : <><LockOutlined /> 系统内置</>}</em>
+                <em>{system.kind === 'builtin-template' ? '独立系统 · 可编辑' : system.editable ? '自定义' : <><LockOutlined /> 系统内置</>}</em>
               </strong>
-              <span>{system.sensorType} · {system.matrix?.rows}×{system.matrix?.cols}</span>
+              <span>{system.builtinTemplate ? `来源：${system.builtinTemplate.sourceType} · ${system.id}` : `${system.sensorType} · ${system.matrix?.rows}×${system.matrix?.cols}`}</span>
             </button>
           ))}
           {!systems.length ? <p className="display-builder-empty">暂无已保存配置</p> : null}

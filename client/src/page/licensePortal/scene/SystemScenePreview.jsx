@@ -11,6 +11,8 @@ const CAMERA_FRAMING_CAPTURE_EVENT = "system-scene:framing-capture";
 import { SCENE_MODELS as MODEL_SPECS } from './sceneCatalog';
 import { captureParticleProjection } from '../../../renderers/particleEntrance';
 import { createSceneMotionClock, returnMotionSpeed } from './sceneMotionClock';
+import { createLayoutPositions, loadFootLayout } from './sceneLayouts';
+import { getMeshSurfaceArea } from './sceneModelSampling';
 const PARTICLE_COUNT = 3600;
 const AMBIENT_PARTICLE_COUNT = 720;
 /** 平滑粒子扫掠进度，避免端点跳变。 */
@@ -18,7 +20,7 @@ function smoothstep(start, end, value) {
   const t = THREE.MathUtils.clamp((value - start) / (end - start), 0, 1);
   return t * t * (3 - 2 * t);
 }
-/** 按各网格的顶点权重分配固定粒子总数。 */
+/** 按各网格的面积权重分配固定粒子总数。 */
 function allocateCounts(weights, total) {
   const sum = weights.reduce((acc, value) => acc + value, 0) || 1;
   const counts = weights.map((weight) => Math.floor(weight / sum * total));
@@ -72,6 +74,11 @@ function normalizeModel(root, spec) {
   const wrapper = new THREE.Group();
   wrapper.add(root);
   wrapper.rotation.set(spec.rotation[0], spec.rotation[1], spec.rotation[2]);
+  // 原生机器人从 Y 轴观察；把原相机方向转到预览 Z 轴，避免只复制模型旋转后变成俯视。
+  if (spec.viewDirection) {
+    const view = new THREE.Matrix4().lookAt(new THREE.Vector3(...spec.viewDirection), new THREE.Vector3(), new THREE.Vector3(0, 1, 0));
+    wrapper.quaternion.premultiply(new THREE.Quaternion().setFromRotationMatrix(view).invert());
+  }
   wrapper.updateMatrixWorld(true);
   const initialBox = new THREE.Box3().setFromObject(wrapper);
   const initialSize = new THREE.Vector3();
@@ -152,7 +159,7 @@ function sampleTarget(root, spec) {
   }
   const counts = allocateCounts(
     meshes.map(
-      (mesh) => mesh.geometry.getAttribute("position").count
+      (mesh) => getMeshSurfaceArea(mesh)
     ),
     PARTICLE_COUNT
   );
@@ -194,8 +201,9 @@ function sampleTarget(root, spec) {
   };
 }
 /** 按模型格式加载本地资源。 */
-function loadModel(spec, gltfLoader, fbxLoader) {
-  return new Promise((resolve, reject) => {
+async function loadModel(spec, gltfLoader, fbxLoader) {
+  try {
+    const root = await new Promise((resolve, reject) => {
     if (spec.loader === "gltf") {
       gltfLoader.load(
         spec.url,
@@ -206,7 +214,12 @@ function loadModel(spec, gltfLoader, fbxLoader) {
       return;
     }
     fbxLoader.load(spec.url, resolve, void 0, reject);
-  });
+    });
+    return { root, spec };
+  } catch (error) {
+    if (!spec.fallback) throw error;
+    return loadModel({ ...spec, ...spec.fallback, fallback: null }, gltfLoader, fbxLoader);
+  }
 }
 /** 采样后释放源模型的几何、材质和纹理，异步迟到的结果也必须清理。 */
 function disposeModel(root) {
@@ -221,21 +234,14 @@ function disposeModel(root) {
   });
 }
 
-/** 通用设备使用平面粒子示意，不伪造压力或设备外形。 */
-function createMatrixTarget() {
-  const positions = new Float32Array(PARTICLE_COUNT * 3);
+/** 非模型系统从实际矩阵或底图布局生成粒子，颜色只用于预览。 */
+function createLayoutTarget(key, { positions, grid }) {
   const colors = new Float32Array(PARTICLE_COUNT * 3);
   const color = new THREE.Color('#8bd8ff');
-  const tilt = Math.PI / 3;
   for (let i = 0; i < PARTICLE_COUNT; i += 1) {
-    const depth = (Math.floor(i / 60) / 59 - 0.5) * 3.4;
-    positions[i * 3] = ((i % 60) / 59 - 0.5) * 4.4;
-    // 沿用手部点阵的倾角；水平平面在入口镜头下会退化为一条细线。
-    positions[i * 3 + 1] = -0.45 - Math.sin(tilt) * depth;
-    positions[i * 3 + 2] = Math.cos(tilt) * depth;
     colors.set([color.r, color.g, color.b], i * 3);
   }
-  return { key: 'matrix', positions, colors, sweepWeights: createSweepWeights(positions), center: getTargetCenter(positions) };
+  return { key, positions, colors, grid, sweepWeights: createSweepWeights(positions), center: getTargetCenter(positions) };
 }
 
 /** 创建加载中的装饰形态，不冒充已加载设备。 */
@@ -499,7 +505,7 @@ function SystemScenePreview({
         renderFrame(motionClock.advance(performance.now(), returnMotionSpeed(event.detail.resumeProgress)));
       }
       event.detail.snapshot = captureParticleProjection(points, camera, root.getBoundingClientRect());
-      if (event.detail.snapshot && currentTarget.key === 'matrix') event.detail.snapshot.grid = { rows: 60, cols: 60 };
+      if (event.detail.snapshot && currentTarget.grid && transitionProgress >= 1) event.detail.snapshot.grid = currentTarget.grid;
     };
     root.addEventListener('system-scene:capture-particles', capturePresentation);
     /** 捕获切换前模型在屏幕中的位置。 */
@@ -579,24 +585,27 @@ function SystemScenePreview({
       if (targetMap.has(key) || pendingTargets.has(key) || failedTargets.has(key)) {
         return;
       }
-      if (key === 'matrix') {
-        targetMap.set(key, createMatrixTarget());
+      const layout = createLayoutPositions(key);
+      if (layout) {
+        targetMap.set(key, createLayoutTarget(key, layout));
         return;
       }
       const spec = MODEL_SPECS.find((candidate) => candidate.key === key);
-      if (!spec) return;
-      const request = loadModel(spec, gltfLoader, fbxLoader).then((rootObject) => {
+      if (!spec && key !== 'foot') return;
+      const loading = key === 'foot' ? loadFootLayout(PARTICLE_COUNT).then((foot) => createLayoutTarget(key, foot))
+        : loadModel(spec, gltfLoader, fbxLoader).then(({ root: rootObject, spec: loadedSpec }) => {
         try {
-          if (!disposed) targetMap.set(spec.key, sampleTarget(rootObject, spec));
+          if (!disposed) return sampleTarget(rootObject, loadedSpec);
         } finally { disposeModel(rootObject); }
-      }).catch((error) => {
-        if (disposed) return;
-        failedTargets.add(spec.key);
-        console.warn(`Failed to load preview model ${spec.label}`, error);
-      }).finally(() => {
-        pendingTargets.delete(spec.key);
       });
-      pendingTargets.set(spec.key, request);
+      const request = loading.then((target) => { if (!disposed) targetMap.set(key, target); }).catch((error) => {
+        if (disposed) return;
+        failedTargets.add(key);
+        console.warn(`Failed to load preview model ${spec?.label || key}`, error);
+      }).finally(() => {
+        pendingTargets.delete(key);
+      });
+      pendingTargets.set(key, request);
     };
     ensureTarget("shroom");
     let lastReducedMotionFrame = 0;

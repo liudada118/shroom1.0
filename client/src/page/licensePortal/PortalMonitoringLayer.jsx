@@ -80,7 +80,7 @@ export default function PortalMonitoringLayer({ component: MonitoringPage, syste
         leaving = true;
         entrance?.kill();
         const backgroundOpacity = directEntry ? getComputedStyle(root, '::before').opacity : 1;
-        const panel = directEntry && backdrop?.querySelector(':scope > .system-selector-panel');
+        const panel = directEntry ? backdrop?.querySelector(':scope > .system-selector-panel') : null;
         const previewHost = panel?.querySelector('.system-scene-particle-host');
         const panelOpacity = panel ? getComputedStyle(panel).opacity : 0;
         root.dataset.handoff = 'leaving';

@@ -46,6 +46,10 @@
 .fiber-portal .portal-utility-card:active:not(:disabled) { background-color: #17394d; }
 .fiber-portal .portal-utility-panel :focus-visible, .fiber-portal .portal-quick-tools-handle:focus-visible { outline: 2px solid var(--system-accent); outline-offset: -3px; }
 .fiber-portal .portal-utility-empty { color: var(--portal-secondary); font-size: 14px; }
+.fiber-portal .portal-utility-display { grid-auto-columns: minmax(210px, 1fr); }
+.fiber-portal .portal-utility-display fieldset { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0; padding: 0 10px 6px; border: 1px solid rgba(135, 176, 205, .3); border-radius: 8px; }
+.fiber-portal .portal-utility-display legend { padding: 0 5px; color: var(--portal-secondary); font-size: 12px; }
+.fiber-portal .portal-utility-display .ant-select { min-width: 100px; flex: 1; margin: 0 !important; }
 /* 提示挂在 body，避免被工具条的横向滚动边界裁剪。 */
 .portal-utility-tooltip { max-width: 300px; }
 .portal-utility-tooltip .ant-tooltip-inner { padding: 9px 12px; color: #e2edf5; font-size: 13px; line-height: 1.6; border: 1px solid rgba(143, 181, 209, .35); box-shadow: 0 8px 26px rgba(0, 5, 13, .4); }
@@ -55,8 +59,24 @@
 .fiber-portal .portal-ruler-surface:focus-visible { outline: 2px dashed var(--system-accent); outline-offset: -3px; }
 .fiber-portal .portal-ruler-line { stroke: var(--system-accent); stroke-width: 2; fill: #071523; pointer-events: none; }
 .fiber-portal .portal-ruler-line line { stroke-dasharray: 6 4; }
+.fiber-portal .portal-ruler-saved { --ruler-color: #63d5ff; }
+.fiber-portal .portal-ruler-saved.is-selected { --ruler-color: #ffe077; }
+.fiber-portal .portal-ruler-hit { stroke: transparent; stroke-width: 20; pointer-events: stroke; cursor: grab; }
+.fiber-portal .portal-ruler-stroke { stroke: var(--ruler-color); stroke-width: 2; pointer-events: none; }
+.fiber-portal .portal-ruler-endpoint { stroke: var(--ruler-color); stroke-width: 2; fill: #071523; pointer-events: none; }
+.fiber-portal .portal-ruler-endpoint-hit { fill: transparent; stroke: none; cursor: move; pointer-events: all; }
+.fiber-portal .portal-ruler-saved text { fill: var(--ruler-color); stroke: #071523; stroke-width: 4; paint-order: stroke; font: 600 13px monospace; cursor: grab; user-select: none; }
+.fiber-portal .portal-ruler-saved:focus-visible, .fiber-portal .portal-ruler-endpoint-hit:focus-visible { outline: 2px dashed var(--ruler-color); outline-offset: 4px; }
 .fiber-portal .portal-ruler-crosshair { stroke: #fff; stroke-width: 1; pointer-events: none; }
-.fiber-portal .portal-ruler-readout { position: absolute; top: 92px; left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100% - 28px); box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 14px; border: 1px solid #48738b; border-radius: 10px; background: #0b1c2a; color: var(--portal-text); pointer-events: auto; }
+.fiber-portal .portal-ruler-readout { position: absolute; top: 92px; left: 50%; transform: translateX(-50%); width: 620px; max-width: calc(100% - 28px); box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 14px; border: 1px solid #48738b; border-radius: 10px; background: #0b1c2a; color: var(--portal-text); pointer-events: auto; }
+.fiber-portal .portal-ruler-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
+.fiber-portal .portal-ruler-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.fiber-portal .portal-ruler-spacing { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; width: 100%; }
+.fiber-portal .portal-ruler-spacing label { display: grid; gap: 4px; flex: 1; min-width: 105px; font-size: 12px; }
+.fiber-portal .portal-ruler-spacing input { box-sizing: border-box; width: 100%; min-width: 0; height: 34px; padding: 4px 8px; border: 1px solid #48738b; border-radius: 5px; color: #e5f0f8; background: #061521; }
+.fiber-portal .portal-ruler-spacing button { min-height: 34px; }
+.fiber-portal .portal-ruler-spacing input:focus-visible { outline: 2px solid var(--system-accent); }
+.fiber-portal .portal-ruler-readout .portal-ruler-error { color: #ffbd91; }
 .fiber-portal .portal-ruler-readout strong { font: 600 14px monospace; }
 .fiber-portal .portal-ruler-readout span { font-size: 12px; color: var(--portal-secondary); }
 .fiber-portal .portal-ruler-readout button { border: 1px solid #48738b; border-radius: 5px; background: #102c40; color: var(--portal-text); padding: 5px 8px; cursor: pointer; }

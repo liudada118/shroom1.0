@@ -11,6 +11,7 @@
 1. [开发者手册](developer-guide.md)：进程、启动/关闭、资源路径、扩展安装、打包与修改边界。
 2. [数据与算法链路](chains/data-flow.md)：控制命令、串口、帧处理、算法、采集、回放与 CSV。
 3. [界面与渲染链路](chains/interface-flow.md)：首页、选择、进入、实时画面、图表和返回的状态及调用链。
+4. [内置 Agent](embedded-agent.md)：模型设置、附件、提案应用、设备连接与任务恢复，以及当前验证边界。
 
 代码定位和测试选择用 [ARCHITECTURE_INDEX.md](../ARCHITECTURE_INDEX.md)；追溯旧决策才查
 [ARCHITECTURE.md](../ARCHITECTURE.md)。后者是累积台账，不再作为从头学习当前架构的入口。

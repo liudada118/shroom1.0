@@ -54,12 +54,13 @@ export function PortalUtilityItem({ item, hintOpen, onHintOpenChange }) {
 }
 
 /** 展示宿主提供的工具动作，不自行建立设备、算法或数据下载逻辑。 */
-export default function PortalUtilityPanel({ open, onClose, items = [] }) {
+export default function PortalUtilityPanel({ open, onClose, items = [], displayContent }) {
   const rootRef = useRef(null);
   const hintRef = useRef(null);
   const [hintId, setHintId] = useState(null);
   const [category, setCategory] = useState('view');
-  const categorized = items.some((item) => item.category);
+  const categories = displayContent ? [...PORTAL_TOOL_CATEGORIES, { id: 'display', label: '显示与语言' }] : PORTAL_TOOL_CATEGORIES;
+  const categorized = Boolean(displayContent) || items.some((item) => item.category);
   const visibleItems = categorized ? items.filter((item) => (item.category || 'settings') === category) : items;
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -94,12 +95,12 @@ export default function PortalUtilityPanel({ open, onClose, items = [] }) {
   };
   /** 提供标签页的方向键与首尾键导航。 */
   const navigateCategory = (event, index) => {
-    const count = PORTAL_TOOL_CATEGORIES.length;
+    const count = categories.length;
     const target = event.key === 'ArrowRight' ? (index + 1) % count : event.key === 'ArrowLeft' ? (index + count - 1) % count
       : event.key === 'Home' ? 0 : event.key === 'End' ? count - 1 : null;
     if (target === null) return;
     event.preventDefault();
-    changeCategory(PORTAL_TOOL_CATEGORIES[target].id);
+    changeCategory(categories[target].id);
     event.currentTarget.parentElement.querySelectorAll('[role="tab"]')[target]?.focus();
   };
 
@@ -110,13 +111,13 @@ export default function PortalUtilityPanel({ open, onClose, items = [] }) {
       <button type="button" aria-label="收起实用工具" onClick={onClose}><CloseOutlined aria-hidden="true" /></button>
     </header>
     {categorized && <div className="portal-utility-tabs" role="tablist" aria-label="工具分类">
-      {PORTAL_TOOL_CATEGORIES.map((entry, index) => <button key={entry.id} type="button" role="tab"
+      {categories.map((entry, index) => <button key={entry.id} type="button" role="tab"
         id={`portal-tool-tab-${entry.id}`} aria-selected={category === entry.id} aria-controls="portal-utility-category"
         tabIndex={category === entry.id ? 0 : -1} onClick={() => changeCategory(entry.id)} onKeyDown={(event) => navigateCategory(event, index)}>{entry.label}</button>)}
     </div>}
-    <div className="portal-utility-grid" id="portal-utility-category" role={categorized ? 'tabpanel' : undefined}
+    <div className={`portal-utility-grid${category === 'display' ? ' portal-utility-display' : ''}`} id="portal-utility-category" role={categorized ? 'tabpanel' : undefined}
       aria-labelledby={categorized ? `portal-tool-tab-${category}` : undefined}>
-      {visibleItems.length ? visibleItems.map((item) => <PortalUtilityItem key={item.id} item={item}
+      {category === 'display' ? displayContent : visibleItems.length ? visibleItems.map((item) => <PortalUtilityItem key={item.id} item={item}
         hintOpen={open && hintId === item.id} onHintOpenChange={(visible) => changeHint(item.id, visible)} />)
         : <p className="portal-utility-empty">当前系统没有可用工具。</p>}
     </div>

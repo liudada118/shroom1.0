@@ -4,6 +4,8 @@ import { Button, Popconfirm, Tooltip } from 'antd'
 import { DeleteOutlined, EditOutlined } from '@ant-design/icons'
 import { CanvasDemo } from '../chart/Chart'
 import FormulaChartPanel from './FormulaChartPanel'
+import NativeSystemOutputs from './NativeSystemOutputs'
+import { getNativeSystemTemplate, selectedNativeSystemId, subscribeNativeSystemTemplates } from '../../displays/nativeSystemTemplates'
 import AgentRendererHost from '../../extensions/display-system/AgentRendererHost.jsx'
 import { listAgentRendererApps } from '../../extensions/display-system/api.js'
 import {
@@ -699,20 +701,32 @@ class Aside extends React.Component {
         const canvasId = kind === 'pressure' ? 'myChart1' : 'myChart2'
         const openEditor = () => this.openBuiltinFormulaEditor(kind)
         return (
-            <canvas
-                aria-label={`编辑 ${title} 图表公式`}
-                className="editableBuiltinChart"
-                id={canvasId}
-                onClick={openEditor}
-                onKeyDown={(event) => {
-                    if (event.key !== 'Enter' && event.key !== ' ') return
-                    event.preventDefault()
-                    openEditor()
-                }}
-                role="button"
-                style={style}
-                tabIndex={0}
-            />
+            <div className="builtinChartViewport" style={style}>
+                <canvas
+                    aria-label={`编辑 ${title} 图表公式`}
+                    className="editableBuiltinChart"
+                    id={canvasId}
+                    onClick={openEditor}
+                    onKeyDown={(event) => {
+                        if (event.key !== 'Enter' && event.key !== ' ') return
+                        event.preventDefault()
+                        openEditor()
+                    }}
+                    role="button"
+                    style={{ width: '100%', height: '100%' }}
+                    tabIndex={0}
+                />
+                <span
+                    aria-hidden="true"
+                    className="playbackChartCursor"
+                    data-chart={kind}
+                    ref={(node) => {
+                        this._playbackCursors ||= {}
+                        this._playbackCursors[kind] = node
+                        this.setPlaybackChartIndex(this._playbackChartIndex || 0)
+                    }}
+                />
+            </div>
         )
     }
 
@@ -738,6 +752,7 @@ class Aside extends React.Component {
         // 所以自己订阅，而不是让 Home 用 props 把清单灌进来。
         this.setState({ customCharts: loadFormulaCharts(this.props.matrixName) })
         this._unsubscribeFormulaCharts = subscribeFormulaCharts(this.handleFormulaChartsChanged)
+        this._unsubscribeNativeSystem = subscribeNativeSystemTemplates(() => this.forceUpdate())
         this.loadAgentChartRegistry()
 
         // jqbed 在床/离床计时 - 由后端 server.js 计算并通过 WebSocket 发送
@@ -756,8 +771,8 @@ class Aside extends React.Component {
         // 曲线是在收到数据时才重画的，换了图表零件却没有新数据进来（暂停、
         // 回放停在某一帧）时画面会一直停在旧外观上。用上一帧缓存立刻重画一次。
         if (prevProps?.chartAppearance !== this.props.chartAppearance) {
-            this.drawFormulaAwareChart('pressure', this._pendingChart || null)
-            this.drawFormulaAwareChart('area', this._pendingArea || null)
+            this.drawFormulaAwareChart('pressure', this._pendingChart || null, true)
+            this.drawFormulaAwareChart('area', this._pendingArea || null, true)
             this.drawCustomCharts()
         }
 
@@ -786,6 +801,7 @@ class Aside extends React.Component {
             this._unsubscribeFormulaCharts()
             this._unsubscribeFormulaCharts = null
         }
+        this._unsubscribeNativeSystem?.()
     }
 
     /**
@@ -823,11 +839,50 @@ class Aside extends React.Component {
         return this.buildFormulaDrawInput(this._builtinFormulaSeries?.[kind])
     }
 
+    /** 载入整段历史曲线；后续实时公式回调不能覆盖它。 */
+    setPlaybackCharts({ pressArr = [], areaArr = [], length = 0, index = 0 }) {
+        this._playbackCharts = { pressure: pressArr, area: areaArr, length }
+        for (const kind of ['pressure', 'area']) {
+            const canvas = document.getElementById(kind === 'pressure' ? 'myChart1' : 'myChart2')
+            canvas?.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height)
+            this.drawFormulaAwareChart(kind, null, true)
+        }
+        this.setPlaybackChartIndex(index)
+    }
+
+    /** 按完整记录的帧进度移动竖线，抽样曲线也使用同一时间范围。 */
+    setPlaybackChartIndex(index) {
+        this._playbackChartIndex = Number.isFinite(Number(index)) ? Number(index) : 0
+        const history = this._playbackCharts
+        for (const kind of ['pressure', 'area']) {
+            const cursor = this._playbackCursors?.[kind]
+            if (!cursor) continue
+            const count = history?.[kind]?.length || 0
+            cursor.hidden = !count || !(history.length > 0)
+            if (cursor.hidden) continue
+            const progress = Math.max(0, Math.min(1, this._playbackChartIndex / Math.max(1, history.length - 1)))
+            // drawChart 首末点分别在第 1 和第 count 个 gap 上。
+            cursor.style.left = `${100 * (1 + progress * (count - 1)) / (count + 1)}%`
+        }
+    }
+
+    /** 退出回放后丢弃历史和旧的滚动缓存，等待下一帧实时数据。 */
+    clearPlaybackCharts() {
+        this._playbackCharts = null
+        this._builtinFormulaSeries = {}
+        this._pendingChart = null
+        this._pendingArea = null
+        this.setPlaybackChartIndex(0)
+    }
+
     /**
      * 将内置公式曲线画到原有 Pressure Canvas 上。
      */
-    drawFormulaAwareChart(kind, fallback = null) {
-        const drawInput = this.getBuiltinFormulaDrawInput(kind) || fallback
+    drawFormulaAwareChart(kind, fallback = null, refreshPlayback = false) {
+        if (this._playbackCharts && !refreshPlayback) return
+        const drawInput = this._playbackCharts
+            ? this.buildFormulaDrawInput({ values: this._playbackCharts[kind], definition: { color: kind === 'area' ? '#10cda0' : '#991BFA' } })
+            : this.getBuiltinFormulaDrawInput(kind) || fallback
         if (!drawInput) return
         const canvasId = kind === 'pressure' ? 'myChart1' : 'myChart2'
         const canvas = document.getElementById(canvasId)
@@ -941,6 +996,7 @@ class Aside extends React.Component {
     }
 
     handleCharts(arr, max, index) {
+        if (this._playbackCharts) return
         const now = performance.now();
         this._pendingChart = { arr, max, index };
         if (now - this._lastChartTime >= this._ASIDE_INTERVAL) {
@@ -960,6 +1016,7 @@ class Aside extends React.Component {
     }
 
     handleChartsArea(arr, max, index) {
+        if (this._playbackCharts) return
         const now = performance.now();
         this._pendingArea = { arr, max, index };
         if (now - this._lastAreaTime >= this._ASIDE_INTERVAL) {
@@ -1000,17 +1057,18 @@ class Aside extends React.Component {
     }
 
     initCharts() {
+        this.clearPlaybackCharts()
         const canvas = document.getElementById('myChart1')
         if (ctx1 && canvas) {
             ctx1.clearRect(0, 0, canvas.width, canvas.height);
         }
         const canvas1 = document.getElementById('myChart2')
-        if (ctx2) {
+        if (ctx2 && canvas1) {
             ctx2.clearRect(0, 0, canvas1.width, canvas1.height);
         }
 
         const canvas2 = document.getElementById('myChart3')
-        if (ctx3) {
+        if (ctx3 && canvas2) {
             ctx3.clearRect(0, 0, canvas2.width, canvas2.height);
         }
     }
@@ -1311,10 +1369,11 @@ class Aside extends React.Component {
         const temperatureValues = Array.isArray(this.state.temperatureData) ? this.state.temperatureData : []
         const temperatureAvg = Number(this.state.temperatureAvg)
         const temperatureAvgText = Number.isFinite(temperatureAvg) ? temperatureAvg.toFixed(1) : '--'
+        const nativeConfiguration = getNativeSystemTemplate(selectedNativeSystemId(this.props.matrixName))?.configuration
 
         return (
             <div className='aside'>
-               {this.props.matrixName != 'bed40' ? <div className="asideContent firstAside">
+               {this.props.matrixName != 'bed40' && nativeConfiguration?.showArea !== false ? <div className="asideContent firstAside">
                     {this.props.matrixName != 'foot' ? <>{this.renderBuiltinChartHeading(t('sensorPanel.pressureArea'), 'area')}
                         {this.renderBuiltinChartCanvas('area', {
                             height: `${150 * this.state.fontSize}px`,
@@ -1360,7 +1419,7 @@ class Aside extends React.Component {
                 </div> : ''}
 
                 {/* jqbed 健康监测面板 */}
-                {this.props.matrixName === 'tempFullBed' ? (
+                {nativeConfiguration?.showPressure !== false && <>{this.props.matrixName === 'tempFullBed' ? (
                     <div className="asideContent firstAside">
                         <h2 className="asideTitle">{t('sensorPanel.temperature')}</h2>
                         <span className='pressData'>{temperatureAvgText}</span> <span style={{ color: '#999' }}>℃</span>
@@ -1545,6 +1604,8 @@ class Aside extends React.Component {
                         </>}
                 </div> : ''}
 
+                </>}
+                <NativeSystemOutputs matrixName={this.props.matrixName} />
                 {this.renderCustomChartCards()}
                 <FormulaChartPanel
                     algorithmMetricDefinitions={this.props.sidebarConfig?.algorithmMetrics || []}

@@ -11,6 +11,8 @@ const {
   createAgentAppService,
 } = require('./agent-apps/agentAppService');
 const path = require('path');
+const { createRealtimeAlgorithmCatalog } = require('../agent-runtime/algorithm-lab/realtimeCatalog');
+const { createBuiltinSystemTemplates } = require('./workspace/builtinSystemTemplates');
 const {
   buildRuntimeBindingSnapshot,
   createDisplaySystemRuntimeController,
@@ -36,7 +38,9 @@ function createAppRuntime({
   logger,
   runtimeResourceRoot,
   runtimeWritableRoot,
+  agentRoot = path.join(runtimeWritableRoot, 'agent'),
 }) {
+  const userAlgorithms = createRealtimeAlgorithmCatalog(agentRoot);
   const agentAppService = createAgentAppService({
     logger,
     runtimeResourceRoot,
@@ -51,6 +55,11 @@ function createAppRuntime({
   const displaySystemRuntimeController = createDisplaySystemRuntimeController({
     runtimeChannelRegistry: displaySystemRuntimeDiscovery.runtimeRegistry,
     logger,
+  });
+  const builtinTemplates = createBuiltinSystemTemplates({
+    root: path.join(runtimeWritableRoot, 'builtin-system-copies'), logger,
+    listPackages: () => displaySystemWorkspace.getCatalog().algorithmPackages || [],
+    isOccupied: (id) => Boolean(displaySystemRuntimeDiscovery.getById(id) || displaySystemRuntimeDiscovery.getBySensorType(id)),
   });
   const serialProtocolDirectories = [resolveUserPresetDirectory(runtimeWritableRoot)];
   const builtinAlgorithmPackageRoots = [
@@ -78,7 +87,7 @@ function createAppRuntime({
       discovered.invalid.forEach((entry) => {
         logger?.warn?.('[displaySystems] 内置算法包无效', entry.source, entry.errors.join('; '));
       });
-      return discovered.packages;
+      return [...discovered.packages, ...userAlgorithms.list()];
     },
   });
   let runtimeBindingOptions = null;
@@ -98,6 +107,7 @@ function createAppRuntime({
    */
   function reloadDisplaySystems() {
     displaySystemRuntimeDiscovery.reload();
+    builtinTemplates.reload();
     if (runtimeBindingOptions) {
       displaySystemRuntimeController.bind(runtimeBindingOptions);
     }
@@ -105,10 +115,12 @@ function createAppRuntime({
   }
 
   return {
+    builtinTemplates,
     // Agent 生成的展示包只作为静态浏览器资源加载；宿主不会执行包内 JS/Node 代码。
     agentApps: agentAppService,
     // 仅供进程内算法超市装配；HTTP 层不能直接返回含绝对路径的这份清单。
     getAlgorithmMarketPackages: () => discoverBuiltinAlgorithmPackages({ roots: builtinAlgorithmPackageRoots, includeResolved: true }).packages,
+    getUserAlgorithmPackages: () => userAlgorithms.list({ includeResolved: true }),
     displaySystems: {
       bindRuntimeChannels: ({
         serialManager,
@@ -138,21 +150,34 @@ function createAppRuntime({
       stopRuntimeDispatch: () => displaySystemRuntimeController.stop(),
       resetRuntimeAlgorithms: (reason) => displaySystemRuntimeController.resetAlgorithms(reason),
       getRuntimeBindings: () => displaySystemRuntimeController.getRuntimeBindings(),
-      getStatus: () => ({
-        ...displaySystemRuntimeDiscovery.getStatus(),
-        ...displaySystemRuntimeController.getStatus(),
-      }),
-      getById: (id) => displaySystemRuntimeDiscovery.getById(id),
+      getStatus: () => {
+        const status = displaySystemRuntimeDiscovery.getStatus();
+        const copies = builtinTemplates.list();
+        return { ...status, ...displaySystemRuntimeController.getStatus(),
+          count: status.count + copies.length,
+          systems: [...status.systems, ...copies],
+          runtimeDefinitions: [...status.runtimeDefinitions, ...copies.map((item) => item.runtimeDefinition)] };
+      },
+      getById: (id) => builtinTemplates.get(id) || displaySystemRuntimeDiscovery.getById(id),
       /** 标出当前 Manifest 已占用的 Python 包，超市不能重复初始化同一原生库。 */
       getActiveAlgorithmPackageIds: (sensorType) => (displaySystemRuntimeDiscovery.getBySensorType(sensorType)?.sensors || []).map((sensor) => sensor.algorithm?.package?.id).filter(Boolean),
       getEditorById: (id) => {
         const config = displaySystemRuntimeDiscovery.getById(id);
-        return config ? displaySystemWorkspace.read(config) : null;
+        return config ? displaySystemWorkspace.read(config) : builtinTemplates.editor(id);
       },
-      getBuilderCatalog: () => displaySystemWorkspace.getCatalog(),
+      getBuilderCatalog: () => ({ ...displaySystemWorkspace.getCatalog(), builtinTemplates: builtinTemplates.catalog,
+        builtinTemplateCreation: { supported: true, version: 1 },
+        nativeSystemEditing: { supported: true, version: 1, maxAlgorithms: 8, maxCharts: 12,
+          fields: ['name', 'configuration.algorithms', 'configuration.charts', 'configuration.showPressure', 'configuration.showArea'],
+          updateRoute: '/api/display-systems/:id/native', deleteRoute: '/api/display-systems/:id/native' } }),
       reload: reloadDisplaySystems,
       save: (input) => {
+        if (input?.builtinTemplate) {
+          if (Object.keys(input).some((key) => key !== 'builtinTemplate')) throw new Error('内置模板创建不接受其他配置字段。');
+          return builtinTemplates.create(input.builtinTemplate);
+        }
         const requestedId = String(input?.manifest?.id || '').trim();
+        if (builtinTemplates.get(requestedId)) throw Object.assign(new Error('这个标识已被内置模板副本使用。'), { code: 'DISPLAY_SYSTEM_EXISTS' });
         const existing = requestedId
           ? displaySystemRuntimeDiscovery.getById(requestedId)
           : null;
@@ -186,6 +211,7 @@ function createAppRuntime({
         };
       },
       duplicate: (id, options) => {
+        if (builtinTemplates.get(options?.id)) throw Object.assign(new Error('这个标识已被内置模板副本使用。'), { code: 'DISPLAY_SYSTEM_EXISTS' });
         const existing = displaySystemRuntimeDiscovery.getById(String(id || '').trim());
         if (!existing) return null;
         // **刻意不检查 `existing.editable`。** 自带展示系统正是要能被另存为 ——

@@ -1,4 +1,6 @@
 import * as THREE from "three";
+import { createNativeSceneEntrance } from '../../renderers/nativeSceneEntrance';
+import { NATIVE_SCENE_ASSETS } from '../../displays/nativeSceneAssets';
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { TrackballControls } from "three/examples/jsm/controls/TrackballControls";
@@ -162,6 +164,7 @@ const Canvas = React.forwardRef((props, refs) => {
   let i = 0;
 
   let container;
+  let portalEntrance;
 
 
   let controls, lastRender = 0;
@@ -252,10 +255,12 @@ const Canvas = React.forwardRef((props, refs) => {
 
 
     const loader = new FBXLoader();
-    loader.load("./model/0717.fbx", (fbx) => {
+    loader.load(NATIVE_SCENE_ASSETS.carQX.url, (fbx) => {
+      if (portalEntrance && !portalEntrance.accept(fbx)) return;
       fbx.scale.set(0.5, 0.5, 0.5); // 可能需要缩小模型
       // fbx.rotation.z = Math.PI / 2
       group.add(fbx);
+      portalEntrance?.setModel(fbx);
       console.log("FBX 模型加载成功", fbx);
 
 
@@ -270,6 +275,7 @@ const Canvas = React.forwardRef((props, refs) => {
       },
       (error) => {
         console.error("FBX 加载失败", error);
+        portalEntrance?.fail();
       });
 
 
@@ -336,7 +342,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
     // renderer
 
-    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: Boolean(props.portalEmbedded) });
     renderer.setPixelRatio(window.devicePixelRatio);
 
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -350,6 +356,7 @@ const Canvas = React.forwardRef((props, refs) => {
     }
 
     renderer.setClearColor(0x10152b);
+    if (props.portalEmbedded) portalEntrance = createNativeSceneEntrance(renderer, scene, camera, container);
 
     //FlyControls
     controls = new TrackballControls(camera, renderer.domElement);
@@ -984,6 +991,7 @@ const Canvas = React.forwardRef((props, refs) => {
   //
 
   function onWindowResize() {
+    if (portalEntrance) { portalEntrance.resize(); return; }
     renderer.setSize(window.innerWidth, window.innerHeight);
 
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -2098,6 +2106,10 @@ const Canvas = React.forwardRef((props, refs) => {
     animate();
     return () => {
       if (animationRequestId) cancelAnimationFrame(animationRequestId);
+      portalEntrance?.dispose();
+      window.removeEventListener('resize', onWindowResize);
+      controls?.dispose();
+      renderer?.dispose();
       document.removeEventListener('pointerdown', pointDown)
       document.removeEventListener('pointermove', pointMove)
       document.removeEventListener('pointerup', pointUp)
@@ -2105,7 +2117,7 @@ const Canvas = React.forwardRef((props, refs) => {
     };
   }, []);
   return (
-    <div>
+    <div style={props.portalEmbedded ? { width: '100%', height: '100%' } : undefined}>
       <div
         style={{ width: "100%", height: "100%" }}
         id={`canvas${props.index}`}

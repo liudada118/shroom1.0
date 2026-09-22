@@ -36,12 +36,15 @@ export function createModelParticleSamples(model, count = 3600) {
 }
 
 /** 点云先贴合原生实体表面，再显出材质；进退场共用实际手模型而非第二个演示模型。 */
-export function installModelParticleEntrance(renderer, scene, camera, model) {
-  const samples = createModelParticleSamples(model);
+export function installModelParticleEntrance(renderer, scene, camera, model, options = {}) {
+  const samples = options.samples || createModelParticleSamples(model);
   if (!samples) return null;
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(samples.positions, 3));
-  const points = new THREE.Points(geometry, new THREE.PointsMaterial({ size: .045, color: '#a8e4ff', transparent: true, depthWrite: false }));
+  geometry.computeBoundingBox();
+  const extent = geometry.boundingBox.getSize(new THREE.Vector3());
+  const size = options.adaptiveSize ? Math.max(extent.x, extent.y, extent.z) * .005 : .045;
+  const points = new THREE.Points(geometry, new THREE.PointsMaterial({ size, color: '#a8e4ff', transparent: true, depthWrite: false }));
   points.visible = false;
   scene.add(points);
   const disposeEntrance = installParticleEntrance(renderer, scene, camera, points);

@@ -71,4 +71,21 @@ describe('入口自动交接压力画布', () => {
     expect(vi.getTimerCount()).toBe(0);
     expect(root.querySelector).not.toHaveBeenCalled();
   });
+  it('原生大模型超过旧等待上限仍衔接实际模型，超时则显示错误并清理', async () => {
+    surface.dataset = { modelState: 'loading' };
+    surface.shroomSceneLoading = { fail: vi.fn() };
+    const done = vi.fn();
+    const promise = waitForMonitoringSurface(root).then(done);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(done).not.toHaveBeenCalled();
+    surface.dataset.modelState = 'ready';
+    await vi.advanceTimersByTimeAsync(32); await promise;
+    expect(surface.shroomSceneLoading.fail).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+    surface.dataset.modelState = 'loading';
+    const timeout = waitForMonitoringSurface(root);
+    await vi.advanceTimersByTimeAsync(30000); await timeout;
+    expect(surface.shroomSceneLoading.fail).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });

@@ -38,17 +38,9 @@ function createRuntimeControlService(deps) {
   /**
    * 处理历史回放控制命令（开关历史模式、播放/暂停、倍速、跳帧、上下阈值）。
    *
-   * 形状是「逐字段判存在、攒一个 patch、最后一次性 `setRuntime`」—— 攒起来一次写，中间状态才不会
-   * 被别的模块看到（`setRuntime` 会走整条 patch 链、可能触发 setter 副作用）。定时器启停**不进
-   * patch**（它是副作用不是状态）：关历史一定停，改倍速按**当前** `playFlag` 决定重启还是停（重启
-   * 是为了让新 interval 生效），改播放状态按新值启停。`Number()` 只套 `up`/`down`/`speed`（可能从
-   * 输入框来），`index` 由滑块算出本来就是数字。
-   *
-   * ⚠️ 判断一律用 `!= null` 而非真值判断：`play: false`（暂停）、`index: 0`（跳首帧）、`up: 0` 都
-   * 是合法值，真值判断会把暂停命令整条丢掉。唯一例外是 `history === false` 那支要的正是这一个值。
-   *
-   * ⚠️ 倍速是相对「**这份历史数据原本的速度**」：`detectedInterval` 是实测帧间隔而非配置值，所以
-   * 换一份采集频率不同的数据，同一个倍速的实际播放速度就不同（有意如此，1x 永远等于原速）。
+   * ⚠️ 先写 interval 和帧位置再启定时器，否则选择的倍速会晚一次操作才生效。
+   * 倍速基于记录原始帧间隔，保留小数；history:false 优先于同条命令里的 play:true。
+   * `play:false`、`index:0`、`up:0` 都是有效控制值，必须按字段存在性处理。
    *
    * @param {object} message 旧字段形态的命令载荷。
    * @returns {void}
@@ -61,21 +53,20 @@ function createRuntimeControlService(deps) {
     if (message.down != null) next.down = Number(message.down);
     if (message.history === false) {
       next.history = false;
-      stopPlaybackTimer();
     }
     if (message.speed != null) {
       const speed = Number(message.speed);
-      next.interval = Math.max(1, parseInt(runtime.detectedInterval / speed));
-      if (runtime.playFlag) startPlaybackTimer();
-      else stopPlaybackTimer();
+      if (!Number.isFinite(speed) || speed <= 0) throw new RangeError('回放倍速必须是正数');
+      next.interval = Math.max(1, runtime.detectedInterval / speed);
     }
-    if (message.play != null) {
-      next.playFlag = message.play;
-      if (message.play) startPlaybackTimer();
-      else stopPlaybackTimer();
-    }
+    if (message.play != null) next.playFlag = message.play;
+    if (message.history === false) next.playFlag = false;
     if (message.index != null) next.nowIndex = message.index;
     setRuntime(next);
+    if (message.speed != null || message.play != null || message.history === false) {
+      if (next.playFlag ?? runtime.playFlag) startPlaybackTimer();
+      else stopPlaybackTimer();
+    }
   }
 
   /**

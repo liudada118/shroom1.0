@@ -2,13 +2,12 @@ import { hasValidLicenseDate, isExpiredLicenseMessage } from '../../services/ws/
 import { isPortalSystemAllowed, readPortalLicenseScope } from './portalSystems';
 
 /**
- * 串起密钥验证与系统切换；只有本次提交的有效授权和 HTTP 确认都到达后才切换。
- * ⚠️ 浏览列表不会调用本控制器；断线、卸载及失败后的迟到消息不能触发跳转。
+ * 验证密钥后更新目录，或继续切换所选系统。
+ * ⚠️ 授权范围只读本次 HTTP 回执；其他窗口的广播不能完成当前请求。
  */
-export function createPortalEntry({ activate, switchSystem, onPhase, onError, onEntered }) {
+export function createPortalEntry({ activate, switchSystem, onPhase, onError, onEntered, onValidated, onInvalidated }) {
   let attempt = null;
   let timer = null;
-  let scope;
 
   /** 结束本次等待；不会伪称撤销后端已经接收的命令。 */
   function cancel() {
@@ -20,16 +19,28 @@ export function createPortalEntry({ activate, switchSystem, onPhase, onError, on
 
   /** 清理忙碌状态并将失败保留在当前入口。 */
   function fail(message) {
+    if (!attempt?.validated) onInvalidated?.();
     cancel();
     onError(message);
   }
 
-  /** 等待授权命令完成，防止其默认系统晚于用户选择生效。 */
+  /** 等待与提交密钥绑定的授权回执，再更新列表或进入系统。 */
   async function finish(current) {
     try {
-      const ack = await current.activation;
+      const ack = await activate(current.key);
       if (attempt !== current) return;
-      if (!ack) throw new Error('授权请求未完成，请重试');
+      const activation = ack?.data?.results?.find((result) => result.name === 'license-activation');
+      if (activation?.activationCode === 'OK' && !Object.hasOwn(activation, 'payload')) {
+        throw new Error('授权服务版本较旧，请完全退出并重新启动 Shroom 后重试');
+      }
+      const payload = activation?.payload;
+      if (!hasValidLicenseDate(payload)) throw new Error('密钥验证未返回有效授权，请重试');
+      if (isExpiredLicenseMessage(payload)) throw new Error('密钥已过期，请输入有效密钥');
+      const scope = readPortalLicenseScope(payload);
+      if (scope === undefined) throw new Error('未读取到密钥授权范围，请重试');
+      current.validated = true;
+      onValidated?.(scope, current.key);
+      if (!current.system) { cancel(); return; }
       if (!isPortalSystemAllowed(current.system, scope)) {
         throw new Error('当前密钥未授权此系统，请选择可用系统或更换密钥');
       }
@@ -43,43 +54,42 @@ export function createPortalEntry({ activate, switchSystem, onPhase, onError, on
     }
   }
 
-  /** 接收既有授权消息，不因后台自动刷新成功而自动进入。 */
+  /** 撤销授权或锁定消息立即取消当前操作；普通成功广播不推进请求。 */
   function receive(message) {
-    const nextScope = readPortalLicenseScope(message);
-    if (nextScope !== undefined) scope = nextScope;
     if (!attempt) return;
+    if (isExpiredLicenseMessage(message)) { fail('密钥已过期，请输入有效密钥'); return; }
     if (message?.licenseError || message?.licenseLocked || message?.valid === false) {
       fail(message.licenseError || message.reason || '密钥无效，请检查后重试');
       return;
     }
-    if (!hasValidLicenseDate(message) || attempt.finishing) return;
-    if (isExpiredLicenseMessage(message)) {
-      fail('密钥已过期，请输入有效密钥');
-      return;
-    }
-    attempt.finishing = true;
-    void finish(attempt);
   }
 
-  /** 锁定点击时的系统与密钥，重复点击不会并发提交。 */
-  function begin({ system, key, connected }) {
+  /** 锁定当前密钥及可选目标；重复点击不并发提交。 */
+  function start({ system, key, connected }) {
     if (attempt) return;
-    if (!system) return onError('请先选择一个展示系统');
-    if (!key.trim()) return onError('请输入访问密钥');
+    const normalizedKey = typeof key === 'string' ? key.trim() : '';
+    if (!normalizedKey) return onError('请输入访问密钥');
     if (!connected) return onError('与应用的连接已断开，请等待重新连接');
-    const current = { system, finishing: false };
-    scope = undefined;
+    const current = { system, key: normalizedKey, validated: false };
     attempt = current;
     onError('');
     onPhase('validating');
     timer = setTimeout(() => {
       if (attempt === current) fail('请求超时，请确认连接及当前系统状态后重试');
     }, 20000);
-    current.activation = Promise.resolve().then(() => activate(key.trim()));
-    current.activation.catch((error) => {
-      if (attempt === current) fail(error.message || '授权请求失败');
-    });
+    void finish(current);
   }
 
-  return { begin, receive, cancel };
+  /** 进入前再次校验密钥，所选系统必须在最新授权范围内。 */
+  function begin(options) {
+    if (!options.system) return onError('请先选择一个展示系统');
+    start(options);
+  }
+
+  /** 只验证并更新系统列表，不发送系统切换命令。 */
+  function validate({ key, connected }) {
+    start({ key, connected });
+  }
+
+  return { begin, validate, receive, cancel };
 }

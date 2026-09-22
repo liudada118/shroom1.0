@@ -41,7 +41,8 @@ import {
   computeVertexHeatValues,
 } from "./humanBodyVertexHeat";
 
-const MODEL_URLS = ["./model/human3-low.glb", "./model/human3.glb"];
+import { NATIVE_SCENE_ASSETS } from '../../displays/nativeSceneAssets';
+const MODEL_URLS = [NATIVE_SCENE_ASSETS.humanBodyOptimized.url, NATIVE_SCENE_ASSETS.humanBodyOptimized.fallback.url];
 const SENSOR_LAYOUT_URL = "./model/sensor_canvas_positions.json";
 const MAX_SHADER_SENSORS = 1200;
 const DEFAULT_OPTIONS = { max: 1555, size: 31, filter: 6 };

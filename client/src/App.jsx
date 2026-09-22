@@ -4,6 +4,7 @@ import { HashRouter, Routes, Route } from 'react-router-dom'
 import { App as AntdApp, message } from 'antd'
 import i18next from './i18n'
 import UpdateNotifier from './components/updater/UpdateNotifier'
+import AgentWorkspace from './features/agent/AgentWorkspace'
 import { loadMonitoringPage } from './page/home/loadMonitoringPage'
 
 const Home = lazy(loadMonitoringPage)
@@ -44,6 +45,7 @@ function App() {
   return (
     <AntdApp>
       <UpdateNotifier />
+      <AgentWorkspace />
       <HashRouter>
         <Suspense fallback={null}>
           <Routes>

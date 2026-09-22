@@ -10,6 +10,7 @@ import React, { useContext, useEffect, useImperativeHandle, useRef, useState } f
 import { SceneVisibilityContext } from '../../renderers/sceneVisibility';
 import { installParticleEntrance } from '../../renderers/particleEntrance';
 import { createWorkspaceViewTools } from '../../renderers/workspaceViewTools';
+import { createPointGridSelection } from '../../renderers/pointGridSelection';
 import { TextureLoader } from "three";
 import { checkRectIndex, checkRectangleIntersection, getPointCoordinate, getPointCoordinateback } from "./threeUtil1";
 import {
@@ -95,6 +96,7 @@ const Canvas = React.forwardRef((props, refs) => {
   // 当前配色，换配色就能当场生效、不用重建场景（相机视角因此得以保留）。
   const colormapRef = useRef(props.colormap);
   const workspaceViewRef = useRef(null);
+  const selectionRef = useRef(null);
   colormapRef.current = props.colormap;
   const sceneVisibleRef = useContext(SceneVisibilityContext);
   var newDiv, newDiv1, selectStartArr = [], selectEndArr = [], sitArr, backArr, sitMatrix = [], backMatrix = [], selectMatrix = [];
@@ -165,6 +167,7 @@ const Canvas = React.forwardRef((props, refs) => {
   let colors, scales;
 
   function init() {
+    controlsFlag = true;
     // 清空 group 中的旧粒子，防止重复 add 导致双层
     while (group.children.length > 0) {
       group.remove(group.children[0]);
@@ -258,8 +261,14 @@ const Canvas = React.forwardRef((props, refs) => {
       CMD_KEY, // pan
     ];
     workspaceViewRef.current = createWorkspaceViewTools({ object: group, camera, controls });
+    if (props.portalEmbedded) selectionRef.current = createPointGridSelection({ points: particles, camera,
+      canvas: renderer.domElement, columns: sitnum1, rows: sitnum2, interpolation: sitInterp, padding: sitOrder,
+      onInteractionChange: (active) => { controlsFlag = !active; controls.enabled = !active; } });
 
     window.addEventListener("resize", onWindowResize);
+
+    // 门户框选由真实投影与原始矩阵管理，不能再进入旧的线性外框换算或发送设备索引。
+    if (props.portalEmbedded) return;
 
     // BrushManager 订阅回调：框选变化时计算传感器索引并通知父组件
     const _brushCallback = (rangeArr) => {
@@ -328,7 +337,7 @@ const Canvas = React.forwardRef((props, refs) => {
       transparent: true,
       //   color: 0xffffff,
       map: spite,
-      size: props.portalEmbedded ? 0.55 : 1,
+      size: 1,
       opacity: props.portalEmbedded ? 0.8 : 1,
     });
     sitGeometry.setAttribute("scale", new THREE.BufferAttribute(scales, 1));
@@ -369,6 +378,10 @@ const Canvas = React.forwardRef((props, refs) => {
   function changeSelectFlag(value, flag) {
     controlsFlag = value;
     controls.enabled = Boolean(value);
+    if (selectionRef.current) {
+      selectionRef.current.setActive(!value);
+      return;
+    }
     if (value) {
       // 关闭框选模式
       brushManager.stopBrush();
@@ -483,7 +496,11 @@ const Canvas = React.forwardRef((props, refs) => {
 
         let rgb
 
-        if (sitIndexArr && !sitIndexArr.every((a) => a == 0)) {
+        if (selectionRef.current) {
+          rgb = selectionRef.current.containsGridPoint(ix, iy)
+            ? sampleDataRgb(useClassicColor, activeColormap, smoothBig[l], valuej1)
+            : jetgGrey(0, valuej1, smoothBig[l]);
+        } else if (sitIndexArr && !sitIndexArr.every((a) => a == 0)) {
 
           if (ix >= sitIndexArr[0] && ix < sitIndexArr[1] && iy >= sitIndexArr[2] && iy < sitIndexArr[3]) {
             // rgb = [255, 0, 0];
@@ -519,7 +536,11 @@ const Canvas = React.forwardRef((props, refs) => {
     if (timeS > renderT) {
       // === 使用原始数据 ndata1 计算 Aside 统计值（零分配优化） ===
       let max = 0, point = 0, press = 0;
-      if (sitIndexArr && sitIndexArr.length && !sitIndexArr.every((a) => a == 0)) {
+      if (selectionRef.current) {
+        selectionRef.current.updateValues(ndata1);
+        const stats = selectionRef.current.getStats();
+        max = stats.maxPres; point = stats.point; press = stats.totalPres;
+      } else if (sitIndexArr && sitIndexArr.length && !sitIndexArr.every((a) => a == 0)) {
         // 框选模式：直接遍历原始数据的框选区域，用 Set 去重原始索引
         const visited = new Set();
         for (let i = sitIndexArr[0]; i < sitIndexArr[1]; i++) {
@@ -762,6 +783,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
   useImperativeHandle(refs, () => ({
     getViewTools: () => workspaceViewRef.current,
+    getSelectionTools: () => selectionRef.current,
     backData: backData,
     sitData: sitData,
     changeDataFlag: changeDataFlag,
@@ -829,6 +851,8 @@ const Canvas = React.forwardRef((props, refs) => {
       cancelAnimationFrame(animationRequestId);
       workspaceViewRef.current?.dispose();
       workspaceViewRef.current = null;
+      selectionRef.current?.dispose();
+      selectionRef.current = null;
       window.removeEventListener('resize', onWindowResize);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);

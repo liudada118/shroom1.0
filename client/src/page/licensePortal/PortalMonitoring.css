@@ -15,7 +15,11 @@
 .fiber-portal .portal-monitor-identity { display: grid; gap: 4px; padding-left: 18px; border-left: 1px solid rgba(122, 170, 213, .2); }
 .fiber-portal .portal-monitor-identity small { color: rgba(99, 213, 255, .48); font: 8px 'JetBrains Mono', monospace; letter-spacing: .18em; }
 .fiber-portal .portal-monitor-identity strong { color: rgba(239, 247, 255, .84); font-size: 13px; font-weight: 620; }
-.fiber-portal .portal-monitor-close { width: 44px; padding: 0; font-size: 24px; font-weight: 300; }
+.fiber-portal .portal-monitor-navigation .portal-monitor-close {
+  box-sizing: border-box; width: 44px; height: 44px; flex: 0 0 44px; align-self: center;
+  display: grid; place-items: center; padding: 0; border-radius: 50%;
+  font-size: 24px; font-weight: 300; line-height: 1;
+}
 .fiber-portal .portal-monitor-floor { position: absolute; top: 78%; left: 50%; width: 38%; height: 12%; border: 2px solid rgba(20, 67, 102, .24); border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; }
 
 .fiber-portal .portal-runtime-monitor .home > .title {

@@ -1,6 +1,6 @@
 # 历史回放
 
-> 最后更新：2026-08-29
+> 最后更新：2026-09-17
 
 把数据库里的历史帧变回前端能画的画面。分工按「谁只做一件事」切：
 
@@ -16,7 +16,7 @@ historyAnalysisService 框选统计、跳帧、历史曲线（旧 WS 遗留逻�
 
 | 文件 | 作用 | 边界 |
 | --- | --- | --- |
-| `playbackTimerService.js` | 回放定时器，66 行。`createPlaybackTimerService({getInterval, onTick, onStop})` | **不关心帧内容、数据库和 WebSocket**。周期由 `getInterval` 每次现取，所以变速回放不用重建定时器。`clearTimer` 只清句柄不改播放状态——两者分开是故意的 |
+| `playbackTimerService.js` | 基于单调时钟的回放调度。`createPlaybackTimerService({getInterval, onTick, onStop})` | 每次 start 读取新间隔，按实际经过时间向 `onTick(steps)` 传递到期帧数；画面最多约 60 次/秒，忙时合并到最新到期帧，不突发补发。暂停/变速重新计时；不读取数据库或处理帧内容 |
 | `historyFrameTransformService.js` | 格式转换主体，544 行。解析 matrix 行、压力帧归一化、CSV 表头和文件名前缀、回放 payload、带清零信息的采集存储 payload | 依赖全注入（各传感器类型常量、`isHandGloveType`、`smallBed12B`……）。这是「同一份历史数据要同时喂给回放、CSV 导出和趋势图」的汇聚点，所以格式统一收在这里 |
 | `playbackFrameService.js` | 组 payload，285 行。DB 历史行 → 前端 WebSocket payload | 明确**不**负责定时器、WebSocket 发送、数据库查询和播放状态。足部（`footL`/`footR`/`footVideo`）和手套（`handGloveFullPacket`）的特殊结构在这里处理 |
 | `historyPlaybackService.js` | 三件小事，157 行。`getHistoryLengthFromCounts` 取多路同步长度、`getHistorySeries` 给趋势图抽样（上限 **2000** 点）、`buildZeroPlaybackFrame` / `buildZeroPlaybackPayload` 构造空白帧 | 抽样上限是画图上限不是数据上限。一天几十万帧全画出来图是黑的，浏览器也卡 |

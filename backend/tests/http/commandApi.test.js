@@ -1,6 +1,7 @@
 const assert = require('assert');
 const express = require('express');
 const http = require('http');
+const { EventEmitter } = require('events');
 const { createControlCommandService } = require('../../kernel/platform/commands/controlCommandService');
 const { createControlCommandRouter } = require('../../kernel/platform/commands/controlCommandRouter');
 const {
@@ -8,6 +9,7 @@ const {
 } = require('../../kernel/platform/commands/registerCalibrationZeroCommandHandler');
 const { createZeroCommandService } = require('../../kernel/platform/runtime/zeroCommandService');
 const { registerControlRoutes } = require('../../kernel/platform/http/controlRoutes');
+const { createWebSocketHandlerAttacher } = require('../../kernel/platform/websocket/webSocketHandlerFactory');
 
 /**
  * 端到端跑一遍控制命令的 HTTP 入口：真起 express server、真发 HTTP 请求、真关掉。
@@ -40,6 +42,37 @@ async function run() {
     },
   });
   const controlCommandService = createControlCommandService({ commandRouter: router });
+  const licenseEvents = [];
+  const activationKeys = [];
+  const licenseScopes = new Map([
+    ['test-private-hand-key', {
+      date: 1900000000000,
+      nowDate: 1800000000000,
+      file: ['hand0205'],
+      currentSensorType: 'custom-pressure-map',
+      selectFlag: ['hand0205'],
+      moduleConfig: { report: true },
+    }],
+    ['test-private-bed-key', {
+      date: 1950000000000,
+      nowDate: 1800000000001,
+      file: ['jqbed'],
+      currentSensorType: 'custom-pressure-map',
+      selectFlag: ['jqbed'],
+    }],
+  ]);
+  createWebSocketHandlerAttacher({
+    controlCommandService,
+    server: new EventEmitter(),
+    publishSystemEvent: (payload) => licenseEvents.push(payload),
+    // 用明确的验证结果替身，只将 HTTP、归一、路由和真实 handler 纳入本测试。
+    activateSubmittedLicenseKey: (key) => {
+      activationKeys.push(key);
+      return licenseScopes.has(key)
+        ? { ok: true, code: 'OK', payload: licenseScopes.get(key) }
+        : { ok: false, code: 'LICENSE_INVALID', message: 'invalid license' };
+    },
+  })();
   const zeroOperations = [];
   const zeroCommandService = createZeroCommandService({
     zeroStateStore: {
@@ -85,6 +118,51 @@ async function run() {
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
 
   try {
+    for (const [key, payload] of licenseScopes) {
+      const requestId = `req-http-license-${activationKeys.length}`;
+      const activationResponse = await fetch(`${baseUrl}/api/commands`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ type: 'license.activate', payload: { key }, requestId }),
+      });
+      const activationBody = await activationResponse.json();
+      assert.strictEqual(activationResponse.status, 200);
+      assert.strictEqual(activationBody.code, 0);
+      assert.strictEqual(activationBody.data.ok, true);
+      assert.strictEqual(activationBody.data.requestId, requestId);
+      assert.strictEqual(activationBody.data.commandType, 'license.activate');
+      assert.deepStrictEqual(activationBody.data.data.results, [{
+        name: 'license-activation',
+        activationCode: 'OK',
+        payload,
+      }]);
+      assert.strictEqual(activationKeys.at(-1), key);
+      assert.strictEqual(licenseEvents.at(-1), payload);
+      assert.strictEqual(JSON.stringify(activationBody).includes(key), false);
+      assert.strictEqual(JSON.stringify(licenseEvents).includes(key), false);
+    }
+    assert.strictEqual(licenseEvents.length, 2);
+
+    const invalidLicenseKey = 'test-private-invalid-key';
+    const invalidLicenseResponse = await fetch(`${baseUrl}/api/commands`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type: 'license.activate',
+        payload: { key: invalidLicenseKey },
+        requestId: 'req-http-license-invalid',
+      }),
+    });
+    const invalidLicenseBody = await invalidLicenseResponse.json();
+    assert.strictEqual(invalidLicenseResponse.status, 500);
+    assert.strictEqual(invalidLicenseBody.data.ok, false);
+    assert.strictEqual(invalidLicenseBody.data.requestId, 'req-http-license-invalid');
+    assert.strictEqual(invalidLicenseBody.data.code, 'LICENSE_INVALID');
+    assert.strictEqual(Object.hasOwn(invalidLicenseBody.data, 'data'), false);
+    assert.strictEqual(JSON.stringify(invalidLicenseBody).includes('selectFlag'), false);
+    assert.strictEqual(JSON.stringify(invalidLicenseBody).includes(invalidLicenseKey), false);
+    assert.strictEqual(licenseEvents.length, 2);
+
     const successResponse = await fetch(`${baseUrl}/api/commands`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

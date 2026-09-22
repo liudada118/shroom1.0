@@ -43,7 +43,7 @@ const RENDERER_IDS = [
 ];
 
 /** 所有后端都有的那四个，由 `NumMatrixRenderer` 自己实现，不随后端变。 */
-const SHELL_METHODS = ['sitData', 'sitValue', 'changeWsData', 'changeWsDataRaw'];
+const SHELL_METHODS = ['sitData', 'sitValue', 'changeWsData', 'changeWsDataRaw', 'getSelectionTools', 'changeSelectFlag'];
 
 /**
  * 两个带命令的后端的 `commandNames` 并集，去重后排序。

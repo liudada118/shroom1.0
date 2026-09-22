@@ -152,6 +152,7 @@ function buildAgentAppContentSecurityPolicy(req, appId) {
  */
 function createHttpApp({
   algorithmMarketService,
+  agentDeviceConnectionService,
   agentAppService,
   controlCommandService,
   getChannelBusStatus,
@@ -176,6 +177,9 @@ function createHttpApp({
   saveDisplaySystem = () => null,
   saveDisplaySystemDisplaySection = () => null,
   duplicateDisplaySystem = () => null,
+  updateNativeSystem = () => null,
+  deleteNativeSystem = () => null,
+  algorithmRecordService,
   // 展示系统目录变了要告诉正在跑的前端。Builder 在进程内保存时自己派发 DOM 事件，
   // 但 Agent / 脚本走的是这里的 HTTP 接口，前端毫无感知 —— 不广播的话新系统要重启软件才出现。
   publishDisplaySystemsUpdated = () => {},
@@ -191,6 +195,55 @@ function createHttpApp({
   httpApp.use(express.json({ limit: '50mb' }));
   httpApp.use(express.urlencoded({ limit: '50mb', extended: true }));
   httpApp.use(createJsonBodyErrorHandler(logger));
+
+  /** 限制设备控制接口只供本机调用，拒绝公网页面借用 localhost 控制硬件。 */
+  function assertAgentDeviceOrigin(req) {
+    assertAgentAppWriteOrigin(req);
+    if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress)) {
+      const error = new Error('Agent device access requires a local client');
+      error.code = 'AGENT_DEVICE_ORIGIN_FORBIDDEN'; error.httpStatus = 403; throw error;
+    }
+  }
+
+  /** 返回设备控制的稳定错误，未知底层异常不向界面暴露内部路径。 */
+  function respondAgentDeviceError(res, error) {
+    res.status(error.httpStatus || 503).json({ code: error.code || 'AGENT_DEVICE_UNAVAILABLE', error: error.httpStatus ? error.message : 'Agent device service is unavailable', ...(error.details ? { details: error.details } : {}) });
+  }
+
+  httpApp.post('/api/agent-algorithms/records', (req, res) => {
+    try {
+      assertAgentDeviceOrigin(req);
+      if (!algorithmRecordService) throw Object.assign(new Error('请重启软件以加载算法数据接口。'), { httpStatus: 503 });
+      res.json(algorithmRecordService.list(req.body));
+    } catch (error) { respondAgentDeviceError(res, error); }
+  });
+  httpApp.post('/api/agent-algorithms/frames', (req, res) => {
+    try {
+      assertAgentDeviceOrigin(req);
+      if (!algorithmRecordService) throw Object.assign(new Error('请重启软件以加载算法数据接口。'), { httpStatus: 503 });
+      res.json(algorithmRecordService.read(req.body));
+    } catch (error) { respondAgentDeviceError(res, error); }
+  });
+
+  httpApp.get('/api/agent-device/status', async (req, res) => {
+    try {
+      assertAgentDeviceOrigin(req);
+      if (!agentDeviceConnectionService) { res.status(503).json({ code: 'AGENT_DEVICE_UNAVAILABLE', error: 'Agent device service is unavailable' }); return; }
+      const availablePorts = getPort(await listPorts()).map(({ path, manufacturer, vendorId, productId }) => ({ path, manufacturer, vendorId, productId }));
+      res.json({ ...agentDeviceConnectionService.snapshot(), availablePorts });
+    } catch (error) { respondAgentDeviceError(res, error); }
+  });
+  httpApp.post('/api/agent-device/connect', async (req, res) => {
+    try {
+      assertAgentDeviceOrigin(req);
+      if (!agentDeviceConnectionService) { res.status(503).json({ code: 'AGENT_DEVICE_UNAVAILABLE', error: 'Agent device service is unavailable' }); return; }
+      agentDeviceConnectionService.validateRequest(req.body);
+      const availablePorts = getPort(await listPorts());
+      if (req.aborted || res.destroyed) return;
+      // 端口枚举后才同步检查状态并派发，HTTP 等待期间的手动操作不会使用旧快照。
+      res.json(agentDeviceConnectionService.connect(req.body, availablePorts));
+    } catch (error) { respondAgentDeviceError(res, error); }
+  });
 
   if (algorithmMarketService) {
     httpApp.get('/api/algorithm-market', (req, res) => res.json(algorithmMarketService.snapshot()));
@@ -346,9 +399,9 @@ function createHttpApp({
    * 区别决定提示语（「这是自带展示系统，请用另存为」而不是「参数有误」）。
    */
   function respondDisplaySystemWriteError(res, error) {
-    const status = error.code === 'DISPLAY_SYSTEM_EXISTS' ? 409
+    const status = error.httpStatus || (['DISPLAY_SYSTEM_EXISTS', 'DISPLAY_SYSTEM_REVISION_CONFLICT', 'DISPLAY_SYSTEM_ACTIVE'].includes(error.code) ? 409
       : error.code === 'DISPLAY_SYSTEM_READ_ONLY' ? 403
-        : 400;
+        : 400);
     res.status(status).json({
       error: error.message,
       code: error.code || 'DISPLAY_SYSTEM_INVALID',
@@ -364,6 +417,27 @@ function createHttpApp({
     } catch (error) {
       respondDisplaySystemWriteError(res, error);
     }
+  });
+
+  httpApp.patch('/api/display-systems/:id/native', (req, res) => {
+    try {
+      assertAgentDeviceOrigin(req);
+      const result = updateNativeSystem(req.params.id, req.body);
+      if (!result) { res.status(404).json({ error: 'system not found' }); return; }
+      notifyDisplaySystemsUpdated('update', req.params.id);
+      res.json({ result });
+    } catch (error) { respondDisplaySystemWriteError(res, error); }
+  });
+
+  httpApp.delete('/api/display-systems/:id/native', (req, res) => {
+    try {
+      assertAgentDeviceOrigin(req);
+      if (!req.body || Object.keys(req.body).some((key) => key !== 'expectedRevision')) throw Object.assign(new Error('删除请求只能包含修订号。'), { code: 'DISPLAY_SYSTEM_INVALID' });
+      const result = deleteNativeSystem(req.params.id, req.body.expectedRevision);
+      if (!result) { res.status(404).json({ error: 'system not found' }); return; }
+      notifyDisplaySystemsUpdated('delete', req.params.id);
+      res.json({ result });
+    } catch (error) { respondDisplaySystemWriteError(res, error); }
   });
 
   // 只写 manifest 的 display 段：主界面拖出来的画布 / 图表外观固化到基线。

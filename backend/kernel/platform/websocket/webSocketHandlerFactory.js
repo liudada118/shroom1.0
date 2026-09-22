@@ -77,7 +77,7 @@ function sendCommandResultAck(ws, message, result, logger) {
 function createSensorStatusPayload(ctx, extra = {}) {
   return {
     file: ctx.licenseFile ?? null,
-    currentSensorType: ctx.file,
+    currentSensorType: ctx.currentSystemId || ctx.file,
     selectFlag: ctx.selectFlag,
     ...extra,
   };
@@ -198,7 +198,7 @@ function createWebSocketHandlerAttacher(ctx) {
           throw error;
         }
         publishSystemEvent(activation.payload);
-        return { activationCode: activation.code || 'OK' };
+        return { activationCode: activation.code || 'OK', payload: activation.payload };
       },
     });
 
@@ -219,7 +219,7 @@ function createWebSocketHandlerAttacher(ctx) {
       name: 'sensor-types-status',
       when: (message) => message.getSensorTypes === true,
       handle: () => ({
-        currentSensorType: ctx.file,
+        currentSensorType: ctx.currentSystemId || ctx.file,
         selectFlag: ctx.selectFlag,
       }),
     });

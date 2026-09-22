@@ -34,6 +34,10 @@ const ProgressCom = React.forwardRef((props, refs) => {
     const { t } = useTranslation()
 
     const [playFlag, setPlayFlag] = useState(false)
+    const [playbackSpeed, setPlaybackSpeed] = useState(1)
+
+    // 后端载入新记录会恢复原速，下拉框同步恢复，避免显示和实际倍速不一致。
+    useEffect(() => { setPlaybackSpeed(1) }, [props.dataTime])
     const [leftFlag, setLeftFlag] = useState(false)
     const [rightFlag, setRightFlag] = useState(false)
     const [lineFlag, setLineFlag] = useState(false)
@@ -247,22 +251,8 @@ const ProgressCom = React.forwardRef((props, refs) => {
                 });
             });
 
-            if (props.areaArr) {
-                props.data.current?.handleChartsArea(
-                    props.areaArr,
-                    props.max + 100,
-                    value + 1
-                );
-            }
+            props.data.current?.setPlaybackChartIndex(value);
 
-
-            if (props.pressArr && (props.matrixName == "car" || props.matrixName == "bigBed")) {
-                props.data.current?.handleCharts(
-                    props.pressArr,
-                    props.pressMax + 100,
-                    value + 1
-                );
-            }
         }
     }
 
@@ -303,37 +293,7 @@ const ProgressCom = React.forwardRef((props, refs) => {
             const lineLocaltion = moveValue(lineLeft < left + 20 ? left + 20 : lineLeft > right ? right : lineLeft)
             document.querySelector(".progressLine").style.left = `${lineLocaltion}px`;
 
-            // this.setState({
-            //   index: value,
-            // });
-
-
-            if (props.areaArr) {
-                props.data.current?.handleChartsArea(
-                    props.areaArr,
-                    props.max + 100,
-                    value + 1
-                );
-                if (value == props.areaArr.length) {
-                    props.wsSendObj({ play: false });
-
-                    setPlayFlag(false)
-                }
-            }
-
-            if (props.pressArr && (props.matrixName != "foot")) {
-
-                props.data.current?.handleCharts(
-                    props.pressArr,
-                    props.pressMax + 100,
-                    value + 1
-                );
-            }
-
-            // if (this.bodyArr && this.state.matrixName == "bigBed") {
-            //   this.data.current?.handleChartsBody(this.bodyArr, 200);
-            // }
-
+            props.data.current?.setPlaybackChartIndex(value);
 
         }
     }
@@ -361,15 +321,13 @@ const ProgressCom = React.forwardRef((props, refs) => {
         // 向后端索要当前帧的数据
         props.wsSendObj({ value });
 
-        // 渲染当前帧的图表
-        if (props.areaArr) props.data.current?.handleChartsArea(props.areaArr, props.max + 100, value + 1);
-        if (props.pressArr && (props.matrixName != "foot")) {
-            props.data.current?.handleCharts(props.pressArr, props.pressMax + 100, value + 1);
-        }
+        props.data.current?.setPlaybackChartIndex(value);
     }
 
     const resetPlay = () => {
         setPlayFlag(false);
+        setPlaybackSpeed(1);
+        props.data.current?.setPlaybackChartIndex(0);
         // 重置滑块和进度线的 DOM 位置
         const left = document.querySelector('.leftProgress');
         const right = document.querySelector('.rightProgress');
@@ -385,7 +343,9 @@ const ProgressCom = React.forwardRef((props, refs) => {
 
     useImperativeHandle(refs, () => ({
         changeIndex,
-        resetPlay
+        resetPlay,
+        // 外部载入流程已收到播放 ACK，只同步按钮，不重复发送命令。
+        setPlaying: setPlayFlag
     }));
 
     // console.log(props)
@@ -494,11 +454,12 @@ const ProgressCom = React.forwardRef((props, refs) => {
                 />
                 <div style={{ position: "absolute", right: "30%" }}>
                     <Select
-                        defaultValue="1.0X"
+                        value={playbackSpeed}
                         style={{
                             width: 80,
                         }}
                         onChange={(e) => {
+                            setPlaybackSpeed(e);
                             props.wsSendObj({ speed: e });
                         }}
                         placement={"topLeft"}

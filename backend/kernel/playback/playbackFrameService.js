@@ -131,11 +131,12 @@ function createPlaybackFrameService(deps) {
       sitPayload.rawPressureData = sitPressure;
       sitPayload.newArr147 = handL([...sitPressure]);
       sitPayload.rotate = sitFrame.rotateData;
-    } else {
-      sitPayload.newArr147 = sitFrame.rotateData.length ? sitRaw : sitRaw.slice(0, sitRaw.length - 4);
-      sitPayload.rotate = sitFrame.rotateData.length ? sitFrame.rotateData : sitRaw.slice(sitRaw.length - 4);
+    } else if (sitRow) {
+      sitPayload.newArr147 = sitRaw;
+      sitPayload.rotate = sitFrame.rotateData;
     }
 
+    if (!backRow || !backPayload) return;
     if (sensorType === handGloveFullPacket && backRaw.length >= 256) {
       const backPressure = backRaw.slice(0, 256);
       const backMapped = mapHandGloveFullPacketPressure([...backPressure], 'right');
@@ -160,8 +161,8 @@ function createPlaybackFrameService(deps) {
       backPayload.newArr147 = handR([...backPressure]);
       backPayload.rotate = backFrame.rotateData;
     } else {
-      backPayload.newArr147 = backFrame.rotateData.length ? backRaw : backRaw.slice(0, backRaw.length - 4);
-      backPayload.rotate = backFrame.rotateData.length ? backFrame.rotateData : backRaw.slice(backRaw.length - 4);
+      backPayload.newArr147 = backRaw;
+      backPayload.rotate = backFrame.rotateData;
     }
   }
 
@@ -235,7 +236,7 @@ function createPlaybackFrameService(deps) {
 
     if (sensorType?.includes?.('robot') && backPayload) {
       applyRobotPlayback({ sensorType, sitRow, backRow, sitPayload, backPayload });
-    } else if (isHandGloveType(sensorType) && backPayload) {
+    } else if (isHandGloveType(sensorType)) {
       applyHandGlovePlayback({ sensorType, sitRow, backRow, sitPayload, backPayload });
     }
 
@@ -274,7 +275,7 @@ function createPlaybackFrameService(deps) {
       }
       : undefined;
 
-    return { sitPayload, backPayload, headPayload };
+    return { sitPayload: isHandGloveType(sensorType) && !sitRow ? undefined : sitPayload, backPayload, headPayload };
   }
 
   return { buildPayloads, parseDisplaySystemPlaybackFrame };

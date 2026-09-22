@@ -45,7 +45,8 @@
  * | `commands` | canvas2d / webgl | 后端自有的命令式方法，原样铺进 `state.api` |
  * | `applyTuning(changed)` | canvas2d / webgl | `sitValue` 末尾回调，让后端吸收阈值变化 |
  * | `factory.commandNames` | canvas2d / webgl | 上面那些方法的名字，供 `useImperativeHandle` 用 |
- * | `setRawFrame(data)` | webgl | 接管 `changeWsDataRaw`：不过滤、不统计、原样上屏 |
+ * | `setRawFrame(data)` | webgl | 接管 `changeWsDataRaw`：不过滤，按原始显示布局统计并上屏 |
+ * | `sensorGrid` | sprite3d / webgl 规则矩阵 | 提供采样点投影、矩阵尺寸和指针控制，供框选与物理量尺使用 |
  *
  * **为什么非得开这几个口子。** 接 `canvas2d` 时本来只该往 `BACKEND_FACTORIES`
  * 加一行（这个文件原来的注释就是这么写的），实际不够：`NumWs.jsx` 暴露 12 个
@@ -73,6 +74,7 @@ import { applyFloorFilter, computeFrameStats, createRollingWindow } from '../cor
 import { createCanvas2dMatrixBackend } from './backends/canvas2d.js';
 import { createSpriteMatrixBackend } from './backends/sprite3d.js';
 import { createWebglMatrixBackend } from './backends/webgl.js';
+import { createPointGridSelection } from '../../shared/gridSelection.js';
 
 /**
  * 后端分派表。
@@ -92,7 +94,7 @@ const BACKEND_FACTORIES = {
  * 后端可以再往上挂自己的（`factory.commandNames`），两者拼起来就是
  * `useImperativeHandle` 的全集。名字只有这一处，不会和后端那份漂移。
  */
-const SHELL_METHODS = ['sitData', 'sitValue', 'changeWsData', 'changeWsDataRaw'];
+const SHELL_METHODS = ['sitData', 'sitValue', 'changeWsData', 'changeWsDataRaw', 'getSelectionTools', 'changeSelectFlag'];
 
 /**
  * 可共享的调参对象。
@@ -168,6 +170,7 @@ const NumMatrixRenderer = React.forwardRef((props, refs) => {
 
     state.totalWindow = createRollingWindow(config.chartWindow);
     state.pointWindow = createRollingWindow(config.chartWindow);
+    let selection = null, lastStats = [];
 
     /**
      * 回写侧栏读数与两条滚动曲线。
@@ -186,9 +189,14 @@ const NumMatrixRenderer = React.forwardRef((props, refs) => {
      * @param {boolean} [local] 回放模式；为真时不驱动侧栏曲线。
      */
     function reportStats(sourceArr, local = propsRef.current.local) {
+      lastStats = sourceArr;
+      selection?.updateValues(sourceArr);
       if (!config.manageSidebar) return;
 
-      const { max, point, total, mean } = computeFrameStats(sourceArr);
+      const regionStats = selection?.getStats();
+      const { max, point, total, mean } = regionStats
+        ? { max: regionStats.maxPres, point: regionStats.point, total: regionStats.totalPres, mean: regionStats.meanPres }
+        : computeFrameStats(sourceArr);
       const displayPress = config.totalMetric === 'max' ? max : total;
       const host = propsRef.current;
 
@@ -234,6 +242,11 @@ const NumMatrixRenderer = React.forwardRef((props, refs) => {
         if (peakRef.current) peakRef.current.textContent = String(index);
       },
     });
+    if (state.backend.sensorGrid) {
+      selection = createPointGridSelection({ ...state.backend.sensorGrid,
+        onSelectionChange: () => reportStats(lastStats) });
+      selection.updateValues(lastStats);
+    }
 
     /**
      * 收一帧数据。
@@ -291,6 +304,8 @@ const NumMatrixRenderer = React.forwardRef((props, refs) => {
       ...(state.backend.commands || {}),
       sitData,
       sitValue,
+      getSelectionTools: () => selection,
+      changeSelectFlag: (cameraEnabled) => selection?.setActive(!cameraEnabled),
       changeWsData: (wsPointData) => sitData({ wsPointData }, propsRef.current.local),
 
       // 裸数据通路。后端实现了 `setRawFrame` 就交给它（`webgl` 那份不过滤、
@@ -307,6 +322,7 @@ const NumMatrixRenderer = React.forwardRef((props, refs) => {
 
     return () => {
       state.api = null;
+      selection?.dispose();
       state.backend?.dispose();
       state.backend = null;
     };

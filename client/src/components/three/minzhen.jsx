@@ -1,5 +1,7 @@
 import Stats from "three/examples/jsm/libs/stats.module.js";
 import * as THREE from "three";
+import { createNativeSceneEntrance } from '../../renderers/nativeSceneEntrance';
+import { NATIVE_SCENE_ASSETS } from '../../displays/nativeSceneAssets';
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 // import { FlyControls } from 'three/examples/jsm/controls/FlyControls.js';
 import { TrackballControls } from "three/examples/jsm/controls/TrackballControls";
@@ -252,6 +254,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
 
   let container, stats;
+  let portalEntrance;
 
   let scene, renderer;
 
@@ -303,6 +306,7 @@ const Canvas = React.forwardRef((props, refs) => {
     // points  座椅
 
     const addChairModel = (model, sourceName) => {
+      if (portalEntrance && !portalEntrance.accept(model)) return;
       chair = model;
       chairRef.current = model;
       const box = new THREE.Box3().setFromObject(chair);
@@ -323,19 +327,20 @@ const Canvas = React.forwardRef((props, refs) => {
       setChairVisible(chairVisibleRef.current);
 
       scene.add(group);
+      portalEntrance?.setModel(model);
     };
 
     loader.load(
-      "./model/minzhen/chair.gltf",
+      NATIVE_SCENE_ASSETS.minzhen.url,
       function (gltf) {
         addChairModel(gltf.scene, "minzhen");
       },
       undefined,
       function (error) {
         console.warn("[minzhen] chair.gltf load failed. Check referenced .bin/textures in model/minzhen.", error);
-        loader.load("./model/chair3.glb", function (gltf) {
+        loader.load(NATIVE_SCENE_ASSETS.minzhen.fallback.url, function (gltf) {
           addChairModel(gltf.scene, "fallback");
-        });
+        }, undefined, () => portalEntrance?.fail());
       }
     );
 
@@ -364,7 +369,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
     // renderer
 
-    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: Boolean(props.portalEmbedded) });
     renderer.setPixelRatio(window.devicePixelRatio);
     // renderer.setSize(window.innerWidth, window.innerHeight);
 
@@ -379,6 +384,7 @@ const Canvas = React.forwardRef((props, refs) => {
     }
 
     renderer.setClearColor(0x000000);
+    if (props.portalEmbedded) portalEntrance = createNativeSceneEntrance(renderer, scene, camera, container);
 
     //FlyControls
     controls = new TrackballControls(camera, renderer.domElement);
@@ -672,6 +678,7 @@ const Canvas = React.forwardRef((props, refs) => {
   }
 
   function onWindowResize() {
+    if (portalEntrance) { portalEntrance.resize(); return; }
     renderer.setSize(window.innerWidth, window.innerHeight);
 
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -1227,6 +1234,13 @@ const Canvas = React.forwardRef((props, refs) => {
 
     return () => {
       cancelAnimationFrame(animationRequestId);
+      portalEntrance?.dispose();
+      window.removeEventListener('resize', onWindowResize);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      controls?.dispose();
+      selectHelper?.dispose?.();
+      renderer?.dispose();
       if (pointTweenRef.current) {
         pointTweenRef.current.stop();
         pointTweenRef.current = null;

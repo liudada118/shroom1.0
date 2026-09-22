@@ -18,7 +18,8 @@ export function buildPortalSystems(t, runtimeDefinitions = []) {
     if (typeof value !== 'string' || !value.trim() || seen.has(value)) continue;
     seen.add(value);
     systems.push({
-      value, label: metadata.name || value, category: 'custom', source: 'manifest',
+      value, label: metadata.name || value, category: 'custom', source: runtime.builtinTemplate ? 'builtin-template' : 'manifest',
+      nativeSourceType: runtime.builtinTemplate?.sourceType,
       matrix: metadata.matrix || runtime.sensorDefinition?.matrix, runtimeDefinition: runtime,
     });
   }
@@ -33,10 +34,15 @@ export function readPortalLicenseScope(message) {
   return undefined;
 }
 
-/** 自定义系统沿用独立安装入口；内置入口只在已知范围下判断是否可用。 */
+/** 已验证的密钥限定内置入口；自定义系统沿用独立安装入口。 */
 export function isPortalSystemAllowed(system, scope) {
-  return !!system && (system.source === 'manifest' || scope === null
-    || (Array.isArray(scope) && scope.includes(system.value)));
+  return !!system && scope !== undefined && (system.source === 'manifest' || scope === null
+    || (Array.isArray(scope) && scope.includes(system.nativeSourceType || system.value)));
+}
+
+/** 列表只显示当前已验证密钥可访问的系统，未知授权不回退全量目录。 */
+export function getAuthorizedPortalSystems(systems, scope) {
+  return systems.filter((system) => isPortalSystemAllowed(system, scope));
 }
 
 /** 分类与检索仅改变预览，不发送切换、串口或采集命令。 */

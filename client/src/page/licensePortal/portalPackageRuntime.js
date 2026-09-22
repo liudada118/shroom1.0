@@ -35,7 +35,7 @@ async function requestMarket(body, signal) {
 }
 
 /** 会话开关只在后端确认后显示已启用；快照包含有界真实算法结果，不另建压力代理。 */
-export function usePortalPackageRuntime(matrixName, open) {
+export function usePortalPackageRuntime(matrixName, open, configurationRevision = '') {
   const [snapshot, setSnapshot] = useState(EMPTY_MARKET);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
@@ -62,7 +62,7 @@ export function usePortalPackageRuntime(matrixName, open) {
     };
     poll();
     return () => { stopped = true; clearTimeout(timer); request?.abort(); };
-  }, [matrixName, open, active]);
+  }, [matrixName, open, active, configurationRevision]);
 
   /** 只传包 ID 和通道身份，不能通过超市执行任意路径或 Python 代码。 */
   const toggle = async (packageId, channelId, enabled) => {

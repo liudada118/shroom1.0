@@ -1,4 +1,6 @@
 import * as THREE from "three";
+import { createNativeSceneEntrance } from '../../renderers/nativeSceneEntrance';
+import { NATIVE_SCENE_ASSETS } from '../../displays/nativeSceneAssets';
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
@@ -84,6 +86,7 @@ const Canvas = React.forwardRef((props, refs) => {
     headGeometry
   let cube, chair, mixer, clips;
   let camera, scene, renderer;
+  let portalEntrance, removeResize;
 
   let dataFlag = false;
   const changeDataFlag = () => {
@@ -245,7 +248,11 @@ const Canvas = React.forwardRef((props, refs) => {
 
     // })
     window.addEventListener("resize", onWindowResize);
+    // 卸载时解除当前画布的窗口尺寸监听。
+    removeResize = () => window.removeEventListener("resize", onWindowResize);
+    // 门户画布按宿主尺寸调整，独立页保持原窗口尺寸。
     function onWindowResize() {
+      if (portalEntrance) return portalEntrance.resize();
       renderer.setSize(window.innerWidth, window.innerHeight);
 
       camera.aspect = window.innerWidth / window.innerHeight;
@@ -256,7 +263,8 @@ const Canvas = React.forwardRef((props, refs) => {
 
 
 
-    loader.load("./model/robot04_marge.fbx", function (fbx) {
+    loader.load(NATIVE_SCENE_ASSETS.robotLCF.url, function (fbx) {
+      if (portalEntrance && !portalEntrance.accept(fbx)) return;
       // chair = gltf.scene;
 
       chair = fbx
@@ -287,6 +295,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
       // // // // console.log(bodyCanvasRef.current.canvas)
       addCanvas(fbx, bodyCanvasRef.current.canvas)
+      portalEntrance?.setModel(fbx);
 
       // const ctx = bodyCanvasRef.current.canvas.getContext('2d');
 
@@ -315,7 +324,7 @@ const Canvas = React.forwardRef((props, refs) => {
       //     addCanvas(child , bodyCanvasRef.current.canvas)
       //   }
       // });
-    });
+    }, undefined, () => portalEntrance?.fail());
 
     // const loader = new OBJLoader();
     // loader.load(
@@ -354,6 +363,7 @@ const Canvas = React.forwardRef((props, refs) => {
     helper.material.opacity = 0.4;
     helper.material.transparent = true;
     helper.rotation.x = -Math.PI / 2
+    helper.visible = !props.portalEmbedded;
     scene.add(helper);
 
     const coordinates = [80, 0, -80];
@@ -409,7 +419,7 @@ const Canvas = React.forwardRef((props, refs) => {
     // 		scene.add( dirLight );
 
 
-    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: Boolean(props.portalEmbedded) });
     renderer.setPixelRatio(window.devicePixelRatio);
 
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -421,6 +431,10 @@ const Canvas = React.forwardRef((props, refs) => {
     renderer.gammaFactor = 2.2;
 
     renderer.setClearColor(0xaaaaaa);
+    if (props.portalEmbedded) {
+      renderer.setClearAlpha(0);
+      portalEntrance = createNativeSceneEntrance(renderer, scene, camera, container);
+    }
 
     //FlyControls
     controls = new TrackballControls(camera, renderer.domElement);
@@ -925,11 +939,16 @@ const Canvas = React.forwardRef((props, refs) => {
     return () => {
       if (animationRequestId) cancelAnimationFrame(animationRequestId);
       selectHelper?.dispose()
+      portalEntrance?.dispose();
+      removeResize?.();
+      window.removeEventListener("keydown", keyDown);
+      controls?.dispose();
+      renderer?.dispose();
     };
   }, []);
   const img = useRef()
   return (
-    <div>
+    <div style={props.portalEmbedded ? { width: '100%', height: '100%' } : undefined}>
       <div
         style={{ width: "100%", height: "100%" }}
         id={`canvas${props.index}`}

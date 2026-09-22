@@ -70,7 +70,7 @@ export function registerBuiltinRenderers() {
       label: '数字矩阵',
       description: '每格显示压力数值，背景按配色着色；一次 draw call 画完整片矩阵',
       load: () => import('./numMatrix/react/NumMatrixRenderer.jsx'),
-      // 没有框选。ROTATE 是 2026-08-06 接 `canvas2d` 后端时加的 ——
+      // 规则矩阵的框选能力由 getSelectionTools() 动态读取。ROTATE 是 canvas2d 的视角命令。
       // `num3D` 那条通路有 `changePointRotation` / `changeGroupRotate` /
       // `reset` / `setFrontView` 四个视角命令。**它依赖 backend 参数**，
       // 走 `sprite3d` 时没有；见下面 `optionalMethods` 那段说明。
@@ -82,6 +82,8 @@ export function registerBuiltinRenderers() {
         'sitValue',
         'changeWsData',
         'changeWsDataRaw',
+        'getSelectionTools',
+        'changeSelectFlag',
         'changeWsData147',
         'changeWsData147R',
         'changeWsData256',

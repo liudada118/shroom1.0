@@ -30,6 +30,7 @@ const {
 } = require('./commands/registerCalibrationZeroCommandHandler');
 const { registerSerialControlHandlers } = require('../serial/serialControlService');
 const { createControlCommandService } = require('./commands/controlCommandService');
+const { createAgentDeviceConnectionService } = require('./commands/agentDeviceConnectionService');
 const { createHttpApp } = require('./http/httpAppFactory');
 const { syncSystemTime } = require('./bootstrap/systemTimeSyncService');
 const {
@@ -81,6 +82,8 @@ const {
   getHistoryLengthFromCounts,
   getHistorySeries: createHistorySeries,
 } = require('../playback/historyPlaybackService');
+// 单通道超过 5 万行时按页读取历史，避免载入大采集占满内存。
+const HISTORY_EAGER_ROW_LIMIT = 50000;
 const { createPlaybackFrameService } = require('../playback/playbackFrameService');
 const {
   buildChannelPlaybackFrames,
@@ -380,6 +383,7 @@ const appRuntime = createAppRuntime({
   logger,
   runtimeResourceRoot,
   runtimeWritableRoot,
+  agentRoot: path.join(electronApp?.getPath ? electronApp.getPath('userData') : runtimeWritableRoot, 'agent'),
 });
 
 /**
@@ -428,7 +432,7 @@ const {
 
 const zeroStateStore = createZeroStateStore();
 const zeroChannelIdentityResolver = createZeroChannelIdentityResolver({
-  getActiveSensorType: () => file,
+  getActiveSensorType: () => appRuntime.builtinTemplates.currentId(file),
   listSerialChannels: appRuntime.displaySystems.listSerialChannels,
 });
 const zeroFrameAdapter = createZeroFrameAdapter({
@@ -752,11 +756,14 @@ function enqueueCollectionFrame(dbRef, dataToStore, channelOrIdentity) {
  * 所以这两个绝不能混用。
  *
  * @param {string} fileStr 传感器型号标识。
+ * @param {string} [templateId] 已校验的副本 ID；只改变数据库目录，不能替换原型号的通道布局。
  * @returns {{db: object, db1: object, db2: object}} 三个通道的数据库句柄，
  *   单通道型号的 db1/db2 为空。
  */
-function initDb(fileStr) {
-  return _initDbFromModule(fileStr, filePath, runtimeResourceRoot);
+function initDb(fileStr, templateId) {
+  const directory = templateId ? path.join(filePath, 'builtin-system-copies', templateId) : filePath;
+  if (templateId) fs.mkdirSync(directory, { recursive: true });
+  return _initDbFromModule(fileStr, directory, runtimeResourceRoot);
 }
 
 const playbackStateStore = createRuntimeStateStore({
@@ -907,19 +914,20 @@ function publishPlaybackFrame(index, options = {}) {
 
   if (backPayload) publishRealtimeFrame('back', backPayload, { source: 'playback' });
   if (headPayload) publishRealtimeFrame('head', headPayload, { source: 'playback' });
-  publishRealtimeFrame('sit', sitPayload, { source: 'playback' });
+  if (sitPayload) publishRealtimeFrame('sit', sitPayload, { source: 'playback' });
 }
 
 const playbackTimer = createPlaybackTimerService({
   getInterval: () => interval,
-  onTick: () => {
+  onTick: (steps) => {
     const currentIndex = getPlaybackState('nowIndex');
     const currentRange = getPlaybackState('indexArr');
-    if (currentIndex <= currentRange[1]) {
-      const nextIndex = currentIndex + 1;
+    const lastIndex = Math.min(length - 1, currentRange[1] + 1);
+    if (currentIndex < lastIndex) {
+      const nextIndex = Math.min(currentIndex + steps, lastIndex);
       setPlaybackState('nowIndex', nextIndex);
       publishPlaybackFrame(nextIndex);
-      return true;
+      return nextIndex < lastIndex;
     }
     return false;
   },
@@ -947,7 +955,7 @@ function broadcastHistorySelectionPayload(payload) {
  *
  * 流程：停定时器 → 清空旧回放状态 → 统计三通道行数 → 决定 eager/lazy → 建行序列 → 算曲线 → 广播
  * 元信息。`indexArr` 上界取 `length - 2`（回放 tick 是「先 +1 再取帧」，留一帧余量才不越界）。失败
- * 时广播全零元信息而不是静默返回 —— 库损坏、型号不对、日期不存在都是用户操作能触发的正常情况。
+ * 时广播全零元信息并向命令层抛错，让前端保留载入错误，不能继续自动播放。
  *
  * ⚠️ **先 `stopPlaybackTimer()` 再清状态**：反过来定时器可能在清空之后、新数据装上之前 tick 一次，
  * 读到空数组并把 `nowIndex` 推过界。
@@ -959,7 +967,7 @@ function broadcastHistorySelectionPayload(payload) {
  * 高阶方法返回空），反过来会让大采集的进度条只有几帧长。
  *
  * @param {string} dateLabel 历史日期标签（即入库时的 `saveTime`）。
- * @returns {void}
+ * @returns {{length:number, availableChannels:string[]}} 实际帧数与有数据的通道。
  */
 function loadSelectedHistory(dateLabel) {
   try {
@@ -1064,7 +1072,7 @@ function loadSelectedHistory(dateLabel) {
         channelIds: historyChannelDescriptors.map((descriptor) => descriptor.channelId),
         ...buildZeroPlaybackPayload(),
       });
-      return;
+      return { length, availableChannels: historyChannelDescriptors.map((descriptor) => descriptor.outputChannel) };
     }
 
     const sitStats = getHistoryStats(sitDb, dateLabel, logger);
@@ -1079,6 +1087,7 @@ function loadSelectedHistory(dateLabel) {
       : isCar(sensorType)
         ? getHistoryLengthFromCounts(sitStats.count, backStats.count)
         : getHistoryLengthFromCounts(sitStats.count);
+    if (!totalLength) throw new Error('所选记录没有可回放的数据，请刷新列表后重新选择');
     const maxRows = Math.max(sitStats.count, backStats.count, headStats.count);
     const eager = maxRows <= HISTORY_EAGER_ROW_LIMIT;
 
@@ -1105,7 +1114,11 @@ function loadSelectedHistory(dateLabel) {
     length = totalLength || historySeries.length;
     setPlaybackState('indexArr', [0, Math.max(length - 2, 0)]);
     timeStamp = historySeries.time;
-    detectedInterval = calcDetectedInterval(timeStamp);
+    // ⚠️ 曲线时间轴可能抽样；用连续原始帧推算间隔，否则长记录会被错误地减速。
+    const cadenceRows = sitRows.length ? sitRows : backRows.length ? backRows : headRows;
+    detectedInterval = calcDetectedInterval(Array.from(
+      { length: Math.min(length, 21) }, (_, index) => cadenceRows[index]?.timestamp,
+    ));
     interval = detectedInterval;
     historyArr = [0, length];
 
@@ -1118,6 +1131,11 @@ function loadSelectedHistory(dateLabel) {
       areaArr: historySeries.area,
       ...buildZeroPlaybackPayload(),
     });
+    return { length, availableChannels: [
+      ...(sitRows.length ? ['sit'] : []),
+      ...(backRows.length ? ['back'] : []),
+      ...(headRows.length ? ['head'] : []),
+    ] };
   } catch (error) {
     logger.error('[History] failed to load selected history:', error.message || error);
     broadcastHistorySelectionPayload({
@@ -1129,6 +1147,7 @@ function loadSelectedHistory(dateLabel) {
       areaArr: [],
       ...buildZeroPlaybackPayload(),
     });
+    throw error;
   }
 }
 
@@ -1175,7 +1194,7 @@ function startPlaybackTimer() {
  * `0 < d < 5000` 丢掉两类脏数据：非正间隔（时间戳乱序或重复，改过系统时间就会出现）与超 5 秒的
  * 间隔（采集中断过，那不是帧率；本仓最慢的采集也远快于 0.2Hz）。全被过滤掉时回退 `timeNum` 而
  * 不抛错 —— 时间戳不可用只影响回放速度，不该让「加载历史」整体失败。`Math.max(1, ...)` 挡住 0
- * （0 会让 `setInterval` 退化成尽快执行，把事件循环打满）。
+ * （0 会使到期帧数计算失效）。
  *
  * @param {number[]} timestamps 按帧顺序的时间戳。
  * @returns {number} 帧间隔毫秒数（≥ 1）。
@@ -1527,7 +1546,7 @@ serialManager.startReconnectLoop({
 
 const webSocketRuntime = createWebSocketRuntime({
   logger,
-  getSensorType: runtimeContext.getSensorType,
+  getSensorType: () => appRuntime.builtinTemplates.currentId(runtimeContext.getSensorType()),
 });
 const {
   channelBus,
@@ -1540,11 +1559,14 @@ let server = wsServer;
 algorithmMarketService = createAlgorithmMarketService({
   channelBus,
   packages: appRuntime.getAlgorithmMarketPackages(),
+  listUserPackages: appRuntime.getUserAlgorithmPackages,
   getContext: () => {
     const sensorType = runtimeContext.getSensorType();
     const nativePackages = { jqbed: 'mattress-vitals', smallBed: 'mattress-vitals', petCare: 'pet-care', petCareMini: 'pet-care-mini' };
     return {
-      sensorType,
+      sensorType: appRuntime.builtinTemplates.currentId(sensorType),
+      nativeSensorType: sensorType,
+      systemConfiguration: appRuntime.builtinTemplates.getRuntimeConfiguration(appRuntime.builtinTemplates.currentId(sensorType)),
       allowed: runtimeContext.getNowDate() < endDate,
       playback: runtimeContext.isLocalPlayback(),
       reservedPackageIds: [nativePackages[sensorType], ...appRuntime.displaySystems.getActiveAlgorithmPackageIds(sensorType)].filter(Boolean),
@@ -1677,6 +1699,9 @@ function parseOutboundSystemEvent(data) {
 function publishSystemEvent(data) {
   const event = parseOutboundSystemEvent(data);
   if (!event) return wsSubscriptions.publishScope('main', data);
+  for (const key of ['currentSensorType', 'activeSensorType']) {
+    if (event[key]) event[key] = appRuntime.builtinTemplates.currentId(event[key]);
+  }
   if (event.type === 'sensor.frame' && event.channelId) {
     return publishRealtimeFrame(
       event.outputChannel || event.sensorId || event.channelId,
@@ -1801,7 +1826,7 @@ function getRealtimeChannelMetadata() {
   const sensorType = runtimeContext.getSensorType();
   const manifestChannels = appRuntime.displaySystems.listSerialChannels(sensorType);
   const realtimeChannels = buildRealtimeChannelMetadata({
-    sensorType,
+    sensorType: appRuntime.builtinTemplates.currentId(sensorType),
     manifestChannels,
     managedChannels: serialManager.getStatus(),
   });
@@ -2038,7 +2063,7 @@ function activateSubmittedLicenseKey(licenseKey) {
       date: endDate,
       nowDate: runtimeContext.getNowDate(),
       file: licenseFile || file,
-      currentSensorType: file,
+      currentSensorType: appRuntime.builtinTemplates.currentId(file),
       selectFlag,
       ...(state.moduleConfig ? { moduleConfig: state.moduleConfig } : {}),
     },
@@ -2075,6 +2100,15 @@ registerRuntimeCommandHandlers(controlCommandRouter, {
 
 registerSerialControlHandlers(controlCommandRouter, {
   HAND_GLOVE_DOUBLE,
+  /** 原生副本切换前先核验身份；采集中切换会把一段记录拆到两个库。 */
+  resolveSystemSelection: (id) => {
+    const selection = appRuntime.builtinTemplates.resolve(id, selectFlag);
+    if ((selection.template || appRuntime.builtinTemplates.currentId(file) !== file) && getCollectionState('flag')) {
+      throw Object.assign(new Error('请先停止采集，再切换系统。'), { code: 'AGENT_DEVICE_BUSY', httpStatus: 409 });
+    }
+    return selection;
+  },
+  activateSystemSelection: appRuntime.builtinTemplates.activate,
   closeAllManagedSerialPorts,
   closeManagedSerialPort,
   closeManagedSerialPorts,
@@ -2225,6 +2259,7 @@ const webSocketHandlerContext = createWebSocketHandlerContext({
     wsSubscriptions,
   },
   mutableAccessors: {
+    currentSystemId: { get: () => appRuntime.builtinTemplates.currentId(runtimeContext.getSensorType()) },
     backAreaSelect: { get: () => backAreaSelect, set: (value) => { backAreaSelect = value; } },
     backPressSelect: { get: () => backPressSelect, set: (value) => { backPressSelect = value; } },
     baudRate: { get: runtimeContext.getBaudRate, set: (value) => { baudRate = value; } },
@@ -2618,7 +2653,28 @@ module.exports.getChannelBusStatus = getChannelBusStatus;
 module.exports.handleCommand = handleCommand;
 
 const httpApp = createHttpApp({
+  algorithmRecordService: require('../storage/history/algorithmRecordService').createAlgorithmRecordService({
+    getContext: () => ({ systemId: zeroChannelIdentityResolver.getActiveDisplaySystemId() || appRuntime.builtinTemplates.currentId(runtimeContext.getSensorType()), allowed: runtimeContext.getNowDate() < endDate }),
+    getDatabases: () => Object.fromEntries(['sit', 'back', 'head'].map((role) => [role, runtimeContext.getDatabase(role)])),
+  }),
   algorithmMarketService,
+  agentDeviceConnectionService: createAgentDeviceConnectionService({
+    controlCommandService,
+    getRuntimeState: () => ({
+      currentSensorType: appRuntime.builtinTemplates.currentId(runtimeContext.getSensorType()),
+      currentSystemId: zeroChannelIdentityResolver.getActiveDisplaySystemId(),
+      collecting: Boolean(getCollectionState('flag')),
+      localPlayback: runtimeContext.isLocalPlayback(),
+      playing: Boolean(playFlag),
+      historyMode: Boolean(history),
+      licensed: runtimeContext.getNowDate() < endDate,
+      licenseScope: selectFlag,
+    }),
+    getSerialStatus: () => serialManager.getStatus(),
+    getSystem: appRuntime.displaySystems.getById,
+    getEditor: appRuntime.displaySystems.getEditorById,
+    listSerialChannels: appRuntime.displaySystems.listSerialChannels,
+  }),
   agentAppService: appRuntime.agentApps,
   controlCommandService,
   getChannelBusStatus,
@@ -2642,6 +2698,8 @@ const httpApp = createHttpApp({
   saveDisplaySystem: appRuntime.displaySystems.save,
   saveDisplaySystemDisplaySection: appRuntime.displaySystems.saveDisplaySection,
   duplicateDisplaySystem: appRuntime.displaySystems.duplicate,
+  updateNativeSystem: appRuntime.builtinTemplates.update,
+  deleteNativeSystem: appRuntime.builtinTemplates.remove,
   // Agent / 脚本经 HTTP 写完展示系统后，让前端顶部菜单不用重启就能看到新系统。
   publishDisplaySystemsUpdated: (detail) => publishSystemEvent({ displaySystemsUpdated: detail }),
 });

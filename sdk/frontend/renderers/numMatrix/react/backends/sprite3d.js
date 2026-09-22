@@ -324,6 +324,7 @@ export function createSpriteMatrixBackend({
   const afterZoom = new THREE.Vector3();
   const lastDrag = new THREE.Vector2();
   let isDragging = false;
+  let interactionActive = false;
 
   const getWorldPoint = (event, target) => {
     const rect = canvas.getBoundingClientRect();
@@ -335,6 +336,7 @@ export function createSpriteMatrixBackend({
 
   const onWheel = (event) => {
     event.preventDefault();
+    if (interactionActive) return;
     if (!getWorldPoint(event, beforeZoom)) return;
     const scale = event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
     const nextZoom = THREE.MathUtils.clamp(camera.zoom * scale, MIN_ZOOM, MAX_ZOOM);
@@ -348,7 +350,7 @@ export function createSpriteMatrixBackend({
   };
 
   const onPointerDown = (event) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || interactionActive) return;
     isDragging = true;
     lastDrag.set(event.clientX, event.clientY);
     canvas.setPointerCapture(event.pointerId);
@@ -441,6 +443,33 @@ export function createSpriteMatrixBackend({
   }
 
   return {
+    // 坐标表可能是不规则布点，不能把其数据下标冒充等间距矩阵。
+    sensorGrid: coordinatePoints ? null : {
+      canvas, columns: grid.gridWidth, rows: grid.gridHeight,
+      /** 投影矩阵外沿，框选按完整格边界吸附，不能用格中心再加固定像素。 */
+      getGridBounds() {
+        const rect = canvas.getBoundingClientRect();
+        mesh.updateWorldMatrix(true, false); camera.updateWorldMatrix(true, false);
+        const first = new THREE.Vector3(-grid.gridWidth * worldCellSize / 2, -grid.gridHeight * worldCellSize / 2, 0).applyMatrix4(mesh.matrixWorld).project(camera);
+        const last = new THREE.Vector3(grid.gridWidth * worldCellSize / 2, grid.gridHeight * worldCellSize / 2, 0).applyMatrix4(mesh.matrixWorld).project(camera);
+        return { x1: rect.left + (first.x + 1) * rect.width / 2, y1: rect.top + (1 - first.y) * rect.height / 2,
+          x2: rect.left + (last.x + 1) * rect.width / 2, y2: rect.top + (1 - last.y) * rect.height / 2 };
+      },
+      /** 原始数字格中心经真实相机投影，跟随平移与缩放。 */
+      projectSensors() {
+        const rect = canvas.getBoundingClientRect();
+        mesh.updateWorldMatrix(true, false); camera.updateWorldMatrix(true, false);
+        const matrix = new THREE.Matrix4(), point = new THREE.Vector3();
+        return Array.from({ length: count }, (_, index) => {
+          mesh.getMatrixAt(index, matrix);
+          point.setFromMatrixPosition(matrix).applyMatrix4(mesh.matrixWorld).project(camera);
+          return { index, x: rect.left + (point.x + 1) * rect.width / 2, y: rect.top + (1 - point.y) * rect.height / 2,
+            visible: Math.abs(point.x) <= 1 && Math.abs(point.y) <= 1 && Math.abs(point.z) <= 1 };
+        });
+      },
+      /** 框选或量尺接管指针时停止拖动画布。 */
+      onInteractionChange(active) { interactionActive = active; isDragging = false; },
+    },
     /**
      * 收一帧数据。只存不画，画由帧循环驱动 —— 与原实现一致
      * （原实现也是 sitData 写模块级 ndata1、animate 里读）。

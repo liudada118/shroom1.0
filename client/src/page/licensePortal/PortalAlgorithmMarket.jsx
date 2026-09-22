@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { selectedNativeSystemId } from '../../displays/nativeSystemTemplates';
 import { packageDisabledReason, usePortalPackageRuntime } from './portalPackageRuntime';
 import PortalPackageOutputs from './PortalPackageOutputs';
 import { AppstoreOutlined, CheckOutlined, CloseOutlined, LineChartOutlined, HolderOutlined, SettingOutlined } from '@ant-design/icons';
@@ -19,7 +20,7 @@ export default function PortalAlgorithmMarket({ open, matrixName, metricDefiniti
   const [dragging, setDragging] = useState(null);
   const [category, setCategory] = useState('charts');
   const [selectedChannel, setSelectedChannel] = useState('');
-  const packages = usePortalPackageRuntime(matrixName, open);
+  const packages = usePortalPackageRuntime(selectedNativeSystemId(matrixName), open);
   const channel = packages.snapshot.channels.find((entry) => entry.channelId === selectedChannel) || packages.snapshot.channels[0];
 
   useEffect(() => subscribeFormulaCharts((system, next) => {
@@ -114,15 +115,16 @@ export default function PortalAlgorithmMarket({ open, matrixName, metricDefiniti
     <div className="portal-algorithm-market-track">
       {category === 'packages' ? packages.snapshot.packages.map((item) => {
         const instance = packages.snapshot.instances.find((entry) => entry.id === item.id);
+        const managed = packages.snapshot.configuredAlgorithms?.some((entry) => entry.packageId === item.id);
         const reason = packageDisabledReason(item, channel, packages.snapshot);
         const enabled = Boolean(instance);
-        return <button type="button" key={item.id} title={reason || item.description} className={`portal-algorithm-card is-package ${enabled || item.reserved ? 'is-added' : ''}`}
-          aria-pressed={enabled || item.reserved} aria-label={`${enabled ? '停用' : '启用'}${item.name}`}
-          disabled={Boolean(packages.busy) || (!enabled && Boolean(reason))}
+        return <button type="button" key={item.id} title={managed ? '请在系统编辑器中启用、停用或删除此算法' : reason || item.description} className={`portal-algorithm-card is-package ${enabled || item.reserved ? 'is-added' : ''}`}
+          aria-pressed={enabled || item.reserved} aria-label={`${managed ? '系统配置：' : enabled ? '停用' : '启用'}${item.name}`}
+          disabled={managed || Boolean(packages.busy) || (!enabled && Boolean(reason))}
           onClick={async () => { if (await packages.toggle(item.id, instance?.channelId || channel?.channelId, !enabled)) onShowCharts?.(); }}>
           <span className="portal-algorithm-card-top"><AppstoreOutlined aria-hidden="true" /><small>Python · {item.sampleRateHz || '—'} Hz 参考输入</small></span>
           <strong>{item.name}</strong><span className="portal-algorithm-card-description">{item.description}</span>
-          <span className="portal-algorithm-card-output"><span>{enabled ? `${item.metricDefinitions.length} 个可选输出` : reason || `${item.metricDefinitions.length} 个输出`}</span><b>{packages.busy === item.id ? '处理中…' : enabled ? '停用' : item.reserved ? '系统内置' : reason ? '不可启用' : '启用 +'}</b></span>
+          <span className="portal-algorithm-card-output"><span>{enabled ? `${item.metricDefinitions.length} 个可选输出` : reason || `${item.metricDefinitions.length} 个输出`}</span><b>{managed ? '系统配置' : packages.busy === item.id ? '处理中…' : enabled ? '停用' : item.reserved ? '系统内置' : reason ? '不可启用' : '启用 +'}</b></span>
         </button>;
       }) : templates.map((template) => {
         const added = Boolean(findChartByTemplate(definitions, template));
@@ -140,7 +142,7 @@ export default function PortalAlgorithmMarket({ open, matrixName, metricDefiniti
         </button>;
       })}
     </div>
-  </aside>{outputTarget && createPortal(packages.snapshot.instances.map((instance) => {
+  </aside>{outputTarget && createPortal(packages.snapshot.instances.filter((instance) => !instance.managed).map((instance) => {
     const item = packages.snapshot.packages.find((entry) => entry.id === instance.id);
     return item ? <PortalPackageOutputs key={`${instance.id}:${instance.token}`} item={item} instance={instance}
       channelLabel={packages.snapshot.channels.find((entry) => entry.channelId === instance.channelId)?.label || instance.channelId}

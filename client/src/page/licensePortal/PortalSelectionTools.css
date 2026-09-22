@@ -1,0 +1,33 @@
+.portal-selection-layer { position: absolute; inset: 0; pointer-events: none; color: #edf5ff; font: 14px/1.5 sans-serif; }
+.portal-selection-box { position: absolute; z-index: 9; border: 2px solid color-mix(in srgb, var(--region-color) 82%, white); background: color-mix(in srgb, var(--region-color) 24%, transparent); box-shadow: 0 0 0 1px var(--region-color); box-sizing: border-box; pointer-events: auto; cursor: move; touch-action: none; }
+.portal-selection-box.is-active { box-shadow: 0 0 0 1px #fff, 0 0 14px color-mix(in srgb, var(--region-color) 35%, transparent); }
+.portal-selection-box.is-draft { pointer-events: none; }
+.portal-selection-label { position: absolute; bottom: 100%; left: -2px; padding: 2px 8px; color: #08131e; background: var(--region-color); font-weight: 600; white-space: nowrap; pointer-events: none; }
+.portal-selection-delete { position: absolute; top: -28px; right: -28px; width: 24px; height: 24px; padding: 0; line-height: 20px; border: 1px solid #ff8585; border-radius: 4px; background: #101820; color: #ff8585; cursor: pointer; }
+.portal-selection-measure { position: absolute; left: -2px; top: calc(100% + 8px); padding: 3px 8px; border-radius: 14px; background: #030507ed; color: #fff; font: 600 12px/18px monospace; white-space: nowrap; pointer-events: none; user-select: none; }
+.portal-selection-handle { position: absolute; width: 14px; height: 14px; border: 2px solid var(--region-color); border-radius: 2px; background: #fff; box-sizing: border-box; }
+.portal-selection-handle.nw { left: -7px; top: -7px; cursor: nw-resize; }
+.portal-selection-handle.ne { right: -7px; top: -7px; cursor: ne-resize; }
+.portal-selection-handle.sw { left: -7px; bottom: -7px; cursor: sw-resize; }
+.portal-selection-handle.se { right: -7px; bottom: -7px; cursor: se-resize; }
+.portal-selection-handle.n { left: calc(50% - 7px); top: -7px; cursor: n-resize; }
+.portal-selection-handle.s { left: calc(50% - 7px); bottom: -7px; cursor: s-resize; }
+.portal-selection-handle.w { left: -7px; top: calc(50% - 7px); cursor: w-resize; }
+.portal-selection-handle.e { right: -7px; top: calc(50% - 7px); cursor: e-resize; }
+.portal-selection-panel { position: absolute; z-index: 23; top: 100px; right: 22px; width: 280px; max-height: calc(100vh - 320px); overflow: auto; padding: 14px; box-sizing: border-box; border: 1px solid #496579; border-radius: 12px; background: #0b1b29f5; box-shadow: 0 10px 35px #0006; pointer-events: auto; }
+.portal-selection-panel header, .portal-region-heading { display: flex; align-items: center; gap: 8px; }
+.portal-selection-panel header strong, .portal-region-heading strong { flex: 1; overflow-wrap: anywhere; }
+.portal-selection-panel p { margin: 10px 0; font-size: 12px; color: #b7cddd; }
+.portal-selection-panel .portal-selection-error { color: #ffbd91; }
+.portal-selection-panel section { padding: 10px 0 10px 10px; margin: 10px 0; border-left: 3px solid var(--region-color); background: #162a38; }
+.portal-selection-panel button, .portal-selection-panel input { min-height: 32px; border: 1px solid #4b667c; border-radius: 5px; background: #081621; color: #edf5ff; font: inherit; box-sizing: border-box; }
+.portal-selection-panel button { cursor: pointer; padding: 4px 8px; }
+.portal-selection-panel summary { padding: 8px 0; cursor: pointer; }
+.portal-region-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; padding-top: 8px; font-size: 12px; }
+.portal-region-stats b { font-variant-numeric: tabular-nums; }
+.portal-region-editor { display: grid; gap: 8px; padding: 8px 6px 0 0; }
+.portal-region-name { display: grid; gap: 3px; }
+.portal-region-coordinates { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.portal-region-editor input { width: 100%; min-width: 0; padding: 3px 5px; }
+.portal-selection-layer :focus-visible { outline: 2px solid #63d5ff; outline-offset: 3px; }
+@media (max-width: 820px) { .portal-selection-panel { top: auto; bottom: 192px; right: 12px; max-height: 220px; width: min(280px, calc(100vw - 24px)); } }

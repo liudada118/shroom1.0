@@ -5,6 +5,14 @@ import { packageDisabledReason, packageMetricValue } from './portalPackageRuntim
 import PortalPackageOutputs from './PortalPackageOutputs';
 
 describe('算法超市真实输出及输入限制', () => {
+  it('分类显示真实类别和阶梯趋势，未知不会伪装成概率', () => {
+    const item = { id: 'user-gesture', name: '动作识别', metricDefinitions: [{ id: 'classIndex', label: '识别类别', decimals: 0, values: { '-1': '未知', 0: '抚摸', 1: '拍打' } }] };
+    const history = [{ timestamp: 1000, metrics: { classIndex: 0 } }, { timestamp: 2000, metrics: { classIndex: 1 } }];
+    const html = renderToStaticMarkup(<PortalPackageOutputs item={item} instance={{ status: 'running', history }} />);
+    expect(html).toContain('拍打'); expect(html).toContain('H268V'); expect(html).not.toContain('%');
+    const unknown = renderToStaticMarkup(<PortalPackageOutputs item={item} instance={{ status: 'running', history: [{ timestamp: 1000, metrics: { classIndex: -1 } }] }} />);
+    expect(unknown).toContain('未知');
+  });
   it('已运行、断线、授权及点数不匹配都有可读说明', () => {
     const item = { compatibility: { matrixTotals: [1024] } };
     expect(packageDisabledReason(item, { live: true, matrix: { total: 256 } }, { allowed: true })).toContain('当前 256');

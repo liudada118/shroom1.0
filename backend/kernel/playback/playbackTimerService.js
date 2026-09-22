@@ -1,12 +1,13 @@
-/**
- * 历史回放定时器服务。
- *
- * 只管理播放定时器生命周期，不关心帧内容、数据库和 WebSocket。
- */
+const { performance } = require('node:perf_hooks');
+
+/** 按单调时钟推进回放；onTick(steps) 接收实际经过的帧数，不补发积压的中间帧。 */
 function createPlaybackTimerService({
   getInterval,
   onTick,
   onStop,
+  now = () => performance.now(),
+  schedule = setTimeout,
+  cancel = clearTimeout,
 }) {
   let timer = null;
   let playing = false;
@@ -15,8 +16,8 @@ function createPlaybackTimerService({
    * 清理当前定时器句柄，但不修改播放状态。
    */
   function clearTimer() {
-    if (timer) {
-      clearInterval(timer);
+    if (timer != null) {
+      cancel(timer);
       timer = null;
     }
   }
@@ -31,18 +32,32 @@ function createPlaybackTimerService({
   }
 
   /**
-   * 按当前 interval 启动历史回放定时器。
-   * 当 onTick 返回 false 时自动停止播放。
+   * 从当前位置按新 interval 计时，onTick 返回 false 时停止。
+   * ⚠️ 按已过时间合并帧推进，忙时只发布最新到期帧，否则卡顿后会拖慢或突发追帧。
    */
   function start() {
     playing = true;
     clearTimer();
-    timer = setInterval(() => {
-      const shouldContinue = onTick?.();
-      if (shouldContinue === false) {
-        stop();
+    const requestedInterval = Number(getInterval?.());
+    const interval = Number.isFinite(requestedInterval) && requestedInterval > 0 ? requestedInterval : 1;
+    let lastFrameTime = now();
+
+    /** 每次唤醒最多发布一次，把处理耗时计入下一次到期时间。 */
+    function tick() {
+      timer = null;
+      if (!playing) return;
+      const steps = Math.floor((now() - lastFrameTime) / interval);
+      if (steps > 0) {
+        lastFrameTime += steps * interval;
+        if (onTick?.(steps) === false) {
+          stop();
+          return;
+        }
       }
-    }, Math.max(1, Number(getInterval?.() || 1)));
+      if (playing) timer = schedule(tick, Math.max(1000 / 60, lastFrameTime + interval - now()));
+    }
+
+    timer = schedule(tick, Math.max(1000 / 60, interval));
   }
 
   /**

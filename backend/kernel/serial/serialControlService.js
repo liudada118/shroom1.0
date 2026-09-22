@@ -116,8 +116,8 @@ function registerSerialControlHandlers(router, deps) {
         localFlag: true,
         nowGetTime: message.getTime,
       });
-      loadSelectedHistory(message.getTime);
-      return { stop: true };
+      const selection = loadSelectedHistory(message.getTime);
+      return { stop: true, ...selection };
     },
   });
 
@@ -128,6 +128,7 @@ function registerSerialControlHandlers(router, deps) {
     handle: (message) => {
       requireAuthorizedRuntime();
       const runtime = getRuntime();
+      const selection = deps.resolveSystemSelection?.(message.file) || { id: message.file, sourceType: message.file };
 
       setRuntime({
         backClose: true,
@@ -164,8 +165,8 @@ function registerSerialControlHandlers(router, deps) {
         closeManagedSerialPort(serialRoles.HEAD, 'file switch');
       }
       closeMinzhenSensorPort('file switch');
-      const receiveFile = message.file;
-      const dbObj = initDb(receiveFile);
+      const receiveFile = selection.sourceType;
+      const dbObj = initDb(receiveFile, selection.template ? selection.id : undefined);
       petCareRuntimeService.resetAll();
       stopPlaybackTimer();
       setRuntime({
@@ -181,11 +182,12 @@ function registerSerialControlHandlers(router, deps) {
         historyChannels: [],
         indexArr: [0, 0],
       });
+      deps.activateSystemSelection?.(selection);
       // Display System dispatcher 的策略依赖当前传感器类型，切换后立即重绑，
       // 让刚保存的 parser/line-order/algorithm 链路无需重启软件即可接收数据。
       rebindDisplaySystemRuntime?.();
       // 当前选择与密钥授权范围是两类状态，不能再复用 file 字段，否则会覆盖前端授权列表。
-      publishSystemEvent({ currentSensorType: receiveFile });
+      publishSystemEvent({ currentSensorType: selection.id, ...(selection.template ? { nativeSensorType: receiveFile } : {}) });
     },
   });
 

@@ -9,6 +9,7 @@ let rebindCount = 0;
 const openedManifestPorts = [];
 const closedManagedPorts = [];
 const closeAllReasons = [];
+let selectedHistory = { length: 428, availableChannels: ['back'] };
 const runtime = {
   backTotal: 1024,
   endDate: 200,
@@ -49,7 +50,10 @@ registerSerialControlHandlers({
   isCar: () => false,
   isThreePortFile: () => false,
   listPorts: async () => [],
-  loadSelectedHistory: () => {},
+  loadSelectedHistory: () => {
+    if (selectedHistory instanceof Error) throw selectedHistory;
+    return selectedHistory;
+  },
   logSerialPortList: () => {},
   logger: { error: () => {}, warn: () => {} },
   openBackSerialPort: () => {},
@@ -120,5 +124,12 @@ assert.throws(
   () => serialPortHandler.handle({ channelClose: ['missing'] }, { scope: 'http' }),
   /not declared by current manifest/,
 );
+
+const historyLoadHandler = handlers.find((handler) => handler.name === 'history-load-date');
+assert.deepStrictEqual(historyLoadHandler.handle({ getTime: 'right-only' }), {
+  stop: true, length: 428, availableChannels: ['back'],
+});
+selectedHistory = new Error('所选记录没有可回放的数据');
+assert.throws(() => historyLoadHandler.handle({ getTime: 'missing' }), /没有可回放的数据/);
 
 console.log('serialControlService.test.js passed');

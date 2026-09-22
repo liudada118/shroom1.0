@@ -626,3 +626,19 @@
         border-left: 0;
     }
 }
+.builtinChartViewport {
+    position: relative;
+}
+
+.playbackChartCursor {
+    position: absolute;
+    top: 1px;
+    bottom: 1px;
+    width: 0;
+    border-left: 2px dashed #01f1e3;
+    pointer-events: none;
+}
+
+.playbackChartCursor[hidden] {
+    display: none;
+}

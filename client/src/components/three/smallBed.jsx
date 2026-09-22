@@ -1,5 +1,6 @@
 import Stats from "three/examples/jsm/libs/stats.module.js";
 import * as THREE from "three";
+import { installParticleEntrance } from '../../renderers/particleEntrance';
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 // import { FlyControls } from 'three/examples/jsm/controls/FlyControls.js';
 import { TrackballControls } from "three/examples/jsm/controls/TrackballControls";
@@ -103,6 +104,7 @@ let isShiftPressed = false;
   let container, stats;
 
   let camera, scene, renderer;
+  let disposeParticleEntrance, portalResizeObserver;
   let controls;
   let cube, chair, mixer, clips;
   const clock = new THREE.Clock();
@@ -193,6 +195,7 @@ let isShiftPressed = false;
     group.position.z = 5
     scene.add(group);
     const helper = new THREE.GridHelper(2000, 100);
+    helper.visible = !props.portalEmbedded;
     helper.position.y = -199;
     helper.material.opacity = 0.25;
     helper.material.transparent = true;
@@ -211,7 +214,7 @@ let isShiftPressed = false;
 
     // renderer
 
-    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: Boolean(props.portalEmbedded) });
     renderer.setPixelRatio(window.devicePixelRatio);
     // renderer.setSize(window.innerWidth, window.innerHeight);
 
@@ -220,7 +223,13 @@ let isShiftPressed = false;
     renderer.outputEncoding = THREE.sRGBEncoding;
     container.replaceChildren(renderer.domElement);
 
-    renderer.setClearColor(0x000000);
+    renderer.setClearColor(0x000000, props.portalEmbedded ? 0 : 1);
+    if (props.portalEmbedded) {
+      disposeParticleEntrance = installParticleEntrance(renderer, scene, camera, particles, { rows: AMOUNTX, cols: AMOUNTY });
+      portalResizeObserver = new ResizeObserver(onWindowResize);
+      portalResizeObserver.observe(container);
+      onWindowResize();
+    }
 
     //FlyControls
     controls = new TrackballControls(camera, renderer.domElement);
@@ -492,10 +501,15 @@ let isShiftPressed = false;
   }
   //
 
+  /** 入口嵌入时跟随真实宿主尺寸，独立展示继续使用窗口尺寸。 */
   function onWindowResize() {
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    const width = props.portalEmbedded ? container.clientWidth : window.innerWidth;
+    const height = props.portalEmbedded ? container.clientHeight : window.innerHeight;
+    if (!width || !height) return;
+    renderer.setSize(width, height, !props.portalEmbedded);
+    if (props.portalEmbedded) Object.assign(renderer.domElement.style, { width: '100%', height: '100%', display: 'block' });
 
-    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.aspect = width / height;
 
     // camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
@@ -923,6 +937,9 @@ let isShiftPressed = false;
 
     return () => {
       cancelAnimationFrame(animationRequestId);
+      disposeParticleEntrance?.();
+      portalResizeObserver?.disconnect();
+      controls?.dispose();
       document.removeEventListener('pointerdown', pointDown)
       document.removeEventListener('pointermove', pointMove)
       document.removeEventListener('pointerup', pointUp)
@@ -937,9 +954,9 @@ let isShiftPressed = false;
     };
   }, []);
   return (
-    <div>
+    <div style={props.portalEmbedded ? { width: '100%', height: '100%' } : undefined}>
       <div
-
+        style={props.portalEmbedded ? { width: '100%', height: '100%' } : undefined}
         id={`canvas`}
       ></div>
     </div>

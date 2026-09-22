@@ -1,4 +1,5 @@
 import { extractFormulaChartExpression } from './formulaChartRuntime';
+import { selectedNativeSystemId } from '../../displays/nativeSystemTemplates';
 
 /**
  * 用户自定义公式图表清单的唯一主人。
@@ -43,7 +44,7 @@ export function clampFormulaChartDecimals(value) {
  * @returns {string} localStorage 键名。
  */
 export function formulaChartStorageKey(matrixName) {
-  return `shroom.formulaCharts.v1.${encodeURIComponent(matrixName || 'default')}`;
+  return `shroom.formulaCharts.v1.${encodeURIComponent(selectedNativeSystemId(matrixName) || 'default')}`;
 }
 
 /**

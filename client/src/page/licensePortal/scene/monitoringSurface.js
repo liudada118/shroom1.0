@@ -25,7 +25,13 @@ export function waitForMonitoringSurface(root, signal, timeoutMs = 4000) {
     };
     if (signal?.aborted) { finish(); return; }
     signal?.addEventListener('abort', finish, { once: true });
-    timer = setTimeout(finish, timeoutMs);
+    // 大型原生模型继续留在当前预览等待；不能在 4 秒时交接空画布，再突然弹出模型。
+    timer = setTimeout(() => {
+      const canvas = root.querySelector('.portal-data-renderer canvas');
+      if (canvas?.shroomSceneLoading && canvas.dataset.modelState === 'loading') {
+        timer = setTimeout(() => { canvas.shroomSceneLoading?.fail(); finish(); }, 26000);
+      } else finish();
+    }, timeoutMs);
     frame = requestAnimationFrame(check);
   });
 }

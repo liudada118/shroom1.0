@@ -1,6 +1,6 @@
 # 开发者手册：当前代码如何运行
 
-> 核对日期：2026-09-11。描述当前源码，不描述未来平台目标。入口见 [文档导航](README.md)。
+> 核对日期：2026-09-15。描述当前源码，不描述未来平台目标。入口见 [文档导航](README.md)。
 > 本次依据源码和已有测试入口做静态核对；不等同于安装包或真实硬件验收。
 
 ## 1. 从哪里开始读
@@ -13,6 +13,7 @@
 | 串口字节怎样变成压力帧，怎样采集、回放和导出 | [数据与算法链路](chains/data-flow.md) |
 | 首页、弹窗、进入、渲染、返回的状态和动画怎么衔接 | [界面与渲染链路](chains/interface-flow.md) |
 | 新系统、Python 算法、自定义渲染和图表如何接入 | 本页第 4 节，再读上述两条链路的对应部分 |
+| 软件内 Agent 如何配置、执行和恢复 | [内置 Agent 使用与开发说明](embedded-agent.md) |
 | 修改后该跑哪些测试 | [验证矩阵](../ARCHITECTURE_INDEX.md) |
 | 某个设计为什么曾这样改 | [历史架构与维护记录](../ARCHITECTURE.md)，按符号或日期搜索 |
 
@@ -22,6 +23,9 @@
 
 ```text
 Electron 主进程 app/electron/index.js
+  ├─ agentProcess.js → 独立 utilityProcess → backend/agent-runtime/worker.js
+  │    ├─ Responses 模型、受限工具、会话与附件
+  │    └─ 现有 HTTP 配置服务 / 有界 WebSocket 帧观察
   └─ backend/runtime/index.js → backend/kernel/platform/server.js
        ├─ 串口 / 协议 / 处理 / 采集 / SQLite
        ├─ HTTP 控制及配置 :19245
@@ -30,12 +34,13 @@ Electron 主进程 app/electron/index.js
 
 Electron 渲染进程
   └─ React 门户 → Home / Manifest 展示 → Three.js、Canvas、图表
-       └─ Agent iframe（由宿主转发只读帧，不直接连接硬件）
+       ├─ Agent App iframe（展示扩展，由宿主转发只读帧，不直接连接硬件）
+       └─ 内置 Agent 对话抽屉（受限 preload 桥，不持有持久化密钥）
 
 网页来源：开发态 Vite；打包态本地 build 静态服务 :12321
 ```
 
-- 后端由 Electron 主进程加载，不是默认独立 Node 服务；同步计算、数据库操作会占用这个进程的事件循环。Python 才是另起的算法子进程。
+- 后端由 Electron 主进程加载，不是默认独立 Node 服务；同步计算、数据库操作会占用这个进程的事件循环。Python 算法与内置 Agent 分别使用独立进程。
 - [窗口配置](../app/electron/index.js) 启用 `contextIsolation`、`sandbox`，关闭 `nodeIntegration`；需要系统能力时查 [preload](../app/electron/preload.js)，不要在 React 中直接使用 Node API。
 - [HTTP/WS 契约](../sdk/backend/contract/sdkApiContract.js) 将新命令传输定义为 HTTP、帧传输定义为 WebSocket。存量扁平 WS 控制入口仍在运行，`Home.wsSendObj` 的三个 JQBed 算法配置命令仍走 WS；不能将迁移方向写成已经全面完成。多传感器靠 `channelId` 区分，不靠增加端口。
 - `backend/kernel` 是应用编排；协议、串口底层、采集等通用实现位于 `sdk/backend`。`client/src/renderers/RendererHost.jsx` 是应用适配入口，组件主体来自 `sdk/frontend`。
@@ -58,9 +63,10 @@ Electron 渲染进程
 ### 关闭顺序
 
 `before-quit` → [createApplicationQuitHandler](../app/electron/applicationQuit.js) 阻止第一次退出
-→ `cleanupApplicationResources` → 后端 `shutdownServer` → 清理完成后再次 `app.quit()`。
+→ `cleanupApplicationResources` → 停止 Agent 后续调度并回收独立进程 → 后端 `shutdownServer` → 清理完成后再次 `app.quit()`。
 
 - Electron 清理共用一个 Promise；停止开发服务，并行关闭前端静态服务和后端。
+- Agent 按需启动，退出时先中止模型请求与后续写操作；已发出的操作无法确认结果时保留 `uncertain`，重启不会重放。
 - 后端先停 Display System 分发并 dispose 算法超市，再进入 [serverShutdownOrchestrator](../backend/kernel/platform/bootstrap/serverShutdownOrchestrator.js)。
 - 编排器停止回放和串口重连，先标记关闭状态，再用先前捕获的句柄关闭串口、WS、HTTP、Python 和数据库。
 - 顶层等待上限为 8 秒；部分资源关闭有自己的超时。退出成功不证明每项都正常释放，异常要看日志中的 warning。

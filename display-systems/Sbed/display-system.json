@@ -83,7 +83,8 @@
     ],
     "canvas": {
       "colormap": {
-        "id": "classic"
+        "id": "classic",
+        "reverse": false
       },
       "overlays": [],
       "widgets": [
@@ -190,7 +191,17 @@
           "area"
         ]
       }
-    }
+    },
+    "chartCards": [
+      {
+        "templateId": "agent-maxPressure-0",
+        "name": "峰值压力",
+        "formula": "max",
+        "unit": "",
+        "decimals": 1,
+        "color": "#ff0000"
+      }
+    ]
   },
   "metadata": {
     "runtimeMode": "parallel",

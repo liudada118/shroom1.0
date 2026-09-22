@@ -10,6 +10,7 @@ import { verifyPortalSerialFeedback } from './portal-serial-feedback.mjs';
 
 const requireClient = createRequire(new URL('../../client/package.json', import.meta.url));
 const requireRoot = createRequire(new URL('../../package.json', import.meta.url));
+const { glovePlaybackFrames } = requireRoot('./backend/tests/fixtures/glovePlayback.cjs');
 const { createAlgorithmMarketService } = requireRoot('./backend/extension-host/runtime/algorithmMarketService');
 const { discoverBuiltinAlgorithmPackages } = requireRoot('./backend/extension-host/manifest/builtinAlgorithmPackageCatalog');
 const { createChannelBus } = requireRoot('@shroom/backend/telemetry/channelBus.js');
@@ -144,12 +145,16 @@ try {
   const sockets = new Set();
   let licenseFailure = false;
   let catalogFailure = false;
+  let bootstrapKey = 'fixture-key';
+  let bootstrapScope = 'all';
   const commands = [];
   await page.routeWebSocket(/:19999/, (ws) => {
     socket = ws;
     sockets.add(ws);
     ws.onClose(() => sockets.delete(ws));
-    ws.send(JSON.stringify({ date: Date.now() + 30 * 86400000, nowDate: Date.now(), selectFlag: 'all', licenseKey: 'fixture-key' }));
+    ws.send(JSON.stringify({ selectFlag: bootstrapScope }));
+    ws.send(JSON.stringify({ licenseKey: bootstrapKey }));
+    ws.send(JSON.stringify({ date: Date.now() + 30 * 86400000, nowDate: Date.now(), selectFlag: bootstrapScope }));
   });
   await page.route('http://127.0.0.1:19245/**', async (route) => {
     const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type' };
@@ -175,9 +180,28 @@ try {
       if (command.type === 'history.mode' && command.payload.local) for (const peer of sockets) peer.send(JSON.stringify({ timeArr: [
         { date: 'session-one', name: '测试采集一' }, { date: 'session-two', name: '测试采集二' }, { date: 'session-three', name: '测试采集三' },
       ] }));
-      if (command.type === 'license.activate') for (const peer of sockets) peer.send(JSON.stringify(licenseFailure
-        ? { licenseError: '测试：密钥错误' }
-        : { date: Date.now() + 30 * 86400000, nowDate: Date.now(), selectFlag: 'all', valid: true }));
+      if (command.type === 'history.load') for (const peer of sockets) peer.send(JSON.stringify({
+        length: 4, historyTimeArr: [1000, 1100, 1200, 1300], index: 0,
+        pressArr: [0, 2048, 4096, 8192], areaArr: [0, 1024, 1024, 1024],
+      }));
+      if (command.type === 'history.load' && algorithmSystem === 'hand0205') {
+        return route.fulfill({ headers, json: { code: 0, data: { ok: true, data: { results: [
+          { name: 'history-load-date', length: 4, availableChannels: ['back'] },
+        ] } } } });
+      }
+      if (command.type === 'playback.control' && command.payload.play && algorithmSystem === 'hand0205') {
+        const frames = glovePlaybackFrames({ backRows: [{ data: JSON.stringify({ pressureData: Array(256).fill(20), rotate: [0, 0, 0, 1], zeroFrame: [] }) }] });
+        for (const peer of sockets) for (const frame of frames) peer.send(JSON.stringify(frame));
+      }
+      if (command.type === 'license.activate') {
+        if (licenseFailure || command.payload.key === 'invalid-fixture-key') {
+          return route.fulfill({ status: 400, headers, json: { code: 1, data: { ok: false, message: '测试：密钥错误' } } });
+        }
+        const payload = { date: Date.now() + (command.payload.key === 'expired-fixture-key' ? -1000 : 30 * 86400000), nowDate: Date.now(),
+          selectFlag: command.payload.key === 'chair-fixture-key' ? ['wholeChair'] : 'all', valid: true };
+        for (const peer of sockets) peer.send(JSON.stringify(payload));
+        return route.fulfill({ headers, json: { code: 0, data: { ok: true, data: { results: [{ name: 'license-activation', activationCode: 'OK', payload }] } } } });
+      }
       return route.fulfill({ headers, json: { code: 0, data: { ok: true } } });
     }
     return route.fulfill({ status: 404, headers, json: {} });
@@ -262,7 +286,7 @@ try {
   await page.screenshot({ path: join(screenshots, 'chair.png'), fullPage: true });
   await page.getByRole('button', { name: '康养监测', exact: true }).click();
   await page.locator('[data-system="bed4096"]').click();
-  await page.locator('.system-scene-particle-root[data-scene="care"][data-model-status="ready"]').waitFor();
+  await page.locator('.system-scene-particle-root[data-scene="heatmap64"][data-model-status="ready"]').waitFor();
   await page.getByRole('button', { name: '具身触觉', exact: true }).click();
   await page.locator('[data-system="robot1"]').click();
   await page.locator('.system-scene-particle-root[data-scene="robot"][data-model-status="ready"]').waitFor({ timeout: 60000 });
@@ -283,6 +307,8 @@ try {
   assert.ok(!commands.some((command) => command.type === 'sensor.switch'));
   assert.equal(await page.locator('.is-scene-expanded').count(), 0, '授权失败不放大预览或伪装进入系统');
   licenseFailure = false;
+  await page.getByRole('button', { name: '验证密钥', exact: true }).click();
+  await page.getByRole('button', { name: /测试 32×32 呼吸重心系统/ }).waitFor();
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.evaluate(() => { window.__portalPrepareGate = new Promise((resolve) => { window.__releasePortalPreparation = resolve; }); });
   await page.getByRole('button', { name: '进入该系统' }).click();
@@ -360,6 +386,7 @@ try {
   await page.getByRole('heading', { name: 'Shroom Vision' }).waitFor();
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.route('**/model/chair3.glb', (route) => route.fulfill({ status: 404, body: 'missing model' }));
+  await page.route('**/model/0717.fbx', (route) => route.fulfill({ status: 404, body: 'missing model' }));
   await page.reload();
   await page.getByRole('button', { name: /座椅感知/ }).click();
   await page.locator('.system-scene-particle-root[data-scene="chair"][data-model-status="error"]').waitFor();
@@ -369,6 +396,54 @@ try {
   console.log('PORTAL_RESPONSIVE_AND_FAILURES_PASS');
   }
   catalogFailure = false;
+  await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__portal-test`);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.getByRole('button', { name: '系统列表', exact: true }).click();
+  await page.locator('[data-system="hand"]').waitFor();
+  for (const [width, height] of [[1440, 900], [1366, 768]]) {
+    await page.setViewportSize({ width, height });
+    const space = await page.locator('.system-options').evaluate((node) => {
+      const bounds = node.getBoundingClientRect();
+      const rows = [...node.querySelectorAll('.system-option')].map((item) => item.getBoundingClientRect());
+      return { height: bounds.height, visibleRows: rows.filter((rect) => rect.top >= bounds.top && rect.bottom <= bounds.bottom + 1).length };
+    });
+    assert.ok(space.visibleRows >= 4, `${width}×${height} 至少完整展示四个系统：${JSON.stringify(space)}`);
+    console.log('PORTAL_DIRECTORY_SPACE', { width, height, ...space });
+    await page.screenshot({ path: join(screenshots, `system-list-${width}.png`) });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole('button', { name: '更换密钥', exact: true }).click();
+  await page.locator('#portal-system-key').fill('chair-fixture-key');
+  assert.equal(await page.locator('.portal-system-option').count(), 0, '改密钥立即清空旧授权系统');
+  await page.getByRole('button', { name: '验证密钥', exact: true }).click();
+  await page.locator('[data-system="wholeChair"]').waitFor();
+  assert.deepEqual(await page.locator('.portal-system-option').evaluateAll((nodes) => nodes.map((node) => node.dataset.system)),
+    ['wholeChair', 'portal-custom-mat'], '受限密钥只显示授权内置系统和独立安装系统');
+  assert.equal(await page.locator('[data-system="hand"]').count(), 0);
+  await page.getByRole('button', { name: '更换密钥', exact: true }).click();
+  await page.locator('#portal-system-key').fill('invalid-fixture-key');
+  await page.getByRole('button', { name: '验证密钥', exact: true }).click();
+  await page.getByRole('alert').filter({ hasText: '测试：密钥错误' }).waitFor();
+  assert.equal(await page.locator('.portal-system-option').count(), 0, '失败不能恢复旧授权范围');
+  await page.locator('#portal-system-key').fill('expired-fixture-key');
+  await page.getByRole('button', { name: '验证密钥', exact: true }).click();
+  await page.getByRole('alert').filter({ hasText: '密钥已过期' }).waitFor();
+  assert.equal(await page.locator('.portal-system-option').count(), 0);
+  await page.locator('#portal-system-key').fill('fixture-key');
+  await page.getByRole('button', { name: '验证密钥', exact: true }).click();
+  await page.locator('[data-system="hand"]').waitFor();
+  assert.ok(await page.locator('.portal-system-option').count() > 2, '全授权密钥恢复完整目录');
+  bootstrapKey = 'chair-fixture-key'; bootstrapScope = ['wholeChair'];
+  await page.reload();
+  await page.locator('[data-system="wholeChair"]').waitFor();
+  socket.send(JSON.stringify({ date: Date.now() + 30 * 86400000, nowDate: Date.now(), selectFlag: 'all' }));
+  await page.evaluate(() => new Promise(requestAnimationFrame));
+  await page.getByRole('button', { name: '更换密钥', exact: true }).click();
+  assert.equal(await page.locator('#portal-system-key').inputValue(), 'chair-fixture-key');
+  assert.deepEqual(await page.locator('.portal-system-option').evaluateAll((nodes) => nodes.map((node) => node.dataset.system)),
+    ['wholeChair', 'portal-custom-mat'], '其他窗口的无关联授权广播不能替换当前密钥目录');
+  bootstrapKey = 'fixture-key'; bootstrapScope = 'all';
+  console.log('PORTAL_LICENSE_FILTER_PASS');
   await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__portal-test?actual-monitor=1`);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.getByRole('button', { name: /具身触觉/ }).click();
@@ -779,6 +854,14 @@ try {
   await page.screenshot({ path: join(screenshots, 'glove-solid-monitor.png') });
   assert.equal(await page.getByRole('group', { name: '连接设备', exact: true }).getByRole('combobox').count(), 2,
     '双手系统在顶部保留左右两个独立串口下拉');
+  await page.getByRole('button', { name: '回放', exact: true }).click();
+  const glovePlayback = page.getByRole('dialog', { name: '回放与下载', exact: true });
+  await glovePlayback.getByRole('radio', { name: '回放：测试采集一', exact: true }).check();
+  await glovePlayback.getByRole('button', { name: '载入回放', exact: true }).click();
+  await glovePlayback.waitFor({ state: 'hidden' });
+  await page.locator('.aside').getByText('5120', { exact: true }).waitFor();
+  await page.screenshot({ path: join(screenshots, 'glove-right-only-playback.png') });
+  console.log('GLOVE_RIGHT_ONLY_PLAYBACK_PASS');
   await page.getByRole('button', { name: '返回系统列表', exact: false }).first().click();
   await page.getByRole('heading', { name: '选择你的展示系统' }).waitFor();
   assert.equal(await page.locator('.portal-runtime-monitor').count(), 0);

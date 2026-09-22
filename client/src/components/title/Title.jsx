@@ -23,13 +23,15 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { bthClickHandle as heatmapBthClickHandle } from '../onestep/heatmap';
 import { getDisplayDefinition, registerRuntimeDisplayDefinition } from '../../displays/registry';
+import { syncNativeSystemTemplates } from '../../displays/nativeSystemTemplates';
 import { buildAccessibleSensorOptions } from '../../services/sensorStatus';
+import { resolveNativeSystemType } from '../../displays/nativeSystemTemplates';
 import { getBuiltinSystemOptions } from '../../services/displaySystemOptions';
 import { translateDomainLabel } from '../../i18n/translateDomainLabel';
 import { getLanguageLocale } from '../../i18n';
 import JqbedAlgorithmConfigModal from '../../extensions/jqbed/JqbedAlgorithmConfigModal';
 import { getJqbedConfigAccess } from '../../extensions/jqbed/jqbedAlgorithmConfig';
-import { commandClient } from '../../services/command/commandClient';
+import { commandClient, commandFromLegacyFields } from '../../services/command/commandClient';
 import { serialFeedback, serialErrorText } from '../../services/serial/serialFeedback';
 import {
   PRESSURE_SCENES,
@@ -59,7 +61,7 @@ const HUMAN_BODY_COLOR_SLIDER_MAX = 5000
 const HUMAN_BODY_DEFAULT_COLOR = 1555
 const HUMAN_BODY_DEFAULT_SIZE = 31
 const HUMAN_BODY_OPTIMIZED_MATRIX = 'humanBodyOptimized'
-const isHumanBodyMatrixTitle = (matrixName) => ['humanBody', HUMAN_BODY_OPTIMIZED_MATRIX].includes(matrixName)
+const isHumanBodyMatrixTitle = (matrixName) => ['humanBody', HUMAN_BODY_OPTIMIZED_MATRIX].includes(resolveNativeSystemType(matrixName))
 const HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES = [1205, 5000]
 const HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES = [20, 60]
 const MINZHEN_NORMAL_DEFAULT_COLOR = 415
@@ -316,7 +318,6 @@ class Title extends React.Component {
       portalDownloadValues: [],
       portalBusy: false,
       portalError: '',
-      portalDisplayOpen: false,
       portalSpecialOpen: false,
       portalToolsOpen: false,
       portalToolsCollapsed: false,
@@ -399,13 +400,16 @@ class Title extends React.Component {
     ])
       .then(([displayPayload, serialPayload]) => {
         if (this._portalUnmounted || scope !== this._portalScope) return;
-        const definitions = displayPayload?.displaySystems?.runtimeDefinitions || []
+        const definitions = displayPayload?.displaySystems?.runtimeDefinitions
+        if (!Array.isArray(definitions)) throw new Error('系统目录格式不正确')
+        syncNativeSystemTemplates(definitions)
         const dynamicSensors = definitions
           .map((definition) => registerRuntimeDisplayDefinition(definition))
           .filter(Boolean)
-          .map((definition) => ({ label: definition.label, value: definition.type }))
+          .map((definition) => ({ label: definition.label, value: definition.type, nativeSourceType: definition.nativeSourceType }))
         const statuses = serialPayload?.data?.serial || serialPayload?.serial || []
         this.setState({ dynamicSensors })
+        this.props.onRuntimeDefinitionsLoaded?.()
         ;(Array.isArray(statuses) ? statuses : [statuses]).forEach(this.applySerialStatus)
       })
       .catch((error) => console.warn('[DisplaySystems] load failed', error))
@@ -563,7 +567,7 @@ class Title extends React.Component {
       this._csvBatch = null;
       this.setState({ serialPending: {}, serialStates: {}, manifestPortSelections: {},
         portalPlaybackValue: '', portalDownloadValues: [], portalPlaybackOpen: false,
-        portalDisplayOpen: false, portalSpecialOpen: false, portalToolsOpen: false,
+        portalSpecialOpen: false, portalToolsOpen: false,
         portalBusy: false, portalError: '', dataTime: '', csvBatchDates: [], csvDownloadModalOpen: false,
         csvDownloadStage: 'config', csvBatchCompleted: 0, csvBatchFailures: [] });
     }
@@ -717,11 +721,13 @@ class Title extends React.Component {
 
   filterOption = (input, option) =>
     (option?.label ?? '').toLowerCase().includes(input.toLowerCase());
-  changeMatrixType(e) {
+  /** 切换成功后初始化原系统控件，拒绝切换时不继续清零或重置串口。 */
+  async changeMatrixType(e) {
     // this.props.handleChangeCom(e);
     console.log(e);
     // file 切换移到 changeMatrix 中统一管理，确保 play:false 先于 file 到达后端
-    this.props.changeMatrix(e)
+    if (await this.props.changeMatrix(e) === false) return false;
+    e = resolveNativeSystemType(e)
     if (e === 'bigBed') {
       this.props.initBigCtx()
     } else if (e === 'sitCol') {
@@ -1988,7 +1994,7 @@ class Title extends React.Component {
     }
   };
 
-  /** 仅载入单选记录；不会把批量下载的勾选项写入播放状态。 */
+  /** 载入单选记录后显示首帧并启动播放；每次等待后检查页面是否仍有效。 */
   loadPortalPlayback = async (value) => {
     if (this.state.portalBusy || !this.props.dataArr?.some((record) => record.value === value)) return;
     const system = this.props.matrixName;
@@ -1997,11 +2003,20 @@ class Title extends React.Component {
     try {
       await commandClient.execute('playback.control', { play: false });
       if (!isCurrent()) return;
-      if (!await executePortalLegacyControl(commandClient,
-        this.withSmallBed12BDisplayOptions({ getTime: value, index: 0 }), isCurrent)) return;
+      const [loadCommand] = commandFromLegacyFields(this.withSmallBed12BDisplayOptions({ getTime: value, index: 0 }));
+      const ack = await commandClient.executeEnvelope(loadCommand);
+      if (!isCurrent()) return;
+      const selection = ack?.data?.results?.find((result) => result.name === 'history-load-date');
+      const channels = selection?.availableChannels || [];
+      const handState = tactileGloveTypes_title.includes(system) && channels.length === 1
+        && ['sit', 'back'].includes(channels[0]) ? { hand: channels[0] === 'sit' } : {};
       this.props.onPortalResetPlayback?.();
       if (system === 'foot') this.props.track.current?.canvasInit();
-      this.props.changeStateData(this.withSmallBed12BDisplayState({ dataTime: value, history: 'playback', local: true, index: 0 }));
+      this.props.changeStateData(this.withSmallBed12BDisplayState({ dataTime: value, history: 'playback', local: true, index: 0, ...handState }));
+      if (handState.hand != null) this.props.com?.current?.changeModal?.(handState.hand);
+      await commandClient.execute('playback.control', { value: 0, play: true });
+      if (!isCurrent()) return;
+      this.props.onPortalPlaybackStarted?.();
       this.setState({ dataTime: value, current: 'playback', portalPlaybackOpen: false });
     } catch (error) {
       if (isCurrent()) this.setState({ portalError: `载入失败：${error.message}` });
@@ -2801,15 +2816,20 @@ class Title extends React.Component {
         settingsOpen={this.state.open} onSettings={() => this.setState({ open: !this.state.open })}
         collapsed={this.state.portalToolsCollapsed} onCollapse={(portalToolsCollapsed) => this.setState({ portalToolsCollapsed })}
         toolsOpen={this.state.portalToolsOpen} onTools={this.togglePortalTools}
-      /><PortalWorkspaceTools key={`${this.props.matrixName}:${this.props.numMatrixFlag}:${this.props.history}`} open={this.state.portalToolsOpen}
+      /><PortalWorkspaceTools key={`${this.props.matrixName}:${this.props.history}`} open={this.state.portalToolsOpen}
+        systemKey={this.props.matrixName}
         rendererRef={this.props.com} selectionActive={this.props.portalSelectionActive} onSelectionChange={this.props.onPortalSelectionChange}
         onClose={() => this.setState({ portalToolsOpen: false })}
+        displayContent={<ConfigProvider theme={PORTAL_CONTROL_THEME}>
+          {Boolean(baudControl.props.children) && <fieldset><legend>串口参数</legend>{baudControl}</fieldset>}
+          <fieldset><legend>渲染与显示区域</legend>{displayControls}{carControls}{partControls}</fieldset>
+          <fieldset><legend>界面语言</legend>{languageControl}</fieldset>
+        </ConfigProvider>}
         items={[
           { id: 'zero', category: 'processing', label: '压力清零', description: '以当前压力作为零点基准。', active: this.state.resetZero,
             disabled: this.props.history !== 'now', onClick: this.resetPortalPressure },
           { id: 'restore', category: 'processing', label: '恢复零点', description: '取消预压力扣除，恢复原始压力。',
             disabled: this.props.history !== 'now', onClick: this.restorePortalPressure },
-          { id: 'display', label: '显示与语言', description: '选择原生渲染模式、显示区域和界面语言。', onClick: () => this.openPortalPanel('portalDisplayOpen') },
           { id: 'system', label: '系统专用工具', description: '设备校准、曲线、重心或报告等当前系统支持的功能。', onClick: () => this.openPortalPanel('portalSpecialOpen') },
           { id: 'builder', label: '展示系统配置', description: '配置传感器、算法、渲染和图表。', disabled: !this.props.openDisplaySystemBuilder,
             onClick: () => { this.setState({ portalToolsOpen: false }); this.props.openDisplaySystemBuilder?.(); } },
@@ -2817,12 +2837,6 @@ class Title extends React.Component {
             onClick: () => this.openPortalPanel('jqbedAlgorithmConfigOpen') }] : []),
         ]} /></>, this.props.portalToolsHost) : null}
       {this.props.portalEmbedded && <>
-        <PortalControlDialog open={this.state.portalDisplayOpen} title="显示与语言"
-          onClose={() => this.setState({ portalDisplayOpen: false })}>
-          {Boolean(baudControl.props.children) && <fieldset className="portal-control-section"><legend>串口参数</legend><div className="portal-control-fields">{baudControl}</div></fieldset>}
-          <fieldset className="portal-control-section"><legend>渲染与显示区域</legend><div className="portal-control-fields">{displayControls}{carControls}{partControls}</div></fieldset>
-          <fieldset className="portal-control-section"><legend>界面语言</legend><div className="portal-control-fields">{languageControl}</div></fieldset>
-        </PortalControlDialog>
         <PortalControlDialog open={this.state.portalSpecialOpen} title="系统专用工具"
           description="仅显示当前系统与模式支持的功能；设备校准需要先选择对应的渲染模式。"
           onClose={() => this.setState({ portalSpecialOpen: false })}>
@@ -2859,9 +2873,9 @@ class Title extends React.Component {
           <Select
           style={{ width: '130px' }}
           placeholder={t('chooseSensor')}
-          value={this.props.matrixName}
-          onChange={(e) => {
-            this.changeMatrixType(e)
+          value={this.props.systemId || this.props.matrixName}
+          onChange={async (e) => {
+            if (await this.changeMatrixType(e) === false) return;
             if (!isHumanBodyMatrixTitle(e)) {
               this.props.changeStateData({
                 numMatrixFlag: 'normal'

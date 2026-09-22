@@ -44,6 +44,7 @@ export function buildAccessibleSensorOptions({
   const seenTypes = new Set(result.map((sensor) => sensor.value));
 
   dynamicSensors.forEach((sensor) => {
+    if (sensor?.nativeSourceType && allowedTypeSet && !allowedTypeSet.has(sensor.nativeSourceType)) return;
     if (!sensor?.value || builtInTypeSet.has(sensor.value) || seenTypes.has(sensor.value)) return;
     seenTypes.add(sensor.value);
     result.push(sensor);

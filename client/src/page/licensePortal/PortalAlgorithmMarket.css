@@ -66,22 +66,22 @@
 .fiber-portal .portal-algorithm-card.is-package .portal-algorithm-card-output b { flex-shrink: 0; }
 .fiber-portal .portal-algorithm-card:disabled { cursor: not-allowed; border-color: #354653; background: #101b25; }
 .fiber-portal .portal-algorithm-card:disabled .portal-algorithm-card-output b { color: #b7c2cb; }
-.fiber-portal .portal-package-output { margin: 12px 0; padding: 14px; color: #e5eff7; background: #0a1d29; border: 1px solid #315364; border-radius: 12px; min-width: 0; }
-.fiber-portal .portal-package-output header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.fiber-portal .portal-package-output header div { display: grid; gap: 6px; min-width: 0; }
-.fiber-portal .portal-package-output strong { font-size: 17px; }
-.fiber-portal .portal-package-output small { color: #b7c9d8; font-size: 11px; overflow-wrap: anywhere; }
-.fiber-portal .portal-package-output button, .fiber-portal .portal-package-output select { background: #0c2534; color: #e5eff7; border: 1px solid #44697d; border-radius: 6px; min-height: 32px; padding: 4px 6px; cursor: pointer; }
-.fiber-portal .portal-package-output label { display: grid; gap: 6px; margin-top: 14px; font-size: 12px; color: #bacfdd; }
-.fiber-portal .portal-package-output select { width: 100%; font-size: 14px; }
-.fiber-portal .portal-package-value { font: 600 27px/1.4 monospace; margin-top: 12px; color: var(--system-accent); }
-.fiber-portal .portal-package-output svg { display: block; width: 100%; height: auto; }
-.fiber-portal .portal-package-grid { stroke: #294354; fill: none; stroke-dasharray: 2 5; }
-.fiber-portal .portal-package-line { stroke: var(--system-accent, #69dfca); fill: none; stroke-width: 2; }
-.fiber-portal .portal-package-output svg text { fill: #b8ccd9; font-size: 10px; }
-.fiber-portal .portal-package-output p { margin: 6px 0; color: #c8dbe9; font-size: 12px; }
-.fiber-portal .portal-package-output .is-error { color: #ffb3a5; }
-.fiber-portal .portal-algorithm-categories :focus-visible, .fiber-portal .portal-package-output :focus-visible { outline: 2px solid var(--system-accent); outline-offset: 2px; }
+.portal-package-output { margin: 12px 0; padding: 14px; color: #e5eff7; background: #0a1d29; border: 1px solid #315364; border-radius: 12px; min-width: 0; }
+.portal-package-output header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.portal-package-output header div { display: grid; gap: 6px; min-width: 0; }
+.portal-package-output strong { font-size: 17px; }
+.portal-package-output small { color: #b7c9d8; font-size: 11px; overflow-wrap: anywhere; }
+.portal-package-output button, .portal-package-output select { background: #0c2534; color: #e5eff7; border: 1px solid #44697d; border-radius: 6px; min-height: 32px; padding: 4px 6px; cursor: pointer; }
+.portal-package-output label { display: grid; gap: 6px; margin-top: 14px; font-size: 12px; color: #bacfdd; }
+.portal-package-output select { width: 100%; font-size: 14px; }
+.portal-package-value { font: 600 27px/1.4 monospace; margin-top: 12px; color: var(--system-accent, #69dfca); }
+.portal-package-output svg { display: block; width: 100%; height: auto; }
+.portal-package-grid { stroke: #294354; fill: none; stroke-dasharray: 2 5; }
+.portal-package-line { stroke: var(--system-accent, #69dfca); fill: none; stroke-width: 2; }
+.portal-package-output svg text { fill: #b8ccd9; font-size: 10px; }
+.portal-package-output p { margin: 6px 0; color: #c8dbe9; font-size: 12px; }
+.portal-package-output .is-error { color: #ffb3a5; }
+.fiber-portal .portal-algorithm-categories :focus-visible, .portal-package-output :focus-visible { outline: 2px solid var(--system-accent, #69dfca); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) {
   .fiber-portal .portal-algorithm-market, .fiber-portal .portal-algorithm-card { transition: none; }
 }

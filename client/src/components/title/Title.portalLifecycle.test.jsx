@@ -17,7 +17,7 @@ function createTitle(state = {}) {
   title.props = {
     matrixName: 'hand', history: 'playback',
     dataArr: [{ value: 'record-a' }, { value: 'record-b' }],
-    changeStateData: vi.fn(), onPortalResetPlayback: vi.fn(),
+    changeStateData: vi.fn(), onPortalResetPlayback: vi.fn(), onPortalPlaybackStarted: vi.fn(),
     t: (key) => key,
   };
   title.state = { ...title.state, ...state };
@@ -47,6 +47,60 @@ describe('Title 门户操作生命周期', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it('载入完成后请求首帧并播放，播放 ACK 前不关闭弹窗或显示播放中', async () => {
+    const title = createTitle({ portalPlaybackOpen: true });
+    const start = deferred();
+    commandClient.execute.mockResolvedValueOnce({ ok: true }).mockReturnValueOnce(start.promise);
+    const pending = title.loadPortalPlayback('record-a');
+    await vi.waitFor(() => expect(commandClient.execute).toHaveBeenCalledWith('playback.control', { value: 0, play: true }));
+    expect(commandClient.executeEnvelope.mock.calls.map(([cmd]) => cmd.type)).toEqual(['history.load']);
+    expect(title.props.changeStateData).toHaveBeenCalledWith(expect.objectContaining({ dataTime: 'record-a', local: true }));
+    expect(title.props.onPortalResetPlayback).toHaveBeenCalledOnce();
+    expect(title.props.onPortalPlaybackStarted).not.toHaveBeenCalled();
+    expect(title.state.portalPlaybackOpen).toBe(true);
+    start.resolve({ ok: true });
+    await pending;
+    expect(title.props.onPortalPlaybackStarted).toHaveBeenCalledOnce();
+    expect(title.state).toMatchObject({ portalPlaybackOpen: false, portalBusy: false, dataTime: 'record-a' });
+  });
+
+  it.each(['load', 'start'])('%s 命令失败保留弹窗和错误，不显示播放中', async (stage) => {
+    const title = createTitle({ portalPlaybackOpen: true });
+    if (stage === 'load') commandClient.executeEnvelope.mockRejectedValueOnce(new Error('读取失败'));
+    else commandClient.execute.mockResolvedValueOnce({ ok: true }).mockRejectedValueOnce(new Error('启动失败'));
+    await title.loadPortalPlayback('record-a');
+    expect(title.state).toMatchObject({ portalPlaybackOpen: true, portalBusy: false });
+    expect(title.state.portalError).toContain('失败');
+    expect(title.props.onPortalPlaybackStarted).not.toHaveBeenCalled();
+    if (stage === 'load') expect(commandClient.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([['sit', true], ['back', false]])('单手记录 %s 在请求首帧前切到对应模型', async (channel, hand) => {
+    const title = createTitle();
+    title.props = { ...title.props, matrixName: 'hand0205', com: { current: { changeModal: vi.fn() } } };
+    commandClient.executeEnvelope.mockResolvedValueOnce({ ok: true, data: { results: [
+      { name: 'history-load-date', length: 428, availableChannels: [channel] },
+    ] } });
+    await title.loadPortalPlayback('record-a');
+    expect(title.props.changeStateData).toHaveBeenCalledWith(expect.objectContaining({ hand }));
+    expect(title.props.com.current.changeModal).toHaveBeenCalledWith(hand);
+    expect(title.props.com.current.changeModal.mock.invocationCallOrder[0]).toBeLessThan(commandClient.execute.mock.invocationCallOrder[1]);
+  });
+
+  it('载入等待期间切换系统，迟到 ACK 不能启动旧记录', async () => {
+    const title = createTitle();
+    const load = deferred();
+    commandClient.executeEnvelope.mockReturnValueOnce(load.promise);
+    const pending = title.loadPortalPlayback('record-a');
+    await vi.waitFor(() => expect(commandClient.executeEnvelope).toHaveBeenCalledOnce());
+    title._portalScope = {};
+    load.resolve({ ok: true });
+    await pending;
+    expect(commandClient.execute).toHaveBeenCalledTimes(1);
+    expect(title.props.changeStateData).not.toHaveBeenCalled();
+    expect(title.props.onPortalPlaybackStarted).not.toHaveBeenCalled();
   });
 
   it.each(['scope', 'unmount'])('删除等待暂停 ACK 期间 %s 失效，不能继续发删除命令', async (reason) => {

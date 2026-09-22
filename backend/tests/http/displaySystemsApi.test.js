@@ -59,6 +59,11 @@ async function main() {
     // 四个写接口 + reload 每次成功都必须发一次，失败不发。
     publishDisplaySystemsUpdated: (detail) => publishedUpdates.push(detail),
     saveDisplaySystemDisplaySection: (id, patch) => {
+      if (patch.expectedRevision === 'stale') {
+        const error = new Error('display system changed since it was read');
+        error.code = 'DISPLAY_SYSTEM_REVISION_CONFLICT';
+        throw error;
+      }
       if (id === 'built-in') {
         const error = new Error('system display systems are read-only');
         error.code = 'DISPLAY_SYSTEM_READ_ONLY';
@@ -90,6 +95,14 @@ async function main() {
     assert.strictEqual(statusBody.displaySystems.runtimeChannelRegistry.count, 1);
     assert.strictEqual(statusBody.displaySystems.runtimeBindings.count, 1);
     assert.strictEqual(statusBody.displaySystems.runtimeDispatcher.activeHandlerCount, 1);
+
+    const staleWrite = await fetch(`http://127.0.0.1:${port}/api/display-systems/demo/display`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ expectedRevision: 'stale', canvas: null }),
+    });
+    assert.strictEqual(staleWrite.status, 409);
+    assert.strictEqual((await staleWrite.json()).code, 'DISPLAY_SYSTEM_REVISION_CONFLICT');
+    assert.strictEqual(publishedUpdates.length, 0, 'conflicting writes must not broadcast updates');
 
     const detailResponse = await fetch(`http://127.0.0.1:${port}/api/display-systems/demo`);
     const detailBody = await detailResponse.json();

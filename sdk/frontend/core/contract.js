@@ -71,6 +71,7 @@ export const RENDERER_METHODS = {
   headData: 1,
   changeWsData: 1,
   changeSelectFlag: 1,
+  getSelectionTools: 0, // 返回原始点位分析控制器；未支持的后端返回 null。
   // 计数来自 page/home/util.js 而非 Home.jsx，见上文说明。
   changeWsDataRaw: 11,
   // 以下方法由场景组件暴露，Home.jsx 目前未经 ref 调用

@@ -1,5 +1,7 @@
 import Stats from "three/examples/jsm/libs/stats.module.js";
 import * as THREE from "three";
+import { createNativeSceneEntrance } from '../../renderers/nativeSceneEntrance';
+import { FOOT_SCENE_PLANES } from '../../displays/nativeSceneAssets';
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 // import { FlyControls } from 'three/examples/jsm/controls/FlyControls.js';
 import { TrackballControls } from "three/examples/jsm/controls/TrackballControls";
@@ -144,6 +146,7 @@ const Canvas = React.forwardRef((props, refs) => {
   let positions;
   let colors, scales;
   let helper
+  let portalEntrance;
   function init() {
     container = document.getElementById(`canvas`);
     // camera
@@ -171,8 +174,9 @@ const Canvas = React.forwardRef((props, refs) => {
 
     // initSet();
     initPoints()
-    initHand('left', './footleft.png')
-    initHand('right', './foot.png')
+    Promise.all(FOOT_SCENE_PLANES.map((plane) => initHand(plane))).then(
+      () => portalEntrance?.setModel(group, { footPlanes: true }),
+      () => portalEntrance?.fail());
     // initBack();
     // scene.add(group);
     // group.rotation.x = -(Math.PI * 2) / 12
@@ -204,7 +208,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
     // renderer
 
-    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: Boolean(props.portalEmbedded) });
     renderer.setPixelRatio(window.devicePixelRatio);
     // renderer.setSize(window.innerWidth, window.innerHeight);
 
@@ -216,6 +220,7 @@ const Canvas = React.forwardRef((props, refs) => {
     }
 
     renderer.setClearColor(0x000000);
+    if (props.portalEmbedded) portalEntrance = createNativeSceneEntrance(renderer, scene, camera, container);
 
     //FlyControls
     controls = new TrackballControls(camera, renderer.domElement);
@@ -343,10 +348,12 @@ const Canvas = React.forwardRef((props, refs) => {
     group.add(particles);
   }
 
-  // 初始化手图片
-  function initHand(name, imgsrc) {
+  // 使用原生双足底图与固定平面布局。
+  function initHand({ url, x, width, height }) {
+    let ready, failed;
+    const loaded = new Promise((resolve, reject) => { ready = resolve; failed = reject; });
     // handGeometry = new THREE.PlaneGeometry(10,10)
-    const hand = new THREE.TextureLoader().load(imgsrc);
+    const hand = new THREE.TextureLoader().load(url, ready, undefined, failed);
     // console.log('inithand')
     // handMaterial = new THREE.MeshBasicMaterial({
     //   // vertexColors: true,
@@ -355,7 +362,7 @@ const Canvas = React.forwardRef((props, refs) => {
     //   map: hand,
     //   // size: 10000,
     // });
-    const geometry = new THREE.PlaneGeometry(35, 35);
+    const geometry = new THREE.PlaneGeometry(width, height);
     const material = new THREE.MeshBasicMaterial({ color: 0x666, map: hand, transparent: true, });
     // const geometry = new THREE.PlaneGeometry(35, 35*1.9);
     // const material = new THREE.MeshBasicMaterial({  map: hand, transparent: true,});
@@ -364,16 +371,14 @@ const Canvas = React.forwardRef((props, refs) => {
     plane.position.y = 0;
     // plane.position.z = 100;
 
-    if (name == 'left') {
-      plane.position.x = -10;
-    } else {
-      plane.position.x = 10;
-    }
+    plane.position.x = x;
     // handParticles = new THREE.Points(handGeometry, handMaterial);
     group.add(plane);
+    return loaded;
   }
 
   function onWindowResize() {
+    if (portalEntrance) { portalEntrance.resize(); return; }
     renderer.setSize(window.innerWidth, window.innerHeight);
 
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -921,12 +926,18 @@ const Canvas = React.forwardRef((props, refs) => {
 
     return () => {
       cancelAnimationFrame(animationRequestId);
+      portalEntrance?.dispose();
+      window.removeEventListener('resize', onWindowResize);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      controls?.dispose();
+      renderer?.dispose();
     };
   }, []);
   return (
-    <div>
+    <div style={props.portalEmbedded ? { width: '100%', height: '100%' } : undefined}>
       <div
-        // style={{ width: "100%", height: "100%" }}
+        style={props.portalEmbedded ? { width: '100%', height: '100%' } : undefined}
         id={`canvas`}
       ></div>
     </div>

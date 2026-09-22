@@ -115,10 +115,16 @@ export const DISPLAY_REGISTRY = {
   bed4096num: defineDisplay('bed4096num', { matrix: MATRIX_64 }),
 };
 
+import { getNativeSystemTemplate, listNativeSystemTemplates, registerNativeSystemTemplate, selectedNativeSystemId } from './nativeSystemTemplates';
+
 const RUNTIME_DISPLAY_REGISTRY = new Map();
 let runtimeDisplayRevision = 0;
 
 export function registerRuntimeDisplayDefinition(runtimeDefinition = {}) {
+  if (runtimeDefinition.builtinTemplate) {
+    registerNativeSystemTemplate(runtimeDefinition.builtinTemplate);
+    return getDisplayDefinition(runtimeDefinition.builtinTemplate.id);
+  }
   const metadata = runtimeDefinition.displayMetadata || runtimeDefinition;
   const sensor = runtimeDefinition.sensorDefinition || {};
   const runtimeChannels = Array.isArray(runtimeDefinition.runtimeChannels)
@@ -261,10 +267,13 @@ export function registerRuntimeDisplayDefinition(runtimeDefinition = {}) {
 }
 
 export function listRuntimeDisplayDefinitions() {
-  return [...RUNTIME_DISPLAY_REGISTRY.values()];
+  return [...RUNTIME_DISPLAY_REGISTRY.values(), ...listNativeSystemTemplates().map((item) => getDisplayDefinition(item.id))];
 }
 
 export function getDisplayDefinition(sensorType) {
+  const template = getNativeSystemTemplate(sensorType) || getNativeSystemTemplate(selectedNativeSystemId(sensorType));
+  if (template) return { ...DISPLAY_REGISTRY[template.sourceType], type: sensorType, label: template.name,
+    displaySystemId: template.id, nativeSourceType: template.sourceType, source: 'builtin-template', editable: true };
   return RUNTIME_DISPLAY_REGISTRY.get(sensorType) || DISPLAY_REGISTRY[sensorType] || null;
 }
 

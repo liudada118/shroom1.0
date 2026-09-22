@@ -1,5 +1,6 @@
 import Stats from "three/examples/jsm/libs/stats.module.js";
 import * as THREE from "three";
+import { installParticleEntrance } from '../../renderers/particleEntrance';
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 // import { FlyControls } from 'three/examples/jsm/controls/FlyControls.js';
 import { TrackballControls } from "three/examples/jsm/controls/TrackballControls";
@@ -119,6 +120,7 @@ const Canvas = React.forwardRef((props, refs) => {
   let container, stats;
 
   let scene, renderer;
+  let disposeParticleEntrance, portalResizeObserver;
 
   let cube, chair, mixer, clips;
   const clock = new THREE.Clock();
@@ -175,6 +177,7 @@ const Canvas = React.forwardRef((props, refs) => {
     group.position.z = groupZ
     scene.add(group);
     const helper = new THREE.GridHelper(2000, 100);
+    helper.visible = !props.portalEmbedded;
     helper.position.y = -199;
     helper.material.opacity = 0.25;
     helper.material.transparent = true;
@@ -193,7 +196,7 @@ const Canvas = React.forwardRef((props, refs) => {
 
     // renderer
 
-    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: Boolean(props.portalEmbedded) });
     renderer.setPixelRatio(window.devicePixelRatio);
     // renderer.setSize(window.innerWidth, window.innerHeight);
 
@@ -202,7 +205,13 @@ const Canvas = React.forwardRef((props, refs) => {
     renderer.outputEncoding = THREE.sRGBEncoding;
     container.replaceChildren(renderer.domElement);
 
-    renderer.setClearColor(0x000000);
+    renderer.setClearColor(0x000000, props.portalEmbedded ? 0 : 1);
+    if (props.portalEmbedded) {
+      disposeParticleEntrance = installParticleEntrance(renderer, scene, camera, particles, { rows: AMOUNTX, cols: AMOUNTY });
+      portalResizeObserver = new ResizeObserver(onWindowResize);
+      portalResizeObserver.observe(container);
+      onWindowResize();
+    }
 
     //FlyControls
     controls = new TrackballControls(camera, renderer.domElement);
@@ -488,10 +497,15 @@ const Canvas = React.forwardRef((props, refs) => {
 
   }
 
+  /** 入口嵌入时跟随真实宿主尺寸，独立展示继续使用窗口尺寸。 */
   function onWindowResize() {
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    const width = props.portalEmbedded ? container.clientWidth : window.innerWidth;
+    const height = props.portalEmbedded ? container.clientHeight : window.innerHeight;
+    if (!width || !height) return;
+    renderer.setSize(width, height, !props.portalEmbedded);
+    if (props.portalEmbedded) Object.assign(renderer.domElement.style, { width: '100%', height: '100%', display: 'block' });
 
-    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.aspect = width / height;
 
     // camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
@@ -941,6 +955,13 @@ const Canvas = React.forwardRef((props, refs) => {
 
     return () => {
       cancelAnimationFrame(animationRequestId);
+      disposeParticleEntrance?.();
+      portalResizeObserver?.disconnect();
+      controls?.dispose();
+      selectHelper?.dispose?.();
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('resize', onWindowResize);
       // 清理 renderer
       if (renderer) {
         renderer.dispose();
@@ -956,9 +977,9 @@ const Canvas = React.forwardRef((props, refs) => {
     };
   }, []);
   return (
-    <div>
+    <div style={props.portalEmbedded ? { width: '100%', height: '100%' } : undefined}>
       <div
-        // style={{ width: "100%", height: "100%" }}
+        style={props.portalEmbedded ? { width: '100%', height: '100%' } : undefined}
         id={`canvas`}
       ></div>
     </div>

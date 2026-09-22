@@ -123,6 +123,7 @@ import { createJsonWebSocket } from "../../services/ws/messages";
 import { commandClient } from "../../services/command/commandClient";
 import { serialFeedback } from '../../services/serial/serialFeedback';
 import { getCurrentSensorTypeFromStatus } from "../../services/sensorStatus";
+import { getNativeSystemTemplate, resolveNativeSystemType, selectedNativeSystemId } from '../../displays/nativeSystemTemplates';
 import {
   getDisplayDefinition,
   listRuntimeDisplayDefinitions,
@@ -206,8 +207,12 @@ const SMALL_BED_12B_MATRIX = 'smallBed12B'
 const FULL_PACKET_GLOVE_MODES = ['num', 'numoriginal']
 const WHOLE_CHAIR_MATRIX = 'wholeChair'
 const HIDDEN_DISPLAY_MATRIX_TYPES = [HAND_0205_DOUBLE_MATRIX]
-const normalizeDisplayMatrixName = (matrixName) =>
-  HIDDEN_DISPLAY_MATRIX_TYPES.includes(matrixName) ? 'hand0205' : matrixName
+/** 副本使用原生型号选取渲染分支，独立身份另外保留在 systemId。 */
+const normalizeDisplayMatrixName = (matrixName) => {
+  const nativeType = resolveNativeSystemType(matrixName);
+  if (nativeType !== matrixName || selectedNativeSystemId(matrixName) !== matrixName) return nativeType;
+  return HIDDEN_DISPLAY_MATRIX_TYPES.includes(matrixName) ? 'hand0205' : matrixName;
+}
 const filterVisibleDisplayMatrixTypes = (types) =>
   types.filter((type) => !HIDDEN_DISPLAY_MATRIX_TYPES.includes(type))
 const resolveBackendDisplayMatrixName = (activeSensorType, allowedTypes, currentMatrixName) => {
@@ -1060,6 +1065,7 @@ class Home extends React.Component {
     this.state = {
       hand: true,
       matrixName: initialMatrixName,
+      systemId: localStorage.getItem('file') || initialMatrixName,
       valueg1: initialMatrixConfig.valueg1,
       valuej1: initialMatrixConfig.valuej1,
       valuel1: initialMatrixConfig.valuel1,
@@ -1706,6 +1712,7 @@ class Home extends React.Component {
    */
   isCurrentDisplayFrame = (message) => {
     const definition = getDisplayDefinition(this.state.matrixName);
+    if (definition?.source === 'builtin-template') return isSensorFrameForDisplay(message, [definition.displaySystemId]);
     return isSensorFrameForDisplay(message, [
       this.state.matrixName,
       definition?.displaySystemId,
@@ -1739,15 +1746,16 @@ class Home extends React.Component {
    */
   applyCurrentSensorType = (sensorType) => {
     if (!sensorType) return;
+    localStorage.setItem('file', sensorType);
     const nextMatrixName = normalizeDisplayMatrixName(sensorType);
     const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag);
     this.setState({
       matrixName: nextMatrixName,
+      systemId: sensorType,
       numMatrixFlag: nextMode,
       minzhenSensorInfo: {},
       ...getConfig({ sensorType: nextMatrixName, mode: nextMode }),
     });
-    localStorage.setItem('file', nextMatrixName);
   };
 
   /**
@@ -1783,6 +1791,10 @@ class Home extends React.Component {
     }
     if (jsonObject.serialNotice) serialFeedback.error(jsonObject.serialNotice);
     const sitFrameData = getSensorFrameChannelValue(jsonObject, 'sit');
+    if (Array.isArray(jsonObject.pressArr) && Array.isArray(jsonObject.areaArr) && jsonObject.length != null) {
+      this.data.current?.setPlaybackCharts(jsonObject);
+    }
+    if (jsonObject.index != null) this.data.current?.setPlaybackChartIndex(jsonObject.index);
     this.syncSmallBed12BMatrixSize(jsonObject);
 
     if (jsonObject.jqbedAlgorithmConfig) {
@@ -1807,6 +1819,9 @@ class Home extends React.Component {
       getSensorFrameOutputChannel(jsonObject)
       && getSensorFrameChannelValue(jsonObject),
     );
+    // ⚠️ 目录尚未返回或副本型号还在切换时不分派旧处理器，否则重载后的首帧会抛错。
+    if (hasPressureFrame && (!currentDisplayDefinition
+      || (currentDisplayDefinition.nativeSourceType && currentDisplayDefinition.nativeSourceType !== this.state.matrixName))) return;
     // 采集计时不在这里了：它改成由 `startCollectionTimer` 的定时器驱动，不再蹭帧。
     // 之前这段代码在帧处理链里，于是既受「显示系统提前 return」影响（manifest
     // 传感器数字恒为 0），也受帧率影响（没帧进来秒表就停）。
@@ -2107,11 +2122,12 @@ class Home extends React.Component {
           matrixTitle: false,
           allowedTypes,
           matrixName: nextMatrixName,
+          systemId: nextMatrixName,
           numMatrixFlag: nextMode,
           minzhenSensorInfo: {},
           ...getConfig({ sensorType: nextMatrixName, mode: nextMode }),
         })
-        localStorage.setItem('file', nextMatrixName)
+        localStorage.setItem('file', selectedNativeSystemId(nextMatrixName))
       } else {
         this.setState({ matrixTitle: true })
       }
@@ -2132,6 +2148,7 @@ class Home extends React.Component {
           const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag)
           Object.assign(nextState, {
             matrixName: nextMatrixName,
+            systemId: selectedNativeSystemId(nextMatrixName),
             numMatrixFlag: nextMode,
             minzhenSensorInfo: {},
             portname: '',
@@ -2140,7 +2157,7 @@ class Home extends React.Component {
             portnameSensor: '',
             ...getConfig({ sensorType: nextMatrixName, mode: nextMode }),
           })
-          localStorage.setItem('file', nextMatrixName)
+          localStorage.setItem('file', selectedNativeSystemId(nextMatrixName))
         }
         this.setState(nextState)
       } else {
@@ -2157,6 +2174,7 @@ class Home extends React.Component {
           const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag)
           Object.assign(nextState, {
             matrixName: nextMatrixName,
+            systemId: selectedNativeSystemId(nextMatrixName),
             numMatrixFlag: nextMode,
             minzhenSensorInfo: {},
             portname: '',
@@ -2165,7 +2183,7 @@ class Home extends React.Component {
             portnameSensor: '',
             ...getConfig({ sensorType: nextMatrixName, mode: nextMode }),
           })
-          localStorage.setItem('file', nextMatrixName)
+          localStorage.setItem('file', selectedNativeSystemId(nextMatrixName))
 
           const backendMatrixName = normalizeDisplayMatrixName(jsonObject.activeSensorType)
           if (!backendMatrixName || backendMatrixName !== nextMatrixName) {
@@ -3399,6 +3417,10 @@ class Home extends React.Component {
   };
 
   componentDidUpdate(prevProps, prevState) {
+    const systemChanged = prevState.matrixName !== this.state.matrixName || prevState.systemId !== this.state.systemId;
+    if ((prevState.local && !this.state.local) || systemChanged) {
+      this.data.current?.initCharts();
+    }
     if (this.state.selectFlag && (prevState.matrixName !== this.state.matrixName
       || prevState.numMatrixFlag !== this.state.numMatrixFlag || prevState.history !== this.state.history)) {
       // 新场景已挂载，不能用旧框选命令去开启新场景的选区。
@@ -3413,9 +3435,9 @@ class Home extends React.Component {
     }
     // 换展示形式时丢掉总线上的末帧。不丢的话，下一个渲染器挂上来会先收到
     // 一帧属于上一台设备的数据（订阅时的补发），画出一帧错的东西。
-    if (prevState.matrixName !== this.state.matrixName) {
+    if (systemChanged) {
       clearLastFrame();
-      this.props.onPortalSystemChange?.(this.state.matrixName);
+      this.props.onPortalSystemChange?.(this.state.systemId || this.state.matrixName);
     }
 
     if (
@@ -3457,7 +3479,7 @@ class Home extends React.Component {
     }
 
     // 换展示系统就换一套画布偏好，否则上一个系统选的配色会跟着带过来。
-    if (prevState.matrixName !== this.state.matrixName) {
+    if (systemChanged) {
       const cards = seedFormulaChartsFromManifest(this.state.matrixName);
       this.setState({
         displaySelection: readDisplayCanvasSelection(this.state.matrixName),
@@ -3793,6 +3815,7 @@ class Home extends React.Component {
   }
 
   wsSendObj = (obj) => {
+    if (obj?.file) obj = { ...obj, file: selectedNativeSystemId(obj.file) };
     const isJqbedAlgorithmCommand = Boolean(
       obj?.getJqbedAlgorithmConfig
       || obj?.setJqbedAlgorithmConfig
@@ -3816,26 +3839,32 @@ class Home extends React.Component {
     });
   };
 
-  changeMatrix = (e) => {
-    // setMatrixName(e)
+  /** 原生副本等待服务端许可与采集状态检查；拒绝时保留当前页面和端口。 */
+  changeMatrix = async (e) => {
+    const nativeSwitch = Boolean(getNativeSystemTemplate(e) || getNativeSystemTemplate(this.state.systemId));
+    if (nativeSwitch) {
+      try { await commandClient.execute('sensor.switch', { sensorType: e }); }
+      catch (error) { message.error(error.message || '系统切换失败，请停止采集并检查授权。'); return false; }
+    }
     const nextMatrixName = normalizeDisplayMatrixName(e);
     const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag);
     const configObj = getConfig({ sensorType: nextMatrixName, mode: nextMode })
     const wasLocal = this.state.local;
-    localStorage.setItem('file', nextMatrixName);
+    localStorage.setItem('file', e);
 
     // 1. 先停止回放，确保后端不再发送旧数据
     this.wsSendObj({ play: false });
     // 2. 关闭所有串口，确保切换前旧串口完全停止
-    this.wsSendObj({ sitClose: true, backClose: true, headClose: true, sensorClose: true });
+    if (!nativeSwitch) this.wsSendObj({ sitClose: true, backClose: true, headClose: true, sensorClose: true });
     // 3. 再发送 file 切换，后端切换数据库并重置回放状态
     const smallBed12BDisplayOptions = getSmallBed12BDisplayOptions(
       this.state.smallBed12BRealtimeMatrixMode,
       this.state.smallBed12BRealtimeSamplePoint,
     );
-    this.wsSendObj(nextMatrixName === SMALL_BED_12B_MATRIX
+    if (!nativeSwitch) this.wsSendObj(nextMatrixName === SMALL_BED_12B_MATRIX
       ? { file: nextMatrixName, smallBed12BDisplayOptions }
       : { file: nextMatrixName });
+    else if (nextMatrixName === SMALL_BED_12B_MATRIX) this.wsSendObj({ smallBed12BDisplayOptions });
 
     // 4. 清空前端数据
     this.data.current?.changeData({ meanPres: 0, maxPres: 0, point: 0, area: 0, totalPres: 0, pressure: 0 });
@@ -3850,6 +3879,7 @@ class Home extends React.Component {
 
     this.setState({
       matrixName: nextMatrixName,
+      systemId: e,
       numMatrixFlag: nextMode,
       ...configObj,
       dataArr: [],
@@ -4518,6 +4548,7 @@ class Home extends React.Component {
       />
     );
     const canvasVariantKey = [
+      this.state.systemId,
       runtimeDisplayDefinition?.runtimeRevision,
       canvasColormapKey,
     ].filter(Boolean).join('|') || undefined;
@@ -4946,6 +4977,8 @@ class Home extends React.Component {
             locale={this.state.locale}
             ref={this.title}
             matrixTitle={this.state.matrixTitle}
+            systemId={this.state.systemId}
+            onRuntimeDefinitionsLoaded={() => this.applyCurrentSensorType(localStorage.getItem('file'))}
             allowedTypes={this.state.allowedTypes}
             sensorTypeList={this.state.sensorTypeList ? this.state.sensorTypeList.flat : null}
             com={this.com}
@@ -4999,6 +5032,7 @@ class Home extends React.Component {
             portalChartsVisible={this.props.portalChartsVisible}
             onPortalChartsToggle={this.props.onPortalChartsToggle}
             onPortalResetPlayback={() => this.progress.current?.resetPlay()}
+            onPortalPlaybackStarted={() => this.progress.current?.setPlaying(true)}
             portalSelectionActive={this.state.selectFlag}
             onPortalSelectionChange={this.changePortalSelection}
             portalAlgorithmMarketOpen={this.state.portalAlgorithmMarketOpen}
@@ -5285,6 +5319,7 @@ class Home extends React.Component {
                         local={this.state.local}
                       >
                         <Minzhen
+                          portalEmbedded={this.props.portalEmbedded}
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
@@ -5369,6 +5404,7 @@ class Home extends React.Component {
                         local={this.state.local}
                       >
                         <Bed4096
+                          portalEmbedded={this.props.portalEmbedded}
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
@@ -5476,6 +5512,7 @@ class Home extends React.Component {
                         local={this.state.local}
                       >
                         <FootVideo
+                          portalEmbedded={this.props.portalEmbedded}
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
@@ -5526,6 +5563,7 @@ class Home extends React.Component {
                         local={this.state.local}
                       >
                         <RobotBlue
+                          portalEmbedded={this.props.portalEmbedded}
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
@@ -5546,6 +5584,7 @@ class Home extends React.Component {
                         local={this.state.local}
                       >
                         <RobotBlueSY
+                          portalEmbedded={this.props.portalEmbedded}
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
@@ -5556,6 +5595,7 @@ class Home extends React.Component {
                         local={this.state.local}
                       >
                         <RobotBlueLCF
+                          portalEmbedded={this.props.portalEmbedded}
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}
@@ -5703,6 +5743,7 @@ class Home extends React.Component {
                     ) : this.state.matrixName == "carQX" ? (
                       <CanvasCom matrixName={this.state.matrixName}>
                         <CanvasCarQX
+                          portalEmbedded={this.props.portalEmbedded}
                           ref={this.com}
                           changeSelect={this.changeSelect}
                           changeStateData={this.changeStateData}
@@ -5711,6 +5752,7 @@ class Home extends React.Component {
                     ) : this.state.matrixName == WHOLE_CHAIR_MATRIX ? (
                       <CanvasCom matrixName={this.state.matrixName}>
                         <WholeChair
+                          portalEmbedded={this.props.portalEmbedded}
                           ref={this.com}
                           changeSelect={this.changeSelect}
                           changeStateData={this.changeStateData}
@@ -5773,6 +5815,7 @@ class Home extends React.Component {
                       >
                         <SmallBed
                           matrixName={this.state.matrixName}
+                          portalEmbedded={this.props.portalEmbedded}
                           matrixWidth={this.state.matrixName === SMALL_BED_12B_MATRIX ? this.state.smallBedMatrixWidth : undefined}
                           matrixHeight={this.state.matrixName === SMALL_BED_12B_MATRIX ? this.state.smallBedMatrixHeight : undefined}
                           ref={this.com}
@@ -5784,6 +5827,7 @@ class Home extends React.Component {
                     ) : this.state.matrixName == "jqbed" ? (
                       <CanvasCom matrixName={this.state.matrixName}>
                         <SmallBed
+                          portalEmbedded={this.props.portalEmbedded}
                           ref={this.com}
                           data={this.data}
                           local={this.state.local}

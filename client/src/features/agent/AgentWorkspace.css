@@ -1,0 +1,186 @@
+.shroom-agent-root {
+  --agent-surface: #0b1828;
+  --agent-raised: #11243a;
+  --agent-input: #071322;
+  --agent-text: #edf5ff;
+  --agent-secondary: #b6cbe0;
+  --agent-border: #37516c;
+  --agent-soft-border: #243d55;
+  --agent-accent: #78d3f5;
+  --agent-accent-ink: #062235;
+  --agent-error: #ffb4aa;
+  --agent-success: #99e0bc;
+  --agent-warning: #edcf8e;
+  color: var(--agent-text);
+  font-family: Inter, "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.shroom-agent-root *, .shroom-agent-root *::before, .shroom-agent-root *::after { box-sizing: border-box; }
+.shroom-agent-root button, .shroom-agent-root input, .shroom-agent-root textarea, .shroom-agent-root select { font: inherit; }
+.shroom-agent-root button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; padding: 8px 12px;
+  border: 1px solid var(--agent-border); border-radius: 9px; background: var(--agent-raised); color: var(--agent-text); cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+.shroom-agent-root button:hover:not(:disabled) { background: #1d3650; border-color: var(--agent-accent); }
+.shroom-agent-root button:active:not(:disabled) { background: #2b4661; }
+.shroom-agent-root button:disabled { opacity: .5; cursor: not-allowed; }
+.shroom-agent-root :is(button, input, textarea, select, summary, [tabindex]):focus-visible { outline: 2px solid var(--agent-accent); outline-offset: 3px; }
+.shroom-agent-root button.shroom-agent-primary { background: var(--agent-accent); color: var(--agent-accent-ink); border-color: var(--agent-accent); font-weight: 650; }
+.shroom-agent-root button.shroom-agent-primary:hover:not(:disabled) { background: #a3e8ff; }
+.shroom-agent-root .shroom-agent-entry {
+  position: fixed; z-index: 950; right: 24px; bottom: max(20px, env(safe-area-inset-bottom)); gap: 10px; min-height: 46px; padding-inline: 16px;
+  background: #10273b; border-color: #4a7896; border-radius: 14px; color: var(--agent-text); box-shadow: 0 6px 24px #0006;
+}
+.shroom-agent-entry svg { color: var(--agent-accent); }
+.shroom-agent-entry-dot, .shroom-agent-working > span { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--agent-accent); }
+.shroom-agent-dialog {
+  inset: 0 0 0 auto; width: min(560px, 100vw); max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; padding: 0;
+  background: var(--agent-surface); color: var(--agent-text); border: 0; border-left: 1px solid var(--agent-border); box-shadow: -18px 0 70px #0005;
+  font: inherit; overflow: hidden;
+}
+.shroom-agent-dialog::backdrop { background: #02091466; }
+.shroom-agent-dialog[open] { animation: shroom-agent-enter 180ms ease-out; }
+.shroom-agent-panel { height: 100%; display: flex; flex-direction: column; min-width: 0; }
+.shroom-agent-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 20px 20px 16px; border-bottom: 1px solid var(--agent-soft-border); flex: 0 0 auto; }
+.shroom-agent-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.shroom-agent-emblem { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 11px; color: var(--agent-accent); background: var(--agent-raised); }
+.shroom-agent-identity h2 { margin: 0; font-size: 17px; font-weight: 620; line-height: 1.5; }
+.shroom-agent-identity p { margin: 2px 0 0; font-size: 12px; color: var(--agent-secondary); }
+.shroom-agent-header-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.shroom-agent-header-actions button { width: 44px; padding: 0; background: transparent; border-color: transparent; }
+.shroom-agent-header-actions button[aria-expanded="true"] { color: var(--agent-accent); background: var(--agent-raised); }
+.shroom-agent-history { flex: 1; min-height: 0; overflow: auto; padding: 20px; }
+.shroom-agent-algorithm-data { flex: 1; min-height: 0; overflow: auto; padding: 20px; }
+.shroom-agent-data-records { display: grid; gap: 12px; }
+.shroom-agent-data-records fieldset { min-width: 0; margin: 0; padding: 12px; border: 1px solid var(--agent-border); border-radius: 10px; }
+.shroom-agent-data-check { display: flex; align-items: start; gap: 10px; overflow-wrap: anywhere; }
+.shroom-agent-data-check input[type="checkbox"] { width: 18px; height: 18px; margin-top: 5px; flex-shrink: 0; }
+.shroom-agent-data-check small { display: block; color: var(--agent-secondary); }
+.shroom-agent-data-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.shroom-agent-data-fields label { font-size: 12px; min-width: 0; }
+.shroom-agent-data-label-rule { margin-bottom: 14px; }
+.shroom-agent-data-selection { color: var(--agent-accent); font-size: 13px; overflow-wrap: anywhere; }
+.shroom-agent-data-selection small { display: block; color: var(--agent-secondary); margin-top: 6px; }
+.shroom-agent-data-selected-label { font-size: 13px; color: var(--agent-accent); overflow-wrap: anywhere; margin: 10px 0 0; }
+.shroom-agent-data-bulk { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.shroom-agent-data-bulk label { flex: 1 1 160px; min-width: 0; font-size: 13px; }
+.shroom-agent-algorithm-data :is(input:not([type="checkbox"]), select) { width: 100%; min-height: 40px; padding: 8px; color: var(--agent-text); background: var(--agent-input); border: 1px solid var(--agent-border); border-radius: 6px; }
+.shroom-agent-data-pages { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.shroom-agent-history-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.shroom-agent-history-heading h3 { margin: 0; font-size: 17px; }
+.shroom-agent-history > input { width: 100%; margin-bottom: 14px; }
+.shroom-agent-history ul { list-style: none; display: grid; gap: 10px; padding: 0; margin: 0; }
+.shroom-agent-history li > button { width: 100%; display: flex; flex-direction: column; align-items: start; text-align: left; padding: 14px; overflow-wrap: anywhere; }
+.shroom-agent-history li strong { font-weight: 550; }
+.shroom-agent-history li span { font-size: 12px; color: var(--agent-secondary); }
+.shroom-agent-history li .is-current { border-color: var(--agent-accent); }
+.shroom-agent-attachments img, .shroom-agent-message-attachments img { width: 56px; height: 56px; object-fit: contain; border-radius: 5px; background: var(--agent-input); flex-shrink: 0; }
+.shroom-agent-message-attachments { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+.shroom-agent-message-attachments li { display: flex; align-items: center; gap: 10px; font-size: 12px; overflow-wrap: anywhere; }
+@media (max-width: 440px) {
+  .shroom-agent-header { padding-inline: 12px; }
+  .shroom-agent-identity h2 { font-size: 14px; }
+  .shroom-agent-identity p { display: none; }
+  .shroom-agent-header-actions { gap: 0; }
+}
+.shroom-agent-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 20px; scrollbar-width: thin; scrollbar-color: var(--agent-border) transparent; scroll-padding-block: 14px; }
+.shroom-agent-empty { margin: auto; padding: 32px; max-width: 440px; text-align: center; color: var(--agent-secondary); }
+.shroom-agent-empty > svg { width: 36px; height: 36px; color: var(--agent-accent); }
+.shroom-agent-empty h3, .shroom-agent-welcome h3 { color: var(--agent-text); font-size: 22px; font-weight: 580; margin: 12px 0; }
+.shroom-agent-empty p, .shroom-agent-welcome p { margin: 0; }
+.shroom-agent-connect-note { padding: 14px; display: flex; gap: 12px; justify-content: space-between; align-items: center; border: 1px solid var(--agent-border); border-radius: 12px; background: var(--agent-raised); }
+.shroom-agent-connect-note p { margin: 2px 0 0; font-size: 12px; color: var(--agent-secondary); }
+.shroom-agent-connect-note button { white-space: nowrap; flex-shrink: 0; }
+.shroom-agent-welcome { padding-block: 32px 24px; }
+.shroom-agent-eyebrow { font-size: 12px; color: var(--agent-accent); }
+.shroom-agent-welcome > p { color: var(--agent-secondary); font-size: 14px; }
+.shroom-agent-suggestions { display: grid; gap: 10px; margin-top: 24px; }
+.shroom-agent-suggestions button { justify-content: space-between; text-align: left; padding: 13px 14px; background: transparent; }
+.shroom-agent-suggestions button > span { color: var(--agent-accent); }
+.shroom-agent-messages { display: grid; gap: 24px; }
+.shroom-agent-turn { display: grid; gap: 20px; min-width: 0; }
+.shroom-agent-turn .shroom-agent-task-history { margin-top: 0; }
+.shroom-agent-message { min-width: 0; }
+.shroom-agent-message-label { color: var(--agent-accent); font-size: 12px; font-weight: 600; margin-bottom: 7px; }
+.shroom-agent-message-label > span { color: var(--agent-secondary); font-weight: 400; margin-left: 8px; }
+.shroom-agent-message-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 1.8; }
+.shroom-agent-message.is-user { margin-left: 30px; border: 1px solid var(--agent-soft-border); padding: 12px 16px; border-radius: 12px 12px 3px 12px; background: var(--agent-raised); }
+.shroom-agent-message.is-user .shroom-agent-message-label { color: var(--agent-secondary); }
+.shroom-agent-caret { display: inline-block; width: 6px; height: 15px; margin-left: 3px; background: var(--agent-accent); vertical-align: -2px; animation: shroom-agent-pulse 1.1s ease-in-out infinite; }
+.shroom-agent-task-history { display: grid; gap: 12px; margin-top: 24px; }
+.shroom-agent-task { padding: 14px; border: 1px solid var(--agent-soft-border); border-radius: 12px; background: #0c1d30; min-width: 0; }
+.shroom-agent-task-heading { display: flex; align-items: start; justify-content: space-between; gap: 10px; font-size: 13px; }
+.shroom-agent-status { color: var(--agent-secondary); font-size: 12px; flex-shrink: 0; }
+.shroom-agent-status:is([data-status="succeeded"], [data-status="applied"], [data-status="restored"]) { color: var(--agent-success); }
+.shroom-agent-status:is([data-status="failed"], [data-status="uncertain"]) { color: var(--agent-error); }
+.shroom-agent-status:is([data-status="running"], [data-status="verifying"], [data-status="applying"], [data-status="restoring"]) { color: var(--agent-accent); }
+.shroom-agent-status:is([data-status="awaiting_action"], [data-status="pending"]) { color: var(--agent-warning); }
+.shroom-agent-steps { list-style: none; display: grid; gap: 14px; padding: 0; margin: 18px 0 0; }
+.shroom-agent-steps li { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; gap: 8px; font-size: 12px; }
+.shroom-agent-steps li > span:last-child { color: var(--agent-secondary); }
+.shroom-agent-step-marker { width: 6px; height: 6px; border-radius: 50%; margin-top: 6px; background: var(--agent-secondary); }
+.shroom-agent-steps li:is([data-status="succeeded"], [data-status="completed"]) .shroom-agent-step-marker { background: var(--agent-success); }
+.shroom-agent-steps li[data-status="running"] .shroom-agent-step-marker { background: var(--agent-accent); }
+.shroom-agent-steps li[data-status="failed"] .shroom-agent-step-marker { background: var(--agent-error); }
+.shroom-agent-steps p { margin: 3px 0 0; color: var(--agent-secondary); white-space: pre-wrap; overflow-wrap: anywhere; }
+.shroom-agent-proposal { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--agent-soft-border); }
+.shroom-agent-proposal > p { font-size: 13px; overflow-wrap: anywhere; }
+.shroom-agent-root summary { cursor: pointer; padding: 11px 4px; min-height: 44px; color: var(--agent-secondary); font-size: 12px; }
+.shroom-agent-proposal pre { max-height: 260px; margin: 0 0 8px; padding: 12px; overflow: auto; background: var(--agent-input); border-radius: 8px; font: 12px/1.6 Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.shroom-agent-proposal-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.shroom-agent-working { display: flex; align-items: center; gap: 9px; font-size: 12px; color: var(--agent-secondary); margin: 20px 0 0; }
+.shroom-agent-composer { flex: 0 0 auto; padding: 16px 20px max(16px, env(safe-area-inset-bottom)); border-top: 1px solid var(--agent-soft-border); background: var(--agent-surface); }
+.shroom-agent-root textarea, .shroom-agent-root input, .shroom-agent-root select { width: 100%; min-width: 0; border: 1px solid var(--agent-border); border-radius: 10px; background: var(--agent-input); padding: 11px 12px; color: var(--agent-text); caret-color: var(--agent-accent); }
+.shroom-agent-root select { min-height: 44px; color-scheme: dark; cursor: pointer; }
+.shroom-agent-root select:disabled { opacity: .65; cursor: not-allowed; }
+.shroom-agent-root textarea::placeholder, .shroom-agent-root input::placeholder { color: #98b0c7; }
+.shroom-agent-root textarea { display: block; min-height: 94px; max-height: 220px; resize: vertical; font-size: 14px; line-height: 1.6; }
+.shroom-agent-root textarea:disabled { opacity: .65; }
+.shroom-agent-composer-tools { display: flex; justify-content: space-between; gap: 8px; margin-top: 10px; }
+.shroom-agent-composer-tools button:first-child { border-color: transparent; background: transparent; padding-inline: 6px; }
+.shroom-agent-send-hint { color: var(--agent-secondary); font-size: 11px; margin: 10px 0 0; line-height: 1.6; }
+.shroom-agent-attachments { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; max-height: 138px; overflow: auto; padding: 0; margin: 0 0 10px; }
+.shroom-agent-attachments li { display: flex; align-items: center; max-width: 100%; min-width: 0; border: 1px solid var(--agent-border); border-radius: 8px; background: var(--agent-raised); padding-left: 10px; }
+.shroom-agent-attachments li > span { display: block; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 330px; font-size: 12px; }
+.shroom-agent-attachments small { color: var(--agent-secondary); margin-left: 8px; font-size: 11px; }
+.shroom-agent-attachments button { width: 44px; padding: 0; border: 0; background: transparent; flex-shrink: 0; }
+.shroom-agent-attachments svg { width: 15px; height: 15px; }
+.shroom-agent-settings { padding: 20px; overflow: auto; min-height: 0; }
+.shroom-agent-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.shroom-agent-section-heading h3 { font-size: 17px; margin: 0; }
+.shroom-agent-settings form { display: grid; gap: 8px; margin-top: 20px; }
+.shroom-agent-settings label { margin-top: 14px; font-weight: 550; }
+.shroom-agent-settings label span { color: var(--agent-success); font-size: 12px; font-weight: 400; }
+.shroom-agent-settings form > button { margin-top: 16px; }
+.shroom-agent-hint { color: var(--agent-secondary); font-size: 12px; line-height: 1.7; }
+.shroom-agent-inline-error { color: var(--agent-error); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.shroom-agent-error { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid #65454b; background: #2d202b; color: var(--agent-error); padding: 12px 20px; font-size: 13px; flex: 0 0 auto; }
+.shroom-agent-error > span { overflow-wrap: anywhere; min-width: 0; }
+.shroom-agent-error button { flex-shrink: 0; font-size: 12px; }
+.shroom-agent-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+@keyframes shroom-agent-enter { from { transform: translateX(24px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes shroom-agent-pulse { 50% { opacity: .3; } }
+@media (max-width: 520px) {
+  .shroom-agent-root .shroom-agent-entry { right: 14px; bottom: max(14px, env(safe-area-inset-bottom)); }
+  .shroom-agent-header { padding: 14px 12px; }
+  .shroom-agent-emblem { display: none; }
+  .shroom-agent-identity h2 { font-size: 16px; }
+  .shroom-agent-identity p { font-size: 11px; }
+  .shroom-agent-header-actions { gap: 0; }
+  .shroom-agent-scroll, .shroom-agent-settings { padding: 16px; }
+  .shroom-agent-composer { padding: 12px 16px max(12px, env(safe-area-inset-bottom)); }
+  .shroom-agent-connect-note { align-items: start; flex-direction: column; }
+  .shroom-agent-send-hint { font-size: 11px; }
+  .shroom-agent-error { padding: 10px 12px; }
+}
+@media (max-height: 550px) {
+  .shroom-agent-header { padding-block: 8px; }
+  .shroom-agent-root textarea { min-height: 62px; max-height: 100px; }
+  .shroom-agent-composer { padding-block: 10px; }
+  .shroom-agent-send-hint { margin-top: 6px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shroom-agent-root *, .shroom-agent-root *::before, .shroom-agent-root *::after { animation: none !important; transition: none !important; }
+}

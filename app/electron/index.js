@@ -52,6 +52,17 @@ let appUpdater = null;
 let viteProcess = null;  // Vite 子进程引用，用于退出时清理
 let staticServer = null; // 生产环境静态资源 HTTP 服务
 let appCleanupPromise = null;
+let agentProcess = null;
+
+/** 首次使用时创建 Agent 管理器，凭据和任务写入独立用户目录。 */
+function getAgentProcess() {
+  if (!agentProcess) {
+    const { createAgentProcess } = require('./agentProcess');
+    agentProcess = createAgentProcess({ electron: require('electron'),
+      root: path.join(app.getPath('userData'), 'agent'), getWindow: () => mainWindow });
+  }
+  return agentProcess;
+}
 
 /**
  * 将已经存在的主窗口恢复并置于前台。
@@ -484,7 +495,9 @@ function startViteAndLoad(win) {
         if (viteFailed || viteLoaded) return;
         viteLoaded = true;
         logger.info(`[Main] Vite dev server is ready, loading ${nextUrl}`);
-        win.loadURL(nextUrl);
+        require('./agentProcess').loadAgentWindowUrl(win, nextUrl).catch((err) => {
+          logger.error(`[Main] Failed to load frontend: ${err.message}`);
+        });
       })
       .catch((err) => {
         logger.error(`[Main] ${err.message}`);
@@ -596,6 +609,8 @@ function cleanupApplicationResources() {
 
   appCleanupPromise = (async () => {
     killVite();
+    // ⚠️ 先停止 Agent 后续调度，再关闭业务服务，避免退出时仍发出写操作。
+    if (agentProcess) await agentProcess.dispose();
     // 两侧同时开始关闭，静态连接不能阻止后端先停分发、算法请求和串口。
     await Promise.all([
       closeStaticServer(),
@@ -726,7 +741,9 @@ function startStaticServer({ hostname, port, win }) {
 
   staticServer.listen(port, hostname, () => {
     logger.info(`[Main] Static server running at http://${hostname}:${port}/`);
-    win.loadURL(`http://${hostname}:${port}`);
+    require('./agentProcess').loadAgentWindowUrl(win, `http://${hostname}:${port}`).catch((err) => {
+      logger.error(`[Main] Failed to load frontend: ${err.message}`);
+    });
   });
 }
 
@@ -734,6 +751,8 @@ function startStaticServer({ hostname, port, win }) {
 // 应用生命周期
 // ============================================================
 app.whenReady().then(() => {
+  const { registerAgentIpc } = require('./agentProcess');
+  registerAgentIpc({ ipcMain, getWindow: () => mainWindow, getProcess: getAgentProcess });
   // 防止息屏后系统暂停应用，保持 WebSocket 数据通道持续工作
   const psBlockerId = powerSaveBlocker.start('prevent-app-suspension');
   logger.info(`[Main] powerSaveBlocker started, id=${psBlockerId}, active=${powerSaveBlocker.isStarted(psBlockerId)}`);

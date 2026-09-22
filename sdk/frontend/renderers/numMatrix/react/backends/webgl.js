@@ -869,6 +869,22 @@ export function createWebglMatrixBackend({
   };
 
   return {
+    // 分区、补点手套和双脚不满足等距矩阵假设，需独立物理点位映射。
+    sensorGrid: isRobot || isFoot || isGlove ? null : {
+      canvas: paneA.gl, columns: baseTexW, rows: baseTexH,
+      /** 返回实际矩阵外沿，排除叠加层留白。 */
+      getGridBounds() {
+        const rect = paneA.gl.getBoundingClientRect();
+        return { x1: rect.left, y1: rect.top, x2: rect.right, y2: rect.bottom };
+      },
+      /** 按实际数字画布尺寸投影原始格中心，统计使用相同转置后的行优先帧。 */
+      projectSensors() {
+        const rect = paneA.gl.getBoundingClientRect();
+        return Array.from({ length: baseTexW * baseTexH }, (_, index) => ({ index, visible: true,
+          x: rect.left + (index % baseTexW + 0.5) * rect.width / baseTexW,
+          y: rect.top + (Math.floor(index / baseTexW) + 0.5) * rect.height / baseTexH }));
+      },
+    },
     /**
      * 常规通道：shell 已经按 `valuef1` 过滤过，这里补总量守卫与高斯模糊。
      *

@@ -1,5 +1,7 @@
 const fs = require('fs');
 const path = require('path');
+const { createHash } = require('crypto');
+const { buildDisplaySystemDuplicateManifest, displaySystemEditorDigest } = require('../manifest/displaySystemDuplication');
 const {
   validateDisplaySystemConfig,
 } = require('../manifest/displaySystemConfigValidator');
@@ -46,6 +48,11 @@ const {
 const SAFE_DISPLAY_SYSTEM_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const BUILDER_ALGORITHM_TYPES = new Set(['none', 'json', 'js', 'python']);
 const CODE_ALGORITHM_TYPES = new Set(['js', 'python']);
+
+/** 标识编辑器读取的 manifest 内容，供后台任务写回前检测并发修改。 */
+function manifestRevision(manifest) {
+  return createHash('sha256').update(JSON.stringify(manifest)).digest('hex');
+}
 
 const DEFAULT_ALGORITHM_SOURCES = Object.freeze({
   js: `module.exports = function calculate(rawData, context) {
@@ -1036,6 +1043,12 @@ function createDisplaySystemWorkspaceService({
     if (!manifest || typeof manifest !== 'object') {
       throw new Error('display system manifest is not readable');
     }
+    // ⚠️ 检查与写入之间不得 await，否则用户手动保存会被旧 Agent 提案覆盖。
+    if (patch.expectedRevision !== undefined && patch.expectedRevision !== manifestRevision(manifest)) {
+      const error = new Error('display system changed since it was read; prepare a new proposal');
+      error.code = 'DISPLAY_SYSTEM_REVISION_CONFLICT';
+      throw error;
+    }
     const display = buildDisplaySection(manifest.display, patch);
     const nextManifest = { ...manifest, display };
     writeJsonAtomic(config.manifestPath, nextManifest, fsLike);
@@ -1043,6 +1056,7 @@ function createDisplaySystemWorkspaceService({
       id: String(manifest.id || ''),
       directory: path.dirname(config.manifestPath),
       manifest: nextManifest,
+      revision: manifestRevision(nextManifest),
     };
   }
 
@@ -1054,7 +1068,8 @@ function createDisplaySystemWorkspaceService({
    *
    * @param {object} config 源展示系统配置（要有 `manifestPath`）。
    * @param {{id: string, name?: string, canvas?: object, chartAppearance?: object,
-   *          chartCards?: object[]}} options 新模块的身份与要写入的三段。
+   *          chartCards?: object[], independentSensorTypes?: boolean,
+   *          expectedRevision?: string, expectedSourceDigest?: string}} options 身份、显示段及可选源版本校验。
    * @returns {{id: string, directory: string, manifest: object}} 新模块。
    */
   function duplicate(config, options = {}) {
@@ -1068,6 +1083,13 @@ function createDisplaySystemWorkspaceService({
     if (!manifest || typeof manifest !== 'object') {
       throw new Error('display system manifest is not readable');
     }
+    // ⚠️ 复制前同步核对源版本，否则用户确认的映射可能在复制时被替换。
+    if ((options.expectedRevision !== undefined && options.expectedRevision !== manifestRevision(manifest))
+      || (options.expectedSourceDigest !== undefined && options.expectedSourceDigest !== displaySystemEditorDigest(read(config)))) {
+      const error = new Error('source display system changed; prepare a new duplicate proposal');
+      error.code = 'DISPLAY_SYSTEM_REVISION_CONFLICT';
+      throw error;
+    }
     const directory = path.join(writableRoot, id);
     if (fsLike.existsSync(directory)) {
       const error = new Error('display system already exists');
@@ -1075,21 +1097,11 @@ function createDisplaySystemWorkspaceService({
       throw error;
     }
     const display = buildDisplaySection(manifest.display, options);
-    const nextManifest = {
-      ...manifest,
-      id,
-      name: String(options.name || '').trim() || `${manifest.name || id} 副本`,
-      display,
-      metadata: {
-        ...(manifest.metadata || {}),
-        // 必须显式写 'user'：`classifyDisplaySystemAccess` 把 `metadata.origin` 当
-        // 最高优先级的判据，自带系统那份写着 'system'，照抄过来的话副本明明躺在
-        // 可写目录里也会被判成不可编辑，用户就再也保存不了第二次。
-        origin: 'user',
-        // 记下来源，以后要做"和原版比一比"或者"跟随原版升级"时有据可查。
-        derivedFrom: String(manifest.id || ''),
-      },
-    };
+    const nextManifest = buildDisplaySystemDuplicateManifest(manifest, { ...options, id }, display);
+    if (options.independentSensorTypes === true) {
+      const validation = validateDisplaySystemConfig(nextManifest);
+      if (!validation.ok) throw Object.assign(new Error('duplicate manifest validation failed'), { details: validation.errors });
+    }
     copyDirectoryRecursive(sourceDirectory, directory, fsLike);
     // manifest 的文件名跟着源目录走 —— 源里叫 display-system.json 就还叫这个。
     writeJsonAtomic(path.join(directory, path.basename(config.manifestPath)), nextManifest, fsLike);
@@ -1138,8 +1150,10 @@ function createDisplaySystemWorkspaceService({
     const primaryDefinitions = config.sensors?.[0]?.id
       ? sensorDefinitions[config.sensors[0].id]
       : readDefinitions(config.resolvedFiles);
+    const manifest = readJsonOptional(config.manifestPath, fsLike);
     return {
-      manifest: readJsonOptional(config.manifestPath, fsLike),
+      manifest,
+      revision: manifestRevision(manifest),
       definitions: {
         ...primaryDefinitions,
         // v3 编辑器以这里为逐路真相；顶层五个字段继续投影第一路，兼容旧 Builder。
@@ -1158,6 +1172,7 @@ function createDisplaySystemWorkspaceService({
         algorithmPackages: listAlgorithmPackages(),
       }),
       writableRoot,
+      duplicateSystem: { version: 1, checksSourceRevision: true, checksSourceDigest: true, independentSensorTypes: true },
     }),
     read,
     save,

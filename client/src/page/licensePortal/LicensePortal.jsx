@@ -4,10 +4,11 @@ import { ArrowRightOutlined, AppstoreOutlined, SafetyCertificateOutlined, HeartO
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import useMainWebSocket from '../../services/ws/useMainWebSocket';
-import { getLicenseKeyFromMessage, isObjectMessage } from '../../services/ws/messages';
+import { getLicenseKeyFromMessage, hasValidLicenseDate, isExpiredLicenseMessage, isObjectMessage } from '../../services/ws/messages';
 import { commandClient } from '../../services/command/commandClient';
 import { requestJson } from '../../extensions/display-system/api';
 import { registerRuntimeDisplayDefinition } from '../../displays/registry';
+import { syncNativeSystemTemplates } from '../../displays/nativeSystemTemplates';
 import BRAND_LOGO_SRC from '../../assets/开屏IMG/shroom-vision-logo.png';
 import { FeedbackWidget } from './LicensePortalWidgets';
 import { PORTAL_CATEGORIES, buildPortalSystems, readPortalLicenseScope } from './portalSystems';
@@ -16,7 +17,7 @@ import PortalSystemSelector from './PortalSystemSelector';
 import './PortalFeedback.css';
 import SystemScenePreview from './scene/SystemScenePreview';
 import PressureParticleField from './scene/PressureParticleField';
-import { getPortalScene } from './scene/sceneCatalog';
+import { getPortalScene, supportsDirectSceneEntry } from './scene/sceneCatalog';
 import { transitionSceneFraming } from './scene/sceneNavigation';
 import { usePortalEntrance } from './usePortalMotion';
 import PortalMonitoringLayer from './PortalMonitoringLayer';
@@ -38,6 +39,8 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
   const [catalogError, setCatalogError] = useState(false);
   const [reload, setReload] = useState(0);
   const keyRef = useRef('');
+  const keyEditedRef = useRef(false);
+  const savedLicenseRef = useRef({ key: '', message: null, bootstrapped: false });
   const entryRef = useRef(null);
   const headingRef = useRef(null);
   const returnFocusRef = useRef(null);
@@ -69,7 +72,7 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
     setDirectEntry(false);
   }, []);
 
-  /** 手部先在后台准备真实画布，直接接续列表点阵；其他系统保留原有镜头过渡。 */
+  /** 支持粒子交接的原生画布直接接续列表点阵；其他系统保留镜头过渡。 */
   const enterMonitoringPage = useCallback(async (system) => {
     const controller = new AbortController();
     navigationRef.current?.abort();
@@ -77,7 +80,7 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
     try {
       if (system.runtimeDefinition) registerRuntimeDisplayDefinition(system.runtimeDefinition);
       localStorage.setItem('file', system.value);
-      const direct = ['hand', 'hand0205', 'handGlove115200', 'handGloveFullPacket'].includes(system.value);
+      const direct = supportsDirectSceneEntry(system);
       setDirectEntry(direct);
       setPhase('entering');
       const [module] = await Promise.all([
@@ -126,6 +129,10 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
       onPhase: setPhase,
       onError: setError,
       onEntered: enterMonitoringPage,
+      onValidated: (nextScope, key) => {
+        if (key === keyRef.current.trim()) { savedLicenseRef.current.bootstrapped = true; setScope(nextScope); }
+      },
+      onInvalidated: () => { savedLicenseRef.current.message = null; setScope(undefined); },
     });
     return () => { entryRef.current?.cancel(); entryRef.current = null; navigationRef.current?.abort(); };
   }, [enterMonitoringPage]);
@@ -133,14 +140,31 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
   const handleMessage = useCallback((data) => {
     if (!isObjectMessage(data)) return;
     const key = getLicenseKeyFromMessage(data);
-    if (key && !keyRef.current.trim()) { keyRef.current = key; setAccessKey(key); }
-    const nextScope = readPortalLicenseScope(data);
-    if (nextScope !== undefined) setScope(nextScope);
+    if (key) {
+      savedLicenseRef.current.key = key;
+      if (!keyEditedRef.current && !keyRef.current.trim()) { keyRef.current = key; setAccessKey(key); }
+    }
+    const invalid = data.licenseError || data.licenseLocked || data.valid === false || isExpiredLicenseMessage(data);
+    if (invalid) {
+      savedLicenseRef.current.message = null;
+      setScope(undefined);
+    } else if (!savedLicenseRef.current.bootstrapped && !keyEditedRef.current
+      && hasValidLicenseDate(data) && readPortalLicenseScope(data) !== undefined) {
+      savedLicenseRef.current.message = data;
+    }
+    // ⚠️ 用户编辑后只接受该次验证回执，后台旧密钥广播不能恢复已清空的列表。
+    const saved = savedLicenseRef.current;
+    if (!saved.bootstrapped && !keyEditedRef.current && saved.key && saved.key === keyRef.current.trim() && saved.message) {
+      saved.bootstrapped = true;
+      setScope(readPortalLicenseScope(saved.message));
+    }
     if (data.displaySystemsUpdated) setReload((value) => value + 1);
     entryRef.current?.receive(data);
   }, []);
 
   const handleDisconnect = useCallback(() => {
+    savedLicenseRef.current = { key: '', message: null, bootstrapped: false };
+    setScope(undefined);
     cancelNavigation();
     entryRef.current?.cancel();
     setError('与应用的连接已断开，请等待重新连接后重试');
@@ -156,6 +180,7 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
       .then((payload) => {
         if (controller.signal.aborted) return;
         if (!Array.isArray(payload?.displaySystems?.runtimeDefinitions)) throw new Error('系统目录格式不正确');
+        syncNativeSystemTemplates(payload.displaySystems.runtimeDefinitions);
         setRuntimeDefinitions(payload.displaySystems.runtimeDefinitions);
       })
       .catch(() => {
@@ -175,13 +200,24 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
     }
   }, [selectorOpen, cancelNavigation]);
 
-  /** 将输入立即同步到 ref，防止后端回填覆盖刚输入的密钥。 */
-  const changeKey = (key) => { keyRef.current = key; setAccessKey(key); setError(''); };
+  /** 编辑密钥立即撤回旧目录，并使在途验证结果失效。 */
+  const changeKey = (key) => {
+    keyEditedRef.current = true;
+    if (key.trim() !== keyRef.current.trim()) {
+      entryRef.current?.cancel();
+      savedLicenseRef.current.message = null;
+      setScope(undefined);
+    }
+    keyRef.current = key;
+    setAccessKey(key);
+    setError('');
+  };
 
   /** 浏览器返回可回到首页；分类选择不会切换运行系统。 */
   const openCategory = (nextCategory) => {
     returnFocusRef.current = document.activeElement;
     setParams({ category: nextCategory, system: localStorage.getItem('file') || '' });
+    if (scope === undefined && accessKey.trim()) entryRef.current?.validate({ key: accessKey, connected });
   };
 
   /** 配置器或后端确认切换系统后，让常驻模型同步真实系统身份。 */
@@ -226,10 +262,10 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
           <form className="portal-access" onSubmit={(event) => { event.preventDefault(); openCategory('all'); }}>
             <label className="portal-access-title" htmlFor="portal-home-key"><KeyOutlined aria-hidden="true" /> 访问密钥</label>
             <div className="portal-access-main">
-              <input id="portal-home-key" value={accessKey} onChange={(event) => changeKey(event.target.value)} placeholder="输入密钥，或先浏览系统" autoComplete="off" />
+              <input id="portal-home-key" value={accessKey} onChange={(event) => changeKey(event.target.value)} placeholder="输入访问密钥" autoComplete="off" />
               <button type="submit" className="portal-enter-button" aria-haspopup="dialog">选择系统 <ArrowRightOutlined aria-hidden="true" /></button>
             </div>
-            <p className="portal-access-hint">进入所选系统时验证密钥；已保存密钥由本机服务回填。</p>
+            <p className="portal-access-hint">系统列表按密钥授权显示；已保存密钥由本机服务回填。</p>
           </form>
           <section className="portal-grid" aria-label="场景分类">
             {PORTAL_CATEGORIES.map((item) => {
@@ -256,6 +292,7 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
       runtime={monitoringModule && <PortalMonitoringLayer component={monitoringModule.default}
         system={previewSystem} directEntry={directEntry} capturePreview={capturePreview} onPreviewChange={changePreview} onBack={returnToSelector} onSystemChange={syncMonitoringSystem} />}
       onKeyChange={changeKey} onReload={() => setReload((value) => value + 1)}
+      onValidate={() => entryRef.current?.validate({ key: accessKey, connected })}
       onBack={() => setParams({})}
       onCategory={(next) => setParams({ category: next }, { replace: true })}
       onSelect={(system) => { setError(''); setParams({ category: activeCategory, system }, { replace: true }); }}

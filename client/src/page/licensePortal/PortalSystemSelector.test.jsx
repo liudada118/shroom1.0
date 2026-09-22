@@ -10,7 +10,7 @@ const props = {
     { value: 'hand', label: '手部检测', category: 'embodied', source: 'builtin' },
     { value: 'bed', label: '床垫监测', category: 'care', source: 'builtin' },
   ], category: 'embodied', selectedId: 'hand', sceneStatus: { state: 'ready', key: 'matrix' },
-  accessKey: '', phase: 'entering', directEntry: true, monitoring: true, expanded: false,
+  accessKey: '', scope: null, phase: 'entering', directEntry: true, monitoring: true, expanded: false,
   runtime: <div data-testid="actual-canvas" />,
 };
 
@@ -35,6 +35,19 @@ describe('手部单段直达的选择器宿主', () => {
   it('监测中同步系统不受保留的列表筛选限制', () => {
     const html = renderToStaticMarkup(<PortalSystemSelector {...props} selectedId="bed" dataView phase="idle" />);
     expect(html).toContain('>床垫监测</h3>');
+    expect(html).not.toContain('>手部检测</h3>');
+  });
+  it('按密钥过滤列表、数量和选中预览，URL 中的未授权系统不能成为选中项', () => {
+    const html = renderToStaticMarkup(<PortalSystemSelector {...props} category="all" selectedId="hand" scope={['bed']} phase="idle" monitoring={false} directEntry={false} />);
+    expect(html).toContain('data-system="bed"');
+    expect(html).not.toContain('data-system="hand"');
+    expect(html).toContain('>床垫监测</h3>');
+    expect(html).toContain('1 个可用系统');
+  });
+  it('尚未验证或更换密钥时隐藏所有系统，并提供验证入口', () => {
+    const html = renderToStaticMarkup(<PortalSystemSelector {...props} scope={undefined} phase="idle" monitoring={false} directEntry={false} />);
+    expect(html).not.toContain('data-system=');
+    expect(html).toContain('验证密钥后显示系统');
     expect(html).not.toContain('>手部检测</h3>');
   });
 });

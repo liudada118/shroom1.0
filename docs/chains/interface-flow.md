@@ -1,6 +1,6 @@
 # 界面、场景交接与前端数据链
 
-> 当前实现核对日期：2026-09-11。本文说明实际代码，不把参考项目的演示能力当成已接入功能。
+> 当前实现核对日期：2026-09-16。本文说明实际代码，不把参考项目的演示能力当成已接入功能。
 > 阅读目标：从点击入口追到真实画布、图表，再理解返回、取消和资源释放。
 
 [返回开发手册](../developer-guide.md) · [文档导航](../README.md) · [后端数据与算法](data-flow.md)
@@ -18,7 +18,7 @@
 
 ```text
 LicensePortal → PortalSystemSelector → createPortalEntry
-  → license.activate（HTTP + 授权消息）→ sensor.switch（HTTP 确认）
+  → license.activate（HTTP 回执携带本次授权范围）→ sensor.switch（HTTP 确认）
   → loadMonitoringPage → PortalMonitoringLayer → Home
      ├─ Title：真实控制与快捷工具
      ├─ Aside：统计、公式、Agent 图表、算法包结果
@@ -31,7 +31,7 @@ LicensePortal → PortalSystemSelector → createPortalEntry
 
 1. `LicensePortal` 通过 `useMainWebSocket` 接收连接、授权范围、已保存密钥及目录更新消息。
 2. `/api/display-systems` 提供运行时定义；`buildPortalSystems` 合并内置与自定义系统。
-3. `openCategory` 修改 URL 查询参数 `category/system`；`PortalSystemSelector` 管理本地搜索及可见列表。
+3. `openCategory` 修改 URL 查询参数 `category/system`；没有已验证范围时提交密钥验证。`PortalSystemSelector` 先按授权过滤内置系统，再做分类和搜索；自定义安装系统沿用独立入口规则，未知授权不显示系统。
 4. 单击某个系统只更新选择身份、文案和 `previewSystem`，不会发送 `sensor.switch`。
 5. `SystemScenePreview` 按 `getPortalScene` 选择本地模型或矩形点阵，并在首页宿主与弹窗宿主之间交接。
 
@@ -41,18 +41,21 @@ LicensePortal → PortalSystemSelector → createPortalEntry
 当前手部检测 `hand` 对应矩形点阵；手套系统对应手模型；未知或 Manifest 系统使用通用矩阵，不根据名称猜外形。
 
 选择器打开后背景 `main` 被设为 `inert`；关闭后焦点回到入口。监测已接管交互时，选择器不抢内部配置弹窗的键盘事件。
-目录请求使用 `AbortController`；重载或卸载后不写入迟到结果，目录读取失败仍允许浏览内置系统。
+桌面选择器高度上限 780px，分类保持单行；已验证密钥收在底部“更换密钥”入口，系统列表占用剩余高度并独立滚动。未知或失败授权直接显示编辑区；表单始终挂载，以保留右侧进入按钮的提交关联。
+目录请求使用 `AbortController`；重载或卸载后不写入迟到结果，目录读取失败仍显示已授权内置系统。
+初始私有密钥与有效授权消息只配对一次；后续无密钥的成功广播不改列表。编辑密钥立即清空范围、取消在途验证；点击“验证密钥”读取本次 HTTP 回执，失败保持空列表。
 
-## 3. 授权进入：HTTP 确认和授权状态不能混为一谈
+## 3. 授权进入：使用当前提交的 HTTP 授权回执
 
-[createPortalEntry](../../client/src/page/licensePortal/portalEntry.js) 是进入控制器，内部保存 `attempt`、超时计时器和授权范围。
+[createPortalEntry](../../client/src/page/licensePortal/portalEntry.js) 管理验证与进入请求，内部保存 `attempt` 和超时计时器。
 
 | 步骤 | 函数/状态 | 输入 → 输出 |
 | --- | --- | --- |
-| 提交 | `begin` / `validating` | 锁定点击时的系统与密钥；校验连接、非空密钥、防重复提交 |
+| 提交 | `validate` 或 `begin` / `validating` | 锁定密钥及可选目标；校验连接、非空密钥、防重复提交 |
 | 激活 | `activate` | `license.activate` 发往 HTTP 命令接口 |
-| 授权消息 | `receive` | 检查有效日期、过期、拒绝状态；触发本次 `finish` |
-| 顺序切换 | `finish` / `switching` | 等待激活 HTTP 成功、检查系统授权，再调用 `sensor.switch` |
+| 授权回执 | `finish` | 读取 `ack.data.results` 中 license-activation 的 payload，检查日期和范围，再更新目录；仅验证请求到此结束 |
+| 失效广播 | `receive` | 拒绝、锁定或过期时取消请求；成功广播不能代替当前 HTTP 回执 |
+| 顺序切换 | `finish` / `switching` | 进入请求在授权匹配后调用 `sensor.switch` |
 | 页面准备 | `onEntered` | 后端切换确认后进入前端加载与场景交接 |
 
 总等待上限为 20 秒。后台自动刷新授权不会在没有 `attempt` 时自动进入系统。
@@ -241,3 +244,19 @@ GET 轮询串行、单次 4 秒超时，活跃时请求结束后等待 500ms；P
 - 超市：[portalAlgorithmCatalog.test.jsx](../../client/src/page/licensePortal/portalAlgorithmCatalog.test.jsx)、[portalPackageRuntime.test.jsx](../../client/src/page/licensePortal/portalPackageRuntime.test.jsx)。
 - 真页面隔离回归：`node scripts/tests/portal-launcher.mjs --monitor-only`，脚本使用受控消息/算法输入，不证明实际设备或安装包工作正常；完整入口回归去掉参数。
 - 布局回归：`node scripts/tests/manifest-workspace-layout.mjs`；改动验证分级见 [ARCHITECTURE_INDEX](../../ARCHITECTURE_INDEX.md)。
+
+## 11. 内置场景预览资源与连续交接（2026-09-22）
+
+`nativeSceneAssets` 与原生模型渲染器共享 URL、备用资源和足底图平面配置。`sceneCatalog` 按真实型号选择模型，不按机器人/座椅大类替代；`sceneLayouts` 处理无模型的矩阵、OneStep 平面及双足轮廓，`sceneModelSampling` 按世界表面积分配粒子。预览仅表示展示外形，不生成压力、算法读数或采集帧。
+
+小床 (`jqbed`)、宠物/mini 看护与 64×64 高速加入 `supportsDirectSceneEntry`，通过真实画布的 `shroomParticleEntrance` 单段进入和反向返回。小床及高速点图的门户宿主调整由组件内 ResizeObserver 维护，原生几何和数据处理仍属于原渲染器。实体模型未在本次批量接入粒子交接，进入仍可降级为淡入。
+
+新增回归 `node scripts/tests/portal-scene-catalog.mjs`：逐项加载用户报告的 12 个系统预览并截图，检查上述 4 个原生画布往返的 GPU 权重、尺寸、样式清理及减少动画；使用合成授权和拦截接口，不接触真实设备。
+
+### 2026-09-22 后续：座椅、足底与机器人实体交接
+
+`wholeChair`、`carQX`、`minzhen`、`footVideo`、`robot1`（G1）、`robotSY`（N2）、`robotLCF`（H1）已补齐上述实体交接缺口。Home 显式传入 `portalEmbedded`，`nativeSceneEntrance` 维护真实资源加载状态、宿主尺寸和卸载清理；`nativeSceneSamples` 按世界表面积选取固定三角形及重心坐标，过渡时跟随原模型/骨骼与相机。足底只采样已经加载的原生双平面透明轮廓，不创建另一套脚模型，也不改压力矩阵。
+
+`modelParticleEntrance` 将采样点接到原实体表面，再显出原材质，反向返回复用当前预览投影。`monitoringSurface` 对受管原生模型延长等待至最多 30 秒，超时/失败显示错误，迟到结果不能再弹出；正常未完成加载可通过“取消进入”退出。只有上述原生类型和它们的副本新增直接交接，其他未接入类型仍保留原路径。
+
+`portal-scene-catalog.mjs` 现覆盖 13 个预览和 11 个原生往返，`--native-only` 聚焦新增的 7 项实体场景，并检查实际 GPU 中间权重、慢加载、资源失败和减少动画。原生采样及生命周期测试使用真实 Three 几何，设备/授权接口仍由浏览器夹具拦截。

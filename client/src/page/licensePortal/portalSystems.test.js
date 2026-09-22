@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildPortalSystems, filterPortalSystems, isPortalSystemAllowed, readPortalLicenseScope } from './portalSystems';
+import { buildPortalSystems, filterPortalSystems, getAuthorizedPortalSystems, isPortalSystemAllowed, readPortalLicenseScope } from './portalSystems';
 import { getBuiltinSystemOptions } from '../../services/displaySystemOptions';
 
 /** 构造目录中的真实 runtimeDefinition 结构，不依赖运行后端。 */
@@ -29,5 +29,12 @@ describe('首页系统目录', () => {
     expect(isPortalSystemAllowed(system, [])).toBe(false);
     expect(isPortalSystemAllowed(system, ['hand'])).toBe(true);
     expect(isPortalSystemAllowed(system, null)).toBe(true);
+  });
+  it('列表仅包含授权内置系统和已安装自定义系统，换密钥时清空', () => {
+    const systems = buildPortalSystems((key) => key, [runtime('custom-mat')]);
+    expect(getAuthorizedPortalSystems(systems, ['wholeChair']).map((item) => item.value)).toEqual(['wholeChair', 'custom-mat']);
+    expect(getAuthorizedPortalSystems(systems, undefined)).toEqual([]);
+    expect(getAuthorizedPortalSystems(systems, []).map((item) => item.value)).toEqual(['custom-mat']);
+    expect(getAuthorizedPortalSystems(systems, null)).toEqual(systems);
   });
 });

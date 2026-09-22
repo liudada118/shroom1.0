@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { NATIVE_SCENE_ASSETS } from '../../displays/nativeSceneAssets';
 
 const readGlbJson = (relativeUrl) => {
   const buffer = fs.readFileSync(fileURLToPath(new URL(relativeUrl, import.meta.url)));
@@ -62,8 +63,10 @@ describe("human body low-poly model", () => {
       fileURLToPath(new URL("./HumanBodyOptimized.jsx", import.meta.url)),
       "utf8",
     );
-    const lowPolyIndex = source.indexOf('"./model/human3-low.glb"');
-    const originalIndex = source.indexOf('"./model/human3.glb"');
+    expect(NATIVE_SCENE_ASSETS.humanBodyOptimized.url).toBe('./model/human3-low.glb');
+    expect(NATIVE_SCENE_ASSETS.humanBodyOptimized.fallback.url).toBe('./model/human3.glb');
+    const lowPolyIndex = source.indexOf('NATIVE_SCENE_ASSETS.humanBodyOptimized.url');
+    const originalIndex = source.indexOf('NATIVE_SCENE_ASSETS.humanBodyOptimized.fallback.url');
     expect(lowPolyIndex).toBeGreaterThan(-1);
     expect(originalIndex).toBeGreaterThan(lowPolyIndex);
     expect(source).toContain("loadHumanBodyModel(new GLTFLoader())");

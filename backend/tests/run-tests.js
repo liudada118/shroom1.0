@@ -3,6 +3,17 @@ const { spawnSync } = require('child_process');
 
 const projectRoot = path.resolve(__dirname, '../..');
 const testFiles = [
+  'backend/tests/agentRuntime/realtimeClassifier.test.js',
+  'backend/tests/agentRuntime/algorithmLab.test.js',
+  'backend/tests/displaySystems/builtinTemplates.test.js',
+  'backend/tests/http/nativeSystemsApi.test.js',
+  'backend/tests/playback/playbackTiming.test.js',
+  'backend/tests/agentRuntime/provider.test.js',
+  'backend/tests/agentRuntime/runtime.test.js',
+  'backend/tests/agentRuntime/attachments.test.js',
+  'backend/tests/agentRuntime/agentProcess.test.js',
+  'backend/tests/agentRuntime/agentTools.test.js',
+  'backend/tests/agentRuntime/agentDeviceConnection.test.js',
   'backend/tests/contracts/multiSensorStableContract.test.js',
   'backend/tests/license/licenseScopes.test.js',
   'backend/tests/processing/lineOrders.test.js',
@@ -63,6 +74,7 @@ const testFiles = [
   'backend/tests/server/zeroFrameAdapter.test.js',
   'backend/tests/server/zeroStateStore.test.js',
   'backend/tests/server/playbackFrameService.test.js',
+  'backend/tests/server/serverHistoryLoader.test.js',
   'backend/tests/playback/channelPlaybackService.test.js',
   'backend/tests/server/handRuntimeFactory.test.js',
   'backend/tests/server/runtimeContextFactory.test.js',
