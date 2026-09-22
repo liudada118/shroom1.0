@@ -123,8 +123,8 @@ export class CommandClient {
 
   async executeEnvelope(command) {
     if (!this.fetchImpl) throw new CommandClientError('fetch is not available');
-    // 串口后端最多等待打开 10 秒/关闭 3 秒，客户端留出传输余量。
-    const controller = command.type?.startsWith('serial.') ? new AbortController() : null;
+    // 设备操作留出后端完成时间；网络挂起时也必须恢复串口与 HaLow 控件。
+    const controller = command.type?.startsWith('serial.') || command.type === 'halow.control' ? new AbortController() : null;
     const timer = controller ? setTimeout(() => controller.abort(), 15000) : null;
     try {
       const response = await Reflect.apply(this.fetchImpl, globalThis, [`${this.baseUrl}/api/commands`, {

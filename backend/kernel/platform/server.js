@@ -24,6 +24,8 @@ const { createPetCareRuntimeService } = require('../algorithm-channel/petCareRun
 const { createAlgorithmMarketService } = require('../../extension-host/runtime/algorithmMarketService');
 let algorithmMarketService = null;
 const { createControlCommandRouter } = require('./commands/controlCommandRouter');
+const { createHalowService, hasSerialConnection, registerHalowControlHandler } = require('../transport/halowService');
+let halowService = null;
 const { registerRuntimeCommandHandlers } = require('./commands/registerRuntimeCommandHandlers');
 const {
   registerCalibrationZeroCommandHandler,
@@ -1313,7 +1315,8 @@ function getShutdownOrchestrator() {
  */
 function shutdownServer() {
   appRuntime.displaySystems.stopRuntimeDispatch();
-  return Promise.resolve(algorithmMarketService?.dispose()).then(() => getShutdownOrchestrator().shutdownServer());
+  return Promise.all([algorithmMarketService?.dispose(), halowService?.dispose()])
+    .then(() => getShutdownOrchestrator().shutdownServer());
 }
 let baudRate = 1000000;
 const timeNum = 1000 / 12;
@@ -1484,6 +1487,7 @@ const {
 } = serialRuntime;
 
 const serialPortOrchestrator = createSerialPortOrchestrator({
+  beforeOpen: () => halowService?.requireSerialAvailable(),
   getBaudRate: runtimeContext.getBaudRate,
   getSerialConfig: appRuntime.displaySystems.getSerialConfig,
   getSensorType: runtimeContext.getSensorType,
@@ -1958,6 +1962,7 @@ const historyMaintenanceService = createHistoryMaintenanceService({
 });
 
 const controlCommandRouter = createControlCommandRouter({ logger });
+registerHalowControlHandler(controlCommandRouter, { getService: () => halowService });
 controlCommandRouter.register(createJqbedAlgorithmCommandHandler({
   protocol: jqbedAlgorithmProtocol,
   getRuntimeContext: () => ({
@@ -2103,12 +2108,13 @@ registerSerialControlHandlers(controlCommandRouter, {
   /** 原生副本切换前先核验身份；采集中切换会把一段记录拆到两个库。 */
   resolveSystemSelection: (id) => {
     const selection = appRuntime.builtinTemplates.resolve(id, selectFlag);
-    if ((selection.template || appRuntime.builtinTemplates.currentId(file) !== file) && getCollectionState('flag')) {
+    if ((selection.template || appRuntime.builtinTemplates.currentId(file) !== file || halowService?.receiver.active) && getCollectionState('flag')) {
       throw Object.assign(new Error('请先停止采集，再切换系统。'), { code: 'AGENT_DEVICE_BUSY', httpStatus: 409 });
     }
     return selection;
   },
   activateSystemSelection: appRuntime.builtinTemplates.activate,
+  stopAlternateTransport: () => halowService?.stop(),
   closeAllManagedSerialPorts,
   closeManagedSerialPort,
   closeManagedSerialPorts,
@@ -2528,7 +2534,7 @@ const legacySerialFrameRuntimeBaseContext = {
   zeroLineMatrix,
 };
 
-const { legacySerialRuntimeContext } = bindLegacySerialRuntime({
+const { legacySerialRuntimeContext, legacySerialRuntimeBinding } = bindLegacySerialRuntime({
   baseContext: legacySerialFrameRuntimeBaseContext,
   collectionStateAccessor,
   getManagedSerialPort,
@@ -2553,6 +2559,21 @@ const { legacySerialRuntimeContext } = bindLegacySerialRuntime({
   runtimeStateAccessor,
   serialRoles,
   serialParserManager,
+});
+
+// HaLow 只替换传输层，原生副本仍使用自己的系统身份和数据库。
+halowService = createHalowService({
+  getContext: () => ({
+    file: runtimeContext.getSensorType(),
+    systemId: appRuntime.builtinTemplates.currentId(runtimeContext.getSensorType()),
+    licenseValid: runtimeContext.getNowDate() < endDate,
+    shutdown: serverShutdownRequested,
+    playback: runtimeContext.isLocalPlayback(),
+    collecting: Boolean(getCollectionState('flag')),
+    serialBusy: Boolean(com || com1 || comhead || comSensor) || hasSerialConnection(serialManager.getStatus()),
+  }),
+  onFrame: legacySerialRuntimeBinding.legacySerialFrameRuntime.handleSitSerialFrame,
+  publish: publishSystemEvent,
 });
 
 jqbedTimer = petCareRuntimeService.startVitalSignsTimer();
@@ -2667,6 +2688,7 @@ const httpApp = createHttpApp({
       localPlayback: runtimeContext.isLocalPlayback(),
       playing: Boolean(playFlag),
       historyMode: Boolean(history),
+      alternateTransportBusy: Boolean(halowService?.isBusy()),
       licensed: runtimeContext.getNowDate() < endDate,
       licenseScope: selectFlag,
     }),

@@ -3,6 +3,9 @@ const { spawnSync } = require('child_process');
 
 const projectRoot = path.resolve(__dirname, '../..');
 const testFiles = [
+  'backend/tests/serial/halowReceiver.test.js',
+  'backend/tests/http/halowControlApi.test.js',
+  'backend/tests/packaging/upload-release.test.js',
   'backend/tests/agentRuntime/realtimeClassifier.test.js',
   'backend/tests/agentRuntime/algorithmLab.test.js',
   'backend/tests/displaySystems/builtinTemplates.test.js',

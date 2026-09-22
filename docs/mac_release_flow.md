@@ -6,7 +6,7 @@
 
 - 正式 mac 发版命令: `npm run build-mac-release`
 - 内部分发测试命令: `npm run build-mac-share`
-- 当前更新源: `http://sensor.bodyta.com/shroom1`
+- 当前更新源: `https://shroom.jq-industries.com/shroom1`
 
 不适用范围:
 
@@ -32,7 +32,7 @@
    ```json
    {
      "provider": "generic",
-     "url": "http://sensor.bodyta.com/shroom1"
+     "url": "https://shroom.jq-industries.com/shroom1"
    }
    ```
 
@@ -264,7 +264,7 @@ dist/latest-mac.yml
 当前仓库配置下，上传位置对应:
 
 ```text
-http://sensor.bodyta.com/shroom1
+https://shroom.jq-industries.com/shroom1
 ```
 
 如果只想给用户一个手动安装包，再额外上传 DMG 即可。
@@ -273,7 +273,7 @@ http://sensor.bodyta.com/shroom1
 
 服务端文件上传完成后，打包版客户端会按下面的链路生效。
 
-1. 应用启动后，`index.js` 只在 `app.isPackaged` 时初始化 `AppUpdater`
+1. 应用启动后，`app/electron/index.js` 只在 `app.isPackaged` 时初始化 `AppUpdater`
 2. `AppUpdater.startAutoCheck()` 在启动 30 秒后做第一次检查，之后每 4 小时检查一次
 3. 客户端通过包内的 `app-update.yml` 知道更新服务器地址
 4. `electron-updater` 从服务器读取 `latest-mac.yml`
@@ -305,10 +305,10 @@ http://sensor.bodyta.com/shroom1
 - `scripts/entitlements.mac.plist`
   mac Electron 运行和重签名需要的 entitlements
 
-- `autoUpdater.js`
+- `app/update/autoUpdater.js`
   主进程自动更新逻辑
 
-- `preload.js`
+- `app/electron/preload.js`
   暴露 `update-command` / `update-status` IPC 能力
 
 - `client/src/components/updater/UpdateNotifier.jsx`

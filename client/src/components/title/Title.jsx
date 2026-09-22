@@ -33,6 +33,7 @@ import JqbedAlgorithmConfigModal from '../../extensions/jqbed/JqbedAlgorithmConf
 import { getJqbedConfigAccess } from '../../extensions/jqbed/jqbedAlgorithmConfig';
 import { commandClient, commandFromLegacyFields } from '../../services/command/commandClient';
 import { serialFeedback, serialErrorText } from '../../services/serial/serialFeedback';
+import HalowConnection from './HalowConnection';
 import {
   PRESSURE_SCENES,
   readPressureScene,
@@ -2166,6 +2167,12 @@ class Title extends React.Component {
       },
     ];
     const isMinzhenAnimationMode = this.props.matrixName === minzhenType_title && this.props.numMatrixFlag === 'normal';
+    const isHalowSystem = resolveNativeSystemType(this.props.systemId || this.props.matrixName) === HUMAN_BODY_OPTIMIZED_MATRIX;
+    const halowControls = isHalowSystem ? <HalowConnection
+      key={this.props.systemId || this.props.matrixName}
+      status={this.props.halowStatus} onStatus={(halowStatus) => this.props.changeStateData({ halowStatus })}
+      connected={this.props.wsConnected} connectionEpoch={this.props.wsConnectionEpoch}
+      history={this.props.history} collecting={!this.props.colFlag} /> : null;
     // console.log('title')
     const baudControl = <>
         {
@@ -2206,6 +2213,7 @@ class Title extends React.Component {
           aria-label={t('chooseSensor')}
           {...this.getSerialSelectProps('sit')}
           value={this.props.portname || undefined}
+          disabled={this.getSerialSelectProps('sit').disabled || (isHalowSystem && Boolean(this.props.halowStatus?.running))}
           onOpenChange={() => {
             this.props.wsSendObj({ serialReset: true })
           }}
@@ -2799,7 +2807,7 @@ class Title extends React.Component {
           componentDisabled={this.state.portalBusy || this.state.csvDownloadStage === 'exporting'}>
           <div className="portal-device-inline" role="group" aria-label="连接设备">
             <span className="portal-device-inline-label">连接设备</span>
-            <div className="portal-device-port-fields">{serialControls}</div>
+            <div className="portal-device-port-fields">{serialControls}{halowControls}</div>
             <div className="portal-device-inline-actions">{closeControl}</div>
           </div>
         </ConfigProvider>}
@@ -2904,6 +2912,7 @@ class Title extends React.Component {
 
         <Menu className='menu' onClick={this.onClick} selectedKeys={[this.state.current]} mode="horizontal" items={navItems} />
         {serialControls}
+        {halowControls}
         {serialStatusControls}
 
         {displayControls}

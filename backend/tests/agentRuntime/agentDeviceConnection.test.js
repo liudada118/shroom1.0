@@ -27,6 +27,7 @@ function fixture() {
 
 test('guard validates identity, configuration, idle state, actual port and license before any command', () => {
   for (const mutation of [
+    (f) => { f.runtime.alternateTransportBusy = true; },
     (f) => { f.runtime.collecting = true; }, (f) => { f.runtime.playing = true; }, (f) => { f.runtime.localPlayback = true; }, (f) => { f.runtime.historyMode = true; },
     (f) => { f.serial.push({ role: 'back', status: 'opening', isOpen: false, reconnect: false }); },
     (f) => { f.serial.push({ role: 'back', status: 'closed', isOpen: false, reconnect: true }); },

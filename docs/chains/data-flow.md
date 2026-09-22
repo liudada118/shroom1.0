@@ -261,3 +261,8 @@ Manifest 路径调用 [channelPlaybackService.buildChannelPlaybackFrames](../../
 | 呼吸库异常而 CoP 还在变 | onbedFilterHealthy 与算法返回指标 | 把 CoP 正常当作呼吸算法健康 |
 
 本文仅做静态源码核对；没有启动服务、连接硬件或运行上述测试。修改这些共享数据边界时按 [验证索引](../../ARCHITECTURE_INDEX.md) 选择 Full，不能以文档核对替代运行验证。
+
+
+### HaLow 人体 TCP 数据源
+
+`humanBodyOptimized`（人体全身传感）及其原生副本可通过 `halow.control` HTTP 命令启动接收。`backend/kernel/transport/halowReceiver.js` 按连接解析 ID 和 1024 字节帧，`halowService.js` 只把当前所选设备交给原有 SIT 处理器；后续归零、采集数组格式、回放/CSV 和规范帧发布使用上述同一链路。设备 ID 不替代系统或副本身份。启动与串口互斥，采集时禁止换设备；进入回放或换系统后停止实时接收。详见 [HaLow 接入](../halow-human-body.md)。

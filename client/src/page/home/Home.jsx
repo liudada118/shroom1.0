@@ -1092,6 +1092,7 @@ class Home extends React.Component {
       colNum: 0,
       history: "now",
       jqbedAlgorithmConfig: null,
+      halowStatus: null,
       jqbedAlgorithmConfigResult: null,
       jqbedAlgorithmStatus: { state: 'waiting', error: null },
       wsConnected: false,
@@ -1781,10 +1782,27 @@ class Home extends React.Component {
     }
   }
 
+  /** 接收停止或设备切换时清空实时画面；只改展示缓存，不发布或保存模拟零帧。 */
+  clearHalowDisplay = () => {
+    if (resolveNativeSystemType(this.state.systemId || this.state.matrixName) !== HUMAN_BODY_OPTIMIZED_MATRIX
+      || this.state.history !== 'now') return;
+    clearLastFrame();
+    const empty = new Array(1024).fill(0);
+    if (this.state.numMatrixFlag === 'numoriginal') this.com.current?.changeHumanBodyData?.(empty);
+    else this.com.current?.sitData?.({ wsPointData: empty });
+    this.humanBodyPressureTrend = [];
+    this.humanBodyAreaTrend = [];
+    this.data.current?.changeData({ meanPres: '0.00', maxPres: 0, point: 0, area: 0, totalPres: '0' });
+    this.data.current?.initCharts();
+    this.setState({ realHz: 0 });
+  }
+
   wsData = (e, decodedMessage = null) => {
     sitPress = 0;
     const jsonObject = decodedMessage || parseWebSocketEventPayload(e);
     if (!jsonObject) return;
+    if (jsonObject.halowStatus) this.setState({ halowStatus: jsonObject.halowStatus });
+    if (jsonObject.halowClear) this.clearHalowDisplay();
     if (jsonObject.serialStatus) {
       serialFeedback.status(jsonObject.serialStatus);
       window.dispatchEvent(new CustomEvent('shroom-serial-status', { detail: jsonObject.serialStatus }));
@@ -4995,6 +5013,7 @@ class Home extends React.Component {
             smallBed12BRealtimeSamplePoint={this.state.smallBed12BRealtimeSamplePoint}
             history={this.state.history}
             jqbedAlgorithmConfig={this.state.jqbedAlgorithmConfig}
+            halowStatus={this.state.halowStatus}
             jqbedAlgorithmConfigResult={this.state.jqbedAlgorithmConfigResult}
             jqbedAlgorithmStatus={this.state.jqbedAlgorithmStatus}
             wsConnected={this.state.wsConnected}

@@ -27,6 +27,7 @@
  * @returns {object} 串口编排能力。
  */
 function createSerialPortOrchestrator({
+  beforeOpen,
   getBaudRate,
   getSerialConfig,
   getSensorType,
@@ -169,6 +170,7 @@ function createSerialPortOrchestrator({
    * @throws {Error} 缺 path 或底层打开失败（同步部分）。
    */
   function openManagedSerialPort(role, options = {}) {
+    beforeOpen?.();
     serialManager.registerPort(role, {
       ...options,
       role,

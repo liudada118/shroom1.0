@@ -190,7 +190,7 @@ CC Switch、Claude 或 Codex 配置，也未新增 Anthropic 适配或软件内�
 入口和使用限制见 `docs/embedded-agent.md`。自动化、真实 Electron 进程以及前端交互各有独立测试；
 真实模型密钥、代表设备与 Windows 安装包验收仍需现场条件，不能由合成数据测试替代。
 
-验证记录：Full 9/9 通过（后端 81 文件、客户端 69 文件/640 项、前端 SDK 31 文件/509 项、
+验证记录：Full 10/10 通过（后端 81 文件、客户端 69 文件/640 项、前端 SDK 31 文件/509 项、
 两侧 smoke、lint、临时生产构建、脚本语法、数据面基线）。真实 Electron 与临时 ASAR 入口均完成独立
 进程/加密/流/工具/存储/关闭冒烟；后续矩阵形状与缺失元数据核验追加定向回归通过。
 
@@ -334,7 +334,7 @@ transform，导致动画期间下移、结束后弹回。现保留原布局和�
 算法包兼容性检查。手部 32×32 输入可启用兼容包，足压 64×64 包仍不可启用。
 
 回归使用真实手部处理器、`jqbed` 线序与标准网关复现缺失尺寸，不再只构造带 matrix 的
-测试帧。Full 9/9 通过（后端 75 文件、客户端 59 文件 / 563 项、前端 SDK 31 文件 /
+测试帧。Full 10/10 通过（后端 75 文件、客户端 59 文件 / 563 项、前端 SDK 31 文件 /
 509 项，以及 lint、临时生产构建、SDK smoke、数据平面基线和脚本语法）。隔离浏览器
 `portal-launcher.mjs --monitor-only` 验证通道识别、启用、左侧指标切换和停用通过；
 Python runner 使用替身，不代表真实硬件或原生算法验收。未打包、替换安装目录或重启
@@ -398,7 +398,7 @@ onbed_filter 故障只屏蔽生命体征，CoP 独立保留。无有效输出显
 写入及双面设置，释放临时 GPU 资源。显现期间只画外表面并保留有效深度，避免背面三角叠色。主模型加载完成才交接，四秒超时保留加载/错误状态；全屏
 宿主尺寸由 ResizeObserver 同步。手部检测仍是矩形压力点阵，双手分屏入口未改成此模式。
 
-验证：Full 9/9 通过（后端 75 个测试文件，客户端 58 文件/557 项，前端 SDK
+验证：Full 10/10 通过（后端 75 个测试文件，客户端 58 文件/557 项，前端 SDK
 31 文件/509 项，双 SDK smoke、lint、临时生产构建、性能基线与脚本语法）。浏览器
 隔离回归已验证点击→实际服务启用→左侧标量输出→指标切换→停用，以及手套直接到
 实体、减少动画和返回；无实物串口/Python 生命体征有效性或 Windows 安装包真机验证。
@@ -4895,6 +4895,7 @@ flowchart LR
 | 完成日期 | 完成的功能/工作 | 简要说明 |
 | --- | --- | --- |
 | 2026-09-20 | 串口连接异常闭环 | 实际打开回执、错误分类、持续状态提示、有限重连与迟到端口清理，普通和 manifest 通道共用。 |
+| 2026-09-22 | Revise 集成 | 合并 1.1.37 更新源及上传工具；HaLow TCP 适配当前原生系统、HTTP 控制与数据链，保留 Agent 和场景交互。 |
 
 ## 9. 更新日志
 
@@ -5425,6 +5426,7 @@ flowchart LR
 | --- | --- | --- |
 | 2026-09-20 | 验证 | 最终 Full 8/8 通过；`portal-launcher.mjs --monitor-only` 的串口提示、工作区、窄屏、返回动画及单手回放回归通过。串口夹具验证实际 Home/Title 的加载禁用、HTTP/WS 提示去重、失败清空、无数据与断连；桌面/窄屏截图已目视核对。 |
 | 2026-09-20 | 修复缺陷 | 参考 E:/shroom 补齐串口错误向界面的传递；HTTP 等待真实打开、阻止重复连接与通道抢占、超时后清理迟到端口，增加无数据/无完整帧/连续校验失败提示。Full 8/8 通过：85 个后端测试文件、699 项客户端测试、512 项前端 SDK 测试、lint、临时生产构建、SDK smoke 和性能基线；真机拔插与驱动差异仍需硬件验证。 |
+| 2026-09-22 | 新增功能 / 配置变更 | 合并 Revise 的人体 HaLow 与更新服务器迁移，保留当前模块架构并补齐传输互斥和测试。 |
 
 ## 2026-06-04 Minzhen / Wheelchair Display System
 
@@ -5803,3 +5805,19 @@ flowchart LR
 - `nativeSceneEntrance` 等待模型或两张足底贴图就绪后安装 `modelParticleEntrance`；`nativeSceneSamples` 按世界三角形面积分配固定重心样本，过渡时跟随原模型父级及骨骼姿态。足底从已加载的两个实际平面贴图透明轮廓采样，终点使用原平面世界坐标。采样点大小随模型尺寸调整，不读取或重排压力数组。
 - 门户画布背景透明、辅助网格隐藏，ResizeObserver 同步宿主尺寸及相机比例。`monitoringSurface` 对受管原生加载最多等待 30 秒，避免原先 4 秒就显示空画布、随后模型突现；加载失败保留明确提示及返回入口，取消进入不会让迟到资源再次加入场景。退出恢复材质/渲染函数并释放采样、原生场景资源、观察器和控件，重复清理保持幂等。
 - 验证：定向 52 项通过；Full 9/9 通过，包括后端 89 个文件、客户端 83 个文件共 767 项、前端 SDK 512 项、lint、两侧 smoke、临时生产构建、数据面基线及浏览器脚本语法。真实浏览器完成 13 项预览与 11 项往返检查，新增 7 个实体场景均有实际 GPU 中间权重和过渡截图；专项 `--lifecycle-only` 验证超过 4 秒的慢加载、取消后迟到、主/备用资源失败及减少动画通过。没有连接物理设备、读写真实采集记录或执行发布打包。
+
+
+### 2026-09-22：Revise 合并到 agent
+
+保留当前拆分后的 Electron/后端/SDK 入口、Agent、模板编辑与原生场景交互；将 Revise 60ebe46 的功能迁入现有架构，不恢复旧根 server.js。版本配置为 1.1.37，更新源为 `https://shroom.jq-industries.com/shroom1`；依赖树没有变化。构建冲突保留 agent 的已有 build，合并验证只生成临时生产构建；没有发布安装包或上传服务器。
+
+- 新增 `backend/kernel/transport/halowReceiver.js` / `halowService.js`，用于 humanBodyOptimized（中文显示“人体全身传感”）及其原生副本。ID 首帧 `AA 55 00 LL` + 1～64 字节可显示 ASCII；数据帧 `AA 55 03 99` + 1024 字节。每连接独立缓存，最多 16 个连接；重复 ID 拒绝，选中设备断开后不换选其他设备。
+- `halow.control` 为 HTTP 规范命令，start/stop 等待完成后回执；WS 仅广播 halowStatus/halowClear。TCP 绑定前后均检查授权、源型号、副本身份、采集、回放与串口状态。串口编排器的 beforeOpen 在登记重连意图前检查互斥；切系统取消待完成连接，退出软件等待释放监听器。
+- 数据沿 `legacySerialRuntimeBinding.legacySerialFrameRuntime.handleSitSerialFrame` 进入原生处理、归零、采集与 canonical sensor.frame；设备 ID 只参与选流，不替换副本的系统 ID 和数据库。清屏仅清前端缓存，不能注入假零帧。切入回放后实时帧不继续发布/存储，返回实时需重开接收。
+- 前端 HalowConnection 复用门户与旧标题栏入口，HTTP 超时和迟到回执保护沿 commandClient；内置/副本都按原生 sourceType 判断兼容性。模型、线序、统计、回放、CSV 和当前场景动画沿用现有实现。
+- `scripts/upload-release.js` 提供 Windows NSIS 上传命令，读取 SHROOM_UPLOAD_DIR / SHROOM_SSH_KEY，核验安装包、blockmap、latest.yml 的版本/更新地址/哈希；上传暂存目录后最后替换更新元数据。正式发布未在此次合并中执行。
+- 测试登记到 backend/tests/run-tests.js：协议/TCP 7 项、HTTP/原生数据链 5 项、上传 dry-run 6 项；前端入口/串口/门户/超时定向测试 31 项通过。真实 B 板、网关和安装包自动更新需真机验证；Revise 旧分支实机记录保留在 docs/halow-human-body.md 的历史区。
+
+本次 Full 验证 10/10 通过：后端 92 个文件，客户端 84 个文件/775 项，前端 SDK 32 个文件/512 项，前后端 SDK smoke、lint、临时生产构建、数据面性能基线与上传脚本语法均通过。测试使用 Electron Node ABI；没有覆盖仓库 build，也未使用真实 B 板或发布安装包。
+
+补充合并回归：HaLow 空闲时停止为同步无副作用操作，避免 Agent“切系统后立即开串口”被临时 stopping 状态阻断；活跃或正在启动/停止的 TCP 接收会在 Agent 状态中标记 alternateTransportBusy，并在派发任何连接命令前拒绝。Chrome 合成设备检查 `node scripts/tests/halow-connection.mjs` 通过，覆盖读状态、HTTP 错误与重试、开停、切设备、采集/回放限制及 HTTP/WS 职责，无浏览器运行错误。

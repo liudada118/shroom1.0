@@ -61,6 +61,10 @@ client commandClient → HTTP :19245 /api/commands
 
 ## 4. 高频路径入口
 
+HaLow 人体接入：`kernel/transport/halowReceiver.js` 独立 TCP 分帧，`halowService.js` 校验当前系统/授权/串口互斥；`halow.control` 走 HTTP 并等待完成，状态走 WS。原生 `humanBodyOptimized` 与副本共用 `legacySerialFrameRuntime`，保留 canonical 身份、归零与存储。前端 `HalowConnection.jsx` 同时接门户/旧工具栏。验证 `halowReceiver.test.js`、`halowControlApi.test.js`、`Title.halow.test.jsx`、`node scripts/tests/halow-connection.mjs` 和 Full；说明见 [HaLow 接入](docs/halow-human-body.md)。
+
+更新发布：`package.json` / `dev-app-update.yml` 指向 HTTPS 更新源，运行时 `app/update/autoUpdater.js`；`scripts/upload-release.js` 只上传 Windows NSIS 产物，验证版本/更新地址/哈希后最后替换元数据。环境变量 `SHROOM_UPLOAD_DIR`、`SHROOM_SSH_KEY`；测试 `backend/tests/packaging/upload-release.test.js`，说明见 [更新服务器](docs/shroom-update-server.md)。上传和发布需显式操作。
+
 内置系统真实预览：`displays/nativeSceneAssets.js` 与原生渲染器共用模型/底图地址，`sceneCatalog` 按具体型号映射，`sceneLayouts` 提供矩阵和足底布局，`sceneModelSampling` 按世界表面积分配粒子。小床、宠物/mini 和高速矩阵通过 `supportsDirectSceneEntry`、`smallBed.jsx` / `4096.jsx` / `hand.jsx` 单段交接。验证 `sceneCatalog` / `sceneLayouts` / `sceneModelSampling` tests、`node scripts/tests/portal-scene-catalog.mjs`（12 项预览、4 项真实画布往返）及 `portal-launcher.mjs`；原生画布接入执行 Full。
 
 原生实体连续交接：`renderers/nativeSceneEntrance.js` 等待真实模型就绪，`nativeSceneSamples.js` 按实际三角形表面/足底透明轮廓采样，复用 `modelParticleEntrance`。`wholeChair`、`carQX`、`minzhen`、`footVideo`、`robot1`、`robotSY`、`robotLCF` 通过 Home 的 `portalEmbedded` 直接衔接列表并反向返回。`monitoringSurface` 对受管原生模型提供最多 30 秒等待及失败出口；验证两个 nativeScene 单测、monitoringSurface、modelParticleEntrance 和 `portal-scene-catalog.mjs --native-only`（7 个原生场景、慢加载/失败/减少动画），执行 Full。

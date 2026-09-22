@@ -125,10 +125,12 @@ function registerSerialControlHandlers(router, deps) {
   router.register({
     name: 'sensor-file-switch',
     when: (message) => message.file != null,
-    handle: (message) => {
+    handle: (message, context = {}) => {
       requireAuthorizedRuntime();
       const runtime = getRuntime();
       const selection = deps.resolveSystemSelection?.(message.file) || { id: message.file, sourceType: message.file };
+      const stoppingTransport = deps.stopAlternateTransport?.();
+      if (stoppingTransport) context.waitFor?.(stoppingTransport);
 
       setRuntime({
         backClose: true,

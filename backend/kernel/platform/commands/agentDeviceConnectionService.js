@@ -48,11 +48,12 @@ function createAgentDeviceConnectionService({ getRuntimeState, getSerialStatus, 
     const channels = listSerialChannels(runtime.currentSensorType) || [];
     const currentIds = [...new Set(channels.map((channel) => channel.displaySystemId).filter(Boolean))];
     const currentSystemId = currentIds.length === 1 ? currentIds[0] : runtime.currentSystemId || null;
-    const idle = runtime.collecting === false && runtime.localPlayback === false && runtime.playing === false && runtime.historyMode === false;
+    const alternateTransportBusy = runtime.alternateTransportBusy === true;
+    const idle = runtime.collecting === false && runtime.localPlayback === false && runtime.playing === false && runtime.historyMode === false && !alternateTransportBusy;
     const portsIdle = Array.isArray(serial) && serial.every((port) => !port.isOpen && !port.reconnect && ['registered', 'closed', 'stopped', 'error'].includes(port.status));
     return { schemaVersion: 1, observedAt: new Date().toISOString(), currentSystemId, currentSensorType: runtime.currentSensorType || null,
       currentSystem: describeCurrentSystem(currentSystemId, runtime.currentSensorType || null),
-      idle, collecting: runtime.collecting, localPlayback: runtime.localPlayback, playing: runtime.playing, historyMode: runtime.historyMode,
+      idle, alternateTransportBusy, collecting: runtime.collecting, localPlayback: runtime.localPlayback, playing: runtime.playing, historyMode: runtime.historyMode,
       licensed: runtime.licensed === true, licenseScope: runtime.licenseScope === 'all' ? 'all' : Array.isArray(runtime.licenseScope) ? runtime.licenseScope.filter((value) => typeof value === 'string') : null,
       portsIdle, serial, currentChannels: channels.map(({ channelId, displaySystemId, sensorId, serialRole }) => ({ channelId, displaySystemId, sensorId, serialRole })),
     };
@@ -64,7 +65,7 @@ function createAgentDeviceConnectionService({ getRuntimeState, getSerialStatus, 
     if (!Array.isArray(availablePorts) || !availablePorts.some((port) => port?.path === input.portPath)) throw connectionError('AGENT_PORT_UNAVAILABLE', 'Selected serial port is no longer available');
     const state = snapshot();
     if (!state.licensed) throw connectionError('LICENSE_REQUIRED', 'A valid license is required to connect a device', 403);
-    if (!state.idle || !state.portsIdle) throw connectionError('AGENT_DEVICE_BUSY', 'Stop collection and playback, then close existing or reconnecting ports before connecting');
+    if (!state.idle || !state.portsIdle) throw connectionError('AGENT_DEVICE_BUSY', 'Stop collection, playback and HaLow reception, then close existing or reconnecting ports before connecting');
     if (state.currentSystemId !== input.expectedCurrentSystemId || state.currentSensorType !== input.expectedCurrentSensorType) throw connectionError('AGENT_RUNTIME_CONFLICT', 'Current system changed after this connection proposal was prepared');
     const system = getSystem(input.systemId);
     const editor = getEditor(input.systemId);

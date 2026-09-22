@@ -24,7 +24,7 @@
  *   "build": {
  *     "publish": [{
  *       "provider": "generic",
- *       "url": "http://sensor.bodyta.com/shroom1"
+ *       "url": "https://shroom.jq-industries.com/shroom1"
  *     }]
  *   }
  * }

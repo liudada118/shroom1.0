@@ -120,13 +120,16 @@ describe('CommandClient', () => {
     });
   });
 
-  it('serial request timeout aborts fetch and clears the pending operation', async () => {
+  it.each([
+    ['serial.open', { role: 'sit', path: 'COM3' }],
+    ['halow.control', { action: 'start', host: '127.0.0.1', port: 12345 }],
+  ])('%s request timeout aborts fetch and clears the pending operation', async (type, payload) => {
     vi.useFakeTimers();
     try {
       const client = new CommandClient({ fetchImpl: (_url, { signal }) => new Promise((_resolve, reject) => {
         signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
       }) });
-      const request = client.execute('serial.open', { role: 'sit', path: 'COM3' });
+      const request = client.execute(type, payload);
       const result = expect(request).rejects.toMatchObject({ code: 'COMMAND_REQUEST_TIMEOUT' });
       await vi.advanceTimersByTimeAsync(15000);
       await result;

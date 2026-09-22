@@ -157,6 +157,7 @@ function toLegacyCommand(envelope) {
   const { type, payload } = envelope;
 
   switch (type) {
+    case 'halow.control': return { halow: payload };
     case 'serial.open': {
       const field = serialPortField(payload.role);
       if (!field) {
