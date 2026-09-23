@@ -88,6 +88,7 @@ function createAlgorithmLab({ root, request }) {
       } catch { return []; }
     }) : [];
     return { language: 'restricted-python-v1', features: FEATURES, example: EXAMPLE, instructions: 'def predict(f):，四空格缩进；局部数值赋值、if/elif/else、return、算术与比较、and/or/not、abs/min/max/sqrt。特征键使用双引号。返回按开发集 labels 顺序的 0 基类别下标，不确定返回 -1。不支持 import、循环、文件、网络或安装库。', selection: context.algorithmSelection || null, installed,
+      recordSemantics: 'count 是本记录存储帧数；maxId 是数据库全局行 ID 的读取上界，不是本记录帧数，不能据 maxId 大于 count 推断缺口、丢帧或时间异常。startFrame 是记录内从 0 开始的位置，frameLimit 是原始读取数量。连续性必须以实际分析结果为准：同毫秒采样仅用于分析时跳过并报告数量；真正倒序或超过 5 秒的断点会返回具体记录和帧位置。不要仅凭这些元数据建议删除或重采记录。',
       limits: { maxSourceChars: 16000, maxAttemptsPerTask: 6, maxValues: 2000000, computeTimeoutSeconds: 10, memoryMiB: 128 },
       featureUnits: 'duration 秒；压力特征使用存储值原单位，rise/fall 为每秒变化；activeMean 为值>0的点数均值；meanChange 为相邻帧总值绝对差均值。' };
   }
@@ -108,9 +109,11 @@ function createAlgorithmLab({ root, request }) {
       for (const key of validationKeys) ledger[key] = new Date().toISOString();
       writeJsonAtomic(ledgerFile, ledger);
     }
-    const report = { ...await compute({ ...loaded, source, split: validation ? 'validation' : 'development' }, context.signal),
+    const evaluated = await compute({ ...loaded, source, split: validation ? 'validation' : 'development' }, context.signal);
+    const report = { ...evaluated,
       dataDigest: loaded.dataDigest, sourceDigest: digest(source), windowFrames: loaded.windowFrames,
-      records: loaded.records.filter((item) => item.split === (validation ? 'validation' : 'development')).map(({ id, date, channel, label, startFrame, frameLimit }) => ({ id, date, channel, label, startFrame, frameLimit, unusedTailFrames: frameLimit % loaded.windowFrames })) };
+      records: loaded.records.filter((item) => item.split === (validation ? 'validation' : 'development')).map(({ id, date, channel, label, startFrame, frameLimit }) => ({
+        ...evaluated.records.find((record) => record.id === id), id, date, channel, label, startFrame, frameLimit })) };
     const id = randomUUID();
     const draft = { id, name, source, language: 'restricted-python-v1', systemId: selection(context).systemId, selectionDigest: loaded.key, dataDigest: loaded.dataDigest,
       labels: loaded.labels, windowFrames: loaded.windowFrames, report, createdAt: new Date().toISOString() };

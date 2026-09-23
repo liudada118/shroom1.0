@@ -11,7 +11,7 @@ const { createHttpApp } = require('../../kernel/platform/http/httpAppFactory');
 const { createAgentTools } = require('../../agent-runtime/tools');
 const { createAgentRuntime } = require('../../agent-runtime/runtime');
 const { compute } = require('../../agent-runtime/algorithm-lab/service');
-const { prepareWindows } = require('../../agent-runtime/algorithm-lab/evaluate');
+const { prepareWindows, evaluate } = require('../../agent-runtime/algorithm-lab/evaluate');
 
 const source = 'def predict(f):\n    change = f["maxRiseRate"]\n    if change > 100:\n        return 1\n    elif f["totalMean"] >= 0:\n        return 0\n    else:\n        return -1';
 
@@ -79,6 +79,68 @@ test('real SQLite selection, analysis, model tools, report proposal and installa
   assert.ok(fs.existsSync(path.join(root, 'algorithm-lab', 'validation-ledger.json')));
   await assert.rejects(restarted.execute('test_algorithm', { name: '重启后重试', source, validation: true }, context), { code: 'ALGORITHM_VALIDATION_USED' });
   await assert.rejects(tools.execute('test_algorithm', { name: '重试', source, validation: true }, context), { code: 'ALGORITHM_VALIDATION_USED' });
+});
+
+test('offline analysis skips same-millisecond samples without renumbering source offsets or changing data', async () => {
+  const base = Array.from({ length: 34 }, (_, index) => ({ values: [index, 2], timestamp: 1000 + index * 20, stage: 'stored-array' }));
+  const frames = [...base.slice(0, 13), { ...base[12], values: [9000, 9000] }, ...base.slice(13)].map((frame, index) => ({ ...frame, id: 282 + index }));
+  const record = { id: 'stroke', date: 'stroke-record', label: '抚摸', split: 'development', startFrame: 5, frames };
+  const before = structuredClone(record), prepared = prepareWindows([record], 16);
+  const expected = prepareWindows([{ ...record, frames: base }], 16);
+  assert.deepEqual(prepared.windows.map((item) => item.features), expected.windows.map((item) => item.features));
+  assert.deepEqual(prepared.windows.map((item) => item.startFrame), [5, 22]);
+  const summary = { id: 'stroke', date: 'stroke-record', label: '抚摸', split: 'development', frameCount: 35, usableFrameCount: 34,
+    skippedDuplicateTimestamps: 1, windows: 2, unusedTailFrames: 2 };
+  assert.deepEqual(prepared.records, [summary]);
+  assert.deepEqual((await compute({ records: [record], windowFrames: 16 })).records, [summary]);
+  const report = evaluate(prepared, 'def predict(f):\n    return 0', ['抚摸'], 'development');
+  assert.deepEqual(report.records, [summary]);
+  assert.equal(report.inputContract.sampleIntervalMs, 20);
+  assert.deepEqual(record, before);
+});
+
+test('real SQLite duplicate sampling counts survive analysis, test reports and installed packages', async (t) => {
+  const { root, db, tools, selection } = await fixture(t);
+  const selected = selection.records[0];
+  const rows = db.prepare('SELECT id, timestamp FROM matrix WHERE date = ? ORDER BY id').all(selected.date);
+  db.prepare('UPDATE matrix SET timestamp = ? WHERE id = ?').run(rows[12].timestamp, rows[13].id);
+  const before = db.prepare('SELECT * FROM matrix ORDER BY id').all();
+  const context = { algorithmSelection: selection, taskId: 'duplicate-record' };
+  const analysis = await tools.execute('analyze_algorithm_data', {}, context);
+  const summary = analysis.records.find((item) => item.id === selected.id);
+  assert.equal(summary.frameCount, 64); assert.equal(summary.usableFrameCount, 63);
+  assert.equal(summary.skippedDuplicateTimestamps, 1); assert.equal(summary.windows, 3); assert.equal(summary.unusedTailFrames, 15);
+  const report = await tools.execute('test_algorithm', { name: '重复时间容错', source, validation: false }, context);
+  const reportRecord = report.records.find((item) => item.id === selected.id);
+  assert.equal(reportRecord.frameLimit, 64); assert.equal(reportRecord.startFrame, 0);
+  assert.equal(reportRecord.skippedDuplicateTimestamps, 1); assert.equal(reportRecord.usableFrameCount, 63);
+  assert.equal(reportRecord.unusedTailFrames, 15); assert.equal(report.windows, 7);
+  let proposal;
+  await tools.execute('prepare_algorithm_package', { draftId: report.draftId }, { ...context, createProposal: (value) => { proposal = { ...value, id: 'duplicate-proposal', status: 'pending' }; return proposal; } });
+  await tools.apply(proposal);
+  const saved = JSON.parse(fs.readFileSync(path.join(root, 'algorithm-lab', 'installed', `${report.draftId}.json`), 'utf8'));
+  assert.deepEqual(saved.report.records, report.records);
+  const workspace = await tools.execute('get_algorithm_workspace', {}, context);
+  assert.match(workspace.recordSemantics, /maxId/); assert.match(workspace.recordSemantics, /数据库/);
+  assert.match(workspace.recordSemantics, /不能.*缺口/);
+  assert.deepEqual(db.prepare('SELECT * FROM matrix ORDER BY id').all(), before);
+});
+
+test('offline duplicate tolerance still reports the actual record and position for reverse time or long gaps', () => {
+  const frames = Array.from({ length: 17 }, (_, index) => ({ id: 282 + index, values: [1, 2], timestamp: 1000 + index * 20, stage: 'data' }));
+  frames[8] = { ...frames[8], timestamp: frames[7].timestamp };
+  const record = { id: 'stroke', date: 'stroke-record', startFrame: 10, frames };
+  for (const [timestamp, reason] of [[1100, /倒序/], [7000, /5 秒/]]) {
+    const bad = { ...record, frames: frames.map((frame, index) => index === 9 ? { ...frame, timestamp } : frame) };
+    assert.throws(() => prepareWindows([bad], 16), (error) => {
+      assert.match(error.message, /stroke-record/); assert.match(error.message, /第 20 帧/);
+      assert.match(error.message, /290.*291/); assert.match(error.message, reason); return true;
+    });
+  }
+  assert.throws(() => prepareWindows([{ ...record, frames: frames.map((frame) => ({ ...frame, timestamp: 1000 })) }], 16), /不足一个完整窗口/);
+  for (const patch of [{ values: [1] }, { stage: 'rawPressureData' }, { timestamp: NaN }]) {
+    assert.throws(() => prepareWindows([{ ...record, frames: frames.map((frame, index) => index === 8 ? { ...frame, ...patch } : frame) }], 16));
+  }
 });
 
 test('selection identity, allowed data range, changed records and remote web origins are enforced', async (t) => {

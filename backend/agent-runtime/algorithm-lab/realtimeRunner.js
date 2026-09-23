@@ -22,10 +22,12 @@ function createRealtimeClassifier({ classifier }) {
   function run(values, context) {
     if (closed || failure) return Promise.reject(failure || new Error('分类已停止。'));
     const timestamp = context.timestamp;
-    if (!Number.isFinite(timestamp) || (lastTimestamp !== null && (timestamp <= lastTimestamp || timestamp - lastTimestamp > 5000))
+    if (!Number.isFinite(timestamp) || (lastTimestamp !== null && (timestamp < lastTimestamp || timestamp - lastTimestamp > 5000))
       || !Array.isArray(values) || values.length !== classifier.pointCount || !values.every(Number.isFinite)) {
       fail('分类输入不连续或点数发生变化，请重新启用。'); return Promise.reject(failure);
     }
+    // 批量发布可能落在同一毫秒；跳过该采样点，不补造时间或取消在飞分类。
+    if (timestamp === lastTimestamp) return Promise.resolve({ pending: true, buffered: frames.length });
     lastTimestamp = timestamp;
     if (lastSample !== null && timestamp - lastSample < classifier.sampleIntervalMs * .8) return Promise.resolve({ pending: true, buffered: frames.length });
     lastSample = timestamp;

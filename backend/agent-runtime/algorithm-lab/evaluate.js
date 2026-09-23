@@ -26,24 +26,32 @@ function windowFeatures(frames) {
   return result;
 }
 
-/** 按整段记录分组形成不重叠窗口，尾部不足一个窗口明确计数。 */
+/** 按记录形成不重叠窗口；同毫秒采样只留首帧，报告保留原始范围和跳过数量。 */
 function prepareWindows(records, windowFrames) {
   const windows = [], summaries = [];
   let pointCount = null, stage = null;
   for (const record of records) {
+    const samples = [], name = record.date || record.id || '未命名记录';
     for (let i = 0; i < record.frames.length; i++) {
       const frame = record.frames[i];
       pointCount ??= frame.values.length; stage ??= frame.stage;
       if (frame.values.length !== pointCount || frame.stage !== stage) throw new Error('所选记录的点数或存储数据阶段不一致。');
-      if (i && (frame.timestamp <= record.frames[i - 1].timestamp || frame.timestamp - record.frames[i - 1].timestamp > 5000)) throw new Error('所选记录包含时间断点或倒序，请选择连续记录。');
+      if (!Number.isFinite(frame.timestamp)) throw new Error(`记录“${name}”第 ${(record.startFrame || 0) + i + 1} 帧时间戳无效。`);
+      if (i) {
+        const previous = record.frames[i - 1], delta = frame.timestamp - previous.timestamp;
+        if (delta < 0 || delta > 5000) throw new Error(`记录“${name}”第 ${(record.startFrame || 0) + i + 1} 帧${delta < 0 ? '时间戳倒序' : '存在超过 5 秒的时间断点'}（数据库 ID ${previous.id ?? '未知'} -> ${frame.id ?? '未知'}，间隔 ${delta} ms），请重新选择连续片段。`);
+        if (delta === 0) continue;
+      }
+      samples.push({ frame, offset: i });
     }
-    const count = Math.floor(record.frames.length / windowFrames);
-    if (!count) throw new Error('所选记录不足一个完整窗口，请增加帧范围或缩小窗口。');
+    const count = Math.floor(samples.length / windowFrames), skippedDuplicateTimestamps = record.frames.length - samples.length;
+    if (!count) throw new Error(`记录“${name}”有效采样 ${samples.length} 帧（同毫秒跳过 ${skippedDuplicateTimestamps} 帧），不足一个完整窗口，请增加帧范围或缩小窗口。`);
     for (let index = 0; index < count; index++) {
-      const frames = record.frames.slice(index * windowFrames, (index + 1) * windowFrames);
-      windows.push({ recordId: record.id, label: record.label, split: record.split, startFrame: record.startFrame + index * windowFrames, timestamp: frames[0].timestamp, features: windowFeatures(frames) });
+      const frames = samples.slice(index * windowFrames, (index + 1) * windowFrames).map((sample) => sample.frame);
+      windows.push({ recordId: record.id, label: record.label, split: record.split, startFrame: (record.startFrame || 0) + samples[index * windowFrames].offset, timestamp: frames[0].timestamp, features: windowFeatures(frames) });
     }
-    summaries.push({ id: record.id, date: record.date, label: record.label, split: record.split, frameCount: record.frames.length, windows: count, unusedTailFrames: record.frames.length % windowFrames });
+    summaries.push({ id: record.id, date: record.date, label: record.label, split: record.split, frameCount: record.frames.length, usableFrameCount: samples.length,
+      skippedDuplicateTimestamps, windows: count, unusedTailFrames: samples.length % windowFrames });
   }
   return { windows, records: summaries, pointCount, stage };
 }
@@ -74,6 +82,7 @@ function evaluate(prepared, source, labels, split) {
     return { recordId: row.recordId, startFrame: row.startFrame, timestamp: row.timestamp, expected: row.label, predicted: code < 0 ? '未知' : labels[code], correct: code === expected };
   });
   return { split, labels, windows: rows.length, correct, unknown, accuracy: correct / rows.length, confusion, columns: [...labels, '未知'], predictions,
+    records: prepared.records.filter((record) => record.split === split),
     inputContract: { pointCount: prepared.pointCount, stage: prepared.stage,
       sampleIntervalMs: rows.reduce((sum, row) => sum + row.features.duration * 1000 / (row.features.frameCount - 1), 0) / rows.length } };
 }

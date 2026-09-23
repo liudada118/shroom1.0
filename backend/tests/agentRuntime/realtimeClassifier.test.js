@@ -57,6 +57,35 @@ test('actual worker gives the same labels as offline windows, without mutating f
   assert.equal(JSON.stringify(frames), before);
 });
 
+test('same-millisecond frames do not enter classifier windows or cancel in-flight results', async (t) => {
+  const { draft, frames, report } = example();
+  const runner = createRealtimeClassifier(realtimePackage(draft, true).resolvedPackage); t.after(() => runner.dispose());
+  const before = JSON.stringify(frames), results = [];
+  for (const [index, frame] of frames.entries()) {
+    const duplicate = { values: [9000, 9000, 9000, 9000], timestamp: frame.timestamp };
+    const [result, skipped] = await Promise.all([runner(frame.values, frame), runner(duplicate.values, duplicate)]);
+    assert.deepEqual(skipped, { pending: true, buffered: (index + 1) % 16 });
+    if (!result.pending) results.push(draft.labels[result.metrics.classIndex]);
+  }
+  assert.deepEqual(results, report.predictions.map((item) => item.predicted));
+  assert.equal(JSON.stringify(frames), before);
+});
+
+test('duplicate tolerance preserves long-gap and invalid-input failures', async (t) => {
+  const { draft } = example(); const options = realtimePackage(draft, true).resolvedPackage;
+  for (const input of [
+    { timestamp: 6001, values: [1, 0, 0, 0] },
+    { timestamp: 1000, values: [1, 0] },
+    { timestamp: 1000, values: [NaN, 0, 0, 0] },
+    { timestamp: NaN, values: [1, 0, 0, 0] },
+  ]) {
+    const runner = createRealtimeClassifier(options); t.after(() => runner.dispose());
+    await runner([1, 0, 0, 0], { timestamp: 1000 });
+    await assert.rejects(runner(input.values, input), /不连续/);
+    await assert.rejects(runner([1, 0, 0, 0], { timestamp: 1020 }), /不连续/);
+  }
+});
+
 test('runtime rejects broken timing, incompatible cadence and unbounded queues', async (t) => {
   const { draft } = example(); const options = realtimePackage(draft, true).resolvedPackage;
   const gap = createRealtimeClassifier(options); t.after(() => gap.dispose());
@@ -93,6 +122,45 @@ test('live market discovers saved packages, uses processed values and clears ins
   current = { ...current, sensorType: 'other' }; assert.equal(service.snapshot().instances.length, 0); assert.equal(service.snapshot().packages.length, 0);
   current = { ...current, sensorType: 'copy-hand' }; publish({ ...frames[0], timestamp: 2100 }); await service.toggle(request);
   fs.unlinkSync(file); assert.equal(service.snapshot().instances.length, 0); assert.equal(service.snapshot().packages.length, 0);
+});
+
+test('live market skips equal timestamps but keeps reverse-time and reception-gap protection', async (t) => {
+  const { draft, frames, report } = example(); const { root } = directory(t, draft);
+  const catalog = createRealtimeAlgorithmCatalog(root), bus = createChannelBus(); let time = 980, sequence = 0;
+  const service = createAlgorithmMarketService({ channelBus: bus, getContext: () => ({ sensorType: 'copy-hand', allowed: true, playback: false }),
+    listUserPackages: () => catalog.list({ includeResolved: true }), now: () => time, schedule: () => null, unschedule() {} });
+  t.after(() => service.dispose());
+  /** 模拟批量发布：序号递增，接收时钟与帧时间可独立推进。 */
+  function publish(frame, receivedAt = frame.timestamp) {
+    time = receivedAt;
+    bus.publish('copy-hand:sit', { type: 'sensor.frame', sensorType: 'copy-hand', displaySystemId: 'copy-hand', sensorId: 'sit', channelId: 'copy-hand:sit', source: 'realtime',
+      timestamp: frame.timestamp, sequence: ++sequence, payload: { matrix: { rows: 2, cols: 2, total: 4 }, value: frame.values, stages: { processed: frame.values } } });
+  }
+  const request = { sensorType: 'copy-hand', packageId: 'user-test-classifier', channelId: 'copy-hand:sit', enabled: true };
+  publish({ ...frames[0], timestamp: 980 }); await service.toggle(request);
+  const before = JSON.stringify(frames);
+  for (let window = 0; window < 2; window++) {
+    for (const frame of frames.slice(window * 16, (window + 1) * 16)) {
+      publish(frame); publish({ ...frame, values: [9000, 9000, 9000, 9000] });
+      assert.notEqual(service.snapshot().instances[0].status, 'error');
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    await until(() => service.snapshot(), (state) => state.instances[0]?.history.length === window + 1);
+  }
+  const state = service.snapshot().instances[0];
+  assert.equal(state.status, 'running'); assert.equal(state.error, ''); assert.equal(state.dropped, frames.length);
+  assert.deepEqual(state.history.map((point) => draft.labels[point.metrics.classIndex]), report.predictions.map((item) => item.predicted));
+  assert.equal(JSON.stringify(frames), before);
+  publish({ ...frames.at(-1), timestamp: frames.at(-1).timestamp - 1 });
+  assert.match(service.snapshot().instances[0].error, /倒序/);
+  publish({ ...frames.at(-1), timestamp: 2000 });
+  assert.equal(service.snapshot().instances[0].status, 'error');
+
+  await service.toggle({ ...request, enabled: false }); await service.toggle(request);
+  publish({ ...frames[0], timestamp: 2020 });
+  publish({ ...frames[0], timestamp: 2020 }, 4021);
+  publish({ ...frames[0], timestamp: 2040 }, 4022);
+  assert.match(service.snapshot().instances[0].error, /数据中断/);
 });
 
 test('native configuration and restart retain user bindings only in their tested system', (t) => {

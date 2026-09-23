@@ -196,8 +196,13 @@ function createAlgorithmMarketService({ channelBus, packages = [], listUserPacka
     }
     const timestamp = frame.timestamp;
     if (!Number.isFinite(timestamp)) return;
-    if (instance.lastTimestamp !== null && timestamp <= instance.lastTimestamp) {
-      if (item.runtime === RUNTIME) { instance.faulted = true; instance.status = 'error'; instance.error = '数据时间戳倒序或重复，请重新启用分类算法。'; void instance.runner.dispose(); }
+    // 同毫秒发布不代表倒序；仅跳过算法采样，不修改原帧或刷新有效数据接收时间。
+    if (timestamp === instance.lastTimestamp) {
+      if (item.runtime === RUNTIME) instance.dropped++;
+      return;
+    }
+    if (instance.lastTimestamp !== null && timestamp < instance.lastTimestamp) {
+      if (item.runtime === RUNTIME) { instance.faulted = true; instance.status = 'error'; instance.error = '数据时间戳倒序，请重新启用分类算法。'; void instance.runner.dispose(); }
       return;
     }
     if (instance.lastTimestamp !== null && now() - instance.lastReceived > 2000) {
