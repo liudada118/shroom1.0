@@ -6,6 +6,7 @@ const path = require('node:path');
 const { createAgentRuntime } = require('../../agent-runtime/runtime');
 const { agentError } = require('../../agent-runtime/errors');
 const { createAgentStorage } = require('../../agent-runtime/storage');
+const { requestModelResponse } = require('../../agent-runtime/provider');
 
 test('history restores attachments and task records across switching and restarting', async (t) => {
   const inputs = [];
@@ -107,6 +108,32 @@ test('every task reads current selection before the first model call and keeps e
   assert.deepEqual(tasks.map((task) => task.systemContext.currentSystem.id), ['hand', 'my-hand']);
   assert.match(tasks[1].steps[0].message, /我的手部（my-hand）/);
   assert.ok(tasks.every((task) => task.proposals.length === 0));
+});
+
+test('a model HTTP 402 fails the task after successful local system identification', async (t) => {
+  let modelCalls = 0, toolCalls = 0;
+  const { root, runtime } = fixture(t, {
+    readCurrentSystem: () => ({ currentSystem: { id: 'hand_resp_fixture', name: '手部检测（呼吸趋势）' }, selectionStatus: 'selected' }),
+    tools: { execute: async () => { toolCalls++; return {}; } },
+    modelRequest: (options) => requestModelResponse({ ...options, fetchImpl: async () => {
+      modelCalls++;
+      return new Response(JSON.stringify({ error: { message: 'private-secret' } }), { status: 402 });
+    } }),
+  });
+  const started = runtime.startTask({ text: '修改当前系统图表' });
+  await runtime.whenIdle();
+  const state = runtime.getState(), task = state.conversation.tasks[0];
+  assert.equal(state.activeTask, null);
+  assert.equal(task.id, started.id);
+  assert.equal(task.steps[0].name, 'get_current_system');
+  assert.equal(task.steps[0].status, 'succeeded');
+  assert.equal(task.status, 'failed');
+  assert.equal(task.error.code, 'AGENT_MODEL_PAYMENT_REQUIRED');
+  assert.match(state.conversation.messages.at(-1).text, /HTTP 402/);
+  assert.equal(task.proposals.length, 0);
+  assert.equal(modelCalls, 1);
+  assert.equal(toolCalls, 0);
+  assert.ok(!fs.readFileSync(path.join(root, 'state.json'), 'utf8').includes('private-secret'));
 });
 
 test('failed context reads explicitly provide unavailable state without reusing the last system', async (t) => {

@@ -84,6 +84,8 @@ Shroom 不会自动读取 CC Switch 当前选中的供应商。能否复用地�
 
 ### GPT 的密钥与费用由谁提供
 
+如果“识别本轮当前系统”已完成，随后出现 **HTTP 402**，表示本机系统读取完成，但后续模型请求被服务商拒绝，整轮任务仍为失败。请在所配置服务商后台检查账户余额、当前 Key 的剩余额度、套餐限制和该请求的日志。软件现在对 402 给出独立提示，不再笼统要求修改模型名称；也不会自动换 Key、换模型或重复请求。402 的具体业务含义由服务商决定，仅凭状态不能确认欠费；[HTTP 标准](https://www.rfc-editor.org/rfc/rfc9110.html#name-402-payment-required)仍将它保留待用。
+
 当前版本由使用者在模型设置中填写自己的 API Key，费用归该密钥所属的服务账户。官方 OpenAI Key 对应 `https://api.openai.com/v1`；第三方 Key 必须配该服务的地址和允许的模型，不能混用。密钥直接填在软件里，不需要发到聊天中。
 
 官方 API 按实际用量计费，ChatGPT 会员与 API 账单独立；最新费率见 [OpenAI API 价格](https://developers.openai.com/api/docs/pricing)，账号设置见 [官方快速开始](https://developers.openai.com/api/docs/quickstart)。第三方服务的实际单价、套餐和可用分组以该账户后台为准，不能套用 OpenAI 官网价格。

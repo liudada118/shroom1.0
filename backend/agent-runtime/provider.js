@@ -84,12 +84,15 @@ function parseModelErrorDetail(text) {
   return null;
 }
 
-/** 有界读取 JSON/SSE 错误以识别权限原因；只返回固定提示，不回显上游正文或链接。 */
+/** 有界读取 JSON/SSE 错误以区分额度、权限和接口问题，不回显上游正文或链接。 */
 async function modelHttpError(response, baseUrl) {
   let detail;
   try { detail = parseModelErrorDetail(await readBoundedText(response, 16 * 1024)); }
   catch { /* 非 JSON、超限或断流仍按原 HTTP 状态提示；取消由请求层处理。 */ }
   const status = response.status;
+  if (status === 402) {
+    return agentError('AGENT_MODEL_PAYMENT_REQUIRED', '模型服务返回 HTTP 402。请在服务商控制台检查账户余额、当前 API Key 的剩余额度和套餐限制，并查看该请求的失败原因；处理后重试。');
+  }
   if ([403, 404].includes(status) && typeof detail?.message === 'string'
     && /organi[sz]ation\s+(?:must be|is not)\s+verified/i.test(detail.message)) {
     const official = new URL(baseUrl).origin === 'https://api.openai.com';

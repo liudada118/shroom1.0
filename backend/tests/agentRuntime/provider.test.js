@@ -105,6 +105,23 @@ test('HTTP 403 SSE errors preserve group permission diagnostics across fragmente
   }
 });
 
+test('HTTP 402 points to provider billing checks without exposing JSON, SSE or malformed error bodies', async () => {
+  const detail = { code: 'insufficient_balance', message: '余额不足 secret-value https://untrusted.example' };
+  const cases = [
+    ['application/json', JSON.stringify({ error: detail })],
+    ['text/event-stream', `data: ${JSON.stringify({ type: 'error', error: detail })}\n\n`],
+    ['text/html', '<html>secret-value</html>'],
+    ['application/json', 'secret-value'.repeat(2000)],
+    ['text/plain', ''],
+  ];
+  for (const [contentType, body] of cases) {
+    await withModel((_req, res) => { res.writeHead(402, { 'content-type': contentType }); res.end(body); },
+      (baseUrl) => assert.rejects(requestModelResponse({ settings: { baseUrl, model: 'test', apiKey: 'secret-value' }, input: [], tools: [] }),
+      (error) => error.code === 'AGENT_MODEL_PAYMENT_REQUIRED' && /HTTP 402/.test(error.message) && /账户余额/.test(error.message)
+        && /剩余额度/.test(error.message) && /套餐限制/.test(error.message) && !/secret-value|untrusted\.example|余额不足/.test(error.message)));
+  }
+});
+
 test('SSE HTTP errors retain organization checks and safe fallback for malformed events', async () => {
   for (const [body, code] of [
     ['data: {"error":{"message":"Your organization must be verified. secret-value"}}\n\ndata: [DONE]\n\n', 'AGENT_MODEL_VERIFICATION'],

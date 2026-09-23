@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { DEFAULT_AGENT_SETTINGS, agentErrorMessage } from './agentState';
+import AgentSyncSettings from './AgentSyncSettings';
 
 // 常用模型预设；实际调用权限由 API 账户决定，未列出的模型可手动填写。
 const OPENAI_MODELS = [
@@ -18,7 +19,7 @@ const CODEX_MODELS = [
 ];
 
 /** 编辑模型连接；密钥只存在于输入框生命周期并通过桌面桥提交。 */
-export default function AgentSettings({ settings = DEFAULT_AGENT_SETTINGS, onSave, onClose, disabled }) {
+export default function AgentSettings({ settings = DEFAULT_AGENT_SETTINGS, onSave, onClose, disabled, chatSync, onSaveSync, onRetrySync }) {
   const [baseUrl, setBaseUrl] = useState(settings.baseUrl || DEFAULT_AGENT_SETTINGS.baseUrl);
   const initialModel = settings.model?.trim() || 'gpt-5-mini';
   const isPreset = [...CODEX_MODELS, ...OPENAI_MODELS].some((option) => option.value === initialModel);
@@ -70,9 +71,10 @@ export default function AgentSettings({ settings = DEFAULT_AGENT_SETTINGS, onSav
       <label htmlFor="shroom-agent-api-key">API 密钥{settings.hasApiKey && <span> · 已配置</span>}</label>
       <input id="shroom-agent-api-key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} disabled={saving || disabled}
         placeholder={settings.hasApiKey ? '留空以保留当前密钥' : '输入 API 密钥'} autoComplete="off" spellCheck={false} aria-describedby="shroom-agent-key-hint" />
-      <p id="shroom-agent-key-hint" className="shroom-agent-hint">密钥由系统加密保存在本机。更换服务地址时需要重新填写密钥。</p>
+      <p id="shroom-agent-key-hint" className="shroom-agent-hint">首次使用请填写自己的密钥。密钥由系统加密保存在本机，同一电脑和账号升级后继续保留；更换服务地址时需要重新填写。</p>
       {error && <p className="shroom-agent-inline-error" role="alert" tabIndex={-1} ref={errorRef}>{error}</p>}
       <button className="shroom-agent-primary" type="submit" disabled={saving || disabled}>{saving ? '正在保存…' : '保存连接设置'}</button>
     </form>
+    <AgentSyncSettings sync={chatSync} onSave={onSaveSync} onRetry={onRetrySync} />
   </section>;
 }
