@@ -790,6 +790,8 @@ class Home extends React.Component {
       jqbedAlgorithmConfig: null,
       halowStatus: null,
       halowResult: null,
+      serialDiagnostic: null,
+      serialDiagResult: null,
       jqbedAlgorithmConfigResult: null,
       jqbedAlgorithmStatus: { state: 'waiting', error: null },
       wsConnected: false,
@@ -1428,6 +1430,9 @@ class Home extends React.Component {
     let jsonObject = JSON.parse(e.data);
     if (jsonObject.halowStatus) this.setState({ halowStatus: jsonObject.halowStatus });
     if (jsonObject.halowResult) this.setState({ halowResult: jsonObject.halowResult });
+    // 串口打开成功时后端推送 null 清除告警，因此这里不能用真值判断
+    if (jsonObject.serialDiagnostic !== undefined) this.setState({ serialDiagnostic: jsonObject.serialDiagnostic });
+    if (jsonObject.serialDiagResult) this.setState({ serialDiagResult: jsonObject.serialDiagResult });
     this.syncSmallBed12BMatrixSize(jsonObject);
 
     if (jsonObject.jqbedAlgorithmConfig) {
@@ -4147,6 +4152,8 @@ class Home extends React.Component {
             jqbedAlgorithmConfig={this.state.jqbedAlgorithmConfig}
             halowStatus={this.state.halowStatus}
             halowResult={this.state.halowResult}
+            serialDiagnostic={this.state.serialDiagnostic}
+            serialDiagResult={this.state.serialDiagResult}
             jqbedAlgorithmConfigResult={this.state.jqbedAlgorithmConfigResult}
             jqbedAlgorithmStatus={this.state.jqbedAlgorithmStatus}
             wsConnected={this.state.wsConnected}

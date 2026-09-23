@@ -19,6 +19,7 @@ import { translateDomainLabel } from '../../i18n/translateDomainLabel';
 import { getLanguageLocale } from '../../i18n';
 import JqbedAlgorithmConfigModal from './JqbedAlgorithmConfigModal';
 import HalowConnection from './HalowConnection';
+import SerialDiagnostics from './SerialDiagnostics';
 import { getJqbedConfigAccess } from './jqbedAlgorithmConfig';
 import {
   PRESSURE_SCENES,
@@ -1752,6 +1753,10 @@ class Title extends React.Component {
           status={this.props.halowStatus} result={this.props.halowResult}
           connected={this.props.wsConnected} connectionEpoch={this.props.wsConnectionEpoch}
           history={this.props.history} collecting={!this.props.colFlag} send={this.props.wsSendObj} />}
+        <SerialDiagnostics
+          diagnostic={this.props.serialDiagnostic} result={this.props.serialDiagResult}
+          connected={this.props.wsConnected} send={this.props.wsSendObj}
+          onFixed={() => this.props.wsSendObj({ serialReset: true })} />
         {this.props.matrixName != 'localCar' ? this.props.history === 'now' ? this.props.matrixName != 'car' && this.props.matrixName != 'car10' && this.props.matrixName != 'sofa' && this.props.matrixName != 'yanfeng10' && this.props.matrixName != 'volvo' && this.props.matrixName != 'carQX' && this.props.matrixName != wholeChairType_title && this.props.matrixName != minzhenType_title && this.props.matrixName != 'hand0507' && !tactileGloveTypes_title.includes(this.props.matrixName) && this.props.matrixName != 'footVideo' && this.props.matrixName != 'eye' ? <><Select
 
           style={{ marginRight: 6, width: 140 }}

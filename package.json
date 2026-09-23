@@ -9,6 +9,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "electron-forge start",
+    "fix-serial-permission": "node scripts/fix-serial-permission.js",
     "build-client": "npm --prefix client run build",
     "build-python-runtime": "node scripts/build-python-runtime.js",
     "check-python-runtime-health": "node scripts/check-python-runtime-health.js",
@@ -23,6 +24,7 @@
     "build": "npm run clean-pack-output && npm run prepare-build-assets && electron-builder -w && node scripts/inject-release-notes.js",
     "upload": "node scripts/upload-release.js",
     "build-mac": "npm run clean-pack-output && npm run prepare-build-assets && electron-builder -m",
+    "build-linux": "npm run clean-pack-output && npm run prepare-build-assets && electron-builder -l",
     "build-mac-release": "npm run clean-pack-output && node scripts/build-mac-release.js",
     "build-mac-share": "npm run clean-pack-output && node scripts/build-mac-share.js",
     "build-all": "npm run clean-pack-output && npm run prepare-build-assets && electron-builder -mwl"
@@ -200,6 +202,36 @@
       "gatekeeperAssess": false,
       "entitlements": "scripts/entitlements.mac.plist",
       "entitlementsInherit": "scripts/entitlements.mac.plist"
+    },
+    "linux": {
+      "icon": "./logo.png",
+      "category": "Science",
+      "maintainer": "JQ Industries <support@jq-industries.com>",
+      "synopsis": "Pressure sensor data acquisition and visualization",
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "desktop": {
+        "entry": {
+          "Name": "Shroom",
+          "Comment": "柔性压力感知数据采集与可视化",
+          "Categories": "Science;Education;"
+        }
+      }
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libsecret-1-0"
+      ]
     },
     "publish": [
       {

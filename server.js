@@ -104,6 +104,11 @@ const {
 const smallBed12B = require('./server/smallBed12B');
 const { HalowReceiver, createHalowProtocol } = require('./server/halowReceiver');
 const {
+  classifyOpenFailure,
+  createThrottle,
+  createSerialDiagnosticsProtocol,
+} = require('./server/serialDiagnostics');
+const {
   estimatePointPressure,
   FILTER_THRESHOLD: PRESSURE_CALIBRATION_FILTER_THRESHOLD,
 } = require('./util/pressureCalibration_V2.7.54');
@@ -595,6 +600,12 @@ function isWindowsTargetSerialPort(port = {}) {
 }
 
 function isMacTargetSerialPort(port = {}) {
+  return hasWchSerialSignature(port);
+}
+
+// Linux 的 serial8250 驱动会无条件枚举 /dev/ttyS0-31，无论主板上是否真有这些串口。
+// 它们没有 vendorId 等任何 USB 特征，用同一套白名单即可滤掉。
+function isLinuxTargetSerialPort(port = {}) {
   return hasWchSerialSignature(port);
 }
 
@@ -1328,6 +1339,12 @@ const getPort = (ports) => {
   if (process.platform === 'darwin') {
     const filteredPorts = portList.filter(isMacTargetSerialPort);
     logger.info(`[SerialList] filter darwin whitelist matched ${filteredPorts.length}/${portList.length} port(s)`);
+    return filteredPorts;
+  }
+
+  if (process.platform === 'linux') {
+    const filteredPorts = portList.filter(isLinuxTargetSerialPort);
+    logger.info(`[SerialList] filter linux whitelist matched ${filteredPorts.length}/${portList.length} port(s)`);
     return filteredPorts;
   }
 
@@ -3394,6 +3411,38 @@ function broadcastJson(payload) {
   });
 }
 
+// 串口重连每 3 秒重试一次，失败原因不变时无需反复推送
+let allowSerialDiagnostic = createThrottle();
+
+/**
+ * 串口打开结果的统一出口。SerialPort 的打开回调在成功时也会触发（err 为空），
+ * 因此这里既负责推送失败原因，也负责在恢复后清除界面告警。
+ * 各调用点形状一致，设备路径从 serialport 的错误信息中提取。
+ */
+function reportSerialOpenResult(err) {
+  if (!err) {
+    // 打开成功：清掉界面告警，并重置节流以便下次故障立即上报
+    allowSerialDiagnostic = createThrottle();
+    broadcastJson({ serialDiagnostic: null });
+    return;
+  }
+  logger.warn(err, "err");
+
+  SerialPort.list()
+    .then((ports) => {
+      const diagnostic = classifyOpenFailure({ error: err, ports });
+      if (!allowSerialDiagnostic(`${diagnostic.path}|${diagnostic.kind}`)) return;
+      logger.warn(`[SerialDiag] ${diagnostic.path} ${diagnostic.kind}`);
+      broadcastJson({ serialDiagnostic: diagnostic });
+    })
+    .catch((listError) => logger.warn('[SerialDiag] 端口列举失败：', listError.message));
+}
+
+const handleSerialDiagMessage = createSerialDiagnosticsProtocol({
+  sendJson,
+  listPorts: () => SerialPort.list(),
+});
+
 function switchActiveDisplaySystem(receiveFile, reason = 'file switch') {
   if (typeof receiveFile !== 'string' || !receiveFile.trim()) return false;
   if (halowReceiver.active) {
@@ -3524,7 +3573,7 @@ module.exports = {
                   autoOpen: true,
                 },
                 function (err) {
-                  logger.warn(err, "err");
+                  reportSerialOpenResult(err);
                 }
               );
               //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
@@ -3568,7 +3617,7 @@ module.exports = {
                     autoOpen: true,
                   },
                   function (err) {
-                    logger.warn(err, "err");
+                    reportSerialOpenResult(err);
                   }
                 );
                 //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
@@ -3671,6 +3720,10 @@ module.exports = {
         const getMessage = JSON.parse(message);
         if (getMessage.halow) {
           handleHalowMessage(getMessage, ws).catch(error => logger.warn('[HaLow]', error.message));
+          return;
+        }
+        if (getMessage.serialDiag) {
+          handleSerialDiagMessage(getMessage, ws).catch(error => logger.warn('[SerialDiag]', error.message));
           return;
         }
         if (jqbedAlgorithmProtocol.handle(getMessage, {
@@ -4340,7 +4393,7 @@ module.exports = {
                     autoOpen: true,
                   },
                   function (err) {
-                    logger.warn(err, "err");
+                    reportSerialOpenResult(err);
                   }
                 );
                 //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
@@ -4360,7 +4413,7 @@ module.exports = {
                     autoOpen: true,
                   },
                   function (err) {
-                    logger.warn(err, "err");
+                    reportSerialOpenResult(err);
                   }
                 );
                 //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
@@ -4461,7 +4514,7 @@ module.exports = {
                   autoOpen: true,
                 },
                 function (err) {
-                  logger.warn(err, "err");
+                  reportSerialOpenResult(err);
                 }
               );
               //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
@@ -5262,7 +5315,7 @@ module.exports = {
                       autoOpen: true,
                     },
                     function (err) {
-                      logger.warn(err, "err");
+                      reportSerialOpenResult(err);
                     }
                   );
                   //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
@@ -5282,7 +5335,7 @@ module.exports = {
                       autoOpen: true,
                     },
                     function (err) {
-                      logger.warn(err, "err");
+                      reportSerialOpenResult(err);
                     }
                   );
                   //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
@@ -6205,7 +6258,7 @@ module.exports = {
                     autoOpen: true,
                   },
                   function (err) {
-                    if (err) logger.warn(err, "err");
+                    reportSerialOpenResult(err);
                   }
                 );
                 port1.pipe(getSitParser());
@@ -6217,7 +6270,7 @@ module.exports = {
                     autoOpen: true,
                   },
                   function (err) {
-                    if (err) logger.warn(err, "err");
+                    reportSerialOpenResult(err);
                   }
                 );
                 bindBackPortParser();
@@ -8241,7 +8294,7 @@ reconnectTimer = setInterval(() => {
             autoOpen: true,
           },
           function (err) {
-            logger.warn(err, "err");
+            reportSerialOpenResult(err);
           }
         );
         //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
@@ -8259,7 +8312,7 @@ reconnectTimer = setInterval(() => {
             autoOpen: true,
           },
           function (err) {
-            logger.warn(err, "err");
+            reportSerialOpenResult(err);
           }
         );
         //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
@@ -8281,7 +8334,7 @@ reconnectTimer = setInterval(() => {
           autoOpen: true,
         },
         function (err) {
-          logger.warn(err, "err");
+          reportSerialOpenResult(err);
         }
       );
       //缁狅繝浜惧ǎ璇插鐟欙絾鐎介崳?
