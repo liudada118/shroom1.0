@@ -1,8 +1,8 @@
 const fs = require("fs");
 const path = require("path");
+const { createPackDbTemplate } = require('./create-pack-db-template');
 
 const projectRoot = process.cwd();
-const sourceInitDb = path.join(projectRoot, "db", "init.db");
 const sourceAgentResources = path.join(projectRoot, "agent-resources");
 const packResourcesDir = path.join(projectRoot, "pack-resources");
 
@@ -50,17 +50,10 @@ function runtimeContainsOnbedFilter(dirPath) {
   return false;
 }
 
+/** 打包只生成空数据库模板，开发库与用户采集记录保留在原处。 */
 function syncDb() {
-  const targetDir = path.join(packResourcesDir, "db");
-  const targetInitDb = path.join(targetDir, "init.db");
-
-  if (!fs.existsSync(sourceInitDb)) {
-    throw new Error(`source init.db not found: ${sourceInitDb}`);
-  }
-
-  fs.mkdirSync(targetDir, { recursive: true });
-  fs.copyFileSync(sourceInitDb, targetInitDb);
-  console.log(`[pack] synced init.db -> ${targetInitDb}`);
+  const targetInitDb = createPackDbTemplate(projectRoot);
+  console.log(`[pack] created empty init.db -> ${targetInitDb}`);
 }
 
 function syncPython() {

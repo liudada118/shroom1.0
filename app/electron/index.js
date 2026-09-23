@@ -59,6 +59,7 @@ function getAgentProcess() {
   if (!agentProcess) {
     const { createAgentProcess } = require('./agentProcess');
     agentProcess = createAgentProcess({ electron: require('electron'),
+      getLicenseKey: require('../../backend/kernel/platform/license/licenseKeyStore').readStoredLicenseKey,
       root: path.join(app.getPath('userData'), 'agent'), getWindow: () => mainWindow });
   }
   return agentProcess;

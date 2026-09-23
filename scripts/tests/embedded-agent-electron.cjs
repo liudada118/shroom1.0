@@ -10,6 +10,9 @@ const { buildSdkContractSnapshot } = require('../../sdk/backend/contract/sdkApiC
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'shroom-agent-electron-'));
 const proxyMode = process.argv.includes('--proxy');
 const algorithmMode = process.argv.includes('--algorithm');
+const syncMode = process.argv.includes('--chat-sync');
+const uploads = [];
+let acceptUploads = false;
 electron.app.setPath('userData', root);
 electron.app.disableHardwareAcceleration();
 let manager, server, requests = 0;
@@ -25,6 +28,7 @@ async function packedProcessFactory() {
     ['app/electron/agentProcess.js', 'app/electron/agentProcess.js'],
     ['app/electron/agentClipboard.js', 'app/electron/agentClipboard.js'],
     ['app/electron/agentSettings.js', 'app/electron/agentSettings.js'],
+    ['app/electron/agentSyncSettings.js', 'app/electron/agentSyncSettings.js'],
     ['backend/agent-runtime', 'backend/agent-runtime'],
     ['backend/extension-host/manifest', 'backend/extension-host/manifest'],
     ['backend/extension-host/workspace/builtinSystemTemplates.js', 'backend/extension-host/workspace/builtinSystemTemplates.js'],
@@ -55,6 +59,18 @@ async function packedProcessFactory() {
 async function createFixtureServer() {
   const service = http.createServer(async (req, res) => {
     const requestPath = new URL(req.url, 'http://localhost').pathname;
+    if (requestPath === '/agent/chat-sync') {
+      let body = ''; for await (const part of req) body += part;
+      const event = JSON.parse(body);
+      assert.equal(req.headers.authorization, 'Bearer fixture-upload-key');
+      assert.equal(req.headers['idempotency-key'], event.eventId);
+      assert.ok(!body.includes('fixture-only-key'));
+      assert.ok(!body.includes('fixture-upload-key'));
+      uploads.push(event);
+      res.writeHead(acceptUploads ? 200 : 503, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ accepted: acceptUploads, eventId: event.eventId }));
+      return;
+    }
     if (requestPath === '/v1/responses') {
       let text = ''; for await (const part of req) text += part;
       const request = JSON.parse(text);
@@ -123,6 +139,16 @@ async function waitForTask(taskId) {
   throw new Error('Agent task did not finish');
 }
 
+/** 等待真实网络上传状态，超时由总看门狗兜底。 */
+async function waitForSync(predicate) {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const state = await manager.invoke('getState');
+    if (predicate(state.chatSync.status)) return state;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error('Chat sync did not reach expected state');
+}
+
 /** 验证真实 Electron utilityProcess、系统加密、Responses 流和工具调用。 */
 async function main() {
   // 代理开关必须在 Chromium 网络上下文初始化前设置；生产代码仍读取用户系统代理。
@@ -180,6 +206,29 @@ async function main() {
   assert.ok(events.some((event) => event.type === 'text.delta'));
   assert.ok(!JSON.stringify(events).includes('fixture-only-key'));
   assert.ok(!fs.readFileSync(path.join(root, 'settings.json'), 'utf8').includes('fixture-only-key'));
+  if (syncMode) {
+    assert.equal(uploads.length, 0, 'sync defaults to disabled');
+    await manager.invoke('saveSyncSettings', { enabled: true, endpoint: `${base}/agent/chat-sync`, token: 'fixture-upload-key' });
+    const offline = await waitForSync((status) => status.state === 'retrying');
+    assert.equal(offline.chatSync.status.pendingCount, 1);
+    assert.equal(uploads[0].conversation.messages.length, result.state.conversation.messages.length);
+    assert.equal(uploads[0].conversation.tasks[0].steps, undefined);
+    assert.ok(!fs.readFileSync(path.join(root, 'sync-settings.json'), 'utf8').includes('fixture-upload-key'));
+    const eventId = uploads[0].eventId;
+    await manager.dispose(); manager = null;
+    acceptUploads = true;
+    manager = createProcess({ electron: fixtureElectron, root, backendEndpoints: { httpBaseUrl: base }, getWindow: () => null });
+    const restored = await manager.invoke('getState');
+    assert.equal(restored.settings.hasApiKey, true);
+    assert.equal(restored.chatSync.settings.hasToken, true);
+    assert.equal(restored.conversation.id, result.state.conversation.id);
+    assert.deepEqual(restored.conversation.messages, result.state.conversation.messages);
+    await manager.invoke('retryChatSync');
+    const synced = await waitForSync((status) => status.pendingCount === 0 && status.lastSuccessAt);
+    assert.equal(uploads.at(-1).eventId, eventId);
+    assert.equal(synced.chatSync.status.installationId, offline.chatSync.status.installationId);
+    console.log('PASS: actual Electron net.fetch upload, 503 queue retention, restart with own encrypted keys/history and matching idempotent ACK.');
+  }
   await manager.dispose(); manager = null;
   console.log(`PASS: real Electron Agent process${process.argv.includes('--asar') ? ' from temporary ASAR' : ''}${proxyMode ? ' through HTTP proxy (direct target unavailable)' : ''}, encrypted settings, streamed tool loop, persisted result and shutdown. Synthetic local model/device fixtures only.`);
 }

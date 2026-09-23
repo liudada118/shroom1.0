@@ -79,6 +79,7 @@ Electron 渲染进程
 | --- | --- | --- |
 | 只读运行资源 | 项目根 | `process.resourcesPath` |
 | 数据库 | 项目根 `db/` | `app.getPath('userData')/db/` |
+| 内置 Agent 聊天/凭据/上传队列 | `app.getPath('userData')/agent/` | 同左，同机同账号升级保留 |
 | 用户展示系统 | 项目根 `display-systems/` | `userData/display-systems/` |
 | 用户 Agent App | 项目根 `agent-apps/` | `userData/agent-apps/` |
 | 上传图片 | `runtime/uploads/` | `userData/img/` |
@@ -86,6 +87,8 @@ Electron 渲染进程
 | 报告 | `runtime/exports/reports/` | Windows：`resources/OneStep/`；macOS：桌面 `oneStepPdf/` |
 
 后两项仍存在安装资源目录写入的旧路径，不能笼统声称“所有运行数据都已放进 userData”。授权配置另由 [licenseHelper](../backend/kernel/platform/license/licenseHelper.js) 解析候选位置，不复制真实密钥到文档或示例。
+
+打包 `sync-pack-resources` 通过 `create-pack-db-template` 使用 Electron ABI 新建空 schema，暂存目录只保留 `init.db`，不复制开发采集库。Builder 仅收该模板；Builder/Forge 排除根 `agent/`、`userData/` 和 `builtin-system-copies/`，运行时已有数据库不被模板覆盖。Agent 同步凭据和队列布局见 [接口文档](agent-chat-sync-api.md)。
 
 **排查顺序：** 白屏先查 `Static build root` 和资源请求；端口冲突查监听错误；关机报错查清理及 Python 管道；写盘失败查实际解析路径和权限。
 对应测试：[应用退出](../backend/tests/server/applicationQuit.test.js)、[后端关闭](../backend/tests/server/serverShutdownOrchestrator.test.js)、[路径配置](../backend/tests/platform/serverPathConfig.test.js)。

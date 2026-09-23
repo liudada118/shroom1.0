@@ -54,6 +54,15 @@ async function main() {
   const result = await getState(mainWindow.webContents);
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.data.settings.hasApiKey, false);
+  assert.equal(result.data.chatSync.settings.enabled, false);
+  assert.equal(result.data.chatSync.settings.endpoint, 'https://shroom.jq-industries.com/api/agent/conversations');
+  assert.equal(result.data.chatSync.settings.hasToken, false);
+  const syncSaved = await mainWindow.webContents.executeJavaScript("window.electronAPI.agent.invoke('saveSyncSettings', {enabled:false, endpoint:'https://example.invalid/chat', token:'synthetic-upload-credential'})");
+  assert.equal(syncSaved.ok, true, JSON.stringify(syncSaved));
+  assert.equal(syncSaved.data.settings.hasToken, true);
+  assert.ok(!JSON.stringify(syncSaved).includes('synthetic-upload-credential'));
+  const syncCleared = await mainWindow.webContents.executeJavaScript("window.electronAPI.agent.invoke('saveSyncSettings', {enabled:false, clearToken:true})");
+  assert.equal(syncCleared.data.settings.hasToken, false);
   assert.ok(result.data.conversation.id);
 
   const image = electron.nativeImage.createFromBitmap(Buffer.from([100, 150, 200, 255]), { width: 1, height: 1 });

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import AgentWorkspace from './AgentWorkspace';
 import AgentSettings from './AgentSettings';
 import AgentTaskCard from './AgentTaskCard';
+import AgentSyncSettings, { describeChatSync } from './AgentSyncSettings';
 
 /** 渲染一个方案供安全和操作边界断言使用。 */
 function proposalMarkup(kind, status, overrides = {}) {
@@ -11,6 +12,23 @@ function proposalMarkup(kind, status, overrides = {}) {
 }
 
 describe('Agent 工作区界面边界', () => {
+  it('官方同步接口将独立凭证标为可选，并说明有效软件密钥鉴权', () => {
+    const html = renderToStaticMarkup(<AgentSyncSettings sync={{ settings: { endpoint: 'https://shroom.jq-industries.com/api/agent/conversations' } }} />);
+    expect(html).toContain('（可选）');
+    expect(html).toContain('仅有效密钥可上传');
+    expect(html).toContain('绑定公司的记录显示公司名');
+  });
+  it('同步明确上传范围，不回显令牌，状态区分本机保存和服务端确认', () => {
+    const html = renderToStaticMarkup(<AgentSyncSettings sync={{ settings: { enabled: true, endpoint: 'https://example.invalid/chat', hasToken: true, token: 'never-render-token' },
+      status: { state: 'retrying', pendingCount: 2, lastError: { message: '网络异常，等待重试' } } }} />);
+    expect(html).not.toContain('never-render-token');
+    expect(html).toContain('留空以保留上传凭证');
+    expect(html).toContain('附件原文件、采集数据库和模型密钥配置不上传');
+    expect(html).toContain('2 个会话待同步');
+    expect(html).toContain('网络异常，等待重试');
+    expect(describeChatSync({ settings: { enabled: true }, status: { state: 'idle', pendingCount: 0 } })).toBe('等待聊天内容');
+    expect(describeChatSync({ settings: { enabled: true }, status: { state: 'idle', pendingCount: 0, lastSuccessAt: '2026-09-22T00:00:00Z' } })).toBe('聊天已同步');
+  });
   it('普通浏览器只显示桌面使用说明，不生成虚假的设备状态', () => {
     const html = renderToStaticMarkup(<AgentWorkspace />);
     expect(html).toContain('在桌面软件中使用 Agent');

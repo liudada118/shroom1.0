@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import AgentSettings from './AgentSettings';
+import { describeChatSync } from './AgentSyncSettings';
 import AgentConversation from './AgentConversation';
 import AgentHistory from './AgentHistory';
 import AgentAlgorithmData from './AgentAlgorithmData';
@@ -198,13 +199,13 @@ export default function AgentWorkspace({ bridge: bridgeOverride, initiallyOpen =
           <div className="shroom-agent-header-actions">
             <button type="button" aria-label="历史会话" title="历史会话" aria-expanded={historyOpen} onClick={() => { setHistoryOpen((value) => !value); setSettingsOpen(false); }} disabled={!bridge || loading}><AgentIcon name="history" /></button>
             <button type="button" aria-label="新会话" title="新会话" onClick={newConversation} disabled={!bridge || loading || locked || importing}><AgentIcon name="plus" /></button>
-            <button type="button" aria-label="模型设置" title="模型设置" onClick={() => { setSettingsOpen((value) => !value); setHistoryOpen(false); }} aria-expanded={settingsOpen} disabled={!bridge || loading || locked || importing}><AgentIcon name="settings" /></button>
+            <button type="button" aria-label="模型设置" title="模型与同步设置" onClick={() => { setSettingsOpen((value) => !value); setHistoryOpen(false); }} aria-expanded={settingsOpen} disabled={!bridge || loading || importing}><AgentIcon name="settings" /></button>
             <button type="button" aria-label="关闭 Agent" title="关闭 Agent" onClick={close}><AgentIcon name="close" /></button>
           </div>
         </header>
         {!bridge ? <div className="shroom-agent-empty"><AgentIcon name="agent" /><h3>在桌面软件中使用 Agent</h3><p>请打开 Shroom 桌面软件，即可连接模型、读取设备状态并创建展示系统。</p></div> : loading ? <div className="shroom-agent-empty" role="status"><p>正在加载 Agent…</p></div> : <>
           {error && <div className="shroom-agent-error" role="alert"><span>{error}</span><button type="button" onClick={refreshStatus}>刷新状态</button></div>}
-          {historyOpen ? <AgentHistory invoke={invoke} disabled={locked || importing} onOpen={openConversation} onClose={() => setHistoryOpen(false)} /> : settingsOpen ? <AgentSettings settings={settings} disabled={locked} onSave={(value) => invoke('saveSettings', value)} onClose={() => setSettingsOpen(false)} /> : algorithmOpen ? <AgentAlgorithmData invoke={invoke} selection={snapshot?.conversation?.algorithmSelection} disabled={locked || importing} onSave={saveAlgorithmSelection} onClose={() => setAlgorithmOpen(false)} /> : <>
+          {historyOpen ? <AgentHistory invoke={invoke} disabled={locked || importing} onOpen={openConversation} onClose={() => setHistoryOpen(false)} /> : settingsOpen ? <AgentSettings settings={settings} disabled={locked} onSave={(value) => invoke('saveSettings', value)} chatSync={snapshot?.chatSync} onSaveSync={(value) => invoke('saveSyncSettings', value)} onRetrySync={() => invoke('retryChatSync')} onClose={() => setSettingsOpen(false)} /> : algorithmOpen ? <AgentAlgorithmData invoke={invoke} selection={snapshot?.conversation?.algorithmSelection} disabled={locked || importing} onSave={saveAlgorithmSelection} onClose={() => setAlgorithmOpen(false)} /> : <>
             <div className="shroom-agent-scroll" ref={scrollRef} onScroll={(event) => { const node = event.currentTarget; followOutput.current = node.scrollHeight - node.scrollTop - node.clientHeight < 64; }}>
               {!configured && <div className="shroom-agent-connect-note"><div><strong>连接你的模型</strong><p>配置服务地址、模型名称和密钥后即可开始。</p></div><button type="button" onClick={() => setSettingsOpen(true)}>配置模型</button></div>}
               {messages.length === 0 && <section className="shroom-agent-welcome"><span className="shroom-agent-eyebrow">从一个具体任务开始</span><h3>告诉我，你想完成什么？</h3><p>查询设备、排查数据问题，或根据协议和点位表生成展示方案。</p><div className="shroom-agent-suggestions">{SUGGESTIONS.map((suggestion) => <button type="button" key={suggestion} disabled={locked} onClick={() => { setText(suggestion); inputRef.current?.focus(); }}>{suggestion}<span aria-hidden="true">↗</span></button>)}</div></section>}
@@ -223,6 +224,7 @@ export default function AgentWorkspace({ bridge: bridgeOverride, initiallyOpen =
                 {busy ? <button ref={stopRef} type="button" onClick={cancel} disabled={cancelling}><AgentIcon name="stop" />{cancelling ? '正在停止…' : '停止任务'}</button> : <button className="shroom-agent-primary" type="submit" disabled={!text.trim() || !configured || locked || importing || !snapshot}><AgentIcon name="send" />{submitting ? '正在发送…' : '发送'}</button>}
               </div>
               <p id="shroom-agent-send-hint" className="shroom-agent-send-hint">消息、所选附件和任务所需的软件状态将发送至你配置的模型服务。Shift + Enter 换行。</p>
+              {snapshot?.chatSync?.settings?.enabled && <p className="shroom-agent-send-hint" role="status">聊天同步：{describeChatSync(snapshot.chatSync)}。可在设置中查看服务器地址或关闭。</p>}
             </form>
           </>}
         </>}

@@ -115,3 +115,53 @@ test('worker exit rejects pending requests and supports a fresh restart', async 
   await manager.invoke('getState'); assert.equal(processes.length, 2);
   await manager.dispose();
 });
+
+test('chat sync settings do not start the model worker and never enter worker or renderer credentials', async (t) => {
+  const root = temporaryRoot(t), calls = [], events = [], uploads = [];
+  let forks = 0, manager;
+  const state = { conversation: { id: 'conversation-sync', messages: [], tasks: [] }, attachments: [], activeTask: null };
+  const ref = new EventEmitter();
+  ref.kill = () => ref.emit('exit', 0);
+  ref.postMessage = (message) => {
+    calls.push(message);
+    setImmediate(() => {
+      if (message.action === 'startTask') {
+        state.conversation.messages.push({ id: 'message-sync', role: 'user', text: message.payload.text });
+        ref.emit('message', { event: { type: 'state', state: JSON.parse(JSON.stringify(state)) } });
+      }
+      ref.emit('message', { id: message.id, ok: true, data: message.action === 'getState' ? state : {} });
+    });
+  };
+  manager = createAgentProcess({ root, electron: { safeStorage,
+    net: { fetch: async (_url, options) => { uploads.push(options); return new Response('{}', { status: 503 }); } },
+    utilityProcess: { fork: () => { forks++; setImmediate(() => ref.emit('message', { ready: true })); return ref; } },
+  }, getWindow: () => ({ isDestroyed: () => false, webContents: { isDestroyed: () => false, send: (_channel, event) => events.push(event) } }) });
+  try {
+    const fresh = await manager.invoke('getState');
+    assert.equal(fresh.settings.hasApiKey, false);
+    assert.equal(fresh.chatSync.settings.enabled, false);
+    await manager.invoke('saveSettings', { baseUrl: 'https://example.invalid/v1', model: 'test', apiKey: 'model-fixture-secret' });
+    await manager.invoke('saveSyncSettings', { enabled: true, endpoint: 'https://example.invalid/chat', token: 'upload-fixture-secret' });
+    assert.equal(uploads.length, 0, 'empty conversations are not uploaded');
+    await manager.invoke('startTask', { text: '合成数据查询' });
+    for (let attempt = 0; attempt < 50 && uploads.length === 0; attempt++) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(uploads.length, 1);
+    assert.equal(uploads[0].headers.Authorization, 'Bearer upload-fixture-secret');
+    assert.equal(JSON.parse(uploads[0].body).conversation.messages[0].text, '合成数据查询');
+    const failed = await manager.invoke('getState');
+    assert.equal(failed.chatSync.status.pendingCount, 1);
+    assert.equal(failed.chatSync.status.state, 'retrying');
+    assert.ok(!JSON.stringify(calls).includes('upload-fixture-secret'));
+    assert.ok(!JSON.stringify(events).includes('upload-fixture-secret'));
+    assert.ok(!JSON.stringify(events).includes('model-fixture-secret'));
+    assert.ok(!fs.readFileSync(path.join(root, 'sync-settings.json'), 'utf8').includes('upload-fixture-secret'));
+    await manager.dispose();
+    const restarter = createAgentProcess({ root, electron: { safeStorage, utilityProcess: { fork: () => { throw new Error('worker must stay stopped'); } },
+      net: { fetch: async () => { throw new Error('must not send while disabled'); } } }, getWindow: () => null });
+    try {
+      await restarter.invoke('saveSyncSettings', { enabled: false });
+      assert.equal(forks, 1);
+      assert.equal(createAgentSettings({ root, safeStorage }).getPrivate().apiKey, 'model-fixture-secret');
+    } finally { await restarter.dispose(); }
+  } finally { await manager.dispose(); }
+});

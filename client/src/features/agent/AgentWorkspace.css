@@ -154,6 +154,12 @@
 .shroom-agent-settings label { margin-top: 14px; font-weight: 550; }
 .shroom-agent-settings label span { color: var(--agent-success); font-size: 12px; font-weight: 400; }
 .shroom-agent-settings form > button { margin-top: 16px; }
+.shroom-agent-sync-settings { margin-top: 28px; padding-top: 22px; border-top: 1px solid var(--agent-border); }
+.shroom-agent-sync-settings h3 { font-size: 17px; margin: 0; }
+.shroom-agent-settings .shroom-agent-check { display: flex; align-items: center; gap: 10px; min-height: 44px; margin-top: 4px; cursor: pointer; }
+.shroom-agent-root .shroom-agent-check input { width: 18px; height: 18px; min-height: 0; margin: 0; padding: 0; flex: 0 0 auto; accent-color: var(--agent-accent); }
+.shroom-agent-sync-status { display: grid; gap: 5px; padding: 14px 0; font-size: 12px; overflow-wrap: anywhere; color: var(--agent-secondary); }
+.shroom-agent-sync-status strong { color: var(--agent-text); font-size: 14px; }
 .shroom-agent-hint { color: var(--agent-secondary); font-size: 12px; line-height: 1.7; }
 .shroom-agent-inline-error { color: var(--agent-error); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .shroom-agent-error { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid #65454b; background: #2d202b; color: var(--agent-error); padding: 12px 20px; font-size: 13px; flex: 0 0 auto; }

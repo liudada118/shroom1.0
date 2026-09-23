@@ -64,6 +64,9 @@
           "^/build($|/)",
           "^/data($|/)",
           "^/db($|/)",
+          "^/agent($|/)",
+          "^/userData($|/)",
+          "^/builtin-system-copies($|/)",
           "^/pack-resources($|/)",
           "^/agent-resources($|/)",
           "^/client($|/)",
@@ -132,6 +135,9 @@
       "!agent-resources/**",
       "!data/**",
       "!db/**",
+      "!agent/**",
+      "!userData/**",
+      "!builtin-system-copies/**",
       "!python/**",
       "!.git/**",
       "!.git_broken*/**",
@@ -192,8 +198,7 @@
         "from": "./pack-resources/db",
         "to": "db",
         "filter": [
-          "**/*",
-          "!**/config.txt"
+          "init.db"
         ]
       },
       {

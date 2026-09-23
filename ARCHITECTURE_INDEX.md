@@ -1,6 +1,6 @@
 # Shroom 快速架构索引
 
-> 最后更新于：2026-09-22
+> 最后更新于：2026-09-23
 > 用途：代码定位和验证路由。理解当前实现先读 [开发者手册](docs/developer-guide.md)，完整文档分类见 [docs/README.md](docs/README.md)。`ARCHITECTURE.md` 保留历史设计与维护台账，不用作默认全文入口。
 
 当前完整链路：[数据、算法、存储与回放](docs/chains/data-flow.md) · [页面、渲染与交互](docs/chains/interface-flow.md)。
@@ -60,6 +60,8 @@ client commandClient → HTTP :19245 /api/commands
 约束：传感器实时/回放数据使用 canonical `sensor.frame`；新控制命令走 HTTP。当前仍保留旧扁平 WebSocket 控制入口，Home 的三个 JQBed 算法配置命令尚走 WS；它们不属于规范命令的新接入方式。WebSocket 还承载订阅、实时帧和低频系统状态；回放回注同一发布边界，详见数据链路。
 
 ## 4. 高频路径入口
+
+Agent 客户交付与聊天同步：`index.js` 注入 `readStoredLicenseKey` → `agentProcess` → `agentSyncSettings` / `backend/agent-runtime/chatSync`，`AgentSyncSettings.jsx` 设置开关与状态。官方 HTTPS 接口默认复用软件密钥，自定义地址仍需独立令牌；按地址和密钥摘要隔离队列，经 Electron net.fetch 上传白名单快照，服务端校验有效性并确定公司名。`create-pack-db-template` 生成空库，Builder/Forge 排除个人目录，运行时 userData 不变。验证 `chatSync.test.js`、`agentProcess.test.js`、`privateDataIsolation.test.js`、`agent-workspace.mjs`、`embedded-agent-electron.cjs --chat-sync --asar` 和真实 IPC；触及 Electron/打包，执行 Full。服务端契约见 [聊天同步接口](docs/agent-chat-sync-api.md)。
 
 HaLow 人体接入：`kernel/transport/halowReceiver.js` 独立 TCP 分帧，`halowService.js` 校验当前系统/授权/串口互斥；`halow.control` 走 HTTP 并等待完成，状态走 WS。原生 `humanBodyOptimized` 与副本共用 `legacySerialFrameRuntime`，保留 canonical 身份、归零与存储。前端 `HalowConnection.jsx` 同时接门户/旧工具栏。验证 `halowReceiver.test.js`、`halowControlApi.test.js`、`Title.halow.test.jsx`、`node scripts/tests/halow-connection.mjs` 和 Full；说明见 [HaLow 接入](docs/halow-human-body.md)。
 

@@ -26,6 +26,32 @@ try {
   await page.getByLabel('API 密钥', { exact: true }).fill('fixture-not-a-real-key');
   await page.getByRole('button', { name: '保存连接设置' }).click();
   console.log('Model settings saved');
+  await page.getByRole('button', { name: '模型设置', exact: true }).click();
+  const syncPanel = page.getByRole('region', { name: '聊天同步', exact: true });
+  await syncPanel.getByLabel('开启聊天同步').check();
+  await syncPanel.getByLabel('服务器接口地址').fill('https://reject.invalid/chat');
+  await syncPanel.getByLabel('上传凭证', { exact: true }).fill('fixture-upload-token');
+  await syncPanel.getByRole('button', { name: '保存同步设置' }).click();
+  await syncPanel.getByRole('alert').filter({ hasText: '同步设置保存失败' }).waitFor();
+  assert.equal(await syncPanel.locator('input[type=password]').inputValue(), 'fixture-upload-token');
+  await syncPanel.getByLabel('服务器接口地址').fill('https://example.invalid/chat');
+  await syncPanel.getByRole('button', { name: '保存同步设置' }).click();
+  await syncPanel.getByText('等待自动重试 · 1 个会话待同步').waitFor();
+  assert.equal(await syncPanel.locator('input[type=password]').inputValue(), '');
+  await syncPanel.getByRole('button', { name: '立即重试' }).click();
+  await syncPanel.getByText('聊天已同步', { exact: true }).waitFor();
+  await syncPanel.getByLabel('服务器接口地址').fill('https://shroom.jq-industries.com/api/agent/conversations');
+  await syncPanel.getByLabel('清除已保存的上传凭证').check();
+  assert.equal(await syncPanel.getByLabel('开启聊天同步').isChecked(), true);
+  await syncPanel.getByRole('button', { name: '保存同步设置' }).click();
+  await syncPanel.getByText('等待自动重试 · 1 个会话待同步').waitFor();
+  await syncPanel.getByText(/默认使用本机软件密钥/).waitFor();
+  assert.equal(await syncPanel.locator('input[type=password]').inputValue(), '');
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.ok(await syncPanel.evaluate((node) => node.scrollWidth <= node.clientWidth));
+  await page.screenshot({ path: join(root, 'chat-sync-mobile.png') });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.getByRole('button', { name: '返回对话' }).click();
   await page.getByLabel('任务内容').fill('检查图片和协议');
 
   /** 用 DOM 文件事件测试粘贴，不读取或改写用户操作系统剪贴板。 */
@@ -52,6 +78,13 @@ try {
   await page.getByRole('button', { name: '移除附件 剪贴板文件.csv' }).click();
   await page.getByRole('button', { name: '发送', exact: true }).click();
   console.log('Attachments sent');
+  await page.getByRole('button', { name: '模型设置', exact: true }).click();
+  assert.equal(await page.getByRole('button', { name: '保存连接设置' }).isDisabled(), true);
+  await syncPanel.getByLabel('开启聊天同步').uncheck();
+  await syncPanel.getByRole('button', { name: '保存同步设置' }).click();
+  await syncPanel.getByText('聊天同步未开启', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '返回对话' }).click();
+  console.log('Sync settings, retry and disabling during an active task passed');
   await page.getByRole('list', { name: '已发送附件' }).getByText('截图.png', { exact: true }).waitFor();
   await page.getByRole('button', { name: '历史会话', exact: true }).click();
   const first = page.getByRole('region', { name: '历史会话列表' }).getByRole('button', { name: /检查图片和协议/ });

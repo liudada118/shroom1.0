@@ -7,6 +7,7 @@ const listeners = new Set();
 const archives = new Map();
 let sequence = 0;
 let snapshot = { settings: { baseUrl: 'https://api.openai.com/v1', model: '', hasApiKey: false }, conversation: { id: 'fixture-0', messages: [], tasks: [] }, activeTask: null, attachments: [] };
+snapshot.chatSync = { settings: { enabled: false, endpoint: '', hasToken: false }, status: { state: 'disabled', pendingCount: 0 } };
 
 /** 复制内存快照，模拟跨进程结构化复制而不是共享对象。 */
 function copy(value) { return JSON.parse(JSON.stringify(value)); }
@@ -41,7 +42,16 @@ const bridge = {
       return { ok: true, data: [...records.values()].map((item) => ({ id: item.conversation.id, title: item.conversation.messages[0]?.text || '新会话', messageCount: item.conversation.messages.length, current: item.conversation.id === snapshot.conversation.id })) };
     }
     let data = null;
-    if (action === 'saveSettings') {
+    if (action === 'saveSyncSettings') {
+      if (payload.endpoint.includes('reject.invalid')) return { ok: false, error: { message: '测试：同步设置保存失败' } };
+      snapshot.chatSync.settings = { enabled: payload.enabled, endpoint: payload.endpoint, hasToken: payload.clearToken ? false : Boolean(payload.token) || snapshot.chatSync.settings.hasToken };
+      snapshot.chatSync.status = { state: payload.enabled ? 'retrying' : 'disabled', pendingCount: payload.enabled ? 1 : 0,
+        ...(payload.enabled ? { lastError: { message: '测试：网络不可用，等待自动重试' } } : {}) };
+      data = snapshot.chatSync;
+    } else if (action === 'retryChatSync') {
+      snapshot.chatSync.status = { state: 'idle', pendingCount: 0, lastSuccessAt: new Date().toISOString() };
+      data = snapshot.chatSync.status;
+    } else if (action === 'saveSettings') {
       snapshot.settings = { baseUrl: payload.baseUrl, model: payload.model, hasApiKey: Boolean(payload.apiKey) || snapshot.settings.hasApiKey };
       data = snapshot.settings;
     } else if (action === 'setAlgorithmSelection') {
@@ -74,7 +84,7 @@ const bridge = {
     } else if (action === 'openConversation') {
       if (payload.conversationId !== snapshot.conversation.id) {
         archives.set(snapshot.conversation.id, copy(snapshot));
-        snapshot = { ...copy(archives.get(payload.conversationId)), settings: snapshot.settings, activeTask: null };
+        snapshot = { ...copy(archives.get(payload.conversationId)), settings: snapshot.settings, chatSync: snapshot.chatSync, activeTask: null };
       }
     } else if (action === 'applyProposal' || action === 'restoreProposal') {
       snapshot.activeTask.proposals[0].status = action === 'applyProposal' ? 'applied' : 'restored';

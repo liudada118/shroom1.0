@@ -2,11 +2,13 @@ const fs = require('fs/promises');
 const path = require('path');
 const { randomUUID } = require('crypto');
 const { createAgentSettings } = require('./agentSettings');
+const { createAgentSyncSettings } = require('./agentSyncSettings');
+const { createChatSync } = require('../../backend/agent-runtime/chatSync');
 const { agentError, publicError } = require('../../backend/agent-runtime/errors');
 const { MAX_FILE_BYTES, IMAGE_EXTENSIONS, imageMime } = require('../../backend/agent-runtime/attachments');
 const { readClipboardFiles } = require('./agentClipboard');
 
-const ACTIONS = new Set(['getState', 'listConversations', 'openConversation', 'listAlgorithmRecords', 'setAlgorithmSelection', 'saveSettings', 'startTask', 'cancelTask', 'newConversation', 'importFiles', 'importAttachments', 'importClipboard', 'applyProposal', 'restoreProposal']);
+const ACTIONS = new Set(['getState', 'listConversations', 'openConversation', 'listAlgorithmRecords', 'setAlgorithmSelection', 'saveSettings', 'saveSyncSettings', 'retryChatSync', 'startTask', 'cancelTask', 'newConversation', 'importFiles', 'importAttachments', 'importClipboard', 'applyProposal', 'restoreProposal']);
 const trustedWindowOrigins = new WeakMap();
 
 /** 由主进程加载已核验的前端地址，并绑定该窗口唯一可信的 Agent 来源。 */
@@ -33,15 +35,39 @@ function isTrustedAgentSender(event, window) {
 }
 
 /** 管理独立 Agent 子进程、有限 IPC、附件选择和操作系统凭据存储。 */
-function createAgentProcess({ electron, root, getWindow, timeoutMs = 20000, backendEndpoints = {} }) {
+function createAgentProcess({ electron, root, getWindow, timeoutMs = 20000, backendEndpoints = {}, getLicenseKey = () => '' }) {
   const { utilityProcess, safeStorage, dialog } = electron;
   const settings = createAgentSettings({ root, safeStorage });
+  const syncSettings = createAgentSyncSettings({ root, safeStorage, getLicenseKey });
   const requests = new Map();
   let child = null, starting = null, closed = false, lastState = null, actionPending = false;
+  let chatSync = null;
+
+  /** 同步设置和状态只出现在桌面快照中，不交给模型或写入会话正文。 */
+  function publicState(state) {
+    return { ...state, settings: settings.getPublic(),
+      chatSync: { settings: syncSettings.getPublic(), status: chatSync?.getStatus() } };
+  }
+
+  /** 单独推送同步进度，避免状态反馈再次触发入队。 */
+  function publishSyncStatus() {
+    const window = getWindow();
+    if (!closed && lastState && window && !window.isDestroyed() && !window.webContents.isDestroyed()) {
+      window.webContents.send('agent:event', { type: 'state', state: publicState(lastState) });
+    }
+  }
+  chatSync = createChatSync({ root, getConfig: syncSettings.getPrivate,
+    getSecrets: () => [settings.getPrivate().apiKey, syncSettings.getPrivate().token],
+    onStatus: publishSyncStatus, appVersion: electron.app?.getVersion?.(),
+    fetchImpl: electron.net ? (url, options) => electron.net.fetch(url, options) : globalThis.fetch });
 
   /** 向当前主窗口发布事件；窗口关闭后不继续发送。 */
   function emit(event) {
-    if (event.type === 'state') lastState = event.state;
+    if (event.type === 'state') {
+      lastState = event.state;
+      chatSync.observe(lastState);
+      event = { ...event, state: publicState(lastState) };
+    }
     const window = getWindow();
     if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send('agent:event', event);
   }
@@ -195,8 +221,27 @@ function createAgentProcess({ electron, root, getWindow, timeoutMs = 20000, back
     if (!payload || typeof payload !== 'object' || Array.isArray(payload) || (action === 'importAttachments'
       ? Object.keys(payload).some((key) => key !== 'files') || !Array.isArray(payload.files) || payload.files.length > 6
       : JSON.stringify(payload).length > 24000)) throw agentError('AGENT_INPUT_INVALID', 'Agent 操作参数无效或过大。');
+    if (closed) throw agentError('AGENT_CLOSED', 'Agent 正在关闭。');
+    if (action === 'saveSyncSettings') {
+      syncSettings.save(payload);
+      chatSync.reconfigure();
+      if (lastState) chatSync.observe(lastState);
+      publishSyncStatus();
+      return { settings: syncSettings.getPublic(), status: chatSync.getStatus() };
+    }
+    if (action === 'retryChatSync') {
+      if (lastState) chatSync.observe(lastState);
+      chatSync.retry();
+      return chatSync.getStatus();
+    }
     const processRef = await ensureStarted();
-    if (action === 'getState' || action === 'listConversations') return request(processRef, action);
+    if (action === 'getState') {
+      const state = await request(processRef, action);
+      lastState = state;
+      chatSync.observe(state);
+      return publicState(state);
+    }
+    if (action === 'listConversations') return request(processRef, action);
     if (action === 'cancelTask') return request(processRef, action, { taskId: payload.taskId });
     if (actionPending) throw agentError('AGENT_BUSY', '正在处理上一个操作，请稍候。');
     actionPending = true;
@@ -221,8 +266,9 @@ function createAgentProcess({ electron, root, getWindow, timeoutMs = 20000, back
   async function dispose() {
     closed = true;
     const processRef = child;
-    if (!processRef) return;
+    if (!processRef) { chatSync.dispose(); return; }
     try { await request(processRef, 'shutdown', {}, 3000); } catch { /* 记录由运行器恢复为中断或不确定。 */ }
+    chatSync.dispose();
     if (child === processRef) processRef.kill();
     rejectPending(processRef, agentError('AGENT_CLOSED', 'Agent 已关闭。'));
     child = null;
