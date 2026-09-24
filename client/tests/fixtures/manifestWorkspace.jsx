@@ -3,11 +3,14 @@ import { createRoot } from 'react-dom/client';
 import ManifestDisplayRenderer from '../../src/extensions/display-system/ManifestDisplayRenderer.jsx';
 import ManifestSidebarOverlay from '../../src/extensions/display-system/ManifestSidebarOverlay.jsx';
 import '../../src/components/aside/aside.scss';
+import '../../src/page/licensePortal/PortalLauncher.css';
+import '../../src/page/licensePortal/PortalMonitoring.css';
 
 /** 无设备副作用的布局夹具：挂载真实原生点图，以合成帧验证布局而非硬件接通。 */
 function WorkspaceFixture() {
   const rendererRef = useRef();
   const [presentation, setPresentation] = useState('workspace');
+  const portal = window.location.search.includes('portal');
   const definition = {
     displaySystemId: 'layout-fixture', type: 'layout-fixture', matrix: { rows: 32, cols: 32 },
     sensors: [{ id: 'mat', sensorId: 'mat', outputChannel: 'mat', matrix: { rows: 32, cols: 32 } }],
@@ -29,7 +32,7 @@ function WorkspaceFixture() {
     }]);
     return () => { delete window.pushWorkspaceFrame; };
   }, []);
-  return (
+  const surface = (
     <>
       <header className="title" style={{ position: 'absolute', inset: '0 0 auto', height: 60, background: '#1b1b35', color: 'white', zIndex: 50 }}>
         Shroom 布局测试（合成数据）
@@ -37,7 +40,7 @@ function WorkspaceFixture() {
           {['standard', 'immersive', 'workspace'].map((id) => <option key={id}>{id}</option>)}
         </select>
       </header>
-      <ManifestSidebarOverlay enabled={presentation !== 'immersive'}>
+      <ManifestSidebarOverlay portalEmbedded={portal} enabled={!portal && presentation !== 'immersive'}>
         <div className="aside">
           <input aria-label="图表状态保留测试" defaultValue="保留" />
           {['压力', '呼吸波形', '重心轨迹'].map((label) => (
@@ -47,9 +50,12 @@ function WorkspaceFixture() {
           ))}
         </div>
       </ManifestSidebarOverlay>
-      <ManifestDisplayRenderer ref={rendererRef} definition={definition} enabled={false} />
+      {portal ? <div className="portal-data-renderer"><ManifestDisplayRenderer ref={rendererRef} definition={definition} enabled={false} /></div>
+        : <ManifestDisplayRenderer ref={rendererRef} definition={definition} enabled={false} />}
+      {portal ? <div className="portal-quick-tools-anchor"><div className="portal-quick-tools"><button type="button">工具区</button></div></div> : null}
     </>
   );
+  return portal ? <div className="fiber-portal" style={{ height: '100vh' }}><div className="portal-runtime-monitor" style={{ height: '100%' }}><div className="home">{surface}</div></div></div> : surface;
 }
 
 createRoot(document.getElementById('root')).render(<WorkspaceFixture />);

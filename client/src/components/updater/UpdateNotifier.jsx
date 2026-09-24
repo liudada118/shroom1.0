@@ -3,18 +3,18 @@
  *
  * 功能:
  * 1. 监听主进程推送的更新状态
- * 2. 在右下角显示更新通知（有新版本、下载进度、下载完成）
+ * 2. 在应用工具组上方显示更新通知（有新版本、下载进度、下载完成）
  * 3. 提供手动检查更新按钮
  * 4. 下载完成后提供安装按钮
  *
  * 使用方式:
- *   在 App.jsx 或 Home 页面中引入:
+ *   放在 AppTools 工具组内，由外层统一定位:
  *   import UpdateNotifier from '../components/updater/UpdateNotifier'
  *   <UpdateNotifier />
  */
 
 import React, { useEffect, useState, useCallback } from "react";
-import { Modal, Progress, Button, notification, Tag, Spin } from "antd";
+import { Modal, Progress, Button, notification, Tag } from "antd";
 import { useTranslation } from "react-i18next";
 import { getLanguageLocale } from "../../i18n";
 import {
@@ -381,31 +381,16 @@ export default function UpdateNotifier() {
 
   return (
     <>
-      {/* 右下角悬浮更新按钮 */}
-      <div
-        style={{
-          position: "fixed",
-          bottom: 20,
-          right: 20,
-          zIndex: 9999,
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-        }}
-      >
-        {renderStatusTag()}
+      <div className="shroom-update-tools">
+        <div className="shroom-app-update-status" role="status" aria-live="polite">
+          {renderStatusTag()}
+        </div>
         <VersionHistory />
         <Button
-          type="primary"
-          shape="circle"
-          size="small"
-          icon={
-            updateState === UPDATE_STATE.CHECKING ? (
-              <Spin size="small" />
-            ) : (
-              <SyncOutlined />
-            )
-          }
+          className="shroom-app-tool shroom-app-update"
+          data-state={updateState}
+          disabled={updateState === UPDATE_STATE.CHECKING}
+          icon={<SyncOutlined spin={updateState === UPDATE_STATE.CHECKING} />}
           onClick={() => {
             if (
               updateState === UPDATE_STATE.AVAILABLE ||
@@ -417,17 +402,9 @@ export default function UpdateNotifier() {
               handleCheckUpdate();
             }
           }}
-          title={t("update.check")}
-          style={{
-            backgroundColor:
-              updateState === UPDATE_STATE.AVAILABLE
-                ? "#faad14"
-                : updateState === UPDATE_STATE.DOWNLOADED
-                ? "#52c41a"
-                : "#1890ff",
-            borderColor: "transparent",
-          }}
-        />
+          title={t([UPDATE_STATE.AVAILABLE, UPDATE_STATE.DOWNLOADING, UPDATE_STATE.DOWNLOADED].includes(updateState) ? "update.title" : "update.check")}
+          aria-label={t("update.title")}
+        >{t("update.action")}</Button>
       </div>
 
       {/* 更新详情弹窗 */}

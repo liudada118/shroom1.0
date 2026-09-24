@@ -4,7 +4,7 @@ import { Button, Popconfirm, Tooltip } from 'antd'
 import { DeleteOutlined, EditOutlined } from '@ant-design/icons'
 import { CanvasDemo } from '../chart/Chart'
 import FormulaChartPanel from './FormulaChartPanel'
-import NativeSystemOutputs from './NativeSystemOutputs'
+import NativeSystemOutputs, { ManifestSystemOutputs } from './NativeSystemOutputs'
 import { getNativeSystemTemplate, selectedNativeSystemId, subscribeNativeSystemTemplates } from '../../displays/nativeSystemTemplates'
 import AgentRendererHost from '../../extensions/display-system/AgentRendererHost.jsx'
 import { listAgentRendererApps } from '../../extensions/display-system/api.js'
@@ -1173,6 +1173,8 @@ class Aside extends React.Component {
         if (!metric) return null
         return {
             ...metric,
+            label: metricId === 'area' && areaUnit === '格' ? '覆盖格数' : metric.label,
+            eng: metricId === 'area' && areaUnit === '格' ? 'Covered Cells' : metric.eng,
             unit: metricId === 'area' ? areaUnit : metric.unit,
             value: this.state[metric.key],
         }
@@ -1207,16 +1209,30 @@ class Aside extends React.Component {
     renderConfigurableSidebar(sidebar) {
         const pressure = sidebar.pressure || {}
         const area = sidebar.area || {}
-        const primary = this.getConfiguredMetric(pressure.primaryMetric, sidebar, area.unit)
-            || this.getConfiguredMetric('totalPressure', sidebar, area.unit)
+        const areaUnit = area.unit ?? (area.pointArea == null ? '格' : '')
+        const primary = this.getConfiguredMetric(pressure.primaryMetric || 'totalPressure', sidebar, areaUnit)
+            || this.getConfiguredMetric('totalPressure', sidebar, areaUnit)
         const primaryValue = this.formatConfiguredMetricValue(primary.value, primary.decimals)
         const primaryUnit = primary.unit
         return (
             <div className='aside'>
+                {area.visible !== false ? (
+                    <div className="asideContent firstAside">
+                        {this.renderBuiltinChartHeading(
+                            area.title || this.props.i18n.t('sensorPanel.pressureArea'),
+                            'area'
+                        )}
+                        {this.renderBuiltinChartCanvas('area', {
+                            height: `${150 * this.state.fontSize}px`,
+                            width: '100%',
+                        })}
+                        {(area.metrics || ['activePoints', 'area']).map((metricId) => this.renderConfiguredMetric(metricId, sidebar, areaUnit))}
+                    </div>
+                ) : null}
                 {pressure.visible !== false ? (
                     <div className="asideContent firstAside">
                         {this.renderBuiltinChartHeading(
-                            pressure.title || 'Pressure Data',
+                            pressure.title || this.props.i18n.t('sensorPanel.pressureData'),
                             'pressure'
                         )}
                         <span className='pressData'>{primaryValue}</span>
@@ -1226,10 +1242,11 @@ class Aside extends React.Component {
                             height: `${150 * this.state.fontSize}px`,
                             width: '100%',
                         })}
-                        {(pressure.metrics || []).map((metricId) => this.renderConfiguredMetric(metricId, sidebar, area.unit))}
+                        {(pressure.metrics || ['averagePressure', 'maxPressure', 'totalPressure']).map((metricId) => this.renderConfiguredMetric(metricId, sidebar, areaUnit))}
                     </div>
                 ) : null}
                 {this.renderCustomChartCards()}
+                <ManifestSystemOutputs systemId={this.props.displaySystemId || this.props.matrixName} />
                 <FormulaChartPanel
                     algorithmMetricDefinitions={sidebar.algorithmMetrics || []}
                     builtinDefinitions={BUILTIN_FORMULA_CHARTS}
@@ -1239,19 +1256,6 @@ class Aside extends React.Component {
                     onCustomSeries={this.handleCustomFormulaSeries}
                     ref={this.formulaCharts}
                 />
-                {area.visible !== false ? (
-                    <div className="asideContent firstAside">
-                        {this.renderBuiltinChartHeading(
-                            area.title || 'Pressure Area',
-                            'area'
-                        )}
-                        {this.renderBuiltinChartCanvas('area', {
-                            height: `${150 * this.state.fontSize}px`,
-                            width: '100%',
-                        })}
-                        {(area.metrics || []).map((metricId) => this.renderConfiguredMetric(metricId, sidebar, area.unit))}
-                    </div>
-                ) : null}
             </div>
         )
     }

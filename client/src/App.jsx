@@ -3,8 +3,7 @@ import { lazy, Suspense } from 'react'
 import { HashRouter, Routes, Route } from 'react-router-dom'
 import { App as AntdApp, message } from 'antd'
 import i18next from './i18n'
-import UpdateNotifier from './components/updater/UpdateNotifier'
-import AgentWorkspace from './features/agent/AgentWorkspace'
+import AppTools from './components/appTools/AppTools'
 import { loadMonitoringPage } from './page/home/loadMonitoringPage'
 
 const Home = lazy(loadMonitoringPage)
@@ -44,8 +43,7 @@ message.config({
 function App() {
   return (
     <AntdApp>
-      <UpdateNotifier />
-      <AgentWorkspace />
+      <AppTools />
       <HashRouter>
         <Suspense fallback={null}>
           <Routes>

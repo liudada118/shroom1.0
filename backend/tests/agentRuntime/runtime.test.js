@@ -33,6 +33,21 @@ test('history restores attachments and task records across switching and restart
   await restarted.dispose();
 });
 
+test('one conversation can continue past 40 tasks and restore the full history after restart', async (t) => {
+  const { root, runtime } = fixture(t);
+  const conversationId = runtime.getState().conversation.id;
+  for (let index = 0; index < 41; index += 1) {
+    runtime.startTask({ text: `继续任务 ${index + 1}` });
+    await runtime.whenIdle();
+  }
+  assert.equal(runtime.getState().conversation.tasks.length, 41);
+  assert.equal(runtime.getState().conversation.id, conversationId);
+  const restored = createAgentRuntime({ root, tools: { definitions: [], execute: async () => ({}) } });
+  assert.equal(restored.getState().conversation.tasks.length, 41);
+  assert.equal(restored.getState().conversation.messages.length, 82);
+  await restored.dispose();
+});
+
 test('corrupt, missing, and traversal history cannot replace the current conversation', (t) => {
   const { root, runtime } = fixture(t);
   const id = runtime.getState().conversation.id;

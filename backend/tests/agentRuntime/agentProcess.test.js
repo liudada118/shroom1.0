@@ -41,6 +41,17 @@ test('credentials remain encrypted, redact public settings and clear on endpoint
   assert.equal(settings.getPublic().hasApiKey, false);
 });
 
+test('switching from a relay to DeepSeek replaces the key and keeps it when changing DeepSeek model', (t) => {
+  const root = temporaryRoot(t);
+  const settings = createAgentSettings({ root, safeStorage });
+  settings.save({ baseUrl: 'https://relay.example/v1', model: 'gpt-6-astra', apiKey: 'relay-key' });
+  settings.save({ baseUrl: 'https://api.deepseek.com', model: 'deepseek-flash', apiKey: 'deepseek-key' });
+  assert.equal(settings.getPrivate().apiKey, 'deepseek-key');
+  assert.equal(settings.getPublic().apiKey, undefined);
+  settings.save({ baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-pro' });
+  assert.equal(createAgentSettings({ root, safeStorage }).getPrivate().apiKey, 'deepseek-key');
+});
+
 test('unavailable system encryption fails closed without a plaintext fallback', (t) => {
   const root = temporaryRoot(t);
   const settings = createAgentSettings({ root, safeStorage: { ...safeStorage, isEncryptionAvailable: () => false } });

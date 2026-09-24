@@ -92,6 +92,16 @@ assert.deepStrictEqual(validateLineOrderDefinition({ order: [1, 7] }, {
   source: 'line-order.json',
   matrixTotal: 6,
 }), ['line-order.json: order[1] exceeds matrix total 6']);
+assert.deepStrictEqual(validateLineOrderDefinition({ order: [1, 1024] }, {
+  source: 'line-order.json',
+  matrixTotal: 529,
+  sourcePointCount: 1024,
+}), []);
+assert.deepStrictEqual(validateLineOrderDefinition({ order: [1025] }, {
+  source: 'line-order.json',
+  matrixTotal: 529,
+  sourcePointCount: 1024,
+}), ['line-order.json: order[0] exceeds decoded point count 1024']);
 
 assert.deepStrictEqual(validateCoordinateMapDefinition([
   [[10, 20], [20, 20]],

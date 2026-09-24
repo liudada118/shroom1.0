@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
+const { WebSocketServer } = require('ws');
 const Database = require('better-sqlite3');
 const { compile, predict } = require('../../agent-runtime/algorithm-lab/restrictedPython');
 const { createAlgorithmRecordService } = require('../../kernel/storage/history/algorithmRecordService');
@@ -28,15 +29,26 @@ async function fixture(t) {
   const records = createAlgorithmRecordService({ getContext: () => ({ systemId, allowed }), getDatabases: () => ({ sit: db }) });
   const app = createHttpApp({ algorithmRecordService: records, agentDeviceConnectionService: { snapshot: () => ({ licensed: allowed, currentSystem: { id: systemId, name: '测试系统' } }) },
     controlCommandService: { executeHttp: async () => ({}) }, serialManager: { getStatus: () => [] }, getRealtimeChannels: () => [], listPorts: async () => [], getPort: (value) => value, logger: { error() {}, warn() {} } });
-  const server = http.createServer(app);
+  const server = http.createServer((req, res) => {
+    if (req.url === '/api/display-systems/hand-copy/editor') {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ editor: { kind: 'builtin-template', writable: true,
+        inputs: { channels: ['sit'], matrix: { rows: 2, cols: 2, total: 4 } } } }));
+      return;
+    }
+    app(req, res);
+  });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const wsServer = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+  await new Promise((resolve) => wsServer.on('listening', resolve));
   const address = `http://127.0.0.1:${server.address().port}`;
-  const tools = createAgentTools({ root, httpBaseUrl: address });
+  const tools = createAgentTools({ root, httpBaseUrl: address, wsUrl: `ws://127.0.0.1:${wsServer.address().port}` });
   const catalog = await tools.listAlgorithmRecords();
   const chosen = catalog.records.sort((a, b) => a.date.localeCompare(b.date)).map((record) => ({ id: record.id, label: record.date.includes('tap') ? '拍打' : '抚摸', split: record.date.includes('test') ? 'validation' : 'development', startFrame: 0, frameLimit: 64 }));
   const selection = await tools.selectAlgorithmRecords({ systemId, records: chosen, windowFrames: 16 });
-  t.after(async () => { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); db.close(); fs.rmSync(root, { recursive: true, force: true }); });
-  return { root, db, tools, records, selection, address, switchSystem: (id) => { systemId = id; }, deny: () => { allowed = false; } };
+  t.after(async () => { for (const client of wsServer.clients) client.terminate(); await new Promise((resolve) => wsServer.close(resolve));
+    server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); db.close(); fs.rmSync(root, { recursive: true, force: true }); });
+  return { root, db, tools, records, selection, address, wsServer, switchSystem: (id) => { systemId = id; }, deny: () => { allowed = false; } };
 }
 
 test('restricted Python calculates branches but cannot access host capabilities', () => {
@@ -81,6 +93,38 @@ test('real SQLite selection, analysis, model tools, report proposal and installa
   await assert.rejects(tools.execute('test_algorithm', { name: '重试', source, validation: true }, context), { code: 'ALGORITHM_VALIDATION_USED' });
 });
 
+test('Agent adapts selected tagged recordings to measured live cadence before generating a realtime package', async (t) => {
+  const { tools, selection, wsServer } = await fixture(t);
+  wsServer.on('connection', (client) => client.on('message', () => {
+    const start = Date.now() - 59 * 40;
+    for (let index = 0; index < 60; index += 1) client.send(JSON.stringify({ type: 'sensor.frame', schemaVersion: 1,
+      channelId: 'hand-copy:sit', displaySystemId: 'hand-copy', sensorId: 'sit', outputChannel: 'sit', source: 'realtime', quality: 'good',
+      timestamp: start + index * 40, sequence: index, payload: { value: [1, 2, 3, 4], matrix: { rows: 2, cols: 2 } } }));
+  }));
+  const context = { algorithmSelection: selection, taskId: 'adapt-live' };
+  const adapted = await tools.execute('adapt_algorithm_data', { sensorId: 'sit' }, context);
+  assert.equal(adapted.adaptation.measuredIntervalMs, 40);
+  assert.equal(adapted.adaptation.targetIntervalMs, 40);
+  assert.equal(adapted.records[0].selectedFrameCount, 32);
+  assert.deepEqual(adapted.labels, ['抚摸', '拍打']);
+  const report = await tools.execute('test_algorithm', { name: '适配分类', source, validation: false }, context);
+  assert.equal(report.inputContract.sampleIntervalMs, 40);
+  assert.equal(report.preprocessing.mode, 'nearest-real-frame');
+  assert.equal(report.windows, 4);
+  let proposal;
+  await tools.execute('prepare_algorithm_package', { draftId: report.draftId }, { ...context,
+    createProposal: (value) => { proposal = { ...value, id: 'adapt-proposal', status: 'pending' }; return proposal; } });
+  const installed = await tools.apply(proposal);
+  assert.equal(installed.offlineOnly, false);
+  assert.equal((await tools.execute('get_algorithm_workspace', {}, context)).installed[0].report.inputContract.sampleIntervalMs, 40);
+});
+
+test('adapted windowing refuses to invent missing short events from sparse real frames', () => {
+  const records = [{ id: 'stroke', label: '抚摸', split: 'development', frames: Array.from({ length: 64 }, (_, index) => ({
+    values: [index], timestamp: 1000 + index * 20, stage: 'data' })) }];
+  assert.throws(() => prepareWindows(records, 16, 100), /不足一个完整窗口.*不能插值/);
+});
+
 test('offline analysis skips same-millisecond samples without renumbering source offsets or changing data', async () => {
   const base = Array.from({ length: 34 }, (_, index) => ({ values: [index, 2], timestamp: 1000 + index * 20, stage: 'stored-array' }));
   const frames = [...base.slice(0, 13), { ...base[12], values: [9000, 9000] }, ...base.slice(13)].map((frame, index) => ({ ...frame, id: 282 + index }));
@@ -97,6 +141,15 @@ test('offline analysis skips same-millisecond samples without renumbering source
   assert.deepEqual(report.records, [summary]);
   assert.equal(report.inputContract.sampleIntervalMs, 20);
   assert.deepEqual(record, before);
+});
+
+test('independent validation at a different cadence does not overwrite the development input contract', () => {
+  const records = [['development', 20], ['validation', 100]].map(([split, interval]) => ({ id: split, label: '抚摸', split,
+    frames: Array.from({ length: 16 }, (_, index) => ({ values: [index], timestamp: 1000 + index * interval, stage: 'data' })) }));
+  const prepared = prepareWindows(records, 16);
+  const report = evaluate(prepared, 'def predict(f):\n    return 0', ['抚摸'], 'validation');
+  assert.equal(report.inputContract.sampleIntervalMs, 20);
+  assert.equal(prepared.windows.find((row) => row.split === 'validation').features.duration, 1.5);
 });
 
 test('real SQLite duplicate sampling counts survive analysis, test reports and installed packages', async (t) => {

@@ -12,6 +12,15 @@ function proposalMarkup(kind, status, overrides = {}) {
 }
 
 describe('Agent 工作区界面边界', () => {
+  it('创建矩阵提案显示原始点数和线序跨行样点，避免把保存误当物理验证', () => {
+    const html = proposalMarkup('create_system', 'pending', { mappingPreview: [{ sensorId: 'sit', rawPoints: 1024,
+      matrix: { rows: 23, cols: 23 }, mappedPoints: 529, first: [353, 354, 355], firstRowEnd: 375,
+      secondRowStart: 385, last: [21, 22, 23] }] });
+    expect(html).toContain('原始 1024 点');
+    expect(html).toContain('23×23');
+    expect(html).toContain('第二行首 385');
+    expect(html).toContain('物理方向待设备验证');
+  });
   it('官方同步接口将独立凭证标为可选，并说明有效软件密钥鉴权', () => {
     const html = renderToStaticMarkup(<AgentSyncSettings sync={{ settings: { endpoint: 'https://shroom.jq-industries.com/api/agent/conversations' } }} />);
     expect(html).toContain('（可选）');
@@ -45,6 +54,14 @@ describe('Agent 工作区界面边界', () => {
     expect(html).toContain('留空以保留当前密钥');
     expect(html).toContain('Responses API');
     expect(html).not.toContain('must-not-render');
+  });
+
+  it('已保存的 DeepSeek 官方连接显示对应模型与视觉能力提示', () => {
+    const html = renderToStaticMarkup(<AgentSettings settings={{ baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-pro', hasApiKey: true }} />);
+    expect(html).toContain('value="deepseek" selected=""');
+    expect(html).toContain('value="deepseek-v4-pro" selected=""');
+    expect(html).toContain('https://api.deepseek.com');
+    expect(html).toContain('V4 Pro 官方暂不支持图片输入');
   });
 
   it('模型生成的配置和说明按文本转义，不执行 HTML', () => {

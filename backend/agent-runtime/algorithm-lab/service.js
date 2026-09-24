@@ -33,7 +33,7 @@ function compute(payload, signal) {
 
 /** 管理选定数据的快照、数值源码测试与版本化算法库。 */
 function createAlgorithmLab({ root, request }) {
-  const snapshots = new Map(), attempts = new Map();
+  const snapshots = new Map(), attempts = new Map(), adaptations = new Map();
   const ledgerFile = path.join(root, 'algorithm-lab', 'validation-ledger.json');
   const ledger = readJson(ledgerFile, {});
   /** 仅允许宿主生成的文件标识进入工作目录。 */
@@ -74,6 +74,34 @@ function createAlgorithmLab({ root, request }) {
     const loaded = { key, records, dataDigest: digest(records), labels: [...new Set(chosen.records.filter((item) => item.split === 'development').map((item) => item.label))], windowFrames: chosen.windowFrames };
     snapshots.clear(); snapshots.set(key, loaded); return loaded;
   }
+  /** 仅在同一任务和数据选择内沿用宿主实测的目标采样间隔。 */
+  function activeAdaptation(context, loaded) {
+    const adaptation = adaptations.get(context.taskId || 'manual');
+    if (adaptation && (adaptation.selectionKey !== loaded.key || Date.now() - adaptation.measuredAt >= 10 * 60 * 1000)) {
+      throw agentError('ALGORITHM_ADAPTATION_STALE', '适配测量已过期或选择的数据发生变化，请重新测量当前设备后再测试算法。');
+    }
+    return adaptation || null;
+  }
+  /** 开始新的设备测量时清除旧目标，失败后不能沿用上次帧率。 */
+  function clearAdaptation(context) { adaptations.delete(context.taskId || 'manual'); }
+  /** 按当前设备节奏重建已选标签数据的特征窗口，原始压力帧保持不变。 */
+  async function adapt(context, { sensorId, measuredIntervalMs }) {
+    const loaded = await load(context);
+    if (loaded.records.some((record) => record.channel !== sensorId)) throw agentError('ALGORITHM_CHANNEL_MISMATCH', '所选采集记录必须全部来自当前要绑定的同一传感器通道。');
+    const sourceIntervals = loaded.records.map((record) => {
+      const deltas = record.frames.slice(1).map((frame, index) => frame.timestamp - record.frames[index].timestamp).filter((delta) => delta > 0 && delta <= 5000).sort((a, b) => a - b);
+      if (!deltas.length) throw agentError('ALGORITHM_DATA_CADENCE', `记录“${record.date || record.id}”缺少可计算的采样间隔。`);
+      return { id: record.id, medianIntervalMs: deltas[Math.floor(deltas.length / 2)] };
+    });
+    const targetIntervalMs = Math.max(measuredIntervalMs, ...sourceIntervals.map((item) => item.medianIntervalMs));
+    if (!Number.isFinite(targetIntervalMs) || targetIntervalMs <= 0 || targetIntervalMs > 5000) throw agentError('ALGORITHM_DATA_CADENCE', '实测采样间隔超出算法工作台的适配范围。');
+    const result = await compute({ ...loaded, targetIntervalMs }, context.signal);
+    adaptations.set(context.taskId || 'manual', { selectionKey: loaded.key, measuredAt: Date.now(), targetIntervalMs, sensorId });
+    while (adaptations.size > 100) adaptations.delete(adaptations.keys().next().value);
+    return { ...result, labels: loaded.labels, dataDigest: loaded.dataDigest,
+      adaptation: { sensorId, measuredIntervalMs, targetIntervalMs, sourceIntervals, method: 'nearest-real-frame',
+        explanation: '按当前设备与已选记录中较慢的节奏选择真实压力帧；不插值、不补造峰值。后续 analyze_algorithm_data 和 test_algorithm 沿用此目标节奏。' } };
+  }
   /** 返回语言契约、选择范围及已安装算法，不读取用户未选择的帧。 */
   function workspace(context) {
     const directory = path.join(root, 'algorithm-lab', 'installed');
@@ -84,7 +112,7 @@ function createAlgorithmLab({ root, request }) {
         if (!systemId || item?.systemId !== systemId) return [];
         const realtime = realtimePackage(item);
         return [{ id: item.id, name: item.name, source: item.source, labels: item.labels, report: item.report,
-          realtimePackageId: realtime?.id || null, realtimeStatus: realtime ? '可从实时算法目录绑定启用' : '旧版本缺少实时输入契约；用原源码在已选数据上重新测试并保存新版本即可登记' }];
+          realtimePackageId: realtime?.id || null, realtimeStatus: realtime ? '已进入实时算法目录；启用前需核验当前设备的采样节奏' : '旧版本缺少实时输入契约；用原源码在已选数据上重新测试并保存新版本即可登记' }];
       } catch { return []; }
     }) : [];
     return { language: 'restricted-python-v1', features: FEATURES, example: EXAMPLE, instructions: 'def predict(f):，四空格缩进；局部数值赋值、if/elif/else、return、算术与比较、and/or/not、abs/min/max/sqrt。特征键使用双引号。返回按开发集 labels 顺序的 0 基类别下标，不确定返回 -1。不支持 import、循环、文件、网络或安装库。', selection: context.algorithmSelection || null, installed,
@@ -93,11 +121,15 @@ function createAlgorithmLab({ root, request }) {
       featureUnits: 'duration 秒；压力特征使用存储值原单位，rise/fall 为每秒变化；activeMean 为值>0的点数均值；meanChange 为相邻帧总值绝对差均值。' };
   }
   /** 分析只返回开发集统计；验证数据仅在冻结代码后运行一次。 */
-  async function analyze(context) { const loaded = await load(context); return { ...await compute(loaded, context.signal), labels: loaded.labels, dataDigest: loaded.dataDigest }; }
+  async function analyze(context) {
+    const loaded = await load(context), adaptation = activeAdaptation(context, loaded);
+    return { ...await compute({ ...loaded, ...(adaptation ? { targetIntervalMs: adaptation.targetIntervalMs } : {}) }, context.signal),
+      labels: loaded.labels, dataDigest: loaded.dataDigest, ...(adaptation ? { adaptation: { sensorId: adaptation.sensorId, targetIntervalMs: adaptation.targetIntervalMs } } : {}) };
+  }
   /** 运行开发测试或独立验证并将真实报告与源码一起固定到磁盘。 */
   async function test({ source, name, validation = false }, context) {
     compile(source);
-    const loaded = await load(context), taskKey = context.taskId || 'manual';
+    const loaded = await load(context), adaptation = activeAdaptation(context, loaded), taskKey = context.taskId || 'manual';
     const count = (attempts.get(taskKey) || 0) + 1;
     if (count > 6) throw agentError('ALGORITHM_ATTEMPT_LIMIT', '本任务已运行 6 次算法测试，请检查报告后再开新任务。');
     attempts.set(taskKey, count); while (attempts.size > 100) attempts.delete(attempts.keys().next().value);
@@ -109,7 +141,7 @@ function createAlgorithmLab({ root, request }) {
       for (const key of validationKeys) ledger[key] = new Date().toISOString();
       writeJsonAtomic(ledgerFile, ledger);
     }
-    const evaluated = await compute({ ...loaded, source, split: validation ? 'validation' : 'development' }, context.signal);
+    const evaluated = await compute({ ...loaded, ...(adaptation ? { targetIntervalMs: adaptation.targetIntervalMs } : {}), source, split: validation ? 'validation' : 'development' }, context.signal);
     const report = { ...evaluated,
       dataDigest: loaded.dataDigest, sourceDigest: digest(source), windowFrames: loaded.windowFrames,
       records: loaded.records.filter((item) => item.split === (validation ? 'validation' : 'development')).map(({ id, date, channel, label, startFrame, frameLimit }) => ({
@@ -129,7 +161,7 @@ function createAlgorithmLab({ root, request }) {
     const realtime = realtimePackage(draft);
     return { kind: 'algorithm_package', systemId: draft.systemId, summary: `保存算法“${draft.name}”${realtime ? '并登记到实时算法目录' : '到离线算法库'}`, input: { draftId }, draftDigest: digest(draft),
       after: { name: draft.name, language: draft.language, labels: draft.labels, source: draft.source, report, realtimePackageId: realtime?.id || null,
-        activation: realtime ? '保存后可在当前系统绑定为实时分类算法；绑定启用前不运行。' : '此版本缺少实时输入契约，保存后可继续离线测试。' } };
+        activation: realtime ? '保存后可在当前系统配置算法；首次启用时需有兼容的实时设备输入，Agent 会在准备和应用配置时核验。' : '此版本缺少实时输入契约，保存后可继续离线测试。' } };
   }
   /** 原子保存经测试版本，重复应用相同草稿幂等且不覆盖其他算法。 */
   function apply(proposal) {
@@ -141,7 +173,7 @@ function createAlgorithmLab({ root, request }) {
     const realtime = realtimePackage(saved);
     return { id: draft.id, systemId: draft.systemId, verified: true, offlineOnly: !realtime, realtimePackageId: realtime?.id || null, realtimeEnabled: false, independentValidation: draft.report.split === 'validation' };
   }
-  return { workspace, analyze, test, proposal, apply };
+  return { workspace, analyze, adapt, clearAdaptation, test, proposal, apply };
 }
 
 module.exports = { createAlgorithmLab, compute, digest };

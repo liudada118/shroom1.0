@@ -162,7 +162,7 @@ function createAlgorithmMarketService({ channelBus, packages = [], listUserPacka
     if (catalog.get(packageId)?.revision !== item.revision) fail('算法版本已变化，请刷新后重试。');
     const runner = native ? { dispose: async () => {} } : item.runtime === RUNTIME ? createRealtimeClassifier(item.resolvedPackage)
       : createRunner({ entry: item.resolvedPackage.resolvedEntry, algorithmPackage: item.resolvedPackage, timeoutMs: 3000 });
-    instances.set(packageId, { id: packageId, channelId, runner, native, configurationKey, token: ++generation, status: 'waiting', error: '', history: [], dropped: 0, lastReceived: now(), lastTimestamp: null });
+    instances.set(packageId, { id: packageId, channelId, runner, native, configurationKey, token: ++generation, windowEpoch: 0, status: 'waiting', error: '', history: [], dropped: 0, lastReceived: now(), lastTimestamp: null });
     return snapshot();
   }
 
@@ -201,27 +201,30 @@ function createAlgorithmMarketService({ channelBus, packages = [], listUserPacka
       if (item.runtime === RUNTIME) instance.dropped++;
       return;
     }
-    if (instance.lastTimestamp !== null && timestamp < instance.lastTimestamp) {
-      if (item.runtime === RUNTIME) { instance.faulted = true; instance.status = 'error'; instance.error = '数据时间戳倒序，请重新启用分类算法。'; void instance.runner.dispose(); }
-      return;
+    const backwards = instance.lastTimestamp !== null && timestamp < instance.lastTimestamp;
+    const interrupted = instance.lastTimestamp !== null && now() - instance.lastReceived > 2000;
+    if (item.runtime !== RUNTIME && backwards) return;
+    if (item.runtime !== RUNTIME && interrupted) {
+      instance.faulted = true; instance.status = 'error'; instance.error = '数据中断，需停用后重新启用以重置算法窗口'; return;
     }
-    if (instance.lastTimestamp !== null && now() - instance.lastReceived > 2000) {
-      instance.faulted = true; instance.status = 'error'; instance.error = '数据中断，需停用后重新启用以重置算法窗口';
-      if (item.runtime === RUNTIME) void instance.runner.dispose(); return;
-    }
+    const resetReason = backwards ? '数据时间戳倒序，正在重新积累分类窗口。'
+      : interrupted ? '数据短时中断，正在重新积累分类窗口。' : '';
+    if (resetReason) { instance.windowEpoch++; instance.history = []; instance.status = 'waiting'; instance.error = resetReason; }
     instance.lastTimestamp = timestamp; instance.lastReceived = now();
-    const token = instance.token;
+    const token = instance.token, windowEpoch = instance.windowEpoch;
     /** 迟到结果既核对系统也核对实例代次，错误窗口不能自行变回运行中。 */
-    const owned = () => !closed && !instance.faulted && instances.get(instance.id)?.token === token && contextKey === frame.sensorType;
+    const owned = () => !closed && !instance.faulted && instances.get(instance.id)?.token === token && instance.windowEpoch === windowEpoch
+      && contextKey === (frame.displaySystemId || frame.sensorType);
     const normalized = [...values];
     Promise.resolve().then(() => {
       if (!owned()) return null;
       if (instance.native) return { metrics: frame.payload.algorithmMetrics || frame.payload.metrics?.algorithm || {} };
-      return instance.runner(normalized, { normalizedData: normalized, rawData: [...(frame.payload.stages?.decoded || values)], matrix: { ...matrix }, timestamp, identity: { channelId: frame.channelId, sensorId: frame.sensorId, displaySystemId: frame.displaySystemId }, algorithm: item.resolvedPackage });
+      return instance.runner(normalized, { normalizedData: normalized, rawData: [...(frame.payload.stages?.decoded || values)], matrix: { ...matrix }, timestamp, resetReason, identity: { channelId: frame.channelId, sensorId: frame.sensorId, displaySystemId: frame.displaySystemId }, algorithm: item.resolvedPackage });
     }).then((result) => {
       if (!owned() || !result) return;
       if (result.pending) {
-        if (!instance.history.length) { instance.status = 'waiting'; instance.error = `正在积累分类窗口：${result.buffered} / ${item.resolvedPackage.classifier.windowFrames} 帧`; }
+        if (result.reason) { instance.history = []; instance.status = 'waiting'; instance.error = result.reason; }
+        else if (!instance.history.length && !instance.error.includes('已暂停识别')) { instance.status = 'waiting'; instance.error = `正在积累分类窗口：${result.buffered} / ${item.resolvedPackage.classifier.windowFrames} 帧`; }
         return;
       }
       const metrics = Object.fromEntries(item.metricDefinitions.filter(({ id }) => Number.isFinite(result.metrics?.[id])).map(({ id }) => [id, result.metrics[id]]));
@@ -237,6 +240,7 @@ function createAlgorithmMarketService({ channelBus, packages = [], listUserPacka
     }).catch((error) => {
       if (!owned()) return;
       if (item.runtime === RUNTIME) {
+        if (error.code === 'ALGORITHM_REALTIME_RECOVERING') return;
         instance.faulted = true; instance.status = 'error'; instance.error = error.code === 'ALGORITHM_REALTIME_FAILED' ? error.message : '分类运行失败，请停用后重新启用。';
         instance.history = []; void instance.runner.dispose(); return;
       }
@@ -251,7 +255,8 @@ function createAlgorithmMarketService({ channelBus, packages = [], listUserPacka
     try {
       const current = context();
       const frame = event.payload;
-      if (closed || !contextKey || frame?.type !== 'sensor.frame' || frame.sensorType !== current.sensorType || frame.source !== 'realtime' || !frame.payload) return;
+      // ⚠️ Manifest 的 sensor.type 可以不同于展示系统 ID；按 canonical displaySystemId 判断归属，否则已绑定算法永远收不到帧。
+      if (closed || !contextKey || frame?.type !== 'sensor.frame' || (frame.displaySystemId || frame.sensorType) !== current.sensorType || frame.source !== 'realtime' || !frame.payload) return;
       const input = { frame, receivedAt: now(), ...resolveMarketInput(frame, current.nativeSensorType || frame.sensorType) };
       channels.set(frame.channelId, input);
       if (channels.size > 32) channels.delete(channels.keys().next().value);

@@ -1566,11 +1566,14 @@ algorithmMarketService = createAlgorithmMarketService({
   listUserPackages: appRuntime.getUserAlgorithmPackages,
   getContext: () => {
     const sensorType = runtimeContext.getSensorType();
+    const displaySystemId = zeroChannelIdentityResolver.getActiveDisplaySystemId()
+      || appRuntime.builtinTemplates.currentId(sensorType);
     const nativePackages = { jqbed: 'mattress-vitals', smallBed: 'mattress-vitals', petCare: 'pet-care', petCareMini: 'pet-care-mini' };
     return {
-      sensorType: appRuntime.builtinTemplates.currentId(sensorType),
+      sensorType: displaySystemId,
       nativeSensorType: sensorType,
-      systemConfiguration: appRuntime.builtinTemplates.getRuntimeConfiguration(appRuntime.builtinTemplates.currentId(sensorType)),
+      systemConfiguration: appRuntime.builtinTemplates.getRuntimeConfiguration(displaySystemId)
+        || appRuntime.displaySystems.getManifestAlgorithmConfiguration(displaySystemId),
       allowed: runtimeContext.getNowDate() < endDate,
       playback: runtimeContext.isLocalPlayback(),
       reservedPackageIds: [nativePackages[sensorType], ...appRuntime.displaySystems.getActiveAlgorithmPackageIds(sensorType)].filter(Boolean),
@@ -2722,6 +2725,8 @@ const httpApp = createHttpApp({
   duplicateDisplaySystem: appRuntime.displaySystems.duplicate,
   updateNativeSystem: appRuntime.builtinTemplates.update,
   deleteNativeSystem: appRuntime.builtinTemplates.remove,
+  readManifestAlgorithmBindings: appRuntime.displaySystems.readManifestAlgorithmBindings,
+  updateManifestAlgorithmBindings: appRuntime.displaySystems.updateManifestAlgorithmBindings,
   // Agent / 脚本经 HTTP 写完展示系统后，让前端顶部菜单不用重启就能看到新系统。
   publishDisplaySystemsUpdated: (detail) => publishSystemEvent({ displaySystemsUpdated: detail }),
 });

@@ -33,6 +33,15 @@ function normalizeModelSettings(input = {}) {
   return { baseUrl: url.href.replace(/\/+$/, ''), model };
 }
 
+/** 在官方不支持视觉输入的模型上提前拒绝图片，避免提交注定失败的付费请求。 */
+function assertModelInputCompatibility(settings, input) {
+  if (String(settings.baseUrl || '').replace(/\/+$/, '') !== 'https://api.deepseek.com'
+    || settings.model !== 'deepseek-v4-pro' || !Array.isArray(input)) return;
+  const hasImage = input.some((item) => [item?.content, item?.output].some((parts) =>
+    Array.isArray(parts) && parts.some((part) => part?.type === 'input_image')));
+  if (hasImage) throw agentError('AGENT_MODEL_IMAGE_UNSUPPORTED', 'DeepSeek V4 Pro 官方 API 暂不支持图片输入。请在模型设置中选择 DeepSeek Flash 后重新发送。');
+}
+
 /** 保留明确拒答，并拒绝没有文本或工具的空终态。 */
 function validateCompletedResponse(response) {
   if (response?.status !== 'completed' || !Array.isArray(response.output)) throw agentError('AGENT_MODEL_RESPONSE', '模型服务没有返回完整 Responses 结果。');
@@ -52,7 +61,7 @@ function validateCompletedResponse(response) {
 }
 
 /** 从有限大小的响应读取文本，避免错误页或流无限占用内存。 */
-async function readBoundedText(response, limit) {
+async function readBoundedText(response, limit, onActivity = () => {}) {
   const reader = response.body?.getReader();
   if (!reader) return '';
   const decoder = new TextDecoder();
@@ -61,6 +70,7 @@ async function readBoundedText(response, limit) {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      if (value.byteLength) onActivity();
       bytes += value.byteLength;
       if (bytes > limit) throw agentError('AGENT_RESPONSE_LIMIT', '模型响应超过大小限制。');
       text += decoder.decode(value, { stream: true });
@@ -85,9 +95,9 @@ function parseModelErrorDetail(text) {
 }
 
 /** 有界读取 JSON/SSE 错误以区分额度、权限和接口问题，不回显上游正文或链接。 */
-async function modelHttpError(response, baseUrl) {
+async function modelHttpError(response, baseUrl, onActivity) {
   let detail;
-  try { detail = parseModelErrorDetail(await readBoundedText(response, 16 * 1024)); }
+  try { detail = parseModelErrorDetail(await readBoundedText(response, 16 * 1024, onActivity)); }
   catch { /* 非 JSON、超限或断流仍按原 HTTP 状态提示；取消由请求层处理。 */ }
   const status = response.status;
   if (status === 402) {
@@ -112,14 +122,35 @@ async function modelHttpError(response, baseUrl) {
     }
     return agentError('AGENT_MODEL_FORBIDDEN', '模型服务拒绝访问（HTTP 403）。请检查当前 API 密钥的分组、所选模型的调用权限及服务商访问限制。');
   }
+  if ([502, 503, 504].includes(status)) {
+    return agentError('AGENT_MODEL_UNAVAILABLE', `模型服务暂时不可用（HTTP ${status}）。软件已自动重试，仍未恢复；请稍后再试，持续出现时检查服务商状态。`);
+  }
   const message = status === 401 ? '模型密钥无效或无权访问，请检查连接设置。'
     : status === 429 ? '模型服务额度或请求频率受限，请稍后重试。'
       : `模型请求失败（HTTP ${status}），请检查服务地址、模型名称及可用性。`;
   return agentError('AGENT_MODEL_HTTP', message);
 }
 
+/** 在瞬时服务错误后等待重试，任务取消或超时会立即中断等待。 */
+function waitForModelRetry(delayMs, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) { reject(signal.reason); return; }
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, delayMs);
+    /** 清除尚未触发的等待定时器。 */
+    function onAbort() {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+      reject(signal.reason);
+    }
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 /** 消费 Responses SSE，仅完整终态允许执行其中的工具调用。 */
-async function readResponseStream(response, onText = () => {}) {
+async function readResponseStream(response, onText = () => {}, onActivity = () => {}) {
   const reader = response.body?.getReader();
   if (!reader) throw agentError('AGENT_MODEL_STREAM', '模型服务没有返回可读取的响应。');
   const decoder = new TextDecoder();
@@ -141,6 +172,7 @@ async function readResponseStream(response, onText = () => {}) {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      if (value.byteLength) onActivity();
       received += value.byteLength;
       if (received > 4 * 1024 * 1024) throw agentError('AGENT_RESPONSE_LIMIT', '模型响应超过大小限制。');
       buffer += decoder.decode(value, { stream: true });
@@ -162,25 +194,41 @@ async function readResponseStream(response, onText = () => {}) {
 }
 
 /** 调用用户配置的 Responses 服务，凭据不进入输出和错误正文。 */
-async function requestModelResponse({ settings, input, tools, instructions, signal, onText, fetchImpl = globalThis.fetch, timeoutMs = 90000 }) {
+async function requestModelResponse({ settings, input, tools, instructions, signal, onText, fetchImpl = globalThis.fetch, timeoutMs = 240000 }) {
+  assertModelInputCompatibility(settings, input);
   const controller = new AbortController();
   const abort = () => controller.abort(signal?.reason);
   if (signal?.aborted) abort();
   else signal?.addEventListener('abort', abort, { once: true });
-  const timer = setTimeout(() => controller.abort(agentError('AGENT_MODEL_TIMEOUT', '模型响应超时。')), timeoutMs);
+  let timer;
+  /** 只在连接或响应持续静默时中止；流式活动会重新计时。 */
+  function refreshTimeout() {
+    if (controller.signal.aborted) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => controller.abort(agentError('AGENT_MODEL_TIMEOUT', '模型服务连续 4 分钟未返回数据，请检查网络、服务地址或所选模型。')), timeoutMs);
+  }
+  refreshTimeout();
   try {
-    const response = await fetchImpl(`${settings.baseUrl}/responses`, {
-      method: 'POST', redirect: 'error', signal: controller.signal,
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${settings.apiKey}` },
-      body: JSON.stringify({ model: settings.model, instructions, input, tools, stream: true, store: false,
-        include: ['reasoning.encrypted_content'], parallel_tool_calls: false, max_output_tokens: 16000 }),
-    });
-    if (!response.ok) {
-      throw await modelHttpError(response, settings.baseUrl);
+    const requestBody = JSON.stringify({ model: settings.model, instructions, input, tools, stream: true, store: false,
+      include: ['reasoning.encrypted_content'], parallel_tool_calls: false, max_output_tokens: 16000 });
+    let response;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      response = await fetchImpl(`${settings.baseUrl}/responses`, {
+        method: 'POST', redirect: 'error', signal: controller.signal,
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${settings.apiKey}` },
+        body: requestBody,
+      });
+      refreshTimeout();
+      if (![502, 503, 504].includes(response.status) || attempt === 2) break;
+      await response.body?.cancel().catch(() => {});
+      await waitForModelRetry(attempt === 0 ? 500 : 1500, controller.signal);
     }
-    if (response.headers.get('content-type')?.includes('text/event-stream')) return await readResponseStream(response, onText);
+    if (!response.ok) {
+      throw await modelHttpError(response, settings.baseUrl, refreshTimeout);
+    }
+    if (response.headers.get('content-type')?.includes('text/event-stream')) return await readResponseStream(response, onText, refreshTimeout);
     let result;
-    try { result = JSON.parse(await readBoundedText(response, 4 * 1024 * 1024)); }
+    try { result = JSON.parse(await readBoundedText(response, 4 * 1024 * 1024, refreshTimeout)); }
     catch (error) { throw error.code ? error : agentError('AGENT_MODEL_RESPONSE', '模型服务返回的响应格式无效。'); }
     validateCompletedResponse(result);
     for (const item of result.output) for (const content of item.content || []) {

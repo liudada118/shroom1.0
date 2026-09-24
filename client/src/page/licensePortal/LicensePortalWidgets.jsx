@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { message } from 'antd';
-import { CloseOutlined, CommentOutlined, RightOutlined } from '@ant-design/icons';
+import { CloseOutlined, CommentOutlined } from '@ant-design/icons';
 import { LICENSE_SERVER_BASE_URL } from '../../constants';
 
 const FEEDBACK_TYPES = ['功能建议', '问题反馈', '商务合作', '其他'];
@@ -15,6 +16,10 @@ export const FeedbackWidget = ({ accessKey = '', activeSolution = '' }) => {
   const [content, setContent] = useState('');
   const [contact, setContact] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [toolSlot, setToolSlot] = useState(null);
+
+  // 首页入口并入应用工具组；反馈表单仍保留在门户层，沿用原提交上下文。
+  useEffect(() => { setToolSlot(document.getElementById('shroom-app-feedback')); }, []);
 
   const resetAndClose = () => {
     setContent('');
@@ -71,6 +76,11 @@ export const FeedbackWidget = ({ accessKey = '', activeSolution = '' }) => {
       setSubmitting(false);
     }
   };
+
+  const trigger = <button className="portal-feedback-trigger shroom-app-tool" type="button"
+    title="反馈" aria-label="反馈" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}>
+    <CommentOutlined /><strong>反馈</strong>
+  </button>;
 
   return (
     <>
@@ -141,11 +151,7 @@ export const FeedbackWidget = ({ accessKey = '', activeSolution = '' }) => {
         </>
       ) : null}
 
-      <button className="portal-feedback-trigger" type="button" onClick={() => setOpen(true)}>
-        <CommentOutlined />
-        <strong>反馈</strong>
-        <RightOutlined />
-      </button>
+      {toolSlot ? createPortal(trigger, toolSlot) : trigger}
     </>
   );
 };

@@ -16,6 +16,39 @@ test('rejects insecure model endpoints and credentials in URLs', () => {
   assert.throws(() => normalizeModelSettings({ baseUrl: 'https://user:key@example.com/v1' }), /凭据/);
   assert.throws(() => normalizeModelSettings({ baseUrl: 'file:///etc/passwd' }), /HTTPS/);
   assert.equal(normalizeModelSettings({ baseUrl: 'http://127.0.0.1:8123/v1/' }).baseUrl, 'http://127.0.0.1:8123/v1');
+  assert.equal(normalizeModelSettings({ baseUrl: 'https://api.deepseek.com/', model: 'deepseek-flash' }).baseUrl, 'https://api.deepseek.com');
+});
+
+test('DeepSeek official preset uses the direct Responses endpoint with tool calls', async () => {
+  const tools = [{ type: 'function', name: 'get_current_system', description: 'Read the current system', parameters: { type: 'object', properties: {} } }];
+  const input = [{ role: 'user', content: '当前系统是什么？' }];
+  const output = [{ type: 'function_call', name: 'get_current_system', call_id: 'deepseek-call', arguments: '{}' }];
+  let requested = false;
+  const result = await requestModelResponse({ settings: { baseUrl: 'https://api.deepseek.com', model: 'deepseek-flash', apiKey: 'deepseek-fixture-key' },
+    instructions: 'Use tools for system state', input, tools,
+    fetchImpl: async (url, options) => {
+      requested = true;
+      assert.equal(url, 'https://api.deepseek.com/responses');
+      assert.equal(options.headers.authorization, 'Bearer deepseek-fixture-key');
+      const body = JSON.parse(options.body);
+      assert.equal(body.model, 'deepseek-flash');
+      assert.equal(body.stream, true);
+      assert.deepEqual(body.input, input);
+      assert.deepEqual(body.tools, tools);
+      return new Response(`data: ${JSON.stringify({ type: 'response.completed', response: { status: 'completed', output } })}\n\n`,
+        { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    } });
+  assert.equal(requested, true);
+  assert.deepEqual(result.output, output);
+});
+
+test('DeepSeek V4 Pro rejects image input before a network request', async () => {
+  let requested = false;
+  await assert.rejects(requestModelResponse({ settings: { baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-pro', apiKey: 'fixture-key' },
+    input: [{ role: 'user', content: [{ type: 'input_text', text: '看图' }, { type: 'input_image', image_url: 'data:image/png;base64,AA==' }] }],
+    tools: [], fetchImpl: async () => { requested = true; throw new Error('must not send'); } }),
+  { code: 'AGENT_MODEL_IMAGE_UNSUPPORTED' });
+  assert.equal(requested, false);
 });
 
 test('streams fragmented UTF-8 SSE and retains complete function/reasoning output', async () => {
@@ -51,6 +84,23 @@ test('a truncated stream never returns a callable tool response', async () => {
 test('model timeout cancels a hanging connection', async () => {
   await withModel((_req, res) => { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.flushHeaders(); },
     (baseUrl) => assert.rejects(requestModelResponse({ settings: { baseUrl, model: 'test', apiKey: 'test' }, input: [], tools: [], timeoutMs: 40 }), { code: 'AGENT_MODEL_TIMEOUT' }));
+});
+
+test('an active streaming response can outlive one inactivity interval', async () => {
+  await withModel((_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/event-stream' }); res.flushHeaders();
+    let count = 0;
+    const ticker = setInterval(() => {
+      if (count++ < 4) res.write(': model is working\n\n');
+      else res.end(`data: ${JSON.stringify({ type: 'response.completed', response: { status: 'completed', output: [
+        { type: 'message', content: [{ type: 'output_text', text: '完成' }] },
+      ] } })}\n\n`);
+    }, 75);
+    res.on('close', () => clearInterval(ticker));
+  }, async (baseUrl) => {
+    const result = await requestModelResponse({ settings: { baseUrl, model: 'test', apiKey: 'test' }, input: [], tools: [], timeoutMs: 300 });
+    assert.equal(result.output[0].content[0].text, '完成');
+  });
 });
 
 test('upstream error bodies cannot echo model secrets', async () => {
@@ -120,6 +170,42 @@ test('HTTP 402 points to provider billing checks without exposing JSON, SSE or m
       (error) => error.code === 'AGENT_MODEL_PAYMENT_REQUIRED' && /HTTP 402/.test(error.message) && /账户余额/.test(error.message)
         && /剩余额度/.test(error.message) && /套餐限制/.test(error.message) && !/secret-value|untrusted\.example|余额不足/.test(error.message)));
   }
+});
+
+test('HTTP 503 retries the same model round, then reports a safe service error if unavailable', async () => {
+  const settings = { baseUrl: 'https://example.com/v1', model: 'test', apiKey: 'secret-value' };
+  const completed = { status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: '恢复完成' }] }] };
+  const requestBodies = [];
+  const result = await requestModelResponse({ settings, input: [], tools: [],
+    fetchImpl: async (_url, init) => {
+      requestBodies.push(init.body);
+      return requestBodies.length === 1
+        ? new Response('secret-value', { status: 503 })
+        : new Response(JSON.stringify(completed), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+  assert.deepEqual(result, completed);
+  assert.equal(requestBodies.length, 2);
+  assert.equal(requestBodies[0], requestBodies[1]);
+
+  let failedAttempts = 0;
+  await assert.rejects(requestModelResponse({ settings, input: [], tools: [],
+    fetchImpl: async () => { failedAttempts += 1; return new Response('secret-value', { status: 503 }); },
+  }), (error) => error.code === 'AGENT_MODEL_UNAVAILABLE' && /HTTP 503/.test(error.message)
+    && /自动重试/.test(error.message) && !error.message.includes('secret-value'));
+  assert.equal(failedAttempts, 3);
+});
+
+test('cancellation interrupts a pending 503 retry without sending another request', async () => {
+  const controller = new AbortController();
+  let attempts = 0;
+  const pending = requestModelResponse({ settings: { baseUrl: 'https://example.com/v1', model: 'test', apiKey: 'test' },
+    input: [], tools: [], signal: controller.signal,
+    fetchImpl: async () => { attempts += 1; return new Response('', { status: 503 }); },
+  });
+  setTimeout(() => controller.abort(Object.assign(new Error('cancelled'), { code: 'AGENT_CANCELLED' })), 20);
+  await assert.rejects(pending, { code: 'AGENT_CANCELLED' });
+  assert.equal(attempts, 1);
 });
 
 test('SSE HTTP errors retain organization checks and safe fallback for malformed events', async () => {

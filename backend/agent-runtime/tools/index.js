@@ -1,10 +1,11 @@
 const { definitions, schemas, validateValue } = require('./toolSchemas');
 const { createAlgorithmLab } = require('../algorithm-lab/service');
 const { validateBuiltinTemplate } = require('../../extension-host/workspace/builtinSystemTemplates');
-const { validateNativeConfiguration } = require('../../extension-host/workspace/builtinSystemConfiguration');
+const { nativeInputs, validateNativeConfiguration } = require('../../extension-host/workspace/builtinSystemConfiguration');
 const { observeFrames } = require('./frameObserver');
 const { validateDisplaySystemConfig } = require('../../extension-host/manifest/displaySystemConfigValidator');
 const { validateLineOrderDefinition, validatePointOrderDefinition, validateAlgorithmDataDefinition } = require('../../extension-host/manifest/displaySystemConfigFileValidator');
+const { validateCoordinateMapDefinition } = require('../../extension-host/manifest/displaySystemCoordinateMap');
 const { normalizeCanvasConfig, normalizeChartAppearanceConfig, normalizeChartCardsConfig, validateDisplayConfig } = require('../../extension-host/manifest/displaySystemPage');
 const { buildDisplaySystemDuplicateManifest, displaySystemEditorDigest } = require('../../extension-host/manifest/displaySystemDuplication');
 
@@ -16,6 +17,20 @@ const CHARTS = Object.freeze({ totalPressure: ['总压力', 'total'], averagePre
 function fail(code, message, details) { return Object.assign(new Error(message), { code, ...(details ? { details } : {}) }); }
 /** 复制纯 JSON，防止提案被模型对象引用改变。 */
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
+/** 原生副本固定设备输入；只拦截本轮明确要求改变矩阵或映射的误调用。 */
+function assertNativeInputCompatibility(sourceType, context = {}) {
+  if (!context.taskText) return;
+  const matrix = nativeInputs(sourceType).matrix;
+  if (!matrix) return;
+  for (const match of context.taskText.matchAll(/(\d{1,3})\s*[xX×*＊]\s*(\d{1,3})/g)) {
+    if (Number(match[1]) !== matrix.rows || Number(match[2]) !== matrix.cols) throw fail('AGENT_NATIVE_INPUT_MISMATCH',
+      `${sourceType} 完整原生副本固定为 ${matrix.rows}×${matrix.cols}。要保留图表和工具布局并使用 ${match[1]}×${match[2]} 点阵，请改用 prepare_create_system 配置新矩阵系统。`);
+  }
+  for (const match of context.taskText.matchAll(/(?:自定义|更改|修改|重排|重新排列|抽取|截取|提取|筛选|替换).{0,8}(?:线序|点位|映射|协议)/g)) {
+    if (/(?:不|不要|别|无需|禁止)\s*$/.test(context.taskText.slice(Math.max(0, match.index - 4), match.index))) continue;
+    throw fail('AGENT_NATIVE_INPUT_MISMATCH', `${sourceType} 完整原生副本不能改变协议、线序或点位；若只需图表和工具布局，请改用 prepare_create_system。`);
+  }
+}
 /** 将受支持的本机 URL 固定到回环服务。 */
 function localBase(value, protocol) {
   const url = new URL(value);
@@ -70,9 +85,46 @@ function buildPatch(input, display, catalog) {
   if (errors.length) throw fail('AGENT_INVALID_DISPLAY', 'Display validation failed', errors);
   return normalizePatch(patch);
 }
+/** 把坐标轴的单点和含端点区间展开，超出目标尺寸时立即停止。 */
+function expandMappingAxis(parts, expected, limit, label) {
+  const values = [];
+  for (const part of parts) {
+    const [start, end] = Array.isArray(part) ? part : [part, part];
+    const step = start <= end ? 1 : -1;
+    for (let value = start; step > 0 ? value <= end : value >= end; value += step) {
+      if (value >= limit || values.length >= expected) throw fail('AGENT_INVALID_MAPPING', `${label} 坐标超出原始帧或展示矩阵范围。`);
+      values.push(value);
+    }
+  }
+  if (values.length !== expected || new Set(values).size !== expected) throw fail('AGENT_INVALID_MAPPING', `${label} 坐标数量须等于矩阵尺寸且不能重复。`);
+  return values;
+}
+/** 按源函数的 y 外层、x 内层顺序生成 1 基原始索引及行优先展示点位。 */
+function compileAxisMapping(rule, matrix, rawCount) {
+  if (!Number.isInteger(rawCount) || rawCount % rule.sourceColumns !== 0) throw fail('AGENT_INVALID_MAPPING', '原始帧点数必须能被 sourceColumns 整除。');
+  const x = expandMappingAxis(rule.x, matrix.cols, rule.sourceColumns, 'x');
+  const y = expandMappingAxis(rule.y, matrix.rows, rawCount / rule.sourceColumns, 'y');
+  return {
+    lineOrder: y.flatMap((row) => x.map((col) => row * rule.sourceColumns + col + 1)),
+    pointOrder: y.flatMap((_, row) => x.map((__, col) => [row, col])),
+  };
+}
+/** 给用户和模型展示原始/目标点数及跨行样点，便于在应用前核对坐标公式。 */
+function mappingPreview(input, payload) {
+  return payload.manifest.sensors.map((sensor, index) => {
+    const order = payload.definitions.sensors[sensor.id].lineOrder.order;
+    const cols = sensor.matrix.cols;
+    return { sensorId: sensor.id, rawPoints: sensor.protocol.decoding.valueCount, matrix: sensor.matrix,
+      mappedPoints: order.length, sourceAxes: input.sensors[index].axisMapping || null,
+      first: order.slice(0, 5), firstRowEnd: order[cols - 1], secondRowStart: order.length > cols ? order[cols] : null,
+      last: order.slice(-5),
+      indexBase: 1, physicalOrientationVerified: false };
+  });
+}
 /** 从已注册协议、算法和显式映射生成 manifest 与定义文件，不采用模型提供的源码或路径。 */
 function buildCreate(input, catalog, protocols) {
-  const renderer = findItem(catalog.renderers, input.rendererId, 'Renderer');
+  if (!input.rendererId && input.sensors.length !== 1) throw fail('AGENT_INVALID_ARGUMENTS', '多传感器系统必须明确指定 rendererId。');
+  const renderer = findItem(catalog.renderers, input.rendererId || 'pointGrid', 'Renderer');
   const sensorDefinitions = {};
   const ids = new Set();
   const singletonPackages = new Set();
@@ -82,19 +134,29 @@ function buildCreate(input, catalog, protocols) {
     if (ids.has(sensor.id)) throw fail('AGENT_INVALID_ARGUMENTS', 'Sensor IDs must be unique');
     ids.add(sensor.id);
     const total = sensor.matrix.rows * sensor.matrix.cols;
-    if (sensor.lineOrder.length !== sensor.pointOrder.length) throw fail('AGENT_INVALID_MAPPING', 'Line order and point order lengths must match');
     const preset = findItem(protocols, sensor.protocolId, 'Protocol');
     const protocol = clone(preset.protocol);
-    const count = sensor.lineOrder.length;
-    if (protocol.decoding?.valueCount && protocol.decoding.valueCount !== count) throw fail('AGENT_PROTOCOL_SHAPE_MISMATCH', `Protocol ${preset.id} expects ${protocol.decoding.valueCount} values; mapping has ${count}`);
-    protocol.decoding = { ...protocol.decoding, valueCount: count };
-    const lineOrder = { order: sensor.lineOrder };
-    const pointOrder = { matrix: sensor.matrix, points: sensor.pointOrder };
-    const errors = [...validateLineOrderDefinition(lineOrder, { source: sensor.id, matrixTotal: total }), ...validatePointOrderDefinition(pointOrder, { source: sensor.id, matrix: sensor.matrix, maxPointCount: count })];
+    const rule = sensor.axisMapping;
+    if (!rule && (!sensor.lineOrder || !sensor.pointOrder)) throw fail('AGENT_INVALID_MAPPING', '请提供完整 lineOrder 与 pointOrder，或提供可计算的 axisMapping。');
+    const mapping = rule ? compileAxisMapping(rule, sensor.matrix, protocol.decoding?.valueCount) : { lineOrder: sensor.lineOrder, pointOrder: sensor.pointOrder };
+    if (rule && (sensor.lineOrder && JSON.stringify(sensor.lineOrder) !== JSON.stringify(mapping.lineOrder)
+      || sensor.pointOrder && JSON.stringify(sensor.pointOrder) !== JSON.stringify(mapping.pointOrder))) {
+      throw fail('AGENT_INVALID_MAPPING', '显式映射与 axisMapping 计算结果不一致；请以坐标规则为准。');
+    }
+    if (mapping.lineOrder.length !== mapping.pointOrder.length) throw fail('AGENT_INVALID_MAPPING', 'Line order and point order lengths must match');
+    const count = mapping.lineOrder.length;
+    // 协议读取完整原始帧；线序可以只选其中一部分，展示矩阵不决定协议点数。
+    protocol.decoding = { ...protocol.decoding, valueCount: protocol.decoding?.valueCount ?? count };
+    const lineOrder = { order: mapping.lineOrder };
+    const pointOrder = { matrix: sensor.matrix, points: mapping.pointOrder };
+    const coordinateMap = sensor.coordinateMap ? { matrix: sensor.matrix, coordinates: sensor.coordinateMap } : null;
+    const errors = [...validateLineOrderDefinition(lineOrder, { source: sensor.id, matrixTotal: total, sourcePointCount: protocol.decoding.valueCount }),
+      ...validatePointOrderDefinition(pointOrder, { source: sensor.id, matrix: sensor.matrix, maxPointCount: count }),
+      ...(coordinateMap ? validateCoordinateMapDefinition(coordinateMap, { source: sensor.id, matrix: sensor.matrix }) : [])];
     if (errors.length) throw fail('AGENT_INVALID_MAPPING', 'Mapping validation failed', errors);
     const type = sensor.algorithmType || 'none';
     const algorithm = { type: type === 'package' ? 'python' : type };
-    const scoped = { lineOrder, pointOrder };
+    const scoped = { lineOrder, pointOrder, ...(coordinateMap ? { coordinateMap } : {}) };
     if (type === 'package') {
       const pkg = findItem(catalog.algorithmPackages, sensor.packageId, 'Algorithm package');
       if (pkg.attachable === false || !pkg.packageManifest || typeof pkg.algorithmSource !== 'string') throw fail('AGENT_CAPABILITY_UNAVAILABLE', 'Algorithm package cannot be attached');
@@ -121,13 +183,20 @@ function buildCreate(input, catalog, protocols) {
     }
     sensorDefinitions[sensor.id] = scoped;
     return { id: sensor.id, label: sensor.label || sensor.id, type: sensor.type, outputChannel: sensor.outputChannel || sensor.id, matrix: sensor.matrix,
-      protocol, algorithm, files: { lineOrder: `${sensor.id}/line-order.json`, pointOrder: `${sensor.id}/point-order.json` }, stored: true };
+      protocol, algorithm, files: { lineOrder: `${sensor.id}/line-order.json`, pointOrder: `${sensor.id}/point-order.json`,
+        ...(coordinateMap ? { coordinateMap: `${sensor.id}/coordinate-map.json` } : {}) }, stored: true };
   });
   const manifest = { schemaVersion: 3, id: input.id, name: input.name, version: '1.0.0', metadata: { origin: 'user', createdBy: 'embedded-agent' }, sensors,
-    display: { views: [{ id: 'main', type: renderer.type || renderer.id, source: 'data' }], widgets: [{ id: 'main', type: renderer.type || renderer.id, source: 'data' }],
+    display: { layout: { type: 'grid', columns: 12, presentation: 'workspace' },
+      views: [{ id: 'main', type: renderer.type || renderer.id, source: 'data' }], widgets: [{ id: 'main', type: renderer.type || renderer.id, source: 'data' }],
       renderers: [{ id: renderer.id, type: renderer.type || renderer.id }], visualizationAlgorithms: [{ id: 'identity', type: 'identity' }],
       profiles: [{ id: 'default', renderer: renderer.id, visualizationAlgorithm: 'identity', widgets: ['main'] }], defaultView: 'main', defaultProfile: 'default', chartCards: chartCards(input.chartCards),
-      ...(metricDefinitions.size ? { sidebar: { algorithmMetrics: [...metricDefinitions.values()] } } : {}),
+      // 左侧统计读取映射后的原始矩阵通道，不能取 3D 插值或平滑后的画布数据。
+      sidebar: { source: sensors[0].id,
+        pressure: { primaryMetric: 'totalPressure', metrics: ['averagePressure', 'maxPressure', 'totalPressure'] },
+        // 未提供单点物理面积时，以覆盖格数显示，不伪造 mm²/cm²。
+        area: { metrics: ['activePoints', 'area'], pointArea: 1, unit: '格' },
+        algorithmMetrics: [...metricDefinitions.values()] },
     } };
   const validation = validateDisplaySystemConfig(manifest);
   if (!validation.ok) throw fail('AGENT_INVALID_MANIFEST', 'Manifest validation failed', validation.errors);
@@ -139,6 +208,46 @@ function createAgentTools({ root, httpBaseUrl = 'http://127.0.0.1:19245', wsUrl 
   const base = localBase(httpBaseUrl, 'http:');
   const websocket = localBase(wsUrl, 'ws:');
   const lab = root ? createAlgorithmLab({ root, request }) : null;
+
+  /** 在 Agent 首次启用用户分类包前，用目标系统的真实通道核验输入节奏。 */
+  async function verifyUserClassifierActivation(configuration, previous, systemId, editor, packages, context) {
+    const newBindings = configuration.algorithms.filter((entry) => entry.enabled &&
+      !previous?.algorithms?.some((old) => old.packageId === entry.packageId && old.sensorId === entry.sensorId && old.enabled));
+    const classifiers = newBindings.map((entry) => ({ entry, item: packages.find((item) => item.id === entry.packageId) }))
+      .filter(({ item }) => item?.runtime === 'restricted-python-v1');
+    if (!classifiers.length) return [];
+    const device = await request('/api/agent-device/status', context);
+    if (device.currentSystem?.id !== systemId) throw fail('ALGORITHM_REALTIME_UNVERIFIED', '请先进入目标系统并连接传感器，再让 Agent 启用实时分类；算法可以先保存或添加为停用状态。');
+    const channels = [...new Set(classifiers.map(({ entry }) => entry.sensorId))];
+    const observations = await Promise.all(channels.map(async (sensorId) => {
+      try {
+        const matrix = editor.inputs?.matrices?.[sensorId] || editor.inputs?.matrix || editor.manifest?.sensors?.find((sensor) => sensor.id === sensorId)?.matrix;
+        if (!matrix) throw fail('ALGORITHM_REALTIME_UNVERIFIED', '目标系统没有可核验的传感器矩阵，不能启用实时分类。');
+        return [sensorId, await observeFrames({ WebSocketImpl, wsUrl: websocket, systemId, sensorId, durationMs: 3000, maxFrames: 60,
+          expectedPointCount: matrix.total || matrix.rows * matrix.cols, expectedMatrix: { rows: matrix.rows, cols: matrix.cols }, signal: context.signal })];
+      } catch (cause) {
+        if (cause.code === 'AGENT_CANCELLED') throw cause;
+        throw fail('ALGORITHM_REALTIME_UNVERIFIED', `无法核验 ${sensorId} 的实时数据，请检查设备连接后重试。`, { causeCode: cause.code });
+      }
+    }));
+    const observed = new Map(observations);
+    return classifiers.map(({ entry, item }) => {
+      const frames = observed.get(entry.sensorId);
+      if (!frames.liveVerified || frames.timing.intervalCount < 8 || frames.timing.reverseTimestamps) {
+        throw fail('ALGORITHM_REALTIME_UNVERIFIED', `${entry.sensorId} 尚未提供至少 9 帧连续、有效的实时数据，不能确认算法兼容；可先保存为停用，连接设备后再启用。`,
+          { status: frames.status, intervalCount: frames.timing.intervalCount });
+      }
+      const targetInterval = 1000 / item.sampleRateHz;
+      if (!Number.isFinite(targetInterval) || targetInterval <= 0) throw fail('ALGORITHM_REALTIME_UNVERIFIED', '算法包缺少有效的测试采样间隔，请重新测试并保存算法。');
+      const { medianIntervalMs, p90IntervalMs } = frames.timing;
+      if (medianIntervalMs > targetInterval * 1.5 || p90IntervalMs > targetInterval * 2) {
+        throw fail('ALGORITHM_REALTIME_RATE_UNSUPPORTED', `${entry.sensorId} 实测约 ${Math.round(1000 / medianIntervalMs)} Hz，算法测试参考 ${Math.round(item.sampleRateHz)} Hz；当前输入超出可安全适配范围，已阻止启用。可沿用已有标签选择采集记录，调用 adapt_algorithm_data 后重新分析、生成并测试适配算法；若记录的真实帧不足，再补采或缩小窗口。`,
+          { medianIntervalMs, p90IntervalMs, referenceIntervalMs: targetInterval });
+      }
+      return { packageId: entry.packageId, sensorId: entry.sensorId, observedAt: frames.observedAt,
+        observedRateHz: Math.round(1000 / medianIntervalMs), referenceRateHz: Math.round(item.sampleRateHz), status: 'compatible' };
+    });
+  }
 
   /** 读取资料目录供用户选择，模型不能修改用户的数据授权范围。 */
   async function listAlgorithmRecords(payload = {}) { return request('/api/agent-algorithms/records', { method: 'POST', body: { offset: payload.offset || 0 } }); }
@@ -259,7 +368,9 @@ function createAgentTools({ root, httpBaseUrl = 'http://127.0.0.1:19245', wsUrl 
   async function propose(proposal, context) {
     if (typeof context.createProposal !== 'function') throw fail('AGENT_PROPOSAL_STORE_UNAVAILABLE', 'Proposal storage is unavailable');
     const saved = await context.createProposal(proposal);
-    return { proposalId: saved.id, kind: saved.kind, systemId: saved.systemId, summary: saved.summary, status: 'pending', applied: false, verification: 'Configuration proposal only; no device or live frame was verified.' };
+    return { proposalId: saved.id, kind: saved.kind, systemId: saved.systemId, summary: saved.summary, status: 'pending', applied: false,
+      ...(saved.mappingPreview ? { mappingPreview: saved.mappingPreview } : {}),
+      verification: 'Configuration proposal only; no device or live frame was verified.' };
   }
 
   /** 写入独立系统后核对名称与完整配置，响应丢失或读回失败保留不确定结果。 */
@@ -271,15 +382,57 @@ function createAgentTools({ root, httpBaseUrl = 'http://127.0.0.1:19245', wsUrl 
     return editor;
   }
 
+  /** 校验 Manifest 当前输入与已登记算法的点数、归属和输出指标。 */
+  function manifestAlgorithmConfiguration(value, editor, packages, systemId) {
+    const sensors = editor.manifest.sensors || (editor.manifest.sensor ? [editor.manifest.sensor] : []);
+    const matrices = Object.fromEntries(sensors.filter((sensor) => sensor.id && sensor.matrix).map((sensor) => [sensor.id, {
+      rows: sensor.matrix.rows, cols: sensor.matrix.cols, total: sensor.matrix.rows * sensor.matrix.cols,
+    }]));
+    const checked = validateNativeConfiguration({ ...value, showPressure: true, showArea: true }, {
+      systemId, packages, inputs: { channels: Object.keys(matrices), matrices },
+    });
+    return { algorithms: checked.algorithms, charts: checked.charts };
+  }
+
+  /** 写入 Manifest 算法绑定并从独立配置接口读回，防止成功响应掩盖未生效状态。 */
+  async function saveManifestAlgorithms(id, configuration, expectedRevision, context) {
+    const route = `/api/display-systems/${encodeURIComponent(id)}/algorithm-bindings`;
+    const result = await request(route, { ...context, method: 'PATCH', body: { expectedRevision, configuration } });
+    let saved;
+    try { saved = (await request(route, context)).result; }
+    catch { throw fail('AGENT_OPERATION_UNCERTAIN', '算法绑定请求已发出，但无法读回当前系统配置。'); }
+    if (result.result?.revision !== saved?.revision || JSON.stringify(saved.configuration) !== JSON.stringify(configuration)) throw fail('AGENT_OPERATION_UNCERTAIN', '算法绑定读回不一致，请检查当前系统。');
+    return saved;
+  }
+
   /** 校验工具名与固定 schema 后执行只读查询或生成提案。 */
   async function execute(name, args = {}, context = {}) {
     if (!Object.hasOwn(schemas, name)) throw fail('AGENT_UNKNOWN_TOOL', `Unknown tool: ${name}`);
     try { if (Buffer.byteLength(JSON.stringify(args)) > LIMIT_BYTES) throw new Error('arguments exceed the size limit'); validateValue(args, schemas[name]); } catch (cause) { throw fail('AGENT_INVALID_ARGUMENTS', cause.message); }
-    if (['get_algorithm_workspace', 'analyze_algorithm_data', 'test_algorithm', 'prepare_algorithm_package'].includes(name)) {
+    if (['get_algorithm_workspace', 'analyze_algorithm_data', 'adapt_algorithm_data', 'test_algorithm', 'prepare_algorithm_package'].includes(name)) {
       if (!lab) throw fail('ALGORITHM_UNAVAILABLE', '算法工作台尚未加载，请重启软件。');
       if (name === 'get_algorithm_workspace') {
         const state = await request('/api/agent-device/status', context);
         return lab.workspace({ ...context, currentSystemId: state.currentSystem?.id });
+      }
+      if (name === 'adapt_algorithm_data') {
+        lab.clearAdaptation(context);
+        const selection = context.algorithmSelection;
+        if (!selection?.records?.length) throw fail('ALGORITHM_SELECTION_REQUIRED', '请先选择带标签的采集记录，已有采集标签会自动带入。');
+        if (selection.records.some((record) => record.channel !== args.sensorId)) throw fail('ALGORITHM_CHANNEL_MISMATCH', '所选记录必须都来自要适配的同一通道。');
+        const state = await request('/api/agent-device/status', context);
+        if (state.currentSystem?.id !== selection.systemId) throw fail('ALGORITHM_SYSTEM_CHANGED', '请先进入采集记录对应的系统并连接当前设备。');
+        const editor = await read(selection.systemId, context);
+        const matrix = editor.kind === 'builtin-template' ? editor.inputs?.matrix : editor.manifest?.sensors?.find((sensor) => sensor.id === args.sensorId)?.matrix;
+        const channelExists = editor.kind === 'builtin-template' ? editor.inputs?.channels.includes(args.sensorId) : Boolean(matrix);
+        if (!(editor.kind === 'builtin-template' ? editor.writable : editor.editable) || !matrix || !channelExists) throw fail('ALGORITHM_BINDING_UNSUPPORTED', '请选择可编辑系统中已登记的传感器通道。');
+        const frames = await observeFrames({ WebSocketImpl, wsUrl: websocket, systemId: selection.systemId, sensorId: args.sensorId,
+          durationMs: 10000, maxFrames: 60, expectedPointCount: matrix.total || matrix.rows * matrix.cols, expectedMatrix: { rows: matrix.rows, cols: matrix.cols }, signal: context.signal });
+        if (!frames.liveVerified || frames.timing.intervalCount < 8 || frames.timing.reverseTimestamps) throw fail('ALGORITHM_REALTIME_UNVERIFIED',
+          '当前设备还没有至少 9 帧连续有效的实时数据；请连接设备并稳定采样后再生成适配算法。', { status: frames.status, intervalCount: frames.timing.intervalCount });
+        if (frames.timing.p90IntervalMs > frames.timing.medianIntervalMs * 2) throw fail('ALGORITHM_REALTIME_UNSTABLE',
+          '当前设备的帧间隔波动过大，无法确定可靠的适配目标；请先检查连接与采样稳定性。', { timing: frames.timing });
+        return lab.adapt(context, { sensorId: args.sensorId, measuredIntervalMs: frames.timing.medianIntervalMs });
       }
       if (name === 'analyze_algorithm_data') return lab.analyze(context);
       if (name === 'test_algorithm') return lab.test(args, context);
@@ -307,30 +460,43 @@ function createAgentTools({ root, httpBaseUrl = 'http://127.0.0.1:19245', wsUrl 
       if (section === 'contract') return request('/api/sdk/contract', context);
       if (section === 'policy') return request('/api/agent-apps/policy', context);
       const { catalog, protocols } = await capabilities(context);
-      const native = { builtinTemplates: catalog.builtinTemplates || [], builtinTemplateCreation: catalog.builtinTemplateCreation || null, nativeSystemEditing: catalog.nativeSystemEditing || null };
+      const native = { builtinTemplates: catalog.builtinTemplates || [], builtinTemplateCreation: catalog.builtinTemplateCreation || null, nativeSystemEditing: catalog.nativeSystemEditing || null, manifestAlgorithmEditing: catalog.manifestAlgorithmEditing || null };
       const algorithmDevelopment = { available: Boolean(lab), language: 'restricted-python-v1', entry: 'get_algorithm_workspace', selectedDataOnly: true, execution: 'local numeric interpreter',
-        installation: 'saved versions with inputContract appear as user-* realtime packages; bind in native system configuration or algorithm market; no arbitrary Python execution' };
+        adaptation: 'adapt_algorithm_data measures the current realtime channel and reuses selected labels to test on nearest real frames at a compatible cadence',
+        installation: 'saved versions with inputContract appear as user-* realtime candidates; Agent first activation checks live frame cadence, but saved package alone is not verified on current hardware; no arbitrary Python execution' };
       const packages = (catalog.algorithmPackages || []).map(({ algorithmSource, packageManifest, ...item }) => ({ ...item, apiVersion: packageManifest?.apiVersion, input: packageManifest?.input, output: packageManifest?.output }));
       if (section === 'protocols') return { protocols: protocols.map(({ id, label, summary, protocol, matrix }) => ({ id, label, summary, protocol, matrix })) };
-      if (section === 'algorithms') return { algorithmDevelopment, backendAlgorithms: catalog.backendAlgorithms, algorithmPackages: packages, supportedJsonOperations: ['scale', 'offset', 'clamp', 'zeroBelow'], supportedJsonMetrics: ['sum', 'average', 'max', 'min', 'activeCount', 'activeRatio'] };
+      if (section === 'algorithms') return { algorithmDevelopment, nativeSystemEditing: native.nativeSystemEditing, manifestAlgorithmEditing: native.manifestAlgorithmEditing,
+        backendAlgorithms: catalog.backendAlgorithms, algorithmPackages: packages, supportedJsonOperations: ['scale', 'offset', 'clamp', 'zeroBelow'], supportedJsonMetrics: ['sum', 'average', 'max', 'min', 'activeCount', 'activeRatio'] };
       if (section === 'display') return { ...native, renderers: catalog.renderers, colormaps: catalog.colormaps, overlays: catalog.overlays, chartOverlays: catalog.chartOverlays, chartMetrics: Object.keys(CHARTS), duplicateSystem: catalog.duplicateSystem || null, chartLimitations: 'Chart tools support only the listed metrics. Respiration/heart-rate charts require an actual compatible algorithm data source and are not provided by renaming pressure charts.' };
-      return { ...native, algorithmDevelopment, protocols: protocols.map(({ id, label, matrix, protocol }) => ({ id, label, matrix, valueCount: protocol?.decoding?.valueCount })), renderers: catalog.renderers, backendAlgorithms: catalog.backendAlgorithms, algorithmPackages: packages.map(({ id, name, description }) => ({ id, name, description })), chartMetrics: Object.keys(CHARTS), limits: { maxSensors: 8, maxPoints: 65536, requiresExplicitMapping: true, modifies: DISPLAY_FIELDS, installsCode: 'realtime: unchanged registered builtin package source; offline: tested restricted-python proposals', activatesDevices: 'explicit connect proposal, guarded by server idle and identity checks' } };
+      return { ...native, algorithmDevelopment, protocols: protocols.map(({ id, label, matrix, protocol }) => ({ id, label, matrix, valueCount: protocol?.decoding?.valueCount })), renderers: catalog.renderers, backendAlgorithms: catalog.backendAlgorithms, algorithmPackages: packages.map(({ id, name, description }) => ({ id, name, description })), chartMetrics: Object.keys(CHARTS), limits: { maxSensors: 8, maxPoints: 65536, mapping: 'axisMapping 或显式 lineOrder+pointOrder', modifies: DISPLAY_FIELDS, installsCode: 'realtime: unchanged registered builtin package source; offline: tested restricted-python proposals', activatesDevices: 'explicit connect proposal, guarded by server idle and identity checks' } };
     }
     if (name === 'read_system') {
       const editor = await read(args.systemId, context);
       const result = clone(editor);
       if (editor.kind === 'builtin-template') return { ...result, agentGuidance: editor.writable
-        ? '这是可编辑的独立系统。使用 prepare_update_native_system 增删改算法和图表、改名或调整显示；完整 configuration 中保留其他项。复制使用 prepare_builtin_system 并带上 configuration。算法实际输出可绑定呼吸率趋势。串口仍通过原生设备控件连接。'
+        ? '这是可编辑的独立系统。使用 prepare_update_native_system 增删改算法和图表、改名或调整原生图表显示开关；矩阵、线序和协议仍固定为原生来源。完整 configuration 中保留其他项。复制使用 prepare_builtin_system 并带上 configuration。算法实际输出可绑定呼吸率趋势。串口仍通过原生设备控件连接。'
         : '这是内置原系统。使用 prepare_builtin_system 创建独立系统后，可继续编辑其算法、图表和名称。' };
       delete result.definitions?.algorithmSource;
       for (const item of Object.values(result.definitions?.sensors || {})) delete item.algorithmSource;
-      result.agentGuidance = 'To copy this existing Manifest, use prepare_duplicate_system with sourceSystemId. A legacy manifest may use sensor instead of sensors; do not pass an empty sensors array to prepare_create_system. Configuration readback does not verify the displayed page or live data.';
+      if (editor.editable) {
+        const binding = (await request(`/api/display-systems/${encodeURIComponent(args.systemId)}/algorithm-bindings`, context)).result;
+        result.algorithmBindings = binding;
+      }
+      result.agentGuidance = editor.editable
+        ? '当前 Manifest 系统可直接用 prepare_update_manifest_algorithms 增删改算法及真实输出图表，保留本系统 ID、协议、线序和采集数据。读取 algorithmBindings.configuration 并传完整配置；无需创建新系统。'
+        : '此系统只读；可用 prepare_duplicate_system 复制成用户系统。配置读回不证明真实帧已运行。';
       return result;
     }
     if (name === 'inspect_frames') {
       await bootstrap(context);
       const editor = await read(args.systemId, context);
-      if (editor.kind === 'builtin-template') throw fail('AGENT_BINDING_UNSUPPORTED', '原生系统请进入页面使用原有设备控件查看数据。');
+      if (editor.kind === 'builtin-template') {
+        const matrix = editor.inputs?.matrix;
+        if (!matrix || !editor.inputs.channels.includes(args.sensorId)) throw fail('AGENT_SENSOR_NOT_FOUND', '所选通道不属于原生系统。');
+        return observeFrames({ WebSocketImpl, wsUrl: websocket, ...args, signal: context.signal,
+          expectedPointCount: matrix.total, expectedMatrix: { rows: matrix.rows, cols: matrix.cols } });
+      }
       const sensor = editor.manifest.sensors?.find((item) => item.id === args.sensorId);
       const legacy = editor.manifest.sensor;
       if (!sensor && !legacy?.ports?.includes(args.sensorId)) throw fail('AGENT_SENSOR_NOT_FOUND', 'Sensor is not declared in this system');
@@ -338,6 +504,17 @@ function createAgentTools({ root, httpBaseUrl = 'http://127.0.0.1:19245', wsUrl 
       return observeFrames({ WebSocketImpl, wsUrl: websocket, ...args, signal: context.signal, expectedPointCount: matrix.rows * matrix.cols, expectedMatrix: { rows: matrix.rows, cols: matrix.cols } });
     }
     const { catalog, protocols } = await capabilities(context);
+    if (name === 'prepare_update_manifest_algorithms') {
+      if (!catalog.manifestAlgorithmEditing?.supported) throw fail('AGENT_PLATFORM_RESTART_REQUIRED', '请完全退出并重启软件以加载 Manifest 算法绑定能力。');
+      const editor = await read(args.systemId, context);
+      if (editor.kind === 'builtin-template' || !editor.editable) throw fail('DISPLAY_SYSTEM_READ_ONLY', '请选择用户创建的 Manifest 系统。');
+      const binding = (await request(`/api/display-systems/${encodeURIComponent(args.systemId)}/algorithm-bindings`, context)).result;
+      const configuration = manifestAlgorithmConfiguration(args.configuration, editor, catalog.algorithmPackages, args.systemId);
+      const inputVerification = await verifyUserClassifierActivation(configuration, binding.configuration, args.systemId, editor, catalog.algorithmPackages, context);
+      return propose({ kind: 'update_manifest_algorithms', systemId: args.systemId, summary: args.summary, input: clone(args),
+        expectedRevision: binding.revision, expectedSystemRevision: editor.revision, before: binding.configuration,
+        after: configuration, inputVerification }, context);
+    }
     if (['prepare_update_native_system', 'prepare_delete_native_system'].includes(name)) {
       if (!catalog.nativeSystemEditing?.supported) throw fail('AGENT_PLATFORM_RESTART_REQUIRED', '请重启软件加载独立系统编辑能力。');
       const editor = await read(args.systemId, context);
@@ -346,10 +523,12 @@ function createAgentTools({ root, httpBaseUrl = 'http://127.0.0.1:19245', wsUrl 
         input: clone(args), expectedRevision: editor.revision, before: { name: editor.builtinTemplate.name, configuration: editor.configuration }, after: { deleted: true, dataRetained: true } }, context);
       validateBuiltinTemplate({ ...editor.builtinTemplate, name: args.name });
       const configuration = validateNativeConfiguration(args.configuration, { sourceType: editor.builtinTemplate.sourceType, systemId: args.systemId, packages: catalog.algorithmPackages });
+      const inputVerification = await verifyUserClassifierActivation(configuration, editor.configuration, args.systemId, editor, catalog.algorithmPackages, context);
       return propose({ kind: 'update_native_system', systemId: args.systemId, summary: args.summary, input: clone(args), expectedRevision: editor.revision,
-        before: { name: editor.builtinTemplate.name, configuration: editor.configuration }, after: { name: args.name.trim(), configuration } }, context);
+        before: { name: editor.builtinTemplate.name, configuration: editor.configuration }, after: { name: args.name.trim(), configuration }, inputVerification }, context);
     }
     if (name === 'prepare_builtin_system') {
+      assertNativeInputCompatibility(args.sourceType, context);
       if (!catalog.builtinTemplateCreation?.supported || !catalog.builtinTemplates?.some((item) => item.id === args.sourceType)) throw fail('AGENT_CAPABILITIES_CHANGED', '内置模板不可用，请刷新目录或重启软件。');
       const template = validateBuiltinTemplate({ id: args.id, name: args.name, sourceType: args.sourceType });
       const configuration = validateNativeConfiguration(args.configuration, { sourceType: args.sourceType, systemId: args.id, packages: catalog.algorithmPackages });
@@ -378,7 +557,8 @@ function createAgentTools({ root, httpBaseUrl = 'http://127.0.0.1:19245', wsUrl 
     if (name === 'prepare_create_system') {
       const payload = buildCreate(args, catalog, protocols);
       await assertCreateIdentity(args, context);
-      return propose({ kind: 'create_system', systemId: args.id, summary: args.summary, status: 'pending', input: clone(args), after: payload.manifest, payload }, context);
+      return propose({ kind: 'create_system', systemId: args.id, summary: args.summary, status: 'pending', input: clone(args), after: payload.manifest,
+        mappingPreview: mappingPreview(args, payload), payload }, context);
     }
     if (name === 'prepare_duplicate_system') {
       const editor = await read(args.sourceSystemId, context);
@@ -405,11 +585,27 @@ function createAgentTools({ root, httpBaseUrl = 'http://127.0.0.1:19245', wsUrl 
       if (!current.licensed || current.currentSystem?.id !== proposal.systemId) throw fail('ALGORITHM_SYSTEM_CHANGED', '请回到提案对应的已授权系统再保存算法。');
       return lab.apply(proposal);
     }
-    const name = proposal.kind === 'update_native_system' ? 'prepare_update_native_system' : proposal.kind === 'delete_native_system' ? 'prepare_delete_native_system' : proposal.kind === 'builtin_system' ? 'prepare_builtin_system' : proposal.kind === 'create_system' ? 'prepare_create_system' : proposal.kind === 'duplicate_system' ? 'prepare_duplicate_system' : proposal.kind === 'update_display' ? 'prepare_update_display' : proposal.kind === 'connect_device' ? 'prepare_connect_device' : null;
+    const name = proposal.kind === 'update_manifest_algorithms' ? 'prepare_update_manifest_algorithms' : proposal.kind === 'update_native_system' ? 'prepare_update_native_system' : proposal.kind === 'delete_native_system' ? 'prepare_delete_native_system' : proposal.kind === 'builtin_system' ? 'prepare_builtin_system' : proposal.kind === 'create_system' ? 'prepare_create_system' : proposal.kind === 'duplicate_system' ? 'prepare_duplicate_system' : proposal.kind === 'update_display' ? 'prepare_update_display' : proposal.kind === 'connect_device' ? 'prepare_connect_device' : null;
     if (!name) throw fail('AGENT_PROPOSAL_STATE', 'Unknown proposal kind');
     try { validateValue(proposal.input, schemas[name]); } catch (cause) { throw fail('AGENT_INVALID_ARGUMENTS', cause.message); }
     if (proposal.systemId !== (proposal.input.id || proposal.input.systemId)) throw fail('AGENT_PROPOSAL_STATE', 'Proposal identity does not match its input');
     const { catalog, protocols } = await capabilities(context);
+    if (proposal.kind === 'update_manifest_algorithms') {
+      if (!catalog.manifestAlgorithmEditing?.supported) throw fail('AGENT_CAPABILITIES_CHANGED', 'Manifest 算法绑定能力已变化。');
+      const editor = await read(proposal.systemId, context);
+      if (editor.kind === 'builtin-template' || !editor.editable) throw fail('DISPLAY_SYSTEM_READ_ONLY', '目标不再是可编辑 Manifest 系统。');
+      if (editor.revision !== proposal.expectedSystemRevision) throw fail('DISPLAY_SYSTEM_REVISION_CONFLICT', '系统输入或展示配置已变化，请重新生成提案。');
+      const route = `/api/display-systems/${encodeURIComponent(proposal.systemId)}/algorithm-bindings`;
+      const binding = (await request(route, context)).result;
+      if (binding.revision !== proposal.expectedRevision) throw fail('DISPLAY_SYSTEM_REVISION_CONFLICT', '算法绑定已变化，请重新生成提案。');
+      const configuration = manifestAlgorithmConfiguration(proposal.input.configuration, editor, catalog.algorithmPackages, proposal.systemId);
+      if (JSON.stringify(configuration) !== JSON.stringify(proposal.after)) throw fail('AGENT_PROPOSAL_STATE', '算法配置提案已变化。');
+      const inputVerification = await verifyUserClassifierActivation(configuration, binding.configuration, proposal.systemId, editor, catalog.algorithmPackages, context);
+      const saved = await saveManifestAlgorithms(proposal.systemId, configuration, binding.revision, context);
+      proposal.appliedRevision = saved.revision;
+      return { systemId: proposal.systemId, verified: true, appliedRevision: saved.revision, liveVerified: false, inputVerification,
+        verification: '算法绑定已保存到当前系统并读回；实际分类输出请在连接实时设备后查看算法状态和图表。' };
+    }
     if (['update_native_system', 'delete_native_system'].includes(proposal.kind)) {
       if (!catalog.nativeSystemEditing?.supported) throw fail('AGENT_CAPABILITIES_CHANGED', '当前后端不支持独立系统编辑。');
       const editor = await read(proposal.systemId, context);
@@ -425,12 +621,16 @@ function createAgentTools({ root, httpBaseUrl = 'http://127.0.0.1:19245', wsUrl 
       validateBuiltinTemplate({ ...editor.builtinTemplate, name: proposal.input.name });
       const value = { name: proposal.input.name.trim(), configuration: validateNativeConfiguration(proposal.input.configuration, { sourceType: editor.builtinTemplate.sourceType, systemId: proposal.systemId, packages: catalog.algorithmPackages }) };
       if (JSON.stringify(value) !== JSON.stringify(proposal.after)) throw fail('AGENT_PROPOSAL_STATE', '配置提案内容已变化。');
+      const inputVerification = await verifyUserClassifierActivation(value.configuration, editor.configuration, proposal.systemId, editor, catalog.algorithmPackages, context);
       const saved = await saveNative(proposal.systemId, value, proposal.expectedRevision, context);
       proposal.appliedRevision = saved.revision;
-      return { systemId: proposal.systemId, verified: true, appliedRevision: saved.revision, liveVerified: false, verification: '独立配置已保存；进入系统并收到兼容实时帧后运行已启用算法。' };
+      return { systemId: proposal.systemId, verified: true, appliedRevision: saved.revision, liveVerified: false, inputVerification,
+        verification: inputVerification.length ? '独立配置已保存；新启用的用户分类算法已核验当前设备输入节奏。实际分类输出仍需在运行状态中观察。'
+          : '独立配置已保存；算法运行及设备输入尚未经过本次核验。' };
     }
     if (proposal.kind === 'builtin_system') {
       const { id, name: systemName, sourceType } = proposal.input;
+      assertNativeInputCompatibility(sourceType, context);
       const template = validateBuiltinTemplate({ id, name: systemName, sourceType });
       const configuration = validateNativeConfiguration(proposal.input.configuration, { sourceType, systemId: id, packages: catalog.algorithmPackages });
       if (!catalog.builtinTemplateCreation?.supported || !catalog.builtinTemplates?.some((item) => item.id === sourceType)) throw fail('AGENT_CAPABILITIES_CHANGED', '内置模板不可用，请重新准备提案。');
@@ -496,6 +696,16 @@ function createAgentTools({ root, httpBaseUrl = 'http://127.0.0.1:19245', wsUrl 
     let editor;
     try { editor = await read(proposal.systemId, context); } catch { throw fail('AGENT_OPERATION_UNCERTAIN', 'Write returned success but readback failed; inspect the system before retrying'); }
     if (JSON.stringify(result.result?.manifest) !== JSON.stringify(editor.manifest)) throw fail('AGENT_OPERATION_UNCERTAIN', 'Readback differs from the write result; another editor may have changed the system');
+    if (proposal.kind === 'create_system') {
+      for (const [sensorId, expected] of Object.entries(proposal.payload.definitions.sensors)) {
+        const saved = editor.definitions?.sensors?.[sensorId];
+        if (JSON.stringify(saved?.lineOrder) !== JSON.stringify(expected.lineOrder)
+          || JSON.stringify(saved?.pointOrder) !== JSON.stringify(expected.pointOrder)
+          || JSON.stringify(saved?.coordinateMap || null) !== JSON.stringify(expected.coordinateMap || null)) {
+          throw fail('AGENT_OPERATION_UNCERTAIN', `系统已写入，但 ${sensorId} 线序或点位读回不一致；请检查实际配置。`);
+        }
+      }
+    }
     if (proposal.kind === 'duplicate_system' && JSON.stringify(editor.manifest) !== JSON.stringify(proposal.after)) throw fail('AGENT_OPERATION_UNCERTAIN', '副本已写入，但与确认的配置不一致，请检查实际系统。');
     proposal.appliedRevision = editor.revision;
     return { systemId: proposal.systemId, verified: true, appliedRevision: editor.revision, verification: 'Saved configuration read back successfully. Device activation, live data and physical correctness are not verified.', liveVerified: false };
@@ -503,6 +713,11 @@ function createAgentTools({ root, httpBaseUrl = 'http://127.0.0.1:19245', wsUrl 
 
   /** 恢复显示修改，仅当当前版本仍等于该提案写入版本时才执行。 */
   async function restore(proposal, context = {}) {
+    if (proposal?.kind === 'update_manifest_algorithms' && ['applied', 'restoring'].includes(proposal.status) && proposal.appliedRevision) {
+      await capabilities(context);
+      const saved = await saveManifestAlgorithms(proposal.systemId, proposal.before, proposal.appliedRevision, context);
+      return { systemId: proposal.systemId, restored: true, verified: true, revision: saved.revision };
+    }
     if (proposal?.kind === 'update_native_system' && ['applied', 'restoring'].includes(proposal.status) && proposal.appliedRevision) {
       await capabilities(context);
       const editor = await saveNative(proposal.systemId, proposal.before, proposal.appliedRevision, context);

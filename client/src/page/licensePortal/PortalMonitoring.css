@@ -10,6 +10,9 @@
   --portal-chart-top: clamp(110px, 14vh, 142px);
   --portal-chart-bottom: 22px;
 }
+/* 配置式矩阵画布只占数据层；其默认 z-index:20 会盖住同页的图表和工具。 */
+.fiber-portal .portal-runtime-monitor .portal-data-renderer .manifest-display { z-index: 1; }
+.fiber-portal .portal-runtime-monitor .portal-data-renderer .manifest-renderer-picker { right: calc(var(--right-tools-width) + 44px); }
 .fiber-portal .portal-monitor-navigation { top: 24px; left: 26px; right: 22px; }
 .fiber-portal .portal-monitor-identity-group { display: flex; align-items: center; gap: 18px; min-width: 0; }
 .fiber-portal .portal-monitor-identity { display: grid; gap: 4px; padding-left: 18px; border-left: 1px solid rgba(122, 170, 213, .2); }

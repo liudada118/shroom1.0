@@ -489,6 +489,7 @@ try {
   console.log('PORTAL_ACTUAL_LOADING');
   await page.locator('.home .title').waitFor({ timeout: 60000 });
   console.log('PORTAL_ACTUAL_MOUNTED');
+  assert.equal(await page.locator('.canvas-overlay-toggle').count(), 0, '运行页不再显示画布零件入口');
   await page.locator('.portal-data-renderer canvas').first().waitFor({ state: 'attached', timeout: 60000 });
   await page.waitForFunction(() => document.querySelector('.portal-runtime-monitor')?.dataset.handoff === 'entering');
   const handoff = await page.locator('.portal-monitor-content').evaluate((node) => ({
@@ -578,7 +579,7 @@ try {
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => JSON.parse(localStorage.getItem('shroom.formulaCharts.v1.hand') || '[]').length === 1);
   console.log('PORTAL_MARKET_CLICK_ADDED');
-  assert.equal(await page.locator('.canvas-draft-bar').evaluate((node) => getComputedStyle(node).visibility), 'hidden', '旧配置浮条不能盖住超市卡片的添加按钮');
+  assert.equal(await page.locator('.canvas-draft-bar').count(), 0, '移除画布零件后不再挂载旧配置浮条');
   await page.screenshot({ path: join(screenshots, 'algorithm-first-add.png') });
   await market.getByRole('button', { name: '已添加峰值压力', exact: true }).click();
   console.log('PORTAL_MARKET_DUPLICATE_CHECKED');
@@ -639,7 +640,7 @@ try {
   await market.getByRole('button', { name: '收起算法超市', exact: true }).focus();
   await page.keyboard.press('Escape');
   await market.waitFor({ state: 'hidden' });
-  assert.equal(await page.locator('.canvas-draft-bar').evaluate((node) => getComputedStyle(node).visibility), 'visible', '收起超市后保留原草稿提示和撤销入口');
+  assert.equal(await page.locator('.canvas-draft-bar').count(), 0, '收起算法超市也不恢复画布零件浮条');
   assert.equal(await page.getByRole('button', { name: '算法', exact: true }).evaluate((node) => node === document.activeElement), true, '关闭超市回到工具入口');
   await page.getByRole('button', { name: '算法', exact: true }).click();
   await market.getByRole('button', { name: '已添加峰值压力', exact: true }).waitFor();

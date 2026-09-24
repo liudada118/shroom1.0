@@ -24,6 +24,7 @@ export default function PortalPackageOutputs({ item, instance, channelLabel, onD
   }).join(' ');
   const waiting = offline || instance.status !== 'running';
   const status = offline ? '算法服务未连接' : instance.error || (instance.status === 'waiting' ? '等待实时数据' : instance.status === 'error' ? '算法异常' : current?.label);
+  const statusClass = offline || instance.status === 'error' ? 'is-error' : instance.error?.includes('已暂停识别') ? 'is-paused' : '';
   return <section className="portal-package-output" aria-label={`${chart?.name || item.name}输出`}>
     <header><div><small>{channelLabel}</small><strong>{chart?.name || item.name}</strong></div><button type="button" disabled={busy} onClick={chart ? onRemove : onDisable} aria-label={chart ? `删除${chart.name}` : `停用${item.name}`}>{chart ? '删除图表' : '停用'}</button></header>
     {chart ? <p>{item.name} · {metric.label}</p> : <label>显示指标<select aria-label={`${item.name}显示指标`} value={metric.id} onChange={(event) => setMetricId(event.target.value)}>{item.metricDefinitions.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}</select></label>}
@@ -33,7 +34,7 @@ export default function PortalPackageOutputs({ item, instance, channelLabel, onD
       <path d={path} className="portal-package-line" style={chart?.color ? { stroke: chart.color } : undefined} />
       <text x="12" y="119">{points.length ? new Date(points[0].timestamp).toLocaleTimeString() : '等待数据'}</text><text x="268" y="119" textAnchor="end">{points.length ? new Date(points.at(-1).timestamp).toLocaleTimeString() : ''}</text>
     </svg>
-    <p className={instance.error || offline ? 'is-error' : ''}>{status || `${metric.label} · 算法标量趋势`}</p>
+    <p className={statusClass}>{status || `${metric.label} · 算法标量趋势`}</p>
     <small>{metric.values ? Object.entries(metric.values).map(([code, label]) => `${code}：${label}`).join(' · ') : values.length ? `范围 ${min.toFixed(1)} – ${max.toFixed(1)} ${metric.unit || ''}` : '尚无有效算法数值'}{instance.dropped > 0 ? ` · 已合并 ${instance.dropped} 帧` : ''}</small>
   </section>;
 }

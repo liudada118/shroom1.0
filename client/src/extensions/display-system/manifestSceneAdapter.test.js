@@ -1,4 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { calculatePressureMetrics } from './displayProfileRuntime';
+
+it('keeps the common area chart meaningful without physical cell calibration', () => {
+  expect(calculatePressureMetrics([0, 2, 3], { area: {} }).area).toBe(2);
+  expect(calculatePressureMetrics([0, 2, 3], { area: { pointArea: 4 } }).area).toBe(8);
+});
 import {
   buildManifestSceneFrame,
   getManifestSourceChannel,

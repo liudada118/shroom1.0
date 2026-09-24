@@ -953,6 +953,7 @@ function createDisplaySystemWorkspaceService({
         ...validateLineOrderDefinition(state.lineOrder, {
           source: `${sourcePrefix}: ${sensor.files.lineOrder}`,
           matrixTotal: total,
+          sourcePointCount: sensor.protocol?.decoding?.valueCount,
         }),
         ...validatePointOrderDefinition(state.pointOrder, {
           source: `${sourcePrefix}: ${sensor.files.pointOrder}`,

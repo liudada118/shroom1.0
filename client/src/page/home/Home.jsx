@@ -147,22 +147,18 @@ import { LEGACY_PRESETS as HAND_POINTS_PRESETS } from '@shroom/frontend/core/han
 import { LEGACY_PRESETS as WEBGL_HEATMAP_PRESETS } from '@shroom/frontend/core/webglHeatmap';
 import { clearLastFrame, publishFrame } from '../../runtime/frameBus';
 import { SCENE_CHANNELS, buildSceneFrame } from '../../runtime/sceneFrame';
-import DisplayCanvasConfigurator from '../../extensions/display-system/canvasConfigurator/DisplayCanvasConfigurator.jsx';
 import {
   buildDisplayProfileModel,
   resolveChartAppearance,
   resolveDisplayProfile,
 } from '../../extensions/display-system/displayProfileRuntime';
 import {
-  buildDisplaySectionPayload,
   clearDisplayDraftSelection,
-  describeDisplayDraft,
 } from '../../extensions/display-system/displayDraftState';
 import {
   duplicateDisplaySystem,
   saveDisplaySection,
 } from '../../extensions/display-system/api';
-import { CHART_OVERLAY_IDS } from '../../components/aside/chartAppearance';
 import { FORMULA_CHART_TEMPLATES } from '../../components/aside/formulaChartTemplates';
 import {
   FORMULA_CHART_LIMIT,
@@ -867,13 +863,6 @@ const getConfig = ({ sensorType, mode }) => {
   return mergedConfig
 }
 
-// 3D 场景能落地的叠加层，只有图例一个 —— 它由零件栏自己画在 DOM 上，
-// 与是哪个场景组件无关，所以两条链都成立。其余几个都落不了地：
-// Fast1024 的数值和格子描边是数字精灵图本身画上去的、恒为开；CanvasHand 是
-// 点云，压根没有格子；坐标轴和峰值环在 3D 里没有对应物。都是二维 widget
-// 才有的能力，留在配置器那条链里。模块级常量，引用稳定。
-const CANVAS_SCENE_OVERLAY_IDS = ['legend'];
-
 /**
  * 取展示系统的偏好存储 id。manifest 系统与 ManifestDisplayRenderer 用同一份
  * 规则，读写的是同一个 localStorage 键。
@@ -892,8 +881,7 @@ const getDisplayProfileId = (definition, matrixName) => (
 /**
  * 读某个矩阵对应展示系统的画布偏好。没存过就是空对象，一切按默认值渲染。
  *
- * 不区分 manifest 与老展示系统 —— 读本身对谁都无副作用；真正的收口在
- * "零件栏挂不挂"，那是 render 里各分支自己决定的（见 `renderCanvasRail`）。
+ * 运行页继续应用已保存的配色和图表偏好，不依赖画布零件入口。
  *
  * @param {string} matrixName 当前矩阵名。
  * @returns {object} 画布偏好，无则空对象。
@@ -4492,10 +4480,7 @@ class Home extends React.Component {
     const manifestRenderer = runtimeDisplayDefinition?.source === 'manifest'
       ? resolveRendererFromDefinition(runtimeDisplayDefinition)
       : null;
-    // 画布配置走和 ManifestDisplayRenderer 完全相同的解析链，保证配置器里
-    // 预览到的效果和主界面一致。老展示系统没有 `page`，buildDisplayProfileModel
-    // 会给出全默认（classic + 无叠加层），所以这两个值对谁都成立、不用判空 ——
-    // 零件栏挂不挂由各分支自己决定，不由这里的 null 与否决定。
+    // 沿用配置器的解析链及已有偏好；无 page 的旧系统使用 classic 默认配色。
     const canvasProfileModel = buildDisplayProfileModel(runtimeDisplayDefinition?.page);
     const canvasProfile = resolveDisplayProfile(canvasProfileModel, this.state.displaySelection);
     // 配色标识拆成两个 prop 是因为两类场景换色的代价不同：
@@ -4519,52 +4504,6 @@ class Home extends React.Component {
       chartAppearance.colormap.reverse ? 'reverse' : '',
       ...chartAppearance.overlays,
     ].filter(Boolean).join('|');
-    // 只在场景组件真的认 colormap 的分支里调用它 —— 摆一排拖上去没反应的
-    // 方块比没有零件栏更糟。当前认的是 Fast1024 和 CanvasHand 两条链。
-    // 图表三类零件跟着同一条栏走：侧栏在这些分支上都在，多挂一条栏只会
-    // 让右下角两个入口按钮打架。「图表卡片」拖出来的是侧栏里的一张新卡片，
-    // 它写的是另一个存储键，所以不走 value/onChange 那条纯值变换的路。
-    // 拖零件写的只是 localStorage，展示系统目录里那份 manifest 一个字节都没动过。
-    // 状态带就是把这件事说出来的地方；不脏时它自己不渲染，界面和改动前一致。
-    const displayDraft = describeDisplayDraft({
-      model: canvasProfileModel,
-      selection: this.state.displaySelection,
-      cards: this.state.chartCards,
-      baselineCards: runtimeDisplayDefinition?.page?.chartCards,
-    });
-    // 保存 / 另存为要有个文件夹才谈得上。约 55 个写死的展示形式没有目录，
-    // 它们只有撤销 —— 而撤销对谁都成立。`editable` 前后端都已经算好了
-    // （资源目录只读、用户目录可写），这里不重新推导。
-    const canDuplicateDisplay = runtimeDisplayDefinition?.source === 'manifest'
-      && Boolean(runtimeDisplayDefinition.displaySystemId);
-    const canSaveDisplay = canDuplicateDisplay && runtimeDisplayDefinition.editable === true;
-    const buildDraftPayload = () => buildDisplaySectionPayload({
-      model: canvasProfileModel,
-      selection: this.state.displaySelection,
-      cards: this.state.chartCards,
-    });
-    const renderCanvasRail = () => (
-      <DisplayCanvasConfigurator
-        value={canvasProfile.canvas}
-        onChange={this.updateDisplayCanvas}
-        renderers={canvasProfileModel.renderers}
-        variant="overlay"
-        categoryIds={['colormap', 'overlay', 'chartColormap', 'chartOverlay', 'chartWidget']}
-        overlayIds={CANVAS_SCENE_OVERLAY_IDS}
-        chartValue={chartAppearance}
-        onChartChange={this.updateChartAppearance}
-        chartOverlayIds={CHART_OVERLAY_IDS}
-        chartTemplates={FORMULA_CHART_TEMPLATES}
-        chartWidgetIds={this.state.chartWidgetIds}
-        onChartWidgetAdd={this.addChartWidget}
-        onChartWidgetRemove={this.removeChartWidget}
-        draft={displayDraft}
-        onRevert={() => this.revertDisplayDraft(displayDraft)}
-        onSave={canSaveDisplay ? () => this.saveDisplayDraft(buildDraftPayload()) : null}
-        onSaveAs={canDuplicateDisplay ? () => this.saveDisplayDraftAs(buildDraftPayload()) : null}
-        saveHint={canDuplicateDisplay && !canSaveDisplay ? '自带展示系统只能另存为' : ''}
-      />
-    );
     const canvasVariantKey = [
       this.state.systemId,
       runtimeDisplayDefinition?.runtimeRevision,
@@ -5060,6 +4999,7 @@ class Home extends React.Component {
 
           {this.props.portalEmbedded && <PortalAlgorithmMarket key={this.state.matrixName}
             open={this.state.portalAlgorithmMarketOpen} matrixName={this.state.matrixName}
+            displaySystemId={runtimeDisplayDefinition?.displaySystemId || this.state.matrixName}
             inputKind={runtimeDisplayDefinition?.source === 'manifest' ? 'matrix' : 'statistics'}
             metricDefinitions={runtimeDisplayDefinition?.source === 'manifest' ? runtimeDisplayDefinition.page?.sidebar?.algorithmMetrics : undefined}
             dropTargetRef={this.portalChartDropTarget}
@@ -5100,6 +5040,7 @@ class Home extends React.Component {
               ref={this.data}
               chartAppearance={chartAppearance}
               matrixName={this.state.matrixName}
+              displaySystemId={runtimeDisplayDefinition?.displaySystemId || this.state.matrixName}
               matrixShape={runtimeDisplayDefinition?.matrix}
               numMatrixFlag={this.state.numMatrixFlag}
               sidebarConfig={runtimeDisplayDefinition?.source === 'manifest' ? runtimeDisplayDefinition.page?.sidebar : null}
@@ -5263,7 +5204,6 @@ class Home extends React.Component {
                     {this.state.matrixName === MINZHEN_MATRIX ? (
                       <MinzhenSensorPanel sensorInfo={this.state.minzhenSensorInfo} />
                     ) : null}
-                    {renderCanvasRail()}
                   </>
                   :
                   this.state.numMatrixFlag == "numoriginal" && [...tactileGloveTypes, 'robot1', 'footVideo', 'robotSY', 'robotLCF', 'normal', 'jqbed', tempFullBedMatrix, 'petCare', 'petCareMini', 'daliegu', 'smallSample'].includes(this.state.matrixName) ?
@@ -5358,7 +5298,6 @@ class Home extends React.Component {
                             local={this.state.local}
                             {...this.sceneChartProps} />
                         </CanvasCom>
-                        {renderCanvasRail()}
                       </>
                     ) : this.state.matrixName == "sit100" || this.state.matrixName == "back100" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -5659,7 +5598,6 @@ class Home extends React.Component {
                             local={this.state.local}
                             {...this.sceneChartProps} />
                         </CanvasCom>
-                        {renderCanvasRail()}
                       </>
                     ) : this.state.matrixName == "newHand" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -5705,7 +5643,6 @@ class Home extends React.Component {
                             local={this.state.local}
                             {...this.sceneChartProps} />
                         </CanvasCom>
-                        {renderCanvasRail()}
                       </>
                     ) : this.state.matrixName == "matCol" ? (
                       <CanvasCom matrixName={this.state.matrixName}
@@ -5879,7 +5816,6 @@ class Home extends React.Component {
                             {...this.sceneChartProps}
                           />
                         </CanvasCom>
-                        {renderCanvasRail()}
                       </>
                     ) : this.state.matrixName == "xiyueReal1" ? (
                       <CanvasCom matrixName={this.state.matrixName}>

@@ -42,5 +42,7 @@ describe('算法超市真实输出及输入限制', () => {
     expect(html).toContain('20.0'); expect(html).toContain('重心 X'); expect(html).toContain('真实算法输出趋势');
     const empty = renderToStaticMarkup(<PortalPackageOutputs item={item} instance={{ status: 'waiting', history: [] }} />);
     expect(empty).toContain('等待实时数据'); expect(empty).not.toContain('0.0');
+    const paused = renderToStaticMarkup(<PortalPackageOutputs item={item} instance={{ status: 'waiting', history: [], error: '已暂停识别，输入恢复后自动继续。' }} />);
+    expect(paused).toContain('is-paused'); expect(paused).toContain('—'); expect(paused).not.toContain('is-error');
   });
 });

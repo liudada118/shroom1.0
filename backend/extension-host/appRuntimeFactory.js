@@ -13,6 +13,7 @@ const {
 const path = require('path');
 const { createRealtimeAlgorithmCatalog } = require('../agent-runtime/algorithm-lab/realtimeCatalog');
 const { createBuiltinSystemTemplates } = require('./workspace/builtinSystemTemplates');
+const { createManifestAlgorithmBindings } = require('./workspace/manifestAlgorithmBindings');
 const {
   buildRuntimeBindingSnapshot,
   createDisplaySystemRuntimeController,
@@ -90,6 +91,16 @@ function createAppRuntime({
       return [...discovered.packages, ...userAlgorithms.list()];
     },
   });
+  const manifestAlgorithmBindings = createManifestAlgorithmBindings({
+    // 与 Agent 已保存算法共处 userData；开发版升级到打包版仍能读到绑定。
+    root: path.join(path.dirname(agentRoot), 'manifest-algorithm-bindings'),
+    getSystem: (id) => displaySystemRuntimeDiscovery.getById(id),
+    getEditor: (id) => {
+      const system = displaySystemRuntimeDiscovery.getById(id);
+      return system ? displaySystemWorkspace.read(system) : null;
+    },
+    listPackages: () => displaySystemWorkspace.getCatalog().algorithmPackages || [],
+  });
   let runtimeBindingOptions = null;
 
   /**
@@ -159,6 +170,9 @@ function createAppRuntime({
           runtimeDefinitions: [...status.runtimeDefinitions, ...copies.map((item) => item.runtimeDefinition)] };
       },
       getById: (id) => builtinTemplates.get(id) || displaySystemRuntimeDiscovery.getById(id),
+      readManifestAlgorithmBindings: manifestAlgorithmBindings.read,
+      updateManifestAlgorithmBindings: manifestAlgorithmBindings.update,
+      getManifestAlgorithmConfiguration: manifestAlgorithmBindings.getRuntimeConfiguration,
       /** 标出当前 Manifest 已占用的 Python 包，超市不能重复初始化同一原生库。 */
       getActiveAlgorithmPackageIds: (sensorType) => (displaySystemRuntimeDiscovery.getBySensorType(sensorType)?.sensors || []).map((sensor) => sensor.algorithm?.package?.id).filter(Boolean),
       getEditorById: (id) => {
@@ -169,7 +183,9 @@ function createAppRuntime({
         builtinTemplateCreation: { supported: true, version: 1 },
         nativeSystemEditing: { supported: true, version: 1, maxAlgorithms: 8, maxCharts: 12,
           fields: ['name', 'configuration.algorithms', 'configuration.charts', 'configuration.showPressure', 'configuration.showArea'],
-          updateRoute: '/api/display-systems/:id/native', deleteRoute: '/api/display-systems/:id/native' } }),
+          updateRoute: '/api/display-systems/:id/native', deleteRoute: '/api/display-systems/:id/native' },
+        manifestAlgorithmEditing: { supported: true, version: 1, maxAlgorithms: 8, maxCharts: 12,
+          fields: ['configuration.algorithms', 'configuration.charts'], updateRoute: '/api/display-systems/:id/algorithm-bindings' } }),
       reload: reloadDisplaySystems,
       save: (input) => {
         if (input?.builtinTemplate) {

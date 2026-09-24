@@ -65,15 +65,19 @@ function readJsonDefinition(filePath, readJsonFile) {
  * @param {*} definition 线序定义原始 JSON。
  * @param {object} options 校验上下文。
  * @param {string} options.source 文件路径，用于拼错误信息。
- * @param {number} options.matrixTotal 矩阵点总数（rows × cols），0 表示未知。
+ * @param {number} options.matrixTotal 展示矩阵点数；协议未声明解码点数时用于兜底。
+ * @param {number} [options.sourcePointCount] 协议解码后的原始点数，可大于展示矩阵。
  * @returns {string[]} 错误列表；全部通过为空数组。
  */
 function validateLineOrderDefinition(definition, {
   source,
   matrixTotal,
+  sourcePointCount,
 }) {
   const errors = [];
   let order = [];
+  const hasSourcePointCount = Number.isInteger(sourcePointCount) && sourcePointCount > 0;
+  const maxIndex = hasSourcePointCount ? sourcePointCount : matrixTotal;
 
   try {
     order = normalizeOrderDefinition(definition);
@@ -84,8 +88,8 @@ function validateLineOrderDefinition(definition, {
   order.forEach((index, offset) => {
     if (!Number.isInteger(index) || index <= 0) {
       errors.push(`${source}: order[${offset}] must be a positive integer`);
-    } else if (matrixTotal > 0 && index > matrixTotal) {
-      errors.push(`${source}: order[${offset}] exceeds matrix total ${matrixTotal}`);
+    } else if (maxIndex > 0 && index > maxIndex) {
+      errors.push(`${source}: order[${offset}] exceeds ${hasSourcePointCount ? 'decoded point count' : 'matrix total'} ${maxIndex}`);
     }
   });
 
@@ -247,6 +251,7 @@ function validateDisplaySystemDefinitionFiles(config, {
   const errors = [];
   const matrix = config.sensor?.matrix || {};
   const matrixTotal = Number(matrix.rows || 0) * Number(matrix.cols || 0);
+  const sourcePointCount = config.sensor?.protocol?.decoding?.valueCount;
 
   const lineOrderResult = readJsonDefinition(config.resolvedFiles?.lineOrder, readJsonFile);
   if (!lineOrderResult.ok) {
@@ -255,6 +260,7 @@ function validateDisplaySystemDefinitionFiles(config, {
     errors.push(...validateLineOrderDefinition(lineOrderResult.value, {
       source: config.resolvedFiles.lineOrder,
       matrixTotal,
+      sourcePointCount,
     }));
   }
 

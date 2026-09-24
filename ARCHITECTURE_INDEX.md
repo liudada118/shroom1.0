@@ -1,6 +1,6 @@
 # Shroom 快速架构索引
 
-> 最后更新于：2026-09-23
+> 最后更新于：2026-09-24
 > 用途：代码定位和验证路由。理解当前实现先读 [开发者手册](docs/developer-guide.md)，完整文档分类见 [docs/README.md](docs/README.md)。`ARCHITECTURE.md` 保留历史设计与维护台账，不用作默认全文入口。
 
 当前完整链路：[数据、算法、存储与回放](docs/chains/data-flow.md) · [页面、渲染与交互](docs/chains/interface-flow.md)。
@@ -61,6 +61,8 @@ client commandClient → HTTP :19245 /api/commands
 
 ## 4. 高频路径入口
 
+全局工具布局：`components/appTools/AppTools.jsx` 统一排列版本、更新和 Agent；首页反馈按钮通过专用 Portal 插槽加入同一行，页面卸载后自动移除。更新状态独占上方，不参与按钮宽度；`Home` 不再挂载运行页“画布零件”浮动栏。验证 `node scripts/tests/app-tools.mjs`（三种语言、320–1920px、更新状态、弹窗焦点、反馈卸载及长版本号）、`portal-launcher.mjs --monitor-only` 和 Standard；仅 UI 布局变更，无更新服务或渲染数据契约变动。
+
 Agent 客户交付与聊天同步：`index.js` 注入 `readStoredLicenseKey` → `agentProcess` → `agentSyncSettings` / `backend/agent-runtime/chatSync`，`AgentSyncSettings.jsx` 设置开关与状态。官方 HTTPS 接口默认复用软件密钥，自定义地址仍需独立令牌；按地址和密钥摘要隔离队列，经 Electron net.fetch 上传白名单快照，服务端校验有效性并确定公司名。`create-pack-db-template` 生成空库，Builder/Forge 排除个人目录，运行时 userData 不变。验证 `chatSync.test.js`、`agentProcess.test.js`、`privateDataIsolation.test.js`、`agent-workspace.mjs`、`embedded-agent-electron.cjs --chat-sync --asar` 和真实 IPC；触及 Electron/打包，执行 Full。服务端契约见 [聊天同步接口](docs/agent-chat-sync-api.md)。
 
 HaLow 人体接入：`kernel/transport/halowReceiver.js` 独立 TCP 分帧，`halowService.js` 校验当前系统/授权/串口互斥；`halow.control` 走 HTTP 并等待完成，状态走 WS。原生 `humanBodyOptimized` 与副本共用 `legacySerialFrameRuntime`，保留 canonical 身份、归零与存储。前端 `HalowConnection.jsx` 同时接门户/旧工具栏。验证 `halowReceiver.test.js`、`halowControlApi.test.js`、`Title.halow.test.jsx`、`node scripts/tests/halow-connection.mjs` 和 Full；说明见 [HaLow 接入](docs/halow-human-body.md)。
@@ -71,13 +73,19 @@ HaLow 人体接入：`kernel/transport/halowReceiver.js` 独立 TCP 分帧，`ha
 
 原生实体连续交接：`renderers/nativeSceneEntrance.js` 等待真实模型就绪，`nativeSceneSamples.js` 按实际三角形表面/足底透明轮廓采样，复用 `modelParticleEntrance`。`wholeChair`、`carQX`、`minzhen`、`footVideo`、`robot1`、`robotSY`、`robotLCF` 通过 Home 的 `portalEmbedded` 直接衔接列表并反向返回。`monitoringSurface` 对受管原生模型提供最多 30 秒等待及失败出口；验证两个 nativeScene 单测、monitoringSurface、modelParticleEntrance 和 `portal-scene-catalog.mjs --native-only`（7 个原生场景、慢加载/失败/减少动画），执行 Full。
 
-Agent 分类算法：`AgentAlgorithmData` → `agentProcess` / `runtime` 用户选择 → `tools` → `algorithm-lab`。`algorithmRecordService` 只读查询采集记录；受限 Python 由数值 AST 解释器执行。`evaluate` 保存输入契约，`realtimeCatalog` 发现已保存版本，`algorithmMarketService` 通过 `realtimeRunner` / `realtimeWorker` 实时分类；原生副本支持持久绑定，`PortalPackageOutputs` 显示类别和阶梯趋势。验证 `algorithmLab.test.js`、`realtimeClassifier.test.js`、`builtin-templates.mjs`、`embedded-agent-electron.cjs --algorithm --asar`；实时执行及跨层变更使用 Full。
+Agent 分类算法：`AgentAlgorithmData` → `agentProcess` / `runtime` 用户选择 → `tools` → `algorithm-lab`。`algorithmRecordService` 只读查询采集记录；受限 Python 由数值 AST 解释器执行。`adapt_algorithm_data` 测量当前设备节奏，在用户已选且带标签的记录上以最近真实帧重建离线窗口；`analyze_algorithm_data` / `test_algorithm` 沿用任务内适配目标，`evaluate` 保存输入契约，`realtimeCatalog` 发现已保存版本。原生副本走 `prepare_update_native_system`，用户 Manifest 走 `prepare_update_manifest_algorithms` → `manifestAlgorithmBindings` sidecar，首次启用均借 `frameObserver` 核验目标通道；无设备可先配置为停用。`server.js` 用当前 canonical displaySystemId 选择配置，`algorithmMarketService` 按 `displaySystemId` 消费帧；`ManifestSystemOutputs` 与原生侧栏共用真实分类图表。验证 `agentTools.test.js`、`manifestAlgorithmBindings.test.js`、`manifestAlgorithmBindingsApi.test.js`、`realtimeClassifier.test.js`、`builtin-templates.mjs`、`embedded-agent-electron.cjs --algorithm --asar`；实时执行及跨层变更使用 Full。
+
+实时分类节奏适配：`realtimeRunner` 依据离线报告的目标间隔选择最近的真实帧，保持 `windowFeatures` 同源，不插值、不补造压力值；跨越过大的已选帧间隔或窗口节奏超限则清空窗口、暂停输出，恢复后重新积累。`algorithmMarketService` 对用户分类器的时间倒序与接收断流清除旧历史、隔离迟到结果并自动重启窗口，输入点数/数值错误和计算线程故障仍停用。`PortalPackageOutputs` 将可恢复的暂停显示为等待状态；验证 `realtimeClassifier.test.js` 的节奏/隔离/恢复、算法超市接口测试、完整 Full 与真实设备采样验收。
 
 采集标签复用：`client/src/features/agent/collectionLabels.js` 从已知采集命名格式提取标签，`AgentAlgorithmData` 默认只需勾选，按需展开单条/批量改标签；支持当前页标签筛选、批量选择及上限反馈。只改前端选数，不改采集存储或 Agent 接口；验证 `collectionLabels.test.js`、`agent-workspace.mjs` 和 Standard 客户端域。
 
-Agent 历史与粘贴：`AgentHistory` / `AgentWorkspace.onPaste` → 主进程 `agentProcess` / `agentClipboard` → `runtime` / `storage`。原图独立保存，公开状态只传缩略图；当前会话与归档可切换续聊。验证 `runtime.test.js`、`agentProcess.test.js`、`node scripts/tests/agent-workspace.mjs` 及真实 Electron IPC/ASAR 夹具；触及桌面 IPC，执行 Full。
+Agent 历史与粘贴：`AgentHistory` / `AgentWorkspace.onPaste` → 主进程 `agentProcess` / `agentClipboard` → `runtime` / `storage`。原图独立保存，公开状态只传缩略图；当前会话与归档可切换续聊。`runtime.startTask` 不再按 40 次任务强制截断，仍保留单会话 6 MiB 大小保护和最近 20 条消息的模型上下文窗口。验证 `runtime.test.js`、`agentProcess.test.js`、`node scripts/tests/agent-workspace.mjs` 及真实 Electron IPC/ASAR 夹具；触及桌面 IPC，执行 Full。
 
-原生内置系统模板：`backend/extension-host/workspace/builtinSystemTemplates.js` → `appRuntimeFactory` → `serialControlService` / `server`；前端 `BuiltinTemplateDialog`、`nativeSystemTemplates`、Home 原生分支；Agent `prepare_builtin_system`。测试 `builtinTemplates.test.js`、`nativeSystemTemplates.test.js`、`AgentConversation.test.jsx`、`agentTools.test.js`、`node scripts/tests/builtin-templates.mjs`；涉及串口选择、身份与存储隔离，执行 Full。
+Agent 模型请求超时：`worker.requestDesktopModel` 经 Electron `net.fetch` → `provider.requestModelResponse`。每轮从原 90 秒固定截止改为 4 分钟无响应数据的静默超时，响应头、SSE 或 JSON 数据会续期；`runtime` 整任务上限由 4 分钟调整为 15 分钟，外部取消和响应大小限制仍有效。验证 `provider.test.js` 的持续流式输出、挂起连接与 HTTP 错误体，`runtime.test.js` 的取消，以及 Agent 真实 Electron/ASAR 夹具；未触及主进程 IPC 或打包路由时使用 Standard。
+
+Agent DeepSeek 官方直连：`AgentSettings.jsx` 按已存地址识别服务商，选 DeepSeek 官方后固定 `https://api.deepseek.com`，提供 `deepseek-flash` / `deepseek-v4-pro`；`provider.requestModelResponse` 复用 Responses SSE/函数工具调用链。切换地址须填新密钥，主进程 `agentSettings.js` 按地址隔离并加密保存。验证 `AgentWorkspace.test.jsx`、`agent-workspace.mjs`、`provider.test.js`、`agentProcess.test.js` 及 `embedded-agent-electron.cjs --proxy`；无真实 DeepSeek 凭据时使用本机模拟响应，不宣称外网账户权限已验证。
+
+原生内置系统模板：`backend/extension-host/workspace/builtinSystemTemplates.js` → `appRuntimeFactory` → `serialControlService` / `server`；前端 `BuiltinTemplateDialog`、`nativeSystemTemplates`、Home 原生分支；Agent `prepare_builtin_system` 仅用于完整复制固定设备与专用页面。新矩阵系统走 `prepare_create_system`，`tools/index.js` 根据 `axisMapping` 计算 1 基线序及行优先点位，默认单传感器 `pointGrid`、`workspace` 布局和首路矩阵侧栏，保存后读回映射。`PortalMonitoring.css` 把 Manifest 画布放在图表/工具层下；验证 `agentTools.test.js` 的源函数等价映射与 `manifest-workspace-layout.mjs` 的入口三栏遮挡。完整原生模板接入涉及串口选择、身份与存储隔离时执行 Full。
 
 原生独立系统编辑：`builtinSystemConfiguration.js` 校验算法、指标和输入 → `builtinSystemTemplates` 修订号保存/删除 → `PATCH/DELETE /api/display-systems/:id/native`。前端 `NativeSystemEditor` 编辑配置，`Aside/NativeSystemOutputs` 读取 `algorithmMarketService` 的真实输出；Agent 使用 `prepare_update_native_system` / `prepare_delete_native_system` / `get_algorithm_state`。测试增加 `nativeSystemsApi.test.js`、算法实例生命周期和原生图表浏览器回归；旧副本自动补默认配置，执行 Full。
 

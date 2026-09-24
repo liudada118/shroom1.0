@@ -9,7 +9,7 @@ import { buildPortalAlgorithmTemplates, PORTAL_ALGORITHM_DRAG_TYPE, readPortalAl
 import './PortalAlgorithmMarket.css';
 
 /** 参考式底部算法卡片栏；添加结果写入宿主图表 store，不建立第二套数据队列。 */
-export default function PortalAlgorithmMarket({ open, matrixName, metricDefinitions, inputKind = 'matrix', dropTargetRef, onClose, onShowCharts, onConfigure }) {
+export default function PortalAlgorithmMarket({ open, matrixName, displaySystemId, metricDefinitions, inputKind = 'matrix', dropTargetRef, onClose, onShowCharts, onConfigure }) {
   const rootRef = useRef(null);
   const openerRef = useRef(null);
   const callbacksRef = useRef({ onClose, onShowCharts });
@@ -20,7 +20,7 @@ export default function PortalAlgorithmMarket({ open, matrixName, metricDefiniti
   const [dragging, setDragging] = useState(null);
   const [category, setCategory] = useState('charts');
   const [selectedChannel, setSelectedChannel] = useState('');
-  const packages = usePortalPackageRuntime(selectedNativeSystemId(matrixName), open);
+  const packages = usePortalPackageRuntime(displaySystemId || selectedNativeSystemId(matrixName), open);
   const channel = packages.snapshot.channels.find((entry) => entry.channelId === selectedChannel) || packages.snapshot.channels[0];
 
   useEffect(() => subscribeFormulaCharts((system, next) => {

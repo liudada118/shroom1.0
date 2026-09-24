@@ -179,6 +179,8 @@ function createHttpApp({
   duplicateDisplaySystem = () => null,
   updateNativeSystem = () => null,
   deleteNativeSystem = () => null,
+  readManifestAlgorithmBindings = () => null,
+  updateManifestAlgorithmBindings = () => null,
   algorithmRecordService,
   // 展示系统目录变了要告诉正在跑的前端。Builder 在进程内保存时自己派发 DOM 事件，
   // 但 Agent / 脚本走的是这里的 HTTP 接口，前端毫无感知 —— 不广播的话新系统要重启软件才出现。
@@ -425,6 +427,24 @@ function createHttpApp({
       const result = updateNativeSystem(req.params.id, req.body);
       if (!result) { res.status(404).json({ error: 'system not found' }); return; }
       notifyDisplaySystemsUpdated('update', req.params.id);
+      res.json({ result });
+    } catch (error) { respondDisplaySystemWriteError(res, error); }
+  });
+
+  httpApp.get('/api/display-systems/:id/algorithm-bindings', (req, res) => {
+    try {
+      const result = readManifestAlgorithmBindings(req.params.id);
+      if (!result) { res.status(404).json({ error: 'system not found' }); return; }
+      res.json({ result });
+    } catch (error) { respondDisplaySystemWriteError(res, error); }
+  });
+
+  httpApp.patch('/api/display-systems/:id/algorithm-bindings', (req, res) => {
+    try {
+      assertAgentDeviceOrigin(req);
+      const result = updateManifestAlgorithmBindings(req.params.id, req.body);
+      if (!result) { res.status(404).json({ error: 'system not found' }); return; }
+      notifyDisplaySystemsUpdated('algorithm-bindings', req.params.id);
       res.json({ result });
     } catch (error) { respondDisplaySystemWriteError(res, error); }
   });

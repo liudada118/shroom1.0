@@ -19,9 +19,14 @@ export default function AgentTaskCard({ task, disabled, pendingAction, onProposa
       const key = `${task.id}:${proposal.id}`;
       const pending = pendingAction === key;
       return <article className="shroom-agent-proposal" key={proposal.id}>
-        <div className="shroom-agent-task-heading"><strong>{proposal.kind === 'algorithm_package' ? '保存分类算法' : proposal.kind === 'delete_native_system' ? '删除独立系统（保留采集数据）' : proposal.kind === 'update_native_system' ? '修改独立系统' : proposal.kind === 'builtin_system' ? '以内置模板创建系统' : proposal.kind === 'create_system' ? '创建展示系统' : proposal.kind === 'duplicate_system' ? '复制展示系统' : proposal.kind === 'connect_device' ? '连接设备' : '修改展示配置'}</strong>
+        <div className="shroom-agent-task-heading"><strong>{proposal.kind === 'algorithm_package' ? '保存分类算法' : proposal.kind === 'delete_native_system' ? '删除独立系统（保留采集数据）' : proposal.kind === 'update_native_system' ? '修改独立系统' : proposal.kind === 'update_manifest_algorithms' ? '绑定当前系统算法' : proposal.kind === 'builtin_system' ? '以内置模板创建系统' : proposal.kind === 'create_system' ? '创建展示系统' : proposal.kind === 'duplicate_system' ? '复制展示系统' : proposal.kind === 'connect_device' ? '连接设备' : '修改展示配置'}</strong>
           <span className="shroom-agent-status" data-status={proposal.status}>{TASK_LABELS[proposal.status] || proposal.status}</span></div>
         <p>{proposal.summary || proposal.systemId}</p>
+        {proposal.kind === 'create_system' && proposal.mappingPreview?.map((mapping) => <p className="shroom-agent-hint" key={mapping.sensorId}>
+          {mapping.sensorId}：原始 {mapping.rawPoints} 点 → {mapping.matrix.rows}×{mapping.matrix.cols}，线序 {mapping.mappedPoints} 项（1 基）；
+          首行起始 {mapping.first.join('、')}，首行末 {mapping.firstRowEnd}，{mapping.secondRowStart == null ? '' : `第二行首 ${mapping.secondRowStart}，`}末尾 {mapping.last.join('、')}。
+          物理方向待设备验证。
+        </p>)}
         {proposal.kind === 'algorithm_package' && proposal.after?.report && <div className="shroom-agent-algorithm-report">
           <p><strong>{proposal.after.report.split === 'validation' ? '独立记录验证' : '仅开发集测试'}</strong> · {proposal.after.report.windows} 个窗口 · 正确 {proposal.after.report.correct} · 未知 {proposal.after.report.unknown}</p>
           <p>本次窗口正确率：{(proposal.after.report.accuracy * 100).toFixed(1)}%。{proposal.after.report.split === 'development' ? '尚未验证对新采集数据的识别效果。' : '只反映所选记录的结果。'}</p>
@@ -35,7 +40,7 @@ export default function AgentTaskCard({ task, disabled, pendingAction, onProposa
         <div className="shroom-agent-proposal-actions">
           {proposal.status === 'pending' && <button className="shroom-agent-primary" type="button" disabled={disabled || pending}
             onClick={() => onProposalAction('applyProposal', task.id, proposal.id)}>{pending ? '正在应用…' : '应用此方案'}</button>}
-          {proposal.status === 'applied' && ['update_display', 'update_native_system'].includes(proposal.kind) && <button type="button" disabled={disabled || pending}
+          {proposal.status === 'applied' && ['update_display', 'update_native_system', 'update_manifest_algorithms'].includes(proposal.kind) && <button type="button" disabled={disabled || pending}
             onClick={() => onProposalAction('restoreProposal', task.id, proposal.id)}>{pending ? '正在恢复…' : '恢复此项更改'}</button>}
         </div>
         {proposal.status === 'applied' && <p className="shroom-agent-hint">{proposal.kind === 'connect_device'

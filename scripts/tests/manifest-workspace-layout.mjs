@@ -129,6 +129,22 @@ try {
     console.log(`workspace layout passed: DPR ${deviceScaleFactor}, cold empty -> single valid frame without remount, invalid frames, 5 viewport sizes, native pointGrid, collapse/restore, mode switches`);
     await context.close();
   }
+  const portalContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const portalPage = await portalContext.newPage();
+  await portalPage.route('http://127.0.0.1:19245/**', (route) => route.fulfill({ json: { code: 0, data: { apps: [] } } }));
+  await portalPage.goto(`http://127.0.0.1:${server.httpServer.address().port}/__workspace-test?portal`);
+  await portalPage.locator('.manifest-display').waitFor();
+  const panels = await portalPage.evaluate(() => ['.portal-observatory', '.portal-quick-tools'].map((selector) => {
+    const node = document.querySelector(selector);
+    const rect = node.getBoundingClientRect();
+    return { visible: rect.width > 0 && rect.height > 0 && getComputedStyle(node).visibility === 'visible',
+      front: node.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)) };
+  }));
+  assert.deepEqual(panels, [{ visible: true, front: true }, { visible: true, front: true }], '矩阵画布不能盖住图表和工具区');
+  await portalPage.getByText('渲染设置', { exact: true }).click();
+  assert.equal(await portalPage.getByRole('combobox', { name: '选择渲染器' }).isVisible(), true);
+  await portalContext.close();
+  console.log('Manifest portal shell passed: charts, tools and renderer picker remain accessible above matrix canvas');
   const context = await browser.newContext();
   let breathLoads = 0;
   await context.route('http://127.0.0.1:19245/**', async (route) => {

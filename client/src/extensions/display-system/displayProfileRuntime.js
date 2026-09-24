@@ -73,7 +73,8 @@ export function applyVisualizationAlgorithm(values = [], algorithm = {}, matrix 
 export function calculatePressureMetrics(values = [], sidebar = {}) {
   const numeric = toNumericValues(values);
   const threshold = Math.max(0, Number(sidebar?.area?.threshold) || 0);
-  const pointArea = Math.max(0, Number(sidebar?.area?.pointArea) || 0);
+  // 未校准物理单点面积时以 1 格计，避免新系统面积图一直显示 0。
+  const pointArea = Math.max(0, Number(sidebar?.area?.pointArea ?? 1) || 0);
   const totalPressure = numeric.reduce((sum, value) => sum + value, 0);
   const activePoints = numeric.filter((value) => value > threshold).length;
   return {

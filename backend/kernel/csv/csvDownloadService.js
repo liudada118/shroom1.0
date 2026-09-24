@@ -307,6 +307,7 @@ function createCsvDownloadService({
       const data = normalizeHistoryPressureData(
         rowForPressureNormalization(row, storedData, descriptor),
         rowSensorType,
+        { canonical: !descriptor.legacy },
       );
       const pressureSum = data.reduce((sum, value) => sum + value, 0);
       // sit/back 的阈值差异只属于旧三通道格式；canonical outputChannel 是任意展示别名，

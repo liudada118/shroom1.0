@@ -450,6 +450,7 @@ export const bilingualConfig = {
   },
 
   update: {
+    action: text('更新', 'Update'),
     title: text('软件更新', 'Software Update'),
     checking: text('检查中…', 'Checking…'),
     available: text('有新版本 {{version}}', 'New version {{version}}'),

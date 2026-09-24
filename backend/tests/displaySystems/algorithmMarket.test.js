@@ -145,6 +145,10 @@ function fixture() {
   ]) {
     legacy.bus.publish(invalid.channelId, invalid);
     const channel = legacy.service.snapshot().channels.find((item) => item.channelId === invalid.channelId);
+    if (invalid.displaySystemId !== 'hand') {
+      assert.equal(channel, undefined, '其他展示系统的 canonical 帧不得进入当前算法会话');
+      continue;
+    }
     assert.equal(channel.matrix, null, '身份或尺寸不明确时不借用默认方阵');
     assert.match(channel.inputError, /矩阵尺寸/);
   }

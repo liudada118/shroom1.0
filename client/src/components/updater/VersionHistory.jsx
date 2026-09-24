@@ -2,7 +2,7 @@
  * VersionHistory.jsx - 版本历史组件
  *
  * 功能:
- * 1. 在更新 icon 旁边显示一个版本历史 icon
+ * 1. 在更新按钮旁显示当前版本及历史入口
  * 2. 点击后弹出 Modal 展示所有历史版本和更新信息
  * 3. 顶部显示当前版本号
  *
@@ -53,17 +53,12 @@ export default function VersionHistory() {
   return (
     <>
       <Button
-        shape="circle"
-        size="small"
+        className="shroom-app-tool shroom-app-version"
         icon={<HistoryOutlined />}
         onClick={() => setShowModal(true)}
         title={t("update.history")}
-        style={{
-          backgroundColor: "#722ed1",
-          borderColor: "transparent",
-          color: "#fff",
-        }}
-      />
+        aria-label={currentVersion ? `${t("update.history")} · v${currentVersion}` : t("update.history")}
+      >{currentVersion ? `v${currentVersion}` : t("update.history")}</Button>
 
       <Modal
         title={

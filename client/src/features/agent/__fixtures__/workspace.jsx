@@ -52,7 +52,8 @@ const bridge = {
       snapshot.chatSync.status = { state: 'idle', pendingCount: 0, lastSuccessAt: new Date().toISOString() };
       data = snapshot.chatSync.status;
     } else if (action === 'saveSettings') {
-      snapshot.settings = { baseUrl: payload.baseUrl, model: payload.model, hasApiKey: Boolean(payload.apiKey) || snapshot.settings.hasApiKey };
+      snapshot.settings = { baseUrl: payload.baseUrl, model: payload.model,
+        hasApiKey: Boolean(payload.apiKey) || (payload.baseUrl === snapshot.settings.baseUrl && snapshot.settings.hasApiKey) };
       data = snapshot.settings;
     } else if (action === 'setAlgorithmSelection') {
       if (payload.selection && payload.selection.records.some((item) => !item.label.trim())) return { ok: false, error: { message: '请填写类别。' } };

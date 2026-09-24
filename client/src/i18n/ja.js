@@ -380,6 +380,7 @@ export const japaneseTranslations = Object.freeze({
   "licenseAdmin.groups.lab": compare("实验室", "ラボ"),
   "licenseAdmin.groups.custom": compare("定制", "カスタム"),
   "licenseAdmin.groups.precision": compare("精密", "精密"),
+  "update.action": compare("更新", "更新"),
   "update.title": compare("软件更新", "ソフトウェアアップデート"),
   "update.checking": compare("检查中…", "確認しています…"),
   "update.available": compare("有新版本 {{version}}", "新しいバージョン{{version}}"),

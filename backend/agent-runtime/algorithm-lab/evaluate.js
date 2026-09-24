@@ -26,8 +26,31 @@ function windowFeatures(frames) {
   return result;
 }
 
-/** 按记录形成不重叠窗口；同毫秒采样只留首帧，报告保留原始范围和跳过数量。 */
-function prepareWindows(records, windowFrames) {
+/** 以目标时间网格选择最近的真实帧，与实时分类器保持相同的选帧顺序。 */
+function selectFramesAtInterval(samples, targetIntervalMs) {
+  const selected = [samples[0]];
+  let nextTarget = samples[0].frame.timestamp + targetIntervalMs, candidate = null;
+  /** 接纳一个真实采样，并向前推进目标时刻。 */
+  function accept(sample) {
+    selected.push(sample);
+    nextTarget += targetIntervalMs;
+    while (nextTarget <= sample.frame.timestamp) nextTarget += targetIntervalMs;
+  }
+  for (const sample of samples.slice(1)) {
+    if (sample.frame.timestamp < nextTarget) { candidate = sample; continue; }
+    if (candidate && nextTarget - candidate.frame.timestamp < sample.frame.timestamp - nextTarget) {
+      accept(candidate);
+      candidate = null;
+      if (sample.frame.timestamp < nextTarget) candidate = sample;
+      else accept(sample);
+    } else { candidate = null; accept(sample); }
+  }
+  return selected;
+}
+
+/** 按记录形成不重叠窗口；适配时只选真实帧，不跨缺口组成分类窗口。 */
+function prepareWindows(records, windowFrames, targetIntervalMs = null) {
+  if (targetIntervalMs !== null && (!Number.isFinite(targetIntervalMs) || targetIntervalMs <= 0 || targetIntervalMs > 5000)) throw new Error('目标采样间隔无效。');
   const windows = [], summaries = [];
   let pointCount = null, stage = null;
   for (const record of records) {
@@ -44,16 +67,33 @@ function prepareWindows(records, windowFrames) {
       }
       samples.push({ frame, offset: i });
     }
-    const count = Math.floor(samples.length / windowFrames), skippedDuplicateTimestamps = record.frames.length - samples.length;
-    if (!count) throw new Error(`记录“${name}”有效采样 ${samples.length} 帧（同毫秒跳过 ${skippedDuplicateTimestamps} 帧），不足一个完整窗口，请增加帧范围或缩小窗口。`);
-    for (let index = 0; index < count; index++) {
-      const frames = samples.slice(index * windowFrames, (index + 1) * windowFrames).map((sample) => sample.frame);
-      windows.push({ recordId: record.id, label: record.label, split: record.split, startFrame: (record.startFrame || 0) + samples[index * windowFrames].offset, timestamp: frames[0].timestamp, features: windowFeatures(frames) });
+    const selected = targetIntervalMs === null ? samples : selectFramesAtInterval(samples, targetIntervalMs);
+    const skippedDuplicateTimestamps = record.frames.length - samples.length;
+    const segments = [[]];
+    for (const sample of selected) {
+      const segment = segments.at(-1);
+      if (targetIntervalMs !== null && segment.length && sample.frame.timestamp - segment.at(-1).frame.timestamp > targetIntervalMs * 2) segments.push([]);
+      segments.at(-1).push(sample);
     }
+    let count = 0, unusedTailFrames = 0;
+    for (const segment of segments) {
+      const complete = Math.floor(segment.length / windowFrames);
+      count += complete; unusedTailFrames += segment.length % windowFrames;
+      for (let index = 0; index < complete; index++) {
+        const part = segment.slice(index * windowFrames, (index + 1) * windowFrames);
+        const frames = part.map((sample) => sample.frame);
+        windows.push({ recordId: record.id, label: record.label, split: record.split, startFrame: (record.startFrame || 0) + part[0].offset,
+          timestamp: frames[0].timestamp, features: windowFeatures(frames) });
+      }
+    }
+    if (!count) throw new Error(targetIntervalMs === null
+      ? `记录“${name}”有效采样 ${samples.length} 帧（同毫秒跳过 ${skippedDuplicateTimestamps} 帧），不足一个完整窗口，请增加帧范围或缩小窗口。`
+      : `记录“${name}”按当前设备约 ${Math.round(1000 / targetIntervalMs)} Hz 选取真实帧后不足一个完整窗口；请增加该类别已采集帧范围，或缩小窗口，不能插值补造动作峰值。`);
     summaries.push({ id: record.id, date: record.date, label: record.label, split: record.split, frameCount: record.frames.length, usableFrameCount: samples.length,
-      skippedDuplicateTimestamps, windows: count, unusedTailFrames: samples.length % windowFrames });
+      skippedDuplicateTimestamps, windows: count, unusedTailFrames,
+      ...(targetIntervalMs !== null ? { selectedFrameCount: selected.length, targetIntervalMs } : {}) });
   }
-  return { windows, records: summaries, pointCount, stage };
+  return { windows, records: summaries, pointCount, stage, ...(targetIntervalMs !== null ? { targetIntervalMs } : {}) };
 }
 
 /** 返回开发集特征摘要；验证集数值不用于指导生成和修改。 */
@@ -71,7 +111,10 @@ function summarize(prepared) {
 function evaluate(prepared, source, labels, split) {
   const program = compile(source);
   const rows = prepared.windows.filter((item) => item.split === split);
+  // 实时窗口必须沿用开发集的采样基准；独立验证只评估冻结代码，不能重写输入契约。
+  const referenceRows = prepared.windows.filter((item) => item.split === 'development');
   if (!rows.length) throw new Error(split === 'validation' ? '未选择独立验证记录。' : '没有开发集窗口。');
+  if (!referenceRows.length) throw new Error('没有开发集窗口，不能生成实时输入契约。');
   let correct = 0, unknown = 0;
   const confusion = labels.map(() => Array(labels.length + 1).fill(0));
   const predictions = rows.map((row) => {
@@ -84,7 +127,9 @@ function evaluate(prepared, source, labels, split) {
   return { split, labels, windows: rows.length, correct, unknown, accuracy: correct / rows.length, confusion, columns: [...labels, '未知'], predictions,
     records: prepared.records.filter((record) => record.split === split),
     inputContract: { pointCount: prepared.pointCount, stage: prepared.stage,
-      sampleIntervalMs: rows.reduce((sum, row) => sum + row.features.duration * 1000 / (row.features.frameCount - 1), 0) / rows.length } };
+      sampleIntervalMs: prepared.targetIntervalMs || referenceRows.reduce((sum, row) => sum + row.features.duration * 1000 / (row.features.frameCount - 1), 0) / referenceRows.length },
+    ...(prepared.targetIntervalMs ? { preprocessing: { mode: 'nearest-real-frame', targetIntervalMs: prepared.targetIntervalMs,
+      source: 'measured-current-device', noInterpolation: true } } : {}) };
 }
 
-module.exports = { windowFeatures, prepareWindows, summarize, evaluate };
+module.exports = { windowFeatures, prepareWindows, summarize, evaluate, selectFramesAtInterval };

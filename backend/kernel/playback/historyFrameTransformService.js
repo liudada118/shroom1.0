@@ -111,20 +111,22 @@ function createHistoryFrameTransformService({
    *
    * @param {{ data?: string }} row matrix 表中的数据库行。
    * @param {string} sensorType 该行数据对应的传感器类型。
+   * @param {{canonical?: boolean}} [options] canonical 帧已是展示矩阵，不再套用旧型号裁剪与校正。
    * @returns {number[]} 归一化后的压力值。
    */
-  function normalizeHistoryPressureData(row, sensorType = '') {
+  function normalizeHistoryPressureData(row, sensorType = '', options = {}) {
     const storedData = parseStoredFrameData(row);
     const data = getHistoryPressureData(row);
-    const pressureData = isHandStorageType(sensorType) && data.length > 256 ? data.slice(0, 256) : data;
+    const canonical = options.canonical === true;
+    const pressureData = !canonical && isHandStorageType(sensorType) && data.length > 256 ? data.slice(0, 256) : data;
     const normalizedData = pressureData.map((value) => {
       const numberValue = Number(value);
       return Number.isFinite(numberValue) ? numberValue : 0;
     });
-    if (sensorType === SMALL_BED_12B_TYPE) {
+    if (!canonical && sensorType === SMALL_BED_12B_TYPE) {
       return normalizeSmallBed12BPressureData(normalizedData, storedData);
     }
-    if (sensorType !== TEMP_FULL_BED_TYPE) return normalizedData;
+    if (canonical || sensorType !== TEMP_FULL_BED_TYPE) return normalizedData;
     return normalizedData.map((value) => value < TEMP_FULL_BED_PRESSURE_THRESHOLD ? 0 : value);
   }
 

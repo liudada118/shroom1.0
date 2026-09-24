@@ -57,6 +57,24 @@ test('actual worker gives the same labels as offline windows, without mutating f
   assert.equal(JSON.stringify(frames), before);
 });
 
+test('device-cadence adaptation uses the same real-frame features in offline testing and realtime worker', async (t) => {
+  const records = ['抚摸', '拍打'].map((label, recordIndex) => ({ id: label, label, split: 'development',
+    frames: Array.from({ length: 32 }, (_, index) => ({ values: [recordIndex ? index % 4 * 100 : 2, 0, 0, 0],
+      timestamp: 1000 + recordIndex * 10000 + index * 20, stage: 'data' })) }));
+  const report = evaluate(prepareWindows(records, 16, 40), source, ['抚摸', '拍打'], 'development');
+  assert.equal(report.inputContract.sampleIntervalMs, 40);
+  const observed = [];
+  for (const record of records) {
+    const runner = createRealtimeClassifier({ classifier: { source, labels: ['抚摸', '拍打'], windowFrames: 16, pointCount: 4, sampleIntervalMs: 40 } });
+    t.after(() => runner.dispose());
+    for (const frame of record.frames) {
+      const result = await runner(frame.values, { timestamp: frame.timestamp });
+      if (!result.pending) observed.push(result.metrics.classIndex);
+    }
+  }
+  assert.deepEqual(observed, report.predictions.map((row) => report.labels.indexOf(row.predicted)));
+});
+
 test('same-millisecond frames do not enter classifier windows or cancel in-flight results', async (t) => {
   const { draft, frames, report } = example();
   const runner = createRealtimeClassifier(realtimePackage(draft, true).resolvedPackage); t.after(() => runner.dispose());
@@ -71,33 +89,75 @@ test('same-millisecond frames do not enter classifier windows or cancel in-fligh
   assert.equal(JSON.stringify(frames), before);
 });
 
-test('duplicate tolerance preserves long-gap and invalid-input failures', async (t) => {
+test('duplicate tolerance recovers from long gaps but still rejects invalid input', async (t) => {
   const { draft } = example(); const options = realtimePackage(draft, true).resolvedPackage;
+  const gap = createRealtimeClassifier(options); t.after(() => gap.dispose());
+  await gap([1, 0, 0, 0], { timestamp: 1000 });
+  const recovering = await gap([1, 0, 0, 0], { timestamp: 6001 });
+  assert.equal(recovering.pending, true); assert.match(recovering.reason, /中断/);
   for (const input of [
-    { timestamp: 6001, values: [1, 0, 0, 0] },
     { timestamp: 1000, values: [1, 0] },
     { timestamp: 1000, values: [NaN, 0, 0, 0] },
     { timestamp: NaN, values: [1, 0, 0, 0] },
   ]) {
     const runner = createRealtimeClassifier(options); t.after(() => runner.dispose());
     await runner([1, 0, 0, 0], { timestamp: 1000 });
-    await assert.rejects(runner(input.values, input), /不连续/);
-    await assert.rejects(runner([1, 0, 0, 0], { timestamp: 1020 }), /不连续/);
+    await assert.rejects(runner(input.values, input), /无效/);
+    await assert.rejects(runner([1, 0, 0, 0], { timestamp: 1020 }), /无效/);
   }
 });
 
-test('runtime rejects broken timing, incompatible cadence and unbounded queues', async (t) => {
+test('runtime pauses on unsupported cadence and resumes automatically, while keeping queues bounded', async (t) => {
   const { draft } = example(); const options = realtimePackage(draft, true).resolvedPackage;
   const gap = createRealtimeClassifier(options); t.after(() => gap.dispose());
   await gap([1, 0, 0, 0], { timestamp: 1000 });
-  await assert.rejects(gap([1, 0, 0, 0], { timestamp: 999 }), /不连续/);
+  assert.match((await gap([1, 0, 0, 0], { timestamp: 999 })).reason, /倒序/);
   const cadence = createRealtimeClassifier(options); t.after(() => cadence.dispose());
-  for (let index = 0; index < 15; index++) await cadence([1, 0, 0, 0], { timestamp: 1000 + index * 100 });
-  await assert.rejects(cadence([1, 0, 0, 0], { timestamp: 2500 }), /采样频率/);
+  await cadence([1, 0, 0, 0], { timestamp: 1000 });
+  const paused = await cadence([1, 0, 0, 0], { timestamp: 1100 });
+  assert.equal(paused.pending, true); assert.match(paused.reason, /已暂停识别/);
+  let recovered;
+  for (let index = 1; index < 16; index++) recovered = await cadence([1, 0, 0, 0], { timestamp: 1100 + index * 20 });
+  assert.equal(recovered.metrics.classIndex, 0);
   const queued = createRealtimeClassifier(options); t.after(() => queued.dispose());
   const outcomes = [];
   for (let index = 0; index < 32; index++) outcomes.push(queued([1, 0, 0, 0], { timestamp: 1000 + index * 20 }).catch((error) => error));
   const result = await Promise.all(outcomes); assert.ok(result.some((entry) => entry instanceof Error && /跟不上/.test(entry.message)));
+});
+
+test('faster frames and uneven 14/26 ms input retain real offline features and labels', async (t) => {
+  const { draft, frames, report } = example();
+  const options = realtimePackage(draft, true).resolvedPackage;
+  const fast = createRealtimeClassifier(options); t.after(() => fast.dispose());
+  const fastResults = [];
+  for (let index = 0; index < frames.length * 2; index++) {
+    const result = await fast(frames[Math.floor(index / 2)].values, { timestamp: 1000 + index * 10 });
+    if (!result.pending) fastResults.push(result.metrics.classIndex);
+  }
+  assert.deepEqual(fastResults, report.predictions.map((row) => draft.labels.indexOf(row.predicted)));
+
+  const uneven = createRealtimeClassifier(options); t.after(() => uneven.dispose());
+  const timed = frames.map((frame, index) => ({ ...frame, timestamp: frame.timestamp - (index % 2 ? 6 : 0) }));
+  const reference = evaluate(prepareWindows([
+    { id: 'a', frames: timed.slice(0, 16), label: '抚摸', split: 'development' },
+    { id: 'b', frames: timed.slice(16), label: '拍打', split: 'development' },
+  ], 16), source, draft.labels, 'development');
+  const results = [];
+  for (const frame of timed) { const result = await uneven(frame.values, frame); if (!result.pending) results.push(result.metrics.classIndex); }
+  const final = await uneven(timed.at(-1).values, { timestamp: timed.at(-1).timestamp + 20 });
+  if (!final.pending) results.push(final.metrics.classIndex);
+  assert.deepEqual(results, reference.predictions.map((row) => draft.labels.indexOf(row.predicted)));
+});
+
+test('restarting an in-flight worker cannot publish its previous window as a new result', async (t) => {
+  const { draft } = example(); const runner = createRealtimeClassifier(realtimePackage(draft, true).resolvedPackage); t.after(() => runner.dispose());
+  for (let index = 0; index < 15; index++) await runner([2, 0, 0, 0], { timestamp: 1000 + index * 20 });
+  const stale = runner([2, 0, 0, 0], { timestamp: 1300 });
+  const restarted = await runner([0, 0, 0, 0], { timestamp: 2000, resetReason: '数据中断' });
+  assert.equal(restarted.pending, true); await assert.rejects(stale, /重新同步/);
+  let fresh;
+  for (let index = 1; index < 16; index++) fresh = await runner([index * 100, 0, 0, 0], { timestamp: 2000 + index * 20 });
+  assert.equal(fresh.metrics.classIndex, 1);
 });
 
 test('live market discovers saved packages, uses processed values and clears instances on mode or system changes', async (t) => {
@@ -124,7 +184,7 @@ test('live market discovers saved packages, uses processed values and clears ins
   fs.unlinkSync(file); assert.equal(service.snapshot().instances.length, 0); assert.equal(service.snapshot().packages.length, 0);
 });
 
-test('live market skips equal timestamps but keeps reverse-time and reception-gap protection', async (t) => {
+test('live market skips duplicates, clears stale labels on timing faults and recovers without rebinding', async (t) => {
   const { draft, frames, report } = example(); const { root } = directory(t, draft);
   const catalog = createRealtimeAlgorithmCatalog(root), bus = createChannelBus(); let time = 980, sequence = 0;
   const service = createAlgorithmMarketService({ channelBus: bus, getContext: () => ({ sensorType: 'copy-hand', allowed: true, playback: false }),
@@ -152,15 +212,29 @@ test('live market skips equal timestamps but keeps reverse-time and reception-ga
   assert.deepEqual(state.history.map((point) => draft.labels[point.metrics.classIndex]), report.predictions.map((item) => item.predicted));
   assert.equal(JSON.stringify(frames), before);
   publish({ ...frames.at(-1), timestamp: frames.at(-1).timestamp - 1 });
-  assert.match(service.snapshot().instances[0].error, /倒序/);
-  publish({ ...frames.at(-1), timestamp: 2000 });
-  assert.equal(service.snapshot().instances[0].status, 'error');
-
-  await service.toggle({ ...request, enabled: false }); await service.toggle(request);
-  publish({ ...frames[0], timestamp: 2020 });
-  publish({ ...frames[0], timestamp: 2020 }, 4021);
-  publish({ ...frames[0], timestamp: 2040 }, 4022);
-  assert.match(service.snapshot().instances[0].error, /数据中断/);
+  await until(() => service.snapshot(), (value) => /倒序/.test(value.instances[0]?.error));
+  assert.equal(service.snapshot().instances[0].status, 'waiting');
+  assert.equal(service.snapshot().instances[0].history.length, 0);
+  publish({ ...frames[0], timestamp: 4500 }, 4501);
+  await until(() => service.snapshot(), (value) => /中断/.test(value.instances[0]?.error));
+  assert.equal(service.snapshot().instances[0].status, 'waiting');
+  for (let index = 1; index < 16; index++) {
+    publish({ ...frames[index], timestamp: 4500 + index * 20 }, 4501 + index * 20);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  await until(() => service.snapshot(), (value) => value.instances[0]?.history.length === 1);
+  assert.equal(service.snapshot().instances[0].status, 'running');
+  assert.equal(service.snapshot().instances[0].error, '');
+  publish({ ...frames[0], timestamp: 4900 }, 4901);
+  await until(() => service.snapshot(), (value) => /已暂停识别/.test(value.instances[0]?.error));
+  assert.equal(service.snapshot().instances[0].history.length, 0);
+  assert.equal(service.snapshot().instances[0].status, 'waiting');
+  for (let index = 1; index < 16; index++) {
+    publish({ ...frames[index], timestamp: 4900 + index * 20 }, 4901 + index * 20);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  await until(() => service.snapshot(), (value) => value.instances[0]?.history.length === 1);
+  assert.equal(service.snapshot().instances[0].error, '');
 });
 
 test('native configuration and restart retain user bindings only in their tested system', (t) => {

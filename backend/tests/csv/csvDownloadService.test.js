@@ -7,6 +7,8 @@ const {
   sanitizeFileNameSegment,
   shortChannelHash,
 } = require('../../kernel/csv/csvDownloadService');
+const { createHistoryFrameTransformService } = require('../../kernel/playback/historyFrameTransformService');
+const { createCollectionFrameStorageService } = require('@shroom/backend/collection/collectionFrameStorageService.js');
 
 const DATE = '2026-08-31 10:00:00';
 
@@ -23,7 +25,7 @@ function normalizeHistoryPressureData(row, sensorType) {
 normalizeHistoryPressureData.calls = [];
 
 function createService({ exportDir, events, databases, descriptors, rowsByKey, legacyRowsByDb,
-  runtime = { file: 'demo', historyArr: [0, 100] }, rowsByDate = new Map() }) {
+  runtime = { file: 'demo', historyArr: [0, 100] }, rowsByDate = new Map(), normalizer = normalizeHistoryPressureData }) {
   const rowsQueries = [];
   const service = createCsvDownloadService({
     fs,
@@ -49,7 +51,7 @@ function createService({ exportDir, events, databases, descriptors, rowsByKey, l
     queryHistoryRows: () => {
       throw new Error('date-only rows must not be used when exact query helpers exist');
     },
-    normalizeHistoryPressureData,
+    normalizeHistoryPressureData: normalizer,
     formatMatrixTotalForFile: (value) => value,
     totalToN: (value) => value,
     findMax: (values) => Math.max(...values),
@@ -281,6 +283,33 @@ async function run() {
     assert.deepStrictEqual(successEvent.downloadFiles, result.files);
     assert.strictEqual(successEvent.downloadArtifacts.length, 4);
     assert.ok(events.some((event) => event.csvDownloadProgress?.channelId === 'desk:pad/a'));
+
+    const raw = Array.from({ length: 1024 }, (_, index) => index + 1);
+    const displayed = Array.from({ length: 529 }, (_, index) => raw[Math.floor(index / 23) * 32 + index % 23]);
+    const collection = createCollectionFrameStorageService();
+    const saved = collection.buildDisplaySystemCollectionData({
+      runtimeSource: 'display-system', channelId: 'mapped:pad', displaySystemId: 'mapped', sensorId: 'pad',
+      sensorType: 'hand0205', outputChannel: 'pad', rawData: raw, normalizedData: displayed, data: displayed,
+    }, 'padData');
+    assert.equal(JSON.parse(saved).rawData.length, 1024);
+    assert.equal(JSON.parse(saved).data.length, 529);
+    const historyTransform = createHistoryFrameTransformService({
+      isHandStorageType: (type) => type === 'hand0205',
+      SMALL_BED_12B_TYPE: 'smallBed12B', TEMP_FULL_BED_TYPE: 'tempFullBed', TEMP_FULL_BED_PRESSURE_THRESHOLD: 20,
+    });
+    assert.equal(historyTransform.normalizeHistoryPressureData({ data: saved }, 'hand0205').length, 256);
+    const mappedExport = createService({
+      exportDir: path.join(tempRoot, 'mapped'), events: [], databases,
+      descriptors: new Map([[db, [{ channelId: 'mapped:pad', displaySystemId: 'mapped', sensorId: 'pad', sensorType: 'hand0205', outputChannel: 'pad' }]], [db1, []], [db2, []]]),
+      rowsByKey: new Map([['db|mapped:pad', [{ id: 1, timestamp: 1000, data: saved }]]]),
+      legacyRowsByDb: new Map(), runtime: { file: 'hand0205', historyArr: [0, 1] },
+      normalizer: historyTransform.normalizeHistoryPressureData,
+    });
+    const mappedResult = await mappedExport.service.exportHistoryCsv({ date: DATE });
+    assert.equal(mappedResult.ok, true);
+    const mappedCsv = fs.readFileSync(mappedResult.artifacts[0].file, 'utf8');
+    assert.ok(mappedCsv.includes(JSON.stringify(displayed)), 'CSV must contain all 529 displayed values');
+    assert.ok(!mappedCsv.includes(JSON.stringify(raw)), 'CSV must not export the 1024 decoded values');
 
     // 精确筛选只能执行目标 channelId 的行查询；未知目标会作为 skipped 返回。
     const filteredEvents = [];

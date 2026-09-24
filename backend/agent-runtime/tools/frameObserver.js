@@ -12,6 +12,8 @@ function observeFrames({ WebSocketImpl, wsUrl, systemId, sensorId, durationMs = 
     let socket; let timer; let done = false; let frameCount = 0; let invalidFrames = 0; let unmatchedFrames = 0; let sequenceGaps = 0; let outOfOrder = 0; let pointCountMismatch = 0; let latest = null;
     let emptyFrames = 0; let invalidSampleFrames = 0; let usableRealtimeFrames = 0; let staleFrames = 0;
     let matrixMismatch = 0; let matrixMissing = 0;
+    let previousRealtimeTimestamp = null; let duplicateTimestamps = 0; let reverseTimestamps = 0;
+    const realtimeIntervals = [];
     const sourceCounts = { realtime: 0, playback: 0 };
     const sequences = { realtime: null, playback: null };
     /** 清理所有观察资源，并返回已获得的证据。 */
@@ -32,8 +34,14 @@ function observeFrames({ WebSocketImpl, wsUrl, systemId, sensorId, durationMs = 
         : emptyFrames === frameCount ? 'no_valid_samples' : !sourceCounts.realtime ? 'playback_only'
           : sourceCounts.playback ? 'mixed_sources' : matrixMismatch ? 'matrix_mismatch' : matrixMissing ? 'matrix_unavailable'
             : usableRealtimeFrames ? 'realtime_frames_observed' : 'realtime_data_invalid';
+      const orderedIntervals = [...realtimeIntervals].sort((a, b) => a - b);
+      const timing = { intervalCount: orderedIntervals.length, duplicateTimestamps, reverseTimestamps,
+        medianIntervalMs: orderedIntervals.length ? orderedIntervals[Math.floor(orderedIntervals.length / 2)] : null,
+        p90IntervalMs: orderedIntervals.length ? orderedIntervals[Math.ceil(orderedIntervals.length * .9) - 1] : null,
+        minIntervalMs: orderedIntervals[0] ?? null, maxIntervalMs: orderedIntervals.at(-1) ?? null };
       resolve({ channelId, observedAt: new Date().toISOString(), durationMs: Date.now() - started,
         status, frameCount, invalidFrames, unmatchedFrames, sequenceGaps, outOfOrder, pointCountMismatch, matrixMismatch, matrixMissing, expectedMatrix, latest, sourceCounts, emptyFrames, invalidSampleFrames, staleFrames, usableRealtimeFrames,
+        timing,
         liveVerified: usableRealtimeFrames > 0 && pointCountMismatch === 0 && matrixMismatch === 0 && matrixMissing === 0 && invalidSampleFrames === 0 && staleFrames === 0 && invalidFrames === 0 && unmatchedFrames === 0 && sourceCounts.playback === 0 && outOfOrder === 0,
         findings: [!frameCount ? 'No valid canonical frame was observed during this bounded interval; check active system, device connection and protocol.'
           : !sourceCounts.realtime ? 'Only playback frames were observed; this does not verify the connected device.' : 'Canonical realtime frames were observed; inspect the quality counts before accepting the data.',
@@ -79,7 +87,16 @@ function observeFrames({ WebSocketImpl, wsUrl, systemId, sensorId, durationMs = 
       if (!values.length || valid !== values.length) invalidSampleFrames += 1;
       const stale = frame.quality !== 'good' || (frame.source === 'realtime' && Math.abs(Date.now() - frame.timestamp) > 15000);
       if (stale) staleFrames += 1;
-      if (frame.source === 'realtime' && valid > 0 && valid === values.length && (!expectedPointCount || values.length === expectedPointCount) && !stale) usableRealtimeFrames += 1;
+      if (frame.source === 'realtime' && valid > 0 && valid === values.length && (!expectedPointCount || values.length === expectedPointCount) && !stale) {
+        usableRealtimeFrames += 1;
+        if (previousRealtimeTimestamp !== null) {
+          const interval = frame.timestamp - previousRealtimeTimestamp;
+          if (interval > 0) realtimeIntervals.push(interval);
+          else if (interval === 0) duplicateTimestamps += 1;
+          else reverseTimestamps += 1;
+        }
+        previousRealtimeTimestamp = frame.timestamp;
+      }
       frameCount += 1;
       latest = { sequence: frame.sequence, timestamp: frame.timestamp, source: frame.source, quality: frame.quality, matrix: matrix ? { rows: matrix.rows, cols: matrix.cols } : null, pointCount: values.length, validPointCount: valid,
         min: valid ? min : null, max: valid ? max : null, average: valid ? sum / valid : null, sample: values.slice(0, 8) };

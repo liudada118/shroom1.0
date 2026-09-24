@@ -18,12 +18,12 @@ function nativeInputs(sourceType) {
 }
 
 /** 规范化每个系统独有的算法与图表；加载旧文件时补齐默认值。 */
-function validateNativeConfiguration(value = DEFAULT_CONFIGURATION, { sourceType, systemId, packages, validatePackages = true } = {}) {
+function validateNativeConfiguration(value = DEFAULT_CONFIGURATION, { sourceType, systemId, packages, validatePackages = true, inputs: suppliedInputs } = {}) {
   fields(value, ['algorithms', 'charts', 'showPressure', 'showArea']);
   const next = { ...DEFAULT_CONFIGURATION, ...value };
   if (typeof next.showPressure !== 'boolean' || typeof next.showArea !== 'boolean') invalid('原生图表显示开关必须是布尔值。');
   if (!Array.isArray(next.algorithms) || next.algorithms.length > 8 || !Array.isArray(next.charts) || next.charts.length > 12) invalid('最多配置 8 个算法和 12 张算法图表。');
-  const inputs = nativeInputs(sourceType);
+  const inputs = suppliedInputs || nativeInputs(sourceType);
   const ids = new Set();
   next.algorithms = next.algorithms.map((entry) => {
     fields(entry, ['packageId', 'sensorId', 'enabled']);
@@ -36,7 +36,8 @@ function validateNativeConfiguration(value = DEFAULT_CONFIGURATION, { sourceType
       if (item.systemId && item.systemId !== systemId) invalid('用户分类算法只能绑定到其测试并保存的系统。');
       const totals = item.compatibility?.matrixTotals || [];
       const shapes = item.compatibility?.recommendedMatrices || [];
-      if (!inputs.matrix || (totals.length && !totals.includes(inputs.matrix.total)) || (shapes.length && !shapes.some((shape) => shape.rows === inputs.matrix.rows && shape.cols === inputs.matrix.cols))) invalid('算法输入尺寸与模板不匹配，请选择兼容算法。');
+      const matrix = inputs.matrices?.[entry.sensorId] || inputs.matrix;
+      if (!matrix || (totals.length && !totals.includes(matrix.total)) || (shapes.length && !shapes.some((shape) => shape.rows === matrix.rows && shape.cols === matrix.cols))) invalid('算法输入尺寸与模板不匹配，请选择兼容算法。');
     }
     return { packageId: entry.packageId, sensorId: entry.sensorId, enabled: entry.enabled };
   });

@@ -13,6 +13,9 @@ const { buildSdkContractSnapshot } = require('@shroom/backend/contract/sdkApiCon
 const installedPolicy = require('../../../agent-resources/policy.json');
 const { createAgentDeviceConnectionService } = require('../../kernel/platform/commands/agentDeviceConnectionService');
 const { createBuiltinSystemTemplates } = require('../../extension-host/workspace/builtinSystemTemplates');
+const { createManifestAlgorithmBindings } = require('../../extension-host/workspace/manifestAlgorithmBindings');
+const { executeConfiguredMapping } = require('@shroom/backend/processing/configMappingExecutor.js');
+const { endiSit1024 } = require('@shroom/backend/processing/lineOrders.js');
 
 /** 构造带真实校验和临时磁盘的本机平台 API，不接触用户目录或串口。 */
 async function fixture() {
@@ -21,11 +24,15 @@ async function fixture() {
   const requests = []; const proposals = [];
   const hooks = {};
   const policy = JSON.parse(JSON.stringify(installedPolicy));
-  const protocols = [{ id: 'two-by-two', label: 'Test', protocol: { baudRate: 115200, framing: { type: 'fixedLength', frameLength: 4 }, decoding: { valueType: 'uint8', byteOffset: 0, valueCount: 4 } } }];
+  const protocols = [{ id: 'two-by-two', label: 'Test', protocol: { baudRate: 115200, framing: { type: 'fixedLength', frameLength: 4 }, decoding: { valueType: 'uint8', byteOffset: 0, valueCount: 4 } } },
+    require('@shroom/backend/protocol/presets/standard-1024.json')];
   const packages = [{ id: 'trusted', attachable: true, compatibility: { matrixTotals: [4] }, packageManifest: { schemaVersion: 1, id: 'trusted', name: 'Trusted', version: '1.0.0', apiVersion: 2, language: 'python', entry: 'algorithm.py', input: { mode: 'single-sensor' }, output: { metrics: [] } }, algorithmSource: 'def process(request):\n    return {"data": request["normalized_data"]}\n' }];
   /** 从临时目录重新发现刚写入的系统。 */
   function config(id) { if (!id) return null; const directory = path.join(root, id); return fs.existsSync(directory) ? loadDisplaySystemDirectory(directory, { validateFiles: true }).config : null; }
   const native = createBuiltinSystemTemplates({ root: path.join(root, '_native'), isOccupied: (id) => Boolean(config(id)), listPackages: () => packages });
+  const manifestBindings = createManifestAlgorithmBindings({ root: path.join(root, '_algorithm_bindings'),
+    getSystem: (id) => { const loaded = config(id); return loaded && { ...loaded, editable: true }; },
+    getEditor: (id) => { const loaded = config(id); return loaded && workspace.read(loaded); }, listPackages: () => packages });
   const runtime = { currentSensorType: 'previous-system', collecting: false, localPlayback: false, playing: false, historyMode: false, licensed: true, licenseScope: 'all' };
   const serial = []; const deviceCommands = [];
   const deviceService = createAgentDeviceConnectionService({ getRuntimeState: () => runtime, getSerialStatus: () => serial,
@@ -43,19 +50,21 @@ async function fixture() {
     res.setHeader('content-type', 'application/json');
     let body = ''; for await (const chunk of req) body += chunk;
     const input = body ? JSON.parse(body) : {};
-    const match = req.url.match(/^\/api\/display-systems\/([^/]+)\/(editor|display|duplicate|native)$/);
+    const match = req.url.match(/^\/api\/display-systems\/([^/]+)\/(editor|display|duplicate|native|algorithm-bindings)$/);
     try {
       let result;
       if (req.url === '/api/sdk/contract') result = buildSdkContractSnapshot();
       else if (req.url === '/api/agent-apps/policy') result = { code: 0, data: { policy } };
-      else if (req.url === '/api/display-systems/catalog') result = { catalog: { ...workspace.getCatalog(), algorithmPackages: packages, builtinTemplates: native.catalog, builtinTemplateCreation: { supported: true, version: 1 }, nativeSystemEditing: { supported: true, version: 1 } } };
+      else if (req.url === '/api/display-systems/catalog') result = { catalog: { ...workspace.getCatalog(), algorithmPackages: packages, builtinTemplates: native.catalog, builtinTemplateCreation: { supported: true, version: 1 }, nativeSystemEditing: { supported: true, version: 1 }, manifestAlgorithmEditing: { supported: true, version: 1 } } };
       else if (req.url === '/api/serial/protocols') result = { code: 0, data: { protocols } };
       else if (req.url === '/api/display-systems' && req.method === 'GET') result = { displaySystems: { systems: [...fs.readdirSync(root).filter((id) => id !== '_native' && config(id)).map((id) => ({ id, sensorType: config(id).sensor.type })), ...native.list()] } };
-      else if (req.url === '/api/display-systems' && req.method === 'POST') result = { result: input.builtinTemplate ? native.create(input.builtinTemplate) : workspace.save(input) };
+      else if (req.url === '/api/display-systems' && req.method === 'POST') { result = { result: input.builtinTemplate ? native.create(input.builtinTemplate) : workspace.save(input) }; hooks.afterCreate?.(input); }
       else if (req.url === '/api/agent-device/status') result = { ...deviceService.snapshot(), availablePorts: [{ path: 'COM8' }] };
       else if (req.url === '/api/agent-device/connect') result = deviceService.connect(input, [{ path: 'COM8' }]);
       else if (match?.[2] === 'native' && req.method === 'PATCH') result = { result: native.update(match[1], input) };
       else if (match?.[2] === 'native' && req.method === 'DELETE') result = { result: native.remove(match[1], input.expectedRevision) };
+      else if (match?.[2] === 'algorithm-bindings' && req.method === 'GET') result = { result: manifestBindings.read(match[1]) };
+      else if (match?.[2] === 'algorithm-bindings' && req.method === 'PATCH') result = { result: manifestBindings.update(match[1], input) };
       else if (match && req.method === 'GET') { const loaded = config(match[1]); if (!loaded && !native.editor(match[1])) { res.statusCode = 404; result = { code: 'NOT_FOUND', error: 'not found' }; } else result = { editor: loaded ? workspace.read(loaded) : native.editor(match[1]) }; }
       else if (match && req.method === 'PATCH') result = { result: workspace.saveDisplaySection(config(match[1]), input) };
       else if (match?.[2] === 'duplicate' && req.method === 'POST') { hooks.beforeDuplicate?.(); result = { result: workspace.duplicate(config(match[1]), input) }; }
@@ -76,11 +85,67 @@ async function fixture() {
 /** 提供必须显式给出线序及点位的最小真实配置。 */
 function input(id = 'created') { return { id, name: '测试系统', summary: '创建已知协议的测试系统', rendererId: 'heatmap', sensors: [{ id: 'seat', type: `${id}-pressure`, protocolId: 'two-by-two', matrix: { rows: 2, cols: 2 }, lineOrder: [1, 2, 3, 4], pointOrder: [[0, 0], [0, 1], [1, 0], [1, 1]] }], chartCards: [{ metric: 'maxPressure' }] }; }
 
+/** 订阅后送入合成原生实时帧，覆盖 Agent 启用前的频率核验。 */
+function streamNativeFrames(f, systemId, intervalMs) {
+  f.wsServer.on('connection', (client) => client.on('message', () => {
+    const interval = typeof intervalMs === 'function' ? intervalMs() : intervalMs;
+    const start = Date.now() - 59 * interval;
+    for (let index = 0; index < 60; index += 1) client.send(JSON.stringify({ type: 'sensor.frame', schemaVersion: 1,
+      channelId: `${systemId}:sit`, displaySystemId: systemId, sensorId: 'sit', outputChannel: 'sit', source: 'realtime', quality: 'good',
+      timestamp: start + index * interval, sequence: index, payload: { value: Array(1024).fill(1), matrix: { rows: 32, cols: 32 } } }));
+  }));
+}
+
+test('Agent binds a trained classifier to the existing Manifest system without replacing its input or records', async () => {
+  const f = await fixture();
+  try {
+    await f.tools.execute('prepare_create_system', input('seatpad'), f.context);
+    await f.tools.apply(f.proposals[0], f.context);
+    const original = fs.readFileSync(path.join(f.root, 'seatpad', 'display-system.json'), 'utf8');
+    const records = path.join(f.root, 'existing-records.db'); fs.writeFileSync(records, 'keep');
+    const packageId = 'user-seatpad-gesture';
+    f.packages.push({ id: packageId, name: '动作分类', runtime: 'restricted-python-v1', systemId: 'seatpad', attachable: true,
+      compatibility: { matrixTotals: [4] }, packageManifest: { input: { mode: 'single-sensor' } },
+      metricDefinitions: [{ id: 'classIndex', label: '识别类别', values: { 0: '抚摸', 1: '拍打' } }] });
+    const editor = await f.tools.execute('read_system', { systemId: 'seatpad' });
+    assert.deepEqual(editor.algorithmBindings.configuration, { algorithms: [], charts: [] });
+    const configuration = { algorithms: [{ packageId, sensorId: 'seat', enabled: false }],
+      charts: [{ id: 'gesture', name: '动作识别', packageId, metricId: 'classIndex', color: '#20B486', decimals: 0 }] };
+    await f.tools.execute('prepare_update_manifest_algorithms', { systemId: 'seatpad', configuration, summary: '绑定已训练分类器' }, f.context);
+    const proposal = f.proposals.at(-1);
+    assert.equal(proposal.kind, 'update_manifest_algorithms');
+    assert.deepEqual((await f.tools.execute('read_system', { systemId: 'seatpad' })).algorithmBindings.configuration, { algorithms: [], charts: [] });
+    const applied = await f.tools.apply(proposal, f.context);
+    assert.equal(applied.verified, true);
+    assert.deepEqual((await f.tools.execute('read_system', { systemId: 'seatpad' })).algorithmBindings.configuration, configuration);
+    assert.equal(fs.readFileSync(path.join(f.root, 'seatpad', 'display-system.json'), 'utf8'), original);
+    assert.equal(fs.readFileSync(records, 'utf8'), 'keep');
+    await assert.rejects(f.tools.apply(proposal, f.context), { code: 'DISPLAY_SYSTEM_REVISION_CONFLICT' });
+    const restored = await f.tools.restore({ ...proposal, status: 'applied' }, f.context);
+    assert.equal(restored.restored, true);
+    assert.deepEqual((await f.tools.execute('read_system', { systemId: 'seatpad' })).algorithmBindings.configuration, { algorithms: [], charts: [] });
+  } finally { await f.close(); }
+});
+
+test('Manifest algorithm binding rejects mismatched point counts before preparing a proposal', async () => {
+  const f = await fixture();
+  try {
+    await f.tools.execute('prepare_create_system', input('seatpad'), f.context);
+    await f.tools.apply(f.proposals[0], f.context);
+    f.packages.push({ id: 'user-wrong-shape', runtime: 'restricted-python-v1', systemId: 'seatpad', attachable: true,
+      compatibility: { matrixTotals: [529] }, packageManifest: { input: { mode: 'single-sensor' } }, metricDefinitions: [{ id: 'classIndex' }] });
+    await assert.rejects(f.tools.execute('prepare_update_manifest_algorithms', { systemId: 'seatpad', summary: '错误点数',
+      configuration: { algorithms: [{ packageId: 'user-wrong-shape', sensorId: 'seat', enabled: false }], charts: [] } }, f.context),
+    { code: 'DISPLAY_SYSTEM_INVALID' });
+    assert.equal(f.proposals.length, 1);
+  } finally { await f.close(); }
+});
+
 test('Agent discovers and binds a saved user classifier without replacing existing native charts', async () => {
   const f = await fixture();
   try {
     const packageId = 'user-agent-classifier';
-    f.packages.push({ id: packageId, name: '用户动作识别', runtime: 'restricted-python-v1', systemId: 'agent-hand', attachable: true,
+    f.packages.push({ id: packageId, name: '用户动作识别', runtime: 'restricted-python-v1', systemId: 'agent-hand', sampleRateHz: 50, attachable: true,
       compatibility: { matrixTotals: [1024] }, packageManifest: { input: { mode: 'single-sensor' } },
       metricDefinitions: [{ id: 'classIndex', label: '识别类别', values: { 0: '抚摸', 1: '拍打', '-1': '未知' } }] });
     f.native.create({ id: 'agent-hand', name: '独立手部', sourceType: 'hand' });
@@ -90,12 +155,41 @@ test('Agent discovers and binds a saved user classifier without replacing existi
     const editor = await f.tools.execute('read_system', { systemId: 'agent-hand' });
     const configuration = { ...editor.configuration, algorithms: [{ packageId, sensorId: 'sit', enabled: true }],
       charts: [{ id: 'gesture', name: '动作识别', packageId, metricId: 'classIndex', color: '#20B486', decimals: 0 }] };
+    await assert.rejects(f.tools.execute('prepare_update_native_system', { systemId: 'agent-hand', name: '独立手部', configuration, summary: '绑定用户分类算法' }, f.context),
+      { code: 'ALGORITHM_REALTIME_UNVERIFIED' }, '没有实时帧时不能生成已启用的算法提案');
+    let actualInterval = 20;
+    streamNativeFrames(f, 'agent-hand', () => actualInterval);
     await f.tools.execute('prepare_update_native_system', { systemId: 'agent-hand', name: '独立手部', configuration, summary: '绑定用户分类算法' }, f.context);
+    assert.equal(f.proposals.at(-1).inputVerification[0].status, 'compatible');
+    const inspected = await f.tools.execute('inspect_frames', { systemId: 'agent-hand', sensorId: 'sit', maxFrames: 60, durationMs: 1000 });
+    assert.equal(inspected.timing.medianIntervalMs, 20);
     assert.equal(f.native.editor('agent-hand').configuration.algorithms.length, 0);
+    actualInterval = 100;
+    await assert.rejects(f.tools.apply(f.proposals.at(-1)), { code: 'ALGORITHM_REALTIME_RATE_UNSUPPORTED' }, '应用前设备降速必须重新拦截');
+    assert.equal(f.native.editor('agent-hand').configuration.algorithms.length, 0);
+    actualInterval = 20;
     const applied = await f.tools.apply(f.proposals.at(-1));
     assert.equal(applied.verified, true); assert.equal(applied.liveVerified, false);
     assert.deepEqual(f.native.editor('agent-hand').configuration, configuration);
     assert.equal(f.native.editor('agent-hand').configuration.showPressure, true);
+  } finally { await f.close(); }
+});
+
+test('Agent blocks a slow live channel before preparing an enabled user classifier', async () => {
+  const f = await fixture();
+  try {
+    const packageId = 'user-slow-test';
+    f.packages.push({ id: packageId, name: '分类', runtime: 'restricted-python-v1', systemId: 'slow-hand', sampleRateHz: 50, attachable: true,
+      compatibility: { matrixTotals: [1024] }, packageManifest: { input: { mode: 'single-sensor' } }, metricDefinitions: [{ id: 'classIndex', label: '类别' }] });
+    f.native.create({ id: 'slow-hand', name: '手部副本', sourceType: 'hand' });
+    f.runtime.currentSensorType = 'slow-hand';
+    streamNativeFrames(f, 'slow-hand', 100);
+    const configuration = { algorithms: [{ packageId, sensorId: 'sit', enabled: true }], charts: [], showPressure: true, showArea: true };
+    await assert.rejects(f.tools.execute('prepare_update_native_system', { systemId: 'slow-hand', name: '手部副本', configuration, summary: '启用分类' }, f.context),
+      (error) => error.code === 'ALGORITHM_REALTIME_RATE_UNSUPPORTED' && error.message.includes('10 Hz'));
+    assert.equal(f.proposals.length, 0);
+    await f.tools.execute('prepare_update_native_system', { systemId: 'slow-hand', name: '手部副本', configuration: { ...configuration, algorithms: [{ packageId, sensorId: 'sit', enabled: false }] }, summary: '先保存停用配置' }, f.context);
+    assert.equal(f.proposals.length, 1);
   } finally { await f.close(); }
 });
 
@@ -213,6 +307,66 @@ test('builtin templates are discoverable and only saved after applying a reviewe
     assert.equal((await f.tools.execute('read_system', { systemId: 'my-hand' }, f.context)).kind, 'builtin-template');
     await assert.rejects(f.tools.execute('prepare_builtin_system', { id: 'my-hand', name: '重复', sourceType: 'hand', summary: '重复' }, f.context), { code: 'DISPLAY_SYSTEM_EXISTS' });
     await assert.rejects(f.tools.execute('prepare_duplicate_system', { sourceSystemId: 'hand', id: 'bad-copy', name: '错误工具', summary: '复制' }, f.context), { code: 'AGENT_INVALID_ARGUMENTS' });
+  } finally { await f.close(); }
+});
+
+test('single-sensor matrix creation reuses workspace charts without inheriting hand input', async () => {
+  const f = await fixture();
+  try {
+    const request = input('matrix-23');
+    request.rendererId = 'pointGrid';
+    request.sensors[0].protocolId = 'standard-1024';
+    request.sensors[0].matrix = { rows: 23, cols: 23 };
+    request.sensors[0].lineOrder = Array.from({ length: 529 }, (_, index) => Math.floor(index / 23) * 32 + index % 23 + 1);
+    request.sensors[0].pointOrder = Array.from({ length: 529 }, (_, index) => [Math.floor(index / 23), index % 23]);
+    request.sensors[0].coordinateMap = Array.from({ length: 23 }, (_, row) =>
+      Array.from({ length: 23 }, (_, col) => [col * (1 + row / 40), row]));
+    const context = { ...f.context, taskText: '沿用 hand 图表和工具，创建 23×23 点图，原始帧 1024 点' };
+    await f.tools.execute('prepare_create_system', request, context);
+    const proposal = f.proposals.at(-1);
+    assert.equal(proposal.kind, 'create_system');
+    assert.equal(proposal.after.display.layout.presentation, 'workspace');
+    assert.equal(proposal.after.display.sidebar.source, 'seat');
+    assert.equal(proposal.after.display.renderers[0].id, 'pointGrid');
+    assert.equal(proposal.after.sensors[0].files.coordinateMap, 'seat/coordinate-map.json');
+    await f.tools.apply(proposal, context);
+    const saved = f.config('matrix-23');
+    assert.equal(saved.sensors[0].protocol.decoding.valueCount, 1024);
+    assert.deepEqual(saved.sensors[0].matrix, { rows: 23, cols: 23 });
+    assert.equal(saved.display.sidebar.source, 'seat');
+    assert.equal(saved.display.layout.presentation, 'workspace');
+    const editor = await f.tools.execute('read_system', { systemId: 'matrix-23' });
+    assert.deepEqual(editor.definitions.sensors.seat.coordinateMap.coordinates[22][22], [34.1, 22]);
+    const malformed = { ...input('bad-shape'), sensors: [{ ...input('bad-shape').sensors[0], coordinateMap: [[[0, 0]]] }] };
+    await assert.rejects(f.tools.execute('prepare_create_system', malformed, f.context), { code: 'AGENT_INVALID_MAPPING' });
+    const wrongNative = { ...f.context, taskText: '沿用 hand 图表，创建 23×23 的新矩阵系统' };
+    await assert.rejects(f.tools.execute('prepare_builtin_system', { id: 'wrong-native', name: '错误副本', sourceType: 'hand', summary: '创建' }, wrongNative),
+      { code: 'AGENT_NATIVE_INPUT_MISMATCH' });
+    await f.tools.execute('prepare_builtin_system', { id: 'old-native-draft', name: '旧草稿', sourceType: 'hand', summary: '创建' }, f.context);
+    await assert.rejects(f.tools.apply(f.proposals.at(-1), wrongNative), { code: 'AGENT_NATIVE_INPUT_MISMATCH' });
+    assert.equal(f.native.get('old-native-draft'), null);
+  } finally { await f.close(); }
+});
+
+test('Agent prepares a variable matrix with the shared chart and tool workspace', async () => {
+  const f = await fixture();
+  try {
+    let turn = 0;
+    const runtime = createAgentRuntime({ root: path.join(f.root, 'agent-matrix-workspace'), tools: f.tools,
+      modelRequest: async ({ input: messages, onText }) => {
+        if (turn++ === 0) return { output: [{ type: 'function_call', name: 'prepare_create_system', call_id: 'matrix', arguments: JSON.stringify(input('matrix-workspace')) }] };
+        assert.ok(JSON.parse(messages.at(-1).output).proposalId);
+        onText('已生成矩阵工作区提案，等待应用。');
+        return { output: [] };
+      } });
+    runtime.configure({ baseUrl: 'https://example.com/v1', model: 'test', apiKey: 'fixture-only' });
+    runtime.startTask({ text: '新建单传感器矩阵系统，沿用 hand 图表和工具布局，矩阵尺寸可以不同' });
+    await runtime.whenIdle();
+    const task = runtime.getState().conversation.tasks[0];
+    assert.equal(task.status, 'awaiting_action');
+    assert.deepEqual(task.proposals.map((proposal) => proposal.kind), ['create_system']);
+    assert.equal(f.native.get('matrix-workspace'), null);
+    await runtime.dispose();
   } finally { await f.close(); }
 });
 
@@ -339,6 +493,83 @@ test('create proposal is read-only, apply validates and reads real saved system 
     await assert.rejects(f.tools.execute('prepare_create_system', input('created-pressure'), f.context), { code: 'AGENT_SENSOR_TYPE_CONFLICT' });
     f.policy.schemaVersion = 999;
     await assert.rejects(f.tools.execute('prepare_create_system', input('unsupported'), f.context), { code: 'AGENT_CONTRACT_UNSUPPORTED' });
+  } finally { await f.close(); }
+});
+
+test('create keeps 1024 decoded points while mapping a selected 23x23 subset', async () => {
+  const f = await fixture();
+  try {
+    const request = input('subset-1024');
+    const sensor = request.sensors[0];
+    sensor.protocolId = 'standard-1024';
+    sensor.matrix = { rows: 23, cols: 23 };
+    sensor.lineOrder = Array.from({ length: 529 }, (_, index) => index === 528
+      ? 1024 : Math.floor(index / 23) * 32 + index % 23 + 1);
+    sensor.pointOrder = Array.from({ length: 529 }, (_, index) => [Math.floor(index / 23), index % 23]);
+    const proposal = await f.tools.execute('prepare_create_system', request, f.context);
+    assert.equal(proposal.applied, false);
+    assert.equal(f.proposals[0].after.sensors[0].protocol.decoding.valueCount, 1024);
+    await f.tools.apply(f.proposals[0]);
+    const loaded = f.config('subset-1024');
+    assert.ok(loaded);
+    assert.equal(loaded.sensors[0].protocol.decoding.valueCount, 1024);
+    const editor = await f.tools.execute('read_system', { systemId: 'subset-1024' });
+    const mapping = editor.definitions.sensors.seat;
+    const raw = Array.from({ length: 1024 }, (_, index) => index + 1);
+    const output = executeConfiguredMapping(raw, mapping);
+    assert.equal(output.length, 529);
+    assert.equal(output[0], 1);
+    assert.equal(output[528], 1024);
+    sensor.lineOrder[528] = 1025;
+    await assert.rejects(f.tools.execute('prepare_create_system', request, f.context), { code: 'AGENT_INVALID_MAPPING' });
+  } finally { await f.close(); }
+});
+
+test('axis mapping compiles the legacy 1024-to-23x23 function and detects changed saved line order', async () => {
+  const f = await fixture();
+  try {
+    const request = input('axis-seat');
+    delete request.rendererId;
+    const sensor = request.sensors[0];
+    sensor.protocolId = 'standard-1024';
+    sensor.matrix = { rows: 23, cols: 23 };
+    delete sensor.lineOrder;
+    delete sensor.pointOrder;
+    sensor.axisMapping = { sourceColumns: 32, x: [[0, 22]], y: [[11, 22], [10, 0]] };
+    const prepared = await f.tools.execute('prepare_create_system', request, f.context);
+    const proposal = f.proposals.at(-1);
+    assert.deepEqual(prepared.mappingPreview[0], proposal.mappingPreview[0]);
+    assert.deepEqual(prepared.mappingPreview[0].first, [353, 354, 355, 356, 357]);
+    assert.equal(prepared.mappingPreview[0].firstRowEnd, 375);
+    assert.equal(prepared.mappingPreview[0].secondRowStart, 385);
+    assert.equal(proposal.after.display.renderers[0].id, 'pointGrid');
+    assert.deepEqual(proposal.after.display.sidebar.pressure.metrics, ['averagePressure', 'maxPressure', 'totalPressure']);
+    assert.equal(proposal.after.display.sidebar.area.pointArea, 1);
+    assert.equal(proposal.payload.definitions.sensors.seat.lineOrder.order.length, 529);
+    await f.tools.apply(proposal);
+    const raw = Array.from({ length: 1024 }, (_, index) => index + 1);
+    const editor = await f.tools.execute('read_system', { systemId: 'axis-seat' });
+    assert.deepEqual(executeConfiguredMapping(raw, editor.definitions.sensors.seat), endiSit1024(raw));
+    assert.deepEqual(editor.definitions.sensors.seat.lineOrder.order.slice(0, 3), [353, 354, 355]);
+    assert.deepEqual(editor.definitions.sensors.seat.lineOrder.order.slice(-3), [21, 22, 23]);
+    const bad = input('bad-axis');
+    bad.sensors[0].protocolId = 'standard-1024';
+    bad.sensors[0].matrix = { rows: 23, cols: 23 };
+    bad.sensors[0].axisMapping = sensor.axisMapping;
+    await assert.rejects(f.tools.execute('prepare_create_system', bad, f.context), { code: 'AGENT_INVALID_MAPPING' });
+    bad.sensors[0] = { ...sensor, type: 'bad-axis-pressure', axisMapping: { sourceColumns: 32, x: [[0, 22]], y: [[11, 22], [11, 0]] } };
+    await assert.rejects(f.tools.execute('prepare_create_system', bad, f.context), { code: 'AGENT_INVALID_MAPPING' });
+    bad.sensors[0] = { ...sensor, type: 'bad-axis-pressure', axisMapping: { sourceColumns: 32, x: [[0, 22]], y: [[11, 22], [10, 0]] }, lineOrder: Array(529).fill(1) };
+    await assert.rejects(f.tools.execute('prepare_create_system', bad, f.context), { code: 'AGENT_INVALID_MAPPING' });
+    const changed = { ...request, id: 'axis-tamper', sensors: [{ ...sensor, type: 'axis-tamper-pressure' }] };
+    await f.tools.execute('prepare_create_system', changed, f.context);
+    f.hooks.afterCreate = () => {
+      const file = path.join(f.root, 'axis-tamper/seat/line-order.json');
+      const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+      [value.order[0], value.order[1]] = [value.order[1], value.order[0]];
+      fs.writeFileSync(file, JSON.stringify(value));
+    };
+    await assert.rejects(f.tools.apply(f.proposals.at(-1)), { code: 'AGENT_OPERATION_UNCERTAIN' });
   } finally { await f.close(); }
 });
 

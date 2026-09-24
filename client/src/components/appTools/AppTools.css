@@ -1,0 +1,90 @@
+.shroom-app-tools {
+  position: fixed;
+  z-index: 950;
+  right: max(24px, env(safe-area-inset-right));
+  bottom: max(20px, env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 48px);
+  padding: 6px;
+  box-sizing: border-box;
+  border: 1px solid #294359;
+  border-radius: 16px;
+  background: #0b1828;
+  box-shadow: 0 8px 28px #0005;
+  color: #edf5ff;
+  font-family: Inter, "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+}
+
+.shroom-update-tools { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.shroom-app-feedback-slot { display: flex; flex-shrink: 0; }
+.shroom-app-feedback-slot:empty { display: none; }
+.shroom-app-tools .shroom-app-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 44px;
+  height: 44px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: none;
+  color: #b6cbe0;
+  font-size: 13px;
+}
+.shroom-app-tools .shroom-app-tool:hover:not(:disabled) { color: #edf5ff; background: #1d3650; border-color: #4a7896; }
+.shroom-app-tools .shroom-app-tool:focus-visible { outline: 2px solid #78d3f5; outline-offset: 2px; }
+.shroom-app-tools .shroom-app-tool:disabled { color: #8ba5bc; cursor: wait; }
+.shroom-app-tools .shroom-app-version { min-width: 44px; max-width: 150px; }
+.shroom-app-version > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shroom-app-tools .shroom-app-update { flex-shrink: 0; }
+.shroom-app-tools .portal-feedback-trigger { cursor: pointer; }
+.shroom-app-tools .portal-feedback-trigger strong { font-weight: 400; }
+.shroom-app-tools .shroom-app-update[data-state="available"] { color: #edcf8e; background: #30291c; }
+.shroom-app-tools .shroom-app-update[data-state="downloaded"] { color: #99e0bc; background: #17352d; }
+.shroom-app-tools .shroom-app-update[data-state="error"] { color: #ffb4aa; }
+.shroom-app-tools .shroom-agent-root { flex-shrink: 0; }
+.shroom-app-tools .shroom-agent-root .shroom-agent-entry {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  min-height: 44px;
+  padding-inline: 14px;
+  border-radius: 10px;
+  box-shadow: none;
+}
+.shroom-app-tools .shroom-agent-entry-dot { position: absolute; top: 6px; right: 6px; }
+
+/* 状态独占工具组上方，不随版本号或下载进度扩展按钮行。 */
+.shroom-app-update-status {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  right: 0;
+  max-width: 100%;
+  pointer-events: none;
+}
+.shroom-app-update-status .ant-tag {
+  margin: 0;
+  padding: 5px 10px;
+  border-radius: 8px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  box-shadow: 0 4px 16px #0003;
+}
+@media (max-width: 520px) {
+  .shroom-app-tools {
+    right: max(12px, env(safe-area-inset-right));
+    bottom: max(12px, env(safe-area-inset-bottom));
+    max-width: calc(100vw - max(12px, env(safe-area-inset-left)) - max(12px, env(safe-area-inset-right)));
+  }
+  .shroom-app-tools .shroom-app-tool { padding-inline: 8px; }
+  .shroom-app-tools .portal-feedback-trigger strong { display: none; }
+  .shroom-app-tools .shroom-agent-root .shroom-agent-entry { padding-inline: 10px; }
+}
+@media (max-width: 360px) {
+  .shroom-app-tools .shroom-app-update > span:last-child { display: none; }
+  .shroom-app-tools .shroom-app-version .ant-btn-icon { display: none; }
+}

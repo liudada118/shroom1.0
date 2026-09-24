@@ -81,6 +81,7 @@
 .portal-package-output svg text { fill: #b8ccd9; font-size: 10px; }
 .portal-package-output p { margin: 6px 0; color: #c8dbe9; font-size: 12px; }
 .portal-package-output .is-error { color: #ffb3a5; }
+.portal-package-output .is-paused { color: #edcf8e; }
 .fiber-portal .portal-algorithm-categories :focus-visible, .portal-package-output :focus-visible { outline: 2px solid var(--system-accent, #69dfca); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) {
   .fiber-portal .portal-algorithm-market, .fiber-portal .portal-algorithm-card { transition: none; }
