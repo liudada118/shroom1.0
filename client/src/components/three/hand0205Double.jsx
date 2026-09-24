@@ -56,8 +56,10 @@ let rightBaseQuaternionInv = null;
  */
 
 function transformQuaternion(a, side = 'left') {
-  const values = [...a]
-  [values[0], values[1]] = [values[1], values[0]]
+  // 注意：第一行必须以分号结尾，否则会和下一行的解构交换被解析成一条语句并抛错，
+  // 导致姿态/弯指链路整体中断（模型不跟手动）
+  const values = [...a];
+  [values[0], values[1]] = [values[1], values[0]];
 
   let q = new THREE.Quaternion(...values)
   if (!q) {
@@ -98,6 +100,15 @@ let baseEulerX = null
 
 let local, quaternion, rightQuaternion, fingerArr, rightFingerArr
 let cube, chair, rightChair, mixer, clips;
+
+// 左右手模型的摆放朝向（弧度，与陀螺仪姿态无关，只决定模型安装方向）
+const HAND_BASE_ROTATION_L = { x: Math.PI / 6, y: 0, z: -Math.PI }
+const HAND_BASE_ROTATION_R = { x: Math.PI / 6, y: 0, z: -Math.PI }
+
+const applyHandBaseRotation = () => {
+  if (chair) chair.rotation.set(HAND_BASE_ROTATION_L.x, HAND_BASE_ROTATION_L.y, HAND_BASE_ROTATION_L.z)
+  if (rightChair) rightChair.rotation.set(HAND_BASE_ROTATION_R.x, HAND_BASE_ROTATION_R.y, HAND_BASE_ROTATION_R.z)
+}
 const Canvas = React.forwardRef((props, refs) => {
   local = props.local
   let showFlag = false
@@ -143,18 +154,22 @@ const Canvas = React.forwardRef((props, refs) => {
     valuelInit1 = localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2,
     valuelInit2 = localStorage.getItem('carValueInit') ? JSON.parse(localStorage.getItem('carValueInit')) : 2;
   let particles,
+    particlesR,
     particles1,
     particlesHead,
     material,
     backGeometry,
     sitGeometry,
+    sitGeometryR,
     headGeometry
 
   let camera, scene, renderer;
   var ndata1 = new Array(sitnum1 * sitnum2).fill(0), ndata = new Array(backnum1 * backnum2).fill(0),
     ndatahead = new Array(headnum1 * headnum2).fill(0), newData1 = new Array(sitnum1 * sitnum2).fill(0),
     newData = new Array(backnum1 * backnum2).fill(0), newDatahead = new Array(backnum1 * backnum2).fill(0);
+  var ndata1R = new Array(sitnum1 * sitnum2).fill(0); // 右手压力数据（back 串口）
   let rawPressureStatsData = [];
+  let rawPressureStatsDataR = [];
   let dataFlag = false;
   const changeDataFlag = () => {
     dataFlag = true;
@@ -196,6 +211,10 @@ const Canvas = React.forwardRef((props, refs) => {
       (sitnum2 * sitInterp + sitOrder * 2)
     ).fill(1),
     smoothBig = new Array((sitnum1 * sitInterp + sitOrder * 2) * (sitnum2 * sitInterp + sitOrder * 2)).fill(1);
+  // 右手点云独立缓冲，掌形遮罩 bigArrshand 与左手共用
+  let bigArrR = new Array(sitnum1 * sitInterp * sitnum2 * sitInterp).fill(1);
+  let bigArrgR = new Array((sitnum1 * sitInterp + sitOrder * 2) * (sitnum2 * sitInterp + sitOrder * 2)).fill(1),
+    smoothBigR = new Array((sitnum1 * sitInterp + sitOrder * 2) * (sitnum2 * sitInterp + sitOrder * 2)).fill(1);
   let i = 0;
 
   let container;
@@ -216,6 +235,8 @@ const Canvas = React.forwardRef((props, refs) => {
   let colors1, scales1;
   let positions;
   let colors, scales;
+  let positionsR;
+  let colorsR, scalesR;
   let positionsHead;
   let colorsHead, scalesHead;
 
@@ -226,6 +247,16 @@ const Canvas = React.forwardRef((props, refs) => {
   const groupX = -10
   const groupY = -23
   const groupZ = -380
+  // 双手模型的世界坐标中心，相机与控制器都对准它
+  const HAND_VIEW_TARGET = { x: -10, y: -833, z: 155 }
+  // 相机相对双手中心的偏移：按旧单手视角 (0,30,-10)（模型 scale=1）等比放大 5 倍，
+  // 形成"上方俯视、网格在手下方"的地面视角
+  const HAND_CAMERA_OFFSET = { x: 0, y: 150, z: -50 }
+  // 缩放限制：min 防止拉得过近，max 防止拉远后看到网格边缘
+  const HAND_ZOOM_MIN_DISTANCE = 70
+  const HAND_ZOOM_MAX_DISTANCE = 1200
+  // 左右手分组间距：越小两只手越靠近
+  const HAND_GROUP_OFFSET_X = 45
   let leftHandGroup;
   let rightHandGroup;
   function changeFlag(value) {
@@ -247,28 +278,14 @@ const Canvas = React.forwardRef((props, refs) => {
       150000
     );
 
-    // 初版
-    camera.position.z = 2000;
-    camera.position.y = -3003;
-    camera.position.x = 0;
-
-    // 更新版
-    // camera.position.z = 2000;
-    // camera.position.y = -3003;
-    // camera.position.x = 0;
-
-
-    // camera.position.z = 2000;
-    // camera.position.y = -3003;
-    // camera.position.x = 0;
-
-
-    // camera.rotation.z = 0;
-    // camera.rotation.y = 0;
-    // camera.rotation.x = 2.1;
-
-
-    camera.lookAt(0, 0, 0)
+    // 初始视角：与旧单手一致的上方俯视（up 保持默认 (0,1,0)），
+    // 相机姿态只在这里设置一次，之后交给 TrackballControls，保证可拖拽/缩放
+    camera.position.set(
+      HAND_VIEW_TARGET.x + HAND_CAMERA_OFFSET.x,
+      HAND_VIEW_TARGET.y + HAND_CAMERA_OFFSET.y,
+      HAND_VIEW_TARGET.z + HAND_CAMERA_OFFSET.z
+    );
+    camera.lookAt(HAND_VIEW_TARGET.x, HAND_VIEW_TARGET.y, HAND_VIEW_TARGET.z)
     // scene
 
     scene = new THREE.Scene();
@@ -280,8 +297,11 @@ const Canvas = React.forwardRef((props, refs) => {
     group.quaternion.set(0, 0, 0, 1)
     leftHandGroup = new THREE.Group();
     rightHandGroup = new THREE.Group();
-    leftHandGroup.position.x = -80;
-    rightHandGroup.position.x = 80;
+    // 分组原点必须与手腕（模型原点）重合：四元数转的是分组，
+    // 若模型再带位置偏移，转腕就会变成绕远处支点公转（手乱飘、忽大忽小）。
+    // 俯视相机下世界 +x 显示在屏幕左侧，所以左手挂 +x、右手挂 -x
+    leftHandGroup.position.set(HAND_GROUP_OFFSET_X, -810, 535);
+    rightHandGroup.position.set(-HAND_GROUP_OFFSET_X, -810, 535);
     group.add(leftHandGroup);
     group.add(rightHandGroup);
     loader.load("./model/hand1.glb", function (gltf) {
@@ -293,12 +313,10 @@ const Canvas = React.forwardRef((props, refs) => {
 
       //   chair.position.z = 150;
       // }
-      chair.rotation.x = -Math.PI / 3
-      chair.rotation.z = Math.PI;
-      chair.rotation.y = 0;
-      chair.position.z = 535;
-      chair.position.y = -810;
-      chair.position.x = 10;
+      // 摆放朝向统一从 HAND_BASE_ROTATION_L/R 取
+      chair.rotation.set(HAND_BASE_ROTATION_L.x, HAND_BASE_ROTATION_L.y, HAND_BASE_ROTATION_L.z);
+      // 模型自身不再带位置偏移，保证绕手腕原地旋转；世界位置由 leftHandGroup 提供
+      chair.position.set(0, 0, 0);
       chair.scale.set(5, 5, 5)
 
       // if(!props.hand){
@@ -409,9 +427,7 @@ const Canvas = React.forwardRef((props, refs) => {
       leftHandGroup.add(chair);
 
       rightChair = SkeletonUtils.clone(chair);
-      rightChair.rotation.x = -Math.PI / 3
-      rightChair.rotation.z = Math.PI;
-      rightChair.rotation.y = 0;
+      rightChair.rotation.set(HAND_BASE_ROTATION_R.x, HAND_BASE_ROTATION_R.y, HAND_BASE_ROTATION_R.z);
       rightChair.scale.x = -5;
       rightHandGroup.add(rightChair);
 
@@ -437,8 +453,9 @@ const Canvas = React.forwardRef((props, refs) => {
       // changeHandAngle([0.97,0.10,0.17,0.05])
     });
 
-    const helper = new THREE.GridHelper(2000, 100);
-    helper.position.y = -199;
+    // 网格作为地面放在手的下方（模型 scale=5，按旧单手"手下 199"等比放大 5 倍）
+    const helper = new THREE.GridHelper(10000, 100);
+    helper.position.y = HAND_VIEW_TARGET.y - 995;
     helper.material.opacity = 0.25;
     helper.material.transparent = true;
     scene.add(helper);
@@ -501,6 +518,16 @@ const Canvas = React.forwardRef((props, refs) => {
       MIDDLE: THREE.MOUSE.ZOOM,
       RIGHT: THREE.MOUSE.ROTATE,
     };
+    // 控制器目标对准双手中心，保持初始视角的同时允许拖拽/缩放/旋转
+    controls.target.set(HAND_VIEW_TARGET.x, HAND_VIEW_TARGET.y, HAND_VIEW_TARGET.z);
+    // 缩放限制：拉近不超过 min，拉远不超过 max（避免看到网格边缘）
+    controls.minDistance = HAND_ZOOM_MIN_DISTANCE;
+    controls.maxDistance = HAND_ZOOM_MAX_DISTANCE;
+    // 同步复位基准，controls.reset() 能回到该初始视角（构造时 target 还是原点）
+    controls.target0.copy(controls.target);
+    controls.position0.copy(camera.position);
+    controls.up0.copy(camera.up);
+    controls.update();
     initSet();
 
     window.addEventListener("resize", onWindowResize);
@@ -595,11 +622,30 @@ const Canvas = React.forwardRef((props, refs) => {
     // particles.rotation.y = Math.PI 
     // particles.rotation.z = Math.PI
     // scene.add(particles);
-    particles.position.z = 286.2
-    particles.position.y = 211.5
-    particles.position.x = 8.55;
+    // 相对手模型的偏移不变（原值减去旧的 chair 偏移 (10,-810,535)）
+    particles.position.z = 286.2 - 535
+    particles.position.y = 211.5 + 810
+    particles.position.x = 8.55 - 10;
     (leftHandGroup || group).add(particles);
     particles.material.opacity = showFlag ? 1 : 0
+
+    // 右手点云：与左手同构，scale.x 取负镜像，跟随右手模型
+    positionsR = new Float32Array(positions);
+    scalesR = new Float32Array(scales);
+    colorsR = new Float32Array(colors);
+    sitGeometryR = new THREE.BufferGeometry();
+    sitGeometryR.setAttribute("position", new THREE.BufferAttribute(positionsR, 3));
+    sitGeometryR.setAttribute("scale", new THREE.BufferAttribute(scalesR, 1));
+    sitGeometryR.setAttribute("color", new THREE.BufferAttribute(colorsR, 3));
+    particlesR = new THREE.Points(sitGeometryR, material);
+    particlesR.scale.x = -0.001;
+    particlesR.scale.y = 0.001;
+    particlesR.scale.z = 0.001;
+    particlesR.rotation.x = Math.PI / 2;
+    particlesR.position.z = 286.2 - 535
+    particlesR.position.y = 211.5 + 810
+    particlesR.position.x = 8.55 - 10;
+    (rightHandGroup || group).add(particlesR);
   }
 
 
@@ -818,6 +864,47 @@ const Canvas = React.forwardRef((props, refs) => {
       dataArr = bigArrg;
     }
 
+    // 右手点云：与左手同一流程渲染 ndata1R，掌形遮罩复用 bigArrshand
+    const renderSourceR = normalizeHandRenderData(ndata1R)
+    interp(renderSourceR, bigArrR, sitnum1, sitInterp);
+    let bigArrsR = addSide(
+      bigArrR,
+      sitnum2 * sitInterp,
+      sitnum1 * sitInterp,
+      sitOrder,
+      sitOrder
+    );
+    gaussBlur_1(
+      bigArrsR,
+      bigArrgR,
+      sitnum2 * sitInterp + sitOrder * 2,
+      sitnum1 * sitInterp + sitOrder * 2,
+      valueg1
+    );
+    let kR = 0,
+      lR = 0;
+    for (let ix = 0; ix < AMOUNTX; ix++) {
+      for (let iy = 0; iy < AMOUNTY; iy++) {
+        const value = bigArrgR[lR] * 10;
+        const valuehand = bigArrshand[lR] * 10;
+        smoothBigR[lR] = smoothBigR[lR] + (value - smoothBigR[lR] + 0.5) / valuel1;
+        positionsR[kR] = ix * SEPARATION - (AMOUNTX * SEPARATION) / 2; // x
+        positionsR[kR + 1] = smoothBigR[lR] * value1; // y
+        positionsR[kR + 2] = iy * SEPARATION - (AMOUNTY * SEPARATION) / 2; // z
+        if (valuehand < 50) {
+          positionsR[kR + 1] = -100000;
+          positionsR[kR] = 0;
+          positionsR[kR + 2] = 0;
+        }
+        const rgb = jet(0, valuej1, smoothBigR[lR]);
+        colorsR[kR] = rgb[0] / 255;
+        colorsR[kR + 1] = rgb[1] / 255;
+        colorsR[kR + 2] = rgb[2] / 255;
+        kR += 3;
+        lR++;
+      }
+    }
+
     var T = clock.getDelta();
     timeS = timeS + T;
 
@@ -825,10 +912,15 @@ const Canvas = React.forwardRef((props, refs) => {
       // console.log(renderT)
       dataArr = dataArr.filter((a) => a > valuej1 * 0.025)
       const point = renderSource.filter((a) => a > 0).length
-      const statsData = rawPressureStatsData.length ? rawPressureStatsData : dataArr
-      const statsPoint = rawPressureStatsData.length
+      // 左右手统计合并：侧栏压力数据同时统计两只手
+      const leftStatsData = rawPressureStatsData.length ? rawPressureStatsData : dataArr
+      const leftStatsPoint = rawPressureStatsData.length
         ? rawPressureStatsData.filter((a) => a > 0).length
         : point
+      const statsData = rawPressureStatsDataR.length
+        ? leftStatsData.concat(rawPressureStatsDataR)
+        : leftStatsData
+      const statsPoint = leftStatsPoint + rawPressureStatsDataR.filter((a) => a > 0).length
       const max = findMax(statsData)
       const press = statsData.reduce((a, b) => a + b, 0)
       const mean = press / (statsPoint == 0 ? 1 : statsPoint)
@@ -877,17 +969,22 @@ const Canvas = React.forwardRef((props, refs) => {
       new THREE.BufferAttribute(positions, 3)
     );
     sitGeometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+
+    particlesR.geometry.attributes.position.needsUpdate = true;
+    particlesR.geometry.attributes.color.needsUpdate = true;
+
+    sitGeometryR.setAttribute(
+      "position",
+      new THREE.BufferAttribute(positionsR, 3)
+    );
+    sitGeometryR.setAttribute("color", new THREE.BufferAttribute(colorsR, 3));
   }
 
   function render() {
     // backRenew();
     sitRenew();
     // headRenew()
-    camera.position.set(0, -1000, -50)
-    camera.rotation.set(2.5, 0, 0)
-    // console.log(camera.position, 'position')
-    // console.log(camera.rotation, 'rotation')
-
+    // 相机姿态在 init 中设置一次，这里交给 TrackballControls，保证可拖拽
 
     TWEEN.update();
     if (controlsFlag) {
@@ -901,7 +998,7 @@ const Canvas = React.forwardRef((props, refs) => {
         CTRL_KEY, // zoom
         CMD_KEY, // pan
       ];
-      // controls.update();
+      controls.update();
 
     } else if (!controlsFlag) {
 
@@ -965,13 +1062,16 @@ const Canvas = React.forwardRef((props, refs) => {
 
   function rightData(prop = {}, nextLocal = local) {
     local = nextLocal
-    const { statsData } = prop
-    rawPressureStatsData = Array.isArray(statsData) && statsData.length >= 256
+    const { wsPointData, statsData } = prop
+    if (Array.isArray(wsPointData)) {
+      ndata1R = wsPointData.map((a) => (a - valuef1 < 0 ? 0 : a))
+    }
+    rawPressureStatsDataR = Array.isArray(statsData) && statsData.length >= 256
       ? statsData.map((item) => {
         const numericValue = Number(item)
         return Number.isFinite(numericValue) ? numericValue : 0
       })
-      : rawPressureStatsData
+      : rawPressureStatsDataR
   }
 
   function changePointRotation({ direction, value, type }) {
@@ -1068,7 +1168,7 @@ const Canvas = React.forwardRef((props, refs) => {
     calibration(new Array(5).fill(0))
     calibrationRight(new Array(5).fill(0))
     // rotateFingers([0,0,0,0,0])
-    chair.rotation.set(0, 0, -Math.PI)
+    applyHandBaseRotation()
     // group.quaternion.set(0, 0, 0, 1)
     quaternion = new THREE.Quaternion(0, 0, 0, 1)
     rightQuaternion = new THREE.Quaternion(0, 0, 0, 1)

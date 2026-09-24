@@ -7156,6 +7156,8 @@ parser.on("data", function (data) {
         realArr,
         rawPressureData,
         newArr147: newArr,
+        // 未清零的映射帧：3D 遥操手指弯曲必须基于未清零数据计算
+        newArr147Raw: newArr147,
         sitFlag: port1?.isOpen,
         backFlag: port2?.isOpen,
       }
@@ -7342,6 +7344,8 @@ parser.on("data", function (data) {
         realArr,
         rawPressureData: pointArr,
         newArr147: newArr,
+        // 未清零的映射帧：3D 遥操手指弯曲必须基于未清零数据计算
+        newArr147Raw: newArr147,
         sitFlag: port1?.isOpen,
         backFlag: port2?.isOpen,
       }
@@ -7851,6 +7855,8 @@ parser2.on("data", function (data) {
         realArr,
         rawPressureData,
         newArr147: newArr,
+        // 未清零的映射帧：3D 遥操手指弯曲必须基于未清零数据计算
+        newArr147Raw: newArr147_2,
         sitFlag: port1?.isOpen,
         backFlag: port2?.isOpen,
       }

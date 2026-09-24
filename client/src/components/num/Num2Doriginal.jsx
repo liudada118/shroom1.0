@@ -531,6 +531,8 @@ function prewarmWebGL() {
 
 const MATRIX_WIDTH_RATIO = 0.4;
 const ROBOT_MATRIX_WIDTH_RATIO = 0.6;
+// 手套左右手双画布并排，允许占用更宽的视口
+const GLOVE_MATRIX_WIDTH_RATIO = 0.75;
 const MATRIX_SIDE_PANEL_WIDTH = 360;
 const MATRIX_HORIZONTAL_PADDING = 48;
 const MATRIX_VERTICAL_PADDING = 120;
@@ -578,6 +580,8 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
 
     const isRobot = props.matrixName === 'robotSY' || props.matrixName === 'robotLCF' || props.matrixName === 'robot1';
     const isFoot = props.matrixName === 'footVideo';
+    // 手套系列固定左右手双画布布局
+    const isGlove = ['hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket'].includes(props.matrixName);
 
     // ===== Robot 布局信息（必须在 computeCellSize 之前声明） =====
     const robotLayoutInfoRef = useRef(null); // { layoutW, layoutH }
@@ -585,7 +589,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
 
     // 计算初始 cellSize 的辅助函数
     const computeCellSize = useCallback((hasRight = false) => {
-        const { maxW, maxH } = getMatrixViewportBounds(isRobot ? ROBOT_MATRIX_WIDTH_RATIO : MATRIX_WIDTH_RATIO);
+        const { maxW, maxH } = getMatrixViewportBounds(isRobot ? ROBOT_MATRIX_WIDTH_RATIO : isGlove ? GLOVE_MATRIX_WIDTH_RATIO : MATRIX_WIDTH_RATIO);
 
         if (isRobot) {
             // 使用缓存的布局尺寸，如果有的话
@@ -596,9 +600,10 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             // 默认估算
             return calcRobotCellSizeFromLayout(40, 10, maxW, maxH);
         }
-        if (['hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket'].includes(props.matrixName)) {
+        if (isGlove) {
             const handRows = props.matrixName === 'handGloveFullPacket' ? 13 : 10;
-            return calcCellSize(15, handRows, maxW, maxH, 40);
+            // 两个 15 列面板并排（含间隙）
+            return calcCellSize(32, handRows, maxW, maxH, 40);
         }
         if (isFoot) {
             return 30;
@@ -639,6 +644,10 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
 
     // 当前渲染的纹理尺寸
     const texSizeRef = useRef({ w: width, h: height });
+    const texSize2Ref = useRef({ w: 15, h: 10 });
+
+    // 手套左右手最近一帧数据，用于合并统计
+    const lastGloveStatsRef = useRef({ left: null, right: null });
 
     // 预热 WebGL
     useEffect(() => {
@@ -652,7 +661,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             // 这里不初始化 WebGL，在 processRobotParts 中初始化
         } else if (glCanvasRef.current) {
             let tw = width, th = height;
-            if (['hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket'].includes(props.matrixName)) {
+            if (isGlove) {
                 tw = 15;
                 th = props.matrixName === 'handGloveFullPacket' ? 13 : 10;
             }
@@ -666,11 +675,25 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                 overlayCtxRef.current = overlayCanvasRef.current.getContext('2d');
             }
         }
+        if (isGlove && glCanvasRef2.current) {
+            const tw = 15, th = props.matrixName === 'handGloveFullPacket' ? 13 : 10;
+            const cs = cellSizeRef.current;
+            texSize2Ref.current = { w: tw, h: th };
+            glCtxRef2.current = initWebGL(glCanvasRef2.current, tw, th, cs, false);
+            if (overlayCanvasRef2.current) {
+                overlayCanvasRef2.current.width = tw * cs + 30;
+                overlayCanvasRef2.current.height = th * cs + 30;
+                overlayCtxRef2.current = overlayCanvasRef2.current.getContext('2d');
+            }
+        }
         initedRef.current = true;
-        if (props.matrixName === fullPacketGloveType) {
-            const defaultData = new Array(15 * 13).fill(0);
+        if (isGlove) {
+            // 默认渲染左右手两块全 0 矩阵，打开即展示双手
+            const tw = 15, th = props.matrixName === 'handGloveFullPacket' ? 13 : 10;
+            const defaultData = new Array(tw * th).fill(0);
             layoutData(defaultData);
-            pendingFlatRef.current = { data: defaultData, tw: 15, th: 13 };
+            pendingFlatRef.current = { data: [...defaultData], tw, th };
+            pendingFlatRef2.current = { data: [...defaultData], tw, th };
             scheduleRender();
         }
 
@@ -745,6 +768,18 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                         overlayCanvasRef.current.width = w * newCs + 30;
                         overlayCanvasRef.current.height = h * newCs + 30;
                         overlayCtxRef.current = overlayCanvasRef.current.getContext('2d');
+                    }
+                }
+
+                // 手套右手 canvas 同步重建
+                if (isGlove && glCanvasRef2.current && glCtxRef2.current) {
+                    const { w, h } = texSize2Ref.current;
+                    cleanupWebGL(glCtxRef2.current);
+                    glCtxRef2.current = initWebGL(glCanvasRef2.current, w, h, newCs, false);
+                    if (overlayCanvasRef2.current) {
+                        overlayCanvasRef2.current.width = w * newCs + 30;
+                        overlayCanvasRef2.current.height = h * newCs + 30;
+                        overlayCtxRef2.current = overlayCanvasRef2.current.getContext('2d');
                     }
                 }
 
@@ -909,8 +944,11 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     const ensureFlatMatrixSize = (tw, th) => {
         if (texSizeRef.current.w !== tw || texSizeRef.current.h !== th) {
             texSizeRef.current = { w: tw, h: th };
-            const { maxW, maxH } = getMatrixViewportBounds(MATRIX_WIDTH_RATIO);
-            const newCs = calcCellSize(tw, th, maxW, maxH, 40);
+            const { maxW, maxH } = getMatrixViewportBounds(isGlove ? GLOVE_MATRIX_WIDTH_RATIO : MATRIX_WIDTH_RATIO);
+            // 手套双画布：cellSize 按两个面板并排计算
+            const newCs = isGlove
+                ? calcCellSize(tw * 2 + 2, th, maxW, maxH, 40)
+                : calcCellSize(tw, th, maxW, maxH, 40);
             cellSizeRef.current = newCs;
             setCellSize(newCs);
 
@@ -926,24 +964,55 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
         }
     }
 
+    // 第二个 canvas（手套右手）的纹理尺寸维护，cellSize 复用当前值
+    const ensureFlatMatrixSize2 = (tw, th) => {
+        if (!glCanvasRef2.current) return;
+        if (texSize2Ref.current.w !== tw || texSize2Ref.current.h !== th || !glCtxRef2.current) {
+            texSize2Ref.current = { w: tw, h: th };
+            const cs = cellSizeRef.current;
+            cleanupWebGL(glCtxRef2.current);
+            glCtxRef2.current = initWebGL(glCanvasRef2.current, tw, th, cs, false);
+            if (overlayCanvasRef2.current) {
+                overlayCanvasRef2.current.width = tw * cs + 30;
+                overlayCanvasRef2.current.height = th * cs + 30;
+                overlayCtxRef2.current = overlayCanvasRef2.current.getContext('2d');
+            }
+        }
+    }
+
+    // 手套：更新一侧数据并合并左右手做统计
+    const updateGloveStats = (side, dataArr) => {
+        lastGloveStatsRef.current[side] = [...dataArr];
+        const { left, right } = lastGloveStatsRef.current;
+        layoutData([...(left || []), ...(right || [])]);
+    }
+
     // ========== 手套原始数据 16x16 矩阵显示（256个原始数据点） ==========
-    const changeWsData256 = (wsPointData) => {
+    const changeWsData256 = (wsPointData, side = 'left') => {
         let rawData = [...wsPointData]
         // 确保数据长度为256
         if (rawData.length > 256) rawData = rawData.slice(0, 256)
         while (rawData.length < 256) rawData.push(0)
 
-        layoutData([...rawData])
+        if (isGlove) {
+            updateGloveStats(side === 'right' ? 'right' : 'left', rawData)
+        } else {
+            layoutData([...rawData])
+        }
 
         const tw = 16, th = 16;
-        ensureFlatMatrixSize(tw, th);
-
-        pendingFlatRef.current = { data: rawData, tw, th };
+        if (isGlove && side === 'right') {
+            ensureFlatMatrixSize2(tw, th);
+            pendingFlatRef2.current = { data: rawData, tw, th };
+        } else {
+            ensureFlatMatrixSize(tw, th);
+            pendingFlatRef.current = { data: rawData, tw, th };
+        }
         scheduleRender();
     }
 
-    const changeWsData147 = (wsPointData) => {
-        if (['hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket'].includes(props.matrixName)) {
+    const changeWsData147 = (wsPointData, side = 'left') => {
+        if (isGlove) {
             let newArr1 = [...wsPointData]
             const isFullPacketGlove = props.matrixName === 'handGloveFullPacket' && newArr1.length >= 189;
             if (isFullPacketGlove) {
@@ -956,9 +1025,14 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
             }
 
             const tw = 15, th = isFullPacketGlove ? 13 : 10;
-            ensureFlatMatrixSize(tw, th);
-            layoutData([...newArr1])
-            pendingFlatRef.current = { data: newArr1, tw, th };
+            updateGloveStats(side === 'right' ? 'right' : 'left', [...newArr1])
+            if (side === 'right') {
+                ensureFlatMatrixSize2(tw, th);
+                pendingFlatRef2.current = { data: newArr1, tw, th };
+            } else {
+                ensureFlatMatrixSize(tw, th);
+                pendingFlatRef.current = { data: newArr1, tw, th };
+            }
             scheduleRender();
         } else if (props.matrixName == 'footVideo') {
             let newArr = [...wsPointData]
@@ -1019,9 +1093,9 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
         }
     }
 
-    const changeWsData147R = (wsPointData) => {
-        if (['hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket'].includes(props.matrixName)) {
-            changeWsData147(wsPointData)
+    const changeWsData147R = (wsPointData, side = 'left') => {
+        if (isGlove) {
+            changeWsData147(wsPointData, side)
         } else if (props.matrixName == 'footVideo') {
             const { left, right } = wsPointData
             const hasLeftFrame = Array.isArray(left)
@@ -1146,7 +1220,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
     }, []);
 
     const cs = cellSize;
-    const { maxW: containerWidth } = getMatrixViewportBounds(isRobot ? ROBOT_MATRIX_WIDTH_RATIO : MATRIX_WIDTH_RATIO);
+    const { maxW: containerWidth } = getMatrixViewportBounds(isRobot ? ROBOT_MATRIX_WIDTH_RATIO : isGlove ? GLOVE_MATRIX_WIDTH_RATIO : MATRIX_WIDTH_RATIO);
     const showDualFoot = footLayout === 'dual';
     const primaryFootLabel = footLayout === 'single-right' ? t('bodyParts.rightFoot') : t('bodyParts.leftFoot');
 
@@ -1159,7 +1233,10 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                 justifyContent: 'center',
                 alignItems: 'center',
                 backgroundColor: '#fff',
-                fontSize: '12px'
+                fontSize: '12px',
+                // 手套双画布较宽，在左侧数据卡片右侧的剩余区域内居中，避免被卡片遮挡
+                paddingLeft: isGlove ? MATRIX_SIDE_PANEL_WIDTH : 0,
+                boxSizing: 'border-box'
             }}
         >
             <div
@@ -1187,10 +1264,11 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                         style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
                     />
                     {isFoot && <div style={{ textAlign: 'center', marginTop: '4px' }}>{primaryFootLabel}</div>}
+                    {isGlove && <div style={{ textAlign: 'center', marginTop: '4px' }}>{t('leftHand')}</div>}
                 </div>
 
-                {/* footVideo 右脚 - 只在有右脚数据时显示 */}
-                {isFoot && showDualFoot && (
+                {/* footVideo 右脚按数据显示；手套右手固定显示 */}
+                {((isFoot && showDualFoot) || isGlove) && (
                     <div style={{ position: 'relative' }}>
                         <canvas
                             ref={glCanvasRef2}
@@ -1200,7 +1278,7 @@ export const Num2DOriginal = React.forwardRef((props, refs) => {
                             ref={overlayCanvasRef2}
                             style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
                         />
-                        <div style={{ textAlign: 'center', marginTop: '4px' }}>{t('bodyParts.rightFoot')}</div>
+                        <div style={{ textAlign: 'center', marginTop: '4px' }}>{isGlove ? t('rightHand') : t('bodyParts.rightFoot')}</div>
                     </div>
                 )}
             </div>
