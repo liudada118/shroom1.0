@@ -1,0 +1,11 @@
+{
+  "id": "chair",
+  "name": "座椅",
+  "sourceType": "wholeChair",
+  "configuration": {
+    "algorithms": [],
+    "charts": [],
+    "showPressure": true,
+    "showArea": true
+  }
+}

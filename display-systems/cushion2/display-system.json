@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 3,
+  "id": "cushion2",
+  "name": "坐垫2",
+  "version": "1.0.0",
+  "metadata": {
+    "origin": "user",
+    "createdBy": "embedded-agent",
+    "derivedFrom": "cushion"
+  },
+  "sensors": [
+    {
+      "id": "cushionSit",
+      "label": "坐垫压力",
+      "type": "cushion2",
+      "outputChannel": "sit",
+      "matrix": {
+        "rows": 23,
+        "cols": 23
+      },
+      "protocol": {
+        "validation": null,
+        "baudRate": 1000000,
+        "framing": {
+          "type": "delimiter",
+          "delimiter": [
+            170,
+            85,
+            3,
+            153
+          ],
+          "frameLength": null,
+          "includeDelimiter": false
+        },
+        "decoding": {
+          "valueType": "uint8",
+          "byteOffset": 0,
+          "valueCount": 1024
+        }
+      },
+      "algorithm": {
+        "type": "none"
+      },
+      "files": {
+        "lineOrder": "cushionSit/line-order.json",
+        "pointOrder": "cushionSit/point-order.json"
+      },
+      "stored": true
+    }
+  ],
+  "display": {
+    "views": [
+      {
+        "id": "main",
+        "type": "heatmap",
+        "source": "data"
+      }
+    ],
+    "widgets": [
+      {
+        "id": "main",
+        "type": "heatmap",
+        "source": "data"
+      }
+    ],
+    "renderers": [
+      {
+        "id": "heatmap",
+        "type": "heatmap"
+      }
+    ],
+    "visualizationAlgorithms": [
+      {
+        "id": "identity",
+        "type": "identity"
+      }
+    ],
+    "profiles": [
+      {
+        "id": "default",
+        "renderer": "heatmap",
+        "visualizationAlgorithm": "identity",
+        "widgets": [
+          "main"
+        ]
+      }
+    ],
+    "defaultView": "main",
+    "defaultProfile": "default",
+    "chartCards": []
+  },
+  "sensor": {
+    "type": "cushion2",
+    "matrix": {
+      "rows": 23,
+      "cols": 23
+    },
+    "ports": [
+      "cushionSit"
+    ],
+    "portLabels": {
+      "cushionSit": "坐垫压力"
+    }
+  },
+  "files": {
+    "lineOrder": "cushionSit/line-order.json",
+    "pointOrder": "cushionSit/point-order.json"
+  },
+  "protocol": {
+    "validation": null,
+    "baudRate": 1000000,
+    "framing": {
+      "type": "delimiter",
+      "delimiter": [
+        170,
+        85,
+        3,
+        153
+      ],
+      "frameLength": null,
+      "includeDelimiter": false
+    },
+    "decoding": {
+      "valueType": "uint8",
+      "byteOffset": 0,
+      "valueCount": 1024
+    }
+  },
+  "algorithm": {
+    "type": "none"
+  }
+}
