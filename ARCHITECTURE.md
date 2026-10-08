@@ -416,6 +416,7 @@ graph TD
 
 | 完成时间 | 分支 | 完成的功能/工作 | 说明 |
 | :--- | :--- | :--- | :--- |
+| 2026-10-08 | Revise | 触觉手套 2D 数字手形布局 | `hand0205` / `handGlove115200` / `hand0205Double` 的 2D 数字模式改用新增 `GloveHandNum2D.jsx`：按 `gloveHandLayout.js` 中的左右手点位表（1 起编号，与 `server.js` 的 `HAND_GLOVE_CSV_SEGMENT_POINTS` 一致并由单测校验）把原始 256 点摆成五指 4x3 + 指腹 + 手掌 5 行（首行 12 点）的手形，显示各分区 Σ、左右手共用 jet 色阶；`handGloveFullPacket` 点位不同仍用 16x16 矩阵。 |
 | 2026-09-24 | main | 触觉手套系列双手同显 | `hand0205` / `hand0205Double` / `handGlove115200` / `handGloveFullPacket` 支持同时连接左右两个串口并同时展示两只手：3D 遥操统一使用 `hand0205Double.jsx` 双手组件（新增右手压力点云，sit 串口驱动左手、back 串口驱动右手），2D 数字与原始数据视图改为左右手双画布（默认展示、视口宽度比例 0.75、在侧栏右侧居中）；num3D/skin 仍按最后选择的串口切换单手。修复双手组件历史问题：`transformQuaternion` 缺分号导致姿态/弯指链路中断；四元数绕远端支点公转导致模型乱飘（分组原点改为与手腕重合）。3D 视角改为旧单手式上方俯视+地面网格，TrackballControls 可拖拽/缩放并限制 min/max 距离，左手屏幕左、右手屏幕右。弯指计算改用服务端新增的未清零映射帧 `newArr147Raw`（遥操不再受清零影响），缺失一侧手指校准时沿用另一侧基准。仅动手套四个类型，`hand` 手部检测等其它系统未改动。 |
 | 2026-08-14 | sqliteOpti | 合并回退业务功能恢复 | 保留 `licenseManager` 在线/离线授权体系，恢复 `smallBed12B` V2.7.54 kPa 数据链、32/16显示缓存、历史时间、SQLite批量采集、CSV UTF-8 BOM 和 `matCol` 16x10原始数字方向。 |
 | 2026-08-10 | Codex | 日文译文人工校订同步 | 按《JQTOOLS中日翻译确认表》逐项回写 642 项中日目录：采用 101 项填写的新译文，并按表格当前译文恢复 3 项已勾选内容；4 项空白待确认内容保持现状，所有模板占位符不变。 |

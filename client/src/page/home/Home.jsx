@@ -82,6 +82,7 @@ import { ConfigProvider, Input, Popover, message, Modal } from "antd";
 import { SelectOutlined } from "@ant-design/icons";
 import { Num } from "../../components/num/Num";
 import { Num2D } from "../../components/num/Num2D";
+import { GloveHandNum2D } from "../../components/num/GloveHandNum2D";
 import { Num2DOriginal } from "../../components/num/Num2Doriginal";
 import HumanBodyRawData from "../../components/num/HumanBodyRawData";
 import Num3D from "../../components/num/NumWs";
@@ -146,6 +147,8 @@ const DUAL_GLOVE_MODES = ['normal', 'num', 'numoriginal']
 const isDualGloveDisplay = (matrixName, mode) =>
   (tactileGloveTypes.includes(matrixName) || matrixName === HAND_0205_DOUBLE_MATRIX) &&
   DUAL_GLOVE_MODES.includes(mode)
+// 2D 数字按手指/手掌形状展示的手套类型（整包手套点位不同，仍用 16x16 矩阵）
+const GLOVE_HAND_LAYOUT_TYPES = ['hand0205', 'handGlove115200', HAND_0205_DOUBLE_MATRIX]
 const isTactileGloveMappedLength = (matrixName, length) => {
   return length === 147 || (matrixName === 'handGloveFullPacket' && length === 195)
 }
@@ -4236,6 +4239,12 @@ class Home extends React.Component {
                   changeStateData={this.changeStateData}
                   changeSelect={this.changeSelect} />
               </CanvasCom>
+              : this.state.numMatrixFlag == "num" && GLOVE_HAND_LAYOUT_TYPES.includes(this.state.matrixName) ?
+                <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
+                  <GloveHandNum2D ref={this.com}
+                    data={this.data}
+                    local={this.state.local} />
+                </CanvasCom>
               : this.state.numMatrixFlag == "num" && [...tactileGloveTypes, 'robot1', 'footVideo'].includes(this.state.matrixName) ?
                 <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
                   <Num2D ref={this.com}

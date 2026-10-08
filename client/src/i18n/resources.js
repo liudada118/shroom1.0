@@ -728,6 +728,13 @@ export const bilingualConfig = {
     rightBackLeg: text('右后腿', 'Right Back Leg'),
     leftFoot: text('左脚', 'Left Foot'),
     rightFoot: text('右脚', 'Right Foot'),
+    littleFinger: text('小拇指', 'Little Finger'),
+    ringFinger: text('无名指', 'Ring Finger'),
+    middleFinger: text('中指', 'Middle Finger'),
+    indexFinger: text('食指', 'Index Finger'),
+    thumb: text('大拇指', 'Thumb'),
+    handPalm: text('手掌', 'Palm'),
+    fingerPulp: text('指腹', 'Pulp'),
   },
 
   humanBodyRaw: {

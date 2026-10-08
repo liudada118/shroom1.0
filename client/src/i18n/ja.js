@@ -623,6 +623,13 @@ export const japaneseTranslations = Object.freeze({
   "bodyParts.rightBackLeg": compare("右后腿", "右脚（背面）"),
   "bodyParts.leftFoot": compare("左脚", "左足"),
   "bodyParts.rightFoot": compare("右脚", "右足"),
+  "bodyParts.littleFinger": compare("小拇指", "小指"),
+  "bodyParts.ringFinger": compare("无名指", "薬指"),
+  "bodyParts.middleFinger": compare("中指", "中指"),
+  "bodyParts.indexFinger": compare("食指", "人差し指"),
+  "bodyParts.thumb": compare("大拇指", "親指"),
+  "bodyParts.handPalm": compare("手掌", "手のひら"),
+  "bodyParts.fingerPulp": compare("指腹", "指腹"),
   "humanBodyRaw.title": compare("人体原始数据", "人体の生データ"),
   "humanBodyRaw.overview": compare("人体原始点位展开图", "人体生センサー展開図"),
   "humanBodyRaw.description": compare(
