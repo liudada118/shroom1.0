@@ -7,7 +7,7 @@ const EMPTY = Object.freeze({ algorithms: [], charts: [] });
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
 /** 为当前用户创建的 Manifest 保存算法绑定，不改动协议、线序或已有采集目录。 */
-function createManifestAlgorithmBindings({ root, getSystem, getEditor, listPackages }) {
+function createManifestAlgorithmBindings({ root, managedRoot = null, getSystem, getEditor, listPackages }) {
   const cache = new Map();
 
   /** 将错误码保留给 HTTP 和 Agent，避免把不兼容输入误报成只读。 */
@@ -37,21 +37,27 @@ function createManifestAlgorithmBindings({ root, getSystem, getEditor, listPacka
     if (!SAFE_ID.test(id || '')) fail('DISPLAY_SYSTEM_INVALID', '系统 ID 无效。');
     const system = getSystem(id);
     if (!system) return null;
-    if (system.editable !== true) fail('DISPLAY_SYSTEM_READ_ONLY', '只能给用户创建的 Manifest 系统绑定算法。');
+    if (system.editable !== true && !system.managed) fail('DISPLAY_SYSTEM_READ_ONLY', '只能给用户创建的 Manifest 系统绑定算法。');
     if (cache.get(id)?.system === system) return cache.get(id).value;
     const editor = getEditor(id);
     if (!editor?.manifest || editor.kind === 'builtin-template') fail('DISPLAY_SYSTEM_INVALID', '目标不是 Manifest 系统。');
     const digest = inputDigest(editor);
-    const filename = path.join(root, `${id}.json`);
+    const filename = system.managed ? path.join(managedRoot || '', id, 'package-bindings.json') : path.join(root, `${id}.json`);
     let saved = null;
     if (fs.existsSync(filename)) {
       try { saved = JSON.parse(fs.readFileSync(filename, 'utf8')); }
       catch { fail('DISPLAY_SYSTEM_BINDING_INVALID', '算法绑定文件损坏，请检查用户数据目录。'); }
-      if (saved.inputDigest !== digest) fail('DISPLAY_SYSTEM_INPUT_CHANGED', '系统输入、协议或线序已变化，请核对后重新绑定算法。');
-      const checked = normalize(saved.configuration, editor, id);
-      const expectedRevision = createHash('sha256').update(JSON.stringify([digest, checked])).digest('hex');
-      if (saved.systemId !== id || saved.revision !== expectedRevision) fail('DISPLAY_SYSTEM_BINDING_INVALID', '算法绑定文件内容或版本无效。');
-      saved.configuration = checked;
+      if (system.managed) {
+        const checked = normalize(saved, editor, id);
+        saved = { systemId: id, inputDigest: digest, configuration: checked,
+          revision: createHash('sha256').update(JSON.stringify([digest, checked])).digest('hex') };
+      } else {
+        if (saved.inputDigest !== digest) fail('DISPLAY_SYSTEM_INPUT_CHANGED', '系统输入、协议或线序已变化，请核对后重新绑定算法。');
+        const checked = normalize(saved.configuration, editor, id);
+        const expectedRevision = createHash('sha256').update(JSON.stringify([digest, checked])).digest('hex');
+        if (saved.systemId !== id || saved.revision !== expectedRevision) fail('DISPLAY_SYSTEM_BINDING_INVALID', '算法绑定文件内容或版本无效。');
+        saved.configuration = checked;
+      }
     }
     const configuration = saved?.configuration || EMPTY;
     const revision = saved?.revision || createHash('sha256').update(`empty:${digest}`).digest('hex');
@@ -64,6 +70,7 @@ function createManifestAlgorithmBindings({ root, getSystem, getEditor, listPacka
   function update(id, { expectedRevision, configuration } = {}) {
     const current = load(id);
     if (!current) return null;
+    if (getSystem(id)?.managed) fail('DISPLAY_SYSTEM_READ_ONLY', '受管系统只读，请复制为独立系统后编辑。');
     if (expectedRevision !== current.revision) fail('DISPLAY_SYSTEM_REVISION_CONFLICT', '算法绑定已变化，请重新读取后提交。');
     const editor = getEditor(id);
     const normalized = normalize(configuration, editor, id);

@@ -9,6 +9,7 @@ const {
   validateLicenseSensorGroups,
 } = require('../../../licenseScopes');
 const {
+  aesDecrypt,
   decodeLicenseKey,
   generateLicenseKey,
   verifyOfflineLicense,
@@ -93,6 +94,63 @@ test('offline category licenses verify and preserve their stable scope token', (
   assert.deepEqual(verified.groupKeys, ['care']);
   assert.deepEqual(verified.sensorTypes, care.items.map((item) => item.value));
   assert.equal(verified.licenseFile, '@group:care');
+
+  const validation = validateLicenseKey(activationCode, {
+    decryptStr: () => { throw new Error('offline codes must not use AES'); },
+    verifyOfflineLicense: (code) => verifyOfflineLicense(code, {
+      publicKey: publicKey.export({ type: 'spki', format: 'pem' }),
+      nowMs: Date.now(),
+    }),
+    fallbackFile: 'hand0205',
+  });
+  assert.equal(validation.ok, true);
+  assert.equal(validation.state.licenseFile, '@group:care');
+  assert.deepEqual(validation.state.selectFlag, care.items.map((item) => item.value));
+  assert.equal(validation.state.endDate > Date.now(), true);
+
+  const altered = Buffer.from(JSON.stringify({
+    payload,
+    signature: Buffer.alloc(256).toString('base64'),
+  })).toString('base64');
+  assert.equal(validateLicenseKey(altered, {
+    verifyOfflineLicense: (code) => verifyOfflineLicense(code, {
+      publicKey: publicKey.export({ type: 'spki', format: 'pem' }),
+    }),
+  }).code, 'LICENSE_OFFLINE_INVALID');
+
+  const expiredPayload = Buffer.from(JSON.stringify({
+    expireDate: Date.now() - 86400000,
+    sensorTypes: '@group:care',
+  })).toString('base64');
+  const expiredSigner = crypto.createSign('RSA-SHA256');
+  expiredSigner.update(expiredPayload);
+  expiredSigner.end();
+  const expiredCode = Buffer.from(JSON.stringify({
+    payload: expiredPayload,
+    signature: expiredSigner.sign(privateKey, 'base64'),
+  })).toString('base64');
+  assert.equal(validateLicenseKey(expiredCode, {
+    verifyOfflineLicense: (code) => verifyOfflineLicense(code, {
+      publicKey: publicKey.export({ type: 'spki', format: 'pem' }),
+    }),
+  }).code, 'LICENSE_EXPIRED');
+});
+
+test('expired offline and malformed legacy keys return errors without leaking crypto exceptions', () => {
+  assert.deepEqual(validateLicenseKey('badhex', {
+    verifyOfflineLicense: () => ({ valid: false, error: '授权已过期' }),
+  }), {
+    ok: false,
+    code: 'LICENSE_EXPIRED',
+    message: '离线授权已过期，请联系厂商续期',
+  });
+  assert.deepEqual(validateLicenseKey('abcdef', {
+    decryptStr: () => { throw new Error('Malformed UTF-8 data'); },
+  }), {
+    ok: false,
+    code: 'LICENSE_DECRYPT_FAILED',
+    message: '密钥无效，解密失败',
+  });
 });
 
 test('backend runtime expands category scopes before selecting a display system', () => {
@@ -107,7 +165,7 @@ test('backend runtime expands category scopes before selecting a display system'
 });
 
 test('backend authorization rejects an unknown category without mutating runtime state', () => {
-  const validation = validateLicenseKey('encrypted', {
+  const validation = validateLicenseKey('abcdef', {
     decryptStr: () => JSON.stringify({
       date: Date.now() + 86400000,
       file: '@group:missing',
@@ -132,4 +190,11 @@ test('legacy all, single, and fixed-list licenses keep their behavior', () => {
   assert.deepEqual(multiple.sensorTypes, ['hand0205', 'jqbed']);
   assert.deepEqual(multiple.groupKeys, []);
   assert.equal(multiple.version, 2);
+
+  const runtime = validateLicenseKey(generateLicenseKey('hand0205', 30), {
+    decryptStr: aesDecrypt,
+    fallbackFile: 'jqbed',
+  });
+  assert.equal(runtime.ok, true);
+  assert.deepEqual(runtime.state.selectFlag, ['hand0205']);
 });

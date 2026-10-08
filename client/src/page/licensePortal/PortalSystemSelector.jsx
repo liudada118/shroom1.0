@@ -7,7 +7,7 @@ import { useSelectorMotion, useSceneCopyMotion } from './usePortalMotion';
 const CATEGORY_LABELS = { all: '全部', care: '康养', vehicle: '座椅', embodied: '触觉', custom: '定制' };
 
 /** 参考项目的列表与粒子场景弹层；目录、密钥和进入操作使用 Shroom 真实链路。 */
-export default function PortalSystemSelector({ open, systems, category, selectedId, scope, phase,
+export default function PortalSystemSelector({ open, systems, category, selectedId, scope, managedIds = [], syncStatus = '', phase,
   error, loading, catalogError, accessKey, onKeyChange, onCategory, onSelect, onBack, onEnter, onReload, onValidate,
   sceneStatus, onPreview, onHost, expanded = false, onReturnToSelector, monitoring = false, dataView = false, directEntry = false, runtime }) {
   const [query, setQuery] = useState('');
@@ -18,7 +18,7 @@ export default function PortalSystemSelector({ open, systems, category, selected
   const backdropRef = useRef(null);
   const returnButtonRef = useRef(null);
   const wasExpanded = useRef(false);
-  const authorized = useMemo(() => getAuthorizedPortalSystems(systems, scope), [systems, scope]);
+  const authorized = useMemo(() => getAuthorizedPortalSystems(systems, scope, managedIds), [systems, scope, managedIds]);
   const visible = useMemo(() => filterPortalSystems(authorized, category, query), [authorized, category, query]);
   const selected = (expanded || monitoring ? authorized : visible).find((item) => item.value === selectedId) || visible[0];
   useSelectorMotion(backdropRef, open, visible.map((item) => item.value).join('|'));
@@ -33,6 +33,12 @@ export default function PortalSystemSelector({ open, systems, category, selected
       : sceneStatus.state === 'error' ? '模型加载失败，仍可进入系统' : '粒子场景预览 · 非实时数据';
 
   useEffect(() => { onPreview(selected || null); }, [selected, onPreview]);
+  useEffect(() => {
+    if (!open || expanded || !selectedId) return;
+    const selectedButton = [...(panelRef.current?.querySelectorAll('.system-option') || [])]
+      .find((button) => button.dataset.system === selectedId);
+    selectedButton?.scrollIntoView?.({ block: 'nearest' });
+  }, [open, expanded, selectedId, visible]);
   useEffect(() => { if (editingKey) keyInputRef.current?.focus({ preventScroll: true }); }, [editingKey]);
   useEffect(() => {
     setQuery('');
@@ -107,6 +113,7 @@ export default function PortalSystemSelector({ open, systems, category, selected
           <button type="button" className="portal-text-button" onClick={onReload} disabled={loading || busy} aria-label="刷新系统列表"><ReloadOutlined aria-hidden="true" /> 刷新</button>
         </div>
         {catalogError && <p className="portal-catalog-error" role="alert">自定义系统读取失败，已授权的内置系统仍可使用。请刷新重试。</p>}
+        {syncStatus && scope !== undefined && <p className="portal-catalog-error" role="status">{syncStatus}</p>}
         <div className="system-options" aria-label="系统列表">
           {visible.map((system, index) => <button type="button" className={`system-option portal-system-option ${selected?.value === system.value ? 'is-active' : ''}`}
             key={system.value} style={{ '--system-accent': getPortalAccent(system) }} data-system={system.value} aria-pressed={selected?.value === system.value} disabled={busy} onClick={() => onSelect(system.value)}>

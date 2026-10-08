@@ -69,6 +69,7 @@
 | --- | --- |
 | [shroom-product-concept-one-pager.md](shroom-product-concept-one-pager.md) | 产品概念，讨论产品范围时读 |
 | [shroom-platform-target-architecture.md](shroom-platform-target-architecture.md) | 目标架构，不是当前代码地图 |
+| [system-publishing-design.md](system-publishing-design.md) | Agent 系统提交、管理员发布、客户授权与安装的实现及上线步骤 |
 | [shroom-platform-overview-and-guide.md](shroom-platform-overview-and-guide.md) | 产品目标与版本指南混合材料；实现细节转到开发者手册 |
 | [superpowers/specs/](superpowers/specs/)、[superpowers/plans/](superpowers/plans/) | 按日期保存的设计及实施计划；前端渲染抽离、人体映射/调节、日文告警、床垫算法配置等专题，仅在追溯该任务时读取 |
 | [markdown/PRD-Shroom.md](markdown/PRD-Shroom.md) | 历史需求材料，不作为现状证明 |

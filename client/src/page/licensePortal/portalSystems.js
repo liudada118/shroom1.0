@@ -18,7 +18,8 @@ export function buildPortalSystems(t, runtimeDefinitions = []) {
     if (typeof value !== 'string' || !value.trim() || seen.has(value)) continue;
     seen.add(value);
     systems.push({
-      value, label: metadata.name || value, category: 'custom', source: runtime.builtinTemplate ? 'builtin-template' : 'manifest',
+      value, systemId: runtime.sensorDefinition?.displaySystemId || runtime.sensorDefinition?.id || value,
+      managed: metadata.managed === true, label: metadata.name || value, category: 'custom', source: runtime.builtinTemplate ? 'builtin-template' : 'manifest',
       nativeSourceType: runtime.builtinTemplate?.sourceType,
       matrix: metadata.matrix || runtime.sensorDefinition?.matrix, runtimeDefinition: runtime,
     });
@@ -35,14 +36,17 @@ export function readPortalLicenseScope(message) {
 }
 
 /** 已验证的密钥限定内置入口；自定义系统沿用独立安装入口。 */
-export function isPortalSystemAllowed(system, scope) {
+export function isPortalSystemAllowed(system, scope, managedIds = []) {
+  // ⚠️ 受管系统同时需要签名目录授权和当前密钥里的系统 ID，不能只靠客户范围显示。
+  if (system?.managed) return scope !== undefined && managedIds.includes(system.systemId)
+    && (scope === null || (Array.isArray(scope) && scope.includes(system.systemId)));
   return !!system && scope !== undefined && (system.source === 'manifest' || scope === null
     || (Array.isArray(scope) && scope.includes(system.nativeSourceType || system.value)));
 }
 
 /** 列表只显示当前已验证密钥可访问的系统，未知授权不回退全量目录。 */
-export function getAuthorizedPortalSystems(systems, scope) {
-  return systems.filter((system) => isPortalSystemAllowed(system, scope));
+export function getAuthorizedPortalSystems(systems, scope, managedIds = []) {
+  return systems.filter((system) => isPortalSystemAllowed(system, scope, managedIds));
 }
 
 /** 分类与检索仅改变预览，不发送切换、串口或采集命令。 */

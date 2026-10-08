@@ -37,4 +37,15 @@ describe('首页系统目录', () => {
     expect(getAuthorizedPortalSystems(systems, []).map((item) => item.value)).toEqual(['custom-mat']);
     expect(getAuthorizedPortalSystems(systems, null)).toEqual(systems);
   });
+  it('受管系统必须在当前密钥的签名目录中，普通本地系统保持原有入口', () => {
+    const managed = { sensorDefinition: { id: 'seatpad', type: 'seatpad-sit' }, displayMetadata: { name: '公司坐垫', managed: true } };
+    const systems = buildPortalSystems((key) => key, [runtime('local-mat'), managed]);
+    expect(getAuthorizedPortalSystems(systems, null).map((item) => item.value)).toContain('local-mat');
+    expect(getAuthorizedPortalSystems(systems, null).map((item) => item.value)).not.toContain('seatpad-sit');
+    expect(getAuthorizedPortalSystems(systems, null, ['seatpad']).map((item) => item.value)).toContain('seatpad-sit');
+    expect(getAuthorizedPortalSystems(systems, [], ['seatpad']).map((item) => item.value)).not.toContain('seatpad-sit');
+    expect(getAuthorizedPortalSystems(systems, ['seatpad'], ['seatpad']).map((item) => item.value)).toContain('seatpad-sit');
+    expect(getAuthorizedPortalSystems(systems, ['hand'], ['seatpad']).map((item) => item.value)).not.toContain('seatpad-sit');
+    expect(getAuthorizedPortalSystems(systems, undefined, ['seatpad'])).toEqual([]);
+  });
 });

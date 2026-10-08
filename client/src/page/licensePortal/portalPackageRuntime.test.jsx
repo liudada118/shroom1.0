@@ -1,10 +1,28 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { packageDisabledReason, packageMetricValue } from './portalPackageRuntime';
+import { activateSavedAlgorithm, packageDisabledReason, packageMetricValue } from './portalPackageRuntime';
 import PortalPackageOutputs from './PortalPackageOutputs';
 
 describe('算法超市真实输出及输入限制', () => {
+  it('Agent 成果仅在同一系统的唯一兼容实时通道上启用，并核对后端实例', async () => {
+    const snapshot = { sensorType: 'seatpad2', allowed: true, packages: [{ id: 'user-gesture', compatibility: { matrixTotals: [529] } }],
+      channels: [{ channelId: 'seatpad2:sit', live: true, matrix: { rows: 23, cols: 23, total: 529 } }], instances: [] };
+    const calls = [];
+    const request = async (body) => { calls.push(body); return body ? { ...snapshot, instances: [{ id: 'user-gesture' }] } : snapshot; };
+    expect(await activateSavedAlgorithm({ systemId: 'seatpad2', packageId: 'user-gesture' }, request)).toEqual({ alreadyRunning: false });
+    expect(calls[1]).toEqual({ sensorType: 'seatpad2', packageId: 'user-gesture', channelId: 'seatpad2:sit', enabled: true });
+    await expect(activateSavedAlgorithm({ systemId: 'other', packageId: 'user-gesture' }, request)).rejects.toThrow('所属系统');
+    await expect(activateSavedAlgorithm({ systemId: 'seatpad2' }, request)).rejects.toThrow('离线版本');
+  });
+  it('Agent 不猜测多通道，也不把点数不匹配或未确认当成启用成功', async () => {
+    const channel = { channelId: 'seatpad2:sit', live: true, matrix: { rows: 23, cols: 23, total: 529 } };
+    const snapshot = { sensorType: 'seatpad2', allowed: true, packages: [{ id: 'user-gesture', compatibility: { matrixTotals: [529] } }], channels: [channel, { ...channel, channelId: 'seatpad2:back' }], instances: [] };
+    const result = { systemId: 'seatpad2', packageId: 'user-gesture' };
+    await expect(activateSavedAlgorithm(result, async () => snapshot)).rejects.toThrow('多个兼容通道');
+    await expect(activateSavedAlgorithm(result, async () => ({ ...snapshot, channels: [{ ...channel, matrix: { rows: 32, cols: 32, total: 1024 } }] }))).rejects.toThrow('当前 1024 点');
+    await expect(activateSavedAlgorithm(result, async (body) => body ? snapshot : { ...snapshot, channels: [channel] })).rejects.toThrow('未确认');
+  });
   it('分类显示真实类别和阶梯趋势，未知不会伪装成概率', () => {
     const item = { id: 'user-gesture', name: '动作识别', metricDefinitions: [{ id: 'classIndex', label: '识别类别', decimals: 0, values: { '-1': '未知', 0: '抚摸', 1: '拍打' } }] };
     const history = [{ timestamp: 1000, metrics: { classIndex: 0 } }, { timestamp: 2000, metrics: { classIndex: 1 } }];

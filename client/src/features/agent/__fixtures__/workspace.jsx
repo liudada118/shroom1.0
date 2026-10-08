@@ -26,6 +26,22 @@ function complete() {
   emitState();
 }
 
+/** 推送一个已核验成果，供浏览器回归检查展开、未读提示和下一步入口。 */
+window.__agentFixtureCreateResult = (kind) => {
+  const taskId = `created-${++sequence}`;
+  const algorithm = kind === 'algorithm';
+  const proposal = algorithm
+    ? { id: `${taskId}-proposal`, kind: 'algorithm_package', status: 'applied', systemId: 'seatpad2',
+      after: { name: '坐姿分类', report: { windows: 8, accuracy: 0.75, split: 'validation' } },
+      result: { systemId: 'seatpad2', verified: true, realtimePackageId: 'user-fixture' } }
+    : { id: `${taskId}-proposal`, kind: 'create_system', status: 'applied', systemId: 'seatpad2',
+      after: { name: '坐垫2', sensor: { type: 'seatpad2-sit' } }, result: { systemId: 'seatpad2', verified: true } };
+  const task = { id: taskId, conversationId: snapshot.conversation.id, status: 'succeeded', steps: [], proposals: [proposal] };
+  snapshot.conversation.tasks.push(task);
+  snapshot.activeTask = task;
+  emitState();
+};
+
 const bridge = {
   /** 订阅测试事件并返回清理函数。 */
   subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },

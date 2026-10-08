@@ -34,6 +34,32 @@ async function requestMarket(body, signal) {
   return data;
 }
 
+/** 从已保存的 Agent 成果启用实时包；多个兼容通道时交由算法超市明确选择。 */
+export async function activateSavedAlgorithm({ systemId, packageId }, request = requestMarket) {
+  if (!packageId) throw new Error('此算法只有离线版本，请先补齐实时输入契约');
+  /** 单次查询或启用超时后不推断状态，由用户再到算法超市核对。 */
+  const timedRequest = async (body) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    try { return await request(body, controller.signal); }
+    finally { clearTimeout(timeout); }
+  };
+  const snapshot = await timedRequest();
+  if (snapshot.sensorType !== systemId) throw new Error(`请先进入算法所属系统 ${systemId}，再连接传感器`);
+  const item = snapshot.packages?.find((entry) => entry.id === packageId);
+  if (!item) throw new Error('实时算法包不在当前系统目录中，请刷新后重试');
+  if (snapshot.instances?.some((instance) => instance.id === packageId)) return { alreadyRunning: true };
+  if (!snapshot.allowed) throw new Error(snapshot.reason || '当前不可启用算法');
+  const channels = (snapshot.channels || []).filter((channel) => channel.live);
+  if (!channels.length) throw new Error('请先连接传感器并收到实时数据，再启用算法');
+  const compatible = channels.filter((channel) => !packageDisabledReason(item, channel, snapshot));
+  if (!compatible.length) throw new Error(packageDisabledReason(item, channels[0], snapshot) || '没有兼容的实时通道');
+  if (compatible.length > 1) throw new Error('有多个兼容通道，请在算法超市选择要使用的通道');
+  const confirmed = await timedRequest({ sensorType: systemId, packageId, channelId: compatible[0].channelId, enabled: true });
+  if (!confirmed.instances?.some((instance) => instance.id === packageId)) throw new Error('后端未确认算法已启用，请到算法超市核对状态');
+  return { alreadyRunning: false };
+}
+
 /** 会话开关只在后端确认后显示已启用；快照包含有界真实算法结果，不另建压力代理。 */
 export function usePortalPackageRuntime(matrixName, open, configurationRevision = '') {
   const [snapshot, setSnapshot] = useState(EMPTY_MARKET);

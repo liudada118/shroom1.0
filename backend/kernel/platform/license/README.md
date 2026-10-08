@@ -15,6 +15,10 @@
 | `licenseKeyStore.js` | 落盘读写。`findExistingConfigFile`、`readStoredLicenseKey`、`writeStoredLicenseKey` | 路径全靠 `licenseHelper` 提供，自己不拼路径。只管存取密钥字符串，不解析它 |
 | `licenseValidationService.js` | 判定层。`validateLicenseKey` 校验密钥、`buildLicenseRuntimeState` 构造运行态、`getSelectFlagFromLicense` / `getDefaultFileFromLicense` 取授权范围 | **无任何文件 I/O**，纯函数式。密钥字符串从参数进来，结果从返回值出去 |
 
+`validateLicenseKey` 按格式区分旧版十六进制 AES 密钥和 base64 离线签名码。离线码通过 `crypto-lib.cjs` 的 RSA 公钥验签及到期检查后，转换为同一份运行态授权范围；启动读取和界面激活复用这条路径。格式错误、验签失败和旧版 AES 解密异常均返回错误码，不向界面透出加解密异常文本。
+
+当前后端激活链路尚未接入 `crypto-lib.cjs` 的持久化时间回拨闸；离线到期校验依赖本机时钟，不能将它表述为已完成防回拨授权。旧版授权运行期复检缺口仍见下文。
+
 ## 授权范围决定前端能选什么
 
 `getSelectFlagFromLicense` 返回的 `selectFlag` 直接决定前端传感器类型下拉框里有哪些选项，`getDefaultFileFromLicense` 决定默认选中哪个。

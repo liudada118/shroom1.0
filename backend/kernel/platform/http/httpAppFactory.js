@@ -181,6 +181,13 @@ function createHttpApp({
   deleteNativeSystem = () => null,
   readManifestAlgorithmBindings = () => null,
   updateManifestAlgorithmBindings = () => null,
+  exportDisplaySystemPackage = () => null,
+  syncManagedSystems = async () => ({ installed: [], errors: [], available: [] }),
+  getManagedSystemStatus = () => ({ available: [], expiresAt: null }),
+  getStaffPackageSubmissionStatus = () => ({ configured: false }),
+  saveStaffPackageSubmissionToken = () => ({ configured: false }),
+  clearStaffPackageSubmissionToken = () => ({ configured: false }),
+  submitDisplaySystemPackage = async () => null,
   algorithmRecordService,
   // 展示系统目录变了要告诉正在跑的前端。Builder 在进程内保存时自己派发 DOM 事件，
   // 但 Agent / 脚本走的是这里的 HTTP 接口，前端毫无感知 —— 不广播的话新系统要重启软件才出现。
@@ -364,6 +371,42 @@ function createHttpApp({
 
   httpApp.get(HTTP_ROUTES.displaySystemCatalog, (req, res) => {
     res.json({ catalog: getDisplaySystemBuilderCatalog() });
+  });
+
+  httpApp.get('/api/system-packages/status', (req, res) => {
+    try { assertAgentDeviceOrigin(req); res.json(getManagedSystemStatus()); }
+    catch (error) { respondDisplaySystemWriteError(res, error); }
+  });
+
+  httpApp.get('/api/system-packages/export/:id', (req, res) => {
+    try { assertAgentDeviceOrigin(req); res.json({ package: exportDisplaySystemPackage(req.params.id) }); }
+    catch (error) { respondDisplaySystemWriteError(res, error); }
+  });
+
+  httpApp.post('/api/system-packages/sync', async (req, res) => {
+    try {
+      assertAgentDeviceOrigin(req);
+      const result = await syncManagedSystems();
+      notifyDisplaySystemsUpdated('managed-sync');
+      res.json(result);
+    } catch (error) { respondDisplaySystemWriteError(res, error); }
+  });
+
+  httpApp.get('/api/system-packages/staff-credential', (req, res) => {
+    try { assertAgentDeviceOrigin(req); res.json(getStaffPackageSubmissionStatus()); }
+    catch (error) { respondDisplaySystemWriteError(res, error); }
+  });
+  httpApp.put('/api/system-packages/staff-credential', (req, res) => {
+    try { assertAgentDeviceOrigin(req); res.json(saveStaffPackageSubmissionToken(req.body?.token)); }
+    catch (error) { respondDisplaySystemWriteError(res, error); }
+  });
+  httpApp.delete('/api/system-packages/staff-credential', (req, res) => {
+    try { assertAgentDeviceOrigin(req); res.json(clearStaffPackageSubmissionToken()); }
+    catch (error) { respondDisplaySystemWriteError(res, error); }
+  });
+  httpApp.post('/api/system-packages/submit/:id', async (req, res) => {
+    try { assertAgentDeviceOrigin(req); res.json(await submitDisplaySystemPackage(req.params.id)); }
+    catch (error) { respondDisplaySystemWriteError(res, error); }
   });
 
   httpApp.post(HTTP_ROUTES.displaySystemReload, (req, res) => {

@@ -98,8 +98,10 @@ const { createHistoryMaintenanceService } = require('../storage/history/historyM
 const { createHistoryFrameTransformService } = require('../playback/historyFrameTransformService');
 const { createAppRuntime } = require('../../extension-host/appRuntimeFactory');
 let electronApp = null;
+let electronSafeStorage = null;
+let electronNet = null;
 try {
-  ({ app: electronApp } = require('electron'));
+  ({ app: electronApp, safeStorage: electronSafeStorage, net: electronNet } = require('electron'));
 } catch {}
 const path = require('path');
 const os = require('os');
@@ -175,12 +177,13 @@ const {
 } = require('@shroom/backend/processing');
 const module2 = require('./license/aes_ecb')
 const {
-  buildLicenseRuntimeState,
   getDefaultFileFromLicense,
   getSelectFlagFromLicense,
   validateLicenseKey,
 } = require('./license/licenseValidationService');
 const { readStoredLicenseKey, writeStoredLicenseKey } = require('./license/licenseKeyStore');
+const { createManagedSystemSync } = require('../../extension-host/workspace/managedSystemSync');
+const { createStaffPackageSubmission } = require('../../extension-host/workspace/staffPackageSubmission');
 const { createServerPathConfig } = require('./serverPathConfig');
 const { isCar, dedupli, totalToN, } = require('../../compatibility/legacyDataUtils');
 const { estimatePointPressure, FILTER_THRESHOLD: PRESSURE_CALIBRATION_FILTER_THRESHOLD } = require('../../../util/pressureCalibration_V2.7.54');
@@ -387,6 +390,26 @@ const appRuntime = createAppRuntime({
   runtimeWritableRoot,
   agentRoot: path.join(electronApp?.getPath ? electronApp.getPath('userData') : runtimeWritableRoot, 'agent'),
 });
+const managedSystemSync = createManagedSystemSync({
+  root: runtimeWritableRoot,
+  getLicenseKey: getStoredLicenseKey,
+  installPackage: appRuntime.displaySystems.installPackage,
+  ...(electronNet?.fetch ? { fetchImpl: electronNet.fetch.bind(electronNet) } : {}),
+});
+const staffPackageSubmission = createStaffPackageSubmission({
+  root: runtimeWritableRoot,
+  safeStorage: electronSafeStorage,
+  exportPackage: appRuntime.displaySystems.exportPackage,
+  ...(electronNet?.fetch ? { fetchImpl: electronNet.fetch.bind(electronNet) } : {}),
+});
+
+/** Guard both system switching and direct channel-open commands against expired managed grants. */
+function assertManagedSystemSelection(id) {
+  const system = appRuntime.displaySystems.getById(id) || appRuntime.displaySystems.getBySensorType(id);
+  if (system?.managed && !managedSystemSync.isAllowed(system.id)) {
+    throw Object.assign(new Error('此系统尚未授权给当前密钥，或授权目录已过期。'), { code: 'SYSTEM_PACKAGE_NOT_ENTITLED', httpStatus: 403 });
+  }
+}
 
 /**
  * 取展示系统注册表的整体状态（已加载哪些、哪些加载失败）。
@@ -1366,15 +1389,19 @@ let licenseFile = null;
 if (fs.existsSync(nameTxt)) {
   try {
     const dateRes = fs.readFileSync(nameTxt, 'utf8');
-    const parsedData = JSON.parse(module2.decryptStr(dateRes));
-    const startupLicenseState = buildLicenseRuntimeState(parsedData, {
+    const validation = validateLicenseKey(dateRes, {
+      decryptStr: module2.decryptStr,
       fallbackFile: defauleFile,
     });
-    endDate = startupLicenseState.endDate;
-    licenseFile = startupLicenseState.licenseFile;
-    selectFlag = startupLicenseState.selectFlag;
-    file = startupLicenseState.nextFile;
-    baudRate = getSensorBaudRate(file);
+    if (validation.ok) {
+      endDate = validation.state.endDate;
+      licenseFile = validation.state.licenseFile;
+      selectFlag = validation.state.selectFlag;
+      file = validation.state.nextFile;
+      baudRate = getSensorBaudRate(file);
+    } else {
+      logger.warn('[License] stored license rejected:', validation.code);
+    }
   } catch (err) {
     logger.error(err);
   }
@@ -2110,6 +2137,7 @@ registerSerialControlHandlers(controlCommandRouter, {
   HAND_GLOVE_DOUBLE,
   /** 原生副本切换前先核验身份；采集中切换会把一段记录拆到两个库。 */
   resolveSystemSelection: (id) => {
+    assertManagedSystemSelection(id);
     const selection = appRuntime.builtinTemplates.resolve(id, selectFlag);
     if ((selection.template || appRuntime.builtinTemplates.currentId(file) !== file || halowService?.receiver.active) && getCollectionState('flag')) {
       throw Object.assign(new Error('请先停止采集，再切换系统。'), { code: 'AGENT_DEVICE_BUSY', httpStatus: 409 });
@@ -2143,8 +2171,8 @@ registerSerialControlHandlers(controlCommandRouter, {
   logger,
   openBackSerialPort,
   openHeadSerialPort,
-  openManifestSerialPort,
-  openManifestSerialPorts,
+  openManifestSerialPort: (...args) => { assertManagedSystemSelection(runtimeContext.getSensorType()); return openManifestSerialPort(...args); },
+  openManifestSerialPorts: (...args) => { assertManagedSystemSelection(runtimeContext.getSensorType()); return openManifestSerialPorts(...args); },
   openMinzhenSensorPort,
   openSitSerialPort,
   petCareRuntimeService,
@@ -2676,6 +2704,22 @@ module.exports.getRealtimeChannels = getRealtimeChannels;
 module.exports.getChannelBusStatus = getChannelBusStatus;
 module.exports.handleCommand = handleCommand;
 
+/** Stop an already-open managed channel when its signed entitlement expires or is revoked. */
+let lastRevokedManagedSystemId = null;
+function enforceManagedSystemGrant() {
+  const type = appRuntime.builtinTemplates.currentId(runtimeContext.getSensorType());
+  const active = appRuntime.displaySystems.getById(type) || appRuntime.displaySystems.getBySensorType(type);
+  if (!active?.managed || managedSystemSync.isAllowed(active.id)) { lastRevokedManagedSystemId = null; return; }
+  if (lastRevokedManagedSystemId === active.id) return;
+  lastRevokedManagedSystemId = active.id;
+  if (getCollectionState('flag')) { flushCollectionInsertQueues(); setCollectionState('flag', false); }
+  closeAllManagedSerialPorts('managed system entitlement expired');
+  publishSystemEvent({ managedSystemAccessError: '当前系统授权已变化，已停止采集并断开设备。请刷新系统目录。' });
+}
+
+const managedGrantTimer = setInterval(enforceManagedSystemGrant, 60000);
+managedGrantTimer.unref?.();
+
 const httpApp = createHttpApp({
   algorithmRecordService: require('../storage/history/algorithmRecordService').createAlgorithmRecordService({
     getContext: () => ({ systemId: zeroChannelIdentityResolver.getActiveDisplaySystemId() || appRuntime.builtinTemplates.currentId(runtimeContext.getSensorType()), allowed: runtimeContext.getNowDate() < endDate }),
@@ -2727,6 +2771,17 @@ const httpApp = createHttpApp({
   deleteNativeSystem: appRuntime.builtinTemplates.remove,
   readManifestAlgorithmBindings: appRuntime.displaySystems.readManifestAlgorithmBindings,
   updateManifestAlgorithmBindings: appRuntime.displaySystems.updateManifestAlgorithmBindings,
+  exportDisplaySystemPackage: appRuntime.displaySystems.exportPackage,
+  syncManagedSystems: async () => {
+    const result = await managedSystemSync.sync();
+    enforceManagedSystemGrant();
+    return result;
+  },
+  getManagedSystemStatus: managedSystemSync.status,
+  getStaffPackageSubmissionStatus: staffPackageSubmission.status,
+  saveStaffPackageSubmissionToken: staffPackageSubmission.save,
+  clearStaffPackageSubmissionToken: staffPackageSubmission.clear,
+  submitDisplaySystemPackage: staffPackageSubmission.submit,
   // Agent / 脚本经 HTTP 写完展示系统后，让前端顶部菜单不用重启就能看到新系统。
   publishDisplaySystemsUpdated: (detail) => publishSystemEvent({ displaySystemsUpdated: detail }),
 });

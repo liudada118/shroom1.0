@@ -340,6 +340,13 @@ try {
   console.log('PORTAL_NAVIGATION_PASS');
   await page.getByRole('button', { name: '返回系统列表', exact: false }).first().click();
   await page.getByRole('heading', { name: '测试 32×32 呼吸重心系统' }).waitFor();
+  const agentEntryCommands = commands.length;
+  await page.evaluate(() => { window.location.hash = '/?category=custom&system=portal-custom-mat&agentEnter=1'; });
+  await page.getByRole('heading', { name: '已进入：portal-custom-mat' }).waitFor();
+  assert.ok(!page.url().includes('agentEnter=1'), 'Agent 一次性进入意图必须在提交后清除');
+  assert.deepEqual(commands.slice(agentEntryCommands).map((command) => command.type), ['license.activate', 'sensor.switch'], 'Agent 直达必须沿用密钥验证和系统切换');
+  await page.getByRole('button', { name: '返回系统列表', exact: false }).first().click();
+  await page.getByRole('heading', { name: '测试 32×32 呼吸重心系统' }).waitFor();
   await page.emulateMedia({ reducedMotion: 'reduce' });
   for (const [width, height] of [[1440, 900], [1024, 768], [768, 1024], [375, 812], [812, 375]]) {
     await page.setViewportSize({ width, height });
@@ -402,6 +409,7 @@ try {
   await page.locator('[data-system="hand"]').waitFor();
   for (const [width, height] of [[1440, 900], [1366, 768]]) {
     await page.setViewportSize({ width, height });
+    await page.locator('.system-options').evaluate((node) => { node.scrollTop = 0; });
     const space = await page.locator('.system-options').evaluate((node) => {
       const bounds = node.getBoundingClientRect();
       const rows = [...node.querySelectorAll('.system-option')].map((item) => item.getBoundingClientRect());

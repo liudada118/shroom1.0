@@ -176,6 +176,31 @@ try {
   await page.getByRole('button', { name: '算法数据', exact: true }).click();
   await dataPanel.getByRole('button', { name: '清除选择' }).click();
   assert.equal(await page.getByText('算法数据：2 条记录 · fixture-system').count(), 0);
+  await page.evaluate(() => window.__agentFixtureCreateResult('system'));
+  const created = page.getByRole('region', { name: 'Agent 创建成果' });
+  await created.getByText('坐垫2', { exact: true }).waitFor();
+  assert.equal(await created.getByRole('button', { name: '进入系统', exact: true }).count(), 1);
+  assert.equal(await created.getByRole('button', { name: '在系统列表中查看' }).count(), 1);
+  await page.getByRole('button', { name: '关闭 Agent' }).click();
+  await page.evaluate(() => window.__agentFixtureCreateResult('algorithm'));
+  await page.getByRole('status').filter({ hasText: 'Agent 已创建新成果' }).waitFor();
+  await page.getByRole('button', { name: '查看成果', exact: true }).click();
+  await created.getByText('坐姿分类', { exact: true }).waitFor();
+  await created.getByText('可在实时连接启用', { exact: false }).waitFor();
+  assert.equal(await created.getByRole('button', { name: '直接使用算法' }).count(), 1);
+  await page.route('http://127.0.0.1:19245/api/algorithm-market', (route) => route.fulfill({
+    status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' },
+    body: JSON.stringify({ sensorType: 'other-system', allowed: true, packages: [], channels: [], instances: [] }),
+  }));
+  await created.getByRole('button', { name: '直接使用算法' }).click();
+  await created.getByRole('alert').filter({ hasText: '请先进入算法所属系统 seatpad2' }).waitFor();
+  await created.getByRole('button', { name: '绑定到系统' }).click();
+  assert.ok((await page.getByLabel('任务内容').inputValue()).includes('user-fixture'));
+  assert.ok(await page.locator('.shroom-agent-panel').evaluate((node) => node.scrollWidth <= node.clientWidth));
+  await page.screenshot({ path: join(root, 'created-results-mobile.png') });
+  await created.getByRole('button', { name: '进入系统', exact: true }).click();
+  assert.ok(new URL(page.url()).hash.includes('system=seatpad2-sit'));
+  assert.ok(new URL(page.url()).hash.includes('agentEnter=1'));
   assert.deepEqual(errors, []);
-  console.log(`PASS: collection labels, optional relabeling, filtered bulk selection/limit, history, paste, errors and 390px layout. Screenshots: ${root}`);
+  console.log(`PASS: created results, collection labels, optional relabeling, filtered bulk selection/limit, history, paste, errors and 390px layout. Screenshots: ${root}`);
 } finally { await browser?.close(); await server.close(); }

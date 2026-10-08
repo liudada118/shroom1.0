@@ -35,6 +35,10 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
   const [phase, setPhase] = useState('idle');
   const [error, setError] = useState('');
   const [runtimeDefinitions, setRuntimeDefinitions] = useState([]);
+  const [managedIds, setManagedIds] = useState([]);
+  const [syncStatus, setSyncStatus] = useState('');
+  const [syncAttempt, setSyncAttempt] = useState(0);
+  const syncedKeyRef = useRef('');
   const [loading, setLoading] = useState(true);
   const [catalogError, setCatalogError] = useState(false);
   const [reload, setReload] = useState(0);
@@ -159,6 +163,11 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
       setScope(readPortalLicenseScope(saved.message));
     }
     if (data.displaySystemsUpdated) setReload((value) => value + 1);
+    if (data.managedSystemAccessError) {
+      setManagedIds([]);
+      setSyncStatus(data.managedSystemAccessError);
+      setError(data.managedSystemAccessError);
+    }
     entryRef.current?.receive(data);
   }, []);
 
@@ -171,6 +180,38 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
   }, [cancelNavigation]);
 
   const { connected } = useMainWebSocket({ onMessage: handleMessage, onClose: handleDisconnect, onError: handleDisconnect });
+
+  /** On a validated key, refresh the signed company catalog without blocking local systems. */
+  useEffect(() => {
+    const requestId = `${accessKey.trim()}:${syncAttempt}`;
+    if (scope === undefined || !connected || !accessKey.trim() || syncedKeyRef.current === requestId) return undefined;
+    syncedKeyRef.current = requestId;
+    let stopped = false;
+    requestJson('/api/system-packages/status').then((status) => {
+      if (!stopped) setManagedIds((status.available || []).map((item) => item.systemId));
+    }).catch(() => {});
+    setSyncStatus('正在检查公司发布的新系统…');
+    requestJson('/api/system-packages/sync', { method: 'POST' }).then((result) => {
+      if (stopped) return;
+      setManagedIds((result.available || []).map((item) => item.systemId));
+      setSyncStatus(result.installed?.length ? `已安装 ${result.installed.length} 个新系统${result.errors?.length ? `；${result.errors.length} 个安装失败` : ''}`
+        : result.errors?.length ? `${result.errors.length} 个系统更新失败，可稍后刷新重试` : '系统目录已是最新');
+      setReload((value) => value + 1);
+    }).catch((failure) => { if (!stopped) setSyncStatus(failure.message || '公司系统同步暂不可用，已有本地授权系统仍可使用'); });
+    return () => { stopped = true; };
+  }, [scope, connected, accessKey, syncAttempt]);
+
+  useEffect(() => {
+    const timer = setInterval(() => setSyncAttempt((value) => value + 1), 6 * 60 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    /** Agent 定位刚创建的系统时刷新已打开的目录；其他路由进入本页会自行加载。 */
+    const refreshCreatedSystems = () => setReload((value) => value + 1);
+    window.addEventListener('shroom:agent-display-systems-refresh', refreshCreatedSystems);
+    return () => window.removeEventListener('shroom:agent-display-systems-refresh', refreshCreatedSystems);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -190,6 +231,22 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
     return () => controller.abort();
   }, [reload, connected]);
 
+  /** Agent 的“进入系统”只触发一次，仍经密钥验证和现有切换命令；缺少密钥时留在目标列表。 */
+  useEffect(() => {
+    if (params.get('agentEnter') !== '1' || loading) return;
+    const targetId = params.get('system');
+    const target = systems.find((item) => item.value === targetId);
+    if (!target) {
+      setError('刚创建的系统暂未出现在列表，请刷新系统列表后重试。');
+      setParams({ category: 'custom', system: targetId || '' }, { replace: true });
+      return;
+    }
+    if (!accessKey.trim()) { setError('请输入访问密钥，验证后可进入该系统。'); return; }
+    if (!connected) { setError('与应用的连接已断开，请等待重新连接后重试。'); return; }
+    setParams({ category: 'custom', system: target.value }, { replace: true });
+    entryRef.current?.begin({ system: target, key: accessKey, connected });
+  }, [params, loading, systems, accessKey, connected, setParams]);
+
   useEffect(() => {
     if (!selectorOpen) { entryRef.current?.cancel(); cancelNavigation(); }
     if (selectorOpen) hadSelectorOpenRef.current = true;
@@ -207,6 +264,8 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
       entryRef.current?.cancel();
       savedLicenseRef.current.message = null;
       setScope(undefined);
+      setManagedIds([]);
+      syncedKeyRef.current = '';
     }
     keyRef.current = key;
     setAccessKey(key);
@@ -286,12 +345,12 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
       {!selectorOpen && <FeedbackWidget accessKey={accessKey} activeSolution="care" />}
     </main>
     <PortalSystemSelector open={selectorOpen} systems={systems} category={activeCategory} selectedId={params.get('system')}
-      scope={scope} phase={phase} error={error} loading={loading} catalogError={catalogError} accessKey={accessKey}
+      scope={scope} managedIds={managedIds} syncStatus={syncStatus} phase={phase} error={error} loading={loading} catalogError={catalogError} accessKey={accessKey}
       sceneStatus={sceneStatus} onPreview={setPreviewSystem} onHost={setPreviewHost} expanded={sceneExpanded} onReturnToSelector={returnToSelector}
       monitoring={Boolean(monitoringModule)} dataView={!previewVisible} directEntry={directEntry}
       runtime={monitoringModule && <PortalMonitoringLayer component={monitoringModule.default}
         system={previewSystem} directEntry={directEntry} capturePreview={capturePreview} onPreviewChange={changePreview} onBack={returnToSelector} onSystemChange={syncMonitoringSystem} />}
-      onKeyChange={changeKey} onReload={() => setReload((value) => value + 1)}
+      onKeyChange={changeKey} onReload={() => { setReload((value) => value + 1); setSyncAttempt((value) => value + 1); }}
       onValidate={() => entryRef.current?.validate({ key: accessKey, connected })}
       onBack={() => setParams({})}
       onCategory={(next) => setParams({ category: next }, { replace: true })}

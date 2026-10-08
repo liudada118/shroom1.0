@@ -11,9 +11,11 @@ const {
   createAgentAppService,
 } = require('./agent-apps/agentAppService');
 const path = require('path');
+const fs = require('node:fs');
 const { createRealtimeAlgorithmCatalog } = require('../agent-runtime/algorithm-lab/realtimeCatalog');
 const { createBuiltinSystemTemplates } = require('./workspace/builtinSystemTemplates');
 const { createManifestAlgorithmBindings } = require('./workspace/manifestAlgorithmBindings');
+const { exportManifestPackage, exportNativePackage, installManifestPackage, installNativePackage } = require('./workspace/systemPackageService');
 const {
   buildRuntimeBindingSnapshot,
   createDisplaySystemRuntimeController,
@@ -41,7 +43,9 @@ function createAppRuntime({
   runtimeWritableRoot,
   agentRoot = path.join(runtimeWritableRoot, 'agent'),
 }) {
-  const userAlgorithms = createRealtimeAlgorithmCatalog(agentRoot);
+  const managedSystemRoot = path.join(runtimeWritableRoot, 'managed-display-systems');
+  const managedNativeRoot = path.join(runtimeWritableRoot, 'managed-native-systems');
+  const userAlgorithms = createRealtimeAlgorithmCatalog(agentRoot, { managedRoot: managedSystemRoot, managedNativeRoot });
   const agentAppService = createAgentAppService({
     logger,
     runtimeResourceRoot,
@@ -59,6 +63,7 @@ function createAppRuntime({
   });
   const builtinTemplates = createBuiltinSystemTemplates({
     root: path.join(runtimeWritableRoot, 'builtin-system-copies'), logger,
+    managedRoot: managedNativeRoot,
     listPackages: () => displaySystemWorkspace.getCatalog().algorithmPackages || [],
     isOccupied: (id) => Boolean(displaySystemRuntimeDiscovery.getById(id) || displaySystemRuntimeDiscovery.getBySensorType(id)),
   });
@@ -94,6 +99,7 @@ function createAppRuntime({
   const manifestAlgorithmBindings = createManifestAlgorithmBindings({
     // 与 Agent 已保存算法共处 userData；开发版升级到打包版仍能读到绑定。
     root: path.join(path.dirname(agentRoot), 'manifest-algorithm-bindings'),
+    managedRoot: managedSystemRoot,
     getSystem: (id) => displaySystemRuntimeDiscovery.getById(id),
     getEditor: (id) => {
       const system = displaySystemRuntimeDiscovery.getById(id);
@@ -170,6 +176,48 @@ function createAppRuntime({
           runtimeDefinitions: [...status.runtimeDefinitions, ...copies.map((item) => item.runtimeDefinition)] };
       },
       getById: (id) => builtinTemplates.get(id) || displaySystemRuntimeDiscovery.getById(id),
+      getBySensorType: (type) => displaySystemRuntimeDiscovery.getBySensorType(type),
+      /** 导出当前用户 Manifest 及其线序、算法和图表绑定的闭包。 */
+      exportPackage: (id) => {
+        const native = builtinTemplates.get(id);
+        if (native) return exportNativePackage(native, { installedAlgorithmRoot: path.join(agentRoot, 'algorithm-lab', 'installed') });
+        const system = displaySystemRuntimeDiscovery.getById(id);
+        return exportManifestPackage(system, {
+          bindings: manifestAlgorithmBindings.read(id),
+          installedAlgorithmRoot: path.join(agentRoot, 'algorithm-lab', 'installed'),
+        });
+      },
+      /** 安装审核后的受管包，冲突时保留客户自己的系统。 */
+      installPackage: (input, version = null) => {
+        if (input?.kind === 'native-template') {
+          const result = installNativePackage(input, {
+            managedRoot: managedNativeRoot,
+            version,
+            isOccupied: (id) => Boolean(displaySystemRuntimeDiscovery.getById(id)
+              || (builtinTemplates.get(id) && !builtinTemplates.get(id).managed)),
+            isAlgorithmOccupied: (id, systemId) => fs.existsSync(path.join(agentRoot, 'algorithm-lab', 'installed', `${id}.json`))
+              || userAlgorithms.list().some((item) => item.id === `user-${id}` && item.systemId !== systemId),
+            listPackages: () => displaySystemWorkspace.getCatalog().algorithmPackages || [],
+          });
+          reloadDisplaySystems();
+          return result;
+        }
+        const result = installManifestPackage(input, {
+          managedRoot: managedSystemRoot,
+          version,
+          isOccupied: (id) => Boolean(builtinTemplates.get(id)
+            || (displaySystemRuntimeDiscovery.getById(id) && !displaySystemRuntimeDiscovery.getById(id).managed)),
+          isAlgorithmOccupied: (id, systemId) => fs.existsSync(path.join(agentRoot, 'algorithm-lab', 'installed', `${id}.json`))
+            || userAlgorithms.list().some((item) => item.id === `user-${id}` && item.systemId !== systemId),
+          isSensorTypeOccupied: (type, systemId) => {
+            const existing = displaySystemRuntimeDiscovery.getBySensorType(type);
+            return Boolean(existing && existing.id !== systemId);
+          },
+          listPackages: () => displaySystemWorkspace.getCatalog().algorithmPackages || [],
+        });
+        reloadDisplaySystems();
+        return result;
+      },
       readManifestAlgorithmBindings: manifestAlgorithmBindings.read,
       updateManifestAlgorithmBindings: manifestAlgorithmBindings.update,
       getManifestAlgorithmConfiguration: manifestAlgorithmBindings.getRuntimeConfiguration,

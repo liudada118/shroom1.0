@@ -6,6 +6,7 @@
  */
 
 const { expandLicenseFile } = require('../../../../licenseScopes');
+const { verifyOfflineLicense } = require('../../../../crypto-lib.cjs');
 
 /**
  * 从授权 file 字段推导前端可选类型标记。
@@ -69,6 +70,7 @@ function buildLicenseRuntimeState(parsedLicense, options = {}) {
  * @param {string} licenseKey 授权密钥原文。
  * @param {object} options 校验选项。
  * @param {(key: string) => string} options.decryptStr AES 解密函数。
+ * @param {(key: string) => object} options.verifyOfflineLicense 离线验签函数。
  * @param {string} options.fallbackFile 当前默认传感器类型。
  * @returns {{ok: true, state: object} | {ok: false, code: string, message: string}}
  */
@@ -82,31 +84,59 @@ function validateLicenseKey(licenseKey, options = {}) {
     };
   }
 
-  if (typeof options.decryptStr !== 'function') {
-    return {
-      ok: false,
-      code: 'LICENSE_DECRYPTOR_MISSING',
-      message: '密钥校验服务未初始化',
-    };
-  }
-
-  const decrypted = options.decryptStr(normalizedKey);
-  if (!decrypted) {
-    return {
-      ok: false,
-      code: 'LICENSE_DECRYPT_FAILED',
-      message: '密钥无效，解密失败',
-    };
-  }
-
   let parsedLicense;
-  try {
-    parsedLicense = JSON.parse(decrypted);
-  } catch (err) {
-    return {
-      ok: false,
-      code: 'LICENSE_PARSE_FAILED',
-      message: '密钥无效，请检查后重新输入',
+  if (/^[0-9a-fA-F]+$/.test(normalizedKey)) {
+    if (typeof options.decryptStr !== 'function') {
+      return {
+        ok: false,
+        code: 'LICENSE_DECRYPTOR_MISSING',
+        message: '密钥校验服务未初始化',
+      };
+    }
+    let decrypted;
+    try {
+      decrypted = options.decryptStr(normalizedKey);
+    } catch (err) {
+      return {
+        ok: false,
+        code: 'LICENSE_DECRYPT_FAILED',
+        message: '密钥无效，解密失败',
+      };
+    }
+    if (!decrypted) {
+      return {
+        ok: false,
+        code: 'LICENSE_DECRYPT_FAILED',
+        message: '密钥无效，解密失败',
+      };
+    }
+    try {
+      parsedLicense = JSON.parse(decrypted);
+    } catch (err) {
+      return {
+        ok: false,
+        code: 'LICENSE_PARSE_FAILED',
+        message: '密钥无效，请检查后重新输入',
+      };
+    }
+  } else {
+    let verified;
+    try {
+      verified = (options.verifyOfflineLicense || verifyOfflineLicense)(normalizedKey);
+    } catch (err) {
+      verified = null;
+    }
+    if (!verified?.valid) {
+      const expired = verified?.error === '授权已过期';
+      return {
+        ok: false,
+        code: expired ? 'LICENSE_EXPIRED' : 'LICENSE_OFFLINE_INVALID',
+        message: expired ? '离线授权已过期，请联系厂商续期' : '离线激活码无效或验签失败，请检查后重新输入',
+      };
+    }
+    parsedLicense = {
+      date: verified.expireTimestamp,
+      file: verified.licenseFile,
     };
   }
 

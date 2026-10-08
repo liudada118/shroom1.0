@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import AgentWorkspace from './AgentWorkspace';
 import AgentSettings from './AgentSettings';
 import AgentTaskCard from './AgentTaskCard';
+import AgentResults, { collectAgentResults } from './AgentResults';
 import AgentSyncSettings, { describeChatSync } from './AgentSyncSettings';
 
 /** 渲染一个方案供安全和操作边界断言使用。 */
@@ -12,6 +13,25 @@ function proposalMarkup(kind, status, overrides = {}) {
 }
 
 describe('Agent 工作区界面边界', () => {
+  it('已创建系统和已保存算法固定显示名称、位置与下一步，待应用方案不冒充成果', () => {
+    const results = collectAgentResults([{ id: 'task-a', proposals: [
+      { id: 'system-a', kind: 'create_system', status: 'applied', systemId: 'seatpad2', after: { name: '坐垫2', sensor: { type: 'seatpad2-sit' } }, result: { systemId: 'seatpad2' } },
+      { id: 'algorithm-a', kind: 'algorithm_package', status: 'applied', systemId: 'seatpad2', after: { name: '坐姿分类', report: { windows: 8, accuracy: 0.75, split: 'validation' } }, result: { realtimePackageId: 'user-test' } },
+      { id: 'pending-a', kind: 'create_system', status: 'pending', systemId: 'unapplied', after: { name: '尚未创建' } },
+    ] }]);
+    expect(results).toHaveLength(2);
+    expect(results.find((item) => item.kind === 'system').systemType).toBe('seatpad2-sit');
+    const html = renderToStaticMarkup(<AgentResults results={results} expanded onToggle={() => {}} onOpenSystem={() => {}} onPrepareAlgorithm={() => {}} />);
+    expect(html).toContain('坐垫2');
+    expect(html).toContain('进入系统');
+    expect(html).toContain('在系统列表中查看');
+    expect(html).toContain('坐姿分类');
+    expect(html).toContain('可在实时连接启用');
+    expect(html).toContain('直接使用算法');
+    expect(html).toContain('绑定到系统');
+    expect(html).not.toContain('尚未创建');
+  });
+
   it('创建矩阵提案显示原始点数和线序跨行样点，避免把保存误当物理验证', () => {
     const html = proposalMarkup('create_system', 'pending', { mappingPreview: [{ sensorId: 'sit', rawPoints: 1024,
       matrix: { rows: 23, cols: 23 }, mappedPoints: 529, first: [353, 354, 355], firstRowEnd: 375,

@@ -1,9 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import AgentSettings from './AgentSettings';
 import { describeChatSync } from './AgentSyncSettings';
 import AgentConversation from './AgentConversation';
 import AgentHistory from './AgentHistory';
 import AgentAlgorithmData from './AgentAlgorithmData';
+import AgentResults, { collectAgentResults } from './AgentResults';
+import { activateSavedAlgorithm } from '../../page/licensePortal/portalPackageRuntime';
+import { requestJson } from '../../extensions/display-system/api';
 import { attachmentThumbnail, encodePastedFiles } from './agentAttachments';
 import useAgentController from './useAgentController';
 import { collectAgentTasks, DEFAULT_AGENT_SETTINGS, isTaskBusy, TASK_LABELS } from './agentState';
@@ -49,6 +52,10 @@ export default function AgentWorkspace({ bridge: bridgeOverride, initiallyOpen =
   const [cancelling, setCancelling] = useState(false);
   const [newConversationPending, setNewConversationPending] = useState(false);
   const [pendingAction, setPendingAction] = useState('');
+  const [resultsOpen, setResultsOpen] = useState(false);
+  const [unseenResults, setUnseenResults] = useState(false);
+  const [pendingAlgorithm, setPendingAlgorithm] = useState('');
+  const [resultActionFeedback, setResultActionFeedback] = useState(null);
   const dialogRef = useRef(null);
   const entryRef = useRef(null);
   const inputRef = useRef(null);
@@ -58,11 +65,13 @@ export default function AgentWorkspace({ bridge: bridgeOverride, initiallyOpen =
   const actionLock = useRef(false);
   const importLock = useRef(false);
   const seenConversation = useRef(null);
+  const seenResults = useRef({ conversationId: null, keys: new Set() });
   const settings = snapshot?.settings || DEFAULT_AGENT_SETTINGS;
   const activeTask = snapshot?.activeTask;
   const busy = Boolean(isTaskBusy(activeTask));
   const configured = Boolean(settings.model && settings.hasApiKey);
-  const tasks = collectAgentTasks(snapshot);
+  const tasks = useMemo(() => collectAgentTasks(snapshot), [snapshot]);
+  const results = useMemo(() => collectAgentResults(tasks), [tasks]);
   const messages = snapshot?.conversation?.messages || EMPTY_MESSAGES;
   const attachments = (snapshot?.attachments || []).filter((attachment) => selectedIds.includes(attachment.id));
   const locked = busy || submitting || Boolean(pendingAction) || newConversationPending;
@@ -94,11 +103,85 @@ export default function AgentWorkspace({ bridge: bridgeOverride, initiallyOpen =
   }, [snapshot?.conversation?.id]);
 
   useEffect(() => {
+    const conversationId = snapshot?.conversation?.id;
+    if (!conversationId) return;
+    const keys = new Set(results.map((result) => result.key));
+    if (seenResults.current.conversationId !== conversationId) {
+      seenResults.current = { conversationId, keys };
+      setUnseenResults(false);
+      setResultsOpen(false);
+      return;
+    }
+    const created = results.some((result) => !seenResults.current.keys.has(result.key));
+    seenResults.current.keys = keys;
+    if (created) { setResultsOpen(true); if (!open) setUnseenResults(true); }
+  }, [snapshot?.conversation?.id, results, open]);
+
+  useEffect(() => {
     if (open && followOutput.current && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [open, messages, drafts, tasks.length, activeTask]);
 
   /** 关闭面板只隐藏界面，已开始的任务继续由运行进程管理。 */
   const close = () => { setOpen(false); setSettingsOpen(false); setHistoryOpen(false); };
+
+  /** 明确点击进入时由门户执行授权和系统切换；查看列表只定位，不连接设备。 */
+  const openCreatedSystem = (result, enter = false) => {
+    close();
+    window.dispatchEvent(new Event('shroom:agent-display-systems-refresh'));
+    const query = new URLSearchParams({ category: 'custom', system: result.systemType || result.systemId });
+    if (enter) query.set('agentEnter', '1');
+    window.location.hash = `/?${query}`;
+  };
+
+  /** Export a dependency-closed review package; only the staff website can approve publication. */
+  const exportCreatedSystem = async (result) => {
+    setResultActionFeedback(null);
+    try {
+      const payload = await requestJson(`/api/system-packages/export/${encodeURIComponent(result.systemId)}`);
+      if (!payload.package) throw new Error('系统包尚未生成');
+      const blob = new Blob([JSON.stringify(payload.package)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url; anchor.download = `${result.systemId}-review.json`; anchor.click();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      setResultActionFeedback({ key: result.key, message: '审核包已导出；请在管理网站“公司系统库”提交审核。' });
+    } catch (error) { setResultActionFeedback({ key: result.key, error: true, message: error.message || '审核包导出失败' }); }
+  };
+
+  /** Submit the current disk revision through a scoped employee token; receipt means pending review. */
+  const submitCreatedSystem = async (result) => {
+    setResultActionFeedback(null);
+    try {
+      const submitted = await requestJson(`/api/system-packages/submit/${encodeURIComponent(result.systemId)}`, { method: 'POST' });
+      setResultActionFeedback({ key: result.key, message: submitted.status === 'published'
+        ? `系统包 #${submitted.id} 已发布，客户软件同步后可用。`
+        : `已提交审核 #${submitted.id}。管理员发布后，客户软件同步时才会出现。` });
+    } catch (error) { setResultActionFeedback({ key: result.key, error: true, message: error.message || '提交审核失败' }); }
+  };
+
+  /** 使用后端算法超市核验目标系统和实时通道，只有确认实例存在才报告启用。 */
+  const useCreatedAlgorithm = async (result) => {
+    if (pendingAlgorithm) return;
+    setPendingAlgorithm(result.key);
+    setResultActionFeedback(null);
+    try {
+      const outcome = await activateSavedAlgorithm(result);
+      setResultActionFeedback({ key: result.key, message: outcome.alreadyRunning
+        ? '算法已在当前实时通道运行；切换系统后请重新核对状态。'
+        : '算法已在本次实时连接启用。切换系统或回放后会停止；如需自动启用，请绑定到系统。' });
+    } catch (failure) {
+      setResultActionFeedback({ key: result.key, error: true, message: failure.name === 'AbortError'
+        ? '启用请求超时，请到算法超市核对状态后重试。' : failure.message || '启用失败，请到算法超市核对状态。' });
+    } finally { setPendingAlgorithm(''); }
+  };
+
+  /** 将下一步任务写入输入框，用户发送后才会产生新的 Agent 操作。 */
+  const prepareCreatedAlgorithm = (result) => {
+    setText(result.packageId
+      ? `请把已保存的分类算法「${result.name}」（${result.packageId}）绑定到系统 ${result.systemId}，保留现有配置并添加分类结果图表。先核对当前系统；设备离线时先保存为停用，生成可审阅提案。`
+      : `请读取系统 ${result.systemId} 已保存的算法「${result.name}」，沿用原源码补齐实时输入契约并测试，生成可审阅的新版算法提案。`);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
 
   /** 提交前锁定本地按钮，防止双击创建两个任务。 */
   const submit = async (event) => {
@@ -189,9 +272,10 @@ export default function AgentWorkspace({ bridge: bridgeOverride, initiallyOpen =
   };
 
   return <div className="shroom-agent-root">
-    <button ref={entryRef} className="shroom-agent-entry" type="button" onClick={() => setOpen(true)} aria-haspopup="dialog" aria-expanded={open} aria-controls="shroom-agent-dialog">
-      <AgentIcon name="agent" /><span>Agent</span>{busy && <span className="shroom-agent-entry-dot" aria-label="任务执行中" />}
+    <button ref={entryRef} className="shroom-agent-entry" type="button" onClick={() => { setOpen(true); setUnseenResults(false); }} aria-haspopup="dialog" aria-expanded={open} aria-controls="shroom-agent-dialog">
+      <AgentIcon name="agent" /><span>Agent</span>{unseenResults ? <span className="shroom-agent-entry-new">新成果</span> : busy && <span className="shroom-agent-entry-dot" aria-label="任务执行中" />}
     </button>
+    {!open && unseenResults && <div className="shroom-agent-result-toast" role="status"><span>Agent 已创建新成果</span><button type="button" onClick={() => { setOpen(true); setUnseenResults(false); setResultsOpen(true); }}>查看成果</button></div>}
     <dialog ref={dialogRef} id="shroom-agent-dialog" className="shroom-agent-dialog" aria-labelledby="shroom-agent-title" onCancel={close} onClose={close}>
       <div className="shroom-agent-panel">
         <header className="shroom-agent-header">
@@ -205,6 +289,7 @@ export default function AgentWorkspace({ bridge: bridgeOverride, initiallyOpen =
         </header>
         {!bridge ? <div className="shroom-agent-empty"><AgentIcon name="agent" /><h3>在桌面软件中使用 Agent</h3><p>请打开 Shroom 桌面软件，即可连接模型、读取设备状态并创建展示系统。</p></div> : loading ? <div className="shroom-agent-empty" role="status"><p>正在加载 Agent…</p></div> : <>
           {error && <div className="shroom-agent-error" role="alert"><span>{error}</span><button type="button" onClick={refreshStatus}>刷新状态</button></div>}
+          <AgentResults results={results} expanded={resultsOpen} onToggle={() => setResultsOpen((value) => !value)} onOpenSystem={openCreatedSystem} onExportPackage={exportCreatedSystem} onSubmitPackage={submitCreatedSystem} onUseAlgorithm={useCreatedAlgorithm} onPrepareAlgorithm={prepareCreatedAlgorithm} pendingAlgorithm={pendingAlgorithm} actionFeedback={resultActionFeedback} />
           {historyOpen ? <AgentHistory invoke={invoke} disabled={locked || importing} onOpen={openConversation} onClose={() => setHistoryOpen(false)} /> : settingsOpen ? <AgentSettings settings={settings} disabled={locked} onSave={(value) => invoke('saveSettings', value)} chatSync={snapshot?.chatSync} onSaveSync={(value) => invoke('saveSyncSettings', value)} onRetrySync={() => invoke('retryChatSync')} onClose={() => setSettingsOpen(false)} /> : algorithmOpen ? <AgentAlgorithmData invoke={invoke} selection={snapshot?.conversation?.algorithmSelection} disabled={locked || importing} onSave={saveAlgorithmSelection} onClose={() => setAlgorithmOpen(false)} /> : <>
             <div className="shroom-agent-scroll" ref={scrollRef} onScroll={(event) => { const node = event.currentTarget; followOutput.current = node.scrollHeight - node.scrollTop - node.clientHeight < 64; }}>
               {!configured && <div className="shroom-agent-connect-note"><div><strong>连接你的模型</strong><p>配置服务地址、模型名称和密钥后即可开始。</p></div><button type="button" onClick={() => setSettingsOpen(true)}>配置模型</button></div>}

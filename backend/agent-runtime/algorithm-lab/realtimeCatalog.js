@@ -30,29 +30,66 @@ function realtimePackage(draft, includeResolved = false) {
 }
 
 /** 按文件修订缓存已保存分类包；调用只读目录，不产生或安装 Python 文件。 */
-function createRealtimeAlgorithmCatalog(root) {
+function createRealtimeAlgorithmCatalog(root, { managedRoot = null, managedNativeRoot = null } = {}) {
   const directory = path.join(root, 'algorithm-lab', 'installed');
   const cache = new Map();
   return {
     /** 给系统编辑器或实时服务提供同一份已验证目录。 */
     list({ includeResolved = false } = {}) {
-      let names;
-      try { names = fs.readdirSync(directory).filter((name) => /^[A-Za-z0-9_-]{1,50}\.json$/.test(name)).slice(0, 1000); } catch { return []; }
-      const result = [];
-      for (const name of names) {
+      const files = [];
+      try {
+        for (const name of fs.readdirSync(directory).filter((name) => /^[A-Za-z0-9_-]{1,50}\.json$/.test(name)).slice(0, 1000)) files.push(path.join(directory, name));
+      } catch { /* An empty user catalog is valid. */ }
+      if (managedRoot) {
         try {
-          const file = path.join(directory, name), stat = fs.lstatSync(file);
+          for (const systemId of fs.readdirSync(managedRoot).filter((name) => /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(name))) {
+            const managedDirectory = path.join(managedRoot, systemId, 'package-algorithms');
+            try {
+              for (const name of fs.readdirSync(managedDirectory).filter((item) => /^[A-Za-z0-9_-]{1,50}\.json$/.test(item)).slice(0, 8)) files.push(path.join(managedDirectory, name));
+            } catch { /* A package without a classifier has no algorithm directory. */ }
+          }
+        } catch { /* The managed catalog is optional before first sync. */ }
+      }
+      const result = [];
+      const seenIds = new Set();
+      for (const file of files) {
+        try {
+          const name = path.basename(file), stat = fs.lstatSync(file);
           if (!stat.isFile() || stat.size > 4000000) continue;
           const key = `${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}`;
-          let entry = cache.get(name);
+          let entry = cache.get(file);
           if (entry?.key !== key) {
             const draft = JSON.parse(fs.readFileSync(file, 'utf8'));
-            entry = { key, item: draft.id === name.slice(0, -5) ? realtimePackage(draft, true) : null }; cache.set(name, entry);
+            const managedSystemId = managedRoot && path.dirname(path.dirname(file)) !== path.dirname(directory)
+              && file.startsWith(path.resolve(managedRoot) + path.sep) ? path.basename(path.dirname(path.dirname(file))) : null;
+            entry = { key, item: draft.id === name.slice(0, -5) && (!managedSystemId || draft.systemId === managedSystemId)
+              ? realtimePackage(draft, true) : null }; cache.set(file, entry);
           }
-          if (entry.item) { const { resolvedPackage, ...item } = entry.item; result.push(includeResolved ? entry.item : item); }
-        } catch { cache.delete(name); }
+          if (entry.item && !seenIds.has(entry.item.id)) {
+            seenIds.add(entry.item.id);
+            const { resolvedPackage, ...item } = entry.item; result.push(includeResolved ? entry.item : item);
+          }
+        } catch { cache.delete(file); }
       }
-      for (const name of cache.keys()) if (!names.includes(name)) cache.delete(name);
+      for (const file of cache.keys()) if (!files.includes(file)) cache.delete(file);
+      if (managedNativeRoot) {
+        try {
+          for (const name of fs.readdirSync(managedNativeRoot).filter((item) => /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}\.json$/.test(item))) {
+            const file = path.join(managedNativeRoot, name);
+            try {
+              const stat = fs.lstatSync(file);
+              if (!stat.isFile() || stat.size > 16 * 1024 * 1024) continue;
+              const stored = JSON.parse(fs.readFileSync(file, 'utf8'));
+              if (stored.id !== name.slice(0, -5) || !stored.managedPackage) continue;
+              for (const draft of (stored.packageAlgorithms || []).slice(0, 8)) {
+                if (draft.systemId !== stored.id || seenIds.has(`user-${draft.id}`)) continue;
+                const item = realtimePackage(draft, includeResolved);
+                if (item) { seenIds.add(item.id); result.push(item); }
+              }
+            } catch { /* A bad managed declaration does not hide other algorithms. */ }
+          }
+        } catch { /* The native managed catalog is optional. */ }
+      }
       return result;
     },
   };

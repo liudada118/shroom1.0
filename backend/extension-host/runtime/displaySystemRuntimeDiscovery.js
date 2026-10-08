@@ -31,6 +31,7 @@ function buildDisplaySystemRoots({
     path.join(runtimeResourceRoot, 'displaySystems'),
     path.join(runtimeWritableRoot, 'display-systems'),
     path.join(runtimeWritableRoot, 'displaySystems'),
+    path.join(runtimeWritableRoot, 'managed-display-systems'),
   ]));
 }
 
@@ -76,6 +77,8 @@ function classifyDisplaySystemAccess(config, {
     : null;
   const createdByBuilder = metadata.createdBy === 'display-system-builder';
   const sourceDirectory = config?.sourceDirectory || path.dirname(config?.manifestPath || '');
+  const managedRoot = path.join(runtimeWritableRoot, 'managed-display-systems');
+  if (isPathInside(managedRoot, sourceDirectory)) return { origin: 'system', editable: false, managed: true };
   const resourceRoots = [
     path.join(runtimeResourceRoot, 'display-systems'),
     path.join(runtimeResourceRoot, 'displaySystems'),

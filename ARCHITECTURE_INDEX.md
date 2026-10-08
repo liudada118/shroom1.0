@@ -1,6 +1,6 @@
 # Shroom 快速架构索引
 
-> 最后更新于：2026-09-24
+> 最后更新于：2026-10-08
 > 用途：代码定位和验证路由。理解当前实现先读 [开发者手册](docs/developer-guide.md)，完整文档分类见 [docs/README.md](docs/README.md)。`ARCHITECTURE.md` 保留历史设计与维护台账，不用作默认全文入口。
 
 当前完整链路：[数据、算法、存储与回放](docs/chains/data-flow.md) · [页面、渲染与交互](docs/chains/interface-flow.md)。
@@ -68,6 +68,8 @@ Agent 客户交付与聊天同步：`index.js` 注入 `readStoredLicenseKey` →
 HaLow 人体接入：`kernel/transport/halowReceiver.js` 独立 TCP 分帧，`halowService.js` 校验当前系统/授权/串口互斥；`halow.control` 走 HTTP 并等待完成，状态走 WS。原生 `humanBodyOptimized` 与副本共用 `legacySerialFrameRuntime`，保留 canonical 身份、归零与存储。前端 `HalowConnection.jsx` 同时接门户/旧工具栏。验证 `halowReceiver.test.js`、`halowControlApi.test.js`、`Title.halow.test.jsx`、`node scripts/tests/halow-connection.mjs` 和 Full；说明见 [HaLow 接入](docs/halow-human-body.md)。
 
 更新发布：`package.json` / `dev-app-update.yml` 指向 HTTPS 更新源，运行时 `app/update/autoUpdater.js`；`scripts/upload-release.js` 只上传 Windows NSIS 产物，验证版本/更新地址/哈希后最后替换元数据。环境变量 `SHROOM_UPLOAD_DIR`、`SHROOM_SSH_KEY`；测试 `backend/tests/packaging/upload-release.test.js`，说明见 [更新服务器](docs/shroom-update-server.md)。上传和发布需显式操作。
+
+公司展示系统交付：`extension-host/workspace/systemPackageService.js` 按引用闭包导出/安装 Manifest 与原生模板副本，受管目录分别为 `managed-display-systems/` 和 `managed-native-systems/`；`managedSystemSync.js` 核验密钥绑定的签名目录与包，`staffPackageSubmission.js` 用 OS 加密的员工令牌提交待审包。`E:/key/server/systemPackages.ts` 管理审核、客户范围和签名下载，发布的系统可在开密钥页按系统 ID 勾选；门户只列客户授权且密钥勾选的受管系统，串口切换/打开与后台定时检查复核权限。Agent 成果卡片可提交或导出审核包；HTML 回退返回明确的服务未就绪提示。验证 `systemPackageService` / `managedSystemSync` / `staffPackageSubmission` 测试、`E:/key` 的 `systemPackages.test.ts` 与两库完整验证；涉及授权、包安装和跨层控制，使用 Full。操作见 [系统发布](docs/system-publishing-design.md)。
 
 内置系统真实预览：`displays/nativeSceneAssets.js` 与原生渲染器共用模型/底图地址，`sceneCatalog` 按具体型号映射，`sceneLayouts` 提供矩阵和足底布局，`sceneModelSampling` 按世界表面积分配粒子。小床、宠物/mini 和高速矩阵通过 `supportsDirectSceneEntry`、`smallBed.jsx` / `4096.jsx` / `hand.jsx` 单段交接。验证 `sceneCatalog` / `sceneLayouts` / `sceneModelSampling` tests、`node scripts/tests/portal-scene-catalog.mjs`（12 项预览、4 项真实画布往返）及 `portal-launcher.mjs`；原生画布接入执行 Full。
 

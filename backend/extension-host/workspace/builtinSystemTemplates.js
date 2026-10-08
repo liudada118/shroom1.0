@@ -25,20 +25,23 @@ function validateBuiltinTemplate(input) {
 }
 
 /** 提供原生系统副本的持久化目录与运行期选择；协议处理始终交回原系统。 */
-function createBuiltinSystemTemplates({ root, isOccupied = () => false, listPackages = () => [], logger } = {}) {
+function createBuiltinSystemTemplates({ root, managedRoot = null, isOccupied = () => false, listPackages = () => [], logger } = {}) {
   const systems = new Map();
   let selected = null;
 
   /** 每次读写都使用磁盘版本，外部编辑不能绕过提案的版本检查。 */
   function stored(id) {
     if (!SAFE_ID.test(id || '') || TYPES.has(id)) return null;
-    const filename = path.join(root, `${id}.json`);
-    if (!fs.existsSync(filename)) return null;
+    const userFile = path.join(root, `${id}.json`);
+    const managedFile = managedRoot && path.join(managedRoot, `${id}.json`);
+    const filename = fs.existsSync(userFile) ? userFile : managedFile;
+    if (!filename || !fs.existsSync(filename)) return null;
     const raw = JSON.parse(fs.readFileSync(filename, 'utf8'));
-    const { configuration, ...identity } = raw;
+    const { configuration, packageAlgorithms, managedPackage, ...identity } = raw;
     const template = validateBuiltinTemplate(identity);
     if (template.id !== id) throw templateError('DISPLAY_SYSTEM_INVALID', '配置文件和系统 ID 不一致。');
-    return { ...template, configuration: validateNativeConfiguration(configuration, { sourceType: template.sourceType, validatePackages: false }) };
+    return { ...template, configuration: validateNativeConfiguration(configuration, { sourceType: template.sourceType, validatePackages: false }),
+      ...(managedPackage ? { managed: true, managedPackage } : {}) };
   }
 
   /** 标识保留原有形状，独立配置单独暴露给编辑器与运行时。 */
@@ -50,23 +53,26 @@ function createBuiltinSystemTemplates({ root, isOccupied = () => false, listPack
   /** 重读可写目录；坏文件单独报告，不阻塞其他模板。 */
   function reload() {
     systems.clear();
-    if (!fs.existsSync(root)) return;
-    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-      if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
-      try {
-        const value = stored(entry.name.slice(0, -5));
-        if (!value) throw new Error('无效系统文件');
-        if (entry.name !== `${value.id}.json` || isOccupied(value.id)) throw new Error('模板标识与现有系统冲突');
-        systems.set(value.id, value);
-      } catch (error) { logger?.warn?.('[builtinTemplates]', entry.name, error.message); }
+    for (const directory of [root, managedRoot].filter(Boolean)) {
+      if (!fs.existsSync(directory)) continue;
+      for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+        if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+        try {
+          const value = stored(entry.name.slice(0, -5));
+          if (!value) throw new Error('无效系统文件');
+          if (entry.name !== `${value.id}.json` || isOccupied(value.id) || systems.has(value.id)) throw new Error('模板标识与现有系统冲突');
+          systems.set(value.id, value);
+        } catch (error) { logger?.warn?.('[builtinTemplates]', entry.name, error.message); }
+      }
     }
   }
 
   /** 返回前端目录可识别的原生模板定义，不将它注册为通用 Manifest 渲染器。 */
   function definition(template) {
-    return { id: template.id, name: template.name, kind: 'builtin-template', builtinTemplate: identity(template), configuration: template.configuration, editable: true,
+    return { id: template.id, name: template.name, kind: 'builtin-template', builtinTemplate: identity(template), configuration: template.configuration,
+      editable: template.managed !== true, managed: template.managed === true,
       runtimeDefinition: { builtinTemplate: { ...template, revision: revision(template) }, sensorDefinition: { type: template.id },
-        displayMetadata: { id: template.id, name: template.name, source: 'builtin-template', nativeSourceType: template.sourceType } } };
+        displayMetadata: { id: template.id, name: template.name, source: 'builtin-template', nativeSourceType: template.sourceType, managed: template.managed === true } } };
   }
 
   /** 读取副本或内置来源，供配置器和 Agent 核实复制对象。 */
@@ -80,7 +86,7 @@ function createBuiltinSystemTemplates({ root, isOccupied = () => false, listPack
     const original = BUILTIN_TEMPLATES.find((item) => item.id === id);
     const template = stored(id) || (original && { id, name: original.name, sourceType: id, configuration: validateNativeConfiguration() });
     return template ? { kind: 'builtin-template', builtinTemplate: identity(template), configuration: template.configuration,
-      inputs: nativeInputs(template.sourceType), editable: !original, writable: !original,
+      inputs: nativeInputs(template.sourceType), editable: !original && !template.managed, writable: !original && !template.managed,
       revision: revision(template),
       inheritance: original?.inheritance || ['serial-protocol', 'line-order', 'native-display', 'native-controls'] } : null;
   }
@@ -102,7 +108,7 @@ function createBuiltinSystemTemplates({ root, isOccupied = () => false, listPack
   /** 校验完整编辑结果；预览不写盘，应用必须带读回的修订号。 */
   function preview(id, input) {
     const previous = stored(id);
-    if (!previous) throw templateError('DISPLAY_SYSTEM_READ_ONLY', '只有用户创建的独立系统可以修改。');
+    if (!previous || previous.managed) throw templateError('DISPLAY_SYSTEM_READ_ONLY', '只有用户创建的独立系统可以修改。');
     if (!input || !Object.hasOwn(input, 'configuration') || Object.keys(input).some((key) => !['name', 'configuration', 'expectedRevision'].includes(key))) throw templateError('DISPLAY_SYSTEM_INVALID', '编辑请求需包含名称、完整配置和修订号。');
     if (input.expectedRevision !== revision(previous)) throw templateError('DISPLAY_SYSTEM_REVISION_CONFLICT', '系统配置已变化，请重新读取后修改。');
     return { ...validateBuiltinTemplate({ ...identity(previous), name: input.name }),
@@ -124,7 +130,7 @@ function createBuiltinSystemTemplates({ root, isOccupied = () => false, listPack
   /** 将未运行的系统配置移入回收目录；保留全部采集文件。 */
   function remove(id, expectedRevision) {
     const previous = stored(id);
-    if (!previous) throw templateError('DISPLAY_SYSTEM_READ_ONLY', '只能删除用户创建的系统。');
+    if (!previous || previous.managed) throw templateError('DISPLAY_SYSTEM_READ_ONLY', '只能删除用户创建的系统。');
     if (selected?.id === id) throw templateError('DISPLAY_SYSTEM_ACTIVE', '请先切换到其他系统，再删除此系统。');
     if (expectedRevision !== revision(previous)) throw templateError('DISPLAY_SYSTEM_REVISION_CONFLICT', '系统配置已变化，请重新读取后删除。');
     const trash = path.join(root, '.trash');
@@ -134,12 +140,14 @@ function createBuiltinSystemTemplates({ root, isOccupied = () => false, listPack
     return { id, deleted: true, dataRetained: true };
   }
 
-  /** 切换前检查原系统授权；新名称不能绕过原系统的许可范围。 */
+  /** Check a local copy against its source; managed copies use their explicitly licensed system ID. */
   function resolve(id, scope) {
     const template = stored(id);
     if (!template) return { id, sourceType: id, template: false };
-    const allowed = scope === 'all' || (Array.isArray(scope) ? scope : [scope]).includes(template.sourceType);
-    if (!allowed) throw Object.assign(templateError('LICENSE_SCOPE_REQUIRED', '当前授权不包含此模板的原系统。'), { httpStatus: 403 });
+    // ⚠️ 受管副本在 server.js 切换前还须通过签名目录校验；仅有本地系统 ID 不能直接放行。
+    const allowed = scope === 'all' || (Array.isArray(scope) ? scope : [scope]).includes(template.managed ? template.id : template.sourceType);
+    if (!allowed) throw Object.assign(templateError('LICENSE_SCOPE_REQUIRED', template.managed
+      ? '当前密钥未选择此公司系统。' : '当前授权不包含此模板的原系统。'), { httpStatus: 403 });
     return { ...template, template: true };
   }
 

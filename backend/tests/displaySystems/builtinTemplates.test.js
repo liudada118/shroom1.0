@@ -57,6 +57,21 @@ test('rejects traversal, unknown sources, duplicate IDs and manifest overwrite',
   } finally { f.close(); }
 });
 
+test('a managed native copy can use its own selected key scope, while local copies still require source scope', () => {
+  const f = fixture();
+  try {
+    const managedRoot = path.join(f.options.runtimeWritableRoot, 'managed-native-systems');
+    fs.mkdirSync(managedRoot, { recursive: true });
+    fs.writeFileSync(path.join(managedRoot, 'company-hand.json'), JSON.stringify({ id: 'company-hand', name: '公司手部', sourceType: 'hand',
+      configuration: { algorithms: [], charts: [] }, managedPackage: { version: 1, sha256: 'a'.repeat(64) } }));
+    f.runtime.displaySystems.reload();
+    assert.equal(f.runtime.builtinTemplates.resolve('company-hand', ['company-hand']).sourceType, 'hand');
+    assert.throws(() => f.runtime.builtinTemplates.resolve('company-hand', ['hand']), { code: 'LICENSE_SCOPE_REQUIRED' });
+    f.runtime.displaySystems.save({ builtinTemplate: { id: 'local-hand', name: '本地手部', sourceType: 'hand' } });
+    assert.throws(() => f.runtime.builtinTemplates.resolve('local-hand', ['local-hand']), { code: 'LICENSE_SCOPE_REQUIRED' });
+  } finally { f.close(); }
+});
+
 test('old copies become editable and algorithms/charts persist independently with revision guards', () => {
   const f = fixture(true);
   try {

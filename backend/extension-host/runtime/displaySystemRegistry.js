@@ -132,6 +132,7 @@ function createDisplaySystemRegistry({ logger } = {}) {
         algorithmType: system.algorithm?.type,
         editable: system.editable === true,
         origin: system.origin || 'system',
+        managed: system.managed === true,
         parserChannelCount: system.runtimeDefinition?.parserChannels?.length || 0,
         runtimeChannelCount: system.runtimeDefinition?.runtimeChannelCount || 0,
         defaultView: system.runtimeDefinition?.displayMetadata?.defaultView,

@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { DEFAULT_AGENT_SETTINGS, agentErrorMessage } from './agentState';
 import AgentSyncSettings from './AgentSyncSettings';
+import AgentSystemSubmissionSettings from './AgentSystemSubmissionSettings';
 
 // 常用模型预设；实际调用权限由 API 账户决定，未列出的模型可手动填写。
 const OPENAI_MODELS = [
@@ -126,5 +127,6 @@ export default function AgentSettings({ settings = DEFAULT_AGENT_SETTINGS, onSav
       <button className="shroom-agent-primary" type="submit" disabled={saving || disabled}>{saving ? '正在保存…' : '保存连接设置'}</button>
     </form>
     <AgentSyncSettings sync={chatSync} onSave={onSaveSync} onRetry={onRetrySync} />
+    <AgentSystemSubmissionSettings />
   </section>;
 }
