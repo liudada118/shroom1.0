@@ -123,8 +123,16 @@ function mappingPreview(input, payload) {
 }
 /** 从已注册协议、算法和显式映射生成 manifest 与定义文件，不采用模型提供的源码或路径。 */
 function buildCreate(input, catalog, protocols) {
-  if (!input.rendererId && input.sensors.length !== 1) throw fail('AGENT_INVALID_ARGUMENTS', '多传感器系统必须明确指定 rendererId。');
-  const renderer = findItem(catalog.renderers, input.rendererId || 'pointGrid', 'Renderer');
+  const rendererIds = input.rendererIds || [input.rendererId || 'pointGrid'];
+  if (new Set(rendererIds).size !== rendererIds.length || input.rendererId && !rendererIds.includes(input.rendererId)) {
+    throw fail('AGENT_INVALID_ARGUMENTS', 'rendererIds 不得重复，默认 rendererId 必须包含在可切换展示列表中。');
+  }
+  if (rendererIds.some((id) => ['heatmap', 'matrix', 'raw2d'].includes(id))) {
+    throw fail('AGENT_RENDERER_UNAVAILABLE', '请使用原生展示模式：pointGrid、numMatrix（3D 数字）、numMatrix2d（2D 数字）、webglHeatmap 或 blobHeatmap。');
+  }
+  if (!input.rendererId && !input.rendererIds && input.sensors.length !== 1) throw fail('AGENT_INVALID_ARGUMENTS', '多传感器系统必须明确指定 rendererId 或 rendererIds。');
+  const renderers = rendererIds.map((id) => findItem(catalog.renderers, id, 'Renderer'));
+  const renderer = renderers.find((item) => item.id === input.rendererId) || renderers[0];
   const sensorDefinitions = {};
   const ids = new Set();
   const singletonPackages = new Set();
@@ -189,8 +197,16 @@ function buildCreate(input, catalog, protocols) {
   const manifest = { schemaVersion: 3, id: input.id, name: input.name, version: '1.0.0', metadata: { origin: 'user', createdBy: 'embedded-agent' }, sensors,
     display: { layout: { type: 'grid', columns: 12, presentation: 'workspace' },
       views: [{ id: 'main', type: renderer.type || renderer.id, source: 'data' }], widgets: [{ id: 'main', type: renderer.type || renderer.id, source: 'data' }],
-      renderers: [{ id: renderer.id, type: renderer.type || renderer.id }], visualizationAlgorithms: [{ id: 'identity', type: 'identity' }],
-      profiles: [{ id: 'default', renderer: renderer.id, visualizationAlgorithm: 'identity', widgets: ['main'] }], defaultView: 'main', defaultProfile: 'default', chartCards: chartCards(input.chartCards),
+      renderers: renderers.map((item) => ({ id: item.id, type: item.type || item.id, label: item.label || item.id,
+        ...(item.params ? { params: { ...clone(item.params), ...(item.type === 'webglHeatmap' ? {
+          dataWidth: sensors[0].matrix.cols, dataHeight: sensors[0].matrix.rows,
+          minFrameLength: sensors[0].matrix.rows * sensors[0].matrix.cols,
+        } : {}) } } : {}) })),
+      visualizationAlgorithms: [{ id: 'identity', type: 'identity' }],
+      profiles: [renderer, ...renderers.filter((item) => item.id !== renderer.id)].map((item, index) => ({
+        id: index === 0 ? 'default' : `display-${item.id}`, label: item.label || item.id,
+        renderer: item.id, visualizationAlgorithm: 'identity', widgets: ['main'],
+      })), defaultView: 'main', defaultProfile: 'default', chartCards: chartCards(input.chartCards),
       // 左侧统计读取映射后的原始矩阵通道，不能取 3D 插值或平滑后的画布数据。
       sidebar: { source: sensors[0].id,
         pressure: { primaryMetric: 'totalPressure', metrics: ['averagePressure', 'maxPressure', 'totalPressure'] },
@@ -201,6 +217,14 @@ function buildCreate(input, catalog, protocols) {
   const validation = validateDisplaySystemConfig(manifest);
   if (!validation.ok) throw fail('AGENT_INVALID_MANIFEST', 'Manifest validation failed', validation.errors);
   return { manifest, definitions: { sensors: sensorDefinitions }, overwrite: false };
+}
+
+/** 比较真实输入与算法，忽略系统名称和通道身份，识别同一任务按展示形式拆开的副本。 */
+function createInputSignature(payload) {
+  return JSON.stringify({ sensors: payload.manifest.sensors.map((sensor) => ({
+    matrix: sensor.matrix, protocol: sensor.protocol, algorithmType: sensor.algorithm.type,
+    definitions: payload.definitions.sensors[sensor.id],
+  })), chartCards: payload.manifest.display.chartCards });
 }
 
 /** 创建限定本机能力的 Agent 工具，读操作即时执行，写操作先注册可审阅提案。 */
@@ -370,6 +394,7 @@ function createAgentTools({ root, httpBaseUrl = 'http://127.0.0.1:19245', wsUrl 
     const saved = await context.createProposal(proposal);
     return { proposalId: saved.id, kind: saved.kind, systemId: saved.systemId, summary: saved.summary, status: 'pending', applied: false,
       ...(saved.mappingPreview ? { mappingPreview: saved.mappingPreview } : {}),
+      ...(saved.kind === 'create_system' ? { displayModes: saved.after.display.renderers.map((item) => ({ id: item.id, label: item.label })) } : {}),
       verification: 'Configuration proposal only; no device or live frame was verified.' };
   }
 
@@ -555,10 +580,21 @@ function createAgentTools({ root, httpBaseUrl = 'http://127.0.0.1:19245', wsUrl 
         after: { systemId: args.systemId, sensorId: args.sensorId, portPath: args.portPath, activateSystem: state.currentSystemId !== args.systemId || state.currentSensorType !== args.systemId, verification: 'Activate the selected system and open this port only; do not start collection. Realtime data remains to be checked.' } }, context);
     }
     if (name === 'prepare_create_system') {
-      const payload = buildCreate(args, catalog, protocols);
-      await assertCreateIdentity(args, context);
-      return propose({ kind: 'create_system', systemId: args.id, summary: args.summary, status: 'pending', input: clone(args), after: payload.manifest,
-        mappingPreview: mappingPreview(args, payload), payload }, context);
+      let input = args;
+      let payload = buildCreate(input, catalog, protocols);
+      const existing = !input.separateSystem && context.getPendingProposals?.().find((item) => item.kind === 'create_system'
+        && item.status === 'pending' && !item.input.separateSystem
+        && createInputSignature(item.payload) === createInputSignature(payload));
+      if (existing) {
+        const rendererIds = [...new Set([...existing.after.display.renderers, ...payload.manifest.display.renderers].map((item) => item.id))];
+        if (rendererIds.length > 8) throw fail('AGENT_INVALID_ARGUMENTS', '同一系统最多选择 8 种展示模式。');
+        input = { ...existing.input, rendererIds };
+        payload = buildCreate(input, catalog, protocols);
+      }
+      await assertCreateIdentity(input, context);
+      return propose({ kind: 'create_system', systemId: input.id, summary: `${input.summary}；展示模式：${payload.manifest.display.renderers.map((item) => item.label).join('、')}`,
+        status: 'pending', input: clone(input), after: payload.manifest,
+        mappingPreview: mappingPreview(input, payload), payload }, context);
     }
     if (name === 'prepare_duplicate_system') {
       const editor = await read(args.sourceSystemId, context);

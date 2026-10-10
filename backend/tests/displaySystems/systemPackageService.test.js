@@ -9,6 +9,8 @@ const { exportManifestPackage, exportNativePackage, installManifestPackage, inst
 const { createRealtimeAlgorithmCatalog } = require('../../agent-runtime/algorithm-lab/realtimeCatalog');
 const { createManifestAlgorithmBindings } = require('../../extension-host/workspace/manifestAlgorithmBindings');
 const { createBuiltinSystemTemplates } = require('../../extension-host/workspace/builtinSystemTemplates');
+const { createAppRuntime } = require('../../extension-host/appRuntimeFactory');
+const { realtimePackage } = require('../../agent-runtime/algorithm-lab/realtimeCatalog');
 
 /** 读取真实 1024 输入、529 展示的坐垫配置以覆盖发布前后的线序契约。 */
 function sampleSystem() {
@@ -85,6 +87,50 @@ test('a saved restricted classifier and chart remain bound after managed install
   assert.throws(() => bindings.update('seatpad2', { expectedRevision: bindings.read('seatpad2').revision, configuration }), { code: 'DISPLAY_SYSTEM_READ_ONLY' });
 });
 
+test('the author can receive a published system without replacing their saved classifier', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'shroom-author-release-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const authorRoot = path.join(root, 'author-algorithms');
+  fs.mkdirSync(authorRoot, { recursive: true });
+  const source = 'def predict(f):\n    return 0';
+  const draft = { id: 'gesture', systemId: 'seatpad2', name: '动作识别', language: 'restricted-python-v1',
+    source, labels: ['抚摸', '拍打'], windowFrames: 16,
+    report: { inputContract: { stage: 'data', pointCount: 529, sampleIntervalMs: 20 },
+      sourceDigest: createHash('sha256').update(JSON.stringify(source)).digest('hex') } };
+  fs.writeFileSync(path.join(authorRoot, 'gesture.json'), JSON.stringify(draft));
+  const input = exportManifestPackage(sampleSystem(), { installedAlgorithmRoot: authorRoot,
+    bindings: { configuration: { algorithms: [{ packageId: 'user-gesture', sensorId: 'sit', enabled: false }], charts: [] } } });
+  const agentRoot = path.join(root, 'client-agent');
+  const installedRoot = path.join(agentRoot, 'algorithm-lab', 'installed');
+  fs.mkdirSync(installedRoot, { recursive: true });
+  const localSource = 'def predict(f):\n    return 1';
+  const localDraft = { ...draft, source: localSource, report: { ...draft.report,
+    sourceDigest: createHash('sha256').update(JSON.stringify(localSource)).digest('hex') } };
+  const localFile = path.join(installedRoot, 'gesture.json');
+  fs.writeFileSync(localFile, JSON.stringify(localDraft));
+  const runtime = createAppRuntime({ logger: { warn() {} }, runtimeResourceRoot: path.join(root, 'resources'),
+    runtimeWritableRoot: path.join(root, 'client'), agentRoot });
+  runtime.displaySystems.installPackage(input, 1);
+  assert.equal(runtime.displaySystems.getById('seatpad2').managed, true);
+  assert.equal(runtime.getUserAlgorithmPackages().find((item) => item.id === 'user-gesture').revision,
+    realtimePackage(draft).revision);
+  assert.equal(JSON.parse(fs.readFileSync(localFile, 'utf8')).source, localSource);
+
+  const anotherManagedAlgorithm = path.join(root, 'client', 'managed-display-systems', 'another-system', 'package-algorithms');
+  fs.mkdirSync(anotherManagedAlgorithm, { recursive: true });
+  fs.writeFileSync(path.join(anotherManagedAlgorithm, 'gesture.json'),
+    JSON.stringify({ ...draft, systemId: 'another-system' }));
+  assert.throws(() => runtime.displaySystems.installPackage(input, 2), { code: 'SYSTEM_PACKAGE_ALGORITHM_INVALID' });
+
+  const otherAgentRoot = path.join(root, 'other-agent');
+  const otherInstalled = path.join(otherAgentRoot, 'algorithm-lab', 'installed');
+  fs.mkdirSync(otherInstalled, { recursive: true });
+  fs.writeFileSync(path.join(otherInstalled, 'gesture.json'), JSON.stringify({ ...draft, systemId: 'another-system' }));
+  const otherRuntime = createAppRuntime({ logger: { warn() {} }, runtimeResourceRoot: path.join(root, 'resources'),
+    runtimeWritableRoot: path.join(root, 'other-client'), agentRoot: otherAgentRoot });
+  assert.throws(() => otherRuntime.displaySystems.installPackage(input, 1), { code: 'SYSTEM_PACKAGE_ALGORITHM_INVALID' });
+});
+
 test('a native hand-template copy installs read-only and retains its original source', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'shroom-native-package-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -97,7 +143,8 @@ test('a native hand-template copy installs read-only and retains its original so
   const customer = createBuiltinSystemTemplates({ root: path.join(root, 'customer-native'), managedRoot });
   assert.equal(customer.get('hand_copy').managed, true);
   assert.equal(customer.get('hand_copy').editable, false);
-  assert.equal(customer.resolve('hand_copy', ['hand']).sourceType, 'hand');
+  assert.throws(() => customer.resolve('hand_copy', ['hand']), { code: 'LICENSE_SCOPE_REQUIRED' });
+  assert.equal(customer.resolve('hand_copy', ['hand_copy']).sourceType, 'hand');
   assert.equal(customer.editor('hand_copy').writable, false);
   assert.throws(() => customer.update('hand_copy', {}), { code: 'DISPLAY_SYSTEM_READ_ONLY' });
   assert.equal(JSON.parse(fs.readFileSync(path.join(managedRoot, 'hand_copy.json'), 'utf8')).managedPackage.version, 7);

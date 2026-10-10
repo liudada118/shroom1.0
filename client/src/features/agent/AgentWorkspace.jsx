@@ -149,14 +149,18 @@ export default function AgentWorkspace({ bridge: bridgeOverride, initiallyOpen =
   };
 
   /** Submit the current disk revision through a scoped employee token; receipt means pending review. */
-  const submitCreatedSystem = async (result) => {
+  const submitCreatedSystem = async (result, baseVersion) => {
     setResultActionFeedback(null);
     try {
-      const submitted = await requestJson(`/api/system-packages/submit/${encodeURIComponent(result.systemId)}`, { method: 'POST' });
+      const submitted = await requestJson(`/api/system-packages/submit/${encodeURIComponent(result.systemId)}`, {
+        method: 'POST', ...(baseVersion === undefined ? {} : { body: JSON.stringify({ baseVersion }) }),
+      });
       setResultActionFeedback({ key: result.key, message: submitted.status === 'published'
         ? `系统包 #${submitted.id} 已发布，客户软件同步后可用。`
         : `已提交审核 #${submitted.id}。管理员发布后，客户软件同步时才会出现。` });
-    } catch (error) { setResultActionFeedback({ key: result.key, error: true, message: error.message || '提交审核失败' }); }
+    } catch (error) { setResultActionFeedback({ key: result.key, error: true, message: error.message || '提交审核失败',
+      updateBaseVersion: error.code === 'SYSTEM_ID_ALREADY_PUBLISHED' && Number.isSafeInteger(error.currentVersion)
+        ? error.currentVersion : null }); }
   };
 
   /** 使用后端算法超市核验目标系统和实时通道，只有确认实例存在才报告启用。 */

@@ -43,3 +43,8 @@ pack-resources/python/
 /.git.broken_*/
 /.worktrees/
 /runtime
+
+# Local code intelligence indexes and generated architecture graphs.
+/.codegraph/
+/.ua/
+/.understand-anything/

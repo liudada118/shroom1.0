@@ -67,7 +67,12 @@ export function buildManifestWidgetRendererParams({
     return { ...base, gridWidth: cols, gridHeight: rows };
   }
   if (rendererId === 'blobHeatmap' || rendererId === 'webglHeatmap') {
-    return { ...base, dataWidth: cols, dataHeight: rows };
+    return {
+      ...base,
+      dataWidth: cols,
+      dataHeight: rows,
+      ...(rendererId === 'webglHeatmap' ? { minFrameLength: rows * cols } : {}),
+    };
   }
   return base;
 }

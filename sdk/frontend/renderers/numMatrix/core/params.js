@@ -434,6 +434,8 @@ export function normalizeNumMatrixParams(params = {}) {
   return {
     /** 画法。见 `BACKENDS`。 */
     backend: BACKENDS.includes(params.backend) ? params.backend : 'sprite3d',
+    // 新二维数字模式显示映射后的逐点数值；旧预设仍沿用过滤/模糊通路。
+    frameInput: params.frameInput === 'raw' ? 'raw' : 'filtered',
     /** 格子放大倍率。gridWidth/gridHeight 为 0 时用 64/size 推导网格。 */
     size: clampInteger(params.size, 2, PARAM_RANGES.size),
     /** 显式网格宽高；0 表示「由 size 推导」，对应原实现的 `64 / size`。 */

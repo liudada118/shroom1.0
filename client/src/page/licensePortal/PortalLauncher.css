@@ -40,10 +40,15 @@ body:has(.fiber-portal .system-selector-backdrop.is-open) { overflow: hidden; }
 .fiber-portal .portal-entry-form input { width: 100%; min-height: 42px; padding: 8px 12px; color: #f8fbff; background: rgba(3, 13, 27, .48); border: 1px solid rgba(72, 117, 178, .4); border-radius: 6px; }
 .fiber-portal .portal-entry-form input:focus, .fiber-portal .portal-system-search:focus-within { border-color: rgba(151, 207, 255, .95); box-shadow: 0 0 0 3px rgba(42, 139, 255, .2); }
 .fiber-portal .portal-entry-error, .fiber-portal .portal-catalog-error { margin: 0; color: #ffb2a6; font-size: 12px; line-height: 1.5; }
+.fiber-portal .portal-directory-note { margin: 0; color: #9fb8cc; font-size: 12px; line-height: 1.5; }
 .fiber-portal .portal-no-systems { padding: 18px 8px; color: rgba(203, 219, 237, .54); font-size: 13px; }
 .fiber-portal .system-scene-status { top: 26px; bottom: auto; left: 26px; right: 72px; letter-spacing: .04em; line-height: 1.6; font-size: 11px; }
 .fiber-portal .system-scene-copy { right: 26px; bottom: 26px; max-width: 360px; }
 .fiber-portal .system-scene-copy h3 { font-size: 26px; line-height: 1.35; overflow-wrap: anywhere; }
+.fiber-portal .portal-system-submit { display: block; width: 100%; min-height: 44px; margin-top: 8px; padding: 8px 14px; color: #d8f5ed; background: rgba(34, 112, 91, .18); border: 1px solid rgba(93, 205, 164, .55); border-radius: 6px; font-size: 13px; cursor: pointer; }
+.fiber-portal .portal-system-submit:hover, .fiber-portal .portal-system-submit:focus-visible { color: #fff; background: rgba(34, 112, 91, .38); border-color: #80d8b6; }
+.fiber-portal .portal-system-submit:focus-visible { outline: 2px solid #b0efd8; outline-offset: 2px; }
+.fiber-portal .portal-system-submit:disabled { opacity: .5; cursor: not-allowed; }
 .fiber-portal .system-selector-close { width: 44px; height: 44px; }
 .fiber-portal .system-scene-particle-root { contain: size layout; min-height: 0; min-width: 0; }
 .fiber-portal .system-scene-particle-root canvas { position: absolute; inset: 0; width: 100% !important; height: 100% !important; }

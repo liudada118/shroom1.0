@@ -21,12 +21,13 @@ const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:19245';
  * 两者都不是"参数有误"。
  */
 export class DisplaySystemApiError extends Error {
-  constructor(message, { code = 'DISPLAY_SYSTEM_REQUEST_FAILED', status = 0, details = [] } = {}) {
+  constructor(message, { code = 'DISPLAY_SYSTEM_REQUEST_FAILED', status = 0, details = [], currentVersion } = {}) {
     super(message);
     this.name = 'DisplaySystemApiError';
     this.code = code;
     this.status = status;
     this.details = details;
+    this.currentVersion = currentVersion;
   }
 }
 
@@ -44,7 +45,7 @@ export async function requestJson(path, options) {
     const details = Array.isArray(payload.details) ? payload.details : [];
     throw new DisplaySystemApiError(
       `${payload.error || payload.msg || payload.message || `HTTP ${response.status}`}${details.length ? `：${details.join('；')}` : ''}`,
-      { code: payload.code, status: response.status, details },
+      { code: payload.code, status: response.status, details, currentVersion: payload.currentVersion },
     );
   }
   return payload;

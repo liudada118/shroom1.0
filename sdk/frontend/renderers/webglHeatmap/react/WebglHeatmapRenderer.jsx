@@ -27,7 +27,7 @@
  */
 
 import React, {
-  useCallback, useEffect, useImperativeHandle, useMemo, useRef,
+  useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState,
 } from 'react';
 
 import { normalizeWebglHeatmapParams } from '../core/params.js';
@@ -43,6 +43,15 @@ const WebglHeatmapRenderer = React.forwardRef(function WebglHeatmapRenderer(prop
   const canvasRef = useRef(null);
   const painterRef = useRef(null);
   const rafRef = useRef(null);
+  const renderStatusRef = useRef('waiting');
+  const [renderStatus, setRenderStatus] = useState('waiting');
+
+  /** 只在绘制状态变化时更新提示，避免每帧触发 React 渲染。 */
+  const updateRenderStatus = useCallback((status) => {
+    if (renderStatusRef.current === status) return;
+    renderStatusRef.current = status;
+    setRenderStatus(status);
+  }, []);
 
   const params = useMemo(
     () => normalizeWebglHeatmapParams(props.params),
@@ -97,6 +106,10 @@ const WebglHeatmapRenderer = React.forwardRef(function WebglHeatmapRenderer(prop
     if (!canvas || !painter) return;
 
     const current = paramsRef.current;
+    if (stateRef.current.frame.length < current.minFrameLength) {
+      updateRenderStatus('waiting');
+      return;
+    }
     const { max, filter, size } = stateRef.current.cfg;
     const values = prepareFrame(stateRef.current.frame, { ...current, filter });
     const points = buildHeatPoints(values, current);
@@ -116,8 +129,11 @@ const WebglHeatmapRenderer = React.forwardRef(function WebglHeatmapRenderer(prop
     if (ctx && source) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+      updateRenderStatus('ready');
+    } else {
+      updateRenderStatus('unavailable');
     }
-  }, []);
+  }, [updateRenderStatus]);
 
   useEffect(() => {
     painterRef.current = new WebGLCanvas();
@@ -205,6 +221,7 @@ const WebglHeatmapRenderer = React.forwardRef(function WebglHeatmapRenderer(prop
   return (
     <div
       style={{
+        position: 'relative',
         width: '100vw',
         height: '100vh',
         display: 'flex',
@@ -219,6 +236,12 @@ const WebglHeatmapRenderer = React.forwardRef(function WebglHeatmapRenderer(prop
         height={params.canvasHeight}
         style={{ width: params.displaySize, height: params.displaySize }}
       />
+      {renderStatus !== 'ready' && (
+        <div role="status" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
+          justifyContent: 'center', color: '#9cb9c8', pointerEvents: 'none' }}>
+          {renderStatus === 'waiting' ? '等待传感器数据' : '热力图暂时无法绘制，请切换其他展示方式。'}
+        </div>
+      )}
     </div>
   );
 });

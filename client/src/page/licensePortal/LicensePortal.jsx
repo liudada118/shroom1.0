@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { ArrowRightOutlined, AppstoreOutlined, SafetyCertificateOutlined, HeartOutlined, CarOutlined, RobotOutlined, ExperimentOutlined, KeyOutlined } from '@ant-design/icons';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import useMainWebSocket from '../../services/ws/useMainWebSocket';
 import { getLicenseKeyFromMessage, hasValidLicenseDate, isExpiredLicenseMessage, isObjectMessage } from '../../services/ws/messages';
@@ -11,7 +11,7 @@ import { registerRuntimeDisplayDefinition } from '../../displays/registry';
 import { syncNativeSystemTemplates } from '../../displays/nativeSystemTemplates';
 import BRAND_LOGO_SRC from '../../assets/开屏IMG/shroom-vision-logo.png';
 import { FeedbackWidget } from './LicensePortalWidgets';
-import { PORTAL_CATEGORIES, buildPortalSystems, readPortalLicenseScope } from './portalSystems';
+import { PORTAL_CATEGORIES, buildPortalSystems, describeCompanySystemSync, needsCompanySystemSync, readPortalLicenseScope } from './portalSystems';
 import { createPortalEntry } from './portalEntry';
 import PortalSystemSelector from './PortalSystemSelector';
 import './PortalFeedback.css';
@@ -29,6 +29,7 @@ const CATEGORY_ICONS = { care: HeartOutlined, vehicle: CarOutlined, embodied: Ro
 /** 首页只选择入口；授权、系统切换和真实数据仍使用原有后端链路。 */
 export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [accessKey, setAccessKey] = useState('');
   const [scope, setScope] = useState(undefined);
@@ -36,6 +37,7 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
   const [error, setError] = useState('');
   const [runtimeDefinitions, setRuntimeDefinitions] = useState([]);
   const [managedIds, setManagedIds] = useState([]);
+  const [staffConfigured, setStaffConfigured] = useState(false);
   const [syncStatus, setSyncStatus] = useState('');
   const [syncAttempt, setSyncAttempt] = useState(0);
   const syncedKeyRef = useRef('');
@@ -130,6 +132,11 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
     entryRef.current = createPortalEntry({
       activate: (key) => commandClient.execute('license.activate', { key, startTime: Date.now() }),
       switchSystem: (sensorType) => commandClient.execute('sensor.switch', { sensorType }),
+      /** 进入公司系统前读取后端已验签、未过期且与当前密钥绑定的目录。 */
+      getManagedIds: async () => {
+        const status = await requestJson('/api/system-packages/status');
+        return (status.available || []).map((item) => item.systemId);
+      },
       onPhase: setPhase,
       onError: setError,
       onEntered: enterMonitoringPage,
@@ -181,23 +188,44 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
 
   const { connected } = useMainWebSocket({ onMessage: handleMessage, onClose: handleDisconnect, onError: handleDisconnect });
 
+  /** 员工维护入口只随本机令牌状态显示，客户使用系统仍走软件密钥授权。 */
+  useEffect(() => {
+    setStaffConfigured(false);
+    if (!connected) return undefined;
+    const controller = new AbortController();
+    requestJson('/api/system-packages/staff-credential', { signal: controller.signal })
+      .then((status) => { if (!controller.signal.aborted) setStaffConfigured(status.configured === true); })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [connected, selectorOpen, reload]);
+
   /** On a validated key, refresh the signed company catalog without blocking local systems. */
   useEffect(() => {
     const requestId = `${accessKey.trim()}:${syncAttempt}`;
     if (scope === undefined || !connected || !accessKey.trim() || syncedKeyRef.current === requestId) return undefined;
+    if (!needsCompanySystemSync(scope)) {
+      syncedKeyRef.current = '';
+      setManagedIds([]);
+      setSyncStatus('');
+      return undefined;
+    }
     syncedKeyRef.current = requestId;
     let stopped = false;
     requestJson('/api/system-packages/status').then((status) => {
       if (!stopped) setManagedIds((status.available || []).map((item) => item.systemId));
     }).catch(() => {});
-    setSyncStatus('正在检查公司发布的新系统…');
+    setSyncStatus('');
     requestJson('/api/system-packages/sync', { method: 'POST' }).then((result) => {
       if (stopped) return;
       setManagedIds((result.available || []).map((item) => item.systemId));
-      setSyncStatus(result.installed?.length ? `已安装 ${result.installed.length} 个新系统${result.errors?.length ? `；${result.errors.length} 个安装失败` : ''}`
-        : result.errors?.length ? `${result.errors.length} 个系统更新失败，可稍后刷新重试` : '系统目录已是最新');
+      setSyncStatus(describeCompanySystemSync(result));
       setReload((value) => value + 1);
-    }).catch((failure) => { if (!stopped) setSyncStatus(failure.message || '公司系统同步暂不可用，已有本地授权系统仍可使用'); });
+    }).catch((failure) => {
+      if (stopped) return;
+      setSyncStatus(failure.code === 'SYSTEM_SYNC_HTTP_ERROR'
+        ? '公司系统暂未同步；已授权的内置系统仍可使用。需要公司系统时，请检查发布与密钥授权。'
+        : `公司系统暂未同步：${failure.message || '请稍后刷新重试'}。已授权的内置系统仍可使用。`);
+    });
     return () => { stopped = true; };
   }, [scope, connected, accessKey, syncAttempt]);
 
@@ -355,7 +383,9 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
       onBack={() => setParams({})}
       onCategory={(next) => setParams({ category: next }, { replace: true })}
       onSelect={(system) => { setError(''); setParams({ category: activeCategory, system }, { replace: true }); }}
-      onEnter={(system) => entryRef.current?.begin({ system, key: accessKey, connected })} />
+      onEnter={(system) => entryRef.current?.begin({ system, key: accessKey, connected })}
+      onSubmit={(system) => navigate(`/display-systems?submitSystem=${encodeURIComponent(system.systemId)}`)}
+      onRevise={staffConfigured ? (system) => navigate(`/display-systems?companySystem=${encodeURIComponent(system.systemId)}`) : undefined} />
     <SystemScenePreview activeScene={selectorOpen ? getPortalScene(previewSystem) : 'shroom'}
       active={directEntry ? previewVisible : !sceneExpanded || previewVisible}
       host={selectorOpen ? previewHost : homeHost} framing={selectorOpen ? sceneExpanded ? 'focused' : 'preview' : 'home'} onStatus={setSceneStatus}

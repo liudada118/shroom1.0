@@ -23,24 +23,6 @@ import {
  */
 export const MATRIX_DISPLAY_MODES = Object.freeze([
   {
-    id: 'shape-heatmap-2d',
-    rendererId: 'heatmap',
-    label: '2D 热力图',
-    description: '按传感器坐标形状显示颜色分布',
-    dimension: '2d',
-    kind: 'heatmap',
-    shapeAware: true,
-  },
-  {
-    id: 'shape-values-2d',
-    rendererId: 'matrix',
-    label: '2D 数字',
-    description: '按传感器坐标形状显示每个点的数值',
-    dimension: '2d',
-    kind: 'values',
-    shapeAware: true,
-  },
-  {
     id: 'matrix-points-3d',
     rendererId: 'pointGrid',
     label: '3D 点图',
@@ -56,6 +38,25 @@ export const MATRIX_DISPLAY_MODES = Object.freeze([
     description: '以可旋转的三维数字矩阵显示每个点',
     dimension: '3d',
     kind: 'values',
+    shapeAware: false,
+  },
+  {
+    id: 'matrix-values-2d',
+    rendererId: 'numMatrix2d',
+    rendererType: 'numMatrix',
+    label: '2D 数字',
+    description: '在平面网格逐格显示映射后的数值，不再旋转或重排线序',
+    dimension: '2d',
+    kind: 'values',
+    shapeAware: false,
+  },
+  {
+    id: 'native-heatmap-2d',
+    rendererId: 'webglHeatmap',
+    label: '热力图',
+    description: '使用系统原生 WebGL 热力图显示同一传感器矩阵',
+    dimension: '2d',
+    kind: 'heatmap',
     shapeAware: false,
   },
   {
@@ -104,6 +105,11 @@ export function inferMatrixDisplayModeId(rendererId) {
   return MODE_BY_RENDERER_ID.get(rendererId)?.id || MATRIX_DISPLAY_MODES[0].id;
 }
 
+/** 将展示模式 ID 解析成注册表类型；2D/3D 数字共用 numMatrix 的不同后端。 */
+export function resolveMatrixRendererType(rendererId) {
+  return MODE_BY_RENDERER_ID.get(rendererId)?.rendererType || rendererId;
+}
+
 /**
  * 根据矩阵定义生成所有展示形式的渲染器描述。
  *
@@ -125,13 +131,20 @@ export function createMatrixDisplayRenderers({ matrix = {}, coordinateMap = null
         back: { num1: rows, num2: cols, interp: 1, order: 0 },
         ...(points?.length === rows * cols ? { points } : {}),
       };
-    } else if (mode.rendererId === 'numMatrix') {
+    } else if (resolveMatrixRendererType(mode.rendererId) === 'numMatrix') {
       params = {
-        backend: 'sprite3d',
+        backend: mode.dimension === '2d' ? 'webgl' : 'sprite3d',
         gridWidth: cols,
         gridHeight: rows,
         manageSidebar: false,
+        ...(mode.dimension === '2d' ? {
+          frameInput: 'raw',
+          webgl: { variant: 'original', rawTranspose: false, indexRow: false, overlayPad: 0 },
+        } : {}),
       };
+    } else if (mode.rendererId === 'webglHeatmap') {
+      // 通用矩阵不继承 64×64 床垫的裁边、镜像和 4096 点门槛。
+      params = { ...WEBGL_HEATMAP_PRESETS.plain, dataWidth: cols, dataHeight: rows, minFrameLength: rows * cols };
     } else if (mode.rendererId === 'blobHeatmap') {
       params = {
         dataWidth: cols,
@@ -141,7 +154,7 @@ export function createMatrixDisplayRenderers({ matrix = {}, coordinateMap = null
 
     return {
       id: mode.rendererId,
-      type: mode.rendererId,
+      type: resolveMatrixRendererType(mode.rendererId),
       label: mode.label,
       description: mode.description,
       params,
@@ -212,7 +225,7 @@ export function createBuiltinMatrixRendererParams(
       dataWidth: cols,
       dataHeight: rows,
       max: normalizedMax,
-      minFrameLength: 1,
+      minFrameLength: rows * cols,
     });
   }
 

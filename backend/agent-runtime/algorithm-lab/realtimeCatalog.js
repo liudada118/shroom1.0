@@ -35,7 +35,7 @@ function createRealtimeAlgorithmCatalog(root, { managedRoot = null, managedNativ
   const cache = new Map();
   return {
     /** 给系统编辑器或实时服务提供同一份已验证目录。 */
-    list({ includeResolved = false } = {}) {
+    list({ includeResolved = false, includeConflicts = false } = {}) {
       const files = [];
       try {
         for (const name of fs.readdirSync(directory).filter((name) => /^[A-Za-z0-9_-]{1,50}\.json$/.test(name)).slice(0, 1000)) files.push(path.join(directory, name));
@@ -51,23 +51,36 @@ function createRealtimeAlgorithmCatalog(root, { managedRoot = null, managedNativ
         } catch { /* The managed catalog is optional before first sync. */ }
       }
       const result = [];
-      const seenIds = new Set();
+      const seenIds = new Map();
+      /** A signed managed package supersedes the author's local copy of the same system and algorithm. */
+      function addPackage(item, managed) {
+        const previous = seenIds.get(item.id);
+        if (!previous) {
+          seenIds.set(item.id, { index: result.length, managed });
+          result.push(item);
+        } else if (managed && !previous.managed && result[previous.index].systemId === item.systemId) {
+          result[previous.index] = item;
+          seenIds.set(item.id, { index: previous.index, managed: true });
+        } else if (includeConflicts && result[previous.index].systemId !== item.systemId) {
+          result.push(item);
+        }
+      }
       for (const file of files) {
         try {
           const name = path.basename(file), stat = fs.lstatSync(file);
           if (!stat.isFile() || stat.size > 4000000) continue;
           const key = `${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}`;
+          const managedSystemId = managedRoot && path.dirname(path.dirname(file)) !== path.dirname(directory)
+            && file.startsWith(path.resolve(managedRoot) + path.sep) ? path.basename(path.dirname(path.dirname(file))) : null;
           let entry = cache.get(file);
           if (entry?.key !== key) {
             const draft = JSON.parse(fs.readFileSync(file, 'utf8'));
-            const managedSystemId = managedRoot && path.dirname(path.dirname(file)) !== path.dirname(directory)
-              && file.startsWith(path.resolve(managedRoot) + path.sep) ? path.basename(path.dirname(path.dirname(file))) : null;
             entry = { key, item: draft.id === name.slice(0, -5) && (!managedSystemId || draft.systemId === managedSystemId)
               ? realtimePackage(draft, true) : null }; cache.set(file, entry);
           }
-          if (entry.item && !seenIds.has(entry.item.id)) {
-            seenIds.add(entry.item.id);
-            const { resolvedPackage, ...item } = entry.item; result.push(includeResolved ? entry.item : item);
+          if (entry.item) {
+            const { resolvedPackage, ...item } = entry.item;
+            addPackage(includeResolved ? entry.item : item, Boolean(managedSystemId));
           }
         } catch { cache.delete(file); }
       }
@@ -82,9 +95,9 @@ function createRealtimeAlgorithmCatalog(root, { managedRoot = null, managedNativ
               const stored = JSON.parse(fs.readFileSync(file, 'utf8'));
               if (stored.id !== name.slice(0, -5) || !stored.managedPackage) continue;
               for (const draft of (stored.packageAlgorithms || []).slice(0, 8)) {
-                if (draft.systemId !== stored.id || seenIds.has(`user-${draft.id}`)) continue;
+                if (draft.systemId !== stored.id) continue;
                 const item = realtimePackage(draft, includeResolved);
-                if (item) { seenIds.add(item.id); result.push(item); }
+                if (item) addPackage(item, true);
               }
             } catch { /* A bad managed declaration does not hide other algorithms. */ }
           }

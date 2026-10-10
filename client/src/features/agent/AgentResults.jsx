@@ -38,6 +38,10 @@ export default function AgentResults({ results, expanded, onToggle, onOpenSystem
           : item.packageId ? '已保存到实时算法目录；可在实时连接启用，或绑定到系统自动启用。' : '已保存到离线算法库，尚不能实时启用。'}</p>
         {item.kind === 'algorithm' && Number.isFinite(item.report?.accuracy) && <p className="shroom-agent-result-report">测试：{item.report.windows} 个窗口 · 正确率 {(item.report.accuracy * 100).toFixed(1)}%{item.report.split === 'development' ? '（开发集）' : '（独立记录）'}</p>}
         {actionFeedback?.key === item.key && <p className={`shroom-agent-result-feedback ${actionFeedback.error ? 'is-error' : ''}`} role={actionFeedback.error ? 'alert' : 'status'}>{actionFeedback.message}</p>}
+        {item.kind === 'system' && actionFeedback?.key === item.key && actionFeedback.updateBaseVersion
+          && <button type="button" onClick={() => onSubmitPackage(item, actionFeedback.updateBaseVersion)}>
+            确认作为版本 #{actionFeedback.updateBaseVersion} 的更新提交
+          </button>}
         <div className="shroom-agent-result-actions">
           {item.kind === 'system' ? <><button className="shroom-agent-primary" type="button" onClick={() => onOpenSystem(item, true)}>进入系统</button>
             <button type="button" onClick={() => onOpenSystem(item, false)}>在系统列表中查看</button>

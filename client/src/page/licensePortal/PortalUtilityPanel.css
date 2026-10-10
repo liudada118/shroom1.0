@@ -50,6 +50,16 @@
 .fiber-portal .portal-utility-display fieldset { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0; padding: 0 10px 6px; border: 1px solid rgba(135, 176, 205, .3); border-radius: 8px; }
 .fiber-portal .portal-utility-display legend { padding: 0 5px; color: var(--portal-secondary); font-size: 12px; }
 .fiber-portal .portal-utility-display .ant-select { min-width: 100px; flex: 1; margin: 0 !important; }
+
+.portal-renderer-controls { display: grid; gap: 10px; margin: 0 0 16px; padding: 12px; border: 1px solid #294556; border-radius: 8px; color: #d7e5ee; }
+.fiber-portal .portal-utility-display .portal-renderer-controls { display: grid; padding: 0 10px 6px; gap: 4px; }
+.fiber-portal .portal-utility-display .portal-renderer-controls label { display: flex; align-items: center; }
+.fiber-portal .portal-utility-display .portal-renderer-controls label > span { white-space: nowrap; }
+.fiber-portal .portal-utility-display .portal-renderer-controls small { display: none; }
+.portal-renderer-controls label { display: grid; gap: 8px; }
+.portal-renderer-controls select { width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid #345a70; border-radius: 6px; background: #0d2130; color: #d7e5ee; color-scheme: dark; }
+.portal-renderer-controls select:focus-visible { outline: 2px solid #66e0db; outline-offset: 2px; }
+.portal-renderer-controls small { color: #96adbb; line-height: 1.5; }
 /* 提示挂在 body，避免被工具条的横向滚动边界裁剪。 */
 .portal-utility-tooltip { max-width: 300px; }
 .portal-utility-tooltip .ant-tooltip-inner { padding: 9px 12px; color: #e2edf5; font-size: 13px; line-height: 1.6; border: 1px solid rgba(143, 181, 209, .35); box-shadow: 0 8px 26px rgba(0, 5, 13, .4); }

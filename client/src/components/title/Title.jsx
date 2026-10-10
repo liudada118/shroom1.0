@@ -4,6 +4,7 @@ import { PortalSessionBar, PortalQuickTools } from '../../page/licensePortal/Por
 import PortalControlDialog, { PORTAL_CONTROL_THEME } from '../../page/licensePortal/PortalControlDialog';
 import PortalPlaybackDialog from '../../page/licensePortal/PortalPlaybackDialog';
 import PortalWorkspaceTools from '../../page/licensePortal/PortalWorkspaceTools';
+import PortalRendererControls from '../../page/licensePortal/PortalRendererControls';
 import { createPortalCsvBatch } from './portalCsvBatch';
 import { capturePortalOperation, executePortalLegacyControl } from './portalOperationGuard';
 import { Menu, Slider, Button, Select, message, notification, Divider, Space, Radio, Drawer, Modal, Progress, Tooltip, ConfigProvider } from 'antd';
@@ -2829,6 +2830,7 @@ class Title extends React.Component {
         rendererRef={this.props.com} selectionActive={this.props.portalSelectionActive} onSelectionChange={this.props.onPortalSelectionChange}
         onClose={() => this.setState({ portalToolsOpen: false })}
         displayContent={<ConfigProvider theme={PORTAL_CONTROL_THEME}>
+          <PortalRendererControls rendererRef={this.props.com} active={this.state.portalToolsOpen} />
           {Boolean(baudControl.props.children) && <fieldset><legend>串口参数</legend>{baudControl}</fieldset>}
           <fieldset><legend>渲染与显示区域</legend>{displayControls}{carControls}{partControls}</fieldset>
           <fieldset><legend>界面语言</legend>{languageControl}</fieldset>
@@ -2979,6 +2981,7 @@ class Title extends React.Component {
           })
         }} className='optionImg' src={option} alt="" />
         <Drawer style={{ backgroundColor: 'rgba(21,18,42,0.8)' }} title={t('setData')} onClose={() => { this.setState({ open: false }) }} open={this.state.open}>
+          <PortalRendererControls rendererRef={this.props.com} active={this.state.open} />
           {this.renderSettingSliders(t)}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {/* 演示场景 / 真实场景：决定切展示模式时要不要自动做预压力清零 */}

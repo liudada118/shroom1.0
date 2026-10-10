@@ -8,7 +8,7 @@ const valid = (selectFlag = 'all') => ({ date: Date.now() + 60000, nowDate: Date
 const activationAck = (payload = valid()) => ({ ok: true, data: { results: [{ name: 'license-activation', activationCode: 'OK', payload }] } });
 /** 测试入口事务，所有外部动作都替换为可检查的桩。 */
 function setup(overrides = {}) {
-  const callbacks = { activate: vi.fn(async () => activationAck()), switchSystem: vi.fn(async () => ({ ok: true })), onPhase: vi.fn(), onError: vi.fn(), onEntered: vi.fn(), onValidated: vi.fn(), onInvalidated: vi.fn(), ...overrides };
+  const callbacks = { activate: vi.fn(async () => activationAck()), switchSystem: vi.fn(async () => ({ ok: true })), getManagedIds: vi.fn(async () => []), onPhase: vi.fn(), onError: vi.fn(), onEntered: vi.fn(), onValidated: vi.fn(), onInvalidated: vi.fn(), ...overrides };
   const entry = createPortalEntry(callbacks);
   return { entry, ...callbacks };
 }
@@ -70,6 +70,64 @@ describe('首页选择系统事务', () => {
     const test = setup({ activate: vi.fn(async () => activationAck(valid(['wholeChair']))) }); const custom = { value: 'agent-pressure', source: 'manifest' };
     test.entry.begin({ system: custom, key: 'test', connected: true }); test.entry.receive(valid(['wholeChair'])); await flush();
     expect(test.switchSystem.mock.calls).toEqual([['agent-pressure']]);
+    expect(test.getManagedIds).not.toHaveBeenCalled();
+  });
+  it.each([{ scope: ['company-seat'] }, { scope: 'all' }])('公司系统进入同时使用本轮密钥范围 $scope 和激活后读取的签名目录', async ({ scope }) => {
+    const managed = { value: 'company-seat-sensor', systemId: 'company-seat', source: 'manifest', managed: true };
+    let finishActivation;
+    const test = setup({
+      activate: vi.fn(() => new Promise((resolve) => { finishActivation = resolve; })),
+      getManagedIds: vi.fn(async () => ['company-seat']),
+    });
+    test.entry.begin({ system: managed, key: 'company-key', connected: true });
+    await flush();
+    expect(test.getManagedIds).not.toHaveBeenCalled();
+    finishActivation(activationAck(valid(scope))); await flush();
+    expect(test.getManagedIds).toHaveBeenCalledTimes(1);
+    expect(test.switchSystem.mock.calls).toEqual([['company-seat-sensor']]);
+    expect(test.onEntered).toHaveBeenCalledWith(managed);
+    expect(test.onError).toHaveBeenLastCalledWith('');
+  });
+  it.each([
+    [['other-system'], ['company-seat']],
+    [['company-seat'], []],
+    ['all', []],
+    [['company-seat'], ['other-system']],
+  ])('公司系统缺少密钥范围或签名目录授权时仍拒绝：%j / %j', async (scope, managedIds) => {
+    const test = setup({ activate: vi.fn(async () => activationAck(valid(scope))), getManagedIds: vi.fn(async () => managedIds) });
+    test.entry.begin({ system: { value: 'company-seat-sensor', systemId: 'company-seat', source: 'manifest', managed: true }, key: 'company-key', connected: true });
+    await flush();
+    expect(test.switchSystem).not.toHaveBeenCalled();
+    expect(test.onEntered).not.toHaveBeenCalled();
+    expect(test.onError).toHaveBeenLastCalledWith('当前密钥未授权此系统，请选择可用系统或更换密钥');
+  });
+  it('公司授权目录读取失败时保留失败原因且不进入', async () => {
+    const test = setup({ getManagedIds: vi.fn(async () => { throw new Error('公司系统授权目录读取失败'); }) });
+    test.entry.begin({ system: { value: 'company-seat', systemId: 'company-seat', managed: true }, key: 'company-key', connected: true });
+    await flush();
+    expect(test.switchSystem).not.toHaveBeenCalled();
+    expect(test.onError).toHaveBeenLastCalledWith('公司系统授权目录读取失败');
+    expect(test.onInvalidated).not.toHaveBeenCalled();
+  });
+  it('换密钥取消后，迟到的公司目录不能进入旧系统', async () => {
+    let finishCatalog;
+    const test = setup({ getManagedIds: vi.fn(() => new Promise((resolve) => { finishCatalog = resolve; })) });
+    test.entry.begin({ system: { value: 'company-seat', systemId: 'company-seat', managed: true }, key: 'old-key', connected: true });
+    await flush();
+    expect(test.getManagedIds).toHaveBeenCalledTimes(1);
+    test.entry.cancel();
+    test.entry.validate({ key: 'new-key', connected: true }); await flush();
+    finishCatalog(['company-seat']); await flush();
+    expect(test.switchSystem).not.toHaveBeenCalled();
+    expect(test.onEntered).not.toHaveBeenCalled();
+    expect(test.onValidated.mock.calls).toEqual([[null, 'old-key'], [null, 'new-key']]);
+  });
+  it('未接入公司目录读取器时仍默认拒绝公司系统', async () => {
+    const test = setup({ getManagedIds: undefined });
+    test.entry.begin({ system: { value: 'company-seat', systemId: 'company-seat', managed: true }, key: 'company-key', connected: true });
+    await flush();
+    expect(test.switchSystem).not.toHaveBeenCalled();
+    expect(test.onError).toHaveBeenLastCalledWith('当前密钥未授权此系统，请选择可用系统或更换密钥');
   });
   it.each(['disconnect', 'unmount'])('%s 取消后迟到的成功不能跳转', async () => {
     const test = setup(); test.entry.begin({ system, key: 'test', connected: true });

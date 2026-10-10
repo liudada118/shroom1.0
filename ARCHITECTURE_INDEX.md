@@ -1,6 +1,6 @@
 # Shroom 快速架构索引
 
-> 最后更新于：2026-10-08
+> 最后更新于：2026-10-10
 > 用途：代码定位和验证路由。理解当前实现先读 [开发者手册](docs/developer-guide.md)，完整文档分类见 [docs/README.md](docs/README.md)。`ARCHITECTURE.md` 保留历史设计与维护台账，不用作默认全文入口。
 
 当前完整链路：[数据、算法、存储与回放](docs/chains/data-flow.md) · [页面、渲染与交互](docs/chains/interface-flow.md)。
@@ -61,6 +61,8 @@ client commandClient → HTTP :19245 /api/commands
 
 ## 4. 高频路径入口
 
+本地代码理解：`codegraph.json` 固定索引排除范围，`.codegraph/` 保存本机调用图；有索引时先用 `codegraph explore` 获取当前代码与调用关系。Understand-Anything 的中文架构图保存于 `.ua/knowledge-graph.json`，`$understand` 更新图谱，`$understand-dashboard` 打开交互查看；依赖、构建产物、大型模型资源与本机运行数据不进入分析。两个生成目录由 Git 忽略，项目文档和测试仍纳入图谱。
+
 全局工具布局：`components/appTools/AppTools.jsx` 统一排列版本、更新和 Agent；首页反馈按钮通过专用 Portal 插槽加入同一行，页面卸载后自动移除。更新状态独占上方，不参与按钮宽度；`Home` 不再挂载运行页“画布零件”浮动栏。验证 `node scripts/tests/app-tools.mjs`（三种语言、320–1920px、更新状态、弹窗焦点、反馈卸载及长版本号）、`portal-launcher.mjs --monitor-only` 和 Standard；仅 UI 布局变更，无更新服务或渲染数据契约变动。
 
 Agent 客户交付与聊天同步：`index.js` 注入 `readStoredLicenseKey` → `agentProcess` → `agentSyncSettings` / `backend/agent-runtime/chatSync`，`AgentSyncSettings.jsx` 设置开关与状态。官方 HTTPS 接口默认复用软件密钥，自定义地址仍需独立令牌；按地址和密钥摘要隔离队列，经 Electron net.fetch 上传白名单快照，服务端校验有效性并确定公司名。`create-pack-db-template` 生成空库，Builder/Forge 排除个人目录，运行时 userData 不变。验证 `chatSync.test.js`、`agentProcess.test.js`、`privateDataIsolation.test.js`、`agent-workspace.mjs`、`embedded-agent-electron.cjs --chat-sync --asar` 和真实 IPC；触及 Electron/打包，执行 Full。服务端契约见 [聊天同步接口](docs/agent-chat-sync-api.md)。
@@ -69,7 +71,21 @@ HaLow 人体接入：`kernel/transport/halowReceiver.js` 独立 TCP 分帧，`ha
 
 更新发布：`package.json` / `dev-app-update.yml` 指向 HTTPS 更新源，运行时 `app/update/autoUpdater.js`；`scripts/upload-release.js` 只上传 Windows NSIS 产物，验证版本/更新地址/哈希后最后替换元数据。环境变量 `SHROOM_UPLOAD_DIR`、`SHROOM_SSH_KEY`；测试 `backend/tests/packaging/upload-release.test.js`，说明见 [更新服务器](docs/shroom-update-server.md)。上传和发布需显式操作。
 
-公司展示系统交付：`extension-host/workspace/systemPackageService.js` 按引用闭包导出/安装 Manifest 与原生模板副本，受管目录分别为 `managed-display-systems/` 和 `managed-native-systems/`；`managedSystemSync.js` 核验密钥绑定的签名目录与包，`staffPackageSubmission.js` 用 OS 加密的员工令牌提交待审包。`E:/key/server/systemPackages.ts` 管理审核、客户范围和签名下载，发布的系统可在开密钥页按系统 ID 勾选；门户只列客户授权且密钥勾选的受管系统，串口切换/打开与后台定时检查复核权限。Agent 成果卡片可提交或导出审核包；HTML 回退返回明确的服务未就绪提示。验证 `systemPackageService` / `managedSystemSync` / `staffPackageSubmission` 测试、`E:/key` 的 `systemPackages.test.ts` 与两库完整验证；涉及授权、包安装和跨层控制，使用 Full。操作见 [系统发布](docs/system-publishing-design.md)。
+公司展示系统交付：`extension-host/workspace/systemPackageService.js` 按引用闭包导出/安装 Manifest 与原生模板副本，受管目录分别为 `managed-display-systems/` 和 `managed-native-systems/`；`managedSystemSync.js` 核验密钥绑定的签名目录与包，`staffPackageSubmission.js` 用 OS 加密的员工令牌提交待审包。`E:/key/server/systemPackages.ts` 管理审核、客户范围和签名下载，发布的系统可在开密钥页按系统 ID 勾选；已登记的离线 RSA 码也可在联网时按签名、客户、有效期与系统范围同步，失败原因由服务端错误码说明。门户只列客户授权且密钥勾选的受管系统，串口切换/打开与后台定时检查复核权限。Agent 成果卡片可提交或导出审核包；HTML 回退返回明确的服务未就绪提示。验证 `systemPackageService` / `managedSystemSync` / `staffPackageSubmission` 测试、`E:/key` 的 `systemPackages.test.ts` 与两库完整验证；涉及授权、包安装和跨层控制，使用 Full。操作见 [系统发布](docs/system-publishing-design.md)。
+
+门户公司系统提示：`portalSystems.needsCompanySystemSync` 识别仅含内置系统的密钥并跳过公司目录请求；`LicensePortal` 对空目录保持安静，只在新增系统或公司同步异常时显示中性状态，原有受管系统授权核验不变。验证 `portalSystems.test.js` 与 Full。
+
+公司系统进入授权：`LicensePortal` 向 `createPortalEntry` 提供签名目录读取器；`finish` 在本轮密钥激活后获取 `/api/system-packages/status`，将其系统 ID 与激活回执范围一起传给 `isPortalSystemAllowed`。取消后不接受迟到目录，目录缺失或范围不匹配仍拒绝；验证 `portalEntry.test.js` 与 Full。
+
+生产监测页加载：`client/vite.config.js` 的混淆器设置 `ignoreImports: true`，保留动态导入字面量，使 `loadMonitoringPage` 正确输出 Home chunk。`LicensePortal` 仅对已配置员工令牌的客户端显示修订入口；`CompanySystemRevisions.readStaffReleases` 未配置时不调用员工目录。验证 `loadMonitoringPage.build.test.js`、`CompanySystemRevisions.test.jsx`、`PortalSystemSelector.test.jsx`、Full，以及 `node scripts/tests/production-monitoring.mjs` 的临时生产构建和真实页面进入/返回；`--build-dir <临时构建目录>` 可只复测页面。
+
+系统包 ID 冲突：员工提交已发布 ID 须明确携带当前 `baseVersion`；后台拒绝内置 ID、传感器类型及并行待审，同 ID 发布在事务内锁定版本并复核基线。Agent 和网站提供“作为旧版更新”的明确操作；客户安装遇本机 ID/传感器冲突保留旧内容并提示原因。验证 `systemPackages.test.ts`、`staffPackageSubmission.test.js`、`portalSystems.test.js` 和 Full。
+
+公司系统同机安装：`appRuntimeFactory.savedAlgorithmConflicts` 仅拒绝其他系统占用的算法 ID；作者本机保存的同系统算法不阻止受管包安装。`realtimeCatalog` 在同系统同 ID 时选用受管包版本，安装校验仍读取跨系统重名项，保留本地算法文件。`portalSystems.describeCompanySystemSync` 展示具体安装失败原因；验证 `systemPackageService.test.js`、`managedSystemSync.test.js`、`portalSystems.test.js` 和 Full。
+
+公司系统修订与客户版本：`companySystemRevisions.js` 从员工只读接口取得签名发布包，创建可编辑的独立 `draftId`，将提交包映射回稳定系统 ID 和 `baseVersion`；`CompanySystemRevisions.jsx` 提供独立于 Agent 对话的草稿入口与差异确认，含既有用户分类器的包暂不允许自动派生。`E:/key/server/systemPackages.ts` 以客户版本指针推广/回退，目录和下载仅提供当前指针且复核密钥范围；紧急撤回不自动回退。Manifest 受管帧保存 `managedRelease` 供历史追溯。验证 `companySystemRevisions.test.js`、`systemPackagesApi.test.js`、`managedReleaseHistory.test.js`、`managedSystemSync.test.js`、两库测试和 Full；生产迁移、真实 MySQL 与真机回放仍需部署验收。
+
+本机系统提交入口：`portalSystems.canSubmitPortalSystem` 区分可编辑本机系统与内置、受管、修订草稿，`PortalSystemSelector` 显示“提交公司审核”，`LicensePortal` 按真实系统 ID 深链到 `DisplaySystemBuilder` 的已保存版本确认框。编辑器内未保存的修改不进入审核包；后端 `/api/system-packages/submit/:id` 仍复核身份与员工令牌。验证 `portalSystems.test.js`、`companySystemSubmission.test.js` 与 Standard；实际服务端提交需部署后联调。
 
 内置系统真实预览：`displays/nativeSceneAssets.js` 与原生渲染器共用模型/底图地址，`sceneCatalog` 按具体型号映射，`sceneLayouts` 提供矩阵和足底布局，`sceneModelSampling` 按世界表面积分配粒子。小床、宠物/mini 和高速矩阵通过 `supportsDirectSceneEntry`、`smallBed.jsx` / `4096.jsx` / `hand.jsx` 单段交接。验证 `sceneCatalog` / `sceneLayouts` / `sceneModelSampling` tests、`node scripts/tests/portal-scene-catalog.mjs`（12 项预览、4 项真实画布往返）及 `portal-launcher.mjs`；原生画布接入执行 Full。
 
@@ -164,3 +180,8 @@ Agent 复制链路：`tools/toolSchemas.js` → `tools/index.js` 的 `prepare_du
 ## 8. 索引维护
 
 只有入口、依赖方向、公共契约或验证命令发生变化时才更新本索引。功能历史、详细设计推演和累计项目进度继续追加到 `ARCHITECTURE.md`，不要把本文件扩写成第二份历史文档。
+
+
+矩阵统一工作区：新建目录 `displaySystemRendererCatalog.SELECTABLE_DISPLAY_RENDERERS` / SDK `matrixDisplayModes` → Agent `prepare_create_system` 或配置器 → `ManifestDisplayRenderer`。Agent 用 `rendererIds` 为一个系统声明多种可切换展示，同一任务相同输入的分次创建合并提案；明确独立系统才设 `separateSystem`。原生二维数字模式 ID 为 `numMatrix2d`，实际类型为 `numMatrix`，使用 WebGL 裸数值通路，三维数字仍为 `numMatrix`；原生热力图为 `webglHeatmap`。旧 `heatmap/matrix/raw2d` 仅在展示层回落 3D 点图。`PortalRendererControls` 在共用工具箱和调节面板读取 ref 能力，画布无独立设置浮层。验证目录、Agent 工具、工作区模型测试及 `node scripts/tests/manifest-workspace-layout.mjs`；跨共享 SDK 执行 Full。
+
+热力图空白定位：Agent 生成的 `webglHeatmap.params` 写入通用矩阵预设，运行时 `buildManifestWidgetRendererParams` 按当前 widget 矩阵覆盖行列及 `minFrameLength`；不继承旧床垫裁边和镜像。`ManifestDisplayRenderer` 缺帧时保持空输入，`WebglHeatmapRenderer` 显示等待提示；浏览器回归必须检查压力帧及归零帧的实际像素，不能只检查 canvas 挂载。

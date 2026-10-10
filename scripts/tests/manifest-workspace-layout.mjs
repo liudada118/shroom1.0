@@ -30,6 +30,12 @@ try {
     await context.addInitScript(() => {
       // 观察真实 GPU 上传；DOM 中存在 canvas 并不能证明点阵已画出。
       window.pointGridProbe = { invalid: 0, maxHeight: 0, pointDraws: 0 };
+      window.numericCells = [];
+      const fillText = CanvasRenderingContext2D.prototype.fillText;
+      CanvasRenderingContext2D.prototype.fillText = function (...args) {
+        if (this.canvas.closest('.canvasNum .threeBoxF')) window.numericCells.push(args.slice(0, 3));
+        return fillText.apply(this, args);
+      };
       for (const Context of [window.WebGLRenderingContext, window.WebGL2RenderingContext]) {
         if (!Context) continue;
         const upload = Context.prototype.bufferData;
@@ -117,16 +123,69 @@ try {
     await page.getByLabel('布局', { exact: true }).selectOption('workspace');
     await page.waitForTimeout(250);
     assert.equal(await canvas.getAttribute('height'), before);
-    await page.getByText('渲染设置', { exact: true }).click();
-    await page.getByRole('combobox', { name: '选择渲染器' }).press('ArrowDown');
-    await page.locator('.ant-select-item-option-content').getByText('2D 数字', { exact: true }).click();
-    await page.locator('.manifest-matrix-widget').waitFor();
-    await page.getByRole('combobox', { name: '选择渲染器' }).press('ArrowDown');
-    await page.locator('.ant-select-item-option-content').getByText('3D 点图', { exact: true }).click();
+    assert.equal(await page.locator('.manifest-renderer-picker').count(), 0, '画布不再保留第二套设置浮层');
+    await page.getByRole('button', { name: '工具区', exact: true }).click();
+    await page.getByRole('tab', { name: '显示与语言' }).click();
+    const picker = page.getByRole('combobox', { name: '选择渲染器' });
+    await picker.waitFor();
+    assert.deepEqual(await picker.locator('option').evaluateAll((nodes) => nodes.map((node) => node.value)),
+      ['pointGrid', 'numMatrix', 'numMatrix2d', 'webglHeatmap', 'blobHeatmap']);
+    await picker.selectOption('numMatrix');
+    await page.locator('[data-renderer-id="numMatrix"] canvas').waitFor();
+    await picker.selectOption('numMatrix2d');
+    await page.locator('[data-renderer-id="numMatrix"] .threeBoxF canvas').first().waitFor();
+    await page.evaluate(() => {
+      window.numericCells = [];
+      window.pushWorkspaceFrame(Array.from({ length: 1024 }, (_, index) => index % 251));
+    });
+    await page.waitForFunction(() => window.numericCells.length >= 1024);
+    const cells = await page.evaluate(() => window.numericCells.slice(-1024));
+    assert.deepEqual(cells.map(([text]) => Number(text)), Array.from({ length: 1024 }, (_, index) => index % 251),
+      '2D 数字必须逐点显示当前帧，不能模糊、转置或重排线序');
+    assert.equal(cells[0][2], cells[31][2], '首行的 32 格保持同一纵坐标');
+    assert.equal(cells[0][1], cells[32][1], '下一行从同一横坐标开始');
+    await picker.selectOption('webglHeatmap');
+    await page.locator('[data-renderer-id="webglHeatmap"] canvas').first().waitFor();
+    await page.evaluate(() => window.pushWorkspaceFrame(new Array(1024).fill(200)));
+    await page.waitForFunction(() => {
+      const heatmap = document.querySelector('[data-renderer-id="webglHeatmap"] canvas');
+      const pixels = heatmap?.getContext('2d')?.getImageData(0, 0, heatmap.width, heatmap.height).data;
+      return pixels && pixels.some((value, index) => index % 4 === 0 && value > 80);
+    }, null, { timeout: 5000 });
+    const heatSidebar = await page.evaluate(() => window.workspaceSidebarData);
+    await picker.selectOption('pointGrid');
     await canvas.waitFor();
     assert.equal(await input.inputValue(), '仍然保留', '换渲染器不能丢失图表状态');
+    assert.deepEqual(await page.evaluate(() => window.workspaceSidebarData), heatSidebar,
+      '热力图切回点图后，同一帧的统计保持不变');
+    await page.getByRole('button', { name: '收起实用工具' }).click();
     assert.deepEqual(errors, []);
     console.log(`workspace layout passed: DPR ${deviceScaleFactor}, cold empty -> single valid frame without remount, invalid frames, 5 viewport sizes, native pointGrid, collapse/restore, mode switches`);
+    await context.close();
+  }
+  for (const side of [32, 23, 3]) {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await context.newPage();
+    const errors = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    await page.route('http://127.0.0.1:19245/**', (route) => route.fulfill({ json: { code: 0, data: { apps: [] } } }));
+    await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__workspace-test?renderer=webglHeatmap&side=${side}`);
+    await page.getByRole('status').filter({ hasText: '等待传感器数据' }).waitFor();
+    await page.evaluate((length) => window.pushWorkspaceFrame(new Array(length).fill(200)), side * side);
+    await page.waitForFunction(() => {
+      const canvas = document.querySelector('[data-renderer-id="webglHeatmap"] canvas');
+      const pixels = canvas?.getContext('2d')?.getImageData(0, 0, canvas.width, canvas.height).data;
+      return pixels && pixels.some((value, index) => index % 4 === 0 && value > 80);
+    }, null, { timeout: 5000 });
+    assert.equal(await page.getByRole('status').count(), 0, '单帧成功出图后隐藏等待提示');
+    await page.evaluate((length) => window.pushWorkspaceFrame(new Array(length).fill(0)), side * side);
+    await page.waitForFunction(() => {
+      const canvas = document.querySelector('[data-renderer-id="webglHeatmap"] canvas');
+      const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+      return !pixels.some((value, index) => index % 4 === 0 && value > 80);
+    }, null, { timeout: 5000 });
+    assert.deepEqual(errors, []);
+    console.log(`heatmap pixels passed: ${side}x${side}, waiting -> single pressure frame -> zero frame`);
     await context.close();
   }
   const portalContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -141,8 +200,25 @@ try {
       front: node.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)) };
   }));
   assert.deepEqual(panels, [{ visible: true, front: true }, { visible: true, front: true }], '矩阵画布不能盖住图表和工具区');
-  await portalPage.getByText('渲染设置', { exact: true }).click();
+  await portalPage.getByRole('button', { name: '工具区', exact: true }).click();
+  await portalPage.getByRole('tab', { name: '显示与语言' }).click();
+  await portalPage.getByRole('combobox', { name: '选择渲染器' }).waitFor();
   assert.equal(await portalPage.getByRole('combobox', { name: '选择渲染器' }).isVisible(), true);
+  for (const legacy of ['heatmap', 'matrix']) {
+    await portalPage.goto(`http://127.0.0.1:${server.httpServer.address().port}/__workspace-test?portal&legacy=${legacy}`);
+    const nativeCanvas = portalPage.locator('[data-renderer-id="pointGrid"] canvas');
+    await nativeCanvas.waitFor();
+    await portalPage.evaluate(() => window.pushWorkspaceFrame(Array.from({ length: 529 }, (_, index) => index + 1)));
+    await portalPage.waitForFunction(() => window.workspaceSidebarData?.values?.length === 529);
+    assert.equal(await portalPage.locator('.manifest-matrix-widget').count(), 0, '旧二维系统自动显示原生点图');
+    assert.equal(await portalPage.locator('.manifest-renderer-picker').count(), 0);
+    const bounds = await nativeCanvas.evaluate((node) => {
+      const canvas = node.getBoundingClientRect();
+      const surface = document.querySelector('.manifest-display').getBoundingClientRect();
+      return { canvasHeight: canvas.height, surfaceHeight: surface.height, bottom: canvas.bottom };
+    });
+    assert.ok(Math.abs(bounds.canvasHeight - bounds.surfaceHeight) < 2 && bounds.bottom <= 901, JSON.stringify(bounds));
+  }
   await portalContext.close();
   console.log('Manifest portal shell passed: charts, tools and renderer picker remain accessible above matrix canvas');
   const context = await browser.newContext();

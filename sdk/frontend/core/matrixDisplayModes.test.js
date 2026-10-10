@@ -10,12 +10,12 @@ import {
 } from './matrixDisplayModes.js';
 
 describe('matrixDisplayModes', () => {
-  it('提供五种面向用户的矩阵展示形式', () => {
+  it('只提供原生矩阵展示形式，默认 3D 点图', () => {
     expect(MATRIX_DISPLAY_MODES.map((mode) => mode.rendererId)).toEqual([
-      'heatmap',
-      'matrix',
       'pointGrid',
       'numMatrix',
+      'numMatrix2d',
+      'webglHeatmap',
       'blobHeatmap',
     ]);
   });
@@ -41,12 +41,21 @@ describe('matrixDisplayModes', () => {
       gridWidth: 3,
       gridHeight: 2,
     });
+    expect(renderers.find((item) => item.id === 'numMatrix2d')).toMatchObject({
+      type: 'numMatrix', params: { backend: 'webgl', frameInput: 'raw', gridWidth: 3, gridHeight: 2,
+        webgl: { rawTranspose: false, indexRow: false } },
+    });
+    expect(renderers.find((item) => item.id === 'webglHeatmap').params).toMatchObject({
+      dataWidth: 3, dataHeight: 2, minFrameLength: 6, edgeClear: null, mirrorX: false, valueScale: 1,
+    });
   });
 
   it('生成方向校验帧并兼容旧 renderer id', () => {
     expect(createDirectionCheckFrame(5)).toEqual([1, 2, 3, 4, 5]);
     expect(inferMatrixDisplayModeId('pointGrid')).toBe('matrix-points-3d');
-    expect(inferMatrixDisplayModeId('unknown')).toBe('shape-heatmap-2d');
+    expect(inferMatrixDisplayModeId('unknown')).toBe('matrix-points-3d');
+    expect(inferMatrixDisplayModeId('heatmap')).toBe('matrix-points-3d');
+    expect(inferMatrixDisplayModeId('matrix')).toBe('matrix-points-3d');
   });
 
   it('为所有通用矩阵渲染器生成同一份 2×3 输入参数', () => {
@@ -79,7 +88,7 @@ describe('matrixDisplayModes', () => {
       dataWidth: 3,
       dataHeight: 2,
       max: 6,
-      minFrameLength: 1,
+      minFrameLength: 6,
     });
     expect(createBuiltinMatrixRendererParams('blobHeatmap', context)).toMatchObject({
       dataWidth: 3,

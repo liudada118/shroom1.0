@@ -25,7 +25,8 @@ function validateBuiltinTemplate(input) {
 }
 
 /** 提供原生系统副本的持久化目录与运行期选择；协议处理始终交回原系统。 */
-function createBuiltinSystemTemplates({ root, managedRoot = null, isOccupied = () => false, listPackages = () => [], logger } = {}) {
+function createBuiltinSystemTemplates({ root, managedRoot = null, isOccupied = () => false, listPackages = () => [],
+  isRevisionDraft = () => false, logger } = {}) {
   const systems = new Map();
   let selected = null;
 
@@ -72,7 +73,8 @@ function createBuiltinSystemTemplates({ root, managedRoot = null, isOccupied = (
     return { id: template.id, name: template.name, kind: 'builtin-template', builtinTemplate: identity(template), configuration: template.configuration,
       editable: template.managed !== true, managed: template.managed === true,
       runtimeDefinition: { builtinTemplate: { ...template, revision: revision(template) }, sensorDefinition: { type: template.id },
-        displayMetadata: { id: template.id, name: template.name, source: 'builtin-template', nativeSourceType: template.sourceType, managed: template.managed === true } } };
+        displayMetadata: { id: template.id, name: template.name, source: 'builtin-template', nativeSourceType: template.sourceType,
+          managed: template.managed === true, revisionDraft: !template.managed && isRevisionDraft(template.id) } } };
   }
 
   /** 读取副本或内置来源，供配置器和 Agent 核实复制对象。 */
@@ -145,7 +147,9 @@ function createBuiltinSystemTemplates({ root, managedRoot = null, isOccupied = (
     const template = stored(id);
     if (!template) return { id, sourceType: id, template: false };
     // ⚠️ 受管副本在 server.js 切换前还须通过签名目录校验；仅有本地系统 ID 不能直接放行。
-    const allowed = scope === 'all' || (Array.isArray(scope) ? scope : [scope]).includes(template.managed ? template.id : template.sourceType);
+    // ⚠️ A signed local revision is an authoring workspace, not a customer grant to its published source.
+    const allowed = (!template.managed && isRevisionDraft(id))
+      || scope === 'all' || (Array.isArray(scope) ? scope : [scope]).includes(template.managed ? template.id : template.sourceType);
     if (!allowed) throw Object.assign(templateError('LICENSE_SCOPE_REQUIRED', template.managed
       ? '当前密钥未选择此公司系统。' : '当前授权不包含此模板的原系统。'), { httpStatus: 403 });
     return { ...template, template: true };
@@ -158,7 +162,7 @@ function createBuiltinSystemTemplates({ root, managedRoot = null, isOccupied = (
   function currentId(sourceType) { return selected?.sourceType === sourceType ? selected.id : sourceType; }
 
   reload();
-  return { catalog: BUILTIN_TEMPLATES, create, get, editor, reload, resolve, activate, currentId, preview, update, remove,
+  return { catalog: BUILTIN_TEMPLATES, userRoot: root, create, get, editor, reload, resolve, activate, currentId, preview, update, remove,
     getRuntimeConfiguration: (id) => systems.get(id)?.configuration || null,
     list: () => [...systems.values()].map(definition) };
 }

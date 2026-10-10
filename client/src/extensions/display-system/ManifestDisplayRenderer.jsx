@@ -7,18 +7,18 @@ import React, {
   useState,
 } from 'react';
 import { Select } from 'antd';
-import { MATRIX_DISPLAY_MODES, createMatrixDisplayRenderers } from '@shroom/frontend/core/matrixDisplayModes.js';
+import { MATRIX_DISPLAY_MODES } from '@shroom/frontend/core/matrixDisplayModes.js';
+import { buildWorkspaceDisplayProfileModel } from './manifestWorkspaceRenderers.js';
 import useWorkspaceTop from './useWorkspaceTop.js';
 import useMainWebSocket from '../../services/ws/useMainWebSocket';
 import {
   applyVisualizationAlgorithm,
-  buildDisplayProfileModel,
   calculatePressureMetrics,
   isDataRendererType,
   resolveDisplayProfile,
 } from './displayProfileRuntime';
 import { readDisplaySelection, writeDisplaySelection } from './displayProfileStorage';
-import { applyMatrixTransform } from '../../displays/matrixTransform';
+import { applyMatrixTransform, deriveTransformedMatrix } from '../../displays/matrixTransform';
 import RendererHost from '../../renderers/RendererHost.jsx';
 import AgentRendererHost from './AgentRendererHost.jsx';
 import MatrixWidget from './widgets/MatrixWidget.jsx';
@@ -76,11 +76,6 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
     ], sensors);
     return pushFrames(routedFrames);
   }, [definition?.displaySystemId, definition?.type, pushFrames, sensors]);
-  useImperativeHandle(rendererRef, () => ({
-    handleMessage,
-    pushFrame: handleMessage,
-    pushFrames,
-  }), [handleMessage, pushFrames]);
   // Home 已持有主连接，嵌入时传 enabled=false；独立使用组件时仍可自行订阅。
   useMainWebSocket({ onMessage: handleMessage, enabled });
 
@@ -142,19 +137,8 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
     ? 'immersive' : 'workspace';
   const showRuntimeChrome = definition?.page?.controls?.runtimeChrome === true;
   const profileModel = useMemo(
-    () => {
-      const model = buildDisplayProfileModel(definition?.page);
-      const candidates = [
-        ...model.renderers,
-        ...createMatrixDisplayRenderers({ matrix, coordinateMap: definition?.coordinateMap }),
-        ...agentRendererRegistry.apps.filter((app) => app.rendererId).map((app) => ({
-          id: app.rendererId, type: app.rendererId, label: app.label, params: {},
-        })),
-      ];
-      return { ...model, renderers: candidates.filter((item, index) => (
-        candidates.findIndex((candidate) => candidate.id === item.id) === index
-      )) };
-    },
+    () => buildWorkspaceDisplayProfileModel(definition?.page,
+      { matrix, coordinateMap: definition?.coordinateMap }, agentRendererRegistry.apps),
     [definition, matrix, agentRendererRegistry.apps],
   );
   const activeProfile = useMemo(
@@ -221,6 +205,18 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
     });
   }, [activeProfile, profileModel.renderers, selection, updateSelection]);
 
+  useImperativeHandle(rendererRef, () => ({
+    handleMessage,
+    pushFrame: handleMessage,
+    pushFrames,
+    selectRenderer,
+    /** 向共用工具区提供画布选择，图表与算法仍由原有接口管理。 */
+    getDisplayControls: () => ({
+      value: activeProfile.rendererId,
+      options: profileModel.renderers.map((item) => ({ value: item.id, label: item.label || item.id })),
+    }),
+  }), [handleMessage, pushFrames, selectRenderer, activeProfile.rendererId, profileModel.renderers]);
+
   const widgetModels = useMemo(() => {
     // 画布 widget 来自 activeProfile：manifest 的 display.canvas.widgets
     // 被用户偏好覆盖后的结果，缺省时就是原来的 display.widgets。
@@ -245,15 +241,19 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
       // 多传感器系统每一路矩阵可能都不一样，widget 要用自己那一路的矩阵，
       // 否则第二路会被按第一路的行列数摆放。找不到就沿用顶层矩阵。
       const channelMatrix = geometry.sourceMatrix || matrix;
-      const widgetType = isDataRendererType(widget.type)
+      const usesProfileDataRenderer = isDataRendererType(widget.type)
+        || MATRIX_DISPLAY_MODES.some((mode) => mode.rendererId === widget.type);
+      const widgetType = usesProfileDataRenderer
         ? activeProfile.renderer?.type || widget.type
         : widget.type;
-      const usesProfileDataRenderer = isDataRendererType(widget.type);
-      const visualizedValues = usesProfileDataRenderer
+      const visualizedValues = usesProfileDataRenderer && values.length > 0
         ? applyVisualizationAlgorithm(values, activeProfile.algorithm, channelMatrix)
         : values;
+      // 缺帧保持空输入，不能补零冒充已经收到完整传感器帧。
       const transformed = usesProfileDataRenderer
-        ? applyMatrixTransform(visualizedValues, channelMatrix, matrixTransform)
+        ? values.length > 0
+          ? applyMatrixTransform(visualizedValues, channelMatrix, matrixTransform)
+          : { values: [], matrix: deriveTransformedMatrix(channelMatrix, matrixTransform) }
         : { values: visualizedValues, matrix: channelMatrix };
       return {
         widget: { ...widget, type: widgetType },
@@ -379,24 +379,6 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
       data-layout-presentation={layoutPresentation}
       style={{ top: workspaceTop }}
     >
-      <details className="manifest-renderer-picker">
-        <summary>渲染设置</summary>
-        <label>
-          <span>渲染器（不改变算法和图表）</span>
-          <Select
-            aria-label="选择渲染器"
-            value={activeProfile.rendererId}
-            onChange={selectRenderer}
-            options={[
-              { label: '系统自带', options: profileModel.renderers.filter((item) => !parseAgentRendererId(item.type))
-                .map((item) => ({ value: item.id, label: item.label })) },
-              { label: 'Agent 自定义', options: profileModel.renderers.filter((item) => parseAgentRendererId(item.type))
-                .map((item) => ({ value: item.id, label: item.label })) },
-            ]}
-          />
-        </label>
-        <small>新建算法、渲染或图表可分别交给 Agent；安装后在对应目录选择。</small>
-      </details>
       {showRuntimeChrome ? (
         <>
           <header className="manifest-display-header">
@@ -529,6 +511,7 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
                 style={{ gridColumn: `span ${widget.columnSpan || 8}` }}
               >
                 <RendererHost
+                  key={`${widget.type}:${activeProfile.rendererId}`}
                   rendererId={widget.type}
                   label={label}
                   params={widgetRendererParams}

@@ -59,7 +59,8 @@ try {
     [1, 2, 3, 4]
   );
   assert.strictEqual(service.read(loaded.config).definitions.algorithmData.scale, 2);
-  assert.ok(service.getCatalog().renderers.some((renderer) => renderer.id === 'heatmap'));
+  assert.ok(service.getCatalog().renderers.some((renderer) => renderer.id === 'pointGrid'));
+  assert.ok(!service.getCatalog().renderers.some((renderer) => ['heatmap', 'matrix', 'raw2d'].includes(renderer.id)));
   assert.strictEqual(service.getCatalog().serialTemplates.length, 3);
   assert.strictEqual(service.getCatalog().displayTemplates.length, 2);
   assert.deepStrictEqual(

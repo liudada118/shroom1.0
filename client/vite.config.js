@@ -103,6 +103,8 @@ export default defineConfig({
             disableConsoleOutput: false,
             // ✔ 保留 - 变量名替换为 _0x 前缀，不影响运行时性能
             identifierNamesGenerator: 'hexadecimal',
+            // ⚠️ 保留 import()/require() 路径字面量，否则生产包会遗漏监测页并请求 HTML。
+            ignoreImports: true,
             log: false,
             // ✘ 关闭 - 将数字常量转为表达式，在热循环中增加计算开销
             numbersToExpressions: false,

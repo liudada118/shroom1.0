@@ -2,25 +2,34 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import ManifestDisplayRenderer from '../../src/extensions/display-system/ManifestDisplayRenderer.jsx';
 import ManifestSidebarOverlay from '../../src/extensions/display-system/ManifestSidebarOverlay.jsx';
+import PortalWorkspaceTools from '../../src/page/licensePortal/PortalWorkspaceTools.jsx';
+import PortalRendererControls from '../../src/page/licensePortal/PortalRendererControls.jsx';
 import '../../src/components/aside/aside.scss';
 import '../../src/page/licensePortal/PortalLauncher.css';
 import '../../src/page/licensePortal/PortalMonitoring.css';
+import '../../src/page/licensePortal/PortalUtilityPanel.css';
 
 /** 无设备副作用的布局夹具：挂载真实原生点图，以合成帧验证布局而非硬件接通。 */
 function WorkspaceFixture() {
   const rendererRef = useRef();
   const [presentation, setPresentation] = useState('workspace');
+  const [toolsOpen, setToolsOpen] = useState(false);
   const portal = window.location.search.includes('portal');
+  const query = new URLSearchParams(window.location.search);
+  const legacy = query.get('legacy');
+  const rendererType = legacy || query.get('renderer') || 'pointGrid';
+  const side = legacy ? 23 : Math.max(1, Number(query.get('side')) || 32);
   const definition = {
-    displaySystemId: 'layout-fixture', type: 'layout-fixture', matrix: { rows: 32, cols: 32 },
-    sensors: [{ id: 'mat', sensorId: 'mat', outputChannel: 'mat', matrix: { rows: 32, cols: 32 } }],
+    displaySystemId: 'layout-fixture', type: 'layout-fixture', matrix: { rows: side, cols: side },
+    sensors: [{ id: 'mat', sensorId: 'mat', outputChannel: 'mat', matrix: { rows: side, cols: side } }],
     page: {
       layout: { columns: 12, presentation },
-      renderers: [{ id: 'pointGrid', type: 'pointGrid', label: '3D 点图', params: {
-        sit: { num1: 32, num2: 32, interp: 1, order: 0 },
-        back: { num1: 32, num2: 32, interp: 1, order: 0 },
+      renderers: [{ id: rendererType, type: rendererType, params: {
+        sit: { num1: side, num2: side, interp: 1, order: 0 },
+        back: { num1: side, num2: side, interp: 1, order: 0 },
       } }],
-      widgets: [{ id: 'main', type: 'pointGrid', source: 'mat', columnSpan: 12 }],
+      widgets: [{ id: 'main', type: rendererType, source: 'mat', columnSpan: 12 }],
+      sidebar: { source: 'mat' },
     },
   };
   useEffect(() => {
@@ -50,9 +59,15 @@ function WorkspaceFixture() {
           ))}
         </div>
       </ManifestSidebarOverlay>
-      {portal ? <div className="portal-data-renderer"><ManifestDisplayRenderer ref={rendererRef} definition={definition} enabled={false} /></div>
-        : <ManifestDisplayRenderer ref={rendererRef} definition={definition} enabled={false} />}
-      {portal ? <div className="portal-quick-tools-anchor"><div className="portal-quick-tools"><button type="button">工具区</button></div></div> : null}
+      {portal ? <div className="portal-data-renderer"><ManifestDisplayRenderer ref={rendererRef} definition={definition} enabled={false}
+        onSidebarData={(data) => { window.workspaceSidebarData = data; }} /></div>
+        : <ManifestDisplayRenderer ref={rendererRef} definition={definition} enabled={false}
+          onSidebarData={(data) => { window.workspaceSidebarData = data; }} />}
+      <div className="fiber-portal" style={{ position: 'absolute', inset: 0, zIndex: 40, pointerEvents: 'none', '--left-chart-width': '300px', '--right-tools-width': '140px' }}>
+        <div className="portal-quick-tools-anchor"><div className="portal-quick-tools"><button type="button" onClick={() => setToolsOpen(true)}>工具区</button></div></div>
+        <PortalWorkspaceTools open={toolsOpen} onClose={() => setToolsOpen(false)} rendererRef={rendererRef}
+          displayContent={<PortalRendererControls rendererRef={rendererRef} active={toolsOpen} />} />
+      </div>
     </>
   );
   return portal ? <div className="fiber-portal" style={{ height: '100vh' }}><div className="portal-runtime-monitor" style={{ height: '100%' }}><div className="home">{surface}</div></div></div> : surface;

@@ -50,4 +50,23 @@ describe('手部单段直达的选择器宿主', () => {
     expect(html).toContain('验证密钥后显示系统');
     expect(html).not.toContain('>手部检测</h3>');
   });
+
+  it('本机系统在进入操作旁显示提交入口，受管系统仍走更新草稿', () => {
+    const local = { value: 'seatpad2-sit', systemId: 'seatpad2', label: '坐垫2', category: 'custom',
+      source: 'manifest', editable: true };
+    const managed = { value: 'company-sit', systemId: 'company', label: '公司坐垫', category: 'custom',
+      source: 'manifest', managed: true };
+    const localHtml = renderToStaticMarkup(<PortalSystemSelector {...props} systems={[local]} category="all"
+      selectedId={local.value} phase="idle" monitoring={false} directEntry={false} />);
+    expect(localHtml).toContain('本机系统');
+    expect(localHtml).toContain('提交公司审核');
+    const managedHtml = renderToStaticMarkup(<PortalSystemSelector {...props} systems={[managed]} category="all"
+      selectedId={managed.value} managedIds={['company']} phase="idle" monitoring={false} directEntry={false} onRevise={() => {}} />);
+    expect(managedHtml).toContain('从此系统创建更新草稿');
+    expect(managedHtml).not.toContain('提交公司审核');
+    const customerHtml = renderToStaticMarkup(<PortalSystemSelector {...props} systems={[managed]} category="all"
+      selectedId={managed.value} managedIds={['company']} phase="idle" monitoring={false} directEntry={false} />);
+    expect(customerHtml).toContain('进入该系统');
+    expect(customerHtml).not.toContain('从此系统创建更新草稿');
+  });
 });

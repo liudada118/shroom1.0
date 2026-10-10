@@ -30,7 +30,7 @@ const {
   DISPLAY_CHART_CARD_LIMIT,
 } = require('../manifest/displaySystemCanvasCatalog');
 const {
-  DISPLAY_RENDERERS,
+  SELECTABLE_DISPLAY_RENDERERS,
 } = require('../manifest/displaySystemRendererCatalog');
 const {
   DISPLAY_LAYOUT_PRESENTATIONS,
@@ -421,26 +421,26 @@ function buildDisplaySystemBuilderCatalog({
     serialTemplates,
     displayTemplates: [
       {
-        id: 'heatmap-overview',
-        label: '热力图总览',
-        description: '彩色热力图、压力统计和左侧受压区域数据',
+        id: 'matrix-points-3d',
+        label: '3D 点图',
+        description: '原生三维点阵，沿用监测工作区的图表和工具',
         defaults: {
-          rendererId: 'heatmap',
+          rendererId: 'pointGrid',
           visualizationAlgorithmId: 'identity',
-          profileLabel: '热力图总览',
+          profileLabel: '3D 点图',
           showStats: true,
           showPressurePanel: true,
           showAreaPanel: true,
         },
       },
       {
-        id: 'numeric-matrix',
-        label: '数字矩阵',
-        description: '直接显示每个点的数值，同时保留压力统计',
+        id: 'matrix-values-3d',
+        label: '3D 数字',
+        description: '原生三维数字矩阵，保留监测工作区',
         defaults: {
-          rendererId: 'matrix',
+          rendererId: 'numMatrix',
           visualizationAlgorithmId: 'identity',
-          profileLabel: '数字矩阵',
+          profileLabel: '3D 数字',
           showStats: true,
           showPressurePanel: true,
           showAreaPanel: true,
@@ -502,7 +502,7 @@ function buildDisplaySystemBuilderCatalog({
     },
     // 渲染方式目录。内置三条由主应用直接实现，其余来自 @shroom/frontend 注册表；
     // 与 colormaps 同理，绘制实现在前端，这里只登记 id 和中文名。
-    renderers: [...DISPLAY_RENDERERS],
+    renderers: [...SELECTABLE_DISPLAY_RENDERERS],
     layoutPresentations: DISPLAY_LAYOUT_PRESENTATIONS.map((id) => ({
       id,
       label: { standard: '兼容标准（铺满、图表浮层）', immersive: '沉浸（隐藏侧栏）', workspace: '铺满（图表浮层）' }[id],

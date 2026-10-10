@@ -1,3 +1,4 @@
+const fs = require('node:fs');
 const path = require('path');
 const { discoverDisplaySystems } = require('../manifest/displaySystemConfigLoader');
 const {
@@ -102,6 +103,18 @@ function classifyDisplaySystemAccess(config, {
   };
 }
 
+/** Read the installed release identity so collected frames can retain the version that produced them. */
+function readManagedRelease(config) {
+  try {
+    const info = JSON.parse(fs.readFileSync(path.join(config.sourceDirectory, 'package-info.json'), 'utf8'));
+    if (info.systemId === config.id && Number.isSafeInteger(info.version) && info.version > 0
+      && /^[a-f0-9]{64}$/.test(info.sha256 || '')) {
+      return { version: info.version, sha256: info.sha256 };
+    }
+  } catch { /* Older local packages may not have release metadata. */ }
+  return null;
+}
+
 /**
  * 处理不同扫描目录中重复的展示系统 ID。
  *
@@ -202,6 +215,7 @@ function createDisplaySystemRuntimeDiscovery({
       const accessibleConfig = {
         ...config,
         ...access,
+        managedRelease: access.managed ? readManagedRelease(config) : null,
       };
       return {
         ...accessibleConfig,
@@ -284,5 +298,6 @@ module.exports = {
   classifyDisplaySystemAccess,
   createDisplaySystemRuntimeDiscovery,
   isPathInside,
+  readManagedRelease,
   resolveDisplaySystemAccessConflicts,
 };

@@ -105,6 +105,7 @@ function buildRuntimeChannelPlan(runtimeDefinition) {
       defaultProfile: displayMetadata.defaultProfile || null,
     },
     metadata: { ...(displayMetadata.metadata || {}) },
+    managedRelease: displayMetadata.managedRelease || null,
     runtimeMode: displayMetadata.metadata?.runtimeMode || null,
     sensor: {
       // sensorDefinition.id 是展示系统 ID；每路真实 sensorId 必须来自 parser channel。

@@ -1,5 +1,5 @@
 /**
- * display.renderers 的可选值白名单 —— Builder「渲染方式」下拉框的唯一数据源。
+ * display.renderers 的解析白名单；新建目录使用 SELECTABLE_DISPLAY_RENDERERS。
  *
  * 绘制实现全在前端，后端只登记 id 和中文名，理由与 `displaySystemCanvasCatalog.js`
  * 一样：Builder 的零件栏按这份目录渲染，生成出来的 manifest 也只能引用这份目录里的 id，
@@ -43,17 +43,18 @@ const BUILTIN_DISPLAY_RENDERERS = Object.freeze([
  * 不抛异常、不影响别的 widget，所以**它不会在测试里红，只会在真机上白**。
  */
 const SDK_DISPLAY_RENDERERS = Object.freeze([
-  Object.freeze({ id: 'numMatrix', type: 'numMatrix', label: '数字矩阵', group: 'sdk' }),
+  Object.freeze({ id: 'numMatrix', type: 'numMatrix', label: '3D 数字', group: 'sdk' }),
   Object.freeze({ id: 'pointGrid', type: 'pointGrid', label: '点阵热力（3D）', group: 'sdk' }),
-  Object.freeze({ id: 'webglHeatmap', type: 'webglHeatmap', label: '斑点热力（WebGL）', group: 'sdk' }),
+  Object.freeze({ id: 'webglHeatmap', type: 'webglHeatmap', label: '热力图', group: 'sdk',
+    params: { canvasWidth: 512, canvasHeight: 512, radius: 18, max: 200, filter: 0,
+      valueScale: 1, edgeClear: null, mirrorX: false } }),
   Object.freeze({ id: 'blobHeatmap', type: 'blobHeatmap', label: '斑点热力（Canvas 2D）', group: 'sdk' }),
 ]);
 
 /**
- * Builder 能选的全部渲染方式。
+ * 当前与历史 manifest 能解析的全部渲染方式。
  *
- * 内置的排在前面：这是下拉框的显示顺序，而 `heatmap` 同时又是全链路的兜底值
- * （`buildDefaultRenderers` 等多处），排第一位可以让「兜底值」和「默认选中项」是同一个。
+ * 保留旧二维类型以兼容已安装包；不把它们重新开放给 Builder 或 Agent。
  */
 const DISPLAY_RENDERERS = Object.freeze([
   ...BUILTIN_DISPLAY_RENDERERS,
@@ -62,9 +63,19 @@ const DISPLAY_RENDERERS = Object.freeze([
 
 const DISPLAY_RENDERER_IDS = new Set(DISPLAY_RENDERERS.map((item) => item.id));
 
+/** 新系统只提供 SDK 原生矩阵渲染器；旧类型仍可解析，避免已安装包失效。 */
+const SELECTABLE_DISPLAY_RENDERERS = Object.freeze([
+  ...SDK_DISPLAY_RENDERERS,
+  // 模式 ID 不作 widget 类型；注册表实际挂载 numMatrix 的原生二维后端。
+  Object.freeze({ id: 'numMatrix2d', type: 'numMatrix', label: '2D 数字', group: 'sdk',
+    params: { backend: 'webgl', frameInput: 'raw', manageSidebar: false,
+      webgl: { variant: 'original', rawTranspose: false, indexRow: false, overlayPad: 0 } } }),
+]);
+
 module.exports = {
   BUILTIN_DISPLAY_RENDERERS,
   DISPLAY_RENDERERS,
   DISPLAY_RENDERER_IDS,
   SDK_DISPLAY_RENDERERS,
+  SELECTABLE_DISPLAY_RENDERERS,
 };

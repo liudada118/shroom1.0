@@ -45,7 +45,8 @@ describe('ManifestDisplayRenderer 运行页外观', () => {
 
     expect(html).toContain('class="manifest-display is-workspace"');
     expect(html).toContain('data-layout-presentation="workspace"');
-    expect(html).toContain('渲染设置');
+    expect(html).not.toContain('渲染设置');
+    expect(html).not.toContain('manifest-renderer-picker');
     expect(html).not.toContain('manifest-display-header');
     expect(html).not.toContain('manifest-profile-menu');
     expect(html).not.toContain('runtime-presentation-test</span>');

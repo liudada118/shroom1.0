@@ -1,0 +1,13 @@
+{
+  "exclude": [
+    "node_modules/", "**/node_modules/**", "build/", "**/build/**", "dist/", "**/dist/**",
+    "out/", "pack-resources/", "**/venv*/**", "**/__pycache__/**", "*.timestamp-*.mjs", "*.timestamp-*.js",
+    ".codegraph/", ".ua/", ".understand-anything/", ".worktrees/", ".git.broken_*/",
+    "runtime/", "data/", "db/", "img/", "outputs/", "test-results/", "tmp/", "coverage/",
+    "*.glb", "*.gltf", "*.fbx", "*.obj", "*.stl", "*.ply", "*.onnx", "*.pt", "*.pth",
+    "*.h5", "*.safetensors", "*.bin", "*.db", "*.sqlite", "*.sqlite3", "*.npy", "*.npz",
+    "*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.ico", "*.mp4", "*.zip", "*.exe",
+    "*.dll", "*.pyd", "*.so", "*.asar", "*.log", "*.icns", "client/public/model/sensor_canvas_positions.json",
+    "system-package-staff-credential.json", ".env"
+  ]
+}

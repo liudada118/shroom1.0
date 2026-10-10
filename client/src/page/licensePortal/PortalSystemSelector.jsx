@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRightOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons';
-import { PORTAL_CATEGORIES, filterPortalSystems, getAuthorizedPortalSystems } from './portalSystems';
+import { PORTAL_CATEGORIES, canSubmitPortalSystem, filterPortalSystems, getAuthorizedPortalSystems } from './portalSystems';
 import { getPortalAccent, getPortalScene } from './scene/sceneCatalog';
 import { useSelectorMotion, useSceneCopyMotion } from './usePortalMotion';
 
@@ -8,7 +8,7 @@ const CATEGORY_LABELS = { all: '全部', care: '康养', vehicle: '座椅', embo
 
 /** 参考项目的列表与粒子场景弹层；目录、密钥和进入操作使用 Shroom 真实链路。 */
 export default function PortalSystemSelector({ open, systems, category, selectedId, scope, managedIds = [], syncStatus = '', phase,
-  error, loading, catalogError, accessKey, onKeyChange, onCategory, onSelect, onBack, onEnter, onReload, onValidate,
+  error, loading, catalogError, accessKey, onKeyChange, onCategory, onSelect, onBack, onEnter, onRevise, onSubmit, onReload, onValidate,
   sceneStatus, onPreview, onHost, expanded = false, onReturnToSelector, monitoring = false, dataView = false, directEntry = false, runtime }) {
   const [query, setQuery] = useState('');
   const [editingKey, setEditingKey] = useState(false);
@@ -113,12 +113,12 @@ export default function PortalSystemSelector({ open, systems, category, selected
           <button type="button" className="portal-text-button" onClick={onReload} disabled={loading || busy} aria-label="刷新系统列表"><ReloadOutlined aria-hidden="true" /> 刷新</button>
         </div>
         {catalogError && <p className="portal-catalog-error" role="alert">自定义系统读取失败，已授权的内置系统仍可使用。请刷新重试。</p>}
-        {syncStatus && scope !== undefined && <p className="portal-catalog-error" role="status">{syncStatus}</p>}
+        {syncStatus && scope !== undefined && <p className="portal-directory-note" role="status">{syncStatus}</p>}
         <div className="system-options" aria-label="系统列表">
           {visible.map((system, index) => <button type="button" className={`system-option portal-system-option ${selected?.value === system.value ? 'is-active' : ''}`}
             key={system.value} style={{ '--system-accent': getPortalAccent(system) }} data-system={system.value} aria-pressed={selected?.value === system.value} disabled={busy} onClick={() => onSelect(system.value)}>
             <span className="system-option-index">{String(index + 1).padStart(2, '0')}</span>
-            <span className="system-option-copy"><small>{system.source === 'manifest' ? '自定义系统' : '系统内置'}</small><strong>{system.label}</strong></span>
+            <span className="system-option-copy"><small>{system.managed ? '公司系统' : system.editable ? '本机系统' : '系统内置'}</small><strong>{system.label}</strong></span>
             <ArrowRightOutlined className="system-option-arrow" aria-hidden="true" />
           </button>)}
           {!visible.length && <div className="portal-no-systems"><strong>{scope === undefined ? '验证密钥后显示系统' : '没有找到可用系统'}</strong><p>{scope === undefined ? '输入访问密钥并点击“验证密钥”。' : '试试其他名称、切换到“全部”，或更换密钥。'}</p></div>}
@@ -159,6 +159,10 @@ export default function PortalSystemSelector({ open, systems, category, selected
           <button data-scene-copy type="submit" form="portal-entry-form" className="system-scene-enter" disabled={!selected || busy} title="进入时切换系统并关闭旧串口，不会自动连接设备">
             {phase === 'validating' ? '正在验证密钥…' : phase === 'switching' ? '正在进入系统…' : phase === 'entering' ? '正在准备监测画布…' : '进入该系统'} <ArrowRightOutlined aria-hidden="true" />
           </button>
+          {canSubmitPortalSystem(selected) && <button data-scene-copy type="button" className="portal-system-submit" disabled={busy}
+            onClick={() => onSubmit?.(selected)}>提交公司审核</button>}
+          {selected?.managed && onRevise && <button data-scene-copy type="button" className="portal-text-button" disabled={busy}
+            onClick={() => onRevise(selected)}>员工：从此系统创建更新草稿</button>}
           {directEntry && phase === 'entering' && <button type="button" className="portal-text-button" onClick={onReturnToSelector}>取消进入</button>}
         </div>
         </div>

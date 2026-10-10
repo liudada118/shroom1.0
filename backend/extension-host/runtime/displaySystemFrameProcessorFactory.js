@@ -617,6 +617,7 @@ function createDisplaySystemFrameProcessor({
         sensorLabel: runtimeChannel.label || identity.sensorId,
         sensorType: identity.sensorType,
         runtimeSource: 'display-system',
+        ...(runtimeChannel.managedRelease ? { managedRelease: runtimeChannel.managedRelease } : {}),
         stored: runtimeChannel.stored !== false,
         outputChannel,
         rawData: values,

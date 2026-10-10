@@ -264,6 +264,10 @@ const NumMatrixRenderer = React.forwardRef((props, refs) => {
     function sitData(prop, local) {
       const t = state.tuning;
       const source = prop?.wsPointData;
+      if (config.frameInput === 'raw' && state.backend?.setRawFrame) {
+        if (Array.isArray(source)) state.backend.setRawFrame(source);
+        return;
+      }
       const dataArr = applyFloorFilter(source, t.valuef1);
       state.backend?.setFrame(dataArr);
       reportStats(config.statsBeforeFilter && Array.isArray(source) ? source : dataArr, local);

@@ -52,10 +52,25 @@ function createManagedSystemSync({ root, getLicenseKey, installPackage, baseUrl 
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await fetchImpl(url, { headers: { Authorization: `License ${key}` }, signal: controller.signal });
-      if (!response.ok) throw Object.assign(new Error(response.status === 403
-        ? '当前软件密钥没有有效的公司系统授权，请联系管理员检查客户关联与密钥状态'
-        : `系统包服务器返回 HTTP ${response.status}`), { code: 'SYSTEM_SYNC_HTTP_ERROR' });
       const contentType = response.headers?.get?.('content-type') || '';
+      if (!response.ok) {
+        let reason = '';
+        if (contentType.toLowerCase().includes('application/json')) {
+          try { reason = (await response.json())?.error || ''; } catch { /* Keep a safe fallback. */ }
+        }
+        const messages = {
+          OFFLINE_KEY_NOT_REGISTERED: '这把离线密钥未在当前公司系统服务器登记，请联系管理员核对签发服务器',
+          LICENSE_CUSTOMER_REQUIRED: '这把密钥未关联客户；请管理员重新签发并选择客户',
+          LICENSE_CUSTOMER_INACTIVE: '关联客户已停用，请联系管理员',
+          LICENSE_INACTIVE: '这把密钥已停用或删除，请联系管理员',
+          LICENSE_EXPIRED: '这把密钥已过期，请更新密钥',
+          LICENSE_INVALID: '密钥格式或签名无效，请核对激活码',
+        };
+        const message = response.status === 403
+          ? messages[reason] || '当前软件密钥没有有效的公司系统授权，请联系管理员检查客户关联与密钥状态'
+          : `系统包服务器返回 HTTP ${response.status}`;
+        throw Object.assign(new Error(message), { code: reason || 'SYSTEM_SYNC_HTTP_ERROR' });
+      }
       if (contentType && !contentType.toLowerCase().includes('application/json')) {
         throw Object.assign(new Error('公司系统服务尚未就绪，请联系管理员更新服务器后重试'), { code: 'SYSTEM_SYNC_SERVICE_UNAVAILABLE' });
       }

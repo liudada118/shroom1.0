@@ -216,6 +216,7 @@ function buildDisplayMetadataFromDisplaySystem(config) {
     editable: config.editable === true,
     origin: config.origin || 'system',
     managed: config.managed === true,
+    managedRelease: config.managedRelease || null,
     metadata: { ...(config.metadata || {}) },
   };
 }

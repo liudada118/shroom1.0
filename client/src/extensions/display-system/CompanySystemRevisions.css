@@ -1,0 +1,32 @@
+.company-revision-modal .ant-modal-content {
+  background: #101b2b;
+  border: 1px solid #2a425a;
+  color: #e9f2f8;
+}
+
+.company-revision-modal .ant-modal-title,
+.company-revision-modal .ant-modal-close { color: #e9f2f8; background: transparent; }
+.company-revision-intro { color: #a9bfd0; line-height: 1.6; }
+.company-revision-toolbar { display: flex; align-items: center; gap: 12px; margin: 16px 0; }
+.company-revision-toolbar span { color: #b7d4e5; }
+.company-revision-section { margin-top: 18px; }
+.company-revision-section h3, .company-revision-review h3 { margin: 0 0 10px; color: #e9f2f8; }
+.company-revision-section > p, .company-revision-review p { color: #afc5d5; line-height: 1.5; }
+.company-revision-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 0; border-top: 1px solid #284158; }
+.company-revision-row > div:first-child { min-width: 0; }
+.company-revision-row strong { display: block; color: #eff8fc; }
+.company-revision-row small { display: block; margin-top: 4px; color: #9cb8ca; overflow-wrap: anywhere; }
+.company-revision-row .company-revision-stale, .company-revision-review .company-revision-stale { color: #f3c987; }
+.company-revision-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.company-revision-modal button { min-height: 38px; padding: 7px 12px; color: #d9f3ff; border: 1px solid #41647d; border-radius: 8px; background: #162b40; cursor: pointer; }
+.company-revision-modal button:hover:not(:disabled), .company-revision-modal button:focus-visible { border-color: #69bbdb; background: #234257; }
+.company-revision-modal button:focus-visible { outline: 2px solid #8dd4f2; outline-offset: 2px; }
+.company-revision-modal button:disabled { opacity: .5; cursor: not-allowed; }
+.company-revision-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid #327b88; border-radius: 8px; background: #123540; color: #d4faf7; }
+.company-revision-notice.is-error { border-color: #a0555b; background: #43252d; color: #ffe8e8; }
+.company-revision-review { margin-top: 20px; padding: 16px; border: 1px solid #3b6276; border-radius: 10px; background: #112637; }
+
+@media (max-width: 650px) {
+  .company-revision-row, .company-revision-notice { align-items: stretch; flex-direction: column; }
+  .company-revision-actions { justify-content: flex-start; }
+}

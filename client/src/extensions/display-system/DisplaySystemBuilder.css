@@ -111,7 +111,7 @@
   gap: 4px;
 }
 
-.display-builder-list button {
+.display-builder-list .display-builder-select {
   display: grid;
   gap: 4px;
   width: 100%;
@@ -125,13 +125,13 @@
   cursor: pointer;
 }
 
-.display-builder-list button:hover,
-.display-builder-list button.is-active {
+.display-builder-list .display-builder-select:hover,
+.display-builder-list .display-builder-select.is-active {
   background: #1b262a;
   border-left-color: var(--builder-primary);
 }
 
-.display-builder-list button strong {
+.display-builder-list .display-builder-select strong {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -141,7 +141,7 @@
   white-space: nowrap;
 }
 
-.display-builder-list button strong em {
+.display-builder-list .display-builder-select strong em {
   display: inline-flex;
   flex: none;
   align-items: center;
@@ -155,12 +155,12 @@
   border-radius: 3px;
 }
 
-.display-builder-list button.is-user-system strong em {
+.display-builder-list .display-builder-select.is-user-system strong em {
   color: #8fd8c7;
   background: #173b35;
 }
 
-.display-builder-list button span,
+.display-builder-list .display-builder-select span,
 .display-builder-empty {
   color: var(--builder-muted);
   font-size: 11px;
@@ -168,6 +168,36 @@
 
 .display-builder-empty {
   margin: 12px 8px;
+}
+
+.display-builder-list-entry {
+  border-bottom: 1px solid var(--builder-border-soft);
+}
+
+.display-builder-submit-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  margin: 0 0 6px 10px;
+  padding: 5px 8px;
+  color: #9ee4d4;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.display-builder-submit-trigger:hover,
+.display-builder-submit-trigger:focus-visible {
+  color: #d5fff5;
+  background: #173b35;
+  border-color: #388b7f;
+}
+
+.display-builder-submit-trigger:focus-visible {
+  outline: 2px solid #8eddd0;
+  outline-offset: 2px;
 }
 
 .display-builder-main {
@@ -1466,6 +1496,58 @@
   line-height: 1.7;
 }
 
+.display-builder-submission-target {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+.display-builder-submission-target div {
+  display: flex;
+  gap: 12px;
+}
+
+.display-builder-submission-target dt {
+  flex: 0 0 72px;
+  color: #93a9b1;
+}
+
+.display-builder-submission-target dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.display-builder-submission-note {
+  color: #b9cbd0;
+  line-height: 1.6;
+}
+
+.display-builder-submission-feedback {
+  padding: 10px 12px;
+  color: #a9e8dc;
+  background: #15352f;
+  border: 1px solid #357e71;
+  border-radius: 4px;
+  line-height: 1.6;
+}
+
+.display-builder-submission-feedback.is-error,
+.display-builder-submission-feedback.is-conflict,
+.display-builder-submission-feedback.is-editing {
+  color: #ffdca4;
+  background: #3b2a16;
+  border-color: #986b35;
+}
+
+.display-builder-submission-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
+}
+
 .display-builder-modal-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1820,7 +1902,7 @@
   gap: 5px;
 }
 
-.display-builder-list button {
+.display-builder-list .display-builder-select {
   position: relative;
   min-height: 58px;
   padding: 10px 10px 10px 32px;
@@ -1830,7 +1912,7 @@
   border-radius: 4px;
 }
 
-.display-builder-list button::before {
+.display-builder-list .display-builder-select::before {
   position: absolute;
   top: 18px;
   left: 12px;
@@ -1841,27 +1923,27 @@
   content: "";
 }
 
-.display-builder-list button:hover {
+.display-builder-list .display-builder-select:hover {
   background: #101d29;
   border-color: #223243;
 }
 
-.display-builder-list button.is-active {
+.display-builder-list .display-builder-select.is-active {
   background: #172433;
   border-color: #2b3a4b;
 }
 
-.display-builder-list button.is-active::before {
+.display-builder-list .display-builder-select.is-active::before {
   background: var(--builder-primary);
   box-shadow: 0 0 0 3px rgb(22 119 255 / 14%);
 }
 
-.display-builder-list button strong {
+.display-builder-list .display-builder-select strong {
   font-size: 13px;
   font-weight: 600;
 }
 
-.display-builder-list button strong em {
+.display-builder-list .display-builder-select strong em {
   padding: 1px 5px;
   color: #8495a5;
   font-size: 9px;
@@ -1869,12 +1951,12 @@
   border-radius: 2px;
 }
 
-.display-builder-list button.is-user-system strong em {
+.display-builder-list .display-builder-select.is-user-system strong em {
   color: #9cc5f5;
   background: #172f4b;
 }
 
-.display-builder-list button span {
+.display-builder-list .display-builder-select span {
   color: #718293;
   font-size: 10px;
 }

@@ -44,6 +44,26 @@ test('sync installs only a package matching the signed catalog and keeps a cache
   assert.equal(wrongKey.isAllowed('seatpad'), false);
 });
 
+test('a customer rollback installs the signed older release over a newer local version', async (t) => {
+  const f = fixture();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'shroom-managed-rollback-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const installedRoot = path.join(root, 'managed-display-systems', 'seatpad');
+  fs.mkdirSync(installedRoot, { recursive: true });
+  fs.writeFileSync(path.join(installedRoot, 'package-info.json'), JSON.stringify({
+    systemId: 'seatpad', version: 12, sha256: 'c'.repeat(64),
+  }));
+  const versions = [];
+  const sync = createManagedSystemSync({ root, getLicenseKey: () => f.key,
+    installPackage: (_value, version) => versions.push(version), publicKey: f.keys.publicKey,
+    fetchImpl: async (url) => ({ ok: true, json: async () => String(url).includes('/catalog')
+      ? f.envelope : { version: 9, signature: f.packageSignature,
+        package: { systemId: 'seatpad', sha256: f.sha256 } } }),
+  });
+  assert.deepEqual((await sync.sync()).errors, []);
+  assert.deepEqual(versions, [9]);
+});
+
 test('sync explains an HTML site fallback instead of exposing a JSON parser error', async (t) => {
   const f = fixture();
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'shroom-managed-html-'));
@@ -53,4 +73,15 @@ test('sync explains an HTML site fallback instead of exposing a JSON parser erro
       throw new SyntaxError("Unexpected token '<'");
     } }) });
   await assert.rejects(sync.sync(), { code: 'SYSTEM_SYNC_SERVICE_UNAVAILABLE' });
+});
+
+test('sync explains why an offline key cannot access the company catalog', async (t) => {
+  const f = fixture();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'shroom-managed-offline-auth-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const sync = createManagedSystemSync({ root, getLicenseKey: () => f.key, installPackage() {},
+    publicKey: f.keys.publicKey, fetchImpl: async () => ({ ok: false, status: 403,
+      headers: { get: () => 'application/json' }, json: async () => ({ error: 'LICENSE_CUSTOMER_REQUIRED' }) }) });
+  await assert.rejects(sync.sync(), (error) => error.code === 'LICENSE_CUSTOMER_REQUIRED'
+    && error.message.includes('未关联客户'));
 });

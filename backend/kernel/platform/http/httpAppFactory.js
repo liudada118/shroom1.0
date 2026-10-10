@@ -188,6 +188,11 @@ function createHttpApp({
   saveStaffPackageSubmissionToken = () => ({ configured: false }),
   clearStaffPackageSubmissionToken = () => ({ configured: false }),
   submitDisplaySystemPackage = async () => null,
+  listStaffSystemReleases = async () => ({ releases: [] }),
+  listCompanyRevisionDrafts = () => [],
+  createCompanyRevisionDraft = async () => null,
+  inspectCompanyRevisionDraft = () => null,
+  submitCompanyRevisionDraft = async () => null,
   algorithmRecordService,
   // 展示系统目录变了要告诉正在跑的前端。Builder 在进程内保存时自己派发 DOM 事件，
   // 但 Agent / 脚本走的是这里的 HTTP 接口，前端毫无感知 —— 不广播的话新系统要重启软件才出现。
@@ -405,7 +410,32 @@ function createHttpApp({
     catch (error) { respondDisplaySystemWriteError(res, error); }
   });
   httpApp.post('/api/system-packages/submit/:id', async (req, res) => {
-    try { assertAgentDeviceOrigin(req); res.json(await submitDisplaySystemPackage(req.params.id)); }
+    try { assertAgentDeviceOrigin(req); res.json(await submitDisplaySystemPackage(req.params.id, req.body?.baseVersion)); }
+    catch (error) { respondDisplaySystemWriteError(res, error); }
+  });
+
+  httpApp.get('/api/system-packages/staff/releases', async (req, res) => {
+    try { assertAgentDeviceOrigin(req); res.json(await listStaffSystemReleases()); }
+    catch (error) { respondDisplaySystemWriteError(res, error); }
+  });
+  httpApp.get('/api/system-packages/revisions', (req, res) => {
+    try { assertAgentDeviceOrigin(req); res.json({ drafts: listCompanyRevisionDrafts() }); }
+    catch (error) { respondDisplaySystemWriteError(res, error); }
+  });
+  httpApp.post('/api/system-packages/revisions', async (req, res) => {
+    try {
+      assertAgentDeviceOrigin(req);
+      const result = await createCompanyRevisionDraft(req.body?.systemId, req.body?.version);
+      notifyDisplaySystemsUpdated('revision-draft', result?.draftId);
+      res.status(result?.reused ? 200 : 201).json({ result });
+    } catch (error) { respondDisplaySystemWriteError(res, error); }
+  });
+  httpApp.get('/api/system-packages/revisions/:draftId', (req, res) => {
+    try { assertAgentDeviceOrigin(req); res.json({ result: inspectCompanyRevisionDraft(req.params.draftId) }); }
+    catch (error) { respondDisplaySystemWriteError(res, error); }
+  });
+  httpApp.post('/api/system-packages/revisions/:draftId/submit', async (req, res) => {
+    try { assertAgentDeviceOrigin(req); res.json({ result: await submitCompanyRevisionDraft(req.params.draftId, req.body?.expectedSha256) }); }
     catch (error) { respondDisplaySystemWriteError(res, error); }
   });
 
@@ -451,6 +481,7 @@ function createHttpApp({
       error: error.message,
       code: error.code || 'DISPLAY_SYSTEM_INVALID',
       details: error.details || [],
+      ...(Number.isSafeInteger(error.currentVersion) ? { currentVersion: error.currentVersion } : {}),
     });
   }
 

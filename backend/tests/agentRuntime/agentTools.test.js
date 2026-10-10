@@ -83,7 +83,7 @@ async function fixture() {
   };
 }
 /** 提供必须显式给出线序及点位的最小真实配置。 */
-function input(id = 'created') { return { id, name: '测试系统', summary: '创建已知协议的测试系统', rendererId: 'heatmap', sensors: [{ id: 'seat', type: `${id}-pressure`, protocolId: 'two-by-two', matrix: { rows: 2, cols: 2 }, lineOrder: [1, 2, 3, 4], pointOrder: [[0, 0], [0, 1], [1, 0], [1, 1]] }], chartCards: [{ metric: 'maxPressure' }] }; }
+function input(id = 'created') { return { id, name: '测试系统', summary: '创建已知协议的测试系统', rendererId: 'pointGrid', sensors: [{ id: 'seat', type: `${id}-pressure`, protocolId: 'two-by-two', matrix: { rows: 2, cols: 2 }, lineOrder: [1, 2, 3, 4], pointOrder: [[0, 0], [0, 1], [1, 0], [1, 1]] }], chartCards: [{ metric: 'maxPressure' }] }; }
 
 /** 订阅后送入合成原生实时帧，覆盖 Agent 启用前的频率核验。 */
 function streamNativeFrames(f, systemId, intervalMs) {
@@ -523,6 +523,93 @@ test('create keeps 1024 decoded points while mapping a selected 23x23 subset', a
     sensor.lineOrder[528] = 1025;
     await assert.rejects(f.tools.execute('prepare_create_system', request, f.context), { code: 'AGENT_INVALID_MAPPING' });
   } finally { await f.close(); }
+});
+
+test('Agent cannot prepare removed 2D renderers even when explicitly requested', async () => {
+  const f = await fixture();
+  try {
+    const capabilities = await f.tools.execute('get_capabilities', {});
+    assert.ok(!capabilities.renderers.some((item) => ['heatmap', 'matrix', 'raw2d'].includes(item.id)));
+    for (const rendererId of ['heatmap', 'matrix', 'raw2d']) {
+      await assert.rejects(f.tools.execute('prepare_create_system', { ...input(), rendererId }, f.context),
+        { code: 'AGENT_RENDERER_UNAVAILABLE' });
+    }
+    assert.equal(f.proposals.length, 0);
+  } finally { await f.close(); }
+});
+
+test('one system proposal saves switchable native heatmap and real 2D numbers without duplicating input', async () => {
+  const f = await fixture();
+  try {
+    const request = { ...input('switchable'), rendererId: 'webglHeatmap', rendererIds: ['webglHeatmap', 'numMatrix2d'] };
+    await f.tools.execute('prepare_create_system', request, f.context);
+    const proposal = f.proposals[0];
+    assert.equal(f.proposals.length, 1);
+    assert.equal(proposal.after.sensors.length, 1);
+    assert.equal(proposal.after.display.widgets.length, 1);
+    assert.deepEqual(proposal.after.display.renderers.map((item) => item.id), request.rendererIds);
+    assert.deepEqual(proposal.after.display.renderers[0].params, {
+      canvasWidth: 512, canvasHeight: 512, radius: 18, max: 200, filter: 0, valueScale: 1,
+      edgeClear: null, mirrorX: false, dataWidth: 2, dataHeight: 2, minFrameLength: 4,
+    });
+    assert.equal(proposal.after.display.renderers[1].type, 'numMatrix');
+    assert.equal(proposal.after.display.renderers[1].params.backend, 'webgl');
+    assert.equal(proposal.after.display.renderers[1].params.frameInput, 'raw');
+    assert.equal(proposal.after.display.renderers[1].params.webgl.rawTranspose, false);
+    assert.deepEqual(proposal.after.display.profiles.map((item) => item.renderer), request.rendererIds);
+    await f.tools.apply(proposal);
+    const editor = f.workspace.read(f.config('switchable'));
+    assert.deepEqual(editor.definitions.sensors.seat.lineOrder.order, request.sensors[0].lineOrder);
+    assert.deepEqual(editor.definitions.sensors.seat.pointOrder.points, request.sensors[0].pointOrder);
+    assert.equal(editor.manifest.sensors[0].protocol.decoding.valueCount, 4);
+    assert.deepEqual(editor.manifest.display.renderers.map((item) => item.id), request.rendererIds);
+    assert.equal(f.requests.filter((item) => item.method === 'POST').length, 1);
+  } finally { await f.close(); }
+});
+
+test('renderer modes reject unknown IDs, duplicates, missing defaults and removed legacy types', async () => {
+  const f = await fixture();
+  try {
+    for (const rendererIds of [['numMatrix2d', 'numMatrix2d'], ['numMatrix2d'], ['pointGrid', 'matrix'], ['pointGrid', 'unknown']]) {
+      await assert.rejects(f.tools.execute('prepare_create_system', { ...input(), rendererIds }, f.context));
+    }
+    assert.equal(f.proposals.length, 0);
+    assert.equal(f.requests.filter((item) => item.method === 'POST').length, 0);
+  } finally { await f.close(); }
+});
+
+test('actual Agent runtime combines renderer-only creations into one proposal and honours explicit independent systems', async () => {
+  for (const separateSystem of [false, true]) {
+    const f = await fixture(); let runtime;
+    try {
+      let turn = 0;
+      runtime = createAgentRuntime({ root: path.join(f.root, 'agent-state'), tools: f.tools,
+        modelRequest: async ({ onText }) => {
+          if (turn++ === 0) return { output: ['webglHeatmap', 'numMatrix2d'].map((rendererId, index) => ({
+            type: 'function_call', name: 'prepare_create_system', call_id: `create-${index}`,
+            arguments: JSON.stringify({ ...input(`style-${index}`), rendererId, separateSystem }),
+          })) };
+          onText('展示提案已生成。'); return { output: [] };
+        } });
+      runtime.configure({ baseUrl: 'https://example.com/v1', model: 'test', apiKey: 'fixture-only' });
+      runtime.startTask({ text: separateSystem ? '分别创建两套独立系统' : '按线序和协议创建一个可切换热力图和2D数字的系统' });
+      await runtime.whenIdle();
+      let task = runtime.getState().conversation.tasks[0];
+      assert.equal(task.status, 'awaiting_action', JSON.stringify(task.error));
+      assert.equal(task.error, undefined);
+      assert.equal(task.proposals.length, separateSystem ? 2 : 1);
+      const proposal = task.proposals[0];
+      assert.equal(proposal.systemId, 'style-0');
+      assert.equal(proposal.after.sensors[0].type, 'style-0-pressure');
+      assert.deepEqual(proposal.after.display.renderers.map((item) => item.id), separateSystem ? ['webglHeatmap'] : ['webglHeatmap', 'numMatrix2d']);
+      runtime.applyProposal({ taskId: task.id, proposalId: proposal.id }); await runtime.whenIdle();
+      task = runtime.getState().conversation.tasks[0];
+      assert.equal(task.proposals[0].status, 'applied', JSON.stringify(task.error));
+      assert.equal(f.requests.filter((item) => item.method === 'POST').length, 1);
+      assert.equal(f.config('style-0').sensors.length, 1);
+      assert.equal(f.config('style-1'), null);
+    } finally { await runtime?.dispose(); await f.close(); }
+  }
 });
 
 test('axis mapping compiles the legacy 1024-to-23x23 function and detects changed saved line order', async () => {

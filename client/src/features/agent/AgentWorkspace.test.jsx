@@ -32,6 +32,14 @@ describe('Agent 工作区界面边界', () => {
     expect(html).not.toContain('尚未创建');
   });
 
+  it('已发布 ID 冲突需要明确确认作为旧版本更新', () => {
+    const results = [{ key: 'result-1', kind: 'system', name: '坐垫', systemId: 'seatpad' }];
+    const html = renderToStaticMarkup(<AgentResults results={results} expanded onToggle={() => {}} onOpenSystem={() => {}}
+      onSubmitPackage={() => {}} actionFeedback={{ key: 'result-1', error: true, message: '系统 ID 已占用', updateBaseVersion: 7 }} />);
+    expect(html).toContain('确认作为版本 #7 的更新提交');
+    expect(html).toContain('系统 ID 已占用');
+  });
+
   it('创建矩阵提案显示原始点数和线序跨行样点，避免把保存误当物理验证', () => {
     const html = proposalMarkup('create_system', 'pending', { mappingPreview: [{ sensorId: 'sit', rawPoints: 1024,
       matrix: { rows: 23, cols: 23 }, mappedPoints: 529, first: [353, 354, 355], firstRowEnd: 375,

@@ -5,7 +5,7 @@ import { isPortalSystemAllowed, readPortalLicenseScope } from './portalSystems';
  * 验证密钥后更新目录，或继续切换所选系统。
  * ⚠️ 授权范围只读本次 HTTP 回执；其他窗口的广播不能完成当前请求。
  */
-export function createPortalEntry({ activate, switchSystem, onPhase, onError, onEntered, onValidated, onInvalidated }) {
+export function createPortalEntry({ activate, switchSystem, getManagedIds = () => [], onPhase, onError, onEntered, onValidated, onInvalidated }) {
   let attempt = null;
   let timer = null;
 
@@ -41,7 +41,10 @@ export function createPortalEntry({ activate, switchSystem, onPhase, onError, on
       current.validated = true;
       onValidated?.(scope, current.key);
       if (!current.system) { cancel(); return; }
-      if (!isPortalSystemAllowed(current.system, scope)) {
+      // ⚠️ 激活后读取当前密钥的签名目录；漏传目录会把所有已授权公司系统误判为无权限。
+      const managedIds = current.system.managed ? await getManagedIds() : [];
+      if (attempt !== current) return;
+      if (!isPortalSystemAllowed(current.system, scope, managedIds)) {
         throw new Error('当前密钥未授权此系统，请选择可用系统或更换密钥');
       }
       onPhase('switching');

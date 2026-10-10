@@ -2782,6 +2782,20 @@ const httpApp = createHttpApp({
   saveStaffPackageSubmissionToken: staffPackageSubmission.save,
   clearStaffPackageSubmissionToken: staffPackageSubmission.clear,
   submitDisplaySystemPackage: staffPackageSubmission.submit,
+  listStaffSystemReleases: staffPackageSubmission.listReleases,
+  listCompanyRevisionDrafts: appRuntime.companyRevisions.list,
+  createCompanyRevisionDraft: async (systemId, version) => appRuntime.companyRevisions.create(
+    await staffPackageSubmission.getRelease(systemId, version)),
+  inspectCompanyRevisionDraft: appRuntime.companyRevisions.inspect,
+  submitCompanyRevisionDraft: async (draftId, expectedSha256) => {
+    const inspection = appRuntime.companyRevisions.inspect(draftId);
+    if (!expectedSha256 || inspection.packageSha256 !== expectedSha256) {
+      throw Object.assign(new Error('草稿已变化，请重新查看差异后提交'), { code: 'SYSTEM_REVISION_CHANGED', httpStatus: 409 });
+    }
+    if (!inspection.hasChanges) throw Object.assign(new Error('草稿与已发布版本没有变化，请先保存修改再提交'), { code: 'SYSTEM_REVISION_UNCHANGED' });
+    const { package: input, baseVersion } = appRuntime.companyRevisions.exportRevision(draftId);
+    return staffPackageSubmission.submitPackage(input, baseVersion);
+  },
   // Agent / 脚本经 HTTP 写完展示系统后，让前端顶部菜单不用重启就能看到新系统。
   publishDisplaySystemsUpdated: (detail) => publishSystemEvent({ displaySystemsUpdated: detail }),
 });

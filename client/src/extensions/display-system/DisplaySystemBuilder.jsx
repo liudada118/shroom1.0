@@ -6,6 +6,8 @@ import {
   useState,
 } from 'react';
 import BuiltinTemplateDialog from './BuiltinTemplateDialog';
+import CompanySystemRevisions from './CompanySystemRevisions.jsx';
+import { canSubmitLocalSystem, listSystemsWithRevisionStatus } from './companySystemSubmission.js';
 import {
   Button,
   Checkbox,
@@ -33,16 +35,18 @@ import {
   SettingOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   MATRIX_DISPLAY_MODES,
   createDirectionCheckFrame,
   createMatrixDisplayRenderers,
   inferMatrixDisplayModeId,
+  resolveMatrixRendererType,
 } from '@shroom/frontend/core/matrixDisplayModes.js';
 import { commandClient } from '../../services/command/commandClient';
 import { registerRuntimeDisplayDefinition } from '../../displays/registry';
 import useMainWebSocket from '../../services/ws/useMainWebSocket';
+import { resolveWorkspaceRendererId } from './manifestWorkspaceRenderers.js';
 import DisplayCanvasConfigurator from './canvasConfigurator/DisplayCanvasConfigurator.jsx';
 import MatrixWidget from './widgets/MatrixWidget.jsx';
 import CoordinatePointWidget from './widgets/CoordinatePointWidget.jsx';
@@ -90,7 +94,7 @@ const DEFAULT_VALUES = {
   id: '',
   name: '',
   serialTemplate: 'pressure-fixed-length',
-  displayTemplate: 'shape-heatmap-2d',
+  displayTemplate: 'matrix-points-3d',
   version: '1.0.0',
   sensorType: '',
   ports: ['sit'],
@@ -127,7 +131,7 @@ const DEFAULT_VALUES = {
   scale: 1,
   offset: 0,
   zeroBelow: 0,
-  rendererId: 'heatmap',
+  rendererId: 'pointGrid',
   visualizationAlgorithmId: 'identity',
   normalizeMax: 100,
   threshold: 20,
@@ -237,13 +241,13 @@ function pickSensorFormValues(values = {}) {
  * @returns {{colormap: object, overlays: string[], widgets: object[]}} 画布配置。
  */
 function buildDefaultCanvasConfig({
-  rendererId = 'heatmap',
+  rendererId = 'pointGrid',
   showStats = false,
   source = 'sitData',
 } = {}) {
   const widgets = [{
     id: 'main',
-    type: rendererId,
+    type: resolveMatrixRendererType(rendererId),
     label: '压力数据',
     source,
     columnSpan: showStats ? 8 : 12,
@@ -505,7 +509,7 @@ function compactObject(value) {
  * 渲染模板缩略图。
  * 使用固定模拟数据展示热力图或数字矩阵的视觉差异，不参与真实传感器计算。
  */
-function DisplayTemplatePreview({ rendererId = 'heatmap', large = false }) {
+function DisplayTemplatePreview({ rendererId = 'pointGrid', large = false }) {
   const isMatrix = rendererId === 'matrix' || rendererId === 'numMatrix';
   const isRaw = rendererId === 'raw2d';
   const isPointGrid = rendererId === 'pointGrid';
@@ -644,8 +648,7 @@ function buildFormValues(editor) {
     version: manifest.version || '1.0.0',
     sensorType: primarySensor.type || manifest.sensor?.type || '',
     serialTemplate: inferSerialTemplate(manifest),
-    displayTemplate: manifest.metadata?.builder?.displayTemplate
-      || inferMatrixDisplayModeId(profile.renderer),
+    displayTemplate: inferMatrixDisplayModeId(resolveWorkspaceRendererId(profile.renderer || display.renderers?.[0]?.id)),
     ports: manifestPorts,
     portLabels: buildPortLabels(manifestPorts, manifestPortLabels),
     transportType: manifest.metadata?.builder?.transportType || 'binary',
@@ -683,7 +686,7 @@ function buildFormValues(editor) {
     min: algorithmData.min,
     max: algorithmData.max,
     zeroBelow: algorithmData.zeroBelow ?? 0,
-    rendererId: profile.renderer || display.renderers?.[0]?.id || 'heatmap',
+    rendererId: resolveWorkspaceRendererId(profile.renderer || display.renderers?.[0]?.id),
     visualizationAlgorithmId: profile.visualizationAlgorithm || 'identity',
     normalizeMax: selectedVisualizationAlgorithm.options?.max ?? 100,
     threshold: selectedVisualizationAlgorithm.options?.threshold ?? 20,
@@ -697,15 +700,15 @@ function buildFormValues(editor) {
       ? {
         colormap: display.canvas.colormap || { id: DEFAULT_COLORMAP_ID },
         overlays: display.canvas.overlays || [],
-        widgets: display.canvas.widgets,
+        widgets: display.canvas.widgets.map((widget) => ({ ...widget, type: resolveWorkspaceRendererId(widget.type) })),
       }
       : {
         colormap: display.canvas?.colormap || { id: DEFAULT_COLORMAP_ID },
         overlays: display.canvas?.overlays || [],
         widgets: display.widgets?.length
-          ? display.widgets
+          ? display.widgets.map((widget) => ({ ...widget, type: resolveWorkspaceRendererId(widget.type) }))
           : buildDefaultCanvasConfig({
-            rendererId: profile.renderer || 'heatmap',
+            rendererId: resolveWorkspaceRendererId(profile.renderer),
             source: `${manifest.sensor?.ports?.[0] || 'sit'}Data`,
           }).widgets,
       },
@@ -1030,6 +1033,9 @@ function compileSensorDraftForSave(draft, {
 
 export default function DisplaySystemBuilder({ embedded = false, onActivated, onClose }) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const companySystemId = new URLSearchParams(location.search).get('companySystem') || '';
+  const submitSystemId = new URLSearchParams(location.search).get('submitSystem') || '';
   const [form] = Form.useForm();
   const [createForm] = Form.useForm();
   const [catalog, setCatalog] = useState(null);
@@ -1044,6 +1050,9 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
   const [saving, setSaving] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [builtinDialog, setBuiltinDialog] = useState(null);
+  const [companyRevisionOpen, setCompanyRevisionOpen] = useState(Boolean(companySystemId));
+  const [submitTarget, setSubmitTarget] = useState(null);
+  const [submission, setSubmission] = useState({ phase: 'idle', message: '', currentVersion: null });
   const [editorAccess, setEditorAccess] = useState(null);
   const [loadedChartCards, setLoadedChartCards] = useState([]);
   const [activeStep, setActiveStep] = useState('connection');
@@ -1057,6 +1066,8 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
   const activeSensorIdRef = useRef(null);
   const probePortBySensorRef = useRef({});
   const protocolProbeGenerationRef = useRef(0);
+  const submissionInFlightRef = useRef(false);
+  const handledSubmitSystemRef = useRef('');
   const systemId = Form.useWatch('id', form);
   const systemName = Form.useWatch('name', form);
   const sensorType = Form.useWatch('sensorType', form);
@@ -1114,8 +1125,10 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
       requestJson('/api/display-systems'),
       requestJson('/api/display-systems/catalog'),
     ]);
-    setSystems(systemsPayload.displaySystems?.systems || []);
+    const listedSystems = listSystemsWithRevisionStatus(systemsPayload.displaySystems);
+    setSystems(listedSystems);
     setCatalog(catalogPayload.catalog || {});
+    return listedSystems;
   }, []);
 
   const loadSerialPorts = useCallback(async () => {
@@ -1220,13 +1233,13 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     }
   }, [createForm, form, systems]);
 
-  const editSystem = useCallback(async (id) => {
+  const editSystem = useCallback(async (id, listedSystem = null) => {
     resetProtocolProbeUi();
     setLoading(true);
     try {
       const payload = await requestJson(`/api/display-systems/${encodeURIComponent(id)}/editor`);
       if (payload.editor?.kind === 'builtin-template') {
-        const system = systems.find((item) => item.id === id);
+        const system = listedSystem || systems.find((item) => item.id === id);
         setBuiltinDialog({ existing: system });
         return;
       }
@@ -1250,6 +1263,56 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
       setLoading(false);
     }
   }, [form, resetProtocolProbeUi, systems]);
+
+  /** Return to the existing editor for a persistent revision draft after refreshing discovery. */
+  const editCompanyRevision = useCallback(async (draftId) => {
+    setCompanyRevisionOpen(false);
+    const listed = await loadIndex();
+    await editSystem(draftId, listed.find((item) => item.id === draftId));
+  }, [editSystem, loadIndex]);
+
+  /** Submit the saved disk package even when its editor is open; unsaved fields stay local. */
+  const openSubmission = useCallback((system) => {
+    setSubmitTarget(system);
+    setSubmission({ phase: 'idle', message: '', currentVersion: null });
+  }, []);
+
+  /** Open the saved-system submit dialog from a system-card deep link. */
+  useEffect(() => {
+    if (!submitSystemId || loading || !catalog || handledSubmitSystemRef.current === submitSystemId) return;
+    handledSubmitSystemRef.current = submitSystemId;
+    const system = systems.find((item) => item.id === submitSystemId);
+    if (canSubmitLocalSystem(system)) openSubmission(system);
+    else message.error('只有本机已保存、可编辑的系统可以提交公司审核');
+  }, [catalog, loading, openSubmission, submitSystemId, systems]);
+
+  /** The first request creates a new submission; a published-ID conflict needs a second explicit click. */
+  const submitSavedSystem = useCallback(async (baseVersion) => {
+    if (!submitTarget || submissionInFlightRef.current) return;
+    submissionInFlightRef.current = true;
+    setSubmission({ phase: 'busy', message: '正在上传已保存的系统包…', currentVersion: null });
+    try {
+      const result = await requestJson(`/api/system-packages/submit/${encodeURIComponent(submitTarget.id)}`, {
+        method: 'POST',
+        ...(baseVersion === undefined ? {} : { body: JSON.stringify({ baseVersion }) }),
+      });
+      setSubmission({ phase: 'success', currentVersion: null,
+        message: result.status === 'pending'
+          ? `已提交审核 #${result.id}。超管发布前，客户仍使用当前版本。`
+          : `系统包 #${result.id} 已由服务端记录为已发布；请在管理网站核对客户版本配置。` });
+    } catch (error) {
+      if (error.code === 'SYSTEM_ID_ALREADY_PUBLISHED' && Number.isSafeInteger(error.currentVersion)
+        && error.currentVersion > 0) {
+        setSubmission({ phase: 'conflict', currentVersion: error.currentVersion,
+          message: `系统 ID “${submitTarget.id}”已有发布版 #${error.currentVersion}。确认后将作为该版本的更新提交审核，不会立即替换客户正在使用的版本。` });
+        return;
+      }
+      setSubmission({ phase: 'error', currentVersion: null,
+        message: error.code === 'SYSTEM_SUBMISSION_TOKEN_REQUIRED'
+          ? '请先在 Agent → 模型设置 → 公司系统提交中填写员工提交令牌，再重试。'
+          : error.message || '提交审核失败，请重试。' });
+    } finally { submissionInFlightRef.current = false; }
+  }, [submitTarget]);
 
   const rendererOptions = useMemo(
     () => [
@@ -2049,7 +2112,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
       // 换模板等于重置画布布局，配色和叠加层沿用用户已有选择。
       canvasConfig: {
         ...buildDefaultCanvasConfig({
-          rendererId: defaults.rendererId || 'heatmap',
+          rendererId: defaults.rendererId || 'pointGrid',
           showStats: defaults.showStats ?? true,
           source: `${form.getFieldValue('ports')?.[0] || 'sit'}Data`,
         }),
@@ -2070,7 +2133,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
         widgets: widgets.map((widget) => {
           if (widget.type === 'pressureStats') return widget;
           if (shouldApplyAgent || isAgentRendererId(widget.type) || MATRIX_DISPLAY_MODES.some((mode) => mode.rendererId === widget.type)) {
-            return { ...widget, type: nextRendererId };
+            return { ...widget, type: resolveMatrixRendererType(nextRendererId) };
           }
           return widget;
         }),
@@ -2244,7 +2307,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
       const widgets = ensureBuilderPortWidgets({
         widgets: canvasWidgets,
         sensorPlan,
-        rendererId: values.rendererId,
+        rendererId: resolveMatrixRendererType(values.rendererId),
       });
       const builtInDisplayRenderers = createMatrixDisplayRenderers({
         matrix: { rows: normalizedMatrix.rows, cols: normalizedMatrix.cols },
@@ -2489,25 +2552,35 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
           />
         </div>
         <Button style={{ margin: '12px 16px' }} onClick={() => setBuiltinDialog({})}>以内置系统为模板创建</Button>
+        <Button style={{ margin: '0 16px 12px' }} onClick={() => setCompanyRevisionOpen(true)}>公司系统库 · 创建更新草稿</Button>
         <div className="display-builder-list-label">展示系统</div>
         <div className="display-builder-list" role="list">
-          {systems.map((system) => (
-            <button
-              type="button"
-              key={system.id}
-              className={[
-                selectedId === system.id ? 'is-active' : '',
-                system.editable ? 'is-user-system' : 'is-system-system',
-              ].filter(Boolean).join(' ')}
-              onClick={() => editSystem(system.id)}
-            >
-              <strong>
-                {system.name}
-                <em>{system.kind === 'builtin-template' ? '独立系统 · 可编辑' : system.editable ? '自定义' : <><LockOutlined /> 系统内置</>}</em>
-              </strong>
-              <span>{system.builtinTemplate ? `来源：${system.builtinTemplate.sourceType} · ${system.id}` : `${system.sensorType} · ${system.matrix?.rows}×${system.matrix?.cols}`}</span>
-            </button>
-          ))}
+          {systems.map((system) => {
+            const canSubmit = canSubmitLocalSystem(system);
+            return <div className="display-builder-list-entry" role="listitem" key={system.id}>
+              <button
+                type="button"
+                className={[
+                  'display-builder-select',
+                  selectedId === system.id ? 'is-active' : '',
+                  system.editable ? 'is-user-system' : 'is-system-system',
+                ].filter(Boolean).join(' ')}
+                onClick={() => editSystem(system.id)}
+              >
+                <strong>
+                  {system.name}
+                  <em>{system.revisionDraft ? '公司版本草稿'
+                    : system.kind === 'builtin-template' ? '独立系统 · 可编辑'
+                      : system.editable ? '自定义' : <><LockOutlined /> 系统内置</>}</em>
+                </strong>
+                <span>{system.builtinTemplate ? `来源：${system.builtinTemplate.sourceType} · ${system.id}` : `${system.sensorType} · ${system.matrix?.rows}×${system.matrix?.cols}`}</span>
+              </button>
+              {canSubmit && <button className="display-builder-submit-trigger" type="button"
+                onClick={() => openSubmission(system)}><UploadOutlined /> 提交公司审核</button>}
+              {system.revisionDraft && <button className="display-builder-submit-trigger" type="button"
+                onClick={() => setCompanyRevisionOpen(true)}>在公司系统库提交更新</button>}
+            </div>;
+          })}
           {!systems.length ? <p className="display-builder-empty">暂无已保存配置</p> : null}
         </div>
       </aside>
@@ -3098,7 +3171,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
                             disabled={readOnly}
                             onClick={() => applyDisplayTemplate(template.id)}
                           >
-                            <DisplayTemplatePreview rendererId={template.rendererId || 'heatmap'} />
+                            <DisplayTemplatePreview rendererId={template.rendererId || 'pointGrid'} />
                             <strong>{template.label}</strong>
                             {selected ? <CheckCircleFilled /> : null}
                           </button>
@@ -3557,6 +3630,37 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
           ))}
         </div>
       </Form>
+    </Modal>
+    <CompanySystemRevisions open={companyRevisionOpen} initialSystemId={companySystemId} editingSystemId={selectedId}
+      onClose={() => { setCompanyRevisionOpen(false); if (companySystemId) navigate('/display-systems', { replace: true }); }}
+      onEditDraft={(draftId) => void editCompanyRevision(draftId).catch((error) => message.error(error.message))} />
+    <Modal className="display-builder-modal display-builder-submission-modal" open={Boolean(submitTarget)}
+      title="提交公司审核" footer={null} maskClosable={submission.phase !== 'busy'}
+      closable={submission.phase !== 'busy'}
+      onCancel={() => { if (submission.phase !== 'busy') setSubmitTarget(null); }}>
+      {submitTarget && <>
+        <p className="display-builder-modal-intro">将本机已保存的系统包提交给公司审核。提交后由超管决定是否发布；提交成功不代表客户已收到更新。</p>
+        <dl className="display-builder-submission-target">
+          <div><dt>展示系统</dt><dd>{submitTarget.name || submitTarget.id}</dd></div>
+          <div><dt>系统 ID</dt><dd>{submitTarget.id}</dd></div>
+          <div><dt>本机版本</dt><dd>{submitTarget.version || '未标注'}</dd></div>
+        </dl>
+        <p className="display-builder-submission-note">仅上传磁盘中已保存的配置。正在编辑但尚未保存的线序、图表或算法不会包含在本次审核包中。</p>
+        {submission.message && <p className={`display-builder-submission-feedback is-${submission.phase}`}
+          role={submission.phase === 'error' || submission.phase === 'conflict' ? 'alert' : 'status'}>{submission.message}</p>}
+        <div className="display-builder-submission-actions">
+          <Button onClick={() => setSubmitTarget(null)} disabled={submission.phase === 'busy'}>
+            {submission.phase === 'success' ? '完成' : '取消'}
+          </Button>
+          {submission.phase === 'conflict' && <Button type="primary"
+            onClick={() => void submitSavedSystem(submission.currentVersion)}>
+            确认作为发布版 #{submission.currentVersion} 的更新提交
+          </Button>}
+          {submission.phase !== 'conflict' && submission.phase !== 'success'
+            && <Button type="primary" loading={submission.phase === 'busy'}
+              onClick={() => void submitSavedSystem()}>提交已保存的系统</Button>}
+        </div>
+      </>}
     </Modal>
 
     </>
