@@ -32,20 +32,10 @@ export const MATRIX_DISPLAY_MODES = Object.freeze([
     shapeAware: true,
   },
   {
-    id: 'matrix-values-3d',
-    rendererId: 'numMatrix',
-    label: '3D 数字',
-    description: '以可旋转的三维数字矩阵显示每个点',
-    dimension: '3d',
-    kind: 'values',
-    shapeAware: false,
-  },
-  {
     id: 'matrix-values-2d',
-    rendererId: 'numMatrix2d',
-    rendererType: 'numMatrix',
+    rendererId: 'numMatrix',
     label: '2D 数字',
-    description: '在平面网格逐格显示映射后的数值，不再旋转或重排线序',
+    description: '使用原生蓝色平面数字矩阵，支持缩放和平移',
     dimension: '2d',
     kind: 'values',
     shapeAware: false,
@@ -74,6 +64,9 @@ const MODE_BY_ID = new Map(MATRIX_DISPLAY_MODES.map((mode) => [mode.id, mode]));
 const MODE_BY_RENDERER_ID = new Map(
   MATRIX_DISPLAY_MODES.map((mode) => [mode.rendererId, mode]),
 );
+// 旧名称仅用于兼容已保存选择，不再作为第二种数字模式出现在目录中。
+MODE_BY_ID.set('matrix-values-3d', MODE_BY_ID.get('matrix-values-2d'));
+MODE_BY_RENDERER_ID.set('numMatrix2d', MODE_BY_ID.get('matrix-values-2d'));
 
 function positiveInteger(value, fallback = 1) {
   const numeric = Math.round(Number(value));
@@ -105,9 +98,10 @@ export function inferMatrixDisplayModeId(rendererId) {
   return MODE_BY_RENDERER_ID.get(rendererId)?.id || MATRIX_DISPLAY_MODES[0].id;
 }
 
-/** 将展示模式 ID 解析成注册表类型；2D/3D 数字共用 numMatrix 的不同后端。 */
+/** 将展示模式 ID 解析成注册表类型，旧数字别名统一到原生平面矩阵。 */
 export function resolveMatrixRendererType(rendererId) {
-  return MODE_BY_RENDERER_ID.get(rendererId)?.rendererType || rendererId;
+  const mode = MODE_BY_RENDERER_ID.get(rendererId);
+  return mode?.rendererType || mode?.rendererId || rendererId;
 }
 
 /**
@@ -133,14 +127,11 @@ export function createMatrixDisplayRenderers({ matrix = {}, coordinateMap = null
       };
     } else if (resolveMatrixRendererType(mode.rendererId) === 'numMatrix') {
       params = {
-        backend: mode.dimension === '2d' ? 'webgl' : 'sprite3d',
+        backend: 'sprite3d',
+        frameInput: 'raw',
         gridWidth: cols,
         gridHeight: rows,
         manageSidebar: false,
-        ...(mode.dimension === '2d' ? {
-          frameInput: 'raw',
-          webgl: { variant: 'original', rawTranspose: false, indexRow: false, overlayPad: 0 },
-        } : {}),
       };
     } else if (mode.rendererId === 'webglHeatmap') {
       // 通用矩阵不继承 64×64 床垫的裁边、镜像和 4096 点门槛。

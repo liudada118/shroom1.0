@@ -8,7 +8,7 @@ import React, {
 } from 'react';
 import { Select } from 'antd';
 import { MATRIX_DISPLAY_MODES } from '@shroom/frontend/core/matrixDisplayModes.js';
-import { buildWorkspaceDisplayProfileModel } from './manifestWorkspaceRenderers.js';
+import { buildWorkspaceDisplayProfileModel, buildWorkspaceViewOptions, resolveWorkspaceRendererId } from './manifestWorkspaceRenderers.js';
 import useWorkspaceTop from './useWorkspaceTop.js';
 import useMainWebSocket from '../../services/ws/useMainWebSocket';
 import {
@@ -142,8 +142,13 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
     [definition, matrix, agentRendererRegistry.apps],
   );
   const activeProfile = useMemo(
-    () => resolveDisplayProfile(profileModel, selection),
+    () => resolveDisplayProfile(profileModel, selection.rendererId
+      ? { ...selection, rendererId: resolveWorkspaceRendererId(selection.rendererId) } : selection),
     [profileModel, selection],
+  );
+  const viewOptions = useMemo(
+    () => buildWorkspaceViewOptions(definition?.page, profileModel.renderers, activeProfile.rendererId),
+    [definition?.page, profileModel.renderers, activeProfile.rendererId],
   );
   const profileId = definition?.displaySystemId || definition?.type || 'unknown';
 
@@ -191,10 +196,11 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
 
   /** 只切换当前画布渲染组件，不修改算法、图表、通道或采集配置。 */
   const selectRenderer = useCallback((rendererId) => {
-    const renderer = profileModel.renderers.find((item) => item.id === rendererId);
+    const resolvedRendererId = resolveWorkspaceRendererId(rendererId);
+    const renderer = profileModel.renderers.find((item) => item.id === resolvedRendererId);
     if (!renderer) return;
     updateSelection({
-      ...selection, profileId: activeProfile.profileId, rendererId,
+      ...selection, profileId: activeProfile.profileId, rendererId: resolvedRendererId,
       canvas: {
         ...activeProfile.canvas,
         widgets: activeProfile.canvasWidgets.map((widget) => (
@@ -416,6 +422,21 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
           </nav>
         </>
       ) : null}
+      {viewOptions.length > 1 && activeProfile.canvasWidgets.some((widget) => (
+        isDataRendererType(widget.type) || MATRIX_DISPLAY_MODES.some((mode) => mode.rendererId === widget.type)
+      )) && (
+        <nav className="manifest-view-switcher" aria-label="视图切换">
+          <div className="manifest-view-switcher-controls">
+            <span className="manifest-view-switcher-label">视图</span>
+            <div className="manifest-view-switcher-options" role="group" aria-label="展示方式">
+              {viewOptions.map((option) => (
+                <button key={option.value} type="button" aria-pressed={activeProfile.rendererId === option.value}
+                  onClick={() => selectRenderer(option.value)}>{option.label}</button>
+              ))}
+            </div>
+          </div>
+        </nav>
+      )}
       <DisplayCanvasConfigurator
         value={activeProfile.canvas}
         onChange={updateCanvas}

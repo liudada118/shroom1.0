@@ -6,6 +6,55 @@ import { chromium } from 'playwright';
 const clientRoot = fileURLToPath(new URL('../../client/', import.meta.url));
 const clientRequire = createRequire(new URL('../../client/package.json', import.meta.url));
 const { createServer } = clientRequire('vite');
+
+/** 观察原生数字矩阵的真实 GPU 数值、平面位置与绘制像素。 */
+function installNumericProbe() {
+  window.numericProbe = { uv: [], positions: [], pixel: [], captureColor: false };
+  for (const Context of [window.WebGLRenderingContext, window.WebGL2RenderingContext]) {
+    if (!Context) continue;
+    for (const name of ['bufferData', 'bufferSubData']) {
+      const upload = Context.prototype[name];
+      Context.prototype[name] = function (...args) {
+        const values = args[name === 'bufferData' ? 1 : 2];
+        if (values instanceof Float32Array && this.canvas.closest('[data-renderer-id="numMatrix"]')) {
+          if (values.length === 1024 * 2) window.numericProbe.uv = Array.from(values);
+          if (values.length === 1024 * 16) window.numericProbe.positions = Array.from(values);
+        }
+        return upload.apply(this, args);
+      };
+    }
+    for (const name of ['drawElements', 'drawElementsInstanced']) {
+      const draw = Context.prototype[name];
+      if (!draw) continue;
+      Context.prototype[name] = function (...args) {
+        const result = draw.apply(this, args);
+        if (window.numericProbe.captureColor && this.canvas.closest('[data-renderer-id="numMatrix"]')) {
+          const pixel = new Uint8Array(4);
+          this.readPixels(2, 2, 1, 1, this.RGBA, this.UNSIGNED_BYTE, pixel);
+          window.numericProbe.pixel = Array.from(pixel);
+        }
+        return result;
+      };
+    }
+  }
+}
+
+/** 检查合法零帧显示原生蓝色网格，且数字视图只有一个平面画布。 */
+async function assertBlueNumericMatrix(page, length) {
+  await page.evaluate((count) => {
+    window.numericProbe.captureColor = true;
+    window.pushWorkspaceFrame(new Array(count).fill(0));
+  }, length);
+  await page.waitForFunction(() => {
+    const { uv, pixel } = window.numericProbe;
+    return uv.length === 1024 * 2 && uv.every((value) => value === 0)
+      && pixel[2] > 80 && pixel[0] < 50 && pixel[1] < 50 && pixel[3] === 255;
+  });
+  await page.evaluate(() => { window.numericProbe.captureColor = false; });
+  assert.equal(await page.locator('[data-renderer-id="numMatrix"] canvas').count(), 1);
+  assert.equal(await page.locator('[data-renderer-id="numMatrix"] .threeBoxF').count(), 0);
+}
+
 const server = await createServer({
   root: clientRoot,
   server: { host: '127.0.0.1', port: 0, open: false },
@@ -27,15 +76,10 @@ try {
   browser = await chromium.launch({ channel: process.env.SHROOM_TEST_BROWSER || 'chrome', headless: true, args: ['--enable-unsafe-swiftshader'] });
   for (const deviceScaleFactor of [1, 2]) {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor });
+    await context.addInitScript(installNumericProbe);
     await context.addInitScript(() => {
       // 观察真实 GPU 上传；DOM 中存在 canvas 并不能证明点阵已画出。
       window.pointGridProbe = { invalid: 0, maxHeight: 0, pointDraws: 0 };
-      window.numericCells = [];
-      const fillText = CanvasRenderingContext2D.prototype.fillText;
-      CanvasRenderingContext2D.prototype.fillText = function (...args) {
-        if (this.canvas.closest('.canvasNum .threeBoxF')) window.numericCells.push(args.slice(0, 3));
-        return fillText.apply(this, args);
-      };
       for (const Context of [window.WebGLRenderingContext, window.WebGL2RenderingContext]) {
         if (!Context) continue;
         const upload = Context.prototype.bufferData;
@@ -129,21 +173,31 @@ try {
     const picker = page.getByRole('combobox', { name: '选择渲染器' });
     await picker.waitFor();
     assert.deepEqual(await picker.locator('option').evaluateAll((nodes) => nodes.map((node) => node.value)),
-      ['pointGrid', 'numMatrix', 'numMatrix2d', 'webglHeatmap', 'blobHeatmap']);
+      ['pointGrid', 'numMatrix', 'webglHeatmap', 'blobHeatmap']);
+    assert.equal(await picker.getByRole('option', { name: '2D 数字', exact: true }).count(), 1);
+    assert.equal(await picker.getByRole('option', { name: '3D 数字', exact: true }).count(), 0);
     await picker.selectOption('numMatrix');
     await page.locator('[data-renderer-id="numMatrix"] canvas').waitFor();
-    await picker.selectOption('numMatrix2d');
-    await page.locator('[data-renderer-id="numMatrix"] .threeBoxF canvas').first().waitFor();
     await page.evaluate(() => {
-      window.numericCells = [];
+      window.numericProbe.uv = [];
       window.pushWorkspaceFrame(Array.from({ length: 1024 }, (_, index) => index % 251));
     });
-    await page.waitForFunction(() => window.numericCells.length >= 1024);
-    const cells = await page.evaluate(() => window.numericCells.slice(-1024));
-    assert.deepEqual(cells.map(([text]) => Number(text)), Array.from({ length: 1024 }, (_, index) => index % 251),
+    await page.waitForFunction(() => window.numericProbe.uv.length === 1024 * 2
+      && window.numericProbe.uv.every((value, index, uv) => index % 2 !== 0
+        || Math.round(value * 16) + Math.round(uv[index + 1] * 16) * 16 === (index / 2) % 251));
+    const numbers = await page.evaluate(() => window.numericProbe.uv.filter((_, index) => index % 2 === 0)
+      .map((value, index) => Math.round(value * 16) + Math.round(window.numericProbe.uv[index * 2 + 1] * 16) * 16));
+    assert.deepEqual(numbers, Array.from({ length: 1024 }, (_, index) => index % 251),
       '2D 数字必须逐点显示当前帧，不能模糊、转置或重排线序');
-    assert.equal(cells[0][2], cells[31][2], '首行的 32 格保持同一纵坐标');
-    assert.equal(cells[0][1], cells[32][1], '下一行从同一横坐标开始');
+    const positions = await page.evaluate(() => window.numericProbe.positions);
+    assert.equal(positions.length, 1024 * 16);
+    assert.equal(positions[13], positions[31 * 16 + 13], '首行的 32 格保持同一纵坐标');
+    assert.equal(positions[12], positions[32 * 16 + 12], '下一行从同一横坐标开始');
+    assert.ok(positions.filter((_, index) => index % 16 === 14).every((z) => z === 0), '数字格始终在同一个平面');
+    await assertBlueNumericMatrix(page, 1024);
+    if (deviceScaleFactor === 1 && process.env.SHROOM_TEST_NUMERIC_SCREENSHOT) {
+      await page.locator('[data-renderer-id="numMatrix"] canvas').screenshot({ path: process.env.SHROOM_TEST_NUMERIC_SCREENSHOT });
+    }
     await picker.selectOption('webglHeatmap');
     await page.locator('[data-renderer-id="webglHeatmap"] canvas').first().waitFor();
     await page.evaluate(() => window.pushWorkspaceFrame(new Array(1024).fill(200)));
@@ -163,6 +217,65 @@ try {
     console.log(`workspace layout passed: DPR ${deviceScaleFactor}, cold empty -> single valid frame without remount, invalid frames, 5 viewport sizes, native pointGrid, collapse/restore, mode switches`);
     await context.close();
   }
+  const viewContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await viewContext.addInitScript(installNumericProbe);
+  const viewPage = await viewContext.newPage();
+  const viewErrors = [];
+  viewPage.on('pageerror', (error) => viewErrors.push(error.message));
+  await viewPage.route('http://127.0.0.1:19245/**', (route) => route.fulfill({ json: { code: 0, data: { apps: [] } } }));
+  await viewPage.goto(`http://127.0.0.1:${server.httpServer.address().port}/__workspace-test?portal&multi&legacy2dStyle`);
+  const views = viewPage.getByRole('navigation', { name: '视图切换' });
+  await views.waitFor();
+  assert.deepEqual(await views.getByRole('button').allTextContents(), ['3D 点图', '热力图', '2D 数字']);
+  for (const [width, height] of [[1440, 900], [900, 600], [768, 600], [375, 740]]) {
+    await viewPage.setViewportSize({ width, height });
+    const hitTargets = await views.getByRole('button').evaluateAll((buttons) => buttons.map((button) => {
+      const rect = button.getBoundingClientRect();
+      return rect.width > 0 && rect.left >= 0 && rect.right <= window.innerWidth
+        && button.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2));
+    }));
+    assert.deepEqual(hitTargets, [true, true, true], `视图条不能被图表、工具或画布遮挡：${width}×${height}`);
+  }
+  await viewPage.setViewportSize({ width: 1440, height: 900 });
+  const viewChartInput = viewPage.getByRole('textbox', { name: '图表状态保留测试' });
+  await viewChartInput.fill('视图切换保留图表');
+  await views.getByRole('button', { name: '热力图', exact: true }).click();
+  await viewPage.evaluate(() => window.pushWorkspaceFrame(new Array(1024).fill(200)));
+  await viewPage.waitForFunction(() => {
+    const canvas = document.querySelector('[data-renderer-id="webglHeatmap"] canvas');
+    const pixels = canvas?.getContext('2d')?.getImageData(0, 0, canvas.width, canvas.height).data;
+    return pixels && pixels.some((value, index) => index % 4 === 0 && value > 80);
+  });
+  const viewStats = await viewPage.evaluate(() => window.workspaceSidebarData);
+  await views.getByRole('button', { name: '2D 数字', exact: true }).press('Enter');
+  await viewPage.locator('[data-renderer-id="numMatrix"] canvas').waitFor();
+  assert.equal(await views.getByRole('button', { name: '2D 数字', exact: true }).getAttribute('aria-pressed'), 'true');
+  assert.equal(await viewPage.locator('.manifest-widget-slot').count(), 1, '三种模式共用一个 main 画布');
+  assert.deepEqual(await viewPage.evaluate(() => window.workspaceSidebarData), viewStats, '切换保持同一帧与统计');
+  assert.equal(await viewChartInput.inputValue(), '视图切换保留图表');
+  await assertBlueNumericMatrix(viewPage, 1024);
+  await viewPage.getByRole('button', { name: '工具区', exact: true }).click();
+  await viewPage.getByRole('tab', { name: '显示与语言' }).click();
+  const viewPicker = viewPage.getByRole('combobox', { name: '选择渲染器' });
+  assert.equal(await viewPicker.inputValue(), 'numMatrix', '旧重复数字别名在常驻入口和工具区统一为原生数字');
+  await viewPicker.selectOption('pointGrid');
+  await viewPage.locator('[data-renderer-id="pointGrid"] canvas').waitFor();
+  assert.equal(await views.getByRole('button', { name: '3D 点图', exact: true }).getAttribute('aria-pressed'), 'true');
+  await viewPage.getByRole('button', { name: '收起实用工具' }).click();
+  await views.getByRole('button', { name: '2D 数字', exact: true }).click();
+  await viewPage.evaluate(() => {
+    const key = Object.keys(localStorage).find((item) => item.includes('layout-fixture') && item.includes('display-profile'));
+    if (!key) throw new Error('未找到已保存视图选择');
+    const selection = JSON.parse(localStorage.getItem(key));
+    localStorage.setItem(key, JSON.stringify({ ...selection, rendererId: 'numMatrix2d' }));
+  });
+  await viewPage.reload();
+  await viewPage.waitForFunction(() => document.querySelector('.manifest-view-switcher button[aria-pressed="true"]')?.textContent === '2D 数字');
+  await viewPage.locator('[data-renderer-id="numMatrix"] canvas').waitFor();
+  assert.deepEqual(viewErrors, []);
+  if (process.env.SHROOM_TEST_VIEW_SCREENSHOT) await views.screenshot({ path: process.env.SHROOM_TEST_VIEW_SCREENSHOT });
+  await viewContext.close();
+  console.log('Visible view switcher passed: three modes, responsive hit targets, keyboard, shared chart/data, toolbox sync and reload');
   for (const side of [32, 23, 3]) {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const page = await context.newPage();

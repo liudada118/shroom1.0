@@ -19,15 +19,22 @@ function WorkspaceFixture() {
   const legacy = query.get('legacy');
   const rendererType = legacy || query.get('renderer') || 'pointGrid';
   const side = legacy ? 23 : Math.max(1, Number(query.get('side')) || 32);
+  const rendererIds = query.has('multi') ? ['pointGrid', 'webglHeatmap', 'numMatrix2d'] : [rendererType];
   const definition = {
     displaySystemId: 'layout-fixture', type: 'layout-fixture', matrix: { rows: side, cols: side },
     sensors: [{ id: 'mat', sensorId: 'mat', outputChannel: 'mat', matrix: { rows: side, cols: side } }],
     page: {
       layout: { columns: 12, presentation },
-      renderers: [{ id: rendererType, type: rendererType, params: {
+      renderers: rendererIds.map((id) => ({ id, type: id === 'numMatrix2d' ? 'numMatrix' : id, params: {
         sit: { num1: side, num2: side, interp: 1, order: 0 },
         back: { num1: side, num2: side, interp: 1, order: 0 },
-      } }],
+        ...(id === 'numMatrix2d' && query.has('legacy2dStyle') ? {
+          backend: 'webgl', frameInput: 'raw',
+          webgl: { variant: 'original', rawTranspose: false, indexRow: false, overlayPad: 0 },
+        } : {}),
+      } })),
+      profiles: rendererIds.map((id, index) => ({ id: index === 0 ? 'default' : `display-${id}`,
+        renderer: id, widgets: ['main'] })),
       widgets: [{ id: 'main', type: rendererType, source: 'mat', columnSpan: 12 }],
       sidebar: { source: 'mat' },
     },

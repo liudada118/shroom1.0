@@ -7,14 +7,16 @@ import {
   createDirectionCheckFrame,
   createMatrixDisplayRenderers,
   inferMatrixDisplayModeId,
+  getMatrixDisplayMode,
+  resolveMatrixRendererType,
 } from './matrixDisplayModes.js';
+import { normalizeNumMatrixParams } from '../renderers/numMatrix/core/params.js';
 
 describe('matrixDisplayModes', () => {
   it('只提供原生矩阵展示形式，默认 3D 点图', () => {
     expect(MATRIX_DISPLAY_MODES.map((mode) => mode.rendererId)).toEqual([
       'pointGrid',
       'numMatrix',
-      'numMatrix2d',
       'webglHeatmap',
       'blobHeatmap',
     ]);
@@ -38,12 +40,9 @@ describe('matrixDisplayModes', () => {
     });
     expect(renderers.find((item) => item.id === 'numMatrix').params).toMatchObject({
       backend: 'sprite3d',
+      frameInput: 'raw',
       gridWidth: 3,
       gridHeight: 2,
-    });
-    expect(renderers.find((item) => item.id === 'numMatrix2d')).toMatchObject({
-      type: 'numMatrix', params: { backend: 'webgl', frameInput: 'raw', gridWidth: 3, gridHeight: 2,
-        webgl: { rawTranspose: false, indexRow: false } },
     });
     expect(renderers.find((item) => item.id === 'webglHeatmap').params).toMatchObject({
       dataWidth: 3, dataHeight: 2, minFrameLength: 6, edgeClear: null, mirrorX: false, valueScale: 1,
@@ -56,6 +55,21 @@ describe('matrixDisplayModes', () => {
     expect(inferMatrixDisplayModeId('unknown')).toBe('matrix-points-3d');
     expect(inferMatrixDisplayModeId('heatmap')).toBe('matrix-points-3d');
     expect(inferMatrixDisplayModeId('matrix')).toBe('matrix-points-3d');
+  });
+
+  it('只提供原生平面数字矩阵，旧三维名称和重复数字别名都指向同一个二维模式', () => {
+    const renderer = createMatrixDisplayRenderers({ matrix: { rows: 23, cols: 23 } })
+      .find((item) => item.id === 'numMatrix');
+    expect(normalizeNumMatrixParams(renderer.params)).toMatchObject({
+      backend: 'sprite3d', frameInput: 'raw', gridWidth: 23, gridHeight: 23,
+    });
+    expect(renderer.label).toBe('2D 数字');
+    expect(MATRIX_DISPLAY_MODES.filter((mode) => mode.kind === 'values')).toHaveLength(1);
+    expect(getMatrixDisplayMode('matrix-values-3d')).toMatchObject({ rendererId: 'numMatrix', dimension: '2d' });
+    expect(inferMatrixDisplayModeId('numMatrix2d')).toBe('matrix-values-2d');
+    expect(resolveMatrixRendererType('numMatrix2d')).toBe('numMatrix');
+    expect(normalizeNumMatrixParams({ backend: 'webgl', webgl: { variant: 'original' } }).webgl)
+      .toMatchObject({ whiteOnZero: true, zeroTextColor: '#999' });
   });
 
   it('为所有通用矩阵渲染器生成同一份 2×3 输入参数', () => {

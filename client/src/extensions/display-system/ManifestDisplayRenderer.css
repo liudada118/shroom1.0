@@ -26,6 +26,83 @@
   z-index: 20;
 }
 
+/* 常用视图直接可见，避开图表和工具；不挤压或重新分配画布高度。 */
+.manifest-view-switcher {
+  position: absolute;
+  z-index: 4;
+  top: 12px;
+  left: calc(var(--left-chart-width, 340px) + 24px);
+  right: calc(var(--right-tools-width, 184px) + 24px);
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.manifest-view-switcher-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 5px 6px 5px 12px;
+  border: 1px solid #294456;
+  border-radius: 10px;
+  background: #0c1b28;
+  box-shadow: 0 4px 16px #0004;
+  pointer-events: auto;
+}
+
+.manifest-view-switcher-label {
+  flex-shrink: 0;
+  color: #b4c7d4;
+  font-size: 12px;
+}
+
+.manifest-view-switcher-options {
+  display: flex;
+  gap: 3px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.manifest-view-switcher-options button {
+  flex-shrink: 0;
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #c4d6e3;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.manifest-view-switcher-options button:hover {
+  background: #18374a;
+}
+
+.manifest-view-switcher-options button[aria-pressed="true"] {
+  color: #bdefff;
+  border-color: #3b839c;
+  background: #194659;
+}
+
+.manifest-view-switcher-options button:focus-visible {
+  outline: 2px solid #8ddff8;
+  outline-offset: -3px;
+}
+
+@media (max-width: 1000px) {
+  .manifest-view-switcher { right: 16px; }
+}
+
+@media (max-width: 760px) {
+  .manifest-view-switcher { left: 12px; right: 12px; }
+}
+
 /* 由工作区向内分配高度，禁止 iframe/canvas 的固有尺寸反向撑大网格。 */
 .manifest-display {
   display: flex;

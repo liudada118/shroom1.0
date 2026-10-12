@@ -60,6 +60,23 @@ describe('ManifestDisplayRenderer 运行页外观', () => {
     expect(html).toContain('运行展示测试');
   });
 
+  it('无需开启诊断界面或工具抽屉，就能看到同一画布的多视图切换条', () => {
+    const definition = buildDefinition(false, 'workspace');
+    definition.page.renderers = [{ id: 'pointGrid', type: 'pointGrid' },
+      { id: 'webglHeatmap', type: 'webglHeatmap' }, { id: 'numMatrix2d', type: 'numMatrix' }];
+    definition.page.widgets = [{ id: 'main', type: 'pointGrid', source: 'data' }];
+    definition.page.canvas.widgets = definition.page.widgets;
+    definition.page.profiles[0].renderer = 'pointGrid';
+    definition.page.profiles[0].widgets = ['main'];
+    const html = renderToStaticMarkup(<ManifestDisplayRenderer definition={definition} enabled={false} />);
+    expect(html).toContain('aria-label="视图切换"');
+    expect(html).toContain('aria-pressed="true">3D 点图');
+    expect(html).toContain('aria-pressed="false">热力图');
+    expect(html).toContain('aria-pressed="false">2D 数字');
+    expect(html).not.toContain('manifest-profile-menu');
+    expect(html).not.toContain('manifest-renderer-picker');
+  });
+
   it('正式沉浸布局字段会落成全宽运行页样式', () => {
     const html = renderRuntime(false, 'immersive');
 

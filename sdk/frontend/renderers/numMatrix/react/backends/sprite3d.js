@@ -218,6 +218,7 @@ function bakeDigitSpriteSheet({ colorMaxInput, textureValueMax, decimalScale, co
  * @param {object|null} options.coordinateLayout `buildCoordinateWorldLayout` 的结果。
  * @param {object} options.colormap 当前配色。
  * @param {object} options.tuning 实例私有的阈值对象（含 valuef1 / valuej1 / valuep / valueprop）。
+ * @param {Function} [options.reportStats] 裸数值通路同步原始帧统计与选区。
  * @param {(index: number) => void} [options.onPeak] 每帧回调最大值所在的点位序号（从 1 开始）。
  * @returns {object} 后端实例。
  */
@@ -228,6 +229,7 @@ export function createSpriteMatrixBackend({
   coordinateLayout,
   colormap,
   tuning,
+  reportStats,
   onPeak,
 }) {
   const coordinatePoints = coordinateLayout?.points || null;
@@ -412,7 +414,7 @@ export function createSpriteMatrixBackend({
       );
     }
 
-    const data = quantizeFrame(source, tuning.valuef1, decimalScale);
+    const data = quantizeFrame(source, config.frameInput === 'raw' ? 0 : tuning.valuef1, decimalScale);
     const peak = findPeak(data);
     onPeak?.(peak.index + 1);
 
@@ -479,6 +481,15 @@ export function createSpriteMatrixBackend({
     setFrame(nextFrame) {
       if (Array.isArray(nextFrame)) frame = nextFrame;
     },
+
+    ...(config.frameInput === 'raw' ? {
+      /** 裸数值模式直接显示映射后帧；旧预设仍由 shell 过滤后推入。 */
+      setRawFrame(nextFrame) {
+        if (!Array.isArray(nextFrame)) return;
+        frame = nextFrame;
+        reportStats?.(nextFrame);
+      },
+    } : {}),
 
     /**
      * 阈值变化后重烘精灵图。

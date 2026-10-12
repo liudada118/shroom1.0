@@ -541,7 +541,7 @@ test('Agent cannot prepare removed 2D renderers even when explicitly requested',
 test('one system proposal saves switchable native heatmap and real 2D numbers without duplicating input', async () => {
   const f = await fixture();
   try {
-    const request = { ...input('switchable'), rendererId: 'webglHeatmap', rendererIds: ['webglHeatmap', 'numMatrix2d'] };
+    const request = { ...input('switchable'), rendererId: 'webglHeatmap', rendererIds: ['webglHeatmap', 'numMatrix'] };
     await f.tools.execute('prepare_create_system', request, f.context);
     const proposal = f.proposals[0];
     assert.equal(f.proposals.length, 1);
@@ -553,9 +553,9 @@ test('one system proposal saves switchable native heatmap and real 2D numbers wi
       edgeClear: null, mirrorX: false, dataWidth: 2, dataHeight: 2, minFrameLength: 4,
     });
     assert.equal(proposal.after.display.renderers[1].type, 'numMatrix');
-    assert.equal(proposal.after.display.renderers[1].params.backend, 'webgl');
+    assert.equal(proposal.after.display.renderers[1].params.backend, 'sprite3d');
     assert.equal(proposal.after.display.renderers[1].params.frameInput, 'raw');
-    assert.equal(proposal.after.display.renderers[1].params.webgl.rawTranspose, false);
+    assert.equal(proposal.after.display.renderers[1].label, '2D 数字');
     assert.deepEqual(proposal.after.display.profiles.map((item) => item.renderer), request.rendererIds);
     await f.tools.apply(proposal);
     const editor = f.workspace.read(f.config('switchable'));
@@ -564,6 +564,21 @@ test('one system proposal saves switchable native heatmap and real 2D numbers wi
     assert.equal(editor.manifest.sensors[0].protocol.decoding.valueCount, 4);
     assert.deepEqual(editor.manifest.display.renderers.map((item) => item.id), request.rendererIds);
     assert.equal(f.requests.filter((item) => item.method === 'POST').length, 1);
+  } finally { await f.close(); }
+});
+
+test('old numeric aliases resolve to one native 2D view and are not advertised as a second mode', async () => {
+  const f = await fixture();
+  try {
+    const catalog = await f.tools.execute('get_capabilities', {});
+    assert.equal(catalog.renderers.some((item) => item.id === 'numMatrix2d'), false);
+    assert.equal(catalog.renderers.find((item) => item.id === 'numMatrix').label, '2D 数字');
+    await f.tools.execute('prepare_create_system', { ...input('alias-numbers'), rendererId: 'numMatrix2d',
+      rendererIds: ['pointGrid', 'numMatrix', 'numMatrix2d'] }, f.context);
+    const display = f.proposals[0].after.display;
+    assert.deepEqual(display.renderers.map((item) => item.id), ['pointGrid', 'numMatrix']);
+    assert.equal(display.profiles[0].renderer, 'numMatrix');
+    assert.equal(display.profiles[0].label, '2D 数字');
   } finally { await f.close(); }
 });
 
@@ -601,7 +616,7 @@ test('actual Agent runtime combines renderer-only creations into one proposal an
       const proposal = task.proposals[0];
       assert.equal(proposal.systemId, 'style-0');
       assert.equal(proposal.after.sensors[0].type, 'style-0-pressure');
-      assert.deepEqual(proposal.after.display.renderers.map((item) => item.id), separateSystem ? ['webglHeatmap'] : ['webglHeatmap', 'numMatrix2d']);
+      assert.deepEqual(proposal.after.display.renderers.map((item) => item.id), separateSystem ? ['webglHeatmap'] : ['webglHeatmap', 'numMatrix']);
       runtime.applyProposal({ taskId: task.id, proposalId: proposal.id }); await runtime.whenIdle();
       task = runtime.getState().conversation.tasks[0];
       assert.equal(task.proposals[0].status, 'applied', JSON.stringify(task.error));

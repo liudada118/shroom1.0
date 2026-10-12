@@ -35,7 +35,7 @@ function flattenCoordinatePoints(coordinateMap) {
  * 给 SDK 矩阵渲染器覆写当前 widget 的逐路几何参数。
  *
  * display.renderers 是方案级配置，旧 Builder 只按第一路生成一次。多传感器卡片若直接
- * 复用它，3D 点图、3D 数字和柔和热力图仍会拿第一路行列/坐标。这里保留其它调参，
+ * 复用它，3D 点图、2D 数字和柔和热力图仍会拿第一路行列/坐标。这里保留其它调参，
  * 只替换必须随 sensor 变化的尺寸与 points；当前路没有坐标时还会删掉旧 points，避免
  * 第二路继续套用第一路物理形状。
  */

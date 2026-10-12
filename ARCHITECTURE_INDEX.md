@@ -182,6 +182,8 @@ Agent 复制链路：`tools/toolSchemas.js` → `tools/index.js` 的 `prepare_du
 只有入口、依赖方向、公共契约或验证命令发生变化时才更新本索引。功能历史、详细设计推演和累计项目进度继续追加到 `ARCHITECTURE.md`，不要把本文件扩写成第二份历史文档。
 
 
-矩阵统一工作区：新建目录 `displaySystemRendererCatalog.SELECTABLE_DISPLAY_RENDERERS` / SDK `matrixDisplayModes` → Agent `prepare_create_system` 或配置器 → `ManifestDisplayRenderer`。Agent 用 `rendererIds` 为一个系统声明多种可切换展示，同一任务相同输入的分次创建合并提案；明确独立系统才设 `separateSystem`。原生二维数字模式 ID 为 `numMatrix2d`，实际类型为 `numMatrix`，使用 WebGL 裸数值通路，三维数字仍为 `numMatrix`；原生热力图为 `webglHeatmap`。旧 `heatmap/matrix/raw2d` 仅在展示层回落 3D 点图。`PortalRendererControls` 在共用工具箱和调节面板读取 ref 能力，画布无独立设置浮层。验证目录、Agent 工具、工作区模型测试及 `node scripts/tests/manifest-workspace-layout.mjs`；跨共享 SDK 执行 Full。
+矩阵统一工作区：新建目录 `displaySystemRendererCatalog.SELECTABLE_DISPLAY_RENDERERS` / SDK `matrixDisplayModes` → Agent `prepare_create_system` 或配置器 → `ManifestDisplayRenderer`。Agent 用 `rendererIds` 为一个系统声明多种可切换展示，同一任务相同输入的分次创建合并提案；明确独立系统才设 `separateSystem`。唯一原生数字模式为 `numMatrix`（2D 数字），使用正交相机与同一平面的数字格；原生热力图为 `webglHeatmap`。旧 `numMatrix2d` 请求、profile 和保存的选择统一到 `numMatrix`，旧 `matrix-values-3d` 选择兼容二维数字；不提供独立三维数字模式。旧 `heatmap/matrix/raw2d` 仅在展示层回落 3D 点图。画布上方的常驻视图条使用 `buildWorkspaceViewOptions` 与 `selectRenderer`；`PortalRendererControls` 在共用工具箱和调节面板读取相同 ref 能力，不再使用旧设置浮层。验证目录、Agent 工具、工作区模型测试及 `node scripts/tests/manifest-workspace-layout.mjs`；跨共享 SDK 执行 Full。
 
 热力图空白定位：Agent 生成的 `webglHeatmap.params` 写入通用矩阵预设，运行时 `buildManifestWidgetRendererParams` 按当前 widget 矩阵覆盖行列及 `minFrameLength`；不继承旧床垫裁边和镜像。`ManifestDisplayRenderer` 缺帧时保持空输入，`WebglHeatmapRenderer` 显示等待提示；浏览器回归必须检查压力帧及归零帧的实际像素，不能只检查 canvas 挂载。
+
+二维数字蓝色矩阵：`matrixDisplayModes` 与后端渲染目录为 `numMatrix` 使用原生 `sprite3d` 后端的平面蓝色矩阵，名字不按底层绘制技术判断维度。`frameInput: raw` 的精灵矩阵直接消费映射后帧，不过滤、不模糊、不转置；旧内置过滤预设保持原样。验证目录及工作区测试、`manifest-workspace-layout.mjs` 的真实数字纹理索引、平面实例坐标、蓝色像素及旧别名恢复；共享 SDK 变更执行 Full。

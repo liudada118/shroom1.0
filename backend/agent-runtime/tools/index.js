@@ -123,16 +123,18 @@ function mappingPreview(input, payload) {
 }
 /** 从已注册协议、算法和显式映射生成 manifest 与定义文件，不采用模型提供的源码或路径。 */
 function buildCreate(input, catalog, protocols) {
-  const rendererIds = input.rendererIds || [input.rendererId || 'pointGrid'];
-  if (new Set(rendererIds).size !== rendererIds.length || input.rendererId && !rendererIds.includes(input.rendererId)) {
+  const requestedIds = input.rendererIds || [input.rendererId || 'pointGrid'];
+  const rendererIds = [...new Set(requestedIds.map((id) => id === 'numMatrix2d' ? 'numMatrix' : id))];
+  const defaultRendererId = input.rendererId === 'numMatrix2d' ? 'numMatrix' : input.rendererId;
+  if (new Set(requestedIds).size !== requestedIds.length || defaultRendererId && !rendererIds.includes(defaultRendererId)) {
     throw fail('AGENT_INVALID_ARGUMENTS', 'rendererIds 不得重复，默认 rendererId 必须包含在可切换展示列表中。');
   }
   if (rendererIds.some((id) => ['heatmap', 'matrix', 'raw2d'].includes(id))) {
-    throw fail('AGENT_RENDERER_UNAVAILABLE', '请使用原生展示模式：pointGrid、numMatrix（3D 数字）、numMatrix2d（2D 数字）、webglHeatmap 或 blobHeatmap。');
+    throw fail('AGENT_RENDERER_UNAVAILABLE', '请使用原生展示模式：pointGrid（3D 点图）、numMatrix（2D 数字）、webglHeatmap 或 blobHeatmap。');
   }
   if (!input.rendererId && !input.rendererIds && input.sensors.length !== 1) throw fail('AGENT_INVALID_ARGUMENTS', '多传感器系统必须明确指定 rendererId 或 rendererIds。');
   const renderers = rendererIds.map((id) => findItem(catalog.renderers, id, 'Renderer'));
-  const renderer = renderers.find((item) => item.id === input.rendererId) || renderers[0];
+  const renderer = renderers.find((item) => item.id === defaultRendererId) || renderers[0];
   const sensorDefinitions = {};
   const ids = new Set();
   const singletonPackages = new Set();
