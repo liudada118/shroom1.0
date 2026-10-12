@@ -1,6 +1,6 @@
 # Shroom 快速架构索引
 
-> 最后更新于：2026-10-10
+> 最后更新于：2026-10-12
 > 用途：代码定位和验证路由。理解当前实现先读 [开发者手册](docs/developer-guide.md)，完整文档分类见 [docs/README.md](docs/README.md)。`ARCHITECTURE.md` 保留历史设计与维护台账，不用作默认全文入口。
 
 当前完整链路：[数据、算法、存储与回放](docs/chains/data-flow.md) · [页面、渲染与交互](docs/chains/interface-flow.md)。
@@ -187,3 +187,5 @@ Agent 复制链路：`tools/toolSchemas.js` → `tools/index.js` 的 `prepare_du
 热力图空白定位：Agent 生成的 `webglHeatmap.params` 写入通用矩阵预设，运行时 `buildManifestWidgetRendererParams` 按当前 widget 矩阵覆盖行列及 `minFrameLength`；不继承旧床垫裁边和镜像。`ManifestDisplayRenderer` 缺帧时保持空输入，`WebglHeatmapRenderer` 显示等待提示；浏览器回归必须检查压力帧及归零帧的实际像素，不能只检查 canvas 挂载。
 
 二维数字蓝色矩阵：`matrixDisplayModes` 与后端渲染目录为 `numMatrix` 使用原生 `sprite3d` 后端的平面蓝色矩阵，名字不按底层绘制技术判断维度。`frameInput: raw` 的精灵矩阵直接消费映射后帧，不过滤、不模糊、不转置；旧内置过滤预设保持原样。验证目录及工作区测试、`manifest-workspace-layout.mjs` 的真实数字纹理索引、平面实例坐标、蓝色像素及旧别名恢复；共享 SDK 变更执行 Full。
+
+本机 Git 归档：`build/`、三个 `seatpad32-*` 配置目录和打包空模板可随分支保存；`.gitignore` 排除 `managed-system-catalog.json` 和 `system-package-staff-credential.json`，保留机器凭据及授权缓存。构建快照不代表当前源码已重新编译；正式构建仍先写入临时目录，打包模板须保持空库并通过完整性检查。

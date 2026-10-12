@@ -1,0 +1,169 @@
+{
+  "schemaVersion": 3,
+  "id": "seatpad32-heatmap",
+  "name": "坐垫32×32 热力图",
+  "version": "1.0.0",
+  "metadata": {
+    "origin": "user",
+    "createdBy": "embedded-agent"
+  },
+  "sensors": [
+    {
+      "id": "sit",
+      "label": "坐垫",
+      "type": "seatpad32-heatmap-sit",
+      "outputChannel": "sit",
+      "matrix": {
+        "rows": 32,
+        "cols": 32
+      },
+      "protocol": {
+        "validation": null,
+        "baudRate": 1000000,
+        "framing": {
+          "type": "delimiter",
+          "delimiter": [
+            170,
+            85,
+            3,
+            153
+          ],
+          "frameLength": null,
+          "includeDelimiter": false
+        },
+        "decoding": {
+          "valueType": "uint8",
+          "byteOffset": 0,
+          "valueCount": 1024
+        }
+      },
+      "algorithm": {
+        "type": "none"
+      },
+      "files": {
+        "lineOrder": "sit/line-order.json",
+        "pointOrder": "sit/point-order.json"
+      },
+      "stored": true
+    }
+  ],
+  "display": {
+    "layout": {
+      "type": "grid",
+      "columns": 12,
+      "presentation": "workspace"
+    },
+    "views": [
+      {
+        "id": "main",
+        "type": "webglHeatmap",
+        "source": "data"
+      }
+    ],
+    "widgets": [
+      {
+        "id": "main",
+        "type": "webglHeatmap",
+        "source": "data"
+      }
+    ],
+    "renderers": [
+      {
+        "id": "webglHeatmap",
+        "type": "webglHeatmap",
+        "params": {
+          "canvasWidth": 512,
+          "canvasHeight": 512,
+          "radius": 18,
+          "max": 200,
+          "filter": 0,
+          "valueScale": 1,
+          "edgeClear": null,
+          "mirrorX": false,
+          "dataWidth": 32,
+          "dataHeight": 32,
+          "minFrameLength": 1024
+        }
+      }
+    ],
+    "visualizationAlgorithms": [
+      {
+        "id": "identity",
+        "type": "identity"
+      }
+    ],
+    "profiles": [
+      {
+        "id": "default",
+        "renderer": "webglHeatmap",
+        "visualizationAlgorithm": "identity",
+        "widgets": [
+          "main"
+        ]
+      }
+    ],
+    "defaultView": "main",
+    "defaultProfile": "default",
+    "chartCards": [],
+    "sidebar": {
+      "source": "sit",
+      "pressure": {
+        "primaryMetric": "totalPressure",
+        "metrics": [
+          "averagePressure",
+          "maxPressure",
+          "totalPressure"
+        ]
+      },
+      "area": {
+        "metrics": [
+          "activePoints",
+          "area"
+        ],
+        "pointArea": 1,
+        "unit": "格"
+      },
+      "algorithmMetrics": []
+    }
+  },
+  "sensor": {
+    "type": "seatpad32-heatmap-sit",
+    "matrix": {
+      "rows": 32,
+      "cols": 32
+    },
+    "ports": [
+      "sit"
+    ],
+    "portLabels": {
+      "sit": "坐垫"
+    }
+  },
+  "files": {
+    "lineOrder": "sit/line-order.json",
+    "pointOrder": "sit/point-order.json"
+  },
+  "protocol": {
+    "validation": null,
+    "baudRate": 1000000,
+    "framing": {
+      "type": "delimiter",
+      "delimiter": [
+        170,
+        85,
+        3,
+        153
+      ],
+      "frameLength": null,
+      "includeDelimiter": false
+    },
+    "decoding": {
+      "valueType": "uint8",
+      "byteOffset": 0,
+      "valueCount": 1024
+    }
+  },
+  "algorithm": {
+    "type": "none"
+  }
+}

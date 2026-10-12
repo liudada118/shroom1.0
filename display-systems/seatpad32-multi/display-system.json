@@ -1,0 +1,210 @@
+{
+  "schemaVersion": 3,
+  "id": "seatpad32-multi",
+  "name": "坐垫32×32 三视图（3D点图/热力图/2D数字）",
+  "version": "1.0.0",
+  "metadata": {
+    "origin": "user",
+    "createdBy": "embedded-agent"
+  },
+  "sensors": [
+    {
+      "id": "sit",
+      "label": "坐垫通道",
+      "type": "seatpad32-multi-sit",
+      "outputChannel": "sit",
+      "matrix": {
+        "rows": 32,
+        "cols": 32
+      },
+      "protocol": {
+        "validation": null,
+        "baudRate": 1000000,
+        "framing": {
+          "type": "delimiter",
+          "delimiter": [
+            170,
+            85,
+            3,
+            153
+          ],
+          "frameLength": null,
+          "includeDelimiter": false
+        },
+        "decoding": {
+          "valueType": "uint8",
+          "byteOffset": 0,
+          "valueCount": 1024
+        }
+      },
+      "algorithm": {
+        "type": "none"
+      },
+      "files": {
+        "lineOrder": "sit/line-order.json",
+        "pointOrder": "sit/point-order.json"
+      },
+      "stored": true
+    }
+  ],
+  "display": {
+    "layout": {
+      "type": "grid",
+      "columns": 12,
+      "presentation": "workspace"
+    },
+    "views": [
+      {
+        "id": "main",
+        "type": "pointGrid",
+        "source": "data"
+      }
+    ],
+    "widgets": [
+      {
+        "id": "main",
+        "type": "pointGrid",
+        "source": "data"
+      }
+    ],
+    "renderers": [
+      {
+        "id": "pointGrid",
+        "type": "pointGrid",
+        "label": "点阵热力（3D）"
+      },
+      {
+        "id": "webglHeatmap",
+        "type": "webglHeatmap",
+        "label": "热力图",
+        "params": {
+          "canvasWidth": 512,
+          "canvasHeight": 512,
+          "radius": 18,
+          "max": 200,
+          "filter": 0,
+          "valueScale": 1,
+          "edgeClear": null,
+          "mirrorX": false,
+          "dataWidth": 32,
+          "dataHeight": 32,
+          "minFrameLength": 1024
+        }
+      },
+      {
+        "id": "numMatrix2d",
+        "type": "numMatrix",
+        "label": "2D 数字",
+        "params": {
+          "backend": "webgl",
+          "frameInput": "raw",
+          "manageSidebar": false,
+          "webgl": {
+            "variant": "original",
+            "rawTranspose": false,
+            "indexRow": false,
+            "overlayPad": 0
+          }
+        }
+      }
+    ],
+    "visualizationAlgorithms": [
+      {
+        "id": "identity",
+        "type": "identity"
+      }
+    ],
+    "profiles": [
+      {
+        "id": "default",
+        "label": "点阵热力（3D）",
+        "renderer": "pointGrid",
+        "visualizationAlgorithm": "identity",
+        "widgets": [
+          "main"
+        ]
+      },
+      {
+        "id": "display-webglHeatmap",
+        "label": "热力图",
+        "renderer": "webglHeatmap",
+        "visualizationAlgorithm": "identity",
+        "widgets": [
+          "main"
+        ]
+      },
+      {
+        "id": "display-numMatrix2d",
+        "label": "2D 数字",
+        "renderer": "numMatrix2d",
+        "visualizationAlgorithm": "identity",
+        "widgets": [
+          "main"
+        ]
+      }
+    ],
+    "defaultView": "main",
+    "defaultProfile": "default",
+    "chartCards": [],
+    "sidebar": {
+      "source": "sit",
+      "pressure": {
+        "primaryMetric": "totalPressure",
+        "metrics": [
+          "averagePressure",
+          "maxPressure",
+          "totalPressure"
+        ]
+      },
+      "area": {
+        "metrics": [
+          "activePoints",
+          "area"
+        ],
+        "pointArea": 1,
+        "unit": "格"
+      },
+      "algorithmMetrics": []
+    }
+  },
+  "sensor": {
+    "type": "seatpad32-multi-sit",
+    "matrix": {
+      "rows": 32,
+      "cols": 32
+    },
+    "ports": [
+      "sit"
+    ],
+    "portLabels": {
+      "sit": "坐垫通道"
+    }
+  },
+  "files": {
+    "lineOrder": "sit/line-order.json",
+    "pointOrder": "sit/point-order.json"
+  },
+  "protocol": {
+    "validation": null,
+    "baudRate": 1000000,
+    "framing": {
+      "type": "delimiter",
+      "delimiter": [
+        170,
+        85,
+        3,
+        153
+      ],
+      "frameLength": null,
+      "includeDelimiter": false
+    },
+    "decoding": {
+      "valueType": "uint8",
+      "byteOffset": 0,
+      "valueCount": 1024
+    }
+  },
+  "algorithm": {
+    "type": "none"
+  }
+}

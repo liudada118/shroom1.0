@@ -1,0 +1,156 @@
+{
+  "schemaVersion": 3,
+  "id": "seatpad32-nummatrix",
+  "name": "坐垫32×32 数字矩阵",
+  "version": "1.0.0",
+  "metadata": {
+    "origin": "user",
+    "createdBy": "embedded-agent"
+  },
+  "sensors": [
+    {
+      "id": "sit",
+      "label": "坐垫",
+      "type": "seatpad32-nummatrix-sit",
+      "outputChannel": "sit",
+      "matrix": {
+        "rows": 32,
+        "cols": 32
+      },
+      "protocol": {
+        "validation": null,
+        "baudRate": 1000000,
+        "framing": {
+          "type": "delimiter",
+          "delimiter": [
+            170,
+            85,
+            3,
+            153
+          ],
+          "frameLength": null,
+          "includeDelimiter": false
+        },
+        "decoding": {
+          "valueType": "uint8",
+          "byteOffset": 0,
+          "valueCount": 1024
+        }
+      },
+      "algorithm": {
+        "type": "none"
+      },
+      "files": {
+        "lineOrder": "sit/line-order.json",
+        "pointOrder": "sit/point-order.json"
+      },
+      "stored": true
+    }
+  ],
+  "display": {
+    "layout": {
+      "type": "grid",
+      "columns": 12,
+      "presentation": "workspace"
+    },
+    "views": [
+      {
+        "id": "main",
+        "type": "numMatrix",
+        "source": "data"
+      }
+    ],
+    "widgets": [
+      {
+        "id": "main",
+        "type": "numMatrix",
+        "source": "data"
+      }
+    ],
+    "renderers": [
+      {
+        "id": "numMatrix",
+        "type": "numMatrix"
+      }
+    ],
+    "visualizationAlgorithms": [
+      {
+        "id": "identity",
+        "type": "identity"
+      }
+    ],
+    "profiles": [
+      {
+        "id": "default",
+        "renderer": "numMatrix",
+        "visualizationAlgorithm": "identity",
+        "widgets": [
+          "main"
+        ]
+      }
+    ],
+    "defaultView": "main",
+    "defaultProfile": "default",
+    "chartCards": [],
+    "sidebar": {
+      "source": "sit",
+      "pressure": {
+        "primaryMetric": "totalPressure",
+        "metrics": [
+          "averagePressure",
+          "maxPressure",
+          "totalPressure"
+        ]
+      },
+      "area": {
+        "metrics": [
+          "activePoints",
+          "area"
+        ],
+        "pointArea": 1,
+        "unit": "格"
+      },
+      "algorithmMetrics": []
+    }
+  },
+  "sensor": {
+    "type": "seatpad32-nummatrix-sit",
+    "matrix": {
+      "rows": 32,
+      "cols": 32
+    },
+    "ports": [
+      "sit"
+    ],
+    "portLabels": {
+      "sit": "坐垫"
+    }
+  },
+  "files": {
+    "lineOrder": "sit/line-order.json",
+    "pointOrder": "sit/point-order.json"
+  },
+  "protocol": {
+    "validation": null,
+    "baudRate": 1000000,
+    "framing": {
+      "type": "delimiter",
+      "delimiter": [
+        170,
+        85,
+        3,
+        153
+      ],
+      "frameLength": null,
+      "includeDelimiter": false
+    },
+    "decoding": {
+      "valueType": "uint8",
+      "byteOffset": 0,
+      "valueCount": 1024
+    }
+  },
+  "algorithm": {
+    "type": "none"
+  }
+}

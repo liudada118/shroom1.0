@@ -48,3 +48,7 @@ pack-resources/python/
 /.codegraph/
 /.ua/
 /.understand-anything/
+
+# Machine-specific company authorization cache and encrypted staff credential.
+/managed-system-catalog.json
+/system-package-staff-credential.json
