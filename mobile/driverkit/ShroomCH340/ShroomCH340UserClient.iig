@@ -1,0 +1,26 @@
+#ifndef SHROOM_CH340_USER_CLIENT_IIG
+#define SHROOM_CH340_USER_CLIENT_IIG
+#include <DriverKit/IOUserClient.iig>
+
+/** Restrict USB reads to the signed host application and validate every user-client request. */
+class ShroomCH340UserClient : public IOUserClient {
+public:
+  /** Allocate state for the attached host application's connection. */
+  virtual bool init(void) override;
+  /** Verify the client application identifier before attaching to the USB provider. */
+  virtual kern_return_t Start(IOService *provider) override;
+  /** Stop UART reads when the application closes or is terminated. */
+  virtual kern_return_t Stop(IOService *provider) override;
+  /** Release the retained provider. */
+  virtual void free(void) override;
+  /** Reject unknown selectors and dispatch fixed-size checked operations. */
+  virtual kern_return_t ExternalMethod(uint64_t selector, IOUserClientMethodArguments *arguments,
+    const IOUserClientMethodDispatch *dispatch, OSObject *target, void *reference) override;
+  /** Configure UART using one scalar baud-rate input. */
+  static kern_return_t Configure(OSObject *target, void *reference, IOUserClientMethodArguments *arguments) LOCALONLY;
+  /** Return one bounded raw USB batch to the signed app. */
+  static kern_return_t Read(OSObject *target, void *reference, IOUserClientMethodArguments *arguments) LOCALONLY;
+  /** Close the UART while keeping the user-client Mach connection alive. */
+  static kern_return_t Close(OSObject *target, void *reference, IOUserClientMethodArguments *arguments) LOCALONLY;
+};
+#endif

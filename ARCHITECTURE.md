@@ -3966,6 +3966,7 @@ Shroom1.0 是一个基于 **Electron** 的跨平台桌面应用程序，专用�
 | 分类 | 技术 | 版本/说明 |
 | :--- | :--- | :--- |
 | **应用框架** | Electron | ^31.3.0，跨平台桌面应用容器 |
+| **移动端原型** | Expo / React Native / WKWebView | 独立 `mobile/`：Expo SDK57、RN0.86、React19.2.3；iPad Air M3 的 CH340 接入使用原生模块及 DriverKit，网页复用既有渲染器，原生链路尚待 Mac 编译与真机验证 |
 | **前端框架** | React | ^19.0.0（从 17 升级），支持并发特性 |
 | **前端构建** | Vite | ^6.0.0（从 Webpack 4 迁移），极速 HMR |
 | **后端运行时** | Node.js | Electron 内置，主进程运行环境 |
@@ -6426,3 +6427,26 @@ flowchart LR
 | 日期 | 工作 | 状态 |
 | --- | --- | --- |
 | 2026-10-12 | 分支工作区文件归档 | 配置、数据库空模板及现有构建快照已校验，便于保存并切换分支。 |
+
+## 2026-10-12 React Native iPad 压力数据展示原型
+
+- 新增独立 `mobile/` 宿主（Expo SDK57、RN0.86、React19.2.3），目标为用户确认的 iPad Air11英寸M3与CH340 USB。`mobile/App.tsx` 管理设备选择、波特率、连接、停止、前后台生命周期与显式演示；移动端没有加载桌面Electron后端。
+- `client/src/mobile/` 复用既有SDK `webglHeatmap`、`numMatrix` 原始数字渲染器，以相同32×32行列显示1024个uint8。移动入口只接收私有 `pressure.frame` 桥包，不改公共`sensor.frame`契约或桌面授权。原始ADC顺序不冒充已核对的物理线序，没有标定、保存或Python算法。
+- `client/vite.mobile.config.js` 输出单IIFE与CSS，`mobile/scripts/build-display.mjs` 在系统临时目录构建后内联到Git忽略的 `generated/display.ts`。RN WebView离线显示，CSP禁止网络连接，不请求固定localhost HTTP/WS服务；桌面 `build/` 未被覆盖。
+- `FrameDispatcher` 严格校验点数/uint8/整数时间/来源/序号，每次只允许一帧在途及一帧最新待发，页面ACK后继续。停止、换源及重连发送 `stream.reset` 清除旧画面；网页坏帧不覆盖合法帧，2秒无新帧提示暂停。RN及原生以连接ID拒绝旧连接迟到的帧与状态，ready握手幂等并在页面加载结束时补发。USB原生模块最多30Hz发布最新帧，该桥只服务显示，不能用于逐帧存储。
+- `mobile/modules/shroom-usb/` 通过IOKit UserClient连接 `mobile/driverkit/` 的CH340 DriverKit原型，匹配1A86:7523/interface0。驱动定位bulk IN、配置8N1与115200–1000000波特率，每读最多2048字节、超时100ms；应用串行队列调用生产C++帧尾分帧器，接收AA550399之间恰好1024字节。没有驱动、权限、设备或签名均明确失败。
+- Expo `withShroomDriverKit.cjs` 插件生成DriverKit target、宿主依赖与dext嵌入阶段；UserClient仅接受指定应用签名ID且独占USB设备。账号需Apple批准DriverKit/USB transport能力，编译时填实际团队和profile。Windows不能执行iOS prebuild，当前工程变换只通过隔离夹具回读。
+- 已实测：Full8/8通过（后端94文件、客户端844项、前端SDK513项、lint、临时桌面生产构建、smoke、性能基线）；移动桥/工程契约8项、移动类型检查与lint、Expo Doctor21/21；MSVC编译生产分帧器的全部USB拆包位置、噪声恢复、内存边界与波特率测试；Chrome真实画布、视图切换、断流、reset清屏、RN脚本→离线HTML→ACK、375px触摸布局，零网络请求/零页面错误；Metro/Hermes iOS JS导出。
+- 尚需Mac实测：Objective-C++/Swift/DriverKit/IIG编译、Apple授权签名、USB拔插、供电和CH340实机连续收数，以及真实物理点位顺序。iOS JS导出或演示画面不代表USB链路已验证，也没有生成可安装IPA。用户已确认有Mac和开发者账号；后续在Mac继续。操作见 `mobile/README.md`、`mobile/driverkit/README.md`。
+
+### 维护记录（追加）
+
+| 日期 | 类型 | 说明 |
+| --- | --- | --- |
+| 2026-10-12 | 新增功能 | 准备RN iPad宿主、离线既有渲染器、CH340原生模块及DriverKit源码，完成本机可验证的数据/显示边界。 |
+
+### 项目进度（追加）
+
+| 日期 | 工作 | 状态 |
+| --- | --- | --- |
+| 2026-10-12 | iPad第一阶段数据展示原型 | 数据桥与展示已验证，原生驱动待Mac编译、签名及iPad USB真机验收。 |

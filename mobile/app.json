@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "Shroom",
+    "slug": "shroom-mobile",
+    "version": "0.1.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "platforms": ["ios"],
+    "plugins": ["./driverkit/withShroomDriverKit.cjs"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.shroom.pressure-sensor.mobile",
+      "entitlements": {
+        "com.apple.developer.driverkit.communicates-with-drivers": true
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}

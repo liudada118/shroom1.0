@@ -1,0 +1,37 @@
+name: ShroomDriverKit
+options:
+  minimumXcodeGenVersion: 2.40.0
+settings:
+  base:
+    DEVELOPMENT_TEAM: ""
+    SHROOM_APP_BUNDLE_ID: com.shroom.pressure-sensor.mobile
+    SHROOM_CLIENT_APPLICATION_ID: $(DEVELOPMENT_TEAM).$(SHROOM_APP_BUNDLE_ID)
+targets:
+  ShroomCH340:
+    type: driver-extension
+    platform: macOS
+    sources:
+      - path: ShroomCH340
+        excludes: ["Info.plist", "*.entitlements"]
+      - path: Shared
+    settings:
+      base:
+        SDKROOT: driverkit
+        DRIVERKIT_DEPLOYMENT_TARGET: "22.0"
+        SUPPORTED_PLATFORMS: driverkit
+        ARCHS: arm64
+        CLANG_CXX_LANGUAGE_STANDARD: gnu++17
+        CODE_SIGN_ENTITLEMENTS: ShroomCH340/ShroomCH340.entitlements
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: Apple Development
+        INFOPLIST_FILE: ShroomCH340/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: $(SHROOM_APP_BUNDLE_ID).driver
+        HEADER_SEARCH_PATHS: ["$(inherited)", "$(DERIVED_SOURCES_DIR)", "$(SRCROOT)/Shared"]
+        GCC_PREPROCESSOR_DEFINITIONS:
+          - $(inherited)
+          - 'SHROOM_CLIENT_APPLICATION_ID=$(SHROOM_CLIENT_APPLICATION_ID)'
+        SKIP_INSTALL: YES
+    dependencies:
+      - sdk: DriverKit.framework
+      - sdk: USBDriverKit.framework
+    scheme: {}

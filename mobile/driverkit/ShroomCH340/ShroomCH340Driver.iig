@@ -1,0 +1,37 @@
+#ifndef SHROOM_CH340_DRIVER_IIG
+#define SHROOM_CH340_DRIVER_IIG
+#include <DriverKit/IOService.iig>
+#include "ShroomDriverABI.h"
+
+/** Own a CH340 interface and expose bounded, serialized UART reads to the host app. */
+class ShroomCH340Driver : public IOService {
+public:
+  /** Allocate zero-initialized driver state. */
+  virtual bool init(void) override;
+  /** Open the matched interface and locate its bulk input pipe. */
+  virtual kern_return_t Start(IOService *provider) override;
+  /** Close the USB interface before stopping its service. */
+  virtual kern_return_t Stop(IOService *provider) override;
+  /** Release descriptor, memory and USB resources. */
+  virtual void free(void) override;
+  /** Create the signed host application's user client. */
+  virtual kern_return_t NewUserClient(uint32_t type, IOUserClient **userClient) override;
+  /** Configure 8N1 UART; values outside the phase-one baud range are rejected. */
+  kern_return_t Configure(uint32_t baudRate) LOCALONLY;
+  /** Read at most 2048 bytes with a 100 ms timeout; preserve partial bytes on timeout. */
+  kern_return_t Read(ShroomReadPacket *packet) LOCALONLY;
+  /** Stop accepting reads until the next Configure call. */
+  void CloseUART(void) LOCALONLY;
+  /** Grant exclusive UART access to one signed user client. */
+  kern_return_t ClaimClient(void) LOCALONLY;
+  /** Release the client's exclusive claim and stop its UART. */
+  void ReleaseClient(void) LOCALONLY;
+private:
+  /** Send a CH340 vendor write command through the interface control endpoint. */
+  kern_return_t ControlOut(uint8_t request, uint16_t value, uint16_t index) LOCALONLY;
+  /** Verify a two-byte CH340 register read without requiring chip-version-specific bytes. */
+  kern_return_t ControlIn(uint8_t request, uint16_t value) LOCALONLY;
+  /** Apply the CH340 baud divisor, including its 921600 special case. */
+  kern_return_t SetBaudRate(uint32_t baudRate) LOCALONLY;
+};
+#endif

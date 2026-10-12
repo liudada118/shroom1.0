@@ -1,0 +1,62 @@
+:root {
+  color-scheme: dark;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #06101b;
+  color: #edf5ff;
+  --mobile-accent: #63d5ff;
+  --mobile-secondary: #b5c9db;
+  --mobile-border: rgba(137, 178, 207, .2);
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+button { font: inherit; }
+.shroom-mobile { min-height: 100vh; padding: 20px max(20px, env(safe-area-inset-right)) 20px max(20px, env(safe-area-inset-left)); max-width: 1280px; margin: auto; }
+.mobile-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 18px; }
+.mobile-identity { display: grid; gap: 4px; }
+.mobile-identity small { color: var(--mobile-accent); letter-spacing: .18em; font-size: 12px; }
+.mobile-identity h1 { margin: 0; font-size: 25px; font-weight: 600; }
+.mobile-identity > span { color: var(--mobile-secondary); font-size: 14px; }
+.mobile-stream-status { display: flex; align-items: center; gap: 9px; color: var(--mobile-secondary); font-size: 14px; flex-wrap: wrap; }
+.mobile-stream-status strong { color: #edf5ff; font-weight: 500; }
+.mobile-status-dot { width: 8px; height: 8px; border-radius: 50%; background: #aab9c9; }
+.is-receiving .mobile-status-dot { background: var(--mobile-accent); }
+.is-stale .mobile-status-dot { background: #e5c277; }
+.mobile-workspace { border: 1px solid var(--mobile-border); border-radius: 16px; padding: 14px; background: linear-gradient(145deg, rgba(20, 31, 42, .95), rgba(4, 15, 27, .95)); }
+.mobile-workspace-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.mobile-view-switch { display: flex; gap: 8px; }
+.mobile-workspace button { min-height: 44px; min-width: 100px; padding: 10px 15px; border: 1px solid var(--mobile-border); border-radius: 8px; color: #edf5ff; background: #0a1928; cursor: pointer; transition: background 160ms, border-color 160ms; }
+.mobile-workspace button[aria-pressed='true'] { color: var(--mobile-accent); border-color: var(--mobile-accent); background: rgba(99, 213, 255, .12); }
+.mobile-workspace button:focus-visible { outline: 2px solid #edf5ff; outline-offset: 3px; }
+.mobile-workspace button:active { background: #17364c; }
+.mobile-matrix-stage { position: relative; width: min(100%, 68vh, 720px); aspect-ratio: 1; margin: auto; overflow: hidden; border: 1px solid var(--mobile-border); border-radius: 10px; background: #000; }
+.mobile-renderer, .mobile-renderer > div { width: 100% !important; height: 100% !important; }
+.mobile-renderer .canvasNum { height: 100% !important; }
+.mobile-renderer .maxNum { display: none; }
+.mobile-renderer .threeBoxF { margin-top: 0 !important; max-width: 100%; max-height: 100%; }
+.mobile-renderer .threeBoxF > div { max-width: 100%; max-height: 100%; }
+.mobile-renderer canvas { max-width: 100%; max-height: 100%; }
+.mobile-renderer .threeBoxF canvas { width: 100% !important; height: auto !important; }
+.mobile-waiting { position: absolute; inset: 0; display: grid; place-content: center; gap: 10px; text-align: center; padding: 24px; background: #06101b; color: var(--mobile-secondary); }
+.mobile-waiting strong { color: #edf5ff; font-size: 18px; font-weight: 500; }
+.mobile-waiting span { font-size: 14px; }
+.mobile-stale-notice { position: absolute; inset: auto 0 0; padding: 12px; background: rgba(6, 16, 27, .92); color: #f3d797; text-align: center; font-size: 14px; }
+.mobile-scale { display: flex; align-items: center; gap: 12px; max-width: 500px; margin: 16px auto 2px; color: var(--mobile-secondary); font-size: 13px; }
+.mobile-scale i { flex: 1; height: 8px; border-radius: 4px; background: linear-gradient(90deg, #000080, #006bff, #00ffff, #80ff00, #ffff00, #ff5800, #800000); }
+.mobile-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+.mobile-metrics > div { display: grid; gap: 8px; padding: 16px; border: 1px solid var(--mobile-border); border-radius: 12px; background: #0a1928; }
+.mobile-metrics > div > span { font-size: 13px; color: var(--mobile-secondary); }
+.mobile-metrics strong { font: 500 26px ui-monospace, 'SF Mono', Consolas, monospace; color: var(--mobile-accent); overflow-wrap: anywhere; }
+.mobile-metrics small { font-size: 13px; color: var(--mobile-secondary); }
+.mobile-protocol-error { display: grid; gap: 6px; margin-top: 14px; padding: 14px; border: 1px solid #d99b72; border-radius: 10px; background: #37241c; color: #ffe5d4; }
+.mobile-protocol-error small { font-size: 13px; }
+@media (max-width: 600px) {
+  .shroom-mobile { padding: 14px; }
+  .mobile-header { align-items: flex-start; gap: 12px; }
+  .mobile-stream-status { max-width: 130px; gap: 7px; }
+  .mobile-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mobile-workspace { padding: 10px; }
+  .mobile-view-switch { flex: 1; }
+  .mobile-workspace button { flex: 1; min-width: 0; }
+  .mobile-matrix-stage { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) { .mobile-workspace button { transition: none; } }

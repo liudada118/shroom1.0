@@ -1,0 +1,7 @@
+const { defineConfig } = require('eslint/config');
+const expoConfig = require('eslint-config-expo/flat');
+
+module.exports = defineConfig([
+  expoConfig,
+  { ignores: ['generated/**', 'driverkit/**', 'modules/**', 'scripts/**', 'ios/**', 'android/**'] },
+]);

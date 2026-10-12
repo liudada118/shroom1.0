@@ -61,6 +61,8 @@ client commandClient → HTTP :19245 /api/commands
 
 ## 4. 高频路径入口
 
+iPad 数据展示原型：`mobile/App.tsx` / `src/frameDispatcher.ts` → 离线 WebView `client/src/mobile/` → 既有 SDK 热力图和数字矩阵。`mobile/modules/shroom-usb/` 通过 IOKit UserClient 接入 `mobile/driverkit/` CH340 驱动；Expo 插件在 Mac 生成并嵌入 dext。验证 `npm --prefix mobile test`、`typecheck`、`lint`、两个 `client/tests/mobile-*.browser.mjs`、C++ `nativeProtocol.test.cpp` 及 Full；Metro iOS 导出只证明 JS 包，原生编译、签名与 USB 真机验收另需 Mac/iPad。操作见 [移动端说明](mobile/README.md)、[iPad USB 驱动](mobile/driverkit/README.md)。
+
 本地代码理解：`codegraph.json` 固定索引排除范围，`.codegraph/` 保存本机调用图；有索引时先用 `codegraph explore` 获取当前代码与调用关系。Understand-Anything 的中文架构图保存于 `.ua/knowledge-graph.json`，`$understand` 更新图谱，`$understand-dashboard` 打开交互查看；依赖、构建产物、大型模型资源与本机运行数据不进入分析。两个生成目录由 Git 忽略，项目文档和测试仍纳入图谱。
 
 全局工具布局：`components/appTools/AppTools.jsx` 统一排列版本、更新和 Agent；首页反馈按钮通过专用 Portal 插槽加入同一行，页面卸载后自动移除。更新状态独占上方，不参与按钮宽度；`Home` 不再挂载运行页“画布零件”浮动栏。验证 `node scripts/tests/app-tools.mjs`（三种语言、320–1920px、更新状态、弹窗焦点、反馈卸载及长版本号）、`portal-launcher.mjs --monitor-only` 和 Standard；仅 UI 布局变更，无更新服务或渲染数据契约变动。

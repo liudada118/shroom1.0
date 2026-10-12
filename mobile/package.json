@@ -1,0 +1,35 @@
+{
+  "name": "shroom-mobile",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "index.ts",
+  "dependencies": {
+    "expo": "~57.0.27",
+    "expo-keep-awake": "~57.0.2",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-webview": "13.16.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/react": "~19.2.2",
+    "eslint": "^9.39.4",
+    "eslint-config-expo": "~57.0.2",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "build:display": "node scripts/build-display.mjs",
+    "prestart": "npm run build:display",
+    "start": "expo start",
+    "preios": "npm run build:display",
+    "ios": "expo run:ios",
+    "prebuild:ios": "npm run build:display && expo prebuild --platform ios",
+    "test": "node --test src/frameDispatcher.test.ts driverkit/tests/nativeContract.test.cjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "expo lint",
+    "export:ios": "npm run build:display && expo export --platform ios"
+  },
+  "private": true
+}
