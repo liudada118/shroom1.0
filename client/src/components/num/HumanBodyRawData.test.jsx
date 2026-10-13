@@ -7,6 +7,7 @@ import {
   HUMAN_BODY_RAW_SLOTS,
   HUMAN_BODY_RAW_VIEWS,
 } from './humanBodyRawLayout'
+import { PRESSURE_VEST_RAW_LAYOUT } from '../video/pressureVestConfig'
 
 const rawDataCss = readFileSync(
   new URL('./HumanBodyRawData.css', import.meta.url),
@@ -42,6 +43,21 @@ const renderRawDataView = () => renderToStaticMarkup(
 )
 
 describe('HumanBodyRawData', () => {
+  it('renders the vest front with two half-shoulders, an 18-row chest and no leg section', () => {
+    const markup = renderToStaticMarkup(<HumanBodyRawData layout={PRESSURE_VEST_RAW_LAYOUT} manageStats={false} />)
+    expect((markup.match(/<canvas/g) || []).length).toBe(3)
+    expect(markup).toContain('human-body-raw--vest')
+    expect(markup).toContain('背心原始数据')
+    expect(markup).toContain('10 × 18 · 180')
+    expect((markup.match(/3 × 3 · 9/g) || []).length).toBe(2)
+    expect(markup).not.toContain('human-body-raw__lower')
+    expect(markup).not.toContain('手臂')
+    expect(markup).not.toContain('裤')
+    expect(markup).toContain('--human-body-part-width:308px')
+    expect(markup).toContain('--human-body-part-columns:11')
+    expect(rawDataCss).toMatch(/human-body-raw--vest\s+\.human-body-raw__upper\s*{[^}]*display:\s*flex/s)
+  })
+
   it('renders only the seven front-view canvases by default', () => {
     const markup = renderRawDataView()
     const canvasCount = (markup.match(/<canvas/g) || []).length

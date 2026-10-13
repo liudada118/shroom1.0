@@ -19,6 +19,7 @@ import { translateDomainLabel } from '../../i18n/translateDomainLabel';
 import { getLanguageLocale } from '../../i18n';
 import JqbedAlgorithmConfigModal from './JqbedAlgorithmConfigModal';
 import HalowConnection from './HalowConnection';
+import { PRESSURE_VEST_MATRIX } from '../video/pressureVestConfig';
 import { getJqbedConfigAccess } from './jqbedAlgorithmConfig';
 import {
   PRESSURE_SCENES,
@@ -38,7 +39,9 @@ const HUMAN_BODY_COLOR_SLIDER_MAX = 5000
 const HUMAN_BODY_DEFAULT_COLOR = 1555
 const HUMAN_BODY_DEFAULT_SIZE = 31
 const HUMAN_BODY_OPTIMIZED_MATRIX = 'humanBodyOptimized'
-const isHumanBodyMatrixTitle = (matrixName) => ['humanBody', HUMAN_BODY_OPTIMIZED_MATRIX].includes(matrixName)
+const isHumanBodyMatrixTitle = (matrixName) => ['humanBody', HUMAN_BODY_OPTIMIZED_MATRIX, PRESSURE_VEST_MATRIX].includes(matrixName)
+// 两个人体展示共用 HaLow 接收器，串口与无线接收保持互斥。
+const isHalowMatrixTitle = (matrixName) => [HUMAN_BODY_OPTIMIZED_MATRIX, PRESSURE_VEST_MATRIX].includes(matrixName)
 const HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES = [1205, 5000]
 const HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES = [20, 60]
 const MINZHEN_NORMAL_DEFAULT_COLOR = 415
@@ -91,6 +94,7 @@ const titleInitConfig = {
   humanBody: { valueg1: 2, valuej1: HUMAN_BODY_DEFAULT_COLOR, valuel1: 5, valuef1: 6, value1: 0.72, sizeValue: HUMAN_BODY_DEFAULT_SIZE },
 }
 titleInitConfig[HUMAN_BODY_OPTIMIZED_MATRIX] = { ...titleInitConfig.humanBody }
+titleInitConfig[PRESSURE_VEST_MATRIX] = { ...titleInitConfig.humanBody }
 titleInitConfig.minzhen__normal = {
   ...titleInitConfig.minzhen,
   valuej1: MINZHEN_NORMAL_DEFAULT_COLOR,
@@ -1658,6 +1662,7 @@ class Title extends React.Component {
       // { label: t('sensorHumanBody'), value: 'humanBody' },
       { label: t('chairQX'), value: 'carQX' },
       { label: t('sensorHumanBodyOptimized'), value: HUMAN_BODY_OPTIMIZED_MATRIX },
+      { label: t('sensorPressureVest'), value: PRESSURE_VEST_MATRIX },
     ]
 
     const allowedTypes = Array.isArray(this.props.allowedTypes) ? this.props.allowedTypes : [];
@@ -1748,7 +1753,8 @@ class Title extends React.Component {
         }
 
         <Menu className='menu' onClick={this.onClick} selectedKeys={[this.state.current]} mode="horizontal" items={navItems} />
-        {this.props.matrixName === HUMAN_BODY_OPTIMIZED_MATRIX && <HalowConnection
+        {isHalowMatrixTitle(this.props.matrixName) && <HalowConnection
+          sensorLabel={t(this.props.matrixName === PRESSURE_VEST_MATRIX ? 'sensorPressureVest' : 'sensorHumanBodyOptimized')}
           status={this.props.halowStatus} result={this.props.halowResult}
           connected={this.props.wsConnected} connectionEpoch={this.props.wsConnectionEpoch}
           history={this.props.history} collecting={!this.props.colFlag} send={this.props.wsSendObj} />}
@@ -1757,7 +1763,7 @@ class Title extends React.Component {
           style={{ marginRight: 6, width: 140 }}
           placeholder={t('chooseSensor')}
           value={this.props.portname || undefined}
-          disabled={this.props.matrixName === HUMAN_BODY_OPTIMIZED_MATRIX && this.props.halowStatus?.running}
+          disabled={isHalowMatrixTitle(this.props.matrixName) && this.props.halowStatus?.running}
           onOpenChange={() => {
             this.props.wsSendObj({ serialReset: true })
           }}
@@ -1897,7 +1903,7 @@ class Title extends React.Component {
 
 
 
-        {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'handSinglePoint', 'normal', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'matCol', 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody', HUMAN_BODY_OPTIMIZED_MATRIX].includes(this.props.matrixName) ?
+        {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'handSinglePoint', 'normal', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'matCol', 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody', HUMAN_BODY_OPTIMIZED_MATRIX, PRESSURE_VEST_MATRIX].includes(this.props.matrixName) ?
           <Select
             defaultValue={this.props.numMatrixFlag}
             style={{ width: 90 }}
@@ -2147,7 +2153,7 @@ class Title extends React.Component {
 
         <Button onClick={() => {
           this.props.wsSendObj({
-            halowStop: this.props.matrixName === HUMAN_BODY_OPTIMIZED_MATRIX,
+            halowStop: isHalowMatrixTitle(this.props.matrixName),
             sitClose: true,
             backClose: true,
             headClose: true,

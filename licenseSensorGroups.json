@@ -58,7 +58,8 @@
       { "labelKey": "sensorFast256", "value": "fast256" },
       { "labelKey": "sensorFast1024", "value": "fast1024" },
       { "labelKey": "sensorHumanBody", "value": "humanBody" },
-      { "labelKey": "sensorHumanBodyOptimized", "value": "humanBodyOptimized" }
+      { "labelKey": "sensorHumanBodyOptimized", "value": "humanBodyOptimized" },
+      { "labelKey": "sensorPressureVest", "value": "pressureVest" }
     ]
   }
 ]

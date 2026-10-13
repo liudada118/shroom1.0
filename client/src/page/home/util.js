@@ -3163,6 +3163,15 @@ export const sitTypeEvent = {
       local: that.state.local,
     });
   },
+  // 压力背心保留1024通道帧，由背心配置选择胸背和肩部点位。
+  pressureVest: ({ that, wsPointData }) => {
+    that.com.current?.sitData({
+      wsPointData,
+      valuef: that.state.valuef1,
+      valuelInit: that.state.valuelInit1,
+      local: that.state.local,
+    });
+  },
 };
 
 export const backTypeEvent = {

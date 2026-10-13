@@ -45,6 +45,8 @@ import RobotBlueLCF from "../../components/video/robotLCF";
 import RobotBlue0428 from "../../components/video/robot0428";
 import HumanBodyCanvas from '../../components/video/humanBody';
 import HumanBodyOptimized from '../../components/video/HumanBodyOptimized';
+import { PRESSURE_VEST_MATRIX, PRESSURE_VEST_PROFILE, PRESSURE_VEST_RAW_LAYOUT, PRESSURE_VEST_SENSOR_INDICES } from '../../components/video/pressureVestConfig';
+import { getHumanBodyPressureStatistics } from './humanBodyPressureStatistics';
 import MatCol from "../../components/three/matCol";
 import CarTq from "../../components/three/carTq";
 import Bed from "../../components/three/Bed";
@@ -429,7 +431,7 @@ const displayRendererConfigMatrixArr = ['smallBed', SMALL_BED_NO_ALG_MATRIX, 'sm
 const HUMAN_BODY_DEFAULT_COLOR = 1555
 const HUMAN_BODY_DEFAULT_SIZE = 31
 const HUMAN_BODY_OPTIMIZED_MATRIX = 'humanBodyOptimized'
-const isHumanBodyMatrix = (matrixName) => ['humanBody', HUMAN_BODY_OPTIMIZED_MATRIX].includes(matrixName)
+const isHumanBodyMatrix = (matrixName) => ['humanBody', HUMAN_BODY_OPTIMIZED_MATRIX, PRESSURE_VEST_MATRIX].includes(matrixName)
 const HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES = [1205, 5000]
 const HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES = [20, 60]
 const MINZHEN_NORMAL_DEFAULT_COLOR = 415
@@ -509,6 +511,7 @@ initConfig.humanBody = {
 initConfig[HUMAN_BODY_OPTIMIZED_MATRIX] = {
   ...initConfig.humanBody,
 }
+initConfig[PRESSURE_VEST_MATRIX] = { ...initConfig.humanBody }
 
 initConfig.petCare = {
   valueg1: 2,
@@ -958,15 +961,13 @@ class Home extends React.Component {
       return false;
     }
 
-    const originalFrame = rawMatrix.slice(0, 1024).map((value) => {
-      const numericValue = Number(value);
-      return Number.isFinite(numericValue) ? numericValue : 0;
-    });
-    const activeValues = originalFrame.filter((value) => value > 0);
-    const point = activeValues.length;
-    const totalPres = activeValues.reduce((sum, value) => sum + value, 0);
-    const maxPres = activeValues.length ? findMax(activeValues) : 0;
-    const meanPres = totalPres / (point || 1);
+    const sensorIndices = this.state.matrixName === PRESSURE_VEST_MATRIX ? PRESSURE_VEST_SENSOR_INDICES : undefined;
+    const { point, totalPres, maxPres, meanPres } = getHumanBodyPressureStatistics(rawMatrix, sensorIndices);
+    if (this.humanBodyTrendMatrix !== this.state.matrixName) {
+      this.humanBodyPressureTrend = [];
+      this.humanBodyAreaTrend = [];
+      this.humanBodyTrendMatrix = this.state.matrixName;
+    }
     const pressureTrend = this.humanBodyPressureTrend || (this.humanBodyPressureTrend = []);
     const areaTrend = this.humanBodyAreaTrend || (this.humanBodyAreaTrend = []);
 
@@ -4342,6 +4343,8 @@ class Home extends React.Component {
                         ref={this.com}
                         data={this.data}
                         local={this.state.local}
+                        layout={this.state.matrixName === PRESSURE_VEST_MATRIX ? PRESSURE_VEST_RAW_LAYOUT : undefined}
+                        manageStats={this.state.matrixName !== PRESSURE_VEST_MATRIX}
                       />
                     </CanvasCom>
                     :
@@ -4362,12 +4365,14 @@ class Home extends React.Component {
                         changeSelect={this.changeSelect} />
                     </CanvasCom>
                     :
-                    this.state.numMatrixFlag == "skin" && this.state.matrixName == HUMAN_BODY_OPTIMIZED_MATRIX ?
+                    this.state.numMatrixFlag == "skin" && [HUMAN_BODY_OPTIMIZED_MATRIX, PRESSURE_VEST_MATRIX].includes(this.state.matrixName) ?
                     <CanvasCom matrixName={this.state.matrixName} local={this.state.local}>
                       <HumanBodyOptimized
                         ref={this.com}
                         data={this.data}
                         local={this.state.local}
+                        sensorProfile={this.state.matrixName === PRESSURE_VEST_MATRIX ? PRESSURE_VEST_PROFILE : undefined}
+                        manageStats={this.state.matrixName !== PRESSURE_VEST_MATRIX}
                         renderOptions={{
                           max: this.state.valuej1,
                           size: this.state.sizeValue ?? HUMAN_BODY_DEFAULT_SIZE,

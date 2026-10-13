@@ -158,6 +158,10 @@ const SENSOR_MODULES = {
     { value: 'skin', labelKey: 'skin3D' },
     { value: 'numoriginal', labelKey: 'rawData' },
   ],
+  pressureVest: [
+    { value: 'skin', labelKey: 'skin3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
+  ],
 };
 
 /** 获取某传感器类型的可用功能模块，若无定义则返回通用选项 */

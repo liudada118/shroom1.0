@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Button, InputNumber, Modal, Select, Space, Table, Tag } from 'antd';
 import { useTranslation } from 'react-i18next';
 
-export default function HalowConnection({ status, result, connected, connectionEpoch, history, collecting, send }) {
+export default function HalowConnection({ status, result, connected, connectionEpoch, history, collecting, send, sensorLabel }) {
   const { i18n } = useTranslation();
   const english = i18n.language?.startsWith('en');
   const text = (zh, en) => english ? en : zh;
@@ -80,7 +80,7 @@ export default function HalowConnection({ status, result, connected, connectionE
     <Button className="titleButton" onClick={() => setOpen(true)}>
       {running && connected ? `HaLow · ${selected?.deviceId || text('等待连接', 'Waiting')}` : text('HaLow 连接', 'HaLow connection')}
     </Button>
-    <Modal title={text('假人全身优化 · HaLow 数据连接', 'Full body · HaLow connection')}
+    <Modal title={`${sensorLabel || text('人体全身传感', 'Full body')} · ${text('HaLow 数据连接', 'HaLow connection')}`}
       open={open} onCancel={() => setOpen(false)} footer={null} width={740} destroyOnClose={false}>
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         <Alert type="info" showIcon message={text('B 板主动连接电脑，渲染方式保持不变', 'B board connects to this computer; rendering stays unchanged')}

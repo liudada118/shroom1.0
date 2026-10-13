@@ -175,6 +175,20 @@ test('findByFrameLength 能按帧长反查候选类型', () => {
   assert.deepEqual(findByFrameLength(undefined), []);
 });
 
+test('pressure vest registry describes HaLow raw ADC without claiming hardware verification', () => {
+  const vest = getSensor('pressureVest');
+  assert.equal(vest.transport, 'halow-tcp');
+  assert.equal(vest.verified, false);
+  assert.equal(vest.protocol.valueType, 'uint8');
+  assert.equal(vest.protocol.pressureLength, 1024);
+  assert.equal(vest.protocol.delimiterPosition, 'header');
+  assert.equal(vest.lineOrder, null);
+  assert.deepEqual(vest.channels, ['sit']);
+  assert.ok(vest.unknown.includes('hardwareValidation'));
+  assert.ok(findByFrameLength(1024).includes('pressureVest'));
+  assert.equal(DEFAULT_SENSOR_PROFILES.pressureVest, undefined, 'TCP headers must not silently become a serial delimiter profile');
+});
+
 test('minzhen 的波特率以注册表为准，不用 getDefaultBaudRate 的兜底值', () => {
   // 这是一条真实的回归：server.js:122 用 115200 打开民振传感器，
   // 而 getDefaultBaudRate('minzhen') 走 else 分支返回 1000000。

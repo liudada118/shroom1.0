@@ -102,7 +102,8 @@ const {
   transposeMatColToVisualDirection,
 } = require('./server/csvMatrixUtils');
 const smallBed12B = require('./server/smallBed12B');
-const { HalowReceiver, createHalowProtocol } = require('./server/halowReceiver');
+const { HalowReceiver, createHalowProtocol, isHalowDisplaySystem } = require('./server/halowReceiver');
+const { getPressureVestStatistics } = require('./server/pressureVest');
 const {
   estimatePointPressure,
   FILTER_THRESHOLD: PRESSURE_CALIBRATION_FILTER_THRESHOLD,
@@ -158,7 +159,7 @@ const getSensorBaudRate = (sensorType) => {
   if (sensorType === SMALL_BED_12B_TYPE) {
     return 1500000;
   }
-  if (['humanBody', 'humanBodyOptimized'].includes(sensorType)) {
+  if (['humanBody', 'humanBodyOptimized', 'pressureVest'].includes(sensorType)) {
     return 1000000;
   }
   return 1000000;
@@ -1963,6 +1964,13 @@ function getHistorySeries({ sitRows = [], backRows = [], start = 0, end = null, 
   for (let i = rangeStart; i < rangeEnd; i += sampleStep) {
     const sitData = hasSit && safeSitRows[i] ? normalizeHistoryPressureData(safeSitRows[i], file) : null;
     const backData = hasBack && safeBackRows[i] ? normalizeHistoryPressureData(safeBackRows[i], file) : null;
+    if (file === 'pressureVest') {
+      const statistics = getPressureVestStatistics(sitData);
+      press.push(statistics.totalPres);
+      area.push(statistics.point);
+      if (baseRows[i]?.timestamp != null) time.push(baseRows[i].timestamp);
+      continue;
+    }
     const sitTotalValue = sitData ? sitData.reduce((a, b) => a + b, 0) : 0;
     const backTotalValue = backData ? backData.reduce((a, b) => a + b, 0) : 0;
     const sitAreaValue = sitData ? sitData.filter((a) => a > 10).length : 0;
@@ -2134,6 +2142,7 @@ function formatMatColCsvRealData(value) {
 function formatMatrixTotalForFile(value, targetFile = file) {
   const numberValue = Number(value);
   const safeValue = Number.isFinite(numberValue) ? numberValue : 0;
+  if (targetFile === 'pressureVest') return safeValue;
   if (targetFile === SMALL_BED_12B_TYPE) {
     return Number(safeValue.toFixed(1));
   }
@@ -2157,12 +2166,13 @@ function buildCollectionCsvRow(row, { absoluteIndex = 0, relativeIndex = 0, base
   labelText = '',
 } = {}) {
   const matrixData = parseCsvMatrixData(transformRealData(row?.data));
-  const press = matrixData.reduce((sum, value) => sum + Number(value || 0), 0);
+  const vestStatistics = file === 'pressureVest' ? getPressureVestStatistics(matrixData) : null;
+  const press = vestStatistics ? vestStatistics.totalPres : matrixData.reduce((sum, value) => sum + Number(value || 0), 0);
   const newData = {
     index: getCsvElapsedSecondsFromBase(row, absoluteIndex, baseTimestamp, relativeIndex),
-    max: matrixData.length ? findMax(matrixData) : 0,
+    max: vestStatistics ? vestStatistics.maxPres : matrixData.length ? findMax(matrixData) : 0,
     time: timeStampToDate(row?.timestamp),
-    pressureArea: matrixData.filter((value) => Number(value) > 0).length,
+    pressureArea: vestStatistics ? vestStatistics.point : matrixData.filter((value) => Number(value) > 0).length,
     pressure: formatMatrixTotalForFile(press, file),
     realData: matrixData.length ? JSON.stringify(matrixData) : transformRealData(row?.data),
   };
@@ -2368,15 +2378,16 @@ function buildGenericSitCsvRow(row, { absoluteIndex, relativeIndex, baseTimestam
   ) {
     pressureData = transposeSquareMatrix(pressureData);
   }
-  const press = pressureData.reduce((a, b) => a + b, 0);
-  const area = pressureData.filter((a) => a > 0).length;
+  const vestStatistics = file === 'pressureVest' ? getPressureVestStatistics(pressureData) : null;
+  const press = vestStatistics ? vestStatistics.totalPres : pressureData.reduce((a, b) => a + b, 0);
+  const area = vestStatistics ? vestStatistics.point : pressureData.filter((a) => a > 0).length;
   const newData = {
     time: timeStampToDate(row?.timestamp),
     pressureArea: area,
     pressure: formatMatrixTotalForFile(press, file),
     realData: JSON.stringify(pressureData),
     index: getCsvElapsedSecondsFromBase(row, absoluteIndex, baseTimestamp, relativeIndex),
-    max: findMax(pressureData),
+    max: vestStatistics ? vestStatistics.maxPres : findMax(pressureData),
     rotate: rotateData.length ? JSON.stringify(rotateData) : '',
     zeroFrame: zeroFrameData.length ? JSON.stringify(zeroFrameData) : '',
     temperatureData: tempFullBedPayload ? JSON.stringify(tempFullBedPayload.temperatureData.map((value) => Number(value).toFixed(1))) : '',
@@ -3467,15 +3478,15 @@ const jqbedAlgorithmProtocol = createJqbedAlgorithmProtocol({
 
 // Transport only: reuse the exact existing 1024-point serial processing/recording path.
 const halowReceiver = new HalowReceiver({
-  isAllowed: () => !serverShutdownRequested && licenseManager.isLicenseValid() && file === 'humanBodyOptimized',
+  isAllowed: () => !serverShutdownRequested && licenseManager.isLicenseValid() && isHalowDisplaySystem(file),
   onFrame: payload => {
-    if (file === 'humanBodyOptimized' && licenseManager.isLicenseValid()) parser.emit('data', payload);
+    if (isHalowDisplaySystem(file) && licenseManager.isLicenseValid()) parser.emit('data', payload);
   },
 });
 halowReceiver.on('status', status => broadcastJson({ halowStatus: status }));
 halowReceiver.on('clear', () => {
   // Clear the view only. A synthetic zero frame must never enter recorded samples.
-  if (file === 'humanBodyOptimized' && !localFlag) broadcastJson({ sitData: new Array(1024).fill(0) });
+  if (isHalowDisplaySystem(file) && !localFlag) broadcastJson({ sitData: new Array(1024).fill(0) });
 });
 const handleHalowMessage = createHalowProtocol({
   receiver: halowReceiver,
@@ -5358,6 +5369,13 @@ module.exports = {
             const sitArr = getMessage.sitIndex;
             (sitPressSelect = []), (sitAreaSelect = []);
             for (let i = 0; i < localData.length; i++) {
+              if (file === 'pressureVest') {
+                // 背心按身体区域布点，旧 32x32 框选不能把未接入通道加入统计。
+                const statistics = getPressureVestStatistics(normalizeHistoryPressureData(localData[i], file));
+                sitPressSelect.push(statistics.totalPres);
+                sitAreaSelect.push(statistics.point);
+                continue;
+              }
               const newsit = [];
               // for (let x = sitArr[2]; x < sitArr[3]; x++) {
               //   for (let y = sitArr[0]; y < sitArr[1]; y++) {
@@ -6773,8 +6791,8 @@ parser.on("data", function (data) {
         pointArr = arrToRealLine(pointArr, [[7, 0], [8, 15]], [[0, 15]], 32)
        } else if (file == 'carY') {
         pointArr = carYLine(pointArr)
-      } else if (['humanBody', 'humanBodyOptimized'].includes(file)) {
-        // 人体全身：直接透传 1024 字节原始数据，不做线序变换
+      } else if (['humanBody', 'humanBodyOptimized', 'pressureVest'].includes(file)) {
+        // 人体全身和背心保留 1024 点 ADC 序号，由展示端映射身体区域。
       }
       pointArr1zeroData = [...pointArr]
 

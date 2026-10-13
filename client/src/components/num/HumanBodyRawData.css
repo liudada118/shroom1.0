@@ -309,6 +309,29 @@
   background: transparent;
 }
 
+.human-body-raw--vest {
+  --raw-atlas-max-width: 900px;
+}
+
+.human-body-raw--vest .human-body-raw__figure::after {
+  display: none;
+}
+
+.human-body-raw--vest .human-body-raw__upper {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.human-body-raw--vest .human-body-raw__upper .human-body-raw__caption {
+  height: 96px;
+  min-height: 96px;
+}
+
+.human-body-raw--vest .human-body-raw__canvas {
+  width: 100% !important;
+}
+
 .human-body-raw__part[data-part-key='leftShoulder'] .human-body-raw__caption,
 .human-body-raw__part[data-part-key='rightShoulder'] .human-body-raw__caption {
   padding-right: 6px;

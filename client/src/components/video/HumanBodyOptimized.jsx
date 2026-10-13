@@ -73,6 +73,16 @@ const getBrowserStorage = () => {
   }
 };
 
+/** 为独立传感系统隔离渲染设置，同时保留人体系统的历史存储键。 */
+const getProfileStorage = (profile) => {
+  const storage = getBrowserStorage();
+  if (!profile?.settingsKey || !storage) return storage;
+  return {
+    getItem: () => storage.getItem(profile.settingsKey),
+    setItem: (_, value) => storage.setItem(profile.settingsKey, value),
+  };
+};
+
 const BG_PRESETS = ["#afacac", "#10152b", "#0f2027", "#000000"];
 const MODEL_PRESETS = ["#718096", "#4a5568", "#d2d6dc", "#4fd1c5"];
 const VISIBLE_RENDER_MODES = [
@@ -432,12 +442,13 @@ const NUMBER_HORIZONTAL_FLIP_PARTS = new Set([
   "chest",
 ]);
 
-function getOrientedPartValues(frame, part) {
+function getOrientedPartValues(frame, part, profile) {
   let rows = Array.from({ length: part.height }, (_, row) => (
     part.positions
       .slice(row * part.width, (row + 1) * part.width)
       .map((position) => Number(frame[position - 1]) || 0)
   ));
+  if (profile?.numberMatrixOrientation === "source") return rows;
   rows = orientPartMatrix(part.key, rows);
   if (NUMBER_HORIZONTAL_FLIP_PARTS.has(part.key)) rows = rows.map((row) => [...row].reverse());
   return rows;
@@ -455,7 +466,7 @@ function drawNumberCell(ctx, value, x, y, size) {
   ctx.fillText(String(Math.round(value)), x + size / 2, y + size / 2);
 }
 
-const RegionNumberPanel = React.forwardRef(({ activeRegion }, ref) => {
+const RegionNumberPanel = React.forwardRef(({ activeRegion, sensorProfile }, ref) => {
   const canvasRef = useRef(null);
   const frameRef = useRef(new Array(1024).fill(0));
 
@@ -463,9 +474,12 @@ const RegionNumberPanel = React.forwardRef(({ activeRegion }, ref) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ratio = Math.min(window.devicePixelRatio || 1, 2);
-    const isOverview = activeRegion === "overview";
-    const slots = getHumanBodyNumberViewSlots(activeRegion);
-    const cellSize = isOverview ? 9 : 18;
+    const isOverview = activeRegion === "overview" && !sensorProfile;
+    const slots = sensorProfile
+      ? (sensorProfile.numberViews[activeRegion] || []).map((key) => ({ displayPartKey: key, dataPartKey: key }))
+      : getHumanBodyNumberViewSlots(activeRegion);
+    const parts = sensorProfile ? new Map(sensorProfile.parts.map((part) => [part.key, part])) : PART_BY_KEY;
+    const cellSize = activeRegion === "overview" ? 9 : 18;
     const titleHeight = 25;
     const padding = 10;
     const gap = 10;
@@ -479,8 +493,8 @@ const RegionNumberPanel = React.forwardRef(({ activeRegion }, ref) => {
     } else {
       let offsetX = 0;
       slots.forEach(({ displayPartKey, dataPartKey }) => {
-        const displayPart = PART_BY_KEY.get(displayPartKey);
-        const dataPart = PART_BY_KEY.get(dataPartKey);
+        const displayPart = parts.get(displayPartKey);
+        const dataPart = parts.get(dataPartKey);
         if (!displayPart) return;
         const width = displayPart.width * cellSize;
         const height = displayPart.height * cellSize + titleHeight;
@@ -526,15 +540,15 @@ const RegionNumberPanel = React.forwardRef(({ activeRegion }, ref) => {
       ctx.font = "11px Arial";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(`${HUMAN_BODY_NUMBER_PART_LABELS[part.key]} ${part.width}×${part.height}`, padding + x + gridWidth / 2, padding + titleHeight / 2);
-      const values = getOrientedPartValues(frameRef.current, dataPart);
+      ctx.fillText(`${(sensorProfile?.partLabels || HUMAN_BODY_NUMBER_PART_LABELS)[part.key]} ${part.width}×${part.height}`, padding + x + gridWidth / 2, padding + titleHeight / 2);
+      const values = getOrientedPartValues(frameRef.current, dataPart, sensorProfile);
       values.forEach((rowValues, row) => {
         rowValues.forEach((value, col) => {
           drawNumberCell(ctx, value, padding + x + col * cellSize, padding + titleHeight + row * cellSize, cellSize);
         });
       });
     });
-  }, [activeRegion]);
+  }, [activeRegion, sensorProfile]);
 
   useImperativeHandle(ref, () => ({
     updateData(nextFrame) {
@@ -550,7 +564,7 @@ const RegionNumberPanel = React.forwardRef(({ activeRegion }, ref) => {
   return (
     <div style={{ ...panelStyle, right: 78, bottom: 14, padding: 9, maxWidth: "calc(100vw - 500px)", overflow: "auto" }}>
       <div style={{ fontSize: "11px", color: "#8193a5", margin: "0 2px 6px" }}>
-        2D 数字 · {REGION_VIEWS[activeRegion]?.label || "全身"}
+        2D 数字 · {(sensorProfile?.regionViews || REGION_VIEWS)[activeRegion]?.label || "全身"}
       </div>
       <canvas ref={canvasRef} style={{ display: "block" }} />
     </div>
@@ -654,9 +668,11 @@ const HoverDataPanel = React.forwardRef(({ sensorsRef }, ref) => {
 HoverDataPanel.displayName = "HoverDataPanel";
 
 const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
+  const sensorProfile = props.sensorProfile;
+  const regionViews = sensorProfile?.regionViews || REGION_VIEWS;
   const initialSettingsRef = useRef(null);
   if (initialSettingsRef.current === null) {
-    initialSettingsRef.current = readHumanBodyRenderSettings(getBrowserStorage());
+    initialSettingsRef.current = readHumanBodyRenderSettings(getProfileStorage(sensorProfile));
   }
   const initialSettings = initialSettingsRef.current;
   const containerRef = useRef(null);
@@ -778,7 +794,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
   }, [props.renderOptions, updateTextureValues]);
 
   useEffect(() => {
-    writeHumanBodyRenderSettings(getBrowserStorage(), {
+    writeHumanBodyRenderSettings(getProfileStorage(sensorProfile), {
       mode,
       heatComputationMode,
       radius,
@@ -790,7 +806,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
       settingsCollapsed,
       overviewAutoRotate,
     });
-  }, [mode, heatComputationMode, radius, intensity, opacity, colorScheme, bgColor, modelColor, settingsCollapsed, overviewAutoRotate]);
+  }, [mode, heatComputationMode, radius, intensity, opacity, colorScheme, bgColor, modelColor, settingsCollapsed, overviewAutoRotate, sensorProfile]);
 
   useEffect(() => {
     activeRegionRef.current = activeRegion;
@@ -1110,7 +1126,12 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
         scene.add(normalizedModel);
 
         try {
-          const sensors = buildSensorLayout(sensorArchive);
+          const sensors = sensorProfile
+            ? sensorProfile.buildSensorLayout(sensorArchive, normalizedModel).map((sensor) => ({
+              ...sensor,
+              position: new THREE.Vector3(sensor.position.x, sensor.position.y, sensor.position.z),
+            }))
+            : buildSensorLayout(sensorArchive);
           if (!sensors.length) throw new Error("点位文件中没有可渲染的物理点位");
           sensorsRef.current = sensors;
           setSensorCount(sensors.length);
@@ -1196,6 +1217,8 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
               side: THREE.BackSide,
             });
             const crystalOverlayFrontMaterial = crystalOverlayMaterial.clone();
+            // clone 会分离纹理的 GPU 上传版本；两侧必须共享实时数据纹理。
+            crystalOverlayFrontMaterial.uniforms.uSensorData.value = texture;
             crystalOverlayFrontMaterial.side = THREE.FrontSide;
             crystalOverlayFrontMaterial.uniforms.uHeatAlpha.value = 0.65;
             const crystalOverlayNearest12Material = new THREE.ShaderMaterial({
@@ -1401,7 +1424,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
       lineGridRef.current?.material?.dispose();
       if (container.contains(renderer.domElement)) container.removeChild(renderer.domElement);
     };
-  }, []);
+  }, [sensorProfile]);
 
   useEffect(() => {
     sceneRef.current?.background?.set(bgColor);
@@ -1516,7 +1539,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
   const flyTo = (regionKey) => {
     const camera = cameraRef.current;
     const controls = controlsRef.current;
-    const view = REGION_VIEWS[regionKey];
+    const view = regionViews[regionKey];
     if (!camera || !controls || !view) return;
     activeRegionRef.current = regionKey;
     setActiveRegion(regionKey);
@@ -1559,7 +1582,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
 
       <div style={{ ...panelStyle, top: 72, left: "max(250px, 19vw)", width: 222 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-          <div style={{ fontSize: "14px", fontWeight: 700, letterSpacing: "0.08em" }}>人体全身优化</div>
+          <div style={{ fontSize: "14px", fontWeight: 700, letterSpacing: "0.08em" }}>{sensorProfile?.title || "人体全身优化"}</div>
           <button
             type="button"
             aria-expanded={!settingsCollapsed}
@@ -1619,7 +1642,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
       <div style={{ ...panelStyle, top: 72, right: 14, width: 126 }}>
         <div style={{ fontSize: "11px", color: "#8193a5", marginBottom: 7 }}>部位视角</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
-          {Object.entries(REGION_VIEWS).map(([key, view]) => (
+          {Object.entries(regionViews).map(([key, view]) => (
             <button key={key} onClick={() => flyTo(key)} style={buttonStyle(activeRegion === key)}>{view.label}</button>
           ))}
         </div>
@@ -1631,7 +1654,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
         <button onClick={resetView} style={{ ...buttonStyle(false), width: "100%", marginTop: 8 }}>重置视角</button>
       </div>
 
-      <RegionNumberPanel ref={numberPanelRef} activeRegion={activeRegion} />
+      <RegionNumberPanel ref={numberPanelRef} activeRegion={activeRegion} sensorProfile={sensorProfile} />
     </div>
   );
 

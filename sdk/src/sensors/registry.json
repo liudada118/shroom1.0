@@ -299,6 +299,29 @@
       "protocol": { "baudRate": 1000000 },
       "unknown": ["valueType", "delimiter", "pressureLength", "matrix", "lineOrder", "channels"],
       "source": "getDefaultBaudRate() 兜底值"
+    },
+    "pressureVest": {
+      "label": "压力传感背心",
+      "licenseGroup": "precision",
+      "verified": false,
+      "transport": "halow-tcp",
+      "protocol": {
+        "baudRate": 1000000,
+        "valueType": "uint8",
+        "delimiter": "aa550399",
+        "delimiterPosition": "header",
+        "pressureLength": 1024,
+        "payloadBytes": 1024,
+        "identityHeader": "aa5500",
+        "identityLengthMin": 1,
+        "identityLengthMax": 64
+      },
+      "matrix": { "width": 32, "height": 32 },
+      "lineOrder": null,
+      "channels": ["sit"],
+      "unknown": ["hardwareValidation", "physicalPointMappingValidation"],
+      "note": "沿用人体全身优化的 HaLow TCP：先发 ID 帧，再发 AA550399 + 1024 字节原始 ADC。32x32 描述原始采样数组，不是背心区域布局；点位映射在展示端。仅已完成软件和模拟帧验证，尚需真机核对。",
+      "source": "server/halowReceiver.js + server.js 的 1024 点处理链"
     }
   }
 }

@@ -269,6 +269,7 @@ const key = issueCategoryLicense({
 | 24 | 精密 | `humanBody` | 人体全身 |
 | 25 | 关怀 | `petCareMini` | mini看护 |
 | 26 | 精密 | `humanBodyOptimized` | 人体全身优化 |
+| 27 | 精密 | `pressureVest` | 压力传感背心 |
 
 ## numMatrixFlag 模块 Key/Value
 
@@ -290,6 +291,7 @@ const key = issueCategoryLicense({
 | `handSinglePoint` | 32*32(检测点) | `normal`=3D模型<br>`numoriginal`=原始数据 |
 | `humanBody` | 人体全身 | `skin`=3D皮肤 |
 | `humanBodyOptimized` | 人体全身优化 | `skin`=3D皮肤<br>`numoriginal`=原始数据 |
+| `pressureVest` | 压力传感背心（HaLow） | `skin`=3D皮肤<br>`numoriginal`=原始数据（前胸18×10、后背22×10、双肩各6×3） |
 | `jqbed` | 小床监测 | `normal`=3D模型<br>`numoriginal`=原始数据 |
 | `matCol` | 小床褥采集 | `normal`=3D模型<br>`numoriginal`=原始数据（16x10，宽16高10） |
 | `minzhen` | 轮椅 | `normal`=3D模型<br>`numoriginal`=原始数据 |

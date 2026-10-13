@@ -161,6 +161,7 @@ export const bilingualConfig = {
   sensorNormal: text('正常测试', 'Standard Test'),
   sensorHumanBody: text('人体全身', 'Full Body'),
   sensorHumanBodyOptimized: text('人体全身传感', 'Optimized Full Body'),
+  sensorPressureVest: text('压力传感背心', 'Pressure Sensing Vest'),
   sensorWholeChair: text('整椅展示', 'Full Chair'),
   sensorMinzhen: text('轮椅', 'Wheelchair'),
   sensorMatCol: text('小床褥监测', 'Smart Mattress'),
@@ -737,6 +738,16 @@ export const bilingualConfig = {
     fingerPulp: text('指腹', 'Pulp'),
   },
 
+  pressureVest: {
+    rawTitle: text('背心原始数据', 'Vest Raw Data'),
+    zipper: text('拉链', 'Zipper'),
+    parts: {
+      chest: text('前胸', 'Chest'),
+      back: text('后背', 'Back'),
+      leftShoulder: text('左肩', 'Left Shoulder'),
+      rightShoulder: text('右肩', 'Right Shoulder'),
+    },
+  },
   humanBodyRaw: {
     title: text('人体原始数据', 'Human Body Raw Data'),
     overview: text('人体原始点位展开图', 'Human raw-sensor unfolded map'),

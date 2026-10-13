@@ -81,6 +81,7 @@ const BUILTIN_GROUPS = [
       { label: '64*64高速', value: 'bed4096num' },
       { label: '人体全身', value: 'humanBody' },
       { label: '人体全身优化', value: 'humanBodyOptimized' },
+      { label: '压力传感背心', value: 'pressureVest' },
     ],
   },
 ];
