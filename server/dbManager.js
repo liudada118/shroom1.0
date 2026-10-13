@@ -11,6 +11,7 @@ const { app } = require('electron');
 const sqlite3 = require("../sqlite3-compat").verbose();
 const logger = require('../logger');
 const { isCar } = require('../util');
+const { isGloveDatabaseType, openGloveDatabase } = require('./gloveDatabase');
 
 /**
  * 初始化数据库
@@ -21,6 +22,7 @@ const { isCar } = require('../util');
  */
 function initDb(fileStr, filePath, runtimeResourceRoot) {
   logger.debug('initDb: ' + fileStr);
+  if (isGloveDatabaseType(fileStr)) return openGloveDatabase(fileStr, filePath);
   let db, db1, db2;
 
   if (fileStr === 'volvo' || fileStr === 'wholeChair') {

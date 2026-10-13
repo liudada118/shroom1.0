@@ -54,7 +54,7 @@ function drawHand(ctx, layout, frame, originX, cs, maxValue, labels) {
   ctx.textBaseline = 'middle'
 
   layout.parts.forEach((part) => {
-    ctx.fillStyle = '#1f2d4d'
+    ctx.fillStyle = '#e8ecf5'
     ctx.font = `bold ${Math.max(10, cs * 0.4)}px sans-serif`
     ctx.fillText(labels.parts[part.key], px(part.labelX), py(part.labelY + 0.4))
 
@@ -101,7 +101,7 @@ function drawHand(ctx, layout, frame, originX, cs, maxValue, labels) {
     ctx.fillText(String(Math.round(value)), x + cs / 2, y + cs / 2)
   })
 
-  ctx.fillStyle = '#1f2d4d'
+  ctx.fillStyle = '#e8ecf5'
   ctx.font = `${Math.max(10, cs * 0.38)}px sans-serif`
   ctx.fillText(labels.title, px(layout.width / 2), py(layout.titleY + 0.4))
 }
@@ -236,7 +236,7 @@ export const GloveHandNum2D = React.forwardRef((props, refs) => {
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: '#fff',
+        backgroundColor: '#000',
         paddingLeft: SIDE_PANEL_WIDTH,
         paddingRight: RIGHT_TOOLBAR_WIDTH,
         boxSizing: 'border-box',

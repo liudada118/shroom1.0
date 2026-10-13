@@ -890,6 +890,13 @@ function parseStoredSensorFrame(storedData, sensorType = '') {
   };
 }
 
+/** 某只手没有对应历史帧时清空压力，避免继续显示它上一帧的数据。 */
+function getHandGlovePlaybackFrame(row, sensorType = file) {
+  return row?.data
+    ? parseStoredSensorFrame(JSON.parse(row.data), sensorType)
+    : { pressureData: new Array(256).fill(0), rotateData: [], zeroFrame: [] };
+}
+
 function getZeroAwareStoragePressureData(frameToStore, dataKey) {
   const candidates = [
     frameToStore.rawPressureData,
@@ -1052,6 +1059,12 @@ function getHandGloveSideLabels(languageTitles = CSV_TITLES.zh) {
 
 function getHandGloveCsvFilePrefix(languageTitles = CSV_TITLES.zh) {
   const prefixes = { zh: '触觉手套2', en: 'glove2', ja: '触覚グローブ2' };
+  return prefixes[getCsvTitleLanguage(languageTitles)];
+}
+
+/** 普通手套左右帧共用一个文件名，保留手套2原有文件名。 */
+function getCombinedHandGloveCsvFilePrefix(languageTitles = CSV_TITLES.zh) {
+  const prefixes = { zh: '触觉手套', en: 'glove', ja: '触覚グローブ' };
   return prefixes[getCsvTitleLanguage(languageTitles)];
 }
 
@@ -1848,6 +1861,17 @@ function dbAllHistory(dbRef, sql, params = []) {
   return getHistoryStmt(dbRef, sql).all(...params);
 }
 
+/** 同一手套库中的两张手表一起删除，迁移游标保留以免旧备份记录复活。 */
+function deleteHandGloveCollection(date) {
+  collectionInsertQueue.flushAll();
+  const leftDb = getNativeDb(db);
+  const rightDb = getNativeDb(db1);
+  leftDb.transaction(() => {
+    leftDb.prepare('DELETE FROM matrix WHERE date = ?').run(date);
+    rightDb.prepare('DELETE FROM matrix WHERE date = ?').run(date);
+  })();
+}
+
 function ensureHistoryIndexes(dbRef) {
   const nativeDb = getNativeDb(dbRef);
   if (!nativeDb || typeof nativeDb.exec !== 'function') return;
@@ -1884,7 +1908,10 @@ function queryHistoryRows(dbRef, date, limit, offset = 0) {
 }
 
 function queryHistoryTimestampSample(dbRef, date, limit = 21) {
-  return queryHistoryRows(dbRef, date, limit, 0)
+  const rows = isHandGloveType(file)
+    ? queryGloveHistoryRows(dbRef, date, limit, 0)
+    : queryHistoryRows(dbRef, date, limit, 0);
+  return rows
     .map((row) => row.timestamp)
     .filter((value) => value != null);
 }
@@ -1899,15 +1926,40 @@ function queryHistoryRowsFromId(dbRef, date, minId, limit) {
   );
 }
 
+/** 手套迁移可能在较新ID后追加较早的帧，按真实时间和ID稳定排列。 */
+function queryGloveHistoryRows(dbRef, date, limit, offset = 0) {
+  if (!dbRef || !date || limit <= 0) return [];
+  getNativeDb(dbRef).exec('CREATE INDEX IF NOT EXISTS idx_matrix_date_timestamp_id ON matrix(date, timestamp, id)');
+  return dbAllHistory(dbRef,
+    'SELECT * FROM matrix WHERE date = ? ORDER BY timestamp ASC, id ASC LIMIT ? OFFSET ?',
+    [date, limit, Math.max(0, offset)]);
+}
+
+/** 延续复合游标读取，保留同毫秒的不同原始帧。 */
+function queryGloveHistoryRowsAfter(dbRef, date, timestamp, id, limit) {
+  return dbAllHistory(dbRef,
+    'SELECT * FROM matrix WHERE date = ? AND (timestamp, id) > (?, ?) ORDER BY timestamp ASC, id ASC LIMIT ?',
+    [date, timestamp, id, limit]);
+}
+
 function createLazyHistoryRows(dbRef, date, stats) {
   const cache = new Map();
   const maxCacheSize = 512;
   const lengthValue = Number(stats?.count || 0);
   const minId = Number(stats?.minId || 0);
+  const gloveHistory = isHandGloveType(file);
 
   const readByIndex = (index) => {
     if (!Number.isInteger(index) || index < 0 || index >= lengthValue || !minId) return undefined;
     if (cache.has(index)) return cache.get(index);
+    if (gloveHistory) {
+      // 旧库迁移和删除记录后ID可能不连续；按行序分页，不能用minId+index代替。
+      const offset = Math.floor(index / maxCacheSize) * maxCacheSize;
+      const rows = queryGloveHistoryRows(dbRef, date, Math.min(maxCacheSize, lengthValue - offset), offset);
+      cache.clear();
+      rows.forEach((row, rowIndex) => cache.set(offset + rowIndex, row));
+      return cache.get(index);
+    }
     const row = dbGetHistory(
       dbRef,
       'SELECT * FROM matrix WHERE date = ? AND id >= ? ORDER BY id ASC LIMIT 1',
@@ -1948,7 +2000,7 @@ function getHistorySeries({ sitRows = [], backRows = [], start = 0, end = null, 
   const hasSit = safeSitRows.length > 0;
   const hasBack = safeBackRows.length > 0;
   const totalLength = hasSit && hasBack
-    ? Math.min(safeSitRows.length, safeBackRows.length)
+    ? (isHandGloveType(file) ? Math.max(safeSitRows.length, safeBackRows.length) : Math.min(safeSitRows.length, safeBackRows.length))
     : (hasSit ? safeSitRows.length : safeBackRows.length);
   const rangeStart = Math.max(0, start);
   const rangeEnd = Math.min(end == null ? totalLength : end, totalLength);
@@ -1982,8 +2034,9 @@ function getHistorySeries({ sitRows = [], backRows = [], start = 0, end = null, 
     );
     area.push(sitAreaValue + backAreaValue);
 
-    if (baseRows[i] && baseRows[i].timestamp != null) {
-      time.push(baseRows[i].timestamp);
+    const timeRow = baseRows[i] || (isHandGloveType(file) ? safeBackRows[i] : null);
+    if (timeRow?.timestamp != null) {
+      time.push(timeRow.timestamp);
     }
   }
 
@@ -2007,7 +2060,7 @@ function getHistoryLengthFromCounts(...counts) {
 function createHistoryRowsForPlayback(dbRef, date, stats, eager) {
   if (!stats?.count) return [];
   return eager
-    ? queryHistoryRows(dbRef, date, stats.count, 0)
+    ? (isHandGloveType(file) ? queryGloveHistoryRows(dbRef, date, stats.count, 0) : queryHistoryRows(dbRef, date, stats.count, 0))
     : createLazyHistoryRows(dbRef, date, stats);
 }
 
@@ -2049,7 +2102,9 @@ function loadSelectedHistory(dateLabel) {
     const sitStats = getHistoryStats(db, dateLabel);
     const backStats = isCar(file) && db1 ? getHistoryStats(db1, dateLabel) : { count: 0, minId: 0, maxId: 0 };
     const headStats = isThreePortFile(file) && db2 ? getHistoryStats(db2, dateLabel) : { count: 0, minId: 0, maxId: 0 };
-    const totalLength = isThreePortFile(file)
+    const totalLength = isHandGloveType(file)
+      ? Math.max(sitStats.count, backStats.count)
+      : isThreePortFile(file)
       ? getHistoryLengthFromCounts(sitStats.count, backStats.count, headStats.count)
       : isCar(file)
         ? getHistoryLengthFromCounts(sitStats.count, backStats.count)
@@ -2066,7 +2121,7 @@ function loadSelectedHistory(dateLabel) {
     }
 
     length = totalLength;
-    indexArr = [0, Math.max(length - 2, 0)];
+    indexArr = [0, Math.max(length - (isHandGloveType(file) ? 1 : 2), 0)];
     historyArr = [0, length];
     const timestampDb = sitStats.count ? db : (backStats.count && db1 ? db1 : db);
     timeStamp = queryHistoryTimestampSample(timestampDb, dateLabel, 21);
@@ -2563,130 +2618,306 @@ function getHeadCsvHeaders(csvTitle, { collectionLabelInfo = null } = {}) {
   return headers;
 }
 
-async function exportHandGloveDoubleCsvStreaming({ date, csvTitle, csvTargetPath, sendCsvSuccess, sendCsvFailed, sendCsvProgress }) {
-  const leftStats = getHistoryStats(db, date);
-  const rightStats = getHistoryStats(db1, date);
-  const totalLength = Math.max(leftStats.count, rightStats.count);
-  if (!totalLength) {
-    sendCsvFailed(new Error('no rows to export'));
-    return;
-  }
-  const start = Math.max(0, historyArr[0] || 0);
-  const end = Math.min(historyArr[1] || totalLength, totalLength);
-  const sideLabel = getHandGloveSideLabels(csvTitle);
-  const collectionLabelInfo = getCollectionCsvLabelInfo(date);
-  const csvHeaders = [
-    { id: "index", title: csvTitle.index },
-    { id: "time", title: csvTitle.time },
-    { id: "leftMax", title: `${sideLabel.left}${csvTitle.max}` },
-    { id: "leftPressureArea", title: `${sideLabel.left}${csvTitle.pressureArea}` },
-    { id: "leftPressure", title: `${sideLabel.left}${csvTitle.pressure}` },
-    { id: "leftRealData", title: `${sideLabel.left}${csvTitle.realData}` },
-    { id: "leftZeroFrame", title: `${sideLabel.left}${csvTitle.zeroFrame}` },
-    { id: "leftRotate", title: `${sideLabel.left}${csvTitle.rotate}` },
-    { id: "rightMax", title: `${sideLabel.right}${csvTitle.max}` },
-    { id: "rightPressureArea", title: `${sideLabel.right}${csvTitle.pressureArea}` },
-    { id: "rightPressure", title: `${sideLabel.right}${csvTitle.pressure}` },
-    { id: "rightRealData", title: `${sideLabel.right}${csvTitle.realData}` },
-    { id: "rightZeroFrame", title: `${sideLabel.right}${csvTitle.zeroFrame}` },
-    { id: "rightRotate", title: `${sideLabel.right}${csvTitle.rotate}` },
-  ];
-  appendPrefixedHandGloveCsvHeaders(csvHeaders, 'left', csvTitle);
-  appendPrefixedHandGloveCsvHeaders(csvHeaders, 'right', csvTitle);
-  appendCollectionLabelHeaders(csvHeaders, csvTitle, collectionLabelInfo);
-
-  let str = formatCsvDatePart(nowGetTime || date);
-  const csvFilePath = csvTargetPath(`${getHandGloveCsvFilePrefix(csvTitle)}${str}.csv`);
-  const stringifier = createCsvStringifier({ header: csvHeaders });
-  const stream = fs.createWriteStream(csvFilePath, { encoding: 'utf8' });
-  let written = 0;
-  let leftNextId = leftStats.minId + start;
-  let rightNextId = rightStats.minId + start;
-  const baseRow = (leftStats.count ? queryHistoryRowsFromId(db, date, leftNextId, 1) : queryHistoryRowsFromId(db1, date, rightNextId, 1))[0];
-  const baseTimestamp = baseRow?.timestamp ?? null;
-  const batchSize = 1000;
-  const emitProgress = (force = false) => {
-    if (typeof sendCsvProgress !== 'function') return;
-    const total = end - start;
-    sendCsvProgress({
-      percent: total ? Math.min(99, Math.round((written / total) * 100)) : 100,
-      filePercent: total ? Math.min(100, Math.round((written / total) * 100)) : 100,
-      written,
-      total,
-      fileIndex: 1,
-      fileCount: 1,
-      currentFile: path.basename(csvFilePath),
-      currentFilePath: csvFilePath,
-      force,
-    });
-  };
-
-  try {
-    await writeStreamChunk(
-      stream,
-      prefixCsvHeaderWithBom(stringifier.getHeaderString()),
-    );
-    emitProgress(true);
-    while (written < end - start) {
-      const limit = Math.min(batchSize, end - start - written);
-      const leftRows = queryHistoryRowsFromId(db, date, leftNextId, limit);
-      const rightRows = queryHistoryRowsFromId(db1, date, rightNextId, limit);
-      const count = Math.max(leftRows.length, rightRows.length);
-      if (!count) break;
-      const records = [];
-      for (let index = 0; index < count; index++) {
-        const leftFrame = buildStoredHandGloveCsvFrame(leftRows[index], 'left');
-        const rightFrame = buildStoredHandGloveCsvFrame(rightRows[index], 'right');
-        const leftData = leftFrame.pressureData;
-        const rightData = rightFrame.pressureData;
-        const leftPress = leftData.reduce((sum, value) => sum + value, 0);
-        const rightPress = rightData.reduce((sum, value) => sum + value, 0);
-        const leftArea = leftData.filter((value) => value > 0).length;
-        const rightArea = rightData.filter((value) => value > 0).length;
-        const baseFrameRow = leftRows[index] || rightRows[index];
-        records.push(applyCollectionLabelInfo({
-          index: getCsvElapsedSecondsFromBase(baseFrameRow, start + written + index, baseTimestamp, written + index),
-          time: timeStampToDate(leftFrame.timestamp || rightFrame.timestamp || Date.now()),
-          leftMax: leftData.length ? findMax(leftData) : 0,
-          leftPressureArea: leftArea,
-          leftPressure: totalToN(leftPress),
-          leftRealData: JSON.stringify(leftData),
-          leftZeroFrame: leftFrame.zeroFrame.length ? JSON.stringify(leftFrame.zeroFrame) : '',
-          leftRotate: leftFrame.rotateData.length ? JSON.stringify(leftFrame.rotateData) : '',
-          rightMax: rightData.length ? findMax(rightData) : 0,
-          rightPressureArea: rightArea,
-          rightPressure: totalToN(rightPress),
-          rightRealData: JSON.stringify(rightData),
-          rightZeroFrame: rightFrame.zeroFrame.length ? JSON.stringify(rightFrame.zeroFrame) : '',
-          rightRotate: rightFrame.rotateData.length ? JSON.stringify(rightFrame.rotateData) : '',
-          ...buildPrefixedHandGloveCsvSegments(leftData, 'left'),
-          ...buildPrefixedHandGloveCsvSegments(rightData, 'right'),
-        }, collectionLabelInfo));
-      }
-      await writeStreamChunk(stream, stringifier.stringifyRecords(records));
-      written += count;
-      if (leftRows.length) leftNextId = Number(leftRows[leftRows.length - 1].id) + 1;
-      if (rightRows.length) rightNextId = Number(rightRows[rightRows.length - 1].id) + 1;
-      emitProgress();
+/** 按与回放相同的时间行序读选定范围，首批OFFSET后延续时间/ID复合游标。 */
+function* iterateHandGloveHistoryRows(dbRef, date, { start = 0, end = null, batchSize = 1000 } = {}) {
+  const stats = getHistoryStats(dbRef, date);
+  const rangeStart = Math.min(stats.count, Math.max(0, Math.floor(Number(start) || 0)));
+  const rangeEnd = Math.min(stats.count, end == null ? stats.count : Math.max(0, Math.floor(Number(end) || 0)));
+  if (rangeStart >= rangeEnd) return;
+  const limit = Math.max(1, Math.min(1000, Math.floor(Number(batchSize) || 1000)));
+  let remaining = rangeEnd - rangeStart;
+  let rows = queryGloveHistoryRows(dbRef, date, Math.min(limit, remaining), rangeStart);
+  while (remaining > 0) {
+    if (!rows.length) return;
+    for (const row of rows) {
+      yield row;
+      remaining -= 1;
     }
-    await closeWriteStream(stream);
-    if (typeof sendCsvProgress === 'function') {
+    if (remaining > 0) {
+      const lastRow = rows[rows.length - 1];
+      rows = queryGloveHistoryRowsAfter(dbRef, date, lastRow.timestamp, lastRow.id, Math.min(limit, remaining));
+    }
+  }
+}
+
+/** 导出期间独立持有手套视图，切换系统关闭原视图时仍读取原采集。 */
+function retainHandGloveExportSources() {
+  const retained = [];
+  const retain = source => {
+    if (typeof source?.retain !== 'function') return source;
+    const view = source.retain();
+    retained.push(view);
+    return view;
+  };
+  const release = () => retained.splice(0).forEach(view => view.close());
+  try {
+    return { left: retain(db), right: retain(db1), release };
+  } catch (error) {
+    release();
+    throw error;
+  }
+}
+
+/** 按接收时间交错输出左右帧，每个原帧独占一行；相同毫秒左手先输出。 */
+function* mergeHandGloveHistoryRows(leftRows, rightRows) {
+  const hasTimestamp = row => row?.timestamp != null
+    && (typeof row.timestamp === 'number' || (typeof row.timestamp === 'string' && row.timestamp.trim() !== ''))
+    && Number.isFinite(Number(row.timestamp));
+  const left = leftRows[Symbol.iterator]();
+  const right = rightRows[Symbol.iterator]();
+  let leftNext = left.next();
+  let rightNext = right.next();
+  while (!leftNext.done || !rightNext.done) {
+    if (!leftNext.done && !hasTimestamp(leftNext.value)) throw new Error('left hand frame has invalid timestamp');
+    if (!rightNext.done && !hasTimestamp(rightNext.value)) throw new Error('right hand frame has invalid timestamp');
+    if (rightNext.done || (!leftNext.done && Number(leftNext.value.timestamp) <= Number(rightNext.value.timestamp))) {
+      yield { side: 'left', row: leftNext.value };
+      leftNext = left.next();
+    } else {
+      yield { side: 'right', row: rightNext.value };
+      rightNext = right.next();
+    }
+  }
+}
+
+/** 格式化一只手的一帧，保留实际类型的原始矩阵、归零帧、四元数和分指列。 */
+function buildCombinedHandGloveCsvRow(row, meta, csvTitle, side, sensorType) {
+  const frame = parseStoredSensorFrame(JSON.parse(row?.data || '[]'), sensorType);
+  const pressureData = frame.pressureData;
+  const press = pressureData.reduce((sum, value) => sum + value, 0);
+  return {
+    hand: getHandGloveSideLabels(csvTitle)[side],
+    index: getCsvElapsedSecondsFromBase(row, meta.absoluteIndex, meta.baseTimestamp, meta.relativeIndex),
+    time: timeStampToDate(Number(row?.timestamp)),
+    max: pressureData.length ? findMax(pressureData) : 0,
+    pressureArea: pressureData.filter(value => value > (side === 'right' ? 10 : 0)).length,
+    pressure: side === 'right' ? totalToN(press, 1.3) : totalToN(press),
+    realData: JSON.stringify(pressureData),
+    zeroFrame: frame.zeroFrame.length ? JSON.stringify(frame.zeroFrame) : '',
+    rotate: frame.rotateData.length ? JSON.stringify(frame.rotateData) : '',
+    ...buildHandGloveCsvSegments(pressureData, side),
+  };
+}
+
+/** 普通触觉手套导出单份长表；两路各取相同[start,end)，每流最多缓存1000帧。 */
+async function exportCombinedHandGloveCsvStreaming({ date, csvTitle, csvTargetPath, sendCsvSuccess, sendCsvFailed, sendCsvProgress }) {
+  const sources = retainHandGloveExportSources();
+  const db = sources.left;
+  const db1 = sources.right;
+  try {
+    const sensorType = file;
+    const start = Math.max(0, Math.floor(Number(historyArr[0]) || 0));
+    const end = historyArr[1] == null ? null : Math.max(0, Math.floor(Number(historyArr[1]) || 0));
+    const leftStats = getHistoryStats(db, date);
+    const rightStats = getHistoryStats(db1, date);
+    const selectedCount = stats => Math.max(0, Math.min(stats.count, end == null ? stats.count : end) - start);
+    const total = selectedCount(leftStats) + selectedCount(rightStats);
+    if (!total) {
+      sendCsvFailed(new Error('no rows to export'));
+      return;
+    }
+    const collectionLabelInfo = getCollectionCsvLabelInfo(date);
+    const handTitles = { zh: '手别', en: 'hand', ja: '手側' };
+    const csvHeaders = [
+      { id: 'hand', title: handTitles[getCsvTitleLanguage(csvTitle)] },
+      ...getDefaultSitCsvHeaders(csvTitle, {
+        isHandGloveCsvType: true,
+        shouldWriteZeroFrame: true,
+        isHandType: true,
+        collectionLabelInfo,
+      }),
+    ];
+    const csvFilePath = csvTargetPath(`${getCombinedHandGloveCsvFilePrefix(csvTitle)}${formatCsvDatePart(nowGetTime || date)}.csv`);
+    const stringifier = createCsvStringifier({ header: csvHeaders });
+    const stream = fs.createWriteStream(csvFilePath, { encoding: 'utf8' });
+    let written = 0;
+    let baseTimestamp = null;
+    const emitProgress = (force = false) => {
+      if (typeof sendCsvProgress !== 'function') return;
       sendCsvProgress({
-        percent: 100,
-        filePercent: 100,
-        written: end - start,
-        total: end - start,
+        percent: force && written === total ? 100 : Math.min(99, Math.round(written / total * 100)),
+        filePercent: Math.min(100, Math.round(written / total * 100)),
+        written, total, fileIndex: 1, fileCount: 1,
+        currentFile: path.basename(csvFilePath), currentFilePath: csvFilePath, force,
+      });
+    };
+    try {
+      await writeStreamChunk(stream, prefixCsvHeaderWithBom(stringifier.getHeaderString()));
+      emitProgress(true);
+      const records = [];
+      const merged = mergeHandGloveHistoryRows(
+        iterateHandGloveHistoryRows(db, date, { start, end: end == null ? leftStats.count : Math.min(leftStats.count, end) }),
+        iterateHandGloveHistoryRows(db1, date, { start, end: end == null ? rightStats.count : Math.min(rightStats.count, end) }),
+      );
+      for (const { side, row } of merged) {
+        if (baseTimestamp === null) baseTimestamp = Number(row.timestamp);
+        records.push(applyCollectionLabelInfo(buildCombinedHandGloveCsvRow(row, {
+          absoluteIndex: written + records.length,
+          relativeIndex: written + records.length,
+          baseTimestamp,
+        }, csvTitle, side, sensorType), collectionLabelInfo));
+        if (records.length >= 1000) {
+          await writeStreamChunk(stream, stringifier.stringifyRecords(records));
+          written += records.length;
+          records.length = 0;
+          emitProgress();
+        }
+      }
+      if (records.length) {
+        await writeStreamChunk(stream, stringifier.stringifyRecords(records));
+        written += records.length;
+      }
+      if (written !== total) throw new Error(`incomplete glove export: expected ${total} frames, wrote ${written}`);
+      await closeWriteStream(stream);
+      emitProgress(true);
+      sendCsvSuccess([csvFilePath]);
+    } catch (error) {
+      stream.destroy();
+      sendCsvFailed(error, [csvFilePath]);
+    }
+  } finally {
+    sources.release();
+  }
+}
+
+async function exportHandGloveDoubleCsvStreaming({ date, csvTitle, csvTargetPath, sendCsvSuccess, sendCsvFailed, sendCsvProgress }) {
+  const sources = retainHandGloveExportSources();
+  const db = sources.left;
+  const db1 = sources.right;
+  try {
+    const leftStats = getHistoryStats(db, date);
+    const rightStats = getHistoryStats(db1, date);
+    const totalLength = Math.max(leftStats.count, rightStats.count);
+    if (!totalLength) {
+      sendCsvFailed(new Error('no rows to export'));
+      return;
+    }
+    const start = Math.max(0, historyArr[0] || 0);
+    const end = Math.min(historyArr[1] || totalLength, totalLength);
+    const sideLabel = getHandGloveSideLabels(csvTitle);
+    const collectionLabelInfo = getCollectionCsvLabelInfo(date);
+    const csvHeaders = [
+      { id: "index", title: csvTitle.index },
+      { id: "time", title: csvTitle.time },
+      { id: "leftMax", title: `${sideLabel.left}${csvTitle.max}` },
+      { id: "leftPressureArea", title: `${sideLabel.left}${csvTitle.pressureArea}` },
+      { id: "leftPressure", title: `${sideLabel.left}${csvTitle.pressure}` },
+      { id: "leftRealData", title: `${sideLabel.left}${csvTitle.realData}` },
+      { id: "leftZeroFrame", title: `${sideLabel.left}${csvTitle.zeroFrame}` },
+      { id: "leftRotate", title: `${sideLabel.left}${csvTitle.rotate}` },
+      { id: "rightMax", title: `${sideLabel.right}${csvTitle.max}` },
+      { id: "rightPressureArea", title: `${sideLabel.right}${csvTitle.pressureArea}` },
+      { id: "rightPressure", title: `${sideLabel.right}${csvTitle.pressure}` },
+      { id: "rightRealData", title: `${sideLabel.right}${csvTitle.realData}` },
+      { id: "rightZeroFrame", title: `${sideLabel.right}${csvTitle.zeroFrame}` },
+      { id: "rightRotate", title: `${sideLabel.right}${csvTitle.rotate}` },
+    ];
+    appendPrefixedHandGloveCsvHeaders(csvHeaders, 'left', csvTitle);
+    appendPrefixedHandGloveCsvHeaders(csvHeaders, 'right', csvTitle);
+    appendCollectionLabelHeaders(csvHeaders, csvTitle, collectionLabelInfo);
+
+    let str = formatCsvDatePart(nowGetTime || date);
+    const csvFilePath = csvTargetPath(`${getHandGloveCsvFilePrefix(csvTitle)}${str}.csv`);
+    const stringifier = createCsvStringifier({ header: csvHeaders });
+    const stream = fs.createWriteStream(csvFilePath, { encoding: 'utf8' });
+    let written = 0;
+    const baseRow = queryGloveHistoryRows(db, date, 1, start)[0] || queryGloveHistoryRows(db1, date, 1, start)[0];
+    const baseTimestamp = baseRow?.timestamp ?? null;
+    const leftIterator = iterateHandGloveHistoryRows(db, date, { start, end })[Symbol.iterator]();
+    const rightIterator = iterateHandGloveHistoryRows(db1, date, { start, end })[Symbol.iterator]();
+    const readBatch = (iterator, limit) => {
+      const rows = [];
+      while (rows.length < limit) {
+        const next = iterator.next();
+        if (next.done) break;
+        rows.push(next.value);
+      }
+      return rows;
+    };
+    const batchSize = 1000;
+    const emitProgress = (force = false) => {
+      if (typeof sendCsvProgress !== 'function') return;
+      const total = end - start;
+      sendCsvProgress({
+        percent: total ? Math.min(99, Math.round((written / total) * 100)) : 100,
+        filePercent: total ? Math.min(100, Math.round((written / total) * 100)) : 100,
+        written,
+        total,
         fileIndex: 1,
         fileCount: 1,
         currentFile: path.basename(csvFilePath),
         currentFilePath: csvFilePath,
-        force: true,
+        force,
       });
+    };
+
+    try {
+      await writeStreamChunk(
+        stream,
+        prefixCsvHeaderWithBom(stringifier.getHeaderString()),
+      );
+      emitProgress(true);
+      while (written < end - start) {
+        const limit = Math.min(batchSize, end - start - written);
+        const leftRows = readBatch(leftIterator, limit);
+        const rightRows = readBatch(rightIterator, limit);
+        const count = Math.max(leftRows.length, rightRows.length);
+        if (!count) break;
+        const records = [];
+        for (let index = 0; index < count; index++) {
+          const leftFrame = buildStoredHandGloveCsvFrame(leftRows[index], 'left');
+          const rightFrame = buildStoredHandGloveCsvFrame(rightRows[index], 'right');
+          const leftData = leftFrame.pressureData;
+          const rightData = rightFrame.pressureData;
+          const leftPress = leftData.reduce((sum, value) => sum + value, 0);
+          const rightPress = rightData.reduce((sum, value) => sum + value, 0);
+          const leftArea = leftData.filter((value) => value > 0).length;
+          const rightArea = rightData.filter((value) => value > 0).length;
+          const baseFrameRow = leftRows[index] || rightRows[index];
+          records.push(applyCollectionLabelInfo({
+            index: getCsvElapsedSecondsFromBase(baseFrameRow, start + written + index, baseTimestamp, written + index),
+            time: timeStampToDate(leftFrame.timestamp || rightFrame.timestamp || Date.now()),
+            leftMax: leftData.length ? findMax(leftData) : 0,
+            leftPressureArea: leftArea,
+            leftPressure: totalToN(leftPress),
+            leftRealData: JSON.stringify(leftData),
+            leftZeroFrame: leftFrame.zeroFrame.length ? JSON.stringify(leftFrame.zeroFrame) : '',
+            leftRotate: leftFrame.rotateData.length ? JSON.stringify(leftFrame.rotateData) : '',
+            rightMax: rightData.length ? findMax(rightData) : 0,
+            rightPressureArea: rightArea,
+            rightPressure: totalToN(rightPress),
+            rightRealData: JSON.stringify(rightData),
+            rightZeroFrame: rightFrame.zeroFrame.length ? JSON.stringify(rightFrame.zeroFrame) : '',
+            rightRotate: rightFrame.rotateData.length ? JSON.stringify(rightFrame.rotateData) : '',
+            ...buildPrefixedHandGloveCsvSegments(leftData, 'left'),
+            ...buildPrefixedHandGloveCsvSegments(rightData, 'right'),
+          }, collectionLabelInfo));
+        }
+        await writeStreamChunk(stream, stringifier.stringifyRecords(records));
+        written += count;
+        emitProgress();
+      }
+      await closeWriteStream(stream);
+      if (typeof sendCsvProgress === 'function') {
+        sendCsvProgress({
+          percent: 100,
+          filePercent: 100,
+          written: end - start,
+          total: end - start,
+          fileIndex: 1,
+          fileCount: 1,
+          currentFile: path.basename(csvFilePath),
+          currentFilePath: csvFilePath,
+          force: true,
+        });
+      }
+      sendCsvSuccess([csvFilePath]);
+    } catch (error) {
+      stream.destroy();
+      sendCsvFailed(error, [csvFilePath]);
     }
-    sendCsvSuccess([csvFilePath]);
-  } catch (error) {
-    stream.destroy();
-    sendCsvFailed(error, [csvFilePath]);
+  } finally {
+    sources.release();
   }
 }
 
@@ -2718,6 +2949,11 @@ async function exportHistoryCsvStreaming({ date, csvTitle, csvTargetPath, sendCs
 
     if (file === HAND_GLOVE_DOUBLE) {
       await exportHandGloveDoubleCsvStreaming({ date, csvTitle, csvTargetPath, sendCsvSuccess, sendCsvFailed, sendCsvProgress, downloadOptions });
+      return;
+    }
+
+    if (isHandGloveType(file)) {
+      await exportCombinedHandGloveCsvStreaming({ date, csvTitle, csvTargetPath, sendCsvSuccess, sendCsvFailed, sendCsvProgress });
       return;
     }
 
@@ -3444,10 +3680,17 @@ function switchActiveDisplaySystem(receiveFile, reason = 'file switch') {
   }
   closeMinzhenSensorPort(reason);
 
+  if (isHandGloveType(previousFile)) collectionInsertQueue.flushAll();
+  const previousDatabases = isHandGloveType(previousFile) ? [db, db1] : [];
   file = receiveFile.trim();
   Object.keys(petCareSystems).forEach(resetPetCareRuntime);
   baudRate = getSensorBaudRate(file);
   const nextDb = initDb(file);
+  previousDatabases.forEach((previousDb, index) => {
+    previousDb?.close(error => {
+      if (error) logger.warn(`[Glove] previous database ${index} close failed:`, error.message || error);
+    });
+  });
   db = nextDb.db;
   db1 = nextDb.db1;
   db2 = nextDb.db2;
@@ -4833,8 +5076,8 @@ module.exports = {
                   }
                 } else if (isHandGloveType(file)) {
                   // 鍏煎鏂版棫鏁版嵁鏍煎紡锛氭柊鐗?60(256+4)锛屾棫鐗?51(147+4)
-                  const sitRawFrame = parseStoredSensorFrame(JSON.parse(localData[value]?.data || '[]'), file)
-                  const backRawFrame = parseStoredSensorFrame(JSON.parse(localDataBack[value]?.data || '[]'), file)
+                  const sitRawFrame = getHandGlovePlaybackFrame(localData[value], file)
+                  const backRawFrame = getHandGlovePlaybackFrame(localDataBack[value], file)
                   const sitRaw = sitRawFrame.pressureData
                   const backRaw = backRawFrame.pressureData
                   if (file === HAND_GLOVE_FULL_PACKET && sitRaw.length >= 256) {
@@ -5104,8 +5347,8 @@ module.exports = {
                     }
                   } else if (isHandGloveType(file)) {
                     // 鍏煎鏂版棫鏁版嵁鏍煎紡锛氭柊鐗?60(256+4)锛屾棫鐗?51(147+4)
-                    const sitRawFrame = parseStoredSensorFrame(JSON.parse(localData[nowIndex]?.data || '[]'), file)
-                    const backRawFrame = parseStoredSensorFrame(JSON.parse(localDataBack[nowIndex]?.data || '[]'), file)
+                    const sitRawFrame = getHandGlovePlaybackFrame(localData[nowIndex], file)
+                    const backRawFrame = getHandGlovePlaybackFrame(localDataBack[nowIndex], file)
                     const sitRaw = sitRawFrame.pressureData
                     const backRaw = backRawFrame.pressureData
                     if (file === HAND_GLOVE_FULL_PACKET && sitRaw.length >= 256) {
@@ -6109,6 +6352,14 @@ module.exports = {
           }
 
           if (getMessage.delete) {
+            if (isHandGloveType(file)) {
+              try {
+                deleteHandGloveCollection(getMessage.delete);
+                broadcastJson({ download: 'deleteSuccess' });
+              } catch (error) {
+                logger.error('[Glove] failed to delete both hands:', error);
+              }
+            } else {
             const createTableQuery = `delete from matrix  where date='${getMessage.delete}'`;
 
             db.run(createTableQuery, function (err) {
@@ -6143,6 +6394,7 @@ module.exports = {
                   });
                 }
               });
+            }
             }
           }
 
