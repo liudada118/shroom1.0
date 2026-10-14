@@ -54,7 +54,7 @@ const serial = {
 /**
  * 汽车类型传感器列表（需要 sit + back 双串口）
  */
-const CAR_TYPES = ['yanfeng10', 'car', 'car10', 'volvo', 'footVideo', 'hand0507', 'hand0205', 'handGlove115200', 'handGloveFullPacket', 'carQX', 'wholeChair', 'eye', 'sofa', 'carY'];
+const CAR_TYPES = ['yanfeng10', 'car', 'car10', 'volvo', 'footVideo', 'hand0507', 'hand0205', 'hand0205Single', 'handGlove115200', 'handGloveFullPacket', 'carQX', 'wholeChair', 'eye', 'sofa', 'carY'];
 
 /**
  * 三串口类型（sit + back + head）
@@ -106,6 +106,7 @@ const SENSOR_MATRIX_MAP = {
   footL:      { width: 32, height: 32, total: 1024 },
   footR:      { width: 32, height: 32, total: 1024 },
   gloves:     { width: 16, height: 16, total: 256 },
+  hand0205Single: { width: 16, height: 16, total: 256 },
   bigBed:     { width: 64, height: 32, total: 2048 },
   matCol:     { width: 32, height: 32, total: 1024 },
   endiSit:    { width: 32, height: 32, total: 1024 },

@@ -106,10 +106,17 @@ export const SOLUTIONS = [
     icon: renderIcon(embodiedIcon),
     modules: [
       {
-        key: 'hand0205',
+        key: 'hand0205Single',
         labelKey: 'solutions.embodied.glove.label',
         icon: renderIcon(gloveIcon),
         detailTitleKey: 'solutions.embodied.glove.title',
+        detailKey: 'solutions.embodied.glove.detail',
+      },
+      {
+        key: 'hand0205',
+        labelKey: 'sensorHand0205',
+        icon: renderIcon(gloveIcon),
+        detailTitleKey: 'sensorHand0205',
         detailKey: 'solutions.embodied.glove.detail',
       },
       {

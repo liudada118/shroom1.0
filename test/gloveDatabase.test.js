@@ -188,7 +188,7 @@ function frameData(marker) {
   });
 }
 
-for (const sensorType of ['hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket']) {
+for (const sensorType of ['hand0205', 'hand0205Single', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket']) {
   test(`${sensorType} writes both hands to one physical database with distinct routed tables`, async (t) => {
     const fixture = temporaryDirectory(t);
     const { db, db1 } = fixture.open(sensorType);
@@ -212,6 +212,24 @@ for (const sensorType of ['hand0205', 'hand0205Double', 'handGlove115200', 'hand
     assert.deepEqual(fs.readdirSync(fixture.directory).filter((name) => name.endsWith('.db')), [`${sensorType}.db`]);
   });
 }
+
+test('restored glove and current glove keep their collections and deletions in separate databases', async (t) => {
+  const fixture = temporaryDirectory(t);
+  const current = fixture.open('hand0205');
+  const restored = fixture.open('hand0205Single');
+  await run(current.db, INSERT, [frameData(11), BASE_TIME, DATE]);
+  await run(current.db1, INSERT, [frameData(22), BASE_TIME + 1, DATE]);
+  await run(restored.db, INSERT, [frameData(33), BASE_TIME + 2, DATE]);
+  await run(restored.db1, INSERT, [frameData(44), BASE_TIME + 3, DATE]);
+  assert.equal((await all(current.db, 'SELECT * FROM matrix'))[0].data, frameData(11));
+  assert.equal((await all(restored.db, 'SELECT * FROM matrix'))[0].data, frameData(33));
+  await run(restored.db, 'DELETE FROM matrix WHERE date = ?', [DATE]);
+  await run(restored.db1, 'DELETE FROM matrix WHERE date = ?', [DATE]);
+  assert.equal((await all(restored.db, 'SELECT * FROM matrix')).length, 0);
+  assert.equal((await all(restored.db1, 'SELECT * FROM matrix')).length, 0);
+  assert.equal((await all(current.db, 'SELECT * FROM matrix'))[0].data, frameData(11));
+  assert.equal((await all(current.db1, 'SELECT * FROM matrix'))[0].data, frameData(22));
+});
 
 test('dbManager dispatches ordinary gloves to a single file without needing an init.db template', async (t) => {
   const fixture = temporaryDirectory(t);

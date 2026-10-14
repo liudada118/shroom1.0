@@ -113,7 +113,7 @@ const smallBedNoAlgType_title = 'smallBedNoAlg'
 const smallBed12BType_title = 'smallBed12B'
 const wholeChairType_title = 'wholeChair'
 const minzhenType_title = 'minzhen'
-const tactileGloveTypes_title = ['hand0205', 'handGlove115200', 'handGloveFullPacket']
+const tactileGloveTypes_title = ['hand0205Single', 'hand0205', 'handGlove115200', 'handGloveFullPacket']
 const fullPacketGloveType_title = 'handGloveFullPacket'
 const calibratableGloveTypes_title = tactileGloveTypes_title.filter((type) => type !== fullPacketGloveType_title)
 const isPetCareMatrixTitle = (type) => petCareMatrixTypes_title.includes(type)
@@ -1634,8 +1634,8 @@ class Title extends React.Component {
     // 全量传感器类型列表
     const allSensorArr = [
       { label: t('sensorHand'), value: 'hand' },
+      { label: t('sensorHand0205Single'), value: 'hand0205Single' },
       { label: t('sensorHand0205'), value: 'hand0205' },
-      { label: t('sensorHand0205Double'), value: 'hand0205Double' },
       { label: t('sensorHandGlove115200'), value: 'handGlove115200' },
       { label: t('sensorHandGloveFullPacket'), value: 'handGloveFullPacket' },
       { label: t('sensorSmallSample'), value: 'smallSample' },
@@ -1915,7 +1915,7 @@ class Title extends React.Component {
 
               if (calibratableGloveTypes_title.includes(this.props.matrixName)) {
                 if (['normal', 'skin'].includes(this.props.numMatrixFlag)) {
-                  this.props.com.current?.changeModal(this.props.hand)
+                  this.props.com.current?.changeModal?.(this.props.hand)
                 }
 
                 if (value == 'normal') {
@@ -2011,10 +2011,15 @@ class Title extends React.Component {
             >
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px' }}>
                 <Select
-                  defaultValue={this.state.calibHand || 'left'}
+                  value={this.state.calibHand || (this.props.matrixName === 'hand0205Single' && !this.props.hand ? 'right' : 'left')}
                   style={{ width: 100 }}
                   onChange={(e) => {
                     this.setState({ calibHand: e })
+                    if (this.props.matrixName === 'hand0205Single') {
+                      const hand = e === 'left';
+                      this.props.changeStateData({ hand });
+                      this.props.com.current?.changeModal?.(hand);
+                    }
                   }}
                   options={[
                     { value: 'left', label: t('leftHand') },
@@ -2043,7 +2048,7 @@ class Title extends React.Component {
 
               <Button
                 onClick={() => {
-                  this.props.colFingerData(this.state.fingerIndex, this.state.calibHand || 'left')
+                  this.props.colFingerData(this.state.fingerIndex, this.state.calibHand || (this.props.matrixName === 'hand0205Single' && !this.props.hand ? 'right' : 'left'))
                 }}
               >{t('colData')}</Button>
               <Button
@@ -2088,7 +2093,7 @@ class Title extends React.Component {
 
             <Button
               onClick={() => {
-                this.props.colFingerData(this.state.fingerIndex, this.state.calibHand || 'left')
+                this.props.colFingerData(this.state.fingerIndex, this.state.calibHand || (this.props.matrixName === 'hand0205Single' && !this.props.hand ? 'right' : 'left'))
               }}
             >采集数据</Button>
             <Button
@@ -2125,6 +2130,21 @@ class Title extends React.Component {
           : ''} */}
 
 
+        {this.props.matrixName === 'hand0205Single' ? (
+          <Select
+            value={this.props.hand}
+            style={{ marginRight: 6, width: 90 }}
+            onChange={(hand) => {
+              this.props.changeStateData({ hand });
+              this.props.com.current?.changeModal?.(hand);
+            }}
+            options={[
+              { value: true, label: t('leftHand') },
+              { value: false, label: t('rightHand') },
+            ]}
+          />
+        ) : null}
+
         {calibratableGloveTypes_title.includes(this.props.matrixName) && this.props.numMatrixFlag == 'normal' ? <Button className='titleButton'
           onClick={() => {
             // this.props.com.current?.calibration()
@@ -2135,6 +2155,9 @@ class Title extends React.Component {
 
 
             // 校准弹框
+            if (this.props.matrixName === 'hand0205Single') {
+              this.setState({ calibHand: this.props.hand ? 'left' : 'right' });
+            }
             this.props.changeCalibration()
 
             // 手固定

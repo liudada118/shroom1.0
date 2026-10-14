@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const BetterSqlite3 = require('better-sqlite3');
 
-const GLOVE_SENSOR_TYPES = Object.freeze(['hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket']);
+const GLOVE_SENSOR_TYPES = Object.freeze(['hand0205', 'hand0205Single', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket']);
 
 /** 判断是否使用左右手同库存储，其他传感系统保持原数据库布局。 */
 function isGloveDatabaseType(sensorType) {

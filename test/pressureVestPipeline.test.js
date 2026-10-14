@@ -79,7 +79,6 @@ function createPipeline(file = 'pressureVest') {
     flag: false, localFlag: false, saveTime: 'vest-recording', db: {},
     colHZ: 12, pointArr: [], pointArr1zeroData: [], pointArr1zero: [], newData: [], useMatrixOrigin: false,
     shouldStoreCollectionFrame: () => true, hasEnoughCollectionDiskSpace: () => true,
-    shouldSendRealtimeFrame: () => true,
     collectionInsertQueue: { enqueue: (_db, row, channel) => stored.push({ row, channel }) },
     WebSocket: { OPEN: 1 }, server: { clients: [{ readyState: 1, send: text => sent.push(JSON.parse(text)) }] },
     broadcastJson: value => sent.push(value),

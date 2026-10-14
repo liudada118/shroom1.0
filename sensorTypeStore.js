@@ -66,7 +66,8 @@ const BUILTIN_GROUPS = [
     icon: '🔬',
     items: [
       { label: '32*32(检测点)', value: 'handSinglePoint' },
-      { label: '触觉手套', value: 'hand0205' },
+      { label: '触觉手套', value: 'hand0205Single' },
+      { label: '触觉手套2', value: 'hand0205' },
       { label: '触觉手套2', value: 'hand0205Double' },
       { label: '触觉手套(115200)', value: 'handGlove115200' },
       { label: '触觉手套(整包)', value: 'handGloveFullPacket' },
@@ -108,8 +109,29 @@ function deriveMap(flat) {
 
 /** 任意来源（远程/缓存）的原始对象 → 规范化快照 { time, flat, map }（map 缺失则从 flat 派生）。 */
 function normalizeSnapshot(json) {
-  const flat = Array.isArray(json.flat) ? json.flat : [];
-  const map = (json.map && typeof json.map === 'object') ? json.map : deriveMap(flat);
+  // 老后台和缓存尚未区分单手切换版/双手同显版时，保留本地入口和名称。
+  // 这里只补展示清单，授权仍按独立的 sensor key 校验。
+  const localGloves = [
+    { label: '触觉手套', value: 'hand0205Single', group: '精密' },
+    { label: '触觉手套2', value: 'hand0205', group: '精密' },
+  ];
+  const labels = deriveMap(localGloves);
+  const flat = (Array.isArray(json.flat) ? json.flat : []).map((item) => (
+    item && Object.prototype.hasOwnProperty.call(labels, item.value)
+      ? { ...item, label: labels[item.value] }
+      : item
+  ));
+  for (const item of localGloves) {
+    if (flat.some((entry) => entry && entry.value === item.value)) continue;
+    const doubleIndex = flat.findIndex((entry) => entry && entry.value === 'hand0205');
+    if (item.value === 'hand0205Single' && doubleIndex >= 0) flat.splice(doubleIndex, 0, item);
+    else flat.push(item);
+  }
+  const map = {
+    ...deriveMap(flat),
+    ...((json.map && typeof json.map === 'object') ? json.map : {}),
+    ...labels,
+  };
   return { time: typeof json.time === 'number' ? json.time : 0, flat, map };
 }
 

@@ -111,7 +111,7 @@ const {
 
 const HAND_GLOVE_FULL_PACKET = 'handGloveFullPacket';
 const HAND_GLOVE_DOUBLE = 'hand0205Double';
-const HAND_GLOVE_TYPES = ['hand0205', HAND_GLOVE_DOUBLE, 'handGlove115200', HAND_GLOVE_FULL_PACKET];
+const HAND_GLOVE_TYPES = ['hand0205', 'hand0205Single', HAND_GLOVE_DOUBLE, 'handGlove115200', HAND_GLOVE_FULL_PACKET];
 const HAND_GLOVE_FULL_PACKET_LENGTH = 274;
 const TEMP_FULL_BED_TYPE = 'tempFullBed';
 const TEMP_FULL_BED_PRESSURE_THRESHOLD = 20;
@@ -140,12 +140,7 @@ const isZeroFrameStorageType = (sensorType = '') => isHandGloveType(sensorType) 
 const isSmallBedMatrixType = (sensorType) => [SMALL_BED_TYPE, SMALL_BED_NO_ALG_TYPE].includes(sensorType);
 const isThreePortFile = (sensorType) => THREE_PORT_SENSOR_TYPES.has(sensorType);
 const getFrameMatrixData = (frame, key) => Array.isArray(frame?.[key]) ? frame[key] : [];
-const HAND_GLOVE_REALTIME_SEND_INTERVAL_MS = 1000 / 60;
 const COLLECTION_MIN_FREE_BYTES = Number(process.env.SHROOM_MIN_COLLECTION_FREE_BYTES) || 2 * 1024 * 1024 * 1024;
-let lastHandGloveRealtimeSendAt = {
-  sit: 0,
-  back: 0,
-};
 const getSensorBaudRate = (sensorType) => {
   if (sensorType == 'handGlove115200') {
     return 115200;
@@ -672,19 +667,6 @@ function getCsvFilePrefix(sensorType, fallbackPrefix, downloadOptions = {}) {
   return fallbackPrefix;
 }
 
-function shouldSendRealtimeFrame(channel = 'sit') {
-  if (!isHandGloveType(file)) return true;
-
-  const now = Date.now();
-  const lastSendAt = lastHandGloveRealtimeSendAt[channel] || 0;
-  if (now - lastSendAt < HAND_GLOVE_REALTIME_SEND_INTERVAL_MS) {
-    return false;
-  }
-
-  lastHandGloveRealtimeSendAt[channel] = now;
-  return true;
-}
-
 function normalizeCollectFrequency(value) {
   const numberValue = Number(value);
   if (!Number.isFinite(numberValue) || numberValue <= 0) return 12;
@@ -1062,9 +1044,11 @@ function getHandGloveCsvFilePrefix(languageTitles = CSV_TITLES.zh) {
   return prefixes[getCsvTitleLanguage(languageTitles)];
 }
 
-/** 普通手套左右帧共用一个文件名，保留手套2原有文件名。 */
-function getCombinedHandGloveCsvFilePrefix(languageTitles = CSV_TITLES.zh) {
-  const prefixes = { zh: '触觉手套', en: 'glove', ja: '触覚グローブ' };
+/** 两种手套使用独立文件名前缀，避免同名采集在导出时互相覆盖。 */
+function getCombinedHandGloveCsvFilePrefix(languageTitles = CSV_TITLES.zh, sensorType = '') {
+  const prefixes = sensorType === 'hand0205'
+    ? { zh: '触觉手套2', en: 'glove2', ja: '触覚グローブ2' }
+    : { zh: '触觉手套', en: 'glove', ja: '触覚グローブ' };
   return prefixes[getCsvTitleLanguage(languageTitles)];
 }
 
@@ -2727,7 +2711,7 @@ async function exportCombinedHandGloveCsvStreaming({ date, csvTitle, csvTargetPa
         collectionLabelInfo,
       }),
     ];
-    const csvFilePath = csvTargetPath(`${getCombinedHandGloveCsvFilePrefix(csvTitle)}${formatCsvDatePart(nowGetTime || date)}.csv`);
+    const csvFilePath = csvTargetPath(`${getCombinedHandGloveCsvFilePrefix(csvTitle, sensorType)}${formatCsvDatePart(nowGetTime || date)}.csv`);
     const stringifier = createCsvStringifier({ header: csvHeaders });
     const stream = fs.createWriteStream(csvFilePath, { encoding: 'utf8' });
     let written = 0;
@@ -7893,7 +7877,7 @@ function colOrSendData(jsonData) {
     collectionInsertQueue.enqueue(db, [dataToStore, timestamp, date], 'sit');
   }
 
-  if (!localFlag && shouldSendRealtimeFrame('sit')) {
+  if (!localFlag) {
 
     server.clients.forEach(function each(client) {
       if (client.readyState === WebSocket.OPEN) {
@@ -8210,7 +8194,7 @@ function colOrSendData1(jsonData) {
     collectionInsertQueue.enqueue(db1, [dataToStore, timestamp, date], 'back');
   }
 
-  if (!localFlag && shouldSendRealtimeFrame('back')) {
+  if (!localFlag) {
 
     server.clients.forEach(function each(client) {
       if (client.readyState === WebSocket.OPEN) {

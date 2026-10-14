@@ -43,6 +43,13 @@ const ALL_SENSORS = SENSOR_GROUPS.flatMap((g) => g.items);
  * 与 Title.jsx 中 Select options 保持一致
  */
 const SENSOR_MODULES = {
+  hand0205Single: [
+    { value: 'num', labelKey: 'data2D' },
+    { value: 'normal', labelKey: 'tel3D' },
+    { value: 'num3D', labelKey: 'data3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
+    { value: 'skin', labelKey: 'skin3D' },
+  ],
   hand0205: [
     { value: 'num', labelKey: 'data2D' },
     { value: 'normal', labelKey: 'tel3D' },

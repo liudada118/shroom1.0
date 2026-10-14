@@ -17,7 +17,7 @@ const source = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
 const ast = acorn.parse(source, { ecmaVersion: 'latest' });
 const BASE_TIME = 1700000000000;
 const DATE = String(BASE_TIME);
-const GLOVE_TYPES = ['hand0205', 'handGlove115200', 'handGloveFullPacket'];
+const GLOVE_TYPES = ['hand0205', 'hand0205Single', 'handGlove115200', 'handGloveFullPacket'];
 
 /** 提取实际导出代码，避免启动 Electron、串口或生产数据库。 */
 function symbolSource(name) {
@@ -201,6 +201,22 @@ for (const file of GLOVE_TYPES) {
     assert.ok(harness.progress.every((value) => value.fileCount === 1));
   });
 }
+
+test('restored glove and glove2 exports use distinct localized filenames for the same collection', async (t) => {
+  for (const [language, oldPrefix, currentPrefix] of [
+    ['zh', '触觉手套', '触觉手套2'],
+    ['en', 'glove', 'glove2'],
+    ['ja', '触覚グローブ', '触覚グローブ2'],
+  ]) {
+    const left = [historyRow(1, BASE_TIME, 11)];
+    const restored = await createExportHarness(t, { file: 'hand0205Single', left }).export(language);
+    const current = await createExportHarness(t, { file: 'hand0205', left }).export(language);
+    assert.ok(restored.filename.startsWith(oldPrefix));
+    assert.ok(current.filename.startsWith(currentPrefix));
+    assert.notEqual(restored.filename, current.filename, 'the same collection time must not overwrite the other system export');
+    assert.deepEqual(restored.records, current.records, 'renaming systems must not alter raw frames');
+  }
+});
 
 test('equal millisecond timestamps and repeated timestamps preserve every frame with stable left-first ordering', async (t) => {
   const harness = createExportHarness(t, {

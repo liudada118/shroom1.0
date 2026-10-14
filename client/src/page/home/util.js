@@ -1961,6 +1961,9 @@ export const sitTypeEvent = {
       // that.com.current?.calibration([0,0,0])
     }
   },
+  hand0205Single: function(args) {
+    if (args.that.state.hand) return sitTypeEvent.hand0205(args);
+  },
   hand0205Double: function(args) { return sitTypeEvent.hand0205(args); },
   handGlove115200: function(args) { return sitTypeEvent.hand0205(args); },
   handGloveFullPacket: function(args) { return sitTypeEvent.hand0205(args); },
@@ -5012,6 +5015,9 @@ export const backTypeEvent = {
       // that.com.current?.handZero()
       // that.com.current?.calibration([0,0,0])
     }
+  },
+  hand0205Single: function(args) {
+    if (!args.that.state.hand) return backTypeEvent.hand0205(args);
   },
   hand0205Double: function(args) { return backTypeEvent.hand0205(args); },
   handGlove115200: function(args) { return backTypeEvent.hand0205(args); },

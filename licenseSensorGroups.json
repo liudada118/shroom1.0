@@ -45,6 +45,7 @@
     "icon": "🔬",
     "items": [
       { "labelKey": "sensorHandSinglePoint", "value": "handSinglePoint" },
+      { "labelKey": "sensorHand0205Single", "value": "hand0205Single" },
       { "labelKey": "sensorHand0205", "value": "hand0205" },
       { "labelKey": "sensorHand0205Double", "value": "hand0205Double" },
       { "labelKey": "sensorHandGlove115200", "value": "handGlove115200" },
