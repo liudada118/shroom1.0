@@ -28,12 +28,14 @@ class JqbedAlgorithmConfigTests(unittest.TestCase):
                 "pong": True,
                 "onbedFilterAvailable": True,
                 "onbedFilterSensitivitySchema": False,
+                "onbedFilterBedTypeSchema": False,
             })
             MODULE.ncz = None
             self.assertEqual(MODULE.health(), {
                 "pong": True,
                 "onbedFilterAvailable": False,
                 "onbedFilterSensitivitySchema": False,
+                "onbedFilterBedTypeSchema": False,
             })
         finally:
             MODULE.ncz = original
@@ -44,7 +46,9 @@ class JqbedAlgorithmConfigTests(unittest.TestCase):
         self.assertEqual(inputs["threshold_factor"], 0.0)
         self.assertEqual(inputs["filter_switch"], 1.0)
         self.assertEqual(inputs["sensitivity_threshold"], 0.0)
-        self.assertNotIn("head_foot_area", inputs)
+        self.assertEqual(inputs["isLowBed"], 0.0)
+        np.testing.assert_array_equal(inputs["head_foot_area"], [0.0, 0.0])
+        self.assertEqual(inputs["head_foot_area"].dtype, np.float32)
         np.testing.assert_array_equal(inputs["sos_disable_area"], [6.0, 10.0])
         self.assertEqual(inputs["frame_data"].dtype, np.float32)
 
@@ -64,6 +68,7 @@ class JqbedAlgorithmConfigTests(unittest.TestCase):
             "step_leavebed_trigger": 50,
             "edge_align_ratio": 6,
             "sensitivity_threshold": 3,
+            "isLowBed": 1,
             "sos_disable_area": [0, 0],
             "sitting_area": [255, 255],
             "leave_bed_disable_area": [32, 0],
@@ -92,6 +97,9 @@ class JqbedAlgorithmConfigTests(unittest.TestCase):
             {"strel_switch": -1},
             {"sensitivity_threshold": 4},
             {"sensitivity_threshold": 1.5},
+            {"isLowBed": 2},
+            {"isLowBed": 0.5},
+            {"isLowBed": True},
         )
 
         for config in invalid_configs:
@@ -139,6 +147,45 @@ class JqbedAlgorithmConfigTests(unittest.TestCase):
 
         inputs = MODULE.build_step_inputs([1], {"unknown_key": 99})
         self.assertNotIn("unknown_key", inputs)
+
+    def test_inactive_head_foot_area_stays_fixed_even_with_legacy_config(self):
+        inputs = MODULE.build_step_inputs([0] * 1024, {"head_foot_area": [254, 254], "isLowBed": 1})
+        np.testing.assert_array_equal(inputs["head_foot_area"], [0.0, 0.0])
+        self.assertEqual(inputs["isLowBed"], 1.0)
+        inputs["head_foot_area"][0] = 99
+        np.testing.assert_array_equal(MODULE.build_step_inputs([0], None)["head_foot_area"], [0.0, 0.0])
+
+    def test_health_distinguishes_old_sensitivity_only_and_new_bed_type_interfaces(self):
+        class FakeNcz:
+            @staticmethod
+            def step(inputs):
+                "sensitivity_threshold"
+
+        original = MODULE.ncz
+        try:
+            MODULE.ncz = FakeNcz
+            self.assertTrue(MODULE.health()["onbedFilterSensitivitySchema"])
+            self.assertFalse(MODULE.health()["onbedFilterBedTypeSchema"])
+            FakeNcz.step.__doc__ = "sensitivity_threshold head_foot_area isLowBed"
+            self.assertTrue(MODULE.health()["onbedFilterBedTypeSchema"])
+        finally:
+            MODULE.ncz = original
+
+    @unittest.skipIf(MODULE.ncz is None, "native library is unavailable on this platform")
+    def test_native_algorithm_accepts_both_bed_types_through_the_real_bridge(self):
+        self.assertTrue(MODULE.health()["onbedFilterBedTypeSchema"])
+        for bed_type in [0, 1]:
+            with self.subTest(bed_type=bed_type):
+                MODULE.ncz.initialize()
+                try:
+                    result = MODULE.getData([0] * 1024, {"isLowBed": bed_type})
+                    for key in ["matrix_origin", "matrix_filter"]:
+                        self.assertEqual(len(result[key]), 1024)
+                        self.assertTrue(np.all(np.isfinite(result[key])))
+                    self.assertIn("stateInBbed", result)
+                    self.assertIn("sosflag", result)
+                finally:
+                    MODULE.ncz.terminate()
 
     def test_get_data_passes_config_to_step_and_preserves_sosflag(self):
         class FakeNcz:

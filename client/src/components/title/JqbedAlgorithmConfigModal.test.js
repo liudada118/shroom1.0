@@ -26,6 +26,18 @@ describe('jqbed algorithm configuration UI contract', () => {
     expect(modalSource).toContain('jqbedAlgorithmConfig__footer');
   });
 
+  it('provides a labelled bed-type select with only the two supported algorithm values', () => {
+    const bedTypeControl = modalSource.split("if (field.kind === 'bedType') {")[1]
+      .split("if (field.kind === 'sensitivityMode') {")[0];
+    expect(bedTypeControl).toContain('<Select');
+    expect(bedTypeControl).toContain('value={Number(value)}');
+    expect(bedTypeControl).toContain('aria-label={t(field.labelKey)}');
+    expect(bedTypeControl).toContain('options={[0, 1].map((bedType)');
+    expect(bedTypeControl).toContain('onChange={setValue}');
+    expect(bedTypeControl).toContain('jqbedAlgorithmConfig.bedTypes.${bedType}');
+    expect(bedTypeControl).not.toMatch(/defaultValue|i18n\./);
+  });
+
   it('sends backend-owned read, save and reset requests', () => {
     expect(titleSource).toContain('getJqbedAlgorithmConfig: true');
     expect(titleSource).toContain('setJqbedAlgorithmConfig: values');

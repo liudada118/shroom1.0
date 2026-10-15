@@ -4,6 +4,7 @@ const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { runtimeNativeMatchesSource } = require('./pythonRuntimeNative');
 
 let electronApp = null;
 try {
@@ -103,7 +104,9 @@ function resolveFreshDevExe() {
     latestMtime(path.join(devPythonRoot(), 'requirements.txt'))
   );
 
-  return latestMtime(runtimeDir) >= sourceStamp ? runtimeExe : null;
+  return latestMtime(runtimeDir) >= sourceStamp
+    && runtimeNativeMatchesSource({ appDir: path.join(devPythonRoot(), 'app'), runtimeDir })
+    ? runtimeExe : null;
 }
 
 function resolveServerPy() {

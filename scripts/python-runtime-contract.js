@@ -1,16 +1,11 @@
 "use strict";
 
 const { spawnSync } = require("child_process");
-const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const { NATIVE_FILENAME, fileSha256 } = require("../pythonRuntimeNative");
 
-const NATIVE_FILENAME = "onbed_filter.cp311-win_amd64.pyd";
-const TRACKED_ONBED_FILTER_SHA256 = "cdc003a317f8281ab126839df4a3e94237a5856229cb3660cfaeb453b4d462e2";
-
-function fileSha256(filePath) {
-  return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
-}
+const TRACKED_ONBED_FILTER_SHA256 = "0650ee61472710df08589a971d9c7c2ec991f23c98a55e658677099d4d8aa349";
 
 function normalizeExpectedSha256(value) {
   const normalized = String(value || "").trim().toLowerCase();
@@ -123,6 +118,9 @@ function parseRuntimeHealth(stdout) {
   }
   if (response.data.onbedFilterSensitivitySchema !== true) {
     throw new Error("native onbed_filter module does not support sensitivity_threshold schema");
+  }
+  if (response.data.onbedFilterBedTypeSchema !== true) {
+    throw new Error("native onbed_filter module does not support head_foot_area/isLowBed schema");
   }
   return response.data;
 }

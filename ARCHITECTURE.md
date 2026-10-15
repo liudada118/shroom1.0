@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-10-14
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-10-15
 
 ## 1. 项目概述
 
@@ -171,7 +171,7 @@ shroom1.0/
 | `/docs/japanese-alert-mp3-generation-guide.md` | 日文告警 MP3 的可复现生成与发布指南；记录固定 TTS 参数、候选校验、public/build 同步、运行时映射和故障排查 |
 | `/preload.js` | Electron 预加载脚本，建立渲染进程与主进程之间的安全 IPC 通道 |
 | `/server.js` | 后端核心调度器，协调串口通信、数据处理、WebSocket 分发、数据库存储 |
-| `/server/jqbedAlgorithmConfig.js` | jqbed 算法配置的 18 项默认值、双层校验、版本化快照及临时文件写入后重命名的原子持久化实现 |
+| `/server/jqbedAlgorithmConfig.js` | jqbed 算法配置的 19 项默认值、双层校验、v1/v2 到 v3 的兼容读取及临时文件写入后重命名的原子持久化实现 |
 | `/server/jqbedAlgorithmProtocol.js` | jqbed 实时配置的 WebSocket 协议边界；负责读取、保存、恢复默认、结果关联、广播和非 jqbed Python 请求隔离 |
 | `/client/src/components/title/` | 除通用标题栏外，包含 `JqbedAlgorithmConfigModal.jsx`、`jqbedAlgorithmConfig.js` 与样式，提供四分组配置交互和前端校验 |
 | `/client/src/hooks/` | 7 个自定义 React Hook，封装 WebSocket、压力数据、串口控制、3D 场景等逻辑 |
@@ -182,6 +182,7 @@ shroom1.0/
 | `/docs/` | 当前架构、目标平台架构、产品介绍、专利交底、优化报告、技术指南及 EULA 最终用户许可协议文本 |
 | `/build/model/human3-low-muscular*.glb` | 人体低面数参考模型及边界对比变体；用于构建资源验证，不改变 `HumanBodyOptimized` 当前默认模型入口 |
 | `/scripts/` | 打包与发布脚本目录，包含 Python runtime 同步、更新说明注入，以及打包前清理和 `afterPack`/`afterComplete` 兜底移除 `config.txt` 的脚本 |
+| `/pythonRuntimeNative.js` | 开发启动与构建共用的 Windows 原生算法 SHA-256 比对，检查源码与 PyInstaller `_internal` / flat 布局内的 PYD 一致；仅依赖 Node 内置模块，随主程序打包 |
 | `/python/app/` | Python 算法桥目录；`onbed_filter_example.py` 提供 JSON-line RPC，`oneStep/` 提供足压分析，`petCare/` 提供 `petCare` / `petCareMini` 算法二进制与调用文档 |
 | `/python/dist/onbed_server/`、`/pack-resources/python/onbed_server/` | Windows 正式 Python JSON-line runtime 的构建输出与打包同步副本；均为生成物，不进入 Git |
 | `/db/` | SQLite 数据库文件，存储采集数据和配置信息（运行时生成，Git 忽略） |
@@ -335,11 +336,12 @@ graph TD
 
 配置链路为 `Title` 图标/弹窗 → `Home` WebSocket → `jqbedAlgorithmProtocol` → `jqbedAlgorithmConfig` store → `server.js` 的 `jqbedTimer` → `pyWorker` → `getData(data, config=None)` → `onbed_filter.pyd`。该链路只服务持有效 `jqbed` 授权的实时“小床监测”；标题栏调节图标仅在 `matrixName === 'jqbed'` 时显示并位于通用设置齿轮左侧，回放时保留入口但禁用，提示“算法参数仅对实时监测生效”，后端同时以授权、活动系统和实时状态再次拒绝越界请求。
 
-- **字段模型**：共 18 项，分为四组。SOS：`sos_peak_threshold`、`points_threshold_in`、`sos_disable_area`、`min_sos_sequence`；基础参数：`threshold_factor`、`continuous_on_bed_duration_minutes`、`unlock_sitting_alarm_duration_minutes`；滤波与区域：`filter_switch`、`strel_switch`、`leave_bed_disable_area`、`small_object_size`；高级参数：`breath_detect_mode`、`sitting_area`、`body_movement_threshold`、`step_leavebed_trigger`、`edge_align_ratio`、`sensitivity_threshold`、`breath_th`。新版原生算法删除二元输入 `head_foot_area`，新增整数模式 `sensitivity_threshold`：`0` 默认、`1` 宽松（严格参数）、`2` 标准、`3` 灵敏，用于联动三个内部阈值；实时返回预留字段第 5～8 位用于显示内部细节。前后端都要求字段完整并拒绝未知字段、非有限值和负数，灵敏度严格限制为整数 `0–3`；配置 envelope 升级至 v2，读取 v1 时保留其余公共参数、丢弃 `head_foot_area` 并补入灵敏度默认值。二维区域继续按各自约束校验，`sitting_area` 额外允许成对哨兵 `[255, 255]`。
+- **字段模型**：共 19 项，分为四组。SOS：`sos_peak_threshold`、`points_threshold_in`、`sos_disable_area`、`min_sos_sequence`；基础参数：`threshold_factor`、`continuous_on_bed_duration_minutes`、`unlock_sitting_alarm_duration_minutes`、`isLowBed`；滤波与区域：`filter_switch`、`strel_switch`、`leave_bed_disable_area`、`small_object_size`；高级参数：`breath_detect_mode`、`sitting_area`、`body_movement_threshold`、`step_leavebed_trigger`、`edge_align_ratio`、`sensitivity_threshold`、`breath_th`。2026-10-15 更新为用户提供的“关怀2.0.14.2”Windows 原生包。新增床型下拉 `isLowBed`：`0` 高床/正常床（当前国内默认）、`1` 矮床（日本版通常选用），配置不随界面语言改变。`head_foot_area` 经用户确认在此版本无效，不出现在设置或持久化配置中；原生接口仍强制要求该字段，Python 每帧固定传入 `float32[0,0]`，忽略旧配置对此字段的覆写。灵敏度 `sensitivity_threshold` 继续使用整数模式 `0` 默认、`1` 宽松（严格参数）、`2` 标准、`3` 灵敏。前后端要求19字段完整，拒绝未知字段、非有限值和负数；床型仅接受0/1，二维区域继续沿用各自约束，`sitting_area` 额外允许成对哨兵 `[255,255]`。配置 envelope 升级为 v3，读取 v1/v2 时保留现有合法参数、丢弃失效 `head_foot_area`、补足床型及缺失默认值，仅在用户保存/恢复时写入新版本文件。
 - **持久化与同步**：打包环境写入 `app.getPath('userData')/jqbed-algorithm-config.json`，开发环境写入项目根目录 `jqbed-algorithm-config.json`。store 先把版本化 envelope 写入同目录唯一 `.tmp` 临时文件，再以 rename 替换正式 JSON；只有落盘成功后才更新内存快照。保存或恢复默认会向所有 WebSocket 客户端广播后端快照，GET/保存/恢复均按 `requestId` 返回明确结果。`Home` 只有在主 WebSocket 真正完成 `send()` 时才报告成功，并把连接状态及重连 epoch 传给弹窗；弹窗为读取和变更分别设置 10 秒超时，断线会清理 pending，重连会重新 GET。发送失败、超时、拒绝和断线都保留 dirty 草稿，远端广播/重连快照也不会覆盖未保存输入。
 - **帧边界与系统隔离**：`jqbedTimer` 每次 Python 调用前读取一次深拷贝快照；已经发出的在途帧不被修改，下一帧开始使用新配置。`buildJqbedGetDataArgs()` 仅在活动系统为 `jqbed` 时附加 `config`；兼容定时器中的 `smallBed` 仍只发送 `{ data }`，`smallBedNoAlg` 与 `smallBed12B` 不进入此 Python 配置链路。原始矩阵、采集、回放、CSV 和历史数据通道不读取算法配置。
 - **Python 与告警边界**：`python/app/onbed_filter_example.py` 的 `getData(data, config=None)` 将合法 JSON 配置转换为 `onbed_filter.pyd` 的标量或 `float32` 二元数组输入。SOS 配置本身不直接触发或改写前端告警；只有 PYD 输出经 Python RPC 返回的 `sosflag` 继续进入现有 `Home`/`Aside` 告警路径。
-- **正式 runtime**：Windows 仓库直接跟踪指定的 `python/app/onbed_filter.cp311-win_amd64.pyd`，固定 SHA-256 为 `CDC003A317F8281AB126839DF4A3E94237A5856229CB3660CFAEB453B4D462E2`，保证其他电脑 `git pull` 后不会继续沿用仍要求 `head_foot_area` 的旧二进制。`npm run prepare-pack-resources` 默认校验该固定哈希；仍可用 `ONBED_FILTER_PYD_SOURCE` 与 `ONBED_FILTER_PYD_SHA256` 显式注入并校验外部候选。构建脚本对 Python 3.11 探测、PyInstaller 构建统一强制 UTF-8，生成 `python/dist/onbed_server/onbed_server.exe` 后执行 `health` JSON-line RPC，只有 `pong=true`、`onbedFilterAvailable=true` 且 `onbedFilterSensitivitySchema=true` 才继续同步到 `pack-resources/python/onbed_server/onbed_server.exe`，从打包阶段阻断旧字段协议。`npm run check-python-runtime-health` 可独立复验。打包后的 `pyWorker` 从 `process.resourcesPath/python`（含 `app.asar.unpacked` 候选）解析该可执行文件，并保持 stdout 仅承载 JSON-line RPC。`python/app/serial_monitor_updated2.0(1).py` 仅是非运行时、未跟踪参考，不属于提交、构建输入或打包 runtime。
+- **正式 runtime**：Windows 仓库跟踪 `python/app/onbed_filter.cp311-win_amd64.pyd`，本次新包固定 SHA-256 为 `0650EE61472710DF08589A971D9C7C2EC991F23C98A55E658677099D4D8AA349`。`npm run prepare-pack-resources` 默认校验该哈希，仍可用 `ONBED_FILTER_PYD_SOURCE` 与 `ONBED_FILTER_PYD_SHA256` 显式注入并校验外部候选。`scripts/build-python-runtime.js` 与开发模式的 `pyWorker.resolveFreshDevExe()` 除源文件时间外，还通过根模块 `pythonRuntimeNative.js` 比较源码与运行时实际 PYD 的 SHA-256；缺失、内容不同或 `_internal` / flat 同时存在的副本冲突时拒用，防止只替换源包却继续加载旧算法。非 Windows 保持原平台流程。Python 3.11 探测和 PyInstaller 构建统一强制 UTF-8；生成 runtime 后执行 `health` JSON-line RPC，要求 `pong=true`、`onbedFilterAvailable=true`、`onbedFilterSensitivitySchema=true` 和新增的 `onbedFilterBedTypeSchema=true`，再同步到 `pack-resources/python/onbed_server/`。`npm run check-python-runtime-health` 可独立复验。实际算法调用另以两个床型的1024点模拟帧验证输入兼容和输出结构。安装版从 `process.resourcesPath/python`（含 `app.asar.unpacked` 候选）加载该运行时，stdout 仅承载 JSON-line RPC；源码更新需重启开发后端，已安装软件需重新生成安装包。`python/app/serial_monitor_updated2.0(1).py` 仍仅为未跟踪参考。
+- **本次验证**：38项Node测试、47项前端Vitest与10项Python测试通过，含真实原生库两个床型调用；前端生产构建通过。Python运行时已重建并同步，源码、运行时及待打包副本的PYD哈希一致；两个exe各用零帧/非零帧验证两种床型，实际 `pyWorker` 链路健康检查和 `getData` 调用也通过。测试未操作真实传感器或用户配置/采集库。
 
 ### 4.4. 人体全身优化 HaLow 数据入口
 
@@ -925,6 +927,8 @@ HaLow socket 的连接错误与其设备 ID / 来源 IP 关联，同设备重新
 
 | 2026-10-14 | Codex | 手套系统类型恢复原对应关系 | 本机使用 `hand0205`=旧单手、`hand0205Double`=当前双手，`hand0205Single` 归一为单手别名；原单项全选密钥可显示两套。前后端及SDK对应一致，保留各自现有采集库和单CSV，旧Double历史只读迁入一次。 |
 
+| 2026-10-15 | Codex | 小床监测算法包及床型配置更新 | 替换“关怀2.0.14.2”Windows PYD并固定新哈希，新增高床/矮床配置，19字段配置升级v3并兼容旧值；无效head_foot_area只保留调用兼容值。源码/打包运行时增加原生库哈希匹配，重建并同步新版Python资源。 |
+
 ## 9. 更新日志
 
 | 时间 | 分支 | 变更类型 | 描述 |
@@ -1407,6 +1411,8 @@ HaLow socket 的连接错误与其设备 ID / 来源 IP 关联，同设备重新
 | 2026-10-14 | Revise | 功能调整 | 取消触觉手套系列后端约60Hz实时WebSocket推送限频，完整压力与姿态帧按左右路接收顺序推送到前端。 |
 
 | 2026-10-14 | Revise | 修复缺陷 | 恢复本机触觉手套/触觉手套2与 `hand0205`/`hand0205Double` 的对应关系，修复旧密钥单项全选缺少单手入口；兼容Single别名，保留旧库，双手实时与单CSV沿用当前展示行为。 |
+
+| 2026-10-15 | Revise | 算法更新 | 小床监测使用“关怀2.0.14.2”算法，基础参数新增床型isLowBed（0高床、1矮床）；忽略失效head_foot_area设置并在桥接补固定值，兼容v1/v2配置，哈希及健康检查防止沿用旧运行时。 |
 
 ## 2026-06-04 Minzhen / Wheelchair Display System
 

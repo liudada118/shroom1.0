@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const JQBED_ALGORITHM_CONFIG_VERSION = 2;
+const JQBED_ALGORITHM_CONFIG_VERSION = 3;
 
 const DEFAULT_JQBED_ALGORITHM_VALUES = Object.freeze({
   threshold_factor: 0.0,
@@ -22,6 +22,7 @@ const DEFAULT_JQBED_ALGORITHM_VALUES = Object.freeze({
   edge_align_ratio: 0.0,
   sensitivity_threshold: 0.0,
   breath_th: 0.0,
+  isLowBed: 0,
 });
 
 const FIELD_RULES = Object.freeze({
@@ -43,6 +44,7 @@ const FIELD_RULES = Object.freeze({
   edge_align_ratio: { kind: 'number' },
   sensitivity_threshold: { kind: 'sensitivityMode' },
   breath_th: { kind: 'number' },
+  isLowBed: { kind: 'bedType' },
 });
 
 class JqbedAlgorithmConfigValidationError extends Error {
@@ -77,6 +79,13 @@ function normalizePair(value, kind) {
   return { value: pair };
 }
 
+function normalizeBedType(value) {
+  const parsed = parseNonnegativeNumber(value);
+  return !parsed.error && (parsed.value === 0 || parsed.value === 1)
+    ? parsed
+    : { error: 'bedType' };
+}
+
 function normalizeJqbedAlgorithmValues(values) {
   const errors = Object.create(null);
   const source = values && typeof values === 'object' && !Array.isArray(values) ? values : {};
@@ -91,9 +100,11 @@ function normalizeJqbedAlgorithmValues(values) {
       errors[key] = 'missing';
       continue;
     }
-    const result = rule.kind === 'pair' || rule.kind === 'sittingPair'
-      ? normalizePair(source[key], rule.kind)
-      : parseNonnegativeNumber(source[key]);
+    const result = rule.kind === 'bedType'
+      ? normalizeBedType(source[key])
+      : rule.kind === 'pair' || rule.kind === 'sittingPair'
+        ? normalizePair(source[key], rule.kind)
+        : parseNonnegativeNumber(source[key]);
     if (result.error) {
       errors[key] = result.error;
       continue;
@@ -163,11 +174,11 @@ function createJqbedAlgorithmConfigStore({ filePath, fsImpl = fs, now = () => ne
     try {
       const envelope = JSON.parse(fsImpl.readFileSync(filePath, 'utf8'));
       if (!envelope
-        || ![1, JQBED_ALGORITHM_CONFIG_VERSION].includes(envelope.version)
+        || ![1, 2, JQBED_ALGORITHM_CONFIG_VERSION].includes(envelope.version)
         || typeof envelope.savedAt !== 'string') {
         throw new Error('incompatible configuration envelope');
       }
-      const values = envelope.version === 1
+      const values = envelope.version < JQBED_ALGORITHM_CONFIG_VERSION
         ? Object.fromEntries(Object.keys(DEFAULT_JQBED_ALGORITHM_VALUES).map((key) => [
           key,
           Object.hasOwn(envelope.values || {}, key)

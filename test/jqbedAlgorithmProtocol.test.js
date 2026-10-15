@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const {
+  JQBED_ALGORITHM_CONFIG_VERSION,
   DEFAULT_JQBED_ALGORITHM_VALUES,
   JqbedAlgorithmConfigValidationError,
 } = require('../server/jqbedAlgorithmConfig');
@@ -13,7 +14,7 @@ const {
 } = require('../server/jqbedAlgorithmProtocol');
 
 function createSnapshot(values = DEFAULT_JQBED_ALGORITHM_VALUES, savedAt = null) {
-  return { version: 1, values: structuredClone(values), savedAt };
+  return { version: JQBED_ALGORITHM_CONFIG_VERSION, values: structuredClone(values), savedAt };
 }
 
 function createProtocol({ save, reset } = {}) {

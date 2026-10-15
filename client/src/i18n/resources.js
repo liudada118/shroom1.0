@@ -814,6 +814,7 @@ export const bilingualConfig = {
       points_threshold_in: { label: text('SOS 拍打点数', 'SOS pat point count'), help: text('SOS 拍打检测使用的点数阈值。', 'Point-count threshold used for SOS pat detection.') },
       sos_disable_area: { label: text('SOS 禁用区域', 'SOS disabled area'), help: text('SOS 检测忽略的前、后区域边界。', 'Front and back boundaries excluded from SOS detection.') },
       min_sos_sequence: { label: text('最小 SOS 连续次数', 'Minimum SOS sequence'), help: text('触发 SOS 所需的最小连续检测次数。', 'Minimum consecutive detections required to trigger SOS.') },
+      isLowBed: { label: text('床型', 'Bed type'), help: text('0 高床（正常床），1 矮床。国内版本默认使用 0，日本版本通常使用 1；切换界面语言不会改变床型。', '0 High (standard) bed, 1 Low bed. The China version defaults to 0; the Japan version typically uses 1. Changing the interface language does not change the bed type.') },
       threshold_factor: { label: text('离床阈值因子', 'Bed-exit threshold factor'), help: text('调节离床判定的灵敏度。', 'Adjusts bed-exit detection sensitivity.') },
       continuous_on_bed_duration_minutes: { label: text('连续在床时长（分钟）', 'Continuous in-bed duration (minutes)'), help: text('判定连续在床的最小时长。', 'Minimum duration required for continuous in-bed status.') },
       unlock_sitting_alarm_duration_minutes: { label: text('坐起告警解锁时长（分钟）', 'Sitting alarm unlock duration (minutes)'), help: text('坐起告警触发后的解锁等待时长。', 'Wait time before a sitting alarm can be unlocked.') },
@@ -828,6 +829,10 @@ export const bilingualConfig = {
       edge_align_ratio: { label: text('边缘对齐比例', 'Edge alignment ratio'), help: text('用于边缘对齐的比例参数。', 'Ratio parameter used for edge alignment.') },
       sensitivity_threshold: { label: text('坐床边灵敏度模式', 'Bed-edge sensitivity mode'), help: text('0 默认、1 宽松（严格参数）、2 标准、3 灵敏；用于联动算法内部三个阈值，实时返回的预留字段第 5～8 位会显示内部细节。', '0 Default, 1 Relaxed (strict parameters), 2 Standard, 3 Sensitive. It controls three internal thresholds; reserved real-time fields 5–8 expose the internal details.') },
       breath_th: { label: text('呼吸阈值', 'Breathing threshold'), help: text('呼吸检测使用的阈值。', 'Threshold used for breathing detection.') },
+    },
+    bedTypes: {
+      0: text('0 高床（正常床）', '0 High (standard) bed'),
+      1: text('1 矮床', '1 Low bed'),
     },
     sensitivityModes: {
       0: text('0 默认', '0 Default'),
@@ -865,6 +870,7 @@ export const bilingualConfig = {
       nonnegative: text('请输入大于或等于 0 的值。', 'Enter a value greater than or equal to 0.'),
       integer: text('请输入整数。', 'Enter an integer.'),
       switch: text('开关值只能为 0 或 1。', 'A switch value must be 0 or 1.'),
+      bedType: text('床型只能选择 0（高床）或 1（矮床）。', 'Bed type must be 0 (high bed) or 1 (low bed).'),
       sensitivityMode: text('灵敏度模式只能选择 0、1、2 或 3。', 'Sensitivity mode must be 0, 1, 2, or 3.'),
       pair: text('请输入两个坐标值。', 'Enter two coordinate values.'),
       range: text('坐标值必须在 0 到 32 之间。', 'Coordinate values must be between 0 and 32.'),

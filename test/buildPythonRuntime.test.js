@@ -114,13 +114,19 @@ test('forces UTF-8 for every spawned Python process', () => {
 
 test('accepts health output only when the native algorithm is available', () => {
   assert.deepEqual(parseRuntimeHealth(
-    '{"id":"build-health","ok":true,"data":{"pong":true,"onbedFilterAvailable":true,"onbedFilterSensitivitySchema":true}}\n',
-  ), { pong: true, onbedFilterAvailable: true, onbedFilterSensitivitySchema: true });
+    '{"id":"build-health","ok":true,"data":{"pong":true,"onbedFilterAvailable":true,"onbedFilterSensitivitySchema":true,"onbedFilterBedTypeSchema":true}}\n',
+  ), { pong: true, onbedFilterAvailable: true, onbedFilterSensitivitySchema: true, onbedFilterBedTypeSchema: true });
   assert.throws(() => parseRuntimeHealth(
     '{"id":"build-health","ok":true,"data":{"pong":true,"onbedFilterAvailable":false,"onbedFilterSensitivitySchema":false}}\n',
   ), /native onbed_filter module is unavailable/);
   assert.throws(() => parseRuntimeHealth(
     '{"id":"build-health","ok":true,"data":{"pong":true,"onbedFilterAvailable":true,"onbedFilterSensitivitySchema":false}}\n',
   ), /does not support sensitivity_threshold schema/);
+  assert.throws(() => parseRuntimeHealth(
+    '{"id":"build-health","ok":true,"data":{"pong":true,"onbedFilterAvailable":true,"onbedFilterSensitivitySchema":true}}\n',
+  ), /does not support head_foot_area\/isLowBed schema/);
+  assert.throws(() => parseRuntimeHealth(
+    '{"id":"build-health","ok":true,"data":{"pong":true,"onbedFilterAvailable":true,"onbedFilterSensitivitySchema":true,"onbedFilterBedTypeSchema":false}}\n',
+  ), /does not support head_foot_area\/isLowBed schema/);
   assert.throws(() => parseRuntimeHealth('not-json\n'), /valid JSON health response/);
 });

@@ -3,6 +3,7 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { runtimeNativeMatchesSource } = require("../pythonRuntimeNative");
 const {
   spawnPython,
   stageOnbedFilterNative,
@@ -112,7 +113,8 @@ function runtimeIsFresh() {
     latestMtime(path.join(pythonRoot, "requirements.txt"))
   );
 
-  return latestMtime(runtimeDir) >= sourceStamp;
+  return latestMtime(runtimeDir) >= sourceStamp
+    && runtimeNativeMatchesSource({ appDir: path.join(pythonRoot, "app"), runtimeDir });
 }
 
 function interpreterCandidates() {
@@ -272,7 +274,8 @@ function main() {
     const health = verifyRuntimeHealth(runtimeExe);
     console.log(
       `[pack] python runtime health ready; onbedFilterAvailable=${health.onbedFilterAvailable}; `
-      + `onbedFilterSensitivitySchema=${health.onbedFilterSensitivitySchema}`
+      + `onbedFilterSensitivitySchema=${health.onbedFilterSensitivitySchema}; `
+      + `onbedFilterBedTypeSchema=${health.onbedFilterBedTypeSchema}`
     );
   } finally {
     stagedNative.cleanup();

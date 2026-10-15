@@ -29,6 +29,7 @@ export const JQBED_CONFIG_FIELDS = Object.freeze([
   { key: 'points_threshold_in', group: 'sos', kind: 'number' },
   { key: 'sos_disable_area', group: 'sos', kind: 'pair' },
   { key: 'min_sos_sequence', group: 'sos', kind: 'integer' },
+  { key: 'isLowBed', group: 'basic', kind: 'bedType' },
   { key: 'threshold_factor', group: 'basic', kind: 'number' },
   { key: 'continuous_on_bed_duration_minutes', group: 'basic', kind: 'number' },
   { key: 'unlock_sitting_alarm_duration_minutes', group: 'basic', kind: 'number' },
@@ -84,6 +85,12 @@ function normalizePair(value, kind) {
 }
 
 function normalizeFieldValue(field, value) {
+  if (field.kind === 'bedType') {
+    const result = parseNonnegativeNumber(value);
+    return !result.error && (result.value === 0 || result.value === 1)
+      ? result
+      : { error: 'bedType' };
+  }
   if (field.kind === 'switch' && typeof value === 'boolean') {
     return { value: value ? 1 : 0 };
   }

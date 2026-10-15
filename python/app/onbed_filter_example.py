@@ -533,7 +533,11 @@ def health():
         "onbedFilterSensitivitySchema": (
             ncz is not None
             and "sensitivity_threshold" in step_doc
-            and "head_foot_area" not in step_doc
+        ),
+        "onbedFilterBedTypeSchema": (
+            ncz is not None
+            and "isLowBed" in step_doc
+            and "head_foot_area" in step_doc
         ),
     }
 
@@ -625,11 +629,15 @@ def create_default_inputs():
         'step_leavebed_trigger': 50.0,
         'edge_align_ratio': 0.0,
         'sensitivity_threshold': 0.0,
+        # 国内默认正常/高床；日本矮床可在算法配置中选择 1。
+        'isLowBed': 0.0,
         # 数组参数
         'sos_disable_area': np.array([6.0, 10.0], dtype=np.float32),
         'sitting_area': np.array([0.0, 0.0], dtype=np.float32),
         'leave_bed_disable_area': np.array([0.0, 0.0], dtype=np.float32),
         'small_object_size': np.array([0.0, 0.0], dtype=np.float32),
+        # 新版仍要求此接口字段，但参数已无效；只提供固定兼容值，不开放配置。
+        'head_foot_area': np.array([0.0, 0.0], dtype=np.float32),
     }
     return inputs
 
@@ -641,7 +649,7 @@ ALGORITHM_PAIR_KEYS = {
     'small_object_size',
 }
 ALGORITHM_INTEGER_KEYS = {'min_sos_sequence', 'breath_detect_mode', 'sensitivity_threshold'}
-ALGORITHM_SWITCH_KEYS = {'filter_switch', 'strel_switch'}
+ALGORITHM_SWITCH_KEYS = {'filter_switch', 'strel_switch', 'isLowBed'}
 
 
 def _normalize_json_number(key, value):
@@ -688,7 +696,7 @@ def build_step_inputs(data, config=None):
         if not isinstance(config, dict):
             raise ValueError('config must be an object')
         for key, value in config.items():
-            if key not in inputs:
+            if key not in inputs or key == 'head_foot_area':
                 continue
             inputs[key] = _normalize_algorithm_value(key, value)
     inputs['frame_data'] = np.asarray(data, dtype=np.float32)
