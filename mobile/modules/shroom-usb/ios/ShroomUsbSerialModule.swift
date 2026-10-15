@@ -67,9 +67,7 @@ public final class ShroomUsbSerialModule: Module {
     worker.asyncAfter(deadline: .now() + .milliseconds(1)) { [weak self] in
       guard let self, self.connected, self.generation == expectedGeneration else { return }
       do {
-        guard let batch = try self.client.readBatch() else {
-          throw NSError(domain: "ShroomUSB", code: 5, userInfo: [NSLocalizedDescriptionKey: "驱动未返回数据。"])
-        }
+        let batch = try self.client.readBatch()
         self.accept(batch)
         self.flushFrame()
         self.scheduleRead()

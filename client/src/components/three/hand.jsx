@@ -13,15 +13,9 @@ import { createWorkspaceViewTools } from '../../renderers/workspaceViewTools';
 import { createPointGridSelection } from '../../renderers/pointGridSelection';
 import { TextureLoader } from "three";
 import { checkRectIndex, checkRectangleIntersection, getPointCoordinate, getPointCoordinateback } from "./threeUtil1";
-import {
-  addSide,
-  findMax,
-  gaussBlur_1,
-  interp,
-  interp1016,
-  jet,
-  jetgGrey,
-} from "../../assets/util/util";
+import { addSide, findMax, gaussBlur_1, jet } from '@shroom/frontend/core/frameMath.js';
+import { jetgGrey } from '@shroom/frontend/core/greyLadder.js';
+import { interp } from '../../renderers/squareInterpolation.js';
 import { isClassicColormap, sampleColormapRgb } from "../../extensions/display-system/colormaps";
 // import { withData } from "./WithData";
 
@@ -331,7 +325,7 @@ const Canvas = React.forwardRef((props, refs) => {
       return new TextureLoader().load("");
     }
     // require("../../assets/images/circle.png")
-    const spite = new THREE.TextureLoader().load("./circle.png");
+    const spite = new THREE.TextureLoader().load(props.pointSprite || "./circle.png");
     material = new THREE.PointsMaterial({
       vertexColors: true,
       transparent: true,

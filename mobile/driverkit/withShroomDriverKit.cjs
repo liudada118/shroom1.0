@@ -6,11 +6,12 @@ module.exports = function withShroomDriverKit(config, options = {}) {
   const team = options.teamId ?? process.env.SHROOM_APPLE_TEAM_ID ?? '';
   if (team !== '' && !/^[A-Z0-9]{10}$/.test(team)) throw new Error('SHROOM_APPLE_TEAM_ID must be the ten-character Apple team ID.');
   const bundleID = config.ios?.bundleIdentifier;
+  const developmentSigning = options.developmentSigning ?? (process.env.SHROOM_DRIVERKIT_DEVELOPMENT === '1');
   if (!/^[A-Za-z0-9.-]+$/.test(bundleID ?? '')) throw new Error('Shroom DriverKit requires ios.bundleIdentifier.');
   config.ios = config.ios ?? {};
   config.ios.entitlements = { ...config.ios.entitlements, 'com.apple.developer.driverkit.communicates-with-drivers': true };
   return withXcodeProject(config, (mod) => {
-    configureProject(mod.modResults, { projectDirectory: mod.modRequest.platformProjectRoot, team, bundleID });
+    configureProject(mod.modResults, { projectDirectory: mod.modRequest.platformProjectRoot, team, bundleID, developmentSigning });
     return mod;
   });
 };

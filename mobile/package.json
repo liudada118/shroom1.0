@@ -26,7 +26,7 @@
     "preios": "npm run build:display",
     "ios": "expo run:ios",
     "prebuild:ios": "npm run build:display && expo prebuild --platform ios",
-    "test": "node --test src/frameDispatcher.test.ts driverkit/tests/nativeContract.test.cjs",
+    "test": "node --test src/frameDispatcher.test.ts src/hostControl.test.ts driverkit/tests/nativeContract.test.cjs",
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
     "export:ios": "npm run build:display && expo export --platform ios"

@@ -3,6 +3,17 @@ import { nearestSensorPoint, normalizeSensorPitch, readSensorPitch, saveSensorPi
 import { createPointGridSelection } from '../../renderers/pointGridSelection';
 
 describe('传感点物理量尺', () => {
+  it('离线WebView拒绝读取storage属性时保持未设置，不使页面崩溃', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, get() { throw new Error('Access denied'); } });
+    try {
+      expect(readSensorPitch('mobile-hand')).toBe(null);
+      expect(saveSensorPitch('mobile-hand', { x: 1, y: 1 })).toBe(false);
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis, 'localStorage', descriptor);
+      else delete globalThis.localStorage;
+    }
+  });
   it('相邻两点是一格，跨格数不依赖毫米校准，非整数点位不产生测量', () => {
     expect(sensorRulerSpan({ x: 2, y: 5 }, { x: 3, y: 5 })).toEqual({ columns: 1, rows: 0 });
     expect(sensorRulerSpan({ x: 5, y: 9 }, { x: 2, y: 5 })).toEqual({ columns: 3, rows: 4 });

@@ -29,13 +29,13 @@ export function nearestSensorPoint(points, location, columns, maxDistance = 32) 
 }
 
 /** 从本机设置读取指定系统和矩阵尺寸的点距；无记录或损坏时保持未设置。 */
-export function readSensorPitch(key, storage = globalThis.localStorage) {
-  try { return normalizeSensorPitch(JSON.parse(storage.getItem(key))); } catch { return null; }
+export function readSensorPitch(key, storage) {
+  try { return normalizeSensorPitch(JSON.parse((storage ?? globalThis.localStorage).getItem(key))); } catch { return null; }
 }
 
 /** 保存校验后的点距，写入失败时由界面提示本次仍可测量。 */
-export function saveSensorPitch(key, pitch, storage = globalThis.localStorage) {
+export function saveSensorPitch(key, pitch, storage) {
   const value = normalizeSensorPitch(pitch);
   if (!value) return false;
-  try { storage.setItem(key, JSON.stringify(value)); return true; } catch { return false; }
+  try { (storage ?? globalThis.localStorage).setItem(key, JSON.stringify(value)); return true; } catch { return false; }
 }

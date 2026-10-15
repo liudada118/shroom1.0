@@ -20,6 +20,7 @@
       <key>IOProviderClass</key><string>IOUSBHostInterface</string>
       <key>idVendor</key><integer>6790</integer>
       <key>idProduct</key><integer>29987</integer>
+      <key>bConfigurationValue</key><integer>1</integer>
       <key>bInterfaceNumber</key><integer>0</integer>
       <key>UserClientProperties</key><dict>
         <key>IOClass</key><string>IOUserUserClient</string>

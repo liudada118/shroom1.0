@@ -21,7 +21,7 @@
  *   rangeArr = [{ x1, y1, x2, y2 }] 表示当前框选区域（页面坐标）
  */
 
-import { jet } from '../../assets/util/util';
+import { jet } from '@shroom/frontend/core/frameMath.js';
 
 class BrushManager {
   constructor() {

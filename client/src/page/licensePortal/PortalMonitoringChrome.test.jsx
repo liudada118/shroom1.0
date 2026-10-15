@@ -36,6 +36,15 @@ describe('门户最新监测控制层', () => {
     expect(html).toMatch(/aria-label="结束采集" disabled=""/);
   });
 
+  it('未接入采集和回放的平台明确禁用入口，默认桌面能力保持可用', () => {
+    const html = renderToStaticMarkup(<PortalSessionBar mode="now" captureAvailable={false} playbackAvailable={false} />);
+    expect(html).toMatch(/aria-label="回放"[^>]*disabled=""/);
+    expect(html).toMatch(/aria-label="开始采集" disabled=""/);
+    expect(html).toContain('当前平台尚未接入采集保存');
+    const desktop = renderToStaticMarkup(<PortalSessionBar mode="now" />);
+    expect(desktop).not.toMatch(/aria-label="回放"[^>]*disabled=""/);
+  });
+
   it('四个工具只在点击时调用各自的原生动作', () => {
     const actions = { onCharts: vi.fn(), onAlgorithms: vi.fn(), onSettings: vi.fn(), onTools: vi.fn() };
     const tree = PortalQuickTools({ chartsVisible: true, algorithmsOpen: true, toolsOpen: true, ...actions });

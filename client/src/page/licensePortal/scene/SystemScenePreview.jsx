@@ -151,7 +151,7 @@ function getTargetCenter(positions) {
   return [(minX + maxX) * 0.5, (minY + maxY) * 0.5, (minZ + maxZ) * 0.5];
 }
 /** 将模型表面采样为固定数量的粒子。 */
-function sampleTarget(root, spec) {
+function sampleTarget(root, spec, random = Math.random) {
   const normalizedRoot = normalizeModel(root, spec);
   const meshes = extractMeshes(normalizedRoot);
   if (meshes.length === 0) {
@@ -173,17 +173,17 @@ function sampleTarget(root, spec) {
   normalizedRoot.updateMatrixWorld(true);
   meshes.forEach((mesh, meshIndex) => {
     mesh.updateWorldMatrix(true, false);
-    const sampler = new MeshSurfaceSampler(mesh).build();
+    const sampler = new MeshSurfaceSampler(mesh).setRandomGenerator(random).build();
     for (let index = 0; index < counts[meshIndex]; index += 1) {
       sampler.sample(point, normal);
       mesh.localToWorld(point);
       normal.transformDirection(mesh.matrixWorld).normalize();
-      point.addScaledVector(normal, (Math.random() - 0.5) * 0.018);
+      point.addScaledVector(normal, (random() - 0.5) * 0.018);
       const stride = cursor * 3;
       positions[stride] = point.x;
       positions[stride + 1] = point.y;
       positions[stride + 2] = point.z;
-      const color = baseColor.clone().lerp(highlight, Math.random() * 0.55);
+      const color = baseColor.clone().lerp(highlight, random() * 0.55);
       colors[stride] = color.r;
       colors[stride + 1] = color.g;
       colors[stride + 2] = color.b;
@@ -244,6 +244,33 @@ function createLayoutTarget(key, { positions, grid }) {
   return { key, positions, colors, grid, sweepWeights: createSweepWeights(positions), center: getTargetCenter(positions) };
 }
 
+/** 从原模型或足底图生成离线预览；构建时不接受替代模型。 */
+export async function samplePreviewScene(key, random = Math.random) {
+  if (key === 'foot') return createLayoutTarget(key, await loadFootLayout(PARTICLE_COUNT));
+  const spec = MODEL_SPECS.find((candidate) => candidate.key === key);
+  if (!spec) throw new Error(`Unknown preview scene ${key}`);
+  const { root, spec: loadedSpec } = await loadModel({ ...spec, fallback: null }, new GLTFLoader(), new FBXLoader());
+  // GLTF 子网格可能按异步材质就绪顺序挂载；离线构建固定遍历次序后再分配粒子。
+  root.traverse((object) => object.children.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  try { return sampleTarget(root, loadedSpec, random); } finally { disposeModel(root); }
+}
+
+/** 校验离线采样并恢复运行时缓冲；缺项直接报错，避免在离线页面请求原模型。 */
+function restorePreviewScene(key, preloadedScenes) {
+  const data = preloadedScenes.scenes?.[key];
+  if (preloadedScenes.version !== 1 || preloadedScenes.particleCount !== PARTICLE_COUNT
+    || ![data?.positions, data?.colors].every((values) => Array.isArray(values)
+      && values.length === PARTICLE_COUNT * 3 && values.every(Number.isFinite))) {
+    throw new Error(`Invalid offline preview scene ${key}`);
+  }
+  const positions = Float32Array.from(data.positions);
+  const colors = Float32Array.from(data.colors);
+  if (!positions.every(Number.isFinite) || !colors.every(Number.isFinite)) {
+    throw new Error(`Offline preview scene ${key} exceeds the coordinate range`);
+  }
+  return { key, positions, colors, sweepWeights: createSweepWeights(positions), center: getTargetCenter(positions) };
+}
+
 /** 创建加载中的装饰形态，不冒充已加载设备。 */
 function createLoadingTarget() {
   const positions = new Float32Array(PARTICLE_COUNT * 3);
@@ -278,6 +305,7 @@ function SystemScenePreview({
   host,
   framing = "home",
   active = true,
+  preloadedScenes,
   onRootReady,
   onStatus
 }) {
@@ -590,6 +618,13 @@ function SystemScenePreview({
         targetMap.set(key, createLayoutTarget(key, layout));
         return;
       }
+      if (preloadedScenes) {
+        try { targetMap.set(key, restorePreviewScene(key, preloadedScenes)); } catch (error) {
+          failedTargets.add(key);
+          console.warn(`Failed to restore offline preview ${key}`, error);
+        }
+        return;
+      }
       const spec = MODEL_SPECS.find((candidate) => candidate.key === key);
       if (!spec && key !== 'foot') return;
       const loading = key === 'foot' ? loadFootLayout(PARTICLE_COUNT).then((foot) => createLayoutTarget(key, foot))
@@ -828,7 +863,7 @@ function SystemScenePreview({
         root.removeChild(renderer.domElement);
       }
     };
-  }, []);
+  }, [preloadedScenes]);
   return null;
 }
 export {

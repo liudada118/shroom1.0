@@ -12,10 +12,17 @@ function option(name, fallback) {
 /** Strip the surrounding quotes used by the xcode project parser. */
 function unquote(value) { return String(value ?? '').replace(/^"|"$/g, ''); }
 
+/** Omit unset xcode helper fields instead of serializing them as the literal string undefined. */
+function omitUnsetProjectFields(object) {
+  for (const [key, value] of Object.entries(object)) {
+    if (value === undefined || value === 'undefined') delete object[key];
+  }
+}
+
 /** Add a DriverKit target to Expo's generated project, with an original-project backup. */
 function integrate() {
   const input = process.argv[2];
-  if (!input || input.startsWith('--')) throw new Error('Usage: node driverkit/integrate-ios.cjs ios/Shroom.xcodeproj --team TEAMID [--check]');
+  if (!input || input.startsWith('--')) throw new Error('Usage: node driverkit/integrate-ios.cjs ios/Shroom.xcodeproj --team TEAMID [--development-signing] [--check]');
   const projectPath = path.resolve(input);
   const pbxPath = projectPath.endsWith('.pbxproj') ? projectPath : path.join(projectPath, 'project.pbxproj');
   const projectDirectory = path.dirname(path.dirname(pbxPath));
@@ -25,7 +32,8 @@ function integrate() {
   const bundleID = option('--app-bundle-id', mobileConfig.expo.ios.bundleIdentifier);
   if (!/^[A-Za-z0-9.-]+$/.test(bundleID ?? '')) throw new Error('Invalid app bundle identifier.');
   const project = xcode.project(pbxPath).parseSync();
-  const result = configureProject(project, { projectDirectory, team, bundleID });
+  const developmentSigning = process.argv.includes('--development-signing');
+  const result = configureProject(project, { projectDirectory, team, bundleID, developmentSigning });
   if (result === null) { console.log('ShroomCH340 target already matches the requested configuration.'); return; }
   if (process.argv.includes('--check')) {
     require('xcode/lib/parser/pbxproj').parse(result);
@@ -35,17 +43,18 @@ function integrate() {
   const backup = `${pbxPath}.before-shroom-driverkit`;
   if (!fs.existsSync(backup)) fs.copyFileSync(pbxPath, backup, fs.constants.COPYFILE_EXCL);
   fs.writeFileSync(pbxPath, result);
-  console.log(`Added ShroomCH340 to ${pbxPath}. Set the approved driver provisioning profile in Xcode; the host entitlement is configured in app.json.`);
+  console.log(`Configured ShroomCH340 in ${pbxPath} for ${developmentSigning ? 'automatic development' : 'manual'} signing; the host also needs a matching provisioning profile.`);
 }
 
 /** Add the complete DriverKit target to an in-memory Xcode project for prebuild or CLI use. */
-function configureProject(project, { projectDirectory, team, bundleID }) {
+function configureProject(project, { projectDirectory, team, bundleID, developmentSigning = false }) {
   const objects = project.hash.project.objects;
   objects.PBXContainerItemProxy ??= {};
   objects.PBXTargetDependency ??= {};
   const first = project.getFirstTarget();
   if (unquote(first.firstTarget.productType) !== 'com.apple.product-type.application') throw new Error('The first target must be the Expo iOS application.');
   const previous = project.writeSync();
+  const previousGroups = new Set(Object.keys(objects.PBXGroup));
   const existing = Object.entries(project.pbxNativeTargetSection()).find(([, target]) => target?.name && unquote(target.name) === 'ShroomCH340');
   // xcode's target helper lacks DriverKit; create a bundle then set the actual Apple product type.
   const target = existing ? { uuid: existing[0], pbxNativeTarget: existing[1] }
@@ -55,6 +64,7 @@ function configureProject(project, { projectDirectory, team, bundleID }) {
   product.path = 'ShroomCH340.dext';
   product.explicitFileType = '"wrapper.driver-extension"';
   product.sourceTree = 'BUILT_PRODUCTS_DIR';
+  omitUnsetProjectFields(product);
   if (!existing) {
     const group = project.addPbxGroup([], 'Shroom DriverKit');
     project.addToPbxGroup(group.uuid, project.getFirstProject().firstProject.mainGroup);
@@ -68,16 +78,41 @@ function configureProject(project, { projectDirectory, team, bundleID }) {
     project.addFramework('DriverKit.framework', { target: target.uuid });
     project.addFramework('USBDriverKit.framework', { target: target.uuid });
   }
+  for (const [key, group] of Object.entries(objects.PBXGroup)) {
+    if (!previousGroups.has(key) && group?.isa === 'PBXGroup') omitUnsetProjectFields(group);
+  }
+  const driverGroup = Object.values(objects.PBXGroup).find(group => group?.name && unquote(group.name) === 'Shroom DriverKit');
+  if (driverGroup) {
+    driverGroup.name = JSON.stringify('Shroom DriverKit');
+    omitUnsetProjectFields(driverGroup);
+  }
+  // xcode's file map omits C++/IIG; unknown types prevent the native compiler from selecting its rules.
+  for (const entry of target.pbxNativeTarget.buildPhases) {
+    const phase = objects.PBXSourcesBuildPhase?.[entry.value] ?? objects.PBXFrameworksBuildPhase?.[entry.value];
+    for (const file of phase?.files ?? []) {
+      const reference = objects.PBXFileReference[objects.PBXBuildFile[file.value].fileRef];
+      omitUnsetProjectFields(reference);
+      const extension = path.extname(unquote(reference.path));
+      if (extension === '.cpp') reference.lastKnownFileType = 'sourcecode.cpp.cpp';
+      if (extension === '.iig') reference.lastKnownFileType = 'sourcecode.iig';
+    }
+  }
   const configurationList = objects.XCConfigurationList[target.pbxNativeTarget.buildConfigurationList];
   const relativeDriver = path.relative(projectDirectory, __dirname).split(path.sep).join('/');
   for (const entry of configurationList.buildConfigurations) {
     const settings = objects.XCBuildConfiguration[entry.value].buildSettings;
+    if (developmentSigning) {
+      // Explicit profiles conflict with automatic signing, including SDK-specific overrides.
+      for (const key of Object.keys(settings)) {
+        if (/^PROVISIONING_PROFILE(?:_SPECIFIER)?(?:\[|$)/.test(unquote(key))) delete settings[key];
+      }
+    }
     Object.assign(settings, {
       SDKROOT: 'driverkit', SUPPORTED_PLATFORMS: 'driverkit', ARCHS: 'arm64',
       DRIVERKIT_DEPLOYMENT_TARGET: '22.0', MACH_O_TYPE: 'mh_execute', WRAPPER_EXTENSION: 'dext',
-      CLANG_CXX_LANGUAGE_STANDARD: '"gnu++17"', DEVELOPMENT_TEAM: team,
-      CODE_SIGN_STYLE: 'Manual', CODE_SIGN_IDENTITY: '"Apple Development"',
-      CODE_SIGN_ENTITLEMENTS: JSON.stringify(`${relativeDriver}/ShroomCH340/ShroomCH340.entitlements`),
+      CLANG_CXX_LANGUAGE_STANDARD: '"gnu++17"', DEVELOPMENT_TEAM: team || '""',
+      CODE_SIGN_STYLE: developmentSigning ? 'Automatic' : 'Manual', CODE_SIGN_IDENTITY: '"Apple Development"',
+      CODE_SIGN_ENTITLEMENTS: JSON.stringify(`${relativeDriver}/ShroomCH340/ShroomCH340${developmentSigning ? '.development' : ''}.entitlements`),
       INFOPLIST_FILE: JSON.stringify(`${relativeDriver}/ShroomCH340/Info.plist`),
       PRODUCT_BUNDLE_IDENTIFIER: JSON.stringify(`${bundleID}.driver`),
       HEADER_SEARCH_PATHS: ['"$(inherited)"', '"$(DERIVED_SOURCES_DIR)"', JSON.stringify(`$(SRCROOT)/${relativeDriver}/Shared`)],

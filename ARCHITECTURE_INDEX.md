@@ -63,6 +63,8 @@ client commandClient → HTTP :19245 /api/commands
 
 iPad 数据展示原型：`mobile/App.tsx` / `src/frameDispatcher.ts` → 离线 WebView `client/src/mobile/` → 既有 SDK 热力图和数字矩阵。`mobile/modules/shroom-usb/` 通过 IOKit UserClient 接入 `mobile/driverkit/` CH340 驱动；Expo 插件在 Mac 生成并嵌入 dext。验证 `npm --prefix mobile test`、`typecheck`、`lint`、两个 `client/tests/mobile-*.browser.mjs`、C++ `nativeProtocol.test.cpp` 及 Full；Metro iOS 导出只证明 JS 包，原生编译、签名与 USB 真机验收另需 Mac/iPad。操作见 [移动端说明](mobile/README.md)、[iPad USB 驱动](mobile/driverkit/README.md)。
 
+iPad 手部线序与调参：`pressureDisplayFrame` 在 `useMobileSession` 发布前仅对 USB 应用桌面 `jqbed` 行序，demo 保持显示坐标；`MobileViewControls` / `mobileViewParameters` 控制当前视图，`MobileMatrix3D` 缓存未过滤帧以支持断流后恢复。验证线序全点等价/角点、参数单测、离线浏览器真实调参及 Full；物理方向须真机按点验收。
+
 本地代码理解：`codegraph.json` 固定索引排除范围，`.codegraph/` 保存本机调用图；有索引时先用 `codegraph explore` 获取当前代码与调用关系。Understand-Anything 的中文架构图保存于 `.ua/knowledge-graph.json`，`$understand` 更新图谱，`$understand-dashboard` 打开交互查看；依赖、构建产物、大型模型资源与本机运行数据不进入分析。两个生成目录由 Git 忽略，项目文档和测试仍纳入图谱。
 
 全局工具布局：`components/appTools/AppTools.jsx` 统一排列版本、更新和 Agent；首页反馈按钮通过专用 Portal 插槽加入同一行，页面卸载后自动移除。更新状态独占上方，不参与按钮宽度；`Home` 不再挂载运行页“画布零件”浮动栏。验证 `node scripts/tests/app-tools.mjs`（三种语言、320–1920px、更新状态、弹窗焦点、反馈卸载及长版本号）、`portal-launcher.mjs --monitor-only` 和 Standard；仅 UI 布局变更，无更新服务或渲染数据契约变动。
@@ -191,3 +193,6 @@ Agent 复制链路：`tools/toolSchemas.js` → `tools/index.js` 的 `prepare_du
 二维数字蓝色矩阵：`matrixDisplayModes` 与后端渲染目录为 `numMatrix` 使用原生 `sprite3d` 后端的平面蓝色矩阵，名字不按底层绘制技术判断维度。`frameInput: raw` 的精灵矩阵直接消费映射后帧，不过滤、不模糊、不转置；旧内置过滤预设保持原样。验证目录及工作区测试、`manifest-workspace-layout.mjs` 的真实数字纹理索引、平面实例坐标、蓝色像素及旧别名恢复；共享 SDK 变更执行 Full。
 
 本机 Git 归档：`build/`、三个 `seatpad32-*` 配置目录和打包空模板可随分支保存；`.gitignore` 排除 `managed-system-catalog.json` 和 `system-package-staff-credential.json`，保留机器凭据及授权缓存。构建快照不代表当前源码已重新编译；正式构建仍先写入临时目录，打包模板须保持空库并通过完整性检查。
+
+
+移动 iPad 入口：`client/src/mobile/MobilePressureApp.jsx` → 首页/系统目录/监测页 → `useMobileSession` → RN `hostControl` / `App.tsx` → 原生 CH340。共用门户视觉与帧总线；三维原矩阵和 SDK 热力/数字视图、离线 `previewScenes.json` 均由 `mobile/scripts/build-display.mjs` 内联。当前仅 hand 32×32 可运行，其余目录仅预览；授权、保存、回放、算法尚未迁移。验证 mobile tests/typecheck/lint、client mobile/scene/PortalMonitoringChrome/sensorRuler/squareInterpolation 测试及两项 mobile 浏览器验收；签名发布执行 Full 并核对最终 IPA 和真机。

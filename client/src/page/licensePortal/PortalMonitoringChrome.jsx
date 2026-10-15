@@ -3,18 +3,18 @@ import { AppstoreOutlined, LineChartOutlined, SlidersOutlined, ToolOutlined, Api
 import './PortalUtilityPanel.css';
 
 /** 会话栏直接显示串口下拉；回放仍打开记录弹窗，不模拟连接或采集状态。 */
-export function PortalSessionBar({ mode, onMode, controlsOpen, onControls, deviceControls, selectedPorts, collecting, onStart, onStop, busy = false, elapsed = 0 }) {
+export function PortalSessionBar({ mode, onMode, controlsOpen, onControls, deviceControls, selectedPorts, collecting, onStart, onStop, busy = false, elapsed = 0, captureAvailable = true, playbackAvailable = true }) {
   return <div className="portal-session-bar" aria-label="监测控制">
     <div className="portal-session-modes">
       <button type="button" aria-label="实时" className={mode === 'now' ? 'is-active' : ''} aria-pressed={mode === 'now'} disabled={busy} onClick={() => onMode('now')}><RadarChartOutlined aria-hidden="true" />实时</button>
-      <button type="button" aria-label="回放" className={mode !== 'now' ? 'is-active' : ''} aria-pressed={mode !== 'now'} disabled={busy || collecting} title={collecting ? '请先结束采集' : '选择回放数据或批量下载'} onClick={() => onMode('playback')}><HistoryOutlined aria-hidden="true" />回放</button>
+      <button type="button" aria-label="回放" className={mode !== 'now' ? 'is-active' : ''} aria-pressed={mode !== 'now'} disabled={!playbackAvailable || busy || collecting} title={!playbackAvailable ? '当前平台尚未接入回放' : collecting ? '请先结束采集' : '选择回放数据或批量下载'} onClick={() => onMode('playback')}><HistoryOutlined aria-hidden="true" />回放</button>
     </div>
     {mode === 'now' && deviceControls ? deviceControls : <button type="button" className="portal-device-launch" disabled={busy} aria-haspopup="dialog" aria-expanded={controlsOpen} onClick={onControls}>
       <ApiOutlined /><span>{mode === 'now' ? '连接设备' : '选择回放'}</span><small>{mode === 'now' ? selectedPorts ? '串口已选择' : '未选择串口' : '单选回放 · 多选下载'}</small><i aria-hidden="true" />
     </button>}
     <div className="portal-capture-actions">
-      <button type="button" aria-label="开始采集" disabled={busy || collecting || mode !== 'now'} onClick={onStart}><PlayCircleOutlined />开始采集</button>
-      <button type="button" aria-label="结束采集" disabled={busy || !collecting || mode !== 'now'} onClick={onStop}><PauseCircleOutlined />{collecting ? `${Math.floor(elapsed)}s · 停止` : '结束采集'}</button>
+      <button type="button" aria-label="开始采集" disabled={!captureAvailable || busy || collecting || mode !== 'now'} title={captureAvailable ? undefined : '当前平台尚未接入采集保存'} onClick={onStart}><PlayCircleOutlined />开始采集</button>
+      <button type="button" aria-label="结束采集" disabled={!captureAvailable || busy || !collecting || mode !== 'now'} title={captureAvailable ? undefined : '当前平台尚未接入采集保存'} onClick={onStop}><PauseCircleOutlined />{collecting ? `${Math.floor(elapsed)}s · 停止` : '结束采集'}</button>
     </div>
   </div>;
 }

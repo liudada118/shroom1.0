@@ -1,0 +1,11 @@
+.mobile-view-controls { display: grid; gap: 12px; color: #e4f0f5; }
+.mobile-view-controls > header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.mobile-view-controls > header > strong { font-size: 17px; }
+.mobile-view-controls > header > button { min-height: 44px; padding: 8px 12px; color: #bcd7e6; background: rgba(122, 177, 208, .08); border: 1px solid rgba(145, 196, 223, .24); border-radius: 8px; cursor: pointer; }
+.mobile-view-controls > p { margin: 0 0 2px; color: #a0b4c1; font-size: 13px; line-height: 1.6; }
+.mobile-view-parameter { display: grid; grid-template-columns: minmax(0, 1fr) 92px; align-items: center; column-gap: 14px; border-top: 1px solid rgba(145, 196, 223, .14); padding-top: 10px; }
+.mobile-view-parameter > label { color: #e0eef5; font-size: 15px; }
+.mobile-view-parameter > .mobile-view-parameter-number { box-sizing: border-box; width: 100%; min-height: 44px; padding: 7px 9px; color: #edf9ff; background: #111e2c; border: 1px solid rgba(145, 196, 223, .3); border-radius: 7px; font: inherit; text-align: right; }
+.mobile-view-parameter > input[type="range"] { width: 100%; min-height: 44px; margin: 0; grid-column: 1 / -1; accent-color: #93c7e5; cursor: pointer; }
+.mobile-view-parameter > small { grid-column: 1 / -1; color: #9bb0bf; font-size: 12px; line-height: 1.6; }
+@media (max-width: 480px) { .mobile-view-controls > header { flex-wrap: wrap; } }

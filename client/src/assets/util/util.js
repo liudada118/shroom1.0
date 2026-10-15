@@ -187,18 +187,7 @@ export function backLinearOrder(ndata) {
  * @param {*} Length 
  * @param {*} num 
  */
-export function interp(smallMat, bigMat, Length, num) {
-  for (let x = 1; x <= Length; x++) {
-    for (let y = 1; y <= Length; y++) {
-      bigMat[
-        Length * num * (num * (y - 1)) +
-        (Length * num * num) / 2 +
-        num * (x - 1) +
-        num / 2
-      ] = smallMat[Length * (y - 1) + x - 1] * 10;
-    }
-  }
-}
+export { interp } from '../../renderers/squareInterpolation.js';
 
 
 /**

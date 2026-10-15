@@ -15,7 +15,10 @@ export default defineConfig({
   define: { 'process.env.NODE_ENV': JSON.stringify('production') },
   resolve: {
     dedupe: ['react', 'react-dom', 'three'],
-    alias: { '@shroom/frontend': path.resolve(clientRoot, '../sdk/frontend') },
+    alias: {
+      '@shroom/frontend/react/three': path.resolve(clientRoot, '../sdk/frontend/renderers/shared/three'),
+      '@shroom/frontend': path.resolve(clientRoot, '../sdk/frontend'),
+    },
   },
   build: {
     outDir: path.join(os.tmpdir(), 'shroom-mobile-display'),

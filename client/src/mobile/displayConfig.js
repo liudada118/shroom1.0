@@ -1,7 +1,7 @@
 export const DISPLAY_MODES = ['heatmap', 'numbers'];
 
 /** 使用现有 SDK 画布显示原始矩阵，两个视图保持相同点位方向。 */
-export function mobileDisplayConfig(mode) {
+export function mobileDisplayConfig(mode, parameters = {}) {
   if (mode === 'numbers') {
     return { rendererId: 'numMatrix', label: '原始数字矩阵', params: {
       backend: 'webgl', frameInput: 'raw', gridWidth: 32, gridHeight: 32,
@@ -12,7 +12,7 @@ export function mobileDisplayConfig(mode) {
   }
   return { rendererId: 'webglHeatmap', label: '压力热力图', params: {
     dataWidth: 32, dataHeight: 32, canvasWidth: 512, canvasHeight: 512,
-    minFrameLength: 1024, max: 255, radius: 18, filter: 0,
+    minFrameLength: 1024, max: parameters.colorMax ?? 255, radius: parameters.radius ?? 18, filter: parameters.pointFilter ?? 0,
     valueScale: 1, mirrorX: false, edgeClear: null,
     displaySize: '100%', background: 'transparent',
   } };

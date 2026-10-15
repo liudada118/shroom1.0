@@ -5,6 +5,7 @@
 #include <USBDriverKit/IOUSBHostInterface.h>
 #include <USBDriverKit/IOUSBHostPipe.h>
 #include <USBDriverKit/IOUSBHostDevice.h>
+#include <USBDriverKit/USBDriverKitDefs.h>
 #include <os/log.h>
 #include "ShroomCH340Driver.h"
 #include "ShroomCH340UserClient.h"
