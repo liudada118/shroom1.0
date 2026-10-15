@@ -3,6 +3,18 @@ const path = require('node:path');
 const BetterSqlite3 = require('better-sqlite3');
 
 const GLOVE_SENSOR_TYPES = Object.freeze(['hand0205', 'hand0205Single', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket']);
+const GLOVE_STORAGE_TYPES = Object.freeze({
+  hand0205: 'hand0205Single',
+  hand0205Single: 'hand0205Single',
+  hand0205Double: 'hand0205',
+  handGlove115200: 'handGlove115200',
+  handGloveFullPacket: 'handGloveFullPacket',
+});
+
+/** 系统类型恢复原含义后保留已有采集文件名，旧单手别名与原类型共用库。 */
+function getGloveStorageType(sensorType) {
+  return GLOVE_STORAGE_TYPES[sensorType] || sensorType;
+}
 
 /** 判断是否使用左右手同库存储，其他传感系统保持原数据库布局。 */
 function isGloveDatabaseType(sensorType) {
@@ -158,30 +170,63 @@ function ensureGloveSchema(nativeDb) {
 }
 
 /** 事务性追加旧库未迁移的行；游标按源 ID 记录，删掉目标历史不会重新导入旧行。 */
-function migrateLegacyGloveRows(nativeDb, sensorType, directory) {
+function migrateLegacyGloveRows(nativeDb, storageType, directory) {
   const readCursor = nativeDb.prepare('SELECT last_imported_id FROM glove_migrations WHERE source_path = ?');
   const saveCursor = nativeDb.prepare(`INSERT INTO glove_migrations (source_path, hand, last_imported_id, updated_at)
     VALUES (?, ?, ?, ?) ON CONFLICT(source_path) DO UPDATE SET
     hand = excluded.hand, last_imported_id = excluded.last_imported_id, updated_at = excluded.updated_at`);
+  const sources = [['sit', 'left', 'matrix'], ['back', 'right', 'matrix_right']].map(([suffix, hand, table]) => ({
+    filename: `${storageType}${suffix}.db`, hand, table, sourceTable: 'matrix',
+  }));
+  if (storageType === 'hand0205') {
+    // 旧 Double 类型归入双手系统 2 时，只迁入一次其独立历史，原文件保持只读。
+    sources.push(
+      { filename: 'hand0205Double.db', hand: 'left', table: 'matrix', sourceTable: 'matrix', snapshot: true },
+      { filename: 'hand0205Double.db', hand: 'right', table: 'matrix_right', sourceTable: 'matrix_right', snapshot: true, optionalTable: true },
+      { filename: 'hand0205Doublesit.db', hand: 'left', table: 'matrix', sourceTable: 'matrix', snapshot: true },
+      { filename: 'hand0205Doubleback.db', hand: 'right', table: 'matrix_right', sourceTable: 'matrix', snapshot: true },
+    );
+  }
   nativeDb.transaction(() => {
-    for (const [suffix, hand, table] of [['sit', 'left', 'matrix'], ['back', 'right', 'matrix_right']]) {
-      const sourcePath = `${sensorType}${suffix}.db`;
-      const filename = path.join(directory, sourcePath);
+    for (const { filename: sourceName, hand, table, sourceTable, snapshot, optionalTable } of sources) {
+      const sourcePath = sourceTable === 'matrix_right' || sourceName === 'hand0205Double.db'
+        ? `${sourceName}#${sourceTable}` : sourceName;
+      const filename = path.join(directory, sourceName);
       if (!fs.existsSync(filename)) continue;
-      const cursor = readCursor.get(sourcePath)?.last_imported_id || 0;
+      const marker = readCursor.get(sourcePath);
+      if (snapshot && marker) continue;
+      let cursor = marker?.last_imported_id || 0;
+      if (snapshot && sourceName !== 'hand0205Double.db') {
+        // 旧 Double 单库中已迁入或删除的行不能再从其 sit/back 备份复制回来。
+        const previousFilename = path.join(directory, 'hand0205Double.db');
+        if (fs.existsSync(previousFilename)) {
+          const previous = new BetterSqlite3(previousFilename, { readonly: true, fileMustExist: true });
+          try {
+            if (previous.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'glove_migrations'").get()) {
+              cursor = previous.prepare('SELECT last_imported_id FROM glove_migrations WHERE source_path = ?').get(sourceName)?.last_imported_id || 0;
+            }
+          } finally {
+            previous.close();
+          }
+        }
+      }
       const source = new BetterSqlite3(filename, { readonly: true, fileMustExist: true });
       try {
+        if (optionalTable && !source.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(sourceTable)) {
+          saveCursor.run(sourcePath, hand, 0, Date.now());
+          continue;
+        }
         const preserveSourceIds = !nativeDb.prepare(`SELECT 1 AS present FROM ${table} LIMIT 1`).get();
         const insertWithId = nativeDb.prepare(`INSERT INTO ${table} (id, data, timestamp, date, hand) VALUES (?, ?, ?, ?, ?)`);
         const insertAutoId = nativeDb.prepare(`INSERT INTO ${table} (data, timestamp, date, hand) VALUES (?, ?, ?, ?)`);
         let lastImportedId = cursor;
-        for (const row of source.prepare('SELECT id, data, timestamp, date FROM matrix WHERE id > ? ORDER BY id ASC').iterate(cursor)) {
+        for (const row of source.prepare(`SELECT id, data, timestamp, date FROM ${sourceTable} WHERE id > ? ORDER BY id ASC`).iterate(cursor)) {
           // 目标已有行时统一追加，避免保留空闲低 ID 导致同批旧帧的先后顺序倒置。
           if (preserveSourceIds) insertWithId.run(row.id, row.data, row.timestamp, row.date, hand);
           else insertAutoId.run(row.data, row.timestamp, row.date, hand);
           lastImportedId = row.id;
         }
-        if (lastImportedId !== cursor) saveCursor.run(sourcePath, hand, lastImportedId, Date.now());
+        if (snapshot || lastImportedId !== cursor) saveCursor.run(sourcePath, hand, lastImportedId, Date.now());
       } finally {
         source.close();
       }
@@ -194,11 +239,12 @@ function openGloveDatabase(sensorType, directory) {
   if (!isGloveDatabaseType(sensorType)) throw new Error('unsupported glove database type');
   const resolvedDirectory = path.resolve(directory);
   fs.mkdirSync(resolvedDirectory, { recursive: true });
-  const filename = path.join(resolvedDirectory, `${sensorType}.db`);
+  const storageType = getGloveStorageType(sensorType);
+  const filename = path.join(resolvedDirectory, `${storageType}.db`);
   const nativeDb = new BetterSqlite3(filename);
   try {
     ensureGloveSchema(nativeDb);
-    migrateLegacyGloveRows(nativeDb, sensorType, resolvedDirectory);
+    migrateLegacyGloveRows(nativeDb, storageType, resolvedDirectory);
     const owner = { references: 2 };
     return {
       db: createGloveDatabaseView(nativeDb, filename, 'left', owner),
@@ -210,4 +256,4 @@ function openGloveDatabase(sensorType, directory) {
   }
 }
 
-module.exports = { GLOVE_SENSOR_TYPES, isGloveDatabaseType, openGloveDatabase, rewriteGloveSql };
+module.exports = { GLOVE_SENSOR_TYPES, isGloveDatabaseType, getGloveStorageType, openGloveDatabase, rewriteGloveSql };

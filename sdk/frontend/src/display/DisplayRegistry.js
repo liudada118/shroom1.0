@@ -27,11 +27,13 @@ export class DisplayRegistry {
   }
 
   get(key) {
-    return this.systems.get(key) || null;
+    return this.systems.get(key)
+      || this.list().find((system) => Array.isArray(system.aliases) && system.aliases.includes(key))
+      || null;
   }
 
   has(key) {
-    return this.systems.has(key);
+    return this.get(key) !== null;
   }
 
   list() {

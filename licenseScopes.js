@@ -4,6 +4,12 @@ const LICENSE_SENSOR_GROUPS = require("./licenseSensorGroups.json");
 
 const GROUP_SCOPE_PREFIX = "@group:";
 
+/** 旧单手兼容 key 与正式手套类型表达同一授权，不额外授予双手版。 */
+function normalizeLicenseSensorType(value) {
+  const sensorType = typeof value === "string" ? value.trim() : value;
+  return sensorType === "hand0205Single" ? "hand0205" : sensorType;
+}
+
 function validateLicenseSensorGroups(groups = LICENSE_SENSOR_GROUPS) {
   if (!Array.isArray(groups) || groups.length === 0) {
     throw new Error("license sensor groups must be a non-empty array");
@@ -63,7 +69,7 @@ function expandLicenseFile(licenseFile, { allSensorTypes = [] } = {}) {
     return {
       isAllTypes: true,
       groupKeys: [],
-      sensorTypes: [...new Set(allSensorTypes.filter(Boolean))],
+      sensorTypes: [...new Set(allSensorTypes.filter(Boolean).map(normalizeLicenseSensorType))],
     };
   }
 
@@ -83,16 +89,18 @@ function expandLicenseFile(licenseFile, { allSensorTypes = [] } = {}) {
         groupKeys.push(groupKey);
       }
       for (const item of GROUPS_BY_KEY.get(groupKey).items) {
-        if (!seenTypes.has(item.value)) {
-          seenTypes.add(item.value);
-          sensorTypes.push(item.value);
+        const sensorType = normalizeLicenseSensorType(item.value);
+        if (!seenTypes.has(sensorType)) {
+          seenTypes.add(sensorType);
+          sensorTypes.push(sensorType);
         }
       }
       continue;
     }
-    if (!seenTypes.has(normalized)) {
-      seenTypes.add(normalized);
-      sensorTypes.push(normalized);
+    const sensorType = normalizeLicenseSensorType(normalized);
+    if (!seenTypes.has(sensorType)) {
+      seenTypes.add(sensorType);
+      sensorTypes.push(sensorType);
     }
   }
 
@@ -108,6 +116,7 @@ module.exports = {
   LICENSE_SENSOR_GROUPS,
   createGroupScopeToken,
   expandLicenseFile,
+  normalizeLicenseSensorType,
   parseGroupScopeToken,
   validateLicenseSensorGroups,
 };

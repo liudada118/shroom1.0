@@ -254,9 +254,9 @@ const key = issueCategoryLicense({
 | 9 | 定制 | `wholeChair` | 整椅展示 |
 | 10 | 定制 | `minzhen` | 轮椅 |
 | 11 | 精密 | `handSinglePoint` | 32*32(检测点) |
-| 12 | 精密 | `hand0205` | 触觉手套2（当前双手同屏版，保留原 key） |
-| 12.1 | 精密 | `hand0205Single` | 触觉手套（恢复提交 `60ebe460` 的单手切换版） |
-| 13 | 精密 | `hand0205Double` | 旧双手协议兼容 key，主展示入口隐藏 |
+| 12 | 精密 | `hand0205` | 触觉手套（恢复提交 `60ebe460` 的单手切换版） |
+| 12.1 | 精密 | `hand0205Single` | 单手兼容别名，运行时归一为 `hand0205`，无独立菜单 |
+| 13 | 精密 | `hand0205Double` | 触觉手套2（当前双手同屏版） |
 | 14 | 精密 | `handGlove115200` | 触觉手套(115200) |
 | 15 | 精密 | `handGloveFullPacket` | 触觉手套(整包) |
 | 16 | 精密 | `smallSample` | 10*10小样 |
@@ -285,9 +285,9 @@ const key = issueCategoryLicense({
 | `fast256` | 16x16高速 | `normal`=3D模型<br>`numoriginal`=原始数据 |
 | `footVideo` | 触觉足底 | `num`=2D数字<br>`normal`=3D模型<br>`numoriginal`=原始数据 |
 | `hand` | 手部检测 | `normal`=3D模型<br>`numoriginal`=原始数据 |
-| `hand0205` | 触觉手套2（双手同屏） | `num`=2D数字<br>`normal`=3D遥操<br>`num3D`=3D数字<br>`numoriginal`=原始数据<br>`skin`=3D皮肤 |
-| `hand0205Single` | 触觉手套（单手切换） | `num`=旧版16×16数字<br>`normal`=单手3D遥操<br>`num3D`=3D数字<br>`numoriginal`=旧版15×10原始数据<br>`skin`=3D皮肤 |
-| `hand0205Double` | 旧双手协议兼容 key | `num`=2D数字<br>`normal`=3D遥操<br>`num3D`=3D数字<br>`numoriginal`=原始数据<br>`skin`=3D皮肤 |
+| `hand0205` | 触觉手套（单手切换） | `num`=旧版16×16数字<br>`normal`=单手3D遥操<br>`num3D`=3D数字<br>`numoriginal`=旧版15×10原始数据<br>`skin`=3D皮肤 |
+| `hand0205Single` | 触觉手套兼容别名 | 与 `hand0205` 相同 |
+| `hand0205Double` | 触觉手套2（双手同屏） | `num`=双手2D数字<br>`normal`=双手3D遥操<br>`num3D`=3D数字<br>`numoriginal`=双手原始数据<br>`skin`=3D皮肤 |
 | `handGlove115200` | 触觉手套(115200) | `num`=2D数字<br>`normal`=3D遥操<br>`num3D`=3D数字<br>`numoriginal`=原始数据<br>`skin`=3D皮肤 |
 | `handGloveFullPacket` | 触觉手套(整包) | `num`=2D数字<br>`normal`=3D遥操<br>`num3D`=3D数字<br>`numoriginal`=原始数据<br>`skin`=3D皮肤 |
 | `handSinglePoint` | 32*32(检测点) | `normal`=3D模型<br>`numoriginal`=原始数据 |
@@ -311,11 +311,13 @@ const key = issueCategoryLicense({
 
 ## 快捷预设 Key/Value
 
-2026-10-13 手套兼容说明：当前双手版只更改显示名称为“触觉手套2”，`hand0205` 的已有授权、采集库和配置继续有效。恢复的旧版使用独立 `hand0205Single`，需要密钥的 `file` 范围包含该 key；两套系统同时授权时使用 `["hand0205Single", "hand0205"]`，各自的 `sensorModules` 可单独限制上述五种模式。旧 `hand0205Double` 授权继续按既有兼容入口映射到双手展示，不作为第三套可选系统。
+2026-10-14 手套兼容说明：本机使用原有两个正式类型，`hand0205` 对应恢复的单手“触觉手套”，`hand0205Double` 对应当前双手“触觉手套2”。已有“单项全选”密钥的 `file` 列表只要包含这两个 key，即可显示两套；无需增加新类型或改发证服务器。两套同时授权使用 `["hand0205", "hand0205Double"]`，各自 `sensorModules` 的模式 key 沿用上表。此前 `hand0205Single` 仅作兼容别名，在线/离线授权、前端与SDK统一归一到 `hand0205` 并去重，不额外授权 `hand0205Double`。
+
+系统类型与存储文件显式映射，单手使用已有 `hand0205Single.db`，双手使用已有 `hand0205.db`；旧独立 Double 历史只读迁入双手库一次并保留来源文件。两套下载均为按时间归并的单个CSV，手别列区分原始帧，分别使用 `glove` / `glove2` 文件名前缀。
 
 | 类型 | Key | Value |
 | --- | --- | --- |
-| 传感器预设 | 触觉全套 | `hand0205Single`, `hand0205`, `handGlove115200`, `handGloveFullPacket`, `robot1`, `robotSY`, `robotLCF`, `footVideo` |
+| 传感器预设 | 触觉全套 | `hand0205`, `hand0205Double`, `handGlove115200`, `handGloveFullPacket`, `robot1`, `robotSY`, `robotLCF`, `footVideo` |
 | 传感器预设 | 高速矩阵 | `fast256`, `fast1024`, `daliegu` |
 | 天数预设 | `30` | 30天 |
 | 天数预设 | `90` | 90天 |

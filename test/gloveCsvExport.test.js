@@ -17,7 +17,7 @@ const source = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
 const ast = acorn.parse(source, { ecmaVersion: 'latest' });
 const BASE_TIME = 1700000000000;
 const DATE = String(BASE_TIME);
-const GLOVE_TYPES = ['hand0205', 'hand0205Single', 'handGlove115200', 'handGloveFullPacket'];
+const GLOVE_TYPES = ['hand0205', 'hand0205Double', 'hand0205Single', 'handGlove115200', 'handGloveFullPacket'];
 
 /** 提取实际导出代码，避免启动 Electron、串口或生产数据库。 */
 function symbolSource(name) {
@@ -136,8 +136,8 @@ function createExportHarness(t, { file = 'hand0205', left = [], right = [], rang
   return {
     sandbox, successes, failures, progress, queries, directory,
     /** 发出真实下载请求，允许失败场景独立检查通知。 */
-    async request(language = 'en') {
-      await sandbox.exportHistoryCsvStreaming({
+    async request(language = 'en', exporter = 'exportHistoryCsvStreaming') {
+      await sandbox[exporter]({
         date: DATE,
         csvTitle: sandbox.getCsvTitleMap({ language }),
         csvTargetPath: (filename) => path.join(directory, filename),
@@ -147,8 +147,8 @@ function createExportHarness(t, { file = 'hand0205', left = [], right = [], rang
         downloadOptions: { language },
       });
     },
-    async export(language = 'en') {
-      await this.request(language);
+    async export(language = 'en', exporter = 'exportHistoryCsvStreaming') {
+      await this.request(language, exporter);
       assert.deepEqual(failures, []);
       assert.equal(successes.length, 1);
       assert.equal(successes[0].length, 1);
@@ -209,8 +209,8 @@ test('restored glove and glove2 exports use distinct localized filenames for the
     ['ja', '触覚グローブ', '触覚グローブ2'],
   ]) {
     const left = [historyRow(1, BASE_TIME, 11)];
-    const restored = await createExportHarness(t, { file: 'hand0205Single', left }).export(language);
-    const current = await createExportHarness(t, { file: 'hand0205', left }).export(language);
+    const restored = await createExportHarness(t, { file: 'hand0205', left }).export(language);
+    const current = await createExportHarness(t, { file: 'hand0205Double', left }).export(language);
     assert.ok(restored.filename.startsWith(oldPrefix));
     assert.ok(current.filename.startsWith(currentPrefix));
     assert.notEqual(restored.filename, current.filename, 'the same collection time must not overwrite the other system export');
@@ -230,11 +230,11 @@ test('equal millisecond timestamps and repeated timestamps preserve every frame 
   assert.deepEqual(records.map((row) => row.index), ['0.000', '0.000', '0.000', '0.001', '0.002']);
 });
 
-test('hand0205Double keeps its existing wide CSV with separate left/right columns', async (t) => {
+test('legacy wide CSV helper remains compatible while the current dual system uses chronological rows', async (t) => {
   const left = historyRow(1, BASE_TIME, 11);
   const right = historyRow(2, BASE_TIME + 1, 22);
   const harness = createExportHarness(t, { file: 'hand0205Double', left: [left], right: [right] });
-  const { records, headers, filename } = await harness.export();
+  const { records, headers, filename } = await harness.export('en', 'exportHandGloveDoubleCsvStreaming');
   assert.equal(records.length, 1, 'the existing glove2 wide format remains one paired row');
   assert.ok(filename.startsWith('glove2'));
   assert.equal(headers.some((header) => header.id === 'hand'), false);

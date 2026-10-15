@@ -12,7 +12,7 @@ test('license replacement uses the same complete display-system switch lifecycle
 });
 
 test('license category scopes are expanded before frontend filtering and default selection', () => {
-  assert.match(serverSource, /const \{ expandLicenseFile \} = require\('\.\/licenseScopes'\)/);
+  assert.match(serverSource, /const \{[^}]*\bexpandLicenseFile\b[^}]*\} = require\('\.\/licenseScopes'\)/);
   assert.match(serverSource, /const expanded = expandLicenseFile\(licenseFile\)/);
   assert.match(serverSource, /return expanded\.isAllTypes \? 'all' : expanded\.sensorTypes/);
   assert.match(serverSource, /return expanded\.sensorTypes\[0\] \|\| fallback/);

@@ -9,7 +9,7 @@ const { createRequire } = require('node:module');
 const BetterSqlite3 = require('better-sqlite3');
 const { createObjectCsvStringifier } = require('csv-writer');
 const acorn = createRequire(path.join(__dirname, '../client/package.json'))('acorn');
-const { openGloveDatabase, GLOVE_SENSOR_TYPES, isGloveDatabaseType } = require('../server/gloveDatabase');
+const { openGloveDatabase, GLOVE_SENSOR_TYPES, isGloveDatabaseType, getGloveStorageType } = require('../server/gloveDatabase');
 const { createCollectionInsertQueue } = require('../server/collectionInsertQueue');
 const { totalToN, isCar } = require('../util');
 const { findMax } = require('../server/mathUtils');
@@ -43,7 +43,7 @@ function temporaryDirectory(t) {
       connections.push(pair);
       return pair;
     },
-    open(sensorType = 'hand0205') {
+    open(sensorType = 'hand0205Double') {
       const pair = openGloveDatabase(sensorType, directory);
       connections.push(pair);
       return pair;
@@ -137,6 +137,26 @@ function createLegacyDatabase(filename, rows) {
   }
 }
 
+/** 构造类型修正前的双手单库，迁移时必须只读其表和既有 legacy 游标。 */
+function createPreviousDoubleDatabase(filename, leftRows, rightRows, cursors = []) {
+  const native = new BetterSqlite3(filename);
+  try {
+    native.exec(`CREATE TABLE matrix (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT, timestamp INTEGER, date TEXT);
+      CREATE TABLE matrix_right (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT, timestamp INTEGER, date TEXT);
+      CREATE TABLE glove_migrations (source_path TEXT PRIMARY KEY, hand TEXT NOT NULL, last_imported_id INTEGER NOT NULL, updated_at INTEGER NOT NULL)`);
+    native.transaction(() => {
+      for (const [table, rows] of [['matrix', leftRows], ['matrix_right', rightRows]]) {
+        const insert = native.prepare(`INSERT INTO ${table} (id,data,timestamp,date) VALUES (?,?,?,?)`);
+        rows.forEach((row) => insert.run(row.id, row.data, row.timestamp, row.date));
+      }
+      const marker = native.prepare('INSERT INTO glove_migrations VALUES (?,?,?,?)');
+      cursors.forEach((cursor) => marker.run(cursor.source, cursor.hand, cursor.lastId, BASE_TIME));
+    })();
+  } finally {
+    native.close();
+  }
+}
+
 /** 模拟旧安装版本继续向保留的旧库追加数据。 */
 function appendLegacyRows(filename, rows) {
   const native = new BetterSqlite3(filename);
@@ -192,7 +212,7 @@ for (const sensorType of ['hand0205', 'hand0205Single', 'hand0205Double', 'handG
   test(`${sensorType} writes both hands to one physical database with distinct routed tables`, async (t) => {
     const fixture = temporaryDirectory(t);
     const { db, db1 } = fixture.open(sensorType);
-    const filename = path.join(fixture.directory, `${sensorType}.db`);
+    const filename = path.join(fixture.directory, `${getGloveStorageType(sensorType)}.db`);
     assert.ok(GLOVE_SENSOR_TYPES.includes(sensorType));
     assert.equal(isGloveDatabaseType(sensorType), true);
     assert.notEqual(db._db, db1._db, 'statement caches need separate table-routing facades');
@@ -209,14 +229,108 @@ for (const sensorType of ['hand0205', 'hand0205Single', 'hand0205Double', 'handG
     assert.equal(rightRows[0].hand, 'right');
     assert.equal(leftRows[0].data, frameData(11));
     assert.equal(rightRows[0].data, frameData(22));
-    assert.deepEqual(fs.readdirSync(fixture.directory).filter((name) => name.endsWith('.db')), [`${sensorType}.db`]);
+    assert.deepEqual(fs.readdirSync(fixture.directory).filter((name) => name.endsWith('.db')), [`${getGloveStorageType(sensorType)}.db`]);
   });
 }
 
+test('canonical system roles retain the previous data files and the single-hand alias shares their history', async (t) => {
+  assert.equal(getGloveStorageType('hand0205'), 'hand0205Single');
+  assert.equal(getGloveStorageType('hand0205Single'), 'hand0205Single');
+  assert.equal(getGloveStorageType('hand0205Double'), 'hand0205');
+  const fixture = temporaryDirectory(t);
+  createLegacyDatabase(path.join(fixture.directory, 'hand0205Single.db'), [{ id: 4, data: frameData(11), timestamp: BASE_TIME, date: DATE }]);
+  createLegacyDatabase(path.join(fixture.directory, 'hand0205.db'), [{ id: 8, data: frameData(22), timestamp: BASE_TIME, date: DATE }]);
+  const restored = fixture.open('hand0205');
+  const current = fixture.open('hand0205Double');
+  const alias = fixture.open('hand0205Single');
+  assert.equal(restored.db.filename, alias.db.filename);
+  assert.notEqual(restored.db.filename, current.db.filename);
+  assert.equal((await all(restored.db, 'SELECT * FROM matrix'))[0].data, frameData(11));
+  assert.equal((await all(current.db, 'SELECT * FROM matrix'))[0].data, frameData(22));
+  await run(alias.db1, INSERT, [frameData(33), BASE_TIME + 1, DATE]);
+  assert.equal((await all(restored.db1, 'SELECT * FROM matrix'))[0].data, frameData(33));
+  assert.equal((await all(current.db1, 'SELECT * FROM matrix')).length, 0);
+  assert.deepEqual(fs.readdirSync(fixture.directory).filter((name) => name.endsWith('.db')).sort(), ['hand0205.db', 'hand0205Single.db']);
+});
+
+test('legacy per-hand migration follows the existing storage prefix without copying across system roles', async (t) => {
+  const fixture = temporaryDirectory(t);
+  createLegacyDatabase(path.join(fixture.directory, 'hand0205sit.db'), [{ id: 1, data: frameData(11), timestamp: BASE_TIME, date: DATE }]);
+  createLegacyDatabase(path.join(fixture.directory, 'hand0205Singlesit.db'), [{ id: 1, data: frameData(22), timestamp: BASE_TIME, date: DATE }]);
+  const restored = fixture.open('hand0205');
+  const current = fixture.open('hand0205Double');
+  assert.deepEqual((await all(restored.db, 'SELECT data FROM matrix')).map((row) => row.data), [frameData(22)]);
+  assert.deepEqual((await all(current.db, 'SELECT data FROM matrix')).map((row) => row.data), [frameData(11)]);
+  const alias = fixture.open('hand0205Single');
+  assert.equal((await all(alias.db, 'SELECT * FROM matrix')).length, 1);
+  assert.equal((await all(current.db, 'SELECT * FROM matrix')).length, 1);
+});
+
+test('previous Double databases import once, preserve source files and respect their completed legacy cursors', async (t) => {
+  const fixture = temporaryDirectory(t);
+  const sourceCombined = path.join(fixture.directory, 'hand0205Double.db');
+  const sourceLeft = path.join(fixture.directory, 'hand0205Doublesit.db');
+  const sourceRight = path.join(fixture.directory, 'hand0205Doubleback.db');
+  const row = (id, marker) => ({ id, data: frameData(marker), timestamp: BASE_TIME + marker, date: DATE });
+  createPreviousDoubleDatabase(sourceCombined, [row(1, 11)], [row(1, 22)], [
+    { source: 'hand0205Doublesit.db', hand: 'left', lastId: 2 },
+    { source: 'hand0205Doubleback.db', hand: 'right', lastId: 1 },
+  ]);
+  createLegacyDatabase(sourceLeft, [row(1, 11), row(2, 12), row(3, 33)]);
+  createLegacyDatabase(sourceRight, [row(1, 22), row(2, 44)]);
+  const sources = [sourceCombined, sourceLeft, sourceRight];
+  const hashes = sources.map((filename) => createHash('sha256').update(fs.readFileSync(filename)).digest('hex'));
+  const first = fixture.open('hand0205Double');
+  assert.deepEqual((await all(first.db, 'SELECT data FROM matrix ORDER BY id')).map((value) => value.data), [frameData(11), frameData(33)]);
+  assert.deepEqual((await all(first.db1, 'SELECT data FROM matrix ORDER BY id')).map((value) => value.data), [frameData(22), frameData(44)]);
+  assert.equal(first.db._db.prepare('SELECT COUNT(*) AS count FROM glove_migrations').get().count, 4);
+  sources.forEach((filename, index) => assert.equal(createHash('sha256').update(fs.readFileSync(filename)).digest('hex'), hashes[index]));
+  await run(first.db, 'DELETE FROM matrix WHERE data = ?', [frameData(33)]);
+  await closeDatabase(first.db);
+  await closeDatabase(first.db1);
+  appendLegacyRows(sourceLeft, [row(4, 55)]);
+  appendLegacyRows(sourceRight, [row(3, 66)]);
+  appendLegacyRows(sourceCombined, [row(5, 77)]);
+  const second = fixture.open('hand0205Double');
+  assert.deepEqual((await all(second.db, 'SELECT data FROM matrix ORDER BY id')).map((value) => value.data), [frameData(11)], 'snapshot imports must not resurrect deleted frames or continue syncing another former type');
+  assert.deepEqual((await all(second.db1, 'SELECT data FROM matrix ORDER BY id')).map((value) => value.data), [frameData(22), frameData(44)]);
+  const restored = fixture.open('hand0205');
+  assert.equal((await all(restored.db, 'SELECT * FROM matrix')).length, 0);
+  assert.equal((await all(restored.db1, 'SELECT * FROM matrix')).length, 0);
+  sources.forEach((filename) => assert.ok(fs.existsSync(filename)));
+});
+
+test('former Double compatibility migration fails atomically and can retry without losing existing target data', async (t) => {
+  const fixture = temporaryDirectory(t);
+  const first = fixture.open('hand0205Double');
+  await run(first.db, INSERT, [frameData(99), BASE_TIME, DATE]);
+  await closeDatabase(first.db);
+  await closeDatabase(first.db1);
+  const row = { id: 1, data: frameData(11), timestamp: BASE_TIME + 1, date: DATE };
+  createPreviousDoubleDatabase(path.join(fixture.directory, 'hand0205Double.db'), [row], []);
+  const rightFile = path.join(fixture.directory, 'hand0205Doubleback.db');
+  const broken = new BetterSqlite3(rightFile);
+  broken.exec('CREATE TABLE unrelated (id INTEGER)');
+  broken.close();
+  assert.throws(() => fixture.open('hand0205Double'), /matrix/);
+  const target = new BetterSqlite3(path.join(fixture.directory, 'hand0205.db'), { readonly: true });
+  try {
+    assert.deepEqual(target.prepare('SELECT data FROM matrix').all().map((value) => value.data), [frameData(99)]);
+    assert.equal(target.prepare('SELECT COUNT(*) AS count FROM matrix_right').get().count, 0);
+    assert.equal(target.prepare('SELECT COUNT(*) AS count FROM glove_migrations').get().count, 0);
+  } finally {
+    target.close();
+  }
+  createLegacyDatabase(rightFile, [{ ...row, data: frameData(22) }]);
+  const retry = fixture.open('hand0205Double');
+  assert.deepEqual((await all(retry.db, 'SELECT data FROM matrix ORDER BY id')).map((value) => value.data), [frameData(99), frameData(11)]);
+  assert.deepEqual((await all(retry.db1, 'SELECT data FROM matrix')).map((value) => value.data), [frameData(22)]);
+});
+
 test('restored glove and current glove keep their collections and deletions in separate databases', async (t) => {
   const fixture = temporaryDirectory(t);
-  const current = fixture.open('hand0205');
-  const restored = fixture.open('hand0205Single');
+  const current = fixture.open('hand0205Double');
+  const restored = fixture.open('hand0205');
   await run(current.db, INSERT, [frameData(11), BASE_TIME, DATE]);
   await run(current.db1, INSERT, [frameData(22), BASE_TIME + 1, DATE]);
   await run(restored.db, INSERT, [frameData(33), BASE_TIME + 2, DATE]);
@@ -236,7 +350,7 @@ test('dbManager dispatches ordinary gloves to a single file without needing an i
   const { initDb } = require('../server/dbManager');
   const pair = initDb('hand0205', fixture.directory, fixture.directory);
   try {
-    assert.equal(pair.db._db.name, path.join(fixture.directory, 'hand0205.db'));
+    assert.equal(pair.db._db.name, path.join(fixture.directory, 'hand0205Single.db'));
     assert.equal(pair.db1._db.name, pair.db._db.name);
     await run(pair.db1, INSERT, [frameData(9), BASE_TIME, DATE]);
     assert.equal((await all(pair.db1, 'SELECT * FROM matrix')).length, 1);

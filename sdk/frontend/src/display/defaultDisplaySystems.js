@@ -12,7 +12,8 @@ const COMMON_PRESSURE_CONTROLS = {
 
 export const DEFAULT_DISPLAY_SYSTEMS = [
   {
-    key: 'hand0205Single',
+    key: 'hand0205',
+    aliases: ['hand0205Single'],
     label: '触觉手套',
     channels: ['sit', 'back'],
     defaultMode: 'normal',
@@ -30,7 +31,7 @@ export const DEFAULT_DISPLAY_SYSTEMS = [
     },
   },
   {
-    key: 'hand0205',
+    key: 'hand0205Double',
     label: '触觉手套2',
     channels: ['sit', 'back'],
     defaultMode: 'normal',

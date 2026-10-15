@@ -1792,7 +1792,7 @@ export const sitTypeEvent = {
       // that.com.current?.calibration([0,0,0])
       // that.com.current?.handZero(      // that.com.current?.calibration([0,0,0])
     }
-  }, hand0205: ({ that, wsPointData, local, rotate, fingerArr }) => {
+  }, hand0205Double: ({ that, wsPointData, local, rotate, fingerArr }) => {
     // console.log('wsPointData')
     // console.log(wsPointData.length)
     if (wsPointData.length == 1024) {
@@ -1961,12 +1961,12 @@ export const sitTypeEvent = {
       // that.com.current?.calibration([0,0,0])
     }
   },
-  hand0205Single: function(args) {
-    if (args.that.state.hand) return sitTypeEvent.hand0205(args);
+  hand0205: function(args) {
+    if (args.that.state.hand) return sitTypeEvent.hand0205Double(args);
   },
-  hand0205Double: function(args) { return sitTypeEvent.hand0205(args); },
-  handGlove115200: function(args) { return sitTypeEvent.hand0205(args); },
-  handGloveFullPacket: function(args) { return sitTypeEvent.hand0205(args); },
+  hand0205Single: function(args) { return sitTypeEvent.hand0205(args); },
+  handGlove115200: function(args) { return sitTypeEvent.hand0205Double(args); },
+  handGloveFullPacket: function(args) { return sitTypeEvent.hand0205Double(args); },
   hand0205Point: ({ that, wsPointData, local, rotate, fingerArr }) => {
 
 
@@ -4838,7 +4838,7 @@ export const backTypeEvent = {
       }
       that.com.current?.changeWsData147R({ right: [...rightNumData] });
     }
-  }, hand0205: ({ that, jsonObject, local, rotate, fingerArr }) => {
+  }, hand0205Double: ({ that, jsonObject, local, rotate, fingerArr }) => {
     // console.log('wsPointData')
     // console.log(wsPointData.length)
     let wsPointData = jsonObject.backData;
@@ -5016,12 +5016,12 @@ export const backTypeEvent = {
       // that.com.current?.calibration([0,0,0])
     }
   },
-  hand0205Single: function(args) {
-    if (!args.that.state.hand) return backTypeEvent.hand0205(args);
+  hand0205: function(args) {
+    if (!args.that.state.hand) return backTypeEvent.hand0205Double(args);
   },
-  hand0205Double: function(args) { return backTypeEvent.hand0205(args); },
-  handGlove115200: function(args) { return backTypeEvent.hand0205(args); },
-  handGloveFullPacket: function(args) { return backTypeEvent.hand0205(args); },
+  hand0205Single: function(args) { return backTypeEvent.hand0205(args); },
+  handGlove115200: function(args) { return backTypeEvent.hand0205Double(args); },
+  handGloveFullPacket: function(args) { return backTypeEvent.hand0205Double(args); },
 };
 
 export const headTypeEvent = {

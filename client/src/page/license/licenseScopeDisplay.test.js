@@ -7,7 +7,7 @@ describe('license category display', () => {
     expect(describeLicenseFile('@group:precision')).toEqual({
       type: 'group',
       groupKeys: ['precision'],
-      list: precision.items.map((item) => item.value),
+      list: [...new Set(precision.items.map((item) => item.value === 'hand0205Single' ? 'hand0205' : item.value))],
     });
   });
 
@@ -22,5 +22,11 @@ describe('license category display', () => {
 
   it('rejects an unknown category instead of treating it as a sensor', () => {
     expect(() => describeLicenseFile('@group:unknown')).toThrow(/unknown license group/);
+  });
+
+  it('keeps both legacy glove selections and only normalizes the single-glove alias', () => {
+    expect(describeLicenseFile(['hand0205', 'hand0205Double']).list).toEqual(['hand0205', 'hand0205Double']);
+    expect(describeLicenseFile(['hand0205Single', 'hand0205']).list).toEqual(['hand0205']);
+    expect(describeLicenseFile('hand0205Single').list).toEqual(['hand0205']);
   });
 });

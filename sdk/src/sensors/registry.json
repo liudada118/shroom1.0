@@ -163,6 +163,21 @@
       "source": "sdk/src/profiles.js"
     },
     "hand0205Single": {
+      "label": "触觉手套（兼容）",
+      "aliasOf": "hand0205",
+      "licenseGroup": "precision",
+      "verified": true,
+      "protocol": {
+        "baudRate": 921600, "valueType": "uint8", "delimiter": "aa550399",
+        "pressureLength": 256, "rotateOffset": 256, "rotateLength": 4
+      },
+      "matrix": { "width": 16, "height": 16 },
+      "lineOrder": null,
+      "channels": ["sit", "back"],
+      "note": "已发密钥和 SDK API 的兼容别名，不新增第三个运行时展示入口；正式单手系统为 hand0205。",
+      "source": "60ebe4601a7250618327d407c4100b8c49ea9acd:sdk/src/profiles.js 的 hand0205 协议"
+    },
+    "hand0205": {
       "label": "触觉手套",
       "licenseGroup": "precision",
       "verified": true,
@@ -173,24 +188,11 @@
       "matrix": { "width": 16, "height": 16 },
       "lineOrder": null,
       "channels": ["sit", "back"],
-      "note": "单手切换展示版，复用历史 hand0205 协议。展示映射使用 147 个点位，原始帧保留 256 点。",
-      "source": "60ebe4601a7250618327d407c4100b8c49ea9acd:sdk/src/profiles.js 的 hand0205 协议"
-    },
-    "hand0205": {
-      "label": "触觉手套2",
-      "licenseGroup": "precision",
-      "verified": true,
-      "protocol": {
-        "baudRate": 921600, "valueType": "uint8", "delimiter": "aa550399",
-        "pressureLength": 256, "rotateOffset": 256, "rotateLength": 4
-      },
-      "matrix": { "width": 16, "height": 16 },
-      "lineOrder": null,
-      "channels": ["sit", "back"],
+      "note": "历史单手切换展示版。展示映射使用 147 个点位，原始帧保留 256 点。",
       "source": "sdk/src/profiles.js"
     },
     "hand0205Double": {
-      "label": "手套 0205 双手",
+      "label": "触觉手套2",
       "licenseGroup": "precision",
       "verified": true,
       "protocol": {

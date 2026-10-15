@@ -6,6 +6,7 @@ const {
   LICENSE_SENSOR_GROUPS,
   createGroupScopeToken,
   expandLicenseFile,
+  normalizeLicenseSensorType,
 } = require('../licenseScopes');
 const {
   decodeLicenseKey,
@@ -13,11 +14,13 @@ const {
   verifyOfflineLicense,
 } = require('../crypto-lib.cjs');
 
+const canonicalGroupTypes = (group) => [...new Set(group.items.map((item) => normalizeLicenseSensorType(item.value)))];
+
 test('every configured license category expands to all systems in registry order', () => {
   for (const group of LICENSE_SENSOR_GROUPS) {
     const expanded = expandLicenseFile(createGroupScopeToken(group.key));
     assert.deepEqual(expanded.groupKeys, [group.key]);
-    assert.deepEqual(expanded.sensorTypes, group.items.map((item) => item.value));
+    assert.deepEqual(expanded.sensorTypes, canonicalGroupTypes(group));
   }
 });
 
@@ -25,7 +28,7 @@ test('precision-all includes both human-body systems and all current precision s
   const precision = LICENSE_SENSOR_GROUPS.find((group) => group.key === 'precision');
   const expanded = expandLicenseFile('@group:precision');
 
-  assert.deepEqual(expanded.sensorTypes, precision.items.map((item) => item.value));
+  assert.deepEqual(expanded.sensorTypes, canonicalGroupTypes(precision));
   assert.ok(expanded.sensorTypes.includes('humanBody'));
   assert.ok(expanded.sensorTypes.includes('humanBodyOptimized'));
 });
@@ -67,7 +70,7 @@ test('online key generation stores a category token and decoding expands it', ()
   assert.equal(decoded.valid, true);
   assert.equal(decoded.version, 3);
   assert.deepEqual(decoded.groupKeys, ['precision']);
-  assert.deepEqual(decoded.sensorTypes, precision.items.map((item) => item.value));
+  assert.deepEqual(decoded.sensorTypes, canonicalGroupTypes(precision));
   assert.equal(decoded.licenseFile, '@group:precision');
 });
 
@@ -107,4 +110,22 @@ test('legacy single-system and fixed-list keys keep their original behavior', ()
   assert.deepEqual(multiple.sensorTypes, ['hand0205', 'jqbed']);
   assert.deepEqual(multiple.groupKeys, []);
   assert.equal(multiple.version, 2);
+});
+
+test('legacy individual all-selection keys retain both original glove system types', () => {
+  const decoded = decodeLicenseKey(generateLicenseKey(['hand0205', 'hand0205Double'], 30), Date.now());
+  assert.equal(decoded.valid, true);
+  assert.deepEqual(decoded.sensorTypes, ['hand0205', 'hand0205Double']);
+  assert.deepEqual(decoded.groupKeys, []);
+});
+
+test('single-glove compatibility aliases de-duplicate without granting the dual system', () => {
+  for (const value of ['hand0205Single', ['hand0205Single', 'hand0205']]) {
+    const decoded = decodeLicenseKey(generateLicenseKey(value, 30), Date.now());
+    assert.equal(decoded.valid, true);
+    assert.deepEqual(decoded.sensorTypes, ['hand0205']);
+  }
+  assert.deepEqual(expandLicenseFile('all', {
+    allSensorTypes: ['hand0205Single', 'hand0205', 'hand0205Double'],
+  }).sensorTypes, ['hand0205', 'hand0205Double']);
 });

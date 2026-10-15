@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { LicenseService } = require('../sdk/src/license/LicenseService');
-const { LICENSE_SENSOR_GROUPS } = require('../licenseScopes');
+const { LICENSE_SENSOR_GROUPS, normalizeLicenseSensorType } = require('../licenseScopes');
 
 test('SDK expands category-all scopes before selecting display systems', () => {
   const service = new LicenseService();
@@ -10,7 +10,7 @@ test('SDK expands category-all scopes before selecting display systems', () => {
 
   assert.deepEqual(
     service.getSelectFlag('@group:precision'),
-    precision.items.map((item) => item.value),
+    [...new Set(precision.items.map((item) => normalizeLicenseSensorType(item.value)))],
   );
   assert.equal(service.getDefaultFile('@group:precision'), precision.items[0].value);
 });

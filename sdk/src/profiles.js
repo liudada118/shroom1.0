@@ -34,16 +34,6 @@ const DEFAULT_SENSOR_PROFILES = {
     delimiter: STANDARD_FRAME_DELIMITER,
     valueType: 'uint8',
   },
-  hand0205Single: {
-    sensorType: 'hand0205Single',
-    baudRate: getDefaultBaudRate('hand0205Single'),
-    delimiter: STANDARD_FRAME_DELIMITER,
-    valueType: 'uint8',
-    pressureLength: 256,
-    rotateOffset: 256,
-    rotateLength: 4,
-    channels: ['sit', 'back'],
-  },
   hand0205: {
     sensorType: 'hand0205',
     baudRate: getDefaultBaudRate('hand0205'),
@@ -53,6 +43,18 @@ const DEFAULT_SENSOR_PROFILES = {
     rotateOffset: 256,
     rotateLength: 4,
     channels: ['sit', 'back'],
+  },
+  // API 兼容别名；正式单手系统使用 hand0205。
+  hand0205Single: {
+    sensorType: 'hand0205Single',
+    baudRate: getDefaultBaudRate('hand0205Single'),
+    delimiter: STANDARD_FRAME_DELIMITER,
+    valueType: 'uint8',
+    pressureLength: 256,
+    rotateOffset: 256,
+    rotateLength: 4,
+    channels: ['sit', 'back'],
+    aliasOf: 'hand0205',
   },
   hand0205Double: {
     sensorType: 'hand0205Double',

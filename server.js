@@ -81,7 +81,7 @@ const {
 const { resolveConfigFile, getConfigFileCandidates, getWritableConfigFile } = require('./licenseHelper');
 const licenseManager = require('./licenseManager');
 const sensorTypeStore = require('./sensorTypeStore');
-const { expandLicenseFile } = require('./licenseScopes');
+const { expandLicenseFile, normalizeLicenseSensorType } = require('./licenseScopes');
 const appConfig = require('./configManager');
 const { isCar, dedupli, totalToN, } = require("./util");
 const { pressSmallBed } = require("./utilMatrix");
@@ -1046,7 +1046,7 @@ function getHandGloveCsvFilePrefix(languageTitles = CSV_TITLES.zh) {
 
 /** 两种手套使用独立文件名前缀，避免同名采集在导出时互相覆盖。 */
 function getCombinedHandGloveCsvFilePrefix(languageTitles = CSV_TITLES.zh, sensorType = '') {
-  const prefixes = sensorType === 'hand0205'
+  const prefixes = sensorType === HAND_GLOVE_DOUBLE
     ? { zh: '触觉手套2', en: 'glove2', ja: '触覚グローブ2' }
     : { zh: '触觉手套', en: 'glove', ja: '触覚グローブ' };
   return prefixes[getCsvTitleLanguage(languageTitles)];
@@ -2931,11 +2931,6 @@ async function exportHistoryCsvStreaming({ date, csvTitle, csvTargetPath, sendCs
     };
     const collectionLabelInfo = getCollectionCsvLabelInfo(date);
 
-    if (file === HAND_GLOVE_DOUBLE) {
-      await exportHandGloveDoubleCsvStreaming({ date, csvTitle, csvTargetPath, sendCsvSuccess, sendCsvFailed, sendCsvProgress, downloadOptions });
-      return;
-    }
-
     if (isHandGloveType(file)) {
       await exportCombinedHandGloveCsvStreaming({ date, csvTitle, csvTargetPath, sendCsvSuccess, sendCsvFailed, sendCsvProgress });
       return;
@@ -3627,6 +3622,7 @@ function broadcastJson(payload) {
 
 function switchActiveDisplaySystem(receiveFile, reason = 'file switch') {
   if (typeof receiveFile !== 'string' || !receiveFile.trim()) return false;
+  resetHandGloveDoublePackets();
   if (halowReceiver.active) {
     halowReceiver.stop().catch(error => logger.warn('[HaLow] Stop on system switch failed:', error.message));
   }
@@ -3666,7 +3662,7 @@ function switchActiveDisplaySystem(receiveFile, reason = 'file switch') {
 
   if (isHandGloveType(previousFile)) collectionInsertQueue.flushAll();
   const previousDatabases = isHandGloveType(previousFile) ? [db, db1] : [];
-  file = receiveFile.trim();
+  file = normalizeLicenseSensorType(receiveFile);
   Object.keys(petCareSystems).forEach(resetPetCareRuntime);
   baudRate = getSensorBaudRate(file);
   const nextDb = initDb(file);
@@ -3753,6 +3749,7 @@ module.exports = {
          */
         if (licenseManager.isLicenseValid()) {
           if (JSON.parse(message).backPort != null) {
+            resetHandGloveDoublePackets();
             com1 = JSON.parse(message).backPort;
             try {
               port2 = new SerialPort(
@@ -4552,6 +4549,7 @@ module.exports = {
               sendJson(ws, { halowResult: { ok: false, message: '请先停止 HaLow 接收，再打开串口' } });
               return;
             }
+            resetHandGloveDoublePackets();
             sitClose = false
             com = JSON.parse(message).sitPort;
             if (port1?.isOpen) {
@@ -4675,6 +4673,7 @@ module.exports = {
            * 鐏忓棗鐤勯弮鍫曟浆閼冲本鏆熼幑顕€鈧岸浜鹃幍鎾崇磻
            */
           if (JSON.parse(message).backPort != null) {
+            resetHandGloveDoublePackets();
             backClose = false
             com1 = JSON.parse(message).backPort;
             if (port2?.isOpen) {
@@ -6434,6 +6433,8 @@ module.exports = {
               }
 
               const [leftPath, rightPath] = paths;
+              resetHandGloveDoublePackets();
+              handGloveRouteByPacketType = true;
               sitClose = false;
               backClose = false;
               com = leftPath;
@@ -6791,9 +6792,16 @@ const handGloveDoublePacketChunks = {
   left: [],
   right: [],
 };
+let handGloveRouteByPacketType = false;
+
+function resetHandGloveDoublePackets() {
+  handGloveRouteByPacketType = false;
+  handGloveDoublePacketChunks.left = [];
+  handGloveDoublePacketChunks.right = [];
+}
 
 function getHandGloveDoublePacketSide(packetType, fallbackSide) {
-  if (file !== HAND_GLOVE_DOUBLE) return fallbackSide;
+  if (file !== HAND_GLOVE_DOUBLE || !handGloveRouteByPacketType) return fallbackSide;
   return HAND_GLOVE_DOUBLE_PACKET_SIDE[Number(packetType)] || fallbackSide;
 }
 
@@ -6825,6 +6833,7 @@ function routeHandGloveDoubleFrame({ pressureData, imuBytes = [], outputSide = '
       realArr: realPressureData,
       rawPressureData,
       newArr147: mappedData,
+      newArr147Raw: newArr147_2,
       handSide: 'right',
       packetSourcePort: sourcePort,
       sitFlag: port1?.isOpen,
@@ -6858,6 +6867,7 @@ function routeHandGloveDoubleFrame({ pressureData, imuBytes = [], outputSide = '
     realArr: realPressureData,
     rawPressureData,
     newArr147: mappedData,
+    newArr147Raw: newArr147,
     handSide: 'left',
     packetSourcePort: sourcePort,
     sitFlag: port1?.isOpen,

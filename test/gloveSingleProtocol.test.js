@@ -22,7 +22,7 @@ function symbolSource(name) {
 }
 
 /** 运行真正的串口回调与采集函数，只替换串口、WS 和数据库写入等外部 I/O。 */
-function createHarness(file = 'hand0205Single', licensed = true) {
+function createHarness(file = 'hand0205', licensed = true) {
   const messages = [], rows = [];
   let currentTime = 1700000000000;
   class MockDate extends Date {
@@ -56,6 +56,8 @@ function createHarness(file = 'hand0205Single', licensed = true) {
     'isHandGloveType', 'isZeroFrameStorageType', 'isSmallBedMatrixType', 'getSensorBaudRate',
     'getZeroAwareStoragePressureData', 'getZeroFrameForStorage', 'buildZeroAwareStorageData',
     'normalizeFiniteFrame', 'parseStoredSensorFrame', 'getHandGlovePlaybackFrame',
+    'HAND_GLOVE_DOUBLE_PACKET_SIDE', 'handGloveDoublePacketChunks', 'handGloveRouteByPacketType',
+    'getHandGloveDoublePacketSide', 'resetHandGloveDoublePackets', 'routeHandGloveDoubleFrame',
     'handleHandGloveDoubleFirstPacket', 'handleHandGloveDoubleSecondPacket',
     'colOrSendData', 'colOrSendData1',
   ];
@@ -87,7 +89,7 @@ function packetPair(pressure, rotate = [0.25, -0.5, 0.75, 1], type = 0) {
 
 const pressure = Array.from({ length: 256 }, (_, index) => index % 200 + 10);
 
-for (const file of ['hand0205Single', 'hand0205']) {
+for (const file of ['hand0205', 'hand0205Single', 'hand0205Double']) {
   test(`${file} preserves both ordinary 130+146 packet paths, pressure mapping and stored quaternion`, () => {
     const { sandbox, rows, messages } = createHarness(file);
     assert.equal(sandbox.getSensorBaudRate(file), 921600);
@@ -135,6 +137,59 @@ test('single glove ignores double-glove hand routing codes and follows the physi
   for (const packet of packetPair(pressure, undefined, 4)) sandbox.parser(packet);
   for (const packet of packetPair(pressure, undefined, 3)) sandbox.parser2(packet);
   assert.deepEqual(rows.map(row => row.hand), ['left', 'right']);
+});
+
+test('current dual glove uses manually selected ports and preserves raw bend data after zeroing', () => {
+  const { sandbox, rows, messages } = createHarness('hand0205Double');
+  sandbox.pointArr1RawZero = sandbox.pointArr1zero = new Array(256).fill(20);
+  sandbox.pointArr2RawZero = sandbox.pointArr2zero = new Array(256).fill(30);
+  sandbox.pointArr147zero = new Array(handL([...pressure]).length).fill(5);
+  sandbox.pointArr147zero_2 = new Array(handR([...pressure]).length).fill(7);
+  for (const packet of packetPair(pressure, undefined, 2)) sandbox.parser(packet);
+  for (const packet of packetPair(pressure, undefined, 1)) sandbox.parser2(packet);
+  assert.deepEqual(rows.map(row => row.hand), ['left', 'right']);
+  for (const [index, baseline, mapped, mappedBaseline] of [
+    [0, 20, handL([...pressure]), 5], [1, 30, handR([...pressure]), 7],
+  ]) {
+    assert.deepEqual(rows[index].data.pressureData, pressure.map(value => Math.max(0, value - baseline)));
+    assert.deepEqual(rows[index].data.zeroFrame, new Array(256).fill(baseline));
+    assert.deepEqual(rows[index].data.rotate, [0.25, -0.5, 0.75, 1]);
+    assert.deepEqual(messages[index].rawPressureData, rows[index].data.pressureData);
+    assert.deepEqual(messages[index].newArr147Raw, mapped);
+    assert.deepEqual(messages[index].newArr147, mapped.map(value => Math.max(0, value - mappedBaseline)));
+  }
+});
+
+test('current dual glove automatic connection routes interleaved halves by hand code', () => {
+  const { sandbox, rows, messages } = createHarness('hand0205Double');
+  vm.runInContext('handGloveRouteByPacketType = true', sandbox);
+  const rightPressure = pressure.map(value => (value + 25) % 256);
+  const left = packetPair(pressure, [0.25, -0.5, 0.75, 1], 1);
+  const right = packetPair(rightPressure, [1, 0.5, -0.25, 0.75], 2);
+  sandbox.parser(left[0]);
+  sandbox.parser(right[0]);
+  sandbox.parser(right[1]);
+  sandbox.parser(left[1]);
+  assert.deepEqual(rows.map(row => row.hand), ['right', 'left']);
+  assert.deepEqual(rows[0].data.pressureData, rightPressure);
+  assert.deepEqual(rows[1].data.pressureData, pressure);
+  assert.deepEqual(rows[0].data.rotate, [1, 0.5, -0.25, 0.75]);
+  assert.deepEqual(messages.map(message => message.handSide), ['right', 'left']);
+  assert.deepEqual(messages.map(message => message.packetSourcePort), ['sit', 'sit']);
+});
+
+test('dual glove reconnect reset clears partial packets and restores physical-port routing', () => {
+  const { sandbox, rows } = createHarness('hand0205Double');
+  vm.runInContext('handGloveRouteByPacketType = true', sandbox);
+  sandbox.parser(packetPair(pressure, undefined, 2)[0]);
+  assert.equal(vm.runInContext('handGloveDoublePacketChunks.right.length', sandbox), 128);
+  sandbox.resetHandGloveDoublePackets();
+  assert.equal(vm.runInContext('handGloveRouteByPacketType', sandbox), false);
+  assert.equal(vm.runInContext('handGloveDoublePacketChunks.left.length + handGloveDoublePacketChunks.right.length', sandbox), 0);
+  for (const packet of packetPair(pressure, undefined, 2)) sandbox.parser(packet);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].hand, 'left');
+  assert.deepEqual(rows[0].data.pressureData, pressure);
 });
 
 test('single glove keeps old 260 and 151 frame playback compatibility and clears a missing hand', () => {

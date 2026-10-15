@@ -113,8 +113,9 @@ const smallBedNoAlgType_title = 'smallBedNoAlg'
 const smallBed12BType_title = 'smallBed12B'
 const wholeChairType_title = 'wholeChair'
 const minzhenType_title = 'minzhen'
-const tactileGloveTypes_title = ['hand0205Single', 'hand0205', 'handGlove115200', 'handGloveFullPacket']
+const tactileGloveTypes_title = ['hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket']
 const fullPacketGloveType_title = 'handGloveFullPacket'
+const normalizeGloveDisplayTypeTitle = (type) => type === 'hand0205Single' ? 'hand0205' : type
 const calibratableGloveTypes_title = tactileGloveTypes_title.filter((type) => type !== fullPacketGloveType_title)
 const isPetCareMatrixTitle = (type) => petCareMatrixTypes_title.includes(type)
 const bedArr_title = ['bigBed', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'bed4096', 'bed4096num', 'matColPos', 'jqbed', tempFullBedType_title, ...petCareMatrixTypes_title]
@@ -1634,8 +1635,8 @@ class Title extends React.Component {
     // 全量传感器类型列表
     const allSensorArr = [
       { label: t('sensorHand'), value: 'hand' },
-      { label: t('sensorHand0205Single'), value: 'hand0205Single' },
       { label: t('sensorHand0205'), value: 'hand0205' },
+      { label: t('sensorHand0205Double'), value: 'hand0205Double' },
       { label: t('sensorHandGlove115200'), value: 'handGlove115200' },
       { label: t('sensorHandGloveFullPacket'), value: 'handGloveFullPacket' },
       { label: t('sensorSmallSample'), value: 'smallSample' },
@@ -1665,7 +1666,9 @@ class Title extends React.Component {
       { label: t('sensorPressureVest'), value: PRESSURE_VEST_MATRIX },
     ]
 
-    const allowedTypes = Array.isArray(this.props.allowedTypes) ? this.props.allowedTypes : [];
+    const allowedTypes = Array.isArray(this.props.allowedTypes)
+      ? [...new Set(this.props.allowedTypes.map(normalizeGloveDisplayTypeTitle))]
+      : [];
     const sensorArr = allowedTypes.length
       ? allSensorArr.filter((sensor) => allowedTypes.includes(sensor.value))
       : allSensorArr;
@@ -2011,11 +2014,11 @@ class Title extends React.Component {
             >
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px' }}>
                 <Select
-                  value={this.state.calibHand || (this.props.matrixName === 'hand0205Single' && !this.props.hand ? 'right' : 'left')}
+                  value={this.state.calibHand || (this.props.matrixName === 'hand0205' && !this.props.hand ? 'right' : 'left')}
                   style={{ width: 100 }}
                   onChange={(e) => {
                     this.setState({ calibHand: e })
-                    if (this.props.matrixName === 'hand0205Single') {
+                    if (this.props.matrixName === 'hand0205') {
                       const hand = e === 'left';
                       this.props.changeStateData({ hand });
                       this.props.com.current?.changeModal?.(hand);
@@ -2048,7 +2051,7 @@ class Title extends React.Component {
 
               <Button
                 onClick={() => {
-                  this.props.colFingerData(this.state.fingerIndex, this.state.calibHand || (this.props.matrixName === 'hand0205Single' && !this.props.hand ? 'right' : 'left'))
+                  this.props.colFingerData(this.state.fingerIndex, this.state.calibHand || (this.props.matrixName === 'hand0205' && !this.props.hand ? 'right' : 'left'))
                 }}
               >{t('colData')}</Button>
               <Button
@@ -2093,7 +2096,7 @@ class Title extends React.Component {
 
             <Button
               onClick={() => {
-                this.props.colFingerData(this.state.fingerIndex, this.state.calibHand || (this.props.matrixName === 'hand0205Single' && !this.props.hand ? 'right' : 'left'))
+                this.props.colFingerData(this.state.fingerIndex, this.state.calibHand || (this.props.matrixName === 'hand0205' && !this.props.hand ? 'right' : 'left'))
               }}
             >采集数据</Button>
             <Button
@@ -2130,7 +2133,7 @@ class Title extends React.Component {
           : ''} */}
 
 
-        {this.props.matrixName === 'hand0205Single' ? (
+        {this.props.matrixName === 'hand0205' ? (
           <Select
             value={this.props.hand}
             style={{ marginRight: 6, width: 90 }}
@@ -2155,7 +2158,7 @@ class Title extends React.Component {
 
 
             // 校准弹框
-            if (this.props.matrixName === 'hand0205Single') {
+            if (this.props.matrixName === 'hand0205') {
               this.setState({ calibHand: this.props.hand ? 'left' : 'right' });
             }
             this.props.changeCalibration()

@@ -37,6 +37,7 @@ export const SENSOR_TYPES = {
   HAND_L:      'handL',
   HAND_R:      'handR',
   HAND_0205:   'hand0205',
+  // 保留已发旧 key 的兼容名称；正式单手入口是 HAND_0205。
   HAND_0205_SINGLE: 'hand0205Single',
   HAND_0205_DOUBLE: 'hand0205Double',
   HAND_GLOVE_115200: 'handGlove115200',
@@ -114,6 +115,8 @@ export const SENSOR_MATRIX_MAP = {
   short:      { width: 32, height: 32, total: 1024 },
   handL:      { width: 16, height: 16, total: 256 },
   handR:      { width: 16, height: 16, total: 256 },
+  hand0205:   { width: 16, height: 16, total: 256 },
+  hand0205Double: { width: 16, height: 16, total: 256 },
   hand0205Single: { width: 16, height: 16, total: 256 },
   handGloveFullPacket: { width: 16, height: 16, total: 256 },
   gloves:     { width: 16, height: 16, total: 256 },

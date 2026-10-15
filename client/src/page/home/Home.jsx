@@ -120,7 +120,8 @@ import {
 
 const ANT_DESIGN_LOCALES = Object.freeze({ zh: zhCN, en: enUS, ja: jaJP });
 
-const SINGLE_GLOVE_MATRIX = 'hand0205Single'
+const SINGLE_GLOVE_MATRIX = 'hand0205'
+const SINGLE_GLOVE_ALIAS = 'hand0205Single'
 const FULL_PACKET_GLOVE_MATRIX = 'handGloveFullPacket'
 const HAND_0205_DOUBLE_MATRIX = 'hand0205Double'
 const MINZHEN_MATRIX = 'minzhen'
@@ -128,11 +129,11 @@ const SMALL_BED_NO_ALG_MATRIX = 'smallBedNoAlg'
 const SMALL_BED_12B_MATRIX = 'smallBed12B'
 const FULL_PACKET_GLOVE_MODES = ['num', 'numoriginal']
 const WHOLE_CHAIR_MATRIX = 'wholeChair'
-const HIDDEN_DISPLAY_MATRIX_TYPES = [HAND_0205_DOUBLE_MATRIX]
+const HIDDEN_DISPLAY_MATRIX_TYPES = [SINGLE_GLOVE_ALIAS]
 const normalizeDisplayMatrixName = (matrixName) =>
-  HIDDEN_DISPLAY_MATRIX_TYPES.includes(matrixName) ? 'hand0205' : matrixName
+  HIDDEN_DISPLAY_MATRIX_TYPES.includes(matrixName) ? SINGLE_GLOVE_MATRIX : matrixName
 const filterVisibleDisplayMatrixTypes = (types) =>
-  types.filter((type) => !HIDDEN_DISPLAY_MATRIX_TYPES.includes(type))
+  [...new Set(types.map(normalizeDisplayMatrixName).filter(Boolean))]
 const resolveBackendDisplayMatrixName = (activeSensorType, allowedTypes, currentMatrixName) => {
   const backendMatrixName = normalizeDisplayMatrixName(activeSensorType)
   const normalizedCurrentMatrixName = normalizeDisplayMatrixName(currentMatrixName)
@@ -146,7 +147,7 @@ const resolveBackendDisplayMatrixName = (activeSensorType, allowedTypes, current
   }
   return allowedTypes[0] || normalizedCurrentMatrixName
 }
-const tactileGloveTypes = [SINGLE_GLOVE_MATRIX, 'hand0205', 'handGlove115200', FULL_PACKET_GLOVE_MATRIX]
+const tactileGloveTypes = [SINGLE_GLOVE_MATRIX, HAND_0205_DOUBLE_MATRIX, 'handGlove115200', FULL_PACKET_GLOVE_MATRIX]
 // 手套双手同显：这些模式下 sit(左手)/back(右手) 两路数据同时驱动左右手视图，
 // 不再按最后选择的串口切换单手；num3D/skin 仍沿用单手切换逻辑
 const DUAL_GLOVE_MODES = ['normal', 'num', 'numoriginal']
@@ -155,7 +156,7 @@ const isDualGloveDisplay = (matrixName, mode) =>
   (tactileGloveTypes.includes(matrixName) || matrixName === HAND_0205_DOUBLE_MATRIX) &&
   DUAL_GLOVE_MODES.includes(mode)
 // 2D 数字按手指/手掌形状展示的手套类型（整包手套点位不同，仍用 16x16 矩阵）
-const GLOVE_HAND_LAYOUT_TYPES = ['hand0205', 'handGlove115200', HAND_0205_DOUBLE_MATRIX]
+const GLOVE_HAND_LAYOUT_TYPES = [HAND_0205_DOUBLE_MATRIX, 'handGlove115200']
 const isTactileGloveMappedLength = (matrixName, length) => {
   return length === 147 || (matrixName === 'handGloveFullPacket' && length === 195)
 }
@@ -665,7 +666,7 @@ const getDefaultModeForMatrix = (matrixName, currentMode = "normal") => {
   if (isHumanBodyMatrix(matrixName)) {
     return currentMode === "numoriginal" ? "numoriginal" : "skin";
   }
-  if (matrixName === SINGLE_GLOVE_MATRIX) {
+  if (matrixName === SINGLE_GLOVE_MATRIX || matrixName === HAND_0205_DOUBLE_MATRIX) {
     return ['normal', 'num', 'num3D', 'numoriginal', 'skin'].includes(currentMode) ? currentMode : 'normal';
   }
   if (matrixName === FULL_PACKET_GLOVE_MATRIX) {
@@ -1840,7 +1841,7 @@ class Home extends React.Component {
         localStorage.setItem('file', nextMatrixName)
       } else if (jsonObject.file) {
         const nextMatrixName = normalizeDisplayMatrixName(jsonObject.file)
-        const allowedTypes = HIDDEN_DISPLAY_MATRIX_TYPES.includes(jsonObject.file) ? [] : [jsonObject.file]
+        const allowedTypes = filterVisibleDisplayMatrixTypes([jsonObject.file])
         const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag)
         localStorage.setItem('matrixTitle', false)
         localStorage.setItem('allowedTypes', JSON.stringify(allowedTypes))

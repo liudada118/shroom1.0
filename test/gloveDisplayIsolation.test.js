@@ -21,16 +21,19 @@ const utilityAst = parse(utilitySource, { sourceType: 'module', plugins: ['jsx']
 const robotSource = fs.readFileSync(path.join(repoRoot, 'client/src/page/home/robotUtil.js'), 'utf8');
 const robotAst = parse(robotSource, { sourceType: 'module' });
 const skinFunction = robotAst.program.body.find((node) => node.declaration?.id?.name === 'handSkinChange').declaration;
+// Existing explicit "all" licenses predate hand0205Single and contain these canonical glove keys.
+const EXISTING_EXPLICIT_ALL_TYPES = ['hand', 'hand0205', 'hand0205Double', 'handGlove115200',
+  'handGloveFullPacket', 'normal', 'matCol', 'jqbed', 'bed4096', 'humanBody'];
 
 function utilityGloveHandlers(name) {
   const declaration = utilityAst.program.body.find((node) => node.declaration?.declarations?.some((item) => item.id.name === name));
   const properties = declaration.declaration.declarations.find((item) => item.id.name === name).init.properties;
-  return `const ${name} = { ${properties.filter((item) => ['hand0205', 'hand0205Single'].includes(item.key.name))
+  return `const ${name} = { ${properties.filter((item) => ['hand0205', 'hand0205Double', 'hand0205Single', 'handGlove115200', 'handGloveFullPacket'].includes(item.key.name))
     .map((item) => utilitySource.slice(item.start, item.end)).join(',')} };`;
 }
 
 /** Execute the actual Home message handlers and actual glove utility routing without opening devices. */
-function createHarness({ matrixName = 'hand0205Single', mode = 'num', hand = true, calibration = false, local = false } = {}) {
+function createHarness({ matrixName = 'hand0205', mode = 'num', hand = true, calibration = false, local = false } = {}) {
   const storage = new Map();
   const calls = [];
   const stats = [];
@@ -151,7 +154,7 @@ for (const mode of ['normal', 'num', 'numoriginal', 'num3D', 'skin']) {
 
 for (const mode of ['normal', 'num', 'numoriginal']) {
   test(`current glove2 keeps both hands in ${mode}`, () => {
-    const harness = createHarness({ matrixName: 'hand0205', mode });
+    const harness = createHarness({ matrixName: 'hand0205Double', mode });
     harness.send('left');
     const leftCount = harness.calls.length;
     harness.send('right');
@@ -167,6 +170,36 @@ for (const mode of ['normal', 'num', 'numoriginal']) {
     }
   });
 }
+
+test('existing explicit-all scope retains both canonical gloves and backend Double resolves to the dual renderer', () => {
+  const harness = createHarness({ mode: 'num' });
+  harness.instance.wsData({ data: JSON.stringify({ selectFlag: EXISTING_EXPLICIT_ALL_TYPES, activeSensorType: 'hand0205Double' }) });
+  assert.deepEqual(Array.from(harness.instance.state.allowedTypes), EXISTING_EXPLICIT_ALL_TYPES);
+  assert.equal(harness.instance.state.matrixName, 'hand0205Double');
+  assert.equal(allElements(harness.render()).filter((item) => item.type === 'GloveHandNum2D').length, 1);
+  harness.send('left');
+  const leftCount = harness.calls.length;
+  harness.send('right');
+  assert.ok(harness.calls.length > leftCount);
+  harness.instance.wsData({ data: JSON.stringify({ selectFlag: EXISTING_EXPLICIT_ALL_TYPES, activeSensorType: 'hand0205' }) });
+  assert.equal(harness.instance.state.matrixName, 'hand0205');
+  assert.equal(allElements(harness.render()).filter((item) => item.type === 'LegacyGloveNum2D').length, 1);
+});
+
+test('Single alias authorization normalizes to one restricted canonical hand0205 without dropping or widening it', () => {
+  for (const payload of [
+    { file: 'hand0205Single' },
+    { file: ['hand0205Single', 'hand0205', 'hand0205Single'] },
+    { selectFlag: ['hand0205Single', 'hand0205'], activeSensorType: 'hand0205Single' },
+  ]) {
+    const harness = createHarness();
+    harness.instance.wsData({ data: JSON.stringify(payload) });
+    assert.equal(harness.instance.state.matrixName, 'hand0205');
+    assert.deepEqual(Array.from(harness.instance.state.allowedTypes), ['hand0205']);
+    assert.deepEqual(JSON.parse(harness.storage.get('allowedTypes')), ['hand0205']);
+    assert.equal(allElements(harness.render()).filter((item) => item.type === 'LegacyGloveNum2D').length, 1);
+  }
+});
 
 test('single glove calibration uses separate side baselines despite stale backFlag', () => {
   const harness = createHarness({ mode: 'normal', hand: false });
@@ -217,7 +250,7 @@ test('legacy matrix components are restored from the requested commit with only 
     const historical = execFileSync('git', ['show', `${revision}:client/src/components/num/${oldName}`], { cwd: repoRoot, encoding: 'utf8' });
     const actual = fs.readFileSync(path.join(repoRoot, 'client/src/components/num', newName), 'utf8');
     const normalizeWhitespace = (value) => value.replace(/\r\n/g, '\n').replace(/[ \t]+$/gm, '').trimEnd();
-    assert.equal(normalizeWhitespace(actual), normalizeWhitespace(historical.replace(oldExport, newExport).replaceAll("'hand0205'", "'hand0205Single'")));
+    assert.equal(normalizeWhitespace(actual), normalizeWhitespace(historical.replace(oldExport, newExport)));
   }
 });
 
@@ -294,7 +327,7 @@ test('actual Home render selects the restored single component in all five modes
     assert.equal(elements.filter((element) => ['Hand0205Double', 'GloveHandNum2D', 'Num2DOriginal'].includes(element.type)).length, 0);
   }
   for (const [mode, component] of [['normal', 'Hand0205Double'], ['num', 'GloveHandNum2D'], ['numoriginal', 'Num2DOriginal']]) {
-    const harness = createHarness({ matrixName: 'hand0205', mode });
+    const harness = createHarness({ matrixName: 'hand0205Double', mode });
     const elements = allElements(harness.render());
     assert.equal(elements.filter((element) => element.type === component).length, 1);
     assert.equal(elements.find((element) => element.type === component).props.data, harness.instance.data);
@@ -332,8 +365,8 @@ test('actual Title menu, five modes, hand selection and calibration remain conne
   vm.runInContext(helpers, context);
   const instance = {
     props: {
-      matrixName: 'hand0205Single', numMatrixFlag: 'normal', hand: true, history: 'now',
-      port: [], allowedTypes: [],
+      matrixName: 'hand0205', numMatrixFlag: 'normal', hand: true, history: 'now',
+      port: [], allowedTypes: EXISTING_EXPLICIT_ALL_TYPES,
       t: (key) => key, i18n: { language: 'zh' },
       com: { current: { changeModal: (hand) => modelChanges.push(hand), handZero() {} } },
       changeStateData: (values) => changes.push(values), wsSendObj: (command) => commands.push(command),
@@ -354,10 +387,12 @@ test('actual Title menu, five modes, hand selection and calibration remain conne
   const render = titleClass.body.body.find((node) => node.key?.name === 'render');
   const compiled = transformSync(`function render() ${titleSource.slice(render.body.start, render.body.end)}`, { loader: 'jsx', format: 'cjs' }).code;
   const elements = allElements(vm.runInContext(`${compiled}; render.call(instance);`, context));
-  const menu = elements.find((item) => item.type === 'Select' && item.props.value === 'hand0205Single');
-  assert.ok(menu.props.options.some((item) => item.value === 'hand0205Single'));
+  const menu = elements.find((item) => item.type === 'Select' && item.props.value === 'hand0205');
+  assert.equal(menu.props.options.some((item) => item.value === 'hand0205Single'), false);
   assert.ok(menu.props.options.some((item) => item.value === 'hand0205'));
-  assert.equal(menu.props.options.some((item) => item.value === 'hand0205Double'), false);
+  assert.ok(menu.props.options.some((item) => item.value === 'hand0205Double'));
+  assert.equal(menu.props.options.filter((item) => item.value === 'hand0205').length, 1);
+  assert.equal(menu.props.options.filter((item) => item.value === 'hand0205Double').length, 1);
   const modeSelector = elements.find((item) => item.type === 'Select' && item.props.value === 'normal');
   assert.deepEqual(Array.from(modeSelector.props.options, (item) => item.value), ['num', 'normal', 'num3D', 'numoriginal', 'skin']);
   for (const mode of ['num', 'normal', 'num3D', 'numoriginal', 'skin']) modeSelector.props.onChange(mode);
@@ -383,4 +418,16 @@ test('actual Title menu, five modes, hand selection and calibration remain conne
   assert.equal(instance.state.calibHand, 'right', 'reopening calibration follows the currently selected hand');
   instance.props.com.current = {}; // A mode without changeModal must not make transitions throw.
   modeSelector.props.onChange('num');
+  instance.props.allowedTypes = ['hand0205Single', 'hand0205', 'hand0205Single'];
+  const aliasElements = allElements(vm.runInContext('render.call(instance);', context));
+  const aliasMenu = aliasElements.find((item) => item.type === 'Select' && item.props.value === 'hand0205');
+  assert.deepEqual(Array.from(aliasMenu.props.options, (item) => item.value), ['hand0205']);
+  instance.props.allowedTypes = EXISTING_EXPLICIT_ALL_TYPES;
+  instance.props.matrixName = 'hand0205Double';
+  const doubleElements = allElements(vm.runInContext('render.call(instance);', context));
+  const doubleMenu = doubleElements.find((item) => item.type === 'Select' && item.props.value === 'hand0205Double');
+  assert.ok(doubleMenu.props.options.some((item) => item.value === 'hand0205'));
+  assert.ok(doubleMenu.props.options.some((item) => item.value === 'hand0205Double'));
+  assert.equal(doubleElements.some((item) => item.type === 'Select' && item.props.value === false), false,
+    'dual glove has no single-hand display selector');
 });
