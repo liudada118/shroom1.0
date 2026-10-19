@@ -443,4 +443,8 @@ GET /sensorTypes
 - `server.js` / `licenseManager.js`：分类展开、默认系统和前端授权范围下发。
 - `sdk/src/license/LicenseService.js`：SDK 分类范围展开。
 
-当前本机没有线上 `shroom.jq-industries.com` 对应的真实服务仓库，因此尚未直接修改或部署线上服务。服务端开发拿到本文档后，需要在真实服务代码中完成第 4～7 节，并按第 12 节验收。
+2026-10-19 已定位线上真实服务仓库为服务器 `/opt/key-manager`，PM2 进程名为 `key-manager`，运行入口为 `dist/index.js`。本桌面仓库仍只保存共享注册表及同步工具，不包含发证服务源码。
+
+新增压力传感背心时，在该服务的 `config/licenseSensorGroups.json` 的 `precision` 中加入 `pressureVest`，在 `shared/licenseScopes.ts` 的 `SENSOR_LABELS` 中补充“压力传感背心”，然后执行 `pnpm registry:snapshot` 同步 `shared/crypto-lib.cjs`。实际发证页面使用数据库分组清单；启动时的 `ensureDefaultSensorTypes()` 会从注册表增补启用选项。上线后按第 12 节验收 `/sensorTypes` 的 `flat`、`map`、`licenseGroups` 及生成页面选项。
+
+线上与桌面注册表仍存在历史类型差异，本次只增量加入背心，不能把同步脚本当成无需核对的全量覆盖命令。生产环境的类型检查和构建应先确认可用内存，设置超时及资源上限，或在独立环境完成后部署构建产物。
