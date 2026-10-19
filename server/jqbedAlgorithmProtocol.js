@@ -15,6 +15,58 @@ function isConfigMessage(message) {
 }
 
 function createJqbedAlgorithmProtocol({ store, sendJson, broadcastJson, getAlgorithmStatus }) {
+  const logSubscribers = new Set();
+  const logGenerations = new WeakMap();
+  let logSequence = 0;
+
+  function removeClient(client) {
+    logSubscribers.delete(client);
+    logGenerations.delete(client);
+  }
+
+  function captureLogSubscribers() {
+    const recipients = [];
+    for (const client of logSubscribers) {
+      if (client?.readyState !== 1) {
+        removeClient(client);
+      } else {
+        recipients.push({ client, generation: logGenerations.get(client) });
+      }
+    }
+    return recipients;
+  }
+
+  function hasLogSubscribers() {
+    return captureLogSubscribers().length > 0;
+  }
+
+  function publishLog(outputs, context, recipients = []) {
+    if (!context?.licenseValid || context.activeFile !== 'jqbed' || !context.realtime
+      || !outputs || typeof outputs !== 'object' || Array.isArray(outputs)) return 0;
+    const currentRecipients = recipients.filter(({ client, generation }) => (
+      client?.readyState === 1 && logSubscribers.has(client) && logGenerations.get(client) === generation
+    ));
+    if (!currentRecipients.length) return 0;
+    const payload = {
+      jqbedAlgorithmLog: {
+        sensorType: 'jqbed',
+        sequence: ++logSequence,
+        receivedAt: new Date().toISOString(),
+        outputs,
+      },
+    };
+    let delivered = 0;
+    for (const { client } of currentRecipients) {
+      try {
+        sendJson(client, payload);
+        delivered += 1;
+      } catch (_error) {
+        removeClient(client);
+      }
+    }
+    return delivered;
+  }
+
   function sendResult(client, ok, action, errors = {}, message = null, requestId) {
     sendJson(client, {
       jqbedAlgorithmConfigResult: {
@@ -28,6 +80,31 @@ function createJqbedAlgorithmProtocol({ store, sendJson, broadcastJson, getAlgor
   }
 
   function handle(message, context) {
+    if (Object.prototype.hasOwnProperty.call(message || {}, 'subscribeJqbedAlgorithmLog')) {
+      const { client, licenseValid, activeFile, realtime } = context;
+      const requested = message.subscribeJqbedAlgorithmLog;
+      const validRequest = typeof requested === 'boolean';
+      const allowed = validRequest && (!requested || (
+        licenseValid && activeFile === 'jqbed' && realtime && client?.readyState === 1
+      ));
+      if (!requested && validRequest) {
+        removeClient(client);
+      } else if (allowed) {
+        logSubscribers.add(client);
+        logGenerations.set(client, Symbol('jqbed algorithm log subscription'));
+      } else if (requested === true) {
+        removeClient(client);
+      }
+      sendJson(client, {
+        jqbedAlgorithmLogSubscription: {
+          ok: Boolean(allowed),
+          subscribed: logSubscribers.has(client),
+          ...(message.requestId !== undefined ? { requestId: message.requestId } : {}),
+          ...(!allowed ? { message: 'jqbed realtime algorithm log is unavailable' } : {}),
+        },
+      });
+      return true;
+    }
     if (!isConfigMessage(message)) return false;
 
     const { client, licenseValid, activeFile, realtime } = context;
@@ -78,7 +155,7 @@ function createJqbedAlgorithmProtocol({ store, sendJson, broadcastJson, getAlgor
     return true;
   }
 
-  return { handle };
+  return { handle, hasLogSubscribers, captureLogSubscribers, publishLog, removeClient };
 }
 
 module.exports = {

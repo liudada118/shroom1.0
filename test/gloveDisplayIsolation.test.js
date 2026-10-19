@@ -57,8 +57,12 @@ function createHarness({ matrixName = 'hand0205', mode = 'num', hand = true, cal
     setTimeout() {},
     findMax: (values) => values.length ? Math.max(...values) : 0,
     normalizeLanguage: (value) => value || 'zh',
+    module: { exports: {} },
     instance: null,
   });
+  const alarmSpeechSource = fs.readFileSync(path.join(repoRoot, 'client/src/page/home/jqbedAlarmSpeech.js'), 'utf8');
+  vm.runInContext(transformSync(alarmSpeechSource, { loader: 'js', format: 'cjs' }).code, context);
+  Object.assign(context, context.module.exports);
   vm.runInContext(`${helperSource}\n${utilityGloveHandlers('sitTypeEvent')}\n${utilityGloveHandlers('backTypeEvent')}\n${robotSource.slice(skinFunction.start, skinFunction.end)}`, context);
   const instance = {
     state: { matrixName, numMatrixFlag: mode, hand, calibration, local, dataTime: '', colFlag: true, carState: '', realHz: 0, history: local ? 'playback' : 'now' },
@@ -77,7 +81,7 @@ function createHarness({ matrixName = 'hand0205', mode = 'num', hand = true, cal
   context.instance = instance;
   for (const name of ['parseGloveRawMatrix', 'syncGloveRawPressureStats', 'syncSingleGloveRawPressureStats',
     'getSingleGloveRendererDataRef', 'getSingleGloveFrameSourceKey', 'resetSingleGloveFrameCache',
-    'cacheSingleGloveFrame', 'replaySelectedSingleGloveFrame', 'wsData', 'ws1Data']) {
+    'cacheSingleGloveFrame', 'replaySelectedSingleGloveFrame', 'syncJqbedReturnedSettings', 'syncJqbedAlgorithmLog', 'syncJqbedAlarmSpeech', 'wsData', 'ws1Data']) {
     const node = homeClass.body.body.find((item) => item.key?.name === name);
     instance[name] = vm.runInContext(`(function () { return ${homeSource.slice(node.value.start, node.value.end)}; }).call(instance)`, context);
   }

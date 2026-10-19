@@ -3864,6 +3864,7 @@ module.exports = {
       ws.isAlive = true;
       ws.on('pong', () => { ws.isAlive = true; });
       ws.on('close', () => { ws.isAlive = false; });
+      ws.on('close', () => jqbedAlgorithmProtocol.removeClient(ws));
       const heartbeatInterval = setInterval(() => {
         if (ws.isAlive === false) {
           logger.warn('[WS] 客户端心跳超时，关闭连接: ' + clientName);
@@ -8725,19 +8726,52 @@ function logPetCareResult(result, systemKey) {
 jqbedTimer = setInterval(async () => {
   if (pointArr&&pointArr.length  && pointArr.every((a) => typeof a == 'number') && ['jqbed', 'smallBed'].includes(file) && port1 && port1.isOpen) {
     const activeFile = file;
+    const activePort = port1;
+    const wasRealtime = !localFlag;
     const newArr = jqbedOppo(pointArr);
+    const logRecipients = activeFile === 'jqbed' && wasRealtime
+      && licenseManager.isLicenseValid() && jqbedAlgorithmProtocol.hasLogSubscribers()
+      ? jqbedAlgorithmProtocol.captureLogSubscribers() : [];
     // console.log(newArr.reduce((a,b) => a+b , 0),pointArr.length,'nweArr')
     try {
-      const rawData = await callPy(
-        'getData',
-        buildJqbedGetDataArgs(
-          newArr,
-          activeFile,
-          jqbedAlgorithmConfigStore.getSnapshot(),
-        ),
+      const getDataArgs = buildJqbedGetDataArgs(
+        newArr,
+        activeFile,
+        jqbedAlgorithmConfigStore.getSnapshot(),
       );
+      if (logRecipients.length) getDataArgs.includeRawOutputs = true;
+      let rawData = await callPy('getData', getDataArgs);
+      const rawOutputs = rawData?.raw_outputs;
+      if (rawData && Object.prototype.hasOwnProperty.call(rawData, 'raw_outputs')) {
+        const { raw_outputs: _rawOutputs, ...legacyResult } = rawData;
+        rawData = legacyResult;
+      }
       if (activeFile === 'jqbed') {
         setJqbedAlgorithmStatus({ state: 'ready', error: null });
+      }
+      const payload = {};
+      if (
+        activeFile === 'jqbed'
+        && activeFile === file
+        && wasRealtime
+        && !localFlag
+        && activePort === port1
+        && port1?.isOpen
+        && licenseManager.isLicenseValid()
+      ) {
+        payload.jqbedAlgorithmDiagnostics = {
+          sensorType: activeFile,
+          reserved_bytes: Array.isArray(rawData?.reserved_bytes) ? rawData.reserved_bytes : [],
+          merged_alarm: rawData?.merged_alarm,
+          sosflag: rawData?.sosflag,
+        };
+        if (logRecipients.length) {
+          jqbedAlgorithmProtocol.publishLog(rawOutputs, {
+            licenseValid: true,
+            activeFile,
+            realtime: true,
+          }, logRecipients);
+        }
       }
       if (rawData && rawData.rate != -1) {
         const data = normalizeVitalSignsHeartRate(rawData, activeFile);
@@ -8766,7 +8800,10 @@ jqbedTimer = setInterval(async () => {
           data.onBedTime = 0;
         }
 
-        const jsonData = JSON.stringify({ rate: data });
+        payload.rate = data;
+      }
+      if (Object.keys(payload).length) {
+        const jsonData = JSON.stringify(payload);
         server.clients.forEach(function each(client) {
           if (client.readyState === WebSocket.OPEN) {
             client.send(jsonData);

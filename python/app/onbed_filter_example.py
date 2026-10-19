@@ -703,7 +703,24 @@ def build_step_inputs(data, config=None):
     return inputs
 
 
-def getData(data, config=None):
+def json_safe_algorithm_output(value):
+    """Copy native diagnostic outputs without dropping fields or emitting NaN/Infinity."""
+    if isinstance(value, np.ndarray):
+        return json_safe_algorithm_output(value.tolist())
+    if isinstance(value, np.generic):
+        return json_safe_algorithm_output(value.item())
+    if isinstance(value, dict):
+        return {str(key): json_safe_algorithm_output(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe_algorithm_output(item) for item in value]
+    if isinstance(value, float):
+        return value if np.isfinite(value) else None
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    return str(value)
+
+
+def getData(data, config=None, includeRawOutputs=False):
     """
     处理传感器数据，返回健康监测结果（新版 API）
     """
@@ -736,10 +753,14 @@ def getData(data, config=None):
         "strokerisk": safe_float(outputs.get("strokerisk", 0)),
         "strokeriskMin": safe_float(outputs.get("strokeriskMin", 0)),
         "body_movement_data": safe_float(outputs.get("body_movement_data", outputs.get("bodyMovementData", 0))),
+        # 完整保留算法预留位；第5/6位（索引4/5）是灵敏度档位/床型回传值。
+        "reserved_bytes": safe_list(outputs.get("reserved_bytes")),
         # 矩阵数据
         "matrix_origin": safe_list(outputs.get("matrix_origin")),
         "matrix_filter": safe_list(outputs.get("matrix_filter")),
     }
+    if includeRawOutputs is True:
+        result["raw_outputs"] = json_safe_algorithm_output(outputs)
 
     return result
 

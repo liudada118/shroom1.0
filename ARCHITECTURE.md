@@ -1,6 +1,6 @@
 # 架构文档
 
-> 本文档由 Manus 自动生成和维护。最后更新于：2026-10-15
+> 本文档由 Manus 自动生成和维护。最后更新于：2026-10-16
 
 ## 1. 项目概述
 
@@ -167,6 +167,7 @@ shroom1.0/
 | `/client/src/components/title/` | 顶部标题栏组件，负责品牌字标、传感器切换、采集/回放控制、语言切换与设置抽屉 |
 | `/client/src/i18n/` | 前端国际化入口与统一中英日资源目录；负责语言标准化、持久化，以及后端授权中文原因到当前界面语言的适配 |
 | `/client/src/page/home/speechSynthesis.js` | 生命体征告警语音边界；按稳定 `alertKey` 调度日文本地 MP3，并负责中英文系统 voice、日文播放失败后的严格 `ja` voice 回退及防叠播状态 |
+| `/client/src/page/home/jqbedAlarmSpeech.js` | 实时小床监测的综合告警语音状态；按 `merged_alarm` 变化选择播报，跳过无效值，独立处理 SOS 序列并在会话边界复位 |
 | `/client/public/audio/alerts/ja/` | 日文生命体征固定告警 MP3 源资源；生产发布副本位于 `/build/audio/alerts/ja/` |
 | `/docs/japanese-alert-mp3-generation-guide.md` | 日文告警 MP3 的可复现生成与发布指南；记录固定 TTS 参数、候选校验、public/build 同步、运行时映射和故障排查 |
 | `/preload.js` | Electron 预加载脚本，建立渲染进程与主进程之间的安全 IPC 通道 |
@@ -326,7 +327,7 @@ graph TD
     - `client/src/i18n/resources.js` 维护中文和英文基准文案，`client/src/i18n/ja.js` 按同一键路径以 `compare(中文, 日文)` 维护逐项对照目录，再生成 i18next 所需的三套同构资源；入口、授权、更新、采集、CSV、报告、主工具栏、传感器面板、人体分区、回放、足压分析和演示调节组件均通过 `t(key)` 读取。
     - `client/src/i18n/translateBackendMessage.js` 只在展示层转换授权服务返回的固定中文原因和带前缀异常；WebSocket 协议值、密钥内容、数据库字段、采集标签和 CSV 数据保持原值，避免国际化影响后端匹配与历史数据兼容。
     - Shroom Vision 入口页和系统标题栏都提供中、英、日文切换；入口页可在未授权状态下直接选择语言，系统标题栏沿用同一全局语言状态。日期、浏览器语音和 Ant Design 组件同步使用当前语言的区域设置。
-    - 生命体征告警统一经过 `client/src/page/home/speechSynthesis.js`。`Home.jsx` 保持原有触发条件，只为 `leftBed`、`fallRisk`、`satUp`、`emergency` 传入稳定 `alertKey`；日文模式分别优先播放 `/audio/alerts/ja/left-bed.mp3`、`edge-seat.mp3`、`edge-seat.mp3`、`emergency.mp3`。同一活动键重复请求不叠播，不同键会暂停并归零上一条本地音频后切换。
+    - 生命体征告警统一经过 `client/src/page/home/speechSynthesis.js`。`Home.jsx` 的实时 `jqbed` 改由独立诊断消息中的 `merged_alarm` 驱动床状态类语音，并保留独立 SOS 输出；`smallBed` 保留原有状态触发方式。两条路径都为 `leftBed`、`fallRisk`、`satUp`、`emergency` 传入稳定 `alertKey`；日文模式分别优先播放 `/audio/alerts/ja/left-bed.mp3`、`edge-seat.mp3`、`edge-seat.mp3`、`emergency.mp3`。同一活动键重复请求不叠播，不同键会暂停并归零上一条本地音频后切换。
     - 本地 MP3 的构造、加载或播放失败时回退 Web Speech API；voice 的大小写、下划线和地区变体会标准化后按基础语言匹配，日文只允许 `ja` voice，首次 voice 列表尚未加载时监听一次 `voiceschanged` 重试，仍不可用则跳过播报并告警，不回退到中文系统 voice。中文和英文继续直接使用 Web Speech，不进入日文 MP3 路径。日文界面及播报用的 `fallBed`、`sitUp`、`home.alerts.fallRisk`、`home.alerts.satUp` 四个资源键统一为 `端座位`。
     - `client/public/audio/alerts/ja/` 保存 `left-bed.mp3`（`離床`）、`edge-seat.mp3`（`端座位`）和 `emergency.mp3`（`SOS緊急通報`），均由 `ja-JP-NanamiNeural` 以 `-5%` 语速制作，并由 Vite 同步到 `build/audio/alerts/ja/` 供离线运行。
     - `docs/japanese-alert-mp3-generation-guide.md` 固化 `edge-tts==7.2.8` 隔离环境、三条生成命令、格式与 SHA-256 校验、构建发布和运行时回退边界；生成阶段需要联网，随应用发布后的本地 MP3 播放不需要网络或系统日文语音包。
@@ -339,7 +340,21 @@ graph TD
 - **字段模型**：共 19 项，分为四组。SOS：`sos_peak_threshold`、`points_threshold_in`、`sos_disable_area`、`min_sos_sequence`；基础参数：`threshold_factor`、`continuous_on_bed_duration_minutes`、`unlock_sitting_alarm_duration_minutes`、`isLowBed`；滤波与区域：`filter_switch`、`strel_switch`、`leave_bed_disable_area`、`small_object_size`；高级参数：`breath_detect_mode`、`sitting_area`、`body_movement_threshold`、`step_leavebed_trigger`、`edge_align_ratio`、`sensitivity_threshold`、`breath_th`。2026-10-15 更新为用户提供的“关怀2.0.14.2”Windows 原生包。新增床型下拉 `isLowBed`：`0` 高床/正常床（当前国内默认）、`1` 矮床（日本版通常选用），配置不随界面语言改变。`head_foot_area` 经用户确认在此版本无效，不出现在设置或持久化配置中；原生接口仍强制要求该字段，Python 每帧固定传入 `float32[0,0]`，忽略旧配置对此字段的覆写。灵敏度 `sensitivity_threshold` 继续使用整数模式 `0` 默认、`1` 宽松（严格参数）、`2` 标准、`3` 灵敏。前后端要求19字段完整，拒绝未知字段、非有限值和负数；床型仅接受0/1，二维区域继续沿用各自约束，`sitting_area` 额外允许成对哨兵 `[255,255]`。配置 envelope 升级为 v3，读取 v1/v2 时保留现有合法参数、丢弃失效 `head_foot_area`、补足床型及缺失默认值，仅在用户保存/恢复时写入新版本文件。
 - **持久化与同步**：打包环境写入 `app.getPath('userData')/jqbed-algorithm-config.json`，开发环境写入项目根目录 `jqbed-algorithm-config.json`。store 先把版本化 envelope 写入同目录唯一 `.tmp` 临时文件，再以 rename 替换正式 JSON；只有落盘成功后才更新内存快照。保存或恢复默认会向所有 WebSocket 客户端广播后端快照，GET/保存/恢复均按 `requestId` 返回明确结果。`Home` 只有在主 WebSocket 真正完成 `send()` 时才报告成功，并把连接状态及重连 epoch 传给弹窗；弹窗为读取和变更分别设置 10 秒超时，断线会清理 pending，重连会重新 GET。发送失败、超时、拒绝和断线都保留 dirty 草稿，远端广播/重连快照也不会覆盖未保存输入。
 - **帧边界与系统隔离**：`jqbedTimer` 每次 Python 调用前读取一次深拷贝快照；已经发出的在途帧不被修改，下一帧开始使用新配置。`buildJqbedGetDataArgs()` 仅在活动系统为 `jqbed` 时附加 `config`；兼容定时器中的 `smallBed` 仍只发送 `{ data }`，`smallBedNoAlg` 与 `smallBed12B` 不进入此 Python 配置链路。原始矩阵、采集、回放、CSV 和历史数据通道不读取算法配置。
-- **Python 与告警边界**：`python/app/onbed_filter_example.py` 的 `getData(data, config=None)` 将合法 JSON 配置转换为 `onbed_filter.pyd` 的标量或 `float32` 二元数组输入。SOS 配置本身不直接触发或改写前端告警；只有 PYD 输出经 Python RPC 返回的 `sosflag` 继续进入现有 `Home`/`Aside` 告警路径。
+- **Python 与告警边界**：`python/app/onbed_filter_example.py` 的 `getData(data, config=None)` 将合法 JSON 配置转换为 `onbed_filter.pyd` 的标量或 `float32` 二元数组输入。告警配置本身不直接触发语音；床状态类播报使用 PYD 实际输出的 `merged_alarm`，SOS 使用独立 `sos_flag` 经包装后的 `sosflag`，不猜测不存在的综合 SOS 编码。原始 `state_in_bed` 经包装后的 `stateInBbed` 继续用于状态展示。
+- **返回预留位**：`getData()` 将原生 `reserved_bytes` 转换为完整JSON数组，经 `server.js` 的心率归一化保留、随 `{ rate: data }` WebSocket消息传到前端。按1起编号：1=平滑SNR（中值+IIR，×10取整），2=呼吸信号最高突出度（×10取整），3=大体动帧上传标志，4=呼吸阈值调整，5=灵敏度档位透传，6=高矮床字段透传；程序索引分别为 `[0]` 到 `[5]`。不在传输层除以10、裁剪尾部或用配置值替代算法回传，保留 `0` 与初始化阶段 `-1`；旧算法缺失该数组时返回 `[]`。新第5/6位只作返回诊断，不反向更新 `sensitivity_threshold` / `isLowBed`，不参与告警判断，三语参数说明同步更正。现有采集、历史回放与CSV仍只保存压力矩阵，没有新增生命体征或预留位历史列。
+- **设置页实际回传**：`jqbedTimer` 在有效授权、实时 `jqbed`、同一串口仍打开且调用前后系统未改变时，附加 `{ jqbedAlgorithmDiagnostics: { sensorType: 'jqbed', reserved_bytes: [...], merged_alarm, sosflag } }`。呼吸率初始化为 `-1` 时也单独发送诊断，使语音不再依赖呼吸率有效或打开 Log；生命体征 `rate` 的原有过滤保留。125ms是调用调度间隔，不代表原生算法每次均返回有效值。`Home` 只在算法就绪的实时上下文接收该事件，通过 `jqbedReturnedSettings` → `Title` → 配置弹窗顶部的只读“算法最近有效返回”区域显示第5位灵敏度和第6位床型；两项独立接受有效整数（含0），中间帧缺失、-1、越界或非整数只表示本次无新值，不覆盖同一会话上次有效值；尚未获得有效值时才显示“未返回”，支持中英日。读取设置和重连时的GET响应同时补齐当前算法状态；页面连接断开、切系统、进入回放或算法等待/错误时清空旧回传，相同数值不重复触发状态更新。显示值不进入草稿、保存或恢复默认流程。
+- **综合告警语音（2026-10-16）**：按用户最新协议，`jqbedAlarmSpeech` 为每个实时会话维护去重状态，`merged_alarm` 仅支持 `0/10/14`；`10` 触发离床，`14` 触发坐床边，`0` 静默并结束前一次床告警。用户要求播放内容保持原样，因此继续使用既有 `leftBed/satUp/emergency` 文案与音频（中文分别为“已离床”“已坐起”“S O S 紧急求助”）。`11/13` 未在最新协议中定义，忽略且不复位，不新增上床语音。已知告警首次有效返回立即播报，重复值、缺失、`-1`、未知码、非整数或错误类型均不重复播报、不复位。SOS 只接受 `0–254` 整数：`1` 为新序列起点并播报，连续重复 `1` 不重复；`2–254` 仅记录同一序列后续点，首次只收到后续点不补播，收到后续点后再次 `1` 表示新序列、可再播。`0` 结束SOS，`-1` 或非法值不覆盖上次有效点；SOS与床告警各自独立，同包床告警与新SOS同时出现时优先SOS。`Home` 直接消费独立诊断，不读取实时 Log 或旧 `rate.stateInBbed` 来触发 `jqbed` 语音。仅当前 WebSocket、就绪算法、获准的实时 `jqbed` 可触发；断线、切系统、进入回放、授权撤销及算法等待/错误复位，恢复需新的有效结果。算法状态、来源与许可消息同步门控，避免 React 批处理尚未提交时用旧上下文发声。中英日播放方式不变，未添加前端报警延时或告警判定算法；采集、回放与CSV数据未增加或改写字段。实时Log三语说明同步这两个字段的协议定义。
+- **告警语音验证（2026-10-16）**：121项Node测试覆盖真实计时器与Home接线、呼吸率缺省时独立告警、最终协议映射、重复与无效值、SOS序列起点/续点、React批处理下的状态/来源/授权门控、会话复位、旧smallBed与手套隔离；49项Vitest覆盖语音状态、现有三语播放引擎、Log协议说明与保值状态。临时目录前端生产构建通过；未调用真实传感器、未触发用户电脑的声音、未修改数据库/用户配置、未重建原生算法运行时或安装包。
+- **设置页验证**：63项Node协议/实际计时器/真实Home与Title方法及手套回归测试、78项Vitest配置/回传解析/弹窗渲染/三语测试通过，临时目录生产构建通过。浏览器用模拟回传验证0/0、3/1、未返回及三语显示；回传变化不覆盖未保存床型草稿，布局和按钮可用，无页面错误。本轮未连接真实传感器或生成安装包，未覆盖用户已有build文件。
+- **回传防闪烁验证（2026-10-16）**：独立Python进程以125ms调度向当前真实PYD发送72次合成压力帧，仅第24/48/72次有有效灵敏度3、床型1，间隔约3秒，其余69次返回全-1；Python桥与原生输出逐帧一致。该结果说明当前包的有效结果间隔，与通用调用频率不同，不能推断所有版本均固定24次。64项Node及82项Vitest通过，覆盖连续60帧无效值、两字段独立更新、有效0与会话/错误清空；临时目录生产构建通过。浏览器模拟验证3/1与0/0均可跨无效帧保留、新会话不恢复旧值，帮助文案及固定操作区显示正常，无页面错误；未改动真实采集、用户配置和已有build产物。
+- **原生返回按需传输**：设置弹窗的“实时 Log”页按客户端发送 `{ subscribeJqbedAlgorithmLog: true/false, requestId }`，接收独立 `jqbedAlgorithmLogSubscription` 应答。仅授权的实时 `jqbed` 可订阅；离开此页、关闭弹窗或断线会取消。后端仅在有有效订阅时向 `getData` 传 `includeRawOutputs: true`，Python 额外返回 `raw_outputs`，递归转换所有原生字段与numpy数组，非有限浮点编码为JSON的null，保留0/-1及未知未来字段。`raw_outputs` 不混入原有 `rate` 广播、预留位诊断或压力采集/回放/CSV；独立事件 `{ jqbedAlgorithmLog: { sensorType, sequence, receivedAt, outputs } }` 只发给仍处于同一订阅代际的客户端，包含初始化和-1帧，发布前再次检查实时系统、串口和授权。
+- **实时 Log 前端边界**：按用户简化及跳过-1的要求，移除100帧窗口、历史列表及暂停/清空/自动跟随。`Home` 在每个合法事件的函数式状态更新中逐字段保留最近一次非-1值，经 `Title` 传给实时面板，同批先有效后-1也不会丢掉有效值；只保留一份字段对象，不累积帧历史。共享 `mergeJqbedAlgorithmLogFrame` 同时用于前端接线与面板，标量-1不覆盖，0/null及未知字段正常更新，缺失字段保留，全-1数组跳过；混合有效数组作为完整一块替换，不拼接不同帧的矩阵点。尚无有效值的字段显示“等待有效返回”；“当前显示值JSON”只输出已获非-1的字段，混合矩阵中的原始-1仍保留。数组/对象按需展开，展开状态和滚动位置随新回传保持；时间明确标为最近收到回传，帮助说明字段可能来自不同次回传。进入页面/重连后等待新帧，切页、关闭、断线或订阅失效清除旧显示，不修改参数草稿或持久化数据。
+- **算法方参数说明**：用户确认仅更新中英日名称与帮助，保留当前值和校验。外部表中的 `continuous_on_bed_duration`、`unlock_sitting_alarm_duration`、`filter_swtich`、`sit_mode` 仅用于业务文案对应，实际调用仍使用原生实测必需的 `_minutes` 时长键、`filter_switch`、`sensitivity_threshold`；分钟单位不换算。范围作为算法方参考提示，不改变默认值、控件约束、校验或已有配置；灵敏度仍明确0～3档位，已失效的 `head_foot_area` 不恢复设置入口。
+- **实时输出字段说明**：`jqbedAlgorithmLogFields.js` 为当前28个原生输出键提供三语显示名称和简短说明，`JqbedAlgorithmLogValues` 在原始字段名和值旁直接显示，数组说明在展开前也可阅读。描述仅解释已知含义，不对未确认的运行时间单位、状态码或内部数组槽位作推断；`reserved_bytes` 使用用户确认的第1～6位定义，`reserved_bytes20` 保持扩展预留含义。未来未知键显示原始键名及暂无协议说明的提示，不丢弃值。名称/说明不进入显示值JSON、不改原生键、数值、-1跳过规则或配置。
+- **输出说明验证（2026-10-16）**：67项定向Vitest覆盖28字段三语名称/说明、未知键回退、reserved_bytes第5/6位说明、原始JSON键、实时保值及订阅清理；前端临时目录生产构建通过。浏览器在实际设置弹窗中使用模拟数据核对三语字段名称、原生键、值和直接可见说明，列表独立滚动且操作页脚可见；不依赖悬停。此次只增加显示说明，未重新生成原生运行时或安装包。
+- **实时字段与说明验证（2026-10-16）**：104项Node和118项Vitest通过，包括同批交错字段合并、0后接-1不覆盖、全-1数组跳过/混合数组整块替换、初始等待、会话清理及三语业务名称和参考范围。参数兼容测试核对真实server配置：19键、现有0默认/体动30及现有校验继续接受或拒绝相同输入。临时目录生产构建通过；浏览器模拟0→-1及15→-1保持有效值，展开1024数组后新帧刷新到末项4且保持展开，原字段和配置草稿不被改写。未重建本轮无需改动的原生运行时，保留用户已有build、配置和缓存变更。
+- **完整日志验证（2026-10-16）**：100项Node协议/计时器/实际Home与Title方法及手套回归、106项Vitest配置/日志缓冲/真实组件订阅生命周期/三语和15项Python测试通过；包括订阅代际隔离、批次三帧不遗漏、100条上限、0/-1原值、未知未来字段与1024数组完整保留。前端临时目录生产构建通过；实际 `pyWorker` 通过源码回退验证按需28字段。用户进程占用 `python/dist` 的旧exe，独立临时目录重建成功后仅逐文件覆盖待打包 `pack-resources/python/onbed_server`，两份新exe的health和默认/false/true日志RPC均通过，未中断现有进程；开发dist需退出程序后正常重建。浏览器用真实算法返回结构与模拟日志帧验证批次、暂停/清空/继续、完整时间及1024数组末项显示，无用户配置或采集库变更。
+- **预留位验证**：12项Python测试及38项前端文案/配置测试通过，包含原生库返回数组、缺失旧字段、0/负哨兵、前四位不缩放及尾位不裁剪。前端临时目录生产构建通过；Python运行时已重建并同步，两个exe和实际 `pyWorker` 均返回10位数组。用真正的 `jqbedTimer` 回调加模拟RPC验证 `{rate: data}` 完整透传第5位0、第6位1，不更改SOS值；未修改用户原有build产物或采集库。
 - **正式 runtime**：Windows 仓库跟踪 `python/app/onbed_filter.cp311-win_amd64.pyd`，本次新包固定 SHA-256 为 `0650EE61472710DF08589A971D9C7C2EC991F23C98A55E658677099D4D8AA349`。`npm run prepare-pack-resources` 默认校验该哈希，仍可用 `ONBED_FILTER_PYD_SOURCE` 与 `ONBED_FILTER_PYD_SHA256` 显式注入并校验外部候选。`scripts/build-python-runtime.js` 与开发模式的 `pyWorker.resolveFreshDevExe()` 除源文件时间外，还通过根模块 `pythonRuntimeNative.js` 比较源码与运行时实际 PYD 的 SHA-256；缺失、内容不同或 `_internal` / flat 同时存在的副本冲突时拒用，防止只替换源包却继续加载旧算法。非 Windows 保持原平台流程。Python 3.11 探测和 PyInstaller 构建统一强制 UTF-8；生成 runtime 后执行 `health` JSON-line RPC，要求 `pong=true`、`onbedFilterAvailable=true`、`onbedFilterSensitivitySchema=true` 和新增的 `onbedFilterBedTypeSchema=true`，再同步到 `pack-resources/python/onbed_server/`。`npm run check-python-runtime-health` 可独立复验。实际算法调用另以两个床型的1024点模拟帧验证输入兼容和输出结构。安装版从 `process.resourcesPath/python`（含 `app.asar.unpacked` 候选）加载该运行时，stdout 仅承载 JSON-line RPC；源码更新需重启开发后端，已安装软件需重新生成安装包。`python/app/serial_monitor_updated2.0(1).py` 仍仅为未跟踪参考。
 - **本次验证**：38项Node测试、47项前端Vitest与10项Python测试通过，含真实原生库两个床型调用；前端生产构建通过。Python运行时已重建并同步，源码、运行时及待打包副本的PYD哈希一致；两个exe各用零帧/非零帧验证两种床型，实际 `pyWorker` 链路健康检查和 `getData` 调用也通过。测试未操作真实传感器或用户配置/采集库。
 
@@ -929,6 +944,20 @@ HaLow socket 的连接错误与其设备 ID / 来源 IP 关联，同设备重新
 
 | 2026-10-15 | Codex | 小床监测算法包及床型配置更新 | 替换“关怀2.0.14.2”Windows PYD并固定新哈希，新增高床/矮床配置，19字段配置升级v3并兼容旧值；无效head_foot_area只保留调用兼容值。源码/打包运行时增加原生库哈希匹配，重建并同步新版Python资源。 |
 
+| 2026-10-15 | Codex | 小床算法预留位回传 | Python桥保留完整reserved_bytes数组，新增第5位灵敏度与第6位床型回传定义；保留前四位编码、其余尾位、0和-1，缺失数组兼容为空。三语说明去除旧5～8位描述，回传值不修改配置或告警。 |
+
+| 2026-10-15 | Codex | 小床设置页显示算法实际回传 | 设置弹窗顶部新增只读灵敏度和床型，来自第5/6位实际输出；有效0正常显示，无效或缺失显示未返回。独立诊断事件覆盖算法初始化，清理切系统、回放、断线及算法异常后的旧值，保持草稿和保存流程独立。 |
+
+| 2026-10-16 | Codex | 小床算法回传显示防闪烁 | 按字段保留同一实时会话最近有效的灵敏度和床型，间歇-1或缺失不清空，后续有效0照常更新；真实断线、切系统、回放及算法等待/错误仍清空。显示区明确标注最近有效返回，不伪造回传或改变算法调用节奏。 |
+
+| 2026-10-16 | Codex | 小床设置页完整算法日志 | 按需订阅原生完整返回，保留当前包全部28字段和未来字段，含-1帧与两个1024点矩阵；设置页保留最近100条，支持暂停、清空、自动跟随与完整JSON展开，不影响已有参数和采集链路。 |
+
+| 2026-10-16 | Codex | 小床实时字段面板与参数说明 | 按用户要求将历史日志简化为每字段最近非-1返回，0正常更新，取消历史缓冲及暂停/清空/跟随，保留数组展开状态；按算法方说明更新三语名称帮助，当前值、单位及校验保留。 |
+
+| 2026-10-16 | Codex | 小床实时Log字段说明 | 为28个原生返回字段增加三语名称和含义，原始key和值继续可见，未知字段显示说明待补充提示；保留现有实时更新和-1跳过规则。 |
+
+| 2026-10-16 | Codex | 综合告警驱动语音 | 按用户最终协议，实时jqbed仅由merged_alarm的10/14触发离床/坐床边语音，0静默复位；SOS仅1序列起点播报，2–254不重复，11/13与无效值不触发。呼吸率未返回时仍可播报，会话与批处理边界隔离，smallBed保持兼容。 |
+
 ## 9. 更新日志
 
 | 时间 | 分支 | 变更类型 | 描述 |
@@ -1413,6 +1442,20 @@ HaLow socket 的连接错误与其设备 ID / 来源 IP 关联，同设备重新
 | 2026-10-14 | Revise | 修复缺陷 | 恢复本机触觉手套/触觉手套2与 `hand0205`/`hand0205Double` 的对应关系，修复旧密钥单项全选缺少单手入口；兼容Single别名，保留旧库，双手实时与单CSV沿用当前展示行为。 |
 
 | 2026-10-15 | Revise | 算法更新 | 小床监测使用“关怀2.0.14.2”算法，基础参数新增床型isLowBed（0高床、1矮床）；忽略失效head_foot_area设置并在桥接补固定值，兼容v1/v2配置，哈希及健康检查防止沿用旧运行时。 |
+
+| 2026-10-15 | Revise | 协议适配 | 小床算法输出新增reserved_bytes数组完整透传，索引4/5按新协议为灵敏度档位/床型；旧返回兼容空数组，不把输入配置伪装为回传结果，同步参数说明和测试。 |
+
+| 2026-10-15 | Revise | 新增功能 | 小床算法设置页展示实际返回的灵敏度和床型，新增实时诊断消息使rate=-1时仍可显示初始化状态；不回写配置，清理切系统、回放、断线和异常状态的旧回传，补齐三语与前后端验证。 |
+
+| 2026-10-16 | Revise | 修复缺陷 | 修复小床算法间歇无效输出立即覆盖有效档位/床型而闪回未返回；分别保留会话内最近有效结果，保留错误和来源切换清空边界，并同步三语说明及回归测试。 |
+
+| 2026-10-16 | Revise | 新增功能 | 小床算法设置增加完整返回日志，按客户端订阅实时原生输出，保留全部字段与数组及-1周期，限制100条内存记录，提供暂停/清空/自动跟随和展开查看；日志不进入旧rate广播或数据库。 |
+
+| 2026-10-16 | Revise | 优化重构 | 按用户最新要求改为实时Log字段视图，逐字段保留最近非-1值，无历史记录；同批回传先合并再显示，0有效，全-1数组不覆盖旧数组；同步算法方参数名称及参考说明，保留既有配置值和校验。 |
+
+| 2026-10-16 | Revise | 新增功能 | 实时Log每个字段显示三语名称、原生键名和值及简短说明，覆盖当前28字段并为未来未知字段提供说明回退；JSON和实时数据语义保持原样。 |
+
+| 2026-10-16 | Revise | 修复缺陷 | 小床语音按用户协议改用merged_alarm的10离床、14坐床边与独立SOS序列起点1；保持原有播放文案与音频，0静默复位，跳过-1/未知码和连续重复结果，告警传输不再等待有效呼吸率；隔离回放、系统切换、断线、授权与算法异常，并同步实时Log字段说明。 |
 
 ## 2026-06-04 Minzhen / Wheelchair Display System
 
