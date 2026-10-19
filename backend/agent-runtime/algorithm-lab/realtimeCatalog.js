@@ -2,6 +2,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { compile } = require('./restrictedPython');
+const { CPU_RUNTIME, validateCpuModel, modelDigest } = require('./cpuModel');
+const { FEATURE_VERSION, SPATIAL_FEATURES, validateMatrix } = require('./spatialFeatures');
 
 const RUNTIME = 'restricted-python-v1';
 const STAGES = { 'stored-array': 'processed', data: 'processed', sitData: 'processed', backData: 'processed', headData: 'processed', pressureData: 'processed', normalizedData: 'normalized', rawPressureData: 'calibrated' };
@@ -9,24 +11,40 @@ const STAGES = { 'stored-array': 'processed', data: 'processed', sitData: 'proce
 /** 仅把有已测试输入契约的保存版本登记为数值分类包，不执行磁盘上的任意代码。 */
 function realtimePackage(draft, includeResolved = false) {
   const input = draft?.report?.inputContract;
-  if (draft?.language !== RUNTIME || !/^[A-Za-z0-9_-]{1,50}$/.test(draft.id || '') || typeof draft.systemId !== 'string' || !draft.systemId
-    || typeof draft.source !== 'string' || typeof draft.name !== 'string' || !draft.name.trim() || draft.name.length > 100
+  const cpu = draft?.language === CPU_RUNTIME;
+  if ((!cpu && draft?.language !== RUNTIME) || !/^[A-Za-z0-9_-]{1,50}$/.test(draft.id || '') || typeof draft.systemId !== 'string' || !draft.systemId
+    || (!cpu && typeof draft.source !== 'string') || typeof draft.name !== 'string' || !draft.name.trim() || draft.name.length > 100
     || !Array.isArray(draft.labels) || draft.labels.length < 2 || draft.labels.length > 8 || new Set(draft.labels).size !== draft.labels.length
     || draft.labels.some((label) => typeof label !== 'string' || !label.trim() || label.length > 40 || label === '未知')
     || ![16, 32, 64, 128, 256].includes(draft.windowFrames) || !input || !Object.hasOwn(STAGES, input.stage)
     || !Number.isInteger(input.pointCount) || input.pointCount < 1 || input.pointCount > 65536 || input.pointCount * draft.windowFrames > 2000000
     || !Number.isFinite(input.sampleIntervalMs) || input.sampleIntervalMs <= 0 || input.sampleIntervalMs > 5000) return null;
-  if (createHash('sha256').update(JSON.stringify(draft.source)).digest('hex') !== draft.report.sourceDigest) return null;
-  compile(draft.source);
-  const classifier = { source: draft.source, labels: draft.labels, windowFrames: draft.windowFrames, ...input, inputStage: STAGES[input.stage] };
+  let model, matrix;
+  if (cpu) {
+    model = validateCpuModel(draft.model);
+    const digest = modelDigest(model);
+    if ((draft.report.modelDigest || draft.modelDigest) !== digest || (draft.modelDigest && draft.modelDigest !== digest)
+      || JSON.stringify(model.classLabels) !== JSON.stringify(draft.labels) || draft.featureVersion !== FEATURE_VERSION
+      || input.featureVersion !== draft.featureVersion || !Object.hasOwn(input, 'matrix')) return null;
+    matrix = validateMatrix(draft.matrix, input.pointCount);
+    if (model.featureNames.some((name) => SPATIAL_FEATURES.includes(name)) && !matrix) return null;
+    if (JSON.stringify(validateMatrix(input.matrix, input.pointCount)) !== JSON.stringify(matrix)) return null;
+  } else {
+    if (createHash('sha256').update(JSON.stringify(draft.source)).digest('hex') !== draft.report.sourceDigest) return null;
+    compile(draft.source);
+  }
+  const runtime = cpu ? CPU_RUNTIME : RUNTIME;
+  const classifier = cpu ? { ...input, runtime, model, featureVersion: draft.featureVersion, matrix,
+    labels: draft.labels, windowFrames: draft.windowFrames, inputStage: STAGES[input.stage] }
+    : { source: draft.source, labels: draft.labels, windowFrames: draft.windowFrames, ...input, inputStage: STAGES[input.stage] };
   const revision = createHash('sha256').update(JSON.stringify([draft.systemId, classifier])).digest('hex');
-  return { id: `user-${draft.id}`, name: draft.name, version: '1.0.0', runtime: RUNTIME, systemId: draft.systemId, revision,
+  return { id: `user-${draft.id}`, name: draft.name, version: '1.0.0', runtime, systemId: draft.systemId, revision,
     description: `用户分类算法 · ${draft.windowFrames} 帧窗口 · ${draft.labels.join(' / ')}${draft.report.split === 'validation' ? ' · 已有独立验证报告' : ' · 仅开发集测试'}`,
     category: 'classification', tags: ['用户算法', '分类'], attachable: true, sampleRateHz: 1000 / input.sampleIntervalMs,
-    compatibility: { matrixTotals: [input.pointCount] },
+    compatibility: { matrixTotals: [input.pointCount], ...(cpu && matrix ? { recommendedMatrices: [{ rows: matrix.rows, cols: matrix.cols }] } : {}) },
     metricDefinitions: [{ id: 'classIndex', label: '识别类别', unit: '', decimals: 0, panel: 'both', values: { '-1': '未知', ...Object.fromEntries(draft.labels.map((label, index) => [index, label])) } }],
     packageManifest: { input: { mode: 'single-sensor' } },
-    ...(includeResolved ? { resolvedPackage: { runtime: RUNTIME, classifier } } : {}) };
+    ...(includeResolved ? { resolvedPackage: { runtime, classifier } } : {}) };
 }
 
 /** 按文件修订缓存已保存分类包；调用只读目录，不产生或安装 Python 文件。 */
@@ -108,4 +126,4 @@ function createRealtimeAlgorithmCatalog(root, { managedRoot = null, managedNativ
   };
 }
 
-module.exports = { RUNTIME, realtimePackage, createRealtimeAlgorithmCatalog };
+module.exports = { RUNTIME, CPU_RUNTIME, realtimePackage, createRealtimeAlgorithmCatalog };

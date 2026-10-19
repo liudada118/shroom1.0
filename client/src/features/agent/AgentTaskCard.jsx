@@ -1,9 +1,28 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
+import { trackUsage } from '../../services/usageAnalytics';
 import { TASK_LABELS, TOOL_LABELS, agentErrorMessage, proposalPreview } from './agentState';
+import AgentTrainingReport from './AgentTrainingReport';
 
 /** 展示任务的真实步骤、配置预览和应用后的恢复入口。 */
-export default function AgentTaskCard({ task, disabled, pendingAction, onProposalAction }) {
-  return <section className="shroom-agent-task" aria-label="任务执行情况">
+export default function AgentTaskCard({ task, disabled, pendingAction, onProposalAction, algorithmDataContent }) {
+  const exposed = useRef(new Set());
+  const rootRef = useRef(null);
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root || typeof IntersectionObserver !== 'function') return undefined;
+    /** Hidden drawers and collapsed history never count as a viewed proposal. */
+    const report = (entries) => {
+      if (root.closest('[aria-hidden="true"]')) return;
+      for (const entry of entries) if (entry.isIntersecting && entry.target.getBoundingClientRect().height && !exposed.current.has(entry.target.dataset.proposalId)) {
+        exposed.current.add(entry.target.dataset.proposalId);
+        trackUsage('feature_exposed', { featureId: 'agent_proposal', action: `view_${entry.target.dataset.proposalKind}` });
+      }
+    };
+    const observer = new IntersectionObserver(report);
+    for (const proposal of root.querySelectorAll('[data-proposal-id]')) observer.observe(proposal);
+    return () => observer.disconnect();
+  }, [task.proposals]);
+  return <section ref={rootRef} className="shroom-agent-task" aria-label="任务执行情况">
     <div className="shroom-agent-task-heading">
       <strong>执行记录</strong>
       <span className="shroom-agent-status" data-status={task.status}>{TASK_LABELS[task.status] || task.status}</span>
@@ -15,10 +34,11 @@ export default function AgentTaskCard({ task, disabled, pendingAction, onProposa
     </li>)}</ol>}
     {task.error && <p className="shroom-agent-inline-error" role="alert">{agentErrorMessage(task.error)}</p>}
     {task.status === 'uncertain' && <p className="shroom-agent-hint">执行中断，部分更改可能已生效。请先检查系统现状，再决定下一步。</p>}
+    {algorithmDataContent}
     {(task.proposals || []).map((proposal) => {
       const key = `${task.id}:${proposal.id}`;
       const pending = pendingAction === key;
-      return <article className="shroom-agent-proposal" key={proposal.id}>
+      return <article className="shroom-agent-proposal" key={proposal.id} data-proposal-id={proposal.id} data-proposal-kind={proposal.kind}>
         <div className="shroom-agent-task-heading"><strong>{proposal.kind === 'algorithm_package' ? '保存分类算法' : proposal.kind === 'delete_native_system' ? '删除独立系统（保留采集数据）' : proposal.kind === 'update_native_system' ? '修改独立系统' : proposal.kind === 'update_manifest_algorithms' ? '绑定当前系统算法' : proposal.kind === 'builtin_system' ? '以内置模板创建系统' : proposal.kind === 'create_system' ? '创建展示系统' : proposal.kind === 'duplicate_system' ? '复制展示系统' : proposal.kind === 'connect_device' ? '连接设备' : '修改展示配置'}</strong>
           <span className="shroom-agent-status" data-status={proposal.status}>{TASK_LABELS[proposal.status] || proposal.status}</span></div>
         <p>{proposal.summary || proposal.systemId}</p>
@@ -27,12 +47,13 @@ export default function AgentTaskCard({ task, disabled, pendingAction, onProposa
           首行起始 {mapping.first.join('、')}，首行末 {mapping.firstRowEnd}，{mapping.secondRowStart == null ? '' : `第二行首 ${mapping.secondRowStart}，`}末尾 {mapping.last.join('、')}。
           物理方向待设备验证。
         </p>)}
-        {proposal.kind === 'algorithm_package' && proposal.after?.report && <div className="shroom-agent-algorithm-report">
+        {proposal.kind === 'algorithm_package' && proposal.after?.report && (proposal.after.language === 'cpu-classifier-v1'
+          ? <AgentTrainingReport report={proposal.after.report} modelSummary={proposal.after.modelSummary} /> : <div className="shroom-agent-algorithm-report">
           <p><strong>{proposal.after.report.split === 'validation' ? '独立记录验证' : '仅开发集测试'}</strong> · {proposal.after.report.windows} 个窗口 · 正确 {proposal.after.report.correct} · 未知 {proposal.after.report.unknown}</p>
           <p>本次窗口正确率：{(proposal.after.report.accuracy * 100).toFixed(1)}%。{proposal.after.report.split === 'development' ? '尚未验证对新采集数据的识别效果。' : '只反映所选记录的结果。'}</p>
           <details><summary>查看算法源码</summary><pre>{proposal.after.source}</pre></details>
           <p className="shroom-agent-hint">保存后可继续离线测试，也可绑定当前系统启用实时分类。</p>
-        </div>}
+        </div>)}
         {proposal.after != null && <details><summary>查看配置内容</summary><pre>{proposalPreview(proposal.after)}</pre></details>}
         {proposal.before != null && <details><summary>查看修改前配置</summary><pre>{proposalPreview(proposal.before)}</pre></details>}
         {proposal.result != null && <details><summary>查看实际执行与核验结果</summary><pre>{proposalPreview(proposal.result)}</pre></details>}

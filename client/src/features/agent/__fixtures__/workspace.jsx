@@ -6,14 +6,39 @@ import AgentWorkspace from '../AgentWorkspace';
 const listeners = new Set();
 const archives = new Map();
 let sequence = 0;
+const dataControls = { catalogSystemId: 'fixture-system', catalogError: false, submitDelayMs: 0 };
+const dataCalls = [];
 let snapshot = { settings: { baseUrl: 'https://api.openai.com/v1', model: '', hasApiKey: false }, conversation: { id: 'fixture-0', messages: [], tasks: [] }, activeTask: null, attachments: [] };
-snapshot.chatSync = { settings: { enabled: false, endpoint: '', hasToken: false }, status: { state: 'disabled', pendingCount: 0 } };
+snapshot.chatSync = { settings: { enabled: true, endpoint: 'https://shroom.jq-industries.com/api/agent/conversations', hasToken: false, licenseAuthAvailable: true }, status: { state: 'idle', pendingCount: 0 } };
 
 /** 复制内存快照，模拟跨进程结构化复制而不是共享对象。 */
 function copy(value) { return JSON.parse(JSON.stringify(value)); }
 
 /** 广播夹具状态。 */
 function emitState() { listeners.forEach((listener) => listener({ type: 'state', state: copy(snapshot) })); }
+
+/** 仅切换内存数据目录及延时，供离线回归覆盖系统变化和重试。 */
+window.__agentFixtureDataControl = (patch = {}) => Object.assign(dataControls, patch);
+/** 读取合成任务与调用次数，不接触真实设备和模型。 */
+window.__agentFixtureDataState = () => ({ snapshot: copy(snapshot), calls: copy(dataCalls) });
+
+/** 模拟模型主动请求用户选择，等待时释放运行器。 */
+function requestAlgorithmData(task) {
+  if (snapshot.activeTask?.id !== task.id || task.status !== 'running') return;
+  task.status = 'awaiting_data';
+  task.algorithmDataRequest = { id: `data-${task.id}`, systemId: 'fixture-system', message: '请选择抚摸和拍打的采集记录。', status: 'pending', createdAt: new Date().toISOString() };
+  task.steps = [{ id: 'request-data', name: 'request_algorithm_data', status: 'succeeded' }];
+  snapshot.activeTask = null; emitState();
+}
+
+/** 提交最终回复，覆盖恢复后流式草稿而不生成新任务。 */
+window.__agentFixtureCompleteData = () => {
+  const task = snapshot.activeTask;
+  if (!task || task.algorithmDataRequest?.status !== 'submitted') return;
+  task.status = 'succeeded';
+  snapshot.conversation.messages.push({ id: `final-${task.id}`, taskId: task.id, role: 'assistant', text: '已完成所选采集数据的分析。' });
+  snapshot.activeTask = null; emitState();
+};
 
 /** 推进到可审阅配置，用于检查流式转最终消息及应用恢复。 */
 function complete() {
@@ -23,6 +48,23 @@ function complete() {
   task.steps = [{ id: 'lookup', name: '查询展示能力', status: 'succeeded', message: '已找到矩阵热力图和重心曲线。' }];
   task.proposals = [{ id: 'proposal-1', kind: 'update_display', systemId: 'fixture-system', summary: '将主画面改为热力图，并保留重心轨迹。', status: 'pending', before: { renderer: 'matrix' }, after: { renderer: 'heatmap', charts: ['重心轨迹'] } }];
   snapshot.conversation.messages.push({ id: `assistant-${sequence}`, taskId: task.id, role: 'assistant', text: '方案已经准备好。查看配置内容后，可以应用此方案。' });
+  emitState();
+}
+
+/** 生成合成训练报告，检查保存入口、模型比较和窄屏布局。 */
+function completeTraining() {
+  const task = snapshot.activeTask;
+  if (!task) return;
+  task.status = 'awaiting_action';
+  task.steps = [{ id: 'train', name: 'train_algorithm', status: 'succeeded', message: '本机训练完成，已生成真实评估报告。' }];
+  task.proposals = [{ id: 'cpu-proposal', kind: 'algorithm_package', systemId: 'fixture-system', summary: '保存算法“抚摸与拍打”并登记到实时算法目录', status: 'pending',
+    after: { name: '抚摸与拍打', language: 'cpu-classifier-v1', labels: ['抚摸', '拍打'], realtimePackageId: 'user-cpu-fixture', modelSummary: { kind: 'forest' },
+      report: { split: 'development', evaluation: 'group-cross-validation', windows: 64, accuracy: 0.875, unknown: 2,
+        warnings: ['合成界面测试报告，不代表真实数据效果。'],
+        candidates: [{ kind: 'linear', macroF1: 0.78, accuracy: 0.79 }, { kind: 'tree', macroF1: 0.82, accuracy: 0.83 }, { kind: 'forest', macroF1: 0.875, accuracy: 0.875 }],
+        perClass: [{ label: '抚摸', recall: 0.9, support: 32 }, { label: '拍打', recall: 0.85, support: 32 }],
+        records: [{ id: 'record-0', date: '达_抚摸_2026-9-21' }], mistakes: [{ recordId: 'record-0', startFrame: 32, expected: '抚摸', predicted: '拍打' }] } } }];
+  snapshot.conversation.messages.push({ id: `cpu-${sequence}`, taskId: task.id, role: 'assistant', text: '训练完成。查看评估结果后，可保存算法并用于当前系统。' });
   emitState();
 }
 
@@ -48,7 +90,9 @@ const bridge = {
   /** 用内存数据实现桥契约，任何操作都不会访问真实服务和文件。 */
   async invoke(action, payload = {}) {
     if (action === 'getState') return { ok: true, data: copy(snapshot) };
-    if (action === 'listAlgorithmRecords') return { ok: true, data: { systemId: 'fixture-system', offset: 0, nextOffset: null,
+    if (['submitAlgorithmData', 'cancelTask', 'listAlgorithmRecords'].includes(action)) dataCalls.push({ action, payload: copy(payload) });
+    if (action === 'listAlgorithmRecords' && dataControls.catalogError) return { ok: false, error: { message: '测试：采集目录读取失败，请重试。' } };
+    if (action === 'listAlgorithmRecords') return { ok: true, data: { systemId: dataControls.catalogSystemId, offset: payload.offset || 0, nextOffset: null,
       records: ['达_抚摸', '达_拍打', '达_拍打', '达_平躺_2', '', ...Array.from({ length: 6 }, (_, index) => `对象${index}_抚摸`)].map((name, index) => ({
         id: `record-${index}`, date: name ? `${name}_2026-9-21-19-23-${String(index).padStart(2, '0')}-42 ${1789989780042 + index * 1000}` : '1789989834042', channel: '压力', count: 512,
       })) } };
@@ -74,6 +118,15 @@ const bridge = {
     } else if (action === 'setAlgorithmSelection') {
       if (payload.selection && payload.selection.records.some((item) => !item.label.trim())) return { ok: false, error: { message: '请填写类别。' } };
       snapshot.conversation.algorithmSelection = payload.selection; data = payload.selection;
+    } else if (action === 'submitAlgorithmData') {
+      const task = snapshot.conversation.tasks.find((item) => item.id === payload.taskId);
+      if (!task || task.status !== 'awaiting_data' || task.algorithmDataRequest?.status !== 'pending' || task.algorithmDataRequest.id !== payload.requestId) return { ok: false, error: { message: '测试：数据请求已结束。' } };
+      if (payload.selection.systemId !== task.algorithmDataRequest.systemId || dataControls.catalogSystemId !== task.algorithmDataRequest.systemId) return { ok: false, error: { message: '当前系统已变化，请返回原系统后刷新记录。' } };
+      if (dataControls.submitDelayMs) await new Promise((resolve) => setTimeout(resolve, dataControls.submitDelayMs));
+      task.algorithmDataRequest.status = 'submitted';
+      snapshot.conversation.algorithmSelection = payload.selection;
+      task.status = 'running'; snapshot.activeTask = task;
+      data = task;
     } else if (action === 'importFiles') {
       data = [{ id: 'attachment-1', name: '示例点位表.xlsx', size: 2800 }];
       snapshot.attachments = data;
@@ -86,14 +139,22 @@ const bridge = {
       data = [{ id: `clipboard-${++sequence}`, name: '剪贴板文件.csv', size: 100 }];
       snapshot.attachments.push(...data);
     } else if (action === 'startTask') {
+      for (const previous of snapshot.conversation.tasks) if (previous.status === 'awaiting_data') {
+        previous.status = 'cancelled'; previous.algorithmDataRequest.status = 'cancelled';
+      }
       sequence += 1;
       snapshot.conversation.messages.push({ id: `user-${sequence}`, taskId: `task-${sequence}`, role: 'user', text: payload.text, attachmentIds: payload.attachmentIds });
       snapshot.activeTask = { id: `task-${sequence}`, conversationId: snapshot.conversation.id, status: 'running', steps: [{ id: 'lookup', name: '查询展示能力', status: 'running' }], proposals: [] };
       snapshot.conversation.tasks.push(snapshot.activeTask);
       data = snapshot.activeTask;
     } else if (action === 'cancelTask') {
-      snapshot.activeTask.status = 'cancelled';
-      snapshot.activeTask.steps[0].status = 'cancelled';
+      const task = snapshot.conversation.tasks.find((item) => item.id === payload.taskId);
+      if (task) {
+        task.status = 'cancelled';
+        if (task.algorithmDataRequest?.status === 'pending') task.algorithmDataRequest.status = 'cancelled';
+        if (task.steps[0]) task.steps[0].status = 'cancelled';
+        if (snapshot.activeTask?.id === task.id) snapshot.activeTask = null;
+      }
     } else if (action === 'newConversation') {
       archives.set(snapshot.conversation.id, copy(snapshot));
       snapshot.conversation = { id: `fixture-${++sequence}`, messages: [], tasks: [] };
@@ -105,17 +166,26 @@ const bridge = {
       }
     } else if (action === 'applyProposal' || action === 'restoreProposal') {
       snapshot.activeTask.proposals[0].status = action === 'applyProposal' ? 'applied' : 'restored';
+      if (action === 'applyProposal' && snapshot.activeTask.proposals[0].kind === 'algorithm_package') {
+        data = { systemId: 'fixture-system', verified: true, realtimePackageId: 'user-cpu-fixture', realtimeEnabled: false, offlineOnly: false };
+        snapshot.activeTask.proposals[0].result = data;
+      }
       snapshot.activeTask.status = 'succeeded';
     }
     emitState();
-    if (action === 'startTask') listeners.forEach((listener) => listener({ type: 'text.delta', taskId: snapshot.activeTask.id, delta: '正在查询当前系统可用的图表。' }));
+    if (action === 'startTask') {
+      const task = snapshot.activeTask;
+      listeners.forEach((listener) => listener({ type: 'text.delta', taskId: task.id, delta: '正在查询当前系统可用的图表。' }));
+      if (/训练|编写分类/.test(payload.text)) setTimeout(() => requestAlgorithmData(task), 20);
+    }
+    if (action === 'submitAlgorithmData') listeners.forEach((listener) => listener({ type: 'text.delta', taskId: snapshot.activeTask.id, delta: '已收到所选数据，正在分析开发集。' }));
     return { ok: true, data: copy(data) };
   },
 };
 
 /** 挂载可人工和浏览器自动化操作的隔离测试入口。 */
 function Fixture() {
-  return <><main style={{ padding: 24, maxWidth: 580 }}><h1>Agent 界面本地测试</h1><p>仅使用内存测试数据，不连接模型、设备和文件。</p><p>发送任务后先关闭抽屉，再使用以下按钮推进状态。</p><button onClick={complete}>测试：完成方案生成</button><button onClick={() => listeners.forEach((listener) => listener({ type: 'runtime.error', error: { code: 'FIXTURE_CRASH', message: '测试运行进程中断，请刷新状态。' } }))}>测试：进程错误</button></main><AgentWorkspace bridge={bridge} initiallyOpen /></>;
+  return <><main style={{ padding: 24, maxWidth: 580 }}><h1>Agent 界面本地测试</h1><p>仅使用内存测试数据，不连接模型、设备和文件。</p><p>发送任务后先关闭抽屉，再使用以下按钮推进状态。</p><button onClick={complete}>测试：完成方案生成</button><button onClick={completeTraining}>测试：完成 CPU 训练</button><button onClick={() => listeners.forEach((listener) => listener({ type: 'runtime.error', error: { code: 'FIXTURE_CRASH', message: '测试运行进程中断，请刷新状态。' } }))}>测试：进程错误</button></main><AgentWorkspace bridge={bridge} initiallyOpen /></>;
 }
 
 createRoot(document.getElementById('root')).render(<Fixture />);

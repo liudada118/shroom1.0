@@ -122,6 +122,8 @@ export function normalizePointGridParams(params = {}) {
     fps: clampInteger(params.fps, DEFAULT_FPS, PARAM_RANGES.fps),
     separation: clampInteger(params.separation, DEFAULT_SEPARATION, PARAM_RANGES.separation),
     points: normalizePoints(params.points),
+    transposeAxes: params.transposeAxes === true,
+    workspaceTools: params.workspaceTools === true,
   };
 }
 

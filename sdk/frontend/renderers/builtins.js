@@ -152,6 +152,8 @@ export function registerBuiltinRenderers() {
         'changeSelectFlag',
         'changeGroupRotate',
         'reset',
+        'getViewTools',
+        'getSelectionTools',
       ],
       normalizeParams: normalizePointGridParams,
       // matCol 与 carCol 两条。它们 953 行代码的净差异只有两个数字
@@ -210,6 +212,7 @@ export function registerBuiltinRenderers() {
         'sitValue',
         'changeColor',
         'bthClickHandle',
+        'getTuningControls',
       ],
       normalizeParams: normalizeWebglHeatmapParams,
       // `bed4096` 是唯一的迁移预设（逐字等于 `Canvas4096WebGL` 的现有行为，
@@ -224,12 +227,12 @@ export function registerBuiltinRenderers() {
       capabilities: [RENDERER_CAPABILITIES.SIT],
       // ⚠️ 原实现只暴露 `bthClickHandle` 与 `sitValue` 两个；`sitData` 是搬进包时
       // 补的转调，好让宿主用同一套 `sitData({ wsPointData })` 喂五个渲染器。
-      // 另外 `sitValue` 那六个键里**只有 `valuej` 真的改画面** —— 剩下四个在原件里
-      // 就只喂给一段死运算，见 `renderers/blobHeatmap/core/pipeline.js` 文件头。
+      // 旧路径仅 valuej 改画面；配置式矩阵 opt-in 后接统一的五项视觉调节。
       methods: [
         'sitData',
         'sitValue',
         'bthClickHandle',
+        'getTuningControls',
       ],
       normalizeParams: normalizeBlobHeatmapParams,
       // 两条，就是原件那句 `if (props.matrixName == 'carCol')` 的两边。

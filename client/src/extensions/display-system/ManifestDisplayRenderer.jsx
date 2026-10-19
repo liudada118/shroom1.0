@@ -44,6 +44,8 @@ import {
 } from './manifestWidgetGeometry.js';
 import { listAgentRendererApps } from './api.js';
 import { parseAgentRendererId } from './agentRendererBridge.js';
+import { trackUsageOperation } from '../../services/usageAnalytics';
+import { createManifestRendererTools } from './manifestRendererTools.js';
 import './ManifestDisplayRenderer.css';
 
 const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
@@ -151,6 +153,7 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
     [definition?.page, profileModel.renderers, activeProfile.rendererId],
   );
   const profileId = definition?.displaySystemId || definition?.type || 'unknown';
+  const rendererTools = useMemo(() => createManifestRendererTools(), [profileId]);
 
   useEffect(() => {
     setSelection(readDisplaySelection(profileId));
@@ -212,6 +215,7 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
   }, [activeProfile, profileModel.renderers, selection, updateSelection]);
 
   useImperativeHandle(rendererRef, () => ({
+    ...rendererTools,
     handleMessage,
     pushFrame: handleMessage,
     pushFrames,
@@ -221,7 +225,7 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
       value: activeProfile.rendererId,
       options: profileModel.renderers.map((item) => ({ value: item.id, label: item.label || item.id })),
     }),
-  }), [handleMessage, pushFrames, selectRenderer, activeProfile.rendererId, profileModel.renderers]);
+  }), [handleMessage, pushFrames, selectRenderer, activeProfile.rendererId, profileModel.renderers, rendererTools]);
 
   const widgetModels = useMemo(() => {
     // 画布 widget 来自 activeProfile：manifest 的 display.canvas.widgets
@@ -302,6 +306,7 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
       };
     });
   }, [activeProfile, channelFrames, definition, matrix, matrixTransform, sensors]);
+  rendererTools.setWidgets(widgetModels.map(({ widget, rendererParams }) => ({ ...widget, rendererParams })));
 
   const updateCanvas = useCallback((canvas) => {
     updateSelection({ ...selection, profileId: activeProfile.profileId, canvas });
@@ -399,7 +404,7 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
               <span>展示方案</span>
               <Select
                 value={activeProfile.profileId}
-                onChange={selectProfile}
+                onChange={(value) => trackUsageOperation('analysis_tool_used', { featureId: 'display_switch', action: 'select_profile' }, () => selectProfile(value))}
                 options={profileModel.profiles.map((profile) => ({ value: profile.id, label: profile.label }))}
               />
             </label>
@@ -431,7 +436,7 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
             <div className="manifest-view-switcher-options" role="group" aria-label="展示方式">
               {viewOptions.map((option) => (
                 <button key={option.value} type="button" aria-pressed={activeProfile.rendererId === option.value}
-                  onClick={() => selectRenderer(option.value)}>{option.label}</button>
+                  onClick={() => trackUsageOperation('analysis_tool_used', { featureId: 'display_switch', action: 'select_renderer' }, () => selectRenderer(option.value))}>{option.label}</button>
               ))}
             </div>
           </div>
@@ -534,6 +539,7 @@ const ManifestDisplayRenderer = forwardRef(function ManifestDisplayRenderer({
                 <RendererHost
                   key={`${widget.type}:${activeProfile.rendererId}`}
                   rendererId={widget.type}
+                  rendererRef={rendererTools.rendererRef(widget.id, widget.type)}
                   label={label}
                   params={widgetRendererParams}
                   values={values}

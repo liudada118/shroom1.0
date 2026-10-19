@@ -15,6 +15,7 @@
 3. [界面与渲染链路](chains/interface-flow.md)：首页、选择、进入、实时画面、图表和返回的状态及调用链。
 4. [内置 Agent](embedded-agent.md)：模型设置、附件、提案应用、设备连接与任务恢复，以及当前验证边界。
 5. [Agent 聊天同步接口](agent-chat-sync-api.md)：客户首次配置、升级保留数据、上传内容、持久队列与服务端接收契约。
+6. [电脑授权、网页缓存与使用统计](desktop-distribution-services.md)：设备上限、离线签名凭证、独立网页发布、上报开关与部署验收。
 
 代码定位和测试选择用 [ARCHITECTURE_INDEX.md](../ARCHITECTURE_INDEX.md)；追溯旧决策才查
 [ARCHITECTURE.md](../ARCHITECTURE.md)。后者是累积台账，不再作为从头学习当前架构的入口。

@@ -12,6 +12,18 @@ function fixture() {
 }
 
 describe('原生展示视角工具', () => {
+  it('倾斜点阵俯视沿真实垫面法线，缩放仍围绕当前矩阵中心', () => {
+    const { object, camera, controls } = fixture();
+    object.rotation.x = Math.PI / 3;
+    controls.target.copy(object.position);
+    const tools = createWorkspaceViewTools({ object, camera, controls, localPlane: true });
+    const distance = camera.position.distanceTo(controls.target);
+    tools.top();
+    const expected = new Vector3(0, 1, 0).transformDirection(object.matrixWorld);
+    expect(camera.position.clone().sub(controls.target).normalize().dot(expected)).toBeCloseTo(1, 12);
+    tools.zoom(1);
+    expect(camera.position.distanceTo(controls.target)).toBeCloseTo(distance * .85);
+  });
   it('旋转精确为 30°，反向可恢复，非法轴不改变对象', () => {
     const { object, tools } = fixture();
     expect(tools.rotate('y')).toBe(true);

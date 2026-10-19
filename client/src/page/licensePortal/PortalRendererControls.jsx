@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { trackUsage } from '../../services/usageAnalytics';
 
 /** 在统一工具区选择当前画布渲染器，异步挂载后读取能力，不发送设备命令。 */
 export default function PortalRendererControls({ rendererRef, active = true }) {
@@ -18,7 +19,15 @@ export default function PortalRendererControls({ rendererRef, active = true }) {
   return <fieldset className="portal-renderer-controls"><legend>中间可视化</legend>
     <label><span>渲染方式</span><select aria-label="选择渲染器" value={controls.value}
       onChange={(event) => {
-        rendererRef.current?.selectRenderer?.(event.target.value);
+        const select = rendererRef.current?.selectRenderer;
+        if (typeof select !== 'function') return;
+        try {
+          select.call(rendererRef.current, event.target.value);
+          trackUsage('analysis_tool_used', { featureId: 'display_switch', action: 'select_renderer', result: 'success' });
+        } catch (error) {
+          trackUsage('analysis_tool_used', { featureId: 'display_switch', action: 'select_renderer', result: 'failure' });
+          throw error;
+        }
         setControls((previous) => ({ ...previous, value: event.target.value }));
       }}>
       {controls.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}

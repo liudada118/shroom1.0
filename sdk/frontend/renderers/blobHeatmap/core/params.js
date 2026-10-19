@@ -75,6 +75,7 @@ export function normalizeBlobHeatmapParams(input = {}) {
     canvasScale: clampNumber(source.canvasScale, DEFAULTS.canvasScale, PARAM_RANGES.canvasScale),
     shadow: source.shadow === undefined ? DEFAULTS.shadow : Boolean(source.shadow),
     gradient: source.gradient || null,
+    transposeAxes: source.transposeAxes === true,
   };
 }
 

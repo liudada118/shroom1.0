@@ -59,6 +59,9 @@ export function buildManifestWidgetRendererParams({
       back: { ...(base.back || {}), num1: rows, num2: cols },
     };
     const points = flattenCoordinatePoints(coordinateMap);
+    // ⚠️ 仅规则矩阵交换绘图轴，物理点位表已定义真实形状，不能再次转置。
+    next.transposeAxes = points?.length !== rows * cols;
+    next.workspaceTools = true;
     if (points?.length === rows * cols) next.points = points;
     else delete next.points;
     return next;
@@ -72,6 +75,8 @@ export function buildManifestWidgetRendererParams({
       dataWidth: cols,
       dataHeight: rows,
       ...(rendererId === 'webglHeatmap' ? { minFrameLength: rows * cols } : {}),
+      ...(rendererId === 'blobHeatmap' ? { transposeAxes: true } : {}),
+      ...(rendererId === 'webglHeatmap' ? { workspaceTuning: true } : {}),
     };
   }
   return base;

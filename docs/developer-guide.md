@@ -1,6 +1,6 @@
 # 开发者手册：当前代码如何运行
 
-> 核对日期：2026-09-15。描述当前源码，不描述未来平台目标。入口见 [文档导航](README.md)。
+> 核对日期：2026-10-16。描述当前源码，不描述未来平台目标。入口见 [文档导航](README.md)。
 > 本次依据源码和已有测试入口做静态核对；不等同于安装包或真实硬件验收。
 
 ## 1. 从哪里开始读
@@ -168,6 +168,16 @@ Builder / Agent 提交 manifest + definitions
 资源准备链为 `build-client` → `build-python-runtime` → `sync-pack-resources` → NSIS 协议准备。
 [sync-pack-resources.js](../scripts/sync-pack-resources.js) 同步初始化数据库、Python 和 Agent 规则，
 并检查打包的 Python runtime 是否包含 `onbed_filter`。它不是将当前用户数据库整个复制进包。
+
+Windows 构建需要 `python/app/onbed_filter.cp311-win_amd64.pyd`（CPython 3.11、AMD64）。这份正式算法输入必须随源码版本保留；`.gitignore` 对它设置了精确例外，其余本机原生构建产物继续忽略。只保留 `python/dist` 或 `pack-resources/python` 中的运行副本不足以重新构建。也可通过 `SHROOM_ONBED_FILTER_BINARY` 指定兼容原生库；缺库时不得跳过校验生成缺少床垫算法的安装包。
+
+CPU 训练依赖统一固定在 `python/requirements.txt`：scikit-learn 1.9.1、joblib 1.5.3、threadpoolctl 3.7.0、narwhals 2.27.1，复用已有 NumPy/SciPy。构建机执行 `py -3.11 -m pip install -r python/requirements.txt`；客户由安装包携带依赖，无需自行安装 Python、CUDA 或配置显卡。构建脚本预检模型、预处理和分组验证入口，再显式收集隐藏模块、元数据及动态库；仍排除 torch/tensorflow，模块或 ABI 不可用时提前失败。
+
+Agent 现已接入 `train_algorithm`：由固定本机训练器比较 logistic、决策树和 32 棵树随机森林，单线程 CPU 运行、60 秒超时并支持取消；客户不需要显卡或自行安装 sklearn/torch。训练仅消费用户确认的 2～8 条记录及所选帧范围，每条最多 2000 帧，总计最多 200 万压力数值。特征缓存按数据摘要、窗口、矩阵、特征版本及适配间隔隔离，不复用另一份输入。
+
+`algorithm-lab/worker.js` 通过 `evaluate.prepareWindows` 和 `spatialFeatures.js` 提取 `pressure-spatial-v2`：保持旧 12 项全局特征不变，宿主提供且点数匹配的矩阵才追加 9 项空间特征。相同特征函数用于实时预测；没有矩阵时仅训练全局特征，不按点数猜形状。固定训练器按采集组交叉验证选择候选，独立验证记录不参与拟合或选择，评估尝试写入消费账本。`cpuModel.js` 只解释受限 JSON 系数和树，拒绝 pickle、任意 Python、非有限值及循环结构；保存报告绑定模型摘要、特征版本、矩阵和输入契约。`realtimeCatalog`、系统包导出/安装均保留这些字段，实时入口再次核对形状和数据阶段；用户明确要求规则算法时仍走原受限 `predict(f)`。
+
+安装版通过随包 `onbed_server --train-classifier` 固定入口训练，缺组件时明确要求更新完整软件，不借用客户电脑的任意 Python。此前依赖准备阶段已在系统临时目录验证 PyInstaller 产物，Python 解压目录由 361.88 MiB 增至 379.23 MiB；该历史体积不能代表当前训练流程或 NSIS 安装包增量。本轮固定 CLI 已在 `resources/python` 布局的临时冻结产物中完成实际三候选训练、模型保存、真实实时 worker 分类及原有 ping/health RPC，并通过 Full；当前未生成 NSIS 安装包，尚未证明真实客户数据的分类准确率。
 
 - Agent 规则源码在 `agent-resources/`；Forge 使用 `pack-resources/agent`，builder 的 extraResources 从源码目录复制到 `resources/agent`。不要把打包副本作为唯一修改源。
 - builder 的 [beforePack](../scripts/electron-builder-before-pack.js) 收集实际安装的生产依赖；[afterPack](../scripts/electron-builder-after-pack.js) 经 [package-hooks](../scripts/package-hooks.js) 检查 ASAR 依赖闭环，防止 express 等包的间接依赖漏装。

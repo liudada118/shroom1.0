@@ -1,7 +1,8 @@
 export const DEFAULT_AGENT_SETTINGS = Object.freeze({ baseUrl: 'https://api.openai.com/v1', model: '', hasApiKey: false });
 export const BUSY_TASK_STATUSES = new Set(['running', 'verifying']);
 export const TOOL_LABELS = {
-  get_algorithm_workspace: '读取算法工作台', analyze_algorithm_data: '分析所选采集数据', test_algorithm: '试运行算法并生成报告', prepare_algorithm_package: '准备保存分类算法',
+  request_algorithm_data: '请你选择算法数据',
+  get_algorithm_workspace: '读取算法工作台', analyze_algorithm_data: '分析所选采集数据', train_algorithm: '本机训练并比较分类器', test_algorithm: '试运行算法并生成报告', prepare_algorithm_package: '准备保存分类算法',
   get_current_system: '识别本轮当前系统',
   get_algorithm_state: '读取实际算法输出',
   get_capabilities: '读取平台能力', get_current_state: '查询当前系统与设备', read_system: '读取系统配置',
@@ -12,7 +13,7 @@ export const TOOL_LABELS = {
   prepare_connect_device: '准备连接设备', connect_device: '连接并检查设备', apply_configuration: '应用并核对配置', restore_display: '恢复展示配置',
 };
 export const TASK_LABELS = {
-  running: '执行中', verifying: '正在核验', awaiting_action: '等待应用', succeeded: '已完成',
+  running: '执行中', verifying: '正在核验', awaiting_action: '等待应用', awaiting_data: '等待选择数据', succeeded: '已完成',
   failed: '执行失败', cancelled: '已停止', interrupted: '已中断', uncertain: '需要检查结果',
   pending: '待执行', applying: '正在应用', applied: '已应用', restoring: '正在恢复', restored: '已恢复',
   completed: '已完成', skipped: '已跳过',

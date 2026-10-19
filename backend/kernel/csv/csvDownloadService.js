@@ -5,6 +5,7 @@
  * 的行继续分别映射为 sit/back/head。新增串口不需要再增加 dbN 分支。
  */
 const { createHash } = require('crypto');
+const { recordBusinessEvent } = require('../../common/businessEvents');
 const { createObjectCsvStringifier } = require('csv-writer');
 const { multiSensorStableContract } = require('@shroom/backend/contract');
 const {
@@ -130,6 +131,7 @@ function createCsvDownloadService({
   function publishResult(download, {
     files = [], artifacts = [], skippedChannels = [], dir = '', error = '',
   } = {}) {
+    recordBusinessEvent('export_result', { featureId: 'export', format: 'csv', result: download === 'export csv success' ? 'success' : 'failure', count: files.length });
     return publishSystemEvent({
       download,
       downloadStatus: download === 'export csv success' ? 'success' : 'failed',

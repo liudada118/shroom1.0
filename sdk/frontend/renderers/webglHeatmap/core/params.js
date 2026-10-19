@@ -113,6 +113,7 @@ export function normalizeWebglHeatmapParams(input = {}) {
     chartWindow: clampNumber(source.chartWindow, DEFAULTS.chartWindow, PARAM_RANGES.chartWindow),
     displaySize: source.displaySize || DEFAULTS.displaySize,
     background: source.background || DEFAULTS.background,
+    workspaceTuning: source.workspaceTuning === true,
   };
 }
 

@@ -1,5 +1,7 @@
 const path = require('node:path');
 const { Worker } = require('node:worker_threads');
+const { CPU_RUNTIME } = require('./cpuModel');
+const { validateMatrix } = require('./spatialFeatures');
 // 已选帧相隔超过两个目标间隔时，动作峰值可能已缺失，不组成分类窗口。
 const MAX_SELECTED_GAP_FACTOR = 2;
 
@@ -64,6 +66,13 @@ function createRealtimeClassifier({ classifier }) {
     const timestamp = context.timestamp;
     if (!Number.isFinite(timestamp) || !Array.isArray(values) || values.length !== classifier.pointCount || !values.every(Number.isFinite)) {
       fail('分类输入时间戳、点数或数值无效，请检查设备与线序后重新启用。'); return Promise.reject(failure);
+    }
+    if (classifier.runtime === CPU_RUNTIME && classifier.matrix) {
+      let matrix;
+      try { matrix = validateMatrix(context.matrix, classifier.pointCount); } catch { /* Missing or changed geometry cannot reuse spatial features. */ }
+      if (!matrix || matrix.rows !== classifier.matrix.rows || matrix.cols !== classifier.matrix.cols) {
+        fail('当前展示矩阵与算法训练矩阵不同，请选择兼容的系统和通道。'); return Promise.reject(failure);
+      }
     }
     const frame = { values: [...values], timestamp };
     const reason = context.resetReason || (lastTimestamp !== null && timestamp < lastTimestamp ? '数据时间戳倒序，正在重新积累分类窗口。'

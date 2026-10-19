@@ -21,6 +21,7 @@ export default function AgentSyncSettings({ sync, onSave, onRetry }) {
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [advanced, setAdvanced] = useState(Boolean(settings.warning || (settings.endpoint && settings.endpoint !== 'https://shroom.jq-industries.com/api/agent/conversations')));
   const actionLock = useRef(false);
   const errorRef = useRef(null);
   const savedTokenAvailable = settings.hasToken && endpoint.trim() === settings.endpoint && !clearToken;
@@ -59,8 +60,10 @@ export default function AgentSyncSettings({ sync, onSave, onRetry }) {
 
   return <section className="shroom-agent-sync-settings" aria-labelledby="shroom-agent-sync-title">
     <h3 id="shroom-agent-sync-title">聊天同步</h3>
-    <p className="shroom-agent-hint" id="shroom-agent-sync-notice">开启后，会把当前会话和之后的聊天正文、附件名称、任务状态上传到下方服务器。打开旧会话时也会同步该会话。正文中引用的采集信息会随消息上传；附件原文件、采集数据库和模型密钥配置不上传。</p>
-    <form onSubmit={submit}>
+    <p className="shroom-agent-hint" id="shroom-agent-sync-notice">聊天默认自动同步到公司服务器，使用软件密钥鉴权，无需另外填写同步地址或上传凭证。同步当前会话和之后的聊天正文、附件名称、任务状态；打开旧会话时也会同步该会话。正文中引用的采集信息会随消息上传；附件原文件、采集数据库和模型密钥配置不上传。</p>
+    <details open={advanced} onToggle={event => setAdvanced(event.currentTarget.open)}>
+      <summary>高级同步设置</summary>
+      <form onSubmit={submit}>
       <label className="shroom-agent-check"><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} disabled={pending} aria-describedby="shroom-agent-sync-notice" />开启聊天同步</label>
       <label htmlFor="shroom-agent-sync-endpoint">服务器接口地址</label>
       <input id="shroom-agent-sync-endpoint" type="url" value={endpoint} onChange={(event) => setEndpoint(event.target.value)} disabled={pending} required={enabled} placeholder="https://你的服务器/api/agent/conversations" autoComplete="off" spellCheck={false} />
@@ -70,7 +73,8 @@ export default function AgentSyncSettings({ sync, onSave, onRetry }) {
       {settings.hasToken && <label className="shroom-agent-check"><input type="checkbox" checked={clearToken} onChange={(event) => { setClearToken(event.target.checked); if (event.target.checked) { setToken(''); if (!licenseAuthAvailable) setEnabled(false); } }} disabled={pending} />清除已保存的上传凭证</label>}
       {error && <p role="alert" tabIndex={-1} ref={errorRef} className="shroom-agent-inline-error">{error}</p>}
       <button type="submit" className="shroom-agent-primary" disabled={pending || !onSave}>{pending ? '正在处理…' : '保存同步设置'}</button>
-    </form>
+      </form>
+    </details>
     {message && <p role="status" className="shroom-agent-hint">{message}</p>}
     <div className="shroom-agent-sync-status" role="status" aria-live="polite">
       <strong>{describeChatSync(sync)}</strong>

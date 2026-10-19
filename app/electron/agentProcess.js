@@ -7,8 +7,9 @@ const { createChatSync } = require('../../backend/agent-runtime/chatSync');
 const { agentError, publicError } = require('../../backend/agent-runtime/errors');
 const { MAX_FILE_BYTES, IMAGE_EXTENSIONS, imageMime } = require('../../backend/agent-runtime/attachments');
 const { readClipboardFiles } = require('./agentClipboard');
+const { recordBusinessEvent } = require('../../backend/common/businessEvents');
 
-const ACTIONS = new Set(['getState', 'listConversations', 'openConversation', 'listAlgorithmRecords', 'setAlgorithmSelection', 'saveSettings', 'saveSyncSettings', 'retryChatSync', 'startTask', 'cancelTask', 'newConversation', 'importFiles', 'importAttachments', 'importClipboard', 'applyProposal', 'restoreProposal']);
+const ACTIONS = new Set(['getState', 'listConversations', 'openConversation', 'listAlgorithmRecords', 'setAlgorithmSelection', 'submitAlgorithmData', 'saveSettings', 'saveSyncSettings', 'retryChatSync', 'startTask', 'cancelTask', 'newConversation', 'importFiles', 'importAttachments', 'importClipboard', 'applyProposal', 'restoreProposal']);
 const trustedWindowOrigins = new WeakMap();
 
 /** 由主进程加载已核验的前端地址，并绑定该窗口唯一可信的 Agent 来源。 */
@@ -36,6 +37,8 @@ function isTrustedAgentSender(event, window) {
 
 /** 管理独立 Agent 子进程、有限 IPC、附件选择和操作系统凭据存储。 */
 function createAgentProcess({ electron, root, getWindow, timeoutMs = 20000, backendEndpoints = {}, getLicenseKey = () => '' }) {
+  const observedTasks = new Set();
+  const observedProposals = new Map();
   const { utilityProcess, safeStorage, dialog } = electron;
   const settings = createAgentSettings({ root, safeStorage });
   const syncSettings = createAgentSyncSettings({ root, safeStorage, getLicenseKey });
@@ -64,6 +67,32 @@ function createAgentProcess({ electron, root, getWindow, timeoutMs = 20000, back
   /** 向当前主窗口发布事件；窗口关闭后不继续发送。 */
   function emit(event) {
     if (event.type === 'state') {
+      for (const task of event.state?.conversation?.tasks || []) {
+        const liveTask = observedTasks.has(task.id) || ['running', 'verifying'].includes(task.status);
+        for (const proposal of task.proposals || []) {
+          const previous = observedProposals.get(proposal.id);
+          const action = `${proposal.status !== 'applying' && (proposal.status === 'restoring' || proposal.status === 'restored' || previous?.action?.startsWith('restore_')) ? 'restore' : 'apply'}_${proposal.kind}`;
+          if (!previous && liveTask && proposal.status === 'pending') recordBusinessEvent('agent_task_result', {
+            featureId: 'agent_proposal', action: `generated_${proposal.kind}`, result: 'success' });
+          if (previous && previous.status !== proposal.status) {
+            if (['applying', 'restoring'].includes(proposal.status)) recordBusinessEvent('feature_attempted', { featureId: 'agent_proposal', action });
+            else if (['applied', 'restored', 'failed', 'uncertain'].includes(proposal.status)) recordBusinessEvent('agent_task_result', {
+              featureId: 'agent_proposal', action,
+              ...(previous.startedAt ? { durationMs: Math.min(86400000, Math.max(0, Date.now() - previous.startedAt)) } : {}),
+              result: proposal.status === 'uncertain' || (proposal.kind === 'connect_device' && !proposal.result?.liveVerified) ? 'unknown'
+                : ['applied', 'restored'].includes(proposal.status) ? 'success' : 'failure',
+              ...(proposal.error?.code ? { errorCode: proposal.error.code } : {}) });
+          }
+          observedProposals.set(proposal.id, { status: proposal.status, action,
+            startedAt: ['applying', 'restoring'].includes(proposal.status) && previous?.status !== proposal.status ? Date.now() : previous?.startedAt });
+          if (observedProposals.size > 256) observedProposals.delete(observedProposals.keys().next().value);
+        }
+        if (['running', 'verifying'].includes(task.status)) observedTasks.add(task.id);
+        else if (['succeeded', 'failed', 'cancelled', 'awaiting_action', 'uncertain'].includes(task.status) && observedTasks.delete(task.id)) recordBusinessEvent('agent_task_result', {
+          featureId: 'agent', result: task.status === 'succeeded' ? 'success' : task.status === 'cancelled' ? 'cancelled' : task.status === 'failed' ? 'failure' : 'unknown',
+          durationMs: Math.max(0, Math.min(86400000, Date.parse(task.finishedAt || new Date().toISOString()) - Date.parse(task.createdAt || new Date().toISOString()))),
+          ...(task.error?.code ? { errorCode: task.error.code } : {}) });
+      }
       lastState = event.state;
       chatSync.observe(lastState);
       event = { ...event, state: publicState(lastState) };
@@ -248,6 +277,9 @@ function createAgentProcess({ electron, root, getWindow, timeoutMs = 20000, back
     try {
       if (action === 'listAlgorithmRecords') return await request(processRef, action, { offset: payload.offset });
       if (action === 'setAlgorithmSelection') return await request(processRef, action, { selection: payload.selection });
+      if (action === 'submitAlgorithmData') return await request(processRef, action, {
+        taskId: payload.taskId, requestId: payload.requestId, selection: payload.selection,
+      });
       if (action === 'saveSettings') {
         const state = await request(processRef, 'getState');
         if (state.activeTask) throw agentError('AGENT_BUSY', '请先停止当前任务再修改连接设置。');
@@ -274,7 +306,7 @@ function createAgentProcess({ electron, root, getWindow, timeoutMs = 20000, back
     child = null;
   }
 
-  return { invoke, dispose };
+  return { invoke, dispose, getSecrets: () => [settings.getPrivate().apiKey, syncSettings.getPrivate().token] };
 }
 
 /** 注册最小 Agent IPC，响应始终使用稳定 envelope。 */

@@ -186,7 +186,7 @@ const tryDecodeOffline = (input) => {
     const payload = JSON.parse(atob(envelope.payload));
     const expireTs = parseFloat(payload.expireDate);
     const remainDays = Math.ceil((expireTs - Date.now()) / 86400000);
-    const f = payload.sensorTypes;
+    const f = payload.version === 4 && payload.deviceLimit > 0 ? payload.boundSensorTypes : payload.sensorTypes;
     const fileDisplay = describeLicenseFile(f);
     return {
       version: 'offline',

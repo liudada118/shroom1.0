@@ -14,20 +14,24 @@ function WorkspaceFixture() {
   const rendererRef = useRef();
   const [presentation, setPresentation] = useState('workspace');
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [selectionActive, setSelectionActive] = useState(false);
   const portal = window.location.search.includes('portal');
   const query = new URLSearchParams(window.location.search);
   const legacy = query.get('legacy');
   const rendererType = legacy || query.get('renderer') || 'pointGrid';
   const side = legacy ? 23 : Math.max(1, Number(query.get('side')) || 32);
-  const rendererIds = query.has('multi') ? ['pointGrid', 'webglHeatmap', 'numMatrix2d'] : [rendererType];
+  const rows = legacy ? side : Math.max(1, Number(query.get('rows')) || side);
+  const cols = legacy ? side : Math.max(1, Number(query.get('cols')) || side);
+  const rendererIds = query.has('orientation') ? ['pointGrid', 'blobHeatmap', 'numMatrix', 'webglHeatmap']
+    : query.has('multi') ? ['pointGrid', 'webglHeatmap', 'numMatrix2d'] : [rendererType];
   const definition = {
-    displaySystemId: 'layout-fixture', type: 'layout-fixture', matrix: { rows: side, cols: side },
-    sensors: [{ id: 'mat', sensorId: 'mat', outputChannel: 'mat', matrix: { rows: side, cols: side } }],
+    displaySystemId: 'layout-fixture', type: 'layout-fixture', matrix: { rows, cols },
+    sensors: [{ id: 'mat', sensorId: 'mat', outputChannel: 'mat', matrix: { rows, cols } }],
     page: {
       layout: { columns: 12, presentation },
       renderers: rendererIds.map((id) => ({ id, type: id === 'numMatrix2d' ? 'numMatrix' : id, params: {
-        sit: { num1: side, num2: side, interp: 1, order: 0 },
-        back: { num1: side, num2: side, interp: 1, order: 0 },
+        sit: { num1: rows, num2: cols, interp: 1, order: 0 },
+        back: { num1: rows, num2: cols, interp: 1, order: 0 },
         ...(id === 'numMatrix2d' && query.has('legacy2dStyle') ? {
           backend: 'webgl', frameInput: 'raw',
           webgl: { variant: 'original', rawTranspose: false, indexRow: false, overlayPad: 0 },
@@ -48,6 +52,22 @@ function WorkspaceFixture() {
     }]);
     return () => { delete window.pushWorkspaceFrame; };
   }, []);
+  /** 用可见按钮发送右上亮点，只验证绘图方向，不模拟设备连接。 */
+  function injectDirectionFrame() {
+    const values = Array(rows * cols).fill(10);
+    values[cols - 1] = 600;
+    rendererRef.current?.sitValue?.({ valuej: rendererRef.current?.getDisplayControls?.().value === 'pointGrid' ? 6000 : 600,
+      valueg: 0, valuel: 1, value: 0.001, valuef: 0, valuelInit: 0 });
+    rendererRef.current?.pushFrames([{
+      channelId: 'layout-fixture:mat', outputChannel: 'mat',
+      renderValues: values, normalizedValues: values, timestamp: Date.now(),
+    }]);
+  }
+  /** 复用正式工具区的框选开关，隔离测试不下发设备命令。 */
+  function toggleSelection(next) {
+    rendererRef.current?.changeSelectFlag?.(!next);
+    setSelectionActive(next);
+  }
   const surface = (
     <>
       <header className="title" style={{ position: 'absolute', inset: '0 0 auto', height: 60, background: '#1b1b35', color: 'white', zIndex: 50 }}>
@@ -55,6 +75,12 @@ function WorkspaceFixture() {
         <select aria-label="布局" value={presentation} onChange={(e) => setPresentation(e.target.value)}>
           {['standard', 'immersive', 'workspace'].map((id) => <option key={id}>{id}</option>)}
         </select>
+        {query.has('orientation') && <>
+          <button type="button" onClick={injectDirectionFrame}>注入方向测试帧（右上亮点）</button>
+          <button type="button" onClick={() => rendererRef.current?.sitValue?.({ valuef: 1000 })}>过滤全部</button>
+          <button type="button" onClick={() => rendererRef.current?.sitValue?.({ valuef: 0 })}>恢复过滤</button>
+          <button type="button" onClick={() => rendererRef.current?.sitValue?.({ value: 0 })}>高度归零</button>
+        </>}
       </header>
       <ManifestSidebarOverlay portalEmbedded={portal} enabled={!portal && presentation !== 'immersive'}>
         <div className="aside">
@@ -73,6 +99,7 @@ function WorkspaceFixture() {
       <div className="fiber-portal" style={{ position: 'absolute', inset: 0, zIndex: 40, pointerEvents: 'none', '--left-chart-width': '300px', '--right-tools-width': '140px' }}>
         <div className="portal-quick-tools-anchor"><div className="portal-quick-tools"><button type="button" onClick={() => setToolsOpen(true)}>工具区</button></div></div>
         <PortalWorkspaceTools open={toolsOpen} onClose={() => setToolsOpen(false)} rendererRef={rendererRef}
+          selectionActive={selectionActive} onSelectionChange={toggleSelection} systemKey="layout-fixture"
           displayContent={<PortalRendererControls rendererRef={rendererRef} active={toolsOpen} />} />
       </div>
     </>

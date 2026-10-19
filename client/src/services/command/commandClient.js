@@ -1,4 +1,5 @@
 import { createCommand } from './commandSchema';
+import { trackUsageOperation, trackUsageCommit, trackUsage, flushUsageCommits } from '../usageAnalytics';
 
 const DEFAULT_HTTP_BASE_URL = 'http://127.0.0.1:19245';
 
@@ -122,6 +123,43 @@ export class CommandClient {
   }
 
   async executeEnvelope(command) {
+    if (command.type === 'license.activate') flushUsageCommits();
+    if (command.type === 'playback.control') {
+      const payload = command.payload || {}, actions = [];
+      if (payload.play !== undefined) actions.push(payload.play ? 'play' : 'pause');
+      if (payload.speed !== undefined) actions.push('speed');
+      if (payload.index !== undefined) actions.push('seek');
+      if (payload.up !== undefined || payload.down !== undefined || payload.value !== undefined) actions.push('threshold');
+      if (!actions.length) actions.push('control');
+      try {
+        const result = await this.executeEnvelopeRequest(command);
+        for (const action of actions) {
+          const record = ['speed', 'seek', 'threshold'].includes(action) ? trackUsageCommit : trackUsage;
+          record('analysis_tool_used', { featureId: 'playback_control', action, result: 'success' });
+        }
+        return result;
+      } catch (error) {
+        trackUsage('analysis_tool_used', { featureId: 'playback_control', action: actions[0], result: 'failure',
+          ...(typeof error.code === 'string' && /^[A-Za-z0-9_.:-]{1,80}$/.test(error.code) ? { errorCode: error.code } : {}) });
+        throw error;
+      }
+    }
+    const observed = {
+      'license.activate': ['usage_session_summary', 'license_activation', 'activate'],
+      'license.refresh': ['usage_session_summary', 'license_refresh', 'refresh'],
+      'history.load': ['usage_session_summary', 'playback_load', 'load'],
+      'history.delete': ['usage_session_summary', 'playback_control', 'delete_record'],
+      'history.mode': ['usage_session_summary', 'playback_control', 'switch_mode'],
+      'runtime.configure': ['analysis_tool_used', 'data_adjustment', 'configure'],
+      'halow.control': ['device_connection_result', 'halow_listener', 'control'],
+    }[command.type];
+    if (!observed) return this.executeEnvelopeRequest(command);
+    const [eventName, featureId, action] = observed;
+    return trackUsageOperation(eventName, { featureId, action }, () => this.executeEnvelopeRequest(command));
+  }
+
+  /** Send the actual command and preserve its original acknowledgement and error contract. */
+  async executeEnvelopeRequest(command) {
     if (!this.fetchImpl) throw new CommandClientError('fetch is not available');
     // 设备操作留出后端完成时间；网络挂起时也必须恢复串口与 HaLow 控件。
     const controller = command.type?.startsWith('serial.') || command.type === 'halow.control' ? new AbortController() : null;

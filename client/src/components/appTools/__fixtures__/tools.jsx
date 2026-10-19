@@ -10,6 +10,8 @@ import i18n from '../../../i18n';
 
 const agentListeners = new Set();
 const updateListeners = new Set();
+const serviceListeners = new Set();
+const serviceState = { frontend: { activeReleaseId: 1 }, usage: { enabled: true, queued: 0 } };
 const calls = [];
 const snapshot = { settings: { baseUrl: 'https://example.invalid', model: 'fixture', hasApiKey: true },
   conversation: { id: 'layout-fixture', messages: [], tasks: [] }, attachments: [], activeTask: null };
@@ -20,6 +22,16 @@ window.electronAPI = {
   on(_channel, listener) { updateListeners.add(listener); return () => updateListeners.delete(listener); },
   /** 只记录点击行为，不连接更新服务器。 */
   async invoke(channel, payload) { calls.push({ channel, ...payload }); },
+  services: {
+    subscribe(listener) { serviceListeners.add(listener); return () => serviceListeners.delete(listener); },
+    async invoke(action, input) {
+      calls.push({ serviceAction: action, ...input });
+      if (action === 'setUsageEnabled') serviceState.usage.enabled = input.enabled;
+      if (action === 'checkFrontend') serviceState.frontend.pendingReleaseId = 2;
+      serviceListeners.forEach(listener => listener(structuredClone(serviceState)));
+      return structuredClone(action === 'status' ? serviceState : action === 'checkFrontend' ? serviceState.frontend : serviceState.usage);
+    },
+  },
   agent: {
     /** 订阅内存 Agent 状态。 */
     subscribe(listener) { agentListeners.add(listener); return () => agentListeners.delete(listener); },

@@ -7,7 +7,9 @@ import PortalWorkspaceTools from '../../page/licensePortal/PortalWorkspaceTools'
 import PortalRendererControls from '../../page/licensePortal/PortalRendererControls';
 import { createPortalCsvBatch } from './portalCsvBatch';
 import { capturePortalOperation, executePortalLegacyControl } from './portalOperationGuard';
-import { Menu, Slider, Button, Select, message, notification, Divider, Space, Radio, Drawer, Modal, Progress, Tooltip, ConfigProvider } from 'antd';
+import { Menu, Button, Select, message, notification, Divider, Space, Radio, Drawer, Modal, Progress, Tooltip, ConfigProvider } from 'antd';
+import Slider from '../appTools/UsageSlider';
+import { trackUsage } from '../../services/usageAnalytics';
 import { PlusOutlined, SettingOutlined, SlidersOutlined } from '@ant-design/icons';
 import exchange from '../../assets/images/exchange.png'
 import option from '../../assets/images/Option.png'
@@ -57,6 +59,23 @@ let collection = JSON.parse(localStorage.getItem('collection'))
   : [['hunch', 'front', '标签']];
 
 const maxValue = 1000
+
+/** 设置抽屉打开时读取活动渲染器能力，异步挂载或视图切换后更新可用滑块。 */
+function PortalWorkspaceTuning({ active, rendererRef, renderControls }) {
+  const [, setControls] = React.useState(null);
+  React.useEffect(() => {
+    if (!active) return undefined;
+    /** 只观察低频能力，不读取或轮询传感帧。 */
+    const refresh = () => {
+      const next = rendererRef?.current?.getTuningControls?.() || null;
+      setControls((previous) => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
+    };
+    refresh();
+    const timer = setInterval(refresh, 250);
+    return () => clearInterval(timer);
+  }, [active, rendererRef]);
+  return active ? renderControls(rendererRef?.current?.getTuningControls?.() || null) : null;
+}
 
 let loadData = ''
 const HUMAN_BODY_COLOR_SLIDER_MAX = 5000
@@ -1550,7 +1569,7 @@ class Title extends React.Component {
    * Determine which setting parameters to show based on matrixName + numMatrixFlag (display mode)
    * Returns JSX for the Drawer slider content
    */
-  renderSettingSliders(t) {
+  renderSettingSliders(t, dynamicControls = this.props.com?.current?.getTuningControls?.()) {
     const matrixName = this.props.matrixName;
     const mode = this.props.numMatrixFlag; // 'normal' | 'num' | 'num3D' | 'numoriginal' | 'skin'
     const cacheMode = mode; // mode dimension for cache
@@ -1574,7 +1593,9 @@ class Title extends React.Component {
     let showInit = false;     // Initial value
     let showHumanTransform = false; // Human model transform
 
-    if (isHumanBodyMatrixTitle(matrixName) && mode !== 'numoriginal') {
+    if (dynamicControls) {
+      ({ showGuass, showSize, showSpeed, showColor, showFilter, showHeight, showConsis, showInit } = dynamicControls);
+    } else if (isHumanBodyMatrixTitle(matrixName) && mode !== 'numoriginal') {
       showSize = true;
       showColor = true;
       showFilter = true;
@@ -1691,6 +1712,7 @@ class Title extends React.Component {
       if (this.props.com.current?.changeModelTransform) {
         this.props.com.current.changeModelTransform(defaultTransform);
       }
+      trackUsage('analysis_tool_used', { featureId: 'tuning_model_transform', action: 'restore_default', result: 'success' });
     };
 
     return (
@@ -1702,6 +1724,7 @@ class Title extends React.Component {
             <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
               <div className='dataTitle'>{t('guass')}</div>
               <Slider
+                usageFeature="tuning_gaussian"
                 min={0.1} max={8} step={0.1}
                 value={this.props.valueg1}
                 onChange={(value) => {
@@ -1720,6 +1743,7 @@ class Title extends React.Component {
             <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
               <div className='dataTitle'>{t('size')}</div>
               <Slider
+                usageFeature="tuning_point_size"
                 min={1}
                 max={isHumanBodyMatrixTitle(matrixName) ? 200 : 50}
                 step={isHumanBodyMatrixTitle(matrixName) ? 1 : 0.1}
@@ -1741,6 +1765,7 @@ class Title extends React.Component {
             <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
               <div className='dataTitle'>{t('speed')}</div>
               <Slider
+                usageFeature="tuning_rotation_speed"
                 min={1} max={20} step={1}
                 onChange={(value) => {
                   changeLocalStroage({ sensorType: matrixName, valueType: 'speedValue', value, mode: cacheMode });
@@ -1756,6 +1781,7 @@ class Title extends React.Component {
             <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
               <div className='dataTitle'>{t('color')}</div>
               <Slider
+                usageFeature="tuning_color_range"
                 min={5} max={getColorSliderMax(matrixName)} step={getColorSliderStep(matrixName)}
                 value={this.props.valuej1}
                 onChange={(value) => {
@@ -1775,6 +1801,7 @@ class Title extends React.Component {
             <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
               <div className='dataTitle'>{t('filter')}</div>
               <Slider
+                usageFeature="tuning_filter"
                 min={0} max={100} step={2}
                 value={this.props.valuef1}
                 onChange={(value) => {
@@ -1794,6 +1821,7 @@ class Title extends React.Component {
             <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
               <div className='dataTitle'>{t('height')}</div>
               <Slider
+                usageFeature="tuning_height"
                 min={0.1} max={15} step={0.02}
                 value={this.props.value1}
                 onChange={(value) => {
@@ -1812,6 +1840,7 @@ class Title extends React.Component {
             <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
               <div className='dataTitle'>{t('consis')}</div>
               <Slider
+                usageFeature="tuning_consistency"
                 min={1} max={20} step={1}
                 value={this.props.valuel1}
                 onChange={(value) => {
@@ -1830,6 +1859,7 @@ class Title extends React.Component {
             <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
               <div className='dataTitle'>{t('init')}</div>
               <Slider
+                usageFeature="tuning_initial_value"
                 min={1} max={5000} step={500}
                 value={this.props.valuelInit1}
                 onChange={(value) => {
@@ -1850,6 +1880,7 @@ class Title extends React.Component {
               <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
                 <div className='dataTitle'>{t('display.positionX')}</div>
                 <Slider
+                  usageFeature="tuning_model_transform"
                   min={-200} max={200} step={0.5}
                   value={this.state.humanTransform.position.x}
                   onChange={(value) => pushHumanTransform({ position: { x: value } })}
@@ -1860,6 +1891,7 @@ class Title extends React.Component {
               <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
                 <div className='dataTitle'>{t('display.positionY')}</div>
                 <Slider
+                  usageFeature="tuning_model_transform"
                   min={-200} max={200} step={0.5}
                   value={this.state.humanTransform.position.y}
                   onChange={(value) => pushHumanTransform({ position: { y: value } })}
@@ -1870,6 +1902,7 @@ class Title extends React.Component {
               <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
                 <div className='dataTitle'>{t('display.positionZ')}</div>
                 <Slider
+                  usageFeature="tuning_model_transform"
                   min={-200} max={200} step={0.5}
                   value={this.state.humanTransform.position.z}
                   onChange={(value) => pushHumanTransform({ position: { z: value } })}
@@ -1880,6 +1913,7 @@ class Title extends React.Component {
               <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
                 <div className='dataTitle'>{t('display.rotationX')}</div>
                 <Slider
+                  usageFeature="tuning_model_transform"
                   min={-180} max={180} step={1}
                   value={this.state.humanTransform.rotation.x}
                   onChange={(value) => pushHumanTransform({ rotation: { x: value } })}
@@ -1890,6 +1924,7 @@ class Title extends React.Component {
               <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
                 <div className='dataTitle'>{t('display.rotationY')}</div>
                 <Slider
+                  usageFeature="tuning_model_transform"
                   min={-180} max={180} step={1}
                   value={this.state.humanTransform.rotation.y}
                   onChange={(value) => pushHumanTransform({ rotation: { y: value } })}
@@ -1900,6 +1935,7 @@ class Title extends React.Component {
               <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
                 <div className='dataTitle'>{t('display.rotationZ')}</div>
                 <Slider
+                  usageFeature="tuning_model_transform"
                   min={-180} max={180} step={1}
                   value={this.state.humanTransform.rotation.z}
                   onChange={(value) => pushHumanTransform({ rotation: { z: value } })}
@@ -2374,6 +2410,7 @@ class Title extends React.Component {
                 this.props.wsSendObj(zeroCommand)
                 this.setState({ resetZero: zeroCommand.resetZero })
               }
+              trackUsage('analysis_tool_used', { featureId: 'display_switch', action: 'select_mode', result: 'success' });
             }}
             options={this.props.matrixName === smallBed12BType_title ? [
               { value: 'numoriginal', label: t('rawData') },
@@ -2820,9 +2857,13 @@ class Title extends React.Component {
       {this.props.portalToolsHost ? createPortal(<><PortalQuickTools
         chartsVisible={this.props.portalChartsVisible} onCharts={this.props.onPortalChartsToggle}
         algorithmsOpen={this.props.portalAlgorithmMarketOpen} onAlgorithms={() => {
+          if (!this.props.portalAlgorithmMarketOpen) trackUsage('feature_exposed', { featureId: 'algorithms', action: 'open' });
           this.setState({ portalToolsOpen: false }); this.props.onPortalAlgorithmsToggle?.();
         }}
-        settingsOpen={this.state.open} onSettings={() => this.setState({ open: !this.state.open })}
+        settingsOpen={this.state.open} onSettings={() => {
+          if (!this.state.open) trackUsage('feature_exposed', { featureId: 'data_adjustment', action: 'open' });
+          this.setState({ open: !this.state.open });
+        }}
         collapsed={this.state.portalToolsCollapsed} onCollapse={(portalToolsCollapsed) => this.setState({ portalToolsCollapsed })}
         toolsOpen={this.state.portalToolsOpen} onTools={this.togglePortalTools}
       /><PortalWorkspaceTools key={`${this.props.matrixName}:${this.props.history}`} open={this.state.portalToolsOpen}
@@ -2975,6 +3016,7 @@ class Title extends React.Component {
 
       <div style={{ position: 'relative', flexShrink: 0 }}>
         <img onClick={() => {
+          trackUsage('feature_exposed', { featureId: 'data_adjustment', action: 'open' });
           const show = this.state.show
           this.setState({
             open: true
@@ -2982,7 +3024,8 @@ class Title extends React.Component {
         }} className='optionImg' src={option} alt="" />
         <Drawer style={{ backgroundColor: 'rgba(21,18,42,0.8)' }} title={t('setData')} onClose={() => { this.setState({ open: false }) }} open={this.state.open}>
           <PortalRendererControls rendererRef={this.props.com} active={this.state.open} />
-          {this.renderSettingSliders(t)}
+          <PortalWorkspaceTuning active={this.state.open} rendererRef={this.props.com}
+            renderControls={(controls) => this.renderSettingSliders(t, controls)} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {/* 演示场景 / 真实场景：决定切展示模式时要不要自动做预压力清零 */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>

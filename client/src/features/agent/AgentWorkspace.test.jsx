@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import AgentWorkspace from './AgentWorkspace';
 import AgentSettings from './AgentSettings';
 import AgentTaskCard from './AgentTaskCard';
+import AgentConversation from './AgentConversation';
 import AgentResults, { collectAgentResults } from './AgentResults';
 import AgentSyncSettings, { describeChatSync } from './AgentSyncSettings';
 
@@ -13,6 +14,30 @@ function proposalMarkup(kind, status, overrides = {}) {
 }
 
 describe('Agent 工作区界面边界', () => {
+  it('模型数据请求直接归属本轮，只有最近的待选请求挂载记录选择器', () => {
+    const tasks = ['old', 'latest'].map((id) => ({ id, conversationId: 'conversation', status: 'awaiting_data',
+      algorithmDataRequest: { id: `request-${id}`, systemId: 'fixture-system', message: '请选择训练数据', status: 'pending' } }));
+    const html = renderToStaticMarkup(<AgentConversation snapshot={{ conversation: { id: 'conversation', messages: [], tasks } }} drafts={{}}
+      invoke={() => {}} onSubmitAlgorithmData={() => {}} onCancelAlgorithmData={() => {}} />);
+    expect(html.match(/aria-label="算法数据选择"/g)).toHaveLength(1);
+    expect(html).toContain('等待选择数据');
+    expect(html).toContain('请选择训练数据');
+    expect(html).toContain('取消选择');
+    expect(html).not.toContain('返回聊天');
+  });
+
+  it('已提交和已取消的数据请求只保留确认状态，不再渲染可提交表单', () => {
+    for (const status of ['submitted', 'cancelled']) {
+      const html = renderToStaticMarkup(<AgentConversation snapshot={{ conversation: { id: 'conversation', messages: [], tasks: [{
+        id: 'task', conversationId: 'conversation', status: status === 'submitted' ? 'succeeded' : 'cancelled',
+        algorithmDataRequest: { id: 'request', systemId: 'fixture-system', status },
+      }] } }} drafts={{}} />);
+      expect(html).toContain(status === 'submitted' ? '已确认本轮算法数据。' : '已取消本次数据选择');
+      expect(html).not.toContain('aria-label="算法数据选择"');
+      expect(html).not.toContain('使用所选数据并继续');
+    }
+  });
+
   it('已创建系统和已保存算法固定显示名称、位置与下一步，待应用方案不冒充成果', () => {
     const results = collectAgentResults([{ id: 'task-a', proposals: [
       { id: 'system-a', kind: 'create_system', status: 'applied', systemId: 'seatpad2', after: { name: '坐垫2', sensor: { type: 'seatpad2-sit' } }, result: { systemId: 'seatpad2' } },

@@ -1,4 +1,5 @@
 const { FEATURES, compile, predict } = require('./restrictedPython');
+const { FEATURE_VERSION, validateMatrix, windowFeaturesForVersion } = require('./spatialFeatures');
 
 /** 将固定窗口的真实存储帧转换为有明确单位的统计特征。 */
 function windowFeatures(frames) {
@@ -49,7 +50,7 @@ function selectFramesAtInterval(samples, targetIntervalMs) {
 }
 
 /** 按记录形成不重叠窗口；适配时只选真实帧，不跨缺口组成分类窗口。 */
-function prepareWindows(records, windowFrames, targetIntervalMs = null) {
+function prepareWindows(records, windowFrames, targetIntervalMs = null, options = {}) {
   if (targetIntervalMs !== null && (!Number.isFinite(targetIntervalMs) || targetIntervalMs <= 0 || targetIntervalMs > 5000)) throw new Error('目标采样间隔无效。');
   const windows = [], summaries = [];
   let pointCount = null, stage = null;
@@ -83,7 +84,7 @@ function prepareWindows(records, windowFrames, targetIntervalMs = null) {
         const part = segment.slice(index * windowFrames, (index + 1) * windowFrames);
         const frames = part.map((sample) => sample.frame);
         windows.push({ recordId: record.id, label: record.label, split: record.split, startFrame: (record.startFrame || 0) + part[0].offset,
-          timestamp: frames[0].timestamp, features: windowFeatures(frames) });
+          timestamp: frames[0].timestamp, features: options.featureVersion ? windowFeaturesForVersion(frames, options) : windowFeatures(frames) });
       }
     }
     if (!count) throw new Error(targetIntervalMs === null
@@ -93,18 +94,21 @@ function prepareWindows(records, windowFrames, targetIntervalMs = null) {
       skippedDuplicateTimestamps, windows: count, unusedTailFrames,
       ...(targetIntervalMs !== null ? { selectedFrameCount: selected.length, targetIntervalMs } : {}) });
   }
-  return { windows, records: summaries, pointCount, stage, ...(targetIntervalMs !== null ? { targetIntervalMs } : {}) };
+  return { windows, records: summaries, pointCount, stage, ...(targetIntervalMs !== null ? { targetIntervalMs } : {}),
+    ...(options.featureVersion ? { featureVersion: options.featureVersion, matrix: validateMatrix(options.matrix, pointCount) } : {}) };
 }
 
 /** 返回开发集特征摘要；验证集数值不用于指导生成和修改。 */
 function summarize(prepared) {
   const groups = [...new Set(prepared.windows.filter((item) => item.split === 'development').map((item) => item.label))].map((label) => {
     const rows = prepared.windows.filter((item) => item.split === 'development' && item.label === label);
-    return { label, windows: rows.length, features: Object.fromEntries(FEATURES.map((key) => {
+    const names = prepared.featureVersion === FEATURE_VERSION ? Object.keys(rows[0].features) : FEATURES;
+    return { label, windows: rows.length, features: Object.fromEntries(names.map((key) => {
       const values = rows.map((row) => row.features[key]); return [key, { min: Math.min(...values), max: Math.max(...values), mean: values.reduce((a, b) => a + b, 0) / values.length }];
     })) };
   });
-  return { groups, records: prepared.records, pointCount: prepared.pointCount, stage: prepared.stage };
+  return { groups, records: prepared.records, pointCount: prepared.pointCount, stage: prepared.stage,
+    ...(prepared.featureVersion ? { featureVersion: prepared.featureVersion, matrix: prepared.matrix } : {}) };
 }
 
 /** 用固定源代码评价指定集合，所有得分由本地真实预测计算。 */

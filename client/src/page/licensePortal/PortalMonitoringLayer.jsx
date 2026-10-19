@@ -3,6 +3,7 @@ import gsap from 'gsap';
 import { waitForMonitoringSurface } from './scene/monitoringSurface';
 import { returnPreviewBlend } from './scene/sceneMotionClock';
 import './PortalMonitoring.css';
+import { trackUsage, setUsageSystemContext } from '../../services/usageAnalytics';
 
 /** 真实画布从当前预览投影接续；直接模式保持列表原位，不先放大装饰场景。 */
 export default function PortalMonitoringLayer({ component: MonitoringPage, system, directEntry = false, capturePreview, onPreviewChange, onBack, onSystemChange }) {
@@ -21,6 +22,10 @@ export default function PortalMonitoringLayer({ component: MonitoringPage, syste
     let entrance;
     let particleSession;
     let restorePreviewBlend;
+    let monitoringStartedAt = null;
+    const usageProperties = { featureId: 'monitoring', systemType: system.systemId || system.value,
+      systemOrigin: system.source === 'builtin-template' ? 'copy' : system.source === 'manifest' ? 'custom' : 'builtin' };
+    const releaseUsageContext = setUsageSystemContext(usageProperties);
     const backdrop = root.closest('.system-selector-backdrop');
     if (!directEntry) root.querySelector('.portal-monitor-navigation button')?.focus({ preventScroll: true });
     const media = gsap.matchMedia();
@@ -30,6 +35,7 @@ export default function PortalMonitoringLayer({ component: MonitoringPage, syste
       const complete = () => {
         if (leaving || controller.signal.aborted || surfaceController.signal.aborted) return;
         root.dataset.handoff = 'complete';
+        if (!revealed) { trackUsage('system_entered', { ...usageProperties, result: 'success' }); monitoringStartedAt = performance.now(); }
         revealed = true;
         contentRef.current.inert = false;
         callbacksRef.current.onPreviewChange(false);
@@ -163,6 +169,9 @@ export default function PortalMonitoringLayer({ component: MonitoringPage, syste
       };
     }, rootRef);
     return () => {
+      releaseUsageContext();
+      if (monitoringStartedAt !== null) trackUsage('monitoring_usage_summary', { ...usageProperties,
+        durationMs: Math.min(86400000, Math.max(0, performance.now() - monitoringStartedAt)) });
       controller.abort(); exitRef.current = null; media.revert();
       if (backdrop) delete backdrop.dataset.monitorReturn;
     };

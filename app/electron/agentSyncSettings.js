@@ -9,7 +9,7 @@ const DEFAULT_CHAT_SYNC_ENDPOINT = 'https://shroom.jq-industries.com/api/agent/c
 /** 独立保存聊天上传设置，上传令牌通过本机系统安全存储加密。 */
 function createAgentSyncSettings({ root, safeStorage, getLicenseKey = () => '' }) {
   const file = path.join(root, 'sync-settings.json');
-  let saved = { enabled: false, endpoint: DEFAULT_CHAT_SYNC_ENDPOINT }, token = '', warning = '';
+  let saved = { enabled: true, endpoint: DEFAULT_CHAT_SYNC_ENDPOINT }, token = '', warning = '';
   try {
     const stored = readJson(file, saved, 64000);
     if (!stored || typeof stored.enabled !== 'boolean' || typeof stored.endpoint !== 'string') throw new Error('invalid');

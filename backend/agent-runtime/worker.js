@@ -36,6 +36,7 @@ async function dispatch(message) {
         importAttachments: () => runtime.importAttachments(payload.files), newConversation: () => runtime.newConversation(),
         listConversations: () => runtime.listConversations(), openConversation: () => runtime.openConversation(payload),
         listAlgorithmRecords: () => runtime.listAlgorithmRecords(payload), setAlgorithmSelection: () => runtime.setAlgorithmSelection(payload.selection),
+        submitAlgorithmData: () => runtime.submitAlgorithmData({ taskId: payload.taskId, requestId: payload.requestId, selection: payload.selection }),
         applyProposal: () => runtime.applyProposal(payload), restoreProposal: () => runtime.restoreProposal(payload),
         shutdown: () => runtime.dispose(),
       };

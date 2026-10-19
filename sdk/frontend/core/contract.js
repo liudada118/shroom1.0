@@ -72,6 +72,8 @@ export const RENDERER_METHODS = {
   changeWsData: 1,
   changeSelectFlag: 1,
   getSelectionTools: 0, // 返回原始点位分析控制器；未支持的后端返回 null。
+  getViewTools: 0, // 返回当前画布的视角控制器；未就绪或不支持时返回 null。
+  getTuningControls: 0, // 按运行参数声明真正生效的显示调节项。
   // 计数来自 page/home/util.js 而非 Home.jsx，见上文说明。
   changeWsDataRaw: 11,
   // 以下方法由场景组件暴露，Home.jsx 目前未经 ref 调用

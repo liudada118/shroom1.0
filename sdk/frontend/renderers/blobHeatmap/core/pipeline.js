@@ -40,21 +40,23 @@
  * 行下标配的是宽、列下标配的是高 —— 方阵（32×32，主应用绝大多数情况）看不出来，
  * 但 `carCol` 的 10×9 会既转置又缩放不匀（x 最多到画布的 0.8，y 正好铺满一格
  * 出界）。搬家不改观感，所以逐字保留；要正过来就是换一条公式的事。
+ * 新矩阵宿主显式传 transposeAxes=true，改按列画 X、行画 Y，并修正非方阵比例。
  *
  * @param {number[]} values 一帧原始数据。
  * @param {number} width 矩阵宽。
  * @param {number} height 矩阵高。
  * @param {number} canvasWidth 画布宽，像素。
  * @param {number} canvasHeight 画布高，像素。
+ * @param {boolean} [transposeAxes=false] 使用沿主对角线对称后的矩阵绘图轴。
  * @returns {Array<{x: number, y: number, value: number}>} 点表。
  */
-export function buildBlobPoints(values, width, height, canvasWidth, canvasHeight) {
+export function buildBlobPoints(values, width, height, canvasWidth, canvasHeight, transposeAxes = false) {
   const points = [];
   for (let i = 0; i < height; i += 1) {
     for (let j = 0; j < width; j += 1) {
       points.push({
-        x: (i * canvasWidth) / width,
-        y: (j * canvasHeight) / height,
+        x: ((transposeAxes ? j : i) * canvasWidth) / width,
+        y: ((transposeAxes ? i : j) * canvasHeight) / height,
         value: values[i * width + j],
       });
     }

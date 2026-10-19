@@ -11,6 +11,24 @@ function stateEvent({ conversationId = 'conversation-a', status = 'running', mes
 }
 
 describe('Agent 权威快照与流式回答', () => {
+  it('选择数据时清空前置草稿，同一任务恢复后流式与最终回复正常衔接', () => {
+    let state = reduceAgentView(createAgentViewState(), stateEvent());
+    state = reduceAgentView(state, { type: 'text.delta', taskId: 'task-a', delta: '准备选择数据' });
+    const waiting = stateEvent({ tasks: [{ id: 'task-a', conversationId: 'conversation-a', status: 'awaiting_data',
+      algorithmDataRequest: { id: 'request', status: 'pending' } }] });
+    waiting.state.activeTask = null;
+    state = reduceAgentView(state, waiting);
+    expect(state.drafts).toEqual({});
+    expect(isTaskBusy(state.snapshot.conversation.tasks[0])).toBeFalsy();
+    expect(reduceAgentView(state, { type: 'text.delta', taskId: 'task-a', delta: '迟到前置句' })).toBe(state);
+    state = reduceAgentView(state, stateEvent());
+    state = reduceAgentView(state, { type: 'text.delta', taskId: 'task-a', delta: '正在分析所选记录' });
+    expect(state.drafts['task-a'].text).toBe('正在分析所选记录');
+    state = reduceAgentView(state, stateEvent({ status: 'succeeded', messages: [{ id: 'answer', role: 'assistant', taskId: 'task-a', text: '已完成分析' }] }));
+    expect(state.drafts).toEqual({});
+    expect(state.snapshot.conversation.messages).toHaveLength(1);
+  });
+
   it('保留步骤状态更新间尚未提交的流式正文', () => {
     let state = reduceAgentView(createAgentViewState(), stateEvent());
     state = reduceAgentView(state, { type: 'text.delta', taskId: 'task-a', delta: '已查询' });

@@ -153,3 +153,27 @@ client.emit('close');
 assert.deepStrictEqual(wsSubscriptions.getStatus(), { channels: {}, scopes: {} });
 
 console.log('webSocketHandlerFactory.test.js passed');
+
+/** Async device authorization must preserve its actual denial code in command.ack. */
+(async () => {
+  let handlers = [], resolveActivation;
+  const asyncServer = new EventEmitter(), events = [];
+  const context = { ...handlerContext, server: asyncServer, serverOpened: false,
+    activateSubmittedLicenseKey: () => new Promise(resolve => { resolveActivation = resolve; }),
+    publishSystemEvent: value => events.push(value),
+    controlCommandService: {
+      registerHandler: handler => handlers.push(handler),
+      executeWs: (message, execution) => ({ handled: true, results: handlers.filter(handler => handler.when(message)).map(handler => ({ name: handler.name, ...handler.handle(message, execution) })) }),
+    } };
+  createWebSocketHandlerAttacher(context)();
+  const socket = new EventEmitter(); socket.readyState = 1; socket.sent = []; socket.send = body => socket.sent.push(JSON.parse(body));
+  asyncServer.emit('connection', socket, { connection: { remoteAddress: '127.0.0.1', remotePort: 45679 } });
+  socket.emit('message', Buffer.from(JSON.stringify({ type: 'legacy.license.activate', requestId: 'device-denied', date: { date: 'synthetic' } })));
+  assert.equal(socket.sent.some(value => value.requestId === 'device-denied'), false);
+  resolveActivation({ ok: false, code: 'DEVICE_LIMIT_REACHED', message: '电脑数量已达上限。' });
+  await new Promise(resolve => setImmediate(resolve));
+  const ack = socket.sent.find(value => value.requestId === 'device-denied');
+  assert.equal(ack.ok, false); assert.equal(ack.code, 'DEVICE_LIMIT_REACHED'); assert.equal(ack.message, '电脑数量已达上限。');
+  assert.equal(events.at(-1).licenseErrorCode, 'DEVICE_LIMIT_REACHED');
+  console.log('webSocketHandlerFactory async device authorization passed');
+})().catch(error => { console.error(error); process.exitCode = 1; });

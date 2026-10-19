@@ -284,6 +284,187 @@ test('write result uncertainty is preserved and never blindly retried', async (t
   assert.throws(() => runtime.applyProposal(args), { code: 'AGENT_PROPOSAL_STATE' });
 });
 
+/** 构造仅含用户授权元数据的算法选区。 */
+function algorithmSelection() {
+  return { systemId: 'hand-copy', windowFrames: 32, records: [
+    { id: 'stroke', label: '抚摸', split: 'development', startFrame: 0, frameLimit: 64 },
+    { id: 'tap', label: '拍打', split: 'development', startFrame: 0, frameLimit: 64 },
+  ] };
+}
+
+/** 让合成模型先请求选区，后续调用交给测试控制。 */
+async function waitingAlgorithmTask(t, overrides = {}) {
+  let turn = 0;
+  const calls = [];
+  const { runtime, root, events } = fixture(t, {
+    ...overrides,
+    readCurrentSystem: overrides.readCurrentSystem || (() => ({ currentSystem: { id: 'hand-copy', name: '手部副本' }, selectionStatus: 'selected' })),
+    tools: { selectAlgorithmRecords: async (value) => structuredClone(value), ...overrides.tools,
+      execute: async (name, args, context) => {
+        calls.push({ name, selection: context.algorithmSelection });
+        if (name === 'request_algorithm_data') return context.requestAlgorithmData({ systemId: 'hand-copy', message: args.message });
+        return overrides.tools?.execute?.(name, args, context) || { analyzed: true };
+      } },
+    modelRequest: async (options) => {
+      if (turn++ === 0) return { output: [
+        { type: 'function_call', name: 'request_algorithm_data', call_id: 'pick-data', arguments: '{"message":"请选择采集记录 private-secret"}' },
+        { type: 'function_call', name: 'analyze_algorithm_data', call_id: 'must-not-run', arguments: '{"untrusted":"do-not-persist"}' },
+      ] };
+      return overrides.modelRequest?.(options) || { output: [] };
+    },
+  });
+  const task = runtime.startTask({ text: '请用我采集的数据生成拍打和抚摸算法' });
+  await runtime.whenIdle();
+  const request = runtime.getState().conversation.tasks[0].algorithmDataRequest;
+  return { runtime, root, events, task, request, calls, args: { taskId: task.id, requestId: request.id, selection: algorithmSelection() } };
+}
+
+test('inline data requests pause without frames or a busy lock and resume the same task with verified user data', async (t) => {
+  let count = 0, input;
+  const f = await waitingAlgorithmTask(t, { modelRequest: async (options) => {
+    input = structuredClone(options.input);
+    if (count++ === 0) return { output: [{ type: 'function_call', name: 'analyze_algorithm_data', call_id: 'analysis', arguments: '{}' }] };
+    options.onText('已使用所选数据完成分析。'); return { output: [] };
+  } });
+  let state = f.runtime.getState(), task = state.conversation.tasks[0];
+  assert.equal(task.status, 'awaiting_data'); assert.equal(state.activeTask, null);
+  assert.equal(task.finishedAt, undefined); assert.equal(f.request.status, 'pending');
+  assert.deepEqual(f.calls.map((call) => call.name), ['request_algorithm_data']);
+  assert.ok(!fs.readFileSync(path.join(f.root, 'state.json'), 'utf8').includes('do-not-persist'));
+  assert.ok(!JSON.stringify(state).includes('private-secret'));
+  const continued = await f.runtime.submitAlgorithmData(f.args);
+  assert.equal(continued.id, f.task.id); assert.equal(continued.status, 'running');
+  await f.runtime.whenIdle();
+  state = f.runtime.getState(); task = state.conversation.tasks[0];
+  assert.equal(task.status, 'succeeded'); assert.equal(task.algorithmDataRequest.status, 'submitted');
+  assert.equal(state.conversation.tasks.length, 1);
+  assert.equal(state.conversation.messages.filter((message) => message.role === 'user').length, 1);
+  assert.deepEqual(f.calls.find((call) => call.name === 'analyze_algorithm_data').selection, algorithmSelection());
+  assert.ok(input.some((message) => typeof message.content === 'string' && message.content.includes('现已确认以下范围')));
+  assert.ok(input.some((message) => typeof message.content === 'string' && message.content.includes('本次任务的当前系统快照')));
+  await assert.rejects(f.runtime.submitAlgorithmData(f.args), { code: 'ALGORITHM_DATA_REQUEST_INVALID' });
+});
+
+test('invalid selections remain pending and system changes never resume the algorithm model', async (t) => {
+  let systemId = 'hand-copy', selected = 0, fail = true, modelCalls = 0;
+  const f = await waitingAlgorithmTask(t, {
+    readCurrentSystem: () => ({ currentSystem: { id: systemId } }),
+    tools: { selectAlgorithmRecords: async (value) => {
+      selected++;
+      if (fail) throw agentError('ALGORITHM_SELECTION_INVALID', '请选择两种类别。');
+      systemId = 'other'; return value;
+    } },
+    modelRequest: async () => { modelCalls++; return { output: [] }; },
+  });
+  await assert.rejects(f.runtime.submitAlgorithmData(f.args), { code: 'ALGORITHM_SELECTION_INVALID' });
+  assert.equal(f.runtime.getState().conversation.tasks[0].algorithmDataRequest.status, 'pending');
+  assert.equal(f.runtime.getState().activeTask, null);
+  systemId = 'other';
+  await assert.rejects(f.runtime.submitAlgorithmData(f.args), { code: 'ALGORITHM_SYSTEM_CHANGED' });
+  assert.equal(selected, 1);
+  systemId = 'hand-copy'; fail = false;
+  await assert.rejects(f.runtime.submitAlgorithmData(f.args), { code: 'ALGORITHM_SYSTEM_CHANGED' });
+  assert.equal(modelCalls, 0);
+  assert.equal(f.runtime.getState().conversation.tasks[0].status, 'awaiting_data');
+});
+
+test('double-clicks and cancellation during selection validation cannot run a late continuation', async (t) => {
+  let resolveSelection, entered;
+  const started = new Promise((resolve) => { entered = resolve; });
+  const f = await waitingAlgorithmTask(t, { tools: { selectAlgorithmRecords: (value) => new Promise((resolve) => { resolveSelection = () => resolve(value); entered(); }) } });
+  const submission = f.runtime.submitAlgorithmData(f.args);
+  await started;
+  await assert.rejects(f.runtime.submitAlgorithmData(f.args), { code: 'AGENT_BUSY' });
+  assert.throws(() => f.runtime.newConversation(), { code: 'AGENT_BUSY' });
+  f.runtime.cancelTask({ taskId: f.task.id }); resolveSelection();
+  await assert.rejects(submission, { code: 'AGENT_CANCELLED' });
+  const state = f.runtime.getState();
+  assert.equal(state.activeTask, null); assert.equal(state.conversation.tasks[0].status, 'cancelled');
+  assert.equal(state.conversation.tasks[0].algorithmDataRequest.status, 'cancelled');
+  await assert.rejects(f.runtime.submitAlgorithmData(f.args), { code: 'ALGORITHM_DATA_REQUEST_INVALID' });
+});
+
+test('pending requests survive restarts but cannot cross conversations or supersede a newer task', async (t) => {
+  const f = await waitingAlgorithmTask(t);
+  const oldConversationId = f.runtime.getState().conversation.id;
+  f.runtime.newConversation();
+  await assert.rejects(f.runtime.submitAlgorithmData(f.args), { code: 'ALGORITHM_DATA_REQUEST_INVALID' });
+  f.runtime.openConversation({ conversationId: oldConversationId });
+  assert.equal(f.runtime.getState().conversation.tasks[0].status, 'awaiting_data');
+  const restored = createAgentRuntime({ root: f.root, tools: { definitions: [],
+    selectAlgorithmRecords: async (value) => value,
+    execute: async () => ({ currentSystem: { id: 'hand-copy' } }) },
+    modelRequest: async () => ({ output: [] }) });
+  restored.configure({ model: 'test', apiKey: 'secret' });
+  await restored.submitAlgorithmData(f.args); await restored.whenIdle();
+  assert.equal(restored.getState().conversation.tasks[0].id, f.task.id);
+  assert.equal(restored.getState().conversation.tasks[0].status, 'succeeded');
+  await restored.dispose();
+  f.runtime.startTask({ text: '先只看看当前系统' }); await f.runtime.whenIdle();
+  assert.equal(f.runtime.getState().conversation.tasks[0].algorithmDataRequest.reason, 'superseded');
+  await assert.rejects(f.runtime.submitAlgorithmData(f.args), { code: 'ALGORITHM_DATA_REQUEST_INVALID' });
+});
+
+test('a stopped waiting request stays stopped and failed persistence never starts a model continuation', async (t) => {
+  let failSave = false, modelCalls = 0;
+  const f = await waitingAlgorithmTask(t, { storage: { load: () => null, save: () => { if (failSave) throw new Error('disk full'); } },
+    modelRequest: async () => { modelCalls++; return { output: [] }; } });
+  failSave = true;
+  await assert.rejects(f.runtime.submitAlgorithmData(f.args), { code: 'AGENT_STORAGE_FAILED' });
+  assert.equal(modelCalls, 0);
+  assert.equal(f.runtime.getState().conversation.tasks[0].status, 'awaiting_data');
+  assert.equal(f.runtime.getState().conversation.algorithmSelection, undefined);
+  assert.throws(() => f.runtime.cancelTask({ taskId: f.task.id }), { code: 'AGENT_STORAGE_FAILED' });
+  assert.equal(f.runtime.getState().conversation.tasks[0].algorithmDataRequest.status, 'pending');
+  assert.equal(f.runtime.getState().conversation.messages.filter((message) => message.role === 'assistant').length, 0);
+  failSave = false;
+  f.runtime.cancelTask({ taskId: f.task.id });
+  await assert.rejects(f.runtime.submitAlgorithmData(f.args), { code: 'ALGORITHM_DATA_REQUEST_INVALID' });
+  assert.equal(f.runtime.getState().conversation.tasks[0].status, 'cancelled');
+});
+
+test('cancelling validation rolls back an unpersisted cancellation and allows an explicit retry', async (t) => {
+  let failSave = false, release;
+  const f = await waitingAlgorithmTask(t, {
+    storage: { load: () => null, save: () => { if (failSave) throw new Error('disk full'); } },
+    tools: { selectAlgorithmRecords: (value) => new Promise((resolve) => { release = () => resolve(value); }) },
+  });
+  const submission = f.runtime.submitAlgorithmData(f.args);
+  await new Promise((resolve) => setImmediate(resolve));
+  failSave = true; f.runtime.cancelTask({ taskId: f.task.id }); release();
+  await assert.rejects(submission, { code: 'AGENT_STORAGE_FAILED' });
+  assert.equal(f.runtime.getState().activeTask, null);
+  assert.equal(f.runtime.getState().conversation.tasks[0].status, 'awaiting_data');
+  assert.equal(f.runtime.getState().conversation.tasks[0].algorithmDataRequest.status, 'pending');
+  assert.equal(f.runtime.getState().conversation.messages.filter((message) => message.role === 'assistant').length, 0);
+  failSave = false;
+  const retry = f.runtime.submitAlgorithmData(f.args);
+  await new Promise((resolve) => setImmediate(resolve)); release();
+  await retry; await f.runtime.whenIdle();
+  assert.equal(f.runtime.getState().conversation.tasks[0].status, 'succeeded');
+});
+
+test('a successful fresh current-system read clears its prior failure after resuming data selection', async (t) => {
+  let reads = 0, turn = 0;
+  const { runtime } = fixture(t, {
+    readCurrentSystem: () => {
+      if (++reads === 2) throw agentError('AGENT_HTTP_UNAVAILABLE', '暂时无法读取系统。');
+      return { currentSystem: { id: 'hand-copy' } };
+    },
+    tools: { selectAlgorithmRecords: async (value) => value,
+      execute: async (_name, _args, context) => context.requestAlgorithmData({ systemId: 'hand-copy' }) },
+    modelRequest: async () => ({ output: turn++ === 0 ? [
+      { type: 'function_call', name: 'get_current_system', call_id: 'refresh', arguments: '{}' },
+      { type: 'function_call', name: 'request_algorithm_data', call_id: 'pick', arguments: '{}' },
+    ] : [] }),
+  });
+  const task = runtime.startTask({ text: '根据采集记录生成分类算法。' }); await runtime.whenIdle();
+  const request = runtime.getState().conversation.tasks[0].algorithmDataRequest;
+  await runtime.submitAlgorithmData({ taskId: task.id, requestId: request.id, selection: algorithmSelection() }); await runtime.whenIdle();
+  assert.equal(runtime.getState().conversation.tasks[0].status, 'succeeded');
+  assert.equal(runtime.getState().conversation.tasks[0].error, undefined);
+});
+
 test('attachments are selected by current-session identity and not public full text', async (t) => {
   let received;
   const { runtime } = fixture(t, { modelRequest: async ({ input }) => { received = input; return { output: [] }; } });

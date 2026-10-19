@@ -161,12 +161,12 @@ describe('两条热力的描述符', () => {
    * `optionalMethods` 里说清楚了）。两条热力不是那个关系：方法集不同、参数表不
    * 重合。要是哪天有人把它们合成一个 id，下面这两条会红。
    */
-  it('webglHeatmap 四个方法，blobHeatmap 三个 —— 后者没有 changeColor', () => {
+  it('两种热力图均声明调节能力查询，blobHeatmap 不冒充 changeColor', () => {
     expect([...getRendererDescriptor('webglHeatmap').methods].sort()).toEqual([
-      'bthClickHandle', 'changeColor', 'sitData', 'sitValue',
+      'bthClickHandle', 'changeColor', 'getTuningControls', 'sitData', 'sitValue',
     ]);
     expect([...getRendererDescriptor('blobHeatmap').methods].sort()).toEqual([
-      'bthClickHandle', 'sitData', 'sitValue',
+      'bthClickHandle', 'getTuningControls', 'sitData', 'sitValue',
     ]);
   });
 

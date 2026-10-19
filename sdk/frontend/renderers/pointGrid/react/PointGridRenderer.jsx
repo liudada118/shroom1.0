@@ -73,6 +73,9 @@ import { addSide, findMax, gaussBlur_1, interpSmall, jet } from '../../../core/f
 import { jetgGrey } from '../../../core/greyLadder.js';
 import { deriveGridSize, normalizePointGridParams } from '../core/params.js';
 import { buildPointGridBasePositions, copyPointGridFrame } from '../core/pipeline.js';
+import { preparePointGridValues, updatePointGridTuning } from '../core/tuning.js';
+import { createWorkspaceViewTools } from '../../shared/three/workspaceViewTools.js';
+import { createPointGridSelection } from '../../shared/gridSelection.js';
 // 打包器把它变成一个真实存在的 URL；理由见文件头第 1 条。
 // 2026-08-07 从 `./circle.png` 挪到 `../../shared/three/`：`handPoints` 渲染器也要这张图，
 // 放在两个渲染器目录之一会让另一个跨目录引资源。它和 `SelectionHelper` /
@@ -126,6 +129,9 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
   if (stateRef.current === null) {
     stateRef.current = {
       tuning: createTuningState(),
+      rawSitFrame: null,
+      selection: null,
+      viewTools: null,
       ndata: new Array(back.num1 * back.num2).fill(0),
       ndata1: new Array(sit.num1 * sit.num2).fill(0),
       ndataNum: 0,
@@ -182,6 +188,7 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
       amountY: AMOUNTY,
       separation: SEPARATION,
       points: config.points,
+      transposeAxes: config.transposeAxes,
     });
     let resizeObserver = null;
 
@@ -189,6 +196,7 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
     state.bigArrg = new Array(gridTotal).fill(1);
     state.smoothBig = new Array(gridTotal).fill(1);
     state.ndata1 = new Array(sit.num1 * sit.num2).fill(0);
+    state.rawSitFrame = null;
     state.ndata = new Array(back.num1 * back.num2).fill(0);
 
     /**
@@ -363,7 +371,7 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
         vertexColors: true,
         transparent: true,
         map: state.texture,
-        size: 1,
+        size: config.workspaceTools ? SEPARATION * 0.0062 * 0.3 : 1,
       });
 
       state.particles = new THREE.Points(state.sitGeometry, state.material);
@@ -418,10 +426,24 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
       state.renderer.setClearColor(0x10152b);
       container.replaceChildren(state.renderer.domElement);
 
+      if (config.workspaceTools) {
+        const distance = Math.max(state.camera.near * 4, Math.max(AMOUNTX, AMOUNTY) * SEPARATION * state.particles.scale.x * 1.6);
+        state.camera.position.copy(state.group.position).add(new THREE.Vector3(0, 2, 3).normalize().multiplyScalar(distance));
+        state.camera.lookAt(state.group.position);
+      }
       state.controls = new TrackballControls(state.camera, state.renderer.domElement);
       state.controls.dynamicDampingFactor = 0.2;
       state.controls.domElement = container;
       applyDefaultControlBindings();
+
+      if (config.workspaceTools) {
+        state.controls.target.copy(state.group.position);
+        state.controls.target0.copy(state.group.position);
+        state.viewTools = createWorkspaceViewTools({ object: state.particles, camera: state.camera, controls: state.controls, localPlane: true });
+        state.selection = createPointGridSelection({ points: state.particles, camera: state.camera,
+          canvas: state.renderer.domElement, columns: sit.num2, rows: sit.num1, interpolation: sit.interp, padding: sit.order,
+          onInteractionChange: (active) => { state.controls.enabled = !active; state.controlsFlag = !active; } });
+      }
 
       state.selectHelper = new SelectionHelper(state.renderer, state.controls, 'selectBox');
 
@@ -451,7 +473,8 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
         sit.order,
         sit.order,
       );
-      gaussBlur_1(padded, state.bigArrg, AMOUNTY, AMOUNTX, t.valueg1);
+      if (t.valueg1 > 0) gaussBlur_1(padded, state.bigArrg, AMOUNTY, AMOUNTX, t.valueg1);
+      else for (let index = 0; index < gridTotal; index++) state.bigArrg[index] = padded[index];
 
       const { positions, colors, smoothBig, bigArrg, sitIndexArr } = state;
       const hasSelection = sitIndexArr && sitIndexArr.length > 0
@@ -463,14 +486,17 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
       for (let ix = 0; ix < AMOUNTX; ix += 1) {
         for (let iy = 0; iy < AMOUNTY; iy += 1) {
           const value = bigArrg[l] * 10;
-          smoothBig[l] = smoothBig[l] + (value - smoothBig[l] + 0.5) / t.valuel1;
+          const previous = Number.isFinite(smoothBig[l]) ? smoothBig[l] : 0;
+          smoothBig[l] = previous + (value - previous + 0.5) / t.valuel1;
 
           positions[k] = basePositions[k];
           positions[k + 1] = smoothBig[l] * t.value1;
           positions[k + 2] = basePositions[k + 2];
 
           let rgb;
-          if (hasSelection) {
+          if (state.selection?.getSnapshot().active && !state.selection.containsGridPoint(iy, ix)) {
+            rgb = jetgGrey(0, t.valuej1, smoothBig[l]);
+          } else if (hasSelection) {
             const inside = ix >= sitIndexArr[0] && ix < sitIndexArr[1]
               && iy >= sitIndexArr[2] && iy < sitIndexArr[3];
             if (inside) {
@@ -558,6 +584,7 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
         state.dataFlag = true;
       },
       changeSelectFlag(value, flag) {
+        if (state.selection) { state.selection.setActive(!value); return; }
         state.controlsFlag = value;
         if (state.selectHelper) state.selectHelper.isShiftPressed = !value;
         if (value) {
@@ -570,21 +597,15 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
         // ⚠️ 首次挂载的 values=[] 不是有效矩阵，不能覆盖初始化的安全缓冲。
         if (!values) return;
         const t = state.tuning;
-        state.ndata1 = values.map((a) => (a - t.valuef1 < 0 ? 0 : a));
+        state.rawSitFrame = values;
+        state.selection?.updateValues(values);
+        state.ndata1 = preparePointGridValues(values, t, prop.valuelInit ?? (config.workspaceTools ? t.valuelInit1 : 0));
         state.ndata1Num = state.ndata1.reduce((a, b) => a + b, 0);
-        if (state.ndata1Num < prop.valuelInit) {
-          state.ndata1 = new Array(sit.num1 * sit.num2).fill(0);
-        }
       },
       sitValue(prop) {
         const t = state.tuning;
-        if (prop.valuej) t.valuej1 = prop.valuej;
-        if (prop.valueg) t.valueg1 = prop.valueg;
-        if (prop.value) t.value1 = prop.value;
-        if (prop.valuel) t.valuel1 = prop.valuel;
-        if (prop.valuef) t.valuef1 = prop.valuef;
-        if (prop.valuelInit) t.valuelInit1 = prop.valuelInit;
-        state.ndata1 = state.ndata1.map((a) => (a - t.valuef1 < 0 ? 0 : a));
+        updatePointGridTuning(t, prop);
+        state.ndata1 = preparePointGridValues(state.rawSitFrame || state.ndata1, t);
         state.ndata1Num = state.ndata1.reduce((a, b) => a + b, 0);
         if (state.ndata1Num < t.valuelInit1) {
           state.ndata1 = new Array(sit.num1 * sit.num2).fill(0);
@@ -600,12 +621,7 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
       },
       backValue(prop) {
         const t = state.tuning;
-        if (prop.valuej) t.valuej2 = prop.valuej;
-        if (prop.valueg) t.valueg2 = prop.valueg;
-        if (prop.value) t.value2 = prop.value;
-        if (prop.valuel) t.valuel2 = prop.valuel;
-        if (prop.valuef) t.valuef2 = prop.valuef;
-        if (prop.valuelInit) t.valuelInit2 = prop.valuelInit;
+        updatePointGridTuning(t, prop, 2);
         state.ndata = state.ndata.map((a) => (a - t.valuef2 < 0 ? 0 : a - t.valuef2));
         state.ndataNum = state.ndata.reduce((a, b) => a + b, 0);
       },
@@ -629,6 +645,8 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
 
     return () => {
       state.disposed = true;
+      state.selection?.dispose(); state.selection = null;
+      state.viewTools?.dispose(); state.viewTools = null;
       cancelAnimationFrame(state.animationRequestId);
       clearTimeout(state.debounceTimer);
 
@@ -675,14 +693,19 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
     // `spriteUrl` 也在里面 —— 换贴图本可以只 `texture.dispose()` 再 load 一张，
     // 但那要把 material 单拎出来管生命周期。换图不是热路径（一个消费者通常
     // 只设一次），重建整场景换来的是「这个 effect 只有一条清理路径」。
-  }, [sit, back, config.separation, config.fps, config.points, spriteUrl]);
+  }, [sit, back, config.separation, config.fps, config.points, config.transposeAxes, config.workspaceTools, spriteUrl]);
 
   // 命令式接口转发到当前 effect 周期内的实现。
   // 走 state.api 中转而非直接闭包，是为了让参数变化重建场景后，
   // 外部持有的 ref 仍然指向新场景，不会调用到已释放的对象。
   useImperativeHandle(refs, () => ({
     sitData: (...args) => stateRef.current.api?.sitData(...args),
-    sitValue: (...args) => stateRef.current.api?.sitValue(...args),
+    sitValue: (patch) => {
+      if (stateRef.current.api) stateRef.current.api.sitValue(patch);
+      else updatePointGridTuning(stateRef.current.tuning, patch);
+    },
+    getViewTools: () => stateRef.current.viewTools,
+    getSelectionTools: () => stateRef.current.selection,
     sitRenew: (...args) => stateRef.current.api?.sitRenew(...args),
     backData: (...args) => stateRef.current.api?.backData(...args),
     backValue: (...args) => stateRef.current.api?.backValue(...args),

@@ -39,7 +39,7 @@ function createAlgorithmRecordService({ getContext, getDatabases }) {
         for (const channel of queryHistoryChannels(reader(db), date)) {
           if (channel.displaySystemId && channel.displaySystemId !== current.systemId) continue;
           const id = createHash('sha256').update(JSON.stringify([current.systemId, role, date, channel.channelId])).digest('hex');
-          const item = { id, systemId: current.systemId, date, channelId: channel.channelId, channel: channel.sensorLabel || channel.sensorId || role, count: channel.count, maxId: channel.maxId };
+          const item = { id, systemId: current.systemId, date, channelId: channel.channelId, sensorId: channel.sensorId || role, channel: channel.sensorLabel || channel.sensorId || role, count: channel.count, maxId: channel.maxId };
           records.set(id, { ...item, db, dbRole: role }); items.push(item);
         }
       }

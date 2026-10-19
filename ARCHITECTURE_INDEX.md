@@ -1,6 +1,6 @@
 # Shroom 快速架构索引
 
-> 最后更新于：2026-10-12
+> 最后更新于：2026-10-16
 > 用途：代码定位和验证路由。理解当前实现先读 [开发者手册](docs/developer-guide.md)，完整文档分类见 [docs/README.md](docs/README.md)。`ARCHITECTURE.md` 保留历史设计与维护台账，不用作默认全文入口。
 
 当前完整链路：[数据、算法、存储与回放](docs/chains/data-flow.md) · [页面、渲染与交互](docs/chains/interface-flow.md)。
@@ -18,10 +18,15 @@
 ```text
 Electron main
   ├─ app/electron/index.js                 窗口、生命周期、开发服务与后端启动
+  ├─ app/update/frontendCache.js           构建优先级、资源复用、缓存清理、次启动与回退
+  ├─ app/electron/usageAnalytics.js        有限使用事件、脱敏错误与隔离上传队列
+  │    └─ backend/common/frameUsageObserver.js 连接首帧/断流状态与接收计数旁路
+  ├─ app/electron/deviceIdentity.js        本机安装标识摘要
   ├─ app/electron/agentProcess.js          主窗口受限 IPC、凭据、独立 Agent 生命周期
   │    └─ backend/agent-runtime/worker.js  utilityProcess：Responses、任务、附件、业务工具
   └─ backend/runtime/index.js              稳定运行时桥
        └─ backend/kernel/platform/server.js 组合根
+            ├─ backend/kernel/platform/license/deviceAuthorization.js 电脑授权刷新与签名缓存
             ├─ sdk/backend/serial          串口生命周期与 parser
             ├─ backend/extension-host      Display System 发现、绑定与处理
             ├─ backend/kernel/realtime     canonical sensor.frame 与实时网关
@@ -91,11 +96,15 @@ HaLow 人体接入：`kernel/transport/halowReceiver.js` 独立 TCP 分帧，`ha
 
 原生实体连续交接：`renderers/nativeSceneEntrance.js` 等待真实模型就绪，`nativeSceneSamples.js` 按实际三角形表面/足底透明轮廓采样，复用 `modelParticleEntrance`。`wholeChair`、`carQX`、`minzhen`、`footVideo`、`robot1`、`robotSY`、`robotLCF` 通过 Home 的 `portalEmbedded` 直接衔接列表并反向返回。`monitoringSurface` 对受管原生模型提供最多 30 秒等待及失败出口；验证两个 nativeScene 单测、monitoringSurface、modelParticleEntrance 和 `portal-scene-catalog.mjs --native-only`（7 个原生场景、慢加载/失败/减少动画），执行 Full。
 
-Agent 分类算法：`AgentAlgorithmData` → `agentProcess` / `runtime` 用户选择 → `tools` → `algorithm-lab`。`algorithmRecordService` 只读查询采集记录；受限 Python 由数值 AST 解释器执行。`adapt_algorithm_data` 测量当前设备节奏，在用户已选且带标签的记录上以最近真实帧重建离线窗口；`analyze_algorithm_data` / `test_algorithm` 沿用任务内适配目标，`evaluate` 保存输入契约，`realtimeCatalog` 发现已保存版本。原生副本走 `prepare_update_native_system`，用户 Manifest 走 `prepare_update_manifest_algorithms` → `manifestAlgorithmBindings` sidecar，首次启用均借 `frameObserver` 核验目标通道；无设备可先配置为停用。`server.js` 用当前 canonical displaySystemId 选择配置，`algorithmMarketService` 按 `displaySystemId` 消费帧；`ManifestSystemOutputs` 与原生侧栏共用真实分类图表。验证 `agentTools.test.js`、`manifestAlgorithmBindings.test.js`、`manifestAlgorithmBindingsApi.test.js`、`realtimeClassifier.test.js`、`builtin-templates.mjs`、`embedded-agent-electron.cjs --algorithm --asar`；实时执行及跨层变更使用 Full。
+Agent 规则分类算法：`AgentAlgorithmData` → `agentProcess` / `runtime` 用户选择 → `tools` → `algorithm-lab`。`algorithmRecordService` 只读查询采集记录；受限 Python 由数值 AST 解释器执行。`adapt_algorithm_data` 测量当前设备节奏，在用户已选且带标签的记录上以最近真实帧重建离线窗口；`analyze_algorithm_data` / `test_algorithm` 沿用任务内适配目标，`evaluate` 保存输入契约，`realtimeCatalog` 发现已保存版本。原生副本走 `prepare_update_native_system`，用户 Manifest 走 `prepare_update_manifest_algorithms` → `manifestAlgorithmBindings` sidecar，首次启用均借 `frameObserver` 核验目标通道；无设备可先配置为停用。`server.js` 用当前 canonical displaySystemId 选择配置，`algorithmMarketService` 按 `displaySystemId` 消费帧；`ManifestSystemOutputs` 与原生侧栏共用真实分类图表。验证 `agentTools.test.js`、`manifestAlgorithmBindings.test.js`、`manifestAlgorithmBindingsApi.test.js`、`realtimeClassifier.test.js`、`builtin-templates.mjs`、`embedded-agent-electron.cjs --algorithm --asar`；实时执行及跨层变更使用 Full。
 
 实时分类节奏适配：`realtimeRunner` 依据离线报告的目标间隔选择最近的真实帧，保持 `windowFeatures` 同源，不插值、不补造压力值；跨越过大的已选帧间隔或窗口节奏超限则清空窗口、暂停输出，恢复后重新积累。`algorithmMarketService` 对用户分类器的时间倒序与接收断流清除旧历史、隔离迟到结果并自动重启窗口，输入点数/数值错误和计算线程故障仍停用。`PortalPackageOutputs` 将可恢复的暂停显示为等待状态；验证 `realtimeClassifier.test.js` 的节奏/隔离/恢复、算法超市接口测试、完整 Full 与真实设备采样验收。
 
 采集标签复用：`client/src/features/agent/collectionLabels.js` 从已知采集命名格式提取标签，`AgentAlgorithmData` 默认只需勾选，按需展开单条/批量改标签；支持当前页标签筛选、批量选择及上限反馈。只改前端选数，不改采集存储或 Agent 接口；验证 `collectionLabels.test.js`、`agent-workspace.mjs` 和 Standard 客户端域。
+
+Agent 对话内选数：模型调用 `request_algorithm_data` → `runtime` 持久化 `awaiting_data` 并释放任务锁 → `AgentAlgorithmDataRequest` 在所属任务显示可选记录 → 受限 IPC `submitAlgorithmData` 校验请求、会话、系统和范围后继续同一任务。确认前只读记录元数据，不读取帧；历史卡只读，取消、失败重试和重启不自动授权。验证 runtime / algorithmLab / agentProcess 测试、AgentWorkspace / agentState、真实 `embedded-agent-ipc-electron.cjs` 及本地聊天夹具；新增 IPC 和选区恢复边界，采用 Full，交付需更新完整客户端。
+
+Agent 默认本机训练：`train_algorithm` → `algorithm-lab/service.train` → `worker` / `evaluate` / `spatialFeatures` 提取选区特征 → `cpuTrainingProcess` → 固定 `python/app/cpu_classifier_training.py`（安装版使用随包冻结入口）比较单线程 logistic、树和 32 棵树森林 → 安全 JSON `cpuModel` 校验 → 草稿与真实报告 → `prepare_algorithm_package` 保存。`pressure-spatial-v2` 在有宿主验证矩阵时提供 21 项特征，无矩阵只提供 12 项全局特征；离线和实时共用计算实现，不猜行列。候选选择按采集记录分组交叉验证，独立验证只用于冻结模型后的评价；训练最多 60 秒且可取消。`realtimeCatalog` 绑定模型摘要、类别顺序、特征版本、矩阵和输入契约；`realtimeRunner` 逐帧复查矩阵，系统包携带 JSON 模型而非 Python 环境。受限 `predict(f)` 仍用于用户明确要求的规则算法。客户无需显卡、CUDA 或自行安装训练库；源码、IPC、Python 冻结入口与实时运行时一并更新，不能仅发布网页。
 
 Agent 历史与粘贴：`AgentHistory` / `AgentWorkspace.onPaste` → 主进程 `agentProcess` / `agentClipboard` → `runtime` / `storage`。原图独立保存，公开状态只传缩略图；当前会话与归档可切换续聊。`runtime.startTask` 不再按 40 次任务强制截断，仍保留单会话 6 MiB 大小保护和最近 20 条消息的模型上下文窗口。验证 `runtime.test.js`、`agentProcess.test.js`、`node scripts/tests/agent-workspace.mjs` 及真实 Electron IPC/ASAR 夹具；触及桌面 IPC，执行 Full。
 
@@ -111,6 +120,8 @@ Agent 当前系统识别：`agentDeviceConnectionService.snapshot().currentSyste
 
 门户点图及原始规则矩阵框选：`sdk/frontend/renderers/shared/gridSelection.js` / `gridSelectionGeometry.js` + `PortalSelectionTools.jsx`，由 `hand.jsx` / `NumMatrixRenderer` 暴露 `getSelectionTools()`；验证 `pointGridSelection.test.js`、`sensorRuler.test.js` 和门户浏览器回归的原始压力索引、并集去重、空白保护与拖动缩放；`gridSelectionGeometry.test.js` 和 `portal-selection-controls.mjs` 专测参考项目的格边预览、八向手柄、保尺寸移动与拖动中键盘衔接。
 
+生成系统的矩阵方向与工具：`Home.getActiveRendererRef()` → `ManifestDisplayRenderer` → `manifestRendererTools` → 各 `RendererHost` 的实际 SDK 句柄。`manifestWidgetGeometry` 仅给规则矩阵点图及柔和热力图注入 `transposeAxes`，SDK 默认关闭；变换绘图坐标，不重排帧或线序，点图的有效物理坐标表保持原形。工具桥按主画布真实 `getViewTools()` / `getSelectionTools()` 和 `getTuningControls()` 开放工具，向当前可见矩阵转发展示调参并在异步挂载时重放；Title 按能力显示滑块，原始数字模式不显示无效过滤。点图缓存未过滤值，降低阈值可恢复；高斯值 0 跳过模糊。验证 `manifestRendererTools.test.js`、`Title.manifestTuning.test.jsx`、SDK 点图/柔和热力管线与调参测试，以及 `manifestWorkspace` 合成浏览器夹具；共享 SDK 与真实渲染工具变更执行 Full。
+
 传感点物理量尺：`PortalScreenRuler.jsx` + `portalRulerState.js` + `sensorRuler.js`；用户填写横纵点距（mm），按系统和矩阵尺寸在本机保存。端点锁定整数采样点，显示横纵跨格数并测量平面中心距；验证 `sensorRuler.test.js`、状态单测及 `scripts/tests/portal-ruler-controls.mjs` 的格内偏移吸附、原始矩阵框选、距离、拖拽、键盘、上限、跨视图回填和窄屏投影。无可靠点位映射的布局不冒充支持。
 
 | 关注点 | 主要入口 | 首选测试 |
@@ -122,12 +133,15 @@ Agent 当前系统识别：`agentDeviceConnectionService.snapshot().currentSyste
 | 正式展示可读性 / 算法超市 | `page/licensePortal/PortalMonitoring.css`, `PortalAlgorithmMarket.jsx`, `portalAlgorithmCatalog.js`, `components/aside/formulaChartStore.js` | portalAlgorithmCatalog / PortalMonitoringChrome / formulaChartStore tests + `portal-launcher.mjs --monitor-only`：字号、点击/拖入、真实帧计算、删除同步、弹窗与窄屏；仅 UI 层采用 Standard |
 | 系统连接 / 回放弹窗 / 批量下载 / 工具箱 | `components/title/Title.jsx`, `portalCsvBatch.js`, `portalOperationGuard.js`, `page/licensePortal/PortalControlDialog.jsx`, `PortalPlaybackDialog.jsx`, `PortalUtilityPanel.jsx` | selection / batch / guard / Title lifecycle / Chrome / Utility tests；`portal-launcher.mjs --monitor-only` 调用 `portal-workspace-controls.mjs` 检查单选与多选独立、串行结果及窄屏；完整导出范围变更涉及 `csvDownloadService`，执行 Full |
 | 快捷抽屉 / 分类视角 / 传感点量尺 | `page/licensePortal/PortalWorkspaceTools.jsx`, `PortalScreenRuler.jsx`, `renderers/workspaceViewTools.js`, `components/three/hand.jsx`, `hand0205 copy.jsx` | WorkspaceTools / Utility / Chrome / workspaceViewTools tests + `portal-launcher.mjs --monitor-only`；仅 UI 使用 Standard，真实渲染变换执行 Full；量尺单位 mm，来自用户设置的相邻点中心距；原始规则矩阵经 numMatrix 接入，共享 SDK 接口变更执行 Full |
+| 生成矩阵方向 / 调参 / 工具转发 | `extensions/display-system/manifestWidgetGeometry.js`, `manifestRendererTools.js`, `ManifestDisplayRenderer.jsx`, `page/home/Home.jsx`, `components/title/Title.jsx`；SDK `pointGrid` / `blobHeatmap` 与 `shared/three/workspaceViewTools.js` | Manifest 工具桥、Title 动态调参、SDK 管线/调参及原生视角单测；浏览器检查 6×10 非对称合成帧的点图/柔和热力方向、原始索引框选、过滤恢复及视图切换；执行 Full，不把合成帧验收视为真机验收 |
 | 算法超市 Python 会话启停 | `backend/extension-host/runtime/algorithmMarketService.js`, `kernel/platform/http/httpAppFactory.js`, `client/src/page/licensePortal/portalPackageRuntime.js`, `PortalPackageOutputs.jsx` | algorithmMarket / algorithmMarketApi / portalPackageRuntime tests + Full；包含旧处理器经标准网关缺少 matrix 的输入回归，旁路消费标准帧，内部 HTTP 快照输出，不改变采集回放契约 |
 | 手套点云到原生实体 | `client/src/renderers/modelParticleEntrance.js`, `components/three/hand0205 copy.jsx`, `page/licensePortal/scene/monitoringSurface.js` | modelParticleEntrance / monitoringSurface tests + `portal-launcher.mjs --monitor-only`：真实模型顶点、骨骼姿态、直接交接与返回、减少动画；双手分屏未迁移 |
 | 监测返回选择弹窗 | `page/licensePortal/PortalMonitoringLayer.jsx`, `PortalLauncher.css`, `scene/sceneMotionClock.js`, `renderers/particleEntrance.js`, `components/three/hand.jsx` | PortalMonitoringLayer 真实 GSAP 回归、时钟、动态投影与末段混合单测；`portal-launcher.mjs`：GPU 归位、预览预热、材质互补混合、缓冲复用、首帧连续、固定面板、清理、inert、焦点与减少动画；前端动效采用 Standard |
 | 密钥对应系统列表 | `page/licensePortal/portalEntry.js`, `portalSystems.js`, `LicensePortal.jsx`, `PortalSystemSelector.jsx`；后端 `webSocketHandlerFactory.js` 的 license-activation 回执 | portalEntry / portalSystems / PortalSystemSelector + commandApi；`portal-launcher.mjs` 检查换密钥、失败、过期与跨窗口广播；授权及 HTTP 回执变化采用 Full |
 | Python worker 管道/退出 | `backend/kernel/algorithm-channel/pythonWorker.js` | `backend/tests/server/pythonWorkerLifecycle.test.js`（断管、在飞写入、重启/退出竞态）+ Full |
 | 生产依赖打包 | `scripts/pack-runtime-dependencies.js`, `scripts/electron-builder-before-*.js`, `scripts/package-hooks.js` | `backend/tests/packaging/runtimeDependencies.test.js` + Full；发布须验证最终 ASAR 并实际加载包内模块 |
+| Windows Python 原生算法输入 | `python/app/onbed_filter.cp311-win_amd64.pyd`、`python/build_exe.py`、`scripts/build-python-runtime.js` | 正式库需保留在源码中；校验 CPython 3.11 x64 导入、`health` 动态配置 ABI 和实际 PyInstaller 输出；打包变更使用 Full |
+| Agent CPU 自动分类训练 | `algorithm-lab/service.js`、`cpuTrainingProcess.js`、`cpuModel.js`、`spatialFeatures.js`（位于 `backend/agent-runtime/`），`python/app/cpu_classifier_training.py`、`python/build_exe.py`、`scripts/build-python-runtime.js` | `algorithmLab.test.js`、`cpuModel.test.js`、`realtimeClassifier.test.js`、`systemPackageService.test.js`、`python/tests/test_cpu_classifier_training.py`、`test_build_exe.py` + Full；开发合成数据、跨语言预测、取消/超时、真实冻结训练入口和系统包往返分别验收，不以依赖导入代替训练流程验收 |
 | 串口生命周期 / 异常提示 | `sdk/backend/serial/serialManager.js`、`serialErrors.js` → `serialControlService` / HTTP `context.waitFor` → Home / Title / `services/serial/serialFeedback.js` | `backend/tests/serial/`、`serialControlService.test.js`、`serialConnectionApi.test.js`、Title.serialConnection / serialFeedback / commandClient；Full + `portal-launcher.mjs --monitor-only` 的合成串口异常回归 |
 | framing/协议 | `sdk/backend/serial/serialParserManager.js`, `sdk/backend/protocol/` | `backend/tests/serial/` |
 | Display System | `backend/extension-host/`, `display-systems/` | `backend/tests/displaySystems/`, `backend/tests/server/appRuntimeDisplaySystems.test.js` |

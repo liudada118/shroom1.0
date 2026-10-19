@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { createHash } = require('crypto');
+const { observeUsageOperation } = require('../../common/businessEvents');
 const { buildDisplaySystemDuplicateManifest, displaySystemEditorDigest } = require('../manifest/displaySystemDuplication');
 const {
   validateDisplaySystemConfig,
@@ -1176,9 +1177,9 @@ function createDisplaySystemWorkspaceService({
       duplicateSystem: { version: 1, checksSourceRevision: true, checksSourceDigest: true, independentSensorTypes: true },
     }),
     read,
-    save,
-    saveDisplaySection,
-    duplicate,
+    save: (...args) => observeUsageOperation('custom_system_saved', { featureId: 'workspace', action: 'save' }, () => save(...args)),
+    saveDisplaySection: (...args) => observeUsageOperation('custom_system_saved', { featureId: 'workspace', action: 'edit_display' }, () => saveDisplaySection(...args)),
+    duplicate: (...args) => observeUsageOperation('custom_system_saved', { featureId: 'workspace_copy', action: 'duplicate' }, () => duplicate(...args)),
     writableRoot,
   };
 }

@@ -1229,8 +1229,12 @@ def main():
 
 if __name__ == "__main__":
     configure_stdio_utf8()
-    if ncz is not None:
-        ncz.initialize()
-    main()
+    if sys.argv[1:] == ['--train-classifier']:
+        from cpu_classifier_training import main as train_classifier
+        train_classifier()
+    else:
+        if ncz is not None:
+            ncz.initialize()
+        main()
   
     

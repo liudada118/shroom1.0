@@ -33,6 +33,7 @@
 const { autoUpdater } = require("electron-updater");
 const { ipcMain, dialog } = require("electron");
 const logger = require("../../backend/common/logger");
+const { recordBusinessEvent } = require('../../backend/common/businessEvents');
 
 function getUpdaterErrorMessage(error) {
   return error && error.message ? error.message : String(error || "鏈煡鏇存柊閿欒");
@@ -80,6 +81,8 @@ class AppUpdater {
     this._startupCheckTimer = null;
     this._installRequested = false;
     this._beforeInstall = typeof options.beforeInstall === "function" ? options.beforeInstall : null;
+    this._onInstallRequested = options.onInstallRequested;
+    this._downloadedVersion = null;
 
     // 配置 autoUpdater
     autoUpdater.autoDownload = options.autoDownload || false;
@@ -224,6 +227,15 @@ class AppUpdater {
    * 向渲染进程发送更新状态
    */
   _sendStatus(data) {
+    if (data.type === 'update-downloaded') this._downloadedVersion = data.version;
+    const observed = {
+      'checking-for-update': ['check', 'unknown'], 'update-available': ['update_available', 'success'],
+      'update-not-available': ['check_current', 'success'], 'update-downloaded': ['download_ready', 'success'],
+      'installing-update': ['installer_handoff', 'unknown'], 'update-error': ['update_failed', 'failure'],
+    }[data.type];
+    if (observed) recordBusinessEvent(data.type === 'checking-for-update' ? 'feature_attempted' : 'usage_session_summary', {
+      featureId: 'software_update', action: observed[0], result: observed[1],
+      ...(data.type === 'update-error' ? { errorCode: 'SOFTWARE_UPDATE_FAILED' } : {}) });
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send("update-status", data);
     }
@@ -254,6 +266,7 @@ class AppUpdater {
     }
 
     this._installRequested = true;
+    try { this._onInstallRequested?.(this._downloadedVersion); } catch { /* Diagnostics cannot block installation. */ }
     this.stopAutoCheck();
     this._sendStatus({ type: "installing-update" });
 

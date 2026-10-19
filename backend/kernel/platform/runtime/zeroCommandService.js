@@ -357,6 +357,13 @@ function createZeroCommandService({
    * @throws {Error} 载荷不合法（400）、无法解析目标或未影响任何通道（409）、解析器越界（500）。
    */
   function handle(command = {}) {
+    return require('../../../common/businessEvents').observeUsageOperation('analysis_tool_used', {
+      featureId: 'calibration_zero', action: command.enabled === false ? 'restore' : 'zero',
+    }, () => handleUnobserved(command));
+  }
+
+  /** Apply zeroing to the actual target channels before reporting any successful operation. */
+  function handleUnobserved(command = {}) {
     const normalizedCommand = normalizeZeroCommand(command);
     const { enabled, displaySystemId, channelIds } = normalizedCommand;
     const hasExplicitChannelIds = Object.prototype.hasOwnProperty.call(normalizedCommand, 'channelIds');

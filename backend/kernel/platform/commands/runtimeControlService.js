@@ -2,7 +2,13 @@
  * 运行时控制应用服务。
  * 这里承接显示配置、历史回放、采集控制、运行参数、历史维护和 CSV 导出等业务动作。
  */
+const { recordBusinessEvent } = require('../../../common/businessEvents');
+const { performance } = require('node:perf_hooks');
+
 function createRuntimeControlService(deps) {
+  let collectionStartedAt = null;
+  let collectionWriteStart = { written: 0, failed: 0 };
+  let collectionUsageContext = {};
   const {
     csvDownloadService,
     getRuntime,
@@ -67,6 +73,7 @@ function createRuntimeControlService(deps) {
       if (next.playFlag ?? runtime.playFlag) startPlaybackTimer();
       else stopPlaybackTimer();
     }
+    if (message.play === true && runtime.playFlag !== true) recordBusinessEvent('playback_started', { featureId: 'playback', mode: 'playback', result: 'success' });
   }
 
   /**
@@ -112,6 +119,19 @@ function createRuntimeControlService(deps) {
       next.colHZ = next.collectOptions.frequencyHz;
     }
     setRuntime(next);
+    if (message.flag === true && runtime.flag !== true) {
+      collectionStartedAt = performance.now();
+      collectionWriteStart = deps.getCollectionWriteStats?.() || { written: 0, failed: 0 };
+      collectionUsageContext = deps.getUsageContext?.() || {};
+      recordBusinessEvent('collection_started', { ...collectionUsageContext, featureId: 'collection', result: 'success' });
+    } else if (message.flag === false && (runtime.flag === true || collectionStartedAt !== null)) {
+      const writeStats = deps.getCollectionWriteStats?.();
+      recordBusinessEvent('collection_finished', { ...collectionUsageContext, featureId: 'collection', result: !writeStats ? 'success'
+        : writeStats.failed > collectionWriteStart.failed ? 'failure' : writeStats.exact === false || writeStats.pending > 0 ? 'unknown' : 'success',
+        ...(writeStats?.exact !== false && writeStats ? { count: Math.max(0, writeStats.written - collectionWriteStart.written) } : {}),
+        durationMs: collectionStartedAt === null ? 0 : Math.min(86400000, performance.now() - collectionStartedAt) });
+      collectionStartedAt = null;
+    }
   }
 
   /**
@@ -183,7 +203,9 @@ function createRuntimeControlService(deps) {
   return {
     deleteHistory,
     exportHistoryCsv,
-    updateCollectionControl,
+    updateCollectionControl: (...args) => require('../../../common/businessEvents').observeUsageOperation('usage_session_summary', {
+      featureId: 'collection_save', action: args[0]?.flag === false ? 'stop' : 'configure',
+    }, () => updateCollectionControl(...args)),
     updateDisplayOptions,
     updateHistoryPlayback,
     updateRuntimeOptions,

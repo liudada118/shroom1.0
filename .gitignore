@@ -30,6 +30,8 @@ python/app/*.so
 python/venv*/
 __pycache__/
 *.py[cod]
+# Required Windows algorithm input; keep this exact build asset available after clone/branch changes.
+!python/app/onbed_filter.cp311-win_amd64.pyd
 pdf/
 .DS_Store
 *.log
@@ -52,3 +54,7 @@ pack-resources/python/
 # Machine-specific company authorization cache and encrypted staff credential.
 /managed-system-catalog.json
 /system-package-staff-credential.json
+/license-devices/
+/frontend-cache/
+/usage-analytics/
+/device-identity

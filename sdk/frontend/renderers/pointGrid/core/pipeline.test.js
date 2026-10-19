@@ -130,6 +130,44 @@ function makeFrame(length, seed) {
 }
 
 describe('点阵管线与原场景组件逐帧一致', () => {
+  it('轴反射归一化默认关闭，只接受显式布尔 true', () => {
+    expect(normalizePointGridParams().transposeAxes).toBe(false);
+    expect(normalizePointGridParams({ transposeAxes: true }).transposeAxes).toBe(true);
+    for (const value of [undefined, null, false, 0, 1, '', 'true', 'false', [], {}]) {
+      expect(normalizePointGridParams({ transposeAxes: value }).transposeAxes).toBe(false);
+    }
+  });
+
+  it('矩形网格只沿平面对角线反射，逐点索引和高度分量保持原样', () => {
+    const options = { amountX: 2, amountY: 3, separation: 100 };
+    const legacy = buildPointGridBasePositions(options);
+    const reflected = buildPointGridBasePositions({ ...options, transposeAxes: true });
+
+    expect(Array.from(legacy)).toEqual([
+      -50, 0, -100, -50, 0, 0, -50, 0, 100,
+      50, 0, -100, 50, 0, 0, 50, 0, 100,
+    ]);
+    expect(Array.from(reflected)).toEqual([
+      -100, 0, -50, 0, 0, -50, 100, 0, -50,
+      -100, 0, 50, 0, 0, 50, 100, 0, 50,
+    ]);
+    expect(buildPointGridBasePositions({ ...options, transposeAxes: false })).toEqual(legacy);
+    expect(options).toEqual({ amountX: 2, amountY: 3, separation: 100 });
+  });
+
+  it('有效物理坐标即使请求轴反射也保留真实形状与 row-major 对应', () => {
+    const points = [[0, 0], [2, 0], [4, 1], [0, 3], [2, 3], [4, 4]];
+    const options = { amountX: 2, amountY: 3, separation: 100, points };
+    const reflected = buildPointGridBasePositions({ ...options, transposeAxes: true });
+
+    expect(Array.from(reflected)).toEqual([
+      -100, 0, 100, 0, 0, 100, 100, 0, 50,
+      -100, 0, -50, 0, 0, -50, 100, 0, -100,
+    ]);
+    expect(reflected).toEqual(buildPointGridBasePositions(options));
+    expect(points).toEqual([[0, 0], [2, 0], [4, 1], [0, 3], [2, 3], [4, 4]]);
+  });
+
   it('物理坐标按 row-major 顺序生成居中的 3D 基础位置', () => {
     const positions = buildPointGridBasePositions({
       amountX: 2,

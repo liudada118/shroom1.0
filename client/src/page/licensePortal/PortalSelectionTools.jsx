@@ -153,7 +153,7 @@ export default function PortalSelectionTools({ api, onClose }) {
       </section>)}
       {state.regions.length === 0 && <p>在点图上框选，或输入坐标添加区域。</p>}
       <details><summary>输入坐标添加</summary><RegionEditor api={api} columns={state.columns} rows={state.rows} /></details>
-      <p className="portal-selection-note">侧栏显示所有选区的合计，重叠点只计算一次；无选区时显示全图。</p>
+      <p className="portal-selection-note">区域读数基于原始点值，重叠点合计只计算一次；无选区时显示全图。</p>
     </aside>
   </div>, host);
 }

@@ -7,6 +7,7 @@ const os = require('node:os');
 const { createAgentSettings } = require('../../../app/electron/agentSettings');
 const { createAgentProcess, isTrustedAgentSender, registerAgentIpc, loadAgentWindowUrl } = require('../../../app/electron/agentProcess');
 const { readClipboardFiles } = require('../../../app/electron/agentClipboard');
+const { subscribeBusinessEvents } = require('../../common/businessEvents');
 
 test('Windows file paste reads the OS file list using static code, never pasted text commands', async () => {
   const dangerousName = 'C:\\data\\$(not-a-command).txt';
@@ -23,12 +24,60 @@ test('Windows file paste reads the OS file list using static code, never pasted 
 const safeStorage = { isEncryptionAvailable: () => true, encryptString: (value) => Buffer.from(value.split('').reverse().join('')),
   decryptString: (value) => value.toString().split('').reverse().join('') };
 
+test('proposal applications from waiting or historical tasks report transitions without recounting history', async t => {
+  const items = [], off = subscribeBusinessEvents(event => items.push(event)); t.after(off);
+  const processRef = new EventEmitter();
+  processRef.postMessage = message => setImmediate(() => processRef.emit('message', { id: message.id, ok: true, data: {} }));
+  processRef.kill = () => processRef.emit('exit', 0);
+  const manager = createAgentProcess({ root: temporaryRoot(t), electron: { safeStorage, utilityProcess: { fork: () => {
+    setImmediate(() => processRef.emit('message', { ready: true })); return processRef;
+  } } }, getWindow: () => null });
+  t.after(() => manager.dispose()); await manager.invoke('getState');
+  /** Publish synthetic persisted state from the worker, without running a model request. */
+  function state(status, error) {
+    processRef.emit('message', { event: { type: 'state', state: { conversation: { id: 'fixture', tasks: [{ id: 'old-task', status: 'awaiting_action',
+      proposals: [{ id: 'fixture-proposal', kind: 'update_display', status, error }] }] } } } });
+  }
+  state('pending'); state('pending');
+  assert.equal(items.length, 0, 'opening history is not generation or application');
+  state('applying'); state('applied'); state('applied');
+  assert.equal(items.filter(item => item.properties.action === 'apply_update_display').length, 2);
+  assert.equal(items.at(-1).properties.result, 'success');
+  state('restoring'); state('failed', { code: 'FIXTURE_RESTORE_FAILED', message: 'secret body' });
+  assert.equal(items.at(-1).properties.action, 'restore_update_display');
+  assert.equal(items.at(-1).properties.result, 'failure');
+  state('applying'); state('applied');
+  assert.equal(items.at(-1).properties.action, 'apply_update_display');
+  assert(!JSON.stringify(items).includes('secret body'));
+});
+
 /** 给每个主进程案例隔离临时存储。 */
 function temporaryRoot(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'shroom-agent-process-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   return root;
 }
+
+test('inline algorithm data confirmation forwards only the request identity and user selection', async (t) => {
+  const requests = [];
+  const child = new EventEmitter();
+  child.postMessage = (message) => {
+    requests.push(message);
+    setImmediate(() => child.emit('message', { id: message.id, ok: true, data: { resumed: true } }));
+  };
+  child.kill = () => child.emit('exit', 0);
+  const manager = createAgentProcess({ root: temporaryRoot(t), electron: { safeStorage, utilityProcess: { fork: () => {
+    setImmediate(() => child.emit('message', { ready: true })); return child;
+  } } }, getWindow: () => null });
+  t.after(() => manager.dispose());
+  const selection = { systemId: 'fixture-system', records: [{ id: 'fixture-record', label: '拍打' }] };
+  const result = await manager.invoke('submitAlgorithmData', { taskId: 'fixture-task', requestId: 'fixture-request', selection,
+    apiKey: 'must-not-forward', tool: 'analyze_algorithm_data', arbitraryPath: 'C:/private.db' });
+  assert.deepEqual(result, { resumed: true });
+  assert.deepEqual(requests.find((message) => message.action === 'submitAlgorithmData').payload,
+    { taskId: 'fixture-task', requestId: 'fixture-request', selection });
+  await assert.rejects(manager.invoke('executeTool', { name: 'analyze_algorithm_data' }), { code: 'AGENT_ACTION_UNKNOWN' });
+});
 
 test('credentials remain encrypted, redact public settings and clear on endpoint change', (t) => {
   const root = temporaryRoot(t);
@@ -150,7 +199,7 @@ test('chat sync settings do not start the model worker and never enter worker or
   try {
     const fresh = await manager.invoke('getState');
     assert.equal(fresh.settings.hasApiKey, false);
-    assert.equal(fresh.chatSync.settings.enabled, false);
+    assert.equal(fresh.chatSync.settings.enabled, true);
     await manager.invoke('saveSettings', { baseUrl: 'https://example.invalid/v1', model: 'test', apiKey: 'model-fixture-secret' });
     await manager.invoke('saveSyncSettings', { enabled: true, endpoint: 'https://example.invalid/chat', token: 'upload-fixture-secret' });
     assert.equal(uploads.length, 0, 'empty conversations are not uploaded');

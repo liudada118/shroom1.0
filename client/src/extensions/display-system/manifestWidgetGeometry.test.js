@@ -140,6 +140,7 @@ describe('manifest widget renderer params', () => {
     expect(params.sit).toMatchObject({ num1: 3, num2: 2, interp: 2 });
     expect(params.back).toMatchObject({ num1: 3, num2: 2, interp: 2 });
     expect(params.points).toEqual(rightCoordinates.coordinates.flat());
+    expect(params.transposeAxes).toBe(false);
   });
 
   it('当前路没有坐标时删除方案级旧 points，并为其它矩阵渲染器覆写尺寸', () => {
@@ -160,7 +161,24 @@ describe('manifest widget renderer params', () => {
     });
 
     expect(pointGrid).not.toHaveProperty('points');
+    expect(pointGrid.transposeAxes).toBe(true);
     expect(numMatrix).toMatchObject({ backend: 'sprite3d', gridWidth: 5, gridHeight: 4 });
-    expect(heatmap).toMatchObject({ max: 200, dataWidth: 5, dataHeight: 4 });
+    expect(numMatrix).not.toHaveProperty('transposeAxes');
+    expect(heatmap).toMatchObject({ max: 200, dataWidth: 5, dataHeight: 4, transposeAxes: true });
+  });
+
+  it('显示方向只为矩阵点图和柔和热力图注入，不改变行列或原配置', () => {
+    const matrix = Object.freeze({ rows: 2, cols: 3 });
+    const params = Object.freeze({ fps: 20, transposeAxes: false });
+    const pointGrid = buildManifestWidgetRendererParams({ rendererId: 'pointGrid', matrix, params });
+    const heatmap = buildManifestWidgetRendererParams({ rendererId: 'blobHeatmap', matrix, params });
+    const webglHeatmap = buildManifestWidgetRendererParams({ rendererId: 'webglHeatmap', matrix });
+
+    expect(pointGrid).toMatchObject({ transposeAxes: true, sit: { num1: 2, num2: 3 } });
+    expect(heatmap).toMatchObject({ transposeAxes: true, dataWidth: 3, dataHeight: 2 });
+    expect(webglHeatmap).toMatchObject({ dataWidth: 3, dataHeight: 2, minFrameLength: 6 });
+    expect(webglHeatmap).not.toHaveProperty('transposeAxes');
+    expect(matrix).toEqual({ rows: 2, cols: 3 });
+    expect(params).toEqual({ fps: 20, transposeAxes: false });
   });
 });

@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { validateNativeConfiguration } = require('./builtinSystemConfiguration');
+const { observeUsageOperation } = require('../../common/businessEvents');
 
 const EMPTY = Object.freeze({ algorithms: [], charts: [] });
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
@@ -90,7 +91,9 @@ function createManifestAlgorithmBindings({ root, managedRoot = null, getSystem, 
     try { return load(id)?.configuration || null; } catch { return null; }
   }
 
-  return { read: load, update, getRuntimeConfiguration };
+  return { read: load, update: (...args) => observeUsageOperation('algorithm_result', {
+    featureId: 'algorithm_binding', action: 'bind', systemType: args[0], systemOrigin: 'custom',
+  }, () => update(...args)), getRuntimeConfiguration };
 }
 
 module.exports = { createManifestAlgorithmBindings };

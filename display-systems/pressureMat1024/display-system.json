@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 3,
+  "id": "pressureMat1024",
+  "name": "32×32 压力垫",
+  "version": "1.0.0",
+  "metadata": {
+    "origin": "user",
+    "createdBy": "embedded-agent"
+  },
+  "sensors": [
+    {
+      "id": "sit",
+      "label": "压力垫",
+      "type": "pressureMat1024",
+      "outputChannel": "sit",
+      "matrix": {
+        "rows": 32,
+        "cols": 32
+      },
+      "protocol": {
+        "validation": null,
+        "baudRate": 1000000,
+        "framing": {
+          "type": "delimiter",
+          "delimiter": [
+            170,
+            85,
+            3,
+            153
+          ],
+          "frameLength": null,
+          "includeDelimiter": false
+        },
+        "decoding": {
+          "valueType": "uint8",
+          "byteOffset": 0,
+          "valueCount": 1024
+        }
+      },
+      "algorithm": {
+        "type": "none"
+      },
+      "files": {
+        "lineOrder": "sit/line-order.json",
+        "pointOrder": "sit/point-order.json"
+      },
+      "stored": true
+    }
+  ],
+  "display": {
+    "layout": {
+      "type": "grid",
+      "columns": 12,
+      "presentation": "workspace"
+    },
+    "views": [
+      {
+        "id": "main",
+        "type": "pointGrid",
+        "source": "data"
+      }
+    ],
+    "widgets": [
+      {
+        "id": "main",
+        "type": "pointGrid",
+        "source": "data"
+      }
+    ],
+    "renderers": [
+      {
+        "id": "pointGrid",
+        "type": "pointGrid",
+        "label": "点阵热力（3D）"
+      }
+    ],
+    "visualizationAlgorithms": [
+      {
+        "id": "identity",
+        "type": "identity"
+      }
+    ],
+    "profiles": [
+      {
+        "id": "default",
+        "label": "点阵热力（3D）",
+        "renderer": "pointGrid",
+        "visualizationAlgorithm": "identity",
+        "widgets": [
+          "main"
+        ]
+      }
+    ],
+    "defaultView": "main",
+    "defaultProfile": "default",
+    "chartCards": [],
+    "sidebar": {
+      "source": "sit",
+      "pressure": {
+        "primaryMetric": "totalPressure",
+        "metrics": [
+          "averagePressure",
+          "maxPressure",
+          "totalPressure"
+        ]
+      },
+      "area": {
+        "metrics": [
+          "activePoints",
+          "area"
+        ],
+        "pointArea": 1,
+        "unit": "格"
+      },
+      "algorithmMetrics": []
+    }
+  },
+  "sensor": {
+    "type": "pressureMat1024",
+    "matrix": {
+      "rows": 32,
+      "cols": 32
+    },
+    "ports": [
+      "sit"
+    ],
+    "portLabels": {
+      "sit": "压力垫"
+    }
+  },
+  "files": {
+    "lineOrder": "sit/line-order.json",
+    "pointOrder": "sit/point-order.json"
+  },
+  "protocol": {
+    "validation": null,
+    "baudRate": 1000000,
+    "framing": {
+      "type": "delimiter",
+      "delimiter": [
+        170,
+        85,
+        3,
+        153
+      ],
+      "frameLength": null,
+      "includeDelimiter": false
+    },
+    "decoding": {
+      "valueType": "uint8",
+      "byteOffset": 0,
+      "valueCount": 1024
+    }
+  },
+  "algorithm": {
+    "type": "none"
+  }
+}

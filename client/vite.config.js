@@ -12,13 +12,28 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
+import { readFileSync } from "node:fs";
 import obfuscatorPlugin from "rollup-plugin-obfuscator";
+
+/** Stamp each build once so cached pages cannot replace a newer installer webpage. */
+function frontendBuildStamp() {
+  return {
+    name: 'shroom-frontend-build',
+    apply: 'build',
+    generateBundle() {
+      const appVersion = JSON.parse(readFileSync(path.resolve(__dirname, '../package.json'), 'utf8')).version;
+      this.emitFile({ type: 'asset', fileName: 'frontend-build.json',
+        source: JSON.stringify({ schemaVersion: 1, buildId: Date.now(), appVersion }) });
+    },
+  };
+}
 
 export default defineConfig({
   // 处理大写扩展名的资源文件
   assetsInclude: ['**/*.PNG', '**/*.JPG', '**/*.JPEG', '**/*.GIF', '**/*.SVG'],
 
   plugins: [
+    frontendBuildStamp(),
     react({
       // 启用 Fast Refresh（替代原有的 react-hot-loader）
       fastRefresh: true,
@@ -94,6 +109,8 @@ export default defineConfig({
           // 正是上面这段注释警告的那个后果。
           exclude: ['node_modules/**', '**/src/renderers/**', '**/sdk/frontend/**'],
           options: {
+            // Stable transforms let unchanged code retain its hash across releases.
+            seed: 20261014,
             compact: true,
             // ✘ 关闭 - 将 if/for/while 转为 switch-case，破坏 V8 JIT 优化，导致 requestAnimationFrame 和 message handler 耗时激增
             controlFlowFlattening: false,

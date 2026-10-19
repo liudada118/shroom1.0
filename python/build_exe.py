@@ -7,7 +7,7 @@ PyInstaller 打包脚本
     macOS:    python3 build_exe.py
 
 前提条件:
-    pip install pyinstaller numpy
+    pip install -r requirements.txt
 
 打包后的可执行文件位于:
     dist/onbed_server/onbed_server.exe  (Windows)
@@ -22,6 +22,60 @@ import sys
 import os
 import platform
 import shutil
+import importlib
+
+
+CPU_TRAINING_IMPORTS = {
+    'sklearn': (),
+    'sklearn.linear_model': ('LogisticRegression', 'SGDClassifier'),
+    'sklearn.tree': ('DecisionTreeClassifier',),
+    'sklearn.ensemble': ('RandomForestClassifier',),
+    'sklearn.neighbors': ('KNeighborsClassifier',),
+    'sklearn.preprocessing': ('StandardScaler',),
+    'sklearn.pipeline': ('Pipeline',),
+    'sklearn.model_selection': ('GroupKFold', 'GroupShuffleSplit', 'StratifiedGroupKFold'),
+    'sklearn.metrics': ('classification_report', 'confusion_matrix'),
+    'joblib': ('Parallel', 'delayed'),
+    'threadpoolctl': ('threadpool_limits',),
+    'narwhals': (),
+}
+
+
+def validate_cpu_training_dependencies(import_module=importlib.import_module):
+    """在打包前验证 CPU 训练入口及其原生依赖，缺失时直接失败。"""
+    modules = {}
+    requirements = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'requirements.txt')
+    for name, symbols in CPU_TRAINING_IMPORTS.items():
+        try:
+            module = import_module(name)
+            for symbol in symbols:
+                if not callable(getattr(module, symbol, None)):
+                    raise ImportError(f'{name}.{symbol} 不可用')
+            modules[name] = module
+        except Exception as error:
+            raise RuntimeError(
+                f'CPU 训练依赖 {name} 无法加载：{error}；'
+                f'请执行 "{sys.executable}" -m pip install -r "{requirements}"'
+            ) from error
+    return modules
+
+
+def cpu_training_pyinstaller_args(sklearn_module):
+    """收集限定的 CPU 算法入口及轮子自带动态库，不引入深度学习框架。"""
+    args = ['--collect-binaries', 'sklearn', '--collect-data', 'sklearn']
+    for name in CPU_TRAINING_IMPORTS:
+        args.extend(['--hidden-import', name])
+    for distribution in ('scikit-learn', 'joblib', 'threadpoolctl', 'narwhals'):
+        args.extend(['--copy-metadata', distribution])
+    package_dir = os.path.dirname(os.path.abspath(sklearn_module.__file__))
+    sep = ';' if platform.system() == 'Windows' else ':'
+    # ⚠️ Windows 轮子的 DLL 可位于包目录旁，遗漏会导致客户机导入 sklearn 失败。
+    for relative in ('../scikit_learn.libs', '../sklearn.libs', '.libs', '.dylibs'):
+        directory = os.path.abspath(os.path.join(package_dir, relative))
+        if os.path.isdir(directory):
+            destination = os.path.basename(directory) if relative.startswith('../') else f'sklearn/{relative}'
+            args.extend(['--add-binary', f'{directory}{sep}{destination}'])
+    return args
 
 
 def configure_stdio_utf8():
@@ -79,6 +133,7 @@ def build():
     # onbed_filter 是正式算法包依赖，发布时缺失必须立即失败，不能生成静默降级的安装包。
     try:
         pyd_file = resolve_onbed_filter_binary(app_dir)
+        training_modules = validate_cpu_training_dependencies()
     except (FileNotFoundError, RuntimeError) as error:
         print(f"错误: {error}")
         sys.exit(1)
@@ -133,6 +188,7 @@ def build():
         '--console',
         # 收集 numpy
         '--collect-all', 'numpy',
+        '--hidden-import', 'cpu_classifier_training',
         # 足压分析运行时依赖
         '--hidden-import', 'real_time_and_replay_cop_speed_2',
         '--hidden-import', 'oneStep',
@@ -145,6 +201,7 @@ def build():
         '--exclude-module', 'torch',
         '--exclude-module', 'tensorflow',
     ]
+    args.extend(cpu_training_pyinstaller_args(training_modules['sklearn']))
 
     # 添加动态库为二进制文件 (--add-binary "source;destination", Windows用;, Unix用:)
     # 注意: petCare 库需独立于 onbed_filter 打包, 否则缺 onbed_filter 时宠物看护也会被漏掉

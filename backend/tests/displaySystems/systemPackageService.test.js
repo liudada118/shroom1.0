@@ -11,6 +11,8 @@ const { createManifestAlgorithmBindings } = require('../../extension-host/worksp
 const { createBuiltinSystemTemplates } = require('../../extension-host/workspace/builtinSystemTemplates');
 const { createAppRuntime } = require('../../extension-host/appRuntimeFactory');
 const { realtimePackage } = require('../../agent-runtime/algorithm-lab/realtimeCatalog');
+const { CPU_RUNTIME, modelDigest } = require('../../agent-runtime/algorithm-lab/cpuModel');
+const { FEATURE_VERSION } = require('../../agent-runtime/algorithm-lab/spatialFeatures');
 
 /** 读取真实 1024 输入、529 展示的坐垫配置以覆盖发布前后的线序契约。 */
 function sampleSystem() {
@@ -24,6 +26,16 @@ function sampleSystem() {
 function digest(input) {
   const { sha256, ...payload } = input;
   return { ...payload, sha256: createHash('sha256').update(JSON.stringify(payload)).digest('hex') };
+}
+
+/** 构造已有本地报告的小型空间分类模型，不启动 Python 或模型服务。 */
+function cpuDraft(systemId, rows, cols) {
+  const model = { schemaVersion: 1, runtime: CPU_RUNTIME, kind: 'tree', featureNames: ['copX'], classLabels: ['左', '右'], minConfidence: .55,
+    trees: [{ nodes: [{ feature: 0, threshold: .5, left: 1, right: 2 }, { probabilities: [1, 0] }, { probabilities: [0, 1] }] }] };
+  const matrix = { rows, cols, total: rows * cols };
+  return { id: 'cpu-spatial', systemId, name: '左右压力识别', language: CPU_RUNTIME, model, labels: model.classLabels, windowFrames: 16,
+    featureVersion: FEATURE_VERSION, matrix, report: { modelDigest: modelDigest(model), split: 'development',
+      inputContract: { pointCount: matrix.total, stage: 'data', sampleIntervalMs: 20, featureVersion: FEATURE_VERSION, matrix } } };
 }
 
 test('a managed package preserves raw 1024 input and 529-point display mapping', (t) => {
@@ -85,6 +97,42 @@ test('a saved restricted classifier and chart remain bound after managed install
     listPackages: () => catalog.list() });
   assert.deepEqual(bindings.read('seatpad2').configuration, configuration);
   assert.throws(() => bindings.update('seatpad2', { expectedRevision: bindings.read('seatpad2').revision, configuration }), { code: 'DISPLAY_SYSTEM_READ_ONLY' });
+});
+
+test('a CPU spatial classifier preserves its tested contract and independent system identity through manifest package delivery', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'shroom-cpu-manifest-package-'));
+  t.after(() => {
+    assert.ok(path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep + 'shroom-cpu-manifest-package-'));
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const installedAlgorithmRoot = path.join(root, 'author-algorithms'); fs.mkdirSync(installedAlgorithmRoot);
+  const draft = cpuDraft('seatpad2', 23, 23);
+  fs.writeFileSync(path.join(installedAlgorithmRoot, `${draft.id}.json`), JSON.stringify(draft));
+  const configuration = { algorithms: [{ packageId: 'user-cpu-spatial', sensorId: 'sit', enabled: true }],
+    charts: [{ id: 'cpu-result', name: '左右压力识别', packageId: 'user-cpu-spatial', metricId: 'classIndex', color: '#20B486', decimals: 0 }] };
+  const exported = exportManifestPackage(sampleSystem(), { installedAlgorithmRoot, bindings: { configuration } });
+  assert.equal(exported.systemId, 'seatpad2');
+  assert.deepEqual(exported.algorithms, [draft]);
+  const managedRoot = path.join(root, 'customer', 'managed-display-systems');
+  const installed = installManifestPackage(exported, { managedRoot, version: 3 });
+  assert.equal(loadDisplaySystemDirectory(installed.directory).config.id, 'seatpad2');
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(installed.directory, 'package-algorithms', `${draft.id}.json`), 'utf8')), draft);
+  const catalog = createRealtimeAlgorithmCatalog(path.join(root, 'customer-agent'), { managedRoot });
+  const published = catalog.list({ includeResolved: true });
+  assert.equal(published.length, 1); assert.equal(published[0].runtime, CPU_RUNTIME);
+  assert.equal(published[0].systemId, 'seatpad2');
+  assert.equal(published[0].revision, realtimePackage(draft).revision);
+  const classifier = published[0].resolvedPackage.classifier;
+  assert.equal(modelDigest(classifier.model), draft.report.modelDigest);
+  assert.equal(classifier.featureVersion, FEATURE_VERSION);
+  assert.deepEqual(classifier.matrix, draft.matrix);
+  assert.equal(classifier.pointCount, draft.report.inputContract.pointCount);
+  assert.equal(classifier.sampleIntervalMs, draft.report.inputContract.sampleIntervalMs);
+  assert.equal(classifier.stage, draft.report.inputContract.stage);
+  assert.deepEqual(published[0].compatibility.recommendedMatrices, [{ rows: 23, cols: 23 }]);
+  const changed = structuredClone(exported); changed.algorithms[0].matrix = { rows: 1, cols: 529, total: 529 };
+  assert.throws(() => installManifestPackage(digest(changed), { managedRoot }), { code: 'SYSTEM_PACKAGE_ALGORITHM_INVALID' });
+  assert.equal(catalog.list({ includeResolved: true })[0].revision, published[0].revision);
 });
 
 test('the author can receive a published system without replacing their saved classifier', (t) => {
@@ -171,6 +219,40 @@ test('a native template package carries its bound restricted classifier', (t) =>
   assert.equal(catalog.list()[0].id, 'user-nativegesture');
   const customer = createBuiltinSystemTemplates({ root: path.join(root, 'customer-native'), managedRoot });
   assert.equal(customer.get('hand_copy').configuration.algorithms[0].packageId, 'user-nativegesture');
+});
+
+test('a native independent copy carries its CPU classifier without taking the built-in source identity', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'shroom-cpu-native-package-'));
+  t.after(() => {
+    assert.ok(path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep + 'shroom-cpu-native-package-'));
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const draft = cpuDraft('hand_cpu_copy', 32, 32);
+  const installedAlgorithmRoot = path.join(root, 'author-algorithms'); fs.mkdirSync(installedAlgorithmRoot);
+  fs.writeFileSync(path.join(installedAlgorithmRoot, `${draft.id}.json`), JSON.stringify(draft));
+  const { nativeInputs } = require('../../extension-host/workspace/builtinSystemConfiguration');
+  const configuration = { algorithms: [{ packageId: 'user-cpu-spatial', sensorId: nativeInputs('hand').channels[0], enabled: true }], charts: [], showPressure: true, showArea: true };
+  const system = { kind: 'builtin-template', editable: true, builtinTemplate: { id: 'hand_cpu_copy', name: '客户手部分类', sourceType: 'hand' }, configuration };
+  const exported = exportNativePackage(system, { installedAlgorithmRoot });
+  assert.equal(exported.systemId, 'hand_cpu_copy'); assert.deepEqual(exported.algorithms, [draft]);
+  const managedRoot = path.join(root, 'managed-native-systems');
+  installNativePackage(exported, { managedRoot, version: 4 });
+  const customer = createBuiltinSystemTemplates({ root: path.join(root, 'customer-native'), managedRoot });
+  assert.equal(customer.get('hand_cpu_copy').managed, true);
+  assert.equal(customer.resolve('hand_cpu_copy', ['hand_cpu_copy']).sourceType, 'hand');
+  assert.equal(customer.get('hand_cpu_copy').configuration.algorithms[0].packageId, 'user-cpu-spatial');
+  const stored = JSON.parse(fs.readFileSync(path.join(managedRoot, 'hand_cpu_copy.json'), 'utf8'));
+  assert.equal(stored.managedPackage.systemId, 'hand_cpu_copy');
+  assert.deepEqual(stored.packageAlgorithms, [draft]);
+  const catalog = createRealtimeAlgorithmCatalog(path.join(root, 'customer-agent'), { managedNativeRoot: managedRoot });
+  const published = catalog.list({ includeResolved: true });
+  assert.equal(published.length, 1); assert.equal(published[0].systemId, 'hand_cpu_copy');
+  assert.equal(published[0].runtime, CPU_RUNTIME);
+  const classifier = published[0].resolvedPackage.classifier;
+  assert.equal(modelDigest(classifier.model), draft.report.modelDigest);
+  assert.deepEqual(classifier.matrix, draft.report.inputContract.matrix);
+  assert.equal(classifier.featureVersion, draft.report.inputContract.featureVersion);
+  assert.equal(classifier.pointCount, 1024); assert.equal(classifier.sampleIntervalMs, 20); assert.equal(classifier.stage, 'data');
 });
 
 test('an Agent renderer dependency is rejected instead of publishing a broken system', (t) => {

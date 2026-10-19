@@ -240,7 +240,7 @@ function createAgentTools({ root, httpBaseUrl = 'http://127.0.0.1:19245', wsUrl 
     const newBindings = configuration.algorithms.filter((entry) => entry.enabled &&
       !previous?.algorithms?.some((old) => old.packageId === entry.packageId && old.sensorId === entry.sensorId && old.enabled));
     const classifiers = newBindings.map((entry) => ({ entry, item: packages.find((item) => item.id === entry.packageId) }))
-      .filter(({ item }) => item?.runtime === 'restricted-python-v1');
+      .filter(({ item }) => ['restricted-python-v1', 'cpu-classifier-v1'].includes(item?.runtime));
     if (!classifiers.length) return [];
     const device = await request('/api/agent-device/status', context);
     if (device.currentSystem?.id !== systemId) throw fail('ALGORITHM_REALTIME_UNVERIFIED', '请先进入目标系统并连接传感器，再让 Agent 启用实时分类；算法可以先保存或添加为停用状态。');
@@ -276,7 +276,7 @@ function createAgentTools({ root, httpBaseUrl = 'http://127.0.0.1:19245', wsUrl 
   }
 
   /** 读取资料目录供用户选择，模型不能修改用户的数据授权范围。 */
-  async function listAlgorithmRecords(payload = {}) { return request('/api/agent-algorithms/records', { method: 'POST', body: { offset: payload.offset || 0 } }); }
+  async function listAlgorithmRecords(payload = {}, context = {}) { return request('/api/agent-algorithms/records', { ...context, method: 'POST', body: { offset: payload.offset || 0 } }); }
 
   /** 将 UI 标签和范围绑定到刚读回的真实记录目录。 */
   async function selectAlgorithmRecords(value) {
@@ -436,7 +436,15 @@ function createAgentTools({ root, httpBaseUrl = 'http://127.0.0.1:19245', wsUrl 
   async function execute(name, args = {}, context = {}) {
     if (!Object.hasOwn(schemas, name)) throw fail('AGENT_UNKNOWN_TOOL', `Unknown tool: ${name}`);
     try { if (Buffer.byteLength(JSON.stringify(args)) > LIMIT_BYTES) throw new Error('arguments exceed the size limit'); validateValue(args, schemas[name]); } catch (cause) { throw fail('AGENT_INVALID_ARGUMENTS', cause.message); }
-    if (['get_algorithm_workspace', 'analyze_algorithm_data', 'adapt_algorithm_data', 'test_algorithm', 'prepare_algorithm_package'].includes(name)) {
+    if (name === 'request_algorithm_data') {
+      if (typeof context.requestAlgorithmData !== 'function') throw fail('ALGORITHM_DATA_REQUEST_UNAVAILABLE', '当前运行器尚不支持聊天内选择数据，请重启软件后重试。');
+      const catalog = await listAlgorithmRecords({}, context);
+      const state = await request('/api/agent-device/status', context);
+      if (!catalog.systemId || catalog.systemId !== state.currentSystem?.id || state.currentSystem.kind === 'unknown') throw fail('ALGORITHM_SYSTEM_CHANGED', '当前系统已切换或尚未识别，请进入目标系统后重试。');
+      if (context.signal?.aborted) throw fail('AGENT_CANCELLED', 'Task cancelled');
+      return context.requestAlgorithmData({ systemId: catalog.systemId, message: args.message });
+    }
+    if (['get_algorithm_workspace', 'analyze_algorithm_data', 'train_algorithm', 'adapt_algorithm_data', 'test_algorithm', 'prepare_algorithm_package'].includes(name)) {
       if (!lab) throw fail('ALGORITHM_UNAVAILABLE', '算法工作台尚未加载，请重启软件。');
       if (name === 'get_algorithm_workspace') {
         const state = await request('/api/agent-device/status', context);
@@ -462,6 +470,26 @@ function createAgentTools({ root, httpBaseUrl = 'http://127.0.0.1:19245', wsUrl 
         return lab.adapt(context, { sensorId: args.sensorId, measuredIntervalMs: frames.timing.medianIntervalMs });
       }
       if (name === 'analyze_algorithm_data') return lab.analyze(context);
+      if (name === 'train_algorithm') {
+        const selected = context.algorithmSelection;
+        if (!selected?.records?.length) throw fail('ALGORITHM_SELECTION_REQUIRED', '请先在本轮聊天中选择带标签的采集记录。');
+        const state = await request('/api/agent-device/status', context);
+        if (state.currentSystem?.id !== selected.systemId) throw fail('ALGORITHM_SYSTEM_CHANGED', '当前系统已变化，请返回目标系统再训练。');
+        const editor = await request(`/api/display-systems/${encodeURIComponent(selected.systemId)}/editor`, context);
+        const value = editor.editor;
+        const inputs = value?.inputs;
+        const sensors = value?.manifest?.sensors || (value?.manifest?.sensor ? [value.manifest.sensor] : []);
+        const channel = selected.records[0].sensorId || selected.records[0].channel;
+        if (selected.records.some((record) => (record.sensorId || record.channel) !== channel)) throw fail('ALGORITHM_CHANNEL_MISMATCH', '一次训练请选择同一传感器通道的记录。');
+        const sensor = sensors.find((sensor) => [sensor.id, sensor.label, sensor.outputChannel].includes(channel)) || (sensors.length === 1 ? sensors[0] : null);
+        const shape = inputs?.matrices?.[channel] || inputs?.matrix || sensor?.matrix || null;
+        const matrix = shape ? { rows: shape.rows, cols: shape.cols, total: shape.total ?? shape.rows * shape.cols } : null;
+        return lab.train(args, context, { matrix, validateInput: async () => {
+          const state = await request('/api/agent-device/status', context);
+          const after = await request(`/api/display-systems/${encodeURIComponent(selected.systemId)}/editor`, context);
+          if (state.currentSystem?.id !== selected.systemId || JSON.stringify(after.editor?.inputs || after.editor?.manifest?.sensors || after.editor?.manifest?.sensor) !== JSON.stringify(inputs || value?.manifest?.sensors || value?.manifest?.sensor)) throw fail('ALGORITHM_SYSTEM_CHANGED', '训练期间系统或输入配置发生变化，请核对后重新训练。');
+        } });
+      }
       if (name === 'test_algorithm') return lab.test(args, context);
       return propose(lab.proposal(args, context), context);
     }
@@ -488,7 +516,8 @@ function createAgentTools({ root, httpBaseUrl = 'http://127.0.0.1:19245', wsUrl 
       if (section === 'policy') return request('/api/agent-apps/policy', context);
       const { catalog, protocols } = await capabilities(context);
       const native = { builtinTemplates: catalog.builtinTemplates || [], builtinTemplateCreation: catalog.builtinTemplateCreation || null, nativeSystemEditing: catalog.nativeSystemEditing || null, manifestAlgorithmEditing: catalog.manifestAlgorithmEditing || null };
-      const algorithmDevelopment = { available: Boolean(lab), language: 'restricted-python-v1', entry: 'get_algorithm_workspace', selectedDataOnly: true, execution: 'local numeric interpreter',
+      const algorithmDevelopment = { available: Boolean(lab), language: 'cpu-classifier-v1', languages: ['cpu-classifier-v1', 'restricted-python-v1'], entry: 'get_algorithm_workspace', selectedDataOnly: true, execution: 'local CPU training and numeric realtime inference',
+        training: { tool: 'train_algorithm', runtime: 'cpu-classifier-v1', execution: 'local single-thread CPU', candidates: ['linear', 'tree', 'forest'], selectedRangesOnly: true, groupedValidation: true },
         adaptation: 'adapt_algorithm_data measures the current realtime channel and reuses selected labels to test on nearest real frames at a compatible cadence',
         installation: 'saved versions with inputContract appear as user-* realtime candidates; Agent first activation checks live frame cadence, but saved package alone is not verified on current hardware; no arbitrary Python execution' };
       const packages = (catalog.algorithmPackages || []).map(({ algorithmSource, packageManifest, ...item }) => ({ ...item, apiVersion: packageManifest?.apiVersion, input: packageManifest?.input, output: packageManifest?.output }));
@@ -496,7 +525,7 @@ function createAgentTools({ root, httpBaseUrl = 'http://127.0.0.1:19245', wsUrl 
       if (section === 'algorithms') return { algorithmDevelopment, nativeSystemEditing: native.nativeSystemEditing, manifestAlgorithmEditing: native.manifestAlgorithmEditing,
         backendAlgorithms: catalog.backendAlgorithms, algorithmPackages: packages, supportedJsonOperations: ['scale', 'offset', 'clamp', 'zeroBelow'], supportedJsonMetrics: ['sum', 'average', 'max', 'min', 'activeCount', 'activeRatio'] };
       if (section === 'display') return { ...native, renderers: catalog.renderers, colormaps: catalog.colormaps, overlays: catalog.overlays, chartOverlays: catalog.chartOverlays, chartMetrics: Object.keys(CHARTS), duplicateSystem: catalog.duplicateSystem || null, chartLimitations: 'Chart tools support only the listed metrics. Respiration/heart-rate charts require an actual compatible algorithm data source and are not provided by renaming pressure charts.' };
-      return { ...native, algorithmDevelopment, protocols: protocols.map(({ id, label, matrix, protocol }) => ({ id, label, matrix, valueCount: protocol?.decoding?.valueCount })), renderers: catalog.renderers, backendAlgorithms: catalog.backendAlgorithms, algorithmPackages: packages.map(({ id, name, description }) => ({ id, name, description })), chartMetrics: Object.keys(CHARTS), limits: { maxSensors: 8, maxPoints: 65536, mapping: 'axisMapping 或显式 lineOrder+pointOrder', modifies: DISPLAY_FIELDS, installsCode: 'realtime: unchanged registered builtin package source; offline: tested restricted-python proposals', activatesDevices: 'explicit connect proposal, guarded by server idle and identity checks' } };
+      return { ...native, algorithmDevelopment, protocols: protocols.map(({ id, label, matrix, protocol }) => ({ id, label, matrix, valueCount: protocol?.decoding?.valueCount })), renderers: catalog.renderers, backendAlgorithms: catalog.backendAlgorithms, algorithmPackages: packages.map(({ id, name, description }) => ({ id, name, description })), chartMetrics: Object.keys(CHARTS), limits: { maxSensors: 8, maxPoints: 65536, mapping: 'axisMapping 或显式 lineOrder+pointOrder', modifies: DISPLAY_FIELDS, installsCode: 'registered builtin packages, validated CPU JSON classifiers or tested restricted-rule proposals; no arbitrary Python', activatesDevices: 'explicit connect proposal, guarded by server idle and identity checks' } };
     }
     if (name === 'read_system') {
       const editor = await read(args.systemId, context);

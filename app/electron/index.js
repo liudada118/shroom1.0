@@ -53,6 +53,32 @@ let viteProcess = null;  // Vite 子进程引用，用于退出时清理
 let staticServer = null; // 生产环境静态资源 HTTP 服务
 let appCleanupPromise = null;
 let agentProcess = null;
+let appServices = null;
+let packagedFrontendRoot = null;
+let frontendCheckTimer = null;
+let servicesStatus = { frontend: {}, usage: {} };
+
+/** Initialize local update and diagnostic services independently from sensor processing. */
+function getAppServices() {
+  if (appServices) return appServices;
+  const { createFrontendCache } = require('../update/frontendCache');
+  const { createUsageAnalytics } = require('./usageAnalytics');
+  const root = app.getPath('userData');
+  const fetchImpl = require('electron').net.fetch.bind(require('electron').net);
+  /** Publish only metadata to the trusted application settings panel. */
+  const publish = () => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('services:status', servicesStatus);
+  };
+  const frontend = createFrontendCache({ root, appVersion: app.getVersion(), fetchImpl,
+    onStatus: detail => { servicesStatus.frontend = { ...frontend.status(), ...detail }; publish(); } });
+  const usage = createUsageAnalytics({ root, appVersion: app.getVersion(), environment: app.isPackaged ? 'production' : 'development',
+    getLicenseKey: require('../../backend/kernel/platform/license/licenseKeyStore').readStoredLicenseKey, fetchImpl,
+    getSecrets: () => agentProcess?.getSecrets() || [],
+    onStatus: detail => { servicesStatus.usage = detail; publish(); } });
+  appServices = { frontend, usage };
+  servicesStatus = { frontend: frontend.status(), usage: usage.status() };
+  return appServices;
+}
 
 /** 首次使用时创建 Agent 管理器，凭据和任务写入独立用户目录。 */
 function getAgentProcess() {
@@ -128,6 +154,7 @@ const createWindow = () => {
   mainWindow.maximize();
 
   // 启动后端服务
+  getAppServices();
   openServer();
 
   // 加载前端页面
@@ -156,8 +183,13 @@ const createWindow = () => {
         autoInstallOnAppQuit: true,    // 退出时自动安装已下载的更新
         checkInterval: 4 * 60 * 60 * 1000, // 每 4 小时自动检查一次
         beforeInstall: prepareForUpdateInstall,
+        onInstallRequested: version => getAppServices().usage.markInstallRequested(version),
       });
       appUpdater.startAutoCheck();
+      frontendCheckTimer = setInterval(() => { void getAppServices().frontend.check(); }, 4 * 60 * 60 * 1000);
+      frontendCheckTimer.unref?.();
+      const firstFrontendCheck = setTimeout(() => { void getAppServices().frontend.check(); }, 30000);
+      firstFrontendCheck.unref?.();
     } else {
       appUpdater.setMainWindow(mainWindow);
     }
@@ -609,6 +641,8 @@ function cleanupApplicationResources() {
   }
 
   appCleanupPromise = (async () => {
+    if (frontendCheckTimer) clearInterval(frontendCheckTimer);
+    appServices?.frontend.dispose();
     killVite();
     // ⚠️ 先停止 Agent 后续调度，再关闭业务服务，避免退出时仍发出写操作。
     if (agentProcess) await agentProcess.dispose();
@@ -619,6 +653,7 @@ function cleanupApplicationResources() {
         if (typeof shutdownServer === 'function') return shutdownServer();
       }),
     ]);
+    await appServices?.usage.dispose();
   })();
 
   return appCleanupPromise;
@@ -659,7 +694,8 @@ function resolveBuildRoot() {
 
   for (const candidate of candidates) {
     if (fs.existsSync(path.join(candidate, "index.html"))) {
-      return candidate;
+      packagedFrontendRoot = candidate;
+      return app.isPackaged ? getAppServices().frontend.selectRoot(candidate) : candidate;
     }
   }
 
@@ -690,7 +726,7 @@ function startStaticServer({ hostname, port, win }) {
     ".map": "application/json",
   };
 
-  const buildRoot = resolveBuildRoot();
+  let buildRoot = resolveBuildRoot();
   logger.info(`[Main] Static build root: ${buildRoot}`);
 
   closeStaticServer();
@@ -704,16 +740,19 @@ function startStaticServer({ hostname, port, win }) {
     } catch (e) {
       // 非法编码则保持原值
     }
-    const filePath = path.join(buildRoot, urlPath);
+    const fallbackResource = /^(model|models|uv)\//.test(urlPath) && !fs.existsSync(path.join(buildRoot, urlPath));
+    const resourceRoot = fallbackResource ? packagedFrontendRoot || buildRoot : buildRoot;
+    const filePath = path.join(resourceRoot, urlPath);
 
     // 防目录穿越：解码后的真实路径必须仍位于 buildRoot 内
-    if (!path.resolve(filePath).startsWith(path.resolve(buildRoot))) {
+    if (!path.resolve(filePath).startsWith(path.resolve(resourceRoot) + path.sep)) {
       res.writeHead(403, { "Content-Type": "text/plain" });
       res.end("Forbidden");
       return;
     }
 
     fs.readFile(filePath, (err, data) => {
+      res.setHeader('Cache-Control', 'no-store');
       if (err) {
         // SPA fallback: 对于非静态资源请求，返回 index.html
         if (urlPath.indexOf(".") === -1) {
@@ -745,6 +784,13 @@ function startStaticServer({ hostname, port, win }) {
     require('./agentProcess').loadAgentWindowUrl(win, `http://${hostname}:${port}`).catch((err) => {
       logger.error(`[Main] Failed to load frontend: ${err.message}`);
     });
+    const bootCheck = setTimeout(() => {
+      if (!win.isDestroyed() && getAppServices().frontend.rollback(packagedFrontendRoot)) {
+        buildRoot = getAppServices().frontend.selectRoot(packagedFrontendRoot);
+        void require('./agentProcess').loadAgentWindowUrl(win, `http://${hostname}:${port}`);
+      }
+    }, 30000);
+    bootCheck.unref?.();
   });
 }
 
@@ -752,6 +798,19 @@ function startStaticServer({ hostname, port, win }) {
 // 应用生命周期
 // ============================================================
 app.whenReady().then(() => {
+  ipcMain.handle('services:command', async (event, action, input) => {
+    if (!require('./agentProcess').isTrustedAgentSender(event, mainWindow)) throw new Error('应用来源无效。');
+    const services = getAppServices();
+    if (action === 'status') return { frontend: { ...servicesStatus.frontend, ...services.frontend.status() }, usage: services.usage.status() };
+    if (action === 'frontendReady') { const value = services.frontend.ready(); servicesStatus.frontend = value; return value; }
+    if (action === 'checkFrontend') { void services.frontend.check(); return services.frontend.status(); }
+    if (action === 'setUsageEnabled') return services.usage.setEnabled(input?.enabled);
+    if (action === 'retryUsage') return services.usage.retry();
+    if (action === 'recordUsage') return services.usage.record(input);
+    throw new Error('不支持的应用设置操作。');
+  });
+  process.on('uncaughtExceptionMonitor', error => appServices?.usage.record({ eventName: 'error_reported', properties: {
+    module: 'electron', errorType: 'uncaughtException', severity: 'fatal', message: String(error.message), stack: String(error.stack || '') } }));
   const { registerAgentIpc } = require('./agentProcess');
   registerAgentIpc({ ipcMain, getWindow: () => mainWindow, getProcess: getAgentProcess });
   // 防止息屏后系统暂停应用，保持 WebSocket 数据通道持续工作

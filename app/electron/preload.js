@@ -49,6 +49,17 @@ const VALID_RECEIVE_CHANNELS = [
 ];
 
 contextBridge.exposeInMainWorld("electronAPI", {
+  services: {
+    /** Invoke a finite settings action; credentials and file paths remain in the main process. */
+    invoke: (action, input = {}) => ipcRenderer.invoke('services:command', action, input),
+    /** Receive update and diagnostic delivery status without exposing Electron events. */
+    subscribe: listener => {
+      if (typeof listener !== 'function') return () => {};
+      const handler = (_event, state) => listener(state);
+      ipcRenderer.on('services:status', handler);
+      return () => ipcRenderer.removeListener('services:status', handler);
+    },
+  },
   agent: {
     /** 调用主进程校验过的 Agent 动作，不暴露任意 IPC。 */
     invoke: (action, payload = {}) => ipcRenderer.invoke('agent:invoke', action, payload),

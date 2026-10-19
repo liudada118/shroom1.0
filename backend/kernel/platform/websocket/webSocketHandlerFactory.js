@@ -185,20 +185,29 @@ function createWebSocketHandlerAttacher(ctx) {
     controlCommandService.registerHandler({
       name: 'license-activation',
       when: (message) => message.date?.date != null,
-      handle: (message) => {
+      handle: (message, context) => {
         if (typeof activateSubmittedLicenseKey !== 'function') {
           const error = new Error('license activation service is not available');
           error.code = 'COMMAND_EXECUTION_FAILED';
           throw error;
         }
         const activation = activateSubmittedLicenseKey(message.date.date);
-        if (!activation.ok) {
-          const error = new Error(activation.message);
-          error.code = activation.code || 'COMMAND_EXECUTION_FAILED';
-          throw error;
-        }
-        publishSystemEvent(activation.payload);
-        return { activationCode: activation.code || 'OK', payload: activation.payload };
+        /** Complete activation only after device authorization has finished. */
+        const finish = (value) => {
+          if (!value.ok) {
+            const error = new Error(value.message);
+            error.code = value.code || 'COMMAND_EXECUTION_FAILED';
+            throw error;
+          }
+          publishSystemEvent(value.payload);
+          return { activationCode: value.code || 'OK', payload: value.payload };
+        };
+        if (!activation?.then) return finish(activation);
+        const payload = {};
+        const operation = activation.then(value => { const result = finish(value); Object.assign(payload, result.payload); return result; });
+        if (typeof context.waitFor === 'function') context.waitFor(operation);
+        else operation.catch(error => publishSystemEvent({ licenseError: error.message, licenseErrorCode: error.code, noLicense: true }));
+        return { activationCode: 'OK', payload };
       },
     });
 
@@ -269,15 +278,24 @@ function createWebSocketHandlerAttacher(ctx) {
         publishSystemEvent({ licenseError: '未检测到有效密钥，请输入密钥后使用', noLicense: true });
       }
 
-      ws.on('message', function incoming(message) {
+      ws.on('message', async function incoming(message) {
         const getMessage = parseJsonMessage(message, { logger, clientName });
         if (!getMessage) return;
 
+        const pending = [];
         const commandResult = controlCommandService.executeWs(getMessage, {
           client: ws,
           clientName,
           scope: resolveCommandScope(wsSubscriptions, ws),
+          waitFor: operation => pending.push(Promise.resolve(operation).catch(error => ({ error }))),
         });
+        const completed = pending.length ? await Promise.all(pending) : [];
+        const failed = completed.find(value => value?.error);
+        if (failed) {
+          commandResult.results.push({ name: 'license-authorization', code: failed.error.code, message: failed.error.message, error: failed.error.message });
+          commandResult.ok = false;
+          publishSystemEvent({ licenseError: failed.error.message, licenseErrorCode: failed.error.code, noLicense: true });
+        }
         sendCommandResultAck(ws, getMessage, commandResult, logger);
         // 这一行目前是空操作 —— 后面没有别的处理了，return 与自然结束等价。
         // 留着是因为它标出了 `stop` 的语义（「到此为止，别再往下发」）：

@@ -46,6 +46,7 @@ export function copyPointGridFrame(values, total) {
  * @param {number} options.amountY 列方向点数。
  * @param {number} options.separation 规则矩阵点间距。
  * @param {Array<[number, number]>} [options.points] row-major 物理点位表。
+ * @param {boolean} [options.transposeAxes=false] 规则矩阵沿主对角线交换平面轴，物理点位保持原坐标。
  * @returns {Float32Array} 每点三个分量的基础坐标，Y 固定为 0。
  */
 export function buildPointGridBasePositions({
@@ -53,6 +54,7 @@ export function buildPointGridBasePositions({
   amountY,
   separation,
   points = null,
+  transposeAxes = false,
 }) {
   const total = amountX * amountY;
   const result = new Float32Array(total * 3);
@@ -93,9 +95,11 @@ export function buildPointGridBasePositions({
   for (let row = 0; row < amountX; row += 1) {
     for (let col = 0; col < amountY; col += 1) {
       const offset = index * 3;
-      result[offset] = row * separation - ((amountX - 1) * separation) / 2;
+      const x = row * separation - ((amountX - 1) * separation) / 2;
+      const z = col * separation - ((amountY - 1) * separation) / 2;
+      result[offset] = transposeAxes ? z : x;
       result[offset + 1] = 0;
-      result[offset + 2] = col * separation - ((amountY - 1) * separation) / 2;
+      result[offset + 2] = transposeAxes ? x : z;
       index += 1;
     }
   }
@@ -138,7 +142,8 @@ export function runPointGridPipeline(source, channel, blurRadius, output) {
 
   const target = output && output.length === total ? output : new Array(total).fill(0);
 
-  gaussBlur_1(padded, target, amountY, amountX, blurRadius);
+  if (blurRadius > 0) gaussBlur_1(padded, target, amountY, amountX, blurRadius);
+  else for (let index = 0; index < total; index++) target[index] = padded[index];
 
   return target;
 }

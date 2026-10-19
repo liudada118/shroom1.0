@@ -29,7 +29,7 @@ try {
   await dock.getByRole('button', { name: '反馈', exact: true }).waitFor();
 
   /** 实测屏内边界、44px 点击区、间隔与命中元素，覆盖独立 fixed 引起的原始遮挡。 */
-  async function checkLayout(expectedCount = 4) {
+  async function checkLayout(expectedCount = 5) {
     const result = await dock.evaluate((element) => {
       const buttons = [...element.querySelectorAll('button')].filter((button) => !button.closest('dialog'));
       return { viewport: innerWidth, overflow: document.documentElement.scrollWidth > innerWidth,
@@ -73,6 +73,19 @@ try {
   await history.waitFor();
   await history.getByRole('button', { name: /^关\s*闭$/ }).click();
   await history.waitFor({ state: 'hidden' });
+  await dock.getByRole('button', { name: '应用更新与使用统计设置' }).click();
+  const services = page.getByRole('dialog', { name: '应用设置' });
+  assert.equal(await services.getByRole('checkbox').isChecked(), true);
+  await services.getByText(/首次使用默认开启，可随时关闭/).waitFor();
+  await services.getByRole('checkbox').uncheck();
+  await page.waitForFunction(() => window.appToolsFixture.calls.some(call => call.serviceAction === 'setUsageEnabled' && call.enabled === false));
+  await services.getByRole('checkbox').check();
+  await page.waitForFunction(() => window.appToolsFixture.calls.some(call => call.serviceAction === 'setUsageEnabled' && call.enabled));
+  await services.getByRole('button', { name: '检查网页更新' }).click();
+  await services.getByText('新版页面已缓存，下次启动生效。').waitFor();
+  await services.getByRole('checkbox').uncheck();
+  await services.getByRole('button', { name: 'Close', exact: true }).click();
+  await services.waitFor({ state: 'hidden' });
   await dock.getByRole('button', { name: '软件更新' }).click();
   await page.waitForFunction(() => window.appToolsFixture.calls.some((call) => call.action === 'checkForUpdate'));
   assert.equal(await dock.getByRole('button', { name: '软件更新' }).isDisabled(), true);
@@ -104,8 +117,9 @@ try {
   await page.getByRole('dialog', { name: '提交反馈' }).waitFor();
   await page.getByRole('button', { name: '关闭反馈' }).click();
   await page.getByRole('button', { name: '切换首页反馈' }).click();
-  await checkLayout(3);
+  await checkLayout(4);
   await page.getByRole('button', { name: '切换首页反馈' }).click();
+  await dock.getByRole('button', { name: '反馈', exact: true }).waitFor();
   await checkLayout();
 
   await page.goto(`${url}?version=2.0.0-preview-with-a-very-long-version`);

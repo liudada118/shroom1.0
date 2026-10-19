@@ -30,8 +30,10 @@ const manifestAlgorithmConfiguration = object({
   charts: nativeConfiguration.properties.charts,
 }, ['algorithms', 'charts']);
 const schemas = {
+  request_algorithm_data: object({ message: string(500) }),
   get_algorithm_workspace: object({}),
   analyze_algorithm_data: object({}),
+  train_algorithm: object({ name: string(80) }, ['name']),
   adapt_algorithm_data: object({ sensorId: identifier }, ['sensorId']),
   test_algorithm: object({ name: string(80), source: string(16000), validation: { type: 'boolean' } }, ['name', 'source', 'validation']),
   prepare_algorithm_package: object({ draftId: identifier }, ['draftId']),
@@ -62,8 +64,10 @@ const schemas = {
   prepare_connect_device: object({ systemId: identifier, sensorId: identifier, portPath: string(240), summary: string(1000) }, ['systemId', 'sensorId', 'portPath', 'summary']),
 };
 const descriptions = {
+  request_algorithm_data: '在本轮聊天中请求用户选择当前系统的采集记录；用户确认后自动继续同一个任务。仅查询记录目录元数据，不读取未选择的压力帧。优先复用当前系统已有有效选择；缺少数据或用户要求换数据时调用，不要让用户寻找顶部菜单。不得代选记录、猜标签或扩大范围。',
   get_algorithm_workspace: '查询已选记录、类别、用途、受限 Python 契约以及当前系统保存的分类算法源码和 realtimePackageId。查看保存算法无需重新选数据；分析与测试仍只能使用用户已选范围。',
   analyze_algorithm_data: '本机分析已选择采集记录，返回开发集窗口特征统计及真实数据摘要，不上传原始帧，不向模型泄露验证集特征。先读取算法工作台。',
+  train_algorithm: '使用用户明确选择且带标签的记录，在独立 CPU 进程训练并比较线性、决策树和随机森林。默认训练入口，无需手写阈值；复用本机特征缓存，按整次采集分组比较，独立验证只评估冻结模型。返回真实候选结果、错例、限制和 draftId，再用 prepare_algorithm_package 生成保存提案。只读所选范围，不调用云端训练、不安装依赖、不自动启用实时识别。分组不足时只能报告开发集效果，不能宣称独立准确率。',
   adapt_algorithm_data: '根据当前系统指定实时通道测得的采样节奏，将已选、已带标签记录重新组织为相同节奏的真实帧窗口并返回开发集特征；不插值、不改原始记录。后续 analyze_algorithm_data 和 test_algorithm 在本任务内使用该适配目标。缺少足够真实帧时会说明需扩大已选范围或缩小窗口。',
   test_algorithm: '对选定记录运行新编写的受限 Python predict(f)。validation=false 为开发测试；true 在冻结源码后运行一次独立验证，使用过的验证采集不能重复用于调参后的独立验证。每任务最多 6 次。返回真实报告、误判及 draftId。禁止捏造准确率；支持的语法以工作台为准。',
   prepare_algorithm_package: '使用本会话数据范围内已真实测试的 draftId，生成源码和报告保存提案。保存后有输入契约的版本进入实时目录，但这只表示可以申请绑定，不表示当前设备频率兼容。绑定启用前使用当前系统对应的算法更新工具核验实时通道采样节奏；无设备时可先保存停用配置，不修改采集数据。',

@@ -1,6 +1,6 @@
 # Agent 聊天同步：客户端交付与服务端接口
 
-更新：2026-09-23。默认地址为 `https://shroom.jq-industries.com/api/agent/conversations`。新版客户端支持现有软件密钥自动鉴权，服务端对应实现位于 `E:/key`；需部署 `0014_agent_chat_license_auth` 迁移并升级两端。生产 HTTPS 已通过本机软件密钥及实际会话上传联调：HTTP 200、匹配 eventId 的 `accepted:true` 回执、客户端待传队列归零。该结论是服务端按契约确认接收，未直接查询生产数据库。
+更新：2026-10-14。默认地址为 `https://shroom.jq-industries.com/api/agent/conversations`。新版客户端首次使用默认自动同步，以软件密钥鉴权，无需另外配置同步地址或上传令牌。服务端对应实现位于 `E:/key`；离线密钥支持需新增 `0021_agent_chat_offline_sources` 迁移并升级两端。2026-09-23 的在线密钥生产 HTTPS 联调曾收到 HTTP 200、匹配 eventId 的 `accepted:true` 回执及队列归零；这是当时的契约确认，不代表本次默认策略及离线支持已经部署。
 
 ## 1. 客户首次使用与升级
 
@@ -13,11 +13,13 @@
 
 ## 2. 配置上传与范围
 
-服务端就绪后，在 Agent → 模型设置 → **聊天同步** 保留官方地址，上传凭证留空，勾选开启并点击 **保存同步设置**。主进程复用 `readStoredLicenseKey` 读取当前软件密钥，不回传给页面或模型、不另存至同步配置。同步默认关闭。已有独立凭证可清除后保存，切换为软件密钥鉴权。
+首次使用默认自动同步。主进程复用 `readStoredLicenseKey` 读取当前软件密钥，不回传给页面或模型、不另存至同步配置；客户不需要额外保存同步设置。面板优先显示同步说明、状态和重试按钮，地址、凭证和开关放在折叠的“高级同步设置”中。已有手动关闭和自定义接口配置保留，损坏配置仍暂停上传；已有独立凭证可在高级设置清除后保存，切换为软件密钥鉴权。
 
 首次使用默认填入 `https://shroom.jq-industries.com/api/agent/conversations`。仅此精确 HTTPS 地址可自动接收软件密钥；其他地址必须单独填写上传凭证，旧自定义配置保持原样，切换地址清除旧凭证。手动配置的凭证优先使用 Bearer，不代用模型 API Key。开发版须重启 Electron；安装版须更新安装包。
 
 服务器只允许已登记、未过期且状态为 ISSUED/ACTIVATED/RENEWED 的软件密钥上传；暂停、吊销、异常、软删除、过期及停用/删除的关联客户均拒绝。续期以数据库期限为准；无密钥或未知密钥不允许上传。公司名由服务器关联客户或密钥中保存的公司名称确定，未绑定公司的有效密钥单独显示“未绑定公司 · 密钥 #ID”。
+
+在线密钥沿用原有来源身份。离线 RSA 激活码按已登记记录、签发公钥、签名范围及期限验证，并要求有效客户关联；v2/v3/v4 范围均按对应签名格式解析。离线密钥来源使用唯一 `offline_key_id`，不与同数字 ID 的在线密钥混淆，也不会因客户关联变化修改会话的来源主键。尚未关联客户的离线码需管理员在密钥网站处理，不要求客户填写额外上传凭证。
 
 启用时同步当前会话已有内容，之后同步用户消息、助手最终回复和任务状态变化。流式 token 不逐个上传；同一会话未发送的版本可以合并为包含全部消息的最新快照。打开旧会话也会同步它，不自动遍历全部历史归档。
 
@@ -103,7 +105,7 @@ Content-Type: application/json
 | 建议表 | 字段与约束 |
 | --- | --- |
 | upload_credentials | token_hash、tenant_id、权限、有效期/撤销状态；保存不可逆摘要 |
-| agent_chat_sources | id、唯一 customer_id 或唯一 license_key_id，提供稳定的聊天来源身份 |
+| agent_chat_sources | id、唯一 customer_id、唯一 license_key_id 或唯一 offline_key_id，提供稳定的聊天来源身份 |
 | agent_conversations | tenant_id、installation_id、conversation_id 联合主键；revision、snapshot_json、received_at |
 | agent_sync_events | tenant_id、installation_id、event_id 联合唯一；conversation_id、revision、payload_hash、accepted_at |
 
@@ -125,7 +127,7 @@ Content-Type: application/json
 
 切换软件密钥不会把旧密钥待传队列交给新密钥；切回原密钥并重试可续传。旧 Bearer 队列不自动迁移到软件密钥来源，需要用户重新打开会话同步。调度发送前重新检查本机授权配置，避免继续使用已移除的旧密钥；服务器每次上传再次校验当前有效性。不同客户不应共用本机聊天数据目录，用户主动打开的历史会话仍属于当前启用同步的范围。
 
-联调至少覆盖：首次关闭无上传、完整成功/失败任务、重复事件、迟到版本、断网/503 后重启续传、401 后换凭证、关闭时中止、跳转被拒、大请求、错误 ACK、不同客户会话隔离。仓库已有合成 HTTP 与真实 Electron/ASAR 夹具；实际服务端上线后还需 HTTPS、鉴权和可靠存储联调。
+联调至少覆盖：首次无同步配置自动上传、已有关闭选择保留、在线/离线鉴权、完整成功/失败任务、重复事件、迟到版本、断网/503 后重启续传、401 后换凭证、关闭时中止、跳转被拒、大请求、错误 ACK、不同客户会话隔离。仓库已有合成 HTTP 与真实 Electron/ASAR 夹具；实际服务端上线后还需 HTTPS、鉴权和可靠存储联调。
 
 ### 2026-09-23 生产接口重新连接
 

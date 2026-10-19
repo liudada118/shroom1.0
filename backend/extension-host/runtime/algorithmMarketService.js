@@ -1,7 +1,11 @@
 const { createPythonAlgorithmRunner } = require('../../kernel/algorithm-channel/displaySystemAlgorithmRunner');
 const { SENSOR_DEFINITIONS } = require('@shroom/backend/sensors');
 const { createRealtimeClassifier } = require('../../agent-runtime/algorithm-lab/realtimeRunner');
-const { RUNTIME } = require('../../agent-runtime/algorithm-lab/realtimeCatalog');
+const { RUNTIME, CPU_RUNTIME } = require('../../agent-runtime/algorithm-lab/realtimeCatalog');
+
+/** 受限规则和训练模型共用有界分类线程及自动恢复。 */
+function isClassifier(item) { return [RUNTIME, CPU_RUNTIME].includes(item?.runtime); }
+const { recordBusinessEvent, observeUsageOperation } = require('../../common/businessEvents');
 
 /** 用户分类器按离线记录的阶段读取，不能一律用归一化矩阵替换已测试压力值。 */
 function inputValues(frame, item) {
@@ -71,6 +75,7 @@ function createAlgorithmMarketService({ channelBus, packages = [], listUserPacka
     const instance = instances.get(id);
     if (!instance) return closing.get(id) || Promise.resolve();
     instances.delete(id);
+    recordBusinessEvent('algorithm_result', { ...instance.usageProperties, featureId: 'algorithms', action: 'runtime_stopped', result: 'success' });
     const task = Promise.resolve().then(() => instance.runner.dispose()).catch(() => {}).finally(() => {
       if (closing.get(id) === task) closing.delete(id);
     });
@@ -123,6 +128,14 @@ function createAlgorithmMarketService({ channelBus, packages = [], listUserPacka
 
   /** 按已收帧的通道启停受信包，重复点击幂等，销毁完成前不能重建同一 Python 模块。 */
   async function toggle({ sensorType, packageId, channelId, enabled } = {}, configurationKey = null) {
+    const input = { sensorType, packageId, channelId, enabled };
+    return configurationKey ? toggleUnobserved(input, configurationKey)
+      : observeUsageOperation('algorithm_result', { featureId: 'algorithms', action: enabled ? 'enable' : 'disable',
+        ...(typeof sensorType === 'string' ? { systemType: sensorType, systemOrigin: Object.hasOwn(SENSOR_DEFINITIONS, sensorType) ? 'builtin' : 'custom' } : {}) }, () => toggleUnobserved(input, configurationKey));
+  }
+
+  /** Keep automatic binding retries outside user operation counts. */
+  async function toggleUnobserved({ sensorType, packageId, channelId, enabled } = {}, configurationKey = null) {
     refreshCatalog();
     if (typeof enabled !== 'boolean') fail('enabled 必须是布尔值', 400);
     const current = context();
@@ -141,14 +154,14 @@ function createAlgorithmMarketService({ channelBus, packages = [], listUserPacka
     const item = catalog.get(packageId);
     if (item.systemId && item.systemId !== sensorType) fail('此用户算法属于另一系统，请在目标系统重新测试后保存。');
     if (item.systemId && selected.frame.displaySystemId !== item.systemId) fail('输入通道不属于此算法的系统。');
-    if (selected.inputError && item.runtime !== RUNTIME) fail(selected.inputError);
+    if (selected.inputError && !isClassifier(item)) fail(selected.inputError);
     const reason = incompatibility(item, selected.matrix);
     if (reason) fail(reason);
     const selectedValues = inputValues(selected.frame, item);
     if (!Array.isArray(selectedValues) || selectedValues.length !== selected.matrix.total || !selectedValues.every(Number.isFinite)) fail('当前帧数据不完整，请检查协议和线序后重试');
     const existing = instances.get(packageId);
     if (existing) {
-      if (configurationKey && !existing.configurationKey) { await remove(packageId); return toggle({ sensorType, packageId, channelId, enabled }, configurationKey); }
+      if (configurationKey && !existing.configurationKey) { await remove(packageId); return toggleUnobserved({ sensorType, packageId, channelId, enabled }, configurationKey); }
       if (existing.channelId !== channelId) fail('此算法已在另一通道运行，请先停用');
       return snapshot();
     }
@@ -157,12 +170,14 @@ function createAlgorithmMarketService({ channelBus, packages = [], listUserPacka
     if (latestContext.sensorType !== sensorType || !contextKey || closed || (!native && (latestContext.reservedPackageIds || []).includes(packageId))) fail('当前系统状态已变化，请重试');
     if (configurationKey && !latestContext.systemConfiguration?.algorithms?.some((entry) => entry.enabled && JSON.stringify(entry) === configurationKey)) fail('系统算法配置已变化');
     if (!channels.has(channelId) || now() - channels.get(channelId).receivedAt > 2000) fail('传感器数据已中断，请重新连接后启用');
-    if (instances.has(packageId)) return toggle({ sensorType, packageId, channelId, enabled }, configurationKey);
+    if (instances.has(packageId)) return toggleUnobserved({ sensorType, packageId, channelId, enabled }, configurationKey);
     if (instances.size >= 8) fail('最多同时运行 8 个算法，请先停用其他算法。');
     if (catalog.get(packageId)?.revision !== item.revision) fail('算法版本已变化，请刷新后重试。');
-    const runner = native ? { dispose: async () => {} } : item.runtime === RUNTIME ? createRealtimeClassifier(item.resolvedPackage)
+    const runner = native ? { dispose: async () => {} } : isClassifier(item) ? createRealtimeClassifier(item.resolvedPackage)
       : createRunner({ entry: item.resolvedPackage.resolvedEntry, algorithmPackage: item.resolvedPackage, timeoutMs: 3000 });
-    instances.set(packageId, { id: packageId, channelId, runner, native, configurationKey, token: ++generation, windowEpoch: 0, status: 'waiting', error: '', history: [], dropped: 0, lastReceived: now(), lastTimestamp: null });
+    instances.set(packageId, { id: packageId, channelId, runner, native, configurationKey, token: ++generation, windowEpoch: 0, status: 'waiting', error: '', history: [], dropped: 0, lastReceived: now(), lastTimestamp: null,
+      usageProperties: { systemType: current.sensorType, systemOrigin: Object.hasOwn(SENSOR_DEFINITIONS, current.sensorType) ? 'builtin' : 'custom',
+        algorithmId: item.systemId ? 'user-classifier' : item.id } });
     return snapshot();
   }
 
@@ -180,7 +195,8 @@ function createAlgorithmMarketService({ channelBus, packages = [], listUserPacka
       configuredPending.set(id, pending);
       pending.promise = toggle({ sensorType: current.sensorType, packageId: id, channelId: input.frame.channelId, enabled: true }, signature)
         .then(() => { if (configuredPending.get(id) === pending) configuredErrors.delete(id); })
-        .catch((error) => { if (configuredPending.get(id) === pending) configuredErrors.set(id, { key, at: now(), message: error.message }); })
+        .catch((error) => { if (configuredPending.get(id) === pending) configuredErrors.set(id, { key, at: now(), message: error.message,
+          reported: configuredErrors.get(id)?.key === key && configuredErrors.get(id)?.reported === true }); })
         .finally(() => { if (configuredPending.get(id) === pending) configuredPending.delete(id); });
     }
   }
@@ -190,21 +206,21 @@ function createAlgorithmMarketService({ channelBus, packages = [], listUserPacka
     if (instance.faulted || !item || (item.systemId && frame.displaySystemId !== item.systemId)) return;
     if (instance.retryAfter > now()) return;
     const values = inputValues(frame, item);
-    if ((inputError && item.runtime !== RUNTIME) || incompatibility(item, matrix) || !Array.isArray(values) || values.length !== matrix.total || !values.every(Number.isFinite)) {
+    if ((inputError && !isClassifier(item)) || incompatibility(item, matrix) || !Array.isArray(values) || values.length !== matrix.total || !values.every(Number.isFinite)) {
       instance.faulted = true; instance.status = 'error'; instance.error = '矩阵与算法输入不匹配，请检查线序与点数后重新启用';
-      if (item.runtime === RUNTIME) void instance.runner.dispose(); return;
+      if (isClassifier(item)) void instance.runner.dispose(); return;
     }
     const timestamp = frame.timestamp;
     if (!Number.isFinite(timestamp)) return;
     // 同毫秒发布不代表倒序；仅跳过算法采样，不修改原帧或刷新有效数据接收时间。
     if (timestamp === instance.lastTimestamp) {
-      if (item.runtime === RUNTIME) instance.dropped++;
+      if (isClassifier(item)) instance.dropped++;
       return;
     }
     const backwards = instance.lastTimestamp !== null && timestamp < instance.lastTimestamp;
     const interrupted = instance.lastTimestamp !== null && now() - instance.lastReceived > 2000;
-    if (item.runtime !== RUNTIME && backwards) return;
-    if (item.runtime !== RUNTIME && interrupted) {
+    if (!isClassifier(item) && backwards) return;
+    if (!isClassifier(item) && interrupted) {
       instance.faulted = true; instance.status = 'error'; instance.error = '数据中断，需停用后重新启用以重置算法窗口'; return;
     }
     const resetReason = backwards ? '数据时间戳倒序，正在重新积累分类窗口。'
@@ -233,13 +249,13 @@ function createAlgorithmMarketService({ channelBus, packages = [], listUserPacka
         throw new Error('empty metrics');
       }
       const point = { timestamp, sequence: frame.sequence, metrics };
-      if (item.runtime === RUNTIME || !instance.history.length || timestamp - instance.history.at(-1).timestamp >= 500) instance.history.push(point);
+      if (isClassifier(item) || !instance.history.length || timestamp - instance.history.at(-1).timestamp >= 500) instance.history.push(point);
       else instance.history[instance.history.length - 1] = { ...point, timestamp: instance.history.at(-1).timestamp };
       if (instance.history.length > 120) instance.history.shift();
       instance.status = 'running'; instance.error = metrics.onbedFilterHealthy === 0 ? '生命体征算法不可用，CoP 仍独立输出' : '';
     }).catch((error) => {
       if (!owned()) return;
-      if (item.runtime === RUNTIME) {
+      if (isClassifier(item)) {
         if (error.code === 'ALGORITHM_REALTIME_RECOVERING') return;
         instance.faulted = true; instance.status = 'error'; instance.error = error.code === 'ALGORITHM_REALTIME_FAILED' ? error.message : '分类运行失败，请停用后重新启用。';
         instance.history = []; void instance.runner.dispose(); return;
@@ -268,7 +284,24 @@ function createAlgorithmMarketService({ channelBus, packages = [], listUserPacka
   /** 装配状态异常时停用旁路，不能升级为 Electron 主进程未捕获异常。 */
   function tick() {
     if (closed) return;
-    try { refreshCatalog(); context(); } catch {
+    try {
+      refreshCatalog(); context();
+      for (const instance of instances.values()) {
+        const state = instance.status === 'error' ? 'error' : now() - instance.lastReceived > 2000 ? 'paused' : instance.status;
+        if (state === instance.usageState) continue;
+        instance.usageState = state;
+        recordBusinessEvent('algorithm_result', { ...instance.usageProperties, featureId: 'algorithms', action: `runtime_${state}`,
+          result: state === 'running' ? 'success' : state === 'error' ? 'failure' : 'unknown',
+          algorithmId: catalog.get(instance.id)?.systemId ? 'user-classifier' : instance.id,
+          ...(state === 'error' ? { errorCode: instance.faulted ? 'ALGORITHM_INPUT_OR_RUNTIME_INVALID' : 'ALGORITHM_RUNTIME_FAILED' } : {}) });
+      }
+      for (const [id, problem] of configuredErrors) {
+        if (problem.reported) continue;
+        problem.reported = true;
+        recordBusinessEvent('algorithm_result', { featureId: 'algorithm_binding', action: 'automatic_start', result: 'failure',
+          algorithmId: catalog.get(id)?.systemId ? 'user-classifier' : id, errorCode: 'ALGORITHM_BIND_START_FAILED' });
+      }
+    } catch {
       contextKey = ''; channels.clear();
       for (const id of instances.keys()) remove(id);
     }

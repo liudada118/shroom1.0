@@ -15,7 +15,7 @@ import {
 
 const KEYS = [
   'dataWidth', 'dataHeight', 'radius', 'max', 'min',
-  'maxOpacity', 'alphaFloor', 'canvasScale', 'shadow', 'gradient',
+  'maxOpacity', 'alphaFloor', 'canvasScale', 'shadow', 'gradient', 'transposeAxes',
 ];
 
 describe('normalizeBlobHeatmapParams', () => {
@@ -31,6 +31,7 @@ describe('normalizeBlobHeatmapParams', () => {
       canvasScale: 0.6,   // window.innerHeight * 0.6
       shadow: true,
       gradient: null,
+      transposeAxes: false,
     });
   });
 
@@ -91,6 +92,13 @@ describe('normalizeBlobHeatmapParams', () => {
     expect(normalizeBlobHeatmapParams({ shadow: false }).shadow).toBe(false);
     expect(normalizeBlobHeatmapParams({ shadow: 0 }).shadow).toBe(false);
     expect(normalizeBlobHeatmapParams({ shadow: 'yes' }).shadow).toBe(true);
+  });
+
+  it('坐标反射只接受显式布尔 true，旧默认和非布尔输入均保持原方向', () => {
+    expect(normalizeBlobHeatmapParams({ transposeAxes: true }).transposeAxes).toBe(true);
+    for (const value of [undefined, null, false, 0, 1, '', 'true', 'false', [], {}]) {
+      expect(normalizeBlobHeatmapParams({ transposeAxes: value }).transposeAxes).toBe(false);
+    }
   });
 
   it('gradient 透传，缺省是 null（用 GRADIENT_STOPS）', () => {

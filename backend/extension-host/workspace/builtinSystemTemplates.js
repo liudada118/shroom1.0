@@ -3,6 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { LICENSE_SENSOR_GROUPS } = require('../../../licenseScopes');
 const { nativeInputs, validateNativeConfiguration } = require('./builtinSystemConfiguration');
+const { observeUsageOperation } = require('../../common/businessEvents');
 
 const BUILTIN_TEMPLATES = Object.freeze(LICENSE_SENSOR_GROUPS.flatMap((group) => group.items.map((item) => ({
   id: item.value, name: item.label, labelKey: item.labelKey,
@@ -162,7 +163,17 @@ function createBuiltinSystemTemplates({ root, managedRoot = null, isOccupied = (
   function currentId(sourceType) { return selected?.sourceType === sourceType ? selected.id : sourceType; }
 
   reload();
-  return { catalog: BUILTIN_TEMPLATES, userRoot: root, create, get, editor, reload, resolve, activate, currentId, preview, update, remove,
+  return { catalog: BUILTIN_TEMPLATES, userRoot: root,
+    create: (...args) => observeUsageOperation('custom_system_saved', { featureId: 'workspace_copy', action: 'create_native' }, () => create(...args)),
+    /** Distinguish algorithm binding changes from edits to names and chart settings. */
+    update: (id, input) => {
+      const bindingsChanged = JSON.stringify(systems.get(id)?.configuration?.algorithms) !== JSON.stringify(input?.configuration?.algorithms);
+      return observeUsageOperation(bindingsChanged ? 'algorithm_result' : 'custom_system_saved', {
+        featureId: bindingsChanged ? 'algorithm_binding' : 'workspace', action: 'edit_native', systemType: id, systemOrigin: 'copy',
+      }, () => update(id, input));
+    },
+    remove: (...args) => observeUsageOperation('custom_system_saved', { featureId: 'workspace', action: 'delete' }, () => remove(...args)),
+    get, editor, reload, resolve, activate, currentId, preview,
     getRuntimeConfiguration: (id) => systems.get(id)?.configuration || null,
     list: () => [...systems.values()].map(definition) };
 }

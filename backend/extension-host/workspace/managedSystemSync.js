@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { createHash, verify } = require('node:crypto');
+const { recordBusinessEvent, observeUsageOperation } = require('../../common/businessEvents');
 
 const DEFAULT_URL = 'https://shroom.jq-industries.com';
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
@@ -81,6 +82,11 @@ function createManagedSystemSync({ root, getLicenseKey, installPackage, baseUrl 
 
   /** Verify the grant first, then each release; keep the previous installed version on failure. */
   async function sync() {
+    return observeUsageOperation('custom_system_saved', { featureId: 'system_sync', action: 'sync' }, syncUnobserved);
+  }
+
+  /** Assemble a verified customer catalog without publishing raw packages or customer names. */
+  async function syncUnobserved() {
     const key = getLicenseKey();
     if (!key) throw Object.assign(new Error('请先激活软件密钥'), { code: 'LICENSE_REQUIRED' });
     const envelope = await request(new URL('/api/system-packages/client/catalog', endpoint), key, 12000);
@@ -106,8 +112,14 @@ function createManagedSystemSync({ root, getLicenseKey, installPackage, baseUrl 
           throw Object.assign(new Error('系统包签名或目录版本不一致'), { code: 'SYSTEM_PACKAGE_SIGNATURE_INVALID' });
         }
         installPackage(data.package, item.version);
+        recordBusinessEvent('custom_system_saved', { featureId: 'system_install', action: 'install', result: 'success',
+          systemType: item.systemId, systemOrigin: 'custom' });
         installed.push({ systemId: item.systemId, name: item.name, version: item.version });
-      } catch (error) { errors.push({ systemId: item.systemId, code: error.code || 'SYSTEM_INSTALL_FAILED', message: error.message }); }
+      } catch (error) {
+        recordBusinessEvent('custom_system_saved', { featureId: 'system_install', action: 'install', result: 'failure', errorCode: error.code || 'SYSTEM_INSTALL_FAILED',
+          systemType: item.systemId, systemOrigin: 'custom' });
+        errors.push({ systemId: item.systemId, code: error.code || 'SYSTEM_INSTALL_FAILED', message: error.message });
+      }
     }
     return { installed, errors, available: catalog.systems.map(({ systemId, name, version }) => ({ systemId, name, version })) };
   }

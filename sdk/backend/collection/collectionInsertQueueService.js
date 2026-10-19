@@ -19,7 +19,7 @@ function getNativeDb(dbRef) {
  * 创建采集入库队列，统一处理批量写入、定时 flush 和数据库错误回调。
  *
  * @param {{ sql: string, batchSize: number, flushIntervalMs: number, onError?: Function }} options 队列配置。
- * @returns {{ enqueue: Function, flushAll: Function, flushQueue: Function }} 入库队列服务。
+ * @returns {{ enqueue: Function, flushAll: Function, flushQueue: Function, getStats: Function }} 入库队列及只读计数。
  */
 function createCollectionInsertQueueService({
   sql,
@@ -30,6 +30,7 @@ function createCollectionInsertQueueService({
   const queues = new Set();
   const queueByDb = new WeakMap();
   let flushTimer = null;
+  const stats = { queued: 0, written: 0, failed: 0, pending: 0, exact: true };
 
   /**
    * 获取指定数据库连接对应的队列，不存在时延迟创建。
@@ -98,20 +99,32 @@ function createCollectionInsertQueueService({
         }
         if (!queue.tx) {
           queue.tx = nativeDb.transaction((batchRows) => {
+            let written = 0;
             for (const params of batchRows) {
-              queue.stmt.run(...params);
+              const result = queue.stmt.run(...params);
+              written += Number.isFinite(result?.changes) ? result.changes : 1;
             }
+            return written;
           });
         }
-        queue.tx(rows);
+        const written = queue.tx(rows);
+        if (Number.isFinite(written)) stats.written += written;
+        else stats.exact = false;
+        stats.pending -= rows.length;
       } else {
+        stats.exact = false;
         for (const params of rows) {
           queue.dbRef.run(sql, params, function onRun(error) {
+            stats.pending = Math.max(0, stats.pending - 1);
+            if (error) stats.failed++;
+            else stats.written += Number.isFinite(this?.changes) ? this.changes : 1;
             reportError(error, queue.channel);
           });
         }
       }
     } catch (error) {
+      stats.pending = Math.max(0, stats.pending - rows.length);
+      stats.failed += rows.length;
       reportError(error, queue.channel);
     } finally {
       queue.flushing = false;
@@ -137,6 +150,7 @@ function createCollectionInsertQueueService({
     if (!queue) return;
 
     queue.rows.push(params);
+    stats.queued++; stats.pending++;
     if (queue.rows.length >= batchSize) {
       flushQueue(queue);
     } else {
@@ -148,6 +162,8 @@ function createCollectionInsertQueueService({
     enqueue,
     flushAll,
     flushQueue,
+    /** Return counts only; queued rows and SQL values never leave the writer. */
+    getStats: () => ({ ...stats }),
   };
 }
 

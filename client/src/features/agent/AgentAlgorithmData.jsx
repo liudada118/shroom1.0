@@ -1,12 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { collectionLabel } from './collectionLabels';
 
 /** 复用采集标签选择算法数据，确认后才授权读取所选范围。 */
-export default function AgentAlgorithmData({ invoke, selection, disabled, onSave, onClose }) {
+export default function AgentAlgorithmData({ invoke, selection, disabled, onSave, onClose, inline = false, expectedSystemId, submitLabel = '使用所选数据' }) {
+  const compatibleSelection = !expectedSystemId || selection?.systemId === expectedSystemId ? selection : null;
   const [catalog, setCatalog] = useState(null);
-  const [offset, setOffset] = useState(selection?.catalogOffset || 0);
-  const [chosen, setChosen] = useState(() => Object.fromEntries((selection?.records || []).map((item) => [item.id, item])));
-  const [windowFrames, setWindowFrames] = useState(selection?.windowFrames || 32);
+  const [offset, setOffset] = useState(compatibleSelection?.catalogOffset || 0);
+  const [chosen, setChosen] = useState(() => Object.fromEntries((compatibleSelection?.records || []).map((item) => [item.id, item])));
+  const [windowFrames, setWindowFrames] = useState(compatibleSelection?.windowFrames || 32);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
@@ -15,6 +16,8 @@ export default function AgentAlgorithmData({ invoke, selection, disabled, onSave
   const [bulkLabel, setBulkLabel] = useState('');
   const [notice, setNotice] = useState('');
   const [saving, setSaving] = useState(false);
+  const savingLock = useRef(false);
+  const errorRef = useRef(null);
   const busy = disabled || saving;
   const rows = (catalog?.records || []).map((record) => ({ ...record, collectionLabel: collectionLabel(record.date, labelRule) }));
   const groups = [...new Set(rows.map((record) => record.collectionLabel))];
@@ -25,11 +28,22 @@ export default function AgentAlgorithmData({ invoke, selection, disabled, onSave
   const batchCount = Math.min(8 - selectedCount, available.length);
   useEffect(() => {
     let alive = true;
-    setLoading(true); setError('');
-    invoke('listAlgorithmRecords', { offset }).then((result) => { if (alive) setCatalog(result); }, (cause) => { if (alive) setError(cause.message); })
+    setLoading(true); setError(''); setCatalog(null);
+    invoke('listAlgorithmRecords', { offset }).then((result) => {
+      if (!alive) return;
+      if (expectedSystemId && result?.systemId !== expectedSystemId) {
+        setChosen({}); setError('当前系统已变化，请返回原系统后刷新记录，或取消本次选择后重新提出需求。'); return;
+      }
+      setCatalog(result);
+    }, (cause) => { if (alive) setError(cause.message); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [invoke, offset, attempt]);
+  }, [invoke, offset, attempt, expectedSystemId]);
+  /** 将提交错误定位到可聚焦反馈，保留当前已选记录。 */
+  const fail = (message) => {
+    setError(message);
+    requestAnimationFrame(() => errorRef.current?.focus());
+  };
   /** 修改本地标签与帧范围，不读取数据直到用户确认。 */
   const update = (id, patch) => setChosen((previous) => ({ ...previous, [id]: { ...previous[id], ...patch } }));
   /** 新选择默认沿用采集标签；空值和超长值留给界面校验，不截断类别。 */
@@ -58,23 +72,27 @@ export default function AgentAlgorithmData({ invoke, selection, disabled, onSave
   };
   /** 保存失败保留全部输入；成功后由宿主切回聊天。 */
   const save = async (event) => {
-    event.preventDefault(); setError('');
+    event.preventDefault();
+    if (busy || savingLock.current || loading || !catalog) return;
+    setError('');
+    if (expectedSystemId && catalog.systemId !== expectedSystemId) { fail('当前系统已变化，请刷新记录后重试。'); return; }
+    if (selectedCount < 2 || selectedCount > 8) { fail('请选择 2～8 条采集记录。'); return; }
     if (Object.values(chosen).some((item) => !item.label.trim() || item.label.trim().length > 40 || item.label.trim() === '未知')) {
-      setError('部分已选记录的类别缺失或无效。请显示全部记录后补填，或按采集标签筛选后统一修改。'); return;
+      fail('部分已选记录的类别缺失或无效。请显示全部记录后补填，或按采集标签筛选后统一修改。'); return;
     }
-    setSaving(true);
+    savingLock.current = true; setSaving(true);
     try { await onSave({ systemId: catalog.systemId, catalogOffset: offset, windowFrames, records: Object.values(chosen).map(({ labelAutomatic, ...item }) => item) }); }
-    catch (cause) { setError(cause.message); }
-    finally { setSaving(false); }
+    catch (cause) { fail(cause.message); }
+    finally { savingLock.current = false; setSaving(false); }
   };
   /** 翻页前清空草稿选择，避免把未显示记录当成当前页授权。 */
   const turnPage = (next) => { setChosen({}); setLabelFilter('all'); setNotice(''); setOffset(next); };
-  return <section className="shroom-agent-algorithm-data" aria-label="算法数据选择">
-    <div className="shroom-agent-history-heading"><h3>算法数据</h3><button type="button" onClick={onClose} disabled={busy}>返回聊天</button></div>
+  return <section className={`shroom-agent-algorithm-data${inline ? ' is-inline' : ''}`} aria-label="算法数据选择" aria-busy={loading || saving}>
+    <div className="shroom-agent-history-heading"><h3>选择算法数据</h3><button type="button" onClick={onClose} disabled={busy}>{inline ? '取消选择' : '返回聊天'}</button></div>
     <p>勾选要使用的数据即可，自动沿用采集时的标签。需要时可展开“修改标签”自行填写，原采集记录保留。</p>
-    <p className="shroom-agent-send-hint">计算在本机进行；开发集特征摘要、标签、生成代码及测试结果会发送给配置的模型服务。完整压力帧不发送给模型。</p>
-    {error && <p role="alert" className="shroom-agent-error">{error}</p>}
-    {loading ? <p role="status">正在读取采集记录…</p> : !catalog ? <button onClick={() => setAttempt((value) => value + 1)}>重试读取</button> : <form onSubmit={save} noValidate>
+    <p className="shroom-agent-send-hint">计算在本机进行；任务所需的标签、统计摘要和评估结果会发送给配置的模型服务。完整压力帧不发送给模型。</p>
+    {error && <p ref={errorRef} tabIndex={-1} role="alert" className="shroom-agent-error">{error}</p>}
+    {loading ? <p role="status">正在读取采集记录…</p> : !catalog ? <button type="button" disabled={busy} onClick={() => setAttempt((value) => value + 1)}>重试读取</button> : <form onSubmit={save} noValidate>
       <p>系统：{catalog.systemId}</p>
       <label>按采集标签筛选（当前页）<select disabled={busy} value={labelFilter} onChange={(event) => { setLabelFilter(event.target.value); setNotice(''); }}>
         <option value="all">全部标签 · {rows.length} 条</option>{groups.map((label) => <option key={label} value={`label:${label}`}>{label || '未提取到标签'} · {rows.filter((record) => record.collectionLabel === label).length} 条</option>)}
@@ -114,7 +132,7 @@ export default function AgentAlgorithmData({ invoke, selection, disabled, onSave
       <p className="shroom-agent-send-hint">翻页会清空本页选择。每次 2～8 条记录、至少两类开发数据；独立验证请使用另一次采集的数据，同次采集不能拆分到两组。</p>
       <label>每个识别窗口的帧数<select disabled={busy} value={windowFrames} onChange={(event) => setWindowFrames(Number(event.target.value))}>{[16, 32, 64, 128, 256].map((count) => <option key={count} value={count}>{count} 帧</option>)}</select></label>
       <p className="shroom-agent-send-hint">本次总量最多 200 万个压力数值，超限时请减少帧数。尾部不足一个窗口的帧会在报告中单列。分类算法在本机测试，保存后可绑定当前系统进行实时识别。</p>
-      <div className="shroom-agent-data-pages"><button className="shroom-agent-primary" type="submit" disabled={busy || selectedCount < 2}>{saving ? '正在保存…' : '使用所选数据'}</button>{selection && <button type="button" disabled={busy} onClick={() => onSave(null).catch((cause) => setError(cause.message))}>清除选择</button>}</div>
+      <div className="shroom-agent-data-pages"><button className="shroom-agent-primary" type="submit" disabled={busy || selectedCount < 2}>{saving ? '正在提交…' : submitLabel}</button>{selection && !inline && <button type="button" disabled={busy} onClick={() => onSave(null).catch((cause) => setError(cause.message))}>清除选择</button>}</div>
     </form>}
   </section>;
 }

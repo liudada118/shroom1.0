@@ -171,7 +171,7 @@ function probeInterpreter(candidate) {
     [
       ...candidate.args,
       "-c",
-      "import sys, numpy, PyInstaller; assert sys.version_info[:2] == (3, 11), sys.version; print(sys.executable)",
+      "import sys, numpy, scipy, sklearn, joblib, threadpoolctl, narwhals, PyInstaller; assert sys.version_info[:2] == (3, 11), sys.version; print(sys.executable)",
     ],
     {
       cwd: pythonRoot,
@@ -217,7 +217,7 @@ function resolveInterpreter() {
   throw new Error(
     [
       "No usable Python build environment found for packaging.",
-      "Expected Python 3.11 with numpy and PyInstaller installed.",
+      "Expected Python 3.11 with the pinned dependencies from python/requirements.txt. Run py -3.11 -m pip install -r python/requirements.txt.",
       ...failures.map((failure) => `- ${failure}`),
     ].join("\n")
   );

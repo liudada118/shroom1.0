@@ -31,6 +31,7 @@ import React, {
 } from 'react';
 
 import { normalizeWebglHeatmapParams } from '../core/params.js';
+import { createMatrixVisualTuning } from '../../shared/matrixVisualTuning.js';
 import {
   buildHeatPoints,
   frameStats,
@@ -54,7 +55,7 @@ const WebglHeatmapRenderer = React.forwardRef(function WebglHeatmapRenderer(prop
   }, []);
 
   const params = useMemo(
-    () => normalizeWebglHeatmapParams(props.params),
+    () => ({ ...normalizeWebglHeatmapParams(props.params), workspaceTuning: props.params?.workspaceTuning === true }),
     [props.params],
   );
   const paramsRef = useRef(params);
@@ -66,13 +67,16 @@ const WebglHeatmapRenderer = React.forwardRef(function WebglHeatmapRenderer(prop
     totalWindow: [],
     pointWindow: [],
     dirty: true,
+    visual: createMatrixVisualTuning({ width: params.dataWidth, height: params.dataHeight, max: params.max, filter: params.filter }),
   });
 
   // 预设换了要跟着换调参基线，否则切预设只改尺寸不改阈值。
   useEffect(() => {
     stateRef.current.cfg = { max: params.max, filter: params.filter, size: params.radius };
+    stateRef.current.visual = createMatrixVisualTuning({ width: params.dataWidth, height: params.dataHeight, max: params.max, filter: params.filter });
+    if (params.workspaceTuning && stateRef.current.frame.length) stateRef.current.visual.push(stateRef.current.frame);
     stateRef.current.dirty = true;
-  }, [params.max, params.filter, params.radius]);
+  }, [params.max, params.filter, params.radius, params.dataWidth, params.dataHeight, params.workspaceTuning]);
 
   /**
    * 把一帧的读数推给宿主。
@@ -111,7 +115,8 @@ const WebglHeatmapRenderer = React.forwardRef(function WebglHeatmapRenderer(prop
       return;
     }
     const { max, filter, size } = stateRef.current.cfg;
-    const values = prepareFrame(stateRef.current.frame, { ...current, filter });
+    const visual = current.workspaceTuning ? stateRef.current.visual.read() : stateRef.current.frame;
+    const values = prepareFrame(visual, { ...current, filter: current.workspaceTuning ? 0 : filter });
     const points = buildHeatPoints(values, current);
 
     const source = painter.render({
@@ -161,19 +166,27 @@ const WebglHeatmapRenderer = React.forwardRef(function WebglHeatmapRenderer(prop
   const sitData = useCallback((prop) => {
     const { wsPointData, local } = prop || {};
     if (!wsPointData || wsPointData.length < paramsRef.current.minFrameLength) return;
-    stateRef.current.frame = wsPointData;
+    stateRef.current.frame = wsPointData.slice();
+    if (paramsRef.current.workspaceTuning) stateRef.current.visual.push(wsPointData);
     stateRef.current.dirty = true;
     publishStats(wsPointData, local ?? props.local);
   }, [publishStats, props.local]);
 
   /**
-   * 侧栏两个滑块。`valuej` → 满值阈值，`valuef` → 下限。
+   * 工作区五种调节只改变视觉副本，旧内置路径保留原有两个滑块。
    *
    * @param {{valuej?: number, valuef?: number}} obj 调参。
    * @returns {void}
    */
   const sitValue = useCallback((obj) => {
     if (!obj) return;
+    if (paramsRef.current.workspaceTuning) {
+      stateRef.current.visual.update(obj);
+      const values = stateRef.current.visual.settings();
+      stateRef.current.cfg.max = values.valuej; stateRef.current.cfg.filter = values.valuef;
+      stateRef.current.dirty = true;
+      return;
+    }
     if (obj.valuej !== undefined) stateRef.current.cfg.max = obj.valuej;
     if (obj.valuef !== undefined) stateRef.current.cfg.filter = obj.valuef;
     stateRef.current.dirty = true;
@@ -187,6 +200,14 @@ const WebglHeatmapRenderer = React.forwardRef(function WebglHeatmapRenderer(prop
    */
   const changeColor = useCallback((obj) => {
     if (!obj) return;
+    if (paramsRef.current.workspaceTuning) {
+      stateRef.current.visual.update({ valuej: obj.max, valuef: obj.filter });
+      const values = stateRef.current.visual.settings();
+      stateRef.current.cfg.max = values.valuej; stateRef.current.cfg.filter = values.valuef;
+      if (typeof obj.size === 'number' && Number.isFinite(obj.size)) stateRef.current.cfg.size = Math.max(1, Math.min(256, obj.size));
+      stateRef.current.dirty = true;
+      return;
+    }
     if (obj.max !== undefined) stateRef.current.cfg.max = obj.max;
     if (obj.filter !== undefined) stateRef.current.cfg.filter = obj.filter;
     if (obj.size !== undefined) stateRef.current.cfg.size = obj.size;
@@ -203,7 +224,8 @@ const WebglHeatmapRenderer = React.forwardRef(function WebglHeatmapRenderer(prop
    */
   const bthClickHandle = useCallback((wsPointData) => {
     if (wsPointData && wsPointData.length >= paramsRef.current.minFrameLength) {
-      stateRef.current.frame = wsPointData;
+      stateRef.current.frame = wsPointData.slice();
+      if (paramsRef.current.workspaceTuning) stateRef.current.visual.push(wsPointData);
       publishStats(wsPointData, props.local);
     }
     renderFrame();
@@ -211,12 +233,17 @@ const WebglHeatmapRenderer = React.forwardRef(function WebglHeatmapRenderer(prop
     return canvasRef.current;
   }, [publishStats, renderFrame, props.local]);
 
+  /** 旧实例保留颜色和过滤，工作区实例声明其余真实调节能力。 */
+  const getTuningControls = useCallback(() => ({ showColor: true, showFilter: true, showGuass: paramsRef.current.workspaceTuning,
+    showConsis: paramsRef.current.workspaceTuning, showInit: paramsRef.current.workspaceTuning }), []);
+
   useImperativeHandle(refs, () => ({
     sitData,
     sitValue,
     changeColor,
     bthClickHandle,
-  }), [sitData, sitValue, changeColor, bthClickHandle]);
+    getTuningControls,
+  }), [sitData, sitValue, changeColor, bthClickHandle, getTuningControls]);
 
   return (
     <div

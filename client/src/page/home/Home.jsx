@@ -4449,8 +4449,9 @@ class Home extends React.Component {
 
   /** 工具箱复用原生框选开关与统计索引，关闭时同步清掉旧选区。 */
   changePortalSelection = (enabled) => {
-    if (typeof this.com.current?.changeSelectFlag !== 'function') return;
-    this.com.current.changeSelectFlag(!enabled, this.state.local);
+    const renderer = this.getActiveRendererRef().current;
+    if (typeof renderer?.changeSelectFlag !== 'function') return;
+    renderer.changeSelectFlag(!enabled, this.state.local);
     this.setState({ selectFlag: enabled, ...(!enabled ? { width: 0, height: 0 } : {}) });
     if (!enabled) {
       this.sitIndexArr = new Array(4).fill(0);
@@ -4458,6 +4459,10 @@ class Home extends React.Component {
       this.handIndexArr = new Array(4).fill(0);
     }
   };
+
+  /** 统一工具区读取当前展示系统的实例，避免生成系统仍调用旧原生画布。 */
+  getActiveRendererRef = () => getDisplayDefinition(this.state.matrixName)?.source === 'manifest'
+    ? this.manifestDisplay : this.com;
 
   render() {
     // rotate: "旋转",
@@ -4807,7 +4812,7 @@ class Home extends React.Component {
                     this.setState({
                       selectFlag: !flag,
                     });
-                    this.com.current?.changeSelectFlag(flag, this.state.local);
+                    this.getActiveRendererRef().current?.changeSelectFlag?.(flag, this.state.local);
 
 
 
@@ -4938,7 +4943,7 @@ class Home extends React.Component {
             onRuntimeDefinitionsLoaded={() => this.applyCurrentSensorType(localStorage.getItem('file'))}
             allowedTypes={this.state.allowedTypes}
             sensorTypeList={this.state.sensorTypeList ? this.state.sensorTypeList.flat : null}
-            com={this.com}
+            com={this.getActiveRendererRef()}
             track={this.track}
             port={this.state.port}
             portname={this.state.portname}

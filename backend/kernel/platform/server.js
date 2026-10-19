@@ -23,6 +23,7 @@ const { createServerShutdownOrchestrator } = require('./bootstrap/serverShutdown
 const { createPetCareRuntimeService } = require('../algorithm-channel/petCareRuntimeService');
 const { createAlgorithmMarketService } = require('../../extension-host/runtime/algorithmMarketService');
 let algorithmMarketService = null;
+let frameUsageObserver = null;
 const { createControlCommandRouter } = require('./commands/controlCommandRouter');
 const { createHalowService, hasSerialConnection, registerHalowControlHandler } = require('../transport/halowService');
 let halowService = null;
@@ -182,6 +183,9 @@ const {
   validateLicenseKey,
 } = require('./license/licenseValidationService');
 const { readStoredLicenseKey, writeStoredLicenseKey } = require('./license/licenseKeyStore');
+const { createDeviceAuthorization } = require('./license/deviceAuthorization');
+const { recordBusinessEvent } = require('../../common/businessEvents');
+const { createFrameUsageObserver } = require('../../common/frameUsageObserver');
 const { createManagedSystemSync } = require('../../extension-host/workspace/managedSystemSync');
 const { createStaffPackageSubmission } = require('../../extension-host/workspace/staffPackageSubmission');
 const { createServerPathConfig } = require('./serverPathConfig');
@@ -579,6 +583,7 @@ function shouldStoreCollectionFrame(channel = 'sit') {
  * @returns {number} 收到广播的客户端数量。
  */
 function broadcastCollectionStorageError(error = {}) {
+  recordBusinessEvent('usage_session_summary', { featureId: 'collection_save', action: 'storage_error', result: 'failure', errorCode: 'COLLECTION_STORAGE_FAILED' });
   return publishSystemEvent( {
     collectionStorageError: {
       message: error.message || 'database space is insufficient; collection stopped',
@@ -1337,6 +1342,8 @@ function getShutdownOrchestrator() {
  *   原因见 `serverShutdownOrchestrator`。
  */
 function shutdownServer() {
+  frameUsageObserver?.dispose();
+  if (deviceAuthorizationTimer) { clearInterval(deviceAuthorizationTimer); deviceAuthorizationTimer = null; }
   appRuntime.displaySystems.stopRuntimeDispatch();
   return Promise.all([algorithmMarketService?.dispose(), halowService?.dispose()])
     .then(() => getShutdownOrchestrator().shutdownServer());
@@ -1385,6 +1392,12 @@ let endDate = 0;
 const defauleFile = 'hand0205';
 let date, sysStartTime, file = defauleFile, selectFlag;
 let licenseFile = null;
+const deviceAuthorization = createDeviceAuthorization({
+  root: electronApp?.getPath ? electronApp.getPath('userData') : runtimeWritableRoot,
+  ...(electronNet?.fetch ? { fetchImpl: electronNet.fetch.bind(electronNet) } : {}),
+});
+let deviceAuthorizationTimer = null;
+let licenseActivationGeneration = 0;
 
 if (fs.existsSync(nameTxt)) {
   try {
@@ -1394,11 +1407,17 @@ if (fs.existsSync(nameTxt)) {
       fallbackFile: defauleFile,
     });
     if (validation.ok) {
-      endDate = validation.state.endDate;
+      endDate = 0;
       licenseFile = validation.state.licenseFile;
       selectFlag = validation.state.selectFlag;
       file = validation.state.nextFile;
       baudRate = getSensorBaudRate(file);
+      void deviceAuthorization.authorize(dateRes.trim(), validation.state).then((access) => {
+        if (serverShutdownRequested || getStoredLicenseKey()?.trim() !== dateRes.trim()) return;
+        endDate = access.ok ? access.expiresAt : 0;
+        publishSystemEvent(access.ok ? { date: endDate, file: licenseFile, selectFlag, licenseDeviceLimit: access.deviceLimit }
+          : { licenseError: access.message, licenseErrorCode: access.code, noLicense: true });
+      }).catch(() => publishSystemEvent({ licenseError: '电脑授权验证暂不可用，请联网后重试。', noLicense: true }));
     } else {
       logger.warn('[License] stored license rejected:', validation.code);
     }
@@ -1587,6 +1606,18 @@ const {
 } = webSocketRuntime;
 let server = wsServer;
 
+let usageSystemIdentity = {};
+/** Read the public system identity without searching template metadata on every sensor frame. */
+function readUsageSystemContext() {
+  const systemType = zeroChannelIdentityResolver.getActiveDisplaySystemId() || appRuntime.builtinTemplates.currentId(runtimeContext.getSensorType());
+  if (usageSystemIdentity.systemType !== systemType) usageSystemIdentity = { systemType,
+    systemOrigin: appRuntime.builtinTemplates.get(systemType) ? 'copy'
+      : appRuntime.builtinTemplates.catalog.some(item => item.id === systemType) ? 'builtin' : 'custom' };
+  return usageSystemIdentity;
+}
+frameUsageObserver = createFrameUsageObserver({ channelBus, getContext: () => ({ ...readUsageSystemContext(),
+  playback: runtimeContext.isLocalPlayback(), allowed: runtimeContext.getNowDate() < endDate }) });
+
 algorithmMarketService = createAlgorithmMarketService({
   channelBus,
   packages: appRuntime.getAlgorithmMarketPackages(),
@@ -1733,6 +1764,18 @@ function parseOutboundSystemEvent(data) {
 function publishSystemEvent(data) {
   const event = parseOutboundSystemEvent(data);
   if (!event) return wsSubscriptions.publishScope('main', data);
+  if (event.serialStatus) {
+    const statuses = Array.isArray(event.serialStatus) ? event.serialStatus : [event.serialStatus];
+    for (const status of statuses) frameUsageObserver?.connection(status);
+    for (const status of statuses) if (['open', 'error'].includes(status?.status)) recordBusinessEvent('device_connection_result', {
+      featureId: 'connection', connectionType: 'serial', result: status.status === 'open' ? 'success' : 'failure',
+      ...(status.error?.code && /^[A-Za-z0-9_.:-]{1,80}$/.test(status.error.code) ? { errorCode: status.error.code } : {}) });
+  }
+  if (event.halowStatus) {
+    const status = event.halowStatus;
+    const connected = status.phase === 'listening' && status.clients?.some(client => client.deviceId === status.selectedDeviceId);
+    frameUsageObserver?.connection({ role: 'halow', status: connected ? 'connected' : 'closed' }, 'halow');
+  }
   for (const key of ['currentSensorType', 'activeSensorType']) {
     if (event[key]) event[key] = appRuntime.builtinTemplates.currentId(event[key]);
   }
@@ -2071,7 +2114,8 @@ function getStoredLicenseKey() {
  * @returns {{ok: boolean, code: string, payload?: object}} 激活结果；
  *   失败时直接返回校验器的结果对象（含具体失败原因码）。
  */
-function activateSubmittedLicenseKey(licenseKey) {
+async function activateSubmittedLicenseKey(licenseKey) {
+  const generation = ++licenseActivationGeneration;
   const validation = validateLicenseKey(licenseKey, {
     decryptStr: module2.decryptStr,
     fallbackFile: runtimeContext.getSensorType() || defauleFile,
@@ -2079,10 +2123,13 @@ function activateSubmittedLicenseKey(licenseKey) {
   if (!validation.ok) return validation;
 
   const state = validation.state;
+  const access = await deviceAuthorization.authorize(licenseKey.trim(), state);
+  if (generation !== licenseActivationGeneration || serverShutdownRequested) return { ok: false, code: 'LICENSE_ACTIVATION_REPLACED', message: '此激活操作已取消或被新的密钥替代。' };
+  if (!access.ok) return { ok: false, code: access.code, message: access.message };
   writeStoredLicenseKey(licenseKey, { targetPath: writableNameTxt });
   licenseFile = state.licenseFile;
   selectFlag = state.selectFlag;
-  endDate = state.endDate;
+  endDate = access.expiresAt;
 
   if (state.nextFile) {
     file = state.nextFile;
@@ -2100,10 +2147,30 @@ function activateSubmittedLicenseKey(licenseKey) {
       file: licenseFile || file,
       currentSensorType: appRuntime.builtinTemplates.currentId(file),
       selectFlag,
+      licenseDeviceLimit: access.deviceLimit,
       ...(state.moduleConfig ? { moduleConfig: state.moduleConfig } : {}),
     },
   };
 }
+
+/** Revalidate computers; a valid signed offline allowance survives temporary network failure. */
+deviceAuthorizationTimer = setInterval(() => {
+  const key = getStoredLicenseKey()?.trim();
+  if (!key) return;
+  const validation = validateLicenseKey(key, { decryptStr: module2.decryptStr, fallbackFile: runtimeContext.getSensorType() });
+  if (!validation.ok) return;
+  void deviceAuthorization.authorize(key, validation.state).then(access => {
+    if (serverShutdownRequested || getStoredLicenseKey()?.trim() !== key) return;
+    endDate = access.ok ? access.expiresAt : 0;
+    if (!access.ok) {
+      setCollectionState('flag', false);
+      closeAllManagedSerialPorts();
+      void halowService?.stop();
+      publishSystemEvent({ licenseError: access.message, licenseErrorCode: access.code, noLicense: true });
+    }
+  }).catch(error => logger.warn('[LicenseDevices] recheck failed', error.code || 'LICENSE_SERVICE_UNAVAILABLE'));
+}, 2 * 60 * 60 * 1000);
+deviceAuthorizationTimer.unref?.();
 
 // 注册运行时控制命令，getRuntime/setRuntime 是旧运行时变量的过渡适配层。
 registerRuntimeCommandHandlers(controlCommandRouter, {
@@ -2114,11 +2181,14 @@ registerRuntimeCommandHandlers(controlCommandRouter, {
   normalizeSmallBed12BDisplayOptions,
   resetCollectionStorageClock,
   flushCollectionInsertQueues,
+  getCollectionWriteStats: collectionInsertQueueService.getStats,
+  getUsageContext: readUsageSystemContext,
   startPlaybackTimer,
   stopPlaybackTimer,
   getRuntime: () => ({
     backTotal,
     colHZ: getCollectionState('colHZ'),
+    flag: getCollectionState('flag'),
     com,
     com1,
     collectOptions: getCollectionState('collectOptions'),

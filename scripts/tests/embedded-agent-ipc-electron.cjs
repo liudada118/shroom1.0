@@ -54,7 +54,10 @@ async function main() {
   const result = await getState(mainWindow.webContents);
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.data.settings.hasApiKey, false);
-  assert.equal(result.data.chatSync.settings.enabled, false);
+  const staleSelection = await mainWindow.webContents.executeJavaScript("window.electronAPI.agent.invoke('submitAlgorithmData', {taskId:'missing-task', requestId:'missing-request', selection:{systemId:'fixture-system', records:[]}})");
+  assert.equal(staleSelection.ok, false);
+  assert.equal(staleSelection.error.code, 'AGENT_NOT_CONFIGURED');
+  assert.equal(result.data.chatSync.settings.enabled, true);
   assert.equal(result.data.chatSync.settings.endpoint, 'https://shroom.jq-industries.com/api/agent/conversations');
   assert.equal(result.data.chatSync.settings.hasToken, false);
   const syncSaved = await mainWindow.webContents.executeJavaScript("window.electronAPI.agent.invoke('saveSyncSettings', {enabled:false, endpoint:'https://example.invalid/chat', token:'synthetic-upload-credential'})");

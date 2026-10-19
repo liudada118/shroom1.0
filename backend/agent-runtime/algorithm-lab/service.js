@@ -6,6 +6,9 @@ const { writeJsonAtomic, readJson } = require('../storage');
 const { agentError } = require('../errors');
 const { FEATURES, EXAMPLE, compile } = require('./restrictedPython');
 const { realtimePackage } = require('./realtimeCatalog');
+const { trainCpuClassifier } = require('./cpuTrainingProcess');
+const { CPU_RUNTIME, validateCpuModel, modelDigest } = require('./cpuModel');
+const { FEATURE_VERSION } = require('./spatialFeatures');
 
 /** 计算配置及源码的稳定校验值，测试报告不能绑定到另一份代码。 */
 function digest(value) { return createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
@@ -32,8 +35,8 @@ function compute(payload, signal) {
 }
 
 /** 管理选定数据的快照、数值源码测试与版本化算法库。 */
-function createAlgorithmLab({ root, request }) {
-  const snapshots = new Map(), attempts = new Map(), adaptations = new Map();
+function createAlgorithmLab({ root, request, trainCpu = trainCpuClassifier }) {
+  const snapshots = new Map(), attempts = new Map(), adaptations = new Map(), featureCache = new Map();
   const ledgerFile = path.join(root, 'algorithm-lab', 'validation-ledger.json');
   const ledger = readJson(ledgerFile, {});
   /** 仅允许宿主生成的文件标识进入工作目录。 */
@@ -44,7 +47,7 @@ function createAlgorithmLab({ root, request }) {
   /** 获取当前会话明确选中的数据范围，不接受模型替换选择。 */
   function selection(context) {
     const value = context.algorithmSelection;
-    if (!value?.records?.length) throw agentError('ALGORITHM_SELECTION_REQUIRED', '请先点击聊天框的“算法数据”，选择采集记录并标注类别。');
+    if (!value?.records?.length) throw agentError('ALGORITHM_SELECTION_REQUIRED', '请在本轮聊天中选择采集记录，已有标签会自动带入。');
     return value;
   }
   /** 按有界分页取数并固定本次记录摘要，原始压力数组只留本机。 */
@@ -111,13 +114,15 @@ function createAlgorithmLab({ root, request }) {
         const systemId = context.currentSystemId || context.algorithmSelection?.systemId;
         if (!systemId || item?.systemId !== systemId) return [];
         const realtime = realtimePackage(item);
-        return [{ id: item.id, name: item.name, source: item.source, labels: item.labels, report: item.report,
+        return [{ id: item.id, name: item.name, language: item.language, source: item.source, labels: item.labels,
+          ...(item.model ? { modelSummary: { kind: item.model.kind, featureNames: item.model.featureNames }, report: { ...item.report, predictions: item.report.predictions?.slice(0, 30) } } : { report: item.report }),
           realtimePackageId: realtime?.id || null, realtimeStatus: realtime ? '已进入实时算法目录；启用前需核验当前设备的采样节奏' : '旧版本缺少实时输入契约；用原源码在已选数据上重新测试并保存新版本即可登记' }];
       } catch { return []; }
     }) : [];
-    return { language: 'restricted-python-v1', features: FEATURES, example: EXAMPLE, instructions: 'def predict(f):，四空格缩进；局部数值赋值、if/elif/else、return、算术与比较、and/or/not、abs/min/max/sqrt。特征键使用双引号。返回按开发集 labels 顺序的 0 基类别下标，不确定返回 -1。不支持 import、循环、文件、网络或安装库。', selection: context.algorithmSelection || null, installed,
+    return { language: CPU_RUNTIME, languages: [CPU_RUNTIME, 'restricted-python-v1'], features: FEATURES, example: EXAMPLE, instructions: '优先调用 train_algorithm 在本机比较 CPU 分类器，自动选择和保存有真实报告的模型草稿；不需要模型手写阈值或导入库。只有用户明确要求自定义规则时才用受限 def predict(f)：四空格缩进；局部数值赋值、if/elif/else、return、算术与比较、and/or/not、abs/min/max/sqrt。特征键使用双引号。返回按开发集 labels 顺序的 0 基类别下标，不确定返回 -1。不支持 import、循环、文件、网络或安装库。', selection: context.algorithmSelection || null, installed,
+      training: { available: true, tool: 'train_algorithm', runtime: CPU_RUNTIME, featureVersion: FEATURE_VERSION, execution: 'local single-thread CPU process', candidates: ['linear', 'tree', 'forest'], timeoutSeconds: 60, maxWindows: 16000, featureCache: 'same selected data and input contract only', validation: 'grouped by collection session; insufficient groups are explicitly development-only', onlySelectedRanges: true },
       recordSemantics: 'count 是本记录存储帧数；maxId 是数据库全局行 ID 的读取上界，不是本记录帧数，不能据 maxId 大于 count 推断缺口、丢帧或时间异常。startFrame 是记录内从 0 开始的位置，frameLimit 是原始读取数量。连续性必须以实际分析结果为准：同毫秒采样仅用于分析时跳过并报告数量；真正倒序或超过 5 秒的断点会返回具体记录和帧位置。不要仅凭这些元数据建议删除或重采记录。',
-      limits: { maxSourceChars: 16000, maxAttemptsPerTask: 6, maxValues: 2000000, computeTimeoutSeconds: 10, memoryMiB: 128 },
+      limits: { maxValues: 2000000, restrictedRuleWorker: { maxSourceChars: 16000, maxAttemptsPerTask: 6, computeTimeoutSeconds: 10, memoryMiB: 128 } },
       featureUnits: 'duration 秒；压力特征使用存储值原单位，rise/fall 为每秒变化；activeMean 为值>0的点数均值；meanChange 为相邻帧总值绝对差均值。' };
   }
   /** 分析只返回开发集统计；验证数据仅在冻结代码后运行一次。 */
@@ -153,27 +158,94 @@ function createAlgorithmLab({ root, request }) {
     return { draftId: id, name, ...report, predictions: report.predictions.slice(0, 30), predictionsTruncated: report.predictions.length > 30,
       warning: validation ? '验证数据已用于本次评估，不能重复调参后继续称为独立验证；报告仅反映选定记录。' : '仅开发集结果，尚未进行独立验证，不能据此宣称泛化准确率。' };
   }
+  /** 使用已授权范围训练固定 CPU 模型，特征留本机，验证记录不参与模型选择。 */
+  async function train({ name }, context, { matrix = null, validateInput } = {}) {
+    const loaded = await load(context), adaptation = activeAdaptation(context, loaded);
+    const key = digest([loaded.dataDigest, loaded.windowFrames, FEATURE_VERSION, matrix, adaptation?.targetIntervalMs]);
+    context.onStep?.({ message: featureCache.has(key) ? '复用本机缓存特征，准备 CPU 分类训练。' : '正在从所选范围提取统一窗口特征。' });
+    let prepared = featureCache.get(key);
+    if (!prepared) {
+      prepared = await compute({ ...loaded, operation: 'features', featureVersion: FEATURE_VERSION, matrix,
+        ...(adaptation ? { targetIntervalMs: adaptation.targetIntervalMs } : {}) }, context.signal);
+      featureCache.set(key, prepared); while (featureCache.size > 2) featureCache.delete(featureCache.keys().next().value);
+    }
+    if (!prepared.windows?.length) throw agentError('CPU_TRAINING_DATA_INVALID', '所选范围没有完整窗口，请增加连续数据或缩小窗口。');
+    const validationRecords = loaded.records.filter((item) => item.split === 'validation');
+    const validationKeys = [...new Set(validationRecords.map((item) => digest([selection(context).systemId, item.date])))];
+    if (validationKeys.some((key) => Object.hasOwn(ledger, key))) throw agentError('ALGORITHM_VALIDATION_USED', '这批验证采集已用于评估，请选择新的独立验证记录。');
+    if (validationRecords.length && loaded.labels.some((label) => !validationRecords.some((item) => item.label === label))) throw agentError('ALGORITHM_VALIDATION_MISSING', '独立验证记录需要覆盖全部类别。');
+    if (validationKeys.length) {
+      if (Object.keys(ledger).length + validationKeys.length > 10000) throw agentError('ALGORITHM_HISTORY_LIMIT', '独立验证记录已达上限，请联系维护人员归档。');
+      for (const validationKey of validationKeys) ledger[validationKey] = new Date().toISOString();
+      writeJsonAtomic(ledgerFile, ledger);
+    }
+    const names = Object.keys(prepared.windows[0].features);
+    const records = new Map(loaded.records.map((record) => [record.id, record]));
+    const windows = prepared.windows.map((window) => {
+      const record = records.get(window.recordId);
+      return { features: names.map((key) => window.features[key]), label: loaded.labels.indexOf(window.label),
+        group: digest([selection(context).systemId, record.date]), split: window.split,
+        recordId: window.recordId, startFrame: window.startFrame, timestamp: window.timestamp };
+    });
+    context.onStep?.({ message: '正在本机单线程比较线性、决策树和随机森林；可以停止本轮任务。' });
+    let trained;
+    try { trained = await trainCpu({ schemaVersion: 1, featureNames: names, labels: loaded.labels, windows, mode: 'quick', minConfidence: 0.55 }, { signal: context.signal }); }
+    catch (error) {
+      if (validationKeys.length) error.message += ' 本轮验证采集已登记使用；再次独立验证需选择新采集，也可仅用开发集训练。';
+      throw error;
+    }
+    context.signal?.throwIfAborted();
+    const model = validateCpuModel(trained.model);
+    if (JSON.stringify(model.featureNames) !== JSON.stringify(names) || JSON.stringify(model.classLabels) !== JSON.stringify(loaded.labels)) throw agentError('CPU_TRAINING_RESULT_INVALID', '训练结果与所选类别或特征不一致，未保存。');
+    const evaluated = trained.report;
+    if (!evaluated || !['development', 'validation'].includes(evaluated.split) || !Number.isInteger(evaluated.windows) || evaluated.windows < 1 || !Array.isArray(evaluated.predictions)
+      || !Number.isFinite(evaluated.accuracy) || evaluated.accuracy < 0 || evaluated.accuracy > 1) throw agentError('CPU_TRAINING_RESULT_INVALID', '训练报告不完整，未保存。');
+    // ⚠️ 长时间训练期间切系统或采集增长会使选择失效，不能把旧模型保存到新系统。
+    await load(context); await validateInput?.(); context.signal?.throwIfAborted();
+    const reference = prepared.windows.filter((window) => window.split === 'development');
+    const sampleIntervalMs = adaptation?.targetIntervalMs || reference.reduce((sum, window) => sum + window.features.duration * 1000 / (window.features.frameCount - 1), 0) / reference.length;
+    const report = { ...evaluated, candidates: trained.candidates || evaluated.candidates || [], dataDigest: loaded.dataDigest,
+      warnings: [...(evaluated.warnings || []), ...(!prepared.matrix ? ['当前系统未提供可匹配的矩阵，只使用整体压力特征；左右或前后位置识别需核对系统矩阵配置。'] : [])],
+      modelDigest: modelDigest(model), windowFrames: loaded.windowFrames,
+      inputContract: { pointCount: prepared.pointCount, stage: prepared.stage, sampleIntervalMs, featureVersion: FEATURE_VERSION, matrix: prepared.matrix || null },
+      records: loaded.records.map(({ id, date, channel, label, split, startFrame, frameLimit }) => ({ ...prepared.records.find((record) => record.id === id), id, date, channel, label, split, startFrame, frameLimit })),
+      ...(adaptation ? { preprocessing: { mode: 'nearest-real-frame', targetIntervalMs: adaptation.targetIntervalMs, source: 'measured-current-device', noInterpolation: true } } : {}) };
+    const id = randomUUID();
+    const draft = { id, name, language: CPU_RUNTIME, model, featureVersion: FEATURE_VERSION, matrix: prepared.matrix || null,
+      systemId: selection(context).systemId, selectionDigest: loaded.key, dataDigest: loaded.dataDigest,
+      labels: loaded.labels, windowFrames: loaded.windowFrames, report, createdAt: new Date().toISOString() };
+    if (!realtimePackage(draft)) throw agentError('CPU_TRAINING_RESULT_INVALID', '模型输入契约未通过校验，未保存。');
+    writeJsonAtomic(file('drafts', id), draft);
+    context.onStep?.({ message: '本机训练完成，已生成真实评估报告；保存后可绑定当前系统。' });
+    return { draftId: id, name, language: CPU_RUNTIME, modelSummary: { kind: model.kind, featureNames: names }, ...report,
+      predictions: report.predictions.slice(0, 30), predictionsTruncated: report.predictions.length > 30,
+      warning: report.evaluation === 'independent-validation' ? '仅代表所选独立采集的验证效果，尚未启用实时识别。' : '未提供新的独立验证采集；交叉验证或开发集结果不能代替真实设备验收。' };
+  }
   /** 只允许为当前选择真实测试过的固定源码生成应用提案。 */
   function proposal({ draftId }, context) {
     const draft = readJson(file('drafts', draftId), null);
     if (!draft || draft.selectionDigest !== digest(selection(context))) throw agentError('ALGORITHM_DRAFT_STALE', '算法草稿不属于当前数据选择，请重新测试。');
     const { predictions, ...report } = draft.report;
+    if (draft.language === CPU_RUNTIME) report.mistakes = (predictions || []).filter((item) => !item.correct).slice(0, 10);
     const realtime = realtimePackage(draft);
     return { kind: 'algorithm_package', systemId: draft.systemId, summary: `保存算法“${draft.name}”${realtime ? '并登记到实时算法目录' : '到离线算法库'}`, input: { draftId }, draftDigest: digest(draft),
-      after: { name: draft.name, language: draft.language, labels: draft.labels, source: draft.source, report, realtimePackageId: realtime?.id || null,
+      after: { name: draft.name, language: draft.language, labels: draft.labels, source: draft.source,
+        ...(draft.model ? { modelSummary: { kind: draft.model.kind, featureNames: draft.model.featureNames }, featureVersion: draft.featureVersion } : {}), report, realtimePackageId: realtime?.id || null,
         activation: realtime ? '保存后可在当前系统配置算法；首次启用时需有兼容的实时设备输入，Agent 会在准备和应用配置时核验。' : '此版本缺少实时输入契约，保存后可继续离线测试。' } };
   }
   /** 原子保存经测试版本，重复应用相同草稿幂等且不覆盖其他算法。 */
   function apply(proposal) {
     const draft = readJson(file('drafts', proposal.input?.draftId), null);
     if (!draft || digest(draft) !== proposal.draftDigest || draft.systemId !== proposal.systemId) throw agentError('ALGORITHM_DRAFT_STALE', '算法源码或测试报告已变化，不能应用旧提案。');
-    compile(draft.source); writeJsonAtomic(file('installed', draft.id), draft);
+    if (draft.language === CPU_RUNTIME) { validateCpuModel(draft.model); if (!realtimePackage(draft)) throw agentError('ALGORITHM_DRAFT_STALE', '训练模型或输入契约无效，请重新训练。'); }
+    else compile(draft.source);
+    writeJsonAtomic(file('installed', draft.id), draft);
     const saved = readJson(file('installed', draft.id), null);
     if (digest(saved) !== digest(draft)) throw agentError('AGENT_OPERATION_UNCERTAIN', '算法保存后读回不一致，请检查算法库。');
     const realtime = realtimePackage(saved);
     return { id: draft.id, systemId: draft.systemId, verified: true, offlineOnly: !realtime, realtimePackageId: realtime?.id || null, realtimeEnabled: false, independentValidation: draft.report.split === 'validation' };
   }
-  return { workspace, analyze, adapt, clearAdaptation, test, proposal, apply };
+  return { workspace, analyze, adapt, clearAdaptation, test, train, proposal, apply };
 }
 
 module.exports = { createAlgorithmLab, compute, digest };

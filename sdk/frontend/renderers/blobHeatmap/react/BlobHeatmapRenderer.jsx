@@ -29,8 +29,8 @@
  * ## ⚠️ 那四个滑块本来就不起作用
  *
  * `valueg` / `valuel` / `valuef` / `valuelInit` 在原件里只喂给上面第 3 条那段
- * 死运算，对画面零影响。搬进包之后仍然零影响（界面零变化是这一轮的硬约束）。
- * `sitValue` 照收照存，宿主的调用点不用改。
+ * 死运算，对画面零影响。旧内置路径仍保留这个行为；Manifest 显式传
+ * `transposeAxes=true` 时使用独立视觉处理，五种调节都可重绘缓存帧。
  */
 
 import React, {
@@ -42,6 +42,7 @@ import {
   createIntensity,
 } from '../core/intensity.js';
 import { normalizeBlobHeatmapParams } from '../core/params.js';
+import { createMatrixVisualTuning } from '../../shared/matrixVisualTuning.js';
 import {
   buildBlobPoints,
   frameStats,
@@ -99,26 +100,12 @@ const BlobHeatmapRenderer = React.forwardRef(function BlobHeatmapRenderer(props,
      * 那四个不起作用的。存着只为让 `sitValue` 有个去处 —— 见文件头。
      */
     inert: { valueg: null, valuel: null, valuef: null, valuelInit: null },
+    frame: [],
+    visual: createMatrixVisualTuning({ width: params.dataWidth, height: params.dataHeight, max: params.max }),
     circle: null,
     circleKey: null,
     intensity: null,
   });
-
-  useEffect(() => {
-    stateRef.current.cfg = { max: params.max, radius: params.radius };
-    // 色标换了就得重建调色板。
-    stateRef.current.intensity = null;
-    stateRef.current.circle = null;
-  }, [params.max, params.radius, params.gradient]);
-
-  /** 画布挂上来之后定尺寸。原件写死 `window.innerHeight * 0.6`，现在是参数。 */
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const side = window.innerHeight * params.canvasScale;
-    canvas.width = side;
-    canvas.height = side;
-  }, [params.canvasScale]);
 
   /** 拿（或建）圆点贴图与调色板，两者都只依赖参数。 */
   const ensureAssets = useCallback(() => {
@@ -156,7 +143,7 @@ const BlobHeatmapRenderer = React.forwardRef(function BlobHeatmapRenderer(props,
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const points = buildBlobPoints(
-      values, current.dataWidth, current.dataHeight, canvas.width, canvas.height,
+      values, current.dataWidth, current.dataHeight, canvas.width, canvas.height, current.transposeAxes,
     );
     const halfWidth = circle.width / 2;
     const halfHeight = circle.height / 2;
@@ -185,6 +172,20 @@ const BlobHeatmapRenderer = React.forwardRef(function BlobHeatmapRenderer(props,
     ctx.putImageData(colored, 0, 0);
   }, [ensureAssets]);
 
+  /** 更新预设和画布后重画缓存，旧内置路径不启用新过滤。 */
+  useEffect(() => {
+    const state = stateRef.current;
+    state.cfg = { max: params.max, radius: params.radius };
+    state.intensity = null; state.circle = null;
+    state.visual = createMatrixVisualTuning({ width: params.dataWidth, height: params.dataHeight, max: params.max });
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const side = window.innerHeight * params.canvasScale;
+      canvas.width = side; canvas.height = side;
+    }
+    if (state.frame.length) paint(params.transposeAxes ? state.visual.push(state.frame) : state.frame);
+  }, [params.max, params.radius, params.gradient, params.canvasScale, params.dataWidth, params.dataHeight, params.transposeAxes, paint]);
+
   /** 把读数推给宿主。原件没有这一步，宿主不传 `data` 就整段不执行。 */
   const publishStats = useCallback((values) => {
     if (!props.data?.current?.changeData) return;
@@ -199,7 +200,9 @@ const BlobHeatmapRenderer = React.forwardRef(function BlobHeatmapRenderer(props,
    */
   const bthClickHandle = useCallback((values) => {
     const list = Array.isArray(values) ? values : [];
-    paint(list);
+    const state = stateRef.current;
+    state.frame = list.slice();
+    paint(paramsRef.current.transposeAxes ? state.visual.push(list) : list);
     publishStats(list);
     return canvasRef.current;
   }, [paint, publishStats]);
@@ -218,26 +221,38 @@ const BlobHeatmapRenderer = React.forwardRef(function BlobHeatmapRenderer(props,
   }, [bthClickHandle]);
 
   /**
-   * 侧栏滑块。⚠️ 六个键里只有 `valuej` 真的改画面，另外四个见文件头。
+   * 工作区滑块重算缓存副本；旧内置路径只沿用原来的颜色调节。
    *
    * @param {object} prop 调参。
    * @returns {void}
    */
   const sitValue = useCallback((prop) => {
     if (!prop) return;
+    const state = stateRef.current;
+    if (paramsRef.current.transposeAxes) {
+      const values = state.visual.update(prop);
+      state.cfg.max = state.visual.settings().valuej;
+      if (state.frame.length) paint(values);
+      return;
+    }
     const { valuej, valueg, valuel, valuef, valuelInit } = prop;
     if (valuej) stateRef.current.cfg.max = valuej;
     if (valueg) stateRef.current.inert.valueg = valueg;
     if (valuel) stateRef.current.inert.valuel = valuel;
     if (valuef) stateRef.current.inert.valuef = valuef;
     if (valuelInit) stateRef.current.inert.valuelInit = valuelInit;
-  }, []);
+  }, [paint]);
+
+  /** 仅为已启用工作区处理的实例声明五种真实调节能力。 */
+  const getTuningControls = useCallback(() => ({ showColor: true, showGuass: paramsRef.current.transposeAxes,
+    showConsis: paramsRef.current.transposeAxes, showFilter: paramsRef.current.transposeAxes, showInit: paramsRef.current.transposeAxes }), []);
 
   useImperativeHandle(refs, () => ({
     sitData,
     sitValue,
     bthClickHandle,
-  }), [sitData, sitValue, bthClickHandle]);
+    getTuningControls,
+  }), [sitData, sitValue, bthClickHandle, getTuningControls]);
 
   return (
     <div

@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
+const { observeUsageOperation } = require('../../common/businessEvents');
 
 const TOKEN = /^sps_[A-Za-z0-9_-]{43}$/;
 const SUBMISSION_URL = 'https://shroom.jq-industries.com/api/system-packages/submissions';
@@ -44,11 +45,17 @@ function createStaffPackageSubmission({ root, safeStorage, exportPackage, fetchI
 
   /** Submit exactly one freshly exported package with the scoped staff token. */
   async function submit(systemId, baseVersion) {
-    return submitPackage(exportPackage(systemId), baseVersion);
+    return observeUsageOperation('custom_system_saved', { featureId: 'system_submission', action: 'submit', systemType: systemId, systemOrigin: 'custom' },
+      () => submitPackageUnobserved(exportPackage(systemId), baseVersion));
   }
 
   /** Submit an already validated revision package with its fixed published baseline. */
   async function submitPackage(input, baseVersion) {
+    return observeUsageOperation('custom_system_saved', { featureId: 'system_submission', action: 'submit' }, () => submitPackageUnobserved(input, baseVersion));
+  }
+
+  /** Upload one validated package; analytics never receives its contents or staff credential. */
+  async function submitPackageUnobserved(input, baseVersion) {
     const token = readToken();
     if (!token) throw Object.assign(new Error('请先在 Agent 设置中填写员工提交令牌'), { code: 'SYSTEM_SUBMISSION_TOKEN_REQUIRED' });
     const body = JSON.stringify({ package: input,

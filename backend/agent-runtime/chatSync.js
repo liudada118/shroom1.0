@@ -267,7 +267,7 @@ function createChatSync({ root, getConfig, getSecrets = () => [], onStatus = () 
         await response.body?.cancel?.().catch(() => {});
         if (epoch !== generation || disposed) return;
         const blocked = response.status >= 400 && response.status < 500 && response.status !== 429;
-        const error = safeError('AGENT_SYNC_HTTP_ERROR', `聊天上传失败（HTTP ${response.status}），${blocked ? '请检查软件密钥状态或上传凭证后重试' : '将自动重试'}。`);
+        const error = safeError('AGENT_SYNC_HTTP_ERROR', `聊天上传失败（HTTP ${response.status}），${blocked ? config.authScheme === 'License' ? '请管理员检查软件密钥登记、状态和客户关联后重试' : '请检查上传凭证后重试' : '将自动重试'}。`);
         recordFailure(error, blocked);
       } else {
         const acknowledgement = await readAcknowledgement(response);

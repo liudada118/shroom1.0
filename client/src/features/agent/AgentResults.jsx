@@ -2,6 +2,12 @@ import React from 'react';
 
 const SYSTEM_KINDS = new Set(['create_system', 'builtin_system', 'duplicate_system']);
 
+/** 不把开发集、折外预测或未注明的历史报告标成独立验证。 */
+function evaluationLabel(report) {
+  const labels = { 'group-cross-validation': '按采集分组交叉验证', 'development-only': '仅开发集', 'independent-validation': '独立采集验证' };
+  return labels[report.evaluation] || (report.split === 'development' ? '开发集' : report.split === 'validation' ? '独立记录' : '验证方式未注明');
+}
+
 /** 从当前会话的已应用提案提取可直达的系统与算法成果。 */
 export function collectAgentResults(tasks = []) {
   return tasks.flatMap((task) => (task.proposals || []).filter((proposal) => (
@@ -36,7 +42,7 @@ export default function AgentResults({ results, expanded, onToggle, onOpenSystem
         <small>{item.kind === 'system' ? `系统 ID：${item.systemId}` : item.packageId ? `实时包：${item.packageId}` : `所属系统：${item.systemId}`}</small>
         <p>{item.kind === 'system' ? '已加入系统列表。连接设备和实际画面仍需验证。'
           : item.packageId ? '已保存到实时算法目录；可在实时连接启用，或绑定到系统自动启用。' : '已保存到离线算法库，尚不能实时启用。'}</p>
-        {item.kind === 'algorithm' && Number.isFinite(item.report?.accuracy) && <p className="shroom-agent-result-report">测试：{item.report.windows} 个窗口 · 正确率 {(item.report.accuracy * 100).toFixed(1)}%{item.report.split === 'development' ? '（开发集）' : '（独立记录）'}</p>}
+        {item.kind === 'algorithm' && Number.isFinite(item.report?.accuracy) && <p className="shroom-agent-result-report">测试：{item.report.windows} 个窗口 · 正确率 {(item.report.accuracy * 100).toFixed(1)}%（{evaluationLabel(item.report)}）</p>}
         {actionFeedback?.key === item.key && <p className={`shroom-agent-result-feedback ${actionFeedback.error ? 'is-error' : ''}`} role={actionFeedback.error ? 'alert' : 'status'}>{actionFeedback.message}</p>}
         {item.kind === 'system' && actionFeedback?.key === item.key && actionFeedback.updateBaseVersion
           && <button type="button" onClick={() => onSubmitPackage(item, actionFeedback.updateBaseVersion)}>

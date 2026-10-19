@@ -2,6 +2,14 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Tooltip } from 'antd';
 import { CheckOutlined, CloseOutlined, ToolOutlined } from '@ant-design/icons';
 import './PortalUtilityPanel.css';
+import { trackUsage, trackUsageOperation } from '../../services/usageAnalytics';
+
+const TOOL_FEATURES = {
+  'rotate-x': 'view_tools', 'rotate-y': 'view_tools', 'rotate-back': 'view_tools', top: 'view_tools',
+  'zoom-in': 'view_tools', 'zoom-out': 'view_tools', 'view-reset': 'view_tools',
+  select: 'region_selection', ruler: 'sensor_ruler', 'flip-x': 'view_tools', 'flip-y': 'view_tools',
+  zero: 'calibration_zero', restore: 'calibration_zero', system: 'workspace_tools', builder: 'workspace', jqbed: 'algorithm_binding',
+};
 
 export const PORTAL_TOOL_CATEGORIES = [
   { id: 'view', label: '视角调节' }, { id: 'analysis', label: '数据分析' },
@@ -33,9 +41,16 @@ export function bindPortalUtilityPanelFocus(root, onClose, dismissHint) {
 
 /** 用悬停和键盘焦点显示说明；禁用工具保留可聚焦的说明入口。 */
 export function PortalUtilityItem({ item, hintOpen, onHintOpenChange }) {
+  /** Record a tool attempt only when it is available; asynchronous actions report real completion. */
+  const invoke = () => {
+    if (item.disabled || typeof item.onClick !== 'function') return;
+    const tool = TOOL_FEATURES[item.id];
+    if (!tool || ['zero', 'restore'].includes(item.id)) return item.onClick();
+    return trackUsageOperation('analysis_tool_used', { featureId: tool, action: item.id.replaceAll('-', '_') }, item.onClick);
+  };
   const card = <button type="button" className={`portal-utility-card${item.active ? ' is-active' : ''}`}
     aria-label={item.label} aria-pressed={typeof item.active === 'boolean' ? item.active : undefined}
-    disabled={Boolean(item.disabled)} onClick={item.onClick}>
+    disabled={Boolean(item.disabled)} onClick={TOOL_FEATURES[item.id] && !['zero', 'restore'].includes(item.id) ? invoke : item.onClick}>
     <span className="portal-utility-card-icon" aria-hidden="true">{item.icon || <ToolOutlined />}</span>
     <span className="portal-utility-card-content"><strong>{item.label}</strong>
       {(item.disabled || item.active) && <span className="portal-utility-card-status">
@@ -62,6 +77,16 @@ export default function PortalUtilityPanel({ open, onClose, items = [], displayC
   const categories = displayContent ? [...PORTAL_TOOL_CATEGORIES, { id: 'display', label: '显示与语言' }] : PORTAL_TOOL_CATEGORIES;
   const categorized = Boolean(displayContent) || items.some((item) => item.category);
   const visibleItems = categorized ? items.filter((item) => (item.category || 'settings') === category) : items;
+  const exposed = useRef(new Set());
+  useEffect(() => {
+    if (!open) { exposed.current.clear(); return; }
+    for (const item of visibleItems) {
+      const featureId = TOOL_FEATURES[item.id];
+      if (!featureId || item.disabled || exposed.current.has(item.id)) continue;
+      exposed.current.add(item.id);
+      trackUsage('feature_exposed', { featureId, action: item.id.replaceAll('-', '_') });
+    }
+  }, [open, visibleItems]);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 

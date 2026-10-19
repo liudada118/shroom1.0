@@ -63,6 +63,22 @@ test('restricted Python calculates branches but cannot access host capabilities'
   assert.throws(() => predict(compile('def predict(f):\n    return 2'), {}, 2), /类别下标/);
 });
 
+test('CPU tool advertises training and rejects unselected, changed-system or mixed-channel data before starting Python', async (t) => {
+  const f = await fixture(t);
+  const context = { algorithmSelection: f.selection, taskId: 'cpu-guard' };
+  const workspace = await f.tools.execute('get_algorithm_workspace', {}, context);
+  assert.equal(workspace.language, 'cpu-classifier-v1');
+  assert.equal(workspace.training.tool, 'train_algorithm');
+  assert.equal(workspace.training.timeoutSeconds, 60);
+  assert(workspace.languages.includes('restricted-python-v1'));
+  await assert.rejects(f.tools.execute('train_algorithm', { name: '动作分类' }, {}), { code: 'ALGORITHM_SELECTION_REQUIRED' });
+  const mixed = { ...f.selection, records: f.selection.records.map((record, index) => ({ ...record, sensorId: index ? 'other' : 'sit' })) };
+  await assert.rejects(f.tools.execute('train_algorithm', { name: '动作分类' }, { ...context, algorithmSelection: mixed }), { code: 'ALGORITHM_CHANNEL_MISMATCH' });
+  f.switchSystem('other');
+  await assert.rejects(f.tools.execute('train_algorithm', { name: '动作分类' }, context), { code: 'ALGORITHM_SYSTEM_CHANGED' });
+  assert(!fs.existsSync(path.join(f.root, 'algorithm-lab', 'drafts')));
+});
+
 test('real SQLite selection, analysis, model tools, report proposal and installation form one workflow', async (t) => {
   const { root, db, tools, selection, address } = await fixture(t);
   const schemaBefore = db.prepare('SELECT sql FROM sqlite_master').all();
@@ -91,6 +107,47 @@ test('real SQLite selection, analysis, model tools, report proposal and installa
   assert.ok(fs.existsSync(path.join(root, 'algorithm-lab', 'validation-ledger.json')));
   await assert.rejects(restarted.execute('test_algorithm', { name: '重启后重试', source, validation: true }, context), { code: 'ALGORITHM_VALIDATION_USED' });
   await assert.rejects(tools.execute('test_algorithm', { name: '重试', source, validation: true }, context), { code: 'ALGORITHM_VALIDATION_USED' });
+});
+
+test('chat data requests inspect only the catalog and resume analysis after an explicit verified selection', async (t) => {
+  const f = await fixture(t);
+  const requests = [];
+  const tools = createAgentTools({ root: f.root, httpBaseUrl: f.address, fetchImpl: async (url, options) => {
+    requests.push(new URL(url).pathname);
+    return fetch(url, options);
+  } });
+  let requested;
+  const reply = await tools.execute('request_algorithm_data', { message: '勾选用于动作识别的记录。' }, {
+    requestAlgorithmData: (value) => { requested = value; return { requestId: 'inline-request', status: 'awaiting_data' }; },
+  });
+  assert.deepEqual(reply, { requestId: 'inline-request', status: 'awaiting_data' });
+  assert.equal(requested.systemId, 'hand-copy');
+  assert.deepEqual(requests, ['/api/agent-algorithms/records', '/api/agent-device/status']);
+  assert.equal(requested.records, undefined, 'the model never chooses a record through this tool');
+  await assert.rejects(tools.execute('request_algorithm_data', { records: f.selection.records }, {
+    requestAlgorithmData: () => assert.fail('model supplied selection must not reach the runtime'),
+  }), { code: 'AGENT_INVALID_ARGUMENTS' });
+
+  let turn = 0;
+  const runtime = createAgentRuntime({ root: path.join(f.root, 'inline-chat'), tools,
+    modelRequest: async () => ({ output: turn++ === 0
+      ? [{ type: 'function_call', name: 'request_algorithm_data', call_id: 'ask', arguments: '{}' }]
+      : turn === 2 ? [{ type: 'function_call', name: 'analyze_algorithm_data', call_id: 'analyze', arguments: '{}' }] : [] }) });
+  runtime.configure({ model: 'test', apiKey: 'synthetic' });
+  const task = runtime.startTask({ text: '根据我的抚摸和拍打记录写动作识别算法。' });
+  await runtime.whenIdle();
+  const paused = runtime.getState().conversation.tasks[0];
+  assert.equal(paused.status, 'awaiting_data');
+  assert.ok(!requests.includes('/api/agent-algorithms/frames'), 'waiting cannot load raw pressure frames');
+  const invalid = { ...f.selection, records: f.selection.records.slice(0, 1) };
+  await assert.rejects(runtime.submitAlgorithmData({ taskId: task.id, requestId: paused.algorithmDataRequest.id, selection: invalid }), { code: 'ALGORITHM_SELECTION_INVALID' });
+  await runtime.submitAlgorithmData({ taskId: task.id, requestId: paused.algorithmDataRequest.id, selection: f.selection });
+  await runtime.whenIdle();
+  const completed = runtime.getState().conversation.tasks[0];
+  assert.equal(completed.id, task.id); assert.equal(completed.status, 'succeeded');
+  assert.ok(completed.steps.some((step) => step.name === 'analyze_algorithm_data' && step.status === 'succeeded'));
+  assert.ok(requests.includes('/api/agent-algorithms/frames'), 'only the verified selection permits frame analysis');
+  await runtime.dispose();
 });
 
 test('Agent adapts selected tagged recordings to measured live cadence before generating a realtime package', async (t) => {

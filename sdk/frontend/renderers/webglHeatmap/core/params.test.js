@@ -24,6 +24,11 @@ const REQUIRED_KEYS = [
 ];
 
 describe('normalizeWebglHeatmapParams', () => {
+  it('显示宿主的调节标记在注册表归一化后保留，旧预设缺省关闭', () => {
+    expect(normalizeWebglHeatmapParams({ workspaceTuning: true }).workspaceTuning).toBe(true);
+    expect(normalizeWebglHeatmapParams({}).workspaceTuning).toBe(false);
+    expect(normalizeWebglHeatmapParams({ workspaceTuning: 'true' }).workspaceTuning).toBe(false);
+  });
   it.each([undefined, null, {}, 'nonsense', 42])('入参 %p 也给出完整的一份', (input) => {
     const params = normalizeWebglHeatmapParams(input);
     REQUIRED_KEYS.forEach((key) => {

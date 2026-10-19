@@ -172,6 +172,7 @@
 .fiber-portal .portal-mushroom-ambient .system-scene-particle-root {
   opacity: 0.96;
   filter: saturate(1.2) brightness(1.3);
+  transform: translateX(clamp(20px, 5vw, 96px));
 }
 
 .fiber-portal .system-scene-particle-host {

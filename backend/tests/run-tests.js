@@ -3,6 +3,8 @@ const { spawnSync } = require('child_process');
 
 const projectRoot = path.resolve(__dirname, '../..');
 const testFiles = [
+  'backend/tests/application/desktopServices.test.js',
+  'backend/tests/application/businessUsage.test.js',
   'backend/tests/serial/halowReceiver.test.js',
   'backend/tests/http/halowControlApi.test.js',
   'backend/tests/packaging/upload-release.test.js',
@@ -10,6 +12,9 @@ const testFiles = [
   'backend/tests/agentRuntime/chatSync.test.js',
   'backend/tests/agentRuntime/realtimeClassifier.test.js',
   'backend/tests/agentRuntime/algorithmLab.test.js',
+  'backend/tests/agentRuntime/autoTrainingLab.test.js',
+  'backend/tests/agentRuntime/cpuModel.test.js',
+  'backend/tests/agentRuntime/cpuTrainingProcess.test.js',
   'backend/tests/displaySystems/builtinTemplates.test.js',
   'backend/tests/http/nativeSystemsApi.test.js',
   'backend/tests/playback/playbackTiming.test.js',

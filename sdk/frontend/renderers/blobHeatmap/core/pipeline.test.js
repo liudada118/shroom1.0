@@ -118,6 +118,34 @@ describe('buildBlobPoints', () => {
     expect(Math.max(...ys)).toBe(100);
   });
 
+  it('启用显示轴反射后矩形四角留在画布内，点值仍按原索引对应', () => {
+    const frame = Object.freeze([10, 20, 30, 40, 50, 60]);
+    const points = buildBlobPoints(frame, 3, 2, 300, 120, true);
+
+    expect(points).toEqual([
+      { x: 0, y: 0, value: 10 },
+      { x: 100, y: 0, value: 20 },
+      { x: 200, y: 0, value: 30 },
+      { x: 0, y: 60, value: 40 },
+      { x: 100, y: 60, value: 50 },
+      { x: 200, y: 60, value: 60 },
+    ]);
+    expect(points.every(({ x, y }) => x >= 0 && x < 300 && y >= 0 && y < 120)).toBe(true);
+    expect(frame).toEqual([10, 20, 30, 40, 50, 60]);
+    expect(frameStats(points.map(({ value }) => value))).toEqual(frameStats(frame));
+    expect(buildBlobPoints(frame, 3, 2, 300, 120, false))
+      .toEqual(buildBlobPoints(frame, 3, 2, 300, 120));
+  });
+
+  it('纵长矩形启用轴反射后末行不再超出右侧画布', () => {
+    const points = buildBlobPoints([1, 2, 3, 4, 5, 6], 2, 3, 120, 300, true);
+
+    expect(points[1]).toEqual({ x: 60, y: 0, value: 2 });
+    expect(points[4]).toEqual({ x: 0, y: 200, value: 5 });
+    expect(points[5]).toEqual({ x: 60, y: 200, value: 6 });
+    expect(points.every(({ x, y }) => x >= 0 && x < 120 && y >= 0 && y < 300)).toBe(true);
+  });
+
   it('取数下标是 i * width + j —— 非方阵下越界的那些是 undefined，不是 0', () => {
     // i 最大 height-1 = 8，j 最大 width-1 = 9 ⇒ 最大下标 8*10+9 = 89，正好铺满。
     const points = buildBlobPoints(makeFrame(90), 10, 9, 100, 100);

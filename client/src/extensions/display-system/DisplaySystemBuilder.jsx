@@ -1380,7 +1380,7 @@ export default function DisplaySystemBuilder({ embedded = false, onActivated, on
     [catalog],
   );
   const algorithmPackageOptions = useMemo(
-    () => (catalog?.algorithmPackages || []).filter((item) => item.runtime !== 'restricted-python-v1').map((item) => ({
+    () => (catalog?.algorithmPackages || []).filter((item) => !['restricted-python-v1', 'cpu-classifier-v1'].includes(item.runtime)).map((item) => ({
       value: item.id,
       label: `${item.name} · v${item.version}`,
     })),

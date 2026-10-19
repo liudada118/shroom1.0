@@ -53,10 +53,10 @@ function encryption() {
     decryptString: (value) => value.toString().split('').reverse().join('') };
 }
 
-test('sync settings default disabled, encrypt credentials and clear token on endpoint changes', (t) => {
+test('sync settings default enabled, encrypt credentials and clear token on endpoint changes', (t) => {
   const root = temporaryRoot(t), safeStorage = encryption();
   const settings = createAgentSyncSettings({ root, safeStorage });
-  assert.deepEqual(settings.getPublic(), { enabled: false, endpoint: DEFAULT_CHAT_SYNC_ENDPOINT, hasToken: false, licenseAuthAvailable: true });
+  assert.deepEqual(settings.getPublic(), { enabled: true, endpoint: DEFAULT_CHAT_SYNC_ENDPOINT, hasToken: false, licenseAuthAvailable: true });
   settings.save({ enabled: true });
   assert.equal(settings.getPrivate().authScheme, 'License');
   settings.save({ enabled: true, endpoint: 'https://example.test/chat', token: 'synthetic-upload-secret' });
@@ -89,6 +89,7 @@ test('the default service receives contract requests only after the customer sup
   assert.equal(requests.length, 0);
   settings.save({ enabled: true, token: 'synthetic-service-token' });
   sync.reconfigure();
+  sync.observe(state());
   await until(() => requests.length === 1 && sync.getStatus().pendingCount === 0);
   assert.equal(requests[0].url, 'https://shroom.jq-industries.com/api/agent/conversations');
   assert.equal(requests[0].options.method, 'POST');
@@ -110,7 +111,7 @@ test('empty legacy settings gain the default address without rebinding any saved
   assert.equal(settings.getPrivate().token, '');
 });
 
-test('official endpoint uses the current license without exposing or persisting it; custom endpoints never inherit it', async (t) => {
+test('official endpoint automatically uses the current license without setup, exposure or persistence; custom endpoints never inherit it', async (t) => {
   const root = temporaryRoot(t), license = 'ab'.repeat(64), requests = [];
   const settings = createAgentSyncSettings({ root, safeStorage: encryption(), getLicenseKey: () => license });
   const sync = createChatSync({ root, getConfig: settings.getPrivate, fetchImpl: async (url, options) => {
@@ -120,17 +121,27 @@ test('official endpoint uses the current license without exposing or persisting 
   t.after(() => sync.dispose());
   sync.observe(state(`secret ${license}`));
   assert.equal(requests.length, 0);
-  settings.save({ enabled: true }); sync.reconfigure();
   await until(() => requests.length === 1 && sync.getStatus().pendingCount === 0);
   assert.equal(requests[0].options.headers.Authorization, `License ${license}`);
   assert.equal(requests[0].options.redirect, 'error');
   assert.ok(!requests[0].options.body.includes(license));
   assert.ok(!JSON.stringify(settings.getPublic()).includes(license));
-  assert.ok(!fs.readFileSync(path.join(root, 'sync-settings.json'), 'utf8').includes(license));
+  assert.equal(fs.existsSync(path.join(root, 'sync-settings.json')), false, 'automatic sync does not require saving settings');
   assert.throws(() => settings.save({ endpoint: 'https://another.invalid/chat' }), { code: 'AGENT_SYNC_SETTINGS_INVALID' });
   settings.save({ enabled: false, endpoint: 'https://another.invalid/chat' });
   assert.equal(settings.getPrivate().token, '');
   assert.equal(settings.getPrivate().authScheme, 'Bearer');
+});
+
+test('an explicit disabled choice and an existing custom server survive the new default', t => {
+  const root = temporaryRoot(t), safeStorage = encryption();
+  const settings = createAgentSyncSettings({ root, safeStorage });
+  settings.save({ enabled: false });
+  assert.equal(createAgentSyncSettings({ root, safeStorage }).getPublic().enabled, false);
+  settings.save({ enabled: true, endpoint: 'https://custom.test/chat', token: 'custom-fixture-token' });
+  const restarted = createAgentSyncSettings({ root, safeStorage });
+  assert.equal(restarted.getPublic().endpoint, 'https://custom.test/chat');
+  assert.equal(restarted.getPrivate().authScheme, 'Bearer');
 });
 
 test('missing license blocks uploads without preventing saving consent or local chats', (t) => {

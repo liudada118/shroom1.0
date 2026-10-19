@@ -45,6 +45,10 @@ try {
   assert.equal(await page.locator('#shroom-agent-api-key').getAttribute('placeholder'), '留空以保留当前密钥');
   console.log('DeepSeek official settings saved');
   const syncPanel = page.getByRole('region', { name: '聊天同步', exact: true });
+  await syncPanel.getByText(/聊天默认自动同步到公司服务器/).waitFor();
+  assert.equal(await syncPanel.getByLabel('服务器接口地址').isVisible(), false);
+  await syncPanel.getByText('高级同步设置', { exact: true }).click();
+  assert.equal(await syncPanel.getByLabel('开启聊天同步').isChecked(), true);
   await syncPanel.getByLabel('开启聊天同步').check();
   await syncPanel.getByLabel('服务器接口地址').fill('https://reject.invalid/chat');
   await syncPanel.getByLabel('上传凭证', { exact: true }).fill('fixture-upload-token');
@@ -97,6 +101,7 @@ try {
   console.log('Attachments sent');
   await page.getByRole('button', { name: '模型设置', exact: true }).click();
   assert.equal(await page.getByRole('button', { name: '保存连接设置' }).isDisabled(), true);
+  await syncPanel.getByText('高级同步设置', { exact: true }).click();
   await syncPanel.getByLabel('开启聊天同步').uncheck();
   await syncPanel.getByRole('button', { name: '保存同步设置' }).click();
   await syncPanel.getByText('聊天同步未开启', { exact: true }).waitFor();
@@ -176,6 +181,95 @@ try {
   await page.getByRole('button', { name: '算法数据', exact: true }).click();
   await dataPanel.getByRole('button', { name: '清除选择' }).click();
   assert.equal(await page.getByText('算法数据：2 条记录 · fixture-system').count(), 0);
+
+  /** 从需求直接触发模型请求，不经工具栏的手动算法数据入口。 */
+  async function trainingRequest(text = '根据采集数据训练抚摸和拍打分类算法') {
+    await page.getByRole('button', { name: '新会话', exact: true }).click();
+    await page.getByLabel('任务内容').fill(text);
+    await page.getByRole('button', { name: '发送', exact: true }).click();
+    const panel = page.locator('.shroom-agent-data-request').getByRole('region', { name: '算法数据选择' });
+    await panel.waitFor();
+    return panel;
+  }
+  await page.setViewportSize({ width: 320, height: 844 });
+  const inlineData = await trainingRequest();
+  await inlineData.getByRole('checkbox').first().waitFor();
+  await page.getByText('等待选择数据', { exact: true }).waitFor();
+  assert.equal(await page.getByText('正在查询当前系统可用的图表。', { exact: true }).count(), 0);
+  const waitingState = await page.evaluate(() => window.__agentFixtureDataState());
+  const waitingTask = waitingState.snapshot.conversation.tasks.at(-1);
+  assert.equal(waitingState.snapshot.activeTask, null);
+  await inlineData.getByRole('checkbox').nth(0).check();
+  await inlineData.getByRole('checkbox').nth(1).check();
+  assert.equal(await inlineData.getByLabel('类别', { exact: true }).nth(0).inputValue(), '抚摸');
+  assert.equal(await inlineData.getByLabel('类别', { exact: true }).nth(1).inputValue(), '拍打');
+  assert.ok(await inlineData.evaluate((node) => node.scrollWidth <= node.clientWidth));
+  assert.ok(await page.locator('.shroom-agent-panel').evaluate((node) => node.scrollWidth <= node.clientWidth));
+  await page.screenshot({ path: join(root, 'algorithm-data-inline-320.png') });
+  await page.evaluate(() => window.__agentFixtureDataControl({ submitDelayMs: 120 }));
+  await inlineData.getByRole('button', { name: '使用所选数据并继续' }).evaluate((button) => { button.click(); button.click(); });
+  await page.getByText('已确认本轮算法数据。', { exact: true }).waitFor();
+  await page.getByText('已收到所选数据，正在分析开发集。', { exact: true }).waitFor();
+  const resumedState = await page.evaluate(() => window.__agentFixtureDataState());
+  assert.equal(resumedState.calls.filter((call) => call.action === 'submitAlgorithmData').length, 1);
+  assert.equal(resumedState.snapshot.conversation.tasks.length, waitingState.snapshot.conversation.tasks.length);
+  assert.equal(resumedState.snapshot.activeTask.id, waitingTask.id);
+  assert.equal(resumedState.snapshot.conversation.tasks.at(-1).algorithmDataRequest.status, 'submitted');
+  assert.equal(await inlineData.count(), 0);
+  await page.evaluate(() => window.__agentFixtureCompleteData());
+  await page.getByText('已完成所选采集数据的分析。', { exact: true }).waitFor();
+  assert.equal(await page.getByText('已收到所选数据，正在分析开发集。', { exact: true }).count(), 0);
+  assert.equal(await page.getByRole('button', { name: '使用所选数据并继续' }).count(), 0);
+  console.log('Inline selection resumes the original task exactly once, with automatic labels and fresh streaming');
+
+  await page.evaluate(() => window.__agentFixtureDataControl({ submitDelayMs: 0, catalogError: true }));
+  const failedData = await trainingRequest('目录失败重试后训练抚摸和拍打分类算法');
+  await failedData.getByRole('alert').filter({ hasText: '采集目录读取失败' }).waitFor();
+  assert.equal(await failedData.getByRole('checkbox').count(), 0);
+  await page.evaluate(() => window.__agentFixtureDataControl({ catalogError: false }));
+  await failedData.getByRole('button', { name: '重试读取' }).click();
+  await failedData.getByRole('checkbox').first().waitFor();
+  const beforeCancel = await page.evaluate(() => window.__agentFixtureDataState());
+  await failedData.getByRole('button', { name: '取消选择', exact: true }).click();
+  await page.getByText('已取消本次数据选择，采集记录保留。', { exact: true }).waitFor();
+  const cancelledState = await page.evaluate(() => window.__agentFixtureDataState());
+  assert.equal(cancelledState.snapshot.conversation.tasks.at(-1).algorithmDataRequest.status, 'cancelled');
+  assert.equal(cancelledState.calls.filter((call) => call.action === 'submitAlgorithmData').length,
+    beforeCancel.calls.filter((call) => call.action === 'submitAlgorithmData').length);
+  const cancelledConversationId = cancelledState.snapshot.conversation.id;
+  await page.getByRole('button', { name: '新会话', exact: true }).click();
+  await page.getByRole('button', { name: '历史会话', exact: true }).click();
+  const cancelledHistory = page.getByRole('region', { name: '历史会话列表' });
+  await cancelledHistory.getByRole('button').filter({ hasText: '目录失败重试后训练抚摸和拍打分类算法' }).click();
+  assert.equal((await page.evaluate(() => window.__agentFixtureDataState())).snapshot.conversation.id, cancelledConversationId);
+  await page.getByText('已取消本次数据选择，采集记录保留。', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('region', { name: '算法数据选择' }).count(), 0);
+  console.log('Directory failure retries and cancellation survives opening chat history');
+
+  await page.evaluate(() => window.__agentFixtureDataControl({ catalogSystemId: 'another-system' }));
+  const changedData = await trainingRequest('切换系统前训练抚摸和拍打分类算法');
+  await changedData.getByRole('alert').filter({ hasText: '当前系统已变化' }).waitFor();
+  assert.equal(await changedData.getByRole('checkbox').count(), 0);
+  await page.evaluate(() => window.__agentFixtureDataControl({ catalogSystemId: 'fixture-system' }));
+  await changedData.getByRole('button', { name: '重试读取' }).click();
+  await changedData.getByRole('checkbox').nth(0).check();
+  await changedData.getByRole('checkbox').nth(1).check();
+  await page.evaluate(() => window.__agentFixtureDataControl({ catalogSystemId: 'another-system' }));
+  await changedData.getByRole('button', { name: '使用所选数据并继续' }).click();
+  await changedData.getByRole('alert').filter({ hasText: '当前系统已变化' }).waitFor();
+  assert.equal(await changedData.getByRole('checkbox', { checked: true }).count(), 2);
+  assert.equal((await page.evaluate(() => window.__agentFixtureDataState())).snapshot.conversation.tasks.at(-1).algorithmDataRequest.status, 'pending');
+  await page.getByLabel('任务内容').fill('查询当前设备状态');
+  await page.getByRole('button', { name: '发送', exact: true }).click();
+  await page.getByRole('button', { name: '停止任务', exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: '使用所选数据并继续' }).count(), 0);
+  const superseded = await page.evaluate(() => window.__agentFixtureDataState());
+  assert.equal(superseded.snapshot.conversation.tasks.at(-2).algorithmDataRequest.status, 'cancelled');
+  await page.getByRole('button', { name: '停止任务', exact: true }).click();
+  await page.evaluate(() => window.__agentFixtureDataControl({ catalogSystemId: 'fixture-system' }));
+  await page.setViewportSize({ width: 390, height: 844 });
+  console.log('Changed systems are blocked before selection and at submission; a new task supersedes old requests');
+
   await page.evaluate(() => window.__agentFixtureCreateResult('system'));
   const created = page.getByRole('region', { name: 'Agent 创建成果' });
   await created.getByText('坐垫2', { exact: true }).waitFor();
