@@ -1,5 +1,14 @@
 # Python 健康监测算法
 
+## 当前 Windows 算法（2026-10-15）
+
+- 使用用户提供的“关怀2.0.14.2” `onbed_filter.cp311-win_amd64.pyd`，SHA-256 为 `0650ee61472710df08589a971d9c7c2ec991f23c98a55e658677099d4d8aa349`。
+- 小床监测算法配置中的床型 `isLowBed`：`0` 高床/正常床（国内默认），`1` 矮床（日本版通常使用）。切换界面语言不会修改算法配置。
+- `head_foot_area` 在该版本无效，不开放调节；原生接口仍要求此键，Python 桥固定补入 `float32[0,0]`。
+- 配置升级为 v3，旧 v1/v2 参数在读取时兼容迁移，保存时写入新格式。
+- Python 桥按 `health` 区分旧 ABI、仅灵敏度 ABI 与新版床型 ABI，避免新 Windows 参数破坏尚未更新的 macOS 原生库；床型设置需对应原生接口支持。
+- 修改算法后执行 `npm run prepare-pack-resources` 重建并同步运行时；其中 `build-python-runtime` 自动运行原生库哈希与真实 JSON-line 健康检查，避免缓存旧包。安装版仍需重新打包安装。
+
 ## 目录结构
 
 ```
@@ -23,7 +32,7 @@ python/
 
 ### 运行方式
 
-`pyWorker.js` 会自动检测并调用系统 Python 运行 `onbed_filter_example.py`。
+`backend/kernel/algorithm-channel/pythonWorker.js` 会自动检测并调用系统 Python 运行 `onbed_filter_example.py`。
 
 Windows 优先查找 `python/Python311/python.exe`，macOS/Linux 优先查找 `python/venv/bin/python`，找不到则回退到系统 Python。
 
@@ -41,7 +50,7 @@ python build_exe.py
 
 打包后将 `dist/onbed_server/` 目录复制到 Electron 项目的 `resources/python/` 目录下。
 
-`pyWorker.js` 会自动检测 `onbed_server.exe`（Windows）或 `onbed_server`（macOS/Linux），优先使用打包后的可执行文件。
+`backend/kernel/algorithm-channel/pythonWorker.js` 会自动检测 `onbed_server.exe`（Windows）或 `onbed_server`（macOS/Linux），优先使用打包后的可执行文件。
 
 ## 通信协议
 

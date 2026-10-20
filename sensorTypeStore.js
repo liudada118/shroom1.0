@@ -53,14 +53,38 @@ function deriveMap(flat) {
 
 /** 任意来源（远程/缓存）的原始对象 → 规范化快照 { time, flat, map }（map 缺失则从 flat 派生）。 */
 function normalizeSnapshot(json) {
-  const flat = Array.isArray(json.flat) ? json.flat : [];
-  const map = (json.map && typeof json.map === 'object') ? json.map : deriveMap(flat);
+  // 与原发证清单保持一致：hand0205 是单手切换版，hand0205Double 是双手同显版。
+  // hand0205Single 仅兼容旧 key，不在运行时新增第三个手套入口。
+  const localGloves = [
+    { label: '触觉手套', value: 'hand0205', group: '精密' },
+    { label: '触觉手套2', value: 'hand0205Double', group: '精密' },
+  ];
+  const labels = deriveMap(localGloves);
+  const flat = (Array.isArray(json.flat) ? json.flat : []).filter((item) => (
+    item && item.value !== 'hand0205Single'
+  )).map((item) => (
+    item && Object.prototype.hasOwnProperty.call(labels, item.value)
+      ? { ...item, label: labels[item.value] }
+      : item
+  ));
+  for (const item of localGloves) {
+    if (flat.some((entry) => entry && entry.value === item.value)) continue;
+    const doubleIndex = flat.findIndex((entry) => entry && entry.value === 'hand0205Double');
+    if (item.value === 'hand0205' && doubleIndex >= 0) flat.splice(doubleIndex, 0, item);
+    else flat.push(item);
+  }
+  const map = {
+    ...deriveMap(flat),
+    ...((json.map && typeof json.map === 'object') ? json.map : {}),
+    ...labels,
+    hand0205Single: '触觉手套（兼容）',
+  };
   return { time: typeof json.time === 'number' ? json.time : 0, flat, map };
 }
 
 // 内置兜底快照
 const BUILTIN_FLAT = deriveFlat(BUILTIN_GROUPS);
-const BUILTIN = { time: 0, flat: BUILTIN_FLAT, map: deriveMap(BUILTIN_FLAT) };
+const BUILTIN = { time: 0, flat: BUILTIN_FLAT, map: { ...deriveMap(BUILTIN_FLAT), hand0205Single: '触觉手套（兼容）' } };
 
 // 当前生效快照（远程 > 缓存 > 内置），getSnapshot 永远从这里同步取。
 let current = BUILTIN;

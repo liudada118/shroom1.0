@@ -64,6 +64,14 @@ const SENSOR_MODULES = {
     { value: 'numoriginal', label: '原始数据' },
     { value: 'skin', label: '3D皮肤' },
   ],
+  // 已发 hand0205Single 密钥使用 hand0205 的单手功能。
+  hand0205Single: [
+    { value: 'num', labelKey: 'data2D' },
+    { value: 'normal', labelKey: 'tel3D' },
+    { value: 'num3D', labelKey: 'data3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
+    { value: 'skin', labelKey: 'skin3D' },
+  ],
   handGlove115200: [
     { value: 'num', label: '2D数字' },
     { value: 'normal', label: '3D遥操' },
@@ -160,6 +168,10 @@ const SENSOR_MODULES = {
   ],
   humanBody: [
     { value: 'skin', label: '3D皮肤' },
+  ],
+  pressureVest: [
+    { value: 'skin', labelKey: 'skin3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
   ],
 };
 

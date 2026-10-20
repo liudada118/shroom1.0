@@ -140,6 +140,7 @@ function createHistoryFrameTransformService({
   function formatMatrixTotalForFile(value, targetFile = getRuntime().file) {
     const numberValue = Number(value);
     const safeValue = Number.isFinite(numberValue) ? numberValue : 0;
+    if (targetFile === 'pressureVest') return safeValue;
     if (targetFile === SMALL_BED_12B_TYPE) {
       return Number(safeValue.toFixed(1));
     }

@@ -535,7 +535,11 @@ def health():
         "onbedFilterSensitivitySchema": (
             ncz is not None
             and "sensitivity_threshold" in step_doc
-            and "head_foot_area" not in step_doc
+        ),
+        "onbedFilterBedTypeSchema": (
+            ncz is not None
+            and "isLowBed" in step_doc
+            and "head_foot_area" in step_doc
         ),
     }
 
@@ -626,11 +630,15 @@ def create_default_inputs():
         'body_movement_threshold': 30.0,
         'step_leavebed_trigger': 50.0,
         'edge_align_ratio': 0.0,
+        'sensitivity_threshold': 0.0,
+        # 国内默认正常/高床；日本矮床可在算法配置中选择 1。
+        'isLowBed': 0.0,
         # 数组参数
         'sos_disable_area': np.array([6.0, 10.0], dtype=np.float32),
         'sitting_area': np.array([0.0, 0.0], dtype=np.float32),
         'leave_bed_disable_area': np.array([0.0, 0.0], dtype=np.float32),
         'small_object_size': np.array([0.0, 0.0], dtype=np.float32),
+        # 新版仍要求此接口字段，但参数已无效；只提供固定兼容值，不开放配置。
         'head_foot_area': np.array([0.0, 0.0], dtype=np.float32),
     }
     return inputs
@@ -643,7 +651,7 @@ ALGORITHM_PAIR_KEYS = {
     'small_object_size',
 }
 ALGORITHM_INTEGER_KEYS = {'min_sos_sequence', 'breath_detect_mode', 'sensitivity_threshold'}
-ALGORITHM_SWITCH_KEYS = {'filter_switch', 'strel_switch'}
+ALGORITHM_SWITCH_KEYS = {'filter_switch', 'strel_switch', 'isLowBed'}
 
 
 def _normalize_json_number(key, value):
@@ -685,17 +693,14 @@ def _normalize_algorithm_value(key, value):
 
 
 def build_step_inputs(data, config=None):
-    """构造算法输入；无配置时严格保留 codeOpi 的旧 ABI。"""
+    """构造新版算法输入，保留无效字段的固定 ABI 占位值。"""
     inputs = create_default_inputs()
     if config is not None:
         if not isinstance(config, dict):
             raise ValueError('config must be an object')
 
-        # 动态配置只在 health() 证明新版原生 ABI 后由 Node 端启用。
-        inputs.pop('head_foot_area', None)
-        inputs['sensitivity_threshold'] = 0.0
         for key, value in config.items():
-            if key not in inputs:
+            if key not in inputs or key == 'head_foot_area':
                 continue
             inputs[key] = _normalize_algorithm_value(key, value)
 
@@ -707,10 +712,16 @@ def getData(data, config=None):
     """
     处理传感器数据，返回健康监测结果（新版 API）
     """
-    # 新版原生库即使调用方没有可调参数也强制要求 sensitivity_threshold；自动选 ABI，
-    # 避免 smallBed 这类稳定调用方因只传 data 而在打包后失效。
-    effective_config = {} if config is None and health()["onbedFilterSensitivitySchema"] else config
-    outputs = ncz.step(build_step_inputs(data, effective_config))
+    inputs = build_step_inputs(data, config)
+    schema = health()
+    # ⚠️ macOS 可能仍使用旧 ABI；新增 Windows 床型字段不能导致旧库全部帧调用失败。
+    if not schema["onbedFilterBedTypeSchema"]:
+        inputs.pop("isLowBed", None)
+        if schema["onbedFilterSensitivitySchema"]:
+            inputs.pop("head_foot_area", None)
+        else:
+            inputs.pop("sensitivity_threshold", None)
+    outputs = ncz.step(inputs)
 
     # 安全转换 numpy 值为 Python 原生类型
     def safe_float(val, default=0.0):

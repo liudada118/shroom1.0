@@ -144,6 +144,20 @@ export default function JqbedAlgorithmConfigModal({
     if (field.kind === 'switch') {
       return <Switch checked={Number(value) === 1} onChange={(checked) => setValue(checked ? 1 : 0)} />;
     }
+    if (field.kind === 'bedType') {
+      return (
+        <Select
+          value={Number(value)}
+          aria-label={t(field.labelKey)}
+          style={{ width: 190 }}
+          onChange={setValue}
+          options={[0, 1].map((bedType) => ({
+            value: bedType,
+            label: t(`jqbedAlgorithmConfig.bedTypes.${bedType}`),
+          }))}
+        />
+      );
+    }
     if (field.kind === 'sensitivityMode') {
       return (
         <Select

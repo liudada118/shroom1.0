@@ -32,23 +32,35 @@ class JqbedAlgorithmConfigTests(unittest.TestCase):
             MODULE.ncz = CompatibleNcz
             self.assertTrue(MODULE.health()["onbedFilterSensitivitySchema"])
             MODULE.ncz = object()
-            self.assertFalse(MODULE.health()["onbedFilterSensitivitySchema"])
+            self.assertEqual(MODULE.health(), {
+                "pong": True,
+                "onbedFilterAvailable": True,
+                "onbedFilterSensitivitySchema": False,
+                "onbedFilterBedTypeSchema": False,
+            })
             MODULE.ncz = None
-            self.assertFalse(MODULE.health()["onbedFilterAvailable"])
+            self.assertEqual(MODULE.health(), {
+                "pong": True,
+                "onbedFilterAvailable": False,
+                "onbedFilterSensitivitySchema": False,
+                "onbedFilterBedTypeSchema": False,
+            })
         finally:
             MODULE.ncz = original
 
-    def test_build_step_inputs_preserves_the_codeopi_abi_without_config(self):
+    def test_build_step_inputs_keeps_new_native_defaults_without_config(self):
         inputs = MODULE.build_step_inputs([1, 2, 3], None)
 
         self.assertEqual(inputs["threshold_factor"], 0.0)
         self.assertEqual(inputs["filter_switch"], 1.0)
-        self.assertIn("head_foot_area", inputs)
-        self.assertNotIn("sensitivity_threshold", inputs)
+        self.assertEqual(inputs["sensitivity_threshold"], 0.0)
+        self.assertEqual(inputs["isLowBed"], 0.0)
+        np.testing.assert_array_equal(inputs["head_foot_area"], [0.0, 0.0])
+        self.assertEqual(inputs["head_foot_area"].dtype, np.float32)
         np.testing.assert_array_equal(inputs["sos_disable_area"], [6.0, 10.0])
         self.assertEqual(inputs["frame_data"].dtype, np.float32)
 
-    def test_build_step_inputs_uses_the_new_schema_only_with_config(self):
+    def test_build_step_inputs_overrides_supported_values(self):
         config = {
             "threshold_factor": 7,
             "breath_th": 8,
@@ -64,6 +76,7 @@ class JqbedAlgorithmConfigTests(unittest.TestCase):
             "step_leavebed_trigger": 50,
             "edge_align_ratio": 6,
             "sensitivity_threshold": 3,
+            "isLowBed": 1,
             "sos_disable_area": [0, 0],
             "sitting_area": [255, 255],
             "leave_bed_disable_area": [32, 0],
@@ -72,7 +85,7 @@ class JqbedAlgorithmConfigTests(unittest.TestCase):
 
         inputs = MODULE.build_step_inputs([1, 2], config)
 
-        self.assertNotIn("head_foot_area", inputs)
+        np.testing.assert_array_equal(inputs["head_foot_area"], [0.0, 0.0])
         for key, expected in config.items():
             if key in PAIR_KEYS:
                 self.assertEqual(inputs[key].dtype, np.float32)
@@ -80,7 +93,7 @@ class JqbedAlgorithmConfigTests(unittest.TestCase):
             else:
                 self.assertEqual(inputs[key], float(expected))
 
-    def test_get_data_auto_selects_the_packaged_sensitivity_schema(self):
+    def test_get_data_supplies_native_defaults_without_config(self):
         class SensitivityNcz:
             captured = None
 
@@ -99,6 +112,35 @@ class JqbedAlgorithmConfigTests(unittest.TestCase):
 
         self.assertEqual(SensitivityNcz.captured["sensitivity_threshold"], 0.0)
         self.assertNotIn("head_foot_area", SensitivityNcz.captured)
+        self.assertNotIn("isLowBed", SensitivityNcz.captured)
+
+    def test_get_data_keeps_old_and_new_native_abi_fields_separate(self):
+        """按实际原生接口选择字段，避免 Windows 升级破坏旧 macOS 算法。"""
+        class FakeNcz:
+            captured = None
+
+            @classmethod
+            def step(cls, inputs):
+                """记录输入字段而不执行设备算法。"""
+                cls.captured = inputs
+                return {}
+
+        original = MODULE.ncz
+        try:
+            MODULE.ncz = FakeNcz
+            for doc, expected in (
+                ("head_foot_area", {"head_foot_area"}),
+                ("sensitivity_threshold", {"sensitivity_threshold"}),
+                ("sensitivity_threshold head_foot_area isLowBed", {"sensitivity_threshold", "head_foot_area", "isLowBed"}),
+            ):
+                FakeNcz.step.__func__.__doc__ = doc
+                for config in (None, {"sos_peak_threshold": 22}):
+                    with self.subTest(schema=doc, config=config):
+                        MODULE.getData([0] * 1024, config)
+                        actual = set(FakeNcz.captured) & {"sensitivity_threshold", "head_foot_area", "isLowBed"}
+                        self.assertEqual(actual, expected)
+        finally:
+            MODULE.ncz = original
 
     def test_build_step_inputs_rejects_invalid_dynamic_values(self):
         invalid_configs = (
@@ -112,6 +154,9 @@ class JqbedAlgorithmConfigTests(unittest.TestCase):
             {"strel_switch": -1},
             {"sensitivity_threshold": 4},
             {"sensitivity_threshold": 1.5},
+            {"isLowBed": 2},
+            {"isLowBed": 0.5},
+            {"isLowBed": True},
             {"filter_switch": True},
         )
 
@@ -120,7 +165,87 @@ class JqbedAlgorithmConfigTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     MODULE.build_step_inputs([1], config)
 
-    def test_get_data_applies_config_and_preserves_the_result_contract(self):
+    def test_get_data_rejects_unrounded_boundaries_and_booleans_before_step(self):
+        class FakeNcz:
+            calls = 0
+
+            @classmethod
+            def step(cls, inputs):
+                cls.calls += 1
+                return {
+                    "rate": 0,
+                    "heart_rate": 0,
+                    "stateInBbed": 0,
+                    "sosflag": 0,
+                    "merged_alarm": 0,
+                    "matrix_origin": [],
+                    "matrix_filter": [],
+                }
+
+        invalid_configs = (
+            {"sos_disable_area": [32.0000001, 0]},
+            {"sitting_area": [254.999999, 254.999999]},
+            {"sos_disable_area": [True, False]},
+            {"filter_switch": True},
+        )
+        original = MODULE.ncz
+        try:
+            MODULE.ncz = FakeNcz
+            for config in invalid_configs:
+                with self.subTest(config=config):
+                    with self.assertRaises(ValueError):
+                        MODULE.getData([0] * 1024, config)
+                    self.assertEqual(FakeNcz.calls, 0)
+        finally:
+            MODULE.ncz = original
+
+    def test_build_step_inputs_rejects_non_object_config_and_ignores_unknown_keys(self):
+        with self.assertRaises(ValueError):
+            MODULE.build_step_inputs([1], ["not", "an", "object"])
+
+        inputs = MODULE.build_step_inputs([1], {"unknown_key": 99})
+        self.assertNotIn("unknown_key", inputs)
+
+    def test_inactive_head_foot_area_stays_fixed_even_with_legacy_config(self):
+        inputs = MODULE.build_step_inputs([0] * 1024, {"head_foot_area": [254, 254], "isLowBed": 1})
+        np.testing.assert_array_equal(inputs["head_foot_area"], [0.0, 0.0])
+        self.assertEqual(inputs["isLowBed"], 1.0)
+        inputs["head_foot_area"][0] = 99
+        np.testing.assert_array_equal(MODULE.build_step_inputs([0], None)["head_foot_area"], [0.0, 0.0])
+
+    def test_health_distinguishes_old_sensitivity_only_and_new_bed_type_interfaces(self):
+        class FakeNcz:
+            @staticmethod
+            def step(inputs):
+                "sensitivity_threshold"
+
+        original = MODULE.ncz
+        try:
+            MODULE.ncz = FakeNcz
+            self.assertTrue(MODULE.health()["onbedFilterSensitivitySchema"])
+            self.assertFalse(MODULE.health()["onbedFilterBedTypeSchema"])
+            FakeNcz.step.__doc__ = "sensitivity_threshold head_foot_area isLowBed"
+            self.assertTrue(MODULE.health()["onbedFilterBedTypeSchema"])
+        finally:
+            MODULE.ncz = original
+
+    @unittest.skipIf(MODULE.ncz is None, "native library is unavailable on this platform")
+    def test_native_algorithm_accepts_both_bed_types_through_the_real_bridge(self):
+        self.assertTrue(MODULE.health()["onbedFilterBedTypeSchema"])
+        for bed_type in [0, 1]:
+            with self.subTest(bed_type=bed_type):
+                MODULE.ncz.initialize()
+                try:
+                    result = MODULE.getData([0] * 1024, {"isLowBed": bed_type})
+                    for key in ["matrix_origin", "matrix_filter"]:
+                        self.assertEqual(len(result[key]), 1024)
+                        self.assertTrue(np.all(np.isfinite(result[key])))
+                    self.assertIn("stateInBbed", result)
+                    self.assertIn("sosflag", result)
+                finally:
+                    MODULE.ncz.terminate()
+
+    def test_get_data_passes_config_and_preserves_output_aliases(self):
         class FakeNcz:
             captured = None
 

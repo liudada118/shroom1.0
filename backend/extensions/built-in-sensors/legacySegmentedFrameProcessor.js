@@ -167,6 +167,7 @@ function createLegacySegmentedFrameProcessor({
       realArr,
       rawPressureData: context.rawPressureMode === 'pressure' ? pressureData : rawPressureData,
       newArr147: mappedData,
+      newArr147Raw: mappedFrame,
       sitFlag: context.port1?.isOpen,
       backFlag: context.port2?.isOpen,
     };
@@ -208,7 +209,7 @@ function createLegacySegmentedFrameProcessor({
       sitFlag: context.port1?.isOpen,
       backFlag: context.port2?.isOpen,
     };
-    if (mappedFrame.length) payloadObj.newArr147 = mappedFrame;
+    if (mappedFrame.length) { payloadObj.newArr147 = mappedFrame; payloadObj.newArr147Raw = [...mappedFrame]; }
     return {
       lastData: payload,
       pointArr: pressureFrame,
@@ -249,6 +250,7 @@ function createLegacySegmentedFrameProcessor({
       realArr,
       rawPressureData: context.channel === 'head' ? pressureData : rawPressureData,
       newArr147: mappedData,
+      newArr147Raw: mappedFrame,
       sitFlag: context.port1?.isOpen,
       backFlag: context.port2?.isOpen,
     };

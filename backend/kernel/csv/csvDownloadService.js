@@ -14,6 +14,10 @@ const {
   resolveSensorIdentity,
 } = require('@shroom/backend/identity');
 
+const { isHandGloveType } = require('@shroom/backend/sensors');
+const { getPressureVestStatistics } = require('../../extensions/built-in-sensors/pressureVest');
+const { buildHandGloveCsvSegments } = require('./gloveCsv');
+
 const CSV_UTF8_BOM = '\ufeff';
 const CSV_COLUMN_IDS = Object.freeze([
   ...multiSensorStableContract.csv.legacyColumnIds,
@@ -311,7 +315,8 @@ function createCsvDownloadService({
         rowSensorType,
         { canonical: !descriptor.legacy },
       );
-      const pressureSum = data.reduce((sum, value) => sum + value, 0);
+      const vestStatistics = rowSensorType === 'pressureVest' ? getPressureVestStatistics(data) : null;
+      const pressureSum = vestStatistics ? vestStatistics.totalPres : data.reduce((sum, value) => sum + value, 0);
       // sit/back 的阈值差异只属于旧三通道格式；canonical outputChannel 是任意展示别名，
       // 不能把名为 sit 的左手误当坐垫，也不能把名为 leftHand 的座垫套靠背阈值。
       const useLegacySecondaryChannelRule = descriptor.legacy && descriptor.outputChannel !== 'sit';
@@ -323,9 +328,9 @@ function createCsvDownloadService({
       mergeArtifactIdentity(artifactIdentity, identity);
       records.push({
         index: getCsvElapsedSeconds(rows, i, start, frameIndex),
-        max: data.length ? findMax(data) : 0,
+        max: vestStatistics ? vestStatistics.maxPres : data.length ? findMax(data) : 0,
         time: timeStampToDate(row?.timestamp),
-        pressureArea: data.filter((value) => value > areaThreshold).length,
+        pressureArea: vestStatistics ? vestStatistics.point : data.filter((value) => value > areaThreshold).length,
         pressure,
         realData: JSON.stringify(data),
         ...identity,
@@ -549,7 +554,7 @@ function createCsvDownloadService({
     };
   }
 
-  async function exportHistoryCsv({ date, downloadOptions = {} }) {
+  async function exportHistoryCsvSnapshot({ date, downloadOptions = {}, runtime, databases }) {
     const csvFormat = String(downloadOptions?.format || 'csv').toLowerCase();
     if (csvFormat !== 'csv') {
       const error = `unsupported export format: ${csvFormat}`;
@@ -570,8 +575,6 @@ function createCsvDownloadService({
       return { ok: false, error: csvExportDir.error };
     }
 
-    const runtime = getRuntime();
-    const databases = getDatabases();
     const csvTitle = getCsvTitleMap(downloadOptions);
     let discovered;
     try {
@@ -601,6 +604,17 @@ function createCsvDownloadService({
       return { ok: false, error, skippedChannels };
     }
 
+    if (isHandGloveType(runtime.file) && [databases.db, databases.db1].some(database => database?.hand)) {
+      try {
+        const artifact = await exportCombinedGlove({ selected, date, dir: csvExportDir.dir, csvTitle,
+          runtime, downloadOptions });
+        publishResult('export csv success', { files: [artifact.file], artifacts: [artifact], dir: csvExportDir.dir, skippedChannels });
+        return { ok: true, files: [artifact.file], artifacts: [artifact], skippedChannels };
+      } catch (error) {
+        publishResult('export csv failed', { dir: csvExportDir.dir, error: error.message, skippedChannels });
+        return { ok: false, error: error.message, files: [], artifacts: [], skippedChannels };
+      }
+    }
     const files = [];
     const artifacts = [];
     const usedFilePaths = new Set();
@@ -658,6 +672,77 @@ function createCsvDownloadService({
       });
       return { ok: false, error: errorMessage, files, artifacts, skippedChannels };
     }
+  }
+
+  /** 导出期间保留原采集库视图；切系统不能让另一只手改读新库或提前关闭。 */
+  async function exportHistoryCsv(request) {
+    const runtime = { ...getRuntime() };
+    const databases = { ...getDatabases() };
+    const retained = [];
+    try {
+      for (const slot of DATABASE_SLOTS) {
+        const original = databases[slot.key];
+        if (typeof original?.retain !== 'function') continue;
+        databases[slot.key] = original.retain();
+        retained.push(databases[slot.key]);
+      }
+      return await exportHistoryCsvSnapshot({ ...request, runtime, databases });
+    } finally {
+      for (const database of retained) database.close();
+    }
+  }
+
+  /** 双手保留各自身份和256点原始数据，按时间合并为同一份长表。 */
+  async function exportCombinedGlove({ selected, date, dir, csvTitle, runtime, downloadOptions }) {
+    const records = [];
+    const channelIds = [];
+    for (const descriptor of selected) {
+      const rows = queryExactRows(descriptor.source.dbRef, date,
+        descriptor.legacy ? null : descriptor.channelId, descriptor.count, Boolean(descriptor.legacyQueryFallback));
+      const range = downloadOptions.rangeMode === 'full' ? null : runtime.historyArr;
+      const start = Math.max(0, Number(range?.[0] || 0));
+      const end = Math.min(Number(range?.[1] ?? rows.length), rows.length);
+      for (let index = start; index < end; index++) {
+        const row = rows[index];
+        const stored = parseStoredData(row);
+        const frameData = Array.isArray(stored) ? stored : stored?.pressureData || stored?.rawPressureData || stored?.realArr || [];
+        const pressureData = frameData.length >= 256 ? frameData.slice(0, 256)
+          : normalizeHistoryPressureData(row, descriptor.sensorType || runtime.file);
+        const identity = resolveRecordIdentity(row, stored, descriptor);
+        if (!identity) continue;
+        const side = descriptor.source.legacyChannel === 'back' ? 'right' : 'left';
+        const pressureSum = pressureData.reduce((sum, value) => sum + Number(value || 0), 0);
+        records.push({
+          ...identity, hand: side, timestamp: row.timestamp,
+          max: pressureData.length ? findMax(pressureData) : 0,
+          time: timeStampToDate(row.timestamp),
+          pressureArea: pressureData.filter(value => value > (side === 'right' ? 10 : 0)).length,
+          pressure: totalToN(pressureSum, side === 'right' ? 1.3 : undefined),
+          realData: JSON.stringify(pressureData),
+          zeroFrame: Array.isArray(stored?.zeroFrame) ? JSON.stringify(stored.zeroFrame) : '',
+          rotate: JSON.stringify(Array.isArray(stored) ? stored.slice(256, 260) : stored?.rotate || stored?.quaternion || []),
+          ...buildHandGloveCsvSegments(pressureData, side),
+        });
+      }
+      channelIds.push(descriptor.channelId);
+    }
+    records.sort((left, right) => Number(left.timestamp) - Number(right.timestamp));
+    if (!records.length) throw new Error('selected history channels contain no rows in the export range');
+    const firstTimestamp = Number(records[0].timestamp);
+    records.forEach((record, index) => { record.index = Number.isFinite(firstTimestamp)
+      ? ((Number(record.timestamp) - firstTimestamp) / 1000).toFixed(3) : String(index); });
+    const segmentIds = ['littleFinger', 'ringFinger', 'middleFinger', 'indexFinger', 'thumb', 'fingerRoot', 'palm'];
+    const headers = [
+      { id: 'hand', title: title(csvTitle, 'hand', 'hand') }, ...buildHeaders(csvTitle),
+      { id: 'zeroFrame', title: title(csvTitle, 'zeroFrame', 'zeroFrame') },
+      { id: 'rotate', title: title(csvTitle, 'rotate', 'rotate') },
+      ...segmentIds.map(id => ({ id, title: title(csvTitle, id, id) })),
+    ];
+    const prefix = runtime.file === 'hand0205Double' ? 'glove2' : 'glove';
+    const filePath = path.join(dir, `${prefix}-${sanitizeFileNameSegment(formatDateLabel(date, timeStampToDateLabel))}.csv`);
+    await writeCsvFile({ fs, filePath, headers, records });
+    return { file: filePath, combined: true, channelIds, displaySystemId: records[0].displaySystemId,
+      sensorType: runtime.file, rowCount: records.length };
   }
 
   return {

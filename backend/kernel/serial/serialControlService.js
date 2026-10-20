@@ -169,6 +169,8 @@ function registerSerialControlHandlers(router, deps) {
         closeManagedSerialPort(serialRoles.HEAD, 'file switch');
       }
       closeMinzhenSensorPort('file switch');
+      deps.resetHandPacketRuntime?.();
+      const previousDatabases = deps.releasePreviousDatabases?.() || [];
       const receiveFile = selection.sourceType;
       const dbObj = initDb(receiveFile, selection.template ? selection.id : undefined);
       petCareRuntimeService.resetAll();
@@ -185,6 +187,9 @@ function registerSerialControlHandlers(router, deps) {
         localDataHead: [],
         historyChannels: [],
         indexArr: [0, 0],
+      });
+      for (const database of previousDatabases) database.close?.((error) => {
+        if (error) logger?.warn?.('[Glove] previous database close failed:', error.message);
       });
       deps.activateSystemSelection?.(selection);
       // Display System dispatcher 的策略依赖当前传感器类型，切换后立即重绑，
@@ -212,6 +217,7 @@ function registerSerialControlHandlers(router, deps) {
     ),
     handle: (message, context = {}) => {
       if (message.sitPort != null || message.headPort != null || message.sensorPort != null || message.backPort != null || message.channelPorts != null) requireAuthorizedRuntime();
+      deps.resetHandPacketRuntime?.();
       // manifest 多传感器系统用 channelPorts 这一个字段承载任意数量的通道，
       // 而不是给每个新传感器再加一对 xxxPort / xxxClose 命令字段。
       if (message.channelPorts && typeof message.channelPorts === 'object') {
@@ -340,6 +346,7 @@ function registerSerialControlHandlers(router, deps) {
     handle: () => {
       requireAuthorizedRuntime();
       const runtime = getRuntime();
+      deps.resetHandPacketRuntime?.();
       const nextCom = runtime.com1;
       const nextCom1 = runtime.com;
       setRuntime({ com: nextCom, com1: nextCom1 });
@@ -415,6 +422,7 @@ function registerSerialControlHandlers(router, deps) {
           ]);
           const closeFailure = closed.find((result) => result?.ok === false);
           if (closeFailure) throw closeFailure.error;
+          deps.resetHandPacketRuntime?.({ routeByPacketType: true });
           openSitSerialPort(leftPath, 'autoConnectHand0205Double sit');
           openBackSerialPort(rightPath, 'autoConnectHand0205Double back');
           if (waitForSerialOpen) await Promise.all([waitForSerialOpen(serialRoles.SIT), waitForSerialOpen(serialRoles.BACK)]);

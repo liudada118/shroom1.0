@@ -236,7 +236,6 @@ const parseHandGloveFullPacket = handGloveFullPacket.parseHandGloveFullPacket;
 
 const SMALL_BED_12B_PAYLOAD_LENGTH = smallBed12B.PAYLOAD_LENGTH;
 const SMALL_BED_12B_FRAME_TAIL = smallBed12B.FRAME_TAIL;
-const HAND_GLOVE_REALTIME_SEND_INTERVAL_MS = 1000 / 60;
 const COLLECTION_MIN_FREE_BYTES = Number(process.env.SHROOM_MIN_COLLECTION_FREE_BYTES) || 2 * 1024 * 1024 * 1024;
 const COLLECTION_INSERT_SQL = `INSERT INTO matrix (
   data,
@@ -262,10 +261,7 @@ const smallBed12BCalibration = {
 };
 const roundSmallBed12BPressureValue = smallBed12B.roundPressureValue;
 const normalizeSmallBed12BDisplayOptions = smallBed12B.normalizeDisplayOptions;
-let lastHandGloveRealtimeSendAt = {
-  sit: 0,
-  back: 0,
-};
+
 
 const maskMinzhenMatrixValues = minzhen.maskMatrixValues;
 /**
@@ -533,26 +529,6 @@ const {
   shouldTransposeSmallBedRawMatrixFrame,
   transposeSquareMatrix,
 } = historyFrameTransformService;
-
-/**
- * 判断当前通道是否可以发送实时帧。
- * 手套类传感器会按 60FPS 做限频，其他类型直接发送。
- *
- * @param {string} channel manifest outputChannel 或兼容通道名称。
- * @returns {boolean} 是否允许发送本帧。
- */
-function shouldSendRealtimeFrame(channel = 'sit') {
-  if (!isHandGloveType(file)) return true;
-
-  const now = Date.now();
-  const lastSendAt = lastHandGloveRealtimeSendAt[channel] || 0;
-  if (now - lastSendAt < HAND_GLOVE_REALTIME_SEND_INTERVAL_MS) {
-    return false;
-  }
-
-  lastHandGloveRealtimeSendAt[channel] = now;
-  return true;
-}
 
 /**
  * 重置采集存储时钟，用于开始采集或修改采集频率后重新计时。
@@ -1085,7 +1061,7 @@ function loadSelectedHistory(dateLabel) {
       });
       const playbackTimeline = buildPlaybackAnchorTimeline(playbackAnchor);
       length = playbackTimeline.length || maxCanonicalRows;
-      setPlaybackState('indexArr', [0, Math.max(length - 2, 0)]);
+      setPlaybackState('indexArr', [0, Math.max(length - (isHandGloveType(sensorType) ? 1 : 2), 0)]);
       timeStamp = playbackTimeline.time.length ? playbackTimeline.time : historySeries.time;
       detectedInterval = calcDetectedInterval(
         playbackTimeline.intervalTimestamps.length
@@ -1117,7 +1093,9 @@ function loadSelectedHistory(dateLabel) {
     const headStats = isThreePortFile(sensorType) && headDb
       ? getHistoryStats(headDb, dateLabel, logger)
       : { count: 0, minId: 0, maxId: 0 };
-    const totalLength = isThreePortFile(sensorType)
+    const totalLength = isHandGloveType(sensorType)
+      ? Math.max(sitStats.count, backStats.count)
+      : isThreePortFile(sensorType)
       ? getHistoryLengthFromCounts(sitStats.count, backStats.count, headStats.count)
       : isCar(sensorType)
         ? getHistoryLengthFromCounts(sitStats.count, backStats.count)
@@ -1147,7 +1125,7 @@ function loadSelectedHistory(dateLabel) {
       file: sensorType,
     });
     length = totalLength || historySeries.length;
-    setPlaybackState('indexArr', [0, Math.max(length - 2, 0)]);
+    setPlaybackState('indexArr', [0, Math.max(length - (isHandGloveType(sensorType) ? 1 : 2), 0)]);
     timeStamp = historySeries.time;
     // ⚠️ 曲线时间轴可能抽样；用连续原始帧推算间隔，否则长记录会被错误地减速。
     const cadenceRows = sitRows.length ? sitRows : backRows.length ? backRows : headRows;
@@ -1719,25 +1697,14 @@ function publishRealtimeFrame(channel, jsonData, options) {
 }
 
 /**
- * 发布一帧实时数据，带两道门 —— 实时采集链路应该用的入口。
- *
- * 两道门都是为了「不让前端收到自相矛盾的数据」：① **回放期间一律不发** —— 回放和实时共用同一批
- * 通道，不拦的话串口来的实时帧会插在回放帧中间、画面在两个时间点之间跳；这道门没有开关，任何
- * 「回放时也要看实时」的需求都得另开通道。② **手套类型限频到 60FPS**（`shouldSendRealtimeFrame`）
- * —— 手套串口 1Mbps，帧率远高于屏幕刷新率，不限频会让 WebSocket 缓冲区堆积、延迟越跑越大。
- *
- * `respectFrequency: false` 用于「这一帧必须送到」的场合（如归零后的第一帧），它绕过限频但
- * **绕不过回放门**。返回 0 的三种含义（回放中 / 被限频 / 没有订阅者）都不是错误，调用方一律当
- * 「这帧没发出去」处理即可，不需要区分。
- *
+ * 发布实时通道；回放期间隔离实时帧，手套不再在这里重复限频。
+ * 有界缓冲由 realtime 网关处理；采集频率仍由独立入库时钟控制。
  * @param {string} channel 输出通道别名。
- * @param {string | object} jsonData 帧数据。
- * @param {{respectFrequency?: boolean}} [options] `respectFrequency: false` 跳过限频。
- * @returns {number} 实际发送成功的客户端数量；被拦下时 0。
+ * @param {object|string} jsonData 帧数据。
+ * @returns {number} 实际发送成功的客户端数量。
  */
-function publishRealtimeChannel(channel, jsonData, { respectFrequency = true } = {}) {
+function publishRealtimeChannel(channel, jsonData) {
   if (runtimeContext.isLocalPlayback()) return 0;
-  if (respectFrequency && !shouldSendRealtimeFrame(channel)) return 0;
   return publishRealtimeFrame(channel, jsonData);
 }
 
@@ -1764,6 +1731,7 @@ const SENSOR_FRAME_ONLY_FIELDS = Object.freeze([
   'mappedData',
   'mappedArr195',
   'newArr147',
+  'newArr147Raw',
   'newArr',
   'rotate',
   'orientation',
@@ -2086,6 +2054,7 @@ const csvDownloadService = createCsvDownloadService({
 
 const historyMaintenanceService = createHistoryMaintenanceService({
   logger,
+  beforeDelete: flushCollectionInsertQueues,
   getDatabases: () => ({
     db: runtimeContext.getDatabase('sit'),
     db1: runtimeContext.getDatabase('back'),
@@ -2274,6 +2243,11 @@ registerRuntimeCommandHandlers(controlCommandRouter, {
 registerSerialControlHandlers(controlCommandRouter, {
   requireAccess: licenseAccess.requireAccess,
   HAND_GLOVE_DOUBLE,
+  resetHandPacketRuntime: (options) => handPacketRuntime.reset(options),
+  releasePreviousDatabases: () => {
+    flushCollectionInsertQueues();
+    return [db, db1].filter((database) => typeof database?.retain === 'function');
+  },
   /** 原生副本切换前先核验身份；采集中切换会把一段记录拆到两个库。 */
   resolveSystemSelection: (id) => {
     if (licenseAccess.read().canAcquire) assertManagedSystemSelection(id);

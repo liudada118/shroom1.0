@@ -1,4 +1,4 @@
-const { HalowReceiver } = require('./halowReceiver');
+const { HalowReceiver, isHalowDisplaySystem } = require('./halowReceiver');
 
 /** 构造可供 HTTP 回执使用的连接错误。 */
 function connectionError(message, code = 'HALOW_BUSY', httpStatus = 409) {
@@ -20,7 +20,7 @@ function createHalowService({ getContext, onFrame, publish = () => {}, receiverO
   function isAllowed() {
     const context = getContext();
     return !closing && !context.shutdown && context.licenseValid
-      && context.file === 'humanBodyOptimized' && context.systemId === systemId
+      && isHalowDisplaySystem(context.file) && context.systemId === systemId
       && !context.playback && !context.serialBusy
       && (receiver.phase === 'listening' || !context.collecting);
   }
@@ -29,7 +29,7 @@ function createHalowService({ getContext, onFrame, publish = () => {}, receiverO
   receiver.on('clear', () => {
     const context = getContext();
     // ⚠️ 清屏只发送状态事件；假零帧进入数据链会污染采集和算法输入。
-    if (context.file === 'humanBodyOptimized' && !context.playback) publish({ halowClear: true });
+    if (isHalowDisplaySystem(context.file) && !context.playback) publish({ halowClear: true });
   });
 
   /** TCP 绑定和关闭期间也保留互斥，避免串口趁异步操作尚未结束时打开。 */
@@ -52,8 +52,8 @@ function createHalowService({ getContext, onFrame, publish = () => {}, receiverO
     const context = getContext();
     if (!context.licenseValid) throw connectionError('请先完成软件授权', 'LICENSE_REQUIRED', 403);
     if (action === 'status') return undefined;
-    if (context.file !== 'humanBodyOptimized' || context.shutdown || closing) {
-      throw connectionError('仅人体全身优化系统可使用 HaLow 接收');
+    if (!isHalowDisplaySystem(context.file) || context.shutdown || closing) {
+      throw connectionError('仅人体全身优化和压力传感背心系统可使用 HaLow 接收');
     }
     if (context.playback || context.collecting) throw connectionError('请先退出回放或停止采集，再调整 HaLow 连接');
     if (action === 'select') return receiver.select(request.deviceId);

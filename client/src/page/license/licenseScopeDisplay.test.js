@@ -11,7 +11,7 @@ describe('licenseScopeDisplay', () => {
     expect(describeLicenseFile('@group:care')).toEqual({
       type: 'group',
       groupKeys: ['care'],
-      list: care.items.map((item) => item.value),
+      list: [...new Set(care.items.map((item) => item.value === 'hand0205Single' ? 'hand0205' : item.value))],
     });
   });
 
@@ -27,5 +27,11 @@ describe('licenseScopeDisplay', () => {
     expect(describeLicenseFile('hand0205').type).toBe('single');
     expect(describeLicenseFile(['hand0205', 'jqbed']).type).toBe('multi');
     expect(() => describeLicenseFile('@group:missing')).toThrow(/unknown license group/);
+  });
+
+  it('keeps both legacy glove selections and only normalizes the single-glove alias', () => {
+    expect(describeLicenseFile(['hand0205', 'hand0205Double']).list).toEqual(['hand0205', 'hand0205Double']);
+    expect(describeLicenseFile(['hand0205Single', 'hand0205']).list).toEqual(['hand0205']);
+    expect(describeLicenseFile('hand0205Single').list).toEqual(['hand0205']);
   });
 });

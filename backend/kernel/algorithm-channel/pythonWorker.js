@@ -16,6 +16,7 @@ const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { runtimeNativeMatchesSource } = require(path.join(__dirname, 'pythonRuntimeNative'));
 
 const PROJECT_ROOT = path.resolve(__dirname, "../../..");
 
@@ -183,6 +184,7 @@ function latestMtime(targetPath) {
  *
  * ⚠️ 这个新鲜度检查挡的是一个很难查的坑：改完 .py 忘了 build，无条件用 dist 里的 exe
  * 就还在跑旧算法 —— 现象是「代码明明改了但行为没变」，且毫无提示。
+ * Windows 还比较原生库字节，避免复制旧 PYD 时修改时间相同而漏检。
  *
  * @returns {string | null} 可用的开发环境可执行文件路径；缺失或过期时返回 null。
  */
@@ -201,7 +203,9 @@ function resolveFreshDevExe() {
     latestMtime(path.join(devPythonRoot(), 'requirements.txt'))
   );
 
-  return latestMtime(runtimeDir) >= sourceStamp ? runtimeExe : null;
+  return latestMtime(runtimeDir) >= sourceStamp
+    && runtimeNativeMatchesSource({ appDir: path.join(devPythonRoot(), 'app'), runtimeDir })
+    ? runtimeExe : null;
 }
 
 /**

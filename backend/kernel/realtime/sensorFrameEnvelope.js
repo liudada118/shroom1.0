@@ -395,6 +395,7 @@ function buildSensorFrameEnvelope({
       : undefined,
   });
   const protocol = compactObject({
+    mappedRaw: firstArray(data.newArr147Raw),
     frameIndex: data.frameIndex,
     packetType: data.packetType,
     handSide: data.handSide,

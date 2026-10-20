@@ -64,7 +64,8 @@
       { "label": "14*20 高速", "labelKey": "sensorDaliegu", "value": "daliegu" },
       { "label": "16*16 高速", "labelKey": "sensorFast256", "value": "fast256" },
       { "label": "32*32 高速", "labelKey": "sensorFast1024", "value": "fast1024" },
-      { "label": "人体全身优化", "labelKey": "sensorHumanBodyOptimized", "value": "humanBodyOptimized" }
+      { "label": "人体全身优化", "labelKey": "sensorHumanBodyOptimized", "value": "humanBodyOptimized" },
+      { "label": "压力传感背心", "labelKey": "sensorPressureVest", "value": "pressureVest" }
     ]
   }
 ]

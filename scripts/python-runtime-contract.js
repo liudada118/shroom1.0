@@ -1,0 +1,162 @@
+"use strict";
+
+const { spawnSync } = require("child_process");
+const fs = require("fs");
+const path = require("path");
+const { NATIVE_FILENAME, fileSha256 } = require("../backend/kernel/algorithm-channel/pythonRuntimeNative");
+
+const TRACKED_ONBED_FILTER_SHA256 = "0650ee61472710df08589a971d9c7c2ec991f23c98a55e658677099d4d8aa349";
+
+/** 规范化并校验外部原生库的预期摘要。 */
+function normalizeExpectedSha256(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(normalized)) {
+    throw new Error("ONBED_FILTER_PYD_SHA256 must be a 64-character SHA-256 digest");
+  }
+  return normalized;
+}
+
+/** 校验原生库来源，仅在目标缺失时暂存，完成后可清理注入文件。 */
+function stageOnbedFilterNative({
+  appDir,
+  env = process.env,
+  trackedSha256 = TRACKED_ONBED_FILTER_SHA256,
+}) {
+  const targetPath = path.join(appDir, NATIVE_FILENAME);
+  const sourceValue = String(env.ONBED_FILTER_PYD_SOURCE || env.SHROOM_ONBED_FILTER_BINARY || "").trim();
+  const targetExists = fs.existsSync(targetPath);
+
+  if (!sourceValue && !targetExists) {
+    throw new Error(
+      `required Windows native library is missing; set ONBED_FILTER_PYD_SOURCE to ${NATIVE_FILENAME}`
+    );
+  }
+
+  const expectedSha256 = normalizeExpectedSha256(
+    env.ONBED_FILTER_PYD_SOURCE ? env.ONBED_FILTER_PYD_SHA256 : (env.ONBED_FILTER_PYD_SHA256 || trackedSha256)
+  );
+  let injected = false;
+
+  try {
+    if (sourceValue) {
+      const sourcePath = path.resolve(sourceValue);
+      if (!fs.existsSync(sourcePath) || !fs.statSync(sourcePath).isFile()) {
+        throw new Error(`ONBED_FILTER_PYD_SOURCE is not a file: ${sourcePath}`);
+      }
+
+      const sourceSha256 = fileSha256(sourcePath);
+      if (sourceSha256 !== expectedSha256) {
+        throw new Error(
+          `onbed_filter SHA-256 mismatch: expected ${expectedSha256}, received ${sourceSha256}`
+        );
+      }
+
+      if (path.resolve(sourcePath) !== path.resolve(targetPath)) {
+        if (targetExists) {
+          const existingSha256 = fileSha256(targetPath);
+          if (existingSha256 !== expectedSha256) {
+            throw new Error(
+              `refusing to overwrite existing ${NATIVE_FILENAME} with a different artifact`
+            );
+          }
+        } else {
+          fs.copyFileSync(sourcePath, targetPath);
+          injected = true;
+        }
+      }
+    }
+
+    const actualSha256 = fileSha256(targetPath);
+    if (actualSha256 !== expectedSha256) {
+      throw new Error(
+        `onbed_filter SHA-256 mismatch: expected ${expectedSha256}, received ${actualSha256}`
+      );
+    }
+
+    return {
+      path: targetPath,
+      sha256: actualSha256,
+      injected,
+      cleanup() {
+        if (injected && fs.existsSync(targetPath)) fs.rmSync(targetPath, { force: true });
+      },
+    };
+  } catch (error) {
+    if (injected && fs.existsSync(targetPath)) fs.rmSync(targetPath, { force: true });
+    throw error;
+  }
+}
+
+/** 用统一 UTF-8 环境启动 Python，避免 Windows 日志及 RPC 编码漂移。 */
+function spawnPython(candidate, args, options = {}) {
+  const baseEnv = options.env || process.env;
+  return spawnSync(
+    candidate.command,
+    [...(candidate.args || []), ...args],
+    {
+      ...options,
+      env: {
+        ...baseEnv,
+        PYTHONUTF8: "1",
+        PYTHONIOENCODING: "utf-8",
+      },
+    }
+  );
+}
+
+/** 验证服务握手和新版床型配置 ABI，拒绝仅存在文件的坏运行时。 */
+function parseRuntimeHealth(stdout) {
+  const lines = String(stdout || "").trim().split(/\r?\n/).filter(Boolean);
+  let response;
+  try {
+    response = JSON.parse(lines.at(-1));
+  } catch {
+    throw new Error("runtime did not return a valid JSON health response");
+  }
+
+  if (!response?.ok || response.id !== "build-health" || response.data?.pong !== true) {
+    throw new Error("runtime health response did not confirm a working RPC server");
+  }
+  if (response.data.onbedFilterAvailable !== true) {
+    throw new Error("native onbed_filter module is unavailable in the packaged runtime");
+  }
+  if (response.data.onbedFilterSensitivitySchema !== true) {
+    throw new Error("native onbed_filter module does not support sensitivity_threshold schema");
+  }
+  if (response.data.onbedFilterBedTypeSchema !== true) {
+    throw new Error("native onbed_filter module does not support head_foot_area/isLowBed schema");
+  }
+  return response.data;
+}
+
+/** 用真实 JSON-line 握手验证打包运行时，不连接设备或写入采集数据。 */
+function verifyRuntimeHealth(runtimeExe) {
+  const result = spawnPython(
+    { command: runtimeExe, args: [] },
+    [],
+    {
+      input: '{"id":"build-health","fn":"health","args":{}}\n',
+      encoding: "utf8",
+      timeout: 30000,
+      windowsHide: true,
+    }
+  );
+
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(
+      `python runtime health check failed with exit code ${result.status ?? "unknown"}: ${(result.stderr || "").trim()}`
+    );
+  }
+  return parseRuntimeHealth(result.stdout);
+}
+
+module.exports = {
+  NATIVE_FILENAME,
+  TRACKED_ONBED_FILTER_SHA256,
+  fileSha256,
+  parseRuntimeHealth,
+  spawnPython,
+  stageOnbedFilterNative,
+  verifyRuntimeHealth,
+};

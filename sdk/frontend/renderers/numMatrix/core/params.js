@@ -367,6 +367,7 @@ function normalizeWebglRobot(raw, defaults) {
 function normalizeWebglParams(raw = {}) {
   const variant = raw.variant === 'original' ? 'original' : 'plain';
   const base = WEBGL_VARIANT_DEFAULTS[variant];
+  const glove = normalizeWebglGlove(raw.glove, base.glove);
 
   return {
     variant,
@@ -377,7 +378,7 @@ function normalizeWebglParams(raw = {}) {
     retintOnTuning: normalizeBoolean(raw.retintOnTuning, base.retintOnTuning),
     /** 裸数据是否转置。**只在 `width === height` 时生效**，这是原实现的条件。 */
     rawTranspose: normalizeBoolean(raw.rawTranspose, base.rawTranspose),
-    widthRatio: clampNumber(raw.widthRatio, WEBGL_SHARED_DEFAULTS.widthRatio, PARAM_RANGES.widthRatio),
+    widthRatio: clampNumber(raw.widthRatio, glove.enabled ? 0.75 : WEBGL_SHARED_DEFAULTS.widthRatio, PARAM_RANGES.widthRatio),
     cellPadding: clampInteger(
       raw.cellPadding, WEBGL_SHARED_DEFAULTS.cellPadding, PARAM_RANGES.cellPadding,
     ),
@@ -418,13 +419,12 @@ function normalizeWebglParams(raw = {}) {
     /**
      * 挂载时先推一帧全 0。
      *
-     * 只有整包手套（`handGloveFullPacket`）需要：它上电到第一帧之间有好几秒，
-     * 不先铺一张空网格的话那段时间是纯白，看着像坏了。
+     * 双手通路在第一帧之前也显示两块零矩阵，避免右手尚未连接时没有布局。
      */
     glovePrimeOnMount: normalizeBoolean(
-      raw.glovePrimeOnMount, WEBGL_SHARED_DEFAULTS.glovePrimeOnMount,
+      raw.glovePrimeOnMount, glove.enabled || WEBGL_SHARED_DEFAULTS.glovePrimeOnMount,
     ),
-    glove: normalizeWebglGlove(raw.glove, base.glove),
+    glove,
     foot: normalizeWebglFoot(raw.foot, { ...base.foot, ttlMs: WEBGL_SHARED_DEFAULTS.footTtlMs }),
     robot: normalizeWebglRobot(raw.robot, WEBGL_SHARED_DEFAULTS.robot),
   };

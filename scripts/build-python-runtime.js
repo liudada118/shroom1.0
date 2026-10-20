@@ -1,9 +1,14 @@
 "use strict";
 
-const { spawnSync } = require("child_process");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { runtimeNativeMatchesSource } = require("../backend/kernel/algorithm-channel/pythonRuntimeNative");
+const {
+  spawnPython,
+  stageOnbedFilterNative,
+  verifyRuntimeHealth,
+} = require("./python-runtime-contract");
 
 const projectRoot = path.resolve(__dirname, "..");
 const pythonRoot = path.join(projectRoot, "python");
@@ -40,7 +45,7 @@ function runtimeContainsOnbedFilter(dirPath) {
 function pathCommandCandidates(command) {
   if (process.platform === "win32") return [];
 
-  const result = spawnSync("which", ["-a", command], {
+  const result = spawnPython({ command: "which", args: [] }, ["-a", command], {
     encoding: "utf8",
     stdio: "pipe",
   });
@@ -109,7 +114,7 @@ function latestMtime(targetPath) {
 }
 
 function runtimeIsFresh() {
-  if (!fs.existsSync(runtimeExe) || !runtimeContainsOnbedFilter(runtimeDir)) {
+  if (!fs.existsSync(runtimeExe)) {
     return false;
   }
 
@@ -119,7 +124,8 @@ function runtimeIsFresh() {
     latestMtime(path.join(pythonRoot, "requirements.txt"))
   );
 
-  return latestMtime(runtimeDir) >= sourceStamp;
+  return latestMtime(runtimeDir) >= sourceStamp
+    && runtimeNativeMatchesSource({ appDir: path.join(pythonRoot, "app"), runtimeDir });
 }
 
 function interpreterCandidates() {
@@ -166,10 +172,9 @@ function interpreterCandidates() {
 }
 
 function probeInterpreter(candidate) {
-  const result = spawnSync(
-    candidate.command,
+  const result = spawnPython(
+    candidate,
     [
-      ...candidate.args,
       "-c",
       "import sys, numpy, scipy, sklearn, joblib, threadpoolctl, narwhals, PyInstaller; assert sys.version_info[:2] == (3, 11), sys.version; print(sys.executable)",
     ],
@@ -217,23 +222,24 @@ function resolveInterpreter() {
   throw new Error(
     [
       "No usable Python build environment found for packaging.",
-      "Expected Python 3.11 with the pinned dependencies from python/requirements.txt. Run py -3.11 -m pip install -r python/requirements.txt.",
+      "Expected Python 3.11 with numpy and PyInstaller installed.",
       ...failures.map((failure) => `- ${failure}`),
     ].join("\n")
   );
 }
 
-function runBuild(interpreter) {
+function runBuild(interpreter, nativePath) {
   console.log(
     `[pack] building python runtime with ${interpreter.label} -> ${interpreter.executable}`
   );
 
-  const result = spawnSync(
-    interpreter.command,
-    [...interpreter.args, "build_exe.py"],
+  const result = spawnPython(
+    interpreter,
+    ["build_exe.py"],
     {
       cwd: pythonRoot,
       stdio: "inherit",
+      env: { ...process.env, SHROOM_ONBED_FILTER_BINARY: nativePath },
     }
   );
 
@@ -258,22 +264,40 @@ function main() {
     throw new Error(`python build script not found: ${pythonBuildScript}`);
   }
 
-  if (runtimeIsFresh()) {
-    console.log(`[pack] python runtime up-to-date -> ${runtimeExe}`);
-    return;
-  }
+  const stagedNative = stageOnbedFilterNative({
+    appDir: path.join(pythonRoot, "app"),
+  });
+  console.log(`[pack] verified onbed_filter SHA-256 ${stagedNative.sha256}`);
 
-  const interpreter = resolveInterpreter();
-  runBuild(interpreter);
+  try {
+    if (runtimeIsFresh()) {
+      console.log(`[pack] python runtime up-to-date -> ${runtimeExe}`);
+    } else {
+      const interpreter = resolveInterpreter();
+      runBuild(interpreter, stagedNative.path);
 
-  if (!fs.existsSync(runtimeExe)) {
-    throw new Error(`python runtime build completed without output: ${runtimeExe}`);
-  }
-  if (!runtimeContainsOnbedFilter(runtimeDir)) {
-    throw new Error(`python runtime build completed without onbed_filter: ${runtimeDir}`);
-  }
+      if (!fs.existsSync(runtimeExe)) {
+        throw new Error(`python runtime build completed without output: ${runtimeExe}`);
+      }
 
-  console.log(`[pack] python runtime ready -> ${runtimeExe}`);
+      if (!runtimeContainsOnbedFilter(runtimeDir)) {
+        throw new Error(`python runtime build completed without onbed_filter: ${runtimeDir}`);
+      }
+      if (!runtimeNativeMatchesSource({ appDir: path.join(pythonRoot, "app"), runtimeDir })) {
+        throw new Error(`python runtime build contains a different onbed_filter artifact: ${runtimeDir}`);
+      }
+      console.log(`[pack] python runtime ready -> ${runtimeExe}`);
+    }
+
+    const health = verifyRuntimeHealth(runtimeExe);
+    console.log(
+      `[pack] python runtime health ready; onbedFilterAvailable=${health.onbedFilterAvailable}; `
+      + `onbedFilterSensitivitySchema=${health.onbedFilterSensitivitySchema}; `
+      + `onbedFilterBedTypeSchema=${health.onbedFilterBedTypeSchema}`
+    );
+  } finally {
+    stagedNative.cleanup();
+  }
 }
 
 try {

@@ -19,10 +19,10 @@ const {
   validateLicenseKey,
 } = require('../../kernel/platform/license/licenseValidationService');
 
-test('license category registry is unique and covers all 28 visible built-in systems', () => {
+test('license category registry is unique and covers all 29 visible built-in systems', () => {
   assert.deepEqual(validateLicenseSensorGroups(), {
     groupCount: 5,
-    sensorTypeCount: 28,
+    sensorTypeCount: 29,
   });
   assert.equal(
     LICENSE_SENSOR_GROUPS.some((group) => group.items.some((item) => item.value === 'humanBody')),
@@ -32,6 +32,17 @@ test('license category registry is unique and covers all 28 visible built-in sys
     LICENSE_SENSOR_GROUPS.some((group) => group.items.some((item) => item.value === 'humanBodyOptimized')),
     true,
   );
+  assert.equal(LICENSE_SENSOR_GROUPS.some((group) => group.items.some((item) => item.value === 'pressureVest')), true);
+  assert.equal(LICENSE_SENSOR_GROUPS.some((group) => group.items.some((item) => item.value === 'hand0205Single')), false);
+});
+
+test('glove compatibility aliases preserve single-system scope without granting the dual glove', () => {
+  assert.deepEqual(expandLicenseFile('hand0205Single').sensorTypes, ['hand0205']);
+  assert.deepEqual(expandLicenseFile(['hand0205Single', 'hand0205', 'hand0205Double']).sensorTypes, ['hand0205', 'hand0205Double']);
+  assert.deepEqual(decodeLicenseKey(generateLicenseKey('hand0205Single', 30), Date.now()).sensorTypes, ['hand0205']);
+  const fixed = decodeLicenseKey(generateLicenseKey('hand0205', 30), Date.now());
+  assert.equal(fixed.sensorTypes.includes('pressureVest'), false);
+  assert.equal(fixed.sensorTypes.includes('hand0205Double'), false);
 });
 
 test('every category token expands in registry order', () => {

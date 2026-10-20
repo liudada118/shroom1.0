@@ -38,6 +38,7 @@ import { getJqbedConfigAccess } from '../../extensions/jqbed/jqbedAlgorithmConfi
 import { commandClient, commandFromLegacyFields } from '../../services/command/commandClient';
 import { serialFeedback, serialErrorText } from '../../services/serial/serialFeedback';
 import HalowConnection from './HalowConnection';
+import { PRESSURE_VEST_MATRIX } from '../video/pressureVestConfig';
 import {
   PRESSURE_SCENES,
   readPressureScene,
@@ -83,7 +84,9 @@ const HUMAN_BODY_COLOR_SLIDER_MAX = 5000
 const HUMAN_BODY_DEFAULT_COLOR = 1555
 const HUMAN_BODY_DEFAULT_SIZE = 31
 const HUMAN_BODY_OPTIMIZED_MATRIX = 'humanBodyOptimized'
-const isHumanBodyMatrixTitle = (matrixName) => ['humanBody', HUMAN_BODY_OPTIMIZED_MATRIX].includes(resolveNativeSystemType(matrixName))
+const isHumanBodyMatrixTitle = (matrixName) => ['humanBody', HUMAN_BODY_OPTIMIZED_MATRIX, PRESSURE_VEST_MATRIX].includes(resolveNativeSystemType(matrixName))
+/** 人体优化与背心共用 HaLow，副本沿用来源型号判断。 */
+const isHalowMatrixTitle = (matrixName) => [HUMAN_BODY_OPTIMIZED_MATRIX, PRESSURE_VEST_MATRIX].includes(resolveNativeSystemType(matrixName))
 const HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES = [1205, 5000]
 const HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES = [20, 60]
 const MINZHEN_NORMAL_DEFAULT_COLOR = 415
@@ -136,6 +139,7 @@ const titleInitConfig = {
   humanBody: { valueg1: 2, valuej1: HUMAN_BODY_DEFAULT_COLOR, valuel1: 5, valuef1: 6, value1: 0.72, sizeValue: HUMAN_BODY_DEFAULT_SIZE },
 }
 titleInitConfig[HUMAN_BODY_OPTIMIZED_MATRIX] = { ...titleInitConfig.humanBody }
+titleInitConfig[PRESSURE_VEST_MATRIX] = { ...titleInitConfig.humanBody }
 titleInitConfig.minzhen__normal = {
   ...titleInitConfig.minzhen,
   valuej1: MINZHEN_NORMAL_DEFAULT_COLOR,
@@ -154,8 +158,9 @@ const smallBedNoAlgType_title = 'smallBedNoAlg'
 const smallBed12BType_title = 'smallBed12B'
 const wholeChairType_title = 'wholeChair'
 const minzhenType_title = 'minzhen'
-const tactileGloveTypes_title = ['hand0205', 'handGlove115200', 'handGloveFullPacket']
+const tactileGloveTypes_title = ['hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket']
 const fullPacketGloveType_title = 'handGloveFullPacket'
+const normalizeGloveDisplayTypeTitle = (type) => type === 'hand0205Single' ? 'hand0205' : type
 const calibratableGloveTypes_title = tactileGloveTypes_title.filter((type) => type !== fullPacketGloveType_title)
 const isPetCareMatrixTitle = (type) => petCareMatrixTypes_title.includes(type)
 const bedArr_title = ['bigBed', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'bed4096', 'bed4096num', 'matColPos', 'jqbed', tempFullBedType_title, ...petCareMatrixTypes_title]
@@ -2224,8 +2229,9 @@ class Title extends React.Component {
       },
     ];
     const isMinzhenAnimationMode = this.props.matrixName === minzhenType_title && this.props.numMatrixFlag === 'normal';
-    const isHalowSystem = resolveNativeSystemType(this.props.systemId || this.props.matrixName) === HUMAN_BODY_OPTIMIZED_MATRIX;
+    const isHalowSystem = isHalowMatrixTitle(this.props.systemId || this.props.matrixName);
     const halowControls = isHalowSystem ? <HalowConnection
+      sensorLabel={t(resolveNativeSystemType(this.props.systemId || this.props.matrixName) === PRESSURE_VEST_MATRIX ? 'sensorPressureVest' : 'sensorHumanBodyOptimized')}
       key={this.props.systemId || this.props.matrixName}
       status={this.props.halowStatus} onStatus={(halowStatus) => this.props.changeStateData({ halowStatus })}
       connected={this.props.wsConnected} connectionEpoch={this.props.wsConnectionEpoch}
@@ -2388,7 +2394,7 @@ class Title extends React.Component {
         </span>)}
     </div> : null;
     const displayControls = <>
-        {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'handSinglePoint', 'normal', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'matCol', 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody', HUMAN_BODY_OPTIMIZED_MATRIX].includes(this.props.matrixName) ?
+        {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'handSinglePoint', 'normal', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'matCol', 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody', HUMAN_BODY_OPTIMIZED_MATRIX, PRESSURE_VEST_MATRIX].includes(this.props.matrixName) ?
           <Select
             defaultValue={this.props.numMatrixFlag}
             style={{ width: 90 }}
@@ -2400,7 +2406,7 @@ class Title extends React.Component {
 
               if (calibratableGloveTypes_title.includes(this.props.matrixName)) {
                 if (['normal', 'skin'].includes(this.props.numMatrixFlag)) {
-                  this.props.com.current?.changeModal(this.props.hand)
+                  this.props.com.current?.changeModal?.(this.props.hand)
                 }
 
                 if (value == 'normal') {
@@ -2498,10 +2504,15 @@ class Title extends React.Component {
             >
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px' }}>
                 <Select
-                  defaultValue={this.state.calibHand || 'left'}
+                  value={this.state.calibHand || (this.props.matrixName === 'hand0205' && !this.props.hand ? 'right' : 'left')}
                   style={{ width: 100 }}
                   onChange={(e) => {
                     this.setState({ calibHand: e })
+                    if (this.props.matrixName === 'hand0205') {
+                      const hand = e === 'left';
+                      this.props.changeStateData({ hand });
+                      this.props.com.current?.changeModal?.(hand);
+                    }
                   }}
                   options={[
                     { value: 'left', label: t('leftHand') },
@@ -2530,7 +2541,7 @@ class Title extends React.Component {
 
               <Button
                 onClick={() => {
-                  this.props.colFingerData(this.state.fingerIndex, this.state.calibHand || 'left')
+                  this.props.colFingerData(this.state.fingerIndex, this.state.calibHand || (this.props.matrixName === 'hand0205' && !this.props.hand ? 'right' : 'left'))
                 }}
               >{t('colData')}</Button>
               <Button
@@ -2575,7 +2586,7 @@ class Title extends React.Component {
 
             <Button
               onClick={() => {
-                this.props.colFingerData(this.state.fingerIndex, this.state.calibHand || 'left')
+                this.props.colFingerData(this.state.fingerIndex, this.state.calibHand || (this.props.matrixName === 'hand0205' && !this.props.hand ? 'right' : 'left'))
               }}
             >采集数据</Button>
             <Button
@@ -2612,6 +2623,21 @@ class Title extends React.Component {
           : ''} */}
 
 
+        {this.props.matrixName === 'hand0205' ? (
+          <Select
+            value={this.props.hand}
+            style={{ marginRight: 6, width: 90 }}
+            onChange={(hand) => {
+              this.props.changeStateData({ hand });
+              this.props.com.current?.changeModal?.(hand);
+            }}
+            options={[
+              { value: true, label: t('leftHand') },
+              { value: false, label: t('rightHand') },
+            ]}
+          />
+        ) : null}
+
         {calibratableGloveTypes_title.includes(this.props.matrixName) && this.props.numMatrixFlag == 'normal' ? <Button className='titleButton'
           onClick={() => {
             // this.props.com.current?.calibration()
@@ -2622,6 +2648,9 @@ class Title extends React.Component {
 
 
             // 校准弹框
+            if (this.props.matrixName === 'hand0205') {
+              this.setState({ calibHand: this.props.hand ? 'left' : 'right' });
+            }
             this.props.changeCalibration()
 
             // 手固定

@@ -30,10 +30,8 @@
  *
  * ## 与原实现的四处已知差异（都写明了为什么）
  *
- * 1. **`reportStats` 无条件先调。** 原实现的 `layoutData` 散在各分支里，
- *    `original` 变体在「三条通路一条都没开」时是不调的。本后端统一在
- *    `changeWsData147` 开头调一次 —— 内置预设没有一条会走到那个空分支
- *    （`webglRaw*` 里不开通路的那些都靠 `setRawFrame` 喂数据），所以现网无差异。
+ * 1. 非手套通路先调 `reportStats`；手套按左右最后帧合并统计，rows15
+ *    仍按补位后的数据统计，scatter32 仍按源点统计。
  * 2. **`u_useMask` 在建上下文时定死，不逐帧改。** 一个上下文要么是分区布局
  *    （建的时候 `withMask = true`）要么不是，原实现也是在 `initWebGL` 里
  *    一次性 `uniform1f`。
@@ -180,13 +178,12 @@ export function createWebglMatrixBackend({
     return { pane, gl, overlay, label: labelNode };
   }
 
-  const paneA = createPane(isFoot ? '左脚' : '');
-  const paneB = createPane(isFoot ? '右脚' : '');
-  // 第二块在原实现里是条件挂载；这里常驻 DOM 用 display 切。两者等价 ——
-  // 第二个上下文仍然只在版面变成 dual 时才建（见 `applyFootLayout`）。
-  paneB.pane.style.display = 'none';
+  const paneA = createPane(isGlove ? '左手' : (isFoot ? '左脚' : ''));
+  const paneB = createPane(isGlove ? '右手' : (isFoot ? '右脚' : ''));
+  // 手套固定双手画布；足底仍按在线状态切换并延迟创建第二上下文。
+  paneB.pane.style.display = isGlove ? '' : 'none';
   row.appendChild(paneA.pane);
-  if (isFoot) row.appendChild(paneB.pane);
+  if (isFoot || isGlove) row.appendChild(paneB.pane);
   stage.appendChild(row);
   container.replaceChildren(stage);
 
@@ -207,10 +204,13 @@ export function createWebglMatrixBackend({
   let footLayout = 'single-left';
   let lastLeftFrameAt = 0;
   let lastRightFrameAt = 0;
+  const gloveStats = { left: null, right: null };
+  const gloveFrames = { left: null, right: null };
 
   const baseTexW = grid.gridWidth;
   const baseTexH = grid.gridHeight;
   let texSize = { w: baseTexW, h: baseTexH };
+  let texSize2 = { w: baseTexW, h: baseTexH };
 
   /**
    * 视口可用宽高。**这是「渲染器按视口而非按容器定尺寸」那条积压的落点** ——
@@ -258,11 +258,12 @@ export function createWebglMatrixBackend({
    * @returns {[number, number]} 参考宽高（格）。
    */
   function sizingSize(dual) {
+    if (isGlove) return [texSize.w + texSize2.w + DUAL_FOOT_GAP_CELLS, Math.max(texSize.h, texSize2.h)];
     if (isFoot && dual) return [opts.foot.width * 2 + DUAL_FOOT_GAP_CELLS, opts.foot.height];
     return [baseTexW, baseTexH];
   }
 
-  let cellSize = computeCellSize();
+  let cellSize = computeCellSize(...sizingSize(false));
 
   // ---- WebGL 上下文 ----
 
@@ -378,12 +379,13 @@ export function createWebglMatrixBackend({
   }
 
   /**
-   * 重建第二块（右脚）上下文。
+   * 重建第二块（右手或右脚）上下文。
    *
    * @param {number} tw 矩阵宽（格）。
    * @param {number} th 矩阵高（格）。
    */
   function rebuildSecondary(tw, th) {
+    texSize2 = { w: tw, h: th };
     destroyContext(ctxB);
     ctxB = initContext(paneB.gl, tw, th, cellSize, false);
     overlayB = sizeOverlay(paneB.overlay, tw, th, cellSize);
@@ -641,6 +643,37 @@ export function createWebglMatrixBackend({
     schedule();
   }
 
+  /** 排入单侧手套帧；尺寸变化和重绘保留另一侧最后一帧，不交换左右数据。 */
+  function queueGloveFrame(data, tw, th, side) {
+    const right = side === 'right';
+    gloveFrames[right ? 'right' : 'left'] = { data, tw, th };
+    const previous = right ? texSize2 : texSize;
+    const sizeChanged = previous.w !== tw || previous.h !== th;
+    if (right) texSize2 = { w: tw, h: th };
+    else texSize = { w: tw, h: th };
+    const nextCellSize = opts.refitOnSizeChange ? computeCellSize(...sizingSize(false)) : cellSize;
+    if (nextCellSize !== cellSize) {
+      cellSize = nextCellSize;
+      rebuildPrimary(texSize.w, texSize.h, false);
+      rebuildSecondary(texSize2.w, texSize2.h);
+      pendingA = gloveFrames.left;
+      pendingB = gloveFrames.right;
+    } else if (right) {
+      if (sizeChanged || !ctxB) rebuildSecondary(tw, th);
+      pendingB = gloveFrames.right;
+    } else {
+      if (sizeChanged || !ctxA) rebuildPrimary(tw, th, false);
+      pendingA = gloveFrames.left;
+    }
+    schedule();
+  }
+
+  /** 合并左右最后一份统计输入；补点/显示插值不会替换真实源帧统计。 */
+  function reportGloveStats(data, side) {
+    gloveStats[side === 'right' ? 'right' : 'left'] = [...data];
+    reportStats?.([...(gloveStats.left || []), ...(gloveStats.right || [])]);
+  }
+
   // ---- 足底的单/双脚状态机（本后端唯一一处运行期状态机）----
 
   /**
@@ -741,6 +774,7 @@ export function createWebglMatrixBackend({
   // ---- 窗口 resize ----
 
   let resizeTimer = null;
+  /** 视口变化时重排画布；双手同时恢复最后帧，避免重建后只剩一侧。 */
   function handleResize() {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
@@ -760,6 +794,12 @@ export function createWebglMatrixBackend({
         rebuildPrimary(texSize.w, texSize.h, false);
       }
       if (isFoot && dual && ctxB) rebuildSecondary(opts.foot.width, opts.foot.height);
+      if (isGlove) {
+        rebuildSecondary(texSize2.w, texSize2.h);
+        pendingA = gloveFrames.left;
+        pendingB = gloveFrames.right;
+        schedule();
+      }
     }, RESIZE_DEBOUNCE_MS);
   }
   globalThis.addEventListener?.('resize', handleResize);
@@ -769,26 +809,28 @@ export function createWebglMatrixBackend({
   // 分区布局不在这里建上下文：布局尺寸要等第一帧到了才知道（原实现同此）。
   if (!isRobot) {
     rebuildPrimary(baseTexW, baseTexH, false);
+    if (isGlove) rebuildSecondary(baseTexW, baseTexH);
   }
 
-  // 整包手套上电到第一帧之间有好几秒，不先铺一张空网格那段时间是纯白，像坏了。
+  // 两侧在第一帧之前也显示零矩阵，布局不依赖设备先后上报顺序。
   if (opts.glovePrimeOnMount) {
     const primed = new Array(opts.glove.width * opts.glove.height).fill(0);
     reportStats?.(primed);
-    queuePrimary(primed, opts.glove.width, opts.glove.height);
+    if (isGlove) {
+      queueGloveFrame([...primed], opts.glove.width, opts.glove.height, 'left');
+      queueGloveFrame([...primed], opts.glove.width, opts.glove.height, 'right');
+    } else queuePrimary(primed, opts.glove.width, opts.glove.height);
   }
 
   const commands = {
     /**
      * 147 点手套 / 足底 / 分区布局三选一。
      *
-     * `reportStats` 无条件先调，与原实现的差异见文件头第 1 条。
-     *
      * @param {number[]} wsPointData 原始帧。
+     * @param {string} [side='left'] 手套数据归属侧；足底及分区通路忽略。
      */
-    changeWsData147(wsPointData) {
+    changeWsData147(wsPointData, side = 'left') {
       if (!Array.isArray(wsPointData)) return;
-      reportStats?.(wsPointData.slice());
 
       if (isGlove) {
         if (opts.glove.mode === 'scatter32') {
@@ -796,8 +838,8 @@ export function createWebglMatrixBackend({
             thumbRowOffsets: GLOVE_147_THUMB_ROWS_WEBGL,
           });
           const padded = addSide(laid, GLOVE_147_BASE, GLOVE_147_BASE, 2, 2, 0);
-          ensureTextureSize(GLOVE_147_PADDED, GLOVE_147_PADDED);
-          queuePrimary(padded, GLOVE_147_PADDED, GLOVE_147_PADDED);
+          reportGloveStats(wsPointData, side);
+          queueGloveFrame(padded, GLOVE_147_PADDED, GLOVE_147_PADDED, side);
           return;
         }
         // `rows15`：整包手套补到 15×13，其余在第 75 位补三个 0 成 15×10。
@@ -805,10 +847,12 @@ export function createWebglMatrixBackend({
         const { data, gridWidth, gridHeight } = padGlove147Rows(wsPointData, {
           fullPacket: opts.glove.height >= 13,
         });
-        ensureTextureSize(gridWidth, gridHeight);
-        queuePrimary(data, gridWidth, gridHeight);
+        reportGloveStats(data, side);
+        queueGloveFrame(data, gridWidth, gridHeight, side);
         return;
       }
+
+      reportStats?.(wsPointData.slice());
 
       if (isFoot) {
         queueFootFrame(wsPointData, 'primary');
@@ -819,16 +863,17 @@ export function createWebglMatrixBackend({
     },
 
     /**
-     * 左右两侧分开推的通路。手套原样转给 `changeWsData147`，足底走双画布。
+     * 左右两侧分开推的通路。手套连同侧别转给 `changeWsData147`，足底走双画布。
      *
      * 版面判定必须在排帧**之前**：`syncFootLayout` 可能会改格子边长并重建上下文，
      * 排帧时才好按新边长建第二块。
      *
      * @param {{left?: number[], right?: number[]}} wsPointData 两侧的帧。
+     * @param {string} [side='left'] 数组式手套帧的归属侧。
      */
-    changeWsData147R(wsPointData) {
+    changeWsData147R(wsPointData, side = 'left') {
       if (isGlove) {
-        commands.changeWsData147(wsPointData);
+        commands.changeWsData147(wsPointData, side);
         return;
       }
       if (!isFoot || !wsPointData) return;
@@ -853,12 +898,18 @@ export function createWebglMatrixBackend({
      * 手套原始 256 点，按 16×16 直接上屏。
      *
      * @param {number[]} wsPointData 原始帧。
+     * @param {string} [side='left'] 手套数据归属侧。
      */
-    changeWsData256(wsPointData) {
+    changeWsData256(wsPointData, side = 'left') {
       if (!Array.isArray(wsPointData)) return;
       let raw = [...wsPointData];
       if (raw.length > 256) raw = raw.slice(0, 256);
       while (raw.length < 256) raw.push(0);
+      if (isGlove) {
+        reportGloveStats(raw, side);
+        queueGloveFrame(raw, 16, 16, side);
+        return;
+      }
       reportStats?.([...raw]);
       ensureTextureSize(16, 16);
       queuePrimary(raw, 16, 16);
@@ -946,6 +997,12 @@ export function createWebglMatrixBackend({
     applyTuning(changed = {}) {
       if (!opts.retintOnTuning) return;
       if (!(changed.valuej || changed.valuef)) return;
+      if (isGlove) {
+        if (pendingA === null && ctxA) pendingA = gloveFrames.left;
+        if (pendingB === null && ctxB) pendingB = gloveFrames.right;
+        schedule();
+        return;
+      }
       if (pendingA !== null || !ctxA || !lastData) return;
       queuePrimary(lastData, ctxA.texWidth, ctxA.texHeight);
     },
@@ -970,6 +1027,10 @@ export function createWebglMatrixBackend({
       pendingB = null;
       pendingRobot = null;
       lastData = null;
+      gloveFrames.left = null;
+      gloveFrames.right = null;
+      gloveStats.left = null;
+      gloveStats.right = null;
       destroyContext(ctxA);
       destroyContext(ctxB);
       ctxA = null;

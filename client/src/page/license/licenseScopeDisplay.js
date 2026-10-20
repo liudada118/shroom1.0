@@ -14,6 +14,9 @@ const groupsByKey = new Map(
   licenseSensorGroups.map((group) => [group.key, group]),
 );
 
+/** 将历史单手型号别名归一到现有触觉手套型号。 */
+const normalizeSensorType = (value) => value === 'hand0205Single' ? 'hand0205' : value;
+
 /**
  * 把授权 `file` 展开成界面要用的形状；`type` 决定文案走「全部 / 整类 / 多型号 / 单型号」哪一支。
  *
@@ -47,16 +50,18 @@ export function describeLicenseFile(licenseFile) {
         groupKeys.push(groupKey);
       }
       group.items.forEach((item) => {
-        if (!seenTypes.has(item.value)) {
-          seenTypes.add(item.value);
-          list.push(item.value);
+        const sensorType = normalizeSensorType(item.value);
+        if (!seenTypes.has(sensorType)) {
+          seenTypes.add(sensorType);
+          list.push(sensorType);
         }
       });
       return;
     }
-    if (!seenTypes.has(normalized)) {
-      seenTypes.add(normalized);
-      list.push(normalized);
+    const sensorType = normalizeSensorType(normalized);
+    if (!seenTypes.has(sensorType)) {
+      seenTypes.add(sensorType);
+      list.push(sensorType);
     }
   });
 

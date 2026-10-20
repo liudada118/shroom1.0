@@ -5,9 +5,16 @@ import { getBuiltinSystemOptions } from '../../services/displaySystemOptions';
 /** 构造目录中的真实 runtimeDefinition 结构，不依赖运行后端。 */
 const runtime = (value, name = value) => ({ sensorDefinition: { type: value }, displayMetadata: { name, matrix: { rows: 32, cols: 32 } } });
 describe('首页系统目录', () => {
-  it('和运行页共用入口，保持顺序，仅隐藏旧双手重复类型', () => {
+  it('和运行页共用入口，区分单手、双手并加入背心', () => {
     const items = buildPortalSystems((key) => key);
-    expect(items.map((item) => item.value)).toEqual(getBuiltinSystemOptions((key) => key).filter((item) => item.value !== 'hand0205Double').map((item) => item.value));
+    expect(items.map((item) => item.value)).toEqual(getBuiltinSystemOptions((key) => key).map((item) => item.value));
+  });
+  it('新的背心和双手入口只对相应密钥范围开放，不触发公司目录请求', () => {
+    const systems = buildPortalSystems((key) => key);
+    expect(getAuthorizedPortalSystems(systems, ['pressureVest', 'hand0205Double']).map((item) => item.value))
+      .toEqual(['hand0205Double', 'pressureVest']);
+    expect(getAuthorizedPortalSystems(systems, ['hand0205']).map((item) => item.value)).toEqual(['hand0205']);
+    expect(needsCompanySystemSync(['pressureVest', 'hand0205Double'])).toBe(false);
   });
   it('追加实际安装系统，排除缺身份项、重复项和伪造内置同名项', () => {
     const items = buildPortalSystems((key) => key, [runtime('custom-mat', '定制垫'), runtime('custom-mat'), runtime('hand0205'), {}]);

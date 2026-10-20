@@ -303,6 +303,8 @@ export function adaptSensorFrameForClient(frame) {
   }
 
   if (isObject(payload.protocol)) {
+    // ⚠️ 弯指基准依赖未清零映射，不能从归零后的 mapped 阶段补回。
+    assignArray(internal, 'newArr147Raw', payload.protocol.mappedRaw);
     for (const field of LEGACY_PROTOCOL_FIELDS) {
       if (payload.protocol[field] != null) internal[field] = payload.protocol[field];
     }

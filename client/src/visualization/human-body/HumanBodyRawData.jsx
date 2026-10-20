@@ -38,9 +38,9 @@ const getViewStats = (view, source) => getHumanBodyRawPartStats(
   getUniquePositionValues(source, [...view.upperSlots, ...view.lowerSlots]),
 )
 
-export const getHumanBodyRawView = (viewKey) => (
-  HUMAN_BODY_RAW_VIEWS.find((view) => view.key === viewKey)
-  ?? HUMAN_BODY_RAW_VIEWS[0]
+export const getHumanBodyRawView = (viewKey, views = HUMAN_BODY_RAW_VIEWS) => (
+  views.find((view) => view.key === viewKey)
+  ?? views[0]
 )
 
 const getPartCanvasMetrics = (part) => {
@@ -49,7 +49,7 @@ const getPartCanvasMetrics = (part) => {
   return {
     cellWidth,
     cellHeight,
-    width: part.width * cellWidth,
+    width: (part.width + (part.gapAfterColumn ? 1 : 0)) * cellWidth,
     height: part.height * cellHeight,
   }
 }
@@ -91,7 +91,7 @@ const drawPart = (canvas, part, values, positions, viewPeak) => {
   if (!canvas) return
 
   const { cellWidth, cellHeight, width, height } = getPartCanvasMetrics(part)
-  const ratio = Math.min(window.devicePixelRatio || 1, 2)
+  const ratio = Math.min((window.devicePixelRatio || 1) * (part.pixelRatioScale || 1), 2)
 
   canvas.width = Math.round(width * ratio)
   canvas.height = Math.round(height * ratio)
@@ -104,12 +104,23 @@ const drawPart = (canvas, part, values, positions, viewPeak) => {
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
 
+  if (part.gapAfterColumn) {
+    const gapX = part.gapAfterColumn * cellWidth + cellWidth / 2
+    ctx.strokeStyle = 'rgba(130, 162, 184, 0.45)'
+    ctx.setLineDash([4, 5])
+    ctx.beginPath()
+    ctx.moveTo(gapX, 2)
+    ctx.lineTo(gapX, height - 2)
+    ctx.stroke()
+    ctx.setLineDash([])
+  }
+
   for (let row = 0; row < part.height; row++) {
     for (let col = 0; col < part.width; col++) {
       const index = row * part.width + col
       const value = Math.round(values[index] || 0)
       const position = positions[index] || 0
-      const x = col * cellWidth + 2
+      const x = (col + (part.gapAfterColumn && col >= part.gapAfterColumn ? 1 : 0)) * cellWidth + 2
       const y = row * cellHeight + 2
       const tileWidth = cellWidth - 4
       const tileHeight = cellHeight - 4
@@ -134,14 +145,16 @@ const drawPart = (canvas, part, values, positions, viewPeak) => {
 }
 
 const HumanBodyRawData = React.forwardRef((props, refs) => {
+  const views = props.layout?.views || HUMAN_BODY_RAW_VIEWS
+  const slots = props.layout?.slots || HUMAN_BODY_RAW_SLOTS
   const { t } = useTranslation()
   const instanceId = useId().replace(/:/g, '')
   const canvasRefs = useRef({})
   const [sourceData, setSourceData] = useState(() => createDefaultSource())
   const [activeViewKey, setActiveViewKey] = useState('front')
-  const activeView = getHumanBodyRawView(activeViewKey)
+  const activeView = getHumanBodyRawView(activeViewKey, views)
   const projectedSlots = useMemo(() => Object.fromEntries(
-    HUMAN_BODY_RAW_SLOTS.map((slot) => {
+    slots.map((slot) => {
       const positions = slot.indexMatrix.flat()
       return [
         slot.slotKey,
@@ -152,10 +165,10 @@ const HumanBodyRawData = React.forwardRef((props, refs) => {
         },
       ]
     }),
-  ), [sourceData])
+  ), [sourceData, slots])
   const viewStatsByKey = useMemo(() => Object.fromEntries(
-    HUMAN_BODY_RAW_VIEWS.map((view) => [view.key, getViewStats(view, sourceData)]),
-  ), [sourceData])
+    views.map((view) => [view.key, getViewStats(view, sourceData)]),
+  ), [sourceData, views])
 
   const updateStats = (nextSourceData) => {
     const point = nextSourceData.filter((value) => value > 0).length
@@ -163,7 +176,7 @@ const HumanBodyRawData = React.forwardRef((props, refs) => {
     const maxPres = findMax(nextSourceData)
     const meanPres = totalPres / (point || 1)
 
-    props.data.current?.changeData({
+    props.data?.current?.changeData({
       meanPres: meanPres.toFixed(2),
       maxPres,
       point,
@@ -173,7 +186,7 @@ const HumanBodyRawData = React.forwardRef((props, refs) => {
 
   const changeHumanBodyData = (nextData = []) => {
     const nextSourceData = normalizeSourceData(nextData)
-    updateStats(nextSourceData)
+    if (props.manageStats !== false) updateStats(nextSourceData)
     setSourceData(nextSourceData)
   }
 
@@ -211,7 +224,7 @@ const HumanBodyRawData = React.forwardRef((props, refs) => {
         data-part-key={slot.sourcePartKey}
         style={{
           '--human-body-part-width': `${width}px`,
-          '--human-body-part-columns': slot.width,
+          '--human-body-part-columns': slot.width + (slot.gapAfterColumn ? 1 : 0),
         }}
       >
         <figcaption id={captionId} className="human-body-raw__caption">
@@ -221,6 +234,11 @@ const HumanBodyRawData = React.forwardRef((props, refs) => {
               {slot.width} × {slot.height} · {stats.total}
               {t('humanBodyRaw.points', { defaultValue: '点' })}
             </span>
+            {slot.gapAfterColumn && (
+              <span className="human-body-raw__dimensions">
+                {t('pressureVest.zipper', { defaultValue: '中间为拉链位置' })}
+              </span>
+            )}
           </span>
           <span className="human-body-raw__part-peak">
             {t('humanBodyRaw.peak', { defaultValue: '峰值' })} {stats.peak}
@@ -250,17 +268,17 @@ const HumanBodyRawData = React.forwardRef((props, refs) => {
     : t('humanBodyRaw.backLowerTitle', { defaultValue: '后裤（中线分开）' })
 
   return (
-    <div className="human-body-raw">
+    <div className={`human-body-raw${props.layout?.className ? ` ${props.layout.className}` : ''}`}>
       <main
         className="human-body-raw__atlas"
-        aria-label={t('humanBodyRaw.title', { defaultValue: '人体原始数据' })}
+        aria-label={t(props.layout?.titleKey || 'humanBodyRaw.title', { defaultValue: props.layout?.fallbackTitle || '人体原始数据' })}
       >
         <div
           className="human-body-raw__view-switch"
           role="group"
           aria-label={t('humanBodyRaw.viewSwitchLabel', { defaultValue: '原始数据视角' })}
         >
-          {HUMAN_BODY_RAW_VIEWS.map((view) => {
+          {views.map((view) => {
             const isActive = view.key === activeView.key
             return (
               <button
@@ -291,12 +309,14 @@ const HumanBodyRawData = React.forwardRef((props, refs) => {
               <div className="human-body-raw__upper">
                 {activeView.upperSlots.map(renderPart)}
               </div>
-              <h3 className="human-body-raw__lower-heading">
-                {lowerTitle}
-              </h3>
-              <div className="human-body-raw__lower" role="group" aria-label={lowerTitle}>
-                {activeView.lowerSlots.map(renderPart)}
-              </div>
+              {activeView.lowerSlots.length > 0 && (
+                <>
+                  <h3 className="human-body-raw__lower-heading">{lowerTitle}</h3>
+                  <div className="human-body-raw__lower" role="group" aria-label={lowerTitle}>
+                    {activeView.lowerSlots.map(renderPart)}
+                  </div>
+                </>
+              )}
             </div>
           </section>
         </div>

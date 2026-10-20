@@ -216,6 +216,7 @@
 | 26 | 精密 | `fast256` | 16*16 高速 |
 | 27 | 精密 | `fast1024` | 32*32 高速 |
 | 28 | 精密 | `humanBodyOptimized` | 人体全身优化 |
+| 29 | 精密 | `pressureVest` | 压力传感背心 |
 
 ## numMatrixFlag 模块 Key/Value
 
@@ -230,12 +231,14 @@
 | `fast256` | 16x16高速 | `normal`=3D模型<br>`numoriginal`=原始数据 |
 | `footVideo` | 触觉足底 | `num`=2D数字<br>`normal`=3D模型<br>`numoriginal`=原始数据 |
 | `hand` | 手部检测 | `normal`=3D模型<br>`numoriginal`=原始数据 |
-| `hand0205` | 触觉手套 | `num`=2D数字<br>`normal`=3D遥操<br>`num3D`=3D数字<br>`numoriginal`=原始数据<br>`skin`=3D皮肤 |
-| `hand0205Double` | 触觉手套2 | `num`=2D数字<br>`normal`=3D遥操<br>`num3D`=3D数字<br>`numoriginal`=原始数据<br>`skin`=3D皮肤 |
+| `hand0205` | 触觉手套（单手切换） | `num`=旧版16×16数字<br>`normal`=单手3D遥操<br>`num3D`=3D数字<br>`numoriginal`=旧版15×10原始数据<br>`skin`=3D皮肤 |
+| `hand0205Single` | 触觉手套兼容别名 | 与 `hand0205` 相同 |
+| `hand0205Double` | 触觉手套2（双手同屏） | `num`=双手2D数字<br>`normal`=双手3D遥操<br>`num3D`=3D数字<br>`numoriginal`=双手原始数据<br>`skin`=3D皮肤 |
 | `handGlove115200` | 触觉手套(115200) | `num`=2D数字<br>`normal`=3D遥操<br>`num3D`=3D数字<br>`numoriginal`=原始数据<br>`skin`=3D皮肤 |
 | `handGloveFullPacket` | 触觉手套(整包) | `num`=2D数字<br>`normal`=3D遥操<br>`num3D`=3D数字<br>`numoriginal`=原始数据<br>`skin`=3D皮肤 |
 | `handSinglePoint` | 32*32(检测点) | `normal`=3D模型<br>`numoriginal`=原始数据 |
-| `humanBodyOptimized` | 人体全身优化 | `skin`=3D皮肤 |
+| `humanBodyOptimized` | 人体全身优化 | `skin`=3D皮肤<br>`numoriginal`=原始数据 |
+| `pressureVest` | 压力传感背心（HaLow） | `skin`=3D皮肤<br>`numoriginal`=原始数据（前胸18×10、后背22×10、双肩各6×3） |
 | `jqbed` | 小床监测 | `normal`=3D模型<br>`numoriginal`=原始数据 |
 | `matCol` | 小床褥采集 | `normal`=3D模型<br>`numoriginal`=原始数据（16x10，宽16高10） |
 | `minzhen` | 轮椅 | `normal`=3D模型<br>`numoriginal`=原始数据 |
@@ -253,9 +256,13 @@
 
 ## 快捷预设 Key/Value
 
+2026-10-14 手套兼容说明：本机使用原有两个正式类型，`hand0205` 对应恢复的单手“触觉手套”，`hand0205Double` 对应当前双手“触觉手套2”。已有“单项全选”密钥的 `file` 列表只要包含这两个 key，即可显示两套；无需增加新类型或改发证服务器。两套同时授权使用 `["hand0205", "hand0205Double"]`，各自 `sensorModules` 的模式 key 沿用上表。此前 `hand0205Single` 仅作兼容别名，在线/离线授权、前端与SDK统一归一到 `hand0205` 并去重，不额外授权 `hand0205Double`。
+
+系统类型与存储文件显式映射，单手使用已有 `hand0205Single.db`，双手使用已有 `hand0205.db`；旧独立 Double 历史只读迁入双手库一次并保留来源文件。两套下载均为按时间归并的单个CSV，手别列区分原始帧，分别使用 `glove` / `glove2` 文件名前缀。
+
 | 类型 | Key | Value |
 | --- | --- | --- |
-| 传感器预设 | 触觉全套 | `hand0205`, `handGlove115200`, `handGloveFullPacket`, `robot1`, `robotSY`, `robotLCF`, `footVideo` |
+| 传感器预设 | 触觉全套 | `hand0205`, `hand0205Double`, `handGlove115200`, `handGloveFullPacket`, `robot1`, `robotSY`, `robotLCF`, `footVideo` |
 | 传感器预设 | 高速矩阵 | `fast256`, `fast1024`, `daliegu` |
 | 天数预设 | `30` | 30天 |
 | 天数预设 | `90` | 90天 |

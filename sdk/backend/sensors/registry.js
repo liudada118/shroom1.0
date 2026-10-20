@@ -23,7 +23,7 @@ const SENSOR_CAPABILITIES = {
 
 const HAND_GLOVE_FULL_PACKET = 'handGloveFullPacket';
 const HAND_GLOVE_DOUBLE = handGloveDouble.TYPE;
-const HAND_GLOVE_TYPES = ['hand0205', HAND_GLOVE_DOUBLE, 'handGlove115200', HAND_GLOVE_FULL_PACKET];
+const HAND_GLOVE_TYPES = ['hand0205', 'hand0205Single', HAND_GLOVE_DOUBLE, 'handGlove115200', HAND_GLOVE_FULL_PACKET];
 
 const TEMP_FULL_BED_TYPE = 'tempFullBed';
 const JQ_BED_TYPE = 'jqbed';
@@ -67,6 +67,7 @@ const SENSOR_DEFINITIONS = {
   handR: { matrix: MATRIX_16, channels: ['back'], capabilities: DEFAULT_CAPABILITIES },
   hand0507: { matrix: MATRIX_16, channels: ['sit', 'back'], baudRate: 921600, capabilities: [...DEFAULT_CAPABILITIES, SENSOR_CAPABILITIES.ZERO_FRAME] },
   hand0205: { matrix: MATRIX_16, channels: ['sit', 'back'], baudRate: 921600, capabilities: [...DEFAULT_CAPABILITIES, SENSOR_CAPABILITIES.HAND_STORAGE, SENSOR_CAPABILITIES.ZERO_FRAME] },
+  hand0205Single: { matrix: MATRIX_16, channels: ['sit', 'back'], baudRate: 921600, capabilities: [...DEFAULT_CAPABILITIES, SENSOR_CAPABILITIES.HAND_STORAGE, SENSOR_CAPABILITIES.ZERO_FRAME] },
   [HAND_GLOVE_DOUBLE]: { matrix: MATRIX_16, channels: ['sit', 'back'], baudRate: 921600, capabilities: [...DEFAULT_CAPABILITIES, SENSOR_CAPABILITIES.HAND_STORAGE, SENSOR_CAPABILITIES.ZERO_FRAME], plugin: handGloveDouble },
   handGlove115200: { matrix: MATRIX_16, channels: ['sit', 'back'], baudRate: 115200, capabilities: [...DEFAULT_CAPABILITIES, SENSOR_CAPABILITIES.HAND_STORAGE, SENSOR_CAPABILITIES.ZERO_FRAME] },
   [HAND_GLOVE_FULL_PACKET]: { matrix: MATRIX_16, channels: ['sit', 'back'], baudRate: 921600, capabilities: [...DEFAULT_CAPABILITIES, SENSOR_CAPABILITIES.HAND_STORAGE, SENSOR_CAPABILITIES.ZERO_FRAME] },
@@ -105,6 +106,8 @@ const SENSOR_DEFINITIONS = {
   daliegu: { matrix: MATRIX_32, channels: ['sit'], baudRate: 921600, capabilities: DEFAULT_CAPABILITIES },
   smallSample: { matrix: MATRIX_32, channels: ['sit'], baudRate: 921600, capabilities: DEFAULT_CAPABILITIES },
   humanBody: { matrix: MATRIX_32, channels: ['sit'], baudRate: 1000000, capabilities: DEFAULT_CAPABILITIES },
+  humanBodyOptimized: { matrix: MATRIX_32, channels: ['sit'], baudRate: 1000000, capabilities: DEFAULT_CAPABILITIES },
+  pressureVest: { matrix: MATRIX_32, channels: ['sit'], baudRate: 1000000, capabilities: DEFAULT_CAPABILITIES },
   xiyueReal1: { matrix: MATRIX_32, channels: ['sit'], capabilities: DEFAULT_CAPABILITIES },
   handBlue: { matrix: MATRIX_32, channels: ['sit'], capabilities: DEFAULT_CAPABILITIES },
   newHand: { matrix: MATRIX_32, channels: ['sit'], capabilities: DEFAULT_CAPABILITIES },

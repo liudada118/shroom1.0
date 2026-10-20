@@ -11,7 +11,7 @@ export const PORTAL_CATEGORIES = Object.freeze([
 export function buildPortalSystems(t, runtimeDefinitions = []) {
   const builtin = getBuiltinSystemOptions(t);
   const seen = new Set(builtin.map((item) => item.value));
-  const systems = builtin.filter((item) => item.value !== 'hand0205Double');
+  const systems = [...builtin];
   for (const runtime of runtimeDefinitions) {
     const metadata = runtime?.displayMetadata || {};
     const value = runtime?.sensorDefinition?.type || metadata.sensorType;

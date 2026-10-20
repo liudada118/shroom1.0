@@ -321,7 +321,7 @@ function queryHistoryRows(dbRef, date, limit, offset = 0, logger) {
   ensureHistoryIndexes(dbRef, logger);
   return dbAllHistory(
     dbRef,
-    'SELECT * FROM matrix WHERE date = ? ORDER BY id ASC LIMIT ? OFFSET ?',
+    `SELECT * FROM matrix WHERE date = ? ORDER BY ${dbRef.hand ? 'timestamp ASC, id ASC' : 'id ASC'} LIMIT ? OFFSET ?`,
     [date, limit, Math.max(0, offset)],
   );
 }
@@ -576,7 +576,7 @@ function queryChannelHistoryRows(dbRef, date, channelId, limit, offset = 0, logg
       dbRef,
       `SELECT * FROM matrix
        WHERE date = ?${filter.clause}${rangeClause}
-       ORDER BY id ASC LIMIT ? OFFSET ?`,
+       ORDER BY ${dbRef.hand ? 'timestamp ASC, id ASC' : 'id ASC'} LIMIT ? OFFSET ?`,
       params,
     );
   } catch (error) {
@@ -676,6 +676,13 @@ function createLazyHistoryRows(dbRef, date, stats) {
   const readByIndex = (index) => {
     if (!Number.isInteger(index) || index < 0 || index >= lengthValue || !minId) return undefined;
     if (cache.has(index)) return cache.get(index);
+    if (dbRef.hand) {
+      const offset = Math.floor(index / maxCacheSize) * maxCacheSize;
+      const rows = queryHistoryRows(dbRef, date, Math.min(maxCacheSize, lengthValue - offset), offset);
+      cache.clear();
+      rows.forEach((row, rowIndex) => cache.set(offset + rowIndex, row));
+      return cache.get(index);
+    }
 
     const row = dbGetHistory(
       dbRef,

@@ -80,6 +80,20 @@ describe('sensorFrameDecoder', () => {
     expect(decoded.serial).toEqual(frame.serial);
   });
 
+  it('遥操未清零映射独立传递，压力仍读取归零后的 canonical 阶段', () => {
+    const rawMapped = [111, 222];
+    const decoded = decodeWebSocketPayload({ ...frame, payload: { ...frame.payload,
+      value: [0, 0], stages: { ...frame.payload.stages, mapped: [0, 0] },
+      protocol: { ...frame.payload.protocol, mappedRaw: rawMapped } } });
+    expect(decoded.newArr147Raw).toEqual(rawMapped);
+    expect(decoded.newArr147).toEqual([0, 0]);
+    expect(getSensorFrameChannelValue(decoded)).toEqual([0, 0]);
+    expect(decoded).not.toHaveProperty('sitData');
+    expect(decoded.displaySystemId).toBe(frame.displaySystemId);
+    expect(adaptSensorFrameForClient(frame).newArr147Raw).toBeUndefined();
+    expect(rawMapped).toEqual([111, 222]);
+  });
+
   it.each(['sit', 'back', 'head'])('不重建 %s 通道的顶层旧字段', (channel) => {
     const decoded = adaptSensorFrameForClient({
       ...frame,

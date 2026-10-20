@@ -14,6 +14,7 @@ try {
 const sqlite3 = require('./sqlite3-compat').verbose();
 const logger = require('../../common/logger');
 const { isCar } = require('../../compatibility/legacyDataUtils');
+const { isGloveDatabaseType, openGloveDatabase } = require('./gloveDatabase');
 const { multiSensorStableContract } = require('@shroom/backend/contract');
 
 const CHANNEL_HISTORY_COLUMNS = Object.freeze(
@@ -84,6 +85,12 @@ function openDb(file) {
  */
 function initDb(fileStr, filePath, runtimeResourceRoot) {
   logger.debug('initDb: ' + fileStr);
+  if (isGloveDatabaseType(fileStr)) {
+    const databases = openGloveDatabase(fileStr, filePath);
+    ensureChannelHistorySchema(databases.db);
+    ensureChannelHistorySchema(databases.db1);
+    return databases;
+  }
   let db, db1, db2;
 
   if (fileStr === 'volvo' || fileStr === 'wholeChair') {

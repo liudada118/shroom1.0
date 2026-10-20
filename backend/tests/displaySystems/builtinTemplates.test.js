@@ -22,10 +22,10 @@ function fixture(realResources = false) {
     close() { assert.ok(path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep)); fs.rmSync(root, { recursive: true, force: true }); } };
 }
 
-test('all 28 builtin templates create, read back and survive runtime reload', () => {
+test('all 29 builtin templates create, read back and survive runtime reload', () => {
   const f = fixture();
   try {
-    assert.equal(BUILTIN_TEMPLATES.length, 28);
+    assert.equal(BUILTIN_TEMPLATES.length, 29);
     for (const source of BUILTIN_TEMPLATES) {
       const builtinTemplate = { id: `copy-${source.id}`, name: `${source.name}副本`, sourceType: source.id };
       const result = f.runtime.displaySystems.save({ builtinTemplate });
@@ -35,10 +35,10 @@ test('all 28 builtin templates create, read back and survive runtime reload', ()
     }
     const restored = createAppRuntime(f.options);
     const status = restored.displaySystems.getStatus();
-    assert.equal(status.count, 28);
-    assert.equal(status.runtimeDefinitions.length, 28);
-    assert.equal(status.systems.length, 28);
-    assert.equal(restored.displaySystems.getBuilderCatalog().builtinTemplates.length, 28);
+    assert.equal(status.count, 29);
+    assert.equal(status.runtimeDefinitions.length, 29);
+    assert.equal(status.systems.length, 29);
+    assert.equal(restored.displaySystems.getBuilderCatalog().builtinTemplates.length, 29);
     assert.equal(restored.displaySystems.getEditorById('copy-hand').builtinTemplate.sourceType, 'hand');
   } finally { f.close(); }
 });

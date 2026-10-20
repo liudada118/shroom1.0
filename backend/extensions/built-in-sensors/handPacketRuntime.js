@@ -22,6 +22,14 @@ function createHandPacketRuntime({
   setRuntime,
 }) {
   const doublePacketParser = createDoublePacketParser();
+  let routeByPacketType = false;
+  let previousFile = null;
+
+  /** 系统/串口重连时丢弃半包；自动双手连接才使用包内手别。 */
+  function reset(options = {}) {
+    routeByPacketType = options.routeByPacketType === true;
+    doublePacketParser.reset?.();
+  }
 
   /**
    * 从发布结果里按字段优先级取回一帧，取不到用 fallback。
@@ -148,6 +156,7 @@ function createHandPacketRuntime({
         realArr: realPressureData,
         rawPressureData,
         newArr147: mappedData,
+        newArr147Raw: mappedSourceFrame,
         handSide: 'right',
         packetSourcePort: sourcePort,
         ...buildPortFlags(runtime),
@@ -172,6 +181,7 @@ function createHandPacketRuntime({
       realArr: realPressureData,
       rawPressureData,
       newArr147: mappedData,
+      newArr147Raw: mappedSourceFrame,
       handSide: 'left',
       packetSourcePort: sourcePort,
       ...buildPortFlags(runtime),
@@ -198,7 +208,8 @@ function createHandPacketRuntime({
     const runtime = getRuntime();
     if (runtime.file !== doublePacketType) return false;
 
-    const frame = doublePacketParser.handlePacket(buffer, fallbackSide, sourcePort);
+    if (previousFile !== runtime.file) { doublePacketParser.reset?.(); previousFile = runtime.file; }
+    const frame = doublePacketParser.handlePacket(buffer, fallbackSide, sourcePort, { routeByPacketType });
     if (!frame) return false;
     if (!frame.complete) return true;
 
@@ -211,6 +222,7 @@ function createHandPacketRuntime({
   }
 
   return {
+    reset,
     handleDoublePacket,
     handleFullPacket,
     routeDoubleFrame,

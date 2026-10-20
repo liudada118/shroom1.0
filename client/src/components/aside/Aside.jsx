@@ -1262,7 +1262,7 @@ class Aside extends React.Component {
 
     render() {
         const { t, i18n } = this.props;
-        const isGlove = ['hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket'].includes(this.props.matrixName);
+        const isGlove = ['hand0205Single', 'hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket'].includes(this.props.matrixName);
         const isGloveRemoteControl = isGlove && this.props.numMatrixFlag === 'normal';
         const isSmallBed12B = this.props.matrixName === 'smallBed12B'
         const pressureDataFields = isSmallBed12B

@@ -3,6 +3,11 @@ const { spawnSync } = require('child_process');
 
 const projectRoot = path.resolve(__dirname, '../..');
 const testFiles = [
+  'backend/tests/sdk/gloveDisplayRegistry.test.js',
+  'backend/tests/packaging/pythonRuntimeNative.test.js',
+  'backend/tests/packaging/buildPythonRuntime.test.js',
+  'backend/tests/server/reviseSensorIntegration.test.js',
+  'backend/tests/server/pressureVest.test.js',
   'backend/tests/application/desktopServices.test.js',
   'backend/tests/application/frontendBuildIdentity.test.js',
   'backend/tests/application/autoUpdater.test.js',

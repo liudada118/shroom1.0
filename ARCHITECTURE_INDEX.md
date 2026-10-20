@@ -1,6 +1,6 @@
 # Shroom 快速架构索引
 
-> 最后更新于：2026-10-19
+> 最后更新于：2026-10-20
 > 用途：代码定位和验证路由。理解当前实现先读 [开发者手册](docs/developer-guide.md)，完整文档分类见 [docs/README.md](docs/README.md)。`ARCHITECTURE.md` 保留历史设计与维护台账，不用作默认全文入口。
 
 2026-10-19 增量：v1.3 到期权限、采集证据/排空、对话历史分析、上传队列隔离、候选推广/撤回、版本诊断及服务端 180/90 天保留已接入。入口与发布顺序见 [实现与交付记录](docs/v1.3-implementation-and-release.md)，不代表生产已部署；相关跨层改动运行 Full。
@@ -16,6 +16,8 @@
 同日网页标识排障：`frontendCache` 区分开发模式、标识缺失/无效、版本错配与缓存写入错误，开发版不操作生产缓存。Builder beforePack/afterPack通过 `scripts/verify-frontend-build.js` 校验源与最终资源标识，防止继续打出无更新基线的安装包；Forge配置未切换。Full 11项通过，客户安装包修复仍需正确重建发布，见 [桌面交付服务](docs/desktop-distribution-services.md)。
 
 当前完整链路：[数据、算法、存储与回放](docs/chains/data-flow.md) · [页面、渲染与交互](docs/chains/interface-flow.md)。
+
+2026-10-20 合并 `Revise`：压力背心 HaLow/436点模型与统计、单双手手套独立入口及同库分表/双路数字、JQBed床型参数与新版Windows原生库迁入现有目录；旧根server/worker与旧SDK树不恢复。保留Agent、授权、canonical帧和采集证据链，详见文末合并记录及 [背心说明](docs/pressure-vest-halow.md)。构建快照保持合并前完整版本，验收构建输出到临时目录；新的交付包仍须重新构建。
 
 ## 1. 一分钟判断路径
 

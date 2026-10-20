@@ -16,6 +16,7 @@ const validDraft = {
   points_threshold_in: '3',
   sos_disable_area: ['6', '10'],
   min_sos_sequence: '2',
+  isLowBed: '0',
   threshold_factor: '1.25',
   continuous_on_bed_duration_minutes: '1',
   unlock_sitting_alarm_duration_minutes: '2',
@@ -33,11 +34,15 @@ const validDraft = {
 };
 
 describe('jqbed algorithm configuration model', () => {
-  it('defines exactly 18 fields in four groups with SOS selected first', () => {
-    expect(JQBED_CONFIG_FIELDS).toHaveLength(18);
+  it('defines exactly 19 fields in four groups with SOS selected first', () => {
+    expect(JQBED_CONFIG_FIELDS).toHaveLength(19);
     expect(JQBED_CONFIG_GROUPS.map((group) => group.key)).toEqual([
       'sos', 'basic', 'filter', 'advanced',
     ]);
+    expect(JQBED_CONFIG_FIELDS.find(({ key }) => key === 'isLowBed')).toMatchObject({
+      group: 'basic', kind: 'bedType',
+    });
+    expect(JQBED_CONFIG_FIELDS.some(({ key }) => key === 'head_foot_area')).toBe(false);
   });
 
   it('assigns the algorithm-defined meaning to every two-value field', () => {
@@ -142,14 +147,37 @@ describe('jqbed algorithm configuration model', () => {
     });
   });
 
+  it.each([0, 1, '0', '1'])('accepts explicit bed type %s without using the interface language', (isLowBed) => {
+    const draft = { ...validDraft, isLowBed };
+    expect(validateJqbedConfigDraft(draft)).toEqual({ valid: true, errors: {} });
+    expect(serializeJqbedConfigDraft(draft).isLowBed).toBe(Number(isLowBed));
+  });
+
+  it.each([-1, 2, 0.5, '1.5', 'invalid', '', null, true, false, NaN, Infinity, [], {}])(
+    'rejects invalid bed type %s with the bed-type error', (isLowBed) => {
+      expect(validateJqbedConfigDraft({ ...validDraft, isLowBed })).toEqual({
+        valid: false,
+        errors: { isLowBed: 'jqbedAlgorithmConfig.errors.bedType' },
+      });
+    },
+  );
+
+  it('does not expose the ineffective head/foot parameter to saved configuration', () => {
+    const draft = { ...validDraft, head_foot_area: [254, 254] };
+    expect(validateJqbedConfigDraft(draft).errors.head_foot_area).toBe('jqbedAlgorithmConfig.errors.unknown');
+    expect(serializeJqbedConfigDraft(draft)).not.toHaveProperty('head_foot_area');
+    expect(cloneJqbedConfigValues(draft)).not.toHaveProperty('head_foot_area');
+  });
+
   it('serializes numeric strings and switches while preserving pairs', () => {
     const serialized = serializeJqbedConfigDraft(validDraft);
 
-    expect(Object.keys(serialized)).toHaveLength(18);
+    expect(Object.keys(serialized)).toHaveLength(19);
     expect(serialized).toMatchObject({
       sos_peak_threshold: 22.5,
       filter_switch: 1,
       strel_switch: 0,
+      isLowBed: 0,
       sitting_area: [255, 255],
     });
     expect(serialized.sos_disable_area).not.toBe(validDraft.sos_disable_area);

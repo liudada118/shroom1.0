@@ -1,3 +1,6 @@
+const { isHandGloveType } = require('@shroom/backend/sensors');
+const { getPressureVestStatistics } = require('../../extensions/built-in-sensors/pressureVest');
+
 /**
  * 历史回放辅助服务。
  *
@@ -51,7 +54,7 @@ function getHistorySeries({
   const hasSit = safeSitRows.length > 0;
   const hasBack = safeBackRows.length > 0;
   const totalLength = hasSit && hasBack
-    ? Math.min(safeSitRows.length, safeBackRows.length)
+    ? (isHandGloveType(sensorType) ? Math.max(safeSitRows.length, safeBackRows.length) : Math.min(safeSitRows.length, safeBackRows.length))
     : (hasSit ? safeSitRows.length : safeBackRows.length);
   const rangeStart = Math.max(0, start);
   const rangeEnd = Math.min(end == null ? totalLength : end, totalLength);
@@ -72,6 +75,13 @@ function getHistorySeries({
     const backData = hasBack && safeBackRows[i]
       ? normalizeHistoryPressureData(safeBackRows[i], sensorType)
       : null;
+    if (sensorType === 'pressureVest') {
+      const statistics = getPressureVestStatistics(sitData);
+      press.push(statistics.totalPres);
+      area.push(statistics.point);
+      if (baseRows[i]?.timestamp != null) time.push(baseRows[i].timestamp);
+      continue;
+    }
     const sitTotalValue = sitData ? sitData.reduce((a, b) => a + b, 0) : 0;
     const backTotalValue = backData ? backData.reduce((a, b) => a + b, 0) : 0;
     const sitAreaValue = sitData ? sitData.filter((a) => a > 10).length : 0;
@@ -83,8 +93,9 @@ function getHistorySeries({
     );
     area.push(sitAreaValue + backAreaValue);
 
-    if (baseRows[i] && baseRows[i].timestamp != null) {
-      time.push(baseRows[i].timestamp);
+    const timeRow = baseRows[i] || (isHandGloveType(sensorType) ? safeBackRows[i] : null);
+    if (timeRow?.timestamp != null) {
+      time.push(timeRow.timestamp);
     }
   }
 
