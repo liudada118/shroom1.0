@@ -221,6 +221,8 @@ function createPetCareRuntimeService({
   getFile,
   getPort,
   getExecutionContext,
+  getJqbedLogContext,
+  jqbedAlgorithmProtocol,
   probeJqbedAlgorithmConfig,
   publishSystemEvent,
   setJqbedAlgorithmStatus,
@@ -548,7 +550,7 @@ function createPetCareRuntimeService({
    * 开头那串前置条件**每轮都重新读**（`getPointArr`/`getFile`/`getPort` 是取值函数而不是装配期
    * 快照）：型号和串口开关运行期会变，缓存会让切换型号后仍按旧型号跑算法。
    * `every(typeof === 'number')` 防半帧脏数据进算法。`rawData.rate !== -1` 是「这一帧没结果」
-   * 信号（不是错误），此时什么都不发 —— 发空结果会让界面读数闪成 0。catch 只 warn 不停表，
+   * 信号（不是错误），此时不发 rate；独立告警与显式订阅的原生输出仍可回传。catch 只 warn 不停表，
    * 下一轮 125ms 后自然重试。
    *
    * ⚠️ 每次请求冻结系统、采集会话与运行代次；切换后返回的旧结果不能更新 matrix_origin。
@@ -576,18 +578,40 @@ function createPetCareRuntimeService({
       const execution = captureExecution();
       vitalSignsActive = execution;
       const newArr = jqbedOppo(pointArr);
+      const logContext = getJqbedLogContext?.();
+      const diagnosticEligible = activeFile === 'jqbed'
+        && logContext?.licenseValid && logContext.realtime;
+      const logRecipients = diagnosticEligible
+        ? jqbedAlgorithmProtocol?.captureLogSubscribers() || [] : [];
       try {
         const configEnvelope = activeFile === 'jqbed' && await supportsJqbedAlgorithmConfig()
           ? getJqbedAlgorithmConfigSnapshot()
           : null;
         if (!isCurrentExecution(execution)) return;
-        const rawData = await callPy(
-          'getData',
-          buildJqbedGetDataArgs(newArr, activeFile, configEnvelope),
-        );
+        const getDataArgs = buildJqbedGetDataArgs(newArr, activeFile, configEnvelope);
+        if (logRecipients.length) getDataArgs.includeRawOutputs = true;
+        let rawData = await callPy('getData', getDataArgs);
         if (!isCurrentExecution(execution)) return;
+        const rawOutputs = rawData?.raw_outputs;
+        if (rawData && Object.prototype.hasOwnProperty.call(rawData, 'raw_outputs')) {
+          const { raw_outputs: _rawOutputs, ...legacyResult } = rawData;
+          rawData = legacyResult;
+        }
         if (activeFile === 'jqbed' && jqbedConfigCapability === true) {
           setJqbedAlgorithmStatus?.({ state: 'ready', error: null });
+        }
+        const payload = {};
+        const currentLogContext = getJqbedLogContext?.();
+        if (diagnosticEligible && currentLogContext?.licenseValid
+          && currentLogContext.activeFile === 'jqbed' && currentLogContext.realtime
+          && execution.port === getPort?.()) {
+          payload.jqbedAlgorithmDiagnostics = {
+            sensorType: activeFile,
+            reserved_bytes: Array.isArray(rawData?.reserved_bytes) ? rawData.reserved_bytes : [],
+            merged_alarm: rawData?.merged_alarm,
+            sosflag: rawData?.sosflag,
+          };
+          if (logRecipients.length) jqbedAlgorithmProtocol?.publishLog(rawOutputs, currentLogContext, logRecipients);
         }
         if (rawData && rawData.rate !== -1) {
           const data = normalizeVitalSignsHeartRate(rawData, activeFile);
@@ -614,8 +638,9 @@ function createPetCareRuntimeService({
             data.onBedTime = 0;
           }
 
-          publishSystemEvent?.(JSON.stringify({ rate: data }));
+          payload.rate = data;
         }
+        if (Object.keys(payload).length) publishSystemEvent?.(JSON.stringify(payload));
       } catch (error) {
         if (!isCurrentExecution(execution)) return;
         logger?.warn?.('[jqbed] callPy error:', error.message || error);

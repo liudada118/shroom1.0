@@ -2004,6 +2004,9 @@ function publishHistoryDateList() {
 const petCareRuntimeService = createPetCareRuntimeService({
   getExecutionContext: () => ({ systemId: zeroChannelIdentityResolver.getActiveDisplaySystemId() || appRuntime.builtinTemplates.currentId(runtimeContext.getSensorType()),
     collectionId: collectionSessions.current()?.id || null, phase: collectionSessions.current()?.phase || 'idle' }),
+  getJqbedLogContext: () => ({ activeFile: runtimeContext.getSensorType(),
+    licenseValid: runtimeContext.getNowDate() < endDate, realtime: !runtimeContext.isLocalPlayback() }),
+  jqbedAlgorithmProtocol,
   buildJqbedGetDataArgs,
   getJqbedAlgorithmConfigSnapshot: jqbedAlgorithmConfigStore.getSnapshot,
   logger,
@@ -2403,6 +2406,7 @@ const webSocketHandlerContext = createWebSocketHandlerContext({
     parseStoredFrameData,
     path,
     petCareRuntimeService,
+    onClientClose: jqbedAlgorithmProtocol.removeClient,
     publishPlaybackFrame,
     publishSystemEvent,
     server,

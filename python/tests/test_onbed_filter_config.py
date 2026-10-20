@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import pathlib
 import sys
 import unittest
@@ -242,6 +243,8 @@ class JqbedAlgorithmConfigTests(unittest.TestCase):
                         self.assertTrue(np.all(np.isfinite(result[key])))
                     self.assertIn("stateInBbed", result)
                     self.assertIn("sosflag", result)
+                    self.assertEqual(len(result["reserved_bytes"]), 10)
+                    json.dumps(result, allow_nan=False)
                 finally:
                     MODULE.ncz.terminate()
 
@@ -301,6 +304,148 @@ class JqbedAlgorithmConfigTests(unittest.TestCase):
                 self.assertNotIn("respiration_waveform", result)
         finally:
             MODULE.ncz = original
+
+    def test_reserved_bytes_preserves_native_order_scaling_echoes_and_trailing_slots(self):
+        raw = np.array([126, 43, 1, 6, 0, 1, 71, 82, 93, 104], dtype=np.float64)
+
+        class FakeNcz:
+            @staticmethod
+            def step(inputs):
+                return {"reserved_bytes": raw, "sosflag": 1, "stateInBbed": 1}
+
+        original = MODULE.ncz
+        try:
+            MODULE.ncz = FakeNcz
+            result = MODULE.getData([0] * 1024, {"sensitivity_threshold": 3, "isLowBed": 0})
+        finally:
+            MODULE.ncz = original
+
+        payload = json.loads(json.dumps(result, allow_nan=False))
+        self.assertEqual(payload["reserved_bytes"], raw.tolist())
+        self.assertEqual(payload["reserved_bytes"][:4], [126, 43, 1, 6])
+        self.assertEqual(payload["reserved_bytes"][4:6], [0, 1], "echoes must come from the algorithm, not its input config")
+        self.assertEqual(payload["reserved_bytes"][6:], [71, 82, 93, 104])
+        self.assertEqual(payload["sosflag"], 1.0)
+        self.assertEqual(payload["stateInBbed"], 1.0)
+        result["reserved_bytes"][0] = 999
+        self.assertEqual(raw[0], 126, "JSON conversion must not mutate native memory")
+
+    def test_reserved_bytes_missing_legacy_outputs_and_negative_sentinels_remain_compatible(self):
+        class FakeNcz:
+            outputs = {}
+
+            @classmethod
+            def step(cls, inputs):
+                return cls.outputs
+
+        original = MODULE.ncz
+        try:
+            MODULE.ncz = FakeNcz
+            for native_output in [{}, {"reserved_bytes": None}, {"reserved_bytes": []}]:
+                FakeNcz.outputs = native_output
+                self.assertEqual(MODULE.getData([0] * 1024)["reserved_bytes"], [])
+            FakeNcz.outputs = {"reserved_bytes": np.full(10, -1, dtype=np.float32)}
+            self.assertEqual(MODULE.getData([0] * 1024)["reserved_bytes"], [-1] * 10)
+            FakeNcz.outputs = {"reserved_bytes": [10, 20, 0, 0, 3, 0]}
+            self.assertEqual(MODULE.getData([0] * 1024)["reserved_bytes"], [10, 20, 0, 0, 3, 0])
+        finally:
+            MODULE.ncz = original
+
+    def test_complete_native_outputs_are_optional_and_keep_unknown_fields_and_large_arrays(self):
+        raw_matrix = np.arange(1024, dtype=np.float32)
+        native_outputs = {
+            "rate": -1.0,
+            "state_in_bed": 1.0,
+            "sos_flag": 0.0,
+            "stroke_risk": 7.0,
+            "matrix_origin": raw_matrix,
+            "matrix_filter": raw_matrix.copy(),
+            "reserved_bytes": np.full(10, -1, dtype=np.float32),
+            "future_diagnostic": {
+                "nested_array": np.array([[1.25, np.nan], [np.inf, -np.inf]], dtype=np.float32),
+                "scalar": np.int64(123),
+                "switch": np.bool_(True),
+                "tuple": (np.float32(2.5), None, "native"),
+            },
+        }
+
+        class FakeNcz:
+            @staticmethod
+            def step(inputs):
+                return native_outputs
+
+        original = MODULE.ncz
+        try:
+            MODULE.ncz = FakeNcz
+            legacy = MODULE.getData([0] * 1024)
+            self.assertNotIn("raw_outputs", legacy)
+            self.assertNotIn("raw_outputs", MODULE.getData([0] * 1024, includeRawOutputs=False))
+            self.assertNotIn("raw_outputs", MODULE.getData([0] * 1024, includeRawOutputs="true"))
+            complete = MODULE.getData([0] * 1024, includeRawOutputs=True)
+        finally:
+            MODULE.ncz = original
+
+        raw = complete.pop("raw_outputs")
+        self.assertEqual(complete, legacy, "requesting native logs must not change legacy results")
+        self.assertEqual(set(raw), set(native_outputs))
+        self.assertEqual(len(raw["matrix_origin"]), 1024)
+        self.assertEqual(raw["matrix_filter"], raw["matrix_origin"])
+        self.assertEqual(raw["stroke_risk"], 7.0)
+        self.assertEqual(raw["future_diagnostic"], {
+            "nested_array": [[1.25, None], [None, None]],
+            "scalar": 123, "switch": True, "tuple": [2.5, None, "native"],
+        })
+        json.dumps(raw, allow_nan=False)
+        raw["matrix_origin"][0] = 999
+        self.assertEqual(raw_matrix[0], 0, "raw output conversion must detach native array memory")
+        self.assertTrue(np.isnan(native_outputs["future_diagnostic"]["nested_array"][0, 1]))
+
+    def test_raw_diagnostic_serializer_handles_nested_nonfinite_python_values(self):
+        native = {"list": [float("nan"), float("inf"), float("-inf"), 0, 1.5], "none": None}
+        safe = MODULE.json_safe_algorithm_output(native)
+        self.assertEqual(safe, {"list": [None, None, None, 0, 1.5], "none": None})
+        json.dumps(safe, allow_nan=False)
+
+    @unittest.skipIf(MODULE.ncz is None, "native library is unavailable on this platform")
+    def test_complete_real_native_outputs_include_all_28_fields_without_renaming_or_truncating(self):
+        native = MODULE.ncz
+
+        class CaptureNative:
+            raw = None
+
+            @classmethod
+            def step(cls, inputs):
+                cls.raw = native.step(inputs)
+                return cls.raw
+
+        expected = {
+            "body_movement_data", "rate", "stroke_risk", "state_in_bed", "onbed_ratio", "runtime",
+            "sos_flag", "merged_alarm", "current_threshold", "sitting_alarm_duration_minutes",
+            "on_bed_duration_minutes", "onbed_ratio_minute", "rate_minute", "awake_state", "onbed_state",
+            "body_movement_flag", "version_info", "alarm_counter", "matrix_origin", "matrix_filter",
+            "merged_switch", "filter_param", "sos_param", "sitting_area_out", "reserved_bytes",
+            "reserved_bytes20", "sos_signal_out", "sos_coord",
+        }
+        # Preserve the native ABI description while capturing its real outputs.
+        CaptureNative.step.__func__.__doc__ = native.step.__doc__
+        native.initialize()
+        try:
+            MODULE.ncz = CaptureNative
+            for _ in range(24):
+                result = MODULE.getData([0] * 1024, includeRawOutputs=True)
+            self.assertTrue(expected.issubset(result["raw_outputs"]))
+            self.assertEqual(set(result["raw_outputs"]), set(CaptureNative.raw))
+            self.assertEqual(result["raw_outputs"], MODULE.json_safe_algorithm_output(CaptureNative.raw))
+            self.assertEqual(len(result["raw_outputs"]["matrix_origin"]), 1024)
+            self.assertEqual(len(result["raw_outputs"]["matrix_filter"]), 1024)
+            self.assertEqual(len(result["raw_outputs"]["sos_signal_out"]), 159)
+            self.assertEqual(len(result["raw_outputs"]["reserved_bytes20"]), 20)
+            self.assertIn("state_in_bed", result["raw_outputs"])
+            self.assertNotIn("stateInBbed", result["raw_outputs"])
+            json.dumps(result["raw_outputs"], allow_nan=False)
+        finally:
+            MODULE.ncz = native
+            native.terminate()
 
 
 if __name__ == "__main__":

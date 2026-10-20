@@ -1979,6 +1979,14 @@ class Title extends React.Component {
     return sent ? requestId : null;
   }
 
+  subscribeJqbedAlgorithmLog = (enabled) => {
+    const subscribed = enabled === true;
+    if (subscribed && !this.canUseJqbedAlgorithmConfig()) return null;
+    const requestId = crypto.randomUUID();
+    const sent = this.props.wsSendObj({ subscribeJqbedAlgorithmLog: subscribed, requestId });
+    return sent ? requestId : null;
+  }
+
   canUseJqbedAlgorithmConfig = () => {
     const access = getJqbedConfigAccess({
       matrixName: this.props.matrixName,
@@ -3042,6 +3050,10 @@ class Title extends React.Component {
         envelope={this.props.jqbedAlgorithmConfig}
         operationResult={this.props.jqbedAlgorithmConfigResult}
         algorithmStatus={this.props.jqbedAlgorithmStatus}
+        returnedSettings={this.props.jqbedReturnedSettings}
+        algorithmLogFrame={this.props.jqbedAlgorithmLogFrame}
+        logSubscription={this.props.jqbedAlgorithmLogSubscription}
+        onLogSubscription={this.subscribeJqbedAlgorithmLog}
         connected={this.props.wsConnected}
         connectionEpoch={this.props.wsConnectionEpoch}
         onRequest={this.requestJqbedAlgorithmConfig}

@@ -39,6 +39,7 @@ const server = new EventEmitter();
 const registeredClients = [];
 const commandCalls = [];
 const heartbeatClients = [];
+const closedClients = [];
 const publishedSystemEvents = [];
 const registeredHandlers = [];
 const wsSubscriptions = createWebSocketSubscriptionManager({
@@ -52,6 +53,7 @@ wsSubscriptions.registerClient = (client, options) => {
 const handlerContext = {
   WILDCARD_CHANNEL: '*',
   attachHeartbeat: (client) => heartbeatClients.push(client),
+  onClientClose: (client) => closedClients.push(client),
   controlCommandService: {
     executeWs: (message, context) => {
       commandCalls.push({ message, context });
@@ -151,7 +153,7 @@ assert.deepStrictEqual(zeroAck.data.results, [{
 
 client.emit('close');
 assert.deepStrictEqual(wsSubscriptions.getStatus(), { channels: {}, scopes: {} });
-
+assert.deepStrictEqual(closedClients, [client]);
 console.log('webSocketHandlerFactory.test.js passed');
 
 /** Async device authorization must preserve its actual denial code in command.ack. */

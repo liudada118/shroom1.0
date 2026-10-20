@@ -115,6 +115,8 @@ const testFiles = [
   'backend/tests/server/smallBedRuntimeFactory.test.js',
   'backend/tests/server/jqbedAlgorithmConfig.test.js',
   'backend/tests/server/jqbedAlgorithmProtocol.test.js',
+  'backend/tests/server/jqbedDiagnostics.test.js',
+  'backend/tests/server/onbedReturnedWiring.test.js',
   'backend/tests/server/petCareRuntimeService.test.js',
   'backend/tests/sensors/runtime/legacyGloveFrameProcessor.test.js',
 ];

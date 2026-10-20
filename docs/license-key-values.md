@@ -63,6 +63,14 @@
 }
 ```
 
+其中 `value` 必须与共享注册表和桌面端内部系统 key 完全一致；`label` 只负责显示。发布后桌面端会后台拉取 `/sensorTypes` 并缓存，用于动态系统名称清单，但授权能否使用该系统仍由密钥中的 `file` 分类范围决定。
+
+2026-10-19 已定位 `https://shroom.jq-industries.com` 的真实发证项目：服务器 `/opt/key-manager`，由 PM2 的 `key-manager` 进程运行 `/opt/key-manager/dist/index.js`。本地配套服务源码位于 `E:/key`，不属于本桌面仓库。
+
+压力传感背心使用稳定 key `pressureVest`，归入 `precision`（精密），桌面端已经支持 `skin` 与 `numoriginal`。发证服务需同时维护 `config/licenseSensorGroups.json` 的分类成员、`shared/licenseScopes.ts` 的 `SENSOR_LABELS` 中文名，并执行该项目的 `pnpm registry:snapshot` 更新自包含加密库快照。服务启动时从磁盘加载注册表，`ensureDefaultSensorTypes()` 将注册表派生为数据库中的启用选项；在线、离线生成页面均从此清单取项。
+
+两仓库当前还存在历史类型差异，单独新增背心时应增量加入 `pressureVest`，不要直接用本仓库注册表覆盖整个发证注册表。发布验收以 `/sensorTypes` 为准：`flat` 和 `map` 应包含唯一的“压力传感背心”，`licenseGroups` 的 `precision` 应包含 `pressureVest`；固定单系统/数组旧密钥仍需重新签发才会增加背心权限。
+
 加密参数：
 
 | 项 | 规则 |

@@ -11,6 +11,8 @@ import {
   getSensorFrameOutputChannel,
   isSensorFrameForDisplay,
 } from '../../services/ws/sensorFrameDecoder';
+import { mergeJqbedReturnedSettings, sameJqbedReturnedSettings } from '../../extensions/jqbed/jqbedReturnedSettings';
+import { mergeJqbedAlgorithmLogFrame } from '../../extensions/jqbed/jqbedAlgorithmLogState';
 import "./index.scss";
 import CanvasCar from "../../components/three/carnewTest copy";
 import CanvasCarWow from "../../components/three/carnewWow";
@@ -125,6 +127,7 @@ import { getLanguageLocale, normalizeLanguage } from '../../i18n';
 import { translateBackendMessage } from '../../i18n/translateBackendMessage';
 import { translateDomainLabel } from '../../i18n/translateDomainLabel';
 import { speakLocalizedMessage } from './speechSynthesis';
+import { createJqbedAlarmSpeechState } from './jqbedAlarmSpeech';
 import { chestLine, flLine, frLine, genWebglData, handSkinChange, heatMapMax, hlLine, hrLine, robot0401 } from "./robotUtil";
 import { WebGLCanvas } from "../../components/webgl/WebGL.HeatMap copy 2";
 import { WS_URLS } from "../../constants";
@@ -1116,6 +1119,9 @@ class Home extends React.Component {
       halowStatus: null,
       jqbedAlgorithmConfigResult: null,
       jqbedAlgorithmStatus: { state: 'waiting', error: null },
+      jqbedReturnedSettings: null,
+      jqbedAlgorithmLogFrame: null,
+      jqbedAlgorithmLogSubscription: null,
       wsConnected: false,
       wsConnectionEpoch: 0,
       numMatrixFlag: "normal",
@@ -1606,7 +1612,11 @@ class Home extends React.Component {
   }
 
   componentDidMount() {
-    this.setState({ wsConnected: false });
+    this.jqbedAlarmSpeechState?.reset();
+    this.jqbedAlarmSpeechBlocked = false;
+    this.jqbedAlarmSpeechStatus = null;
+    this.jqbedAlarmSpeechSource = null;
+    this.setState({ wsConnected: false, jqbedReturnedSettings: null, jqbedAlgorithmLogFrame: null, jqbedAlgorithmLogSubscription: null });
     // window.alert(window.innerWidth)
     if (this._portalFontSize === undefined) this._portalFontSize = document.documentElement.style.fontSize;
     document.documentElement.style.fontSize = `${window.innerWidth / 120}px`;
@@ -1645,9 +1655,16 @@ class Home extends React.Component {
     ws.onopen = () => {
       // connection opened
       console.info("connect success");
+      this.jqbedAlarmSpeechState?.reset();
+      this.jqbedAlarmSpeechBlocked = false;
+      this.jqbedAlarmSpeechStatus = null;
+      this.jqbedAlarmSpeechSource = null;
       this.setState((previousState) => ({
         wsConnected: true,
         wsConnectionEpoch: previousState.wsConnectionEpoch + 1,
+        jqbedReturnedSettings: null,
+        jqbedAlgorithmLogFrame: null,
+        jqbedAlgorithmLogSubscription: null,
       }));
       this.wsSendObj({
         // file: this.state.matrixName,
@@ -1686,7 +1703,10 @@ class Home extends React.Component {
       console.warn('[WS] 连接错误，将在 3s 后重连');
     };
     ws.onclose = (e) => {
-      this.setState({ wsConnected: false });
+      this.jqbedAlarmSpeechState?.reset();
+      this.jqbedAlarmSpeechStatus = null;
+      this.jqbedAlarmSpeechSource = null;
+      this.setState({ wsConnected: false, jqbedReturnedSettings: null, jqbedAlgorithmLogFrame: null, jqbedAlgorithmLogSubscription: null });
       // 息屏或网络中断后自动重连
       console.warn('[WS] 连接断开，3s 后自动重连...');
       if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
@@ -1736,6 +1756,9 @@ class Home extends React.Component {
       this._unsubscribeFormulaCharts();
       this._unsubscribeFormulaCharts = null;
     }
+    this.jqbedAlarmSpeechState?.reset();
+    this.jqbedAlarmSpeechStatus = null;
+    this.jqbedAlarmSpeechSource = null;
     // 清理自动重连定时器
     if (wsReconnectTimer) {
       clearTimeout(wsReconnectTimer);
@@ -1914,7 +1937,107 @@ class Home extends React.Component {
     this.setState({ realHz: 0 });
   }
 
+  /** 仅在当前实时小床会话中播报算法确认的告警。 */
+  syncJqbedAlarmSpeech = (jsonObject, event) => {
+    if (event?.target && event.target !== ws) return;
+    const speechState = this.jqbedAlarmSpeechState ||
+      (this.jqbedAlarmSpeechState = createJqbedAlarmSpeechState());
+    const licenseInvalidated = jsonObject.licenseLocked || jsonObject.noLicense || jsonObject.licenseError != null;
+    if (licenseInvalidated) this.jqbedAlarmSpeechBlocked = true;
+    else if (jsonObject.selectFlag != null) {
+      const selectedTypes = Array.isArray(jsonObject.selectFlag) ? jsonObject.selectFlag : [jsonObject.selectFlag];
+      this.jqbedAlarmSpeechBlocked = jsonObject.selectFlag !== 'all' && !selectedTypes.includes('jqbed');
+    }
+
+    // Socket messages may be batched before React commits the corresponding status update.
+    if (jsonObject.jqbedAlgorithmStatus) this.jqbedAlarmSpeechStatus = jsonObject.jqbedAlgorithmStatus;
+    const status = this.jqbedAlarmSpeechStatus || this.state.jqbedAlgorithmStatus;
+    const permitted = !Array.isArray(this.state.allowedTypes) || this.state.allowedTypes.includes('jqbed');
+    const fileSensor = Array.isArray(jsonObject.file) ? jsonObject.file[0] : jsonObject.file;
+    const packetSensor = jsonObject.activeSensorType ||
+      (typeof fileSensor === 'string' && fileSensor !== 'all' ? fileSensor : null);
+    if (packetSensor) this.jqbedAlarmSpeechSource = packetSensor;
+    if (this.jqbedAlarmSpeechBlocked || !permitted ||
+      this.state.matrixName !== 'jqbed' || this.state.history !== 'now' || this.state.local ||
+      !this.state.wsConnected || status?.state !== 'ready' ||
+      (this.jqbedAlarmSpeechSource && this.jqbedAlarmSpeechSource !== 'jqbed')) {
+      speechState.reset();
+      return;
+    }
+
+    const diagnostics = jsonObject.jqbedAlgorithmDiagnostics;
+    if (diagnostics?.sensorType !== 'jqbed') return;
+    for (const alertKey of speechState.observe(diagnostics)) {
+      speakLocalizedMessage(
+        this.props.t(`home.alerts.${alertKey}`),
+        this.props.i18n.language,
+        { alertKey },
+      );
+    }
+  };
+
+  /** 保留本次会话的最近有效床型和灵敏度回传。 */
+  syncJqbedReturnedSettings = (jsonObject) => {
+    const status = jsonObject.jqbedAlgorithmStatus;
+    const invalidated = status && ['waiting', 'error'].includes(status.state);
+    const diagnostics = jsonObject.jqbedAlgorithmDiagnostics;
+    if (!invalidated && !diagnostics) return;
+
+    this.setState((previousState) => {
+      if (invalidated || ['waiting', 'error'].includes(previousState.jqbedAlgorithmStatus?.state) ||
+        previousState.matrixName !== 'jqbed' || previousState.history !== 'now' ||
+        previousState.local || !previousState.wsConnected) {
+        return previousState.jqbedReturnedSettings == null ? null : { jqbedReturnedSettings: null };
+      }
+      if (diagnostics?.sensorType !== 'jqbed') return null;
+      const nextSettings = mergeJqbedReturnedSettings(previousState.jqbedReturnedSettings, diagnostics.reserved_bytes);
+      return sameJqbedReturnedSettings(previousState.jqbedReturnedSettings, nextSettings)
+        ? null
+        : { jqbedReturnedSettings: nextSettings };
+    });
+  };
+
+  /** 按当前客户端订阅合并实时算法字段，来源失效时清空。 */
+  syncJqbedAlgorithmLog = (jsonObject, event) => {
+    if (event?.target && event.target !== ws) return;
+    const subscription = jsonObject.jqbedAlgorithmLogSubscription;
+    const frame = jsonObject.jqbedAlgorithmLog;
+    const invalidated = ['waiting', 'error'].includes(jsonObject.jqbedAlgorithmStatus?.state);
+    const licenseInvalidated = jsonObject.licenseLocked || jsonObject.noLicense || jsonObject.licenseError != null;
+    if (!subscription && !frame && !invalidated && !licenseInvalidated) return;
+    if (licenseInvalidated) {
+      this.jqbedAlgorithmLogRequestId = null;
+      this.jqbedAlgorithmLogRequested = false;
+    }
+
+    this.setState((previousState) => {
+      const permitted = !Array.isArray(previousState.allowedTypes) || previousState.allowedTypes.includes('jqbed');
+      if (licenseInvalidated || !permitted || previousState.matrixName !== 'jqbed' ||
+        previousState.history !== 'now' || previousState.local || !previousState.wsConnected) {
+        return previousState.jqbedAlgorithmLogFrame == null && previousState.jqbedAlgorithmLogSubscription == null
+          ? null : { jqbedAlgorithmLogFrame: null, jqbedAlgorithmLogSubscription: null };
+      }
+      const matchingAck = subscription && (subscription.subscribed !== true || this.jqbedAlgorithmLogRequested !== false) &&
+        (!subscription.requestId || !this.jqbedAlgorithmLogRequestId ||
+        subscription.requestId === this.jqbedAlgorithmLogRequestId);
+      const nextSubscription = matchingAck ? subscription : previousState.jqbedAlgorithmLogSubscription;
+      let nextFrame = previousState.jqbedAlgorithmLogFrame;
+      if (invalidated || (matchingAck && (!subscription.ok || !subscription.subscribed))) nextFrame = null;
+      if (!invalidated && frame?.sensorType === 'jqbed' && nextSubscription?.ok === true &&
+        nextSubscription.subscribed === true && this.jqbedAlgorithmLogRequested !== false &&
+        frame.outputs && typeof frame.outputs === 'object' && !Array.isArray(frame.outputs)) {
+        if (nextFrame?.sequence !== frame.sequence || nextFrame?.receivedAt !== frame.receivedAt) {
+          nextFrame = mergeJqbedAlgorithmLogFrame(nextFrame, frame);
+        }
+      }
+      return nextFrame === previousState.jqbedAlgorithmLogFrame && nextSubscription === previousState.jqbedAlgorithmLogSubscription
+        ? null : { jqbedAlgorithmLogFrame: nextFrame, jqbedAlgorithmLogSubscription: nextSubscription };
+    });
+  };
+
   wsData = (e, decodedMessage = null) => {
+    // A replaced socket may still dispatch a queued message; it cannot update the current session.
+    if (e.target && e.target !== ws) return;
     sitPress = 0;
     const jsonObject = decodedMessage || parseWebSocketEventPayload(e);
     if (!jsonObject) return;
@@ -1948,7 +2071,11 @@ class Home extends React.Component {
       this.setState({ jqbedAlgorithmConfigResult: jsonObject.jqbedAlgorithmConfigResult });
     }
     if (jsonObject.jqbedAlgorithmStatus) {
-      this.setState({ jqbedAlgorithmStatus: jsonObject.jqbedAlgorithmStatus });
+      this.setState({
+        jqbedAlgorithmStatus: jsonObject.jqbedAlgorithmStatus,
+        ...(['waiting', 'error'].includes(jsonObject.jqbedAlgorithmStatus.state)
+          ? { jqbedReturnedSettings: null, jqbedAlgorithmLogFrame: null } : {}),
+      });
     }
     // 后端 HTTP 写接口（Agent / 脚本）改了展示系统目录。Builder 在进程内保存时自己派发这个
     // DOM 事件；这里把后端广播翻译成同一个事件，顶部菜单就能沿用既有的重拉逻辑。
@@ -1977,6 +2104,7 @@ class Home extends React.Component {
       // canonical 帧按 displaySystemId 隔离；缺少身份的旧帧由兼容边界继续透传。
       return;
     }
+    this.syncJqbedAlarmSpeech(jsonObject, e);
 
     // 传感器类型清单（{time,flat,map}）：存到 state 并落地 localStorage 兜底
     if (jsonObject.sensorTypeList && Array.isArray(jsonObject.sensorTypeList.flat)) {
@@ -2353,6 +2481,10 @@ class Home extends React.Component {
       }
     }
 
+    // Read diagnostics after processing system context; configuration/rate values are not returned settings.
+    this.syncJqbedReturnedSettings(jsonObject);
+    this.syncJqbedAlgorithmLog(jsonObject, e);
+
     if (jsonObject.backFlag != null) {
       backFlag = jsonObject.backFlag;
       // 根据左右手切换 fingerArr 指向
@@ -2368,73 +2500,19 @@ class Home extends React.Component {
 
     if (jsonObject.rate != null) {
       this.data.current?.changeData(jsonObject.rate);
-
-
-      if (onBedState.length < 2) {
-        onBedState.push(jsonObject.rate.stateInBbed)
-      } else {
-        onBedState.shift()
-        onBedState.push(jsonObject.rate.stateInBbed)
-      }
-
-
-      if (onBedState[0] != onBedState[1] && onBedState[1] == 0) {
-
-
-        // if (this.props.i18n.language == 'zh') {
-        //   const msg = new SpeechSynthesisUtterance("已离床");
-        //   msg.lang = "zh-CN"; // 设定语言
-        //   speechSynthesis.speak(msg);
-        // }else if(this.props.i18n.language == 'en'){
-        //   const msg = new SpeechSynthesisUtterance("已离床");
-        //   msg.lang = "en-US"; // 设定语言
-        //   speechSynthesis.speak(msg);
-        // }
-        speakLocalizedMessage(
-          this.props.t('home.alerts.leftBed'),
-          this.props.i18n.language,
-          { alertKey: 'leftBed' },
-        )
-
-
-      }
-
-
-      if (onBedState[0] != onBedState[1] && onBedState[1] == 3) {
-        // const msg = new SpeechSynthesisUtterance("坠床风险");
-        // msg.lang = "zh-CN"; // 设定语言
-        // speechSynthesis.speak(msg);
-        speakLocalizedMessage(
-          this.props.t('home.alerts.fallRisk'),
-          this.props.i18n.language,
-          { alertKey: 'fallRisk' },
-        )
-      }
-
-
-      if (onBedState[0] != onBedState[1] && onBedState[1] == 4) {
-        // const msg = new SpeechSynthesisUtterance("已坐起");
-        // msg.lang = "zh-CN"; // 设定语言
-        // speechSynthesis.speak(msg);
-        speakLocalizedMessage(
-          this.props.t('home.alerts.satUp'),
-          this.props.i18n.language,
-          { alertKey: 'satUp' },
-        )
-      }
-
-
-
-
-      if (jsonObject.rate.sosflag) {
-        // const msg = new SpeechSynthesisUtterance("SOS紧急求助");
-        // msg.lang = "zh-CN"; // 设定语言
-        // speechSynthesis.speak(msg);
-        speakLocalizedMessage(
-          this.props.t('home.alerts.emergency'),
-          this.props.i18n.language,
-          { alertKey: 'emergency' },
-        )
+      // jqbed speech uses merged alarms from the independent diagnostics channel.
+      if (this.state.matrixName === 'smallBed') {
+        if (onBedState.length >= 2) onBedState.shift();
+        onBedState.push(jsonObject.rate.stateInBbed);
+        if (onBedState[0] != onBedState[1]) {
+          const alertKey = { 0: 'leftBed', 3: 'fallRisk', 4: 'satUp' }[onBedState[1]];
+          if (alertKey) speakLocalizedMessage(
+            this.props.t(`home.alerts.${alertKey}`), this.props.i18n.language, { alertKey },
+          );
+        }
+        if (jsonObject.rate.sosflag) speakLocalizedMessage(
+          this.props.t('home.alerts.emergency'), this.props.i18n.language, { alertKey: 'emergency' },
+        );
       }
     }
 
@@ -3606,6 +3684,27 @@ class Home extends React.Component {
       clearLastFrame();
       this.props.onPortalSystemChange?.(this.state.systemId || this.state.matrixName);
     }
+    const jqbedReturnedSourceChanged =
+      prevState.matrixName !== this.state.matrixName ||
+      prevState.history !== this.state.history ||
+      prevState.local !== this.state.local ||
+      prevState.wsConnected !== this.state.wsConnected ||
+      prevState.wsConnectionEpoch !== this.state.wsConnectionEpoch ||
+      (Array.isArray(prevState.allowedTypes) ? prevState.allowedTypes.includes('jqbed') : true) !==
+        (Array.isArray(this.state.allowedTypes) ? this.state.allowedTypes.includes('jqbed') : true);
+    if (jqbedReturnedSourceChanged) {
+      this.jqbedAlarmSpeechState?.reset();
+      this.jqbedAlarmSpeechSource = this.state.matrixName;
+      this.jqbedAlgorithmLogRequestId = null;
+      this.jqbedAlgorithmLogRequested = false;
+      if (this.state.jqbedReturnedSettings != null || this.state.jqbedAlgorithmLogFrame != null ||
+        this.state.jqbedAlgorithmLogSubscription != null) {
+        this.setState({ jqbedReturnedSettings: null, jqbedAlgorithmLogFrame: null, jqbedAlgorithmLogSubscription: null });
+      }
+    }
+    if (['waiting', 'error'].includes(this.state.jqbedAlgorithmStatus?.state)) {
+      this.jqbedAlarmSpeechState?.reset();
+    }
 
     const singleGloveSourceChanged =
       prevState.matrixName !== this.state.matrixName ||
@@ -4007,10 +4106,16 @@ class Home extends React.Component {
       obj?.getJqbedAlgorithmConfig
       || obj?.setJqbedAlgorithmConfig
       || obj?.resetJqbedAlgorithmConfig
+      || typeof obj?.subscribeJqbedAlgorithmLog === 'boolean'
     );
     if (isJqbedAlgorithmCommand) {
       const state = ws ? ws.readyState : 'no ws';
       const sent = sendWebSocketJson(ws, obj);
+      if (typeof obj.subscribeJqbedAlgorithmLog === 'boolean') {
+        this.jqbedAlgorithmLogRequestId = obj.requestId || null;
+        this.jqbedAlgorithmLogRequested = sent && obj.subscribeJqbedAlgorithmLog;
+        this.setState({ jqbedAlgorithmLogFrame: null, jqbedAlgorithmLogSubscription: null });
+      }
       if (!sent) {
         console.warn(`[WS Send] 无法发送， ws.readyState=${state}`, obj);
       }
@@ -4067,6 +4172,9 @@ class Home extends React.Component {
     this.setState({
       matrixName: nextMatrixName,
       systemId: e,
+      jqbedReturnedSettings: null,
+      jqbedAlgorithmLogFrame: null,
+      jqbedAlgorithmLogSubscription: null,
       numMatrixFlag: nextMode,
       ...configObj,
       dataArr: [],
@@ -4246,7 +4354,7 @@ class Home extends React.Component {
   }
 
   changeLocal = (value) => {
-    this.setState({ local: value });
+    this.setState({ local: value, jqbedReturnedSettings: null, jqbedAlgorithmLogFrame: null, jqbedAlgorithmLogSubscription: null });
     // changeDateArr(matrixName)
 
     this.wsSendObj(value ? { local: true } : { play: false, local: false, history: false });
@@ -4536,7 +4644,13 @@ class Home extends React.Component {
   };
 
   changeStateData = (obj) => {
-    this.setState(obj);
+    this.setState((previousState) => {
+      const sourceChanged = ['matrixName', 'history', 'local'].some((key) =>
+        Object.prototype.hasOwnProperty.call(obj, key) && previousState[key] !== obj[key]);
+      return { ...obj, ...(sourceChanged ? {
+        jqbedReturnedSettings: null, jqbedAlgorithmLogFrame: null, jqbedAlgorithmLogSubscription: null,
+      } : {}) };
+    });
   };
 
   /**
@@ -5158,6 +5272,9 @@ class Home extends React.Component {
             halowStatus={this.state.halowStatus}
             jqbedAlgorithmConfigResult={this.state.jqbedAlgorithmConfigResult}
             jqbedAlgorithmStatus={this.state.jqbedAlgorithmStatus}
+            jqbedReturnedSettings={this.state.jqbedReturnedSettings}
+            jqbedAlgorithmLogFrame={this.state.jqbedAlgorithmLogFrame}
+            jqbedAlgorithmLogSubscription={this.state.jqbedAlgorithmLogSubscription}
             wsConnected={this.state.wsConnected}
             wsConnectionEpoch={this.state.wsConnectionEpoch}
             wsSendObj={this.wsSendObj}
