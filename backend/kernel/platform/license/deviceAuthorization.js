@@ -6,11 +6,12 @@ const { observeUsageOperation } = require('../../../common/businessEvents');
 const PUBLIC_KEY = fs.readFileSync(path.join(__dirname, '../../../extension-host/workspace/systemPackagePublicKey.pem'), 'utf8');
 
 /** Verify the signed offline allowance for this exact key and computer. */
-function verifyDeviceLease(envelope, key, deviceId, now = Date.now(), publicKey = PUBLIC_KEY) {
+function verifyDeviceLease(envelope, key, deviceId, now = Date.now(), publicKey = PUBLIC_KEY, allowExpired = false) {
   const lease = envelope?.lease;
   return Boolean(lease?.schemaVersion === 1 && lease.keyHash === createHash('sha256').update(key).digest('hex')
     && lease.deviceId === deviceId && Number.isFinite(lease.issuedAt) && Number.isFinite(lease.expiresAt)
-    && lease.issuedAt <= now + 60000 && lease.expiresAt > now && lease.expiresAt - lease.issuedAt <= 7 * 86400000
+    && lease.issuedAt <= now + 60000 && (allowExpired || lease.expiresAt > now) && lease.expiresAt > lease.issuedAt
+    && lease.expiresAt - lease.issuedAt <= 7 * 86400000
     && Number.isInteger(lease.deviceLimit) && lease.deviceLimit >= 0 && typeof envelope.signature === 'string'
     && verify(null, Buffer.from(JSON.stringify(lease)), publicKey, Buffer.from(envelope.signature, 'base64')));
 }
@@ -22,13 +23,14 @@ function createDeviceAuthorization({ root, fetchImpl = globalThis.fetch, now = D
   let lastKey = '', current = null;
 
   /** Read only this key's saved result; an allowed online result always requires a signature. */
-  function cached(key) {
+  function cached(key, allowExpired = false) {
     const file = path.join(directory, `${createHash('sha256').update(key).digest('hex')}.json`);
     try {
       const value = JSON.parse(fs.readFileSync(file, 'utf8'));
       if (value.keyHash !== createHash('sha256').update(key).digest('hex') || value.deviceId !== deviceId) return null;
-      if (value.ok && (!verifyDeviceLease(value.deviceLease, key, deviceId, now(), publicKey)
-        || value.deviceLimit !== value.deviceLease.lease.deviceLimit || value.expiresAt > value.deviceLease.lease.expiresAt)) return null;
+      if ((value.ok || value.historyAllowed === true) && (!verifyDeviceLease(value.deviceLease, key, deviceId, now(), publicKey, allowExpired)
+        || value.deviceLimit !== value.deviceLease.lease.deviceLimit || !Number.isFinite(value.expiresAt)
+        || value.expiresAt > value.deviceLease.lease.expiresAt)) return null;
       return value;
     } catch { return null; }
   }
@@ -59,9 +61,14 @@ function createDeviceAuthorization({ root, fetchImpl = globalThis.fetch, now = D
         const payload = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf8'));
         limitedOffline = Number.isInteger(payload.deviceLimit) && payload.deviceLimit > 0;
       } catch { /* The local validator has already rejected malformed keys. */ }
-      if (!limitedOffline) return { ok: true, expiresAt: localState.endDate, deviceLimit: 0 };
+      if (!limitedOffline) {
+        lastKey = key;
+        current = { ok: localState.endDate > now(), expiresAt: localState.endDate, licenseExpiresAt: localState.endDate,
+          historyAllowed: true, deviceLimit: 0, ...(localState.endDate <= now() ? { code: 'LICENSE_EXPIRED', message: '密钥已到期，仍可查看和分析历史数据。' } : {}) };
+        return current;
+      }
     }
-    const previous = cached(key);
+    const previous = cached(key, true);
     const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 8000);
     timeout.unref?.();
     let response;
@@ -81,8 +88,8 @@ function createDeviceAuthorization({ root, fetchImpl = globalThis.fetch, now = D
     let value;
     if (response) {
       const limit = response.deviceLimit || 0;
-      if (response.valid && !response.deviceLease && response.status === 'UNKNOWN') {
-        value = { ok: false, code: 'LICENSE_NOT_REGISTERED', message: '这把旧密钥尚未登记，请联系管理员补录原密钥后重试。', deviceLimit: limit };
+      if (response.status === 'LICENSE_NOT_REGISTERED' || (response.valid && !response.deviceLease && response.status === 'UNKNOWN')) {
+        value = { ok: false, code: 'LICENSE_NOT_REGISTERED', message: '原密钥需要同步登记。请管理员在授权网站“密钥验证”中核对并补录原密钥，然后联网重试，无需更换密钥。', deviceLimit: limit };
       } else if (response.valid && !response.deviceLease) {
         value = { ok: false, code: 'LICENSE_SERVER_UPGRADE_REQUIRED', message: '授权服务尚未返回电脑授权凭证，请联系管理员更新授权服务后重试。', deviceLimit: limit };
       } else if (response.valid && (!verifyDeviceLease(response.deviceLease, key, deviceId, now(), publicKey)
@@ -91,16 +98,30 @@ function createDeviceAuthorization({ root, fetchImpl = globalThis.fetch, now = D
       } else value = { ok: response.valid, code: response.status || 'LICENSE_INVALID', message: response.reason || '密钥未通过验证。',
         deviceLimit: limit, licenseExpiresAt: response.expireTimestamp, expiresAt: Math.min(response.expireTimestamp || localState.endDate,
           response.deviceLease?.lease?.expiresAt || 0), ...(response.deviceLease ? { deviceLease: response.deviceLease } : {}) };
+      const expiry = Number(value.licenseExpiresAt || response.expireTimestamp || localState.endDate);
+      const normalExpiry = ['EXPIRED', 'LICENSE_EXPIRED'].includes(response.status) && expiry > 0 && expiry <= now();
+      value = { ...value, licenseExpiresAt: expiry, serverTime: response.time,
+        historyAllowed: value.ok || normalExpiry, explicitDenial: !value.ok && !normalExpiry };
+      if (normalExpiry && !value.deviceLease && previous?.deviceLease) {
+        // Keep signature evidence for read-only restart; this expired lease never grants live acquisition.
+        value = { ...value, deviceLease: previous.deviceLease, expiresAt: previous.expiresAt, deviceLimit: previous.deviceLimit };
+      }
       persist(key, value);
-    } else if (previous) value = { ...previous, offline: true };
+    } else if (previous) value = { ...previous, licenseExpiresAt: localState.endDate, offline: true };
     else value = { ok: false, code: 'LICENSE_ONLINE_ACTIVATION_REQUIRED', message: '请先联网验证一次密钥，完成电脑授权后可离线使用。' };
-    if (value.ok && (!Number.isFinite(value.expiresAt) || value.expiresAt <= now())) value = { ...value, ok: false, code: 'DEVICE_LEASE_EXPIRED', message: '离线授权凭证已到期，请联网后自动恢复。' };
+    const normalExpiry = Number(value.licenseExpiresAt || localState.endDate) <= now()
+      && !value.explicitDenial && (value.ok || value.historyAllowed === true);
+    if (normalExpiry) value = { ...value, ok: false, historyAllowed: true, code: 'LICENSE_EXPIRED',
+      licenseExpiresAt: value.licenseExpiresAt || localState.endDate, message: '密钥已到期，仍可查看和分析历史数据。' };
+    else if (value.ok && (!Number.isFinite(value.expiresAt) || value.expiresAt <= now())) value = { ...value, ok: false,
+      historyAllowed: false, code: 'DEVICE_LEASE_EXPIRED', message: '离线授权凭证已到期，请联网后自动恢复。' };
     lastKey = key; current = value;
     return value;
   }
 
   /** Return the most recently verified state without exposing key or hardware identity to the UI. */
-  function status() { return current ? { ok: current.ok, code: current.code, deviceLimit: current.deviceLimit, expiresAt: current.expiresAt, licenseExpiresAt: current.licenseExpiresAt, offline: Boolean(current.offline) } : null; }
+  function status() { return current ? { ok: current.ok, code: current.code, historyAllowed: current.historyAllowed === true,
+    deviceLimit: current.deviceLimit, expiresAt: current.expiresAt, licenseExpiresAt: current.licenseExpiresAt, offline: Boolean(current.offline) } : null; }
   return { authorize, status, getCurrentKey: () => lastKey };
 }
 

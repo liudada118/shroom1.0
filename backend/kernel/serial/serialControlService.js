@@ -99,6 +99,7 @@ function registerSerialControlHandlers(router, deps) {
    * @throws {Error} 未授权时抛出带 `code: 'LICENSE_REQUIRED'` 与 `httpStatus: 403` 的错误。
    */
   function requireAuthorizedRuntime() {
+    if (deps.requireAccess) { deps.requireAccess('acquire'); return; }
     if (isAuthorizedRuntime()) return;
     const error = new Error('a valid license is required for this command');
     error.code = 'LICENSE_REQUIRED';
@@ -111,6 +112,7 @@ function registerSerialControlHandlers(router, deps) {
     name: 'history-load-date',
     when: (message) => message.getTime != null,
     handle: (message) => {
+      deps.requireAccess?.('history');
       setRuntime({
         getTime: message.getTime,
         localFlag: true,
@@ -126,7 +128,7 @@ function registerSerialControlHandlers(router, deps) {
     name: 'sensor-file-switch',
     when: (message) => message.file != null,
     handle: (message, context = {}) => {
-      requireAuthorizedRuntime();
+      if (deps.requireAccess) deps.requireAccess('history'); else requireAuthorizedRuntime();
       const runtime = getRuntime();
       const selection = deps.resolveSystemSelection?.(message.file) || { id: message.file, sourceType: message.file };
       const stoppingTransport = deps.stopAlternateTransport?.();
@@ -209,7 +211,7 @@ function registerSerialControlHandlers(router, deps) {
       message.sensorClose === true
     ),
     handle: (message, context = {}) => {
-      requireAuthorizedRuntime();
+      if (message.sitPort != null || message.headPort != null || message.sensorPort != null || message.backPort != null || message.channelPorts != null) requireAuthorizedRuntime();
       // manifest 多传感器系统用 channelPorts 这一个字段承载任意数量的通道，
       // 而不是给每个新传感器再加一对 xxxPort / xxxClose 命令字段。
       if (message.channelPorts && typeof message.channelPorts === 'object') {
@@ -298,7 +300,7 @@ function registerSerialControlHandlers(router, deps) {
     name: 'local-playback-switch',
     when: (message) => message.local === true || message.local === false,
     handle: (message, context = {}) => {
-      requireAuthorizedRuntime();
+      if (deps.requireAccess) deps.requireAccess(message.local === true ? 'history' : 'acquire'); else requireAuthorizedRuntime();
       const runtime = getRuntime();
       if (context.scope === 'back') {
         if (message.local === true) {
@@ -381,6 +383,7 @@ function registerSerialControlHandlers(router, deps) {
     name: 'auto-connect-hand-glove-double',
     when: (message) => message.autoConnectHand0205Double === true,
     handle: (_message, context = {}) => {
+      requireAuthorizedRuntime();
       const connecting = listPorts({ throwOnError: true }).then(async (ports) => {
         const serialport = getPort(ports);
         logSerialPortList('autoConnectHand0205Double', serialport);

@@ -220,11 +220,24 @@ function createPetCareRuntimeService({
   getPointArr,
   getFile,
   getPort,
+  getExecutionContext,
   probeJqbedAlgorithmConfig,
   publishSystemEvent,
   setJqbedAlgorithmStatus,
   setJqbedMatrixOrigin,
 } = {}) {
+  let generation = 0, disposed = false, vitalSignsActive = null;
+  const timers = new Set();
+  /** Freeze the current system, collection and physical port before a Python request. */
+  function captureExecution() {
+    return { generation, file: getFile?.(), port: getPort?.(), identity: JSON.stringify(getExecutionContext?.() ?? null) };
+  }
+  /** Late results cannot update caches, error state or output for a newer collection or runtime. */
+  function isCurrentExecution(captured) {
+    if (disposed || captured.generation !== generation || captured.file !== getFile?.() || !getPort?.()?.isOpen) return false;
+    if (getExecutionContext && captured.port !== getPort?.()) return false;
+    return captured.identity === JSON.stringify(getExecutionContext?.() ?? null);
+  }
   let onbedArr = [];
   let onBedTime = 0;
   let jqbedConfigCapability = null;
@@ -303,12 +316,14 @@ function createPetCareRuntimeService({
     if (jqbedConfigCapability !== null) return jqbedConfigCapability;
     if (jqbedConfigProbePromise) return jqbedConfigProbePromise;
 
+    const execution = captureExecution();
     jqbedConfigProbePromise = Promise.resolve()
       .then(() => probeJqbedAlgorithmConfig())
       .then((health) => {
+        if (!isCurrentExecution(execution)) return false;
         jqbedConfigCapability = health?.onbedFilterAvailable === true
           && health?.onbedFilterSensitivitySchema === true;
-        if (!jqbedConfigCapability) {
+        if (!jqbedConfigCapability && isCurrentExecution(execution)) {
           setJqbedAlgorithmStatus?.({
             state: 'error',
             error: 'JQBed algorithm runtime does not support dynamic configuration',
@@ -318,8 +333,9 @@ function createPetCareRuntimeService({
         return jqbedConfigCapability;
       })
       .catch((error) => {
+        if (!isCurrentExecution(execution)) return false;
         jqbedConfigCapability = false;
-        setJqbedAlgorithmStatus?.({
+        if (isCurrentExecution(execution)) setJqbedAlgorithmStatus?.({
           state: 'error',
           error: safeAlgorithmErrorMessage(error, 'Unable to inspect JQBed algorithm runtime'),
           code: 'JQBED_CONFIG_ABI_PROBE_FAILED',
@@ -341,6 +357,7 @@ function createPetCareRuntimeService({
   function resetRuntime(systemKey) {
     const system = petCareSystems[systemKey];
     if (!system) return;
+    generation++;
     Object.assign(system.runtime, createPetCareRuntimeState());
   }
 
@@ -348,6 +365,7 @@ function createPetCareRuntimeService({
    * 重置全部宠物看护和生命体征运行时状态。
    */
   function resetAll() {
+    generation++;
     Object.keys(petCareSystems).forEach(resetRuntime);
     Object.values(vitalSignsHeartRateSimulator).forEach(resetVitalSignsHeartRateSimulatorState);
     onbedArr = [];
@@ -533,9 +551,8 @@ function createPetCareRuntimeService({
    * 信号（不是错误），此时什么都不发 —— 发空结果会让界面读数闪成 0。catch 只 warn 不停表，
    * 下一轮 125ms 后自然重试。
    *
-   * ⚠️ **这个定时器没有重入保护**（对比 `startPetCareTimer` 的 `processing`），只有探测期那条
-   * 早退。Python 慢于 125ms 时会有多个 `callPy` 并发在飞，靠 worker 自己的队列消化。现象上没
-   * 出过问题，但加重活算法之前值得先补一个 `processing` 守卫。
+   * ⚠️ 每次请求冻结系统、采集会话与运行代次；切换后返回的旧结果不能更新 matrix_origin。
+   * 同一代次只允许一个在飞调用，避免慢 Python 堆积过期结果。
    *
    * ⚠️ **`onBedTime` 那三支里前两支代码完全相同**（在床、离床都累加），只有「两帧不一致」才
    * 归零 —— 所以它的实际语义是「当前稳定状态持续了多久」，不是字面的在床时长，且单位不是秒
@@ -544,7 +561,9 @@ function createPetCareRuntimeService({
    * @returns {NodeJS.Timeout} 定时器句柄；调用方负责在关闭时 clearInterval。
    */
   function startVitalSignsTimer() {
-    return setInterval(async () => {
+    if (disposed) return null;
+    const timer = setInterval(async () => {
+      if (disposed || (vitalSignsActive && vitalSignsActive.generation === generation)) return;
       const pointArr = getPointArr?.();
       const activeFile = getFile?.();
       const port = getPort?.();
@@ -554,15 +573,19 @@ function createPetCareRuntimeService({
       // 首次启动 Python 可能较慢；探测期间不让 125ms 定时器堆积同一批等待任务。
       if (activeFile === 'jqbed' && jqbedConfigProbePromise) return;
 
+      const execution = captureExecution();
+      vitalSignsActive = execution;
       const newArr = jqbedOppo(pointArr);
       try {
         const configEnvelope = activeFile === 'jqbed' && await supportsJqbedAlgorithmConfig()
           ? getJqbedAlgorithmConfigSnapshot()
           : null;
+        if (!isCurrentExecution(execution)) return;
         const rawData = await callPy(
           'getData',
           buildJqbedGetDataArgs(newArr, activeFile, configEnvelope),
         );
+        if (!isCurrentExecution(execution)) return;
         if (activeFile === 'jqbed' && jqbedConfigCapability === true) {
           setJqbedAlgorithmStatus?.({ state: 'ready', error: null });
         }
@@ -594,6 +617,7 @@ function createPetCareRuntimeService({
           publishSystemEvent?.(JSON.stringify({ rate: data }));
         }
       } catch (error) {
+        if (!isCurrentExecution(execution)) return;
         logger?.warn?.('[jqbed] callPy error:', error.message || error);
         if (activeFile === 'jqbed') {
           setJqbedAlgorithmStatus?.({
@@ -602,8 +626,9 @@ function createPetCareRuntimeService({
             errorAt: new Date().toISOString(),
           });
         }
-      }
+      } finally { if (vitalSignsActive === execution) vitalSignsActive = null; }
     }, 125);
+    timers.add(timer); return timer;
   }
 
   /**
@@ -614,16 +639,17 @@ function createPetCareRuntimeService({
    * 成功才置 false，失败下一轮重试。`timeoutMs: 30000` 只给 `rpcStep`（首次调用要加载模型）。
    * `petCareMini` 不打日志（两套常同时跑，20ms 双份日志会淹掉别的信息）。catch 只 warn 不停表。
    *
-   * ⚠️ **`processing` 重入保护在这里是必须的**（对比 `startVitalSignsTimer` 就没有）：Python
-   * 一轮远超 20ms，没有它会瞬间堆出成百个并发调用把 worker 打死。`finally` 里无条件复位。
+   * ⚠️ 请求代次隔离重入标记；旧请求的 finally 不得释放新代次正在执行的请求。
+   * 每次 await 后重新核验系统和采集身份，避免旧复位或结果污染下一次采集。
    *
    * @param {'petCare' | 'petCareMini'} systemKey 系统 key。
    * @returns {NodeJS.Timeout} 定时器句柄；调用方负责在关闭时 clearInterval。
    */
   function startPetCareTimer(systemKey) {
+    if (disposed) return null;
     const system = petCareSystems[systemKey];
-    return setInterval(async () => {
-      if (system.runtime.processing) return;
+    const timer = setInterval(async () => {
+      if (disposed || system.runtime.processing) return;
 
       const pointArr = getPointArr?.();
       const file = getFile?.();
@@ -632,23 +658,36 @@ function createPetCareRuntimeService({
         return;
       }
 
+      const execution = captureExecution();
+      const input = [...pointArr];
       system.runtime.processing = true;
+      system.runtime.processingToken = execution;
       try {
         if (system.runtime.resetPending) {
           await callPy(system.rpcReset, {});
+          if (!isCurrentExecution(execution)) return;
           system.runtime.resetPending = false;
         }
 
-        const data = await callPy(system.rpcStep, { data: [...pointArr] }, { timeoutMs: 30000 });
+        const data = await callPy(system.rpcStep, { data: input }, { timeoutMs: 30000 });
+        if (!isCurrentExecution(execution)) return;
         const result = normalizePetCareResult(data, systemKey);
         logPetCareResult(result, systemKey);
         publishSystemEvent?.(JSON.stringify({ [system.eventKey]: result }));
       } catch (error) {
-        logger?.warn?.(`[${system.eventKey}] callPy error:`, error.message || error);
+        if (isCurrentExecution(execution)) logger?.warn?.(`[${system.eventKey}] callPy error:`, error.message || error);
       } finally {
-        system.runtime.processing = false;
+        if (system.runtime.processingToken === execution) { system.runtime.processing = false; delete system.runtime.processingToken; }
       }
     }, 20);
+    timers.add(timer); return timer;
+  }
+
+  /** Stop timers and invalidate all pending Python replies during host shutdown. */
+  function dispose() {
+    disposed = true; generation++;
+    for (const timer of timers) clearInterval(timer);
+    timers.clear();
   }
 
   return {
@@ -657,6 +696,7 @@ function createPetCareRuntimeService({
     resetRuntime,
     startPetCareTimer,
     startVitalSignsTimer,
+    dispose,
   };
 }
 

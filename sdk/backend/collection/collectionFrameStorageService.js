@@ -17,6 +17,8 @@ const { resolveSensorIdentity } = require('../identity');
 function createCollectionFrameStorageService(options = {}) {
   const {
     getSensorType,
+    getCollectionTrace,
+    collectionSessions,
     getDbRef,
     isCollecting,
     shouldStoreCollectionFrame,
@@ -30,6 +32,21 @@ function createCollectionFrameStorageService(options = {}) {
     tempFullBedType,
     smallBed12BType,
   } = options;
+  const admissions = new WeakMap();
+
+  /** Freeze admission, sampling decision, database and trace before an asynchronous processor starts. */
+  function beginCollectionFrame(identity = {}) {
+    const outputChannel = identity.outputChannel || 'sit';
+    const channelId = identity.channelId || outputChannel;
+    const originalDb = getDbRef(identity.runtimeSource === 'display-system' ? 'sit' : outputChannel);
+    const admitted = identity.stored !== false && Boolean(isCollecting?.() && originalDb && shouldStoreCollectionFrame?.(channelId) && hasEnoughCollectionDiskSpace?.());
+    const token = admitted ? collectionSessions?.beginFrame({ channelId, timestamp: identity.timestamp, originalDb }) || {} : {};
+    admissions.set(token, { admitted, originalDb, channelId, used: false, trace: getCollectionTrace?.() || null });
+    return token;
+  }
+
+  /** End one captured processor; its opaque token never enters a stored or published frame. */
+  function endCollectionFrame(token, result) { collectionSessions?.endFrame(token, result); }
 
   /**
    * 读取当前传感器类型。
@@ -58,7 +75,12 @@ function createCollectionFrameStorageService(options = {}) {
    * @param {'sit' | 'back' | 'head'} channel 采集通道。
    * @returns {boolean} 是否可以入库。
    */
-  function canStore(channel) {
+  function canStore(channel, token) {
+    if (token) {
+      const admission = admissions.get(token);
+      return Boolean(admission?.admitted && !admission.used && admission.channelId === channel
+        && (!collectionSessions || collectionSessions.isFrameToken(token)) && hasEnoughCollectionDiskSpace?.());
+    }
     return Boolean(
       isCollecting?.() &&
       shouldStoreCollectionFrame?.(channel) &&
@@ -127,7 +149,7 @@ function createCollectionFrameStorageService(options = {}) {
    * @param {'sitData' | 'backData' | 'headData'} dataKey 当前通道矩阵字段。
    * @returns {string | null} 展示系统存储数据；非展示系统帧返回 null。
    */
-  function buildDisplaySystemCollectionData(frameToStore, dataKey) {
+  function buildDisplaySystemCollectionData(frameToStore, dataKey, trace = getCollectionTrace?.()) {
     // legacy zero adapter 也会补齐 canonical displaySystemId/channelId，供实时帧
     // 寻址使用；这不代表该帧应切换到 manifest 专用历史格式。只有 runtime
     // processor 明确标记的 Display System 帧才能走这里，否则会绕过手套零点帧、
@@ -152,6 +174,7 @@ function createCollectionFrameStorageService(options = {}) {
       ...frameToStore,
       ...identity,
       data: processed,
+      ...(trace ? { collectionTrace: trace } : {}),
       [resolvedDataKey]: processed,
       normalizedData: Array.isArray(frameToStore.normalizedData)
         ? frameToStore.normalizedData
@@ -242,7 +265,7 @@ function createCollectionFrameStorageService(options = {}) {
    * @param {object} frameToStore 实时帧对象。
    * @returns {boolean} 是否已入队。
    */
-  function store(channel, frameToStore) {
+  function store(channel, frameToStore, { collectionToken } = {}) {
     const displaySystemFrame = isDisplaySystemFrame(frameToStore);
     const displayIdentity = getDisplaySystemFrameIdentity(frameToStore, channel);
     // display-system 是 canonical producer 身份声明。声明存在但身份不合法时必须在
@@ -250,20 +273,23 @@ function createCollectionFrameStorageService(options = {}) {
     if (displaySystemFrame && !displayIdentity) return false;
     if (displayIdentity) {
       if (frameToStore?.stored === false) return false;
-      if (!canStore(displayIdentity.channelId)) return false;
+      if (!canStore(displayIdentity.channelId, collectionToken)) return false;
+      const admission = collectionToken ? admissions.get(collectionToken) : null;
       const dataToStore = buildDisplaySystemCollectionData(
         frameToStore,
         `${displayIdentity.outputChannel}Data`,
+        admission ? admission.trace : getCollectionTrace?.(),
       );
       if (!dataToStore) return false;
 
       // 所有 manifest 通道共享当前型号的主库，并由 channel_id 精确隔离。
       // 不能按 outputChannel 映射 db1/db2：任意多串口并不存在可无限扩展的 dbN。
-      enqueueCollectionFrame(getDbRef('sit'), dataToStore, displayIdentity);
+      if (admission) admission.used = true;
+      enqueueCollectionFrame(admission ? admission.originalDb : getDbRef('sit'), dataToStore, displayIdentity, collectionToken);
       return true;
     }
 
-    if (!canStore(channel)) return false;
+    if (!canStore(channel, collectionToken)) return false;
 
     const builders = {
       sit: buildSitCollectionData,
@@ -275,7 +301,9 @@ function createCollectionFrameStorageService(options = {}) {
       throw new Error(`unknown collection channel: ${channel}`);
     }
 
-    enqueueCollectionFrame(getDbRef(channel), builder(frameToStore), channel);
+    const admission = collectionToken ? admissions.get(collectionToken) : null;
+    if (admission) admission.used = true;
+    enqueueCollectionFrame(admission ? admission.originalDb : getDbRef(channel), builder(frameToStore), channel, collectionToken);
     return true;
   }
 
@@ -285,14 +313,17 @@ function createCollectionFrameStorageService(options = {}) {
     buildHeadCollectionData,
     buildSitCollectionData,
     getDisplaySystemFrameIdentity,
+    beginCollectionFrame,
+    endCollectionFrame,
     store,
     storeFrame: (frameToStore, options = {}) => store(
       options.fallbackChannel || frameToStore?.outputChannel || 'sit',
       frameToStore,
+      options,
     ),
-    storeBack: (frameToStore) => store('back', frameToStore),
-    storeHead: (frameToStore) => store('head', frameToStore),
-    storeSit: (frameToStore) => store('sit', frameToStore),
+    storeBack: (frameToStore, options) => store('back', frameToStore, options),
+    storeHead: (frameToStore, options) => store('head', frameToStore, options),
+    storeSit: (frameToStore, options) => store('sit', frameToStore, options),
   };
 }
 

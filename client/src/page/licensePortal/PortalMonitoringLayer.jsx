@@ -6,7 +6,7 @@ import './PortalMonitoring.css';
 import { trackUsage, setUsageSystemContext } from '../../services/usageAnalytics';
 
 /** 真实画布从当前预览投影接续；直接模式保持列表原位，不先放大装饰场景。 */
-export default function PortalMonitoringLayer({ component: MonitoringPage, system, directEntry = false, capturePreview, onPreviewChange, onBack, onSystemChange }) {
+export default function PortalMonitoringLayer({ component: MonitoringPage, system, directEntry = false, capturePreview, onPreviewChange, onBack, onSystemChange, licenseAccess }) {
   const [chartsVisible, setChartsVisible] = useState(true);
   const [toolsHost, setToolsHost] = useState(null);
   const rootRef = useRef(null);
@@ -190,7 +190,7 @@ export default function PortalMonitoringLayer({ component: MonitoringPage, syste
     </nav>
     <div id="portal-monitor-content" ref={contentRef} className="portal-monitor-content" style={{ opacity: 0 }} inert>
       <div className="portal-monitor-floor" aria-hidden="true" />
-      <MonitoringPage portalEmbedded onPortalBack={leave} onPortalSystemChange={onSystemChange}
+      <MonitoringPage portalEmbedded onPortalBack={leave} onPortalSystemChange={onSystemChange} licenseAccess={licenseAccess}
         portalToolsHost={toolsHost} portalChartsVisible={chartsVisible} onPortalChartsToggle={() => setChartsVisible((value) => !value)} />
       <div ref={setToolsHost} className="portal-tools-host" />
     </div>

@@ -34,35 +34,21 @@ const { autoUpdater } = require("electron-updater");
 const { ipcMain, dialog } = require("electron");
 const logger = require("../../backend/common/logger");
 const { recordBusinessEvent } = require('../../backend/common/businessEvents');
+const { describeUpdaterError, createUpdaterLogger } = require('./updaterErrors');
 
+/** Read the transport error only for the bounded retry decision. */
 function getUpdaterErrorMessage(error) {
-  return error && error.message ? error.message : String(error || "鏈煡鏇存柊閿欒");
+  return error && error.message ? error.message : String(error || '未知更新错误');
 }
 
+/** Only retry the known truncated-response failure once. */
 function isContentLengthMismatchError(error) {
   return getUpdaterErrorMessage(error).includes("ERR_CONTENT_LENGTH_MISMATCH");
 }
 
+/** Delay the single retry without blocking Electron's event loop. */
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function normalizeUpdaterErrorMessage(error) {
-  const raw = getUpdaterErrorMessage(error);
-
-  if (raw.includes("ERR_CHECKSUM_MISMATCH") || raw.includes("sha512 checksum mismatch")) {
-    return "更新包校验失败：服务器上的 latest-mac.yml 和实际 zip 文件不一致，请重新上传更新包后再试。";
-  }
-
-  if (raw.includes("ERR_CONTENT_LENGTH_MISMATCH")) {
-    return "更新服务器返回的文件长度与响应头不一致（ERR_CONTENT_LENGTH_MISMATCH）。这通常是服务器、CDN 或代理缓存异常，请重新上传更新文件、清理缓存后再试。";
-  }
-
-  if (raw.includes("Code signature at URL") && raw.includes("did not pass validation")) {
-    return "更新安装失败：当前电脑里的 Shroom 不是同一条正式签名链，不能直接自动升级。请先手动安装一次最新正式 DMG 到 /Applications，后续版本再走自动更新。";
-  }
-
-  return raw;
 }
 
 class AppUpdater {
@@ -73,9 +59,11 @@ class AppUpdater {
    * @param {boolean} options.autoInstallOnAppQuit - 退出时自动安装（默认 true）
    * @param {number} options.checkInterval - 自动检查间隔（ms，默认 4 小时）
    * @param {string} options.feedUrl - 自定义更新服务器 URL（可选）
+   * @param {string} options.platform - 运行平台，默认使用 process.platform
    */
   constructor(mainWindow, options = {}) {
     this.mainWindow = mainWindow;
+    this.platform = options.platform || process.platform;
     this.checkInterval = options.checkInterval || 4 * 60 * 60 * 1000;
     this._timer = null;
     this._startupCheckTimer = null;
@@ -87,7 +75,7 @@ class AppUpdater {
     // 配置 autoUpdater
     autoUpdater.autoDownload = options.autoDownload || false;
     autoUpdater.autoInstallOnAppQuit = options.autoInstallOnAppQuit !== false;
-    autoUpdater.logger = logger;
+    autoUpdater.logger = createUpdaterLogger(logger, this.platform);
 
     // 如果有自定义更新服务器
     if (options.feedUrl) {
@@ -111,11 +99,11 @@ class AppUpdater {
   _bindEvents() {
     // 检查更新出错
     autoUpdater.on("error", (err) => {
-      const message = normalizeUpdaterErrorMessage(err);
-      logger.error("[Updater] 更新检查失败:", message);
+      const failure = describeUpdaterError(err, this.platform);
+      logger.error("[Updater] 安装包更新失败:", failure);
       this._sendStatus({
         type: "update-error",
-        message,
+        ...failure,
       });
     });
 
@@ -185,7 +173,7 @@ class AppUpdater {
         .then(({ response }) => {
           if (response === 0) {
             this.installDownloadedUpdate().catch((err) => {
-              logger.error("[Updater] installDownloadedUpdate failed:", normalizeUpdaterErrorMessage(err));
+              logger.error("[Updater] installDownloadedUpdate failed:", describeUpdaterError(err, this.platform));
             });
           }
         });
@@ -205,19 +193,21 @@ class AppUpdater {
         switch (data?.action) {
           case "checkForUpdate":
             logger.info("[Updater] 收到前端检查更新请求");
-            return this.checkForUpdates();
+            return await this.checkForUpdates();
           case "downloadUpdate":
             logger.info("[Updater] 收到前端下载更新请求");
-            return autoUpdater.downloadUpdate();
+            return await autoUpdater.downloadUpdate();
           case "installUpdate":
             logger.info("[Updater] 收到前端安装更新请求");
-            return this.installDownloadedUpdate();
+            return await this.installDownloadedUpdate();
           default:
             return null;
         }
       } catch (err) {
-        const message = normalizeUpdaterErrorMessage(err);
-        logger.error("[Updater] update-command failed:", message);
+        const failure = describeUpdaterError(err, this.platform);
+        logger.error("[Updater] update-command failed:", failure);
+        const { message } = failure;
+        this._sendStatus({ type: 'update-error', ...failure });
         throw new Error(message);
       }
     });
@@ -227,6 +217,11 @@ class AppUpdater {
    * 向渲染进程发送更新状态
    */
   _sendStatus(data) {
+    if (data.type === 'update-error') {
+      const fingerprint = `${data.code}:${data.httpStatus || ''}`;
+      if (this._lastError?.fingerprint === fingerprint && Date.now() - this._lastError.at < 1000) return;
+      this._lastError = { fingerprint, at: Date.now() };
+    } else if (data.type === 'checking-for-update') this._lastError = null;
     if (data.type === 'update-downloaded') this._downloadedVersion = data.version;
     const observed = {
       'checking-for-update': ['check', 'unknown'], 'update-available': ['update_available', 'success'],
@@ -235,7 +230,7 @@ class AppUpdater {
     }[data.type];
     if (observed) recordBusinessEvent(data.type === 'checking-for-update' ? 'feature_attempted' : 'usage_session_summary', {
       featureId: 'software_update', action: observed[0], result: observed[1],
-      ...(data.type === 'update-error' ? { errorCode: 'SOFTWARE_UPDATE_FAILED' } : {}) });
+      ...(data.type === 'update-error' ? { errorCode: data.code || 'SOFTWARE_UPDATE_FAILED' } : {}) });
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send("update-status", data);
     }
@@ -276,12 +271,12 @@ class AppUpdater {
         await this._beforeInstall();
       }
     } catch (err) {
-      const message = normalizeUpdaterErrorMessage(err);
+      const failure = describeUpdaterError(err, this.platform);
       this._installRequested = false;
-      logger.error("[Updater] Failed to prepare application shutdown:", message);
+      logger.error("[Updater] Failed to prepare application shutdown:", failure);
       this._sendStatus({
         type: "update-error",
-        message,
+        ...failure,
       });
       throw err;
     }
@@ -297,7 +292,7 @@ class AppUpdater {
 
   _safeCheckForUpdates() {
     return this.checkForUpdates().catch((err) => {
-      logger.error("[Updater] checkForUpdates rejected:", normalizeUpdaterErrorMessage(err));
+      logger.error("[Updater] checkForUpdates rejected:", describeUpdaterError(err, this.platform));
       return null;
     });
   }

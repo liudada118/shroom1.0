@@ -548,7 +548,7 @@ function getChannelHistoryStats(dbRef, date, channelId, logger) {
  * @param {object} logger 日志对象。
  * @returns {Array<object>} 历史行。
  */
-function queryChannelHistoryRows(dbRef, date, channelId, limit, offset = 0, logger) {
+function queryChannelHistoryRows(dbRef, date, channelId, limit, offset = 0, logger, range = {}) {
   if (
     !dbRef
     || !date
@@ -564,12 +564,18 @@ function queryChannelHistoryRows(dbRef, date, channelId, limit, offset = 0, logg
   ensureHistoryIndexes(dbRef, logger);
 
   const params = [date, ...filter.params];
+  let rangeClause = '';
+  for (const [key, column, operator] of [['maxId', 'id', '<='], ['startTimestamp', 'timestamp', '>='], ['endTimestamp', 'timestamp', '<=']]) {
+    if (range[key] == null) continue;
+    if (!Number.isFinite(range[key])) throw new RangeError('历史读取范围无效。');
+    rangeClause += ` AND ${column} ${operator} ?`; params.push(range[key]);
+  }
   params.push(Math.max(1, Math.floor(Number(limit))), Math.max(0, Math.floor(Number(offset) || 0)));
   try {
     return dbAllHistory(
       dbRef,
       `SELECT * FROM matrix
-       WHERE date = ?${filter.clause}
+       WHERE date = ?${filter.clause}${rangeClause}
        ORDER BY id ASC LIMIT ? OFFSET ?`,
       params,
     );

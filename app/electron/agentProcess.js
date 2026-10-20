@@ -9,7 +9,9 @@ const { MAX_FILE_BYTES, IMAGE_EXTENSIONS, imageMime } = require('../../backend/a
 const { readClipboardFiles } = require('./agentClipboard');
 const { recordBusinessEvent } = require('../../backend/common/businessEvents');
 
-const ACTIONS = new Set(['getState', 'listConversations', 'openConversation', 'listAlgorithmRecords', 'setAlgorithmSelection', 'submitAlgorithmData', 'saveSettings', 'saveSyncSettings', 'retryChatSync', 'startTask', 'cancelTask', 'newConversation', 'importFiles', 'importAttachments', 'importClipboard', 'applyProposal', 'restoreProposal']);
+const ACTIONS = new Set(['getState', 'listConversations', 'openConversation', 'listAlgorithmRecords', 'setAlgorithmSelection', 'submitAlgorithmData',
+  'listHistoryRecords', 'setHistorySelection', 'completeHistoryDataRequest', 'cancelHistoryDataRequest',
+  'saveSettings', 'saveSyncSettings', 'retryChatSync', 'clearChatSyncQueue', 'restoreChatSyncQueue', 'startTask', 'cancelTask', 'newConversation', 'importFiles', 'importAttachments', 'importClipboard', 'applyProposal', 'restoreProposal']);
 const trustedWindowOrigins = new WeakMap();
 
 /** 由主进程加载已核验的前端地址，并绑定该窗口唯一可信的 Agent 来源。 */
@@ -64,8 +66,8 @@ function createAgentProcess({ electron, root, getWindow, timeoutMs = 20000, back
     onStatus: publishSyncStatus, appVersion: electron.app?.getVersion?.(),
     fetchImpl: electron.net ? (url, options) => electron.net.fetch(url, options) : globalThis.fetch });
 
-  /** 向当前主窗口发布事件；窗口关闭后不继续发送。 */
-  function emit(event) {
+  /** 向当前主窗口发布事件；初始化和模型设置快照只更新界面，不生成聊天上传。 */
+  function emit(event, { observeSync = true } = {}) {
     if (event.type === 'state') {
       for (const task of event.state?.conversation?.tasks || []) {
         const liveTask = observedTasks.has(task.id) || ['running', 'verifying'].includes(task.status);
@@ -94,7 +96,7 @@ function createAgentProcess({ electron, root, getWindow, timeoutMs = 20000, back
           ...(task.error?.code ? { errorCode: task.error.code } : {}) });
       }
       lastState = event.state;
-      chatSync.observe(lastState);
+      if (observeSync) chatSync.observe(lastState);
       event = { ...event, state: publicState(lastState) };
     }
     const window = getWindow();
@@ -116,7 +118,7 @@ function createAgentProcess({ electron, root, getWindow, timeoutMs = 20000, back
         requests.delete(id);
         reject(agentError('AGENT_PROCESS_TIMEOUT', 'Agent 进程响应超时，请重新打开面板检查任务状态。'));
       }, limit);
-      requests.set(id, { resolve, reject, timer, child: processRef });
+      requests.set(id, { resolve, reject, timer, child: processRef, action });
       try { processRef.postMessage({ id, action, payload }); }
       catch {
         clearTimeout(timer); requests.delete(id);
@@ -144,7 +146,11 @@ function createAgentProcess({ electron, root, getWindow, timeoutMs = 20000, back
           request(processRef, 'initialize', { root, settings: settings.getPrivate(), httpBaseUrl: backendEndpoints.httpBaseUrl, wsUrl: backendEndpoints.wsUrl }).then(() => {
             clearTimeout(timer); resolve(processRef);
           }, (error) => { clearTimeout(timer); reject(error); processRef.kill(); });
-        } else if (message?.event) emit(message.event);
+        } else if (message?.event) {
+          const settingsSnapshot = [...requests.values()].some((pending) => pending.child === processRef
+            && (pending.action === 'initialize' || pending.action === 'configure'));
+          emit(message.event, { observeSync: !settingsSnapshot });
+        }
         else if (message?.id) {
           const pending = requests.get(message.id);
           if (!pending || pending.child !== processRef) return;
@@ -254,29 +260,37 @@ function createAgentProcess({ electron, root, getWindow, timeoutMs = 20000, back
     if (action === 'saveSyncSettings') {
       syncSettings.save(payload);
       chatSync.reconfigure();
-      if (lastState) chatSync.observe(lastState);
       publishSyncStatus();
       return { settings: syncSettings.getPublic(), status: chatSync.getStatus() };
     }
     if (action === 'retryChatSync') {
-      if (lastState) chatSync.observe(lastState);
       chatSync.retry();
       return chatSync.getStatus();
     }
+    if (action === 'clearChatSyncQueue' || action === 'restoreChatSyncQueue') {
+      const status = action === 'clearChatSyncQueue' ? chatSync.clearPending({ includeLegacy: payload.includeLegacy })
+        : chatSync.restorePending({ queueId: payload.queueId, confirmed: payload.confirmed });
+      publishSyncStatus(); return status;
+    }
     const processRef = await ensureStarted();
     if (action === 'getState') {
+      // ⚠️ 设置与清理后界面也会刷新；读取不能把旧会话重新加入新凭据的上传队列。
       const state = await request(processRef, action);
       lastState = state;
-      chatSync.observe(state);
       return publicState(state);
     }
     if (action === 'listConversations') return request(processRef, action);
-    if (action === 'cancelTask') return request(processRef, action, { taskId: payload.taskId });
+    if (action === 'cancelTask' || action === 'cancelHistoryDataRequest') return request(processRef, action, { taskId: payload.taskId });
     if (actionPending) throw agentError('AGENT_BUSY', '正在处理上一个操作，请稍候。');
     actionPending = true;
     try {
       if (action === 'listAlgorithmRecords') return await request(processRef, action, { offset: payload.offset });
       if (action === 'setAlgorithmSelection') return await request(processRef, action, { selection: payload.selection });
+      if (action === 'listHistoryRecords') return await request(processRef, action, { offset: payload.offset });
+      if (action === 'setHistorySelection') return await request(processRef, action, { selection: payload.selection });
+      if (action === 'completeHistoryDataRequest') return await request(processRef, action, {
+        taskId: payload.taskId, requestId: payload.requestId, selection: payload.selection,
+      });
       if (action === 'submitAlgorithmData') return await request(processRef, action, {
         taskId: payload.taskId, requestId: payload.requestId, selection: payload.selection,
       });

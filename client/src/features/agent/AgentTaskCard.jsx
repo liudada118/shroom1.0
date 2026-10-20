@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { trackUsage } from '../../services/usageAnalytics';
 import { TASK_LABELS, TOOL_LABELS, agentErrorMessage, proposalPreview } from './agentState';
 import AgentTrainingReport from './AgentTrainingReport';
+import AgentHistoryReport from './AgentHistoryReport';
 
 /** 展示任务的真实步骤、配置预览和应用后的恢复入口。 */
 export default function AgentTaskCard({ task, disabled, pendingAction, onProposalAction, algorithmDataContent }) {
@@ -35,6 +36,7 @@ export default function AgentTaskCard({ task, disabled, pendingAction, onProposa
     {task.error && <p className="shroom-agent-inline-error" role="alert">{agentErrorMessage(task.error)}</p>}
     {task.status === 'uncertain' && <p className="shroom-agent-hint">执行中断，部分更改可能已生效。请先检查系统现状，再决定下一步。</p>}
     {algorithmDataContent}
+    {(task.analysisRuns || []).map((report) => <AgentHistoryReport key={report.id} report={report} />)}
     {(task.proposals || []).map((proposal) => {
       const key = `${task.id}:${proposal.id}`;
       const pending = pendingAction === key;

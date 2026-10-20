@@ -11,6 +11,63 @@ const EVENT_NAMES = new Set(['app_session_started', 'feature_exposed', 'feature_
 const PROPERTY_NAMES = new Set(['featureId', 'systemType', 'systemOrigin', 'operationId', 'result', 'durationMs', 'count', 'format',
   'errorCode', 'connectionType', 'mode', 'algorithmId', 'module', 'action', 'errorType', 'severity', 'message', 'stack']);
 const IDENTIFIER = /^[A-Za-z0-9_.:-]{1,80}$/;
+const FAILURE_CODES = {
+  400: new Set(['INVALID_PAYLOAD', 'INVALID_EVENT', 'INVALID_JSON']),
+  401: new Set(['INVALID_CREDENTIAL', 'INVALID_LICENSE', 'LICENSE_INVALID']),
+  403: new Set(['LICENSE_UNAVAILABLE', 'LICENSE_CUSTOMER_REQUIRED', 'LICENSE_CUSTOMER_INACTIVE', 'PRODUCT_MISMATCH', 'LICENSE_EXPIRED', 'LICENSE_REVOKED']),
+  409: new Set(['EVENT_CONTENT_CONFLICT']), 413: new Set(['BATCH_TOO_LARGE', 'PAYLOAD_TOO_LARGE']),
+  415: new Set(['JSON_REQUIRED', 'ENCODING_UNSUPPORTED']), 429: new Set(['RATE_LIMITED']),
+  503: new Set(['STORAGE_UNAVAILABLE', 'RECEIVE_TIMEOUT']),
+};
+
+/** Read at most 16 KiB of JSON and cancel oversized or unusable response bodies. */
+async function readUsageResponse(response) {
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error('USAGE_RESPONSE_INVALID');
+  const chunks = []; let bytes = 0;
+  try {
+    while (true) {
+      const item = await reader.read(); if (item.done) break;
+      bytes += item.value.byteLength;
+      if (bytes > 16384) throw new Error('USAGE_RESPONSE_TOO_LARGE');
+      chunks.push(Buffer.from(item.value));
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('USAGE_RESPONSE_INVALID');
+    return body;
+  } finally { await reader.cancel().catch(() => {}); }
+}
+
+/** Separate schema, authorization and service failures without exposing server-provided text. */
+function usageHttpFailure(status, body) {
+  status = Number.isInteger(status) && status >= 400 && status <= 599 ? status : 0;
+  const allowed = FAILURE_CODES[status], candidate = body?.error;
+  const code = typeof candidate === 'string' && allowed?.has(candidate) ? candidate : status ? `USAGE_HTTP_${status}` : 'USAGE_HTTP_REJECTED';
+  const blocked = status >= 400 && status < 500 && status !== 429;
+  const message = {
+    400: '使用统计格式与服务器接收规则不兼容，已暂停自动上传。请管理员检查客户端与服务端版本；待上传记录仍保留。',
+    401: '使用统计上传未通过身份验证，已暂停自动上传。请管理员检查软件密钥登记与状态；待上传记录仍保留。',
+    403: '当前授权不允许上传使用统计，已暂停自动上传。请管理员检查授权与客户关联；待上传记录仍保留。',
+    409: '使用统计记录与服务器已有内容冲突，已暂停自动上传。请管理员核查记录；待上传记录仍保留。',
+    413: '使用统计批次超出服务器接收上限，已暂停自动上传。请管理员检查接收限制；待上传记录仍保留。',
+    429: '使用统计上传频率受限，稍后自动重试；待上传记录仍保留。',
+  }[status] || (blocked ? '使用统计接口暂不接受当前请求，已暂停自动上传。请管理员检查接口配置；待上传记录仍保留。'
+    : '使用统计服务暂不可用，将自动重试；待上传记录仍保留。');
+  return { code, message, httpStatus: status || null, blocked };
+}
+
+/** Keep only bounded release identifiers; runtime diagnostics never contain paths or configurations. */
+function normalizeRuntimeVersions(input) {
+  const result = {};
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return result;
+  for (const name of ['frontendReleaseId', 'frontendBuildId', 'hostContract']) {
+    if (Number.isSafeInteger(input[name]) && input[name] > 0) result[name] = input[name];
+  }
+  for (const name of ['systemPackageVersion', 'serverContractVersion']) {
+    if (typeof input[name] === 'string' && /^[A-Za-z0-9_.-]{1,80}$/.test(input[name])) result[name] = input[name];
+  }
+  return result;
+}
 
 /** Compare numeric release versions when confirming that an installer handoff actually took effect. */
 function versionReached(actual, target) {
@@ -54,8 +111,9 @@ function normalizeEvent(input, identity, secrets = []) {
     format: ['csv'], connectionType: ['serial', 'halow', 'unknown'], mode: ['realtime', 'playback'], severity: ['warning', 'error', 'fatal'] };
   for (const [name, allowed] of Object.entries(enums)) if (properties[name] !== undefined && !allowed.includes(properties[name])) throw new Error('USAGE_EVENT_INVALID');
   if (properties.systemType && properties.systemOrigin !== 'builtin') properties.systemType = `${properties.systemOrigin || 'custom'}.${createHash('sha256').update(`${identity.installationId}:${identity.scope}:${properties.systemType}`).digest('hex').slice(0, 16)}`;
-  const { scope, ...publicIdentity } = identity;
-  const event = { schemaVersion: 1, eventId: randomUUID(), ...publicIdentity, occurredAt: new Date().toISOString(), eventName: input.eventName, properties };
+  const { scope, runtimeVersions: rawVersions, ...publicIdentity } = identity;
+  const runtimeVersions = normalizeRuntimeVersions(rawVersions);
+  const event = { schemaVersion: 1, eventId: randomUUID(), ...publicIdentity, ...(Object.keys(runtimeVersions).length ? { runtimeVersions } : {}), occurredAt: new Date().toISOString(), eventName: input.eventName, properties };
   if (Buffer.byteLength(JSON.stringify(event)) > 4096) throw new Error('USAGE_EVENT_TOO_LARGE');
   return event;
 }
@@ -63,13 +121,14 @@ function normalizeEvent(input, identity, secrets = []) {
 /** Revalidate persisted queues instead of trusting arbitrary JSON copied into the application directory. */
 function restoreEvent(event, installationId, secrets) {
   const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
-  const fields = new Set(['schemaVersion', 'eventId', 'installationId', 'sessionId', 'appVersion', 'environment', 'occurredAt', 'eventName', 'properties']);
+  const fields = new Set(['schemaVersion', 'eventId', 'installationId', 'sessionId', 'appVersion', 'environment', 'runtimeVersions', 'occurredAt', 'eventName', 'properties']);
   const occurred = Date.parse(event?.occurredAt);
   if (!event || Object.keys(event).some(name => !fields.has(name)) || event.schemaVersion !== 1
     || event.installationId !== installationId || !uuid.test(event.eventId) || !uuid.test(event.sessionId)
     || !/^\d+\.\d+\.\d+$/.test(event.appVersion) || !['production', 'development', 'test'].includes(event.environment)
     || !Number.isFinite(occurred) || occurred < Date.now() - 30 * 86400000 || occurred > Date.now() + 60000) throw new Error('USAGE_QUEUE_INVALID');
-  const normalized = normalizeEvent(event, { installationId, sessionId: event.sessionId, appVersion: event.appVersion, environment: event.environment, scope: '' }, secrets);
+  const normalized = normalizeEvent(event, { installationId, sessionId: event.sessionId, appVersion: event.appVersion, environment: event.environment, runtimeVersions: event.runtimeVersions, scope: '' }, secrets);
+  if (event.runtimeVersions !== undefined && JSON.stringify(normalized.runtimeVersions) !== JSON.stringify(event.runtimeVersions)) throw new Error('USAGE_QUEUE_INVALID');
   if (event.properties.systemType && event.properties.systemOrigin !== 'builtin') {
     if (!/^(custom|copy)\.[a-f0-9]{16}$/.test(event.properties.systemType)) throw new Error('USAGE_QUEUE_INVALID');
     normalized.properties.systemType = event.properties.systemType;
@@ -81,7 +140,7 @@ function restoreEvent(event, installationId, secrets) {
 
 /** Persist isolated customer queues and upload only confirmed events, without delaying sensor processing. */
 function createUsageAnalytics({ root, appVersion, environment, getLicenseKey, getSecrets = () => [], fetchImpl = globalThis.fetch,
-  endpoint = ENDPOINT, onStatus = () => {}, defaultEnabled = true }) {
+  endpoint = ENDPOINT, onStatus = () => {}, defaultEnabled = true, getRuntimeVersions = () => ({}) }) {
   const directory = path.join(root, 'usage-analytics'), settingsFile = path.join(directory, 'settings.json');
   const installationFile = path.join(directory, 'update-install.json');
   let storageError = false;
@@ -95,6 +154,7 @@ function createUsageAnalytics({ root, appVersion, environment, getLicenseKey, ge
   const sessionId = randomUUID(), sessionStart = performance.now();
   let scope = '', queue = [], chain = Promise.resolve(), sending = false, stopped = false, failureCount = 0, nextRetryAt = 0,
     lastSuccessAt = null, lastError = storageError ? '使用统计目录不可写，业务功能不受影响。' : null, blocked = false, dropped = 0, active = null, writeFailed = storageError;
+  let lastErrorCode = storageError ? 'USAGE_STORAGE_UNAVAILABLE' : null, httpStatus = null;
   const repeatedErrors = new Map();
   const pendingWrites = new Map();
   let writing = false;
@@ -105,7 +165,7 @@ function createUsageAnalytics({ root, appVersion, environment, getLicenseKey, ge
     try { key = String(getLicenseKey() || '').trim(); } catch { return ''; }
     const next = key ? createHash('sha256').update(key).digest('hex') : '';
     if (next === scope) return key;
-    active?.abort(); scope = next; queue = []; repeatedErrors.clear(); blocked = false; lastError = null; nextRetryAt = 0;
+    active?.abort(); scope = next; queue = []; repeatedErrors.clear(); blocked = false; lastError = null; lastErrorCode = null; httpStatus = null; nextRetryAt = 0;
     if (scope) {
       try {
         const file = path.join(directory, `${scope}.json`), stat = fs.statSync(file);
@@ -148,7 +208,10 @@ function createUsageAnalytics({ root, appVersion, environment, getLicenseKey, ge
   }
 
   /** Expose only the switch, delivery state and counts. */
-  function status() { return { enabled: settings.enabled, queued: queue.length, sending, lastSuccessAt, lastError, nextRetryAt, dropped }; }
+  function status() { return { enabled: settings.enabled, queued: queue.length, sending, lastSuccessAt, lastError, lastErrorCode, httpStatus, nextRetryAt, dropped,
+    noticePending: settings.noticeVersion !== 1, noticeVersion: 1 }; }
+  /** Snapshot trusted host versions without allowing diagnostics failure to block business events. */
+  function runtimeVersions() { try { return normalizeRuntimeVersions(getRuntimeVersions()); } catch { return {}; } }
   /** Notify the settings panel without exposing credentials or customer content. */
   function publish() { try { onStatus(status()); } catch { /* An unavailable UI is harmless. */ } }
 
@@ -158,7 +221,7 @@ function createUsageAnalytics({ root, appVersion, environment, getLicenseKey, ge
     const key = selectScope();
     if (!key) return false;
     try {
-      const event = normalizeEvent(input, { installationId: settings.installationId, sessionId, appVersion, environment, scope }, [...getSecrets(), key]);
+      const event = normalizeEvent(input, { installationId: settings.installationId, sessionId, appVersion, environment, scope, runtimeVersions: runtimeVersions() }, [...getSecrets(), key]);
       if (event.eventName === 'error_reported') {
         const fingerprint = createHash('sha256').update(JSON.stringify(event.properties)).digest('hex');
         const previous = repeatedErrors.get(fingerprint);
@@ -184,7 +247,7 @@ function createUsageAnalytics({ root, appVersion, environment, getLicenseKey, ge
     for (const entry of repeatedErrors.values()) {
       if (!entry.count) continue;
       const event = normalizeEvent({ eventName: 'error_reported', properties: { ...entry.properties, count: entry.count } },
-        { installationId: settings.installationId, sessionId, appVersion, environment, scope }, [...getSecrets(), key]);
+        { installationId: settings.installationId, sessionId, appVersion, environment, scope, runtimeVersions: runtimeVersions() }, [...getSecrets(), key]);
       entry.count = 0; queue.push(event); changed = true;
       if (queue.length > 2000) { queue.shift(); dropped++; }
     }
@@ -195,37 +258,39 @@ function createUsageAnalytics({ root, appVersion, environment, getLicenseKey, ge
   async function flush(force = false) {
     if (stopped || !settings.enabled || sending || blocked || (!force && Date.now() < nextRetryAt)) return status();
     const key = selectScope();
-    if (!/^[A-Za-z0-9+/=]{32,8192}$/.test(key)) { if (key) lastError = '使用统计需要有效的软件密钥。'; publish(); return status(); }
+    if (!/^[A-Za-z0-9+/=]{32,8192}$/.test(key)) { if (key) { lastError = '使用统计需要有效的软件密钥。'; lastErrorCode = 'USAGE_CREDENTIAL_INVALID'; httpStatus = null; } publish(); return status(); }
     if (!queue.length) return status();
     sending = true; publish();
     const epoch = scope, batch = queue.slice(0, 50), controller = new AbortController(); active = controller;
     const timeout = setTimeout(() => controller.abort(), 12000); timeout.unref?.();
+    let failure = null;
     try {
       await chain;
-      if (writeFailed) throw new Error('使用统计暂未保存，将在恢复后重试。');
+      if (writeFailed) {
+        failure = { code: 'USAGE_STORAGE_UNAVAILABLE', message: '使用统计暂未保存，将在恢复后重试。' };
+        throw new Error('USAGE_STORAGE_UNAVAILABLE');
+      }
       const response = await fetchImpl(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `License ${key}` },
         body: JSON.stringify({ schemaVersion: 1, events: batch }), signal: controller.signal, redirect: 'error' });
       if (scope !== epoch || stopped || !settings.enabled) return status();
       if (!response.ok) {
-        blocked = response.status >= 400 && response.status < 500 && response.status !== 429;
-        throw new Error(`使用统计上传暂不可用（HTTP ${response.status}）${blocked ? '，请检查密钥后重试' : '，将自动重试'}。`);
+        const body = await readUsageResponse(response).catch(() => null);
+        if (scope !== epoch || stopped || !settings.enabled) return status();
+        failure = usageHttpFailure(response.status, body); blocked = failure.blocked;
+        throw new Error('USAGE_HTTP_REJECTED');
       }
-      const reader = response.body.getReader(), chunks = []; let bytes = 0;
-      try {
-        while (true) {
-          const item = await reader.read(); if (item.done) break;
-          bytes += item.value.byteLength;
-          if (bytes > 16384) throw new Error('上传确认无效，将自动重试。');
-          chunks.push(Buffer.from(item.value));
-        }
-      } finally { await reader.cancel().catch(() => {}); }
-      const body = Buffer.concat(chunks).toString('utf8');
-      const ack = JSON.parse(body), ids = new Set(batch.map(event => event.eventId));
-      if (ack.accepted !== true || !Array.isArray(ack.eventIds) || ack.eventIds.length !== ids.size || ack.eventIds.some(id => !ids.has(id)) || new Set(ack.eventIds).size !== ids.size) throw new Error('上传确认无效，将自动重试。');
+      failure = { code: 'USAGE_RESPONSE_INVALID', message: '上传确认无效，将自动重试；待上传记录仍保留。', httpStatus: response.status };
+      const ack = await readUsageResponse(response), ids = new Set(batch.map(event => event.eventId));
+      if (scope !== epoch || stopped || !settings.enabled) return status();
+      if (ack.accepted !== true || !Array.isArray(ack.eventIds) || ack.eventIds.length !== ids.size || ack.eventIds.some(id => !ids.has(id)) || new Set(ack.eventIds).size !== ids.size) throw new Error('USAGE_RESPONSE_INVALID');
       queue = queue.filter(event => !ids.has(event.eventId));
-      await persist(); lastSuccessAt = new Date().toISOString(); lastError = null; failureCount = 0; nextRetryAt = 0;
-    } catch (error) {
-      if (scope === epoch && settings.enabled && !stopped) { failureCount++; nextRetryAt = Date.now() + Math.min(300000, 1000 * 2 ** Math.min(failureCount, 18)); lastError = error.message.startsWith('使用统计') || error.message.startsWith('上传确认') ? error.message : '使用统计上传失败，将自动重试。'; }
+      await persist(); lastSuccessAt = new Date().toISOString(); lastError = null; lastErrorCode = null; httpStatus = null; failureCount = 0; nextRetryAt = 0;
+    } catch {
+      if (scope === epoch && settings.enabled && !stopped) {
+        failureCount++; nextRetryAt = blocked ? 0 : Date.now() + Math.min(300000, 1000 * 2 ** Math.min(failureCount, 18));
+        lastError = failure?.message || '使用统计上传失败，将自动重试；待上传记录仍保留。';
+        lastErrorCode = failure?.code || 'USAGE_UPLOAD_FAILED'; httpStatus = failure?.httpStatus || null;
+      }
     } finally { clearTimeout(timeout); sending = false; active = null; publish(); }
     return status();
   }
@@ -237,13 +302,20 @@ function createUsageAnalytics({ root, appVersion, environment, getLicenseKey, ge
     await fs.promises.writeFile(settingsFile, JSON.stringify(nextSettings), { mode: 0o600 });
     settings = nextSettings;
     if (!enabled) {
-      await chain; queue = []; repeatedErrors.clear(); blocked = false; lastError = null;
+      await chain; queue = []; repeatedErrors.clear(); blocked = false; lastError = null; lastErrorCode = null; httpStatus = null;
       try {
         await fs.promises.unlink(installationFile).catch(() => {});
         for (const name of await fs.promises.readdir(directory)) if (/^[a-f0-9]{64}\.json$/.test(name)) await fs.promises.unlink(path.join(directory, name));
       } catch { lastError = '上报已关闭，部分待传文件暂未清除；请检查目录权限后再次关闭。'; }
     } else { selectScope(); record({ eventName: 'app_session_started', properties: {} }); }
     publish(); return status();
+  }
+
+  /** Remember that this version of the upload explanation has been displayed, independently of opt-out. */
+  async function acknowledgeNotice() {
+    const nextSettings = { ...settings, noticeVersion: 1 };
+    await fs.promises.writeFile(settingsFile, JSON.stringify(nextSettings), { mode: 0o600 });
+    settings = nextSettings; publish(); return status();
   }
 
   const unsubscribe = subscribeBusinessEvents(record);
@@ -274,7 +346,7 @@ function createUsageAnalytics({ root, appVersion, environment, getLicenseKey, ge
     record({ eventName: 'usage_session_summary', properties: { action: 'session', durationMs: Math.min(86400000, performance.now() - sessionStart) } });
     stopped = true; active?.abort(); clearInterval(timer); unsubscribe(); await chain;
   }
-  return { record, flush, status, setEnabled, markInstallRequested, retry: () => { blocked = false; nextRetryAt = 0; return flush(true); }, dispose };
+  return { record, flush, status, setEnabled, acknowledgeNotice, markInstallRequested, retry: () => { blocked = false; nextRetryAt = 0; return flush(true); }, dispose };
 }
 
-module.exports = { createUsageAnalytics, normalizeEvent, restoreEvent, scrub, EVENT_NAMES };
+module.exports = { createUsageAnalytics, normalizeEvent, restoreEvent, scrub, EVENT_NAMES, normalizeRuntimeVersions };

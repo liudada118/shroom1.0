@@ -56,7 +56,7 @@ function encryption() {
 test('sync settings default enabled, encrypt credentials and clear token on endpoint changes', (t) => {
   const root = temporaryRoot(t), safeStorage = encryption();
   const settings = createAgentSyncSettings({ root, safeStorage });
-  assert.deepEqual(settings.getPublic(), { enabled: true, endpoint: DEFAULT_CHAT_SYNC_ENDPOINT, hasToken: false, licenseAuthAvailable: true });
+  assert.deepEqual(settings.getPublic(), { enabled: true, endpoint: DEFAULT_CHAT_SYNC_ENDPOINT, hasToken: false, licenseAuthAvailable: true, noticeVersion: 1, noticePending: true });
   settings.save({ enabled: true });
   assert.equal(settings.getPrivate().authScheme, 'License');
   settings.save({ enabled: true, endpoint: 'https://example.test/chat', token: 'synthetic-upload-secret' });
@@ -280,6 +280,10 @@ test('401 blocks retained records until configuration changes or manual retry', 
   assert.equal(f.sync.getStatus().pendingCount, 1);
   assert.equal(f.sync.getStatus().lastError.message.includes('private server details'), false);
   f.setConfig({ token: 'replacement-token' }); f.sync.reconfigure();
+  assert.equal(calls, 1, 'a different credential never inherits the old queue automatically');
+  const previous = f.sync.getStatus().recoverableQueues[0];
+  assert.equal(previous.count, 1);
+  f.sync.restorePending({ queueId: previous.queueId, confirmed: true });
   await until(() => f.sync.getStatus().pendingCount === 0);
   assert.equal(calls, 2);
 });
@@ -325,12 +329,70 @@ test('switching endpoint isolates queued history and aborts the previous request
   f.sync.observe(state('current conversation', 'current-conversation'));
   f.setConfig({ endpoint: 'https://other.invalid/chat', token: 'other-token' });
   f.sync.reconfigure();
+  assert.equal(sent.filter(item => item.url.includes('other.invalid')).length, 0, 'changing receiver must not re-enqueue the previous conversation');
+  f.sync.observe(state('current conversation', 'current-conversation'));
   await until(() => f.sync.getStatus().pendingCount === 0);
   assert.equal(oldRequest.signal.aborted, true);
   const newDestination = sent.filter((item) => item.url.includes('other.invalid'));
   assert.equal(newDestination.length, 1);
   assert.equal(newDestination[0].event.conversationId, 'current-conversation');
   assert.equal(fs.readdirSync(path.join(f.root, 'chat-sync', 'outboxes')).length, 2);
+});
+
+test('upload notice follows receiver and credential changes without changing an explicit pause', t => {
+  const root = temporaryRoot(t), safeStorage = encryption();
+  const settings = createAgentSyncSettings({ root, safeStorage });
+  settings.save({ enabled: false, acknowledgeNotice: true });
+  assert.equal(settings.getPublic().noticePending, false);
+  const restarted = createAgentSyncSettings({ root, safeStorage });
+  assert.equal(restarted.getPublic().enabled, false);
+  assert.equal(restarted.getPublic().noticePending, false);
+  restarted.save({ endpoint: 'https://custom.invalid/chat', token: 'customer-a-token' });
+  assert.equal(restarted.getPublic().noticePending, true);
+  restarted.save({ acknowledgeNotice: true });
+  restarted.save({ token: 'customer-b-token' });
+  assert.equal(restarted.getPublic().noticePending, true);
+  assert.equal(restarted.getPublic().enabled, false);
+});
+
+test('legacy address-only queues require explicit ownership confirmation before recovery', async t => {
+  const { createHash } = require('crypto');
+  const f = fixture(t, { fetchImpl: async () => new Response('{}', { status: 401 }) });
+  f.sync.observe(state('legacy customer data'));
+  await until(() => f.sync.getStatus().state === 'blocked');
+  f.setConfig({ enabled: false }); f.sync.reconfigure();
+  const folder = path.join(f.root, 'chat-sync', 'outboxes');
+  const source = path.join(folder, fs.readdirSync(folder)[0]);
+  const oldId = createHash('sha256').update('https://test.invalid/chat').digest('hex');
+  fs.renameSync(source, path.join(folder, `${oldId}.json`));
+  f.setConfig({ enabled: true, token: 'verified-new-customer-token' }); f.sync.reconfigure();
+  assert.equal(f.sync.getStatus().pendingCount, 0);
+  const previous = f.sync.getStatus().recoverableQueues[0];
+  assert.equal(previous.legacy, true);
+  assert.equal(previous.count, 1);
+  assert.throws(() => f.sync.restorePending({ queueId: oldId }), { code: 'AGENT_SYNC_OWNERSHIP_REQUIRED' });
+  f.sync.restorePending({ queueId: oldId, confirmed: true });
+  await until(() => f.sync.getStatus().state === 'blocked');
+  assert.equal(f.sync.getStatus().pendingCount, 1);
+  assert.equal(fs.existsSync(path.join(folder, `${oldId}.json`)), false);
+});
+
+test('pause exposes pending range and clearing aborts requests without deleting local conversation data', async t => {
+  let active;
+  const f = fixture(t, { fetchImpl: async (_url, init) => { active = init; return new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(new Error('abort')), { once: true })); } });
+  const conversationFile = path.join(f.root, 'local-chat.json'); fs.writeFileSync(conversationFile, 'local chat preserved');
+  f.sync.observe(state('pending message'));
+  await until(() => active);
+  f.setConfig({ enabled: false }); f.sync.reconfigure();
+  assert.equal(f.sync.getStatus().pendingRange.count, 1);
+  assert.ok(f.sync.getStatus().pendingRange.oldestAt);
+  f.sync.clearPending({ includeLegacy: true });
+  assert.equal(active.signal.aborted, true);
+  assert.equal(f.sync.getStatus().pendingCount, 0);
+  assert.equal(fs.readFileSync(conversationFile, 'utf8'), 'local chat preserved');
+  f.setConfig({ enabled: true }); f.sync.reconfigure();
+  f.sync.observe(state('pending message'));
+  assert.equal(f.sync.getStatus().pendingCount, 0, 'unchanged cleared snapshot is not immediately re-enqueued');
 });
 
 test('disabling upload aborts work while preserving pending disk records', async (t) => {

@@ -11,6 +11,8 @@ import {
   resolveMatrixRendererType,
 } from './matrixDisplayModes.js';
 import { normalizeNumMatrixParams } from '../renderers/numMatrix/core/params.js';
+import { deriveGridSize, normalizePointGridParams } from '../renderers/pointGrid/core/params.js';
+import { buildPointGridBasePositions, runPointGridPipeline } from '../renderers/pointGrid/core/pipeline.js';
 
 describe('matrixDisplayModes', () => {
   it('只提供原生矩阵展示形式，默认 3D 点图', () => {
@@ -47,6 +49,62 @@ describe('matrixDisplayModes', () => {
     expect(renderers.find((item) => item.id === 'webglHeatmap').params).toMatchObject({
       dataWidth: 3, dataHeight: 2, minFrameLength: 6, edgeClear: null, mirrorX: false, valueScale: 1,
     });
+  });
+
+  it('规则 32×32 点图只在渲染副本内扩为 64×64，原始输入保持 1024 点', () => {
+    const matrix = { rows: 32, cols: 32 };
+    const input = createDirectionCheckFrame(1024), original = input.slice();
+    const generated = createMatrixDisplayRenderers({ matrix }).find(item => item.id === 'pointGrid');
+    const builtin = createBuiltinMatrixRendererParams('pointGrid', { matrix });
+    for (const params of [normalizePointGridParams(generated.params), builtin]) {
+      for (const channel of [params.sit, params.back]) {
+        expect(channel.num1 * channel.num2).toBe(1024);
+        expect(channel).toMatchObject({ interp: 2, order: 0 });
+        expect(deriveGridSize(channel)).toEqual({ amountX: 64, amountY: 64, total: 4096 });
+        const displayed = runPointGridPipeline(input, channel, 2);
+        expect(displayed).toHaveLength(4096);
+        expect(displayed.every(Number.isFinite)).toBe(true);
+      }
+    }
+    expect(input).toEqual(original);
+    expect(matrix).toEqual({ rows: 32, cols: 32 });
+  });
+
+  it('非方阵只加密显示点，不改变行列与输入点数', () => {
+    const matrix = { rows: 2, cols: 3 }, input = [1, 2, 3, 4, 5, 6];
+    const generated = createMatrixDisplayRenderers({ matrix }).find(item => item.id === 'pointGrid');
+    for (const params of [normalizePointGridParams(generated.params), createBuiltinMatrixRendererParams('pointGrid', { matrix })]) {
+      expect(params.sit).toMatchObject({ num1: 2, num2: 3, interp: 2, order: 0 });
+      expect(deriveGridSize(params.sit)).toEqual({ amountX: 4, amountY: 6, total: 24 });
+      expect(runPointGridPipeline(input, params.sit, 1)).toHaveLength(24);
+    }
+    expect(input).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it('有效物理坐标保持逐点形状和原有点数，不做规则网格插点', () => {
+    const matrix = { rows: 2, cols: 3 };
+    const coordinateMap = [[[0, 0], [2, 0], [8, 1]], [[1, 4], [4, 7], [9, 10]]];
+    const original = coordinateMap.map(row => row.map(point => point.slice()));
+    const generated = createMatrixDisplayRenderers({ matrix, coordinateMap }).find(item => item.id === 'pointGrid');
+    for (const params of [normalizePointGridParams(generated.params), createBuiltinMatrixRendererParams('pointGrid', { matrix, coordinateMap })]) {
+      expect(params.sit).toMatchObject({ num1: 2, num2: 3, interp: 1, order: 0 });
+      expect(params.back).toMatchObject({ interp: 1, order: 0 });
+      const grid = deriveGridSize(params.sit);
+      expect(grid).toEqual({ amountX: 2, amountY: 3, total: 6 });
+      expect(params.points).toEqual(coordinateMap.flat());
+      expect(Array.from(buildPointGridBasePositions({ ...grid, separation: 100, points: params.points })))
+        .toEqual([-90, 0, 100, -50, 0, 100, 70, 0, 80, -70, 0, 20, -10, 0, -40, 90, 0, -100]);
+    }
+    expect(coordinateMap).toEqual(original);
+  });
+
+  it('不完整的物理坐标不会把规则网格误判为保形点位', () => {
+    const context = { matrix: { rows: 2, cols: 3 }, coordinateMap: [[[0, 0]]] };
+    const generated = createMatrixDisplayRenderers(context).find(item => item.id === 'pointGrid');
+    for (const params of [normalizePointGridParams(generated.params), createBuiltinMatrixRendererParams('pointGrid', context)]) {
+      expect(params.points).toBeNull();
+      expect(params.sit).toMatchObject({ num1: 2, num2: 3, interp: 2, order: 0 });
+    }
   });
 
   it('生成方向校验帧并兼容旧 renderer id', () => {

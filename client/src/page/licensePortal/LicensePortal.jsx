@@ -5,6 +5,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import useMainWebSocket from '../../services/ws/useMainWebSocket';
 import { getLicenseKeyFromMessage, hasValidLicenseDate, isExpiredLicenseMessage, isObjectMessage } from '../../services/ws/messages';
+import { readLicenseAccess, isHistoryOnlyLicense } from '../../services/licenseAccess';
 import { commandClient } from '../../services/command/commandClient';
 import { requestJson } from '../../extensions/display-system/api';
 import { registerRuntimeDisplayDefinition } from '../../displays/registry';
@@ -33,6 +34,7 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
   const [params, setParams] = useSearchParams();
   const [accessKey, setAccessKey] = useState('');
   const [scope, setScope] = useState(undefined);
+  const [licenseAccess, setLicenseAccess] = useState(undefined);
   const [phase, setPhase] = useState('idle');
   const [error, setError] = useState('');
   const [runtimeDefinitions, setRuntimeDefinitions] = useState([]);
@@ -133,17 +135,18 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
       activate: (key) => commandClient.execute('license.activate', { key, startTime: Date.now() }),
       switchSystem: (sensorType) => commandClient.execute('sensor.switch', { sensorType }),
       /** 进入公司系统前读取后端已验签、未过期且与当前密钥绑定的目录。 */
-      getManagedIds: async () => {
+      getManagedIds: async (payload) => {
         const status = await requestJson('/api/system-packages/status');
+        if (isHistoryOnlyLicense(readLicenseAccess(payload)) && isHistoryOnlyLicense(readLicenseAccess(status))) return status.historyAvailable || [];
         return (status.available || []).map((item) => item.systemId);
       },
       onPhase: setPhase,
       onError: setError,
       onEntered: enterMonitoringPage,
-      onValidated: (nextScope, key) => {
-        if (key === keyRef.current.trim()) { savedLicenseRef.current.bootstrapped = true; setScope(nextScope); }
+      onValidated: (nextScope, key, access) => {
+        if (key === keyRef.current.trim()) { savedLicenseRef.current.bootstrapped = true; setScope(nextScope); setLicenseAccess(access); }
       },
-      onInvalidated: () => { savedLicenseRef.current.message = null; setScope(undefined); },
+      onInvalidated: () => { savedLicenseRef.current.message = null; setScope(undefined); setLicenseAccess(undefined); },
     });
     return () => { entryRef.current?.cancel(); entryRef.current = null; navigationRef.current?.abort(); };
   }, [enterMonitoringPage]);
@@ -155,7 +158,11 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
       savedLicenseRef.current.key = key;
       if (!keyEditedRef.current && !keyRef.current.trim()) { keyRef.current = key; setAccessKey(key); }
     }
-    const invalid = data.licenseError || data.licenseLocked || data.valid === false || isExpiredLicenseMessage(data);
+    const nextAccess = readLicenseAccess(data);
+    if (nextAccess !== undefined) setLicenseAccess(nextAccess);
+    const historyOnly = isHistoryOnlyLicense(nextAccess);
+    const invalid = data.licenseLocked || (!historyOnly && (data.licenseError || data.valid === false || isExpiredLicenseMessage(data)))
+      || (nextAccess !== undefined && !nextAccess.canReadHistory);
     if (invalid) {
       savedLicenseRef.current.message = null;
       setScope(undefined);
@@ -181,6 +188,7 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
   const handleDisconnect = useCallback(() => {
     savedLicenseRef.current = { key: '', message: null, bootstrapped: false };
     setScope(undefined);
+    setLicenseAccess(undefined);
     cancelNavigation();
     entryRef.current?.cancel();
     setError('与应用的连接已断开，请等待重新连接后重试');
@@ -201,7 +209,7 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
 
   /** On a validated key, refresh the signed company catalog without blocking local systems. */
   useEffect(() => {
-    const requestId = `${accessKey.trim()}:${syncAttempt}`;
+    const requestId = `${accessKey.trim()}:${syncAttempt}:${licenseAccess?.state || 'legacy'}`;
     if (scope === undefined || !connected || !accessKey.trim() || syncedKeyRef.current === requestId) return undefined;
     if (!needsCompanySystemSync(scope)) {
       syncedKeyRef.current = '';
@@ -211,6 +219,13 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
     }
     syncedKeyRef.current = requestId;
     let stopped = false;
+    if (isHistoryOnlyLicense(licenseAccess)) {
+      requestJson('/api/system-packages/status').then(status => {
+        if (!stopped && isHistoryOnlyLicense(readLicenseAccess(status))) setManagedIds(status.historyAvailable || []);
+      }).catch(() => {});
+      setSyncStatus('授权已到期，仅可查看本机已有系统的历史数据；不下载更新。');
+      return () => { stopped = true; };
+    }
     requestJson('/api/system-packages/status').then((status) => {
       if (!stopped) setManagedIds((status.available || []).map((item) => item.systemId));
     }).catch(() => {});
@@ -227,7 +242,7 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
         : `公司系统暂未同步：${failure.message || '请稍后刷新重试'}。已授权的内置系统仍可使用。`);
     });
     return () => { stopped = true; };
-  }, [scope, connected, accessKey, syncAttempt]);
+  }, [scope, connected, accessKey, syncAttempt, licenseAccess]);
 
   useEffect(() => {
     const timer = setInterval(() => setSyncAttempt((value) => value + 1), 6 * 60 * 60 * 1000);
@@ -292,6 +307,7 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
       entryRef.current?.cancel();
       savedLicenseRef.current.message = null;
       setScope(undefined);
+      setLicenseAccess(undefined);
       setManagedIds([]);
       syncedKeyRef.current = '';
     }
@@ -377,6 +393,7 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
       sceneStatus={sceneStatus} onPreview={setPreviewSystem} onHost={setPreviewHost} expanded={sceneExpanded} onReturnToSelector={returnToSelector}
       monitoring={Boolean(monitoringModule)} dataView={!previewVisible} directEntry={directEntry}
       runtime={monitoringModule && <PortalMonitoringLayer component={monitoringModule.default}
+        licenseAccess={licenseAccess}
         system={previewSystem} directEntry={directEntry} capturePreview={capturePreview} onPreviewChange={changePreview} onBack={returnToSelector} onSystemChange={syncMonitoringSystem} />}
       onKeyChange={changeKey} onReload={() => { setReload((value) => value + 1); setSyncAttempt((value) => value + 1); }}
       onValidate={() => entryRef.current?.validate({ key: accessKey, connected })}

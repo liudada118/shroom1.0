@@ -1,0 +1,27 @@
+const assert = require('node:assert/strict');
+const { createLicenseAccessPolicy, createLicenseClock } = require('../../kernel/platform/license/licenseAccessPolicy');
+
+let wall = 1000, mono = 0;
+const clock = createLicenseClock({ now: () => wall, monotonic: () => mono });
+const states = [];
+const policy = createLicenseAccessPolicy({ clock, onChange: state => states.push(state.state), setTimer: () => 1, clearTimer: () => {} });
+policy.update({ ok: true, expiresAt: 2000, licenseExpiresAt: 2000 });
+assert.equal(policy.read().canAcquire, true);
+wall = 500; mono = 1000;
+assert.equal(policy.check().state, 'expired');
+assert.equal(policy.requireAccess('history').canReadHistory, true);
+assert.equal(policy.requireAccess('analyze').canAnalyzeHistory, true);
+assert.throws(() => policy.requireAccess('export'), { code: 'LICENSE_EXPIRED' });
+assert.throws(() => policy.requireAccess('acquire'), { code: 'LICENSE_EXPIRED' });
+assert.deepEqual(states, ['active', 'expired']);
+policy.update({ ok: false, code: 'REVOKED', explicitDenial: true, licenseExpiresAt: 2000 });
+assert.equal(policy.read().canReadHistory, false);
+policy.update({ ok: true, expiresAt: 2100, licenseExpiresAt: 4000 });
+mono = 1200;
+assert.equal(policy.check().canReadHistory, false, 'lease expiry is not normal software-key expiry');
+policy.update({ ok: false, historyAllowed: true, licenseExpiresAt: 2000 });
+assert.equal(policy.check().canAnalyzeHistory, true);
+policy.update(null);
+assert.equal(policy.read().canReadHistory, false);
+policy.dispose();
+console.log('license access policy tests passed');

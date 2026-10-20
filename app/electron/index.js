@@ -28,7 +28,9 @@ if (process.platform === "win32") {
   }
 }
 
-const { openServer, shutdownServer, getWsServer, handleCommand } = require("../../backend/runtime");
+const backendRuntime = require("../../backend/runtime");
+const { openServer, shutdownServer, getWsServer, handleCommand } = backendRuntime;
+const { runtimeVersionSnapshot, checkLicenseOnWake } = require('./runtimeDiagnostics');
 const { AppUpdater } = require("../update/autoUpdater");
 const logger = require('../../backend/common/logger');
 
@@ -67,13 +69,15 @@ function getAppServices() {
   const fetchImpl = require('electron').net.fetch.bind(require('electron').net);
   /** Publish only metadata to the trusted application settings panel. */
   const publish = () => {
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('services:status', servicesStatus);
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('services:status', { ...servicesStatus,
+      runtimeVersions: runtimeVersionSnapshot(backendRuntime, appServices?.frontend) });
   };
-  const frontend = createFrontendCache({ root, appVersion: app.getVersion(), fetchImpl,
+  const frontend = createFrontendCache({ root, appVersion: app.getVersion(), isPackaged: app.isPackaged, fetchImpl,
     onStatus: detail => { servicesStatus.frontend = { ...frontend.status(), ...detail }; publish(); } });
   const usage = createUsageAnalytics({ root, appVersion: app.getVersion(), environment: app.isPackaged ? 'production' : 'development',
     getLicenseKey: require('../../backend/kernel/platform/license/licenseKeyStore').readStoredLicenseKey, fetchImpl,
     getSecrets: () => agentProcess?.getSecrets() || [],
+    getRuntimeVersions: () => runtimeVersionSnapshot(backendRuntime, frontend),
     onStatus: detail => { servicesStatus.usage = detail; publish(); } });
   appServices = { frontend, usage };
   servicesStatus = { frontend: frontend.status(), usage: usage.status() };
@@ -801,10 +805,16 @@ app.whenReady().then(() => {
   ipcMain.handle('services:command', async (event, action, input) => {
     if (!require('./agentProcess').isTrustedAgentSender(event, mainWindow)) throw new Error('应用来源无效。');
     const services = getAppServices();
-    if (action === 'status') return { frontend: { ...servicesStatus.frontend, ...services.frontend.status() }, usage: services.usage.status() };
-    if (action === 'frontendReady') { const value = services.frontend.ready(); servicesStatus.frontend = value; return value; }
+    if (action === 'status') return { frontend: { ...servicesStatus.frontend, ...services.frontend.status() }, usage: services.usage.status(),
+      runtimeVersions: runtimeVersionSnapshot(backendRuntime, services.frontend) };
+    if (action === 'frontendReady') {
+      const value = services.frontend.ready(); servicesStatus.frontend = value;
+      mainWindow.webContents.send('services:status', { ...servicesStatus, runtimeVersions: runtimeVersionSnapshot(backendRuntime, services.frontend) });
+      return value;
+    }
     if (action === 'checkFrontend') { void services.frontend.check(); return services.frontend.status(); }
     if (action === 'setUsageEnabled') return services.usage.setEnabled(input?.enabled);
+    if (action === 'acknowledgeUsageNotice') return services.usage.acknowledgeNotice();
     if (action === 'retryUsage') return services.usage.retry();
     if (action === 'recordUsage') return services.usage.record(input);
     throw new Error('不支持的应用设置操作。');
@@ -858,6 +868,7 @@ app.whenReady().then(() => {
   };
 
   powerMonitor.on('resume', () => {
+    void checkLicenseOnWake(backendRuntime, () => logger.warn('[Main] 唤醒后授权状态校验未完成，将由后台继续检查。'));
     forceWsReconnect('系统已唤醒');
   });
   powerMonitor.on('lock-screen', () => {
@@ -867,6 +878,7 @@ app.whenReady().then(() => {
     }
   });
   powerMonitor.on('unlock-screen', () => {
+    void checkLicenseOnWake(backendRuntime, () => logger.warn('[Main] 解锁后授权状态校验未完成，将由后台继续检查。'));
     forceWsReconnect('屏幕已解锁');
   });
 

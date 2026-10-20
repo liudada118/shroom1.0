@@ -5,7 +5,7 @@ const { queryHistoryDates, queryHistoryChannels, queryChannelHistoryRows, getNat
 function recordError(message, status = 400) { return Object.assign(new Error(message), { code: 'ALGORITHM_DATA_INVALID', httpStatus: status }); }
 
 /** 从现有采集库分页读取选定通道；不调用回放控制或修改采集状态。 */
-function createAlgorithmRecordService({ getContext, getDatabases }) {
+function createAlgorithmRecordService({ getContext, getDatabases, getRecordEvidence = () => null }) {
   const records = new Map();
   const readers = new WeakMap();
   let identity = '';
@@ -21,7 +21,7 @@ function createAlgorithmRecordService({ getContext, getDatabases }) {
   /** 系统切换或授权变化后，旧记录标识立即失效。 */
   function context(expected) {
     const current = getContext();
-    if (!current.allowed || !current.systemId) throw recordError('请先选择已授权系统。', 403);
+    if ((!current.allowed && current.historyAllowed !== true) || !current.systemId) throw recordError('请先选择可查看历史的系统。', 403);
     if (identity !== current.systemId) { records.clear(); identity = current.systemId; }
     if (expected && current.systemId !== expected) throw recordError('当前系统已切换，请重新选择算法数据。', 409);
     return current;
@@ -48,13 +48,17 @@ function createAlgorithmRecordService({ getContext, getDatabases }) {
     return { systemId: current.systemId, records: items, offset, nextOffset: items.length ? offset + 30 : null };
   }
   /** 返回真实存储压力值；未存储的原始协议字节不能伪造为原始帧。 */
-  function read({ systemId, recordId, offset = 0, limit = 32, maxId } = {}) {
+  function read({ systemId, recordId, offset = 0, limit = 32, maxId, startTimestamp, endTimestamp } = {}) {
     context(systemId);
     const record = records.get(recordId);
     if (!record || record.systemId !== systemId || record.maxId !== maxId) throw recordError('记录目录已变化，请重新选择采集记录。', 409);
     if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(limit) || limit < 1 || limit > 32 || offset + limit > 1000000) throw recordError('数据读取范围无效。');
     if (getDatabases()[record.dbRole] !== record.db) throw recordError('采集数据库已切换，请刷新记录列表。', 409);
-    const rows = queryChannelHistoryRows(reader(record.db), record.date, record.channelId, limit, offset);
+    if ((startTimestamp != null && !Number.isFinite(startTimestamp)) || (endTimestamp != null && !Number.isFinite(endTimestamp))
+      || (startTimestamp != null && endTimestamp != null && startTimestamp > endTimestamp)) throw recordError('时间区间无效。');
+    const rows = queryChannelHistoryRows(reader(record.db), record.date, record.channelId, limit, offset, undefined,
+      { maxId, startTimestamp, endTimestamp });
+    const evidence = getRecordEvidence({ recordKey: record.date, systemId });
     const frames = [];
     for (const row of rows) {
       if (row.id > maxId) break;
@@ -65,7 +69,14 @@ function createAlgorithmRecordService({ getContext, getDatabases }) {
       const values = field ? value[field] : value;
       if (!Array.isArray(values) || !values.length || values.length > 65536 || !values.every((number) => typeof number === 'number' && Number.isFinite(number))) throw recordError('采集帧没有完整、有限的压力数值，不能用于算法分析。');
       if (!Number.isFinite(row.timestamp)) throw recordError('采集帧缺少有效时间戳。');
-      frames.push({ id: row.id, timestamp: row.timestamp, values, stage: field || 'stored-array' });
+      const declaredMatrix = value?.matrix || value?.payload?.matrix;
+      const matrix = declaredMatrix && Number.isInteger(declaredMatrix.rows) && Number.isInteger(declaredMatrix.cols)
+        && declaredMatrix.rows > 0 && declaredMatrix.cols > 0 && declaredMatrix.rows * declaredMatrix.cols === values.length
+        ? { rows: declaredMatrix.rows, cols: declaredMatrix.cols, total: values.length } : null;
+      const configuration = value?.collectionTrace || evidence?.configuration || null;
+      const trace = { status: configuration ? 'known' : 'unknown', configuration,
+        managedRelease: value?.managedRelease || null, dataStage: field || 'stored-array' };
+      frames.push({ id: row.id, timestamp: row.timestamp, values, stage: field || 'stored-array', matrix, trace });
     }
     return { systemId, recordId, frames, nextOffset: offset + frames.length, complete: rows.length < limit || frames.length < rows.length || frames.at(-1)?.id === maxId };
   }

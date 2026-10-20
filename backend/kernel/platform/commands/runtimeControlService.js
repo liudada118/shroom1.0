@@ -52,6 +52,7 @@ function createRuntimeControlService(deps) {
    * @returns {void}
    */
   function updateHistoryPlayback(message) {
+    if (message.play !== false) deps.requireAccess?.(message.history === false ? 'acquire' : 'history');
     const runtime = getRuntime();
     const next = {};
     if (message.history != null) next.history = message.history;
@@ -84,9 +85,8 @@ function createRuntimeControlService(deps) {
    * 冲突时以 `collectOptions` 为准 —— 下游存储时钟同时读这两个字段，不能不一致。
    *
    * ⚠️ 两处副作用的时机是要点，顺序不能改：开始采集要**先** `resetCollectionStorageClock()`
-   * （不重置的话时钟还带着上次结束的时间戳，新采集头几帧会被判成「没到采样点」而丢掉）；停止采集
-   * 要**先 flush 队列再置 flag 为 false**（入库是批量攒的，先置 flag 会让最后一批帧永远等不到下次
-   * 触发 —— 现象是每次采集都丢结尾几百毫秒）。
+   * （不重置的话新采集头几帧会被判成「没到采样点」而丢掉）；停止时先封闭入场，再 flush，
+   * 已入场的异步帧仍通过会话 token 写回原库，不能把它们丢掉或写进下一次采集。
    *
    * ⚠️ `saveTime` 被写两次、后面的 `colName` **覆盖前面的 `time`**，不是笔误：这个字段同时承担
    * 「采集起始时间」和「采集名称」（它最终是历史库的会话标识），新前端传 `colName`、旧的传 `time`。
@@ -96,14 +96,18 @@ function createRuntimeControlService(deps) {
    * @returns {void}
    */
   function updateCollectionControl(message) {
+    if (message.flag === true) deps.requireAccess?.('acquire');
     const runtime = getRuntime();
     const next = {};
     if (message.time != null) next.saveTime = message.time;
     if (message.colName != null) next.saveTime = message.colName;
+    if (runtime.flag === true && next.saveTime != null && next.saveTime !== runtime.saveTime) {
+      throw Object.assign(new Error('请先停止当前采集，再更改记录名称。'), { code: 'COLLECTION_ACTIVE', httpStatus: 409 });
+    }
     if (message.flag === true) {
       next.flag = true;
-      resetCollectionStorageClock();
     } else if (message.flag === false) {
+      deps.onCollectionStopping?.('USER_STOPPED');
       flushCollectionInsertQueues();
       next.flag = false;
     }
@@ -117,6 +121,10 @@ function createRuntimeControlService(deps) {
     if (message.collectOptions != null) {
       next.collectOptions = normalizeCollectOptions(message.collectOptions, next.colHZ ?? runtime.colHZ);
       next.colHZ = next.collectOptions.frequencyHz;
+    }
+    if (message.flag === true) {
+      if (runtime.flag !== true) deps.onCollectionStarted?.({ ...runtime, ...next });
+      resetCollectionStorageClock();
     }
     setRuntime(next);
     if (message.flag === true && runtime.flag !== true) {
@@ -193,6 +201,7 @@ function createRuntimeControlService(deps) {
    * @returns {void}
    */
   function exportHistoryCsv(message) {
+    deps.requireAccess?.('export');
     setRuntime({ smoothValue: 0 });
     csvDownloadService.exportHistoryCsv({
       date: message.download,

@@ -1,7 +1,19 @@
 # Shroom 快速架构索引
 
-> 最后更新于：2026-10-16
+> 最后更新于：2026-10-19
 > 用途：代码定位和验证路由。理解当前实现先读 [开发者手册](docs/developer-guide.md)，完整文档分类见 [docs/README.md](docs/README.md)。`ARCHITECTURE.md` 保留历史设计与维护台账，不用作默认全文入口。
+
+2026-10-19 增量：v1.3 到期权限、采集证据/排空、对话历史分析、上传队列隔离、候选推广/撤回、版本诊断及服务端 180/90 天保留已接入。入口与发布顺序见 [实现与交付记录](docs/v1.3-implementation-and-release.md)，不代表生产已部署；相关跨层改动运行 Full。
+
+同日排障：旧在线密钥未登记使用管理员审核补录，保留原码；网页检查失败原因持久保留，不把服务器未发布或坏版本跳过当作最新。`/data/html` 中的原始 React 构建必须经过签名发布生成 `latest.json` 才能被安装版下载；见 [桌面交付服务](docs/desktop-distribution-services.md)。
+
+同日已完成现有网页签名发布：release `1792395247824` / build `1792116828439`，118 个公网资源验签/哈希及隔离缓存检查通过；此次上线只包含已上传网页，其他 v1.3 源码仍按独立发布计划部署。
+
+同日使用统计修复：线上最小补丁已支持可选 `runtimeVersions`，解决旧 strict schema 的 `400/INVALID_EVENT`；客户端区分格式、授权和服务错误的源码已完成，未发安装包。已暂停队列在设置中“立即重试上传”，不删除或改写事件。新增 `usageUploadFailures.test.js` 与服务端 HTTP 混批回归，见 [桌面交付服务](docs/desktop-distribution-services.md)。
+
+同日生成点图显示：`PointGridRenderer` 工具模式恢复手部监测点径/点距比例，默认点径0.186→1；随后补齐规则矩阵两倍显示插点和平滑，32×32输入仍1024点，渲染64×64。`matrixDisplayModes` 负责新建默认值，`manifestWidgetGeometry` 兼容既有单倍配置；物理点表保持一倍无补边，框选按原始索引统计。Full与合成浏览器验证通过，尚未发布网页。
+
+同日网页标识排障：`frontendCache` 区分开发模式、标识缺失/无效、版本错配与缓存写入错误，开发版不操作生产缓存。Builder beforePack/afterPack通过 `scripts/verify-frontend-build.js` 校验源与最终资源标识，防止继续打出无更新基线的安装包；Forge配置未切换。Full 11项通过，客户安装包修复仍需正确重建发布，见 [桌面交付服务](docs/desktop-distribution-services.md)。
 
 当前完整链路：[数据、算法、存储与回放](docs/chains/data-flow.md) · [页面、渲染与交互](docs/chains/interface-flow.md)。
 
@@ -74,7 +86,7 @@ Agent 客户交付与聊天同步：`index.js` 注入 `readStoredLicenseKey` →
 
 HaLow 人体接入：`kernel/transport/halowReceiver.js` 独立 TCP 分帧，`halowService.js` 校验当前系统/授权/串口互斥；`halow.control` 走 HTTP 并等待完成，状态走 WS。原生 `humanBodyOptimized` 与副本共用 `legacySerialFrameRuntime`，保留 canonical 身份、归零与存储。前端 `HalowConnection.jsx` 同时接门户/旧工具栏。验证 `halowReceiver.test.js`、`halowControlApi.test.js`、`Title.halow.test.jsx`、`node scripts/tests/halow-connection.mjs` 和 Full；说明见 [HaLow 接入](docs/halow-human-body.md)。
 
-更新发布：`package.json` / `dev-app-update.yml` 指向 HTTPS 更新源，运行时 `app/update/autoUpdater.js`；`scripts/upload-release.js` 只上传 Windows NSIS 产物，验证版本/更新地址/哈希后最后替换元数据。环境变量 `SHROOM_UPLOAD_DIR`、`SHROOM_SSH_KEY`；测试 `backend/tests/packaging/upload-release.test.js`，说明见 [更新服务器](docs/shroom-update-server.md)。上传和发布需显式操作。
+更新发布：`package.json` / `dev-app-update.yml` 指向 HTTPS 更新源，运行时 `app/update/autoUpdater.js`；`updaterErrors.js` 以有限错误码分类安装包失败并脱敏日志，`UpdateNotifier` 兼容旧宿主长错误、保留详情并区分网页更新。`scripts/upload-release.js` 只处理 Windows NSIS 的静态 SSH 上传，不能代替当前线上 MinIO `data/shroom1/` 发布；Mac 须另外发布正式 ZIP 和 `latest-mac.yml`。环境变量 `SHROOM_UPLOAD_DIR`、`SHROOM_SSH_KEY`；测试 `backend/tests/application/autoUpdater.test.js`、`packaging/upload-release.test.js` 和客户端 `updaterMessage.test.jsx`；涉及 Electron 更新执行 Full，当前路由与操作见 [更新服务器](docs/shroom-update-server.md)。上传和发布需显式操作。
 
 公司展示系统交付：`extension-host/workspace/systemPackageService.js` 按引用闭包导出/安装 Manifest 与原生模板副本，受管目录分别为 `managed-display-systems/` 和 `managed-native-systems/`；`managedSystemSync.js` 核验密钥绑定的签名目录与包，`staffPackageSubmission.js` 用 OS 加密的员工令牌提交待审包。`E:/key/server/systemPackages.ts` 管理审核、客户范围和签名下载，发布的系统可在开密钥页按系统 ID 勾选；已登记的离线 RSA 码也可在联网时按签名、客户、有效期与系统范围同步，失败原因由服务端错误码说明。门户只列客户授权且密钥勾选的受管系统，串口切换/打开与后台定时检查复核权限。Agent 成果卡片可提交或导出审核包；HTML 回退返回明确的服务未就绪提示。验证 `systemPackageService` / `managedSystemSync` / `staffPackageSubmission` 测试、`E:/key` 的 `systemPackages.test.ts` 与两库完整验证；涉及授权、包安装和跨层控制，使用 Full。操作见 [系统发布](docs/system-publishing-design.md)。
 

@@ -10,6 +10,7 @@ import { capturePortalOperation, executePortalLegacyControl } from './portalOper
 import { Menu, Button, Select, message, notification, Divider, Space, Radio, Drawer, Modal, Progress, Tooltip, ConfigProvider } from 'antd';
 import Slider from '../appTools/UsageSlider';
 import { trackUsage } from '../../services/usageAnalytics';
+import { canUseLicenseCapability } from '../../services/licenseAccess';
 import { PlusOutlined, SettingOutlined, SlidersOutlined } from '@ant-design/icons';
 import exchange from '../../assets/images/exchange.png'
 import option from '../../assets/images/Option.png'
@@ -454,15 +455,23 @@ class Title extends React.Component {
   /** 接收 Home 转发的串口生命周期事件。 */
   handleSerialStatus = (event) => this.applySerialStatus(event.detail);
 
+  /** Explain modern host restrictions before attempting acquisition or file export. */
+  requireLicenseCapability = (capability) => {
+    if (canUseLicenseCapability(this.props.licenseAccess, capability)) return true;
+    message.warning(capability === 'canExport' ? '当前授权不允许导出数据或分析结果，仍可在软件内查看。' : '当前授权不能新增采集或连接设备，仍可查看和分析历史数据。');
+    return false;
+  };
+
   /** 在打开期间禁用重复选择，并给失败的通道显示错误边框。 */
   getSerialSelectProps = (role) => {
     const busy = this.state.serialPending[role] || this.state.serialStates[role]?.status === 'opening';
-    return { loading: Boolean(busy), disabled: Boolean(busy), 'aria-busy': Boolean(busy),
+    return { loading: Boolean(busy), disabled: Boolean(busy) || !canUseLicenseCapability(this.props.licenseAccess, 'canAcquire'), 'aria-busy': Boolean(busy),
       status: this.state.serialStates[role]?.error ? 'error' : undefined };
   }
 
   /** 统一普通和 manifest 通道连接，等待真实 ACK 后再显示选中结果。 */
   connectSerialChannel = async (role, path, { label, baudRate, hand } = {}) => {
+    if (!this.requireLicenseCapability('canAcquire')) return false;
     this._serialOperations ||= new Map();
     if (this._serialOperations.has(role)) {
       message.info('正在连接中，请稍后再试');
@@ -819,6 +828,7 @@ class Title extends React.Component {
   };
 
   openCsvDownloadModal = () => {
+    if (!this.requireLicenseCapability('canExport')) return;
     this._csvBatch?.dispose();
     this._csvBatch = null;
     if (!this.state.dataTime) {
@@ -870,6 +880,7 @@ class Title extends React.Component {
   }
 
   startCsvDownload = async () => {
+    if (!this.requireLicenseCapability('canExport')) return;
     if (this.state.csvDownloadStage === 'exporting' || this._csvStarting) return;
     if (!this.state.dataTime && !this.state.csvBatchDates.length) {
       message.warning(this.props.t('collection.chooseHistory'));
@@ -1194,6 +1205,7 @@ class Title extends React.Component {
   }
 
   openCollectionModal = () => {
+    if (!this.requireLicenseCapability('canAcquire') || this.props.collectionSummary?.phase === 'finalizing') return;
     this.setState({
       collectionModalOpen: true,
       collectLabel: this.state.collectLabel || '',
@@ -1207,7 +1219,7 @@ class Title extends React.Component {
   stopCollection = () => {
     const flag = this.props.colFlag;
     this.props.wsSendObj({ colHZ: this.state.colHZ, flag });
-    if (this.props.matrixName == 'sitCol' && loadData) {
+    if (this.props.matrixName == 'sitCol' && loadData && canUseLicenseCapability(this.props.licenseAccess, 'canExport')) {
       this._csvActive = true;
       this.props.wsSendObj({
         colHZ: this.state.colHZ,
@@ -1222,6 +1234,7 @@ class Title extends React.Component {
   }
 
   startCollectionWithOptions = () => {
+    if (!this.requireLicenseCapability('canAcquire') || this.props.collectionSummary?.phase === 'finalizing') return;
     const formattedDate = Date.now();
     const baseName = this.getCollectionBaseName();
     const collectHz = Math.max(1, Number(this.state.colHZ) || 12);
@@ -1248,7 +1261,7 @@ class Title extends React.Component {
       loadData = '';
     }
 
-    this.props.changeStateData({ colFlag: false });
+    this.props.changeStateData({ colFlag: false, collectionSummary: null });
     this.props.setColValueFlag(true);
     this.setState({ collectionModalOpen: false, colHZ: collectHz });
   }
@@ -1465,6 +1478,7 @@ class Title extends React.Component {
   }
 
   openOneStepPdfModal = () => {
+    if (!this.requireLicenseCapability('canExport')) return;
     if (!this.state.dataTime) {
       message.warning(this.props.t('collection.chooseExportData'));
       return;
@@ -1473,6 +1487,7 @@ class Title extends React.Component {
   }
 
   generateOneStepPdfReport = async () => {
+    if (!this.requireLicenseCapability('canExport')) return;
     const date = this.state.dataTime;
     const collectName = (this.state.realname || '').trim() || this.props.t('common.unknown');
     const collectAge = (this.state.collectAge || '').trim() || '0';
@@ -2000,6 +2015,7 @@ class Title extends React.Component {
 
   /** 新会话栏等待模式命令成功后才改界面；回放期间仍使用原播放条。 */
   changePortalMode = async (mode) => {
+    if (mode === 'now' && !this.requireLicenseCapability('canAcquire')) return;
     if (this.state.portalBusy || this.state.csvDownloadStage === 'exporting') return;
     if (mode !== 'now' && (this.props.matrixName === 'localCar' ? this.props.colWebFlag : !this.props.colFlag)) {
       message.warning('请先结束采集，再选择回放数据');
@@ -2124,6 +2140,7 @@ class Title extends React.Component {
 
   /** 批量选择只保存导出快照，随后复用已有路径、格式及文件结果弹窗。 */
   openPortalBatchDownload = (values) => {
+    if (!this.requireLicenseCapability('canExport')) return;
     const available = new Set(this.props.dataArr?.map((record) => record.value));
     const dates = [...new Set(values)].filter((value) => available.has(value));
     if (!dates.length || this.state.csvDownloadStage === 'exporting') return;
@@ -2148,6 +2165,9 @@ class Title extends React.Component {
   render() {
     const routerStr = this.props.matrixName == 'yanfeng10' ? '10a10' : this.props.matrixName == 'smallSample' ? '10a10' : this.props.matrixName == 'matCol' || this.props.matrixName == 'matColPos' ? '16a10' : this.props.matrixName == 'bed4096' ? '64a64' : this.props.matrixName == 'carCol' ? '10a9' : '32a32'
     const { t, i18n } = this.props;
+    const canAcquire = canUseLicenseCapability(this.props.licenseAccess, 'canAcquire');
+    const canExport = canUseLicenseCapability(this.props.licenseAccess, 'canExport');
+    const finalizingCollection = this.props.collectionSummary?.phase === 'finalizing';
     const jqbedConfigAccess = getJqbedConfigAccess({
       matrixName: this.props.matrixName,
       history: this.props.history,
@@ -2209,7 +2229,7 @@ class Title extends React.Component {
       key={this.props.systemId || this.props.matrixName}
       status={this.props.halowStatus} onStatus={(halowStatus) => this.props.changeStateData({ halowStatus })}
       connected={this.props.wsConnected} connectionEpoch={this.props.wsConnectionEpoch}
-      history={this.props.history} collecting={!this.props.colFlag} /> : null;
+      history={this.props.history} collecting={!this.props.colFlag} canAcquire={canAcquire} /> : null;
     // console.log('title')
     const baudControl = <>
         {
@@ -2662,6 +2682,7 @@ class Title extends React.Component {
             {/* <Input type='number' placeholder={t('enterColHZ')} onChange={(e) => { this.setState({ colHZ: e.target.value }) }} /> */}
             <Button
               className='titleButton'
+              disabled={!(this.props.matrixName === 'localCar' ? this.props.colWebFlag : !this.props.colFlag) && (!canAcquire || finalizingCollection)}
               onClick={() => {
 
                 if (this.props.matrixName !== 'localCar') {
@@ -2682,13 +2703,14 @@ class Title extends React.Component {
             {this.props.matrixName == 'localCar' ?
 
               <>
-                <Button onClick={() => {
+                <Button disabled={!canAcquire || finalizingCollection} onClick={() => {
+                  if (!this.requireLicenseCapability('canAcquire')) return;
                   this.props.colPushData()
                 }} className='titleButton'>
                   {t('display.singleCollection')}
                 </Button>
-                <Button className='titleButton'>
-                  <CSVLink
+                <Button className='titleButton' disabled={!canExport}>
+                  {canExport ? <CSVLink
                     // ref={downloadRef}
 
                     filename={`${new Date().getTime()}.csv`}
@@ -2696,7 +2718,7 @@ class Title extends React.Component {
                     style={{ color: '#5A5A89', textDecoration: 'none' }}
                   >
                     {t('download')}
-                  </CSVLink> </Button> </> : null}
+                  </CSVLink> : t('download')} </Button> </> : null}
 
             {this.props.matrixName == 'localCar' ?
               <Button className='titleButton' onClick={() => {
@@ -2706,6 +2728,7 @@ class Title extends React.Component {
           </>
           : <> <Button
             className='titleButton'
+            disabled={!canExport}
             onClick={this.openCsvDownloadModal}
           >{t('download')}</Button>
             <Button
@@ -2732,6 +2755,7 @@ class Title extends React.Component {
         }}>{t('display.pressureCurve')}</Button> : null}
 
         {this.props.matrixName === 'bigBed' ? <Button className='titleButton' onClick={() => {
+          if (!this.requireLicenseCapability('canExport')) return;
 
           if (this.props.com.current) {
             this.props.com.current.logData()
@@ -2756,7 +2780,7 @@ class Title extends React.Component {
           <>
             <Button
               className='titleButton'
-              disabled={!this.state.dataTime || this.state.pdfLoading}
+              disabled={!canExport || !this.state.dataTime || this.state.pdfLoading}
               loading={this.state.pdfLoading}
               onClick={this.openOneStepPdfModal}
             >{t('report.exportPdf')}</Button>
@@ -2851,6 +2875,7 @@ class Title extends React.Component {
         </ConfigProvider>}
         selectedPorts={Object.values(this.state.manifestPortSelections || {}).some(Boolean) || [this.props.portname, this.props.portnameBack, this.props.portnameHead, this.props.portnameSensor].some(Boolean)}
         collecting={this.props.matrixName === 'localCar' ? this.props.colWebFlag : !this.props.colFlag}
+        canAcquire={canAcquire && !finalizingCollection}
         onStart={this.startPortalCollection} onStop={this.stopPortalCollection}
       /> : null}
       {this.props.portalEmbedded ? serialStatusControls : null}
@@ -2882,7 +2907,7 @@ class Title extends React.Component {
           { id: 'restore', category: 'processing', label: '恢复零点', description: '取消预压力扣除，恢复原始压力。',
             disabled: this.props.history !== 'now', onClick: this.restorePortalPressure },
           { id: 'system', label: '系统专用工具', description: '设备校准、曲线、重心或报告等当前系统支持的功能。', onClick: () => this.openPortalPanel('portalSpecialOpen') },
-          { id: 'builder', label: '展示系统配置', description: '配置传感器、算法、渲染和图表。', disabled: !this.props.openDisplaySystemBuilder,
+          { id: 'builder', label: '展示系统配置', description: '配置传感器、算法、渲染和图表。', disabled: !this.props.openDisplaySystemBuilder || !canUseLicenseCapability(this.props.licenseAccess, 'canConfigure'),
             onClick: () => { this.setState({ portalToolsOpen: false }); this.props.openDisplaySystemBuilder?.(); } },
           ...(jqbedConfigAccess.visible ? [{ id: 'jqbed', label: '床垫算法配置', description: '调整当前床垫算法参数。', disabled: jqbedConfigAccess.disabled,
             onClick: () => this.openPortalPanel('jqbedAlgorithmConfigOpen') }] : []),
@@ -2897,6 +2922,7 @@ class Title extends React.Component {
         </PortalControlDialog>
         <PortalPlaybackDialog key={this.props.matrixName} open={this.state.portalPlaybackOpen}
           records={this.props.dataArr} playbackValue={this.state.portalPlaybackValue} downloadValues={this.state.portalDownloadValues}
+          canExport={canExport}
           busy={this.state.portalBusy} error={this.state.portalError}
           onPlaybackChange={(portalPlaybackValue) => this.setState({ portalPlaybackValue })}
           onDownloadsChange={(portalDownloadValues) => this.setState({ portalDownloadValues })}

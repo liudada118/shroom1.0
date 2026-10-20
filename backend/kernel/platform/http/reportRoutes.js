@@ -143,6 +143,7 @@ function registerReportRoutes(httpApp, {
   imgPath,
   pdfPath,
   logger,
+  requireAccess = () => {},
 }) {
   let pdfArrData = [];
 
@@ -156,8 +157,15 @@ function registerReportRoutes(httpApp, {
   });
   const upload = multer({ storage: multerStorage });
 
+  /** Reject report writes before multer creates files; historical analysis remains readable. */
+  function requireReportExport(req, res, next) {
+    try { requireAccess('export'); next(); }
+    catch (error) { res.status(error.httpStatus || 403).json({ code: error.code || 'LICENSE_EXPORT_DENIED', error: error.message }); }
+  }
+
   httpApp.post('/getDbHeatmap', async (req, res) => {
     try {
+      requireAccess('history');
       const { time } = req.body;
       const selectQuery = 'select * from matrix WHERE date=?';
       const params = [time];
@@ -184,11 +192,11 @@ function registerReportRoutes(httpApp, {
       });
     } catch (error) {
       logger.error('[getDbHeatmap] error:', error.message);
-      res.json(new HttpResult(1, {}, 'error'));
+      res.status(error.httpStatus || 500).json(new HttpResult(1, {}, error.httpStatus ? error.message : 'error'));
     }
   });
 
-  httpApp.post('/uploadCanvas', upload.single('file'), async (req, res) => {
+  httpApp.post('/uploadCanvas', requireReportExport, upload.single('file'), async (req, res) => {
     try {
       if (!req.file) {
         return res.json(new HttpResult(1, {}, 'missing file'));
@@ -232,6 +240,7 @@ function registerReportRoutes(httpApp, {
       });
 
       const pdfFilePath = `${name}.pdf`;
+      requireAccess('export');
       res.json(new HttpResult(0, { file: req.file, body: req.body, absolutePath, pdfFilePath, pdfDir: pdfPath }, 'success'));
     } catch (error) {
       logger.error('[uploadCanvas] error:', error.message);

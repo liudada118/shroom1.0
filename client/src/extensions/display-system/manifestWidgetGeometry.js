@@ -31,13 +31,23 @@ function flattenCoordinatePoints(coordinateMap) {
     : null;
 }
 
+/** 规则矩阵至少使用手部监测的两倍显示插值，物理坐标表保持逐点对应。 */
+function buildPointGridChannel(channel = {}, rows, cols, hasPhysicalPoints) {
+  return {
+    ...channel,
+    num1: rows,
+    num2: cols,
+    interp: hasPhysicalPoints ? 1 : Math.max(2, Number(channel.interp) || 2),
+    order: hasPhysicalPoints ? 0 : channel.order ?? 0,
+  };
+}
+
 /**
  * 给 SDK 矩阵渲染器覆写当前 widget 的逐路几何参数。
  *
- * display.renderers 是方案级配置，旧 Builder 只按第一路生成一次。多传感器卡片若直接
- * 复用它，3D 点图、2D 数字和柔和热力图仍会拿第一路行列/坐标。这里保留其它调参，
- * 只替换必须随 sensor 变化的尺寸与 points；当前路没有坐标时还会删掉旧 points，避免
- * 第二路继续套用第一路物理形状。
+ * display.renderers 是方案级配置，每路必须使用自己的行列和坐标。
+ * 规则点图至少使用两倍显示插值；物理点表保持逐点对应且不补边，避免回退成规则形状。
+ * 当前路没有坐标时清除旧 points，避免第二路继续套用第一路物理形状。
  */
 export function buildManifestWidgetRendererParams({
   rendererId,
@@ -53,16 +63,17 @@ export function buildManifestWidgetRendererParams({
   if (!rows || !cols) return base;
 
   if (rendererId === 'pointGrid') {
+    const points = flattenCoordinatePoints(coordinateMap);
+    const hasPhysicalPoints = points?.length === rows * cols;
     const next = {
       ...base,
-      sit: { ...(base.sit || {}), num1: rows, num2: cols },
-      back: { ...(base.back || {}), num1: rows, num2: cols },
+      sit: buildPointGridChannel(base.sit || {}, rows, cols, hasPhysicalPoints),
+      back: buildPointGridChannel(base.back || {}, rows, cols, hasPhysicalPoints),
     };
-    const points = flattenCoordinatePoints(coordinateMap);
     // ⚠️ 仅规则矩阵交换绘图轴，物理点位表已定义真实形状，不能再次转置。
-    next.transposeAxes = points?.length !== rows * cols;
+    next.transposeAxes = !hasPhysicalPoints;
     next.workspaceTools = true;
-    if (points?.length === rows * cols) next.points = points;
+    if (hasPhysicalPoints) next.points = points;
     else delete next.points;
     return next;
   }

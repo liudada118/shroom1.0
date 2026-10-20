@@ -116,14 +116,16 @@ export function createMatrixDisplayRenderers({ matrix = {}, coordinateMap = null
   const rows = positiveInteger(matrix.rows || matrix.height);
   const cols = positiveInteger(matrix.cols || matrix.width);
   const points = flattenCoordinateMap(coordinateMap);
+  const hasPhysicalPoints = points?.length === rows * cols;
+  const pointInterp = hasPhysicalPoints ? 1 : 2;
 
   return MATRIX_DISPLAY_MODES.map((mode) => {
     let params = {};
     if (mode.rendererId === 'pointGrid') {
       params = {
-        sit: { num1: rows, num2: cols, interp: 1, order: 0 },
-        back: { num1: rows, num2: cols, interp: 1, order: 0 },
-        ...(points?.length === rows * cols ? { points } : {}),
+        sit: { num1: rows, num2: cols, interp: pointInterp, order: 0 },
+        back: { num1: rows, num2: cols, interp: pointInterp, order: 0 },
+        ...(hasPhysicalPoints ? { points } : {}),
       };
     } else if (resolveMatrixRendererType(mode.rendererId) === 'numMatrix') {
       params = {
@@ -189,6 +191,7 @@ export function createBuiltinMatrixRendererParams(
   const normalizedMax = Math.max(1, Number(valueMax) || 1);
   const points = flattenCoordinateMap(coordinateMap);
   const pointParams = points?.length === rows * cols ? { points } : {};
+  const pointInterp = pointParams.points ? 1 : 2;
 
   if (rendererId === 'numMatrix') {
     return normalizeNumMatrixParams({
@@ -204,8 +207,8 @@ export function createBuiltinMatrixRendererParams(
   if (rendererId === 'pointGrid') {
     return normalizePointGridParams({
       ...POINT_GRID_PRESETS.matCol,
-      sit: { num1: rows, num2: cols, interp: 1, order: 0 },
-      back: { num1: rows, num2: cols, interp: 1, order: 0 },
+      sit: { num1: rows, num2: cols, interp: pointInterp, order: 0 },
+      back: { num1: rows, num2: cols, interp: pointInterp, order: 0 },
       ...pointParams,
     });
   }

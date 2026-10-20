@@ -45,7 +45,7 @@ function modelGroupsFor(provider) {
 }
 
 /** 编辑模型连接；密钥只存在于输入框生命周期并通过桌面桥提交。 */
-export default function AgentSettings({ settings = DEFAULT_AGENT_SETTINGS, onSave, onClose, disabled, chatSync, onSaveSync, onRetrySync }) {
+export default function AgentSettings({ settings = DEFAULT_AGENT_SETTINGS, onSave, onClose, disabled, chatSync, onSaveSync, onRetrySync, onClearSync, onRestoreSync }) {
   const initialBaseUrl = settings.baseUrl || DEFAULT_AGENT_SETTINGS.baseUrl;
   const initialProvider = providerFromUrl(initialBaseUrl);
   const [provider, setProvider] = useState(initialProvider);
@@ -126,7 +126,7 @@ export default function AgentSettings({ settings = DEFAULT_AGENT_SETTINGS, onSav
       {error && <p className="shroom-agent-inline-error" role="alert" tabIndex={-1} ref={errorRef}>{error}</p>}
       <button className="shroom-agent-primary" type="submit" disabled={saving || disabled}>{saving ? '正在保存…' : '保存连接设置'}</button>
     </form>
-    <AgentSyncSettings sync={chatSync} onSave={onSaveSync} onRetry={onRetrySync} />
+    <AgentSyncSettings sync={chatSync} onSave={onSaveSync} onRetry={onRetrySync} onClear={onClearSync} onRestore={onRestoreSync} />
     <AgentSystemSubmissionSettings />
   </section>;
 }

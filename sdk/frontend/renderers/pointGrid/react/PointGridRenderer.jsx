@@ -371,7 +371,8 @@ const PointGridRenderer = React.forwardRef((props, refs) => {
         vertexColors: true,
         transparent: true,
         map: state.texture,
-        size: config.workspaceTools ? SEPARATION * 0.0062 * 0.3 : 1,
+        // 沿用手部监测的点径/点距比例；材质点径不会随几何体缩放自动变化。
+        size: config.workspaceTools ? SEPARATION / 100 : 1,
       });
 
       state.particles = new THREE.Points(state.sitGeometry, state.material);

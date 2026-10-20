@@ -30,6 +30,9 @@ const manifestAlgorithmConfiguration = object({
   charts: nativeConfiguration.properties.charts,
 }, ['algorithms', 'charts']);
 const schemas = {
+  request_history_data: object({ message: string(500) }),
+  get_history_workspace: object({}),
+  analyze_history_data: object({ compare: { type: 'boolean' }, activeThreshold: number }),
   request_algorithm_data: object({ message: string(500) }),
   get_algorithm_workspace: object({}),
   analyze_algorithm_data: object({}),
@@ -64,6 +67,9 @@ const schemas = {
   prepare_connect_device: object({ systemId: identifier, sensorId: identifier, portPath: string(240), summary: string(1000) }, ['systemId', 'sensorId', 'portPath', 'summary']),
 };
 const descriptions = {
+  request_history_data: '在本轮聊天内请用户选择当前系统的历史记录和帧/时间区间，可选规则矩阵区域。支持单条无标签数据，确认后自动继续；不能代选、扩大范围或要求两类标签。只读目录，不读取未确认完整帧。',
+  get_history_workspace: '查询本会话独立的历史分析选择和当前任务已有分析报告；这与分类训练数据选择不同，不要求标签。没有选择时调用 request_history_data。',
+  analyze_history_data: '在本机对用户明确选择的历史记录、帧/时间区间和可选矩阵区域计算真实描述统计及最多24点标量趋势；compare=true 比较同矩阵同数据阶段的记录。activeThreshold 仅定义有效点数，不是舒适度或合格标准。返回带记录maxId、区间、矩阵、存储阶段、已有版本证据、内容摘要、参数和计算版本的报告，软件自动持久保存并显示。完整帧留本地。不执行SQL/Python、不控制回放或修改记录。缺少评价规则时只能描述差异，不得声称舒适、合格或准确率。',
   request_algorithm_data: '在本轮聊天中请求用户选择当前系统的采集记录；用户确认后自动继续同一个任务。仅查询记录目录元数据，不读取未选择的压力帧。优先复用当前系统已有有效选择；缺少数据或用户要求换数据时调用，不要让用户寻找顶部菜单。不得代选记录、猜标签或扩大范围。',
   get_algorithm_workspace: '查询已选记录、类别、用途、受限 Python 契约以及当前系统保存的分类算法源码和 realtimePackageId。查看保存算法无需重新选数据；分析与测试仍只能使用用户已选范围。',
   analyze_algorithm_data: '本机分析已选择采集记录，返回开发集窗口特征统计及真实数据摘要，不上传原始帧，不向模型泄露验证集特征。先读取算法工作台。',

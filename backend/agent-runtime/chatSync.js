@@ -1,4 +1,5 @@
 const path = require('path');
+const fs = require('fs');
 const { createHash, randomUUID } = require('crypto');
 const { isDeepStrictEqual } = require('util');
 const { readJson, writeJsonAtomic } = require('./storage');
@@ -102,9 +103,9 @@ function createChatSync({ root, getConfig, getSecrets = () => [], onStatus = () 
   let installationId = null, config = { enabled: false, endpoint: '', token: '' }, outbox = null, file = null;
   let latestState = null, localError = null, controller = null, timer = null, generation = 0, disposed = false, initialized = false;
   const deferredSnapshots = new Map();
+  let recoveryMetadata = [];
   // Keep different software licenses in separate queues without writing the key itself.
-  const scope = () => config.authScheme === 'License'
-    ? `${config.endpoint}\nlicense:${createHash('sha256').update(config.token).digest('hex')}` : config.endpoint;
+  const scope = () => `${config.endpoint}\n${config.authScheme.toLowerCase()}:${createHash('sha256').update(config.token).digest('hex')}`;
   /** Re-read the current license from the main process at each dispatch boundary. */
   function readConfig() {
     const input = getConfig();
@@ -127,7 +128,51 @@ function createChatSync({ root, getConfig, getSecrets = () => [], onStatus = () 
     const state = !config.enabled ? 'disabled' : localError || deferred.length ? 'error' : outbox?.blocked ? 'blocked'
       : controller ? 'syncing' : outbox?.nextRetryAt ? 'retrying' : 'idle';
     return { state, pendingCount, unsyncedCount: deferred.length, installationId, lastSuccessAt: outbox?.lastSuccessAt || null,
-      lastError: localError || deferred[0]?.error || outbox?.blocked || outbox?.lastError || null, nextRetryAt: outbox?.nextRetryAt || null };
+      lastError: localError || deferred[0]?.error || outbox?.blocked || outbox?.lastError || null, nextRetryAt: outbox?.nextRetryAt || null,
+      pendingRange: queueRange(outbox), recoverableQueues: recoveryMetadata };
+  }
+
+  /** Summarize pending snapshots without exposing conversation names or messages. */
+  function queueRange(value) {
+    const events = Object.values(value?.records || {}).map(entry => entry.event).filter(Boolean);
+    const times = events.map(event => event.occurredAt).filter(value => timestamp(value)).sort();
+    return { count: events.length, oldestAt: times[0] || null, newestAt: times.at(-1) || null };
+  }
+
+  /** Read a bounded, validated local queue before any explicit recovery operation. */
+  function readRecoveryQueue(queueId) {
+    if (!/^[a-f0-9]{64}$/.test(queueId || '')) throw agentError('AGENT_SYNC_QUEUE_INVALID', '待传队列标识无效。');
+    const target = path.join(directory, 'outboxes', `${queueId}.json`);
+    const stat = fs.lstatSync(target);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > maximumQueueBytes) throw agentError('AGENT_SYNC_QUEUE_INVALID', '待传队列无法安全读取。');
+    const saved = readJson(target, null, maximumQueueBytes);
+    if (saved?.schemaVersion !== 1 || saved.endpoint !== config.endpoint || !saved.records || typeof saved.records !== 'object' || Array.isArray(saved.records)) throw agentError('AGENT_SYNC_QUEUE_INVALID', '待传队列不属于当前接收方。');
+    for (const [id, entry] of Object.entries(saved.records)) {
+      if (!IDENTIFIER.test(id) || !Number.isSafeInteger(entry?.revision) || entry.revision < 1 || typeof entry.digest !== 'string'
+        || (entry.event && (entry.event.schemaVersion !== 1 || entry.event.eventType !== 'agent.conversation.upsert'
+          || !IDENTIFIER.test(entry.event.eventId || '') || entry.event.conversation?.id !== id || entry.event.installationId !== installationId
+          || entry.event.conversationId !== id || entry.event.revision !== entry.revision || Buffer.byteLength(JSON.stringify(entry.event)) > maximumEventBytes
+          || !validStoredEvent(entry.event) || createHash('sha256').update(JSON.stringify(entry.event.conversation)).digest('hex') !== entry.digest))) {
+        throw agentError('AGENT_SYNC_QUEUE_INVALID', '待传队列校验失败，原文件保留。');
+      }
+    }
+    return saved;
+  }
+
+  /** Other credentials and legacy address-only queues remain local until ownership is confirmed. */
+  function recoverableQueues() {
+    if (!config.endpoint || !installationId) return [];
+    const current = createHash('sha256').update(scope()).digest('hex');
+    const legacy = createHash('sha256').update(config.endpoint).digest('hex');
+    try {
+      return fs.readdirSync(path.join(directory, 'outboxes')).filter(name => /^[a-f0-9]{64}\.json$/.test(name) && name !== `${current}.json`).slice(0, 100)
+        .flatMap(name => {
+          try {
+            const queueId = name.slice(0, -5), range = queueRange(readRecoveryQueue(queueId));
+            return range.count ? [{ queueId, legacy: queueId === legacy, ...range }] : [];
+          } catch { return []; }
+        });
+    } catch { return []; }
   }
 
   /** UI 订阅者抛错也不能影响队列和聊天。 */
@@ -173,6 +218,7 @@ function createChatSync({ root, getConfig, getSecrets = () => [], onStatus = () 
         || createHash('sha256').update(JSON.stringify(entry.event.conversation)).digest('hex') !== entry.digest)) throw new Error('invalid event');
     }
     outbox = saved;
+    recoveryMetadata = recoverableQueues();
   }
 
   /** 清理定时器并中断在飞请求；旧请求回调不能更新新配置的队列。 */
@@ -307,17 +353,18 @@ function createChatSync({ root, getConfig, getSecrets = () => [], onStatus = () 
   /** 配置变化后取消旧请求并恢复对应地址的队列。 */
   function reconfigure() {
     if (disposed) return getStatus();
-    cancelWork(); outbox = null; file = null; localError = null;
+    cancelWork(); outbox = null; file = null; localError = null; recoveryMetadata = [];
     try {
       const next = readConfig();
-      if (config.enabled && (config.authScheme === 'License' || next.authScheme === 'License')
-        && (config.token !== next.token || config.authScheme !== next.authScheme)) latestState = null;
+      if (config.token !== next.token || config.authScheme !== next.authScheme || config.endpoint !== next.endpoint) latestState = null;
       config = next;
-      if (config.enabled) {
+      if (config.enabled || (config.endpoint && config.token)) {
         if (!config.endpoint || !config.token || config.token.length > 8192 || /[\x00-\x20\x7f]/.test(config.token)) throw agentError('AGENT_SYNC_SETTINGS_INVALID', config.authScheme === 'License' ? '未读取到软件密钥，请先激活软件，再重试聊天同步。' : '启用聊天上传前，请填写服务器接口和上传令牌。');
         loadInstallation(); loadOutbox();
-        if (initialized && (outbox.blocked || outbox.nextRetryAt)) persist({ ...outbox, blocked: null, lastError: null, nextRetryAt: null, failureCount: 0 });
-        enqueueLatest(); flushDeferred(); schedule();
+        if (config.enabled) {
+          if (initialized && (outbox.blocked || outbox.nextRetryAt)) persist({ ...outbox, blocked: null, lastError: null, nextRetryAt: null, failureCount: 0 });
+          enqueueLatest(); flushDeferred(); schedule();
+        }
       }
     } catch (error) { reportLocal(error); }
     initialized = true;
@@ -334,11 +381,44 @@ function createChatSync({ root, getConfig, getSecrets = () => [], onStatus = () 
     publish(); return getStatus();
   }
 
+  /** Clear only queued uploads, retaining local chats and revision bookmarks. */
+  function clearPending({ includeLegacy = false } = {}) {
+    if (typeof includeLegacy !== 'boolean') throw agentError('AGENT_SYNC_INPUT_INVALID', '清理范围无效。');
+    cancelWork(); latestState = null;
+    if (!outbox && config.endpoint && config.token) { loadInstallation(); loadOutbox(); }
+    if (outbox) persist({ ...outbox, records: Object.fromEntries(Object.entries(outbox.records).map(([id, entry]) => [id, { ...entry, event: null }])), blocked: null, lastError: null, nextRetryAt: null, failureCount: 0 });
+    for (const [key, entry] of deferredSnapshots) if (entry.endpoint === scope()) deferredSnapshots.delete(key);
+    if (includeLegacy) {
+      for (const item of recoverableQueues()) fs.unlinkSync(path.join(directory, 'outboxes', `${item.queueId}.json`));
+    }
+    recoveryMetadata = recoverableQueues();
+    localError = null; publish(); return getStatus();
+  }
+
+  /** Explicitly resume a prior credential queue only after the user confirms the same customer. */
+  function restorePending({ queueId, confirmed } = {}) {
+    if (confirmed !== true || !config.enabled || !outbox || !recoveryMetadata.some(item => item.queueId === queueId)) {
+      throw agentError('AGENT_SYNC_OWNERSHIP_REQUIRED', '请先开启同步，并确认待传内容属于当前客户和接收方。');
+    }
+    cancelWork(); latestState = null;
+    const previous = readRecoveryQueue(queueId), records = { ...outbox.records };
+    for (const [id, entry] of Object.entries(previous.records)) {
+      if (!entry.event) continue;
+      const current = records[id];
+      if (current && current.digest !== entry.digest) throw agentError('AGENT_SYNC_QUEUE_CONFLICT', '同一会话有不同版本，原队列保留；请切回原凭据续传，或确认不再需要后清理待传。');
+      if (!current?.event) records[id] = entry;
+    }
+    persist({ ...outbox, records, blocked: null, lastError: null, nextRetryAt: null, failureCount: 0 });
+    fs.unlinkSync(path.join(directory, 'outboxes', `${queueId}.json`));
+    recoveryMetadata = recoverableQueues();
+    localError = null; publish(); schedule(); return getStatus();
+  }
+
   /** 停止网络活动，保留磁盘队列供下次启动继续上传。 */
   function dispose() { disposed = true; cancelWork(); }
 
   reconfigure();
-  return { observe, reconfigure, retry, getStatus, dispose };
+  return { observe, reconfigure, retry, getStatus, clearPending, restorePending, dispose };
 }
 
 module.exports = { createChatSync, normalizeSyncEndpoint };

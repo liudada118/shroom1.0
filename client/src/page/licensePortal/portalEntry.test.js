@@ -17,6 +17,31 @@ async function flush() { for (let i = 0; i < 8; i += 1) await Promise.resolve();
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
 
 describe('首页选择系统事务', () => {
+  it('正常到期只读合同仍可进入本轮授权的历史系统', async () => {
+    const licenseAccess = { schemaVersion: 1, state: 'expired', canAcquire: false, canReadHistory: true,
+      canAnalyzeHistory: true, canExport: false, canConfigure: false, canStop: true };
+    const payload = { ...valid(['hand0205']), date: Date.now() - 1000, valid: false, licenseAccess };
+    const test = setup({ activate: vi.fn(async () => activationAck(payload)) });
+    test.entry.begin({ system, key: 'expired-key', connected: true });
+    test.entry.receive(payload); await flush();
+    expect(test.switchSystem).toHaveBeenCalledWith('hand0205');
+    expect(test.onEntered).toHaveBeenCalledWith(system);
+    expect(test.onValidated).toHaveBeenCalledWith(['hand0205'], 'expired-key', expect.objectContaining({ state: 'expired', canExport: false }));
+  });
+
+  it('公司历史入口仍要求当前密钥系统范围及已安装历史列表', async () => {
+    const licenseAccess = { schemaVersion: 1, state: 'expired', canAcquire: false, canReadHistory: true,
+      canAnalyzeHistory: true, canExport: false, canConfigure: false, canStop: true };
+    const payload = { ...valid(['company-seat']), date: Date.now() - 1000, valid: false, licenseAccess };
+    const managed = { value: 'company-sit', systemId: 'company-seat', managed: true, source: 'manifest' };
+    const test = setup({ activate: vi.fn(async () => activationAck(payload)), getManagedIds: vi.fn(async () => ['company-seat']) });
+    test.entry.begin({ system: managed, key: 'expired-key', connected: true }); await flush();
+    expect(test.getManagedIds).toHaveBeenCalledWith(payload);
+    expect(test.switchSystem).toHaveBeenCalledWith('company-sit');
+    const denied = setup({ activate: vi.fn(async () => activationAck({ ...payload, selectFlag: ['other-system'] })), getManagedIds: vi.fn(async () => ['company-seat']) });
+    denied.entry.begin({ system: managed, key: 'expired-key', connected: true }); await flush();
+    expect(denied.switchSystem).not.toHaveBeenCalled();
+  });
   it('旧后端只有激活成功标记时提示完整重启，不误报密钥无效或复用广播范围', async () => {
     const test = setup({ activate: vi.fn(async () => ({ ok: true, data: { results: [{ name: 'license-activation', activationCode: 'OK' }] } })) });
     test.entry.begin({ system, key: 'test-key', connected: true });

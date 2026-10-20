@@ -15,6 +15,8 @@ const { createFrameOutputPipeline } = require('./frameOutputPipelineService');
  */
 function createServerFramePipeline({
   runtimeContext,
+  getCollectionTrace,
+  collectionSessions,
   publishRealtimeChannel,
   isCollecting,
   shouldStoreCollectionFrame,
@@ -33,6 +35,8 @@ function createServerFramePipeline({
 }) {
   const collectionFrameStorage = createCollectionFrameStorageService({
     getSensorType: runtimeContext.getSensorType,
+    getCollectionTrace,
+    collectionSessions,
     getDbRef: (channel) => runtimeContext.getDatabase(channel),
     isCollecting,
     shouldStoreCollectionFrame,

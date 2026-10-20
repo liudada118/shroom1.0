@@ -1,5 +1,9 @@
 import React, { useRef, useEffect } from "react";
 import Title from "../../components/title/Title";
+import { readLicenseAccess, isHistoryOnlyLicense, canUseLicenseCapability } from '../../services/licenseAccess';
+import { readCollectionSummary } from '../../services/collectionStatus';
+import { requestJson } from '../../extensions/display-system/api';
+import RuntimeStatusNotice from './RuntimeStatusNotice';
 import { sendWebSocketJson } from './websocketTransport';
 import {
   decodeWebSocketPayload,
@@ -1021,8 +1025,8 @@ var backFlag, hz = 12, sitFlag, realHzFrameCount = 0, realHzLastTime = Date.now(
 
 let onBedState = []
 class Home extends React.Component {
-  constructor() {
-    super();
+  constructor(props) {
+    super(props);
     this.sceneVisibility = { current: true };
     let storedAllowedTypes = null;
     try {
@@ -1124,6 +1128,8 @@ class Home extends React.Component {
       calibration: false,
       showType: 'hand',
       licenseModalVisible: false,
+      licenseAccess: props?.licenseAccess,
+      collectionSummary: null,
       licenseModalType: '',
       licenseModalExpireDate: '',
       licenseModalRemainDays: 0,
@@ -1338,6 +1344,7 @@ class Home extends React.Component {
   }
 
   appendControlCollectionRow = (row) => {
+    if (!canUseLicenseCapability(this.state.licenseAccess, 'canAcquire')) return;
     collection.push(row);
     localStorage.setItem("collection", JSON.stringify(collection));
     this.setState({ csvData: collection, length: collection.length });
@@ -1537,6 +1544,13 @@ class Home extends React.Component {
       })
       // 主动请求传感器类型清单（请求-应答；主进程连接时也会主动 push 一次）
       this.wsSendObj({ getSensorTypes: true })
+      this._collectionStatusController?.abort();
+      const collectionController = new AbortController();
+      this._collectionStatusController = collectionController;
+      const collectionStatusEpoch = this._collectionStatusEpoch || 0;
+      requestJson('/api/collection/status', { signal: collectionController.signal }).then(payload => {
+        if (!collectionController.signal.aborted && collectionStatusEpoch === (this._collectionStatusEpoch || 0)) this.applyCollectionSummary(payload.collectionSummary || payload);
+      }).catch(() => {});
     };
     ws.onmessage = (e) => {
       const message = parseWebSocketEventPayload(e);
@@ -1601,6 +1615,7 @@ class Home extends React.Component {
   }
 
   componentWillUnmount() {
+    this._collectionStatusController?.abort();
     clearLastFrame();
     if (this.props.portalEmbedded) document.documentElement.style.fontSize = this._portalFontSize;
     if (this._unsubscribeFormulaCharts) {
@@ -1789,6 +1804,14 @@ class Home extends React.Component {
     sitPress = 0;
     const jsonObject = decodedMessage || parseWebSocketEventPayload(e);
     if (!jsonObject) return;
+    const nextLicenseAccess = readLicenseAccess(jsonObject);
+    const effectiveLicenseAccess = nextLicenseAccess === undefined ? this.state.licenseAccess : nextLicenseAccess;
+    const historyOnly = isHistoryOnlyLicense(effectiveLicenseAccess);
+    if (nextLicenseAccess !== undefined) {
+      this.setState({ licenseAccess: nextLicenseAccess, ...(historyOnly ? { licenseModalVisible: false, licenseLockedVisible: false } : {}) });
+      if (historyOnly && this._licenseModal) { this._licenseModal.destroy?.(); this._licenseModal = null; }
+    }
+    if (jsonObject.collectionSummary) this.applyCollectionSummary(jsonObject.collectionSummary);
     if (jsonObject.halowStatus) this.setState({ halowStatus: jsonObject.halowStatus });
     if (jsonObject.halowClear) this.clearHalowDisplay();
     if (jsonObject.serialStatus) {
@@ -2028,7 +2051,7 @@ class Home extends React.Component {
 
     // ====== 密钥过期检查 ======
     // 处理密钥错误提示
-    if (jsonObject.licenseError != null) {
+    if (jsonObject.licenseError != null && !historyOnly) {
       // 无有效密钥时跳转到密钥输入页
       if (jsonObject.noLicense) {
         Modal.error({
@@ -2072,7 +2095,7 @@ class Home extends React.Component {
       );
       console.log('[密钥检查] endDate:', endDate, 'serverNow:', serverNow, 'remainMs:', remainMs, 'remainDays:', remainDays);
 
-      if (remainMs <= 0) {
+      if (remainMs <= 0 && !historyOnly) {
         console.log('[密钥检查] 密钥已过期，弹出提示');
         this.setState({
           licenseModalVisible: true,
@@ -2080,7 +2103,7 @@ class Home extends React.Component {
           licenseModalExpireDate: expireDateStr,
           licenseModalRemainDays: 0
         });
-      } else if (remainDays <= 7) {
+      } else if (remainMs > 0 && remainDays <= 7) {
         // 临期提醒每天只弹一次。
         //
         // 后端每次复检（configManager.js RECHECK_INTERVAL_MS）都会无条件广播授权状态，
@@ -3423,6 +3446,12 @@ class Home extends React.Component {
   };
 
   componentDidUpdate(prevProps, prevState) {
+    if (this.props.licenseAccess !== undefined && prevProps.licenseAccess !== this.props.licenseAccess) {
+      const licenseAccess = readLicenseAccess({ licenseAccess: this.props.licenseAccess });
+      const historyOnly = isHistoryOnlyLicense(licenseAccess);
+      this.setState({ licenseAccess, ...(historyOnly ? { licenseModalVisible: false, licenseLockedVisible: false, colWebFlag: false, colOneFlag: false } : {}) });
+      if (historyOnly && this._licenseModal) { this._licenseModal.destroy?.(); this._licenseModal = null; }
+    }
     const systemChanged = prevState.matrixName !== this.state.matrixName || prevState.systemId !== this.state.systemId;
     if ((prevState.local && !this.state.local) || systemChanged) {
       this.data.current?.initCharts();
@@ -3821,6 +3850,11 @@ class Home extends React.Component {
   }
 
   wsSendObj = (obj) => {
+    if ((obj?.flag === true && !canUseLicenseCapability(this.state.licenseAccess, 'canAcquire'))
+      || (obj?.download && !canUseLicenseCapability(this.state.licenseAccess, 'canExport'))) {
+      message.warning('当前授权仅允许查看和分析历史数据，不能采集或导出。');
+      return Promise.resolve([]);
+    }
     if (obj?.file) obj = { ...obj, file: selectedNativeSystemId(obj.file) };
     const isJqbedAlgorithmCommand = Boolean(
       obj?.getJqbedAlgorithmConfig
@@ -4372,6 +4406,16 @@ class Home extends React.Component {
     }
   };
 
+  /** Apply the storage receipt separately from the capture toggle and timer. */
+  applyCollectionSummary = (value) => {
+    const collectionSummary = readCollectionSummary(value);
+    if (!collectionSummary) return;
+    this._collectionStatusEpoch = (this._collectionStatusEpoch || 0) + 1;
+    const collecting = collectionSummary.phase === 'collecting';
+    this.setState({ collectionSummary, colFlag: !collecting });
+    if (collecting !== colValueFlag) this.setColValueFlag(collecting);
+  };
+
   /**
    * 开始采集计时。Title 上「停止」后面那个数字，单位是**秒**。
    *
@@ -4542,6 +4586,7 @@ class Home extends React.Component {
     return (
       <ConfigProvider locale={antdLocale}>
         <div className={`home${this.props.portalEmbedded ? ' home-portal-embedded' : ''}`}>
+          <RuntimeStatusNotice licenseAccess={this.state.licenseAccess} collectionSummary={this.state.collectionSummary} onRefreshLicense={() => this.wsSendObj({ refreshLicense: true })} />
           {this.state.matrixName != "robot0428" ? <div className="setIcons">
             <div className="setIconItem setIconItem1">
               <Popover placement="top" title={text} content={content}>
@@ -4785,6 +4830,7 @@ class Home extends React.Component {
                   <div
                     className="setIcon marginB10"
                     onClick={() => {
+                      if (!canUseLicenseCapability(this.state.licenseAccess, 'canExport')) { message.warning('当前授权不允许导出数据或分析结果。'); return; }
                       const that = this;
 
                       this.track.current?.loadImg({
@@ -4922,6 +4968,8 @@ class Home extends React.Component {
           </div> : ''}
 
           <Title
+            licenseAccess={this.state.licenseAccess}
+            collectionSummary={this.state.collectionSummary}
             hand={this.state.hand}
             changeAside={this.changeAside}
             i18n={i18n}

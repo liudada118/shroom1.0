@@ -1,1 +1,1 @@
-module.exports = require('./pack-runtime-dependencies').prepareRuntimeDependencies;
+module.exports = require('./package-hooks').electronBuilderBeforePack;

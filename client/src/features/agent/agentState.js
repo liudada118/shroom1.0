@@ -1,6 +1,7 @@
 export const DEFAULT_AGENT_SETTINGS = Object.freeze({ baseUrl: 'https://api.openai.com/v1', model: '', hasApiKey: false });
 export const BUSY_TASK_STATUSES = new Set(['running', 'verifying']);
 export const TOOL_LABELS = {
+  request_history_data: '请你选择历史分析范围', get_history_workspace: '读取历史分析范围', analyze_history_data: '本机统计并比较历史数据',
   request_algorithm_data: '请你选择算法数据',
   get_algorithm_workspace: '读取算法工作台', analyze_algorithm_data: '分析所选采集数据', train_algorithm: '本机训练并比较分类器', test_algorithm: '试运行算法并生成报告', prepare_algorithm_package: '准备保存分类算法',
   get_current_system: '识别本轮当前系统',

@@ -1,10 +1,12 @@
 const path = require('path');
+const { createHash } = require('crypto');
 const { readJson, writeJsonAtomic } = require('../../backend/agent-runtime/storage');
 const { agentError } = require('../../backend/agent-runtime/errors');
 const { normalizeSyncEndpoint } = require('../../backend/agent-runtime/chatSync');
 
 // Only this exact HTTPS endpoint may receive the application's license automatically.
 const DEFAULT_CHAT_SYNC_ENDPOINT = 'https://shroom.jq-industries.com/api/agent/conversations';
+const NOTICE_VERSION = 1;
 
 /** 独立保存聊天上传设置，上传令牌通过本机系统安全存储加密。 */
 function createAgentSyncSettings({ root, safeStorage, getLicenseKey = () => '' }) {
@@ -15,7 +17,8 @@ function createAgentSyncSettings({ root, safeStorage, getLicenseKey = () => '' }
     if (!stored || typeof stored.enabled !== 'boolean' || typeof stored.endpoint !== 'string') throw new Error('invalid');
     const endpoint = normalizeSyncEndpoint(stored.endpoint);
     // ⚠️ 只给未配置的旧设置补默认地址，不能把已有凭据转交给另一个服务器。
-    saved = { enabled: stored.enabled, endpoint: endpoint || (!stored.encryptedToken ? DEFAULT_CHAT_SYNC_ENDPOINT : '') };
+    saved = { enabled: stored.enabled, endpoint: endpoint || (!stored.encryptedToken ? DEFAULT_CHAT_SYNC_ENDPOINT : ''),
+      ...(typeof stored.noticeAcknowledgement === 'string' ? { noticeAcknowledgement: stored.noticeAcknowledgement } : {}) };
     if (stored.encryptedToken) {
       if (typeof stored.encryptedToken !== 'string' || !safeStorage.isEncryptionAvailable() || safeStorage.getSelectedStorageBackend?.() === 'basic_text') throw new Error('unavailable');
       token = safeStorage.decryptString(Buffer.from(stored.encryptedToken, 'base64'));
@@ -28,7 +31,18 @@ function createAgentSyncSettings({ root, safeStorage, getLicenseKey = () => '' }
   }
 
   /** 界面只获得启用状态、服务地址和令牌是否存在。 */
-  function getPublic() { return { ...saved, hasToken: Boolean(token), licenseAuthAvailable: saved.endpoint === DEFAULT_CHAT_SYNC_ENDPOINT, ...(warning ? { warning } : {}) }; }
+  function getPublic() {
+    const { noticeAcknowledgement, ...settings } = saved;
+    return { ...settings, hasToken: Boolean(token), licenseAuthAvailable: saved.endpoint === DEFAULT_CHAT_SYNC_ENDPOINT,
+      noticeVersion: NOTICE_VERSION, noticePending: noticeAcknowledgement !== noticeIdentity(saved.endpoint, token), ...(warning ? { warning } : {}) };
+  }
+
+  /** Bind the visible notice to its destination and credential without persisting that credential. */
+  function noticeIdentity(endpoint, explicitToken) {
+    let credential = explicitToken;
+    if (!credential && endpoint === DEFAULT_CHAT_SYNC_ENDPOINT) { try { credential = getLicenseKey().trim(); } catch { credential = ''; } }
+    return createHash('sha256').update(`${NOTICE_VERSION}\n${endpoint}\n${explicitToken ? 'Bearer' : 'License'}\n${credential}`).digest('hex');
+  }
 
   /** 仅向主进程上传器提供解密后的上传令牌。 */
   function getPrivate() {
@@ -42,10 +56,11 @@ function createAgentSyncSettings({ root, safeStorage, getLicenseKey = () => '' }
 
   /** 部分更新设置；地址变化清除旧令牌，保存失败保留内存旧配置。 */
   function save(input = {}) {
-    if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some((key) => !['enabled', 'endpoint', 'token', 'clearToken'].includes(key))) {
+    if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some((key) => !['enabled', 'endpoint', 'token', 'clearToken', 'acknowledgeNotice'].includes(key))) {
       throw agentError('AGENT_SYNC_SETTINGS_INVALID', '聊天上传设置格式无效。');
     }
-    if ((input.enabled !== undefined && typeof input.enabled !== 'boolean') || (input.clearToken !== undefined && typeof input.clearToken !== 'boolean')) {
+    if ((input.enabled !== undefined && typeof input.enabled !== 'boolean') || (input.clearToken !== undefined && typeof input.clearToken !== 'boolean')
+      || (input.acknowledgeNotice !== undefined && typeof input.acknowledgeNotice !== 'boolean')) {
       throw agentError('AGENT_SYNC_SETTINGS_INVALID', '聊天上传开关格式无效。');
     }
     if (input.token !== undefined && (typeof input.token !== 'string' || input.token.length > 8192 || /[\x00-\x20\x7f]/.test(input.token.trim()))) {
@@ -64,8 +79,9 @@ function createAgentSyncSettings({ root, safeStorage, getLicenseKey = () => '' }
       }
       encryptedToken = safeStorage.encryptString(nextToken).toString('base64');
     }
-    writeJsonAtomic(file, { enabled, endpoint, ...(encryptedToken ? { encryptedToken } : {}) });
-    saved = { enabled, endpoint }; token = nextToken; warning = '';
+    const noticeAcknowledgement = input.acknowledgeNotice === true ? noticeIdentity(endpoint, nextToken) : saved.noticeAcknowledgement;
+    writeJsonAtomic(file, { enabled, endpoint, ...(encryptedToken ? { encryptedToken } : {}), ...(noticeAcknowledgement ? { noticeAcknowledgement } : {}) });
+    saved = { enabled, endpoint, ...(noticeAcknowledgement ? { noticeAcknowledgement } : {}) }; token = nextToken; warning = '';
     return getPublic();
   }
 

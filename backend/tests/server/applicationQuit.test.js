@@ -2,6 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const { createRequire } = require('module');
 const { EventEmitter } = require('events');
 const { createApplicationQuitHandler } = require('../../../app/electron/applicationQuit');
 
@@ -25,6 +26,7 @@ async function verifyMainEntry(installing) {
   const electron = { app, ipcMain: { on() {}, handle() {} } };
   const logger = { info() {}, warn: (...args) => warnings.push(args) };
   const filename = path.resolve(__dirname, '../../../app/electron/index.js');
+  const requireFromEntry = createRequire(filename);
   const module = { exports: {} };
   vm.runInNewContext(fs.readFileSync(filename, 'utf8') + '\nmodule.exports.setUpdater = (value) => { appUpdater = value; };', {
     __dirname: path.dirname(filename), module, process, setTimeout, clearTimeout,
@@ -38,7 +40,7 @@ async function verifyMainEntry(installing) {
       } };
       if (name === '../update/autoUpdater') return { AppUpdater: class {} };
       if (name === '../../backend/common/logger') return logger;
-      return require(name);
+      return requireFromEntry(name);
     },
   }, { filename });
   module.exports.setUpdater({ isInstallingUpdate: () => installing, dispose: () => { disposeCalls += 1; } });

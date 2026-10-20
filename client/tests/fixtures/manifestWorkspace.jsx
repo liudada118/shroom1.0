@@ -63,6 +63,19 @@ function WorkspaceFixture() {
       renderValues: values, normalizedValues: values, timestamp: Date.now(),
     }]);
   }
+  /** 发送连续压力分布，用真实插点和平滑管线观察显示密度，不连接设备。 */
+  function injectSmoothFrame() {
+    const values = Array.from({ length: rows * cols }, (_, index) => {
+      const x = (index % cols) / Math.max(1, cols - 1);
+      const y = Math.floor(index / cols) / Math.max(1, rows - 1);
+      return Math.round(400 * Math.exp(-((x - 0.35) ** 2 + (y - 0.45) ** 2) / 0.04)
+        + 300 * Math.exp(-((x - 0.7) ** 2 + (y - 0.6) ** 2) / 0.03));
+    });
+    rendererRef.current?.sitValue?.({ valuej: 8000, valueg: 2, valuel: 1, value: 0.001,
+      valuef: 0, valuelInit: 0 });
+    rendererRef.current?.pushFrames([{ channelId: 'layout-fixture:mat', outputChannel: 'mat',
+      renderValues: values, normalizedValues: values, timestamp: Date.now() }]);
+  }
   /** 复用正式工具区的框选开关，隔离测试不下发设备命令。 */
   function toggleSelection(next) {
     rendererRef.current?.changeSelectFlag?.(!next);
@@ -81,6 +94,7 @@ function WorkspaceFixture() {
           <button type="button" onClick={() => rendererRef.current?.sitValue?.({ valuef: 0 })}>恢复过滤</button>
           <button type="button" onClick={() => rendererRef.current?.sitValue?.({ value: 0 })}>高度归零</button>
         </>}
+        {query.has('density') && <button type="button" onClick={injectSmoothFrame}>注入平滑压力帧（合成数据）</button>}
       </header>
       <ManifestSidebarOverlay portalEmbedded={portal} enabled={!portal && presentation !== 'immersive'}>
         <div className="aside">

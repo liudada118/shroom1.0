@@ -136,3 +136,88 @@ test('falls back to the unchanged getData(data) path when the native ABI is unav
     harness.restore();
   }
 });
+
+test('jqbed replies cannot update cached matrices across collection start, stop or system reset', async () => {
+  const harness = createTimerHarness();
+  const matrices = [], events = [], statuses = [];
+  const port = { isOpen: true };
+  let context = { systemId: 'jqbed', collectionId: null, phase: 'idle' }, complete;
+  const service = createPetCareRuntimeService({ getFile: () => 'jqbed', getPointArr: () => new Array(1024).fill(1), getPort: () => port,
+    getExecutionContext: () => context, callPy: () => new Promise((resolve) => { complete = resolve; }),
+    setJqbedMatrixOrigin: (value) => matrices.push(value), publishSystemEvent: (value) => events.push(value), setJqbedAlgorithmStatus: (value) => statuses.push(value) });
+  try {
+    service.startVitalSignsTimer();
+    const tick = harness.timers[0].callback;
+    const beforeCollection = tick(); await Promise.resolve();
+    context = { systemId: 'jqbed', collectionId: 'capture-a', phase: 'collecting' };
+    complete({ ...algorithmResult(), matrix_origin: [100] }); await beforeCollection;
+    assert.equal(matrices.length, 0); assert.equal(events.length, 0);
+    const beforeStop = tick(); await Promise.resolve();
+    context = { ...context, phase: 'completed' };
+    complete({ ...algorithmResult(), matrix_origin: [200] }); await beforeStop;
+    assert.equal(matrices.length, 0);
+    const beforeReset = tick(); await Promise.resolve(); service.resetAll();
+    complete({ ...algorithmResult(), matrix_origin: [300] }); await beforeReset;
+    assert.equal(matrices.length, 0);
+    const current = tick(); await Promise.resolve(); complete({ ...algorithmResult(), matrix_origin: [400] }); await current;
+    assert.deepEqual(matrices, [[400]]); assert.equal(events.length, 1);
+    assert.equal(statuses.length, 0);
+  } finally { service.dispose(); harness.restore(); }
+});
+
+test('pet reset and step retain their originating context and disposal discards pending replies', async () => {
+  const harness = createTimerHarness();
+  const port = { isOpen: true }, calls = [], events = [];
+  let context = { systemId: 'petCare', collectionId: 'a', phase: 'collecting' }, completeReset, completeStep;
+  const service = createPetCareRuntimeService({ getFile: () => 'petCare', getPointArr: () => [1, 2], getPort: () => port,
+    getExecutionContext: () => context, publishSystemEvent: (value) => events.push(value), callPy: (name) => {
+      calls.push(name);
+      return new Promise((resolve) => { if (name.includes('reset')) completeReset = resolve; else completeStep = resolve; });
+    } });
+  try {
+    service.startPetCareTimer('petCare'); const tick = harness.timers[0].callback;
+    const first = tick(); context = { ...context, collectionId: 'b' }; completeReset({}); await first;
+    assert.deepEqual(calls, ['reset_pet_care']);
+    const second = tick(); completeReset({}); await Promise.resolve();
+    assert.deepEqual(calls, ['reset_pet_care', 'reset_pet_care', 'pet_care_step']);
+    service.dispose(); completeStep({ posture_state: 0, breath_rate: 0 }); await second;
+    assert.equal(events.length, 0);
+    await tick(); assert.equal(calls.length, 3);
+  } finally { service.dispose(); harness.restore(); }
+});
+
+test('an old finally cannot overwrite a newer runtime generation', async () => {
+  const harness = createTimerHarness();
+  const port = { isOpen: true }, events = [], complete = [];
+  const service = createPetCareRuntimeService({ getFile: () => 'petCareMini', getPointArr: () => [1], getPort: () => port,
+    getExecutionContext: () => ({ systemId: 'petCareMini', collectionId: 'a', phase: 'collecting' }), publishSystemEvent: value => events.push(value),
+    callPy: (name) => name.includes('reset') ? Promise.resolve({}) : new Promise(resolve => complete.push(resolve)) });
+  try {
+    service.startPetCareTimer('petCareMini'); const tick = harness.timers[0].callback;
+    const old = tick(); await Promise.resolve(); service.resetAll();
+    const current = tick(); await Promise.resolve();
+    complete[0]({ posture_state: 0 }); await old;
+    await tick(); assert.equal(complete.length, 2, 'old finally must not release the current call guard');
+    complete[1]({ posture_state: 0 }); await current;
+    assert.equal(events.length, 1);
+  } finally { service.dispose(); harness.restore(); }
+});
+
+test('an obsolete ABI probe cannot publish status or prevent a fresh context from probing again', async () => {
+  const harness = createTimerHarness();
+  const port = { isOpen: true }, statuses = [];
+  let context = { systemId: 'jqbed', collectionId: 'a', phase: 'collecting' }, probeCount = 0, complete;
+  const calls = [];
+  const service = createPetCareRuntimeService({ getFile: () => 'jqbed', getPointArr: () => new Array(1024).fill(1), getPort: () => port,
+    getExecutionContext: () => context, getJqbedAlgorithmConfigSnapshot: () => ({ version: 1, values: {} }),
+    setJqbedAlgorithmStatus: value => statuses.push(value), callPy: async name => { calls.push(name); return algorithmResult(); },
+    probeJqbedAlgorithmConfig: () => ++probeCount === 1 ? new Promise(resolve => { complete = resolve; }) : Promise.resolve({ onbedFilterAvailable: true, onbedFilterSensitivitySchema: true }) });
+  try {
+    service.startVitalSignsTimer(); const tick = harness.timers[0].callback;
+    const old = tick(); await Promise.resolve();
+    context = { ...context, collectionId: 'b' }; complete({ onbedFilterAvailable: false }); await old;
+    assert.equal(statuses.length, 0); assert.equal(calls.length, 0);
+    await tick(); assert.equal(probeCount, 2); assert.deepEqual(calls, ['getData']);
+    assert.equal(statuses.at(-1).state, 'ready');
+  } finally { service.dispose(); harness.restore(); }
+});
