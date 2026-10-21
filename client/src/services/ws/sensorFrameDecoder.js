@@ -27,6 +27,24 @@ const LEGACY_PROTOCOL_FIELDS = [
   'packetSourcePort',
 ];
 
+/** 将已验证的矩阵说明投影给旧页面，避免降采样后的矩阵再次转置。 */
+function assignMatrixProtocolMetadata(target, protocol) {
+  if (['row-major', 'transposed'].includes(protocol.matrixOrientation)) {
+    target.matrixOrientation = protocol.matrixOrientation;
+  }
+  const sampling = protocol.matrixDownsample;
+  if (!isObject(sampling) || typeof sampling.enabled !== 'boolean') return;
+  const samplePoints = ['topLeft', 'topRight', 'bottomLeft', 'bottomRight'];
+  const projected = { enabled: sampling.enabled };
+  for (const field of ['samplePoint', 'displaySamplePoint']) {
+    if (samplePoints.includes(sampling[field])) projected[field] = sampling[field];
+  }
+  for (const field of ['blockWidth', 'blockHeight']) {
+    if (Number.isInteger(sampling[field]) && sampling[field] > 0 && sampling[field] <= 64) projected[field] = sampling[field];
+  }
+  target.matrixDownsample = projected;
+}
+
 function isObject(value) {
   return value != null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -303,6 +321,7 @@ export function adaptSensorFrameForClient(frame) {
   }
 
   if (isObject(payload.protocol)) {
+    assignMatrixProtocolMetadata(internal, payload.protocol);
     // ⚠️ 弯指基准依赖未清零映射，不能从归零后的 mapped 阶段补回。
     assignArray(internal, 'newArr147Raw', payload.protocol.mappedRaw);
     for (const field of LEGACY_PROTOCOL_FIELDS) {

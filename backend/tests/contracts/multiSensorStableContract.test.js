@@ -207,9 +207,41 @@ function testBackendValidatorFailsClosed() {
   });
 }
 
+/** 矩阵显示方向只进入 protocol；旧帧不补造方向或修改压力值。 */
+function testMatrixProtocolMetadataSurvivesCanonicalProjection() {
+  const values = Array.from({ length: 256 }, (_, index) => index);
+  const sampling = { enabled: true, samplePoint: 'bottomLeft', displaySamplePoint: 'bottomLeft', blockWidth: 2, blockHeight: 2 };
+  const frame = buildSensorFrameEnvelope({ channel: 'sit', sensorType: 'smallBed12B', payload: {
+    sitData: values, matrixWidth: 16, matrixHeight: 16, matrixOrientation: 'transposed', matrixDownsample: sampling,
+  } });
+  assert.strictEqual(validateBackendFrame(frame), true);
+  assert.deepStrictEqual(frame.payload.matrix, { rows: 16, cols: 16, total: 256 });
+  assert.deepStrictEqual(frame.payload.value, values);
+  assert.deepStrictEqual(frame.payload.protocol, { matrixOrientation: 'transposed', matrixDownsample: sampling });
+  assert.strictEqual(Object.hasOwn(frame, 'matrixOrientation'), false);
+  assert.deepStrictEqual(buildSensorFrameEnvelope({ payload: frame }).payload.protocol, frame.payload.protocol);
+
+  const legacy = buildSensorFrameEnvelope({ channel: 'sit', sensorType: 'smallBed12B', payload: { sitData: values } });
+  assert.strictEqual(legacy.payload.protocol, null);
+  assert.deepStrictEqual(legacy.payload.value, values);
+  const invalid = buildSensorFrameEnvelope({ channel: 'sit', sensorType: 'hand', payload: {
+    sitData: values, matrixOrientation: { transposed: true },
+    matrixDownsample: { enabled: 'true', samplePoint: 'unsafe', blockWidth: 2 },
+  } });
+  assert.strictEqual(invalid.payload.protocol, null);
+  const sanitized = buildSensorFrameEnvelope({ payload: { ...frame, payload: { ...frame.payload, protocol: {
+    matrixOrientation: 'flip-everything', matrixDownsample: {
+      enabled: true, samplePoint: 'unsafe', displaySamplePoint: 'bottomRight', blockWidth: '2', blockHeight: -1, privateField: 'discard',
+    },
+  } } } });
+  assert.deepStrictEqual(sanitized.payload.protocol, { matrixDownsample: { enabled: true, displaySamplePoint: 'bottomRight' } });
+  assert.deepStrictEqual(sanitized.payload.value, values);
+}
+
 testPublishedCopiesDoNotDrift();
 testAllBackendBoundariesUseTheFrozenVersion();
 testWireShapeAndPlaybackDiagnosticsAreFrozen();
 testBackendValidatorFailsClosed();
+testMatrixProtocolMetadataSurvivesCanonicalProjection();
 
 console.log('multiSensorStableContract.test.js passed');

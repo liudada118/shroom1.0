@@ -40,7 +40,8 @@ describe('统一矩阵工作区渲染', () => {
     const model = buildWorkspaceDisplayProfileModel(page, { matrix: { rows: 23, cols: 23 } });
     const active = resolveDisplayProfile(model, { rendererId: resolveWorkspaceRendererId('numMatrix2d') });
     expect(active.renderer).toMatchObject({ type: 'numMatrix', params: {
-      backend: 'sprite3d', frameInput: 'raw', manageSidebar: false, gridWidth: 23, gridHeight: 23,
+      backend: 'webgl', frameInput: 'raw', manageSidebar: false, gridWidth: 23, gridHeight: 23,
+      webgl: { whiteOnZero: false, indexRow: true, indexColumn: true },
     } });
     expect(active.canvasWidgets).toEqual(page.widgets);
     expect(page.chartCards).toEqual([{ metric: 'maxPressure' }]);
@@ -71,7 +72,8 @@ describe('统一矩阵工作区渲染', () => {
     const before = JSON.stringify(page);
     const renderer = buildWorkspaceDisplayProfileModel(page, { matrix: { rows: 23, cols: 23 } }).renderers[0];
     expect(renderer).toMatchObject({ id: 'numMatrix', label: '2D 数字', params: {
-      backend: 'sprite3d', frameInput: 'raw', gridWidth: 23, gridHeight: 23,
+      backend: 'webgl', frameInput: 'raw', gridWidth: 23, gridHeight: 23,
+      webgl: { whiteOnZero: false, indexRow: true, indexColumn: true },
     } });
     expect(JSON.stringify(page)).toBe(before);
     expect(resolveDisplayProfile(buildWorkspaceDisplayProfileModel(page, { matrix: { rows: 23, cols: 23 } }), {}).rendererId)

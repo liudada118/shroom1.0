@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 import {
   adaptSensorFrameForClient,
   decodeWebSocketPayload,
@@ -9,6 +12,28 @@ import {
   isSensorFrameForDisplay,
   isSensorFrameEnvelope,
 } from './sensorFrameDecoder';
+
+const nodeRequire = createRequire(import.meta.url);
+const { buildSensorFrameEnvelope } = nodeRequire('../../../../backend/kernel/realtime/sensorFrameEnvelope');
+const { buildRealtimeFrame } = nodeRequire('../../../../sdk/backend/sensors/smallBed12B');
+const { parse } = nodeRequire('@babel/parser');
+
+/** 执行实际小床 raw 分派方法，隔离与本次方向契约无关的导入和其他硬件。 */
+function loadSmallBedRawConsumer() {
+  const source = readFileSync(new URL('../../page/home/util.js', import.meta.url), 'utf8');
+  const ast = parse(source, { sourceType: 'module' });
+  const declarations = ast.program.body.flatMap(node => node.declarations || node.declaration?.declarations || []);
+  const transpose = declarations.find(node => node.id.name === 'transposeSquareMatrix');
+  const methods = declarations.find(node => node.id.name === 'sitTypeEvent').init.properties;
+  const consumer = methods.find(node => node.key.name === 'smallBed12B');
+  return vm.runInNewContext(`const transposeSquareMatrix = ${source.slice(transpose.init.start, transpose.init.end)};
+    ({ ${source.slice(consumer.start, consumer.end)} }).smallBed12B;`);
+}
+
+/** 给真实小床降采样函数提供按行列交换的矩阵实现。 */
+function transposeSquare(values, size) {
+  return values.map((_, index) => values[(index % size) * size + Math.floor(index / size)]);
+}
 
 const frame = {
   type: 'sensor.frame',
@@ -58,6 +83,61 @@ const frame = {
 describe('sensorFrameDecoder', () => {
   beforeEach(() => {
     globalThis.localStorage?.removeItem?.('file');
+  });
+
+  it('小床16×16已转置帧经过真实canonical/decoder链后按原方向显示，不再二次转置', () => {
+    const raw = Array.from({ length: 1024 }, (_, index) => Math.floor(index / 32) * 100 + index % 32);
+    const realtime = buildRealtimeFrame(raw, { displayOptions: { matrixMode: '16x16', samplePoint: 'bottomLeft' },
+      transposeSquareMatrix: transposeSquare });
+    const canonical = buildSensorFrameEnvelope({ channel: 'sit', sensorType: 'smallBed12B', payload: realtime });
+    const decoded = decodeWebSocketPayload(JSON.stringify(canonical));
+    expect(decoded.matrixOrientation).toBe('transposed');
+    expect(decoded.matrixDownsample).toEqual(realtime.matrixDownsample);
+    expect(decoded.matrixWidth).toBe(16);
+    expect(decoded.matrixHeight).toBe(16);
+    const rendered = [];
+    loadSmallBedRawConsumer()({ that: { state: { numMatrixFlag: 'numoriginal' },
+      com: { current: { changeWsDataRaw: values => rendered.push(Array.from(values)) } } },
+      wsPointData: getSensorFrameChannelValue(decoded, 'sit'), jsonObject: decoded });
+    expect(rendered).toEqual([realtime.sitData]);
+    expect(rendered[0][1]).not.toBe(rendered[0][16]);
+    expect(canonical.payload.value).toEqual(realtime.sitData);
+    expect(canonical.displaySystemId).toBe('smallBed12B');
+    expect(decoded).not.toHaveProperty('sitData');
+  });
+
+  it('没有方向标记的旧帧保留旧的小床转置规则，不猜测方向', () => {
+    const values = Array.from({ length: 256 }, (_, index) => index);
+    const canonical = buildSensorFrameEnvelope({ channel: 'sit', sensorType: 'smallBed12B', payload: {
+      sitData: values, matrixWidth: 16, matrixHeight: 16,
+    } });
+    const decoded = decodeWebSocketPayload(canonical);
+    expect(decoded).not.toHaveProperty('matrixOrientation');
+    const rendered = [];
+    const consume = loadSmallBedRawConsumer();
+    for (const message of [decoded, decodeWebSocketPayload({ sitData: values })]) {
+      consume({ that: { state: { numMatrixFlag: 'numoriginal' },
+        com: { current: { changeWsDataRaw: data => rendered.push(Array.from(data)) } } },
+        wsPointData: getSensorFrameChannelValue(message, 'sit'), jsonObject: message });
+    }
+    expect(rendered).toEqual([transposeSquare(values, 16), transposeSquare(values, 16)]);
+  });
+
+  it('任意系统的矩阵说明只接受方向、采样点和有限整数块大小白名单', () => {
+    const decoded = adaptSensorFrameForClient({ ...frame, payload: { ...frame.payload, protocol: {
+      matrixOrientation: 'transposed', matrixDownsample: { enabled: true, samplePoint: 'topRight',
+        displaySamplePoint: 'private', blockWidth: 2, blockHeight: Infinity, displaySystemId: 'forged' },
+    } } });
+    expect(decoded.matrixOrientation).toBe('transposed');
+    expect(decoded.matrixDownsample).toEqual({ enabled: true, samplePoint: 'topRight', blockWidth: 2 });
+    expect(decoded.displaySystemId).toBe(frame.displaySystemId);
+    for (const invalid of ['flip', 1, {}, null]) {
+      const rejected = adaptSensorFrameForClient({ ...frame, payload: { ...frame.payload, protocol: {
+        matrixOrientation: invalid, matrixDownsample: { enabled: 'yes', blockWidth: '2' },
+      } } });
+      expect(rejected).not.toHaveProperty('matrixOrientation');
+      expect(rejected).not.toHaveProperty('matrixDownsample');
+    }
   });
 
   it('从 canonical payload 读取自定义通道及数据阶段', () => {

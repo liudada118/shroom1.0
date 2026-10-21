@@ -146,6 +146,7 @@ const NumMatrixRenderer = React.forwardRef((props, refs) => {
       pointWindow: createRollingWindow(config.chartWindow),
       backend: null,
       api: null,
+      lastRawFrame: null,
     };
   }
 
@@ -265,12 +266,18 @@ const NumMatrixRenderer = React.forwardRef((props, refs) => {
       const t = state.tuning;
       const source = prop?.wsPointData;
       if (config.frameInput === 'raw' && state.backend?.setRawFrame) {
-        if (Array.isArray(source)) state.backend.setRawFrame(source);
+        if (Array.isArray(source)) acceptRawFrame(source);
         return;
       }
       const dataArr = applyFloorFilter(source, t.valuef1);
       state.backend?.setFrame(dataArr);
       reportStats(config.statsBeforeFilter && Array.isArray(source) ? source : dataArr, local);
+    }
+
+    /** 保留最近原始输入供矩阵尺寸重建后重绘；输入方向仍交给后端处理一次。 */
+    function acceptRawFrame(source) {
+      state.lastRawFrame = Array.isArray(source) ? source : null;
+      return state.backend?.setRawFrame?.(source);
     }
 
     /**
@@ -317,12 +324,16 @@ const NumMatrixRenderer = React.forwardRef((props, refs) => {
       // 同一条 —— 这正是接 `webgl` 之前所有后端的行为。
       changeWsDataRaw: (wsPointData) => (
         state.backend?.setRawFrame
-          ? state.backend.setRawFrame(wsPointData)
+          ? acceptRawFrame(wsPointData)
           : sitData({ wsPointData }, propsRef.current.local)
       ),
     };
 
     state.backend.start();
+    // ⚠️ 16/32 切换的首帧先到旧画布；尺寸生效后必须重放，否则单帧回放会空白。
+    if (state.backend.setRawFrame && state.lastRawFrame?.length === grid.count) {
+      state.backend.setRawFrame(state.lastRawFrame);
+    }
 
     return () => {
       state.api = null;

@@ -1,7 +1,8 @@
 import * as THREE from "three";
+import { createPointViewTools } from './pointViewTools';
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { TrackballControls } from "three/examples/jsm/controls/TrackballControls";
-import React, { useEffect, useImperativeHandle } from "react";
+import React, { useEffect, useImperativeHandle, useRef } from "react";
 import { TextureLoader } from "three";
 import TWEEN from "@tweenjs/tween.js";
 import {
@@ -130,6 +131,7 @@ var ndata1 = new Array(sitnum1 * sitnum2).fill(0), ndata = new Array(backnum1 * 
   newData = new Array(backnum1 * backnum2).fill(0), newDatahead = new Array(backnum1 * backnum2).fill(0);
 
 const Canvas = React.forwardRef((props, refs) => {
+  const workspaceViewRef = useRef(null);
   local = props.local
   let showFlag = false
   var FPS = 10;
@@ -881,6 +883,8 @@ const Canvas = React.forwardRef((props, refs) => {
 
 
   useImperativeHandle(refs, () => ({
+    /** 返回当前点图的视角工具，切换渲染器后不复用旧场景。 */
+    getViewTools: () => workspaceViewRef.current,
     sitData,
     changeDataFlag: changeDataFlag,
     changePointRotation,
@@ -898,9 +902,21 @@ const Canvas = React.forwardRef((props, refs) => {
     window.removeEventListener('keydown', function () { })
     window.removeEventListener('keyup', function () { })
     init();
+    // 贴图底板与分区点图必须一起变换，attach 保留当前世界坐标。
+    const workspaceGroup = new THREE.Group();
+    workspaceGroup.position.copy(pointGroup.position);
+    scene.add(workspaceGroup);
+    workspaceGroup.attach(group);
+    workspaceGroup.attach(pointGroup);
+    workspaceViewRef.current = createPointViewTools({ object: workspaceGroup, camera, controls });
     animate();
     return () => {
       if (animationRequestId) cancelAnimationFrame(animationRequestId);
+      workspaceViewRef.current?.dispose();
+      workspaceViewRef.current = null;
+      controls?.dispose();
+      renderer?.dispose();
+      renderer?.forceContextLoss();
       selectHelper?.dispose()
     };
   }, []);

@@ -2,6 +2,7 @@ const fs = require('fs/promises');
 const path = require('path');
 const { randomUUID } = require('crypto');
 const { createAgentSettings } = require('./agentSettings');
+const { createAgentModelCatalog } = require('./agentModelCatalog');
 const { createAgentSyncSettings } = require('./agentSyncSettings');
 const { createChatSync } = require('../../backend/agent-runtime/chatSync');
 const { agentError, publicError } = require('../../backend/agent-runtime/errors');
@@ -11,7 +12,7 @@ const { recordBusinessEvent } = require('../../backend/common/businessEvents');
 
 const ACTIONS = new Set(['getState', 'listConversations', 'openConversation', 'listAlgorithmRecords', 'setAlgorithmSelection', 'submitAlgorithmData',
   'listHistoryRecords', 'setHistorySelection', 'completeHistoryDataRequest', 'cancelHistoryDataRequest',
-  'saveSettings', 'saveSyncSettings', 'retryChatSync', 'clearChatSyncQueue', 'restoreChatSyncQueue', 'startTask', 'cancelTask', 'newConversation', 'importFiles', 'importAttachments', 'importClipboard', 'applyProposal', 'restoreProposal']);
+  'getModelCatalog', 'saveSettings', 'saveSyncSettings', 'retryChatSync', 'clearChatSyncQueue', 'restoreChatSyncQueue', 'startTask', 'cancelTask', 'newConversation', 'importFiles', 'importAttachments', 'importClipboard', 'applyProposal', 'restoreProposal']);
 const trustedWindowOrigins = new WeakMap();
 
 /** 由主进程加载已核验的前端地址，并绑定该窗口唯一可信的 Agent 来源。 */
@@ -38,11 +39,13 @@ function isTrustedAgentSender(event, window) {
 }
 
 /** 管理独立 Agent 子进程、有限 IPC、附件选择和操作系统凭据存储。 */
-function createAgentProcess({ electron, root, getWindow, timeoutMs = 20000, backendEndpoints = {}, getLicenseKey = () => '' }) {
+function createAgentProcess({ electron, root, getWindow, timeoutMs = 20000, backendEndpoints = {}, getLicenseKey = () => '', modelCatalogUrl }) {
   const observedTasks = new Set();
   const observedProposals = new Map();
   const { utilityProcess, safeStorage, dialog } = electron;
   const settings = createAgentSettings({ root, safeStorage });
+  const modelCatalog = createAgentModelCatalog({ root, url: modelCatalogUrl,
+    fetchImpl: electron.net ? (url, options) => electron.net.fetch(url, options) : globalThis.fetch });
   const syncSettings = createAgentSyncSettings({ root, safeStorage, getLicenseKey });
   const requests = new Map();
   let child = null, starting = null, closed = false, lastState = null, actionPending = false;
@@ -257,6 +260,12 @@ function createAgentProcess({ electron, root, getWindow, timeoutMs = 20000, back
       ? Object.keys(payload).some((key) => key !== 'files') || !Array.isArray(payload.files) || payload.files.length > 6
       : JSON.stringify(payload).length > 24000)) throw agentError('AGENT_INPUT_INVALID', 'Agent 操作参数无效或过大。');
     if (closed) throw agentError('AGENT_CLOSED', 'Agent 正在关闭。');
+    if (action === 'getModelCatalog') {
+      if (Object.keys(payload).some((key) => key !== 'refresh') || (payload.refresh !== undefined && typeof payload.refresh !== 'boolean')) {
+        throw agentError('AGENT_INPUT_INVALID', '模型目录请求参数无效。');
+      }
+      return modelCatalog.load({ refresh: payload.refresh === true });
+    }
     if (action === 'saveSyncSettings') {
       syncSettings.save(payload);
       chatSync.reconfigure();
@@ -311,6 +320,7 @@ function createAgentProcess({ electron, root, getWindow, timeoutMs = 20000, back
   /** 优先请求正常退出，超时后结束专用进程。 */
   async function dispose() {
     closed = true;
+    modelCatalog.dispose();
     const processRef = child;
     if (!processRef) { chatSync.dispose(); return; }
     try { await request(processRef, 'shutdown', {}, 3000); } catch { /* 记录由运行器恢复为中断或不确定。 */ }

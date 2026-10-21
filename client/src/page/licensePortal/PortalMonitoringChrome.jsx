@@ -2,6 +2,17 @@ import React from 'react';
 import { AppstoreOutlined, LineChartOutlined, SlidersOutlined, ToolOutlined, ApiOutlined, PlayCircleOutlined, PauseCircleOutlined, HistoryOutlined, RadarChartOutlined, CloseOutlined } from '@ant-design/icons';
 import './PortalUtilityPanel.css';
 
+/** 语言与显示选择常驻工具栏，收起快捷工具时仍能直接操作。 */
+export function PortalDisplayPanel({ languageControl, children }) {
+  return <section className="portal-display-panel" aria-labelledby="portal-display-title">
+    <header><SlidersOutlined aria-hidden="true" /><strong id="portal-display-title">渲染与显示</strong></header>
+    <div className="portal-display-fields">
+      <label className="portal-display-language"><span>界面语言</span>{languageControl}</label>
+      {children}
+    </div>
+  </section>;
+}
+
 /** 会话栏直接显示串口下拉；回放仍打开记录弹窗，不模拟连接或采集状态。 */
 export function PortalSessionBar({ mode, onMode, controlsOpen, onControls, deviceControls, selectedPorts, collecting, onStart, onStop, busy = false, elapsed = 0, canAcquire = true }) {
   return <div className="portal-session-bar" aria-label="监测控制">

@@ -180,6 +180,37 @@ function compactObject(value) {
   return entries.length ? Object.fromEntries(entries) : null;
 }
 
+/** 白名单投影矩阵方向与降采样说明，保留展示坐标但不改变压力数组。 */
+function normalizeMatrixProtocolMetadata(data = {}) {
+  const orientations = ['row-major', 'transposed'];
+  const samplePoints = ['topLeft', 'topRight', 'bottomLeft', 'bottomRight'];
+  const sampling = data.matrixDownsample;
+  let matrixDownsample;
+  if (sampling && typeof sampling === 'object' && !Array.isArray(sampling)
+    && typeof sampling.enabled === 'boolean') {
+    matrixDownsample = compactObject({
+      enabled: sampling.enabled,
+      samplePoint: samplePoints.includes(sampling.samplePoint) ? sampling.samplePoint : undefined,
+      displaySamplePoint: samplePoints.includes(sampling.displaySamplePoint) ? sampling.displaySamplePoint : undefined,
+      blockWidth: Number.isInteger(sampling.blockWidth) && sampling.blockWidth > 0 && sampling.blockWidth <= 64
+        ? sampling.blockWidth : undefined,
+      blockHeight: Number.isInteger(sampling.blockHeight) && sampling.blockHeight > 0 && sampling.blockHeight <= 64
+        ? sampling.blockHeight : undefined,
+    });
+  }
+  return compactObject({
+    matrixOrientation: orientations.includes(data.matrixOrientation) ? data.matrixOrientation : undefined,
+    matrixDownsample,
+  }) || {};
+}
+
+/** 复核已成形 canonical 帧中的矩阵附加说明，其余现有协议字段保持原状。 */
+function normalizeCanonicalProtocolMetadata(protocol) {
+  if (!protocol || typeof protocol !== 'object' || Array.isArray(protocol)) return null;
+  const { matrixOrientation: _orientation, matrixDownsample: _sampling, ...rest } = protocol;
+  return { ...rest, ...normalizeMatrixProtocolMetadata(protocol) };
+}
+
 /**
  * 将回放诊断信息投影为稳定 history 契约。
  *
@@ -335,9 +366,7 @@ function buildSensorFrameEnvelope({
         temperature: framePayload.temperature && typeof framePayload.temperature === 'object'
           ? framePayload.temperature
           : null,
-        protocol: framePayload.protocol && typeof framePayload.protocol === 'object'
-          ? framePayload.protocol
-          : null,
+        protocol: normalizeCanonicalProtocolMetadata(framePayload.protocol),
         history: normalizeHistoryMetadata(framePayload.history),
       },
     };
@@ -401,6 +430,7 @@ function buildSensorFrameEnvelope({
     handSide: data.handSide,
     outputSide: data.outputSide,
     packetSourcePort: data.packetSourcePort,
+    ...normalizeMatrixProtocolMetadata(data),
   });
   const history = normalizeHistoryMetadata(data.history, {
     index: data.index,

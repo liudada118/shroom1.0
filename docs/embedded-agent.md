@@ -33,6 +33,8 @@ Shroom Agent 提供软件内对话入口，能够查询设备与系统、生成�
 
 ### 模型连接怎么填
 
+“模型服务商”和“模型名称”现在从授权服务的公开目录读取，支持手动刷新；离线或接口异常时保留最近有效列表，首次使用退回内置选项。目录更新不会改变已保存/正在编辑的连接，也不携带API密钥。服务端配置与首次客户端交付方式见 [模型目录接口](agent-model-catalog-api.md)。
+
 | 字段 | 填写方式 |
 | --- | --- |
 | 模型服务商 | 选择 **DeepSeek 官方 API**、**OpenAI 官方 API** 或 **自定义地址／中转站**。官方选项自动设置地址；自定义选项可填写原中转地址。 |
@@ -44,7 +46,7 @@ DeepSeek Flash 支持图片输入；V4 Pro 官方暂不支持视觉输入。选�
 
 当前接入的是 Responses API。DeepSeek 官方的 [Responses API](https://api-docs.deepseek.com/guides/responses_api/) 支持本软件使用的流式输出和函数工具调用；DeepSeek 模型清单见[官方模型文档](https://api-docs.deepseek.com/quick_start/pricing/)。仅支持 Chat Completions 的服务不能直接使用；第三方兼容服务仍需实际验证。OpenAI 接口说明见 [Responses 官方指南](https://developers.openai.com/api/docs/guides/migrate-to-responses)、[工具调用指南](https://developers.openai.com/api/docs/guides/function-calling)和[流式响应指南](https://developers.openai.com/api/docs/guides/streaming-responses/)。
 
-下拉框是常用模型预设，不会读取账户的模型清单。预设接口能力核对于 2026-09-17：[GPT-5 mini](https://developers.openai.com/api/docs/models/gpt-5-mini)、[GPT-5.4 mini](https://developers.openai.com/api/docs/models/gpt-5.4-mini)、[GPT-5.4](https://developers.openai.com/api/docs/models/gpt-5.4)、[GPT-4.1 mini](https://developers.openai.com/api/docs/models/gpt-4.1-mini)。手动填写的模型也需要支持 Responses API 和工具调用。
+下拉框由公开目录提供常用选项，不会读取账户的私有模型清单。随包预设的历史接口能力核对于 2026-09-17：[GPT-5 mini](https://developers.openai.com/api/docs/models/gpt-5-mini)、[GPT-5.4 mini](https://developers.openai.com/api/docs/models/gpt-5.4-mini)、[GPT-5.4](https://developers.openai.com/api/docs/models/gpt-5.4)、[GPT-4.1 mini](https://developers.openai.com/api/docs/models/gpt-4.1-mini)。手动填写的模型也需要支持 Responses API 和工具调用。
 
 远程地址必须使用 HTTPS；`localhost`、`127.0.0.1` 和 `[::1]` 的本机服务允许 HTTP。地址不能包含账号密码、查询参数或片段。**更换服务地址会清除旧服务密钥，需要重新填写。**
 
@@ -70,7 +72,7 @@ DeepSeek 官方直连只改变模型请求目的地；若已开启“聊天同�
 
 2026-09-21 现场最小请求中，配置的第三方服务对 `gpt-4.1-mini` 返回 HTTP 403，SSE 错误事件明确说明“当前分组未授权使用该模型”。这表示当前请求被分组权限拒绝，不代表模型对所有账户不可用。软件无法替账户开通模型权限，也不会自动更换模型或密钥。
 
-同一天使用相同服务地址和密钥，`gpt-6-astra` 最小流式请求及项目 provider 请求均返回完整结果 `OK`。可重启软件后，在模型设置中选择 **Codex（RelaxyCode）→ ChatGPT-6-Astra** 并保存，再发起新任务。此验证仅覆盖短文本模型连接，未验证真实工具任务；其余四个模型由用户提供清单，未逐个实测。服务商清单见 [RelaxyCode 模型价格](https://www.relaxycode.com/pricing)。
+同一天使用相同服务地址和密钥，`gpt-6-astra` 最小流式请求及项目 provider 请求均返回完整结果 `OK`。可重启软件后，在模型设置中选择 **自定义地址／中转站 → ChatGPT-6-Astra** 并保存，再发起新任务。此验证仅覆盖短文本模型连接，未验证真实工具任务；其余四个模型由用户提供清单，未逐个实测。服务商清单见 [RelaxyCode 模型价格](https://www.relaxycode.com/pricing)。
 
 错误解析同时支持 JSON 与 SSE，仍限制为 16 KiB 并只输出固定提示。其他未识别的 403 提示检查密钥分组、模型调用权限和服务商访问限制。修复后需完整退出并重启 Shroom，再发送新任务；旧执行记录保留原提示。
 

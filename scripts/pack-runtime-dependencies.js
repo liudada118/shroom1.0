@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { createHash } = require('node:crypto');
 const { createRequire } = require('module');
 // 从已声明的构建工具链加载，兼容 pnpm 隔离安装。
 const builderRequire = createRequire(require.resolve('electron-builder'));
@@ -7,6 +8,14 @@ const libraryRequire = createRequire(builderRequire.resolve('app-builder-lib'));
 const semver = libraryRequire('semver');
 
 const preparedConfigs = new WeakSet();
+const localWorkspaceDirectories = new Set([
+  'display-systems', 'displaysystems', 'agent-apps', 'manifest-algorithm-bindings',
+  'managed-display-systems', 'managed-native-systems', 'company-system-revisions',
+  'serial-protocols', 'builtin-system-copies',
+]);
+const localWorkspaceFiles = new Set([
+  'managed-system-catalog.json', 'system-package-staff-credential.json', 'jqbed-algorithm-config.json',
+]);
 const packageFilter = [
   '**/*', '!node_modules{,/**/*}', '!test{,/**/*}', '!tests{,/**/*}',
   '!__tests__{,/**/*}', '!example{,/**/*}', '!examples{,/**/*}',
@@ -113,15 +122,40 @@ async function runtimeDependenciesHandledExternally() {
   return false;
 }
 
-/** 校验 ASAR 内每个生产包的依赖可达性与版本；不允许从开发机 node_modules 补漏。 */
+/** 读取包清单前核对归档中的文件字节，避免把偏移损坏误报成业务 JSON 错误。 */
+function readPackagedManifest(asar, archivePath, relative) {
+  const filename = path.normalize(relative);
+  const contents = asar.extractFile(archivePath, filename);
+  const integrity = asar.statFile(archivePath, filename).integrity;
+  if (integrity?.algorithm === 'SHA256'
+    && createHash('sha256').update(contents).digest('hex') !== integrity.hash) {
+    throw Object.assign(new Error(`[pack] PACKAGED_MANIFEST_INTEGRITY_FAILED: ${relative}. The ASAR bytes do not match its file index; rebuild the package after excluding changing development files.`), {
+      code: 'PACKAGED_MANIFEST_INTEGRITY_FAILED',
+    });
+  }
+  try { return JSON.parse(contents.toString('utf8')); }
+  catch {
+    throw Object.assign(new Error(`[pack] PACKAGED_MANIFEST_INVALID: ${relative}. The packaged dependency manifest is not valid JSON; rebuild the package.`), {
+      code: 'PACKAGED_MANIFEST_INVALID',
+    });
+  }
+}
+
+/** 校验 ASAR 不含本机系统，且每个生产包的依赖可达、版本正确。 */
 function verifyPackagedDependencies(archivePath) {
   const asar = loadAsar();
   asar.uncache(archivePath);
   const packages = new Map();
   for (const filename of asar.listPackage(archivePath)) {
     const relative = filename.replace(/^[\\/]+/, '').replace(/\\/g, '/');
+    const normalized = relative.toLowerCase();
+    if (localWorkspaceDirectories.has(normalized.split('/')[0]) || localWorkspaceFiles.has(normalized)) {
+      throw Object.assign(new Error(`[pack] PACKAGED_LOCAL_WORKSPACE_FOUND: ${relative}. Exclude local systems and workspace state before distributing this package.`), {
+        code: 'PACKAGED_LOCAL_WORKSPACE_FOUND',
+      });
+    }
     if (relative !== 'package.json' && !relative.endsWith('/package.json')) continue;
-    const manifest = JSON.parse(asar.extractFile(archivePath, path.normalize(relative)).toString('utf8'));
+    const manifest = readPackagedManifest(asar, archivePath, relative);
     packages.set(path.posix.dirname(relative), { manifest, to: path.posix.dirname(relative) });
   }
   const root = packages.get('.');

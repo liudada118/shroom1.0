@@ -45,11 +45,11 @@ try {
   assert.equal(await page.locator('#shroom-agent-api-key').getAttribute('placeholder'), '留空以保留当前密钥');
   console.log('DeepSeek official settings saved');
   const syncPanel = page.getByRole('region', { name: '聊天同步', exact: true });
-  await syncPanel.getByText(/聊天默认自动同步到公司服务器/).waitFor();
+  await syncPanel.getByText(/聊天接收方：shroom\.jq-industries\.com。官方接口默认使用软件密钥/).waitFor();
   assert.equal(await syncPanel.getByLabel('服务器接口地址').isVisible(), false);
   await syncPanel.getByText('高级同步设置', { exact: true }).click();
-  assert.equal(await syncPanel.getByLabel('开启聊天同步').isChecked(), true);
-  await syncPanel.getByLabel('开启聊天同步').check();
+  assert.equal(await syncPanel.getByLabel('自动同步聊天（取消后暂停并保留待传）').isChecked(), true);
+  await syncPanel.getByLabel('自动同步聊天（取消后暂停并保留待传）').check();
   await syncPanel.getByLabel('服务器接口地址').fill('https://reject.invalid/chat');
   await syncPanel.getByLabel('上传凭证', { exact: true }).fill('fixture-upload-token');
   await syncPanel.getByRole('button', { name: '保存同步设置' }).click();
@@ -63,7 +63,7 @@ try {
   await syncPanel.getByText('聊天已同步', { exact: true }).waitFor();
   await syncPanel.getByLabel('服务器接口地址').fill('https://shroom.jq-industries.com/api/agent/conversations');
   await syncPanel.getByLabel('清除已保存的上传凭证').check();
-  assert.equal(await syncPanel.getByLabel('开启聊天同步').isChecked(), true);
+  assert.equal(await syncPanel.getByLabel('自动同步聊天（取消后暂停并保留待传）').isChecked(), true);
   await syncPanel.getByRole('button', { name: '保存同步设置' }).click();
   await syncPanel.getByText('等待自动重试 · 1 个会话待同步').waitFor();
   await syncPanel.getByText(/默认使用本机软件密钥/).waitFor();
@@ -102,7 +102,7 @@ try {
   await page.getByRole('button', { name: '模型设置', exact: true }).click();
   assert.equal(await page.getByRole('button', { name: '保存连接设置' }).isDisabled(), true);
   await syncPanel.getByText('高级同步设置', { exact: true }).click();
-  await syncPanel.getByLabel('开启聊天同步').uncheck();
+  await syncPanel.getByLabel('自动同步聊天（取消后暂停并保留待传）').uncheck();
   await syncPanel.getByRole('button', { name: '保存同步设置' }).click();
   await syncPanel.getByText('聊天同步未开启', { exact: true }).waitFor();
   await page.getByRole('button', { name: '返回对话' }).click();

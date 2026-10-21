@@ -19,6 +19,18 @@
 
 2026-10-20 合并 `Revise`：压力背心 HaLow/436点模型与统计、单双手手套独立入口及同库分表/双路数字、JQBed床型参数与新版Windows原生库迁入现有目录；旧根server/worker与旧SDK树不恢复。保留Agent、授权、canonical帧和采集证据链，详见文末合并记录及 [背心说明](docs/pressure-vest-halow.md)。构建快照保持合并前完整版本，验收构建输出到临时目录；新的交付包仍须重新构建。
 
+2026-10-20 打包修复：活动 `.codegraph` WAL 被 `**/*` 选中会导致ASAR偏移失配；Builder与两份Forge配置排除开发索引/助手缓存目录。`pack-runtime-dependencies` 先验包清单SHA再解析，私有数据隔离和真实临时ASAR回归覆盖。详见 `ARCHITECTURE.md` 同日维护记录。
+
+同日本机系统隔离：Builder与两份Forge排除根 `display-systems/displaySystems`、原生副本、Agent应用、算法绑定、受管下载与修订、用户协议及本机凭据/配置；最终ASAR校验发现这些目录即拒绝交付。正式内置系统和 `agent-resources` 不受影响；同机升级仍保留userData中的系统，不能仅凭列表里的“本机系统”判断安装包内容。验证 `privateDataIsolation.test.js`、`runtimeDependencies.test.js` 和Full，详见文末记录。
+
+同日Agent模型目录：`AgentSettings` → 有限 `getModelCatalog` IPC → `app/electron/agentModelCatalog.js` → 授权服务公开 `GET /api/agent/model-catalog`。共享默认 `shared/agent-model-catalog.json`、userData最近有效缓存与5秒有界请求保证离线可用；目录不改当前连接，不发送Key。`E:/key/server/agentModelCatalog.ts` 热读外置JSON，无需数据库迁移；首次需部署路由并更新完整客户端，以后维护目录即可。验证新目录/设置测试、真实ElectronIPC、浏览器与Full；契约见 [模型目录](docs/agent-model-catalog-api.md)。
+
+同日监测界面：`Title` 将语言和渲染/显示区域移入右侧常驻 `PortalDisplayPanel`，独立于可收起快捷工具；移除调节抽屉旧原始数据跳转，数字视图仍由显示选择器提供。`Aside` 床状态卡去掉旧紫底和固定空白占位，仅有效状态显示，风险提示保留。验证 Aside/Title/Chrome 局部测试、床侧栏与真实Home浏览器回归，以及Standard客户端检查；不改后端或帧数据链。
+
+同日再次合并 `origin/Revise` f879c49（merge f84fe1a）：小床独立回传/客户端订阅日志与告警播报迁入现有 algorithm-channel/WS 装配，旧根server/test不恢复。原始矩阵改由 `Home.buildNumMatrixParams` → `NumMatrix` WebGL raw，统一蓝底和左侧/底部一基索引；行列号不进入数据。小床设置右侧直达，无模型点图复用 `getViewTools`，卸载回收与选区安全保持。Agent规则点图默认与手部同为4层显示补零边，物理点表不补边；12B方向与降采样元数据沿现有protocol透传且只转置一次。验证入口 `raw-matrix-style.mjs`、`native-point-view-tools.mjs`、实际Home原始矩阵专项、JQBed回传与协议测试；跨SDK和后台合并执行Full。
+
+同日原始数字交互回归：`numMatrix/react/backends/webgl.js` 补齐原sprite3d的光标中心滚轮缩放和左键平移，同步变换数字、热场与外侧索引；框选/量尺启用时互斥，投影读取实际画布边界。缩放不改压力、采集或导出，卸载移除监听与指针捕获；入口测试 `webglGlove.test.js` 与实际Home `native-raw-home.mjs`，涉及共享前端SDK执行Full。
+
 ## 1. 一分钟判断路径
 
 1. 查看 `git status --short`，确认用户已有改动。

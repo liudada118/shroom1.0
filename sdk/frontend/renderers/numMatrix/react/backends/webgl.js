@@ -11,11 +11,12 @@
  *
  * | 参数 | `plain`（Num2D） | `original`（Num2Doriginal） |
  * | :--- | :--- | :--- |
- * | `useMask` / `whiteOnZero` | 关 | 开 |
+ * | `useMask` / `whiteOnZero` | 关 / 关 | 开 / 关（原始矩阵统一蓝底） |
  * | `potTexture` | 纹理就是矩阵尺寸 | `nextPOT` + `u_texScale` |
  * | `maxFromThreshold` | 色标上限恒取帧内最大 | `valuej1 > 0` 时用它 |
  * | `retintOnTuning` | 拖滑块不重画 | 重推最后一帧 |
- * | `indexRow` / `overlayPad` | 无 / 0 | 底部列号带 / 30 |
+ * | `indexRow` / `indexColumn` | 底部列号与左侧行号 | 同左，均为 1 基 |
+ * | `overlayPad` | 0（索引空间另留） | 30（兼容分区标题） |
  * | `refitOnSizeChange` | 换纹理尺寸**不**动格子边长 | 重算 |
  * | `glove.mode` | `scatter32`（36×36） | `rows15`（15×10 或 15×13） |
  * | `foot.mode` | `interp`（16×32 插值） | `raw`（6×10 原样） |
@@ -93,6 +94,9 @@ const RESIZE_DEBOUNCE_MS = 200;
 /** 双脚版面时用来算格子边长的额外列数（两块 16 宽的图 + 2 列缝）。`Num2D.jsx:322`。 */
 const DUAL_FOOT_GAP_CELLS = 2;
 
+/** 与数字精灵后端保持相同的滚轮缩放范围和步长。 */
+const MIN_ZOOM = 0.5, MAX_ZOOM = 8, ZOOM_STEP = 1.1;
+
 /**
  * 创建 WebGL 后端。
  *
@@ -146,12 +150,13 @@ export function createWebglMatrixBackend({
 
   const stage = document.createElement('div');
   stage.style.cssText = 'width:100%;height:100%;display:flex;'
-    + 'justify-content:center;align-items:center;background-color:#fff;font-size:12px;';
+    + 'justify-content:center;align-items:center;overflow:hidden;background-color:#000;color:#4ec7ff;font-size:12px;';
 
   const row = document.createElement('div');
   row.className = 'threeBoxF';
   row.style.cssText = `position:relative;margin-top:${stageMarginTop};display:flex;`
-    + `gap:10px;justify-content:center;align-items:flex-start;max-width:100%;${stageFlexWrap}`;
+    + `gap:10px;justify-content:center;align-items:flex-start;max-width:100%;transform-origin:0 0;${stageFlexWrap}`;
+  if (config.cameraControls) row.style.touchAction = 'none';
 
   /**
    * 建一组「热场 canvas + 叠加层 canvas + 脚别标签」。
@@ -195,6 +200,9 @@ export function createWebglMatrixBackend({
   let pendingA = null;
   let pendingB = null;
   let pendingRobot = null;
+  let lastPrimaryFrame = null;
+  let lastSecondaryFrame = null;
+  let lastRobotFrame = null;
   let rafId = null;
   let started = false;
   let disposed = false;
@@ -211,6 +219,66 @@ export function createWebglMatrixBackend({
   const baseTexH = grid.gridHeight;
   let texSize = { w: baseTexW, h: baseTexH };
   let texSize2 = { w: baseTexW, h: baseTexH };
+
+  // 数字、热场和行列索引一起变换；选区和量尺继续读取真实画布的屏幕矩形。
+  let zoom = 1, panX = 0, panY = 0, drag = null, interactionActive = false;
+
+  /** 只更新版面变换，不重新分配纹理或修改原始数据。 */
+  function applyViewTransform() {
+    row.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+  }
+
+  /** 以鼠标下的矩阵位置为中心缩放，保留原数字视图的上下限。 */
+  function onWheel(event) {
+    if (disposed || !started || !Number.isFinite(event.deltaY) || event.deltaY === 0) return;
+    event.preventDefault();
+    if (interactionActive) return;
+    const nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * (event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP)));
+    if (nextZoom === zoom) return;
+    const rect = row.getBoundingClientRect();
+    const ratio = nextZoom / zoom;
+    panX += (event.clientX - rect.left) * (1 - ratio);
+    panY += (event.clientY - rect.top) * (1 - ratio);
+    zoom = nextZoom;
+    applyViewTransform();
+  }
+
+  /** 结束平移并释放捕获，切换框选、量尺或卸载时也使用同一路径。 */
+  function endDrag() {
+    const pointerId = drag?.pointerId;
+    drag = null;
+    if (pointerId !== undefined && row.hasPointerCapture?.(pointerId)) row.releasePointerCapture(pointerId);
+  }
+
+  /** 普通查看时按住左键平移，工具模式下将手势交给框选和量尺。 */
+  function onPointerDown(event) {
+    if (disposed || !started || interactionActive || event.button !== 0) return;
+    drag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+    row.setPointerCapture?.(event.pointerId);
+  }
+
+  /** 使用屏幕位移平移整组画布，缩放后仍让索引紧贴对应数据格。 */
+  function onPointerMove(event) {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    panX += event.clientX - drag.x;
+    panY += event.clientY - drag.y;
+    drag.x = event.clientX;
+    drag.y = event.clientY;
+    applyViewTransform();
+  }
+
+  /** 只结束当前指针的平移，忽略其它鼠标或触点的结束事件。 */
+  function onPointerEnd(event) {
+    if (drag?.pointerId === event.pointerId) endDrag();
+  }
+
+  const viewEvents = [
+    ['wheel', onWheel], ['pointerdown', onPointerDown], ['pointermove', onPointerMove],
+    ['pointerup', onPointerEnd], ['pointercancel', onPointerEnd], ['lostpointercapture', onPointerEnd],
+  ];
+  if (config.cameraControls) {
+    for (const [name, handler] of viewEvents) row.addEventListener(name, handler, { passive: false });
+  }
 
   /**
    * 视口可用宽高。**这是「渲染器按视口而非按容器定尺寸」那条积压的落点** ——
@@ -359,8 +427,14 @@ export function createWebglMatrixBackend({
    * @returns {CanvasRenderingContext2D} 2d 上下文。
    */
   function sizeOverlay(canvas, texWidth, texHeight, cs) {
-    canvas.width = texWidth * cs + opts.overlayPad;
-    canvas.height = texHeight * cs + opts.overlayPad;
+    const left = opts.indexColumn ? Math.max(cs, 24) : 0;
+    const bottom = opts.indexRow ? Math.max(cs * 0.7, 18) : 0;
+    canvas.width = texWidth * cs + left + opts.overlayPad;
+    canvas.height = texHeight * cs + Math.max(bottom, opts.overlayPad);
+    const pane = canvas === paneA.overlay ? paneA : paneB;
+    pane.gl.style.marginLeft = `${left}px`;
+    pane.pane.style.paddingBottom = `${Math.max(bottom, opts.overlayPad)}px`;
+    pane.pane.style.width = `${texWidth * cs + left}px`;
     return canvas.getContext('2d');
   }
 
@@ -419,18 +493,24 @@ export function createWebglMatrixBackend({
   function uploadFrame(ctx, data, tw, th, maxOverride) {
     const { gl, texture, texData, potW, potH, uMin, uMax } = ctx;
     texData.fill(0);
+    let sourceMax = 0;
+    for (let i = 0; i < Math.min(data.length, tw * th); i++) {
+      const value = Number(data[i]);
+      if (Number.isFinite(value) && value > sourceMax) sourceMax = value;
+    }
+    // ⚠️ 12 位压力值可超过 255；仅缩放 GPU 颜色纹理，数字与统计必须保留原值。
+    const colorScale = Math.max(1, sourceMax / 255);
     let maxVal = 0;
     for (let y = 0; y < th; y++) {
       for (let x = 0; x < tw; x++) {
         const src = y * tw + x;
-        const v = src < data.length
-          ? Math.min(255, Math.max(0, Math.round(data[src])))
-          : 0;
+        const source = src < data.length ? Number(data[src]) : 0;
+        const v = Number.isFinite(source) ? Math.min(255, Math.max(0, Math.round(source / colorScale))) : 0;
         texData[y * potW + x] = v;
         if (v > maxVal) maxVal = v;
       }
     }
-    const dynamicMax = (maxOverride && maxOverride > 0) ? maxOverride : Math.max(maxVal, 1);
+    const dynamicMax = (maxOverride && maxOverride > 0) ? maxOverride / colorScale : Math.max(maxVal, 1);
     gl.uniform1f(uMin, 0);
     gl.uniform1f(uMax, dynamicMax);
     uploadLuminance(gl, 0, texture, texData, potW, potH);
@@ -482,7 +562,7 @@ export function createWebglMatrixBackend({
   }
 
   /**
-   * 画叠加层：网格线 + 每格数字 +（可选）底部列号带。
+   * 画叠加层：网格线、每格数字以及矩阵外侧的行列号。
    *
    * 合并自两份原实现的 `drawOverlay`，差异全在参数里：线色、0 值字色、列号带。
    *
@@ -496,7 +576,9 @@ export function createWebglMatrixBackend({
     if (!ctx2d) return;
     const cw = tw * cs;
     const ch = th * cs;
+    ctx2d.setTransform(1, 0, 0, 1, 0, 0);
     ctx2d.clearRect(0, 0, ctx2d.canvas.width, ctx2d.canvas.height);
+    ctx2d.setTransform(1, 0, 0, 1, opts.indexColumn ? Math.max(cs, 24) : 0, 0);
 
     if (opts.showBorder) {
       ctx2d.strokeStyle = opts.gridColor;
@@ -523,24 +605,41 @@ export function createWebglMatrixBackend({
       for (let i = 0; i < th; i++) {
         for (let j = 0; j < tw; j++) {
           const idx = i * tw + j;
-          const val = idx < len ? Math.round(data[idx]) : 0;
-          ctx2d.fillStyle = (val === 0 && opts.zeroTextColor) ? opts.zeroTextColor : opts.textColor;
-          ctx2d.fillText(val.toString(), j * cs + cs / 2, i * cs + cs / 2);
+          const raw = idx < len ? Number(data[idx]) || 0 : 0;
+          const val = config.decimalScale > 1 ? raw.toFixed(1) : String(Math.round(raw));
+          ctx2d.fillStyle = (raw === 0 && opts.zeroTextColor) ? opts.zeroTextColor : opts.textColor;
+          if (config.decimalScale > 1) ctx2d.fillText(val, j * cs + cs / 2, i * cs + cs / 2, Math.max(1, cs - 2));
+          else ctx2d.fillText(val, j * cs + cs / 2, i * cs + cs / 2);
         }
       }
     }
 
+    paintIndices(ctx2d, 0, 0, tw, th, cs);
+  }
+
+  /** 在矩阵外侧绘制 1 基行列号，不增加采样格或参与统计。 */
+  function paintIndices(ctx2d, x, y, tw, th, cs) {
+    const cw = tw * cs, ch = th * cs;
+    const rowH = Math.max(cs * 0.7, 18);
+    const colW = Math.max(cs, 24);
+    ctx2d.font = `bold ${Math.max(8, cs * 0.35)}px monospace`;
+    ctx2d.textAlign = 'center';
+    ctx2d.textBaseline = 'middle';
+    if (opts.indexColumn) {
+      ctx2d.fillStyle = opts.indexRowColor;
+      ctx2d.fillRect(x - colW, y, colW, ch);
+      ctx2d.fillStyle = opts.textColor;
+      for (let i = 0; i < th; i++) {
+        ctx2d.fillText(String(i + 1), x - colW / 2, y + (i + 0.5) * cs);
+      }
+    }
     if (opts.indexRow) {
       const rowY = ch;
-      const rowH = Math.max(cs * 0.7, 18);
       ctx2d.fillStyle = opts.indexRowColor;
-      ctx2d.fillRect(0, rowY, cw, rowH);
+      ctx2d.fillRect(x, y + rowY, cw, rowH);
       ctx2d.fillStyle = opts.textColor;
-      ctx2d.font = `bold ${Math.max(8, cs * 0.35)}px monospace`;
-      ctx2d.textAlign = 'center';
-      ctx2d.textBaseline = 'middle';
       for (let j = 0; j < tw; j++) {
-        ctx2d.fillText(j.toString(), j * cs + cs / 2, rowY + rowH / 2);
+        ctx2d.fillText(String(j + 1), x + (j + 0.5) * cs, y + rowY + rowH / 2);
       }
     }
   }
@@ -554,7 +653,9 @@ export function createWebglMatrixBackend({
    */
   function paintRobotOverlay(ctx2d, partDefs, cs) {
     if (!ctx2d) return;
+    ctx2d.setTransform(1, 0, 0, 1, 0, 0);
     ctx2d.clearRect(0, 0, ctx2d.canvas.width, ctx2d.canvas.height);
+    ctx2d.setTransform(1, 0, 0, 1, opts.indexColumn ? Math.max(cs, 24) : 0, 0);
     const fontSize = Math.max(10, cs * 0.45);
     const titleFontSize = Math.max(10, cs * 0.5);
 
@@ -592,11 +693,12 @@ export function createWebglMatrixBackend({
         }
       }
 
+      paintIndices(ctx2d, px, py, w, h, cs);
       ctx2d.fillStyle = opts.titleColor;
       ctx2d.font = `bold ${titleFontSize}px sans-serif`;
       ctx2d.textAlign = 'center';
       ctx2d.textBaseline = 'top';
-      ctx2d.fillText(text, px + pw / 2, py + ph + 4);
+      ctx2d.fillText(text, px + pw / 2, py + ph + (opts.indexRow ? Math.max(cs * 0.7, 18) : 0) + 4);
     });
   }
 
@@ -610,6 +712,7 @@ export function createWebglMatrixBackend({
 
       if (!isRobot && pendingA !== null) {
         const { data, tw, th } = pendingA;
+        lastPrimaryFrame = pendingA;
         pendingA = null;
         renderFrame(ctxA, data, tw, th);
         paintOverlay(overlayA, data, tw, th, cs);
@@ -617,6 +720,7 @@ export function createWebglMatrixBackend({
 
       if (pendingB !== null && ctxB) {
         const { data, tw, th } = pendingB;
+        lastSecondaryFrame = pendingB;
         pendingB = null;
         renderFrame(ctxB, data, tw, th);
         paintOverlay(overlayB, data, tw, th, cs);
@@ -624,6 +728,7 @@ export function createWebglMatrixBackend({
 
       if (isRobot && pendingRobot !== null && ctxA) {
         const { layoutData, maskData, layoutW, layoutH, partDefsWithOffset } = pendingRobot;
+        lastRobotFrame = pendingRobot;
         pendingRobot = null;
         renderRobotFrame(ctxA, layoutData, maskData, layoutW, layoutH);
         paintRobotOverlay(overlayA, partDefsWithOffset, cs);
@@ -774,7 +879,7 @@ export function createWebglMatrixBackend({
   // ---- 窗口 resize ----
 
   let resizeTimer = null;
-  /** 视口变化时重排画布；双手同时恢复最后帧，避免重建后只剩一侧。 */
+  /** 视口变化时重排画布并恢复最后帧，避免暂停采集时重建后画面和索引消失。 */
   function handleResize() {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
@@ -798,8 +903,11 @@ export function createWebglMatrixBackend({
         rebuildSecondary(texSize2.w, texSize2.h);
         pendingA = gloveFrames.left;
         pendingB = gloveFrames.right;
-        schedule();
       }
+      pendingA = pendingA || lastPrimaryFrame;
+      pendingB = pendingB || lastSecondaryFrame;
+      pendingRobot = pendingRobot || lastRobotFrame;
+      schedule();
     }, RESIZE_DEBOUNCE_MS);
   }
   globalThis.addEventListener?.('resize', handleResize);
@@ -923,6 +1031,8 @@ export function createWebglMatrixBackend({
     // 分区、补点手套和双脚不满足等距矩阵假设，需独立物理点位映射。
     sensorGrid: isRobot || isFoot || isGlove ? null : {
       canvas: paneA.gl, columns: baseTexW, rows: baseTexH,
+      /** 框选和量尺期间暂停查看手势，退出后恢复。 */
+      onInteractionChange(active) { interactionActive = Boolean(active); endDrag(); },
       /** 返回实际矩阵外沿，排除叠加层留白。 */
       getGridBounds() {
         const rect = paneA.gl.getBoundingClientRect();
@@ -1019,6 +1129,10 @@ export function createWebglMatrixBackend({
       if (disposed) return;
       disposed = true;
       started = false;
+      endDrag();
+      if (config.cameraControls) {
+        for (const [name, handler] of viewEvents) row.removeEventListener(name, handler);
+      }
       globalThis.removeEventListener?.('resize', handleResize);
       clearTimeout(resizeTimer);
       if (rafId !== null) cancelAnimationFrame(rafId);
@@ -1027,6 +1141,9 @@ export function createWebglMatrixBackend({
       pendingB = null;
       pendingRobot = null;
       lastData = null;
+      lastPrimaryFrame = null;
+      lastSecondaryFrame = null;
+      lastRobotFrame = null;
       gloveFrames.left = null;
       gloveFrames.right = null;
       gloveStats.left = null;

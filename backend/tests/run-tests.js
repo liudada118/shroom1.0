@@ -31,6 +31,7 @@ const testFiles = [
   'backend/tests/agentRuntime/runtime.test.js',
   'backend/tests/agentRuntime/attachments.test.js',
   'backend/tests/agentRuntime/agentProcess.test.js',
+  'backend/tests/agentRuntime/agentModelCatalog.test.js',
   'backend/tests/agentRuntime/agentTools.test.js',
   'backend/tests/agentRuntime/agentDeviceConnection.test.js',
   'backend/tests/contracts/multiSensorStableContract.test.js',

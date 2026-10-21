@@ -45,10 +45,11 @@ export async function verifyPortalRulerControls({ page, screenshots }) {
 /** 在真实原始数字矩阵中验证鼠标框选、两点量距、拖动以及点距复用。 */
 export async function verifyRawMatrixTools({ page, sockets, screenshots }) {
   const utility = page.locator('.portal-utility-panel');
-  await utility.getByRole('tab', { name: '显示与语言', exact: true }).click();
-  const mode = utility.getByRole('tabpanel', { name: '显示与语言', exact: true }).locator('.ant-select-selector').first();
+  const mode = page.getByRole('region', { name: '渲染与显示', exact: true }).locator('.portal-display-native .ant-select-selector').first();
   await mode.click(); await page.getByText('原始数据', { exact: true }).last().click();
-  const canvas = page.locator('.portal-data-renderer .canvasNum canvas'); await canvas.waitFor();
+  // 数字和索引使用独立叠加画布，测量坐标只取真实数据网格的 WebGL 画布。
+  const canvas = page.locator('.portal-data-renderer .canvasNum canvas').first(); await canvas.waitFor();
+  assert.equal(await canvas.evaluate((node) => Boolean(node.getContext('webgl'))), true);
   // 新挂载的原始矩阵接收独立的新帧，框选不得靠上一渲染器的缓存制造读数。
   for (const peer of sockets) peer.send(JSON.stringify({ type: 'sensor.frame', schemaVersion: 1, channelId: 'hand:sit', displaySystemId: 'hand',
     sensorId: 'sit', sensorLabel: '测试手垫', outputChannel: 'sit', sensorType: 'hand', source: 'realtime', sequence: 4,
@@ -85,7 +86,6 @@ export async function verifyRawMatrixTools({ page, sockets, screenshots }) {
   await ruler.getByText('1 · 40.00 mm', { exact: true }).waitFor();
   await page.screenshot({ path: join(screenshots, 'workspace-raw-ruler.png') });
   await ruler.getByRole('button', { name: '退出量尺', exact: true }).click();
-  await utility.getByRole('tab', { name: '显示与语言', exact: true }).click();
   await mode.click(); await page.getByText('3D 模型', { exact: true }).last().click();
   await page.waitForFunction(() => !document.querySelector('.portal-data-renderer .canvasNum'));
 }

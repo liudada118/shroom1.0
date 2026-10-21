@@ -22,6 +22,9 @@ module.exports = {
       './python'
     ],
     ignore: [
+      '^/(\\.codegraph|\\.ua|\\.understand-anything|\\.superpowers|\\.codex|\\.agents|\\.worktrees)($|/)',
+      '^/(display-systems|displaySystems|agent-apps|manifest-algorithm-bindings|managed-display-systems|managed-native-systems|company-system-revisions|serial-protocols|builtin-system-copies)($|/)',
+      '^/(managed-system-catalog\\.json|system-package-staff-credential\\.json|jqbed-algorithm-config\\.json)$',
       '^/venv($|/)',        // 排除 venv 文件夹
       '^/python($|/)',      // 如果你环境叫 python
       '^/__pycache__($|/)',

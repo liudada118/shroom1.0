@@ -1,6 +1,6 @@
 import React from 'react'
 import { createPortal } from 'react-dom';
-import { PortalSessionBar, PortalQuickTools } from '../../page/licensePortal/PortalMonitoringChrome';
+import { PortalSessionBar, PortalQuickTools, PortalDisplayPanel } from '../../page/licensePortal/PortalMonitoringChrome';
 import PortalControlDialog, { PORTAL_CONTROL_THEME } from '../../page/licensePortal/PortalControlDialog';
 import PortalPlaybackDialog from '../../page/licensePortal/PortalPlaybackDialog';
 import PortalWorkspaceTools from '../../page/licensePortal/PortalWorkspaceTools';
@@ -1979,6 +1979,7 @@ class Title extends React.Component {
     return sent ? requestId : null;
   }
 
+  /** 配置页按需订阅原生回传，关闭后立即停止当前客户端日志。 */
   subscribeJqbedAlgorithmLog = (enabled) => {
     const subscribed = enabled === true;
     if (subscribed && !this.canUseJqbedAlgorithmConfig()) return null;
@@ -2176,7 +2177,6 @@ class Title extends React.Component {
   };
 
   render() {
-    const routerStr = this.props.matrixName == 'yanfeng10' ? '10a10' : this.props.matrixName == 'smallSample' ? '10a10' : this.props.matrixName == 'matCol' || this.props.matrixName == 'matColPos' ? '16a10' : this.props.matrixName == 'bed4096' ? '64a64' : this.props.matrixName == 'carCol' ? '10a9' : '32a32'
     const { t, i18n } = this.props;
     const canAcquire = canUseLicenseCapability(this.props.licenseAccess, 'canAcquire');
     const canExport = canUseLicenseCapability(this.props.licenseAccess, 'canExport');
@@ -2404,6 +2404,7 @@ class Title extends React.Component {
     const displayControls = <>
         {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'handSinglePoint', 'normal', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'matCol', 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody', HUMAN_BODY_OPTIMIZED_MATRIX, PRESSURE_VEST_MATRIX].includes(this.props.matrixName) ?
           <Select
+            aria-label="显示方式"
             defaultValue={this.props.numMatrixFlag}
             style={{ width: 90 }}
             value={this.props.numMatrixFlag}
@@ -2688,7 +2689,8 @@ class Title extends React.Component {
     </>;
     const languageControl = <>
         <Select
-          defaultValue={this.props.i18n.language}
+          aria-label="界面语言"
+          value={this.props.i18n.resolvedLanguage || this.props.i18n.language}
           style={{ width: 108 }}
           onChange={(value) => {
             localStorage.setItem('language', value)
@@ -2916,7 +2918,22 @@ class Title extends React.Component {
         onStart={this.startPortalCollection} onStop={this.stopPortalCollection}
       /> : null}
       {this.props.portalEmbedded ? serialStatusControls : null}
-      {this.props.portalToolsHost ? createPortal(<><PortalQuickTools
+      {this.props.portalToolsHost ? createPortal(<><div className="portal-monitor-tools-rail">
+        <ConfigProvider theme={PORTAL_CONTROL_THEME}>
+          <PortalDisplayPanel languageControl={languageControl}>
+            <PortalRendererControls rendererRef={this.props.com} />
+            <fieldset className="portal-display-native"><legend>显示方式与区域</legend>{displayControls}{carControls}{partControls}</fieldset>
+            {Boolean(baudControl.props.children) && <fieldset><legend>串口参数</legend>{baudControl}</fieldset>}
+          </PortalDisplayPanel>
+          {jqbedConfigAccess.visible && <Tooltip title={t(jqbedConfigAccess.tooltipKey)}>
+            <Button className="portal-bed-settings" icon={<SettingOutlined />}
+              disabled={jqbedConfigAccess.disabled}
+              onClick={() => this.openPortalPanel('jqbedAlgorithmConfigOpen')}>
+              {t('jqbedAlgorithmConfig.title')}
+            </Button>
+          </Tooltip>}
+        </ConfigProvider>
+        <PortalQuickTools
         chartsVisible={this.props.portalChartsVisible} onCharts={this.props.onPortalChartsToggle}
         algorithmsOpen={this.props.portalAlgorithmMarketOpen} onAlgorithms={() => {
           if (!this.props.portalAlgorithmMarketOpen) trackUsage('feature_exposed', { featureId: 'algorithms', action: 'open' });
@@ -2928,16 +2945,10 @@ class Title extends React.Component {
         }}
         collapsed={this.state.portalToolsCollapsed} onCollapse={(portalToolsCollapsed) => this.setState({ portalToolsCollapsed })}
         toolsOpen={this.state.portalToolsOpen} onTools={this.togglePortalTools}
-      /><PortalWorkspaceTools key={`${this.props.matrixName}:${this.props.history}`} open={this.state.portalToolsOpen}
+      /></div><PortalWorkspaceTools key={`${this.props.matrixName}:${this.props.history}`} open={this.state.portalToolsOpen}
         systemKey={this.props.matrixName}
         rendererRef={this.props.com} selectionActive={this.props.portalSelectionActive} onSelectionChange={this.props.onPortalSelectionChange}
         onClose={() => this.setState({ portalToolsOpen: false })}
-        displayContent={<ConfigProvider theme={PORTAL_CONTROL_THEME}>
-          <PortalRendererControls rendererRef={this.props.com} active={this.state.portalToolsOpen} />
-          {Boolean(baudControl.props.children) && <fieldset><legend>串口参数</legend>{baudControl}</fieldset>}
-          <fieldset><legend>渲染与显示区域</legend>{displayControls}{carControls}{partControls}</fieldset>
-          <fieldset><legend>界面语言</legend>{languageControl}</fieldset>
-        </ConfigProvider>}
         items={[
           { id: 'zero', category: 'processing', label: '压力清零', description: '以当前压力作为零点基准。', active: this.state.resetZero,
             disabled: this.props.history !== 'now', onClick: this.resetPortalPressure },
@@ -2955,7 +2966,7 @@ class Title extends React.Component {
           onClose={() => this.setState({ portalSpecialOpen: false })}>
           <div className="portal-control-fields">{calibrationControls}{specialControls}{this.props.matrixName === 'localCar' ? collectionControls : null}</div>
           {!calibratableGloveTypes_title.includes(this.props.matrixName) && !['car', 'bigBed', 'foot', 'bed4096', 'localCar'].includes(this.props.matrixName)
-            && <p className="portal-control-empty">当前系统没有额外专用操作。通用清零与显示设置在工具箱中。</p>}
+            && <p className="portal-control-empty">当前系统没有额外专用操作。显示与语言可在右侧直接调整，清零在工具箱中。</p>}
         </PortalControlDialog>
         <PortalPlaybackDialog key={this.props.matrixName} open={this.state.portalPlaybackOpen}
           records={this.props.dataArr} playbackValue={this.state.portalPlaybackValue} downloadValues={this.state.portalDownloadValues}
@@ -3090,7 +3101,7 @@ class Title extends React.Component {
           })
         }} className='optionImg' src={option} alt="" />
         <Drawer style={{ backgroundColor: 'rgba(21,18,42,0.8)' }} title={t('setData')} onClose={() => { this.setState({ open: false }) }} open={this.state.open}>
-          <PortalRendererControls rendererRef={this.props.com} active={this.state.open} />
+          {!this.props.portalEmbedded && <PortalRendererControls rendererRef={this.props.com} active={this.state.open} />}
           <PortalWorkspaceTuning active={this.state.open} rendererRef={this.props.com}
             renderControls={(controls) => this.renderSettingSliders(t, controls)} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -3135,14 +3146,6 @@ class Title extends React.Component {
                   this.setState(zeroCommand)
                 }
               }}>{t('cancelZero')}</Button>
-              <NavLink
-                to={`/num/${routerStr}`}
-                state={{ displaySystemId: this.props.matrixName }}
-              >
-                <Button className='titleButton' onClick={() => {
-                  this.props.dataZero0()
-                }}>{t('rawData')}</Button>
-              </NavLink>
               <NavLink to={`/?from=system`}>
                 <Button className='titleButton'>{t('key')}</Button>
               </NavLink>

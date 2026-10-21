@@ -1477,15 +1477,15 @@ class Aside extends React.Component {
                                 </div>
                             </div>
                         </div>
-                        <div className="asideContent firstAside" style={{ display: 'flex', flexDirection: 'column', justifyContent: "space-around", backgroundColor: petInBed === 0 ? "#ED4F4F" : "#191932" }}>
-                            {petBedStatus[petInBed] && <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '30px', fontWeight: 'bold' }}>{petBedStatus[petInBed].text}</div>}
-                            <div style={{ display: 'grid', gap: '10px', marginTop: '16px' }}>
+                        {resolvedPetInBed != null && petBedStatus[petInBed] && <div className={`asideContent firstAside bedStatusCard${petInBed === 0 ? ' bedStatusCard--warning' : ''}`}>
+                            <div className="bedStatusHeading">{petBedStatus[petInBed].text}</div>
+                            <div className="bedStatusDetails">
                                 <div>{this.props.i18n.t('petPosture')} : {petPostureStatus[petPostureState] || '--'}</div>
                                 <div>{this.props.i18n.t('petMotionFlag')} : {this.state.is_motion ? this.props.i18n.t('petMotion') : this.props.i18n.t('petStill')}</div>
                                 <div>{this.props.i18n.t('petPressureCoeff')} : {petPressureCoefficient}</div>
                             </div>
-                            <div style={{ marginTop: '20px', textAlign: 'center', background: '#25254F', borderRadius: '12px', padding: "10px 0" }}>{petInBed === 1 ? this.props.i18n.t('inBedDuration') : this.props.i18n.t('leaveBedDuration')} : {secondsToHMS(this.state.onBedTime)}</div>
-                        </div>
+                            <div className="bedStatusDuration">{petInBed === 1 ? this.props.i18n.t('inBedDuration') : this.props.i18n.t('leaveBedDuration')} : {secondsToHMS(this.state.onBedTime)}</div>
+                        </div>}
                     </>
                     : ['jqbed', 'smallBed'].includes(this.props.matrixName) ?
                     <>
@@ -1515,10 +1515,10 @@ class Aside extends React.Component {
                             </div>
 
                         </div>
-                        <div className="asideContent firstAside" style={{ display: 'flex', flexDirection: 'column', justifyContent: "space-around", backgroundColor: [3, 4].includes(this.state.stateInBbed) ? "#ED4F4F" : "#191932" }}>
-                            {this.state.stateInBbed != null && onBedStatus[this.state.stateInBbed] && <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '30px', fontWeight: 'bold' }}>{onBedStatus[this.state.stateInBbed].text} <img src={onBedStatus[this.state.stateInBbed].img} alt="" /></div>}
-                            {(this.state.stateInBbed == 1 || this.state.stateInBbed == 0) ? <div style={{ marginTop: '20px', textAlign: 'center', background: '#25254F', borderRadius: '12px', padding: "10px 0" }}>{this.state.stateInBbed == 1 ? this.props.i18n.t('inBedDuration') : this.props.i18n.t('leaveBedDuration')} : {secondsToHMS(this.state.onBedTime)}</div> : ''}
-                        </div>
+                        {this.state.stateInBbed != null && onBedStatus[this.state.stateInBbed] && <div className={`asideContent firstAside bedStatusCard${[3, 4].includes(this.state.stateInBbed) ? ' bedStatusCard--warning' : ''}`}>
+                            <div className="bedStatusHeading">{onBedStatus[this.state.stateInBbed].text} <img src={onBedStatus[this.state.stateInBbed].img} alt="" /></div>
+                            {(this.state.stateInBbed == 1 || this.state.stateInBbed == 0) ? <div className="bedStatusDuration">{this.state.stateInBbed == 1 ? this.props.i18n.t('inBedDuration') : this.props.i18n.t('leaveBedDuration')} : {secondsToHMS(this.state.onBedTime)}</div> : null}
+                        </div>}
                         {
                             this.state.sosflag ? <div className="asideContent firstAside" style={{ fontSize: '30px', color: '#ED4F4F', fontWeight: 'bold' }}>{this.props.i18n.t('sos')}</div> : ''
                         }

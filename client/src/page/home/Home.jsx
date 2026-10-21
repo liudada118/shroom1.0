@@ -271,52 +271,25 @@ const NUM_MATRIX_SCENES = {
 }
 
 /**
- * 推导 manifest / hand / minzhen / smallBed 那一路的 `numMatrix` 参数。
- *
- * 这一路原先传的是 `<Fast1024 matrixName=... matrixWidth=... manageSidebar=...>`，
- * 组件内部再按 `matrixName` 字符串分出三条支路。参数化之后渲染器不再认识
- * `matrixName`，所以那几条支路在这里折平：
- *
- * - `smallBed12B` 的三处分支（`getDecimalScale` / `getPressureChartPadding` /
- *   合力取 max）合成「基础预设取 smallBed12B」一件事；
- * - `manageSidebar` 原来的守卫是 `props.manageSidebar !== false &&
- *   props.matrixName !== 'minzhen'`（`NumThreeColor1024.jsx:167`），**两个条件的
- *   AND**，所以 minzhen 那一项必须在这里折进来 —— 漏掉的话 minzhen 的侧栏会
- *   被渲染器和外层同时回写。
- *
- * `gridWidth` / `gridHeight` 只在 manifest 那一路有值，缺省 0 让渲染器退回
- * `64 / size`，与原实现的 `matrixWidth > 0 ? matrixWidth : 64 / size` 一致。
- *
- * @param {string} matrixName 当前展示形式。
- * @param {object} definition 运行期展示定义（`getDisplayDefinition` 的结果）。
- * @param {{width?: number, height?: number}} matrixSize 后端回传的动态矩阵尺寸。
- * @returns {object} 传给 RendererHost 的 params。
+ * 原始矩阵统一使用蓝底数字；索引仅用于展示，尺寸仍取真实通道。
+ * 小床帧已在分派入口转置，不能再套 jqbed 的 rawTranspose。
+ * @param {string} matrixName 当前原生型号。
+ * @param {object} definition 运行期展示定义。
+ * @param {{width?:number,height?:number}} matrixSize 后端回传的矩阵尺寸。
+ * @returns {object} 数字渲染器参数。
  */
 const buildNumMatrixParams = (matrixName, definition, matrixSize = {}) => {
-  const fromManifest = definition?.source === 'manifest'
-  const base = matrixName === SMALL_BED_12B_MATRIX
-    ? NUM_MATRIX_PRESETS.smallBed12B
-    : NUM_MATRIX_PRESETS.fast1024
-  const gridWidth = fromManifest
-    ? definition.matrix?.width
-    : matrixName === 'matCol'
-      ? 16
-      : matrixName === SMALL_BED_12B_MATRIX
-        ? matrixSize.width
-        : undefined
-  const gridHeight = fromManifest
-    ? definition.matrix?.height
-    : matrixName === 'matCol'
-      ? 10
-      : matrixName === SMALL_BED_12B_MATRIX
-        ? matrixSize.height
-        : undefined
+  const fromManifest = definition?.source === 'manifest';
   return {
-    ...base,
-    gridWidth,
-    gridHeight,
+    ...NUM_MATRIX_PRESETS.webglRawDefault,
+    frameInput: 'raw',
+    ...(matrixName === SMALL_BED_12B_MATRIX ? { decimalScale: 10, chartPadding: 5, totalMetric: 'max' } : {}),
+    gridWidth: fromManifest ? definition.matrix?.width : matrixName === 'matCol' ? 16
+      : matrixName === SMALL_BED_12B_MATRIX ? matrixSize.width : 32,
+    gridHeight: fromManifest ? definition.matrix?.height : matrixName === 'matCol' ? 10
+      : matrixName === SMALL_BED_12B_MATRIX ? matrixSize.height : 32,
     manageSidebar: !fromManifest && matrixName !== MINZHEN_MATRIX,
-  }
+  };
 }
 
 /**
@@ -348,7 +321,7 @@ const buildWebglNumParams = (matrixName) => {
  * 12+ 处 `props.matrixName ==`，折平成这 10 行 —— 加一款设备从此是加一行数据。
  *
  * `jqbed` 是 `RAW_TRANSPOSE_MATRIX_TYPES` 四个键里**唯一走得到这条通路的**
- * （`smallBed` 三型在更早的分支就进 sprite3d 后端了），所以只有它要转置。
+ * （`smallBed` 三型在数据分派入口已转置），所以只有它要转置。
  *
  * @param {string} matrixName 当前展示形式。
  * @returns {object} 传给 RendererHost 的 params。
@@ -1863,13 +1836,17 @@ class Home extends React.Component {
 
 
 
+  /** 仅用显式合法的矩阵尺寸更新画布，普通状态消息不能把 16×16 重置为 32×32。 */
   syncSmallBed12BMatrixSize(jsonObject = {}) {
     if (this.state.matrixName !== SMALL_BED_12B_MATRIX) {
       return;
     }
 
-    const nextWidth = Number(jsonObject.matrixWidth) || 32;
-    const nextHeight = Number(jsonObject.matrixHeight) || 32;
+    const matrix = jsonObject.matrix || jsonObject.metadata?.matrix;
+    const nextWidth = Number(jsonObject.matrixWidth ?? matrix?.cols);
+    const nextHeight = Number(jsonObject.matrixHeight ?? matrix?.rows);
+    if (!Number.isInteger(nextWidth) || nextWidth <= 0 || nextWidth > 256
+      || !Number.isInteger(nextHeight) || nextHeight <= 0 || nextHeight > 256) return;
     if (
       nextWidth !== this.state.smallBedMatrixWidth ||
       nextHeight !== this.state.smallBedMatrixHeight
@@ -5516,6 +5493,8 @@ class Home extends React.Component {
                       matrixName={modeCanvasMatrixName}
                       local={this.state.local}
                       variantKey={canvasVariantKey}
+                      viewKey={this.state.matrixName === SMALL_BED_12B_MATRIX
+                        ? `${this.state.smallBedMatrixWidth}x${this.state.smallBedMatrixHeight}` : undefined}
                     >
                       <RendererHost
                         rendererId="numMatrix"

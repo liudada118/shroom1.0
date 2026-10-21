@@ -6,6 +6,7 @@ import {
   createBuiltinMatrixRendererParams,
   createDirectionCheckFrame,
   createMatrixDisplayRenderers,
+  createRawMatrixRendererParams,
   inferMatrixDisplayModeId,
   getMatrixDisplayMode,
   resolveMatrixRendererType,
@@ -41,7 +42,7 @@ describe('matrixDisplayModes', () => {
       points: [[0, 0], [2, 0], [4, 0], [0, 3], [2, 3], [4, 3]],
     });
     expect(renderers.find((item) => item.id === 'numMatrix').params).toMatchObject({
-      backend: 'sprite3d',
+      backend: 'webgl',
       frameInput: 'raw',
       gridWidth: 3,
       gridHeight: 2,
@@ -51,7 +52,7 @@ describe('matrixDisplayModes', () => {
     });
   });
 
-  it('规则 32×32 点图只在渲染副本内扩为 64×64，原始输入保持 1024 点', () => {
+  it('规则 32×32 点图插为 64×64 再补四层零边，原始输入保持 1024 点', () => {
     const matrix = { rows: 32, cols: 32 };
     const input = createDirectionCheckFrame(1024), original = input.slice();
     const generated = createMatrixDisplayRenderers({ matrix }).find(item => item.id === 'pointGrid');
@@ -59,11 +60,20 @@ describe('matrixDisplayModes', () => {
     for (const params of [normalizePointGridParams(generated.params), builtin]) {
       for (const channel of [params.sit, params.back]) {
         expect(channel.num1 * channel.num2).toBe(1024);
-        expect(channel).toMatchObject({ interp: 2, order: 0 });
-        expect(deriveGridSize(channel)).toEqual({ amountX: 64, amountY: 64, total: 4096 });
+        expect(channel).toMatchObject({ interp: 2, order: 4 });
+        expect(deriveGridSize(channel)).toEqual({ amountX: 72, amountY: 72, total: 5184 });
         const displayed = runPointGridPipeline(input, channel, 2);
-        expect(displayed).toHaveLength(4096);
+        expect(displayed).toHaveLength(5184);
         expect(displayed.every(Number.isFinite)).toBe(true);
+        const padded = runPointGridPipeline(input, channel, 0);
+        const interior = [], border = [];
+        for (let row = 0; row < 72; row++) for (let col = 0; col < 72; col++) {
+          const value = padded[row * 72 + col];
+          (row < 4 || col < 4 || row >= 68 || col >= 68 ? border : interior).push(value);
+        }
+        expect(border).toHaveLength(1088);
+        expect(border.every(value => value === 0)).toBe(true);
+        expect(interior).toEqual(runPointGridPipeline(input, { ...channel, order: 0 }, 0));
       }
     }
     expect(input).toEqual(original);
@@ -74,9 +84,9 @@ describe('matrixDisplayModes', () => {
     const matrix = { rows: 2, cols: 3 }, input = [1, 2, 3, 4, 5, 6];
     const generated = createMatrixDisplayRenderers({ matrix }).find(item => item.id === 'pointGrid');
     for (const params of [normalizePointGridParams(generated.params), createBuiltinMatrixRendererParams('pointGrid', { matrix })]) {
-      expect(params.sit).toMatchObject({ num1: 2, num2: 3, interp: 2, order: 0 });
-      expect(deriveGridSize(params.sit)).toEqual({ amountX: 4, amountY: 6, total: 24 });
-      expect(runPointGridPipeline(input, params.sit, 1)).toHaveLength(24);
+      expect(params.sit).toMatchObject({ num1: 2, num2: 3, interp: 2, order: 4 });
+      expect(deriveGridSize(params.sit)).toEqual({ amountX: 12, amountY: 14, total: 168 });
+      expect(runPointGridPipeline(input, params.sit, 1)).toHaveLength(168);
     }
     expect(input).toEqual([1, 2, 3, 4, 5, 6]);
   });
@@ -103,7 +113,7 @@ describe('matrixDisplayModes', () => {
     const generated = createMatrixDisplayRenderers(context).find(item => item.id === 'pointGrid');
     for (const params of [normalizePointGridParams(generated.params), createBuiltinMatrixRendererParams('pointGrid', context)]) {
       expect(params.points).toBeNull();
-      expect(params.sit).toMatchObject({ num1: 2, num2: 3, interp: 2, order: 0 });
+      expect(params.sit).toMatchObject({ num1: 2, num2: 3, interp: 2, order: 4 });
     }
   });
 
@@ -119,7 +129,8 @@ describe('matrixDisplayModes', () => {
     const renderer = createMatrixDisplayRenderers({ matrix: { rows: 23, cols: 23 } })
       .find((item) => item.id === 'numMatrix');
     expect(normalizeNumMatrixParams(renderer.params)).toMatchObject({
-      backend: 'sprite3d', frameInput: 'raw', gridWidth: 23, gridHeight: 23,
+      backend: 'webgl', frameInput: 'raw', gridWidth: 23, gridHeight: 23,
+      webgl: { whiteOnZero: false, textColor: '#4ec7ff', indexRow: true, indexColumn: true },
     });
     expect(renderer.label).toBe('2D 数字');
     expect(MATRIX_DISPLAY_MODES.filter((mode) => mode.kind === 'values')).toHaveLength(1);
@@ -127,7 +138,20 @@ describe('matrixDisplayModes', () => {
     expect(inferMatrixDisplayModeId('numMatrix2d')).toBe('matrix-values-2d');
     expect(resolveMatrixRendererType('numMatrix2d')).toBe('numMatrix');
     expect(normalizeNumMatrixParams({ backend: 'webgl', webgl: { variant: 'original' } }).webgl)
-      .toMatchObject({ whiteOnZero: true, zeroTextColor: '#999' });
+      .toMatchObject({ whiteOnZero: false, zeroTextColor: null, indexRow: true, indexColumn: true });
+  });
+
+  it('兼容旧蓝底数字配置，保留精度、转置和矩形几何且不修改原对象', () => {
+    const previous = { backend: 'sprite3d', frameInput: 'raw', gridWidth: 23, gridHeight: 16,
+      decimalScale: 10, webgl: { variant: 'original', rawTranspose: true, whiteOnZero: true,
+        zeroTextColor: '#999', indexRow: false } };
+    const before = structuredClone(previous);
+    expect(normalizeNumMatrixParams(createRawMatrixRendererParams(previous))).toMatchObject({
+      backend: 'webgl', frameInput: 'raw', gridWidth: 23, gridHeight: 16, decimalScale: 10,
+      webgl: { variant: 'original', rawTranspose: true, whiteOnZero: false, zeroTextColor: null,
+        textColor: '#4ec7ff', indexRow: true, indexColumn: true },
+    });
+    expect(previous).toEqual(before);
   });
 
   it('为所有通用矩阵渲染器生成同一份 2×3 输入参数', () => {
@@ -148,9 +172,12 @@ describe('matrixDisplayModes', () => {
       'blobHeatmap',
     ]);
     expect(createBuiltinMatrixRendererParams('numMatrix', context)).toMatchObject({
+      backend: 'webgl',
+      frameInput: 'raw',
       gridWidth: 3,
       gridHeight: 2,
       textureValueMax: 6,
+      webgl: { indexRow: true, indexColumn: true, whiteOnZero: false },
     });
     expect(createBuiltinMatrixRendererParams('pointGrid', context)).toMatchObject({
       sit: { num1: 2, num2: 3, interp: 1, order: 0 },

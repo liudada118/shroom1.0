@@ -564,7 +564,10 @@ try {
   assert.equal(dockLayout.display, 'block', '正式展示使用参考项目最新的左侧纵向图表');
   assert.ok(dockLayout.top < 220 && dockLayout.cards[1].y > dockLayout.cards[0].y && dockLayout.cards[1].x === dockLayout.cards[0].x);
   const toolsBounds = await page.locator('.portal-quick-tools').boundingBox();
-  assert.ok(toolsBounds.x > 1200 && Math.abs(toolsBounds.width - 184) < 1, '右侧工具卡必须使用最新宽度');
+  assert.ok(toolsBounds.x > 1100 && Math.abs(toolsBounds.width - 240) < 1, '右侧工具与常驻显示设置保持统一栏宽');
+  const displayBounds = await page.getByRole('region', { name: '渲染与显示', exact: true }).boundingBox();
+  assert.ok(Math.abs(displayBounds.x - toolsBounds.x) < 1 && displayBounds.y + displayBounds.height < toolsBounds.y,
+    '显示与语言设置常驻快捷工具上方，两块不能互相覆盖');
   assert.ok((await page.locator('.home > .title').boundingBox()).y < 30, '会话栏位于顶部而非场景下方');
   const typeScale = await page.locator('.aside').evaluate((node) => ({
     heading: parseFloat(getComputedStyle(node.querySelector('.asideTitle')).fontSize),
@@ -690,6 +693,7 @@ try {
   const commandsAfterDevice = commands.length;
   await page.getByRole('button', { name: '调节', exact: true }).click();
   await page.locator('.ant-drawer-open').waitFor();
+  assert.equal(await page.locator('.ant-drawer-open').getByRole('button', { name: '原始数据', exact: true }).count(), 0, '调节抽屉不再显示原始数据跳转按钮');
   await page.keyboard.press('Escape');
   await page.locator('.ant-drawer-open').waitFor({ state: 'hidden' });
   assert.ok(Math.abs((await page.locator('.portal-quick-tools').boundingBox()).y - toolsBounds.y) < 1, '关闭调节面板不能推移快捷工具');
@@ -716,8 +720,8 @@ try {
     });
     assert.ok(fit.x >= 0 && fit.right <= fit.width + 1 && fit.bottom <= fit.height + 1 && fit.scrollWidth <= fit.width + 1, '窄屏控制台只能内部滚动，不能撑大窗口');
     const compactTools = await page.locator('.portal-quick-tools').boundingBox();
-    const expectedToolsTop = viewport.width <= 820 ? 178 : viewport.height / 2 - compactTools.height * .42;
-    assert.ok(Math.abs(compactTools.y - expectedToolsTop) < 1, '响应式定位由布局层负责，不能残留桌面入场 transform');
+    const compactDisplay = await page.getByRole('region', { name: '渲染与显示', exact: true }).boundingBox();
+    assert.ok(compactDisplay.y + compactDisplay.height < compactTools.y, '响应式布局始终把显示设置排在快捷工具上方');
     assert.ok(compactTools.x >= 0 && compactTools.x + compactTools.width <= viewport.width && compactTools.y + compactTools.height <= viewport.height, '快捷工具必须留在视口内');
     await page.getByRole('button', { name: '算法', exact: true }).click();
     await page.waitForFunction(() => {

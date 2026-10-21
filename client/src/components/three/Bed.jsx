@@ -1,5 +1,6 @@
 import Stats from "three/examples/jsm/libs/stats.module.js";
 import * as THREE from "three";
+import { createPointViewTools } from './pointViewTools';
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 // import { FlyControls } from 'three/examples/jsm/controls/FlyControls.js';
 import { TrackballControls } from "three/examples/jsm/controls/TrackballControls";
@@ -50,6 +51,7 @@ let isShiftPressed = false;
 
 
 const Canvas = React.forwardRef((props, refs) => {
+  const workspaceViewRef = useRef(null);
 
   var newDiv, newDiv1, selectStartArr = [], selectEndArr = [], sitArr, backArr, sitMatrix = [], backMatrix = [], selectMatrix = [], selectHelper, cooArr = [0, 0]
   let sitIndexArr = [], backIndexArr = []
@@ -755,6 +757,8 @@ const Canvas = React.forwardRef((props, refs) => {
   }
 
   useImperativeHandle(refs, () => ({
+    /** 返回当前点图的视角工具，切换渲染器后不复用旧场景。 */
+    getViewTools: () => workspaceViewRef.current,
     backData: backData,
     sitData: sitData,
     changeDataFlag: changeDataFlag,
@@ -808,6 +812,7 @@ const Canvas = React.forwardRef((props, refs) => {
     // 靠垫数据
 
     init();
+    workspaceViewRef.current = createPointViewTools({ object: group, plane: particles, camera, controls });
     // window.addEventListener("mousemove", () => {}, false);
     animate();
 
@@ -817,6 +822,9 @@ const Canvas = React.forwardRef((props, refs) => {
 
     return () => {
       cancelAnimationFrame(animationRequestId);
+      workspaceViewRef.current?.dispose();
+      workspaceViewRef.current = null;
+      controls?.dispose();
       document.removeEventListener('pointerdown', pointDown)
       document.removeEventListener('pointermove', pointMove)
       document.removeEventListener('pointerup', pointUp)

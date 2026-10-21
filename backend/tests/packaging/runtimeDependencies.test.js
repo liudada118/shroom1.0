@@ -56,6 +56,58 @@ async function main() {
     await finished(await asar.createPackage(staged, archive));
     assert.equal(verifyPackagedDependencies(archive), 5);
 
+    const corruptArchive = path.join(temporary, 'corrupt.asar');
+    diskFs.copyFileSync(archive, corruptArchive);
+    const { headerSize } = asar.getRawHeader(corruptArchive);
+    const manifestPath = path.join('node_modules', 'express', 'package.json');
+    const manifestOffset = asar.statFile(corruptArchive, manifestPath).offset;
+    const descriptor = diskFs.openSync(corruptArchive, 'r+');
+    try { diskFs.writeSync(descriptor, Buffer.from('logFilePath'), 0, 11, 8 + headerSize + Number(manifestOffset)); }
+    finally { diskFs.closeSync(descriptor); }
+    assert.throws(() => verifyPackagedDependencies(corruptArchive), (error) => {
+      assert.equal(error.code, 'PACKAGED_MANIFEST_INTEGRITY_FAILED');
+      assert(error.message.includes('node_modules/express/package.json'));
+      assert(!error.message.includes('logFilePath'), 'do not echo unrelated packed file bytes');
+      return true;
+    });
+
+    const invalidDirectory = path.join(temporary, 'invalid-manifest');
+    writePackage(invalidDirectory, { name: 'invalid-app' });
+    fs.writeFileSync(path.join(invalidDirectory, 'package.json'), 'logFilePath = null;');
+    const invalidArchive = path.join(temporary, 'invalid-manifest.asar');
+    await finished(await asar.createPackage(invalidDirectory, invalidArchive));
+    assert.throws(() => verifyPackagedDependencies(invalidArchive), { code: 'PACKAGED_MANIFEST_INVALID' });
+
+    const privateDirectory = path.join(temporary, 'private-workspace');
+    writePackage(privateDirectory, { name: 'private-app' });
+    for (const privatePath of [
+      'display-systems/draft/display-system.json', 'displaySystems/draft/display-system.json',
+      'agent-apps/draft/algorithm.py', 'manifest-algorithm-bindings/draft.json',
+      'managed-display-systems/customer/display-system.json', 'managed-native-systems/customer.json',
+      'company-system-revisions/draft.json', 'serial-protocols/custom.json', 'builtin-system-copies/copy.json',
+      'managed-system-catalog.json', 'system-package-staff-credential.json', 'jqbed-algorithm-config.json',
+    ]) {
+      const privateFile = path.join(privateDirectory, privatePath);
+      fs.mkdirSync(path.dirname(privateFile), { recursive: true });
+      fs.writeFileSync(privateFile, '{"private":"never-distribute"}');
+      const privateArchive = path.join(temporary, `${privatePath.replace(/\//g, '-')}.asar`);
+      await finished(await asar.createPackage(privateDirectory, privateArchive));
+      assert.throws(() => verifyPackagedDependencies(privateArchive), (error) => {
+        assert.equal(error.code, 'PACKAGED_LOCAL_WORKSPACE_FOUND');
+        assert(!error.message.includes('never-distribute'), 'never expose workspace contents');
+        return true;
+      });
+      fs.rmSync(privateFile);
+      // 移除已测试目录，避免下一轮被空目录抢先拦截。
+      if (privatePath.includes('/')) fs.rmSync(path.join(privateDirectory, privatePath.split('/')[0]), { recursive: true });
+    }
+    writePackage(path.join(privateDirectory, 'backend/display-systems'), { name: 'runtime-module' });
+    writePackage(path.join(privateDirectory, 'agent-resources/algorithm-packages'), { name: 'official-algorithms' });
+    writePackage(path.join(privateDirectory, 'display-systems-runtime'), { name: 'neighbor' });
+    const publicArchive = path.join(temporary, 'runtime-resources.asar');
+    await finished(await asar.createPackage(privateDirectory, publicArchive));
+    assert.equal(verifyPackagedDependencies(publicArchive), 0, 'keep source modules, official resources and neighboring names');
+
     const badPackage = path.join(staged, 'node_modules/express/package.json');
     fs.writeFileSync(badPackage, JSON.stringify({ name: 'express', version: '5.0.0', dependencies: { missing: '^1.0.0', qs: '^8.0.0' } }));
     const badArchive = path.join(temporary, 'bad.asar');

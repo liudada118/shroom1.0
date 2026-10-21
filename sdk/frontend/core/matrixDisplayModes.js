@@ -104,6 +104,28 @@ export function resolveMatrixRendererType(rendererId) {
   return mode?.rendererType || mode?.rendererId || rendererId;
 }
 
+/** 生成统一蓝底原始数字参数；保留尺寸、方向和小数单位，索引只供显示。 */
+export function createRawMatrixRendererParams(params = {}) {
+  const defaults = normalizeNumMatrixParams(NUM_MATRIX_PRESETS.webglRawDefault);
+  const source = params && typeof params === 'object' && !Array.isArray(params) ? params : {};
+  return {
+    ...NUM_MATRIX_PRESETS.webglRawDefault,
+    ...source,
+    backend: 'webgl',
+    frameInput: 'raw',
+    webgl: {
+      ...NUM_MATRIX_PRESETS.webglRawDefault.webgl,
+      ...source.webgl,
+      whiteOnZero: false,
+      gridColor: defaults.webgl.gridColor,
+      textColor: defaults.webgl.textColor,
+      zeroTextColor: null,
+      indexRow: true,
+      indexColumn: true,
+    },
+  };
+}
+
 /**
  * 根据矩阵定义生成所有展示形式的渲染器描述。
  *
@@ -118,23 +140,23 @@ export function createMatrixDisplayRenderers({ matrix = {}, coordinateMap = null
   const points = flattenCoordinateMap(coordinateMap);
   const hasPhysicalPoints = points?.length === rows * cols;
   const pointInterp = hasPhysicalPoints ? 1 : 2;
+  // 四层零边仅参与渲染；物理点位不能新增传感点或改变真实外形。
+  const pointOrder = hasPhysicalPoints ? 0 : 4;
 
   return MATRIX_DISPLAY_MODES.map((mode) => {
     let params = {};
     if (mode.rendererId === 'pointGrid') {
       params = {
-        sit: { num1: rows, num2: cols, interp: pointInterp, order: 0 },
-        back: { num1: rows, num2: cols, interp: pointInterp, order: 0 },
+        sit: { num1: rows, num2: cols, interp: pointInterp, order: pointOrder },
+        back: { num1: rows, num2: cols, interp: pointInterp, order: pointOrder },
         ...(hasPhysicalPoints ? { points } : {}),
       };
     } else if (resolveMatrixRendererType(mode.rendererId) === 'numMatrix') {
-      params = {
-        backend: 'sprite3d',
-        frameInput: 'raw',
+      params = createRawMatrixRendererParams({
         gridWidth: cols,
         gridHeight: rows,
         manageSidebar: false,
-      };
+      });
     } else if (mode.rendererId === 'webglHeatmap') {
       // 通用矩阵不继承 64×64 床垫的裁边、镜像和 4096 点门槛。
       params = { ...WEBGL_HEATMAP_PRESETS.plain, dataWidth: cols, dataHeight: rows, minFrameLength: rows * cols };
@@ -192,23 +214,22 @@ export function createBuiltinMatrixRendererParams(
   const points = flattenCoordinateMap(coordinateMap);
   const pointParams = points?.length === rows * cols ? { points } : {};
   const pointInterp = pointParams.points ? 1 : 2;
+  const pointOrder = pointParams.points ? 0 : 4;
 
   if (rendererId === 'numMatrix') {
-    return normalizeNumMatrixParams({
-      ...NUM_MATRIX_PRESETS.fast1024,
-      backend: 'sprite3d',
+    return normalizeNumMatrixParams(createRawMatrixRendererParams({
       gridWidth: cols,
       gridHeight: rows,
       manageSidebar: false,
       textureValueMax: normalizedMax,
-    });
+    }));
   }
 
   if (rendererId === 'pointGrid') {
     return normalizePointGridParams({
       ...POINT_GRID_PRESETS.matCol,
-      sit: { num1: rows, num2: cols, interp: pointInterp, order: 0 },
-      back: { num1: rows, num2: cols, interp: pointInterp, order: 0 },
+      sit: { num1: rows, num2: cols, interp: pointInterp, order: pointOrder },
+      back: { num1: rows, num2: cols, interp: pointInterp, order: pointOrder },
       ...pointParams,
     });
   }

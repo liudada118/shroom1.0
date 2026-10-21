@@ -110,6 +110,54 @@
 
 }
 
+.asideContent.bedStatusCard {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.bedStatusHeading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 20px;
+    font-weight: 650;
+}
+
+.bedStatusHeading img {
+    width: 44px;
+    height: 44px;
+    object-fit: contain;
+}
+
+.bedStatusDetails {
+    display: grid;
+    gap: 10px;
+}
+
+.bedStatusDuration {
+    padding: 10px 8px;
+    border: 1px solid rgb(147 185 211 / 12%);
+    border-radius: 8px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+/* 床状态卡跟随监测侧栏，不沿用旧版整块紫底或固定空白高度。 */
+.fiber-portal .portal-runtime-monitor .home .aside > .asideContent.bedStatusCard {
+    min-height: 0;
+    background: transparent;
+}
+
+.asideContent.bedStatusCard--warning .bedStatusHeading {
+    color: #ff8e8e;
+}
+
+.asideContent.bedStatusCard--warning .bedStatusDuration {
+    border-color: rgb(237 79 79 / 30%);
+}
+
 /* 从零件栏拖出来的图表卡片。长相完全复用 .asideContent.firstAside，
    这里只补"能拖回去删掉"的手势提示。 */
 .customChartCard {

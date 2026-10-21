@@ -4,6 +4,7 @@ import {
   transformCoordinateMap,
 } from '../../displays/matrixTransform.js';
 import { getManifestSourceSensor } from './manifestSceneAdapter.js';
+import { createRawMatrixRendererParams } from '@shroom/frontend/core/matrixDisplayModes.js';
 
 function matrixShapeMatchesLayout(matrix, layout) {
   if (!layout) return false;
@@ -31,14 +32,15 @@ function flattenCoordinatePoints(coordinateMap) {
     : null;
 }
 
-/** 规则矩阵至少使用手部监测的两倍显示插值，物理坐标表保持逐点对应。 */
+/** 规则矩阵沿用手部监测的两倍插值与四层零边，物理坐标表保持逐点对应。 */
 function buildPointGridChannel(channel = {}, rows, cols, hasPhysicalPoints) {
+  const order = Number(channel.order);
   return {
     ...channel,
     num1: rows,
     num2: cols,
     interp: hasPhysicalPoints ? 1 : Math.max(2, Number(channel.interp) || 2),
-    order: hasPhysicalPoints ? 0 : channel.order ?? 0,
+    order: hasPhysicalPoints ? 0 : Number.isFinite(order) && order > 0 ? order : 4,
   };
 }
 
@@ -46,7 +48,7 @@ function buildPointGridChannel(channel = {}, rows, cols, hasPhysicalPoints) {
  * 给 SDK 矩阵渲染器覆写当前 widget 的逐路几何参数。
  *
  * display.renderers 是方案级配置，每路必须使用自己的行列和坐标。
- * 规则点图至少使用两倍显示插值；物理点表保持逐点对应且不补边，避免回退成规则形状。
+ * 规则点图至少使用两倍显示插值和默认四层零边；物理点表保持逐点对应且不补边。
  * 当前路没有坐标时清除旧 points，避免第二路继续套用第一路物理形状。
  */
 export function buildManifestWidgetRendererParams({
@@ -77,8 +79,11 @@ export function buildManifestWidgetRendererParams({
     else delete next.points;
     return next;
   }
-  if (rendererId === 'numMatrix') {
-    return { ...base, gridWidth: cols, gridHeight: rows };
+  if (rendererId === 'numMatrix' || rendererId === 'numMatrix2d') {
+    const rawMatrix = base.backend !== 'canvas2d' && (rendererId === 'numMatrix2d' || base.frameInput === 'raw'
+      || base.backend === 'webgl' || !base.backend);
+    const next = rawMatrix ? createRawMatrixRendererParams(base) : base;
+    return { ...next, gridWidth: cols, gridHeight: rows };
   }
   if (rendererId === 'blobHeatmap' || rendererId === 'webglHeatmap') {
     return {

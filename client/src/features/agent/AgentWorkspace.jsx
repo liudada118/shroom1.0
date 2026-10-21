@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AgentSettings from './AgentSettings';
 import { describeChatSync, ChatUploadNotice } from './AgentSyncSettings';
 import AgentConversation from './AgentConversation';
@@ -42,6 +42,12 @@ function fileSize(size) {
 export default function AgentWorkspace({ bridge: bridgeOverride, initiallyOpen = false }) {
   const bridge = bridgeOverride ?? (typeof window !== 'undefined' ? window.electronAPI?.agent : null);
   const { snapshot, drafts, loading, error, invoke, refresh } = useAgentController(bridge);
+  /** 模型目录读取失败只由设置面板提示，不覆盖会话和任务错误。 */
+  const loadModelCatalog = useCallback(async (input) => {
+    const result = await bridge?.invoke('getModelCatalog', input);
+    if (!result?.ok) throw new Error(result?.error?.message || '模型目录暂时不可用');
+    return result.data;
+  }, [bridge]);
   const [open, setOpen] = useState(initiallyOpen);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -333,7 +339,7 @@ export default function AgentWorkspace({ bridge: bridgeOverride, initiallyOpen =
         {!bridge ? <div className="shroom-agent-empty"><AgentIcon name="agent" /><h3>在桌面软件中使用 Agent</h3><p>请打开 Shroom 桌面软件，即可连接模型、读取设备状态并创建展示系统。</p></div> : loading ? <div className="shroom-agent-empty" role="status"><p>正在加载 Agent…</p></div> : <>
           {error && <div className="shroom-agent-error" role="alert"><span>{error}</span><button type="button" onClick={refreshStatus}>刷新状态</button></div>}
           <AgentResults results={results} expanded={resultsOpen} onToggle={() => setResultsOpen((value) => !value)} onOpenSystem={openCreatedSystem} onExportPackage={exportCreatedSystem} onSubmitPackage={submitCreatedSystem} onUseAlgorithm={useCreatedAlgorithm} onPrepareAlgorithm={prepareCreatedAlgorithm} pendingAlgorithm={pendingAlgorithm} actionFeedback={resultActionFeedback} />
-          {historyOpen ? <AgentHistory invoke={invoke} disabled={locked || importing} onOpen={openConversation} onClose={() => setHistoryOpen(false)} /> : settingsOpen ? <AgentSettings settings={settings} disabled={locked} onSave={(value) => invoke('saveSettings', value)} chatSync={snapshot?.chatSync} onSaveSync={(value) => invoke('saveSyncSettings', value)} onRetrySync={() => invoke('retryChatSync')} onClearSync={(input) => invoke('clearChatSyncQueue', input)} onRestoreSync={(input) => invoke('restoreChatSyncQueue', input)} onClose={() => setSettingsOpen(false)} /> : algorithmOpen ? dataTask?.algorithmDataRequest.kind === 'history' ? <AgentHistoryData invoke={invoke} expectedSystemId={dataTask.algorithmDataRequest.systemId} disabled={locked || importing} onSave={saveAlgorithmSelection} onClose={() => setAlgorithmOpen(false)} /> : <AgentAlgorithmData invoke={invoke} selection={snapshot?.conversation?.algorithmSelection} expectedSystemId={dataTask?.algorithmDataRequest.systemId} submitLabel={dataTask ? '使用所选数据并继续' : '使用所选数据'} disabled={locked || importing} onSave={saveAlgorithmSelection} onClose={() => setAlgorithmOpen(false)} /> : <>
+          {historyOpen ? <AgentHistory invoke={invoke} disabled={locked || importing} onOpen={openConversation} onClose={() => setHistoryOpen(false)} /> : settingsOpen ? <AgentSettings settings={settings} disabled={locked} onLoadModelCatalog={loadModelCatalog} onSave={(value) => invoke('saveSettings', value)} chatSync={snapshot?.chatSync} onSaveSync={(value) => invoke('saveSyncSettings', value)} onRetrySync={() => invoke('retryChatSync')} onClearSync={(input) => invoke('clearChatSyncQueue', input)} onRestoreSync={(input) => invoke('restoreChatSyncQueue', input)} onClose={() => setSettingsOpen(false)} /> : algorithmOpen ? dataTask?.algorithmDataRequest.kind === 'history' ? <AgentHistoryData invoke={invoke} expectedSystemId={dataTask.algorithmDataRequest.systemId} disabled={locked || importing} onSave={saveAlgorithmSelection} onClose={() => setAlgorithmOpen(false)} /> : <AgentAlgorithmData invoke={invoke} selection={snapshot?.conversation?.algorithmSelection} expectedSystemId={dataTask?.algorithmDataRequest.systemId} submitLabel={dataTask ? '使用所选数据并继续' : '使用所选数据'} disabled={locked || importing} onSave={saveAlgorithmSelection} onClose={() => setAlgorithmOpen(false)} /> : <>
             <div className="shroom-agent-scroll" ref={scrollRef} onScroll={(event) => { const node = event.currentTarget; followOutput.current = node.scrollHeight - node.scrollTop - node.clientHeight < 64; }}>
               {snapshot?.chatSync?.settings?.noticePending && <ChatUploadNotice settings={snapshot.chatSync.settings} disabled={locked || importing} onAcknowledge={() => invoke('saveSyncSettings', { acknowledgeNotice: true })} />}
               {!configured && <div className="shroom-agent-connect-note"><div><strong>连接你的模型</strong><p>配置服务地址、模型名称和密钥后即可开始。</p></div><button type="button" onClick={() => setSettingsOpen(true)}>配置模型</button></div>}
