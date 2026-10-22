@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { PortalSessionBar, PortalQuickTools, PortalDisplayPanel } from './PortalMonitoringChrome';
 
 describe('门户最新监测控制层', () => {
-  it('显示与语言直接展示，不依赖工具箱或快捷工具展开', () => {
+  it('显示与语言在工具面板内直接展示，折叠时保留状态并禁用交互', () => {
     const html = renderToStaticMarkup(<><PortalDisplayPanel languageControl={<select aria-label="界面语言" defaultValue="zh"><option value="zh">中文</option></select>}>
       <select aria-label="选择渲染器" defaultValue="pointGrid"><option value="pointGrid">3D 点图</option></select>
     </PortalDisplayPanel><PortalQuickTools collapsed /></>);
@@ -13,6 +13,11 @@ describe('门户最新监测控制层', () => {
     expect(html).toContain('aria-label="界面语言"');
     expect(html).toContain('aria-label="选择渲染器"');
     expect(html.indexOf('portal-display-panel')).toBeLessThan(html.indexOf('portal-quick-tools-slide is-collapsed'));
+    const collapsed = PortalDisplayPanel({ collapsed: true, languageControl: <select defaultValue="zh"><option value="zh">中文</option></select> });
+    expect(collapsed.props.inert).toBe(true);
+    expect(collapsed.props['aria-hidden']).toBe(true);
+    expect(collapsed.props.id).toBe('portal-display-panel');
+    expect(renderToStaticMarkup(collapsed)).toContain('selected=""');
   });
 
   it('实时串口直接放进会话栏，支持多个下拉而不产生设备弹窗入口', () => {
@@ -87,6 +92,7 @@ describe('门户最新监测控制层', () => {
     expect(collapsedCard.props.children[1].props['aria-hidden']).toBe(true);
     expect(collapsedButton.props['aria-label']).toBe('展开快捷工具');
     expect(collapsedButton.props['aria-expanded']).toBe(false);
+    expect(collapsedButton.props['aria-controls']).toContain('portal-display-panel');
     expect(collapsedButton.props.className).toBe('portal-quick-tools-handle');
     expect(renderToStaticMarkup(collapsed)).toContain('portal-drawer-grip');
     expect(renderToStaticMarkup(collapsed)).not.toContain('aria-label="left"');

@@ -1,0 +1,3 @@
+.glove-motion-renderer { position: absolute; inset: 0; overflow: hidden; background: radial-gradient(ellipse at 50% 45%, #0a2230 0%, #061018 65%, #030b12 100%); }
+.glove-motion-renderer > canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.glove-motion-status { position: absolute; inset: 0; display: grid; place-content: center; padding: 24px; color: #d8faff; font-size: 15px; pointer-events: none; text-align: center; }

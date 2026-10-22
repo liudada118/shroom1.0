@@ -8,10 +8,12 @@ const { createRequire } = require('node:module');
 const root = path.resolve(__dirname, '../../..');
 const clientRequire = createRequire(path.join(root, 'client/package.json'));
 const { parse } = clientRequire('@babel/parser');
-const { transformSync } = clientRequire('esbuild');
+const { transformSync, buildSync } = clientRequire('esbuild');
 const returnedSource = fs.readFileSync(path.join(root, 'client/src/extensions/jqbed/jqbedReturnedSettings.js'), 'utf8');
 const logStateSource = fs.readFileSync(path.join(root, 'client/src/extensions/jqbed/jqbedAlgorithmLogState.js'), 'utf8');
 const alarmSpeechSource = fs.readFileSync(path.join(root, 'client/src/page/home/jqbedAlarmSpeech.js'), 'utf8');
+const gloveExhibitionSource = buildSync({ entryPoints: [path.join(root, 'client/src/page/home/gloveExhibition.js')],
+  bundle: true, write: false, format: 'cjs', platform: 'node' }).outputFiles[0].text;
 const files = {
   Home: 'client/src/page/home/Home.jsx',
   Title: 'client/src/components/title/Title.jsx',
@@ -60,6 +62,8 @@ function createHarness(name = 'Home', props = {}, overrides = {}) {
   vm.runInContext(transformSync(logStateSource, { loader: 'js', format: 'cjs' }).code, context);
   Object.assign(context, context.module.exports);
   vm.runInContext(transformSync(alarmSpeechSource, { loader: 'js', format: 'cjs' }).code, context);
+  Object.assign(context, context.module.exports);
+  vm.runInContext(gloveExhibitionSource, context);
   Object.assign(context, context.module.exports);
   const sensorStatusSource = fs.readFileSync(path.join(root, 'client/src/services/sensorStatus.js'), 'utf8');
   vm.runInContext(transformSync(sensorStatusSource, { loader: 'js', format: 'cjs' }).code, context);

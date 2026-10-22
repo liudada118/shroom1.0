@@ -164,4 +164,48 @@ assert.strictEqual(storedBigBedFrame.length, 2048);
 assert.strictEqual(storedBigBedFrame[0], 1);
 assert.strictEqual(storedBigBedFrame[32], 3);
 
+// 硬件重置按到达的串口保留左右手，同时复用真实系统/传感器身份。
+const { createZeroChannelIdentityResolver } = require('../../kernel/platform/runtime/zeroChannelIdentityResolver');
+let resetSystemId = 'hand0205', resetDeclaredChannels = [];
+const resetIdentity = createZeroChannelIdentityResolver({
+  getActiveSensorType: () => resetSystemId,
+  listSerialChannels: () => resetDeclaredChannels,
+});
+const resetEvents = [];
+context.resolveChannelIdentity = resetIdentity.resolveChannelIdentity;
+context.publishSystemEvent = (event) => resetEvents.push(event);
+for (const [sourceType, displaySystemId] of [
+  ['hand0205', 'hand0205'], ['hand0205Double', 'hand0205Double'], ['hand0205Double', 'customer-glove-copy'],
+]) {
+  context.file = sourceType;
+  resetSystemId = displaySystemId;
+  runtime.handleSitSerialFrame(Buffer.from([3]));
+  runtime.handleBackSerialFrame(Buffer.from([3]));
+  assert.deepStrictEqual(resetEvents.slice(-2), [
+    { handReset: true, handSide: 'left', outputChannel: 'sit', displaySystemId, sensorId: 'sit', channelId: `${displaySystemId}:sit` },
+    { handReset: true, handSide: 'right', outputChannel: 'back', displaySystemId, sensorId: 'back', channelId: `${displaySystemId}:back` },
+  ]);
+}
+
+// 已声明传感器使用自己的 sensorId，不能把输出别名或来源型号当成身份。
+resetSystemId = 'declared-glove';
+resetDeclaredChannels = [
+  { channelId: 'declared-glove:left-glove', displaySystemId: 'declared-glove', sensorId: 'left-glove', serialRole: 'sit', outputChannel: 'sit' },
+  { channelId: 'declared-glove:right-glove', displaySystemId: 'declared-glove', sensorId: 'right-glove', serialRole: 'back', outputChannel: 'back' },
+];
+runtime.handleSitSerialFrame(Buffer.from([3]));
+runtime.handleBackSerialFrame(Buffer.from([3]));
+assert.deepStrictEqual(resetEvents.slice(-2), [
+  { handReset: true, handSide: 'left', outputChannel: 'sit', displaySystemId: 'declared-glove', sensorId: 'left-glove', channelId: 'declared-glove:left-glove' },
+  { handReset: true, handSide: 'right', outputChannel: 'back', displaySystemId: 'declared-glove', sensorId: 'right-glove', channelId: 'declared-glove:right-glove' },
+]);
+
+// 缺失当前通道声明和授权过期时，不得退回影响全部手套的裸重置事件。
+const resetCount = resetEvents.length;
+resetDeclaredChannels = [resetDeclaredChannels[0]];
+runtime.handleBackSerialFrame(Buffer.from([3]));
+context.nowDate = context.endDate;
+runtime.handleSitSerialFrame(Buffer.from([3]));
+assert.strictEqual(resetEvents.length, resetCount);
+
 console.log('legacySerialFrameRuntimeState.test.js passed');

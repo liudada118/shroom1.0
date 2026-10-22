@@ -33,6 +33,12 @@
 
 ## 1. 一分钟判断路径
 
+2026-10-21 手套展示：`Home` → `gloveExhibition.js` → `components/three/gloveMotion` / `gloveTerrain`，右侧显示选择新增“炫酷摇操”与“热力地图”。复用当前系统过滤后的两路帧、单手选择及末帧缓存，不创建第二套设备连接；`scripts/tests/glove-exhibition-home.mjs` 验证真实Home帧分派与画布。新增原生渲染使用Full，真机姿态/校准仍需设备验收。
+
+姿态置零（2026-10-22更新）：硬件单字节3 → `legacySerialFrameRuntime.publishHandReset`（既有身份解析器补齐系统/传感器及左右手）→ `Home` 按当前系统和手侧分派 → `resetHand(side, { waitForNextFrame: true })`。硬件初始化立即归位并清除本侧旧姿态缓存/零点，通知后首个有效帧建立新基准，避免混用设备初始化前后参考系；炫酷摇操和普通双手未传选项的软件置零继续使用最新有效读数，普通单手保留原等待下一帧行为。双手旧裸事件不再同时清两侧。验证 `legacySerialFrameRuntimeState.test.js`、`motionOrientation.test.js`、`gloveExhibition.test.js` 及真实Home事件回归，执行Full。
+
+同日校准：3D遥操和炫酷摇操均可从显示面板直接校准。`Title` → `GloveMotion.setCalibration` / `motionCalibration.js` 管理单侧平铺/握拳预览，`Home.colFingerData` → `getCalibratedGloveFingers` 保存本侧基准并立即重算末帧；关闭恢复最新实时弯指，另一侧继续更新。验证Title控件、Motion预览纯函数及真实Home校准采集/清除回归；涉及渲染器执行Full。
+
 1. 查看 `git status --short`，确认用户已有改动。
 2. 按下面的“变更路径 → 验证域”选择范围。
 3. 只读取入口、直接依赖、调用方和对应测试；使用 `rg` 查符号，不遍历构建产物和模型资源。

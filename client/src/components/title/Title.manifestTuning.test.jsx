@@ -26,6 +26,20 @@ function titleFor(matrixName, getTuningControls) {
 describe('Title 生成系统动态调参', () => {
   beforeEach(() => localStorage.clear());
 
+  it('手套热力地图使用参考底形强度范围，独立保存并立即转发给画布', () => {
+    const title = titleFor('hand0205', () => ({ showColor: true, showHeight: true, showInit: true }));
+    title.props.numMatrixFlag = 'gloveTerrain';
+    const initial = sliders(title.renderSettingSliders(title.props.t)).find((slider) => slider.props.usageFeature === 'tuning_initial_value');
+    expect(initial.props.min).toBe(0);
+    expect(initial.props.max).toBe(1.5);
+    expect(initial.props.step).toBe(.05);
+    expect(initial.props.ariaLabelForHandle).toBe('gloveTerrainInitial');
+    initial.props.onChange(0);
+    expect(title.props.changeStateData).toHaveBeenCalledWith({ valuelInit1: 0 });
+    expect(title.props.com.current.sitValue).toHaveBeenCalledWith({ valuelInit: 0 });
+    expect(JSON.parse(localStorage.getItem('valueConfig')).hand0205__gloveTerrain.terrainBaseGain).toBe(0);
+  });
+
   it('未知系统 ID 从已挂载渲染器读取六项矩阵调节能力', () => {
     const title = titleFor('agent-seat-new', () => ({ showGuass: true, showColor: true, showFilter: true,
       showHeight: true, showConsis: true, showInit: true, showSize: false, showSpeed: false }));

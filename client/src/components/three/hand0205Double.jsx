@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { TrackballControls } from "three/examples/jsm/controls/TrackballControls";
 import { SkeletonUtils } from "three/examples/jsm/utils/SkeletonUtils.js";
-import React, { useEffect, useImperativeHandle } from "react";
+import React, { useEffect, useImperativeHandle, useRef } from "react";
 import { TextureLoader } from "three";
 import TWEEN from "@tweenjs/tween.js";
 import {
@@ -62,7 +62,8 @@ function transformQuaternion(a, side = 'left') {
   const values = [...a];
   [values[0], values[1]] = [values[1], values[0]];
 
-  let q = new THREE.Quaternion(...values)
+  // ⚠️ 设备读数未必恰好为单位长度；先归一化，否则取逆后同一读数仍会残留非单位零姿态。
+  let q = new THREE.Quaternion(...values).normalize()
   if (!q) {
     console.warn("Received invalid quaternion.");
     return new THREE.Quaternion(0, 0, 0, 1);
@@ -93,7 +94,7 @@ function transformQuaternion(a, side = 'left') {
   const qTransformed = new THREE.Quaternion();
   qTransformed.multiplyQuaternions(currentBaseQuaternionInv, q);
   qTransformed.x = -qTransformed.x
-  return qTransformed;
+  return qTransformed.normalize();
 }
 
 let baseEulerX = null
@@ -111,6 +112,7 @@ const applyHandBaseRotation = () => {
   if (rightChair) rightChair.rotation.set(HAND_BASE_ROTATION_R.x, HAND_BASE_ROTATION_R.y, HAND_BASE_ROTATION_R.z)
 }
 const Canvas = React.forwardRef((props, refs) => {
+  const latestOrientationRef = useRef({ left: null, right: null });
   local = props.local
   let showFlag = false
   var FPS = 10;
@@ -1118,8 +1120,10 @@ const Canvas = React.forwardRef((props, refs) => {
     particles.material.opacity = showFlag ? 1 : 0
   }
 
+  /** 缓存左手最新有效姿态，供置零使用当前读数并立即更新显示。 */
   function changeHandAngle(arr) {
-    if (arr && !arr.includes(undefined)) {
+    if (Array.isArray(arr) && arr.length === 4 && arr.every(Number.isFinite) && Math.hypot(...arr) > .000001) {
+      latestOrientationRef.current.left = [...arr];
       quaternion = transformQuaternion(arr)
       if (leftHandGroup && quaternion) {
         leftHandGroup.quaternion.copy(quaternion)
@@ -1128,8 +1132,10 @@ const Canvas = React.forwardRef((props, refs) => {
 
   }
 
+  /** 缓存右手最新有效姿态，缺失读数不能擦掉本侧可用零点。 */
   function changeRightHandAngle(arr) {
-    if (arr && !arr.includes(undefined)) {
+    if (Array.isArray(arr) && arr.length === 4 && arr.every(Number.isFinite) && Math.hypot(...arr) > .000001) {
+      latestOrientationRef.current.right = [...arr];
       rightQuaternion = transformQuaternion(arr, 'right')
       if (rightHandGroup && rightQuaternion) {
         rightHandGroup.quaternion.copy(rightQuaternion)
@@ -1186,9 +1192,30 @@ const Canvas = React.forwardRef((props, refs) => {
     // chair.matrix.decompose(chair.position, chair.quaternion, chair.scale);
   }
 
-  function resetHand() {
-    baseQuaternion = null
-    rightBaseQuaternion = null
+  /** 软件置零采用本侧最新读数；硬件初始化等待本侧下一有效帧，另一手不变。 */
+  function resetHand(side = 'left', options = {}) {
+    if (side === 'right') {
+      if (options.waitForNextFrame === true) latestOrientationRef.current.right = null;
+      rightBaseQuaternion = null;
+      rightBaseQuaternionInv = null;
+      rightQuaternion = latestOrientationRef.current.right
+        ? transformQuaternion(latestOrientationRef.current.right, 'right') : new THREE.Quaternion();
+      rightHandGroup?.quaternion.copy(rightQuaternion);
+      rightHandGroup?.updateMatrixWorld(true);
+    } else if (side === 'left') {
+      if (options.waitForNextFrame === true) latestOrientationRef.current.left = null;
+      baseQuaternion = null;
+      baseQuaternionInv = null;
+      quaternion = latestOrientationRef.current.left
+        ? transformQuaternion(latestOrientationRef.current.left) : new THREE.Quaternion();
+      leftHandGroup?.quaternion.copy(quaternion);
+      leftHandGroup?.updateMatrixWorld(true);
+    }
+  }
+
+  /** 返回两手显示姿态的只读数值，供真实设备事件回归观测。 */
+  function getQuaternionSnapshot() {
+    return { left: leftHandGroup?.quaternion.toArray(), right: rightHandGroup?.quaternion.toArray() };
   }
 
   function changaCamera(obj) {
@@ -1232,6 +1259,7 @@ const Canvas = React.forwardRef((props, refs) => {
     calibrationRight,
     handZero,
     resetHand,
+    getQuaternionSnapshot,
     changaCamera,
     changeModal
   }));
@@ -1240,6 +1268,14 @@ const Canvas = React.forwardRef((props, refs) => {
   //   视图数据
 
   useEffect(() => {
+    // 切回3D遥操时两侧各等有效首帧，不能沿用其他模式硬件初始化前的零点。
+    baseQuaternion = null;
+    baseQuaternionInv = null;
+    rightBaseQuaternion = null;
+    rightBaseQuaternionInv = null;
+    quaternion = new THREE.Quaternion();
+    rightQuaternion = new THREE.Quaternion();
+    latestOrientationRef.current = { left: null, right: null };
     // 靠垫数据
 
     window.removeEventListener('keydown', function () { })

@@ -5,16 +5,22 @@ import { verifyPortalRulerControls, verifyRawMatrixTools } from './portal-ruler-
 /** 在隔离 Home 上验证新工具、回放与下载交互；设备和导出事件均来自测试桩。 */
 export async function verifyPortalWorkspaceControls({ page, commands, sockets, screenshots }) {
   const tools = page.locator('.portal-quick-tools');
+  const displayPanel = page.locator('.portal-display-panel');
   const before = await tools.boundingBox();
   await page.getByRole('button', { name: '收起快捷工具', exact: true }).click();
+  await tools.waitFor({ state: 'hidden' });
+  await displayPanel.waitFor({ state: 'hidden' });
   assert.equal(await page.getByRole('button', { name: '工具', exact: true }).isVisible(), false);
-  assert.equal(await page.getByRole('region', { name: '渲染与显示', exact: true }).isVisible(), true, '收起快捷工具后仍能直接切换语言与显示');
+  assert.equal(await page.getByRole('region', { name: '渲染与显示', exact: true }).isVisible(), false, '收起工具栏同时收回语言与显示面板');
   const handle = page.getByRole('button', { name: '展开快捷工具', exact: true });
   await handle.waitFor();
   const grip = await handle.boundingBox();
   assert.ok(grip.x >= 0 && grip.x + grip.width <= 1441, '抽屉收起后左侧拉手仍在窗口内');
   await page.screenshot({ path: join(screenshots, 'workspace-drawer-closed.png') });
   await page.getByRole('button', { name: '展开快捷工具', exact: true }).click();
+  await tools.waitFor();
+  await displayPanel.waitFor();
+  await page.getByRole('region', { name: '渲染与显示', exact: true }).waitFor();
   assert.ok(Math.abs((await tools.boundingBox()).y - before.y) < 1, '工具收起/展开不能改变垂直锚点');
   await page.getByRole('button', { name: '工具', exact: true }).click();
   const utility = page.locator('.portal-utility-panel');

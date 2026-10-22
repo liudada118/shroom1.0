@@ -47,6 +47,14 @@ function createLegacySerialFrameRuntime(ctx) {
     isHandGloveType: ctx.isHandGloveType,
   });
 
+  /** 发布按系统与左右手限定的设备姿态重置；身份不可解析时不广播。 */
+  function publishHandReset(outputChannel, handSide) {
+    const identity = ctx.resolveChannelIdentity?.(outputChannel);
+    if (!identity?.displaySystemId || !identity.sensorId) return;
+    ctx.publishSystemEvent({ handReset: true, handSide, outputChannel,
+      displaySystemId: identity.displaySystemId, sensorId: identity.sensorId, channelId: identity.channelId });
+  }
+
   /**
    * 把发布时的入参 payload 归一成对象。
    *
@@ -289,7 +297,7 @@ function createLegacySerialFrameRuntime(ctx) {
     }
 
     if (buffer.length === 1 && buffer.readUInt8(0) === 3) {
-      ctx.publishSystemEvent({ handReset: true });
+      publishHandReset('sit', 'left');
     }
   }
 
@@ -400,7 +408,7 @@ function createLegacySerialFrameRuntime(ctx) {
     }
 
     if (buffer.length === 1 && buffer.readUInt8(0) === 3) {
-      ctx.publishSystemEvent({ handReset: true });
+      publishHandReset('back', 'right');
     }
   }
 

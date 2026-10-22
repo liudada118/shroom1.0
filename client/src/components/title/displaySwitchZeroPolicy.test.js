@@ -22,6 +22,12 @@ const memoryStorage = (initial = {}) => {
 };
 
 describe('切展示模式的清零策略', () => {
+  it('炫酷摇操沿用遥操未扣零基准，热力地图保留真实场景手动清零', () => {
+    expect(resolveDisplaySwitchZero({ sensorType: 'hand0205', nextMode: 'gloveMotion', scene: PRESSURE_SCENES.demo,
+      cancelZeroSensorTypes: GLOVES })).toEqual({ resetZero: false });
+    expect(resolveDisplaySwitchZero({ sensorType: 'hand0205', nextMode: 'gloveTerrain', scene: PRESSURE_SCENES.real,
+      cancelZeroSensorTypes: GLOVES })).toBeNull();
+  });
   it('演示场景：任何传感器切任何模式都做一次预压力清零', () => {
     ['jqbed', 'petCare', 'humanBody', 'smallBed', 'hand0205'].forEach((sensorType) => {
       ['num', 'num3D', 'numoriginal', 'skin'].forEach((nextMode) => {

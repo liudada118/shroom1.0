@@ -39,6 +39,8 @@ import { commandClient, commandFromLegacyFields } from '../../services/command/c
 import { serialFeedback, serialErrorText } from '../../services/serial/serialFeedback';
 import HalowConnection from './HalowConnection';
 import { PRESSURE_VEST_MATRIX } from '../video/pressureVestConfig';
+import { gloveExhibitionConfig } from '../../page/home/gloveExhibition';
+import { TERRAIN_BASE_GAIN_RANGE } from '../three/gloveTerrain/terrainConfig';
 import {
   PRESSURE_SCENES,
   readPressureScene,
@@ -202,7 +204,7 @@ const getConfig = ({ sensorType, mode }) => {
       ? titleInitConfig[realType]
       : titleInitConfig['bed']
   let config = JSON.parse(localStorage.getItem('valueConfig'))
-  if (!config) return { ...init }
+  if (!config) return { ...init, ...gloveExhibitionConfig(mode) }
   let result = {}
   if (config[realType] && Object.keys(config[realType]).length) {
     result = { ...config[realType] }
@@ -213,7 +215,7 @@ const getConfig = ({ sensorType, mode }) => {
       result = { ...result, ...config[modeKey] }
     }
   }
-  const mergedConfig = { ...init, ...result }
+  const mergedConfig = { ...init, ...result, ...gloveExhibitionConfig(mode, config[modeDefaultKey]) }
   if (isHumanBodyMatrixTitle(realType)) {
     if (HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES.includes(Number(mergedConfig.valuej1))) {
       mergedConfig.valuej1 = HUMAN_BODY_DEFAULT_COLOR
@@ -593,6 +595,15 @@ class Title extends React.Component {
   }
 
   componentDidUpdate(prevProps) {
+    if (this.props.calibration && (prevProps.matrixName !== this.props.matrixName
+      || prevProps.numMatrixFlag !== this.props.numMatrixFlag)) {
+      this.closeGloveCalibration();
+    } else if (prevProps.calibration && !this.props.calibration) {
+      this.props.com.current?.setCalibration?.({ active: false });
+    } else if (this.props.calibration && this.props.numMatrixFlag === 'gloveMotion'
+      && prevProps.hand !== this.props.hand && this.props.matrixName === 'hand0205') {
+      this.previewGloveCalibration(this.props.hand ? 'left' : 'right', this.state.fingerIndex);
+    }
     if (prevProps.matrixName !== this.props.matrixName) {
       this._portalScope = {};
       this._serialOperations?.clear();
@@ -615,6 +626,37 @@ class Title extends React.Component {
       this.closeJqbedAlgorithmConfig();
     }
   }
+
+  /** 选择本次校准手，单手视图始终跟随当前显示手。 */
+  getGloveCalibrationHand = () => this.props.matrixName === 'hand0205'
+    ? (this.props.hand ? 'left' : 'right') : (this.state.calibHand || 'left');
+
+  /** 仅预览选中手的校准姿势，普通遥操继续使用原有分侧接口。 */
+  previewGloveCalibration = (side, pose) => {
+    const renderer = this.props.com.current;
+    if (renderer?.setCalibration) {
+      renderer.setCalibration({ active: true, side, pose });
+      return;
+    }
+    const preview = this.props.matrixName !== 'hand0205' && side === 'right'
+      ? renderer?.calibrationRight : renderer?.calibration;
+    preview?.(new Array(5).fill(pose === 1 ? 1 : 0));
+  };
+
+  /** 从平铺姿势开始校准；炫酷摇操只预览目标手，保留两侧实时采样。 */
+  openGloveCalibration = () => {
+    const side = this.getGloveCalibrationHand();
+    this.setState({ calibHand: side, fingerIndex: 0 });
+    if (this.props.com.current?.setCalibration) this.previewGloveCalibration(side, 0);
+    else this.props.com.current?.handZero?.();
+    this.props.changeCalibration();
+  };
+
+  /** 退出校准预览后恢复最新实时弯指，保留已经采集的本侧基准。 */
+  closeGloveCalibration = () => {
+    this.props.com.current?.setCalibration?.({ active: false });
+    this.props.changeStateData({ calibration: false });
+  };
 
   getSmallBed12BDisplayState = () => {
     if (this.props.matrixName !== smallBed12BType_title) return {};
@@ -1877,15 +1919,18 @@ class Title extends React.Component {
           {/* Initial Value */}
           {showInit && (
             <div className="progerssSlide" style={{ display: "flex", alignItems: "center" }}>
-              <div className='dataTitle'>{t('init')}</div>
+              <div className='dataTitle'>{t(mode === 'gloveTerrain' ? 'gloveTerrainInitial' : 'init')}</div>
               <Slider
                 usageFeature="tuning_initial_value"
-                min={1} max={5000} step={500}
+                ariaLabelForHandle={t(mode === 'gloveTerrain' ? 'gloveTerrainInitial' : 'init')}
+                min={mode === 'gloveTerrain' ? TERRAIN_BASE_GAIN_RANGE.min : 1}
+                max={mode === 'gloveTerrain' ? TERRAIN_BASE_GAIN_RANGE.max : 5000}
+                step={mode === 'gloveTerrain' ? TERRAIN_BASE_GAIN_RANGE.step : 500}
                 value={this.props.valuelInit1}
                 onChange={(value) => {
-                  localStorage.setItem("carValueInit", value);
+                  if (mode !== 'gloveTerrain') localStorage.setItem("carValueInit", value);
                   this.props.changeStateData({ valuelInit1: value });
-                  changeLocalStroage({ sensorType: matrixName, valueType: 'valuelInit1', value, mode: cacheMode });
+                  changeLocalStroage({ sensorType: matrixName, valueType: mode === 'gloveTerrain' ? 'terrainBaseGain' : 'valuelInit1', value, mode: cacheMode });
                   pushSitBack({ valuelInit: value });
                 }}
                 style={{ width: '200px' }}
@@ -2178,6 +2223,9 @@ class Title extends React.Component {
 
   render() {
     const { t, i18n } = this.props;
+    const isCalibratableGlove = calibratableGloveTypes_title.includes(this.props.matrixName);
+    const calibrationHand = this.getGloveCalibrationHand();
+    const canCalibrateMode = ['normal', 'gloveMotion'].includes(this.props.numMatrixFlag);
     const canAcquire = canUseLicenseCapability(this.props.licenseAccess, 'canAcquire');
     const canExport = canUseLicenseCapability(this.props.licenseAccess, 'canExport');
     const finalizingCollection = this.props.collectionSummary?.phase === 'finalizing';
@@ -2409,6 +2457,7 @@ class Title extends React.Component {
             style={{ width: 90 }}
             value={this.props.numMatrixFlag}
             onChange={(value) => {
+              if (this.props.calibration) this.closeGloveCalibration();
               // Load cached config for the new mode
               const modeConfig = getConfig({ sensorType: this.props.matrixName, mode: value })
               this.props.changeStateData({ numMatrixFlag: value, ...modeConfig })
@@ -2418,7 +2467,7 @@ class Title extends React.Component {
                   this.props.com.current?.changeModal?.(this.props.hand)
                 }
 
-                if (value == 'normal') {
+                if (value === 'normal' || value === 'gloveMotion') {
                   // 检查手指校准数据是否存在
                   const fingerL = localStorage.getItem('fingerArrL')
                   const fingerR = localStorage.getItem('fingerArrR')
@@ -2433,8 +2482,8 @@ class Title extends React.Component {
               }
 
               // 清零决策见 displaySwitchZeroPolicy.js：演示场景每次切换都以当下读数为零点，
-              // 真实场景一律不动基准（清零只走抽屉里的手动按钮）。手套切 3D 遥操是唯一
-              // 与场景无关的例外 —— 遥操必须跑在未清零数据上，两种场景都取消清零。
+              // 真实场景一律不动基准（清零只走抽屉里的手动按钮）。手套的 3D 遥操与炫酷摇操
+              // 依赖未清零弯指基准，两种场景都取消清零。
               const zeroCommand = resolveDisplaySwitchZero({
                 sensorType: this.props.matrixName,
                 nextMode: value,
@@ -2452,9 +2501,13 @@ class Title extends React.Component {
             ] : this.props.matrixName === fullPacketGloveType_title ? [
               { value: 'num', label: t('data2D') },
               { value: 'numoriginal', label: t('rawData') },
+              { value: 'gloveMotion', label: t('gloveMotion') },
+              { value: 'gloveTerrain', label: t('gloveTerrain') },
             ] : tactileGloveTypes_title.includes(this.props.matrixName) ? [
               { value: 'num', label: t('data2D') },
               { value: 'normal', label: t('tel3D') },
+              { value: 'gloveMotion', label: t('gloveMotion') },
+              { value: 'gloveTerrain', label: t('gloveTerrain') },
               { value: 'num3D', label: t('data3D') },
               { value: 'numoriginal', label: t('rawData') },
               { value: 'skin', label: t('skin3D') },
@@ -2498,22 +2551,15 @@ class Title extends React.Component {
               width={450}
               className='calibModal'
               title={t('deviceCal')}
-              closable={{ 'aria-label': 'Custom Close Button' }}
+              closable={{ 'aria-label': t('common.close') }}
               open={this.props.calibration}
-              onOk={() => {
-                this.props.changeStateData({
-                  calibration: false
-                })
-              }}
-              onCancel={() => {
-                this.props.changeStateData({
-                  calibration: false
-                })
-              }}
+              onOk={this.closeGloveCalibration}
+              onCancel={this.closeGloveCalibration}
             >
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px' }}>
                 <Select
-                  value={this.state.calibHand || (this.props.matrixName === 'hand0205' && !this.props.hand ? 'right' : 'left')}
+                  aria-label={t('calibrationHand')}
+                  value={calibrationHand}
                   style={{ width: 100 }}
                   onChange={(e) => {
                     this.setState({ calibHand: e })
@@ -2522,6 +2568,7 @@ class Title extends React.Component {
                       this.props.changeStateData({ hand });
                       this.props.com.current?.changeModal?.(hand);
                     }
+                    this.previewGloveCalibration(e, this.state.fingerIndex);
                   }}
                   options={[
                     { value: 'left', label: t('leftHand') },
@@ -2529,17 +2576,14 @@ class Title extends React.Component {
                   ]}
                 />
                 <Select
-                  defaultValue={this.state.fingerIndex}
+                  aria-label={t('calibrationPose')}
+                  value={this.state.fingerIndex}
                   style={{ width: 120 }}
                   onChange={(e) => {
                     this.setState({
                       fingerIndex: e
                     })
-                    if (e == 1) {
-                      this.props.com.current?.calibration(new Array(5).fill(1))
-                    } else {
-                      this.props.com.current?.calibration(new Array(5).fill(0))
-                    }
+                    this.previewGloveCalibration(calibrationHand, e);
                   }}
                   options={[
                     { value: 0, label: t('FingersSpread') },
@@ -2550,15 +2594,18 @@ class Title extends React.Component {
 
               <Button
                 onClick={() => {
-                  this.props.colFingerData(this.state.fingerIndex, this.state.calibHand || (this.props.matrixName === 'hand0205' && !this.props.hand ? 'right' : 'left'))
+                  this.props.colFingerData(this.state.fingerIndex, calibrationHand)
                 }}
               >{t('colData')}</Button>
               <Button
                 onClick={() => {
-                  localStorage.removeItem('fingerArrL')
-                  localStorage.removeItem('fingerArrR')
+                  if (this.props.clearFingerCalibration) this.props.clearFingerCalibration();
+                  else {
+                    localStorage.removeItem('fingerArrL');
+                    localStorage.removeItem('fingerArrR');
+                  }
                 }}
-              >{t('clearData')}</Button>
+              >{t('clearCalibrationData')}</Button>
 
             </Modal>
             : ""
@@ -2634,6 +2681,7 @@ class Title extends React.Component {
 
         {this.props.matrixName === 'hand0205' ? (
           <Select
+            aria-label={t('displayHand')}
             value={this.props.hand}
             style={{ marginRight: 6, width: 90 }}
             onChange={(hand) => {
@@ -2647,25 +2695,14 @@ class Title extends React.Component {
           />
         ) : null}
 
-        {calibratableGloveTypes_title.includes(this.props.matrixName) && this.props.numMatrixFlag == 'normal' ? <Button className='titleButton'
-          onClick={() => {
-            // this.props.com.current?.calibration()
-            // this.setState({
-            //   calibration: !this.state.calibration
-            // })
-
-
-
-            // 校准弹框
-            if (this.props.matrixName === 'hand0205') {
-              this.setState({ calibHand: this.props.hand ? 'left' : 'right' });
-            }
-            this.props.changeCalibration()
-
-            // 手固定
-            this.props.com.current?.handZero()
-          }}
-        >{t('calib')}</Button> : calibratableGloveTypes_title.includes(this.props.matrixName) && this.props.numMatrixFlag == 'skin' ? <Button className='titleButton'
+        {isCalibratableGlove ? <Button className='titleButton'
+          disabled={!canCalibrateMode}
+          title={canCalibrateMode ? t('deviceCal') : t('calibrationModeHint')}
+          onClick={this.openGloveCalibration}
+        >{t('calib')}</Button> : null}
+        {isCalibratableGlove && !canCalibrateMode
+          ? <small className="portal-glove-hint">{t('calibrationModeHint')}</small> : null}
+        {isCalibratableGlove && this.props.numMatrixFlag == 'skin' ? <Button className='titleButton'
           onClick={() => {
             // this.props.com.current?.calibration()
             // this.setState({
@@ -2918,15 +2955,17 @@ class Title extends React.Component {
         onStart={this.startPortalCollection} onStop={this.stopPortalCollection}
       /> : null}
       {this.props.portalEmbedded ? serialStatusControls : null}
-      {this.props.portalToolsHost ? createPortal(<><div className="portal-monitor-tools-rail">
+      {this.props.portalToolsHost ? createPortal(<><div className={`portal-monitor-tools-rail${this.state.portalToolsCollapsed ? ' is-collapsed' : ''}`}>
         <ConfigProvider theme={PORTAL_CONTROL_THEME}>
-          <PortalDisplayPanel languageControl={languageControl}>
+          <PortalDisplayPanel languageControl={languageControl} collapsed={this.state.portalToolsCollapsed}>
             <PortalRendererControls rendererRef={this.props.com} />
             <fieldset className="portal-display-native"><legend>显示方式与区域</legend>{displayControls}{carControls}{partControls}</fieldset>
+            {isCalibratableGlove && <fieldset className="portal-glove-controls"><legend>{t('deviceCal')}</legend>{calibrationControls}</fieldset>}
             {Boolean(baudControl.props.children) && <fieldset><legend>串口参数</legend>{baudControl}</fieldset>}
           </PortalDisplayPanel>
           {jqbedConfigAccess.visible && <Tooltip title={t(jqbedConfigAccess.tooltipKey)}>
             <Button className="portal-bed-settings" icon={<SettingOutlined />}
+              aria-hidden={this.state.portalToolsCollapsed} inert={this.state.portalToolsCollapsed}
               disabled={jqbedConfigAccess.disabled}
               onClick={() => this.openPortalPanel('jqbedAlgorithmConfigOpen')}>
               {t('jqbedAlgorithmConfig.title')}
@@ -2964,7 +3003,8 @@ class Title extends React.Component {
         <PortalControlDialog open={this.state.portalSpecialOpen} title="系统专用工具"
           description="仅显示当前系统与模式支持的功能；设备校准需要先选择对应的渲染模式。"
           onClose={() => this.setState({ portalSpecialOpen: false })}>
-          <div className="portal-control-fields">{calibrationControls}{specialControls}{this.props.matrixName === 'localCar' ? collectionControls : null}</div>
+          <div className="portal-control-fields">{!this.props.portalToolsHost && calibrationControls}{specialControls}{this.props.matrixName === 'localCar' ? collectionControls : null}</div>
+          {isCalibratableGlove && this.props.portalToolsHost && <p className="portal-control-empty">{t('gloveControlsLocation')}</p>}
           {!calibratableGloveTypes_title.includes(this.props.matrixName) && !['car', 'bigBed', 'foot', 'bed4096', 'localCar'].includes(this.props.matrixName)
             && <p className="portal-control-empty">当前系统没有额外专用操作。显示与语言可在右侧直接调整，清零在工具箱中。</p>}
         </PortalControlDialog>

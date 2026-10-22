@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { verifyPortalWorkspaceControls } from './portal-workspace-controls.mjs';
 import { verifyPortalSerialFeedback } from './portal-serial-feedback.mjs';
+import { verifyPortalGloveControls } from './portal-glove-controls.mjs';
 
 const requireClient = createRequire(new URL('../../client/package.json', import.meta.url));
 const requireRoot = createRequire(new URL('../../package.json', import.meta.url));
@@ -159,6 +160,9 @@ try {
   await page.route('http://127.0.0.1:19245/**', async (route) => {
     const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type' };
     if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+    if (/\/api\/system-packages\/(?:status|sync)$/.test(route.request().url())) {
+      return route.fulfill({ headers, json: { available: [], installed: [], errors: [], expiresAt: null } });
+    }
     if (route.request().url().endsWith('/api/algorithm-market')) {
       try {
         const body = route.request().method() === 'POST' ? route.request().postDataJSON() : null;
@@ -564,10 +568,19 @@ try {
   assert.equal(dockLayout.display, 'block', '正式展示使用参考项目最新的左侧纵向图表');
   assert.ok(dockLayout.top < 220 && dockLayout.cards[1].y > dockLayout.cards[0].y && dockLayout.cards[1].x === dockLayout.cards[0].x);
   const toolsBounds = await page.locator('.portal-quick-tools').boundingBox();
-  assert.ok(toolsBounds.x > 1100 && Math.abs(toolsBounds.width - 240) < 1, '右侧工具与常驻显示设置保持统一栏宽');
+  assert.ok(toolsBounds.x > 1100 && Math.abs(toolsBounds.width - 240) < 1, '展开后的右侧工具与显示设置保持统一栏宽');
   const displayBounds = await page.getByRole('region', { name: '渲染与显示', exact: true }).boundingBox();
   assert.ok(Math.abs(displayBounds.x - toolsBounds.x) < 1 && displayBounds.y + displayBounds.height < toolsBounds.y,
-    '显示与语言设置常驻快捷工具上方，两块不能互相覆盖');
+    '展开后显示与语言设置位于快捷工具上方，两块不能互相覆盖');
+  await page.getByRole('button', { name: '收起快捷工具', exact: true }).click();
+  await page.getByRole('region', { name: '渲染与显示', exact: true }).waitFor({ state: 'hidden' });
+  await page.getByRole('complementary', { name: '快捷显示工具', exact: true }).waitFor({ state: 'hidden' });
+  const toolsHandle = page.getByRole('button', { name: '展开快捷工具', exact: true });
+  assert.equal(await toolsHandle.isVisible(), true, '两块面板收回后保留展开拉手');
+  await page.screenshot({ path: join(screenshots, 'workspace-both-panels-collapsed.png') });
+  await toolsHandle.click();
+  await page.getByRole('region', { name: '渲染与显示', exact: true }).waitFor();
+  await page.getByRole('complementary', { name: '快捷显示工具', exact: true }).waitFor();
   assert.ok((await page.locator('.home > .title').boundingBox()).y < 30, '会话栏位于顶部而非场景下方');
   const typeScale = await page.locator('.aside').evaluate((node) => ({
     heading: parseFloat(getComputedStyle(node.querySelector('.asideTitle')).fontSize),
@@ -721,7 +734,7 @@ try {
     assert.ok(fit.x >= 0 && fit.right <= fit.width + 1 && fit.bottom <= fit.height + 1 && fit.scrollWidth <= fit.width + 1, '窄屏控制台只能内部滚动，不能撑大窗口');
     const compactTools = await page.locator('.portal-quick-tools').boundingBox();
     const compactDisplay = await page.getByRole('region', { name: '渲染与显示', exact: true }).boundingBox();
-    assert.ok(compactDisplay.y + compactDisplay.height < compactTools.y, '响应式布局始终把显示设置排在快捷工具上方');
+    assert.ok(compactDisplay.y + compactDisplay.height < compactTools.y, '响应式展开布局把显示设置排在快捷工具上方');
     assert.ok(compactTools.x >= 0 && compactTools.x + compactTools.width <= viewport.width && compactTools.y + compactTools.height <= viewport.height, '快捷工具必须留在视口内');
     await page.getByRole('button', { name: '算法', exact: true }).click();
     await page.waitForFunction(() => {
@@ -865,6 +878,7 @@ try {
   const gloveSize = await page.locator('.portal-data-renderer canvas').boundingBox();
   assert.ok(gloveSize.width >= 1438 && gloveSize.height >= 898, '实体手模型沿用全屏宿主尺寸');
   await page.screenshot({ path: join(screenshots, 'glove-solid-monitor.png') });
+  await verifyPortalGloveControls({ page, screenshots });
   assert.equal(await page.getByRole('group', { name: '连接设备', exact: true }).getByRole('combobox').count(), 2,
     '双手系统在顶部保留左右两个独立串口下拉');
   await page.getByRole('button', { name: '回放', exact: true }).click();

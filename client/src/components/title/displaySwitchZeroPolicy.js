@@ -65,7 +65,7 @@ export function resolvePressureSceneChangeZero(scene) {
  * @param {string} input.nextMode      即将切到的展示模式（`numMatrixFlag` 的新值）
  * @param {string} input.scene         'demo' | 'real'
  * @param {string[]} [input.cancelZeroSensorTypes]
- *        这些传感器切到 3D 遥操（`normal`）时必须**取消**清零 —— 遥操走的是手指校准
+ *        这些传感器切到 3D 遥操（`normal`）或炫酷摇操时必须**取消**清零 —— 遥操走的是手指校准
  *        数据，带着清零基准手模会歪。这条是硬件语义，与场景无关，两边都执行；
  *        它做的是取消清零，不是清零，所以不违反「真实场景不自动清零」。
  * @returns {{ resetZero: boolean } | null} 要发的 WS 消息，null 表示不发
@@ -76,7 +76,7 @@ export function resolveDisplaySwitchZero({
   scene,
   cancelZeroSensorTypes = [],
 } = {}) {
-  if (nextMode === 'normal' && cancelZeroSensorTypes.includes(sensorType)) {
+  if (['normal', 'gloveMotion'].includes(nextMode) && cancelZeroSensorTypes.includes(sensorType)) {
     return { resetZero: false };
   }
 

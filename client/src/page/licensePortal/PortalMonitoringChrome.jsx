@@ -2,9 +2,10 @@ import React from 'react';
 import { AppstoreOutlined, LineChartOutlined, SlidersOutlined, ToolOutlined, ApiOutlined, PlayCircleOutlined, PauseCircleOutlined, HistoryOutlined, RadarChartOutlined, CloseOutlined } from '@ant-design/icons';
 import './PortalUtilityPanel.css';
 
-/** 语言与显示选择常驻工具栏，收起快捷工具时仍能直接操作。 */
-export function PortalDisplayPanel({ languageControl, children }) {
-  return <section className="portal-display-panel" aria-labelledby="portal-display-title">
+/** 语言与显示选择随快捷工具收回，保留控件状态并禁用折叠后的交互。 */
+export function PortalDisplayPanel({ languageControl, children, collapsed = false }) {
+  return <section id="portal-display-panel" className="portal-display-panel" aria-labelledby="portal-display-title"
+    aria-hidden={collapsed} inert={collapsed}>
     <header><SlidersOutlined aria-hidden="true" /><strong id="portal-display-title">渲染与显示</strong></header>
     <div className="portal-display-fields">
       <label className="portal-display-language"><span>界面语言</span>{languageControl}</label>
@@ -34,7 +35,7 @@ export function PortalSessionBar({ mode, onMode, controlsOpen, onControls, devic
 export function PortalQuickTools({ chartsVisible, onCharts, algorithmsOpen, onAlgorithms, settingsOpen, onSettings, toolsOpen, onTools, collapsed = false, onCollapse }) {
   return <div className="portal-quick-tools-anchor"><div className={`portal-quick-tools-slide${collapsed ? ' is-collapsed' : ''}`}>
     <button type="button" className="portal-quick-tools-handle" aria-label={collapsed ? '展开快捷工具' : '收起快捷工具'}
-      title={collapsed ? '展开快捷工具' : '收起快捷工具'} aria-expanded={!collapsed} aria-controls="portal-quick-tools-content" onClick={() => onCollapse?.(!collapsed)}>
+      title={collapsed ? '展开快捷工具' : '收起快捷工具'} aria-expanded={!collapsed} aria-controls="portal-quick-tools-content portal-display-panel" onClick={() => onCollapse?.(!collapsed)}>
       <span className="portal-drawer-grip" aria-hidden="true"><i /><i /></span><span>工具</span>
     </button>
     <aside className="portal-quick-tools" aria-label="快捷显示工具" aria-hidden={collapsed} inert={collapsed}>

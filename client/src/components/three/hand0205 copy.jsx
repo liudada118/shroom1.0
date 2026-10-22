@@ -55,10 +55,12 @@ let baseQuaternionInv = null; // 存储第一个四元数的逆
  * 2.0
  */
 
+/** 保留单手原坐标变换，复制读数以免交换XY污染调用方的原始帧。 */
 function transformQuaternion(a) {
-  [a[0], a[1]] = [a[1], a[0]]
+  const values = [...a];
+  [values[0], values[1]] = [values[1], values[0]];
 
-  let q = new THREE.Quaternion(...a)
+  let q = new THREE.Quaternion(...values).normalize()
   if (!q) {
     console.warn("Received invalid quaternion.");
     return new THREE.Quaternion(0, 0, 0, 1);
@@ -81,7 +83,7 @@ function transformQuaternion(a) {
   const qTransformed = new THREE.Quaternion();
   qTransformed.multiplyQuaternions(baseQuaternionInv, q);
   qTransformed.x = -qTransformed.x
-  return qTransformed;
+  return qTransformed.normalize();
 }
 
 let baseEulerX = null
@@ -950,8 +952,9 @@ const Canvas = React.forwardRef((props, refs) => {
     particles.material.opacity = showFlag ? 1 : 0
   }
 
+  /** 只让有效姿态建立初始化基准；空帧和全零帧保持等待状态。 */
   function changeHandAngle(arr) {
-    if (arr && !arr.includes(undefined)) {
+    if (Array.isArray(arr) && arr.length === 4 && arr.every(Number.isFinite) && Math.hypot(...arr) > .000001) {
       quaternion = transformQuaternion(arr)
     }
 
@@ -994,8 +997,18 @@ const Canvas = React.forwardRef((props, refs) => {
     // chair.matrix.decompose(chair.position, chair.quaternion, chair.scale);
   }
 
+  /** 初始化时立即归位，并沿用单手等待下一有效帧建立新基准的语义。 */
   function resetHand() {
-    baseQuaternion = null
+    baseQuaternion = null;
+    baseQuaternionInv = null;
+    quaternion = new THREE.Quaternion();
+    group?.quaternion.copy(quaternion);
+    group?.updateMatrixWorld(true);
+  }
+
+  /** 返回单手唯一陀螺仪节点的只读姿态，沿用双手诊断的left字段。 */
+  function getQuaternionSnapshot() {
+    return { left: group?.quaternion.toArray() };
   }
 
   function changaCamera(obj) {
@@ -1040,6 +1053,7 @@ const Canvas = React.forwardRef((props, refs) => {
     calibration,
     handZero,
     resetHand,
+    getQuaternionSnapshot,
     changaCamera,
     changeModal
   }));
@@ -1048,6 +1062,10 @@ const Canvas = React.forwardRef((props, refs) => {
   //   视图数据
 
   useEffect(() => {
+    // 切回3D遥操时重新等待有效首帧，不能复用其他模式硬件初始化前的零点。
+    baseQuaternion = null;
+    baseQuaternionInv = null;
+    quaternion = new THREE.Quaternion();
     // 靠垫数据
 
     window.removeEventListener('keydown', function () { })

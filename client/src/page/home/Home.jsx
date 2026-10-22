@@ -36,6 +36,9 @@ import Gloves from "../../components/three/gloves";
 import Gloves1 from "../../components/three/gloves1";
 import Hand0205 from "../../components/three/hand0205 copy";
 import Hand0205Double from "../../components/three/hand0205Double";
+import GloveMotion from "../../components/three/gloveMotion/GloveMotion";
+import GloveTerrain from "../../components/three/gloveTerrain/GloveTerrain";
+import { GLOVE_EXHIBITION_MODES, isGloveExhibitionMode, buildGloveExhibitionFrame, gloveExhibitionConfig, resolveGloveQuaternionResetSide, getCalibratedGloveFingers } from './gloveExhibition';
 import Minzhen from "../../components/three/minzhen";
 import MinzhenSensorPanel from "../../components/minzhen/MinzhenSensorPanel";
 import Hand0507 from "../../components/three/hand0507";
@@ -214,7 +217,7 @@ const HAND_0205_DOUBLE_MATRIX = 'hand0205Double'
 const MINZHEN_MATRIX = 'minzhen'
 const SMALL_BED_NO_ALG_MATRIX = 'smallBedNoAlg'
 const SMALL_BED_12B_MATRIX = 'smallBed12B'
-const FULL_PACKET_GLOVE_MODES = ['num', 'numoriginal']
+const FULL_PACKET_GLOVE_MODES = ['num', 'numoriginal', ...GLOVE_EXHIBITION_MODES]
 const WHOLE_CHAIR_MATRIX = 'wholeChair'
 const HIDDEN_DISPLAY_MATRIX_TYPES = [SINGLE_GLOVE_ALIAS]
 /** 副本使用原生型号选取渲染分支，独立身份另外保留在 systemId。 */
@@ -241,7 +244,7 @@ const resolveBackendDisplayMatrixName = (activeSensorType, allowedTypes, current
 const tactileGloveTypes = [SINGLE_GLOVE_MATRIX, HAND_0205_DOUBLE_MATRIX, 'handGlove115200', FULL_PACKET_GLOVE_MATRIX]
 // 手套双手同显：这些模式下 sit(左手)/back(右手) 两路数据同时驱动左右手视图，
 // 不再按最后选择的串口切换单手；num3D/skin 仍沿用单手切换逻辑
-const DUAL_GLOVE_MODES = ['normal', 'num', 'numoriginal']
+const DUAL_GLOVE_MODES = ['normal', 'num', 'numoriginal', ...GLOVE_EXHIBITION_MODES]
 const isDualGloveDisplay = (matrixName, mode) =>
   matrixName !== SINGLE_GLOVE_MATRIX &&
   (tactileGloveTypes.includes(matrixName) || matrixName === HAND_0205_DOUBLE_MATRIX) &&
@@ -833,7 +836,8 @@ const getConfig = ({ sensorType, mode }) => {
       ? initConfig[realType]
       : initConfig['bed']
   const local = getLocalStorageConfig({ sensorType: realType, mode })
-  const mergedConfig = { ...init, ...local }
+  const modeConfig = JSON.parse(localStorage.getItem('valueConfig'))?.[modeDefaultKey];
+  const mergedConfig = { ...init, ...local, ...gloveExhibitionConfig(mode, modeConfig) }
   if (isHumanBodyMatrix(realType)) {
     if (HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES.includes(Number(mergedConfig.valuej1))) {
       mergedConfig.valuej1 = HUMAN_BODY_DEFAULT_COLOR
@@ -911,6 +915,7 @@ const getDefaultModeForMatrix = (matrixName, currentMode = "normal") => {
   if (runtimeDefinition?.source === 'manifest') {
     return runtimeDefinition.sceneMode || 'numoriginal'
   }
+  if (isGloveExhibitionMode(currentMode) && !tactileGloveTypes.includes(matrixName)) currentMode = 'normal';
   if (matrixName === SMALL_BED_12B_MATRIX) {
     return "numoriginal";
   }
@@ -930,7 +935,7 @@ const getDefaultModeForMatrix = (matrixName, currentMode = "normal") => {
     return currentMode === "numoriginal" ? "numoriginal" : "skin";
   }
   if (matrixName === SINGLE_GLOVE_MATRIX || matrixName === HAND_0205_DOUBLE_MATRIX) {
-    return ['normal', 'num', 'num3D', 'numoriginal', 'skin'].includes(currentMode) ? currentMode : 'normal';
+    return ['normal', 'num', 'num3D', 'numoriginal', 'skin', ...GLOVE_EXHIBITION_MODES].includes(currentMode) ? currentMode : 'normal';
   }
   if (matrixName === FULL_PACKET_GLOVE_MATRIX) {
     return FULL_PACKET_GLOVE_MODES.includes(currentMode) ? currentMode : "num";
@@ -1216,7 +1221,8 @@ class Home extends React.Component {
   }
 
   syncDisplayRendererConfig = () => {
-    if (!displayRendererConfigMatrixArr.includes(this.state.matrixName)) {
+    if (!displayRendererConfigMatrixArr.includes(this.state.matrixName)
+      && !(tactileGloveTypes.includes(this.state.matrixName) && this.state.numMatrixFlag === 'gloveTerrain')) {
       return;
     }
 
@@ -1470,6 +1476,25 @@ class Home extends React.Component {
     this.singleGloveTrendKey = null;
     this.singleGlovePressureTrend = [];
     this.singleGloveAreaTrend = [];
+    this.gloveExhibitionFrames = {};
+  }
+
+  /** 缓存并分派两路手套展示帧，场景切换只重放显示，不写回设备或采集。 */
+  updateGloveExhibitionFrame = (message, channel, channelPressure) => {
+    if (!tactileGloveTypes.includes(this.state.matrixName) || !this.isCurrentDisplayFrame(message)) return;
+    if (this.gloveExhibitionSource !== this.getSingleGloveFrameSourceKey()) {
+      this.gloveExhibitionSource = this.getSingleGloveFrameSourceKey();
+      this.gloveExhibitionFrames = {};
+    }
+    const side = isRightHandPayload(message, channel === 'back') ? 'right' : 'left';
+    const frame = buildGloveExhibitionFrame({ message, channel, channelPressure,
+      rawPressure: getRawPressurePayload(message, channel), calibration: side === 'right' ? fingerArrR : fingerArrL });
+    frame.statsPressure = this.parseGloveRawMatrix(getRawPressurePayload(message, channel));
+    this.gloveExhibitionFrames[frame.side] = frame;
+    if (!isGloveExhibitionMode(this.state.numMatrixFlag)) return;
+    if (frame.fingerPoints) updateLatestFingerPoints(frame.fingerPoints, frame.side === 'right');
+    if (this.state.matrixName !== SINGLE_GLOVE_MATRIX) this.syncGloveRawPressureStats(getRawPressurePayload(message, channel));
+    this.com.current?.updateFrame?.(frame);
   }
 
   /** 缓存当前系统的真实双手末帧，切换显示手时复用。 */
@@ -1491,7 +1516,7 @@ class Home extends React.Component {
     const frame = this.singleGloveFrames[side] || {
       [dataKey]: new Array(256).fill(0),
       newArr147: new Array(147).fill(0),
-      rotate: [0, 0, 0, 1],
+      rotate: null,
       backFlag: !this.state.hand,
     };
     this.singleGloveReplaying = true;
@@ -1820,18 +1845,20 @@ class Home extends React.Component {
     });
   }
 
-  /**
-   * wildcard 订阅会收到所有展示系统的帧。先按展示系统身份过滤，再进入 sit/back/head
-   * 处理器，避免不同系统复用同名 outputChannel 时互相覆盖。
-   */
-  isCurrentDisplayFrame = (message) => {
+  /** 返回当前展示接受的身份，数据帧与设备姿态事件共用同一隔离边界。 */
+  getCurrentDisplayIdentities = () => {
     const definition = getDisplayDefinition(this.state.matrixName);
-    if (definition?.source === 'builtin-template') return isSensorFrameForDisplay(message, [definition.displaySystemId]);
-    return isSensorFrameForDisplay(message, [
+    if (definition?.source === 'builtin-template') return [definition.displaySystemId];
+    return [
       this.state.matrixName,
       definition?.displaySystemId,
       definition?.type,
-    ]);
+    ];
+  };
+
+  /** 按展示系统身份隔离wildcard帧，避免同名sit/back/head跨系统覆盖。 */
+  isCurrentDisplayFrame = (message) => {
+    return isSensorFrameForDisplay(message, this.getCurrentDisplayIdentities());
   };
 
 
@@ -2539,6 +2566,8 @@ class Home extends React.Component {
         wsPointData = JSON.parse(wsPointData);
       }
 
+      this.updateGloveExhibitionFrame(jsonObject, 'sit', wsPointData);
+
 
       // wsPointDataSit = wsPointData;
       // wsPointDataSit = wsPointDataSit.map((a) => Math.round(a));
@@ -2567,7 +2596,7 @@ class Home extends React.Component {
             fingerArr: fingerArr
           });
         }
-      } else if (this.state.matrixName !== 'handGloveFullPacket') {
+      } else if (this.state.matrixName !== 'handGloveFullPacket' && !isGloveExhibitionMode(this.state.numMatrixFlag)) {
         sitTypeEvent[this.state.matrixName]({
           that: this,
           wsPointData,
@@ -2608,7 +2637,28 @@ class Home extends React.Component {
     }
 
     if (jsonObject.handReset != null) {
-      this.com.current?.resetHand()
+      if (tactileGloveTypes.includes(this.state.matrixName)) {
+        const side = resolveGloveQuaternionResetSide(jsonObject, {
+          dual: this.state.matrixName !== SINGLE_GLOVE_MATRIX,
+          hand: this.state.hand, acceptedIdentities: this.getCurrentDisplayIdentities(),
+        });
+        // ⚠️ 硬件初始化会更换设备姿态基准，必须等通知后的有效帧，不能复用初始化前的缓存。
+        if (side) {
+          const exhibitionFrame = this.gloveExhibitionFrames?.[side];
+          if (exhibitionFrame) exhibitionFrame.quaternion = null;
+          const cachedFrame = this.singleGloveFrames?.[side];
+          if (cachedFrame) {
+            cachedFrame.rotate = null;
+            cachedFrame.orientation = null;
+            if (cachedFrame.payload) cachedFrame.payload.orientation = null;
+          }
+          const hiddenSingleHand = this.state.matrixName === SINGLE_GLOVE_MATRIX
+            && this.state.numMatrixFlag === 'normal' && side !== (this.state.hand ? 'left' : 'right');
+          if (!hiddenSingleHand) this.com.current?.resetHand?.(side, { waitForNextFrame: true });
+        }
+      } else {
+        this.com.current?.resetHand?.();
+      }
     }
 
 
@@ -2654,7 +2704,7 @@ class Home extends React.Component {
 
 
     const sitMappedPressurePayload = getMappedPressurePayload(jsonObject, this.state.matrixName)
-    if (sitFrameData &&
+    if (sitFrameData && !isGloveExhibitionMode(this.state.numMatrixFlag) &&
       sitMappedPressurePayload != null &&
       (['robot1', 'footVideo'].includes(this.state.matrixName) || this.state.matrixName.includes('robot') ||
         this.state.matrixName.includes('hand') || this.state.matrixName == 'Num3D')) {
@@ -3181,8 +3231,10 @@ class Home extends React.Component {
         wsPointDataBack = JSON.parse(wsPointDataBack);
       }
 
+      this.updateGloveExhibitionFrame(jsonObject, 'back', wsPointDataBack);
+
       if (
-        this.state.matrixName !== "bigBed" &&
+        !isGloveExhibitionMode(this.state.numMatrixFlag) && this.state.matrixName !== "bigBed" &&
         this.state.matrixName !== "foot" &&
         this.state.matrixName !== "handGloveFullPacket" &&
         this.state.matrixName !== HAND_0205_DOUBLE_MATRIX
@@ -3199,7 +3251,7 @@ class Home extends React.Component {
     }
 
     const backMappedPressurePayload = getMappedPressurePayload(jsonObject, this.state.matrixName)
-    if (backFrameData &&
+    if (backFrameData && !isGloveExhibitionMode(this.state.numMatrixFlag) &&
       backMappedPressurePayload != null &&
       (['robot1', 'footVideo'].includes(this.state.matrixName) || this.state.matrixName.includes('hand') || this.state.matrixName == 'Num3D')) {
 
@@ -3689,7 +3741,19 @@ class Home extends React.Component {
       prevState.local !== this.state.local ||
       prevState.dataTime !== this.state.dataTime ||
       (prevState.colFlag === true && this.state.colFlag === false);
-    if (singleGloveSourceChanged) this.resetSingleGloveFrameCache();
+    if (singleGloveSourceChanged) {
+      this.resetSingleGloveFrameCache();
+      if (this.state.calibration && this.state.numMatrixFlag === 'gloveMotion') {
+        this.setState({ calibration: false });
+      }
+    }
+    if (isGloveExhibitionMode(this.state.numMatrixFlag) && prevState.numMatrixFlag !== this.state.numMatrixFlag) {
+      Object.values(this.gloveExhibitionFrames || {}).forEach((frame) => this.com.current?.updateFrame?.(frame));
+      if (this.state.matrixName !== SINGLE_GLOVE_MATRIX) {
+        const primary = this.gloveExhibitionFrames?.left || this.gloveExhibitionFrames?.right;
+        if (primary?.statsPressure) this.syncGloveRawPressureStats(primary.statsPressure);
+      }
+    }
     if (this.state.matrixName === SINGLE_GLOVE_MATRIX && (
       singleGloveSourceChanged || prevState.hand !== this.state.hand || prevState.numMatrixFlag !== this.state.numMatrixFlag
     )) {
@@ -3732,7 +3796,7 @@ class Home extends React.Component {
       prevState.value1 !== this.state.value1 ||
       prevState.valuelInit1 !== this.state.valuelInit1;
 
-    if (rendererConfigChanged) {
+    if (rendererConfigChanged || (this.state.numMatrixFlag === 'gloveTerrain' && singleGloveSourceChanged)) {
       this.syncDisplayRendererConfig();
     }
 
@@ -4715,6 +4779,15 @@ class Home extends React.Component {
     })
   }
 
+  /** 用新的本侧校准基准重算末帧，不必等待下一份串口数据。 */
+  refreshGloveExhibitionCalibration = (hand) => {
+    const frame = this.gloveExhibitionFrames?.[hand];
+    if (!frame?.fingerPoints) return;
+    frame.fingers = getCalibratedGloveFingers(frame.fingerPoints, hand === 'right' ? fingerArrR : fingerArrL);
+    if (this.state.numMatrixFlag === 'gloveMotion') this.com.current?.updateFrame?.(frame);
+  };
+
+  /** 分别保存左右手的平铺/握拳采样，立即更新炫酷摇操缓存的弯指结果。 */
   colFingerData(index, hand = 'left') {
     const key = hand === 'right' ? 'fingerArrR' : 'fingerArrL'
     const arr = readFingerCalibration(key)
@@ -4727,7 +4800,19 @@ class Home extends React.Component {
     // 同步当前 fingerArr 指向
     fingerArr = backFlag ? fingerArrR : fingerArrL
     localStorage.setItem(key, JSON.stringify(arr))
+    this.refreshGloveExhibitionCalibration(hand);
   }
+
+  /** 清除两侧手指校准并恢复默认基准，同步刷新当前线网的末帧。 */
+  clearFingerCalibration = () => {
+    localStorage.removeItem('fingerArrL');
+    localStorage.removeItem('fingerArrR');
+    fingerArrL = createDefaultFingerCalibration();
+    fingerArrR = createDefaultFingerCalibration();
+    fingerArr = backFlag ? fingerArrR : fingerArrL;
+    this.refreshGloveExhibitionCalibration('left');
+    this.refreshGloveExhibitionCalibration('right');
+  };
 
   /** 工具箱复用原生框选开关与统计索引，关闭时同步清掉旧选区。 */
   changePortalSelection = (enabled) => {
@@ -5280,6 +5365,7 @@ class Home extends React.Component {
             calibration={this.state.calibration}
             changeCalibration={this.changeCalibration}
             colFingerData={this.colFingerData}
+            clearFingerCalibration={this.clearFingerCalibration}
             openDisplaySystemBuilder={() => this.setState({ displaySystemBuilderOpen: true })}
             onPortalBack={this.props.onPortalBack}
             portalEmbedded={this.props.portalEmbedded}
@@ -5358,6 +5444,12 @@ class Home extends React.Component {
                 enabled={false}
               />
             </React.Suspense>
+          ) : tactileGloveTypes.includes(this.state.matrixName) && isGloveExhibitionMode(this.state.numMatrixFlag) ? (
+            this.state.numMatrixFlag === 'gloveMotion'
+              ? <GloveMotion key={this.getSingleGloveFrameSourceKey()} ref={this.com} hand={this.state.hand} dual={this.state.matrixName !== SINGLE_GLOVE_MATRIX}
+                  data={gloveRendererData} local={this.state.local} />
+              : <GloveTerrain key={this.getSingleGloveFrameSourceKey()} ref={this.com} hand={this.state.hand} dual={this.state.matrixName !== SINGLE_GLOVE_MATRIX}
+                  data={gloveRendererData} local={this.state.local} />
           ) : this.state.numMatrixFlag == "num" &&
             this.state.matrixName != WHOLE_CHAIR_MATRIX &&
             (this.state.matrixName == "foot" ||

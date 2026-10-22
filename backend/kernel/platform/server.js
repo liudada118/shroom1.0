@@ -2680,6 +2680,7 @@ const legacySerialFrameRuntimeBaseContext = {
   isSmallBedMatrixType,
   parseMinzhenSensorFrame,
   publishSystemEvent,
+  resolveChannelIdentity: zeroChannelIdentityResolver.resolveChannelIdentity,
   shouldStoreCollectionFrame,
   sit1024FrameProcessor,
   smallBed12BRuntime,
