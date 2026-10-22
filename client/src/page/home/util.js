@@ -1793,7 +1793,7 @@ export const sitTypeEvent = {
       // that.com.current?.calibration([0,0,0])
       // that.com.current?.handZero(      // that.com.current?.calibration([0,0,0])
     }
-  }, hand0205: ({ that, wsPointData, local, rotate, fingerArr }) => {
+  }, hand0205Double: ({ that, wsPointData, local, rotate, fingerArr }) => {
     // console.log('wsPointData')
     // console.log(wsPointData.length)
     if (wsPointData.length == 1024) {
@@ -1962,9 +1962,12 @@ export const sitTypeEvent = {
       // that.com.current?.calibration([0,0,0])
     }
   },
-  hand0205Double: function(args) { return sitTypeEvent.hand0205(args); },
-  handGlove115200: function(args) { return sitTypeEvent.hand0205(args); },
-  handGloveFullPacket: function(args) { return sitTypeEvent.hand0205(args); },
+  hand0205: function(args) {
+    if (args.that.state.hand) return sitTypeEvent.hand0205Double(args);
+  },
+  hand0205Single: function(args) { return sitTypeEvent.hand0205(args); },
+  handGlove115200: function(args) { return sitTypeEvent.hand0205Double(args); },
+  handGloveFullPacket: function(args) { return sitTypeEvent.hand0205Double(args); },
   hand0205Point: ({ that, wsPointData, local, rotate, fingerArr }) => {
 
 
@@ -3157,6 +3160,15 @@ export const sitTypeEvent = {
     });
   },
   humanBodyOptimized: ({ that, wsPointData, local }) => {
+    that.com.current?.sitData({
+      wsPointData,
+      valuef: that.state.valuef1,
+      valuelInit: that.state.valuelInit1,
+      local: that.state.local,
+    });
+  },
+  // 压力背心保留1024通道帧，由背心配置选择胸背和肩部点位。
+  pressureVest: ({ that, wsPointData }) => {
     that.com.current?.sitData({
       wsPointData,
       valuef: that.state.valuef1,
@@ -4827,7 +4839,7 @@ export const backTypeEvent = {
       }
       that.com.current?.changeWsData147R({ right: [...rightNumData] });
     }
-  }, hand0205: ({ that, jsonObject, local, rotate, fingerArr }) => {
+  }, hand0205Double: ({ that, jsonObject, local, rotate, fingerArr }) => {
     // console.log('wsPointData')
     // console.log(wsPointData.length)
     let wsPointData = getSensorFrameChannelValue(jsonObject, 'back');
@@ -5005,9 +5017,12 @@ export const backTypeEvent = {
       // that.com.current?.calibration([0,0,0])
     }
   },
-  hand0205Double: function(args) { return backTypeEvent.hand0205(args); },
-  handGlove115200: function(args) { return backTypeEvent.hand0205(args); },
-  handGloveFullPacket: function(args) { return backTypeEvent.hand0205(args); },
+  hand0205: function(args) {
+    if (!args.that.state.hand) return backTypeEvent.hand0205Double(args);
+  },
+  hand0205Single: function(args) { return backTypeEvent.hand0205(args); },
+  handGlove115200: function(args) { return backTypeEvent.hand0205Double(args); },
+  handGloveFullPacket: function(args) { return backTypeEvent.hand0205Double(args); },
 };
 
 export const headTypeEvent = {

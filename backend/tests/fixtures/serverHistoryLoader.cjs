@@ -41,7 +41,7 @@ function createServerHistoryLoader(databases, sensorType = 'hand0205', clock = {
     createHistorySeries: history.getHistorySeries,
     buildHistoryZeroPlaybackPayload: history.buildZeroPlaybackPayload,
     runtimeContext: { getSensorType: () => sensorType, getDatabase: (role) => databases[role] },
-    isCar, isThreePortFile: sensors.isThreePortFile, totalToN,
+    isCar, isHandGloveType: sensors.isHandGloveType, isThreePortFile: sensors.isThreePortFile, totalToN,
     SMALL_BED_12B_TYPE: 'smallBed12B', smallBed12BDisplayOptions: {},
     length: 0, timeStamp: [], historyArr: [], interval: 10, detectedInterval: 10, timeNum: 10,
     playFlag: false,

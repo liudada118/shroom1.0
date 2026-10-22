@@ -250,7 +250,7 @@ def build():
         print("\n部署说明:")
         print(f"  将 {dist_dir} 目录复制到 Electron 项目的")
         print("  resources/python/ 目录下即可。")
-        print("  pyWorker.js 会自动检测并使用打包后的可执行文件。")
+        print("  backend/kernel/algorithm-channel/pythonWorker.js 会自动检测并使用打包后的可执行文件。")
     else:
         print("\n打包失败！请检查错误信息。")
         sys.exit(1)

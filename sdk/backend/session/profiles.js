@@ -1,7 +1,7 @@
 const STANDARD_FRAME_DELIMITER = Buffer.from([0xaa, 0x55, 0x03, 0x99]);
 const SMALL_BED_12B_FRAME_TAIL = Buffer.from([0xaa, 0x00, 0x55, 0x00, 0x03, 0x00, 0x99, 0x00]);
 
-const HAND_GLOVE_TYPES = ['hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket'];
+const HAND_GLOVE_TYPES = ['hand0205', 'hand0205Single', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket'];
 
 function getDefaultBaudRate(sensorType = '') {
   if (sensorType === 'handGlove115200') {
@@ -43,6 +43,18 @@ const DEFAULT_SENSOR_PROFILES = {
     rotateOffset: 256,
     rotateLength: 4,
     channels: ['sit', 'back'],
+  },
+  // API 兼容别名；正式单手系统使用 hand0205。
+  hand0205Single: {
+    sensorType: 'hand0205Single',
+    baudRate: getDefaultBaudRate('hand0205Single'),
+    delimiter: STANDARD_FRAME_DELIMITER,
+    valueType: 'uint8',
+    pressureLength: 256,
+    rotateOffset: 256,
+    rotateLength: 4,
+    channels: ['sit', 'back'],
+    aliasOf: 'hand0205',
   },
   hand0205Double: {
     sensorType: 'hand0205Double',

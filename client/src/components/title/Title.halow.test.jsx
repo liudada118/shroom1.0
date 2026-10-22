@@ -68,6 +68,30 @@ describe('人体全身优化 HaLow 入口', () => {
     expect(serial.props.disabled).toBe(disabled);
   });
 
+
+  it.each([true, false])('背心入口在 portalEmbedded=%s 复用 HTTP 连接控制并禁止双传输同时开启', (portalEmbedded) => {
+    const title = createTitle({ matrixName: 'pressureVest', portalEmbedded, wsConnected: true, halowStatus: { running: true } });
+    const entries = elements(title.render());
+    const halow = entries.find((entry) => entry.type === HalowConnection);
+    expect(halow.props.sensorLabel).toBe('sensorPressureVest');
+    expect(halow.props.onStatus).toBeTypeOf('function');
+    expect(halow.props.send).toBeUndefined();
+    const serial = entries.find((entry) => entry.type === Select && entry.props['aria-label'] === 'chooseSensor');
+    expect(serial.props.disabled).toBe(true);
+  });
+
+  it('背心副本继承型号入口，仍保留独立系统身份与到期采集限制', () => {
+    const id = 'pressure-vest-title-copy';
+    registerRuntimeDisplayDefinition({ builtinTemplate: { id, name: '背心副本', sourceType: 'pressureVest' },
+      sensorDefinition: { type: id }, displayMetadata: { name: '背心副本' } });
+    const title = createTitle({ systemId: id, matrixName: 'pressureVest', portalEmbedded: true,
+      licenseAccess: { mode: 'history-only', canAcquire: false, canReadHistory: true } });
+    const halow = elements(title.render()).find((entry) => entry.type === HalowConnection);
+    expect(halow.key).toBe(id);
+    expect(halow.props.canAcquire).toBe(false);
+    expect(halow.props.sensorLabel).toBe('sensorPressureVest');
+  });
+
   it('其他系统不暴露人体接收入口', () => {
     const title = createTitle({ matrixName: 'hand', portalEmbedded: true });
     expect(elements(title.render()).some((entry) => entry.type === HalowConnection)).toBe(false);

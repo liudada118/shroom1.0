@@ -1,5 +1,9 @@
 import React, { useRef, useEffect } from "react";
 import Title from "../../components/title/Title";
+import { readLicenseAccess, isHistoryOnlyLicense, canUseLicenseCapability } from '../../services/licenseAccess';
+import { readCollectionSummary } from '../../services/collectionStatus';
+import { requestJson } from '../../extensions/display-system/api';
+import RuntimeStatusNotice from './RuntimeStatusNotice';
 import { sendWebSocketJson } from './websocketTransport';
 import {
   decodeWebSocketPayload,
@@ -7,6 +11,8 @@ import {
   getSensorFrameOutputChannel,
   isSensorFrameForDisplay,
 } from '../../services/ws/sensorFrameDecoder';
+import { mergeJqbedReturnedSettings, sameJqbedReturnedSettings } from '../../extensions/jqbed/jqbedReturnedSettings';
+import { mergeJqbedAlgorithmLogFrame } from '../../extensions/jqbed/jqbedAlgorithmLogState';
 import "./index.scss";
 import CanvasCar from "../../components/three/carnewTest copy";
 import CanvasCarWow from "../../components/three/carnewWow";
@@ -46,6 +52,8 @@ import RobotBlueLCF from "../../components/video/robotLCF";
 import RobotBlue0428 from "../../components/video/robot0428";
 import HumanBodyCanvas from '../../visualization/human-body/humanBody';
 import HumanBodyOptimized from '../../visualization/human-body/HumanBodyOptimized';
+import { PRESSURE_VEST_MATRIX, PRESSURE_VEST_PROFILE, PRESSURE_VEST_RAW_LAYOUT, PRESSURE_VEST_SENSOR_INDICES } from '../../components/video/pressureVestConfig';
+import { getHumanBodyPressureStatistics } from './humanBodyPressureStatistics';
 import CarTq from "../../components/three/carTq";
 import Bed from "../../components/three/Bed";
 import SmallBed from "../../components/three/smallBed";
@@ -91,6 +99,9 @@ import HumanBodyRawData from "../../visualization/human-body/HumanBodyRawData";
 // （`Num2DOriginal` 的掩码 / POT / 分区布局 / 裸数据转置全部做成了参数开关）。
 // 这两个原文件已随本批删除 —— 删掉它们之前 grep 过全仓，除了这两行再无引用方，
 // 留壳没有服务对象（`components/num/daliegu.jsx` 里那个 `Num2D` 是它自己的局部同名量）。
+import { GloveHandNum2D } from "../../components/num/GloveHandNum2D";
+import { LegacyGloveNum2D } from "../../components/num/LegacyGloveNum2D";
+import { LegacyGloveNum2DOriginal } from "../../components/num/LegacyGloveNum2DOriginal";
 import { calFoot } from "../../assets/util/value";
 // `Heatmap`（components/heatmap/canvas.jsx）也不再静态 import —— 那个渲染点换成了
 // `RendererHost` + `blobHeatmap`。原路径留了适配壳（`App.jsx:17` 的 /heatmap 路由
@@ -116,6 +127,7 @@ import { getLanguageLocale, normalizeLanguage } from '../../i18n';
 import { translateBackendMessage } from '../../i18n/translateBackendMessage';
 import { translateDomainLabel } from '../../i18n/translateDomainLabel';
 import { speakLocalizedMessage } from './speechSynthesis';
+import { createJqbedAlarmSpeechState } from './jqbedAlarmSpeech';
 import { chestLine, flLine, frLine, genWebglData, handSkinChange, heatMapMax, hlLine, hrLine, robot0401 } from "./robotUtil";
 import { WebGLCanvas } from "../../components/webgl/WebGL.HeatMap copy 2";
 import { WS_URLS } from "../../constants";
@@ -193,6 +205,8 @@ import {
 
 const ANT_DESIGN_LOCALES = Object.freeze({ zh: zhCN, en: enUS, ja: jaJP });
 
+const SINGLE_GLOVE_MATRIX = 'hand0205'
+const SINGLE_GLOVE_ALIAS = 'hand0205Single'
 const FULL_PACKET_GLOVE_MATRIX = 'handGloveFullPacket'
 const DisplaySystemBuilder = React.lazy(() => import('../displaySystemBuilder/DisplaySystemBuilder'))
 const ManifestDisplayRenderer = React.lazy(() => import('../../extensions/display-system/ManifestDisplayRenderer.jsx'))
@@ -202,7 +216,7 @@ const SMALL_BED_NO_ALG_MATRIX = 'smallBedNoAlg'
 const SMALL_BED_12B_MATRIX = 'smallBed12B'
 const FULL_PACKET_GLOVE_MODES = ['num', 'numoriginal']
 const WHOLE_CHAIR_MATRIX = 'wholeChair'
-const HIDDEN_DISPLAY_MATRIX_TYPES = [HAND_0205_DOUBLE_MATRIX]
+const HIDDEN_DISPLAY_MATRIX_TYPES = [SINGLE_GLOVE_ALIAS]
 /** 副本使用原生型号选取渲染分支，独立身份另外保留在 systemId。 */
 const normalizeDisplayMatrixName = (matrixName) => {
   const nativeType = resolveNativeSystemType(matrixName);
@@ -210,7 +224,7 @@ const normalizeDisplayMatrixName = (matrixName) => {
   return HIDDEN_DISPLAY_MATRIX_TYPES.includes(matrixName) ? 'hand0205' : matrixName;
 }
 const filterVisibleDisplayMatrixTypes = (types) =>
-  types.filter((type) => !HIDDEN_DISPLAY_MATRIX_TYPES.includes(type))
+  [...new Set(types.map(normalizeDisplayMatrixName).filter(Boolean))]
 const resolveBackendDisplayMatrixName = (activeSensorType, allowedTypes, currentMatrixName) => {
   const backendMatrixName = normalizeDisplayMatrixName(activeSensorType)
   const normalizedCurrentMatrixName = normalizeDisplayMatrixName(currentMatrixName)
@@ -224,7 +238,16 @@ const resolveBackendDisplayMatrixName = (activeSensorType, allowedTypes, current
   }
   return allowedTypes[0] || normalizedCurrentMatrixName
 }
-const tactileGloveTypes = ['hand0205', 'handGlove115200', FULL_PACKET_GLOVE_MATRIX]
+const tactileGloveTypes = [SINGLE_GLOVE_MATRIX, HAND_0205_DOUBLE_MATRIX, 'handGlove115200', FULL_PACKET_GLOVE_MATRIX]
+// 手套双手同显：这些模式下 sit(左手)/back(右手) 两路数据同时驱动左右手视图，
+// 不再按最后选择的串口切换单手；num3D/skin 仍沿用单手切换逻辑
+const DUAL_GLOVE_MODES = ['normal', 'num', 'numoriginal']
+const isDualGloveDisplay = (matrixName, mode) =>
+  matrixName !== SINGLE_GLOVE_MATRIX &&
+  (tactileGloveTypes.includes(matrixName) || matrixName === HAND_0205_DOUBLE_MATRIX) &&
+  DUAL_GLOVE_MODES.includes(mode)
+// 2D 数字按手指/手掌形状展示的手套类型（整包手套点位不同，仍用 16x16 矩阵）
+const GLOVE_HAND_LAYOUT_TYPES = [HAND_0205_DOUBLE_MATRIX, 'handGlove115200']
 const isTactileGloveMappedLength = (matrixName, length) => {
   return length === 147 || (matrixName === 'handGloveFullPacket' && length === 195)
 }
@@ -248,52 +271,25 @@ const NUM_MATRIX_SCENES = {
 }
 
 /**
- * 推导 manifest / hand / minzhen / smallBed 那一路的 `numMatrix` 参数。
- *
- * 这一路原先传的是 `<Fast1024 matrixName=... matrixWidth=... manageSidebar=...>`，
- * 组件内部再按 `matrixName` 字符串分出三条支路。参数化之后渲染器不再认识
- * `matrixName`，所以那几条支路在这里折平：
- *
- * - `smallBed12B` 的三处分支（`getDecimalScale` / `getPressureChartPadding` /
- *   合力取 max）合成「基础预设取 smallBed12B」一件事；
- * - `manageSidebar` 原来的守卫是 `props.manageSidebar !== false &&
- *   props.matrixName !== 'minzhen'`（`NumThreeColor1024.jsx:167`），**两个条件的
- *   AND**，所以 minzhen 那一项必须在这里折进来 —— 漏掉的话 minzhen 的侧栏会
- *   被渲染器和外层同时回写。
- *
- * `gridWidth` / `gridHeight` 只在 manifest 那一路有值，缺省 0 让渲染器退回
- * `64 / size`，与原实现的 `matrixWidth > 0 ? matrixWidth : 64 / size` 一致。
- *
- * @param {string} matrixName 当前展示形式。
- * @param {object} definition 运行期展示定义（`getDisplayDefinition` 的结果）。
- * @param {{width?: number, height?: number}} matrixSize 后端回传的动态矩阵尺寸。
- * @returns {object} 传给 RendererHost 的 params。
+ * 原始矩阵统一使用蓝底数字；索引仅用于展示，尺寸仍取真实通道。
+ * 小床帧已在分派入口转置，不能再套 jqbed 的 rawTranspose。
+ * @param {string} matrixName 当前原生型号。
+ * @param {object} definition 运行期展示定义。
+ * @param {{width?:number,height?:number}} matrixSize 后端回传的矩阵尺寸。
+ * @returns {object} 数字渲染器参数。
  */
 const buildNumMatrixParams = (matrixName, definition, matrixSize = {}) => {
-  const fromManifest = definition?.source === 'manifest'
-  const base = matrixName === SMALL_BED_12B_MATRIX
-    ? NUM_MATRIX_PRESETS.smallBed12B
-    : NUM_MATRIX_PRESETS.fast1024
-  const gridWidth = fromManifest
-    ? definition.matrix?.width
-    : matrixName === 'matCol'
-      ? 16
-      : matrixName === SMALL_BED_12B_MATRIX
-        ? matrixSize.width
-        : undefined
-  const gridHeight = fromManifest
-    ? definition.matrix?.height
-    : matrixName === 'matCol'
-      ? 10
-      : matrixName === SMALL_BED_12B_MATRIX
-        ? matrixSize.height
-        : undefined
+  const fromManifest = definition?.source === 'manifest';
   return {
-    ...base,
-    gridWidth,
-    gridHeight,
+    ...NUM_MATRIX_PRESETS.webglRawDefault,
+    frameInput: 'raw',
+    ...(matrixName === SMALL_BED_12B_MATRIX ? { decimalScale: 10, chartPadding: 5, totalMetric: 'max' } : {}),
+    gridWidth: fromManifest ? definition.matrix?.width : matrixName === 'matCol' ? 16
+      : matrixName === SMALL_BED_12B_MATRIX ? matrixSize.width : 32,
+    gridHeight: fromManifest ? definition.matrix?.height : matrixName === 'matCol' ? 10
+      : matrixName === SMALL_BED_12B_MATRIX ? matrixSize.height : 32,
     manageSidebar: !fromManifest && matrixName !== MINZHEN_MATRIX,
-  }
+  };
 }
 
 /**
@@ -325,7 +321,7 @@ const buildWebglNumParams = (matrixName) => {
  * 12+ 处 `props.matrixName ==`，折平成这 10 行 —— 加一款设备从此是加一行数据。
  *
  * `jqbed` 是 `RAW_TRANSPOSE_MATRIX_TYPES` 四个键里**唯一走得到这条通路的**
- * （`smallBed` 三型在更早的分支就进 sprite3d 后端了），所以只有它要转置。
+ * （`smallBed` 三型在数据分派入口已转置），所以只有它要转置。
  *
  * @param {string} matrixName 当前展示形式。
  * @returns {object} 传给 RendererHost 的 params。
@@ -654,7 +650,7 @@ const displayRendererConfigMatrixArr = ['smallBed', SMALL_BED_NO_ALG_MATRIX, 'sm
 const HUMAN_BODY_DEFAULT_COLOR = 1555
 const HUMAN_BODY_DEFAULT_SIZE = 31
 const HUMAN_BODY_OPTIMIZED_MATRIX = 'humanBodyOptimized'
-const isHumanBodyMatrix = (matrixName) => ['humanBody', HUMAN_BODY_OPTIMIZED_MATRIX].includes(matrixName)
+const isHumanBodyMatrix = (matrixName) => ['humanBody', HUMAN_BODY_OPTIMIZED_MATRIX, PRESSURE_VEST_MATRIX].includes(matrixName)
 const HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES = [1205, 5000]
 const HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES = [20, 60]
 const MINZHEN_NORMAL_DEFAULT_COLOR = 415
@@ -734,6 +730,7 @@ initConfig.humanBody = {
 initConfig[HUMAN_BODY_OPTIMIZED_MATRIX] = {
   ...initConfig.humanBody,
 }
+initConfig[PRESSURE_VEST_MATRIX] = { ...initConfig.humanBody }
 
 initConfig.petCare = {
   valueg1: 2,
@@ -932,6 +929,9 @@ const getDefaultModeForMatrix = (matrixName, currentMode = "normal") => {
   if (isHumanBodyMatrix(matrixName)) {
     return currentMode === "numoriginal" ? "numoriginal" : "skin";
   }
+  if (matrixName === SINGLE_GLOVE_MATRIX || matrixName === HAND_0205_DOUBLE_MATRIX) {
+    return ['normal', 'num', 'num3D', 'numoriginal', 'skin'].includes(currentMode) ? currentMode : 'normal';
+  }
   if (matrixName === FULL_PACKET_GLOVE_MATRIX) {
     return FULL_PACKET_GLOVE_MODES.includes(currentMode) ? currentMode : "num";
   }
@@ -1019,10 +1019,19 @@ var backFlag, hz = 12, sitFlag, realHzFrameCount = 0, realHzLastTime = Date.now(
   fingerArrR = readFingerCalibration('fingerArrR'),
   fingerArr = fingerArrL; // 默认指向左手，兼容旧逻辑
 
+// 单手时代可能只校准过一只手：缺失一侧沿用另一侧的校准基准，
+// 避免未校准的那只手弯曲值被默认基准(0~255)钳死、手指不随压力弯曲
+if (!localStorage.getItem('fingerArrR') && localStorage.getItem('fingerArrL')) {
+  fingerArrR = readFingerCalibration('fingerArrL')
+} else if (!localStorage.getItem('fingerArrL') && localStorage.getItem('fingerArrR')) {
+  fingerArrL = readFingerCalibration('fingerArrR')
+  fingerArr = fingerArrL
+}
+
 let onBedState = []
 class Home extends React.Component {
-  constructor() {
-    super();
+  constructor(props) {
+    super(props);
     this.sceneVisibility = { current: true };
     let storedAllowedTypes = null;
     try {
@@ -1083,6 +1092,9 @@ class Home extends React.Component {
       halowStatus: null,
       jqbedAlgorithmConfigResult: null,
       jqbedAlgorithmStatus: { state: 'waiting', error: null },
+      jqbedReturnedSettings: null,
+      jqbedAlgorithmLogFrame: null,
+      jqbedAlgorithmLogSubscription: null,
       wsConnected: false,
       wsConnectionEpoch: 0,
       numMatrixFlag: "normal",
@@ -1124,6 +1136,8 @@ class Home extends React.Component {
       calibration: false,
       showType: 'hand',
       licenseModalVisible: false,
+      licenseAccess: props?.licenseAccess,
+      collectionSummary: null,
       licenseModalType: '',
       licenseModalExpireDate: '',
       licenseModalRemainDays: 0,
@@ -1338,6 +1352,7 @@ class Home extends React.Component {
   }
 
   appendControlCollectionRow = (row) => {
+    if (!canUseLicenseCapability(this.state.licenseAccess, 'canAcquire')) return;
     collection.push(row);
     localStorage.setItem("collection", JSON.stringify(collection));
     this.setState({ csvData: collection, length: collection.length });
@@ -1445,6 +1460,93 @@ class Home extends React.Component {
     wsControl.onclose = () => {};
   }
 
+/** 将单手末帧按系统身份、实时/回放及记录隔离。 */
+  getSingleGloveFrameSourceKey = () => `${this.state.systemId || this.state.matrixName}:${this.state.local}:${this.state.dataTime || ''}`;
+
+  /** 切换采集来源时丢弃双手末帧与趋势。 */
+  resetSingleGloveFrameCache = () => {
+    this.singleGloveFrameSourceKey = this.getSingleGloveFrameSourceKey();
+    this.singleGloveFrames = {};
+    this.singleGloveTrendKey = null;
+    this.singleGlovePressureTrend = [];
+    this.singleGloveAreaTrend = [];
+  }
+
+  /** 缓存当前系统的真实双手末帧，切换显示手时复用。 */
+  cacheSingleGloveFrame = (payload) => {
+    if (this.state.matrixName !== SINGLE_GLOVE_MATRIX || this.singleGloveReplaying || !this.isCurrentDisplayFrame(payload)) return;
+    if (this.singleGloveFrameSourceKey !== this.getSingleGloveFrameSourceKey()) this.resetSingleGloveFrameCache();
+    for (const [side, channel] of [['left', 'sit'], ['right', 'back']]) {
+      if (!getSensorFrameChannelValue(payload, channel)) continue;
+      this.singleGloveFrames[side] = JSON.parse(JSON.stringify(payload));
+    }
+  }
+
+  /** 仅向当前展示重放选中手末帧，不向设备或采集存储发数据。 */
+  replaySelectedSingleGloveFrame = () => {
+    if (this.state.matrixName !== SINGLE_GLOVE_MATRIX) return;
+    if (this.singleGloveFrameSourceKey !== this.getSingleGloveFrameSourceKey()) this.resetSingleGloveFrameCache();
+    const side = this.state.hand ? 'left' : 'right';
+    const dataKey = this.state.hand ? 'sitData' : 'backData';
+    const frame = this.singleGloveFrames[side] || {
+      [dataKey]: new Array(256).fill(0),
+      newArr147: new Array(147).fill(0),
+      rotate: [0, 0, 0, 1],
+      backFlag: !this.state.hand,
+    };
+    this.singleGloveReplaying = true;
+    try {
+      const event = { data: JSON.stringify(frame) };
+      this.wsData(event);
+      if (side === 'right') this.ws1Data(event);
+    } finally {
+      this.singleGloveReplaying = false;
+    }
+  }
+
+  /** 单手侧栏由选中手原始 256 点驱动，隔离渲染器重复统计。 */
+  getSingleGloveRendererDataRef = () => {
+    if (!this.singleGloveRendererDataRef) {
+      const pressureKeys = new Set(['meanPres', 'maxPres', 'point', 'totalPres', 'area', 'pressure']);
+      this.singleGloveRendererDataRef = { current: {
+        changeData: (values) => {
+          const extraValues = Object.fromEntries(Object.entries(values).filter(([key]) => !pressureKeys.has(key)));
+          if (Object.keys(extraValues).length) this.data.current?.changeData(extraValues);
+        },
+        handleCharts: () => {},
+        handleChartsArea: () => {},
+      } };
+    }
+    return this.singleGloveRendererDataRef;
+  }
+
+  /** 更新选中手的原始压力统计与有限长度趋势。 */
+  syncSingleGloveRawPressureStats = (rawData) => {
+    const rawMatrix = this.parseGloveRawMatrix(rawData);
+    if (!rawMatrix) return;
+    this.syncGloveRawPressureStats(rawMatrix);
+    const trendKey = `${this.state.matrixName}:${this.state.hand ? 'left' : 'right'}`;
+    if (this.singleGloveTrendKey !== trendKey) {
+      this.singleGlovePressureTrend = [];
+      this.singleGloveAreaTrend = [];
+      this.singleGloveTrendKey = trendKey;
+    }
+    const pressure = rawMatrix.reduce((sum, value) => sum + value, 0);
+    const point = rawMatrix.filter((value) => value > 0).length;
+    const pressureTrend = this.singleGlovePressureTrend;
+    const areaTrend = this.singleGloveAreaTrend;
+    if (!this.singleGloveReplaying || pressureTrend.length === 0) {
+      if (pressureTrend.length >= 60) pressureTrend.shift();
+      if (areaTrend.length >= 60) areaTrend.shift();
+      pressureTrend.push(pressure);
+      areaTrend.push(point);
+    }
+    if (!this.state.local) {
+      this.data.current?.handleCharts([...pressureTrend], findMax(pressureTrend) + 20);
+      this.data.current?.handleChartsArea([...areaTrend], findMax(areaTrend) + 20);
+    }
+  }
+
   syncHumanBodyRawPressureStats = (rawData) => {
     if (!isHumanBodyMatrix(this.state.matrixName)) {
       return false;
@@ -1455,15 +1557,13 @@ class Home extends React.Component {
       return false;
     }
 
-    const originalFrame = rawMatrix.slice(0, 1024).map((value) => {
-      const numericValue = Number(value);
-      return Number.isFinite(numericValue) ? numericValue : 0;
-    });
-    const activeValues = originalFrame.filter((value) => value > 0);
-    const point = activeValues.length;
-    const totalPres = activeValues.reduce((sum, value) => sum + value, 0);
-    const maxPres = activeValues.length ? findMax(activeValues) : 0;
-    const meanPres = totalPres / (point || 1);
+    const sensorIndices = this.state.matrixName === PRESSURE_VEST_MATRIX ? PRESSURE_VEST_SENSOR_INDICES : undefined;
+    const { point, totalPres, maxPres, meanPres } = getHumanBodyPressureStatistics(rawMatrix, sensorIndices);
+    if (this.humanBodyTrendMatrix !== this.state.matrixName) {
+      this.humanBodyPressureTrend = [];
+      this.humanBodyAreaTrend = [];
+      this.humanBodyTrendMatrix = this.state.matrixName;
+    }
     const pressureTrend = this.humanBodyPressureTrend || (this.humanBodyPressureTrend = []);
     const areaTrend = this.humanBodyAreaTrend || (this.humanBodyAreaTrend = []);
 
@@ -1485,7 +1585,11 @@ class Home extends React.Component {
   }
 
   componentDidMount() {
-    this.setState({ wsConnected: false });
+    this.jqbedAlarmSpeechState?.reset();
+    this.jqbedAlarmSpeechBlocked = false;
+    this.jqbedAlarmSpeechStatus = null;
+    this.jqbedAlarmSpeechSource = null;
+    this.setState({ wsConnected: false, jqbedReturnedSettings: null, jqbedAlgorithmLogFrame: null, jqbedAlgorithmLogSubscription: null });
     // window.alert(window.innerWidth)
     if (this._portalFontSize === undefined) this._portalFontSize = document.documentElement.style.fontSize;
     document.documentElement.style.fontSize = `${window.innerWidth / 120}px`;
@@ -1524,9 +1628,16 @@ class Home extends React.Component {
     ws.onopen = () => {
       // connection opened
       console.info("connect success");
+      this.jqbedAlarmSpeechState?.reset();
+      this.jqbedAlarmSpeechBlocked = false;
+      this.jqbedAlarmSpeechStatus = null;
+      this.jqbedAlarmSpeechSource = null;
       this.setState((previousState) => ({
         wsConnected: true,
         wsConnectionEpoch: previousState.wsConnectionEpoch + 1,
+        jqbedReturnedSettings: null,
+        jqbedAlgorithmLogFrame: null,
+        jqbedAlgorithmLogSubscription: null,
       }));
       this.wsSendObj({
         // file: this.state.matrixName,
@@ -1537,6 +1648,13 @@ class Home extends React.Component {
       })
       // 主动请求传感器类型清单（请求-应答；主进程连接时也会主动 push 一次）
       this.wsSendObj({ getSensorTypes: true })
+      this._collectionStatusController?.abort();
+      const collectionController = new AbortController();
+      this._collectionStatusController = collectionController;
+      const collectionStatusEpoch = this._collectionStatusEpoch || 0;
+      requestJson('/api/collection/status', { signal: collectionController.signal }).then(payload => {
+        if (!collectionController.signal.aborted && collectionStatusEpoch === (this._collectionStatusEpoch || 0)) this.applyCollectionSummary(payload.collectionSummary || payload);
+      }).catch(() => {});
     };
     ws.onmessage = (e) => {
       const message = parseWebSocketEventPayload(e);
@@ -1558,7 +1676,10 @@ class Home extends React.Component {
       console.warn('[WS] 连接错误，将在 3s 后重连');
     };
     ws.onclose = (e) => {
-      this.setState({ wsConnected: false });
+      this.jqbedAlarmSpeechState?.reset();
+      this.jqbedAlarmSpeechStatus = null;
+      this.jqbedAlarmSpeechSource = null;
+      this.setState({ wsConnected: false, jqbedReturnedSettings: null, jqbedAlgorithmLogFrame: null, jqbedAlgorithmLogSubscription: null });
       // 息屏或网络中断后自动重连
       console.warn('[WS] 连接断开，3s 后自动重连...');
       if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
@@ -1601,12 +1722,16 @@ class Home extends React.Component {
   }
 
   componentWillUnmount() {
+    this._collectionStatusController?.abort();
     clearLastFrame();
     if (this.props.portalEmbedded) document.documentElement.style.fontSize = this._portalFontSize;
     if (this._unsubscribeFormulaCharts) {
       this._unsubscribeFormulaCharts();
       this._unsubscribeFormulaCharts = null;
     }
+    this.jqbedAlarmSpeechState?.reset();
+    this.jqbedAlarmSpeechStatus = null;
+    this.jqbedAlarmSpeechSource = null;
     // 清理自动重连定时器
     if (wsReconnectTimer) {
       clearTimeout(wsReconnectTimer);
@@ -1711,13 +1836,17 @@ class Home extends React.Component {
 
 
 
+  /** 仅用显式合法的矩阵尺寸更新画布，普通状态消息不能把 16×16 重置为 32×32。 */
   syncSmallBed12BMatrixSize(jsonObject = {}) {
     if (this.state.matrixName !== SMALL_BED_12B_MATRIX) {
       return;
     }
 
-    const nextWidth = Number(jsonObject.matrixWidth) || 32;
-    const nextHeight = Number(jsonObject.matrixHeight) || 32;
+    const matrix = jsonObject.matrix || jsonObject.metadata?.matrix;
+    const nextWidth = Number(jsonObject.matrixWidth ?? matrix?.cols);
+    const nextHeight = Number(jsonObject.matrixHeight ?? matrix?.rows);
+    if (!Number.isInteger(nextWidth) || nextWidth <= 0 || nextWidth > 256
+      || !Number.isInteger(nextHeight) || nextHeight <= 0 || nextHeight > 256) return;
     if (
       nextWidth !== this.state.smallBedMatrixWidth ||
       nextHeight !== this.state.smallBedMatrixHeight
@@ -1772,7 +1901,7 @@ class Home extends React.Component {
 
   /** 接收停止或设备切换时清空实时画面；只改展示缓存，不发布或保存模拟零帧。 */
   clearHalowDisplay = () => {
-    if (resolveNativeSystemType(this.state.systemId || this.state.matrixName) !== HUMAN_BODY_OPTIMIZED_MATRIX
+    if (![HUMAN_BODY_OPTIMIZED_MATRIX, PRESSURE_VEST_MATRIX].includes(resolveNativeSystemType(this.state.systemId || this.state.matrixName))
       || this.state.history !== 'now') return;
     clearLastFrame();
     const empty = new Array(1024).fill(0);
@@ -1785,10 +1914,119 @@ class Home extends React.Component {
     this.setState({ realHz: 0 });
   }
 
+  /** 仅在当前实时小床会话中播报算法确认的告警。 */
+  syncJqbedAlarmSpeech = (jsonObject, event) => {
+    if (event?.target && event.target !== ws) return;
+    const speechState = this.jqbedAlarmSpeechState ||
+      (this.jqbedAlarmSpeechState = createJqbedAlarmSpeechState());
+    const licenseInvalidated = jsonObject.licenseLocked || jsonObject.noLicense || jsonObject.licenseError != null;
+    if (licenseInvalidated) this.jqbedAlarmSpeechBlocked = true;
+    else if (jsonObject.selectFlag != null) {
+      const selectedTypes = Array.isArray(jsonObject.selectFlag) ? jsonObject.selectFlag : [jsonObject.selectFlag];
+      this.jqbedAlarmSpeechBlocked = jsonObject.selectFlag !== 'all' && !selectedTypes.includes('jqbed');
+    }
+
+    // Socket messages may be batched before React commits the corresponding status update.
+    if (jsonObject.jqbedAlgorithmStatus) this.jqbedAlarmSpeechStatus = jsonObject.jqbedAlgorithmStatus;
+    const status = this.jqbedAlarmSpeechStatus || this.state.jqbedAlgorithmStatus;
+    const permitted = !Array.isArray(this.state.allowedTypes) || this.state.allowedTypes.includes('jqbed');
+    const fileSensor = Array.isArray(jsonObject.file) ? jsonObject.file[0] : jsonObject.file;
+    const packetSensor = jsonObject.activeSensorType ||
+      (typeof fileSensor === 'string' && fileSensor !== 'all' ? fileSensor : null);
+    if (packetSensor) this.jqbedAlarmSpeechSource = packetSensor;
+    if (this.jqbedAlarmSpeechBlocked || !permitted ||
+      this.state.matrixName !== 'jqbed' || this.state.history !== 'now' || this.state.local ||
+      !this.state.wsConnected || status?.state !== 'ready' ||
+      (this.jqbedAlarmSpeechSource && this.jqbedAlarmSpeechSource !== 'jqbed')) {
+      speechState.reset();
+      return;
+    }
+
+    const diagnostics = jsonObject.jqbedAlgorithmDiagnostics;
+    if (diagnostics?.sensorType !== 'jqbed') return;
+    for (const alertKey of speechState.observe(diagnostics)) {
+      speakLocalizedMessage(
+        this.props.t(`home.alerts.${alertKey}`),
+        this.props.i18n.language,
+        { alertKey },
+      );
+    }
+  };
+
+  /** 保留本次会话的最近有效床型和灵敏度回传。 */
+  syncJqbedReturnedSettings = (jsonObject) => {
+    const status = jsonObject.jqbedAlgorithmStatus;
+    const invalidated = status && ['waiting', 'error'].includes(status.state);
+    const diagnostics = jsonObject.jqbedAlgorithmDiagnostics;
+    if (!invalidated && !diagnostics) return;
+
+    this.setState((previousState) => {
+      if (invalidated || ['waiting', 'error'].includes(previousState.jqbedAlgorithmStatus?.state) ||
+        previousState.matrixName !== 'jqbed' || previousState.history !== 'now' ||
+        previousState.local || !previousState.wsConnected) {
+        return previousState.jqbedReturnedSettings == null ? null : { jqbedReturnedSettings: null };
+      }
+      if (diagnostics?.sensorType !== 'jqbed') return null;
+      const nextSettings = mergeJqbedReturnedSettings(previousState.jqbedReturnedSettings, diagnostics.reserved_bytes);
+      return sameJqbedReturnedSettings(previousState.jqbedReturnedSettings, nextSettings)
+        ? null
+        : { jqbedReturnedSettings: nextSettings };
+    });
+  };
+
+  /** 按当前客户端订阅合并实时算法字段，来源失效时清空。 */
+  syncJqbedAlgorithmLog = (jsonObject, event) => {
+    if (event?.target && event.target !== ws) return;
+    const subscription = jsonObject.jqbedAlgorithmLogSubscription;
+    const frame = jsonObject.jqbedAlgorithmLog;
+    const invalidated = ['waiting', 'error'].includes(jsonObject.jqbedAlgorithmStatus?.state);
+    const licenseInvalidated = jsonObject.licenseLocked || jsonObject.noLicense || jsonObject.licenseError != null;
+    if (!subscription && !frame && !invalidated && !licenseInvalidated) return;
+    if (licenseInvalidated) {
+      this.jqbedAlgorithmLogRequestId = null;
+      this.jqbedAlgorithmLogRequested = false;
+    }
+
+    this.setState((previousState) => {
+      const permitted = !Array.isArray(previousState.allowedTypes) || previousState.allowedTypes.includes('jqbed');
+      if (licenseInvalidated || !permitted || previousState.matrixName !== 'jqbed' ||
+        previousState.history !== 'now' || previousState.local || !previousState.wsConnected) {
+        return previousState.jqbedAlgorithmLogFrame == null && previousState.jqbedAlgorithmLogSubscription == null
+          ? null : { jqbedAlgorithmLogFrame: null, jqbedAlgorithmLogSubscription: null };
+      }
+      const matchingAck = subscription && (subscription.subscribed !== true || this.jqbedAlgorithmLogRequested !== false) &&
+        (!subscription.requestId || !this.jqbedAlgorithmLogRequestId ||
+        subscription.requestId === this.jqbedAlgorithmLogRequestId);
+      const nextSubscription = matchingAck ? subscription : previousState.jqbedAlgorithmLogSubscription;
+      let nextFrame = previousState.jqbedAlgorithmLogFrame;
+      if (invalidated || (matchingAck && (!subscription.ok || !subscription.subscribed))) nextFrame = null;
+      if (!invalidated && frame?.sensorType === 'jqbed' && nextSubscription?.ok === true &&
+        nextSubscription.subscribed === true && this.jqbedAlgorithmLogRequested !== false &&
+        frame.outputs && typeof frame.outputs === 'object' && !Array.isArray(frame.outputs)) {
+        if (nextFrame?.sequence !== frame.sequence || nextFrame?.receivedAt !== frame.receivedAt) {
+          nextFrame = mergeJqbedAlgorithmLogFrame(nextFrame, frame);
+        }
+      }
+      return nextFrame === previousState.jqbedAlgorithmLogFrame && nextSubscription === previousState.jqbedAlgorithmLogSubscription
+        ? null : { jqbedAlgorithmLogFrame: nextFrame, jqbedAlgorithmLogSubscription: nextSubscription };
+    });
+  };
+
   wsData = (e, decodedMessage = null) => {
+    // A replaced socket may still dispatch a queued message; it cannot update the current session.
+    if (e.target && e.target !== ws) return;
     sitPress = 0;
     const jsonObject = decodedMessage || parseWebSocketEventPayload(e);
     if (!jsonObject) return;
+    const nextLicenseAccess = readLicenseAccess(jsonObject);
+    const effectiveLicenseAccess = nextLicenseAccess === undefined ? this.state.licenseAccess : nextLicenseAccess;
+    const historyOnly = isHistoryOnlyLicense(effectiveLicenseAccess);
+    if (nextLicenseAccess !== undefined) {
+      this.setState({ licenseAccess: nextLicenseAccess, ...(historyOnly ? { licenseModalVisible: false, licenseLockedVisible: false } : {}) });
+      if (historyOnly && this._licenseModal) { this._licenseModal.destroy?.(); this._licenseModal = null; }
+    }
+    if (jsonObject.collectionSummary) this.applyCollectionSummary(jsonObject.collectionSummary);
+    this.cacheSingleGloveFrame(jsonObject);
     if (jsonObject.halowStatus) this.setState({ halowStatus: jsonObject.halowStatus });
     if (jsonObject.halowClear) this.clearHalowDisplay();
     if (jsonObject.serialStatus) {
@@ -1810,7 +2048,11 @@ class Home extends React.Component {
       this.setState({ jqbedAlgorithmConfigResult: jsonObject.jqbedAlgorithmConfigResult });
     }
     if (jsonObject.jqbedAlgorithmStatus) {
-      this.setState({ jqbedAlgorithmStatus: jsonObject.jqbedAlgorithmStatus });
+      this.setState({
+        jqbedAlgorithmStatus: jsonObject.jqbedAlgorithmStatus,
+        ...(['waiting', 'error'].includes(jsonObject.jqbedAlgorithmStatus.state)
+          ? { jqbedReturnedSettings: null, jqbedAlgorithmLogFrame: null } : {}),
+      });
     }
     // 后端 HTTP 写接口（Agent / 脚本）改了展示系统目录。Builder 在进程内保存时自己派发这个
     // DOM 事件；这里把后端广播翻译成同一个事件，顶部菜单就能沿用既有的重拉逻辑。
@@ -1839,6 +2081,7 @@ class Home extends React.Component {
       // canonical 帧按 displaySystemId 隔离；缺少身份的旧帧由兼容边界继续透传。
       return;
     }
+    this.syncJqbedAlarmSpeech(jsonObject, e);
 
     // 传感器类型清单（{time,flat,map}）：存到 state 并落地 localStorage 兜底
     if (jsonObject.sensorTypeList && Array.isArray(jsonObject.sensorTypeList.flat)) {
@@ -2028,7 +2271,7 @@ class Home extends React.Component {
 
     // ====== 密钥过期检查 ======
     // 处理密钥错误提示
-    if (jsonObject.licenseError != null) {
+    if (jsonObject.licenseError != null && !historyOnly) {
       // 无有效密钥时跳转到密钥输入页
       if (jsonObject.noLicense) {
         Modal.error({
@@ -2072,7 +2315,7 @@ class Home extends React.Component {
       );
       console.log('[密钥检查] endDate:', endDate, 'serverNow:', serverNow, 'remainMs:', remainMs, 'remainDays:', remainDays);
 
-      if (remainMs <= 0) {
+      if (remainMs <= 0 && !historyOnly) {
         console.log('[密钥检查] 密钥已过期，弹出提示');
         this.setState({
           licenseModalVisible: true,
@@ -2080,7 +2323,7 @@ class Home extends React.Component {
           licenseModalExpireDate: expireDateStr,
           licenseModalRemainDays: 0
         });
-      } else if (remainDays <= 7) {
+      } else if (remainMs > 0 && remainDays <= 7) {
         // 临期提醒每天只弹一次。
         //
         // 后端每次复检（configManager.js RECHECK_INTERVAL_MS）都会无条件广播授权状态，
@@ -2215,6 +2458,10 @@ class Home extends React.Component {
       }
     }
 
+    // Read diagnostics after processing system context; configuration/rate values are not returned settings.
+    this.syncJqbedReturnedSettings(jsonObject);
+    this.syncJqbedAlgorithmLog(jsonObject, e);
+
     if (jsonObject.backFlag != null) {
       backFlag = jsonObject.backFlag;
       // 根据左右手切换 fingerArr 指向
@@ -2230,73 +2477,19 @@ class Home extends React.Component {
 
     if (jsonObject.rate != null) {
       this.data.current?.changeData(jsonObject.rate);
-
-
-      if (onBedState.length < 2) {
-        onBedState.push(jsonObject.rate.stateInBbed)
-      } else {
-        onBedState.shift()
-        onBedState.push(jsonObject.rate.stateInBbed)
-      }
-
-
-      if (onBedState[0] != onBedState[1] && onBedState[1] == 0) {
-
-
-        // if (this.props.i18n.language == 'zh') {
-        //   const msg = new SpeechSynthesisUtterance("已离床");
-        //   msg.lang = "zh-CN"; // 设定语言
-        //   speechSynthesis.speak(msg);
-        // }else if(this.props.i18n.language == 'en'){
-        //   const msg = new SpeechSynthesisUtterance("已离床");
-        //   msg.lang = "en-US"; // 设定语言
-        //   speechSynthesis.speak(msg);
-        // }
-        speakLocalizedMessage(
-          this.props.t('home.alerts.leftBed'),
-          this.props.i18n.language,
-          { alertKey: 'leftBed' },
-        )
-
-
-      }
-
-
-      if (onBedState[0] != onBedState[1] && onBedState[1] == 3) {
-        // const msg = new SpeechSynthesisUtterance("坠床风险");
-        // msg.lang = "zh-CN"; // 设定语言
-        // speechSynthesis.speak(msg);
-        speakLocalizedMessage(
-          this.props.t('home.alerts.fallRisk'),
-          this.props.i18n.language,
-          { alertKey: 'fallRisk' },
-        )
-      }
-
-
-      if (onBedState[0] != onBedState[1] && onBedState[1] == 4) {
-        // const msg = new SpeechSynthesisUtterance("已坐起");
-        // msg.lang = "zh-CN"; // 设定语言
-        // speechSynthesis.speak(msg);
-        speakLocalizedMessage(
-          this.props.t('home.alerts.satUp'),
-          this.props.i18n.language,
-          { alertKey: 'satUp' },
-        )
-      }
-
-
-
-
-      if (jsonObject.rate.sosflag) {
-        // const msg = new SpeechSynthesisUtterance("SOS紧急求助");
-        // msg.lang = "zh-CN"; // 设定语言
-        // speechSynthesis.speak(msg);
-        speakLocalizedMessage(
-          this.props.t('home.alerts.emergency'),
-          this.props.i18n.language,
-          { alertKey: 'emergency' },
-        )
+      // jqbed speech uses merged alarms from the independent diagnostics channel.
+      if (this.state.matrixName === 'smallBed') {
+        if (onBedState.length >= 2) onBedState.shift();
+        onBedState.push(jsonObject.rate.stateInBbed);
+        if (onBedState[0] != onBedState[1]) {
+          const alertKey = { 0: 'leftBed', 3: 'fallRisk', 4: 'satUp' }[onBedState[1]];
+          if (alertKey) speakLocalizedMessage(
+            this.props.t(`home.alerts.${alertKey}`), this.props.i18n.language, { alertKey },
+          );
+        }
+        if (jsonObject.rate.sosflag) speakLocalizedMessage(
+          this.props.t('home.alerts.emergency'), this.props.i18n.language, { alertKey: 'emergency' },
+        );
       }
     }
 
@@ -2321,6 +2514,9 @@ class Home extends React.Component {
     }
 
     if (sitFrameData) {
+      if (this.state.matrixName === SINGLE_GLOVE_MATRIX && this.state.hand) {
+        this.syncSingleGloveRawPressureStats(getRawPressurePayload(jsonObject, 'sit'));
+      }
       // 统计真实采样频率
       realHzFrameCount++;
       const now = Date.now();
@@ -2476,7 +2672,7 @@ class Home extends React.Component {
       //   return
       // }
 
-      if ((this.state.hand || this.state.matrixName === HAND_0205_DOUBLE_MATRIX) && this.state.matrixName.includes('hand')) {
+      if ((this.state.hand || isDualGloveDisplay(this.state.matrixName, this.state.numMatrixFlag)) && this.state.matrixName.includes('hand')) {
 
 
 
@@ -2528,15 +2724,18 @@ class Home extends React.Component {
                 });
               }
 
-              // 2. 将映射数据压缩为 5 个点，用于遥操控制（手指弯折/旋转）
+              // 2. 将映射数据压缩为 5 个点，用于遥操控制（手指弯折/旋转）。
+              // 弯指必须基于未清零数据：清零后指根静息值归零，与校准基准对不上，弯曲会恒为 0
+              const bendSourceRaw = parseMaybeJsonPayload(jsonObject.newArr147Raw, null)
+              const bendSource = Array.isArray(bendSourceRaw) && bendSourceRaw.length >= 75 ? bendSourceRaw : wsPointData
               let fivePoints = []
               if (jsonObject.newArr != null) {
                 for (let i = 0; i < 5; i++) {
                   let num = 0
                   for (let j = 0; j < 3; j++) {
                     const index = j * 10 + i * 2
-                    num += wsPointData[index]
-                    num += wsPointData[index + 1]
+                    num += bendSource[index]
+                    num += bendSource[index + 1]
                   }
                   fivePoints[i] = num
                 }
@@ -2546,14 +2745,14 @@ class Home extends React.Component {
                   let num = 0
                   const j = 4
                   const index = j * 15 + i * 3
-                  num += wsPointData[index]
-                  num += wsPointData[index + 1]
-                  num += wsPointData[index + 2]
+                  num += bendSource[index]
+                  num += bendSource[index + 1]
+                  num += bendSource[index + 2]
                   fivePoints[i] = num
                 }
               }
-              const isDoubleGlove = this.state.matrixName === HAND_0205_DOUBLE_MATRIX
-              const isRightPayload = isDoubleGlove ? isRightHandPayload(jsonObject, false) : !!backFlag
+              const isDoubleGlove = isDualGloveDisplay(this.state.matrixName, 'normal')
+              const isRightPayload = isDoubleGlove ? isRightHandPayload(jsonObject, false) : this.state.matrixName === SINGLE_GLOVE_MATRIX ? false : !!backFlag
               const currentFingerPoints = updateLatestFingerPoints(fivePoints, isRightPayload)
 
               const com = isDoubleGlove && isRightPayload
@@ -2562,7 +2761,7 @@ class Home extends React.Component {
                   calibration: that.com.current?.calibrationRight,
                 }
                 : this.state.matrixName == 'hand0507' ? that.com.current?.handL : that.com.current
-              const currentFingerCalibration = isDoubleGlove
+              const currentFingerCalibration = isDoubleGlove || this.state.matrixName === SINGLE_GLOVE_MATRIX
                 ? (isRightPayload ? fingerArrR : fingerArrL)
                 : fingerArr
               if (isDoubleGlove && !isRightPayload) {
@@ -2599,18 +2798,20 @@ class Home extends React.Component {
                 }
               }
             } else if (this.state.numMatrixFlag == 'numoriginal' && tactileGloveTypes.includes(this.state.matrixName)) {
-              // 手套原始数据模式：保留映射数据显示
+              // 手套原始数据模式：sit 路默认左手，双手协议按包内 handSide 分流
+              const gloveSide = isRightHandPayload(jsonObject, false) ? 'right' : 'left'
               let newArr = [...wsPointData]
               if (this.com.current?.changeWsData147R) {
-                this.com.current.changeWsData147R([...newArr])
+                this.com.current.changeWsData147R([...newArr], gloveSide)
               } else {
-                this.com.current?.changeWsData147([...newArr])
+                this.com.current?.changeWsData147([...newArr], gloveSide)
               }
             } else if (this.state.numMatrixFlag == 'num' && tactileGloveTypes.includes(this.state.matrixName)) {
+              const gloveSide = isRightHandPayload(jsonObject, false) ? 'right' : 'left'
               if (this.state.matrixName === 'handGloveFullPacket') {
                 const rawData = this.parseGloveRawMatrix(getRawPressurePayload(jsonObject, 'sit'));
                 if (rawData) {
-                  this.com.current?.changeWsData256([...rawData])
+                  this.com.current?.changeWsData256([...rawData], gloveSide)
                 }
               } else {
                 // 手套2D数字模式：旧手套使用 sitData 的原始256数据点，以16x16矩阵显示
@@ -2619,9 +2820,9 @@ class Home extends React.Component {
                   rawData = JSON.parse(rawData);
                 }
                 if (rawData && rawData.length >= 256) {
-                  this.com.current?.changeWsData256([...rawData.slice(0, 256)])
+                  this.com.current?.changeWsData256([...rawData.slice(0, 256)], gloveSide)
                 } else {
-                  this.com.current?.changeWsData147([...wsPointData])
+                  this.com.current?.changeWsData147([...wsPointData], gloveSide)
                 }
               }
             } else if (this.state.numMatrixFlag == 'num3D' && tactileGloveTypes.includes(this.state.matrixName)) {
@@ -2689,8 +2890,8 @@ class Home extends React.Component {
               wsPointDataSit = wsPointData;
               wsPointDataSit = wsPointDataSit.map((a) => Math.round(a));
               wsPointDataSitWidth = 32;
-              const isDoubleGlove = this.state.matrixName === HAND_0205_DOUBLE_MATRIX
-              const isRightPayload = isDoubleGlove ? isRightHandPayload(jsonObject, false) : !!backFlag
+              const isDoubleGlove = isDualGloveDisplay(this.state.matrixName, 'normal')
+              const isRightPayload = isDoubleGlove ? isRightHandPayload(jsonObject, false) : this.state.matrixName === SINGLE_GLOVE_MATRIX ? false : !!backFlag
               const currentFingerPoints = updateLatestFingerPoints(wsPointDataSit, isRightPayload)
               const rawSitData = getRawPressurePayload(jsonObject, 'sit');
               this.syncGloveRawPressureStats(rawSitData);
@@ -2720,7 +2921,7 @@ class Home extends React.Component {
                   calibration: that.com.current?.calibrationRight,
                 }
                 : this.state.matrixName == 'hand0507' ? that.com.current?.handL : that.com.current
-              const currentFingerCalibration = isDoubleGlove
+              const currentFingerCalibration = isDoubleGlove || this.state.matrixName === SINGLE_GLOVE_MATRIX
                 ? (isRightPayload ? fingerArrR : fingerArrL)
                 : fingerArr
 
@@ -2765,18 +2966,20 @@ class Home extends React.Component {
                 // that.com.current?.calibration([0,0,0])
               }
             } else if (this.state.numMatrixFlag == 'numoriginal' && tactileGloveTypes.includes(this.state.matrixName)) {
-              // 手套原始数据模式：保留映射数据显示
+              // 手套原始数据模式：sit 路默认左手，双手协议按包内 handSide 分流
+              const gloveSide = isRightHandPayload(jsonObject, false) ? 'right' : 'left'
               let newArr = [...wsPointData]
               if (this.com.current?.changeWsData147R) {
-                this.com.current.changeWsData147R([...newArr])
+                this.com.current.changeWsData147R([...newArr], gloveSide)
               } else {
-                this.com.current?.changeWsData147([...newArr])
+                this.com.current?.changeWsData147([...newArr], gloveSide)
               }
             } else if (this.state.numMatrixFlag == 'num' && tactileGloveTypes.includes(this.state.matrixName)) {
+              const gloveSide = isRightHandPayload(jsonObject, false) ? 'right' : 'left'
               if (this.state.matrixName === 'handGloveFullPacket') {
                 const rawData = this.parseGloveRawMatrix(getRawPressurePayload(jsonObject, 'sit'));
                 if (rawData) {
-                  this.com.current?.changeWsData256([...rawData])
+                  this.com.current?.changeWsData256([...rawData], gloveSide)
                 }
               } else {
                 // 手套2D数字模式：旧手套使用 sitData 的原始256数据点，以16x16矩阵显示
@@ -2785,9 +2988,9 @@ class Home extends React.Component {
                   rawData = JSON.parse(rawData);
                 }
                 if (rawData && rawData.length >= 256) {
-                  this.com.current?.changeWsData256([...rawData.slice(0, 256)])
+                  this.com.current?.changeWsData256([...rawData.slice(0, 256)], gloveSide)
                 } else {
-                  this.com.current?.changeWsData147([...wsPointData])
+                  this.com.current?.changeWsData147([...wsPointData], gloveSide)
                 }
               }
             } else if (this.state.numMatrixFlag == 'num3D' && tactileGloveTypes.includes(this.state.matrixName)) {
@@ -2939,6 +3142,7 @@ class Home extends React.Component {
     if (!jsonObject) return;
     const backFrameData = getSensorFrameChannelValue(jsonObject, 'back');
     // let wsPointData = getSensorFrameChannelValue(jsonObject, 'back');
+    this.cacheSingleGloveFrame(jsonObject);
     // if (!Array.isArray(wsPointData)) {
     //   wsPointData = JSON.parse(wsPointData);
     // }
@@ -2950,6 +3154,9 @@ class Home extends React.Component {
     }
 
     if (backFrameData) {
+      if (this.state.matrixName === SINGLE_GLOVE_MATRIX && !this.state.hand) {
+        this.syncSingleGloveRawPressureStats(getRawPressurePayload(jsonObject, 'back'));
+      }
       // 右手（backData 路径）统计真实采样频率
       if (this.state.matrixName.includes('hand') || this.state.matrixName == 'handGlove115200') {
         realHzFrameCount++;
@@ -3005,7 +3212,7 @@ class Home extends React.Component {
         // 跳过 robot
       } else if (this.state.matrixName == 'footVideo') {
         // footVideo 已在块1 backTypeEvent 中处理，跳过
-      } else if ((!this.state.hand || this.state.matrixName === HAND_0205_DOUBLE_MATRIX) && this.state.matrixName.includes('hand')) {
+      } else if ((!this.state.hand || isDualGloveDisplay(this.state.matrixName, this.state.numMatrixFlag)) && this.state.matrixName.includes('hand')) {
 
 
         if (this.state.matrixName == 'Num3D') {
@@ -3037,14 +3244,17 @@ class Home extends React.Component {
         else {
           if (isTactileGloveMappedLength(this.state.matrixName, wsPointData.length)) {
             if (this.state.numMatrixFlag == 'normal') {
+              // 弯指必须基于未清零数据：清零后指根静息值归零，与校准基准对不上，弯曲会恒为 0
+              const bendSourceRaw = parseMaybeJsonPayload(jsonObject.newArr147Raw, null)
+              const bendSource = Array.isArray(bendSourceRaw) && bendSourceRaw.length >= 75 ? bendSourceRaw : wsPointData
               let arr = []
               if (jsonObject.newArr != null) {
                 for (let i = 0; i < 5; i++) {
                   let num = 0
                   for (let j = 0; j < 3; j++) {
                     const index = j * 10 + i * 2
-                    num += wsPointData[index]
-                    num += wsPointData[index + 1]
+                    num += bendSource[index]
+                    num += bendSource[index + 1]
                   }
                   arr[i] = num
                 }
@@ -3055,9 +3265,9 @@ class Home extends React.Component {
                   // for (let j = 0; j < 3; j++) {
                   const j = 4
                   const index = j * 15 + i * 3
-                  num += wsPointData[index]
-                  num += wsPointData[index + 1]
-                  num += wsPointData[index + 2]
+                  num += bendSource[index]
+                  num += bendSource[index + 1]
+                  num += bendSource[index + 2]
                   // }
                   arr[i] = num
                 }
@@ -3068,8 +3278,8 @@ class Home extends React.Component {
 
 
 
-              const isDoubleGlove = this.state.matrixName === HAND_0205_DOUBLE_MATRIX
-              const isRightPayload = isDoubleGlove ? isRightHandPayload(jsonObject, true) : !!backFlag
+              const isDoubleGlove = isDualGloveDisplay(this.state.matrixName, 'normal')
+              const isRightPayload = isDoubleGlove ? isRightHandPayload(jsonObject, true) : this.state.matrixName === SINGLE_GLOVE_MATRIX ? true : !!backFlag
               const com = isDoubleGlove
                 ? {
                   changeHandAngle: that.com.current?.changeRightHandAngle,
@@ -3084,7 +3294,7 @@ class Home extends React.Component {
               const currentFingerPoints = updateLatestFingerPoints(wsPointDataSit, isRightPayload)
               const rawBackData = getRawPressurePayload(jsonObject, 'back');
               this.syncGloveRawPressureStats(rawBackData);
-              const currentFingerCalibration = isDoubleGlove
+              const currentFingerCalibration = isDoubleGlove || this.state.matrixName === SINGLE_GLOVE_MATRIX
                 ? (isRightPayload ? fingerArrR : fingerArrL)
                 : fingerArr
 
@@ -3153,14 +3363,14 @@ class Home extends React.Component {
                 // that.com.current?.calibration([0,0,0])
               }
             } else if (this.state.numMatrixFlag == 'numoriginal' && tactileGloveTypes.includes(this.state.matrixName)) {
-              // 手套原始数据模式：保留映射数据显示
+              // 手套原始数据模式：back 路为右手，渲染到右手画布
               let newArr = [...wsPointData]
-              this.com.current?.changeWsData147([...newArr])
+              this.com.current?.changeWsData147([...newArr], 'right')
             } else if (this.state.numMatrixFlag == 'num' && tactileGloveTypes.includes(this.state.matrixName)) {
               if (this.state.matrixName === 'handGloveFullPacket') {
                 const rawData = this.parseGloveRawMatrix(getRawPressurePayload(jsonObject, 'back'));
                 if (rawData) {
-                  this.com.current?.changeWsData256([...rawData])
+                  this.com.current?.changeWsData256([...rawData], 'right')
                 }
               } else {
                 // 手套2D数字模式：旧手套使用 realArr（原始256字节）渲染16x16矩阵
@@ -3169,9 +3379,9 @@ class Home extends React.Component {
                   rawData = JSON.parse(rawData);
                 }
                 if (rawData && rawData.length >= 256) {
-                  this.com.current?.changeWsData256([...rawData.slice(0, 256)])
+                  this.com.current?.changeWsData256([...rawData.slice(0, 256)], 'right')
                 } else {
-                  this.com.current?.changeWsData147([...wsPointData])
+                  this.com.current?.changeWsData147([...wsPointData], 'right')
                 }
               }
             } else if (this.state.numMatrixFlag == 'num3D' && tactileGloveTypes.includes(this.state.matrixName)) {
@@ -3225,8 +3435,8 @@ class Home extends React.Component {
 
 
 
-              const isDoubleGlove = this.state.matrixName === HAND_0205_DOUBLE_MATRIX
-              const isRightPayload = isDoubleGlove ? isRightHandPayload(jsonObject, true) : !!backFlag
+              const isDoubleGlove = isDualGloveDisplay(this.state.matrixName, 'normal')
+              const isRightPayload = isDoubleGlove ? isRightHandPayload(jsonObject, true) : this.state.matrixName === SINGLE_GLOVE_MATRIX ? true : !!backFlag
               const com = isDoubleGlove
                 ? {
                   changeHandAngle: that.com.current?.changeRightHandAngle,
@@ -3240,7 +3450,7 @@ class Home extends React.Component {
               const currentFingerPoints = updateLatestFingerPoints(wsPointDataSit, isRightPayload)
               const rawBackData = getRawPressurePayload(jsonObject, 'back');
               this.syncGloveRawPressureStats(rawBackData);
-              const currentFingerCalibration = isDoubleGlove
+              const currentFingerCalibration = isDoubleGlove || this.state.matrixName === SINGLE_GLOVE_MATRIX
                 ? (isRightPayload ? fingerArrR : fingerArrL)
                 : fingerArr
               if (that.state.numMatrixFlag == "normal") {
@@ -3304,14 +3514,14 @@ class Home extends React.Component {
                 // that.com.current?.calibration([0,0,0])
               }
             } else if (this.state.numMatrixFlag == 'numoriginal' && tactileGloveTypes.includes(this.state.matrixName)) {
-              // 手套原始数据模式：保留映射数据显示
+              // 手套原始数据模式：back 路为右手，渲染到右手画布
               let newArr = [...wsPointData]
-              this.com.current?.changeWsData147([...newArr])
+              this.com.current?.changeWsData147([...newArr], 'right')
             } else if (this.state.numMatrixFlag == 'num' && tactileGloveTypes.includes(this.state.matrixName)) {
               if (this.state.matrixName === 'handGloveFullPacket') {
                 const rawData = this.parseGloveRawMatrix(getRawPressurePayload(jsonObject, 'back'));
                 if (rawData) {
-                  this.com.current?.changeWsData256([...rawData])
+                  this.com.current?.changeWsData256([...rawData], 'right')
                 }
               } else {
                 // 手套2D数字模式：旧手套使用 realArr（原始256字节）渲染16x16矩阵
@@ -3320,9 +3530,9 @@ class Home extends React.Component {
                   rawData = JSON.parse(rawData);
                 }
                 if (rawData && rawData.length >= 256) {
-                  this.com.current?.changeWsData256([...rawData.slice(0, 256)])
+                  this.com.current?.changeWsData256([...rawData.slice(0, 256)], 'right')
                 } else {
-                  this.com.current?.changeWsData147([...wsPointData])
+                  this.com.current?.changeWsData147([...wsPointData], 'right')
                 }
               }
             } else if (this.state.numMatrixFlag == 'num3D' && tactileGloveTypes.includes(this.state.matrixName)) {
@@ -3423,6 +3633,12 @@ class Home extends React.Component {
   };
 
   componentDidUpdate(prevProps, prevState) {
+    if (this.props.licenseAccess !== undefined && prevProps.licenseAccess !== this.props.licenseAccess) {
+      const licenseAccess = readLicenseAccess({ licenseAccess: this.props.licenseAccess });
+      const historyOnly = isHistoryOnlyLicense(licenseAccess);
+      this.setState({ licenseAccess, ...(historyOnly ? { licenseModalVisible: false, licenseLockedVisible: false, colWebFlag: false, colOneFlag: false } : {}) });
+      if (historyOnly && this._licenseModal) { this._licenseModal.destroy?.(); this._licenseModal = null; }
+    }
     const systemChanged = prevState.matrixName !== this.state.matrixName || prevState.systemId !== this.state.systemId;
     if ((prevState.local && !this.state.local) || systemChanged) {
       this.data.current?.initCharts();
@@ -3445,6 +3661,42 @@ class Home extends React.Component {
       clearLastFrame();
       this.props.onPortalSystemChange?.(this.state.systemId || this.state.matrixName);
     }
+    const jqbedReturnedSourceChanged =
+      prevState.matrixName !== this.state.matrixName ||
+      prevState.history !== this.state.history ||
+      prevState.local !== this.state.local ||
+      prevState.wsConnected !== this.state.wsConnected ||
+      prevState.wsConnectionEpoch !== this.state.wsConnectionEpoch ||
+      (Array.isArray(prevState.allowedTypes) ? prevState.allowedTypes.includes('jqbed') : true) !==
+        (Array.isArray(this.state.allowedTypes) ? this.state.allowedTypes.includes('jqbed') : true);
+    if (jqbedReturnedSourceChanged) {
+      this.jqbedAlarmSpeechState?.reset();
+      this.jqbedAlarmSpeechSource = this.state.matrixName;
+      this.jqbedAlgorithmLogRequestId = null;
+      this.jqbedAlgorithmLogRequested = false;
+      if (this.state.jqbedReturnedSettings != null || this.state.jqbedAlgorithmLogFrame != null ||
+        this.state.jqbedAlgorithmLogSubscription != null) {
+        this.setState({ jqbedReturnedSettings: null, jqbedAlgorithmLogFrame: null, jqbedAlgorithmLogSubscription: null });
+      }
+    }
+    if (['waiting', 'error'].includes(this.state.jqbedAlgorithmStatus?.state)) {
+      this.jqbedAlarmSpeechState?.reset();
+    }
+
+    const singleGloveSourceChanged =
+      prevState.matrixName !== this.state.matrixName ||
+      prevState.systemId !== this.state.systemId ||
+      prevState.local !== this.state.local ||
+      prevState.dataTime !== this.state.dataTime ||
+      (prevState.colFlag === true && this.state.colFlag === false);
+    if (singleGloveSourceChanged) this.resetSingleGloveFrameCache();
+    if (this.state.matrixName === SINGLE_GLOVE_MATRIX && (
+      singleGloveSourceChanged || prevState.hand !== this.state.hand || prevState.numMatrixFlag !== this.state.numMatrixFlag
+    )) {
+      this.com.current?.changeModal?.(this.state.hand);
+      this.replaySelectedSingleGloveFrame();
+    }
+
 
     if (
       this.state.matrixName === WHOLE_CHAIR_MATRIX &&
@@ -3821,15 +4073,26 @@ class Home extends React.Component {
   }
 
   wsSendObj = (obj) => {
+    if ((obj?.flag === true && !canUseLicenseCapability(this.state.licenseAccess, 'canAcquire'))
+      || (obj?.download && !canUseLicenseCapability(this.state.licenseAccess, 'canExport'))) {
+      message.warning('当前授权仅允许查看和分析历史数据，不能采集或导出。');
+      return Promise.resolve([]);
+    }
     if (obj?.file) obj = { ...obj, file: selectedNativeSystemId(obj.file) };
     const isJqbedAlgorithmCommand = Boolean(
       obj?.getJqbedAlgorithmConfig
       || obj?.setJqbedAlgorithmConfig
       || obj?.resetJqbedAlgorithmConfig
+      || typeof obj?.subscribeJqbedAlgorithmLog === 'boolean'
     );
     if (isJqbedAlgorithmCommand) {
       const state = ws ? ws.readyState : 'no ws';
       const sent = sendWebSocketJson(ws, obj);
+      if (typeof obj.subscribeJqbedAlgorithmLog === 'boolean') {
+        this.jqbedAlgorithmLogRequestId = obj.requestId || null;
+        this.jqbedAlgorithmLogRequested = sent && obj.subscribeJqbedAlgorithmLog;
+        this.setState({ jqbedAlgorithmLogFrame: null, jqbedAlgorithmLogSubscription: null });
+      }
       if (!sent) {
         console.warn(`[WS Send] 无法发送， ws.readyState=${state}`, obj);
       }
@@ -3886,6 +4149,9 @@ class Home extends React.Component {
     this.setState({
       matrixName: nextMatrixName,
       systemId: e,
+      jqbedReturnedSettings: null,
+      jqbedAlgorithmLogFrame: null,
+      jqbedAlgorithmLogSubscription: null,
       numMatrixFlag: nextMode,
       ...configObj,
       dataArr: [],
@@ -4065,7 +4331,7 @@ class Home extends React.Component {
   }
 
   changeLocal = (value) => {
-    this.setState({ local: value });
+    this.setState({ local: value, jqbedReturnedSettings: null, jqbedAlgorithmLogFrame: null, jqbedAlgorithmLogSubscription: null });
     // changeDateArr(matrixName)
 
     this.wsSendObj(value ? { local: true } : { play: false, local: false, history: false });
@@ -4355,7 +4621,13 @@ class Home extends React.Component {
   };
 
   changeStateData = (obj) => {
-    this.setState(obj);
+    this.setState((previousState) => {
+      const sourceChanged = ['matrixName', 'history', 'local'].some((key) =>
+        Object.prototype.hasOwnProperty.call(obj, key) && previousState[key] !== obj[key]);
+      return { ...obj, ...(sourceChanged ? {
+        jqbedReturnedSettings: null, jqbedAlgorithmLogFrame: null, jqbedAlgorithmLogSubscription: null,
+      } : {}) };
+    });
   };
 
   /**
@@ -4370,6 +4642,16 @@ class Home extends React.Component {
     } else {
       this.stopCollectionTimer();
     }
+  };
+
+  /** Apply the storage receipt separately from the capture toggle and timer. */
+  applyCollectionSummary = (value) => {
+    const collectionSummary = readCollectionSummary(value);
+    if (!collectionSummary) return;
+    this._collectionStatusEpoch = (this._collectionStatusEpoch || 0) + 1;
+    const collecting = collectionSummary.phase === 'collecting';
+    this.setState({ collectionSummary, colFlag: !collecting });
+    if (collecting !== colValueFlag) this.setColValueFlag(collecting);
   };
 
   /**
@@ -4514,6 +4796,9 @@ class Home extends React.Component {
       runtimeDisplayDefinition?.runtimeRevision,
       canvasColormapKey,
     ].filter(Boolean).join('|') || undefined;
+    const gloveRendererData = this.state.matrixName === SINGLE_GLOVE_MATRIX
+      ? this.getSingleGloveRendererDataRef()
+      : this.data;
     const contentReset = (
       <div>
         <p>{t('resetContent')}</p>
@@ -4542,6 +4827,7 @@ class Home extends React.Component {
     return (
       <ConfigProvider locale={antdLocale}>
         <div className={`home${this.props.portalEmbedded ? ' home-portal-embedded' : ''}`}>
+          <RuntimeStatusNotice licenseAccess={this.state.licenseAccess} collectionSummary={this.state.collectionSummary} onRefreshLicense={() => this.wsSendObj({ refreshLicense: true })} />
           {this.state.matrixName != "robot0428" ? <div className="setIcons">
             <div className="setIconItem setIconItem1">
               <Popover placement="top" title={text} content={content}>
@@ -4785,6 +5071,7 @@ class Home extends React.Component {
                   <div
                     className="setIcon marginB10"
                     onClick={() => {
+                      if (!canUseLicenseCapability(this.state.licenseAccess, 'canExport')) { message.warning('当前授权不允许导出数据或分析结果。'); return; }
                       const that = this;
 
                       this.track.current?.loadImg({
@@ -4922,6 +5209,8 @@ class Home extends React.Component {
           </div> : ''}
 
           <Title
+            licenseAccess={this.state.licenseAccess}
+            collectionSummary={this.state.collectionSummary}
             hand={this.state.hand}
             changeAside={this.changeAside}
             i18n={i18n}
@@ -4960,6 +5249,9 @@ class Home extends React.Component {
             halowStatus={this.state.halowStatus}
             jqbedAlgorithmConfigResult={this.state.jqbedAlgorithmConfigResult}
             jqbedAlgorithmStatus={this.state.jqbedAlgorithmStatus}
+            jqbedReturnedSettings={this.state.jqbedReturnedSettings}
+            jqbedAlgorithmLogFrame={this.state.jqbedAlgorithmLogFrame}
+            jqbedAlgorithmLogSubscription={this.state.jqbedAlgorithmLogSubscription}
             wsConnected={this.state.wsConnected}
             wsConnectionEpoch={this.state.wsConnectionEpoch}
             wsSendObj={this.wsSendObj}
@@ -5105,10 +5397,27 @@ class Home extends React.Component {
                   label="3D 数字"
                   rendererRef={this.com}
                   colormap={canvasColormap}
-                  data={this.data}
+                  data={gloveRendererData}
                   local={this.state.local}
                   {...this.sceneChartProps} />
               </CanvasCom>
+              : this.state.numMatrixFlag == "num" && GLOVE_HAND_LAYOUT_TYPES.includes(this.state.matrixName) ?
+                <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
+                  <GloveHandNum2D ref={this.com}
+                    data={this.data}
+                    local={this.state.local} />
+                </CanvasCom>
+              : this.state.numMatrixFlag == "num" && this.state.matrixName === SINGLE_GLOVE_MATRIX ?
+                <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
+                  <LegacyGloveNum2D ref={this.com}
+                    matrixName={this.state.matrixName}
+                    data={gloveRendererData}
+                    local={this.state.local}
+                    handleChartsBody={this.handleChartsBody.bind(this)}
+                    handleChartsBody1={this.handleChartsBody1.bind(this)}
+                    changeStateData={this.changeStateData}
+                    changeSelect={this.changeSelect} />
+                </CanvasCom>
               : this.state.numMatrixFlag == "num" && [...tactileGloveTypes, 'robot1', 'footVideo'].includes(this.state.matrixName) ?
                 <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
                   <RendererHost
@@ -5184,6 +5493,8 @@ class Home extends React.Component {
                       matrixName={modeCanvasMatrixName}
                       local={this.state.local}
                       variantKey={canvasVariantKey}
+                      viewKey={this.state.matrixName === SMALL_BED_12B_MATRIX
+                        ? `${this.state.smallBedMatrixWidth}x${this.state.smallBedMatrixHeight}` : undefined}
                     >
                       <RendererHost
                         rendererId="numMatrix"
@@ -5211,6 +5522,18 @@ class Home extends React.Component {
                     ) : null}
                   </>
                   :
+                  this.state.numMatrixFlag == "numoriginal" && this.state.matrixName === SINGLE_GLOVE_MATRIX ?
+                  <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
+                    <LegacyGloveNum2DOriginal ref={this.com}
+                      matrixName={this.state.matrixName}
+                      data={gloveRendererData}
+                      local={this.state.local}
+                      handleChartsBody={this.handleChartsBody.bind(this)}
+                      handleChartsBody1={this.handleChartsBody1.bind(this)}
+                      changeStateData={this.changeStateData}
+                      changeSelect={this.changeSelect} />
+                  </CanvasCom>
+                  :
                   this.state.numMatrixFlag == "numoriginal" && [...tactileGloveTypes, 'robot1', 'footVideo', 'robotSY', 'robotLCF', 'normal', 'jqbed', tempFullBedMatrix, 'petCare', 'petCareMini', 'daliegu', 'smallSample'].includes(this.state.matrixName) ?
                   <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
                     <RendererHost
@@ -5230,7 +5553,7 @@ class Home extends React.Component {
                     <CanvasCom matrixName={modeCanvasMatrixName} local={this.state.local}>
                       <HandVideo1
                         ref={this.com}
-                        data={this.data}
+                        data={gloveRendererData}
                         local={this.state.local}
                         hand={this.state.hand}
                         {...this.sceneChartProps} />
@@ -5242,6 +5565,8 @@ class Home extends React.Component {
                         ref={this.com}
                         data={this.data}
                         local={this.state.local}
+                        layout={this.state.matrixName === PRESSURE_VEST_MATRIX ? PRESSURE_VEST_RAW_LAYOUT : undefined}
+                        manageStats={this.state.matrixName !== PRESSURE_VEST_MATRIX}
                       />
                     </CanvasCom>
                     :
@@ -5259,12 +5584,14 @@ class Home extends React.Component {
                         {...this.sceneChartProps} />
                     </CanvasCom>
                     :
-                    this.state.numMatrixFlag == "skin" && this.state.matrixName == HUMAN_BODY_OPTIMIZED_MATRIX ?
+                    this.state.numMatrixFlag == "skin" && [HUMAN_BODY_OPTIMIZED_MATRIX, PRESSURE_VEST_MATRIX].includes(this.state.matrixName) ?
                     <CanvasCom matrixName={this.state.matrixName} local={this.state.local}>
                       <HumanBodyOptimized
                         ref={this.com}
                         data={this.data}
                         local={this.state.local}
+                        sensorProfile={this.state.matrixName === PRESSURE_VEST_MATRIX ? PRESSURE_VEST_PROFILE : undefined}
+                        manageStats={this.state.matrixName !== PRESSURE_VEST_MATRIX}
                         renderOptions={{
                           max: this.state.valuej1,
                           size: this.state.sizeValue ?? HUMAN_BODY_DEFAULT_SIZE,
@@ -5406,18 +5733,20 @@ class Home extends React.Component {
                       <CanvasCom matrixName={this.state.matrixName}
                         local={this.state.local}
                       >
-                        {this.state.matrixName === HAND_0205_DOUBLE_MATRIX ? (
-                          <Hand0205Double
-                            ref={this.com}
-                            data={this.data}
-                            local={this.state.local}
-                            {...this.sceneChartProps} />
-                        ) : (
+                        {this.state.matrixName === SINGLE_GLOVE_MATRIX ? (
                           <Hand0205
                             portalEmbedded={this.props.portalEmbedded}
                             hand={this.state.hand}
                             ref={this.com}
-                            data={this.data}
+                            data={gloveRendererData}
+                            local={this.state.local}
+                            {...this.sceneChartProps} />
+                        ) : (
+                          <Hand0205Double
+                            portalEmbedded={this.props.portalEmbedded}
+                            hand={this.state.hand}
+                            ref={this.com}
+                            data={gloveRendererData}
                             local={this.state.local}
                             {...this.sceneChartProps} />
                         )}

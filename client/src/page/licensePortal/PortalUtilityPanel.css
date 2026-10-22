@@ -94,11 +94,12 @@
 
 /* 横向抽屉不改占位尺寸，快速反向点击可从当前位置继续，不干扰入场动画的 transform。 */
 .fiber-portal .portal-quick-tools-slide { position: relative; --drawer-edge: 22px; transition: transform 360ms cubic-bezier(.22, 1, .36, 1); }
-.fiber-portal .portal-quick-tools-slide.is-collapsed { transform: translateX(calc(100% + var(--drawer-edge))); }
+/* 拉手比左偏移宽 2px，收起时扣除这段搭接，完整留在窗口内。 */
+.fiber-portal .portal-quick-tools-slide.is-collapsed { transform: translateX(calc(100% + var(--drawer-edge) - 2px)); }
 .fiber-portal .portal-quick-tools-slide.is-collapsed .portal-quick-tools { pointer-events: none; }
 .fiber-portal .portal-quick-tools-handle {
   position: absolute; z-index: 1; left: -30px; top: 50%; transform: translateY(-50%);
-  width: 32px; height: 94px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  width: 32px; height: 94px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
   padding: 8px 3px; border: 1px solid rgba(143,181,209,.42); border-right: 0; border-radius: 12px 0 0 12px;
   background: #0c202e; color: var(--portal-secondary); cursor: pointer; pointer-events: auto;
   box-shadow: -5px 0 18px rgba(0,5,13,.2); transition: background 160ms ease, color 160ms ease;

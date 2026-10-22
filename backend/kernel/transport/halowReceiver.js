@@ -5,6 +5,11 @@ const { EventEmitter } = require('node:events');
 const DATA_HEADER = Buffer.from([0xaa, 0x55, 0x03, 0x99]);
 const PAYLOAD_LENGTH = 1024;
 
+/** 判断展示系统是否使用 HaLow 的 1024 点原始帧协议。 */
+function isHalowDisplaySystem(sensorType) {
+  return sensorType === 'humanBodyOptimized' || sensorType === 'pressureVest';
+}
+
 // One parser per TCP connection. ID is mandatory and belongs to this connection only.
 class HalowFrameParser {
   /** 为一条 TCP 连接保存独立的设备 ID 与分帧缓冲。 */
@@ -76,6 +81,7 @@ class HalowReceiver extends EventEmitter {
     this.config = { host: '', port: 12345 };
     this.phase = 'stopped';
     this.error = '';
+    this._socketErrorRecovery = null;
     this.selectedDeviceId = null;
     this.nextClientId = 0;
     this.receivedFrames = 0;
@@ -131,6 +137,7 @@ class HalowReceiver extends EventEmitter {
       this.config = { host, port };
       this.phase = 'starting';
       this.error = '';
+      this._socketErrorRecovery = null;
       this.receivedFrames = this.receivedBytes = 0;
       this.selectedDeviceId = null;
       const listener = net.createServer(socket => this.accept(socket));
@@ -214,7 +221,7 @@ class HalowReceiver extends EventEmitter {
     socket.setNoDelay(true);
     socket.setKeepAlive(true, 5000);
     const client = { id: ++this.nextClientId, socket, parser: new HalowFrameParser(), frames: 0, bytes: 0,
-      lastFrameAt: 0, rate: [], address: `${socket.remoteAddress}:${socket.remotePort}` };
+      lastFrameAt: 0, rate: [], peerAddress: socket.remoteAddress, address: `${socket.remoteAddress}:${socket.remotePort}` };
     this.clients.set(client.id, client);
     client.idTimeout = setTimeout(() => {
       this.error = `设备 ${client.address} 在 10 秒内没有发送完整 ID 帧`;
@@ -230,7 +237,8 @@ class HalowReceiver extends EventEmitter {
         const frames = client.parser.feed(chunk);
         if (!wasIdentified && client.parser.deviceId !== null) {
           clearTimeout(client.idTimeout);
-          const duplicate = [...this.clients.values()].find(c => c !== client && c.parser.deviceId === client.parser.deviceId);
+          const duplicate = [...this.clients.values()].find(c => c !== client && !c.socket.destroyed
+            && c.parser.deviceId === client.parser.deviceId);
           if (duplicate) throw new Error(`设备 ID 重复：${client.parser.deviceId}，请为每块 B 板配置独立 ID`);
           if (this.selectedDeviceId === null) this.selectedDeviceId = client.parser.deviceId;
           this.publish();
@@ -242,6 +250,14 @@ class HalowReceiver extends EventEmitter {
           this.receivedFrames += frames.length;
           client.rate.push({ at: now, count: frames.length });
           if (client.rate.length > 4096) client.rate.splice(0, client.rate.length - 4096);
+          // 只有原设备从同一 IP 恢复完整帧，才清除它的断开错误；保留后来发生的其它错误。
+          const recovery = this._socketErrorRecovery;
+          if (recovery && recovery.deviceId !== null && this.error === recovery.message
+              && client.parser.deviceId === recovery.deviceId && client.peerAddress === recovery.address) {
+            this.error = '';
+            this._socketErrorRecovery = null;
+            this.publish();
+          }
           if (client.parser.deviceId === this.selectedDeviceId) {
             for (const frame of frames) this.onFrame(frame, { deviceId: client.parser.deviceId, clientId: client.id });
           }
@@ -251,7 +267,10 @@ class HalowReceiver extends EventEmitter {
         socket.destroy();
       }
     });
-    socket.on('error', error => { this.error = `${client.address}：${error.message}`; });
+    socket.on('error', error => {
+      this.error = `${client.address}：${error.message}`;
+      this._socketErrorRecovery = { deviceId: client.parser.deviceId, address: client.peerAddress, message: this.error };
+    });
     socket.on('close', () => {
       clearTimeout(client.idTimeout);
       this.clients.delete(client.id);
@@ -263,4 +282,4 @@ class HalowReceiver extends EventEmitter {
   }
 }
 
-module.exports = { HalowFrameParser, HalowReceiver, listLocalAddresses, PAYLOAD_LENGTH };
+module.exports = { HalowFrameParser, HalowReceiver, listLocalAddresses, isHalowDisplaySystem, PAYLOAD_LENGTH };

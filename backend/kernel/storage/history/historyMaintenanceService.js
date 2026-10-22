@@ -39,6 +39,7 @@ function createHistoryMaintenanceService({
   logger,
   getDatabases,
   publishSystemEvent,
+  beforeDelete = () => {},
 }) {
   /**
    * 删除当前日期的历史记录；遍历所有已打开的兼容库，覆盖动态主库及旧三路库。
@@ -48,7 +49,18 @@ function createHistoryMaintenanceService({
    */
   async function deleteHistory(dateLabel) {
     try {
+      beforeDelete();
       const databases = getDatabases() || {};
+      const left = databases.db?._db;
+      const right = databases.db1?._db;
+      if (left?.glovePhysicalDatabase && left.glovePhysicalDatabase === right?.glovePhysicalDatabase) {
+        left.transaction(() => {
+          left.prepare('DELETE FROM matrix WHERE date = ?').run(dateLabel);
+          right.prepare('DELETE FROM matrix WHERE date = ?').run(dateLabel);
+        })();
+        publishSystemEvent({ download: 'deleteSuccess' });
+        return;
+      }
       const seen = new Set();
       for (const dbRef of [databases.db, databases.db1, databases.db2]) {
         if (!dbRef || seen.has(dbRef)) continue;

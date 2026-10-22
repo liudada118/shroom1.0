@@ -13,13 +13,32 @@ const COMMON_PRESSURE_CONTROLS = {
 export const DEFAULT_DISPLAY_SYSTEMS = [
   {
     key: 'hand0205',
+    aliases: ['hand0205Single'],
     label: '触觉手套',
     channels: ['sit', 'back'],
     defaultMode: 'normal',
     modes: ['normal', 'num', 'num3D', 'numoriginal', 'skin'],
     renderers: {
       normal: 'Hand0205',
-      num: 'Num2D',
+      num: 'LegacyGloveNum2D',
+      num3D: 'Num3D',
+      numoriginal: 'LegacyGloveNum2DOriginal',
+      skin: 'HandSkin',
+    },
+    controls: {
+      ...COMMON_PRESSURE_CONTROLS,
+      calibrate: true,
+    },
+  },
+  {
+    key: 'hand0205Double',
+    label: '触觉手套2',
+    channels: ['sit', 'back'],
+    defaultMode: 'normal',
+    modes: ['normal', 'num', 'num3D', 'numoriginal', 'skin'],
+    renderers: {
+      normal: 'Hand0205Double',
+      num: 'GloveHandNum2D',
       num3D: 'Num3D',
       numoriginal: 'Num2DOriginal',
       skin: 'HandSkin',

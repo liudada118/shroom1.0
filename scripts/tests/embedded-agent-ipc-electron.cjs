@@ -5,6 +5,7 @@ const path = require('node:path');
 const http = require('node:http');
 const electron = require('electron');
 const { createAgentProcess, registerAgentIpc, loadAgentWindowUrl } = require('../../app/electron/agentProcess');
+const builtinCatalog = require('../../shared/agent-model-catalog.json');
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'shroom-agent-ipc-'));
 electron.app.setPath('userData', root);
@@ -16,6 +17,13 @@ const watchdog = setTimeout(() => { console.error('Agent IPC smoke timed out'); 
 /** 为真实沙箱窗口提供完全本机的页面和子 frame，不调用模型或设备。 */
 async function createFixtureServer() {
   const server = http.createServer((request, response) => {
+    if (request.url === '/api/agent/model-catalog') {
+      assert.equal(request.headers.authorization, undefined);
+      assert.equal(request.headers.cookie, undefined);
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ ...builtinCatalog, version: 'ipc-catalog-fixture' }));
+      return;
+    }
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     response.end(request.url === '/frame' ? '<!doctype html><title>Child frame</title>'
       : '<!doctype html><title>Shroom IPC fixture</title><iframe src="/frame"></iframe>');
@@ -48,9 +56,17 @@ async function main() {
   const otherOrigin = await createFixtureServer();
   assert.ok(!['3000', '12321'].includes(new URL(origin).port));
   registerAgentIpc({ ipcMain: electron.ipcMain, getWindow: () => mainWindow, getProcess: () => manager });
-  manager = createAgentProcess({ electron, root: path.join(root, 'agent'), getWindow: () => mainWindow });
+  manager = createAgentProcess({ electron, root: path.join(root, 'agent'), getWindow: () => mainWindow,
+    modelCatalogUrl: `${origin}/api/agent/model-catalog` });
   mainWindow = createWindow();
   await loadAgentWindowUrl(mainWindow, origin);
+  const catalog = await mainWindow.webContents.executeJavaScript("window.electronAPI.agent.invoke('getModelCatalog')");
+  assert.equal(catalog.ok, true, JSON.stringify(catalog));
+  assert.equal(catalog.data.version, 'ipc-catalog-fixture');
+  assert.equal(catalog.data.source, 'remote');
+  assert(catalog.data.providers.some(provider => provider.id === 'custom'));
+  const invalidCatalogRequest = await mainWindow.webContents.executeJavaScript("window.electronAPI.agent.invoke('getModelCatalog', {url:'https://other.invalid'})");
+  assert.equal(invalidCatalogRequest.error.code, 'AGENT_INPUT_INVALID');
   const result = await getState(mainWindow.webContents);
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.data.settings.hasApiKey, false);
@@ -88,6 +104,7 @@ async function main() {
   const foreign = createWindow();
   await loadAgentWindowUrl(foreign, origin);
   assert.equal((await getState(foreign.webContents)).error.code, 'AGENT_FORBIDDEN');
+  assert.equal((await foreign.webContents.executeJavaScript("window.electronAPI.agent.invoke('getModelCatalog')")).error.code, 'AGENT_FORBIDDEN');
 
   await mainWindow.loadURL(otherOrigin);
   assert.equal((await getState(mainWindow.webContents)).error.code, 'AGENT_FORBIDDEN');
@@ -101,7 +118,7 @@ async function main() {
   assert.ok(child, 'same-origin child frame must exist');
   assert.equal(await child.executeJavaScript('typeof window.electronAPI?.agent?.invoke'), 'function');
   assert.equal((await getState(child)).error.code, 'AGENT_FORBIDDEN');
-  console.log('PASS: real sandboxed BrowserWindow/preload IPC on a dynamic port; utility-process state; foreign window, changed origin and child frame rejected. No model or device access.');
+  console.log('PASS: real sandboxed BrowserWindow/preload IPC on a dynamic port; public catalog over Electron net without credentials; utility-process state; foreign window, changed origin and child frame rejected. No model or device access.');
 }
 
 /** 关闭测试窗口、进程和本机服务；仅清理明确创建的临时目录。 */

@@ -28,6 +28,7 @@ export const BUILTIN_SYSTEM_ENTRIES = Object.freeze([
   ['normal', 'sensorNormal', 'custom'],
   ['carQX', 'chairQX', 'vehicle'],
   ['humanBodyOptimized', 'sensorHumanBodyOptimized', 'embodied'],
+  ['pressureVest', 'sensorPressureVest', 'embodied'],
 ]);
 
 /** 返回与旧运行页顺序、翻译完全一致的系统选项。 */

@@ -9,6 +9,7 @@ import {
   serializeJqbedConfigDraft,
   validateJqbedConfigDraft,
 } from './jqbedAlgorithmConfig';
+import JqbedAlgorithmLog from './JqbedAlgorithmLog.jsx';
 import './jqbedAlgorithmConfig.scss';
 
 const statusPresentation = {
@@ -24,6 +25,10 @@ export default function JqbedAlgorithmConfigModal({
   envelope,
   operationResult,
   algorithmStatus,
+  returnedSettings,
+  algorithmLogFrame,
+  logSubscription,
+  onLogSubscription,
   connected,
   connectionEpoch,
   onRequest,
@@ -132,6 +137,16 @@ export default function JqbedAlgorithmConfigModal({
     ? new Date(envelope.savedAt).toLocaleString(i18n.resolvedLanguage || i18n.language)
     : null;
   const activeFields = JQBED_CONFIG_FIELDS.filter((field) => field.group === activeGroup);
+  const returnedSensitivity = returnedSettings?.sensitivity;
+  const returnedBedType = returnedSettings?.bedType;
+  const returnedSensitivityLabel = Number.isInteger(returnedSensitivity)
+    && returnedSensitivity >= 0 && returnedSensitivity <= 3
+    ? t(`jqbedAlgorithmConfig.sensitivityModes.${returnedSensitivity}`)
+    : t('jqbedAlgorithmConfig.returnedSettings.unavailable');
+  const returnedBedTypeLabel = Number.isInteger(returnedBedType)
+    && returnedBedType >= 0 && returnedBedType <= 1
+    ? t(`jqbedAlgorithmConfig.bedTypes.${returnedBedType}`)
+    : t('jqbedAlgorithmConfig.returnedSettings.unavailable');
 
   const renderField = (field) => {
     const value = draft[field.key];
@@ -143,6 +158,20 @@ export default function JqbedAlgorithmConfigModal({
 
     if (field.kind === 'switch') {
       return <Switch checked={Number(value) === 1} onChange={(checked) => setValue(checked ? 1 : 0)} />;
+    }
+    if (field.kind === 'bedType') {
+      return (
+        <Select
+          value={Number(value)}
+          aria-label={t(field.labelKey)}
+          style={{ width: 190 }}
+          onChange={setValue}
+          options={[0, 1].map((bedType) => ({
+            value: bedType,
+            label: t(`jqbedAlgorithmConfig.bedTypes.${bedType}`),
+          }))}
+        />
+      );
     }
     if (field.kind === 'sensitivityMode') {
       return (
@@ -247,6 +276,28 @@ export default function JqbedAlgorithmConfigModal({
         </span>
       </div>
 
+      <section
+        className="jqbedAlgorithmConfig__returnedSettings"
+        aria-label={t('jqbedAlgorithmConfig.returnedSettings.title')}
+      >
+        <span className="jqbedAlgorithmConfig__returnedTitle">
+          {t('jqbedAlgorithmConfig.returnedSettings.title')}
+        </span>
+        <dl className="jqbedAlgorithmConfig__returnedValues" aria-live="polite">
+          <div>
+            <dt>{t('jqbedAlgorithmConfig.returnedSettings.sensitivity')}</dt>
+            <dd>{returnedSensitivityLabel}</dd>
+          </div>
+          <div>
+            <dt>{t('jqbedAlgorithmConfig.returnedSettings.bedType')}</dt>
+            <dd>{returnedBedTypeLabel}</dd>
+          </div>
+        </dl>
+        <p className="jqbedAlgorithmConfig__returnedHelp">
+          {t('jqbedAlgorithmConfig.returnedSettings.help')}
+        </p>
+      </section>
+
       {algorithmStatus?.error ? (
         <Alert type="error" showIcon message={algorithmStatus.error} />
       ) : null}
@@ -270,10 +321,26 @@ export default function JqbedAlgorithmConfigModal({
             {t(group.labelKey)}
           </button>
         ))}
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeGroup === 'log'}
+          className={activeGroup === 'log' ? 'is-active' : ''}
+          onClick={() => setActiveGroup('log')}
+        >{t('jqbedAlgorithmConfig.log.title')}</button>
       </div>
 
-      <div className="jqbedAlgorithmConfig__formScroll">
-        {loading ? (
+      <div className={`jqbedAlgorithmConfig__formScroll${activeGroup === 'log' ? ' jqbedAlgorithmConfig__logScroll' : ''}`}>
+        <JqbedAlgorithmLog
+          active={activeGroup === 'log'}
+          open={open}
+          connected={connected}
+          connectionEpoch={connectionEpoch}
+          algorithmLogFrame={algorithmLogFrame}
+          logSubscription={logSubscription}
+          onLogSubscription={onLogSubscription}
+        />
+        {activeGroup === 'log' ? null : loading ? (
           <div className="jqbedAlgorithmConfig__loading">
             <Spin />
           </div>

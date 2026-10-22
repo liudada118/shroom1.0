@@ -126,7 +126,8 @@ function validateLicenseKey(licenseKey, options = {}) {
     } catch (err) {
       verified = null;
     }
-    if (!verified?.valid) {
+    const verifiedExpiry = verified?.error === '授权已过期' && Number.isFinite(verified.expireTimestamp) && verified.licenseFile;
+    if (!verified?.valid && !(options.allowExpired === true && verifiedExpiry)) {
       const expired = verified?.error === '授权已过期';
       return {
         ok: false,

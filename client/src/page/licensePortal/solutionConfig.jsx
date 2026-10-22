@@ -109,10 +109,17 @@ export const SOLUTIONS = [
     modules: [
       {
         key: 'hand0205',
-        label: '触觉手套',
+        labelKey: 'solutions.embodied.glove.label',
         icon: renderIcon(gloveIcon, '触觉手套'),
         detailTitle: '触觉手套方案',
         detail: '多点触觉感知与力反馈，支持精细操作。',
+      },
+      {
+        key: 'hand0205Double',
+        labelKey: 'sensorHand0205Double',
+        icon: renderIcon(gloveIcon),
+        detailTitleKey: 'sensorHand0205Double',
+        detailKey: 'solutions.embodied.glove.detail',
       },
       {
         key: 'footVideo',

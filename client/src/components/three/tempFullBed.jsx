@@ -1,5 +1,6 @@
 import Stats from "three/examples/jsm/libs/stats.module.js";
 import * as THREE from "three";
+import { createPointViewTools } from './pointViewTools';
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 // import { FlyControls } from 'three/examples/jsm/controls/FlyControls.js';
 import { TrackballControls } from "three/examples/jsm/controls/TrackballControls";
@@ -28,6 +29,7 @@ import { calculatePressure, lineInterp, press, pressSmallBed } from "../../asset
 
 
 const Canvas = React.forwardRef((props, refs) => {
+  const workspaceViewRef = useRef(null);
 
   let dataArr
 const group = new THREE.Group();
@@ -815,6 +817,8 @@ let isShiftPressed = false;
   }
 
   useImperativeHandle(refs, () => ({
+    /** 返回当前点图的视角工具，切换渲染器后不复用旧场景。 */
+    getViewTools: () => workspaceViewRef.current,
 
     sitData: sitData,
     changeDataFlag: changeDataFlag,
@@ -869,6 +873,7 @@ let isShiftPressed = false;
     // 靠垫数据
 
     init();
+    workspaceViewRef.current = createPointViewTools({ object: group, plane: particles, camera, controls });
     // window.addEventListener("mousemove", () => {}, false);
     animate();
 
@@ -878,6 +883,9 @@ let isShiftPressed = false;
 
     return () => {
       cancelAnimationFrame(animationRequestId);
+      workspaceViewRef.current?.dispose();
+      workspaceViewRef.current = null;
+      controls?.dispose();
       document.removeEventListener('pointerdown', pointDown)
       document.removeEventListener('pointermove', pointMove)
       document.removeEventListener('pointerup', pointUp)

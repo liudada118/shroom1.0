@@ -81,7 +81,7 @@ function createFrameOutputPipeline({
 
     const stored = options?.store === false
       ? false
-      : collectionFrameStorage.storeSit(frameToStore);
+      : collectionFrameStorage.storeSit(frameToStore, options);
     const sent = options?.publish === false
       ? 0
       : publishRealtimeChannel('sit', payloadText);
@@ -102,7 +102,7 @@ function createFrameOutputPipeline({
    */
   function publishBack(jsonData, options = {}) {
     const { frame, payloadText, zeroedStages } = prepareFrame('back', jsonData, options);
-    const stored = collectionFrameStorage.storeBack(frame);
+    const stored = collectionFrameStorage.storeBack(frame, options);
     const sent = publishRealtimeChannel('back', payloadText);
     return { stored, sent, jsonData: payloadText, frame, zeroedStages };
   }
@@ -117,7 +117,7 @@ function createFrameOutputPipeline({
    */
   function publishHead(jsonData, options = {}) {
     const { frame, payloadText, zeroedStages } = prepareFrame('head', jsonData, options);
-    const stored = collectionFrameStorage.storeHead(frame);
+    const stored = collectionFrameStorage.storeHead(frame, options);
     const sent = publishRealtimeChannel('head', payloadText, { respectFrequency: false });
     return { stored, sent, jsonData: payloadText, frame, zeroedStages };
   }
@@ -136,7 +136,7 @@ function createFrameOutputPipeline({
     const { frame, payloadText, zeroedStages } = prepareFrame(channel, jsonData, options);
     const stored = options?.store === false
       ? false
-      : collectionFrameStorage.storeFrame(frame, { fallbackChannel: channel });
+      : collectionFrameStorage.storeFrame(frame, { ...options, fallbackChannel: channel });
     const sent = options?.publish === false
       ? 0
       : publishRealtimeChannel(channel, payloadText);
@@ -144,6 +144,8 @@ function createFrameOutputPipeline({
   }
 
   return {
+    beginCollectionFrame: (identity) => collectionFrameStorage.beginCollectionFrame?.(identity),
+    endCollectionFrame: (token, result) => collectionFrameStorage.endCollectionFrame?.(token, result),
     publishAux,
     publishBack,
     publishHead,

@@ -217,19 +217,17 @@ function normalizeCanvas2dParams(raw = {}) {
  * | 键 | `plain`（Num2D） | `original`（Num2Doriginal） |
  * | :--- | :--- | :--- |
  * | `useMask` | 着色器不发 `u_mask` | 发，机器人分区靠它把空隙涂白 |
- * | `whiteOnZero` | 0 值走配色（jet 的蓝） | 0 值直接输出白 |
+ * | `whiteOnZero` | 0 值走 jet 蓝色 | 同左，原始矩阵统一使用蓝底 |
  * | `potTexture` | 纹理 = 数据尺寸 | `nextPOT()` + `u_texScale` |
  * | `maxFromThreshold` | 色标上限恒取本帧最大值 | `valuej > 0` 时用 `valuej` |
  * | `retintOnTuning` | 拖阈值不重画 | 重画最后一帧 |
- * | `gridColor` | `rgba(0,0,40,0.6)` 深色细线 | `rgba(200,200,220,0.8)` 浅色 |
- * | `zeroTextColor` | 无（0 值也是白字） | `#999`（白底上要看得见） |
- * | `indexRow` | 无 | 底部一条蓝色列号带 |
- * | `overlayPad` | 0 | 30（给列号带与分区标题留的） |
+ * | `gridColor` / `zeroTextColor` | 深色细线，数字统一青色 | 同左 |
+ * | `indexRow` / `indexColumn` | 底部列号与左侧行号，1 基 | 同左 |
+ * | `overlayPad` | 0，索引空间自动预留 | 30，额外容纳分区标题 |
  * | `refitOnSizeChange` | 纹理换尺寸时格子边长不变 | 跟着重算 |
  *
  * `variant` **只是这张表的选择器，后端一行都不读它** —— 归一化完之后剩下的
- * 全是具体开关。二开想要「Num2D 的配色 + Num2Doriginal 的列号带」，
- * 填 `{ variant: 'plain', indexRow: true }` 就行，不必新造一个 variant。
+ * 全是具体开关；展示索引只占叠加层留白，不会增减采样格。
  */
 const WEBGL_VARIANT_DEFAULTS = {
   /** `num/Num2D.jsx`。「数字」下拉项。 */
@@ -242,7 +240,8 @@ const WEBGL_VARIANT_DEFAULTS = {
     rawTranspose: false,
     gridColor: 'rgba(0, 0, 40, 0.6)',   // Num2D.jsx:234
     zeroTextColor: null,                 // Num2D.jsx:259 恒 '#fff'
-    indexRow: false,
+    indexRow: true,
+    indexColumn: true,
     overlayPad: 0,                       // Num2D.jsx:380 无 +30
     refitOnSizeChange: false,            // Num2D.jsx:499-510 reinitGL 不动 cellSize
     glove: { enabled: false, mode: 'scatter32', width: 16, height: 16 },
@@ -251,14 +250,15 @@ const WEBGL_VARIANT_DEFAULTS = {
   /** `num/Num2Doriginal.jsx`。「原始数据」下拉项。 */
   original: {
     useMask: true,
-    whiteOnZero: true,
+    whiteOnZero: false,
     potTexture: true,
     maxFromThreshold: true,
     retintOnTuning: true,
     rawTranspose: false,                 // 只有 jqbed 那条预设打开
-    gridColor: 'rgba(200, 200, 220, 0.8)', // Num2Doriginal.jsx:345
-    zeroTextColor: '#999',               // Num2Doriginal.jsx:371
-    indexRow: true,                      // Num2Doriginal.jsx:380-395
+    gridColor: 'rgba(0, 0, 40, 0.6)',
+    zeroTextColor: null,
+    indexRow: true,
+    indexColumn: true,
     overlayPad: 30,                      // Num2Doriginal.jsx:658
     refitOnSizeChange: true,             // Num2Doriginal.jsx:903-921 会重算 cellSize
     glove: { enabled: false, mode: 'rows15', width: 15, height: 10 },
@@ -271,7 +271,7 @@ const WEBGL_SHARED_DEFAULTS = {
   widthRatio: 0.4,        // MATRIX_WIDTH_RATIO，两份一致
   cellPadding: 40,        // calcCellSize 的第五个实参，两份所有调用点都是 40
   fixedCellSize: 0,       // 0 = 按视口算；Num2Doriginal 的 footVideo 写死 30
-  textColor: '#fff',
+  textColor: '#4ec7ff',
   titleColor: '#ccc',                       // Num2Doriginal.jsx:449 分区标题
   indexRowColor: 'rgba(30, 60, 200, 0.85)', // Num2Doriginal.jsx:383
   showNumbers: true,      // 唯一调用点传的就是 true
@@ -367,6 +367,7 @@ function normalizeWebglRobot(raw, defaults) {
 function normalizeWebglParams(raw = {}) {
   const variant = raw.variant === 'original' ? 'original' : 'plain';
   const base = WEBGL_VARIANT_DEFAULTS[variant];
+  const glove = normalizeWebglGlove(raw.glove, base.glove);
 
   return {
     variant,
@@ -377,7 +378,7 @@ function normalizeWebglParams(raw = {}) {
     retintOnTuning: normalizeBoolean(raw.retintOnTuning, base.retintOnTuning),
     /** 裸数据是否转置。**只在 `width === height` 时生效**，这是原实现的条件。 */
     rawTranspose: normalizeBoolean(raw.rawTranspose, base.rawTranspose),
-    widthRatio: clampNumber(raw.widthRatio, WEBGL_SHARED_DEFAULTS.widthRatio, PARAM_RANGES.widthRatio),
+    widthRatio: clampNumber(raw.widthRatio, glove.enabled ? 0.75 : WEBGL_SHARED_DEFAULTS.widthRatio, PARAM_RANGES.widthRatio),
     cellPadding: clampInteger(
       raw.cellPadding, WEBGL_SHARED_DEFAULTS.cellPadding, PARAM_RANGES.cellPadding,
     ),
@@ -404,7 +405,9 @@ function normalizeWebglParams(raw = {}) {
     showNumbers: normalizeBoolean(raw.showNumbers, WEBGL_SHARED_DEFAULTS.showNumbers),
     showBorder: normalizeBoolean(raw.showBorder, WEBGL_SHARED_DEFAULTS.showBorder),
     indexRow: normalizeBoolean(raw.indexRow, base.indexRow),
-    /** 叠加层画布比热场大出来的边（px）。列号带与分区标题画在这块地方。 */
+    /** 左侧行号与底部列号均从 1 开始，只绘制在矩阵外侧。 */
+    indexColumn: normalizeBoolean(raw.indexColumn, base.indexColumn),
+    /** 叠加层额外留白；行列号空间由后端独立预留，分区标题可占此边。 */
     overlayPad: clampInteger(raw.overlayPad, base.overlayPad, PARAM_RANGES.overlayPad),
     /**
      * 纹理换尺寸时要不要重算格子边长。
@@ -418,13 +421,12 @@ function normalizeWebglParams(raw = {}) {
     /**
      * 挂载时先推一帧全 0。
      *
-     * 只有整包手套（`handGloveFullPacket`）需要：它上电到第一帧之间有好几秒，
-     * 不先铺一张空网格的话那段时间是纯白，看着像坏了。
+     * 双手通路在第一帧之前也显示两块零矩阵，避免右手尚未连接时没有布局。
      */
     glovePrimeOnMount: normalizeBoolean(
-      raw.glovePrimeOnMount, WEBGL_SHARED_DEFAULTS.glovePrimeOnMount,
+      raw.glovePrimeOnMount, glove.enabled || WEBGL_SHARED_DEFAULTS.glovePrimeOnMount,
     ),
-    glove: normalizeWebglGlove(raw.glove, base.glove),
+    glove,
     foot: normalizeWebglFoot(raw.foot, { ...base.foot, ttlMs: WEBGL_SHARED_DEFAULTS.footTtlMs }),
     robot: normalizeWebglRobot(raw.robot, WEBGL_SHARED_DEFAULTS.robot),
   };

@@ -62,6 +62,9 @@ function createPlaybackFrameService(deps) {
    * @returns {{ pressureData: number[], rotateData: number[], zeroFrame: number[] }} 标准帧。
    */
   function parseStoredPressure(row, sensorType) {
+    if (!row?.data && isHandGloveType(sensorType)) {
+      return { pressureData: new Array(256).fill(0), rotateData: [], zeroFrame: [] };
+    }
     return parseStoredSensorFrame(JSON.parse(row?.data || '[]'), sensorType);
   }
 
@@ -136,7 +139,7 @@ function createPlaybackFrameService(deps) {
       sitPayload.rotate = sitFrame.rotateData;
     }
 
-    if (!backRow || !backPayload) return;
+    if (!backPayload) return;
     if (sensorType === handGloveFullPacket && backRaw.length >= 256) {
       const backPressure = backRaw.slice(0, 256);
       const backMapped = mapHandGloveFullPacketPressure([...backPressure], 'right');
@@ -275,7 +278,7 @@ function createPlaybackFrameService(deps) {
       }
       : undefined;
 
-    return { sitPayload: isHandGloveType(sensorType) && !sitRow ? undefined : sitPayload, backPayload, headPayload };
+    return { sitPayload: isHandGloveType(sensorType) && sitRows.length === 0 ? undefined : sitPayload, backPayload, headPayload };
   }
 
   return { buildPayloads, parseDisplaySystemPlaybackFrame };

@@ -1,9 +1,20 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { PortalSessionBar, PortalQuickTools } from './PortalMonitoringChrome';
+import { PortalSessionBar, PortalQuickTools, PortalDisplayPanel } from './PortalMonitoringChrome';
 
 describe('门户最新监测控制层', () => {
+  it('显示与语言直接展示，不依赖工具箱或快捷工具展开', () => {
+    const html = renderToStaticMarkup(<><PortalDisplayPanel languageControl={<select aria-label="界面语言" defaultValue="zh"><option value="zh">中文</option></select>}>
+      <select aria-label="选择渲染器" defaultValue="pointGrid"><option value="pointGrid">3D 点图</option></select>
+    </PortalDisplayPanel><PortalQuickTools collapsed /></>);
+    expect(html).toContain('aria-labelledby="portal-display-title"');
+    expect(html).toContain('id="portal-display-title">渲染与显示');
+    expect(html).toContain('aria-label="界面语言"');
+    expect(html).toContain('aria-label="选择渲染器"');
+    expect(html.indexOf('portal-display-panel')).toBeLessThan(html.indexOf('portal-quick-tools-slide is-collapsed'));
+  });
+
   it('实时串口直接放进会话栏，支持多个下拉而不产生设备弹窗入口', () => {
     const html = renderToStaticMarkup(<PortalSessionBar mode="now" deviceControls={
       <div role="group" aria-label="连接设备"><select aria-label="座椅串口" /><select aria-label="靠背串口" /></div>

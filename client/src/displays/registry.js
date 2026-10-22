@@ -104,6 +104,7 @@ export const DISPLAY_REGISTRY = {
   eye: defineDisplay('eye', { matrix: MATRIX_16, channels: ['sit', 'back'] }),
   daliegu: defineDisplay('daliegu'),
   smallSample: defineDisplay('smallSample'),
+  pressureVest: defineDisplay('pressureVest', { label: '压力传感背心', defaultMode: 'skin', capabilities: [...DEFAULT_CAPABILITIES, DISPLAY_CAPABILITIES.THREE_D] }),
   humanBody: defineDisplay('humanBody', { defaultMode: 'skin', capabilities: [...DEFAULT_CAPABILITIES, DISPLAY_CAPABILITIES.THREE_D] }),
   xiyueReal1: defineDisplay('xiyueReal1'),
   handBlue: defineDisplay('handBlue'),

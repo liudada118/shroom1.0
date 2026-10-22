@@ -13,10 +13,10 @@ const path = require('node:path');
 
 // 配置文件格式版本。改这个数字意味着旧配置文件要走迁移分支（见 load），
 // 而不是被当成不兼容直接丢回默认值。
-const JQBED_ALGORITHM_CONFIG_VERSION = 2;
+const JQBED_ALGORITHM_CONFIG_VERSION = 3;
 
 // 出厂默认值。它同时是**唯一一份「完整」的参数集合** —— 因为
-// normalizeJqbedAlgorithmValues 要求 18 个键全部到齐，v1 配置的迁移和 reset() 都靠它补齐。
+// normalizeJqbedAlgorithmValues 要求 19 个键全部到齐，v1 配置的迁移和 reset() 都靠它补齐。
 // 冻结（含内层数组）是为了防止某个调用方顺手改了默认值，让后续 reset 拿到被污染的基线。
 const DEFAULT_JQBED_ALGORITHM_VALUES = Object.freeze({
   threshold_factor: 0.0,
@@ -37,6 +37,7 @@ const DEFAULT_JQBED_ALGORITHM_VALUES = Object.freeze({
   edge_align_ratio: 0.0,
   sensitivity_threshold: 0.0,
   breath_th: 0.0,
+  isLowBed: 0,
 });
 
 // 每个字段的校验类型。kind：number 非负有限数 / integer 非负整数 / switch 只能 0 或 1 /
@@ -64,6 +65,7 @@ const FIELD_RULES = Object.freeze({
   edge_align_ratio: { kind: 'number' },
   sensitivity_threshold: { kind: 'sensitivityMode' },
   breath_th: { kind: 'number' },
+  isLowBed: { kind: 'bedType' },
 });
 
 /**
@@ -71,7 +73,7 @@ const FIELD_RULES = Object.freeze({
  *
  * `errors` 是一张 `{字段名: 失败原因}` 的表（原因取值见 FIELD_RULES 注释以及
  * `'unknown'`/`'missing'`），前端靠它高亮具体哪个输入框填错了。所以校验是
- * **收集全部错误再抛**而不是遇错即抛 —— 让用户一次改完，而不是保存 18 次。
+ * **收集全部错误再抛**而不是遇错即抛 —— 让用户一次改完，而不是保存 19 次。
  *
  * 协议层（jqbedAlgorithmProtocol）会 `instanceof` 判断这个类型来区分「用户填错了」和
  * 「后端出问题了」，两者回给前端的文案不同。所以**别把它换成普通 Error**。
@@ -140,16 +142,23 @@ function normalizePair(value, kind) {
   return { value: pair };
 }
 
+/** 只接受标准床/低床枚举，保留 Python 原生算法的数值契约。 */
+function normalizeBedType(value) {
+  const parsed = parseNonnegativeNumber(value);
+  return !parsed.error && (parsed.value === 0 || parsed.value === 1) ? parsed : { error: 'bedType' };
+}
+
+
 /**
  * 校验并归一整套算法参数，**全有或全无**。
  *
- * 所有错误收集完再一次性抛。非对象输入兜成 `{}` 而不是抛错，让 null/数组/字符串都走进「18 个
+ * 所有错误收集完再一次性抛。非对象输入兜成 `{}` 而不是抛错，让 null/数组/字符串都走进「19 个
  * 字段全 missing」的路径，前端拿到的错误表形状一致。
  *
  * ⚠️ 两条严格规则都是刻意的：**未知字段报 `'unknown'`** 而不是忽略（多带字段通常意味着前后端
  * 版本不一致，忽略会让用户以为新参数已生效）；**缺字段报 `'missing'`** 而不是补默认值 ——
  * 保存必须是完整覆盖，否则「只改了一个滑块」和「前端漏传一半字段」无法区分，后者会把没传的
- * 参数悄悄重置。所以前端每次都要发全 18 个字段。（v1 配置的补默认值在 `load` 里，那是迁移。）
+ * 参数悄悄重置。所以前端每次都要发全 19 个字段。（v1 配置的补默认值在 `load` 里，那是迁移。）
  *
  * @param {*} values 待校验的参数对象。
  * @returns {Record<string, number|number[]>} 归一后的参数（新对象，键序按 FIELD_RULES）。
@@ -169,7 +178,9 @@ function normalizeJqbedAlgorithmValues(values) {
       errors[key] = 'missing';
       continue;
     }
-    const result = rule.kind === 'pair' || rule.kind === 'sittingPair'
+    const result = rule.kind === 'bedType'
+      ? normalizeBedType(source[key])
+      : rule.kind === 'pair' || rule.kind === 'sittingPair'
       ? normalizePair(source[key], rule.kind)
       : parseNonnegativeNumber(source[key]);
     if (result.error) {
@@ -314,11 +325,11 @@ function createJqbedAlgorithmConfigStore({ filePath, fsImpl = fs, now = () => ne
     try {
       const envelope = JSON.parse(fsImpl.readFileSync(filePath, 'utf8'));
       if (!envelope
-        || ![1, JQBED_ALGORITHM_CONFIG_VERSION].includes(envelope.version)
+        || ![1, 2, JQBED_ALGORITHM_CONFIG_VERSION].includes(envelope.version)
         || typeof envelope.savedAt !== 'string') {
         throw new Error('incompatible configuration envelope');
       }
-      const values = envelope.version === 1
+      const values = envelope.version < JQBED_ALGORITHM_CONFIG_VERSION
         ? Object.fromEntries(Object.keys(DEFAULT_JQBED_ALGORITHM_VALUES).map((key) => [
           key,
           Object.hasOwn(envelope.values || {}, key)

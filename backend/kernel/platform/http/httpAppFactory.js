@@ -194,6 +194,10 @@ function createHttpApp({
   inspectCompanyRevisionDraft = () => null,
   submitCompanyRevisionDraft = async () => null,
   algorithmRecordService,
+  requireAccess = () => {},
+  getLicenseAccess = () => null,
+  getCollectionStatus = () => ({}),
+  getRuntimeVersions = () => ({}),
   // 展示系统目录变了要告诉正在跑的前端。Builder 在进程内保存时自己派发 DOM 事件，
   // 但 Agent / 脚本走的是这里的 HTTP 接口，前端毫无感知 —— 不广播的话新系统要重启软件才出现。
   publishDisplaySystemsUpdated = () => {},
@@ -223,6 +227,20 @@ function createHttpApp({
   function respondAgentDeviceError(res, error) {
     res.status(error.httpStatus || 503).json({ code: error.code || 'AGENT_DEVICE_UNAVAILABLE', error: error.httpStatus ? error.message : 'Agent device service is unavailable', ...(error.details ? { details: error.details } : {}) });
   }
+
+  httpApp.get('/api/collection/status', (req, res) => {
+    try {
+      assertAgentDeviceOrigin(req);
+      requireAccess('history');
+      res.json(getCollectionStatus());
+    } catch (error) { respondAgentDeviceError(res, error); }
+  });
+  httpApp.get('/api/runtime/diagnostics', (req, res) => {
+    try {
+      assertAgentDeviceOrigin(req);
+      res.json({ licenseAccess: getLicenseAccess(), runtimeVersions: getRuntimeVersions() });
+    } catch (error) { respondAgentDeviceError(res, error); }
+  });
 
   httpApp.post('/api/agent-algorithms/records', (req, res) => {
     try {
@@ -384,7 +402,11 @@ function createHttpApp({
   });
 
   httpApp.get('/api/system-packages/export/:id', (req, res) => {
-    try { assertAgentDeviceOrigin(req); res.json({ package: exportDisplaySystemPackage(req.params.id) }); }
+    try {
+      assertAgentDeviceOrigin(req);
+      if (getLicenseAccess()?.state === 'expired') requireAccess('export');
+      res.json({ package: exportDisplaySystemPackage(req.params.id) });
+    }
     catch (error) { respondDisplaySystemWriteError(res, error); }
   });
 
@@ -597,6 +619,7 @@ function createHttpApp({
     imgPath,
     logger,
     pdfPath,
+    requireAccess,
   });
 
   return httpApp;

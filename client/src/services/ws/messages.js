@@ -1,4 +1,5 @@
 import { decodeWebSocketPayload } from './sensorFrameDecoder';
+import { readLicenseAccess, isHistoryOnlyLicense } from '../licenseAccess';
 
 export function parseJsonMessage(event) {
   return decodeWebSocketPayload(event?.data);
@@ -20,10 +21,12 @@ export function isObjectMessage(message) {
 }
 
 export function hasValidLicenseDate(message) {
-  return isObjectMessage(message) && message.date != null && message.date > 0 && message.valid !== false;
+  return isObjectMessage(message) && message.date != null && message.date > 0
+    && (message.valid !== false || isHistoryOnlyLicense(readLicenseAccess(message)));
 }
 
 export function isExpiredLicenseMessage(message) {
+  if (readLicenseAccess(message)?.state === 'expired') return true;
   if (!hasValidLicenseDate(message)) return false;
   const serverNow = message.nowDate ? parseFloat(message.nowDate) : window.Date.now();
   const endDate = parseFloat(message.date);
@@ -86,6 +89,7 @@ export function toLicenseStatus(message) {
       date: message.date,
       remainingDays: message.remainingDays,
       offline: !!message.offline,
+      ...(readLicenseAccess(message) !== undefined ? { licenseAccess: readLicenseAccess(message) } : {}),
     };
   }
 

@@ -37,6 +37,9 @@ async function dispatch(message) {
         listConversations: () => runtime.listConversations(), openConversation: () => runtime.openConversation(payload),
         listAlgorithmRecords: () => runtime.listAlgorithmRecords(payload), setAlgorithmSelection: () => runtime.setAlgorithmSelection(payload.selection),
         submitAlgorithmData: () => runtime.submitAlgorithmData({ taskId: payload.taskId, requestId: payload.requestId, selection: payload.selection }),
+        listHistoryRecords: () => runtime.listHistoryRecords(payload), setHistorySelection: () => runtime.setHistorySelection(payload.selection),
+        completeHistoryDataRequest: () => runtime.completeHistoryDataRequest({ taskId: payload.taskId, requestId: payload.requestId, selection: payload.selection }),
+        cancelHistoryDataRequest: () => runtime.cancelTask({ taskId: payload.taskId }),
         applyProposal: () => runtime.applyProposal(payload), restoreProposal: () => runtime.restoreProposal(payload),
         shutdown: () => runtime.dispose(),
       };

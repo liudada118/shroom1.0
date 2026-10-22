@@ -1,9 +1,35 @@
 # Shroom 快速架构索引
 
-> 最后更新于：2026-10-16
+> 最后更新于：2026-10-20
 > 用途：代码定位和验证路由。理解当前实现先读 [开发者手册](docs/developer-guide.md)，完整文档分类见 [docs/README.md](docs/README.md)。`ARCHITECTURE.md` 保留历史设计与维护台账，不用作默认全文入口。
 
+2026-10-19 增量：v1.3 到期权限、采集证据/排空、对话历史分析、上传队列隔离、候选推广/撤回、版本诊断及服务端 180/90 天保留已接入。入口与发布顺序见 [实现与交付记录](docs/v1.3-implementation-and-release.md)，不代表生产已部署；相关跨层改动运行 Full。
+
+同日排障：旧在线密钥未登记使用管理员审核补录，保留原码；网页检查失败原因持久保留，不把服务器未发布或坏版本跳过当作最新。`/data/html` 中的原始 React 构建必须经过签名发布生成 `latest.json` 才能被安装版下载；见 [桌面交付服务](docs/desktop-distribution-services.md)。
+
+同日已完成现有网页签名发布：release `1792395247824` / build `1792116828439`，118 个公网资源验签/哈希及隔离缓存检查通过；此次上线只包含已上传网页，其他 v1.3 源码仍按独立发布计划部署。
+
+同日使用统计修复：线上最小补丁已支持可选 `runtimeVersions`，解决旧 strict schema 的 `400/INVALID_EVENT`；客户端区分格式、授权和服务错误的源码已完成，未发安装包。已暂停队列在设置中“立即重试上传”，不删除或改写事件。新增 `usageUploadFailures.test.js` 与服务端 HTTP 混批回归，见 [桌面交付服务](docs/desktop-distribution-services.md)。
+
+同日生成点图显示：`PointGridRenderer` 工具模式恢复手部监测点径/点距比例，默认点径0.186→1；随后补齐规则矩阵两倍显示插点和平滑，32×32输入仍1024点，渲染64×64。`matrixDisplayModes` 负责新建默认值，`manifestWidgetGeometry` 兼容既有单倍配置；物理点表保持一倍无补边，框选按原始索引统计。Full与合成浏览器验证通过，尚未发布网页。
+
+同日网页标识排障：`frontendCache` 区分开发模式、标识缺失/无效、版本错配与缓存写入错误，开发版不操作生产缓存。Builder beforePack/afterPack通过 `scripts/verify-frontend-build.js` 校验源与最终资源标识，防止继续打出无更新基线的安装包；Forge配置未切换。Full 11项通过，客户安装包修复仍需正确重建发布，见 [桌面交付服务](docs/desktop-distribution-services.md)。
+
 当前完整链路：[数据、算法、存储与回放](docs/chains/data-flow.md) · [页面、渲染与交互](docs/chains/interface-flow.md)。
+
+2026-10-20 合并 `Revise`：压力背心 HaLow/436点模型与统计、单双手手套独立入口及同库分表/双路数字、JQBed床型参数与新版Windows原生库迁入现有目录；旧根server/worker与旧SDK树不恢复。保留Agent、授权、canonical帧和采集证据链，详见文末合并记录及 [背心说明](docs/pressure-vest-halow.md)。构建快照保持合并前完整版本，验收构建输出到临时目录；新的交付包仍须重新构建。
+
+2026-10-20 打包修复：活动 `.codegraph` WAL 被 `**/*` 选中会导致ASAR偏移失配；Builder与两份Forge配置排除开发索引/助手缓存目录。`pack-runtime-dependencies` 先验包清单SHA再解析，私有数据隔离和真实临时ASAR回归覆盖。详见 `ARCHITECTURE.md` 同日维护记录。
+
+同日本机系统隔离：Builder与两份Forge排除根 `display-systems/displaySystems`、原生副本、Agent应用、算法绑定、受管下载与修订、用户协议及本机凭据/配置；最终ASAR校验发现这些目录即拒绝交付。正式内置系统和 `agent-resources` 不受影响；同机升级仍保留userData中的系统，不能仅凭列表里的“本机系统”判断安装包内容。验证 `privateDataIsolation.test.js`、`runtimeDependencies.test.js` 和Full，详见文末记录。
+
+同日Agent模型目录：`AgentSettings` → 有限 `getModelCatalog` IPC → `app/electron/agentModelCatalog.js` → 授权服务公开 `GET /api/agent/model-catalog`。共享默认 `shared/agent-model-catalog.json`、userData最近有效缓存与5秒有界请求保证离线可用；目录不改当前连接，不发送Key。`E:/key/server/agentModelCatalog.ts` 热读外置JSON，无需数据库迁移；首次需部署路由并更新完整客户端，以后维护目录即可。验证新目录/设置测试、真实ElectronIPC、浏览器与Full；契约见 [模型目录](docs/agent-model-catalog-api.md)。
+
+同日监测界面：`Title` 将语言和渲染/显示区域移入右侧常驻 `PortalDisplayPanel`，独立于可收起快捷工具；移除调节抽屉旧原始数据跳转，数字视图仍由显示选择器提供。`Aside` 床状态卡去掉旧紫底和固定空白占位，仅有效状态显示，风险提示保留。验证 Aside/Title/Chrome 局部测试、床侧栏与真实Home浏览器回归，以及Standard客户端检查；不改后端或帧数据链。
+
+同日再次合并 `origin/Revise` f879c49（merge f84fe1a）：小床独立回传/客户端订阅日志与告警播报迁入现有 algorithm-channel/WS 装配，旧根server/test不恢复。原始矩阵改由 `Home.buildNumMatrixParams` → `NumMatrix` WebGL raw，统一蓝底和左侧/底部一基索引；行列号不进入数据。小床设置右侧直达，无模型点图复用 `getViewTools`，卸载回收与选区安全保持。Agent规则点图默认与手部同为4层显示补零边，物理点表不补边；12B方向与降采样元数据沿现有protocol透传且只转置一次。验证入口 `raw-matrix-style.mjs`、`native-point-view-tools.mjs`、实际Home原始矩阵专项、JQBed回传与协议测试；跨SDK和后台合并执行Full。
+
+同日原始数字交互回归：`numMatrix/react/backends/webgl.js` 补齐原sprite3d的光标中心滚轮缩放和左键平移，同步变换数字、热场与外侧索引；框选/量尺启用时互斥，投影读取实际画布边界。缩放不改压力、采集或导出，卸载移除监听与指针捕获；入口测试 `webglGlove.test.js` 与实际Home `native-raw-home.mjs`，涉及共享前端SDK执行Full。
 
 ## 1. 一分钟判断路径
 
@@ -74,7 +100,7 @@ Agent 客户交付与聊天同步：`index.js` 注入 `readStoredLicenseKey` →
 
 HaLow 人体接入：`kernel/transport/halowReceiver.js` 独立 TCP 分帧，`halowService.js` 校验当前系统/授权/串口互斥；`halow.control` 走 HTTP 并等待完成，状态走 WS。原生 `humanBodyOptimized` 与副本共用 `legacySerialFrameRuntime`，保留 canonical 身份、归零与存储。前端 `HalowConnection.jsx` 同时接门户/旧工具栏。验证 `halowReceiver.test.js`、`halowControlApi.test.js`、`Title.halow.test.jsx`、`node scripts/tests/halow-connection.mjs` 和 Full；说明见 [HaLow 接入](docs/halow-human-body.md)。
 
-更新发布：`package.json` / `dev-app-update.yml` 指向 HTTPS 更新源，运行时 `app/update/autoUpdater.js`；`scripts/upload-release.js` 只上传 Windows NSIS 产物，验证版本/更新地址/哈希后最后替换元数据。环境变量 `SHROOM_UPLOAD_DIR`、`SHROOM_SSH_KEY`；测试 `backend/tests/packaging/upload-release.test.js`，说明见 [更新服务器](docs/shroom-update-server.md)。上传和发布需显式操作。
+更新发布：`package.json` / `dev-app-update.yml` 指向 HTTPS 更新源，运行时 `app/update/autoUpdater.js`；`updaterErrors.js` 以有限错误码分类安装包失败并脱敏日志，`UpdateNotifier` 兼容旧宿主长错误、保留详情并区分网页更新。`scripts/upload-release.js` 只处理 Windows NSIS 的静态 SSH 上传，不能代替当前线上 MinIO `data/shroom1/` 发布；Mac 须另外发布正式 ZIP 和 `latest-mac.yml`。环境变量 `SHROOM_UPLOAD_DIR`、`SHROOM_SSH_KEY`；测试 `backend/tests/application/autoUpdater.test.js`、`packaging/upload-release.test.js` 和客户端 `updaterMessage.test.jsx`；涉及 Electron 更新执行 Full，当前路由与操作见 [更新服务器](docs/shroom-update-server.md)。上传和发布需显式操作。
 
 公司展示系统交付：`extension-host/workspace/systemPackageService.js` 按引用闭包导出/安装 Manifest 与原生模板副本，受管目录分别为 `managed-display-systems/` 和 `managed-native-systems/`；`managedSystemSync.js` 核验密钥绑定的签名目录与包，`staffPackageSubmission.js` 用 OS 加密的员工令牌提交待审包。`E:/key/server/systemPackages.ts` 管理审核、客户范围和签名下载，发布的系统可在开密钥页按系统 ID 勾选；已登记的离线 RSA 码也可在联网时按签名、客户、有效期与系统范围同步，失败原因由服务端错误码说明。门户只列客户授权且密钥勾选的受管系统，串口切换/打开与后台定时检查复核权限。Agent 成果卡片可提交或导出审核包；HTML 回退返回明确的服务未就绪提示。验证 `systemPackageService` / `managedSystemSync` / `staffPackageSubmission` 测试、`E:/key` 的 `systemPackages.test.ts` 与两库完整验证；涉及授权、包安装和跨层控制，使用 Full。操作见 [系统发布](docs/system-publishing-design.md)。
 

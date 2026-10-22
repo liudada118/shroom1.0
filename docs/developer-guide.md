@@ -5,6 +5,8 @@
 
 ## 1. 从哪里开始读
 
+2026-10-19 增量：正常到期使用 `licenseAccessPolicy` 的分操作权限，采集退出必须等待 `collectionSessions.whenFinished()`；对话历史分析、凭据隔离上传和独立签名撤回状态已接入。发布需同时更新本地后端/Electron 与服务端，详见 [v1.3 实现与交付](v1.3-implementation-and-release.md)。
+
 先读本页，理解进程、启动和扩展边界；再按工作选一条链路，不必通读全部文档。
 
 | 你要搞清楚的事 | 阅读位置 |

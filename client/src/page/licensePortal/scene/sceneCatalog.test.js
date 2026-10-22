@@ -9,7 +9,7 @@ describe('入口模型与真实系统身份', () => {
     ['wholeChair', 'chair'], ['minzhen', 'wheelchair'], ['carQX', 'chairQX'],
     ['bed4096', 'heatmap64'], ['bed4096num', 'matrix64'], ['smallBed12B', 'matrix'],
     ['robotSY', 'robotSY'], ['robotLCF', 'robotLCF'], ['robot-unknown', 'matrix'],
-    ['fast1024', 'matrix'], ['footVideo', 'foot'], ['humanBodyOptimized', 'humanBody'],
+    ['fast1024', 'matrix'], ['footVideo', 'foot'], ['humanBodyOptimized', 'humanBody'], ['pressureVest', 'humanBody'],
     ['jqbed', 'smallBed'], ['petCare', 'matrix'], ['petCareMini', 'matrix'],
   ])('%s 不以无关设备或图标代替', (value, expected) => {
     expect(getPortalScene({ value, source: 'builtin' })).toBe(expected);

@@ -66,6 +66,9 @@ export async function verifyPortalSerialFeedback({ page, sockets, screenshots })
     publish('closed', { code: 'SERIAL_DISCONNECTED', message: '设备连接已断开，请检查 USB 连接', role: 'sit', path: 'COM_TEST_2', stage: 'runtime' });
     await statusLine.filter({ hasText: '设备连接已断开' }).waitFor();
     await page.waitForFunction(() => !document.querySelector('.portal-device-port-fields .ant-select-selection-item'));
+    // 顶部提示悬停会暂停自动消失；先移开指针再操作其下方的关闭按钮。
+    await page.mouse.move(24, 500);
+    await page.locator('.ant-message-error').filter({ hasText: '设备连接已断开' }).waitFor({ state: 'hidden' });
     await device.getByRole('button').click();
     await page.locator('.serial-connection-status').waitFor({ state: 'hidden' });
     // 恢复连接供后续采集/工作区回归继续使用。

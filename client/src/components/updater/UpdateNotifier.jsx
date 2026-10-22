@@ -25,6 +25,7 @@ import {
   RocketOutlined,
 } from "@ant-design/icons";
 import VersionHistory from "./VersionHistory";
+import { updaterErrorKey } from './updaterMessage';
 
 // 更新状态枚举
 const UPDATE_STATE = {
@@ -37,6 +38,7 @@ const UPDATE_STATE = {
   ERROR: "error",
 };
 
+/** Normalize the supported release-note formats for the installer detail dialog. */
 function normalizeReleaseNotes(releaseNotes) {
   if (!releaseNotes) return "";
 
@@ -64,6 +66,13 @@ function normalizeReleaseNotes(releaseNotes) {
   return String(releaseNotes).trim();
 }
 
+/** Retain an accessible short failure explanation in the installer detail dialog. */
+export function UpdateErrorNotice({ error }) {
+  const { t } = useTranslation();
+  return error ? <p role="alert">{t(error)}</p> : null;
+}
+
+/** Show installer updates separately from cached webpage updates. */
 export default function UpdateNotifier() {
   const { t, i18n } = useTranslation();
   const [updateState, setUpdateState] = useState(UPDATE_STATE.IDLE);
@@ -81,8 +90,6 @@ export default function UpdateNotifier() {
     if (!isElectron) return;
 
     const unsubscribe = window.electronAPI.on("update-status", (data) => {
-      console.log("[UpdateNotifier] 收到更新状态:", data);
-
       switch (data.type) {
         case "checking-for-update":
           setUpdateState(UPDATE_STATE.CHECKING);
@@ -134,10 +141,10 @@ export default function UpdateNotifier() {
 
         case "update-error":
           setUpdateState(UPDATE_STATE.ERROR);
-          setUpdateInfo((prev) => ({ ...prev, error: data.message }));
+          setUpdateInfo((prev) => ({ ...prev, error: updaterErrorKey(data) }));
           notification.error({
             message: t("update.checkFailed"),
-            description: data.message || t("update.checkNetwork"),
+            description: t(updaterErrorKey(data)),
             icon: <ExclamationCircleOutlined style={{ color: "#ff4d4f" }} />,
             duration: 8,
           });
@@ -164,8 +171,9 @@ export default function UpdateNotifier() {
         action: "checkForUpdate",
       });
     } catch (err) {
-      console.error("[UpdateNotifier] 检查更新失败:", err);
       setUpdateState(UPDATE_STATE.ERROR);
+      setUpdateInfo((prev) => ({ ...prev, error: updaterErrorKey(err) }));
+      setShowModal(true);
     }
   }, [isElectron]);
 
@@ -179,8 +187,9 @@ export default function UpdateNotifier() {
         action: "downloadUpdate",
       });
     } catch (err) {
-      console.error("[UpdateNotifier] 下载更新失败:", err);
       setUpdateState(UPDATE_STATE.ERROR);
+      setUpdateInfo((prev) => ({ ...prev, error: updaterErrorKey(err) }));
+      setShowModal(true);
     }
   }, [isElectron]);
 
@@ -192,7 +201,9 @@ export default function UpdateNotifier() {
         action: "installUpdate",
       });
     } catch (err) {
-      console.error("[UpdateNotifier] 安装更新失败:", err);
+      setUpdateState(UPDATE_STATE.ERROR);
+      setUpdateInfo((prev) => ({ ...prev, error: updaterErrorKey(err) }));
+      setShowModal(true);
     }
   }, [isElectron]);
 
@@ -274,6 +285,8 @@ export default function UpdateNotifier() {
       width={480}
     >
       <div style={{ padding: "16px 0" }}>
+        <p>{t('update.installerScope')}</p>
+        <UpdateErrorNotice error={updateState === UPDATE_STATE.ERROR ? updateInfo.error : null} />
         {/* 版本信息 */}
         {updateInfo.version && (
           <div style={{ marginBottom: 16 }}>
@@ -395,7 +408,8 @@ export default function UpdateNotifier() {
             if (
               updateState === UPDATE_STATE.AVAILABLE ||
               updateState === UPDATE_STATE.DOWNLOADING ||
-              updateState === UPDATE_STATE.DOWNLOADED
+              updateState === UPDATE_STATE.DOWNLOADED ||
+              updateState === UPDATE_STATE.ERROR
             ) {
               setShowModal(true);
             } else {

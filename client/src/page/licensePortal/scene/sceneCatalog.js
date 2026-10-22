@@ -30,7 +30,7 @@ export function getPortalScene(system) {
   if (['hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket'].includes(system.value)) return 'glove';
   return {
     robot1: 'robot', robotSY: 'robotSY', robotLCF: 'robotLCF',
-    wholeChair: 'chair', carQX: 'chairQX', minzhen: 'wheelchair', humanBodyOptimized: 'humanBody',
+    wholeChair: 'chair', carQX: 'chairQX', minzhen: 'wheelchair', humanBodyOptimized: 'humanBody', pressureVest: 'humanBody',
     footVideo: 'foot', bed4096num: 'matrix64', bed4096: 'heatmap64',
     jqbed: 'smallBed', smallBedNoAlg: 'smallBed', smallBed12B: 'matrix', matCol: 'matrix', tempFullBed: 'tempFullBed',
   }[system.value] || 'matrix';

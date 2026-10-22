@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
-const { verifyPackagedDependencies } = require('./pack-runtime-dependencies');
+const { prepareRuntimeDependencies, verifyPackagedDependencies } = require('./pack-runtime-dependencies');
+const { verifyFrontendBuild, verifyPackagedFrontendBuild } = require('./verify-frontend-build');
 
 const PACK_OUTPUT_DIRS = ['out', 'dist'];
 
@@ -46,9 +47,18 @@ function cleanPackOutputs(projectRoot = process.cwd()) {
   }
 }
 
+/** Validate the frontend identity before resolving the existing production dependency package sets. */
+async function electronBuilderBeforePack(context) {
+  const appDir = context.packager.info.appDir;
+  verifyFrontendBuild(path.join(appDir, 'build'), context.packager.appInfo.version);
+  await prepareRuntimeDependencies(context);
+}
+
+/** Validate final resource metadata and dependencies while retaining the private-config cleanup. */
 async function electronBuilderAfterPack(context) {
   removeBundledConfig(context && context.appOutDir);
   const resources = context.packager.getResourcesDir(context.appOutDir);
+  verifyPackagedFrontendBuild(resources, context.packager.appInfo.version);
   verifyPackagedDependencies(path.join(resources, 'app.asar'));
 }
 
@@ -58,6 +68,7 @@ async function electronForgeAfterComplete(buildPath) {
 
 module.exports = {
   cleanPackOutputs,
+  electronBuilderBeforePack,
   electronBuilderAfterPack,
   electronForgeAfterComplete,
 };

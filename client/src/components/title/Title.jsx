@@ -1,6 +1,6 @@
 import React from 'react'
 import { createPortal } from 'react-dom';
-import { PortalSessionBar, PortalQuickTools } from '../../page/licensePortal/PortalMonitoringChrome';
+import { PortalSessionBar, PortalQuickTools, PortalDisplayPanel } from '../../page/licensePortal/PortalMonitoringChrome';
 import PortalControlDialog, { PORTAL_CONTROL_THEME } from '../../page/licensePortal/PortalControlDialog';
 import PortalPlaybackDialog from '../../page/licensePortal/PortalPlaybackDialog';
 import PortalWorkspaceTools from '../../page/licensePortal/PortalWorkspaceTools';
@@ -10,6 +10,7 @@ import { capturePortalOperation, executePortalLegacyControl } from './portalOper
 import { Menu, Button, Select, message, notification, Divider, Space, Radio, Drawer, Modal, Progress, Tooltip, ConfigProvider } from 'antd';
 import Slider from '../appTools/UsageSlider';
 import { trackUsage } from '../../services/usageAnalytics';
+import { canUseLicenseCapability } from '../../services/licenseAccess';
 import { PlusOutlined, SettingOutlined, SlidersOutlined } from '@ant-design/icons';
 import exchange from '../../assets/images/exchange.png'
 import option from '../../assets/images/Option.png'
@@ -37,6 +38,7 @@ import { getJqbedConfigAccess } from '../../extensions/jqbed/jqbedAlgorithmConfi
 import { commandClient, commandFromLegacyFields } from '../../services/command/commandClient';
 import { serialFeedback, serialErrorText } from '../../services/serial/serialFeedback';
 import HalowConnection from './HalowConnection';
+import { PRESSURE_VEST_MATRIX } from '../video/pressureVestConfig';
 import {
   PRESSURE_SCENES,
   readPressureScene,
@@ -82,7 +84,9 @@ const HUMAN_BODY_COLOR_SLIDER_MAX = 5000
 const HUMAN_BODY_DEFAULT_COLOR = 1555
 const HUMAN_BODY_DEFAULT_SIZE = 31
 const HUMAN_BODY_OPTIMIZED_MATRIX = 'humanBodyOptimized'
-const isHumanBodyMatrixTitle = (matrixName) => ['humanBody', HUMAN_BODY_OPTIMIZED_MATRIX].includes(resolveNativeSystemType(matrixName))
+const isHumanBodyMatrixTitle = (matrixName) => ['humanBody', HUMAN_BODY_OPTIMIZED_MATRIX, PRESSURE_VEST_MATRIX].includes(resolveNativeSystemType(matrixName))
+/** 人体优化与背心共用 HaLow，副本沿用来源型号判断。 */
+const isHalowMatrixTitle = (matrixName) => [HUMAN_BODY_OPTIMIZED_MATRIX, PRESSURE_VEST_MATRIX].includes(resolveNativeSystemType(matrixName))
 const HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES = [1205, 5000]
 const HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES = [20, 60]
 const MINZHEN_NORMAL_DEFAULT_COLOR = 415
@@ -135,6 +139,7 @@ const titleInitConfig = {
   humanBody: { valueg1: 2, valuej1: HUMAN_BODY_DEFAULT_COLOR, valuel1: 5, valuef1: 6, value1: 0.72, sizeValue: HUMAN_BODY_DEFAULT_SIZE },
 }
 titleInitConfig[HUMAN_BODY_OPTIMIZED_MATRIX] = { ...titleInitConfig.humanBody }
+titleInitConfig[PRESSURE_VEST_MATRIX] = { ...titleInitConfig.humanBody }
 titleInitConfig.minzhen__normal = {
   ...titleInitConfig.minzhen,
   valuej1: MINZHEN_NORMAL_DEFAULT_COLOR,
@@ -153,8 +158,9 @@ const smallBedNoAlgType_title = 'smallBedNoAlg'
 const smallBed12BType_title = 'smallBed12B'
 const wholeChairType_title = 'wholeChair'
 const minzhenType_title = 'minzhen'
-const tactileGloveTypes_title = ['hand0205', 'handGlove115200', 'handGloveFullPacket']
+const tactileGloveTypes_title = ['hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket']
 const fullPacketGloveType_title = 'handGloveFullPacket'
+const normalizeGloveDisplayTypeTitle = (type) => type === 'hand0205Single' ? 'hand0205' : type
 const calibratableGloveTypes_title = tactileGloveTypes_title.filter((type) => type !== fullPacketGloveType_title)
 const isPetCareMatrixTitle = (type) => petCareMatrixTypes_title.includes(type)
 const bedArr_title = ['bigBed', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'bed4096', 'bed4096num', 'matColPos', 'jqbed', tempFullBedType_title, ...petCareMatrixTypes_title]
@@ -454,15 +460,23 @@ class Title extends React.Component {
   /** 接收 Home 转发的串口生命周期事件。 */
   handleSerialStatus = (event) => this.applySerialStatus(event.detail);
 
+  /** Explain modern host restrictions before attempting acquisition or file export. */
+  requireLicenseCapability = (capability) => {
+    if (canUseLicenseCapability(this.props.licenseAccess, capability)) return true;
+    message.warning(capability === 'canExport' ? '当前授权不允许导出数据或分析结果，仍可在软件内查看。' : '当前授权不能新增采集或连接设备，仍可查看和分析历史数据。');
+    return false;
+  };
+
   /** 在打开期间禁用重复选择，并给失败的通道显示错误边框。 */
   getSerialSelectProps = (role) => {
     const busy = this.state.serialPending[role] || this.state.serialStates[role]?.status === 'opening';
-    return { loading: Boolean(busy), disabled: Boolean(busy), 'aria-busy': Boolean(busy),
+    return { loading: Boolean(busy), disabled: Boolean(busy) || !canUseLicenseCapability(this.props.licenseAccess, 'canAcquire'), 'aria-busy': Boolean(busy),
       status: this.state.serialStates[role]?.error ? 'error' : undefined };
   }
 
   /** 统一普通和 manifest 通道连接，等待真实 ACK 后再显示选中结果。 */
   connectSerialChannel = async (role, path, { label, baudRate, hand } = {}) => {
+    if (!this.requireLicenseCapability('canAcquire')) return false;
     this._serialOperations ||= new Map();
     if (this._serialOperations.has(role)) {
       message.info('正在连接中，请稍后再试');
@@ -819,6 +833,7 @@ class Title extends React.Component {
   };
 
   openCsvDownloadModal = () => {
+    if (!this.requireLicenseCapability('canExport')) return;
     this._csvBatch?.dispose();
     this._csvBatch = null;
     if (!this.state.dataTime) {
@@ -870,6 +885,7 @@ class Title extends React.Component {
   }
 
   startCsvDownload = async () => {
+    if (!this.requireLicenseCapability('canExport')) return;
     if (this.state.csvDownloadStage === 'exporting' || this._csvStarting) return;
     if (!this.state.dataTime && !this.state.csvBatchDates.length) {
       message.warning(this.props.t('collection.chooseHistory'));
@@ -1194,6 +1210,7 @@ class Title extends React.Component {
   }
 
   openCollectionModal = () => {
+    if (!this.requireLicenseCapability('canAcquire') || this.props.collectionSummary?.phase === 'finalizing') return;
     this.setState({
       collectionModalOpen: true,
       collectLabel: this.state.collectLabel || '',
@@ -1207,7 +1224,7 @@ class Title extends React.Component {
   stopCollection = () => {
     const flag = this.props.colFlag;
     this.props.wsSendObj({ colHZ: this.state.colHZ, flag });
-    if (this.props.matrixName == 'sitCol' && loadData) {
+    if (this.props.matrixName == 'sitCol' && loadData && canUseLicenseCapability(this.props.licenseAccess, 'canExport')) {
       this._csvActive = true;
       this.props.wsSendObj({
         colHZ: this.state.colHZ,
@@ -1222,6 +1239,7 @@ class Title extends React.Component {
   }
 
   startCollectionWithOptions = () => {
+    if (!this.requireLicenseCapability('canAcquire') || this.props.collectionSummary?.phase === 'finalizing') return;
     const formattedDate = Date.now();
     const baseName = this.getCollectionBaseName();
     const collectHz = Math.max(1, Number(this.state.colHZ) || 12);
@@ -1248,7 +1266,7 @@ class Title extends React.Component {
       loadData = '';
     }
 
-    this.props.changeStateData({ colFlag: false });
+    this.props.changeStateData({ colFlag: false, collectionSummary: null });
     this.props.setColValueFlag(true);
     this.setState({ collectionModalOpen: false, colHZ: collectHz });
   }
@@ -1465,6 +1483,7 @@ class Title extends React.Component {
   }
 
   openOneStepPdfModal = () => {
+    if (!this.requireLicenseCapability('canExport')) return;
     if (!this.state.dataTime) {
       message.warning(this.props.t('collection.chooseExportData'));
       return;
@@ -1473,6 +1492,7 @@ class Title extends React.Component {
   }
 
   generateOneStepPdfReport = async () => {
+    if (!this.requireLicenseCapability('canExport')) return;
     const date = this.state.dataTime;
     const collectName = (this.state.realname || '').trim() || this.props.t('common.unknown');
     const collectAge = (this.state.collectAge || '').trim() || '0';
@@ -1959,6 +1979,15 @@ class Title extends React.Component {
     return sent ? requestId : null;
   }
 
+  /** 配置页按需订阅原生回传，关闭后立即停止当前客户端日志。 */
+  subscribeJqbedAlgorithmLog = (enabled) => {
+    const subscribed = enabled === true;
+    if (subscribed && !this.canUseJqbedAlgorithmConfig()) return null;
+    const requestId = crypto.randomUUID();
+    const sent = this.props.wsSendObj({ subscribeJqbedAlgorithmLog: subscribed, requestId });
+    return sent ? requestId : null;
+  }
+
   canUseJqbedAlgorithmConfig = () => {
     const access = getJqbedConfigAccess({
       matrixName: this.props.matrixName,
@@ -2000,6 +2029,7 @@ class Title extends React.Component {
 
   /** 新会话栏等待模式命令成功后才改界面；回放期间仍使用原播放条。 */
   changePortalMode = async (mode) => {
+    if (mode === 'now' && !this.requireLicenseCapability('canAcquire')) return;
     if (this.state.portalBusy || this.state.csvDownloadStage === 'exporting') return;
     if (mode !== 'now' && (this.props.matrixName === 'localCar' ? this.props.colWebFlag : !this.props.colFlag)) {
       message.warning('请先结束采集，再选择回放数据');
@@ -2124,6 +2154,7 @@ class Title extends React.Component {
 
   /** 批量选择只保存导出快照，随后复用已有路径、格式及文件结果弹窗。 */
   openPortalBatchDownload = (values) => {
+    if (!this.requireLicenseCapability('canExport')) return;
     const available = new Set(this.props.dataArr?.map((record) => record.value));
     const dates = [...new Set(values)].filter((value) => available.has(value));
     if (!dates.length || this.state.csvDownloadStage === 'exporting') return;
@@ -2146,8 +2177,10 @@ class Title extends React.Component {
   };
 
   render() {
-    const routerStr = this.props.matrixName == 'yanfeng10' ? '10a10' : this.props.matrixName == 'smallSample' ? '10a10' : this.props.matrixName == 'matCol' || this.props.matrixName == 'matColPos' ? '16a10' : this.props.matrixName == 'bed4096' ? '64a64' : this.props.matrixName == 'carCol' ? '10a9' : '32a32'
     const { t, i18n } = this.props;
+    const canAcquire = canUseLicenseCapability(this.props.licenseAccess, 'canAcquire');
+    const canExport = canUseLicenseCapability(this.props.licenseAccess, 'canExport');
+    const finalizingCollection = this.props.collectionSummary?.phase === 'finalizing';
     const jqbedConfigAccess = getJqbedConfigAccess({
       matrixName: this.props.matrixName,
       history: this.props.history,
@@ -2204,12 +2237,13 @@ class Title extends React.Component {
       },
     ];
     const isMinzhenAnimationMode = this.props.matrixName === minzhenType_title && this.props.numMatrixFlag === 'normal';
-    const isHalowSystem = resolveNativeSystemType(this.props.systemId || this.props.matrixName) === HUMAN_BODY_OPTIMIZED_MATRIX;
+    const isHalowSystem = isHalowMatrixTitle(this.props.systemId || this.props.matrixName);
     const halowControls = isHalowSystem ? <HalowConnection
+      sensorLabel={t(resolveNativeSystemType(this.props.systemId || this.props.matrixName) === PRESSURE_VEST_MATRIX ? 'sensorPressureVest' : 'sensorHumanBodyOptimized')}
       key={this.props.systemId || this.props.matrixName}
       status={this.props.halowStatus} onStatus={(halowStatus) => this.props.changeStateData({ halowStatus })}
       connected={this.props.wsConnected} connectionEpoch={this.props.wsConnectionEpoch}
-      history={this.props.history} collecting={!this.props.colFlag} /> : null;
+      history={this.props.history} collecting={!this.props.colFlag} canAcquire={canAcquire} /> : null;
     // console.log('title')
     const baudControl = <>
         {
@@ -2368,8 +2402,9 @@ class Title extends React.Component {
         </span>)}
     </div> : null;
     const displayControls = <>
-        {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'handSinglePoint', 'normal', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'matCol', 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody', HUMAN_BODY_OPTIMIZED_MATRIX].includes(this.props.matrixName) ?
+        {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'handSinglePoint', 'normal', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'matCol', 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody', HUMAN_BODY_OPTIMIZED_MATRIX, PRESSURE_VEST_MATRIX].includes(this.props.matrixName) ?
           <Select
+            aria-label="显示方式"
             defaultValue={this.props.numMatrixFlag}
             style={{ width: 90 }}
             value={this.props.numMatrixFlag}
@@ -2380,7 +2415,7 @@ class Title extends React.Component {
 
               if (calibratableGloveTypes_title.includes(this.props.matrixName)) {
                 if (['normal', 'skin'].includes(this.props.numMatrixFlag)) {
-                  this.props.com.current?.changeModal(this.props.hand)
+                  this.props.com.current?.changeModal?.(this.props.hand)
                 }
 
                 if (value == 'normal') {
@@ -2478,10 +2513,15 @@ class Title extends React.Component {
             >
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px' }}>
                 <Select
-                  defaultValue={this.state.calibHand || 'left'}
+                  value={this.state.calibHand || (this.props.matrixName === 'hand0205' && !this.props.hand ? 'right' : 'left')}
                   style={{ width: 100 }}
                   onChange={(e) => {
                     this.setState({ calibHand: e })
+                    if (this.props.matrixName === 'hand0205') {
+                      const hand = e === 'left';
+                      this.props.changeStateData({ hand });
+                      this.props.com.current?.changeModal?.(hand);
+                    }
                   }}
                   options={[
                     { value: 'left', label: t('leftHand') },
@@ -2510,7 +2550,7 @@ class Title extends React.Component {
 
               <Button
                 onClick={() => {
-                  this.props.colFingerData(this.state.fingerIndex, this.state.calibHand || 'left')
+                  this.props.colFingerData(this.state.fingerIndex, this.state.calibHand || (this.props.matrixName === 'hand0205' && !this.props.hand ? 'right' : 'left'))
                 }}
               >{t('colData')}</Button>
               <Button
@@ -2555,7 +2595,7 @@ class Title extends React.Component {
 
             <Button
               onClick={() => {
-                this.props.colFingerData(this.state.fingerIndex, this.state.calibHand || 'left')
+                this.props.colFingerData(this.state.fingerIndex, this.state.calibHand || (this.props.matrixName === 'hand0205' && !this.props.hand ? 'right' : 'left'))
               }}
             >采集数据</Button>
             <Button
@@ -2592,6 +2632,21 @@ class Title extends React.Component {
           : ''} */}
 
 
+        {this.props.matrixName === 'hand0205' ? (
+          <Select
+            value={this.props.hand}
+            style={{ marginRight: 6, width: 90 }}
+            onChange={(hand) => {
+              this.props.changeStateData({ hand });
+              this.props.com.current?.changeModal?.(hand);
+            }}
+            options={[
+              { value: true, label: t('leftHand') },
+              { value: false, label: t('rightHand') },
+            ]}
+          />
+        ) : null}
+
         {calibratableGloveTypes_title.includes(this.props.matrixName) && this.props.numMatrixFlag == 'normal' ? <Button className='titleButton'
           onClick={() => {
             // this.props.com.current?.calibration()
@@ -2602,6 +2657,9 @@ class Title extends React.Component {
 
 
             // 校准弹框
+            if (this.props.matrixName === 'hand0205') {
+              this.setState({ calibHand: this.props.hand ? 'left' : 'right' });
+            }
             this.props.changeCalibration()
 
             // 手固定
@@ -2631,7 +2689,8 @@ class Title extends React.Component {
     </>;
     const languageControl = <>
         <Select
-          defaultValue={this.props.i18n.language}
+          aria-label="界面语言"
+          value={this.props.i18n.resolvedLanguage || this.props.i18n.language}
           style={{ width: 108 }}
           onChange={(value) => {
             localStorage.setItem('language', value)
@@ -2662,6 +2721,7 @@ class Title extends React.Component {
             {/* <Input type='number' placeholder={t('enterColHZ')} onChange={(e) => { this.setState({ colHZ: e.target.value }) }} /> */}
             <Button
               className='titleButton'
+              disabled={!(this.props.matrixName === 'localCar' ? this.props.colWebFlag : !this.props.colFlag) && (!canAcquire || finalizingCollection)}
               onClick={() => {
 
                 if (this.props.matrixName !== 'localCar') {
@@ -2682,13 +2742,14 @@ class Title extends React.Component {
             {this.props.matrixName == 'localCar' ?
 
               <>
-                <Button onClick={() => {
+                <Button disabled={!canAcquire || finalizingCollection} onClick={() => {
+                  if (!this.requireLicenseCapability('canAcquire')) return;
                   this.props.colPushData()
                 }} className='titleButton'>
                   {t('display.singleCollection')}
                 </Button>
-                <Button className='titleButton'>
-                  <CSVLink
+                <Button className='titleButton' disabled={!canExport}>
+                  {canExport ? <CSVLink
                     // ref={downloadRef}
 
                     filename={`${new Date().getTime()}.csv`}
@@ -2696,7 +2757,7 @@ class Title extends React.Component {
                     style={{ color: '#5A5A89', textDecoration: 'none' }}
                   >
                     {t('download')}
-                  </CSVLink> </Button> </> : null}
+                  </CSVLink> : t('download')} </Button> </> : null}
 
             {this.props.matrixName == 'localCar' ?
               <Button className='titleButton' onClick={() => {
@@ -2706,6 +2767,7 @@ class Title extends React.Component {
           </>
           : <> <Button
             className='titleButton'
+            disabled={!canExport}
             onClick={this.openCsvDownloadModal}
           >{t('download')}</Button>
             <Button
@@ -2732,6 +2794,7 @@ class Title extends React.Component {
         }}>{t('display.pressureCurve')}</Button> : null}
 
         {this.props.matrixName === 'bigBed' ? <Button className='titleButton' onClick={() => {
+          if (!this.requireLicenseCapability('canExport')) return;
 
           if (this.props.com.current) {
             this.props.com.current.logData()
@@ -2756,7 +2819,7 @@ class Title extends React.Component {
           <>
             <Button
               className='titleButton'
-              disabled={!this.state.dataTime || this.state.pdfLoading}
+              disabled={!canExport || !this.state.dataTime || this.state.pdfLoading}
               loading={this.state.pdfLoading}
               onClick={this.openOneStepPdfModal}
             >{t('report.exportPdf')}</Button>
@@ -2851,10 +2914,26 @@ class Title extends React.Component {
         </ConfigProvider>}
         selectedPorts={Object.values(this.state.manifestPortSelections || {}).some(Boolean) || [this.props.portname, this.props.portnameBack, this.props.portnameHead, this.props.portnameSensor].some(Boolean)}
         collecting={this.props.matrixName === 'localCar' ? this.props.colWebFlag : !this.props.colFlag}
+        canAcquire={canAcquire && !finalizingCollection}
         onStart={this.startPortalCollection} onStop={this.stopPortalCollection}
       /> : null}
       {this.props.portalEmbedded ? serialStatusControls : null}
-      {this.props.portalToolsHost ? createPortal(<><PortalQuickTools
+      {this.props.portalToolsHost ? createPortal(<><div className="portal-monitor-tools-rail">
+        <ConfigProvider theme={PORTAL_CONTROL_THEME}>
+          <PortalDisplayPanel languageControl={languageControl}>
+            <PortalRendererControls rendererRef={this.props.com} />
+            <fieldset className="portal-display-native"><legend>显示方式与区域</legend>{displayControls}{carControls}{partControls}</fieldset>
+            {Boolean(baudControl.props.children) && <fieldset><legend>串口参数</legend>{baudControl}</fieldset>}
+          </PortalDisplayPanel>
+          {jqbedConfigAccess.visible && <Tooltip title={t(jqbedConfigAccess.tooltipKey)}>
+            <Button className="portal-bed-settings" icon={<SettingOutlined />}
+              disabled={jqbedConfigAccess.disabled}
+              onClick={() => this.openPortalPanel('jqbedAlgorithmConfigOpen')}>
+              {t('jqbedAlgorithmConfig.title')}
+            </Button>
+          </Tooltip>}
+        </ConfigProvider>
+        <PortalQuickTools
         chartsVisible={this.props.portalChartsVisible} onCharts={this.props.onPortalChartsToggle}
         algorithmsOpen={this.props.portalAlgorithmMarketOpen} onAlgorithms={() => {
           if (!this.props.portalAlgorithmMarketOpen) trackUsage('feature_exposed', { featureId: 'algorithms', action: 'open' });
@@ -2866,23 +2945,17 @@ class Title extends React.Component {
         }}
         collapsed={this.state.portalToolsCollapsed} onCollapse={(portalToolsCollapsed) => this.setState({ portalToolsCollapsed })}
         toolsOpen={this.state.portalToolsOpen} onTools={this.togglePortalTools}
-      /><PortalWorkspaceTools key={`${this.props.matrixName}:${this.props.history}`} open={this.state.portalToolsOpen}
+      /></div><PortalWorkspaceTools key={`${this.props.matrixName}:${this.props.history}`} open={this.state.portalToolsOpen}
         systemKey={this.props.matrixName}
         rendererRef={this.props.com} selectionActive={this.props.portalSelectionActive} onSelectionChange={this.props.onPortalSelectionChange}
         onClose={() => this.setState({ portalToolsOpen: false })}
-        displayContent={<ConfigProvider theme={PORTAL_CONTROL_THEME}>
-          <PortalRendererControls rendererRef={this.props.com} active={this.state.portalToolsOpen} />
-          {Boolean(baudControl.props.children) && <fieldset><legend>串口参数</legend>{baudControl}</fieldset>}
-          <fieldset><legend>渲染与显示区域</legend>{displayControls}{carControls}{partControls}</fieldset>
-          <fieldset><legend>界面语言</legend>{languageControl}</fieldset>
-        </ConfigProvider>}
         items={[
           { id: 'zero', category: 'processing', label: '压力清零', description: '以当前压力作为零点基准。', active: this.state.resetZero,
             disabled: this.props.history !== 'now', onClick: this.resetPortalPressure },
           { id: 'restore', category: 'processing', label: '恢复零点', description: '取消预压力扣除，恢复原始压力。',
             disabled: this.props.history !== 'now', onClick: this.restorePortalPressure },
           { id: 'system', label: '系统专用工具', description: '设备校准、曲线、重心或报告等当前系统支持的功能。', onClick: () => this.openPortalPanel('portalSpecialOpen') },
-          { id: 'builder', label: '展示系统配置', description: '配置传感器、算法、渲染和图表。', disabled: !this.props.openDisplaySystemBuilder,
+          { id: 'builder', label: '展示系统配置', description: '配置传感器、算法、渲染和图表。', disabled: !this.props.openDisplaySystemBuilder || !canUseLicenseCapability(this.props.licenseAccess, 'canConfigure'),
             onClick: () => { this.setState({ portalToolsOpen: false }); this.props.openDisplaySystemBuilder?.(); } },
           ...(jqbedConfigAccess.visible ? [{ id: 'jqbed', label: '床垫算法配置', description: '调整当前床垫算法参数。', disabled: jqbedConfigAccess.disabled,
             onClick: () => this.openPortalPanel('jqbedAlgorithmConfigOpen') }] : []),
@@ -2893,10 +2966,11 @@ class Title extends React.Component {
           onClose={() => this.setState({ portalSpecialOpen: false })}>
           <div className="portal-control-fields">{calibrationControls}{specialControls}{this.props.matrixName === 'localCar' ? collectionControls : null}</div>
           {!calibratableGloveTypes_title.includes(this.props.matrixName) && !['car', 'bigBed', 'foot', 'bed4096', 'localCar'].includes(this.props.matrixName)
-            && <p className="portal-control-empty">当前系统没有额外专用操作。通用清零与显示设置在工具箱中。</p>}
+            && <p className="portal-control-empty">当前系统没有额外专用操作。显示与语言可在右侧直接调整，清零在工具箱中。</p>}
         </PortalControlDialog>
         <PortalPlaybackDialog key={this.props.matrixName} open={this.state.portalPlaybackOpen}
           records={this.props.dataArr} playbackValue={this.state.portalPlaybackValue} downloadValues={this.state.portalDownloadValues}
+          canExport={canExport}
           busy={this.state.portalBusy} error={this.state.portalError}
           onPlaybackChange={(portalPlaybackValue) => this.setState({ portalPlaybackValue })}
           onDownloadsChange={(portalDownloadValues) => this.setState({ portalDownloadValues })}
@@ -2987,6 +3061,10 @@ class Title extends React.Component {
         envelope={this.props.jqbedAlgorithmConfig}
         operationResult={this.props.jqbedAlgorithmConfigResult}
         algorithmStatus={this.props.jqbedAlgorithmStatus}
+        returnedSettings={this.props.jqbedReturnedSettings}
+        algorithmLogFrame={this.props.jqbedAlgorithmLogFrame}
+        logSubscription={this.props.jqbedAlgorithmLogSubscription}
+        onLogSubscription={this.subscribeJqbedAlgorithmLog}
         connected={this.props.wsConnected}
         connectionEpoch={this.props.wsConnectionEpoch}
         onRequest={this.requestJqbedAlgorithmConfig}
@@ -3023,7 +3101,7 @@ class Title extends React.Component {
           })
         }} className='optionImg' src={option} alt="" />
         <Drawer style={{ backgroundColor: 'rgba(21,18,42,0.8)' }} title={t('setData')} onClose={() => { this.setState({ open: false }) }} open={this.state.open}>
-          <PortalRendererControls rendererRef={this.props.com} active={this.state.open} />
+          {!this.props.portalEmbedded && <PortalRendererControls rendererRef={this.props.com} active={this.state.open} />}
           <PortalWorkspaceTuning active={this.state.open} rendererRef={this.props.com}
             renderControls={(controls) => this.renderSettingSliders(t, controls)} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -3068,14 +3146,6 @@ class Title extends React.Component {
                   this.setState(zeroCommand)
                 }
               }}>{t('cancelZero')}</Button>
-              <NavLink
-                to={`/num/${routerStr}`}
-                state={{ displaySystemId: this.props.matrixName }}
-              >
-                <Button className='titleButton' onClick={() => {
-                  this.props.dataZero0()
-                }}>{t('rawData')}</Button>
-              </NavLink>
               <NavLink to={`/?from=system`}>
                 <Button className='titleButton'>{t('key')}</Button>
               </NavLink>

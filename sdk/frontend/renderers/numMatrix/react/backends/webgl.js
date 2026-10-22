@@ -11,11 +11,12 @@
  *
  * | 参数 | `plain`（Num2D） | `original`（Num2Doriginal） |
  * | :--- | :--- | :--- |
- * | `useMask` / `whiteOnZero` | 关 | 开 |
+ * | `useMask` / `whiteOnZero` | 关 / 关 | 开 / 关（原始矩阵统一蓝底） |
  * | `potTexture` | 纹理就是矩阵尺寸 | `nextPOT` + `u_texScale` |
  * | `maxFromThreshold` | 色标上限恒取帧内最大 | `valuej1 > 0` 时用它 |
  * | `retintOnTuning` | 拖滑块不重画 | 重推最后一帧 |
- * | `indexRow` / `overlayPad` | 无 / 0 | 底部列号带 / 30 |
+ * | `indexRow` / `indexColumn` | 底部列号与左侧行号 | 同左，均为 1 基 |
+ * | `overlayPad` | 0（索引空间另留） | 30（兼容分区标题） |
  * | `refitOnSizeChange` | 换纹理尺寸**不**动格子边长 | 重算 |
  * | `glove.mode` | `scatter32`（36×36） | `rows15`（15×10 或 15×13） |
  * | `foot.mode` | `interp`（16×32 插值） | `raw`（6×10 原样） |
@@ -30,10 +31,8 @@
  *
  * ## 与原实现的四处已知差异（都写明了为什么）
  *
- * 1. **`reportStats` 无条件先调。** 原实现的 `layoutData` 散在各分支里，
- *    `original` 变体在「三条通路一条都没开」时是不调的。本后端统一在
- *    `changeWsData147` 开头调一次 —— 内置预设没有一条会走到那个空分支
- *    （`webglRaw*` 里不开通路的那些都靠 `setRawFrame` 喂数据），所以现网无差异。
+ * 1. 非手套通路先调 `reportStats`；手套按左右最后帧合并统计，rows15
+ *    仍按补位后的数据统计，scatter32 仍按源点统计。
  * 2. **`u_useMask` 在建上下文时定死，不逐帧改。** 一个上下文要么是分区布局
  *    （建的时候 `withMask = true`）要么不是，原实现也是在 `initWebGL` 里
  *    一次性 `uniform1f`。
@@ -95,6 +94,9 @@ const RESIZE_DEBOUNCE_MS = 200;
 /** 双脚版面时用来算格子边长的额外列数（两块 16 宽的图 + 2 列缝）。`Num2D.jsx:322`。 */
 const DUAL_FOOT_GAP_CELLS = 2;
 
+/** 与数字精灵后端保持相同的滚轮缩放范围和步长。 */
+const MIN_ZOOM = 0.5, MAX_ZOOM = 8, ZOOM_STEP = 1.1;
+
 /**
  * 创建 WebGL 后端。
  *
@@ -148,12 +150,13 @@ export function createWebglMatrixBackend({
 
   const stage = document.createElement('div');
   stage.style.cssText = 'width:100%;height:100%;display:flex;'
-    + 'justify-content:center;align-items:center;background-color:#fff;font-size:12px;';
+    + 'justify-content:center;align-items:center;overflow:hidden;background-color:#000;color:#4ec7ff;font-size:12px;';
 
   const row = document.createElement('div');
   row.className = 'threeBoxF';
   row.style.cssText = `position:relative;margin-top:${stageMarginTop};display:flex;`
-    + `gap:10px;justify-content:center;align-items:flex-start;max-width:100%;${stageFlexWrap}`;
+    + `gap:10px;justify-content:center;align-items:flex-start;max-width:100%;transform-origin:0 0;${stageFlexWrap}`;
+  if (config.cameraControls) row.style.touchAction = 'none';
 
   /**
    * 建一组「热场 canvas + 叠加层 canvas + 脚别标签」。
@@ -180,13 +183,12 @@ export function createWebglMatrixBackend({
     return { pane, gl, overlay, label: labelNode };
   }
 
-  const paneA = createPane(isFoot ? '左脚' : '');
-  const paneB = createPane(isFoot ? '右脚' : '');
-  // 第二块在原实现里是条件挂载；这里常驻 DOM 用 display 切。两者等价 ——
-  // 第二个上下文仍然只在版面变成 dual 时才建（见 `applyFootLayout`）。
-  paneB.pane.style.display = 'none';
+  const paneA = createPane(isGlove ? '左手' : (isFoot ? '左脚' : ''));
+  const paneB = createPane(isGlove ? '右手' : (isFoot ? '右脚' : ''));
+  // 手套固定双手画布；足底仍按在线状态切换并延迟创建第二上下文。
+  paneB.pane.style.display = isGlove ? '' : 'none';
   row.appendChild(paneA.pane);
-  if (isFoot) row.appendChild(paneB.pane);
+  if (isFoot || isGlove) row.appendChild(paneB.pane);
   stage.appendChild(row);
   container.replaceChildren(stage);
 
@@ -198,6 +200,9 @@ export function createWebglMatrixBackend({
   let pendingA = null;
   let pendingB = null;
   let pendingRobot = null;
+  let lastPrimaryFrame = null;
+  let lastSecondaryFrame = null;
+  let lastRobotFrame = null;
   let rafId = null;
   let started = false;
   let disposed = false;
@@ -207,10 +212,73 @@ export function createWebglMatrixBackend({
   let footLayout = 'single-left';
   let lastLeftFrameAt = 0;
   let lastRightFrameAt = 0;
+  const gloveStats = { left: null, right: null };
+  const gloveFrames = { left: null, right: null };
 
   const baseTexW = grid.gridWidth;
   const baseTexH = grid.gridHeight;
   let texSize = { w: baseTexW, h: baseTexH };
+  let texSize2 = { w: baseTexW, h: baseTexH };
+
+  // 数字、热场和行列索引一起变换；选区和量尺继续读取真实画布的屏幕矩形。
+  let zoom = 1, panX = 0, panY = 0, drag = null, interactionActive = false;
+
+  /** 只更新版面变换，不重新分配纹理或修改原始数据。 */
+  function applyViewTransform() {
+    row.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+  }
+
+  /** 以鼠标下的矩阵位置为中心缩放，保留原数字视图的上下限。 */
+  function onWheel(event) {
+    if (disposed || !started || !Number.isFinite(event.deltaY) || event.deltaY === 0) return;
+    event.preventDefault();
+    if (interactionActive) return;
+    const nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * (event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP)));
+    if (nextZoom === zoom) return;
+    const rect = row.getBoundingClientRect();
+    const ratio = nextZoom / zoom;
+    panX += (event.clientX - rect.left) * (1 - ratio);
+    panY += (event.clientY - rect.top) * (1 - ratio);
+    zoom = nextZoom;
+    applyViewTransform();
+  }
+
+  /** 结束平移并释放捕获，切换框选、量尺或卸载时也使用同一路径。 */
+  function endDrag() {
+    const pointerId = drag?.pointerId;
+    drag = null;
+    if (pointerId !== undefined && row.hasPointerCapture?.(pointerId)) row.releasePointerCapture(pointerId);
+  }
+
+  /** 普通查看时按住左键平移，工具模式下将手势交给框选和量尺。 */
+  function onPointerDown(event) {
+    if (disposed || !started || interactionActive || event.button !== 0) return;
+    drag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+    row.setPointerCapture?.(event.pointerId);
+  }
+
+  /** 使用屏幕位移平移整组画布，缩放后仍让索引紧贴对应数据格。 */
+  function onPointerMove(event) {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    panX += event.clientX - drag.x;
+    panY += event.clientY - drag.y;
+    drag.x = event.clientX;
+    drag.y = event.clientY;
+    applyViewTransform();
+  }
+
+  /** 只结束当前指针的平移，忽略其它鼠标或触点的结束事件。 */
+  function onPointerEnd(event) {
+    if (drag?.pointerId === event.pointerId) endDrag();
+  }
+
+  const viewEvents = [
+    ['wheel', onWheel], ['pointerdown', onPointerDown], ['pointermove', onPointerMove],
+    ['pointerup', onPointerEnd], ['pointercancel', onPointerEnd], ['lostpointercapture', onPointerEnd],
+  ];
+  if (config.cameraControls) {
+    for (const [name, handler] of viewEvents) row.addEventListener(name, handler, { passive: false });
+  }
 
   /**
    * 视口可用宽高。**这是「渲染器按视口而非按容器定尺寸」那条积压的落点** ——
@@ -258,11 +326,12 @@ export function createWebglMatrixBackend({
    * @returns {[number, number]} 参考宽高（格）。
    */
   function sizingSize(dual) {
+    if (isGlove) return [texSize.w + texSize2.w + DUAL_FOOT_GAP_CELLS, Math.max(texSize.h, texSize2.h)];
     if (isFoot && dual) return [opts.foot.width * 2 + DUAL_FOOT_GAP_CELLS, opts.foot.height];
     return [baseTexW, baseTexH];
   }
 
-  let cellSize = computeCellSize();
+  let cellSize = computeCellSize(...sizingSize(false));
 
   // ---- WebGL 上下文 ----
 
@@ -358,8 +427,14 @@ export function createWebglMatrixBackend({
    * @returns {CanvasRenderingContext2D} 2d 上下文。
    */
   function sizeOverlay(canvas, texWidth, texHeight, cs) {
-    canvas.width = texWidth * cs + opts.overlayPad;
-    canvas.height = texHeight * cs + opts.overlayPad;
+    const left = opts.indexColumn ? Math.max(cs, 24) : 0;
+    const bottom = opts.indexRow ? Math.max(cs * 0.7, 18) : 0;
+    canvas.width = texWidth * cs + left + opts.overlayPad;
+    canvas.height = texHeight * cs + Math.max(bottom, opts.overlayPad);
+    const pane = canvas === paneA.overlay ? paneA : paneB;
+    pane.gl.style.marginLeft = `${left}px`;
+    pane.pane.style.paddingBottom = `${Math.max(bottom, opts.overlayPad)}px`;
+    pane.pane.style.width = `${texWidth * cs + left}px`;
     return canvas.getContext('2d');
   }
 
@@ -378,12 +453,13 @@ export function createWebglMatrixBackend({
   }
 
   /**
-   * 重建第二块（右脚）上下文。
+   * 重建第二块（右手或右脚）上下文。
    *
    * @param {number} tw 矩阵宽（格）。
    * @param {number} th 矩阵高（格）。
    */
   function rebuildSecondary(tw, th) {
+    texSize2 = { w: tw, h: th };
     destroyContext(ctxB);
     ctxB = initContext(paneB.gl, tw, th, cellSize, false);
     overlayB = sizeOverlay(paneB.overlay, tw, th, cellSize);
@@ -417,18 +493,24 @@ export function createWebglMatrixBackend({
   function uploadFrame(ctx, data, tw, th, maxOverride) {
     const { gl, texture, texData, potW, potH, uMin, uMax } = ctx;
     texData.fill(0);
+    let sourceMax = 0;
+    for (let i = 0; i < Math.min(data.length, tw * th); i++) {
+      const value = Number(data[i]);
+      if (Number.isFinite(value) && value > sourceMax) sourceMax = value;
+    }
+    // ⚠️ 12 位压力值可超过 255；仅缩放 GPU 颜色纹理，数字与统计必须保留原值。
+    const colorScale = Math.max(1, sourceMax / 255);
     let maxVal = 0;
     for (let y = 0; y < th; y++) {
       for (let x = 0; x < tw; x++) {
         const src = y * tw + x;
-        const v = src < data.length
-          ? Math.min(255, Math.max(0, Math.round(data[src])))
-          : 0;
+        const source = src < data.length ? Number(data[src]) : 0;
+        const v = Number.isFinite(source) ? Math.min(255, Math.max(0, Math.round(source / colorScale))) : 0;
         texData[y * potW + x] = v;
         if (v > maxVal) maxVal = v;
       }
     }
-    const dynamicMax = (maxOverride && maxOverride > 0) ? maxOverride : Math.max(maxVal, 1);
+    const dynamicMax = (maxOverride && maxOverride > 0) ? maxOverride / colorScale : Math.max(maxVal, 1);
     gl.uniform1f(uMin, 0);
     gl.uniform1f(uMax, dynamicMax);
     uploadLuminance(gl, 0, texture, texData, potW, potH);
@@ -480,7 +562,7 @@ export function createWebglMatrixBackend({
   }
 
   /**
-   * 画叠加层：网格线 + 每格数字 +（可选）底部列号带。
+   * 画叠加层：网格线、每格数字以及矩阵外侧的行列号。
    *
    * 合并自两份原实现的 `drawOverlay`，差异全在参数里：线色、0 值字色、列号带。
    *
@@ -494,7 +576,9 @@ export function createWebglMatrixBackend({
     if (!ctx2d) return;
     const cw = tw * cs;
     const ch = th * cs;
+    ctx2d.setTransform(1, 0, 0, 1, 0, 0);
     ctx2d.clearRect(0, 0, ctx2d.canvas.width, ctx2d.canvas.height);
+    ctx2d.setTransform(1, 0, 0, 1, opts.indexColumn ? Math.max(cs, 24) : 0, 0);
 
     if (opts.showBorder) {
       ctx2d.strokeStyle = opts.gridColor;
@@ -521,24 +605,41 @@ export function createWebglMatrixBackend({
       for (let i = 0; i < th; i++) {
         for (let j = 0; j < tw; j++) {
           const idx = i * tw + j;
-          const val = idx < len ? Math.round(data[idx]) : 0;
-          ctx2d.fillStyle = (val === 0 && opts.zeroTextColor) ? opts.zeroTextColor : opts.textColor;
-          ctx2d.fillText(val.toString(), j * cs + cs / 2, i * cs + cs / 2);
+          const raw = idx < len ? Number(data[idx]) || 0 : 0;
+          const val = config.decimalScale > 1 ? raw.toFixed(1) : String(Math.round(raw));
+          ctx2d.fillStyle = (raw === 0 && opts.zeroTextColor) ? opts.zeroTextColor : opts.textColor;
+          if (config.decimalScale > 1) ctx2d.fillText(val, j * cs + cs / 2, i * cs + cs / 2, Math.max(1, cs - 2));
+          else ctx2d.fillText(val, j * cs + cs / 2, i * cs + cs / 2);
         }
       }
     }
 
+    paintIndices(ctx2d, 0, 0, tw, th, cs);
+  }
+
+  /** 在矩阵外侧绘制 1 基行列号，不增加采样格或参与统计。 */
+  function paintIndices(ctx2d, x, y, tw, th, cs) {
+    const cw = tw * cs, ch = th * cs;
+    const rowH = Math.max(cs * 0.7, 18);
+    const colW = Math.max(cs, 24);
+    ctx2d.font = `bold ${Math.max(8, cs * 0.35)}px monospace`;
+    ctx2d.textAlign = 'center';
+    ctx2d.textBaseline = 'middle';
+    if (opts.indexColumn) {
+      ctx2d.fillStyle = opts.indexRowColor;
+      ctx2d.fillRect(x - colW, y, colW, ch);
+      ctx2d.fillStyle = opts.textColor;
+      for (let i = 0; i < th; i++) {
+        ctx2d.fillText(String(i + 1), x - colW / 2, y + (i + 0.5) * cs);
+      }
+    }
     if (opts.indexRow) {
       const rowY = ch;
-      const rowH = Math.max(cs * 0.7, 18);
       ctx2d.fillStyle = opts.indexRowColor;
-      ctx2d.fillRect(0, rowY, cw, rowH);
+      ctx2d.fillRect(x, y + rowY, cw, rowH);
       ctx2d.fillStyle = opts.textColor;
-      ctx2d.font = `bold ${Math.max(8, cs * 0.35)}px monospace`;
-      ctx2d.textAlign = 'center';
-      ctx2d.textBaseline = 'middle';
       for (let j = 0; j < tw; j++) {
-        ctx2d.fillText(j.toString(), j * cs + cs / 2, rowY + rowH / 2);
+        ctx2d.fillText(String(j + 1), x + (j + 0.5) * cs, y + rowY + rowH / 2);
       }
     }
   }
@@ -552,7 +653,9 @@ export function createWebglMatrixBackend({
    */
   function paintRobotOverlay(ctx2d, partDefs, cs) {
     if (!ctx2d) return;
+    ctx2d.setTransform(1, 0, 0, 1, 0, 0);
     ctx2d.clearRect(0, 0, ctx2d.canvas.width, ctx2d.canvas.height);
+    ctx2d.setTransform(1, 0, 0, 1, opts.indexColumn ? Math.max(cs, 24) : 0, 0);
     const fontSize = Math.max(10, cs * 0.45);
     const titleFontSize = Math.max(10, cs * 0.5);
 
@@ -590,11 +693,12 @@ export function createWebglMatrixBackend({
         }
       }
 
+      paintIndices(ctx2d, px, py, w, h, cs);
       ctx2d.fillStyle = opts.titleColor;
       ctx2d.font = `bold ${titleFontSize}px sans-serif`;
       ctx2d.textAlign = 'center';
       ctx2d.textBaseline = 'top';
-      ctx2d.fillText(text, px + pw / 2, py + ph + 4);
+      ctx2d.fillText(text, px + pw / 2, py + ph + (opts.indexRow ? Math.max(cs * 0.7, 18) : 0) + 4);
     });
   }
 
@@ -608,6 +712,7 @@ export function createWebglMatrixBackend({
 
       if (!isRobot && pendingA !== null) {
         const { data, tw, th } = pendingA;
+        lastPrimaryFrame = pendingA;
         pendingA = null;
         renderFrame(ctxA, data, tw, th);
         paintOverlay(overlayA, data, tw, th, cs);
@@ -615,6 +720,7 @@ export function createWebglMatrixBackend({
 
       if (pendingB !== null && ctxB) {
         const { data, tw, th } = pendingB;
+        lastSecondaryFrame = pendingB;
         pendingB = null;
         renderFrame(ctxB, data, tw, th);
         paintOverlay(overlayB, data, tw, th, cs);
@@ -622,6 +728,7 @@ export function createWebglMatrixBackend({
 
       if (isRobot && pendingRobot !== null && ctxA) {
         const { layoutData, maskData, layoutW, layoutH, partDefsWithOffset } = pendingRobot;
+        lastRobotFrame = pendingRobot;
         pendingRobot = null;
         renderRobotFrame(ctxA, layoutData, maskData, layoutW, layoutH);
         paintRobotOverlay(overlayA, partDefsWithOffset, cs);
@@ -639,6 +746,37 @@ export function createWebglMatrixBackend({
   function queuePrimary(data, tw, th) {
     pendingA = { data, tw, th };
     schedule();
+  }
+
+  /** 排入单侧手套帧；尺寸变化和重绘保留另一侧最后一帧，不交换左右数据。 */
+  function queueGloveFrame(data, tw, th, side) {
+    const right = side === 'right';
+    gloveFrames[right ? 'right' : 'left'] = { data, tw, th };
+    const previous = right ? texSize2 : texSize;
+    const sizeChanged = previous.w !== tw || previous.h !== th;
+    if (right) texSize2 = { w: tw, h: th };
+    else texSize = { w: tw, h: th };
+    const nextCellSize = opts.refitOnSizeChange ? computeCellSize(...sizingSize(false)) : cellSize;
+    if (nextCellSize !== cellSize) {
+      cellSize = nextCellSize;
+      rebuildPrimary(texSize.w, texSize.h, false);
+      rebuildSecondary(texSize2.w, texSize2.h);
+      pendingA = gloveFrames.left;
+      pendingB = gloveFrames.right;
+    } else if (right) {
+      if (sizeChanged || !ctxB) rebuildSecondary(tw, th);
+      pendingB = gloveFrames.right;
+    } else {
+      if (sizeChanged || !ctxA) rebuildPrimary(tw, th, false);
+      pendingA = gloveFrames.left;
+    }
+    schedule();
+  }
+
+  /** 合并左右最后一份统计输入；补点/显示插值不会替换真实源帧统计。 */
+  function reportGloveStats(data, side) {
+    gloveStats[side === 'right' ? 'right' : 'left'] = [...data];
+    reportStats?.([...(gloveStats.left || []), ...(gloveStats.right || [])]);
   }
 
   // ---- 足底的单/双脚状态机（本后端唯一一处运行期状态机）----
@@ -741,6 +879,7 @@ export function createWebglMatrixBackend({
   // ---- 窗口 resize ----
 
   let resizeTimer = null;
+  /** 视口变化时重排画布并恢复最后帧，避免暂停采集时重建后画面和索引消失。 */
   function handleResize() {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
@@ -760,6 +899,15 @@ export function createWebglMatrixBackend({
         rebuildPrimary(texSize.w, texSize.h, false);
       }
       if (isFoot && dual && ctxB) rebuildSecondary(opts.foot.width, opts.foot.height);
+      if (isGlove) {
+        rebuildSecondary(texSize2.w, texSize2.h);
+        pendingA = gloveFrames.left;
+        pendingB = gloveFrames.right;
+      }
+      pendingA = pendingA || lastPrimaryFrame;
+      pendingB = pendingB || lastSecondaryFrame;
+      pendingRobot = pendingRobot || lastRobotFrame;
+      schedule();
     }, RESIZE_DEBOUNCE_MS);
   }
   globalThis.addEventListener?.('resize', handleResize);
@@ -769,26 +917,28 @@ export function createWebglMatrixBackend({
   // 分区布局不在这里建上下文：布局尺寸要等第一帧到了才知道（原实现同此）。
   if (!isRobot) {
     rebuildPrimary(baseTexW, baseTexH, false);
+    if (isGlove) rebuildSecondary(baseTexW, baseTexH);
   }
 
-  // 整包手套上电到第一帧之间有好几秒，不先铺一张空网格那段时间是纯白，像坏了。
+  // 两侧在第一帧之前也显示零矩阵，布局不依赖设备先后上报顺序。
   if (opts.glovePrimeOnMount) {
     const primed = new Array(opts.glove.width * opts.glove.height).fill(0);
     reportStats?.(primed);
-    queuePrimary(primed, opts.glove.width, opts.glove.height);
+    if (isGlove) {
+      queueGloveFrame([...primed], opts.glove.width, opts.glove.height, 'left');
+      queueGloveFrame([...primed], opts.glove.width, opts.glove.height, 'right');
+    } else queuePrimary(primed, opts.glove.width, opts.glove.height);
   }
 
   const commands = {
     /**
      * 147 点手套 / 足底 / 分区布局三选一。
      *
-     * `reportStats` 无条件先调，与原实现的差异见文件头第 1 条。
-     *
      * @param {number[]} wsPointData 原始帧。
+     * @param {string} [side='left'] 手套数据归属侧；足底及分区通路忽略。
      */
-    changeWsData147(wsPointData) {
+    changeWsData147(wsPointData, side = 'left') {
       if (!Array.isArray(wsPointData)) return;
-      reportStats?.(wsPointData.slice());
 
       if (isGlove) {
         if (opts.glove.mode === 'scatter32') {
@@ -796,8 +946,8 @@ export function createWebglMatrixBackend({
             thumbRowOffsets: GLOVE_147_THUMB_ROWS_WEBGL,
           });
           const padded = addSide(laid, GLOVE_147_BASE, GLOVE_147_BASE, 2, 2, 0);
-          ensureTextureSize(GLOVE_147_PADDED, GLOVE_147_PADDED);
-          queuePrimary(padded, GLOVE_147_PADDED, GLOVE_147_PADDED);
+          reportGloveStats(wsPointData, side);
+          queueGloveFrame(padded, GLOVE_147_PADDED, GLOVE_147_PADDED, side);
           return;
         }
         // `rows15`：整包手套补到 15×13，其余在第 75 位补三个 0 成 15×10。
@@ -805,10 +955,12 @@ export function createWebglMatrixBackend({
         const { data, gridWidth, gridHeight } = padGlove147Rows(wsPointData, {
           fullPacket: opts.glove.height >= 13,
         });
-        ensureTextureSize(gridWidth, gridHeight);
-        queuePrimary(data, gridWidth, gridHeight);
+        reportGloveStats(data, side);
+        queueGloveFrame(data, gridWidth, gridHeight, side);
         return;
       }
+
+      reportStats?.(wsPointData.slice());
 
       if (isFoot) {
         queueFootFrame(wsPointData, 'primary');
@@ -819,16 +971,17 @@ export function createWebglMatrixBackend({
     },
 
     /**
-     * 左右两侧分开推的通路。手套原样转给 `changeWsData147`，足底走双画布。
+     * 左右两侧分开推的通路。手套连同侧别转给 `changeWsData147`，足底走双画布。
      *
      * 版面判定必须在排帧**之前**：`syncFootLayout` 可能会改格子边长并重建上下文，
      * 排帧时才好按新边长建第二块。
      *
      * @param {{left?: number[], right?: number[]}} wsPointData 两侧的帧。
+     * @param {string} [side='left'] 数组式手套帧的归属侧。
      */
-    changeWsData147R(wsPointData) {
+    changeWsData147R(wsPointData, side = 'left') {
       if (isGlove) {
-        commands.changeWsData147(wsPointData);
+        commands.changeWsData147(wsPointData, side);
         return;
       }
       if (!isFoot || !wsPointData) return;
@@ -853,12 +1006,18 @@ export function createWebglMatrixBackend({
      * 手套原始 256 点，按 16×16 直接上屏。
      *
      * @param {number[]} wsPointData 原始帧。
+     * @param {string} [side='left'] 手套数据归属侧。
      */
-    changeWsData256(wsPointData) {
+    changeWsData256(wsPointData, side = 'left') {
       if (!Array.isArray(wsPointData)) return;
       let raw = [...wsPointData];
       if (raw.length > 256) raw = raw.slice(0, 256);
       while (raw.length < 256) raw.push(0);
+      if (isGlove) {
+        reportGloveStats(raw, side);
+        queueGloveFrame(raw, 16, 16, side);
+        return;
+      }
       reportStats?.([...raw]);
       ensureTextureSize(16, 16);
       queuePrimary(raw, 16, 16);
@@ -872,6 +1031,8 @@ export function createWebglMatrixBackend({
     // 分区、补点手套和双脚不满足等距矩阵假设，需独立物理点位映射。
     sensorGrid: isRobot || isFoot || isGlove ? null : {
       canvas: paneA.gl, columns: baseTexW, rows: baseTexH,
+      /** 框选和量尺期间暂停查看手势，退出后恢复。 */
+      onInteractionChange(active) { interactionActive = Boolean(active); endDrag(); },
       /** 返回实际矩阵外沿，排除叠加层留白。 */
       getGridBounds() {
         const rect = paneA.gl.getBoundingClientRect();
@@ -946,6 +1107,12 @@ export function createWebglMatrixBackend({
     applyTuning(changed = {}) {
       if (!opts.retintOnTuning) return;
       if (!(changed.valuej || changed.valuef)) return;
+      if (isGlove) {
+        if (pendingA === null && ctxA) pendingA = gloveFrames.left;
+        if (pendingB === null && ctxB) pendingB = gloveFrames.right;
+        schedule();
+        return;
+      }
       if (pendingA !== null || !ctxA || !lastData) return;
       queuePrimary(lastData, ctxA.texWidth, ctxA.texHeight);
     },
@@ -962,6 +1129,10 @@ export function createWebglMatrixBackend({
       if (disposed) return;
       disposed = true;
       started = false;
+      endDrag();
+      if (config.cameraControls) {
+        for (const [name, handler] of viewEvents) row.removeEventListener(name, handler);
+      }
       globalThis.removeEventListener?.('resize', handleResize);
       clearTimeout(resizeTimer);
       if (rafId !== null) cancelAnimationFrame(rafId);
@@ -970,6 +1141,13 @@ export function createWebglMatrixBackend({
       pendingB = null;
       pendingRobot = null;
       lastData = null;
+      lastPrimaryFrame = null;
+      lastSecondaryFrame = null;
+      lastRobotFrame = null;
+      gloveFrames.left = null;
+      gloveFrames.right = null;
+      gloveStats.left = null;
+      gloveStats.right = null;
       destroyContext(ctxA);
       destroyContext(ctxB);
       ctxA = null;

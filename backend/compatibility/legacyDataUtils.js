@@ -14,7 +14,7 @@ module.exports = {
    * @returns {boolean} 是否按多通道处理。
    */
   isCar: (value) => {
-    const arr = ["car", "car10", 'yanfeng10', 'volvo', 'footVideo', 'hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket', 'carQX', 'wholeChair', 'eye' , 'sofa', 'carY'];
+    const arr = ["car", "car10", 'yanfeng10', 'volvo', 'footVideo', 'hand0205', 'hand0205Single', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket', 'carQX', 'wholeChair', 'eye' , 'sofa', 'carY'];
     return arr.includes(value);
   },
 

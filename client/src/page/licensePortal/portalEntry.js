@@ -1,5 +1,6 @@
 import { hasValidLicenseDate, isExpiredLicenseMessage } from '../../services/ws/messages';
 import { isPortalSystemAllowed, readPortalLicenseScope } from './portalSystems';
+import { readLicenseAccess, isHistoryOnlyLicense } from '../../services/licenseAccess';
 
 /**
  * 验证密钥后更新目录，或继续切换所选系统。
@@ -34,15 +35,18 @@ export function createPortalEntry({ activate, switchSystem, getManagedIds = () =
         throw new Error('授权服务版本较旧，请完全退出并重新启动 Shroom 后重试');
       }
       const payload = activation?.payload;
+      const access = readLicenseAccess(payload);
       if (!hasValidLicenseDate(payload)) throw new Error('密钥验证未返回有效授权，请重试');
-      if (isExpiredLicenseMessage(payload)) throw new Error('密钥已过期，请输入有效密钥');
+      if (access !== undefined && !access.canReadHistory) throw new Error('当前授权不允许进入系统，请检查密钥状态');
+      if (isExpiredLicenseMessage(payload) && !isHistoryOnlyLicense(access)) throw new Error('密钥已过期，请输入有效密钥');
       const scope = readPortalLicenseScope(payload);
       if (scope === undefined) throw new Error('未读取到密钥授权范围，请重试');
       current.validated = true;
-      onValidated?.(scope, current.key);
+      if (access === undefined) onValidated?.(scope, current.key);
+      else onValidated?.(scope, current.key, access);
       if (!current.system) { cancel(); return; }
       // ⚠️ 激活后读取当前密钥的签名目录；漏传目录会把所有已授权公司系统误判为无权限。
-      const managedIds = current.system.managed ? await getManagedIds() : [];
+      const managedIds = current.system.managed ? await getManagedIds(payload) : [];
       if (attempt !== current) return;
       if (!isPortalSystemAllowed(current.system, scope, managedIds)) {
         throw new Error('当前密钥未授权此系统，请选择可用系统或更换密钥');
@@ -60,6 +64,7 @@ export function createPortalEntry({ activate, switchSystem, getManagedIds = () =
   /** 撤销授权或锁定消息立即取消当前操作；普通成功广播不推进请求。 */
   function receive(message) {
     if (!attempt) return;
+    if (isHistoryOnlyLicense(readLicenseAccess(message))) return;
     if (isExpiredLicenseMessage(message)) { fail('密钥已过期，请输入有效密钥'); return; }
     if (message?.licenseError || message?.licenseLocked || message?.valid === false) {
       fail(message.licenseError || message.reason || '密钥无效，请检查后重试');

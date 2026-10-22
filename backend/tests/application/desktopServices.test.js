@@ -135,8 +135,18 @@ test('frontend updates are staged, complete, signed and recover after a failed b
   assert.equal(first.selectRoot(shipped), shipped, 'a running page must not change');
   const candidate = createFrontendCache(options);
   assert.notEqual(candidate.selectRoot(shipped), shipped);
+  assert.equal(candidate.status().appVersion, '1.1.37');
+  assert.equal(candidate.status().hostContract, 1);
+  assert.equal(candidate.status().activeBuildId, 2);
+  assert.equal(candidate.status().packagedBuildId, 1);
+  assert.equal(candidate.status().source, 'cache');
+  assert.equal(candidate.status().bootPending, true);
   assert.equal(candidate.rollback(shipped), true);
   assert.equal(candidate.selectRoot(shipped), shipped);
+  assert.equal(candidate.status().source, 'packaged');
+  assert.equal(candidate.status().activeBuildId, 1);
+  assert.equal(candidate.status().lastRollbackReason, 'FRONTEND_BOOT_FAILED');
+  assert.ok(candidate.status().lastRollbackAt);
   first.dispose(); candidate.dispose();
   assert.equal(safeResourcePath('../secret'), false);
   assert.equal(safeResourcePath('assets/CON.js'), false);
@@ -265,6 +275,7 @@ test('failed candidate boots and corrupt active pages fall back to retained veri
   f.publish(22); await active.check(); const failed = f.create(); assert.equal(failed.status().activeReleaseId, 22); failed.dispose();
   const recovered = f.create(); assert.equal(recovered.status().activeReleaseId, 21);
   await recovered.check(); assert.equal(recovered.status().pendingReleaseId, null, 'the same failed release is not staged again');
+  assert.equal(recovered.status().lastErrorCode, 'FRONTEND_RELEASE_PREVIOUSLY_FAILED', 'a rejected latest release must not be reported as already current');
   fs.writeFileSync(path.join(f.root, 'frontend-cache/21/assets/app.js'), 'broken');
   const previous = f.create(); assert.equal(previous.status().activeReleaseId, 20);
   f.setOffline(true); await previous.check(); assert.equal(previous.status().activeReleaseId, 20);
@@ -287,6 +298,41 @@ test('tampered reusable files are fetched again and interrupted downloads leave 
   assert.equal(fs.readdirSync(path.join(f.root, 'frontend-cache')).some(name => name.startsWith('.download-')), false);
 });
 
+test('unpublished webpage releases remain local and keep an actionable diagnosis across restarts', async t => {
+  const f = frontendFixture(t), cache = f.create(undefined, async () => new Response(JSON.stringify({ error: 'FRONTEND_RELEASE_UNAVAILABLE' }), { status: 503 }));
+  await cache.check();
+  const status = cache.status();
+  assert.equal(status.source, 'packaged'); assert.equal(status.pendingReleaseId, null);
+  assert.equal(status.lastErrorCode, 'FRONTEND_RELEASE_UNAVAILABLE'); assert.equal(status.lastCheckResult, 'unavailable');
+  assert.match(status.lastMessage, /管理员完成网页发布/); assert.ok(Number.isFinite(Date.parse(status.lastCheckedAt)));
+  assert.equal(f.create().status().lastErrorCode, 'FRONTEND_RELEASE_UNAVAILABLE');
+  assert.ok(f.notices.some(notice => notice.errorCode === 'FRONTEND_RELEASE_UNAVAILABLE'));
+});
+
+test('signed incompatible webpages request a full installer without downloading or accepting forged compatibility hints', async t => {
+  const f = frontendFixture(t), keyPair = crypto.generateKeyPairSync('ed25519');
+  const manifest = { ...f.publish(20).manifest, minAppVersion: '2.0.0' };
+  const incompatible = signed(manifest, keyPair.privateKey, 'manifest');
+  const root = path.join(f.root, 'isolated-host'); let downloads = 0;
+  const cache = createFrontendCache({ root, appVersion: '1.1.37', publicKey: keyPair.publicKey,
+    fetchImpl: async () => { downloads++; return new Response(JSON.stringify(incompatible)); } });
+  t.after(() => cache.dispose()); cache.selectRoot(f.shipped); await cache.check();
+  assert.equal(downloads, 1); assert.equal(cache.status().lastErrorCode, 'FRONTEND_HOST_UPDATE_REQUIRED');
+  assert.equal(cache.status().pendingReleaseId, null); assert.match(cache.status().lastMessage, /更新完整安装包/);
+  incompatible.signature = 'invalid'; await cache.check();
+  assert.equal(cache.status().lastErrorCode, 'FRONTEND_RELEASE_INVALID', 'unsigned metadata cannot supply an installer-upgrade instruction');
+});
+
+test('missing packaged build stamps and HTML update responses explain why updates cannot be staged', async t => {
+  const f = frontendFixture(t); fs.rmSync(path.join(f.shipped, 'frontend-build.json'));
+  const unstamped = f.create(undefined, async () => assert.fail('an unstamped installer must not load remote code'));
+  await unstamped.check(); assert.equal(unstamped.status().lastErrorCode, 'FRONTEND_PACKAGED_BUILD_MISSING');
+  f.installer(10);
+  const html = f.create(undefined, async () => new Response('<!doctype html><title>Fallback</title>'));
+  await html.check(); assert.equal(html.status().lastErrorCode, 'FRONTEND_RESPONSE_INVALID');
+  assert.equal(html.status().pendingReleaseId, null); assert.equal(html.selectRoot(f.shipped), f.shipped);
+});
+
 test('usage events omit credentials, raw frames, unknown fields and customer system names', () => {
   const identity = { installationId: crypto.randomUUID(), sessionId: crypto.randomUUID(), appVersion: '1.1.37', environment: 'test', scope: 'scope' };
   const event = normalizeEvent({ eventName: 'system_entered', properties: { systemType: 'customer-seat', systemOrigin: 'custom' } }, identity);
@@ -297,6 +343,46 @@ test('usage events omit credentials, raw frames, unknown fields and customer sys
   assert.equal(restoreEvent(event, identity.installationId, []).eventId, event.eventId);
   assert.throws(() => restoreEvent({ ...event, rawFrames: [1, 2] }, identity.installationId, []));
   assert.throws(() => restoreEvent({ ...event, properties: { rawData: [1, 2] } }, identity.installationId, []));
+});
+
+test('runtime version snapshots remain bounded and unchanged on a durable retry', async t => {
+  const root = temporary(t), sent = [];
+  const options = { root, appVersion: '1.1.37', environment: 'test', getLicenseKey: () => 'ab'.repeat(64),
+    getRuntimeVersions: () => ({ frontendReleaseId: 7, frontendBuildId: 20, hostContract: 1, systemPackageVersion: '3', serverContractVersion: '1.3', secretPath: 'C:/private', rawFrames: [1, 2] }),
+    fetchImpl: async (_url, input) => { sent.push(JSON.parse(input.body)); return new Response('{}', { status: 503 }); } };
+  const first = createUsageAnalytics(options);
+  await first.flush(true); await first.dispose();
+  const second = createUsageAnalytics({ ...options, getRuntimeVersions: () => ({ frontendBuildId: 21 }) });
+  await second.flush(true); await second.dispose();
+  const original = sent[0].events[0], retried = sent[1].events.find(event => event.eventId === original.eventId);
+  assert.deepEqual(original.runtimeVersions, { frontendReleaseId: 7, frontendBuildId: 20, hostContract: 1, systemPackageVersion: '3', serverContractVersion: '1.3' });
+  assert.deepEqual(retried.runtimeVersions, original.runtimeVersions);
+  assert.ok(!JSON.stringify(sent).includes('C:/private'));
+});
+
+test('acknowledging diagnostic scope preserves an explicit opt-out across restarts', async t => {
+  const options = { root: temporary(t), appVersion: '1.1.37', environment: 'test', getLicenseKey: () => '', fetchImpl: () => { assert.fail('no upload expected'); } };
+  const first = createUsageAnalytics(options);
+  assert.equal(first.status().noticePending, true);
+  await first.setEnabled(false); await first.acknowledgeNotice(); await first.dispose();
+  const second = createUsageAnalytics(options);
+  assert.equal(second.status().enabled, false);
+  assert.equal(second.status().noticePending, false);
+  await second.dispose();
+});
+
+test('desktop diagnostics combine real running versions and wake checks run without a renderer', async () => {
+  const { runtimeVersionSnapshot, checkLicenseOnWake } = require('../../../app/electron/runtimeDiagnostics');
+  const runtime = { getRuntimeStatus: () => ({ runtimeVersions: { systemPackageVersion: '4', serverContractVersion: '1', privatePath: 'C:/private' } }) };
+  const frontend = { status: () => ({ activeReleaseId: 9, activeBuildId: 21, hostContract: 1, pendingReleaseId: 10 }) };
+  assert.deepEqual(runtimeVersionSnapshot(runtime, frontend), { frontendReleaseId: 9, frontendBuildId: 21, hostContract: 1, systemPackageVersion: '4', serverContractVersion: '1' });
+  assert.deepEqual(runtimeVersionSnapshot({ getRuntimeStatus: () => { throw new Error('booting'); } }, frontend), { frontendReleaseId: 9, frontendBuildId: 21, hostContract: 1 });
+  let checked = false; const errors = [];
+  const checking = checkLicenseOnWake({ checkLicenseAccess: () => { checked = true; } });
+  assert.equal(checked, true, 'expiry is checked synchronously at resume, not after reconnect');
+  await checking;
+  await checkLicenseOnWake({ checkLicenseAccess: () => Promise.reject(new Error('fixture unavailable')) }, error => errors.push(error.message));
+  assert.deepEqual(errors, ['fixture unavailable']);
 });
 
 test('repeated errors are aggregated without changing acknowledged event IDs', async t => {

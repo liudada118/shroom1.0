@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { commandClient } from '../../services/command/commandClient';
 
 /** 通过 HTTP 管理人体全身优化的 HaLow 接收，状态由 ACK 和低频广播同步。 */
-export default function HalowConnection({ status, onStatus, connected, connectionEpoch, history, collecting }) {
+export default function HalowConnection({ status, onStatus, connected, connectionEpoch, history, collecting, canAcquire = true, sensorLabel }) {
   const { i18n } = useTranslation();
   const english = i18n.language?.startsWith('en');
   /** 沿用界面语言展示连接文案。 */
@@ -18,13 +18,13 @@ export default function HalowConnection({ status, onStatus, connected, connectio
   const pendingRequest = useRef(null);
   const applied = useRef(null);
   const running = Boolean(status?.running);
-  const locked = !connected || Boolean(pending) || collecting || history !== 'now';
+  const locked = !canAcquire || !connected || Boolean(pending) || collecting || history !== 'now';
   const clients = status?.clients || [];
   const selected = clients.find(client => client.deviceId === status?.selectedDeviceId);
 
   /** 忽略换系统、断连或关闭弹窗后到达的旧回执，重复点击只发一次请求。 */
   async function request(action, options = {}) {
-    if (pendingRequest.current || (!['status', 'stop'].includes(action) && (collecting || history !== 'now'))) return;
+    if (pendingRequest.current || (!['status', 'stop'].includes(action) && (!canAcquire || collecting || history !== 'now'))) return;
     setError('');
     if (!connected) {
       setError(text('与本地后台的连接已断开', 'Local backend disconnected'));
@@ -86,7 +86,7 @@ export default function HalowConnection({ status, onStatus, connected, connectio
     <Button className="titleButton" onClick={() => setOpen(true)}>
       {running && connected ? `HaLow · ${selected?.deviceId || text('等待连接', 'Waiting')}` : text('HaLow 连接', 'HaLow connection')}
     </Button>
-    <Modal title={text('人体全身传感 · HaLow 数据连接', 'Full body · HaLow connection')}
+    <Modal title={`${sensorLabel || text('人体全身传感', 'Full body')} · ${text('HaLow 数据连接', 'HaLow connection')}`}
       open={open} onCancel={() => setOpen(false)} footer={null} width={740} destroyOnClose={false}>
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         <Alert type="info" showIcon message={text('B 板主动连接电脑，渲染方式保持不变', 'B board connects to this computer; rendering stays unchanged')}

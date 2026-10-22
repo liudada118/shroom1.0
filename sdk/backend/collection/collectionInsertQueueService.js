@@ -12,7 +12,7 @@
  * @returns {object | null} 原生数据库连接。
  */
 function getNativeDb(dbRef) {
-  return dbRef && (dbRef._db || dbRef.db || null);
+  return dbRef && (dbRef._db || dbRef.db || (typeof dbRef.prepare === 'function' ? dbRef : null));
 }
 
 /**
@@ -26,11 +26,13 @@ function createCollectionInsertQueueService({
   batchSize = 200,
   flushIntervalMs = 250,
   onError,
+  onSettled,
 } = {}) {
   const queues = new Set();
   const queueByDb = new WeakMap();
   let flushTimer = null;
   const stats = { queued: 0, written: 0, failed: 0, pending: 0, exact: true };
+  const settledRows = new WeakSet();
 
   /**
    * 获取指定数据库连接对应的队列，不存在时延迟创建。
@@ -50,6 +52,8 @@ function createCollectionInsertQueueService({
         flushing: false,
         stmt: null,
         tx: null,
+        rowContexts: new WeakMap(),
+        rowChannels: new WeakMap(),
       };
       queueByDb.set(dbRef, queue);
       queues.add(queue);
@@ -76,9 +80,8 @@ function createCollectionInsertQueueService({
    * @param {string} channel 采集通道。
    */
   function reportError(error, channel) {
-    if (typeof onError === 'function') {
-      onError(error, channel);
-    }
+    if (!error) return;
+    try { onError?.(error, channel); } catch { /* Observers cannot change completed SQL outcomes. */ }
   }
 
   /**
@@ -90,45 +93,51 @@ function createCollectionInsertQueueService({
     if (!queue || queue.flushing || queue.rows.length === 0) return;
     const rows = queue.rows.splice(0, queue.rows.length);
     queue.flushing = true;
-
-    try {
-      const nativeDb = getNativeDb(queue.dbRef);
-      if (nativeDb && typeof nativeDb.transaction === 'function' && typeof nativeDb.prepare === 'function') {
-        if (!queue.stmt) {
-          queue.stmt = nativeDb.prepare(sql);
-        }
-        if (!queue.tx) {
-          queue.tx = nativeDb.transaction((batchRows) => {
-            let written = 0;
-            for (const params of batchRows) {
-              const result = queue.stmt.run(...params);
-              written += Number.isFinite(result?.changes) ? result.changes : 1;
-            }
-            return written;
-          });
-        }
+    const nativeDb = getNativeDb(queue.dbRef);
+    if (nativeDb && typeof nativeDb.transaction === 'function' && typeof nativeDb.prepare === 'function') {
+      let error = null;
+      try {
+        if (!queue.stmt) queue.stmt = nativeDb.prepare(sql);
+        if (!queue.tx) queue.tx = nativeDb.transaction((batchRows) => {
+          let written = 0;
+          for (const params of batchRows) {
+            const result = queue.stmt.run(...params);
+            written += Number.isFinite(result?.changes) ? result.changes : 1;
+          }
+          return written;
+        });
         const written = queue.tx(rows);
         if (Number.isFinite(written)) stats.written += written;
         else stats.exact = false;
-        stats.pending -= rows.length;
-      } else {
-        stats.exact = false;
-        for (const params of rows) {
+      } catch (cause) { error = cause; }
+      // SQL has committed or rolled back before observers run; observer exceptions cannot reverse it.
+      for (const params of rows) settleRow(queue, params, !error, 0);
+      queue.flushing = false;
+      if (error) reportError(error, queue.channel);
+    } else {
+      stats.exact = false;
+      for (const params of rows) {
+        try {
           queue.dbRef.run(sql, params, function onRun(error) {
-            stats.pending = Math.max(0, stats.pending - 1);
-            if (error) stats.failed++;
-            else stats.written += Number.isFinite(this?.changes) ? this.changes : 1;
-            reportError(error, queue.channel);
+            settleRow(queue, params, !error, Number.isFinite(this?.changes) ? this.changes : 1);
+            reportError(error, queue.rowChannels.get(params));
           });
+        } catch (error) {
+          settleRow(queue, params, false, 0);
+          reportError(error, queue.rowChannels.get(params));
         }
       }
-    } catch (error) {
-      stats.pending = Math.max(0, stats.pending - rows.length);
-      stats.failed += rows.length;
-      reportError(error, queue.channel);
-    } finally {
       queue.flushing = false;
     }
+  }
+
+  /** Settle each queued row once; callbacks and diagnostic observers cannot double-count it. */
+  function settleRow(queue, params, ok, written) {
+    if (settledRows.has(params)) return;
+    settledRows.add(params); stats.pending = Math.max(0, stats.pending - 1);
+    if (ok) stats.written += written;
+    else stats.failed++;
+    try { onSettled?.(queue.rowContexts.get(params), ok); } catch { /* Committed writes remain committed. */ }
   }
 
   /**
@@ -145,17 +154,24 @@ function createCollectionInsertQueueService({
    * @param {unknown[]} params SQL 参数数组。
    * @param {'sit' | 'back' | 'head'} channel 采集通道。
    */
-  function enqueue(dbRef, params, channel = 'sit') {
+  function enqueue(dbRef, params, channel = 'sit', context = null) {
     const queue = getQueue(dbRef, channel);
-    if (!queue) return;
-
+    if (!queue || !Array.isArray(params)) {
+      stats.queued++; stats.failed++;
+      try { onSettled?.(context, false); } catch { /* No database means this row did not commit. */ }
+      reportError(new Error(!queue ? 'Collection database is unavailable' : 'Collection SQL parameters are invalid'), channel);
+      return false;
+    }
+    params = [...params];
     queue.rows.push(params);
+    queue.rowChannels.set(params, channel);
+    if (context && params && typeof params === 'object') queue.rowContexts.set(params, context);
     stats.queued++; stats.pending++;
+    ensureFlushTimer();
     if (queue.rows.length >= batchSize) {
       flushQueue(queue);
-    } else {
-      ensureFlushTimer();
     }
+    return true;
   }
 
   return {

@@ -1,5 +1,6 @@
 const { definitions, schemas, validateValue } = require('./toolSchemas');
 const { createAlgorithmLab } = require('../algorithm-lab/service');
+const { createHistoryAnalysis, selectHistoryRecords } = require('../history-analysis/service');
 const { validateBuiltinTemplate } = require('../../extension-host/workspace/builtinSystemTemplates');
 const { nativeInputs, validateNativeConfiguration } = require('../../extension-host/workspace/builtinSystemConfiguration');
 const { observeFrames } = require('./frameObserver');
@@ -234,6 +235,7 @@ function createAgentTools({ root, httpBaseUrl = 'http://127.0.0.1:19245', wsUrl 
   const base = localBase(httpBaseUrl, 'http:');
   const websocket = localBase(wsUrl, 'ws:');
   const lab = root ? createAlgorithmLab({ root, request }) : null;
+  const history = createHistoryAnalysis({ request });
 
   /** 在 Agent 首次启用用户分类包前，用目标系统的真实通道核验输入节奏。 */
   async function verifyUserClassifierActivation(configuration, previous, systemId, editor, packages, context) {
@@ -278,6 +280,12 @@ function createAgentTools({ root, httpBaseUrl = 'http://127.0.0.1:19245', wsUrl 
   /** 读取资料目录供用户选择，模型不能修改用户的数据授权范围。 */
   async function listAlgorithmRecords(payload = {}, context = {}) { return request('/api/agent-algorithms/records', { ...context, method: 'POST', body: { offset: payload.offset || 0 } }); }
 
+  /** 历史描述分析独立验选，保留原分类训练的标签与分组约束。 */
+  async function selectHistory(value) {
+    if (value == null) return null;
+    return selectHistoryRecords(value, await listAlgorithmRecords({ offset: value.catalogOffset }));
+  }
+
   /** 将 UI 标签和范围绑定到刚读回的真实记录目录。 */
   async function selectAlgorithmRecords(value) {
     if (value == null) return null;
@@ -308,6 +316,7 @@ function createAgentTools({ root, httpBaseUrl = 'http://127.0.0.1:19245', wsUrl 
     const abort = () => controller.abort();
     signal?.addEventListener('abort', abort, { once: true });
     let responded = false;
+    const readOnly = method === 'GET' || ['/api/agent-algorithms/records', '/api/agent-algorithms/frames'].includes(route);
     try {
       const response = await fetchImpl(`${base}${route}`, { method, redirect: 'error', signal: controller.signal, headers: { 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
       if (Number(response.headers?.get?.('content-length')) > LIMIT_BYTES) throw fail('AGENT_RESPONSE_TOO_LARGE', 'Local API response exceeds the tool limit');
@@ -325,7 +334,7 @@ function createAgentTools({ root, httpBaseUrl = 'http://127.0.0.1:19245', wsUrl 
       if (!response.ok || (typeof value.code === 'number' && value.code !== 0)) throw fail(value.errorCode || (typeof value.code === 'string' ? value.code : 'AGENT_HTTP_ERROR'), value.error || value.message || `Local API HTTP ${response.status}`, value.details);
       return unwrap(value);
     } catch (cause) {
-      if (method !== 'GET' && !responded) throw fail('AGENT_OPERATION_UNCERTAIN', 'The write was sent but its result is unknown. Read the system before retrying.');
+      if (!readOnly && !responded) throw fail('AGENT_OPERATION_UNCERTAIN', 'The write was sent but its result is unknown. Read the system before retrying.');
       if (controller.signal.aborted) throw fail(signal?.aborted ? 'AGENT_CANCELLED' : 'AGENT_HTTP_TIMEOUT', signal?.aborted ? 'Task cancelled' : 'Local API request timed out');
       if (cause.code) throw cause;
       throw fail('AGENT_HTTP_UNAVAILABLE', 'Local platform API is unavailable');
@@ -436,6 +445,20 @@ function createAgentTools({ root, httpBaseUrl = 'http://127.0.0.1:19245', wsUrl 
   async function execute(name, args = {}, context = {}) {
     if (!Object.hasOwn(schemas, name)) throw fail('AGENT_UNKNOWN_TOOL', `Unknown tool: ${name}`);
     try { if (Buffer.byteLength(JSON.stringify(args)) > LIMIT_BYTES) throw new Error('arguments exceed the size limit'); validateValue(args, schemas[name]); } catch (cause) { throw fail('AGENT_INVALID_ARGUMENTS', cause.message); }
+    if (name === 'get_history_workspace') return { selection: context.historySelection || null, reports: context.analysisRuns || [],
+      guidance: '单条无标签记录也可分析；缺少选择时调用 request_history_data。在本机计算后引用来源，不把描述指标冒充舒适度或准确率。' };
+    if (name === 'analyze_history_data') {
+      const report = await history.analyze(context.historySelection, args, context);
+      context.onAnalysisReport?.(report);
+      return report;
+    }
+    if (name === 'request_history_data') {
+      if (typeof context.requestAlgorithmData !== 'function') throw fail('HISTORY_DATA_REQUEST_UNAVAILABLE', '请重启软件加载聊天内历史选数能力。');
+      const catalog = await listAlgorithmRecords({}, context);
+      const state = await request('/api/agent-device/status', context);
+      if (!catalog.systemId || catalog.systemId !== state.currentSystem?.id || state.currentSystem.kind === 'unknown') throw fail('HISTORY_SYSTEM_CHANGED', '请进入目标系统后选择历史记录。');
+      return context.requestAlgorithmData({ kind: 'history', systemId: catalog.systemId, message: args.message || '请选择要分析的记录及区间，无需填写类别标签。' });
+    }
     if (name === 'request_algorithm_data') {
       if (typeof context.requestAlgorithmData !== 'function') throw fail('ALGORITHM_DATA_REQUEST_UNAVAILABLE', '当前运行器尚不支持聊天内选择数据，请重启软件后重试。');
       const catalog = await listAlgorithmRecords({}, context);
@@ -800,7 +823,7 @@ function createAgentTools({ root, httpBaseUrl = 'http://127.0.0.1:19245', wsUrl 
     return { systemId: proposal.systemId, restored: true, verified: true, revision: editor.revision };
   }
 
-  return { definitions, execute, apply, restore, listAlgorithmRecords, selectAlgorithmRecords };
+  return { definitions, execute, apply, restore, listAlgorithmRecords, selectAlgorithmRecords, selectHistoryRecords: selectHistory };
 }
 
 module.exports = { createAgentTools };

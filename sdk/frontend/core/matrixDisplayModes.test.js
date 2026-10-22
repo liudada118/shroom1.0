@@ -6,11 +6,14 @@ import {
   createBuiltinMatrixRendererParams,
   createDirectionCheckFrame,
   createMatrixDisplayRenderers,
+  createRawMatrixRendererParams,
   inferMatrixDisplayModeId,
   getMatrixDisplayMode,
   resolveMatrixRendererType,
 } from './matrixDisplayModes.js';
 import { normalizeNumMatrixParams } from '../renderers/numMatrix/core/params.js';
+import { deriveGridSize, normalizePointGridParams } from '../renderers/pointGrid/core/params.js';
+import { buildPointGridBasePositions, runPointGridPipeline } from '../renderers/pointGrid/core/pipeline.js';
 
 describe('matrixDisplayModes', () => {
   it('只提供原生矩阵展示形式，默认 3D 点图', () => {
@@ -39,7 +42,7 @@ describe('matrixDisplayModes', () => {
       points: [[0, 0], [2, 0], [4, 0], [0, 3], [2, 3], [4, 3]],
     });
     expect(renderers.find((item) => item.id === 'numMatrix').params).toMatchObject({
-      backend: 'sprite3d',
+      backend: 'webgl',
       frameInput: 'raw',
       gridWidth: 3,
       gridHeight: 2,
@@ -47,6 +50,71 @@ describe('matrixDisplayModes', () => {
     expect(renderers.find((item) => item.id === 'webglHeatmap').params).toMatchObject({
       dataWidth: 3, dataHeight: 2, minFrameLength: 6, edgeClear: null, mirrorX: false, valueScale: 1,
     });
+  });
+
+  it('规则 32×32 点图插为 64×64 再补四层零边，原始输入保持 1024 点', () => {
+    const matrix = { rows: 32, cols: 32 };
+    const input = createDirectionCheckFrame(1024), original = input.slice();
+    const generated = createMatrixDisplayRenderers({ matrix }).find(item => item.id === 'pointGrid');
+    const builtin = createBuiltinMatrixRendererParams('pointGrid', { matrix });
+    for (const params of [normalizePointGridParams(generated.params), builtin]) {
+      for (const channel of [params.sit, params.back]) {
+        expect(channel.num1 * channel.num2).toBe(1024);
+        expect(channel).toMatchObject({ interp: 2, order: 4 });
+        expect(deriveGridSize(channel)).toEqual({ amountX: 72, amountY: 72, total: 5184 });
+        const displayed = runPointGridPipeline(input, channel, 2);
+        expect(displayed).toHaveLength(5184);
+        expect(displayed.every(Number.isFinite)).toBe(true);
+        const padded = runPointGridPipeline(input, channel, 0);
+        const interior = [], border = [];
+        for (let row = 0; row < 72; row++) for (let col = 0; col < 72; col++) {
+          const value = padded[row * 72 + col];
+          (row < 4 || col < 4 || row >= 68 || col >= 68 ? border : interior).push(value);
+        }
+        expect(border).toHaveLength(1088);
+        expect(border.every(value => value === 0)).toBe(true);
+        expect(interior).toEqual(runPointGridPipeline(input, { ...channel, order: 0 }, 0));
+      }
+    }
+    expect(input).toEqual(original);
+    expect(matrix).toEqual({ rows: 32, cols: 32 });
+  });
+
+  it('非方阵只加密显示点，不改变行列与输入点数', () => {
+    const matrix = { rows: 2, cols: 3 }, input = [1, 2, 3, 4, 5, 6];
+    const generated = createMatrixDisplayRenderers({ matrix }).find(item => item.id === 'pointGrid');
+    for (const params of [normalizePointGridParams(generated.params), createBuiltinMatrixRendererParams('pointGrid', { matrix })]) {
+      expect(params.sit).toMatchObject({ num1: 2, num2: 3, interp: 2, order: 4 });
+      expect(deriveGridSize(params.sit)).toEqual({ amountX: 12, amountY: 14, total: 168 });
+      expect(runPointGridPipeline(input, params.sit, 1)).toHaveLength(168);
+    }
+    expect(input).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it('有效物理坐标保持逐点形状和原有点数，不做规则网格插点', () => {
+    const matrix = { rows: 2, cols: 3 };
+    const coordinateMap = [[[0, 0], [2, 0], [8, 1]], [[1, 4], [4, 7], [9, 10]]];
+    const original = coordinateMap.map(row => row.map(point => point.slice()));
+    const generated = createMatrixDisplayRenderers({ matrix, coordinateMap }).find(item => item.id === 'pointGrid');
+    for (const params of [normalizePointGridParams(generated.params), createBuiltinMatrixRendererParams('pointGrid', { matrix, coordinateMap })]) {
+      expect(params.sit).toMatchObject({ num1: 2, num2: 3, interp: 1, order: 0 });
+      expect(params.back).toMatchObject({ interp: 1, order: 0 });
+      const grid = deriveGridSize(params.sit);
+      expect(grid).toEqual({ amountX: 2, amountY: 3, total: 6 });
+      expect(params.points).toEqual(coordinateMap.flat());
+      expect(Array.from(buildPointGridBasePositions({ ...grid, separation: 100, points: params.points })))
+        .toEqual([-90, 0, 100, -50, 0, 100, 70, 0, 80, -70, 0, 20, -10, 0, -40, 90, 0, -100]);
+    }
+    expect(coordinateMap).toEqual(original);
+  });
+
+  it('不完整的物理坐标不会把规则网格误判为保形点位', () => {
+    const context = { matrix: { rows: 2, cols: 3 }, coordinateMap: [[[0, 0]]] };
+    const generated = createMatrixDisplayRenderers(context).find(item => item.id === 'pointGrid');
+    for (const params of [normalizePointGridParams(generated.params), createBuiltinMatrixRendererParams('pointGrid', context)]) {
+      expect(params.points).toBeNull();
+      expect(params.sit).toMatchObject({ num1: 2, num2: 3, interp: 2, order: 4 });
+    }
   });
 
   it('生成方向校验帧并兼容旧 renderer id', () => {
@@ -61,7 +129,8 @@ describe('matrixDisplayModes', () => {
     const renderer = createMatrixDisplayRenderers({ matrix: { rows: 23, cols: 23 } })
       .find((item) => item.id === 'numMatrix');
     expect(normalizeNumMatrixParams(renderer.params)).toMatchObject({
-      backend: 'sprite3d', frameInput: 'raw', gridWidth: 23, gridHeight: 23,
+      backend: 'webgl', frameInput: 'raw', gridWidth: 23, gridHeight: 23,
+      webgl: { whiteOnZero: false, textColor: '#4ec7ff', indexRow: true, indexColumn: true },
     });
     expect(renderer.label).toBe('2D 数字');
     expect(MATRIX_DISPLAY_MODES.filter((mode) => mode.kind === 'values')).toHaveLength(1);
@@ -69,7 +138,20 @@ describe('matrixDisplayModes', () => {
     expect(inferMatrixDisplayModeId('numMatrix2d')).toBe('matrix-values-2d');
     expect(resolveMatrixRendererType('numMatrix2d')).toBe('numMatrix');
     expect(normalizeNumMatrixParams({ backend: 'webgl', webgl: { variant: 'original' } }).webgl)
-      .toMatchObject({ whiteOnZero: true, zeroTextColor: '#999' });
+      .toMatchObject({ whiteOnZero: false, zeroTextColor: null, indexRow: true, indexColumn: true });
+  });
+
+  it('兼容旧蓝底数字配置，保留精度、转置和矩形几何且不修改原对象', () => {
+    const previous = { backend: 'sprite3d', frameInput: 'raw', gridWidth: 23, gridHeight: 16,
+      decimalScale: 10, webgl: { variant: 'original', rawTranspose: true, whiteOnZero: true,
+        zeroTextColor: '#999', indexRow: false } };
+    const before = structuredClone(previous);
+    expect(normalizeNumMatrixParams(createRawMatrixRendererParams(previous))).toMatchObject({
+      backend: 'webgl', frameInput: 'raw', gridWidth: 23, gridHeight: 16, decimalScale: 10,
+      webgl: { variant: 'original', rawTranspose: true, whiteOnZero: false, zeroTextColor: null,
+        textColor: '#4ec7ff', indexRow: true, indexColumn: true },
+    });
+    expect(previous).toEqual(before);
   });
 
   it('为所有通用矩阵渲染器生成同一份 2×3 输入参数', () => {
@@ -90,9 +172,12 @@ describe('matrixDisplayModes', () => {
       'blobHeatmap',
     ]);
     expect(createBuiltinMatrixRendererParams('numMatrix', context)).toMatchObject({
+      backend: 'webgl',
+      frameInput: 'raw',
       gridWidth: 3,
       gridHeight: 2,
       textureValueMax: 6,
+      webgl: { indexRow: true, indexColumn: true, whiteOnZero: false },
     });
     expect(createBuiltinMatrixRendererParams('pointGrid', context)).toMatchObject({
       sit: { num1: 2, num2: 3, interp: 1, order: 0 },

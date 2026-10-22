@@ -55,7 +55,7 @@ function resolveOutputPublisher(frameOutputPipeline, outputChannel) {
   if (outputChannel === 'back') return frameOutputPipeline.publishBack;
   if (outputChannel === 'head') return frameOutputPipeline.publishHead;
   if (typeof frameOutputPipeline.publishAux !== 'function') return null;
-  return (frame) => frameOutputPipeline.publishAux(outputChannel, frame);
+  return (frame, options) => frameOutputPipeline.publishAux(outputChannel, frame, options);
 }
 
 /**
@@ -124,6 +124,9 @@ function bindDisplaySystemRuntimeChannels({
         const currentSerialStatus = serialManager?.getStatus?.(channel.serialRole) || null;
         return {
           timestamp,
+          collectionToken: frameOutputPipeline?.beginCollectionFrame?.({ channelId: channel.id, displaySystemId: channel.displaySystemId,
+            outputChannel: bindingBase.outputChannel, runtimeSource: 'display-system', timestamp,
+            stored: bindingBase.stored && getRuntimeMode({ runtimeMode }) !== 'shadow' }),
           serial: {
             role: channel.serialRole,
             portId: currentSerialStatus?.portId || channel.serialRole,
@@ -169,7 +172,7 @@ function bindDisplaySystemRuntimeChannels({
         return {
           published: true,
           processedFrame: frameWithSerial,
-          output: outputPublisher(frameWithSerial),
+          output: outputPublisher(frameWithSerial, { collectionToken: frameContext.collectionToken }),
         };
       }
 
@@ -190,10 +193,20 @@ function bindDisplaySystemRuntimeChannels({
         // 物理串口和采样时刻必须在算法开始前冻结。异步算法完成前设备可能重连到另一 COM，
         // 若 resolve 后再读状态，就会把旧帧错误记到新串口上。
         const frameContext = captureFrameContext();
-        const processedFrame = frameProcessor.processFrame(frame, frameContext);
-        return processedFrame && typeof processedFrame.then === 'function'
-          ? processedFrame.then((result) => publishProcessedFrame(result, frameContext))
-          : publishProcessedFrame(processedFrame, frameContext);
+        /** Settle admission even when a processor rejects, throws, or declines publication. */
+        const finish = (error, result) => frameOutputPipeline?.endCollectionFrame?.(frameContext.collectionToken,
+          { error, stored: result?.output?.stored === true });
+        /** Publish the processed frame before releasing its captured storage fence. */
+        const publish = (result) => {
+          try { const output = publishProcessedFrame(result, frameContext); finish(null, output); return output; }
+          catch (error) { finish(error); throw error; }
+        };
+        try {
+          const processedFrame = frameProcessor.processFrame(frame, { timestamp: frameContext.timestamp, serial: frameContext.serial });
+          return processedFrame && typeof processedFrame.then === 'function'
+            ? processedFrame.then(publish, (error) => { finish(error); throw error; })
+            : publish(processedFrame);
+        } catch (error) { finish(error); throw error; }
       }
 
       return {

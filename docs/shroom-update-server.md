@@ -1,5 +1,20 @@
 # Shroom 更新服务器与上传
 
+> **2026-10-19 当前线上路由：MinIO。** `/shroom1/` 已代理到 `http://127.0.0.1:9000/data/shroom1/`，即桶 `data`、对象前缀 `shroom1/`。下文 9 月的 `/data/shroom1` 静态目录与 SSH 上传步骤保留作迁移记录，不能当作当前 MinIO 的发布方法；不要把文件写入 MinIO 的磁盘存储目录。
+
+## 当前 MinIO 发布边界（2026-10-19）
+
+- Windows 更新入口为 `data/shroom1/latest.yml`；Mac 为 `data/shroom1/latest-mac.yml`。对象名大小写及前缀必须与公开 URL 一致。
+- macOS 自动更新必须上传同次正式构建的 `Shroom-<版本>-arm64-mac.zip` 和 `latest-mac.yml`。DMG 供手动安装，不能代替 ZIP；缺少差分 blockmap 可回退整包下载，不能用 DMG 伪造自动更新清单。
+- `npm run build-mac-release` 在 Mac 上按既有签名、公证流程生成正式 ZIP、DMG 和清单；详见 [Mac 发布流程](mac_release_flow.md)。当前 `npm run upload` **仅处理 Windows 并写静态 SSH 目录**，不会上传 Mac，也不是 MinIO 上传命令。
+- 使用已有 MinIO 控制台或已配置的 `mc` 别名上传。先上传清单引用的 ZIP，再上传清单；版本、ZIP SHA-512 与大小必须匹配，不覆盖同名不同内容的正式安装包。仅让已有更新前缀具备预期读取权限，不为排障开放整个桶。
+- 发布后通过公网读取 `https://shroom.jq-industries.com/shroom1/latest-mac.yml`，确认返回 YAML；再核对其 ZIP URL 的状态、大小、SHA-512 与范围请求。最终从兼容的旧版 M 系列 Mac 验收检查、下载、签名校验、收尾及重启安装。元数据上传成功不等同于客户升级成功。
+- `/data/html` 与 `/api/frontend/latest` 是**网页签名更新**，不提供 `latest-mac.yml`。网页更新与安装包更新分别发布，后端能力变更仍需安装包。
+
+本轮只读取证：公网 `latest-mac.yml` 返回 MinIO `NoSuchKey`/404；同前缀有 `Shroom-1.1.37-arm64.dmg`，未见 ZIP/清单。Windows 清单返回 1.1.36，网页清单返回发布号 `1792395247824`。这说明 Mac 发布文件缺失，不是密钥或 token 认证错误；取证不代表已经补传 Mac 版本。
+
+客户端 `app/update/updaterErrors.js` 将缺清单、文件不完整、网络、权限、哈希及签名异常转成有限错误码，主进程和更新引擎日志不复制原始 URL、响应头或堆栈。`UpdateNotifier` 兼容旧宿主的长错误，只显示本地化短提示并在详情保留；入口明确为“安装包更新”，不会悄悄改走网页更新。源代码修复需另行打包/发布后才到客户设备。
+
 目标更新地址：`https://shroom.jq-industries.com/shroom1`。
 SFTP/SSH：`root@shroom.jq-industries.com`，端口 `20202`。
 

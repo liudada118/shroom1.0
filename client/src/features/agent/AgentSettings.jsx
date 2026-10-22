@@ -1,78 +1,79 @@
-import React, { useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import DEFAULT_MODEL_CATALOG from '../../../../shared/agent-model-catalog.json';
 import { DEFAULT_AGENT_SETTINGS, agentErrorMessage } from './agentState';
 import AgentSyncSettings from './AgentSyncSettings';
 import AgentSystemSubmissionSettings from './AgentSystemSubmissionSettings';
 
-// 常用模型预设；实际调用权限由 API 账户决定，未列出的模型可手动填写。
-const OPENAI_MODELS = [
-  { value: 'gpt-5-mini', label: 'GPT-5 mini' },
-  { value: 'gpt-5.4-mini', label: 'GPT-5.4 mini' },
-  { value: 'gpt-5.4', label: 'GPT-5.4' },
-  { value: 'gpt-4.1-mini', label: 'GPT-4.1 mini' },
-];
-// 用户当前服务商提供的 Codex 模型 ID；此清单不代表其他服务的可用模型。
-const CODEX_MODELS = [
-  { value: 'gpt-6-astra', label: 'ChatGPT-6-Astra' },
-  { value: 'gpt-5.6-sol', label: 'ChatGPT-5.6-Sol' },
-  { value: 'gpt-5.6-terra', label: 'ChatGPT-5.6-Terra' },
-  { value: 'gpt-5.5', label: 'ChatGPT-5.5' },
-  { value: 'gpt-5.5-openai-compact', label: 'ChatGPT-5.5-OpenAI-Compact' },
-];
-const DEEPSEEK_MODELS = [
-  { value: 'deepseek-flash', label: 'DeepSeek Flash' },
-  { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
-];
-const OFFICIAL_URLS = {
-  deepseek: 'https://api.deepseek.com',
-  openai: 'https://api.openai.com/v1',
-};
+/** 比较连接地址时忽略结尾斜杠，不改写用户实际填写的地址。 */
+function normalizedUrl(value) { return String(value || '').trim().replace(/\/+$/, ''); }
 
-/** 从已保存地址识别官方服务，其他地址保留为自定义连接。 */
-function providerFromUrl(value) {
-  const normalized = String(value || '').replace(/\/+$/, '');
-  return Object.keys(OFFICIAL_URLS).find((provider) => OFFICIAL_URLS[provider] === normalized) || 'custom';
+/** 只按完整地址识别目录服务，未登记的当前连接继续作为自定义地址。 */
+function providerFromUrl(value, providers) {
+  return providers.find((provider) => provider.id !== 'custom' && normalizedUrl(provider.baseUrl) === normalizedUrl(value))?.id || 'custom';
 }
 
-/** 只给当前服务商显示适合的模型预设，仍允许手动输入其他 ID。 */
-function modelGroupsFor(provider) {
-  if (provider === 'deepseek') return [{ label: 'DeepSeek 官方', models: DEEPSEEK_MODELS }];
-  if (provider === 'openai') return [{ label: 'OpenAI', models: OPENAI_MODELS }];
-  return [
-    { label: 'Codex（RelaxyCode）', models: CODEX_MODELS },
-    { label: 'OpenAI 兼容模型', models: OPENAI_MODELS },
-    { label: 'DeepSeek 兼容模型', models: DEEPSEEK_MODELS },
-  ];
-}
-
-/** 编辑模型连接；密钥只存在于输入框生命周期并通过桌面桥提交。 */
-export default function AgentSettings({ settings = DEFAULT_AGENT_SETTINGS, onSave, onClose, disabled, chatSync, onSaveSync, onRetrySync }) {
+/** 编辑模型连接；目录刷新只改变选项，地址、模型和密钥保持当前表单值。 */
+export default function AgentSettings({ settings = DEFAULT_AGENT_SETTINGS, onSave, onClose, disabled, onLoadModelCatalog, chatSync, onSaveSync, onRetrySync, onClearSync, onRestoreSync }) {
+  const [catalog, setCatalog] = useState({ ...DEFAULT_MODEL_CATALOG, source: 'default', updatedAt: null });
   const initialBaseUrl = settings.baseUrl || DEFAULT_AGENT_SETTINGS.baseUrl;
-  const initialProvider = providerFromUrl(initialBaseUrl);
-  const [provider, setProvider] = useState(initialProvider);
-  const [customBaseUrl, setCustomBaseUrl] = useState(initialProvider === 'custom' ? initialBaseUrl : '');
-  const baseUrl = provider === 'custom' ? customBaseUrl : OFFICIAL_URLS[provider];
-  const initialModel = settings.model?.trim() || (initialProvider === 'deepseek' ? 'deepseek-flash' : 'gpt-5-mini');
-  const isPreset = modelGroupsFor(initialProvider).some((group) => group.models.some((option) => option.value === initialModel));
-  const [modelChoice, setModelChoice] = useState(isPreset ? initialModel : 'custom');
-  const [customModel, setCustomModel] = useState(isPreset ? '' : initialModel);
-  const previousModels = useRef({ [initialProvider]: initialModel });
-  const model = modelChoice === 'custom' ? customModel : modelChoice;
+  const initialProvider = DEFAULT_MODEL_CATALOG.providers.find((item) => item.id === providerFromUrl(initialBaseUrl, DEFAULT_MODEL_CATALOG.providers));
+  const [providerChoice, setProviderChoice] = useState(null);
+  const [baseUrl, setBaseUrl] = useState(initialBaseUrl);
+  const [model, setModel] = useState(settings.model?.trim() || initialProvider.defaultModel);
+  const [manualModel, setManualModel] = useState(false);
+  const previousModels = useRef({});
+  const previousCustomUrl = useRef(initialProvider.id === 'custom' ? initialBaseUrl : '');
   const [apiKey, setApiKey] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogWarning, setCatalogWarning] = useState('');
+  const catalogRequest = useRef(0);
   const errorRef = useRef(null);
-  const hasCurrentKey = Boolean(settings.hasApiKey && providerFromUrl(settings.baseUrl) === provider
-    && String(settings.baseUrl || '').replace(/\/+$/, '') === baseUrl.trim().replace(/\/+$/, ''));
+  const matchedProvider = providerFromUrl(baseUrl, catalog.providers);
+  const provider = providerChoice === 'custom' ? 'custom'
+    : providerChoice && catalog.providers.some((item) => item.id === providerChoice && normalizedUrl(item.baseUrl) === normalizedUrl(baseUrl)) ? providerChoice
+      : providerChoice ? 'custom' : matchedProvider;
+  const providerInfo = catalog.providers.find((item) => item.id === provider);
+  const isPreset = providerInfo.models.some((option) => option.id === model);
+  const modelChoice = manualModel || !isPreset ? 'custom' : model;
+  const hasCurrentKey = Boolean(settings.hasApiKey && normalizedUrl(settings.baseUrl) === normalizedUrl(baseUrl));
 
-  /** 切换服务商时回填官方地址，并恢复该服务商在本次表单中的模型选择。 */
+  /** 后台读取公共模型目录，不提交当前连接或密钥，也不触发设置保存。 */
+  const loadCatalog = useCallback(async (refresh = false) => {
+    if (!onLoadModelCatalog) return;
+    const request = ++catalogRequest.current;
+    setCatalogLoading(true);
+    setCatalogWarning('');
+    try {
+      const result = await onLoadModelCatalog({ refresh });
+      if (catalogRequest.current !== request) return;
+      if (!Array.isArray(result?.providers) || !result.providers.some((item) => item.id === 'custom')) throw new Error('目录不可用');
+      setCatalog(result);
+      setCatalogWarning(result.warning || '');
+    } catch {
+      if (catalogRequest.current === request) setCatalogWarning('模型目录暂时无法更新，仍可使用现有选项或手动填写。');
+    } finally {
+      if (catalogRequest.current === request) setCatalogLoading(false);
+    }
+  }, [onLoadModelCatalog]);
+
+  useEffect(() => {
+    void loadCatalog();
+    return () => { catalogRequest.current += 1; };
+  }, [loadCatalog]);
+
+  /** 显式切换服务时才回填目录地址，并清空尚未保存的密钥。 */
   const changeProvider = (nextProvider) => {
-    previousModels.current[provider] = model;
-    const nextModel = previousModels.current[nextProvider]
-      || (nextProvider === 'deepseek' ? 'deepseek-flash' : nextProvider === 'openai' ? 'gpt-5-mini' : 'gpt-6-astra');
-    const preset = modelGroupsFor(nextProvider).some((group) => group.models.some((option) => option.value === nextModel));
-    setProvider(nextProvider);
-    setModelChoice(preset ? nextModel : 'custom');
-    setCustomModel(preset ? '' : nextModel);
+    const nextInfo = catalog.providers.find((item) => item.id === nextProvider);
+    if (!nextInfo) return;
+    previousModels.current[`${provider}:${normalizedUrl(baseUrl)}`] = model;
+    if (provider === 'custom') previousCustomUrl.current = baseUrl;
+    const nextUrl = nextProvider === 'custom' ? previousCustomUrl.current : nextInfo.baseUrl;
+    setProviderChoice(nextProvider);
+    setBaseUrl(nextUrl);
+    setModel(previousModels.current[`${nextProvider}:${normalizedUrl(nextUrl)}`] || nextInfo.defaultModel);
+    setManualModel(false);
     setApiKey('');
     setError('');
   };
@@ -96,29 +97,27 @@ export default function AgentSettings({ settings = DEFAULT_AGENT_SETTINGS, onSav
 
   return <section className="shroom-agent-settings" aria-labelledby="shroom-agent-settings-title">
     <div className="shroom-agent-section-heading"><h3 id="shroom-agent-settings-title">模型连接</h3><button type="button" onClick={onClose}>返回对话</button></div>
-    <p className="shroom-agent-hint">DeepSeek 官方直连使用 Responses API 和工具调用。密钥不会写入聊天记录或浏览器存储。</p>
+    <p className="shroom-agent-hint">模型服务需支持 Responses API 和工具调用。密钥不会写入聊天记录或浏览器存储。</p>
+    <div className="shroom-agent-section-heading"><span>可用服务与模型</span><button type="button" onClick={() => loadCatalog(true)} disabled={catalogLoading || !onLoadModelCatalog || saving || disabled}>{catalogLoading ? '正在刷新…' : '刷新模型列表'}</button></div>
+    <p className="shroom-agent-hint" role="status">{catalogLoading ? '正在读取模型目录…' : catalog.source === 'remote' ? '模型目录已从服务器更新。' : catalog.source === 'cache' ? '使用本机缓存的模型目录。' : '使用内置模型目录。'}{catalogWarning && ` ${catalogWarning}`}</p>
     <form onSubmit={submit}>
       <label htmlFor="shroom-agent-provider">模型服务商</label>
       <select id="shroom-agent-provider" value={provider} onChange={(event) => changeProvider(event.target.value)} disabled={saving || disabled}>
-        <option value="deepseek">DeepSeek 官方 API</option>
-        <option value="openai">OpenAI 官方 API</option>
-        <option value="custom">自定义地址／中转站</option>
+        {catalog.providers.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
       </select>
       <label htmlFor="shroom-agent-base-url">服务地址</label>
-      <input id="shroom-agent-base-url" type="url" value={baseUrl} onChange={(event) => setCustomBaseUrl(event.target.value)} required readOnly={provider !== 'custom'} disabled={saving || disabled} autoComplete="url" spellCheck={false} />
+      <input id="shroom-agent-base-url" type="url" value={baseUrl} onChange={(event) => { setProviderChoice('custom'); setBaseUrl(event.target.value); setApiKey(''); }} required readOnly={provider !== 'custom'} disabled={saving || disabled} autoComplete="url" spellCheck={false} />
       <label htmlFor="shroom-agent-model">模型名称</label>
-      <select id="shroom-agent-model" value={modelChoice} onChange={(event) => setModelChoice(event.target.value)} disabled={saving || disabled} aria-describedby="shroom-agent-model-hint">
-        {modelGroupsFor(provider).map((group) => <optgroup key={group.label} label={group.label}>
-          {group.models.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </optgroup>)}
+      <select id="shroom-agent-model" value={modelChoice} onChange={(event) => { setManualModel(event.target.value === 'custom'); if (event.target.value !== 'custom') setModel(event.target.value); }} disabled={saving || disabled} aria-describedby="shroom-agent-model-hint">
+        {providerInfo.models.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
         <option value="custom">其他模型（手动填写）</option>
       </select>
       {modelChoice === 'custom' && <>
         <label htmlFor="shroom-agent-custom-model">自定义模型 ID</label>
-        <input id="shroom-agent-custom-model" value={customModel} onChange={(event) => setCustomModel(event.target.value)} required disabled={saving || disabled} placeholder="填写服务商提供的模型 ID" autoComplete="off" spellCheck={false} />
+        <input id="shroom-agent-custom-model" value={model} onChange={(event) => setModel(event.target.value)} required disabled={saving || disabled} placeholder="填写服务商提供的模型 ID" autoComplete="off" spellCheck={false} />
       </>}
       <p id="shroom-agent-model-hint" className="shroom-agent-hint">按所用服务选择模型，或手动填写模型 ID。可用模型以当前 API 密钥所属分组的授权为准。</p>
-      {provider === 'deepseek' && <p className="shroom-agent-hint">图片任务请选择 DeepSeek Flash；V4 Pro 官方暂不支持图片输入。</p>}
+      {providerInfo.hint && <p className="shroom-agent-hint">{providerInfo.hint}</p>}
       <label htmlFor="shroom-agent-api-key">API 密钥{hasCurrentKey && <span> · 已配置</span>}</label>
       <input id="shroom-agent-api-key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} disabled={saving || disabled}
         placeholder={hasCurrentKey ? '留空以保留当前密钥' : '输入当前服务商的 API 密钥'} autoComplete="off" spellCheck={false} aria-describedby="shroom-agent-key-hint" />
@@ -126,7 +125,7 @@ export default function AgentSettings({ settings = DEFAULT_AGENT_SETTINGS, onSav
       {error && <p className="shroom-agent-inline-error" role="alert" tabIndex={-1} ref={errorRef}>{error}</p>}
       <button className="shroom-agent-primary" type="submit" disabled={saving || disabled}>{saving ? '正在保存…' : '保存连接设置'}</button>
     </form>
-    <AgentSyncSettings sync={chatSync} onSave={onSaveSync} onRetry={onRetrySync} />
+    <AgentSyncSettings sync={chatSync} onSave={onSaveSync} onRetry={onRetrySync} onClear={onClearSync} onRestore={onRestoreSync} />
     <AgentSystemSubmissionSettings />
   </section>;
 }

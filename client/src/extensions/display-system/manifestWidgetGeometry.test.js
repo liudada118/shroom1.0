@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import * as THREE from 'three';
+import { deriveGridSize, normalizePointGridParams } from '../../../../sdk/frontend/renderers/pointGrid/core/params.js';
+import { buildPointGridBasePositions, runPointGridPipeline } from '../../../../sdk/frontend/renderers/pointGrid/core/pipeline.js';
+import { gridSelectionStats, projectGridSensors } from '../../../../sdk/frontend/renderers/shared/gridSelection.js';
 import {
   buildManifestWidgetRendererParams,
   buildManifestWidgetSourceOptions,
@@ -123,6 +127,31 @@ describe('manifest widget source choices', () => {
 });
 
 describe('manifest widget renderer params', () => {
+  it.each([
+    ['numMatrix', { backend: 'sprite3d', frameInput: 'raw' }],
+    ['numMatrix', { backend: 'webgl', webgl: { variant: 'original', whiteOnZero: true, zeroTextColor: '#999' } }],
+    ['numMatrix2d', { backend: 'webgl', frameInput: 'raw' }],
+    ['numMatrix', {}],
+  ])('旧原始数字%s在运行时统一蓝底及索引，不改变输入方向、精度或点位', (rendererId, legacy) => {
+    const matrix = { rows: 16, cols: 23 }, coordinateMap = [[[3, 9], [4, 8]]];
+    const params = { ...legacy, gridWidth: 1, gridHeight: 1, decimalScale: 10, coordinateMap,
+      webgl: { ...legacy.webgl, rawTranspose: true, indexRow: false } };
+    const before = structuredClone({ params, matrix, coordinateMap });
+    const result = buildManifestWidgetRendererParams({ rendererId, params, matrix, coordinateMap });
+    expect(result).toMatchObject({ backend: 'webgl', frameInput: 'raw', gridWidth: 23, gridHeight: 16,
+      decimalScale: 10, coordinateMap, webgl: { rawTranspose: true, whiteOnZero: false,
+        zeroTextColor: null, textColor: '#4ec7ff', indexRow: true, indexColumn: true } });
+    expect({ params, matrix, coordinateMap }).toEqual(before);
+  });
+
+  it.each([
+    { backend: 'sprite3d', frameInput: 'filtered' },
+    { backend: 'canvas2d', frameInput: 'raw', canvas2d: { baseTiltDeg: 30 } },
+  ])('显式三维数字配置仍沿用原后端$backend', (params) => {
+    expect(buildManifestWidgetRendererParams({ rendererId: 'numMatrix', params, matrix: { rows: 4, cols: 5 } }))
+      .toEqual({ ...params, gridWidth: 5, gridHeight: 4 });
+  });
+
   it('3D 点图按当前卡片覆写行列和坐标，不沿用第一路 points', () => {
     const params = buildManifestWidgetRendererParams({
       rendererId: 'pointGrid',
@@ -137,8 +166,8 @@ describe('manifest widget renderer params', () => {
     });
 
     expect(params.fps).toBe(20);
-    expect(params.sit).toMatchObject({ num1: 3, num2: 2, interp: 2 });
-    expect(params.back).toMatchObject({ num1: 3, num2: 2, interp: 2 });
+    expect(params.sit).toMatchObject({ num1: 3, num2: 2, interp: 1, order: 0 });
+    expect(params.back).toMatchObject({ num1: 3, num2: 2, interp: 1, order: 0 });
     expect(params.points).toEqual(rightCoordinates.coordinates.flat());
     expect(params.transposeAxes).toBe(false);
   });
@@ -180,5 +209,87 @@ describe('manifest widget renderer params', () => {
     expect(webglHeatmap).not.toHaveProperty('transposeAxes');
     expect(matrix).toEqual({ rows: 2, cols: 3 });
     expect(params).toEqual({ fps: 20, transposeAxes: false });
+  });
+
+  it('旧规则矩阵使用两倍渲染插值，非方阵框选仍只统计原始传感点', () => {
+    const source = Object.freeze([5, 10, 20, 30, 40, 90]);
+    const saved = Object.freeze({ sit: Object.freeze({ interp: 1, order: 4 }) });
+    const config = normalizePointGridParams(buildManifestWidgetRendererParams({
+      rendererId: 'pointGrid', params: saved, matrix: { rows: 2, cols: 3 },
+    }));
+    const grid = deriveGridSize(config.sit);
+    const values = runPointGridPipeline(source, config.sit, 2);
+    expect(grid).toMatchObject({ amountX: 12, amountY: 14 });
+    expect(values).toHaveLength(grid.total);
+    expect(values.every(Number.isFinite)).toBe(true);
+    expect(source).toEqual([5, 10, 20, 30, 40, 90]);
+    expect(saved.sit).toEqual({ interp: 1, order: 4 });
+
+    const camera = new THREE.OrthographicCamera(-1000, 1000, 1000, -1000, 1, 10000);
+    camera.position.set(0, 1000, 1000); camera.lookAt(0, 0, 0);
+    for (const transposeAxes of [false, true]) {
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(buildPointGridBasePositions({
+        ...grid, separation: 100, transposeAxes,
+      }), 3));
+      const points = new THREE.Points(geometry);
+      const projected = projectGridSensors({ points, camera,
+        canvas: { getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }) },
+        columns: 3, rows: 2, interpolation: config.sit.interp, padding: config.sit.order });
+      expect(projected).toHaveLength(24);
+      expect(projected.filter(point => point.sensor).map(point => point.index)).toEqual([0, 1, 2, 3, 4, 5]);
+      expect(gridSelectionStats(source, new Set(projected.map(point => point.index))))
+        .toMatchObject({ totalPres: 195, maxPres: 90, point: 6, selectedPoints: 6 });
+      geometry.dispose(); points.material.dispose();
+    }
+  });
+
+  it.each([undefined, 0])('旧规则点图补足默认四层零边，保存值 %s 不改变原配置或原始点数', (order) => {
+    const matrix = Object.freeze({ rows: 32, cols: 32 });
+    const saved = Object.freeze({ sit: Object.freeze({ interp: 1, ...(order !== undefined ? { order } : {}) }) });
+    const source = Object.freeze(Array.from({ length: 1024 }, (_, index) => index + 1));
+    const config = normalizePointGridParams(buildManifestWidgetRendererParams({ rendererId: 'pointGrid', params: saved, matrix }));
+    expect(config.sit).toMatchObject({ num1: 32, num2: 32, interp: 2, order: 4 });
+    expect(config.back).toMatchObject({ num1: 32, num2: 32, interp: 2, order: 4 });
+    const grid = deriveGridSize(config.sit);
+    expect(grid).toEqual({ amountX: 72, amountY: 72, total: 5184 });
+    const displayed = runPointGridPipeline(source, config.sit, 0);
+    expect(displayed).toHaveLength(5184);
+    expect(displayed.slice(0, 72 * 4).every(value => value === 0)).toBe(true);
+    expect(displayed.slice(-72 * 4).every(value => value === 0)).toBe(true);
+    const camera = new THREE.OrthographicCamera(-4000, 4000, 4000, -4000, 1, 10000);
+    camera.position.set(0, 5000, 0); camera.up.set(0, 0, -1); camera.lookAt(0, 0, 0);
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(buildPointGridBasePositions({ ...grid, separation: 100, transposeAxes: true }), 3));
+    const points = new THREE.Points(geometry);
+    const projected = projectGridSensors({ points, camera,
+      canvas: { getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }) },
+      columns: 32, rows: 32, interpolation: config.sit.interp, padding: config.sit.order });
+    expect(projected).toHaveLength(4096);
+    expect(projected.filter(point => point.sensor).map(point => point.index)).toEqual(Array.from({ length: 1024 }, (_, index) => index));
+    expect(gridSelectionStats(source, new Set(projected.map(point => point.index))))
+      .toMatchObject({ totalPres: 524800, point: 1024, selectedPoints: 1024 });
+    expect(source).toHaveLength(1024);
+    expect(matrix).toEqual({ rows: 32, cols: 32 });
+    expect(saved.sit).toEqual({ interp: 1, ...(order !== undefined ? { order } : {}) });
+    geometry.dispose(); points.material.dispose();
+  });
+
+  it.each([2, 6])('规则矩阵保留已明确配置的正数补边 %s', (order) => {
+    const config = buildManifestWidgetRendererParams({ rendererId: 'pointGrid',
+      matrix: { rows: 2, cols: 3 }, params: { sit: { order }, back: { order } } });
+    expect(config.sit.order).toBe(order);
+    expect(config.back.order).toBe(order);
+  });
+
+  it('物理点位表即使继承旧插值参数也保留真实形状', () => {
+    const config = normalizePointGridParams(buildManifestWidgetRendererParams({
+      rendererId: 'pointGrid', matrix: { rows: 3, cols: 2 }, coordinateMap: rightCoordinates,
+      params: { sit: { interp: 2, order: 4 } },
+    }));
+    const grid = deriveGridSize(config.sit);
+    expect(grid.total).toBe(6);
+    expect(Array.from(buildPointGridBasePositions({ ...grid, points: config.points, separation: 100 })))
+      .toEqual([-50, 0, 100, 50, 0, 100, -50, 0, 50, 50, 0, 50, -50, 0, -100, 50, 0, -100]);
   });
 });

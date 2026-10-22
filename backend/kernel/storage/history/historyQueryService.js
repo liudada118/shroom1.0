@@ -321,7 +321,7 @@ function queryHistoryRows(dbRef, date, limit, offset = 0, logger) {
   ensureHistoryIndexes(dbRef, logger);
   return dbAllHistory(
     dbRef,
-    'SELECT * FROM matrix WHERE date = ? ORDER BY id ASC LIMIT ? OFFSET ?',
+    `SELECT * FROM matrix WHERE date = ? ORDER BY ${dbRef.hand ? 'timestamp ASC, id ASC' : 'id ASC'} LIMIT ? OFFSET ?`,
     [date, limit, Math.max(0, offset)],
   );
 }
@@ -548,7 +548,7 @@ function getChannelHistoryStats(dbRef, date, channelId, logger) {
  * @param {object} logger 日志对象。
  * @returns {Array<object>} 历史行。
  */
-function queryChannelHistoryRows(dbRef, date, channelId, limit, offset = 0, logger) {
+function queryChannelHistoryRows(dbRef, date, channelId, limit, offset = 0, logger, range = {}) {
   if (
     !dbRef
     || !date
@@ -564,13 +564,19 @@ function queryChannelHistoryRows(dbRef, date, channelId, limit, offset = 0, logg
   ensureHistoryIndexes(dbRef, logger);
 
   const params = [date, ...filter.params];
+  let rangeClause = '';
+  for (const [key, column, operator] of [['maxId', 'id', '<='], ['startTimestamp', 'timestamp', '>='], ['endTimestamp', 'timestamp', '<=']]) {
+    if (range[key] == null) continue;
+    if (!Number.isFinite(range[key])) throw new RangeError('历史读取范围无效。');
+    rangeClause += ` AND ${column} ${operator} ?`; params.push(range[key]);
+  }
   params.push(Math.max(1, Math.floor(Number(limit))), Math.max(0, Math.floor(Number(offset) || 0)));
   try {
     return dbAllHistory(
       dbRef,
       `SELECT * FROM matrix
-       WHERE date = ?${filter.clause}
-       ORDER BY id ASC LIMIT ? OFFSET ?`,
+       WHERE date = ?${filter.clause}${rangeClause}
+       ORDER BY ${dbRef.hand ? 'timestamp ASC, id ASC' : 'id ASC'} LIMIT ? OFFSET ?`,
       params,
     );
   } catch (error) {
@@ -670,6 +676,13 @@ function createLazyHistoryRows(dbRef, date, stats) {
   const readByIndex = (index) => {
     if (!Number.isInteger(index) || index < 0 || index >= lengthValue || !minId) return undefined;
     if (cache.has(index)) return cache.get(index);
+    if (dbRef.hand) {
+      const offset = Math.floor(index / maxCacheSize) * maxCacheSize;
+      const rows = queryHistoryRows(dbRef, date, Math.min(maxCacheSize, lengthValue - offset), offset);
+      cache.clear();
+      rows.forEach((row, rowIndex) => cache.set(offset + rowIndex, row));
+      return cache.get(index);
+    }
 
     const row = dbGetHistory(
       dbRef,

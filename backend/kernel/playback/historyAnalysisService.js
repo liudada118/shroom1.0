@@ -1,3 +1,5 @@
+const { getPressureVestStatistics } = require('../../extensions/built-in-sensors/pressureVest');
+
 /**
  * 历史回放和框选统计服务。
  *
@@ -175,6 +177,12 @@ function createHistoryAnalysisService({
     runtime.sitPressSelect = [];
     runtime.sitAreaSelect = [];
     for (let i = 0; i < runtime.localData.length; i++) {
+      if (runtime.file === 'pressureVest') {
+        const statistics = getPressureVestStatistics(normalizeHistoryPressureData(runtime.localData[i], runtime.file));
+        runtime.sitPressSelect.push(statistics.totalPres);
+        runtime.sitAreaSelect.push(statistics.point);
+        continue;
+      }
       const newsit = [];
 
       if (isSmallBedMatrixType(runtime.file) || runtime.file === SMALL_BED_12B_TYPE || runtime.file === TEMP_FULL_BED_TYPE) {

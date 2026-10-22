@@ -62,11 +62,11 @@ function createHandGloveDoublePacketParser() {
    * @param {'left'|'right'} fallbackSide 默认手侧。
    * @returns {null | {complete: false, packetType: number, side: string}} 首包处理结果。
    */
-  function handleFirstPacket(buffer, fallbackSide = 'left') {
+  function handleFirstPacket(buffer, fallbackSide = 'left', options = {}) {
     if (!buffer || buffer.length !== FIRST_PACKET_LENGTH) return null;
 
     const bytes = toPacketBytes(buffer);
-    const side = getPacketSide(bytes[1], fallbackSide);
+    const side = options.routeByPacketType === false ? fallbackSide : getPacketSide(bytes[1], fallbackSide);
     chunks[side] = bytes.slice(2);
     return {
       complete: false,
@@ -82,11 +82,11 @@ function createHandGloveDoublePacketParser() {
    * @param {string} sourcePort 数据来源端口。
    * @returns {null | object} 完整压力帧和 IMU 数据。
    */
-  function handleSecondPacket(buffer, fallbackSide = 'left', sourcePort = 'sit') {
+  function handleSecondPacket(buffer, fallbackSide = 'left', sourcePort = 'sit', options = {}) {
     if (!buffer || buffer.length !== SECOND_PACKET_LENGTH) return null;
 
     const bytes = toPacketBytes(buffer);
-    const side = getPacketSide(bytes[1], fallbackSide);
+    const side = options.routeByPacketType === false ? fallbackSide : getPacketSide(bytes[1], fallbackSide);
     const firstChunk = chunks[side] || [];
     const rest = bytes.slice(2);
     const imuBytes = rest.slice(rest.length - 16);
@@ -111,13 +111,13 @@ function createHandGloveDoublePacketParser() {
    * @param {string} sourcePort 数据来源端口。
    * @returns {null | object} 分包处理结果。
    */
-  function handlePacket(buffer, fallbackSide = 'left', sourcePort = 'sit') {
+  function handlePacket(buffer, fallbackSide = 'left', sourcePort = 'sit', options = {}) {
     if (!buffer) return null;
     if (buffer.length === FIRST_PACKET_LENGTH) {
-      return handleFirstPacket(buffer, fallbackSide);
+      return handleFirstPacket(buffer, fallbackSide, options);
     }
     if (buffer.length === SECOND_PACKET_LENGTH) {
-      return handleSecondPacket(buffer, fallbackSide, sourcePort);
+      return handleSecondPacket(buffer, fallbackSide, sourcePort, options);
     }
     return null;
   }

@@ -16,6 +16,7 @@ const validDraft = {
   points_threshold_in: '3',
   sos_disable_area: ['6', '10'],
   min_sos_sequence: '2',
+  isLowBed: '0',
   threshold_factor: '1.25',
   continuous_on_bed_duration_minutes: '1',
   unlock_sitting_alarm_duration_minutes: '2',
@@ -33,11 +34,15 @@ const validDraft = {
 };
 
 describe('jqbed algorithm configuration model', () => {
-  it('defines exactly 18 fields in four groups with SOS selected first', () => {
-    expect(JQBED_CONFIG_FIELDS).toHaveLength(18);
+  it('defines exactly 19 fields in four groups with SOS selected first', () => {
+    expect(JQBED_CONFIG_FIELDS).toHaveLength(19);
     expect(JQBED_CONFIG_GROUPS.map((group) => group.key)).toEqual([
       'sos', 'basic', 'filter', 'advanced',
     ]);
+    expect(JQBED_CONFIG_FIELDS.find(({ key }) => key === 'isLowBed')).toMatchObject({
+      group: 'basic', kind: 'bedType',
+    });
+    expect(JQBED_CONFIG_FIELDS.some(({ key }) => key === 'head_foot_area')).toBe(false);
   });
 
   it('assigns the algorithm-defined meaning to every two-value field', () => {
@@ -58,9 +63,9 @@ describe('jqbed algorithm configuration model', () => {
     const en = resources.en.translation.jqbedAlgorithmConfig;
     const ja = resources.ja.translation.jqbedAlgorithmConfig;
 
-    expect(zh.fields.points_threshold_in.label).toBe('SOS 拍打点数');
-    expect(en.fields.points_threshold_in.label).toBe('SOS pat point count');
-    expect(ja.fields.points_threshold_in.label).toBe('SOS叩打ポイント数');
+    expect(zh.fields.points_threshold_in.label).toBe('SOS拍打点数下限');
+    expect(en.fields.points_threshold_in.label).toBe('Minimum SOS pat point count');
+    expect(ja.fields.points_threshold_in.label).toBe('SOS叩打点数の下限');
     expect([zh.front, zh.back, zh.minimum, zh.maximum, zh.head, zh.foot]).toEqual([
       '前', '后', '最小', '最大', '床头', '床尾',
     ]);
@@ -76,16 +81,17 @@ describe('jqbed algorithm configuration model', () => {
       en.fields.sitting_area.help,
       en.fields.small_object_size.help,
     ]).toEqual([
-      'Front and back boundaries excluded from SOS detection.',
-      'Front and back boundaries excluded from bed-exit detection.',
-      'Minimum and maximum values for sitting detection; 255,255 disables it.',
-      'Defines the row and column size of objects to filter.',
+      'Front and back area parameters excluded from SOS detection. Format from the algorithm provider: m,n.',
+      'Front and back area parameters for edge filtering. Format from the algorithm provider: m,n.',
+      'Minimum and maximum hip-width parameters for bed-edge sitting detection. Format from the algorithm provider: m,n; 255,255 disables it.',
+      'Row and column parameters for small-object filtering. Format from the algorithm provider: m,n.',
     ]);
     expect(en.fields.sensitivity_threshold.help).toContain('0 Default');
-    expect(zh.fields.sensitivity_threshold.help).toContain('实时返回的预留字段第 5～8 位');
-    expect(ja.fields.sensitivity_threshold.help).toContain('予約フィールド5～8');
-    expect(zh.fields.points_threshold_in.help).toBe('SOS 拍打检测使用的点数阈值。');
-    expect(ja.fields.points_threshold_in.help).toBe('SOS叩打検出に使用するポイント数のしきい値です。');
+    expect(zh.fields.sensitivity_threshold.help).toContain('reserved_bytes 第 5 位为灵敏度档位，第 6 位为床型');
+    expect(en.fields.sensitivity_threshold.help).toContain('field 5 is the sensitivity level and field 6 is the bed type');
+    expect(ja.fields.sensitivity_threshold.help).toContain('reserved_bytes の5番目は感度レベル、6番目はベッドの種類');
+    expect(zh.fields.points_threshold_in.help).toBe('SOS 拍打检测使用的点数下限。算法方说明：最低 3 点。');
+    expect(ja.fields.points_threshold_in.help).toBe('SOSの叩打検出に使用する点数の下限です。アルゴリズム提供元の説明：最小3点。');
   });
 
   it('shows only for jqbed and disables playback', () => {
@@ -142,14 +148,37 @@ describe('jqbed algorithm configuration model', () => {
     });
   });
 
+  it.each([0, 1, '0', '1'])('accepts explicit bed type %s without using the interface language', (isLowBed) => {
+    const draft = { ...validDraft, isLowBed };
+    expect(validateJqbedConfigDraft(draft)).toEqual({ valid: true, errors: {} });
+    expect(serializeJqbedConfigDraft(draft).isLowBed).toBe(Number(isLowBed));
+  });
+
+  it.each([-1, 2, 0.5, '1.5', 'invalid', '', null, true, false, NaN, Infinity, [], {}])(
+    'rejects invalid bed type %s with the bed-type error', (isLowBed) => {
+      expect(validateJqbedConfigDraft({ ...validDraft, isLowBed })).toEqual({
+        valid: false,
+        errors: { isLowBed: 'jqbedAlgorithmConfig.errors.bedType' },
+      });
+    },
+  );
+
+  it('does not expose the ineffective head/foot parameter to saved configuration', () => {
+    const draft = { ...validDraft, head_foot_area: [254, 254] };
+    expect(validateJqbedConfigDraft(draft).errors.head_foot_area).toBe('jqbedAlgorithmConfig.errors.unknown');
+    expect(serializeJqbedConfigDraft(draft)).not.toHaveProperty('head_foot_area');
+    expect(cloneJqbedConfigValues(draft)).not.toHaveProperty('head_foot_area');
+  });
+
   it('serializes numeric strings and switches while preserving pairs', () => {
     const serialized = serializeJqbedConfigDraft(validDraft);
 
-    expect(Object.keys(serialized)).toHaveLength(18);
+    expect(Object.keys(serialized)).toHaveLength(19);
     expect(serialized).toMatchObject({
       sos_peak_threshold: 22.5,
       filter_switch: 1,
       strel_switch: 0,
+      isLowBed: 0,
       sitting_area: [255, 255],
     });
     expect(serialized.sos_disable_area).not.toBe(validDraft.sos_disable_area);

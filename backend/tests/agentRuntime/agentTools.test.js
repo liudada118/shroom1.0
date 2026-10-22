@@ -294,7 +294,7 @@ test('builtin templates are discoverable and only saved after applying a reviewe
   const f = await fixture();
   try {
     const capabilities = await f.tools.execute('get_capabilities', { section: 'display' }, f.context);
-    assert.equal(capabilities.builtinTemplates.length, 28);
+    assert.equal(capabilities.builtinTemplates.length, 29);
     assert.equal((await f.tools.execute('read_system', { systemId: 'hand' }, f.context)).builtinTemplate.sourceType, 'hand');
     await f.tools.execute('prepare_builtin_system', { id: 'my-hand', name: '我的手部', sourceType: 'hand', summary: '继承手部检测' }, f.context);
     assert.equal(f.native.get('my-hand'), null);

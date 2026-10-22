@@ -84,6 +84,11 @@ function shutdownServer() {
   return Promise.resolve();
 }
 
+/** Recheck expiry immediately after desktop resume instead of waiting for the next timer. */
+function checkLicenseAccess() {
+  return getLegacyServer().checkLicenseAccess?.() || null;
+}
+
 /**
  * 取 WebSocket Server 实例。
  *
@@ -158,6 +163,9 @@ function getRuntimeStatus() {
     .map((channel) => channel.channelId);
   return {
     clients: getChannelClientCounts(getWsServer, realtimeChannelIds),
+    runtimeVersions: server.getRuntimeVersions?.() || {},
+    licenseAccess: server.getLicenseAccess?.() || null,
+    collectionSummary: server.getCollectionStatus?.()?.collectionSummary || null,
     channels,
     channelBus: typeof server.getChannelBusStatus === 'function'
       ? server.getChannelBusStatus()
@@ -170,6 +178,7 @@ function getRuntimeStatus() {
 
 module.exports = {
   broadcastRealtime,
+  checkLicenseAccess,
   commandRouter,
   getRuntimeStatus,
   getWsServer,

@@ -32,6 +32,7 @@ export default function PortalPlaybackDialog({
   loading = false,
   busy = false,
   error = '',
+  canExport = true,
 }) {
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(0);
@@ -61,7 +62,7 @@ export default function PortalPlaybackDialog({
 
   /** 下载拿到独立快照，不能覆盖正在查看的回放记录。 */
   function downloadSelected() {
-    if (!blocked && selection.downloadValues.length) onDownload?.([...selection.downloadValues]);
+    if (canExport && !blocked && selection.downloadValues.length) onDownload?.([...selection.downloadValues]);
   }
 
   return <Modal
@@ -76,6 +77,7 @@ export default function PortalPlaybackDialog({
   >
     <section className="portal-playback-content" aria-label="当前系统采集记录" aria-busy={blocked}>
       <p className="portal-playback-hint">圆形按钮单选回放，方形按钮多选下载；两种选择互不影响。</p>
+      {!canExport && <p role="status">当前授权可以回放和分析历史数据，但不能下载数据或导出分析结果。</p>}
       <div className="portal-playback-searchbar">
         <label className="portal-playback-search" htmlFor={searchId}>
           <SearchOutlined aria-hidden="true" />
@@ -89,7 +91,7 @@ export default function PortalPlaybackDialog({
       <div className="portal-playback-batch">
         <span aria-live="polite" aria-atomic="true">{filtered.length} 条记录 · 已勾选 {selectedDownloads.size} 条下载</span>
         <div>
-          <button type="button" disabled={blocked || !onDownloadsChange || !filtered.some((record) => !record.disabled)}
+          <button type="button" disabled={!canExport || blocked || !onDownloadsChange || !filtered.some((record) => !record.disabled)}
             onClick={() => onDownloadsChange?.(selectFilteredDownloads(normalized, downloadValues, query))}>全选筛选结果</button>
           <button type="button" disabled={blocked || !onDownloadsChange || !selectedDownloads.size}
             onClick={() => onDownloadsChange?.([])}>清空勾选</button>
@@ -109,7 +111,7 @@ export default function PortalPlaybackDialog({
             </label></td>
             <td><label className="portal-playback-choice">
               <input type="checkbox" aria-label={`下载：${record.label}`} checked={selectedDownloads.has(record.value)}
-                disabled={blocked || record.disabled || !onDownloadsChange}
+                disabled={!canExport || blocked || record.disabled || !onDownloadsChange}
                 onChange={(event) => onDownloadsChange?.(togglePlaybackDownload(normalized, downloadValues, record.value, event.target.checked))} />
             </label></td>
             <td><div className="portal-playback-record"><strong>{record.label}</strong>
@@ -133,7 +135,7 @@ export default function PortalPlaybackDialog({
         <div className="portal-playback-actions">
           {onDelete && <button type="button" className="portal-playback-delete" disabled={blocked || selection.playbackValue === null}
             onClick={() => onDelete(selection.playbackValue)}>删除单选记录</button>}
-          <button type="button" onClick={downloadSelected} disabled={blocked || !selection.downloadValues.length || !onDownload}>
+          <button type="button" onClick={downloadSelected} disabled={!canExport || blocked || !selection.downloadValues.length || !onDownload}>
             <DownloadOutlined aria-hidden="true" />下载已勾选 ({selection.downloadValues.length})
           </button>
           <button type="button" className="is-primary" onClick={playSelected} disabled={blocked || selection.playbackValue === null || !onPlay}>

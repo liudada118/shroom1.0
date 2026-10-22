@@ -56,9 +56,57 @@ function isJqbedAlgorithmConfigMessage(message) {
  * @param {Function} options.broadcastJson 广播给全部客户端（参数变更要让所有界面同步）。
  * @param {Function} options.getAlgorithmStatus 取 Python 算法当前状态
  *        （waiting/ready/错误），随 load 一起回给前端。
- * @returns {{handle: Function}} 处理器。
+ * @returns {object} 配置与只读算法日志的协议处理器。
  */
 function createJqbedAlgorithmProtocol({ store, sendJson, broadcastJson, getAlgorithmStatus }) {
+  const logSubscribers = new Set();
+  const logGenerations = new WeakMap();
+  let logSequence = 0;
+
+  /** 连接关闭或取消订阅时释放日志接收者。 */
+  function removeClient(client) {
+    logSubscribers.delete(client);
+    logGenerations.delete(client);
+  }
+
+  /** 冻结本次算法调用的订阅代次，避免晚结果发给新订阅。 */
+  function captureLogSubscribers() {
+    const recipients = [];
+    for (const client of logSubscribers) {
+      if (client?.readyState !== 1) removeClient(client);
+      else recipients.push({ client, generation: logGenerations.get(client) });
+    }
+    return recipients;
+  }
+
+  /** 清理已关闭连接后判断是否需要请求完整原生输出。 */
+  function hasLogSubscribers() {
+    return captureLogSubscribers().length > 0;
+  }
+
+  /** 仅向同一次授权实时订阅发送完整原生输出，不进入公共压力帧广播。 */
+  function publishLog(outputs, context, recipients = []) {
+    if (!context?.licenseValid || context.activeFile !== 'jqbed' || !context.realtime
+      || !outputs || typeof outputs !== 'object' || Array.isArray(outputs)) return 0;
+    const currentRecipients = recipients.filter(({ client, generation }) => (
+      client?.readyState === 1 && logSubscribers.has(client) && logGenerations.get(client) === generation
+    ));
+    if (!currentRecipients.length) return 0;
+    const payload = { jqbedAlgorithmLog: {
+      sensorType: 'jqbed', sequence: ++logSequence, receivedAt: new Date().toISOString(), outputs,
+    } };
+    let delivered = 0;
+    for (const { client } of currentRecipients) {
+      try {
+        if (sendJson(client, payload) === false) removeClient(client);
+        else delivered += 1;
+      } catch {
+        removeClient(client);
+      }
+    }
+    return delivered;
+  }
+
   /**
    * 回一条统一形状的结果给发起方。
    *
@@ -107,6 +155,25 @@ function createJqbedAlgorithmProtocol({ store, sendJson, broadcastJson, getAlgor
    * @returns {boolean} 是否已接管这条命令。
    */
   function handle(message, context) {
+    if (Object.prototype.hasOwnProperty.call(message || {}, 'subscribeJqbedAlgorithmLog')) {
+      const { client, licenseValid, activeFile, realtime } = context;
+      const requested = message.subscribeJqbedAlgorithmLog;
+      const validRequest = typeof requested === 'boolean';
+      const allowed = validRequest && (!requested || (
+        licenseValid && activeFile === 'jqbed' && realtime && client?.readyState === 1
+      ));
+      if (!requested && validRequest) removeClient(client);
+      else if (allowed) {
+        logSubscribers.add(client);
+        logGenerations.set(client, Symbol('jqbed algorithm log subscription'));
+      } else if (requested === true) removeClient(client);
+      sendJson(client, { jqbedAlgorithmLogSubscription: {
+        ok: Boolean(allowed), subscribed: logSubscribers.has(client),
+        ...(message.requestId !== undefined ? { requestId: message.requestId } : {}),
+        ...(!allowed ? { message: 'jqbed realtime algorithm log is unavailable' } : {}),
+      } });
+      return true;
+    }
     if (!isJqbedAlgorithmConfigMessage(message)) return false;
 
     const { client, licenseValid, activeFile, realtime } = context;
@@ -157,7 +224,7 @@ function createJqbedAlgorithmProtocol({ store, sendJson, broadcastJson, getAlgor
     return true;
   }
 
-  return { handle };
+  return { handle, hasLogSubscribers, captureLogSubscribers, publishLog, removeClient };
 }
 
 /**
@@ -187,7 +254,8 @@ function createJqbedAlgorithmCommandHandler({ protocol, getRuntimeContext }) {
   return {
     name: 'jqbed-algorithm-config',
     when: (message, context) => (
-      context.scope === 'main' && isJqbedAlgorithmConfigMessage(message)
+      context.scope === 'main' && (isJqbedAlgorithmConfigMessage(message)
+        || Object.prototype.hasOwnProperty.call(message || {}, 'subscribeJqbedAlgorithmLog'))
     ),
     handle: (message, context) => {
       const handled = protocol.handle(message, {

@@ -33,6 +33,8 @@ Shroom Agent 提供软件内对话入口，能够查询设备与系统、生成�
 
 ### 模型连接怎么填
 
+“模型服务商”和“模型名称”现在从授权服务的公开目录读取，支持手动刷新；离线或接口异常时保留最近有效列表，首次使用退回内置选项。目录更新不会改变已保存/正在编辑的连接，也不携带API密钥。服务端配置与首次客户端交付方式见 [模型目录接口](agent-model-catalog-api.md)。
+
 | 字段 | 填写方式 |
 | --- | --- |
 | 模型服务商 | 选择 **DeepSeek 官方 API**、**OpenAI 官方 API** 或 **自定义地址／中转站**。官方选项自动设置地址；自定义选项可填写原中转地址。 |
@@ -44,7 +46,7 @@ DeepSeek Flash 支持图片输入；V4 Pro 官方暂不支持视觉输入。选�
 
 当前接入的是 Responses API。DeepSeek 官方的 [Responses API](https://api-docs.deepseek.com/guides/responses_api/) 支持本软件使用的流式输出和函数工具调用；DeepSeek 模型清单见[官方模型文档](https://api-docs.deepseek.com/quick_start/pricing/)。仅支持 Chat Completions 的服务不能直接使用；第三方兼容服务仍需实际验证。OpenAI 接口说明见 [Responses 官方指南](https://developers.openai.com/api/docs/guides/migrate-to-responses)、[工具调用指南](https://developers.openai.com/api/docs/guides/function-calling)和[流式响应指南](https://developers.openai.com/api/docs/guides/streaming-responses/)。
 
-下拉框是常用模型预设，不会读取账户的模型清单。预设接口能力核对于 2026-09-17：[GPT-5 mini](https://developers.openai.com/api/docs/models/gpt-5-mini)、[GPT-5.4 mini](https://developers.openai.com/api/docs/models/gpt-5.4-mini)、[GPT-5.4](https://developers.openai.com/api/docs/models/gpt-5.4)、[GPT-4.1 mini](https://developers.openai.com/api/docs/models/gpt-4.1-mini)。手动填写的模型也需要支持 Responses API 和工具调用。
+下拉框由公开目录提供常用选项，不会读取账户的私有模型清单。随包预设的历史接口能力核对于 2026-09-17：[GPT-5 mini](https://developers.openai.com/api/docs/models/gpt-5-mini)、[GPT-5.4 mini](https://developers.openai.com/api/docs/models/gpt-5.4-mini)、[GPT-5.4](https://developers.openai.com/api/docs/models/gpt-5.4)、[GPT-4.1 mini](https://developers.openai.com/api/docs/models/gpt-4.1-mini)。手动填写的模型也需要支持 Responses API 和工具调用。
 
 远程地址必须使用 HTTPS；`localhost`、`127.0.0.1` 和 `[::1]` 的本机服务允许 HTTP。地址不能包含账号密码、查询参数或片段。**更换服务地址会清除旧服务密钥，需要重新填写。**
 
@@ -70,7 +72,7 @@ DeepSeek 官方直连只改变模型请求目的地；若已开启“聊天同�
 
 2026-09-21 现场最小请求中，配置的第三方服务对 `gpt-4.1-mini` 返回 HTTP 403，SSE 错误事件明确说明“当前分组未授权使用该模型”。这表示当前请求被分组权限拒绝，不代表模型对所有账户不可用。软件无法替账户开通模型权限，也不会自动更换模型或密钥。
 
-同一天使用相同服务地址和密钥，`gpt-6-astra` 最小流式请求及项目 provider 请求均返回完整结果 `OK`。可重启软件后，在模型设置中选择 **Codex（RelaxyCode）→ ChatGPT-6-Astra** 并保存，再发起新任务。此验证仅覆盖短文本模型连接，未验证真实工具任务；其余四个模型由用户提供清单，未逐个实测。服务商清单见 [RelaxyCode 模型价格](https://www.relaxycode.com/pricing)。
+同一天使用相同服务地址和密钥，`gpt-6-astra` 最小流式请求及项目 provider 请求均返回完整结果 `OK`。可重启软件后，在模型设置中选择 **自定义地址／中转站 → ChatGPT-6-Astra** 并保存，再发起新任务。此验证仅覆盖短文本模型连接，未验证真实工具任务；其余四个模型由用户提供清单，未逐个实测。服务商清单见 [RelaxyCode 模型价格](https://www.relaxycode.com/pricing)。
 
 错误解析同时支持 JSON 与 SSE，仍限制为 16 KiB 并只输出固定提示。其他未识别的 403 提示检查密钥分组、模型调用权限和服务商访问限制。修复后需完整退出并重启 Shroom，再发送新任务；旧执行记录保留原提示。
 
@@ -393,3 +395,13 @@ Agent 生成的 Manifest 矩阵系统复用监测页的调节和工具入口，�
 - **原始蓝色数字矩阵**：保留原始读数，只提供适用的颜色调节。
 
 调节只改变画布显示，不改线序、采集数据或算法输入。过滤调低后立即从原帧缓存恢复；高斯设为 0 表示不模糊。规则矩阵的 3D 点图和柔和热力图已统一主对角线方向，有效物理点位表仍保留其真实形状。
+
+## 10. 对话驱动的历史描述分析
+
+客户可以在已有系统直接说“分析这条采集”“比较两条记录”或“看看这段时间的压力变化”。Agent 使用 `get_history_workspace` / `request_history_data` 在所属轮次展示记录选择卡，用户确认后自动继续 `analyze_history_data`，无需先找菜单或填写类别标签。历史分析选择与分类训练选择分别保存；分类训练仍要求原有的类别、分组和独立验证约束。
+
+每次可确认 1～8 条记录，逐条选择帧区间或本机时间区间，也可指定历史规则矩阵中的一个矩形区域。每条最多读取 2000 帧、一次总量最多 200 万压力数值；时间区间达到用户确认的帧数上限时，报告明确标记只覆盖实际已读区间。矩阵区域只接受历史帧中已有矩阵证据，不以当前系统配置猜测旧记录的形状。不同矩阵、点数或存储数据阶段不能直接比较。
+
+宿主只读固定 SQLite/HTTP 分页入口并固定记录 `maxId`，在本机计算数值范围、均值、总和均值、波动、有效点比例和最多 24 个真实采样点的标量趋势。比较结果以首条为基线列出差值；有效点阈值只是统计参数，没有提供并验证评价规则时不产生“舒适”“合格”或“准确率”结论，也不推定物理压力单位。
+
+每份报告随原会话任务保存为 `analysisRuns`，重启或重开会话可直接查看。报告包含记录标识和名称、通道、`maxId`、用户确认及实际帧/时间范围、历史矩阵和存储字段阶段、内容摘要、已有配置版本证据摘要、计算参数、计算版本和时间。缺少历史版本证据时明确标记未知，不用当前配置补写；配置证据存在也不等于物理标定已知。完整压力数组、任意历史配置对象和归零数组不发送给模型，不新增任意 SQL/Python、控制回放或文件导出权限。

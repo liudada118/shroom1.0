@@ -40,6 +40,32 @@ function fixture(publish) {
   return { state, service, frames };
 }
 
+test('pressure vest retains native-copy identity and the same live transport guards', async t => {
+  const events = [];
+  const { state, service, frames } = fixture(event => events.push(event));
+  state.file = 'pressureVest';
+  state.systemId = 'vest-copy';
+  t.after(() => service.dispose());
+  state.serialBusy = true;
+  assert.throws(() => service.execute({ action: 'start', host: '127.0.0.1', port: 12345 }), /关闭串口/);
+  state.serialBusy = false;
+  const port = await freePort();
+  await service.execute({ action: 'start', host: '127.0.0.1', port });
+  assert.equal(state.systemId, 'vest-copy');
+  const socket = net.connect(port, '127.0.0.1');
+  t.after(() => socket.destroy());
+  await once(socket, 'connect');
+  const id = Buffer.from('vest-device');
+  socket.write(Buffer.concat([Buffer.from([0xaa, 0x55, 0, id.length]), id,
+    Buffer.from([0xaa, 0x55, 3, 0x99]), Buffer.alloc(1024, 7)]));
+  await waitFor(() => frames.length === 1);
+  assert.equal(frames[0].length, 1024);
+  state.systemId = 'another-vest';
+  socket.write(Buffer.concat([Buffer.from([0xaa, 0x55, 3, 0x99]), Buffer.alloc(1024, 8)]));
+  await waitFor(() => service.snapshot().phase === 'stopped');
+  assert.equal(frames.length, 1);
+});
+
 test('HTTP start waits for TCP bind, preserves copy identity, excludes serial and reports port errors', async (t) => {
   const events = [];
   const { state, service, frames } = fixture((event) => events.push(event));

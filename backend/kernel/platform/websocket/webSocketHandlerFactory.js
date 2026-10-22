@@ -79,6 +79,8 @@ function createSensorStatusPayload(ctx, extra = {}) {
     file: ctx.licenseFile ?? null,
     currentSensorType: ctx.currentSystemId || ctx.file,
     selectFlag: ctx.selectFlag,
+    ...(typeof ctx.getLicenseAccess === 'function' ? { licenseAccess: ctx.getLicenseAccess() } : {}),
+    ...(typeof ctx.getCollectionStatus === 'function' ? ctx.getCollectionStatus() : {}),
     ...extra,
   };
 }
@@ -257,6 +259,7 @@ function createWebSocketHandlerAttacher(ctx) {
       });
 
       attachHeartbeat(ws, { clientName, logger, intervalMs: 30000 });
+      ws.on('close', () => ctx.onClientClose?.(ws));
 
       publishSystemEvent(createSensorStatusPayload(ctx, {
         port: ctx.serialport,

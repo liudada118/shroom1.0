@@ -35,7 +35,9 @@ const { registerSerialControlHandlers } = require('../serial/serialControlServic
 const { createControlCommandService } = require('./commands/controlCommandService');
 const { createAgentDeviceConnectionService } = require('./commands/agentDeviceConnectionService');
 const { createHttpApp } = require('./http/httpAppFactory');
-const { syncSystemTime } = require('./bootstrap/systemTimeSyncService');
+const { createHash } = require('node:crypto');
+const { createLicenseAccessPolicy } = require('./license/licenseAccessPolicy');
+const { createCollectionSessionService } = require('../storage/history/collectionSessionService');
 const {
   DEFAULT_REPORT_HTTP_PORT,
   scanStartupSerialPorts,
@@ -234,7 +236,6 @@ const parseHandGloveFullPacket = handGloveFullPacket.parseHandGloveFullPacket;
 
 const SMALL_BED_12B_PAYLOAD_LENGTH = smallBed12B.PAYLOAD_LENGTH;
 const SMALL_BED_12B_FRAME_TAIL = smallBed12B.FRAME_TAIL;
-const HAND_GLOVE_REALTIME_SEND_INTERVAL_MS = 1000 / 60;
 const COLLECTION_MIN_FREE_BYTES = Number(process.env.SHROOM_MIN_COLLECTION_FREE_BYTES) || 2 * 1024 * 1024 * 1024;
 const COLLECTION_INSERT_SQL = `INSERT INTO matrix (
   data,
@@ -260,10 +261,7 @@ const smallBed12BCalibration = {
 };
 const roundSmallBed12BPressureValue = smallBed12B.roundPressureValue;
 const normalizeSmallBed12BDisplayOptions = smallBed12B.normalizeDisplayOptions;
-let lastHandGloveRealtimeSendAt = {
-  sit: 0,
-  back: 0,
-};
+
 
 const maskMinzhenMatrixValues = minzhen.maskMatrixValues;
 /**
@@ -395,6 +393,7 @@ const appRuntime = createAppRuntime({
   agentRoot: path.join(electronApp?.getPath ? electronApp.getPath('userData') : runtimeWritableRoot, 'agent'),
 });
 const managedSystemSync = createManagedSystemSync({
+  now: () => licenseAccess.clock.now(),
   root: runtimeWritableRoot,
   getLicenseKey: getStoredLicenseKey,
   installPackage: appRuntime.displaySystems.installPackage,
@@ -530,26 +529,6 @@ const {
   shouldTransposeSmallBedRawMatrixFrame,
   transposeSquareMatrix,
 } = historyFrameTransformService;
-
-/**
- * 判断当前通道是否可以发送实时帧。
- * 手套类传感器会按 60FPS 做限频，其他类型直接发送。
- *
- * @param {string} channel manifest outputChannel 或兼容通道名称。
- * @returns {boolean} 是否允许发送本帧。
- */
-function shouldSendRealtimeFrame(channel = 'sit') {
-  if (!isHandGloveType(file)) return true;
-
-  const now = Date.now();
-  const lastSendAt = lastHandGloveRealtimeSendAt[channel] || 0;
-  if (now - lastSendAt < HAND_GLOVE_REALTIME_SEND_INTERVAL_MS) {
-    return false;
-  }
-
-  lastHandGloveRealtimeSendAt[channel] = now;
-  return true;
-}
 
 /**
  * 重置采集存储时钟，用于开始采集或修改采集频率后重新计时。
@@ -701,6 +680,7 @@ const collectionInsertQueueService = createCollectionInsertQueueService({
   batchSize: COLLECTION_INSERT_BATCH_SIZE,
   flushIntervalMs: COLLECTION_INSERT_FLUSH_INTERVAL_MS,
   onError: handleCollectionDbError,
+  onSettled: (context, ok) => collectionSessions.settled(context, ok),
 });
 
 /**
@@ -728,11 +708,12 @@ function flushCollectionInsertQueues() {
  * @param {string} channel 通道名，出错上报时用来定位。
  * @returns {void}
  */
-function enqueueCollectionInsert(dbRef, params, channel = 'sit') {
+function enqueueCollectionInsert(dbRef, params, channel = 'sit', frameToken = null) {
   const normalizedParams = Array.isArray(params) && params.length === 3
     ? [...params, null, null, null, null, null, String(channel || 'sit'), null, null, null, null, null]
     : params;
-  collectionInsertQueueService.enqueue(dbRef, normalizedParams, channel);
+  const evidence = collectionSessions.queued({ channelId: String(channel), timestamp: Number(normalizedParams?.[1]), frameToken });
+  collectionInsertQueueService.enqueue(dbRef, normalizedParams, channel, evidence);
 }
 
 /**
@@ -749,7 +730,7 @@ function enqueueCollectionInsert(dbRef, params, channel = 'sit') {
  * @param {string|object} channelOrIdentity 旧通道名或 canonical 通道/串口身份。
  * @returns {void}
  */
-function enqueueCollectionFrame(dbRef, dataToStore, channelOrIdentity) {
+function enqueueCollectionFrame(dbRef, dataToStore, channelOrIdentity, frameToken = null) {
   const identity = channelOrIdentity && typeof channelOrIdentity === 'object'
     ? channelOrIdentity
     : null;
@@ -758,7 +739,7 @@ function enqueueCollectionFrame(dbRef, dataToStore, channelOrIdentity) {
   enqueueCollectionInsert(dbRef, [
     dataToStore,
     Number.isFinite(capturedTimestamp) ? capturedTimestamp : Date.now(),
-    getCollectionState('saveTime'),
+    collectionSessions.frameContext?.(frameToken)?.recordKey || getCollectionState('saveTime'),
     identity?.channelId || null,
     identity?.displaySystemId || null,
     identity?.sensorId || null,
@@ -770,7 +751,7 @@ function enqueueCollectionFrame(dbRef, dataToStore, channelOrIdentity) {
     identity?.serialPortPath || null,
     identity?.baudRate || null,
     identity?.parserChannel || null,
-  ], identity?.channelId || outputChannel);
+  ], identity?.channelId || outputChannel, frameToken);
 }
 
 /**
@@ -1080,7 +1061,7 @@ function loadSelectedHistory(dateLabel) {
       });
       const playbackTimeline = buildPlaybackAnchorTimeline(playbackAnchor);
       length = playbackTimeline.length || maxCanonicalRows;
-      setPlaybackState('indexArr', [0, Math.max(length - 2, 0)]);
+      setPlaybackState('indexArr', [0, Math.max(length - (isHandGloveType(sensorType) ? 1 : 2), 0)]);
       timeStamp = playbackTimeline.time.length ? playbackTimeline.time : historySeries.time;
       detectedInterval = calcDetectedInterval(
         playbackTimeline.intervalTimestamps.length
@@ -1112,7 +1093,9 @@ function loadSelectedHistory(dateLabel) {
     const headStats = isThreePortFile(sensorType) && headDb
       ? getHistoryStats(headDb, dateLabel, logger)
       : { count: 0, minId: 0, maxId: 0 };
-    const totalLength = isThreePortFile(sensorType)
+    const totalLength = isHandGloveType(sensorType)
+      ? Math.max(sitStats.count, backStats.count)
+      : isThreePortFile(sensorType)
       ? getHistoryLengthFromCounts(sitStats.count, backStats.count, headStats.count)
       : isCar(sensorType)
         ? getHistoryLengthFromCounts(sitStats.count, backStats.count)
@@ -1142,7 +1125,7 @@ function loadSelectedHistory(dateLabel) {
       file: sensorType,
     });
     length = totalLength || historySeries.length;
-    setPlaybackState('indexArr', [0, Math.max(length - 2, 0)]);
+    setPlaybackState('indexArr', [0, Math.max(length - (isHandGloveType(sensorType) ? 1 : 2), 0)]);
     timeStamp = historySeries.time;
     // ⚠️ 曲线时间轴可能抽样；用连续原始帧推算间隔，否则长记录会被错误地减速。
     const cadenceRows = sitRows.length ? sitRows : backRows.length ? backRows : headRows;
@@ -1342,11 +1325,16 @@ function getShutdownOrchestrator() {
  *   原因见 `serverShutdownOrchestrator`。
  */
 function shutdownServer() {
+  finishCollection('APPLICATION_EXIT');
+  licenseAccess.dispose();
   frameUsageObserver?.dispose();
   if (deviceAuthorizationTimer) { clearInterval(deviceAuthorizationTimer); deviceAuthorizationTimer = null; }
   appRuntime.displaySystems.stopRuntimeDispatch();
-  return Promise.all([algorithmMarketService?.dispose(), halowService?.dispose()])
-    .then(() => getShutdownOrchestrator().shutdownServer());
+  petCareRuntimeService?.dispose();
+  return collectionSessions.whenFinished().then(() => {
+    collectionSessions.dispose();
+    return Promise.all([algorithmMarketService?.dispose(), halowService?.dispose()]);
+  }).then(() => getShutdownOrchestrator().shutdownServer());
 }
 let baudRate = 1000000;
 const timeNum = 1000 / 12;
@@ -1388,11 +1376,57 @@ let length;
 let history;
 let nowDate = 0;
 let endDate = 0;
+const collectionSessions = createCollectionSessionService({ root: electronApp?.getPath ? electronApp.getPath('userData') : runtimeWritableRoot,
+  onStatus: collectionSummary => publishSystemEvent({ collectionSummary }), onError: error => logger.warn('[CollectionSummary]', error.code || 'write failed') });
+const licenseAccess = createLicenseAccessPolicy({ onChange: access => {
+  if (!access.canAcquire) {
+    finishCollection(access.reason || 'LICENSE_REQUIRED');
+    if (typeof closeAllManagedSerialPorts === 'function') closeAllManagedSerialPorts('license access changed');
+    void halowService?.stop();
+  }
+  publishSystemEvent({ licenseAccess: access, date: access.licenseExpiresAt || 0 });
+} });
+
+/** Stop admission first, then settle queued rows in their original collection database. */
+function finishCollection(reason = 'USER_STOPPED') {
+  setCollectionState('flag', false);
+  return collectionSessions.finish(reason, flushCollectionInsertQueues);
+}
+
+/** Snapshot only configuration identities; historical calibration or zero values are never invented. */
+function beginCollectionEvidence(runtime) {
+  const systemId = zeroChannelIdentityResolver.getActiveDisplaySystemId() || appRuntime.builtinTemplates.currentId(runtimeContext.getSensorType());
+  let editor = null;
+  try { editor = getDisplaySystemEditorById(systemId); } catch { /* Built-in systems may be readable without an editable manifest. */ }
+  const configuration = { systemId, revisionHash: createHash('sha256').update(JSON.stringify(editor || { systemId, source: 'builtin' })).digest('hex'),
+    calibrationStatus: 'unknown', zeroReference: 'unknown', capturedAt: Date.now() };
+  const sourceType = editor?.builtinTemplate?.sourceType || systemId;
+  const knownNative = appRuntime.builtinTemplates.catalog.some(template => template.id === sourceType);
+  const definition = appRuntime.displaySystems.getById(systemId);
+  return collectionSessions.begin({ recordKey: runtime.saveTime, systemId, configuration, storagePolicy: runtime.collectOptions || null,
+    inputCoverage: knownNative ? 'synchronous' : definition?.sensors ? 'fenced' : 'untracked' });
+}
+
+/** Expose version identities for diagnostics without configuration bodies or credentials. */
+function readRuntimeVersions() {
+  const systemId = zeroChannelIdentityResolver.getActiveDisplaySystemId() || appRuntime.builtinTemplates.currentId(runtimeContext.getSensorType());
+  const release = managedSystemSync.installedVersions?.().find(item => item.id === systemId);
+  return { ...(release?.version != null ? { systemPackageVersion: String(release.version) } : {}),
+    ...(managedSystemSync.getServerPolicy?.()?.policyVersion ? { serverContractVersion: String(managedSystemSync.getServerPolicy().policyVersion) } : {}) };
+}
+
+/** Return the current collection, or the last crash-recovered result after a restart. */
+function readCollectionStatus() {
+  const current = collectionSessions.current();
+  const recent = collectionSessions.list({ limit: 10 });
+  return { collectionSummary: current || recent[0] || null, current, recent };
+}
 
 const defauleFile = 'hand0205';
 let date, sysStartTime, file = defauleFile, selectFlag;
 let licenseFile = null;
 const deviceAuthorization = createDeviceAuthorization({
+  now: () => licenseAccess.clock.now(),
   root: electronApp?.getPath ? electronApp.getPath('userData') : runtimeWritableRoot,
   ...(electronNet?.fetch ? { fetchImpl: electronNet.fetch.bind(electronNet) } : {}),
 });
@@ -1405,6 +1439,7 @@ if (fs.existsSync(nameTxt)) {
     const validation = validateLicenseKey(dateRes, {
       decryptStr: module2.decryptStr,
       fallbackFile: defauleFile,
+      allowExpired: true,
     });
     if (validation.ok) {
       endDate = 0;
@@ -1414,8 +1449,9 @@ if (fs.existsSync(nameTxt)) {
       baudRate = getSensorBaudRate(file);
       void deviceAuthorization.authorize(dateRes.trim(), validation.state).then((access) => {
         if (serverShutdownRequested || getStoredLicenseKey()?.trim() !== dateRes.trim()) return;
-        endDate = access.ok ? access.expiresAt : 0;
-        publishSystemEvent(access.ok ? { date: endDate, file: licenseFile, selectFlag, licenseDeviceLimit: access.deviceLimit }
+        endDate = access.ok ? access.expiresAt : access.historyAllowed ? access.licenseExpiresAt : 0;
+        const permissions = licenseAccess.update(access);
+        publishSystemEvent(access.ok || permissions.canReadHistory ? { date: permissions.licenseExpiresAt, licenseAccess: permissions, file: licenseFile, selectFlag, licenseDeviceLimit: access.deviceLimit }
           : { licenseError: access.message, licenseErrorCode: access.code, noLicense: true });
       }).catch(() => publishSystemEvent({ licenseError: '电脑授权验证暂不可用，请联网后重试。', noLicense: true }));
     } else {
@@ -1476,7 +1512,7 @@ const runtimeContext = createServerRuntimeContext({
     db2: () => db2,
     file: () => file,
     localFlag: () => localFlag,
-    nowDate: () => nowDate,
+    nowDate: () => licenseAccess.clock.now(),
   },
 });
 
@@ -1661,25 +1697,14 @@ function publishRealtimeFrame(channel, jsonData, options) {
 }
 
 /**
- * 发布一帧实时数据，带两道门 —— 实时采集链路应该用的入口。
- *
- * 两道门都是为了「不让前端收到自相矛盾的数据」：① **回放期间一律不发** —— 回放和实时共用同一批
- * 通道，不拦的话串口来的实时帧会插在回放帧中间、画面在两个时间点之间跳；这道门没有开关，任何
- * 「回放时也要看实时」的需求都得另开通道。② **手套类型限频到 60FPS**（`shouldSendRealtimeFrame`）
- * —— 手套串口 1Mbps，帧率远高于屏幕刷新率，不限频会让 WebSocket 缓冲区堆积、延迟越跑越大。
- *
- * `respectFrequency: false` 用于「这一帧必须送到」的场合（如归零后的第一帧），它绕过限频但
- * **绕不过回放门**。返回 0 的三种含义（回放中 / 被限频 / 没有订阅者）都不是错误，调用方一律当
- * 「这帧没发出去」处理即可，不需要区分。
- *
+ * 发布实时通道；回放期间隔离实时帧，手套不再在这里重复限频。
+ * 有界缓冲由 realtime 网关处理；采集频率仍由独立入库时钟控制。
  * @param {string} channel 输出通道别名。
- * @param {string | object} jsonData 帧数据。
- * @param {{respectFrequency?: boolean}} [options] `respectFrequency: false` 跳过限频。
- * @returns {number} 实际发送成功的客户端数量；被拦下时 0。
+ * @param {object|string} jsonData 帧数据。
+ * @returns {number} 实际发送成功的客户端数量。
  */
-function publishRealtimeChannel(channel, jsonData, { respectFrequency = true } = {}) {
+function publishRealtimeChannel(channel, jsonData) {
   if (runtimeContext.isLocalPlayback()) return 0;
-  if (respectFrequency && !shouldSendRealtimeFrame(channel)) return 0;
   return publishRealtimeFrame(channel, jsonData);
 }
 
@@ -1706,6 +1731,7 @@ const SENSOR_FRAME_ONLY_FIELDS = Object.freeze([
   'mappedData',
   'mappedArr195',
   'newArr147',
+  'newArr147Raw',
   'newArr',
   'rotate',
   'orientation',
@@ -1976,6 +2002,11 @@ function publishHistoryDateList() {
 }
 
 const petCareRuntimeService = createPetCareRuntimeService({
+  getExecutionContext: () => ({ systemId: zeroChannelIdentityResolver.getActiveDisplaySystemId() || appRuntime.builtinTemplates.currentId(runtimeContext.getSensorType()),
+    collectionId: collectionSessions.current()?.id || null, phase: collectionSessions.current()?.phase || 'idle' }),
+  getJqbedLogContext: () => ({ activeFile: runtimeContext.getSensorType(),
+    licenseValid: runtimeContext.getNowDate() < endDate, realtime: !runtimeContext.isLocalPlayback() }),
+  jqbedAlgorithmProtocol,
   buildJqbedGetDataArgs,
   getJqbedAlgorithmConfigSnapshot: jqbedAlgorithmConfigStore.getSnapshot,
   logger,
@@ -2026,6 +2057,7 @@ const csvDownloadService = createCsvDownloadService({
 
 const historyMaintenanceService = createHistoryMaintenanceService({
   logger,
+  beforeDelete: flushCollectionInsertQueues,
   getDatabases: () => ({
     db: runtimeContext.getDatabase('sit'),
     db1: runtimeContext.getDatabase('back'),
@@ -2119,17 +2151,19 @@ async function activateSubmittedLicenseKey(licenseKey) {
   const validation = validateLicenseKey(licenseKey, {
     decryptStr: module2.decryptStr,
     fallbackFile: runtimeContext.getSensorType() || defauleFile,
+    allowExpired: true,
   });
   if (!validation.ok) return validation;
 
   const state = validation.state;
   const access = await deviceAuthorization.authorize(licenseKey.trim(), state);
   if (generation !== licenseActivationGeneration || serverShutdownRequested) return { ok: false, code: 'LICENSE_ACTIVATION_REPLACED', message: '此激活操作已取消或被新的密钥替代。' };
-  if (!access.ok) return { ok: false, code: access.code, message: access.message };
+  if (!access.ok && !access.historyAllowed) return { ok: false, code: access.code, message: access.message };
   writeStoredLicenseKey(licenseKey, { targetPath: writableNameTxt });
   licenseFile = state.licenseFile;
   selectFlag = state.selectFlag;
-  endDate = access.expiresAt;
+  endDate = access.ok ? access.expiresAt : access.licenseExpiresAt;
+  const permissions = licenseAccess.update(access);
 
   if (state.nextFile) {
     file = state.nextFile;
@@ -2142,7 +2176,8 @@ async function activateSubmittedLicenseKey(licenseKey) {
     ok: true,
     code: 'OK',
     payload: {
-      date: endDate,
+      date: permissions.licenseExpiresAt || endDate,
+      licenseAccess: permissions,
       nowDate: runtimeContext.getNowDate(),
       file: licenseFile || file,
       currentSensorType: appRuntime.builtinTemplates.currentId(file),
@@ -2157,16 +2192,17 @@ async function activateSubmittedLicenseKey(licenseKey) {
 deviceAuthorizationTimer = setInterval(() => {
   const key = getStoredLicenseKey()?.trim();
   if (!key) return;
-  const validation = validateLicenseKey(key, { decryptStr: module2.decryptStr, fallbackFile: runtimeContext.getSensorType() });
+  const validation = validateLicenseKey(key, { decryptStr: module2.decryptStr, fallbackFile: runtimeContext.getSensorType(), allowExpired: true });
   if (!validation.ok) return;
   void deviceAuthorization.authorize(key, validation.state).then(access => {
     if (serverShutdownRequested || getStoredLicenseKey()?.trim() !== key) return;
-    endDate = access.ok ? access.expiresAt : 0;
+    endDate = access.ok ? access.expiresAt : access.historyAllowed ? access.licenseExpiresAt : 0;
+    const permissions = licenseAccess.update(access);
+    if (access.ok) publishSystemEvent({ licenseAccess: permissions, date: permissions.licenseExpiresAt, nowDate: runtimeContext.getNowDate() });
     if (!access.ok) {
-      setCollectionState('flag', false);
-      closeAllManagedSerialPorts();
-      void halowService?.stop();
-      publishSystemEvent({ licenseError: access.message, licenseErrorCode: access.code, noLicense: true });
+      finishCollection(access.code || 'LICENSE_REQUIRED');
+      if (permissions.canReadHistory) publishSystemEvent({ licenseAccess: permissions, date: permissions.licenseExpiresAt });
+      else publishSystemEvent({ licenseError: access.message, licenseErrorCode: access.code, noLicense: true, licenseAccess: permissions });
     }
   }).catch(error => logger.warn('[LicenseDevices] recheck failed', error.code || 'LICENSE_SERVICE_UNAVAILABLE'));
 }, 2 * 60 * 60 * 1000);
@@ -2174,6 +2210,9 @@ deviceAuthorizationTimer.unref?.();
 
 // 注册运行时控制命令，getRuntime/setRuntime 是旧运行时变量的过渡适配层。
 registerRuntimeCommandHandlers(controlCommandRouter, {
+  requireAccess: licenseAccess.requireAccess,
+  onCollectionStarted: beginCollectionEvidence,
+  onCollectionStopping: reason => collectionSessions.finish(reason),
   csvDownloadService,
   historyMaintenanceService,
   normalizeCollectFrequency,
@@ -2189,6 +2228,7 @@ registerRuntimeCommandHandlers(controlCommandRouter, {
     backTotal,
     colHZ: getCollectionState('colHZ'),
     flag: getCollectionState('flag'),
+    saveTime: getCollectionState('saveTime'),
     com,
     com1,
     collectOptions: getCollectionState('collectOptions'),
@@ -2204,12 +2244,18 @@ registerRuntimeCommandHandlers(controlCommandRouter, {
 });
 
 registerSerialControlHandlers(controlCommandRouter, {
+  requireAccess: licenseAccess.requireAccess,
   HAND_GLOVE_DOUBLE,
+  resetHandPacketRuntime: (options) => handPacketRuntime.reset(options),
+  releasePreviousDatabases: () => {
+    flushCollectionInsertQueues();
+    return [db, db1].filter((database) => typeof database?.retain === 'function');
+  },
   /** 原生副本切换前先核验身份；采集中切换会把一段记录拆到两个库。 */
   resolveSystemSelection: (id) => {
-    assertManagedSystemSelection(id);
+    if (licenseAccess.read().canAcquire) assertManagedSystemSelection(id);
     const selection = appRuntime.builtinTemplates.resolve(id, selectFlag);
-    if ((selection.template || appRuntime.builtinTemplates.currentId(file) !== file || halowService?.receiver.active) && getCollectionState('flag')) {
+    if (collectionSessions.current()?.phase === 'finalizing' || getCollectionState('flag')) {
       throw Object.assign(new Error('请先停止采集，再切换系统。'), { code: 'AGENT_DEVICE_BUSY', httpStatus: 409 });
     }
     return selection;
@@ -2350,6 +2396,8 @@ const webSocketHandlerContext = createWebSocketHandlerContext({
     getSelectFlagFromLicense,
     getSensorBaudRate,
     getStoredSitData,
+    getLicenseAccess: licenseAccess.read,
+    getCollectionStatus: readCollectionStatus,
     isSmallBedMatrixType,
     logger,
     module2,
@@ -2358,6 +2406,7 @@ const webSocketHandlerContext = createWebSocketHandlerContext({
     parseStoredFrameData,
     path,
     petCareRuntimeService,
+    onClientClose: jqbedAlgorithmProtocol.removeClient,
     publishPlaybackFrame,
     publishSystemEvent,
     server,
@@ -2489,7 +2538,7 @@ const {
     db2: { get: () => db2, set: (value) => { db2 = value; } },
     file: { get: () => file, set: (value) => { file = value; } },
     localFlag: { get: () => localFlag, set: (value) => { localFlag = value; } },
-    nowDate: { get: () => nowDate, set: (value) => { nowDate = value; } },
+    nowDate: { get: () => licenseAccess.clock.now(), set: (value) => { nowDate = value; licenseAccess.clock.synchronize(value); } },
     pointArr: { get: () => pointArr, set: (value) => { pointArr = value; } },
     pointArr2: { get: () => pointArr2, set: (value) => { pointArr2 = value; } },
     port1: { get: () => getManagedSerialPort(serialRoles.SIT) },
@@ -2522,6 +2571,8 @@ const {
   frameOutputPipeline,
 } = createServerFramePipeline({
   runtimeContext,
+  collectionSessions,
+  getCollectionTrace: collectionSessions.trace,
   publishRealtimeChannel,
   isCollecting: () => Boolean(getCollectionState('flag')),
   shouldStoreCollectionFrame,
@@ -2773,6 +2824,10 @@ module.exports.getWsSubscriptionStatus = getWsSubscriptionStatus;
 module.exports.getRealtimeChannels = getRealtimeChannels;
 module.exports.getChannelBusStatus = getChannelBusStatus;
 module.exports.handleCommand = handleCommand;
+module.exports.getLicenseAccess = licenseAccess.read;
+module.exports.checkLicenseAccess = licenseAccess.check;
+module.exports.getRuntimeVersions = readRuntimeVersions;
+module.exports.getCollectionStatus = readCollectionStatus;
 
 /** Stop an already-open managed channel when its signed entitlement expires or is revoked. */
 let lastRevokedManagedSystemId = null;
@@ -2782,7 +2837,7 @@ function enforceManagedSystemGrant() {
   if (!active?.managed || managedSystemSync.isAllowed(active.id)) { lastRevokedManagedSystemId = null; return; }
   if (lastRevokedManagedSystemId === active.id) return;
   lastRevokedManagedSystemId = active.id;
-  if (getCollectionState('flag')) { flushCollectionInsertQueues(); setCollectionState('flag', false); }
+  if (getCollectionState('flag')) finishCollection('SYSTEM_RELEASE_WITHDRAWN');
   closeAllManagedSerialPorts('managed system entitlement expired');
   publishSystemEvent({ managedSystemAccessError: '当前系统授权已变化，已停止采集并断开设备。请刷新系统目录。' });
 }
@@ -2791,8 +2846,14 @@ const managedGrantTimer = setInterval(enforceManagedSystemGrant, 60000);
 managedGrantTimer.unref?.();
 
 const httpApp = createHttpApp({
+  requireAccess: licenseAccess.requireAccess,
+  getLicenseAccess: licenseAccess.read,
+  getCollectionStatus: readCollectionStatus,
+  getRuntimeVersions: () => readRuntimeVersions(),
   algorithmRecordService: require('../storage/history/algorithmRecordService').createAlgorithmRecordService({
-    getContext: () => ({ systemId: zeroChannelIdentityResolver.getActiveDisplaySystemId() || appRuntime.builtinTemplates.currentId(runtimeContext.getSensorType()), allowed: runtimeContext.getNowDate() < endDate }),
+    getContext: () => ({ systemId: zeroChannelIdentityResolver.getActiveDisplaySystemId() || appRuntime.builtinTemplates.currentId(runtimeContext.getSensorType()), allowed: licenseAccess.read().canAcquire,
+      historyAllowed: licenseAccess.read().canAnalyzeHistory }),
+    getRecordEvidence: ({ recordKey, systemId }) => collectionSessions.list({ recordKey, systemId, limit: 1 })[0] || null,
     getDatabases: () => Object.fromEntries(['sit', 'back', 'head'].map((role) => [role, runtimeContext.getDatabase(role)])),
   }),
   algorithmMarketService,
@@ -2843,11 +2904,12 @@ const httpApp = createHttpApp({
   updateManifestAlgorithmBindings: appRuntime.displaySystems.updateManifestAlgorithmBindings,
   exportDisplaySystemPackage: appRuntime.displaySystems.exportPackage,
   syncManagedSystems: async () => {
-    const result = await managedSystemSync.sync();
-    enforceManagedSystemGrant();
-    return result;
+    try { return await managedSystemSync.sync(); }
+    finally { enforceManagedSystemGrant(); }
   },
-  getManagedSystemStatus: managedSystemSync.status,
+  getManagedSystemStatus: () => ({ ...managedSystemSync.status(), licenseAccess: licenseAccess.read(),
+    historyAvailable: licenseAccess.read().state === 'expired' ? appRuntime.displaySystems.getStatus().systems
+      .filter(system => system.managed).map(system => system.id) : [] }),
   getStaffPackageSubmissionStatus: staffPackageSubmission.status,
   saveStaffPackageSubmissionToken: staffPackageSubmission.save,
   clearStaffPackageSubmissionToken: staffPackageSubmission.clear,

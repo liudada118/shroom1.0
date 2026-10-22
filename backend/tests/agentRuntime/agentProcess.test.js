@@ -79,6 +79,54 @@ test('inline algorithm data confirmation forwards only the request identity and 
   await assert.rejects(manager.invoke('executeTool', { name: 'analyze_algorithm_data' }), { code: 'AGENT_ACTION_UNKNOWN' });
 });
 
+test('history selection and cancellation cross only the finite desktop bridge', async t => {
+  const requests = [], child = new EventEmitter();
+  child.postMessage = request => { requests.push(request); setImmediate(() => child.emit('message', { id: request.id, ok: true, data: {} })); };
+  child.kill = () => child.emit('exit', 0);
+  const manager = createAgentProcess({ root: temporaryRoot(t), getWindow: () => null,
+    electron: { safeStorage, utilityProcess: { fork: () => { setImmediate(() => child.emit('message', { ready: true })); return child; } } } });
+  t.after(() => manager.dispose());
+  const selection = { systemId: 'fixture-system', records: [{ id: 'fixture-record', startFrame: 0, endFrame: 10 }] };
+  await manager.invoke('listHistoryRecords', { offset: 3, arbitraryPath: 'C:/private' });
+  await manager.invoke('setHistorySelection', { selection, apiKey: 'must-not-forward' });
+  await manager.invoke('completeHistoryDataRequest', { taskId: 'task-a', requestId: 'request-a', selection, tool: 'arbitrary-tool' });
+  await manager.invoke('cancelHistoryDataRequest', { taskId: 'task-a', arbitraryPath: 'C:/private' });
+  assert.deepEqual(requests.find(item => item.action === 'listHistoryRecords').payload, { offset: 3 });
+  assert.deepEqual(requests.find(item => item.action === 'setHistorySelection').payload, { selection });
+  assert.deepEqual(requests.find(item => item.action === 'completeHistoryDataRequest').payload, { taskId: 'task-a', requestId: 'request-a', selection });
+  assert.deepEqual(requests.find(item => item.action === 'cancelHistoryDataRequest').payload, { taskId: 'task-a' });
+  assert.ok(!JSON.stringify(requests).includes('must-not-forward'));
+});
+
+test('worker dispatch calls the actual history runtime methods and maps cancellation to cancelTask', async () => {
+  const vm = require('node:vm'), parent = new EventEmitter(), posted = [], calls = [];
+  parent.postMessage = message => posted.push(message);
+  const runtime = Object.fromEntries(['configure', 'listHistoryRecords', 'setHistorySelection', 'completeHistoryDataRequest', 'cancelTask']
+    .map(name => [name, input => { calls.push({ name, input }); return {}; }]));
+  vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../../agent-runtime/worker.js'), 'utf8'), {
+    process: { parentPort: parent },
+    require: name => {
+      if (name === './runtime') return { createAgentRuntime: () => runtime };
+      if (name === './tools') return { createAgentTools: () => ({}) };
+      if (name === './errors') return require('../../agent-runtime/errors');
+      if (name === './provider') return { requestModelResponse: () => ({}) };
+      if (name === 'electron') return { net: { fetch: () => { assert.fail('no model request expected'); } } };
+      throw new Error(`Unexpected worker import: ${name}`);
+    },
+  });
+  const selection = { systemId: 'fixture', records: [{ id: 'record' }] };
+  for (const [action, payload] of [['initialize', { settings: {} }], ['listHistoryRecords', { offset: 2 }], ['setHistorySelection', { selection }],
+    ['completeHistoryDataRequest', { taskId: 'task', requestId: 'request', selection }], ['cancelHistoryDataRequest', { taskId: 'task' }]]) {
+    parent.emit('message', { data: { id: action, action, payload } });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(posted.find(item => item.id === action)?.ok, true);
+  }
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    { name: 'configure', input: {} }, { name: 'listHistoryRecords', input: { offset: 2 } }, { name: 'setHistorySelection', input: selection },
+    { name: 'completeHistoryDataRequest', input: { taskId: 'task', requestId: 'request', selection } }, { name: 'cancelTask', input: { taskId: 'task' } },
+  ]);
+});
+
 test('credentials remain encrypted, redact public settings and clear on endpoint change', (t) => {
   const root = temporaryRoot(t);
   const settings = createAgentSettings({ root, safeStorage });
@@ -224,4 +272,68 @@ test('chat sync settings do not start the model worker and never enter worker or
       assert.equal(createAgentSettings({ root, safeStorage }).getPrivate().apiKey, 'model-fixture-secret');
     } finally { await restarter.dispose(); }
   } finally { await manager.dispose(); }
+});
+
+test('desktop queue actions do not implicitly upload the previous conversation after credential changes', async t => {
+  const uploads = [], children = [];
+  let state = { conversation: { id: 'conversation-queue', tasks: [], messages: [{ id: 'message-a', role: 'user', text: 'synthetic customer A history' }] }, attachments: [], activeTask: null };
+  /** Match the real worker's configure events and keep historical state across utility-process restart. */
+  function fork() {
+    const child = new EventEmitter(); children.push(child);
+    child.kill = () => child.emit('exit', 0);
+    child.postMessage = request => setImmediate(() => {
+      if (request.action === 'newConversation') state = { conversation: { id: 'conversation-new', tasks: [], messages: [] }, attachments: [], activeTask: null };
+      if (request.action === 'startTask') state.conversation.messages.push({ id: 'message-new', role: 'user', text: request.payload.text });
+      if (['initialize', 'configure', 'openConversation', 'newConversation', 'startTask'].includes(request.action)) {
+        child.emit('message', { event: { type: 'state', state: JSON.parse(JSON.stringify(state)) } });
+      }
+      child.emit('message', { id: request.id, ok: true, data: request.action === 'getState' ? JSON.parse(JSON.stringify(state)) : {} });
+    });
+    setImmediate(() => child.emit('message', { ready: true })); return child;
+  }
+  const manager = createAgentProcess({ root: temporaryRoot(t), getWindow: () => null, electron: { safeStorage,
+    utilityProcess: { fork },
+    net: { fetch: async (_url, options) => { uploads.push(options); return new Response('{}', { status: 401 }); } } } });
+  t.after(() => manager.dispose());
+  await manager.invoke('saveSyncSettings', { endpoint: 'https://tenant.example.test/chat', token: 'customer-a-token', enabled: true });
+  const initial = await manager.invoke('getState');
+  assert.equal(initial.chatSync.status.pendingCount, 0, 'initialization and read-only refresh do not upload historical chats');
+  await manager.invoke('openConversation', { conversationId: state.conversation.id });
+  for (let index = 0; index < 50 && uploads.length === 0; index++) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(uploads.length, 1);
+  const changed = await manager.invoke('saveSyncSettings', { token: 'customer-b-token' });
+  assert.equal(changed.status.pendingCount, 0);
+  assert.equal(changed.status.recoverableQueues.length, 1);
+  const afterChange = await manager.invoke('getState');
+  assert.equal(afterChange.chatSync.status.pendingCount, 0, 'the renderer refresh after save cannot enqueue customer A under customer B');
+  await manager.invoke('saveSettings', { baseUrl: 'https://model.example.test/v1', model: 'fixture', apiKey: 'fixture-model-key' });
+  assert.equal((await manager.invoke('getState')).chatSync.status.pendingCount, 0, 'model configure state is not a new chat action');
+  await manager.invoke('retryChatSync');
+  assert.equal((await manager.invoke('getState')).chatSync.status.pendingCount, 0);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(uploads.length, 1, 'settings and retry cannot observe stale lastState into the new customer');
+  await assert.rejects(manager.invoke('restoreChatSyncQueue', { queueId: changed.status.recoverableQueues[0].queueId }), { code: 'AGENT_SYNC_OWNERSHIP_REQUIRED' });
+  await manager.invoke('restoreChatSyncQueue', { queueId: changed.status.recoverableQueues[0].queueId, confirmed: true });
+  for (let index = 0; index < 50 && uploads.length < 2; index++) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(uploads[1].headers.Authorization, 'Bearer customer-b-token');
+  assert.equal(JSON.parse(uploads[1].body).eventId, JSON.parse(uploads[0].body).eventId);
+  const cleared = await manager.invoke('clearChatSyncQueue', { includeLegacy: true });
+  assert.equal(cleared.pendingCount, 0);
+  assert.equal((await manager.invoke('getState')).chatSync.status.pendingCount, 0, 'the renderer refresh after clear cannot recreate pending snapshots');
+  children.at(-1).emit('exit', 1);
+  assert.equal((await manager.invoke('getState')).chatSync.status.pendingCount, 0, 'worker restart configure cannot recreate cleared snapshots');
+  assert.equal(children.length, 2);
+  await manager.invoke('retryChatSync');
+  assert.equal((await manager.invoke('getState')).chatSync.status.pendingCount, 0);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(uploads.length, 2);
+  await manager.invoke('newConversation');
+  await manager.invoke('startTask', { text: 'synthetic customer B new chat' });
+  for (let index = 0; index < 50 && uploads.length < 3; index++) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(uploads.length, 3, 'a real new chat still uploads under the current credential');
+  assert.equal(uploads[2].headers.Authorization, 'Bearer customer-b-token');
+  const freshEvent = JSON.parse(uploads[2].body);
+  assert.equal(freshEvent.conversation.id, 'conversation-new');
+  assert.equal(freshEvent.conversation.messages[0].text, 'synthetic customer B new chat');
+  assert(!uploads[2].body.includes('synthetic customer A history'));
 });
