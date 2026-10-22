@@ -98,7 +98,7 @@ test('unlimited online keys also require a signed cached allowance', async t => 
   assert.equal((await offline.authorize(key, { endDate: now + 86400000 })).ok, false);
 });
 
-test('legacy unregistered keys and outdated servers explain missing allowances without bypassing validation', async t => {
+test('outdated servers request automatic authorization support without website review or unsigned cache access', async t => {
   const root = temporary(t), key = 'ab'.repeat(64), deviceId = 'c'.repeat(64), now = Date.now();
   let online = true, status = 'UNKNOWN', signature;
   const service = createDeviceAuthorization({ root, deviceId, now: () => now, fetchImpl: async () => {
@@ -108,7 +108,7 @@ test('legacy unregistered keys and outdated servers explain missing allowances w
   const legacy = await service.authorize(key, { endDate: now + 86400000 });
   assert.equal(legacy.ok, false);
   assert.equal(legacy.code, 'LICENSE_NOT_REGISTERED');
-  assert.match(legacy.message, /补录原密钥/);
+  assert.match(legacy.message, /自动同步.*无需更换密钥或到网站补录/);
   online = false;
   assert.equal((await service.authorize(key, { endDate: now + 86400000 })).ok, false);
   online = true; status = 'ACTIVATED';

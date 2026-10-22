@@ -4,6 +4,7 @@ const { createHash, verify } = require('node:crypto');
 const { getDeviceId } = require('../../../../app/electron/deviceIdentity');
 const { observeUsageOperation } = require('../../../common/businessEvents');
 const PUBLIC_KEY = fs.readFileSync(path.join(__dirname, '../../../extension-host/workspace/systemPackagePublicKey.pem'), 'utf8');
+const LEGACY_AUTHORIZATION_PENDING_MESSAGE = '原密钥自动同步尚未完成，请保持联网重试；若持续失败，请联系管理员更新授权服务，无需更换密钥或到网站补录。';
 
 /** Verify the signed offline allowance for this exact key and computer. */
 function verifyDeviceLease(envelope, key, deviceId, now = Date.now(), publicKey = PUBLIC_KEY, allowExpired = false) {
@@ -89,7 +90,7 @@ function createDeviceAuthorization({ root, fetchImpl = globalThis.fetch, now = D
     if (response) {
       const limit = response.deviceLimit || 0;
       if (response.status === 'LICENSE_NOT_REGISTERED' || (response.valid && !response.deviceLease && response.status === 'UNKNOWN')) {
-        value = { ok: false, code: 'LICENSE_NOT_REGISTERED', message: '原密钥需要同步登记。请管理员在授权网站“密钥验证”中核对并补录原密钥，然后联网重试，无需更换密钥。', deviceLimit: limit };
+        value = { ok: false, code: 'LICENSE_NOT_REGISTERED', message: LEGACY_AUTHORIZATION_PENDING_MESSAGE, deviceLimit: limit };
       } else if (response.valid && !response.deviceLease) {
         value = { ok: false, code: 'LICENSE_SERVER_UPGRADE_REQUIRED', message: '授权服务尚未返回电脑授权凭证，请联系管理员更新授权服务后重试。', deviceLimit: limit };
       } else if (response.valid && (!verifyDeviceLease(response.deviceLease, key, deviceId, now(), publicKey)
@@ -107,7 +108,8 @@ function createDeviceAuthorization({ root, fetchImpl = globalThis.fetch, now = D
         value = { ...value, deviceLease: previous.deviceLease, expiresAt: previous.expiresAt, deviceLimit: previous.deviceLimit };
       }
       persist(key, value);
-    } else if (previous) value = { ...previous, licenseExpiresAt: localState.endDate, offline: true };
+    } else if (previous) value = { ...previous, licenseExpiresAt: localState.endDate, offline: true,
+      ...(previous.code === 'LICENSE_NOT_REGISTERED' ? { message: LEGACY_AUTHORIZATION_PENDING_MESSAGE } : {}) };
     else value = { ok: false, code: 'LICENSE_ONLINE_ACTIVATION_REQUIRED', message: '请先联网验证一次密钥，完成电脑授权后可离线使用。' };
     const normalExpiry = Number(value.licenseExpiresAt || localState.endDate) <= now()
       && !value.explicitDenial && (value.ok || value.historyAllowed === true);
