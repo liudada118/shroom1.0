@@ -105,6 +105,7 @@ function createHarness(name = 'Home', props = {}, overrides = {}) {
   context.storedAllowedTypes = null;
   context.storedSensorTypeList = null;
   vm.runInContext(helpers, context);
+  if (name === 'Home') context.initialMode = vm.runInContext('getDefaultModeForMatrix(initialMatrixName)', context);
   const updates = [];
   const pending = [];
   let batching = false;

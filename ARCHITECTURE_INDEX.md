@@ -39,6 +39,8 @@
 
 同日校准：3D遥操和炫酷摇操均可从显示面板直接校准。`Title` → `GloveMotion.setCalibration` / `motionCalibration.js` 管理单侧平铺/握拳预览，`Home.colFingerData` → `getCalibratedGloveFingers` 保存本侧基准并立即重算末帧；关闭恢复最新实时弯指，另一侧继续更新。验证Title控件、Motion预览纯函数及真实Home校准采集/清除回归；涉及渲染器执行Full。
 
+人体/背心冷启动：`Home` 构造器复用 `getDefaultModeForMatrix` 决定初始模式及对应调参，`humanBodyOptimized` / `pressureVest` 首屏直接为 `skin`；非原始数据模式保持人体渲染，不能落入末尾汽车座椅兜底。`HumanBodyOptimized` 在门户内保留于 `.portal-data-renderer`，不能挂到body被门户底板遮住；画布 `data-model-state` 参与就绪等待。验证 `node scripts/tests/human-body-entry.mjs` 的真实Home冷启动、目录不可用、原始数据往返、旧模式及刷新，并用 `node scripts/tests/human-body-portal.mjs` 检查完整门户入口的实际遮挡、人体像素、慢加载及退出重进，执行Full。
+
 1. 查看 `git status --short`，确认用户已有改动。
 2. 按下面的“变更路径 → 验证域”选择范围。
 3. 只读取入口、直接依赖、调用方和对应测试；使用 `rg` 查符号，不遍历构建产物和模型资源。

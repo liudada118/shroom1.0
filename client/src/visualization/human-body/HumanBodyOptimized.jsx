@@ -882,6 +882,9 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
     const raycaster = new THREE.Raycaster();
     const pointerNdc = new THREE.Vector2();
     const canvas = renderer.domElement;
+    canvas.dataset.modelState = 'loading';
+    setLoading(true);
+    setError('');
 
     const invalidateRender = () => {
       renderDirty = true;
@@ -1335,14 +1338,17 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
           lineGridRef.current = lineGrid;
 
           updateTextureValues();
+          canvas.dataset.modelState = 'ready';
           setLoading(false);
         } catch (layoutError) {
+          canvas.dataset.modelState = 'error';
           setError(layoutError instanceof Error ? layoutError.message : String(layoutError));
           setLoading(false);
         }
       })
       .catch((loadError) => {
         if (disposed) return;
+        canvas.dataset.modelState = 'error';
         setError(`人体模型或点位加载失败：${loadError?.message || "未知错误"}`);
         setLoading(false);
       });
@@ -1425,7 +1431,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
       lineGridRef.current?.material?.dispose();
       if (container.contains(renderer.domElement)) container.removeChild(renderer.domElement);
     };
-  }, [sensorProfile]);
+  }, [sensorProfile, props.portalEmbedded]);
 
   useEffect(() => {
     sceneRef.current?.background?.set(bgColor);
@@ -1569,7 +1575,8 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
   const viewportContent = (
     <div
       data-human-body-viewport="true"
-      style={{ position: "fixed", inset: 0, zIndex: 0, width: "100vw", height: "100vh", overflow: "hidden", background: bgColor }}
+      style={{ position: props.portalEmbedded ? "absolute" : "fixed", inset: 0, zIndex: 0,
+        width: props.portalEmbedded ? "100%" : "100vw", height: props.portalEmbedded ? "100%" : "100vh", overflow: "hidden", background: bgColor }}
     >
       <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />
 
@@ -1659,7 +1666,8 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
     </div>
   );
 
-  return typeof document === "undefined"
+  // ⚠️ 门户画布必须留在监测宿主中，挂到body会被门户底板遮住且无法等待模型就绪。
+  return props.portalEmbedded || typeof document === "undefined"
     ? viewportContent
     : createPortal(viewportContent, document.body);
 });

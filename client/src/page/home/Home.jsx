@@ -1059,7 +1059,8 @@ class Home extends React.Component {
 
     // 使用上次由配置器或传感器选择器激活的类型，避免重新进入主界面后回退到固定传感器。
     const initialMatrixName = normalizeDisplayMatrixName(localStorage.getItem('file') || 'hand0205');
-    const initialMatrixConfig = getConfig({ sensorType: initialMatrixName });
+    const initialMode = getDefaultModeForMatrix(initialMatrixName);
+    const initialMatrixConfig = getConfig({ sensorType: initialMatrixName, mode: initialMode });
     // 播种必须在读 chartWidgetIds 之前 —— 后者从存储里算高亮，
     // 顺序反了首帧的零件方块就不会亮。
     const initialChartCards = seedFormulaChartsFromManifest(initialMatrixName);
@@ -1102,7 +1103,7 @@ class Home extends React.Component {
       jqbedAlgorithmLogSubscription: null,
       wsConnected: false,
       wsConnectionEpoch: 0,
-      numMatrixFlag: "normal",
+      numMatrixFlag: initialMode,
       centerFlag: false,
       carState: "all",
       leftFlag: false,
@@ -5676,10 +5677,12 @@ class Home extends React.Component {
                         {...this.sceneChartProps} />
                     </CanvasCom>
                     :
-                    this.state.numMatrixFlag == "skin" && [HUMAN_BODY_OPTIMIZED_MATRIX, PRESSURE_VEST_MATRIX].includes(this.state.matrixName) ?
+                    // ⚠️ 人体与背心的旧模式仍显示人体，避免落入末尾的汽车座椅兜底。
+                    this.state.numMatrixFlag !== "numoriginal" && [HUMAN_BODY_OPTIMIZED_MATRIX, PRESSURE_VEST_MATRIX].includes(this.state.matrixName) ?
                     <CanvasCom matrixName={this.state.matrixName} local={this.state.local}>
                       <HumanBodyOptimized
                         ref={this.com}
+                        portalEmbedded={this.props.portalEmbedded}
                         data={this.data}
                         local={this.state.local}
                         sensorProfile={this.state.matrixName === PRESSURE_VEST_MATRIX ? PRESSURE_VEST_PROFILE : undefined}
