@@ -8,6 +8,7 @@ const {
 const {
   createWebSocketSubscriptionManager,
 } = require('../../kernel/platform/websocket/websocketSubscriptionService');
+const { createLicenseAccessPolicy } = require('../../kernel/platform/license/licenseAccessPolicy');
 
 const payload = createSensorStatusPayload({
   file: 'custom-pressure-map',
@@ -155,6 +156,76 @@ client.emit('close');
 assert.deepStrictEqual(wsSubscriptions.getStatus(), { channels: {}, scopes: {} });
 assert.deepStrictEqual(closedClients, [client]);
 console.log('webSocketHandlerFactory.test.js passed');
+
+/** Connection and refresh dates show the software term while short leases still restrict acquisition. */
+(() => {
+  const day = 86400000;
+  let now = Date.UTC(2026, 0, 1);
+  const leaseExpiry = now + 7 * day;
+  const softwareExpiry = now + 3 * 365 * day;
+  const policy = createLicenseAccessPolicy({ clock: { now: () => now, synchronize() {} }, setTimer: () => 1, clearTimer() {} });
+  policy.update({ ok: true, expiresAt: leaseExpiry, licenseExpiresAt: softwareExpiry });
+  const statusServer = new EventEmitter(), events = [], handlers = [];
+  const context = { ...handlerContext, server: statusServer, serverOpened: false,
+    endDate: leaseExpiry, nowDate: now, getLicenseAccess: policy.read,
+    publishSystemEvent: value => events.push(value),
+    wsSubscriptions: createWebSocketSubscriptionManager({ logger: { warn() {} } }),
+    controlCommandService: { registerHandler: handler => handlers.push(handler), executeWs: () => ({ handled: true, results: [] }) } };
+  createWebSocketHandlerAttacher(context)();
+
+  /** Open a synthetic client through the real connection listener. */
+  function connect() {
+    const socket = new EventEmitter();
+    socket.readyState = 1;
+    socket.send = () => {};
+    statusServer.emit('connection', socket, { connection: { remoteAddress: '127.0.0.1', remotePort: 45680 } });
+    return socket;
+  }
+
+  const socket = connect();
+  assert.ok(events.length >= 2);
+  for (const event of events) {
+    assert.equal(event.date, softwareExpiry, 'every connection status uses the real software expiry');
+    assert.equal(event.licenseAccess.expiresAt, leaseExpiry, 'the short authorization deadline is preserved');
+  }
+  const refresh = handlers.find(handler => handler.name === 'license-status-refresh');
+  assert.equal(refresh.handle().payload.date, softwareExpiry);
+
+  let reads = 0;
+  context.getLicenseAccess = () => { reads += 1; return policy.read(); };
+  const snapshot = createSensorStatusPayload(context, { date: leaseExpiry });
+  assert.equal(reads, 1, 'date and permissions come from the same live snapshot');
+  assert.equal(snapshot.date, softwareExpiry);
+
+  now = leaseExpiry + 1;
+  const restricted = refresh.handle().payload;
+  assert.equal(restricted.date, softwareExpiry, 'an expired lease does not become an expired software key');
+  assert.equal(restricted.licenseAccess.state, 'restricted');
+  assert.equal(restricted.licenseAccess.canAcquire, false);
+  assert.equal(restricted.licenseAccess.canReadHistory, false);
+  assert.throws(() => policy.requireAccess('acquire'));
+
+  const renewedExpiry = softwareExpiry + 60 * day;
+  const renewedLease = now + 7 * day;
+  context.endDate = renewedLease;
+  context.nowDate = now;
+  policy.update({ ok: true, expiresAt: renewedLease, licenseExpiresAt: renewedExpiry });
+  assert.equal(refresh.handle().payload.date, renewedExpiry, 'refresh reads a renewed license immediately');
+  const reconnected = connect();
+  assert.equal(events.at(-1).date, renewedExpiry, 'a new connection does not reuse the old license date');
+
+  const shortSoftwareExpiry = now + 3 * day;
+  policy.update({ ok: true, expiresAt: shortSoftwareExpiry, licenseExpiresAt: shortSoftwareExpiry });
+  assert.equal(refresh.handle().payload.date, shortSoftwareExpiry, 'genuinely short software terms remain visible');
+  assert.equal(createSensorStatusPayload({ getLicenseAccess: () => null }, { date: leaseExpiry }).date, 0,
+    'missing modern expiry never falls back to the lease');
+  assert.equal(createSensorStatusPayload({ endDate: leaseExpiry }, { date: leaseExpiry }).date, leaseExpiry,
+    'legacy contexts without an access reader retain the existing date contract');
+  socket.emit('close');
+  reconnected.emit('close');
+  policy.dispose();
+  console.log('webSocketHandlerFactory software expiry and lease regression passed');
+})();
 
 /** Async device authorization must preserve its actual denial code in command.ack. */
 (async () => {

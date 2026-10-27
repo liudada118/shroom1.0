@@ -75,13 +75,17 @@ function sendCommandResultAck(ws, message, result, logger) {
  * file/selectFlag 保留旧授权协议，currentSensorType 只描述当前 runtime 选择。
  */
 function createSensorStatusPayload(ctx, extra = {}) {
+  const hasLicenseAccess = typeof ctx.getLicenseAccess === 'function';
+  const licenseAccess = hasLicenseAccess ? ctx.getLicenseAccess() : undefined;
   return {
     file: ctx.licenseFile ?? null,
     currentSensorType: ctx.currentSystemId || ctx.file,
     selectFlag: ctx.selectFlag,
-    ...(typeof ctx.getLicenseAccess === 'function' ? { licenseAccess: ctx.getLicenseAccess() } : {}),
+    ...(hasLicenseAccess ? { licenseAccess } : {}),
     ...(typeof ctx.getCollectionStatus === 'function' ? ctx.getCollectionStatus() : {}),
     ...extra,
+    // ⚠️ 旧 date 只展示密钥期限；不能让实时权限的短凭证期限覆盖它。
+    ...(hasLicenseAccess ? { date: Number.isFinite(licenseAccess?.licenseExpiresAt) ? licenseAccess.licenseExpiresAt : 0 } : {}),
   };
 }
 

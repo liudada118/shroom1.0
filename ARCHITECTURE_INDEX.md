@@ -1,7 +1,9 @@
 # Shroom 快速架构索引
 
-> 最后更新于：2026-10-26
+> 最后更新于：2026-10-27
 > 用途：代码定位和验证路由。理解当前实现先读 [开发者手册](docs/developer-guide.md)，完整文档分类见 [docs/README.md](docs/README.md)。`ARCHITECTURE.md` 保留历史设计与维护台账，不用作默认全文入口。
+
+2026-10-27 密钥临期误报源码修复：`createSensorStatusPayload` 将WebSocket连接/刷新中的展示日期统一为真实 `licenseAccess.licenseExpiresAt`，`Home` 经 `getLicenseExpiryTimestamp` 同样优先真实期限；现代合同日期缺失不回退短凭证期限，旧宿主保留date兼容。7天电脑凭证、签名、设备绑定及采集权限未改变。实际Home、连接/刷新/续期回归及Full8项通过；此修复尚未重新打包或发布，线上1.1.39不含本次修改。
 
 2026-10-26 Windows安装恢复与发布完成：1.1.39已实际安装至C:/Program Files/Shroom，2806文件哈希一致，普通权限主窗口、前端HTTP200和两个后台端口通过。`scripts/installer.nsh` 在旧卸载前校验磁盘并移除强制D盘路径，`serverPathConfig` 将Windows导出改用userData；Full12项、最终产物16项及真实NSIS回归通过。服务器恢复后改用磁盘暂存并限速顺序发布MinIO，公网latest及五项轻量验收已确认1.1.39；旧1.1.36清单保留回滚备份。状态见 [更新服务器](docs/shroom-update-server.md)，详细验收边界见维护台账。
 

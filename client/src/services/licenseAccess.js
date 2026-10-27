@@ -14,6 +14,14 @@ export function readLicenseAccess(message) {
     ...Object.fromEntries(CAPABILITIES.map(name => [name, access[name]])) };
 }
 
+/** Read the software license deadline; modern lease deadlines never fall back to legacy dates. */
+export function getLicenseExpiryTimestamp(message) {
+  const access = readLicenseAccess(message);
+  const value = access === undefined ? message?.date : access.licenseExpiresAt;
+  const timestamp = typeof value === 'number' || (typeof value === 'string' && value.trim()) ? Number(value) : NaN;
+  return Number.isFinite(timestamp) && timestamp > 0 && Number.isFinite(new Date(timestamp).getTime()) ? timestamp : null;
+}
+
 /** Only an explicit normally expired license may retain history viewing and analysis. */
 export function isHistoryOnlyLicense(access) {
   return access?.state === 'expired' && access.canReadHistory === true && access.canAcquire === false && access.canExport === false;

@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from "react";
 import Title from "../../components/title/Title";
-import { readLicenseAccess, isHistoryOnlyLicense, canUseLicenseCapability } from '../../services/licenseAccess';
+import { readLicenseAccess, isHistoryOnlyLicense, canUseLicenseCapability, getLicenseExpiryTimestamp } from '../../services/licenseAccess';
 import { readCollectionSummary } from '../../services/collectionStatus';
 import { requestJson } from '../../extensions/display-system/api';
 import RuntimeStatusNotice from './RuntimeStatusNotice';
@@ -2333,8 +2333,8 @@ class Home extends React.Component {
       }
     }
 
-    if (jsonObject.date != null) {
-      const endDate = parseFloat(jsonObject.date);
+    const endDate = getLicenseExpiryTimestamp(jsonObject);
+    if (endDate !== null) {
       const serverNow = jsonObject.nowDate ? parseFloat(jsonObject.nowDate) : Date.now();
       const remainMs = endDate - serverNow;
       const remainDays = Math.ceil(remainMs / 86400000);

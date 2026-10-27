@@ -14,6 +14,9 @@ const logStateSource = fs.readFileSync(path.join(root, 'client/src/extensions/jq
 const alarmSpeechSource = fs.readFileSync(path.join(root, 'client/src/page/home/jqbedAlarmSpeech.js'), 'utf8');
 const gloveExhibitionSource = buildSync({ entryPoints: [path.join(root, 'client/src/page/home/gloveExhibition.js')],
   bundle: true, write: false, format: 'cjs', platform: 'node' }).outputFiles[0].text;
+const licenseAccessModule = { exports: {} };
+vm.runInNewContext(transformSync(fs.readFileSync(path.join(root, 'client/src/services/licenseAccess.js'), 'utf8'),
+  { loader: 'js', format: 'cjs' }).code, { module: licenseAccessModule });
 const files = {
   Home: 'client/src/page/home/Home.jsx',
   Title: 'client/src/components/title/Title.jsx',
@@ -47,6 +50,8 @@ function createHarness(name = 'Home', props = {}, overrides = {}) {
     initValue: {}, SMALL_BED_12B_DEFAULT_RENDERER_CONFIG: {},
     Radio: { Group: 'Radio.Group', Button: 'Radio.Button' },
     normalizeLanguage: (value) => value || 'zh',
+    getLanguageLocale: () => 'zh-CN',
+    getLicenseExpiryTimestamp: licenseAccessModule.exports.getLicenseExpiryTimestamp,
     getJqbedConfigAccess: ({ matrixName, history }) => ({ visible: matrixName === 'jqbed', disabled: history !== 'now' }),
     readPressureScene: () => 'real', PRESSURE_SCENES: { real: 'real', demo: 'demo' },
     resolveDisplaySwitchZero: () => null,
@@ -198,6 +203,31 @@ const alarmDiagnostics = (merged_alarm, sosflag = 0, sensorType = 'jqbed') => ({
   jqbedAlgorithmDiagnostics: { sensorType, merged_alarm, sosflag },
 });
 const spokenKeys = (harness) => harness.spoken.map((item) => item.alertKey);
+
+test('actual Home expiry reminders use the software term instead of the shorter computer lease', () => {
+  const now = Date.UTC(2026, 0, 1), day = 86400000;
+  const longExpiry = now + 3 * 365 * day;
+  const access = { schemaVersion: 1, state: 'active', reason: null,
+    expiresAt: now + 7 * day, licenseExpiresAt: longExpiry,
+    canAcquire: true, canReadHistory: true, canAnalyzeHistory: true,
+    canExport: true, canConfigure: true, canStop: true };
+  const props = { i18n: { language: 'zh' } };
+  const home = createHarness('Home', props);
+  home.send({ date: access.expiresAt, nowDate: now, licenseAccess: access });
+  assert.equal(home.instance.state.licenseModalVisible, false);
+  home.send({ date: access.expiresAt, nowDate: now, licenseAccess: { ...access, licenseExpiresAt: longExpiry + day } });
+  assert.equal(home.instance.state.licenseModalVisible, false, 'a refreshed long license stays outside the warning window');
+
+  home.send({ date: longExpiry, nowDate: now, licenseAccess: { ...access, licenseExpiresAt: now + 3 * day } });
+  assert.equal(home.instance.state.licenseModalVisible, true);
+  assert.equal(home.instance.state.licenseModalType, 'warning');
+  assert.equal(home.instance.state.licenseModalRemainDays, 3);
+
+  const legacy = createHarness('Home', props);
+  legacy.send({ date: now + 2 * day, nowDate: now });
+  assert.equal(legacy.instance.state.licenseModalVisible, true);
+  assert.equal(legacy.instance.state.licenseModalRemainDays, 2);
+});
 
 test('actual Home announces merged alarms without a rate packet or a log subscription', () => {
   const home = createHarness();
