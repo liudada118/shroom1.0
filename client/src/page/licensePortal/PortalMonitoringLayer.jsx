@@ -9,11 +9,33 @@ import { trackUsage, setUsageSystemContext } from '../../services/usageAnalytics
 export default function PortalMonitoringLayer({ component: MonitoringPage, system, directEntry = false, capturePreview, onPreviewChange, onBack, onSystemChange, licenseAccess }) {
   const [chartsVisible, setChartsVisible] = useState(true);
   const [toolsHost, setToolsHost] = useState(null);
+  const [sceneOnly, setSceneOnly] = useState(false);
+  const sceneOnlyAvailable = system?.value === 'smallBedNoAlg';
+  const sceneOnlyActive = sceneOnlyAvailable && sceneOnly;
+  const sceneOnlyButtonRef = useRef(null);
   const rootRef = useRef(null);
   const contentRef = useRef(null);
   const exitRef = useRef(null);
   const callbacksRef = useRef({ capturePreview, onPreviewChange, onBack });
   callbacksRef.current = { capturePreview, onPreviewChange, onBack };
+  useLayoutEffect(() => {
+    if (!sceneOnlyActive) return undefined;
+    const close = rootRef.current?.querySelector('.portal-monitor-close');
+    close?.focus({ preventScroll: true });
+    /** 纯点图只保留关闭入口；Escape恢复控件，Tab不落到已隐藏工具。 */
+    const handleSceneKey = (event) => {
+      if (rootRef.current?.dataset.handoff === 'leaving') return;
+      if (event.key === 'Escape') {
+        event.preventDefault(); event.stopImmediatePropagation();
+        setSceneOnly(false);
+        requestAnimationFrame(() => sceneOnlyButtonRef.current?.focus({ preventScroll: true }));
+      } else if (event.key === 'Tab') {
+        event.preventDefault(); close?.focus({ preventScroll: true });
+      }
+    };
+    document.addEventListener('keydown', handleSceneKey, true);
+    return () => document.removeEventListener('keydown', handleSceneKey, true);
+  }, [sceneOnlyActive]);
   useLayoutEffect(() => {
     const root = rootRef.current;
     const controller = new AbortController();
@@ -179,8 +201,12 @@ export default function PortalMonitoringLayer({ component: MonitoringPage, syste
 
   /** 导航和原生页的返回入口共用同一段退场，重复点击不会触发多次系统操作。 */
   const leave = () => exitRef.current?.();
+  const sceneOnlyControl = sceneOnlyAvailable ? <button ref={sceneOnlyButtonRef} type="button" className="portal-scene-only-toggle"
+    aria-label="仅显示3D点图" aria-pressed={sceneOnlyActive} aria-controls="portal-monitor-content"
+    title="隐藏图表和工具，只保留3D点图与关闭按钮；按 Esc 恢复"
+    onClick={() => setSceneOnly(true)}>仅显示3D点图</button> : null;
 
-  return <div ref={rootRef} className={`portal-runtime-monitor is-data-view ${directEntry ? 'is-direct-entry' : ''} ${chartsVisible ? '' : 'is-chart-hidden'}`} data-handoff="preparing" inert={directEntry}>
+  return <div ref={rootRef} className={`portal-runtime-monitor is-data-view ${directEntry ? 'is-direct-entry' : ''} ${chartsVisible ? '' : 'is-chart-hidden'}${sceneOnlyActive ? ' is-scene-only' : ''}`} data-handoff="preparing" inert={directEntry}>
     <nav className="portal-monitor-navigation" aria-label="系统视图">
       <div className="portal-monitor-identity-group">
         <button type="button" onClick={leave}>← 返回系统列表</button>
@@ -191,8 +217,10 @@ export default function PortalMonitoringLayer({ component: MonitoringPage, syste
     <div id="portal-monitor-content" ref={contentRef} className="portal-monitor-content" style={{ opacity: 0 }} inert>
       <div className="portal-monitor-floor" aria-hidden="true" />
       <MonitoringPage portalEmbedded onPortalBack={leave} onPortalSystemChange={onSystemChange} licenseAccess={licenseAccess}
-        portalToolsHost={toolsHost} portalChartsVisible={chartsVisible} onPortalChartsToggle={() => setChartsVisible((value) => !value)} />
-      <div ref={setToolsHost} className="portal-tools-host" />
+        portalToolsHost={toolsHost} portalChartsVisible={chartsVisible && !sceneOnlyActive} portalSceneOnly={sceneOnlyActive}
+        portalSceneOnlyControl={sceneOnlyControl}
+        onPortalChartsToggle={() => setChartsVisible((value) => !value)} />
+      <div ref={setToolsHost} className="portal-tools-host" inert={sceneOnlyActive} />
     </div>
   </div>;
 }

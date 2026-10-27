@@ -59,7 +59,7 @@ describe('门户最新监测控制层', () => {
     expect(tree.props.className).toBe('portal-quick-tools-anchor');
     const card = tree.props.children.props.children[1];
     expect(card.props.className).toBe('portal-quick-tools');
-    const buttons = card.props.children[1].props.children;
+    const buttons = React.Children.toArray(card.props.children[1].props.children);
     expect(buttons.map((button) => button.props['aria-label'])).toEqual(['算法', '图表', '调节', '工具']);
     buttons.forEach((button) => button.props.onClick());
     Object.values(actions).forEach((action) => expect(action).toHaveBeenCalledOnce());
@@ -87,7 +87,7 @@ describe('门户最新监测控制层', () => {
     expect(collapsed.props.className).toBe(expanded.props.className);
     expect(collapsedSlide.props.className).toContain('is-collapsed');
     expect(collapsedCard.props.inert).toBe(true);
-    expect(collapsedCard.props.children[1].props.children).toHaveLength(4);
+    expect(React.Children.toArray(collapsedCard.props.children[1].props.children)).toHaveLength(4);
     expect(collapsedCard.props.children[1].props.inert).toBe(true);
     expect(collapsedCard.props.children[1].props['aria-hidden']).toBe(true);
     expect(collapsedButton.props['aria-label']).toBe('展开快捷工具');
@@ -98,5 +98,16 @@ describe('门户最新监测控制层', () => {
     expect(renderToStaticMarkup(collapsed)).not.toContain('aria-label="left"');
     collapsedButton.props.onClick();
     expect(onCollapse).toHaveBeenLastCalledWith(false);
+  });
+
+  it('仅在提供小床专用入口时增加纯点图按钮，点击不触发其他工具动作', () => {
+    const onSceneOnly = vi.fn(), onCharts = vi.fn();
+    const tree = PortalQuickTools({ onCharts, sceneOnlyControl: <button aria-label="仅显示3D点图" onClick={onSceneOnly}>仅显示3D点图</button> });
+    const buttons = React.Children.toArray(tree.props.children.props.children[1].props.children[1].props.children);
+    expect(buttons).toHaveLength(5);
+    expect(onSceneOnly).not.toHaveBeenCalled();
+    buttons.at(-1).props.onClick();
+    expect(onSceneOnly).toHaveBeenCalledOnce();
+    expect(onCharts).not.toHaveBeenCalled();
   });
 });

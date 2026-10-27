@@ -27,6 +27,7 @@ window.electronAPI = {
     async invoke(action, input) {
       calls.push({ serviceAction: action, ...input });
       if (action === 'setUsageEnabled') serviceState.usage.enabled = input.enabled;
+      if (action === 'acknowledgeUsageNotice') serviceState.usage.noticePending = false;
       if (action === 'checkFrontend') serviceState.frontend.pendingReleaseId = 2;
       serviceListeners.forEach(listener => listener(structuredClone(serviceState)));
       return structuredClone(action === 'status' ? serviceState : action === 'checkFrontend' ? serviceState.frontend : serviceState.usage);
@@ -50,6 +51,11 @@ window.appToolsFixture = {
   },
   /** 在同一个页面核对已有的三种语言。 */
   language(value) { return i18n.changeLanguage(value); },
+  /** 重现首次上报提示转入设置时两个Modal关闭和打开的交接。 */
+  notice() {
+    serviceState.usage.noticePending = true;
+    serviceListeners.forEach(listener => listener(structuredClone(serviceState)));
+  },
 };
 
 /** 用真实组件检查首页反馈与全局工具的组合及卸载。 */

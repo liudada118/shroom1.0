@@ -53,7 +53,7 @@ function createServerPathConfig({
   const desktopPath = typeof electronApp?.getPath === 'function'
     ? electronApp.getPath('desktop')
     : runtimeWritableRoot;
-  const exportRoot = isPackagedRuntime
+  const exportRoot = isPackagedRuntime && processRef.platform !== 'win32'
     ? (processRef.platform === 'darwin' ? desktopPath : processRef.resourcesPath)
     : runtimeWritableRoot;
   const developmentRuntimeRoot = path.join(PROJECT_ROOT, 'runtime');
@@ -67,7 +67,7 @@ function createServerPathConfig({
     ? path.join(runtimeWritableRoot, 'img')
     : path.join(developmentRuntimeRoot, 'uploads');
   const pdfPath = isPackagedRuntime
-    ? (processRef.platform === 'win32' ? path.join(processRef.resourcesPath, 'OneStep') : path.join(exportRoot, 'oneStepPdf'))
+    ? (processRef.platform === 'win32' ? path.join(exportRoot, 'OneStep') : path.join(exportRoot, 'oneStepPdf'))
     : path.join(developmentRuntimeRoot, 'exports', 'reports');
   const nameTxt = resolveConfigFile();
   const writableNameTxt = getWritableConfigFile();

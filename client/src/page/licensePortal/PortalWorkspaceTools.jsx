@@ -54,8 +54,7 @@ export default function PortalWorkspaceTools({ open, onClose, rendererRef, selec
   };
   const viewItems = [
     { id: 'rotate-x', label: 'X 轴 +30°', icon: <RotateRightOutlined />, description: '绕模型 X 轴旋转 30°。', method: 'rotate', args: ['x', 1] },
-    { id: 'rotate-y', label: 'Y 轴 +30°', icon: <RotateRightOutlined />, description: '绕模型 Y 轴旋转 30°。', method: 'rotate', args: ['y', 1] },
-    { id: 'rotate-back', label: 'Y 轴 −30°', icon: <RotateLeftOutlined />, description: '绕模型 Y 轴反向旋转 30°。', method: 'rotate', args: ['y', -1] },
+    { id: 'rotate-back', label: 'X 轴 −30°', icon: <RotateLeftOutlined />, description: '绕模型 X 轴反向旋转 30°。', method: 'rotate', args: ['x', -1] },
     { id: 'top', label: '俯视', icon: <AimOutlined />, description: '从垫面上方观察。', method: 'top' },
     { id: 'zoom-in', label: '放大', icon: <ZoomInOutlined />, description: '拉近观察距离，不改变数据值。', method: 'zoom', args: [1] },
     { id: 'zoom-out', label: '缩小', icon: <ZoomOutOutlined />, description: '拉远观察距离，不改变数据值。', method: 'zoom', args: [-1] },

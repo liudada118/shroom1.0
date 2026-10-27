@@ -3,22 +3,24 @@ import { BufferGeometry, Float32BufferAttribute, Group, PerspectiveCamera, Point
 import { createPointViewTools } from './pointViewTools';
 
 /** 使用真实偏置矩阵与倾斜垫面，验证镜头不会追到世界原点。 */
-function fixture() {
+function fixture(localCenter = null) {
   const object = new Group();
   object.position.set(5, 150, 230);
   const geometry = new BufferGeometry();
   geometry.setAttribute('position', new Float32BufferAttribute([1, 4, 7, 2, 5, 8], 3));
   const plane = new Points(geometry);
   plane.rotation.x = Math.PI / 3;
+  if (localCenter) plane.scale.setScalar(.0062);
   object.add(plane);
   const camera = new PerspectiveCamera(40, 1, 1, 150000);
   camera.position.set(0, 200, 300);
   const initial = camera.position.clone();
-  const controls = { target: new Vector3(), update: vi.fn(), reset: vi.fn(() => {
-    controls.target.set(0, 0, 0); camera.position.copy(initial);
+  const controls = { target: new Vector3(), target0: new Vector3(),
+    update: vi.fn(() => camera.lookAt(controls.target)), reset: vi.fn(() => {
+    controls.target.copy(controls.target0); camera.position.copy(initial);
   }) };
   return { object, plane, camera, controls,
-    tools: createPointViewTools({ object, camera, controls, plane }) };
+    tools: createPointViewTools({ object, camera, controls, plane, localCenter }) };
 }
 
 describe('旧点图视角中心', () => {
@@ -49,5 +51,91 @@ describe('旧点图视角中心', () => {
     expect(tools.top()).toBe(false); expect(tools.zoom(1)).toBe(false);
     expect(tools.rotate('y')).toBe(false); expect(tools.flip('y')).toBe(false);
     expect(camera.position.toArray()).toEqual(before);
+  });
+  it('小床初始旋转目标和复位快照均位于缩放倾斜后的真实底面中心', () => {
+    const localCenter = new Vector3(-50, 0, -50);
+    const { object, plane, camera, controls } = fixture(localCenter);
+    const expected = plane.localToWorld(localCenter.clone());
+    expect(controls.target.distanceTo(expected)).toBeLessThan(1e-12);
+    expect(controls.target.distanceTo(object.position)).toBeGreaterThan(.1);
+    expect(controls.target0.distanceTo(expected)).toBeLessThan(1e-12);
+    const direction = camera.getWorldDirection(new Vector3());
+    expect(direction.dot(expected.sub(camera.position).normalize())).toBeCloseTo(1, 12);
+    expect(localCenter.toArray()).toEqual([-50, 0, -50]);
+  });
+  it('小床工具变换与复位保持同一底面中心，压力顶点不参与目标计算', () => {
+    const localCenter = new Vector3(-50, 0, -50);
+    const { plane, camera, controls, tools } = fixture(localCenter);
+    const initialTarget = controls.target0.clone();
+    const positions = Array.from(plane.geometry.attributes.position.array);
+    for (const [method, args] of [['rotate', ['x']], ['rotate', ['z', -1]],
+      ['flip', ['x']], ['flip', ['y']], ['top', []], ['zoom', [1]], ['reset', []]]) {
+      expect(tools[method](...args)).toBe(true);
+      expect(controls.target.distanceTo(plane.localToWorld(localCenter.clone()))).toBeLessThan(1e-12);
+      expect(controls.target0.toArray()).toEqual(initialTarget.toArray());
+      expect(Array.from(plane.geometry.attributes.position.array)).toEqual(positions);
+      expect(camera.quaternion.toArray().every(Number.isFinite)).toBe(true);
+    }
+    expect(camera.position.toArray()).toEqual([0, 200, 300]);
+    plane.geometry.attributes.position.setY(0, 10000);
+    tools.recenter();
+    expect(controls.target.toArray()).toEqual(initialTarget.toArray());
+  });
+  it('小床平移不会在常规更新时被归中，无效和卸载操作不能移动目标', () => {
+    const { camera, controls, tools } = fixture(new Vector3(-50, 0, -50));
+    controls.target.add(new Vector3(10, 0, 20));
+    const target = controls.target.toArray();
+    controls.update();
+    expect(controls.target.toArray()).toEqual(target);
+    expect(tools.rotate('invalid')).toBe(false);
+    expect(tools.flip('invalid')).toBe(false);
+    expect(controls.target.toArray()).toEqual(target);
+    tools.dispose();
+    const position = camera.position.toArray();
+    for (const [method, args] of [['recenter', []], ['reset', []], ['rotate', ['y']], ['flip', ['x']]]) {
+      expect(tools[method](...args)).toBe(false);
+    }
+    expect(controls.target.toArray()).toEqual(target);
+    expect(camera.position.toArray()).toEqual(position);
+  });
+  it('X/Y按钮混合点击时绕点图自身轴旋转30度，中心和镜头保持不动', () => {
+    const localCenter = new Vector3(-50, 0, -50);
+    const { object, plane, camera, controls, tools } = fixture(localCenter);
+    const center = plane.localToWorld(localCenter.clone());
+    const pivot = object.worldToLocal(center.clone());
+    const cameraMatrix = camera.matrixWorld.clone();
+    const target = controls.target.clone();
+    for (const [axis, direction] of [['y', 1], ['x', 1], ['y', -1], ['x', 1], ['y', 1]]) {
+      const axisVector = new Vector3(axis === 'x' ? 1 : 0, axis === 'y' ? 1 : 0, 0);
+      const across = new Vector3(axis === 'y' ? 1 : 0, axis === 'x' ? 1 : 0, 0);
+      const axialPoint = pivot.clone().addScaledVector(axisVector, 10);
+      const acrossPoint = pivot.clone().addScaledVector(across, 10);
+      const beforeAxis = object.localToWorld(axialPoint.clone());
+      const beforeAcross = object.localToWorld(acrossPoint.clone()).sub(center);
+      expect(tools.rotate(axis, direction)).toBe(true);
+      expect(plane.localToWorld(localCenter.clone()).distanceTo(center)).toBeLessThan(1e-10);
+      expect(object.localToWorld(axialPoint.clone()).distanceTo(beforeAxis)).toBeLessThan(1e-10);
+      const afterAcross = object.localToWorld(acrossPoint.clone()).sub(center);
+      expect(beforeAcross.angleTo(afterAcross)).toBeCloseTo(Math.PI / 6, 10);
+      expect(camera.matrixWorld.elements).toEqual(cameraMatrix.elements);
+      expect(controls.target.toArray()).toEqual(target.toArray());
+    }
+  });
+  it('小床镜像及混合轴旋转保持底面中心，12次旋转和反向操作均可还原', () => {
+    const localCenter = new Vector3(-50, 0, -50);
+    const { object, plane, camera, controls, tools } = fixture(localCenter);
+    const center = plane.localToWorld(localCenter.clone());
+    const initial = object.matrixWorld.clone();
+    const cameraPosition = camera.position.clone();
+    tools.flip('x'); tools.flip('y'); tools.flip('x'); tools.flip('y');
+    expect(plane.localToWorld(localCenter.clone()).distanceTo(center)).toBeLessThan(1e-10);
+    for (let index = 0; index < 12; index++) tools.rotate('x');
+    for (let index = 0; index < 12; index++) tools.rotate('y');
+    tools.rotate('x'); tools.rotate('y'); tools.rotate('y', -1); tools.rotate('x', -1);
+    expect(Math.max(...object.matrixWorld.elements.map((value, index) => Math.abs(value - initial.elements[index])))).toBeLessThan(1e-10);
+    expect(camera.position.toArray()).toEqual(cameraPosition.toArray());
+    expect(controls.target.distanceTo(center)).toBeLessThan(1e-10);
+    tools.reset();
+    expect(object.matrixWorld.elements).toEqual(initial.elements);
   });
 });

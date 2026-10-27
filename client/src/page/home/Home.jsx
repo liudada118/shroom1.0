@@ -3686,6 +3686,9 @@ class Home extends React.Component {
   };
 
   componentDidUpdate(prevProps, prevState) {
+    if (prevProps.portalSceneOnly !== this.props.portalSceneOnly) {
+      this.syncPortalSceneOnly(Boolean(this.props.portalSceneOnly));
+    }
     if (this.props.licenseAccess !== undefined && prevProps.licenseAccess !== this.props.licenseAccess) {
       const licenseAccess = readLicenseAccess({ licenseAccess: this.props.licenseAccess });
       const historyOnly = isHistoryOnlyLicense(licenseAccess);
@@ -4695,6 +4698,24 @@ class Home extends React.Component {
     });
   };
 
+  /** 小床纯点图临时切到现有3D视图，恢复界面时还原原显示模式。 */
+  syncPortalSceneOnly = (enabled) => {
+    if (this.state.matrixName !== SMALL_BED_NO_ALG_MATRIX) return;
+    if (enabled) {
+      this._portalPreviousMode = this.state.numMatrixFlag;
+      if (this.state.selectFlag) this.changePortalSelection(false);
+      this.title.current?.closePortalPanelsForScene?.();
+      this.setState({ portalAlgorithmMarketOpen: false, displaySystemBuilderOpen: false, selectFlag: false,
+        ...(this.state.numMatrixFlag !== 'normal' ? { numMatrixFlag: 'normal',
+          ...getConfig({ sensorType: this.state.matrixName, mode: 'normal' }) } : {}) });
+    } else {
+      const previousMode = this._portalPreviousMode;
+      this._portalPreviousMode = null;
+      if (previousMode && previousMode !== this.state.numMatrixFlag) this.setState({ numMatrixFlag: previousMode,
+        ...getConfig({ sensorType: this.state.matrixName, mode: previousMode }) });
+    }
+  };
+
   /**
    * 采集开关的唯一入口 —— `Title` 的「开始采集」和「停止」都会调到这里
    * （`Title.jsx` 的 `startCollectionWithOptions` 传 true、`stopCollection` 传 false），
@@ -4915,7 +4936,7 @@ class Home extends React.Component {
         <div className={`home${this.props.portalEmbedded ? ' home-portal-embedded' : ''}`}>
           <RuntimeStatusNotice licenseAccess={this.state.licenseAccess} collectionSummary={this.state.collectionSummary} onRefreshLicense={() => this.wsSendObj({ refreshLicense: true })} />
           {this.state.matrixName != "robot0428" ? <div className="setIcons">
-            <div className="setIconItem setIconItem1">
+            {!this.props.portalEmbedded && <div className="setIconItem setIconItem1">
               <Popover placement="top" title={text} content={content}>
                 <div
                   className="setIcon marginB10"
@@ -5126,7 +5147,7 @@ class Home extends React.Component {
                 </div>
               </Popover>
 
-            </div>
+            </div>}
             {this.state.matrixName == "foot" ? (
               <Popover
                 placement="top"
@@ -5370,6 +5391,8 @@ class Home extends React.Component {
             openDisplaySystemBuilder={() => this.setState({ displaySystemBuilderOpen: true })}
             onPortalBack={this.props.onPortalBack}
             portalEmbedded={this.props.portalEmbedded}
+            portalSceneOnly={this.props.portalSceneOnly}
+            portalSceneOnlyControl={this.props.portalSceneOnlyControl}
             portalToolsHost={this.props.portalToolsHost}
             portalChartsVisible={this.props.portalChartsVisible}
             onPortalChartsToggle={this.props.onPortalChartsToggle}

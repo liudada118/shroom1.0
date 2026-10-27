@@ -3,6 +3,14 @@
 const compare = (zh, ja) => Object.freeze({ zh, ja });
 
 export const japaneseTranslations = Object.freeze({
+  'appTools.label': compare('应用工具', 'アプリツール'),
+  'appTools.expand': compare('展开应用工具', 'アプリツールを開く'),
+  'appTools.collapse': compare('收起应用工具', 'アプリツールを閉じる'),
+  'appTools.hoverHint': compare('悬停展开', 'ホバーで開く'),
+  'appTools.leaveHint': compare('移开收起', '離れると閉じる'),
+  'appTools.tapHint': compare('点击展开', 'タップで開く'),
+  'appTools.closeHint': compare('点击收起', 'タップで閉じる'),
+  'appTools.description': compare('版本、更新与应用设置 · 悬停或点击展开，Esc收起', 'バージョン・更新・設定 · ホバーまたはクリックで開き、Escで閉じる'),
   "welcome": compare("欢迎", "ようこそ"),
   "chooseSensor": compare("请选择传感器", "センサーを選択してください"),
   "realTime": compare("实时", "リアルタイム"),

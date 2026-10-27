@@ -14,6 +14,7 @@
  */
 
 import React, { useEffect, useState, useCallback } from "react";
+import { createPortal } from 'react-dom';
 import { Modal, Progress, Button, notification, Tag } from "antd";
 import { useTranslation } from "react-i18next";
 import { getLanguageLocale } from "../../i18n";
@@ -73,7 +74,7 @@ export function UpdateErrorNotice({ error }) {
 }
 
 /** Show installer updates separately from cached webpage updates. */
-export default function UpdateNotifier() {
+export default function UpdateNotifier({ statusContainer, onAfterDialogClose } = {}) {
   const { t, i18n } = useTranslation();
   const [updateState, setUpdateState] = useState(UPDATE_STATE.IDLE);
   const [updateInfo, setUpdateInfo] = useState({});
@@ -281,6 +282,7 @@ export default function UpdateNotifier() {
       }
       open={showModal}
       onCancel={() => setShowModal(false)}
+      afterClose={onAfterDialogClose}
       footer={null}
       width={480}
     >
@@ -392,13 +394,15 @@ export default function UpdateNotifier() {
   // 如果不在 Electron 环境中，不渲染
   if (!isElectron) return null;
 
+  const status = <div className="shroom-app-update-status" role="status" aria-live="polite">
+    {renderStatusTag()}
+  </div>;
+
   return (
     <>
       <div className="shroom-update-tools">
-        <div className="shroom-app-update-status" role="status" aria-live="polite">
-          {renderStatusTag()}
-        </div>
-        <VersionHistory />
+        {statusContainer ? createPortal(status, statusContainer) : status}
+        <VersionHistory onAfterDialogClose={onAfterDialogClose} />
         <Button
           className="shroom-app-tool shroom-app-update"
           data-state={updateState}

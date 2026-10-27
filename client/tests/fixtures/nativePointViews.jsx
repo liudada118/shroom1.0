@@ -42,6 +42,8 @@ function NativePointViews() {
       },
       /** 转发真实工具 API，不直接访问或修改 Three.js 对象。 */
       command(method, ...args) { return renderer.current?.getViewTools?.()?.[method](...args); },
+      /** 验证旧面板复位、倾角调整和压力输入，保持生产渲染器封装。 */
+      rendererCommand(method, ...args) { return renderer.current?.[method]?.(...args); },
     };
   }, [name]);
   const Renderer = renderers[name];

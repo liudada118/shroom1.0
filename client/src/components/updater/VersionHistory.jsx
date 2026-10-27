@@ -32,7 +32,7 @@ const RELEASE_NOTE_MODULES = import.meta.glob(
 // Vite 在构建阶段把 Markdown 原文编译进前端，无需运行时读取磁盘。
 const VERSION_HISTORY = buildVersionHistory(RELEASE_NOTE_MODULES);
 
-export default function VersionHistory() {
+export default function VersionHistory({ onAfterDialogClose } = {}) {
   const { t } = useTranslation();
   const [showModal, setShowModal] = useState(false);
   const [currentVersion, setCurrentVersion] = useState("");
@@ -69,6 +69,7 @@ export default function VersionHistory() {
         }
         open={showModal}
         onCancel={() => setShowModal(false)}
+        afterClose={onAfterDialogClose}
         footer={
           <Button onClick={() => setShowModal(false)}>{t("common.close")}</Button>
         }

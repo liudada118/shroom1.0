@@ -41,8 +41,7 @@ try {
     /**
      * 假的 Electron `app.getPath`，只区分 `desktop`，其它一律当 userData。
      *
-     * 配合 `isPackaged: true` 覆盖**打包态**的路径规则（数据落在 resourcesPath /
-     * userData，与开发态完全不同）—— 打包态恰恰是开发时最难顺手验的一半。
+     * 打包态的资源只读，Windows 运行期目录与数据库均应落在 userData。
      *
      * @param {string} name Electron 路径名。
      * @returns {string} 对应的临时目录路径。
@@ -52,17 +51,36 @@ try {
     },
   };
 
-  const windowsConfig = createServerPathConfig({
-    electronApp,
-    processRef: {
-      platform: 'win32',
-      resourcesPath,
-    },
-  });
+  fs.mkdirSync(resourcesPath);
+  const bundledResource = path.join(resourcesPath, 'builtin-model.glb');
+  fs.writeFileSync(bundledResource, 'bundled read-only model');
+  const originalMkdir = fs.mkdirSync;
+  const writableDirectories = [];
+  let windowsConfig;
+  /** 模拟 Program Files 的只读资源权限，禁止启动时在其下创建运行期目录。 */
+  fs.mkdirSync = function rejectResourceWrites(directory, options) {
+    const resolved = path.resolve(directory);
+    if (resolved === resourcesPath || resolved.startsWith(`${resourcesPath}${path.sep}`)) {
+      throw Object.assign(new Error('packaged resources are read-only'), { code: 'EPERM' });
+    }
+    writableDirectories.push(resolved);
+    return originalMkdir(directory, options);
+  };
+  try {
+    windowsConfig = createServerPathConfig({
+      electronApp,
+      processRef: {
+        platform: 'win32',
+        resourcesPath,
+      },
+    });
+  } finally {
+    fs.mkdirSync = originalMkdir;
+  }
 
-  assert.strictEqual(windowsConfig.csvPath, path.join(resourcesPath, 'data'));
+  assert.strictEqual(windowsConfig.csvPath, path.join(userDataPath, 'data'));
   assert.strictEqual(windowsConfig.imgPath, path.join(userDataPath, 'img'));
-  assert.strictEqual(windowsConfig.pdfPath, path.join(resourcesPath, 'OneStep'));
+  assert.strictEqual(windowsConfig.pdfPath, path.join(userDataPath, 'OneStep'));
   assert.strictEqual(windowsConfig.filePath, path.join(userDataPath, 'db'));
   assert.strictEqual(
     windowsConfig.displaySystemsPath,
@@ -70,7 +88,36 @@ try {
   );
   assert.strictEqual(windowsConfig.runtimeResourceRoot, resourcesPath);
   assert.strictEqual(windowsConfig.runtimeWritableRoot, userDataPath);
-  assert.strictEqual(windowsConfig.exportRoot, resourcesPath);
+  assert.strictEqual(windowsConfig.exportRoot, userDataPath);
+  assert.strictEqual(fs.readFileSync(bundledResource, 'utf8'), 'bundled read-only model');
+  assert.deepStrictEqual(fs.readdirSync(resourcesPath), ['builtin-model.glb']);
+  assert.strictEqual(writableDirectories.length, 5);
+  for (const directory of writableDirectories) {
+    assert(directory.startsWith(`${userDataPath}${path.sep}`), 'runtime directories must stay in userData');
+    assert(fs.statSync(directory).isDirectory());
+  }
+
+  const legacyResources = path.join(packagedRoot, 'legacy-resources');
+  const preservedFiles = [
+    [path.join(legacyResources, 'data', 'previous.csv'), 'legacy exported CSV'],
+    [path.join(legacyResources, 'OneStep', 'previous.pdf'), 'legacy exported PDF'],
+    [path.join(windowsConfig.csvPath, 'previous.csv'), 'existing user CSV'],
+    [path.join(windowsConfig.pdfPath, 'previous.pdf'), 'existing user PDF'],
+  ];
+  for (const [filename, contents] of preservedFiles) {
+    fs.mkdirSync(path.dirname(filename), { recursive: true });
+    fs.writeFileSync(filename, contents);
+  }
+  const legacyConfig = createServerPathConfig({
+    electronApp,
+    processRef: { platform: 'win32', resourcesPath: legacyResources },
+  });
+  assert.strictEqual(legacyConfig.runtimeResourceRoot, legacyResources);
+  assert.strictEqual(legacyConfig.csvPath, windowsConfig.csvPath);
+  assert.strictEqual(legacyConfig.pdfPath, windowsConfig.pdfPath);
+  for (const [filename, contents] of preservedFiles) {
+    assert.strictEqual(fs.readFileSync(filename, 'utf8'), contents, 'existing exports must not be moved or overwritten');
+  }
 
   const macConfig = createServerPathConfig({
     electronApp,
@@ -91,6 +138,16 @@ try {
   assert.strictEqual(macConfig.runtimeResourceRoot, resourcesPath);
   assert.strictEqual(macConfig.runtimeWritableRoot, userDataPath);
   assert.strictEqual(macConfig.exportRoot, desktopPath);
+
+  const linuxConfig = createServerPathConfig({
+    electronApp,
+    processRef: { platform: 'linux', resourcesPath },
+  });
+  assert.strictEqual(linuxConfig.exportRoot, resourcesPath);
+  assert.strictEqual(linuxConfig.csvPath, path.join(resourcesPath, 'data'));
+  assert.strictEqual(linuxConfig.pdfPath, path.join(resourcesPath, 'oneStepPdf'));
+  assert.strictEqual(linuxConfig.runtimeResourceRoot, resourcesPath);
+  assert.strictEqual(linuxConfig.runtimeWritableRoot, userDataPath);
 } finally {
   fs.rmSync(packagedRoot, { force: true, recursive: true });
 }

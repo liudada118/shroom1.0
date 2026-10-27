@@ -1,7 +1,21 @@
 # Shroom 快速架构索引
 
-> 最后更新于：2026-10-22
+> 最后更新于：2026-10-26
 > 用途：代码定位和验证路由。理解当前实现先读 [开发者手册](docs/developer-guide.md)，完整文档分类见 [docs/README.md](docs/README.md)。`ARCHITECTURE.md` 保留历史设计与维护台账，不用作默认全文入口。
+
+2026-10-26 Windows安装恢复与发布完成：1.1.39已实际安装至C:/Program Files/Shroom，2806文件哈希一致，普通权限主窗口、前端HTTP200和两个后台端口通过。`scripts/installer.nsh` 在旧卸载前校验磁盘并移除强制D盘路径，`serverPathConfig` 将Windows导出改用userData；Full12项、最终产物16项及真实NSIS回归通过。服务器恢复后改用磁盘暂存并限速顺序发布MinIO，公网latest及五项轻量验收已确认1.1.39；旧1.1.36清单保留回滚备份。状态见 [更新服务器](docs/shroom-update-server.md)，详细验收边界见维护台账。
+
+2026-10-26 Windows交付：根版本与锁文件递增至1.1.38，用户说明位于 `release-notes/windows/1.1.38.md`，由 `inject-release-notes.js` 注入Windows更新清单。临时快照打包、Full12项与最终安装器13项校验通过；MinIO `data/shroom1/` 已按版本文件在前、`latest.yml`在后的顺序发布1.1.38，回滚清单备份见 [更新服务器](docs/shroom-update-server.md)，验收边界见架构维护台账。
+
+2026-10-26 小床数据纯点图：`PortalMonitoringLayer` → `Home.syncPortalSceneOnly` → `Title` / `PortalQuickTools` 为 `smallBedNoAlg` 提供“仅显示3D点图”。隐藏图表、工具和应用级按钮，只保留实际3D画布与右上关闭入口；Esc恢复原显示方式与焦点，现有3D画布不重挂。回归 `scripts/tests/small-bed-scene-only.mjs` 和门户单测，纯界面状态使用Standard，不改协议或采集链。
+
+同日小床旋转中心：`smallBed.jsx` → `createPointViewTools({ localCenter })` 以点阵固定底面中心初始化Trackball目标与复位快照，视角工具、倾角调整和旧复位沿用同一中心；实时压力不重设目标，保留鼠标平移。定向单测与 `scripts/tests/small-bed-orbit-center.mjs` 验证真实右键旋转投影，渲染行为变更运行Full。
+
+同日按钮轴向修正：小床X/Y按钮按模型局部轴转30°，变换前后补偿底面中心位移，不再让相机追着模型重新瞄准；初始和旧复位镜头上方向固定为垫面纵向，消除近俯视的额外斜转。`scripts/tests/small-bed-axis-buttons.mjs` 验证真实工具按钮的混合轴、方向、中心、整圈与复位；之前鼠标旋转回归不代表这些按钮轴向已验收。
+
+同日最新视角入口：用户要求取消Y轴旋转，`PortalWorkspaceTools` 现仅提供X轴+30°/−30°。`Home` 在门户模式不挂载右下首组旧视角图标，关闭工具箱后也不重新出现；独立页及foot专用/框选组保留。上述按钮浏览器回归已改验X轴正反、整圈、中心与镜头，完整门户回归检查旧图标不挂载。纯UI入口调整使用Standard。
+
+同日默认俯视：小床初始化在首帧前执行同一top()，保存Trackball俯视位置/目标/上方向快照；恢复视角回到默认俯视，旧面板复位恢复水平垫面后也俯视。`small-bed-axis-buttons.mjs` 检查默认法线、俯视按钮等价及恢复/刷新，渲染器初始化变更使用Full。
 
 2026-10-19 增量：v1.3 到期权限、采集证据/排空、对话历史分析、上传队列隔离、候选推广/撤回、版本诊断及服务端 180/90 天保留已接入。入口与发布顺序见 [实现与交付记录](docs/v1.3-implementation-and-release.md)，不代表生产已部署；相关跨层改动运行 Full。
 
@@ -102,7 +116,7 @@ client commandClient → HTTP :19245 /api/commands
 
 本地代码理解：`codegraph.json` 固定索引排除范围，`.codegraph/` 保存本机调用图；有索引时先用 `codegraph explore` 获取当前代码与调用关系。Understand-Anything 的中文架构图保存于 `.ua/knowledge-graph.json`，`$understand` 更新图谱，`$understand-dashboard` 打开交互查看；依赖、构建产物、大型模型资源与本机运行数据不进入分析。两个生成目录由 Git 忽略，项目文档和测试仍纳入图谱。
 
-全局工具布局：`components/appTools/AppTools.jsx` 统一排列版本、更新和 Agent；首页反馈按钮通过专用 Portal 插槽加入同一行，页面卸载后自动移除。更新状态独占上方，不参与按钮宽度；`Home` 不再挂载运行页“画布零件”浮动栏。验证 `node scripts/tests/app-tools.mjs`（三种语言、320–1920px、更新状态、弹窗焦点、反馈卸载及长版本号）、`portal-launcher.mjs --monitor-only` 和 Standard；仅 UI 布局变更，无更新服务或渲染数据契约变动。
+全局工具布局（2026-10-26更新）：`components/appTools/AppTools.jsx` 将版本、更新、设置和首页反馈Portal入口收进悬停横幅，收起显示“应用工具/悬停展开”，Agent常驻；窄屏在上方展开，支持触屏、键盘、Esc及减少动态效果。原生DOM事件保持反馈Portal悬停区连续；更新状态独立根槽常显，弹窗关闭回调处理隐藏按钮焦点。`Home` 不挂载旧“画布零件”浮动栏。验证 `node scripts/tests/app-tools.mjs`（三语言、320–1920px、动画/悬停/触屏/焦点/更新与反馈生命周期）、门户监测入口和Standard；仅UI状态及可选弹窗回调，无更新命令、服务或数据契约变化。
 
 Agent 客户交付与聊天同步：`index.js` 注入 `readStoredLicenseKey` → `agentProcess` → `agentSyncSettings` / `backend/agent-runtime/chatSync`，`AgentSyncSettings.jsx` 设置开关与状态。官方 HTTPS 接口默认复用软件密钥，自定义地址仍需独立令牌；按地址和密钥摘要隔离队列，经 Electron net.fetch 上传白名单快照，服务端校验有效性并确定公司名。`create-pack-db-template` 生成空库，Builder/Forge 排除个人目录，运行时 userData 不变。验证 `chatSync.test.js`、`agentProcess.test.js`、`privateDataIsolation.test.js`、`agent-workspace.mjs`、`embedded-agent-electron.cjs --chat-sync --asar` 和真实 IPC；触及 Electron/打包，执行 Full。服务端契约见 [聊天同步接口](docs/agent-chat-sync-api.md)。
 

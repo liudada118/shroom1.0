@@ -32,7 +32,7 @@ export function PortalSessionBar({ mode, onMode, controlsOpen, onControls, devic
 }
 
 /** 左侧拉手与抽屉一同平移，外层高度不变；GSAP 仍只控制内层入场。 */
-export function PortalQuickTools({ chartsVisible, onCharts, algorithmsOpen, onAlgorithms, settingsOpen, onSettings, toolsOpen, onTools, collapsed = false, onCollapse }) {
+export function PortalQuickTools({ chartsVisible, onCharts, algorithmsOpen, onAlgorithms, settingsOpen, onSettings, toolsOpen, onTools, collapsed = false, onCollapse, sceneOnlyControl }) {
   return <div className="portal-quick-tools-anchor"><div className={`portal-quick-tools-slide${collapsed ? ' is-collapsed' : ''}`}>
     <button type="button" className="portal-quick-tools-handle" aria-label={collapsed ? '展开快捷工具' : '收起快捷工具'}
       title={collapsed ? '展开快捷工具' : '收起快捷工具'} aria-expanded={!collapsed} aria-controls="portal-quick-tools-content portal-display-panel" onClick={() => onCollapse?.(!collapsed)}>
@@ -47,6 +47,7 @@ export function PortalQuickTools({ chartsVisible, onCharts, algorithmsOpen, onAl
       <button type="button" className={chartsVisible ? 'is-active' : ''} aria-label="图表" aria-pressed={chartsVisible} onClick={onCharts}><LineChartOutlined /><span>图表</span><small>{chartsVisible ? '显示' : '隐藏'}</small></button>
       <button type="button" className={settingsOpen ? 'is-active' : ''} aria-label="调节" aria-expanded={settingsOpen} onClick={onSettings}><SlidersOutlined /><span>调节</span><small>VISUAL</small></button>
       <button type="button" className={toolsOpen ? 'is-active' : ''} aria-label="工具" title="实用工具" aria-expanded={Boolean(toolsOpen)} aria-controls="portal-utility-panel" onClick={onTools}><ToolOutlined aria-hidden="true" /><span>工具</span><small>工具箱</small></button>
+      {sceneOnlyControl}
     </div>
     <footer aria-hidden={collapsed}><span><small>VIEW</small><strong>3D CENTER</strong></span><output>HOST DATA</output></footer>
   </aside></div></div>;

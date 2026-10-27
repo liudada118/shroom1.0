@@ -2,6 +2,36 @@
 
 > **2026-10-19 当前线上路由：MinIO。** `/shroom1/` 已代理到 `http://127.0.0.1:9000/data/shroom1/`，即桶 `data`、对象前缀 `shroom1/`。下文 9 月的 `/data/shroom1` 静态目录与 SSH 上传步骤保留作迁移记录，不能当作当前 MinIO 的发布方法；不要把文件写入 MinIO 的磁盘存储目录。
 
+## Windows 1.1.39已发布MinIO（2026-10-26）
+
+服务器恢复响应后，已发布最终修复版到MinIO桶 `data`、对象前缀 `shroom1/`，公网 `latest.yml` 已从回滚后的1.1.36更新为1.1.39，SHA-256 `0ccf266f5cfba2f86362fbaff089e1c6c534c98309003bbc84ea8065b6148867`。EXE、blockmap和版本说明先上传并逐对象通过MinIO接口回读SHA-256，最后才切换清单；未改动Mac清单、MinIO策略或Nginx配置。
+
+公网轻量五项通过：latest、blockmap和说明的大小/哈希/本地字节一致，EXE HEAD200/354815966字节，Range206/前1024字节MZ头与Content-Range正确。整包哈希已由MinIO回读验证，没有重复做完整公网下载。回滚清单 `/data/shroom-update-backups/latest-before-1.1.39-20261026.yml` 和发布摘要 `windows-1.1.39-20261026-publish.json` 已持久备份并复制到本地最终releaseRoot。
+
+本轮恢复后观测 `/tmp` 是838MB的tmpfs，不能作为本机约1.6GB内存服务器的大包暂存位置。本次改用 `/data/shroom-update-staging/` 的磁盘目录，SCP限速8Mbps；MinIO复制单任务、关闭multipart、限速4MiB/s，发布进程使用较低CPU和空闲I/O优先级，避免已存在对象重复整包读取。暂存文件不作为静态更新源，正式发布仍全部通过MinIO接口。已知这是内存压力风险；未取得上次故障的OOM内核证据，不能据此确认失联根因。
+
+截图“当前版本1.1.36已是最新”另有旧客户端文案问题：`autoUpdater` 的无更新事件传出远端info.version，`UpdateNotifier`却将其称为当前版本；底部版本按钮通过app.getVersion读取实际宿主版本。此次现场进程为C:/Shroom/Shroom.exe 1.1.37，之前恢复的C:/Program Files/Shroom/Shroom.exe仍为1.1.39；不能把通知文案误作本机降级。此条只记录定位结果，未在本次已构建安装包中修改通知逻辑。
+
+### 此前本机恢复与服务器失联记录
+
+1.1.38在本机D盘剩余空间为0时发生升级复制中断，旧安装脚本同时存在强制D盘路径。已将Windows推荐清单撤回至先前验证的1.1.36，保留全部版本对象；撤回前备份为 `/data/shroom-update-backups/latest-before-withdrawing-1.1.38-20261026.yml`。撤回后公网GET已确认1.1.36，清单SHA-256为 `22f1ed410e1a1e61613983fde47d452f33e64c7d36889b4196a85bfb2868646e`；这是服务器失联前最后确认状态。
+
+修复版1.1.39增加卸载前磁盘检查、移除强制D盘路径，并将Windows CSV及报告导出改用userData，避免Program Files普通权限启动失败。版本说明见 [1.1.39](../release-notes/windows/1.1.39.md)。从系统临时快照重新构建，前端buildId1793017864101；Full12项、最终产物16项通过。实际安装到 `C:/Program Files/Shroom` 的2806文件哈希均与最终payload一致，普通用户启动的主窗口、前端HTTP200和后台19245/19999端口已实测；尚未连接真实串口设备验收。
+
+最终安装包为354815966字节，SHA-256 `72cc8928e9dc6c74e26e429ae43c46b51a419946522c6fdba0d57bf20b29804a`；尚未发布到MinIO，不能将本地产物校验视为公网发布完成。最终快照及报告在系统TEMP的 `shroom-release-1.1.39-2y6SVj`，本地交付副本保存在用户下载目录 `Shroom-1.1.39-repair`。
+
+发布被目标服务器连接故障阻断：两轮有界检查中HTTPS连接超时、SSH banner阶段超时；DNS正确，绕过代理并固定IP仍失败，对照公网HTTPS正常。只能确认目标服务器或到它的链路不可达，不能据此判断全网宕机。未执行1.1.39对象推广或latest切换；本次停滞SCP及其SSH子进程已精确停止，远端临时目录完整性未知。恢复连接后应先检查staging，再按对象哈希校验、版本文件在前、latest在后的流程发布。
+
+## Windows 1.1.38历史发布（已撤回推荐，2026-10-26）
+
+已从当前工作区的系统临时快照重新构建Windows x64 NSIS安装器，根应用版本由1.1.37递增为1.1.38；前端标识 `buildId=1793013459922`、`appVersion=1.1.38`。本轮小床视角、纯点图与应用工具横幅说明见 [版本说明](../release-notes/windows/1.1.38.md)，同一说明已注入更新清单并单独上传。
+
+MinIO `data/shroom1/` 已发布 `Shroom Setup 1.1.38.exe`（354815139字节）、对应 `.blockmap`、`Shroom-1.1.38-release-notes.md`，逐对象回读SHA-256一致后最后更新 `latest.yml`。线上Windows清单从1.1.36升级至1.1.38；原清单备份为 `/data/shroom-update-backups/latest-before-1.1.38-20261026.yml`，发布摘要为同目录 `windows-1.1.38-20261026-publish.json`。
+
+安装器SHA-256为 `e9b30792f243e7782e412f7e6439ff2a033f73cbc52bf7487fa634299b91ca4f`，清单SHA-256为 `ec04a12abb4faf2f8fc49d153d2797aac3d3869b316553c521b2f82986d9bbde`。Full12项、生产页面浏览器与最终NSIS13项验证通过；最终安装器解出的2806个文件与构建目录逐一一致，真实包内Electron原生模块、空数据库及Python health均通过。构建和解压检查不代表已经在客户电脑安装或连接真机验收。
+
+发布后公网验证：canonical `latest.yml` 返回1.1.38，清单、独立说明及blockmap的大小与SHA-256均匹配本地；EXE HEAD为200/354815139字节，范围请求为206、`Content-Range: bytes 0-1023/354815139`，Windows MZ头正确。完整对象SHA-256已通过MinIO回读；额外的完整HTTPS下载因公网回环吞吐慢主动停止，未完成公网整包SHA-256/SHA-512终检，不将其列为通过项。服务器临时上传目录已清理，旧清单和发布摘要保留于上述备份目录。
+
 ## 当前 MinIO 发布边界（2026-10-19）
 
 - Windows 更新入口为 `data/shroom1/latest.yml`；Mac 为 `data/shroom1/latest-mac.yml`。对象名大小写及前缀必须与公开 URL 一致。

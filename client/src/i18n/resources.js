@@ -5,6 +5,16 @@ const text = (zh, en) => ({ zh, en });
 // Single source catalog. Keep protocol values, database fields, and CSV keys
 // outside this file; only user-facing copy belongs here.
 export const bilingualConfig = {
+  appTools: {
+    label: text('应用工具', 'App tools'),
+    expand: text('展开应用工具', 'Expand app tools'),
+    collapse: text('收起应用工具', 'Collapse app tools'),
+    hoverHint: text('悬停展开', 'Hover to expand'),
+    leaveHint: text('移开收起', 'Leave to collapse'),
+    tapHint: text('点击展开', 'Tap to expand'),
+    closeHint: text('点击收起', 'Tap to collapse'),
+    description: text('版本、更新与应用设置 · 悬停或点击展开，Esc收起', 'Version, updates and settings · Hover or click to expand, Esc to collapse'),
+  },
   welcome: text('欢迎', 'Welcome'),
   chooseSensor: text('请选择传感器', 'Please select a sensor'),
   realTime: text('实时', 'Real-time'),

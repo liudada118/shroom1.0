@@ -173,6 +173,8 @@ let isShiftPressed = false;
 
     camera.position.z = 10;
     camera.position.y = 200;
+    // 近俯视镜头用垫面纵向作上方向，避免观察目标偏移后画面绕视线歪转。
+    camera.up.set(0, 0, -1);
     // camera.position.z = 1;
     // camera.position.y = 50;
     // camera.position.x = 100;
@@ -787,6 +789,7 @@ let isShiftPressed = false;
 
   }
 
+  /** 调整垫面倾角，并让控制器继续围绕点图底面中心旋转。 */
   function changeGroupRotate(obj) {
 
     if (typeof obj.x === 'number') {
@@ -795,7 +798,7 @@ let isShiftPressed = false;
     if (typeof obj.z === 'number') {
       group.rotation.z = (obj.z) * 6 / 12
     }
-    // console.log(JSON.stringify(group.rotation))
+    workspaceViewRef.current?.recenter();
   }
 
   function changeCenterFlag(value) {
@@ -810,38 +813,14 @@ let isShiftPressed = false;
     }
   }
 
+  /** 旧调节面板复位恢复水平垫面，并从点图正上方观察。 */
   function reset() {
-
-    camera.position.z = 10;
-    camera.position.y = 200;
-    camera.position.x = 0;
-    camera.rotation.set({x : 0})
-    camera.rotation.set({y : 0})
-    camera.rotation.set({z : 0})
-
-    // camera = new THREE.PerspectiveCamera(
-    //   40,
-    //   window.innerWidth / window.innerHeight,
-    //   1,
-    //   150000
-    // );
-
-
-    // camera.position.z = 300;
-    // camera.position.y = 200;
-
-    // camera.position.set(0,200,300)
-
-    // renderer.render(scene, camera);
-
-    group.rotation.x = 0
-    group.rotation.y = 0
-    group.rotation.z = 0
-    group.position.x = 3
-    group.position.y = 110
-    group.position.z = 5
-    controls.target = new THREE.Vector3(0, 0, -0)
-    console.log(camera.rotation , camera.position, group.rotation, group.position , camera.lookAt(0,0,0))
+    workspaceViewRef.current?.reset();
+    group.rotation.set(0, 0, 0);
+    group.position.set(3, 110, 5);
+    camera.position.set(0, 200, 10);
+    camera.up.set(0, 0, -1);
+    workspaceViewRef.current?.top();
   }
 
   function chartReset() {
@@ -932,7 +911,13 @@ let isShiftPressed = false;
     // 靠垫数据
 
     init();
-    workspaceViewRef.current = createPointViewTools({ object: group, plane: particles, camera, controls });
+    workspaceViewRef.current = createPointViewTools({ object: group, plane: particles, camera, controls,
+      localCenter: new THREE.Vector3(-SEPARATION / 2, 0, -SEPARATION / 2) });
+    // 首帧直接俯视，并以该镜头保存复位快照，避免恢复到旧斜视位置。
+    workspaceViewRef.current.top();
+    controls.target0.copy(controls.target);
+    controls.position0.copy(camera.position);
+    controls.up0.copy(camera.up);
     // window.addEventListener("mousemove", () => {}, false);
     animate();
 

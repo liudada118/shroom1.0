@@ -6,6 +6,7 @@ const testFiles = [
   'backend/tests/sdk/gloveDisplayRegistry.test.js',
   'backend/tests/packaging/pythonRuntimeNative.test.js',
   'backend/tests/packaging/buildPythonRuntime.test.js',
+  'backend/tests/packaging/installerPreflight.test.js',
   'backend/tests/server/reviseSensorIntegration.test.js',
   'backend/tests/server/pressureVest.test.js',
   'backend/tests/application/desktopServices.test.js',

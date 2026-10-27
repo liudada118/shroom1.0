@@ -2185,6 +2185,12 @@ class Title extends React.Component {
   /** 只打开指定设置面板，功能按钮不会再唤起旧系统标题栏。 */
   openPortalPanel = (name) => this.setState({ portalToolsOpen: false, [name]: true });
 
+  /** 收起纯点图模式之外的弹层，不改变连接、采集或回放状态。 */
+  closePortalPanelsForScene = () => this.setState({ open: false, show: false, portalToolsOpen: false,
+    portalPlaybackOpen: false, portalSpecialOpen: false, collectionModalOpen: false,
+    csvDownloadModalOpen: false, pdfModalOpen: false, smallBed12BDisplaySettingsOpen: false,
+    jqbedAlgorithmConfigOpen: false });
+
   /** 恢复原始压力基准；命令确认失败时不假装已清除零点。 */
   restorePortalPressure = async () => {
     const isCurrent = capturePortalOperation(this);
@@ -2984,7 +2990,8 @@ class Title extends React.Component {
         }}
         collapsed={this.state.portalToolsCollapsed} onCollapse={(portalToolsCollapsed) => this.setState({ portalToolsCollapsed })}
         toolsOpen={this.state.portalToolsOpen} onTools={this.togglePortalTools}
-      /></div><PortalWorkspaceTools key={`${this.props.matrixName}:${this.props.history}`} open={this.state.portalToolsOpen}
+        sceneOnlyControl={this.props.portalSceneOnlyControl}
+      /></div>{!this.props.portalSceneOnly && <PortalWorkspaceTools key={`${this.props.matrixName}:${this.props.history}`} open={this.state.portalToolsOpen}
         systemKey={this.props.matrixName}
         rendererRef={this.props.com} selectionActive={this.props.portalSelectionActive} onSelectionChange={this.props.onPortalSelectionChange}
         onClose={() => this.setState({ portalToolsOpen: false })}
@@ -2998,7 +3005,7 @@ class Title extends React.Component {
             onClick: () => { this.setState({ portalToolsOpen: false }); this.props.openDisplaySystemBuilder?.(); } },
           ...(jqbedConfigAccess.visible ? [{ id: 'jqbed', label: '床垫算法配置', description: '调整当前床垫算法参数。', disabled: jqbedConfigAccess.disabled,
             onClick: () => this.openPortalPanel('jqbedAlgorithmConfigOpen') }] : []),
-        ]} /></>, this.props.portalToolsHost) : null}
+        ]} />}</>, this.props.portalToolsHost) : null}
       {this.props.portalEmbedded && <>
         <PortalControlDialog open={this.state.portalSpecialOpen} title="系统专用工具"
           description="仅显示当前系统与模式支持的功能；设备校准需要先选择对应的渲染模式。"

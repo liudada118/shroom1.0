@@ -45,7 +45,7 @@ export function RuntimeVersionDetails({ frontend = {}, runtimeVersions = {} }) {
 }
 
 /** Show webpage update and diagnostic controls together, with persistent status and recoverable errors. */
-export default function AppServices() {
+export default function AppServices({ onAfterDialogClose } = {}) {
   const [open, setOpen] = useState(false), [state, setState] = useState({ frontend: {}, usage: {} });
   const [pending, setPending] = useState(false), [error, setError] = useState('');
   const api = window.electronAPI?.services;
@@ -74,13 +74,14 @@ export default function AppServices() {
 
   if (!api) return null;
   return <>
-    <Modal title="使用统计与错误上报说明" open={Boolean(state.usage.noticePending)} onCancel={() => action('acknowledgeUsageNotice')} footer={null}>
+    {/* 说明可直接转入设置，退场时不把焦点从新弹窗抢回旧入口。 */}
+    <Modal title="使用统计与错误上报说明" open={Boolean(state.usage.noticePending)} onCancel={() => action('acknowledgeUsageNotice')} focusTriggerAfterClose={false} afterClose={onAfterDialogClose} footer={null}>
       <p>使用统计与错误上报{state.usage.enabled ? '默认开启' : '已关闭'}，接收方为 shroom.jq-industries.com。只上传功能事件、耗时和脱敏错误，不包含聊天正文、附件或原始传感器数据；聊天同步与模型请求各自独立设置。</p>
       <Button disabled={pending} onClick={() => action('acknowledgeUsageNotice')}>已了解上报范围</Button>
       <Button disabled={pending} onClick={() => { void action('acknowledgeUsageNotice'); setOpen(true); }}>查看设置</Button>
     </Modal>
     <Button className="shroom-app-tool shroom-app-services" icon={<SettingOutlined />} onClick={() => setOpen(true)} aria-label="应用更新与使用统计设置">应用设置</Button>
-    <Modal title="应用设置" open={open} onCancel={() => setOpen(false)} footer={null}>
+    <Modal title="应用设置" open={open} onCancel={() => setOpen(false)} afterClose={onAfterDialogClose} footer={null}>
       <FrontendUpdateControls frontend={state.frontend} pending={pending} onCheck={() => action('checkFrontend')} />
       <h3>当前运行版本</h3>
       <RuntimeVersionDetails frontend={state.frontend} runtimeVersions={state.runtimeVersions} />
