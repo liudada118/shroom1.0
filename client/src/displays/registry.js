@@ -106,6 +106,7 @@ export const DISPLAY_REGISTRY = {
   smallSample: defineDisplay('smallSample'),
   pressureVest: defineDisplay('pressureVest', { label: '压力传感背心', defaultMode: 'skin', capabilities: [...DEFAULT_CAPABILITIES, DISPLAY_CAPABILITIES.THREE_D] }),
   humanBody: defineDisplay('humanBody', { defaultMode: 'skin', capabilities: [...DEFAULT_CAPABILITIES, DISPLAY_CAPABILITIES.THREE_D] }),
+  humanBodyOptimized: defineDisplay('humanBodyOptimized', { label: '人体全身优化', defaultMode: 'skin', capabilities: [...DEFAULT_CAPABILITIES, DISPLAY_CAPABILITIES.THREE_D] }),
   xiyueReal1: defineDisplay('xiyueReal1'),
   handBlue: defineDisplay('handBlue'),
   newHand: defineDisplay('newHand'),

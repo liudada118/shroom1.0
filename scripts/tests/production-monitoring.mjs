@@ -64,6 +64,7 @@ try {
     requests.push(path);
     let json = {};
     if (path === '/api/display-systems') json = { displaySystems: { runtimeDefinitions: [definition], systems: [] } };
+    else if (path === '/api/collection/status' && route.request().method() === 'GET') json = { current: null, collectionSummary: null, recent: [] };
     else if (path === '/api/system-packages/status' || path === '/api/system-packages/sync') {
       json = { available: [{ systemId, name, version: 1 }], installed: [], errors: [] };
     } else if (path === '/api/system-packages/staff-credential') json = { configured: false };

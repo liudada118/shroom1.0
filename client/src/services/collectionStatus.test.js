@@ -18,4 +18,15 @@ describe('采集收尾回执', () => {
     expect(readCollectionSummary([1, 2, 3])).toBeNull();
     expect(readCollectionSummary({ phase: 'completed', result: 'saved', channels: { a: { committed: -1 } } })).toBeNull();
   });
+
+  it('保留宿主会话身份和起止时间，忽略不可信或非法时间', () => {
+    const base = { phase: 'interrupted', result: 'saved', channels: {} };
+    expect(readCollectionSummary({ ...base, id: 'capture-a', startedAt: 1000, stoppedAt: 2000, completedAt: 3000 }))
+      .toMatchObject({ id: 'capture-a', startedAt: 1000, stoppedAt: 2000, completedAt: 3000 });
+    const invalid = readCollectionSummary({ ...base, id: {}, startedAt: -1, stoppedAt: '2000', completedAt: Infinity });
+    expect(invalid).not.toHaveProperty('id');
+    expect(invalid).not.toHaveProperty('startedAt');
+    expect(invalid).not.toHaveProperty('stoppedAt');
+    expect(invalid).not.toHaveProperty('completedAt');
+  });
 });

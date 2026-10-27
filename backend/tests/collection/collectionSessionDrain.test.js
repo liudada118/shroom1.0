@@ -3,11 +3,16 @@ const { test } = require('node:test');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const vm = require('node:vm');
+const { EventEmitter } = require('node:events');
 const Database = require('better-sqlite3');
 const { createCollectionSessionService } = require('../../kernel/storage/history/collectionSessionService');
 const { createCollectionInsertQueueService } = require('@shroom/backend/collection/collectionInsertQueueService.js');
 const { createServerFramePipeline } = require('../../kernel/realtime/framePipelineFactory');
 const { bindDisplaySystemRuntimeChannels } = require('../../extension-host/runtime/displaySystemRuntimeBinder');
+const { createSerialRuntime } = require('../../kernel/serial/serialRuntimeFactory');
+const { createSerialManager } = require('@shroom/backend/serial/serialManager.js');
+const { createRuntimeControlService } = require('../../kernel/platform/commands/runtimeControlService');
 
 /** Journal evidence stays in an isolated temporary directory. */
 function journal(t, options = {}) {
@@ -157,4 +162,150 @@ test('Manifest async tail uses original database, record key and trace while a p
   assert.equal(failedSummary.channels['fixture:pad'].processingFailed, 1);
   if (failedSummary.result === 'unknown') assert.equal(failedSummary.evidenceError, 'COLLECTION_SUMMARY_WRITE_FAILED');
   else assert.equal(failedSummary.result, 'partial');
+});
+
+/** Execute the production stop function and serial-runtime wiring without launching the application. */
+function serverCollectionLifecycle({ service, writer, state, events }) {
+  const source = fs.readFileSync(path.resolve(__dirname, '../../kernel/platform/server.js'), 'utf8');
+  const stop = source.match(/function finishCollection\([^]*?\n}/)?.[0];
+  const start = source.indexOf('const serialRuntime = createSerialRuntime({');
+  const end = source.indexOf('\n});', start) + '\n});'.length;
+  assert(stop && start >= 0 && end > start);
+  let options;
+  const context = {
+    Buffer, collectionSessions: service, flushCollectionInsertQueues: writer.flushAll,
+    getCollectionState: key => state[key], setCollectionState: (key, value) => { state[key] = value; },
+    splitBuffer: Buffer.from([1]), SMALL_BED_12B_FRAME_TAIL: Buffer.from([2]), logger: {},
+    publishSystemEvent: event => events.push(event), createSerialRuntime: value => { options = value; },
+  };
+  vm.runInNewContext(`${stop}\n${source.slice(start, end)}`, context);
+  const stopping = source.match(/onCollectionStopping:\s*([^,\n]+)/)?.[1];
+  assert(stopping);
+  return { ...options, onCollectionStopping: vm.runInNewContext(stopping, context) };
+}
+
+/** Drive real SerialManager transitions with a controllable hardware port. */
+class LifecyclePort extends EventEmitter {
+  /** Hold the physical open callback so opening cancellation can be exercised. */
+  constructor() { super(); this.isOpen = false; }
+  /** Store the actual driver's open callback. */
+  open(callback) { this.openCallback = callback; }
+  /** Resolve both driver open paths; SerialManager must publish only once. */
+  ready(error) { this.isOpen = !error; if (!error) this.emit('open'); this.openCallback?.(error); }
+  /** A manual close still emits the real driver's close event. */
+  close(callback) { this.isOpen = false; this.emit('close'); callback?.(); }
+  /** Remove no hardware piping because this fixture uses the raw path. */
+  unpipe() {}
+}
+
+for (const ending of ['manual', 'disconnect', 'error']) {
+  test(`production serial ${ending} closes admission, drains original SQL rows and permits the next collection`, async (t) => {
+    const state = { flag: false }, events = [], ports = [];
+    const { service } = journal(t, { onStatus: summary => events.push({ collectionSummary: summary, collecting: state.flag }) });
+    const db = new Database(':memory:'); t.after(() => db.close());
+    db.exec('CREATE TABLE rows (value INTEGER)');
+    const writer = createCollectionInsertQueueService({ sql: 'INSERT INTO rows VALUES (?)', batchSize: 20, onSettled: service.settled });
+    const { serialManager } = createSerialRuntime({ ...serverCollectionLifecycle({ service, writer, state, events }),
+      parserManagerFactory: () => ({}),
+      serialManagerFactory: options => createSerialManager({ ...options,
+        createSerialPort: () => { const port = new LifecyclePort(); ports.push(port); return port; } }),
+    });
+    t.after(() => serialManager.closeAll());
+    serialManager.open('sit', { path: 'COM_FIXTURE' });
+    await Promise.resolve(); ports[0].ready(); await serialManager.waitForOpen('sit');
+    service.begin({ recordKey: 'first', systemId: 'humanBodyOptimized', inputCoverage: 'fenced' }); state.flag = true;
+    writer.enqueue(db, [11], 'sit', service.queued({ channelId: 'sit' }));
+    const tail = service.beginFrame({ channelId: 'sit', originalDb: db });
+    if (ending === 'manual') await serialManager.close('sit');
+    else if (ending === 'disconnect') { ports[0].isOpen = false; ports[0].emit('close'); }
+    else ports[0].emit('error', new Error('synthetic runtime failure'));
+    assert.equal(state.flag, false);
+    assert.equal(service.current().phase, 'finalizing');
+    assert.equal(service.current().reason, 'SERIAL_DISCONNECTED');
+    assert.equal(service.beginFrame(), null);
+    assert.throws(() => service.begin({ recordKey: 'premature' }), /收尾/);
+    assert.equal(db.prepare('SELECT value FROM rows').get().value, 11);
+    writer.enqueue(service.frameContext(tail).originalDb, [22], 'sit', service.queued({ frameToken: tail }));
+    service.endFrame(tail, { stored: true }); writer.flushAll();
+    assert.equal(service.current().phase, 'interrupted');
+    assert.equal(service.current().result, 'saved');
+    assert.equal(service.current().channels.sit.committed, 2);
+    assert.deepEqual(db.prepare('SELECT value FROM rows ORDER BY value').all(), [{ value: 11 }, { value: 22 }]);
+    assert(events.filter(event => event.collectionSummary?.phase !== 'collecting' && event.collectionSummary).every(event => event.collecting === false));
+    const stoppedAt = service.current().stoppedAt;
+    await serialManager.close('sit');
+    assert.equal(service.current().stoppedAt, stoppedAt);
+    assert.equal(service.current().reason, 'SERIAL_DISCONNECTED');
+    assert.doesNotThrow(() => service.begin({ recordKey: 'next', systemId: 'humanBodyOptimized', inputCoverage: 'synchronous' }));
+  });
+}
+
+test('serial health and failed extra opens do not stop collection; explicit opening cancellation does', async (t) => {
+  const state = { flag: false }, events = [], ports = [];
+  const { service } = journal(t);
+  const writer = { flushAll() {} };
+  const { serialManager } = createSerialRuntime({ ...serverCollectionLifecycle({ service, writer, state, events }),
+    parserManagerFactory: () => ({}),
+    serialManagerFactory: options => createSerialManager({ ...options, dataTimeoutMs: 10,
+      createSerialPort: () => { const port = new LifecyclePort(); ports.push(port); return port; } }),
+  });
+  t.after(() => serialManager.closeAll());
+  serialManager.open('sit', { path: 'COM_SIT' }); await Promise.resolve(); ports[0].ready();
+  await serialManager.waitForOpen('sit');
+  service.begin({ recordKey: 'live', inputCoverage: 'synchronous' }); state.flag = true;
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(serialManager.getStatus('sit').health, 'silent');
+  assert.equal(state.flag, true);
+  assert.equal(service.current().phase, 'collecting');
+  serialManager.open('back', { path: 'COM_BACK' }); await Promise.resolve(); ports[1].ready(new Error('synthetic busy'));
+  await assert.rejects(serialManager.waitForOpen('back'));
+  assert.equal(state.flag, true);
+  assert.equal(service.current().phase, 'collecting');
+  serialManager.open('head', { path: 'COM_HEAD' }); await Promise.resolve();
+  const closing = serialManager.close('head');
+  assert.equal(state.flag, false);
+  assert.equal(service.current().phase, 'interrupted');
+  assert.equal(service.current().result, 'saved');
+  ports[2].ready();
+  await closing;
+  assert.equal(ports[2].isOpen, false);
+});
+
+test('explicit production stop clears the legacy switch guard before publishing collection finalization', (t) => {
+  const state = { flag: false }, events = [];
+  const { service } = journal(t, { onStatus: summary => events.push({ collectionSummary: summary, collecting: state.flag }) });
+  const db = new Database(':memory:'); t.after(() => db.close());
+  db.exec('CREATE TABLE rows (value INTEGER)');
+  const writer = createCollectionInsertQueueService({ sql: 'INSERT INTO rows VALUES (?)', batchSize: 20, onSettled: service.settled });
+  const { onCollectionStopping } = serverCollectionLifecycle({ service, writer, state, events });
+  service.begin({ recordKey: 'stopping', inputCoverage: 'fenced' }); state.flag = true;
+  writer.enqueue(db, [33], 'sit', service.queued({ channelId: 'sit' }));
+  const token = service.beginFrame({ channelId: 'sit', originalDb: db });
+  const controls = createRuntimeControlService({ getRuntime: () => state, setRuntime: next => Object.assign(state, next),
+    onCollectionStopping, flushCollectionInsertQueues: writer.flushAll });
+  controls.updateCollectionControl({ flag: false });
+  assert.equal(state.flag, false);
+  assert.equal(service.current().phase, 'finalizing');
+  assert.equal(db.prepare('SELECT value FROM rows').get().value, 33);
+  service.endFrame(token);
+  assert.equal(service.current().phase, 'completed');
+  assert.equal(service.current().result, 'saved');
+  assert(events.filter(event => event.collectionSummary?.phase !== 'collecting' && event.collectionSummary).every(event => event.collecting === false));
+});
+
+test('an old connection ending cannot interrupt its replacement and duplicate close states are idempotent', () => {
+  const ended = [], published = [];
+  let emitStatus;
+  createSerialRuntime({ parserManagerFactory: () => ({}),
+    serialManagerFactory: ({ onStatus }) => { emitStatus = onStatus; return { roles: {} }; },
+    onConnectionLost: status => ended.push(status.connectionId), onStatus: status => published.push(status) });
+  emitStatus({ role: 'sit', connectionId: 1, status: 'open' });
+  emitStatus({ role: 'sit', connectionId: 2, status: 'open' });
+  emitStatus({ role: 'sit', connectionId: 1, status: 'closed' });
+  assert.deepEqual(ended, []);
+  emitStatus({ role: 'sit', connectionId: 2, status: 'stopping' });
+  emitStatus({ role: 'sit', connectionId: 2, status: 'closed' });
+  emitStatus({ role: 'sit', connectionId: 2, status: 'error' });
+  assert.deepEqual(ended, [2]);
+  assert.equal(published.length, 6);
 });

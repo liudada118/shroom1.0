@@ -10,12 +10,16 @@ export default function PortalMonitoringLayer({ component: MonitoringPage, syste
   const [chartsVisible, setChartsVisible] = useState(true);
   const [toolsHost, setToolsHost] = useState(null);
   const [sceneOnly, setSceneOnly] = useState(false);
+  const [exitPending, setExitPending] = useState(false);
+  const [exitError, setExitError] = useState('');
   const sceneOnlyAvailable = system?.value === 'smallBedNoAlg';
   const sceneOnlyActive = sceneOnlyAvailable && sceneOnly;
   const sceneOnlyButtonRef = useRef(null);
   const rootRef = useRef(null);
   const contentRef = useRef(null);
   const exitRef = useRef(null);
+  const leaveGuardRef = useRef(null);
+  const leaveAttemptRef = useRef(null);
   const callbacksRef = useRef({ capturePreview, onPreviewChange, onBack });
   callbacksRef.current = { capturePreview, onPreviewChange, onBack };
   useLayoutEffect(() => {
@@ -194,13 +198,38 @@ export default function PortalMonitoringLayer({ component: MonitoringPage, syste
       releaseUsageContext();
       if (monitoringStartedAt !== null) trackUsage('monitoring_usage_summary', { ...usageProperties,
         durationMs: Math.min(86400000, Math.max(0, performance.now() - monitoringStartedAt)) });
+      leaveAttemptRef.current?.abort(); leaveAttemptRef.current = null;
       controller.abort(); exitRef.current = null; media.revert();
       if (backdrop) delete backdrop.dataset.monitorReturn;
     };
   }, [directEntry]);
 
-  /** 导航和原生页的返回入口共用同一段退场，重复点击不会触发多次系统操作。 */
-  const leave = () => exitRef.current?.();
+  /** 注册当前监测页的停止采集与保存入口，不在卸载后补发设备命令。 */
+  const registerLeaveGuard = (guard) => { leaveGuardRef.current = guard; };
+
+  /** 先等待采集封闭与尾部保存，再退场；失败保留当前页供重试。 */
+  const leave = async () => {
+    if (leaveAttemptRef.current || rootRef.current?.dataset.handoff === 'leaving') return;
+    if (!leaveGuardRef.current) { exitRef.current?.(); return; }
+    const attempt = new AbortController();
+    leaveAttemptRef.current = attempt;
+    setExitError(''); setExitPending(true);
+    const contentWasInert = contentRef.current?.inert;
+    if (contentRef.current) contentRef.current.inert = true;
+    try {
+      await leaveGuardRef.current({ signal: attempt.signal });
+      if (leaveAttemptRef.current !== attempt || attempt.signal.aborted) return;
+      exitRef.current?.();
+    } catch (error) {
+      if (leaveAttemptRef.current !== attempt || attempt.signal.aborted) return;
+      if (contentRef.current) contentRef.current.inert = contentWasInert;
+      setExitError(error?.message || '结束采集失败，请重试');
+    } finally {
+      if (leaveAttemptRef.current === attempt) {
+        leaveAttemptRef.current = null; setExitPending(false);
+      }
+    }
+  };
   const sceneOnlyControl = sceneOnlyAvailable ? <button ref={sceneOnlyButtonRef} type="button" className="portal-scene-only-toggle"
     aria-label="仅显示3D点图" aria-pressed={sceneOnlyActive} aria-controls="portal-monitor-content"
     title="隐藏图表和工具，只保留3D点图与关闭按钮；按 Esc 恢复"
@@ -209,18 +238,20 @@ export default function PortalMonitoringLayer({ component: MonitoringPage, syste
   return <div ref={rootRef} className={`portal-runtime-monitor is-data-view ${directEntry ? 'is-direct-entry' : ''} ${chartsVisible ? '' : 'is-chart-hidden'}${sceneOnlyActive ? ' is-scene-only' : ''}`} data-handoff="preparing" inert={directEntry}>
     <nav className="portal-monitor-navigation" aria-label="系统视图">
       <div className="portal-monitor-identity-group">
-        <button type="button" onClick={leave}>← 返回系统列表</button>
+        <button type="button" disabled={exitPending} onClick={leave}>{exitPending ? '正在结束采集并保存…' : '← 返回系统列表'}</button>
         <div className="portal-monitor-identity"><small>SENSOR WORKSPACE</small><strong>{system?.label || '传感器展示'}</strong></div>
       </div>
-      <button className="portal-monitor-close" type="button" aria-label="退出监测返回系统列表" onClick={leave}>×</button>
+      <button className="portal-monitor-close" type="button" aria-label="退出监测返回系统列表" disabled={exitPending} onClick={leave}>×</button>
     </nav>
     <div id="portal-monitor-content" ref={contentRef} className="portal-monitor-content" style={{ opacity: 0 }} inert>
       <div className="portal-monitor-floor" aria-hidden="true" />
-      <MonitoringPage portalEmbedded onPortalBack={leave} onPortalSystemChange={onSystemChange} licenseAccess={licenseAccess}
+      <MonitoringPage portalEmbedded onPortalBack={leave} onPortalLeaveGuard={registerLeaveGuard} onPortalSystemChange={onSystemChange} licenseAccess={licenseAccess}
         portalToolsHost={toolsHost} portalChartsVisible={chartsVisible && !sceneOnlyActive} portalSceneOnly={sceneOnlyActive}
         portalSceneOnlyControl={sceneOnlyControl}
         onPortalChartsToggle={() => setChartsVisible((value) => !value)} />
       <div ref={setToolsHost} className="portal-tools-host" inert={sceneOnlyActive} />
     </div>
+    {exitError && <div className="portal-exit-error" role="alert"><span>{exitError}</span>
+      <button type="button" aria-label="关闭退出错误提示" onClick={() => setExitError('')}>×</button></div>}
   </div>;
 }

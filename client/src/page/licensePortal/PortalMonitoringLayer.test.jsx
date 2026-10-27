@@ -24,13 +24,13 @@ function node(extra = {}) {
 
 /** 让粒子返回停在异步边界，以检查动画结束与卸载的竞态。 */
 function deferred() {
-  let resolve;
-  const promise = new Promise((done) => { resolve = done; });
-  return { promise, resolve };
+  let resolve, reject;
+  const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
 }
 
 /** 注入 React 挂载后的 refs，再执行实际布局 effect，保留组件暴露的全部返回入口。 */
-function mount({ directEntry = false, canvas = null, capturePreview = vi.fn(), panelPresent = true } = {}) {
+function mount({ directEntry = false, canvas = null, capturePreview = vi.fn(), panelPresent = true, leaveGuard } = {}) {
   const preview = node();
   const panel = panelPresent ? node({ querySelector: vi.fn(() => preview) }) : null;
   const backdrop = node({ querySelector: vi.fn(() => panel), '--portal-return-opacity': 0 });
@@ -48,6 +48,7 @@ function mount({ directEntry = false, canvas = null, capturePreview = vi.fn(), p
   tree.props.ref.current = root;
   const [nav, body] = tree.props.children;
   body.props.ref.current = content;
+  body.props.children[1].props.onPortalLeaveGuard(leaveGuard);
   fixture.buttons = [nav.props.children[0].props.children[0].props.onClick,
     nav.props.children[1].props.onClick, body.props.children[1].props.onPortalBack];
   const cleanup = hooks.effects.pop()();
@@ -157,5 +158,47 @@ describe('监测页面返回系统列表', () => {
     next.buttons[0]();
     await finishAnimations();
     expect(next.onBack).toHaveBeenCalledOnce();
+  });
+
+  it.each([0, 1, 2])('返回入口 %s 等待停止采集与排空，重复点击不重复停止', async (entry) => {
+    const saved = deferred();
+    const leaveGuard = vi.fn(() => saved.promise);
+    const fixture = mount({ leaveGuard });
+    await Promise.resolve(); await finishAnimations();
+    const leaving = fixture.buttons[entry]();
+    fixture.buttons[(entry + 1) % 3]();
+    await finishAnimations();
+    expect(leaveGuard).toHaveBeenCalledOnce();
+    expect(fixture.content.inert).toBe(true);
+    expect(fixture.root.dataset.handoff).toBe('complete');
+    expect(fixture.onBack).not.toHaveBeenCalled();
+    saved.resolve(); await leaving; await finishAnimations();
+    expect(fixture.onBack).toHaveBeenCalledOnce();
+  });
+
+  it('停止失败保留可操作页面，重试成功后才返回', async () => {
+    const leaveGuard = vi.fn().mockRejectedValueOnce(new Error('保存仍在进行，请重试')).mockResolvedValueOnce();
+    const fixture = mount({ leaveGuard });
+    await Promise.resolve(); await finishAnimations();
+    await fixture.buttons[0](); await finishAnimations();
+    expect(fixture.onBack).not.toHaveBeenCalled();
+    expect(fixture.content.inert).toBe(false);
+    expect(fixture.root.dataset.handoff).toBe('complete');
+    await fixture.buttons[1](); await finishAnimations();
+    expect(leaveGuard).toHaveBeenCalledTimes(2);
+    expect(fixture.onBack).toHaveBeenCalledOnce();
+  });
+
+  it('等待保存期间卸载会取消等待，迟到成功不触发旧页面返回', async () => {
+    const saved = deferred();
+    const leaveGuard = vi.fn(() => saved.promise);
+    const fixture = mount({ leaveGuard });
+    await Promise.resolve(); await finishAnimations();
+    const leaving = fixture.buttons[0]();
+    const { signal } = leaveGuard.mock.calls[0][0];
+    fixture.unmount();
+    expect(signal.aborted).toBe(true);
+    saved.resolve(); await leaving; await finishAnimations();
+    expect(fixture.onBack).not.toHaveBeenCalled();
   });
 });

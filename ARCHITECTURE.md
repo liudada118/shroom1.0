@@ -7445,3 +7445,69 @@ webSocketHandlerFactory.createSensorStatusPayload现每次只读取一次权限�
 | --- | --- | --- |
 | 2026-10-27 | 修复缺陷 | WebSocket状态和Home临期提示改用真实软件密钥期限，保留7天离线凭证与鉴权限制；尚未发布安装包。 |
 | 2026-10-27 | 验证 | 实际Home33项、前端期限8项、真实权限策略和WebSocket回归通过，最终Full8项通过，无真实密钥进入测试或文档。 |
+
+## 2026-10-27：人体全身压力帧恢复与参数面板归位
+
+`humanBodyOptimized` 原本只有 Home 的模型分支，缺少 `client/src/displays/registry.js` 的内置展示定义。`Home.wsData` 收到压力帧时先要求当前定义存在，再做系统与通道身份检查；缺定义会直接返回，导致静态人体仍显示，但 Hz、左侧统计和模型热力都不更新。背心定义完整，所以同串口可显示数据。注册表补齐全身 `sit`、32×32、默认 `skin` 与 3D 能力，保留未知系统与不同身份帧的隔离，不绕过门控或更改后端协议。
+
+门户中的全身参数从左上浮层迁入 `Title` 的现有调节抽屉。抽屉 DOM ref 经 Home 的稳定回调成为 `settingsHost`，由 `HumanBodyOptimized` 使用 React Portal 显示现有参数与持久设置。`CanvasCom.controlsHost` 仅放行低频插槽更新，子场景 key 不变，打开、关闭或修改参数不重建画布。原始数据与 3D 的切换保持各自渲染生命周期，背心保留其独立参数存储与旧面板。
+
+全身不再挂载内嵌 `RegionNumberPanel`；独立的“原始数据”显示方式仍可选择。部位视角改放右下、三列按钮，底部给应用工具留位，矮窗口横向避开右栏；新样式位于 `HumanBodyOptimized.css`。背心数字面板不受全身条件影响。
+
+回归先证明原缺陷：同一模拟串口与 1024×1555 规范压力帧，背心收到真实 `sitData` 并变色，全身模型 ready 但首帧消费超时；补齐注册后背心→全身→背心三轮均收到首帧且实际模型出现热力。全身左侧真实 DOM 点数 1024、平均/最大 1555、总和 1592320 已核验。浏览器接口全部隔离，无实际设备命令；这些结果不替代真机串口验收。
+
+最终门户回归还挂载真实 AppTools，在 1440×900 与 1280×720 验证部位视角不出界且与右栏、应用工具无重叠；参数仅在调节 Drawer 中出现，修改半径并关闭仍为同一 canvas、热力仍可见。原始数据/3D 往返及背心返回均通过，无 pageerror。截图目录为系统 TEMP 的 `shroom-human-body-portal-55lfF9`。
+
+Full 9/9 通过，包括 Electron ABI 后端、客户端 119 文件/1107 项、前端 SDK 36 文件/553 项、lint、双 SDK smoke、临时生产构建、性能基线及回归脚本语法。日志为系统 TEMP 的 `shroom-body-serial-full-20261027-91eb021cb55f41a783a0204f417d47c7.log`。构建未覆盖仓库 build/dist，本轮未提交、打包或发布。
+
+### 维护记录与项目进度（追加）
+
+| 日期 | 类型 | 说明 |
+| --- | --- | --- |
+| 2026-10-27 | 修复缺陷 | 补齐人体全身优化注册定义，恢复串口压力帧的热力、Hz 与图表分派；保留帧身份隔离。 |
+| 2026-10-27 | 界面调整 | 全身参数收进调节抽屉、取消内嵌全身数字面板，部位视角移至右下。 |
+| 2026-10-27 | 验证 | 注册/decoder/人体统计定向 57 项及 Full 9 项通过，隔离门户回归验证实际热力与侧栏数值；真机串口仍待复验。 |
+
+## 2026-10-27：采集中退出、串口中断与收尾状态恢复
+
+原门户返回只播放退场并卸载 Home，没有先停止后台采集；再次进入必须经过 `sensor.switch`，因 legacy flag 仍为 true 被拒绝。Home 的每次 WS open 又无条件关闭所有串口，重进和重连会意外断开设备；串口状态只广播、没有通知采集收尾。即使某条中断回执已保存，残留开关仍可能阻止切换。前端计时器与开关使用模块全局变量，卸载只清计时器、保留开关，也会让重进和回执状态不一致。
+
+`PortalMonitoringLayer` 现在给 Home 注册 `onPortalLeaveGuard`，返回列表、右上关闭和原生返回共用该入口。`Home.preparePortalExit` 经 `services/collectionExit.finishCollectionBeforeExit` 先发送幂等 `collection.control { active:false }`，再轮询 `/api/collection/status`。真实 current 优先于旧摘要，仍 collecting/finalizing 时不卸载；完成、中断或保存失败的终态均保留真实结果，部分保存不伪称成功且不会永久阻止退出。重复点击只发起一次收尾，等待期间禁用内容区；请求错误或 35 秒期限到达后恢复操作并允许重试，错误提示可关闭。卸载会取消等待和忽略迟到回调，不声称撤回宿主已接收的停止命令。localCar 保持本地采集分支。
+
+后端 `serialRuntimeFactory.handleSerialStatus` 追踪 role 与 connectionId，只在当前连接曾 open 后的 stopping/closed/error，或 opening 被手动 stopping 时通知 `onConnectionLost`。仅无数据的 open 健康告警、额外端口打开失败、旧 connectionId 与重复关闭不会误停。server 接入 `finishCollection('SERIAL_DISCONNECTED')`；显式停止也改用同一函数，先清 legacy flag，再封闭入场与排空原库。finalizing 的切换保护保留，异步尾帧仍按原会话 token 写入，不以跳过 busy 检查解决卡死。
+
+Home WS open 只同步目录与采集状态，不再发关闭串口命令。秒表改为实例管理；`readCollectionSummary` 保留有限 id、startedAt/stoppedAt/completedAt，重新进入沿用宿主开始时间，中断和收尾按停止时间冻结，同一 collecting 回执不反复归零。`RuntimeStatusNotice` 的终态可关闭，同一摘要重复广播不会重弹；保存中的提示保持可见，授权和数据保存结果未改写。
+
+后端定向验证用真实 SerialManager、生产 server 接线 VM 与 SQLite 队列，采集 13 项通过，覆盖关闭/拔线/运行错误、原库尾帧与 finalizing 保护、静默不误停及旧连接隔离。runtimeFactories、serialManager、serialControlService、licenseExpiryIntegration 同样通过 Electron ABI。前端 Home 实际方法/收尾 helper/提示等 15 项，以及门户返回 16 项通过。隔离浏览器 `collection-exit-portal.mjs` 实际点击采集配置、等待保存、重新进入、模拟停止失败并恢复、中断冻结计时及再次重进均通过，无 pageerror；未连接实际后台或设备。
+
+提示浮层明确接收 pointer events，避免关闭按钮被 3D 画布截走；最终浏览器回归实际关闭中断提示并重复广播相同回执，确认不会重弹。产物为系统 TEMP 的 `shroom-collection-exit-d2PlPc`。五个实际 Home 门户夹具补齐空闲采集状态合同，保持生产校验严格；人体/背心原有完整门户回归再次通过，产物为 `shroom-human-body-portal-GxQ6r8`，其余大型浏览器矩阵没有重复运行。
+
+最终 Full 14/14 通过：Electron ABI 后端 118 文件、客户端 122 文件/1125 项、前端 SDK 36 文件/553 项、lint、双 SDK smoke、临时生产构建、性能基线及六个浏览器脚本语法。日志为系统 TEMP 的 `shroom-collection-exit-full-final-20261027-9a596b40b51c49ef93daa2792d002ef4.log`。未覆盖仓库 build/dist，没有操作现有设备、采集记录或运行中的后台，未提交、打包或发布；后台改动需重新启动应用生效，真实硬件断开仍待复验。
+
+### 维护记录与项目进度（追加）
+
+| 日期 | 类型 | 说明 |
+| --- | --- | --- |
+| 2026-10-27 | 修复缺陷 | 门户退出先停采并确认保存收尾，串口真实中断同步采集状态，重进不再主动断串口。 |
+| 2026-10-27 | 界面状态 | 实例秒表按宿主时间恢复/冻结，终态提示可关闭，退出错误可恢复和重试。 |
+| 2026-10-27 | 验证 | 真实 SQLite/SerialManager 定向回归及隔离门户退出重进通过；真机串口拔线仍需复验，未提交或发布。 |
+| 2026-10-27 | 最终验证 | Full 14 项、提示真实点击关闭及重复广播、原人体/背心门户回归通过；旧大型浏览器矩阵未重复运行。 |
+
+## 2026-10-27：Windows 1.1.40 本地安装包交付
+
+按用户要求将根 package.json、package-lock 顶层与根包版本从 1.1.39 递增为 1.1.40；client 的独立包版本未变。中文说明为 `release-notes/windows/1.1.40.md`，包含真实密钥期限、人体全身压力帧/热力与统计、调节和部位视角面板、采集中退出/串口中断/计时及终态提示修复。`inject-release-notes` 将同一说明写入 Windows latest.yml，保留 1.1.39 的安装空间保护和用户目录导出修复。
+
+发布快照为系统 TEMP 的 `shroom-release-1.1.40-pj7X53/workspace`，冻结 1661 个当前源码文件及本地 SDK 链接，排除旧 build/dist、用户数据和设备配置。28 个 Python 源文件与已验证 1.1.39 快照完整同哈希后复用其冻结运行时，prepare-build-assets 仍实际通过原生摘要与 health；新建空 SQLite 模板，重新构建前端。Builder 显式使用 `--publish never`，没有运行上传脚本、清理原仓输出或安装程序。
+
+最终前端 buildId 为 1793090866119、appVersion 1.1.40；实际生产页面加载及监测回归通过。Full 14/14 再次通过，含 Electron ABI 后端 118 文件、客户端 122 文件/1125 项、前端 SDK 36 文件/553 项、lint、双 SDK smoke、临时生产构建、性能基线及六个浏览器脚本语法；日志为系统 TEMP 的 `shroom-windows-1.1.40-full-1f9387386dd2414aa60f8933a7fb5e53.log`。
+
+最终 EXE 为 354821349 字节，SHA-256 `fd10ff2fcc0fe053061a7c93a956a684ec8312df16820a17e0dc8a41ae70e7ce`。产物 18 项验证通过：EXE Windows 版本、清单 SHA-512、blockmap、说明匹配、PE 完整性、ASAR 1999 文件完整性/166 生产依赖和私有目录排除、前端版本、Python health、SQLite/串口原生 ABI125/空库，以及关键后台修复与快照原文逐字一致。NSIS 实际解出 2806 个文件，与最终 win-unpacked 逐文件 SHA-256 一致；没有执行本机升级安装或真机串口验收。报告为发布根目录的 release-verification.json。
+
+安装包交付到 `C:/Users/23823/Downloads/Shroom-1.1.40`，同时提供 EXE.blockmap、latest.yml、独立版本说明、SHA256SUMS.txt 和产物报告；交付副本逐项 SHA-256 与原产物一致。未上传 MinIO、未切换线上 latest、未提交代码。线上已发布 1.1.39 的历史记录仍有效；本地 1.1.40 含此前未发布的密钥修复和本轮全部修复。
+
+### 维护记录与项目进度（追加）
+
+| 日期 | 类型 | 说明 |
+| --- | --- | --- |
+| 2026-10-27 | 本地交付 | Windows x64 完整 NSIS 1.1.40 已生成，版本说明和校验文件一并放入下载目录。 |
+| 2026-10-27 | 验证 | Full 14 项、实际生产页面、最终产物 18 项和 NSIS 全部 2806 文件一致性通过；未执行本机安装及真机串口验收。 |

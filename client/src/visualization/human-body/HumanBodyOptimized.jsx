@@ -9,6 +9,7 @@ import React, {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import "./HumanBodyOptimized.css";
 import { HUMAN_BODY_SENSOR_PARTS } from "./humanBody";
 import { HUMAN_BODY_NUMBER_PART_LABELS } from "./humanBodyNumberLabels";
 import { getHumanBodyNumberViewSlots } from "./humanBodyNumberViews";
@@ -1572,26 +1573,12 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
     viewAutoRotateRef.current?.sync();
   };
 
-  const viewportContent = (
-    <div
-      data-human-body-viewport="true"
-      style={{ position: props.portalEmbedded ? "absolute" : "fixed", inset: 0, zIndex: 0,
-        width: props.portalEmbedded ? "100%" : "100vw", height: props.portalEmbedded ? "100%" : "100vh", overflow: "hidden", background: bgColor }}
-    >
-      <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />
-
-      <HoverDataPanel ref={hoverPanelRef} sensorsRef={sensorsRef} />
-
-      {(loading || error) && (
-        <div style={{ position: "absolute", inset: 0, zIndex: 8, display: "flex", alignItems: "center", justifyContent: "center", color: error ? "#ff8b8b" : "#b9cbdc", background: "rgba(2,5,12,0.72)" }}>
-          {error || "正在加载真实人体模型并计算传感器点位…"}
-        </div>
-      )}
-
-      <div style={{ ...panelStyle, top: 72, left: "max(250px, 19vw)", width: 222 }}>
+  const settingsContent = (
+      <div data-human-body-settings="true" className="human-body-render-settings"
+        style={props.portalEmbedded && !sensorProfile ? undefined : { ...panelStyle, top: 72, left: "max(250px, 19vw)", width: 222 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <div style={{ fontSize: "14px", fontWeight: 700, letterSpacing: "0.08em" }}>{sensorProfile?.title || "人体全身优化"}</div>
-          <button
+          {(!props.portalEmbedded || sensorProfile) && <button
             type="button"
             aria-expanded={!settingsCollapsed}
             aria-label={settingsCollapsed ? "展开渲染设置" : "折叠渲染设置"}
@@ -1599,11 +1586,11 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
             style={{ ...buttonStyle(false), minWidth: 30, padding: "3px 8px" }}
           >
             {settingsCollapsed ? "▾" : "▴"}
-          </button>
+          </button>}
         </div>
-        {!settingsCollapsed && (
+        {((props.portalEmbedded && !sensorProfile) || !settingsCollapsed) && (
           <>
-            <div style={{ color: "#5e748a", fontSize: "10px", marginTop: 3 }}>REALISTIC SHADER · {sensorCount} 点位</div>
+            <div style={{ color: "#5e748a", fontSize: "10px", marginTop: 3 }}>{sensorCount} 点位</div>
             <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 5 }}>
               {VISIBLE_RENDER_MODES.map(([value, label]) => (
                 <button key={value} onClick={() => setMode(value)} style={buttonStyle(mode === value)}>{label}</button>
@@ -1625,13 +1612,13 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
             </div>
 
             <label style={{ display: "block", marginTop: 11, fontSize: "11px", color: "#8193a5" }}>扩散半径 {radius.toFixed(2)}</label>
-            <input type="range" min="5" max="13" step="1" value={Math.round(radius * 100)} onChange={(event) => setRadius(clampHumanBodyRadius(Number(event.target.value) / 100))} style={{ width: "100%", accentColor: accentColor }} />
+            <input aria-label="扩散半径" type="range" min="5" max="13" step="1" value={Math.round(radius * 100)} onChange={(event) => setRadius(clampHumanBodyRadius(Number(event.target.value) / 100))} style={{ width: "100%", accentColor: accentColor }} />
             <label style={{ display: "block", marginTop: 8, fontSize: "11px", color: "#8193a5" }}>热力强度 {intensity.toFixed(1)}</label>
-            <input type="range" min="5" max="50" value={Math.round(intensity * 10)} onChange={(event) => setIntensity(Number(event.target.value) / 10)} style={{ width: "100%", accentColor: accentColor }} />
+            <input aria-label="热力强度" type="range" min="5" max="50" value={Math.round(intensity * 10)} onChange={(event) => setIntensity(Number(event.target.value) / 10)} style={{ width: "100%", accentColor: accentColor }} />
             {mode === "crystal" && (
               <>
                 <label style={{ display: "block", marginTop: 8, fontSize: "11px", color: "#8193a5" }}>基础透明度 {opacity.toFixed(2)}</label>
-                <input type="range" min="5" max="80" value={Math.round(opacity * 100)} onChange={(event) => setOpacity(Number(event.target.value) / 100)} style={{ width: "100%", accentColor: accentColor }} />
+                <input aria-label="基础透明度" type="range" min="5" max="80" value={Math.round(opacity * 100)} onChange={(event) => setOpacity(Number(event.target.value) / 100)} style={{ width: "100%", accentColor: accentColor }} />
               </>
             )}
 
@@ -1646,10 +1633,32 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
           </>
         )}
       </div>
+  );
 
-      <div style={{ ...panelStyle, top: 72, right: 14, width: 126 }}>
+  const viewportContent = (
+    <div
+      data-human-body-viewport="true"
+      style={{ position: props.portalEmbedded ? "absolute" : "fixed", inset: 0, zIndex: 0,
+        width: props.portalEmbedded ? "100%" : "100vw", height: props.portalEmbedded ? "100%" : "100vh", overflow: "hidden", background: bgColor }}
+    >
+      <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />
+
+      <HoverDataPanel ref={hoverPanelRef} sensorsRef={sensorsRef} />
+
+      {(loading || error) && (
+        <div style={{ position: "absolute", inset: 0, zIndex: 8, display: "flex", alignItems: "center", justifyContent: "center", color: error ? "#ff8b8b" : "#b9cbdc", background: "rgba(2,5,12,0.72)" }}>
+          {error || "正在加载真实人体模型并计算传感器点位…"}
+        </div>
+      )}
+
+      {props.portalEmbedded && !sensorProfile
+        ? (props.settingsHost ? createPortal(settingsContent, props.settingsHost) : null)
+        : settingsContent}
+
+      <div data-human-body-region-views="true" className={!sensorProfile ? "human-body-region-views" : undefined}
+        style={{ ...panelStyle, ...(sensorProfile ? { top: 72, right: 14, width: 126 } : {}) }}>
         <div style={{ fontSize: "11px", color: "#8193a5", marginBottom: 7 }}>部位视角</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
+        <div style={{ display: "grid", gridTemplateColumns: sensorProfile ? "1fr 1fr" : "repeat(3, 1fr)", gap: 5 }}>
           {Object.entries(regionViews).map(([key, view]) => (
             <button key={key} onClick={() => flyTo(key)} style={buttonStyle(activeRegion === key)}>{view.label}</button>
           ))}
@@ -1662,7 +1671,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
         <button onClick={resetView} style={{ ...buttonStyle(false), width: "100%", marginTop: 8 }}>重置视角</button>
       </div>
 
-      <RegionNumberPanel ref={numberPanelRef} activeRegion={activeRegion} sensorProfile={sensorProfile} />
+      {sensorProfile && <RegionNumberPanel ref={numberPanelRef} activeRegion={activeRegion} sensorProfile={sensorProfile} />}
     </div>
   );
 

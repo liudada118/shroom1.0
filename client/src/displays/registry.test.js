@@ -1,5 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { registerRuntimeDisplayDefinition } from './registry';
+import { DISPLAY_CAPABILITIES, displaySupports, getDisplayDefinition, registerRuntimeDisplayDefinition } from './registry';
+
+describe('人体串口展示注册', () => {
+  it.each(['humanBody', 'humanBodyOptimized', 'pressureVest'])('%s 的压力帧具有可接受的原生展示定义', (sensorType) => {
+    const definition = getDisplayDefinition(sensorType);
+    // Home 在分派压力帧前要求定义存在；只有模型分支不足以接收串口数据。
+    expect(definition).not.toBeNull();
+    expect(definition.type).toBe(sensorType);
+    expect(definition.channels).toEqual(['sit']);
+    expect(definition.matrix).toEqual({ width: 32, height: 32, total: 1024 });
+    expect(definition.defaultMode).toBe('skin');
+    expect(displaySupports(sensorType, DISPLAY_CAPABILITIES.REALTIME)).toBe(true);
+    expect(displaySupports(sensorType, DISPLAY_CAPABILITIES.THREE_D)).toBe(true);
+  });
+
+  it('未知系统继续等待目录，不使用人体定义兜底接收其他系统的帧', () => {
+    expect(getDisplayDefinition('unknown-human-body-regression')).toBeNull();
+  });
+});
 
 describe('runtime display registry', () => {
   it('按 serialRole 关联 sensors 与 runtimeChannels，并保留通道和串口定义', () => {

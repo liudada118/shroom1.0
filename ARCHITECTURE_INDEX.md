@@ -3,7 +3,13 @@
 > 最后更新于：2026-10-27
 > 用途：代码定位和验证路由。理解当前实现先读 [开发者手册](docs/developer-guide.md)，完整文档分类见 [docs/README.md](docs/README.md)。`ARCHITECTURE.md` 保留历史设计与维护台账，不用作默认全文入口。
 
-2026-10-27 密钥临期误报源码修复：`createSensorStatusPayload` 将WebSocket连接/刷新中的展示日期统一为真实 `licenseAccess.licenseExpiresAt`，`Home` 经 `getLicenseExpiryTimestamp` 同样优先真实期限；现代合同日期缺失不回退短凭证期限，旧宿主保留date兼容。7天电脑凭证、签名、设备绑定及采集权限未改变。实际Home、连接/刷新/续期回归及Full8项通过；此修复尚未重新打包或发布，线上1.1.39不含本次修改。
+2026-10-27 Windows 1.1.40 本地交付：根版本与锁文件由 1.1.39 递增为 1.1.40，说明位于 `release-notes/windows/1.1.40.md`；包含密钥期限、人体全身帧注册/面板及采集退出/串口中断修复。系统 TEMP 快照重建前端与完整 NSIS，28 个 Python 源文件同哈希后复用已验证运行时并复验 health；Full 14 项、实际生产页面及最终产物 18 项通过，NSIS 解出 2806 文件 SHA-256 全部一致。交付到用户下载目录 `Shroom-1.1.40`，附 blockmap、latest、说明和校验清单；未上传 MinIO、未执行本机升级安装，线上推荐版本不变。详细证据见维护台账。
+
+2026-10-27 采集中退出与串口断开：`PortalMonitoringLayer` 的全部返回入口先等待 `Home.preparePortalExit` → `services/collectionExit` 幂等停采并核对真实 current 收尾，再播放退场；失败留页重试。Home WS open 不再主动关闭串口，实例秒表依据宿主起止时间同步，终态回执可关闭且重复广播不重弹。`serialRuntimeFactory` 对同一连接的真实断开/关闭/运行错误通知 `finishCollection`，先清 flag、再排空原库，保留 finalizing 的系统切换保护。验证入口为 collectionSessionDrain（真实 SerialManager/SQLite）、Home.collection / collectionExit / RuntimeStatusNotice、PortalMonitoringLayer、`scripts/tests/collection-exit-portal.mjs` 与 Full；真机拔线仍待验证，已纳入本地 1.1.40，尚未发布。
+
+2026-10-27 人体全身串口数据修复：`displays/registry.js` 补齐 `humanBodyOptimized` 的原生定义，使 `Home.wsData` 在帧身份检查后继续分派压力帧；保留未知系统拒绝逻辑，不改串口 framing。`HumanBodyOptimized` 在门户中通过 `Title` 调节抽屉插槽展示参数，`CanvasCom.controlsHost` 只放行插槽更新、不改变场景 key；全身取消内嵌 2D 数字，部位视角移至右下并避开工具。验证入口为 registry 单测、`scripts/tests/human-body-portal.mjs`（模拟串口状态/规范首帧、实际热力与侧栏读数、调节和布局）及 Full；尚需真机串口复验，未发布安装包。
+
+2026-10-27 密钥临期误报源码修复：`createSensorStatusPayload` 将WebSocket连接/刷新中的展示日期统一为真实 `licenseAccess.licenseExpiresAt`，`Home` 经 `getLicenseExpiryTimestamp` 同样优先真实期限；现代合同日期缺失不回退短凭证期限，旧宿主保留date兼容。7天电脑凭证、签名、设备绑定及采集权限未改变。实际Home、连接/刷新/续期回归及Full8项通过；已纳入本地 1.1.40，尚未发布，线上1.1.39不含本次修改。
 
 2026-10-26 Windows安装恢复与发布完成：1.1.39已实际安装至C:/Program Files/Shroom，2806文件哈希一致，普通权限主窗口、前端HTTP200和两个后台端口通过。`scripts/installer.nsh` 在旧卸载前校验磁盘并移除强制D盘路径，`serverPathConfig` 将Windows导出改用userData；Full12项、最终产物16项及真实NSIS回归通过。服务器恢复后改用磁盘暂存并限速顺序发布MinIO，公网latest及五项轻量验收已确认1.1.39；旧1.1.36清单保留回滚备份。状态见 [更新服务器](docs/shroom-update-server.md)，详细验收边界见维护台账。
 

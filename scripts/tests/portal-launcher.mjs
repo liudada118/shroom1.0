@@ -160,6 +160,7 @@ try {
   await page.route('http://127.0.0.1:19245/**', async (route) => {
     const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type' };
     if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+    if (route.request().method() === 'GET' && route.request().url().endsWith('/api/collection/status')) return route.fulfill({ headers, json: { current: null, collectionSummary: null, recent: [] } });
     if (/\/api\/system-packages\/(?:status|sync)$/.test(route.request().url())) {
       return route.fulfill({ headers, json: { available: [], installed: [], errors: [], expiresAt: null } });
     }

@@ -73,6 +73,7 @@ try {
   await page.route('http://127.0.0.1:19245/**', route => {
     const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type' };
     if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+    if (route.request().method() === 'GET' && route.request().url().endsWith('/api/collection/status')) return route.fulfill({ headers, json: { current: null, collectionSummary: null, recent: [] } });
     if (route.request().url().endsWith('/api/display-systems')) return route.fulfill({ headers, json: { displaySystems: { runtimeDefinitions: [] } } });
     if (route.request().url().endsWith('/api/algorithm-market')) return route.fulfill({ headers, json: { packages: [], instances: [] } });
     if (route.request().url().endsWith('/api/commands')) {

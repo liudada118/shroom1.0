@@ -14,7 +14,12 @@ export function readCollectionSummary(input) {
     }
     channels[id] = counters;
   }
-  return { phase: input.phase, result: input.result, reason: typeof input.reason === 'string' ? input.reason.slice(0, 200) : '', channels };
+  const timing = {};
+  for (const name of ['startedAt', 'stoppedAt', 'completedAt']) {
+    if (Number.isSafeInteger(input[name]) && input[name] > 0) timing[name] = input[name];
+  }
+  return { phase: input.phase, result: input.result, reason: typeof input.reason === 'string' ? input.reason.slice(0, 200) : '', channels,
+    ...(typeof input.id === 'string' && input.id.length <= 100 ? { id: input.id } : {}), ...timing };
 }
 
 /** Describe committed, failed and pending totals only when every channel provides that counter. */

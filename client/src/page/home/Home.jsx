@@ -2,6 +2,7 @@ import React, { useRef, useEffect } from "react";
 import Title from "../../components/title/Title";
 import { readLicenseAccess, isHistoryOnlyLicense, canUseLicenseCapability, getLicenseExpiryTimestamp } from '../../services/licenseAccess';
 import { readCollectionSummary } from '../../services/collectionStatus';
+import { finishCollectionBeforeExit } from '../../services/collectionExit';
 import { requestJson } from '../../extensions/display-system/api';
 import RuntimeStatusNotice from './RuntimeStatusNotice';
 import { sendWebSocketJson } from './websocketTransport';
@@ -524,6 +525,8 @@ class CanvasCom extends React.Component {
     if (this.props.colormapKey != nextProps.colormapKey) return true;
     if (this.props.chartKey != nextProps.chartKey) return true;
     if (this.props.viewKey != nextProps.viewKey) return true;
+    // 调节抽屉挂载时只更新插槽，不改变画布 key 或重建场景。
+    if (this.props.controlsHost !== nextProps.controlsHost) return true;
     if (this.props.local !== null && this.props.local !== undefined) {
       return this.props.matrixName != nextProps.matrixName
         || this.props.local != nextProps.local
@@ -560,21 +563,13 @@ let totalArr = [],
   wsMatrixName = "foot";
 let startPressure = 0,
   time = 0;
-// 采集计时：Title 上「采集/停止」后面那个数字，单位秒。
-//
-// 以前是数帧推算的（`num` 计实时帧数，再 `num / 12 * hz` 折成数字），现在直接记
-// 开始时刻、按墙上时间算，所以只需要一个起点和一个定时器句柄。详见
-// `startCollectionTimer` 的注释。
-let colStartAt = 0,
-  colTimerId = null,
-  wsPointDataSit = [],
+let wsPointDataSit = [],
   wsPointDataSitWidth = 32, // 坐垂矩阵列宽，默认 32，hand0205 为 16
   wsPointDataBack = [],
   wsPointDataHead = [],
   wsPointDataBackZero = [],
   wsPointDataSitZero = [],
   wsPointDataHeadZero = [],
-  colValueFlag = false,
   meanSmooth = 0,
   maxSmooth = 0,
   pointSmooth = 0,
@@ -1066,6 +1061,7 @@ class Home extends React.Component {
     const initialChartCards = seedFormulaChartsFromManifest(initialMatrixName);
 
     this.state = {
+      humanBodySettingsHost: null,
       hand: true,
       matrixName: initialMatrixName,
       systemId: localStorage.getItem('file') || initialMatrixName,
@@ -1611,6 +1607,7 @@ class Home extends React.Component {
   }
 
   componentDidMount() {
+    this.props.onPortalLeaveGuard?.(this.preparePortalExit);
     this.jqbedAlarmSpeechState?.reset();
     this.jqbedAlarmSpeechBlocked = false;
     this.jqbedAlarmSpeechStatus = null;
@@ -1665,13 +1662,7 @@ class Home extends React.Component {
         jqbedAlgorithmLogFrame: null,
         jqbedAlgorithmLogSubscription: null,
       }));
-      this.wsSendObj({
-        // file: this.state.matrixName,
-        sitClose: true,
-        backClose: true,
-        headClose: true,
-        sensorClose: true
-      })
+      // ⚠️ 重进监测页和 WS 重连只同步状态，关闭串口会意外中断正在运行的采集。
       // 主动请求传感器类型清单（请求-应答；主进程连接时也会主动 push 一次）
       this.wsSendObj({ getSensorTypes: true })
       this._collectionStatusController?.abort();
@@ -1748,6 +1739,7 @@ class Home extends React.Component {
   }
 
   componentWillUnmount() {
+    this.props.onPortalLeaveGuard?.(null);
     this._collectionStatusController?.abort();
     clearLastFrame();
     if (this.props.portalEmbedded) document.documentElement.style.fontSize = this._portalFontSize;
@@ -1884,6 +1876,11 @@ class Home extends React.Component {
         smallBedMatrixHeight: nextHeight,
       });
     }
+  }
+
+  /** 接收调节抽屉的参数插槽，保留当前人体画布和实时数据。 */
+  setHumanBodySettingsHost = (humanBodySettingsHost) => {
+    if (this.state.humanBodySettingsHost !== humanBodySettingsHost) this.setState({ humanBodySettingsHost });
   }
 
   /**
@@ -4716,13 +4713,9 @@ class Home extends React.Component {
     }
   };
 
-  /**
-   * 采集开关的唯一入口 —— `Title` 的「开始采集」和「停止」都会调到这里
-   * （`Title.jsx` 的 `startCollectionWithOptions` 传 true、`stopCollection` 传 false），
-   * 所以采集计时的起停也挂在这儿。
-   */
+  /** 手动采集开关起停本地秒表，宿主回执再由 applyCollectionSummary 校正。 */
   setColValueFlag = (value) => {
-    colValueFlag = value;
+    this._collecting = value;
     if (value) {
       this.startCollectionTimer();
     } else {
@@ -4730,52 +4723,62 @@ class Home extends React.Component {
     }
   };
 
-  /** Apply the storage receipt separately from the capture toggle and timer. */
+  /** 后台中断/停止回执同步开关与秒表，恢复页面时沿用真实采集起止时间。 */
   applyCollectionSummary = (value) => {
     const collectionSummary = readCollectionSummary(value);
     if (!collectionSummary) return;
     this._collectionStatusEpoch = (this._collectionStatusEpoch || 0) + 1;
     const collecting = collectionSummary.phase === 'collecting';
+    const previousId = this._collectionSessionId;
     this.setState({ collectionSummary, colFlag: !collecting });
-    if (collecting !== colValueFlag) this.setColValueFlag(collecting);
+    if (collecting) {
+      if (!this._collecting || !this._collectionTimerId || (collectionSummary.id && previousId !== collectionSummary.id)) {
+        this.startCollectionTimer(collectionSummary.startedAt);
+      }
+    } else {
+      if (collectionSummary.startedAt) this._collectionStartedAt = collectionSummary.startedAt;
+      this.stopCollectionTimer(collectionSummary.stoppedAt || collectionSummary.completedAt);
+    }
+    this._collectionSessionId = collectionSummary.id;
+    this._collecting = collecting;
+  };
+
+  /** 门户退出先停止接收并等待尾帧保存；失败保留当前页面以便再次退出。 */
+  preparePortalExit = async ({ signal } = {}) => {
+    if (signal?.aborted) throw signal.reason || new DOMException('退出已取消', 'AbortError');
+    if (this.state.matrixName === 'localCar') {
+      await new Promise(resolve => this.setState({ colWebFlag: false }, resolve));
+      this.setColValueFlag(false);
+      return;
+    }
+    await finishCollectionBeforeExit({ signal, onSummary: this.applyCollectionSummary });
+    this.setColValueFlag(false);
+    this.setState({ colFlag: true });
   };
 
   /**
-   * 开始采集计时。Title 上「停止」后面那个数字，单位是**秒**。
-   *
-   * 以前是拿帧数推算的：`num` 每收到一帧实时坐垫数据 +1，显示 `num / 12 * hz`。
-   * 那个式子里 `hz` 是后端下发的采集频率 `colHZ`（默认 12，见
-   * `backend/services/collection/collectionService.js`），而 `12` 是写死的
-   * 「传感器每秒推 12 帧」假设 —— 于是 `num / 12` 当秒数、再乘 `hz` 换成
-   * 「这几秒该入库多少行」。问题是实时下发根本不限频
-   * （`frameOutputPipelineService.publishSit` 每帧都发），真实帧率就是同一个文件里
-   * `realHz` 现量出来的那个值。真实帧率一旦不是 12，这个数既不是秒也不是入库行数，
-   * 偏差正好是 realHz/12 倍（100Hz 的传感器上秒表快 8 倍多）。
-   *
-   * 现在改成记开始时刻、按墙上时间算，与帧率和采集频率都无关。必须用定时器驱动、
-   * 不能再蹭帧：没有帧进来（串口卡住、传感器没数据）时秒表也应该照走。
-   *
-   * 传给 `changeNum` 的是**取整后的秒数** —— `Title.jsx` 显示时会套一层
-   * `Math.ceil`，而 `setInterval` 有几毫秒漂移，直接传 `1.003` 会被 ceil 成 2，
-   * 第一秒就跳到 2。这里先 `Math.floor` 成整数，`Math.ceil` 就成了空操作。
+   * 用宿主起点驱动采集秒表，重进页面沿用已采时长。
+   * ⚠️ 不能按渲染帧计时，否则高频串口加速秒表、无新帧时停表。
+   * Title 会取 ceil，先取整秒避免定时器毫秒漂移导致跳秒。
    */
-  startCollectionTimer = () => {
+  startCollectionTimer = (startedAt = Date.now()) => {
     this.stopCollectionTimer();
-    colStartAt = Date.now();
-    this.title.current?.changeNum(0);
-    colTimerId = setInterval(() => {
-      this.title.current?.changeNum(Math.floor((Date.now() - colStartAt) / 1000));
+    this._collectionStartedAt = startedAt;
+    this.title.current?.changeNum(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+    this._collectionTimerId = setInterval(() => {
+      this.title.current?.changeNum(Math.max(0, Math.floor((Date.now() - this._collectionStartedAt) / 1000)));
     }, 1000);
   };
 
-  /**
-   * 停止采集计时。只停表，**不清零显示** —— 与改动前一致：以前停止采集时只是把
-   * `num` 归 0、并不调 `changeNum`，所以数字停在最后一个值上，正好能看到这次采了多久。
-   */
-  stopCollectionTimer = () => {
-    if (colTimerId) {
-      clearInterval(colTimerId);
-      colTimerId = null;
+  /** 停止并保留最终时长，宿主提供 stoppedAt 时冻结在实际停止接收的时刻。 */
+  stopCollectionTimer = (stoppedAt) => {
+    const wasRunning = Boolean(this._collectionTimerId);
+    if (this._collectionTimerId) {
+      clearInterval(this._collectionTimerId);
+      this._collectionTimerId = null;
+    }
+    if (Number.isFinite(this._collectionStartedAt) && (wasRunning || Number.isFinite(stoppedAt))) {
+      this.title.current?.changeNum(Math.max(0, Math.floor(((stoppedAt ?? Date.now()) - this._collectionStartedAt) / 1000)));
     }
   };
 
@@ -5394,6 +5397,7 @@ class Home extends React.Component {
             portalSceneOnly={this.props.portalSceneOnly}
             portalSceneOnlyControl={this.props.portalSceneOnlyControl}
             portalToolsHost={this.props.portalToolsHost}
+            onHumanBodySettingsHost={this.setHumanBodySettingsHost}
             portalChartsVisible={this.props.portalChartsVisible}
             onPortalChartsToggle={this.props.onPortalChartsToggle}
             onPortalResetPlayback={() => this.progress.current?.resetPlay()}
@@ -5702,10 +5706,11 @@ class Home extends React.Component {
                     :
                     // ⚠️ 人体与背心的旧模式仍显示人体，避免落入末尾的汽车座椅兜底。
                     this.state.numMatrixFlag !== "numoriginal" && [HUMAN_BODY_OPTIMIZED_MATRIX, PRESSURE_VEST_MATRIX].includes(this.state.matrixName) ?
-                    <CanvasCom matrixName={this.state.matrixName} local={this.state.local}>
+                    <CanvasCom matrixName={this.state.matrixName} local={this.state.local} controlsHost={this.state.humanBodySettingsHost}>
                       <HumanBodyOptimized
                         ref={this.com}
                         portalEmbedded={this.props.portalEmbedded}
+                        settingsHost={this.state.humanBodySettingsHost}
                         data={this.data}
                         local={this.state.local}
                         sensorProfile={this.state.matrixName === PRESSURE_VEST_MATRIX ? PRESSURE_VEST_PROFILE : undefined}

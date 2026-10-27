@@ -1559,6 +1559,10 @@ const serialRuntime = createSerialRuntime({
   smallBed12BDelimiter: SMALL_BED_12B_FRAME_TAIL,
   logger,
   onStatus: (serialStatus) => publishSystemEvent({ serialStatus }),
+  // Stop the collection before publishing the disconnected port, while admitted tail rows drain in their original database.
+  onConnectionLost: () => {
+    if (getCollectionState('flag')) finishCollection('SERIAL_DISCONNECTED');
+  },
 });
 const {
   serialParserManager,
@@ -2212,7 +2216,7 @@ deviceAuthorizationTimer.unref?.();
 registerRuntimeCommandHandlers(controlCommandRouter, {
   requireAccess: licenseAccess.requireAccess,
   onCollectionStarted: beginCollectionEvidence,
-  onCollectionStopping: reason => collectionSessions.finish(reason),
+  onCollectionStopping: finishCollection,
   csvDownloadService,
   historyMaintenanceService,
   normalizeCollectFrequency,

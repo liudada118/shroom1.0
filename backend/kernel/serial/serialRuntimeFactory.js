@@ -12,6 +12,7 @@ const { createSerialParserManager } = require('@shroom/backend/serial/serialPars
  * @param {Buffer} options.frameDelimiter 普通压力帧分隔符。
  * @param {Buffer} options.smallBed12BDelimiter 小床 12B 帧分隔符。
  * @param {object} options.logger 日志对象。
+ * @param {Function} options.onConnectionLost 已打开连接结束或手动取消打开时的采集收尾回调。
  * @returns {object} 串口运行时依赖集合。
  */
 function createSerialRuntime({
@@ -19,6 +20,7 @@ function createSerialRuntime({
   smallBed12BDelimiter,
   logger,
   onStatus,
+  onConnectionLost,
   parserManagerFactory = createSerialParserManager,
   serialManagerFactory = createSerialManager,
 }) {
@@ -26,10 +28,23 @@ function createSerialRuntime({
     frameDelimiter,
     smallBed12BDelimiter,
   });
+  const connections = new Map();
+  /** Report an open connection ending or a manual opening cancellation, never health warnings or another failed open. */
+  function handleSerialStatus(status) {
+    const role = status?.portId || status?.role;
+    const previous = connections.get(role);
+    if (['opening', 'open'].includes(status?.status)) connections.set(role, { id: status.connectionId, status: status.status });
+    else if (['stopping', 'closed', 'error'].includes(status?.status)
+      && previous && previous.id === status.connectionId) {
+      connections.delete(role);
+      if (previous.status === 'open' || status.status === 'stopping') onConnectionLost?.(status);
+    }
+    onStatus?.(status);
+  }
   const serialManager = serialManagerFactory({
     parserManager: serialParserManager,
     logger,
-    onStatus,
+    onStatus: handleSerialStatus,
   });
   const serialRoles = serialManager.roles;
   // 只有一个键 `serialport`：启动期扫到的串口候选列表（见 bootstrapServer 的

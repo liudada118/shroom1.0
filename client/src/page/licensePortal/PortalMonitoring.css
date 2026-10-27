@@ -13,6 +13,13 @@
 /* 配置式矩阵画布只占数据层；其默认 z-index:20 会盖住同页的图表和工具。 */
 .fiber-portal .portal-runtime-monitor .portal-data-renderer .manifest-display { z-index: 1; }
 .fiber-portal .portal-monitor-navigation { top: 24px; left: 26px; right: 22px; }
+.fiber-portal .portal-monitor-navigation button:disabled { opacity: .65; cursor: wait; }
+.fiber-portal .portal-exit-error {
+  position: absolute; z-index: 40; top: 92px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 16px; max-width: min(600px, calc(100% - 44px));
+  padding: 12px 16px; border: 1px solid #e5ac7b; border-radius: 8px; background: #fff4e6; color: #713c21; pointer-events: auto;
+}
+.fiber-portal .portal-exit-error button { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 20px; }
 .fiber-portal .portal-monitor-identity-group { display: flex; align-items: center; gap: 18px; min-width: 0; }
 .fiber-portal .portal-monitor-identity { display: grid; gap: 4px; padding-left: 18px; border-left: 1px solid rgba(122, 170, 213, .2); }
 .fiber-portal .portal-monitor-identity small { color: rgba(99, 213, 255, .48); font: 8px 'JetBrains Mono', monospace; letter-spacing: .18em; }
