@@ -1,3 +1,4 @@
+import i18n from '../../i18n';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { ArrowRightOutlined, AppstoreOutlined, SafetyCertificateOutlined, HeartOutlined, CarOutlined, RobotOutlined, ExperimentOutlined, KeyOutlined } from '@ant-design/icons';
@@ -107,7 +108,7 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
       if (controller.signal.aborted) return;
       cancelNavigation();
       setPhase('idle');
-      setError('监测页面加载失败，系统切换已确认，请重试进入。');
+      setError(i18n.t('monitorUi.monitorLoadFailed'));
     }
   }, [prepareSystem, cancelNavigation]);
 
@@ -191,7 +192,7 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
     setLicenseAccess(undefined);
     cancelNavigation();
     entryRef.current?.cancel();
-    setError('与应用的连接已断开，请等待重新连接后重试');
+    setError(i18n.t('monitorUi.connectionLost'));
   }, [cancelNavigation]);
 
   const { connected } = useMainWebSocket({ onMessage: handleMessage, onClose: handleDisconnect, onError: handleDisconnect });
@@ -223,7 +224,7 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
       requestJson('/api/system-packages/status').then(status => {
         if (!stopped && isHistoryOnlyLicense(readLicenseAccess(status))) setManagedIds(status.historyAvailable || []);
       }).catch(() => {});
-      setSyncStatus('授权已到期，仅可查看本机已有系统的历史数据；不下载更新。');
+      setSyncStatus(i18n.t('monitorUi.expiredHistoryOnly'));
       return () => { stopped = true; };
     }
     requestJson('/api/system-packages/status').then((status) => {
@@ -238,8 +239,8 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
     }).catch((failure) => {
       if (stopped) return;
       setSyncStatus(failure.code === 'SYSTEM_SYNC_HTTP_ERROR'
-        ? '公司系统暂未同步；已授权的内置系统仍可使用。需要公司系统时，请检查发布与密钥授权。'
-        : `公司系统暂未同步：${failure.message || '请稍后刷新重试'}。已授权的内置系统仍可使用。`);
+        ? i18n.t('monitorUi.companySyncUnavailable')
+        : i18n.t('monitorUi.companySyncError', { error: failure.message || i18n.t('monitorUi.retryRefresh') }));
     });
     return () => { stopped = true; };
   }, [scope, connected, accessKey, syncAttempt, licenseAccess]);
@@ -263,7 +264,7 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
     requestJson('/api/display-systems', { signal: controller.signal })
       .then((payload) => {
         if (controller.signal.aborted) return;
-        if (!Array.isArray(payload?.displaySystems?.runtimeDefinitions)) throw new Error('系统目录格式不正确');
+        if (!Array.isArray(payload?.displaySystems?.runtimeDefinitions)) throw new Error(i18n.t('monitorUi.invalidCatalog'));
         syncNativeSystemTemplates(payload.displaySystems.runtimeDefinitions);
         setRuntimeDefinitions(payload.displaySystems.runtimeDefinitions);
       })
@@ -280,12 +281,12 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
     const targetId = params.get('system');
     const target = systems.find((item) => item.value === targetId);
     if (!target) {
-      setError('刚创建的系统暂未出现在列表，请刷新系统列表后重试。');
+      setError(i18n.t('monitorUi.newSystemMissing'));
       setParams({ category: 'custom', system: targetId || '' }, { replace: true });
       return;
     }
-    if (!accessKey.trim()) { setError('请输入访问密钥，验证后可进入该系统。'); return; }
-    if (!connected) { setError('与应用的连接已断开，请等待重新连接后重试。'); return; }
+    if (!accessKey.trim()) { setError(i18n.t('monitorUi.keyRequired')); return; }
+    if (!connected) { setError(i18n.t('monitorUi.connectionLostPeriod')); return; }
     setParams({ category: 'custom', system: target.value }, { replace: true });
     entryRef.current?.begin({ system: target, key: accessKey, connected });
   }, [params, loading, systems, accessKey, connected, setParams]);
@@ -350,33 +351,33 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
         <div className="portal-brand"><img alt="Shroom" className="portal-logo" draggable={false} src={BRAND_LOGO_SRC} /></div>
         <div className="portal-topbar-actions">
           <div className={`portal-status ${connected ? 'is-online' : 'is-offline'}`} role="status">
-            <span className="portal-status-dot" aria-hidden="true" />{connected ? '本机服务已连接' : '正在连接本机服务'}
+            <span className="portal-status-dot" aria-hidden="true" />{connected ? i18n.t('monitorUi.serviceConnected') : i18n.t('monitorUi.serviceConnecting')}
           </div>
-          <button type="button" className="portal-sdk-button" onClick={() => openCategory('all')} aria-haspopup="dialog"><AppstoreOutlined aria-hidden="true" /> 系统列表</button>
+          <button type="button" className="portal-sdk-button" onClick={() => openCategory('all')} aria-haspopup="dialog"><AppstoreOutlined aria-hidden="true" />{i18n.t('monitorUi.systemList')}</button>
         </div>
       </header>
       <div className="portal-split">
         <div className="portal-content-column">
           <section className="portal-hero">
-            <div className="portal-hero-tag"><SafetyCertificateOutlined aria-hidden="true" /> 柔性压力感知解决方案</div>
+            <div className="portal-hero-tag"><SafetyCertificateOutlined aria-hidden="true" />{i18n.t('monitorUi.solutionTag')}</div>
             <h1 tabIndex={-1} ref={headingRef}>Shroom Vision</h1>
-            <p className="portal-hero-desc">让柔性压力数据实时可见，快速接入康养、座椅与具身触觉场景。</p>
+            <p className="portal-hero-desc">{i18n.t('monitorUi.solutionDescription')}</p>
           </section>
           <form className="portal-access" onSubmit={(event) => { event.preventDefault(); openCategory('all'); }}>
-            <label className="portal-access-title" htmlFor="portal-home-key"><KeyOutlined aria-hidden="true" /> 访问密钥</label>
+            <label className="portal-access-title" htmlFor="portal-home-key"><KeyOutlined aria-hidden="true" />{i18n.t('monitorUi.accessKey')}</label>
             <div className="portal-access-main">
-              <input id="portal-home-key" value={accessKey} onChange={(event) => changeKey(event.target.value)} placeholder="输入访问密钥" autoComplete="off" />
-              <button type="submit" className="portal-enter-button" aria-haspopup="dialog">选择系统 <ArrowRightOutlined aria-hidden="true" /></button>
+              <input id="portal-home-key" value={accessKey} onChange={(event) => changeKey(event.target.value)} placeholder={i18n.t('monitorUi.inputKey')} autoComplete="off" />
+              <button type="submit" className="portal-enter-button" aria-haspopup="dialog">{i18n.t('monitorUi.chooseSystem')}<ArrowRightOutlined aria-hidden="true" /></button>
             </div>
-            <p className="portal-access-hint">系统列表按密钥授权显示；已保存密钥由本机服务回填。</p>
+            <p className="portal-access-hint">{i18n.t('monitorUi.licenseListHint')}</p>
           </form>
-          <section className="portal-grid" aria-label="场景分类">
+          <section className="portal-grid" aria-label={i18n.t('monitorUi.sceneCategories')}>
             {PORTAL_CATEGORIES.map((item) => {
               const Icon = CATEGORY_ICONS[item.key];
               return <article key={item.key} className="portal-card">
                 <button type="button" className="portal-card-action" onClick={() => openCategory(item.key)} aria-haspopup="dialog">
                   <span className="portal-card-icon"><Icon aria-hidden="true" /></span>
-                  <span className="portal-card-title"><strong>{item.title}</strong><small>{item.description}</small></span>
+                  <span className="portal-card-title"><strong>{i18n.t(`monitorUi.${item.key}Title`)}</strong><small>{i18n.t(`monitorUi.${item.key}Description`)}</small></span>
                   <ArrowRightOutlined className="portal-card-arrow" aria-hidden="true" />
                 </button>
               </article>;
@@ -385,7 +386,7 @@ export default function LicensePortal({ prepareSystem = loadMonitoringPage }) {
         </div>
         <div className="portal-visual-column" aria-hidden="true" />
       </div>
-      <span className="portal-home-scene-status" role="status">{sceneStatus.state === 'unavailable' ? '当前设备无法显示 3D 预览，仍可选择系统' : sceneStatus.state === 'error' ? '场景模型加载失败，仍可选择系统' : '粒子场景预览 · 非实时数据'}</span>
+      <span className="portal-home-scene-status" role="status">{sceneStatus.state === 'unavailable' ? i18n.t('monitorUi.devicePreviewUnavailable') : sceneStatus.state === 'error' ? i18n.t('monitorUi.scenePreviewFailed') : i18n.t('monitorUi.previewOnly')}</span>
       {!selectorOpen && <FeedbackWidget accessKey={accessKey} activeSolution="care" />}
     </main>
     <PortalSystemSelector open={selectorOpen} systems={systems} category={activeCategory} selectedId={params.get('system')}

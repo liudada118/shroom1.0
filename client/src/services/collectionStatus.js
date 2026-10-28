@@ -1,3 +1,5 @@
+import i18n from '../i18n';
+
 const PHASES = ['collecting', 'finalizing', 'completed', 'interrupted', 'save_error'];
 const RESULTS = ['pending', 'saved', 'partial', 'unknown'];
 
@@ -23,19 +25,22 @@ export function readCollectionSummary(input) {
 }
 
 /** Describe committed, failed and pending totals only when every channel provides that counter. */
-export function describeCollectionSummary(summary) {
+export function describeCollectionSummary(summary, t = i18n.t.bind(i18n)) {
   if (!summary) return '';
   const channels = Object.values(summary.channels || {});
   const count = name => channels.length && channels.every(channel => Number.isSafeInteger(channel[name]))
     ? channels.reduce((total, channel) => total + channel[name], 0) : null;
   const pending = count('pending'), committed = count('committed'), failed = count('failed');
-  const details = [committed !== null ? `已提交 ${committed} 帧` : '', pending !== null ? `待提交 ${pending} 帧` : '', failed ? `失败 ${failed} 帧` : ''].filter(Boolean).join('，');
-  const label = summary.phase === 'finalizing' ? '已停止接收新采集数据，正在保存尾部数据'
-    : summary.phase === 'completed' && summary.result === 'saved' ? '采集保存完成'
-      : summary.phase === 'interrupted' && summary.result === 'saved' ? '采集已中断，已接收的数据保存完成'
-      : summary.result === 'partial' ? '采集仅部分保存，请检查保存结果'
-        : summary.phase === 'save_error' ? '采集保存失败，不能视为已保存'
-          : summary.phase === 'interrupted' ? '采集已中断，保存结果需核对'
-            : summary.phase === 'collecting' ? '正在采集' : '采集已停止，保存结果尚未确认';
-  return details ? `${label}（${details}）` : label;
+  const details = [committed !== null ? t('runtimeUi.receipt.committed', { count: committed }) : '',
+    pending !== null ? t('runtimeUi.receipt.pending', { count: pending }) : '',
+    failed ? t('runtimeUi.receipt.failed', { count: failed }) : ''].filter(Boolean).join(t('runtimeUi.receipt.separator'));
+  const status = summary.phase === 'finalizing' ? 'finalizing'
+    : summary.phase === 'completed' && summary.result === 'saved' ? 'completed'
+      : summary.phase === 'interrupted' && summary.result === 'saved' ? 'interruptedSaved'
+        : summary.result === 'partial' ? 'partial'
+          : summary.phase === 'save_error' ? 'saveError'
+            : summary.phase === 'interrupted' ? 'interrupted'
+              : summary.phase === 'collecting' ? 'collecting' : 'unknown';
+  const label = t(`runtimeUi.receipt.${status}`);
+  return details ? t('runtimeUi.receipt.withDetails', { label, details }) : label;
 }

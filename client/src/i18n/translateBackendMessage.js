@@ -1,4 +1,10 @@
 const backendMessageKeys = Object.freeze({
+  '请先停止采集，再切换系统。': 'runtimeUi.stopBeforeSwitch',
+  '当前授权仅允许查看和分析历史数据，不能采集或导出。': 'runtimeUi.acquireDenied',
+  '当前授权不允许导出数据或分析结果。': 'runtimeUi.exportDenied',
+  '系统切换失败，请停止采集并检查授权。': 'runtimeUi.switchFailed',
+  '无法确认采集状态，请重试。': 'runtimeUi.statusUnknown',
+  '采集仍在保存或服务未响应，请稍后重试退出。': 'runtimeUi.exitPending',
   '未检测到有效密钥，请输入密钥后使用': 'license.backendMessages.noValidKey',
   '授权校验未通过': 'license.backendMessages.validationFailed',
   '密钥不能为空，请输入有效密钥': 'license.backendMessages.emptyKey',

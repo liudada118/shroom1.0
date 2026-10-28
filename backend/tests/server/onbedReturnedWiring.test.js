@@ -14,6 +14,8 @@ const logStateSource = fs.readFileSync(path.join(root, 'client/src/extensions/jq
 const alarmSpeechSource = fs.readFileSync(path.join(root, 'client/src/page/home/jqbedAlarmSpeech.js'), 'utf8');
 const gloveExhibitionSource = buildSync({ entryPoints: [path.join(root, 'client/src/page/home/gloveExhibition.js')],
   bundle: true, write: false, format: 'cjs', platform: 'node' }).outputFiles[0].text;
+const tuningConfigSource = buildSync({ entryPoints: [path.join(root, 'client/src/services/tuningConfig.js')],
+  bundle: true, write: false, format: 'cjs', platform: 'node' }).outputFiles[0].text;
 const licenseAccessModule = { exports: {} };
 vm.runInNewContext(transformSync(fs.readFileSync(path.join(root, 'client/src/services/licenseAccess.js'), 'utf8'),
   { loader: 'js', format: 'cjs' }).code, { module: licenseAccessModule });
@@ -67,6 +69,8 @@ function createHarness(name = 'Home', props = {}, overrides = {}) {
   vm.runInContext(transformSync(logStateSource, { loader: 'js', format: 'cjs' }).code, context);
   Object.assign(context, context.module.exports);
   vm.runInContext(transformSync(alarmSpeechSource, { loader: 'js', format: 'cjs' }).code, context);
+  Object.assign(context, context.module.exports);
+  vm.runInContext(tuningConfigSource, context);
   Object.assign(context, context.module.exports);
   vm.runInContext(gloveExhibitionSource, context);
   Object.assign(context, context.module.exports);

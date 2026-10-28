@@ -72,7 +72,7 @@ describe('Title 门户操作生命周期', () => {
     else commandClient.execute.mockResolvedValueOnce({ ok: true }).mockRejectedValueOnce(new Error('启动失败'));
     await title.loadPortalPlayback('record-a');
     expect(title.state).toMatchObject({ portalPlaybackOpen: true, portalBusy: false });
-    expect(title.state.portalError).toContain('失败');
+    expect(title.state.portalError).toBe('monitorUi.loadFailed');
     expect(title.props.onPortalPlaybackStarted).not.toHaveBeenCalled();
     if (stage === 'load') expect(commandClient.execute).toHaveBeenCalledTimes(1);
   });

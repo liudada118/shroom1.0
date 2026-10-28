@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next';
+import { agentUiText as tr, agentUiMessage, agentKnownLabel } from './agentUi';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AgentSettings from './AgentSettings';
 import { describeChatSync, ChatUploadNotice } from './AgentSyncSettings';
@@ -14,7 +16,7 @@ import { collectAgentTasks, DEFAULT_AGENT_SETTINGS, isTaskBusy, TASK_LABELS } fr
 import './AgentWorkspace.css';
 import { trackUsage, trackUsageOperation } from '../../services/usageAnalytics';
 
-const SUGGESTIONS = ['当前有哪些展示系统，设备是什么状态？', '帮我检查设备为什么没有数据。', '根据附件帮我创建一个展示系统。'];
+const SUGGESTIONS = ['suggestStatus', 'suggestNoData', 'suggestCreate'];
 const EMPTY_MESSAGES = [];
 
 /** 绘制与软件控件一致的细线图标。 */
@@ -40,12 +42,13 @@ function fileSize(size) {
 
 /** 提供全局对话入口，以桌面桥执行真实任务和展示配置变更。 */
 export default function AgentWorkspace({ bridge: bridgeOverride, initiallyOpen = false }) {
+  useTranslation();
   const bridge = bridgeOverride ?? (typeof window !== 'undefined' ? window.electronAPI?.agent : null);
   const { snapshot, drafts, loading, error, invoke, refresh } = useAgentController(bridge);
   /** 模型目录读取失败只由设置面板提示，不覆盖会话和任务错误。 */
   const loadModelCatalog = useCallback(async (input) => {
     const result = await bridge?.invoke('getModelCatalog', input);
-    if (!result?.ok) throw new Error(result?.error?.message || '模型目录暂时不可用');
+    if (!result?.ok) throw new Error(result?.error?.message || tr('modelUnavailable'));
     return result.data;
   }, [bridge]);
   const [open, setOpen] = useState(initiallyOpen);
@@ -153,14 +156,14 @@ export default function AgentWorkspace({ bridge: bridgeOverride, initiallyOpen =
     setResultActionFeedback(null);
     try {
       const payload = await requestJson(`/api/system-packages/export/${encodeURIComponent(result.systemId)}`);
-      if (!payload.package) throw new Error('系统包尚未生成');
+      if (!payload.package) throw new Error(tr('packageMissing'));
       const blob = new Blob([JSON.stringify(payload.package)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url; anchor.download = `${result.systemId}-review.json`; anchor.click();
       setTimeout(() => URL.revokeObjectURL(url), 60000);
-      setResultActionFeedback({ key: result.key, message: '审核包已导出；请在管理网站“公司系统库”提交审核。' });
-    } catch (error) { setResultActionFeedback({ key: result.key, error: true, message: error.message || '审核包导出失败' }); }
+      setResultActionFeedback({ key: result.key, message: { key: 'packageExported' } });
+    } catch (error) { setResultActionFeedback({ key: result.key, error: true, message: error.message || { key: 'exportFailed' } }); }
   };
 
   /** Submit the current disk revision through a scoped employee token; receipt means pending review. */
@@ -171,9 +174,9 @@ export default function AgentWorkspace({ bridge: bridgeOverride, initiallyOpen =
         method: 'POST', ...(baseVersion === undefined ? {} : { body: JSON.stringify({ baseVersion }) }),
       });
       setResultActionFeedback({ key: result.key, message: submitted.status === 'published'
-        ? `系统包 #${submitted.id} 已发布，客户软件同步后可用。`
-        : `已提交审核 #${submitted.id}。管理员发布后，客户软件同步时才会出现。` });
-    } catch (error) { setResultActionFeedback({ key: result.key, error: true, message: error.message || '提交审核失败',
+        ? { key: 'publishedPackage', values: { id: submitted.id } }
+        : { key: 'submittedPackage', values: { id: submitted.id } } });
+    } catch (error) { setResultActionFeedback({ key: result.key, error: true, message: error.message || { key: 'submissionFailed' },
       updateBaseVersion: error.code === 'SYSTEM_ID_ALREADY_PUBLISHED' && Number.isSafeInteger(error.currentVersion)
         ? error.currentVersion : null }); }
   };
@@ -186,20 +189,18 @@ export default function AgentWorkspace({ bridge: bridgeOverride, initiallyOpen =
     try {
       const outcome = await trackUsageOperation('agent_task_result', { featureId: 'agent_results', action: 'activate_algorithm' }, () => activateSavedAlgorithm(result));
       setResultActionFeedback({ key: result.key, message: outcome.alreadyRunning
-        ? '算法已在当前实时通道运行；切换系统后请重新核对状态。'
-        : '算法已在本次实时连接启用。切换系统或回放后会停止；如需自动启用，请绑定到系统。' });
+        ? { key: 'algorithmRunning' }
+        : { key: 'algorithmEnabled' } });
     } catch (failure) {
       setResultActionFeedback({ key: result.key, error: true, message: failure.name === 'AbortError'
-        ? '启用请求超时，请到算法超市核对状态后重试。' : failure.message || '启用失败，请到算法超市核对状态。' });
+        ? { key: 'enableTimeout' } : failure.message || { key: 'enableFailed' } });
     } finally { setPendingAlgorithm(''); }
   };
 
   /** 将下一步任务写入输入框，用户发送后才会产生新的 Agent 操作。 */
   const prepareCreatedAlgorithm = (result) => {
     trackUsage('feature_attempted', { featureId: 'agent_results', action: 'prepare_binding' });
-    setText(result.packageId
-      ? `请把已保存的分类算法「${result.name}」（${result.packageId}）绑定到系统 ${result.systemId}，保留现有配置并添加分类结果图表。先核对当前系统；设备离线时先保存为停用，生成可审阅提案。`
-      : `请读取系统 ${result.systemId} 已保存的算法「${result.name}」，沿用原源码补齐实时输入契约并测试，生成可审阅的新版算法提案。`);
+    setText(tr(result.packageId ? 'bindPrompt' : 'completePrompt', { name: result.name, packageId: result.packageId, systemId: result.systemId }));
     requestAnimationFrame(() => inputRef.current?.focus());
   };
 
@@ -223,7 +224,7 @@ export default function AgentWorkspace({ bridge: bridgeOverride, initiallyOpen =
       const payload = action === 'importAttachments' ? { files: await encodePastedFiles(files) } : {};
       const imported = await invoke(action, payload);
       setSelectedIds((previous) => [...new Set([...previous, ...(imported || []).map((attachment) => attachment.id)])]);
-    } catch (failure) { setAttachmentError(failure.message || '附件导入失败，请重试。'); }
+    } catch (failure) { setAttachmentError(failure.message || { key: 'attachmentFailed' }); }
     finally { importLock.current = false; setImporting(false); }
   };
 
@@ -284,18 +285,18 @@ export default function AgentWorkspace({ bridge: bridgeOverride, initiallyOpen =
   /** 用当前权威快照校验旧卡身份，切会话或启动新任务后禁止误授权。 */
   const requireDataRequest = (task) => {
     const view = currentView.current;
-    if (view.locked || view.importing || importLock.current || actionLock.current) throw new Error('请等待当前操作结束。');
-    if (task.conversationId !== view.snapshot?.conversation?.id) throw new Error('会话已切换，请在当前会话中重新选择数据。');
+    if (view.locked || view.importing || importLock.current || actionLock.current) throw new Error(tr('waitOperation'));
+    if (task.conversationId !== view.snapshot?.conversation?.id) throw new Error(tr('conversationChanged'));
     const current = collectAgentTasks(view.snapshot).find((item) => item.id === task.id);
     if (current?.status !== 'awaiting_data' || current.algorithmDataRequest?.status !== 'pending'
-      || current.algorithmDataRequest.id !== task.algorithmDataRequest?.id) throw new Error('这次数据选择已结束，请查看最新任务。');
+      || current.algorithmDataRequest.id !== task.algorithmDataRequest?.id) throw new Error(tr('selectionEnded'));
     return current.algorithmDataRequest;
   };
 
   /** 一次确认数据后恢复原任务，不再要求用户发送“继续”。 */
   const submitAlgorithmData = async (task, selection) => {
     const request = requireDataRequest(task);
-    if (selection?.systemId !== request.systemId) throw new Error('当前系统已变化，请返回原系统后刷新记录。');
+    if (selection?.systemId !== request.systemId) throw new Error(tr('systemChanged'));
     actionLock.current = true; setPendingAction(`algorithm-data:${request.id}`); followOutput.current = true;
     try { await invoke(request.kind === 'history' ? 'completeHistoryDataRequest' : 'submitAlgorithmData', { taskId: task.id, requestId: request.id, selection }); }
     finally { actionLock.current = false; setPendingAction(''); }
@@ -312,55 +313,55 @@ export default function AgentWorkspace({ bridge: bridgeOverride, initiallyOpen =
   /** 用户确认的资料选择保存到当前会话，保存中禁止切换和执行其他操作。 */
   const saveAlgorithmSelection = async (selection) => {
     if (dataTask && selection) { await submitAlgorithmData(dataTask, selection); setAlgorithmOpen(false); return; }
-    if (locked || importing || actionLock.current) throw new Error('请等待当前操作结束。');
+    if (locked || importing || actionLock.current) throw new Error(tr('waitOperation'));
     actionLock.current = true; setPendingAction('algorithm-selection');
     try {
       await invoke('setAlgorithmSelection', { selection }); setAlgorithmOpen(false);
-      if (selection && !text.trim()) setText('请根据所选采集数据编写分类算法，先分析开发集、测试并改进，最后生成包含源码和测试报告的离线算法保存提案。');
+      if (selection && !text.trim()) setText(tr('algorithmPrompt'));
     } finally { actionLock.current = false; setPendingAction(''); }
   };
 
   return <div className="shroom-agent-root">
     <button ref={entryRef} className="shroom-agent-entry" type="button" aria-label="Agent" onClick={() => { setOpen(true); setUnseenResults(false); }} aria-haspopup="dialog" aria-expanded={open} aria-controls="shroom-agent-dialog">
-      <AgentIcon name="agent" /><span>Agent</span>{unseenResults ? <span className="shroom-agent-entry-new">新成果</span> : busy && <span className="shroom-agent-entry-dot" aria-label="任务执行中" />}
+      <AgentIcon name="agent" /><span>Agent</span>{unseenResults ? <span className="shroom-agent-entry-new">{tr('newResults')}</span> : busy && <span className="shroom-agent-entry-dot" aria-label={tr('taskRunning')} />}
     </button>
-    {!open && unseenResults && <div className="shroom-agent-result-toast" role="status"><span>Agent 已创建新成果</span><button type="button" onClick={() => { setOpen(true); setUnseenResults(false); setResultsOpen(true); }}>查看成果</button></div>}
+    {!open && unseenResults && <div className="shroom-agent-result-toast" role="status"><span>{tr('resultsCreated')}</span><button type="button" onClick={() => { setOpen(true); setUnseenResults(false); setResultsOpen(true); }}>{tr('viewResults')}</button></div>}
     <dialog ref={dialogRef} id="shroom-agent-dialog" className="shroom-agent-dialog" aria-labelledby="shroom-agent-title" onCancel={close} onClose={close}>
       <div className="shroom-agent-panel">
         <header className="shroom-agent-header">
-          <div className="shroom-agent-identity"><span className="shroom-agent-emblem"><AgentIcon name="agent" /></span><div><h2 id="shroom-agent-title">Shroom Agent</h2><p>{busy ? TASK_LABELS[activeTask.status] || '任务执行中' : '创建展示 · 修改配置 · 设备诊断'}</p></div></div>
+          <div className="shroom-agent-identity"><span className="shroom-agent-emblem"><AgentIcon name="agent" /></span><div><h2 id="shroom-agent-title">Shroom Agent</h2><p>{busy ? agentKnownLabel(TASK_LABELS[activeTask.status]) || tr('taskRunning') : tr('tagline')}</p></div></div>
           <div className="shroom-agent-header-actions">
-            <button type="button" aria-label="历史会话" title="历史会话" aria-expanded={historyOpen} onClick={() => { setHistoryOpen((value) => !value); setSettingsOpen(false); }} disabled={!bridge || loading}><AgentIcon name="history" /></button>
-            <button type="button" aria-label="新会话" title="新会话" onClick={newConversation} disabled={!bridge || loading || locked || importing}><AgentIcon name="plus" /></button>
-            <button type="button" aria-label="模型设置" title="模型与同步设置" onClick={() => { setSettingsOpen((value) => !value); setHistoryOpen(false); }} aria-expanded={settingsOpen} disabled={!bridge || loading || importing}><AgentIcon name="settings" /></button>
-            <button type="button" aria-label="关闭 Agent" title="关闭 Agent" onClick={close}><AgentIcon name="close" /></button>
+            <button type="button" aria-label={tr('history')} title={tr('history')} aria-expanded={historyOpen} onClick={() => { setHistoryOpen((value) => !value); setSettingsOpen(false); }} disabled={!bridge || loading}><AgentIcon name="history" /></button>
+            <button type="button" aria-label={tr('newConversation')} title={tr('newConversation')} onClick={newConversation} disabled={!bridge || loading || locked || importing}><AgentIcon name="plus" /></button>
+            <button type="button" aria-label={tr('modelSettings')} title={tr('modelSyncSettings')} onClick={() => { setSettingsOpen((value) => !value); setHistoryOpen(false); }} aria-expanded={settingsOpen} disabled={!bridge || loading || importing}><AgentIcon name="settings" /></button>
+            <button type="button" aria-label={tr('closeAgent')} title={tr('closeAgent')} onClick={close}><AgentIcon name="close" /></button>
           </div>
         </header>
-        {!bridge ? <div className="shroom-agent-empty"><AgentIcon name="agent" /><h3>在桌面软件中使用 Agent</h3><p>请打开 Shroom 桌面软件，即可连接模型、读取设备状态并创建展示系统。</p></div> : loading ? <div className="shroom-agent-empty" role="status"><p>正在加载 Agent…</p></div> : <>
-          {error && <div className="shroom-agent-error" role="alert"><span>{error}</span><button type="button" onClick={refreshStatus}>刷新状态</button></div>}
+        {!bridge ? <div className="shroom-agent-empty"><AgentIcon name="agent" /><h3>{tr('desktopAgent')}</h3><p>{tr('desktopHint')}</p></div> : loading ? <div className="shroom-agent-empty" role="status"><p>{tr('loadingAgent')}</p></div> : <>
+          {error && <div className="shroom-agent-error" role="alert"><span>{error}</span><button type="button" onClick={refreshStatus}>{tr('refreshStatus')}</button></div>}
           <AgentResults results={results} expanded={resultsOpen} onToggle={() => setResultsOpen((value) => !value)} onOpenSystem={openCreatedSystem} onExportPackage={exportCreatedSystem} onSubmitPackage={submitCreatedSystem} onUseAlgorithm={useCreatedAlgorithm} onPrepareAlgorithm={prepareCreatedAlgorithm} pendingAlgorithm={pendingAlgorithm} actionFeedback={resultActionFeedback} />
-          {historyOpen ? <AgentHistory invoke={invoke} disabled={locked || importing} onOpen={openConversation} onClose={() => setHistoryOpen(false)} /> : settingsOpen ? <AgentSettings settings={settings} disabled={locked} onLoadModelCatalog={loadModelCatalog} onSave={(value) => invoke('saveSettings', value)} chatSync={snapshot?.chatSync} onSaveSync={(value) => invoke('saveSyncSettings', value)} onRetrySync={() => invoke('retryChatSync')} onClearSync={(input) => invoke('clearChatSyncQueue', input)} onRestoreSync={(input) => invoke('restoreChatSyncQueue', input)} onClose={() => setSettingsOpen(false)} /> : algorithmOpen ? dataTask?.algorithmDataRequest.kind === 'history' ? <AgentHistoryData invoke={invoke} expectedSystemId={dataTask.algorithmDataRequest.systemId} disabled={locked || importing} onSave={saveAlgorithmSelection} onClose={() => setAlgorithmOpen(false)} /> : <AgentAlgorithmData invoke={invoke} selection={snapshot?.conversation?.algorithmSelection} expectedSystemId={dataTask?.algorithmDataRequest.systemId} submitLabel={dataTask ? '使用所选数据并继续' : '使用所选数据'} disabled={locked || importing} onSave={saveAlgorithmSelection} onClose={() => setAlgorithmOpen(false)} /> : <>
+          {historyOpen ? <AgentHistory invoke={invoke} disabled={locked || importing} onOpen={openConversation} onClose={() => setHistoryOpen(false)} /> : settingsOpen ? <AgentSettings settings={settings} disabled={locked} onLoadModelCatalog={loadModelCatalog} onSave={(value) => invoke('saveSettings', value)} chatSync={snapshot?.chatSync} onSaveSync={(value) => invoke('saveSyncSettings', value)} onRetrySync={() => invoke('retryChatSync')} onClearSync={(input) => invoke('clearChatSyncQueue', input)} onRestoreSync={(input) => invoke('restoreChatSyncQueue', input)} onClose={() => setSettingsOpen(false)} /> : algorithmOpen ? dataTask?.algorithmDataRequest.kind === 'history' ? <AgentHistoryData invoke={invoke} expectedSystemId={dataTask.algorithmDataRequest.systemId} disabled={locked || importing} onSave={saveAlgorithmSelection} onClose={() => setAlgorithmOpen(false)} /> : <AgentAlgorithmData invoke={invoke} selection={snapshot?.conversation?.algorithmSelection} expectedSystemId={dataTask?.algorithmDataRequest.systemId} submitLabel={dataTask ? tr('useDataContinue') : tr('useData')} disabled={locked || importing} onSave={saveAlgorithmSelection} onClose={() => setAlgorithmOpen(false)} /> : <>
             <div className="shroom-agent-scroll" ref={scrollRef} onScroll={(event) => { const node = event.currentTarget; followOutput.current = node.scrollHeight - node.scrollTop - node.clientHeight < 64; }}>
               {snapshot?.chatSync?.settings?.noticePending && <ChatUploadNotice settings={snapshot.chatSync.settings} disabled={locked || importing} onAcknowledge={() => invoke('saveSyncSettings', { acknowledgeNotice: true })} />}
-              {!configured && <div className="shroom-agent-connect-note"><div><strong>连接你的模型</strong><p>配置服务地址、模型名称和密钥后即可开始。</p></div><button type="button" onClick={() => setSettingsOpen(true)}>配置模型</button></div>}
-              {messages.length === 0 && <section className="shroom-agent-welcome"><span className="shroom-agent-eyebrow">从一个具体任务开始</span><h3>告诉我，你想完成什么？</h3><p>查询设备、排查数据问题，或根据协议和点位表生成展示方案。</p><div className="shroom-agent-suggestions">{SUGGESTIONS.map((suggestion) => <button type="button" key={suggestion} disabled={locked} onClick={() => { setText(suggestion); inputRef.current?.focus(); }}>{suggestion}<span aria-hidden="true">↗</span></button>)}</div></section>}
+              {!configured && <div className="shroom-agent-connect-note"><div><strong>{tr('connectModel')}</strong><p>{tr('connectionHint')}</p></div><button type="button" onClick={() => setSettingsOpen(true)}>{tr('configureModel')}</button></div>}
+              {messages.length === 0 && <section className="shroom-agent-welcome"><span className="shroom-agent-eyebrow">{tr('startTask')}</span><h3>{tr('welcome')}</h3><p>{tr('welcomeHint')}</p><div className="shroom-agent-suggestions">{SUGGESTIONS.map((suggestion) => <button type="button" key={suggestion} disabled={locked} onClick={() => { setText(tr(suggestion)); inputRef.current?.focus(); }}>{tr(suggestion)}<span aria-hidden="true">↗</span></button>)}</div></section>}
               <AgentConversation snapshot={snapshot} drafts={drafts} disabled={locked || importing} pendingAction={pendingAction} onProposalAction={proposalAction}
                 invoke={invoke} onSubmitAlgorithmData={submitAlgorithmData} onCancelAlgorithmData={cancelAlgorithmData} />
-              {busy && Object.keys(drafts).length === 0 && <p className="shroom-agent-working" role="status"><span aria-hidden="true" />{activeTask.status === 'verifying' ? '正在检查执行结果…' : '正在处理你的任务…'}</p>}
+              {busy && Object.keys(drafts).length === 0 && <p className="shroom-agent-working" role="status"><span aria-hidden="true" />{activeTask.status === 'verifying' ? tr('verifying') : tr('working')}</p>}
             </div>
             <form className="shroom-agent-composer" onSubmit={submit}>
-              {snapshot?.conversation?.algorithmSelection && <p className="shroom-agent-send-hint">算法数据：{snapshot.conversation.algorithmSelection.records.length} 条记录 · {snapshot.conversation.algorithmSelection.systemId}</p>}
-              {attachmentError && attachmentError !== error && <p className="shroom-agent-error" role="alert">{attachmentError}</p>}
-              {attachments.length > 0 && <ul className="shroom-agent-attachments" aria-label="待发送附件">{attachments.map((attachment) => <li key={attachment.id}>{attachmentThumbnail(attachment) && <img src={attachmentThumbnail(attachment)} alt={`预览 ${attachment.name}`} />}<span title={attachment.name}>{attachment.name}<small>{fileSize(attachment.size)}</small></span><button type="button" aria-label={`移除附件 ${attachment.name}`} disabled={locked || importing} onClick={() => setSelectedIds((previous) => previous.filter((id) => id !== attachment.id))}><AgentIcon name="close" /></button></li>)}</ul>}
-              <label className="shroom-agent-sr-only" htmlFor="shroom-agent-prompt">任务内容</label>
+              {snapshot?.conversation?.algorithmSelection && <p className="shroom-agent-send-hint">{tr('algorithmDataPrefix')}{snapshot.conversation.algorithmSelection.records.length}{tr('recordsSuffix')}{snapshot.conversation.algorithmSelection.systemId}</p>}
+              {attachmentError && attachmentError !== error && <p className="shroom-agent-error" role="alert">{agentUiMessage(attachmentError)}</p>}
+              {attachments.length > 0 && <ul className="shroom-agent-attachments" aria-label={tr('pendingAttachments')}>{attachments.map((attachment) => <li key={attachment.id}>{attachmentThumbnail(attachment) && <img src={attachmentThumbnail(attachment)} alt={tr('previewAttachment', { name: attachment.name })} />}<span title={attachment.name}>{attachment.name}<small>{fileSize(attachment.size)}</small></span><button type="button" aria-label={tr('removeAttachment', { name: attachment.name })} disabled={locked || importing} onClick={() => setSelectedIds((previous) => previous.filter((id) => id !== attachment.id))}><AgentIcon name="close" /></button></li>)}</ul>}
+              <label className="shroom-agent-sr-only" htmlFor="shroom-agent-prompt">{tr('prompt')}</label>
               <textarea ref={inputRef} id="shroom-agent-prompt" value={text} onChange={(event) => setText(event.target.value)} onPaste={onPaste} onKeyDown={onComposerKeyDown} rows={3} maxLength={12000} disabled={!snapshot || locked}
-                placeholder={configured ? '描述你的任务，可直接粘贴图片或文件…' : '先配置模型连接，再开始任务'} aria-describedby="shroom-agent-send-hint" />
-              <div className="shroom-agent-composer-tools"><button type="button" onClick={() => importFiles()} disabled={!snapshot || importing || locked} title="添加图片、文本、CSV、JSON 或 XLSX 文件"><AgentIcon name="attach" />{importing ? '正在导入…' : '添加附件'}</button>
-                <button type="button" onClick={() => setAlgorithmOpen(true)} disabled={!snapshot || importing || locked}>算法数据</button>
-                {busy ? <button ref={stopRef} type="button" onClick={cancel} disabled={cancelling}><AgentIcon name="stop" />{cancelling ? '正在停止…' : '停止任务'}</button> : <button className="shroom-agent-primary" type="submit" disabled={!text.trim() || !configured || locked || importing || !snapshot}><AgentIcon name="send" />{submitting ? '正在发送…' : '发送'}</button>}
+                placeholder={configured ? tr('promptPlaceholder') : tr('configureFirst')} aria-describedby="shroom-agent-send-hint" />
+              <div className="shroom-agent-composer-tools"><button type="button" onClick={() => importFiles()} disabled={!snapshot || importing || locked} title={tr('attachmentTypes')}><AgentIcon name="attach" />{importing ? tr('importing') : tr('addAttachment')}</button>
+                <button type="button" onClick={() => setAlgorithmOpen(true)} disabled={!snapshot || importing || locked}>{tr('algorithmData')}</button>
+                {busy ? <button ref={stopRef} type="button" onClick={cancel} disabled={cancelling}><AgentIcon name="stop" />{cancelling ? tr('stopping') : tr('stopTask')}</button> : <button className="shroom-agent-primary" type="submit" disabled={!text.trim() || !configured || locked || importing || !snapshot}><AgentIcon name="send" />{submitting ? tr('sending') : tr('send')}</button>}
               </div>
-              <p id="shroom-agent-send-hint" className="shroom-agent-send-hint">消息、所选附件和任务所需的软件状态将发送至你配置的模型服务。Shift + Enter 换行。</p>
-              {snapshot?.chatSync?.settings?.enabled && <p className="shroom-agent-send-hint" role="status">聊天同步：{describeChatSync(snapshot.chatSync)}。可在设置中查看服务器地址或关闭。</p>}
+              <p id="shroom-agent-send-hint" className="shroom-agent-send-hint">{tr('sendHint')}</p>
+              {snapshot?.chatSync?.settings?.enabled && <p className="shroom-agent-send-hint" role="status">{tr('syncPrefix')}{describeChatSync(snapshot.chatSync)}{tr('syncSettingsHint')}</p>}
             </form>
           </>}
         </>}

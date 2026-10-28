@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next';
+import { agentUiText as tr, agentUiMessage, agentKnownLabel } from './agentUi';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import DEFAULT_MODEL_CATALOG from '../../../../shared/agent-model-catalog.json';
 import { DEFAULT_AGENT_SETTINGS, agentErrorMessage } from './agentState';
@@ -14,6 +16,7 @@ function providerFromUrl(value, providers) {
 
 /** 编辑模型连接；目录刷新只改变选项，地址、模型和密钥保持当前表单值。 */
 export default function AgentSettings({ settings = DEFAULT_AGENT_SETTINGS, onSave, onClose, disabled, onLoadModelCatalog, chatSync, onSaveSync, onRetrySync, onClearSync, onRestoreSync }) {
+  useTranslation();
   const [catalog, setCatalog] = useState({ ...DEFAULT_MODEL_CATALOG, source: 'default', updatedAt: null });
   const initialBaseUrl = settings.baseUrl || DEFAULT_AGENT_SETTINGS.baseUrl;
   const initialProvider = DEFAULT_MODEL_CATALOG.providers.find((item) => item.id === providerFromUrl(initialBaseUrl, DEFAULT_MODEL_CATALOG.providers));
@@ -48,11 +51,11 @@ export default function AgentSettings({ settings = DEFAULT_AGENT_SETTINGS, onSav
     try {
       const result = await onLoadModelCatalog({ refresh });
       if (catalogRequest.current !== request) return;
-      if (!Array.isArray(result?.providers) || !result.providers.some((item) => item.id === 'custom')) throw new Error('目录不可用');
+      if (!Array.isArray(result?.providers) || !result.providers.some((item) => item.id === 'custom')) throw new Error(tr('catalogUnavailable'));
       setCatalog(result);
       setCatalogWarning(result.warning || '');
     } catch {
-      if (catalogRequest.current === request) setCatalogWarning('模型目录暂时无法更新，仍可使用现有选项或手动填写。');
+      if (catalogRequest.current === request) setCatalogWarning({ key: 'catalogFallback' });
     } finally {
       if (catalogRequest.current === request) setCatalogLoading(false);
     }
@@ -82,8 +85,8 @@ export default function AgentSettings({ settings = DEFAULT_AGENT_SETTINGS, onSav
   const submit = async (event) => {
     event.preventDefault();
     setError('');
-    if (!model.trim()) { setError('请输入要使用的模型名称。'); return; }
-    if (!apiKey.trim() && !hasCurrentKey) { setError('切换模型服务后，请填写该服务商的 API 密钥。'); return; }
+    if (!model.trim()) { setError({ key: 'modelRequired' }); return; }
+    if (!apiKey.trim() && !hasCurrentKey) { setError({ key: 'providerKeyRequired' }); return; }
     setSaving(true);
     try {
       await onSave({ baseUrl: baseUrl.trim(), model: model.trim(), ...(apiKey ? { apiKey } : {}) });
@@ -96,34 +99,34 @@ export default function AgentSettings({ settings = DEFAULT_AGENT_SETTINGS, onSav
   };
 
   return <section className="shroom-agent-settings" aria-labelledby="shroom-agent-settings-title">
-    <div className="shroom-agent-section-heading"><h3 id="shroom-agent-settings-title">模型连接</h3><button type="button" onClick={onClose}>返回对话</button></div>
-    <p className="shroom-agent-hint">模型服务需支持 Responses API 和工具调用。密钥不会写入聊天记录或浏览器存储。</p>
-    <div className="shroom-agent-section-heading"><span>可用服务与模型</span><button type="button" onClick={() => loadCatalog(true)} disabled={catalogLoading || !onLoadModelCatalog || saving || disabled}>{catalogLoading ? '正在刷新…' : '刷新模型列表'}</button></div>
-    <p className="shroom-agent-hint" role="status">{catalogLoading ? '正在读取模型目录…' : catalog.source === 'remote' ? '模型目录已从服务器更新。' : catalog.source === 'cache' ? '使用本机缓存的模型目录。' : '使用内置模型目录。'}{catalogWarning && ` ${catalogWarning}`}</p>
+    <div className="shroom-agent-section-heading"><h3 id="shroom-agent-settings-title">{tr('modelConnection')}</h3><button type="button" onClick={onClose}>{tr('backConversation')}</button></div>
+    <p className="shroom-agent-hint">{tr('modelRequirements')}</p>
+    <div className="shroom-agent-section-heading"><span>{tr('availableModels')}</span><button type="button" onClick={() => loadCatalog(true)} disabled={catalogLoading || !onLoadModelCatalog || saving || disabled}>{catalogLoading ? tr('refreshing') : tr('refreshModels')}</button></div>
+    <p className="shroom-agent-hint" role="status">{catalogLoading ? tr('loadingModels') : catalog.source === 'remote' ? tr('catalogRemote') : catalog.source === 'cache' ? tr('catalogCache') : tr('catalogBuiltIn')}{catalogWarning && <> {agentUiMessage(catalogWarning)}</>}</p>
     <form onSubmit={submit}>
-      <label htmlFor="shroom-agent-provider">模型服务商</label>
+      <label htmlFor="shroom-agent-provider">{tr('provider')}</label>
       <select id="shroom-agent-provider" value={provider} onChange={(event) => changeProvider(event.target.value)} disabled={saving || disabled}>
-        {catalog.providers.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+        {catalog.providers.map((item) => <option key={item.id} value={item.id}>{agentKnownLabel(item.label)}</option>)}
       </select>
-      <label htmlFor="shroom-agent-base-url">服务地址</label>
+      <label htmlFor="shroom-agent-base-url">{tr('baseUrl')}</label>
       <input id="shroom-agent-base-url" type="url" value={baseUrl} onChange={(event) => { setProviderChoice('custom'); setBaseUrl(event.target.value); setApiKey(''); }} required readOnly={provider !== 'custom'} disabled={saving || disabled} autoComplete="url" spellCheck={false} />
-      <label htmlFor="shroom-agent-model">模型名称</label>
+      <label htmlFor="shroom-agent-model">{tr('modelName')}</label>
       <select id="shroom-agent-model" value={modelChoice} onChange={(event) => { setManualModel(event.target.value === 'custom'); if (event.target.value !== 'custom') setModel(event.target.value); }} disabled={saving || disabled} aria-describedby="shroom-agent-model-hint">
-        {providerInfo.models.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-        <option value="custom">其他模型（手动填写）</option>
+        {providerInfo.models.map((option) => <option key={option.id} value={option.id}>{agentKnownLabel(option.label)}</option>)}
+        <option value="custom">{tr('otherModel')}</option>
       </select>
       {modelChoice === 'custom' && <>
-        <label htmlFor="shroom-agent-custom-model">自定义模型 ID</label>
-        <input id="shroom-agent-custom-model" value={model} onChange={(event) => setModel(event.target.value)} required disabled={saving || disabled} placeholder="填写服务商提供的模型 ID" autoComplete="off" spellCheck={false} />
+        <label htmlFor="shroom-agent-custom-model">{tr('customModel')}</label>
+        <input id="shroom-agent-custom-model" value={model} onChange={(event) => setModel(event.target.value)} required disabled={saving || disabled} placeholder={tr('modelPlaceholder')} autoComplete="off" spellCheck={false} />
       </>}
-      <p id="shroom-agent-model-hint" className="shroom-agent-hint">按所用服务选择模型，或手动填写模型 ID。可用模型以当前 API 密钥所属分组的授权为准。</p>
-      {providerInfo.hint && <p className="shroom-agent-hint">{providerInfo.hint}</p>}
-      <label htmlFor="shroom-agent-api-key">API 密钥{hasCurrentKey && <span> · 已配置</span>}</label>
+      <p id="shroom-agent-model-hint" className="shroom-agent-hint">{tr('modelHint')}</p>
+      {providerInfo.hint && <p className="shroom-agent-hint">{agentKnownLabel(providerInfo.hint)}</p>}
+      <label htmlFor="shroom-agent-api-key">{tr('apiKey')}{hasCurrentKey && <span>{tr('configured')}</span>}</label>
       <input id="shroom-agent-api-key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} disabled={saving || disabled}
-        placeholder={hasCurrentKey ? '留空以保留当前密钥' : '输入当前服务商的 API 密钥'} autoComplete="off" spellCheck={false} aria-describedby="shroom-agent-key-hint" />
-      <p id="shroom-agent-key-hint" className="shroom-agent-hint">首次使用请填写自己的密钥。密钥由系统加密保存在本机，同一电脑和账号升级后继续保留；更换服务地址时需要重新填写。</p>
-      {error && <p className="shroom-agent-inline-error" role="alert" tabIndex={-1} ref={errorRef}>{error}</p>}
-      <button className="shroom-agent-primary" type="submit" disabled={saving || disabled}>{saving ? '正在保存…' : '保存连接设置'}</button>
+        placeholder={hasCurrentKey ? tr('keepKey') : tr('keyPlaceholder')} autoComplete="off" spellCheck={false} aria-describedby="shroom-agent-key-hint" />
+      <p id="shroom-agent-key-hint" className="shroom-agent-hint">{tr('keyHint')}</p>
+      {error && <p className="shroom-agent-inline-error" role="alert" tabIndex={-1} ref={errorRef}>{agentUiMessage(error)}</p>}
+      <button className="shroom-agent-primary" type="submit" disabled={saving || disabled}>{saving ? tr('saving') : tr('saveConnection')}</button>
     </form>
     <AgentSyncSettings sync={chatSync} onSave={onSaveSync} onRetry={onRetrySync} onClear={onClearSync} onRestore={onRestoreSync} />
     <AgentSystemSubmissionSettings />

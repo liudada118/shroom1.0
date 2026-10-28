@@ -18,6 +18,9 @@ import {
   SendOutlined, UnlockOutlined, CheckCircleOutlined,
   SafetyCertificateOutlined, EyeOutlined, SettingOutlined, LockOutlined
 } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
+import { getLanguageLocale } from '../../i18n';
+import { translateBackendMessage } from '../../i18n/translateBackendMessage';
 import { decryptStr } from './aesUtil';
 import useMainWebSocket from '../../services/ws/useMainWebSocket';
 import {
@@ -51,18 +54,18 @@ const ALL_SENSORS = SENSOR_GROUPS.flatMap((g) => g.items);
  */
 const SENSOR_MODULES = {
   hand0205: [
-    { value: 'num', label: '2D数字' },
-    { value: 'normal', label: '3D遥操' },
-    { value: 'num3D', label: '3D数字' },
-    { value: 'numoriginal', label: '原始数据' },
-    { value: 'skin', label: '3D皮肤' },
+    { value: 'num', labelKey: 'data2D' },
+    { value: 'normal', labelKey: 'tel3D' },
+    { value: 'num3D', labelKey: 'data3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
+    { value: 'skin', labelKey: 'skin3D' },
   ],
   hand0205Double: [
-    { value: 'num', label: '2D数字' },
-    { value: 'normal', label: '3D遥操' },
-    { value: 'num3D', label: '3D数字' },
-    { value: 'numoriginal', label: '原始数据' },
-    { value: 'skin', label: '3D皮肤' },
+    { value: 'num', labelKey: 'data2D' },
+    { value: 'normal', labelKey: 'tel3D' },
+    { value: 'num3D', labelKey: 'data3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
+    { value: 'skin', labelKey: 'skin3D' },
   ],
   // 已发 hand0205Single 密钥使用 hand0205 的单手功能。
   hand0205Single: [
@@ -73,101 +76,101 @@ const SENSOR_MODULES = {
     { value: 'skin', labelKey: 'skin3D' },
   ],
   handGlove115200: [
-    { value: 'num', label: '2D数字' },
-    { value: 'normal', label: '3D遥操' },
-    { value: 'num3D', label: '3D数字' },
-    { value: 'numoriginal', label: '原始数据' },
-    { value: 'skin', label: '3D皮肤' },
+    { value: 'num', labelKey: 'data2D' },
+    { value: 'normal', labelKey: 'tel3D' },
+    { value: 'num3D', labelKey: 'data3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
+    { value: 'skin', labelKey: 'skin3D' },
   ],
   handGloveFullPacket: [
-    { value: 'num', label: '2D数字' },
-    { value: 'normal', label: '3D遥操' },
-    { value: 'num3D', label: '3D数字' },
-    { value: 'numoriginal', label: '原始数据' },
-    { value: 'skin', label: '3D皮肤' },
+    { value: 'num', labelKey: 'data2D' },
+    { value: 'normal', labelKey: 'tel3D' },
+    { value: 'num3D', labelKey: 'data3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
+    { value: 'skin', labelKey: 'skin3D' },
   ],
   footVideo: [
-    { value: 'num', label: '2D数字' },
-    { value: 'normal', label: '3D模型' },
-    { value: 'numoriginal', label: '原始数据' },
+    { value: 'num', labelKey: 'data2D' },
+    { value: 'normal', labelKey: 'modal3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
   ],
   wholeChair: [
-    { value: 'normal', label: '3D模型' },
+    { value: 'normal', labelKey: 'modal3D' },
   ],
   minzhen: [
-    { value: 'normal', label: '3D模型' },
-    { value: 'numoriginal', label: '原始数据' },
+    { value: 'normal', labelKey: 'modal3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
   ],
   robot1: [
-    { value: 'normal', label: '3D模型' },
-    { value: 'numoriginal', label: '原始数据' },
+    { value: 'normal', labelKey: 'modal3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
   ],
   robotSY: [
-    { value: 'normal', label: '3D模型' },
-    { value: 'numoriginal', label: '原始数据' },
+    { value: 'normal', labelKey: 'modal3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
   ],
   robotLCF: [
-    { value: 'normal', label: '3D模型' },
-    { value: 'numoriginal', label: '原始数据' },
+    { value: 'normal', labelKey: 'modal3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
   ],
   hand: [
-    { value: 'normal', label: '3D模型' },
-    { value: 'numoriginal', label: '原始数据' },
+    { value: 'normal', labelKey: 'modal3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
   ],
   handSinglePoint: [
-    { value: 'normal', label: '3D模型' },
-    { value: 'numoriginal', label: '原始数据' },
+    { value: 'normal', labelKey: 'modal3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
   ],
   jqbed: [
-    { value: 'normal', label: '3D模型' },
-    { value: 'numoriginal', label: '原始数据' },
+    { value: 'normal', labelKey: 'modal3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
   ],
   petCare: [
-    { value: 'normal', label: '3D模型' },
-    { value: 'numoriginal', label: '原始数据' },
+    { value: 'normal', labelKey: 'modal3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
   ],
   smallBed: [
-    { value: 'normal', label: '3D模型' },
-    { value: 'numoriginal', label: '原始数据' },
+    { value: 'normal', labelKey: 'modal3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
   ],
   smallBedNoAlg: [
-    { value: 'normal', label: '3D模型' },
-    { value: 'numoriginal', label: '原始数据' },
+    { value: 'normal', labelKey: 'modal3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
   ],
   smallBed12B: [
-    { value: 'normal', label: '3D模型' },
-    { value: 'numoriginal', label: '原始数据' },
+    { value: 'normal', labelKey: 'modal3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
   ],
   tempFullBed: [
-    { value: 'normal', label: '3D模型' },
-    { value: 'numoriginal', label: '原始数据' },
+    { value: 'normal', labelKey: 'modal3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
   ],
   daliegu: [
-    { value: 'normal', label: '3D模型' },
-    { value: 'numoriginal', label: '原始数据' },
+    { value: 'normal', labelKey: 'modal3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
   ],
   smallSample: [
-    { value: 'normal', label: '3D模型' },
-    { value: 'numoriginal', label: '原始数据' },
+    { value: 'normal', labelKey: 'modal3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
   ],
   bed4096: [
-    { value: 'normal', label: '3D模型' },
-    { value: 'numoriginal', label: '原始数据' },
+    { value: 'normal', labelKey: 'modal3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
   ],
   bed4096num: [
-    { value: 'normal', label: '3D模型' },
-    { value: 'numoriginal', label: '原始数据' },
+    { value: 'normal', labelKey: 'modal3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
   ],
   fast256: [
-    { value: 'normal', label: '3D模型' },
-    { value: 'numoriginal', label: '原始数据' },
+    { value: 'normal', labelKey: 'modal3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
   ],
   fast1024: [
-    { value: 'normal', label: '3D模型' },
-    { value: 'numoriginal', label: '原始数据' },
+    { value: 'normal', labelKey: 'modal3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
   ],
   humanBody: [
-    { value: 'skin', label: '3D皮肤' },
+    { value: 'skin', labelKey: 'skin3D' },
   ],
   pressureVest: [
     { value: 'skin', labelKey: 'skin3D' },
@@ -181,8 +184,8 @@ SENSOR_MODULES.humanBodyOptimized = [...(SENSOR_MODULES.humanBody || [])];
 
 const getModulesForSensor = (sensorValue) => {
   return SENSOR_MODULES[sensorValue] || [
-    { value: 'normal', label: '3D模型' },
-    { value: 'numoriginal', label: '原始数据' },
+    { value: 'normal', labelKey: 'modal3D' },
+    { value: 'numoriginal', labelKey: 'rawData' },
   ];
 };
 
@@ -203,7 +206,7 @@ const tryDecodeOffline = (input) => {
     return {
       version: 'offline',
       raw: payload,
-      expireDate: Number.isNaN(expireTs) ? '—' : new Date(expireTs).toLocaleString(),
+      expireDate: Number.isNaN(expireTs) ? null : expireTs,
       remainDays,
       expired: remainDays < 0,
       fileDisplay,
@@ -215,6 +218,7 @@ const tryDecodeOffline = (input) => {
 };
 
 const License = () => {
+  const { t, i18n } = useTranslation();
   // ---- 解析密钥 ----
   const [parseInput, setParseInput] = useState('');
   const [parseResult, setParseResult] = useState(null);
@@ -233,10 +237,11 @@ const License = () => {
 
   // value→中文名：优先后台动态映射，回退到本地写死 ALL_SENSORS，再回退原样
   const sensorLabelOf = useCallback((value) => {
-    if (sensorTypeMap && sensorTypeMap[value]) return sensorTypeMap[value];
     const sensor = ALL_SENSORS.find((s) => s.value === value);
-    return sensor ? sensor.label : value;
-  }, [sensorTypeMap]);
+    const received = sensorTypeMap?.[value];
+    if (received && received !== sensor?.label && received !== value) return received;
+    return sensor?.labelKey ? t(sensor.labelKey) : received || sensor?.label || value;
+  }, [sensorTypeMap, t]);
 
   const handleSocketMessage = useCallback((msg) => {
     const sensorTypeMapPayload = getSensorTypeListMap(msg);
@@ -275,7 +280,7 @@ const License = () => {
   // 解析密钥（自动识别：base64=离线、hex=在线）
   const handleParse = useCallback(() => {
     const input = parseInput.trim();
-    if (!input) { message.warning('请输入密钥'); return; }
+    if (!input) { message.warning(t('licenseAdmin.enterKeyWarning')); return; }
 
     // 离线格式优先：能解码出 {payload, signature} → 离线版预览（不验签）
     const offline = tryDecodeOffline(input);
@@ -295,29 +300,29 @@ const License = () => {
       setParseResult({
         version: 'online',
         raw: obj,
-        expireDate: expireDate.toLocaleString(),
+        expireDate: expireDate.getTime(),
         remainDays,
         expired: remainDays < 0,
         fileDisplay,
         moduleConfig: obj.moduleConfig || null,
       });
     } catch (e) {
-      message.error('密钥解析失败，请检查密钥是否正确');
+      message.error(t('licenseAdmin.parseFailed'));
       setParseResult(null);
     }
-  }, [parseInput]);
+  }, [parseInput, t]);
 
   // 将当前输入的密钥写入应用（在线 hex / 离线 base64 均可；后端按格式校验）
   const handleWriteToApp = useCallback(() => {
     const input = parseInput.trim();
-    if (!input) { message.warning('请先输入密钥'); return; }
+    if (!input) { message.warning(t('licenseAdmin.enterKeyFirst')); return; }
     if (!wsConnected) {
-      message.error('应用未连接，请确保应用正在运行');
+      message.error(t('licenseAdmin.appRequired'));
       return;
     }
     submitLicenseKey(input, { includeStartTime: false });
-    message.success('密钥已写入应用，正在校验…');
-  }, [parseInput, submitLicenseKey, wsConnected]);
+    message.success(t('licenseAdmin.writeSuccess'));
+  }, [parseInput, submitLicenseKey, wsConnected, t]);
 
   return (
     <div className="license-page">
@@ -325,13 +330,13 @@ const License = () => {
       <div className="license-header">
         <SafetyCertificateOutlined className="license-header-icon" />
         <div>
-          <Title level={3} style={{ margin: 0, color: '#fff' }}>密钥配置中心</Title>
-          <Text style={{ color: 'rgba(255,255,255,0.7)' }}>管理传感器授权类型与有效期</Text>
+          <Title level={3} style={{ margin: 0, color: '#fff' }}>{t('licenseAdmin.title')}</Title>
+          <Text style={{ color: 'rgba(255,255,255,0.7)' }}>{t('licenseAdmin.subtitle')}</Text>
         </div>
         <div className="license-header-status">
           <Badge status={wsConnected ? 'success' : 'error'} />
           <Text style={{ color: 'rgba(255,255,255,0.8)' }}>
-            {wsConnected ? '应用已连接' : '应用未连接'}
+            {wsConnected ? t('licenseAdmin.appConnected') : t('licenseAdmin.appDisconnected')}
           </Text>
         </div>
       </div>
@@ -345,12 +350,12 @@ const License = () => {
           icon={licenseStatus.locked ? <LockOutlined /> : undefined}
           message={
             licenseStatus.checking
-              ? '正在校验授权…'
+              ? t('licenseAdmin.validating')
               : licenseStatus.locked
-                ? `${licenseStatus.error || '检测到异常行为'}，请联系厂商重新获取密钥`
+                ? t('licenseAdmin.lockedSummary', { reason: translateBackendMessage(licenseStatus.error, t) || t('license.anomalyDetected') })
                 : licenseStatus.valid
-                  ? `${licenseStatus.type === 'offline' ? '离线授权' : '在线授权'}${licenseStatus.offline ? '（断网缓存兜底）' : ''} · 剩余 ${licenseStatus.remainingDays ?? '—'} 天 · 到期 ${licenseStatus.date ? new Date(licenseStatus.date).toLocaleString() : '—'}`
-                  : (licenseStatus.error || '未检测到有效授权')
+                  ? t('licenseAdmin.statusSummary', { type: t(licenseStatus.type === 'offline' ? 'licenseAdmin.offlineLicense' : 'licenseAdmin.onlineLicense'), fallback: licenseStatus.offline ? t('licenseAdmin.offlineFallback') : '', days: licenseStatus.remainingDays ?? '—', date: licenseStatus.date ? new Date(licenseStatus.date).toLocaleString(getLanguageLocale(i18n.language)) : '—' })
+                  : (translateBackendMessage(licenseStatus.error, t) || t('licenseAdmin.noValidLicense'))
           }
           action={
             (!licenseStatus.checking && !licenseStatus.valid && !licenseStatus.locked && !licenseStatus.noLicense) ? (
@@ -362,7 +367,7 @@ const License = () => {
                   refreshLicense();
                   setLicenseStatus({ checking: true });
                 }}
-              >重新获取授权</Button>
+              >{t('license.refreshAuthorization')}</Button>
             ) : undefined
           }
         />
@@ -374,14 +379,14 @@ const License = () => {
         items={[
           {
             key: 'parse',
-            label: <span><UnlockOutlined /> 解析密钥</span>,
+            label: <span><UnlockOutlined /> {t('licenseAdmin.parseKey')}</span>,
             children: (
               <div className="license-content">
                 <Row gutter={[24, 24]}>
                   <Col xs={24} lg={12}>
-                    <Card title={<Space><UnlockOutlined /> 输入密钥</Space>}>
+                    <Card title={<Space><UnlockOutlined /> {t('licenseAdmin.inputKey')}</Space>}>
                       <TextArea
-                        placeholder="粘贴在线密钥(hex) 或 离线激活码(base64)..."
+                        placeholder={t('licenseAdmin.inputPlaceholder')}
                         value={parseInput}
                         onChange={(e) => setParseInput(e.target.value)}
                         autoSize={{ minRows: 4, maxRows: 8 }}
@@ -389,58 +394,58 @@ const License = () => {
                       />
                       <Space style={{ width: '100%', justifyContent: 'space-between' }}>
                         <Button icon={<UnlockOutlined />} onClick={handleParse}>
-                          解析预览
+                          {t('licenseAdmin.parsePreview')}
                         </Button>
-                        <Tooltip title={wsConnected ? '将密钥写入正在运行的应用' : '应用未连接'}>
+                        <Tooltip title={wsConnected ? t('licenseAdmin.writeHint') : t('licenseAdmin.appDisconnected')}>
                           <Button type="primary" icon={<SendOutlined />} onClick={handleWriteToApp} disabled={!wsConnected}>
-                            写入应用
+                            {t('licenseAdmin.writeToApp')}
                           </Button>
                         </Tooltip>
                       </Space>
                     </Card>
                   </Col>
                   <Col xs={24} lg={12}>
-                    <Card title={<Space><CheckCircleOutlined /> 解析结果</Space>}>
+                    <Card title={<Space><CheckCircleOutlined /> {t('licenseAdmin.parseResult')}</Space>}>
                       {parseResult ? (
                         <div className="parse-result">
                           <div className="parse-item">
-                            <Text type="secondary">密钥类型：</Text>
+                            <Text type="secondary">{t('licenseAdmin.keyType')}</Text>
                             <Tag color={parseResult.version === 'offline' ? 'purple' : 'blue'}>
-                              {parseResult.version === 'offline' ? '离线激活码' : '在线密钥'}
+                              {parseResult.version === 'offline' ? t('licenseAdmin.offlineCode') : t('licenseAdmin.onlineKey')}
                             </Tag>
                           </div>
                           <div className="parse-item">
-                            <Text type="secondary">授权状态：</Text>
+                            <Text type="secondary">{t('licenseAdmin.authorizationStatus')}</Text>
                             <Tag color={parseResult.expired ? 'red' : 'green'}>
-                              {parseResult.expired ? '已过期' : '有效'}
+                              {parseResult.expired ? t('licenseAdmin.expired') : t('licenseAdmin.valid')}
                             </Tag>
                           </div>
                           {parseResult.version === 'offline' && (
                             <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
-                              注：此处仅解码预览，签名将在「写入应用」时由后端校验。
+                              {t('licenseAdmin.previewNote')}
                             </Text>
                           )}
                           <div className="parse-item">
-                            <Text type="secondary">到期时间：</Text>
-                            <Text strong>{parseResult.expireDate}</Text>
+                            <Text type="secondary">{t('licenseAdmin.expiryTime')}</Text>
+                            <Text strong>{parseResult.expireDate == null ? '—' : new Date(parseResult.expireDate).toLocaleString(getLanguageLocale(i18n.language))}</Text>
                           </div>
                           <div className="parse-item">
-                            <Text type="secondary">剩余天数：</Text>
+                            <Text type="secondary">{t('licenseAdmin.remainingDays')}</Text>
                             <Text strong type={parseResult.remainDays < 30 ? 'danger' : undefined}>
-                              {parseResult.remainDays} 天
+                              {parseResult.remainDays} {t('common.day')}
                             </Text>
                           </div>
                           <Divider />
                           <div className="parse-item">
-                            <Text type="secondary">授权模式：</Text>
+                            <Text type="secondary">{t('licenseAdmin.authorizationMode')}</Text>
                             <Text strong>
                               {parseResult.fileDisplay.type === 'all'
-                                ? '全部授权'
+                                ? t('licenseAdmin.allSensors')
                                 : parseResult.fileDisplay.type === 'group'
-                                  ? `分类全选 (${parseResult.fileDisplay.groupKeys.length} 类)`
+                                  ? t('licenseAdmin.categoryAll', { count: parseResult.fileDisplay.groupKeys.length })
                                 : parseResult.fileDisplay.type === 'multi'
-                                  ? `多类型 (${parseResult.fileDisplay.list.length})`
-                                  : '单类型'}
+                                  ? t('licenseAdmin.multiType', { count: parseResult.fileDisplay.list.length })
+                                  : t('licenseAdmin.singleType')}
                             </Text>
                           </div>
                           {parseResult.fileDisplay.groupKeys.length > 0 && (
@@ -449,7 +454,7 @@ const License = () => {
                                 const group = getLicenseGroup(groupKey);
                                 return (
                                   <Tag key={groupKey} color="gold">
-                                    {group ? `${group.label}全部` : groupKey}
+                                    {group ? t('licenseAdmin.categoryAllTag', { category: group.labelKey ? t(group.labelKey) : group.label }) : groupKey}
                                   </Tag>
                                 );
                               })}
@@ -466,7 +471,7 @@ const License = () => {
                             <>
                               <Divider style={{ margin: '8px 0' }} />
                               <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
-                                <SettingOutlined style={{ marginRight: 4 }} />功能模块配置：
+                                <SettingOutlined style={{ marginRight: 4 }} />{t('licenseAdmin.moduleConfig')}
                               </Text>
                               {Object.entries(parseResult.moduleConfig).map(([sensorVal, moduleVal]) => {
                                 const modules = getModulesForSensor(sensorVal);
@@ -475,7 +480,7 @@ const License = () => {
                                   <div key={sensorVal} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                                     <Text style={{ fontSize: 12 }}>{sensorLabelOf(sensorVal)}</Text>
                                     <Tag color="purple" icon={<EyeOutlined />} style={{ margin: 0, fontSize: 11 }}>
-                                      {mod?.label || moduleVal}
+                                      {mod?.labelKey ? t(mod.labelKey) : mod?.label || moduleVal}
                                     </Tag>
                                   </div>
                                 );
@@ -485,7 +490,7 @@ const License = () => {
                         </div>
                       ) : (
                         <div className="parse-empty">
-                          <Text type="secondary">请在左侧输入密钥并点击解析</Text>
+                          <Text type="secondary">{t('licenseAdmin.emptyPreview')}</Text>
                         </div>
                       )}
                     </Card>
@@ -500,11 +505,11 @@ const License = () => {
       {/* 锁定模态框：检测到时间回拨/篡改时弹出，提示联系厂商重新获取密钥 */}
       <Modal
         open={!!(licenseStatus && licenseStatus.locked)}
-        title={<span><LockOutlined style={{ color: '#cf1322', marginRight: 8 }} />授权异常</span>}
+        title={<span><LockOutlined style={{ color: '#cf1322', marginRight: 8 }} />{t('license.anomaly')}</span>}
         closable={false}
         maskClosable={false}
         keyboard={false}
-        okText="确定"
+        okText={t('common.confirm')}
         cancelButtonProps={{ style: { display: 'none' } }}
         onOk={() => {
           setLicenseStatus((prev) => ({ ...(prev || {}), locked: false }));
@@ -512,10 +517,10 @@ const License = () => {
         }}
       >
         <p style={{ marginBottom: 8 }}>
-          {(licenseStatus && licenseStatus.error) || '检测到异常行为'}。
+          {translateBackendMessage(licenseStatus?.error, t) || t('license.anomalyDetected')}
         </p>
         <p style={{ color: '#888' }}>
-          串口连接、数据采集等功能已被禁用。请联系厂商重新获取密钥，点击「确定」前往密钥输入页写入新密钥。
+          {t('license.anomalyAction')}
         </p>
       </Modal>
     </div>

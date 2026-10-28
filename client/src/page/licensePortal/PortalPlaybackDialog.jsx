@@ -1,3 +1,4 @@
+import i18n from '../../i18n';
 import React, { useId, useMemo, useState } from 'react';
 import { Modal } from 'antd';
 import { DownloadOutlined, HistoryOutlined, PlayCircleOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
@@ -72,74 +73,74 @@ export default function PortalPlaybackDialog({
     width={880}
     className="portal-playback-dialog"
     rootClassName="portal-playback-dialog-root"
-    title={<span className="portal-playback-title"><HistoryOutlined aria-hidden="true" />回放与下载</span>}
+    title={<span className="portal-playback-title"><HistoryOutlined aria-hidden="true" />{i18n.t('monitorUi.playbackDownload')}</span>}
     footer={null}
   >
-    <section className="portal-playback-content" aria-label="当前系统采集记录" aria-busy={blocked}>
-      <p className="portal-playback-hint">圆形按钮单选回放，方形按钮多选下载；两种选择互不影响。</p>
-      {!canExport && <p role="status">当前授权可以回放和分析历史数据，但不能下载数据或导出分析结果。</p>}
+    <section className="portal-playback-content" aria-label={i18n.t('monitorUi.systemRecords')} aria-busy={blocked}>
+      <p className="portal-playback-hint">{i18n.t('monitorUi.selectionHint')}</p>
+      {!canExport && <p role="status">{i18n.t('monitorUi.exportDenied')}</p>}
       <div className="portal-playback-searchbar">
         <label className="portal-playback-search" htmlFor={searchId}>
           <SearchOutlined aria-hidden="true" />
-          <span className="portal-playback-sr-only">搜索采集记录</span>
-          <input id={searchId} type="search" placeholder="搜索记录名称或时间" value={query} onChange={changeQuery} />
+          <span className="portal-playback-sr-only">{i18n.t('monitorUi.searchRecords')}</span>
+          <input id={searchId} type="search" placeholder={i18n.t('monitorUi.searchRecordsPlaceholder')} value={query} onChange={changeQuery} />
         </label>
         <button type="button" onClick={onRefresh} disabled={blocked || !onRefresh}>
-          <ReloadOutlined aria-hidden="true" spin={loading} />{loading ? '正在刷新' : '刷新记录'}
+          <ReloadOutlined aria-hidden="true" spin={loading} />{loading ? i18n.t('monitorUi.refreshing') : i18n.t('monitorUi.refreshRecords')}
         </button>
       </div>
       <div className="portal-playback-batch">
-        <span aria-live="polite" aria-atomic="true">{filtered.length} 条记录 · 已勾选 {selectedDownloads.size} 条下载</span>
+        <span aria-live="polite" aria-atomic="true">{i18n.t('monitorUi.recordsSummary', { count: filtered.length, selected: selectedDownloads.size })}</span>
         <div>
           <button type="button" disabled={!canExport || blocked || !onDownloadsChange || !filtered.some((record) => !record.disabled)}
-            onClick={() => onDownloadsChange?.(selectFilteredDownloads(normalized, downloadValues, query))}>全选筛选结果</button>
+            onClick={() => onDownloadsChange?.(selectFilteredDownloads(normalized, downloadValues, query))}>{i18n.t('monitorUi.selectFiltered')}</button>
           <button type="button" disabled={blocked || !onDownloadsChange || !selectedDownloads.size}
-            onClick={() => onDownloadsChange?.([])}>清空勾选</button>
+            onClick={() => onDownloadsChange?.([])}>{i18n.t('monitorUi.clearSelection')}</button>
         </div>
       </div>
       {error && <p className="portal-playback-error" role="alert">{error}</p>}
       <div className="portal-playback-list">
         {pageRecords.length ? <table>
-          <thead><tr><th scope="col">回放</th><th scope="col">下载</th><th scope="col">采集记录</th></tr></thead>
+          <thead><tr><th scope="col">{i18n.t('monitorUi.playback')}</th><th scope="col">{i18n.t('monitorUi.download')}</th><th scope="col">{i18n.t('monitorUi.recording')}</th></tr></thead>
           <tbody>{pageRecords.map((record) => <tr key={record.key}
             className={selection.playbackValue === record.value ? 'is-playback-selected' : ''}>
             <td><label className="portal-playback-choice">
-              <input type="radio" name={radioName} aria-label={`回放：${record.label}`}
+              <input type="radio" name={radioName} aria-label={i18n.t('monitorUi.playRecord', { value0: record.label })}
                 checked={selection.playbackValue === record.value}
                 disabled={blocked || record.disabled || !onPlaybackChange}
                 onChange={() => onPlaybackChange?.(record.value)} />
             </label></td>
             <td><label className="portal-playback-choice">
-              <input type="checkbox" aria-label={`下载：${record.label}`} checked={selectedDownloads.has(record.value)}
+              <input type="checkbox" aria-label={i18n.t('monitorUi.downloadRecord', { value0: record.label })} checked={selectedDownloads.has(record.value)}
                 disabled={!canExport || blocked || record.disabled || !onDownloadsChange}
                 onChange={(event) => onDownloadsChange?.(togglePlaybackDownload(normalized, downloadValues, record.value, event.target.checked))} />
             </label></td>
             <td><div className="portal-playback-record"><strong>{record.label}</strong>
               {record.label !== String(record.value) && <small>{String(record.value)}</small>}
-              {record.disabled && <small>此记录暂不可用</small>}
+              {record.disabled && <small>{i18n.t('monitorUi.recordUnavailable')}</small>}
             </div></td>
           </tr>)}</tbody>
         </table> : <div className="portal-playback-empty" role="status">
           <HistoryOutlined aria-hidden="true" />
-          <strong>{loading ? '正在读取采集记录' : query.trim() ? '没有匹配的记录' : '当前系统暂无采集记录'}</strong>
-          <span>{loading ? '请稍候' : query.trim() ? '换个名称或时间试试，已有勾选会保留。' : '完成采集后，点击“刷新记录”查看。'}</span>
+          <strong>{loading ? i18n.t('monitorUi.loadingRecords') : query.trim() ? i18n.t('monitorUi.noMatchingRecords') : i18n.t('monitorUi.noRecords')}</strong>
+          <span>{loading ? i18n.t('monitorUi.pleaseWait') : query.trim() ? i18n.t('monitorUi.searchAgain') : i18n.t('monitorUi.refreshAfterCollection')}</span>
         </div>}
       </div>
-      {pageCount > 1 && <nav className="portal-playback-pagination" aria-label="记录分页">
-        <button type="button" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>上一页</button>
-        <span>第 {currentPage + 1} / {pageCount} 页</span>
-        <button type="button" disabled={currentPage >= pageCount - 1} onClick={() => setPage(currentPage + 1)}>下一页</button>
+      {pageCount > 1 && <nav className="portal-playback-pagination" aria-label={i18n.t('monitorUi.recordPagination')}>
+        <button type="button" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>{i18n.t('monitorUi.previousPage')}</button>
+        <span>{i18n.t('monitorUi.pageSummary', { page: currentPage + 1, total: pageCount })}</span>
+        <button type="button" disabled={currentPage >= pageCount - 1} onClick={() => setPage(currentPage + 1)}>{i18n.t('monitorUi.nextPage')}</button>
       </nav>}
       <footer className="portal-playback-footer">
-        <div className="portal-playback-current"><span>准备回放</span><strong>{playbackRecord?.label || '尚未选择记录'}</strong></div>
+        <div className="portal-playback-current"><span>{i18n.t('monitorUi.readyPlayback')}</span><strong>{playbackRecord?.label || i18n.t('monitorUi.noRecordSelected')}</strong></div>
         <div className="portal-playback-actions">
           {onDelete && <button type="button" className="portal-playback-delete" disabled={blocked || selection.playbackValue === null}
-            onClick={() => onDelete(selection.playbackValue)}>删除单选记录</button>}
+            onClick={() => onDelete(selection.playbackValue)}>{i18n.t('monitorUi.deleteSelectedRecord')}</button>}
           <button type="button" onClick={downloadSelected} disabled={!canExport || blocked || !selection.downloadValues.length || !onDownload}>
-            <DownloadOutlined aria-hidden="true" />下载已勾选 ({selection.downloadValues.length})
+            <DownloadOutlined aria-hidden="true" />{i18n.t('monitorUi.downloadSelected', { count: selection.downloadValues.length })}
           </button>
           <button type="button" className="is-primary" onClick={playSelected} disabled={blocked || selection.playbackValue === null || !onPlay}>
-            <PlayCircleOutlined aria-hidden="true" />{busy ? '正在处理' : '载入回放'}
+            <PlayCircleOutlined aria-hidden="true" />{busy ? i18n.t('monitorUi.processing') : i18n.t('monitorUi.loadPlayback')}
           </button>
         </div>
       </footer>

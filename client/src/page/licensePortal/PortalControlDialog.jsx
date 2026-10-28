@@ -1,3 +1,4 @@
+import i18n from '../../i18n';
 import React from 'react';
 import { ConfigProvider, Modal, theme } from 'antd';
 import './PortalControlDialog.css';
@@ -12,7 +13,7 @@ export default function PortalControlDialog({ open, title, description, onClose,
   return <ConfigProvider theme={PORTAL_CONTROL_THEME}>
     <Modal open={open} title={title} centered width={660} footer={null}
       rootClassName="portal-control-dialog" onCancel={onClose} forceRender
-      closable={{ 'aria-label': `关闭${title}` }}>
+      closable={{ 'aria-label': i18n.t('monitorUi.closeDialog', { value0: title }) }}>
       <div id={id} className="portal-control-body">
         {description && <p className="portal-control-description">{description}</p>}
         {children}

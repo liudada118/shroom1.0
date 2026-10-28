@@ -1,8 +1,12 @@
 import './App.css'
 import { lazy, Suspense } from 'react'
 import { HashRouter, Routes, Route } from 'react-router-dom'
-import { App as AntdApp, message } from 'antd'
-import i18next from './i18n'
+import { App as AntdApp, ConfigProvider, message } from 'antd'
+import { useTranslation } from 'react-i18next'
+import enUS from 'antd/locale/en_US'
+import jaJP from 'antd/locale/ja_JP'
+import zhCN from 'antd/locale/zh_CN'
+import i18next, { normalizeLanguage } from './i18n'
 import AppTools from './components/appTools/AppTools'
 import { loadMonitoringPage } from './page/home/loadMonitoringPage'
 
@@ -40,8 +44,13 @@ message.config({
   getContainer: () => document.body,
 })
 
+const APP_LOCALES = { zh: zhCN, en: enUS, ja: jaJP }
+
+/** 让全局弹窗和设置与监测页沿用同一语言，切换时保留路由和组件状态。 */
 function App() {
+  const { i18n } = useTranslation()
   return (
+    <ConfigProvider locale={APP_LOCALES[normalizeLanguage(i18n.language)]}>
     <AntdApp>
       <AppTools />
       <HashRouter>
@@ -77,6 +86,7 @@ function App() {
         </Suspense>
       </HashRouter>
     </AntdApp>
+    </ConfigProvider>
   )
 }
 

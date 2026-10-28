@@ -27,6 +27,7 @@ import { isClassicColormap, sampleColormapRgb } from "../../extensions/display-s
 
 import { obj } from "../../assets/util/config";
 import { DUAL_CHANNEL_DEFAULTS, createThresholdState } from '../../runtime/displayThresholds';
+import { filterHandPressure } from './handPressureFilter';
 let group = new THREE.Group();
 const sitInit = 0;
 const backInit = 0;
@@ -97,6 +98,8 @@ const Canvas = React.forwardRef((props, refs) => {
   const colormapRef = useRef(props.colormap);
   const workspaceViewRef = useRef(null);
   const selectionRef = useRef(null);
+  const rawPressureRef = useRef(new Array(sitnum1 * sitnum2).fill(0));
+  const pressureSuppressedRef = useRef(false);
   colormapRef.current = props.colormap;
   const sceneVisibleRef = useContext(SceneVisibilityContext);
   var newDiv, newDiv1, selectStartArr = [], selectEndArr = [], sitArr, backArr, sitMatrix = [], backMatrix = [], selectMatrix = [];
@@ -488,7 +491,7 @@ const Canvas = React.forwardRef((props, refs) => {
       for (let ix = 0; ix < AMOUNTX; ix++) {
         const value = bigArrg[l] * 10;
         //柔化处理smooth
-        smoothBig[l] = smoothBig[l] + (value - smoothBig[l] + 0.5) / valuel1;
+        smoothBig[l] = pressureSuppressedRef.current ? 0 : smoothBig[l] + (value - smoothBig[l] + 0.5) / valuel1;
 
         positions[k] = ix * SEPARATION - (AMOUNTX * SEPARATION) / 2; // x
         positions[k + 1] = smoothBig[l] * value1; // y
@@ -676,23 +679,25 @@ const Canvas = React.forwardRef((props, refs) => {
     //   ndata = new Array(120).fill(1);
     // }
   }
-  // 座椅数据
+  /** 重新过滤末帧，让调高或调低初始值立即生效，不破坏收到的原始ADC。 */
+  function refreshPressureDisplay() {
+    const filtered = filterHandPressure(rawPressureRef.current, { initialThreshold: valuelInit1, pointFilter: valuef1 });
+    ndata1 = filtered.values;
+    pressureSuppressedRef.current = filtered.suppressed;
+    if (filtered.suppressed) smoothBig.fill(0);
+  }
+
+  /** 更新手部显示参数，并用同一份末帧重新计算初始阈值。 */
   function sitValue(prop) {
     // console.log(prop)
     const { valuej, valueg, value, valuel, valuef, valuelInit } = prop;
-    if (valuej) valuej1 = valuej;
-    if (valueg) valueg1 = valueg;
-    if (value) value1 = value;
-    if (valuel) valuel1 = valuel;
-    if (valuef) valuef1 = valuef;
-    if (valuelInit) valuelInit1 = valuelInit;
-    ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a));
-
-    ndata1Num = ndata1.reduce((a, b) => a + b, 0);
-    if (ndata1Num < valuelInit1) {
-      ndata1 = new Array(sitnum1 * sitnum2).fill(0);
-    }
-    console.log(ndata1, 111)
+    if (valuej != null) valuej1 = valuej;
+    if (valueg != null) valueg1 = valueg;
+    if (value != null) value1 = value;
+    if (valuel != null) valuel1 = valuel;
+    if (valuef != null) valuef1 = valuef;
+    if (valuelInit != null) valuelInit1 = valuelInit;
+    refreshPressureDisplay();
   }
   function sitData(prop, local) {
 
@@ -725,14 +730,11 @@ const Canvas = React.forwardRef((props, refs) => {
     // ndata1 = [];
      // wsPointData 为 null/undefined 时保留上一帧数据
     if (!wsPointData) return;
-    ndata1 = wsPointData;
+    if (valuelInit != null) valuelInit1 = valuelInit;
+    rawPressureRef.current = [...wsPointData];
     // valuelInit1 = valuelInit;
     // 修改线序 坐垫
-    ndata1 = ndata1.map((a, index) => (a - valuef1 < 0 ? 0 : a));
-    ndata1Num = ndata1.reduce((a, b) => a + b, 0);
-    if (ndata1Num < valuelInit) {
-      ndata1 = new Array(sitnum1 * sitnum2).fill(0);
-    }
+    refreshPressureDisplay();
     // console.log(ndata1)
   }
 

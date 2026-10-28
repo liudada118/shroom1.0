@@ -1,3 +1,4 @@
+import i18n from '../../i18n';
 import React, { useEffect, useState } from 'react';
 import { trackUsage } from '../../services/usageAnalytics';
 
@@ -16,8 +17,8 @@ export default function PortalRendererControls({ rendererRef, active = true }) {
     return () => clearInterval(timer);
   }, [active, rendererRef]);
   if (!active || !controls?.options?.length) return null;
-  return <fieldset className="portal-renderer-controls"><legend>中间可视化</legend>
-    <label><span>渲染方式</span><select aria-label="选择渲染器" value={controls.value}
+  return <fieldset className="portal-renderer-controls"><legend>{i18n.t('monitorUi.visualization')}</legend>
+    <label><span>{i18n.t('monitorUi.renderMode')}</span><select aria-label={i18n.t('monitorUi.chooseRenderer')} value={controls.value}
       onChange={(event) => {
         const select = rendererRef.current?.selectRenderer;
         if (typeof select !== 'function') return;
@@ -32,6 +33,6 @@ export default function PortalRendererControls({ rendererRef, active = true }) {
       }}>
       {controls.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
     </select></label>
-    <small>切换只改变中间画布，图表、算法和采集保持当前配置。</small>
+    <small>{i18n.t('monitorUi.rendererHint')}</small>
   </fieldset>;
 }

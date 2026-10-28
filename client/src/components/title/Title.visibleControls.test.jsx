@@ -39,8 +39,8 @@ describe('监测页常驻显示与语言设置', () => {
     expect(tree.find((node) => node.type === PortalQuickTools).props.collapsed).toBe(true);
     expect(tree.find((node) => node.type === PortalWorkspaceTools).props.displayContent).toBeUndefined();
     expect(tree.filter((node) => node.type === PortalRendererControls)).toHaveLength(1);
-    expect(tree.find((node) => node.type === Select && node.props['aria-label'] === '显示方式')).toBeDefined();
-    const language = tree.find((node) => node.type === Select && node.props['aria-label'] === '界面语言');
+    expect(tree.find((node) => node.type === Select && node.props['aria-label'] === 'monitorUi.displayMode')).toBeDefined();
+    const language = tree.find((node) => node.type === Select && node.props['aria-label'] === 'monitorUi.language');
     language.props.onChange('en');
     expect(localStorage.getItem('language')).toBe('en');
     expect(title.props.i18n.changeLanguage).toHaveBeenCalledWith('en');
@@ -49,7 +49,7 @@ describe('监测页常驻显示与语言设置', () => {
   it('数据设置抽屉移除原始数据跳转，原生数字显示方式仍然可选', () => {
     const tree = entries(createTitle().render());
     expect(tree.some((node) => String(node.props.to || '').startsWith('/num/'))).toBe(false);
-    const display = tree.find((node) => node.type === Select && node.props['aria-label'] === '显示方式');
+    const display = tree.find((node) => node.type === Select && node.props['aria-label'] === 'monitorUi.displayMode');
     expect(display.props.options).toContainEqual({ value: 'numoriginal', label: 'rawData' });
   });
 

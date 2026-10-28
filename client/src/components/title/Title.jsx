@@ -30,6 +30,7 @@ import { getDisplayDefinition, registerRuntimeDisplayDefinition } from '../../di
 import { syncNativeSystemTemplates } from '../../displays/nativeSystemTemplates';
 import { buildAccessibleSensorOptions } from '../../services/sensorStatus';
 import { resolveNativeSystemType } from '../../displays/nativeSystemTemplates';
+import { readTuningConfig, writeTuningConfig, hasExplicitTuningValue } from '../../services/tuningConfig';
 import { getBuiltinSystemOptions } from '../../services/displaySystemOptions';
 import { translateDomainLabel } from '../../i18n/translateDomainLabel';
 import { getLanguageLocale } from '../../i18n';
@@ -182,19 +183,13 @@ const normalizeHumanBodySizeValue = (sizeValue) => {
   return Math.min(200, Math.max(1, nextValue));
 }
 
-const hasModeColorConfig = ({ sensorType, mode }) => {
-  if (!mode) {
-    return false
-  }
-  const config = JSON.parse(localStorage.getItem('valueConfig'))
-  const modeConfig = config?.[`${sensorType}__${mode}`]
-  return modeConfig && Object.prototype.hasOwnProperty.call(modeConfig, 'valuej1')
-}
+/** 判断模式缓存是否已明确设置颜色。 */
+const hasModeColorConfig = (options) => Object.hasOwn(readTuningConfig({ ...options, modeOnly: true }), 'valuej1');
 
 /**
  * Get merged config from localStorage cache, supporting sensorType + mode two-dimensional cache.
  */
-const getConfig = ({ sensorType, mode }) => {
+const getConfig = ({ sensorType, systemId, mode }) => {
   if (!sensorType) return titleInitConfig['bed']
   const realType = matrixNameToType_title(sensorType)
   const modeDefaultKey = mode ? `${realType}__${mode}` : ''
@@ -203,34 +198,25 @@ const getConfig = ({ sensorType, mode }) => {
     : titleInitConfig[realType]
       ? titleInitConfig[realType]
       : titleInitConfig['bed']
-  let config = JSON.parse(localStorage.getItem('valueConfig'))
-  if (!config) return { ...init, ...gloveExhibitionConfig(mode) }
-  let result = {}
-  if (config[realType] && Object.keys(config[realType]).length) {
-    result = { ...config[realType] }
-  }
-  if (mode) {
-    const modeKey = `${realType}__${mode}`
-    if (config[modeKey] && Object.keys(config[modeKey]).length) {
-      result = { ...result, ...config[modeKey] }
-    }
-  }
-  const mergedConfig = { ...init, ...result, ...gloveExhibitionConfig(mode, config[modeDefaultKey]) }
+  const cacheOptions = { sensorType, systemId, legacyType: realType, mode };
+  const result = readTuningConfig(cacheOptions);
+  const modeConfig = readTuningConfig({ ...cacheOptions, modeOnly: true });
+  const mergedConfig = { valuelInit1: 500, sizeValue: undefined, speedValue: undefined, ...init, ...result, ...gloveExhibitionConfig(mode, modeConfig) };
   if (isHumanBodyMatrixTitle(realType)) {
-    if (HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES.includes(Number(mergedConfig.valuej1))) {
+    if (!hasExplicitTuningValue(cacheOptions, 'valuej1') && HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES.includes(Number(mergedConfig.valuej1))) {
       mergedConfig.valuej1 = HUMAN_BODY_DEFAULT_COLOR
     }
-    if (HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES.includes(Number(mergedConfig.sizeValue))) {
+    if (!hasExplicitTuningValue(cacheOptions, 'sizeValue') && HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES.includes(Number(mergedConfig.sizeValue))) {
       mergedConfig.sizeValue = HUMAN_BODY_DEFAULT_SIZE
     }
     mergedConfig.sizeValue = normalizeHumanBodySizeValue(mergedConfig.sizeValue)
   }
   if (realType === minzhenType_title) {
     const modeDefaultColor = mode === 'numoriginal' ? MINZHEN_RAW_DEFAULT_COLOR : MINZHEN_NORMAL_DEFAULT_COLOR
-    const hasExplicitModeColor = hasModeColorConfig({ sensorType: realType, mode })
+    const hasExplicitModeColor = hasModeColorConfig(cacheOptions)
     const currentColor = Number(mergedConfig.valuej1)
     if (
-      MINZHEN_OLD_DEFAULT_COLOR_VALUES.includes(currentColor) ||
+      (!hasExplicitTuningValue(cacheOptions, 'valuej1') && MINZHEN_OLD_DEFAULT_COLOR_VALUES.includes(currentColor)) ||
       (mode === 'numoriginal' && !hasExplicitModeColor && currentColor === MINZHEN_NORMAL_DEFAULT_COLOR)
     ) {
       mergedConfig.valuej1 = modeDefaultColor
@@ -238,6 +224,7 @@ const getConfig = ({ sensorType, mode }) => {
   }
   if (
     realType === smallBed12BType_title &&
+    !hasExplicitTuningValue(cacheOptions, 'valuej1') &&
     (
       Number(mergedConfig.valuej1) > SMALL_BED_12B_PRESSURE_COLOR_MAX ||
       SMALL_BED_12B_OLD_DEFAULT_COLOR_VALUES.includes(Number(mergedConfig.valuej1))
@@ -247,18 +234,21 @@ const getConfig = ({ sensorType, mode }) => {
   }
   if (
     realType === smallBed12BType_title &&
+    !hasExplicitTuningValue(cacheOptions, 'valuel1') &&
     SMALL_BED_12B_OLD_DEFAULT_SMOOTH_VALUES.includes(Number(mergedConfig.valuel1))
   ) {
     mergedConfig.valuel1 = SMALL_BED_12B_PRESSURE_DEFAULT_SMOOTH
   }
   if (
     realType === smallBed12BType_title &&
+    !hasExplicitTuningValue(cacheOptions, 'valuef1') &&
     SMALL_BED_12B_OLD_DEFAULT_FILTER_VALUES.includes(Number(mergedConfig.valuef1))
   ) {
     mergedConfig.valuef1 = SMALL_BED_12B_PRESSURE_DEFAULT_FILTER
   }
   if (
     realType === smallBed12BType_title &&
+    !hasExplicitTuningValue(cacheOptions, 'valuelInit1') &&
     SMALL_BED_12B_OLD_DEFAULT_INIT_FILTER_VALUES.includes(Number(mergedConfig.valuelInit1))
   ) {
     mergedConfig.valuelInit1 = SMALL_BED_12B_PRESSURE_DEFAULT_INIT_FILTER
@@ -270,27 +260,7 @@ const getConfig = ({ sensorType, mode }) => {
  * @param {*} param0  sensorType 传感器类型, valueType 需要修改的值的类型, value 需要修改的值, mode 展示模式
  * Save setting value to localStorage cache, keyed by sensorType + mode
  */
-const changeLocalStroage = ({ sensorType, valueType, value, mode }) => {
-  let config = JSON.parse(localStorage.getItem('valueConfig'))
-  if (!config) {
-    config = {}
-  }
-  const cacheKeys = []
-  if (mode) {
-    cacheKeys.push(`${sensorType}__${mode}`)
-  }
-  if (!mode || isHumanBodyMatrixTitle(sensorType)) {
-    cacheKeys.push(sensorType)
-  }
-
-  cacheKeys.forEach((cacheKey) => {
-    if (!config[cacheKey]) {
-      config[cacheKey] = {}
-    }
-    config[cacheKey][valueType] = value
-  })
-  localStorage.setItem('valueConfig', JSON.stringify(config))
-}
+const changeLocalStroage = (options) => writeTuningConfig(options);
 
 // const sensorArr = [
 //   { label: '沃尔沃', value: 'volvo' },
@@ -430,7 +400,7 @@ class Title extends React.Component {
       .then(([displayPayload, serialPayload]) => {
         if (this._portalUnmounted || scope !== this._portalScope) return;
         const definitions = displayPayload?.displaySystems?.runtimeDefinitions
-        if (!Array.isArray(definitions)) throw new Error('系统目录格式不正确')
+        if (!Array.isArray(definitions)) throw new Error(this.props.t('monitorUi.invalidCatalog'))
         syncNativeSystemTemplates(definitions)
         const dynamicSensors = definitions
           .map((definition) => registerRuntimeDisplayDefinition(definition))
@@ -465,7 +435,7 @@ class Title extends React.Component {
   /** Explain modern host restrictions before attempting acquisition or file export. */
   requireLicenseCapability = (capability) => {
     if (canUseLicenseCapability(this.props.licenseAccess, capability)) return true;
-    message.warning(capability === 'canExport' ? '当前授权不允许导出数据或分析结果，仍可在软件内查看。' : '当前授权不能新增采集或连接设备，仍可查看和分析历史数据。');
+    message.warning(capability === 'canExport' ? this.props.t('monitorUi.exportPermission') : this.props.t('monitorUi.acquirePermission'));
     return false;
   };
 
@@ -481,7 +451,7 @@ class Title extends React.Component {
     if (!this.requireLicenseCapability('canAcquire')) return false;
     this._serialOperations ||= new Map();
     if (this._serialOperations.has(role)) {
-      message.info('正在连接中，请稍后再试');
+      message.info(this.props.t('monitorUi.connectingWait'));
       return false;
     }
     const operation = {};
@@ -1114,7 +1084,7 @@ class Title extends React.Component {
         cancelButtonProps={{ style: isConfig ? undefined : { display: 'none' } }}
       >
         {this.state.csvBatchDates.length > 0 && <div className="portal-batch-summary" role="status">
-          <p>已选择 {this.state.csvBatchDates.length} 条记录 · 已完成 {this.state.csvBatchCompleted} 条</p>
+          <p>{this.props.t('monitorUi.exportSummary', { selected: this.state.csvBatchDates.length, completed: this.state.csvBatchCompleted })}</p>
         </div>}
         {isConfig ? (
           <Space direction='vertical' style={{ width: '100%' }} size={12}>
@@ -1168,10 +1138,10 @@ class Title extends React.Component {
 
         {isDone || (isError && (artifactList.length || fileList.length)) ? (
           <Space direction='vertical' style={{ width: '100%' }} size={12}>
-            <div>{isError ? '以下文件已生成，失败记录未自动重试。' : this.state.csvDownloadMessage || t('export csv success')}</div>
+            <div>{isError ? this.props.t('monitorUi.partialExport') : this.state.csvDownloadMessage || t('export csv success')}</div>
             {skippedChannelList.length ? (
               <div style={{ color: '#d48806' }}>
-                未找到历史数据：{skippedChannelList.join('、')}
+                {this.props.t('monitorUi.noHistory', { channels: skippedChannelList.join(' / ') })}
               </div>
             ) : null}
             {artifactList.map((artifact) => {
@@ -1202,12 +1172,12 @@ class Title extends React.Component {
                     <div style={{ color: mutedColor, fontSize: 12 }}>
                       {[
                         artifact.channelId,
-                        serialRoles.length ? `角色 ${serialRoles.join(' / ')}` : '',
+                        serialRoles.length ? this.props.t('monitorUi.serialRole', { value0: serialRoles.join(' / ') }) : '',
                         serialPortPaths.length
-                          ? `端口 ${serialPortPaths.join(artifact.serialChanged ? ' → ' : ' / ')}`
+                          ? this.props.t('monitorUi.serialPort', { value0: serialPortPaths.join(artifact.serialChanged ? ' → ' : ' / ') })
                           : '',
                         baudRates.length ? `${baudRates.join(' / ')} baud` : '',
-                        parserChannels.length ? `解析 ${parserChannels.join(' / ')}` : '',
+                        parserChannels.length ? this.props.t('monitorUi.parserChannel', { value0: parserChannels.join(' / ') }) : '',
                       ].filter(Boolean).join(' · ')}
                     </div>
                     {filePath ? (
@@ -1792,7 +1762,7 @@ class Title extends React.Component {
                 onChange={(value) => {
                   localStorage.setItem("carValueg", value);
                   this.props.changeStateData({ valueg1: value });
-                  changeLocalStroage({ sensorType: matrixName, valueType: 'valueg1', value, mode: cacheMode });
+                  changeLocalStroage({ sensorType: matrixName, systemId: this.props.systemId, valueType: 'valueg1', value, mode: cacheMode });
                   pushSitBack({ valueg: value });
                 }}
                 style={{ width: '200px' }}
@@ -1809,12 +1779,10 @@ class Title extends React.Component {
                 min={1}
                 max={isHumanBodyMatrixTitle(matrixName) ? 200 : 50}
                 step={isHumanBodyMatrixTitle(matrixName) ? 1 : 0.1}
-                value={isHumanBodyMatrixTitle(matrixName) ? (this.props.sizeValue ?? HUMAN_BODY_DEFAULT_SIZE) : undefined}
+                value={this.props.sizeValue ?? (isHumanBodyMatrixTitle(matrixName) ? HUMAN_BODY_DEFAULT_SIZE : undefined)}
                 onChange={(value) => {
-                  if (isHumanBodyMatrixTitle(matrixName)) {
-                    this.props.changeStateData({ sizeValue: value });
-                  }
-                  changeLocalStroage({ sensorType: matrixName, valueType: 'sizeValue', value, mode: cacheMode });
+                  this.props.changeStateData({ sizeValue: value });
+                  changeLocalStroage({ sensorType: matrixName, systemId: this.props.systemId, valueType: 'sizeValue', value, mode: cacheMode });
                   pushChangeColor({ size: value });
                 }}
                 style={{ width: '200px' }}
@@ -1829,8 +1797,10 @@ class Title extends React.Component {
               <Slider
                 usageFeature="tuning_rotation_speed"
                 min={1} max={20} step={1}
+                value={this.props.speedValue}
                 onChange={(value) => {
-                  changeLocalStroage({ sensorType: matrixName, valueType: 'speedValue', value, mode: cacheMode });
+                  this.props.changeStateData({ speedValue: value });
+                  changeLocalStroage({ sensorType: matrixName, systemId: this.props.systemId, valueType: 'speedValue', value, mode: cacheMode });
                   pushChangeColor({ speedValue: value });
                 }}
                 style={{ width: '200px' }}
@@ -1849,7 +1819,7 @@ class Title extends React.Component {
                 onChange={(value) => {
                   localStorage.setItem("carValuej", value);
                   this.props.changeStateData({ valuej1: value });
-                  changeLocalStroage({ sensorType: matrixName, valueType: 'valuej1', value, mode: cacheMode });
+                  changeLocalStroage({ sensorType: matrixName, systemId: this.props.systemId, valueType: 'valuej1', value, mode: cacheMode });
                   pushSitBack({ valuej: value });
                   pushChangeColor({ max: value });
                 }}
@@ -1869,7 +1839,7 @@ class Title extends React.Component {
                 onChange={(value) => {
                   localStorage.setItem("carValuef", value);
                   this.props.changeStateData({ valuef1: value });
-                  changeLocalStroage({ sensorType: matrixName, valueType: 'valuef1', value, mode: cacheMode });
+                  changeLocalStroage({ sensorType: matrixName, systemId: this.props.systemId, valueType: 'valuef1', value, mode: cacheMode });
                   pushSitBack({ valuef: value });
                   pushChangeColor({ filter: value });
                 }}
@@ -1889,7 +1859,7 @@ class Title extends React.Component {
                 onChange={(value) => {
                   localStorage.setItem("carValue", value);
                   this.props.changeStateData({ value1: value });
-                  changeLocalStroage({ sensorType: matrixName, valueType: 'value1', value, mode: cacheMode });
+                  changeLocalStroage({ sensorType: matrixName, systemId: this.props.systemId, valueType: 'value1', value, mode: cacheMode });
                   pushSitBack({ value: value });
                 }}
                 style={{ width: '200px' }}
@@ -1908,7 +1878,7 @@ class Title extends React.Component {
                 onChange={(value) => {
                   localStorage.setItem("carValuel", value);
                   this.props.changeStateData({ valuel1: value });
-                  changeLocalStroage({ sensorType: matrixName, valueType: 'valuel1', value, mode: cacheMode });
+                  changeLocalStroage({ sensorType: matrixName, systemId: this.props.systemId, valueType: 'valuel1', value, mode: cacheMode });
                   pushSitBack({ valuel: value });
                 }}
                 style={{ width: '200px' }}
@@ -1923,14 +1893,14 @@ class Title extends React.Component {
               <Slider
                 usageFeature="tuning_initial_value"
                 ariaLabelForHandle={t(mode === 'gloveTerrain' ? 'gloveTerrainInitial' : 'init')}
-                min={mode === 'gloveTerrain' ? TERRAIN_BASE_GAIN_RANGE.min : 1}
+                min={mode === 'gloveTerrain' ? TERRAIN_BASE_GAIN_RANGE.min : 0}
                 max={mode === 'gloveTerrain' ? TERRAIN_BASE_GAIN_RANGE.max : 5000}
                 step={mode === 'gloveTerrain' ? TERRAIN_BASE_GAIN_RANGE.step : 500}
                 value={this.props.valuelInit1}
                 onChange={(value) => {
                   if (mode !== 'gloveTerrain') localStorage.setItem("carValueInit", value);
                   this.props.changeStateData({ valuelInit1: value });
-                  changeLocalStroage({ sensorType: matrixName, valueType: mode === 'gloveTerrain' ? 'terrainBaseGain' : 'valuelInit1', value, mode: cacheMode });
+                  changeLocalStroage({ sensorType: matrixName, systemId: this.props.systemId, valueType: mode === 'gloveTerrain' ? 'terrainBaseGain' : 'valuelInit1', value, mode: cacheMode });
                   pushSitBack({ valuelInit: value });
                 }}
                 style={{ width: '200px' }}
@@ -2069,7 +2039,7 @@ class Title extends React.Component {
         this.props.changeAside?.(zeroCommand);
         this.setState(zeroCommand);
       }
-    } catch (error) { if (isCurrent()) message.error(`清零失败：${error.message}`); }
+    } catch (error) { if (isCurrent()) message.error(this.props.t('monitorUi.zeroFailed', { value0: error.message })); }
   };
 
   /** 新会话栏等待模式命令成功后才改界面；回放期间仍使用原播放条。 */
@@ -2077,7 +2047,7 @@ class Title extends React.Component {
     if (mode === 'now' && !this.requireLicenseCapability('canAcquire')) return;
     if (this.state.portalBusy || this.state.csvDownloadStage === 'exporting') return;
     if (mode !== 'now' && (this.props.matrixName === 'localCar' ? this.props.colWebFlag : !this.props.colFlag)) {
-      message.warning('请先结束采集，再选择回放数据');
+      message.warning(this.props.t('monitorUi.stopBeforePlayback'));
       return;
     }
     if (mode === 'now' && this.props.history === 'now') return;
@@ -2100,7 +2070,7 @@ class Title extends React.Component {
     } catch (error) {
       if (isCurrent()) {
         this.setState({ portalError: error.message });
-        message.error(`切换失败：${error.message}`);
+        message.error(this.props.t('monitorUi.switchFailed', { value0: error.message }));
       }
     } finally {
       if (isCurrent()) this.setState({ portalBusy: false });
@@ -2132,7 +2102,7 @@ class Title extends React.Component {
       this.props.onPortalPlaybackStarted?.();
       this.setState({ dataTime: value, current: 'playback', portalPlaybackOpen: false });
     } catch (error) {
-      if (isCurrent()) this.setState({ portalError: `载入失败：${error.message}` });
+      if (isCurrent()) this.setState({ portalError: this.props.t('monitorUi.loadFailed', { value0: error.message }) });
     } finally {
       if (isCurrent()) this.setState({ portalBusy: false });
     }
@@ -2149,8 +2119,8 @@ class Title extends React.Component {
   deletePortalHistory = (value) => {
     if (this.state.portalBusy || !this.props.dataArr?.some((record) => record.value === value)) return;
     const isCurrent = capturePortalOperation(this);
-    Modal.confirm({ title: '删除这条采集记录？', content: `记录：${value}。删除后无法恢复，不会删除其他下载勾选项。`,
-      okText: '确认删除', cancelText: '取消', okButtonProps: { danger: true },
+    Modal.confirm({ title: this.props.t('monitorUi.deleteRecordQuestion'), content: this.props.t('monitorUi.deleteRecordConfirmation', { value0: value }),
+      okText: this.props.t('monitorUi.confirmDelete'), cancelText: this.props.t('monitorUi.cancel'), okButtonProps: { danger: true },
       onOk: async () => {
         if (!isCurrent() || this.state.portalBusy) return;
         const wasLoaded = this.state.dataTime === value;
@@ -2172,7 +2142,7 @@ class Title extends React.Component {
             this.withSmallBed12BDisplayOptions({ local: true, history: false }), isCurrent);
         } catch (error) {
           if (isCurrent()) {
-            this.setState({ portalError: `删除失败：${error.message}` });
+            this.setState({ portalError: this.props.t('monitorUi.deleteFailed', { value0: error.message }) });
             throw error;
           }
         } finally {
@@ -2200,7 +2170,7 @@ class Title extends React.Component {
         this.props.changeAside?.({ resetZero: false });
         this.setState({ resetZero: false });
       }
-    } catch (error) { if (isCurrent()) message.error(`恢复零点失败：${error.message}`); }
+    } catch (error) { if (isCurrent()) message.error(this.props.t('monitorUi.restoreZeroFailed', { value0: error.message })); }
   };
 
   /** 批量选择只保存导出快照，随后复用已有路径、格式及文件结果弹窗。 */
@@ -2316,8 +2286,8 @@ class Title extends React.Component {
               {...this.getSerialSelectProps(sensor.serialRole)}
               key={sensor.channelId || sensor.serialRole}
               style={{ marginRight: 6, width: 180 }}
-              placeholder={`选择${sensor.sensorLabel}串口`}
-              aria-label={`${sensor.sensorLabel}串口`}
+              placeholder={this.props.t('monitorUi.chooseSensorPort', { value0: translateDomainLabel(sensor.sensorLabel, t) })}
+              aria-label={this.props.t('monitorUi.sensorPort', { value0: translateDomainLabel(sensor.sensorLabel, t) })}
               value={this.state.manifestPortSelections[sensor.serialRole] || undefined}
               onOpenChange={(open) => {
                 if (open) this.props.wsSendObj({ serialReset: true })
@@ -2450,7 +2420,7 @@ class Title extends React.Component {
     const serialStatusControls = this.props.history === 'now' ? <div className="serial-connection-status" role="status" aria-live="polite">
       {Object.values(this.state.serialStates).filter((status) => status.error || status.status === 'opening')
         .map((status) => <span key={status.role} className={status.error ? 'is-error' : ''}>
-          {serialErrorText(status.error || { message: status.retryAttempt ? '正在重新连接…' : '正在连接…' }, {
+          {serialErrorText(status.error || { message: status.retryAttempt ? this.props.t('monitorUi.reconnecting') : this.props.t('monitorUi.connecting') }, {
             ...status, label: manifestSerialSensors.find((sensor) => sensor.serialRole === status.role)?.sensorLabel,
           })}
         </span>)}
@@ -2458,14 +2428,14 @@ class Title extends React.Component {
     const displayControls = <>
         {this.props.matrixName != 'car10' && [...tactileGloveTypes_title, 'footVideo', 'robot1', 'robotSY', 'robotLCF', 'hand', 'handSinglePoint', 'normal', 'smallBed', smallBedNoAlgType_title, smallBed12BType_title, 'matCol', 'jqbed', tempFullBedType_title, 'petCare', 'petCareMini', minzhenType_title, 'daliegu', 'smallSample', 'bed4096', 'bed4096num', 'humanBody', HUMAN_BODY_OPTIMIZED_MATRIX, PRESSURE_VEST_MATRIX].includes(this.props.matrixName) ?
           <Select
-            aria-label="显示方式"
+            aria-label={this.props.t('monitorUi.displayMode')}
             defaultValue={this.props.numMatrixFlag}
             style={{ width: 90 }}
             value={this.props.numMatrixFlag}
             onChange={(value) => {
               if (this.props.calibration) this.closeGloveCalibration();
               // Load cached config for the new mode
-              const modeConfig = getConfig({ sensorType: this.props.matrixName, mode: value })
+              const modeConfig = getConfig({ sensorType: this.props.matrixName, systemId: this.props.systemId, mode: value })
               this.props.changeStateData({ numMatrixFlag: value, ...modeConfig })
 
               if (calibratableGloveTypes_title.includes(this.props.matrixName)) {
@@ -2732,7 +2702,7 @@ class Title extends React.Component {
     </>;
     const languageControl = <>
         <Select
-          aria-label="界面语言"
+          aria-label={this.props.t('monitorUi.language')}
           value={this.props.i18n.resolvedLanguage || this.props.i18n.language}
           style={{ width: 108 }}
           onChange={(value) => {
@@ -2949,8 +2919,8 @@ class Title extends React.Component {
         onControls={() => this.changePortalMode('playback')}
         deviceControls={<ConfigProvider theme={PORTAL_CONTROL_THEME}
           componentDisabled={this.state.portalBusy || this.state.csvDownloadStage === 'exporting'}>
-          <div className="portal-device-inline" role="group" aria-label="连接设备">
-            <span className="portal-device-inline-label">连接设备</span>
+          <div className="portal-device-inline" role="group" aria-label={this.props.t('monitorUi.connectDevice')}>
+            <span className="portal-device-inline-label">{this.props.t('monitorUi.connectDevice')}</span>
             <div className="portal-device-port-fields">{serialControls}{halowControls}</div>
             <div className="portal-device-inline-actions">{closeControl}</div>
           </div>
@@ -2965,9 +2935,9 @@ class Title extends React.Component {
         <ConfigProvider theme={PORTAL_CONTROL_THEME}>
           <PortalDisplayPanel languageControl={languageControl} collapsed={this.state.portalToolsCollapsed}>
             <PortalRendererControls rendererRef={this.props.com} />
-            <fieldset className="portal-display-native"><legend>显示方式与区域</legend>{displayControls}{carControls}{partControls}</fieldset>
+            <fieldset className="portal-display-native"><legend>{this.props.t('monitorUi.displayRegion')}</legend>{displayControls}{carControls}{partControls}</fieldset>
             {isCalibratableGlove && <fieldset className="portal-glove-controls"><legend>{t('deviceCal')}</legend>{calibrationControls}</fieldset>}
-            {Boolean(baudControl.props.children) && <fieldset><legend>串口参数</legend>{baudControl}</fieldset>}
+            {Boolean(baudControl.props.children) && <fieldset><legend>{this.props.t('monitorUi.serialSettings')}</legend>{baudControl}</fieldset>}
           </PortalDisplayPanel>
           {jqbedConfigAccess.visible && <Tooltip title={t(jqbedConfigAccess.tooltipKey)}>
             <Button className="portal-bed-settings" icon={<SettingOutlined />}
@@ -2996,24 +2966,24 @@ class Title extends React.Component {
         rendererRef={this.props.com} selectionActive={this.props.portalSelectionActive} onSelectionChange={this.props.onPortalSelectionChange}
         onClose={() => this.setState({ portalToolsOpen: false })}
         items={[
-          { id: 'zero', category: 'processing', label: '压力清零', description: '以当前压力作为零点基准。', active: this.state.resetZero,
+          { id: 'zero', category: 'processing', label: this.props.t('monitorUi.zeroPressure'), description: this.props.t('monitorUi.zeroPressureHint'), active: this.state.resetZero,
             disabled: this.props.history !== 'now', onClick: this.resetPortalPressure },
-          { id: 'restore', category: 'processing', label: '恢复零点', description: '取消预压力扣除，恢复原始压力。',
+          { id: 'restore', category: 'processing', label: this.props.t('monitorUi.restoreZero'), description: this.props.t('monitorUi.restoreZeroHint'),
             disabled: this.props.history !== 'now', onClick: this.restorePortalPressure },
-          { id: 'system', label: '系统专用工具', description: '设备校准、曲线、重心或报告等当前系统支持的功能。', onClick: () => this.openPortalPanel('portalSpecialOpen') },
-          { id: 'builder', label: '展示系统配置', description: '配置传感器、算法、渲染和图表。', disabled: !this.props.openDisplaySystemBuilder || !canUseLicenseCapability(this.props.licenseAccess, 'canConfigure'),
+          { id: 'system', label: this.props.t('monitorUi.systemTools'), description: this.props.t('monitorUi.systemToolsHint'), onClick: () => this.openPortalPanel('portalSpecialOpen') },
+          { id: 'builder', label: this.props.t('monitorUi.systemConfig'), description: this.props.t('monitorUi.systemConfigHint'), disabled: !this.props.openDisplaySystemBuilder || !canUseLicenseCapability(this.props.licenseAccess, 'canConfigure'),
             onClick: () => { this.setState({ portalToolsOpen: false }); this.props.openDisplaySystemBuilder?.(); } },
-          ...(jqbedConfigAccess.visible ? [{ id: 'jqbed', label: '床垫算法配置', description: '调整当前床垫算法参数。', disabled: jqbedConfigAccess.disabled,
+          ...(jqbedConfigAccess.visible ? [{ id: 'jqbed', label: this.props.t('monitorUi.bedConfig'), description: this.props.t('monitorUi.bedConfigHint'), disabled: jqbedConfigAccess.disabled,
             onClick: () => this.openPortalPanel('jqbedAlgorithmConfigOpen') }] : []),
         ]} />}</>, this.props.portalToolsHost) : null}
       {this.props.portalEmbedded && <>
-        <PortalControlDialog open={this.state.portalSpecialOpen} title="系统专用工具"
-          description="仅显示当前系统与模式支持的功能；设备校准需要先选择对应的渲染模式。"
+        <PortalControlDialog open={this.state.portalSpecialOpen} title={this.props.t('monitorUi.systemTools')}
+          description={this.props.t('monitorUi.systemToolsDescription')}
           onClose={() => this.setState({ portalSpecialOpen: false })}>
           <div className="portal-control-fields">{!this.props.portalToolsHost && calibrationControls}{specialControls}{this.props.matrixName === 'localCar' ? collectionControls : null}</div>
           {isCalibratableGlove && this.props.portalToolsHost && <p className="portal-control-empty">{t('gloveControlsLocation')}</p>}
           {!calibratableGloveTypes_title.includes(this.props.matrixName) && !['car', 'bigBed', 'foot', 'bed4096', 'localCar'].includes(this.props.matrixName)
-            && <p className="portal-control-empty">当前系统没有额外专用操作。显示与语言可在右侧直接调整，清零在工具箱中。</p>}
+            && <p className="portal-control-empty">{this.props.t('monitorUi.noSystemTools')}</p>}
         </PortalControlDialog>
         <PortalPlaybackDialog key={this.props.matrixName} open={this.state.portalPlaybackOpen}
           records={this.props.dataArr} playbackValue={this.state.portalPlaybackValue} downloadValues={this.state.portalDownloadValues}
@@ -3029,8 +2999,8 @@ class Title extends React.Component {
       {/* <h2>bodyta</h2> */}
       {!this.props.portalEmbedded && <><div className="titleBrand">
         {this.props.onPortalBack
-          ? <button className="titlePortalLink" type="button" onClick={this.props.onPortalBack}>返回系统列表</button>
-          : <NavLink className="titlePortalLink" to={`/?category=all&system=${encodeURIComponent(this.props.matrixName)}`} aria-label="返回首页选择系统" title="返回首页选择系统">首页</NavLink>}
+          ? <button className="titlePortalLink" type="button" onClick={this.props.onPortalBack}>{this.props.t('monitorUi.returnSystems')}</button>
+          : <NavLink className="titlePortalLink" to={`/?category=all&system=${encodeURIComponent(this.props.matrixName)}`} aria-label={this.props.t('monitorUi.returnHomeToChoose')} title={this.props.t('monitorUi.returnHomeToChoose')}>{this.props.t('monitorUi.home')}</NavLink>}
         <img className="titleBrandLogo" src={logo} alt="JQ Industries" />
         <img className="titleBrandWordmark" src={shroomWordmark} alt="Shroom" />
       </div>
@@ -3038,8 +3008,8 @@ class Title extends React.Component {
           <Button
             className="titleButton"
             icon={<SettingOutlined />}
-            title="展示系统配置器"
-            aria-label="展示系统配置器"
+            title={this.props.t('monitorUi.systemBuilder')}
+            aria-label={this.props.t('monitorUi.systemBuilder')}
             onClick={() => this.props.openDisplaySystemBuilder?.()}
           />
           <Select

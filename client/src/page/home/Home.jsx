@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from "react";
 import Title from "../../components/title/Title";
+import { readTuningConfig, hasExplicitTuningValue } from '../../services/tuningConfig';
 import { readLicenseAccess, isHistoryOnlyLicense, canUseLicenseCapability, getLicenseExpiryTimestamp } from '../../services/licenseAccess';
 import { readCollectionSummary } from '../../services/collectionStatus';
 import { finishCollectionBeforeExit } from '../../services/collectionExit';
@@ -644,7 +645,7 @@ const petCareMatrixArr = ['petCare', 'petCareMini']
 const isPetCareMatrix = (type) => petCareMatrixArr.includes(type)
 const tempFullBedMatrix = 'tempFullBed'
 const bedArr = ['jqbed', tempFullBedMatrix, ...petCareMatrixArr, 'xiyueReal1', 'smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed1']
-const displayRendererConfigMatrixArr = ['smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed12B', 'matCol', WHOLE_CHAIR_MATRIX, MINZHEN_MATRIX, 'jqbed', ...petCareMatrixArr]
+const displayRendererConfigMatrixArr = ['hand', 'handSinglePoint', 'handBlue', 'sit', 'smallBed', SMALL_BED_NO_ALG_MATRIX, 'smallBed12B', 'matCol', WHOLE_CHAIR_MATRIX, MINZHEN_MATRIX, 'jqbed', ...petCareMatrixArr]
 const HUMAN_BODY_DEFAULT_COLOR = 1555
 const HUMAN_BODY_DEFAULT_SIZE = 31
 const HUMAN_BODY_OPTIMIZED_MATRIX = 'humanBodyOptimized'
@@ -783,43 +784,20 @@ initConfig.minzhen__numoriginal = {
  * Supports two-dimensional cache: sensorType + mode.
  * First tries sensorType__mode key, then falls back to sensorType key.
  */
-const getLocalStorageConfig = ({ sensorType, mode }) => {
-  let config = JSON.parse(localStorage.getItem('valueConfig'))
-  if (!config || !Object.keys(config).length) {
-    return undefined
-  }
-
-  let result = {}
-  // First merge base sensorType config (backward compatible)
-  if (config[sensorType] && Object.keys(config[sensorType]).length) {
-    result = { ...config[sensorType] }
-  }
-  // Then merge mode-specific config (higher priority)
-  if (mode) {
-    const modeKey = `${sensorType}__${mode}`
-    if (config[modeKey] && Object.keys(config[modeKey]).length) {
-      result = { ...result, ...config[modeKey] }
-    }
-  }
-
-  return Object.keys(result).length ? result : undefined
+const getLocalStorageConfig = (options) => {
+  const result = readTuningConfig(options);
+  return Object.keys(result).length ? result : undefined;
 }
 
-const hasModeColorConfig = ({ sensorType, mode }) => {
-  if (!mode) {
-    return false
-  }
-  const config = JSON.parse(localStorage.getItem('valueConfig'))
-  const modeConfig = config?.[`${sensorType}__${mode}`]
-  return modeConfig && Object.prototype.hasOwnProperty.call(modeConfig, 'valuej1')
-}
+/** 判断当前模式是否已有颜色设置，兼容历史模式默认值迁移。 */
+const hasModeColorConfig = (options) => Object.hasOwn(readTuningConfig({ ...options, modeOnly: true }), 'valuej1');
 
 /**
  * Get merged config: defaults + localStorage cache.
  * @param {string} sensorType - sensor type name
  * @param {string} mode - display mode (numMatrixFlag), optional
  */
-const getConfig = ({ sensorType, mode }) => {
+const getConfig = ({ sensorType, systemId, mode }) => {
   if (!sensorType) {
     return initConfig['bed']
   }
@@ -830,31 +808,36 @@ const getConfig = ({ sensorType, mode }) => {
     : initConfig[realType]
       ? initConfig[realType]
       : initConfig['bed']
-  const local = getLocalStorageConfig({ sensorType: realType, mode })
-  const modeConfig = JSON.parse(localStorage.getItem('valueConfig'))?.[modeDefaultKey];
-  const mergedConfig = { ...init, ...local, ...gloveExhibitionConfig(mode, modeConfig) }
+  const cacheOptions = { sensorType, systemId, legacyType: realType, mode };
+  const local = getLocalStorageConfig(cacheOptions);
+  const modeConfig = readTuningConfig({ ...cacheOptions, modeOnly: true });
+  const mergedConfig = { valuelInit1: 500, sizeValue: undefined, speedValue: undefined, ...init, ...local, ...gloveExhibitionConfig(mode, modeConfig) }
   if (isHumanBodyMatrix(realType)) {
-    if (HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES.includes(Number(mergedConfig.valuej1))) {
+    if (!hasExplicitTuningValue(cacheOptions, 'valuej1') && HUMAN_BODY_OLD_DEFAULT_COLOR_VALUES.includes(Number(mergedConfig.valuej1))) {
       mergedConfig.valuej1 = HUMAN_BODY_DEFAULT_COLOR
     }
-    if (HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES.includes(Number(mergedConfig.sizeValue))) {
+    if (!hasExplicitTuningValue(cacheOptions, 'sizeValue') && HUMAN_BODY_OLD_DEFAULT_SIZE_VALUES.includes(Number(mergedConfig.sizeValue))) {
       mergedConfig.sizeValue = HUMAN_BODY_DEFAULT_SIZE
     }
     mergedConfig.sizeValue = normalizeHumanBodySizeValue(mergedConfig.sizeValue)
   }
   if (realType === MINZHEN_MATRIX) {
     const modeDefaultColor = mode === 'numoriginal' ? MINZHEN_RAW_DEFAULT_COLOR : MINZHEN_NORMAL_DEFAULT_COLOR
-    const hasExplicitModeColor = hasModeColorConfig({ sensorType: realType, mode })
+    const hasExplicitModeColor = hasModeColorConfig(cacheOptions)
     const currentColor = Number(mergedConfig.valuej1)
     if (
-      MINZHEN_OLD_DEFAULT_COLOR_VALUES.includes(currentColor) ||
+      (!hasExplicitTuningValue(cacheOptions, 'valuej1') && MINZHEN_OLD_DEFAULT_COLOR_VALUES.includes(currentColor)) ||
       (mode === 'numoriginal' && !hasExplicitModeColor && currentColor === MINZHEN_NORMAL_DEFAULT_COLOR)
     ) {
       mergedConfig.valuej1 = modeDefaultColor
     }
   }
   if (realType === SMALL_BED_12B_MATRIX) {
-    return normalizeSmallBed12BRendererConfig(mergedConfig)
+    const normalized = normalizeSmallBed12BRendererConfig(mergedConfig);
+    for (const field of Object.keys(mergedConfig)) {
+      if (hasExplicitTuningValue(cacheOptions, field)) normalized[field] = mergedConfig[field];
+    }
+    return normalized;
   }
   return mergedConfig
 }
@@ -1055,7 +1038,7 @@ class Home extends React.Component {
     // 使用上次由配置器或传感器选择器激活的类型，避免重新进入主界面后回退到固定传感器。
     const initialMatrixName = normalizeDisplayMatrixName(localStorage.getItem('file') || 'hand0205');
     const initialMode = getDefaultModeForMatrix(initialMatrixName);
-    const initialMatrixConfig = getConfig({ sensorType: initialMatrixName, mode: initialMode });
+    const initialMatrixConfig = getConfig({ sensorType: initialMatrixName, systemId: localStorage.getItem('file'), mode: initialMode });
     // 播种必须在读 chartWidgetIds 之前 —— 后者从存储里算高亮，
     // 顺序反了首帧的零件方块就不会亮。
     const initialChartCards = seedFormulaChartsFromManifest(initialMatrixName);
@@ -1070,7 +1053,8 @@ class Home extends React.Component {
       valuel1: initialMatrixConfig.valuel1,
       valuef1: initialMatrixConfig.valuef1,
       value1: initialMatrixConfig.value1,
-      sizeValue: initialMatrixConfig.sizeValue ?? HUMAN_BODY_DEFAULT_SIZE,
+      sizeValue: initialMatrixConfig.sizeValue ?? (isHumanBodyMatrix(initialMatrixName) ? HUMAN_BODY_DEFAULT_SIZE : undefined),
+      speedValue: initialMatrixConfig.speedValue,
       valuelInit1: initialMatrixConfig.valuelInit1 ?? initValue.valuelInit1,
       valueMult: initValue.valueMult,
       compen: initValue.compen,
@@ -1217,27 +1201,27 @@ class Home extends React.Component {
     };
   }
 
+  /** 恢复当前系统参数，旧场景只重放实际保存过的值，保留其原生默认外观。 */
   syncDisplayRendererConfig = () => {
-    if (!displayRendererConfigMatrixArr.includes(this.state.matrixName)
-      && !(tactileGloveTypes.includes(this.state.matrixName) && this.state.numMatrixFlag === 'gloveTerrain')) {
-      return;
+    const usesSharedDefaults = displayRendererConfigMatrixArr.includes(this.state.matrixName)
+      || (tactileGloveTypes.includes(this.state.matrixName) && this.state.numMatrixFlag === 'gloveTerrain');
+    const saved = readTuningConfig({ sensorType: this.state.matrixName, systemId: this.state.systemId,
+      legacyType: matrixNameToType(this.state.matrixName), mode: this.state.numMatrixFlag });
+    const values = usesSharedDefaults ? this.state : saved;
+    const rendererConfig = {};
+    for (const [field, target] of Object.entries({ valueg1: 'valueg', valuej1: 'valuej', valuel1: 'valuel',
+      valuef1: 'valuef', value1: 'value', valuelInit1: 'valuelInit' })) {
+      if (Number.isFinite(values[field])) rendererConfig[target] = values[field];
     }
-
-    const rendererConfig = {
-      valueg: this.state.valueg1,
-      valuej: this.state.valuej1,
-      valuel: this.state.valuel1,
-      valuef: this.state.valuef1,
-      value: this.state.value1,
-      valuelInit: this.state.valuelInit1,
-    };
-
-    if (this.com.current?.sitValue) {
-      this.com.current.sitValue(rendererConfig);
+    if (Object.keys(rendererConfig).length) {
+      this.com.current?.sitValue?.(rendererConfig);
+      this.com.current?.backValue?.(rendererConfig);
     }
-    if (this.com.current?.backValue) {
-      this.com.current.backValue(rendererConfig);
+    const colorConfig = {};
+    for (const [field, target] of Object.entries({ sizeValue: 'size', speedValue: 'speedValue', valuej1: 'max', valuef1: 'filter' })) {
+      if (Number.isFinite(saved[field])) colorConfig[target] = saved[field];
     }
+    if (Object.keys(colorConfig).length) this.com.current?.changeColor?.(colorConfig);
   }
 
   parseGloveRawMatrix = (rawData) => {
@@ -1897,7 +1881,7 @@ class Home extends React.Component {
       systemId: sensorType,
       numMatrixFlag: nextMode,
       minzhenSensorInfo: {},
-      ...getConfig({ sensorType: nextMatrixName, mode: nextMode }),
+      ...getConfig({ sensorType: nextMatrixName, systemId: sensorType, mode: nextMode }),
     });
   };
 
@@ -3770,7 +3754,7 @@ class Home extends React.Component {
       const nextMode = getDefaultModeForMatrix(this.state.matrixName, this.state.numMatrixFlag);
       this.setState({
         numMatrixFlag: nextMode,
-        ...getConfig({ sensorType: this.state.matrixName, mode: nextMode }),
+        ...getConfig({ sensorType: this.state.matrixName, systemId: this.state.systemId, mode: nextMode }),
       });
       return;
     }
@@ -3782,14 +3766,17 @@ class Home extends React.Component {
       const nextMode = getDefaultModeForMatrix(this.state.matrixName, this.state.numMatrixFlag);
       this.setState({
         numMatrixFlag: nextMode,
-        ...getConfig({ sensorType: this.state.matrixName, mode: nextMode }),
+        ...getConfig({ sensorType: this.state.matrixName, systemId: this.state.systemId, mode: nextMode }),
       });
       return;
     }
 
     const rendererConfigChanged =
       prevState.matrixName !== this.state.matrixName ||
+      prevState.systemId !== this.state.systemId ||
       prevState.numMatrixFlag !== this.state.numMatrixFlag ||
+      prevState.sizeValue !== this.state.sizeValue ||
+      prevState.speedValue !== this.state.speedValue ||
       prevState.valueg1 !== this.state.valueg1 ||
       prevState.valuej1 !== this.state.valuej1 ||
       prevState.valuel1 !== this.state.valuel1 ||
@@ -3929,12 +3916,12 @@ class Home extends React.Component {
   revertDisplayDraft = (draft) => {
     if (!draft?.changes?.length) return;
     Modal.confirm({
-      title: '撤销未保存的改动？',
-      okText: '撤销',
-      cancelText: '再想想',
+      title: this.props.t('runtimeUi.draft.revertTitle'),
+      okText: this.props.t('runtimeUi.draft.revert'),
+      cancelText: this.props.t('runtimeUi.draft.keep'),
       content: (
         <div>
-          <p>会做这几件事：</p>
+          <p>{this.props.t('runtimeUi.draft.changes')}</p>
           <ul style={{ paddingLeft: 18, margin: 0 }}>
             {draft.changes.map((change) => <li key={change.label}>{change.label}</li>)}
           </ul>
@@ -3981,12 +3968,12 @@ class Home extends React.Component {
         { replace: true },
       );
       resetFormulaCharts(matrixName, getDisplayDefinition(matrixName)?.page?.chartCards);
-      message.success('已保存到展示系统目录，这就是新的基线');
+      message.success(this.props.t('runtimeUi.draft.saved'));
     } catch (error) {
       message.error(
         error?.code === 'DISPLAY_SYSTEM_READ_ONLY'
-          ? '这是软件自带的展示系统，改不了它本身，请用「另存为」建一份自己的'
-          : `保存失败：${error?.message || error}`,
+          ? this.props.t('runtimeUi.draft.readOnly')
+          : this.props.t('runtimeUi.draft.saveFailed', { detail: translateBackendMessage(error?.message || error, this.props.t) }),
       );
     }
   };
@@ -4005,16 +3992,15 @@ class Home extends React.Component {
     const sourceId = definition?.displaySystemId;
     if (!sourceId) return;
     // 名字用户改，id 从源 id 派生 —— 名字可以是中文，id 要落成文件夹名。
-    let name = `${definition.label || sourceId} 副本`;
+    let name = this.props.t('runtimeUi.draft.copyName', { name: definition.label || sourceId });
     Modal.confirm({
-      title: '另存为新的展示模块',
-      okText: '另存为',
-      cancelText: '取消',
+      title: this.props.t('runtimeUi.draft.saveAsTitle'),
+      okText: this.props.t('runtimeUi.draft.saveAs'),
+      cancelText: this.props.t('runtimeUi.draft.cancel'),
       content: (
         <div>
           <p style={{ margin: '0 0 8px' }}>
-            会把整个展示系统文件夹复制一份，把当前外观写进新的那份。
-            原来那份不受影响，当前测量也不会中断。
+            {this.props.t('runtimeUi.draft.copyDescription')}
           </p>
           <Input
             defaultValue={name}
@@ -4052,12 +4038,12 @@ class Home extends React.Component {
       }
       // 顶部传感器菜单在听这个事件，收到就重新拉一次清单，新模块立刻出现在里面。
       window.dispatchEvent(new CustomEvent('shroom-display-systems-updated'));
-      message.success(`已另存为「${result?.manifest?.name || name}」，可在顶部传感器菜单里切换过去`);
+      message.success(this.props.t('runtimeUi.draft.copied', { name: result?.manifest?.name || name }));
     } catch (error) {
       message.error(
         error?.code === 'DISPLAY_SYSTEM_EXISTS'
-          ? `目录里已经有一个叫 ${id} 的展示系统了，先把它改名或删掉再试`
-          : `另存为失败：${error?.message || error}`,
+          ? this.props.t('runtimeUi.draft.exists', { id })
+          : this.props.t('runtimeUi.draft.copyFailed', { detail: translateBackendMessage(error?.message || error, this.props.t) }),
       );
       // 抛回去让确认框留在原地，用户改个名字就能重试，不用从头再点一遍。
       throw error;
@@ -4140,7 +4126,7 @@ class Home extends React.Component {
   wsSendObj = (obj) => {
     if ((obj?.flag === true && !canUseLicenseCapability(this.state.licenseAccess, 'canAcquire'))
       || (obj?.download && !canUseLicenseCapability(this.state.licenseAccess, 'canExport'))) {
-      message.warning('当前授权仅允许查看和分析历史数据，不能采集或导出。');
+      message.warning(this.props.t('runtimeUi.acquireDenied'));
       return Promise.resolve([]);
     }
     if (obj?.file) obj = { ...obj, file: selectedNativeSystemId(obj.file) };
@@ -4178,11 +4164,11 @@ class Home extends React.Component {
     const nativeSwitch = Boolean(getNativeSystemTemplate(e) || getNativeSystemTemplate(this.state.systemId));
     if (nativeSwitch) {
       try { await commandClient.execute('sensor.switch', { sensorType: e }); }
-      catch (error) { message.error(error.message || '系统切换失败，请停止采集并检查授权。'); return false; }
+      catch (error) { message.error(translateBackendMessage(error.message, this.props.t) || this.props.t('runtimeUi.switchFailed')); return false; }
     }
     const nextMatrixName = normalizeDisplayMatrixName(e);
     const nextMode = getDefaultModeForMatrix(nextMatrixName, this.state.numMatrixFlag);
-    const configObj = getConfig({ sensorType: nextMatrixName, mode: nextMode })
+    const configObj = getConfig({ sensorType: nextMatrixName, systemId: e, mode: nextMode })
     const wasLocal = this.state.local;
     localStorage.setItem('file', e);
 
@@ -4704,12 +4690,12 @@ class Home extends React.Component {
       this.title.current?.closePortalPanelsForScene?.();
       this.setState({ portalAlgorithmMarketOpen: false, displaySystemBuilderOpen: false, selectFlag: false,
         ...(this.state.numMatrixFlag !== 'normal' ? { numMatrixFlag: 'normal',
-          ...getConfig({ sensorType: this.state.matrixName, mode: 'normal' }) } : {}) });
+          ...getConfig({ sensorType: this.state.matrixName, systemId: this.state.systemId, mode: 'normal' }) } : {}) });
     } else {
       const previousMode = this._portalPreviousMode;
       this._portalPreviousMode = null;
       if (previousMode && previousMode !== this.state.numMatrixFlag) this.setState({ numMatrixFlag: previousMode,
-        ...getConfig({ sensorType: this.state.matrixName, mode: previousMode }) });
+        ...getConfig({ sensorType: this.state.matrixName, systemId: this.state.systemId, mode: previousMode }) });
     }
   };
 
@@ -5181,7 +5167,7 @@ class Home extends React.Component {
                   <div
                     className="setIcon marginB10"
                     onClick={() => {
-                      if (!canUseLicenseCapability(this.state.licenseAccess, 'canExport')) { message.warning('当前授权不允许导出数据或分析结果。'); return; }
+                      if (!canUseLicenseCapability(this.state.licenseAccess, 'canExport')) { message.warning(this.props.t('runtimeUi.exportDenied')); return; }
                       const that = this;
 
                       this.track.current?.loadImg({
@@ -5332,6 +5318,7 @@ class Home extends React.Component {
             valuel1={this.state.valuel1}
             valuej1={this.state.valuej1}
             sizeValue={this.state.sizeValue}
+            speedValue={this.state.speedValue}
             valuelInit1={this.state.valuelInit1}
             compen={this.state.compen}
             ymax={this.state.ymax}
@@ -5496,7 +5483,7 @@ class Home extends React.Component {
               // `carCol`（那支走 10×9 / max 300 / radius 100）。那条判断连同
               // `carValuej` 的存储读取一起折进了 buildBlobHeatmapParams。
               params={buildBlobHeatmapParams(this.state.matrixName)}
-              label="斑点热力"
+              label={t('runtimeUi.renderer.blob')}
               rendererRef={this.com}
               // ⚠️ **刻意不传 `data` / `local` / sceneChartProps** —— 原件从不碰
               // `props.data`，这条展示形式下侧栏读数与两条曲线本来就是不动的。渲染器
@@ -5514,7 +5501,7 @@ class Home extends React.Component {
                   // matrixName 只会是手套四型 / robot1 / footVideo，所以恒定
                   // 走 32×32 那条预设；`carCol` 那支由 num3dCarCol 预设承接。
                   params={NUM_MATRIX_PRESETS.num3dDefault}
-                  label="3D 数字"
+                  label={t('data3D')}
                   rendererRef={this.com}
                   colormap={canvasColormap}
                   data={gloveRendererData}
@@ -5545,7 +5532,7 @@ class Home extends React.Component {
                     // 原来是 `<Num2D matrixName={...}>`。matrixName 的三处分支
                     // 折进了 buildWebglNumParams，渲染器不再认识那串字符串。
                     params={buildWebglNumParams(this.state.matrixName)}
-                    label="数字"
+                    label={t('runtimeUi.renderer.numbers')}
                     rendererRef={this.com}
                     colormap={canvasColormap}
                     data={this.data}
@@ -5562,7 +5549,7 @@ class Home extends React.Component {
                       // matrixName 分支，写死的 64×64 / 1024² / radius 24 / 边缘清零
                       // 窗口 [6,58] / 左右镜像 / ×1.8 全部收进了 bed4096 这条预设。
                       params={WEBGL_HEATMAP_PRESETS.bed4096}
-                      label="热力图"
+                      label={t('heatmap')}
                       rendererRef={this.com}
                       data={this.data}
                       local={this.state.local}
@@ -5576,7 +5563,7 @@ class Home extends React.Component {
                       // 原来是 `<Fast256 size={1}>`：size 覆盖预设里的 4，
                       // 网格由 `64 / size` 推出 64×64 = 4096 格。
                       params={{ ...NUM_MATRIX_PRESETS.fast256, size: 1 }}
-                      label="数字矩阵"
+                      label={t('runtimeUi.renderer.matrix')}
                       rendererRef={this.com}
                       data={this.data}
                       local={this.state.local}
@@ -5626,7 +5613,7 @@ class Home extends React.Component {
                             height: this.state.smallBedMatrixHeight,
                           },
                         )}
-                        label={runtimeDisplayDefinition?.label || "数字矩阵"}
+                        label={runtimeDisplayDefinition?.label || t('runtimeUi.renderer.matrix')}
                         rendererRef={this.com}
                         // 这两项走 props 而不是 params：配色是用户在画布配置器里的
                         // 实时选择，坐标表是数据。两者都在 contract.js 的
@@ -5661,7 +5648,7 @@ class Home extends React.Component {
                       // 原来是 `<Num2DOriginal matrixName={...}>`，12+ 处
                       // matrixName 分支折进了 buildWebglRawParams。
                       params={buildWebglRawParams(this.state.matrixName)}
-                      label="原始数据"
+                      label={t('rawData')}
                       rendererRef={this.com}
                       colormap={canvasColormap}
                       data={this.data}
@@ -5781,7 +5768,7 @@ class Home extends React.Component {
                         <RendererHost
                           rendererId="webglHeatmap"
                           params={WEBGL_HEATMAP_PRESETS.bed4096}
-                          label="热力图"
+                          label={t('heatmap')}
                           rendererRef={this.com}
                           data={this.data}
                           local={this.state.local}
@@ -5806,7 +5793,7 @@ class Home extends React.Component {
                         <RendererHost
                           rendererId="numMatrix"
                           params={NUM_MATRIX_SCENES[this.state.matrixName]}
-                          label="数字矩阵"
+                          label={t('runtimeUi.renderer.matrix')}
                           rendererRef={this.com}
                           data={this.data}
                           local={this.state.local}
@@ -5830,7 +5817,7 @@ class Home extends React.Component {
                         <RendererHost
                           rendererId="pointGrid"
                           params={POINT_GRID_PRESETS.carCol}
-                          label="点阵热力（3D）"
+                          label={t('runtimeUi.renderer.points')}
                           rendererRef={this.com}
                           data={this.data}
                           local={this.state.local}
@@ -5845,7 +5832,7 @@ class Home extends React.Component {
                           // 这个渲染点原先连 matrixName 都没传，NumWs 里
                           // `props.matrixName == 'carCol'` 恒为假 —— 32×32。
                           params={NUM_MATRIX_PRESETS.num3dDefault}
-                          label="3D 数字"
+                          label={t('data3D')}
                           rendererRef={this.com}
                           colormap={canvasColormap}
                           data={this.data}
@@ -5891,7 +5878,7 @@ class Home extends React.Component {
                         <RendererHost
                           rendererId="handPoints"
                           params={HAND_POINTS_PRESETS.hand0205}
-                          label="手部点云"
+                          label={t('runtimeUi.renderer.hand')}
                           rendererRef={this.com}
                           data={this.data}
                           local={this.state.local}
@@ -5906,7 +5893,7 @@ class Home extends React.Component {
                           // 与上一条同一个渲染器，只换预设：147 那份的净差就是
                           // interp 2→4、order 4→6、点表、以及另外几个尺寸参数。
                           params={HAND_POINTS_PRESETS.hand0205_147}
-                          label="手部点云（147）"
+                          label={t('runtimeUi.renderer.hand147')}
                           rendererRef={this.com}
                           data={this.data}
                           local={this.state.local}
@@ -6108,7 +6095,7 @@ class Home extends React.Component {
                         <RendererHost
                           rendererId="pointGrid"
                           params={POINT_GRID_PRESETS.matCol}
-                          label="点阵热力（3D）"
+                          label={t('runtimeUi.renderer.points')}
                           rendererRef={this.com}
                           data={this.data}
                           local={this.state.local}
@@ -6121,7 +6108,7 @@ class Home extends React.Component {
                         <RendererHost
                           rendererId="pointGrid"
                           params={POINT_GRID_PRESETS.matCol}
-                          label="点阵热力（3D）"
+                          label={t('runtimeUi.renderer.points')}
                           rendererRef={this.com}
                           data={this.data}
                           local={this.state.local}

@@ -1,6 +1,6 @@
 # 架构文档
 
-> 最后更新于：2026-10-27
+> 最后更新于：2026-10-28
 > 阅读定位：本文件保留架构演进、历史说明和维护台账。当前实现从 [开发者手册](docs/developer-guide.md) 开始，文档状态见 [文档导航](docs/README.md)，不要将不同日期的记录拼成当前系统行为。
 > 当前增量：2026-10-16 已在源码接入 Agent 默认本机 CPU 分类训练，具体流程与验收边界见文末“Agent 默认 CPU 分类训练与便携模型”。此前“依赖准备”记录保留当时状态，不代表当前能力。本轮另补齐生成矩阵的显示方向和工具桥，见文末“生成矩阵显示方向与共用工具”。
 
@@ -7511,3 +7511,52 @@ Home WS open 只同步目录与采集状态，不再发关闭串口命令。秒�
 | --- | --- | --- |
 | 2026-10-27 | 本地交付 | Windows x64 完整 NSIS 1.1.40 已生成，版本说明和校验文件一并放入下载目录。 |
 | 2026-10-27 | 验证 | Full 14 项、实际生产页面、最终产物 18 项和 NSIS 全部 2806 文件一致性通过；未执行本机安装及真机串口验收。 |
+
+
+## 2026-10-28：手部初始阈值与各系统调节持久化
+
+手部旧 sitValue 只在滑块变化时过滤当前数组，后续 sitData 仍读取未传入的 valuelInit，下一帧就越过阈值；truthy 检查又忽略 0。现在 handPressureFilter 对收到的 ADC 求和，再应用逐点过滤；总和严格低于初始阈值时显示压力归零，等于或高于阈值正常显示。hand.jsx 保存原始末帧并持续使用当前设置，调低阈值或关闭过滤即可立即重算，不必等新帧；抑制期间清零高度平滑缓存，避免残留凸起。底面点阵仍保留，原始帧、串口频率、采集和导出数据不变。
+
+Title 原先按 smallBed__normal 等真实型号保存，Home/Title 又分别归一到 bed 读取，造成回到系统后丢失参数。新 services/tuningConfig 统一 Home 和 Title 的读写，以实际 systemId + 显示模式为键，从旧通用型号缓存逐层回退；合法零值保留，坏 JSON 不阻止进入。显式参数标记阻止历史默认值迁移反复覆盖用户选值，点大小和速度接入受控状态。常用原生点图初始挂载补发参数，其余场景只重放实际保存的字段，避免拿其他模型默认值覆盖专用渲染器。
+
+定向回归执行真实 hand.jsx 方法与真实 Title 控件事件；后端 onbedReturnedWiring 的 VM 增加真实 tuningConfig bundle，保留实际 Home 接线测试。浏览器使用真实 Home、Title、Three.js GPU 缓冲和规范模拟帧：阈值 5000 时 ADC 1024 压力/高度为零，ADC 5120 恢复；降为 0 无新帧也恢复。小床另设 500 后回到手部仍为 5000，刷新和重进同样保留。未连接真实串口。
+
+## 2026-10-28：常用界面国际化补齐与剩余范围
+
+检查覆盖 client/src 的静态 JSX 和翻译调用，确认原目录中的静态 t 键没有丢失，主要问题是新增界面直接写中文、未进入资源目录。resources 增加 runtimeUiTranslations、monitorAuditTranslations、agentAuditTranslations、appAuditTranslations 四个模块，每个新叶子同时维护 zh/en/ja；日语优先用显式 ja，旧目录仍兼容 ja.js。补齐原安装包更新提示的 11 条日文，catalogIntegrity.test 检查全目录日语来源、英文无汉字及插值变量一致。
+
+常用修复范围为系统选择/监测控制/回放/快捷工具、Title 调节与提示、Aside 图表标签、全身/背心部位控制和侧栏标题；Home 外观保存外壳与采集/授权回执、Agent 设置/同步/聊天/历史/任务/成果/请求卡、应用设置/版本与旧密钥页也已接入。App 最外层 ConfigProvider 跟随语言，为监测页以外的 Antd 控件提供中英日 locale。日期按应用语言格式化。Agent 固定反馈保存 key/values 后在渲染时翻译，切换语言会更新当前提示；用户系统名、采集标签、模型/聊天正文、附件名、未知服务器错误及数据字段保留原文，不改上传、授权或设备操作。
+
+已知剩余清单（本轮审计发现，尚未全部改造）：
+
+- 高级显示系统构建/编辑：DisplaySystemBuilder、NativeSystemEditor、CompanySystemRevisions、DisplayCanvasConfigurator 及 displayDraftState 等详细文案。
+- Agent 高级选数和分析报告：AgentAlgorithmData、AgentHistoryData、AgentTrainingReport、AgentHistoryReport，以及 agentState 的详细错误文案。
+- 工具内部：PortalScreenRuler、PortalSelectionTools、PortalAlgorithmMarket、FormulaChartPanel、LicensePortalWidgets 等部分表单或解释文案。
+- 服务器传回的未知错误/诊断/发布说明仍按原文显示；此次只对已知采集切换/收尾错误作确定映射，不任意改写远端内容。
+
+实际浏览器分别检查监测页 en/ja 切换、语言刷新保存、英文 1280×720 控件布局与导航不重叠，以及 Agent 中文已显示反馈切为英文/日文；用户正文保留原文由实际组件测试覆盖。最终 Full 9/9 通过：Electron ABI 后端 118 文件，客户端 129 文件/1157 项，前端 SDK 36 文件/553 项，lint、临时生产构建、双 SDK smoke、性能基线和浏览器脚本语法全部通过。日志为系统 TEMP 的 shroom-tuning-i18n-full-final-771acba134684d1caaf81a6abc95cc1d.log；监测浏览器证据为 shroom-hand-tuning-O6UmHs，Agent 语言切换证据为 shroom-agent-i18n-xfDLIa。本轮新增 682 组中英日界面词条。原来断言源码中文标签的全身设置测试改为核对对应翻译键，实际三语组件测试另行验证文案。
+
+### 维护记录与项目进度（追加）
+
+| 日期 | 类型 | 说明 |
+| --- | --- | --- |
+| 2026-10-28 | 修复缺陷 | 手部初始阈值逐帧生效、降低阈值恢复末帧；各系统/模式统一恢复已保存调参。 |
+| 2026-10-28 | 国际化 | 补齐常用监测、Agent 和应用设置中英日文案，校验目录覆盖与插值，并记录高级编辑/报表等剩余遗漏。 |
+| 2026-10-28 | 验证边界 | 合成规范帧和真实页面验证，不代表真机串口验收；未提交、打包或发布本轮源码。 |
+| 2026-10-28 | 最终验证 | Full 9 项与真实浏览器语言/阈值/持久化回归通过；未覆盖的高级界面已列明，未打包或发布。 |
+
+
+## 2026-10-28：小床数据纯点图隐藏关闭按钮与鼠标
+
+按用户最新要求，smallBedNoAlg 的“仅显示3D点图”不再保留右上关闭按钮。PortalMonitoring.css 在纯点图状态隐藏整组导航，页面光标由 body:has(.is-scene-only) 条件规则统一隐藏，覆盖画布控制器的 cursor 设置；退出该状态或卸载后自然恢复，不改系统鼠标设置。
+
+PortalMonitoringLayer 进入时将键盘焦点移至可程序聚焦的监测容器，Tab/Shift+Tab 留在容器，避免操作隐藏的关闭按钮或背后系统列表；Esc继续恢复原显示模式、工具、叉叉、光标和纯点图入口焦点。三语入口提示同步说明“隐藏所有按钮和鼠标，Esc恢复”。不重建现有3D画布，不改数据与采集处理。
+
+实际浏览器 small-bed-scene-only.mjs 已验证桌面与375px窄屏没有可见按钮、画布及右上区域cursor为none，移动鼠标保持隐藏；Esc恢复按钮、原始/3D模式及焦点，Tab双向不会落入隐藏控件，返回后其他系统鼠标正常。已有画布实例保持一致，合成压力帧仍改变真实3D像素；证据位于系统TEMP的 shroom-small-bed-scene-only-cBg7Up，未连接实际硬件。本次仅界面状态，按Standard验证，不重复后端/SDK Full或发布打包。
+
+### 维护记录与项目进度（追加）
+
+| 日期 | 类型 | 说明 |
+| --- | --- | --- |
+| 2026-10-28 | 界面调整 | 小床数据纯点图隐藏叉叉与页面鼠标，Esc恢复，键盘焦点不会进入隐藏控件。 |
+| 2026-10-28 | 验证 | Standard 3/3通过（lint、客户端129文件/1157项、脚本语法）及桌面/窄屏真实浏览器回归通过；日志为系统TEMP的 shroom-scene-only-standard-e47736ca154e4d2bb38379801f5046f3.log。 |

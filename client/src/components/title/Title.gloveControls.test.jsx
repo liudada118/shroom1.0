@@ -57,7 +57,7 @@ describe('触觉手套显示面板的校准与左右手控制', () => {
 
   it.each(['hand0205', 'hand0205Double', 'handGlove115200', 'handGloveFullPacket'])('%s 可选择两个新增手套展示模式', (matrixName) => {
     const title = createTitle({ matrixName });
-    const display = select(displayEntries(title), '显示方式');
+    const display = select(displayEntries(title), 'monitorUi.displayMode');
     expect(display.props.options).toContainEqual({ value: 'gloveMotion', label: 'gloveMotion' });
     expect(display.props.options).toContainEqual({ value: 'gloveTerrain', label: 'gloveTerrain' });
   });
@@ -157,7 +157,7 @@ describe('触觉手套显示面板的校准与左右手控制', () => {
     select(displayEntries(title), 'calibrationHand').props.onChange('left');
     expect(setCalibration).toHaveBeenLastCalledWith({ active: true, side: 'left', pose: 1 });
     expect(title.props.com.current.changeModal).not.toHaveBeenCalled();
-    select(displayEntries(title), '显示方式').props.onChange('gloveTerrain');
+    select(displayEntries(title), 'monitorUi.displayMode').props.onChange('gloveTerrain');
     expect(setCalibration).toHaveBeenLastCalledWith({ active: false });
     expect(title.props.changeStateData).toHaveBeenCalledWith({ calibration: false });
   });
@@ -198,7 +198,7 @@ describe('触觉手套显示面板的校准与左右手控制', () => {
   it('专用工具不重复承载手套控件，提示用户使用右侧常驻入口', () => {
     const title = createTitle();
     const tree = entries(title.render());
-    const dialog = tree.find((node) => node.type === PortalControlDialog && node.props.title === '系统专用工具');
+    const dialog = tree.find((node) => node.type === PortalControlDialog && node.props.title === 'monitorUi.systemTools');
     const special = entries(dialog);
     expect(button(special, 'calib')).toBeUndefined();
     expect(select(special, 'displayHand')).toBeUndefined();

@@ -1,4 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import i18n from '../../i18n';
+
+vi.mock('react-i18next', async importOriginal => ({
+  ...await importOriginal(), useTranslation: () => ({ t: i18n.t.bind(i18n) }),
+}));
 
 const hook = vi.hoisted(() => ({ dismissed: '' }));
 vi.mock('react', async importOriginal => {
@@ -14,7 +19,7 @@ function collectionAlert(summary) {
 }
 
 describe('采集终态提示', () => {
-  beforeEach(() => { hook.dismissed = ''; });
+  beforeEach(() => { hook.dismissed = ''; i18n.changeLanguage('zh'); });
 
   it('已保存的中断回执可以关闭，同一回执重复广播不会重新出现，下一条仍可展示', () => {
     const receipt = { id: 'capture-a', phase: 'interrupted', result: 'saved', channels: {} };
@@ -33,5 +38,17 @@ describe('采集终态提示', () => {
     expect(alert.props.type).toBe('warning');
     expect(alert.props.message).toContain('仅部分保存');
     expect(alert.props.message).not.toContain('保存完成');
+  });
+
+  it('切换语言重新描述真实计数，同时保留终态关闭状态', () => {
+    const receipt = { id: 'language-test', phase: 'interrupted', result: 'saved', channels: { sit: { committed: 12, pending: 0 } } };
+    i18n.changeLanguage('en');
+    const english = collectionAlert(receipt);
+    expect(english.props.message).toContain('12 frames committed');
+    expect(english.props.message).not.toMatch(/\p{Script=Han}/u);
+    i18n.changeLanguage('ja');
+    expect(collectionAlert(receipt).props.message).toContain('12 フレーム保存済み');
+    english.props.onClose();
+    expect(collectionAlert(receipt)).toBeNull();
   });
 });

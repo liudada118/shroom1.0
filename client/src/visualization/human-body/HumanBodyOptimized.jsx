@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next';
+import i18n from '../../i18n';
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
@@ -64,7 +66,7 @@ const loadHumanBodyModel = async (loader, urls = MODEL_URLS) => {
       console.warn(`[HumanBodyOptimized] 模型加载失败，尝试回退：${url}`, error);
     }
   }
-  throw lastError || new Error("人体模型加载失败");
+  throw lastError || new Error(i18n.t('monitorUi.modelLoadFailed'));
 };
 
 const getBrowserStorage = () => {
@@ -85,23 +87,32 @@ const getProfileStorage = (profile) => {
   };
 };
 
+/** Translate only built-in anatomical labels; custom profile names remain unchanged. */
+function translateBodyLabel(label, t = i18n.t) {
+  const keys = { '全身': 'monitorUi.wholeBody', '前胸': 'bodyParts.frontChest', '后背': 'bodyParts.rearBack',
+    '左臂': 'bodyParts.leftArm', '左手臂': 'bodyParts.leftArm', '右臂': 'bodyParts.rightArm', '右手臂': 'bodyParts.rightArm',
+    '左肩': 'bodyParts.leftShoulder', '右肩': 'bodyParts.rightShoulder', '右前腿': 'bodyParts.rightFrontLeg',
+    '左前腿': 'bodyParts.leftFrontLeg', '左后腿': 'bodyParts.leftBackLeg', '右后腿': 'bodyParts.rightBackLeg' };
+  return keys[label] ? t(keys[label]) : label;
+}
+
 const BG_PRESETS = ["#afacac", "#10152b", "#0f2027", "#000000"];
 const MODEL_PRESETS = ["#718096", "#4a5568", "#d2d6dc", "#4fd1c5"];
 const VISIBLE_RENDER_MODES = [
-  ["heatmap", "热力"],
-  ["crystal", "水晶"],
+  ["heatmap", "monitorUi.heat"],
+  ["crystal", "monitorUi.crystal"],
 ];
 const HEAT_COMPUTATION_MODES = [
-  ["exact", "高效"],
-  ["nearest12", "正常"],
-  ["nearest6", "节能"],
-  ["nearest3", "超节能"],
+  ["exact", "monitorUi.exact"],
+  ["nearest12", "monitorUi.normal"],
+  ["nearest6", "monitorUi.saving"],
+  ["nearest3", "monitorUi.maximumSaving"],
 ];
 const HEAT_COMPUTATION_MODE_TITLES = {
-  exact: "每个像素计算全部传感点，保留最高热力精度",
-  nearest12: "每个模型顶点计算最近12个传感点，兼顾效果和性能",
-  nearest6: "每个模型顶点计算最近6个传感点，进一步降低处理负载",
-  nearest3: "每个模型顶点计算最近3个传感点，最大限度降低处理负载",
+  exact: "monitorUi.exactHint",
+  nearest12: "monitorUi.nearest12Hint",
+  nearest6: "monitorUi.nearest6Hint",
+  nearest3: "monitorUi.nearest3Hint",
 };
 const VERTEX_HEAT_NEIGHBOR_LIMITS = {
   nearest12: 12,
@@ -112,13 +123,13 @@ const isVertexHeatComputationMode = (value) => Boolean(VERTEX_HEAT_NEIGHBOR_LIMI
 const getVertexHeatNeighborLimit = (value) => VERTEX_HEAT_NEIGHBOR_LIMITS[value] || 12;
 
 const REGION_VIEWS = {
-  overview: { label: "全身", position: [0, 4, 12], target: [0, 4, 0] },
-  chest: { label: "前胸", position: [0, 5.5, 6], target: [0, 5.5, 0] },
-  back: { label: "后背", position: [0, 5.5, -6], target: [0, 5.5, 0] },
-  leftArm: { label: "左臂", position: [5, 5.5, 4], target: [2.5, 5.5, 0] },
-  rightArm: { label: "右臂", position: [-5, 5.5, 4], target: [-2.5, 5.5, 0] },
-  frontLegs: { label: "前腿", position: [0, 2, 6], target: [0, 2.5, 0] },
-  backLegs: { label: "后腿", position: [0, 2, -6], target: [0, 2.5, 0] },
+  overview: { label: "全身", labelKey: "monitorUi.wholeBody", position: [0, 4, 12], target: [0, 4, 0] },
+  chest: { label: "前胸", labelKey: "monitorUi.chest", position: [0, 5.5, 6], target: [0, 5.5, 0] },
+  back: { label: "后背", labelKey: "monitorUi.back", position: [0, 5.5, -6], target: [0, 5.5, 0] },
+  leftArm: { label: "左臂", labelKey: "monitorUi.leftArm", position: [5, 5.5, 4], target: [2.5, 5.5, 0] },
+  rightArm: { label: "右臂", labelKey: "monitorUi.rightArm", position: [-5, 5.5, 4], target: [-2.5, 5.5, 0] },
+  frontLegs: { label: "前腿", labelKey: "monitorUi.frontLegs", position: [0, 2, 6], target: [0, 2.5, 0] },
+  backLegs: { label: "后腿", labelKey: "monitorUi.backLegs", position: [0, 2, -6], target: [0, 2.5, 0] },
 };
 
 const vertexShader = `
@@ -469,6 +480,7 @@ function drawNumberCell(ctx, value, x, y, size) {
 }
 
 const RegionNumberPanel = React.forwardRef(({ activeRegion, sensorProfile }, ref) => {
+  const { t } = useTranslation();
   const canvasRef = useRef(null);
   const frameRef = useRef(new Array(1024).fill(0));
 
@@ -542,7 +554,7 @@ const RegionNumberPanel = React.forwardRef(({ activeRegion, sensorProfile }, ref
       ctx.font = "11px Arial";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(`${(sensorProfile?.partLabels || HUMAN_BODY_NUMBER_PART_LABELS)[part.key]} ${part.width}×${part.height}`, padding + x + gridWidth / 2, padding + titleHeight / 2);
+      ctx.fillText(`${translateBodyLabel((sensorProfile?.partLabels || HUMAN_BODY_NUMBER_PART_LABELS)[part.key], t)} ${part.width}×${part.height}`, padding + x + gridWidth / 2, padding + titleHeight / 2);
       const values = getOrientedPartValues(frameRef.current, dataPart, sensorProfile);
       values.forEach((rowValues, row) => {
         rowValues.forEach((value, col) => {
@@ -550,7 +562,7 @@ const RegionNumberPanel = React.forwardRef(({ activeRegion, sensorProfile }, ref
         });
       });
     });
-  }, [activeRegion, sensorProfile]);
+  }, [activeRegion, sensorProfile, t]);
 
   useImperativeHandle(ref, () => ({
     updateData(nextFrame) {
@@ -566,7 +578,7 @@ const RegionNumberPanel = React.forwardRef(({ activeRegion, sensorProfile }, ref
   return (
     <div style={{ ...panelStyle, right: 78, bottom: 14, padding: 9, maxWidth: "calc(100vw - 500px)", overflow: "auto" }}>
       <div style={{ fontSize: "11px", color: "#8193a5", margin: "0 2px 6px" }}>
-        2D 数字 · {(sensorProfile?.regionViews || REGION_VIEWS)[activeRegion]?.label || "全身"}
+        {i18n.t('monitorUi.numberView', { name: translateBodyLabel((sensorProfile?.regionViews || REGION_VIEWS)[activeRegion]?.label) || i18n.t('monitorUi.wholeBody') })}
       </div>
       <canvas ref={canvasRef} style={{ display: "block" }} />
     </div>
@@ -636,7 +648,7 @@ const HoverDataPanel = React.forwardRef(({ sensorsRef }, ref) => {
       aria-hidden={!panel.visible}
     >
       <div style={{ fontSize: "11px", fontWeight: 700, lineHeight: "16px", color: "#b9fbe4", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-        {sensor?.part || "局部数据"}
+        {translateBodyLabel(sensor?.part) || i18n.t('monitorUi.localData')}
         {sensor ? ` · R${sensor.row + 1} C${sensor.col + 1}` : ""}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "4px", marginTop: "8px" }}>
@@ -670,6 +682,7 @@ const HoverDataPanel = React.forwardRef(({ sensorsRef }, ref) => {
 HoverDataPanel.displayName = "HoverDataPanel";
 
 const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
+  useTranslation();
   const sensorProfile = props.sensorProfile;
   const regionViews = sensorProfile?.regionViews || REGION_VIEWS;
   const initialSettingsRef = useRef(null);
@@ -1350,7 +1363,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
       .catch((loadError) => {
         if (disposed) return;
         canvas.dataset.modelState = 'error';
-        setError(`人体模型或点位加载失败：${loadError?.message || "未知错误"}`);
+        setError(i18n.t('monitorUi.bodyLoadFailed', { error: loadError?.message || i18n.t('monitorUi.unknownError') }));
         setLoading(false);
       });
 
@@ -1577,11 +1590,11 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
       <div data-human-body-settings="true" className="human-body-render-settings"
         style={props.portalEmbedded && !sensorProfile ? undefined : { ...panelStyle, top: 72, left: "max(250px, 19vw)", width: 222 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-          <div style={{ fontSize: "14px", fontWeight: 700, letterSpacing: "0.08em" }}>{sensorProfile?.title || "人体全身优化"}</div>
+          <div style={{ fontSize: "14px", fontWeight: 700, letterSpacing: "0.08em" }}>{sensorProfile?.key === 'pressureVest' ? i18n.t('sensorPressureVest') : sensorProfile?.title || i18n.t('monitorUi.bodyTitle')}</div>
           {(!props.portalEmbedded || sensorProfile) && <button
             type="button"
             aria-expanded={!settingsCollapsed}
-            aria-label={settingsCollapsed ? "展开渲染设置" : "折叠渲染设置"}
+            aria-label={settingsCollapsed ? i18n.t('monitorUi.expandRendering') : i18n.t('monitorUi.collapseRendering')}
             onClick={() => setSettingsCollapsed((value) => !value)}
             style={{ ...buttonStyle(false), minWidth: 30, padding: "3px 8px" }}
           >
@@ -1590,46 +1603,46 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
         </div>
         {((props.portalEmbedded && !sensorProfile) || !settingsCollapsed) && (
           <>
-            <div style={{ color: "#5e748a", fontSize: "10px", marginTop: 3 }}>{sensorCount} 点位</div>
+            <div style={{ color: "#5e748a", fontSize: "10px", marginTop: 3 }}>{i18n.t('monitorUi.sensorCount', { count: sensorCount })}</div>
             <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 5 }}>
               {VISIBLE_RENDER_MODES.map(([value, label]) => (
-                <button key={value} onClick={() => setMode(value)} style={buttonStyle(mode === value)}>{label}</button>
+                <button key={value} onClick={() => setMode(value)} style={buttonStyle(mode === value)}>{i18n.t(label)}</button>
               ))}
             </div>
 
-            <label style={{ display: "block", marginTop: 11, fontSize: "11px", color: "#8193a5" }}>热力计算</label>
+            <label style={{ display: "block", marginTop: 11, fontSize: "11px", color: "#8193a5" }}>{i18n.t('monitorUi.heatComputation')}</label>
             <div style={{ marginTop: 5, display: "flex", gap: 5 }}>
               {HEAT_COMPUTATION_MODES.map(([value, label]) => (
                 <button
                   key={value}
                   onClick={() => setHeatComputationMode(value)}
                   style={buttonStyle(heatComputationMode === value)}
-                  title={HEAT_COMPUTATION_MODE_TITLES[value]}
+                  title={i18n.t(HEAT_COMPUTATION_MODE_TITLES[value])}
                 >
-                  {label}
+                  {i18n.t(label)}
                 </button>
               ))}
             </div>
 
-            <label style={{ display: "block", marginTop: 11, fontSize: "11px", color: "#8193a5" }}>扩散半径 {radius.toFixed(2)}</label>
-            <input aria-label="扩散半径" type="range" min="5" max="13" step="1" value={Math.round(radius * 100)} onChange={(event) => setRadius(clampHumanBodyRadius(Number(event.target.value) / 100))} style={{ width: "100%", accentColor: accentColor }} />
-            <label style={{ display: "block", marginTop: 8, fontSize: "11px", color: "#8193a5" }}>热力强度 {intensity.toFixed(1)}</label>
-            <input aria-label="热力强度" type="range" min="5" max="50" value={Math.round(intensity * 10)} onChange={(event) => setIntensity(Number(event.target.value) / 10)} style={{ width: "100%", accentColor: accentColor }} />
+            <label style={{ display: "block", marginTop: 11, fontSize: "11px", color: "#8193a5" }}>{i18n.t('monitorUi.radius')}{radius.toFixed(2)}</label>
+            <input aria-label={i18n.t('monitorUi.radius')} type="range" min="5" max="13" step="1" value={Math.round(radius * 100)} onChange={(event) => setRadius(clampHumanBodyRadius(Number(event.target.value) / 100))} style={{ width: "100%", accentColor: accentColor }} />
+            <label style={{ display: "block", marginTop: 8, fontSize: "11px", color: "#8193a5" }}>{i18n.t('monitorUi.intensity')}{intensity.toFixed(1)}</label>
+            <input aria-label={i18n.t('monitorUi.intensity')} type="range" min="5" max="50" value={Math.round(intensity * 10)} onChange={(event) => setIntensity(Number(event.target.value) / 10)} style={{ width: "100%", accentColor: accentColor }} />
             {mode === "crystal" && (
               <>
-                <label style={{ display: "block", marginTop: 8, fontSize: "11px", color: "#8193a5" }}>基础透明度 {opacity.toFixed(2)}</label>
-                <input aria-label="基础透明度" type="range" min="5" max="80" value={Math.round(opacity * 100)} onChange={(event) => setOpacity(Number(event.target.value) / 100)} style={{ width: "100%", accentColor: accentColor }} />
+                <label style={{ display: "block", marginTop: 8, fontSize: "11px", color: "#8193a5" }}>{i18n.t('monitorUi.opacity')}{opacity.toFixed(2)}</label>
+                <input aria-label={i18n.t('monitorUi.opacity')} type="range" min="5" max="80" value={Math.round(opacity * 100)} onChange={(event) => setOpacity(Number(event.target.value) / 100)} style={{ width: "100%", accentColor: accentColor }} />
               </>
             )}
 
             <div style={{ marginTop: 9, display: "flex", gap: 5 }}>
-              {["经典", "冷色", "暖色", "岩浆"].map((label, index) => (
+              {[i18n.t('monitorUi.classic'), i18n.t('monitorUi.cool'), i18n.t('monitorUi.warm'), i18n.t('monitorUi.magma')].map((label, index) => (
                 <button key={label} onClick={() => setColorScheme(index)} style={buttonStyle(colorScheme === index)}>{label}</button>
               ))}
             </div>
 
-            <ColorRow label="背景" value={bgColor} presets={BG_PRESETS} onChange={setBgColor} />
-            <ColorRow label="模型" value={modelColor} presets={MODEL_PRESETS} onChange={setModelColor} />
+            <ColorRow label={i18n.t('monitorUi.background')} value={bgColor} presets={BG_PRESETS} onChange={setBgColor} />
+            <ColorRow label={i18n.t('monitorUi.model')} value={modelColor} presets={MODEL_PRESETS} onChange={setModelColor} />
           </>
         )}
       </div>
@@ -1647,7 +1660,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
 
       {(loading || error) && (
         <div style={{ position: "absolute", inset: 0, zIndex: 8, display: "flex", alignItems: "center", justifyContent: "center", color: error ? "#ff8b8b" : "#b9cbdc", background: "rgba(2,5,12,0.72)" }}>
-          {error || "正在加载真实人体模型并计算传感器点位…"}
+          {error || i18n.t('monitorUi.loadingBody')}
         </div>
       )}
 
@@ -1657,18 +1670,18 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
 
       <div data-human-body-region-views="true" className={!sensorProfile ? "human-body-region-views" : undefined}
         style={{ ...panelStyle, ...(sensorProfile ? { top: 72, right: 14, width: 126 } : {}) }}>
-        <div style={{ fontSize: "11px", color: "#8193a5", marginBottom: 7 }}>部位视角</div>
+        <div style={{ fontSize: "11px", color: "#8193a5", marginBottom: 7 }}>{i18n.t('monitorUi.regionViews')}</div>
         <div style={{ display: "grid", gridTemplateColumns: sensorProfile ? "1fr 1fr" : "repeat(3, 1fr)", gap: 5 }}>
           {Object.entries(regionViews).map(([key, view]) => (
-            <button key={key} onClick={() => flyTo(key)} style={buttonStyle(activeRegion === key)}>{view.label}</button>
+            <button key={key} onClick={() => flyTo(key)} style={buttonStyle(activeRegion === key)}>{view.labelKey ? i18n.t(view.labelKey) : translateBodyLabel(view.label)}</button>
           ))}
         </div>
         {activeRegion === "overview" && (
           <button onClick={toggleOverviewAutoRotate} style={{ ...buttonStyle(overviewAutoRotate), width: "100%", marginTop: 8 }}>
-            {overviewAutoRotate ? "暂停旋转" : "自动旋转"}
+            {overviewAutoRotate ? i18n.t('monitorUi.pauseRotation') : i18n.t('monitorUi.autoRotation')}
           </button>
         )}
-        <button onClick={resetView} style={{ ...buttonStyle(false), width: "100%", marginTop: 8 }}>重置视角</button>
+        <button onClick={resetView} style={{ ...buttonStyle(false), width: "100%", marginTop: 8 }}>{i18n.t('monitorUi.resetBodyView')}</button>
       </div>
 
       {sensorProfile && <RegionNumberPanel ref={numberPanelRef} activeRegion={activeRegion} sensorProfile={sensorProfile} />}

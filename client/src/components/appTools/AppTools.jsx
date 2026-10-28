@@ -106,7 +106,7 @@ export default function AppTools() {
   }, [collapse, containsTool]);
 
   return <div ref={rootRef} className={`shroom-app-tools${expanded ? ' is-expanded' : ''}`}
-    role="group" aria-label="应用工具" data-expanded={expanded}>
+    role="group" aria-label={t('appTools.label')} data-expanded={expanded}>
     <div className="shroom-app-status-slot" ref={setStatusContainer} />
     <button ref={triggerRef} type="button" className="shroom-app-tool shroom-app-tools-toggle"
       aria-expanded={expanded} aria-controls="shroom-app-tools-banner"

@@ -1,3 +1,4 @@
+import i18n from '../../i18n';
 import React, { useEffect, useRef, useState } from 'react';
 import { Tooltip } from 'antd';
 import { CheckOutlined, CloseOutlined, ToolOutlined } from '@ant-design/icons';
@@ -12,8 +13,8 @@ const TOOL_FEATURES = {
 };
 
 export const PORTAL_TOOL_CATEGORIES = [
-  { id: 'view', label: '视角调节' }, { id: 'analysis', label: '数据分析' },
-  { id: 'processing', label: '数据处理' }, { id: 'settings', label: '系统设置' },
+  { id: 'view', labelKey: 'monitorUi.viewTools' }, { id: 'analysis', labelKey: 'monitorUi.analysisTools' },
+  { id: 'processing', labelKey: 'monitorUi.processingTools' }, { id: 'settings', labelKey: 'monitorUi.systemSettings' },
 ];
 
 /** 管理非模态工具箱焦点；只处理栏内 Escape，关闭后不抢其他弹窗焦点。 */
@@ -54,7 +55,7 @@ export function PortalUtilityItem({ item, hintOpen, onHintOpenChange }) {
     <span className="portal-utility-card-icon" aria-hidden="true">{item.icon || <ToolOutlined />}</span>
     <span className="portal-utility-card-content"><strong>{item.label}</strong>
       {(item.disabled || item.active) && <span className="portal-utility-card-status">
-        {item.disabled ? '暂不可用' : <><CheckOutlined aria-hidden="true" />已启用</>}
+        {item.disabled ? i18n.t('monitorUi.unavailable') : <><CheckOutlined aria-hidden="true" />{i18n.t('monitorUi.enabled')}</>}
       </span>}
     </span>
   </button>;
@@ -64,7 +65,7 @@ export function PortalUtilityItem({ item, hintOpen, onHintOpenChange }) {
     classNames={{ root: 'portal-utility-tooltip' }}
     getPopupContainer={(trigger) => trigger.ownerDocument.body}>
     {item.disabled ? <span className="portal-utility-disabled-hint" tabIndex={0} role="group"
-      aria-label={`${item.label}，暂不可用`}>{card}</span> : card}
+      aria-label={i18n.t('monitorUi.unavailableTool', { value0: item.label })}>{card}</span> : card}
   </Tooltip>;
 }
 
@@ -74,7 +75,7 @@ export default function PortalUtilityPanel({ open, onClose, items = [], displayC
   const hintRef = useRef(null);
   const [hintId, setHintId] = useState(null);
   const [category, setCategory] = useState('view');
-  const categories = displayContent ? [...PORTAL_TOOL_CATEGORIES, { id: 'display', label: '显示与语言' }] : PORTAL_TOOL_CATEGORIES;
+  const categories = displayContent ? [...PORTAL_TOOL_CATEGORIES, { id: 'display', label: i18n.t('monitorUi.displayLanguage') }] : PORTAL_TOOL_CATEGORIES;
   const categorized = Boolean(displayContent) || items.some((item) => item.category);
   const visibleItems = categorized ? items.filter((item) => (item.category || 'settings') === category) : items;
   const exposed = useRef(new Set());
@@ -132,19 +133,19 @@ export default function PortalUtilityPanel({ open, onClose, items = [], displayC
   return <aside ref={rootRef} id="portal-utility-panel" className={`portal-utility-panel${categorized ? ' is-categorized' : ''}${open ? ' is-open' : ''}`}
     aria-labelledby="portal-utility-title" aria-hidden={!open} inert={!open}>
     <header className="portal-utility-head">
-      <span className="portal-utility-title"><ToolOutlined aria-hidden="true" /><span><small>WORKSPACE TOOLS</small><strong id="portal-utility-title">实用工具</strong></span></span>
-      <button type="button" aria-label="收起实用工具" onClick={onClose}><CloseOutlined aria-hidden="true" /></button>
+      <span className="portal-utility-title"><ToolOutlined aria-hidden="true" /><span><small>WORKSPACE TOOLS</small><strong id="portal-utility-title">{i18n.t('monitorUi.utilities')}</strong></span></span>
+      <button type="button" aria-label={i18n.t('monitorUi.collapseUtilities')} onClick={onClose}><CloseOutlined aria-hidden="true" /></button>
     </header>
-    {categorized && <div className="portal-utility-tabs" role="tablist" aria-label="工具分类">
+    {categorized && <div className="portal-utility-tabs" role="tablist" aria-label={i18n.t('monitorUi.toolCategories')}>
       {categories.map((entry, index) => <button key={entry.id} type="button" role="tab"
         id={`portal-tool-tab-${entry.id}`} aria-selected={category === entry.id} aria-controls="portal-utility-category"
-        tabIndex={category === entry.id ? 0 : -1} onClick={() => changeCategory(entry.id)} onKeyDown={(event) => navigateCategory(event, index)}>{entry.label}</button>)}
+        tabIndex={category === entry.id ? 0 : -1} onClick={() => changeCategory(entry.id)} onKeyDown={(event) => navigateCategory(event, index)}>{entry.labelKey ? i18n.t(entry.labelKey) : entry.label}</button>)}
     </div>}
     <div className={`portal-utility-grid${category === 'display' ? ' portal-utility-display' : ''}`} id="portal-utility-category" role={categorized ? 'tabpanel' : undefined}
       aria-labelledby={categorized ? `portal-tool-tab-${category}` : undefined}>
       {category === 'display' ? displayContent : visibleItems.length ? visibleItems.map((item) => <PortalUtilityItem key={item.id} item={item}
         hintOpen={open && hintId === item.id} onHintOpenChange={(visible) => changeHint(item.id, visible)} />)
-        : <p className="portal-utility-empty">当前系统没有可用工具。</p>}
+        : <p className="portal-utility-empty">{i18n.t('monitorUi.noTools')}</p>}
     </div>
   </aside>;
 }

@@ -1,10 +1,18 @@
 import japaneseTranslations from './ja';
+import { runtimeUi } from './runtimeUiTranslations';
+import { agentUi } from './agentAuditTranslations';
+import { appUi } from './appAuditTranslations';
+import monitorTranslations from './monitorAuditTranslations';
 
 const text = (zh, en) => ({ zh, en });
 
 // Single source catalog. Keep protocol values, database fields, and CSV keys
 // outside this file; only user-facing copy belongs here.
 export const bilingualConfig = {
+  runtimeUi,
+  agentUi,
+  appUi,
+  ...monitorTranslations,
   appTools: {
     label: text('应用工具', 'App tools'),
     expand: text('展开应用工具', 'Expand app tools'),
@@ -1016,7 +1024,7 @@ const isLocalizedText = (value) => (
 
 const selectLanguage = (value, language, path = []) => {
   if (isLocalizedText(value)) {
-    if (language === 'ja') return japaneseTranslations[path.join('.')]?.ja ?? value.en;
+    if (language === 'ja') return value.ja ?? japaneseTranslations[path.join('.')]?.ja ?? value.en;
     return value[language];
   }
 

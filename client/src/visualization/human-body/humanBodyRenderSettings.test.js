@@ -202,10 +202,10 @@ describe("human body optimized settings UI source contract", () => {
 
   it("offers high-efficiency, normal, energy-saving, and ultra energy-saving heat computation modes", () => {
     expect(source).toContain('const HEAT_COMPUTATION_MODES = [');
-    expect(source).toContain('["exact", "高效"]');
-    expect(source).toContain('["nearest12", "正常"]');
-    expect(source).toContain('["nearest6", "节能"]');
-    expect(source).toContain('["nearest3", "超节能"]');
+    expect(source).toContain('["exact", "monitorUi.exact"]');
+    expect(source).toContain('["nearest12", "monitorUi.normal"]');
+    expect(source).toContain('["nearest6", "monitorUi.saving"]');
+    expect(source).toContain('["nearest3", "monitorUi.maximumSaving"]');
     expect(source).toContain('nearest3: 3');
   });
 

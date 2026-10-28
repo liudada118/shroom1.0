@@ -559,9 +559,9 @@ class Aside extends React.Component {
                     <div className="builtinChartHeading">
                         <h2 className="asideTitle">{definition.name}</h2>
                         <div className="customChartActions">
-                            <Tooltip title={`编辑 ${definition.name} 公式`}>
+                            <Tooltip title={this.props.t('monitorUi.editFormula', { value0: definition.name })}>
                                 <Button
-                                    aria-label={`编辑 ${definition.name} 公式`}
+                                    aria-label={this.props.t('monitorUi.editFormula', { value0: definition.name })}
                                     icon={<EditOutlined />}
                                     onClick={openEditor}
                                     shape="circle"
@@ -570,14 +570,14 @@ class Aside extends React.Component {
                                 />
                             </Tooltip>
                             <Popconfirm
-                                cancelText="取消"
-                                okText="删除"
+                                cancelText={this.props.t('monitorUi.cancel')}
+                                okText={this.props.t('monitorUi.delete')}
                                 onConfirm={() => removeFormulaChart(this.props.matrixName, definition.id)}
-                                title={`删除“${definition.name}”？`}
+                                title={this.props.t('monitorUi.deleteChartQuestion', { value0: definition.name })}
                             >
-                                <Tooltip title="删除图表">
+                                <Tooltip title={this.props.t('monitorUi.deleteChart')}>
                                     <Button
-                                        aria-label={`删除 ${definition.name}`}
+                                        aria-label={this.props.t('monitorUi.deleteNamedChart', { value0: definition.name })}
                                         danger
                                         icon={<DeleteOutlined />}
                                         shape="circle"
@@ -596,7 +596,7 @@ class Aside extends React.Component {
                     </span>
                     {definition.unit ? <span style={{ color: '#999' }}> {definition.unit}</span> : null}
                     <canvas
-                        aria-label={`编辑 ${definition.name} 公式`}
+                        aria-label={this.props.t('monitorUi.editFormula', { value0: definition.name })}
                         className="editableBuiltinChart"
                         onClick={openEditor}
                         onKeyDown={(event) => {
@@ -630,14 +630,14 @@ class Aside extends React.Component {
                     <h2 className="asideTitle">{definition.name || chart?.label || definition.agentChartId}</h2>
                     <div className="customChartActions">
                         <Popconfirm
-                            cancelText="取消"
-                            okText="删除"
+                            cancelText={this.props.t('monitorUi.cancel')}
+                            okText={this.props.t('monitorUi.delete')}
                             onConfirm={() => removeFormulaChart(this.props.matrixName, definition.id)}
-                            title={`删除“${definition.name || chart?.label || 'Agent 图表'}”？`}
+                            title={this.props.t('monitorUi.deleteChartQuestion', { value0: definition.name || chart?.label || this.props.t('monitorUi.agentChart') })}
                         >
-                            <Tooltip title="删除图表">
+                            <Tooltip title={this.props.t('monitorUi.deleteChart')}>
                                 <Button
-                                    aria-label={`删除 ${definition.name || chart?.label || 'Agent 图表'}`}
+                                    aria-label={this.props.t('monitorUi.deleteNamedChart', { value0: definition.name || chart?.label || this.props.t('monitorUi.agentChart') })}
                                     danger
                                     icon={<DeleteOutlined />}
                                     shape="circle"
@@ -679,9 +679,9 @@ class Aside extends React.Component {
         return (
             <div className="builtinChartHeading">
                 <h2 className="asideTitle">{title}</h2>
-                <Tooltip title={`编辑 ${title} 公式`}>
+                <Tooltip title={this.props.t('monitorUi.editFormula', { value0: title })}>
                     <Button
-                        aria-label={`编辑 ${title} 图表公式`}
+                        aria-label={this.props.t('monitorUi.editChartFormula', { value0: title })}
                         icon={<EditOutlined />}
                         onClick={() => this.openBuiltinFormulaEditor(kind)}
                         shape="circle"
@@ -703,7 +703,7 @@ class Aside extends React.Component {
         return (
             <div className="builtinChartViewport" style={style}>
                 <canvas
-                    aria-label={`编辑 ${title} 图表公式`}
+                    aria-label={this.props.t('monitorUi.editChartFormula', { value0: title })}
                     className="editableBuiltinChart"
                     id={canvasId}
                     onClick={openEditor}
@@ -1173,9 +1173,9 @@ class Aside extends React.Component {
         if (!metric) return null
         return {
             ...metric,
-            label: metricId === 'area' && areaUnit === '格' ? '覆盖格数' : metric.label,
+            label: this.props.t(metricId === 'area' && areaUnit === '格' ? 'monitorUi.coveredCells' : ({ totalPressure: 'pressTotal', averagePressure: 'meanPress', maxPressure: 'maxPress', activePoints: 'monitorUi.activePoints', area: 'monitorUi.pressureArea' })[metricId]),
             eng: metricId === 'area' && areaUnit === '格' ? 'Covered Cells' : metric.eng,
-            unit: metricId === 'area' ? areaUnit : metric.unit,
+            unit: metricId === 'area' ? (areaUnit === '格' ? this.props.t('monitorUi.cells') : areaUnit) : metricId === 'activePoints' ? this.props.t('monitorUi.pointUnit') : metric.unit,
             value: this.state[metric.key],
         }
     }

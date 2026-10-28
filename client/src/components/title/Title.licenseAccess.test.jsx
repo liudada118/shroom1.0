@@ -5,7 +5,7 @@ import { message } from 'antd';
 import { PortalSessionBar } from '../../page/licensePortal/PortalMonitoringChrome';
 
 vi.mock('../onestep/heatmap', () => ({ bthClickHandle: vi.fn() }));
-vi.mock('../../i18n', () => ({ getLanguageLocale: () => 'zh-CN' }));
+vi.mock('../../i18n', async (loadOriginal) => ({ ...await loadOriginal(), getLanguageLocale: () => 'zh-CN' }));
 import TranslatedTitle from './Title';
 const Title = TranslatedTitle.render({}, null).type.WrappedComponent;
 const expired = { schemaVersion: 1, state: 'expired', canAcquire: false, canReadHistory: true,

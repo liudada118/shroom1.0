@@ -21,7 +21,7 @@ function renderBedAside(matrixName, state) {
 describe('矩阵系统共用手部监测图表模板', () => {
   it('生成的配置侧栏按手部监测顺序显示面积、压力和可扩展图表', () => {
     const aside = new Aside();
-    aside.props = { matrixName: 'new-matrix-sit', displaySystemId: 'new-matrix', i18n: { t: (key) => key } };
+    aside.props = { matrixName: 'new-matrix-sit', displaySystemId: 'new-matrix', t: (key) => key, i18n: { t: (key) => key } };
     const children = aside.renderConfigurableSidebar({ pressure: {}, area: {} }).props.children;
     expect(children[0].props.children[0].props.children[0].props.children).toBe('sensorPanel.pressureArea');
     expect(children[1].props.children[0].props.children[0].props.children).toBe('sensorPanel.pressureData');

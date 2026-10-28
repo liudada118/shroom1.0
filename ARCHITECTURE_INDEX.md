@@ -1,7 +1,13 @@
 # Shroom 快速架构索引
 
-> 最后更新于：2026-10-27
+> 最后更新于：2026-10-28
 > 用途：代码定位和验证路由。理解当前实现先读 [开发者手册](docs/developer-guide.md)，完整文档分类见 [docs/README.md](docs/README.md)。`ARCHITECTURE.md` 保留历史设计与维护台账，不用作默认全文入口。
+
+2026-10-28 小床数据纯点图更新：进入“仅显示3D点图”后隐藏右上关闭按钮及页面光标，焦点移至监测容器，Tab/Shift+Tab 不进入隐藏控件；Esc恢复原显示方式、按钮、光标和入口焦点。仅改门户界面状态，继续复用当前画布与帧链路，验证 Standard 与 small-bed-scene-only 浏览器回归。
+
+2026-10-28 手部阈值与调参持久化：`hand.jsx` → `handPressureFilter` 逐帧按原始 ADC 总和判断初始阈值，仅清零显示压力；调低阈值/设零立即重算末帧。Home/Title 共用 `services/tuningConfig` 按实际系统 ID + 模式读取/保存，兼容旧缓存且保留零值、点大小与速度。验证 `handPressureFilter` / `tuningConfig` / `Title.tuningPersistence` 及 `scripts/tests/hand-tuning-home.mjs`，渲染行为运行 Full。
+
+2026-10-28 国际化排查：新增 `runtimeUi` / `monitorUi` / `agentUi` / `appUi` 三语词条，接入常用门户、调节、采集提示、Agent 主界面及应用设置，App Antd locale 跟随当前语言；`catalogIntegrity.test` 检查日语覆盖与插值一致性。高级系统构建器、部分分析报表和量尺等内部界面仍有硬编码，详细范围见同日架构维护台账，不代表全软件国际化完成。Full 9 项及实际监测/Agent 英日切换回归通过，尚未打包发布。
 
 2026-10-27 Windows 1.1.40 本地交付：根版本与锁文件由 1.1.39 递增为 1.1.40，说明位于 `release-notes/windows/1.1.40.md`；包含密钥期限、人体全身帧注册/面板及采集退出/串口中断修复。系统 TEMP 快照重建前端与完整 NSIS，28 个 Python 源文件同哈希后复用已验证运行时并复验 health；Full 14 项、实际生产页面及最终产物 18 项通过，NSIS 解出 2806 文件 SHA-256 全部一致。交付到用户下载目录 `Shroom-1.1.40`，附 blockmap、latest、说明和校验清单；未上传 MinIO、未执行本机升级安装，线上推荐版本不变。详细证据见维护台账。
 

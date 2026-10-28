@@ -35,7 +35,7 @@ async function chooseMode(page, label) {
   await page.locator('.ant-select-dropdown:visible .ant-select-item-option-content').getByText(label, { exact: true }).click();
 }
 
-/** 检查纯点图状态只剩叉叉可点击，且canvas没有被其它元素挡住。 */
+/** 检查纯点图无可见按钮和光标，且canvas没有被其它元素挡住。 */
 async function inspectSceneOnly(page) {
   return page.evaluate(() => {
     const root = document.querySelector('.portal-runtime-monitor');
@@ -47,13 +47,13 @@ async function inspectSceneOnly(page) {
     const bounds = canvas?.getBoundingClientRect();
     const hit = bounds ? document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2) : null;
     const close = root.querySelector('.portal-monitor-close');
-    const closeBounds = close.getBoundingClientRect();
     return { buttons: [...root.querySelectorAll('button')].filter(visible).map(button => button.getAttribute('aria-label') || button.textContent.trim()),
       canvas: Boolean(canvas), canvasHit: canvas === hit, width: bounds?.width, height: bounds?.height,
       toolsVisible: [...document.querySelectorAll('.shroom-app-tools button')].some(visible),
       sampleRateVisible: [...root.querySelectorAll('.portal-sample-rate')].some(visible),
-      closeHit: close.contains(document.elementFromPoint(closeBounds.x + closeBounds.width / 2, closeBounds.y + closeBounds.height / 2)),
-      closeInBounds: closeBounds.x >= 0 && closeBounds.right <= innerWidth && closeBounds.y >= 0 && closeBounds.bottom <= innerHeight };
+      closeVisible: visible(close),
+      canvasCursor: getComputedStyle(canvas).cursor,
+      cornerCursor: getComputedStyle(document.elementFromPoint(innerWidth - 30, 30)).cursor };
   });
 }
 
@@ -113,8 +113,9 @@ try {
   await page.locator('.portal-runtime-monitor.is-scene-only .portal-data-renderer #canvas canvas').waitFor();
   assert.equal(await modeLabel(page), '3D 模型');
   let state = await inspectSceneOnly(page);
-  assert.deepEqual(state.buttons, ['退出监测返回系统列表']);
-  assert.equal(state.canvasHit, true); assert.equal(state.toolsVisible, false); assert.equal(state.closeHit, true);
+  assert.deepEqual(state.buttons, []);
+  assert.equal(state.canvasHit, true); assert.equal(state.toolsVisible, false); assert.equal(state.closeVisible, false);
+  assert.equal(state.canvasCursor, 'none'); assert.equal(state.cornerCursor, 'none');
   assert.equal(state.sampleRateVisible, false, '纯点图不保留采样频率文字');
   assert.ok(state.width >= 1438 && state.height >= 898, JSON.stringify(state));
   await page.screenshot({ path: join(artifacts, 'scene-only-desktop.png') });
@@ -122,6 +123,8 @@ try {
   await page.locator('.portal-runtime-monitor:not(.is-scene-only)').waitFor();
   assert.equal(await modeLabel(page), '原始数据');
   assert.equal(await only.evaluate(element => element === document.activeElement), true, 'Esc恢复入口焦点');
+  assert.equal(await page.locator('.portal-monitor-close').isVisible(), true, 'Esc恢复叉叉');
+  assert.notEqual(await page.locator('body').evaluate(element => getComputedStyle(element).cursor), 'none', 'Esc恢复鼠标指针');
   assert.equal(await page.getByRole('group', { name: '应用工具', exact: true }).isVisible(), true);
 
   await chooseMode(page, '3D 模型');
@@ -144,7 +147,11 @@ try {
   assert.notEqual(after, before, '隐藏期间压力输入必须改变真实3D像素');
   assert.equal(await pointCanvas.evaluate(element => element === document.querySelector('.portal-data-renderer #canvas canvas')), true);
   await page.keyboard.press('Tab');
-  assert.equal(await page.locator('.portal-monitor-close').evaluate(element => element === document.activeElement), true);
+  assert.equal(await page.locator('.portal-runtime-monitor').evaluate(element => element === document.activeElement), true);
+  await page.keyboard.press('Shift+Tab');
+  assert.equal(await page.locator('.portal-runtime-monitor').evaluate(element => element === document.activeElement), true);
+  await page.mouse.move(1400, 40);
+  assert.equal((await inspectSceneOnly(page)).cornerCursor, 'none', '移动鼠标也不显示指针');
   await page.keyboard.press('Escape');
   assert.equal(await modeLabel(page), '3D 模型', '原本3D模式恢复后仍保持3D');
 
@@ -153,10 +160,12 @@ try {
   assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 375, '窄屏新增按钮不溢出');
   await only.click();
   state = await inspectSceneOnly(page);
-  assert.deepEqual(state.buttons, ['退出监测返回系统列表']);
-  assert.equal(state.closeInBounds, true); assert.equal(state.closeHit, true); assert.equal(state.canvasHit, true);
+  assert.deepEqual(state.buttons, []);
+  assert.equal(state.closeVisible, false); assert.equal(state.canvasHit, true);
+  assert.equal(state.canvasCursor, 'none'); assert.equal(state.cornerCursor, 'none');
   assert.equal(state.sampleRateVisible, false);
   await page.screenshot({ path: join(artifacts, 'scene-only-mobile.png') });
+  await page.keyboard.press('Escape');
   await page.getByRole('button', { name: '退出监测返回系统列表', exact: true }).click();
   await page.locator('.portal-runtime-monitor').waitFor({ state: 'detached' });
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -168,6 +177,7 @@ try {
   await enter('hand');
   assert.equal(await only.count(), 0, '其它系统不显示小床专用入口');
   assert.equal(await page.getByRole('group', { name: '应用工具', exact: true }).isVisible(), true);
+  assert.notEqual(await page.locator('body').evaluate(element => getComputedStyle(element).cursor), 'none', '其它系统不隐藏鼠标');
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ status: 'passed', artifacts, commands: commands.length, actualDevice: false }));
 } catch (error) {

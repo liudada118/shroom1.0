@@ -1,51 +1,57 @@
 import { useEffect, useState } from 'react';
 import { Button, Checkbox, Modal } from 'antd';
 import { SettingOutlined } from '@ant-design/icons';
+import { useTranslation } from 'react-i18next';
+import { getLanguageLocale } from '../../i18n';
 import { trackUsage } from '../../services/usageAnalytics';
 
 /** Keep the last verified update outcome visible after reopening settings or restarting the app. */
 export function FrontendUpdateStatus({ frontend = {} }) {
+  const { t, i18n } = useTranslation();
   const development = frontend.source === 'development';
-  if (development) return <p role="status">当前为开发版，页面由本地开发服务更新，无需检查网页更新。</p>;
+  if (development) return <p role="status">{t('appUi.development')}</p>;
   const failed = !frontend.checking && ['unavailable', 'host-update-required', 'installer-update-required'].includes(frontend.lastCheckResult);
-  const message = frontend.checking ? '正在检查网页版本，请稍候…'
-    : frontend.lastMessage || frontend.message || (frontend.pendingReleaseId ? '新版页面已缓存，下次启动生效。' : '尚未检查网页更新，当前使用本地页面。');
+  const message = frontend.checking ? t('appUi.checking')
+    : frontend.lastMessage || frontend.message || (frontend.pendingReleaseId ? t('appUi.cached') : t('appUi.unchecked'));
   return <div>
     <p role={failed ? 'alert' : 'status'}>{message}</p>
-    {frontend.lastCheckedAt && <p>最近检查：{new Date(frontend.lastCheckedAt).toLocaleString()}</p>}
-    {frontend.pendingReleaseId && <p>待启用发布：{frontend.pendingReleaseId}。请在结束采集后关闭并重新打开软件。</p>}
-    {frontend.lastErrorCode && <details><summary>更新诊断信息</summary><p>{frontend.lastErrorCode}</p></details>}
+    {frontend.lastCheckedAt && <p>{t('appUi.lastCheck', { time: new Date(frontend.lastCheckedAt).toLocaleString(getLanguageLocale(i18n.language)) })}</p>}
+    {frontend.pendingReleaseId && <p>{t('appUi.pendingRelease', { id: frontend.pendingReleaseId })}</p>}
+    {frontend.lastErrorCode && <details><summary>{t('appUi.diagnostics')}</summary><p>{frontend.lastErrorCode}</p></details>}
   </div>;
 }
 
 /** Keep development pages out of the signed webpage update flow without hiding production failures. */
 export function FrontendUpdateControls({ frontend = {}, pending = false, onCheck }) {
+  const { t } = useTranslation();
   const development = frontend.source === 'development';
   return <>
-    <h3>网页更新</h3>
-    {!development && <p>仅更新页面，本机后端能力需通过“安装包更新”升级。无网时使用本地页面；新版完整缓存并校验后，下次启动使用，采集中保持当前页面。</p>}
+    <h3>{t('appUi.webpageUpdates')}</h3>
+    {!development && <p>{t('appUi.webpageScope')}</p>}
     <FrontendUpdateStatus frontend={frontend} />
     <Button disabled={pending || frontend.checking || frontend.updateSupported === false} onClick={onCheck}>
-      {development ? '开发版无需网页更新' : frontend.checking ? '正在检查…' : '检查网页更新'}
+      {development ? t('appUi.developmentCheck') : frontend.checking ? t('appUi.checkingShort') : t('appUi.check')}
     </Button>
   </>;
 }
 
 /** Show the installed host and the actual webpage, without treating shell readiness as device acceptance. */
 export function RuntimeVersionDetails({ frontend = {}, runtimeVersions = {} }) {
+  const { t, i18n } = useTranslation();
   const development = frontend.source === 'development';
   return <dl>
-    <dt>软件</dt><dd>{frontend.appVersion || '待读取'} · 宿主契约 {frontend.hostContract || '未知'}</dd>
-    <dt>网页</dt><dd>{development ? '本地开发服务 · 无需网页缓存发布' : <>{frontend.source === 'cache' ? '验证缓存' : frontend.source === 'packaged' ? '安装包页面' : '待读取'} · 构建 {frontend.activeBuildId || '未知'} · 发布 {frontend.activeReleaseId || (frontend.source === 'packaged' ? '随安装包' : '未知')}</>}</dd>
-    <dt>启动状态</dt><dd>{development ? '开发服务提供页面；设备功能需另行验收' : frontend.bootPending === true ? '候选页面等待外壳启动确认' : frontend.bootPending === false ? '外壳启动已确认；设备功能需另行验收' : '待读取；设备功能需另行验收'}</dd>
-    {!development && frontend.lastRollbackAt && <><dt>最近回退</dt><dd>{new Date(frontend.lastRollbackAt).toLocaleString()} · {frontend.lastRollbackReason}</dd></>}
-    {runtimeVersions.systemPackageVersion && <><dt>系统包</dt><dd>{runtimeVersions.systemPackageVersion}</dd></>}
-    {runtimeVersions.serverContractVersion && <><dt>服务端契约</dt><dd>{runtimeVersions.serverContractVersion}</dd></>}
+    <dt>{t('appUi.software')}</dt><dd>{frontend.appVersion || t('appUi.unread')} · {t('appUi.hostContract', { version: frontend.hostContract || t('common.unknown') })}</dd>
+    <dt>{t('appUi.webpage')}</dt><dd>{development ? t('appUi.developmentSource') : <>{frontend.source === 'cache' ? t('appUi.cacheSource') : frontend.source === 'packaged' ? t('appUi.packagedSource') : t('appUi.unread')} · {t('appUi.build', { id: frontend.activeBuildId || t('common.unknown') })} · {t('appUi.release', { id: frontend.activeReleaseId || (frontend.source === 'packaged' ? t('appUi.bundled') : t('common.unknown')) })}</>}</dd>
+    <dt>{t('appUi.bootStatus')}</dt><dd>{development ? t('appUi.developmentBoot') : frontend.bootPending === true ? t('appUi.bootPending') : frontend.bootPending === false ? t('appUi.bootConfirmed') : t('appUi.bootUnread')}</dd>
+    {!development && frontend.lastRollbackAt && <><dt>{t('appUi.rollback')}</dt><dd>{new Date(frontend.lastRollbackAt).toLocaleString(getLanguageLocale(i18n.language))} · {frontend.lastRollbackReason}</dd></>}
+    {runtimeVersions.systemPackageVersion && <><dt>{t('appUi.systemPackage')}</dt><dd>{runtimeVersions.systemPackageVersion}</dd></>}
+    {runtimeVersions.serverContractVersion && <><dt>{t('appUi.serverContract')}</dt><dd>{runtimeVersions.serverContractVersion}</dd></>}
   </dl>;
 }
 
 /** Show webpage update and diagnostic controls together, with persistent status and recoverable errors. */
 export default function AppServices({ onAfterDialogClose } = {}) {
+  const { t, i18n } = useTranslation();
   const [open, setOpen] = useState(false), [state, setState] = useState({ frontend: {}, usage: {} });
   const [pending, setPending] = useState(false), [error, setError] = useState('');
   const api = window.electronAPI?.services;
@@ -68,30 +74,30 @@ export default function AppServices({ onAfterDialogClose } = {}) {
     try {
       const result = await api.invoke(name, input);
       setState(previous => ({ ...previous, [name === 'checkFrontend' ? 'frontend' : 'usage']: result }));
-    } catch { setError('操作未完成，请稍后重试。'); }
+    } catch { setError('appUi.actionFailed'); }
     finally { setPending(false); }
   }
 
   if (!api) return null;
   return <>
     {/* 说明可直接转入设置，退场时不把焦点从新弹窗抢回旧入口。 */}
-    <Modal title="使用统计与错误上报说明" open={Boolean(state.usage.noticePending)} onCancel={() => action('acknowledgeUsageNotice')} focusTriggerAfterClose={false} afterClose={onAfterDialogClose} footer={null}>
-      <p>使用统计与错误上报{state.usage.enabled ? '默认开启' : '已关闭'}，接收方为 shroom.jq-industries.com。只上传功能事件、耗时和脱敏错误，不包含聊天正文、附件或原始传感器数据；聊天同步与模型请求各自独立设置。</p>
-      <Button disabled={pending} onClick={() => action('acknowledgeUsageNotice')}>已了解上报范围</Button>
-      <Button disabled={pending} onClick={() => { void action('acknowledgeUsageNotice'); setOpen(true); }}>查看设置</Button>
+    <Modal title={t('appUi.noticeTitle')} open={Boolean(state.usage.noticePending)} onCancel={() => action('acknowledgeUsageNotice')} focusTriggerAfterClose={false} afterClose={onAfterDialogClose} footer={null}>
+      <p>{t('appUi.notice', { status: t(state.usage.enabled ? 'appUi.enabled' : 'appUi.disabled') })}</p>
+      <Button disabled={pending} onClick={() => action('acknowledgeUsageNotice')}>{t('appUi.acknowledge')}</Button>
+      <Button disabled={pending} onClick={() => { void action('acknowledgeUsageNotice'); setOpen(true); }}>{t('appUi.viewSettings')}</Button>
     </Modal>
-    <Button className="shroom-app-tool shroom-app-services" icon={<SettingOutlined />} onClick={() => setOpen(true)} aria-label="应用更新与使用统计设置">应用设置</Button>
-    <Modal title="应用设置" open={open} onCancel={() => setOpen(false)} afterClose={onAfterDialogClose} footer={null}>
+    <Button className="shroom-app-tool shroom-app-services" icon={<SettingOutlined />} onClick={() => setOpen(true)} aria-label={t('appUi.settingsLabel')}>{t('appUi.settings')}</Button>
+    <Modal title={t('appUi.settings')} open={open} onCancel={() => setOpen(false)} afterClose={onAfterDialogClose} footer={null}>
       <FrontendUpdateControls frontend={state.frontend} pending={pending} onCheck={() => action('checkFrontend')} />
-      <h3>当前运行版本</h3>
+      <h3>{t('appUi.runningVersions')}</h3>
       <RuntimeVersionDetails frontend={state.frontend} runtimeVersions={state.runtimeVersions} />
-      <h3 style={{ marginTop: 24 }}>使用统计与错误上报</h3>
-      <Checkbox checked={Boolean(state.usage.enabled)} disabled={pending} onChange={event => action('setUsageEnabled', { enabled: event.target.checked })}>上传使用统计与脱敏错误</Checkbox>
-      <p>首次使用默认开启，可随时关闭。记录功能使用、操作结果和耗时，不上传聊天正文、附件或原始传感器数据。关闭后清除尚未上传的使用统计，已送达数据按服务器规则保存；升级软件会保留你的开关选择。</p>
-      <p>约定的使用统计保存目标为 90 天；实际清理执行状态请向管理员确认。</p>
-      <p role="status">待上传 {state.usage.queued || 0} 条{state.usage.lastSuccessAt ? ` · 最近上传：${new Date(state.usage.lastSuccessAt).toLocaleString()}` : ''}</p>
-      {(error || state.usage.lastError) && <p role="alert">{error || state.usage.lastError}</p>}
-      <Button disabled={pending || !state.usage.enabled} onClick={() => action('retryUsage')}>立即重试上传</Button>
+      <h3 style={{ marginTop: 24 }}>{t('appUi.usage')}</h3>
+      <Checkbox checked={Boolean(state.usage.enabled)} disabled={pending} onChange={event => action('setUsageEnabled', { enabled: event.target.checked })}>{t('appUi.uploadUsage')}</Checkbox>
+      <p>{t('appUi.usageScope')}</p>
+      <p>{t('appUi.retention')}</p>
+      <p role="status">{t('appUi.queued', { count: state.usage.queued || 0 })}{state.usage.lastSuccessAt ? ` · ${t('appUi.lastUpload', { time: new Date(state.usage.lastSuccessAt).toLocaleString(getLanguageLocale(i18n.language)) })}` : ''}</p>
+      {(error || state.usage.lastError) && <p role="alert">{error ? t(error) : state.usage.lastError}</p>}
+      <Button disabled={pending || !state.usage.enabled} onClick={() => action('retryUsage')}>{t('appUi.retry')}</Button>
     </Modal>
   </>;
 }
