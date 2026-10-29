@@ -3,6 +3,7 @@ const path = require('node:path');
 const { createHash, randomUUID } = require('node:crypto');
 const { performance } = require('node:perf_hooks');
 const { subscribeBusinessEvents } = require('../../backend/common/businessEvents');
+const { compactStackLocations } = require('./diagnosticStack');
 
 const ENDPOINT = 'https://shroom.jq-industries.com/api/usage/events/batch';
 const EVENT_NAMES = new Set(['app_session_started', 'feature_exposed', 'feature_attempted', 'system_entered', 'device_connection_result',
@@ -87,7 +88,7 @@ function scrub(value, secrets = []) {
     .replace(/https?:\/\/[^\s<>'"]+/gi, '[url]')
     .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, '[email]')
     .replace(/\b[A-Za-z]:[\\/][^\r\n"<>|]*/g, '[path]')
-    .replace(/(?:\/(?:Users|home|tmp|var|opt|usr|app|workspace|mnt)\/|\\\\)[^\s"<>]*/g, '[path]');
+    .replace(/(?:\/(?:Users|home|tmp|var|opt|usr|app|workspace|mnt|Volumes|Applications|Library|data|srv|root|etc)\/|\\\\)[^\s"<>]*/g, '[path]');
 }
 
 /** Accept the server's finite event vocabulary, never frames, chat content or arbitrary objects. */
@@ -98,7 +99,7 @@ function normalizeEvent(input, identity, secrets = []) {
   for (const [name, value] of Object.entries(input.properties)) {
     if (['message', 'stack'].includes(name)) {
       if (input.eventName !== 'error_reported' || typeof value !== 'string') throw new Error('USAGE_EVENT_INVALID');
-      properties[name] = scrub(value, secrets).slice(0, name === 'message' ? 400 : 1800);
+      properties[name] = scrub(name === 'stack' ? compactStackLocations(value) : value, secrets).slice(0, name === 'message' ? 400 : 1800);
     } else if (['durationMs', 'count'].includes(name)) {
       if (!Number.isFinite(value) || value < 0 || value > (name === 'durationMs' ? 86400000 : 1e12) || (name === 'count' && !Number.isInteger(value))) throw new Error('USAGE_EVENT_INVALID');
       properties[name] = name === 'durationMs' ? Math.round(value) : value;

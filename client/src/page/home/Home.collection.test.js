@@ -3,6 +3,8 @@ import { createRequire } from 'node:module';
 import vm from 'node:vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readCollectionSummary } from '../../services/collectionStatus';
+import { getSensorFrameChannelValue } from '../../services/ws/sensorFrameDecoder';
+import { canUseLicenseCapability } from '../../services/licenseAccess';
 
 const { parse } = createRequire(import.meta.url)('@babel/parser');
 const source = readFileSync(new URL('./Home.jsx', import.meta.url), 'utf8');
@@ -11,12 +13,18 @@ const home = ast.program.body.find(node => node.type === 'ClassDeclaration' && n
 
 /** 运行真实Home采集方法，避免加载与秒表无关的全部模型与设备依赖。 */
 function createHome(finishCollectionBeforeExit = vi.fn().mockResolvedValue(null)) {
-  const names = ['setColValueFlag', 'applyCollectionSummary', 'startCollectionTimer', 'stopCollectionTimer', 'preparePortalExit'];
+  const names = ['setColValueFlag', 'applyCollectionSummary', 'startCollectionTimer', 'stopCollectionTimer', 'preparePortalExit',
+    'observeCollectionFrame', 'resetCollectionFrameReadiness', 'appendControlCollectionRow', 'applyCollectionSourceStatus'];
   const methods = home.body.body.filter(node => names.includes(node.key?.name)).map(node => source.slice(node.start, node.end));
   const instance = vm.runInNewContext(`new (class { ${methods.join('\n')} })()`, {
     readCollectionSummary, finishCollectionBeforeExit, Date, setInterval, clearInterval, DOMException, Promise,
+    getSensorFrameChannelValue, canUseLicenseCapability, message: { warning: vi.fn() }, collection: [],
+    localStorage: { setItem: vi.fn() }, wsPointDataSit: [], wsPointDataBack: [],
   });
-  instance.state = { colFlag: true, matrixName: 'humanBodyOptimized', collectionSummary: null };
+  instance.state = { colFlag: true, matrixName: 'humanBodyOptimized', collectionSummary: null, history: 'now',
+    wsConnected: true, local: false, collectionLocalFrameReady: false };
+  instance.props = { t: key => key };
+  instance.wsSendObj = vi.fn();
   instance.title = { current: { changeNum: vi.fn() } };
   instance.setState = (patch, done) => { Object.assign(instance.state, patch); done?.(); };
   return instance;
@@ -98,5 +106,66 @@ describe('Home采集状态与秒表', () => {
     open(); await Promise.resolve();
     expect(instance.wsSendObj).toHaveBeenCalledWith({ getSensorTypes: true });
     expect(instance.wsSendObj.mock.calls.some(([payload]) => ['sitClose', 'backClose', 'headClose', 'sensorClose'].some(key => payload[key]))).toBe(false);
+  });
+
+  it('实时来源就绪广播优先于启动时迟到的HTTP无数据快照', async () => {
+    const mount = home.body.body.find(node => node.key?.name === 'componentDidMount');
+    const assignment = mount.body.body.find(node => node.type === 'ExpressionStatement'
+      && node.expression.type === 'AssignmentExpression' && node.expression.left.property?.name === 'onopen').expression;
+    const instance = createHome(); let resolveStatus;
+    const open = vm.runInNewContext(`(function() { return ${source.slice(assignment.right.start, assignment.right.end)}; })`, {
+      console: { info: () => {} }, AbortController,
+      requestJson: () => new Promise(resolve => { resolveStatus = resolve; }),
+    }).call(instance);
+    open();
+    instance.applyCollectionSourceStatus({ systemId: 'hand', ready: true, connected: true });
+    resolveStatus({ collectionSourceStatus: { systemId: 'hand', ready: false, connected: true } });
+    await Promise.resolve();
+    expect(instance.state.collectionSourceStatus.ready).toBe(true);
+  });
+
+  it('旧宿主只认实际有限压力数据，全零有效；无新帧5秒停止并清除就绪状态', () => {
+    vi.useFakeTimers(); vi.setSystemTime(10000);
+    const instance = createHome();
+    for (const frame of [{ serialStatus: { isOpen: true } }, { sitData: [] }, { sitData: [NaN] },
+      { sitData: [0, 0], source: 'playback' }]) instance.observeCollectionFrame(frame);
+    expect(instance.state.collectionLocalFrameReady).toBe(false);
+    instance.observeCollectionFrame({ sitData: [0, 0] });
+    expect(instance.state.collectionLocalFrameReady).toBe(true);
+    instance._collecting = true;
+    vi.advanceTimersByTime(4900);
+    expect(instance.wsSendObj).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(100);
+    expect(instance.wsSendObj).toHaveBeenCalledWith({ flag: false });
+    expect(instance.state).toMatchObject({ colFlag: true, collectionLocalFrameReady: false });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('现代宿主保持权威判定，不因显示帧绕过ready=false，也不创建第二套采集看门狗', () => {
+    vi.useFakeTimers(); vi.setSystemTime(10000);
+    const instance = createHome();
+    instance.state.collectionSourceStatus = { ready: false, connected: true };
+    instance.observeCollectionFrame({ sitData: [0, 1] });
+    expect(instance.state.collectionLocalFrameReady).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('localCar有控制连接但没有实际压力帧不入表；断流后停采并保留已保存行', () => {
+    vi.useFakeTimers(); vi.setSystemTime(10000);
+    const instance = createHome();
+    Object.assign(instance.state, { matrixName: 'localCar', localCarControlConnected: true, colWebFlag: true });
+    instance.appendControlCollectionRow(['stale']);
+    expect(instance.state.length).toBeUndefined();
+    instance.observeCollectionFrame({ sitData: [10, 20] });
+    instance.appendControlCollectionRow(['live']);
+    expect(instance.state.length).toBe(1);
+    vi.advanceTimersByTime(5000);
+    expect(instance.state.colWebFlag).toBe(false);
+    instance.appendControlCollectionRow(['stale-again']);
+    expect(instance.state.length).toBe(1);
+    expect(instance.state.csvData[0][0]).toBe('live');
+    instance.observeCollectionFrame({ sitData: [1, 2] });
+    expect(instance.state.colWebFlag).toBe(false);
+    instance.resetCollectionFrameReadiness();
   });
 });

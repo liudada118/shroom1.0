@@ -38,17 +38,20 @@ describe('门户最新监测控制层', () => {
     const idle = renderToStaticMarkup(<PortalSessionBar mode="now" selectedPorts collecting={false} />);
     expect(idle).toContain('串口已选择');
     expect(idle).not.toContain('已连接');
-    expect(idle).toMatch(/aria-label="开始采集"(?! disabled)/);
+    expect(idle).toMatch(/aria-label="开始采集"[^>]*disabled=""/);
+    expect(idle).toContain('请先连接传感器，再开始采集。');
     expect(idle).toMatch(/aria-label="结束采集" disabled=""/);
+    const ready = renderToStaticMarkup(<PortalSessionBar mode="now" selectedPorts deviceReady collecting={false} />);
+    expect(ready).not.toMatch(/aria-label="开始采集"[^>]*disabled/);
     const active = renderToStaticMarkup(<PortalSessionBar mode="now" collecting />);
-    expect(active).toMatch(/aria-label="开始采集" disabled=""/);
-    expect(active).toMatch(/aria-label="结束采集"(?! disabled)/);
+    expect(active).toMatch(/aria-label="开始采集"[^>]*disabled=""/);
+    expect(active).not.toMatch(/aria-label="结束采集"[^>]*disabled/);
   });
 
   it('回放模式禁用实时采集入口', () => {
     const html = renderToStaticMarkup(<PortalSessionBar mode="playback" collecting={false} />);
     expect(html).toContain('选择回放');
-    expect(html).toMatch(/aria-label="开始采集" disabled=""/);
+    expect(html).toMatch(/aria-label="开始采集"[^>]*disabled=""/);
     expect(html).toMatch(/aria-label="结束采集" disabled=""/);
   });
 

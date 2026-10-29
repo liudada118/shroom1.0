@@ -1,4 +1,7 @@
 const backendMessageKeys = Object.freeze({
+  '尚未收到有效传感器数据，请等待数据后再开始采集。': 'monitorUi.collectionWaitingForData',
+  '请先连接传感器，再开始采集。': 'monitorUi.collectionConnectFirst',
+  '请先退出回放，再开始采集。': 'monitorUi.collectionExitPlayback',
   '请先停止采集，再切换系统。': 'runtimeUi.stopBeforeSwitch',
   '当前授权仅允许查看和分析历史数据，不能采集或导出。': 'runtimeUi.acquireDenied',
   '当前授权不允许导出数据或分析结果。': 'runtimeUi.exportDenied',

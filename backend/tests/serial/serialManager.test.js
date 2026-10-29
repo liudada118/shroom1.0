@@ -62,9 +62,15 @@ async function run() {
     assert.strictEqual(a.manager.reconnectPort('sit').attempted, false);
 
     const b = fixture();
+    const firstFrameHealth = [];
+    const businessFrame = () => firstFrameHealth.push(b.manager.getStatus('sit').health);
+    b.parser.on('data', businessFrame);
     b.manager.open('sit', { path: 'COM3', baudRate: 1000000, reconnect: true, parserChannel: 'sit' });
     await tick(); b.ports[0].finish();
     assert.strictEqual((await b.manager.waitForOpen('sit')).isOpen, true);
+    b.parser.emit('data', Buffer.alloc(4));
+    assert.deepStrictEqual(firstFrameHealth, ['ok'], 'a pre-bound business handler must observe healthy input on the first valid frame');
+    b.parser.removeListener('data', businessFrame);
     assert.throws(() => b.manager.open('back', { path: 'COM3' }), (error) => error.code === 'SERIAL_PORT_BUSY');
     assert.strictEqual(b.ports[0].closes, 0, 'another channel must not evict the active port');
     await b.manager.close('sit');

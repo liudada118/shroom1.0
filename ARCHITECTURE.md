@@ -1,6 +1,6 @@
 # 架构文档
 
-> 最后更新于：2026-10-28
+> 最后更新于：2026-10-29
 > 阅读定位：本文件保留架构演进、历史说明和维护台账。当前实现从 [开发者手册](docs/developer-guide.md) 开始，文档状态见 [文档导航](docs/README.md)，不要将不同日期的记录拼成当前系统行为。
 > 当前增量：2026-10-16 已在源码接入 Agent 默认本机 CPU 分类训练，具体流程与验收边界见文末“Agent 默认 CPU 分类训练与便携模型”。此前“依赖准备”记录保留当时状态，不代表当前能力。本轮另补齐生成矩阵的显示方向和工具桥，见文末“生成矩阵显示方向与共用工具”。
 
@@ -7560,3 +7560,73 @@ PortalMonitoringLayer 进入时将键盘焦点移至可程序聚焦的监测容�
 | --- | --- | --- |
 | 2026-10-28 | 界面调整 | 小床数据纯点图隐藏叉叉与页面鼠标，Esc恢复，键盘焦点不会进入隐藏控件。 |
 | 2026-10-28 | 验证 | Standard 3/3通过（lint、客户端129文件/1157项、脚本语法）及桌面/窄屏真实浏览器回归通过；日志为系统TEMP的 shroom-scene-only-standard-e47736ca154e4d2bb38379801f5046f3.log。 |
+
+## 2026-10-28：Windows 1.1.43 本地安装包交付
+
+按用户指定将根 package.json、package-lock 顶层及根包版本从 1.1.40 升级为 1.1.43，client 独立包版本不变。说明为 `release-notes/windows/1.1.43.md`，包含手部初始阈值逐帧生效、各系统/模式调参持久化、常用界面中英日补齐，以及小床纯点图隐藏所有按钮与鼠标、Esc 恢复。国际化仍保留上一节列出的高级界面遗漏范围。`inject-release-notes` 已把相同说明注入 latest.yml。
+
+系统 TEMP 的 `shroom-release-1.1.43-yUR9wZ/workspace` 冻结 1675 个源文件，以 11e1ef7 为代码基线并包含本次版本及说明修改；依赖使用已安装包，项目 SDK 链接指向该快照。28 个 Python 输入与已验证 1.1.40 快照同哈希后复用运行时，并实际复验原生库摘要和 health。重新生成前端和空 SQLite 模板，Builder 显式 `--publish never`，没有覆盖仓库原有 build、运行数据或 pyc 改动。最终前端 buildId 为 1793184355048，appVersion 为 1.1.43。
+
+Full 8/8 通过：Electron ABI 后端 118 文件、客户端 129 文件/1157 项、前端 SDK 36 文件/553 项、lint、临时生产构建、双 SDK smoke 与性能基线；日志为发布根目录 `full-verification.log`。实际生产页面的进入、返回及模块加载验证通过，浏览器证据为系统 TEMP 的 `shroom-production-monitoring-Yw6ipp`。本轮没有重复既有阈值/纯点图专项浏览器矩阵，也没有进行真机串口操作。
+
+最终安装包为 354869885 字节，SHA-256 为 `b6b3380a608a29224be38d0e9b51b9e3a2b42a7eeb9b690281bb387bd42de636`。构建中 Windows 资源编辑器首次写入失败，Builder 自动重试后成功；最终应用和安装器的 Windows 版本资源、PE 完整性均实际通过校验。产物共 22 项通过，覆盖清单摘要及说明、ASAR 1999 文件完整性和 166 生产依赖、前端 167 文件与发布构建一致、Python health、SQLite/串口原生 ABI125、空库与关键后台源码。实际解出的 NSIS 2806 文件与 win-unpacked 逐文件 SHA-256 相同，报告为 `release-verification.json`。
+
+交付目录为 `C:/Users/23823/Downloads/Shroom-1.1.43`，包含 EXE、EXE.blockmap、latest.yml、独立版本说明、SHA256SUMS.txt、发布清单及产物报告，副本已核对摘要。未执行本机升级安装，未上传 MinIO、未改变线上推荐版本、未提交本次版本文件。
+
+### 维护记录与项目进度（追加）
+
+| 日期 | 类型 | 说明 |
+| --- | --- | --- |
+| 2026-10-28 | 本地交付 | Windows x64 完整 NSIS 1.1.43 已生成，包含最新阈值、持久化、国际化及纯点图修改。 |
+| 2026-10-28 | 验证 | Full 8 项、实际生产页面及最终产物 22 项通过，NSIS 全部 2806 文件一致；升级安装与真机串口仍未实测。 |
+| 2026-10-28 | 发布状态 | 产物及版本说明已放入下载目录，未上传 MinIO 或切换线上 latest。 |
+
+## 2026-10-29：端口冲突、手部空值与错误诊断修复
+
+Electron 入口在引入后台与注册 IPC 前调用 startupGuard.claimApplicationInstance；重复启动只恢复已有主窗口，不再创建第二套监听。首次启动预检 WebSocket 19999、控制 HTTP 19245 和前端 HTTP 12321，检查只临时监听并释放自己的 socket，不连接或终止占用者。Windows 全接口 IPv6 监听可能与 IPv4 共存，所以 19999 同时检查实际客户端使用的 127.0.0.1。预检和真实启动之间仍存在系统级竞态，WebSocket、控制 HTTP、静态 HTTP 均挂 watchLocalServiceErrors 接住真实 error，记录原始 Error 并通知宿主单次提示具体端口、关闭本实例；不擅自换固定端口或复用外部服务。
+
+未启动后台时的退出不调用会懒加载 server 的 shutdownServer；本地诊断/网页缓存初始化也不因读取版本状态而提前加载后台。Mac 关闭全部窗口后重新打开时沿用已有静态 HTTP 监听；每个新窗口单独安排网页启动回退检查，关闭窗口取消自身计时器，回退更新服务读取的 buildRoot。后台、数据采集及固定端口契约未变。
+
+手部旧 Shift 处理将 TrackballControls.keys 和 mouseButtons 置为 null；同一动画帧中的 Shift keydown → Tab keyup → Tab keydown 可使 Three 再次读取 keys[0] 并精确复现 Cannot read properties of null (reading '0')。hand.jsx 现在通过 controls.enabled 合并框选和实例 Shift 状态，映射始终保持有效；捕获阶段暂停交互，keyup/blur 解除 Shift 暂停，框选优先级不变，卸载移除全部新增监听。真实 Home/Three 浏览器回归覆盖组合键、Shift 鼠标暂停/恢复、失焦、框选互斥、退出重进及刷新，也复验已有阈值和持久化行为。修复前证据位于系统 TEMP 的 shroom-hand-tuning-4g2yn9，永久回归通过证据为 shroom-hand-tuning-GSjeQ9；未使用真实串口或 Mac 真机。线上旧堆栈已被脱敏，消息与本地复现吻合，但无法追溯其原始源码行。
+
+backend/common/logger 从原始 Error 或有限结构中提取 message、stack、公开 errorCode 和类型；支持 [Updater] 等模块标签，不再把这类日志全部退化为“后端操作异常”，不序列化额外请求对象、业务帧或凭据。本地 SDK 日志仍接收原始参数，上报异常不打断本地日志。IPC 两处改传 Error 而非仅 message，以保留调用栈。AppServices 通过 describeRendererError 在 Error.stack 缺少来源时补充 ErrorEvent 文件/行/列；usageAnalytics 在通用脱敏之前将 V8/Firefox 堆栈转换为安全脚本文件名:行:列或 node: 模块位置，继续移除完整 URL、查询参数、本地目录及秘密。既有事件字段、长度/大小上限和队列身份约束未变；安全旧事件保持原 ID/内容，不给历史事件伪造缺失堆栈。
+
+服务器 /opt/key-manager 当前 usageSchema.ts 已以两个合成事件直接执行 schema 与二次脱敏验证通过，错误码和新堆栈坐标均保持原值，无数据库或 HTTP 写入，也未部署服务器修改。这只验证现有接收规则兼容，不代表真实客户端上传已经发生。原已生成的 1.1.43 安装包不含本轮源码修复，仍需另行重新打包交付；本轮未提交或发布。
+
+专项 startupGuard 11/11 通过，包含两个隔离 userData 的真实 Electron 进程竞争实例锁、真实随机端口的 HTTP/WebSocket 监听失败、初始化失败不懒加载后台、窗口复用后实际 HTTP 回退内容。Full 首次 8 项通过，唯一后端失败来自旧 applicationQuit VM 将 CommonJS 入口当普通脚本解析；测试夹具按真实模块包装，并显式模拟“后台已运行”的退出状态，原等待关闭与安装 updater 断言完整保留。只重跑受影响后端域后 120 个文件全部通过，未重复已通过的其他域。最终汇总：客户端 130 文件/1161 项、前端 SDK 36 文件/553 项、lint、双 SDK smoke、临时生产构建、性能基线及浏览器脚本语法均通过；真实手部浏览器单独通过。日志分别为系统 TEMP 的 shroom-runtime-fixes-full-2298b07c02ab470cb5daa6a23e4f9d8c.log 与 shroom-runtime-fixes-backend-final-5592cb72c2124387a614da0aacd47d34.log；Mac 生命周期由真实入口/HTTP 回归模拟，未进行 Mac 真机验收。
+
+### 维护记录与项目进度（追加）
+
+| 日期 | 类型 | 说明 |
+| --- | --- | --- |
+| 2026-10-29 | 修复缺陷 | 单实例/固定端口预检与监听失败收尾，Mac 重开复用服务；手部 Shift/框选控制不再清空键位。 |
+| 2026-10-29 | 诊断 | 保留有限错误原因、错误码及安全堆栈坐标，兼容现有服务器事件规则。 |
+| 2026-10-29 | 验证 | Full 其余 8 项通过；修正退出测试夹具后完整后端 120 文件通过，真实手部页面回归及隔离 Electron 双进程验证通过。 |
+| 2026-10-29 | 交付边界 | 源码和架构记录已更新，未重新打包、上传或提交；历史已脱敏错误无法恢复原堆栈。 |
+
+## 2026-10-29：未连接或无有效数据禁止开始采集
+
+原 runtimeControlService 的 flag:true 只核验授权，随后直接创建会话、重置采样时钟和改 flag；Title 也未检查连接，并在开始命令成功前就启用计时。现在统一控制服务先要求宿主当前 connected 和 ready，再执行任何命名、建会话、计时副作用。无设备返回 COLLECTION_DEVICE_NOT_CONNECTED，无有效帧返回 COLLECTION_DATA_NOT_READY，回放返回 COLLECTION_PLAYBACK_ACTIVE，HTTP 均为 409；旧 WS 命令经同一路由，不能绕开保护。停止和修改设置仍可在无设备时使用，授权过期仍优先返回原有 403。
+
+server.readCollectionSourceContext 按当前 manifest 的 serialRole 或内置 sensorRegistry 通道白名单读取真实 open/isOpen，允许多通道仅接入部分设备；登记路径、opening、reconnect 意图不算连接。HaLow.hasConnectedDevice 检查当前原生副本身份、接收条件、监听状态及选中的在线设备，只有监听或其他未选设备在线都不足。串口数据候选通道还需 health=ok，HaLow 需所选客户端最近 5 秒收到压力帧；两者仍需通过下一层 canonical 数据校验，原始字节不等于可采数据。SerialManager 对 parser 的健康监听改为 prependListener，确保预先绑定的业务回调在首个有效帧内即可看到健康状态，避免首帧被误挡。
+
+collectionSourceMonitor 订阅现有 ChannelBus，只接受 realtime、当前 displaySystemId、匹配 canonical channelId/sensorId 和有效角色的非空有限数值数组；全零压力是有效数据。按物理角色记录连接代次与接收时间，不保存压力值；一路新增、失健康或重连只移除该路证据，不误停仍有其他有效输入的采集。系统切换、进入回放或全部断开清除所有旧证据。serialControlService 与 publishHistoryDateList 的纯清屏帧显式标 synthetic，通过网关放进 ChannelBus.metadata，监测器忽略；该标记不进入 WebSocket sensor.frame 契约或数据库，不凭“全零”猜测是否清屏。每次检查及每秒定时检查均重算 5 秒超时，只在就绪状态变化时广播，不逐帧上报。
+
+无有效帧持续 5 秒后，采集中调用既有 finishCollection('DATA_STREAM_TIMEOUT')：先关闭接收入口，再排空原会话已入场数据并发布实际终态，防止空计时。数据恢复仅恢复开始按钮，不能自动重启采集。readCollectionStatus 先同步检查源状态、再读取会话，避免检查触发停止后仍返回旧 collecting；退出释放监测定时器和订阅。
+
+双手手套一个物理串口可分派为左右两个输出通道，监测器优先使用 serial.role，其次采用已有 payload.protocol.packetSourcePort 的 sit/back 物理来源，最后才回退输出角色；非法物理来源不回退放行。这样 sit 串口接收的右手 back 帧仍计入 sit 的连接代次，重连或断开后不会借用旧帧。新增回归实际贯通双包 parser、handPacketRuntime、canonical 网关及 ChannelBus。
+
+前端通过 collectionSourceStatus 显示开始阻断原因，门户、旧工具入口和确认弹窗共同保护；等待标准 HTTP ACK 后才启用计时，失败或迟到回执不能假启动。当前系统 ID 与宿主源状态必须相符，来源状态独立 epoch 防止迟到的 HTTP 快照覆盖较新的实时广播。旧宿主和独立 localCar 路径使用本次连接的新鲜有效压力帧作兼容保护；localCar 的控制消息自身不能证明存在新压力数据，连续 5 秒无有效压力后停止且不继续写入缓存压力。相关提示维护中英日，实际行为和证据见下方验证记录。
+
+验证：Full 9/9 通过，包含后端 122 文件、客户端 131 文件/1179 项、前端 SDK 36 文件/553 项、双 SDK smoke、lint、TEMP 生产构建、性能基线与浏览器脚本语法；日志为系统 TEMP 的 shroom-collection-full-20261029.log。随后补充手套物理来源兼容，监测专项 12/12 通过，再完整复跑受影响后端域，122 文件全部通过，日志为 shroom-collection-backend-final-20261029.log；未重复无变更且已通过的前端检查。采集入口真实 HTTP/命令/串口管理器/会话日志回归 7/7 通过，既有存储排空、授权和 HaLow TCP 回归均通过。
+
+实际门户浏览器回归通过，覆盖未连接、端口已开但无数据、后台拒绝不启表、退出停采、串口中断、断流提示及恢复不自启；证据目录为系统 TEMP 的 shroom-collection-exit-lFYJiN。localCar 的真实 Home 方法与假时钟验证断流后不继续入表。这些验证使用合成数据与隔离设备替身，尚未进行真实传感器验收。本轮仅修改源码与文档，未提交、重新打包或发布；既有 1.1.43 安装包不含本轮修复。
+
+### 维护记录与项目进度（追加）
+
+| 日期 | 类型 | 说明 |
+| --- | --- | --- |
+| 2026-10-29 | 修复缺陷 | 连接与有效实时数据双重门槛，HTTP/旧WS统一拒绝空采，断流停止并保存尾数据。 |
+| 2026-10-29 | 状态同步 | 当前连接代次绑定数据就绪，清屏/回放不算有效输入，全零真实数据不被误拦。 |
+| 2026-10-29 | 兼容与验证 | 多通道独立保留有效数据证据、单串口双手输出按物理来源计时；Full 9 项、最终后端 122 文件及实际门户回归通过。 |
+| 2026-10-29 | 交付边界 | 修复在源码中，未重新打包、发布或提交，真实传感器仍需验收。 |

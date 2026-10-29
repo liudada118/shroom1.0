@@ -15,6 +15,8 @@ export const runtimeUi = {
   statusUnknown: text('无法确认采集状态，请重试。', 'Unable to confirm collection status. Please retry.', '収集状態を確認できません。再試行してください。'),
   exitPending: text('采集仍在保存或服务未响应，请稍后重试退出。', 'Data is still being saved or the service is not responding. Try leaving again shortly.', '保存中、またはサービスから応答がありません。しばらくしてから終了を再試行してください。'),
   receipt: {
+    streamTimeoutSaving: text('数据中断，采集已停止，已收到的数据正在保存', 'Data stream interrupted; recording stopped and received data is being saved', 'データが途絶えたため記録を停止し、受信済みデータを保存しています'),
+    streamTimeoutSaved: text('数据中断，采集已停止，已收到的数据保存完成', 'Data stream interrupted; recording stopped and received data was saved', 'データが途絶えたため記録を停止しました。受信済みデータは保存されました'),
     committed: text('已提交 {{count}} 帧', '{{count}} frames committed', '{{count}} フレーム保存済み'),
     pending: text('待提交 {{count}} 帧', '{{count}} frames pending', '{{count}} フレーム保存待ち'),
     failed: text('失败 {{count}} 帧', '{{count}} frames failed', '{{count}} フレーム失敗'),

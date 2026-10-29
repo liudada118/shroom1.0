@@ -16,7 +16,8 @@ async function verifyMainEntry(installing) {
   const app = new EventEmitter();
   const warnings = [];
   let finishBackend, shutdownCalls = 0, disposeCalls = 0, quitCalls = 0;
-  app.whenReady = () => ({ then() {} });
+  app.whenReady = () => new Promise(() => {});
+  app.requestSingleInstanceLock = () => true;
   app.quit = () => {
     quitCalls += 1;
     const resumed = quitEvent();
@@ -28,7 +29,9 @@ async function verifyMainEntry(installing) {
   const filename = path.resolve(__dirname, '../../../app/electron/index.js');
   const requireFromEntry = createRequire(filename);
   const module = { exports: {} };
-  vm.runInNewContext(fs.readFileSync(filename, 'utf8') + '\nmodule.exports.setUpdater = (value) => { appUpdater = value; };', {
+  // 按真实 CommonJS 包装入口；本用例模拟已经运行后台、等待退出的应用状态。
+  vm.runInNewContext('(function () {\n' + fs.readFileSync(filename, 'utf8') +
+    '\nmodule.exports.setUpdater = (value) => { appUpdater = value; backendStarted = true; };\n})();', {
     __dirname: path.dirname(filename), module, process, setTimeout, clearTimeout,
     require: (name) => {
       if (name === 'electron') return electron;
@@ -40,6 +43,7 @@ async function verifyMainEntry(installing) {
       } };
       if (name === '../update/autoUpdater') return { AppUpdater: class {} };
       if (name === '../../backend/common/logger') return logger;
+      if (name === '../../backend/common/localServiceErrors') return { subscribeLocalServiceErrors() {} };
       return requireFromEntry(name);
     },
   }, { filename });

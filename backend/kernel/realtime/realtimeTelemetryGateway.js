@@ -48,7 +48,7 @@ function createRealtimeTelemetryGateway({
    *
    * @param {string} channel 内部输出别名，例如 sit、back、armLeft。
    * @param {string|object} payload 内部 legacy 或 manifest 帧。
-   * @param {{source?: string, timestamp?: number}} options 来源信息。
+   * @param {{source?: string, timestamp?: number, synthetic?: boolean}} options 来源信息；synthetic 仅进入内部总线元数据。
    * @returns {{sent:number, frame:object|null}}
    */
   function publishRealtimeFrame(channel, payload, options = {}) {
@@ -74,6 +74,7 @@ function createRealtimeTelemetryGateway({
       frameSource: frame.source,
       outputChannel: frame.outputChannel,
       standard: true,
+      ...(options.synthetic === true ? { synthetic: true } : {}),
     });
 
     return {

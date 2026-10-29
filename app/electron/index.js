@@ -11,6 +11,11 @@
  */
 
 const { app, BrowserWindow, ipcMain, powerSaveBlocker, powerMonitor, shell } = require("electron");
+const { claimApplicationInstance, checkApplicationPorts, startupFailureText } = require('./startupGuard');
+// ⚠️ 重复进程必须在加载后台和注册 IPC 前结束，否则会抢占旧实例的端口。
+if (!claimApplicationInstance(app, () => {
+  if (startupReady && !startupFailed && !appCleanupPromise && !focusMainWindow(mainWindow)) createWindow();
+})) return;
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -33,6 +38,7 @@ const { openServer, shutdownServer, getWsServer, handleCommand } = backendRuntim
 const { runtimeVersionSnapshot, checkLicenseOnWake } = require('./runtimeDiagnostics');
 const { AppUpdater } = require("../update/autoUpdater");
 const logger = require('../../backend/common/logger');
+const { subscribeLocalServiceErrors, watchLocalServiceErrors } = require('../../backend/common/localServiceErrors');
 
 const APP_ROOT = path.resolve(__dirname, "../..");
 
@@ -59,6 +65,20 @@ let appServices = null;
 let packagedFrontendRoot = null;
 let frontendCheckTimer = null;
 let servicesStatus = { frontend: {}, usage: {} };
+let startupFailed = false;
+let backendStarted = false;
+let startupReady = false;
+
+/** 单次显示启动失败原因，再关闭本实例；后台未启动时不能进入会懒加载后台的清理链。 */
+function failStartup(error) {
+  if (startupFailed) return;
+  startupFailed = true;
+  const text = startupFailureText(error, app.getLocale());
+  require('electron').dialog.showErrorBox(text.title, text.message);
+  if (backendStarted) app.quit(); else app.exit(1);
+}
+
+subscribeLocalServiceErrors(({ error, port }) => failStartup(Object.assign(error, { port })));
 
 /** Initialize local update and diagnostic services independently from sensor processing. */
 function getAppServices() {
@@ -70,14 +90,14 @@ function getAppServices() {
   /** Publish only metadata to the trusted application settings panel. */
   const publish = () => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('services:status', { ...servicesStatus,
-      runtimeVersions: runtimeVersionSnapshot(backendRuntime, appServices?.frontend) });
+      runtimeVersions: runtimeVersionSnapshot(backendStarted ? backendRuntime : {}, appServices?.frontend) });
   };
   const frontend = createFrontendCache({ root, appVersion: app.getVersion(), isPackaged: app.isPackaged, fetchImpl,
     onStatus: detail => { servicesStatus.frontend = { ...frontend.status(), ...detail }; publish(); } });
   const usage = createUsageAnalytics({ root, appVersion: app.getVersion(), environment: app.isPackaged ? 'production' : 'development',
     getLicenseKey: require('../../backend/kernel/platform/license/licenseKeyStore').readStoredLicenseKey, fetchImpl,
     getSecrets: () => agentProcess?.getSecrets() || [],
-    getRuntimeVersions: () => runtimeVersionSnapshot(backendRuntime, frontend),
+    getRuntimeVersions: () => runtimeVersionSnapshot(backendStarted ? backendRuntime : {}, frontend),
     onStatus: detail => { servicesStatus.usage = detail; publish(); } });
   appServices = { frontend, usage };
   servicesStatus = { frontend: frontend.status(), usage: usage.status() };
@@ -127,6 +147,7 @@ function focusMainWindow(win) {
  * @returns {BrowserWindow} 当前激活的主应用窗口。
  */
 const createWindow = () => {
+  if (startupFailed || appCleanupPromise) return null;
   if (focusMainWindow(mainWindow)) {
     return mainWindow;
   }
@@ -159,6 +180,7 @@ const createWindow = () => {
 
   // 启动后端服务
   getAppServices();
+  backendStarted = true;
   openServer();
 
   // 加载前端页面
@@ -213,7 +235,7 @@ ipcMain.on("ws-send", (event, data) => {
       handleCommand(data);
     }
   } catch (err) {
-    logger.error("[IPC] ws-send error:", err.message);
+    logger.error("[IPC] ws-send error:", err);
     event.sender.send("error", { message: err.message });
   }
 });
@@ -225,7 +247,7 @@ ipcMain.on("serial-command", (event, data) => {
       handleCommand({ type: "serial", ...data });
     }
   } catch (err) {
-    logger.error("[IPC] serial-command error:", err.message);
+    logger.error("[IPC] serial-command error:", err);
     event.sender.send("error", { message: err.message });
   }
 });
@@ -654,7 +676,7 @@ function cleanupApplicationResources() {
     await Promise.all([
       closeStaticServer(),
       Promise.resolve().then(() => {
-        if (typeof shutdownServer === 'function') return shutdownServer();
+        if (backendStarted && typeof shutdownServer === 'function') return shutdownServer();
       }),
     ]);
     await appServices?.usage.dispose();
@@ -713,6 +735,35 @@ function resolveBuildRoot() {
  * @param {{ hostname: string, port: number, win: BrowserWindow }} options 静态服务配置。
  */
 function startStaticServer({ hostname, port, win }) {
+  /** 重新打开 macOS 窗口时复用当前监听，不关闭后立即抢占相同端口。 */
+  const loadWindow = () => {
+    if (win.isDestroyed() || startupFailed || appCleanupPromise) return;
+    const server = staticServer;
+    void require('./agentProcess').loadAgentWindowUrl(win, `http://${hostname}:${port}`).catch((err) => {
+      logger.error('[Main] Failed to load frontend:', err);
+    });
+    // ⚠️ 每个新窗口都要确认网页启动，不能继续依赖已关闭窗口的回退计时器。
+    const bootCheck = setTimeout(() => {
+      win.removeListener('closed', cancelBootCheck);
+      if (win.isDestroyed() || startupFailed || appCleanupPromise || staticServer !== server) return;
+      const frontend = getAppServices().frontend;
+      if (frontend.rollback(packagedFrontendRoot)) {
+        server.buildRoot = frontend.selectRoot(packagedFrontendRoot);
+        void require('./agentProcess').loadAgentWindowUrl(win, `http://${hostname}:${port}`).catch(err => {
+          logger.error('[Main] Failed to load fallback frontend:', err);
+        });
+      }
+    }, 30000);
+    /** 窗口关闭时停止本窗口的网页启动检查。 */
+    function cancelBootCheck() { clearTimeout(bootCheck); }
+    win.once('closed', cancelBootCheck);
+    bootCheck.unref?.();
+  };
+  if (staticServer) {
+    if (staticServer.listening) loadWindow();
+    else staticServer.once('listening', loadWindow);
+    return;
+  }
   const MIME_TYPES = {
     ".html": "text/html",
     ".css": "text/css",
@@ -730,12 +781,11 @@ function startStaticServer({ hostname, port, win }) {
     ".map": "application/json",
   };
 
-  let buildRoot = resolveBuildRoot();
+  const buildRoot = resolveBuildRoot();
   logger.info(`[Main] Static build root: ${buildRoot}`);
 
-  closeStaticServer();
-
-  staticServer = http.createServer((req, res) => {
+  const server = http.createServer((req, res) => {
+    const buildRoot = server.buildRoot;
     let urlPath = req.url === "/" ? "index.html" : req.url.split("?")[0].replace(/^\/+/, "");
     // 解码 URL：资源名可能含空格/中文（如开屏图 "ChatGPT Image …(1).png"），
     // 不解码会按字面 %20/转义串去磁盘找文件导致 404（图片裂开）。
@@ -783,25 +833,22 @@ function startStaticServer({ hostname, port, win }) {
     });
   });
 
+  server.buildRoot = buildRoot;
+  staticServer = server;
+  watchLocalServiceErrors(staticServer, { service: 'frontend-http', port, logger });
   staticServer.listen(port, hostname, () => {
     logger.info(`[Main] Static server running at http://${hostname}:${port}/`);
-    require('./agentProcess').loadAgentWindowUrl(win, `http://${hostname}:${port}`).catch((err) => {
-      logger.error(`[Main] Failed to load frontend: ${err.message}`);
-    });
-    const bootCheck = setTimeout(() => {
-      if (!win.isDestroyed() && getAppServices().frontend.rollback(packagedFrontendRoot)) {
-        buildRoot = getAppServices().frontend.selectRoot(packagedFrontendRoot);
-        void require('./agentProcess').loadAgentWindowUrl(win, `http://${hostname}:${port}`);
-      }
-    }, 30000);
-    bootCheck.unref?.();
+    loadWindow();
   });
 }
 
 // ============================================================
 // 应用生命周期
 // ============================================================
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  await checkApplicationPorts();
+  if (appCleanupPromise) return;
+  startupReady = true;
   ipcMain.handle('services:command', async (event, action, input) => {
     if (!require('./agentProcess').isTrustedAgentSender(event, mainWindow)) throw new Error('应用来源无效。');
     const services = getAppServices();
@@ -889,6 +936,9 @@ app.whenReady().then(() => {
       createWindow();
     }
   });
+}).catch(error => {
+  logger.error('[Startup] Application initialization failed:', error);
+  failStartup(error);
 });
 
 app.on("window-all-closed", () => {

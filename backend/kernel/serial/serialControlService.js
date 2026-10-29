@@ -3,18 +3,22 @@ const { createSerialError, serializeSerialError } = require('@shroom/backend/ser
 /**
  * 构造回到实时模式时需要推送的空白帧。
  * 作用是让旧前端页面清空历史回放画面，避免残留上一帧历史数据。
+ * synthetic 仅供内部来源判定，不能把界面清屏当作真实设备输入。
  */
 function createZeroPayloads({ file, sitTotal, backTotal, isCar, isThreePortFile }) {
   const payloads = [];
   payloads.push({
+    synthetic: true,
     sitData: new Array(file === 'bigBed' ? 2048 : sitTotal).fill(0),
   });
   if (isCar(file)) {
     payloads.push({
+      synthetic: true,
       backData: new Array(backTotal).fill(0),
     });
     if (isThreePortFile(file)) {
       payloads.push({
+        synthetic: true,
         headData: new Array(100).fill(0),
       });
     }
@@ -147,16 +151,19 @@ function registerSerialControlHandlers(router, deps) {
 
       if (runtime.port1?.isOpen) {
         publishSystemEvent({
+          synthetic: true,
           sitData: new Array(runtime.file === 'bigBed' ? 2048 : runtime.sitTotal).fill(0),
         });
       }
       if (runtime.port2?.isOpen) {
         publishSystemEvent({
+          synthetic: true,
           backData: new Array(runtime.backTotal).fill(0),
         });
       }
       if (runtime.portHead?.isOpen) {
         publishSystemEvent({
+          synthetic: true,
           headData: new Array(100).fill(0),
         });
       }
@@ -310,11 +317,11 @@ function registerSerialControlHandlers(router, deps) {
       const runtime = getRuntime();
       if (context.scope === 'back') {
         if (message.local === true) {
-          publishSystemEvent({ backData: new Array(runtime.backTotal).fill(0) });
+          publishSystemEvent({ synthetic: true, backData: new Array(runtime.backTotal).fill(0) });
         } else {
           setRuntime({ localFlag: false });
           stopPlaybackTimer();
-          publishSystemEvent({ backData: new Array(runtime.backTotal).fill(0) });
+          publishSystemEvent({ synthetic: true, backData: new Array(runtime.backTotal).fill(0) });
           if (runtime.com1) {
             openBackSerialPort(runtime.com1, 'shared websocket resume back');
           }

@@ -97,6 +97,19 @@ function createRuntimeControlService(deps) {
    */
   function updateCollectionControl(message) {
     if (message.flag === true) deps.requireAccess?.('acquire');
+    if (message.flag === true) {
+      // ⚠️ 必须在创建会话、重置时钟和改名之前查真实连接；选过串口或正在重连不代表有设备。
+      const source = deps.getCollectionSource?.();
+      if (source?.playback || source?.code === 'COLLECTION_PLAYBACK_ACTIVE') {
+        throw Object.assign(new Error('请先退出回放，再开始采集。'), { code: 'COLLECTION_PLAYBACK_ACTIVE', httpStatus: 409 });
+      }
+      if (source?.connected !== true) {
+        throw Object.assign(new Error('请先连接传感器，再开始采集。'), { code: 'COLLECTION_DEVICE_NOT_CONNECTED', httpStatus: 409 });
+      }
+      if (source.ready !== true) {
+        throw Object.assign(new Error('尚未收到有效传感器数据，请等待数据后再开始采集。'), { code: 'COLLECTION_DATA_NOT_READY', httpStatus: 409 });
+      }
+    }
     const runtime = getRuntime();
     const next = {};
     if (message.time != null) next.saveTime = message.time;

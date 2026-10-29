@@ -121,4 +121,11 @@ assert.deepStrictEqual(mappedOnlyResult.frame.payload.value, [6, 7]);
 assert.strictEqual(mappedOnlyResult.frame.payload.stages.processed, null);
 assert.deepStrictEqual(mappedOnlyResult.frame.payload.stages.mapped, [6, 7]);
 
+const clear = gateway.publishRealtimeFrame('sit', { sitData: [0, 0], synthetic: true }, { synthetic: true });
+assert.strictEqual(busCalls.at(-1).metadata.synthetic, true, 'collection readiness must recognize UI clears');
+assert.ok(!Object.hasOwn(clear.frame, 'synthetic'), 'the internal marker must not change the sensor.frame contract');
+assert.ok(!Object.hasOwn(websocketCalls.at(-1).payload, 'synthetic'));
+gateway.publishRealtimeFrame('sit', { sitData: [0, 0] });
+assert.strictEqual(busCalls.at(-1).metadata.synthetic, undefined, 'real zero pressure remains eligible data');
+
 console.log('realtimeTelemetryGateway.test.js passed');

@@ -39,14 +39,17 @@ describe('到期后保留历史与停止入口', () => {
 
   it('会话栏只禁新增采集，允许停止和历史入口', () => {
     const html = renderToStaticMarkup(<PortalSessionBar mode="now" collecting canAcquire={false} />);
-    expect(html).toMatch(/aria-label="开始采集" disabled=""/);
+    expect(html).toMatch(/aria-label="开始采集"[^>]*disabled=""/);
     expect(html).not.toMatch(/aria-label="结束采集" disabled=""/);
     const playback = renderToStaticMarkup(<PortalSessionBar mode="playback" collecting={false} canAcquire={false} />);
     expect(playback).not.toMatch(/aria-label="回放"[^>]*disabled/);
   });
 
   it('旧宿主仍可打开采集设置，保存收尾期间不能开始下一轮', () => {
-    const legacy = titleFor(); legacy.props.licenseAccess = undefined; legacy.openCollectionModal();
+    const legacy = titleFor(); legacy.props.licenseAccess = undefined; legacy.props.wsConnected = true; legacy.props.history = 'now';
+    legacy.props.collectionLocalFrameReady = true;
+    legacy.state.serialStates.sit = { status: 'open', isOpen: true };
+    legacy.openCollectionModal();
     expect(legacy.state.collectionModalOpen).toBe(true);
     const finalizing = titleFor({ ...expired, state: 'active', canAcquire: true });
     finalizing.props.collectionSummary = { phase: 'finalizing' };

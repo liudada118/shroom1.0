@@ -42,6 +42,13 @@ function createHalowService({ getContext, onFrame, publish = () => {}, receiverO
   /** 判断传输是否仍被启动、接收或清理任务占用。 */
   function isBusy() { return pendingStarts > 0 || receiver.phase !== 'stopped'; }
 
+  /** 采集只接受当前系统选中的在线设备，单纯开启 TCP 监听不代表设备已连接。 */
+  function hasConnectedDevice() {
+    if (!isAllowed() || receiver.phase !== 'listening') return false;
+    const status = receiver.snapshot();
+    return Boolean(status.selectedDeviceId) && status.clients.some(client => client.deviceId === status.selectedDeviceId);
+  }
+
   /** 立即取消旧会话；系统切换调用它时不必等待端口释放才更新身份。 */
   function stop() { return isBusy() ? receiver.stop() : Promise.resolve(); }
 
@@ -67,7 +74,7 @@ function createHalowService({ getContext, onFrame, publish = () => {}, receiverO
 
   /** 关闭应用时拒绝后续启动并释放所有连接。 */
   function dispose() { closing = true; return stop(); }
-  return { receiver, execute, stop, dispose, isBusy, requireSerialAvailable, snapshot: () => receiver.snapshot() };
+  return { receiver, execute, stop, dispose, isBusy, hasConnectedDevice, requireSerialAvailable, snapshot: () => receiver.snapshot() };
 }
 
 /** 注册规范 HTTP 命令；异步操作完成后才回执最终状态。 */

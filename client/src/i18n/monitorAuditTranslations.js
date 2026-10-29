@@ -1,6 +1,31 @@
 // Static interface copy only; system IDs, saved labels and sensor data stay unchanged.
 export default {
   "monitorUi": {
+    "collectionWaitingForData": {
+      "zh": "尚未收到有效传感器数据，请等待数据后再开始采集。",
+      "en": "No valid sensor data has arrived yet. Wait for data before starting recording.",
+      "ja": "有効なセンサーデータをまだ受信していません。データを受信してから記録を開始してください。"
+    },
+    "collectionLocalDataStopped": {
+      "zh": "数据中断，采集已停止，已有数据已保留。",
+      "en": "The data stream stopped. Recording has stopped and existing data has been retained.",
+      "ja": "データが途絶えたため記録を停止しました。受信済みデータは保持されています。"
+    },
+    "collectionConnectFirst": {
+      "zh": "请先连接传感器，再开始采集。",
+      "en": "Connect a sensor before starting recording.",
+      "ja": "センサーを接続してから記録を開始してください。"
+    },
+    "collectionExitPlayback": {
+      "zh": "请先退出回放，再开始采集。",
+      "en": "Exit playback before starting recording.",
+      "ja": "再生を終了してから記録を開始してください。"
+    },
+    "collectionStartFailed": {
+      "zh": "采集未能启动，请检查设备连接后重试。",
+      "en": "Recording could not start. Check the device connection and retry.",
+      "ja": "記録を開始できませんでした。デバイスの接続を確認して再試行してください。"
+    },
     "renderDisplay": {
       "zh": "渲染与显示",
       "en": "Rendering and display",

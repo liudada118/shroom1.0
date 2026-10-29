@@ -10,6 +10,7 @@ const openedManifestPorts = [];
 const closedManagedPorts = [];
 const closeAllReasons = [];
 let selectedHistory = { length: 428, availableChannels: ['back'] };
+let carMode = false, threePortMode = false;
 const runtime = {
   backTotal: 1024,
   endDate: 200,
@@ -47,8 +48,8 @@ registerSerialControlHandlers({
   getRuntime: () => runtime,
   getSensorBaudRate: () => 921600,
   initDb: () => ({ db: 'sit-db', db1: 'back-db', db2: 'head-db' }),
-  isCar: () => false,
-  isThreePortFile: () => false,
+  isCar: () => carMode,
+  isThreePortFile: () => threePortMode,
   listPorts: async () => [],
   loadSelectedHistory: () => {
     if (selectedHistory instanceof Error) throw selectedHistory;
@@ -131,5 +132,31 @@ assert.deepStrictEqual(historyLoadHandler.handle({ getTime: 'right-only' }), {
 });
 selectedHistory = new Error('所选记录没有可回放的数据');
 assert.throws(() => historyLoadHandler.handle({ getTime: 'missing' }), /没有可回放的数据/);
+
+const playbackSwitch = handlers.find(handler => handler.name === 'local-playback-switch');
+for (const [car, three, fields] of [[false, false, ['sitData']], [true, false, ['sitData', 'backData']],
+  [true, true, ['sitData', 'backData', 'headData']]]) {
+  carMode = car; threePortMode = three;
+  const start = publishedEvents.length;
+  playbackSwitch.handle({ local: false });
+  const cleared = publishedEvents.slice(start);
+  assert.equal(runtime.localFlag, false);
+  assert.equal(cleared.length, fields.length);
+  cleared.forEach((event, index) => {
+    assert.equal(event.synthetic, true, 'realtime-mode display clears must not prove device readiness');
+    assert.ok(event[fields[index]].length > 0);
+    assert.ok(event[fields[index]].every(value => value === 0));
+  });
+}
+for (const local of [true, false]) {
+  playbackSwitch.handle({ local }, { scope: 'back' });
+  assert.equal(publishedEvents.at(-1).synthetic, true, 'legacy back-only clears are synthetic too');
+}
+runtime.port1 = runtime.port2 = runtime.portHead = { isOpen: true };
+const switchStart = publishedEvents.length;
+switchHandler.handle({ file: 'next-system' });
+const switchClears = publishedEvents.slice(switchStart).filter(event => !event.currentSensorType);
+assert.equal(switchClears.length, 3);
+assert.ok(switchClears.every(event => event.synthetic === true));
 
 console.log('serialControlService.test.js passed');

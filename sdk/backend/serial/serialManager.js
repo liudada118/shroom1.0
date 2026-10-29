@@ -231,7 +231,8 @@ function createSerialManager({ createSerialPort = defaultCreateSerialPort, parse
       });
       if (config.parserChannel && parserManager) {
         worker.parser = parserManager.pipe(worker.port, config.parserChannel);
-        worker.parser.on('data', worker.frameHandler);
+        // ⚠️ 业务回调可能同步发布首帧；先更新健康状态，避免有效首帧被采集就绪检查拒绝。
+        worker.parser.prependListener('data', worker.frameHandler);
       }
       worker.port.on('data', worker.rawHandler);
       if (typeof config.dataHandler === 'function') worker.port.on('data', config.dataHandler);

@@ -1,4 +1,5 @@
 const DEFAULT_REPORT_HTTP_PORT = 19245;
+const { watchLocalServiceErrors } = require('../../../common/localServiceErrors');
 const DEFAULT_REPORT_HTTP_HOST = '127.0.0.1';
 
 /**
@@ -36,9 +37,10 @@ function startLocalHttpServer({
   logger,
   port = DEFAULT_REPORT_HTTP_PORT,
 }) {
-  return app.listen(port, host, () => {
+  const server = app.listen(port, host, () => {
     logger.info(`[HTTP] OneStep report server listening on http://${host}:${port}`);
   });
+  return watchLocalServiceErrors(server, { service: 'control-http', port, logger });
 }
 
 module.exports = {

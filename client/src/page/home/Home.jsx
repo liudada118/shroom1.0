@@ -1082,6 +1082,9 @@ class Home extends React.Component {
       jqbedAlgorithmLogFrame: null,
       jqbedAlgorithmLogSubscription: null,
       wsConnected: false,
+      collectionSourceStatus: null,
+      collectionLocalFrameReady: false,
+      localCarControlConnected: false,
       wsConnectionEpoch: 0,
       numMatrixFlag: initialMode,
       centerFlag: false,
@@ -1340,6 +1343,8 @@ class Home extends React.Component {
 
   appendControlCollectionRow = (row) => {
     if (!canUseLicenseCapability(this.state.licenseAccess, 'canAcquire')) return;
+    if (this.state.matrixName === 'localCar' && (!this.state.wsConnected || !this.state.localCarControlConnected
+      || !this._collectionLastFrameAt || Date.now() - this._collectionLastFrameAt >= 5000)) return;
     collection.push(row);
     localStorage.setItem("collection", JSON.stringify(collection));
     this.setState({ csvData: collection, length: collection.length });
@@ -1428,6 +1433,7 @@ class Home extends React.Component {
   }
 
   connectControlSocket = (ip, options = {}) => {
+    this.setState({ localCarControlConnected: false });
     if (wsControl) {
       try {
         wsControl.onclose = null;
@@ -1439,12 +1445,15 @@ class Home extends React.Component {
     wsControl = new WebSocket(`ws://${ip}:23001/ws/msg`);
     wsControl.onopen = () => {
       console.info("connect success");
+      this.setState({ localCarControlConnected: true });
     };
     wsControl.onmessage = (event) => {
       this.handleControlMessage(event.data, options);
     };
     wsControl.onerror = () => {};
-    wsControl.onclose = () => {};
+    wsControl.onclose = () => {
+      this.setState({ localCarControlConnected: false, colWebFlag: false });
+    };
   }
 
 /** 将单手末帧按系统身份、实时/回放及记录隔离。 */
@@ -1596,7 +1605,8 @@ class Home extends React.Component {
     this.jqbedAlarmSpeechBlocked = false;
     this.jqbedAlarmSpeechStatus = null;
     this.jqbedAlarmSpeechSource = null;
-    this.setState({ wsConnected: false, jqbedReturnedSettings: null, jqbedAlgorithmLogFrame: null, jqbedAlgorithmLogSubscription: null });
+    this.resetCollectionFrameReadiness();
+    this.setState({ wsConnected: false, collectionSourceStatus: null, jqbedReturnedSettings: null, jqbedAlgorithmLogFrame: null, jqbedAlgorithmLogSubscription: null });
     // window.alert(window.innerWidth)
     if (this._portalFontSize === undefined) this._portalFontSize = document.documentElement.style.fontSize;
     document.documentElement.style.fontSize = `${window.innerWidth / 120}px`;
@@ -1653,8 +1663,13 @@ class Home extends React.Component {
       const collectionController = new AbortController();
       this._collectionStatusController = collectionController;
       const collectionStatusEpoch = this._collectionStatusEpoch || 0;
+      const collectionSourceEpoch = this._collectionSourceStatusEpoch || 0;
       requestJson('/api/collection/status', { signal: collectionController.signal }).then(payload => {
-        if (!collectionController.signal.aborted && collectionStatusEpoch === (this._collectionStatusEpoch || 0)) this.applyCollectionSummary(payload.collectionSummary || payload);
+        if (collectionController.signal.aborted) return;
+        if (collectionStatusEpoch === (this._collectionStatusEpoch || 0)) this.applyCollectionSummary(payload.collectionSummary || payload);
+        if (payload.collectionSourceStatus && collectionSourceEpoch === (this._collectionSourceStatusEpoch || 0)) {
+          this.applyCollectionSourceStatus(payload.collectionSourceStatus);
+        }
       }).catch(() => {});
     };
     ws.onmessage = (e) => {
@@ -1680,7 +1695,8 @@ class Home extends React.Component {
       this.jqbedAlarmSpeechState?.reset();
       this.jqbedAlarmSpeechStatus = null;
       this.jqbedAlarmSpeechSource = null;
-      this.setState({ wsConnected: false, jqbedReturnedSettings: null, jqbedAlgorithmLogFrame: null, jqbedAlgorithmLogSubscription: null });
+      this.resetCollectionFrameReadiness();
+      this.setState({ wsConnected: false, collectionSourceStatus: null, colWebFlag: false, jqbedReturnedSettings: null, jqbedAlgorithmLogFrame: null, jqbedAlgorithmLogSubscription: null });
       // 息屏或网络中断后自动重连
       console.warn('[WS] 连接断开，3s 后自动重连...');
       if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
@@ -1725,6 +1741,7 @@ class Home extends React.Component {
   componentWillUnmount() {
     this.props.onPortalLeaveGuard?.(null);
     this._collectionStatusController?.abort();
+    clearInterval(this._collectionFrameWatchdog);
     clearLastFrame();
     if (this.props.portalEmbedded) document.documentElement.style.fontSize = this._portalFontSize;
     if (this._unsubscribeFormulaCharts) {
@@ -1778,6 +1795,8 @@ class Home extends React.Component {
   }
 
   changeWs(ip) {
+    this.resetCollectionFrameReadiness();
+    this.setState({ wsConnected: false, collectionSourceStatus: null, colWebFlag: false });
     if (ws) {
       ws.close();
     }
@@ -1790,6 +1809,7 @@ class Home extends React.Component {
     ws.onopen = () => {
       // connection opened
       console.info("connect success");
+      this.setState({ wsConnected: true });
     };
     ws.onmessage = (e) => {
       const message = parseWebSocketEventPayload(e);
@@ -1805,6 +1825,8 @@ class Home extends React.Component {
       console.warn('[WS] 连接错误，将在 3s 后重连');
     };
     ws.onclose = (e) => {
+      this.resetCollectionFrameReadiness();
+      this.setState({ wsConnected: false, colWebFlag: false });
       // 息屏或网络中断后自动重连
       console.warn('[WS] 连接断开，3s 后自动重连...');
       if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
@@ -2035,10 +2057,12 @@ class Home extends React.Component {
       if (historyOnly && this._licenseModal) { this._licenseModal.destroy?.(); this._licenseModal = null; }
     }
     if (jsonObject.collectionSummary) this.applyCollectionSummary(jsonObject.collectionSummary);
+    if (jsonObject.collectionSourceStatus) this.applyCollectionSourceStatus(jsonObject.collectionSourceStatus);
     this.cacheSingleGloveFrame(jsonObject);
     if (jsonObject.halowStatus) this.setState({ halowStatus: jsonObject.halowStatus });
     if (jsonObject.halowClear) this.clearHalowDisplay();
     if (jsonObject.serialStatus) {
+      if (jsonObject.serialStatus.status !== 'open' || jsonObject.serialStatus.isOpen !== true) this.resetCollectionFrameReadiness();
       serialFeedback.status(jsonObject.serialStatus);
       window.dispatchEvent(new CustomEvent('shroom-serial-status', { detail: jsonObject.serialStatus }));
     }
@@ -2072,6 +2096,7 @@ class Home extends React.Component {
     }
 
     const currentDisplayDefinition = getDisplayDefinition(this.state.matrixName);
+    if (this.isCurrentDisplayFrame(jsonObject)) this.observeCollectionFrame(jsonObject);
     const hasPressureFrame = Boolean(
       getSensorFrameOutputChannel(jsonObject)
       && getSensorFrameChannelValue(jsonObject),
@@ -3694,6 +3719,10 @@ class Home extends React.Component {
     }
     // 换展示形式时丢掉总线上的末帧。不丢的话，下一个渲染器挂上来会先收到
     // 一帧属于上一台设备的数据（订阅时的补发），画出一帧错的东西。
+    if (systemChanged || prevState.history !== this.state.history || prevState.local !== this.state.local) {
+      this.resetCollectionFrameReadiness();
+      this.setState({ collectionSourceStatus: null });
+    }
     if (systemChanged) {
       clearLastFrame();
       this.props.onPortalSystemChange?.(this.state.systemId || this.state.matrixName);
@@ -4709,6 +4738,50 @@ class Home extends React.Component {
     }
   };
 
+  /** 来源切换或断线时清除本次连接的帧证据，历史缓存不能让开始采集重新可用。 */
+  resetCollectionFrameReadiness = () => {
+    this._collectionLastFrameAt = null;
+    clearInterval(this._collectionFrameWatchdog);
+    this._collectionFrameWatchdog = null;
+    if (this.state.collectionLocalFrameReady) this.setState({ collectionLocalFrameReady: false });
+  };
+
+  /** 低频实时就绪状态使旧 HTTP 快照失效，防止迟到响应覆盖已收到有效帧的判定。 */
+  applyCollectionSourceStatus = (collectionSourceStatus) => {
+    this._collectionSourceStatusEpoch = (this._collectionSourceStatusEpoch || 0) + 1;
+    this.setState({ collectionSourceStatus });
+    if (this.state.matrixName !== 'localCar') this.resetCollectionFrameReadiness();
+  };
+
+  /** 旧宿主和独立网络采集使用实际实时压力帧，新宿主直接使用权威就绪广播。 */
+  observeCollectionFrame = (frame) => {
+    if (this.state.history !== 'now' || this.state.local || frame.source === 'playback') return;
+    const localCar = this.state.matrixName === 'localCar';
+    if (this.state.collectionSourceStatus && !localCar) return;
+    const values = getSensorFrameChannelValue(frame);
+    if (!Array.isArray(values) || !values.length || !Array.from(values).every(Number.isFinite)) return;
+    this._collectionLastFrameAt = Date.now();
+    if (localCar) {
+      const sit = getSensorFrameChannelValue(frame, 'sit'), back = getSensorFrameChannelValue(frame, 'back');
+      if (sit?.length && sit.every(Number.isFinite)) wsPointDataSit = sit;
+      if (back?.length && back.every(Number.isFinite)) wsPointDataBack = back;
+    }
+    if (!this.state.collectionLocalFrameReady) this.setState({ collectionLocalFrameReady: true });
+    if (this._collectionFrameWatchdog) return;
+    this._collectionFrameWatchdog = setInterval(() => {
+      if (Date.now() - this._collectionLastFrameAt < 5000) return;
+      this.resetCollectionFrameReadiness();
+      if (this.state.matrixName === 'localCar' && this.state.colWebFlag) {
+        this.setState({ colWebFlag: false });
+        message.warning(this.props.t('monitorUi.collectionLocalDataStopped'));
+      } else if (!this.state.collectionSourceStatus && this._collecting) {
+        this.wsSendObj({ flag: false });
+        this.setState({ colFlag: true });
+        this.setColValueFlag(false);
+      }
+    }, 250);
+  };
+
   /** 后台中断/停止回执同步开关与秒表，恢复页面时沿用真实采集起止时间。 */
   applyCollectionSummary = (value) => {
     const collectionSummary = readCollectionSummary(value);
@@ -5351,6 +5424,9 @@ class Home extends React.Component {
             jqbedAlgorithmLogSubscription={this.state.jqbedAlgorithmLogSubscription}
             wsConnected={this.state.wsConnected}
             wsConnectionEpoch={this.state.wsConnectionEpoch}
+            collectionSourceStatus={this.state.collectionSourceStatus}
+            collectionLocalFrameReady={this.state.collectionLocalFrameReady}
+            localCarControlConnected={this.state.localCarControlConnected}
             wsSendObj={this.wsSendObj}
             changeMatrix={this.changeMatrix}
             changeLocal={this.changeLocal}

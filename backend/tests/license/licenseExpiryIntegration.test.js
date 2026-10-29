@@ -171,6 +171,7 @@ test('real HTTP history and selected-data analysis remain usable after expiry wh
   /** Preserve actual runtime mutations so refused commands cannot silently start acquisition. */
   const setRuntime = (patch) => { runtime = { ...runtime, ...patch }; if (patch.flag !== undefined) events.push(`flag:${patch.flag}`); };
   controls = createRuntimeControlService({ getRuntime: () => runtime, setRuntime, requireAccess: policy.requireAccess,
+    getCollectionSource: () => ({ connected: true, ready: true, playback: false }),
     resetCollectionStorageClock: () => events.push('reset-clock'),
     flushCollectionInsertQueues: () => events.push('flush-tail'), onCollectionStopping: () => events.push('close-admission'),
     startPlaybackTimer: () => events.push('playback-start'), stopPlaybackTimer: () => events.push('playback-stop'),

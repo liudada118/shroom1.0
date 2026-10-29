@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { describeCollectionSummary, readCollectionSummary } from './collectionStatus';
 
 describe('采集收尾回执', () => {
+  it('无数据超时的保存中与保存完成提示保持区分', () => {
+    const summary = { reason: 'DATA_STREAM_TIMEOUT', phase: 'finalizing', result: 'pending', channels: {} };
+    expect(describeCollectionSummary(summary)).toBe('数据中断，采集已停止，已收到的数据正在保存');
+    expect(describeCollectionSummary({ ...summary, phase: 'interrupted', result: 'saved' })).toBe('数据中断，采集已停止，已收到的数据保存完成');
+  });
   it('停止接收和数据库已保存是两种状态，只有明确结果能显示完成', () => {
     const finalizing = readCollectionSummary({ phase: 'finalizing', result: 'pending', channels: { a: { queued: 10, committed: 8, pending: 2, failed: 0 } } });
     expect(describeCollectionSummary(finalizing)).toContain('正在保存尾部数据');

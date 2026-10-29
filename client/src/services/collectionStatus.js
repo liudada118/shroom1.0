@@ -34,9 +34,10 @@ export function describeCollectionSummary(summary, t = i18n.t.bind(i18n)) {
   const details = [committed !== null ? t('runtimeUi.receipt.committed', { count: committed }) : '',
     pending !== null ? t('runtimeUi.receipt.pending', { count: pending }) : '',
     failed ? t('runtimeUi.receipt.failed', { count: failed }) : ''].filter(Boolean).join(t('runtimeUi.receipt.separator'));
-  const status = summary.phase === 'finalizing' ? 'finalizing'
+  const streamTimeout = summary.reason === 'DATA_STREAM_TIMEOUT';
+  const status = summary.phase === 'finalizing' ? (streamTimeout ? 'streamTimeoutSaving' : 'finalizing')
     : summary.phase === 'completed' && summary.result === 'saved' ? 'completed'
-      : summary.phase === 'interrupted' && summary.result === 'saved' ? 'interruptedSaved'
+      : summary.phase === 'interrupted' && summary.result === 'saved' ? (streamTimeout ? 'streamTimeoutSaved' : 'interruptedSaved')
         : summary.result === 'partial' ? 'partial'
           : summary.phase === 'save_error' ? 'saveError'
             : summary.phase === 'interrupted' ? 'interrupted'

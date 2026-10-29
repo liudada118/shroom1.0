@@ -11,6 +11,8 @@ import { Menu, Button, Select, message, notification, Divider, Space, Radio, Dra
 import Slider from '../appTools/UsageSlider';
 import { trackUsage } from '../../services/usageAnalytics';
 import { canUseLicenseCapability } from '../../services/licenseAccess';
+import { hasCollectionDevice, collectionStartBlock } from '../../services/collectionConnection';
+import { translateBackendMessage } from '../../i18n/translateBackendMessage';
 import { PlusOutlined, SettingOutlined, SlidersOutlined } from '@ant-design/icons';
 import exchange from '../../assets/images/exchange.png'
 import option from '../../assets/images/Option.png'
@@ -359,6 +361,7 @@ class Title extends React.Component {
       fingerIndex: 0,
       colHZ: 12,
       collectionModalOpen: false,
+      collectionStarting: false,
       collectLabel: '',
       collectFrequencyMode: 'serial',
       collectMatrixMode: '16x16',
@@ -577,11 +580,12 @@ class Title extends React.Component {
     if (prevProps.matrixName !== this.props.matrixName) {
       this._portalScope = {};
       this._serialOperations?.clear();
+      this._collectionStarting = null;
       this._csvActive = false;
       this._csvStarting = false;
       this._csvBatch?.dispose();
       this._csvBatch = null;
-      this.setState({ serialPending: {}, serialStates: {}, manifestPortSelections: {},
+      this.setState({ serialPending: {}, serialStates: {}, manifestPortSelections: {}, collectionStarting: false, collectionModalOpen: false,
         portalPlaybackValue: '', portalDownloadValues: [], portalPlaybackOpen: false,
         portalSpecialOpen: false, portalToolsOpen: false,
         portalBusy: false, portalError: '', dataTime: '', csvBatchDates: [], csvDownloadModalOpen: false,
@@ -1221,8 +1225,34 @@ class Title extends React.Component {
     return [manualName, featureName1, featureName2].filter(Boolean).join('_');
   }
 
+  /** 按当前系统的通道和实际后台连接判断是否可新增采集。 */
+  hasCollectionDevice = () => hasCollectionDevice({
+    definition: getDisplayDefinition(this.props.systemId || this.props.matrixName),
+    serialStates: this.state.serialStates, halowStatus: this.props.halowStatus,
+    allowHalow: isHalowMatrixTitle(this.props.systemId || this.props.matrixName),
+    localCar: this.props.matrixName === 'localCar', wsConnected: this.props.matrixName === 'localCar'
+      ? this.props.wsConnected && this.props.localCarControlConnected : this.props.wsConnected,
+  });
+
+  /** 返回开始采集的具体阻断原因，宿主 ready 包含实际有效帧而非仅端口打开。 */
+  getCollectionStartBlock = () => collectionStartBlock({
+    history: this.props.history, wsConnected: this.props.wsConnected,
+    systemId: this.props.systemId || this.props.matrixName, sourceStatus: this.props.collectionSourceStatus,
+    deviceConnected: this.hasCollectionDevice(), localFrameReady: this.props.collectionLocalFrameReady,
+    localCar: this.props.matrixName === 'localCar',
+  });
+
+  /** 开始与弹窗确认都检查连接，避免弹窗打开后断线仍启动秒表。 */
+  requireCollectionDevice = () => {
+    const key = this.getCollectionStartBlock();
+    if (!key) return true;
+    message.warning(this.props.t(key));
+    return false;
+  };
+
   openCollectionModal = () => {
-    if (!this.requireLicenseCapability('canAcquire') || this.props.collectionSummary?.phase === 'finalizing') return;
+    if (!this.requireLicenseCapability('canAcquire') || this.props.collectionSummary?.phase === 'finalizing'
+      || this.state.collectionStarting || !this.requireCollectionDevice()) return;
     this.setState({
       collectionModalOpen: true,
       collectLabel: this.state.collectLabel || '',
@@ -1230,7 +1260,8 @@ class Title extends React.Component {
   }
 
   closeCollectionModal = () => {
-    this.setState({ collectionModalOpen: false });
+    this._collectionStarting = null;
+    this.setState({ collectionModalOpen: false, collectionStarting: false });
   }
 
   stopCollection = () => {
@@ -1250,8 +1281,14 @@ class Title extends React.Component {
     this.props.setColValueFlag(flag);
   }
 
-  startCollectionWithOptions = () => {
-    if (!this.requireLicenseCapability('canAcquire') || this.props.collectionSummary?.phase === 'finalizing') return;
+  startCollectionWithOptions = async () => {
+    if (!this.requireLicenseCapability('canAcquire') || this.props.collectionSummary?.phase === 'finalizing'
+      || this._collectionStarting || !this.requireCollectionDevice()) return;
+    const isCurrent = capturePortalOperation(this);
+    const operation = Symbol('collection-start');
+    const systemId = this.props.systemId;
+    this._collectionStarting = operation;
+    this.setState({ collectionStarting: true });
     const formattedDate = Date.now();
     const baseName = this.getCollectionBaseName();
     const collectHz = Math.max(1, Number(this.state.colHZ) || 12);
@@ -1265,22 +1302,33 @@ class Title extends React.Component {
       ? `${baseName}_${timeStampToDateNospace(formattedDate)} ${formattedDate}`
       : '';
 
-    this.props.wsSendObj({
-      colHZ: frequencyMode === 'custom' ? collectHz : null,
-      flag: true,
-      collectOptions,
-      ...(nextLoadData ? { colName: nextLoadData } : { time: formattedDate }),
-    });
+    try {
+      const started = await executePortalLegacyControl(commandClient, {
+        colHZ: frequencyMode === 'custom' ? collectHz : null,
+        flag: true,
+        collectOptions,
+        ...(nextLoadData ? { colName: nextLoadData } : { time: formattedDate }),
+      }, () => isCurrent() && this.props.systemId === systemId && this._collectionStarting === operation);
+      if (!started || this.getCollectionStartBlock()) return;
 
-    if (nextLoadData) {
-      loadData = nextLoadData;
-    } else {
-      loadData = '';
+      loadData = nextLoadData || '';
+
+      // 已收到宿主广播时沿用真实开始时间，不用迟到的 ACK 重置秒表。
+      if (this.props.colFlag) {
+        this.props.changeStateData({ colFlag: false, collectionSummary: null });
+        this.props.setColValueFlag(true);
+      }
+      this.setState({ collectionModalOpen: false, colHZ: collectHz });
+    } catch (error) {
+      if (isCurrent() && this.props.systemId === systemId) {
+        message.warning(translateBackendMessage(error.message, this.props.t) || this.props.t('monitorUi.collectionStartFailed'));
+      }
+    } finally {
+      if (this._collectionStarting === operation) {
+        this._collectionStarting = null;
+        if (isCurrent()) this.setState({ collectionStarting: false });
+      }
     }
-
-    this.props.changeStateData({ colFlag: false, collectionSummary: null });
-    this.props.setColValueFlag(true);
-    this.setState({ collectionModalOpen: false, colHZ: collectHz });
   }
 
   renderCollectionModal(t) {
@@ -1293,6 +1341,11 @@ class Title extends React.Component {
         cancelText={t('common.cancel')}
         onOk={this.startCollectionWithOptions}
         onCancel={this.closeCollectionModal}
+        confirmLoading={this.state.collectionStarting}
+        okButtonProps={{ disabled: Boolean(this.getCollectionStartBlock()), title: this.getCollectionStartBlock() ? t(this.getCollectionStartBlock()) : undefined }}
+        cancelButtonProps={{ disabled: this.state.collectionStarting }}
+        closable={!this.state.collectionStarting}
+        maskClosable={!this.state.collectionStarting}
         destroyOnHidden
       >
         <Space direction='vertical' style={{ width: '100%' }} size={12}>
@@ -2187,7 +2240,9 @@ class Title extends React.Component {
 
   /** 门户采集复用原有配置弹窗，保留 localCar 特殊采集。 */
   startPortalCollection = () => {
-    if (this.props.matrixName === 'localCar') this.props.changeStateData({ colWebFlag: true });
+    if (this.props.matrixName === 'localCar') {
+      if (this.requireLicenseCapability('canAcquire') && this.requireCollectionDevice()) this.props.changeStateData({ colWebFlag: true });
+    }
     else this.openCollectionModal();
   };
 
@@ -2205,6 +2260,8 @@ class Title extends React.Component {
     const canAcquire = canUseLicenseCapability(this.props.licenseAccess, 'canAcquire');
     const canExport = canUseLicenseCapability(this.props.licenseAccess, 'canExport');
     const finalizingCollection = this.props.collectionSummary?.phase === 'finalizing';
+    const collectionBlocked = this.getCollectionStartBlock();
+    const collectionDeviceReady = !collectionBlocked;
     const jqbedConfigAccess = getJqbedConfigAccess({
       matrixName: this.props.matrixName,
       history: this.props.history,
@@ -2734,7 +2791,9 @@ class Title extends React.Component {
             {/* <Input type='number' placeholder={t('enterColHZ')} onChange={(e) => { this.setState({ colHZ: e.target.value }) }} /> */}
             <Button
               className='titleButton'
-              disabled={!(this.props.matrixName === 'localCar' ? this.props.colWebFlag : !this.props.colFlag) && (!canAcquire || finalizingCollection)}
+              disabled={!(this.props.matrixName === 'localCar' ? this.props.colWebFlag : !this.props.colFlag)
+                && (!canAcquire || finalizingCollection || !collectionDeviceReady || this.state.collectionStarting)}
+              title={collectionBlocked ? t(collectionBlocked) : undefined}
               onClick={() => {
 
                 if (this.props.matrixName !== 'localCar') {
@@ -2748,15 +2807,15 @@ class Title extends React.Component {
 
                   const flag = this.props.colWebFlag
                   console.log(flag)
-                  this.props.changeStateData({ colWebFlag: !flag })
+                  if (flag) this.stopPortalCollection(); else this.startPortalCollection();
                 }
               }}>{this.props.colFlag ? t('col') : t('stop')}{this.props.matrixName == 'localCar' ? this.props.length - 1 : Math.ceil(this.state.num)}
             </Button>
             {this.props.matrixName == 'localCar' ?
 
               <>
-                <Button disabled={!canAcquire || finalizingCollection} onClick={() => {
-                  if (!this.requireLicenseCapability('canAcquire')) return;
+                <Button disabled={!canAcquire || finalizingCollection || !collectionDeviceReady} onClick={() => {
+                  if (!this.requireLicenseCapability('canAcquire') || !this.requireCollectionDevice()) return;
                   this.props.colPushData()
                 }} className='titleButton'>
                   {t('display.singleCollection')}
@@ -2928,6 +2987,8 @@ class Title extends React.Component {
         selectedPorts={Object.values(this.state.manifestPortSelections || {}).some(Boolean) || [this.props.portname, this.props.portnameBack, this.props.portnameHead, this.props.portnameSensor].some(Boolean)}
         collecting={this.props.matrixName === 'localCar' ? this.props.colWebFlag : !this.props.colFlag}
         canAcquire={canAcquire && !finalizingCollection}
+        deviceReady={collectionDeviceReady} starting={this.state.collectionStarting}
+        startHint={collectionBlocked ? t(collectionBlocked) : undefined}
         onStart={this.startPortalCollection} onStop={this.stopPortalCollection}
       /> : null}
       {this.props.portalEmbedded ? serialStatusControls : null}

@@ -13,8 +13,18 @@ const sockets = new Set(), errors = [];
 let activeSystem = 'hand', sequence = 0, browser, page;
 const license = { date: Date.now() + 30 * 86400000, nowDate: Date.now(), valid: true, selectFlag: 'all' };
 const server = await createServer({ root: fileURLToPath(new URL('../../client/', import.meta.url)),
+  cacheDir: join(artifacts, 'vite-cache'),
   server: { host: '127.0.0.1', port: 0, open: false, hmr: false },
-  plugins: [{ name: 'hand-tuning-test',
+  plugins: [{ name: 'hand-tuning-test', enforce: 'pre',
+    /** 只在测试中读取真实控制器和相机，不替换键盘、框选或渲染逻辑。 */
+    transform(source, id) {
+      if (!id.replaceAll('\\', '/').split('?')[0].endsWith('/components/three/hand.jsx')) return null;
+      const hook = 'workspaceViewRef.current = createWorkspaceViewTools(';
+      assert.ok(source.includes(hook), 'Hand controls hook must match the renderer');
+      return source.replace(hook, `window.__readHandControls = () => ({ enabled: controls.enabled,
+        keys: controls.keys, mouseButtons: controls.mouseButtons, camera: camera.position.toArray() });
+        ${hook}`);
+    },
     /** 使用真实Home和调节抽屉，只拦截设备与授权接口。 */
     configureServer(vite) {
       vite.middlewares.use('/__hand-tuning', async (_request, response) => {
@@ -68,6 +78,55 @@ async function initial(keys) {
   return value;
 }
 
+/** 实测 Shift 组合键、鼠标暂停、失焦恢复，以及与框选暂停叠加时的控制器状态。 */
+async function verifyHandControls() {
+  const before = await page.evaluate(() => window.__readHandControls());
+  assert.equal(before.enabled, true);
+  // 同一帧多条键盘事件：旧代码在 Shift 后写 keys=null，Tab keyup 重挂控制器监听后再次读取 null[0]。
+  await page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', code: 'ShiftLeft', shiftKey: true, bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Tab', code: 'Tab', shiftKey: true, bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', shiftKey: true, bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', code: 'ShiftLeft', bubbles: true }));
+  });
+  assert.equal((await page.evaluate(() => window.__readHandControls())).enabled, true);
+
+  await page.keyboard.down('Shift');
+  assert.equal((await page.evaluate(() => window.__readHandControls())).enabled, false);
+  await page.mouse.move(800, 450); await page.mouse.down();
+  await page.mouse.move(900, 500, { steps: 5 }); await page.mouse.up();
+  const paused = await page.evaluate(() => window.__readHandControls());
+  assert.deepEqual(paused.camera, before.camera, 'holding Shift must pause camera gestures');
+  assert.deepEqual(paused.keys, before.keys, 'Shift must preserve the Trackball key map');
+  assert.deepEqual(paused.mouseButtons, before.mouseButtons, 'Shift must preserve the Trackball mouse map');
+  await page.keyboard.up('Shift');
+  assert.equal((await page.evaluate(() => window.__readHandControls())).enabled, true);
+  await page.mouse.move(800, 450); await page.mouse.down();
+  await page.mouse.move(900, 500, { steps: 5 }); await page.mouse.up();
+  await page.waitForFunction(previous => window.__readHandControls().camera.some((value, index) => Math.abs(value - previous[index]) > .01), before.camera);
+
+  await page.keyboard.down('Shift');
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  assert.equal((await page.evaluate(() => window.__readHandControls())).enabled, true, 'blur must recover a missing Shift keyup');
+  await page.keyboard.up('Shift');
+
+  /** 通过真实 Home 渲染器接口切换选区，验证两个暂停来源互不覆盖。 */
+  const select = active => page.locator('.home').evaluate((element, next) => {
+    let fiber = element[Object.keys(element).find(key => key.startsWith('__reactFiber$'))];
+    while (fiber && typeof fiber.stateNode?.syncDisplayRendererConfig !== 'function') fiber = fiber.return;
+    fiber.stateNode.com.current.changeSelectFlag(!next);
+  }, active);
+  await select(true);
+  await page.keyboard.press('Shift');
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  assert.equal((await page.evaluate(() => window.__readHandControls())).enabled, false, 'Shift release and blur must not cancel active selection');
+  await page.keyboard.down('Shift');
+  await select(false);
+  assert.equal((await page.evaluate(() => window.__readHandControls())).enabled, false, 'selection exit must not cancel held Shift');
+  await page.keyboard.up('Shift');
+  assert.equal((await page.evaluate(() => window.__readHandControls())).enabled, true);
+}
+
 try {
   await server.listen();
   browser = await chromium.launch({ channel: 'chrome', headless: true });
@@ -114,6 +173,7 @@ try {
   await page.getByRole('button', { name: /具身触觉/ }).click();
   await page.getByRole('button', { name: '全部', exact: true }).click();
   await enter('hand');
+  await verifyHandControls();
   const high = await initial(['End']); assert.equal(high, 5000);
   for (let index = 0; index < 5; index++) { pressure(1); await page.waitForTimeout(120); }
   await total(0);
@@ -134,9 +194,11 @@ try {
   await page.getByRole('button', { name: '← 返回系统列表', exact: true }).click();
   await page.locator('.portal-runtime-monitor').waitFor({ state: 'detached' });
   await enter('hand'); assert.equal((await state()).initial, 5000);
+  assert.equal((await page.evaluate(() => window.__readHandControls())).enabled, true, 're-entered hand must accept camera gestures');
   pressure(1); await total(0);
   await page.reload();
   await enter('hand'); assert.equal((await state()).initial, 5000);
+  assert.equal((await page.evaluate(() => window.__readHandControls())).enabled, true, 'reloaded hand must accept camera gestures');
   pressure(1); await total(0);
   await page.screenshot({ path: join(artifacts, 'restored-after-reload.png') });
   const copy = monitorTranslations.monitorUi;

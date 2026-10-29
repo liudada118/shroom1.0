@@ -1,7 +1,13 @@
 # Shroom 快速架构索引
 
-> 最后更新于：2026-10-28
+> 最后更新于：2026-10-29
 > 用途：代码定位和验证路由。理解当前实现先读 [开发者手册](docs/developer-guide.md)，完整文档分类见 [docs/README.md](docs/README.md)。`ARCHITECTURE.md` 保留历史设计与维护台账，不用作默认全文入口。
+
+2026-10-29 采集有效数据门槛：`collectionSourceMonitor` 观察当前系统/连接代次的真实 canonical 帧，端口打开但没有有效数据不能开始；5 秒无有效帧通过既有 finishCollection 排空已接收数据并停止，恢复不自动重开。`runtimeControlService` 在创建会话前拒绝无连接/无数据/回放，Title 等 HTTP 成功回执后才更新采集状态；低频 collectionSourceStatus 经 WS 首包及采集状态 API 同步。清屏零帧仅带内部 synthetic 元数据，不改变帧契约；真实全零数据仍有效。验证 collectionStartGuard / collectionSourceMonitor、SerialManager 首帧顺序、HaLow TCP、采集页面与 Full。
+
+2026-10-29 运行异常修复：Electron `startupGuard` 在加载后台前取得单实例锁，预检 19999（IPv4/全接口）、19245 和 12321；`localServiceErrors` 接住真实监听失败，Mac 重开窗口复用静态服务并重新安排网页回退检查。`hand.jsx` 用 controls.enabled 合并 Shift/框选暂停，保留有效键位映射。错误诊断经 logger → businessEvents → usageAnalytics 保留有限错误码及安全文件名:行:列，浏览器无堆栈时补 ErrorEvent 坐标。验证入口为 startupGuard / errorDiagnostics、hand-tuning-home 与 Full，维护台账记录证据与未发布边界。
+
+2026-10-28 Windows 1.1.43 本地交付：按用户指定版本升级根包与锁文件，包含手部阈值、各系统调参持久化、常用界面国际化及小床纯点图隐藏叉叉/鼠标；说明见 `release-notes/windows/1.1.43.md`。TEMP 冻结源码重新构建，Full 8 项、实际生产页面及最终产物 22 项通过，NSIS 解出的 2806 个文件逐项 SHA-256 一致。安装包、blockmap、latest、说明及校验报告位于下载目录 `Shroom-1.1.43`；未执行升级安装、未上传 MinIO、未提交本次版本文件。详细证据见维护台账。
 
 2026-10-28 小床数据纯点图更新：进入“仅显示3D点图”后隐藏右上关闭按钮及页面光标，焦点移至监测容器，Tab/Shift+Tab 不进入隐藏控件；Esc恢复原显示方式、按钮、光标和入口焦点。仅改门户界面状态，继续复用当前画布与帧链路，验证 Standard 与 small-bed-scene-only 浏览器回归。
 

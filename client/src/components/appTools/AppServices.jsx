@@ -4,6 +4,7 @@ import { SettingOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { getLanguageLocale } from '../../i18n';
 import { trackUsage } from '../../services/usageAnalytics';
+import { describeRendererError } from '../../services/errorDiagnostics';
 
 /** Keep the last verified update outcome visible after reopening settings or restarting the app. */
 export function FrontendUpdateStatus({ frontend = {} }) {
@@ -62,8 +63,7 @@ export default function AppServices({ onAfterDialogClose } = {}) {
     void api.invoke('frontendReady').catch(() => {});
     const unsubscribe = api.subscribe(value => { if (active) setState(value); });
     /** Report browser failures while retaining normal browser error behavior. */
-    const onError = event => trackUsage('error_reported', { module: 'renderer', errorType: event.type,
-      severity: 'error', message: String(event.message || event.reason?.message || '页面运行异常'), stack: String(event.error?.stack || event.reason?.stack || '') });
+    const onError = event => trackUsage('error_reported', describeRendererError(event));
     window.addEventListener('error', onError); window.addEventListener('unhandledrejection', onError);
     return () => { active = false; unsubscribe(); window.removeEventListener('error', onError); window.removeEventListener('unhandledrejection', onError); };
   }, [api]);

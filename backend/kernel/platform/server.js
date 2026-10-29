@@ -24,6 +24,7 @@ const { createPetCareRuntimeService } = require('../algorithm-channel/petCareRun
 const { createAlgorithmMarketService } = require('../../extension-host/runtime/algorithmMarketService');
 let algorithmMarketService = null;
 let frameUsageObserver = null;
+let collectionSourceMonitor = null;
 const { createControlCommandRouter } = require('./commands/controlCommandRouter');
 const { createHalowService, hasSerialConnection, registerHalowControlHandler } = require('../transport/halowService');
 let halowService = null;
@@ -38,6 +39,7 @@ const { createHttpApp } = require('./http/httpAppFactory');
 const { createHash } = require('node:crypto');
 const { createLicenseAccessPolicy } = require('./license/licenseAccessPolicy');
 const { createCollectionSessionService } = require('../storage/history/collectionSessionService');
+const { createCollectionSourceMonitor } = require('../storage/history/collectionSourceMonitor');
 const {
   DEFAULT_REPORT_HTTP_PORT,
   scanStartupSerialPorts,
@@ -1328,6 +1330,7 @@ function shutdownServer() {
   finishCollection('APPLICATION_EXIT');
   licenseAccess.dispose();
   frameUsageObserver?.dispose();
+  collectionSourceMonitor?.dispose();
   if (deviceAuthorizationTimer) { clearInterval(deviceAuthorizationTimer); deviceAuthorizationTimer = null; }
   appRuntime.displaySystems.stopRuntimeDispatch();
   petCareRuntimeService?.dispose();
@@ -1417,9 +1420,10 @@ function readRuntimeVersions() {
 
 /** Return the current collection, or the last crash-recovered result after a restart. */
 function readCollectionStatus() {
+  const collectionSourceStatus = collectionSourceMonitor?.status() || null;
   const current = collectionSessions.current();
   const recent = collectionSessions.list({ limit: 10 });
-  return { collectionSummary: current || recent[0] || null, current, recent };
+  return { collectionSummary: current || recent[0] || null, current, recent, collectionSourceStatus };
 }
 
 const defauleFile = 'hand0205';
@@ -1658,6 +1662,34 @@ function readUsageSystemContext() {
 frameUsageObserver = createFrameUsageObserver({ channelBus, getContext: () => ({ ...readUsageSystemContext(),
   playback: runtimeContext.isLocalPlayback(), allowed: runtimeContext.getNowDate() < endDate }) });
 
+/** 读取当前物理连接代次；重连、换系统或 HaLow 换设备后旧帧不能证明新连接可采集。 */
+function readCollectionSourceContext() {
+  const sensorType = runtimeContext.getSensorType();
+  const systemId = zeroChannelIdentityResolver.getActiveDisplaySystemId() || appRuntime.builtinTemplates.currentId(sensorType);
+  const channels = appRuntime.displaySystems.listSerialChannels(sensorType);
+  const roles = channels.length ? channels.map(channel => channel.serialRole) : sensorRegistry.getSensorChannels(sensorType);
+  const serial = roles.map(role => serialManager.getStatus(role))
+    .filter(status => status?.status === 'open' && status.isOpen === true);
+  const halow = halowService?.hasConnectedDevice() ? halowService.snapshot() : null;
+  const selectedClients = halow?.clients.filter(client => client.deviceId === halow.selectedDeviceId) || [];
+  const halowReady = selectedClients.some(client => Number.isFinite(client.ageMs) && client.ageMs >= 0 && client.ageMs < 5000);
+  const halowConnectionKey = JSON.stringify(['halow', selectedClients.map(client => [client.deviceId, client.clientId])]);
+  const roleConnectionKeys = Object.fromEntries([
+    ...serial.filter(status => status.health === 'ok')
+      .map(status => [status.role || status.portId, JSON.stringify(['serial', status.connectionId])]),
+    ...(halowReady ? roles.map(role => [role, halowConnectionKey]) : []),
+  ]);
+  return { systemId, playback: Boolean(runtimeContext.isLocalPlayback()), collecting: Boolean(getCollectionState('flag')),
+    connected: serial.length > 0 || selectedClients.length > 0,
+    roles: Object.keys(roleConnectionKeys), roleConnectionKeys,
+    connectionKey: JSON.stringify([systemId, serial.map(status => [status.role || status.portId, status.connectionId]),
+      selectedClients.map(client => [client.deviceId, client.clientId])]) };
+}
+
+collectionSourceMonitor = createCollectionSourceMonitor({ channelBus, getContext: readCollectionSourceContext,
+  onStatus: collectionSourceStatus => publishSystemEvent({ collectionSourceStatus }),
+  onUnavailable: () => { if (getCollectionState('flag')) finishCollection('DATA_STREAM_TIMEOUT'); } });
+
 algorithmMarketService = createAlgorithmMarketService({
   channelBus,
   packages: appRuntime.getAlgorithmMarketPackages(),
@@ -1693,7 +1725,7 @@ algorithmMarketService = createAlgorithmMarketService({
  *
  * @param {string} channel 输出通道别名。
  * @param {string | object} jsonData 帧数据。
- * @param {{source?: string, timestamp?: number}} [options] 来源标记。
+ * @param {{source?: string, timestamp?: number, synthetic?: boolean}} [options] 来源标记。
  * @returns {number} 实际发送成功的客户端数量。
  */
 function publishRealtimeFrame(channel, jsonData, options) {
@@ -1714,6 +1746,7 @@ function publishRealtimeChannel(channel, jsonData) {
 
 const SENSOR_DATA_FIELDS = Object.freeze(['sitData', 'backData', 'headData', 'sensorData']);
 const SENSOR_FRAME_ONLY_FIELDS = Object.freeze([
+  'synthetic',
   'channelId',
   'displaySystemId',
   'sensorId',
@@ -1806,6 +1839,7 @@ function publishSystemEvent(data) {
     const connected = status.phase === 'listening' && status.clients?.some(client => client.deviceId === status.selectedDeviceId);
     frameUsageObserver?.connection({ role: 'halow', status: connected ? 'connected' : 'closed' }, 'halow');
   }
+  if (event.serialStatus || event.halowStatus || event.currentSensorType || event.activeSensorType) collectionSourceMonitor?.refresh();
   for (const key of ['currentSensorType', 'activeSensorType']) {
     if (event[key]) event[key] = appRuntime.builtinTemplates.currentId(event[key]);
   }
@@ -1816,6 +1850,7 @@ function publishSystemEvent(data) {
       {
         source: event.source || 'realtime',
         timestamp: event.timestamp,
+        synthetic: event.synthetic === true,
       },
     );
   }
@@ -1842,6 +1877,7 @@ function publishSystemEvent(data) {
     sent += publishRealtimeFrame(channel, framePayload, {
       source: event.source || 'realtime',
       timestamp: event.timestamp || event.time,
+      synthetic: event.synthetic === true,
     });
   }
 
@@ -1973,6 +2009,7 @@ function publishHistoryDateList() {
     if (sensorType === 'car') {
       publishSystemEvent({
         timeArr: mergedTimeArr,
+        synthetic: true,
         backData: new Array(backTotal).fill(0),
       });
     }
@@ -1980,6 +2017,7 @@ function publishHistoryDateList() {
     if (sensorType === 'car10') {
       publishSystemEvent({
         timeArr: backRows,
+        synthetic: true,
         backData: new Array(100).fill(0),
       });
     }
@@ -1988,17 +2026,20 @@ function publishHistoryDateList() {
   const timeArr = isCar(sensorType) ? dedupli(sitTimeArr, backTimeArr) : sitRows;
   publishSystemEvent({
     timeArr: sensorType === 'bigBed' ? sitRows : timeArr,
+    synthetic: true,
     index: getPlaybackState('nowIndex'),
     sitData: new Array(sensorType === 'bigBed' ? 2048 : sitTotal).fill(0),
   });
 
   if (isCar(sensorType)) {
     publishSystemEvent({
+      synthetic: true,
       backData: new Array(backTotal).fill(0),
     });
 
     if (isThreePortFile(sensorType)) {
       publishSystemEvent({
+        synthetic: true,
         headData: new Array(100).fill(0),
       });
     }
@@ -2215,6 +2256,7 @@ deviceAuthorizationTimer.unref?.();
 // 注册运行时控制命令，getRuntime/setRuntime 是旧运行时变量的过渡适配层。
 registerRuntimeCommandHandlers(controlCommandRouter, {
   requireAccess: licenseAccess.requireAccess,
+  getCollectionSource: () => collectionSourceMonitor.status(),
   onCollectionStarted: beginCollectionEvidence,
   onCollectionStopping: finishCollection,
   csvDownloadService,

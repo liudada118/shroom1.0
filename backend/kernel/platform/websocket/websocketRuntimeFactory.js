@@ -1,4 +1,5 @@
 const WebSocket = require('ws');
+const { watchLocalServiceErrors } = require('../../../common/localServiceErrors');
 const { createChannelBus } = require('@shroom/backend/telemetry/channelBus.js');
 const { createRealtimeTelemetryGateway } = require('../../realtime/realtimeTelemetryGateway');
 const {
@@ -19,14 +20,14 @@ const { SHARED_WEBSOCKET_PORT } = require('./websocketChannelService');
  *
  * ⚠️ `new WebSocket.Server({port})` 会**立即监听**，端口被占时通过 server 的 `'error'`
  * 事件异步报出来，不是同步抛。所以这里 return 成功不代表端口拿到了 ——
- * 端口冲突（通常是上一次进程没退干净）的现象是前端连不上而后端日志看起来正常。
+ * `watchLocalServiceErrors` 将监听错误交给宿主退出清理，否则前端会连到其他进程。
  *
  * @param {object} [options] 参数。
  * @param {number} [options.port=19999] 监听端口；改它等于改前后端契约。
  * @returns {import('ws').Server} WebSocket Server 实例。
  */
-function createWebSocketServer({ port = SHARED_WEBSOCKET_PORT } = {}) {
-  return new WebSocket.Server({ port });
+function createWebSocketServer({ port = SHARED_WEBSOCKET_PORT, logger } = {}) {
+  return watchLocalServiceErrors(new WebSocket.Server({ port }), { service: 'websocket', port, logger });
 }
 
 /**
@@ -55,7 +56,7 @@ function createWebSocketRuntime({
     wsSubscriptions,
     getSensorType,
   });
-  const wsServer = webSocketServerFactory();
+  const wsServer = webSocketServerFactory({ logger });
 
   /**
    * 将内部帧转换成唯一 sensor.frame 后发布到 canonical channelId。

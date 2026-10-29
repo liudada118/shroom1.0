@@ -45,8 +45,6 @@ var ndata = new Array(backnum1 * backnum2).fill(0), ndata1 = new Array(sitnum1 *
 
 var { valuej1, valueg1, value1, valuel1, valuef1, valuej2, valueg2, value2, valuel2, valuef2,
   valuelInit1, valuelInit2 } = createThresholdState(DUAL_CHANNEL_DEFAULTS);
-let enableControls = true;
-let isShiftPressed = false;
 
 let timer
 
@@ -100,6 +98,7 @@ const Canvas = React.forwardRef((props, refs) => {
   const selectionRef = useRef(null);
   const rawPressureRef = useRef(new Array(sitnum1 * sitnum2).fill(0));
   const pressureSuppressedRef = useRef(false);
+  const shiftPressedRef = useRef(false);
   colormapRef.current = props.colormap;
   const sceneVisibleRef = useContext(SceneVisibilityContext);
   var newDiv, newDiv1, selectStartArr = [], selectEndArr = [], sitArr, backArr, sitMatrix = [], backMatrix = [], selectMatrix = [];
@@ -266,7 +265,7 @@ const Canvas = React.forwardRef((props, refs) => {
     workspaceViewRef.current = createWorkspaceViewTools({ object: group, camera, controls });
     if (props.portalEmbedded) selectionRef.current = createPointGridSelection({ points: particles, camera,
       canvas: renderer.domElement, columns: sitnum1, rows: sitnum2, interpolation: sitInterp, padding: sitOrder,
-      onInteractionChange: (active) => { controlsFlag = !active; controls.enabled = !active; } });
+      onInteractionChange: (active) => { controlsFlag = !active; syncControlsEnabled(); } });
 
     window.addEventListener("resize", onWindowResize);
 
@@ -380,7 +379,7 @@ const Canvas = React.forwardRef((props, refs) => {
   /** 切换原生框选；必须停用 Trackball 指针处理，否则 preventDefault 会吞掉鼠标框选事件。 */
   function changeSelectFlag(value, flag) {
     controlsFlag = value;
-    controls.enabled = Boolean(value);
+    syncControlsEnabled();
     if (selectionRef.current) {
       selectionRef.current.setActive(!value);
       return;
@@ -611,25 +610,7 @@ const Canvas = React.forwardRef((props, refs) => {
   function render() {
     
     sitRenew();
-    if (controlsFlag) {
-      controls.mouseButtons = {
-        LEFT: THREE.MOUSE.PAN, // make pan the default instead of rotate
-        MIDDLE: THREE.MOUSE.ZOOM,
-        RIGHT: THREE.MOUSE.ROTATE,
-      };
-      controls.keys = [
-        ALT_KEY, // orbit
-        CTRL_KEY, // zoom
-        CMD_KEY, // pan
-      ];
-      controls.update();
-
-    } else if (!controlsFlag) {
-
-      controls.keys = [];
-      controls.mouseButtons = [];
-
-    }
+    if (controls.enabled) controls.update();
 
     // ⚠️ 粒子模式下仍要计算上面的真实侧栏读数，只跳过不可见画布的 GPU 提交。
     if (sceneVisibleRef.current) renderer.render(scene, camera);
@@ -803,32 +784,29 @@ const Canvas = React.forwardRef((props, refs) => {
   }));
   //   视图数据
 
-  function onKeyDown(event) {
-    if (event.key === 'Shift') {
-      // enableControls = false;
-      // isShiftPressed = true;
-
-      controls.mouseButtons = null
-      controls.keys = null
-    }
+  /** 合并框选与 Shift 的暂停状态；控制器的键位和鼠标映射始终保留有效结构。 */
+  function syncControlsEnabled() {
+    if (controls) controls.enabled = Boolean(controlsFlag) && !shiftPressedRef.current;
   }
 
-  // 按键放开事件处理函数
+  /** 在控制器处理按键前暂停交互，避免 Shift 组合键读取被清空的键位。 */
+  function onKeyDown(event) {
+    if (event.key !== 'Shift') return;
+    shiftPressedRef.current = true;
+    syncControlsEnabled();
+  }
+
+  /** 松开 Shift 只解除自身暂停，不重新打开仍处于框选模式的控制器。 */
   function onKeyUp(event) {
-    if (event.key === 'Shift') {
-      // enableControls = true;
-      // isShiftPressed = false;
-      controls.mouseButtons = {
-        LEFT: THREE.MOUSE.PAN, // make pan the default instead of rotate
-        MIDDLE: THREE.MOUSE.ZOOM,
-        RIGHT: THREE.MOUSE.ROTATE,
-      };
-      controls.keys = [
-        ALT_KEY, // orbit
-        CTRL_KEY, // zoom
-        CMD_KEY, // pan
-      ];
-    }
+    if (event.key !== 'Shift') return;
+    shiftPressedRef.current = false;
+    syncControlsEnabled();
+  }
+
+  /** 切到其他窗口时清除暂存按键，避免漏掉 keyup 后永久停用视角交互。 */
+  function onWindowBlur() {
+    shiftPressedRef.current = false;
+    syncControlsEnabled();
   }
 
 
@@ -846,8 +824,9 @@ const Canvas = React.forwardRef((props, refs) => {
     animate();
 
 
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('keyup', onKeyUp, true);
+    window.addEventListener('blur', onWindowBlur);
 
     return () => {
       cancelAnimationFrame(animationRequestId);
@@ -856,8 +835,9 @@ const Canvas = React.forwardRef((props, refs) => {
       selectionRef.current?.dispose();
       selectionRef.current = null;
       window.removeEventListener('resize', onWindowResize);
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('keyup', onKeyUp, true);
+      window.removeEventListener('blur', onWindowBlur);
       controls?.dispose();
       // 取消 BrushManager 订阅
       const container = document.getElementById('canvas');

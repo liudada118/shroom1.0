@@ -40,6 +40,60 @@ function fixture(publish) {
   return { state, service, frames };
 }
 
+test('collection readiness requires a selected live HaLow device in the current allowed system', async t => {
+  const { state, service } = fixture();
+  t.after(() => service.dispose());
+  assert.equal(service.hasConnectedDevice(), false);
+  const port = await freePort();
+  const opening = service.execute({ action: 'start', host: '127.0.0.1', port });
+  assert.equal(service.hasConnectedDevice(), false, 'pending bind is not a device connection');
+  await opening;
+  assert.equal(service.hasConnectedDevice(), false, 'listening alone cannot start collection');
+
+  /** 使用真正 TCP 连接，只发送标识帧以验证连接判据不依赖压力值。 */
+  async function device(id) {
+    const socket = net.connect(port, '127.0.0.1');
+    t.after(() => socket.destroy());
+    await once(socket, 'connect');
+    if (id) {
+      const bytes = Buffer.from(id);
+      socket.write(Buffer.concat([Buffer.from([0xaa, 0x55, 0, bytes.length]), bytes]));
+      await waitFor(() => service.snapshot().clients.some(client => client.deviceId === id));
+    }
+    return socket;
+  }
+
+  const first = await device();
+  await waitFor(() => service.snapshot().clients.length === 1);
+  assert.equal(service.hasConnectedDevice(), false, 'unidentified TCP peers are not sensors');
+  first.write(Buffer.from([0xaa, 0x55, 0, 1, 65]));
+  await waitFor(() => service.snapshot().selectedDeviceId === 'A');
+  assert.equal(service.hasConnectedDevice(), true);
+  for (const change of [{ systemId: 'other-copy' }, { file: 'hand' }, { licenseValid: false },
+    { playback: true }, { serialBusy: true }, { shutdown: true }]) {
+    const original = { ...state };
+    Object.assign(state, change);
+    assert.equal(service.hasConnectedDevice(), false, JSON.stringify(change));
+    for (const key of Object.keys(state)) delete state[key];
+    Object.assign(state, original);
+    assert.equal(service.hasConnectedDevice(), true);
+  }
+  state.collecting = true;
+  assert.equal(service.hasConnectedDevice(), true, 'ongoing collection retains its existing transport');
+  state.collecting = false;
+  await device('B');
+  first.destroy();
+  await waitFor(() => service.snapshot().clients.every(client => client.deviceId !== 'A'));
+  assert.equal(service.snapshot().selectedDeviceId, 'A');
+  assert.equal(service.hasConnectedDevice(), false, 'another online device is not the selected source');
+  service.execute({ action: 'select', deviceId: 'B' });
+  assert.equal(service.hasConnectedDevice(), true);
+  const closing = service.stop();
+  assert.equal(service.hasConnectedDevice(), false, 'stopping is not connected');
+  await closing;
+  assert.equal(service.hasConnectedDevice(), false);
+});
+
 test('pressure vest retains native-copy identity and the same live transport guards', async t => {
   const events = [];
   const { state, service, frames } = fixture(event => events.push(event));

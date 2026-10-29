@@ -16,7 +16,7 @@ export function PortalDisplayPanel({ languageControl, children, collapsed = fals
 }
 
 /** 会话栏直接显示串口下拉；回放仍打开记录弹窗，不模拟连接或采集状态。 */
-export function PortalSessionBar({ mode, onMode, controlsOpen, onControls, deviceControls, selectedPorts, collecting, onStart, onStop, busy = false, elapsed = 0, canAcquire = true }) {
+export function PortalSessionBar({ mode, onMode, controlsOpen, onControls, deviceControls, selectedPorts, collecting, onStart, onStop, busy = false, elapsed = 0, canAcquire = true, deviceReady = false, starting = false, startHint }) {
   return <div className="portal-session-bar" aria-label={i18n.t('monitorUi.monitorControls')}>
     <div className="portal-session-modes">
       <button type="button" aria-label={i18n.t('monitorUi.realtime')} className={mode === 'now' ? 'is-active' : ''} aria-pressed={mode === 'now'} disabled={busy || !canAcquire} onClick={() => onMode('now')}><RadarChartOutlined aria-hidden="true" />{i18n.t('monitorUi.realtime')}</button>
@@ -26,7 +26,8 @@ export function PortalSessionBar({ mode, onMode, controlsOpen, onControls, devic
       <ApiOutlined /><span>{mode === 'now' ? i18n.t('monitorUi.connectDevice') : i18n.t('monitorUi.choosePlayback')}</span><small>{mode === 'now' ? selectedPorts ? i18n.t('monitorUi.portSelected') : i18n.t('monitorUi.portNotSelected') : i18n.t('monitorUi.playDownloadHint')}</small><i aria-hidden="true" />
     </button>}
     <div className="portal-capture-actions">
-      <button type="button" aria-label={i18n.t('monitorUi.startCollection')} disabled={!canAcquire || busy || collecting || mode !== 'now'} onClick={onStart}><PlayCircleOutlined />{i18n.t('monitorUi.startCollection')}</button>
+      <button type="button" aria-label={i18n.t('monitorUi.startCollection')} title={startHint || (!deviceReady ? i18n.t('monitorUi.collectionConnectFirst') : undefined)}
+        disabled={!canAcquire || !deviceReady || starting || busy || collecting || mode !== 'now'} onClick={onStart}><PlayCircleOutlined />{i18n.t('monitorUi.startCollection')}</button>
       <button type="button" aria-label={i18n.t('monitorUi.stopCollection')} disabled={busy || !collecting || mode !== 'now'} onClick={onStop}><PauseCircleOutlined />{collecting ? i18n.t('monitorUi.stopElapsed', { value0: Math.floor(elapsed) }) : i18n.t('monitorUi.stopCollection')}</button>
     </div>
   </div>;
