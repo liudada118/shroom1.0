@@ -5,6 +5,10 @@
 
 源码版本1.1.44（2026-10-30）：根package与锁文件同步由1.1.43递增，用户说明见 `release-notes/windows/1.1.44.md`，汇总本轮诊断、显示调节、回执和入口修复；版本提交不代表安装包已生成或线上更新已发布。
 
+2026-10-30 背心调节布局：`Title` 为 `pressureVest` 与 `humanBodyOptimized` 提供同一抽屉插槽，`HumanBodyOptimized` 统一按 `portalEmbedded` 决定调节位置；Home 的宿主传递及画布 key 不变，背心独立参数存储继续沿用。背景/模型预设采用固定32×32圆形按钮，避免通用按钮最小高度拉伸。验证入口 `scripts/tests/human-body-portal.mjs`，仅界面布局使用Standard。
+
+同日背心部位视角统一：门户中的背心复用全身右下三列布局，沿用 `.human-body-region-views` 的矮窗口避让；右下不再叠加内嵌数字小窗，数字查看仍用“原始数据”。前胸/后背/左右肩视角及独立页面原布局保留。验证入口同为 `human-body-portal.mjs` 和Standard。
+
 采集回执提示与回放日期：`RuntimeStatusNotice` → `services/collectionNotice` 控制成功回执6秒寿命及标签页去重；保存中/异常结果保留，后台采集状态不清除。`portalPlaybackSelection` 仅格式化秒/毫秒记录标题，操作沿用原ID。验证 collectionNotice / RuntimeStatusNotice / portalPlaybackSelection / PortalPlaybackDialog 和 `collection-exit-portal.mjs`；仅展示行为使用Standard。
 
 2026-10-30 外围点进出场：`edgeBufferPoints` 提供主网格锚点，`particleEntrance.attachParticleChildren` 为外围安装完整投影属性并共享主图进度；几何换宽在绘制前重绑，完成/取消先释放临时GPU属性再恢复原材质。入口为小床/手部，验证 particleEntrance / pointGridEdgeBuffer 和 `point-buffer-entrance.mjs`，涉及共享渲染执行Full。

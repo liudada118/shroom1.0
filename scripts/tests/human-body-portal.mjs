@@ -81,14 +81,21 @@ async function readModelPixels(page) {
   }, image.toString('base64'));
 }
 
-/** 核对全身设置归入调节抽屉，部位视角移到右下且不覆盖现有工具。 */
-async function verifyFullBodyControls(page) {
+/** 核对全身与背心共用右下三列视角面板，并验证背心各部位仍能驱动真实镜头。 */
+async function verifyBodyRegionControls(page, system, verifyInteractions = false) {
   const viewport = page.locator('[data-human-body-viewport="true"]');
   assert.equal(await viewport.getByText('2D 数字 · 全身', { exact: true }).count(), 0);
   assert.equal(await page.locator('[data-human-body-settings="true"]:visible').count(), 0,
     '默认画布不能继续显示左上渲染设置');
   const regions = page.locator('[data-human-body-region-views="true"]');
   await regions.waitFor();
+  const expectedLabels = system === 'pressureVest'
+    ? ['全身', '前胸', '后背', '左肩', '右肩']
+    : ['全身', '前胸', '后背', '左臂', '右臂', '前腿', '后腿'];
+  assert.deepEqual(await regions.locator('button[aria-pressed]').allTextContents(), expectedLabels);
+  const columns = await regions.locator('button[aria-pressed]').first().evaluate(button =>
+    getComputedStyle(button.parentElement).gridTemplateColumns.split(' ').length);
+  assert.equal(columns, 3, '门户部位视角使用三列布局');
   await page.locator('.shroom-app-tools').waitFor();
   const layouts = [];
   for (const viewportSize of [{ width: 1440, height: 900 }, { width: 1280, height: 720 }]) {
@@ -112,15 +119,102 @@ async function verifyFullBodyControls(page) {
     assert.ok(layout.right <= layout.width && layout.bottom <= layout.height, JSON.stringify(layout));
     assert.deepEqual(layout.overlaps, [], '部位视角不能遮挡右侧工具或应用工具');
     layouts.push(layout);
-    await page.screenshot({ path: join(artifacts, `human-body-layout-${viewportSize.width}-${viewportSize.height}.png`) });
+    await page.screenshot({ path: join(artifacts, `${system}-layout-${viewportSize.width}-${viewportSize.height}.png`) });
   }
   await page.setViewportSize({ width: 1440, height: 900 });
+  if (verifyInteractions) {
+    await page.evaluate(() => { window.bodyPortalRegionCanvas = document.querySelector('[data-human-body-viewport="true"] canvas'); });
+    const wasRotating = await regions.getByRole('button', { name: '暂停旋转', exact: true }).count() > 0;
+    if (wasRotating) await regions.getByRole('button', { name: '暂停旋转', exact: true }).click();
+    await regions.getByRole('button', { name: '自动旋转', exact: true }).waitFor();
+    const canvas = viewport.locator('canvas').first();
+    let previousImage = await canvas.screenshot();
+    for (const label of ['前胸', '后背', '左肩', '右肩']) {
+      const button = regions.getByRole('button', { name: label, exact: true });
+      await button.click();
+      await page.waitForTimeout(1200);
+      assert.equal(await button.getAttribute('aria-pressed'), 'true');
+      assert.equal(await regions.locator('button[aria-pressed="true"]').count(), 1);
+      const currentImage = await canvas.screenshot();
+      assert.equal(currentImage.equals(previousImage), false, `${label} 应改变真实模型视角`);
+      previousImage = currentImage;
+    }
+    await regions.getByRole('button', { name: '重置视角', exact: true }).click();
+    await page.waitForTimeout(1200);
+    assert.equal(await regions.getByRole('button', { name: '全身', exact: true }).getAttribute('aria-pressed'), 'true');
+    await regions.getByRole('button', { name: '自动旋转', exact: true }).waitFor();
+    if (wasRotating) {
+      await regions.getByRole('button', { name: '自动旋转', exact: true }).click();
+      await regions.getByRole('button', { name: '暂停旋转', exact: true }).waitFor();
+    }
+    assert.equal(await page.evaluate(() => window.bodyPortalRegionCanvas === document.querySelector('[data-human-body-viewport="true"] canvas')), true,
+      '切换部位、重置视角或旋转不能重建模型画布');
+    await page.screenshot({ path: join(artifacts, `${system}-region-interactions.png`) });
+  }
+  console.log('HUMAN_BODY_REGION_LAYOUT_PASS', JSON.stringify({ system, columns, labels: expectedLabels, layouts, verifyInteractions }));
+}
+
+/** 检查人体与背心调节归入抽屉、色块正圆，以及各自设置在重新进入后独立保留。 */
+async function verifyBodySettings(page, system) {
+  const settingsKey = `${system}.renderSettings.v1`;
+  const otherKey = `${system === 'pressureVest' ? 'humanBodyOptimized' : 'pressureVest'}.renderSettings.v1`;
+  const stored = await page.evaluate(([key, other]) => ({
+    current: JSON.parse(localStorage.getItem(key) || 'null'), other: localStorage.getItem(other),
+  }), [settingsKey, otherKey]);
+  assert.equal(await page.locator('[data-human-body-settings="true"]:visible').count(), 0,
+    `${system} 默认画布不能显示左上渲染设置`);
   await page.evaluate(() => { window.bodyPortalOriginalCanvas = document.querySelector('[data-human-body-viewport="true"] canvas'); });
   await page.getByRole('button', { name: '调节', exact: true }).click();
   const settings = page.locator('[data-human-body-settings="true"]:visible');
   await settings.waitFor();
+  assert.equal(await settings.count(), 1, '只能显示一份渲染设置');
   assert.equal(await settings.evaluate(element => Boolean(element.closest('.ant-drawer'))), true);
+  assert.equal(await settings.evaluate(element => Boolean(element.closest('[data-human-body-viewport]'))), false,
+    '渲染设置不能留在画布浮层中');
   await settings.getByText('热力计算', { exact: true }).waitFor();
+  const swatches = settings.locator('.human-body-color-swatch');
+  assert.equal(await swatches.count(), 8);
+  if (stored.current) {
+    assert.equal(await settings.getByRole('button', { name: `背景 ${stored.current.bgColor}`, exact: true }).getAttribute('aria-pressed'), 'true');
+    assert.equal(await settings.getByRole('button', { name: `模型 ${stored.current.modelColor}`, exact: true }).getAttribute('aria-pressed'), 'true');
+  }
+  const swatchLayouts = [];
+  for (const viewportSize of [{ width: 1440, height: 900 }, { width: 420, height: 900 }]) {
+    await page.setViewportSize(viewportSize);
+    await page.waitForFunction(() => {
+      const wrapper = document.querySelector('.ant-drawer-open .ant-drawer-content-wrapper');
+      const box = wrapper?.getBoundingClientRect();
+      return box && box.left >= 0 && box.right <= innerWidth + 0.5;
+    });
+    const sizes = await swatches.evaluateAll(elements => elements.map(element => {
+      const box = element.getBoundingClientRect(), style = getComputedStyle(element);
+      return { width: box.width, height: box.height, radius: style.borderRadius, flexShrink: style.flexShrink,
+        inViewport: box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight };
+    }));
+    for (const size of sizes) {
+      assert.ok(size.width >= 31.5 && Math.abs(size.width - size.height) < 0.5,
+        `${system} 色块必须为等宽高正圆: ${JSON.stringify(size)}`);
+      assert.equal(size.radius, '50%');
+      assert.equal(size.inViewport, true, `${system} 色块必须完整显示在视口中`);
+    }
+    swatchLayouts.push({ ...viewportSize, sizes });
+    await page.screenshot({ path: join(artifacts, `${system}-settings-${viewportSize.width}.png`) });
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const colors = system === 'pressureVest'
+    ? { bgColor: '#10152b', modelColor: '#4fd1c5', background: 'rgb(16, 21, 43)' }
+    : { bgColor: '#0f2027', modelColor: '#d2d6dc', background: 'rgb(15, 32, 39)' };
+  await settings.getByRole('button', { name: `背景 ${colors.bgColor}`, exact: true }).click();
+  const modelPreset = settings.getByRole('button', { name: `模型 ${colors.modelColor}`, exact: true });
+  await modelPreset.focus();
+  await modelPreset.press('Space');
+  await page.waitForFunction(({ key, colors }) => {
+    const saved = JSON.parse(localStorage.getItem(key) || 'null');
+    return saved?.bgColor === colors.bgColor && saved?.modelColor === colors.modelColor
+      && getComputedStyle(document.querySelector('[data-human-body-viewport="true"]')).backgroundColor === colors.background;
+  }, { key: settingsKey, colors });
+  assert.equal(await page.evaluate(key => localStorage.getItem(key), otherKey), stored.other,
+    '修改当前系统颜色不能覆盖另一个系统的设置');
   const radius = settings.locator('input[type="range"]').first();
   await radius.focus();
   await radius.press('ArrowRight');
@@ -128,10 +222,16 @@ async function verifyFullBodyControls(page) {
   await settings.waitFor({ state: 'hidden' });
   assert.equal(await page.evaluate(() => window.bodyPortalOriginalCanvas === document.querySelector('[data-human-body-viewport="true"] canvas')), true,
     '开关调节或修改参数不能重建模型画布');
+  await page.getByRole('button', { name: '调节', exact: true }).click();
+  await settings.waitFor();
+  assert.equal(await settings.getByRole('button', { name: `背景 ${colors.bgColor}`, exact: true }).getAttribute('aria-pressed'), 'true');
+  assert.equal(await settings.getByRole('button', { name: `模型 ${colors.modelColor}`, exact: true }).getAttribute('aria-pressed'), 'true');
+  await page.locator('.ant-drawer:visible .ant-drawer-close').click();
+  await settings.waitFor({ state: 'hidden' });
   const pixels = await readModelPixels(page);
   assert.ok(pixels.different > 100 && pixels.warm > 40, '关闭调节后首帧热力仍应可见');
-  await page.screenshot({ path: join(artifacts, 'human-body-controls.png') });
-  console.log('HUMAN_BODY_CONTROLS_PASS', JSON.stringify({ layouts, pixels }));
+  await page.screenshot({ path: join(artifacts, `${system}-controls.png`) });
+  console.log('HUMAN_BODY_CONTROLS_PASS', JSON.stringify({ system, swatchLayouts, colors, pixels }));
 }
 
 let browser, page;
@@ -250,7 +350,8 @@ try {
         `${system} 串口首帧必须改变真实模型热力颜色: ${JSON.stringify(pressured)}`);
       await page.screenshot({ path: join(artifacts, `${index}-${system}-serial-first-frame.png`) });
       console.log('HUMAN_BODY_SERIAL_FRAME_PASS', JSON.stringify({ system, connected, statistics, pixels: pressured }));
-      if (system === 'humanBodyOptimized') await verifyFullBodyControls(page);
+      await verifyBodyRegionControls(page, system, index === 0);
+      await verifyBodySettings(page, system);
       await chooseMode(page, '原始数据');
       await page.locator('.human-body-raw__atlas').waitFor();
       assert.equal(await page.locator('[data-human-body-viewport="true"]').count(), 0);

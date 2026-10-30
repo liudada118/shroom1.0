@@ -3223,7 +3223,7 @@ class Title extends React.Component {
           })
         }} className='optionImg' src={option} alt="" />
         <Drawer style={{ backgroundColor: 'rgba(21,18,42,0.8)' }} title={t('setData')} onClose={() => { this.setState({ open: false }) }} open={this.state.open}>
-          {this.props.portalEmbedded && this.props.matrixName === HUMAN_BODY_OPTIMIZED_MATRIX
+          {this.props.portalEmbedded && [HUMAN_BODY_OPTIMIZED_MATRIX, PRESSURE_VEST_MATRIX].includes(this.props.matrixName)
             && <div ref={this.props.onHumanBodySettingsHost} className="human-body-settings-host" />}
           {!this.props.portalEmbedded && <PortalRendererControls rendererRef={this.props.com} active={this.state.open} />}
           <PortalWorkspaceTuning active={this.state.open} rendererRef={this.props.com}

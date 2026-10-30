@@ -1,6 +1,29 @@
 .human-body-settings-host { margin-bottom: 24px; }
 .human-body-render-settings { color: #dce8f5; }
 .human-body-settings-host .human-body-render-settings button { min-height: 32px; }
+.human-body-color-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* 色块不受抽屉通用按钮最小高度和弹性压缩影响，选中边框计入等宽高。 */
+.human-body-render-settings .human-body-color-swatch {
+  box-sizing: border-box;
+  flex: 0 0 32px;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.human-body-custom-color {
+  box-sizing: border-box;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
 .human-body-render-settings :focus-visible,
 .human-body-region-views :focus-visible { outline: 2px solid #7dffd3; outline-offset: 2px; }
 .human-body-region-views {

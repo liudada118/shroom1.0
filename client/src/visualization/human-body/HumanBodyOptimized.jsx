@@ -433,19 +433,23 @@ const buttonStyle = (active) => ({
   fontSize: "11px",
 });
 
+/** 展示背景或模型的圆形预设色块与自定义颜色选择器。 */
 const ColorRow = ({ label, value, presets, onChange }) => (
   <div style={{ marginTop: "9px" }}>
     <div style={{ fontSize: "11px", color: "#8193a5", marginBottom: "5px" }}>{label}</div>
-    <div style={{ display: "flex", gap: "5px", alignItems: "center" }}>
+    <div className="human-body-color-presets">
       {presets.map((color) => (
         <button
+          type="button"
+          className="human-body-color-swatch"
           aria-label={`${label} ${color}`}
+          aria-pressed={value === color}
           key={color}
           onClick={() => onChange(color)}
-          style={{ width: "18px", height: "18px", borderRadius: "50%", border: value === color ? "2px solid white" : "1px solid #667", background: color, cursor: "pointer" }}
+          style={{ border: value === color ? "2px solid white" : "1px solid #667", background: color }}
         />
       ))}
-      <input type="color" value={value} onChange={(event) => onChange(event.target.value)} style={{ width: "24px", height: "20px", border: 0, padding: 0, background: "transparent" }} />
+      <input className="human-body-custom-color" aria-label={label} type="color" value={value} onChange={(event) => onChange(event.target.value)} />
     </div>
   </div>
 );
@@ -685,6 +689,8 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
   useTranslation();
   const sensorProfile = props.sensorProfile;
   const regionViews = sensorProfile?.regionViews || REGION_VIEWS;
+  // 门户内统一使用右下视角面板，独立背心页面保留配套数字视图。
+  const useStandaloneProfileViews = Boolean(sensorProfile) && !props.portalEmbedded;
   const initialSettingsRef = useRef(null);
   if (initialSettingsRef.current === null) {
     initialSettingsRef.current = readHumanBodyRenderSettings(getProfileStorage(sensorProfile));
@@ -1588,10 +1594,10 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
 
   const settingsContent = (
       <div data-human-body-settings="true" className="human-body-render-settings"
-        style={props.portalEmbedded && !sensorProfile ? undefined : { ...panelStyle, top: 72, left: "max(250px, 19vw)", width: 222 }}>
+        style={props.portalEmbedded ? undefined : { ...panelStyle, top: 72, left: "max(250px, 19vw)", width: 222 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <div style={{ fontSize: "14px", fontWeight: 700, letterSpacing: "0.08em" }}>{sensorProfile?.key === 'pressureVest' ? i18n.t('sensorPressureVest') : sensorProfile?.title || i18n.t('monitorUi.bodyTitle')}</div>
-          {(!props.portalEmbedded || sensorProfile) && <button
+          {!props.portalEmbedded && <button
             type="button"
             aria-expanded={!settingsCollapsed}
             aria-label={settingsCollapsed ? i18n.t('monitorUi.expandRendering') : i18n.t('monitorUi.collapseRendering')}
@@ -1601,7 +1607,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
             {settingsCollapsed ? "▾" : "▴"}
           </button>}
         </div>
-        {((props.portalEmbedded && !sensorProfile) || !settingsCollapsed) && (
+        {(props.portalEmbedded || !settingsCollapsed) && (
           <>
             <div style={{ color: "#5e748a", fontSize: "10px", marginTop: 3 }}>{i18n.t('monitorUi.sensorCount', { count: sensorCount })}</div>
             <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 5 }}>
@@ -1664,16 +1670,16 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
         </div>
       )}
 
-      {props.portalEmbedded && !sensorProfile
+      {props.portalEmbedded
         ? (props.settingsHost ? createPortal(settingsContent, props.settingsHost) : null)
         : settingsContent}
 
-      <div data-human-body-region-views="true" className={!sensorProfile ? "human-body-region-views" : undefined}
-        style={{ ...panelStyle, ...(sensorProfile ? { top: 72, right: 14, width: 126 } : {}) }}>
+      <div data-human-body-region-views="true" className={!useStandaloneProfileViews ? "human-body-region-views" : undefined}
+        style={{ ...panelStyle, ...(useStandaloneProfileViews ? { top: 72, right: 14, width: 126 } : {}) }}>
         <div style={{ fontSize: "11px", color: "#8193a5", marginBottom: 7 }}>{i18n.t('monitorUi.regionViews')}</div>
-        <div style={{ display: "grid", gridTemplateColumns: sensorProfile ? "1fr 1fr" : "repeat(3, 1fr)", gap: 5 }}>
+        <div style={{ display: "grid", gridTemplateColumns: useStandaloneProfileViews ? "1fr 1fr" : "repeat(3, 1fr)", gap: 5 }}>
           {Object.entries(regionViews).map(([key, view]) => (
-            <button key={key} onClick={() => flyTo(key)} style={buttonStyle(activeRegion === key)}>{view.labelKey ? i18n.t(view.labelKey) : translateBodyLabel(view.label)}</button>
+            <button type="button" key={key} aria-pressed={activeRegion === key} onClick={() => flyTo(key)} style={buttonStyle(activeRegion === key)}>{view.labelKey ? i18n.t(view.labelKey) : translateBodyLabel(view.label)}</button>
           ))}
         </div>
         {activeRegion === "overview" && (
@@ -1684,7 +1690,7 @@ const HumanBodyOptimized = React.forwardRef((props, forwardedRef) => {
         <button onClick={resetView} style={{ ...buttonStyle(false), width: "100%", marginTop: 8 }}>{i18n.t('monitorUi.resetBodyView')}</button>
       </div>
 
-      {sensorProfile && <RegionNumberPanel ref={numberPanelRef} activeRegion={activeRegion} sensorProfile={sensorProfile} />}
+      {useStandaloneProfileViews && <RegionNumberPanel ref={numberPanelRef} activeRegion={activeRegion} sensorProfile={sensorProfile} />}
     </div>
   );
 
